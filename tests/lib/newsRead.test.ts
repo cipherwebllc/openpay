@@ -2,7 +2,6 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   getLastSeenNewsId,
   setLastSeenNewsId,
-  hasUnreadNews,
   unreadCount,
   NEWS_LAST_SEEN_STORAGE_KEY,
   NEWS_CHANGED_EVENT,
@@ -16,34 +15,29 @@ const items: NewsItem[] = [
   { id: 'a', date: '2026-06-05', category: 'notice', title: { ja: 'a', en: 'a' }, body: { ja: 'a', en: 'a' } },
 ];
 
-describe('lib/newsRead: hasUnreadNews / unreadCount', () => {
+describe('lib/newsRead: unreadCount', () => {
   it('lastSeen=null (初回) → 全件未読', () => {
     expect(unreadCount(items, null)).toBe(3);
-    expect(hasUnreadNews(items, null)).toBe(true);
   });
 
   it('lastSeen=最新 (先頭 id) → 未読ゼロ', () => {
     expect(unreadCount(items, 'c')).toBe(0);
-    expect(hasUnreadNews(items, 'c')).toBe(false);
   });
 
   it('lastSeen=古い id → それより新しい件数だけ未読', () => {
     // 'a' (最古) を既読にした時点では 'c','b' の 2 件が未読。
     expect(unreadCount(items, 'a')).toBe(2);
-    expect(hasUnreadNews(items, 'a')).toBe(true);
     // 'b' (中間) を既読 → 'c' のみ未読。
     expect(unreadCount(items, 'b')).toBe(1);
   });
 
   it('lastSeen が配列に存在しない (削除された id 等) → 全件未読扱い', () => {
     expect(unreadCount(items, 'gone')).toBe(3);
-    expect(hasUnreadNews(items, 'gone')).toBe(true);
   });
 
   it('items が空 → 未読ゼロ (lastSeen の値に依らず)', () => {
     expect(unreadCount([], null)).toBe(0);
     expect(unreadCount([], 'c')).toBe(0);
-    expect(hasUnreadNews([], null)).toBe(false);
   });
 });
 

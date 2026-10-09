@@ -1,4 +1,5 @@
 // shop:live の KV I/O (readShopLive fail-open / applyShopLive 楽観 CAS) を kv モックで検証。
+// strict な値の検証 (parseShopLiveStrictValue・Shops API の snapshot が使う) は KV を介さず直接検証する。
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const hold = vi.hoisted(() => ({
@@ -22,7 +23,7 @@ vi.mock('@/lib/kv', () => ({
 
 import {
   readShopLive,
-  readShopLiveStrict,
+  parseShopLiveStrictValue,
   applyShopLive,
 } from '@/lib/shopLiveStore';
 import { serializeShopLive, shopLiveKey } from '@/lib/shopLive';
@@ -51,32 +52,28 @@ describe('readShopLive (fail-open)', () => {
   });
 });
 
-describe('readShopLiveStrict (Shops API fail-closed)', () => {
-  it('未保存は EMPTY、KV 未設定/障害は null', async () => {
-    expect(await readShopLiveStrict('alice')).toEqual({
+describe('parseShopLiveStrictValue (Shops API fail-closed)', () => {
+  it('未保存 (null) は EMPTY・正しい保存値はそのまま', () => {
+    expect(parseShopLiveStrictValue(null)).toEqual({
       soldOut: [],
       paused: false,
       updatedAt: 0,
     });
-    hold.configured = false;
-    expect(await readShopLiveStrict('alice')).toBeNull();
-    hold.configured = true;
-    hold.get = { ok: false, reason: 'network_error' };
-    expect(await readShopLiveStrict('alice')).toBeNull();
+    const stored = { soldOut: ['x'], paused: true, updatedAt: 7 };
+    expect(parseShopLiveStrictValue(serializeShopLive(stored))).toEqual(stored);
   });
 
-  it('壊れた JSON / sanitize が必要な値は判定不能 null', async () => {
-    hold.get = { ok: true, value: '{bad' };
-    expect(await readShopLiveStrict('alice')).toBeNull();
-    hold.get = {
-      ok: true,
-      value: JSON.stringify({
-        soldOut: ['a', 'a'],
-        paused: false,
-        updatedAt: 1,
-      }),
-    };
-    expect(await readShopLiveStrict('alice')).toBeNull();
+  it('壊れた JSON / sanitize が必要な値は判定不能 null', () => {
+    expect(parseShopLiveStrictValue('{bad')).toBeNull();
+    expect(
+      parseShopLiveStrictValue(
+        JSON.stringify({
+          soldOut: ['a', 'a'],
+          paused: false,
+          updatedAt: 1,
+        }),
+      ),
+    ).toBeNull();
   });
 });
 

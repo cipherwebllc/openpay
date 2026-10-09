@@ -29,8 +29,6 @@ export type StandardPaymentIntentParams = {
   chainId: number;
   saleAmount?: bigint;
   contextKey?: Hex;
-  // レジ standard fee だけを EIP-3009 authorization + server claim 経路へ分岐する。
-  registerFee?: true;
 };
 
 export type StandardIntentMetadata = {
@@ -48,7 +46,6 @@ export type StandardIntentMetadata = {
   feeTxHash?: Hex;
   merchantBlockNumber?: string;
   contextKey?: Hex;
-  registerFee?: true;
   issuedAt: number;
 };
 
@@ -130,7 +127,6 @@ function parseStandardIntent(value: unknown): StandardIntentMetadata | null {
     (o.merchantBlockNumber !== undefined &&
       !isDecimal(o.merchantBlockNumber)) ||
     (o.contextKey !== undefined && !isHex32(o.contextKey)) ||
-    (o.registerFee !== undefined && o.registerFee !== true) ||
     !isIssuedAt(o.issuedAt)
   ) {
     return null;
@@ -159,7 +155,6 @@ function parseStandardIntent(value: unknown): StandardIntentMetadata | null {
       ? { merchantBlockNumber: o.merchantBlockNumber }
       : {}),
     ...(o.contextKey ? { contextKey: o.contextKey } : {}),
-    ...(o.registerFee === true ? { registerFee: true as const } : {}),
     issuedAt: o.issuedAt,
   };
 }
@@ -238,7 +233,6 @@ export function standardParamsFromIntent(
       ? { saleAmount: BigInt(intent.saleValue) }
       : {}),
     ...(intent.contextKey ? { contextKey: intent.contextKey } : {}),
-    ...(intent.registerFee ? { registerFee: true as const } : {}),
   };
 }
 
@@ -269,7 +263,6 @@ export function saveStandardPaymentIntent(
       ? { merchantBlockNumber: values.merchantBlockNumber.toString() }
       : {}),
     ...(params.contextKey ? { contextKey: params.contextKey } : {}),
-    ...(params.registerFee ? { registerFee: true as const } : {}),
     issuedAt,
   });
 }
@@ -295,7 +288,6 @@ export function saveStandardIntent(intent: StandardIntentMetadata): void {
       ? { merchantBlockNumber: intent.merchantBlockNumber }
       : {}),
     ...(intent.contextKey ? { contextKey: intent.contextKey } : {}),
-    ...(intent.registerFee ? { registerFee: true as const } : {}),
     issuedAt: intent.issuedAt,
   });
 }

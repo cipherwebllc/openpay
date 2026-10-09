@@ -41,8 +41,9 @@ export async function readShopLive(handle: string): Promise<ShopLiveState> {
 }
 
 /**
- * strict read 用の raw validator。未保存は「停止指定なし」の正常状態だが、壊れた保存値は
- * 判定不能として null にする。公開ページ向け parseShopLive の fail-open 契約は変更しない。
+ * Shops API の strict read (lib/shops/snapshot が KV の MGET の値ごとに呼ぶ) 用の raw validator。未保存は
+ * 「停止指定なし」の正常状態だが、壊れた保存値は判定不能として null にする。公開ページ向け parseShopLive の
+ * fail-open 契約は変更しない。
  */
 export function parseShopLiveStrictValue(
   raw: string | null,
@@ -76,20 +77,6 @@ export function parseShopLiveStrictValue(
     return null;
   }
   return parsed;
-}
-
-/** Shops API 向け strict read。KV 未設定/障害/保存値破損は判定不能の null。 */
-export async function readShopLiveStrict(
-  handle: string,
-): Promise<ShopLiveState | null> {
-  if (!isKvConfigured()) return null;
-  const res = await kvGet(shopLiveKey(handle));
-  if (!res.ok) {
-    // 検索 API で「受付中」と誤表示する波及を断つため、既存 readShopLive と異なり fail-open しない。
-    logger.warn('shop.live.strict_read_failed', { reason: res.reason });
-    return null;
-  }
-  return parseShopLiveStrictValue(res.value);
 }
 
 export type ApplyShopLiveResult =

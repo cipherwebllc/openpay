@@ -5,7 +5,6 @@ import { describe, it, expect } from 'vitest';
 import {
   orderListKey,
   callListKey,
-  orderFeeUsedKey,
   orderUsedKey,
   isTxHashLike,
   parseFeeExpectedAmount,
@@ -57,11 +56,6 @@ describe('orderRelay: KV キー', () => {
   });
   it('orderUsedKey は chainId + txHash 小文字 (merchant/items は含めない=1決済1注文)', () => {
     expect(orderUsedKey(137, `0x${'A'.repeat(64)}`)).toBe(`order:used:137:0x${'a'.repeat(64)}`);
-  });
-  it('orderFeeUsedKey は用途横断 payment claim に収束 (1 fee tx 1 商品)', () => {
-    expect(orderFeeUsedKey(137, `0x${'A'.repeat(64)}`)).toBe(
-      `payment:claimed:137:0x${'a'.repeat(64)}`,
-    );
   });
   it('callListKey は受取アドレスを小文字化', () => {
     expect(callListKey('0xABCdef0000000000000000000000000000000000')).toBe(

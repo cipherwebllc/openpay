@@ -27,7 +27,7 @@
 //
 // FSM (横道 abandoned):
 //   reserved → awaiting_signature → signed → submitting → confirmed
-//                                                       ↘ failed
+//   (failed は保存済み record の読み取り互換のため状態として残すが、そこへ遷移させる関数は無い)
 //   reserved/awaiting_signature/signed (= broadcast 前) は同一署名者が安全に abandon /
 //   supersede 可能 (popup 拒否・タブ閉じ)。**submitting 到達後は abandon も新規 op 構築も
 //   禁止** — recovery 経路のみ。
@@ -111,7 +111,7 @@ export type PendingRecord = {
   /** receipt の success (UserOp が revert せず実行されたか)。confirmed 時に永続。
    * resultFromConfirmed の receipt 再取得失敗時に success を捏造しないために使う。 */
   success?: boolean;
-  // failed 時。
+  // failed 時 (旧 record の読み取り互換・新しく書く経路は無い)。
   errorMessage?: string;
 };
 
@@ -488,24 +488,6 @@ export function markConfirmed(args: {
     to: 'confirmed',
     now: args.now,
     patch: { txHash: args.txHash, success: args.success },
-  });
-}
-
-/** failed へ。**submitting からは失敗確定にしない** (included しうる = unknown のため)。
- * pre-submit (署名前/署名後・未 broadcast) の確定的失敗のみ failed にできる。 */
-export function markFailed(args: {
-  key: string;
-  sender: Address;
-  errorMessage: string;
-  now: number;
-}): PendingRecord {
-  return transition({
-    key: args.key,
-    sender: args.sender,
-    from: ['reserved', 'awaiting_signature', 'signed'],
-    to: 'failed',
-    now: args.now,
-    patch: { errorMessage: args.errorMessage.slice(0, 500) },
   });
 }
 

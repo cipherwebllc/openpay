@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
   HANDLE_THEMES,
-  handleFontFamily,
   isHandleTheme,
   resolveHandleTheme,
   handleViewTheme,
@@ -102,18 +101,5 @@ describe('handlePreviewBackground', () => {
     for (const th of ['gradient', 'bold', 'outline', 'night', 'soft'] as const) {
       expect(typeof handlePreviewBackground(ACCENT, th)).toBe('string');
     }
-  });
-});
-
-describe('handleFontFamily', () => {
-  it('leaves the default font untouched', () => {
-    expect(handleFontFamily(undefined)).toBeUndefined();
-    expect(handleFontFamily('sans')).toBeUndefined();
-  });
-  it('uses the system serif stack', () => {
-    expect(handleFontFamily('serif')).toBe('"Hiragino Mincho ProN", "Yu Mincho", Georgia, serif');
-  });
-  it('uses the system rounded stack', () => {
-    expect(handleFontFamily('rounded')).toBe('"Hiragino Maru Gothic ProN", "BIZ UDPGothic", system-ui, sans-serif');
   });
 });

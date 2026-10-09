@@ -113,11 +113,6 @@ export function loadOrderDeliveries(): { records: OrderDelivery[]; unavailable: 
   return { records: [...records.values()].filter((r): r is OrderDelivery => r !== null)
     .sort((a, b) => b.intent.issuedAt - a.intent.issuedAt), unavailable };
 }
-export function loadOrderDelivery(intent?: RelayIntentMetadata): { kind: 'empty' } | { kind: 'unavailable' } | { kind: 'ready'; record: OrderDelivery } {
-  const loaded = loadOrderDeliveries();
-  const record = intent ? loaded.records.find((r) => sameOrderAuthorization(r, intent)) : loaded.records[0];
-  return record ? { kind: 'ready', record } : loaded.unavailable ? { kind: 'unavailable' } : { kind: 'empty' };
-}
 export function saveOrderDelivery(record: OrderDelivery): boolean {
   try {
     if (!parseRecord(record)) return false;

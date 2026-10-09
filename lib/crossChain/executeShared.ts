@@ -163,29 +163,6 @@ function isFeeReceiverBridgeable(
   return true;
 }
 
-// dest チェーンの mint を「再開安全」に実行する。既に broadcast 済の hash があれば
-// on-chain 確定を検証し、成功済なら skip (再 mint は attestation 既消費で必ず
-// revert するため)。未確定なら (再)送信し、broadcast 直後に hash を永続化してから
-// receipt を待つ — receipt 待ち中に中断しても「landed したのに記録されず resume で
-// 必ず revert」する stuck を防ぐ。
-async function settleMint(args: {
-  client: PublicClient;
-  existingHash: Hex | undefined;
-  broadcast: () => Promise<Hex>;
-  onBroadcast: (hash: Hex) => void;
-  label: string;
-}): Promise<void> {
-  if (
-    args.existingHash &&
-    (await txAlreadySucceeded(args.client, args.existingHash))
-  ) {
-    return;
-  }
-  const hash = await args.broadcast();
-  args.onBroadcast(hash);
-  await waitForReceiptOrThrow(args.client, hash, args.label);
-}
-
 // 分割先 executor 間でだけ共有する (facade からは再 export しない = 公開 API は分割前と同じ)。
 export {
   fireMerchantMint,

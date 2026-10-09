@@ -1,7 +1,8 @@
 import { logger } from '@/lib/logger';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { bindingFixture } from '../_helpers/orderBinding';
-import { resolveOrderDelivery, saveOrderDelivery, loadOrderDelivery } from '@/lib/orderDelivery';
+import { resolveOrderDelivery, saveOrderDelivery } from '@/lib/orderDelivery';
+import { latestOrderDelivery } from '../_helpers/orderDeliveryView';
 import type { OrderDelivery } from '@/lib/orderDelivery';
 import type { ReactElement } from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -99,10 +100,9 @@ vi.mock('@/lib/pimlico', async () => {
 vi.mock('@/components/ConnectButton', async () => ({
   ConnectButton: (await import('../_helpers/connectButtonStub')).ConnectButtonStub,
 }));
-// モバイル注文 / レジ 利用料 flag を切替可能に (既定 OFF = 既存テストの挙動不変・完全 inert)。
+// モバイル注文 利用料 flag を切替可能に (既定 OFF = 既存テストの挙動不変・完全 inert)。
 const feeFlags = vi.hoisted(() => ({
   enableMobileOrderFee: false,
-  enableRegisterFee: false,
   enableOrderPickup: false,
 }));
 vi.mock('@/lib/env', async (importOriginal) => {
@@ -111,37 +111,16 @@ vi.mock('@/lib/env', async (importOriginal) => {
     ...actual,
     env: {
       ...actual.env,
-      // hermetic: ambient NEXT_PUBLIC_RECOVER_FEE_BPS に依存させず 0 に固定する。register bps=0 test は
-      // 実 recoverPercentValue を呼び env.recoverFeeBps を読むため、shell/CI で本変数が非ゼロだと予期せず
-      // fee>0 で fail しうる (Codex P3)。recover floor 系テストも bps=0 (フロアのみ) を前提とするので一致。
+      // hermetic: ambient NEXT_PUBLIC_RECOVER_FEE_BPS に依存させず 0 に固定する。recover floor 系テストは
+      // bps=0 (フロアのみ) を前提とする (shell/CI で本変数が非ゼロだと予期せず fee が変わる・Codex P3)。
       recoverFeeBps: 0,
       get enableMobileOrderFee() {
         return feeFlags.enableMobileOrderFee;
-      },
-      get enableRegisterFee() {
-        return feeFlags.enableRegisterFee;
       },
       get enableOrderPickup() {
         return feeFlags.enableOrderPickup;
       },
     },
-  };
-});
-// レジ standard の利用料 % (recoverPercentValue) のみ差し替え可能に。null=実物 (既定 bps=0 → 0 で
-// 既存テスト不変)。register money-flow テストで percentBps=100 (1%) を立てて実額の流れを検証する。
-// recoverFeeValue / recoverFeeBps は実物のまま (relay recover の floor=2 JPYC テストに影響しない)。
-const feeRate = vi.hoisted(() => ({ percentBps: null as number | null }));
-vi.mock('@/lib/relay/recoverFee', async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import('@/lib/relay/recoverFee')>();
-  return {
-    ...actual,
-    recoverPercentValue: (billWei: bigint) =>
-      feeRate.percentBps === null
-        ? actual.recoverPercentValue(billWei)
-        : billWei <= 0n
-          ? 0n
-          : (billWei * BigInt(feeRate.percentBps)) / 10000n,
   };
 });
 
@@ -553,9 +532,7 @@ beforeEach(() => {
   vi.mocked(useRelayHealth).mockReturnValue({ degraded: false });
   // fee flag / rate は毎テスト OFF・実物起点 (fee テストが個別に立てる)。
   feeFlags.enableMobileOrderFee = false;
-  feeFlags.enableRegisterFee = false;
   feeFlags.enableOrderPickup = false;
-  feeRate.percentBps = null;
   window.sessionStorage.clear();
 });
 
@@ -3498,70 +3475,6 @@ describe('CheckoutForm — モバイル注文 / レジ システム利用料 (fl
     expect(arg.gasMode).toBe('merchant');
   });
 
-  it('レジ register + JPYC standard (bps=100 相当): standardMutate に 1% feeAmount + saleAmount=gross・店舗負担・relay 不使用', async () => {
-    const user = userEvent.setup();
-    feeFlags.enableRegisterFee = true;
-    feeRate.percentBps = 100; // 7 月相当 (1%)
-    setupJpycStandard();
-    render(
-      <CheckoutForm params={{ ...JPYC_PARAMS, mode: 'standard', feeKind: 'register' }} />,
-    );
-    await user.click(screen.getByRole('button', { name: /3000 JPYC を支払う/ }));
-    expect(standardMutate).toHaveBeenCalledOnce();
-    const call = standardMutate.mock.calls[0][0];
-    const fee = 30n * 10n ** 18n; // 1% of 3000 = 30 JPYC (フロア無し)
-    expect(call.feeAmount).toBe(fee);
-    expect(call.merchantAmount).toBe(JPYC_TOTAL - fee); // 店舗負担: 受取 = 総額 − 利用料
-    expect(call.saleAmount).toBe(JPYC_TOTAL); // gross は商品小計 (顧客支払額)
-    expect(call.registerFee).toBe(true); // fee txHash の server 通知 → 用途束縛 claim 経路の印
-    expect(relayMutate).not.toHaveBeenCalled(); // register は relay へ行かない (standard のみ)
-  });
-
-  it('レジ register + JPYC standard・実 recoverPercentValue (env bps=0 → 7 月前): feeAmount=0 (早期課金しない)', async () => {
-    const user = userEvent.setup();
-    feeFlags.enableRegisterFee = true;
-    // percentBps=null → CheckoutForm は **実** recoverPercentValue を呼ぶ (env.recoverFeeBps=0 を読み 0)。
-    // = 実 env→bps→recoverPercentValue 経路を CheckoutForm 経由で1度実行する (mock 上書きしない)。
-    feeRate.percentBps = null;
-    setupJpycStandard();
-    render(
-      <CheckoutForm params={{ ...JPYC_PARAMS, mode: 'standard', feeKind: 'register' }} />,
-    );
-    await user.click(screen.getByRole('button', { name: /3000 JPYC を支払う/ }));
-    const call = standardMutate.mock.calls[0][0];
-    expect(call.feeAmount).toBe(0n); // 7 月前は徴収ゼロ
-    expect(call.merchantAmount).toBe(JPYC_TOTAL); // 満額着金
-    expect(call.saleAmount).toBe(JPYC_TOTAL);
-  });
-
-  it('レジ register + USDC standard (bps=100): USDC は対象外 → feeAmount=0 (JPYC のみ課金)', async () => {
-    const user = userEvent.setup();
-    feeFlags.enableRegisterFee = true;
-    feeRate.percentBps = 100;
-    setAccount({ connected: true, chainId: baseSepolia.id });
-    setBalance(200_000_000n);
-    setSmartAccount(false);
-    render(
-      <CheckoutForm params={{ ...STANDARD_USDC_PARAMS, feeKind: 'register' }} />,
-    );
-    await user.click(screen.getByRole('button', { name: /55 USDC を支払う/ }));
-    const call = standardMutate.mock.calls[0][0];
-    expect(call.feeAmount).toBe(0n); // USDC は register 利用料の対象外
-    expect(call.merchantAmount).toBe(55_000_000n); // 満額
-  });
-
-  it('flag OFF (既定): register feeKind でも standard は従来どおり fee=0 (inert)', async () => {
-    const user = userEvent.setup();
-    feeRate.percentBps = 100; // rate はあるが flag OFF なので無視されるべき
-    setupJpycStandard();
-    render(
-      <CheckoutForm params={{ ...JPYC_PARAMS, mode: 'standard', feeKind: 'register' }} />,
-    );
-    await user.click(screen.getByRole('button', { name: /3000 JPYC を支払う/ }));
-    const call = standardMutate.mock.calls[0][0];
-    expect(call.feeAmount).toBe(0n); // flag OFF → 課金しない
-    expect(call.merchantAmount).toBe(JPYC_TOTAL);
-  });
 });
 
 describe('CheckoutForm — F7 off-origin callback 開示', () => {
@@ -3682,7 +3595,7 @@ describe('A2c saved-order-only notification', () => {
     else expect(screen.getByRole('button', { name: /JPYC を支払う/ })).toBeDisabled();
     expect(screen.getByText(kind === 'different-shop' ? '以前のお支払いを確認中です。このお店へのお支払いは続けられます。' : '前回の支払いを確認中です。まだ支払い直さないでください。')).toBeInTheDocument();
     expect(screen.queryByText('お支払いが完了しました')).toBeNull();
-    expect(loadOrderDelivery().kind).toBe('ready');
+    expect(latestOrderDelivery().kind).toBe('ready');
     expect(fetchSpy.mock.calls.every(([url]) => url === '/api/relay/jpyc/status')).toBe(true);
     page.unmount(); client.clear(); fetchSpy.mockRestore(); vi.useRealTimers();
   });
@@ -3732,11 +3645,11 @@ describe('A2c saved-order-only notification', () => {
       await act(async () => vi.advanceTimersByTimeAsync(0));
       const notify = fetchSpy.mock.calls.find(([url]) => url !== '/api/relay/jpyc/status');
       expect(notify?.[1]?.body).toBe(resolveOrderDelivery(record, `0x${'ab'.repeat(32)}`).notifyBody);
-      expect(loadOrderDelivery()).toEqual({ kind: 'empty' });
+      expect(latestOrderDelivery()).toEqual({ kind: 'empty' });
     } else {
       expect(screen.getByRole('button', { name: /JPYC を支払う/ })).toBeDisabled();
       expect(screen.getByText('前回の支払いを確認中です。まだ支払い直さないでください。')).toBeInTheDocument();
-      expect(loadOrderDelivery().kind).toBe('ready');
+      expect(latestOrderDelivery().kind).toBe('ready');
     }
     page.unmount(); client.clear(); vi.mocked(usePublicClient).mockReset();
   });
@@ -3749,7 +3662,7 @@ describe('A2c saved-order-only notification', () => {
     const page = render(<QueryClientProvider client={client}><CheckoutForm params={{ ...savedParams, orderId: 'new' }} /></QueryClientProvider>);
     await vi.waitFor(async () => {
       await act(async () => vi.advanceTimersByTimeAsync(3000));
-      expect(loadOrderDelivery()).toEqual({ kind: 'empty' });
+      expect(latestOrderDelivery()).toEqual({ kind: 'empty' });
     }, { timeout: 2000, interval: 10 });
     const notify = fetchSpy.mock.calls.find(([url]) => url === `${location.origin}/api/order/notify?h=alice`);
     expect(notify?.[1]?.body).toBe(resolveOrderDelivery(record, `0x${'ab'.repeat(32)}`).notifyBody);
@@ -3782,7 +3695,7 @@ describe('A2c saved-order-only notification', () => {
       expect(fetchSpy.mock.calls.filter(([url]) => url !== '/api/relay/jpyc/status')).toHaveLength(2);
     }, { timeout: 2000, interval: 10 });
     await act(async () => acknowledgeFirst(Response.json({ ok: true })));
-    expect(loadOrderDelivery()).toEqual({ kind: 'empty' });
+    expect(latestOrderDelivery()).toEqual({ kind: 'empty' });
     expect(screen.queryByText('以前の注文の登録が保留中です。このお支払いは続けられます。')).toBeNull();
     expect(screen.queryByText('お支払いが完了しました')).toBeNull();
     page.unmount(); client.clear(); fetchSpy.mockRestore(); vi.mocked(usePublicClient).mockReset(); vi.useRealTimers();
@@ -3828,7 +3741,7 @@ describe('A2c saved-order-only notification', () => {
     setupRelayReady(); saveOrderDelivery(savedRecord()); const client = await realRelay();
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({ ok: true }));
     const page = render(<QueryClientProvider client={client}><CheckoutForm params={{ ...savedParams, items: [{ name: 'New cart', qty: 1, price: '4000' }] }} /></QueryClientProvider>);
-    await waitFor(() => expect(loadOrderDelivery()).toEqual({ kind: 'empty' }));
+    await waitFor(() => expect(latestOrderDelivery()).toEqual({ kind: 'empty' }));
     expect(screen.queryByText('お支払いが完了しました')).toBeNull();
     expect(screen.getByRole('button', { name: /4000 JPYC を支払う/ })).toBeEnabled();
     expect(fetchSpy.mock.calls.every(([url]) => url === `${location.origin}/api/order/notify?h=alice`)).toBe(true);
@@ -3841,7 +3754,7 @@ describe('A2c saved-order-only notification', () => {
     const record = resolveOrderDelivery(f.record, `0x${'ab'.repeat(32)}`); restored(record);
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({ ok: true }));
     render(<CheckoutForm params={{ ...savedParams, feeKind: 'preorder', feePayer: 'customer' }} />);
-    await waitFor(() => expect(loadOrderDelivery()).toEqual({ kind: 'empty' }));
+    await waitFor(() => expect(latestOrderDelivery()).toEqual({ kind: 'empty' }));
     expect(screen.getByText('お支払いが完了しました')).toBeInTheDocument(); fetchSpy.mockRestore();
   });
   it('freezes orderId/status/memo before signing and never attaches them to third-party callbacks', async () => {
@@ -3888,7 +3801,7 @@ describe('A2c saved-order-only notification', () => {
     vi.mocked(resolveJpycGaslessProvider).mockReturnValue('pimlico-7702');
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({ ok: true }));
     render(<CheckoutForm params={savedParams} />);
-    await waitFor(() => expect(loadOrderDelivery()).toEqual({ kind: 'empty' }));
+    await waitFor(() => expect(latestOrderDelivery()).toEqual({ kind: 'empty' }));
     expect(fetchSpy.mock.calls[0][0]).toBe(`${location.origin}/api/order/notify?h=alice`);
     expect(fetchSpy.mock.calls[0][1]?.body).toBe(record.notifyBody);
     expect(relayMutate).not.toHaveBeenCalled(); fetchSpy.mockRestore();
@@ -3925,7 +3838,7 @@ describe('A2c saved-order-only notification', () => {
     const next = render(<QueryClientProvider client={client}><CheckoutForm params={{ ...JPYC_PARAMS,
       orderId: 'new-order', webhook: 'https://third.example/hook', successUrl: 'https://third.example/success',
     }} /></QueryClientProvider>);
-    await waitFor(() => expect(loadOrderDelivery()).toEqual({ kind: 'empty' }));
+    await waitFor(() => expect(latestOrderDelivery()).toEqual({ kind: 'empty' }));
     expect(fetchSpy).toHaveBeenCalledOnce();
     expect(fetchSpy.mock.calls[0][0]).toBe(`${location.origin}/api/order/notify?h=alice`);
     expect(fetchSpy.mock.calls[0][1]?.body).toBe(record.notifyBody);
@@ -3947,7 +3860,7 @@ describe('A2c saved-order-only notification', () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => Response.json({ ok: false, error }, { status }));
     render(<CheckoutForm params={{ ...JPYC_PARAMS, orderId: record.order.orderId, webhook: `${location.origin}/api/order/notify?h=alice` }} />);
     expect(await screen.findByText(/再度支払わず/)).toBeInTheDocument();
-    expect(loadOrderDelivery().kind).toBe(retryable ? 'ready' : 'empty');
+    expect(latestOrderDelivery().kind).toBe(retryable ? 'ready' : 'empty');
     expect(!!screen.queryByRole('button', { name: '注文登録を再試行' })).toBe(retryable);
     expect(fetchSpy).toHaveBeenCalledOnce(); expect(relayMutate).not.toHaveBeenCalled(); fetchSpy.mockRestore();
   });
@@ -3962,10 +3875,10 @@ describe('A2c saved-order-only notification', () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockRejectedValueOnce(new Error('lost acknowledgement')).mockResolvedValueOnce(Response.json({ ok: true, duplicate: true }));
     render(<CheckoutForm params={savedParams} />);
     const retry = await screen.findByRole('button', { name: '注文登録を再試行' });
-    expect(loadOrderDelivery().kind).toBe('ready');
+    expect(latestOrderDelivery().kind).toBe('ready');
     expect(screen.getByText(/再度支払わず/)).toBeInTheDocument();
     await user.click(retry);
-    await waitFor(() => expect(loadOrderDelivery()).toEqual({ kind: 'empty' }));
+    await waitFor(() => expect(latestOrderDelivery()).toEqual({ kind: 'empty' }));
     expect(fetchSpy.mock.calls.map(([, init]) => init?.body)).toEqual([record.notifyBody, record.notifyBody]);
     expect(relayMutate).not.toHaveBeenCalled(); fetchSpy.mockRestore();
   });
@@ -3974,7 +3887,7 @@ describe('A2c saved-order-only notification', () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => Response.json({ ok: false, error }, { status: error === 'reserved_order' ? 409 : error === 'merchant_mismatch' ? 403 : error === 'handle_not_found' ? 404 : 422 }));
     const previous = render(<CheckoutForm params={savedParams} />);
     expect(await screen.findByText(/再度支払わず/)).toBeInTheDocument();
-    expect(loadOrderDelivery().kind).toBe('empty'); expect(fetchSpy).toHaveBeenCalledOnce();
+    expect(latestOrderDelivery().kind).toBe('empty'); expect(fetchSpy).toHaveBeenCalledOnce();
     expect(screen.queryByRole('button', { name: '注文登録を再試行' })).toBeNull();
     expect(relayMutate).not.toHaveBeenCalled();
     previous.unmount(); fetchSpy.mockClear();
@@ -3994,7 +3907,7 @@ describe('A2c saved-order-only notification', () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({ ok: true, duplicate: true, bindingConflict: true }));
     render(<CheckoutForm params={{ ...savedParams, successUrl: 'https://third.example/success' }} />);
     expect(await screen.findByText(/再度支払わず/)).toBeInTheDocument();
-    expect(loadOrderDelivery()).toEqual({ kind: 'empty' });
+    expect(latestOrderDelivery()).toEqual({ kind: 'empty' });
     expect(screen.queryByRole('button', { name: '今すぐ確認ページへ' })).toBeNull();
     expect(document.querySelector('a[href*="/order/status"]')).toBeNull();
     expect(relayMutate).not.toHaveBeenCalled(); fetchSpy.mockRestore();
@@ -4009,13 +3922,13 @@ describe('A2c saved-order-only notification', () => {
     await waitFor(() => expect(fetchSpy).toHaveBeenCalledOnce());
     expect(logger.info).toHaveBeenCalledWith('checkout.success', expect.objectContaining({ merchant: MERCHANT, token: 'jpyc' }));
     expect(vi.mocked(logger.info).mock.calls.filter(([event]) => event === 'checkout.success')).toHaveLength(1);
-    const saved = loadOrderDelivery();
+    const saved = latestOrderDelivery();
     if (saved.kind !== 'ready') throw new Error('missing opening');
     expect(JSON.stringify(vi.mocked(logger.info).mock.calls)).not.toContain(saved.record.bind.secret);
     expect(screen.queryByRole('button', { name: '今すぐ確認ページへ' })).toBeNull();
     await act(async () => acknowledge(Response.json({ ok: true })));
     expect(await screen.findByRole('button', { name: '今すぐ確認ページへ' })).toBeInTheDocument();
-    expect(loadOrderDelivery()).toEqual({ kind: 'empty' }); fetchSpy.mockRestore();
+    expect(latestOrderDelivery()).toEqual({ kind: 'empty' }); fetchSpy.mockRestore();
   });
   it('a lingering record does not suppress this attempt’s successUrl, and the retired third-party webhook is never sent', async () => {
     const user = userEvent.setup(); setupRelayReady();
@@ -4037,7 +3950,7 @@ describe('A2c saved-order-only notification', () => {
     const record = savedRecord(); setupRelayReady(); restored(record);
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(Response.json({ ok: false, error: 'processing' }, { status: 409 })).mockResolvedValueOnce(Response.json({ ok: true }));
     render(<CheckoutForm params={savedParams} />);
-    await waitFor(() => expect(loadOrderDelivery()).toEqual({ kind: 'empty' }));
+    await waitFor(() => expect(latestOrderDelivery()).toEqual({ kind: 'empty' }));
     expect(fetchSpy.mock.calls.map(([, init]) => init?.body)).toEqual([record.notifyBody, record.notifyBody]);
     fetchSpy.mockRestore();
   });
@@ -4046,7 +3959,7 @@ describe('A2c saved-order-only notification', () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => Response.json({ ok: false }, { status }));
     render(<CheckoutForm params={savedParams} />);
     expect(await screen.findByText(/再度支払わず/)).toBeInTheDocument();
-    expect(loadOrderDelivery().kind).toBe(status >= 500 ? 'ready' : 'empty');
+    expect(latestOrderDelivery().kind).toBe(status >= 500 ? 'ready' : 'empty');
     expect(fetchSpy).toHaveBeenCalledOnce(); expect(relayMutate).not.toHaveBeenCalled(); fetchSpy.mockRestore();
   });
   it('exhausted processing retries retain the snapshot and never request payment again', async () => {
@@ -4057,7 +3970,7 @@ describe('A2c saved-order-only notification', () => {
     await act(async () => vi.advanceTimersByTimeAsync(141_000));
     expect(fetchSpy).toHaveBeenCalledTimes(7);
     expect(new Set(fetchSpy.mock.calls.map(([, init]) => init?.body))).toEqual(new Set([record.notifyBody]));
-    expect(loadOrderDelivery().kind).toBe('ready'); expect(relayMutate).not.toHaveBeenCalled();
+    expect(latestOrderDelivery().kind).toBe('ready'); expect(relayMutate).not.toHaveBeenCalled();
     expect(screen.getByRole('button', { name: '注文登録を再試行' })).toBeInTheDocument();
     fetchSpy.mockRestore(); vi.useRealTimers();
   });
@@ -4067,7 +3980,7 @@ describe('A2c saved-order-only notification', () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch');
     render(<CheckoutForm params={savedParams} />);
     await act(async () => {});
-    expect(fetchSpy).not.toHaveBeenCalled(); expect(loadOrderDelivery().kind).toBe('ready'); fetchSpy.mockRestore();
+    expect(fetchSpy).not.toHaveBeenCalled(); expect(latestOrderDelivery().kind).toBe('ready'); fetchSpy.mockRestore();
   });
 });
 
@@ -4105,7 +4018,6 @@ describe('CheckoutForm — R14 内訳行 fixture (ja/en)', () => {
     ['mobile storefront (relay recover, merchant pays fee)', () => { feeFlags.enableMobileOrderFee = true; relay(true); return { ...JPYC_PARAMS, feeKind: 'storefront' }; }],
     ['mobile preorder (relay recover, customer pays fee)', () => { feeFlags.enableMobileOrderFee = true; relay(true); return { ...JPYC_PARAMS, feeKind: 'preorder', feePayer: 'customer' }; }],
     ['mobile storefront standard', () => { feeFlags.enableMobileOrderFee = true; jpycReady(); return { ...JPYC_PARAMS, feeKind: 'storefront', mode: 'standard' }; }],
-    ['register standard fee', () => { feeFlags.enableRegisterFee = true; feeRate.percentBps = 100; jpycReady(); return { ...JPYC_PARAMS, mode: 'standard', feeKind: 'register' }; }],
   ];
   describe.each(['ja', 'en'] as const)('%s', (locale) => {
     it.each(cases)('%s', (_name, setup) => {

@@ -13,7 +13,6 @@ import {
   loadPendingRecord,
   markAwaitingSignature,
   markConfirmed,
-  markFailed,
   markSigned,
   markSubmitting,
   PENDING_KEY_PREFIX,
@@ -241,14 +240,6 @@ describe('CAS / FSM ガード', () => {
     expect(() => markSubmitting({ key, sender: SENDER, now: 1_300 })).toThrow(
       /署名済 UserOp が無い/,
     );
-  });
-
-  it('submitting からは failed にできない (included しうる unknown 状態)', () => {
-    const { key } = setup();
-    advanceToSubmitting(key);
-    expect(() =>
-      markFailed({ key, sender: SENDER, errorMessage: 'rpc timeout', now: 1_500 }),
-    ).toThrow(PendingStateError);
   });
 
   it('submitting からは abandon できない (宙吊り防止)', () => {

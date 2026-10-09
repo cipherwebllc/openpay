@@ -358,7 +358,8 @@ export const DISCLOSED_TIP_FEE_MODELS = {
 
 // LP / 導入ガイドの補間値。通常決済の無料表記からはモバイル注文を除く。下記は開示数値の参照のみで
 // 徴収額を変えない。レジの通常決済の利用料 (registerPercent) は 2026-10-07 に廃止 (本番
-// NEXT_PUBLIC_ENABLE_REGISTER_FEE=OFF と同一リリース)。再び点灯するなら開示 3 点セットを書き戻すこと。
+// NEXT_PUBLIC_ENABLE_REGISTER_FEE=OFF と同一リリース)。その後 flag と claim route もコードから削除した
+// (第 7 回レビュー C12)。再導入するなら開示 3 点セットを先に書き戻すこと。
 export const LANDING_PAYMENT_FEE_VALUES = {
   recoverPercent: DISCLOSED_RECOVER_FEE.percentFromJulyBps / 100,
   recoverFloor: DISCLOSED_RECOVER_FEE.floorJpyc,

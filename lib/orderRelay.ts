@@ -135,11 +135,6 @@ export function orderUsedKey(chainId: number, txHash: string): string {
   return `order:used:${chainId}:${txHash.toLowerCase()}`;
 }
 
-/** @deprecated paymentClaimKey を直接使う。旧 call site も用途横断の global claim へ収束させる。 */
-export function orderFeeUsedKey(chainId: number, txHash: string): string {
-  return `payment:claimed:${chainId}:${txHash.toLowerCase()}`;
-}
-
 /** 顧客向け「注文状況」の逆引きポインタ KV キー (status トークン → 受注の所在)。flag ENABLE_ORDER_PICKUP。
  *  token は顧客端末が生成する不可推測の秘密 (43 文字 base64url) = 列挙不可。値は {merchant, chainId, txHash}。
  *  これにより顧客は自分の token でのみ自分の 1 注文の状態を読める (受注リストは受取アドレスでスコープ)。 */

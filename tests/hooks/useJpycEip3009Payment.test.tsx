@@ -1411,18 +1411,18 @@ const ORDER_CONTEXT = { merchant: MERCHANT, chainId: jpycDep.chainId, tokenAddre
 describe('A2c browser binding', () => {
   it.each(['free', 'recover'] as const)('persists %s opening only after signing and before broadcast; never sends secret to relay; success retains order', async (mode) => {
     const { canonicalOrder, orderBindSalt, orderDigest } = await import('@/lib/orderBind');
-    const { loadOrderDelivery } = await import('@/lib/orderDelivery');
+    const { latestOrderDelivery } = await import('../_helpers/orderDeliveryView');
     const order = canonicalOrder({ chainId: jpycDep.chainId, tokenAddress: jpycDep.address, merchant: MERCHANT, handle: 'alice', orderId: 'before-sign', items: [{ name: 'Tea', qty: 1, price: '300' }], statusToken: 's'.repeat(43), customerMemo: 'no ice' });
     vi.mocked(jpycForwarderFor).mockReturnValue(mode === 'recover' ? '0x3333333333333333333333333333333333333333' : null);
     mount();
     signTypedData.mockImplementation(async () => {
-      expect(loadOrderDelivery().kind).toBe('empty');
+      expect(latestOrderDelivery().kind).toBe('empty');
       return `0x${'a'.repeat(130)}`;
     });
     const { result } = renderHook(() => useJpycEip3009Payment(jpycDep, { restoreOrderDelivery: true, orderContext: ORDER_CONTEXT }), { wrapper: makeWrapper() });
     result.current.mutate({ merchant: MERCHANT, value: 300n * 10n ** 18n, order });
     await waitFor(() => expect(result.current.data?.success).toBe(true));
-    const loaded = loadOrderDelivery();
+    const loaded = latestOrderDelivery();
     expect(loaded.kind).toBe('ready');
     if (loaded.kind !== 'ready') throw new Error('missing order');
     expect(loaded.record.state).toBe('notify-pending');
@@ -1457,7 +1457,7 @@ describe('A2c recovery and storage failure transitions', () => {
     spy.mockRestore();
   });
   it.each(['signed', 'notify-pending'] as const)('reload from %s recovers the same authorization even after payment intent was cleared', async (state) => {
-    const { saveOrderDelivery, resolveOrderDelivery, loadOrderDelivery } = await import('@/lib/orderDelivery');
+    const { saveOrderDelivery, resolveOrderDelivery } = await import('@/lib/orderDelivery'); const { latestOrderDelivery } = await import('../_helpers/orderDeliveryView');
     const f = await fixture('recover');
     const firstHash = `0x${'ab'.repeat(32)}` as Hex;
     const finalHash = `0x${'cd'.repeat(32)}` as Hex;
@@ -1473,7 +1473,7 @@ describe('A2c recovery and storage failure transitions', () => {
     expect(result.current.orderDelivery?.order).toEqual(f.order);
     expect(result.current.orderDelivery?.bind).toEqual(f.bind);
     expect(result.current.orderDelivery?.txHash).toBe(finalHash);
-    expect(loadOrderDelivery().kind).toBe('ready');
+    expect(latestOrderDelivery().kind).toBe('ready');
     expect(signTypedData).not.toHaveBeenCalled();
     for (const [url, init] of fetchSpy.mock.calls) {
       expect(url).toBe('/api/relay/jpyc/status'); expect(init.body).not.toContain(f.bind.secret);
@@ -1481,7 +1481,7 @@ describe('A2c recovery and storage failure transitions', () => {
     vi.useRealTimers();
   });
   it.each(['unused', 'reverted'] as const)('proven %s authorization can discard an unpaid snapshot', async (outcome) => {
-    const { saveOrderDelivery, loadOrderDelivery } = await import('@/lib/orderDelivery');
+    const { saveOrderDelivery } = await import('@/lib/orderDelivery'); const { latestOrderDelivery } = await import('../_helpers/orderDeliveryView');
     const f = await fixture(); saveOrderDelivery(f.record);
     vi.useFakeTimers(); mount();
     fetchSpy.mockImplementation(async () => Response.json(outcome === 'unused' ? { ok: true, state: 'unused', expiry: 'expired' } : { ok: true, state: 'settled', txHash: `0x${'ab'.repeat(32)}` }));
@@ -1489,11 +1489,11 @@ describe('A2c recovery and storage failure transitions', () => {
     renderHook(() => useJpycEip3009Payment(jpycDep, { restoreOrderDelivery: true, orderContext: ORDER_CONTEXT }), { wrapper: makeWrapper() });
     await flushStorageLoad();
     await act(async () => vi.advanceTimersByTimeAsync(9000));
-    expect(loadOrderDelivery()).toEqual({ kind: 'empty' });
+    expect(latestOrderDelivery()).toEqual({ kind: 'empty' });
     expect(signTypedData).not.toHaveBeenCalled(); vi.useRealTimers();
   });
   it('IP retry retains the exact opening and signs once', async () => {
-    const { loadOrderDelivery } = await import('@/lib/orderDelivery');
+    const { latestOrderDelivery } = await import('../_helpers/orderDeliveryView');
     const f = await fixture(); vi.mocked(jpycForwarderFor).mockReturnValue(null); mount();
     fetchSpy.mockResolvedValueOnce(Response.json({ error: 'ip_rate_limited' }, { status: 429 }));
     const { result } = renderHook(() => useJpycEip3009Payment(jpycDep, { restoreOrderDelivery: true, orderContext: ORDER_CONTEXT }), { wrapper: makeWrapper() });
@@ -1501,9 +1501,9 @@ describe('A2c recovery and storage failure transitions', () => {
     await waitFor(() => expect(result.current.isError).toBe(true));
     const saved = result.current.orderDelivery;
     expect(saved).not.toBeNull();
-    expect(loadOrderDelivery().kind).toBe('empty');
+    expect(latestOrderDelivery().kind).toBe('empty');
     fetchSpy.mockImplementationOnce(async () => {
-      expect(loadOrderDelivery()).toEqual({ kind: 'ready', record: saved });
+      expect(latestOrderDelivery()).toEqual({ kind: 'ready', record: saved });
       return Response.json({ ok: true, txHash: `0x${'ab'.repeat(32)}` });
     });
     act(() => result.current.retryRelay());
@@ -1513,13 +1513,13 @@ describe('A2c recovery and storage failure transitions', () => {
     expect(result.current.orderDelivery?.bind).toEqual(saved?.bind);
   });
   it('pending/unknown retain their saved opening without notification or new authorization', async () => {
-    const { loadOrderDelivery } = await import('@/lib/orderDelivery');
+    const { latestOrderDelivery } = await import('../_helpers/orderDeliveryView');
     const f = await fixture(); vi.mocked(jpycForwarderFor).mockReturnValue(null); mount();
     fetchSpy.mockResolvedValue(Response.json({ pending: true, txHash: null }, { status: 202 }));
     const { result } = renderHook(() => useJpycEip3009Payment(jpycDep, { restoreOrderDelivery: true, orderContext: ORDER_CONTEXT }), { wrapper: makeWrapper() });
     act(() => result.current.mutate({ merchant: MERCHANT, value: 300n * 10n ** 18n, order: f.order }));
     await waitFor(() => expect(result.current.data?.pending).toBe(true));
-    expect(loadOrderDelivery().kind).toBe('ready');
+    expect(latestOrderDelivery().kind).toBe('ready');
     expect(result.current.orderDelivery?.state).toBe('signed');
     act(() => result.current.mutate({ merchant: MERCHANT, value: 300n * 10n ** 18n, order: f.order }));
     expect(signTypedData).toHaveBeenCalledOnce();
@@ -1528,7 +1528,7 @@ describe('A2c recovery and storage failure transitions', () => {
 
 it('A2c lost relay response resolves the original opening; a failed resolution write keeps payment successful', async () => {
   const { bindingFixture } = await import('../_helpers/orderBinding');
-  const { ORDER_DELIVERY_KEY, loadOrderDelivery } = await import('@/lib/orderDelivery');
+  const { ORDER_DELIVERY_KEY } = await import('@/lib/orderDelivery'); const { latestOrderDelivery } = await import('../_helpers/orderDeliveryView');
   const f = bindingFixture('free', { chainId: jpycDep.chainId, tokenAddress: jpycDep.address, merchant: MERCHANT, handle: 'alice', orderId: 'unknown', items: [{ name: 'Tea', qty: 1, price: '300' }] });
   vi.mocked(jpycForwarderFor).mockReturnValue(null);
   mount(); vi.useFakeTimers();
@@ -1551,7 +1551,7 @@ it('A2c lost relay response resolves the original opening; a failed resolution w
   expect(result.current.data?.success).toBe(true);
   expect(result.current.orderDelivery?.bind).toEqual(opening);
   expect(result.current.orderDelivery?.state).toBe('notify-pending');
-  expect(loadOrderDelivery()).toMatchObject({ kind: 'ready', record: { state: 'signed', bind: opening } });
+  expect(latestOrderDelivery()).toMatchObject({ kind: 'ready', record: { state: 'signed', bind: opening } });
   expect(signTypedData).toHaveBeenCalledOnce();
   write.mockRestore(); vi.useRealTimers();
 });
@@ -1590,7 +1590,7 @@ it('A2c order chunk failure cannot hide an existing ordinary relay payment inten
 
 it.each(['prepared', 'terminal'] as const)('A2c %s record cannot block persisting the next signed checkout', async (state) => {
   const { bindingFixture } = await import('../_helpers/orderBinding');
-  const { ORDER_DELIVERY_KEY, loadOrderDelivery, resolveOrderDelivery, saveOrderDelivery, terminateOrderDelivery } = await import('@/lib/orderDelivery');
+  const { ORDER_DELIVERY_KEY, resolveOrderDelivery, saveOrderDelivery, terminateOrderDelivery } = await import('@/lib/orderDelivery'); const { latestOrderDelivery } = await import('../_helpers/orderDeliveryView');
   const f = bindingFixture('free', { chainId: jpycDep.chainId, tokenAddress: jpycDep.address, merchant: MERCHANT, handle: 'alice', orderId: 'old', items: [{ name: 'Tea', qty: 1, price: '300' }] });
   if (state === 'terminal') {
     const record = resolveOrderDelivery(f.record, `0x${'ab'.repeat(32)}`);
@@ -1598,7 +1598,7 @@ it.each(['prepared', 'terminal'] as const)('A2c %s record cannot block persistin
   } else sessionStorage.setItem(ORDER_DELIVERY_KEY, JSON.stringify({ ...f.record, state: 'prepared' }));
   mount(); vi.mocked(jpycForwarderFor).mockReturnValue(null);
   fetchSpy.mockImplementation(async () => {
-    expect(loadOrderDelivery()).toMatchObject({ kind: 'ready', record: { state: 'signed', order: { orderId: 'new' } } });
+    expect(latestOrderDelivery()).toMatchObject({ kind: 'ready', record: { state: 'signed', order: { orderId: 'new' } } });
     return Response.json({ ok: true, txHash: `0x${'cd'.repeat(32)}` });
   });
   const { result } = renderHook(() => useJpycEip3009Payment(jpycDep, { restoreOrderDelivery: true, orderContext: ORDER_CONTEXT }), { wrapper: makeWrapper() });
@@ -1607,11 +1607,11 @@ it.each(['prepared', 'terminal'] as const)('A2c %s record cannot block persistin
   act(() => result.current.mutate({ merchant: MERCHANT, value: 300n * 10n ** 18n, order: { ...f.order, orderId: 'new' } }));
   await waitFor(() => expect(result.current.data?.success).toBe(true));
   expect(signTypedData).toHaveBeenCalledOnce();
-  expect(loadOrderDelivery()).toMatchObject({ kind: 'ready', record: { state: 'notify-pending', order: { orderId: 'new' } } });
+  expect(latestOrderDelivery()).toMatchObject({ kind: 'ready', record: { state: 'notify-pending', order: { orderId: 'new' } } });
 });
 it('A2c navigation during a wallet prompt leaves no unsigned record or late broadcast', async () => {
   const { bindingFixture } = await import('../_helpers/orderBinding');
-  const { loadOrderDelivery } = await import('@/lib/orderDelivery');
+  const { latestOrderDelivery } = await import('../_helpers/orderDeliveryView');
   const f = bindingFixture('free', { chainId: jpycDep.chainId, tokenAddress: jpycDep.address, merchant: MERCHANT, handle: 'alice', orderId: 'unsigned', items: [{ name: 'Tea', qty: 1, price: '300' }] });
   let sign!: (signature: Hex) => void;
   mount({ signImpl: () => new Promise((resolve) => { sign = resolve; }) });
@@ -1619,12 +1619,12 @@ it('A2c navigation during a wallet prompt leaves no unsigned record or late broa
   const first = renderHook(() => useJpycEip3009Payment(jpycDep, { restoreOrderDelivery: true, orderContext: ORDER_CONTEXT }), { wrapper: makeWrapper() });
   act(() => first.result.current.mutate({ merchant: MERCHANT, value: 300n * 10n ** 18n, order: f.order }));
   await waitFor(() => expect(signTypedData).toHaveBeenCalledOnce());
-  expect(loadOrderDelivery()).toEqual({ kind: 'empty' }); first.unmount();
+  expect(latestOrderDelivery()).toEqual({ kind: 'empty' }); first.unmount();
   await act(async () => sign(`0x${'ab'.repeat(65)}`));
   const next = renderHook(() => useJpycEip3009Payment(jpycDep, { restoreOrderDelivery: true, orderContext: ORDER_CONTEXT }), { wrapper: makeWrapper() });
   await waitFor(() => expect(next.result.current.isRestoring).toBe(false));
   expect(next.result.current.restoredIntent).toBeNull();
-  expect(loadOrderDelivery()).toEqual({ kind: 'empty' }); expect(fetchSpy).not.toHaveBeenCalled();
+  expect(latestOrderDelivery()).toEqual({ kind: 'empty' }); expect(fetchSpy).not.toHaveBeenCalled();
 });
 
 describe('A2c context and authorization slot isolation', () => {
@@ -1687,13 +1687,13 @@ describe('A2c context and authorization slot isolation', () => {
     expect(signTypedData).toHaveBeenCalledOnce();
   });
   it('IP rejection removes the disk record across reload and a retry save failure never POSTS again', async () => {
-    const { ORDER_DELIVERY_KEY, loadOrderDelivery } = await import('@/lib/orderDelivery');
+    const { ORDER_DELIVERY_KEY } = await import('@/lib/orderDelivery'); const { latestOrderDelivery } = await import('../_helpers/orderDeliveryView');
     const f = await saved(); mount(); vi.mocked(jpycForwarderFor).mockReturnValue(null);
     fetchSpy.mockResolvedValueOnce(Response.json({ error: 'ip_rate_limited' }, { status: 429 }));
     const first = renderHook(() => useJpycEip3009Payment(jpycDep, { restoreOrderDelivery: true, orderContext: ORDER_CONTEXT }), { wrapper: makeWrapper() });
     act(() => first.result.current.mutate({ merchant: MERCHANT, value: 300n * 10n ** 18n, order: f.order }));
     await waitFor(() => expect(first.result.current.isError).toBe(true));
-    expect(loadOrderDelivery()).toEqual({ kind: 'empty' });
+    expect(latestOrderDelivery()).toEqual({ kind: 'empty' });
     const original = Storage.prototype.setItem;
     const write = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key, value) {
       if (key.startsWith(ORDER_DELIVERY_KEY)) throw new Error('quota');
@@ -1738,14 +1738,14 @@ describe('A2c background signed-order recovery', () => {
     expect(signTypedData).not.toHaveBeenCalled(); vi.useRealTimers();
   });
   it.each(['expired', 'reverted'])('%s proof abandons a non-matching signed record', async (outcome) => {
-    await signed(); const { loadOrderDelivery } = await import('@/lib/orderDelivery');
+    await signed(); const { latestOrderDelivery } = await import('../_helpers/orderDeliveryView');
     if (outcome === 'expired') vi.advanceTimersByTime(300_000);
     waitForTransactionReceipt.mockResolvedValue({ status: 'reverted' });
     fetchSpy.mockImplementation(async () => Response.json(outcome === 'expired' ? { ok: true, state: 'unused', expiry: 'expired' } : { ok: true, state: 'settled', txHash: `0x${'ab'.repeat(32)}` }));
     const { result } = renderHook(() => useJpycEip3009Payment(jpycDep, { restoreOrderDelivery: true, orderContext: { ...ORDER_CONTEXT, orderId: 'new' } }), { wrapper: makeWrapper() });
     await vi.waitFor(async () => {
       await act(async () => vi.advanceTimersByTimeAsync(9000));
-      expect(loadOrderDelivery()).toEqual({ kind: 'empty' });
+      expect(latestOrderDelivery()).toEqual({ kind: 'empty' });
     }, { timeout: 2000, interval: 10 });
     expect(result.current.data).toBeUndefined(); expect(result.current.restoredIntent).toBeNull();
     expect(result.current.orderPaymentHold).toBe(false);
@@ -1758,7 +1758,7 @@ describe('A2c background signed-order recovery', () => {
   // 第 7 回レビュー A6 (再レビュー反映): 端末の時計で期限を過ぎても、チェーン上でまだ期限前 (live) の間は保留を外さず、
   // 同じ店の新しい署名を許さない。チェーンの期限が過ぎて expired が証明されたら従来どおり放棄して新しい署名を許す。
   it('keeps the same-shop hold while the chain still reports the old signature live, then abandons on proven expiry', async () => {
-    const record = await signed(); const { loadOrderDelivery } = await import('@/lib/orderDelivery');
+    const record = await signed(); const { latestOrderDelivery } = await import('../_helpers/orderDeliveryView');
     vi.advanceTimersByTime(300_000);
     let expiry: 'live' | 'expired' = 'live';
     fetchSpy.mockImplementation(async () => Response.json({ ok: true, state: 'unused', expiry }));
@@ -1768,7 +1768,7 @@ describe('A2c background signed-order recovery', () => {
     await act(async () => vi.advanceTimersByTimeAsync(9_000));
     expect(fetchSpy.mock.calls.length).toBeGreaterThanOrEqual(2);
     expect(result.current.orderPaymentHold).toBe(true);
-    expect(loadOrderDelivery()).toEqual({ kind: 'ready', record });
+    expect(latestOrderDelivery()).toEqual({ kind: 'ready', record });
     act(() => result.current.mutate({ merchant: MERCHANT, value: 300n * 10n ** 18n }));
     await act(async () => vi.advanceTimersByTimeAsync(0));
     expect(signTypedData).not.toHaveBeenCalled();
@@ -1776,13 +1776,13 @@ describe('A2c background signed-order recovery', () => {
     expiry = 'expired';
     await vi.waitFor(async () => {
       await act(async () => vi.advanceTimersByTimeAsync(9_000));
-      expect(loadOrderDelivery()).toEqual({ kind: 'empty' });
+      expect(latestOrderDelivery()).toEqual({ kind: 'empty' });
     }, { timeout: 2000, interval: 10 });
     expect(result.current.orderPaymentHold).toBe(false);
     vi.useRealTimers();
   });
   it('unmounting a background receipt reader preserves the unresolved opening', async () => {
-    const record = await signed(); const { loadOrderDelivery } = await import('@/lib/orderDelivery');
+    const record = await signed(); const { latestOrderDelivery } = await import('../_helpers/orderDeliveryView');
     let receipt!: (value: { status: 'success' }) => void;
     waitForTransactionReceipt.mockImplementation(() => new Promise((resolve) => { receipt = resolve; }));
     fetchSpy.mockResolvedValue(Response.json({ ok: true, state: 'settled', txHash: `0x${'ab'.repeat(32)}` }));
@@ -1792,7 +1792,7 @@ describe('A2c background signed-order recovery', () => {
       expect(waitForTransactionReceipt).toHaveBeenCalledOnce();
     }, { timeout: 2000, interval: 10 });
     hook.unmount(); await act(async () => receipt({ status: 'success' }));
-    expect(loadOrderDelivery()).toEqual({ kind: 'ready', record });
+    expect(latestOrderDelivery()).toEqual({ kind: 'ready', record });
     expect(signTypedData).not.toHaveBeenCalled(); vi.useRealTimers();
   });
 });

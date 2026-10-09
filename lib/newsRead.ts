@@ -41,8 +41,3 @@ export function unreadCount(items: readonly HasId[], lastSeen: string | null): n
   if (idx === -1) return items.length;
   return idx; // idx 個 (0..idx-1) が lastSeen より新しい
 }
-
-/** 未読が 1 件以上あるか。 */
-export function hasUnreadNews(items: readonly HasId[], lastSeen: string | null): boolean {
-  return unreadCount(items, lastSeen) > 0;
-}

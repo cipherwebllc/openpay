@@ -79,17 +79,6 @@ describe('checkout feeKind / feePayer round-trip', () => {
     }
   });
 
-  it('register (レジ) round-trips; feePayer is N/A (always store-borne)', () => {
-    const { path, parsed } = roundTrip({ ...base, feeKind: 'register' });
-    expect(path).toContain('fee_kind=register');
-    expect(path).not.toContain('fee_payer');
-    expect(parsed.ok).toBe(true);
-    if (parsed.ok) {
-      expect(parsed.params.feeKind).toBe('register');
-      expect(parsed.params.feePayer).toBeUndefined();
-    }
-  });
-
   it('invalid fee_kind is ignored (strict validation → undefined)', () => {
     const parsed = parseCheckoutParams(
       new URLSearchParams(
@@ -123,12 +112,12 @@ describe('checkout feeKind / feePayer parse edge cases (hand-crafted / tampered 
     }
   });
 
-  it("register + fee_payer=customer → feeKind='register' だが feePayer は undefined (register は mobile kind ではない)", () => {
+  it('fee_kind=register (2026-10-07 に廃止したレジ通常決済の利用料の合図) は採用しない → feeKind / feePayer とも undefined', () => {
+    // 廃止前に発行された /checkout URL が残っていても、利用料の分割や種別は復活させない (未知の値と同じ扱い)。
     const parsed = parseQs('fee_kind=register&fee_payer=customer');
     expect(parsed.ok).toBe(true);
     if (parsed.ok) {
-      expect(parsed.params.feeKind).toBe('register');
-      // register は常に店舗負担で feePayer 概念が無い → 手書きされても採用しない。
+      expect(parsed.params.feeKind).toBeUndefined();
       expect(parsed.params.feePayer).toBeUndefined();
     }
   });

@@ -16,9 +16,9 @@
 // - 署名は wagmi walletClient 経由 (permit=popup1、UserOp=popup2 の 2 署名)。
 //
 // ⚠️ 二重決済対策 (計画 C1) の durable pending store / 冪等 rebroadcast は本 module
-//    では扱わない。本 module は「permit 署名」「UserOp 送信」の素の building block を
-//    提供し、FSM/idempotency は useBatchPayment 側 (chunk 3) が prepare→persist→
-//    broadcast に分解して使う。
+//    では扱わない。本 module は「permit 署名」「UserOp の署名と broadcast」の素の building
+//    block を提供し、FSM/idempotency は lib/smartAccount/circleSend.ts (useBatchPayment から
+//    呼ぶ) が prepare→persist→broadcast に分解して使う。
 
 import { http, type Address, type Hex, type PublicClient } from 'viem';
 import {
@@ -172,90 +172,14 @@ export async function getCircleUserOpGasPrice(
   const maxFeePerGas = BigInt(gp.standard.maxFeePerGas);
   // P2 (Codex): 署名/送信に実際に使う gas price に ceiling を適用する。useBatchPayment の
   // Pimlico 分岐は assertGasCeiling するが circle 分岐はその手前で return するため、Circle の
-  // 全送信経路 (sendCircleUserOperation / prepareAndSignCircleUserOp) が共通で通る本関数で
-  // 一元ガードする。送信時に gas がスパイクすると署名 op の maxFeePerGas を介して顧客 USDC が
-  // permit 上限 (実費×10) まで過大に pull されうるため、ceiling 超過は GasCongestedError で
-  // 送信前に弾く (ceiling 未設定 chain は pass-through)。
+  // 送信経路 (prepareAndSignCircleUserOp) が通る本関数で一元ガードする。送信時に gas がスパイクすると
+  // 署名 op の maxFeePerGas を介して顧客 USDC が permit 上限 (実費×10) まで過大に pull されうるため、
+  // ceiling 超過は GasCongestedError で送信前に弾く (ceiling 未設定 chain は pass-through)。
   assertGasCeiling(bundle.chainId, maxFeePerGas);
   return {
     maxFeePerGas,
     maxPriorityFeePerGas: BigInt(gp.standard.maxPriorityFeePerGas),
   };
-}
-
-/** Circle paymasterData 入りで gas を見積もる。paymasterPostOpGasLimit は Circle 固定
- * 下限 (15000) 以上を強制する (未満は AA33 0x5ff4afc1 revert・spike)。完全な gas セットを
- * 返す (postOp だけ部分指定すると viem "Invalid fields")。 */
-export async function estimateCircleUserOp(args: {
-  bundle: CircleSmartAccountBundle;
-  calls: BatchCall[];
-  paymasterData: Hex;
-  maxFeePerGas: bigint;
-  maxPriorityFeePerGas: bigint;
-}): Promise<{
-  callGasLimit: bigint;
-  verificationGasLimit: bigint;
-  preVerificationGas: bigint;
-  paymasterVerificationGasLimit: bigint;
-  paymasterPostOpGasLimit: bigint;
-}> {
-  const { bundle, calls, paymasterData, maxFeePerGas, maxPriorityFeePerGas } =
-    args;
-  const est = await bundle.bundlerClient.estimateUserOperationGas({
-    account: bundle.account,
-    calls,
-    paymaster: bundle.paymasterAddress,
-    paymasterData,
-    paymasterPostOpGasLimit: CIRCLE_MIN_POSTOP_GAS,
-    maxFeePerGas,
-    maxPriorityFeePerGas,
-  });
-  const postOp =
-    est.paymasterPostOpGasLimit && est.paymasterPostOpGasLimit > CIRCLE_MIN_POSTOP_GAS
-      ? est.paymasterPostOpGasLimit
-      : CIRCLE_MIN_POSTOP_GAS;
-  return {
-    callGasLimit: est.callGasLimit,
-    verificationGasLimit: est.verificationGasLimit,
-    preVerificationGas: est.preVerificationGas,
-    paymasterVerificationGasLimit: est.paymasterVerificationGasLimit ?? 0n,
-    paymasterPostOpGasLimit: postOp,
-  };
-}
-
-/** Circle UserOp を送信 (popup2 = UserOp 署名)。estimate → fee → 完全 gas セットで
- * sendUserOperation。userOpHash を返す。
- * ⚠️ これは「素の送信」。二重決済耐性 (persist-before-broadcast + 冪等 rebroadcast)
- *    は useBatchPayment の FSM (chunk 3) が担う。本関数を fallback と組み合わせるときは
- *    「broadcast 前 or 決定的 unsupported のみ fallback 可」の制約を呼出側で守ること。 */
-export async function sendCircleUserOperation(args: {
-  bundle: CircleSmartAccountBundle;
-  calls: BatchCall[];
-  paymasterData: Hex;
-}): Promise<Hex> {
-  const { bundle, calls, paymasterData } = args;
-  const { maxFeePerGas, maxPriorityFeePerGas } =
-    await getCircleUserOpGasPrice(bundle);
-  const gas = await estimateCircleUserOp({
-    bundle,
-    calls,
-    paymasterData,
-    maxFeePerGas,
-    maxPriorityFeePerGas,
-  });
-  return bundle.bundlerClient.sendUserOperation({
-    account: bundle.account,
-    calls,
-    paymaster: bundle.paymasterAddress,
-    paymasterData,
-    maxFeePerGas,
-    maxPriorityFeePerGas,
-    callGasLimit: gas.callGasLimit,
-    verificationGasLimit: gas.verificationGasLimit,
-    preVerificationGas: gas.preVerificationGas,
-    paymasterVerificationGasLimit: gas.paymasterVerificationGasLimit,
-    paymasterPostOpGasLimit: gas.paymasterPostOpGasLimit,
-  });
 }
 
 // ===========================================================================
@@ -336,31 +260,6 @@ export async function broadcastCircleUserOp(args: {
     },
     { retryCount: 0 },
   );
-}
-
-/** receipt を 1 回だけ照会。未 included (pending/unknown) は null を返す
- * (例外を制御フローに使わない)。recovery で「included したか」を判定する用。 */
-export async function pollCircleReceipt(args: {
-  bundle: CircleSmartAccountBundle;
-  hash: Hex;
-}): Promise<{ success: boolean; txHash: Hex; blockNumber: bigint } | null> {
-  const request = args.bundle.bundlerClient.request as unknown as (a: {
-    method: string;
-    params: unknown[];
-  }) => Promise<{
-    success: boolean;
-    receipt: { transactionHash: Hex; blockNumber: Hex };
-  } | null>;
-  const raw = await request({
-    method: 'eth_getUserOperationReceipt',
-    params: [args.hash],
-  });
-  if (!raw) return null;
-  return {
-    success: Boolean(raw.success),
-    txHash: raw.receipt.transactionHash,
-    blockNumber: BigInt(raw.receipt.blockNumber),
-  };
 }
 
 /** UserOp receipt を待つ。entryPoint=v0.8 / paymaster=Circle の確認は呼出側 (verifier)。 */

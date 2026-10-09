@@ -10,6 +10,8 @@ export type PaymentClaimKind =
   | 'csvpass'
   | 'billing'
   | 'order'
+  // 2026-10-07 に廃止したレジ利用料の claim。route は削除したが、本番 KV に r:register の恒久 claim が
+  // 残り、注文の fee leg への二重充当を止め続けるので、読み取り (parsePaymentClaimKind) の互換のため残す。
   | 'register'
   | 'store';
 

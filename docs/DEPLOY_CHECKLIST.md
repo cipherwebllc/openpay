@@ -1435,9 +1435,10 @@ on-chain 検証経路 (実 `getTransactionReceipt` → 実 JPYC `Transfer` log �
 
 ## §13 モバイル注文 / レジ システム利用料 go-live SOP
 
-> **2026-10-07: レジの通常決済 (standard) の利用料は廃止しました (#713)。** 本番は
-> `NEXT_PUBLIC_ENABLE_REGISTER_FEE=0`。以下のレジ部分は履歴として残す (再点灯は利用料の再導入 = 開示 3 点セットの
-> 更新が先・点灯しない)。モバイル注文の手順は現役。
+> **2026-10-07: レジの通常決済 (standard) の利用料は廃止しました (#713)。** その後 flag
+> `NEXT_PUBLIC_ENABLE_REGISTER_FEE` と claim route (`/api/register/claim`) もコードから削除した (第 7 回レビュー
+> C12)。Vercel に残る同名の env はもう読まれない。以下のレジ部分は履歴 (再導入は新しいコードと開示 3 点セットの
+> 更新が先)。モバイル注文の手順は現役。
 
 決済コアは無料のまま、モバイル注文 (店頭 1% / 事前 3%) と レジ standard (7 月から 1%) の
 システム利用料を**経路非依存**で課金する。料金は決済と同一 tx 内で `FEE_RECEIVER` へ分割
@@ -1446,9 +1447,9 @@ on-chain 検証経路 (実 `getTransactionReceipt` → 実 JPYC `Transfer` log �
 (legal `DISCLOSED_RECOVER_FEE` フェンス)。
 
 ### §13.1 既定 (現状 = inert・ロールバック先)
-- `NEXT_PUBLIC_ENABLE_MOBILE_ORDER_FEE` / `NEXT_PUBLIC_ENABLE_REGISTER_FEE` 既定 **OFF**。
+- `NEXT_PUBLIC_ENABLE_MOBILE_ORDER_FEE` 既定 **OFF** (レジの `NEXT_PUBLIC_ENABLE_REGISTER_FEE` はコードから削除済み)。
   OFF では CheckoutForm が feeKind を分割せず、relay route が feeKind を無視 (従来 recover に倒す)、
-  MobileOrderView / RegisterMode が feeKind を URL に付けない = **完全 inert (本番挙動不変)**。
+  MobileOrderView が feeKind を URL に付けない = **完全 inert (本番挙動不変)**。
 - **この OFF の組み合わせが安全状態であり、ロールバック先でもある**。
 
 ### §13.2 go-live 手順 (順序厳守)
@@ -1467,14 +1468,12 @@ on-chain 検証経路 (実 `getTransactionReceipt` → 実 JPYC `Transfer` log �
 5. フラグ点灯 (NEXT_PUBLIC_* は build-time inline → **再デプロイ必須**):
    - モバイル注文公開: `NEXT_PUBLIC_ENABLE_MOBILE_ORDER=1` + `NEXT_PUBLIC_ENABLE_ORDER_RELAY=1`
      (受注が店主へ届く・KV 必須 §11) + `NEXT_PUBLIC_ENABLE_MOBILE_ORDER_FEE=1`。
-   - レジ利用料 (**2026-10-07 廃止・点灯しない**・履歴): `NEXT_PUBLIC_ENABLE_REGISTER_FEE=1` + (7 月から) `RECOVER_FEE_BPS=100`。
+   - レジ利用料 (**2026-10-07 廃止・flag はコードから削除済み**・履歴): 旧手順は `NEXT_PUBLIC_ENABLE_REGISTER_FEE=1` + (7 月から) `RECOVER_FEE_BPS=100`。
      ⚠️ `RECOVER_FEE_BPS` は決済QR / relay の既存 recover 利用料と**共有**。7 月前は 0 = フラグ ON でも
      レジ standard は無料。変更は開示済数値の変更 → legal フェンス (`DISCLOSED_RECOVER_FEE`) 確認必須。
 
 ### §13.3 ロールバック (安全状態へ即復帰)
 - **最速 (課金全停止)**: 該当 flag を `0` に戻して再デプロイ → feeKind が付かず/無視され完全 inert。
-- **レジだけ止める**: `NEXT_PUBLIC_ENABLE_REGISTER_FEE=0` (RECOVER_FEE_BPS を 0 にすると決済QR/relay の
-  recover 利用料も全部 0 になるので注意)。
 - **コード巻き戻し**: 該当 commit を `git revert` (本機能は 9027b9c / 507e96c + 硬化 37dff56〜88c9036)。
 - ※ NEXT_PUBLIC_* は build-time inline のため env 変更には再デプロイが要る (Vercel)。
 
@@ -1488,7 +1487,7 @@ forwarderRecover を mock しているため、**実 on-chain 分割の実証は
 4. **改竄耐性**: 改ざんした feeValue で relay POST → `fee_value_mismatch` で拒否 (server 権威・率は再計算)。
 5. **forwarder 未設定 chain**: mobile fee 付き注文 → hook が `mobile_fee_requires_recover` で standard
    fallback (free 経路で素通りしない) を確認。
-6. **レジ standard (`RECOVER_FEE_BPS=100` 相当)**: レジ JPYC standard 決済 → merchant = 売上−1%・
+6. **(2026-10-07 廃止・実施しない・履歴) レジ standard (`RECOVER_FEE_BPS=100` 相当)**: レジ JPYC standard 決済 → merchant = 売上−1%・
    `FEE_RECEIVER` = 1% の 2-tx 分割。relay 経路は既存 recover のまま不変。USDC レジ standard = 0 (対象外)。
 
 ### §13.5 監視

@@ -41,6 +41,7 @@ import {
   presetsToMenu,
   menuToPresets,
   storefrontPartsToDraft,
+  draftToStorefrontParts,
   isPristineMobileOrderDraft,
   draftDiscount,
 } from '@/hooks/useMobileOrderDraft';
@@ -144,10 +145,8 @@ export function MobileOrderBuilder({
   });
 
   // メニュー = レジの有効な JPYC 商品 (単一カタログ)。
+  // 公開可否は「有効なメニューがあるか」で決まる (受取先/店名は @handle 側が権威・下の storefrontParts が null)。
   const menuItems = useMemo(() => presetsToMenu(presets), [presets]);
-
-  // 公開可否は「有効なメニューがあるか」で決まる (受取先/店名は @handle 側が権威)。
-  const hasMenu = menuItems.length > 0;
 
   // 店舗アイコンのプレビュー (https のみ・読込前検証)。無ければ店名の頭文字を円に表示。
   const avatarPreview = safeHttpUrl(draft.avatar.trim());
@@ -170,36 +169,11 @@ export function MobileOrderBuilder({
   // @handle 公開用の店舗固有部分。受取先は @handle が権威だが、店名/アイコン/SNS は
   // ビルダーの設定をそのまま公開ページへ載せる (https 検証は validateStorefrontParts が行う)。
   // メニュー未充足なら null (公開不可)。
-  const storefrontParts = hasMenu
-    ? {
-        chain: draft.chains[0], // 既定 (先頭)
-        chains: draft.chains, // 顧客が選べる集合 (validateStorefrontParts が 2 件以上で採用)
-        mode: draft.mode,
-        feePayer: draft.feePayer,
-        shopName: draft.shopName.trim() || undefined,
-        tagline: draft.tagline.trim() || undefined,
-        avatar: draft.avatar.trim() || undefined,
-        cover: draft.cover.trim() || undefined,
-        socials: draft.socials.map((s) => s.trim()).filter(Boolean),
-        address: draft.address.trim() || undefined,
-        hours: draft.hours.trim() || undefined,
-        phone: draft.phone.trim() || undefined,
-        invoiceNo: draft.invoiceNo.trim() || undefined, // 形式外は validateStorefrontParts が除外
-        acceptingOrders: draft.acceptingOrders,
-        dineIn: draft.dineIn, // 店内なら公開ページで注文時にテーブル番号を入力させる
-        openFrom: draft.openFrom.trim() || undefined,
-        ...(draft.lastOrder.trim() ? { lastOrder: draft.lastOrder.trim() } : {}),
-        ...(draft.minLeadMinutes.trim()
-          ? { minLeadMinutes: Number(draft.minLeadMinutes.trim()) }
-          : {}),
-        ...(discount ? { discount } : {}),
-        menu: menuItems,
-      }
-    : null;
+  const storefrontParts = draftToStorefrontParts(draft, menuItems);
 
   // ④ プレビュー用の MobileOrderConfig。下書きから生成し、必須欠落 (受取先/店名) はプレースホルダで
   // 埋めて作成途中でも実際の店舗ページ (MobileOrderView) をそのまま WYSIWYG 描画する。受取先未確定でも
-  // 描けるようダミーアドレスで代用 (プレビュー専用・公開検証は storefrontParts/validateOrderConfig 側)。
+  // 描けるようダミーアドレスで代用 (プレビュー専用・公開検証は storefrontParts/validateStorefrontParts 側)。
   const previewConfig: MobileOrderConfig = {
     receiver: (/^0x[0-9a-fA-F]{40}$/.test(draft.receiver.trim())
       ? getAddress(draft.receiver.trim())

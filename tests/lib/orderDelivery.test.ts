@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { canonicalOrder, orderBindSalt, orderDigest } from '@/lib/orderBind';
-import { loadOrderDelivery, saveOrderDelivery, resolveOrderDelivery, acknowledgeOrderDelivery, ORDER_DELIVERY_KEY, type OrderDelivery } from '@/lib/orderDelivery';
+import { saveOrderDelivery, resolveOrderDelivery, acknowledgeOrderDelivery, ORDER_DELIVERY_KEY, type OrderDelivery } from '@/lib/orderDelivery';
+import { latestOrderDelivery } from '../_helpers/orderDeliveryView';
 const order = canonicalOrder({ chainId: 80002, tokenAddress: '0x0000000000000000000000000000000000000abc', merchant: '0x1111111111111111111111111111111111111111', handle: 'alice', orderId: 'id', items: [{ name: 'Tea', qty: 1, price: '100' }], statusToken: 's'.repeat(43) });
 const secret = `0x${'12'.repeat(32)}` as const;
 const record: OrderDelivery = {
@@ -12,20 +13,20 @@ beforeEach(() => { vi.restoreAllMocks(); sessionStorage.clear(); });
 describe('A2c undelivered order persistence', () => {
   it('stores a separate validated snapshot before broadcast and retains it at payment resolution', () => {
     expect(saveOrderDelivery(record)).toBe(true);
-    expect(loadOrderDelivery()).toEqual({ kind: 'ready', record });
+    expect(latestOrderDelivery()).toEqual({ kind: 'ready', record });
     const resolved = resolveOrderDelivery(record, `0x${'ab'.repeat(32)}`);
     expect(resolved.state).toBe('notify-pending');
     expect(saveOrderDelivery(resolved)).toBe(true);
-    const reloaded = loadOrderDelivery();
+    const reloaded = latestOrderDelivery();
     expect(reloaded).toEqual({ kind: 'ready', record: resolved });
     expect(JSON.parse(resolved.notifyBody!)).toMatchObject({ orderId: 'id', bind: record.bind, statusToken: order.statusToken });
     expect(acknowledgeOrderDelivery(resolved)).toBe(true);
-    expect(loadOrderDelivery()).toEqual({ kind: 'empty' });
+    expect(latestOrderDelivery()).toEqual({ kind: 'empty' });
   });
   it('lost acknowledgement preserves identical bytes and replacement resolution changes only the hash', () => {
     const resolved = resolveOrderDelivery(record, `0x${'ab'.repeat(32)}`);
     saveOrderDelivery(resolved);
-    const loaded = loadOrderDelivery();
+    const loaded = latestOrderDelivery();
     if (loaded.kind !== 'ready') throw new Error('missing record');
     expect(resolveOrderDelivery(loaded.record, resolved.txHash!).notifyBody).toBe(resolved.notifyBody);
     const replaced = resolveOrderDelivery(loaded.record, `0x${'cd'.repeat(32)}`);
@@ -34,19 +35,19 @@ describe('A2c undelivered order persistence', () => {
     expect(JSON.parse(replaced.notifyBody!).txHash).toBe(replaced.txHash);
   });
   it('session loss cannot invent a snapshot or opening', () => {
-    expect(loadOrderDelivery()).toEqual({ kind: 'empty' });
+    expect(latestOrderDelivery()).toEqual({ kind: 'empty' });
   });
   it.each(['order', 'nonce', 'body'])('rejects corrupted %s instead of regenerating an opening', (field) => {
     const saved = resolveOrderDelivery(record, `0x${'ab'.repeat(32)}`);
     const corrupt = field === 'order' ? { ...saved, order: { ...order, orderId: 'stolen' } } : field === 'nonce' ? { ...saved, intent: { ...saved.intent, nonce: `0x${'00'.repeat(32)}` } } : { ...saved, notifyBody: '{}' };
     sessionStorage.setItem(ORDER_DELIVERY_KEY, JSON.stringify(corrupt));
-    expect(loadOrderDelivery()).toEqual({ kind: 'unavailable' });
+    expect(latestOrderDelivery()).toEqual({ kind: 'unavailable' });
   });
   it('storage read/write/remove failures are explicit and never create a false acknowledgement', () => {
     vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('quota'); });
     expect(saveOrderDelivery(record)).toBe(false);
     vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new Error('denied'); });
-    expect(loadOrderDelivery()).toEqual({ kind: 'unavailable' });
+    expect(latestOrderDelivery()).toEqual({ kind: 'unavailable' });
     expect(acknowledgeOrderDelivery(record)).toBe(false);
   });
 });
@@ -55,20 +56,20 @@ it('failed acknowledgement cleanup retains the record and does not remove a diff
   saveOrderDelivery(record);
   const remove = vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(() => { throw new Error('denied'); });
   expect(acknowledgeOrderDelivery(record)).toBe(false);
-  expect(loadOrderDelivery().kind).toBe('ready');
+  expect(latestOrderDelivery().kind).toBe('ready');
   remove.mockRestore();
   expect(acknowledgeOrderDelivery({ ...record, intent: { ...record.intent, nonce: `0x${'ab'.repeat(32)}` } })).toBe(true);
-  expect(loadOrderDelivery().kind).toBe('ready');
+  expect(latestOrderDelivery().kind).toBe('ready');
 });
 
  it('legacy unsigned prepared records never restore or block the next order', () => {
   sessionStorage.setItem(ORDER_DELIVERY_KEY, JSON.stringify({ ...record, state: 'prepared' }));
-  expect(loadOrderDelivery()).toEqual({ kind: 'empty' });
+  expect(latestOrderDelivery()).toEqual({ kind: 'empty' });
 });
  it('terminal delivery is cleaned on load and never restored or treated as an active order', () => {
   const resolved = resolveOrderDelivery(record, `0x${'ab'.repeat(32)}`);
   sessionStorage.setItem(ORDER_DELIVERY_KEY, JSON.stringify({ ...resolved, state: 'terminal' }));
-  expect(loadOrderDelivery()).toEqual({ kind: 'empty' });
+  expect(latestOrderDelivery()).toEqual({ kind: 'empty' });
 });
 
 it('separate authorization slots preserve another order through acknowledgement and termination', async () => {

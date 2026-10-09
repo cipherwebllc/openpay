@@ -2437,13 +2437,6 @@
     "statusReceiverLabel": "Receiver",
     "statusChangeLink": "Change",
     "editCurrencyConfirm": "Recipient/currency/chain is changed in the Payment QR tab. Your in-progress cart will be discarded — continue?",
-    "paymentPolicyLabel": "Payment settings",
-    "paymentPolicy": {
-      "standard": "Standard (customer pays gas)",
-      "gaslessFree": "Gasless (OpenPay covers gas)",
-      "gaslessCustomerGas": "Gasless / gas paid by customer",
-      "gaslessMerchantGas": "Gasless / gas absorbed by you"
-    },
     "showQr": "Show QR code",
     "qrModalTitle": "Checkout QR code",
     "qrModalClose": "Close",

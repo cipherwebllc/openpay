@@ -14,7 +14,6 @@ import {
   useWaitForTransactionReceipt,
   useWriteContract,
 } from 'wagmi';
-import { notifyRegisterStandardFee } from '@/lib/registerFeeNotify';
 import { classifyTransferReceipt } from '@/lib/replacedTransferReceipt';
 import type {
   StandardPaymentIntentParams,
@@ -173,8 +172,6 @@ export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {
   // merchant 成功時の自動 fee 起動を「1 度だけ」にする gate。
   // useEffect の dep 変化で重複発火しないよう、merchant 成功した直後にのみ true 化。
   const feeStartedRef = useRef(false);
-  // レジ fee の「用途通知」を同一 fee tx で 1 度だけ撃つ dedupe。付帯処理ゆえ結果は保持しない。
-  const registerNotifiedRef = useRef<string | null>(null);
 
   const { address: customer } = useAccount();
   const merchantWrite = useWriteContract();
@@ -403,29 +400,6 @@ export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {
     );
   }, [customer]);
 
-  // レジ standard の fee tx hash をサーバへ通知し、用途を束縛した global claim を作らせる。
-  // 掟13 の隔離: これは **anti-abuse 用の付帯処理** であり、決済本体 (merchant/fee の 2 tx は
-  // 既に確定済み) へ失敗を波及させない。通知が落ちて claim が作られない場合は「その fee tx を
-  // 注文 fee として二重充当できる余地が残る」だけで、資金は動かず顧客の決済も成功したままになる
-  // ため、ガードとしては fail-open を選ぶ (逆に throw すると確定済み決済が失敗表示になる)。
-  const notifyRegisterFee = useCallback(
-    (params: StandardPaymentParams, merchantHash: Hex, feeHash: Hex) => {
-      if (params.registerFee !== true || params.saleAmount === undefined) return;
-      const dedupeKey = `${merchantHash}:${feeHash}`;
-      if (registerNotifiedRef.current === dedupeKey) return;
-      registerNotifiedRef.current = dedupeKey;
-      void notifyRegisterStandardFee({
-        chainId: params.chainId,
-        tokenAddress: params.tokenAddress,
-        merchant: params.merchant,
-        saleAmount: params.saleAmount,
-        merchantTxHash: merchantHash,
-        feeTxHash: feeHash,
-      });
-    },
-    [],
-  );
-
   const submitFee = useCallback(
     (
       params: StandardPaymentParams,
@@ -523,7 +497,6 @@ export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {
     merchantReceiptLoggedKeyRef.current = null;
     feeErrorLoggedKeyRef.current = null;
     feeReceiptLoggedKeyRef.current = null;
-    registerNotifiedRef.current = null;
     feeStartedRef.current = false;
     restoredFromStorageRef.current = false;
     issuedAtRef.current = Date.now();
@@ -754,7 +727,7 @@ export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {
     }
     if (feeReplacedBy) {
       // A1: 取消・別内容の置換 = 元の fee 送金は永久に mine されない。下の既存 reverted 分岐と同じ
-      // 後片付け (fee-awaiting へ戻して fee 再送を許す) をし、success・用途通知へ進ませない。試行に結び付けて
+      // 後片付け (fee-awaiting へ戻して fee 再送を許す) をし、success へ進ませない。試行に結び付けて
       // 保った判定なので、確定後の再照会の RPC error でも unknown に戻さない (#764 Codex P2)。
       if (merchantSettledTxHash && restoredMerchantBlockNumber !== undefined) {
         persistIntent('fee-awaiting', params, merchantSettledTxHash, {
@@ -786,12 +759,6 @@ export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {
       return;
     }
     if (feeReceipt.isSuccess && feeReceipt.data?.status === 'success') {
-      // 2 tx とも確定した後にだけ用途通知を撃つ (no-throw・応答は待たない)。既存の
-      // clearPersistedIntent → success 遷移は不変で、通知の成否は phase に影響させない。
-      // A1: hash は実際に mine された hash (同内容の置換なら置換 tx の hash)。
-      if (merchantSettledTxHash && feeSettledTxHash) {
-        notifyRegisterFee(params, merchantSettledTxHash, feeSettledTxHash);
-      }
       clearPersistedIntent();
       setPhase('success');
       return;
@@ -822,7 +789,6 @@ export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {
     feeReceipt.data,
     feeReceipt.error,
     clearPersistedIntent,
-    notifyRegisterFee,
     persistIntent,
   ]);
 

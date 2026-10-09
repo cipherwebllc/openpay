@@ -39,9 +39,8 @@ vi.mock('@/hooks/useSiweSession', () => ({
     signOut: vi.fn(),
   }),
 }));
-// レジ利用料 flag を切替え可能に (既定 OFF = レジ standard 無料 = 既存テストの挙動不変)。
+// 機能 flag を切替え可能に (既定 OFF = 既存テストの挙動不変)。
 const envHold = vi.hoisted(() => ({
-  enableRegisterFee: false,
   enableShopLive: false,
   enableHandles: false,
   enableMenuOptions: false,
@@ -54,9 +53,6 @@ vi.mock('@/lib/env', async (importOriginal) => {
     ...actual,
     env: {
       ...actual.env,
-      get enableRegisterFee() {
-        return envHold.enableRegisterFee;
-      },
       get enableShopLive() {
         return envHold.enableShopLive;
       },
@@ -132,7 +128,6 @@ async function openLine(user: ReturnType<typeof userEvent.setup>, name: RegExp) 
 describe('RegisterMode', () => {
   beforeEach(() => {
     window.localStorage.clear();
-    envHold.enableRegisterFee = false; // 毎テスト OFF 起点 (flag-ON テストが個別に立てる)
     envHold.enableShopLive = false; // Phase 1 flag も OFF 起点
     envHold.enableHandles = false;
     envHold.enableMenuOptions = false; // Phase 2 flag も OFF 起点
@@ -1025,8 +1020,6 @@ describe('RegisterMode', () => {
     expect(tiles().queryByRole('button', { name: /コーヒー/ })).toBeNull();
   });
 
-  // レジ システム利用料: flag ON のとき /checkout に feeKind='register' を付け、CheckoutForm が
-  // standard 経路の JPYC 決済に recover の OpenPay利用料 % を課金する合図にする。
   describe('モバイル注文への橋 (2026-10 磨き上げ P4)', () => {
     it('モバイル注文が使えて、メニューにできる商品があれば出す・押すとモバイル注文タブへ', async () => {
       envHold.enableMobileOrder = true;
@@ -1085,19 +1078,7 @@ describe('RegisterMode', () => {
     });
   });
 
-  it('flag ON: レジの /checkout URL に fee_kind=register が付く (standard 課金の合図)', async () => {
-    envHold.enableRegisterFee = true;
-    const user = userEvent.setup();
-    seedReceiver();
-    render(<RegisterMode />);
-    await waitFor(() => tiles().getByRole('button', { name: /コーヒー/ }));
-    await user.click(tiles().getByRole('button', { name: /コーヒー/ }));
-    const r = await parsedCheckout();
-    expect(r.ok).toBe(true);
-    if (r.ok) expect(r.params.feeKind).toBe('register');
-  });
-
-  it('flag OFF (既定): レジの /checkout URL に feeKind を付けない (完全 inert・現状維持)', async () => {
+  it('レジの /checkout URL に fee_kind を付けない (レジ通常決済の利用料は 2026-10-07 に廃止・第 7 回レビュー C12)', async () => {
     const user = userEvent.setup();
     seedReceiver();
     render(<RegisterMode />);

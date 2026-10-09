@@ -43,9 +43,8 @@ import {
   isCircleRoute,
   type PaymentRoute,
 } from '@/lib/paymentRoute';
-import { recoverFeeValue, recoverPercentValue } from '@/lib/relay/recoverFee';
+import { recoverFeeValue } from '@/lib/relay/recoverFee';
 import {
-  feeSplit,
   mobileOrderBreakdown,
   mobileOrderGasMode,
   type MobileOrderFeeKind,
@@ -298,8 +297,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   // モバイル注文システム利用料 (storefront/preorder)。flag ON + feeKind が storefront/preorder の
   // ときだけ経路非依存に 1%(店頭)/3%(事前) を分割する。負担者 (店舗負担=merchant / 顧客上乗せ=
   // customer) は mode/feePayer から確定し effectiveGasMode を上書きする (顧客上乗せ preorder では
-  // recover でも customer が必要)。'register' (レジ) は下記 isRegisterStandardFee で別扱い (standard
-  // のみ)。feeKind 無し・/pay・/tip・通常 checkout は従来動作のまま (一切不変)。
+  // recover でも customer が必要)。feeKind 無し・/pay・/tip・通常 checkout は従来動作のまま (一切不変)。
   const isMobileFee = mobileFeeKind !== null;
   // 課金 flag とは独立に、@handle 注文の元 storefront mode を署名前 admission へ渡す。
   // feeKind は MobileOrderView が常に付与し、課金自体は上の mobileFeeKind gate が決める。
@@ -330,20 +328,6 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   const circleQuote = useGasQuoteCircle(deployment, !isStandard && isCircle);
   const activeQuote = isCircle ? circleQuote : gasQuote;
   const circlePermitAmount = isCircle ? circleQuote.data?.permitAmount : undefined;
-
-
-
-  // レジ (店頭POS) システム利用料: standard 経路 (JPYC) で recover の OpenPay利用料 % を店舗負担で
-  // 課金する (relay 経路は既存 recover が徴収するので register は standard のみ追加)。7月前
-  // (recoverFeeBps=0) は 0 = 無料・flag OFF も 0 = 完全 inert。USDC は対象外 (無料据置)。
-  const isRegisterStandardFee =
-    env.enableRegisterFee &&
-    params.feeKind === 'register' &&
-    isStandard &&
-    isJpyc;
-  const registerFee = isRegisterStandardFee
-    ? recoverPercentValue(totalWei)
-    : 0n;
 
   // recover 時に回収する利用料 (= 実 settle で feeReceiver へ分割される額)。CDX-3: 実スケジュール
   // recoverFeeValue(billAmount, effectiveGas) を使う。billAmount は relay.mutate に渡す totalWei、
@@ -380,23 +364,16 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
     () =>
       mobileFeeKind
         ? mobileOrderBreakdown(totalWei, mobileFeeKind, params.feePayer)
-        : isRegisterStandardFee
-          ? // レジ standard: 店舗負担 (顧客は表示額・店舗が利用料を受取から吸収)。利用料は別 tx で
-            // feeReceiver へ (useStandardPayment の 2-tx 分割)。会計は feeAmount (システム利用料)。
-            // モバイル注文の店舗負担と同一の分割なので feeSplit を共有する (下限ガードの単一情報源)。
-            feeSplit(totalWei, registerFee, 'merchant')
-          : paymentBreakdown({
-              totalWei,
-              token: params.token,
-              payMode: effectiveMode,
-              gasMode: effectiveGas,
-              effectiveGasAmount,
-            }),
+        : paymentBreakdown({
+            totalWei,
+            token: params.token,
+            payMode: effectiveMode,
+            gasMode: effectiveGas,
+            effectiveGasAmount,
+          }),
     [
       mobileFeeKind,
       params.feePayer,
-      isRegisterStandardFee,
-      registerFee,
       totalWei,
       params.token,
       effectiveMode,
@@ -1404,9 +1381,6 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
         // 履歴 snapshot に正しい gross を運ぶ (非モバイルは fee=0 で merchantAmount に一致)。
         saleAmount: totalWei,
         contextKey: checkoutContextKey,
-        // レジ standard fee であることの印。送金自体は従来どおり plain transfer のままで、
-        // 2 tx 確定後に fee txHash を server 通知して用途束縛 claim を作らせるだけ (付帯処理)。
-        ...(isRegisterStandardFee ? { registerFee: true as const } : {}),
       });
     } else if (useRelay) {
       // JPYC EIP-3009 relay: 顧客が transferWithAuthorization に署名 → 自前 relayer が gas 負担で
@@ -1418,7 +1392,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
         ...(order ? { order } : {}),
         gasMode: effectiveGas,
         // モバイル注文 (storefront/preorder) のときだけ feeKind を載せる (server が定数表から % を
-        // 再計算・on-chain 強制)。register(レジ) は relay では既存 recover が徴収するので渡さない。
+        // 再計算・on-chain 強制)。
         ...(mobileFeeKind ? { feeKind: mobileFeeKind } : {}),
       });
     } else {

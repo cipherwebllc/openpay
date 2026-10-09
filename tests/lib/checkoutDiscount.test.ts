@@ -47,9 +47,12 @@ describe('値引き (disc) の URL', () => {
     expect(calcCheckoutPayable(r.params, 18)).toBe(J('980'));
   });
 
-  it('レジの経路 (fee_kind=register) とは併用できる', () => {
-    const r = parse(queryOf(pathOf({ discount: '20', feeKind: 'register', mode: 'standard' })));
+  it('廃止前のレジの URL (fee_kind=register 付き) でも値引きは使え、fee_kind は採用しない', () => {
+    const r = parse(`${queryOf(pathOf({ discount: '20', mode: 'standard' }))}&fee_kind=register`);
     expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.params.discount).toBe('20');
+    expect(r.params.feeKind).toBeUndefined();
   });
 
   it.each(['0', '-20', 'abc', '20.5', '1000', '1001', ''])('不正・最小単位の倍数でない・小計以上の値引き (disc=%s) は使えない', (disc) => {

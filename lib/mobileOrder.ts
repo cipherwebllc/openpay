@@ -255,17 +255,6 @@ export function encodeOrderConfig(config: MobileOrderConfig): string {
   return toBase64Url(JSON.stringify(config));
 }
 
-/** 注文ページのルート path (locale prefix 無し・middleware が解決。/pay・/tip と同流儀)。 */
-export const ORDER_PATH = '/order';
-
-/**
- * 検証済み設定を注文ページのフル URL へ。token は base64url ([A-Za-z0-9_-]) ゆえ
- * URL 安全なので再エンコード不要。呼出側は valid な config (validateOrderConfig 通過) を渡す。
- */
-export function buildOrderUrl(origin: string, config: MobileOrderConfig): string {
-  return `${origin}${ORDER_PATH}?s=${encodeOrderConfig(config)}`;
-}
-
 /**
  * href / src へ描画してよい URL を返す (不可なら undefined)。**https のみ許可**
  * (validateOrderConfig と同じ scheme 契約)。
