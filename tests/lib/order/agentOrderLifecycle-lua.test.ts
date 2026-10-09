@@ -61,9 +61,35 @@ describe('A2b lifecycle and compatibility (real Lua)', () => {
     const read = await readAgentOrderReservation(key);
     expect(read.kind).toBe('match');
     if (read.kind === 'match') expect(read.reservation.record.feeModel).toBeUndefined();
-    // 改ざんされた feeModel の値は読まない (別の判定に化けさせない)。
-    h.db!.strings.set(key, JSON.stringify({ ...record, feeModel: 'free' }));
+    // 未知の feeModel は digest が合っていても読まない (別の判定に化けさせない)。digest を 'free' で取り直すので、
+    // 拒否は値の検査によるもの (digest 不一致ではない)。
+    const freeDigest = createHash('sha256')
+      .update(JSON.stringify({ identity: record.identity, snapshot: record.snapshot, tuple: record.tuple, feeConfig: record.feeConfig, feeModel: 'free' }))
+      .digest('hex');
+    h.db!.strings.set(key, JSON.stringify({ ...record, feeModel: 'free', digest: freeDigest }));
     expect((await readAgentOrderReservation(key)).kind).toBe('conflict');
+    // feeModel は digest に入っている: 消しても x402 の digest のままでは読まない (旧い手数料判定へ黙って落とさない)。
+    const { feeModel: _removed, ...stripped } = record;
+    h.db!.strings.set(key, JSON.stringify(stripped));
+    expect((await readAgentOrderReservation(key)).kind).toBe('conflict');
+  });
+
+  it('re-reserving the same payment over a pre-feeModel reservation matches it (no conflict / 402) and keeps the old record', async () => {
+    await beginPending(); const key = reservationKeys()[0]; const record = JSON.parse(h.db!.strings.get(key)!);
+    const { feeModel: _dropped, ...legacy } = record;
+    legacy.digest = createHash('sha256')
+      .update(JSON.stringify({ identity: legacy.identity, snapshot: legacy.snapshot, tuple: legacy.tuple, feeConfig: legacy.feeConfig }))
+      .digest('hex');
+    const legacyRaw = JSON.stringify(legacy);
+    h.db!.strings.set(key, legacyRaw);
+    const { reserveAgentOrder } = await import('@/lib/order/agentOrderReservation');
+    const input = { identity: record.identity, snapshot: record.snapshot, facilitatorBody: record.facilitatorBody, feeConfig: record.feeConfig, feeModel: 'x402' as const };
+    const again = await reserveAgentOrder(input);
+    expect(again.kind).toBe('match');
+    if (again.kind === 'match') expect(again.reservation.record.feeModel).toBeUndefined();
+    expect(h.db!.strings.get(key)).toBe(legacyRaw);
+    // 内容が違えば従来どおり conflict
+    expect(await reserveAgentOrder({ ...input, snapshot: { ...input.snapshot, items: [{ ...input.snapshot.items[0], name: 'replacement' }] } })).toEqual({ kind: 'conflict' });
   });
 
   it('reservation Lua validates key types before writing an orphan reservation', async () => {

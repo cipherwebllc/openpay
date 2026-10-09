@@ -165,7 +165,7 @@ const RESERVE = [
   "for i=1,3 do local t=redis.call('TYPE',KEYS[i]).ok; if t~='none' and t~='string' then return {-2,''} end end",
   "local indexed=redis.call('GET',KEYS[2]); if indexed and indexed~=KEYS[1] then return {-1,''} end",
   "local current=redis.call('GET',KEYS[1])",
-  "if current then local ok,r=pcall(cjson.decode,current); if not ok or type(r)~='table' or r.digest~=ARGV[2] then return {-1,''} end; return {0,current} end",
+  "if current then local ok,r=pcall(cjson.decode,current); if not ok or type(r)~='table' or (r.digest~=ARGV[2] and r.digest~=ARGV[5]) then return {-1,''} end; return {0,current} end",
   "if indexed then return {-2,''} end",
   "local ttl=tonumber(ARGV[3]); if not ttl or ttl<=0 then return {-2,''} end",
   "redis.call('SET',KEYS[1],ARGV[1],'EX',ttl)",
@@ -241,10 +241,13 @@ export async function reserveAgentOrder(input: {
   };
   const raw = JSON.stringify(record);
   const owner = randomBytes(32).toString('hex');
+  // feeModel を足す前に作られた同じ内容の予約は、その digest (feeModel なし) のまま同一とみなして返す
+  // (再予約が conflict = 402 に化けない・旧予約は旧い手数料判定のまま・第 7 回レビュー B2 の互換読み)。
+  const legacyDigest = digestFor(input.identity, input.snapshot, tuple, input.feeConfig);
   const result = await kvEval<[number, string]>(
     RESERVE,
     [key, bindingKey(input.identity), attemptKey(key)],
-    [raw, record.digest, String(AGENT_RESERVATION_TTL_SEC), owner],
+    [raw, record.digest, String(AGENT_RESERVATION_TTL_SEC), owner, legacyDigest],
   );
   if (!result.ok || !result.value || result.value[0] === -2) {
     // A lost reserve ack must not strand an unused payment. This request has not broadcast;

@@ -2,6 +2,13 @@
 import { afterAll, describe, expect, it, vi } from 'vitest';
 import { closeRedisLuaEngine, runRedisLua } from '../../_helpers/redisLua';
 import { h, PAYER, UNIT, NOW, TX, pay, notify, listKey, orders, reservationKeys, request, publicRequest, transfer, authorization, beginPending, drain } from './agentOrderFixture';
+
+// 下限 (B1) を入れる前に作られた予約を再現するため、受注の最低着金だけを差し替えられるようにする (既定は実値)。
+const floor = vi.hoisted(() => ({ wei: null as bigint | null }));
+vi.mock('@/lib/orderRelay', async (original) => {
+  const actual = await original<typeof import('@/lib/orderRelay')>();
+  return { ...actual, get ORDER_DUST_FLOOR_WEI() { return floor.wei ?? actual.ORDER_DUST_FLOOR_WEI; } };
+});
 afterAll(closeRedisLuaEngine);
 
 describe('A2b persistence and compatibility (real Lua)', () => {
@@ -75,6 +82,24 @@ describe('A2b persistence and compatibility (real Lua)', () => {
     expect(await res.json()).toMatchObject({ error: 'order_below_minimum' });
     expect(reservationKeys()).toEqual([]);
     expect(h.settle).not.toHaveBeenCalled();
+  });
+
+  it('a pre-floor reservation below 1 JPYC is refused on its proven-unsent retry (never settles into an unregistered order)', async () => {
+    h.shop = { ...h.shop!, storefront: { ...(h.shop!.storefront as Record<string, unknown>), menu: [{ id: 'food', name: 'candy', price: '0.5' }] } };
+    floor.wei = 0n;
+    try {
+      // 下限が無かったころ: 予約され、settle が送信前に断られて (429) 再試行できる状態で残る。
+      h.settle.mockResolvedValueOnce(Response.json({ success: false, errorReason: 'rate_limited' }, { status: 429 }));
+      expect((await pay.GET(request())).status).toBe(429);
+    } finally {
+      floor.wei = null;
+    }
+    expect(reservationKeys()).toHaveLength(1);
+    const res = await pay.GET(request());
+    expect(res.status).toBe(422);
+    expect(await res.json()).toMatchObject({ error: 'order_below_minimum' });
+    expect(h.verify).toHaveBeenCalledTimes(1); expect(h.settle).toHaveBeenCalledTimes(1);
+    expect(orders()).toEqual([]);
   });
 
   it('agent list retains 200 newest orders with a sliding 72-hour TTL', async () => {

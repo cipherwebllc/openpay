@@ -294,6 +294,12 @@ async function recoverMatchedPayment(input: {
   if (reservation && record.state !== 'settled') {
     const owner = await claimAgentOrderRetry(reservation);
     if (owner) {
+      // 下限 (B1) を入れる前に予約された 1 JPYC 未満の注文は、支払うと受注が残らない。未送信が確定した
+      // 再試行でだけ断る (送った可能性がある・成立済みの復旧応答は下の従来どおり)。
+      if (BigInt(snapshot.totalMinor) < ORDER_DUST_FLOOR_WEI) {
+        await releaseAgentOrderAttempt(reservation, owner);
+        return NextResponse.json({ error: 'order_below_minimum' }, { status: 422 });
+      }
       // Only a proven pre-broadcast rejection resumes settlement. Use the saved binding,
       // never today's menu/handle; an ambiguous prior attempt remains status-only.
       const verifyRes = await verifyPayment(
