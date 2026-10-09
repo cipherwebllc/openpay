@@ -11,6 +11,8 @@
 //      範囲外 (= 新規 partial silent skip。regression 検知用 fence)
 //   4. ディスク上の tests/**/*.test.{ts,tsx} のうち reporter に 1 件も現れないファイルがある
 //      (= collection 前に worker が死んだ / 誤除外。3. は test 数ベースなのでこの経路を見逃す)
+//   5. RUN_TESTS_COVERAGE=1 のとき、coverage-summary.json が無い・下限
+//      (scripts/lib/coverageThresholds.mjs) を割る (CI は full vitest を coverage 付きの 1 回だけ走らせる)
 //
 // KNOWN_BROKEN_FILES: worker OOM 等で collect 後に run されないファイルを file→期待 missing
 // test 数の Map で登録する暫定 allowlist。KNOWN_MAX_MISSING はこの Map から導出するので、
@@ -33,6 +35,7 @@ import {
   normalizeReportedFiles,
 } from './lib/testFileFence.mjs';
 import { LUA_REAL_TEST_FILES } from './lib/luaRealTests.mjs';
+import { COVERAGE_THRESHOLDS } from './lib/coverageThresholds.mjs';
 
 // 既知の worker-OOM 等で未 run のファイル → 期待 missing test 数 (Map)。空 = 全ファイル run 前提
 // (missing が 1 件でも出れば fail)。ここに足す操作は PR レビューで明示同意が必要。
@@ -56,6 +59,31 @@ const jsonOut = join(tmp, 'result.json');
 
 // CLI から渡された追加引数 (path / -t 等の絞り込み)。空 = full run。
 const extraArgs = process.argv.slice(2);
+// CI: full vitest を coverage 付きの 1 回にまとめる (第 7 回レビュー E13・以前は coverage なし + coverage の 2 回)。
+const withCoverage = process.env.RUN_TESTS_COVERAGE === '1';
+const coverageSummary = join(process.cwd(), 'coverage', 'coverage-summary.json');
+if (withCoverage) rmSync(coverageSummary, { force: true });
+
+// coverage の要約を下限と比べる (無い・読めない・下限割れは fail)。vitest の終了コードに任せない理由は
+// scripts/lib/coverageThresholds.mjs の冒頭。
+function checkCoverage() {
+  let total;
+  try {
+    total = JSON.parse(readFileSync(coverageSummary, 'utf8')).total;
+  } catch {
+    console.error(`[run-tests] FAIL: coverage の要約 (${coverageSummary}) が読めない`);
+    return false;
+  }
+  let ok = true;
+  for (const [metric, min] of Object.entries(COVERAGE_THRESHOLDS)) {
+    const pct = total?.[metric]?.pct;
+    const pass = typeof pct === 'number' && pct >= min;
+    console.log(`[run-tests] coverage ${metric}: ${pct}% (下限 ${min}%) ${pass ? 'ok' : 'NG'}`);
+    if (!pass) ok = false;
+  }
+  if (!ok) console.error('[run-tests] FAIL: coverage が下限を割った (テストの無い分岐が増えた)');
+  return ok;
+}
 
 const args = [
   '--max-old-space-size=6144',
@@ -67,6 +95,7 @@ const args = [
   '--reporter=default',
   '--reporter=json',
   `--outputFile=${jsonOut}`,
+  ...(withCoverage ? ['--coverage'] : []),
   ...(skipLuaReal && extraArgs.length === 0
     ? LUA_REAL_TEST_FILES.flatMap((f) => ['--exclude', f])
     : []),
@@ -190,7 +219,7 @@ child.on('exit', (code) => {
           '(testResults entry が空)。stdout 上の "Errors N errors" に相当。',
       );
     }
-    process.exit(0);
+    process.exit(withCoverage && !checkCoverage() ? 1 : 0);
   }
   if (code !== 0) {
     console.warn(
@@ -198,5 +227,5 @@ child.on('exit', (code) => {
         '全 assertion 数 (passed+failed) が total と一致しているため exit 0 で扱う。',
     );
   }
-  process.exit(0);
+  process.exit(withCoverage && !checkCoverage() ? 1 : 0);
 });

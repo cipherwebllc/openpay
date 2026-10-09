@@ -42,7 +42,7 @@ describe('GitHub Actions operation guards', () => {
     const source = workflow('ci.yml');
     const typecheck = source.indexOf('- run: npm run typecheck');
     const lint = source.indexOf('- run: npm run lint');
-    const tests = source.indexOf('- run: node scripts/run-tests.mjs');
+    const tests = source.indexOf('run: node scripts/run-tests.mjs');
 
     expect(typecheck).toBeGreaterThan(-1);
     expect(lint).toBeGreaterThan(typecheck);
@@ -51,7 +51,7 @@ describe('GitHub Actions operation guards', () => {
 
   it('CI は SDK の node:test (保護配布 verifier・license gate) を test job で実行する', () => {
     const source = workflow('ci.yml');
-    const tests = source.indexOf('- run: node scripts/run-tests.mjs');
+    const tests = source.indexOf('run: node scripts/run-tests.mjs');
     const sdk = source.indexOf('run: npm --prefix packages/x402-sdk test');
     expect(sdk).toBeGreaterThan(tests);
     // SDK の step 全体 (name から次の step まで) に continue-on-error を付けさせない (run の後ろに付けても検出する)。
@@ -106,16 +106,31 @@ describe('GitHub Actions operation guards', () => {
   // 一覧 (scripts/lib/luaRealTests.mjs) と ci.yml・実ファイルのドリフトをここで止める。
   it('CI は Lua 実行系 test を test job から外し lua-real job で再試行する', () => {
     const source = workflow('ci.yml');
-    const testsStep = source.indexOf('- run: node scripts/run-tests.mjs');
+    const testsStep = source.indexOf('run: node scripts/run-tests.mjs');
     expect(source.slice(testsStep, testsStep + 200)).toContain("SKIP_LUA_REAL: '1'");
     expect(source).toContain('lua-real:');
     expect(source).toContain('- run: node scripts/run-lua-tests.mjs');
     // worker 無応答で job がぶら下がらないよう job 側の上限を必須にする (2026-09-12 実害)
     const luaJob = source.slice(source.indexOf('lua-real:'), source.indexOf('- run: node scripts/run-lua-tests.mjs'));
     expect(luaJob).toMatch(/timeout-minutes: \d+/);
-    // Coverage step の --exclude は一覧と過不足なく一致する
-    const excluded = [...source.matchAll(/--exclude (tests\/\S+)/g)].map((m) => m[1]).sort();
-    expect(excluded).toEqual([...LUA_REAL_TEST_FILES].sort());
+    // full vitest は coverage 付きの 1 回だけ (第 7 回レビュー E13)。除外は run-tests.mjs が luaRealTests.mjs から付けるので、
+    // ci.yml に別の vitest 実行 (手書きの --exclude 一覧) を持たない。
+    expect(source.slice(testsStep, testsStep + 200)).toContain("RUN_TESTS_COVERAGE: '1'");
+    expect(source).not.toMatch(/vitest run --coverage/);
+    expect([...source.matchAll(/--exclude (tests\/\S+)/g)]).toHaveLength(0);
+  });
+
+  it('run-tests.mjs は coverage の下限を共有の値で判定し、要約が無い・下限割れを fail にする (終了コード任せにしない)', () => {
+    const runner = readFileSync(resolve(process.cwd(), 'scripts/run-tests.mjs'), 'utf8');
+    expect(runner).toContain("from './lib/coverageThresholds.mjs'");
+    expect(runner).toContain("process.env.RUN_TESTS_COVERAGE === '1'");
+    // 成功で終わるすべての出口で coverage を確かめる
+    const exits = [...runner.matchAll(/process\.exit\(([^)]*)\)/g)].map((m) => m[1]);
+    expect(exits.filter((e) => e.trim() === '0')).toHaveLength(0);
+    const config = readFileSync(resolve(process.cwd(), 'vitest.config.ts'), 'utf8');
+    expect(config).toContain('thresholds: { ...COVERAGE_THRESHOLDS }');
+    expect(config).toContain("'json-summary'");
+    expect(LUA_REAL_TEST_FILES.length).toBeGreaterThan(0);
   });
 
   it('Lua 実行系 test の一覧は wasmoon / redisLua ハーネスを import する test ファイルと一致する', () => {
