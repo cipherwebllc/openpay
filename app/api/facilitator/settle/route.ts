@@ -7,7 +7,7 @@
 //
 // 受領証明 (receipt) の署名・添付は X4 (lib/x402/receipt) で success 分岐に配線する。
 
-import { recordMetric } from '@/lib/metrics';
+import { recordMetricAfterResponse } from '@/lib/metrics';
 import { NextResponse } from 'next/server';
 import { env } from '@/lib/env';
 import { isKvConfigured } from '@/lib/kv';
@@ -230,8 +230,8 @@ export async function POST(req: Request): Promise<NextResponse> {
           error: e instanceof Error ? e.message : String(e),
         });
       }
-      // 月次メトリクス (運営ヒント・fail-quiet)。
-      void recordMetric('x402_settle');
+      // 月次メトリクス (運営ヒント・fail-quiet)。応答後に after() で完了させる (第 7 回レビュー F9)。
+      recordMetricAfterResponse('x402_settle');
       // 運営台帳 (誰が・どの商品を・いくらで)。resource は要求の paymentRequirements.resource を
       // そのまま写す (検証対象ではない表示用・無ければ空)。応答返却後・no-throw (掟 12/13)。
       const requirements = isObj(rawRecord.paymentRequirements) ? rawRecord.paymentRequirements : {};

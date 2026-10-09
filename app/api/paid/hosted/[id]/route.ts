@@ -191,15 +191,17 @@ async function settledContentResponse(input: {
       if (healed.kind === 'finalized') {
         // heal で初めて確定した購入も同じ付帯処理 (idempotent は増えない/飛ばない)。
         const healedIntent = healed.intent;
-        scheduleAfterResponse(() => {
-          void recordHostedPurchase(healedIntent.resourceId);
-          void recordMetric('store_purchase');
-          void notifyPaymentReceived(
-            healedIntent.merchant,
-            'store',
-            formatJpycYenLabel(BigInt(healedIntent.merchantValue)),
-          );
-        });
+        scheduleAfterResponse(() =>
+          Promise.allSettled([
+            recordHostedPurchase(healedIntent.resourceId),
+            recordMetric('store_purchase'),
+            notifyPaymentReceived(
+              healedIntent.merchant,
+              'store',
+              formatJpycYenLabel(BigInt(healedIntent.merchantValue)),
+            ),
+          ]),
+        );
       }
       access = await readSettledPurchaseAccess(
         input.intent.intentSalt,
@@ -808,15 +810,17 @@ async function submittedPaymentResponse(input: {
     // 初回確定のみの付帯処理 (応答後・掟 12・いずれも no-throw = 掟 13):
     // ①表示専用の購入数カウンタ ②出品者への「商品が売れました」push (opt-in 購読者のみ)。
     const soldIntent = finalized.intent;
-    scheduleAfterResponse(() => {
-      void recordHostedPurchase(soldIntent.resourceId);
-      void recordMetric('store_purchase');
-      void notifyPaymentReceived(
-        soldIntent.merchant,
-        'store',
-        formatJpycYenLabel(BigInt(soldIntent.merchantValue)),
-      );
-    });
+    scheduleAfterResponse(() =>
+      Promise.allSettled([
+        recordHostedPurchase(soldIntent.resourceId),
+        recordMetric('store_purchase'),
+        notifyPaymentReceived(
+          soldIntent.merchant,
+          'store',
+          formatJpycYenLabel(BigInt(soldIntent.merchantValue)),
+        ),
+      ]),
+    );
   }
   if (finalized.intent.metadata.productKind === 'license') {
     // mint の RPC/KV/after 登録の失敗を、確定済み決済の応答へ波及させない。

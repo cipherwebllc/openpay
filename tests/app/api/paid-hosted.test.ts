@@ -1059,6 +1059,24 @@ describe('R2 hosted JPYC response pinning', () => {
     expect(routeMocks.notify).toHaveBeenCalledWith(SELLER, 'store', '¥5');
   });
 
+  it('the scheduled task returns a promise that settles only after the count, metric and push all finish (after() keeps them alive)', async () => {
+    let finishPurchase!: () => void;
+    routeMocks.recordPurchase.mockReturnValue(new Promise<void>((resolve) => { finishPurchase = resolve; }));
+    routeMocks.metric.mockResolvedValue(undefined);
+    routeMocks.notify.mockResolvedValue(undefined);
+    const route = await loadRoute();
+    expect((await callHosted(route, path, { 'X-PAYMENT': paymentHeader() })).status).toBe(200);
+    const result = routeMocks.after.mock.calls[0]![0]() as unknown;
+    expect(result).toBeInstanceOf(Promise);
+    let settled = false;
+    void (result as Promise<unknown>).then(() => { settled = true; });
+    await Promise.resolve(); await Promise.resolve();
+    expect(settled).toBe(false); // 購入数の書き込みが終わるまで after() は環境を保つ
+    finishPurchase();
+    await result;
+    expect(settled).toBe(true);
+  });
+
   it.each(['scheduled', 'fallback'] as const)('does not catch or retry a task failure in %s execution', async (mode) => {
     const failure = new Error('task is expected to be no-throw');
     routeMocks.recordPurchase.mockImplementation(() => { throw failure; });
