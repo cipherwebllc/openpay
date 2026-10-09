@@ -53,14 +53,37 @@ describe('useResolveAddress', () => {
     expect(resolveAddress).toHaveBeenCalledWith('vitalik.eth');
   });
 
-  it('失敗: error に Error が入る、retry はオフ (queryFn は 1 回のみ)', async () => {
-    resolveAddress.mockRejectedValue(new Error('foo.eth は登録されていません'));
+  it('確定した失敗 (登録されていない = ResolveAddressError) は再試行しない (queryFn は 1 回のみ)', async () => {
+    const { ResolveAddressError } = await import('@/lib/resolveAddressError');
+    resolveAddress.mockRejectedValue(new ResolveAddressError('foo.eth は登録されていません'));
     const { result } = renderHook(() => useResolveAddress('foo.eth'), {
       wrapper: makeWrapper(),
     });
     await waitFor(() => expect(result.current.isError).toBe(true));
     expect(result.current.error?.message).toMatch(/登録されていません/);
     expect(resolveAddress).toHaveBeenCalledOnce();
+  });
+
+  // 第 7 回レビュー #766 の持ち越し: RPC / CCIP の一時的な失敗 1 回で、会計中の QR を閉じない。
+  it('一時的な失敗 (RPC 等) は 1 回だけ再試行し、2 回目に解決できれば error にしない', async () => {
+    resolveAddress
+      .mockRejectedValueOnce(new Error('HTTP request failed'))
+      .mockResolvedValueOnce({ address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', name: 'shop.eth' });
+    const { result } = renderHook(() => useResolveAddress('shop.eth'), {
+      wrapper: makeWrapper(),
+    });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true), { timeout: 3_000 });
+    expect(resolveAddress).toHaveBeenCalledTimes(2);
+    expect(result.current.error).toBeNull();
+  });
+
+  it('一時的な失敗が続けば 2 回で error (再試行は 1 回まで)', async () => {
+    resolveAddress.mockRejectedValue(new Error('HTTP request failed'));
+    const { result } = renderHook(() => useResolveAddress('shop.eth'), {
+      wrapper: makeWrapper(),
+    });
+    await waitFor(() => expect(result.current.isError).toBe(true), { timeout: 3_000 });
+    expect(resolveAddress).toHaveBeenCalledTimes(2);
   });
 
   it('queryKey は trim + lowercase で同一化される (大文字/空白違いはキャッシュヒット)', async () => {

@@ -34,10 +34,12 @@ vi.mock('@/lib/env', async (importOriginal) => {
   };
 });
 // 対象のチェーン = forwarder を設定したチェーン (Amoy・Kairos)。
+// fwdHold.none = どのチェーンにも forwarder が無い (無料のガスレス) を再現する。
+const fwdHold = vi.hoisted(() => ({ none: false }));
 vi.mock('@/lib/relay/forwarderConfig', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/relay/forwarderConfig')>()),
   jpycForwarderFor: (chainId: number) =>
-    chainId === 80002 || chainId === 1001 ? '0x752B7AaD0089286EB7b553d84D05233d80c9FCB4' : null,
+    !fwdHold.none && (chainId === 80002 || chainId === 1001) ? '0x752B7AaD0089286EB7b553d84D05233d80c9FCB4' : null,
 }));
 // QR の中身 (URL) を読む (お店負担の QR は URL を画面に出さないため)。
 vi.mock('qrcode.react', () => ({
@@ -473,6 +475,23 @@ describe('QrGenerator × お店の端末で送る (flag ON)', () => {
       await user.type(await screen.findByPlaceholderText('10.00'), '5');
       expect(await screen.findByRole('button', { name: '通常の QR を出す' })).toBeTruthy();
       expect(screen.queryByText('通常の QR は OpenPay 利用料が店舗負担でかかります。')).toBeNull();
+    });
+
+    // Fable 最終監査 (#758) の持ち越し: 利用料の一文は開示 (RecoverFeeNotice) と同じ条件 (JPYC かつ forwarder あり)。
+    // forwarder の無いチェーンの JPYC の通常の QR は無料のガスレスなので「利用料がかかります」と言わない。
+    it('JPYC でも forwarder の無いチェーンなら、通常の QR に利用料の一文を付けない', async () => {
+      const user = userEvent.setup();
+      fwdHold.none = true;
+      try {
+        seed();
+        sd.state = { phase: 'create_failed', reason: 'unavailable' };
+        render(<QrGenerator />);
+        await user.type(await screen.findByPlaceholderText('1,000'), '5');
+        expect(await screen.findByRole('button', { name: '通常の QR を出す' })).toBeTruthy();
+        expect(screen.queryByText('通常の QR は OpenPay 利用料が店舗負担でかかります。')).toBeNull();
+      } finally {
+        fwdHold.none = false;
+      }
     });
 
     it('作れなかった後でも、金額を消したら「通常の QR を出す」は出さない (後の入力で QR が勝手に開かない)', async () => {

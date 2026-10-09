@@ -244,6 +244,9 @@ function RegisterModeContent({
     resolveJpycGaslessProvider(deployment, deployment.chainId) ===
       'eip3009-relay' &&
     jpycForwarderFor(deployment.chainId) === null;
+  // 通常の QR に OpenPay 利用料 (店舗負担・回収) が掛かるか。RecoverFeeNotice (buildRecoverFeeDisplay) と同じ条件
+  // (JPYC かつそのチェーンに forwarder がある) にして、開示と「利用料がかかります」の一文がずれないようにする。
+  const normalQrHasFee = settings.token === 'jpyc' && jpycForwarderFor(deployment.chainId) !== null;
   const isJpycRecover =
     settings.payMode === 'gasless' &&
     settings.token === 'jpyc' &&
@@ -675,7 +678,8 @@ function RegisterModeContent({
       onReissue={() => void reissueStoreQr()}
       onShowNormal={checkoutUrl ? () => void showNormalQr() : undefined}
       // JPYC の通常の QR は回収 (OpenPay 利用料・店舗負担)。USDC の通常の QR には OpenPay の利用料がかからない。
-      normalQrFeeNote={settings.token === 'jpyc' ? t('storeDevice.normalQrFeeNote') : undefined}
+      // 通常の QR に利用料 (店舗負担) が掛かるのは JPYC の回収経路 (forwarder あり) のときだけ (開示と同じ条件)。
+      normalQrFeeNote={normalQrHasFee ? t('storeDevice.normalQrFeeNote') : undefined}
       onDismiss={device.dismiss}
     />
   );
@@ -1035,8 +1039,8 @@ function RegisterModeContent({
                 {sdSaleBlocked && (
                   <p role="status" className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900">
                     {t(`storeDevice.saleBlocked.${sdSaleBlocked}`, { chain: storeDeviceChainNames(sdChainIds) })}{' '}
-                    {/* JPYC の通常の QR は回収 (OpenPay 利用料・店舗負担) なので、その旨を添える (第 7 回レビュー D4)。 */}
-                    {settings.token === 'jpyc' ? t('storeDevice.saleBlockedHintFee') : t('storeDevice.saleBlockedHint')}
+                    {/* 通常の QR が回収 (OpenPay 利用料・店舗負担) のときだけ、その旨を添える (第 7 回レビュー D4・条件は開示と同じ)。 */}
+                    {normalQrHasFee ? t('storeDevice.saleBlockedHintFee') : t('storeDevice.saleBlockedHint')}
                   </p>
                 )}
                 {/* 切替を OFF にしても、送っている・結果を待っている支払いの表示は残す (次の QR を出せない理由)。 */}

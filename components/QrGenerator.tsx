@@ -259,6 +259,11 @@ export function QrGenerator() {
   // 固定・per-QR 負担者トグルは撤去) になる。よってトグルを隠し gasMode を merchant に強制する
   // (URL params・読み戻しサマリ・RecoverFeeNotice すべて)。USDC や他トークンの recover では
   // トグルを従来どおり出す (この flag は JPYC かつ forwarder 設定済のときだけ true)。
+  // 通常の QR に OpenPay 利用料 (店舗負担・回収) が掛かるか。RecoverFeeNotice (buildRecoverFeeDisplay) と同じ条件
+  // (JPYC かつそのチェーンに forwarder がある) にして、開示と「利用料がかかります」の一文がずれないようにする。
+  const normalQrHasFee =
+    settings.token === 'jpyc' &&
+    jpycForwarderFor(deploymentForSlug(settings.token, settings.chain).chainId) !== null;
   const isJpycRecover = useMemo(() => {
     if (isStandard || splitsForUrl || settings.token !== 'jpyc') return false;
     const dep = deploymentForSlug(settings.token, settings.chain);
@@ -972,7 +977,8 @@ export function QrGenerator() {
                 onClick: () => void showNormalQr(),
                 // JPYC の通常の QR は回収 (OpenPay 利用料・店舗負担・第 7 回レビュー D4)。作れなかった後に USDC に
                 // 切り替えた会計の通常の QR には OpenPay の利用料がかからないので付けない。
-                ...(settings.token === 'jpyc' ? { note: t('storeDevice.normalQrFeeNote') } : {}),
+                // 利用料の一文は、通常の QR が回収 (forwarder あり) のときだけ (RecoverFeeNotice と同じ条件)。
+                ...(normalQrHasFee ? { note: t('storeDevice.normalQrFeeNote') } : {}),
               },
             }
           : {})}
@@ -1087,7 +1093,7 @@ export function QrGenerator() {
                     onRetry={device.retry}
                     onReissue={() => void reissueStoreQr()}
                     onShowNormal={() => void showNormalQr()}
-                    {...(settings.token === 'jpyc' ? { normalQrFeeNote: t('storeDevice.normalQrFeeNote') } : {})}
+                    {...(normalQrHasFee ? { normalQrFeeNote: t('storeDevice.normalQrFeeNote') } : {})}
                     onDismiss={device.dismiss}
                   />
                 )}
