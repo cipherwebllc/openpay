@@ -208,6 +208,16 @@ function isMark(v: unknown): v is DeviceSentMark {
   );
 }
 
+// このタブで書いて読み戻しで確かめた印 (消した印は除く)。送信は印を残してから送るので、送信の後に端末の保存領域が
+// 読めなくなっても、この写しで「送った可能性がある」を取りこぼさない (読めない = 印なし と取り違えて「送っていない」と
+// 言い、同じ会計を二重に払わせる波及を断つ・第 7 回レビュー #762)。
+const writtenThisTab = new Map<string, DeviceSentMark>();
+
+/** このタブで書いた (まだ消していない) この署名 (nonce) の印。無ければ null。 */
+export function sentMarkWrittenThisTab(nonce: string): DeviceSentMark | null {
+  return writtenThisTab.get(nonce.toLowerCase()) ?? null;
+}
+
 /** 印の一覧。読み取りの失敗は ok: false (「印なし」と区別する: 失敗を印なしと読むと二度送りうる)。 */
 export function readSentMarks(): { ok: true; marks: DeviceSentMark[] } | { ok: false } {
   let raw: string | null;
@@ -238,7 +248,9 @@ export function addSentMark(mark: DeviceSentMark, nowMs: number): boolean {
     return false;
   }
   const back = readSentMarks();
-  return back.ok && back.marks.some((m) => m.hash.toLowerCase() === mark.hash.toLowerCase());
+  const saved = back.ok && back.marks.some((m) => m.hash.toLowerCase() === mark.hash.toLowerCase());
+  if (saved) writtenThisTab.set(mark.nonce.toLowerCase(), mark);
+  return saved;
 }
 
 /** 届かなかったと確かめた送信の印を消す (消せなければ false = 「送ったかもしれない」のまま)。 */
@@ -254,7 +266,11 @@ export function removeSentMark(hash: Hex): boolean {
     return false;
   }
   const back = readSentMarks();
-  return back.ok && !back.marks.some((m) => m.hash.toLowerCase() === hash.toLowerCase());
+  const removed = back.ok && !back.marks.some((m) => m.hash.toLowerCase() === hash.toLowerCase());
+  if (removed) {
+    for (const [nonce, m] of writtenThisTab) if (m.hash.toLowerCase() === hash.toLowerCase()) writtenThisTab.delete(nonce);
+  }
+  return removed;
 }
 
 // ---------------------------------------------------------------------------

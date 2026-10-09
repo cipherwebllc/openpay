@@ -609,9 +609,14 @@ export function useStoreDeviceRegister(input: StoreDeviceRegisterInput) {
         // 送っています」のまま止めない (次の QR・通常の QR・閉じる操作を止め続けない・受け渡しは retire 済み)。
         // 送った可能性がある支払いを「送っていない」とは言わない: 送信は印を残してから送る (lib/storeDeviceSend) ので、
         // この署名の印があれば結果が分からない (unknown) としてサーバの判定を待ち、印の前 (印が無い) なら送っていない。
+        // 端末の保存領域が読めない (ok: false) ときも「印なし」とは読まない: このタブで書いた印の写しも見る
+        // (送信は印を書いて読み戻してから送るので、写しが無ければ送っていない・第 7 回レビュー #762 Codex P1)。
         const mark =
           sentMark ??
-          (sendCalled && sendMod ? findSentMark(sendMod.readSentMarks(), view.auth.nonce) : null);
+          (sendCalled && sendMod
+            ? findSentMark(sendMod.readSentMarks(), view.auth.nonce) ??
+              sendMod.sentMarkWrittenThisTab(view.auth.nonce)
+            : null);
         if (mark) {
           const cur = stateRef.current;
           // 結果 (入金の確認など) を出した後の例外なら、その表示のまま。

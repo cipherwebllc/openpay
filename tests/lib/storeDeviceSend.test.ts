@@ -36,6 +36,8 @@ import {
   addSentMark,
   createDeviceIo,
   readSentMarks,
+  removeSentMark,
+  sentMarkWrittenThisTab,
   receiptHasSettlement,
   sendStoreDeviceSettle,
   verifyDeviceAuth,
@@ -284,6 +286,24 @@ describe('sendStoreDeviceSettle (二重に送らない・鍵は送る直前に)'
     window.localStorage.setItem(STORE_DEVICE_SENT_KEY, JSON.stringify([old]));
     expect(addSentMark({ ...old, nonce: `0x${'04'.repeat(32)}`, hash: HASH, at: 3_600_001 }, 3_600_001)).toBe(true);
     expect(readSentMarks()).toMatchObject({ ok: true, marks: [{ hash: HASH }] });
+  });
+
+  // #762: 送信の後に端末の保存領域が読めなくなっても「送った可能性」を取りこぼさないよう、このタブで書いた印の写しを持つ。
+  it('このタブで書いて確かめた印は、保存領域が読めなくなっても nonce で引ける・消した印は引けない', () => {
+    const mark: DeviceSentMark = {
+      handoffId: 'x', chainId: CHAIN, nonce: `0x${'0a'.repeat(32)}`, hash: `0x${'0b'.repeat(32)}`, from: customer.address,
+      merchant: SHOP, amount: '1', validBefore: '1', intentSalt: `0x${'0c'.repeat(32)}`, at: 1,
+    };
+    expect(addSentMark(mark, 1)).toBe(true);
+    const getItem = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new Error('denied'); });
+    try {
+      expect(readSentMarks()).toEqual({ ok: false });
+      expect(sentMarkWrittenThisTab(mark.nonce.toUpperCase().replace('0X', '0x'))).toEqual(mark);
+    } finally {
+      getItem.mockRestore();
+    }
+    expect(removeSentMark(mark.hash)).toBe(true);
+    expect(sentMarkWrittenThisTab(mark.nonce)).toBeNull();
   });
 });
 

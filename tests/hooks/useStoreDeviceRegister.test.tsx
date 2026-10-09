@@ -6,6 +6,7 @@ const send = vi.hoisted(() => ({
   verifyDeviceAuth: vi.fn(),
   sendStoreDeviceSettle: vi.fn(),
   readSentMarks: vi.fn(),
+  sentMarkWrittenThisTab: vi.fn(),
   receiptHasSettlement: vi.fn(),
   waitReceipt: vi.fn(),
   getReceipt: vi.fn(),
@@ -16,6 +17,7 @@ vi.mock('@/lib/storeDeviceSend', () => ({
   verifyDeviceAuth: send.verifyDeviceAuth,
   sendStoreDeviceSettle: send.sendStoreDeviceSettle,
   readSentMarks: send.readSentMarks,
+  sentMarkWrittenThisTab: send.sentMarkWrittenThisTab,
   receiptHasSettlement: send.receiptHasSettlement,
   createDeviceIo: send.createDeviceIo,
   createDeviceWatchIo: send.createDeviceWatchIo,
@@ -101,6 +103,7 @@ beforeEach(() => {
   send.verifyDeviceAuth.mockReset().mockResolvedValue({ ok: true, value: { params: {}, signature: '0x', nonce: NONCE } });
   send.sendStoreDeviceSettle.mockReset().mockResolvedValue({ kind: 'sent', hash: HASH, mark: MARK });
   send.readSentMarks.mockReset().mockReturnValue({ ok: true, marks: [MARK] });
+  send.sentMarkWrittenThisTab.mockReset().mockReturnValue(null);
   send.receiptHasSettlement.mockReset().mockReturnValue(true);
   send.waitReceipt.mockReset().mockResolvedValue({ status: 'success', logs: [] });
   send.getReceipt.mockReset().mockResolvedValue({ status: 'success', logs: [] });
@@ -1449,6 +1452,30 @@ describe('useStoreDeviceRegister: 店の tx の revert・判定が返す tx・�
     await advance(3_000);
     expect(result.current.state).toEqual({ phase: 'not_sent', reason: 'rpc', canRetry: true });
     expect(result.current.busy).toBe(false);
+  });
+
+  // #762 Codex P1: 送信の例外の後に端末の保存領域が読めない (ok: false) のを「印なし」と読むと、送った可能性があるのに
+  // 「お支払いは行われていません」を出して次の QR を許し、同じ会計を二重に払わせうる。このタブで書いた印の写しを見る。
+  it('#762: 送信の中の例外の後に印を読めなくても、このタブで書いた印があれば「送っていない」と言わない (unknown)', async () => {
+    send.sendStoreDeviceSettle.mockRejectedValueOnce(new Error('boom'));
+    send.readSentMarks.mockReturnValue({ ok: false });
+    send.sentMarkWrittenThisTab.mockImplementation((nonce: string) => (nonce.toLowerCase() === MARK.nonce.toLowerCase() ? MARK : null));
+    readRes = signed;
+    const { result } = renderHook(() => useStoreDeviceRegister(input));
+    await started(result);
+    await advance(3_000);
+    expect(result.current.state).toEqual({ phase: 'unknown', mark: MARK, previous: false });
+    expect(result.current.busy).toBe(true);
+  });
+
+  it('#762: 印を読めず、このタブで書いた印も無い (= 印を書く前に止まった) なら送っていない (not_sent)', async () => {
+    send.sendStoreDeviceSettle.mockRejectedValueOnce(new Error('boom'));
+    send.readSentMarks.mockReturnValue({ ok: false });
+    readRes = signed;
+    const { result } = renderHook(() => useStoreDeviceRegister(input));
+    await started(result);
+    await advance(3_000);
+    expect(result.current.state).toEqual({ phase: 'not_sent', reason: 'rpc', canRetry: true });
   });
 
   it('A12: 送信の中の例外 — 送った印があれば「送っていない」と言わず、結果が分からない (unknown) として判定を待つ', async () => {
