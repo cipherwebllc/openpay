@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { createRef } from 'react';
@@ -215,37 +215,114 @@ it.each([
   host.remove();
 });
 
-// 上のモーダルが開いていても focus が下 (または body) に残ることがある (AppKit は再表示のとき card の描画前に
-// focus を試みる)。focus の位置ではなく「上に開いたモーダルがあるか」で止め、上が閉じたら元に戻す。
+// 上のモーダルを組み立てる。body 直下の host → (shadow DOM なら open root) → wrapper → aria-modal の card → ボタン。
+const upperHosts: HTMLElement[] = [];
+afterEach(() => {
+  // 途中で落ちたテストの上のモーダルを次のテストへ持ち越さない。
+  for (const host of upperHosts.splice(0)) host.remove();
+});
+
+function mountUpperModal(shadow: boolean) {
+  const host = document.createElement('div');
+  upperHosts.push(host);
+  document.body.appendChild(host);
+  const root = shadow ? host.attachShadow({ mode: 'open' }) : host;
+  const wrapper = document.createElement('div');
+  const card = document.createElement('div');
+  card.setAttribute('role', 'alertdialog');
+  card.setAttribute('aria-modal', 'true');
+  const inner = document.createElement('button');
+  inner.textContent = 'QR を閉じる';
+  card.appendChild(inner);
+  wrapper.appendChild(card);
+  root.appendChild(wrapper);
+  // 上のモーダルの中で focus を持っている要素 (shadow DOM なら root 側の activeElement)。
+  const focused = () => (shadow ? host.shadowRoot!.activeElement : document.activeElement);
+  return { host, wrapper, card, inner, focused };
+}
+
+// 上のモーダルが開いていても focus が下 (または body) に残ることがある (AppKit は開き直すとき card の描画前に
+// focus を試み、その後の Tab でも描画前に取った card = null を見るので自分では取り戻せない)。下は Escape で
+// 閉じず、Tab は上のモーダルの入口へ移す。上が閉じたら下の Tab / Escape が戻る。
 it.each([
   ['shadow DOM (body 直下の host)', true],
   ['light DOM (後ろに描画された portal)', false],
-] as const)('上に開いた aria-modal (%s) がある間は、focus が下や body にあっても Tab / Escape を処理しない', (_label, shadow) => {
+] as const)('上に開いた aria-modal (%s) があり focus が下や body にあると、Tab で上の入口へ移し Escape は処理しない', async (_label, shadow) => {
+  const user = userEvent.setup();
   const onClose = vi.fn();
   render(<CsvPassModal open onClose={onClose} />);
   const dialog = screen.getByRole('dialog');
   const close = within(dialog).getByRole('button', { name: '閉じる' });
-  const host = document.createElement('div');
-  document.body.appendChild(host);
-  const root = shadow ? host.attachShadow({ mode: 'open' }) : host;
-  const card = document.createElement('div');
-  card.setAttribute('role', 'alertdialog');
-  card.setAttribute('aria-modal', 'true');
-  card.appendChild(document.createElement('button'));
-  root.appendChild(card);
+  const upper = mountUpperModal(shadow);
 
-  for (const target of [close, document.body]) {
-    if (target === close) close.focus();
-    else (document.activeElement as HTMLElement | null)?.blur();
-    expect(fireEvent.keyDown(target, { key: 'Tab' })).toBe(true);
-    fireEvent.keyDown(target, { key: 'Escape' });
-  }
+  close.focus();
+  await user.keyboard('{Escape}');
+  expect(onClose).not.toHaveBeenCalled();
+  await user.tab();
+  expect(upper.focused()).toBe(upper.inner);
+
+  close.focus();
+  await user.tab({ shift: true });
+  expect(upper.focused()).toBe(upper.inner);
+
+  // focus を body へ落とす (shadow DOM の中の要素は host ではなく要素自身を blur する)。
+  (upper.focused() as HTMLElement | null)?.blur();
+  expect(document.activeElement).toBe(document.body);
+  await user.tab();
+  expect(upper.focused()).toBe(upper.inner);
   expect(onClose).not.toHaveBeenCalled();
 
-  // 上のモーダルが閉じたら (DOM から外れたら)、下の Tab / Escape が戻る。
-  host.remove();
+  // 上のモーダルが閉じたら (DOM から外れたら)、下の Tab の循環と Escape が戻る。
+  upper.host.remove();
   close.focus();
-  expect(fireEvent.keyDown(close, { key: 'Tab' })).toBe(false);
+  await user.tab({ shift: true });
+  expect(screen.getByRole('link', { name: 'Terms' })).toHaveFocus();
+  await user.keyboard('{Escape}');
+  expect(onClose).toHaveBeenCalledOnce();
+});
+
+// DOM に残したまま隠して閉じるモーダルは「上に開いている」と数えない (数えると下の Tab / Escape が戻らない)。
+it.each([
+  ['light DOM・hidden 属性の祖先', false, (m: ReturnType<typeof mountUpperModal>) => { m.wrapper.hidden = true; }],
+  ['light DOM・display:none の祖先', false, (m: ReturnType<typeof mountUpperModal>) => { m.wrapper.style.display = 'none'; }],
+  ['light DOM・visibility:hidden', false, (m: ReturnType<typeof mountUpperModal>) => { m.card.style.visibility = 'hidden'; }],
+  ['light DOM・inert の祖先', false, (m: ReturnType<typeof mountUpperModal>) => { m.wrapper.setAttribute('inert', ''); }],
+  ['shadow DOM・display:none のホスト', true, (m: ReturnType<typeof mountUpperModal>) => { m.host.style.display = 'none'; }],
+  ['shadow DOM・hidden 属性のホスト', true, (m: ReturnType<typeof mountUpperModal>) => { m.host.hidden = true; }],
+  ['shadow DOM・inert のホスト', true, (m: ReturnType<typeof mountUpperModal>) => { m.host.setAttribute('inert', ''); }],
+  ['shadow DOM・中の display:none', true, (m: ReturnType<typeof mountUpperModal>) => { m.wrapper.style.display = 'none'; }],
+  ['shadow DOM・visibility:hidden の card', true, (m: ReturnType<typeof mountUpperModal>) => { m.card.style.visibility = 'hidden'; }],
+] as const)('隠れた aria-modal (%s) は上のモーダルと数えず、下の Tab / Escape を止めない', (_label, shadow, hide) => {
+  const onClose = vi.fn();
+  render(<CsvPassModal open onClose={onClose} />);
+  const close = within(screen.getByRole('dialog')).getByRole('button', { name: '閉じる' });
+  const upper = mountUpperModal(shadow);
+  hide(upper);
+  close.focus();
+  expect(fireEvent.keyDown(close, { key: 'Tab', shiftKey: true })).toBe(false);
+  expect(screen.getByRole('link', { name: 'Terms' })).toHaveFocus();
   fireEvent.keyDown(close, { key: 'Escape' });
   expect(onClose).toHaveBeenCalledOnce();
+  upper.host.remove();
+});
+
+// Tab / Escape 以外 (文字入力・矢印) では、上のモーダルを探す DOM 検索を走らせない。
+it('Tab / Escape 以外のキーでは DOM を検索しない', () => {
+  render(<CsvPassModal open onClose={vi.fn()} />);
+  const input = screen.getByRole('textbox');
+  const upper = mountUpperModal(true);
+  const spies = [Document.prototype, Element.prototype, DocumentFragment.prototype].map((proto) =>
+    vi.spyOn(proto, 'querySelectorAll'),
+  );
+  try {
+    input.focus();
+    for (const key of ['a', 'ArrowDown', 'Enter', ' ']) fireEvent.keyDown(input, { key });
+    expect(spies.reduce((sum, spy) => sum + spy.mock.calls.length, 0)).toBe(0);
+    // Tab では検索する (spy が効いていることの確認)。
+    fireEvent.keyDown(input, { key: 'Tab' });
+    expect(spies.reduce((sum, spy) => sum + spy.mock.calls.length, 0)).toBeGreaterThan(0);
+  } finally {
+    for (const spy of spies) spy.mockRestore();
+    upper.host.remove();
+  }
 });

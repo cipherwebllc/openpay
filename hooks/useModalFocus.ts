@@ -14,23 +14,69 @@ const ARIA_MODAL = '[aria-modal="true"]';
 // w3m-modal・body 直下の shadow DOM に aria-modal の card) は自前で focus と Escape を扱うので、ここで Tab を
 // 引き戻したり Escape で下の購入ダイアログまで閉じたりすると操作できなくなる。
 // focus の位置だけでは決められない: AppKit は開き直すとき card の描画前に focus を試みるので、focus が下の
-// ダイアログや body に残ることがある。そこで「自分より上に開いた aria-modal が DOM にあるか」でも見る
-// (このリポのダイアログは閉じたら DOM から外す・AppKit も閉じると card を描画しない)。
-function anotherModalOnTop(event: KeyboardEvent, dialog: HTMLElement): boolean {
-  // focus が別の aria-modal の中にある (shadow DOM の中も composedPath で辿る)。
+// ダイアログや body に残ることがある。そこで「自分より上に、見えている aria-modal があるか」でも見る。
+
+/** focus (キーの宛先) が自分以外の aria-modal の中にある (shadow DOM の中も composedPath で辿る)。 */
+function focusInAnotherModal(event: KeyboardEvent, dialog: HTMLElement): boolean {
   for (const node of event.composedPath()) {
-    if (node === dialog) break;
+    if (node === dialog) return false;
     if (node instanceof Element && node.getAttribute('aria-modal') === 'true') return true;
   }
-  // 自分より後ろ (上に重なる portal・中で開いた入れ子) に aria-modal がある。
-  for (const other of document.querySelectorAll(ARIA_MODAL)) {
-    if (other !== dialog && dialog.compareDocumentPosition(other) & Node.DOCUMENT_POSITION_FOLLOWING) return true;
-  }
-  // body 直下の要素の shadow DOM に aria-modal がある (AppKit の w3m-modal は body の末尾に置かれる)。
-  for (const element of document.body.children) {
-    if (element.shadowRoot?.querySelector(ARIA_MODAL)) return true;
-  }
   return false;
+}
+
+function shadowHost(node: Element): Element | null {
+  const root = node.getRootNode();
+  return root instanceof ShadowRoot ? root.host : null;
+}
+
+// DOM に残したまま隠して閉じるモーダルを「開いている」と数えると、下の Tab / Escape が戻らなくなる。
+// 要素自身と祖先 (shadow ホストを越えて) の hidden・display:none・inert と、要素自身の visibility を見る。
+function isShown(element: Element): boolean {
+  const native = typeof element.checkVisibility === 'function';
+  if (native) {
+    if (!element.checkVisibility({ visibilityProperty: true })) return false;
+  } else {
+    // visibility は子で visible に上書きできるので、要素自身の計算値だけを見る。
+    const { visibility } = window.getComputedStyle(element);
+    if (visibility === 'hidden' || visibility === 'collapse') return false;
+  }
+  for (let node: Element | null = element; node; node = node.parentElement ?? shadowHost(node)) {
+    // inert は checkVisibility では分からないので、どちらでも祖先を辿って見る。
+    if (node.hasAttribute('inert')) return false;
+    if (!native && (node.hasAttribute('hidden') || window.getComputedStyle(node).display === 'none')) return false;
+  }
+  return true;
+}
+
+/** 自分より上に開いている (見えている) aria-modal。複数あれば文書順で最後のもの。 */
+function modalOnTop(dialog: HTMLElement): Element | null {
+  let top: Element | null = null;
+  for (const child of Array.from(document.body.children)) {
+    // light DOM: 自分より後ろ (上に重なる portal・中で開いた入れ子) の aria-modal。
+    const light = [...(child.matches(ARIA_MODAL) ? [child] : []), ...Array.from(child.querySelectorAll(ARIA_MODAL))]
+      .filter((other) => other !== dialog && dialog.compareDocumentPosition(other) & Node.DOCUMENT_POSITION_FOLLOWING);
+    // body 直下の要素の shadow DOM (AppKit の w3m-modal は body の末尾に置かれる・open root だけ見える)。
+    const shadow = child.shadowRoot ? Array.from(child.shadowRoot.querySelectorAll(ARIA_MODAL)) : [];
+    for (const other of [...light, ...shadow]) {
+      if (isShown(other)) top = other;
+    }
+  }
+  return top;
+}
+
+function isFocusable(element: Element): element is HTMLElement {
+  return element instanceof HTMLElement && element.tabIndex >= 0 && !element.matches(':disabled') && isShown(element);
+}
+
+/** 上のモーダルの入口: 自身が focus できれば自身 (AppKit の card は tabindex=0)、無ければ中で最初の操作対象。 */
+function firstFocusableIn(root: Element | ShadowRoot): HTMLElement | null {
+  for (const child of Array.from(root.children)) {
+    if (isFocusable(child)) return child;
+    const inner = (child.shadowRoot && firstFocusableIn(child.shadowRoot)) || firstFocusableIn(child);
+    if (inner) return inner;
+  }
+  return null;
 }
 
 export function useModalFocus(
@@ -61,9 +107,23 @@ export function useModalFocus(
     // cleanup 時は ref が外れている (StrictMode の擬似 unmount も含む) ので node を捕まえておく。
     const dialog = dialogRef.current;
     function onKey(e: KeyboardEvent) {
+      // 扱うのは Tab と Escape だけ。文字入力や矢印のたびに上のモーダルを探す DOM 検索を走らせない。
+      if (e.key !== 'Tab' && e.key !== 'Escape') return;
       // IME の変換操作 (候補の取り消し等) でダイアログを閉じない・Tab を奪わない。
       if (e.isComposing || e.keyCode === 229) return;
-      if (!dialog || anotherModalOnTop(e, dialog)) return;
+      if (!dialog || focusInAnotherModal(e, dialog)) return;
+      const top = modalOnTop(dialog);
+      if (top) {
+        // 上のモーダルが開いているのに focus がその外 (下のダイアログや body) にある。Escape は上のモーダルに任せて
+        // 下は閉じない。Tab は上のモーダルの入口へ移す: AppKit は Tab でも描画前に取った card (null) を見るので、
+        // 移さないと focus は下のダイアログの次の要素へ進み、QR の操作に辿り着けない。
+        const entry = e.key === 'Tab' ? (isFocusable(top) ? top : firstFocusableIn(top)) : null;
+        if (entry) {
+          e.preventDefault();
+          entry.focus();
+        }
+        return;
+      }
       if (e.key === 'Escape') onEscapeRef.current?.();
       trapModalFocus(e, dialog);
     }
