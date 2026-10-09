@@ -49,6 +49,17 @@ describe('GitHub Actions operation guards', () => {
     expect(tests).toBeGreaterThan(lint);
   });
 
+  it('CI は SDK の node:test (保護配布 verifier・license gate) を test job で実行する', () => {
+    const source = workflow('ci.yml');
+    const tests = source.indexOf('- run: node scripts/run-tests.mjs');
+    const sdk = source.indexOf('run: npm --prefix packages/x402-sdk test');
+    expect(sdk).toBeGreaterThan(tests);
+    expect(source.slice(tests, sdk)).not.toMatch(/continue-on-error:\s*true/);
+    const pkg = JSON.parse(readFileSync(resolve(process.cwd(), 'packages/x402-sdk/package.json'), 'utf8'));
+    expect(pkg.scripts.test).toBe('node --test tests/*.test.mjs');
+    expect(pkg.scripts.prepublishOnly).toBe('npm test');
+  });
+
   it.each([
     { event: 'schedule', configured: true, status: 0, output: 'skip=false' },
     { event: 'workflow_dispatch', configured: true, status: 0, output: 'skip=false' },
