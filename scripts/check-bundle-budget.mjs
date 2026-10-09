@@ -14,7 +14,8 @@
 import { stdin } from 'node:process';
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import { parseEnv, stripVTControlCharacters } from 'node:util';
+import { stripVTControlCharacters } from 'node:util';
+import { budgetBuildEnv, publicFeatureFlagKeys } from './lib/bundleBudgetEnv.mjs';
 
 // 2026-10-10 第 7 回レビュー F2/E22: 予算を「実測 + 5 kB」に締め直した。実測 = origin/main 9f80dfda を本番 flag
 // (e2e/prodFlags.env) で build した Route 表 (flag OFF の最小 env でも全 route 同値だった)。22〜34 kB 緩んでいた
@@ -108,12 +109,15 @@ async function readStdin() {
 }
 
 function runBuild() {
-  // CI (ci.yml) と同じ本番 flag のベクターで build する。手元の .env.local (flag が違う・実キー) より優先させ、
-  // 予算の計測条件を CI と揃える。
-  const prodFlags = parseEnv(readFileSync(new URL('../e2e/prodFlags.env', import.meta.url), 'utf8'));
-  const env = { ...process.env, ...prodFlags };
+  // CI (ci.yml) と同じ本番 flag のベクターで build する。shell や .env.local に残った ON (ベクターは OFF の flag を
+  // 載せない) が混ざらないよう、公開 flag を全部 OFF で明示してからベクターを重ねる (scripts/lib/bundleBudgetEnv.mjs)。
+  const repo = (file) => readFileSync(new URL(`../${file}`, import.meta.url), 'utf8');
   const r = spawnSync('npm', ['run', 'build'], {
-    env,
+    env: budgetBuildEnv({
+      parentEnv: process.env,
+      prodFlagsText: repo('e2e/prodFlags.env'),
+      flagKeys: publicFeatureFlagKeys([repo('.env.local.example'), repo('lib/env.ts')]),
+    }),
     encoding: 'utf8',
     maxBuffer: 50 * 1024 * 1024,
   });
@@ -129,15 +133,18 @@ function parseSizeBytes(line) {
   return Number(sizeMatch[1]) * 1000 ** SIZE_UNITS.indexOf(sizeMatch[2]);
 }
 
-// "├ ● /[locale]                            14.8 kB         278 kB" のような行から
-// route name と First Load JS (右端のサイズ) を抽出。
+// "├ ● /[locale]                            14.8 kB         278 kB" のような行から route name と
+// First Load JS (2 つ目のサイズ) を抽出。Next 15 は ISR の route があると表に Revalidate / Expire 列
+// (例 "… 426 kB   5m   1y") を足すので、行末ではなく「route の後ろの 2 つ目のサイズ」を取り、後ろの列は許容する
+// (行末のサイズを要求すると ISR 行が落ちて、予算内は [MISSING]・予算外の重い route は素通りになる)。
+// 行頭の box 文字から始まらない行 (shared chunk の "  ├ chunks/…  130 kB"・子ルート "├   ├ /ja") は route にしない。
+const SIZE = '(\\d+(?:\\.\\d+)?)\\s*(B|kB|MB|GB|TB|PB|EB|ZB|YB)';
+const ROUTE_ROW_RE = new RegExp(`^[┌├└]\\s*[^\\s/]*\\s*(\\/[^\\s│┌├└─]*)\\s+${SIZE}\\s+${SIZE}(?:\\s+\\S+)*\\s*$`);
+
 function parseRoute(line) {
-  const sizeBytes = parseSizeBytes(line);
-  if (sizeBytes === null) return null;
-  // 行全体から / 始まりの token を route として抽出
-  const routeMatch = line.match(/(\/[^\s│┌├└─]*)/);
-  if (!routeMatch) return null;
-  return { route: routeMatch[1], sizeBytes };
+  const m = line.match(ROUTE_ROW_RE);
+  if (!m) return null;
+  return { route: m[1], sizeBytes: Number(m[4]) * 1000 ** SIZE_UNITS.indexOf(m[5]) };
 }
 
 function parseSharedTotal(line) {
@@ -157,12 +164,9 @@ for (const line of lines) {
     observed.__shared__ = shared;
     continue;
   }
-  // Route 表の行は "Size" と "First Load JS" の 2 つのサイズを含む。
-  // Route 行の判定: 行頭が box drawing (┌├└) または "+ First Load" でない
-  if (/^[┌├└]/.test(line.trim()) || /^[├│└]/.test(line)) {
-    const r = parseRoute(line);
-    if (r) observed[r.route] = r.sizeBytes;
-  }
+  // Route 表の行は "Size" と "First Load JS" の 2 つのサイズを含む (判定は ROUTE_ROW_RE)。
+  const r = parseRoute(line);
+  if (r) observed[r.route] = r.sizeBytes;
 }
 
 if (Object.keys(observed).length === 0) {

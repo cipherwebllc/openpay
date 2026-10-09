@@ -130,6 +130,49 @@ describe('check-bundle-budget CLI', () => {
     expect(result.stdout).not.toContain('[UNBUDGETED]');
   });
 
+  // Next 15 は ISR の route があると First Load JS の後ろに Revalidate / Expire 列 (例 "5m  1y") を出す。
+  // 行末のサイズだけを見るパーサーだと ISR 行が落ち、予算内の route は [MISSING]・予算外の重い route は素通りした (Codex #789 P2)。
+  describe('ISR rows with trailing Revalidate / Expire columns', () => {
+    const ISR_HEADER = 'Route (app)                                          Size  First Load JS  Revalidate  Expire';
+    const withHeader = (output: string) => output.replace('Route (app)                                          Size  First Load JS', ISR_HEADER);
+
+    it('reads a budgeted ISR route within budget', () => {
+      const result = runGate(withHeader(NORMAL_BUILD_OUTPUT).replace(PAY_ROW, '├ ◐ /[locale]/pay                                 10.3 kB         426 kB          5m      1y'));
+
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain('[OK] /[locale]/pay: 426 kB / 予算 426 kB');
+      expect(result.stdout).not.toContain('[MISSING]');
+    });
+
+    it('fails a budgeted ISR route over budget', () => {
+      const result = runGate(withHeader(NORMAL_BUILD_OUTPUT).replace(PAY_ROW, '├ ◐ /[locale]/pay                                 10.3 kB         427 kB          1h      1y'));
+
+      expect(result.status).toBe(1);
+      expect(result.stdout).toContain('[OVER] /[locale]/pay: 427 kB / 予算 426 kB');
+    });
+
+    it('fails an unbudgeted ISR route above 300 kB', () => {
+      const result = runGate(withHeader(NORMAL_BUILD_OUTPUT).replace(PAY_ROW, `${PAY_ROW}\n├ ◐ /[locale]/new-isr                             12 kB           301 kB          30s     1d`));
+
+      expect(result.status).toBe(1);
+      expect(result.stdout).toContain('[UNBUDGETED] /[locale]/new-isr: 301 kB > 300 kB');
+    });
+
+    it('still takes First Load JS (the second size), not the Size column, on plain rows', () => {
+      const result = runGate(NORMAL_BUILD_OUTPUT.replace(PAY_ROW, '├ ● /[locale]/pay                                 427 kB          426 kB'));
+
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain('[OK] /[locale]/pay: 426 kB / 予算 426 kB');
+    });
+
+    it('does not count shared chunk file rows (one size, no route) as routes', () => {
+      const result = runGate(NORMAL_BUILD_OUTPUT.replace('  ├ chunks/2432-5a43ac95e33516bc.js                130 kB', '  ├ chunks/2432-5a43ac95e33516bc.js                330 kB'));
+
+      expect(result.status).toBe(0);
+      expect(result.stdout).not.toContain('[UNBUDGETED]');
+    });
+  });
+
   it('accepts a route with zero-byte First Load JS', () => {
     const result = runGate(NORMAL_BUILD_OUTPUT.replace(MANIFEST_ROW, '├ ○ /manifest.webmanifest   0 B   0 B'));
 
