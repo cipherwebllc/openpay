@@ -12,6 +12,8 @@ const h = vi.hoisted(() => ({
   receipt: vi.fn(), push: vi.fn(), metric: vi.fn(), warn: vi.fn(), error: vi.fn(),
   tasks: [] as (() => unknown)[], logs: [] as FeeReceiptLog[],
   shop: null as Record<string, unknown> | null,
+  // 検証した block の時刻 (秒)。null = 今 (fake Date)。受理窓 (30 分) の外へ進めた「旧 tx」を再現するときに固定する。
+  blockTimestamp: null as bigint | null,
   fail: null as ((op: string, keys: string[]) => 'before' | 'after' | undefined) | null,
   beforeEval: null as ((script: string, keys: string[], args: string[]) => void) | null,
   scripts: new Map<string, { keys: string[]; args: string[] }>(),
@@ -29,7 +31,7 @@ vi.mock('@/lib/logger', () => ({ logger: { info: vi.fn(), warn: h.warn, error: h
 vi.mock('viem', async (original) => ({ ...await original<typeof import('viem')>(), createPublicClient: () => ({
   getTransactionReceipt: h.receipt,
   readContract: h.authorizationUsed,
-  getBlock: async () => ({ timestamp: BigInt(Math.floor(Date.now() / 1000)) }),
+  getBlock: async () => ({ timestamp: h.blockTimestamp ?? BigInt(Math.floor(Date.now() / 1000)) }),
 }) }));
 vi.mock('@/lib/kv', () => {
   const command = async (op: string, key: string, ...args: unknown[]) => {
@@ -136,7 +138,7 @@ async function drain() { for (const task of h.tasks.splice(0)) await task(); }
 beforeEach(async () => {
   vi.resetModules(); vi.clearAllMocks(); vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(NOW);
   h.kvConfigured = true; h.authorizationUsed.mockResolvedValue(false);
-  h.db = createFakeRedisStore(NOW); h.fail = null; h.beforeEval = null; h.tasks = []; h.scripts.clear();
+  h.db = createFakeRedisStore(NOW); h.fail = null; h.beforeEval = null; h.tasks = []; h.scripts.clear(); h.blockTimestamp = null;
   h.shop = { owner: SELLER, config: { to: SELLER }, storefront: { chain: 'polygon', mode: 'storefront', feePayer: 'merchant', menu: [{ id: 'food', name: 'original', price: '100' }, { id: 'other', name: 'substitute', price: '100' }] } };
   for (const [key, value] of Object.entries({ NEXT_PUBLIC_NETWORK_ENV: 'testnet', NEXT_PUBLIC_ENABLE_X402_FACILITATOR: '1', NEXT_PUBLIC_ENABLE_ORDER_RELAY: '1', ENABLE_AGENT_ORDER: '1', NEXT_PUBLIC_ENABLE_ORDER_PICKUP: '1', NEXT_PUBLIC_ENABLE_PUSH_NOTIFY: '1', NEXT_PUBLIC_ENABLE_MOBILE_ORDER_FEE: '', NEXT_PUBLIC_ENABLE_SHOP_LIVE: '', NEXT_PUBLIC_ENABLE_PREORDER_TIME: '', NEXT_PUBLIC_JPYC_FORWARDER_AMOY: FORWARDER, NEXT_PUBLIC_FEE_RECEIVER_ADDRESS: FEE, NEXT_PUBLIC_JPYC_TESTNET_ADDRESS: TOKEN, X402_FEE_BPS: '100', X402_FEE_FLOOR_JPYC: '2' })) vi.stubEnv(key, value);
   h.verify.mockImplementation(async () => Response.json({ isValid: true, payer: PAYER }));
