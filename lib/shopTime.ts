@@ -130,6 +130,25 @@ export function pickupSlots(
   return slots;
 }
 
+/**
+ * 候補枠 (pickupSlots の昇順配列) のうち requested (ms) に最も近い枠。同距離なら早い方 (頼んだ時刻より
+ * 遅くしない側)。候補が空なら正規化のしようがないので requested をそのまま返す (受付可否は呼出側が
+ * pickupSlots の空判定で決める)。エージェント注文 (x402) の受取時刻は人間の admission のように拒否せず、
+ * 店舗の最短準備時間・ラストオーダーの枠へ寄せる (第 7 回レビュー B12・user 裁定 R3)。
+ */
+export function nearestPickupSlot(slots: readonly number[], requested: number): number {
+  let best = requested;
+  let bestDistance = Infinity;
+  for (const slot of slots) {
+    const distance = Math.abs(slot - requested);
+    if (distance < bestDistance) {
+      best = slot;
+      bestDistance = distance;
+    }
+  }
+  return best;
+}
+
 /** minLeadMinutes の検証 (整数・1..MIN_LEAD_MAX)。それ以外は null (= 未設定扱い)。 */
 export function sanitizeMinLead(v: unknown): number | null {
   if (typeof v !== 'number' || !Number.isInteger(v) || v < 1 || v > MIN_LEAD_MAX) return null;

@@ -77,6 +77,9 @@ export type StoredOrder = {
   fulfilled: boolean; // 「対応済み」フラグ。削除でなくフラグ化し誤操作を復旧可能に (未対応に戻せる)。
   // 受取予定時刻 (ms・Phase 4・preorder で顧客が選んだスロット)。未指定=即時/店頭。表示用 (advisory)。
   pickupAt?: number;
+  // エージェント注文で、指定時刻を店舗の候補枠 (最短準備時間・ラストオーダー) の最寄りへ正規化して保存したとき
+  // の指定値 (ms)。pickupAt と同じなら持たない (第 7 回レビュー B12・表示用 advisory)。
+  pickupAtRequested?: number;
   // 顧客申告の注文メモ。CheckoutItem.memo / HistoryEntry.memo とは分離し、受注面だけに保存・表示する。
   customerMemo?: string;
   // 厨房モニターの **中間「調理済み」フラグ** (店主操作・調理が終わった合図)。fulfilled (対応済み) とは
@@ -390,6 +393,13 @@ export function parseStoredOrder(raw: string): StoredOrder | null {
   // 受取予定時刻 (任意・正の有限数のみ・preorder)。不正は黙って除外 (旧データは未設定=即時)。
   if (typeof o.pickupAt === 'number' && Number.isFinite(o.pickupAt) && o.pickupAt > 0) {
     order.pickupAt = o.pickupAt;
+    // 正規化前の指定値 (pickupAt があるときだけ意味を持つ・正の有限数のみ)。
+    if (
+      typeof o.pickupAtRequested === 'number' && Number.isFinite(o.pickupAtRequested) &&
+      o.pickupAtRequested > 0 && o.pickupAtRequested !== o.pickupAt
+    ) {
+      order.pickupAtRequested = o.pickupAtRequested;
+    }
   }
   const customerMemo = sanitizeOrderMemo(o.customerMemo);
   if (customerMemo) order.customerMemo = customerMemo;

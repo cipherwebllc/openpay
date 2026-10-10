@@ -9,6 +9,8 @@
 //     合計は実効単価で正しく、受注/履歴/レシートは名前にオプションが出る。
 // flag NEXT_PUBLIC_ENABLE_MENU_OPTIONS 既定 OFF で全経路 inert (UI が options を読まない・data は温存)。
 
+import { truncateSafe } from './sanitize';
+
 export type OptionChoice = {
   id: string;
   label: string;
@@ -35,8 +37,10 @@ const NON_NEG_DECIMAL = /^\d{1,12}(\.\d{1,18})?$/;
 // 桁上限なしの decimal 判定 (effectiveUnitPrice の防御 norm 用)。BigInt scaling は任意桁を扱えるため、
 // 検証済みの大きな base 価格を spurious に 0 へ落とさない (桁上限は入力検証側の責務)。
 const DECIMAL_ANY = /^\d+(\.\d+)?$/;
-// 行表示名の上限 (= lib/url/checkout CHECKOUT_NAME_MAX)。これを超えると checkout が name 末尾を
-// 切り、オプションのサフィックスが欠落するため、composeLineName 側でこの範囲に収める。
+// 行表示名の上限 (= lib/url/checkout CHECKOUT_NAME_MAX = lib/orderRelay ORDER_ITEM_NAME_MAX)。これを超えると
+// checkout / 受注保存 (sanitizeOrderItems) が name 末尾を切り、オプションのサフィックスが欠落するため、
+// composeLineName 側でこの範囲に収める。**単位は保存側と同じ UTF-16 code unit** (String.length / .slice):
+// code point で数えると絵文字 (サロゲートペア) を含む名前が保存時に末尾から切れる (第 7 回レビュー B10)。
 const COMPOSED_NAME_MAX = 80;
 
 function isStr(v: unknown, max: number): v is string {
@@ -140,16 +144,14 @@ export function composeLineName(baseName: string, selectedChoices: OptionChoice[
   const summary = optionSummary(selectedChoices);
   if (!summary) return baseName;
   const suffix = `（${summary}）`;
-  // checkout は name を CHECKOUT_NAME_MAX で末尾切りするため、ここで上限内に収める。オプションは
-  // 注文/レシートで欠落させてはいけないので **base を先に詰めて suffix を残す**。code point 単位で
-  // 切る (サロゲート分割を避ける)。suffix だけで上限超なら suffix を詰める (異常に長いオプション)。
-  const suffixCp = [...suffix];
-  if (suffixCp.length >= COMPOSED_NAME_MAX) {
-    return suffixCp.slice(0, COMPOSED_NAME_MAX).join('');
+  // checkout / 受注保存は name を 80 UTF-16 単位で末尾切りするため、ここで同じ単位で上限内に収める。
+  // オプションは注文/レシートで欠落させてはいけないので **base を先に詰めて suffix を残す**。
+  // truncateSafe は境界のサロゲートペアを丸ごと落とす (分断しない)。suffix だけで上限超なら suffix を
+  // 詰める (異常に長いオプション)。
+  if (suffix.length >= COMPOSED_NAME_MAX) {
+    return truncateSafe(suffix, COMPOSED_NAME_MAX);
   }
-  const room = COMPOSED_NAME_MAX - suffixCp.length;
-  const baseCp = [...baseName];
-  const base = baseCp.length > room ? baseCp.slice(0, room).join('') : baseName;
+  const base = truncateSafe(baseName, COMPOSED_NAME_MAX - suffix.length);
   return `${base}${suffix}`;
 }
 

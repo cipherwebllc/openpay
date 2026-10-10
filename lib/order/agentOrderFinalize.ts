@@ -2,17 +2,19 @@ import 'server-only';
 
 import { randomBytes } from 'node:crypto';
 import { after } from 'next/server';
-import { createPublicClient, type Hex } from 'viem';
+import { createPublicClient, getAddress, isAddress, type Address, type Hex } from 'viem';
 import { chainObjectForId, transportForChain } from '@/lib/chains';
 import { env } from '@/lib/env';
-import { kvEval, kvSetNxGet } from '@/lib/kv';
+import { kvEval, kvLrange, kvSetNxGet } from '@/lib/kv';
+import { resolveHandle } from '@/lib/handleStore';
+import { nearestPickupSlot, pickupSlots } from '@/lib/shopTime';
 import { verifyJpycTransferToOnChain } from '@/lib/feeVerify';
 import { logger } from '@/lib/logger';
 import { recordMetric } from '@/lib/metrics';
 import { notifyPaymentReceived } from '@/lib/push/notify';
 import { relayGasFeeValue } from '@/lib/relay/forwarderConfig';
 import { legacyBillingPaymentKey, paymentClaimKey, paymentClaimResultValue } from '@/lib/paymentClaim';
-import { declaredItemsTotalMinor, evaluateOrderAmount, orderListKey, orderUsedKey, sanitizeOrderItems, sanitizeTable, serializeOrder, ORDER_DONE_TTL_SEC, ORDER_DUST_FLOOR_WEI, ORDER_LIST_MAX, ORDER_LIST_TTL_SEC, ORDER_PENDING_TTL_SEC, type StoredOrder } from '@/lib/orderRelay';
+import { declaredItemsTotalMinor, evaluateOrderAmount, orderListKey, orderUsedKey, parseStoredOrder, sanitizeOrderItems, sanitizeTable, serializeOrder, ORDER_DONE_TTL_SEC, ORDER_DUST_FLOOR_WEI, ORDER_LIST_MAX, ORDER_LIST_TTL_SEC, ORDER_PENDING_TTL_SEC, type StoredOrder } from '@/lib/orderRelay';
 import { parseAgentOrderSettlement, type AgentOrderSettlement } from '@/lib/x402/agentOrderRecovery';
 import { agentCompletionKey, agentTransactionKey, readAgentOrderReservation, type AgentOrderReservation } from './agentOrderReservation';
 import { matchesAgentSettlement } from './agentOrderReceipt';
@@ -43,7 +45,54 @@ const SAVE = [
 ].join('\n');
 const RELEASE = "if redis.call('GET',KEYS[1])==ARGV[1] then return redis.call('DEL',KEYS[1]) end; return 0";
 
-export type AgentOrderFinalizeResult = { ok: true; duplicate: boolean } | { ok: false; reason: 'processing' | 'conflict' | 'storage_unavailable' | 'settlement_mismatch' };
+// pickupAt / pickupAtRequested = 保存された受注の受取時刻 (重複のときは保存済みの受注から読む・読めなければ無し)。
+export type AgentOrderFinalizeResult =
+  | { ok: true; duplicate: boolean; pickupAt?: number; pickupAtRequested?: number }
+  | { ok: false; reason: 'processing' | 'conflict' | 'storage_unavailable' | 'settlement_mismatch' };
+type StoredPickup = { pickupAt?: number; pickupAtRequested?: number };
+
+// 受注を保存する瞬間に 1 回だけ、エージェントの指定時刻を店舗の候補枠 (最短準備時間・ラストオーダー・15 分刻み・
+// 猶予なし = 過去の枠は候補にならない) の最寄りへ正規化する (第 7 回レビュー B12・user 裁定 R3)。予約 snapshot と
+// digest は生の指定値のまま (時刻に依存しない) なので、再試行や redelivery の経路は main と同じ。finalize は冪等
+// (同じ予約の 2 回目は duplicate) なので最初に保存した値が正本。店舗設定は表示用の metadata で、handle の読取障害や
+// 候補枠が無い状態は受注の保存を止めず生の指定値のまま保存する (付帯処理の隔離・掟 13)。
+// 予約後に handle が別の店へ移っていることがある (受注は予約の merchant = 元の店に保存する)。別の店の枠で正規化しない
+// よう、取得した handle の受取先 config.to (@handle 店舗の受取先の権威) が予約の merchant と一致するときだけ正規化する。
+async function normalizedPickup(
+  handle: string,
+  merchant: Address,
+  requested: number | null,
+): Promise<{ pickupAt: number | null; requested?: number }> {
+  if (requested === null || !env.enablePreorderTime) return { pickupAt: requested };
+  const resolved = await resolveHandle(handle);
+  const record = resolved.ok ? resolved.record : null;
+  const sameShop = record !== null && isAddress(record.config.to) && getAddress(record.config.to) === merchant;
+  const storefront = sameShop ? record.storefront : undefined;
+  if (!storefront || storefront.mode !== 'preorder') return { pickupAt: requested };
+  const slot = nearestPickupSlot(pickupSlots(Date.now(), storefront.minLeadMinutes, storefront.lastOrder), requested);
+  return slot === requested ? { pickupAt: requested } : { pickupAt: slot, requested };
+}
+function pickupOf(order: Pick<StoredOrder, 'pickupAt' | 'pickupAtRequested'>): StoredPickup {
+  if (order.pickupAt === undefined) return {};
+  return { pickupAt: order.pickupAt, ...(order.pickupAtRequested !== undefined ? { pickupAtRequested: order.pickupAtRequested } : {}) };
+}
+// 重複 (保存済み) の応答に載せる受取時刻を保存済みの受注から読む。読めなければ応答に載せないだけで結果は変えない。
+// orderId は人間の notify が顧客指定で同じ値を付けられる (別 tx の別受注) ので、予約の chainId と settle の tx hash も照合する。
+async function storedPickup(input: { merchant: string; orderId: string; chainId: number; txHash: string }): Promise<StoredPickup> {
+  const list = await kvLrange(orderListKey(input.merchant), 0, ORDER_LIST_MAX - 1);
+  if (!list.ok) return {};
+  for (const raw of list.value) {
+    const order = parseStoredOrder(raw);
+    if (
+      order?.orderId === input.orderId &&
+      order.chainId === input.chainId &&
+      order.txHash.toLowerCase() === input.txHash.toLowerCase()
+    ) {
+      return pickupOf(order);
+    }
+  }
+  return {};
+}
 
 export async function finalizeAgentOrder(input: { reservation: AgentOrderReservation; settlement: AgentOrderSettlement }): Promise<AgentOrderFinalizeResult> {
   const { reservation, settlement } = input;
@@ -53,10 +102,12 @@ export async function finalizeAgentOrder(input: { reservation: AgentOrderReserva
   const { snapshot, tuple, digest, feeConfig, feeModel } = stored.reservation.record;
   if (!parseAgentOrderSettlement(settlement, snapshot)) return { ok: false, reason: 'settlement_mismatch' };
   const completionKey = agentCompletionKey(reservation.key);
+  const orderId = `agent-${tuple.nonce.slice(0, 18)}`;
   const owner = 'pending:' + randomBytes(32).toString('hex');
   const claim = await kvSetNxGet(completionKey, owner, ORDER_PENDING_TTL_SEC);
   if (!claim.ok) return { ok: false, reason: 'storage_unavailable' };
-  if (claim.value === digest) return { ok: true, duplicate: true };
+  const savedOrder = { merchant: snapshot.merchant, orderId, chainId: tuple.chainId, txHash: settlement.transaction };
+  if (claim.value === digest) return { ok: true, duplicate: true, ...(await storedPickup(savedOrder)) };
   if (claim.value !== null) return { ok: false, reason: claim.value.startsWith('pending:') ? 'processing' : 'conflict' };
   try {
     const chain = chainObjectForId(tuple.chainId);
@@ -72,13 +123,17 @@ export async function finalizeAgentOrder(input: { reservation: AgentOrderReserva
     const items = sanitizeOrderItems(snapshot.items);
     const amount = BigInt(tuple.merchantValue);
     const advisory = evaluateOrderAmount(declaredItemsTotalMinor(items, snapshot.decimals), amount, relayGasFeeValue(tuple.chainId), 300);
-    const order: StoredOrder = { orderId: `agent-${tuple.nonce.slice(0, 18)}`, items, table: sanitizeTable(snapshot.table), amount: amount.toString(),
+    const order: StoredOrder = { orderId, items, table: sanitizeTable(snapshot.table), amount: amount.toString(),
       txHash: settlement.transaction, chainId: tuple.chainId, from: snapshot.payer, ts: Date.now(), fulfilled: false };
     if (advisory.mismatch) order.amountMismatch = true;
     if (advisory.unchecked) order.amountUnchecked = true;
-    const at = snapshot.pickupAt;
+    const picked = await normalizedPickup(snapshot.handle, snapshot.merchant, snapshot.pickupAt);
+    const at = picked.pickupAt;
     // Same advisory near-future window as public notify; stale pickup metadata must not pollute boards.
-    if (at !== null && at > Date.now() - 3600_000 && at < Date.now() + 14 * 86400_000) order.pickupAt = at;
+    if (at !== null && at > Date.now() - 3600_000 && at < Date.now() + 14 * 86400_000) {
+      order.pickupAt = at;
+      if (picked.requested !== undefined) order.pickupAtRequested = picked.requested;
+    }
     // x402 の注文は、手数料を x402 料金 (server が requirements で決め、上の matchesAgentSettlement が Settled の
     // feeValue を照合済み) で同じ settle の中で徴収している → 人払いの料金式で判定し直さず「徴収済み」とする
     // (第 7 回レビュー B2)。モバイル注文の利用料が OFF (feeConfig なし) のときは従来どおり義務を作らない。
@@ -107,7 +162,8 @@ export async function finalizeAgentOrder(input: { reservation: AgentOrderReserva
         catch (error) { logger.warn('order.agent.notify_failed', { error }); }
       });
     }
-    return { ok: true, duplicate: result.value === 2 };
+    if (result.value === 2) return { ok: true, duplicate: true, ...(await storedPickup(savedOrder)) };
+    return { ok: true, duplicate: false, ...pickupOf(order) };
   } finally {
     // CAS leaves another worker's lease and any completed marker intact, even after a lost ack.
     await kvEval(RELEASE, [completionKey], [owner]);
