@@ -35,7 +35,7 @@ import {
   PURCHASE_INTENT_VERSION,
   PURCHASE_REVISION_POLICY,
 } from '@/lib/x402/purchaseIntent';
-import { rpcCallOptions } from '@/lib/x402/reconcileBudget';
+import { rpcCallOptions, STORE_RECONCILE_CURSOR_RESERVE_MS } from '@/lib/x402/reconcileBudget';
 import { scanReconcileBlockPages } from '@/lib/x402/reconcilePaging';
 import {
   associateStoreRailIntent,
@@ -75,9 +75,14 @@ export const STORE_USDC_RECONCILE_PAGE_BLOCKS = 2_000n;
 export const STORE_USDC_RECONCILE_MAX_PAGES = 20;
 /**
  * 保留候補 (ログで見つかったが confirmed にならなかった同じ nonce の tx hash) を intent に持つ件数の上限。保留候補は
- * 走査の cursor とは別に毎回再検証するので、cursor は前進だけで巻き戻さない (Codex 5 回目 P2)。正規チェーンに同じ
- * nonce の AuthorizationUsed は 1 件しか存在しないので、候補が複数になるのは旧フォーク/不整合 RPC のときだけ — 上限は
- * 記録の肥大を抑えるための器で、溢れたときだけ cursor をその候補のページに留めて見失わない。
+ * 走査の cursor とは別に毎回再検証するので、cursor は前進だけで巻き戻さない (Codex 5 回目 P2)。
+ *
+ * 溢れは起き得ない前提の器: 候補は (authorizer, nonce) の AuthorizationUsed なので、整合したチェーンでは 1 件しか
+ * 存在しない。複数になるのは旧フォークや不整合な RPC が幻のログを返すときだけで、未確定の候補が上限を超えて並ぶのは
+ * 1 つの nonce に対して幻のログが返り続ける異常時に限る。溢れたら、入れられなかった候補を見失わない側に倒して
+ * cursor をその候補のページに留める — その間はそのページから 1 回分の走査範囲より先へ進めない (その先の支払いは
+ * 保留候補が外れるまで照合されない)。既知の制限として受け入れ、溢れた回は logger.warn
+ * (creator_store.usdc_purchase_deferred_overflow) で人が気づけるようにする (Codex 6 回目 P2)。
  */
 export const STORE_USDC_RECONCILE_MAX_DEFERRED = 8;
 
@@ -1376,8 +1381,9 @@ export async function reconcileStoreUsdcIntent(
   // deadline 付き (cron) では全 RPC の直前に残り時間を見る (第 7 回レビュー B4 follow-up 2): null = 始めずに進捗を
   // 保存して次回へ / 残りがあれば retry なし・本文受信まで timeout を絞った client を 1 回ごとに作る。明示の client
   // (テスト) はそのまま使い、deadline なしは既定の client (undefined)。
-  const rpcClient = (): StoreUsdcPublicClient | undefined | null => {
-    const budget = rpcCallOptions(input.deadline);
+  // deadline を渡すと、その回の一部の段階 (保留候補の再検証) だけ全体より短い期限で絞る。
+  const rpcClient = (deadline = input.deadline): StoreUsdcPublicClient | undefined | null => {
+    const budget = rpcCallOptions(deadline);
     if (budget === null) return null;
     if (input.client) return input.client;
     return budget ? storeUsdcBoundedClient(budget) : undefined;
@@ -1457,9 +1463,10 @@ export async function reconcileStoreUsdcIntent(
   // 候補 1 件の結論: 結果 (settled / storage 等) / 'defer' = まだ確定しない (保留候補として次回も再検証) /
   // 'skip' = この候補は採れない (旧フォーク確定・証拠不一致・revert 等。保留から外す) / 'budget' = 残り時間がなく照合していない。
   type CandidateOutcome = ReconcileStoreUsdcResult | 'defer' | 'skip' | 'budget';
-  const finalizeCandidate = async (txHash: Hex): Promise<CandidateOutcome> => {
+  const finalizeCandidate = async (txHash: Hex, verifyDeadline?: number): Promise<CandidateOutcome> => {
     // 候補 1 件の照合の前に残り時間を見る。足りなければ照合せず、呼び出し側が進捗を保存して次回へ。
-    const verifyClient = rpcClient();
+    // verifyDeadline は照合 (verify) だけの期限。confirmed の後の finalize は全体の残り時間で進める。
+    const verifyClient = rpcClient(verifyDeadline);
     if (verifyClient === null) return 'budget';
     verified.add(txHash);
     // 旧 hash の欠落/revert が replacement の探索を止める波及を断つ。
@@ -1522,12 +1529,24 @@ export async function reconcileStoreUsdcIntent(
     undefer(intent.txHash);
   }
   // 2) 保留候補 (前回までにログで見つかった確定前の候補) を cursor と独立に再検証する。confirmed があればそれで確定。
+  // 遅い候補 (receipt の timeout 等) が後続の候補と走査を毎回待たせる波及を断つ (Codex 6 回目 P2):
+  //   - round robin: 照合して未確定だった候補は列の末尾へ回す。予算で途中終了しても、次回は未照合の候補から始まる。
+  //   - 予算付き (cron) では、保留候補の照合を始められるのはその回の残り予算の半分まで。超えたら照合を打ち切って
+  //     走査へ進む (走査の予算を保留候補の再検証で使い切らない)。
+  const deferredDeadline = (() => {
+    if (input.deadline === undefined) return undefined;
+    const startedAt = Date.now();
+    const usable = Math.max(0, input.deadline - startedAt - STORE_RECONCILE_CURSOR_RESERVE_MS);
+    return startedAt + STORE_RECONCILE_CURSOR_RESERVE_MS + Math.floor(usable / 2);
+  })();
   for (const txHash of [...deferred]) {
     if (verified.has(txHash)) continue;
-    const resolved = await finalizeCandidate(txHash);
-    if (resolved === 'budget') return retry(undefined, deferred);
-    if (resolved === 'skip') { undefer(txHash); continue; }
-    if (resolved === 'defer') continue;
+    const resolved = await finalizeCandidate(txHash, deferredDeadline);
+    // 保留候補に割り当てた予算の終わり。残りの候補は列の先頭に残り、次回に先に照合される。
+    if (resolved === 'budget') break;
+    undefer(txHash);
+    if (resolved === 'skip') continue;
+    if (resolved === 'defer') { deferred.push(txHash); continue; }
     return resolved;
   }
   // 3) 走査 (cursor から前進のみ)。
@@ -1556,13 +1575,32 @@ export async function reconcileStoreUsdcIntent(
   // cursor に保存する (未検証の候補を飛ばさず、同じ範囲での停滞もしない・B4 follow-up 2)。
   // 保留候補の列が溢れて入れられなかった候補のページ (走査順なので最初の 1 件が最も早い)。溢れたときだけ cursor をそこに留める。
   let overflowPageStart: bigint | undefined;
+  // cursor (と保留候補) を保存して pending を返す。溢れた回は保存の後に 1 回だけ warn を出す。
+  const rescheduleScan = async (fromBlock: bigint): Promise<ReconcileStoreUsdcResult> => {
+    const rescheduled = await retry(fromBlock, deferred);
+    if (overflowPageStart !== undefined) {
+      // 溢れは起き得ない前提の異常 (STORE_USDC_RECONCILE_MAX_DEFERRED の説明) なので人が気づけるよう記録する。
+      // 監視の記録の失敗を照合の結果 (保存済みの進捗と pending 応答) や batch の後続 intent へ波及させない。
+      try {
+        logger.warn('creator_store.usdc_purchase_deferred_overflow', {
+          intentSalt: intent.intentSalt,
+          deferred: deferred.length,
+          pageStart: overflowPageStart.toString(),
+        });
+      } catch {
+        // 記録できなくても照合の結果は返す (上記の波及を断つ)。
+      }
+    }
+    return rescheduled;
+  };
   for (const [txHash, candidatePageStart] of scan.candidates) {
-    // 保存 hash と保留候補 (結論が出て外した候補も) はこの回の冒頭で照合済み — 候補としては読み直さない。
-    if (verified.has(txHash)) continue;
+    // 保存 hash と保留候補 (結論が出て外した候補も) はこの回の冒頭で照合済み — 候補としては読み直さない。予算で
+    // この回は照合しなかった保留候補も、走査の予算で読み直さず round robin の順番を待つ。
+    if (verified.has(txHash) || deferred.includes(txHash)) continue;
     const resolved = await finalizeCandidate(txHash);
     // 残り時間がなければ、この候補のページ (未照合) を cursor にして次回へ (取得済みの保留候補の更新は保存する)。
     // 先に溢れた候補があればそのページ (走査順なので早い) を優先する。
-    if (resolved === 'budget') return retry(overflowPageStart ?? candidatePageStart, deferred);
+    if (resolved === 'budget') return rescheduleScan(overflowPageStart ?? candidatePageStart);
     if (resolved === 'skip') continue;
     if (resolved === 'defer') {
       if (!defer(txHash)) overflowPageStart ??= candidatePageStart;
@@ -1571,7 +1609,7 @@ export async function reconcileStoreUsdcIntent(
     return resolved;
   }
   // 採用できる候補が無ければ cursor を前進させ (溢れた候補があればそのページに留め)、保留候補は次回も再検証する。
-  return retry(overflowPageStart ?? scan.nextFromBlock, deferred);
+  return rescheduleScan(overflowPageStart ?? scan.nextFromBlock);
 }
 
 // 両 ZSET の型/score を書込前に検査し、隔離先の障害が pending 証拠の消失へ波及しないようにする。

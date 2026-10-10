@@ -578,8 +578,9 @@ describe('USDC reconciliation with real Lua and receipt verification', () => {
   });
 
   // 保留候補の列が上限まで埋まっていると新しい確定前の候補は列に入れられない → 見失わないよう cursor をその候補のページに
-  // 留める (前進しない)。receipt が読めるようになった回に同じページから再発見して確定する。
-  it('keeps the cursor at the page of a candidate that overflows the deferred list', async () => {
+  // 留める (前進しない)。receipt が読めるようになった回に同じページから再発見して確定する。溢れは整合したチェーンでは
+  // 起き得ない異常なので (その間はそのページから先へ進めない既知の制限)、溢れた回は warn を 1 回出して人が気づけるようにする。
+  it('keeps the cursor at the page of a candidate that overflows the deferred list and warns once per run', async () => {
     const intent = await active();
     const stuck = Array.from({ length: STORE_USDC_RECONCILE_MAX_DEFERRED }, (_, i) => `0x${(i + 1).toString(16).padStart(64, '0')}` as Hex);
     patchIntent({ reconcileDeferred: stuck });
@@ -592,8 +593,54 @@ describe('USDC reconciliation with real Lua and receipt verification', () => {
     });
     expect(await reconcileStoreUsdcIntent(SALT, { now: CHECKED_AT, client })).toEqual({ ok: true, state: 'pending' });
     expect(rawIntent()).toMatchObject({ state: 'indeterminate', reconcileFromBlock: '2090', reconcileDeferred: stuck });
+    const overflowWarnings = () => vi.mocked(logger.warn).mock.calls.filter(([event]) => event === 'creator_store.usdc_purchase_deferred_overflow');
+    expect(overflowWarnings()).toEqual([[
+      'creator_store.usdc_purchase_deferred_overflow',
+      { intentSalt: SALT, deferred: STORE_USDC_RECONCILE_MAX_DEFERRED, pageStart: '2090' },
+    ]]);
     txMissing = false;
     expect(await reconcileStoreUsdcIntent(SALT, { now: CHECKED_AT + 30_000, client })).toEqual({ ok: true, state: 'settled' });
+    await expectSettled();
+    expect(overflowWarnings()).toHaveLength(1);
+  });
+
+  // Codex 6 回目 P2 (2) の再現: 保留列 [OLD, MID, TX]・予算 25 秒・authorizationState 1 秒・先頭 2 件の receipt は各 10 秒で
+  // timeout。毎回先頭から再検証すると 21 秒後に残りが 1 回の RPC に足りず TX の前で中断し、順序が変わらないので次回も
+  // 同じ 2 件から (8 回で TX の照合 0 回・ログ走査 0 回)。→ round robin (未確定は末尾へ) と、保留候補の照合を始められるのは
+  // その回の予算の半分までにする上限で、TX に順番が回り、走査の予算も残る。
+  it('rotates slow deferred candidates and caps their budget so a later deferred candidate and the scan still run', async () => {
+    const intent = await active();
+    patchIntent({ reconcileDeferred: [OLD, MID, TX] });
+    const client = chain(intent.nonce, { latest: 50_090n, eventBlock: 100n });
+    let clock = NOW;
+    vi.mocked(client.readContract).mockImplementation(async () => { clock += 1_000; return true; });
+    const receipt = vi.mocked(client.getTransactionReceipt).getMockImplementation()!;
+    vi.mocked(client.getTransactionReceipt).mockImplementation(async (args) => {
+      if (args.hash === OLD || args.hash === MID) {
+        clock += 10_000;
+        throw new Error('receipt timeout');
+      }
+      return receipt(args);
+    });
+    const spy = vi.spyOn(Date, 'now').mockImplementation(() => clock);
+    const results: string[] = [];
+    const logPages: number[] = [];
+    try {
+      for (let run = 0; run < 8; run += 1) {
+        vi.mocked(client.getLogs).mockClear();
+        const result = await reconcileStoreUsdcIntent(SALT, { now: CHECKED_AT + run * 30_000, client, deadline: clock + 25_000 });
+        results.push(result.ok ? result.state : result.reason);
+        logPages.push(vi.mocked(client.getLogs).mock.calls.length);
+        if (result.ok && result.state === 'settled') break;
+      }
+    } finally {
+      spy.mockRestore();
+    }
+    expect(results).toEqual(['pending', 'pending', 'settled']);
+    expect(client.getTransactionReceipt).toHaveBeenCalledWith({ hash: TX });
+    // 保留候補の照合が予算の半分で打ち切られるので、走査も毎回走る (1 回目は TX のページで止まり、TX は保留候補なので
+    // 走査では読み直さない・2 回目はその次のページから 20 ページ)。
+    expect(logPages.slice(0, 2)).toEqual([1, 20]);
     await expectSettled();
   });
 
