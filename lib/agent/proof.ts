@@ -56,7 +56,8 @@ export async function issueAgentProofChallenge(address: string): Promise<({ ok: 
     if (!saved.ok || saved.value !== null) return { ok: false, reason: 'storage_error' };
     return { ok: true, nonce, issuedAt, expiresAt };
   } catch {
-    // No challenge may be issued without a confirmed server-side nonce record.
+    // No challenge may be issued without a confirmed server-side nonce record. Random generation
+    // (randomBytes can throw) and KV helper internals fail closed as the API's storage_error (503).
     return { ok: false, reason: 'storage_error' };
   }
 }

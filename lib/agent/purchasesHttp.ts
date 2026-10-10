@@ -26,7 +26,8 @@ export async function purchasesSession() {
     if (session.status === 'missing') return { ok: false as const, response: purchasesJson({ reason: 'not_signed_in' }, 401) };
     return { ok: true as const, address: session.address };
   } catch {
-    // Session storage exceptions must fail closed with the same private response.
+    // Session read exceptions (KV helper internals such as error formatting, cookies()) must fail
+    // closed with the same private 503 instead of escaping as an uncached-header 500.
     return { ok: false as const, response: purchasesJson({ reason: 'storage_error' }, 503) };
   }
 }

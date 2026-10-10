@@ -69,14 +69,18 @@ describe('R6a checkReadRateLimit is no-throw over the real KV transport', () => 
     expect(bodies()).toEqual([JSON.stringify(['INCR', KEY])]);
   });
 
-  it.each([
+  it.each<{ result: unknown; allowed: boolean; expire: boolean }>([
     { result: 1, allowed: true, expire: true },
     { result: 60, allowed: true, expire: false },
     { result: 61, allowed: false, expire: false },
+    // 数値でない INCR 結果は本番では起きない。lib/kv が parse_error にするので、KV 障害と同じ fail-open になる
+    // (以前は null を 0 として通し、{} は大小比較が false で拒否していた・第 7 回レビュー PR27 の Codex 指摘)。
     { result: null, allowed: true, expire: false },
-    // 数値でない INCR 結果は本番では起きない。その到達不能な癖 (拒否) をそのまま固定する。
-    // fail-open に直すときは意図してこの行を更新する。
-    { result: {}, allowed: false, expire: false },
+    { result: {}, allowed: true, expire: false },
+    { result: { toString: null, valueOf: null }, allowed: true, expire: false },
+    // 整数の文字列は従来どおり受け入れる (number に揃える)。
+    { result: '61', allowed: false, expire: false },
+    { result: '1', allowed: true, expire: true },
   ])('resolves $allowed for INCR result $result', async ({ result, allowed, expire }) => {
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ result })));
     fetchMock.mockRejectedValue(new TypeError('EXPIRE unreachable'));

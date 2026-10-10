@@ -187,8 +187,9 @@ export async function storeTipMessage(
     );
     return result.ok && result.value === 1;
   } catch {
-    // Private-message storage is ancillary: an unexpected KV exception must
-    // never propagate into the already-successful payment path.
+    // Private-message storage is ancillary: an unexpected exception from inside
+    // the KV helper (warning output, malformed reply) must never propagate into
+    // the already-successful payment path, whichever caller schedules it.
     return false;
   }
 }
@@ -213,8 +214,10 @@ export async function listTipMessages(
           item !== null && item.to.toLowerCase() === ownerLower,
       );
   } catch {
-    // A read-side KV exception is reported as unavailable, not as an empty
-    // inbox, so an outage cannot erase the owner's visible state.
+    // A read-side exception (KV helper internals, or a reply that is not the
+    // list LRANGE promises) is reported as unavailable (API 503), not as an
+    // empty inbox or an opaque 500, so an outage cannot erase the owner's
+    // visible state.
     return null;
   }
 }
@@ -228,8 +231,9 @@ export async function deleteTipMessages(
     const result = await kvDel(tipMessageInboxKey(owner));
     return result.ok;
   } catch {
-    // A deletion storage exception must stay within inbox maintenance and be
-    // surfaced by the API as unavailable rather than escaping as an opaque 500.
+    // A deletion storage exception (KV helper internals) must stay within inbox
+    // maintenance and be surfaced by the API as unavailable (503) rather than
+    // escaping as an opaque 500.
     return false;
   }
 }

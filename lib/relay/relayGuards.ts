@@ -144,10 +144,12 @@ export async function checkIpRateLimit(
     if (!isKvConfigured()) return true;
     const key = `iprl:v1:${scope}:${hashedIp}`;
     const r = await kvIncr(key, { initialTtlSec: windowSec });
+    // rate-limit storage の障害 (ok:false) を auth/resource 管理本体へ波及させない (fail-open)。
     if (!r.ok) return true;
     return r.value <= max;
   } catch {
-    // rate-limit storage の障害を auth/resource 管理本体へ波及させない (fail-open)。
+    // lib/kv は失敗を ok:false で返す契約だが、helper の中の想定外の例外 (期限だけ失敗したときの警告出力 =
+    // console/Sentry、応答の形など) が relay・SIWE 等の入口を 500 にする波及を断つ。向きは ok:false と同じ fail-open。
     return true;
   }
 }

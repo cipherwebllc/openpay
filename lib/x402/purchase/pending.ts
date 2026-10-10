@@ -25,12 +25,16 @@ export async function listPendingPurchaseIntents(
     1,
     Math.min(PURCHASE_RECONCILE_BATCH_SIZE, Math.floor(limit)),
   );
-  const result = await kvEval<string[]>(
+  const result = await kvEval<unknown>(
     LIST_PENDING_INTENTS,
     [PENDING_INDEX_KEY],
     ['-inf', String(now), 'LIMIT', '0', String(safeLimit)],
   );
-  return result.ok ? result.value : 'storage';
+  // ZRANGEBYSCORE の member (文字列) の配列だけを受理する。想定外の応答を reconcile の反復へ渡すと TypeError で
+  // cron ごと落ちる波及を断ち、KV 障害と同じ 'storage' 経路で扱う。
+  if (!result.ok || !Array.isArray(result.value)) return 'storage';
+  if (!result.value.every((member) => typeof member === 'string')) return 'storage';
+  return result.value as string[];
 }
 
 export async function removeTerminalPendingMember(

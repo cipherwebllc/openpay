@@ -652,3 +652,249 @@ describe('lib/kv', () => {
     });
   });
 });
+
+// 第 7 回レビュー C3: lib/kv の helper は保存先の失敗をすべて { ok: false } で返し、reject しない (no-throw)。
+// 呼び出し側 (limiter・チップのメッセージ・Agent の nonce 等) は波及を断つ catch も持つ (掟 13) が、helper 自身の
+// no-throw をここで固定する。送信の失敗・投げられた値・HTTP の失敗・壊れた本文・想定外の型・警告出力の例外を流す。
+describe('lib/kv の no-throw 契約', () => {
+  function erroredBody(): Response {
+    return new Response(new ReadableStream({ start(controller) { controller.error(new Error('stream broke')); } }));
+  }
+
+  const failures: Array<[string, () => unknown]> = [
+    ['fetch が同期で throw', () => { throw new Error('sync'); }],
+    ['fetch が TypeError で reject', () => Promise.reject(new TypeError('fetch failed'))],
+    ['fetch が TimeoutError で reject', () => Promise.reject(new DOMException('timed out', 'TimeoutError'))],
+    ['fetch が文字列で reject', () => Promise.reject('offline')],
+    ['fetch が null で reject', () => Promise.reject(null)],
+    ['fetch が undefined で reject', () => Promise.reject(undefined)],
+    ['fetch がただの object で reject', () => Promise.reject({ code: 'ECONNRESET' })],
+    // errInfo の読み取り・文字列化が投げる値 (Codex: String(Object.create(null)) は TypeError)。
+    ['fetch が prototype の無い object で reject', () => Promise.reject(Object.create(null))],
+    ['fetch が message の getter で投げる値で reject', () => Promise.reject({ get message() { throw new Error('getter'); } })],
+    ['fetch が toString で投げる値で reject', () => Promise.reject({ toString() { throw new Error('toString'); } })],
+    ['HTTP 503 の JSON error', () => Promise.resolve(new Response('{"error":"unavailable"}', { status: 503 }))],
+    ['HTTP 502 の HTML', () => Promise.resolve(new Response('<html>bad gateway</html>', { status: 502 }))],
+    ['HTTP 500 の本文 null', () => Promise.resolve(new Response('null', { status: 500 }))],
+    ['HTTP 400 の error が文字列でない', () => Promise.resolve(new Response('{"error":{"x":1}}', { status: 400 }))],
+    ['200 の壊れた JSON', () => Promise.resolve(new Response('{'))],
+    ['200 の null', () => Promise.resolve(new Response('null'))],
+    ['200 の数値', () => Promise.resolve(new Response('5'))],
+    ['200 の文字列', () => Promise.resolve(new Response('"x"'))],
+    ['200 の空 object', () => Promise.resolve(new Response('{}'))],
+    ['200 の空配列', () => Promise.resolve(new Response('[]'))],
+    ['200 の Upstash error', () => Promise.resolve(new Response('{"error":"ERR"}'))],
+    ['200 の本文の stream エラー', () => Promise.resolve(erroredBody())],
+  ];
+
+  beforeEach(() => {
+    process.env.UPSTASH_REDIS_REST_URL = 'https://nothrow.upstash.test';
+    process.env.UPSTASH_REDIS_REST_TOKEN = 'secret';
+  });
+  afterEach(() => {
+    delete process.env.UPSTASH_REDIS_REST_URL;
+    delete process.env.UPSTASH_REDIS_REST_TOKEN;
+    vi.unstubAllGlobals();
+  });
+
+  it.each(failures)('%s でも全 helper が resolve して ok:false を返す', async (_name, reply) => {
+    vi.stubGlobal('fetch', vi.fn(reply));
+    const kv = await import('@/lib/kv');
+    const calls: Array<[string, () => Promise<{ ok: boolean }>]> = [
+      ['kvLpush', () => kv.kvLpush('k', 'v')],
+      ['kvLpush(atomic)', () => kv.kvLpush('k', 'v', { trimStart: 0, trimStop: 9, ttlSec: 60 })],
+      ['kvLrange', () => kv.kvLrange('k', 0, 9)],
+      ['kvLlen', () => kv.kvLlen('k')],
+      ['kvLtrim', () => kv.kvLtrim('k', 0, 9)],
+      ['kvEval', () => kv.kvEval('return 1', ['k'], ['a'])],
+      ['kvIncr', () => kv.kvIncr('k')],
+      ['kvIncr(atomic)', () => kv.kvIncr('k', { initialTtlSec: 60 })],
+      ['kvDecr', () => kv.kvDecr('k')],
+      ['kvGet', () => kv.kvGet('k')],
+      ['kvMget', () => kv.kvMget(['a', 'b'])],
+      ['kvSet', () => kv.kvSet('k', 'v', { nx: true, ttlSec: 60 })],
+      ['kvExpire', () => kv.kvExpire('k', 60)],
+      ['kvExists', () => kv.kvExists(['a'])],
+      ['kvDel', () => kv.kvDel('k')],
+      ['kvGetDel', () => kv.kvGetDel('k')],
+      ['kvSetNxGet', () => kv.kvSetNxGet('k', 'v', 60)],
+    ];
+    for (const [name, call] of calls) {
+      const settled = await call().then(
+        (value) => ({ name, rejected: false, ok: value.ok }),
+        () => ({ name, rejected: true, ok: undefined }),
+      );
+      expect(settled).toEqual({ name, rejected: false, ok: false });
+    }
+  });
+
+  it('errInfo が読めない値でも reason を保ったまま detail を返す', async () => {
+    const kv = await import('@/lib/kv');
+    vi.stubGlobal('fetch', vi.fn(() => Promise.reject(Object.create(null))));
+    expect(await kv.kvGet('k')).toEqual({ ok: false, reason: 'network_error', detail: 'unprintable thrown value' });
+    vi.stubGlobal('fetch', vi.fn(() => Promise.reject({ name: 'TimeoutError', get message() { throw new Error('getter'); } })));
+    expect(await kv.kvGet('k')).toEqual({ ok: false, reason: 'timeout', detail: '[object Object]' });
+  });
+
+  // Codex: 応答の形が宣言と違うと、呼出側の .map や文字列メソッドが TypeError を投げる。配列・文字列を返す helper は
+  // ok:true の value を実行時に検証し、違えば parse_error にする。
+  it.each([
+    ['kvLrange', '{"result":{}}'],
+    ['kvLrange', '{"result":"x"}'],
+    ['kvLrange', '{"result":[1]}'],
+    ['kvMget', '{"result":{}}'],
+    ['kvMget', '{"result":["a"]}'],
+    ['kvMget', '{"result":["a",{}]}'],
+    ['kvGet', '{"result":{}}'],
+    ['kvGet', '{"result":5}'],
+    ['kvGetDel', '{"result":[]}'],
+    ['kvSetNxGet', '{"result":{}}'],
+  ] as const)('%s: 応答 %s は parse_error (型を偽った ok:true にしない)', async (helper, body) => {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response(body))));
+    const kv = await import('@/lib/kv');
+    const run = {
+      kvLrange: () => kv.kvLrange('k', 0, 9),
+      kvMget: () => kv.kvMget(['a', 'b']),
+      kvGet: () => kv.kvGet('k'),
+      kvGetDel: () => kv.kvGetDel('k'),
+      kvSetNxGet: () => kv.kvSetNxGet('k', 'v', 60),
+    }[helper];
+    expect(await run()).toEqual({ ok: false, reason: 'parse_error', detail: 'unexpected result type' });
+  });
+
+  it.each([
+    ['kvLrange', '{"result":["a","b"]}', ['a', 'b']],
+    ['kvLrange', '{"result":[]}', []],
+    ['kvMget', '{"result":["a",null]}', ['a', null]],
+    ['kvGet', '{"result":null}', null],
+    ['kvGetDel', '{"result":"v"}', 'v'],
+    ['kvSetNxGet', '{"result":null}', null],
+  ] as const)('%s: 宣言どおりの応答 %s はそのまま返す', async (helper, body, value) => {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response(body))));
+    const kv = await import('@/lib/kv');
+    const run = {
+      kvLrange: () => kv.kvLrange('k', 0, 9),
+      kvMget: () => kv.kvMget(['a', 'b']),
+      kvGet: () => kv.kvGet('k'),
+      kvGetDel: () => kv.kvGetDel('k'),
+      kvSetNxGet: () => kv.kvSetNxGet('k', 'v', 60),
+    }[helper];
+    expect(await run()).toEqual({ ok: true, value });
+  });
+
+  // Codex 2 回目: 数値・'OK'・EVAL の応答も宣言した形かを確かめる。数値の helper は object や toString の無い値を
+  // parse_error にし (大小比較の TypeError・{} の「拒否」への化けを断つ)、整数の文字列は number に揃えて受け入れる。
+  type HelperName =
+    | 'kvLpush' | 'kvLpush(atomic)' | 'kvLlen' | 'kvIncr' | 'kvDecr' | 'kvExpire' | 'kvExists' | 'kvDel'
+    | 'kvSet' | 'kvSet(nx)' | 'kvLtrim' | 'kvEval';
+  async function runHelper(name: HelperName): Promise<unknown> {
+    const kv = await import('@/lib/kv');
+    return {
+      kvLpush: () => kv.kvLpush('k', 'v'),
+      'kvLpush(atomic)': () => kv.kvLpush('k', 'v', { trimStart: 0, trimStop: 9, ttlSec: 60 }),
+      kvLlen: () => kv.kvLlen('k'),
+      kvIncr: () => kv.kvIncr('k'),
+      kvDecr: () => kv.kvDecr('k'),
+      kvExpire: () => kv.kvExpire('k', 60),
+      kvExists: () => kv.kvExists(['a']),
+      kvDel: () => kv.kvDel('k'),
+      kvSet: () => kv.kvSet('k', 'v'),
+      'kvSet(nx)': () => kv.kvSet('k', 'v', { nx: true, ttlSec: 60 }),
+      kvLtrim: () => kv.kvLtrim('k', 0, 9),
+      kvEval: () => kv.kvEval('return 1', ['k'], ['a']),
+    }[name]();
+  }
+  const numericHelpers = [
+    'kvLpush', 'kvLpush(atomic)', 'kvLlen', 'kvIncr', 'kvDecr', 'kvExpire', 'kvExists', 'kvDel',
+  ] as const;
+
+  it.each(numericHelpers.flatMap((helper) => [
+    [helper, '{"result":{}}'],
+    [helper, '{"result":{"toString":null,"valueOf":null}}'],
+    [helper, '{"result":true}'],
+    [helper, '{"result":null}'],
+    [helper, '{"result":[1]}'],
+    [helper, '{"result":"x"}'],
+    [helper, '{"result":"1.5"}'],
+    [helper, '{"result":"9007199254740993"}'],
+  ] as const))('%s: 応答 %s は parse_error (数値でない値を ok:true にしない)', async (helper, body) => {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response(body))));
+    expect(await runHelper(helper)).toEqual({ ok: false, reason: 'parse_error', detail: 'unexpected result type' });
+  });
+
+  it.each(numericHelpers.flatMap((helper) => [
+    [helper, '{"result":5}', 5],
+    [helper, '{"result":0}', 0],
+    [helper, '{"result":-1}', -1],
+    [helper, '{"result":"5"}', 5],
+    [helper, '{"result":"-2"}', -2],
+  ] as const))('%s: 整数の応答 %s は number で返す (整数の文字列も受け入れる)', async (helper, body, value) => {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response(body))));
+    expect(await runHelper(helper)).toEqual({ ok: true, value });
+  });
+
+  // Codex 2 回目: SET NX に {"result":{}} が来ても claim を「取れた」と読ませない (idempotency の偽成功を断つ)。
+  it.each([
+    ['kvSet(nx)', '{"result":{}}'],
+    ['kvSet(nx)', '{"result":"QUEUED"}'],
+    ['kvSet(nx)', '{"result":1}'],
+    ['kvSet', '{"result":{}}'],
+    ['kvSet', '{"result":null}'],
+    ['kvLtrim', '{"result":{}}'],
+    ['kvLtrim', '{"result":null}'],
+  ] as const)('%s: 応答 %s は parse_error', async (helper, body) => {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response(body))));
+    expect(await runHelper(helper)).toEqual({ ok: false, reason: 'parse_error', detail: 'unexpected result type' });
+  });
+
+  it.each([
+    ['kvSet(nx)', '{"result":"OK"}', 'OK'],
+    ['kvSet(nx)', '{"result":null}', null],
+    ['kvSet', '{"result":"OK"}', 'OK'],
+    ['kvLtrim', '{"result":"OK"}', 'OK'],
+  ] as const)('%s: 正当な応答 %s はそのまま返す', async (helper, body, value) => {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response(body))));
+    expect(await runHelper(helper)).toEqual({ ok: true, value });
+  });
+
+  // EVAL の応答は Redis の値 (整数・文字列・null・入れ子の配列) だけ。JSON の object・真偽値はどの script からも返らない。
+  it.each([
+    '{"result":{}}',
+    '{"result":{"toString":null,"valueOf":null}}',
+    '{"result":true}',
+    '{"result":[1,{}]}',
+    '{"result":[["a",[false]]]}',
+  ])('kvEval: 応答 %s は parse_error', async (body) => {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response(body))));
+    expect(await runHelper('kvEval')).toEqual({ ok: false, reason: 'parse_error', detail: 'unexpected result type' });
+  });
+
+  it.each([
+    ['{"result":1}', 1],
+    ['{"result":-3}', -3],
+    ['{"result":"raw"}', 'raw'],
+    ['{"result":null}', null],
+    ['{"result":[]}', []],
+    ['{"result":[1,"a",[null,["b",2]]]}', [1, 'a', [null, ['b', 2]]]],
+  ] as const)('kvEval: Redis の値 %s はそのまま返す', async (body, value) => {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response(body))));
+    expect(await runHelper('kvEval')).toEqual({ ok: true, value });
+  });
+
+  // Codex: INCR 成功・EXPIRE NX 失敗のときの警告出力 (logger → console / Sentry) が投げても kvIncr を reject させず、
+  // 取得済みの数 (超過の判定) を返す。logger を本物の代わりに「投げる logger」に差し替えて流す。
+  it('期限だけ失敗した警告の出力が投げても、kvIncr は INCR の数を返す', async () => {
+    vi.resetModules();
+    const warn = vi.fn(() => { throw new Error('sentry transport down'); });
+    vi.doMock('@/lib/logger', () => ({ logger: { warn, info: vi.fn(), error: vi.fn(), debug: vi.fn() } }));
+    try {
+      vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response('[{"result":61},{"error":"ERR injected"}]'))));
+      const kv = await import('@/lib/kv');
+      await expect(kv.kvIncr('iprl:v1:scope:hash', { initialTtlSec: 60 })).resolves.toEqual({ ok: true, value: 61 });
+      expect(warn).toHaveBeenCalledOnce();
+    } finally {
+      vi.doUnmock('@/lib/logger');
+      vi.resetModules();
+    }
+  });
+});

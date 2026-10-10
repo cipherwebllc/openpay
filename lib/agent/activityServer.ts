@@ -43,6 +43,8 @@ async function consumeBudgetWindow(
     if (!count.ok) return true;
     return count.value <= max;
   } catch {
+    // KV helper の中の想定外の例外 (期限だけ失敗したときの警告出力・応答の形など) を、閲覧の 500 へ波及させない。
+    // 向きは ok:false と同じ fail-open。
     return true;
   }
 }
