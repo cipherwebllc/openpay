@@ -406,5 +406,46 @@ describe('usePayerReceipts: 照合の調整 (A10)', () => {
       await advance(0);
       expect(queried('0xlate')).toBe(2);
     });
+
+    // Codex 4 回目の指摘 (P3): 画面が 0 の間の保存の失敗を、開き直したときの待ち時間に持ち越さない。
+    it('画面が 0 の間に返った成立の保存に失敗しても、開き直したらすぐ保存し直す (RPC は重ねない)', async () => {
+      const usePayerReceipts = await loadHook();
+      seed([pending('0xlate-save')]);
+      const { held } = holdResponses();
+      const first = renderHook(() => usePayerReceipts());
+      await advance(0);
+      first.unmount();
+      const setItem = vi.spyOn(Storage.prototype, 'setItem');
+      setItem.mockImplementationOnce(() => {
+        throw new Error('QuotaExceededError');
+      });
+      held[0].resolve('success');
+      await advance(0);
+      setItem.mockRestore();
+      expect(statusOf('0xlate-save')).toBe('pending');
+      renderHook(() => usePayerReceipts());
+      await advance(0);
+      expect(statusOf('0xlate-save')).toBe('confirmed');
+      expect(queried('0xlate-save')).toBe(1);
+    });
+  });
+
+  // Codex 4 回目の指摘 (P2): 壊れた保存値 (文字列でない txHash・数でない chainId) で控えの画面を落とさない。
+  it('txHash や chainId の型が壊れた控えが保存されていても画面は落ちず、ほかの控えの照合は続く', async () => {
+    const usePayerReceipts = await loadHook();
+    const broken = [
+      { ...pending('0xbroken-hash'), receiptId: 'broken-hash', txHash: 123 },
+      { ...pending('0xbroken-chain'), receiptId: 'broken-chain', chainId: '80002' },
+    ];
+    window.localStorage.setItem(PAYER_RECEIPTS_STORAGE_KEY, JSON.stringify([...broken, pending('0xok')]));
+    fetchMock.mockResolvedValue('success');
+    const view = renderHook(() => usePayerReceipts());
+    await advance(0);
+    expect(view.result.current.receipts.map((r) => r.txHash)).toEqual(['0xok']);
+    expect(statusOf('0xok')).toBe('confirmed');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    // 読めない控えも保存のときに元の位置で残す (既存の扱い)。
+    const raw = JSON.parse(window.localStorage.getItem(PAYER_RECEIPTS_STORAGE_KEY)!) as Array<{ receiptId: string }>;
+    expect(raw.map((x) => x.receiptId)).toEqual(['broken-hash', 'broken-chain', '0xok']);
   });
 });

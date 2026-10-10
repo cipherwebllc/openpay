@@ -359,6 +359,10 @@ function isValidReceipt(value: unknown): value is PayerReceipt {
   if (typeof r.amount !== 'string') return false;
   if (typeof r.merchantAddress !== 'string') return false;
   if (r.orderId !== undefined && typeof r.orderId !== 'string') return false;
+  // 任意の txHash / chainId も型まで確かめる。壊れた保存値 (数の txHash 等) が控えの照合 (hash の小文字化) や
+  // Explorer リンクで例外を投げ、控えを出す画面全体を落とす波及を断つ (読めない控えは保存のとき元の位置で残す)。
+  if (r.txHash != null && typeof r.txHash !== 'string') return false;
+  if (r.chainId != null && (typeof r.chainId !== 'number' || !Number.isFinite(r.chainId))) return false;
   if (r.lineItems !== undefined && !isValidLineItems(r.lineItems)) return false;
   if (r.discountAmount !== undefined && !isConsistentDiscount(r)) return false;
   return true;

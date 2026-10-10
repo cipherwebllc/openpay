@@ -499,6 +499,23 @@ describe('appendPayerReceipt: pending → confirmed/failed 昇格', () => {
   });
 });
 
+describe('保存値の txHash / chainId の型 (第 7 回レビュー Codex)', () => {
+  beforeEach(() => window.localStorage.clear());
+
+  it('文字列でない txHash・数でない chainId の控えは読まない (null・未設定は読む)', () => {
+    const base = buildPayerReceipt({ asset: 'jpyc', amount: '1', merchantAddress: '0xM', txHash: '0xok', chainId: 80002 }, NOW);
+    const raw = [
+      { ...base, receiptId: 'num-hash', txHash: 123 },
+      { ...base, receiptId: 'str-chain', chainId: '80002' },
+      { ...base, receiptId: 'null-hash', txHash: null, chainId: null },
+      { ...base, receiptId: 'no-hash', txHash: undefined, chainId: undefined },
+      base,
+    ];
+    window.localStorage.setItem(PAYER_RECEIPTS_STORAGE_KEY, JSON.stringify(raw));
+    expect(loadPayerReceipts().map((r) => r.receiptId)).toEqual(['null-hash', 'no-hash', base.receiptId]);
+  });
+});
+
 describe('promotePayerReceiptStatus', () => {
   beforeEach(() => window.localStorage.clear());
 

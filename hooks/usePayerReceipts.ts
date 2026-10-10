@@ -171,8 +171,9 @@ function startReconcile(r: PayerReceipt): void {
         saveAttempts: 0,
         saveDueAt: 0,
       };
-      // 照合の中で保存できていなければ (書き込み・読み込みの失敗)、保存だけを間隔を空けてやり直す。
-      if (!result.promoted && !storedAs(id, known)) {
+      // 照合の中で保存できていなければ (書き込み・読み込みの失敗)、保存だけを間隔を空けてやり直す。画面が 0 の間は
+      // 結果だけを覚え、やり直しの回数と待ち時間は付けない (開き直したらすぐ保存し直す)。
+      if (reconcileState.subscribers > 0 && !result.promoted && !storedAs(id, known)) {
         known.saveAttempts = 1;
         known.saveDueAt = nextAttemptAt(1, now);
       }
