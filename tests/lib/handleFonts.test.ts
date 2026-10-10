@@ -59,6 +59,27 @@ describe('handleFonts (self-hosted @handle fonts)', () => {
     }
   });
 
+  // 片方の weight だけスライスが欠けると、その weight の字だけ fallback になる。serif は 400 と 700 が
+  // 同じ可変フォントを指すので、「参照されない woff2 が無い」だけでは 400 側の欠けを検出できない。
+  it.each([
+    ['OpenPay Handle Serif', 124],
+    ['OpenPay Handle Rounded', 122],
+  ])('%s declares the same %i slices (full unicode-range) for 400 and 700', (family, slices) => {
+    const of = (weight: string) => faces.filter((f) => f.family === family && f.weight === weight);
+    const [w400, w700] = [of('400'), of('700')];
+    expect(w400).toHaveLength(slices);
+    expect(w700).toHaveLength(slices);
+    const ranges = (list: Face[]) => list.map((f) => f.range).sort();
+    expect(new Set(ranges(w400)).size).toBe(slices);
+    expect(ranges(w700)).toEqual(ranges(w400));
+    const byRange = new Map(w400.map((f) => [f.range, f.url]));
+    for (const f of w700) {
+      const url400 = byRange.get(f.range)!;
+      // serif は可変フォント 1 本 (同じ URL)。rounded は weight ごとの静的ファイル (同じスライス番号)。
+      expect(f.url).toBe(family === 'OpenPay Handle Serif' ? url400 : url400.replace('-400-normal.', '-700-normal.'));
+    }
+  });
+
   it('bundles the OFL text for both fonts', () => {
     for (const name of ['OFL-NotoSerifJP.txt', 'OFL-ZenMaruGothic.txt']) {
       expect(readFileSync(join(FONT_DIR, name), 'utf8')).toContain('SIL OPEN FONT LICENSE Version 1.1');

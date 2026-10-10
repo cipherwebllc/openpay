@@ -9,28 +9,36 @@
 // 入力: @fontsource-variable/noto-serif-jp の wght.css と @fontsource/zen-maru-gothic の
 // 400.css / 700.css (= unicode-range つきの @font-face)。
 // 出力: public/fonts/handle/ (一度消して作り直す: woff2 と OFL) と components/handleFonts.css。
-import { copyFileSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+// 展開物は信用しない: 検査 (名前・ライセンス・scripts・版・woff2 の中身・書き込み先) をすべて
+// 終えてから消して書く。検査で止まったときは既存の public/fonts/handle/ がそのまま残る。
+import { copyFileSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { isAbsolute, join, relative, resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
-const [serifPkg, maruPkg] = process.argv.slice(2);
-if (!serifPkg || !maruPkg) {
-  console.error('usage: node scripts/gen-handle-fonts.mjs <noto-serif-jp package dir> <zen-maru-gothic package dir>');
-  process.exit(1);
+const SEMVER_RE = /^\d+\.\d+\.\d+$/;
+const RANGE_RE = /^U\+[0-9a-fA-F]+(?:-[0-9a-fA-F]+)?(?:,U\+[0-9a-fA-F]+(?:-[0-9a-fA-F]+)?)*$/;
+
+/** 書き込み先が root の内側 (root 自身は除く) にあることを確かめる。外なら中断。 */
+export function assertInside(root, target) {
+  const rel = relative(resolve(root), resolve(target));
+  if (rel === '' || rel.startsWith('..') || isAbsolute(rel)) {
+    throw new Error(`refusing to write outside ${root}: ${target}`);
+  }
+  return target;
 }
-
-const repo = fileURLToPath(new URL('..', import.meta.url));
-const outRoot = join(repo, 'public/fonts/handle');
 
 function pkgInfo(dir, expectedName) {
   const p = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'));
   if (p.name !== expectedName) throw new Error(`${dir}: expected ${expectedName}, got ${p.name}`);
   if (p.license !== 'OFL-1.1') throw new Error(`${p.name}: license is ${p.license}, not OFL-1.1`);
   if (p.scripts && Object.keys(p.scripts).length > 0) throw new Error(`${p.name}: has scripts`);
+  // version はディレクトリ名・URL・CSS に入る。`5.3.0/../../x` のような値で
+  // public/fonts/handle/ の外へ書かせない。
+  if (typeof p.version !== 'string' || !SEMVER_RE.test(p.version)) {
+    throw new Error(`${p.name}: version is not plain SemVer`);
+  }
   return p;
 }
-
-const RANGE_RE = /^U\+[0-9a-fA-F]+(?:-[0-9a-fA-F]+)?(?:,U\+[0-9a-fA-F]+(?:-[0-9a-fA-F]+)?)*$/;
 
 function parseFaces(cssPath) {
   const css = readFileSync(cssPath, 'utf8');
@@ -48,34 +56,6 @@ function parseFaces(cssPath) {
   });
 }
 
-const serif = pkgInfo(serifPkg, '@fontsource-variable/noto-serif-jp');
-const maru = pkgInfo(maruPkg, '@fontsource/zen-maru-gothic');
-const serifDir = `noto-serif-jp-${serif.version}`;
-const maruDir = `zen-maru-gothic-${maru.version}`;
-
-const serifFaces = parseFaces(join(serifPkg, 'wght.css'));
-const maruFaces = [...parseFaces(join(maruPkg, '400.css')), ...parseFaces(join(maruPkg, '700.css'))];
-if (serifFaces.some((f) => f.weight !== '200 900' || f.style !== 'normal')) throw new Error('serif: unexpected face');
-if (maruFaces.some((f) => !['400', '700'].includes(f.weight) || f.style !== 'normal')) throw new Error('rounded: unexpected face');
-
-rmSync(outRoot, { recursive: true, force: true });
-
-function copyFaces(faces, pkgDir, dir) {
-  mkdirSync(join(outRoot, dir), { recursive: true });
-  let bytes = 0;
-  for (const f of faces) {
-    const from = join(pkgDir, 'files', f.file);
-    if (readFileSync(from).subarray(0, 4).toString('latin1') !== 'wOF2') throw new Error(`${f.file}: not woff2`);
-    copyFileSync(from, join(outRoot, dir, f.file));
-    bytes += statSync(from).size;
-  }
-  return bytes;
-}
-
-const bytes = copyFaces(serifFaces, serifPkg, serifDir) + copyFaces(maruFaces, maruPkg, maruDir);
-copyFileSync(join(serifPkg, 'LICENSE'), join(outRoot, 'OFL-NotoSerifJP.txt'));
-copyFileSync(join(maruPkg, 'LICENSE'), join(outRoot, 'OFL-ZenMaruGothic.txt'));
-
 // CSS 上の family 名は自前の別名 (端末に同名フォントが入っていても取り違えない)。
 const SERIF_FAMILY = 'OpenPay Handle Serif';
 const ROUNDED_FAMILY = 'OpenPay Handle Rounded';
@@ -91,7 +71,7 @@ const face = (family, weight, dir, f) => [
   '}',
 ].join('\n');
 
-const header = `/*
+const header = (serif, maru) => `/*
  * @handle プロフィールの字体 (serif = Noto Serif JP / rounded = Zen Maru Gothic) を self-host する。
  * 生成物 — 手で編集しない (scripts/gen-handle-fonts.mjs が作る)。入手元・更新手順は
  * docs/SUPPLY_CHAIN_RISKS.md「依存外で同梱している第三者ファイル」。
@@ -115,12 +95,66 @@ const classes = `.handle-font-serif {
 }
 `;
 
-const blocks = [
-  ...[400, 700].flatMap((w) => serifFaces.map((f) => face(SERIF_FAMILY, w, serifDir, f))),
-  ...maruFaces.map((f) => face(ROUNDED_FAMILY, f.weight, maruDir, f)),
-];
-const css = [header, ...blocks, classes].join('\n\n');
-writeFileSync(join(repo, 'components/handleFonts.css'), css);
+/**
+ * 展開済みの 2 package から <repo>/public/fonts/handle/ と <repo>/components/handleFonts.css を
+ * 作り直す。repo は出力先のリポジトリ root (テストでは一時ディレクトリ)。
+ */
+export function generateHandleFonts({ serifPkg, maruPkg, repo }) {
+  const outRoot = join(repo, 'public/fonts/handle');
+  const serif = pkgInfo(serifPkg, '@fontsource-variable/noto-serif-jp');
+  const maru = pkgInfo(maruPkg, '@fontsource/zen-maru-gothic');
+  const serifDir = `noto-serif-jp-${serif.version}`;
+  const maruDir = `zen-maru-gothic-${maru.version}`;
 
-const woff2 = readdirSync(join(outRoot, serifDir)).length + readdirSync(join(outRoot, maruDir)).length;
-console.log(`woff2 ${woff2} files / ${(bytes / 1024 / 1024).toFixed(2)} MiB, @font-face ${blocks.length}, css ${css.length} chars`);
+  const serifFaces = parseFaces(join(serifPkg, 'wght.css'));
+  const maruFaces = [...parseFaces(join(maruPkg, '400.css')), ...parseFaces(join(maruPkg, '700.css'))];
+  if (serifFaces.length === 0 || serifFaces.some((f) => f.weight !== '200 900' || f.style !== 'normal')) {
+    throw new Error('serif: unexpected face');
+  }
+  if (maruFaces.length === 0 || maruFaces.some((f) => !['400', '700'].includes(f.weight) || f.style !== 'normal')) {
+    throw new Error('rounded: unexpected face');
+  }
+
+  // 消す前に、書くものをすべて決めて検査する。
+  const dirs = [serifDir, maruDir].map((dir) => assertInside(outRoot, join(outRoot, dir)));
+  const copies = [
+    ...serifFaces.map((f) => ({ from: join(serifPkg, 'files', f.file), to: join(outRoot, serifDir, f.file), woff2: true })),
+    ...maruFaces.map((f) => ({ from: join(maruPkg, 'files', f.file), to: join(outRoot, maruDir, f.file), woff2: true })),
+    { from: join(serifPkg, 'LICENSE'), to: join(outRoot, 'OFL-NotoSerifJP.txt'), woff2: false },
+    { from: join(maruPkg, 'LICENSE'), to: join(outRoot, 'OFL-ZenMaruGothic.txt'), woff2: false },
+  ];
+  let bytes = 0;
+  for (const c of copies) {
+    assertInside(outRoot, c.to);
+    if (c.woff2) {
+      if (readFileSync(c.from).subarray(0, 4).toString('latin1') !== 'wOF2') throw new Error(`${c.from}: not woff2`);
+      bytes += statSync(c.from).size;
+    } else if (!readFileSync(c.from, 'utf8').includes('SIL OPEN FONT LICENSE Version 1.1')) {
+      throw new Error(`${c.from}: not the OFL 1.1 text`);
+    }
+  }
+
+  const blocks = [
+    ...[400, 700].flatMap((w) => serifFaces.map((f) => face(SERIF_FAMILY, w, serifDir, f))),
+    ...maruFaces.map((f) => face(ROUNDED_FAMILY, f.weight, maruDir, f)),
+  ];
+  const css = [header(serif, maru), ...blocks, classes].join('\n\n');
+
+  rmSync(outRoot, { recursive: true, force: true });
+  for (const dir of dirs) mkdirSync(dir, { recursive: true });
+  for (const c of copies) copyFileSync(c.from, c.to);
+  writeFileSync(join(repo, 'components/handleFonts.css'), css);
+
+  return { woff2: copies.filter((c) => c.woff2).length, bytes, faces: blocks.length, cssChars: css.length };
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+  const [serifPkg, maruPkg] = process.argv.slice(2);
+  if (!serifPkg || !maruPkg) {
+    console.error('usage: node scripts/gen-handle-fonts.mjs <noto-serif-jp package dir> <zen-maru-gothic package dir>');
+    process.exit(1);
+  }
+  const repo = fileURLToPath(new URL('..', import.meta.url));
+  const r = generateHandleFonts({ serifPkg, maruPkg, repo });
+  console.log(`woff2 ${r.woff2} files / ${(r.bytes / 1024 / 1024).toFixed(2)} MiB, @font-face ${r.faces}, css ${r.cssChars} chars`);
+}
