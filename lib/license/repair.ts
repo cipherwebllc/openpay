@@ -45,6 +45,8 @@ export async function repairLicenseIndexes(now = Date.now(), limit = 50): Promis
     // kvEval は Redis の値の形までしか確かめない。数でない応答 (nil・文字列・配列) は `< 0` が false になり修復済みと
     // 読まれるので、REBUILD が返す件数 (0 以上の整数) のときだけ成功にする (修復の失敗を cron の成功で隠す波及を断つ)。
     if (!r.ok || typeof r.value !== 'number' || r.value < 0) return false;
+    // REBUILD が拾うのは 1 ページ (最大 limit 件) だけ。limit を超える件数は script の応答ではないので修復済みと読まない。
+    if (!Number.isInteger(r.value) || r.value > limit) return false;
   }
   return true;
 }

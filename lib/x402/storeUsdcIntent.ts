@@ -1753,6 +1753,10 @@ export async function reconcilePendingStoreUsdcPurchases(input: {
     [String(now), String(input.limit ?? STORE_USDC_RECONCILE_BATCH_SIZE)],
   );
   if (!due.ok || !Array.isArray(due.value)) return 'storage';
+  // ZRANGEBYSCORE の member は文字列だけ。kvEval は Redis の値の形 (入れ子の配列を含む) までしか確かめないので、文字列で
+  // ない要素 ([salt] 等) は INTENT_RE の暗黙の文字列化を通ったあと .toLowerCase で投げ、batch 全体と後続 intent の回復を
+  // 止める。反復の前に確かめ、KV 障害と同じ 'storage' にする。
+  if (!due.value.every((member) => typeof member === 'string')) return 'storage';
   const summary = { checked: 0, settled: 0, failed: 0, pending: 0, storageErrors: 0, deferred: 0 };
   for (const salt of due.value) {
     // 重い 1 件が cron の maxDuration を使い切って後続 intent の回復を止める波及を断つ。残りは due のまま残す。

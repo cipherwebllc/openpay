@@ -263,6 +263,13 @@ export async function reserveAgentOrder(input: {
     await releaseAgentOrderAttempt({ key, raw, record }, owner);
     return { kind: 'unavailable' };
   }
+  // 成功の応答は {code, 予約 JSON 文字列} の 2 要素だけ。配列の入れ子 ([1, [json]]) は JSON.parse の暗黙の文字列化で
+  // 予約として通ってしまい、settle 後の finalize で保存済みの予約 (文字列) と一致せず注文 0 件になる。形が違えば
+  // broadcast 前のまま自分の attempt を CAS で解放して unavailable にする (送金後に注文が残らない波及を断つ)。
+  if (!Array.isArray(result.value) || result.value.length !== 2 || typeof result.value[1] !== 'string') {
+    await releaseAgentOrderAttempt({ key, raw, record }, owner);
+    return { kind: 'unavailable' };
+  }
   const reservation = decodeReservation(key, result.value[1]);
   if (!reservation) {
     await releaseAgentOrderAttempt({ key, raw, record }, owner);

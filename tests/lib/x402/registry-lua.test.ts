@@ -288,6 +288,19 @@ describe('CAS_UPDATE (本物の Lua)', () => {
     expect(stored('r1')).toMatchObject({ hidden: true, url: 'https://a.jp/new' });
   });
 
+  // kvEval は Redis の値の形までしか確かめない。"1" も JSON として parse できるので、更新した resource の object (対象 id・
+  // 今回の url) でない応答を更新成功と読まない (未更新なのに { ok: true, resource: 1 } を返す偽成功を断つ)。
+  it.each([['"1"', '1'], ['別 id の resource', JSON.stringify({ id: 'other', merchant: OWNER, url: 'https://a.jp/r1' })]])(
+    '想定外の応答 (%s) は更新成功にせず storage・掲載は変わらない', async (_name, reply) => {
+      seedResource('r1');
+      const before = store.strings.get(resourceKey('r1'));
+      holder.reply = async (script, run) => script === CAS_UPDATE ? reply : run();
+      expect(await updateResource('r1', OWNER, input({ url: 'https://a.jp/r1', description: 'changed' }), 7))
+        .toEqual({ ok: false, reason: 'storage' });
+      expect(store.strings.get(resourceKey('r1'))).toBe(before);
+    },
+  );
+
   it('URL 据え置きなら verification を残す', async () => {
     seedResource('r1', {
       url: 'https://a.jp/same',

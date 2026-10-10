@@ -430,6 +430,11 @@ describe('license worker: viem + real Lua CAS', () => {
     h.reply = null;
     expect(await repairLicenseIndexes(NOW)).toBe(true);
   });
+  // REBUILD が拾うのは 1 ページ (最大 limit 件) だけ。limit を超える件数・整数でない件数は script の応答ではない。
+  it.each([101, 2.5])('repairLicenseIndexes: a REBUILD count outside 0..limit (%s for limit 50) is a failed repair', async (count) => {
+    h.reply = async (script, run) => script.includes('nextOffset') ? count : run();
+    expect(await repairLicenseIndexes(NOW, 50)).toBe(false);
+  });
   it('isLicenseRepairRun: true only for minutes 0-14 of each UTC hour (15-minute cron・hourly repair)', () => {
     expect([0, 14, 15, 30, 45, 59].map((minute) => isLicenseRepairRun(Date.UTC(2026, 8, 26, 10, minute)))).toEqual([true, true, false, false, false, false]);
     expect([0, 5, 13, 23].every((hour) => isLicenseRepairRun(Date.UTC(2026, 8, 26, hour, 3)))).toBe(true);

@@ -80,5 +80,8 @@ export async function POST(req: Request): Promise<NextResponse> {
   if (id.length === 0 || id.length > 128) return fail('invalid_body', 400);
   const result = await kvEval<number>(REMOVE_CALL, [callListKey(actor.merchant)], [id]);
   if (!result.ok) return fail('kv_error', 503);
+  // REMOVE_CALL は消した件数 (0 以上の整数) だけを返す。kvEval は Redis の値の形までしか確かめないので、それ以外 (nil 等) を
+  // 処理済みと読まない: 呼び出しが残ったまま 200 を返し、店側の「対応済み」が効いたように見える波及を断つ。
+  if (!Number.isSafeInteger(result.value) || result.value < 0) return fail('kv_error', 503);
   return NextResponse.json({ ok: true, removed: result.value ?? 0 });
 }
