@@ -68,4 +68,12 @@ describe('GRANT_MAX_SCRIPT (real Lua)', () => {
     }));
     await expect(grantTimedMax(KEY, NOW + DAY, NOW)).resolves.toEqual({ ok: false, expiresAt: NOW + DAY });
   });
+
+  // Lua は max(既存, target) を返すので、確定した期限は target 以上。付与を実行していない "1" や空白 (期限 0) を付与したと
+  // 読むと、未保存のまま加入が成功し、同じ tx の再送も replay で付与をやり直さない。
+  it.each([['"1"', '1'], ['空白', ' ']])('付与を実行せずに %s が返っても付与したと読まない (ok:false)', async (_name, result) => {
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ result })));
+    await expect(grantTimedMax(KEY, NOW + DAY, NOW)).resolves.toEqual({ ok: false, expiresAt: NOW + DAY });
+    expect(store.strings.has(KEY)).toBe(false);
+  });
 });

@@ -489,6 +489,20 @@ describe('USDC reconciliation with real Lua and receipt verification', () => {
     await expectSettled();
   });
 
+  // ZSCORE の応答は score の文字列か nil だけ。library の欠落 (nil) が [score] で届くと Number() の暗黙の変換で通ってしまい、
+  // 配信が既存の修復を飛ばす → 文字列でなければ storage。
+  it('readSettledStoreUsdcAccess: a missing library entry arriving as [score] is storage, not a settled access', async () => {
+    const intent = await active(TX);
+    expect(await reconcileStoreUsdcIntent(SALT, { now: CHECKED_AT, client: chain(intent.nonce) })).toEqual({ ok: true, state: 'settled' });
+    const library = h.store!.zsets.get(`store:lib:${PAYER.toLowerCase()}`)!;
+    const score = String(library.get(ID));
+    library.delete(ID);
+    h.reply = async (script, run) => script.trim() === "return redis.call('ZSCORE', KEYS[1], ARGV[1])" ? [score] : run();
+    expect(await readSettledStoreUsdcAccess(SALT)).toEqual({ ok: false, reason: 'storage' });
+    h.reply = null;
+    expect(await readSettledStoreUsdcAccess(SALT)).toEqual({ ok: false, reason: 'conflict' });
+  });
+
   // 正常系 (保存 hash が finality 待ち = pending_finality) では障害として数えず、warn も出さない。
   it('does not count a stored hash that is merely awaiting finality as a storage failure', async () => {
     const intent = await active(TX);

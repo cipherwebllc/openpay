@@ -1274,6 +1274,11 @@ export async function readSettledStoreUsdcAccess(
   if (!ownRead.ok || !purchaseRead.ok || !libraryRead.ok || !globalRead.ok) {
     return { ok: false, reason: 'storage' };
   }
+  // ZSCORE の応答は score の文字列か nil だけ。kvEval は Redis の値の形 (配列を含む) までしか確かめず、[score] も下の
+  // Number() の暗黙の変換で通ってしまう (library の欠落を検出できず、配信が既存の修復を飛ばす)。文字列でなければ storage。
+  if (libraryRead.value !== null && typeof libraryRead.value !== 'string') {
+    return { ok: false, reason: 'storage' };
+  }
   const ownership = parseStorePurchaseOwnership(ownRead.value);
   const purchase = parseUsdcPurchaseRecord(purchaseRead.value);
   const exactGrant = ownership?.grants.find(

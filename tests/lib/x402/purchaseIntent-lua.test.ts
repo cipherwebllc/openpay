@@ -44,7 +44,7 @@ vi.mock('@/lib/x402/facilitatorSettle', () => ({ parseFacilitatorRequest: vi.fn(
 vi.mock('@/lib/x402/paymentRedelivery', () => ({ paymentRedeliveryIdentity: vi.fn() }));
 
 import { buildForwarderNonce } from '@/lib/relay/forwarderIntent';
-import { createQuotedPurchaseIntent, claimSignedPurchaseIntent, claimPurchaseSettlement, finalizeHostedPurchase, purchaseIntentKey, purchaseOwnershipKey, type PurchaseAuthorizationClaim, type PurchaseOwnership } from '@/lib/x402/purchaseIntent';
+import { createQuotedPurchaseIntent, claimSignedPurchaseIntent, claimPurchaseSettlement, finalizeHostedPurchase, purchaseIntentKey, purchaseLibraryKey, purchaseOwnershipKey, readSettledPurchaseAccess, type PurchaseAuthorizationClaim, type PurchaseOwnership } from '@/lib/x402/purchaseIntent';
 import { createLicenseDefinition } from '@/lib/license/definition';
 import { LICENSE_OBLIGATION_INDEX, licenseStockKey, licenseObligationKey, licenseReservationKey } from '@/lib/license/stock';
 import { computeLicensePaymentKey } from '@/lib/license/paymentKey';
@@ -149,6 +149,7 @@ describe('FINALIZE_PURCHASE: Upstash cjson alias regression, actual Lua', () => 
 // script は本文の断片で見分ける (lib/x402/purchase/* は facade 経由でしか import しない)。
 const isClaimSigned = (script: string) => script.includes('decoded.claim.signatureFingerprint == ARGV[18]');
 const isFinalize = (script: string) => script.includes('own.latestGrant = cjson.decode(ARGV[13])');
+const isLibraryScore = (script: string) => script.trim() === "return redis.call('ZSCORE', KEYS[1], ARGV[1])";
 describe('unexpected kvEval replies, actual Lua', () => {
   it('CLAIM_SIGNED_INTENT: a nil reply is not claimed; the intent stays quoted and a retry claims it', async () => {
     const input = await quotedInput('digital', 3);
@@ -171,4 +172,21 @@ describe('unexpected kvEval replies, actual Lua', () => {
     h.reply = null;
     expect(await finalizeHostedPurchase(input)).toMatchObject({ ok: true, kind: 'idempotent' });
   });
+
+  // ZSCORE の応答は score の文字列か nil だけ。library の欠落 (nil) が [score] / [[score]] で届くと Number() の暗黙の変換で
+  // 通ってしまい、配信が既存の修復を飛ばす → 文字列でなければ storage。
+  it.each([['[score]', (score: string) => [score]], ['[[score]]', (score: string) => [[score]]]])(
+    'READ_LIBRARY_SCORE: a missing library entry arriving as %s is storage, not a settled access', async (_name, wrap) => {
+      const first = await settling('digital', 5);
+      const input = { intentSalt: first.intentSalt, txHash: toHex(105n, { size: 32 }), settledAt: NOW + 2000 };
+      expect(await finalizeHostedPurchase(input)).toMatchObject({ ok: true, kind: 'finalized' });
+      const library = h.store!.zsets.get(purchaseLibraryKey(PAYER))!;
+      const score = String(library.get(ID));
+      library.delete(ID);
+      h.reply = async (script, run) => isLibraryScore(script) ? wrap(score) : run();
+      expect(await readSettledPurchaseAccess(input.intentSalt)).toEqual({ ok: false, reason: 'storage' });
+      h.reply = null;
+      expect(await readSettledPurchaseAccess(input.intentSalt)).toEqual({ ok: false, reason: 'corrupt' });
+    },
+  );
 });

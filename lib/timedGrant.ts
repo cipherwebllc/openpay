@@ -61,5 +61,8 @@ export async function grantTimedMax(
   // Lua は tostring(final) を返すので number/string 双方を許容してパースする。
   const final = parseExpiresAtMs(res.value);
   if (final === null) return { ok: false, expiresAt: targetExpiresAtMs };
+  // Lua は max(既存, target) を返すので、確定した期限は必ず target 以上。それ未満 ("1"・空白 = 0 等) は付与の応答ではない。
+  // 付与したと読むと、未保存のまま加入が 200 になり、同じ tx の再送も replay で付与をやり直さない波及を断つ (未付与の ok:false)。
+  if (final < Math.floor(targetExpiresAtMs)) return { ok: false, expiresAt: targetExpiresAtMs };
   return { ok: true, expiresAt: final };
 }
