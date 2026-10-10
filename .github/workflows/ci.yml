@@ -98,6 +98,8 @@ jobs:
           node scripts/check-bundle-budget.mjs < build.log
           # サーバーバンドル内の Lua (EVAL 用 CAS) が minifier に壊されていないか (2026-09-06 実害)
           node scripts/check-lua-bundle.mjs
+          # client chunk にクラスの static ブロック (ES2022) が残っていないか (iOS 16.4 未満で SyntaxError・2026-10 実害)
+          node scripts/check-client-syntax.mjs
 
   # 本物の Lua (wasmoon) を使う 4 file だけを、プロセスを作り直しながら最大 3 回まで実行する。
   # test job から分離した理由・一覧は scripts/lib/luaRealTests.mjs。ここが 3 回とも落ちたら

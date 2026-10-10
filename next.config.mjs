@@ -125,6 +125,14 @@ function enforcedCsp(frameAncestors) {
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  // Next は node_modules の構文を既定のターゲット (Safari 12 / Chrome 64 等) へ下げない。intl-messageformat
+  // (next-intl → use-intl 経由) はクラスの static 初期化ブロック (ES2022) をそのまま出荷しており、[locale] の
+  // layout が読む chunk に入るため、static ブロックを読めない Safari / iOS 16.4 未満・Chrome 94 未満・Firefox 93 未満
+  // ではその chunk が SyntaxError で読めず、全ページの hydration が止まっていた (2026-10 本番 Sentry)。SWC に下げさせる。
+  // intl-messageformat の下に入れ子で入る @formatjs/fast-memoize もパスの一致で一緒に下がる (ほかの @formatjs/* は
+  // static ブロックを持たない)。build 後の client chunk に static ブロックが残っていないことは
+  // scripts/check-client-syntax.mjs が CI の build step で検査する (依存の更新で再発したらそこで落ちる)。
+  transpilePackages: ['intl-messageformat'],
   // OG 画像ルート (/api/og/tip, /api/og/handle) は実行時に fs で日本語フォントと
   // ブランドアイコンを読む。serverless 関数バンドルに確実に含めるため出力ファイル
   // トレースに明示追加する (動的 path の fs 読込は nft が自動検出できないため)。
