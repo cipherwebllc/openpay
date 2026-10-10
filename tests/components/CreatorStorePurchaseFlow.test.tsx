@@ -1,5 +1,6 @@
 import { fireEvent, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import userEvent from '@testing-library/user-event';
 import { renderWithIntl } from '../_helpers/i18n';
 import {
   CreatorStorePurchaseFlow,
@@ -521,6 +522,107 @@ describe('CreatorStorePurchaseFlow', () => {
     );
     expect(state.retry).toHaveBeenCalledOnce();
     expect(state.purchase).not.toHaveBeenCalled();
+  });
+});
+
+// D1: aria-modal を名乗る購入ダイアログの focus 管理 (共通の useModalFocus)。
+describe('CreatorStorePurchaseFlow: focus 管理', () => {
+  function renderOpenable(onClose = vi.fn()) {
+    const opener = document.createElement('button');
+    opener.textContent = '購入';
+    document.body.appendChild(opener);
+    opener.focus();
+    const props = { product: PRODUCT, sellerDisclosureHref: '/ja/store/seller/0xseller', onClose };
+    const utils = renderWithIntl(<CreatorStorePurchaseFlow open {...props} />);
+    const close = () => utils.rerender(<CreatorStorePurchaseFlow open={false} {...props} />);
+    return { ...utils, opener, onClose, close };
+  }
+
+  it('開くと dialog へ focus・外へ移った focus は Tab で中へ戻る・閉じたら押したボタンへ戻る', () => {
+    state.phase = 'idle';
+    state.quote = null;
+    const { opener, close } = renderOpenable();
+    const dialog = screen.getByRole('dialog');
+    expect(dialog).toHaveFocus();
+    opener.focus();
+    expect(fireEvent.keyDown(opener, { key: 'Tab' })).toBe(false);
+    expect(dialog.contains(document.activeElement)).toBe(true);
+    close();
+    expect(opener).toHaveFocus();
+    opener.remove();
+  });
+
+  it('Escape は閉じるボタンと同じく onClose を呼ぶ', () => {
+    state.phase = 'idle';
+    state.quote = null;
+    const { onClose, opener } = renderOpenable();
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
+    expect(onClose).toHaveBeenCalledOnce();
+    opener.remove();
+  });
+
+  it.each(['signing', 'submitting'] as const)('%s 中の Escape では閉じない (進行中の購入を誤って隠さない)', (phase) => {
+    state.phase = phase;
+    state.isBusy = true;
+    const { onClose, opener } = renderOpenable();
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
+    expect(onClose).not.toHaveBeenCalled();
+    opener.remove();
+  });
+
+  it('上に重なった別のモーダル (ウォレット接続の QR 等) のキーは奪わない', () => {
+    state.phase = 'idle';
+    state.quote = null;
+    const { onClose, opener } = renderOpenable();
+    // Reown AppKit の w3m-modal は body 直下に aria-modal の card を出し、自前で focus と Escape を扱う。
+    const walletModal = document.createElement('div');
+    walletModal.setAttribute('role', 'alertdialog');
+    walletModal.setAttribute('aria-modal', 'true');
+    const walletButton = document.createElement('button');
+    walletModal.appendChild(walletButton);
+    document.body.appendChild(walletModal);
+    walletButton.focus();
+    expect(fireEvent.keyDown(walletButton, { key: 'Tab' })).toBe(true);
+    expect(walletButton).toHaveFocus();
+    fireEvent.keyDown(walletButton, { key: 'Escape' });
+    expect(onClose).not.toHaveBeenCalled();
+    walletModal.remove();
+    opener.remove();
+  });
+
+  it('ウォレット接続の QR を開き直して focus が購入側に残っても、Tab は QR の card へ移し、Escape で購入を閉じない', async () => {
+    const user = userEvent.setup();
+    state.phase = 'idle';
+    state.quote = null;
+    const { onClose, opener } = renderOpenable();
+    const close = screen.getByRole('button', { name: '閉じる' });
+    // AppKit は body 直下の w3m-modal (shadow DOM) に aria-modal の card (tabindex=0) を出す。開き直すときは
+    // card の描画前に focus を試み、Tab の処理も描画前に取った card (null) を見るので、focus は購入側に残る。
+    const host = document.createElement('w3m-modal');
+    const card = document.createElement('div');
+    card.setAttribute('role', 'alertdialog');
+    card.setAttribute('aria-modal', 'true');
+    card.tabIndex = 0;
+    const walletButton = document.createElement('button');
+    walletButton.textContent = 'MetaMask';
+    card.appendChild(walletButton);
+    host.attachShadow({ mode: 'open' }).appendChild(card);
+    document.body.appendChild(host);
+
+    close.focus();
+    await user.keyboard('{Escape}');
+    expect(onClose).not.toHaveBeenCalled();
+    // 実際の Tab 移動: 購入側の次のボタンではなく、QR の card (入口) へ移る。
+    await user.tab();
+    expect(host.shadowRoot!.activeElement).toBe(card);
+    expect(screen.getByRole('dialog').contains(document.activeElement)).toBe(false);
+
+    // QR を閉じたら購入ダイアログの Escape が戻る。
+    host.remove();
+    close.focus();
+    await user.keyboard('{Escape}');
+    expect(onClose).toHaveBeenCalledOnce();
+    opener.remove();
   });
 });
 

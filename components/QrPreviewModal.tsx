@@ -8,13 +8,13 @@
 // 状態は持たず props で受ける (labels-as-props)。印刷はポスター部に print: クラスを
 // 持たせ、モーダルの chrome (header / ボタン) は print:hidden で隠す。
 
-import { useEffect, useRef, type ReactNode, type RefObject } from 'react';
+import { useRef, type ReactNode, type RefObject } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import { ChevronDown, CircleCheck, Eye, Printer, ScanLine, X } from 'lucide-react';
 import NextImage from 'next/image';
 import { TokenLogo, ChainLogo } from '@/components/AssetLogo';
 import { QR_CENTER_MARK, QR_CENTER_MARK_RATIO } from '@/lib/qrCenterMark';
-import { trapModalFocus } from '@/lib/trapModalFocus';
+import { useModalFocus } from '@/hooks/useModalFocus';
 import type { TokenSymbol } from '@/lib/tokens';
 import type { ChainSlug } from '@/lib/chains';
 
@@ -137,37 +137,8 @@ export function QrPreviewModal({
   hideUrl?: boolean;
 }) {
   const dialogRef = useRef<HTMLDivElement>(null);
-  // inline onClose の更新で focus effect を再実行せず、ESC は最新のハンドラを読む。
-  const onCloseRef = useRef(onClose);
-  onCloseRef.current = onClose;
-
-  // 開く時だけ focus を移し、close / unmount 時に dialog 側に残っていれば元の要素へ戻す。
-  useEffect(() => {
-    if (!open) return;
-    const previousFocus = document.activeElement;
-    // cleanup 時は ref が detach 済み (StrictMode の擬似 unmount も含む) なので node を捕捉する。
-    const dialog = dialogRef.current;
-    function onKey(e: KeyboardEvent) {
-      // IME のキャンセル操作で modal を閉じない。
-      if (e.isComposing || e.keyCode === 229) return;
-      if (e.key === 'Escape') onCloseRef.current();
-      if (dialog) trapModalFocus(e, dialog);
-    }
-    window.addEventListener('keydown', onKey);
-    dialog?.focus();
-    return () => {
-      window.removeEventListener('keydown', onKey);
-      // 明示的に別の要素へ移された focus は opener へ奪わない。
-      // dialog 除去で body に落ちた場合と、StrictMode の擬似 cleanup で dialog 内に残る場合は戻す。
-      const active = document.activeElement;
-      if (
-        previousFocus instanceof HTMLElement &&
-        (!active || active === document.body || dialog?.contains(active))
-      ) {
-        previousFocus.focus();
-      }
-    };
-  }, [open]);
+  // 開いたら dialog へ focus・Tab は中だけ・Escape で閉じる・閉じたら元の要素へ戻す。
+  useModalFocus(dialogRef, { open, onEscape: onClose });
 
   if (!open) return null;
 

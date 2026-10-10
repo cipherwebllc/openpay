@@ -4,8 +4,9 @@
 // single=ラジオ (既定で先頭を選択) / multi=チェックボックス。required グループ未選択は確定不可。
 // 確定すると選択 choice 配列 + 識別用 selections を親へ返す (親が実効単価 + 名前サフィックスを組む)。
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
+import { useModalFocus } from '@/hooks/useModalFocus';
 import {
   effectiveUnitPrice,
   resolveSelection,
@@ -59,6 +60,11 @@ export function OptionSelectModal({
   const resolved = useMemo(() => resolveSelection(options, sel), [options, sel]);
   const priceText = resolved.ok ? effectiveUnitPrice(basePrice, resolved.choices) : basePrice;
 
+  // aria-modal を名乗るので実挙動も揃える (D1): 開いたら dialog (名前 = 商品名) へ focus・Tab は中だけ・
+  // Escape で閉じる・閉じたら押した商品ボタンへ戻す。
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useModalFocus(dialogRef, { open, onEscape: onClose });
+
   if (!open) return null;
 
   const toggleMulti = (gid: string, cid: string) => {
@@ -87,10 +93,12 @@ export function OptionSelectModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-0 sm:items-center sm:p-4"
+      ref={dialogRef}
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-0 outline-none sm:items-center sm:p-4"
       role="dialog"
       aria-modal="true"
       aria-label={itemName}
+      tabIndex={-1}
       onClick={onClose}
     >
       <div

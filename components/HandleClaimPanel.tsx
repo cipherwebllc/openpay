@@ -36,8 +36,9 @@ import type {
   PublishedHandleSnapshot,
 } from '@/lib/handlePublish';
 import { MY_HANDLES_ROOT_KEY, fetchMyHandles, myHandlesQueryKey } from '@/lib/handleMine';
+import { useModalFocus } from '@/hooks/useModalFocus';
 
-// 削除確認の danger モーダル。LinkQrModal と同じ a11y パターン: 開いたら確定ボタンへ
+// 削除確認の danger モーダル。他のモーダルと同じ a11y (共通の useModalFocus): 開いたらキャンセルへ
 // フォーカス・Tab は背後へ抜けないようトラップ・閉じたら元の要素へ復元・ESC/背景で閉じる。
 // window.confirm はブラウザ依存で文言制御もできず、削除という不可逆操作の警告に弱いため。
 function ReleaseConfirmModal({
@@ -63,46 +64,17 @@ function ReleaseConfirmModal({
   onConfirm: () => void;
   onClose: () => void;
 }) {
-  const confirmRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
-  const returnFocusRef = useRef<HTMLElement | null>(null);
-  // inline arrow は毎レンダ別 identity なので effect dep にせず ref 経由で読む
-  // (表示中の親再レンダで returnFocusRef がボタン自身に上書きされ復元 focus が壊れるのを防ぐ)。
-  const onCloseRef = useRef(onClose);
-  onCloseRef.current = onClose;
-
-  useEffect(() => {
-    if (!open) return;
-    returnFocusRef.current =
-      document.activeElement instanceof HTMLElement
-        ? document.activeElement
-        : null;
-    // 破壊的操作の確認なので初期フォーカスは安全側 (キャンセル) に置く
-    // (開いた直後の Enter 誤打で解放が確定しないように)。
-    cancelRef.current?.focus();
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onCloseRef.current();
-      // フォーカス可能要素は確定/キャンセルの 2 つ → Tab/Shift+Tab で 2 ボタン間を循環させ
-      // 背後のページへ抜けないようトラップする。
-      if (e.key === 'Tab') {
-        e.preventDefault();
-        const active = document.activeElement;
-        if (active === confirmRef.current) cancelRef.current?.focus();
-        else confirmRef.current?.focus();
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => {
-      window.removeEventListener('keydown', onKey);
-      returnFocusRef.current?.focus?.();
-      returnFocusRef.current = null;
-    };
-  }, [open]);
+  // 破壊的操作の確認なので初期フォーカスは安全側 (キャンセル) に置く (開いた直後の Enter 誤打で
+  // 解放が確定しないように)。Tab は中だけ・Escape で閉じる・閉じたら「削除」へ戻す (共通の useModalFocus)。
+  useModalFocus(dialogRef, { open, onEscape: onClose, initialFocusRef: cancelRef });
 
   if (!open) return null;
 
   return (
     <div
+      ref={dialogRef}
       role="dialog"
       aria-modal="true"
       aria-label={title}
@@ -126,7 +98,6 @@ function ReleaseConfirmModal({
             {cancelLabel}
           </button>
           <button
-            ref={confirmRef}
             type="button"
             onClick={onConfirm}
             disabled={confirmDisabled}

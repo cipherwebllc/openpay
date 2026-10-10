@@ -32,6 +32,14 @@ const STATUS_DOT_CLASS = {
   pending: 'bg-sky-500',
 } as const satisfies Record<HistoryEntry['status'], string>;
 
+// 状態の文字の色 (白地で AA のコントラスト)。色だけに頼らず、文字そのもので状態を伝える (D2)。
+const STATUS_TEXT_CLASS = {
+  success: 'text-emerald-700',
+  reverted: 'text-amber-700',
+  error: 'text-red-700',
+  pending: 'text-sky-700',
+} as const satisfies Record<HistoryEntry['status'], string>;
+
 const STATUS_I18N_KEY = {
   success: 'statusSuccess',
   reverted: 'statusReverted',
@@ -88,16 +96,20 @@ export function MiniHistoryRecent() {
               className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 px-3 py-2 text-sm"
             >
               <div className="flex min-w-0 items-center gap-3">
+                {/* 色の点は飾り。状態は下の行の文字で伝える (色覚・読み上げに頼らない・D2)。 */}
                 <span
                   className={`inline-block h-2 w-2 flex-shrink-0 rounded-full ${STATUS_DOT_CLASS[entry.status]}`}
-                  aria-label={tHistory(STATUS_I18N_KEY[entry.status])}
+                  aria-hidden
                 />
                 <div className="min-w-0">
                   {/* 受取方向 ↓ + トークンロゴ (HistoryRow #190 と同じ意味論・この
-                      strip は受取のみを表示するため常に ↓)。 */}
+                      strip は受取のみを表示するため常に ↓)。緑は成功だけ: 失敗・差し戻し・確認待ちを
+                      「受け取った」ように見せない。 */}
                   <p className="flex items-center gap-1.5 font-semibold text-slate-900">
                     <ArrowDown
-                      className="h-3.5 w-3.5 shrink-0 text-emerald-600"
+                      className={`h-3.5 w-3.5 shrink-0 ${
+                        entry.status === 'success' ? 'text-emerald-600' : 'text-slate-400'
+                      }`}
                       strokeWidth={2.5}
                       aria-hidden
                     />
@@ -111,6 +123,10 @@ export function MiniHistoryRecent() {
                     </span>
                   </p>
                   <p className="truncate text-[11px] text-slate-500">
+                    <span className={`font-semibold ${STATUS_TEXT_CLASS[entry.status]}`}>
+                      {tHistory(STATUS_I18N_KEY[entry.status])}
+                    </span>
+                    {' · '}
                     {formatHistoryTimestamp(entry.ts)}
                     {chainName && <> · {chainName}</>}
                   </p>

@@ -11,7 +11,7 @@ import { Volume2, VolumeX } from 'lucide-react';
 import { pad } from '@/lib/pad';
 import { isSuccessSoundEnabled } from '@/lib/soundPref';
 import { playSuccessChime } from '@/lib/successChime';
-import { trapModalFocus } from '@/lib/trapModalFocus';
+import { useModalFocus } from '@/hooks/useModalFocus';
 import { useSuccessSoundPref } from '@/hooks/useSuccessSoundPref';
 import { CopyableField } from './CopyableField';
 import { NonCustodialNotice } from './NonCustodialNotice';
@@ -49,9 +49,6 @@ export function SuccessOverlay({
   const titleId = useId();
   const [now, setNow] = useState(() => new Date());
   const dialogRef = useRef<HTMLDivElement>(null);
-  // inline onDismiss の更新で focus effect を再実行せず、ESC は最新のハンドラを読む。
-  const onDismissRef = useRef(onDismiss);
-  onDismissRef.current = onDismiss;
   const [soundOn, setSoundOn] = useSuccessSoundPref();
 
   // 決済完了チャイム (PayPay の「ペイペイ！」音 相当)。overlay マウント時に 1 回だけ
@@ -78,31 +75,8 @@ export function SuccessOverlay({
     if (next) playSuccessChime();
   }
 
-  // mount が open に相当する。開く時だけ focus し、unmount 時に guard 付きで復元する。
-  useEffect(() => {
-    const previousFocus = document.activeElement;
-    // cleanup 時の ref detach (StrictMode を含む) に備えて node を捕捉する。
-    const dialog = dialogRef.current;
-    function onKey(e: KeyboardEvent) {
-      // IME のキャンセル操作で overlay を閉じない。
-      if (e.isComposing || e.keyCode === 229) return;
-      if (e.key === 'Escape') onDismissRef.current();
-      if (dialog) trapModalFocus(e, dialog);
-    }
-    window.addEventListener('keydown', onKey);
-    dialog?.focus();
-    return () => {
-      window.removeEventListener('keydown', onKey);
-      // 明示的に別の要素へ移された focus は奪わず、dialog 内か除去後の body からだけ戻す。
-      const active = document.activeElement;
-      if (
-        previousFocus instanceof HTMLElement &&
-        (!active || active === document.body || dialog?.contains(active))
-      ) {
-        previousFocus.focus();
-      }
-    };
-  }, []);
+  // mount が open に相当する。開いたら dialog へ focus・Tab は中だけ・Escape で閉じる・閉じたら元の要素へ戻す。
+  useModalFocus(dialogRef, { open: true, onEscape: onDismiss });
 
   const explorerTxUrl =
     explorerBase && txHash ? `${explorerBase}/tx/${txHash}` : undefined;
@@ -120,13 +94,15 @@ export function SuccessOverlay({
       tabIndex={-1}
       className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-6 overflow-y-auto bg-emerald-500 px-4 py-8 text-white"
     >
-      {/* 完了音 ON/OFF トグル (右上)。PayPay 風チャイムのミュート切替・localStorage 永続。 */}
+      {/* 完了音 ON/OFF トグル (右上)。PayPay 風チャイムのミュート切替・localStorage 永続。
+          名前は固定 (「完了音」) し、状態は aria-pressed とアイコンだけで伝える。名前まで「オフにする / オンにする」と
+          切り替えると「完了音をオフにする・押されている」= 消音中と読まれ、実際と逆に聞こえる (D5)。 */}
       <button
         type="button"
         onClick={toggleSound}
         aria-pressed={soundOn}
-        aria-label={soundOn ? t('muteSound') : t('unmuteSound')}
-        title={soundOn ? t('muteSound') : t('unmuteSound')}
+        aria-label={t('soundToggle')}
+        title={t('soundToggle')}
         className="absolute right-3 top-3 flex h-9 w-9 items-center justify-center rounded-full bg-white/15 text-white hover:bg-white/25"
       >
         {soundOn ? (

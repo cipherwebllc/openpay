@@ -7,7 +7,7 @@
 // スマホ (640px 未満) は全画面、それ以上は右から出るパネル。
 
 import { useLayoutEffect, useRef, type ReactNode } from 'react';
-import { trapModalFocus } from '@/lib/trapModalFocus';
+import { useModalFocus } from '@/hooks/useModalFocus';
 
 export function ShopSettingsSheet({
   open,
@@ -24,35 +24,16 @@ export function ShopSettingsSheet({
   children: ReactNode;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
-  const onCloseRef = useRef(onClose);
-  onCloseRef.current = onClose;
+  // 開いたらパネルへ focus・Tab は中だけ・Escape で閉じる・閉じたら設定ボタンへ戻す。
+  useModalFocus(panelRef, { open, onEscape: onClose });
 
-  // useLayoutEffect: 閉じたときの後始末を、シートが DOM から外れる「前」に同期で行う。useEffect だと外れた後に
-  // 非同期で走り、WebKit (CI の mobile-safari) では focus の行き先がまだ決まらず、設定ボタンへ戻らないことがあった。
+  // 開いている間は後ろのページをスクロールさせない (シートの中だけが動く)。
   useLayoutEffect(() => {
     if (!open) return;
-    const previousFocus = document.activeElement;
-    const panel = panelRef.current;
-    function onKey(e: KeyboardEvent) {
-      if (e.isComposing || e.keyCode === 229) return;
-      if (e.key === 'Escape') onCloseRef.current();
-      if (panel) trapModalFocus(e, panel);
-    }
-    window.addEventListener('keydown', onKey);
-    panel?.focus();
-    // 開いている間は後ろのページをスクロールさせない (シートの中だけが動く)。
     const { overflow } = document.body.style;
     document.body.style.overflow = 'hidden';
     return () => {
-      window.removeEventListener('keydown', onKey);
       document.body.style.overflow = overflow;
-      const active = document.activeElement;
-      if (
-        previousFocus instanceof HTMLElement &&
-        (!active || active === document.body || panel?.contains(active))
-      ) {
-        previousFocus.focus();
-      }
     };
   }, [open]);
 

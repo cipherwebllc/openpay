@@ -30,6 +30,10 @@ export function InvoiceNumberInput({
 }) {
   const trimmed = value.trim();
   const normalized = normalizeInvoiceRegistrationNumber(trimmed);
+  const invalid = trimmed !== '' && !normalized;
+  // 形式の注意は入力欄の説明として結び付ける (G15・DiscountField と同じ型)。入力中は 1 文字目から注意が出るので、
+  // role="alert" で打つたびに割り込ませず、欄の「無効な入力」と説明として読ませる。
+  const invalidId = `${id}-invalid`;
   return (
     <>
       <input
@@ -41,10 +45,12 @@ export function InvoiceNumberInput({
         autoComplete="off"
         spellCheck={false}
         maxLength={INVOICE_REGISTRATION_INPUT_MAX}
+        aria-invalid={invalid || undefined}
+        aria-describedby={invalid ? invalidId : undefined}
         className={className}
       />
-      {trimmed && !normalized && (
-        <p className="mt-1 text-xs text-amber-700">{text.invalid}</p>
+      {invalid && (
+        <p id={invalidId} className="mt-1 text-xs text-amber-700">{text.invalid}</p>
       )}
       {normalized && (
         <p className="mt-1 text-xs text-slate-500">

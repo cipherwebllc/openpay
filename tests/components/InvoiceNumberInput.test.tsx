@@ -28,6 +28,21 @@ describe('InvoiceNumberInput', () => {
     expect(screen.queryByRole('link')).toBeNull();
   });
 
+  // G15: 画面の注意を入力欄に結び付ける (読み上げで「無効な入力・形式が違います」と分かる)。
+  it('形式外なら入力欄を aria-invalid にし、注意を説明として結び付ける', () => {
+    renderInput('T123');
+    const input = screen.getByRole('textbox', { name: 'インボイス登録番号' });
+    expect(input).toHaveAttribute('aria-invalid', 'true');
+    expect(input).toHaveAccessibleDescription(text.invalid);
+  });
+
+  it.each(['', 'T1234567890123'])('空・形式どおり (%j) なら aria-invalid も説明も付けない', (value) => {
+    renderInput(value);
+    const input = screen.getByRole('textbox', { name: 'インボイス登録番号' });
+    expect(input).not.toHaveAttribute('aria-invalid');
+    expect(input).not.toHaveAttribute('aria-describedby');
+  });
+
   it('形式どおりなら公表サイトのリンク (正規化した番号) を出す', () => {
     renderInput('t-1234-5678-90123');
     expect(screen.queryByText(text.invalid)).toBeNull();

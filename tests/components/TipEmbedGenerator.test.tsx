@@ -151,7 +151,7 @@ function expectInUrl(pattern: RegExp) {
 
 // 公開セクションの embed タブへ切替えて iframe snippet を露出させる。
 async function openEmbedTab(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(screen.getByRole('tab', { name: 'サイトに埋め込む' }));
+  await user.click(screen.getByRole('button', { name: 'サイトに埋め込む' }));
 }
 
 // 「高度な設定」は USDC のみで表示する折りたたみ (default 閉・button+条件描画)。
@@ -704,7 +704,7 @@ describe('TipEmbedGenerator — P2 共有UX (X シェア / QR / ボタン埋め�
     expect(screen.getByText('iframe 埋め込みコード')).toBeInTheDocument();
 
     // ボタン サブタブへ
-    await user.click(screen.getByRole('tab', { name: 'ボタン' }));
+    await user.click(screen.getByRole('button', { name: 'ボタン' }));
     expect(screen.getByText('ボタン埋め込みコード')).toBeInTheDocument();
     expect(screen.queryByText('iframe 埋め込みコード')).toBeNull();
 
@@ -713,6 +713,35 @@ describe('TipEmbedGenerator — P2 共有UX (X シェア / QR / ボタン埋め�
       `<a href="https://test.local/tip/${VALID}`,
     );
     expect(code?.textContent).toContain('チップを送る');
+  });
+
+  // D7: tabpanel・aria-controls・矢印キーの無い role="tab" は名乗らない。他の 2 択 (値引きの金額/率) と同じ
+  // aria-pressed のボタンで、選んでいる方を伝える。
+  it('公開・埋め込みの切替は tab を名乗らず、aria-pressed のボタンで選択を伝える', async () => {
+    const user = userEvent.setup();
+    render(<TipEmbedGenerator />);
+    await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
+    await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
+    const share = screen.getByRole('button', { name: 'リンクで共有' });
+    const embed = screen.getByRole('button', { name: 'サイトに埋め込む' });
+    expect(share).toHaveAttribute('aria-pressed', 'true');
+    expect(embed).toHaveAttribute('aria-pressed', 'false');
+    // 2 択のまとまりは節の見出し (「公開する」) を名前にする。
+    expect(screen.getByRole('group', { name: '公開する' })).toContainElement(share);
+
+    await user.click(embed);
+    expect(share).toHaveAttribute('aria-pressed', 'false');
+    expect(embed).toHaveAttribute('aria-pressed', 'true');
+    const iframeFormat = screen.getByRole('button', { name: 'iframe' });
+    const buttonFormat = screen.getByRole('button', { name: 'ボタン' });
+    expect(iframeFormat).toHaveAttribute('aria-pressed', 'true');
+    expect(buttonFormat).toHaveAttribute('aria-pressed', 'false');
+    await user.click(buttonFormat);
+    expect(iframeFormat).toHaveAttribute('aria-pressed', 'false');
+    expect(buttonFormat).toHaveAttribute('aria-pressed', 'true');
+
+    expect(screen.queryAllByRole('tab')).toHaveLength(0);
+    expect(screen.queryAllByRole('tablist')).toHaveLength(0);
   });
 
   it('embed タブ ボタン: コピーで <a> スニペットが clipboard に入る', async () => {
@@ -726,7 +755,7 @@ describe('TipEmbedGenerator — P2 共有UX (X シェア / QR / ボタン埋め�
     await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
     await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
     await openEmbedTab(user);
-    await user.click(screen.getByRole('tab', { name: 'ボタン' }));
+    await user.click(screen.getByRole('button', { name: 'ボタン' }));
     await user.click(screen.getByRole('button', { name: 'コピー' }));
 
     expect(writeText).toHaveBeenCalled();

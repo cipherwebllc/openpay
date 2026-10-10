@@ -177,4 +177,48 @@ describe('MobileOrderPlacardModal', () => {
     fireEvent.keyDown(window, { key: 'Tab', shiftKey: true });
     expect(document.activeElement).toBe(copy);
   });
+
+  // 共通の focus 管理 (useModalFocus) へ寄せる前の挙動を固定する (D11)。
+  it('閉じたら開く前の要素へ focus を戻す', () => {
+    const trigger = document.createElement('button');
+    document.body.appendChild(trigger);
+    trigger.focus();
+    const { rerender } = render(
+      <MobileOrderPlacardModal
+        open
+        onClose={() => {}}
+        url="https://open-pay.jp/@yamada"
+        shopName="山田カフェ"
+        chains={[]}
+        labels={LABELS}
+        copied={false}
+        onCopy={() => {}}
+      />,
+    );
+    expect(screen.getByRole('button', { name: '閉じる' })).toHaveFocus();
+    rerender(
+      <MobileOrderPlacardModal
+        open={false}
+        onClose={() => {}}
+        url="https://open-pay.jp/@yamada"
+        shopName="山田カフェ"
+        chains={[]}
+        labels={LABELS}
+        copied={false}
+        onCopy={() => {}}
+      />,
+    );
+    expect(trigger).toHaveFocus();
+    trigger.remove();
+  });
+
+  it('外へ移った focus は次の Tab でダイアログの中へ戻る (印刷・コピーの途中で背後へ抜けない)', () => {
+    const outside = document.createElement('button');
+    document.body.prepend(outside);
+    setup();
+    outside.focus();
+    expect(fireEvent.keyDown(outside, { key: 'Tab' })).toBe(false);
+    expect(screen.getByRole('button', { name: '閉じる' })).toHaveFocus();
+    outside.remove();
+  });
 });

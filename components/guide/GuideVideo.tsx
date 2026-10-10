@@ -4,7 +4,7 @@
 // YouTube (youtube-nocookie) の iframe に差し替える。押すまで YouTube へ通信しないので、
 // ページの読み込みが重くならず、見ない人の情報も YouTube に渡らない。
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Image from 'next/image';
 import { Play } from 'lucide-react';
 import {
@@ -16,12 +16,19 @@ import {
 
 export function GuideVideo({ video }: { video: HowtoVideo }) {
   const [playing, setPlaying] = useState(false);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+  // 押したボタンは iframe に置き換わって消えるので、focus を動画へ移す (D6)。移さないと focus が body に落ち、
+  // キーボードでは動画の操作 (一時停止など) までページの先頭から辿り直しになる。
+  useEffect(() => {
+    if (playing) iframeRef.current?.focus();
+  }, [playing]);
   return (
     <figure className="mt-4">
       {/* キーボードのフォーカス枠は親に出す (ボタンは overflow-hidden の親いっぱいなので、ボタン自身の枠は切れて見えない)。 */}
       <div className="relative aspect-video overflow-hidden rounded-2xl bg-slate-900 shadow-lift ring-1 ring-slate-200/60 has-[:focus-visible]:ring-4 has-[:focus-visible]:ring-emerald-400">
         {playing ? (
           <iframe
+            ref={iframeRef}
             src={howtoVideoEmbedUrl(video)}
             title={video.title}
             allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
