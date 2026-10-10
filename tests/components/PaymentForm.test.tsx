@@ -2862,6 +2862,101 @@ describe('PaymentForm — 決済QR の値引き (disc)', () => {
     );
   });
 
+  // 第 7 回レビュー F1: 同じ QR を同一チェーンで払っても cross-chain で払っても、控えの明細と合計欄 (消費税の行) は同じ。
+  describe('cross-chain の控えも同一チェーンと同じ組み立て (F1)', () => {
+    // 控えのうち組み立て (明細と合計欄) に関わる項目。行の id は店舗側履歴の entry 由来なので比べない。
+    function assembly(r: ReturnType<typeof loadPayerReceipts>[number]) {
+      return {
+        amount: r.amount,
+        lineItems: r.lineItems?.map((li) => {
+          const { id: _id, ...rest } = li;
+          return rest;
+        }),
+        subtotalAmount: r.subtotalAmount,
+        discountAmount: r.discountAmount,
+        totalTaxAmount: r.totalTaxAmount,
+        totalAmount: r.totalAmount,
+      };
+    }
+
+    async function sameChainReceipt(query: string) {
+      window.localStorage.clear();
+      const user = userEvent.setup();
+      setURL(query);
+      setAccount({ connected: true, chainId: baseSepolia.id });
+      setBalance(200_000_000n);
+      setSmartAccount(true);
+      setPayment('idle');
+      setGasQuote('ready', 0n);
+      const { rerender, unmount } = render(<PaymentForm />);
+      await user.click(screen.getByRole('button', { name: /11 USDC を支払う/ }));
+      setPayment('success');
+      rerender(<PaymentForm />);
+      await waitFor(() => expect(loadPayerReceipts()).toHaveLength(1));
+      const [receipt] = loadPayerReceipts();
+      unmount();
+      return receipt;
+    }
+
+    async function crossChainReceipt(query: string) {
+      window.localStorage.clear();
+      crossChainHintSpy.mockClear();
+      setURL(query);
+      setAccount({ connected: true, chainId: baseSepolia.id });
+      setBalance(1_000_000n);
+      setSmartAccount(true);
+      setGasQuote('ready', 0n);
+      setPayment('idle');
+      const { unmount } = render(<PaymentForm />);
+      await waitFor(() => expect(crossChainHintSpy).toHaveBeenCalled());
+      const props = crossChainHintSpy.mock.lastCall?.[0] as {
+        onAttemptStart: (amount: bigint) => void;
+        onSuccess: (result: Record<string, unknown>) => void;
+      };
+      act(() => {
+        props.onAttemptStart(11_000_000n);
+        props.onSuccess({
+          path: 'gateway',
+          settlement: 'transaction',
+          transferSpecHash: keccak256(encodedSpec()),
+          attestation: gatewayAttestation().attestation,
+          attestationSignature: gatewayAttestation().signature,
+          mintTxHash: `0x${'f'.repeat(64)}`,
+          destChainId: baseSepolia.id,
+        });
+      });
+      await waitFor(() => expect(loadPayerReceipts()).toHaveLength(1));
+      const [receipt] = loadPayerReceipts();
+      unmount();
+      return receipt;
+    }
+
+    it('商品名 + 税の QR: cross-chain でも消費税の行 (1 USDC) と明細の税額が出る', async () => {
+      const query = `to=${MERCHANT}&token=usdc&amount=11&tax=10&taxcat=taxable_10&pname=Coffee&store=Shop`;
+      const same = await sameChainReceipt(query);
+      const cross = await crossChainReceipt(query);
+      expect(cross.paymentMode).toBe('cross-chain');
+      expect(same.totalTaxAmount).toBe('1');
+      expect(assembly(cross)).toEqual(assembly(same));
+    });
+
+    it('商品名なしで税だけの QR: cross-chain でも店名の 1 行と消費税', async () => {
+      const query = `to=${MERCHANT}&token=usdc&amount=11&tax=10&taxcat=taxable_10&store=Shop`;
+      const same = await sameChainReceipt(query);
+      const cross = await crossChainReceipt(query);
+      expect(same.lineItems?.map((li) => [li.name, li.taxAmount])).toEqual([['Shop', '1']]);
+      expect(assembly(cross)).toEqual(assembly(same));
+    });
+
+    it('値引きのある QR: cross-chain でも 小計 / 値引き / 消費税 / 合計 と明細の税額が同じ', async () => {
+      const query = `to=${MERCHANT}&token=usdc&amount=11&disc=0.2&tax=10&taxcat=taxable_10&pname=Coffee`;
+      const same = await sameChainReceipt(query);
+      const cross = await crossChainReceipt(query);
+      expect([same.subtotalAmount, same.discountAmount, same.totalTaxAmount]).toEqual(['11.2', '0.2', '1']);
+      expect(assembly(cross)).toEqual(assembly(same));
+    });
+  });
+
   it('値引きが正しくない QR は支払わせない (この QR の値引きが正しくありません)', () => {
     setURL(`to=${MERCHANT}&token=usdc&amount=9.8&disc=0.005`);
     setAccount({ connected: true, chainId: baseSepolia.id });

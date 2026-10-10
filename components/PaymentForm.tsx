@@ -111,9 +111,8 @@ import {
   buildJpycRelaySignPreview,
   buildJpycRecoverSignPreview,
 } from '@/lib/signPreview';
-import { appendPayerReceipt, buildPayerReceipt } from '@/lib/payerReceipt';
+import { appendPayerReceipt, buildPayerReceipt, payerReceiptSale } from '@/lib/payerReceipt';
 import { buildCheckoutLineItems } from '@/lib/checkoutLineItems';
-import { lineItemsDiscountWei } from '@/lib/discount';
 import { RecoverFeeNotice } from './RecoverFeeNotice';
 
 type PaymentAttemptSnapshot = {
@@ -783,7 +782,20 @@ function PaymentDetails({ params }: { params: PayParams }) {
       const snapshot = crossChainAttemptSnapshotRef.current;
       if (!snapshot) return;
       const ctx = snapshot.historyCtx;
-      const snapshotDiscount = lineItemsDiscountWei(ctx.lineItems ?? undefined, deployment.decimals) ?? 0n;
+      // 明細と合計欄 (小計・値引き・消費税) は同一チェーンの控えと同じ組み立て (payerReceiptSale)。明細・値引き・
+      // 税率は試みた時点で固定した ctx から取る (完了までに URL が変わっても、明細・小計・値引き額・税額がそろう)。
+      const sale = payerReceiptSale({
+        asset: params.token,
+        gross: snapshot.amountHuman,
+        lineItems: ctx.lineItems,
+        single: {
+          productName: ctx.productName ?? null,
+          taxRate: ctx.taxRate ?? null,
+          taxCategory: ctx.taxCategory ?? null,
+          memo: ctx.memo ?? null,
+          name: ctx.storeName?.trim() || null,
+        },
+      });
       // localStorage 控えの失敗を成立済み cross-chain 決済へ波及させない処理は、
       // appendPayerReceipt 内の既存 no-throw storage 境界に委ねる。
       appendPayerReceipt(
@@ -799,13 +811,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
           payerAddress: address,
           paymentMode: 'cross-chain',
           gasMode: 'customer',
-          lineItems: ctx.lineItems,
-          // 値引きがあれば 小計 = 支払額 + 値引き。値引きは試みた時点で固定した明細から取る (完了までに URL が
-          // 変わっても、明細の値引き・小計・値引き額がそろう)。
-          subtotalAmount: snapshotDiscount > 0n
-            ? formatUnits(parseUnits(snapshot.amountHuman, deployment.decimals) + snapshotDiscount, deployment.decimals)
-            : snapshot.amountHuman,
-          ...(snapshotDiscount > 0n ? { discountAmount: formatUnits(snapshotDiscount, deployment.decimals) } : {}),
+          ...sale,
           totalAmount: snapshot.amountHuman,
           memo: params.memo ?? null,
           receiptNo: params.receiptNo ?? null,
@@ -822,7 +828,6 @@ function PaymentDetails({ params }: { params: PayParams }) {
     [
       address,
       deployment.address,
-      deployment.decimals,
       locale,
       params.memo,
       params.receiptNo,

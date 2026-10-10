@@ -15,7 +15,6 @@ import { buildCsv } from './csv';
 import { randomId } from './id';
 import { chainNameForId, txExplorerUrl } from './chains';
 import {
-  entryLineItems,
   entryTotals,
   HISTORY_ASSET_DECIMALS,
   HISTORY_ASSET_DISPLAY,
@@ -23,11 +22,13 @@ import {
   type HistoryLineItem,
 } from './history';
 import { displaySymbolFor, type TokenSymbol } from './tokens';
-import { lineItemsTax, taxDisplayDecimals } from './tax';
+import { lineItemsTax, taxDisplayDecimals, type TaxCategory } from './tax';
 import {
   invoiceLookupUrl,
   invoiceReceiptView,
   normalizeInvoiceRegistrationNumber,
+  type InvoiceRate,
+  type InvoiceReceiptView,
 } from './invoice';
 
 export const PAYER_RECEIPTS_STORAGE_KEY = 'openpay:payerReceipts:v1';
@@ -187,39 +188,70 @@ export function buildPayerReceipt(
   };
 }
 
-// 明細 (lineItems) の無い単品 QR の 1 行。金額は顧客が払った総額 (gross) で組み、entry の税率を
-// 引き継ぐ (店舗側の entryLineItems は手取り額で組むため、店主がガス代を負担すると総額とずれる)。
-// 商品名も税率も無ければ [] を返し、buildPayerReceipt の仮想行 (対象外) に任せる。
-function singleReceiptLine(
-  entry: HistoryEntry,
-  grossTotal: string,
-  merchantName?: string | null,
-): HistoryLineItem[] {
-  if (!entry.productName && entry.taxRate == null) return [];
-  // 税額は店舗の履歴・インボイスと同じ関数で (1 行なので税率ごとの税額そのもの)。
-  const taxAmount = lineItemsTax(
-    [{ amount: grossTotal, taxRate: entry.taxRate }],
-    HISTORY_ASSET_DECIMALS[entry.asset],
-    taxDisplayDecimals(entry.asset),
-  ).totalTax;
-  return [
-    {
-      id: `${entry.id}-0`,
-      name:
-        entry.productName ||
-        entry.storeName?.trim() ||
-        merchantName?.trim() ||
-        VIRTUAL_FALLBACK_NAME,
-      quantity: 1,
-      unitPrice: grossTotal,
-      amount: grossTotal,
-      currency: entry.asset,
-      taxRate: entry.taxRate,
-      taxCategory: entry.taxCategory,
-      taxAmount,
-      memo: entry.memo,
-    },
-  ];
+export type PayerReceiptSaleInput = {
+  asset: TokenSymbol;
+  /** 支払総額 (人間可読 decimal・商品の請求額 gross)。 */
+  gross: string;
+  /** 保存された明細 (/checkout・値引きや商品名のある /pay)。無い・空なら単品の 1 行 (single) で組む。 */
+  lineItems?: readonly HistoryLineItem[] | null;
+  /** 明細の無い単品 QR の 1 行の元。商品名も税率も無ければ行を組まない (buildPayerReceipt の仮想行・対象外)。 */
+  single: {
+    productName: string | null;
+    taxRate: number | null;
+    taxCategory: TaxCategory | null;
+    memo: string | null;
+    /** 商品名が無いときの行の名前 (店名)。 */
+    name: string | null;
+  };
+  /** 行の id の接頭辞 (店舗側履歴の entry.id)。無ければ id の無い行は id を持たない。 */
+  idPrefix?: string;
+};
+
+export type PayerReceiptSale = {
+  lineItems: HistoryLineItem[];
+  subtotalAmount: string;
+  discountAmount: string | null;
+  totalTaxAmount: string;
+};
+
+/**
+ * 控えの明細と合計欄 (小計・値引き・消費税) を組む。同一チェーンの控え (payerReceiptFromHistoryEntry) と
+ * /pay の cross-chain の控えが共有する (経路で控えの形を変えない・第 7 回レビュー F1)。
+ *   - 明細があれば各行の通貨と税額を補う。税額は税率ごとに 1 回の端数処理 (lib/tax.ts の lineItemsTax)。
+ *   - 明細が無い単品 QR は支払総額の 1 行 (税率・商品名を引き継ぐ。店舗側の entryLineItems は手取り額で組むので
+ *     使わない: 店主がガス代を負担すると総額とずれる)。商品名も税率も無ければ [] (仮想行に任せる)。
+ *   - 値引き (明細に配った額の合計) があれば 小計 = 支払総額 + 値引き。壊れた値引きは出さない。
+ */
+export function payerReceiptSale(input: PayerReceiptSaleInput): PayerReceiptSale {
+  const { asset, gross, single, idPrefix } = input;
+  const decimals = HISTORY_ASSET_DECIMALS[asset];
+  const stored = input.lineItems && input.lineItems.length > 0 ? input.lineItems : null;
+  const lines: readonly HistoryLineItem[] = stored
+    ?? (!single.productName && single.taxRate == null
+      ? []
+      : [
+          {
+            name: single.productName || single.name?.trim() || VIRTUAL_FALLBACK_NAME,
+            quantity: 1,
+            unitPrice: gross,
+            amount: gross,
+            taxRate: single.taxRate,
+            taxCategory: single.taxCategory,
+            memo: single.memo,
+          },
+        ]);
+  const { lineTax, totalTax } = lineItemsTax(lines, decimals, taxDisplayDecimals(asset));
+  const lineItems = lines.map((li, i) => {
+    const id = li.id ?? (idPrefix !== undefined ? `${idPrefix}-${i}` : undefined);
+    return { ...li, ...(id !== undefined ? { id } : {}), currency: li.currency ?? asset, taxAmount: lineTax[i] };
+  });
+  const discountWei = stored ? (lineItemsDiscountWei(stored, decimals) ?? 0n) : 0n;
+  return {
+    lineItems,
+    subtotalAmount: discountWei > 0n ? formatUnits(parseUnits(gross, decimals) + discountWei, decimals) : gross,
+    discountAmount: discountWei > 0n ? formatUnits(discountWei, decimals) : null,
+    totalTaxAmount: totalTax,
+  };
 }
 
 /** 店舗側 HistoryEntry (sale 成功 leg) → 顧客向け PayerReceipt 写像。 */
@@ -235,26 +267,26 @@ export function payerReceiptFromHistoryEntry(
     now?: Date;
   } = {},
 ): PayerReceipt {
-  const totals = entryTotals(entry);
   // 顧客控えの総額は「商品の請求額 (gross sale)」を使う。店主が gas を吸収する gasMode では
   // merchantAmount は gas 控除後の手取りとなり、顧客が支払った商品代金 (= 明細合計 = saleAmount)
-  // と一致しない。saleAmount を優先し、無い leg は merchantAmount にフォールバック (= totals.total)。
+  // と一致しない。saleAmount を優先し、無い leg は merchantAmount にフォールバック。
   const grossRaw = entry.saleAmount ?? entry.merchantAmount;
   const grossTotal = /^\d+$/.test(grossRaw)
     ? formatUnits(BigInt(grossRaw), HISTORY_ASSET_DECIMALS[entry.asset])
-    : totals.total;
-  // 明細の無い単品は総額 (gross) の 1 行で組み、税額もその行から取る (手取り由来の entryTotals と
-  // 混ぜると、同じ控えの中で行の税額と合計の税額が食い違う)。
-  const single = entry.lineItems && entry.lineItems.length > 0 ? null : singleReceiptLine(entry, grossTotal, opts.merchantName);
-  const lineItems = single ?? entryLineItems(entry);
-  const totalTaxAmount = single && single.length > 0 ? (single[0].taxAmount ?? '0') : totals.totalTax;
-  // レジの値引き: 明細に配った額の合計。小計は値引き前 (= 合計 + 値引き)。壊れた値引きは出さない。
-  const decimals = HISTORY_ASSET_DECIMALS[entry.asset];
-  const discountWei = single ? 0n : (lineItemsDiscountWei(entry.lineItems, decimals) ?? 0n);
-  const discountAmount = discountWei > 0n ? formatUnits(discountWei, decimals) : null;
-  const subtotalAmount = discountWei > 0n
-    ? formatUnits(parseUnits(grossTotal, decimals) + discountWei, decimals)
-    : grossTotal;
+    : entryTotals(entry).total;
+  const sale = payerReceiptSale({
+    asset: entry.asset,
+    gross: grossTotal,
+    lineItems: entry.lineItems,
+    single: {
+      productName: entry.productName,
+      taxRate: entry.taxRate,
+      taxCategory: entry.taxCategory,
+      memo: entry.memo,
+      name: entry.storeName?.trim() || opts.merchantName?.trim() || null,
+    },
+    idPrefix: entry.id,
+  });
   const status: PayerReceiptStatus =
     entry.status === 'success'
       ? 'confirmed'
@@ -275,10 +307,7 @@ export function payerReceiptFromHistoryEntry(
       payerAddress: entry.customer,
       paymentMode: entry.payMode,
       gasMode: entry.gasMode,
-      lineItems,
-      subtotalAmount,
-      discountAmount,
-      totalTaxAmount,
+      ...sale,
       totalAmount: grossTotal,
       memo: entry.memo,
       receiptNo: entry.receiptNo,
@@ -537,8 +566,39 @@ export function formatReceiptDateTime(
 }
 
 /** タックスが計上されている (内税 > 0) か。小計/税額行の表示要否に使う。 */
-export function payerReceiptHasTax(r: PayerReceipt): boolean {
+export function payerReceiptHasTax(r: PayerReceipt): r is PayerReceipt & { totalTaxAmount: string } {
   return !!r.totalTaxAmount && r.totalTaxAmount !== '0';
+}
+
+export type PayerReceiptSummaryRow =
+  | { kind: 'subtotal' | 'discount' | 'tax' | 'total'; amount: string }
+  | { kind: 'invoiceGroup'; rate: InvoiceRate; total: string; tax: string };
+
+/**
+ * 控えの合計欄の行 (画面 PayerReceiptDetail とコピー文が共有する。出し分けはここだけ・第 7 回レビュー F20)。
+ *   1. 値引きがある → 小計 (値引き前・保存されていれば) → 値引き。以下の税率ごとの額・合計は値引き後。
+ *   2. インボイス欄を出せる → 税率ごとの税込合計と消費税額 (円・税率ごとに 1 回の端数処理)。消費税の合計
+ *      (totalTaxAmount) は並べない (修正前に保存された控えは行ごとに丸めた合計で、同じ控えで数字が食い違うため)。
+ *   3. それ以外で税額がある → 小計 (値引きの無いときだけ。値引きがあれば 1 で出した) → 消費税。税額 0 は合計だけ。
+ *   4. 合計 (支払総額)。
+ */
+export function payerReceiptSummaryRows(
+  r: PayerReceipt,
+  invoice: InvoiceReceiptView | null = invoiceReceiptView(r),
+): PayerReceiptSummaryRow[] {
+  const rows: PayerReceiptSummaryRow[] = [];
+  if (r.discountAmount) {
+    if (r.subtotalAmount) rows.push({ kind: 'subtotal', amount: r.subtotalAmount });
+    rows.push({ kind: 'discount', amount: r.discountAmount });
+  }
+  if (invoice) {
+    for (const g of invoice.groups) rows.push({ kind: 'invoiceGroup', rate: g.rate, total: g.total, tax: g.tax });
+  } else if (payerReceiptHasTax(r)) {
+    if (r.subtotalAmount && !r.discountAmount) rows.push({ kind: 'subtotal', amount: r.subtotalAmount });
+    rows.push({ kind: 'tax', amount: r.totalTaxAmount });
+  }
+  rows.push({ kind: 'total', amount: r.totalAmount ?? r.amount });
+  return rows;
 }
 
 /** レシート控えのプレーンテキスト (コピー用)。 */
@@ -560,23 +620,10 @@ export function payerReceiptCopyText(r: PayerReceipt, locale?: string): string {
     lines.push(`${li.name} x ${li.quantity}${reduced}    ${li.amount} ${r.currency}`);
   }
   lines.push('');
-  // レジの値引き: 小計 (値引き前) → 値引き。以下の税率ごとの額・合計は値引き後。
-  if (r.discountAmount) {
-    if (r.subtotalAmount) lines.push(`${en ? 'Subtotal' : '小計'}：${r.subtotalAmount} ${r.currency}`);
-    lines.push(`${en ? 'Discount' : '値引き'}：−${r.discountAmount} ${r.currency}`);
+  // 合計欄 (小計 → 値引き → 税率ごと | 消費税 → 合計)。出し分けは画面と共有 (payerReceiptSummaryRows)。
+  for (const row of payerReceiptSummaryRows(r, invoice)) {
+    lines.push(summaryRowCopyLine(row, r.currency, en));
   }
-  if (invoice) {
-    // インボイス欄: 税率ごとの税込合計と消費税額 (円・税率ごとに 1 回の端数処理)。
-    // 消費税の合計 (totalTaxAmount) は並べない (修正前に保存された控えは行ごとに丸めた合計で、同じ控えで数字が食い違うため)。
-    for (const g of invoice.groups) {
-      lines.push(invoiceGroupCopyLine(g.rate, g.total, g.tax, r.currency, en));
-    }
-  } else if (payerReceiptHasTax(r)) {
-    // 税額が計上されているときだけ小計/消費税を併記 (0 のときは合計のみで十分)。
-    if (r.subtotalAmount && !r.discountAmount) lines.push(`${en ? 'Subtotal' : '小計'}：${r.subtotalAmount} ${r.currency}`);
-    lines.push(`${en ? 'Tax' : '消費税'}：${r.totalTaxAmount} ${r.currency}`);
-  }
-  lines.push(`${en ? 'Total' : '合計'}：${r.totalAmount ?? r.amount} ${r.currency}`);
   if (invoice?.hasReducedRate) {
     lines.push(en ? '※ Reduced tax rate (8%) item' : '※ は軽減税率 (8%) の対象です');
   }
@@ -611,19 +658,24 @@ export function payerReceiptCopyText(r: PayerReceipt, locale?: string): string {
   return lines.join('\n');
 }
 
-function invoiceGroupCopyLine(
-  rate: number,
-  total: string,
-  tax: string,
-  currency: string,
-  en: boolean,
-): string {
-  if (rate === 0) {
-    return `${en ? 'Tax-exempt / out of scope' : '非課税・対象外'}：${total} ${currency}`;
+function summaryRowCopyLine(row: PayerReceiptSummaryRow, currency: string, en: boolean): string {
+  switch (row.kind) {
+    case 'subtotal':
+      return `${en ? 'Subtotal' : '小計'}：${row.amount} ${currency}`;
+    case 'discount':
+      return `${en ? 'Discount' : '値引き'}：−${row.amount} ${currency}`;
+    case 'tax':
+      return `${en ? 'Tax' : '消費税'}：${row.amount} ${currency}`;
+    case 'total':
+      return `${en ? 'Total' : '合計'}：${row.amount} ${currency}`;
+    case 'invoiceGroup':
+      if (row.rate === 0) {
+        return `${en ? 'Tax-exempt / out of scope' : '非課税・対象外'}：${row.total} ${currency}`;
+      }
+      return en
+        ? `${row.rate}% items：${row.total} ${currency} (incl. consumption tax ¥${row.tax})`
+        : `${row.rate}% 対象：${row.total} ${currency}（うち消費税 ${row.tax} 円）`;
   }
-  return en
-    ? `${rate}% items：${total} ${currency} (incl. consumption tax ¥${tax})`
-    : `${rate}% 対象：${total} ${currency}（うち消費税 ${tax} 円）`;
 }
 
 /** JSON エクスポート (レシートそのまま・秘密情報なし)。インボイス欄を出せる控えは税率別の集計も添える
