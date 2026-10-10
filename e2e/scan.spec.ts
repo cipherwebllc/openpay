@@ -253,7 +253,7 @@ test.describe('/scan: 実 qr-scanner 統合 (LARP 防御)', () => {
 test.describe('/scan: 実 camera → decode → router.push (LARP 完全防御)', () => {
   test('canvas-backed fake camera で QR を decode し /pay へ実 navigate', async ({
     page,
-  }) => {
+  }, testInfo) => {
     // QR の payload: scanner が parseScannedUrl で同 origin (http://localhost:3000)
     // と判定し /ja/pay へ router.push する文字列。
     const QR_PAYLOAD = `http://localhost:3000/pay?to=${TO}&token=usdc&amount=10`;
@@ -347,6 +347,14 @@ test.describe('/scan: 実 camera → decode → router.push (LARP 完全防御)'
     }, qrDataUrl);
 
     await page.goto('/ja/scan');
+    // iPhone の UA では、hydration 後の effect で上の PWA ヒントが汎用の 1 行から iOS の 3 手順に切り替わり、
+    // 「カメラを起動」が数十 px 下へずれる (SSR と初回描画は UA を見ない)。CI の mobile-safari では、その切替の
+    // 前後で押した click が onClick に届かないことがあった (失敗時の snapshot は毎回、ボタンが focus を持った
+    // まま idle = 押下は当たったが start は走っていない)。切替の済んだ表示 (= hydration と mount 後の effect が
+    // 済み、ボタンの位置が決まった印) を待ってから押す。desktop の UA (chromium) は汎用の 1 行のまま変わらない。
+    if (testInfo.project.name === 'mobile-safari') {
+      await expect(page.getByText('「ホーム画面に追加」を選択')).toBeVisible();
+    }
     await page.getByRole('button', { name: 'カメラを起動' }).click();
 
     // qr-scanner が fake stream を decode → ScanShell の handleScanned が

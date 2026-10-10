@@ -32,6 +32,11 @@ async function openOfframp(page: Page): Promise<Locator> {
 
 // 受取先を保存済みにして開く (returning user)。会計画面の要約に短いアドレスが出たら hydrate 完了の印
 // (fill → inputValue の一致だけでは React の handler が動いた証拠にならない)。「設定」ボタンを返す。
+// 続けて、金額欄の autofocus が済むのを待つ。金額欄は server の HTML に autofocus 属性を持ち、focus を
+// 移すのは React ではなくブラウザ。WebKit は描画の更新のときに 1 回だけ移し、そのとき別の要素に focus が
+// あっても奪う (仕様にある「もう focus があれば autofocus しない」の判定が WebKit に無い)。CI の
+// mobile-safari は描画の更新が遅れ、テストが設定ボタンへ移した focus や開いたシートの focus が後から金額欄へ
+// 奪われていた (失敗時の snapshot は毎回 金額欄が active)。autofocus は 1 ページ 1 回きりなので、済めば奪われない。
 async function hydratedSettingsButton(page: Page): Promise<Locator> {
   await page.addInitScript(() => {
     window.localStorage.setItem('openpay:qr-settings:v2', JSON.stringify({
@@ -40,6 +45,7 @@ async function hydratedSettingsButton(page: Page): Promise<Locator> {
   });
   await page.goto('/ja/create');
   await expect(page.getByText('0x52d4…cA81').first()).toBeVisible({ timeout: 15000 });
+  await expect(page.getByRole('textbox', { name: '請求金額 (JPYC)' })).toBeFocused({ timeout: 15000 });
   return page.getByRole('button', { name: '設定', exact: true });
 }
 
