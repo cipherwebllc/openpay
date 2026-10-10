@@ -169,7 +169,8 @@ const observed = {};
 for (const line of lines) {
   const shared = parseSharedTotal(line);
   if (shared !== null) {
-    observed.__shared__ = shared;
+    // App / Pages の表ごとに出るので最大値を保持する (後の表の小さい値で先の表の超過を消さない)。
+    observed.__shared__ = Math.max(observed.__shared__ ?? 0, shared);
     continue;
   }
   // Route 表の行は "Size" と "First Load JS" の 2 つのサイズを含む (判定は ROUTE_ROW_RE)。

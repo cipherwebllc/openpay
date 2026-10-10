@@ -237,6 +237,21 @@ ${SHARED_ROW}
     });
   });
 
+  // Next は App / Pages の表ごとに "First Load JS shared by all" を出す。後の値で上書きすると、先の表の
+  // 超過が後の表の小さい値に消される (Codex #789 4 回目 P3)。共有値は最大値を保持する。
+  it('keeps the largest shared total when a later table (Pages) prints a smaller one', () => {
+    const pagesTable = `
+Route (pages)                                        Size  First Load JS
+─ ○ /legacy-report                                  12 kB         100 kB
++ First Load JS shared by all                      100 kB
+`;
+    const result = runGate(NORMAL_BUILD_OUTPUT.replace(SHARED_ROW, '+ First Load JS shared by all                      199 kB') + pagesTable);
+
+    expect(result.status).toBe(1);
+    expect(result.stdout).toContain('[OVER] __shared__: 199 kB / 予算 198 kB');
+    expect(result.stdout).not.toContain('[OK] __shared__');
+  });
+
   it('accepts a route with zero-byte First Load JS', () => {
     const result = runGate(NORMAL_BUILD_OUTPUT.replace(MANIFEST_ROW, '├ ○ /manifest.webmanifest   0 B   0 B'));
 
