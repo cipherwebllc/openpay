@@ -80,6 +80,19 @@ describe('installed-scripts-gate CLI', () => {
     expect(result.stderr).toContain('binding.gyp');
   });
 
+  // Codex レビュー 3 回目 (PR #778) 2: 旧設計 (npm ci → 走査) では optional な binding.gyp 依存の暗黙ビルドが失敗すると
+  // npm が実体を消し、走査が通ってしまった。防止の設計では `npm ci --ignore-scripts` が build を走らせないので実体は
+  // 必ず残り、展開直後の走査で捕まる (= 実行されない)。lockfile に hasInstallScript が無くても同じ。
+  it('catches an optional native package with binding.gyp right after extraction, before any build could remove it', () => {
+    pkg('node_modules/optional-native', { name: 'optional-native', optional: true, scripts: { test: 'node test.js' } }, { 'binding.gyp': '{ "targets": [{ "target_name": "addon" }] }' });
+    const npm = fakeNpm();
+    const result = run(['--rebuild', 'node_modules'], { PATH: npm.path });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('node_modules/optional-native');
+    expect(result.stderr).toContain('binding.gyp');
+    expect(npm.calls()).toEqual([]); // 承認されない限り何も rebuild (= 実行) しない
+  });
+
   it('accepts an allowlisted package shipped with binding.gyp', () => {
     pkg('node_modules/keccak', { name: 'keccak', scripts: { install: 'node-gyp-build || exit 0' } }, { 'binding.gyp': '{}' });
     expect(run().status).toBe(0);
