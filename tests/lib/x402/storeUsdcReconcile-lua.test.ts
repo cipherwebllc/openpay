@@ -9,6 +9,8 @@ const h = vi.hoisted(() => ({
   store: null as FakeRedisStore | null,
   calls: [] as LuaCall[],
   failGet: false,
+  // この接頭辞のキーの GET だけ失敗させる (キー単位の KV 障害)。
+  failGetPrefix: null as string | null,
   failClaimOnce: false,
   failReschedule: false,
   // 設定時だけ、予算付き reconcile が作る bounded client (と client なしのページ取得) をこの fake に差し替える。
@@ -31,6 +33,7 @@ vi.mock('@/lib/kv', () => ({
       h.failClaimOnce = false;
       return { ok: false };
     }
+    if (h.failGetPrefix !== null && key.startsWith(h.failGetPrefix)) return { ok: false };
     return h.failGet ? { ok: false } : { ok: true, value: h.store!.strings.get(key) ?? null };
   },
   kvEval: async (script: string, keys: string[], args: string[]) => {
@@ -189,6 +192,7 @@ beforeEach(() => {
   h.store = createFakeRedisStore(NOW);
   h.calls = [];
   h.failGet = false;
+  h.failGetPrefix = null;
   h.failClaimOnce = false;
   h.failReschedule = false;
   h.bounded = null;
@@ -438,6 +442,41 @@ describe('USDC reconciliation with real Lua and receipt verification', () => {
     expect(client.getTransactionReceipt).toHaveBeenCalledWith({ hash: OLD });
     expect(client.getLogs).toHaveBeenCalled();
     await expectSettled();
+  });
+
+  // Codex 12 回目 P2 の再現: 正規・確定済みの保存 hash の finalize が KV 障害 (ownership キーの GET だけ失敗) で storage を
+  // 返す。replacement の探索を続けた後の保存の CAS は成功するので、印が無いと pending として数えられ、cron は storageErrors 0・
+  // 警告なしで、支払い済みの購入が解錠されないまま監視から見えなくなる → 応答は pending のまま、finalize の storage を独立に
+  // 記録して batch の storageErrors に数え、warn を 1 回出す。
+  it('counts a storage failure of the stored hash finalize even when the later reschedule succeeds', async () => {
+    const intent = await active(TX);
+    const client = chain(intent.nonce);
+    h.failGetPrefix = `store:own:`;
+    expect(await reconcilePendingStoreUsdcPurchases({ now: CHECKED_AT, client })).toEqual({
+      checked: 1, settled: 0, failed: 0, pending: 0, storageErrors: 1, deferred: 0,
+    });
+    expect(vi.mocked(logger.warn).mock.calls.filter(([event]) => event === 'creator_store.usdc_purchase_finalize_storage_failed'))
+      .toEqual([['creator_store.usdc_purchase_finalize_storage_failed', { intentSalt: SALT }]]);
+    // 応答は pending (探索と進捗の保存は続けた)。保存 hash は保持したまま、次の照合の時刻も保存されている。
+    expect(rawIntent()).toMatchObject({ state: 'indeterminate', txHash: TX, nextReconcileAt: CHECKED_AT + STORE_USDC_RECONCILE_RETRY_MS });
+    vi.mocked(logger.warn).mockClear();
+    expect(await reconcileStoreUsdcIntent(SALT, { now: CHECKED_AT + 30_000, client })).toEqual({ ok: true, state: 'pending', finalizeStorageError: true });
+    // KV が戻れば同じ保存 hash から確定する。
+    h.failGetPrefix = null;
+    expect(await reconcilePendingStoreUsdcPurchases({ now: CHECKED_AT + 60_000, client })).toEqual({
+      checked: 1, settled: 1, failed: 0, pending: 0, storageErrors: 0, deferred: 0,
+    });
+    await expectSettled();
+  });
+
+  // 正常系 (保存 hash が finality 待ち = pending_finality) では障害として数えず、warn も出さない。
+  it('does not count a stored hash that is merely awaiting finality as a storage failure', async () => {
+    const intent = await active(TX);
+    const client = chain(intent.nonce, { latest: 100n, bad: 'finality' });
+    expect(await reconcilePendingStoreUsdcPurchases({ now: CHECKED_AT, client })).toEqual({
+      checked: 1, settled: 0, failed: 0, pending: 1, storageErrors: 0, deferred: 0,
+    });
+    expect(vi.mocked(logger.warn).mock.calls.some(([event]) => event === 'creator_store.usdc_purchase_finalize_storage_failed')).toBe(false);
   });
 
   it.each(['amount', 'canonical'] as const)('advances past conclusively mismatched candidate evidence (%s)', async (bad) => {

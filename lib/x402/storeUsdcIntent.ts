@@ -1377,13 +1377,32 @@ async function reschedule(
 }
 
 type ReconcileStoreUsdcResult =
-  | { ok: true; state: 'settled' | 'pending' | 'failed' }
+  | { ok: true; state: 'settled' | 'failed' }
+  // finalizeStorageError = 保存済み hash の finalize が storage を返した回 (応答は pending のまま・batch は障害として数える)。
+  | { ok: true; state: 'pending'; finalizeStorageError?: true }
   | { ok: false; reason: 'not_found' | 'storage' | 'corrupt' };
+
+type ReconcileObservation = { finalizeStorage: boolean };
 
 export async function reconcileStoreUsdcIntent(
   intentSalt: Hex,
   // deadline = 経過時間の予算 (epoch ms・第 7 回レビュー B4)。到達後はページを取りに行かず途中 cursor を保存する。
   input: { now?: number; client?: StoreUsdcPublicClient; deadline?: number } = {},
+): Promise<ReconcileStoreUsdcResult> {
+  const observed: ReconcileObservation = { finalizeStorage: false };
+  const result = await reconcileStoreUsdcIntentOnce(intentSalt, input, observed);
+  // 保存済み hash の finalize が storage を返した回は、replacement の探索を続けた後の保存が成功して pending を返しても
+  // 障害の印を消さない。キー単位の KV 障害 (ownership の GET だけ失敗する等) は後の保存の CAS では現れず、印が無いと
+  // cron の集計にも警告にも出ないまま、支払い済みの購入が解錠されずに残る (Codex 12 回目 P2)。
+  return observed.finalizeStorage && result.ok && result.state === 'pending'
+    ? { ...result, finalizeStorageError: true }
+    : result;
+}
+
+async function reconcileStoreUsdcIntentOnce(
+  intentSalt: Hex,
+  input: { now?: number; client?: StoreUsdcPublicClient; deadline?: number },
+  observed: ReconcileObservation,
 ): Promise<ReconcileStoreUsdcResult> {
   const read = await readIntent(intentSalt);
   if (!read.ok) return { ok: false, reason: read.reason };
@@ -1548,8 +1567,8 @@ export async function reconcileStoreUsdcIntent(
   //    なので、finalize をそのまま呼んで照合を 1 回にする (finalize の検査と確定 CAS はそのまま)。
   //    confirmed なら確定。それ以外 (finality 待ち・照合不能・旧フォーク・証拠の不一致・読み取り障害・期限切れ) は保存 hash を
   //    保持したまま、同じ回で replacement の探索へ進む — finalize の 'storage' は照合の読み取り障害も含むので、保存 hash の
-  //    待ちが探索を止めないよう探索へ進める (KV の障害なら後の保存の CAS でも失敗して監視に記録される)。intent そのものの
-  //    欠落/破損 (not_found / corrupt) だけはそのまま返す。
+  //    待ちが探索を止めないよう探索へ進める。'storage' は探索とは独立に記録し (warn・batch の storageErrors)、後の保存が
+  //    成功しても消さない (Codex 12 回目 P2)。intent そのものの欠落/破損 (not_found / corrupt) だけはそのまま返す。
   if (intent.txHash) {
     const storedHash = intent.txHash;
     const finalizeClient = rpcClient();
@@ -1564,6 +1583,15 @@ export async function reconcileStoreUsdcIntent(
     if (finalized.ok) return { ok: true, state: 'settled' };
     if (finalized.reason === 'not_found' || finalized.reason === 'corrupt') {
       return { ok: false, reason: finalized.reason };
+    }
+    if (finalized.reason === 'storage') {
+      observed.finalizeStorage = true;
+      // 監視の記録の失敗を replacement の探索と進捗の保存 (照合の本体) へ波及させない。
+      try {
+        logger.warn('creator_store.usdc_purchase_finalize_storage_failed', { intentSalt });
+      } catch {
+        // 記録できなくても探索は続ける (上記の波及を断つ)。
+      }
     }
     // 保存 hash は保留候補の列に入れない (次回も保存 hash として直接 finalize に渡す)。
     undefer(storedHash);
@@ -1749,6 +1777,9 @@ export async function reconcilePendingStoreUsdcPurchases(input: {
           reason: result.reason,
         });
       }
+    } else if (result.state === 'pending' && result.finalizeStorageError) {
+      // 応答は pending でも、保存済み hash の finalize の storage は障害として数える (監視から見えなくしない)。
+      summary.storageErrors += 1;
     } else {
       summary[result.state] += 1;
     }
