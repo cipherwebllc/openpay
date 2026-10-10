@@ -1100,27 +1100,39 @@ operator demo の Gateway total は API の預入残高であり、経路の利�
       設定済か確認。**未設定の場合 `lib/logger.ts` の Sentry.captureMessage は
       silent no-op となり alert は飛ばない**。
 
-**alert rule 登録** (正本 = `scripts/setup-sentry-alerts.mjs` の `RULES`):
-- [ ] `SENTRY_AUTH_TOKEN` + `SENTRY_ORG_SLUG` + `SENTRY_PROJECT_SLUG` を取得し
-      `node scripts/setup-sentry-alerts.mjs --dry-run` で計画 (create / update / keep / retire)
-      を確認 (GET だけ・何も変えない)
-- [ ] `node scripts/setup-sentry-alerts.mjs` で適用 (無い rule は POST、同名または旧名
-      `legacyNames` の rule は conditions / filters / environment / actionMatch / filterMatch が
-      違えば PUT で更新 = 再実行で収束)。PUT は rule 全体を上書きするので、既存の通知先
-      (Slack 等の actions) は script が引き継ぐ (計画の `[actions 保持: …]`)。通知先を変えるのは
-      Dashboard で
-- [ ] `retire` に出た rule (発火元が無くなったもの・`RETIRED_RULE_NAMES`) は script が削除しない
-      ので Sentry Dashboard → Alerts で手動削除
-- [ ] Dashboard で無効化 (disabled) 中の rule は既定では更新しない (PUT は再有効化して止めていた通知を
-      再開するため)。計画の `! skip` を見て、再有効化してよいものだけ `--include-disabled` で更新
-- [ ] Sentry Dashboard → Alerts で `RULES` と同数の rule・environment=mainnet を目視確認
+**alert 登録** (正本 = `scripts/setup-sentry-alerts.mjs` の `RULES`。Sentry のアラートは Workflow Engine の
+workflow で、script は `/api/0/organizations/{org}/workflows/`・`/detectors/` を使う。旧 Issue Alert Rules API
+(`/projects/{org}/{project}/rules/`) は 2026-09-24 に Sentry 本体から削除され 404 を返す):
+- [ ] `SENTRY_AUTH_TOKEN` (scope は Alerts: Read & Write = `alerts:read` + `alerts:write`)・`SENTRY_ORG_SLUG`・
+      `SENTRY_PROJECT_SLUG` (slug か数値の project ID) を入れ (token は `read -s SENTRY_AUTH_TOKEN && export
+      SENTRY_AUTH_TOKEN` で画面と履歴に出さない)、`node scripts/setup-sentry-alerts.mjs --dry-run` で計画
+      (create / update / keep / skip / retire / 管理外) を確認 (GET だけ・何も変えない)
+- [ ] 計画の前に出る `Issue Stream detector: id=…` が project の Issue Stream (Sentry → Monitors) であることを確認
+      (workflow はこの detector を通して project に結び付く)
+- [ ] `node scripts/setup-sentry-alerts.mjs` で適用 (無い workflow は POST、同名または旧名 `legacyNames` の
+      workflow は条件・environment・frequency・detector が違えば PUT で更新 = 再実行で収束)。PUT は送った条件と
+      通知先で置き換えるので、既存の通知先 (メールの宛先・Slack 等の actions) と owner は script が引き継ぐ
+      (計画の `[actions 保持: …]`)。通知先を変えるのは Dashboard で
+- [ ] もう一度 `--dry-run` で `create 0 / update 0` を確認
+- [ ] `retire` に出た workflow (発火元が無くなったもの・`RETIRED_RULE_NAMES`) は script が削除しないので Sentry
+      Dashboard → Alerts で手動削除。`管理外` (RULES に無い名前: Sentry 既定の通知・Dashboard で手で作ったもの) には
+      触らない
+- [ ] Dashboard で無効化中の workflow は既定では更新しない。計画の `! skip` を見て、再有効化してよいものだけ
+      `--include-disabled` で更新 (`enabled: true` で送る)
+- [ ] 同じ name の workflow が複数あると script は止まる (Sentry の name に一意制約は無い)。Dashboard で重複を
+      消すか名前を変えてから再実行
+- [ ] Sentry Dashboard → Alerts で `RULES` と同数の alert・environment=mainnet を目視確認
 
 **threshold の考え方** (2026-10-10 第 7 回レビュー E6 で較正):
 - 旧閾値「alpha 想定 1000 tx/h の 5%」は実トラフィック (外部の実購入が月数件) では決済が
   全滅しても届かなかった。money-path は閾値 0 (1 件目で通知・同じ issue への再通知は 1h に 1 回)、
   一過性や客側の失敗が混ざるものは 2〜3、客のブラウザ由来は 10。
 - 再較正は Sentry → Issues の実頻度を見て `RULES` を直し、`--dry-run` で差分を見てから適用
-  (旧 rule の削除は不要)。
+  (旧 workflow の削除は不要)。
+- workflow の trigger は `every_event` (event ごとに評価)。Dashboard で新規作成したときの既定の trigger
+  (新しい issue・resolved・escalates・regresses) は issue の状態が変わったときしか評価しないので、続いている
+  issue の 2 件目以降では鳴らない。閾値つきの通知を Dashboard で作るときも trigger を
+  「An event or issue activity is captured」にする。
 
 **動作確認**:
 - [ ] テスト event を 1 度発火させて alert 通知が来ることを目視確認
@@ -1375,18 +1387,24 @@ gh run list --workflow=pimlico-balance.yml --repo=cipherwebllc/openpay --limit 1
   | grep -E 'balance|skip'
 ```
 
-### §11.3 Sentry alert rules (一度限り setup)
+### §11.3 Sentry alert (一度限り setup・`RULES` を変えたら再実行)
+
+旧 Issue Alert Rules API は 2026-09-24 に Sentry 本体から削除された (https://github.com/getsentry/sentry/pull/121879)。
+script は新しいアラート API (Workflow Engine の workflows / detectors) を使う。
 
 ```bash
-SENTRY_AUTH_TOKEN=... SENTRY_ORG_SLUG=... SENTRY_PROJECT_SLUG=... \
-  node scripts/setup-sentry-alerts.mjs --dry-run   # 計画だけ (GET のみ)
-SENTRY_AUTH_TOKEN=... SENTRY_ORG_SLUG=... SENTRY_PROJECT_SLUG=... \
-  node scripts/setup-sentry-alerts.mjs             # 適用 (POST / PUT)
+read -s SENTRY_AUTH_TOKEN && export SENTRY_AUTH_TOKEN   # Alerts: Read & Write の token (画面にも履歴にも出さない)
+export SENTRY_ORG_SLUG=<org slug> SENTRY_PROJECT_SLUG=openpay   # project は数値の ID でも可
+node scripts/setup-sentry-alerts.mjs --dry-run   # 計画だけ (GET のみ)
+node scripts/setup-sentry-alerts.mjs             # 適用 (POST / PUT)
+node scripts/setup-sentry-alerts.mjs --dry-run   # create 0 / update 0 を確認
 ```
 
-idempotent — 無い rule は POST、同名 (旧名 `legacyNames` も) の rule は差分があれば PUT、
-差分が無ければ keep。発火元の無い rule は `retire` として出すだけ (Dashboard で手動削除)。
-実行履歴を私 (operator) が気付けるよう Sentry Dashboard → Alerts → Issue Alerts で目視確認。
+idempotent — 無い workflow は POST、同名 (旧名 `legacyNames` も) の workflow は差分があれば PUT、
+差分が無ければ keep。発火元の無い workflow は `retire` として出すだけ (Dashboard で手動削除)、`RULES` に無い
+名前の workflow は `管理外` として触らない。実行後は Sentry Dashboard → Alerts で目視確認。
+API が異常応答を返したときは status・メソッド・path と本文のキー名だけを出す。本文の全文 (送った宛先が入りうる) は
+`SENTRY_ALERTS_DEBUG=1` を付けて再実行したときだけ表示する。
 
 ### §11.4 「verify-production-config.mjs」が 0 件 ✗ で deploy 認可
 

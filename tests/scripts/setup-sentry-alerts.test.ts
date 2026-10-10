@@ -1,7 +1,8 @@
 // scripts/setup-sentry-alerts.mjs の unit test。
-// API 通信を実発火しないように、RULES の静的シェイプ・buildRulePayload・planRules (差分計画) と
-// formatPlan (dry-run の出力) を検証する。main() の挙動 (GET → 計画 → POST/PUT、dry-run は GET のみ)
-// は fetch を mock した integration としてこのファイル内で完結検証する。
+// API 通信を実発火しないように、RULES の静的シェイプ・buildWorkflowPayload・planRules (差分計画)・
+// resolveIssueStreamDetector・formatPlan (dry-run の出力) を検証する。main() の挙動 (GET → 計画 → POST/PUT、
+// dry-run は GET のみ) は、Sentry の Workflow Engine API (workflows / detectors) を模した fetch の fake で
+// このファイル内で完結検証する。fixture の ID・宛先はすべてダミー (本番の実データからは形だけを写す)。
 
 import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest';
 import { readdirSync, readFileSync } from 'node:fs';
@@ -12,13 +13,21 @@ import { logger } from '@/lib/logger';
 import {
   RULES,
   RETIRED_RULE_NAMES,
-  buildRulePayload,
+  buildWorkflowPayload,
   planRules,
   formatPlan,
+  resolveIssueStreamDetector,
+  verifyFallbackDetector,
+  describeErrorBody,
+  nextCursor,
   type AlertRule,
-  type ExistingRule,
-  type SentryRulePayload,
+  type ExistingDetector,
+  type ExistingWorkflow,
+  type PlanOptions,
   type TagMatch,
+  type WorkflowAction,
+  type WorkflowConditionGroup,
+  type WorkflowPayload,
 } from '../../scripts/setup-sentry-alerts.mjs';
 
 // lib/logger を spy 化 (Sentry / console へは出さない)。実配線 (makeRespond) を通した tag の確認に使う。
@@ -27,35 +36,6 @@ vi.mock('@/lib/logger', () => ({
 }));
 
 const byTag = (t: string) => RULES.find((r) => r.eventTags.includes(t));
-
-const SLACK_ACTION = {
-  id: 'sentry.rules.actions.notify_event_service.SlackNotifyServiceAction',
-  workspace: 12345,
-  channel: '#openpay-alerts',
-  tags: 'event',
-};
-
-// Sentry が POST / PUT の payload を保存して GET で返すときの補完を模す (src/sentry/rules/conditions/
-// event_frequency.py の comparisonType 既定 'count'・serializer が足す表示用 name・rule レベルの付随 field)。
-// 往復 (POST → GET) で本 script が差分を出さない = 冪等であることをこの形で検証する。
-function sentryStored(payload: SentryRulePayload, id: string): ExistingRule {
-  return {
-    id,
-    ...payload,
-    conditions: payload.conditions.map((c) => ({
-      ...c,
-      ...(c.id.endsWith('EventFrequencyCondition') ? { comparisonType: 'count' } : {}),
-      name: `The issue is seen more than ${c.value} times in ${c.interval}`,
-    })),
-    filters: payload.filters.map((f) => ({
-      ...f,
-      name: `The event's tags match ${f.key} ${f.match} ${f.value}`,
-    })),
-    actions: payload.actions.map((a) => ({ ...a, name: 'Send a notification (for all legacy integrations)' })),
-    // rule レベルで Sentry が足す field (比較対象外)。
-    ...({ dateCreated: '2026-10-10T00:00:00Z', status: 'active', owner: null, projects: ['openpay'], snooze: false } as object),
-  };
-}
 
 // import の module specifier をリポジトリ相対のモジュール path に解決する ('@/lib/logger' / './logger' /
 // '../logger' → 'lib/logger')。拡張子は付けない。
@@ -217,9 +197,220 @@ function wiredTags(respondPrefixes: Set<string>): Set<string> {
   return tags;
 }
 
-// 第 7 回レビュー E6 以前の 14 rule が Sentry に登録されている状態 (name・閾値・tag は旧 RULES のまま)。
-// planRules の fixture と dry-run 出力の固定に使う。
-const LEGACY_SENTRY_RULES: ExistingRule[] = [
+// ---- Sentry (Workflow Engine) の fixture・fake ----------------------------------------------------
+
+const ORG = 'test-org';
+const PROJECT = 'test-project';
+const PROJECT_ID = '4500000000000001';
+const DETECTOR = '7000001';
+const ALL_PROJECTS_DETECTOR = '7000002';
+const ORG_URL = `https://sentry.io/api/0/organizations/${ORG}`;
+
+// 本番の detectors 一覧と同じ形 (Error Monitor・Issue Stream・Uptime・全 project 用の Issue Stream)。
+const DETECTORS: ExistingDetector[] = [
+  { id: '7000000', projectId: PROJECT_ID, name: 'Error Monitor', type: 'error' },
+  { id: DETECTOR, projectId: PROJECT_ID, name: 'Issue Stream', type: 'issue_stream' },
+  { id: '7000003', projectId: PROJECT_ID, name: 'Uptime Monitoring', type: 'uptime_domain_failure' },
+  { id: ALL_PROJECTS_DETECTOR, projectId: null, name: 'Issue Stream: All Projects', type: 'issue_stream' },
+];
+
+// 新 UI の既定の trigger (本番の relay failure (mainnet) 等の形)。issue の状態変化のときだけ評価される。
+const UI_DEFAULT_TRIGGERS = ['first_seen_event', 'issue_resolved_trigger', 'reappeared_event', 'regression_event'];
+
+// 通知先 (宛先の ID は架空)。
+const USER_EMAIL: WorkflowAction = {
+  type: 'email',
+  integrationId: null,
+  data: {},
+  config: { targetType: 'user', targetDisplay: null, targetIdentifier: '1000001' },
+  status: 'active',
+};
+const SLACK: WorkflowAction = {
+  type: 'slack',
+  integrationId: '55',
+  data: { tags: 'event' },
+  config: { targetType: 'specific', targetDisplay: '#openpay-alerts', targetIdentifier: 'C000001' },
+  status: 'active',
+};
+// 旧 NotifyEventAction 相当 (script が新規作成に使う既定の通知先)。
+const DEFAULT_EMAIL: WorkflowAction = {
+  type: 'email',
+  integrationId: null,
+  data: { fallthroughType: 'ActiveMembers' },
+  config: { targetType: 'issue_owners', targetDisplay: null, targetIdentifier: '' },
+  status: 'active',
+};
+// Sentry が保存して GET で返す既定の通知先 (targetIdentifier '' は null で返る)。
+const DEFAULT_EMAIL_STORED: WorkflowAction = {
+  ...DEFAULT_EMAIL,
+  config: { ...DEFAULT_EMAIL.config, targetIdentifier: null },
+};
+
+let serverId = 90000;
+const sid = () => String(serverId++);
+
+// Sentry が保存した data condition group (GET の形): group・条件・action に id と organizationId が付く。
+function storedGroup(g: WorkflowConditionGroup): WorkflowConditionGroup {
+  return {
+    id: sid(),
+    organizationId: '1',
+    logicType: g.logicType,
+    conditions: g.conditions.map((c) => ({
+      id: sid(),
+      type: c.type,
+      comparison: c.comparison,
+      conditionResult: c.conditionResult,
+    })),
+    actions: (g.actions ?? []).map((a) => ({
+      id: sid(),
+      ...a,
+      config: {
+        ...a.config,
+        targetIdentifier: a.config?.targetIdentifier === '' ? null : (a.config?.targetIdentifier ?? null),
+      },
+    })),
+  };
+}
+
+// Sentry が POST / PUT の body を保存して GET で返す形を模す。PUT は渡した top-level キーだけを更新し (enabled は
+// 省くと validator の既定 true)、triggers / actionFilters は渡した内容が正 (id 無し = 置き換え)。
+function sentryStored(body: Partial<WorkflowPayload>, id: string, prev?: ExistingWorkflow): ExistingWorkflow {
+  const base: ExistingWorkflow = prev ?? {
+    id,
+    name: '',
+    organizationId: '1',
+    createdBy: '1',
+    dateCreated: '2026-10-10T00:00:00Z',
+    dateUpdated: '2026-10-10T00:00:00Z',
+    triggers: null,
+    actionFilters: [],
+    environment: null,
+    config: {},
+    detectorIds: [],
+    enabled: true,
+    lastTriggered: null,
+    owner: null,
+  };
+  return {
+    ...base,
+    id,
+    dateUpdated: '2026-10-11T00:00:00Z',
+    ...(body.name !== undefined ? { name: body.name } : {}),
+    enabled: body.enabled ?? true,
+    ...('environment' in body ? { environment: body.environment ?? null } : {}),
+    ...(body.config !== undefined ? { config: { ...body.config } } : {}),
+    ...(body.detectorIds !== undefined ? { detectorIds: body.detectorIds.map(String) } : {}),
+    ...(body.triggers !== undefined ? { triggers: storedGroup(body.triggers) } : {}),
+    ...(body.actionFilters !== undefined ? { actionFilters: body.actionFilters.map(storedGroup) } : {}),
+    ...('owner' in body ? { owner: body.owner ?? null } : {}),
+  };
+}
+
+// RULES の 1 件を script が作った形のまま Sentry に保存した workflow。
+const stored = (rule: AlertRule, id: string, extra: Partial<ExistingWorkflow> = {}): ExistingWorkflow => ({
+  ...sentryStored(buildWorkflowPayload(rule, 'mainnet', DETECTOR), id),
+  ...extra,
+});
+
+// 新 UI で作った workflow の形 (本番の relay failure (mainnet) 等と同じ: 既定の 4 trigger・tag と件数の組・frequency 0)。
+function uiShaped(
+  id: string,
+  name: string,
+  tag: string,
+  value: number,
+  interval: string,
+  action: WorkflowAction = USER_EMAIL,
+): ExistingWorkflow {
+  return sentryStored(
+    {
+      name,
+      enabled: true,
+      environment: 'mainnet',
+      config: { frequency: 0 },
+      detectorIds: [DETECTOR],
+      triggers: {
+        logicType: 'any-short',
+        conditions: UI_DEFAULT_TRIGGERS.map((type) => ({ type, comparison: true, conditionResult: true })),
+      },
+      actionFilters: [
+        {
+          logicType: 'all',
+          conditions: [
+            { type: 'tagged_event', comparison: { key: 'event', match: 'eq', value: tag }, conditionResult: true },
+            { type: 'event_frequency_count', comparison: { value, interval }, conditionResult: true },
+          ],
+          actions: [action],
+        },
+      ],
+    },
+    id,
+  );
+}
+
+// 本番の workflow 6 件と同じ名前・形 (ID・宛先はダミー): 新 UI で作った 4 件 + Sentry 既定の 2 件。
+// relay failure (mainnet) と relayer balance low (mainnet) は RULES の legacyNames に載っている (上書き更新して
+// 重複させない)。残り 4 件は管理外。
+const PROD_NAMES = [
+  'Send a notification for high priority issues',
+  'relay failure (mainnet)',
+  'relayer balance low (mainnet)',
+  'relay misconfig (mainnet)',
+  'OpenPay billing failures',
+  'Send a notification when pull requests are ready',
+];
+function prodLikeWorkflows(): ExistingWorkflow[] {
+  const billing = uiShaped('3000005', PROD_NAMES[4], 'billing.', 0, '1h', DEFAULT_EMAIL);
+  billing.actionFilters = [
+    {
+      ...billing.actionFilters![0],
+      conditions: [
+        { id: sid(), type: 'tagged_event', comparison: { key: 'event', match: 'sw', value: 'billing.' }, conditionResult: true },
+      ],
+    },
+  ];
+  const defaults = (id: string, name: string, triggers: WorkflowConditionGroup['conditions'], detector: string) =>
+    sentryStored(
+      {
+        name,
+        enabled: true,
+        environment: 'mainnet',
+        config: { frequency: 0 },
+        detectorIds: [detector],
+        triggers: { logicType: 'any-short', conditions: triggers },
+        actionFilters: [{ logicType: 'any-short', conditions: [], actions: [DEFAULT_EMAIL] }],
+      },
+      id,
+    );
+  return [
+    defaults(
+      '3000001',
+      PROD_NAMES[0],
+      ['new_high_priority_issue', 'existing_high_priority_issue'].map((type) => ({
+        type,
+        comparison: true,
+        conditionResult: true,
+      })),
+      DETECTOR,
+    ),
+    uiShaped('3000002', PROD_NAMES[1], 'relay.jpyc.relay_error', 3, '5m'),
+    uiShaped('3000003', PROD_NAMES[2], 'relay.relayer.balance_low', 1, '1h'),
+    uiShaped('3000004', PROD_NAMES[3], 'relay.jpyc.misconfig', 1, '1h'),
+    billing,
+    defaults(
+      '3000006',
+      PROD_NAMES[5],
+      [{ type: 'seer_activity_trigger', comparison: ['pr_ready_for_review'], conditionResult: true }],
+      ALL_PROJECTS_DETECTOR,
+    ),
+  ];
+}
+// 管理外のまま残る 4 件 (Sentry 既定 2 件・relay misconfig・billing の前方一致)。
+const PROD_UNMANAGED_NAMES = [PROD_NAMES[0], PROD_NAMES[3], PROD_NAMES[4], PROD_NAMES[5]];
+const prodUnmanagedWorkflows = (): ExistingWorkflow[] =>
+  prodLikeWorkflows().filter((w) => PROD_UNMANAGED_NAMES.includes(w.name));
+
+// 第 7 回レビュー E6 以前の 14 rule (name・閾値・tag は旧 RULES のまま) が workflow として登録されている状態。
+const LEGACY: Array<[string, string, number]> = [
   ['payment.failed rate exceeded (alpha threshold)', 'payment.failed', 50],
   ['smart-account.init-failed rate exceeded', 'smart-account.init-failed', 10],
   ['x402.middleware.error rate exceeded', 'x402.middleware.error', 10],
@@ -234,31 +425,57 @@ const LEGACY_SENTRY_RULES: ExistingRule[] = [
   ['billing.settle.release-failed (idempotency lock burned)', 'billing.settle.release-failed', 1],
   ['billing.meter.record-failed (usage volume undercount)', 'billing.meter.record_failed', 5],
   ['billing.revenue.record-failed (revenue ledger gap)', 'billing.revenue.record_failed', 3],
-].map(([suffix, tag, value], i) => ({
-  id: String(100 + i),
-  name: `OpenPay: ${suffix}`,
-  environment: 'mainnet',
-  actionMatch: 'all',
-  filterMatch: 'all',
-  frequency: 60,
-  conditions: [
-    {
-      id: 'sentry.rules.conditions.event_frequency.EventFrequencyCondition',
-      name: `The issue is seen more than ${value} times in 1h`,
-      value,
-      interval: '1h',
-    },
-  ],
-  filters: [
-    {
-      id: 'sentry.rules.filters.tagged_event.TaggedEventFilter',
-      key: 'event',
-      match: 'eq',
-      value: String(tag),
-    },
-  ],
-  actions: [{ id: 'sentry.rules.actions.notify_event.NotifyEventAction' }],
-}));
+];
+const legacyWorkflows = (): ExistingWorkflow[] =>
+  LEGACY.map(([suffix, tag, value], i) =>
+    stored({ name: `OpenPay: ${suffix}`, description: '', eventTags: [tag], threshold: value, interval: '1h' }, String(100 + i)),
+  );
+
+// Workflow Engine API の fake。GET はページング (Link ヘッダの cursor) し、POST / PUT は sentryStored で保存する。
+// detectors は project で絞った一覧の応答、detectorDetails は GET /detectors/{id}/ が引く先 (既定は DETECTORS 全部)。
+type FakeOptions = {
+  workflows: ExistingWorkflow[];
+  detectors?: ExistingDetector[];
+  detectorDetails?: ExistingDetector[];
+  pageSize?: number;
+};
+function fakeSentry({ workflows, detectors = DETECTORS, detectorDetails = DETECTORS, pageSize = 100 }: FakeOptions) {
+  const store = new Map(workflows.map((w) => [w.id, w]));
+  let nextId = 500;
+  const page = (items: unknown[], url: URL) => {
+    const cursor = url.searchParams.get('cursor');
+    const offset = cursor === null ? 0 : Number(cursor.split(':')[1]);
+    const more = offset + pageSize < items.length;
+    const self = `${url.origin}${url.pathname}`;
+    const link =
+      `<${self}?cursor=0:0:1>; rel="previous"; results="false"; cursor="0:0:1", ` +
+      `<${self}?cursor=0:${offset + pageSize}:0>; rel="next"; results="${more}"; cursor="0:${offset + pageSize}:0"`;
+    return new Response(JSON.stringify(items.slice(offset, offset + pageSize)), { status: 200, headers: { link } });
+  };
+  const handler = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const url = new URL(String(input));
+    const method = init?.method ?? 'GET';
+    if (url.pathname === `/api/0/organizations/${ORG}/workflows/`) {
+      if (method === 'GET') return page([...store.values()], url);
+      if (method === 'POST') {
+        const id = String(nextId++);
+        store.set(id, sentryStored(JSON.parse(String(init!.body)), id));
+        return new Response(JSON.stringify(store.get(id)), { status: 201 });
+      }
+    }
+    if (url.pathname === `/api/0/organizations/${ORG}/detectors/` && method === 'GET') return page(detectors, url);
+    const d = url.pathname.match(new RegExp(`^/api/0/organizations/${ORG}/detectors/(\\d+)/$`));
+    const detail = d ? detectorDetails.find((x) => x.id === d[1]) : undefined;
+    if (detail && method === 'GET') return new Response(JSON.stringify(detail), { status: 200 });
+    const m = url.pathname.match(new RegExp(`^/api/0/organizations/${ORG}/workflows/(\\d+)/$`));
+    if (m && method === 'PUT' && store.has(m[1])) {
+      store.set(m[1], sentryStored(JSON.parse(String(init!.body)), m[1], store.get(m[1])));
+      return new Response(JSON.stringify(store.get(m[1])), { status: 200 });
+    }
+    return new Response('not found', { status: 404, statusText: 'Not Found' });
+  };
+  return { store, handler };
+}
 
 describe('setup-sentry-alerts: RULES schema', () => {
   it('全 rule に name / description / eventTags / threshold / interval が定義済・name はユニーク', () => {
@@ -285,6 +502,9 @@ describe('setup-sentry-alerts: RULES schema', () => {
         expect(RETIRED_RULE_NAMES).not.toContain(legacy);
       }
     }
+    // 1 つの旧名は 1 つの rule にだけ属する (2 つの rule が同じ既存 workflow を取り合わない)。
+    const legacy = RULES.flatMap((r) => r.legacyNames ?? []);
+    expect(new Set(legacy).size).toBe(legacy.length);
   });
 
   it('閾値は実トラフィック (外部の実購入が月数件) で発火しうる値: 全 rule が 10 以下・money-path は 0 (1 件目で通知)', () => {
@@ -357,13 +577,12 @@ describe('setup-sentry-alerts: RULES schema', () => {
     const sa = byTag('smart-account.init-failed');
     expect(sa?.match).toBe('ew');
     // 接尾一致なので tip.smart-account.init-failed / checkout.smart-account.init-failed も対象。
-    const payload = buildRulePayload(sa!);
-    expect(payload.filters).toEqual([
+    const payload = buildWorkflowPayload(sa!, 'mainnet', DETECTOR);
+    expect(payload.actionFilters.map((g) => g.conditions[0])).toEqual([
       {
-        id: 'sentry.rules.filters.tagged_event.TaggedEventFilter',
-        key: 'event',
-        match: 'ew',
-        value: 'smart-account.init-failed',
+        type: 'tagged_event',
+        comparison: { key: 'event', match: 'ew', value: 'smart-account.init-failed' },
+        conditionResult: true,
       },
     ]);
   });
@@ -505,7 +724,7 @@ describe('setup-sentry-alerts: emit 抽出器 (extractEmits) は lib/logger の 
   });
 });
 
-describe('setup-sentry-alerts: buildRulePayload', () => {
+describe('setup-sentry-alerts: buildWorkflowPayload', () => {
   const SAMPLE: AlertRule = {
     name: 'test rule',
     description: 'sample rule',
@@ -514,526 +733,809 @@ describe('setup-sentry-alerts: buildRulePayload', () => {
     interval: '1h',
   };
 
-  it('Sentry API 想定 schema を生成する (name / environment / conditions / filters / actions)', () => {
-    const payload = buildRulePayload(SAMPLE, 'mainnet');
-    expect(payload.name).toBe('test rule');
-    expect(payload.environment).toBe('mainnet');
-    expect(payload.actionMatch).toBe('all');
-    expect(payload.filterMatch).toBe('any');
-    expect(payload.frequency).toBe(60);
-    // comparisonType は Sentry 側の既定 'count' を明示する (GET が補って返す値と揃え、往復で差分を出さない)。
-    expect(payload.conditions).toEqual([
-      {
-        id: 'sentry.rules.conditions.event_frequency.EventFrequencyCondition',
-        comparisonType: 'count',
-        value: 3,
-        interval: '1h',
+  it('Workflow Engine の形 (every_event の trigger・tag と件数の組・既定の通知先・detector・frequency 60) を作る', () => {
+    expect(buildWorkflowPayload(SAMPLE, 'mainnet', DETECTOR)).toEqual({
+      name: 'test rule',
+      enabled: true,
+      environment: 'mainnet',
+      config: { frequency: 60 },
+      detectorIds: [DETECTOR],
+      triggers: {
+        logicType: 'any-short',
+        conditions: [{ type: 'every_event', comparison: true, conditionResult: true }],
       },
-    ]);
-    expect(payload.filters).toEqual([
-      {
-        id: 'sentry.rules.filters.tagged_event.TaggedEventFilter',
-        key: 'event',
-        match: 'eq',
-        value: 'payment.failed',
-      },
-    ]);
-    expect(payload.actions).toEqual([
-      { id: 'sentry.rules.actions.notify_event.NotifyEventAction' },
-    ]);
+      actionFilters: [
+        {
+          logicType: 'all',
+          conditions: [
+            { type: 'tagged_event', comparison: { key: 'event', match: 'eq', value: 'payment.failed' }, conditionResult: true },
+            { type: 'event_frequency_count', comparison: { value: 3, interval: '1h' }, conditionResult: true },
+          ],
+          actions: [DEFAULT_EMAIL],
+        },
+      ],
+    });
   });
 
-  it('複数 tag は TaggedEventFilter を tag ごとに並べ filterMatch=any (OR) にする', () => {
-    const payload = buildRulePayload({ ...SAMPLE, eventTags: ['a.b', 'c.d'] }, 'mainnet');
-    expect(payload.filterMatch).toBe('any');
-    expect(payload.filters.map((f) => f.value)).toEqual(['a.b', 'c.d']);
+  it('triggers は毎 event 評価の every_event だけ (新 UI 既定の 4 trigger = issue の状態変化だけ、にはしない)', () => {
+    for (const r of RULES) {
+      const types = buildWorkflowPayload(r, 'mainnet', DETECTOR).triggers.conditions.map((c) => c.type);
+      expect(types, r.name).toEqual(['every_event']);
+      for (const t of UI_DEFAULT_TRIGGERS) expect(types).not.toContain(t);
+    }
   });
 
-  it('environment の既定は mainnet (通知は本番だけ・手元は local-<network>・#709)。production は存在しない', () => {
-    expect(buildRulePayload(SAMPLE).environment).toBe('mainnet');
-    expect(buildRulePayload(SAMPLE, 'testnet').environment).toBe('testnet');
-    for (const r of RULES) expect(buildRulePayload(r).environment).toBe('mainnet');
+  it('複数 tag は tag ごとの組 [tagged_event, event_frequency_count] を並べる (組同士は OR)・通知先は組ごとに別オブジェクト', () => {
+    const payload = buildWorkflowPayload({ ...SAMPLE, eventTags: ['a.b', 'c.d'] }, 'mainnet', DETECTOR);
+    expect(
+      payload.actionFilters.map((g) => [g.logicType, ...g.conditions.map((c) => (c.comparison as { value: unknown }).value)]),
+    ).toEqual([
+      ['all', 'a.b', 3],
+      ['all', 'c.d', 3],
+    ]);
+    expect(payload.actionFilters[0].actions[0]).not.toBe(payload.actionFilters[1].actions[0]);
+  });
+
+  it('environment の既定は mainnet (通知は本番だけ・手元は local-<network>・#709)。detector 未指定なら detectorIds は空', () => {
+    expect(buildWorkflowPayload(SAMPLE).environment).toBe('mainnet');
+    expect(buildWorkflowPayload(SAMPLE, 'testnet').environment).toBe('testnet');
+    expect(buildWorkflowPayload(SAMPLE).detectorIds).toEqual([]);
+    for (const r of RULES) expect(buildWorkflowPayload(r).environment).toBe('mainnet');
+  });
+});
+
+describe('setup-sentry-alerts: resolveIssueStreamDetector / nextCursor', () => {
+  it('project の issue_stream を選ぶ (Error Monitor・Uptime・全 project 用 (projectId=null) の detector は使わない)', () => {
+    expect(resolveIssueStreamDetector(DETECTORS, [], PROJECT)).toEqual({ id: DETECTOR, source: 'detectors' });
+    expect(resolveIssueStreamDetector(DETECTORS, [], PROJECT_ID)).toEqual({ id: DETECTOR, source: 'detectors' });
+  });
+
+  it('数値の project ID と projectId が一致しない issue_stream は使わない', () => {
+    expect(() => resolveIssueStreamDetector(DETECTORS, [], '4500000000000999')).toThrow(/特定できません/);
+  });
+
+  it('project の issue_stream が複数なら止める', () => {
+    const two = [...DETECTORS, { id: '7000009', projectId: '4500000000000002', type: 'issue_stream' }];
+    expect(() => resolveIssueStreamDetector(two, [], PROJECT)).toThrow(/複数あります \(7000001, 7000009\)/);
+  });
+
+  it('一覧に無ければ管理対象 workflow の detectorIds から拾う (管理外の workflow の detector は使わない)', () => {
+    const managed = stored(RULES[0], '1');
+    expect(resolveIssueStreamDetector([], [managed, ...prodUnmanagedWorkflows()], PROJECT)).toEqual({
+      id: DETECTOR,
+      source: 'workflows',
+    });
+    // legacyNames で引き当たる本番の手作り alert (relay failure 等) も管理対象として数える。
+    expect(resolveIssueStreamDetector([], prodLikeWorkflows(), PROJECT)).toEqual({ id: DETECTOR, source: 'workflows' });
+    expect(() => resolveIssueStreamDetector([], prodUnmanagedWorkflows(), PROJECT)).toThrow(/detectorIds は \(none\)/);
+    const other = stored(RULES[1], '2', { detectorIds: ['7000005'] });
+    expect(() => resolveIssueStreamDetector([], [managed, other], PROJECT)).toThrow(/detectorIds は 7000001,7000005/);
+  });
+
+  describe('verifyFallbackDetector: fallback の候補は詳細で型と project を確かめる', () => {
+    // project で絞った一覧に Issue Stream が出ない状況 (Error Monitor・Uptime だけ・どちらも projectId を持つ)。
+    const listed = DETECTORS.filter((d) => d.type !== 'issue_stream');
+    const byId = (id: string) => DETECTORS.find((d) => d.id === id)!;
+
+    it('issue_stream で対象 project のものなら通す (slug は一覧の projectId・数値は ID そのもので照合)', () => {
+      expect(() => verifyFallbackDetector(byId(DETECTOR), PROJECT, listed)).not.toThrow();
+      expect(() => verifyFallbackDetector(byId(DETECTOR), PROJECT_ID, [])).not.toThrow();
+    });
+
+    it('Issue Stream でない detector (error 型など) は止める', () => {
+      expect(() => verifyFallbackDetector(byId('7000000'), PROJECT, listed)).toThrow(/type error で、Issue Stream ではありません/);
+    });
+
+    it('別 project・全 project 用の Issue Stream は止める', () => {
+      const elsewhere = { id: '7000009', projectId: '4500000000000002', type: 'issue_stream' };
+      expect(() => verifyFallbackDetector(elsewhere, PROJECT, listed)).toThrow(/project 4500000000000002 の Issue Stream で/);
+      expect(() => verifyFallbackDetector(elsewhere, PROJECT_ID, [])).toThrow(/対象 project 4500000000000001/);
+      expect(() => verifyFallbackDetector(byId(ALL_PROJECTS_DETECTOR), PROJECT, listed)).toThrow(/\(全 project\)/);
+    });
+
+    it('slug で project の ID が一覧から 1 つに決まらなければ (空・複数 project) 判断できないので止める', () => {
+      expect(() => verifyFallbackDetector(byId(DETECTOR), PROJECT, [])).toThrow(/確かめられない/);
+      const mixed = [...listed, { id: '7000010', projectId: '4500000000000002', type: 'error' }];
+      expect(() => verifyFallbackDetector(byId(DETECTOR), PROJECT, mixed)).toThrow(/確かめられない/);
+    });
+  });
+
+  describe('describeErrorBody: 異常応答の本文は JSON のキーの path だけ (値に宛先が入りうる)', () => {
+    it('入れ子のキーを path で出し、値は出さない', () => {
+      const body = JSON.stringify({
+        actionFilters: [{ actions: [{ config: ['user 1000001 is not a member of this organization'] }] }],
+        detail: 'invalid',
+      });
+      const out = describeErrorBody(body);
+      expect(out).toBe('本文のキー: actionFilters[0].actions[0].config, detail');
+      expect(out).not.toContain('1000001');
+    });
+
+    it('JSON でない本文は字数だけ・キーの無い本文はその旨・多すぎるキーは件数で省く', () => {
+      expect(describeErrorBody('<html>Bad Gateway</html>')).toBe('JSON でない本文・24 字');
+      expect(describeErrorBody('["only a message"]')).toBe('キーの無い本文');
+      const many = JSON.stringify(Object.fromEntries(Array.from({ length: 25 }, (_, i) => [`k${i}`, 'v'])));
+      expect(describeErrorBody(many)).toMatch(/k19 ほか 5 件$/);
+    });
+  });
+
+  it('Link ヘッダの rel="next" の cursor を取り、results="false"・ヘッダ無しは null', () => {
+    const link = (more: boolean) =>
+      '<https://sentry.io/api/0/organizations/o/workflows/?&cursor=0:0:1>; rel="previous"; results="false"; cursor="0:0:1", ' +
+      `<https://sentry.io/api/0/organizations/o/workflows/?&cursor=0:100:0>; rel="next"; results="${more}"; cursor="0:100:0"`;
+    expect(nextCursor(link(true))).toBe('0:100:0');
+    expect(nextCursor(link(false))).toBeNull();
+    expect(nextCursor(null)).toBeNull();
+    expect(nextCursor('')).toBeNull();
   });
 });
 
 describe('setup-sentry-alerts: planRules / formatPlan (dry-run の出力を固定)', () => {
-  it('空の Sentry に対しては全 rule が create・retire なし', () => {
-    const plan = planRules([], RULES, 'mainnet');
-    expect(plan.create.map((r) => r.name)).toEqual(RULES.map((r) => r.name));
-    expect(plan.update).toEqual([]);
-    expect(plan.unchanged).toEqual([]);
-    expect(plan.retire).toEqual([]);
+  const plan = (existing: ExistingWorkflow[], opts: PlanOptions = {}) =>
+    planRules(existing, RULES, 'mainnet', { detectorId: DETECTOR, ...opts });
+  const ruleOf = (tag: string) => RULES.find((r) => r.eventTags[0] === tag)!;
+  const GRANT = 'billing.settle.grant-failed';
+  const HISTORY = 'history.load.unreadable-entries-preserved';
+  const GRANT_GROUP = 'all[billing.settle.grant-failed + event_frequency_count > 0 / 1h]';
+
+  it('空の Sentry に対しては全 rule が create・retire / 管理外なし', () => {
+    const p = plan([]);
+    expect(p.create.map((r) => r.name)).toEqual(RULES.map((r) => r.name));
+    expect(p.update).toEqual([]);
+    expect(p.unchanged).toEqual([]);
+    expect(p.retire).toEqual([]);
+    expect(p.unmanaged).toEqual([]);
+    for (const c of p.create) expect(c.payload.detectorIds).toEqual([DETECTOR]);
   });
 
-  it('現行 RULES をそのまま登録済みの Sentry に対しては全 rule が unchanged (冪等)', () => {
-    const existing: ExistingRule[] = RULES.map((r, i) => ({
-      id: String(i),
-      ...buildRulePayload(r, 'mainnet'),
-    }));
-    const plan = planRules(existing, RULES, 'mainnet');
-    expect(plan.create).toEqual([]);
-    expect(plan.update).toEqual([]);
-    expect(plan.unchanged).toHaveLength(RULES.length);
+  it('Sentry の保存形 (id・organizationId・日付・targetIdentifier null) を経た GET に対しては全 rule が unchanged (往復で冪等)', () => {
+    const p = plan(RULES.map((r, i) => stored(r, String(i))));
+    expect(p.update.map((u) => `${u.name}: ${u.changes.join('; ')}`)).toEqual([]);
+    expect(p.unchanged).toHaveLength(RULES.length);
   });
 
-  it('E6 以前の 14 rule が登録済みの Sentry に対する計画: 旧 name は rename + 閾値更新、新 rule は create、発火元の無い rule は retire', () => {
-    const plan = planRules(LEGACY_SENTRY_RULES, RULES, 'mainnet');
-    const updated = Object.fromEntries(plan.update.map((u) => [u.name, u]));
-    // 旧 name から rename される 2 件 (id は旧 rule を引き継ぐ)。
+  it('条件・comparison のキーの並び順や数値の文字列化が違っても同じ workflow', () => {
+    const w = stored(ruleOf(GRANT), '4');
+    const g = w.actionFilters![0];
+    w.actionFilters = [
+      {
+        ...g,
+        conditions: [...g.conditions].reverse().map((c) => ({
+          conditionResult: c.conditionResult,
+          comparison: Object.fromEntries(
+            Object.entries(c.comparison as object).map(([k, v]) => [k, typeof v === 'number' ? String(v) : v]).reverse(),
+          ),
+          type: c.type,
+          id: c.id,
+        })),
+      },
+    ];
+    expect(plan([w]).unchanged).toHaveLength(1);
+  });
+
+  it('本番と同じ 6 件: 手作りの 2 件は legacyNames で引き当てて上書き更新 (重複させない)、残り 4 件は管理外で触らない', () => {
+    const p = plan(prodLikeWorkflows());
+    expect(p.update.map((u) => [u.id, u.previousName, u.name])).toEqual([
+      ['3000003', 'relayer balance low (mainnet)', 'OpenPay: relayer の残高不足 (relay.relayer.balance_low)'],
+      ['3000002', 'relay failure (mainnet)', 'OpenPay: JPYC ガスレス中継の失敗 (relay.jpyc.*)'],
+    ]);
+    expect(p.create).toHaveLength(RULES.length - 2);
+    expect(p.create.map((c) => c.name)).not.toContain('OpenPay: JPYC ガスレス中継の失敗 (relay.jpyc.*)');
+    expect(p.unchanged).toEqual([]);
+    expect(p.retire).toEqual([]);
+    expect(p.unmanaged.map((u) => u.name)).toEqual(PROD_UNMANAGED_NAMES);
+    const lines = formatPlan(p, 'mainnet');
+    expect(lines[0]).toBe(
+      `[setup-sentry-alerts] plan (environment=mainnet): create ${RULES.length - 2} / update 2 / unchanged 0 / retire 0 / 管理外 (触らない) 4`,
+    );
+    expect(lines).toContain('  · 管理外  relay misconfig (mainnet) (id=3000004): RULES に無い名前 → 触らない');
+    expect(lines).toContain('  · 管理外  OpenPay billing failures (id=3000005): RULES に無い名前 → 触らない');
+    expect(lines).toContain('  · 管理外  Send a notification for high priority issues (id=3000001): RULES に無い名前 → 触らない');
+    expect(lines).toHaveLength(1 + RULES.length + 4);
+  });
+
+  it('legacyNames で引き当てた手作りの alert: 名前を RULES に改め、trigger・条件・閾値を RULES どおりに直し、通知先 (user 宛てメール) は保持する', () => {
+    const p = plan(prodLikeWorkflows());
+    const triggers =
+      'triggers any-short[first_seen_event + issue_resolved_trigger + reappeared_event + regression_event] → any-short[every_event]';
+    const relay = p.update.find((u) => u.id === '3000002')!;
+    expect(relay.changes).toEqual([
+      'rename from "relay failure (mainnet)"',
+      'frequency 0 → 60',
+      triggers,
+      'threshold 3 → 0',
+      'interval 5m → 1h',
+      'filters relay.jpyc.relay_error → relay.jpyc.relay_error + relay.jpyc.reverted + relay.jpyc.misconfig + relay.jpyc.forwarder_invalid',
+    ]);
+    expect(relay.keptActions).toEqual(['email (user)']);
+    expect(relay.payload.name).toBe('OpenPay: JPYC ガスレス中継の失敗 (relay.jpyc.*)');
+    expect(relay.payload.triggers.conditions.map((c) => c.type)).toEqual(['every_event']);
+    expect(relay.payload.actionFilters).toHaveLength(4);
+    for (const g of relay.payload.actionFilters) expect(g.actions).toEqual([USER_EMAIL]);
+    expect(relay.payload).not.toHaveProperty('owner');
+    const balance = p.update.find((u) => u.id === '3000003')!;
+    expect(balance.changes).toEqual([
+      'rename from "relayer balance low (mainnet)"',
+      'frequency 0 → 60',
+      triggers,
+      'threshold 1 → 0',
+    ]);
+    expect(formatPlan(p, 'mainnet')).toContain(
+      '  ~ update  OpenPay: relayer の残高不足 (relay.relayer.balance_low) (id=3000003): ' +
+        `rename from "relayer balance low (mainnet)"; frequency 0 → 60; ${triggers}; threshold 1 → 0 [actions 保持: email (user)]`,
+    );
+    // owner (担当) があれば保持する (PUT に owner キーを載せない = Sentry は owner を変えない)。
+    const owned = prodLikeWorkflows().map((w) => (w.id === '3000003' ? { ...w, owner: 'user:1000001' } : w));
+    const ownedUpdate = plan(owned).update.find((u) => u.id === '3000003')!;
+    expect(ownedUpdate.keptOwner).toBe('user:1000001');
+    expect(ownedUpdate.payload).not.toHaveProperty('owner');
+  });
+
+  it('手作りの relay failure と relay misconfig は同じ rule に当たるので、legacyNames に両方は載せない (載せると止まる)', () => {
+    const jpyc = RULES.find((r) => r.name === 'OpenPay: JPYC ガスレス中継の失敗 (relay.jpyc.*)')!;
+    expect(jpyc.legacyNames).toEqual(['relay failure (mainnet)']);
+    const both = [{ ...jpyc, legacyNames: ['relay failure (mainnet)', 'relay misconfig (mainnet)'] }];
+    expect(() => planRules(prodLikeWorkflows(), both, 'mainnet', { detectorId: DETECTOR })).toThrow(/複数/);
+  });
+
+  it('E6 以前の 14 rule が登録済みの計画: 旧 name は rename + 閾値更新、tag の追加は filters の行、発火元の無いものは retire', () => {
+    const p = plan(legacyWorkflows());
+    const updated = Object.fromEntries(p.update.map((u) => [u.name, u]));
     expect(updated['OpenPay: 支払いフォームの失敗 (payment / tip / checkout)']).toMatchObject({
       id: '100',
       previousName: 'OpenPay: payment.failed rate exceeded (alpha threshold)',
+      changes: [
+        'rename from "OpenPay: payment.failed rate exceeded (alpha threshold)"',
+        'threshold 50 → 3',
+        'filters payment.failed → payment.failed + tip.failed + checkout.failed',
+      ],
     });
+    // tag ごとの組 3 つに、既存の通知先を載せる。
+    expect(updated['OpenPay: 支払いフォームの失敗 (payment / tip / checkout)'].payload.actionFilters.map((g) => g.actions)).toEqual([
+      [DEFAULT_EMAIL_STORED],
+      [DEFAULT_EMAIL_STORED],
+      [DEFAULT_EMAIL_STORED],
+    ]);
     expect(updated['OpenPay: smart-account.init-failed (全フォーム・接尾一致)']).toMatchObject({
       id: '101',
-      previousName: 'OpenPay: smart-account.init-failed rate exceeded',
+      changes: [
+        'rename from "OpenPay: smart-account.init-failed rate exceeded"',
+        'threshold 10 → 2',
+        'filters smart-account.init-failed → ends-with smart-account.init-failed',
+      ],
     });
-    // 同名で閾値だけ変わる 11 件。
-    expect(updated['OpenPay: history.load.unreadable-entries-preserved spike']?.changes).toEqual([
-      'threshold 100 → 10',
-    ]);
-    expect(updated['OpenPay: billing.settle.grant-failed (paid but not credited)']?.changes).toEqual([
-      'threshold 3 → 0',
-    ]);
-    expect(plan.update).toHaveLength(13);
-    expect(plan.unchanged).toEqual([]);
-    expect(plan.retire).toEqual([
-      { id: '102', name: 'OpenPay: x402.middleware.error rate exceeded' },
-    ]);
-    expect(plan.create).toHaveLength(RULES.length - 13);
+    expect(updated['OpenPay: history.load.unreadable-entries-preserved spike']?.changes).toEqual(['threshold 100 → 10']);
+    expect(updated['OpenPay: billing.settle.grant-failed (paid but not credited)']?.changes).toEqual(['threshold 3 → 0']);
+    expect(p.update).toHaveLength(13);
+    expect(p.unchanged).toEqual([]);
+    expect(p.retire).toEqual([{ id: '102', name: 'OpenPay: x402.middleware.error rate exceeded' }]);
+    expect(p.create).toHaveLength(RULES.length - 13);
+    expect(p.unmanaged).toEqual([]);
   });
 
-  it('Sentry の補完 (comparisonType=count・表示用 name・rule の付随 field) を経た GET に対しては全 rule が unchanged (往復で冪等)', () => {
-    const stored = RULES.map((r, i) => sentryStored(buildRulePayload(r, 'mainnet'), String(i)));
-    const plan = planRules(stored, RULES, 'mainnet');
-    expect(plan.update.map((u) => `${u.name}: ${u.changes.join('; ')}`)).toEqual([]);
-    expect(plan.unchanged).toHaveLength(RULES.length);
-  });
-
-  it('comparisonType=percent (前期間比) の既存 rule は count とは別物なので update', () => {
-    const rule = RULES.find((r) => r.eventTags[0] === 'billing.settle.grant-failed')!;
-    const stored = sentryStored(buildRulePayload(rule, 'mainnet'), '3');
-    stored.conditions![0] = { ...stored.conditions![0], comparisonType: 'percent', comparisonInterval: '1d' };
-    const plan = planRules([stored], RULES, 'mainnet');
-    expect(plan.update[0]?.changes).toEqual(['comparisonType percent → count', 'comparisonInterval 1d → (none)']);
-  });
-
-  it('閾値と比較種別が同時に変わるときも、比較種別・比較間隔の変更を計画に出す (threshold だけで隠さない・Codex P3)', () => {
-    const rule = RULES.find((r) => r.eventTags[0] === 'history.load.unreadable-entries-preserved')!;
-    const stored = sentryStored(buildRulePayload(rule, 'mainnet'), '6');
-    stored.conditions![0] = { ...stored.conditions![0], value: 100, comparisonType: 'percent', comparisonInterval: '1d' };
-    const plan = planRules([stored], RULES, 'mainnet');
-    expect(plan.update[0]?.changes).toEqual([
-      'threshold 100 → 10',
-      'comparisonType percent → count',
-      'comparisonInterval 1d → (none)',
-    ]);
-    // value / interval 以外が同じなら (閾値だけの変更) 詳細差分は出ない。
-    const onlyValue = sentryStored(buildRulePayload(rule, 'mainnet'), '6');
-    onlyValue.conditions![0] = { ...onlyValue.conditions![0], value: 100 };
-    expect(planRules([onlyValue], RULES, 'mainnet').update[0]?.changes).toEqual(['threshold 100 → 10']);
-  });
-
-  it('filter のキー順が違っても (match は明示) 同じ filter (Codex P3)', () => {
-    const rule = RULES.find((r) => r.eventTags[0] === 'billing.settle.grant-failed')!;
-    const stored = sentryStored(buildRulePayload(rule, 'mainnet'), '4');
-    // キー順を value → match → key → id に入れ替える (補完した key が末尾に付く取り違えの回帰)。
-    stored.filters = stored.filters!.map((f) => ({ value: f.value, match: f.match, key: f.key, id: f.id, name: f.name }));
-    expect(planRules([stored], RULES, 'mainnet').unchanged).toHaveLength(1);
-  });
-
-  it('filter の match が欠損/null/空の既存 rule は eq と同じ扱いにせず update (Sentry では match は必須・eq への補完は無い)', () => {
-    const rule = RULES.find((r) => r.eventTags[0] === 'billing.settle.grant-failed')!;
-    for (const match of [undefined, null, '']) {
-      const stored = sentryStored(buildRulePayload(rule, 'mainnet'), '4');
-      stored.filters = stored.filters!.map((f) => ({ ...f, match: match as string | undefined }));
-      const plan = planRules([stored], RULES, 'mainnet');
-      expect(plan.update[0]?.changes, String(match)).toEqual([
-        'filters (match なし) billing.settle.grant-failed → billing.settle.grant-failed',
-      ]);
-    }
-  });
-
-  it('comparisonType だけが欠損した既存 rule は Sentry の既定 count と同じ意味なので unchanged (補完の回帰)', () => {
-    const rule = RULES.find((r) => r.eventTags[0] === 'billing.settle.grant-failed')!;
-    const stored = sentryStored(buildRulePayload(rule, 'mainnet'), '5');
-    stored.conditions = stored.conditions!.map(({ comparisonType: _dropped, ...c }) => c);
-    expect(stored.conditions[0]).not.toHaveProperty('comparisonType');
-    const plan = planRules([stored], RULES, 'mainnet');
-    expect(plan.update.map((u) => u.changes)).toEqual([]);
-    expect(plan.unchanged).toHaveLength(1);
-  });
-
-  it('同名 rule の environment が違えば update (production → mainnet の取り違えを直す)', () => {
-    const existing: ExistingRule[] = RULES.map((r, i) => ({
-      id: String(i),
-      ...buildRulePayload(r, 'production'),
-    }));
-    const plan = planRules(existing, RULES, 'mainnet');
-    expect(plan.update).toHaveLength(RULES.length);
-    expect(plan.update[0].changes).toEqual(['environment production → mainnet']);
-  });
-
-  describe('update は既存の通知先 (actions) を保持する (PUT は rule 全体を上書きするため・Codex P1)', () => {
-    const rule = RULES.find((r) => r.eventTags[0] === 'history.load.unreadable-entries-preserved')!;
-    const withActions = (actions: ExistingRule['actions']): ExistingRule => ({
-      id: '7',
-      ...buildRulePayload(rule, 'mainnet'),
-      conditions: [{ id: 'sentry.rules.conditions.event_frequency.EventFrequencyCondition', value: 100, interval: '1h' }],
-      actions,
-    });
-
-    it('Slack 等の既存 actions を PUT payload にそのまま載せ、計画にも出す', () => {
-      const plan = planRules([withActions([SLACK_ACTION, { id: 'sentry.rules.actions.notify_event.NotifyEventAction' }])], RULES, 'mainnet');
-      expect(plan.update).toHaveLength(1);
-      const u = plan.update[0];
-      expect(u.changes).toEqual(['threshold 100 → 10']);
-      expect(u.payload.actions).toEqual([
-        SLACK_ACTION,
-        { id: 'sentry.rules.actions.notify_event.NotifyEventAction' },
-      ]);
-      expect(u.keptActions).toEqual(['SlackNotifyServiceAction', 'NotifyEventAction']);
-      expect(formatPlan(plan, 'mainnet')).toContain(
-        '  ~ update  OpenPay: history.load.unreadable-entries-preserved spike (id=7): threshold 100 → 10 ' +
-          '[actions 保持: SlackNotifyServiceAction, NotifyEventAction]',
-      );
-    });
-
-    it('既存 rule に actions が無い (空) ときだけ既定の NotifyEventAction を付け、計画に明示する', () => {
-      const plan = planRules([withActions([])], RULES, 'mainnet');
-      expect(plan.update[0].payload.actions).toEqual([
-        { id: 'sentry.rules.actions.notify_event.NotifyEventAction' },
-      ]);
-      expect(plan.update[0].changes).toEqual(['threshold 100 → 10', 'actions (none) → NotifyEventAction']);
-    });
-
-    it('既存 rule の owner (担当) を PUT payload に引き継ぐ (未指定だと Sentry の更新処理が None にする)', () => {
-      const existing: ExistingRule = { ...withActions([SLACK_ACTION]), owner: 'team:42' };
-      const plan = planRules([existing], RULES, 'mainnet');
-      expect(plan.update[0].payload.owner).toBe('team:42');
-      expect(plan.update[0].keptOwner).toBe('team:42');
-      expect(formatPlan(plan, 'mainnet')).toContain(
-        '  ~ update  OpenPay: history.load.unreadable-entries-preserved spike (id=7): threshold 100 → 10 ' +
-          '[actions 保持: SlackNotifyServiceAction; owner 保持: team:42]',
-      );
-      // owner が無い (null) 既存 rule には owner を載せない (create と同じ)。
-      const none = planRules([{ ...withActions([SLACK_ACTION]), owner: null }], RULES, 'mainnet');
-      expect(none.update[0].payload).not.toHaveProperty('owner');
-      expect(none.update[0].keptOwner).toBeUndefined();
-    });
-
-    it('create の actions は既定の NotifyEventAction', () => {
-      const plan = planRules([], RULES, 'mainnet');
-      for (const c of plan.create) {
-        expect(c.payload.actions).toEqual([{ id: 'sentry.rules.actions.notify_event.NotifyEventAction' }]);
-      }
-    });
-  });
-
-  describe('無効化 (status=disabled) 中の rule は既定で更新しない (PUT は disabled を active に戻す・Codex P2)', () => {
-    const rule = RULES.find((r) => r.eventTags[0] === 'history.load.unreadable-entries-preserved')!;
-    const disabled = (): ExistingRule => {
-      const r = sentryStored(buildRulePayload(rule, 'mainnet'), '8');
-      r.conditions![0] = { ...r.conditions![0], value: 100 };
-      return { ...r, status: 'disabled' };
-    };
-
-    it('差分があっても update に入れず skippedDisabled に出す (計画に「無効化中のため更新しない」)', () => {
-      const plan = planRules([disabled()], RULES, 'mainnet');
-      expect(plan.update).toEqual([]);
-      expect(plan.unchanged).toEqual([]);
-      expect(plan.skippedDisabled).toEqual([
-        { id: '8', name: 'OpenPay: history.load.unreadable-entries-preserved spike', changes: ['threshold 100 → 10'] },
-      ]);
-      const lines = formatPlan(plan, 'mainnet');
-      expect(lines[0]).toBe(
-        `[setup-sentry-alerts] plan (environment=mainnet): create ${RULES.length - 1} / update 0 / unchanged 0 / retire 0 / disabled (更新しない) 1`,
-      );
-      expect(lines).toContain(
-        '  ! skip    OpenPay: history.load.unreadable-entries-preserved spike (id=8): 無効化中のため更新しない ' +
-          '(差分あり: threshold 100 → 10・再有効化して更新するには --include-disabled)',
-      );
-      expect(lines).toHaveLength(1 + RULES.length);
-    });
-
-    it('差分が無い無効化中の rule は unchanged のまま (再有効化もしない)', () => {
-      const same = { ...sentryStored(buildRulePayload(rule, 'mainnet'), '8'), status: 'disabled' };
-      const plan = planRules([same], RULES, 'mainnet');
-      expect(plan.unchanged).toHaveLength(1);
-      expect(plan.skippedDisabled).toEqual([]);
-    });
-
-    it('includeDisabled を明示したときだけ update に入り、計画に再有効化を明示する', () => {
-      const plan = planRules([disabled()], RULES, 'mainnet', { includeDisabled: true });
-      expect(plan.skippedDisabled).toEqual([]);
-      expect(plan.update[0]).toMatchObject({ id: '8', reenable: true, changes: ['threshold 100 → 10'] });
-      expect(formatPlan(plan, 'mainnet')).toContain(
-        '  ~ update  OpenPay: history.load.unreadable-entries-preserved spike (id=8): threshold 100 → 10 ' +
-          '[actions 保持: NotifyEventAction] ※無効化中 → PUT で再有効化される (--include-disabled)',
-      );
-    });
-  });
-
-  describe('比較は conditions / filters 全体と論理条件 (actionMatch / filterMatch) を見る (Codex P2)', () => {
-    const rule = RULES.find((r) => r.eventTags[0] === 'billing.settle.grant-failed')!;
-    const base = (): ExistingRule => ({ id: '9', ...buildRulePayload(rule, 'mainnet') });
-
-    it('同じ内容なら unchanged (表示用の name / label は無視)', () => {
-      const existing = base();
-      existing.conditions = existing.conditions!.map((c) => ({ ...c, name: 'The issue is seen more than 0 times in 1h' }));
-      existing.filters = existing.filters!.map((f) => ({ ...f, name: "The event's tags match event eq billing.settle.grant-failed", label: 'x' }));
-      existing.conditions[0].value = '0';
-      const plan = planRules([existing], RULES, 'mainnet');
-      expect(plan.unchanged).toHaveLength(1);
-    });
-
-    it('追加の condition があれば update (発火条件が変わっている)', () => {
-      const existing = base();
-      existing.conditions = [
-        ...existing.conditions!,
-        { id: 'sentry.rules.conditions.first_seen_event.FirstSeenEventCondition' },
-      ];
-      const plan = planRules([existing], RULES, 'mainnet');
-      expect(plan.update[0]?.changes).toEqual([
-        'conditions EventFrequencyCondition + FirstSeenEventCondition → EventFrequencyCondition',
-      ]);
-    });
-
-    it('別キーの filter (level 等) が混ざっていれば update', () => {
-      const existing = base();
-      existing.filters = [
-        ...existing.filters!,
-        { id: 'sentry.rules.filters.level.LevelFilter', match: 'gte', level: '40' },
-      ];
-      const plan = planRules([existing], RULES, 'mainnet');
-      expect(plan.update[0]?.changes).toEqual([
-        'filters billing.settle.grant-failed + LevelFilter → billing.settle.grant-failed',
-      ]);
-    });
-
-    it('同じ tag でも match (eq / ew) が違えば update', () => {
-      const existing = base();
-      existing.filters![0].match = 'co';
-      const plan = planRules([existing], RULES, 'mainnet');
-      expect(plan.update[0]?.changes).toEqual([
-        'filters contains billing.settle.grant-failed → billing.settle.grant-failed',
-      ]);
-    });
-
-    it('actionMatch が違えば update', () => {
-      const existing = base();
-      existing.actionMatch = 'any';
-      const plan = planRules([existing], RULES, 'mainnet');
-      expect(plan.update[0]?.changes).toEqual(['actionMatch any → all']);
-    });
-
-    it('filter が 1 つのとき all と any は同等とみなすが、none (通知対象の反転) は update', () => {
-      const same = base();
-      same.filterMatch = 'all';
-      expect(planRules([same], RULES, 'mainnet').unchanged).toHaveLength(1);
-      const inverted = base();
-      inverted.filterMatch = 'none';
-      expect(planRules([inverted], RULES, 'mainnet').update[0]?.changes).toEqual(['filterMatch none → any']);
-    });
-
-    it('filter が複数の rule は all / any の違いも update (OR と AND で意味が変わる)', () => {
-      const multi = RULES.find((r) => r.eventTags.length > 1)!;
-      const existing: ExistingRule = { id: '10', ...buildRulePayload(multi, 'mainnet'), filterMatch: 'all' };
-      expect(planRules([existing], RULES, 'mainnet').update[0]?.changes).toEqual(['filterMatch all → any']);
-    });
-  });
-
-  it('formatPlan は dry-run の出力 (何をどう変えるか) を 1 行 1 rule で出す', () => {
-    const lines = formatPlan(planRules(LEGACY_SENTRY_RULES, RULES, 'mainnet'), 'mainnet');
+  it('formatPlan は dry-run の出力 (何をどう変えるか) を 1 行 1 workflow で出す', () => {
+    const lines = formatPlan(plan(legacyWorkflows()), 'mainnet');
     expect(lines[0]).toBe(
       `[setup-sentry-alerts] plan (environment=mainnet): create ${RULES.length - 13} / update 13 / unchanged 0 / retire 1`,
     );
     expect(lines).toContain(
       '  ~ update  OpenPay: 支払いフォームの失敗 (payment / tip / checkout) (id=100): ' +
         'rename from "OpenPay: payment.failed rate exceeded (alpha threshold)"; threshold 50 → 3; ' +
-        'filters payment.failed → payment.failed + tip.failed + checkout.failed; filterMatch all → any ' +
-        '[actions 保持: NotifyEventAction]',
-    );
-    expect(lines).toContain(
-      '  ~ update  OpenPay: smart-account.init-failed (全フォーム・接尾一致) (id=101): ' +
-        'rename from "OpenPay: smart-account.init-failed rate exceeded"; threshold 10 → 2; ' +
-        'filters smart-account.init-failed → ends-with smart-account.init-failed [actions 保持: NotifyEventAction]',
+        'filters payment.failed → payment.failed + tip.failed + checkout.failed [actions 保持: email (issue_owners)]',
     );
     expect(lines).toContain(
       '  ~ update  OpenPay: billing.meter.record-failed (usage volume undercount) (id=112): threshold 5 → 2 ' +
-        '[actions 保持: NotifyEventAction]',
+        '[actions 保持: email (issue_owners)]',
     );
     expect(lines).toContain(
       '  + create  OpenPay: relayer の残高不足 (relay.relayer.balance_low) [relay.relayer.balance_low > 0 / 1h]',
     );
     expect(lines).toContain(
-      '  - retire  OpenPay: x402.middleware.error rate exceeded (id=102): 発火元が無い → Sentry Dashboard で削除 (本 script は削除しない)',
+      '  + create  OpenPay: JPYC ガスレス中継の失敗 (relay.jpyc.*) ' +
+        '[relay.jpyc.relay_error | relay.jpyc.reverted | relay.jpyc.misconfig | relay.jpyc.forwarder_invalid > 0 / 1h]',
     );
-    // 1 行 1 rule + 見出し。
+    expect(lines).toContain(
+      '  - retire  OpenPay: x402.middleware.error rate exceeded (id=102): ' +
+        '発火元が無い → Sentry Dashboard (Alerts) で削除 (本 script は削除しない)',
+    );
     expect(lines).toHaveLength(1 + RULES.length + 1);
+  });
+
+  it('新 UI の形 (既定の 4 trigger・frequency 0) の管理対象は triggers を every_event に直す update (メールの宛先は保持)', () => {
+    const rule = ruleOf('relay.relayer.balance_low');
+    const p = plan([uiShaped('3100001', rule.name, 'relay.relayer.balance_low', 1, '1h')]);
+    expect(p.update).toHaveLength(1);
+    const triggers =
+      'triggers any-short[first_seen_event + issue_resolved_trigger + reappeared_event + regression_event] → any-short[every_event]';
+    expect(p.update[0].changes).toEqual(['frequency 0 → 60', triggers, 'threshold 1 → 0']);
+    expect(p.update[0].payload.actionFilters[0].actions).toEqual([USER_EMAIL]);
+    expect(formatPlan(p, 'mainnet')).toContain(
+      `  ~ update  ${rule.name} (id=3100001): frequency 0 → 60; ${triggers}; threshold 1 → 0 [actions 保持: email (user)]`,
+    );
+  });
+
+  it('event_frequency_percent (前期間比) は count とは別物なので update (比較種別・比較間隔を行ごとに)', () => {
+    const w = stored(ruleOf(GRANT), '3');
+    w.actionFilters![0].conditions[1] = {
+      id: 'x',
+      type: 'event_frequency_percent',
+      comparison: { value: 0, interval: '1h', comparison_interval: '1d' },
+      conditionResult: true,
+    };
+    expect(plan([w]).update[0]?.changes).toEqual(['comparisonType percent → count', 'comparisonInterval 1d → (none)']);
+  });
+
+  it('閾値と比較種別が同時に変わるときも、比較種別・比較間隔の変更を計画に出す (threshold だけで隠さない)', () => {
+    const w = stored(ruleOf(HISTORY), '6');
+    w.actionFilters![0].conditions[1] = {
+      id: 'x',
+      type: 'event_frequency_percent',
+      comparison: { value: 100, interval: '1h', comparison_interval: '1d' },
+      conditionResult: true,
+    };
+    expect(plan([w]).update[0]?.changes).toEqual([
+      'threshold 100 → 10',
+      'comparisonType percent → count',
+      'comparisonInterval 1d → (none)',
+    ]);
+    // 件数だけ違うなら閾値の行だけ。
+    expect(plan([stored({ ...ruleOf(HISTORY), threshold: 100 }, '6')]).update[0]?.changes).toEqual(['threshold 100 → 10']);
+  });
+
+  it("tag の match が欠損/null/'' の既存 workflow は eq と同じ扱いにせず update (Sentry では match は必須)", () => {
+    for (const match of [undefined, null, '']) {
+      const w = stored(ruleOf(GRANT), '4');
+      const tag = w.actionFilters![0].conditions[0];
+      tag.comparison = { ...(tag.comparison as object), match };
+      expect(plan([w]).update[0]?.changes, String(match)).toEqual([
+        'filters (match なし) billing.settle.grant-failed → billing.settle.grant-failed',
+      ]);
+    }
+  });
+
+  it('同じ tag でも match (eq / co) が違えば update', () => {
+    const w = stored(ruleOf(GRANT), '4');
+    const tag = w.actionFilters![0].conditions[0];
+    tag.comparison = { ...(tag.comparison as object), match: 'co' };
+    expect(plan([w]).update[0]?.changes).toEqual([
+      'filters contains billing.settle.grant-failed → billing.settle.grant-failed',
+    ]);
+  });
+
+  it('environment / detector / frequency が違えば update (production → mainnet の取り違えも直す)', () => {
+    const prod = plan(RULES.map((r, i) => sentryStored(buildWorkflowPayload(r, 'production', DETECTOR), String(i))));
+    expect(prod.update).toHaveLength(RULES.length);
+    expect(prod.update[0].changes).toEqual(['environment production → mainnet']);
+    expect(plan([stored(ruleOf(GRANT), '5', { detectorIds: ['6999999'] })]).update[0]?.changes).toEqual([
+      'detector 6999999 → 7000001',
+    ]);
+    expect(plan([stored(ruleOf(GRANT), '5', { detectorIds: [] })]).update[0]?.changes).toEqual(['detector (none) → 7000001']);
+    expect(plan([stored(ruleOf(GRANT), '5', { config: { frequency: 30 } })]).update[0]?.changes).toEqual([
+      'frequency 30 → 60',
+    ]);
+    expect(plan([stored(ruleOf(GRANT), '5', { config: null })]).update[0]?.changes).toEqual(['frequency (none) → 60']);
+  });
+
+  describe('action filter の組の形が違えば全体を出す (通知の条件が変わる)', () => {
+    it('別の条件 (level) が混ざった組', () => {
+      const w = stored(ruleOf(GRANT), '9');
+      w.actionFilters![0].conditions.push({
+        id: 'l',
+        type: 'level',
+        comparison: { level: 40, match: 'gte' },
+        conditionResult: true,
+      });
+      expect(plan([w]).update[0]?.changes).toEqual([
+        `actionFilters all[billing.settle.grant-failed + event_frequency_count > 0 / 1h + level] → ${GRANT_GROUP}`,
+      ]);
+    });
+
+    it('tag をまとめた any-short の組 (tag 同士も件数とも OR になる)', () => {
+      const rule = ruleOf('cross-chain.burn.unresolved');
+      const w = stored(rule, '9');
+      const [a, b] = w.actionFilters!;
+      w.actionFilters = [{ ...a, logicType: 'any-short', conditions: [a.conditions[0], b.conditions[0], a.conditions[1]] }];
+      expect(plan([w]).update[0]?.changes).toEqual([
+        'actionFilters any-short[cross-chain.burn.unresolved + circle.broadcast.response-lost + event_frequency_count > 0 / 1h] → ' +
+          'all[cross-chain.burn.unresolved + event_frequency_count > 0 / 1h] | ' +
+          'all[circle.broadcast.response-lost + event_frequency_count > 0 / 1h]',
+      ]);
+    });
+
+    it('論理 (all / any-short) の違い', () => {
+      const w = stored(ruleOf(GRANT), '9');
+      w.actionFilters = [{ ...w.actionFilters![0], logicType: 'any-short' }];
+      expect(plan([w]).update[0]?.changes).toEqual([
+        `actionFilters any-short[billing.settle.grant-failed + event_frequency_count > 0 / 1h] → ${GRANT_GROUP}`,
+      ]);
+    });
+  });
+
+  describe('update は既存の通知先 (actions) と owner を保持する (PUT は渡した actionFilters を正とするため)', () => {
+    const rule = ruleOf(HISTORY);
+    const withActions = (actions: WorkflowAction[]): ExistingWorkflow => {
+      const w = stored({ ...rule, threshold: 100 }, '7');
+      w.actionFilters = w.actionFilters!.map((g) => ({ ...g, actions: actions.map((a) => ({ id: sid(), ...a })) }));
+      return w;
+    };
+
+    it('Slack・メール (user) の既存 actions を id を外して PUT payload に載せ、計画には種類だけ出す (宛先の ID は出さない)', () => {
+      const p = plan([withActions([SLACK, USER_EMAIL])]);
+      expect(p.update).toHaveLength(1);
+      const u = p.update[0];
+      expect(u.changes).toEqual(['threshold 100 → 10']);
+      expect(u.payload.actionFilters[0].actions).toEqual([SLACK, USER_EMAIL]);
+      expect(u.keptActions).toEqual(['slack (specific)', 'email (user)']);
+      const line = `  ~ update  ${rule.name} (id=7): threshold 100 → 10 [actions 保持: slack (specific), email (user)]`;
+      expect(formatPlan(p, 'mainnet')).toContain(line);
+      expect(formatPlan(p, 'mainnet').join('\n')).not.toContain('1000001');
+    });
+
+    it('既存 workflow に actions が無い (空) ときだけ既定の通知先を付け、計画に明示する', () => {
+      const p = plan([withActions([])]);
+      expect(p.update[0].payload.actionFilters[0].actions).toEqual([DEFAULT_EMAIL]);
+      expect(p.update[0].changes).toEqual(['threshold 100 → 10', 'actions (none) → email (issue_owners)']);
+      expect(p.update[0].keptActions).toEqual([]);
+    });
+
+    it('組ごとに通知先が違えば、和集合を全組に載せる update にして計画に出す', () => {
+      const multi = ruleOf('payment.failed');
+      const w = stored(multi, '12');
+      w.actionFilters![1] = { ...w.actionFilters![1], actions: [{ id: sid(), ...SLACK }] };
+      const p = plan([w]);
+      expect(p.update[0]?.changes).toEqual(['actions を全 action filter で共通に (email (issue_owners), slack (specific))']);
+      for (const g of p.update[0].payload.actionFilters) expect(g.actions).toEqual([DEFAULT_EMAIL_STORED, SLACK]);
+    });
+
+    it('既存 workflow の owner (担当) は PUT payload に載せずに保持し (同じ値の再送で team の権限検証を起こさない)、計画には種別だけ出す', () => {
+      const p = plan([{ ...withActions([SLACK]), owner: 'team:42' }]);
+      expect(p.update[0].payload).not.toHaveProperty('owner');
+      expect(p.update[0].keptOwner).toBe('team:42');
+      expect(formatPlan(p, 'mainnet')).toContain(
+        `  ~ update  ${rule.name} (id=7): threshold 100 → 10 [actions 保持: slack (specific); owner 保持: team]`,
+      );
+      // owner が無い (null) 既存 workflow も owner を載せない (PUT で触らない)。
+      const none = plan([{ ...withActions([SLACK]), owner: null }]);
+      expect(none.update[0].payload).not.toHaveProperty('owner');
+      expect(none.update[0].keptOwner).toBeUndefined();
+    });
+
+    it('create の actions は既定の通知先 (Suggested Assignees → ActiveMembers)・owner なし', () => {
+      for (const c of plan([]).create) {
+        for (const g of c.payload.actionFilters) expect(g.actions).toEqual([DEFAULT_EMAIL]);
+        expect(c.payload).not.toHaveProperty('owner');
+      }
+    });
+  });
+
+  describe('無効化 (enabled=false) 中の workflow は既定で更新しない (Dashboard で止めたもの)', () => {
+    const rule = ruleOf(HISTORY);
+    const disabled = () => stored({ ...rule, threshold: 100 }, '8', { enabled: false });
+
+    it('差分があっても update に入れず skippedDisabled に出す (計画に「無効化中のため更新しない」)', () => {
+      const p = plan([disabled()]);
+      expect(p.update).toEqual([]);
+      expect(p.unchanged).toEqual([]);
+      expect(p.skippedDisabled).toEqual([{ id: '8', name: rule.name, changes: ['threshold 100 → 10'] }]);
+      const lines = formatPlan(p, 'mainnet');
+      expect(lines[0]).toBe(
+        `[setup-sentry-alerts] plan (environment=mainnet): create ${RULES.length - 1} / update 0 / unchanged 0 / retire 0 / disabled (更新しない) 1`,
+      );
+      expect(lines).toContain(
+        `  ! skip    ${rule.name} (id=8): 無効化中のため更新しない ` +
+          '(差分あり: threshold 100 → 10・再有効化して更新するには --include-disabled)',
+      );
+      expect(lines).toHaveLength(1 + RULES.length);
+    });
+
+    it('差分が無い無効化中の workflow は keep のまま (再有効化もしない)', () => {
+      const p = plan([stored(rule, '8', { enabled: false })]);
+      expect(p.unchanged).toEqual([{ id: '8', name: rule.name, disabled: true }]);
+      expect(p.skippedDisabled).toEqual([]);
+      expect(formatPlan(p, 'mainnet')).toContain(`  = keep    ${rule.name} (id=8) ※無効化中のまま`);
+    });
+
+    it('includeDisabled を明示したときだけ update に入り、enabled: true を送って再有効化することを計画に出す', () => {
+      const p = plan([disabled()], { includeDisabled: true });
+      expect(p.skippedDisabled).toEqual([]);
+      expect(p.update[0]).toMatchObject({ id: '8', reenable: true, changes: ['threshold 100 → 10', 'enabled false → true'] });
+      expect(p.update[0].payload.enabled).toBe(true);
+      expect(formatPlan(p, 'mainnet')).toContain(
+        `  ~ update  ${rule.name} (id=8): threshold 100 → 10; enabled false → true ` +
+          '[actions 保持: email (issue_owners)] ※無効化中 → 再有効化して更新する (--include-disabled)',
+      );
+    });
+  });
+
+  it('同じ name (または legacyNames の旧名) の workflow が複数あれば止める (どれを更新するか決められない)', () => {
+    const rule = ruleOf(GRANT);
+    expect(() => plan([stored(rule, '1'), stored(rule, '2')])).toThrow(
+      new RegExp(`複数.*\\n  - ${rule.name.replace(/[()]/g, '\\$&')}: .*\\(id=1\\), .*\\(id=2\\)`),
+    );
+    const renamed = RULES.find((r) => (r.legacyNames ?? []).length > 0)!;
+    const legacy = stored({ ...renamed, name: renamed.legacyNames![0] }, '11');
+    expect(() => plan([stored(renamed, '10'), legacy])).toThrow(/\(id=10\), .*\(id=11\)/);
+  });
+
+  it('発火元の無い名前は (同名が複数でも) retire に出すだけ', () => {
+    const retired = (id: string) =>
+      stored({ name: RETIRED_RULE_NAMES[0], description: '', eventTags: ['x402.middleware.error'], threshold: 10, interval: '1h' }, id);
+    const p = plan([retired('20'), retired('21')]);
+    expect(p.retire).toEqual([
+      { id: '20', name: RETIRED_RULE_NAMES[0] },
+      { id: '21', name: RETIRED_RULE_NAMES[0] },
+    ]);
+    expect(p.unmanaged).toEqual([]);
   });
 });
 
-describe('setup-sentry-alerts: main (fetch mock 経由の挙動検証)', () => {
+describe('setup-sentry-alerts: main (Workflow Engine API の fake 経由の挙動検証)', () => {
   let fetchSpy: MockInstance<typeof fetch>;
-  const calls = () => fetchSpy.mock.calls.map(([url, init]) => [init?.method ?? 'GET', String(url)]);
+  const calls = () => fetchSpy.mock.calls.map(([url, init]) => `${init?.method ?? 'GET'} ${String(url)}`);
+  const writes = () => calls().filter((c) => !c.startsWith('GET '));
+  const bodies = (method: string) =>
+    fetchSpy.mock.calls
+      .filter(([, init]) => init?.method === method)
+      .map(([url, init]) => ({ url: String(url), body: JSON.parse(String(init!.body)) as WorkflowPayload }));
+  const useFake = (opts: FakeOptions) => {
+    const fake = fakeSentry(opts);
+    fetchSpy.mockImplementation(fake.handler);
+    return fake;
+  };
+  const load = () => import('../../scripts/setup-sentry-alerts.mjs');
+  const GET_WORKFLOWS = `GET ${ORG_URL}/workflows/?per_page=100`;
+  const GET_DETECTORS = `GET ${ORG_URL}/detectors/?projectSlug=${PROJECT}&per_page=100`;
 
   beforeEach(() => {
     fetchSpy = vi.fn() as unknown as typeof fetchSpy;
     vi.stubGlobal('fetch', fetchSpy);
-    // main() は計画を console.log に出す。テスト出力を汚さないよう既定では捨てる (dry-run の test は自前で spy する)。
+    // main() は計画を console.log に出す。テスト出力を汚さないよう既定では捨てる (出力を見る test は自前で spy する)。
     vi.spyOn(console, 'log').mockImplementation(() => {});
     process.env.SENTRY_AUTH_TOKEN = 'test_token';
-    process.env.SENTRY_ORG_SLUG = 'test-org';
-    process.env.SENTRY_PROJECT_SLUG = 'test-project';
+    process.env.SENTRY_ORG_SLUG = ORG;
+    process.env.SENTRY_PROJECT_SLUG = PROJECT;
     delete process.env.SENTRY_ALERT_ENV;
+    delete process.env.SENTRY_API_BASE;
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
     vi.resetModules();
+    delete process.env.SENTRY_API_BASE;
   });
 
-  it('現行 RULES が全て登録済みなら GET 1 回だけで書き込み (POST/PUT) を出さない', async () => {
-    const existing = RULES.map((r, i) => ({ id: `existing-${i}`, ...buildRulePayload(r, 'mainnet') }));
-    fetchSpy.mockImplementation(async (url, init) => {
-      if (!init?.method || init.method === 'GET') {
-        return new Response(JSON.stringify(existing), { status: 200 });
-      }
-      throw new Error(`想定外 ${init.method}: ${url}`);
-    });
-    const mod = await import('../../scripts/setup-sentry-alerts.mjs');
-    await mod.main([]);
-    expect(calls()).toEqual([['GET', 'https://sentry.io/api/0/projects/test-org/test-project/rules/']]);
+  it('現行 RULES が全て登録済みなら GET (workflows・detectors) だけで書き込みを出さない', async () => {
+    useFake({ workflows: RULES.map((r, i) => stored(r, String(i + 1))) });
+    const plan = await (await load()).main([]);
+    expect(calls()).toEqual([GET_WORKFLOWS, GET_DETECTORS]);
+    expect(plan.unchanged).toHaveLength(RULES.length);
+    const auth = (fetchSpy.mock.calls[0][1]!.headers as Record<string, string>).Authorization;
+    expect(auth).toBe('Bearer test_token');
   });
 
-  it('空の Sentry には全 rule を POST で作成する (environment=mainnet)', async () => {
-    fetchSpy.mockImplementation(async (_url, init) => {
-      if (init?.method === 'POST') return new Response(JSON.stringify({ id: 'new' }), { status: 201 });
-      return new Response('[]', { status: 200 });
-    });
-    const mod = await import('../../scripts/setup-sentry-alerts.mjs');
-    await mod.main([]);
-    const posts = fetchSpy.mock.calls.filter(([, init]) => init?.method === 'POST');
+  it('SENTRY_PROJECT_SLUG が数値の project ID なら detectors を project=<id> で引く', async () => {
+    process.env.SENTRY_PROJECT_SLUG = PROJECT_ID;
+    useFake({ workflows: [] });
+    const plan = await (await load()).main(['--dry-run']);
+    expect(calls()).toEqual([GET_WORKFLOWS, `GET ${ORG_URL}/detectors/?project=${PROJECT_ID}&per_page=100`]);
+    expect(plan.create[0].payload.detectorIds).toEqual([DETECTOR]);
+  });
+
+  it('空の Sentry には全 rule を POST で作成する (Issue Stream に接続・every_event・mainnet・既定の通知先・owner なし)', async () => {
+    const fake = useFake({ workflows: [] });
+    await (await load()).main([]);
+    const posts = bodies('POST');
     expect(posts).toHaveLength(RULES.length);
-    for (const [, init] of posts) {
-      const body = JSON.parse(init!.body as string);
-      expect(body.environment).toBe('mainnet');
-      expect(body.conditions[0].id).toBe('sentry.rules.conditions.event_frequency.EventFrequencyCondition');
+    for (const { url, body } of posts) {
+      expect(url).toBe(`${ORG_URL}/workflows/`);
+      expect(body).toMatchObject({
+        enabled: true,
+        environment: 'mainnet',
+        config: { frequency: 60 },
+        detectorIds: [DETECTOR],
+        triggers: { logicType: 'any-short', conditions: [{ type: 'every_event', comparison: true, conditionResult: true }] },
+      });
+      expect(body).not.toHaveProperty('owner');
+      for (const g of body.actionFilters) expect(g.actions).toEqual([DEFAULT_EMAIL]);
     }
+    expect(fake.store.size).toBe(RULES.length);
   });
 
-  it('旧 14 rule が登録済みなら rename/閾値変更は PUT・新 rule は POST・retire は DELETE しない', async () => {
-    fetchSpy.mockImplementation(async (_url, init) => {
-      if (init?.method === 'POST') return new Response(JSON.stringify({ id: 'new' }), { status: 201 });
-      if (init?.method === 'PUT') return new Response(JSON.stringify({ id: 'upd' }), { status: 200 });
-      return new Response(JSON.stringify(LEGACY_SENTRY_RULES), { status: 200 });
-    });
-    const mod = await import('../../scripts/setup-sentry-alerts.mjs');
-    await mod.main([]);
-    const methods = calls().map(([m]) => m);
-    expect(methods.filter((m) => m === 'PUT')).toHaveLength(13);
-    expect(methods.filter((m) => m === 'POST')).toHaveLength(RULES.length - 13);
-    expect(methods).not.toContain('DELETE');
-    const put = calls().find(([m, url]) => m === 'PUT' && url.endsWith('/rules/100/'));
-    expect(put).toBeDefined();
-    const putInit = fetchSpy.mock.calls.find(([url]) => String(url).endsWith('/rules/100/'))![1];
-    expect(JSON.parse(putInit!.body as string).name).toBe('OpenPay: 支払いフォームの失敗 (payment / tip / checkout)');
+  it('往復: 旧 14 rule + 本番と同じ 6 件 → 1 回目は POST / PUT、2 回目は GET だけで書き込みゼロ (冪等)', async () => {
+    const fake = useFake({ workflows: [...legacyWorkflows(), ...prodLikeWorkflows()] });
+    const mod = await load();
+    const first = await mod.main([]);
+    // 旧 14 rule のうち 13 件 + 本番の手作り 2 件 (legacyNames) を PUT で更新。
+    expect(first.update).toHaveLength(15);
+    expect(first.create).toHaveLength(RULES.length - 15);
+    expect(first.retire.map((r) => r.id)).toEqual(['102']);
+    expect(first.unmanaged.map((u) => u.name)).toEqual(PROD_UNMANAGED_NAMES);
+    expect(writes()).toHaveLength(RULES.length);
+    expect(writes()).toContain(`PUT ${ORG_URL}/workflows/3000002/`);
+    expect(writes()).toContain(`PUT ${ORG_URL}/workflows/3000003/`);
+    // 管理外 (3000001・3000004〜6) と retire (102) には書き込まない。DELETE もしない。
+    for (const w of writes()) expect(w).not.toMatch(/\/workflows\/(102|300000[1456])\/$|^DELETE/);
+    // 上書きした手作りの alert は RULES の名前になり、user 宛てメールのまま。
+    expect(fake.store.get('3000002')!.name).toBe('OpenPay: JPYC ガスレス中継の失敗 (relay.jpyc.*)');
+    for (const g of fake.store.get('3000002')!.actionFilters!) {
+      expect(g.actions!.map(({ id: _id, ...a }) => a)).toEqual([USER_EMAIL]);
+    }
+    fetchSpy.mockClear();
+    const second = await mod.main([]);
+    expect(calls()).toEqual([GET_WORKFLOWS, GET_DETECTORS]);
+    expect(second.update.map((u) => `${u.name}: ${u.changes.join('; ')}`)).toEqual([]);
+    expect(second.create).toEqual([]);
+    expect(second.unchanged).toHaveLength(RULES.length);
   });
 
-  it('PUT の body は既存の Slack 通知先を保持し、POST の body は既定の NotifyEventAction だけ', async () => {
-    const existing = LEGACY_SENTRY_RULES.map((r) => ({ ...r, actions: [SLACK_ACTION], owner: 'user:7' }));
-    fetchSpy.mockImplementation(async (_url, init) => {
-      if (init?.method === 'POST') return new Response(JSON.stringify({ id: 'new' }), { status: 201 });
-      if (init?.method === 'PUT') return new Response(JSON.stringify({ id: 'upd' }), { status: 200 });
-      return new Response(JSON.stringify(existing), { status: 200 });
-    });
-    const mod = await import('../../scripts/setup-sentry-alerts.mjs');
+  it('PUT の body: 既存の通知先 (メール・Slack) を全組に載せ、owner は送らずに保持し、id を含まず、enabled を明示する', async () => {
+    const existing = legacyWorkflows().map((w) => ({
+      ...w,
+      owner: 'team:42',
+      actionFilters: w.actionFilters!.map((g) => ({
+        ...g,
+        actions: [
+          { id: sid(), ...USER_EMAIL },
+          { id: sid(), ...SLACK },
+        ],
+      })),
+    }));
+    const fake = useFake({ workflows: existing });
+    const mod = await load();
     await mod.main([]);
-    const bodies = (method: string) =>
-      fetchSpy.mock.calls.filter(([, init]) => init?.method === method).map(([, init]) => JSON.parse(init!.body as string));
-    expect(bodies('PUT')).toHaveLength(13);
-    for (const body of bodies('PUT')) {
-      expect(body.actions).toEqual([SLACK_ACTION]);
-      expect(body.owner).toBe('user:7');
+    const puts = bodies('PUT');
+    expect(puts).toHaveLength(13);
+    for (const { url, body } of puts) {
+      expect(body.enabled).toBe(true);
+      // owner キーを送らない = Sentry は owner を変えない (同じ team を送り直すと権限の再検証で 400 になりうる)。
+      expect(body).not.toHaveProperty('owner');
+      expect(fake.store.get(url.match(/\/workflows\/(\d+)\/$/)![1])!.owner).toBe('team:42');
+      for (const g of body.actionFilters) expect(g.actions).toEqual([USER_EMAIL, SLACK]);
+      // 送った内容が正 (id の無い要素は作り直し・送らなかった要素は削除) なので id は送らない。
+      expect(JSON.stringify(body)).not.toContain('"id"');
     }
-    for (const body of bodies('POST')) {
-      expect(body.actions).toEqual([{ id: 'sentry.rules.actions.notify_event.NotifyEventAction' }]);
+    const payment = puts.find((p) => p.body.name === 'OpenPay: 支払いフォームの失敗 (payment / tip / checkout)')!;
+    expect(payment.url).toBe(`${ORG_URL}/workflows/100/`);
+    expect(payment.body.actionFilters).toHaveLength(3);
+    for (const { body } of bodies('POST')) {
+      for (const g of body.actionFilters) expect(g.actions).toEqual([DEFAULT_EMAIL]);
       expect(body).not.toHaveProperty('owner');
     }
-  });
-
-  it('往復: 1 回目の POST / PUT を Sentry の補完つきで保存した GET に対し、2 回目は GET だけで書き込みゼロ (冪等)', async () => {
-    // 1 回目: 旧 14 rule が登録済み → POST 12 / PUT 13。
-    const stored = new Map<string, ExistingRule>();
-    let nextId = 500;
-    fetchSpy.mockImplementation(async (url, init) => {
-      if (init?.method === 'POST') {
-        const id = String(nextId++);
-        stored.set(id, sentryStored(JSON.parse(init.body as string), id));
-        return new Response(JSON.stringify({ id }), { status: 201 });
-      }
-      if (init?.method === 'PUT') {
-        const id = String(url).match(/\/rules\/(\d+)\/$/)![1];
-        stored.set(id, sentryStored(JSON.parse(init.body as string), id));
-        return new Response(JSON.stringify({ id }), { status: 200 });
-      }
-      return new Response(JSON.stringify([...stored.values()]), { status: 200 });
-    });
-    for (const r of LEGACY_SENTRY_RULES) stored.set(r.id, r);
-    const mod = await import('../../scripts/setup-sentry-alerts.mjs');
-    await mod.main([]);
-    expect(calls().filter(([m]) => m !== 'GET')).toHaveLength(RULES.length);
-    // 2 回目: 保存された (補完つきの) rule に対しては差分なし。
+    // 2 回目は owner を含めて差分なし (owner を送らなくても往復で冪等)。
     fetchSpy.mockClear();
-    const plan = await mod.main([]);
-    expect(calls()).toEqual([['GET', 'https://sentry.io/api/0/projects/test-org/test-project/rules/']]);
-    expect(plan.update).toEqual([]);
-    expect(plan.unchanged).toHaveLength(RULES.length);
+    const second = await mod.main([]);
+    expect(writes()).toEqual([]);
+    expect(second.unchanged).toHaveLength(RULES.length);
   });
 
-  it('無効化中の rule には PUT を送らず、--include-disabled のときだけ送る', async () => {
+  it('無効化中の workflow には PUT を送らず、--include-disabled のときだけ enabled: true で送る', async () => {
     const rule = RULES.find((r) => r.eventTags[0] === 'history.load.unreadable-entries-preserved')!;
-    const stored = sentryStored(buildRulePayload(rule, 'mainnet'), '8');
-    stored.conditions![0] = { ...stored.conditions![0], value: 100 };
-    const existing = RULES.map((r, i) => (r === rule ? { ...stored, status: 'disabled' } : sentryStored(buildRulePayload(r, 'mainnet'), String(i))));
-    fetchSpy.mockImplementation(async (_url, init) => {
-      if (init?.method === 'PUT') return new Response(JSON.stringify({ id: '8' }), { status: 200 });
-      return new Response(JSON.stringify(existing), { status: 200 });
-    });
-    const mod = await import('../../scripts/setup-sentry-alerts.mjs');
+    const existing = RULES.map((r, i) =>
+      r === rule ? stored({ ...rule, threshold: 100 }, '8', { enabled: false }) : stored(r, String(1000 + i)),
+    );
+    useFake({ workflows: existing });
+    const mod = await load();
     const plan = await mod.main([]);
-    expect(calls().map(([m]) => m)).toEqual(['GET']);
+    expect(writes()).toEqual([]);
     expect(plan.skippedDisabled.map((s) => s.id)).toEqual(['8']);
     fetchSpy.mockClear();
     const plan2 = await mod.main(['--include-disabled']);
-    expect(calls().map(([m, url]) => `${m} ${url.split('/rules/')[1] ?? ''}`)).toEqual(['GET ', 'PUT 8/']);
+    expect(writes()).toEqual([`PUT ${ORG_URL}/workflows/8/`]);
+    expect(bodies('PUT')[0].body.enabled).toBe(true);
     expect(plan2.update.map((u) => u.id)).toEqual(['8']);
+  });
+
+  it('ページング: Link ヘッダの cursor を最後まで辿り、2 ページ目以降の管理対象も引き当てる', async () => {
+    useFake({ workflows: [...prodUnmanagedWorkflows(), ...RULES.map((r, i) => stored(r, String(2000 + i)))], pageSize: 10 });
+    const plan = await (await load()).main(['--dry-run']);
+    const pages = Math.ceil((4 + RULES.length) / 10);
+    expect(calls()).toEqual([
+      GET_WORKFLOWS,
+      ...Array.from({ length: pages - 1 }, (_, i) => `${GET_WORKFLOWS}&cursor=0%3A${(i + 1) * 10}%3A0`),
+      GET_DETECTORS,
+    ]);
+    expect(plan.unchanged).toHaveLength(RULES.length);
+    expect(plan.create).toEqual([]);
+    expect(plan.unmanaged).toHaveLength(4);
+  });
+
+  it('同じ cursor を返し続ける Link ヘッダは止める (GET を無限に叩かない)', async () => {
+    fetchSpy.mockImplementation(
+      async () =>
+        new Response('[]', {
+          status: 200,
+          headers: { link: '<https://sentry.io/x?cursor=0:100:0>; rel="next"; results="true"; cursor="0:100:0"' },
+        }),
+    );
+    await expect((await load()).main(['--dry-run'])).rejects.toThrow(/同じ cursor \(0:100:0\)/);
+    expect(calls()).toHaveLength(2);
+  });
+
+  it('同名の workflow が 2 つあればエラーで止め、書き込みをしない', async () => {
+    useFake({ workflows: [stored(RULES[0], '1'), stored(RULES[0], '2')] });
+    await expect((await load()).main([])).rejects.toThrow(/複数/);
+    expect(writes()).toEqual([]);
+  });
+
+  describe('Issue Stream detector が一覧に無いときの fallback (管理対象 workflow の接続先を詳細で確かめる)', () => {
+    // project で絞った一覧に Issue Stream が出ない (Error Monitor・Uptime だけ)。
+    const listed = DETECTORS.filter((d) => d.type !== 'issue_stream');
+
+    it('接続先が対象 project の issue_stream なら、詳細を GET して確かめてから使う', async () => {
+      const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+      useFake({ workflows: [stored(RULES[0], '1')], detectors: listed });
+      const plan = await (await load()).main(['--dry-run']);
+      expect(calls()).toEqual([GET_WORKFLOWS, GET_DETECTORS, `GET ${ORG_URL}/detectors/${DETECTOR}/`]);
+      expect(plan.unchanged).toHaveLength(1);
+      expect(plan.create[0].payload.detectorIds).toEqual([DETECTOR]);
+      const out = log.mock.calls.map((c) => c.join(' ')).join('\n');
+      expect(out).toContain('管理対象 workflow の detectorIds から・詳細で issue_stream と project を確認済み');
+      log.mockRestore();
+    });
+
+    it('接続先が error 型の detector なら止め、書き込みをしない', async () => {
+      useFake({ workflows: [stored(RULES[0], '1', { detectorIds: ['7000000'] })], detectors: listed });
+      await expect((await load()).main([])).rejects.toThrow(/Issue Stream ではありません/);
+      expect(writes()).toEqual([]);
+    });
+
+    it('接続先が別 project の issue_stream なら止め、書き込みをしない', async () => {
+      const elsewhere = { id: '7000009', projectId: '4500000000000002', type: 'issue_stream' };
+      useFake({
+        workflows: [stored(RULES[0], '1', { detectorIds: ['7000009'] })],
+        detectors: listed,
+        detectorDetails: [...DETECTORS, elsewhere],
+      });
+      await expect((await load()).main([])).rejects.toThrow(/のものではありません/);
+      expect(writes()).toEqual([]);
+    });
+
+    it('slug で project の ID を一覧から確かめられなければ止める (数値の project ID なら通る)', async () => {
+      useFake({ workflows: [stored(RULES[0], '1')], detectors: [] });
+      const mod = await load();
+      await expect(mod.main([])).rejects.toThrow(/確かめられない/);
+      expect(writes()).toEqual([]);
+      fetchSpy.mockClear();
+      process.env.SENTRY_PROJECT_SLUG = PROJECT_ID;
+      const plan = await mod.main(['--dry-run']);
+      expect(plan.unchanged).toHaveLength(1);
+    });
+
+    it('管理対象 workflow にも接続先が無ければ止める', async () => {
+      useFake({ workflows: prodUnmanagedWorkflows(), detectors: listed });
+      await expect((await load()).main([])).rejects.toThrow(/Issue Stream detector を特定できません/);
+      expect(writes()).toEqual([]);
+    });
   });
 
   it('--dry-run は GET だけで計画を出し、書き込みを一切しない', async () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
-    fetchSpy.mockImplementation(async (url, init) => {
-      if (!init?.method || init.method === 'GET') {
-        return new Response(JSON.stringify(LEGACY_SENTRY_RULES), { status: 200 });
-      }
-      throw new Error(`想定外 ${init.method}: ${url}`);
-    });
-    const mod = await import('../../scripts/setup-sentry-alerts.mjs');
-    await mod.main(['--dry-run']);
-    expect(calls()).toEqual([['GET', 'https://sentry.io/api/0/projects/test-org/test-project/rules/']]);
+    useFake({ workflows: [...legacyWorkflows(), ...prodLikeWorkflows()] });
+    await (await load()).main(['--dry-run']);
+    expect(calls()).toEqual([GET_WORKFLOWS, GET_DETECTORS]);
     const out = log.mock.calls.map((c) => c.join(' ')).join('\n');
-    expect(out).toContain('update 13 / unchanged 0 / retire 1');
+    expect(out).toContain(`create ${RULES.length - 15} / update 15 / unchanged 0 / retire 1 / 管理外 (触らない) 4`);
+    expect(out).toContain(`Issue Stream detector: id=${DETECTOR} (detectors 一覧から)`);
     expect(out).toContain('dry-run');
+    expect(out).not.toContain('test_token');
+    log.mockRestore();
+  });
+
+  it('適用の出力にも token を出さない', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    useFake({ workflows: legacyWorkflows() });
+    await (await load()).main([]);
+    const out = log.mock.calls.map((c) => c.join(' ')).join('\n');
+    expect(out).toContain('=== summary ===');
+    expect(out).not.toContain('test_token');
     log.mockRestore();
   });
 
   it('--dry-run --offline は Sentry に接続せず (token 不要)、空の Sentry に対する計画を出す', async () => {
     delete process.env.SENTRY_AUTH_TOKEN;
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
-    const mod = await import('../../scripts/setup-sentry-alerts.mjs');
-    await mod.main(['--dry-run', '--offline']);
+    await (await load()).main(['--dry-run', '--offline']);
     expect(fetchSpy).not.toHaveBeenCalled();
     const out = log.mock.calls.map((c) => c.join(' ')).join('\n');
     expect(out).toContain(`create ${RULES.length} / update 0 / unchanged 0 / retire 0`);
@@ -1041,23 +1543,68 @@ describe('setup-sentry-alerts: main (fetch mock 経由の挙動検証)', () => {
   });
 
   it('--offline は --dry-run なしでは拒否する (適用を省いた気になる事故を防ぐ)', async () => {
-    const mod = await import('../../scripts/setup-sentry-alerts.mjs');
-    await expect(mod.main(['--offline'])).rejects.toThrow(/--offline/);
+    await expect((await load()).main(['--offline'])).rejects.toThrow(/--offline/);
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it('Sentry API が non-OK を返したら例外を投げる (silent skip しない)', async () => {
-    fetchSpy.mockImplementation(
-      async () => new Response('Unauthorized', { status: 401, statusText: 'Unauthorized' }),
-    );
-    const mod = await import('../../scripts/setup-sentry-alerts.mjs');
-    await expect(mod.main([])).rejects.toThrow(/Sentry API.*401/);
+  describe('Sentry API が non-OK を返したら例外 (既定は status・メソッド・path と本文のキー名だけ)', () => {
+    // PUT の検証エラーの形 (値に送った宛先が入りうる)。
+    const rejected = JSON.stringify({
+      actionFilters: [{ actions: [{ config: ['user 1000001 is not a member of this organization'] }] }],
+    });
+    const failPut = () => {
+      const fake = fakeSentry({ workflows: legacyWorkflows() });
+      fetchSpy.mockImplementation(async (input, init) =>
+        init?.method === 'PUT'
+          ? new Response(rejected, { status: 400, statusText: 'Bad Request' })
+          : fake.handler(input, init),
+      );
+    };
+    afterEach(() => {
+      delete process.env.SENTRY_ALERTS_DEBUG;
+    });
+
+    it('既定では本文の値 (宛先) を出さず、キーの path と SENTRY_ALERTS_DEBUG の案内だけ', async () => {
+      failPut();
+      const err = (await (await load()).main([]).catch((e: unknown) => e)) as Error;
+      expect(err.message).toBe(
+        'Sentry API PUT /api/0/organizations/test-org/workflows/100/ → 400 Bad Request ' +
+          '(本文のキー: actionFilters[0].actions[0].config・本文の全文は SENTRY_ALERTS_DEBUG=1 で表示)',
+      );
+      expect(err.message).not.toContain('1000001');
+      expect(err.message).not.toContain('test_token');
+    });
+
+    it('SENTRY_ALERTS_DEBUG=1 のときだけ本文の全文を出す', async () => {
+      process.env.SENTRY_ALERTS_DEBUG = '1';
+      failPut();
+      const err = (await (await load()).main([]).catch((e: unknown) => e)) as Error;
+      expect(err.message).toBe(
+        `Sentry API PUT /api/0/organizations/test-org/workflows/100/ → 400 Bad Request (本文: ${rejected})`,
+      );
+      expect(err.message).not.toContain('test_token');
+    });
+
+    it('JSON でない本文 (HTML のエラーページ等) は字数だけ', async () => {
+      fetchSpy.mockImplementation(async () => new Response(`<html>${'x'.repeat(1000)}</html>`, { status: 502, statusText: 'Bad Gateway' }));
+      const err = (await (await load()).main([]).catch((e: unknown) => e)) as Error;
+      expect(err.message).toBe(
+        'Sentry API GET /api/0/organizations/test-org/workflows/?per_page=100 → 502 Bad Gateway ' +
+          '(JSON でない本文・1013 字・本文の全文は SENTRY_ALERTS_DEBUG=1 で表示)',
+      );
+    });
+  });
+
+  it('SENTRY_API_BASE で接続先を変えられる (self-host 等)', async () => {
+    process.env.SENTRY_API_BASE = 'https://sentry.example.com';
+    useFake({ workflows: [] });
+    await (await load()).main(['--dry-run']);
+    expect(calls()[0]).toBe(`GET https://sentry.example.com/api/0/organizations/${ORG}/workflows/?per_page=100`);
   });
 
   it('SENTRY_AUTH_TOKEN 未設定で例外 (silent fail せず明示的に error)', async () => {
     delete process.env.SENTRY_AUTH_TOKEN;
-    const mod = await import('../../scripts/setup-sentry-alerts.mjs');
-    await expect(mod.main([])).rejects.toThrow(/SENTRY_AUTH_TOKEN/);
+    await expect((await load()).main([])).rejects.toThrow(/SENTRY_AUTH_TOKEN/);
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 });

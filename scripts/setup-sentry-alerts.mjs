@@ -1,36 +1,53 @@
 #!/usr/bin/env node
-// Sentry Issue Alert Rules の idempotent 設定スクリプト。
-// RULES (本ファイル) を正本として Sentry の rule と突き合わせ、無ければ POST で作成、同名 (または
-// legacyNames の旧名) の rule があって閾値・filter・environment が違えば PUT で更新する。
+// Sentry のアラート (Workflow Engine の workflow) の idempotent 設定スクリプト。
+// RULES (本ファイル) を正本として Sentry の workflow と突き合わせ、無ければ POST で作成、同名 (または
+// legacyNames の旧名) の workflow があって条件・環境・頻度・detector が違えば PUT で更新する。
 //
 // 使い方:
-//   node scripts/setup-sentry-alerts.mjs --dry-run            # GET だけで計画 (create/update/retire) を出す
+//   node scripts/setup-sentry-alerts.mjs --dry-run            # GET だけで計画 (create/update/keep/retire) を出す
 //   node scripts/setup-sentry-alerts.mjs --dry-run --offline  # Sentry に接続せず空の Sentry に対する計画 (token 不要)
 //   node scripts/setup-sentry-alerts.mjs                      # 適用 (外部サービスの設定変更 = user の承認事項)
 //
 // 必要 env (--offline 以外):
 //   SENTRY_AUTH_TOKEN     - https://sentry.io/settings/account/api/auth-tokens/ で
-//                           "project:write" "alerts:write" scope を持つ token を発行
-//   SENTRY_ORG_SLUG       - org の URL slug (例: "openpay")
-//   SENTRY_PROJECT_SLUG   - project の URL slug (例: "javascript-nextjs")
+//                           "Alerts: Read & Write" (alerts:read + alerts:write) scope を持つ token を発行
+//   SENTRY_ORG_SLUG       - org の URL slug (sentry.io/organizations/<slug>/ の <slug>)
+//   SENTRY_PROJECT_SLUG   - project の slug (例: "openpay") か数値の project ID。Issue Stream detector の特定に使う
 //
 // 任意 env:
 //   SENTRY_ALERT_ENV      - 対象 environment (default: 'mainnet')。本番ランタイムは
 //                           Sentry init で environment=NEXT_PUBLIC_NETWORK_ENV='mainnet'
 //                           (instrumentation*.ts)。手元 (dev / next start / Playwright) の event は
 //                           `local-mainnet` / `local-testnet` (lib/sentryEnvironment.ts・#709) なので
-//                           本 rule には当たらない = 通知は本番だけ。'production' という environment は
-//                           存在しないので指定しないこと (rule が一切 match しなくなる)。
+//                           本 workflow には当たらない = 通知は本番だけ。'production' という environment は
+//                           存在しないので指定しないこと (Sentry が存在しない environment 名を 400 で弾く)。
 //   SENTRY_API_BASE       - Sentry SaaS なら https://sentry.io 既定。
 //                           self-host なら https://sentry.example.com 等を指定
+//   SENTRY_ALERTS_DEBUG   - '1' のとき、Sentry API の異常応答の本文を全文表示する。既定は status・メソッド・path と
+//                           本文のキー名だけ (本文の値には送った宛先が入りうるため)
 //
 // 仕様根拠:
-//   - Sentry Issue Alert Rules API: https://docs.sentry.io/api/alerts/
-//     (list: GET /rules/・create: POST /rules/・update: PUT /rules/{id}/)
+//   - 旧 Issue Alert Rules API (/api/0/projects/{org}/{project}/rules/) は 2026-09-24 に Sentry 本体から削除され
+//     404 を返す (https://github.com/getsentry/sentry/pull/121879)。アラートは Workflow Engine の workflow になった
+//     (https://docs.sentry.io/api/monitors/):
+//       一覧 GET /api/0/organizations/{org}/workflows/ (per_page 最大 100・Link ヘッダの cursor でページング)
+//       作成 POST 同上 / 更新 PUT /api/0/organizations/{org}/workflows/{id}/
+//       project との結び付け = その project の Issue Stream detector (type issue_stream) の id を detectorIds に入れる
+//       (GET /api/0/organizations/{org}/detectors/?project=<id> または ?projectSlug=<slug>)
+//   - 旧 rule との対応: TaggedEventFilter → action filter の tagged_event {key, match, value}・
+//     EventFrequencyCondition (count) → event_frequency_count {value, interval}・rule の frequency →
+//     config.frequency (分)・NotifyEventAction → email action (Suggested Assignees → ActiveMembers)。
 //   - logger.ts は warn/error 発火時に `tags: { event: <msg> }` を付ける設計
-//     (`lib/logger.ts`)。本 script の filter はこの tag を match する。
-//   - EventFrequencyCondition は「issue が interval の間に threshold 回より多く見えたら」発火する。
-//     threshold=0 は 1 件目で通知。同じ issue への再通知は frequency (60 分) に 1 回。
+//     (`lib/logger.ts`)。本 script の tagged_event はこの tag を match する。
+//   - event_frequency_count は「その issue が interval の間に value 回より多く見えたら」真。value=0 は 1 件目で通知。
+//     同じ issue への再通知は config.frequency (60 分) に 1 回。
+//   - triggers (いつ workflow を評価するか) は every_event (「An event or issue activity is captured」)。
+//     旧 rule は event ごとに条件を評価していた。新 UI の既定の 4 trigger (first_seen_event / issue_resolved_trigger
+//     / reappeared_event / regression_event) は issue の状態変化のときだけ評価するので、続いている issue の 2 件目
+//     以降の event では評価されず、閾値 N > 0 の rule はほぼ鳴らず、閾値 0 の rule も issue の初出でしか鳴らない
+//     (workflow_engine/processors/workflow.py の evaluate_workflow_triggers・handlers/condition/*)。
+//     旧 rule の移行 (workflow_engine/migration_helpers/issue_alert_migration.py) も rule の conditions を
+//     triggers にそのまま移し、毎 event 評価を保っている。
 //
 // 閾値の考え方 (第 7 回コードベースレビュー E6・2026-10-10):
 //   旧閾値は「alpha 想定 1000 tx/h の 5%」(payment.failed > 50/h 等) の推測値で、実トラフィック
@@ -42,25 +59,32 @@
 //       は 2〜3 件目で通知。
 //     - 客のブラウザ由来 (LocalStorage・履歴) は 10 件/h = 今のトラフィックでは明らかな異常。
 //   再較正は Sentry → Issues で各 event の実頻度を見て本 RULES を直し、--dry-run で差分を確かめてから
-//   適用する (同名 rule は PUT で更新されるので Dashboard での削除は不要)。
+//   適用する (同名 workflow は PUT で更新されるので Dashboard での削除は不要)。
 //
-// 冪等性: rule NAME (legacyNames の旧名も) で既存 rule を引き当て、閾値・filter・environment・frequency
-//   を比べて違いがあれば PUT で更新する。RETIRED_RULE_NAMES (発火元が無くなった rule) は削除せず
-//   計画に「retire」として出すだけ → Dashboard で手動削除 (削除は不可逆なので script からは行わない)。
+// 冪等性: workflow の name (legacyNames の旧名も) の完全一致で既存 workflow を引き当て (同名が複数あれば止める)、
+//   条件・environment・frequency・detector を比べて違いがあれば PUT で更新する。RULES に無い名前の workflow
+//   (Sentry 既定の通知など) は「管理外」として触らない。RETIRED_RULE_NAMES (発火元が無くなった rule) は
+//   削除せず計画に「retire」として出すだけ → Dashboard で手動削除 (削除は不可逆なので script からは行わない)。
 
 const ALERT_ENV = process.env.SENTRY_ALERT_ENV || 'mainnet';
 const API_BASE = process.env.SENTRY_API_BASE || 'https://sentry.io';
 
-const EVENT_FREQUENCY_CONDITION =
-  'sentry.rules.conditions.event_frequency.EventFrequencyCondition';
-const TAGGED_EVENT_FILTER = 'sentry.rules.filters.tagged_event.TaggedEventFilter';
-const NOTIFY_EVENT_ACTION = 'sentry.rules.actions.notify_event.NotifyEventAction';
+const TAGGED_EVENT = 'tagged_event';
+const EVENT_FREQUENCY_COUNT = 'event_frequency_count';
+const EVENT_FREQUENCY_PREFIX = 'event_frequency_';
+const ISSUE_STREAM = 'issue_stream';
+// 同じ issue への再通知の間隔 (分)。1h おきに 1 度通知すれば十分。
+const FREQUENCY_MINUTES = 60;
+// 1 ページの件数 (Sentry の OffsetPaginator の上限)。
+const PER_PAGE = 100;
+// 異常応答の本文から出すキーの path の上限 (describeErrorBody)。
+const ERROR_KEYS_MAX = 20;
 
 // 各 rule の name は冪等性 key として使う。name を変えるときは旧名を legacyNames に残す
-// (旧 rule を rename して引き継ぐ・孤児の旧 rule を残さない)。
-// eventTags: 複数なら TaggedEventFilter を並べて filterMatch=any (OR)。
-// match: TaggedEventFilter の比較 (既定 eq・'ew' = 接尾一致)。
-// threshold: EventFrequencyCondition の「N 回より多い」の N (0 = 1 件目で通知)。
+// (旧 workflow を rename して引き継ぐ・孤児の旧 workflow を残さない)。
+// eventTags: 複数なら tag ごとに action filter (tagged_event + event_frequency_count の組) を並べる = OR。
+// match: tagged_event の比較 (既定 eq・'ew' = 接尾一致)。
+// threshold: event_frequency_count の「N 回より多い」の N (0 = 1 件目で通知)。
 export const RULES = [
   // ---- 客のブラウザ (支払いフォーム) --------------------------------------------------------------
   {
@@ -142,6 +166,8 @@ export const RULES = [
   // ---- JPYC ガスレス中継 (自前 relayer・lib/relay) ---------------------------------------------------
   {
     name: 'OpenPay: relayer の残高不足 (relay.relayer.balance_low)',
+    // 2026-06 に Dashboard で手作りした同じ tag の alert。重複させず、この rule の形に上書き更新する。
+    legacyNames: ['relayer balance low (mainnet)'],
     description:
       '自前 relayer EOA (RELAYER_PRIVATE_KEY・Polygon/Kaia/Avalanche) の native 残高が ' +
       'RELAY_LOW_BALANCE_ALERT_WEI (既定 0.1 native) を下回った。枯渇 (relayer_unfunded → relay_error → ' +
@@ -153,6 +179,10 @@ export const RULES = [
   },
   {
     name: 'OpenPay: JPYC ガスレス中継の失敗 (relay.jpyc.*)',
+    // 2026-06 に Dashboard で手作りした relay.jpyc.relay_error の alert。重複させず、この rule の形に上書き更新する。
+    // 同じく手作りの 'relay misconfig (mainnet)' (relay.jpyc.misconfig) もこの rule と重なるが、1 つの rule に
+    // 引き当てられる既存 workflow は 1 つだけ (2 つ足すと planRules が止まる) なので、そちらは Dashboard で消す。
+    legacyNames: ['relay failure (mainnet)'],
     description:
       '/api/relay/jpyc の中継失敗: relay_error (broadcast 前の失敗・relayer_unfunded や RPC 障害・客は ' +
       'standard へ fallback) / reverted (relayer の gas を使って失敗) / ' +
@@ -396,260 +426,420 @@ function requireEnv(name) {
   const v = process.env[name];
   if (!v || v.length === 0) {
     throw new Error(
-      `環境変数 ${name} が未設定です。https://sentry.io/settings/account/api/auth-tokens/ で ` +
-        `project:write + alerts:write scope を持つ token を発行してから再実行してください。`,
+      `環境変数 ${name} が未設定です。SENTRY_AUTH_TOKEN (https://sentry.io/settings/account/api/auth-tokens/ で ` +
+        `Alerts: Read & Write = alerts:read + alerts:write scope の token を発行)・SENTRY_ORG_SLUG・` +
+        `SENTRY_PROJECT_SLUG (slug か数値の project ID) を設定してから再実行してください。`,
     );
   }
   return v;
 }
 
-export function buildRulePayload(
+// triggers = every_event (event ごとに評価する・冒頭の「triggers」の項)。
+function buildTriggers() {
+  return {
+    logicType: 'any-short',
+    conditions: [{ type: 'every_event', comparison: true, conditionResult: true }],
+  };
+}
+
+// 旧 NotifyEventAction 相当: Suggested Assignees (issue owners)、いなければ project の active member にメール
+// (docs の Notify on Preferred Channel の例そのまま・validators/api_docs_help_text.py)。
+function defaultAction() {
+  return {
+    type: 'email',
+    integrationId: null,
+    data: { fallthroughType: 'ActiveMembers' },
+    config: { targetType: 'issue_owners', targetDisplay: null, targetIdentifier: '' },
+    status: 'active',
+  };
+}
+
+// RULES の 1 件から POST / PUT の body (Workflow) を作る。detectorId は project の Issue Stream detector。
+export function buildWorkflowPayload(
   { name, eventTags, match = 'eq', threshold, interval },
   env = ALERT_ENV,
+  detectorId = null,
 ) {
-  // Sentry の Issue Alert Rule schema。conditions/filters/actions の id は
-  // Sentry SDK 内部 class の dotted path で、API doc に列挙されている。
   return {
     name,
+    // PUT で enabled を省くと validator の既定 (true) で上書きされる (WorkflowValidator は partial でない) ので
+    // 毎回明示する。
+    enabled: true,
     environment: env,
-    // actionMatch=all: 複数 condition は AND。filterMatch=any: tag filter は OR (eventTags のどれか)。
-    actionMatch: 'all',
-    filterMatch: 'any',
-    // 同一 issue で何回 fire するか (分単位)。1h おきに 1 度通知すれば十分。
-    frequency: 60,
-    // comparisonType は Sentry の既定 'count' (回数比較) を明示する。GET は未指定でも 'count' を補って返す
-    // ので、明示しておくと往復で差分にならない ('percent' = 前期間比は別物)。
-    conditions: [{ id: EVENT_FREQUENCY_CONDITION, comparisonType: 'count', value: threshold, interval }],
-    filters: eventTags.map((value) => ({
-      id: TAGGED_EVENT_FILTER,
-      key: 'event',
-      match,
-      value,
+    config: { frequency: FREQUENCY_MINUTES },
+    detectorIds: detectorId === null ? [] : [String(detectorId)],
+    triggers: buildTriggers(),
+    // 1 つの action filter の条件は 1 つの論理 (all / any-short) でしか結べないので、「(tag A か tag B) かつ
+    // 件数 > N」は tag ごとの組 [tagged_event, event_frequency_count] (all) を並べて表す (action filter 同士は
+    // どれか 1 つが真なら通知 = OR)。組の中の並びは Sentry の画面で作った workflow と同じ。
+    actionFilters: eventTags.map((value) => ({
+      logicType: 'all',
+      conditions: [
+        { type: TAGGED_EVENT, comparison: { key: 'event', match, value }, conditionResult: true },
+        { type: EVENT_FREQUENCY_COUNT, comparison: { value: threshold, interval }, conditionResult: true },
+      ],
+      actions: [defaultAction()],
     })),
-    actions: [
-      // project notification settings に従って通知 (email / Slack integration 等)。
-      // Slack 直接通知をしたい場合は ID を SlackNotifyServiceAction に変更し
-      // workspace / channel パラメタを追加する (workspace ID は Sentry の Slack
-      // integration 設定画面で確認可能)。
-      { id: NOTIFY_EVENT_ACTION },
-    ],
   };
 }
 
 // ---- 比較 ------------------------------------------------------------------------------------
-// 既存 rule (API の応答) と desired (buildRulePayload) を、本 script が意味を持たせている field で比べる。
-// API は conditions / filters に name・label 等の表示用 field を足して返すので、それだけを落として
-// **conditions / filters 全体** (追加の condition・別キーの filter・match の違いも含む) と論理条件
-// (actionMatch / filterMatch) を比べる。最初の frequency condition と event filter だけを見ると、
-// 意味の違う rule (例: filterMatch=none で通知対象が反転・FirstSeen が足されている) を unchanged に
-// してしまう (Codex P2)。
-const DISPLAY_ONLY_KEYS = new Set(['name', 'label', 'prompt', 'formFields']);
+// 既存 workflow (GET の応答) と desired (buildWorkflowPayload) を、本 script が意味を持たせている項目
+// (条件・environment・frequency・detector・enabled) で比べる。GET は id・organizationId・日付・lastTriggered・
+// createdBy などを足して返すので、それらは比べない。
 
-// Sentry が未指定の field に補う既定値 (GET はこの値を付けて返す)。desired と既存の両方に同じ既定値を
-// 補ってから比べ、「未指定」と「既定値を明示」を同じ意味として扱う。
-//   EventFrequencyCondition.comparisonType: 'count' (src/sentry/rules/conditions/event_frequency.py)
-// TaggedEventFilter の match は Sentry では必須で eq への補完は無い (workflow_engine の tagged_event_handler)
-// ので補わない。欠損は「意味の定まらない filter」として差分 (update) に出す。
-function withSentryDefaults(node) {
-  const out = { ...node };
-  if (node.id === EVENT_FREQUENCY_CONDITION && (out.comparisonType === undefined || out.comparisonType === null)) {
-    out.comparisonType = 'count';
-  }
-  return out;
-}
-
-function normalizeNode(node) {
-  const filled = withSentryDefaults(node);
-  const out = {};
-  // 既定値を補ってからキーを並べ替える (補った key が末尾に付いて JSON のキー順が変わり、同じ filter を
-  // 差分扱いする取り違えを防ぐ)。
-  for (const key of Object.keys(filled).sort()) {
-    if (DISPLAY_ONLY_KEYS.has(key)) continue;
-    const v = filled[key];
-    if (v === undefined || v === null || v === '') continue;
-    // API は数値を文字列で返すことがある ("100" / 100)。意味は同じなので文字列に揃える。
-    out[key] = typeof v === 'object' ? v : String(v);
-  }
-  return out;
-}
-
-function normalizeList(list) {
-  return (list ?? []).map((n) => JSON.stringify(normalizeNode(n))).sort();
-}
-
-const MATCH_LABEL = { ew: 'ends-with', sw: 'starts-with', co: 'contains', ne: 'not', nc: 'not-contains' };
-const shortId = (id) => String(id).split('.').pop();
-
-// 人が読む filters の要約: event tag filter は値 (eq 以外は match 付き)・他の filter は class 名。
-function describeFilters(filters) {
-  return (filters ?? [])
-    .map((f) => {
-      if (f.id !== TAGGED_EVENT_FILTER || f.key !== 'event') return shortId(f.id);
-      const match = f.match;
-      if (match === undefined || match === null || match === '') return `(match なし) ${f.value}`;
-      return match === 'eq' ? String(f.value) : `${MATCH_LABEL[match] ?? match} ${f.value}`;
-    })
-    .join(' | ');
-}
-const describeConditions = (conditions) => (conditions ?? []).map((c) => shortId(c.id)).join(' + ');
-const describeFiltersForDiff = (filters) =>
-  (filters ?? [])
-    .map((f) =>
-      f.id === TAGGED_EVENT_FILTER && f.key === 'event'
-        ? describeFilters([f])
-        : shortId(f.id),
-    )
-    .join(' + ');
-
-function frequencyCondition(rule) {
-  return (rule.conditions ?? []).find((c) => c.id === EVENT_FREQUENCY_CONDITION);
-}
-
-// filterMatch: filter が 1 つ以下なら all と any は同じ意味。none は通知対象の反転なので常に別物。
-function sameFilterMatch(a, b, aCount, bCount) {
-  if (a === b) return true;
-  const both = aCount <= 1 && bCount <= 1;
-  return both && ['all', 'any'].includes(a) && ['all', 'any'].includes(b);
-}
-
-function diffRule(existing, desired) {
-  const changes = [];
-  if (existing.name !== desired.name) changes.push(`rename from "${existing.name}"`);
-  const envA = existing.environment ?? null;
-  if (envA !== desired.environment) changes.push(`environment ${envA} → ${desired.environment}`);
-
-  const freqA = frequencyCondition(existing);
-  const freqB = frequencyCondition(desired);
-  const thresholdA = freqA ? Number(freqA.value) : null;
-  const thresholdB = Number(freqB.value);
-  if (thresholdA !== thresholdB) changes.push(`threshold ${thresholdA} → ${thresholdB}`);
-  const intervalA = freqA ? freqA.interval : null;
-  if (intervalA !== freqB.interval) changes.push(`interval ${intervalA} → ${freqB.interval}`);
-  // threshold / interval 以外の違い。value と interval を除いた condition が同等なら (閾値だけの変更) 詳細は
-  // 省略し、比較種別 (comparisonType) ・比較間隔 (comparisonInterval) の変更は閾値と同時でも必ず計画に出す
-  // (threshold の行だけで隠れると、PUT が percent → count に変え comparisonInterval を消すことが見えない)。
-  const withoutValueInterval = (c) => {
-    const { value: _v, interval: _i, ...rest } = normalizeNode(c);
-    return rest;
-  };
-  const restA = (existing.conditions ?? []).map(withoutValueInterval);
-  const restB = desired.conditions.map(withoutValueInterval);
-  const sortedJson = (list) => JSON.stringify(list.map((c) => JSON.stringify(c)).sort());
-  if (sortedJson(restA) !== sortedJson(restB)) {
-    if (restA.length === 1 && restB.length === 1 && restA[0].id === restB[0].id) {
-      // 同じ 1 condition で field が違う: field ごとに出す。
-      const known = ['comparisonType', 'comparisonInterval'];
-      const others = [...new Set([...Object.keys(restA[0]), ...Object.keys(restB[0])])]
-        .filter((k) => k !== 'id' && !known.includes(k))
-        .sort();
-      const keys = [...known, ...others];
-      for (const key of keys) {
-        const a = restA[0][key] ?? '(none)';
-        const b = restB[0][key] ?? '(none)';
-        if (a !== b) changes.push(`${key} ${a} → ${b}`);
-      }
-    } else {
-      changes.push(`conditions ${describeConditions(existing.conditions)} → ${describeConditions(desired.conditions)}`);
+// 比較用の正規形。object はキーを並べ替えて null / undefined / '' の項目を落とし、葉は文字列に揃える
+// (API は数値を文字列で返すことがある: "3" / 3)。
+function canonValue(v) {
+  if (Array.isArray(v)) return v.map(canonValue);
+  if (v !== null && typeof v === 'object') {
+    const out = {};
+    for (const key of Object.keys(v).sort()) {
+      const x = v[key];
+      if (x === undefined || x === null || x === '') continue;
+      out[key] = canonValue(x);
     }
+    return out;
   }
-  if (Number(existing.frequency) !== desired.frequency) {
-    changes.push(`frequency ${existing.frequency} → ${desired.frequency}`);
+  return v === undefined || v === null ? null : String(v);
+}
+
+// 条件は type・comparison・conditionResult だけを比べる (id 等は落とす)。
+const canonCondition = (c) =>
+  JSON.stringify({
+    type: c.type,
+    comparison: canonValue(c.comparison),
+    conditionResult: canonValue(c.conditionResult),
+  });
+// 条件の並び順は意味を持たない (論理は group の logicType) ので並べ替えて比べる。actions は別に扱う。
+const canonGroup = (g) =>
+  JSON.stringify({
+    logicType: g?.logicType ?? null,
+    conditions: (g?.conditions ?? []).map(canonCondition).sort(),
+  });
+const canonGroups = (groups) => JSON.stringify((groups ?? []).map(canonGroup).sort());
+const withoutId = (a) => {
+  const { id: _id, ...rest } = a;
+  return rest;
+};
+// actions は id を除いて比べる (PUT は id 無しで送り直すので往復で id が変わる)。
+const canonAction = (a) => JSON.stringify(canonValue(withoutId(a)));
+
+const MATCH_LABEL = {
+  ew: 'ends-with',
+  sw: 'starts-with',
+  co: 'contains',
+  ne: 'not',
+  nc: 'not-contains',
+  is: 'is-set',
+  ns: 'not-set',
+};
+// event_frequency_* の comparison の value / interval 以外のキーの表示名 (API は snake_case のまま返す)。
+const KEY_LABEL = { comparison_interval: 'comparisonInterval' };
+
+const isEventTag = (c) => c.type === TAGGED_EVENT && c.comparison?.key === 'event';
+const isFrequency = (c) => typeof c.type === 'string' && c.type.startsWith(EVENT_FREQUENCY_PREFIX);
+const distinct = (values) => [...new Set(values)];
+const listOrNone = (values) => (values.length === 0 ? '(none)' : values.join(','));
+
+// 人が読む event tag 条件: 値 (eq 以外は match 付き)。
+function describeTag(c) {
+  const { match, value } = c.comparison ?? {};
+  if (match === undefined || match === null || match === '') return `(match なし) ${value}`;
+  return match === 'eq' ? String(value) : `${MATCH_LABEL[match] ?? match} ${value}`;
+}
+function describeCondition(c) {
+  if (isEventTag(c)) return describeTag(c);
+  if (isFrequency(c)) return `${c.type} > ${c.comparison?.value} / ${c.comparison?.interval}`;
+  return String(c.type);
+}
+const describeGroup = (g) => `${g.logicType}[${(g.conditions ?? []).map(describeCondition).join(' + ')}]`;
+const describeGroups = (groups) => ((groups ?? []).length === 0 ? '(none)' : groups.map(describeGroup).join(' | '));
+const describeTriggers = (g) =>
+  g ? `${g.logicType}[${(g.conditions ?? []).map((c) => c.type).join(' + ')}]` : '(none)';
+// 通知先は種類と宛先の種別だけを出す (user / team の ID は出さない)。
+const describeAction = (a) => (a.config?.targetType ? `${a.type} (${a.config.targetType})` : String(a.type));
+
+// action filter 群の差分を、旧版と同じく閾値・間隔・比較種別・tag ごとの行で出す。
+function diffActionFilters(existingGroups, desiredGroups) {
+  const changes = [];
+  const freqA = existingGroups.flatMap((g) => (g.conditions ?? []).filter(isFrequency));
+  const freqB = desiredGroups[0].conditions.find(isFrequency).comparison;
+  const thresholds = distinct(freqA.map((c) => String(c.comparison?.value)));
+  if (thresholds.length !== 1 || thresholds[0] !== String(freqB.value)) {
+    changes.push(`threshold ${listOrNone(thresholds)} → ${freqB.value}`);
   }
-  if (existing.actionMatch !== desired.actionMatch) {
-    changes.push(`actionMatch ${existing.actionMatch} → ${desired.actionMatch}`);
+  const intervals = distinct(freqA.map((c) => String(c.comparison?.interval)));
+  if (intervals.length !== 1 || intervals[0] !== freqB.interval) {
+    changes.push(`interval ${listOrNone(intervals)} → ${freqB.interval}`);
   }
-  if (JSON.stringify(normalizeList(existing.filters)) !== JSON.stringify(normalizeList(desired.filters))) {
-    changes.push(`filters ${describeFiltersForDiff(existing.filters)} → ${describeFiltersForDiff(desired.filters)}`);
+  // 比較種別 (count / percent = 前期間比) と比較間隔は、閾値と同時に変わっても行を分けて出す (threshold の行で
+  // 隠れると、PUT が percent → count に変えて comparisonInterval を消すことが見えない)。
+  const kinds = distinct(freqA.map((c) => c.type.slice(EVENT_FREQUENCY_PREFIX.length)));
+  if (freqA.length > 0 && (kinds.length !== 1 || kinds[0] !== 'count')) {
+    changes.push(`comparisonType ${kinds.join(',')} → count`);
   }
-  const fa = (existing.filters ?? []).length;
-  const fb = desired.filters.length;
-  if (!sameFilterMatch(existing.filterMatch, desired.filterMatch, fa, fb)) {
-    changes.push(`filterMatch ${existing.filterMatch} → ${desired.filterMatch}`);
+  const extraKeys = distinct(
+    freqA.flatMap((c) => Object.keys(canonValue(c.comparison ?? {})).filter((k) => k !== 'value' && k !== 'interval')),
+  ).sort();
+  for (const key of extraKeys) {
+    const values = distinct(
+      freqA
+        .map((c) => canonValue(c.comparison ?? {})[key])
+        .filter((v) => v !== undefined)
+        .map((v) => (typeof v === 'string' ? v : JSON.stringify(v))),
+    );
+    changes.push(`${KEY_LABEL[key] ?? key} ${values.join(',')} → (none)`);
+  }
+  const tagsA = existingGroups.flatMap((g) => (g.conditions ?? []).filter(isEventTag));
+  const tagsB = desiredGroups.flatMap((g) => g.conditions.filter(isEventTag));
+  if (JSON.stringify(tagsA.map(canonCondition).sort()) !== JSON.stringify(tagsB.map(canonCondition).sort())) {
+    const before = tagsA.length === 0 ? '(none)' : tagsA.map(describeTag).join(' + ');
+    changes.push(`filters ${before} → ${tagsB.map(describeTag).join(' + ')}`);
+  }
+  // 組の形: desired は全組が「論理 all・tag 1 つ + 件数 1 つ」。tag をまとめた組 (any-short に tag を並べる等)・
+  // 別の条件 (level 等) が混ざった組・論理や conditionResult の違いは、通知の条件が変わるので全体を出す。
+  const shape = (g) =>
+    JSON.stringify({
+      logicType: g.logicType ?? null,
+      conditions: (g.conditions ?? [])
+        .map((c) => {
+          if (isEventTag(c)) return `tag:${canonValue(c.conditionResult)}`;
+          if (isFrequency(c)) return `frequency:${canonValue(c.conditionResult)}`;
+          return canonCondition(c);
+        })
+        .sort(),
+    });
+  const desiredShape = shape(desiredGroups[0]);
+  if (existingGroups.some((g) => shape(g) !== desiredShape)) {
+    changes.push(`actionFilters ${describeGroups(existingGroups)} → ${describeGroups(desiredGroups)}`);
   }
   return changes;
 }
 
-// 既存 rule 一覧 (GET の応答) と RULES から、何をどう変えるかの計画を作る (純関数・API を叩かない)。
-// opts.includeDisabled: 無効化 (status=disabled) 中の rule も更新する (PUT は disabled を active に戻すので、
-// 止めていた通知が再開する。既定では更新せず計画に出すだけ)。
-export function planRules(existing, rules = RULES, env = ALERT_ENV, opts = {}) {
-  const byName = new Map(existing.map((r) => [r.name, r]));
-  const plan = { create: [], update: [], unchanged: [], retire: [], skippedDisabled: [] };
+function diffWorkflow(existing, desired) {
+  const changes = [];
+  if (existing.name !== desired.name) changes.push(`rename from "${existing.name}"`);
+  const envA = existing.environment ?? null;
+  if (envA !== desired.environment) changes.push(`environment ${envA} → ${desired.environment}`);
+  const freqA = existing.config?.frequency;
+  if (freqA === undefined || freqA === null || Number(freqA) !== desired.config.frequency) {
+    changes.push(`frequency ${freqA ?? '(none)'} → ${desired.config.frequency}`);
+  }
+  const detectorsA = (existing.detectorIds ?? []).map(String).sort();
+  const detectorsB = desired.detectorIds.map(String).sort();
+  if (detectorsA.join(',') !== detectorsB.join(',')) {
+    changes.push(`detector ${listOrNone(detectorsA)} → ${listOrNone(detectorsB)}`);
+  }
+  if (canonGroup(existing.triggers) !== canonGroup(desired.triggers)) {
+    changes.push(`triggers ${describeTriggers(existing.triggers)} → ${describeTriggers(desired.triggers)}`);
+  }
+  const existingGroups = existing.actionFilters ?? [];
+  changes.push(...diffActionFilters(existingGroups, desired.actionFilters));
+  // 上の行で説明できない差分 (想定外の形) を keep に落とさない: 正規形が違えば全体を出す。
+  if (changes.length === 0 && canonGroups(existingGroups) !== canonGroups(desired.actionFilters)) {
+    changes.push(`actionFilters ${describeGroups(existingGroups)} → ${describeGroups(desired.actionFilters)}`);
+  }
+  return changes;
+}
+
+// 既存の通知先: 全 action filter の actions の和集合 (id を外す)。uniform = どの組も同じ通知先を持つか。
+function collectActions(existing) {
+  const groups = existing.actionFilters ?? [];
+  const union = new Map();
+  for (const g of groups) {
+    for (const a of g.actions ?? []) {
+      const key = canonAction(a);
+      if (!union.has(key)) union.set(key, withoutId(a));
+    }
+  }
+  const all = JSON.stringify([...union.keys()].sort());
+  const uniform = groups.every((g) => JSON.stringify((g.actions ?? []).map(canonAction).sort()) === all);
+  return { actions: [...union.values()], uniform };
+}
+
+// RULES の各 rule に対応する既存 workflow (name か legacyNames の完全一致)。name に一意制約は無いので、
+// 1 つの rule に 2 つ以上当たったら、どれを更新するか決められない (残りが重複通知を出し続ける) ので止める。
+function matchWorkflows(existing, rules) {
+  const matched = new Map();
+  const duplicates = [];
   for (const rule of rules) {
-    const desired = buildRulePayload(rule, env);
-    const found =
-      byName.get(rule.name) ??
-      (rule.legacyNames ?? []).map((n) => byName.get(n)).find((r) => r !== undefined);
+    const names = new Set([rule.name, ...(rule.legacyNames ?? [])]);
+    const hits = existing.filter((w) => names.has(w.name));
+    if (hits.length > 1) {
+      duplicates.push(`${rule.name}: ${hits.map((w) => `"${w.name}" (id=${w.id})`).join(', ')}`);
+    }
+    matched.set(rule.name, hits[0]);
+  }
+  if (duplicates.length > 0) {
+    throw new Error(
+      '同じ name (または legacyNames の旧名) の workflow が複数あり、どれを更新するか決められないので止めます。' +
+        'Sentry → Alerts で重複を削除するか名前を変えてから再実行してください:\n' +
+        duplicates.map((d) => `  - ${d}`).join('\n'),
+    );
+  }
+  return matched;
+}
+
+// project の Issue Stream detector (workflow を project に結び付ける先) を 1 つに決める。
+// 1) detectors 一覧 (project で絞った応答) の type issue_stream で projectId を持つもの (projectId=null は
+//    「全 project」用の detector なので使わない)。数値の project ID が与えられたら projectId も一致させる。
+// 2) 一覧に無ければ、管理対象 (RULES の name / legacyNames) の既存 workflow の detectorIds から候補を拾う
+//    (source='workflows')。この候補は型も project も分からないので、使う前に verifyFallbackDetector で確かめる。
+// どちらでも 1 つに決まらなければ止める (detector の無い workflow は発火しない)。
+export function resolveIssueStreamDetector(detectors, workflows, project, rules = RULES) {
+  const numericProject = /^\d+$/.test(project);
+  const streams = detectors.filter(
+    (d) =>
+      d.type === ISSUE_STREAM &&
+      d.projectId !== null &&
+      d.projectId !== undefined &&
+      (!numericProject || String(d.projectId) === project),
+  );
+  if (streams.length === 1) return { id: String(streams[0].id), source: 'detectors' };
+  if (streams.length > 1) {
+    throw new Error(
+      `project ${project} の Issue Stream detector が複数あります (${streams.map((d) => d.id).join(', ')})。` +
+        'SENTRY_PROJECT_SLUG に数値の project ID を指定して絞ってください。',
+    );
+  }
+  const fromWorkflows = distinct(
+    [...matchWorkflows(workflows, rules).values()]
+      .filter((w) => w !== undefined)
+      .flatMap((w) => (w.detectorIds ?? []).map(String)),
+  );
+  if (fromWorkflows.length === 1) return { id: fromWorkflows[0], source: 'workflows' };
+  throw new Error(
+    `project ${project} の Issue Stream detector を特定できません ` +
+      `(detectors 一覧に無く、管理対象 workflow の detectorIds は ${listOrNone(fromWorkflows)})。` +
+      'SENTRY_PROJECT_SLUG (slug か数値の project ID) と Sentry → Monitors の Issue Stream を確かめてください。',
+  );
+}
+
+// 対象 project の数値 ID。数値で与えられたらそのまま、slug なら project で絞った detectors 一覧の projectId が
+// 1 つに揃うときだけ (Error Monitor 等の detector が持つ)。決まらなければ null。
+function projectIdOf(project, detectors) {
+  if (/^\d+$/.test(project)) return project;
+  const ids = distinct(
+    detectors.filter((d) => d.projectId !== null && d.projectId !== undefined).map((d) => String(d.projectId)),
+  );
+  return ids.length === 1 ? ids[0] : null;
+}
+
+// fallback の候補 (管理対象 workflow の接続先) を、詳細 (GET /detectors/{id}/) で確かめる: 型が issue_stream で、
+// projectId が対象 project と一致すること。error 型や別 project の detector に 28 件を結び付けると、通知が来ないか
+// 別 project の event で鳴る (その波及を断つ)。確かめられなければ止める。
+export function verifyFallbackDetector(detail, project, detectors) {
+  if (detail.type !== ISSUE_STREAM) {
+    throw new Error(
+      `管理対象 workflow の接続先 detector ${detail.id} は type ${detail.type} で、Issue Stream ではありません。` +
+        'Sentry → Monitors で project の Issue Stream を確かめてください。',
+    );
+  }
+  const projectId = projectIdOf(project, detectors);
+  if (projectId === null) {
+    throw new Error(
+      `project ${project} の ID を detectors 一覧から確かめられないので、detector ${detail.id} を使えるか判断できません。` +
+        'SENTRY_PROJECT_SLUG に数値の project ID を指定して再実行してください。',
+    );
+  }
+  if (String(detail.projectId) !== projectId) {
+    throw new Error(
+      `管理対象 workflow の接続先 detector ${detail.id} は project ${detail.projectId ?? '(全 project)'} の Issue Stream で、` +
+        `対象 project ${project} (ID ${projectId}) のものではありません。`,
+    );
+  }
+}
+
+// 既存 workflow 一覧 (GET の応答) と RULES から、何をどう変えるかの計画を作る (純関数・API を叩かない)。
+// opts.detectorId: project の Issue Stream detector の id (resolveIssueStreamDetector)。
+// opts.includeDisabled: 無効化 (enabled=false) 中の workflow も更新する (再有効化する)。既定では更新せず計画に出すだけ。
+export function planRules(existing, rules = RULES, env = ALERT_ENV, opts = {}) {
+  const matched = matchWorkflows(existing, rules);
+  const detectorId = opts.detectorId ?? null;
+  const plan = { create: [], update: [], unchanged: [], retire: [], skippedDisabled: [], unmanaged: [] };
+  for (const rule of rules) {
+    const desired = buildWorkflowPayload(rule, env, detectorId);
+    const found = matched.get(rule.name);
     if (!found) {
       plan.create.push({ name: rule.name, payload: desired });
       continue;
     }
-    const changes = diffRule(found, desired);
-    // PUT は rule 全体を上書きする。既存の通知先 (Slack / PagerDuty 等の actions) は本 script の
-    // 管轄外なので desired で置き換えず、既存をそのまま載せる (閾値だけ変える更新で通知先が消える
-    // 波及を断つ・Codex P1)。既存に actions が無いときだけ既定の NotifyEventAction を付け、計画に明示する。
-    const keptActions = (found.actions ?? []).filter((a) => a && a.id);
-    let actions = desired.actions;
-    if (keptActions.length > 0) {
-      actions = keptActions;
-    } else {
-      // 通知先の無い rule は何も知らせない = 無いのと同じなので、既定の通知先を付ける更新にする。
-      changes.push('actions (none) → NotifyEventAction');
+    const id = String(found.id);
+    const changes = diffWorkflow(found, desired);
+    // PUT は渡した actionFilters を正として置き換える。既存の通知先 (メールの宛先・Slack 等) は本 script の管轄外
+    // なので desired の既定で置き換えず、既存を全組にそのまま載せる (閾値だけ変える更新で通知先が消える波及を
+    // 断つ)。既存に actions が無いときだけ既定の通知先を付け、計画に明示する。
+    const { actions: kept, uniform } = collectActions(found);
+    let actions = kept;
+    if (kept.length === 0) {
+      // 通知先の無い workflow は何も知らせない = 無いのと同じなので、既定の通知先を付ける更新にする。
+      actions = [defaultAction()];
+      changes.push('actions (none) → email (issue_owners)');
+    } else if (!uniform) {
+      changes.push(`actions を全 action filter で共通に (${kept.map(describeAction).join(', ')})`);
     }
-    // owner (担当の割り当て) も同様: PUT で未指定だと Sentry の更新処理 (project_rules/updater.py) が
-    // None にして担当が消える。既存にあるときだけそのまま載せる (create は owner なし)。
+    // owner (担当) は PUT に載せずに保持する: WorkflowValidator.update は body に owner キーがあるときだけ owner を
+    // 変える。同じ値でも送ると team の所属・権限が検証し直され、実行者がその team のメンバーでなく team:admin も
+    // 無いと、owner を変えない更新まで 400 で拒否される (その波及を断つ)。計画には保持することだけを出す。
     const keptOwner = typeof found.owner === 'string' && found.owner.length > 0 ? found.owner : undefined;
+    const disabled = found.enabled === false;
     if (changes.length === 0) {
-      plan.unchanged.push({ id: String(found.id), name: rule.name });
+      plan.unchanged.push({ id, name: rule.name, ...(disabled ? { disabled: true } : {}) });
       continue;
     }
-    // 無効化中の rule: Sentry の PUT (project_rule_details) は disabled を active に戻す = 止めていた通知が
-    // 再開する。status を PUT に載せても保持できる保証が無いので、既定では更新せず計画に出すだけにし、
-    // 再有効化は --include-disabled を明示したときだけ (計画にも明示)。
-    const disabled = found.status === 'disabled';
+    // 無効化中の workflow は Dashboard で止めたもの。既定では更新せず計画に出すだけにし、更新 (= 再有効化) は
+    // --include-disabled を明示したときだけ。
     if (disabled && !opts.includeDisabled) {
-      plan.skippedDisabled.push({ id: String(found.id), name: rule.name, changes });
+      plan.skippedDisabled.push({ id, name: rule.name, changes });
       continue;
     }
+    if (disabled) changes.push('enabled false → true');
     plan.update.push({
-      id: String(found.id),
+      id,
       name: rule.name,
       previousName: found.name !== rule.name ? found.name : undefined,
       changes,
-      keptActions: keptActions.map((a) => shortId(a.id)),
+      keptActions: kept.map(describeAction),
       keptOwner,
       ...(disabled ? { reenable: true } : {}),
-      payload: { ...desired, actions, ...(keptOwner !== undefined ? { owner: keptOwner } : {}) },
+      payload: {
+        ...desired,
+        actionFilters: desired.actionFilters.map((g) => ({ ...g, actions: actions.map((a) => structuredClone(a)) })),
+      },
     });
   }
-  for (const name of RETIRED_RULE_NAMES) {
-    const found = byName.get(name);
-    if (found) plan.retire.push({ id: String(found.id), name });
+  const managed = new Set([...matched.values()].filter((w) => w !== undefined).map((w) => String(w.id)));
+  for (const w of existing) {
+    const id = String(w.id);
+    if (RETIRED_RULE_NAMES.includes(w.name)) plan.retire.push({ id, name: w.name });
+    else if (!managed.has(id)) plan.unmanaged.push({ id, name: w.name });
   }
   return plan;
 }
 
-// dry-run の出力。1 行 1 rule (見出し + create/update/unchanged/retire)。
+// dry-run の出力。見出し + 1 行 1 workflow (create / update / skip / keep / retire / 管理外)。
 export function formatPlan(plan, env = ALERT_ENV) {
-  const skipped = plan.skippedDisabled ?? [];
+  const skipped = plan.skippedDisabled;
   const lines = [
     `[setup-sentry-alerts] plan (environment=${env}): create ${plan.create.length} / ` +
       `update ${plan.update.length} / unchanged ${plan.unchanged.length} / retire ${plan.retire.length}` +
-      (skipped.length > 0 ? ` / disabled (更新しない) ${skipped.length}` : ''),
+      (skipped.length > 0 ? ` / disabled (更新しない) ${skipped.length}` : '') +
+      (plan.unmanaged.length > 0 ? ` / 管理外 (触らない) ${plan.unmanaged.length}` : ''),
   ];
   for (const c of plan.create) {
-    const cond = c.payload.conditions[0];
-    lines.push(
-      `  + create  ${c.name} [${describeFilters(c.payload.filters)} > ${cond.value} / ${cond.interval}]`,
-    );
+    const groups = c.payload.actionFilters;
+    const tags = groups.map((g) => describeTag(g.conditions.find(isEventTag))).join(' | ');
+    const { value, interval } = groups[0].conditions.find(isFrequency).comparison;
+    lines.push(`  + create  ${c.name} [${tags} > ${value} / ${interval}]`);
   }
   for (const u of plan.update) {
     // 通知先は変えない (既存を保持)。何を保持したかを計画に出し、変えたいときは Dashboard で行う。
     const kept = [];
     if (u.keptActions.length > 0) kept.push(`actions 保持: ${u.keptActions.join(', ')}`);
-    if (u.keptOwner !== undefined) kept.push(`owner 保持: ${u.keptOwner}`);
+    if (u.keptOwner !== undefined) kept.push(`owner 保持: ${u.keptOwner.split(':')[0]}`);
     const keptNote = kept.length > 0 ? ` [${kept.join('; ')}]` : '';
-    const reenable = u.reenable ? ' ※無効化中 → PUT で再有効化される (--include-disabled)' : '';
+    const reenable = u.reenable ? ' ※無効化中 → 再有効化して更新する (--include-disabled)' : '';
     lines.push(`  ~ update  ${u.name} (id=${u.id}): ${u.changes.join('; ')}${keptNote}${reenable}`);
   }
   for (const s of skipped) {
@@ -659,19 +849,56 @@ export function formatPlan(plan, env = ALERT_ENV) {
     );
   }
   for (const k of plan.unchanged) {
-    lines.push(`  = keep    ${k.name} (id=${k.id})`);
+    lines.push(`  = keep    ${k.name} (id=${k.id})${k.disabled ? ' ※無効化中のまま' : ''}`);
   }
   for (const r of plan.retire) {
     lines.push(
-      `  - retire  ${r.name} (id=${r.id}): 発火元が無い → Sentry Dashboard で削除 (本 script は削除しない)`,
+      `  - retire  ${r.name} (id=${r.id}): 発火元が無い → Sentry Dashboard (Alerts) で削除 (本 script は削除しない)`,
     );
+  }
+  for (const m of plan.unmanaged) {
+    lines.push(`  · 管理外  ${m.name} (id=${m.id}): RULES に無い名前 → 触らない`);
   }
   return lines;
 }
 
+// ---- Sentry API ------------------------------------------------------------------------------
+// token は Authorization ヘッダだけに載せ、出力やエラー文には出さない。
+
+// 異常応答の本文の要約: JSON ならキーの path (エラー項目名) だけ。値 (検証エラーの文言) には送った宛先
+// (メールの宛先の user ID 等) が入りうるので、既定では出さない (ログやチャットへの貼り付けに宛先が漏れる波及を
+// 断つ)。全文は SENTRY_ALERTS_DEBUG=1 のときだけ出す (sentryRequest)。
+export function describeErrorBody(text) {
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return `JSON でない本文・${text.length} 字`;
+  }
+  const paths = [];
+  const walk = (value, path) => {
+    if (Array.isArray(value)) {
+      if (value.every((v) => v === null || typeof v !== 'object')) {
+        if (path) paths.push(path);
+        return;
+      }
+      value.forEach((v, i) => walk(v, `${path}[${i}]`));
+      return;
+    }
+    if (value !== null && typeof value === 'object') {
+      for (const key of Object.keys(value)) walk(value[key], path ? `${path}.${key}` : key);
+      return;
+    }
+    if (path) paths.push(path);
+  };
+  walk(parsed, '');
+  if (paths.length === 0) return 'キーの無い本文';
+  const shown = paths.slice(0, ERROR_KEYS_MAX).join(', ');
+  return `本文のキー: ${shown}${paths.length > ERROR_KEYS_MAX ? ` ほか ${paths.length - ERROR_KEYS_MAX} 件` : ''}`;
+}
+
 async function sentryRequest({ method, path, token, body }) {
-  const url = `${API_BASE}${path}`;
-  const res = await fetch(url, {
+  const res = await fetch(`${API_BASE}${path}`, {
     method,
     headers: {
       Authorization: `Bearer ${token}`,
@@ -681,17 +908,51 @@ async function sentryRequest({ method, path, token, body }) {
   });
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(
-      `Sentry API ${method} ${path} → ${res.status} ${res.statusText}: ${text}`,
-    );
+    const detail =
+      process.env.SENTRY_ALERTS_DEBUG === '1'
+        ? `本文: ${text}`
+        : `${describeErrorBody(text)}・本文の全文は SENTRY_ALERTS_DEBUG=1 で表示`;
+    throw new Error(`Sentry API ${method} ${path} → ${res.status} ${res.statusText} (${detail})`);
   }
-  return res.json();
+  return { data: await res.json(), link: res.headers.get('link') };
+}
+
+// Link ヘッダ (`<url>; rel="previous"; results="false"; cursor="…", <url>; rel="next"; results="true";
+// cursor="0:100:0"`) から次ページの cursor を取る。次が無ければ (results="false") null。
+export function nextCursor(link) {
+  if (!link) return null;
+  for (const part of link.split(/,\s*(?=<)/)) {
+    const params = Object.fromEntries([...part.matchAll(/(\w+)="([^"]*)"/g)].map((m) => [m[1], m[2]]));
+    if (params.rel === 'next') return params.results === 'true' && params.cursor ? params.cursor : null;
+  }
+  return null;
+}
+
+// 一覧を最後のページまで取る。次ページは Link ヘッダの cursor だけを使い、URL は API_BASE から組み立てる
+// (応答のヘッダが指す別ホストへ token を送らない)。
+async function sentryGetAll(path, token) {
+  const items = [];
+  const seen = new Set();
+  let cursor = null;
+  for (;;) {
+    const sep = path.includes('?') ? '&' : '?';
+    const page = `${path}${sep}per_page=${PER_PAGE}${cursor === null ? '' : `&cursor=${encodeURIComponent(cursor)}`}`;
+    const { data, link } = await sentryRequest({ method: 'GET', path: page, token });
+    items.push(...data);
+    cursor = nextCursor(link);
+    if (cursor === null) return items;
+    // 同じ cursor が返り続けると GET を無限に叩いて rate limit を使い切る: その波及を断つ。
+    if (seen.has(cursor)) {
+      throw new Error(`Sentry API GET ${path}: 同じ cursor (${cursor}) が繰り返し返されたので止めます。`);
+    }
+    seen.add(cursor);
+  }
 }
 
 export async function main(argv = process.argv.slice(2)) {
   const dryRun = argv.includes('--dry-run');
   const offline = argv.includes('--offline');
-  // 無効化中の rule も更新する (PUT で再有効化される)。既定では更新せず計画に出すだけ。
+  // 無効化中の workflow も更新する (再有効化する)。既定では更新せず計画に出すだけ。
   const includeDisabled = argv.includes('--include-disabled');
   if (offline && !dryRun) {
     throw new Error('--offline は --dry-run と一緒にだけ使えます (接続せずに適用はできません)。');
@@ -699,22 +960,43 @@ export async function main(argv = process.argv.slice(2)) {
 
   let existing = [];
   let token = '';
-  let rulesPath = '';
+  let orgPath = '';
+  let detectorId = null;
   if (offline) {
-    console.log('[setup-sentry-alerts] --offline: Sentry に接続せず、空の Sentry に対する計画を出します。');
+    console.log(
+      '[setup-sentry-alerts] --offline: Sentry に接続せず、空の Sentry に対する計画を出します (detector は解決しない)。',
+    );
   } else {
     token = requireEnv('SENTRY_AUTH_TOKEN');
     const orgSlug = requireEnv('SENTRY_ORG_SLUG');
-    const projectSlug = requireEnv('SENTRY_PROJECT_SLUG');
-    rulesPath = `/api/0/projects/${orgSlug}/${projectSlug}/rules/`;
+    const project = requireEnv('SENTRY_PROJECT_SLUG');
+    orgPath = `/api/0/organizations/${orgSlug}`;
     console.log(
-      `[setup-sentry-alerts] target: ${API_BASE}/${orgSlug}/${projectSlug} (environment: ${ALERT_ENV})`,
+      `[setup-sentry-alerts] target: ${API_BASE} org=${orgSlug} project=${project} (environment: ${ALERT_ENV})`,
     );
-    existing = await sentryRequest({ method: 'GET', path: rulesPath, token });
-    console.log(`[setup-sentry-alerts] 既存 rule ${existing.length} 件 (name / legacyNames で引き当て)`);
+    existing = await sentryGetAll(`${orgPath}/workflows/`, token);
+    console.log(`[setup-sentry-alerts] 既存 workflow ${existing.length} 件 (name / legacyNames の完全一致で引き当て)`);
+    const projectQuery = /^\d+$/.test(project)
+      ? `project=${project}`
+      : `projectSlug=${encodeURIComponent(project)}`;
+    const detectors = await sentryGetAll(`${orgPath}/detectors/?${projectQuery}`, token);
+    const detector = resolveIssueStreamDetector(detectors, existing, project);
+    if (detector.source === 'workflows') {
+      const { data: detail } = await sentryRequest({ method: 'GET', path: `${orgPath}/detectors/${detector.id}/`, token });
+      verifyFallbackDetector(detail, project, detectors);
+    }
+    detectorId = detector.id;
+    console.log(
+      `[setup-sentry-alerts] Issue Stream detector: id=${detector.id} ` +
+        `(${
+          detector.source === 'detectors'
+            ? 'detectors 一覧から'
+            : '管理対象 workflow の detectorIds から・詳細で issue_stream と project を確認済み'
+        })`,
+    );
   }
 
-  const plan = planRules(existing, RULES, ALERT_ENV, { includeDisabled });
+  const plan = planRules(existing, RULES, ALERT_ENV, { includeDisabled, detectorId });
   for (const line of formatPlan(plan, ALERT_ENV)) console.log(line);
 
   if (dryRun) {
@@ -723,11 +1005,16 @@ export async function main(argv = process.argv.slice(2)) {
   }
 
   for (const c of plan.create) {
-    const created = await sentryRequest({ method: 'POST', path: rulesPath, token, body: c.payload });
+    const { data: created } = await sentryRequest({
+      method: 'POST',
+      path: `${orgPath}/workflows/`,
+      token,
+      body: c.payload,
+    });
     console.log(`  ✅ created: ${c.name} (id=${created.id})`);
   }
   for (const u of plan.update) {
-    await sentryRequest({ method: 'PUT', path: `${rulesPath}${u.id}/`, token, body: u.payload });
+    await sentryRequest({ method: 'PUT', path: `${orgPath}/workflows/${u.id}/`, token, body: u.payload });
     console.log(`  ✅ updated: ${u.name} (id=${u.id})`);
   }
 
@@ -738,16 +1025,16 @@ export async function main(argv = process.argv.slice(2)) {
   );
   if (plan.create.length > 0) {
     console.log(
-      '通知先 (Slack 等) を追加するには Sentry Dashboard で各 rule の Actions に ' +
-        '"Send a Slack notification" を追加してください。',
+      '新規の通知先は Suggested Assignees (いなければ project の active member) へのメール。Slack 等を足すには ' +
+        'Sentry → Alerts で各 alert の action に追加してください (次回以降の実行でも保持されます)。',
     );
   }
   if (plan.retire.length > 0) {
-    console.log('発火元の無い rule (Sentry Dashboard → Alerts で削除してください):');
+    console.log('発火元の無い workflow (Sentry Dashboard → Alerts で削除してください):');
     for (const r of plan.retire) console.log(`  - ${r.name} (id=${r.id})`);
   }
   if (plan.skippedDisabled.length > 0) {
-    console.log('無効化中のため更新しなかった rule (再有効化して更新するには --include-disabled):');
+    console.log('無効化中のため更新しなかった workflow (再有効化して更新するには --include-disabled):');
     for (const s of plan.skippedDisabled) console.log(`  - ${s.name} (id=${s.id})`);
   }
   return plan;
