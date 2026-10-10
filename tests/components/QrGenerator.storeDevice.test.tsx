@@ -21,6 +21,8 @@ vi.mock('@/hooks/useMarketRates', () => ({
     refetch: vi.fn(),
   }),
 }));
+// envHold.eip3009 = JPYC のガスレスが EIP-3009 relay (= 通常の QR が回収・利用料あり) か。false は Pimlico 経路 (利用料なし)。
+const envHold = vi.hoisted(() => ({ eip3009: true }));
 vi.mock('@/lib/env', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/env')>();
   return {
@@ -30,14 +32,19 @@ vi.mock('@/lib/env', async (importOriginal) => {
       enableStoreGasWallet: true,
       networkEnv: 'testnet',
       feeReceiver: '0x428483FbA62eDCef1E3a100d3799F6d71759c560',
+      get enableJpycEip3009() {
+        return envHold.eip3009;
+      },
     },
   };
 });
 // 対象のチェーン = forwarder を設定したチェーン (Amoy・Kairos)。
+// fwdHold.none = どのチェーンにも forwarder が無い (無料のガスレス) を再現する。
+const fwdHold = vi.hoisted(() => ({ none: false }));
 vi.mock('@/lib/relay/forwarderConfig', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/relay/forwarderConfig')>()),
   jpycForwarderFor: (chainId: number) =>
-    chainId === 80002 || chainId === 1001 ? '0x752B7AaD0089286EB7b553d84D05233d80c9FCB4' : null,
+    !fwdHold.none && (chainId === 80002 || chainId === 1001) ? '0x752B7AaD0089286EB7b553d84D05233d80c9FCB4' : null,
 }));
 // QR の中身 (URL) を読む (お店負担の QR は URL を画面に出さないため)。
 vi.mock('qrcode.react', () => ({
@@ -473,6 +480,44 @@ describe('QrGenerator × お店の端末で送る (flag ON)', () => {
       await user.type(await screen.findByPlaceholderText('10.00'), '5');
       expect(await screen.findByRole('button', { name: '通常の QR を出す' })).toBeTruthy();
       expect(screen.queryByText('通常の QR は OpenPay 利用料が店舗負担でかかります。')).toBeNull();
+    });
+
+    // Fable 最終監査 (#758) の持ち越し: 利用料の一文は開示 (RecoverFeeNotice) と同じ条件 (JPYC かつ forwarder あり)。
+    // forwarder の無いチェーンの JPYC の通常の QR は無料のガスレスなので「利用料がかかります」と言わない。
+    it('JPYC でも forwarder の無いチェーンなら、通常の QR に利用料の一文を付けない', async () => {
+      const user = userEvent.setup();
+      fwdHold.none = true;
+      try {
+        seed();
+        sd.state = { phase: 'create_failed', reason: 'unavailable' };
+        render(<QrGenerator />);
+        await user.type(await screen.findByPlaceholderText('1,000'), '5');
+        expect(await screen.findByRole('button', { name: '通常の QR を出す' })).toBeTruthy();
+        expect(screen.queryByText('通常の QR は OpenPay 利用料が店舗負担でかかります。')).toBeNull();
+      } finally {
+        fwdHold.none = false;
+      }
+    });
+
+    // forwarder があっても EIP-3009 relay が無効なら、支払いは Pimlico 経路で回収しない (利用料なし)。
+    it('forwarder があっても EIP-3009 relay が無効なら、通常の QR に利用料の一文を付けない', async () => {
+      const user = userEvent.setup();
+      envHold.eip3009 = false;
+      try {
+        seed();
+        sd.state = { phase: 'create_failed', reason: 'unavailable' };
+        render(<QrGenerator />);
+        await user.type(await screen.findByPlaceholderText('1,000'), '5');
+        expect(await screen.findByRole('button', { name: '通常の QR を出す' })).toBeTruthy();
+        expect(screen.queryByText('通常の QR は OpenPay 利用料が店舗負担でかかります。')).toBeNull();
+        // 通常の QR に切り替えても、回収の開示 (決済手数料) は QR の画面にも会計の画面にも出さない (recoverBillAmount)。
+        await user.click(screen.getByRole('button', { name: '通常の QR を出す' }));
+        expect(await screen.findByRole('dialog')).toBeTruthy();
+        expect(shownQr()).toMatch(/\/pay\?/);
+        expect(screen.queryByText(/決済手数料/)).toBeNull();
+      } finally {
+        envHold.eip3009 = true;
+      }
     });
 
     it('作れなかった後でも、金額を消したら「通常の QR を出す」は出さない (後の入力で QR が勝手に開かない)', async () => {

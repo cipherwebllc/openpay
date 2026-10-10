@@ -1,4 +1,6 @@
 import {
+  BaseError,
+  ContractFunctionRevertedError,
   createPublicClient,
   getAddress,
   http,
@@ -24,6 +26,7 @@ const ensClient = createPublicClient({
 });
 
 const NAME_PATTERN = /\.eth$/i;
+const INPUT_FORMAT_MESSAGE = '0x アドレスまたは .eth / .base.eth を入力してください';
 
 export type ResolvedAddress = {
   address: Address;
@@ -42,13 +45,46 @@ export async function resolveAddress(
   }
 
   if (NAME_PATTERN.test(trimmed)) {
-    const name = normalize(trimmed);
-    const address = await ensClient.getEnsAddress({ name });
+    // 名前として正規化できない (空のラベル `a..eth`・使えない文字) のは入力の形の誤りで、何度試しても同じ。
+    // 一時的な失敗 (RPC・CCIP-Read) と区別できるよう、形式違いと同じ ResolveAddressError にする
+    // (hooks/useResolveAddress は ResolveAddressError を再試行しない)。
+    let name: string;
+    try {
+      name = normalize(trimmed);
+    } catch {
+      throw new ResolveAddressError(INPUT_FORMAT_MESSAGE);
+    }
+    let address: Address | null;
+    try {
+      address = await ensClient.getEnsAddress({ name, strict: true });
+    } catch (err) {
+      if (isDefinitelyUnregistered(err)) throw new ResolveAddressError(`${trimmed} は登録されていません`);
+      throw err;
+    }
     if (!address) {
       throw new ResolveAddressError(`${trimmed} は登録されていません`);
     }
     return { address: getAddress(address), name: trimmed };
   }
 
-  throw new ResolveAddressError('0x アドレスまたは .eth / .base.eth を入力してください');
+  throw new ResolveAddressError(INPUT_FORMAT_MESSAGE);
+}
+
+// viem の既定 (strict でない) の getEnsAddress は、Universal Resolver の HttpError (CCIP-Read のゲートウェイの失敗) や
+// ResolverError (resolver 自身の revert) まで「登録されていない = null」にする。それでは一時的な失敗 (ゲートウェイの 5xx・
+// 429・404 (ERC-3668: その sender に対応しないゲートウェイも 404 を返す)・Basenames の CCIP proof の期限切れ) が確定した
+// 失敗 (ResolveAddressError = 再試行しない) に化け、会計中の QR を閉じる。strict で例外を受け、名前に resolver が無い・
+// resolver が契約でない・addr に対応しない、の「無い」と確かめられるものだけを確定とする (他は再試行に回す)。
+const UNREGISTERED_RESOLVER_ERRORS = new Set([
+  'ResolverNotContract',
+  'ResolverNotFound',
+  'UnsupportedResolverProfile',
+]);
+
+function isDefinitelyUnregistered(err: unknown): boolean {
+  if (!(err instanceof BaseError)) return false;
+  const cause = err.walk((e) => e instanceof ContractFunctionRevertedError);
+  if (!(cause instanceof ContractFunctionRevertedError)) return false;
+  const errorName = cause.data?.errorName;
+  return errorName !== undefined && UNREGISTERED_RESOLVER_ERRORS.has(errorName);
 }

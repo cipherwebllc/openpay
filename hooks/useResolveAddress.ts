@@ -2,6 +2,7 @@
 
 import { useQuery } from '@tanstack/react-query';
 import type { ResolvedAddress } from '@/lib/resolveAddress';
+import { ResolveAddressError } from '@/lib/resolveAddressError';
 
 // resolveAddress は viem の ENS / Universal Resolver コードを引き込むため
 // ~25KB ある。dynamic import で別チャンクに切り出し、初回ペイロードから外す。
@@ -17,6 +18,11 @@ export function useResolveAddress(input: string) {
     queryFn: () => resolveAddressLazy(input),
     enabled: input.trim().length > 0,
     staleTime: 5 * 60_000,
-    retry: false,
+    // 確定した失敗 (登録されていない・形が違う = ResolveAddressError) は再試行しない。RPC / CCIP ゲートウェイの一時的な
+    // 失敗だけ 1 回再試行する: 受取先の名前で QR を出している画面の再取得 (staleTime 後の再表示・ネットワーク再接続。
+    // window focus での再取得は app/providers.tsx で無効) の 1 回の失敗で、会計中の QR を閉じて受け渡しを締め切らない
+    // (第 7 回レビュー #766 の持ち越し)。
+    retry: (failureCount, error) => !(error instanceof ResolveAddressError) && failureCount < 1,
+    retryDelay: 1_000,
   });
 }

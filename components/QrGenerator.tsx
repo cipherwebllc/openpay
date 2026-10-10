@@ -267,6 +267,9 @@ export function QrGenerator() {
       jpycForwarderFor(dep.chainId) !== null
     );
   }, [isStandard, splitsForUrl, settings.token, settings.chain]);
+  // 通常の QR に OpenPay 利用料 (店舗負担・回収) が掛かるか = 支払い側が回収の経路 (PaymentForm の useRecover) を通るか。
+  // forwarder があっても EIP-3009 relay が無効・標準・分配ありなら回収しないので、「利用料がかかります」と言わない。
+  const normalQrHasFee = isJpycRecover;
 
   // 負担者トグルを隠すべき経路 (free = 概念なし・customer 固定 / JPYC recover = merchant 固定)。
   // USDC や JPYC recover 以外では従来どおりトグルを出す。
@@ -285,6 +288,8 @@ export function QrGenerator() {
     // お店がガス代を肩代わりして送る QR を出すときは OpenPay の利用料がかからない (回収の開示を出さない)。店員が
     // 「通常の QR を出す」に切り替えたら、出る QR は回収 (利用料・店舗負担) なので開示を出す (第 7 回レビュー D4)。
     if (storePaysRequested(settings) && !forceNormalQr) return null;
+    // 支払い側 (PaymentForm) は回収の経路のときだけ利用料を取って開示する (useRecover)。同じ条件でだけ開示する。
+    if (!isJpycRecover) return null;
     if (!amountValid || mode !== 'amount' || settings.token !== 'jpyc') return null;
     const dep = deploymentForSlug(settings.token, settings.chain);
     try {
@@ -293,7 +298,7 @@ export function QrGenerator() {
     } catch {
       return null;
     }
-  }, [amountValid, mode, settings, chargeAmount, forceNormalQr]);
+  }, [amountValid, mode, settings, chargeAmount, forceNormalQr, isJpycRecover]);
   const recoverGasMode: GasMode = effectiveGasMode;
 
   const payUrl = useMemo(() => {
@@ -972,7 +977,8 @@ export function QrGenerator() {
                 onClick: () => void showNormalQr(),
                 // JPYC の通常の QR は回収 (OpenPay 利用料・店舗負担・第 7 回レビュー D4)。作れなかった後に USDC に
                 // 切り替えた会計の通常の QR には OpenPay の利用料がかからないので付けない。
-                ...(settings.token === 'jpyc' ? { note: t('storeDevice.normalQrFeeNote') } : {}),
+                // 利用料の一文は、通常の QR が回収 (forwarder あり) のときだけ (RecoverFeeNotice と同じ条件)。
+                ...(normalQrHasFee ? { note: t('storeDevice.normalQrFeeNote') } : {}),
               },
             }
           : {})}
@@ -1087,7 +1093,7 @@ export function QrGenerator() {
                     onRetry={device.retry}
                     onReissue={() => void reissueStoreQr()}
                     onShowNormal={() => void showNormalQr()}
-                    {...(settings.token === 'jpyc' ? { normalQrFeeNote: t('storeDevice.normalQrFeeNote') } : {})}
+                    {...(normalQrHasFee ? { normalQrFeeNote: t('storeDevice.normalQrFeeNote') } : {})}
                     onDismiss={device.dismiss}
                   />
                 )}
