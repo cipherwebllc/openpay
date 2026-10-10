@@ -1606,11 +1606,12 @@ export async function reconcileStoreUsdcIntent(
       // 走査の予算で読み直さず、保留候補の順番 (round robin・交替) を待つ。
       if (verified.has(txHash) || deferred.includes(txHash)) continue;
       const resolved = await finalizeCandidate(txHash);
-      // 残り時間がなければ、この候補のページ (未照合) を cursor にして次回へ (取得済みの保留候補の更新は保存する)。
-      // 先に溢れた候補があればそのページ (走査順なので早い) を優先する。
-      if (resolved === 'budget') return { fromBlock: overflowPageStart ?? candidatePageStart };
       if (resolved === 'skip') continue;
-      if (resolved === 'defer') {
+      // 'budget' = 走査で見つけたが残り時間がなく照合していない候補。cursor をそのページへ戻すだけだと、取得済みの
+      // 候補を捨てて次回も同じページの取得から始め、ログ取得の後に照合の時間が残らない遅延が続く限り同じページで
+      // 停滞する (Codex 9 回目 P2)。照合前の候補も保留候補として持ち越し (次回は保留候補として照合・採用は confirmed
+      // のときだけ)、cursor はそのページの先へ進める。列が溢れたときだけ従来どおりそのページに留める。
+      if (resolved === 'defer' || resolved === 'budget') {
         if (!defer(txHash)) overflowPageStart ??= candidatePageStart;
         continue;
       }
@@ -1627,6 +1628,9 @@ export async function reconcileStoreUsdcIntent(
   //     遅い保留候補が走査を (または保留候補の枠が足りず confirmed の保留候補が) 永久に待たせる (Codex 7・8 回目 P2)。
   //     intent の印 (reconcileTurn・省略 = 'deferred') の側を残り全部で先に行い、次回は反対側を先にする (印を反転して
   //     保存)。どちらにも有限回で順番が回る。保留候補が無い回は競合しないので印を使わない。
+  //   - 既知の制限: 1 回の照合で RPC を種類ごとに 1 回ずつ終えられないほど遅い状態が続く間 (head は取れたが getLogs を
+  //     始める時間が無い等) は cron では進まない (head の高さ等の途中結果は持ち越さない)。そのときも pending のままで、
+  //     誤った確定にも未払いの失敗にもならず、買い手の状態確認 (status route = 予算なし) は全部を照合する。
   let deferredDeadline: number | undefined;
   let scanFirst = false;
   let nextTurn: StoreUsdcReconcileTurn | undefined;

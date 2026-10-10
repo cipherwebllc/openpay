@@ -737,6 +737,52 @@ describe('USDC reconciliation with real Lua and receipt verification', () => {
     }
   });
 
+  // Codex 9 回目 P2 の再現: 8 回目の条件に加えて getLogs が 1.1 秒かかる。scan 優先の回もログ取得の後に TX の照合を
+  // 始める時間が残らず、照合前の TX を捨てて cursor を同じページへ戻すだけだと、毎回同じページの取得から始めて停滞する
+  // (残り 8 秒 = 半分配分の分岐でも同じ) → 照合前の候補を保留候補として持ち越し、cursor はそのページの先へ進める。
+  it.each([
+    ['6s (alternating turns)', 6_000, 5],
+    ['8s (half-share split)', 8_000, 3],
+  ] as const)('carries a scanned candidate it had no time to verify and settles it later when the remaining budget is %s', async (_label, remaining, settledAt) => {
+    const intent = await active(OLD);
+    patchIntent({ reconcileDeferred: [MID], reconcileFromBlock: '2090' });
+    const client = chain(intent.nonce, { latest: 50_090n, eventBlock: 2_100n });
+    let clock = NOW;
+    vi.mocked(client.readContract).mockImplementation(async () => { clock += 25_000 - 10_000 - remaining; return true; });
+    const receipt = vi.mocked(client.getTransactionReceipt).getMockImplementation()!;
+    vi.mocked(client.getTransactionReceipt).mockImplementation(async (args) => {
+      if (args.hash === OLD || args.hash === MID) {
+        clock += args.hash === OLD ? 10_000 : 2_000;
+        throw new Error('receipt timeout');
+      }
+      return receipt(args);
+    });
+    const getLogs = vi.mocked(client.getLogs).getMockImplementation()!;
+    vi.mocked(client.getLogs).mockImplementation(async (args) => {
+      clock += 1_100;
+      return getLogs(args);
+    });
+    const spy = vi.spyOn(Date, 'now').mockImplementation(() => clock);
+    const results: string[] = [];
+    const snapshots: Record<string, unknown>[] = [];
+    try {
+      for (let run = 0; run < 8; run += 1) {
+        const result = await reconcileStoreUsdcIntent(SALT, { now: CHECKED_AT + run * 30_000, client, deadline: clock + 25_000 });
+        results.push(result.ok ? result.state : result.reason);
+        snapshots.push(rawIntent());
+        if (result.ok && result.state === 'settled') break;
+      }
+    } finally {
+      spy.mockRestore();
+    }
+    expect(results).toEqual([...Array.from({ length: settledAt - 1 }, () => 'pending'), 'settled']);
+    await expectSettled();
+    // 走査で見つけた TX は照合前でも保留候補に入り、cursor は TX のページ (2,090) の先へ進んだ。
+    const carried = snapshots.find((snapshot) => (snapshot.reconcileDeferred as string[] | undefined)?.includes(TX));
+    expect(carried).toMatchObject({ reconcileFromBlock: '4090' });
+    expect(snapshots.slice(0, -1).every((snapshot) => snapshot.txHash === OLD)).toBe(true);
+  });
+
   it.each([
     ['not a list', TX],
     ['empty', []],

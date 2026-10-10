@@ -363,11 +363,13 @@ describe('Store USDC reconciler decisions (no Lua)', () => {
     expect(h.used.mock.calls[0]![0]).not.toHaveProperty('client');
   });
 
-  it('defers candidate verification from the candidate page when the remaining time is below one RPC', async () => {
+  // Codex 9 回目 P2 (#776) で変更: 照合前の候補は保留候補として持ち越し、cursor は候補ページの先へ進める (候補ページへ
+  // 戻すだけだと取得済みの候補を捨て、ログ取得の後に照合の時間が残らない遅延が続く限り同じページで停滞した)。
+  it('carries a candidate it had no time to verify as a deferred candidate and moves past its page', async () => {
     h.anchor.mockResolvedValue(50_090n);
     let clock = NOW;
     const spy = vi.spyOn(Date, 'now').mockImplementation(() => clock);
-    // 候補ページの取得に 21 秒かかると、残り 4 秒 − 予約 3 秒 = 1 秒 < 最小 2 秒 → 照合せず候補ページから延期。
+    // 候補ページの取得に 21 秒かかると、残り 4 秒 − 予約 3 秒 = 1 秒 < 最小 2 秒 → 照合せず保留候補として次回へ。
     h.transactions.mockImplementation(async ({ fromBlock }: { fromBlock: bigint }) => { clock += 21_000; return fromBlock === 90n ? [TX] : []; });
     try {
       expect(await reconcileStoreUsdcIntent(SALT, { now: NOW, deadline: NOW + 25_000 })).toEqual({ ok: true, state: 'pending' });
@@ -376,7 +378,7 @@ describe('Store USDC reconciler decisions (no Lua)', () => {
     }
     expect(h.transactions).toHaveBeenCalledTimes(1);
     expect(h.verify).not.toHaveBeenCalled();
-    expect(JSON.parse(h.kvEval.mock.calls.at(-1)![2][4])).toMatchObject({ reconcileFromBlock: '90' });
+    expect(JSON.parse(h.kvEval.mock.calls.at(-1)![2][4])).toMatchObject({ reconcileFromBlock: '2090', reconcileDeferred: [TX] });
   });
 
   it('a batch past its deadline defers the remaining due members without touching them', async () => {
