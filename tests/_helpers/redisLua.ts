@@ -583,13 +583,19 @@ export async function closeRedisLuaEngine(): Promise<void> {
  * lib/ の Lua 定数をそのまま実行する。KEYS/ARGV/redis/cjson を注入し、返り値を
  * Redis の Lua → RESP 規則で変換して返す (= kvEval の呼び元が受け取る形)。
  */
+// Redis の返り値を Upstash REST の result の形にする: nil (false) は null、status reply ({ok}) は文字列 ("OK" 等)。
+function restResult(reply: RedisReply): unknown {
+  if (reply === false) return null;
+  if (typeof reply === 'object' && !Array.isArray(reply) && 'ok' in reply) return reply.ok;
+  return reply;
+}
+
 /** Upstash REST の pipeline (POST /pipeline) の応答の形: 要素ごとに {result} か {error}。1 要素の失敗で他は止まらない。
- *  Lua の nil (false) は JSON の null。 */
+ *  単発の REST と同じく、Lua の nil (false) は JSON の null・status reply は文字列。 */
 export function runRedisPipeline(store: FakeRedisStore, steps: unknown[][]): ({ result: unknown } | { error: string })[] {
   return steps.map(([command, ...args]) => {
     try {
-      const reply = dispatchRedisCommand(store, String(command), args);
-      return { result: reply === false ? null : reply };
+      return { result: restResult(dispatchRedisCommand(store, String(command), args)) };
     } catch (e) {
       return { error: 'ERR ' + (e instanceof Error ? e.message : String(e)) };
     }
@@ -615,10 +621,7 @@ export function fakeUpstashFetch(store: FakeRedisStore) {
         const count = Number(keyCount);
         return Response.json({ result: await runRedisLua(script, rest.slice(0, count), rest.slice(count), store) });
       }
-      const reply = dispatchRedisCommand(store, String(command), args);
-      const result = reply === false ? null
-        : typeof reply === 'object' && !Array.isArray(reply) && 'ok' in reply ? reply.ok : reply;
-      return Response.json({ result });
+      return Response.json({ result: restResult(dispatchRedisCommand(store, String(command), args)) });
     } catch (e) {
       return Response.json({ error: 'ERR ' + (e instanceof Error ? e.message : String(e)) }, { status: 400 });
     }

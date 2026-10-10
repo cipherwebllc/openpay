@@ -605,6 +605,11 @@ describe('fakeUpstashFetch: 本物の lib/kv.ts が送る REST を fake store �
       .toEqual([{ result: 1 }, { result: 1 }]);
   });
 
+  it('pipeline も要素ごとに Upstash の形 (status reply は文字列・nil は null・失敗はその要素だけ {error})', async () => {
+    expect(await (await post([['SET', 'k', 'v'], ['GET', 'missing'], ['NOPE', 'k'], ['GET', 'k']], 'pipeline')).json())
+      .toEqual([{ result: 'OK' }, { result: null }, { error: expect.stringMatching(/^ERR /) }, { result: 'v' }]);
+  });
+
   it('コマンドの失敗は HTTP 400 + {error} (Upstash と同じ)', async () => {
     const res = await post(['NOPE', 'k']);
     expect(res.status).toBe(400);

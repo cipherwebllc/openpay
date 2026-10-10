@@ -67,6 +67,24 @@ describe('INSTALL_LKG (real Lua)', () => {
     expect(store.strings.get(LKG_KEY)).toBe(snapshot(150, NOW));
   });
 
+  it('競合: 既存 LKG を expected にした CAS の間に別 instance が LKG を更新したら 0 → 新しい LKG で ±10% を判定し直す', async () => {
+    // 既存 150 から見れば 160 は +6.7% で通るが、取得中に別 instance が 135 へ更新していた。古い expected のまま
+    // 上書きすると 135 → 160 (+18.5%) の急変がブレーカーをすり抜ける。
+    store.strings.set(LKG_KEY, snapshot(150, NOW - 3_600_000));
+    store.setTtl(LKG_KEY, 86_400);
+    const latest = snapshot(135, NOW - 1_000);
+    const result = await getStoreUsdcRate({
+      now: NOW,
+      fetchImpl: upstream(160, () => {
+        store.strings.set(LKG_KEY, latest);
+        store.setTtl(LKG_KEY, 86_400);
+      }),
+    });
+    expect(result).toEqual({ ok: false, reason: 'circuit_open' });
+    expect(store.strings.get(LKG_KEY)).toBe(latest);
+    expect(store.strings.has(CACHE_KEY)).toBe(false);
+  });
+
   it('競合: 別 instance の LKG の方が新しければ上書きせず unavailable (古い値で追い越さない)', async () => {
     const newer = snapshot(149, NOW + 5_000);
     const result = await getStoreUsdcRate({
