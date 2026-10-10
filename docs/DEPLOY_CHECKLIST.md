@@ -696,6 +696,37 @@ moderate  ws                    https://github.com/advisories/GHSA-58qx-3vcg-4xp
 
 **他の advisory が追加で出現したら deploy 前に本 §7 を update + allowlist 同期**。
 
+### 7.14 CI gate: 依存の取得元と install script (`scripts/lockfile-gate.mjs` / `scripts/installed-scripts-gate.mjs`)
+
+CLAUDE.md 掟 16 (依存は公式 npm レジストリのみ・install script 付きの新規パッケージは個別確認) を CI で機械化する
+2 段構え (2026-10-10・第 7 回レビュー E4 / user 裁定 R4・PR #778)。
+
+1. **`node scripts/lockfile-gate.mjs`** (npm ci の**前**・全 workflow): Git 管理下の全 `package-lock.json` /
+   `npm-shrinkwrap.json` (隠しディレクトリ含む・lockfileVersion ≥ 2 必須) の `resolved` が
+   `https://registry.npmjs.org/<name>/-/<name>-<version>.tgz` の形 (dot segment・query・userinfo なし) であること、
+   `.npmrc` が `legacy-peer-deps` 以外を持たないこと、`hasInstallScript: true` の名前が
+   `scripts/lib/installScriptAllowlist.mjs` の `INSTALL_SCRIPT_ALLOWLIST` にあり取得元 tarball の名前と lockfile の
+   name も一致すること (npm alias による借用の拒否) を検査する。
+2. **`npm ci --ignore-scripts`** → **`node scripts/installed-scripts-gate.mjs --rebuild <node_modules>`** (全 workflow の
+   全 install の直後): `--ignore-scripts` で preinstall / install / postinstall も binding.gyp の暗黙 `node-gyp rebuild`
+   も走らせずに入れ (npm 10.9 の `@npmcli/arborist` rebuild.js は `ignoreScripts` でこれらの queue を実行しない)、
+   gate が node_modules の実体 (package.json の scripts・binding.gyp・link の prepare) を走査して allowlist 外があれば
+   fail。通ったときだけ、その root に入っている allowlist の名前を `npm rebuild <names>` して必要な install script を
+   実行する (= 従来の `npm ci` と同じ結果)。**allowlist 外の install script 付き依存は一度も実行されずに CI で止まる。**
+   link (workspace) の script は名前でなく realpath を `LINKED_PACKAGE_SCRIPT_ALLOWLIST` と照合する (現状は空)。
+   注意: npm 10.9 は `--ignore-scripts` でも link の `prepare` だけは実行する (rebuild.js の links 経路は gate されて
+   いない)。リポ内の link は `packages/x402-sdk` のみで prepare を持たない。link に prepare を足すときはこの一覧と
+   同時に見直す。
+
+allowlist の追加は「用途・何のための native build か」を 1 行書いて PR レビューで決める。lockfile-gate が
+`stale` と出した名前 (もう install script を持たない) は一覧から外す。ローカルで CI と同じ手順を再現する:
+
+```bash
+node scripts/lockfile-gate.mjs
+npm ci --ignore-scripts
+node scripts/installed-scripts-gate.mjs --rebuild node_modules
+```
+
 ## 8. Sentry observability の前提条件
 
 DEPLOY_CHECKLIST §3.2 の Alert Rules はすべて Sentry が event を受信していることが

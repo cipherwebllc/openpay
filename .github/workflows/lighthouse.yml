@@ -40,25 +40,26 @@ jobs:
       - name: Check dependency sources
         run: node scripts/lockfile-gate.mjs
 
+      # install script は走らせずに入れ、gate が実体を走査して allowlist 外なら fail、通ったら allowlist の名前だけ
+      # npm rebuild する (CLAUDE.md 掟 16・docs/DEPLOY_CHECKLIST.md §7.14)。
       - name: Install
-        run: npm ci
+        run: npm ci --ignore-scripts
 
-      # npm ci の直後に node_modules の実体 (install script・binding.gyp・link の prepare) を走査する (検出)。
-      - name: Check installed packages for install-time scripts
-        run: node scripts/installed-scripts-gate.mjs node_modules
+      - name: Check installed packages for install-time scripts and rebuild the allowlisted ones
+        run: node scripts/installed-scripts-gate.mjs --rebuild node_modules
 
       - name: Build
         run: npm run build
 
       # @lhci/cli は本体の devDependencies に入れず tools/lighthouse の lockfile で固定する
       # (旧: npx --yes @lhci/cli@0.14.0 = 推移的依存を実行のたびに最新解決・掟 16 の gate 外)。
-      # lhci の依存に install script は無い (lockfile-gate の allowlist で検査済み) ので、この job では
-      # install script を一切走らせない = 依存の侵害が LHCI_GITHUB_APP_TOKEN を持つ step へ波及する経路を断つ。
+      # lhci の依存に install script は無い (allowlist の名前が入っていなければ gate は npm rebuild を呼ばない) ので、
+      # この job では install script を一切走らせない = 依存の侵害が LHCI_GITHUB_APP_TOKEN を持つ step へ波及する経路を断つ。
       - name: Install Lighthouse CI (lockfile)
         run: npm --prefix tools/lighthouse ci --ignore-scripts
 
       - name: Check installed Lighthouse CI packages for install-time scripts
-        run: node scripts/installed-scripts-gate.mjs tools/lighthouse/node_modules
+        run: node scripts/installed-scripts-gate.mjs --rebuild tools/lighthouse/node_modules
 
       # autorun (healthcheck → collect → assert → upload) を step に分ける。collect は .lighthouserc.json の
       # `npm run start` でアプリとその依存を同じ env で起動するので、token を持たせない。token は upload

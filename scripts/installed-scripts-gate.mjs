@@ -1,40 +1,40 @@
 #!/usr/bin/env node
-// CI 用 install-time script の実体検査。npm ci の**直後**に node_modules を走査し、install 時に
-// 任意コードを走らせるパッケージ (package.json の preinstall / install / postinstall、link の prepare、
-// binding.gyp による暗黙の `node-gyp rebuild`) が scripts/lib/installScriptAllowlist.mjs の名前以外に
-// あれば fail する (CLAUDE.md 掟 16・第 7 回レビュー E4 / user 裁定 R4・PR #778 Codex レビュー 3)。
+// CI 用 install-time script の gate (防止)。CI は依存を `npm ci --ignore-scripts` で入れ (preinstall / install /
+// postinstall も binding.gyp の暗黙 `node-gyp rebuild` も走らない)、その**直後**にこの script が node_modules の
+// 実体を走査する。install 時に任意コードを走らせるパッケージ (package.json の preinstall / install / postinstall、
+// link の prepare、binding.gyp) が scripts/lib/installScriptAllowlist.mjs の一覧以外にあれば fail し、通ったときだけ
+// `--rebuild` で allowlist の名前を `npm rebuild <names>` して必要な install script を実行する (= 従来の npm ci と
+// 同じ結果)。allowlist 外の install script 付きの新規依存は**一度も実行されずに** CI で止まる
+// (CLAUDE.md 掟 16・第 7 回レビュー E4 / user 裁定 R4 → PR #778 Codex レビューで検出から防止へ)。
 //
 // なぜ lockfile の検査 (scripts/lockfile-gate.mjs) に加えて要るか:
 //   - hasInstallScript は npm が lockfile に書くフラグで、binding.gyp だけのパッケージ (npm が install script
 //     `node-gyp rebuild` を補う)・bundled 依存の実体・link (workspace) の prepare はフラグに出ない。
-//   - 手で編集した lockfile はフラグを消せる。
-// 実行前に lockfile だけで知る手段が無いので、これは**防止ではなく検出**。install script は既に走った後だが、
-// allowlist 外の名前が 1 件でもあれば job を赤にして merge を止める (R4 の裁定 =「CI で検出」の範囲)。
-// 手で編集された lockfile (フラグが消える diff) は PR の diff レビューで見る。
+//   - 手で編集した lockfile はフラグを消せる。実体を見ればどちらも関係ない。
+// 注意: npm 10.9 の @npmcli/arborist rebuild.js は --ignore-scripts でも link の prepare だけは実行する (links 経路の
+// #runScripts('prepare') が ignoreScripts で gate されていない)。link の prepare はここでは検出 (事後) になる。
+// リポ内の link は packages/x402-sdk だけで prepare を持たない。
 //
-// 2 つ目の検査 (PR #778 Codex レビュー 2 回目): optional な native 依存は暗黙ビルドが失敗すると npm が実体を
-// 削除し、install は成功扱いになる = 走査をすり抜ける。root の隣の lockfile から「この環境で入るはず」の
-// エントリ (root の dependencies / optionalDependencies を辿り、os / cpu / libc が合わないものと、そこからしか
-// 辿れないものを除く) を求め、node_modules に無ければ fail する (消えた = ビルド失敗の疑い)。
-//
-// 使い方: node scripts/installed-scripts-gate.mjs [--omit=dev] <node_modules dir> [...]
-//   例: node scripts/installed-scripts-gate.mjs node_modules
-//       node scripts/installed-scripts-gate.mjs tools/lighthouse/node_modules
-//       node scripts/installed-scripts-gate.mjs --omit=dev node_modules   (npm ci --omit=dev の後)
+// 使い方: node scripts/installed-scripts-gate.mjs [--rebuild] <node_modules dir> [...]
+//   例: node scripts/installed-scripts-gate.mjs --rebuild node_modules
+//       node scripts/installed-scripts-gate.mjs --rebuild tools/lighthouse/node_modules
 // 判定:
 //   - registry のパッケージ: ディレクトリ名から導いた名前 (@scope/name) が INSTALL_SCRIPT_ALLOWLIST にあり、
-//     package.json の name も一致するときだけ許容。
+//     package.json の name も一致するときだけ許容 (→ --rebuild の対象)。
 //   - link (symlink = workspace / file:) のパッケージ: 名前ではなく実際のリンク先 (realpath・repo 相対) が
-//     LINKED_PACKAGE_SCRIPT_ALLOWLIST にあるときだけ許容 (registry の承認を別実体へ流用させない)。
+//     LINKED_PACKAGE_SCRIPT_ALLOWLIST にあるときだけ許容 (registry の承認を別実体へ流用させない)。rebuild はしない。
+//   - --rebuild: 全 root が通ったあと、root ごとに「その root に入っている allowlist の名前」だけを
+//     `npm rebuild <names>` (cwd = root の親 = lockfile のある dir) で実行する。名前が無ければ npm を呼ばない
+//     (裸の `npm rebuild` は全パッケージの script を走らせるので絶対に呼ばない)。
 // 依存は Node 標準 API のみ (このゲート自体が新規依存を持つのは本末転倒のため)。
 
+import { spawnSync } from 'node:child_process';
 import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { INSTALL_SCRIPT_ALLOWLIST, LINKED_PACKAGE_SCRIPT_ALLOWLIST } from './lib/installScriptAllowlist.mjs';
 
 const INSTALL_HOOKS = ['preinstall', 'install', 'postinstall'];
-const toPosix = (path) => path.split(sep).join('/');
-const repoRelative = (path) => toPosix(relative(process.cwd(), path));
+const repoRelative = (path) => relative(process.cwd(), path).split(sep).join('/');
 
 function readManifest(dir) {
   const file = join(dir, 'package.json');
@@ -114,7 +114,6 @@ function scanScripts(nodeModules, state) {
           const target = repoRelative(realpathSync(dir));
           if (Object.hasOwn(LINKED_PACKAGE_SCRIPT_ALLOWLIST, target)) {
             state.allowed.push(`${shown} -> ${target} [${triggers.join(', ')}] (linked)`);
-            state.allowedNames.add(target);
           } else {
             state.failures.push(
               `${shown}: linked to ${target} (${manifestName}) which runs install-time scripts [${triggers.join(', ')}] and is not in ` +
@@ -123,7 +122,7 @@ function scanScripts(nodeModules, state) {
           }
         } else if (Object.hasOwn(INSTALL_SCRIPT_ALLOWLIST, name) && manifestName === name) {
           state.allowed.push(`${shown} [${triggers.join(', ')}]`);
-          state.allowedNames.add(name);
+          state.rebuildNames.add(name);
         } else if (Object.hasOwn(INSTALL_SCRIPT_ALLOWLIST, name)) {
           state.failures.push(
             `${shown}: directory name ${name} is allowlisted but package.json names ${manifestName} ` +
@@ -142,157 +141,58 @@ function scanScripts(nodeModules, state) {
   }
 }
 
-// ── lockfile との突き合わせ ──────────────────────────────────────────────
-
-/** npm と同じ os / cpu / libc の判定 ("!x" は否定)。条件が無ければ一致。 */
-function platformMatches(entry) {
-  const current = { os: process.platform, cpu: process.arch, libc: currentLibc() };
-  for (const key of ['os', 'cpu', 'libc']) {
-    const wanted = entry[key];
-    if (!Array.isArray(wanted) || wanted.length === 0) continue;
-    const value = current[key];
-    const negated = wanted.filter((w) => typeof w === 'string' && w.startsWith('!')).map((w) => w.slice(1));
-    const positive = wanted.filter((w) => typeof w === 'string' && !w.startsWith('!'));
-    if (negated.includes(value)) return false;
-    if (positive.length > 0 && !positive.includes(value)) return false;
-  }
-  return true;
-}
-
-function currentLibc() {
-  if (process.platform !== 'linux') return null;
-  try {
-    const header = process.report?.getReport?.()?.header;
-    if (header?.glibcVersionRuntime) return 'glibc';
-  } catch {
-    // report が取れない環境では musl 判定に落とす (glibc の optional を「期待」から外す側 = 過剰検出を避ける)。
-  }
-  return 'musl';
-}
-
-/** path (lockfile の key) から name を Node の解決順で探し、lockfile の key を返す。 */
-function resolveDependency(packages, fromPath, name) {
-  let base = fromPath;
-  for (;;) {
-    const candidate = base === '' ? `node_modules/${name}` : `${base}/node_modules/${name}`;
-    if (Object.hasOwn(packages, candidate)) return candidate;
-    if (base === '') return null;
-    const at = base.lastIndexOf('/node_modules/');
-    if (at === -1) {
-      // workspace の path (packages/x) → root の node_modules へ
-      base = '';
-    } else {
-      base = base.slice(0, at);
-    }
-  }
-}
-
-/**
- * この環境で node_modules に入っているはずの lockfile エントリを返す (root から到達できる
- * dependencies / optionalDependencies のうち、os / cpu / libc が合うもの)。
- */
-function expectedEntries(packages, omitDev) {
-  const expected = new Set();
-  const queue = [];
-  const root = packages[''] ?? {};
-  const rootDeps = { ...(root.dependencies ?? {}), ...(root.optionalDependencies ?? {}), ...(omitDev ? {} : root.devDependencies ?? {}) };
-  for (const name of Object.keys(rootDeps)) {
-    const key = resolveDependency(packages, '', name);
-    if (key !== null) queue.push(key);
-  }
-  while (queue.length > 0) {
-    let key = queue.pop();
-    if (expected.has(key)) continue;
-    const entry = packages[key];
-    if (entry === null || typeof entry !== 'object') continue;
-    if (!platformMatches(entry)) continue; // この環境には入らない (optional の platform 別 binary)
-    expected.add(key);
-    if (entry.link === true && typeof entry.resolved === 'string') {
-      // link の実体 (packages/x) は別エントリ。そちらの依存を辿る。
-      key = entry.resolved;
-      if (!Object.hasOwn(packages, key) || expected.has(key)) continue;
-      expected.add(key);
-    }
-    const target = packages[key];
-    const deps = { ...(target?.dependencies ?? {}), ...(target?.optionalDependencies ?? {}) };
-    for (const name of Object.keys(deps)) {
-      const dep = resolveDependency(packages, key, name);
-      if (dep !== null && !expected.has(dep)) queue.push(dep);
-    }
-  }
-  return expected;
-}
-
-function reconcileWithLockfile(nodeModules, omitDev, state) {
-  const base = dirname(resolve(nodeModules));
-  const lockPath = ['package-lock.json', 'npm-shrinkwrap.json'].map((f) => join(base, f)).find((f) => existsSync(f));
-  if (lockPath === undefined) {
-    state.failures.push(`${repoRelative(nodeModules)}: no package-lock.json / npm-shrinkwrap.json beside it to reconcile against`);
-    return;
-  }
-  let lock;
-  try {
-    lock = JSON.parse(readFileSync(lockPath, 'utf8'));
-  } catch {
-    state.failures.push(`${repoRelative(lockPath)}: cannot be parsed`);
-    return;
-  }
-  const packages = lock?.packages;
-  if (packages === null || typeof packages !== 'object' || Array.isArray(packages)) {
-    state.failures.push(`${repoRelative(lockPath)}: has no packages object (lockfileVersion >= 2 required)`);
-    return;
-  }
-  const expected = expectedEntries(packages, omitDev);
-  let missing = 0;
-  for (const key of expected) {
-    const entry = packages[key];
-    const dir = join(base, key);
-    if (existsSync(dir) && readManifest(dir) !== null) continue;
-    missing++;
-    const flags = ['optional', 'dev', 'devOptional', 'hasInstallScript', 'link'].filter((f) => entry[f] === true).join(', ');
-    state.failures.push(
-      `${repoRelative(dir)}: expected from ${repoRelative(lockPath)} for this platform but absent after install` +
-        (flags ? ` [${flags}]` : '') +
-        (entry.optional || entry.devOptional ? ' — an optional dependency that disappears after npm ci usually means its install script / implicit node-gyp build failed' : ''),
-    );
-  }
-  state.lockfileSummary = `${expected.size} entries expected from ${repoRelative(lockPath)} for ${process.platform}/${process.arch}${omitDev ? ' (omit=dev)' : ''}, ${missing} missing`;
-}
-
 // ── CLI ──────────────────────────────────────────────────────────────
 
 const args = process.argv.slice(2);
-const omitDev = args.includes('--omit=dev');
+const rebuild = args.includes('--rebuild');
 const roots = args.filter((a) => !a.startsWith('--'));
-const unknown = args.filter((a) => a.startsWith('--') && a !== '--omit=dev');
+const unknown = args.filter((a) => a.startsWith('--') && a !== '--rebuild');
 if (roots.length === 0 || unknown.length > 0) {
-  console.error('installed-scripts-gate: usage: node scripts/installed-scripts-gate.mjs [--omit=dev] <node_modules dir> [...]');
+  console.error('installed-scripts-gate: usage: node scripts/installed-scripts-gate.mjs [--rebuild] <node_modules dir> [...]');
   process.exit(1);
 }
 
 let bad = 0;
-const allowedNames = new Set();
+const results = [];
 for (const root of roots) {
   if (!safeIsDir(root)) {
     // npm ci の直後に無いのは install の失敗か指定ミス。検査対象ゼロの偽成功にしない。
-    console.error(`NG ${root}: not a directory (run this right after npm ci)`);
+    console.error(`NG ${root}: not a directory (run this right after npm ci --ignore-scripts)`);
     bad++;
     continue;
   }
-  const state = { visited: new Set(), scanned: 0, allowed: [], allowedNames, failures: [], lockfileSummary: '' };
+  const state = { visited: new Set(), scanned: 0, allowed: [], rebuildNames: new Set(), failures: [] };
   scanScripts(root, state);
-  reconcileWithLockfile(root, omitDev, state);
   for (const line of state.failures) console.error(`NG ${line}`);
   bad += state.failures.length;
-  console.log(`OK ${root}: ${state.scanned} packages scanned, ${state.allowed.length} with allowlisted install-time scripts; ${state.lockfileSummary}`);
+  console.log(`OK ${root}: ${state.scanned} packages scanned, ${state.allowed.length} with allowlisted install-time scripts`);
   for (const line of state.allowed) console.log(`   ${line}`);
+  results.push({ root, rebuildNames: [...state.rebuildNames].sort() });
 }
 
 if (bad > 0) {
   console.error(
-    `installed-scripts-gate: install-time script を持つ allowlist 外のパッケージ・lockfile にあるのに入っていないパッケージ (または未検査の root) が ${bad} 件あります。` +
-      '個別確認のうえ scripts/lib/installScriptAllowlist.mjs に追加するか、依存を外してください (CLAUDE.md 掟 16)。',
+    `installed-scripts-gate: install-time script を持つ allowlist 外のパッケージ (または未検査の root) が ${bad} 件あります。` +
+      '個別確認のうえ scripts/lib/installScriptAllowlist.mjs に追加するか、依存を外してください (CLAUDE.md 掟 16)。' +
+      (rebuild ? ' npm rebuild は実行していません。' : ''),
   );
   process.exit(1);
 }
-console.log(`installed-scripts-gate: install-time script は allowlist の ${allowedNames.size} 件のみ、lockfile のエントリは全て入っています`);
+
+if (rebuild) {
+  for (const { root, rebuildNames } of results) {
+    if (rebuildNames.length === 0) {
+      console.log(`installed-scripts-gate: ${root}: nothing to rebuild (no allowlisted install-time scripts installed)`);
+      continue;
+    }
+    const cwd = dirname(resolve(root));
+    console.log(`installed-scripts-gate: ${root}: npm rebuild ${rebuildNames.join(' ')} (cwd ${repoRelative(cwd) || '.'})`);
+    const run = spawnSync('npm', ['rebuild', ...rebuildNames], { cwd, stdio: 'inherit' });
+    if (run.error || run.status !== 0) {
+      // 必要な native build / binary 取得に失敗した状態で先へ進ませない (後続の build / test が別の理由で赤になる)。
+      console.error(`installed-scripts-gate: npm rebuild failed in ${repoRelative(cwd) || '.'} (status ${run.status ?? run.error?.message})`);
+      process.exit(1);
+    }
+  }
+}
+console.log(`installed-scripts-gate: install-time script は allowlist のものだけです${rebuild ? ' (allowlist の npm rebuild 済み)' : ''}`);

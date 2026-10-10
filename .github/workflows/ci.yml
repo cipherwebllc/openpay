@@ -30,8 +30,10 @@ jobs:
       # http 取得の混入 (AI エージェント経由のサプライチェーン汚染含む) で fail。
       # .npmrc の redirect は npm ci が読む前に止める (Node 標準 API + Git のみ)。
       - run: node scripts/lockfile-gate.mjs
-      - run: npm ci
-      - run: node scripts/installed-scripts-gate.mjs node_modules
+      # install script は走らせずに入れ (binding.gyp の暗黙 build も含む)、gate が実体を走査して allowlist 外なら fail、
+      # 通ったら allowlist の名前だけ npm rebuild する (CLAUDE.md 掟 16・docs/DEPLOY_CHECKLIST.md §7.14)。
+      - run: npm ci --ignore-scripts
+      - run: node scripts/installed-scripts-gate.mjs --rebuild node_modules
       - name: Cache Next.js build
         uses: actions/cache@v4
         with:
@@ -110,8 +112,10 @@ jobs:
           node-version: '22'
           cache: npm
       - run: node scripts/lockfile-gate.mjs
-      - run: npm ci
-      - run: node scripts/installed-scripts-gate.mjs node_modules
+      # install script は走らせずに入れ (binding.gyp の暗黙 build も含む)、gate が実体を走査して allowlist 外なら fail、
+      # 通ったら allowlist の名前だけ npm rebuild する (CLAUDE.md 掟 16・docs/DEPLOY_CHECKLIST.md §7.14)。
+      - run: npm ci --ignore-scripts
+      - run: node scripts/installed-scripts-gate.mjs --rebuild node_modules
       - run: node scripts/run-lua-tests.mjs
 
   audit:

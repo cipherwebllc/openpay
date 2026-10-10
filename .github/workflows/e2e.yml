@@ -37,10 +37,12 @@ jobs:
         run: node scripts/lockfile-gate.mjs
 
       - name: Install
-        run: npm ci
+        run: npm ci --ignore-scripts
 
-      - name: Check installed packages for install-time scripts
-        run: node scripts/installed-scripts-gate.mjs node_modules
+      # install script は走らせずに入れ、gate が実体を走査して allowlist 外なら fail、通ったら allowlist の名前だけ
+      # npm rebuild する (CLAUDE.md 掟 16・docs/DEPLOY_CHECKLIST.md §7.14)。
+      - name: Check installed packages for install-time scripts and rebuild the allowlisted ones
+        run: node scripts/installed-scripts-gate.mjs --rebuild node_modules
 
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium webkit
@@ -75,10 +77,12 @@ jobs:
         run: node scripts/lockfile-gate.mjs
 
       - name: Install
-        run: npm ci
+        run: npm ci --ignore-scripts
 
-      - name: Check installed packages for install-time scripts
-        run: node scripts/installed-scripts-gate.mjs node_modules
+      # install script は走らせずに入れ、gate が実体を走査して allowlist 外なら fail、通ったら allowlist の名前だけ
+      # npm rebuild する (CLAUDE.md 掟 16・docs/DEPLOY_CHECKLIST.md §7.14)。
+      - name: Check installed packages for install-time scripts and rebuild the allowlisted ones
+        run: node scripts/installed-scripts-gate.mjs --rebuild node_modules
 
       - name: Install Chromium
         run: npx playwright install --with-deps chromium

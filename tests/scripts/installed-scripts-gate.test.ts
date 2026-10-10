@@ -1,12 +1,13 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-// Codex レビュー (PR #778) 3: lockfile の hasInstallScript だけでは、binding.gyp の暗黙 `node-gyp rebuild`・
-// bundled 依存の実体の script・link (workspace) の prepare を npm ci の前に知れない。npm ci の直後に
-// node_modules の実体 (package.json の scripts と binding.gyp) を走査し、allowlist 外があれば fail にする。
-// 実行前の防止ではなく検出 (R4 の裁定 = 「CI で検出」の範囲)。
+// Codex レビュー (PR #778) 3 → 3 回目で「防止」に切り替え: CI は `npm ci --ignore-scripts` で install script を
+// 走らせずに入れ、この gate が node_modules の実体 (package.json の preinstall / install / postinstall、link の
+// prepare、binding.gyp = 暗黙の `node-gyp rebuild`) を走査して allowlist 外があれば fail する。通ったときだけ
+// `--rebuild` で allowlist の名前を `npm rebuild <names>` し、必要な install script を実行する。
+// = allowlist 外の install script 付き依存は一度も実行されずに CI で止まる。
 
 const SCRIPT = resolve('scripts/installed-scripts-gate.mjs');
 let root: string;
@@ -21,36 +22,28 @@ function pkg(path: string, manifest: Record<string, unknown>, extraFiles: Record
   }
 }
 
-function run(...roots: string[]) {
-  const result = spawnSync(process.execPath, [SCRIPT, ...(roots.length > 0 ? roots : ['node_modules'])], {
-    cwd: root, encoding: 'utf8',
+// `--rebuild` が呼ぶ npm を PATH 先頭の偽物に差し替え、呼ばれた引数と cwd を記録する (本物の npm は呼ばない)。
+function fakeNpm(exitCode = 0) {
+  const bin = join(root, 'fake-bin');
+  mkdirSync(bin, { recursive: true });
+  const log = join(root, 'npm-calls.log');
+  writeFileSync(join(bin, 'npm'), `#!/bin/sh\necho "$PWD|$*" >> "${log}"\nexit ${exitCode}\n`);
+  chmodSync(join(bin, 'npm'), 0o755);
+  return { path: `${bin}:${process.env.PATH}`, calls: () => (existsSync(log) ? readFileSync(log, 'utf8').trim().split('\n') : []) };
+}
+
+function run(args: string[] = ['node_modules'], env: Record<string, string> = {}) {
+  const result = spawnSync(process.execPath, [SCRIPT, ...args], {
+    cwd: root, encoding: 'utf8', env: { ...process.env, ...env },
   });
   expect(result.error).toBeUndefined();
   return result;
-}
-
-const OFFICIAL = 'https://registry.npmjs.org/';
-type Entry = Record<string, unknown>;
-// root の隣の lockfile (node_modules → package-lock.json) を書く。entries は path → 追加フィールド。
-function lock(
-  entries: Record<string, Entry>,
-  rootDeps: { dependencies?: Record<string, string>; devDependencies?: Record<string, string> } = {},
-  file = 'package-lock.json',
-) {
-  const packages: Record<string, Entry> = { '': { name: 'fixture', ...rootDeps } };
-  for (const [path, extra] of Object.entries(entries)) {
-    const name = path.slice(path.lastIndexOf('node_modules/') + 'node_modules/'.length);
-    packages[path] = { version: '1.0.0', resolved: `${OFFICIAL}${name}/-/${name.slice(name.lastIndexOf('/') + 1)}-1.0.0.tgz`, ...extra };
-  }
-  mkdirSync(dirname(join(root, file)), { recursive: true });
-  writeFileSync(join(root, file), JSON.stringify({ name: 'fixture', lockfileVersion: 3, packages }));
 }
 
 beforeEach(() => {
   root = mkdtempSync(resolve('.installed-scripts-gate-test-'));
   pkg('node_modules/plain', { name: 'plain', scripts: { test: 'vitest', build: 'tsc' } });
   pkg('node_modules/@scope/plain', { name: '@scope/plain' });
-  lock({ 'node_modules/plain': {}, 'node_modules/@scope/plain': {} }, { dependencies: { plain: '^1', '@scope/plain': '^1' } });
 });
 
 afterEach(() => { rmSync(root, { recursive: true, force: true }); });
@@ -141,21 +134,19 @@ describe('installed-scripts-gate CLI', () => {
   });
 
   it('fails closed when a root does not exist', () => {
-    const result = run('node_modules', 'tools/missing/node_modules');
+    const result = run(['node_modules', 'tools/missing/node_modules']);
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('tools/missing/node_modules');
   });
 
-  it('fails closed when no root is given', () => {
-    const result = spawnSync(process.execPath, [SCRIPT], { cwd: root, encoding: 'utf8' });
-    expect(result.status).toBe(1);
+  it.each([[[]], [['--omit=dev', 'node_modules']], [['--unknown', 'node_modules']]])('fails closed for the arguments %j', (args) => {
+    expect(run(args).status).toBe(1);
   });
 
   it('checks every root given', () => {
     pkg('tools/example/node_modules/evil-postinstall', { name: 'evil-postinstall', scripts: { postinstall: 'x' } });
-    lock({ 'node_modules/evil-postinstall': { hasInstallScript: true } }, { dependencies: { 'evil-postinstall': '^1' } }, 'tools/example/package-lock.json');
-    expect(run('node_modules').status).toBe(0);
-    const result = run('node_modules', 'tools/example/node_modules');
+    expect(run(['node_modules']).status).toBe(0);
+    const result = run(['node_modules', 'tools/example/node_modules']);
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('tools/example/node_modules/evil-postinstall');
   });
@@ -187,105 +178,65 @@ describe('installed-scripts-gate CLI', () => {
       expect(run().status).toBe(0);
     });
   });
-});
 
-// Codex レビュー 2 回目 (PR #778) 2: optional な binding.gyp 依存は暗黙ビルドが失敗すると npm が実体を削除し、
-// 事後の走査をすり抜ける (optional の失敗は install 全体の失敗にならない)。lockfile から「この環境で入るはず」の
-// エントリを求め (root から dependencies / optionalDependencies を辿り、os / cpu / libc が合わないものと
-// そこからしか辿れないものを除く)、node_modules に無ければ fail する。
-describe('installed-scripts-gate lockfile reconciliation', () => {
-  const otherOs = process.platform === 'linux' ? 'win32' : 'linux';
-  const otherCpu = process.arch === 'x64' ? 'arm64' : 'x64';
+  // 防止の後半: 通った root だけ、その root に入っている allowlist の名前を `npm rebuild <names>` する。
+  describe('--rebuild', () => {
+    it('rebuilds exactly the installed allowlisted names in the root directory and succeeds', () => {
+      pkg('node_modules/esbuild', { name: 'esbuild', scripts: { postinstall: 'node install.js' } });
+      pkg('node_modules/@swc/core', { name: '@swc/core', scripts: { postinstall: 'node postinstall.js' } });
+      pkg('node_modules/plain/node_modules/keccak', { name: 'keccak' }, { 'binding.gyp': '{}' });
+      const npm = fakeNpm();
+      const result = run(['--rebuild', 'node_modules'], { PATH: npm.path });
+      expect(result.status).toBe(0);
+      const calls = npm.calls();
+      expect(calls).toHaveLength(1);
+      const [cwd, args] = calls[0].split('|');
+      expect(cwd).toBe(root);
+      expect(args.split(' ').sort()).toEqual(['@swc/core', 'esbuild', 'keccak', 'rebuild']);
+      expect(result.stdout).toContain('npm rebuild');
+    });
 
-  it('accepts a tree that matches the lockfile', () => {
-    lock({ 'node_modules/plain': {}, 'node_modules/@scope/plain': {} }, { dependencies: { plain: '^1', '@scope/plain': '^1' } });
-    const result = run();
-    expect(result.status).toBe(0);
-    expect(result.stdout).toContain('lockfile');
-  });
+    it('runs npm rebuild in the directory that owns the root (tools/… lockfile)', () => {
+      pkg('tools/example/node_modules/esbuild', { name: 'esbuild', scripts: { postinstall: 'x' } });
+      const npm = fakeNpm();
+      const result = run(['--rebuild', 'tools/example/node_modules'], { PATH: npm.path });
+      expect(result.status).toBe(0);
+      expect(npm.calls()).toEqual([`${join(root, 'tools/example')}|rebuild esbuild`]);
+    });
 
-  it('rejects a required package that the lockfile expects but node_modules lacks', () => {
-    lock({ 'node_modules/plain': {}, 'node_modules/gone': {} }, { dependencies: { plain: '^1', gone: '^1' } });
-    const result = run();
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain('node_modules/gone');
-    expect(result.stderr).toContain('lockfile');
-  });
+    it('does not call npm when nothing allowlisted is installed (never a bare npm rebuild)', () => {
+      const npm = fakeNpm();
+      const result = run(['--rebuild', 'node_modules'], { PATH: npm.path });
+      expect(result.status).toBe(0);
+      expect(npm.calls()).toEqual([]);
+      expect(result.stdout).toContain('nothing to rebuild');
+    });
 
-  it('rejects an optional native package for this platform that disappeared (implicit build failure)', () => {
-    lock({
-      'node_modules/plain': { dependencies: { 'native-opt': '^1' } },
-      'node_modules/native-opt': { optional: true, hasInstallScript: true, os: [process.platform], cpu: [process.arch] },
-    }, { dependencies: { plain: '^1' } });
-    const result = run();
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain('node_modules/native-opt');
-    expect(result.stderr).toContain('optional');
-  });
+    it('does not rebuild anything when the gate fails', () => {
+      pkg('node_modules/esbuild', { name: 'esbuild', scripts: { postinstall: 'x' } });
+      pkg('node_modules/evil-postinstall', { name: 'evil-postinstall', scripts: { postinstall: 'x' } });
+      const npm = fakeNpm();
+      const result = run(['--rebuild', 'node_modules'], { PATH: npm.path });
+      expect(result.status).toBe(1);
+      expect(npm.calls()).toEqual([]);
+    });
 
-  it('accepts optional packages excluded by os, cpu, libc or negation, and packages reachable only through them', () => {
-    lock({
-      'node_modules/plain': { optionalDependencies: { 'other-os': '^1', 'other-cpu': '^1', 'other-libc': '^1', negated: '^1', 'wasm-only': '^1' } },
-      'node_modules/other-os': { optional: true, os: [otherOs] },
-      'node_modules/other-cpu': { optional: true, cpu: [otherCpu] },
-      'node_modules/other-libc': { optional: true, os: ['linux'], libc: ['nonexistent-libc'] },
-      'node_modules/negated': { optional: true, os: [`!${process.platform}`] },
-      'node_modules/wasm-only': { optional: true, cpu: ['wasm32'], dependencies: { 'wasm-runtime': '^1' } },
-      'node_modules/wasm-runtime': { optional: true, dependencies: { 'wasm-helper': '^1' } },
-      'node_modules/wasm-helper': { optional: true },
-    }, { dependencies: { plain: '^1' } });
-    expect(run().status).toBe(0);
-  });
+    it('does not rebuild linked packages (their scripts are governed by the linked allowlist only)', () => {
+      pkg('packages/esbuild', { name: 'esbuild' });
+      symlinkSync(join(root, 'packages/esbuild'), join(root, 'node_modules/esbuild'), 'dir');
+      const npm = fakeNpm();
+      const result = run(['--rebuild', 'node_modules'], { PATH: npm.path });
+      expect(result.status).toBe(0);
+      expect(npm.calls()).toEqual([]);
+    });
 
-  it('resolves nested node_modules like Node does', () => {
-    pkg('node_modules/plain/node_modules/inner', { name: 'inner' });
-    lock({
-      'node_modules/plain': { dependencies: { inner: '^2', shared: '^1' } },
-      'node_modules/plain/node_modules/inner': { version: '2.0.0' },
-      'node_modules/shared': {},
-    }, { dependencies: { plain: '^1' } });
-    const result = run();
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain('node_modules/shared');
-    pkg('node_modules/shared', { name: 'shared' });
-    expect(run().status).toBe(0);
-  });
-
-  it('rejects a missing nested package', () => {
-    lock({
-      'node_modules/plain': { dependencies: { inner: '^2' } },
-      'node_modules/plain/node_modules/inner': { version: '2.0.0' },
-    }, { dependencies: { plain: '^1' } });
-    const result = run();
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain('node_modules/plain/node_modules/inner');
-  });
-
-  it('expects devDependencies unless --omit=dev is given', () => {
-    lock({ 'node_modules/plain': {}, 'node_modules/dev-only': { dev: true } }, { dependencies: { plain: '^1' }, devDependencies: { 'dev-only': '^1' } });
-    expect(run().status).toBe(1);
-    const result = spawnSync(process.execPath, [SCRIPT, '--omit=dev', 'node_modules'], { cwd: root, encoding: 'utf8' });
-    expect(result.status).toBe(0);
-  });
-
-  it('follows workspace links into their own lockfile entries', () => {
-    pkg('packages/local', { name: 'local' });
-    symlinkSync(join(root, 'packages/local'), join(root, 'node_modules/local'), 'dir');
-    lock({
-      'node_modules/local': { link: true, resolved: 'packages/local', version: undefined },
-      'packages/local': { dependencies: { 'local-dep': '^1' } },
-      'node_modules/local-dep': {},
-    }, { dependencies: { local: 'file:packages/local' } });
-    const result = run();
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain('node_modules/local-dep');
-  });
-
-  it('fails closed when the lockfile beside the root is missing', () => {
-    rmSync(join(root, 'package-lock.json'), { force: true });
-    const result = run();
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain('package-lock.json');
+    it('fails when npm rebuild fails', () => {
+      pkg('node_modules/esbuild', { name: 'esbuild', scripts: { postinstall: 'x' } });
+      const npm = fakeNpm(3);
+      const result = run(['--rebuild', 'node_modules'], { PATH: npm.path });
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain('npm rebuild');
+    });
   });
 });
 

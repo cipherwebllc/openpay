@@ -79,10 +79,11 @@ describe('GitHub Actions operation guards', () => {
     }
   });
 
-  // Codex レビュー (PR #778) 3: lockfile の hasInstallScript だけでは binding.gyp の暗黙 node-gyp rebuild・
-  // bundled 依存の実体の script・link の prepare を実行前に知れない。npm ci の直後に node_modules の実体を
-  // 走査する検出 (scripts/installed-scripts-gate.mjs) を、全 workflow の全 install の次の step に置く。
-  it.each(workflowFiles)('%s scans installed packages for scripts right after every dependency install', (name) => {
+  // Codex レビュー (PR #778) 3 → 3 回目で「防止」: 全 workflow の全 install は `npm ci --ignore-scripts` (install
+  // script も binding.gyp の暗黙 node-gyp rebuild も走らない) にし、直後に scripts/installed-scripts-gate.mjs が
+  // 実体を走査して allowlist 外があれば fail、通ったら `--rebuild` で allowlist の名前だけ `npm rebuild` する。
+  // = allowlist 外の install script 付き依存は一度も実行されずに CI で止まる (CLAUDE.md 掟 16)。
+  it.each(workflowFiles)('%s installs with --ignore-scripts and rebuilds only allowlisted packages after the gate', (name) => {
     const source = workflow(name);
     const jobs = source.slice(source.indexOf('\njobs:\n')).split(/\n  [\w-]+:\n/).slice(1);
     for (const job of jobs) {
@@ -90,15 +91,17 @@ describe('GitHub Actions operation guards', () => {
       steps.forEach((step, index) => {
         const install = step.match(/\brun:\s*npm (?:--prefix (\S+) )?ci\b([^\n]*)/);
         if (!install) return;
+        expect(install[2], `${name}: "${install[0]}" must not run install scripts`).toMatch(/(^|\s)--ignore-scripts(\s|$)/);
         const root = install[1] ? `${install[1]}/node_modules` : 'node_modules';
-        // `npm ci --omit=dev` の後は lockfile との突き合わせも dev を除いて行う (--omit=dev を gate にも渡す)。
-        const omitDev = /--omit=dev\b/.test(install[2]) ? '--omit=dev ' : '';
         const next = steps[index + 1] ?? '';
-        expect(next, `${name}: installed scripts gate after "${install[0]}"`).toMatch(
-          new RegExp(`run:\\s*node scripts/installed-scripts-gate\\.mjs ${omitDev}${root.replace(/[./]/g, '\\$&')}\\s*$`, 'm'),
+        expect(next, `${name}: gate + rebuild right after "${install[0]}"`).toMatch(
+          new RegExp(`run:\\s*node scripts/installed-scripts-gate\\.mjs --rebuild ${root.replace(/[./]/g, '\\$&')}\\s*$`, 'm'),
         );
         expect(next).not.toMatch(/continue-on-error:\s*true/);
       });
+      // gate 以外の経路で install script を走らせない (npm install / npm rebuild の直書き・--ignore-scripts=false)
+      expect(job).not.toMatch(/\brun:\s*npm (?:--prefix \S+ )?(?:install|i|rebuild)\b/);
+      expect(job).not.toMatch(/--ignore-scripts=false/);
     }
   });
 
