@@ -128,9 +128,11 @@ export type StoreUsdcOnchainVerification =
    *   'finality'  = 正規チェーンとの一致を確認できた (または高さ不足で照合先に無く判別不能な) receipt が
    *                 safe 未到達・確認数不足 (同じ hash を待てばよい)
    *   'canonical' = receipt のブロックが今の正規チェーンに無い (旧フォーク)。高さに関係なく、同じ hash を待っても
-   *                 解決しない — 保存済み hash なら replacement 探索へ進む (#776 Codex P2)。
+   *                 解決しない — 保存済み hash なら replacement 探索へ進み、走査中の候補なら採らずに飛ばす。
+   *   'unverified' = 高さが足りず、照合先のノードに同じ番号のブロックがまだ無い (旧フォークか未到達か判別不能)。
+   *                 'finality' (正規と一致を確認済み) と混同しない — 保存済み hash の待ちで replacement 探索を止めない。
    */
-  | { ok: true; state: 'pending'; reason: 'receipt' | 'finality' | 'canonical' }
+  | { ok: true; state: 'pending'; reason: 'receipt' | 'finality' | 'canonical' | 'unverified' }
   | {
       ok: false;
       reason:
@@ -263,11 +265,11 @@ export async function verifyStoreUsdcOnchain(input: {
   const canonical = await receiptIsCanonical(client, receipt);
   if (canonical === 'unavailable') {
     // 高さが足りない receipt のブロックは、照合先のノードにまだ無いことがある (旧フォークか未到達か判別不能)
-    // → 従来どおり finality 待ちに倒す (次回、高さが揃ってから照合する)。高さを満たしているのに照会できないのは
-    // 読み取り障害 → rpc_unavailable (呼び出し側がそのページから再試行)。
+    // → 'unverified' (通常の finality 待ちとは別の理由・採らない・terminal にしない)。高さを満たしているのに
+    // 照会できないのは読み取り障害 → rpc_unavailable (呼び出し側がそのページから再試行)。
     return finality
       ? { ok: false, reason: 'rpc_unavailable' }
-      : { ok: true, state: 'pending', reason: 'finality' };
+      : { ok: true, state: 'pending', reason: 'unverified' };
   }
   // 通常の finality 待ちと区別する (同じ hash を待ち続けると、同じ nonce の replacement が正規チェーンで
   // 支払い済みでも、古い receipt を返し続ける RPC のせいに解錠できない)。高さに関係なく・terminal にはしない。

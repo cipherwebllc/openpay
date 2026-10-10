@@ -60,7 +60,7 @@ import {
   getStoreUsdcIntent, markStoreUsdcIndeterminate, parseStoreUsdcIntent,
   readSettledStoreUsdcAccess, reconcilePendingStoreUsdcPurchases, reconcileStoreUsdcIntent,
   storeUsdcAuthorizationHash, storeUsdcIntentKey, storeUsdcPendingKey,
-  STORE_USDC_RECONCILE_RETRY_MS,
+  STORE_USDC_RECONCILE_MAX_REWINDS, STORE_USDC_RECONCILE_RETRY_MS,
 } from '@/lib/x402/storeUsdcIntent';
 import { STORE_USDC_ADDRESS, verifyStoreUsdcOnchain, type StoreUsdcPublicClient } from '@/lib/x402/storeUsdcOnchain';
 
@@ -222,11 +222,13 @@ describe('USDC reconciliation with real Lua and receipt verification', () => {
     await expectSettled();
   });
 
-  it('reschedules a stored hash awaiting finality without scanning or checking its receipt twice', async () => {
+  // Codex 4 回目 P2 (1): 保存済み hash の待ち (finality / 照合不能 / 旧フォーク / receipt なし) が replacement の探索を
+  // 止めない — 同じ回で getLogs も走らせ、保存 hash は候補として読み直さず (receipt は 1 回)、確定しなければ保持する。
+  it('scans for a replacement while the stored hash awaits finality, checking the stored receipt once and keeping it', async () => {
     const intent = await active(TX);
     const client = chain(intent.nonce, { latest: 100n, bad: 'finality' });
     expect(await reconcileStoreUsdcIntent(SALT, { now: CHECKED_AT, client })).toEqual({ ok: true, state: 'pending' });
-    expect(client.getLogs).not.toHaveBeenCalled();
+    expect(client.getLogs).toHaveBeenCalled();
     expect(client.getTransactionReceipt).toHaveBeenCalledTimes(1);
     expect(rawIntent()).toMatchObject({ state: 'indeterminate', txHash: TX, nextReconcileAt: CHECKED_AT + STORE_USDC_RECONCILE_RETRY_MS });
   });
@@ -279,15 +281,13 @@ describe('USDC reconciliation with real Lua and receipt verification', () => {
     await expectSettled();
   });
 
-  it.each(['receipt', 'finality', 'canonical', 'rpc_unavailable', 'claim'] as const)('retries the candidate page after transient %s failure even with later pages and a growing daily head', async (failure) => {
+  // 'canonical' (正規ブロックが取れて hash が違う = 旧フォークと確定) は一時障害ではなく無効な候補として飛ばす
+  // (下の「advances past ...」)。保留して巻き戻すのは正規と一致する finality 未到達・receipt 未取得・照合不能だけ。
+  it.each(['receipt', 'finality', 'rpc_unavailable', 'claim'] as const)('retries the candidate page after transient %s failure even with later pages and a growing daily head', async (failure) => {
     const intent = await active();
     const client = chain(intent.nonce, { latest: 50_090n, eventBlock: 2_100n });
     if (failure === 'receipt') {
       vi.mocked(client.getTransactionReceipt).mockRejectedValueOnce(new Error('receipt unavailable'));
-    } else if (failure === 'canonical') {
-      // 1 回だけ旧フォークの receipt (hash A) が返る: 候補を採らず、候補のページ位置から再試行する。
-      const receipt = vi.mocked(client.getTransactionReceipt).getMockImplementation()!;
-      vi.mocked(client.getTransactionReceipt).mockImplementationOnce(async (args) => ({ ...(await receipt(args)), blockHash: FORK_HASH }));
     } else if (failure === 'finality') {
       vi.mocked(client.getBlock).mockResolvedValueOnce({ number: 2_099n });
       vi.mocked(client.getBlockNumber).mockResolvedValueOnce(50_090n).mockResolvedValueOnce(2_113n);
@@ -332,14 +332,16 @@ describe('USDC reconciliation with real Lua and receipt verification', () => {
     await expectSettled();
   });
 
-  it('retries from the earliest deferred candidate page when every candidate is pending', async () => {
+  // 先のページの候補 OLD は receipt 未取得 (保留)・後のページの TX は旧フォークと確定 (飛ばす) → 採用できる候補が無く、
+  // 再試行位置は保留した最も早いページ (90)。
+  it('retries from the earliest deferred candidate page when no candidate can be adopted', async () => {
     const intent = await active();
-    const client = chain(intent.nonce, { latest: 50_090n, eventBlock: 2_100n, old: 'noncanonical', bad: 'canonical' });
+    const client = chain(intent.nonce, { latest: 50_090n, eventBlock: 2_100n, bad: 'canonical' });
     mixedPages(client);
     expect(await reconcileStoreUsdcIntent(SALT, { now: CHECKED_AT, client })).toEqual({ ok: true, state: 'pending' });
     expect(client.getTransactionReceipt).toHaveBeenCalledWith({ hash: OLD });
     expect(client.getTransactionReceipt).toHaveBeenCalledWith({ hash: TX });
-    expect(await getStoreUsdcIntent(SALT)).toMatchObject({ state: 'indeterminate', reconcileFromBlock: '90', nextReconcileAt: CHECKED_AT + STORE_USDC_RECONCILE_RETRY_MS });
+    expect(await getStoreUsdcIntent(SALT)).toMatchObject({ state: 'indeterminate', reconcileFromBlock: '90', reconcileRewinds: 1, nextReconcileAt: CHECKED_AT + STORE_USDC_RECONCILE_RETRY_MS });
     expect(rawIntent().txHash).toBeUndefined();
     expect(h.store!.strings.has(`store:own:${PAYER.toLowerCase()}:${ID}`)).toBe(false);
   });
@@ -352,11 +354,11 @@ describe('USDC reconciliation with real Lua and receipt verification', () => {
     }));
   }
 
-  // Codex 3 回目 P2 (1): 先のページの候補を保留した後、後の候補が読み取り障害で中断すると、再試行位置が後の
-  // ページ (2090) に進んで先の候補 (90) が再検証されない → 再試行位置は保留したページを優先する。
+  // Codex 3 回目 P2 (1): 先のページの候補 (OLD・receipt 未取得で保留) の後、後の候補が読み取り障害で中断すると、
+  // 再試行位置が後のページ (2090) に進んで先の候補 (90) が再検証されない → 再試行位置は保留したページを優先する。
   it.each(['rpc', 'claim'] as const)('keeps the earlier deferred page when a later candidate hits a transient %s failure', async (failure) => {
     const intent = await active();
-    const client = chain(intent.nonce, { latest: 50_090n, eventBlock: 2_100n, old: 'noncanonical' });
+    const client = chain(intent.nonce, { latest: 50_090n, eventBlock: 2_100n });
     mixedPages(client);
     splitReceiptBlocks(client);
     let failCanonicalLookup = failure === 'rpc';
@@ -367,7 +369,7 @@ describe('USDC reconciliation with real Lua and receipt verification', () => {
       }
       return { number: 50_090n };
     });
-    // claim: OLD は canonical で止まるので claim を読まず、最初の claim 読み取り (= TX) だけが落ちる。
+    // claim: OLD は receipt 未取得で止まるので claim を読まず、最初の claim 読み取り (= TX) だけが落ちる。
     if (failure === 'claim') h.failClaimOnce = true;
     expect(await reconcileStoreUsdcIntent(SALT, { now: CHECKED_AT, client })).toEqual({ ok: true, state: 'pending' });
     expect(client.getTransactionReceipt).toHaveBeenCalledWith({ hash: OLD });
@@ -397,12 +399,94 @@ describe('USDC reconciliation with real Lua and receipt verification', () => {
     await expectSettled();
   });
 
-  it('advances past conclusively mismatched candidate evidence', async () => {
+  it.each(['amount', 'canonical'] as const)('advances past conclusively mismatched candidate evidence (%s)', async (bad) => {
     const intent = await active();
-    const client = chain(intent.nonce, { latest: 50_090n, eventBlock: 2_100n, bad: 'amount' });
+    const client = chain(intent.nonce, { latest: 50_090n, eventBlock: 2_100n, bad });
     expect(await reconcileStoreUsdcIntent(SALT, { now: CHECKED_AT, client })).toEqual({ ok: true, state: 'pending' });
     expect(await getStoreUsdcIntent(SALT)).toMatchObject({ reconcileFromBlock: '40090' });
     expect(rawIntent().txHash).toBeUndefined();
+    expect(rawIntent().reconcileRewinds).toBeUndefined();
+  });
+
+  // Codex 4 回目 P2 (1) の反例: 保存済みの旧 receipt が block 101、safe=100 / latest=101 で、block 101 の正規照合だけが
+  // 落ちる (照合不能)。これを finality 待ちと混同すると即再スケジュールするだけで、block 100 で確定済みの replacement を
+  // 探索しない → 照合不能は 'unverified' として扱い、同じ回で replacement を探索して確定する。
+  it('scans for the replacement when the stored stale receipt cannot be verified against the canonical chain', async () => {
+    const intent = await active(OLD);
+    const client = chain(intent.nonce, { latest: 101n, eventBlock: 100n, old: 'noncanonical' });
+    const receipt = vi.mocked(client.getTransactionReceipt).getMockImplementation()!;
+    vi.mocked(client.getTransactionReceipt).mockImplementation(async (args) => ({
+      ...(await receipt(args)), blockNumber: args.hash === OLD ? 101n : 100n,
+    }));
+    vi.mocked(client.getBlock).mockImplementation(async (args) => {
+      if ('blockNumber' in args) {
+        if (args.blockNumber === 101n) throw new Error('block not found');
+        return { number: args.blockNumber, hash: BLOCK_HASH };
+      }
+      return { number: 100n };
+    });
+    expect(await verifyStoreUsdcOnchain({ intent: { ...intent, payer: PAYER }, txHash: OLD, client })).toEqual({ ok: true, state: 'pending', reason: 'unverified' });
+    expect(await reconcileStoreUsdcIntent(SALT, { now: CHECKED_AT, client })).toEqual({ ok: true, state: 'settled' });
+    expect(client.getLogs).toHaveBeenCalled();
+    await expectSettled();
+  });
+
+  // Codex 4 回目 P2 (2) の反例: 早いページ (block 100) が旧フォークの候補を返し続け、replacement は 1 回の走査上限
+  // (20 ページ × 2,000 = 90..40,089) より先の block 42,100 にある。旧フォーク候補を保留して毎回同じページへ巻き戻すと
+  // replacement に届かない → 旧フォークと確定した候補は飛ばし、cursor を前進させて次回に replacement を検証する。
+  it('advances past a stale-fork candidate on the first page so a replacement beyond the page budget is reached', async () => {
+    const intent = await active();
+    const client = chain(intent.nonce, { latest: 50_090n, eventBlock: 42_100n, old: 'noncanonical' });
+    vi.mocked(client.getLogs).mockImplementation(async ({ fromBlock, toBlock }) => {
+      if (100n >= fromBlock && 100n <= toBlock) return [{ transactionHash: OLD }];
+      if (42_100n >= fromBlock && 42_100n <= toBlock) return [{ transactionHash: TX }];
+      return [];
+    });
+    const receipt = vi.mocked(client.getTransactionReceipt).getMockImplementation()!;
+    vi.mocked(client.getTransactionReceipt).mockImplementation(async (args) => ({
+      ...(await receipt(args)), blockNumber: args.hash === OLD ? 100n : 42_100n,
+    }));
+    expect(await reconcileStoreUsdcIntent(SALT, { now: CHECKED_AT, client })).toEqual({ ok: true, state: 'pending' });
+    expect(client.getTransactionReceipt).toHaveBeenCalledWith({ hash: OLD });
+    expect(await getStoreUsdcIntent(SALT)).toMatchObject({ state: 'indeterminate', reconcileFromBlock: '40090' });
+    expect(rawIntent().txHash).toBeUndefined();
+    expect(await reconcileStoreUsdcIntent(SALT, { now: CHECKED_AT + 30_000, client })).toEqual({ ok: true, state: 'settled' });
+    await expectSettled();
+  });
+
+  // 保留 (正規と一致するが receipt 未取得等) による同じページへの巻き戻しは上限回数まで。超えたらその回は走査の続きへ
+  // 前進し (採否は pending のまま)、cursor はいずれ latest を越えて anchor へ戻るので候補を見失わない。
+  it('rewinds to a deferred page at most the configured number of times, then advances the cursor', async () => {
+    const intent = await active();
+    const client = chain(intent.nonce, { latest: 50_090n, eventBlock: 100n });
+    let receiptMissing = true;
+    const receipt = vi.mocked(client.getTransactionReceipt).getMockImplementation()!;
+    vi.mocked(client.getTransactionReceipt).mockImplementation(async (args) => {
+      if (receiptMissing) throw new Error('receipt missing');
+      return receipt(args);
+    });
+    for (let run = 1; run <= STORE_USDC_RECONCILE_MAX_REWINDS; run += 1) {
+      expect(await reconcileStoreUsdcIntent(SALT, { now: CHECKED_AT + run * 30_000, client })).toEqual({ ok: true, state: 'pending' });
+      expect(await getStoreUsdcIntent(SALT)).toMatchObject({ state: 'indeterminate', reconcileFromBlock: '90', reconcileRewinds: run });
+    }
+    expect(await reconcileStoreUsdcIntent(SALT, { now: CHECKED_AT + 4 * 30_000, client })).toEqual({ ok: true, state: 'pending' });
+    expect(await getStoreUsdcIntent(SALT)).toMatchObject({ state: 'indeterminate', reconcileFromBlock: '40090' });
+    expect(rawIntent().reconcileRewinds).toBeUndefined();
+    expect(rawIntent().txHash).toBeUndefined();
+    // 走査が latest を越えて anchor へ戻った後、receipt が読めるようになれば確定する。
+    receiptMissing = false;
+    expect(await reconcileStoreUsdcIntent(SALT, { now: CHECKED_AT + 5 * 30_000, client })).toEqual({ ok: true, state: 'pending' });
+    expect(await getStoreUsdcIntent(SALT)).toMatchObject({ reconcileFromBlock: '90' });
+    expect(await reconcileStoreUsdcIntent(SALT, { now: CHECKED_AT + 6 * 30_000, client })).toEqual({ ok: true, state: 'settled' });
+    await expectSettled();
+  });
+
+  it('rejects a malformed rewind counter as corrupt without touching the immutable binding', async () => {
+    await active();
+    patchIntent({ reconcileRewinds: -1 });
+    expect(await getStoreUsdcIntent(SALT)).toBe('corrupt');
+    patchIntent({ reconcileRewinds: 2 });
+    expect(await getStoreUsdcIntent(SALT)).toMatchObject({ state: 'indeterminate', reconcileRewinds: 2 });
   });
 
   it.each([2_089n, 2_090n])('finds evidence at paging boundary %s', async (eventBlock) => {

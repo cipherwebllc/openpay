@@ -73,6 +73,12 @@ export const STORE_USDC_RECONCILE_RETRY_MS = 30_000;
 export const STORE_USDC_RECONCILE_BATCH_SIZE = 50;
 export const STORE_USDC_RECONCILE_PAGE_BLOCKS = 2_000n;
 export const STORE_USDC_RECONCILE_MAX_PAGES = 20;
+/**
+ * 走査の cursor を同じ保留ページ (正規と一致するが finality 未到達・receipt 未取得・照合不能の候補) へ戻す連続回数の上限。
+ * 超えたらその回は走査の続きへ前進する (保留した候補は保存 hash でないので次回の再検証には含まれないが、cursor は
+ * いずれ latest を越えて anchor へ巻き戻るので見失わない)。混在 RPC で保留が長期化しても探索が止まらないための上限。
+ */
+export const STORE_USDC_RECONCILE_MAX_REWINDS = 3;
 
 const INTENT_RE = /^0x[0-9a-f]{64}$/;
 const HASH_RE = /^[0-9a-f]{64}$/;
@@ -162,6 +168,8 @@ type StoreUsdcIntentBase = {
   bindingHash: string;
   nextReconcileAt?: number;
   reconcileFromBlock?: string;
+  /** 走査の cursor を同じ保留ページへ戻した連続回数 (reconcile 専用の可変メタ・binding に含めない)。 */
+  reconcileRewinds?: number;
 };
 
 export type QuotedStoreUsdcIntent = StoreUsdcIntentBase & { state: 'quoted' };
@@ -230,7 +238,7 @@ export function storeUsdcNonce(intentSalt: Hex): Hex {
   );
 }
 
-function binding(value: Omit<StoreUsdcIntentBase, 'bindingHash' | 'nextReconcileAt' | 'reconcileFromBlock'>): string {
+function binding(value: Omit<StoreUsdcIntentBase, 'bindingHash' | 'nextReconcileAt' | 'reconcileFromBlock' | 'reconcileRewinds'>): string {
   return canonicalHash(value);
 }
 
@@ -313,7 +321,9 @@ function parseBase(value: Record<string, unknown>): StoreUsdcIntentBase | null {
     authorizationValidBeforeMax === null ||
     typeof value.bindingHash !== 'string' ||
     !HASH_RE.test(value.bindingHash) ||
-    (value.nextReconcileAt !== undefined && !safeTimestamp(value.nextReconcileAt))
+    (value.nextReconcileAt !== undefined && !safeTimestamp(value.nextReconcileAt)) ||
+    (value.reconcileRewinds !== undefined &&
+      !(Number.isSafeInteger(value.reconcileRewinds) && Number(value.reconcileRewinds) >= 0))
   ) {
     return null;
   }
@@ -345,10 +355,14 @@ function parseBase(value: Record<string, unknown>): StoreUsdcIntentBase | null {
       ? {}
       : { nextReconcileAt: value.nextReconcileAt }),
     ...(reconcileFromBlock === undefined ? {} : { reconcileFromBlock }),
+    ...(value.reconcileRewinds === undefined
+      ? {}
+      : { reconcileRewinds: value.reconcileRewinds as number }),
   };
   const immutable = { ...base };
   delete immutable.nextReconcileAt;
   delete immutable.reconcileFromBlock;
+  delete immutable.reconcileRewinds;
   const { bindingHash, ...withoutHash } = immutable;
   if (
     base.contentRef !== hostedContentKey(base.resourceId, base.contentRevision) ||
@@ -1290,6 +1304,7 @@ async function reschedule(
   raw: string,
   now: number,
   fromBlock?: bigint,
+  rewinds?: number,
 ): Promise<void> {
   if (
     intent.state === 'settled' ||
@@ -1298,14 +1313,17 @@ async function reschedule(
   ) {
     return;
   }
-  const updated = await casIntent({
-    currentRaw: raw,
-    next: {
-      ...intent,
-      nextReconcileAt: now + STORE_USDC_RECONCILE_RETRY_MS,
-      ...(fromBlock === undefined ? {} : { reconcileFromBlock: fromBlock.toString() }),
-    },
-  });
+  const next: StoreUsdcIntent = {
+    ...intent,
+    nextReconcileAt: now + STORE_USDC_RECONCILE_RETRY_MS,
+    ...(fromBlock === undefined ? {} : { reconcileFromBlock: fromBlock.toString() }),
+  };
+  // rewinds は走査の結論が出た回だけ更新する (undefined = 今回は触らない・0 = 連続が途切れたので消す)。
+  if (rewinds !== undefined) {
+    if (rewinds > 0) next.reconcileRewinds = rewinds;
+    else delete next.reconcileRewinds;
+  }
+  const updated = await casIntent({ currentRaw: raw, next });
   if (updated === 'storage') {
     // 再試行時刻の保存失敗を既存の pending 応答の 503 化へ波及させない。
     // 支払いは未確定のままで、元の pending member を残し、失敗は監視へ記録する。
@@ -1331,8 +1349,8 @@ export async function reconcileStoreUsdcIntent(
   if (intent.state === 'failed_prebroadcast') return { ok: true, state: 'failed' };
   if (intent.state === 'quoted') return { ok: true, state: 'pending' };
   const now = input.now ?? Date.now();
-  const retry = async (fromBlock?: bigint): Promise<ReconcileStoreUsdcResult> => {
-    await reschedule(intent, raw, now, fromBlock);
+  const retry = async (fromBlock?: bigint, rewinds?: number): Promise<ReconcileStoreUsdcResult> => {
+    await reschedule(intent, raw, now, fromBlock, rewinds);
     return { ok: true, state: 'pending' };
   };
   // deadline 付き (cron) では全 RPC の直前に残り時間を見る (第 7 回レビュー B4 follow-up 2): null = 始めずに進捗を
@@ -1428,17 +1446,22 @@ export async function reconcileStoreUsdcIntent(
         : null;
     }
     if (verification.state === 'pending') {
-      // 候補 (ページ走査中) は理由を問わず採らない (未払いを解錠しない・terminal にしない)。ただしここで
-      // 再試行に入らず、候補のページ位置を保留して**残りの候補の検証を続ける** — RPC のページ読み取りが混在し、
-      // 先のページに旧 hash (旧フォーク/finality 待ち)・後のページに正規チェーンで支払い済みの replacement が
-      // 返るとき、先の候補で打ち切ると発見済みの replacement が検証されず、同じ応答が続く間は課金済みの購入が
-      // pending のまま残る波及を断つ (Codex 2 回目 P2)。採用できる候補が無ければ呼び出し側が最も早い保留ページから再試行する。
-      if (candidatePageStart !== undefined) return { deferredPageStart: candidatePageStart };
-      // 保存 hash の完全一致 receipt が finality 待ち ('finality') なら、同じ hash の再探索は不要。
-      // receipt 欠落 ('receipt') と「receipt のブロックが今の正規チェーンに無い」('canonical'・旧フォーク) の
-      // 保存 hash は replacement 探索へ進める — 同じ nonce の replacement が正規チェーンで支払い済みなのに、
-      // 古い receipt を返し続ける RPC のせいで課金済みの購入を解錠できない波及を断つ (Codex 1 回目 P2)。
-      return verification.reason === 'finality' ? retry() : null;
+      // 候補 (ページ走査中) は理由を問わず採らない (未払いを解錠しない・terminal にしない)。ここで再試行に入らず
+      // **残りの候補の検証を続ける** — RPC のページ読み取りが混在し、先のページに旧 hash・後のページに正規チェーンで
+      // 支払い済みの replacement が返るとき、先の候補で打ち切ると発見済みの replacement が検証されず、同じ応答が
+      // 続く間は課金済みの購入が pending のまま残る波及を断つ (Codex 2 回目 P2)。
+      //   - 'canonical' (正規ブロックが取れて hash が違う = 旧フォークと確定) は無効な候補として飛ばす (保留しない)。
+      //     保留すると旧フォーク候補を返し続ける早いページへ毎回巻き戻り、ページ上限より先の replacement に届かない
+      //     (Codex 4 回目 P2)。cursor はいずれ latest を越えて anchor へ戻るので、見失いはしない。
+      //   - 'finality' / 'receipt' / 'unverified' (正規と一致・または判別不能) は候補のページ位置を保留し、採用できる
+      //     候補が無ければ呼び出し側が最も早い保留ページから再試行する (巻き戻し回数には上限)。
+      if (candidatePageStart !== undefined) {
+        return verification.reason === 'canonical' ? null : { deferredPageStart: candidatePageStart };
+      }
+      // 保存 hash が confirmed で確定しない (finality 待ち・照合不能・旧フォーク・receipt なし) ときは、理由を問わず
+      // 同じ回で replacement の探索も走らせる — 保存 hash の待ちが探索を止めない (Codex 4 回目 P2)。replacement が
+      // confirmed で見つかればそれで確定し、どちらも確定しなければ保存 hash は保持したまま次回。
+      return null;
     }
     if (intent.txHash !== txHash) {
       const adopted = await adoptReconciledTransaction({ intent, txHash, now });
@@ -1481,9 +1504,12 @@ export async function reconcileStoreUsdcIntent(
   const latest = await readStoreUsdcAnchorBlock(headClient);
   if (latest === null) return retry();
   const anchor = BigInt(intent.anchorBlock);
+  const cursor = intent.reconcileFromBlock ? BigInt(intent.reconcileFromBlock) : anchor;
+  // 走査が実際に始まるページ (anchor より前の cursor は anchor に寄せられる)。巻き戻しの判定に使う。
+  const scanStart = cursor < anchor ? anchor : cursor;
   const scan = await scanReconcileBlockPages({
     anchor,
-    fromBlock: intent.reconcileFromBlock ? BigInt(intent.reconcileFromBlock) : anchor,
+    fromBlock: cursor,
     latest,
     pageBlocks: STORE_USDC_RECONCILE_PAGE_BLOCKS,
     maxPages: STORE_USDC_RECONCILE_MAX_PAGES,
@@ -1501,6 +1527,8 @@ export async function reconcileStoreUsdcIntent(
   // 候補は走査順 (早いページから) に並ぶので、最初に保留した候補のページが最も早い再試行位置。
   let deferredPageStart: bigint | undefined;
   for (const [txHash, candidatePageStart] of scan.candidates) {
+    // 保存 hash はこの回の冒頭で検証済み (次回も保存 hash として直接検証される) — 候補としては読み直さない。
+    if (txHash === intent.txHash) continue;
     const resolved = await finalizeCandidate(txHash, candidatePageStart);
     if (resolved === null) continue;
     if ('deferredPageStart' in resolved) {
@@ -1511,8 +1539,12 @@ export async function reconcileStoreUsdcIntent(
     if ('retryFromPage' in resolved) return retry(deferredPageStart ?? resolved.retryFromPage);
     return resolved;
   }
-  // 採用できる候補が無ければ、保留した候補の最も早いページから (保留が無ければ走査の続きから) 再試行する。
-  return retry(deferredPageStart ?? scan.nextFromBlock);
+  // 採用できる候補が無ければ、保留した候補の最も早いページから再試行する (保留が無ければ走査の続きへ・巻き戻し回数は消す)。
+  if (deferredPageStart === undefined) return retry(scan.nextFromBlock, 0);
+  // 同じ保留ページへの巻き戻しが連続で上限に達したら、その回は走査の続きへ前進する (採否は pending のまま・terminal にしない)。
+  const rewinds = deferredPageStart === scanStart ? (intent.reconcileRewinds ?? 0) + 1 : 1;
+  if (rewinds > STORE_USDC_RECONCILE_MAX_REWINDS) return retry(scan.nextFromBlock, 0);
+  return retry(deferredPageStart, rewinds);
 }
 
 // 両 ZSET の型/score を書込前に検査し、隔離先の障害が pending 証拠の消失へ波及しないようにする。

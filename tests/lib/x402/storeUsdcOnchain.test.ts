@@ -312,14 +312,14 @@ describe('Store USDC on-chain entitlement gate', () => {
       ).resolves.toEqual({ ok: true, state: 'pending', reason: 'canonical' });
     });
 
-    it('高さが足りず正規ブロックも取れない (旧フォークか未到達か判別不能) は finality 待ちに倒す', async () => {
+    it('高さが足りず正規ブロックも取れない (旧フォークか未到達か判別不能) は finality と区別して unverified', async () => {
       await expect(
         verifyStoreUsdcOnchain({
           intent: intent(),
           txHash: TX,
           client: client({ safe: null, latest: 113n, canonicalHash: 'error' }),
         }),
-      ).resolves.toEqual({ ok: true, state: 'pending', reason: 'finality' });
+      ).resolves.toEqual({ ok: true, state: 'pending', reason: 'unverified' });
     });
 
     it('正規ブロックの照会が落ちたら rpc_unavailable (confirmed にも pending にもしない)', async () => {
