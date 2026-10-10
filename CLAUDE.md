@@ -15,7 +15,7 @@ npm run build            # next build (page export 検査を含む・下記参�
 node scripts/audit-gate.mjs   # CI と同一の npm audit 判定
 node scripts/lockfile-gate.mjs # CI と同一の依存取得元判定 (公式 npm レジストリのみ)
 node scripts/dev-shot.mjs     # dev/prod サーバの実機スクショ (mobile/desktop・print 対応)
-node scripts/ci-wait.mjs <PR> # PR の CI settle 待ち+conclusion 判定 (--once/--timeout 分)
+node scripts/ci-wait.mjs <PR> # PR の CI settle 待ち+conclusion 判定 (--once/--timeout 分/--head <sha>)
 ```
 
 ## 不変ルール（違反すると壊れる順）
@@ -56,12 +56,12 @@ node scripts/ci-wait.mjs <PR> # PR の CI settle 待ち+conclusion 判定 (--onc
 **作業の型**（モデルの記憶力に頼らない）:
 
 - git/gh の状態確認は `コマンド > ファイル` → Read で読む。**自分の記憶や「成功したはず」を根拠にしない**（Fable ですら幻覚した実績あり・2026-07-06）
-- CI 待ちは `node scripts/ci-wait.mjs <PR番号>`（settle まで待って conclusion 一覧を出す・全 SUCCESS で exit 0）→ 出力ファイルを Read → **HEAD 一致と nonSUCCESS=0 を確認してから** merge
+- CI 待ちは `node scripts/ci-wait.mjs <PR番号>`（settle まで待って conclusion 一覧を出す・期待 check（`scripts/ci-expected-checks.json`）が全部そろって SUCCESS で exit 0）→ 出力ファイルを Read → **HEAD 一致と nonSUCCESS=0・missing=0 を確認してから** merge。PR の check を足す/外すときは JSON も更新する（workflow とのドリフトは CI の検査が落とす）
 - 迷ったら「最小の可逆な一歩」を選び、不可逆な一歩の前でだけ止まる
 
 ## PR / 検証の型
 
-- ブランチ → conventional commit → push → `gh pr create` → CI 待ち（上記「作業の型」の `scripts/ci-wait.mjs`・HEAD 一致と nonSUCCESS=0 を確認）→ squash merge → main 同期。
+- ブランチ → conventional commit → push → `gh pr create` → CI 待ち（上記「作業の型」の `scripts/ci-wait.mjs`・HEAD 一致と nonSUCCESS=0・missing=0 を確認）→ squash merge → main 同期。
 - コミット trailer: `Co-Authored-By` と `Claude-Session`（エージェント作業時）。
 - UI 変更は実機スクショで検証（`scripts/dev-shot.mjs`）。印刷面（ポスター/kit）は `emulateMedia('print')` で A4 フィット（scrollHeight ≤ viewport）まで確認。
 - **page ファイルを含む変更の検証には `npm run build` を含める**（掟 3 の検出はこれのみ）。
