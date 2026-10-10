@@ -47,21 +47,21 @@
       "groupName": "test-stack"
     },
     {
-      "description": "TypeScript / @types/node はマイナー以下を automerge",
+      "description": "TypeScript / @types/node のマイナー以下 (自動 merge はしない・merge は user の明示)",
       "matchPackageNames": ["typescript", "@types/node"],
-      "automerge": true,
+      "automerge": false,
       "matchUpdateTypes": ["minor", "patch"]
     },
     {
-      "description": "ESLint 関連は automerge minor 以下",
+      "description": "ESLint 関連のマイナー以下 (自動 merge はしない・merge は user の明示)",
       "matchPackageNames": ["eslint"],
-      "automerge": true,
+      "automerge": false,
       "matchUpdateTypes": ["minor", "patch"]
     },
     {
-      "description": "GitHub Actions は最新追従",
+      "description": "GitHub Actions は最新追従 (自動 merge はしない・merge は user の明示)",
       "matchManagers": ["github-actions"],
-      "automerge": true,
+      "automerge": false,
       "matchUpdateTypes": ["minor", "patch"]
     }
   ],
