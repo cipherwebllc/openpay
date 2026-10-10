@@ -30,7 +30,13 @@
 //    この bridge を通さない fake fetch テストで行う。
 // 5. Lua 数値をコマンド引数に渡すと実 Redis は整数へ切り捨てて文字列化する。ここでも同じ
 //    挙動を実装しているが、丸めモードの端の差は保証しない。
+//
+// ## 実行した本文の記録 (opt-in)
+// 環境変数 LUA_EXEC_RECORD_DIR (OS の tmpdir 配下の既存ディレクトリ) があれば、runRedisLua (fakeUpstashFetch の
+// EVAL も含む) が実行した本文と sha256・test file を記録する。既定は無効。形式と使い方は scripts/lib/luaExecRecord.mjs。
+import { expect } from 'vitest';
 import { LuaFactory } from 'wasmoon';
+import { luaExecRecordDir, recordLuaExecution } from '../../scripts/lib/luaExecRecord.mjs';
 
 // Redis が Lua に返す値の形。status reply は {ok=...}、error reply は {err=...}。
 type RedisReply =
@@ -635,6 +641,9 @@ export function runRedisLua(
   store: FakeRedisStore,
 ): Promise<RedisLuaValue> {
   const run = queue.then(async () => {
+    // opt-in の記録 (既定は無効)。成否に関わらず「送られた本文」を数えるので、実行の前に書く。
+    const recordDir = luaExecRecordDir();
+    if (recordDir) recordLuaExecution(recordDir, script, expect.getState().testPath);
     // Wasmoon 1.16 の doString は返り値を global の Lua stack に残す。同じ engine を使い続けると
     // 蓄積した返り値が stack の範囲外書き込みを起こし、WASM heap を壊す。
     // heap は factory が所有するため、factory と engine を EVAL ごとに隔離し、stack の蓄積や
