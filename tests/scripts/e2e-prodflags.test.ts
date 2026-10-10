@@ -32,7 +32,7 @@ describe('production-flag Playwright coverage (F13)', () => {
     const vector = job!.indexOf('e2e/prodFlags.env');
     const exportEnv = job!.indexOf('"$GITHUB_ENV"');
     const build = job!.indexOf('run: npm run build');
-    const specs = job!.indexOf('npx playwright test --config=playwright.prodflags.config.ts');
+    const specs = job!.indexOf('npx --no playwright test --config=playwright.prodflags.config.ts');
     expect(vector).toBeGreaterThan(-1);
     expect(exportEnv).toBeGreaterThan(vector);
     expect(build).toBeGreaterThan(exportEnv);
