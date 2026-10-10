@@ -368,6 +368,45 @@ describe('vanillaGate Arc rail (Circle Gateway)', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  // 第 7 回レビュー B5: 肯定・否定が混在する非 2xx 応答 (verify の否定語 isValid:false と settle の肯定語
+  // success:true が同居する等) は「否定判定」として通すと、後段が endpoint ごとの肯定語だけを見て解錠する。
+  // 肯定判定を運べるのは 2xx 経路だけ — 非 2xx は endpoint の否定語があり、かつ両肯定語とも true でないときだけ判定。
+  it('Gateway settle 4xx + {isValid:false, success:true} (混在) は判定にしない → 503・解錠も台帳もなし', async () => {
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url.endsWith('/verify')) return { ok: true, status: 200, json: async () => ({ isValid: true, payer: PAYER }) };
+      return { ok: false, status: 400, json: async () => ({ isValid: false, success: true, transaction: 'x' }) };
+    });
+    const res = await pay(ARC_ACCEPT, '0x1b');
+    expect(res.status).toBe(503);
+    expect((await res.json()).error).toBe('payment_facility_unavailable');
+    expect(res.headers.get('PAYMENT-RESPONSE')).toBeNull();
+    expect(ledger.record).not.toHaveBeenCalled();
+  });
+
+  it('Gateway verify 4xx + {isValid:true, success:false} (混在) も判定にしない → 503・content/settle は走らない', async () => {
+    fetchMock.mockResolvedValue({ ok: false, status: 400, json: async () => ({ isValid: true, success: false, payer: PAYER }) });
+    const content = vi.fn(() => NextResponse.json({ ok: true }));
+    const res = await handleVanillaPaidGet(
+      new Request(RESOURCE.resourceUrl, { headers: { 'PAYMENT-SIGNATURE': v2Header(ARC_ACCEPT, '0x1c') } }),
+      RESOURCE,
+      content,
+    );
+    expect(res.status).toBe(503);
+    expect(content).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(ledger.record).not.toHaveBeenCalled();
+  });
+
+  it('Gateway 4xx の素直な否定判定 (settle {success:false}) は従来どおり 402 に透過', async () => {
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url.endsWith('/verify')) return { ok: true, status: 200, json: async () => ({ isValid: true, payer: PAYER }) };
+      return { ok: false, status: 400, json: async () => ({ success: false, errorReason: 'insufficient_balance' }) };
+    });
+    const res = await pay(ARC_ACCEPT, '0x1d');
+    expect(res.status).toBe(402);
+    expect((await res.json()).error).toBe('insufficient_balance');
+  });
+
   it('settle 応答の network エコーは Arc では無視し、ローカルの eip155:5042002 を台帳/応答に使う', async () => {
     fetchMock.mockImplementation(async (url: string) => ({
       ok: true,

@@ -73,6 +73,18 @@ export const STORE_USDC_RECONCILE_RETRY_MS = 30_000;
 export const STORE_USDC_RECONCILE_BATCH_SIZE = 50;
 export const STORE_USDC_RECONCILE_PAGE_BLOCKS = 2_000n;
 export const STORE_USDC_RECONCILE_MAX_PAGES = 20;
+/**
+ * 保留候補 (ログで見つかったが confirmed にならなかった同じ nonce の tx hash) を intent に持つ件数の上限。保留候補は
+ * 走査の cursor とは別に毎回再検証するので、cursor は前進だけで巻き戻さない (Codex 5 回目 P2)。
+ *
+ * 溢れは起き得ない前提の器: 候補は (authorizer, nonce) の AuthorizationUsed なので、整合したチェーンでは 1 件しか
+ * 存在しない。複数になるのは旧フォークや不整合な RPC が幻のログを返すときだけで、未確定の候補が上限を超えて並ぶのは
+ * 1 つの nonce に対して幻のログが返り続ける異常時に限る。溢れたら、入れられなかった候補を見失わない側に倒して
+ * cursor をその候補のページに留める — その間はそのページから 1 回分の走査範囲より先へ進めない (その先の支払いは
+ * 保留候補が外れるまで照合されない)。既知の制限として受け入れ、溢れた回は logger.warn
+ * (creator_store.usdc_purchase_deferred_overflow) で人が気づけるようにする (Codex 6 回目 P2)。
+ */
+export const STORE_USDC_RECONCILE_MAX_DEFERRED = 8;
 
 const INTENT_RE = /^0x[0-9a-f]{64}$/;
 const HASH_RE = /^[0-9a-f]{64}$/;
@@ -162,7 +174,21 @@ type StoreUsdcIntentBase = {
   bindingHash: string;
   nextReconcileAt?: number;
   reconcileFromBlock?: string;
+  /**
+   * 保留候補: ログで見つかったがまだ confirmed にならない (finality 待ち・receipt 未取得・照合不能・読み取り障害) 同じ
+   * nonce の tx hash (小文字・重複なし・上限 STORE_USDC_RECONCILE_MAX_DEFERRED)。reconcile 専用の可変メタで binding に
+   * 含めない。毎回 cursor と独立に再検証し、採用は confirmed のときだけ。
+   */
+  reconcileDeferred?: Hex[];
+  /**
+   * 予算付き (cron) で保留候補がある回に先に行う側。その回が終わると反対側に反転して保存する (省略 = 'deferred')。
+   * reconcile 専用の可変メタで binding に含めない。
+   */
+  reconcileTurn?: StoreUsdcReconcileTurn;
 };
+
+/** 予算付きで保留候補がある回の優先順: 'deferred' = 保留候補の再検証を先に / 'scan' = 走査を先に。 */
+export type StoreUsdcReconcileTurn = 'deferred' | 'scan';
 
 export type QuotedStoreUsdcIntent = StoreUsdcIntentBase & { state: 'quoted' };
 type ClaimedStoreUsdcIntentBase = StoreUsdcIntentBase & {
@@ -230,7 +256,24 @@ export function storeUsdcNonce(intentSalt: Hex): Hex {
   );
 }
 
-function binding(value: Omit<StoreUsdcIntentBase, 'bindingHash' | 'nextReconcileAt' | 'reconcileFromBlock'>): string {
+/**
+ * 保留候補の列: 1 件以上・小文字 tx hash・重複なし・上限件数。壊れた値は corrupt (null)。空の列は書かない (reschedule が
+ * 消す) ので受け付けない — Lua の cjson は空の配列を `{}` に encode し直すため、空の列を許すと採用 CAS を通った intent が
+ * 壊れた値として読まれる。
+ */
+function parseReconcileDeferred(value: unknown): Hex[] | null {
+  if (!Array.isArray(value) || value.length === 0 || value.length > STORE_USDC_RECONCILE_MAX_DEFERRED) return null;
+  const hashes: Hex[] = [];
+  for (const item of value) {
+    if (typeof item !== 'string' || !TX_RE.test(item) || hashes.includes(item as Hex)) return null;
+    hashes.push(item as Hex);
+  }
+  return hashes;
+}
+
+function binding(
+  value: Omit<StoreUsdcIntentBase, 'bindingHash' | 'nextReconcileAt' | 'reconcileFromBlock' | 'reconcileDeferred' | 'reconcileTurn'>,
+): string {
   return canonicalHash(value);
 }
 
@@ -278,6 +321,9 @@ function parseBase(value: Record<string, unknown>): StoreUsdcIntentBase | null {
   const reconcileFromBlock = value.reconcileFromBlock === undefined
     ? undefined
     : canonicalDecimal(value.reconcileFromBlock);
+  const reconcileDeferred = value.reconcileDeferred === undefined
+    ? undefined
+    : parseReconcileDeferred(value.reconcileDeferred);
   const authorizationValidBeforeMax = canonicalDecimal(
     value.authorizationValidBeforeMax,
   );
@@ -313,7 +359,9 @@ function parseBase(value: Record<string, unknown>): StoreUsdcIntentBase | null {
     authorizationValidBeforeMax === null ||
     typeof value.bindingHash !== 'string' ||
     !HASH_RE.test(value.bindingHash) ||
-    (value.nextReconcileAt !== undefined && !safeTimestamp(value.nextReconcileAt))
+    (value.nextReconcileAt !== undefined && !safeTimestamp(value.nextReconcileAt)) ||
+    reconcileDeferred === null ||
+    (value.reconcileTurn !== undefined && value.reconcileTurn !== 'deferred' && value.reconcileTurn !== 'scan')
   ) {
     return null;
   }
@@ -345,10 +393,14 @@ function parseBase(value: Record<string, unknown>): StoreUsdcIntentBase | null {
       ? {}
       : { nextReconcileAt: value.nextReconcileAt }),
     ...(reconcileFromBlock === undefined ? {} : { reconcileFromBlock }),
+    ...(reconcileDeferred === undefined ? {} : { reconcileDeferred }),
+    ...(value.reconcileTurn === undefined ? {} : { reconcileTurn: value.reconcileTurn as StoreUsdcReconcileTurn }),
   };
   const immutable = { ...base };
   delete immutable.nextReconcileAt;
   delete immutable.reconcileFromBlock;
+  delete immutable.reconcileDeferred;
+  delete immutable.reconcileTurn;
   const { bindingHash, ...withoutHash } = immutable;
   if (
     base.contentRef !== hostedContentKey(base.resourceId, base.contentRevision) ||
@@ -1290,6 +1342,8 @@ async function reschedule(
   raw: string,
   now: number,
   fromBlock?: bigint,
+  deferred?: readonly Hex[],
+  turn?: StoreUsdcReconcileTurn,
 ): Promise<void> {
   if (
     intent.state === 'settled' ||
@@ -1298,14 +1352,23 @@ async function reschedule(
   ) {
     return;
   }
-  const updated = await casIntent({
-    currentRaw: raw,
-    next: {
-      ...intent,
-      nextReconcileAt: now + STORE_USDC_RECONCILE_RETRY_MS,
-      ...(fromBlock === undefined ? {} : { reconcileFromBlock: fromBlock.toString() }),
-    },
-  });
+  const next: StoreUsdcIntent = {
+    ...intent,
+    nextReconcileAt: now + STORE_USDC_RECONCILE_RETRY_MS,
+    ...(fromBlock === undefined ? {} : { reconcileFromBlock: fromBlock.toString() }),
+  };
+  // 保留候補は候補の照合まで進んだ回だけ更新する (undefined = 今回は触らない・空 = 消す)。交替の印は予算付きで保留候補が
+  // ある回だけ反転して保存し (undefined = 触らない)、保留候補が無くなったら意味を持たないので一緒に消す。
+  if (turn !== undefined) next.reconcileTurn = turn;
+  if (deferred !== undefined) {
+    if (deferred.length > 0) {
+      next.reconcileDeferred = [...deferred];
+    } else {
+      delete next.reconcileDeferred;
+      delete next.reconcileTurn;
+    }
+  }
+  const updated = await casIntent({ currentRaw: raw, next });
   if (updated === 'storage') {
     // 再試行時刻の保存失敗を既存の pending 応答の 503 化へ波及させない。
     // 支払いは未確定のままで、元の pending member を残し、失敗は監視へ記録する。
@@ -1314,13 +1377,32 @@ async function reschedule(
 }
 
 type ReconcileStoreUsdcResult =
-  | { ok: true; state: 'settled' | 'pending' | 'failed' }
+  | { ok: true; state: 'settled' | 'failed' }
+  // finalizeStorageError = 保存済み hash の finalize が storage を返した回 (応答は pending のまま・batch は障害として数える)。
+  | { ok: true; state: 'pending'; finalizeStorageError?: true }
   | { ok: false; reason: 'not_found' | 'storage' | 'corrupt' };
+
+type ReconcileObservation = { finalizeStorage: boolean };
 
 export async function reconcileStoreUsdcIntent(
   intentSalt: Hex,
   // deadline = 経過時間の予算 (epoch ms・第 7 回レビュー B4)。到達後はページを取りに行かず途中 cursor を保存する。
   input: { now?: number; client?: StoreUsdcPublicClient; deadline?: number } = {},
+): Promise<ReconcileStoreUsdcResult> {
+  const observed: ReconcileObservation = { finalizeStorage: false };
+  const result = await reconcileStoreUsdcIntentOnce(intentSalt, input, observed);
+  // 保存済み hash の finalize が storage を返した回は、replacement の探索を続けた後の保存が成功して pending を返しても
+  // 障害の印を消さない。キー単位の KV 障害 (ownership の GET だけ失敗する等) は後の保存の CAS では現れず、印が無いと
+  // cron の集計にも警告にも出ないまま、支払い済みの購入が解錠されずに残る (Codex 12 回目 P2)。
+  return observed.finalizeStorage && result.ok && result.state === 'pending'
+    ? { ...result, finalizeStorageError: true }
+    : result;
+}
+
+async function reconcileStoreUsdcIntentOnce(
+  intentSalt: Hex,
+  input: { now?: number; client?: StoreUsdcPublicClient; deadline?: number },
+  observed: ReconcileObservation,
 ): Promise<ReconcileStoreUsdcResult> {
   const read = await readIntent(intentSalt);
   if (!read.ok) return { ok: false, reason: read.reason };
@@ -1331,8 +1413,12 @@ export async function reconcileStoreUsdcIntent(
   if (intent.state === 'failed_prebroadcast') return { ok: true, state: 'failed' };
   if (intent.state === 'quoted') return { ok: true, state: 'pending' };
   const now = input.now ?? Date.now();
-  const retry = async (fromBlock?: bigint): Promise<ReconcileStoreUsdcResult> => {
-    await reschedule(intent, raw, now, fromBlock);
+  const retry = async (
+    fromBlock?: bigint,
+    deferred?: readonly Hex[],
+    turn?: StoreUsdcReconcileTurn,
+  ): Promise<ReconcileStoreUsdcResult> => {
+    await reschedule(intent, raw, now, fromBlock, deferred, turn);
     return { ok: true, state: 'pending' };
   };
   // deadline 付き (cron) では全 RPC の直前に残り時間を見る (第 7 回レビュー B4 follow-up 2): null = 始めずに進捗を
@@ -1402,13 +1488,28 @@ export async function reconcileStoreUsdcIntent(
     raw = JSON.stringify(consumed);
   }
 
-  const finalizeCandidate = async (
-    txHash: Hex,
-    candidatePageStart?: bigint,
-  ): Promise<ReconcileStoreUsdcResult | null> => {
-    // 候補 1 件の照合の前に残り時間を見る。足りなければ照合せず、候補のページ (保存済み hash なら現 cursor) から延期。
+  // 保留候補の作業用の列 (この回で読み取った確定前の候補を足し、結論が出た候補を外す)。retry に渡して保存する。
+  const deferred: Hex[] = [...(intent.reconcileDeferred ?? [])];
+  // この回で照合済みの hash (保存 hash・保留候補・走査の候補)。同じ回に走査で再び見つかっても読み直さない。
+  const verified = new Set<Hex>();
+  const defer = (txHash: Hex): boolean => {
+    if (deferred.includes(txHash)) return true;
+    if (deferred.length >= STORE_USDC_RECONCILE_MAX_DEFERRED) return false;
+    deferred.push(txHash);
+    return true;
+  };
+  const undefer = (txHash: Hex): void => {
+    const index = deferred.indexOf(txHash);
+    if (index >= 0) deferred.splice(index, 1);
+  };
+  // 候補 1 件の結論: 結果 (settled / storage 等) / 'defer' = まだ確定しない (保留候補として次回も再検証) /
+  // 'skip' = この候補は採れない (旧フォーク確定・証拠不一致・revert 等。保留から外す) / 'budget' = 残り時間がなく照合していない。
+  type CandidateOutcome = ReconcileStoreUsdcResult | 'defer' | 'skip' | 'budget';
+  const finalizeCandidate = async (txHash: Hex): Promise<CandidateOutcome> => {
+    // 候補 1 件の照合の前に残り時間を見る。足りなければ照合せず、呼び出し側が進捗を保存して次回へ。
     const verifyClient = rpcClient();
-    if (verifyClient === null) return retry(candidatePageStart);
+    if (verifyClient === null) return 'budget';
+    verified.add(txHash);
     // 旧 hash の欠落/revert が replacement の探索を止める波及を断つ。
     // ログの hash だけでは採用せず、nonce・Transfer・finality・global claim を照合する。
     const verification = await verifyStoreUsdcOnchain({
@@ -1416,19 +1517,18 @@ export async function reconcileStoreUsdcIntent(
       txHash,
       ...clientArg(verifyClient),
     });
-    // 候補の一時障害で証拠のページを飛ばすと、daily head が探索予算より速く進む間は
-    // 再発見できない。entitlement 未付与への波及を断つため、そのページから再試行する。
-    if (!verification.ok) {
-      return verification.reason === 'rpc_unavailable' && candidatePageStart !== undefined
-        ? retry(candidatePageStart)
-        : null;
-    }
+    // 読み取り障害 (RPC / claim) の候補は捨てず保留候補として保持し、残りの候補の照合を続けてから共通の処理へ進む
+    // (即時中断して候補のページへ戻ると、先に保留した候補と後の障害が組み合わさって cursor が前進せず、ページ上限より
+    // 先の replacement を一度も検証できない・Codex 5 回目 P2)。それ以外の ok:false は結論 (採れない)。
+    if (!verification.ok) return verification.reason === 'rpc_unavailable' ? 'defer' : 'skip';
     if (verification.state === 'pending') {
-      // 保存 hash の完全一致 receipt が finality 待ちなら、同じ hash の再探索は不要。
-      // receipt 欠落の保存 hash は replacement 探索へ進める。
-      return candidatePageStart !== undefined || verification.reason === 'finality'
-        ? retry(candidatePageStart)
-        : null;
+      // 採らない (未払いを解錠しない・terminal にしない)。
+      //   - 'canonical' (正規ブロックが取れて hash が違う = 旧フォークと確定) は無効な候補 → 'skip' (保留しない)。
+      //   - 'finality' / 'receipt' / 'unverified' (正規と一致・または判別不能) → 'defer'。保留候補は走査の cursor とは別に
+      //     毎回再検証するので、cursor は前進だけで巻き戻さず、前進後に receipt が読めるようになっても見失わない
+      //     (Codex 5 回目 P2: 「いずれ anchor へ戻る」は head が 1 日の走査量より速く伸びると成り立たない)。
+      //   保存済み hash はここを通らず finalize に直接渡し、確定しなければ同じく replacement の探索へ進む (Codex 4 回目 P2)。
+      return verification.reason === 'canonical' ? 'skip' : 'defer';
     }
     if (intent.txHash !== txHash) {
       const adopted = await adoptReconciledTransaction({ intent, txHash, now });
@@ -1445,7 +1545,7 @@ export async function reconcileStoreUsdcIntent(
       return { ok: true, state: 'pending' };
     };
     // finalize 内の再照合は照合時の client を使い回さず、その時点の残り時間で予算を計算し直す (B4 follow-up 3)。
-    // 予算が無ければ採用済み hash のまま次回へ (次回は保存 hash の照合から finalize に進む)。
+    // 予算が無ければ採用済み hash のまま次回へ (次回は保存 hash として finalize に直接渡す)。
     const finalizeClient = rpcClient();
     if (finalizeClient === null) return rescheduleLatest();
     const finalized = await finalizeStoreUsdcPurchase({
@@ -1461,37 +1561,150 @@ export async function reconcileStoreUsdcIntent(
     return rescheduleLatest();
   };
 
+  // 1) 保存済み hash (採用済み)。reconcile の側で照合してから finalize を呼ぶと、finalize が同じ照合 (receipt・finality・
+  //    正規ブロック・global claim) をもう一度行い、1 回の予算で照合を 2 回分払う。各 RPC が普通に遅いだけで 2 回目が期限で
+  //    中断し、次回も保存 hash から同じことを繰り返して確定しない (Codex 11 回目 P2)。採用済みの hash は採用の CAS が不要
+  //    なので、finalize をそのまま呼んで照合を 1 回にする (finalize の検査と確定 CAS はそのまま)。
+  //    confirmed なら確定。それ以外 (finality 待ち・照合不能・旧フォーク・証拠の不一致・読み取り障害・期限切れ) は保存 hash を
+  //    保持したまま、同じ回で replacement の探索へ進む — finalize の 'storage' は照合の読み取り障害も含むので、保存 hash の
+  //    待ちが探索を止めないよう探索へ進める。'storage' は探索とは独立に記録し (warn・batch の storageErrors)、後の保存が
+  //    成功しても消さない (Codex 12 回目 P2)。intent そのものの欠落/破損 (not_found / corrupt) だけはそのまま返す。
   if (intent.txHash) {
-    const resolved = await finalizeCandidate(intent.txHash);
+    const storedHash = intent.txHash;
+    const finalizeClient = rpcClient();
+    if (finalizeClient === null) return retry();
+    verified.add(storedHash);
+    const finalized = await finalizeStoreUsdcPurchase({
+      intentSalt,
+      txHash: storedHash,
+      now,
+      ...clientArg(finalizeClient),
+    });
+    if (finalized.ok) return { ok: true, state: 'settled' };
+    if (finalized.reason === 'not_found' || finalized.reason === 'corrupt') {
+      return { ok: false, reason: finalized.reason };
+    }
+    if (finalized.reason === 'storage') {
+      observed.finalizeStorage = true;
+      // 監視の記録の失敗を replacement の探索と進捗の保存 (照合の本体) へ波及させない。
+      try {
+        logger.warn('creator_store.usdc_purchase_finalize_storage_failed', { intentSalt });
+      } catch {
+        // 記録できなくても探索は続ける (上記の波及を断つ)。
+      }
+    }
+    // 保存 hash は保留候補の列に入れない (次回も保存 hash として直接 finalize に渡す)。
+    undefer(storedHash);
+  }
+  // 2) 保留候補 (前回までにログで見つかった確定前の候補) を cursor と独立に再検証する。confirmed があればそれで確定。
+  // 遅い候補 (receipt の timeout 等) が後続の候補を毎回待たせる波及を断つ (Codex 6 回目 P2): round robin — 照合して
+  // 未確定だった候補は列の末尾へ回す。予算で途中終了しても、次回は未照合の候補から始まる。
+  const verifyDeferred = async (): Promise<ReconcileStoreUsdcResult | null> => {
+    for (const txHash of [...deferred]) {
+      if (verified.has(txHash)) continue;
+      const resolved = await finalizeCandidate(txHash);
+      // 予算の終わり。残りの候補は列の先頭に残り、次回に先に照合される。
+      if (resolved === 'budget') break;
+      undefer(txHash);
+      if (resolved === 'skip') continue;
+      if (resolved === 'defer') { deferred.push(txHash); continue; }
+      return resolved;
+    }
+    return null;
+  };
+
+  // 3) 走査 (cursor から前進のみ)。
+  // 保留候補の列が溢れて入れられなかった候補のページ (走査順なので最初の 1 件が最も早い)。溢れたときだけ cursor をそこに留める。
+  let overflowPageStart: bigint | undefined;
+  // 結論 (確定・storage 等) か、保存する cursor (undefined = 走査を始められず cursor は今のまま)。
+  const scanCandidates = async (): Promise<ReconcileStoreUsdcResult | { fromBlock?: bigint }> => {
+    const headClient = rpcClient();
+    if (headClient === null) return {};
+    const latest = await readStoreUsdcAnchorBlock(headClient);
+    if (latest === null) return {};
+    const anchor = BigInt(intent.anchorBlock);
+    const cursor = intent.reconcileFromBlock ? BigInt(intent.reconcileFromBlock) : anchor;
+    const scan = await scanReconcileBlockPages({
+      anchor,
+      fromBlock: cursor,
+      latest,
+      pageBlocks: STORE_USDC_RECONCILE_PAGE_BLOCKS,
+      maxPages: STORE_USDC_RECONCILE_MAX_PAGES,
+      ...(input.deadline === undefined ? {} : { pageBudget: () => rpcCallOptions(input.deadline) ?? null }),
+    }, (fromBlock, toBlock, options) => findStoreUsdcAuthorizationTransactions({
+      payer: intent.claim.payer,
+      nonce: intent.nonce,
+      fromBlock,
+      toBlock,
+      ...(input.client ? { client: input.client } : {}),
+      ...(options ? { budget: options } : {}),
+    }));
+    // 途中ページの RPC 障害/timeout では、取得済みページの候補を照合してから失敗したページの先頭 (nextFromBlock) を
+    // cursor に保存する (未検証の候補を飛ばさず、同じ範囲での停滞もしない・B4 follow-up 2)。
+    for (const [txHash, candidatePageStart] of scan.candidates) {
+      // 保存 hash と照合済みの保留候補 (結論が出て外した候補も) は読み直さない。この回にまだ照合していない保留候補も
+      // 走査の予算で読み直さず、保留候補の順番 (round robin・交替) を待つ。
+      if (verified.has(txHash) || deferred.includes(txHash)) continue;
+      const resolved = await finalizeCandidate(txHash);
+      if (resolved === 'skip') continue;
+      // 'budget' = 走査で見つけたが残り時間がなく照合していない候補。cursor をそのページへ戻すだけだと、取得済みの
+      // 候補を捨てて次回も同じページの取得から始め、ログ取得の後に照合の時間が残らない遅延が続く限り同じページで
+      // 停滞する (Codex 9 回目 P2)。照合前の候補も保留候補として持ち越し (次回は保留候補として照合・採用は confirmed
+      // のときだけ)、cursor はそのページの先へ進める。列が溢れたときだけ従来どおりそのページに留める。
+      if (resolved === 'defer' || resolved === 'budget') {
+        if (!defer(txHash)) overflowPageStart ??= candidatePageStart;
+        continue;
+      }
+      return resolved;
+    }
+    // 採用できる候補が無ければ cursor を前進させ (溢れた候補があればそのページに留め)、保留候補は次回も再検証する。
+    return { fromBlock: overflowPageStart ?? scan.nextFromBlock };
+  };
+
+  // 保留候補と走査の順序 (保存済み hash の照合は上で先頭に済ませてある)。
+  //   - 予算なし (status route) と保留候補が無い回は、今までどおり保留候補 → 走査を全部。
+  //   - 予算付き (cron) で保留候補がある回は、残り時間に関係なく優先順を回ごとに交替する: intent の印 (reconcileTurn・
+  //     省略 = 'deferred') の側が残りの予算を必要なだけ使い、もう片方は残った時間で始められれば続ける。回の終わりに
+  //     印を反転して保存する。保留候補にも走査にも 2 回に 1 回は全予算の回が来る。
+  //     配分 (残りの半分まで・下限つき等) で分け合うと、どの規則でも遅延の組み合わせ次第で片方の照合が毎回枠に収まらず
+  //     (例: 正規の候補の照合に 6 秒要るのに保留候補の枠が毎回 5.5 秒)、支払い済みの購入が cron で確定しなかった
+  //     (Codex 6〜10 回目 P2)。
+  //   - 既知の制限: 1 回の照合で RPC を種類ごとに 1 回ずつ終えられないほど遅い状態が続く間 (head は取れたが getLogs を
+  //     始める時間が無い等) は cron では進まない (head の高さ等の途中結果は持ち越さない)。そのときも pending のままで、
+  //     誤った確定にも未払いの失敗にもならず、買い手の状態確認 (status route = 予算なし) は全部を照合する。
+  let scanFirst = false;
+  let nextTurn: StoreUsdcReconcileTurn | undefined;
+  if (input.deadline !== undefined && deferred.length > 0) {
+    const turn = intent.reconcileTurn ?? 'deferred';
+    scanFirst = turn === 'scan';
+    nextTurn = scanFirst ? 'deferred' : 'scan';
+  }
+  if (!scanFirst) {
+    const resolved = await verifyDeferred();
     if (resolved) return resolved;
   }
-  const headClient = rpcClient();
-  if (headClient === null) return retry();
-  const latest = await readStoreUsdcAnchorBlock(headClient);
-  if (latest === null) return retry();
-  const anchor = BigInt(intent.anchorBlock);
-  const scan = await scanReconcileBlockPages({
-    anchor,
-    fromBlock: intent.reconcileFromBlock ? BigInt(intent.reconcileFromBlock) : anchor,
-    latest,
-    pageBlocks: STORE_USDC_RECONCILE_PAGE_BLOCKS,
-    maxPages: STORE_USDC_RECONCILE_MAX_PAGES,
-    ...(input.deadline === undefined ? {} : { pageBudget: () => rpcCallOptions(input.deadline) ?? null }),
-  }, (fromBlock, toBlock, options) => findStoreUsdcAuthorizationTransactions({
-    payer: intent.claim.payer,
-    nonce: intent.nonce,
-    fromBlock,
-    toBlock,
-    ...(input.client ? { client: input.client } : {}),
-    ...(options ? { budget: options } : {}),
-  }));
-  // 途中ページの RPC 障害/timeout では、取得済みページの候補を照合してから失敗したページの先頭 (nextFromBlock) を
-  // cursor に保存する (未検証の候補を飛ばさず、同じ範囲での停滞もしない・B4 follow-up 2)。
-  for (const [txHash, candidatePageStart] of scan.candidates) {
-    const resolved = await finalizeCandidate(txHash, candidatePageStart);
+  const scanned = await scanCandidates();
+  if ('ok' in scanned) return scanned;
+  if (scanFirst) {
+    const resolved = await verifyDeferred();
     if (resolved) return resolved;
   }
-  return retry(scan.nextFromBlock);
+  // cursor (と保留候補・交替の印) を保存して pending を返す。溢れた回は保存の後に 1 回だけ warn を出す。
+  const rescheduled = await retry(scanned.fromBlock, deferred, nextTurn);
+  if (overflowPageStart !== undefined) {
+    // 溢れは起き得ない前提の異常 (STORE_USDC_RECONCILE_MAX_DEFERRED の説明) なので人が気づけるよう記録する。
+    // 監視の記録の失敗を照合の結果 (保存済みの進捗と pending 応答) や batch の後続 intent へ波及させない。
+    try {
+      logger.warn('creator_store.usdc_purchase_deferred_overflow', {
+        intentSalt: intent.intentSalt,
+        deferred: deferred.length,
+        pageStart: overflowPageStart.toString(),
+      });
+    } catch {
+      // 記録できなくても照合の結果は返す (上記の波及を断つ)。
+    }
+  }
+  return rescheduled;
 }
 
 // 両 ZSET の型/score を書込前に検査し、隔離先の障害が pending 証拠の消失へ波及しないようにする。
@@ -1564,6 +1777,9 @@ export async function reconcilePendingStoreUsdcPurchases(input: {
           reason: result.reason,
         });
       }
+    } else if (result.state === 'pending' && result.finalizeStorageError) {
+      // 応答は pending でも、保存済み hash の finalize の storage は障害として数える (監視から見えなくしない)。
+      summary.storageErrors += 1;
     } else {
       summary[result.state] += 1;
     }

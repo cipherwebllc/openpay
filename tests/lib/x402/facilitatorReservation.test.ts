@@ -116,7 +116,57 @@ describe('x402 facilitator reservation', () => {
     expect(memory.set.mock.calls[0][2]).toEqual({ nx: true, ttlSec: 600 });
   });
 
-  it('binds the reservation token to stable resource and payment JSON', async () => {
+  // 第 7 回レビュー B14: 予約が束縛するのは key (chainId/from/nonce)・resource・token だけ。かつて保存していた
+  // paymentHash (payload+requirements の SHA-256) は consume の照合に使われない見せかけの防御だったので持たない。
+  // 金額・受取先・期限は EIP-712 署名と settle の server 権威 fee 照合が守る (予約の仕事ではない)。
+  it('stores only the fields consume checks (resource・token) under the chain/from/nonce key — no unverified paymentHash', async () => {
+    const memory = memoryStore();
+    const reserved = await reserveFacilitatorPayment(
+      { ...IDENTITY, raw: rawPayment(), validBefore: 1600n, nowSec: 1000 },
+      memory.store,
+    );
+    expect(reserved.ok).toBe(true);
+    if (!reserved.ok) return;
+    expect(memory.set.mock.calls[0][0]).toBe(
+      `x402fac:reservation:v1:80002:${FROM.toLowerCase()}:${NONCE}`,
+    );
+    expect(JSON.parse(memory.set.mock.calls[0][1])).toEqual({
+      version: 1,
+      state: 'reserved',
+      resource: 'https://seller.example/paid/report',
+      token: reserved.token,
+    });
+  });
+
+  it('still consumes a legacy record that carries paymentHash (the field is ignored, not required)', async () => {
+    const memory = memoryStore();
+    const legacyToken = `x402r1_${'cd'.repeat(32)}`;
+    await memory.store.set(
+      `x402fac:reservation:v1:80002:${FROM.toLowerCase()}:${NONCE}`,
+      JSON.stringify({
+        version: 1,
+        state: 'reserved',
+        resource: 'https://seller.example/paid/report',
+        paymentHash: 'f'.repeat(64),
+        token: legacyToken,
+      }),
+      { nx: true, ttlSec: 600 },
+    );
+    await expect(
+      consumeFacilitatorPayment(
+        { ...IDENTITY, raw: rawPayment(), reservationToken: legacyToken },
+        memory.store,
+      ),
+    ).resolves.toEqual({ status: 'consumed' });
+    await expect(
+      consumeFacilitatorPayment(
+        { ...IDENTITY, raw: rawPayment(), reservationToken: legacyToken },
+        memory.store,
+      ),
+    ).resolves.toEqual({ status: 'replay' });
+  });
+
+  it('binds the reservation token to the resource regardless of payment JSON key order', async () => {
     const memory = memoryStore();
     const raw = rawPayment();
     const reserved = await reserveFacilitatorPayment(

@@ -144,10 +144,10 @@ describe.each(['jpyc', 'usdc'] as const)('%s finalized authorization expiry (rea
     expect(h.store!.zsets.get(f.pendingKey)?.has(SALT) ?? false).toBe(false);
     expect(h.store!.strings.has(f.activeKey)).toBe(false);
     expect(h.store!.strings.has(railParentArchiveKey(f.parentId))).toBe(true);
+    // state は finalized の「番号」ではなく「hash」に固定して読む (EIP-1898・第 7 回レビュー持ち越し①)。
     const stateRead = h.client.readContract.mock.calls.at(-1)![0];
-    expect(stateRead).toMatchObject({ args: [PAYER, f.nonce], blockNumber: 500n });
-    expect(stateRead).not.toHaveProperty('blockHash');
-    expect(stateRead).not.toHaveProperty('requireCanonical');
+    expect(stateRead).toMatchObject({ args: [PAYER, f.nonce], blockHash: BLOCK_HASH, requireCanonical: true });
+    expect(stateRead).not.toHaveProperty('blockNumber');
     expect(h.client.getBlock).toHaveBeenNthCalledWith(1, { blockTag: 'finalized' });
     expect(h.client.getBlock).toHaveBeenNthCalledWith(2, { blockNumber: 500n });
     expect(h.client.readContract.mock.invocationCallOrder.at(-1)).toBeLessThan(h.client.getBlock.mock.invocationCallOrder[1]!);
@@ -179,11 +179,14 @@ describe.each(['jpyc', 'usdc'] as const)('%s finalized authorization expiry (rea
     expect(h.store!.strings.has(f.activeKey)).toBe(true);
   });
 
-  it.each(['used-by-replacement', 'cancelled', 'non-boolean', 'state-rpc', 'finalized-rpc', 'missing-block-hash', 'missing-block-time', 'successful-candidate', 'receipt-rpc'] as const)('%s evidence keeps the payment pending and locked', async (scenario) => {
+  it.each(['used-by-replacement', 'cancelled', 'non-boolean', 'state-rpc', 'non-canonical-fork', 'finalized-rpc', 'missing-block-hash', 'missing-block-time', 'successful-candidate', 'receipt-rpc'] as const)('%s evidence keeps the payment pending and locked', async (scenario) => {
     const f = await setup(rail, 'indeterminate');
-    if (scenario === 'used-by-replacement' || scenario === 'cancelled') h.client.readContract.mockImplementation(async (args) => args.blockNumber !== undefined);
+    if (scenario === 'used-by-replacement' || scenario === 'cancelled') h.client.readContract.mockImplementation(async (args) => args.blockHash !== undefined);
     if (scenario === 'non-boolean') h.client.readContract.mockResolvedValue(undefined);
-    if (scenario === 'state-rpc') h.client.readContract.mockImplementation(async (args) => { if (args.blockNumber !== undefined) throw new Error('archive unavailable'); return false; });
+    if (scenario === 'state-rpc') h.client.readContract.mockImplementation(async (args) => { if (args.blockHash !== undefined) throw new Error('archive unavailable'); return false; });
+    // 前後 (finalized・canonical) は A なのに、中間の state だけ別フォーク B を正規とするノードに当たる: A の hash を
+    // 指定した読み取りは requireCanonical で拒否される (番号指定なら B の unused を返して expired と証明してしまう)。
+    if (scenario === 'non-canonical-fork') h.client.readContract.mockImplementation(async (args) => { if (args.blockHash === BLOCK_HASH) throw new Error('block not canonical'); return false; });
     if (scenario === 'finalized-rpc') h.client.getBlock.mockRejectedValue(new Error('finalized unsupported'));
     if (scenario === 'missing-block-hash') h.client.getBlock.mockResolvedValue({ number: 500n, timestamp: f.validBefore + 1n });
     if (scenario === 'missing-block-time') h.client.getBlock.mockResolvedValue({ number: 500n, hash: BLOCK_HASH });
@@ -198,7 +201,7 @@ describe.each(['jpyc', 'usdc'] as const)('%s finalized authorization expiry (rea
   it('a concurrent transaction write defeats terminal CAS and preserves the lock', async () => {
     const f = await setup(rail, 'indeterminate');
     h.client.readContract.mockImplementation(async (args) => {
-      if (args.blockNumber !== undefined) {
+      if (args.blockHash !== undefined) {
         const current = JSON.parse(h.store!.strings.get(f.key)!);
         h.store!.strings.set(f.key, JSON.stringify({ ...current, txHash: REPLACEMENT }));
       }

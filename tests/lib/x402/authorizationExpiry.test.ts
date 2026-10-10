@@ -20,16 +20,31 @@ function fixture() {
 }
 
 describe('finalized authorization expiry canonical observation', () => {
-  it('works with numbered eth_call and rechecks the hash after reading state', async () => {
+  it('reads state fixed to the finalized block hash (EIP-1898) and rechecks the hash after reading state', async () => {
     const { client, prove } = fixture();
     client.readContract.mockImplementation(async (args) => {
-      if ('blockHash' in args || 'requireCanonical' in args) throw new Error('EIP-1898 unsupported');
-      expect(args).toMatchObject({ address: TOKEN, args: [PAYER, NONCE], blockNumber: 500n });
+      // 番号指定は使わない (第 7 回レビュー持ち越し①: observe 側 #767 と同じ hash 固定)。
+      if ('blockNumber' in args) throw new Error('numbered state read is not allowed');
+      expect(args).toMatchObject({ address: TOKEN, args: [PAYER, NONCE], blockHash: HASH, requireCanonical: true });
       expect(client.getBlock).toHaveBeenCalledTimes(1);
       return false;
     });
     expect(await prove()).toBe(true);
     expect(client.getBlock.mock.calls).toEqual([[{ blockTag: 'finalized' }], [{ blockNumber: 500n }]]);
+  });
+
+  // #767 Codex 再レビュー P1 と同じ筋: reorg の反映が遅れたノードが混在すると、前後の読み取り (finalized・canonical) は A
+  // なのに中間の state だけ別フォーク B を読むことがある。番号指定なら B の unused で「期限切れ未使用」を証明し、
+  // A で支払い済みの intent を failed にしてしまう。hash 固定なら B のノードは requireCanonical で拒否 → 証明しない。
+  it('前後は A・中間の state だけ別フォーク B のノードに当たっても期限切れ未使用と証明しない', async () => {
+    const { client, prove } = fixture();
+    client.readContract.mockImplementation(async (args: { blockHash?: string; blockNumber?: bigint }) => {
+      // 中間で当たったノードは B を canonical としている: A の hash を指定されたら EIP-1898 の requireCanonical で拒否。
+      if (args.blockHash === HASH) throw new Error('block not canonical');
+      // 番号指定なら B の state (未使用) を返してしまう。
+      return false;
+    });
+    expect(await prove()).toBe(false);
   });
 
   it.each(['different-hash', 'missing-hash', 'unreadable-block', 'rpc-error'] as const)('rejects %s on the canonical reread after an unused state response', async (scenario) => {

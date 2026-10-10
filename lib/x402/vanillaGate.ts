@@ -478,8 +478,8 @@ export async function postFacilitatorWithStatus(
  * Arc rail: Circle Gateway の x402 facilitator へ verify/settle を送る。
  *   - 認証なし (`security: []`)・x402 v2 wire (CDP と同じ封筒形・Bazaar 拡張は載せない = CDP 専用)
  *   - accepted/paymentRequirements は Arc accept そのもの (CAIP-2・Gateway domain の extra)
- *   - 2xx の判定 body をそのまま返す。4xx でも `isValid`/`success` を持つ判定 body は結果として返す
- *     (CDP と同じ扱い・真偽判定は呼び出し側の fail-closed)。5xx / 形不明は throw → 503 (課金なし)。
+ *   - 2xx の判定 body をそのまま返す。4xx は endpoint の否定判定 (verify isValid:false / settle success:false)
+ *     で肯定語が混ざらないときだけ結果として返す (CDP と同じ扱い)。5xx / 形不明 / 混在は throw → 503 (課金なし)。
  * Base の facilitator (CDP/payai) には一切触れない (掟 12)。
  */
 async function postGatewayFacilitator(
@@ -516,12 +516,17 @@ async function postGatewayFacilitator(
   const parsed: unknown = await res.json().catch(() => null);
   if (res.ok && isRecord(parsed)) return { status: res.status, body: parsed };
   // Gateway の契約は「判定は 200 + body・400 は body 不正」(API ref)。4xx を判定として通すのは
-  // **否定判定 (isValid:false / success:false) のときだけ** — 4xx の `{success:true}` (異形応答・
-  // プロキシ) で解錠+台帳記録される fail-open を断つ。それ以外の 4xx/5xx は障害 → 503 (課金なし)。
+  // **その endpoint の否定判定 (verify は isValid:false / settle は success:false) で、かつ両肯定語
+  // (isValid / success) のどちらも true でないときだけ** — CDP 分岐と同じ条件。4xx の `{success:true}`
+  // (異形応答・プロキシ) や、否定と肯定が混在する body (`{isValid:false, success:true}` を settle が
+  // 「否定判定」として通し、後段が success だけを見て解錠する) で解錠+台帳記録される fail-open を断つ
+  // (第 7 回レビュー B5)。それ以外の 4xx/5xx は障害 → 503 (課金なし)。
   if (
     res.status < 500 &&
     isRecord(parsed) &&
-    (parsed.isValid === false || parsed.success === false)
+    (path === '/verify' ? parsed.isValid === false : parsed.success === false) &&
+    parsed.isValid !== true &&
+    parsed.success !== true
   ) {
     return { status: res.status, body: parsed };
   }

@@ -46,6 +46,8 @@ export type StoreUsdcPublicClient = {
   getTransactionReceipt: (args: { hash: Hex }) => Promise<{
     status: 'success' | 'reverted';
     blockNumber: bigint;
+    /** receipt が属するブロックの hash。confirmed の前に同じ番号の正規ブロックと照合する (B6)。 */
+    blockHash: Hex;
     logs: readonly {
       address: Address;
       data: Hex;
@@ -64,7 +66,9 @@ export type StoreUsdcPublicClient = {
     abi: typeof AUTHORIZATION_STATE_ABI;
     functionName: 'authorizationState';
     args: readonly [Address, Hex];
-    blockNumber?: bigint;
+    /** 期限切れ未使用の証明 (authorizationExpiredUnused) は finalized の hash に固定して読む (EIP-1898)。 */
+    blockHash?: Hex;
+    requireCanonical?: true;
   }) => Promise<boolean>;
   getLogs: (args: {
     address: Address;
@@ -118,7 +122,17 @@ export async function readStoreUsdcAnchorBlock(
 
 export type StoreUsdcOnchainVerification =
   | { ok: true; state: 'confirmed'; blockNumber: bigint }
-  | { ok: true; state: 'pending'; reason: 'receipt' | 'finality' }
+  /**
+   * pending の理由は呼び出し側の分岐に使う:
+   *   'receipt'   = receipt が読めない (欠落/一時障害)
+   *   'finality'  = 正規チェーンとの一致を確認できた (または高さ不足で照合先に無く判別不能な) receipt が
+   *                 safe 未到達・確認数不足 (同じ hash を待てばよい)
+   *   'canonical' = receipt のブロックが今の正規チェーンに無い (旧フォーク)。高さに関係なく、同じ hash を待っても
+   *                 解決しない — 保存済み hash なら replacement 探索へ進み、走査中の候補なら採らずに飛ばす。
+   *   'unverified' = 高さが足りず、照合先のノードに同じ番号のブロックがまだ無い (旧フォークか未到達か判別不能)。
+   *                 'finality' (正規と一致を確認済み) と混同しない — 保存済み hash の待ちで replacement 探索を止めない。
+   */
+  | { ok: true; state: 'pending'; reason: 'receipt' | 'finality' | 'canonical' | 'unverified' }
   | {
       ok: false;
       reason:
@@ -190,7 +204,27 @@ async function hasRequiredFinality(
   }
 }
 
-/** entitlement 発行前の Base receipt 6 条件。global claim の確定 CAS は finalizer 内で再検査する。 */
+/**
+ * receipt のブロックが**今の**正規チェーンに属するか (同じ番号の正規ブロックの hash と一致するか)。
+ * hasRequiredFinality は高さしか見ないので、RPC が旧フォークの成功 receipt (同じ番号・別 hash) を返すと
+ * safe 到達や 15 confirmations を満たしたまま confirmed にできてしまう (第 7 回レビュー B6)。license の
+ * reconcile (lib/license/reconcile.ts) と同じ照合を confirmed の前に置く。不一致は terminal にしない
+ * (正当な購入を失敗化しない) — pending 'canonical' として返し、保存済み hash なら reconcile が同じ nonce の
+ * replacement を正規チェーンで探し、走査の候補なら採らずに飛ばす。
+ */
+async function receiptIsCanonical(
+  client: StoreUsdcPublicClient,
+  receipt: { blockNumber: bigint; blockHash: Hex },
+): Promise<boolean | 'unavailable'> {
+  try {
+    const canonical = await client.getBlock({ blockNumber: receipt.blockNumber });
+    return canonical.hash === receipt.blockHash;
+  } catch {
+    return 'unavailable';
+  }
+}
+
+/** entitlement 発行前の Base receipt 7 条件。global claim の確定 CAS は finalizer 内で再検査する。 */
 export async function verifyStoreUsdcOnchain(input: {
   intent: StoreUsdcOnchainIntent;
   txHash: Hex;
@@ -224,6 +258,22 @@ export async function verifyStoreUsdcOnchain(input: {
   if (finality === 'unavailable') {
     return { ok: false, reason: 'rpc_unavailable' };
   }
+  // 条件7 (B6): receipt が今の正規チェーンのブロックに属すること。高さの判定 (finality 待ちの早期 return) より
+  // **前**に置く — 旧フォークの保存済み receipt が高さの条件を満たさないまま (safe の応答が停滞する等) だと
+  // 'finality' で同じ hash を待ち続け、正規チェーンで確定済みの replacement の探索へ進めない (Codex 3 回目 P2)。
+  // 'finality' を返すのは正規チェーンと一致を確認できた receipt だけ。
+  const canonical = await receiptIsCanonical(client, receipt);
+  if (canonical === 'unavailable') {
+    // 高さが足りない receipt のブロックは、照合先のノードにまだ無いことがある (旧フォークか未到達か判別不能)
+    // → 'unverified' (通常の finality 待ちとは別の理由・採らない・terminal にしない)。高さを満たしているのに
+    // 照会できないのは読み取り障害 → rpc_unavailable (呼び出し側は保留候補として次回も再検証する)。
+    return finality
+      ? { ok: false, reason: 'rpc_unavailable' }
+      : { ok: true, state: 'pending', reason: 'unverified' };
+  }
+  // 通常の finality 待ちと区別する (同じ hash を待ち続けると、同じ nonce の replacement が正規チェーンで
+  // 支払い済みでも、古い receipt を返し続ける RPC のせいに解錠できない)。高さに関係なく・terminal にはしない。
+  if (!canonical) return { ok: true, state: 'pending', reason: 'canonical' };
   if (!finality) return { ok: true, state: 'pending', reason: 'finality' };
 
   const [claim, legacyBilling] = await Promise.all([

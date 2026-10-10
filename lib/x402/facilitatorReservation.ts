@@ -1,9 +1,16 @@
 import 'server-only';
 
-import { createHash, randomBytes } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import type { Address, Hex } from 'viem';
 import { kvEval, kvSet } from '@/lib/kv';
 
+// 予約が束縛するもの (これ以外は束縛しない・第 7 回レビュー B14 で明記):
+//   - key    = chainId / from / nonce (同じ authorization の並行 verify を 1 本に絞る)
+//   - record = resource (別 resource への settle を拒む) ・ token (verify を通った本人の settle であること)
+// 金額・受取先・期限・fee は予約の仕事ではなく、settle 本体の EIP-712 署名検証と server 権威の fee 照合が守る。
+// かつて record に paymentHash (payload+requirements の SHA-256) を保存していたが、consume の Lua は
+// 参照しておらず「検証しているように見える」だけだったので持たない。旧 record に残る paymentHash は無視される
+// (Lua は version / resource / token / state しか読まない)。
 const RESERVATION_PREFIX = 'x402fac:reservation:v1:';
 export const DEFAULT_MAX_UPSTREAM_SECONDS = 60;
 export const DEFAULT_SETTLEMENT_GRACE_SECONDS = 30;
@@ -42,7 +49,6 @@ type ReservationRecord = {
   version: 1;
   state: 'reserved' | 'consumed';
   resource: string;
-  paymentHash: string;
   token: string;
 };
 
@@ -89,19 +95,6 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function stableJson(value: unknown): string {
-  if (Array.isArray(value)) {
-    return `[${value.map((item) => stableJson(item)).join(',')}]`;
-  }
-  if (isObject(value)) {
-    return `{${Object.keys(value)
-      .sort()
-      .map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`)
-      .join(',')}}`;
-  }
-  return JSON.stringify(value);
-}
-
 function nonNegativeInteger(value: unknown): number | null {
   return Number.isSafeInteger(value) && Number(value) >= 0
     ? Number(value)
@@ -137,30 +130,14 @@ function reservationWindow(raw: unknown): number | null {
   return Number.isSafeInteger(required) ? required : null;
 }
 
-function reservationDescriptor(raw: unknown): {
-  resource: string;
-  paymentHash: string;
-} | null {
+function reservationDescriptor(raw: unknown): { resource: string } | null {
   if (!isObject(raw)) return null;
   const paymentPayload = raw.paymentPayload;
   const paymentRequirements = raw.paymentRequirements;
   if (!isObject(paymentPayload) || !isObject(paymentRequirements)) return null;
   const resource = paymentRequirements.resource;
   if (typeof resource !== 'string' || resource.length === 0) return null;
-
-  const paymentHash = createHash('sha256')
-    .update(
-      stableJson({
-        x402Version: raw.x402Version,
-        paymentPayload,
-        paymentRequirements,
-      }),
-    )
-    .digest('hex');
-  return {
-    resource,
-    paymentHash,
-  };
+  return { resource };
 }
 
 function reservationKey({ chainId, from, nonce }: ReservationIdentity): string {
