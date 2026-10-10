@@ -103,6 +103,9 @@ describe('parseWorkflowJobs', () => {
     ['a key without a space after the colon (a plain scalar step in YAML)', '      - run:npm install'],
     ['an empty step', '      -'],
     ['a non-string key', '      - run: echo\n        1: npm install'],
+    // GitHub は key の中の式も展開するので、`${{ 'run' }}` は実行時には run になる
+    ['an expression in a step key', `      - "\${{ 'run' }}": npm install`],
+    ['an expression in a later step key', `      - name: x\n        \${{ 'run' }}: npm install`],
   ])('fails closed on %s', (_label, step) => {
     expect(() => parseWorkflowJobs(workflow(step))).toThrow();
   });
@@ -153,6 +156,10 @@ describe('parseWorkflowJobs', () => {
     ['a lone CR (a line break for GitHub, a character for YAML 1.2)', 'jobs:\n  a:\n    steps:\n      - run: echo\r        npm install\n'],
     ['two documents', 'jobs:\n  a:\n    steps:\n      - run: echo\n---\njobs:\n  a:\n    steps:\n      - run: npm install\n'],
     ['a %YAML directive', '%YAML 1.1\n---\njobs:\n  a:\n    steps:\n      - run: echo\n'],
+    // 解決後の tags は既定と同じでも、directive の存在そのものを拒否する
+    ['a %TAG directive that redeclares the default prefix', '%TAG !! tag:yaml.org,2002:\n---\njobs:\n  a:\n    steps:\n      - run: echo\n'],
+    // GitHub は key の中の式も展開する (式は評価せず、式を含む key は読まない)
+    ['an expression in a job id', `jobs:\n  "\${{ 'a' }}":\n    steps:\n      - run: npm install\n`],
     ['a top level that is not a mapping', '- jobs\n'],
   ])('fails closed on %s', (_label, source) => {
     expect(() => parseWorkflowJobs(source)).toThrow();
@@ -403,6 +410,12 @@ describe('installGuardViolations: env, if, the pipefail build run, defaults and 
     ['misaligned env keys', SEQUENCE, { job: '    env:\n      A: b\n       NPM_CONFIG_REGISTRY: x\n' }],
     ['two top-level env keys', SEQUENCE, { top: 'env:\n  A: b\n', tail: 'env:\n  NPM_CONFIG_REGISTRY: x\n' }],
     ['an env key hidden by an anchor and a merge key', SEQUENCE, { top: 'x-npm: &npm\n  NPM_CONFIG_REGISTRY: x\nenv:\n  <<: *npm\n' }],
+    // GitHub は key の中の式も展開する (`${{ 'npm_config_registry' }}` は実行時に npm_config_registry になる)。式は評価せず読まない
+    ['an expression in a workflow env key', SEQUENCE, { top: `env:\n  \${{ 'NPM_CONFIG_REGISTRY' }}: https://mirror.example/\n` }],
+    ['an expression in a job env key', SEQUENCE, { job: `    env:\n      "\${{ 'npm_config_registry' }}": https://mirror.example/\n` }],
+    ['an expression in a step env key', [SOURCE_GATE, step('npm ci --ignore-scripts', `\n        env:\n          "\${{ 'npm_config_registry' }}": https://mirror.example/`), REBUILD], {}],
+    ['an expression in a top-level key', SEQUENCE, { top: `"\${{ 'env' }}":\n  NPM_CONFIG_REGISTRY: x\n` }],
+    ['an expression in a job key', SEQUENCE, { job: `    \${{ 'env' }}:\n      NPM_CONFIG_REGISTRY: x\n` }],
   ])('fails closed on env it cannot read: %s', (_label, steps, options) => {
     expect(() => guard(steps, options)).toThrow();
   });

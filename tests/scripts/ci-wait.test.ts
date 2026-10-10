@@ -149,6 +149,27 @@ describe('期待 check 集合の正本 (JSON) と workflow のドリフト検出
     expect(parseWorkflow(`on:\n  pull_request:\n    branches: ["main"]\n${JOB}`)).toMatchObject({ branches: ['main'], unsupported: [] });
     expect(parseWorkflow(`on:\n  pull_request:\n    branches:\n      - 'main'\n${JOB}`)).toMatchObject({ branches: ['main'], unsupported: [] });
     expect(parseWorkflow(`on:\n  pull_request:\n    branches: []\n${JOB}`).unsupported).toEqual(['on.pull_request.branches: unreadable list']);
+    // filter pattern のエスケープ (`ma\in` は GitHub では main に一致) は完全一致で比べられないので unsupported
+    // (branches では「main を除外」、branches-ignore では「main を含まない」と誤って判定しない)
+    expect(parseWorkflow(`on:\n  pull_request:\n    branches: ['ma\\in']\n${JOB}`)).toMatchObject({
+      branches: null,
+      unsupported: ['on.pull_request.branches: escape in pattern (ma\\in)'],
+    });
+    expect(parseWorkflow(`on:\n  pull_request:\n    branches-ignore: ["ma\\\\in"]\n${JOB}`)).toMatchObject({
+      branchesIgnore: null,
+      unsupported: ['on.pull_request.branches-ignore: escape in pattern (ma\\in)'],
+    });
+    expect(analyze({
+      'esc.yml': `on:\n  pull_request:\n    branches: ['ma\\in']\njobs:\n  esc:\n    runs-on: x\n`,
+      'ign.yml': `on:\n  pull_request:\n    branches-ignore: ['ma\\in']\njobs:\n  ign:\n    runs-on: x\n`,
+    })).toEqual({
+      required: [],
+      excluded: [],
+      unsupported: [
+        { workflow: 'esc.yml', reason: 'on.pull_request.branches: escape in pattern (ma\\in)' },
+        { workflow: 'ign.yml', reason: 'on.pull_request.branches-ignore: escape in pattern (ma\\in)' },
+      ],
+    });
     const r = analyze({
       'release.yml': `on:\n  pull_request:\n    branches: [release]\njobs:\n  rel:\n    runs-on: x\n`,
       'ignore.yml': `on:\n  pull_request:\n    branches-ignore: [main]\njobs:\n  ign:\n    runs-on: x\n`,
@@ -444,10 +465,17 @@ describe('文書とトップレベルを先に検査する (検査に使って�
       [`on: push\n? jobs\n${JOB}`, ['document: DUPLICATE_KEY (line 3)']],
       [`on: push\n<<: *defaults\n${JOB}`, ['document: merge key (<<)', 'document: alias (*defaults)']],
       [`on: push\n<<: {jobs: {a: {runs-on: x}}}\n`, ['document: merge key (<<)']],
-      [`%YAML 1.2\n---\non: push\n${JOB}`, ['document: %YAML directive (1.2)']],
+      [`%YAML 1.2\n---\non: push\n${JOB}`, ['document: directive (%YAML 1.2)']],
       // YAML 1.1 では on が真偽値の key になる (GitHub と読み方がずれる) ので、ディレクティブごと読まない
-      [`%YAML 1.1\n---\non: pull_request\n${JOB}`, ['document: %YAML directive (1.1)', 'document: non-string key (true)']],
-      [`%TAG !e! tag:example.com,2000:\n---\non: push\n${JOB}`, ['document: %TAG directive (!e!)']],
+      [`%YAML 1.1\n---\non: pull_request\n${JOB}`, ['document: directive (%YAML 1.1)', 'document: non-string key (true)']],
+      [`%TAG !e! tag:example.com,2000:\n---\non: push\n${JOB}`, ['document: directive (%TAG !e! tag:example.com,2000:)']],
+      // 既定の prefix を再宣言する %TAG は解決後の tags が既定と同じになるが、directive の存在そのものを拒否する
+      [`%TAG !! tag:yaml.org,2002:\n---\non: push\n${JOB}`, ['document: directive (%TAG !! tag:yaml.org,2002:)']],
+      // GitHub は key の中の式も展開するので、式を含む key は (評価せず) どの階層でも読まない
+      [`"\${{ 'on' }}": pull_request\n${JOB}`, ["document: expression in key (${{ 'on' }})"]],
+      [`on:\n  "\${{ 'pull_request' }}":\n${JOB}`, ["document: expression in key (${{ 'pull_request' }})"]],
+      [`on: pull_request\njobs:\n  "\${{ 'added' }}":\n    runs-on: x\n`, ["document: expression in key (${{ 'added' }})"]],
+      [`on: pull_request\njobs:\n  a:\n    "\${{ 'name' }}": x\n    runs-on: x\n`, ["document: expression in key (${{ 'name' }})"]],
       [`on: push\n1: x\n${JOB}`, ['document: non-string key (1)']],
       [`on: push\n? [a, b]\n: x\n${JOB}`, ['document: non-string key (["a","b"])']],
       [`- on: pull_request\n`, ['document: the top level is not a mapping']],

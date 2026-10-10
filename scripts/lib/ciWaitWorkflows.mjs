@@ -16,7 +16,8 @@
 //     EVENT_NAME_RE・値は null / mapping か、pull_request 以外の配列 (schedule) だけ)。`on: []` / `{}` / `null` は
 //     今の workflow に無い形なので unsupported。
 //   - pull_request の値は null か mapping。key は paths / paths-ignore / types (= filtered) と branches /
-//     branches-ignore だけで、値は空でない文字列の空でない配列。branches の glob は unsupported。
+//     branches-ignore だけで、値は空でない文字列の空でない配列。branches / branches-ignore は完全一致で比べられる
+//     文字列だけを受け入れ、glob の特殊文字やエスケープ (`\`) を含むものは unsupported。
 //   - jobs: 空でない mapping。check 名が静的に決まらない job (name が文字列でない・式・改行を含む・if / strategy /
 //     uses・定義が mapping でない) は、PR で走る workflow のときだけ unsupported に数える。
 
@@ -54,8 +55,15 @@ function readPullRequestConfig(value, unsupported) {
       cfg.filtered = cfg.filtered ?? key;
       continue;
     }
+    // branches / branches-ignore は GitHub の filter pattern (glob・`\` のエスケープ) なので、main との比較は
+    // 完全一致で扱える文字列 (glob の特殊文字もエスケープも無いもの) だけで行う。`ma\in` は GitHub では main に一致する。
+    // paths / paths-ignore / types は有れば値によらず filtered なので、値の書き方は見ない。
     if (list.some((b) => GLOB_RE.test(b))) {
       unsupported.push(`on.pull_request.${key}: glob pattern (${list.join(', ')})`);
+      continue;
+    }
+    if (list.some((b) => b.includes('\\'))) {
+      unsupported.push(`on.pull_request.${key}: escape in pattern (${list.join(', ')})`);
       continue;
     }
     if (key === 'branches') cfg.branches = list;

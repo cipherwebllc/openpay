@@ -10,14 +10,16 @@
 //   - `yaml` のエラー・警告 (タブのインデント・揃わないインデント・閉じない引用符・複数ドキュメント・重複キー
 //     (uniqueKeys) 等): 1 つでもあれば読まない (部分的に読めた値を使わない)。
 //   - ディレクティブ (`%YAML` / `%TAG`): `%YAML 1.1` で `on:` が真偽値の key になる等、読み方が変わるので読まない。
+//     解決後の tags は既定の prefix を再宣言した `%TAG !! tag:yaml.org,2002:` と区別できないので、CST の directive の
+//     存在そのものを見る (値は比べない)。
 //   - アンカー / エイリアス / タグ: 今の workflow に無い形 (GitHub と `yaml` で展開・解決の仕方がずれうる) なので読まない。
 //   - key: 文字列の scalar だけ (引用符の有無は問わない)。`<<` (YAML 1.1 のマージ key) と、数値・真偽値・null・
-//     collection の key は読まない。
+//     collection の key は読まない。`${{` を含む key も読まない: GitHub は key の中の式も展開する (actions/runner の
+//     TemplateReader) ので、`"${{ 'npm_config_registry' }}":` や `"${{ 'run' }}":` が実行時には別の key になる。
+//     式は評価しない。
 //   - トップレベルは mapping。
 
-import { isAlias, isMap, isPair, isScalar, parseDocument, visit } from 'yaml';
-
-const DEFAULT_TAG_PREFIX = 'tag:yaml.org,2002:';
+import { Parser, isAlias, isMap, isPair, isScalar, parseDocument, visit } from 'yaml';
 
 /** 検査に使わない制御文字か (C0 の \t \n 以外・DEL・C1 (U+0085 を含む)・U+2028 / U+2029・途中の BOM)。CR は呼び出し側が見る。 */
 function isControlChar(code) {
@@ -45,6 +47,7 @@ function controlCharacterProblem(source) {
 function keyProblem(key) {
   if (!isScalar(key) || typeof key.value !== 'string') return `non-string key (${key === null ? 'empty' : String(key)})`;
   if (key.value === '<<') return 'merge key (<<)';
+  if (key.value.includes('${{')) return `expression in key (${key.value})`;
   return null;
 }
 
@@ -61,10 +64,8 @@ export function readWorkflowYaml(source) {
   const parseProblems = [...doc.errors, ...doc.warnings].map((e) => `document: ${e.code} (line ${e.linePos?.[0]?.line ?? '?'})`);
   if (parseProblems.length > 0) return { problems: parseProblems };
   const problems = [];
-  const { yaml, tags } = doc.directives;
-  if (yaml.explicit) problems.push(`document: %YAML directive (${yaml.version})`);
-  for (const [handle, prefix] of Object.entries(tags)) {
-    if (handle !== '!!' || prefix !== DEFAULT_TAG_PREFIX) problems.push(`document: %TAG directive (${handle})`);
+  for (const token of new Parser().parse(source)) {
+    if (token.type === 'directive') problems.push(`document: directive (${token.source})`);
   }
   // visit は値の無い pair の値 (`key:`・`? key`) にも null で来る。null の key は pair の側で見る
   visit(doc, (_key, node) => {
