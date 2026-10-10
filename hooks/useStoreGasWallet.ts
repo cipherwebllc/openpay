@@ -20,7 +20,21 @@ import {
 import { privateKeyToAccount } from 'viem/accounts';
 import { chainObjectForId, transportForChain } from '@/lib/chains';
 import { storeDeviceChainIds, storeGasWalletChainIds } from '@/lib/storeDevicePayment';
-import { finishStoreGasTopUp, liveStoreGasTopUps } from '@/lib/storeGasTopUp';
+import {
+  STORE_GAS_TOPUP_KEY,
+  TOPUP_APPROVAL_TTL_MS,
+  TOPUP_SENT_TTL_MS,
+  checkStoreGasTopUpNonce,
+  finishStoreGasTopUp,
+  liveStoreGasTopUps,
+  markStoreGasTopUpSuspect,
+  noteStoreGasTopUpSender,
+  onStoreGasTopUpChange,
+  readStoreGasTopUpSender,
+  resolveStoreGasTopUp,
+  staleStoreGasTopUps,
+  type StoreGasTopUpRecord,
+} from '@/lib/storeGasTopUp';
 import {
   STORE_GAS_WITHDRAW_GAS,
   createStoreGasWallet,
@@ -41,6 +55,9 @@ export type WithdrawRejectReason =
   | 'zero_address'
   | 'same_address'
   | 'contract_recipient'
+  // EIP-7702 で委任済みの EOA (MetaMask のスマートアカウント化等)。コントラクトと同じく固定ガス 21,000 では送れないが、
+  // 店主にはウォレットのアドレスに見えるので理由を分ける (D8)。
+  | 'delegated_recipient'
   | 'insufficient'
   | 'read_failed';
 
@@ -121,6 +138,46 @@ export function useStoreGasWallet() {
 
   const address = walletState?.state === 'ok' ? walletState.info.address : null;
 
+  // 結果を確かめられていない補充 (送って 1 日・置き換えられた可能性・送れたか分からないまま 30 分)。消すのは止めないが、
+  // 消す前に警告する。読み直すのは: 鍵が変わったとき・記録の変化 (同じタブ = onStoreGasTopUpChange・別のタブ = storage
+  // イベント)・残高の読み直し・途中 → 警告の境界 (タイマー)・削除確認を開くとき。
+  const [staleTopUps, setStaleTopUps] = useState<StoreGasTopUpRecord[]>([]);
+  // 境界のタイマーを張り直す合図。
+  const [staleTick, setStaleTick] = useState(0);
+  const refreshStaleTopUps = useCallback(() => {
+    setStaleTopUps(address ? staleStoreGasTopUps(address) : []);
+    setStaleTick((t) => t + 1);
+  }, [address]);
+  useEffect(() => {
+    if (!address) {
+      setStaleTopUps([]);
+      return;
+    }
+    const own = address;
+    const update = () => {
+      setStaleTopUps(staleStoreGasTopUps(own));
+      setStaleTick((t) => t + 1);
+    };
+    setStaleTopUps(staleStoreGasTopUps(own));
+    // 途中の記録が警告に変わる時刻 (送った = 1 日・送れたか分からない = 30 分) に読み直す (同じタブで開いたままでも
+    // 警告が出る)。記録が変わるたび (update) に張り直す。
+    const now = Date.now();
+    const edges = liveStoreGasTopUps(own, now).flatMap((r) =>
+      r.hash ? [r.at + TOPUP_SENT_TTL_MS - now] : r.unknown ? [r.at + TOPUP_APPROVAL_TTL_MS - now] : [],
+    );
+    const timer = edges.length > 0 ? setTimeout(update, Math.max(0, Math.min(...edges)) + 1_000) : null;
+    function onStorage(e: StorageEvent) {
+      if (e.key === STORE_GAS_TOPUP_KEY || e.key === null) update();
+    }
+    window.addEventListener('storage', onStorage);
+    const offOwn = onStoreGasTopUpChange(update);
+    return () => {
+      if (timer) clearTimeout(timer);
+      window.removeEventListener('storage', onStorage);
+      offOwn();
+    };
+  }, [address, staleTick]);
+
   // 鍵があるときは、ブラウザに消されにくい保存を頼む (作った直後・開いたとき)。結果は画面の案内に使うだけ。
   const [persisted, setPersisted] = useState<boolean | null>(null);
   useEffect(() => {
@@ -170,20 +227,44 @@ export function useStoreGasWallet() {
     if (gen !== walletGenRef.current) return;
     // 送ってから時間のたった補充の結果を片付ける (補充の欄が出ていない間に取引が入っても、記録を外す = 鍵を消せない
     // 状態を残さない)。新しい記録は補充の欄が結果を出すので触らない (先に片付けて結果の表示を消さない)。
-    for (const op of liveStoreGasTopUps(address)) {
+    // 片付けてよい証拠は自分の hash の receipt だけで、時間の経過でも送り手の nonce の消費でも片付けない (A5/G3)。
+    // nonce が消費されたのに receipt が無ければ「置き換えられた可能性」として警告に変える (記録は残す・receipt が後から
+    // 見えれば片付く)。1 日たって「確かめられていない」に変わった記録も同じに見る。
+    for (const op of [...liveStoreGasTopUps(address), ...staleStoreGasTopUps(address)]) {
       const client = op.hash ? clients.get(op.chainId) : undefined;
       if (!op.hash || !client || Date.now() - op.at < TOPUP_SETTLE_BY_PANEL_MS) continue;
       try {
-        await client.getTransactionReceipt({ hash: op.hash });
+        const res = await resolveStoreGasTopUp(client, { hash: op.hash });
+        if (res.kind === 'pending') {
+          // まだ証拠が無い。記録は残す (補充の画面が結果を見る・次の読み直しで片付ける)。
+          // 付帯 (待たない = 補助 RPC の遅れやロック待ちが、他の記録の receipt 確認・出金の「不明」の解除 (この後段) を
+          // 止めない・記録ごとに並行・結果は後から記録に反映):
+          //   - 送り手と nonce の組が無ければ tx から読んで足す (読めなければ次の読み直しでまた試す)
+          //   - 組があれば nonce の消費を見て、消費されていれば「置き換えられた可能性」の印を付ける (警告に変えるだけ)
+          const { id, hash, from, nonce, suspect } = op;
+          if (from === undefined || nonce === undefined) {
+            void readStoreGasTopUpSender(client, { from, hash }).then(async (sender) => {
+              if (sender) await withStoreGasWalletLock(async () => noteStoreGasTopUpSender(id, sender));
+            });
+          } else if (!suspect) {
+            void checkStoreGasTopUpNonce(client, { from, nonce }).then(async (r) => {
+              if (r === 'consumed') await withStoreGasWalletLock(async () => markStoreGasTopUpSuspect(id));
+            });
+          }
+          continue;
+        }
         // 記録を外す前に、そのチェーンの残高を読み直す (入った補充を 0 のまま見せて、注意なしに消させない)。
         const [b, g] = await Promise.all([client.getBalance({ address }), client.getGasPrice()]);
         if (gen !== walletGenRef.current) return;
         setReads((prev) => ({ ...prev, [op.chainId]: { balance: b, gasPrice: g, readFailed: false } }));
         await withStoreGasWalletLock(async () => finishStoreGasTopUp(op.id));
       } catch {
-        // まだ見つからない・読めない。記録は残す (補充の画面が結果を見る・次の読み直しで片付ける)。
+        // 読めない (残高の読み直し等)。記録は残す (次の読み直しで片付ける)。
       }
     }
+    if (gen !== walletGenRef.current) return;
+    setStaleTopUps(staleStoreGasTopUps(address));
+    setStaleTick((t) => t + 1);
     // 「不明」の出口: hash があれば receipt で確定/取り消しを確かめる。hash が無い (送信中に切れた) ときは
     // そのチェーンの残高を読めた時点で解除する (残高が残っていれば「消す」の確認で先に戻すよう出る)。
     const unknown = unknownRef.current;
@@ -229,8 +310,26 @@ export function useStoreGasWallet() {
     withdrawStatus.phase === 'pending' ||
     withdrawStatus.phase === 'unknown';
 
-  const remove = useCallback(async (): Promise<boolean> => {
+  /**
+   * 鍵を消す。seen = 削除をクリックした時点で画面が警告として見せていた「確かめられていない」補充の記録 (id と状態)。
+   * ロック内で読み直した記録に、seen に無い・状態 (hash・置き換えの可能性・送信不明) が違うものがあれば消さず、
+   * 一覧を出し直して再確認させる (クリック後に増えた・変わった記録を、見せないまま消さない)。
+   */
+  const remove = useCallback(async (seen: readonly StoreGasTopUpRecord[] = []): Promise<boolean> => {
     if (removeBlocked) return false;
+    // 画面にまだ知らせていない「確かめられていない」補充 (消さずに、警告に出してから消させる)。
+    let unwarned: StoreGasTopUpRecord[] | null = null;
+    const shown = new Map(seen.map((r) => [r.id, r]));
+    const acknowledged = (r: StoreGasTopUpRecord) => {
+      const s = shown.get(r.id);
+      return (
+        !!s &&
+        s.hash === r.hash &&
+        !!s.suspect === !!r.suspect &&
+        !!s.unknown === !!r.unknown &&
+        (s.overflow ?? 0) === (r.overflow ?? 0)
+      );
+    };
     // 消すのは、いま保存されている鍵が表示中のものと同じで、その鍵への補充が途中 (このタブ・別のタブ) でないときだけ
     // (別のタブで作り直された鍵を古い表示のまま消さない・届く途中の補充の宛先の鍵を消さない)。
     const removed = await withStoreGasWalletLock(async () => {
@@ -242,13 +341,28 @@ export function useStoreGasWallet() {
         return false;
       }
       if (liveStoreGasTopUps(current.info.address).length > 0) return false;
-      return removeStoreGasWallet();
+      // 結果を確かめられていない補充は止めないが、消す時点で記録を読み直し、クリック時に見せていた集合に無い・状態の
+      // 違うものがあれば消さない (古い state のまま、警告なしに消さない)。消したら、その鍵の記録は片付ける (消した鍵の
+      // 注意が残り続けない)。
+      const stale = staleStoreGasTopUps(current.info.address);
+      if (stale.some((r) => !acknowledged(r))) {
+        unwarned = stale;
+        return false;
+      }
+      const ok = removeStoreGasWallet();
+      if (ok) for (const r of stale) finishStoreGasTopUp(r.id);
+      return ok;
     });
+    if (unwarned) {
+      setStaleTopUps(unwarned);
+      return false;
+    }
     // 消えたかどうかは保存状態を読み直して決める (消せなかったのに「未作成」に戻さない)。
     setWalletState(loadStoreGasWallet());
     if (removed) {
       walletGenRef.current += 1;
       setReads({});
+      setStaleTopUps([]);
       setWithdrawStatus({ phase: 'idle' });
     }
     return removed;
@@ -300,7 +414,10 @@ export function useStoreGasWallet() {
                 publicClient.estimateFeesPerGas(),
               ]);
               // 戻し先はウォレット (EOA) に限る (コントラクトは受け取りの処理でガスが 21,000 を超えうる)。
-              if (code && code !== '0x') return reject('contract_recipient');
+              // EIP-7702 の委任 (code = 0xef0100 + 委任先) も同じ理由で送らないが、ウォレットに見えるので理由を分ける (D8)。
+              if (code && code !== '0x') {
+                return reject(code.toLowerCase().startsWith('0xef0100') ? 'delegated_recipient' : 'contract_recipient');
+              }
               fees = estimated;
               value = withdrawableAmount(current, STORE_GAS_WITHDRAW_GAS, fees.maxFeePerGas);
             } catch {
@@ -372,6 +489,8 @@ export function useStoreGasWallet() {
     persisted,
     withdrawStatus,
     removeBlocked,
+    staleTopUps,
+    refreshStaleTopUps,
     refresh,
     create,
     remove,

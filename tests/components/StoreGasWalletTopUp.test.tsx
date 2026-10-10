@@ -23,6 +23,7 @@ const w = vi.hoisted(() => ({
   receipt: { data: undefined, isError: false } as Receipt,
   receiptArgs: [] as ReceiptArgs[],
   rawReceipt: vi.fn(),
+  rawTx: vi.fn(),
 }));
 vi.mock('wagmi', () => ({
   useAccount: () => w.account,
@@ -33,12 +34,29 @@ vi.mock('wagmi', () => ({
     w.receiptArgs.push(args);
     return args.hash ? w.receipt : { data: undefined, isError: false };
   },
-  usePublicClient: () => ({ getTransactionReceipt: w.rawReceipt }),
+  usePublicClient: () => ({ getTransactionReceipt: w.rawReceipt, getTransaction: w.rawTx }),
 }));
+
+// jsdom に Web Locks は無い。本番の端末と同じく「ある」前提で動かし、無い端末のテストだけ外す (G11)。
+function stubLocks() {
+  Object.defineProperty(window.navigator, 'locks', {
+    configurable: true,
+    value: { request: (_name: string, fn: () => unknown) => fn() },
+  });
+}
+function removeLocks() {
+  delete (window.navigator as { locks?: unknown }).locks;
+}
 
 import { StoreGasWalletTopUp } from '@/components/StoreGasWalletTopUp';
 import { createStoreGasWallet, loadStoreGasWallet } from '@/lib/storeGasWallet';
-import { attachStoreGasTopUpHash, liveStoreGasTopUps, reserveStoreGasTopUp } from '@/lib/storeGasTopUp';
+import {
+  TOPUP_HEARTBEAT_MS,
+  attachStoreGasTopUpHash,
+  liveStoreGasTopUps,
+  reserveStoreGasTopUp,
+  staleStoreGasTopUps,
+} from '@/lib/storeGasTopUp';
 
 const SHOP = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 const OTHER = '0x1111111111111111111111111111111111111111';
@@ -80,6 +98,8 @@ describe('StoreGasWalletTopUp', () => {
     w.receipt = { data: undefined, isError: false };
     w.receiptArgs = [];
     w.rawReceipt.mockReset().mockRejectedValue(new Error('not found'));
+    w.rawTx.mockReset().mockResolvedValue({ nonce: 5, from: SHOP });
+    stubLocks();
   });
 
   it('未接続なら、右上で接続するよう案内するだけ (送る欄は出さない)', () => {
@@ -105,6 +125,61 @@ describe('StoreGasWalletTopUp', () => {
     expect(duringApproval).toHaveLength(1);
     expect(duringApproval[0].hash).toBeUndefined();
     expect(records()[0]).toMatchObject({ hash: TX, chainId: 80002 });
+    // 送り手と nonce は同じ tx から読んだ組だけを残す (1 日たっても、nonce の消費で置き換えの可能性を確かめられる)
+    await waitFor(() => expect(records()[0]).toMatchObject({ from: SHOP, nonce: 5 }));
+    expect(w.rawTx).toHaveBeenCalledWith({ hash: TX });
+  });
+
+  it('送り手は画面の接続先ではなく、送った tx の from (ロック待ちの間に接続先を変えても、別の財布の nonce と組にしない) (P1-1)', async () => {
+    // 画面の接続先は SHOP のまま、実際に送った tx の from は OTHER (wagmi は送信時の接続先から送る)
+    w.rawTx.mockResolvedValue({ nonce: 5, from: OTHER });
+    show();
+    await act(async () => {
+      fireEvent.click(sendButton());
+    });
+    await waitFor(() => expect(records()[0]).toMatchObject({ hash: TX, from: OTHER, nonce: 5 }));
+  });
+
+  it('hash が返った瞬間に記録へ残し、送り手と nonce の読み取りが終わらなくても追跡を巻き込まない (P1-2)', async () => {
+    let release!: () => void;
+    w.rawTx.mockImplementation(
+      () => new Promise<{ nonce: number; from: string }>((r) => { release = () => r({ nonce: 5, from: SHOP }); }),
+    );
+    show();
+    await act(async () => {
+      fireEvent.click(sendButton());
+    });
+    // 読み取りが終わる前から hash 付きの記録 (タブを閉じても「送った」として残る)
+    expect(records()[0]).toMatchObject({ hash: TX });
+    expect(records()[0].nonce).toBeUndefined();
+    expect(screen.getByRole('status')).toHaveTextContent('送っています。確定を待っています');
+    await act(async () => {
+      release();
+    });
+    await waitFor(() => expect(records()[0]).toMatchObject({ hash: TX, from: SHOP, nonce: 5 }));
+  });
+
+  it('送った直後に tx を読めなくても (RPC にまだ届いていない)、hash だけ残して送る本体は止めない', async () => {
+    w.rawTx.mockRejectedValue(new Error('not found'));
+    show();
+    await act(async () => {
+      fireEvent.click(sendButton());
+    });
+    expect(records()[0]).toMatchObject({ hash: TX });
+    expect(records()[0].from).toBeUndefined();
+    expect(records()[0].nonce).toBeUndefined();
+    expect(screen.getByRole('status')).toHaveTextContent('送っています。確定を待っています');
+  });
+
+  it('Web Locks の無いブラウザでは補充しない (別のタブとの同時操作を止められない・理由を出す)', () => {
+    removeLocks();
+    try {
+      show();
+      expect(sendButton()).toBeDisabled();
+      expect(screen.getByRole('alert')).toHaveTextContent('このブラウザでは補充できません');
+    } finally {
+      stubLocks();
+    }
   });
 
   it('二度押ししても 1 回だけ送る (描画やロック待ちの前に止める)', async () => {
@@ -238,10 +313,13 @@ describe('StoreGasWalletTopUp', () => {
       fireEvent.click(sendButton());
     });
     await act(async () => {
-      lastReplaced()({ reason: 'repriced', transaction: { to: gas, value: 10n ** 18n, hash: TX2 } as never });
+      lastReplaced()({
+        reason: 'repriced',
+        transaction: { to: gas, value: 10n ** 18n, hash: TX2, from: SHOP, nonce: 9 } as never,
+      });
     });
-    // 記録の tx は置き換え先に変わる (画面を離れても置き換え先を見る)
-    expect(records()[0]).toMatchObject({ hash: TX2 });
+    // 記録の tx は置き換え先に変わる (画面を離れても置き換え先を見る)。送り手と nonce も置き換え先のもの
+    expect(records()[0]).toMatchObject({ hash: TX2, from: SHOP, nonce: 9 });
     w.receipt = { data: undefined, isError: true }; // wagmi は revert を失敗で返す
     w.rawReceipt.mockImplementation(async ({ hash }: { hash: string }) => {
       if (hash !== TX2) throw new Error('not found');
@@ -307,7 +385,7 @@ describe('StoreGasWalletTopUp', () => {
     }
   });
 
-  it('ウォレットで断ったら記録を片付けて元に戻す (失敗の表示は出さない)・それ以外の失敗は出す', async () => {
+  it('ウォレットで断ったら記録を片付けて元に戻す (失敗の表示は出さない)', async () => {
     w.sendAsync.mockRejectedValueOnce(new Error('User rejected the request.'));
     show();
     await act(async () => {
@@ -316,12 +394,106 @@ describe('StoreGasWalletTopUp', () => {
     expect(records()).toHaveLength(0);
     expect(screen.queryByRole('alert')).toBeNull();
     expect(sendButton()).not.toBeDisabled();
+  });
+
+  it('断った以外の失敗は「送れたか分からない」として記録を残す (送った後に応答を失った可能性・宛先の鍵を消させない) (A5/G2)', async () => {
     w.sendAsync.mockRejectedValueOnce(new Error('rpc down'));
+    const v = show();
     await act(async () => {
       fireEvent.click(sendButton());
     });
-    expect(screen.getByRole('alert')).toHaveTextContent('送れませんでした');
-    expect(records()).toHaveLength(0);
+    expect(screen.getByRole('alert')).toHaveTextContent('送れたかどうか確かめられませんでした');
+    expect(screen.queryByRole('status')).toBeNull(); // 「ウォレットで確認してください…」は出さない
+    expect(records()).toHaveLength(1);
+    expect(records()[0].hash).toBeUndefined();
+    // 「送れたか分からない」の印 (30 分の後も、消えずに警告として残る)
+    expect(records()[0].unknown).toBe(true);
+    expect(sendButton()).toBeDisabled();
+    expect(v.onPendingChange).toHaveBeenLastCalledWith(true);
+  });
+
+  it('送信待ちの間に画面を離れ、その後 tx を記録に残せなくても、閉じた画面の heartbeat を残さない (2 回目 P2)', async () => {
+    let approve!: (h: string) => void;
+    w.sendAsync.mockImplementation(() => new Promise((r) => { approve = r; }));
+    const realSetItem = Storage.prototype.setItem;
+    // hash を含む書き込み (tx を残す) だけ失敗させる。確認中の記録の延長 (hash なし) は通す
+    const spy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, k: string, val: string) {
+      if (k === 'openpay:store-gas-wallet:topup:v2' && val.includes(TX)) throw new Error('QuotaExceededError');
+      return realSetItem.call(this, k, val);
+    });
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const v = show();
+      await act(async () => {
+        fireEvent.click(sendButton());
+      });
+      v.unmount();
+      await act(async () => {
+        approve(TX);
+      });
+      const before = records()[0]?.at;
+      expect(before).toBeDefined();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(TOPUP_HEARTBEAT_MS * 2 + 100);
+      });
+      // 閉じた画面が確認中の記録を延ばし続けない (延ばすと、補充と鍵の削除が止まったままになる)
+      expect(records()[0]?.at).toBe(before);
+    } finally {
+      vi.useRealTimers();
+      spy.mockRestore();
+    }
+  });
+
+  it('画面を離れた後に送れて hash を記録に残せなくても、送る前に置いた「送れたか分からない」の印が残り、30 分後は警告に回る (3 回目 P1)', async () => {
+    let approve!: (h: string) => void;
+    w.sendAsync.mockImplementation(() => new Promise((r) => { approve = r; }));
+    const realSetItem = Storage.prototype.setItem;
+    const spy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, k: string, val: string) {
+      if (k === 'openpay:store-gas-wallet:topup:v2' && val.includes(TX)) throw new Error('QuotaExceededError');
+      return realSetItem.call(this, k, val);
+    });
+    try {
+      const v = show();
+      await act(async () => {
+        fireEvent.click(sendButton());
+      });
+      // 送る前から「送れたか分からない」の印つきで永続化されている
+      expect(records()[0]).toMatchObject({ unknown: true });
+      v.unmount();
+      await act(async () => {
+        approve(TX);
+      });
+      const rec = records()[0];
+      expect(rec.hash).toBeUndefined();
+      expect(rec.unknown).toBe(true);
+      // 期限 (30 分) の後も消えず、警告に残る
+      expect(staleStoreGasTopUps(gas, Date.now() + 31 * 60_000).map((r) => r.id)).toEqual([rec.id]);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('ウォレットが応答しないまま画面を離れても、確認中の記録を延ばし続けない (unmount で heartbeat を止める) (3 回目 P2)', async () => {
+    w.sendAsync.mockImplementation(() => new Promise(() => {}));
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const v = show();
+      await act(async () => {
+        fireEvent.click(sendButton());
+      });
+      const before = records()[0]?.at;
+      expect(before).toBeDefined();
+      v.unmount();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(TOPUP_HEARTBEAT_MS * 2 + 100);
+      });
+      expect(records()[0]?.at).toBe(before);
+      // 延ばさないので期限の後は警告に回る (補充と鍵の削除を永久に止めない)
+      expect(liveStoreGasTopUps(gas, Date.now() + 31 * 60_000)).toEqual([]);
+      expect(staleStoreGasTopUps(gas, Date.now() + 31 * 60_000)).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('1 回の上限 (目安の上限) を超える額・数字でない額は送らない', () => {

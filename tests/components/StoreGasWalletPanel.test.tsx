@@ -60,6 +60,8 @@ function base({ balance, gasPrice, readFailed, ...over }: Record<string, unknown
     address: null,
     withdrawStatus: { phase: 'idle' },
     removeBlocked: false,
+    staleTopUps: [],
+    refreshStaleTopUps: vi.fn(),
     refresh: vi.fn(),
     create: vi.fn(async () => ({ ok: true })),
     remove: vi.fn(async () => true),
@@ -159,6 +161,7 @@ describe('StoreGasWalletPanel', () => {
       [{ phase: 'unknown', chainId: 80002, hash: TX }, /確かめられませんでした/, 'alert'],
       [{ phase: 'reverted', chainId: 80002, hash: TX }, /失敗しました/, 'alert'],
       [{ phase: 'rejected', reason: 'contract_recipient' }, /コントラクトのアドレスには戻せません/, 'alert'],
+      [{ phase: 'rejected', reason: 'delegated_recipient' }, /スマートアカウント（委任）になっているため戻せません/, 'alert'],
     ];
     for (const [status, text, role] of cases) {
       hold.state = ready({ withdrawStatus: status });
@@ -355,6 +358,29 @@ describe('StoreGasWalletPanel', () => {
     render(<StoreGasWalletPanel />);
     expect(screen.getByTestId('topup')).toHaveTextContent('80002');
     expect(screen.getByTestId('topup')).not.toHaveTextContent('1001');
+  });
+
+  it('結果を確かめられていない補充 (1 日以上) があれば、消す前にそれを知らせる (取引へのリンクつき・消すのは止めない)', () => {
+    hold.state = ready({
+      balance: 0n,
+      gasPrice: 1n,
+      staleTopUps: [
+        { id: 's', address: ADDR, chainId: 80002, at: 1, hash: TX },
+        // 溢れた分の要約 (取引へのリンクは無い・同じ警告文に含める)
+        { id: `overflow:${ADDR.toLowerCase()}`, address: ADDR, chainId: 0, at: 1, overflow: 3 },
+      ],
+    });
+    render(<StoreGasWalletPanel />);
+    const button = screen.getByRole('button', { name: 'この端末から消す' });
+    expect(button).not.toBeDisabled();
+    fireEvent.click(button);
+    // 確認を開く時点で記録を読み直す (古い state で警告を出し損ねない)
+    expect(hold.state.refreshStaleTopUps).toHaveBeenCalledTimes(1);
+    expect(screen.getByText(/結果を確かめられていない補充があります/)).toBeTruthy();
+    expect(screen.getByRole('link', { name: '取引を見る' }).getAttribute('href')).toContain(TX);
+    // 消すときは、見せていた記録の集合を渡す (ロック待ちの間に増えた・変わった記録は hook が止める)
+    fireEvent.click(screen.getByRole('button', { name: '消す' }));
+    expect(hold.state.remove).toHaveBeenCalledWith((hold.state as { staleTopUps: unknown }).staleTopUps);
   });
 
   it('補充の結果が出るまでは消せない (届く途中の宛先の鍵を消さない)', () => {

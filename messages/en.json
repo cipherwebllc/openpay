@@ -2516,12 +2516,14 @@
         "insufficient": "Nothing is left after paying gas.",
         "zero_address": "You can't send to the zero address.",
         "contract_recipient": "Contract addresses aren't supported. Enter a wallet address.",
+        "delegated_recipient": "This address has been upgraded to a smart account (delegated), so it can’t receive the return. Enter a wallet address that isn’t delegated.",
         "read_failed": "Couldn't read the balance or gas price. Please try again later."
       },
       "removeButton": "Remove from this device",
       "removeConfirm": "Removes the key from this device. Gas tokens sent to this address afterwards can’t be recovered.",
       "removeConfirmWithBalance": "{amount} is still left. Return it first with “Return the remaining balance”. Once removed, it can’t be recovered.",
       "removeConfirmUnread": "The balance on some chains couldn’t be read. Check it with “Refresh balance” before removing.",
+      "removeConfirmTopUpUnresolved": "There is a top-up whose result couldn’t be confirmed. If it arrives later, it can’t be recovered once the key is removed.",
       "removeYes": "Remove",
       "cancel": "Cancel",
       "withdrawToHint": "The destination wallet address (0x...). Contract addresses aren't supported.",
@@ -2561,10 +2563,11 @@
         "invalid": "Enter the amount as a number.",
         "too_much": "You can send up to {max} {symbol} at a time (keep only a small amount in the gas wallet).",
         "insufficient": "The connected wallet doesn’t have enough {symbol}.",
-        "failed": "Couldn’t send. Please try again.",
+        "unknown": "Couldn’t tell whether it was sent. Check the connected wallet’s history. You can’t send to this address again until then (up to 30 minutes).",
         "wallet_changed": "The gas wallet has changed (for example, recreated in another tab). Reload the page before sending.",
         "storage": "Can’t send because this device can’t save the top-up record.",
-        "busy": "A top-up to this gas wallet is already in progress (possibly on another screen). Try again after it has a result."
+        "busy": "A top-up to this gas wallet is already in progress (possibly on another screen). Try again after it has a result.",
+        "no_locks": "Top-ups aren’t available in this browser (it can’t prevent simultaneous operations from other tabs). Please use another browser."
       }
     },
     "storeDevice": {

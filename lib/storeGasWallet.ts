@@ -195,6 +195,14 @@ export async function withStoreGasWalletLock<T>(fn: () => Promise<T>): Promise<T
   return locks.request(STORE_GAS_WALLET_LOCK, fn) as Promise<T>;
 }
 
+/**
+ * このブラウザで別のタブとの排他 (Web Locks) が使えるか。使えない端末では「接続中のウォレットから補充」を始めない
+ * (記録の読み書きが交差して二重に送る・片方の記録を失うのを止められないため・G11)。描画後にだけ呼ぶ (server では false)。
+ */
+export function hasStoreGasWalletLock(): boolean {
+  return typeof navigator !== 'undefined' && typeof navigator.locks?.request === 'function';
+}
+
 /** 残高と現在のガス価格から、あと何回送れるかの目安 (0 以上の整数)。 */
 export function estimateRemainingSends(balanceWei: bigint, gasPriceWei: bigint): number {
   if (balanceWei <= 0n || gasPriceWei <= 0n) return 0;
