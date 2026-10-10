@@ -164,6 +164,8 @@ export const RULES = [
   // ---- JPYC ガスレス中継 (自前 relayer・lib/relay) ---------------------------------------------------
   {
     name: 'OpenPay: relayer の残高不足 (relay.relayer.balance_low)',
+    // 2026-06 に Dashboard で手作りした同じ tag の alert。重複させず、この rule の形に上書き更新する。
+    legacyNames: ['relayer balance low (mainnet)'],
     description:
       '自前 relayer EOA (RELAYER_PRIVATE_KEY・Polygon/Kaia/Avalanche) の native 残高が ' +
       'RELAY_LOW_BALANCE_ALERT_WEI (既定 0.1 native) を下回った。枯渇 (relayer_unfunded → relay_error → ' +
@@ -175,6 +177,10 @@ export const RULES = [
   },
   {
     name: 'OpenPay: JPYC ガスレス中継の失敗 (relay.jpyc.*)',
+    // 2026-06 に Dashboard で手作りした relay.jpyc.relay_error の alert。重複させず、この rule の形に上書き更新する。
+    // 同じく手作りの 'relay misconfig (mainnet)' (relay.jpyc.misconfig) もこの rule と重なるが、1 つの rule に
+    // 引き当てられる既存 workflow は 1 つだけ (2 つ足すと planRules が止まる) なので、そちらは Dashboard で消す。
+    legacyNames: ['relay failure (mainnet)'],
     description:
       '/api/relay/jpyc の中継失敗: relay_error (broadcast 前の失敗・relayer_unfunded や RPC 障害・客は ' +
       'standard へ fallback) / reverted (relayer の gas を使って失敗) / ' +

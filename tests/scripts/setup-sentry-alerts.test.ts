@@ -346,7 +346,8 @@ function uiShaped(
 }
 
 // 本番の workflow 6 件と同じ名前・形 (ID・宛先はダミー): 新 UI で作った 4 件 + Sentry 既定の 2 件。
-// どれも RULES の name / legacyNames に無い = 管理外。
+// relay failure (mainnet) と relayer balance low (mainnet) は RULES の legacyNames に載っている (上書き更新して
+// 重複させない)。残り 4 件は管理外。
 const PROD_NAMES = [
   'Send a notification for high priority issues',
   'relay failure (mainnet)',
@@ -401,6 +402,10 @@ function prodLikeWorkflows(): ExistingWorkflow[] {
     ),
   ];
 }
+// 管理外のまま残る 4 件 (Sentry 既定 2 件・relay misconfig・billing の前方一致)。
+const PROD_UNMANAGED_NAMES = [PROD_NAMES[0], PROD_NAMES[3], PROD_NAMES[4], PROD_NAMES[5]];
+const prodUnmanagedWorkflows = (): ExistingWorkflow[] =>
+  prodLikeWorkflows().filter((w) => PROD_UNMANAGED_NAMES.includes(w.name));
 
 // 第 7 回レビュー E6 以前の 14 rule (name・閾値・tag は旧 RULES のまま) が workflow として登録されている状態。
 const LEGACY: Array<[string, string, number]> = [
@@ -486,6 +491,9 @@ describe('setup-sentry-alerts: RULES schema', () => {
         expect(RETIRED_RULE_NAMES).not.toContain(legacy);
       }
     }
+    // 1 つの旧名は 1 つの rule にだけ属する (2 つの rule が同じ既存 workflow を取り合わない)。
+    const legacy = RULES.flatMap((r) => r.legacyNames ?? []);
+    expect(new Set(legacy).size).toBe(legacy.length);
   });
 
   it('閾値は実トラフィック (外部の実購入が月数件) で発火しうる値: 全 rule が 10 以下・money-path は 0 (1 件目で通知)', () => {
@@ -782,11 +790,13 @@ describe('setup-sentry-alerts: resolveIssueStreamDetector / nextCursor', () => {
 
   it('一覧に無ければ管理対象 workflow の detectorIds から拾う (管理外の workflow の detector は使わない)', () => {
     const managed = stored(RULES[0], '1');
-    expect(resolveIssueStreamDetector([], [managed, ...prodLikeWorkflows()], PROJECT)).toEqual({
+    expect(resolveIssueStreamDetector([], [managed, ...prodUnmanagedWorkflows()], PROJECT)).toEqual({
       id: DETECTOR,
       source: 'workflows',
     });
-    expect(() => resolveIssueStreamDetector([], prodLikeWorkflows(), PROJECT)).toThrow(/detectorIds は \(none\)/);
+    // legacyNames で引き当たる本番の手作り alert (relay failure 等) も管理対象として数える。
+    expect(resolveIssueStreamDetector([], prodLikeWorkflows(), PROJECT)).toEqual({ id: DETECTOR, source: 'workflows' });
+    expect(() => resolveIssueStreamDetector([], prodUnmanagedWorkflows(), PROJECT)).toThrow(/detectorIds は \(none\)/);
     const other = stored(RULES[1], '2', { detectorIds: ['7000005'] });
     expect(() => resolveIssueStreamDetector([], [managed, other], PROJECT)).toThrow(/detectorIds は 7000001,7000005/);
   });
@@ -845,20 +855,67 @@ describe('setup-sentry-alerts: planRules / formatPlan (dry-run の出力を固�
     expect(plan([w]).unchanged).toHaveLength(1);
   });
 
-  it('本番と同じ 6 件 (新 UI で作った 4 件 + Sentry 既定 2 件) は管理外: 触らず、RULES は全 create', () => {
+  it('本番と同じ 6 件: 手作りの 2 件は legacyNames で引き当てて上書き更新 (重複させない)、残り 4 件は管理外で触らない', () => {
     const p = plan(prodLikeWorkflows());
-    expect(p.create).toHaveLength(RULES.length);
-    expect(p.update).toEqual([]);
+    expect(p.update.map((u) => [u.id, u.previousName, u.name])).toEqual([
+      ['3000003', 'relayer balance low (mainnet)', 'OpenPay: relayer の残高不足 (relay.relayer.balance_low)'],
+      ['3000002', 'relay failure (mainnet)', 'OpenPay: JPYC ガスレス中継の失敗 (relay.jpyc.*)'],
+    ]);
+    expect(p.create).toHaveLength(RULES.length - 2);
+    expect(p.create.map((c) => c.name)).not.toContain('OpenPay: JPYC ガスレス中継の失敗 (relay.jpyc.*)');
     expect(p.unchanged).toEqual([]);
     expect(p.retire).toEqual([]);
-    expect(p.unmanaged.map((u) => u.name)).toEqual(PROD_NAMES);
+    expect(p.unmanaged.map((u) => u.name)).toEqual(PROD_UNMANAGED_NAMES);
     const lines = formatPlan(p, 'mainnet');
     expect(lines[0]).toBe(
-      `[setup-sentry-alerts] plan (environment=mainnet): create ${RULES.length} / update 0 / unchanged 0 / retire 0 / 管理外 (触らない) 6`,
+      `[setup-sentry-alerts] plan (environment=mainnet): create ${RULES.length - 2} / update 2 / unchanged 0 / retire 0 / 管理外 (触らない) 4`,
     );
-    expect(lines).toContain('  · 管理外  relay failure (mainnet) (id=3000002): RULES に無い名前 → 触らない');
+    expect(lines).toContain('  · 管理外  relay misconfig (mainnet) (id=3000004): RULES に無い名前 → 触らない');
+    expect(lines).toContain('  · 管理外  OpenPay billing failures (id=3000005): RULES に無い名前 → 触らない');
     expect(lines).toContain('  · 管理外  Send a notification for high priority issues (id=3000001): RULES に無い名前 → 触らない');
-    expect(lines).toHaveLength(1 + RULES.length + 6);
+    expect(lines).toHaveLength(1 + RULES.length + 4);
+  });
+
+  it('legacyNames で引き当てた手作りの alert: 名前を RULES に改め、trigger・条件・閾値を RULES どおりに直し、通知先 (user 宛てメール) は保持する', () => {
+    const p = plan(prodLikeWorkflows());
+    const triggers =
+      'triggers any-short[first_seen_event + issue_resolved_trigger + reappeared_event + regression_event] → any-short[every_event]';
+    const relay = p.update.find((u) => u.id === '3000002')!;
+    expect(relay.changes).toEqual([
+      'rename from "relay failure (mainnet)"',
+      'frequency 0 → 60',
+      triggers,
+      'threshold 3 → 0',
+      'interval 5m → 1h',
+      'filters relay.jpyc.relay_error → relay.jpyc.relay_error + relay.jpyc.reverted + relay.jpyc.misconfig + relay.jpyc.forwarder_invalid',
+    ]);
+    expect(relay.keptActions).toEqual(['email (user)']);
+    expect(relay.payload.name).toBe('OpenPay: JPYC ガスレス中継の失敗 (relay.jpyc.*)');
+    expect(relay.payload.triggers.conditions.map((c) => c.type)).toEqual(['every_event']);
+    expect(relay.payload.actionFilters).toHaveLength(4);
+    for (const g of relay.payload.actionFilters) expect(g.actions).toEqual([USER_EMAIL]);
+    expect(relay.payload).not.toHaveProperty('owner');
+    const balance = p.update.find((u) => u.id === '3000003')!;
+    expect(balance.changes).toEqual([
+      'rename from "relayer balance low (mainnet)"',
+      'frequency 0 → 60',
+      triggers,
+      'threshold 1 → 0',
+    ]);
+    expect(formatPlan(p, 'mainnet')).toContain(
+      '  ~ update  OpenPay: relayer の残高不足 (relay.relayer.balance_low) (id=3000003): ' +
+        `rename from "relayer balance low (mainnet)"; frequency 0 → 60; ${triggers}; threshold 1 → 0 [actions 保持: email (user)]`,
+    );
+    // owner (担当) があれば引き継ぐ。
+    const owned = prodLikeWorkflows().map((w) => (w.id === '3000003' ? { ...w, owner: 'user:1000001' } : w));
+    expect(plan(owned).update.find((u) => u.id === '3000003')!.payload.owner).toBe('user:1000001');
+  });
+
+  it('手作りの relay failure と relay misconfig は同じ rule に当たるので、legacyNames に両方は載せない (載せると止まる)', () => {
+    const jpyc = RULES.find((r) => r.name === 'OpenPay: JPYC ガスレス中継の失敗 (relay.jpyc.*)')!;
+    expect(jpyc.legacyNames).toEqual(['relay failure (mainnet)']);
+    const both = [{ ...jpyc, legacyNames: ['relay failure (mainnet)', 'relay misconfig (mainnet)'] }];
+    expect(() => planRules(prodLikeWorkflows(), both, 'mainnet', { detectorId: DETECTOR })).toThrow(/複数/);
   });
 
   it('E6 以前の 14 rule が登録済みの計画: 旧 name は rename + 閾値更新、tag の追加は filters の行、発火元の無いものは retire', () => {
@@ -1225,17 +1282,25 @@ describe('setup-sentry-alerts: main (Workflow Engine API の fake 経由の挙�
     expect(fake.store.size).toBe(RULES.length);
   });
 
-  it('往復: 旧 14 rule + 本番と同じ管理外 6 件 → 1 回目は POST / PUT、2 回目は GET だけで書き込みゼロ (冪等)', async () => {
-    useFake({ workflows: [...legacyWorkflows(), ...prodLikeWorkflows()] });
+  it('往復: 旧 14 rule + 本番と同じ 6 件 → 1 回目は POST / PUT、2 回目は GET だけで書き込みゼロ (冪等)', async () => {
+    const fake = useFake({ workflows: [...legacyWorkflows(), ...prodLikeWorkflows()] });
     const mod = await load();
     const first = await mod.main([]);
-    expect(first.update).toHaveLength(13);
-    expect(first.create).toHaveLength(RULES.length - 13);
+    // 旧 14 rule のうち 13 件 + 本番の手作り 2 件 (legacyNames) を PUT で更新。
+    expect(first.update).toHaveLength(15);
+    expect(first.create).toHaveLength(RULES.length - 15);
     expect(first.retire.map((r) => r.id)).toEqual(['102']);
-    expect(first.unmanaged.map((u) => u.name)).toEqual(PROD_NAMES);
+    expect(first.unmanaged.map((u) => u.name)).toEqual(PROD_UNMANAGED_NAMES);
     expect(writes()).toHaveLength(RULES.length);
-    // 管理外 (30000xx) と retire (102) には書き込まない。DELETE もしない。
-    for (const w of writes()) expect(w).not.toMatch(/\/workflows\/(102|300000\d)\/$|^DELETE/);
+    expect(writes()).toContain(`PUT ${ORG_URL}/workflows/3000002/`);
+    expect(writes()).toContain(`PUT ${ORG_URL}/workflows/3000003/`);
+    // 管理外 (3000001・3000004〜6) と retire (102) には書き込まない。DELETE もしない。
+    for (const w of writes()) expect(w).not.toMatch(/\/workflows\/(102|300000[1456])\/$|^DELETE/);
+    // 上書きした手作りの alert は RULES の名前になり、user 宛てメールのまま。
+    expect(fake.store.get('3000002')!.name).toBe('OpenPay: JPYC ガスレス中継の失敗 (relay.jpyc.*)');
+    for (const g of fake.store.get('3000002')!.actionFilters!) {
+      expect(g.actions!.map(({ id: _id, ...a }) => a)).toEqual([USER_EMAIL]);
+    }
     fetchSpy.mockClear();
     const second = await mod.main([]);
     expect(calls()).toEqual([GET_WORKFLOWS, GET_DETECTORS]);
@@ -1294,9 +1359,9 @@ describe('setup-sentry-alerts: main (Workflow Engine API の fake 経由の挙�
   });
 
   it('ページング: Link ヘッダの cursor を最後まで辿り、2 ページ目以降の管理対象も引き当てる', async () => {
-    useFake({ workflows: [...prodLikeWorkflows(), ...RULES.map((r, i) => stored(r, String(2000 + i)))], pageSize: 10 });
+    useFake({ workflows: [...prodUnmanagedWorkflows(), ...RULES.map((r, i) => stored(r, String(2000 + i)))], pageSize: 10 });
     const plan = await (await load()).main(['--dry-run']);
-    const pages = Math.ceil((6 + RULES.length) / 10);
+    const pages = Math.ceil((4 + RULES.length) / 10);
     expect(calls()).toEqual([
       GET_WORKFLOWS,
       ...Array.from({ length: pages - 1 }, (_, i) => `${GET_WORKFLOWS}&cursor=0%3A${(i + 1) * 10}%3A0`),
@@ -1304,7 +1369,7 @@ describe('setup-sentry-alerts: main (Workflow Engine API の fake 経由の挙�
     ]);
     expect(plan.unchanged).toHaveLength(RULES.length);
     expect(plan.create).toEqual([]);
-    expect(plan.unmanaged).toHaveLength(6);
+    expect(plan.unmanaged).toHaveLength(4);
   });
 
   it('同じ cursor を返し続ける Link ヘッダは止める (GET を無限に叩かない)', async () => {
@@ -1332,7 +1397,7 @@ describe('setup-sentry-alerts: main (Workflow Engine API の fake 経由の挙�
     expect(plan.unchanged).toHaveLength(1);
     expect(plan.create[0].payload.detectorIds).toEqual([DETECTOR]);
     fetchSpy.mockClear();
-    useFake({ workflows: prodLikeWorkflows(), detectors: DETECTORS.filter((d) => d.id !== DETECTOR) });
+    useFake({ workflows: prodUnmanagedWorkflows(), detectors: DETECTORS.filter((d) => d.id !== DETECTOR) });
     await expect(mod.main([])).rejects.toThrow(/Issue Stream detector を特定できません/);
     expect(writes()).toEqual([]);
   });
@@ -1343,7 +1408,7 @@ describe('setup-sentry-alerts: main (Workflow Engine API の fake 経由の挙�
     await (await load()).main(['--dry-run']);
     expect(calls()).toEqual([GET_WORKFLOWS, GET_DETECTORS]);
     const out = log.mock.calls.map((c) => c.join(' ')).join('\n');
-    expect(out).toContain(`create ${RULES.length - 13} / update 13 / unchanged 0 / retire 1 / 管理外 (触らない) 6`);
+    expect(out).toContain(`create ${RULES.length - 15} / update 15 / unchanged 0 / retire 1 / 管理外 (触らない) 4`);
     expect(out).toContain(`Issue Stream detector: id=${DETECTOR} (detectors 一覧から)`);
     expect(out).toContain('dry-run');
     expect(out).not.toContain('test_token');
