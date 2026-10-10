@@ -22,7 +22,9 @@ production の公開フラグを変更するときはこのファイルも確認
 ネットワークは testnet、鍵/forwarder はダミー、
 server-only フラグ/秘密は含めない。`.github/workflows/e2e.yml` の `e2e-prodflags` が同じファイルを
 **build 前**に読み、Chromium のみで `/pay`・`/checkout` (mobile order・お店がガス代を肩代わりして送る `submit=store`)・`/tip` の
-smoke/料金行を検証する。
+smoke/料金行を検証する。`.github/workflows/ci.yml` の bundle 予算チェック (`scripts/check-bundle-budget.mjs`) も
+同じファイルを build 前に読む — 予算は本番で点灯している flag の build で測る (flag OFF の build では到達コードが入らず
+本番より小さく見える・第 7 回レビュー E7)。予算の数字は `BUDGETS_KB` の注記どおり「この build の実測 + 小さな余裕」。
 既存の flags-OFF suite は別 job のまま維持する。ブラウザの API は `page.route` で固定し、未定義の
 API/外部通信はテスト失敗にする。例外は Coinbase SDK の同一 origin・非 API の HEAD probe
 (ローカルサーバへ通す) と `cca-lite.coinbase.com` の telemetry (記録せず中断し、外部へ送らない)。

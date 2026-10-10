@@ -120,6 +120,32 @@ describe('GitHub Actions operation guards', () => {
     expect([...source.matchAll(/--exclude (tests\/\S+)/g)]).toHaveLength(0);
   });
 
+  // bundle 予算は本番で点灯している公開 flag の build で測る (第 7 回レビュー E7)。NEXT_PUBLIC_* は build 時に値へ
+  // 置換されるので、flag OFF の build では本番で到達するコードが入らず、本番の bundle が予算を超えても CI が通る。
+  // 正本は e2e/prodFlags.env (e2e-prodflags job と同じ 1 本のベクター・Vercel 実値との照合は user)。build を増やさず
+  // 既存の test job の build を本番 flag にする。e2e の flags-OFF suite の build env は掟 2 のとおり変えない。
+  it('CI の bundle 予算は本番 flag (e2e/prodFlags.env) で build して測り、e2e の flags-OFF build は変えない', () => {
+    const source = workflow('ci.yml');
+    const testJob = source.slice(source.indexOf('\n  test:\n'), source.indexOf('\n  lua-real:\n'));
+    const loadVector = "sed '/^[[:space:]]*#/d; /^[[:space:]]*$/d' e2e/prodFlags.env >> \"$GITHUB_ENV\"";
+    const vector = testJob.indexOf(loadVector);
+    const build = testJob.indexOf('npm run build');
+    const budget = testJob.indexOf('node scripts/check-bundle-budget.mjs');
+    expect(vector, 'test job loads e2e/prodFlags.env into GITHUB_ENV').toBeGreaterThan(-1);
+    expect(build).toBeGreaterThan(vector);
+    expect(budget).toBeGreaterThan(build);
+    // build step に flag を上書きする env を持たせない (正本は e2e/prodFlags.env の 1 本だけ)
+    const buildStep = testJob.slice(testJob.lastIndexOf('- name:', build));
+    expect(buildStep).not.toMatch(/NEXT_PUBLIC_\w+:/);
+    // e2e-prodflags と同じ読み込み方 (コメント・空行を除いて GITHUB_ENV へ) に揃え、片方だけ変わるドリフトを止める
+    const e2e = workflow('e2e.yml');
+    expect(e2e).toContain(loadVector);
+    // flags-OFF の playwright job は CI の最小 env が権威 (掟 2): ベクターを読まない
+    const playwrightJob = e2e.slice(e2e.indexOf('\n  playwright:\n'), e2e.indexOf('\n  e2e-prodflags:\n'));
+    expect(playwrightJob).not.toContain('prodFlags.env');
+    expect(playwrightJob).toContain('NEXT_PUBLIC_NETWORK_ENV: testnet');
+  });
+
   it('run-tests.mjs は coverage の下限を共有の値で判定し、要約が無い・下限割れを fail にする (終了コード任せにしない)', () => {
     const runner = readFileSync(resolve(process.cwd(), 'scripts/run-tests.mjs'), 'utf8');
     expect(runner).toContain("from './lib/coverageThresholds.mjs'");

@@ -76,11 +76,14 @@ jobs:
       # ここで走らせないと SDK を変えても壊れたまま CI が green になる (第 7 回レビュー F16)。依存は root の node_modules。
       - name: SDK tests (node:test)
         run: npm --prefix packages/x402-sdk test
-      - name: Build (production) + bundle budget check
-        env:
-          NEXT_PUBLIC_NETWORK_ENV: testnet
-          NEXT_PUBLIC_PIMLICO_API_KEY: ci_dummy_key
-          NEXT_PUBLIC_FEE_RECEIVER_ADDRESS: '0x000000000000000000000000000000000000dEaD'
+      # bundle 予算は本番で点灯している公開 flag で build して測る (第 7 回レビュー E7)。NEXT_PUBLIC_* は build 時に
+      # 値へ置換されるので、flag OFF の最小 env で build すると本番で到達するコードが入らず、本番の bundle が予算を
+      # 超えても CI が通ってしまう。正本は e2e/prodFlags.env (e2e-prodflags job と同じ 1 本のベクター・network は
+      # testnet・鍵/forwarder はダミー・Vercel 実値との照合は user)。この job の最後の step なので他の step には及ばない。
+      # e2e (playwright job) の flags-OFF build は掟 2 のとおり変えない。
+      - name: Load public production flags (testnet fixtures)
+        run: sed '/^[[:space:]]*#/d; /^[[:space:]]*$/d' e2e/prodFlags.env >> "$GITHUB_ENV"
+      - name: Build (production flags) + bundle budget check
         run: |
           # build の失敗を tee の終了コードで隠さない (pipefail が無いと予算スクリプトのパース失敗頼みになる・第 7 回レビュー E12)
           set -o pipefail
