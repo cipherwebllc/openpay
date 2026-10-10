@@ -93,37 +93,38 @@ const PROFILES: Profile[] = [
 // 同レビュー E17 の follow-up で Payment Monitor の行に不変の slug を足し dedupe キーを改めたので、Monitor を含む構成を
 // 再採取 (差分は 200 応答の schema/example への slug の追加と、x-agent-usage の dedupe キーの説明だけ)。
 // 続けて x-agent-usage に slug が付く前に保存したイベントの照合手順を足したので再採取 (差分は Payment Monitor の x-agent-usage 2 本だけ)。
+// さらに provider をイベントごとに固定したので、USDC 版の x-agent-usage の「改名で変わる」を直して再採取 (差分はその 1 文だけ)。
 const EXPECTED_SHA256: Record<string, string> = {
   'all-on':
-    '365c2e8ea8dc08df76386821d806ff1ba7eb62a289eaf7ae60222160c534672e',
+    'ec131172dd862e8377c83820ce550f5d65c273a60fd4af5e6d5344daedfc3252',
   'all-on+arc':
-    '1d0eacd5f0dcc453c881f98ee9bf3ab77528dde15f460efc7b15d67921f7b7c3',
+    'ad046ac30f673c0eb358d9d840933d8bb5255327a78981a706534550688cc874',
   'all-on+mainnet':
-    'cac599638c939e212063a9674034a15f843c94c966d93eb5ca593894f67fde13',
+    '6d847a8c4fc7107b16cdaf78128d44d45c1e5edf3c7fd600332302a8447fd9fb',
   'all-on+mainnet+avalanche+ethereum':
-    '2e3f10ede7aae81cc1cf3553e7b3ad70551ea5ed5b48eb08d423de94022fa543',
+    'fd9a2072328e3688caae436784538b1dec38773a8e2c92b834d3660cf4699488',
   'all-on+fee':
-    'b96fa6efb6710ff70962da8d4cfd5f2aaf632f0eea074da6f08388606e3bc0ac',
+    '63adf900f467ca6e3ae3bf44d34c65217b623a9d01d463a9ded2cb07ecab9e36',
   'all-on+default-hello-price':
-    '97594b5af10b38d57e2e1ff722bc9e1d6bbcd2ffc526d6053557ae82eed8ea8f',
+    '5bc16abf5a084afefc08da2f1c82ca845f337700dc625b113b7f29ce1a4b99d3',
   'all-on+invalid-hello-price-unlisted':
-    '456de21f2f86c983ea14e63292f03c086665a527f3403ad22b6c81a5c97c5f59',
+    'a3af0b09df497c33305ce0060a966f9a8c1d9cf3feb901776dbac77930f5411f',
   'directory-only':
-    '34bed8dea7333229fa387867b629c3e9888742619a068017789d5cb835db6a34',
+    '8aa55afdc1f16731f5e289002aca149f4de5b63f23fd242617b86b9c3b526a81',
   'facilitator-only':
     '21ac634fe16c274ca3f1d66ef903d77839c67a4c92963b11b168d71418a191e0',
   'facilitator+shops':
     '935bca12f86224bafc76c3761bd32e5faaeda7398fde7ba557ab68b5618ee3b7',
   'directory+facilitator':
-    '90fb8a1cb132c86b1af8e0887dc1e3983dd9815be2e63da34a7b1ad6d3512a12',
+    '2550f1dc7bb550d7c6cb7211e3d434417b6def6ea18278d97b880758e1b5a31f',
   'license-only':
     'bdf3b0b4b901d5174663e0a74ebd070fb202326f20cee6bf9c193779fa2ac250',
   'directory+license-child-only':
-    '34bed8dea7333229fa387867b629c3e9888742619a068017789d5cb835db6a34',
+    '8aa55afdc1f16731f5e289002aca149f4de5b63f23fd242617b86b9c3b526a81',
   'late-mutation':
     '2e63ea53cf8c0c69e29f523b0c99f2d75f39456995e9d9a22c282f3918bb7dee',
   'late-facilitator':
-    'ba70449cf40652b9f8c3ea9b00a0e268142febc4513b4ebc2920105814459393',
+    'ca57dc1b29e7c026523fac40da5ecd9b89a32a131e64b0f8adbe41e52fe659ec',
 };
 
 // all-on の paths の key 順 (spread 順の固定)。

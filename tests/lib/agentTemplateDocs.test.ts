@@ -26,6 +26,8 @@ describe('docs/agent-templates/jpyc-service-monitor.md の MCP 設定例', () =>
   it('Payment Monitor の重複排除キーと slug 移行の手順を書く', () => {
     expect(doc).toContain('重複排除の鍵は `slug + date + changeCategory`');
     expect(doc).toContain('`slug` が付く前に保存したイベントは `provider` の鍵で残っているので、`slug` つきの行は同じ行の `provider` で組んだ旧い鍵とも照合してください');
+    expect(doc).toContain('`provider` はイベントを記録した時点の表示名で固定され、ディレクトリ側の名称変更には追随しません');
+    expect(doc).not.toContain('ディレクトリ側の名称変更で変わることがあります');
   });
 
   it('MCP 設定の JSON に秘密鍵の欄を置かない', () => {

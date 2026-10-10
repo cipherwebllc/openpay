@@ -37,13 +37,13 @@ export type PaymentChangeRow = {
   date: string;
   /** YYYY-MM-DD = こちらが記録した日 (収集日)。発表日と乖離する場合の監査用・任意。 */
   collectedAt?: string;
-  /** 事業者/主体の表示名。ディレクトリ掲載の事業者は entry の表示名から導出するので、名前の変更で変わる。 */
+  /** 事業者/主体の表示名 = changelog に記録した時点の名前で、イベントごとに固定 (ディレクトリの改名に追随しない)。
+   * 決済スコープのイベントは provider の明示が必須 (paymentMonitor.test.ts のフェンス)。 */
   provider: string;
   /**
-   * ディレクトリエントリに紐づくイベントだけに付く不変の識別子 (changelog の slug)。表示名 provider が
-   * 変わっても変わらない。公開の dedupe キー = slug (無いときは provider) + date + changeCategory
-   * (第 7 回レビュー E17 の follow-up: snapshot の続きで再配信されたイベントが改名後の provider で
-   * 届いても二重登録にしない)。
+   * ディレクトリエントリに紐づくイベントだけに付く不変の識別子 (changelog の slug)。公開の dedupe キー =
+   * slug (無いときは provider) + date + changeCategory (第 7 回レビュー E17 の follow-up)。slug を足す前に
+   * 保存された鍵は provider なので、同じ行の provider で旧い鍵を組んで照合できる (provider は固定)。
    */
   slug?: string;
   changeType: ServiceChangeType;
@@ -96,6 +96,8 @@ function toRow(
   return {
     date: event.date,
     ...(event.collectedAt ? { collectedAt: event.collectedAt } : {}),
+    // 決済スコープのイベントは provider を changelog に明示して固定する (改名に追随させない・フェンスあり)。
+    // entry.name 以降は明示を欠いたデータ (テスト fixture 等) の表示用の補い。
     provider: event.provider ?? entry?.name ?? event.slug ?? 'unknown',
     ...(event.slug ? { slug: event.slug } : {}),
     changeType: event.changeType,

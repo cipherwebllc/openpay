@@ -146,7 +146,7 @@ Claude Code なら `/schedule`(cron)や Hermes Agent の定期ジョブに上の
 A second monitor generated from the same weekly collection: it completes a different job — watching Japan's stablecoin **payment providers** (launches, pilots, partnerships, fee changes, supported assets/chains, closures).
 
 - イベントは `provider` 中心で、`changeCategory`(service_launch / pilot / partnership / fee_change / assets_change / chains_change / closure)と `assets` / `chains` が付きます
-- 重複排除の鍵は `slug + date + changeCategory`(`slug` はディレクトリ掲載の事業者のイベントだけに付く不変の識別子。無いイベントは `provider` で代用)。`provider` は表示名なので、ディレクトリ側の名称変更で変わることがあります。`slug` が付く前に保存したイベントは `provider` の鍵で残っているので、`slug` つきの行は同じ行の `provider` で組んだ旧い鍵とも照合してください
+- 重複排除の鍵は `slug + date + changeCategory`(`slug` はディレクトリ掲載の事業者のイベントだけに付く不変の識別子。無いイベントは `provider` で代用)。`provider` はイベントを記録した時点の表示名で固定され、ディレクトリ側の名称変更には追随しません。`slug` が付く前に保存したイベントは `provider` の鍵で残っているので、`slug` つきの行は同じ行の `provider` で組んだ旧い鍵とも照合してください
 - ディレクトリに載らない業界イベント(実証実験・提携)も対象です(例: JCB×Circle MOU、DG・JCB・りそなの実店舗実証)
 - 履歴は 2025 年 11 月まで遡って収録済み。実購入検証済み(settle tx `0xef1f0969…546b`)
 - **事業者の現況行 `providers`**(固定項目・毎週再確認): stage(partnership / pilot / commercial / closed)・assets・chains・settlementCurrency・merchantFee・integrations(api / in-store / ec / wallet)・posIntegration・region・announcedAt・startedAt・plannedPeriod・sourceUrl・verifiedAt・lastEventDate。**null は「確認したが一次ソースに公表がない」**という確認結果です(推測で埋めません)。snapshot は全社、delta は変更のあった社のみ・`totalProviders` で母数を開示

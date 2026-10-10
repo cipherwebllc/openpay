@@ -229,6 +229,7 @@ describe('public/llms.txt 開示同期 (掟 14③)', () => {
     const line = lineMentioning(JPYC_PAYMENTS_RESOURCE.path);
     expect(line).toContain('重複排除は slug+date+changeCategory');
     expect(line).toContain('slug が付く前に保存したイベントは provider で保存されているので、slug つきの行は同じ行の provider で組んだ旧い鍵とも照合する');
+    expect(line).toContain('provider はイベントごとに記録時の名前で固定され、改名に追随しない');
   });
 
   it('Activity は独立した価格・preview・observedAt/expiresAt の再購入ルールを持つ', () => {

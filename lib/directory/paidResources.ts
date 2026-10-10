@@ -317,7 +317,7 @@ const PAYMENT_MONITOR_OUTPUT = {
           provider: {
             type: 'string',
             description:
-              'Display name of the provider. For providers listed in the directory it follows the current directory name, so it can change when renamed.',
+              'Display name of the provider as recorded with the event; it is fixed per event and does not follow later directory renames.',
           },
           slug: {
             type: 'string',
