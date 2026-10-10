@@ -152,6 +152,20 @@ describe('useReceiverAutofill', () => {
     expect(setReceiver).toHaveBeenCalledWith(A2, 'auto');
   });
 
+  it('取り込んだ受取先のあと、切断して同じウォレットに再接続したら追従する', () => {
+    const A3 = getAddress('0x3333333333333333333333333333333333333333');
+    setAccount(A1);
+    const { setReceiver, rerender } = setup({ receiver: A2, receiverSource: 'manual', effectiveReceiver: A2, hydrated: true });
+    rerender({ receiver: A3, receiverSource: 'auto', effectiveReceiver: A3, hydrated: true });
+    setAccount(undefined);
+    rerender({ receiver: A3, receiverSource: 'auto', effectiveReceiver: A3, hydrated: true });
+    expect(setReceiver).not.toHaveBeenCalled();
+    setAccount(A1);
+    rerender({ receiver: A3, receiverSource: 'auto', effectiveReceiver: A3, hydrated: true });
+    expect(setReceiver).toHaveBeenCalledTimes(1);
+    expect(setReceiver).toHaveBeenCalledWith(A1, 'auto');
+  });
+
   it("source='manual' はウォレット切替に追従しない (据置)", () => {
     setAccount(A1);
     const { setReceiver, rerender } = setup({

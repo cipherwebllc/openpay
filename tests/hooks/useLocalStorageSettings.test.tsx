@@ -492,7 +492,7 @@ describe('取り込まない値 (受取先を別のウォレットに変えな�
     ['Web Locks あり', true],
     ['Web Locks なし', false],
   ])(
-    '別のウォレットに接続した 2 つのタブ: B で「接続中のウォレットを使う」を保存しても、取り込んだ A は自分のウォレットに置き換えない (%s)',
+    '別のウォレットに接続した 2 つのタブ: B で「接続中のウォレットを使う」を保存しても、取り込んだ A は自分のウォレットに置き換えない・A の再接続と切り替えには追従する (%s)',
     async (_label, withLocks) => {
       const WA = getAddress('0x1010101010101010101010101010101010101010');
       const WB = getAddress('0x2020202020202020202020202020202020202020');
@@ -505,7 +505,7 @@ describe('取り込まない値 (受取先を別のウォレットに変えな�
         while (locks.waiting() > 0) await locks.grant();
       };
       useAccountMock.mockImplementation(useTabWallet);
-      let walletA: Address = WA;
+      let walletA: Address | undefined = WA;
       const wrapA = ({ children }: { children: ReactNode }) => createElement(TabWallet.Provider, { value: walletA }, children);
       const wrapB = ({ children }: { children: ReactNode }) => createElement(TabWallet.Provider, { value: WB }, children);
       const a = renderHook(() => useQrTab(), { wrapper: wrapA });
@@ -523,7 +523,18 @@ describe('取り込まない値 (受取先を別のウォレットに変えな�
       expect(a.result.current.settings).toMatchObject({ receiver: WB, receiverSource: 'auto' });
       expect(stored()).toMatchObject({ receiver: WB, receiverSource: 'auto' });
 
-      // その後に A のウォレットが実際に切り替わったときは、従来どおり追従する。
+      // A で切断しただけでは受取先を変えない。同じウォレット (WA) に再接続したら、接続したウォレットに追従する。
+      walletA = undefined;
+      a.rerender();
+      await flush();
+      expect(a.result.current.settings).toMatchObject({ receiver: WB, receiverSource: 'auto' });
+      walletA = WA;
+      a.rerender();
+      await flush();
+      expect(a.result.current.settings).toMatchObject({ receiver: WA, receiverSource: 'auto' });
+      expect(stored()).toMatchObject({ receiver: WA, receiverSource: 'auto' });
+
+      // その後に A のウォレットが実際に切り替わったときも、従来どおり追従する。
       walletA = WA2;
       a.rerender();
       await flush();

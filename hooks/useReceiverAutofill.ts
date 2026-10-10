@@ -59,6 +59,9 @@ export function useReceiverAutofill(opts: {
     if (!hydrated) return;
     const seen = seenConnectedRef.current;
     seenConnectedRef.current = connected;
+    // 切断したら追従の基準を消す: 同じウォレットへの再接続も「接続アドレスが変わった」として追従する (取り込んだ別の
+    // タブの受取先のまま、再接続したウォレットではなく別のウォレット宛ての QR を出し続けないため)。
+    if (!connected) lastAutoRef.current = null;
     if (receiverSource !== 'auto') return;
     if (!connected || connected === lastAutoRef.current) return;
     if (seen === connected) {
