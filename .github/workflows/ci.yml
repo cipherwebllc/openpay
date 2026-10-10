@@ -86,6 +86,8 @@ jobs:
       # e2e (playwright job) の flags-OFF build は掟 2 のとおり変えない。
       - name: Load public production flags (testnet fixtures)
         run: sed '/^[[:space:]]*#/d; /^[[:space:]]*$/d' e2e/prodFlags.env >> "$GITHUB_ENV"
+      # この step の run は scripts/lib/workflowRun.mjs の PIPEFAIL_BUILD_RUN と完全一致させる (パイプの build の行を
+      # 許す唯一の形・コメント行も含む)。変えるときは両方を同時に変える (docs/DEPLOY_CHECKLIST.md §7.14)。
       - name: Build (production flags) + bundle budget check
         run: |
           # build の失敗を tee の終了コードで隠さない (pipefail が無いと予算スクリプトのパース失敗頼みになる・第 7 回レビュー E12)

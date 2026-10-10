@@ -738,11 +738,18 @@ run の行は許可リストとの完全一致だけを通し (fail-closed)、�
 workflow での書き方 (`scripts/lib/workflowRun.mjs` の `installGuardViolations` を `tests/scripts/workflow-guards.test.ts`
 が全 workflow に当てる): run の中で npm / npx / `lockfile-gate` / `installed-scripts-gate` の名前を含む行 (大文字小文字を
 問わない部分一致・コメントや echo・引用・here-doc の中も区別しない) は、前後の空白を除いた行全体が許可リスト
-(`ALLOWED_RUN_LINES`。今の workflow で使っている 12 行だけ。パイプを含む `npm run build 2>&1 | tee build.log` は同じ run の
-前の行に `set -o pipefail` があるときだけ) に完全一致しなければ fail。install の行と 2 つの gate の行は、
+(`ALLOWED_RUN_LINES`。今の workflow で使っている 12 行だけ) に完全一致しなければ fail。install の行と 2 つの gate の行は、
 その step の run がその 1 行だけで、install の step の直後の step が同じ root の実体 gate、install より前の step に
 lockfile-gate を置く。**npm / npx / gate の名前を run の中の説明文やコメントに書かない** (書くなら run の外の YAML コメントにする)。
-新しい npm の呼び出しが要るときは許可リストに 1 行足し、PR レビューで決める。
+新しい npm の呼び出しが要るときは許可リストに 1 行足し、PR レビューで決める。許可した行の実行のされ方を変える設定も止める:
+
+- workflow / job / step の `env` に `npm_config_*` (大文字小文字を問わない・取得元や ignore-scripts を差し替える) を置かない。
+  env の書式が読めなければ fail (flow・式・引用符付きの key・継続行)。
+- install・lockfile-gate・実体 gate の step の `if:` は、無いか、install の step と同じ 1 行の文字列だけ (job の `if:` は対象外)。
+- パイプを含む `npm run build 2>&1 | tee build.log` は、step の run 全体が ci.yml の build の step の固定テンプレート
+  (`PIPEFAIL_BUILD_RUN`・コメント行も含めた行の並び) と完全一致するときだけ許す。
+- workflow / job の `defaults:` (run.shell / run.working-directory) を使わない。npm / npx / gate の名前を含む行がある step に
+  `shell:` を付けない (install と実体 gate の step は working-directory も不可)。
 
 allowlist の追加は「用途・何のための native build か」を 1 行書いて PR レビューで決める。lockfile-gate が
 `stale` と出した名前 (もう install script を持たない) は一覧から外す。ローカルで CI と同じ手順を再現する:

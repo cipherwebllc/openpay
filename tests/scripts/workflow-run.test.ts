@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { ALLOWED_RUN_LINES, installGuardViolations, parseWorkflowJobs, runLines } from '../../scripts/lib/workflowRun.mjs';
 
@@ -168,6 +170,9 @@ describe('installGuardViolations', () => {
   const INSTALL = step('npm ci --ignore-scripts');
   const REBUILD = step('node scripts/installed-scripts-gate.mjs --rebuild node_modules');
   const guard = (...steps: string[]) => installGuardViolations(workflow(steps.join('\n')), 'x.yml');
+  // ci.yml の build の step の run (パイプの build の行を許す唯一の形)
+  const CI_BUILD_RUN = runLines(parseWorkflowJobs(readFileSync(resolve('.github/workflows/ci.yml'), 'utf8'))
+    .flatMap((job) => job.steps).find((step) => step.run?.includes('tee build.log'))!.run!);
 
   it('allows exactly the lines the workflows use, without comment, separator, expansion or quote characters', () => {
     expect([...ALLOWED_RUN_LINES]).toEqual([
@@ -184,7 +189,7 @@ describe('installGuardViolations', () => {
       'npm --prefix packages/x402-sdk test',
       'npm run build 2>&1 | tee build.log',
     ]);
-    // パイプを含むのは set -o pipefail の後ろでだけ許す build の 1 行だけ
+    // パイプを含むのは、run 全体が ci.yml の build の step と一致するときだけ許す build の 1 行だけ
     expect(ALLOWED_RUN_LINES.filter((line) => /[|&]/.test(line))).toEqual(['npm run build 2>&1 | tee build.log']);
     for (const line of ALLOWED_RUN_LINES) {
       expect(line).not.toMatch(/[#;$`'"\\(){}]|(^|\s)--(\s|$)|npx/);
@@ -196,7 +201,7 @@ describe('installGuardViolations', () => {
     ['production deps only', [SOURCE_GATE, step('npm ci --omit=dev --ignore-scripts'), REBUILD]],
     ['a second install under tools/lighthouse', [SOURCE_GATE, INSTALL, REBUILD, step('npm --prefix tools/lighthouse ci --ignore-scripts'), step('node scripts/installed-scripts-gate.mjs --rebuild tools/lighthouse/node_modules')]],
     ['allowed npm lines and local bins inside a longer run', [block('./node_modules/.bin/vitest run', 'npm run lint', 'npm --prefix packages/x402-sdk test', 'echo done')]],
-    ['the build piped to tee after set -o pipefail', [block('set -o pipefail', 'npm run build 2>&1 | tee build.log', 'node scripts/check-bundle-budget.mjs < build.log')]],
+    ['the build piped to tee in the run of the ci.yml build step', [block(...CI_BUILD_RUN)]],
     ['a YAML comment after a plain run (bash never sees it)', [SOURCE_GATE, step('npm ci --ignore-scripts # see docs'), REBUILD]],
     ['quoted runs', [step("'node scripts/lockfile-gate.mjs'"), step('"npm ci --ignore-scripts"'), REBUILD]],
     ['a source gate without an install (the audit job)', [SOURCE_GATE, step('node scripts/audit-gate.mjs')]],
@@ -309,5 +314,91 @@ describe('installGuardViolations', () => {
     ['shell on the installed-scripts gate', [SOURCE_GATE, INSTALL, step('node scripts/installed-scripts-gate.mjs --rebuild node_modules', '\n        shell: sh')], /working-directory or shell/],
   ])('reports %s', (_label, steps, message) => {
     expect(guard(...steps).join('\n')).toMatch(message);
+  });
+});
+
+// Codex レビュー 8 回目 (PR #778): 許可した行のままでも、env による npm の設定の差し替え・gate だけを飛ばす if・
+// pipefail が効かない run・defaults / shell による実行のされ方の変更で偽 green になっていた。
+describe('installGuardViolations: env, if, the pipefail build run, defaults and shell', () => {
+  const step = (run: string, extra = '') => `      - run: ${run}${extra}`;
+  const block = (...lines: string[]) => `      - run: |\n${lines.map((line) => `          ${line}`).join('\n')}`;
+  const SOURCE_GATE = step('node scripts/lockfile-gate.mjs');
+  const INSTALL = step('npm ci --ignore-scripts');
+  const REBUILD = step('node scripts/installed-scripts-gate.mjs --rebuild node_modules');
+  const full = (steps: string[], { top = '', job = '', tail = '' } = {}) =>
+    `name: x\non: push\npermissions:\n  contents: read\n${top}jobs:\n  build:\n    runs-on: ubuntu-latest\n${job}    steps:\n${steps.join('\n')}\n${tail}`;
+  const guard = (steps: string[], options: { top?: string, job?: string, tail?: string } = {}) => installGuardViolations(full(steps, options), 'x.yml');
+  const SEQUENCE = [SOURCE_GATE, INSTALL, REBUILD];
+  const CI_BUILD_RUN = runLines(parseWorkflowJobs(readFileSync(resolve('.github/workflows/ci.yml'), 'utf8'))
+    .flatMap((job) => job.steps).find((step) => step.run?.includes('tee build.log'))!.run!);
+  const IF_SKIP = "\n        if: steps.secrets.outputs.skip != 'true'";
+
+  it('keeps the pipefail template identical to the ci.yml build step', async () => {
+    const { PIPEFAIL_BUILD_RUN } = await import('../../scripts/lib/workflowRun.mjs');
+    expect([...PIPEFAIL_BUILD_RUN]).toEqual(CI_BUILD_RUN);
+  });
+
+  it.each([
+    ['the install sequence with ordinary env at every level', [step('npm ci --ignore-scripts', '\n        env:\n          TZ: UTC'), REBUILD], { top: 'env:\n  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: \'true\'\n', job: '    env:\n      NEXT_PUBLIC_NETWORK_ENV: testnet\n' }],
+    ['the Pimlico shape (no if on the source gate, the same if on the install and the gate)', [SOURCE_GATE, step('npm ci --omit=dev --ignore-scripts', IF_SKIP), step('node scripts/installed-scripts-gate.mjs --rebuild node_modules', IF_SKIP)], {}],
+    ['a job-level if (it applies to the whole job)', SEQUENCE, { job: "    if: github.event_name == 'push'\n" }],
+    ['shell on a step without npm / npx / gate lines', [...SEQUENCE, step('echo hi', '\n        shell: bash {0}')], {}],
+  ])('accepts %s', (_label, steps, options) => {
+    const allSteps = steps[0] === SOURCE_GATE ? steps : [SOURCE_GATE, ...steps];
+    expect(guard(allSteps, options)).toEqual([]);
+  });
+
+  // 1. env による npm の設定 (取得元・ignore-scripts) の差し替え
+  it.each([
+    ['workflow env', SEQUENCE, { top: 'env:\n  NPM_CONFIG_REGISTRY: https://mirror.example/\n' }, /x\.yml: env NPM_CONFIG_REGISTRY/],
+    ['workflow env after jobs', SEQUENCE, { tail: 'env:\n  npm_config_registry: https://mirror.example/\n' }, /x\.yml: env npm_config_registry/],
+    ['job env', SEQUENCE, { job: '    env:\n      npm_config_registry: https://mirror.example/\n' }, /x\.yml\/build: env npm_config_registry/],
+    ['install step env', [SOURCE_GATE, step('npm ci --ignore-scripts', '\n        env:\n          NPM_CONFIG_REGISTRY: https://mirror.example/'), REBUILD], {}, /step 2: env NPM_CONFIG_REGISTRY/],
+    ['env of another step', [...SEQUENCE, step('npm run build', "\n        env:\n          npm_config_ignore_scripts: 'false'")], {}, /step 4: env npm_config_ignore_scripts/],
+  ])('reports npm_config_* in %s', (_label, steps, options, message) => {
+    expect(guard(steps, options).join('\n')).toMatch(message);
+  });
+
+  it.each([
+    ['a flow mapping at the workflow level', SEQUENCE, { top: 'env: {NPM_CONFIG_REGISTRY: https://mirror.example/}\n' }],
+    ['an expression at the step level', [SOURCE_GATE, step('npm ci --ignore-scripts', '\n        env: ${{ fromJSON(vars.ENV) }}'), REBUILD], {}],
+    ['a quoted env key', SEQUENCE, { job: '    env:\n      "NPM_CONFIG_REGISTRY": https://mirror.example/\n' }],
+    ['misaligned env keys', SEQUENCE, { job: '    env:\n      A: b\n       NPM_CONFIG_REGISTRY: x\n' }],
+    ['a quoted top-level env key', SEQUENCE, { top: '"env":\n  NPM_CONFIG_REGISTRY: x\n' }],
+    ['two top-level env keys', SEQUENCE, { top: 'env:\n  A: b\n', tail: 'env:\n  NPM_CONFIG_REGISTRY: x\n' }],
+  ])('fails closed on env it cannot read: %s', (_label, steps, options) => {
+    expect(() => guard(steps, options)).toThrow();
+  });
+
+  // 2. gate だけが飛ばされる if (Codex の 2 例ほか)
+  it.each([
+    ['the Pimlico installed-scripts gate with another condition', [SOURCE_GATE, step('npm ci --omit=dev --ignore-scripts', IF_SKIP), step('node scripts/installed-scripts-gate.mjs --rebuild node_modules', "\n        if: steps.secrets.outputs.skip == 'true'")], /step 3: the if of a gate step/],
+    ['the CI source gate only on push', [step('node scripts/lockfile-gate.mjs', "\n        if: github.event_name == 'push'"), INSTALL, REBUILD], /step 1: the if of a gate step/],
+    ['the installed-scripts gate with an if the install does not have', [SOURCE_GATE, INSTALL, step('node scripts/installed-scripts-gate.mjs --rebuild node_modules', '\n        if: always()')], /step 3: the if of a gate step/],
+    ['a block scalar if on the gate', [SOURCE_GATE, step('npm ci --ignore-scripts', '\n        if: |\n          true'), step('node scripts/installed-scripts-gate.mjs --rebuild node_modules', '\n        if: |\n          false')], /the if of (the install step|a gate step)/],
+  ])('reports %s', (_label, steps, message) => {
+    expect(guard(steps).join('\n')).toMatch(message);
+  });
+
+  // 3. pipefail が build のときに効く保証が無い run
+  it.each([
+    // set -o pipefail の行はあるが、呼ばれないサブシェル関数の中なので build には効かない
+    ['pipefail set only inside a subshell function', CI_BUILD_RUN.flatMap((line) => (line === 'set -o pipefail' ? ['enable() (', line, ')'] : [line]))],
+    ['pipefail turned off before the build', CI_BUILD_RUN.flatMap((line) => (line.startsWith('npm run build') ? ['set +o pipefail', line] : [line]))],
+    ['only set -o pipefail before the build line', ['set -o pipefail', 'npm run build 2>&1 | tee build.log']],
+    ['the template with an extra line at the end', [...CI_BUILD_RUN, 'echo done']],
+  ])('reports the piped build in a run that is not the template: %s', (_label, lines) => {
+    expect(guard([...SEQUENCE, block(...lines)]).join('\n')).toMatch(/"npm run build 2>&1 \| tee build\.log" .* is not an allowed line/);
+  });
+
+  // 4. defaults と shell
+  it.each([
+    ['workflow defaults.run.shell', SEQUENCE, { top: 'defaults:\n  run:\n    shell: bash {0}\n' }, /x\.yml: defaults/],
+    ['job defaults.run.working-directory', SEQUENCE, { job: '    defaults:\n      run:\n        working-directory: packages/x\n' }, /x\.yml\/build: defaults/],
+    ['shell on a step with an allowed npm line', [...SEQUENCE, step('npm run lint', '\n        shell: bash {0}')], {}, /step 4: a step that runs npm \/ a gate must not set shell/],
+    ['shell on the source gate', [step('node scripts/lockfile-gate.mjs', '\n        shell: bash {0}'), INSTALL, REBUILD], {}, /step 1: a step that runs npm \/ a gate must not set shell/],
+    ['shell on the pipefail build step', [...SEQUENCE, `${block(...CI_BUILD_RUN)}\n        shell: bash {0}`], {}, /step 4: a step that runs npm \/ a gate must not set shell/],
+  ])('reports %s', (_label, steps, options, message) => {
+    expect(guard(steps, options).join('\n')).toMatch(message);
   });
 });
