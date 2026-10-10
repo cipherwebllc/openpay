@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { classifyNpmCommand, installGuardViolations, parseWorkflowJobs, splitCommands } from '../../scripts/lib/workflowRun.mjs';
+import { classifyNpmCommand, installGuardViolations, parseWorkflowJobs, splitCommands, splitShell } from '../../scripts/lib/workflowRun.mjs';
 
 // Codex レビュー 4 回目 (PR #778) 2: workflow ガードが YAML の別書式 (`run: |`・`run: >-`・引用符付き) と
 // 1 step 内の追加コマンド (`npm ci --ignore-scripts && npm rebuild`) を見逃していた。run をこの形まで読み、
@@ -271,5 +271,81 @@ describe('installGuardViolations', () => {
     const violations = guard(...steps);
     expect(violations.length).toBeGreaterThan(0);
     expect(violations.join('\n')).toMatch(message);
+  });
+
+  // Codex レビュー 6 回目 (PR #778) P1: npm (nopt) は `--ignore-scripts false` の false を値として読み、scripts の無効化を
+  // 解除する。--ignore-scripts の存在だけでなく、ちょうど 1 回・値なし・略記や否定なしを求める。
+  it.each([
+    ['--ignore-scripts false', 'npm ci --ignore-scripts false'],
+    ['--ignore-scripts true', 'npm ci --ignore-scripts true'],
+    ['--ignore-scripts given twice', 'npm ci --ignore-scripts --ignore-scripts'],
+    ['an abbreviated second flag', 'npm ci --ignore-scripts --ignore-scr false'],
+    ['a value after a prefixed install', 'npm --prefix tools/x ci --ignore-scripts false'],
+  ])('reports npm ci with %s', (_label, install) => {
+    const root = install.includes('--prefix tools/x') ? 'tools/x/node_modules' : 'node_modules';
+    const violations = guard(SOURCE_GATE, step(install), step(`node scripts/installed-scripts-gate.mjs --rebuild ${root}`));
+    expect(violations.join('\n')).toMatch(/--ignore-scripts (must be given exactly once|takes no value)/);
+  });
+
+  it('accepts --ignore-scripts followed by another flag', () => {
+    expect(guard(SOURCE_GATE, step('npm ci --ignore-scripts --omit=dev'), REBUILD)).toEqual([]);
+  });
+
+  // Codex レビュー 6 回目 (PR #778) P2: GitHub の既定の shell (bash -e) に pipefail は無く、gate を tee にパイプする・
+  // || true を付ける・バックグラウンドにする・後ろにコマンドを続けると、gate の失敗が step の成功に隠れうる。
+  it.each([
+    ['piped to tee', [SOURCE_GATE, INSTALL, step('node scripts/installed-scripts-gate.mjs --rebuild node_modules | tee /dev/null')]],
+    ['piped with |&', [SOURCE_GATE, INSTALL, step('node scripts/installed-scripts-gate.mjs --rebuild node_modules |& tee log')]],
+    ['followed by || true', [SOURCE_GATE, INSTALL, step('node scripts/installed-scripts-gate.mjs --rebuild node_modules || true')]],
+    ['run in the background', [SOURCE_GATE, INSTALL, step('node scripts/installed-scripts-gate.mjs --rebuild node_modules &')]],
+    ['followed by ; echo ok', [SOURCE_GATE, INSTALL, step('node scripts/installed-scripts-gate.mjs --rebuild node_modules; echo ok')]],
+    ['followed by && echo ok', [SOURCE_GATE, INSTALL, step('node scripts/installed-scripts-gate.mjs --rebuild node_modules && echo ok')]],
+    ['followed by another line', [SOURCE_GATE, INSTALL, step('|\n          node scripts/installed-scripts-gate.mjs --rebuild node_modules\n          echo ok')]],
+    ['on the right of a pipe from npm ci', [SOURCE_GATE, step('npm ci --ignore-scripts | node scripts/installed-scripts-gate.mjs --rebuild node_modules')]],
+    ['after npm ci in the background', [SOURCE_GATE, step('npm ci --ignore-scripts & node scripts/installed-scripts-gate.mjs --rebuild node_modules')]],
+    ['after npm ci ||', [SOURCE_GATE, step('npm ci --ignore-scripts || node scripts/installed-scripts-gate.mjs --rebuild node_modules')]],
+    ['after npm ci || continued on the next line', [SOURCE_GATE, step('|\n          npm ci --ignore-scripts ||\n          node scripts/installed-scripts-gate.mjs --rebuild node_modules')]],
+    ['the source gate piped to tee', [step('node scripts/lockfile-gate.mjs | tee /dev/null'), INSTALL, REBUILD]],
+    ['the source gate followed by || true', [step('node scripts/lockfile-gate.mjs || true'), INSTALL, REBUILD]],
+    ['the source gate followed by ; echo ok', [step('node scripts/lockfile-gate.mjs; echo ok'), INSTALL, REBUILD]],
+  ])('reports a gate %s', (_label, steps) => {
+    expect(guard(...steps).join('\n')).toMatch(/a gate must run on its own at the end of its step/);
+  });
+
+  it.each([
+    ['after npm ci &&', [SOURCE_GATE, step('npm ci --ignore-scripts && node scripts/installed-scripts-gate.mjs --rebuild node_modules')]],
+    ['after npm ci on the previous line', [SOURCE_GATE, step('|\n          npm ci --ignore-scripts\n          node scripts/installed-scripts-gate.mjs --rebuild node_modules')]],
+    ['after npm ci ;', [SOURCE_GATE, step('npm ci --ignore-scripts; node scripts/installed-scripts-gate.mjs --rebuild node_modules')]],
+    ['timed', [step('time node scripts/lockfile-gate.mjs'), INSTALL, REBUILD]],
+  ])('accepts a gate %s', (_label, steps) => {
+    expect(guard(...steps)).toEqual([]);
+  });
+});
+
+describe('splitShell', () => {
+  it('returns the separator before and after each command', () => {
+    expect(splitShell('a | tee x && b || c; d &\ne\nf |& g')).toEqual([
+      { command: 'a', before: '', after: '|' },
+      { command: 'tee x', before: '|', after: '&&' },
+      { command: 'b', before: '&&', after: '||' },
+      { command: 'c', before: '||', after: ';' },
+      { command: 'd', before: ';', after: '&' },
+      { command: 'e', before: '&', after: '\n' },
+      { command: 'f', before: '\n', after: '|&' },
+      { command: 'g', before: '|&', after: '' },
+    ]);
+  });
+
+  it('treats a new line after &&, || or | as the continuation of that operator, like bash', () => {
+    expect(splitShell('a ||\n  # comment\nb &&\nc |\nd')).toEqual([
+      { command: 'a', before: '', after: '||' },
+      { command: 'b', before: '||', after: '&&' },
+      { command: 'c', before: '&&', after: '|' },
+      { command: 'd', before: '|', after: '' },
+    ]);
+  });
+
+  it('keeps redirections inside the command and a trailing operator as after', () => {
+    expect(splitShell('npm run build 2>&1 &> log;')).toEqual([{ command: 'npm run build 2>&1 &> log', before: '', after: ';' }]);
   });
 });

@@ -735,6 +735,12 @@ workflow の検査 (`tests/scripts/workflow-guards.test.ts` + `scripts/lib/workf
    いない)。リポ内の link は `packages/x402-sdk` のみで prepare を持たない。link に prepare を足すときはこの一覧と
    同時に見直す。
 
+workflow での書き方 (`scripts/lib/workflowRun.mjs` の `installGuardViolations` を `tests/scripts/workflow-guards.test.ts`
+が全 workflow に当てる): `npm ci` には `--ignore-scripts` をちょうど 1 回・値なしで付ける (npm は
+`--ignore-scripts false` の `false` を値として読み、scripts の無効化を解除する)。2 つの gate はそれぞれ単独のコマンドとして
+step の最後に置く。GitHub の既定の shell (`bash -e`) は pipefail を持たないので、`| tee`・`|| true`・`&`・後ろに続く
+コマンドは gate の失敗を step の成功に隠しうる (直前の `npm ci --ignore-scripts &&` だけは可)。
+
 allowlist の追加は「用途・何のための native build か」を 1 行書いて PR レビューで決める。lockfile-gate が
 `stale` と出した名前 (もう install script を持たない) は一覧から外す。ローカルで CI と同じ手順を再現する:
 

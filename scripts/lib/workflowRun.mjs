@@ -20,13 +20,14 @@
 //
 // シェル (splitCommands): `\` + 改行 (行継続) を bash と同じく先に取り除き、`&&` `||` `;` `|` `|&` `&` と改行で分け、
 // 先頭の `time` と `VAR=value` を落として最初の語 (npm / npx / node …) で判定できる形にする。シェル構文の完全な解析は
-// しない代わりに、npm / npx を含む行で読めないもの (上記) を throw する。
+// しない代わりに、npm / npx を含む行で読めないもの (上記) を throw する。splitShell は各コマンドの前後の区切りの
+// 演算子も返し、installGuardViolations が gate を単独のコマンドに限るのに使う。
 
 const NPM_WORD = /\b(?:npm|npx)\b/;
 const KEY_LINE = /^(\w[\w-]*):(?:[ \t]+(.*))?$/;
 const BLANK_OR_COMMENT = /^\s*(?:#.*)?$/;
-// 区切り: && / || / |& / ; / | / & (ただし 2>&1 や &> のリダイレクトの & は区切りにしない)
-const SEPARATOR = /\s*(?:&&|\|\||\|&|;|\||(?<![<>])&(?!>))\s*/;
+// 区切り: && / || / |& / ; / | / & (ただし 2>&1 や &> のリダイレクトの & は区切りにしない)。split で演算子も残す。
+const SEPARATOR = /\s*(&&|\|\||\|&|;|\||(?<![<>])&(?!>))\s*/;
 
 function lineError(line, message) {
   return new Error(`line ${line.at + 1}: ${message}`);
@@ -152,15 +153,15 @@ function parseStep(state, item, seqIndent) {
     line = next;
     state.i = next.at + 1;
   }
-  let commands = [];
+  let segments = [];
   if (run !== null) {
     try {
-      commands = splitCommands(run);
+      segments = splitShell(run);
     } catch (error) {
       throw lineError(item, error.message);
     }
   }
-  return { raw: state.lines.slice(item.at, state.i).join('\n'), keys, run, commands };
+  return { raw: state.lines.slice(item.at, state.i).join('\n'), keys, run, commands: segments.map((s) => s.command), segments };
 }
 
 /** `steps:` の値 (ブロックシーケンス) を読む。 */
@@ -208,7 +209,7 @@ function parseJob(state, jobIndent, name) {
 /**
  * 1 つの workflow ファイルを job ごとの step 配列に分ける。
  * @param {string} source
- * @returns {Array<{ job: string, steps: Array<{ raw: string, keys: Record<string, string>, run: string | null, commands: string[] }> }>}
+ * @returns {Array<{ job: string, steps: Array<{ raw: string, keys: Record<string, string>, run: string | null, commands: string[], segments: Array<{ command: string, before: string, after: string }> }> }>}
  */
 export function parseWorkflowJobs(source) {
   if (source.includes('\r')) throw new Error('a workflow with CR line endings is not read');
@@ -231,11 +232,17 @@ export function parseWorkflowJobs(source) {
   return jobs;
 }
 
-/** シェル (複数行可) を個々のコマンドに分ける。先頭の time / 環境変数指定は落とす。npm / npx を読めない形は throw。 */
-export function splitCommands(shell) {
+/**
+ * シェル (複数行可) を個々のコマンドに分け、前後の区切りの演算子も返す。先頭の time / 環境変数指定は落とす。
+ * npm / npx を読めない形は throw。
+ * before = 直前の区切り ('' = 先頭・'\n' = 改行・';' '&&' '||' '|' '|&' '&')、after = 直後の区切り ('' = 末尾)。
+ * `&&` `||` `|` の後ろの改行は bash と同じく続きとして扱う (`a ||` + 改行 + `b` の b の before は '||')。
+ * @returns {Array<{ command: string, before: string, after: string }>}
+ */
+export function splitShell(shell) {
   // 行継続は bash と同じく `\` + 改行をそのまま取り除く (`np\` + 改行 + `m install` = `npm install`)。
   const joined = shell.replace(/\\\n/g, '');
-  const out = [];
+  const tokens = [];
   for (const line of joined.split('\n')) {
     const trimmed = line.trim();
     if (trimmed === '') continue;
@@ -244,7 +251,13 @@ export function splitCommands(shell) {
       if (NPM_WORD.test(trimmed)) throw new Error(`npm / npx in a shell comment is not read: ${trimmed}`);
       continue;
     }
-    for (const part of trimmed.split(SEPARATOR)) {
+    // 改行はコマンドの直後にあるときだけ区切り (演算子の後ろの改行は、その演算子の続き)。
+    if (tokens.length > 0 && tokens[tokens.length - 1].command !== undefined) tokens.push({ op: '\n' });
+    trimmed.split(SEPARATOR).forEach((part, index) => {
+      if (index % 2 === 1) {
+        tokens.push({ op: part });
+        return;
+      }
       const words = part.trim().split(/\s+/).filter(Boolean);
       while (words.length > 0 && (words[0] === 'time' || /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[0]))) words.shift();
       const command = words.join(' ');
@@ -257,10 +270,20 @@ export function splitCommands(shell) {
         // env npm … / bash -c 'npm …' / "$(npm …)" / xargs npm … / (npm …) / /usr/bin/npm … / n=npm 等。
         throw new Error(`npm / npx not at the head of the command (wrapper / subshell / expansion / quote / path / assignment) is not read: ${part.trim()}`);
       }
-      if (words.length > 0) out.push(command);
-    }
+      if (words.length > 0) tokens.push({ command });
+    });
   }
-  return out;
+  // 2 つのコマンドの間には必ず演算子があるので、隣の token が演算子ならそれが before / after。
+  return tokens.flatMap((token, index) => (token.command === undefined ? [] : [{
+    command: token.command,
+    before: tokens[index - 1]?.op ?? '',
+    after: tokens[index + 1]?.op ?? '',
+  }]));
+}
+
+/** シェル (複数行可) を個々のコマンドに分ける (splitShell のコマンドだけ)。 */
+export function splitCommands(shell) {
+  return splitShell(shell).map((segment) => segment.command);
 }
 
 /**
@@ -300,6 +323,8 @@ const INSTALLED_SCRIPTS_GATE = 'node scripts/installed-scripts-gate.mjs';
 const FORBIDDEN_NPM_SUBCOMMANDS = ['install', 'i', 'add', 'rebuild', 'exec', 'x', 'update', 'up'];
 // それ以外で workflow から呼んでよいもの (未知のサブコマンドは足す前にレビューする)。
 const ALLOWED_NPM_SUBCOMMANDS = ['run', 'run-script', 'test', 'audit', 'view', 'pack', 'publish'];
+// gate の直前に来てよい区切り (先頭・改行・; ・&&)。|・||・|&・& の後ろは gate が走らない / 並行に走る。
+const GATE_BEFORE = ['', '\n', ';', '&&'];
 
 /**
  * workflow 1 本の依存 install の手順と npm / npx の呼び出しを検査し、違反を返す (空配列なら OK・読めない形は throw)。
@@ -308,8 +333,13 @@ const ALLOWED_NPM_SUBCOMMANDS = ['run', 'run-script', 'test', 'audit', 'view', '
  *     continue-on-error を付けない。
  *   - npx は全面禁止 (`npx --no` でも global の bin や npx の cache を実行しうる)。bin は `npm run <script>` か
  *     `./node_modules/.bin/<bin>` で呼ぶ。`--no-ignore-scripts` / `--ignore-scripts=…` は書かない。
- *   - npm ci は `--ignore-scripts` 付きで、直後のコマンド (同じ step か次の step) が
+ *   - npm ci は `--ignore-scripts` をちょうど 1 回・値なしで付け (npm は `--ignore-scripts false` の false を値として
+ *     読み、scripts の無効化を解除する)、直後のコマンド (同じ step か次の step) が
  *     `node scripts/installed-scripts-gate.mjs --rebuild <root>/node_modules` で continue-on-error なし。
+ *   - 2 つの gate (lockfile-gate / installed-scripts-gate) の呼び出しは単独のコマンドで、その step の最後に置く
+ *     (before は 先頭 / 改行 / ; / && のどれか・after は無し)。GitHub の既定の shell (bash -e) は pipefail を持たず、
+ *     `| tee` の右・`|| true`・`&` (バックグラウンド)・後ろに続くコマンドは gate の失敗を step の成功に変えうる。
+ *     前の `npm ci --ignore-scripts &&` は許す (npm ci が失敗すれば gate は走らず、末尾の && の失敗で step が落ちる)。
  *   - その他の npm は ALLOWED_NPM_SUBCOMMANDS だけ (install / rebuild / exec 等は禁止)。
  * @param {string} source workflow の YAML
  * @param {string} [name] 違反メッセージに付けるファイル名
@@ -319,7 +349,9 @@ export function installGuardViolations(source, name = 'workflow') {
   const violations = [];
   const continueOnError = (step) => step.keys['continue-on-error'] ?? 'false';
   for (const { job, steps } of parseWorkflowJobs(source)) {
-    const commands = steps.flatMap((step, stepIndex) => step.commands.map((command) => ({ command, step, stepIndex })));
+    const commands = steps.flatMap((step, stepIndex) => step.segments.map((segment, at) => ({
+      command: segment.command, segment, last: at === step.segments.length - 1, step, stepIndex,
+    })));
     const install = commands.findIndex(({ command }) => {
       const npm = classifyNpmCommand(command);
       return npm?.tool === 'npm' && npm.subcommand === 'ci';
@@ -332,10 +364,19 @@ export function installGuardViolations(source, name = 'workflow') {
         violations.push(`${name}/${job}: no continue-on-error up to and including the source gate`);
       }
     }
-    commands.forEach(({ command, step, stepIndex }, index) => {
+    commands.forEach(({ command, segment, last, step, stepIndex }, index) => {
+      const where = `${name}/${job}: "${command}"`;
+      // Codex レビュー 6 回目 (PR #778) P2: `gate | tee /dev/null` は pipefail の無い bash で gate の exit 1 を tee の 0 に隠す。
+      if ([LOCKFILE_GATE, INSTALLED_SCRIPTS_GATE].some((gate) => command === gate || command.startsWith(`${gate} `))) {
+        if (!last || segment.after !== '' || !GATE_BEFORE.includes(segment.before)) {
+          violations.push(
+            `${where}: a gate must run on its own at the end of its step (no pipe, ||, &, or commands after it; ` +
+              `before it only a new line, ; or &&) so that its exit status is the step's`,
+          );
+        }
+      }
       const npm = classifyNpmCommand(command);
       if (npm === null) return;
-      const where = `${name}/${job}: "${command}"`;
       if (npm.tool === 'npx') {
         violations.push(`${where}: npx is not allowed; call ./node_modules/.bin/<bin> or npm run <script>`);
         return;
@@ -345,7 +386,20 @@ export function installGuardViolations(source, name = 'workflow') {
         violations.push(`${where}: --no-ignore-scripts / --ignore-scripts=<value> undo --ignore-scripts`);
       }
       if (npm.subcommand === 'ci') {
-        if (!npm.args.includes('--ignore-scripts')) violations.push(`${where}: npm ci must not run install scripts (--ignore-scripts)`);
+        // Codex レビュー 6 回目 (PR #778) P1: npm (nopt) は boolean の直後の `true` / `false` を値として読む
+        // (`--ignore-scripts false` で scripts の無効化が解除される)。--ignore-scripts はちょうど 1 回・値なしに限り、
+        // 略記 (--ig…) や否定も拒否する。
+        const ignoreFlags = npm.args.filter((arg) => /^--(?:no-)?ig/.test(arg));
+        if (ignoreFlags.length === 0) {
+          violations.push(`${where}: npm ci must not run install scripts (--ignore-scripts)`);
+        } else if (ignoreFlags.length !== 1 || ignoreFlags[0] !== '--ignore-scripts') {
+          violations.push(`${where}: --ignore-scripts must be given exactly once, spelled out (got ${ignoreFlags.join(' ')})`);
+        } else {
+          const value = npm.args[npm.args.indexOf('--ignore-scripts') + 1];
+          if (value !== undefined && !value.startsWith('-')) {
+            violations.push(`${where}: --ignore-scripts takes no value (npm reads "--ignore-scripts ${value}" as ignore-scripts=${value})`);
+          }
+        }
         const root = npm.prefix ? `${npm.prefix}/node_modules` : 'node_modules';
         const next = commands[index + 1];
         if (next?.command !== `${INSTALLED_SCRIPTS_GATE} --rebuild ${root}`) {
