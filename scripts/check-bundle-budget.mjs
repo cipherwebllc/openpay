@@ -142,11 +142,12 @@ function parseSizeBytes(line) {
 // (例 "… 426 kB   5m   1y") を足すので、行末ではなく「route の後ろの 2 つ目のサイズ」を取り、後ろの列は許容する
 // (行末のサイズを要求すると ISR 行が落ちて、予算内は [MISSING]・予算外の重い route は素通りになる)。
 // 行頭の box 文字から始まらない行 (shared chunk の "  ├ chunks/…  130 kB"・子ルート "├   ├ /ja") は route にしない。
+// 表が 1 行だけのとき Next は行頭を "─" にする (printTreeView の border 選択・Pages Router 併設時など) ので許容する。
 // 生成に 300 ms を超えた route は名前の直後に "(301 ms)" が付く (next/dist/build/utils.js の MIN_DURATION・
 // 秒表記が来ても許容)。これを許容しないと注記付きの予算対象は [MISSING]・予算外の重い route は素通りになる。
 const SIZE = '(\\d+(?:\\.\\d+)?)\\s*(B|kB|MB|GB|TB|PB|EB|ZB|YB)';
 const DURATION_NOTE = '(?:\\s*\\(\\d+(?:\\.\\d+)?\\s*(?:ms|s)\\))?';
-const ROUTE_ROW_RE = new RegExp(`^[┌├└]\\s*[^\\s/]*\\s*(\\/[^\\s│┌├└─]*)${DURATION_NOTE}\\s+${SIZE}\\s+${SIZE}(?:\\s+\\S+)*\\s*$`);
+const ROUTE_ROW_RE = new RegExp(`^[┌├└─]\\s*[^\\s/]*\\s*(\\/[^\\s│┌├└─]*)${DURATION_NOTE}\\s+${SIZE}\\s+${SIZE}(?:\\s+\\S+)*\\s*$`);
 
 function parseRoute(line) {
   const m = line.match(ROUTE_ROW_RE);

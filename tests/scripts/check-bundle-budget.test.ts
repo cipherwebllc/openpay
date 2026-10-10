@@ -213,6 +213,30 @@ describe('check-bundle-budget CLI', () => {
     });
   });
 
+  // Next の printTreeView は表が 1 行だけのとき行頭を "─" にする (next/dist/build/utils.js の border 選択)。
+  // Pages Router を併設した単一ルートの表などで、`[┌├└]` だけだと数え落として 300 kB 超でも exit 0 になる (Codex #789 3 回目 P3)。
+  describe('single-row route table (─ border)', () => {
+    const SINGLE_ROW_TABLE = `
+Route (pages)                                        Size  First Load JS
+─ ○ /legacy-report                                  12 kB         301 kB
+${SHARED_ROW}
+`;
+
+    it('fails an unbudgeted heavy route in a single-row table', () => {
+      const result = runGate(NORMAL_BUILD_OUTPUT + SINGLE_ROW_TABLE);
+
+      expect(result.status).toBe(1);
+      expect(result.stdout).toContain('[UNBUDGETED] /legacy-report: 301 kB > 300 kB');
+    });
+
+    it('fails a budgeted route over budget when it is the only row', () => {
+      const result = runGate(NORMAL_BUILD_OUTPUT.replace(PAY_ROW, '─ ● /[locale]/pay                                 10.3 kB         427 kB'));
+
+      expect(result.status).toBe(1);
+      expect(result.stdout).toContain('[OVER] /[locale]/pay: 427 kB / 予算 426 kB');
+    });
+  });
+
   it('accepts a route with zero-byte First Load JS', () => {
     const result = runGate(NORMAL_BUILD_OUTPUT.replace(MANIFEST_ROW, '├ ○ /manifest.webmanifest   0 B   0 B'));
 
