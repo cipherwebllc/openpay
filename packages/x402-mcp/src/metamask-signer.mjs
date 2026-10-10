@@ -27,8 +27,7 @@ export function createMetamaskSigner(env = process.env, { execFileImpl } = {}) {
   const signer = createCliSigner({
     address, env, execFileImpl, bin,
     deadlineMs: 30_000,
-    excludedEnvPrefixes: ['STEWARD_', 'KOVA_'],
-    excludedEnvKeys: ['POLYGON_RPC_URL'],
+    signer: 'metamask',
     args({ domain, primaryType }, json) {
       const chain = String(domain.chainId);
       if (chain !== '137' && chain !== '80002') throw new Error('metamask_sign_failed');

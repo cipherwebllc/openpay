@@ -611,7 +611,12 @@ splits, amount inconsistencies,
 resource URL mismatches, and catalog bait-and-switches before requesting a
 signature. `MAX_TIMEOUT_SECONDS` is the equivalent setting for the exported
 environment config readers. Target host/catalog admission and private-address
-checks run before buyer target requests. Those requests require HTTPS, do not
+checks run before buyer target requests. The private-address check uses the
+same IANA special-purpose table as the OpenPay server: loopback, private,
+CGNAT, link-local, documentation, benchmarking, multicast and reserved IPv4;
+IPv4-mapped/translated, NAT64, 6to4, Teredo, ULA, site-local and multicast
+IPv6; plus `localhost`, `.localhost`, `.local` and `.internal` names. Those
+requests require HTTPS, do not
 follow redirects, and have a 15-second timeout. The default Node transport also
 validates DNS before and during connection to block rebinding. A custom
 `fetchImpl` still gets the pre-connection resolution check — a hostname that
