@@ -588,6 +588,14 @@ export async function updateResource(
   if (typeof cas.value !== 'string') return { ok: false, reason: 'storage' }; // -2 (破損 JSON) 等
   const updated = safeParse<X402Resource>(cas.value);
   if (!updated) return { ok: false, reason: 'storage' };
+  // 成功の応答は Lua が更新した resource の JSON (対象 id・merchant・今回の url を持つ object) だけ。"1" 等の文字列も
+  // JSON として parse できるので、形と対象 id を確かめずに返すと、未更新なのに { ok: true, resource: 1 } を返す偽成功になる。
+  if (
+    typeof updated !== 'object' || Array.isArray(updated) || updated.id !== id ||
+    typeof updated.merchant !== 'string' || updated.url !== input.url
+  ) {
+    return { ok: false, reason: 'storage' };
+  }
   return { ok: true, resource: updated };
 }
 
@@ -619,6 +627,9 @@ export async function deactivateResource(
   if (cas.value === -1) return { ok: false, reason: 'not_found' };
   if (cas.value === -2 || cas.value === -4) return { ok: false, reason: 'storage' }; // 破損 / URL 競合
   if (cas.value === 0) return { ok: false, reason: 'forbidden' };
+  // kvEval は Redis の値の形までしか確かめない。1 / 2 以外 (nil・文字列・配列等) を削除成功と読まない
+  // (掲載が残っているのに削除済みと返す偽成功を断つ)。
+  if (cas.value !== 1 && cas.value !== 2) return { ok: false, reason: 'storage' };
   return { ok: true }; // 1 (無効化) / 2 (既に無効・冪等)
 }
 

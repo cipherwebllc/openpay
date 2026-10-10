@@ -29,8 +29,11 @@ export const GRANT_MAX_SCRIPT =
   'return tostring(final)';
 
 // 数値 (ms) として妥当な expiresAt を取り出す。値は素の数値文字列 (例 "1750000000000")。
-function parseExpiresAtMs(raw: string | number | null): number | null {
+function parseExpiresAtMs(raw: unknown): number | null {
   if (raw === null) return null;
+  // kvEval は Redis の値の形 (配列を含む) までしか確かめない。文字列・数値以外で下の .trim() が投げ、支払い後の付与
+  // route を 500 にする波及を断つ (未付与の ok:false にして、route の 503 と同じ txHash の再試行に委ねる)。
+  if (typeof raw !== 'string' && typeof raw !== 'number') return null;
   const s = typeof raw === 'number' ? String(raw) : raw;
   return parseExpiresAt(s);
 }
@@ -46,7 +49,7 @@ export async function grantTimedMax(
   targetExpiresAtMs: number,
   nowMs: number = Date.now(),
 ): Promise<{ ok: boolean; expiresAt: number }> {
-  const res = await kvEval<string | number | null>(
+  const res = await kvEval<unknown>(
     GRANT_MAX_SCRIPT,
     [key],
     [String(Math.floor(targetExpiresAtMs)), String(Math.floor(nowMs))],
@@ -58,5 +61,8 @@ export async function grantTimedMax(
   // Lua は tostring(final) を返すので number/string 双方を許容してパースする。
   const final = parseExpiresAtMs(res.value);
   if (final === null) return { ok: false, expiresAt: targetExpiresAtMs };
+  // Lua は max(既存, target) を返すので、確定した期限は必ず target 以上。それ未満 ("1"・空白 = 0 等) は付与の応答ではない。
+  // 付与したと読むと、未保存のまま加入が 200 になり、同じ tx の再送も replay で付与をやり直さない波及を断つ (未付与の ok:false)。
+  if (final < Math.floor(targetExpiresAtMs)) return { ok: false, expiresAt: targetExpiresAtMs };
   return { ok: true, expiresAt: final };
 }

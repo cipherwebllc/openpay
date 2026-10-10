@@ -15,6 +15,9 @@ const h = vi.hoisted(() => ({
   failReschedule: false,
   // 設定時だけ、予算付き reconcile が作る bounded client (と client なしのページ取得) をこの fake に差し替える。
   bounded: null as ((budget: RpcBudget) => StoreUsdcPublicClient) | null,
+  // kvEval の応答の差し替え (kvEval の契約は Redis の値の形まで・script ごとの意味は呼出側が確かめる)。
+  // run() を呼べば本物の Lua を実行した結果、呼ばなければ Lua を走らせずに返した値がそのまま ok:true で届く。
+  reply: null as ((script: string, run: () => Promise<unknown>) => Promise<unknown>) | null,
 }));
 vi.mock('@/lib/x402/storeUsdcOnchain', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/x402/storeUsdcOnchain')>();
@@ -41,7 +44,8 @@ vi.mock('@/lib/kv', () => ({
     h.calls.push(call);
     if (h.failReschedule && script.includes('if current ~= ARGV[4]')) return { ok: false };
     try {
-      return { ok: true, value: await runRedisLua(script, keys, args, h.store!) };
+      const run = () => runRedisLua(script, keys, args, h.store!);
+      return { ok: true, value: h.reply ? await h.reply(script, run) : await run() };
     } catch {
       // Match kvEval: script failures must be reported as storage failures to the caller.
       return { ok: false };
@@ -196,6 +200,7 @@ beforeEach(() => {
   h.failClaimOnce = false;
   h.failReschedule = false;
   h.bounded = null;
+  h.reply = null;
   vi.clearAllMocks();
 });
 afterAll(closeRedisLuaEngine);
@@ -467,6 +472,35 @@ describe('USDC reconciliation with real Lua and receipt verification', () => {
       checked: 1, settled: 1, failed: 0, pending: 0, storageErrors: 0, deferred: 0,
     });
     await expectSettled();
+  });
+
+  // kvEval は Redis の値の形 (入れ子の配列を含む) までしか確かめない。due の member が文字列でない応答 ([salt] 等) は
+  // INTENT_RE の暗黙の文字列化を通ったあと投げ、batch 全体と後続 intent の回復を止める → 反復の前に 'storage' にする。
+  it('a due list with a non-string member is storage instead of rejecting the whole batch', async () => {
+    const intent = await active(TX);
+    const client = chain(intent.nonce);
+    h.reply = async (script, run) => {
+      const value = await run();
+      return script.startsWith("return redis.call('ZRANGEBYSCORE'") && Array.isArray(value) ? [[SALT], ...value] : value;
+    };
+    await expect(reconcilePendingStoreUsdcPurchases({ now: CHECKED_AT, client })).resolves.toBe('storage');
+    h.reply = null;
+    expect(await reconcilePendingStoreUsdcPurchases({ now: CHECKED_AT, client })).toMatchObject({ checked: 1, settled: 1 });
+    await expectSettled();
+  });
+
+  // ZSCORE の応答は score の文字列か nil だけ。library の欠落 (nil) が [score] で届くと Number() の暗黙の変換で通ってしまい、
+  // 配信が既存の修復を飛ばす → 文字列でなければ storage。
+  it('readSettledStoreUsdcAccess: a missing library entry arriving as [score] is storage, not a settled access', async () => {
+    const intent = await active(TX);
+    expect(await reconcileStoreUsdcIntent(SALT, { now: CHECKED_AT, client: chain(intent.nonce) })).toEqual({ ok: true, state: 'settled' });
+    const library = h.store!.zsets.get(`store:lib:${PAYER.toLowerCase()}`)!;
+    const score = String(library.get(ID));
+    library.delete(ID);
+    h.reply = async (script, run) => script.trim() === "return redis.call('ZSCORE', KEYS[1], ARGV[1])" ? [score] : run();
+    expect(await readSettledStoreUsdcAccess(SALT)).toEqual({ ok: false, reason: 'storage' });
+    h.reply = null;
+    expect(await readSettledStoreUsdcAccess(SALT)).toEqual({ ok: false, reason: 'conflict' });
   });
 
   // 正常系 (保存 hash が finality 待ち = pending_finality) では障害として数えず、warn も出さない。

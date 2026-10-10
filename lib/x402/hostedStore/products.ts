@@ -63,6 +63,9 @@ export async function createHostedProduct(
   if (!res.ok) return { ok: false, reason: 'storage' };
   if (res.value === -2) return { ok: false, reason: 'too_many' };
   if (res.value === -3) return { ok: false, reason: 'conflict' };
+  // kvEval は Redis の値の形までしか確かめない。1 以外 (nil・文字列・配列等) を作成成功と読まない
+  // (保存されていない商品を作成済みとして出品者に返す偽成功を断つ)。
+  if (res.value !== 1) return { ok: false, reason: 'storage' };
   return { ok: true, product };
 }
 
@@ -358,6 +361,9 @@ export async function replaceHostedSellerProduct(input: {
   if (res.value === -1) return { ok: false, reason: 'forbidden' };
   if (res.value === -2) return { ok: false, reason: 'corrupt' };
   if (res.value === -4) return { ok: false, reason: 'conflict' };
+  // kvEval は Redis の値の形までしか確かめない。1 以外 (nil・文字列・配列等) を更新成功と読まない
+  // (保存されていない編集を保存済みとして出品者に返す偽成功を断つ)。
+  if (res.value !== 1) return { ok: false, reason: 'storage' };
   return { ok: true, product: next };
 }
 
