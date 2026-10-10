@@ -1,4 +1,5 @@
 import { test, expect, type Page, type Locator } from '@playwright/test';
+import { openTipTab } from './tipTab';
 
 // hydration race 対策: 低速な webkit (mobile-safari) や負荷の高い CI runner では controlled input
 // への fill が React hydration より前に走ると値が捨てられ、settings 更新 → localStorage 書込が起きず
@@ -78,8 +79,7 @@ test.describe('create /create (QR generator + Tip widget tab)', () => {
   test('受取アドレス入力 → URL と iframe スニペットが生成される', async ({
     page,
   }) => {
-    await page.goto('/ja/create');
-    await page.getByRole('button', { name: 'チップ' }).click();
+    await openTipTab(page);
     const addressInput = page.getByPlaceholder(/0x\.\.\. または vitalik\.eth/);
     await addressInput.fill(
       '0x52d4901142e2B5680027da5EB47C86CB02a3cA81',
@@ -267,8 +267,7 @@ test.describe('create /create (QR generator + Tip widget tab)', () => {
       await route.continue();
     });
 
-    await page.goto('/ja/create');
-    await page.getByRole('button', { name: 'チップ' }).click();
+    await openTipTab(page);
     await page.getByPlaceholder(/0x\.\.\. または vitalik\.eth/).fill('vitalik.eth');
 
     await expect(page.getByText(/✓ vitalik\.eth/)).toBeVisible({ timeout: 5_000 });
@@ -300,8 +299,7 @@ test.describe('create /create (QR generator + Tip widget tab)', () => {
     // iPhone 14 viewport (390px) で document.scrollWidth ≤ clientWidth を保証。
     // 負 control: min-w-0 を外すと scrollWidth=859 (2.2x overflow) で fail する。
     test.skip(testInfo.project.name !== 'mobile-safari', 'mobile viewport 専用');
-    await page.goto('/ja/create');
-    await page.getByRole('button', { name: 'チップ' }).click();
+    await openTipTab(page);
     const addressInput = page.getByPlaceholder(/0x\.\.\. または vitalik\.eth/);
     await addressInput.fill('0x52d4901142e2B5680027da5EB47C86CB02a3cA81');
 

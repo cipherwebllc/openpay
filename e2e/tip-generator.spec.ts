@@ -1,17 +1,10 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect } from '@playwright/test';
+import { openTipTab } from './tipTab';
 
 // home の Tip widget タブ (TipEmbedGenerator) のクリエイター向け UX を実 browser で smoke。
 // /tip/[address] 消費側 (tip.spec.ts) とは別。生成側の再構成 (Step1/2/3・公開2択・
 // 開発者向け折りたたみ・プリセット編集 UI・プレビュー位置) を検証する。
 const TO = '0x52d4901142e2B5680027da5EB47C86CB02a3cA81';
-
-async function openTipTab(page: Page) {
-  await page.goto('/ja/create');
-  // タブラベルは短縮済み (旧「Tip widget (クリエイター)」→「チップ」)。
-  await page.getByRole('button', { name: 'チップ' }).click();
-  // 見出しはタブ名に任せる (2026-10 磨き上げ P4)。最初のカード「受け取り」で開いたことを確かめる。
-  await expect(page.getByRole('heading', { name: '受け取り', exact: true })).toBeVisible();
-}
 
 test.describe('Tip widget generator (creator UX)', () => {
   test('公開は default リンク共有、サイト埋め込みタブで iframe に切替', async ({
