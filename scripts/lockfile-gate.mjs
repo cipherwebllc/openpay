@@ -27,8 +27,7 @@
 import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { INSTALL_SCRIPT_ALLOWLIST } from './lib/installScriptAllowlist.mjs';
-
-const ALLOWED_PREFIX = 'https://registry.npmjs.org/';
+import { parseRegistryTarball } from './lib/registryTarball.mjs';
 // userconfig/globalconfig 経由の別設定ファイルや proxy/CA による取得元の偽装が
 // npm ci に波及するのを防ぐ。新しいキーは用途をレビューしてから明示的に追加する。
 const ALLOWED_NPMRC_KEYS = new Set(['legacy-peer-deps']);
@@ -66,34 +65,7 @@ function iniToken(raw) {
   return value.replace(/\\([\\;#])|[;#].*$/g, (_match, escaped) => escaped ?? '').trim();
 }
 
-// 公式レジストリの tarball URL を厳密に読む。許す形は
-//   https://registry.npmjs.org/<name>/-/<unscoped>-<version>.tgz   (<name> は name か @scope/name か @scope%2fname)
-// だけ。dot segment (生・%2e) は URL 正規化で `/-/` より前の名前をすり替えられるので、形の検査は
-// `new URL()` で正規化した pathname に対して行い、生の文字列にも `.`/`..` の segment を許さない。
-// 返り値: { name, basename } か null (= 取得元として不許可)。
-// scope の先頭 @ は npm が %40 で書くこともある (`%40parcel/watcher`・`%40parcel%2Fwatcher`)。名前照合では @ に戻す。
-const NAME_SEGMENT = '[^/@%]+';
-const TARBALL_PATH = new RegExp(`^/((?:@|%40)${NAME_SEGMENT}(?:/|%2f|%2F)${NAME_SEGMENT}|${NAME_SEGMENT})/-/([^/]+)\\.tgz$`);
-function parseRegistryTarball(resolved) {
-  if (typeof resolved !== 'string' || !resolved.startsWith(ALLOWED_PREFIX)) return null;
-  let url;
-  try {
-    url = new URL(resolved);
-  } catch {
-    return null;
-  }
-  if (url.origin !== 'https://registry.npmjs.org' || url.username || url.password || url.search || url.hash) return null;
-  const rawPath = resolved.slice('https://registry.npmjs.org'.length);
-  // 生の path に dot segment (生・エンコード) があれば正規化で消えていても不許可。
-  if (rawPath.split('/').some((segment) => /^(?:\.|%2e){1,2}$/i.test(segment))) return null;
-  const match = TARBALL_PATH.exec(url.pathname);
-  if (!match || url.pathname !== rawPath) return null;
-  const name = match[1].replace(/^%40/, '@').replace(/%2f/i, '/');
-  const basename = match[2];
-  const unscoped = name.slice(name.lastIndexOf('/') + 1);
-  if (unscoped === '.' || unscoped === '..' || !basename.startsWith(`${unscoped}-`)) return null;
-  return { name, basename };
-}
+// 公式レジストリの tarball URL の形は scripts/lib/registryTarball.mjs (installed-scripts-gate と共用) が決める。
 
 const npmrcs = trackedFiles(['.npmrc', '**/.npmrc'], '.npmrc files');
 const lockfiles = trackedFiles(
@@ -154,6 +126,16 @@ for (const file of lockfiles) {
       bad++;
     }
     const tarball = parseRegistryTarball(pkg.resolved);
+    // 同梱 (inBundle) の実体は親 tarball の中身で、resolved も hasInstallScript も持たずに入る。allowlist の名前が
+    // 同梱で現れると、名前の承認が別 publisher の同梱コードに流用されうる (実体 gate も `npm rebuild <name>` も
+    // 同名の全実体を対象にする) ので、install の前にここで止める。
+    if (pkg.inBundle === true && Object.hasOwn(INSTALL_SCRIPT_ALLOWLIST, packageNameOf(name))) {
+      console.error(
+        `NG ${file}: ${name} is a bundled copy of the allowlisted name ${packageNameOf(name)}; ` +
+          'the install script allowlist only applies to official registry tarballs of that name, not to bundled copies (CLAUDE.md 掟 16).',
+      );
+      bad++;
+    }
     // install script 付きは取得元に関係なく名前で allowlist 照合する (link も含む)。
     if (pkg.hasInstallScript === true) {
       const packageName = packageNameOf(name);

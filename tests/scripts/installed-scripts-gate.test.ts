@@ -40,10 +40,27 @@ function run(args: string[] = ['node_modules'], env: Record<string, string> = {}
   return result;
 }
 
+// Codex レビュー 4 回目 (PR #778) 1: 名前の allowlist は、その実体が lockfile で「公式レジストリのその名前の tarball」
+// (inBundle でない・resolved がその名前・別名でない) と確かめられたときだけ効かせる。root の隣の lockfile に
+// 実体の path のエントリを書く helper (既定は正規の官製 tarball)。`resolved: undefined` で resolved を消せる。
+const OFFICIAL = 'https://registry.npmjs.org/';
+type Entry = Record<string, unknown>;
+function lock(entries: Record<string, Entry>, file = 'package-lock.json') {
+  const packages: Record<string, Entry> = { '': { name: 'fixture' } };
+  for (const [path, extra] of Object.entries(entries)) {
+    const name = path.slice(path.lastIndexOf('node_modules/') + 'node_modules/'.length);
+    packages[path] = { version: '1.0.0', resolved: `${OFFICIAL}${name}/-/${name.slice(name.lastIndexOf('/') + 1)}-1.0.0.tgz`, ...extra };
+  }
+  mkdirSync(dirname(join(root, file)), { recursive: true });
+  writeFileSync(join(root, file), JSON.stringify({ name: 'fixture', lockfileVersion: 3, packages }));
+}
+const BASE = { 'node_modules/plain': {}, 'node_modules/@scope/plain': {} };
+
 beforeEach(() => {
   root = mkdtempSync(resolve('.installed-scripts-gate-test-'));
   pkg('node_modules/plain', { name: 'plain', scripts: { test: 'vitest', build: 'tsc' } });
   pkg('node_modules/@scope/plain', { name: '@scope/plain' });
+  lock(BASE);
 });
 
 afterEach(() => { rmSync(root, { recursive: true, force: true }); });
@@ -58,6 +75,7 @@ describe('installed-scripts-gate CLI', () => {
 
   it('accepts an allowlisted package whose manifest name matches and lists it', () => {
     pkg('node_modules/esbuild', { name: 'esbuild', scripts: { postinstall: 'node install.js' } });
+    lock({ ...BASE, 'node_modules/esbuild': { hasInstallScript: true } });
     const result = run();
     expect(result.status).toBe(0);
     expect(result.stdout).toContain('esbuild');
@@ -65,6 +83,7 @@ describe('installed-scripts-gate CLI', () => {
 
   it.each(['preinstall', 'install', 'postinstall'])('rejects an unknown package with a %s script', (hook) => {
     pkg('node_modules/evil-postinstall', { name: 'evil-postinstall', scripts: { [hook]: 'node steal.js' } });
+    lock({ ...BASE, 'node_modules/evil-postinstall': {} });
     const result = run();
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('node_modules/evil-postinstall');
@@ -74,6 +93,7 @@ describe('installed-scripts-gate CLI', () => {
 
   it('rejects an unknown package with binding.gyp even without scripts (npm runs node-gyp rebuild implicitly)', () => {
     pkg('node_modules/native-evil', { name: 'native-evil' }, { 'binding.gyp': '{ "targets": [] }' });
+    lock({ ...BASE, 'node_modules/native-evil': {} });
     const result = run();
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('node_modules/native-evil');
@@ -85,6 +105,7 @@ describe('installed-scripts-gate CLI', () => {
   // 必ず残り、展開直後の走査で捕まる (= 実行されない)。lockfile に hasInstallScript が無くても同じ。
   it('catches an optional native package with binding.gyp right after extraction, before any build could remove it', () => {
     pkg('node_modules/optional-native', { name: 'optional-native', optional: true, scripts: { test: 'node test.js' } }, { 'binding.gyp': '{ "targets": [{ "target_name": "addon" }] }' });
+    lock({ ...BASE, 'node_modules/optional-native': { optional: true } });
     const npm = fakeNpm();
     const result = run(['--rebuild', 'node_modules'], { PATH: npm.path });
     expect(result.status).toBe(1);
@@ -95,11 +116,13 @@ describe('installed-scripts-gate CLI', () => {
 
   it('accepts an allowlisted package shipped with binding.gyp', () => {
     pkg('node_modules/keccak', { name: 'keccak', scripts: { install: 'node-gyp-build || exit 0' } }, { 'binding.gyp': '{}' });
+    lock({ ...BASE, 'node_modules/keccak': { hasInstallScript: true } });
     expect(run().status).toBe(0);
   });
 
   it('rejects an allowlisted directory name whose manifest names another package (alias)', () => {
     pkg('node_modules/esbuild', { name: 'evil-postinstall', scripts: { postinstall: 'node steal.js' } });
+    lock({ ...BASE, 'node_modules/esbuild': { hasInstallScript: true } });
     const result = run();
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('node_modules/esbuild');
@@ -108,11 +131,13 @@ describe('installed-scripts-gate CLI', () => {
 
   it('rejects an allowlisted package whose manifest has no name', () => {
     pkg('node_modules/esbuild', { scripts: { postinstall: 'node install.js' } });
+    lock({ ...BASE, 'node_modules/esbuild': { hasInstallScript: true } });
     expect(run().status).toBe(1);
   });
 
   it('scans nested node_modules and scoped packages', () => {
     pkg('node_modules/plain/node_modules/@evil/nested', { name: '@evil/nested', scripts: { postinstall: 'x' } });
+    lock({ ...BASE, 'node_modules/plain/node_modules/@evil/nested': {} });
     const result = run();
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('node_modules/plain/node_modules/@evil/nested');
@@ -120,6 +145,7 @@ describe('installed-scripts-gate CLI', () => {
 
   it('treats prepare as install-time only for linked (workspace) packages', () => {
     pkg('node_modules/registry-pkg', { name: 'registry-pkg', scripts: { prepare: 'husky' } });
+    lock({ ...BASE, 'node_modules/registry-pkg': {} });
     expect(run().status).toBe(0);
     pkg('packages/local', { name: 'local', scripts: { prepare: 'node build.js' } });
     symlinkSync(join(root, 'packages/local'), join(root, 'node_modules/local'), 'dir');
@@ -158,6 +184,7 @@ describe('installed-scripts-gate CLI', () => {
 
   it('checks every root given', () => {
     pkg('tools/example/node_modules/evil-postinstall', { name: 'evil-postinstall', scripts: { postinstall: 'x' } });
+    lock({ 'node_modules/evil-postinstall': {} }, 'tools/example/package-lock.json');
     expect(run(['node_modules']).status).toBe(0);
     const result = run(['node_modules', 'tools/example/node_modules']);
     expect(result.status).toBe(1);
@@ -192,12 +219,85 @@ describe('installed-scripts-gate CLI', () => {
     });
   });
 
+  // Codex レビュー 4 回目 (PR #778) 1: 公式レジストリの親パッケージが node_modules/esbuild を同梱し、同梱物の manifest が
+  // name "esbuild" と任意の postinstall を持つと、lockfile の同梱エントリは inBundle: true・resolved なしで取得元 gate を
+  // 通り、名前一致だけの実体 gate も通し、`npm rebuild esbuild` は同梱物も対象にする。→ allowlist の名前の実体は
+  // lockfile のその path のエントリが「inBundle でない・resolved が公式レジストリのその名前の tarball・別名でない」
+  // ときだけ承認する。script を持たない同名の実体も (rebuild の対象になるので) 同じ条件で確かめる。
+  describe('lockfile cross-check for allowlisted names', () => {
+    const esbuildWithScript = () => pkg('node_modules/esbuild', { name: 'esbuild', scripts: { postinstall: 'node install.js' } });
+
+    it('rejects a bundled copy of an allowlisted name (inBundle, no resolved)', () => {
+      esbuildWithScript();
+      lock({ ...BASE, 'node_modules/esbuild': { inBundle: true, resolved: undefined } });
+      const npm = fakeNpm();
+      const result = run(['--rebuild', 'node_modules'], { PATH: npm.path });
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain('node_modules/esbuild');
+      expect(result.stderr).toContain('bundled');
+      expect(npm.calls()).toEqual([]);
+    });
+
+    it('rejects a bundled nested copy even when the top-level copy is genuine (npm rebuild <name> targets every copy)', () => {
+      esbuildWithScript();
+      pkg('node_modules/plain/node_modules/esbuild', { name: 'esbuild' }); // script なしでも rebuild の対象
+      lock({ ...BASE, 'node_modules/esbuild': { hasInstallScript: true }, 'node_modules/plain/node_modules/esbuild': { inBundle: true, resolved: undefined } });
+      const npm = fakeNpm();
+      const result = run(['--rebuild', 'node_modules'], { PATH: npm.path });
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain('node_modules/plain/node_modules/esbuild');
+      expect(npm.calls()).toEqual([]);
+    });
+
+    it.each([
+      ['no resolved', { resolved: undefined }],
+      ['resolved from another registry', { resolved: 'https://registry.evil.example/esbuild/-/esbuild-1.0.0.tgz' }],
+      ['resolved tarball of another package', { resolved: `${OFFICIAL}evil-postinstall/-/evil-postinstall-1.0.0.tgz` }],
+      ['aliased lockfile name', { name: 'evil-postinstall' }],
+      ['link entry', { link: true, resolved: 'packages/esbuild' }],
+    ])('rejects an allowlisted name whose lockfile entry has %s', (_label, extra) => {
+      esbuildWithScript();
+      lock({ ...BASE, 'node_modules/esbuild': extra });
+      const result = run();
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain('node_modules/esbuild');
+    });
+
+    it('rejects an allowlisted name that is absent from the lockfile', () => {
+      esbuildWithScript();
+      const result = run();
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain('node_modules/esbuild');
+      expect(result.stderr).toContain('lockfile');
+    });
+
+    it('fails closed when no lockfile sits beside the root', () => {
+      rmSync(join(root, 'package-lock.json'));
+      const result = run();
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain('package-lock.json');
+    });
+
+    it('prefers npm-shrinkwrap.json over package-lock.json like npm does', () => {
+      esbuildWithScript();
+      lock({ ...BASE, 'node_modules/esbuild': { inBundle: true, resolved: undefined } });
+      lock({ ...BASE, 'node_modules/esbuild': { hasInstallScript: true } }, 'npm-shrinkwrap.json');
+      expect(run().status).toBe(0);
+    });
+
+    it('does not require lockfile entries for packages without install-time scripts outside the allowlist', () => {
+      pkg('node_modules/extra', { name: 'extra' });
+      expect(run().status).toBe(0);
+    });
+  });
+
   // 防止の後半: 通った root だけ、その root に入っている allowlist の名前を `npm rebuild <names>` する。
   describe('--rebuild', () => {
     it('rebuilds exactly the installed allowlisted names in the root directory and succeeds', () => {
       pkg('node_modules/esbuild', { name: 'esbuild', scripts: { postinstall: 'node install.js' } });
       pkg('node_modules/@swc/core', { name: '@swc/core', scripts: { postinstall: 'node postinstall.js' } });
       pkg('node_modules/plain/node_modules/keccak', { name: 'keccak' }, { 'binding.gyp': '{}' });
+      lock({ ...BASE, 'node_modules/esbuild': { hasInstallScript: true }, 'node_modules/@swc/core': { hasInstallScript: true }, 'node_modules/plain/node_modules/keccak': {} });
       const npm = fakeNpm();
       const result = run(['--rebuild', 'node_modules'], { PATH: npm.path });
       expect(result.status).toBe(0);
@@ -211,6 +311,7 @@ describe('installed-scripts-gate CLI', () => {
 
     it('runs npm rebuild in the directory that owns the root (tools/… lockfile)', () => {
       pkg('tools/example/node_modules/esbuild', { name: 'esbuild', scripts: { postinstall: 'x' } });
+      lock({ 'node_modules/esbuild': { hasInstallScript: true } }, 'tools/example/package-lock.json');
       const npm = fakeNpm();
       const result = run(['--rebuild', 'tools/example/node_modules'], { PATH: npm.path });
       expect(result.status).toBe(0);
@@ -228,6 +329,7 @@ describe('installed-scripts-gate CLI', () => {
     it('does not rebuild anything when the gate fails', () => {
       pkg('node_modules/esbuild', { name: 'esbuild', scripts: { postinstall: 'x' } });
       pkg('node_modules/evil-postinstall', { name: 'evil-postinstall', scripts: { postinstall: 'x' } });
+      lock({ ...BASE, 'node_modules/esbuild': { hasInstallScript: true }, 'node_modules/evil-postinstall': {} });
       const npm = fakeNpm();
       const result = run(['--rebuild', 'node_modules'], { PATH: npm.path });
       expect(result.status).toBe(1);
@@ -245,6 +347,7 @@ describe('installed-scripts-gate CLI', () => {
 
     it('fails when npm rebuild fails', () => {
       pkg('node_modules/esbuild', { name: 'esbuild', scripts: { postinstall: 'x' } });
+      lock({ ...BASE, 'node_modules/esbuild': { hasInstallScript: true } });
       const npm = fakeNpm(3);
       const result = run(['--rebuild', 'node_modules'], { PATH: npm.path });
       expect(result.status).toBe(1);

@@ -50,7 +50,7 @@ jobs:
         env:
           TZ: America/Los_Angeles
         run: >-
-          npx vitest run --no-cache
+          npx --no vitest run --no-cache
           tests/lib/shopTime.test.ts
           tests/lib/freeeSync.test.ts
           tests/lib/accountingCsv.test.ts

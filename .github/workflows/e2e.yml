@@ -45,7 +45,7 @@ jobs:
         run: node scripts/installed-scripts-gate.mjs --rebuild node_modules
 
       - name: Install Playwright browsers
-        run: npx playwright install --with-deps chromium webkit
+        run: npx --no playwright install --with-deps chromium webkit
 
       - name: Build
         run: npm run build
@@ -85,7 +85,7 @@ jobs:
         run: node scripts/installed-scripts-gate.mjs --rebuild node_modules
 
       - name: Install Chromium
-        run: npx playwright install --with-deps chromium
+        run: npx --no playwright install --with-deps chromium
 
       - name: Load public production flags (testnet fixtures)
         # One vector supplies BOTH the build and the server/test process.
@@ -95,7 +95,7 @@ jobs:
         run: npm run build
 
       - name: Run production-flag smoke and fee rows (timed)
-        run: time npx playwright test --config=playwright.prodflags.config.ts
+        run: time npx --no playwright test --config=playwright.prodflags.config.ts
 
       - name: Upload production-flag report and durations
         if: always()

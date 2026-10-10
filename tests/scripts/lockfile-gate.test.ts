@@ -337,6 +337,29 @@ describe('lockfile-gate CLI', () => {
       expect(runGate().status).toBe(0);
     });
 
+    // Codex レビュー 4 回目 (PR #778) 1: 同梱 (inBundle) の実体は resolved も hasInstallScript も無いまま入る。
+    // allowlist の名前が同梱で現れる lockfile は、実体 gate (installed-scripts-gate) に行く前に止める。
+    it.each(['node_modules/esbuild', 'node_modules/parent/node_modules/esbuild', 'node_modules/@parcel/watcher'])('rejects a bundled copy of an allowlisted name at %s', (path) => {
+      fixture('package-lock.json', JSON.stringify({ lockfileVersion: 3, packages: {
+        '': {},
+        'node_modules/parent': { resolved: `${OFFICIAL}parent/-/parent-1.0.0.tgz` },
+        [path]: { inBundle: true, version: '1.0.0' },
+      } }));
+      const result = runGate();
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(path);
+      expect(result.stderr).toContain('bundled');
+    });
+
+    it('still accepts a bundled copy of a name outside the allowlist (no install script flag)', () => {
+      fixture('package-lock.json', JSON.stringify({ lockfileVersion: 3, packages: {
+        '': {},
+        'node_modules/parent': { resolved: `${OFFICIAL}parent/-/parent-1.0.0.tgz` },
+        'node_modules/parent/node_modules/helper': { inBundle: true, version: '1.0.0' },
+      } }));
+      expect(runGate().status).toBe(0);
+    });
+
     it('rejects a workspace package (no node_modules/ in its path) that gains an install script', () => {
       fixture('package-lock.json', lockWith({
         'packages/local': { hasInstallScript: true },

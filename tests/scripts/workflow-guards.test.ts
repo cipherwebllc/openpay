@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { LUA_REAL_TEST_FILES } from '../../scripts/lib/luaRealTests.mjs';
 import { listTestFiles } from '../../scripts/lib/testFileFence.mjs';
+import { classifyNpmCommand, parseWorkflowJobs } from '../../scripts/lib/workflowRun.mjs';
 
 function workflow(name: string): string {
   return readFileSync(resolve(process.cwd(), '.github/workflows', name), 'utf8');
@@ -65,17 +66,27 @@ describe('GitHub Actions operation guards', () => {
     if (name === 'post-deploy-verify.yml') expect(permissions).toContain('actions: read');
   });
 
+  // Codex レビュー 4 回目 (PR #778) 2: run を YAML の別書式 (block scalar・引用符) まで読み、1 step 内の複数コマンドも
+  // 1 つずつ見る。読めない形は parseWorkflowJobs が throw して test が落ちる (fail-closed)。
+  // 各 job のコマンド列 (step 境界つき) を返す。
+  function jobCommands(name: string) {
+    return parseWorkflowJobs(workflow(name)).map(({ job, steps }) => ({
+      job,
+      commands: steps.flatMap((step, stepIndex) => step.commands.map((command) => ({ command, step, stepIndex }))),
+    }));
+  }
+  const isNpmCi = (command: string) => classifyNpmCommand(command)?.tool === 'npm' && classifyNpmCommand(command)?.subcommand === 'ci';
+
   it.each(workflowFiles)('%s checks registry sources before every dependency install', (name) => {
-    const source = workflow(name);
-    const jobs = source.slice(source.indexOf('\njobs:\n')).split(/\n  [\w-]+:\n/).slice(1);
-    for (const job of jobs) {
-      // `npm --prefix <dir> ci` (tools/lighthouse 等の別 lockfile) も install として扱う。
-      const install = job.search(/\brun:\s*npm (?:--prefix \S+ )?ci\b/);
+    for (const { job, commands } of jobCommands(name)) {
+      const install = commands.findIndex(({ command }) => isNpmCi(command));
       if (install === -1) continue;
-      const gate = job.indexOf('run: node scripts/lockfile-gate.mjs');
-      expect(gate, `${name}: pre-install source gate`).toBeGreaterThan(-1);
-      expect(gate, `${name}: pre-install source gate`).toBeLessThan(install);
-      expect(job.slice(0, gate)).not.toMatch(/continue-on-error:\s*true/);
+      const gate = commands.findIndex(({ command }) => command === 'node scripts/lockfile-gate.mjs');
+      expect(gate, `${name}/${job}: pre-install source gate`).toBeGreaterThan(-1);
+      expect(gate, `${name}/${job}: pre-install source gate`).toBeLessThan(install);
+      for (const { step } of commands.slice(0, gate + 1)) {
+        expect(step.keys['continue-on-error'] ?? 'false', `${name}/${job}: no continue-on-error before the source gate`).toBe('false');
+      }
     }
   });
 
@@ -84,24 +95,32 @@ describe('GitHub Actions operation guards', () => {
   // 実体を走査して allowlist 外があれば fail、通ったら `--rebuild` で allowlist の名前だけ `npm rebuild` する。
   // = allowlist 外の install script 付き依存は一度も実行されずに CI で止まる (CLAUDE.md 掟 16)。
   it.each(workflowFiles)('%s installs with --ignore-scripts and rebuilds only allowlisted packages after the gate', (name) => {
-    const source = workflow(name);
-    const jobs = source.slice(source.indexOf('\njobs:\n')).split(/\n  [\w-]+:\n/).slice(1);
-    for (const job of jobs) {
-      const steps = job.split(/\n\s+- (?=name:|run:|uses:)/);
-      steps.forEach((step, index) => {
-        const install = step.match(/\brun:\s*npm (?:--prefix (\S+) )?ci\b([^\n]*)/);
-        if (!install) return;
-        expect(install[2], `${name}: "${install[0]}" must not run install scripts`).toMatch(/(^|\s)--ignore-scripts(\s|$)/);
-        const root = install[1] ? `${install[1]}/node_modules` : 'node_modules';
-        const next = steps[index + 1] ?? '';
-        expect(next, `${name}: gate + rebuild right after "${install[0]}"`).toMatch(
-          new RegExp(`run:\\s*node scripts/installed-scripts-gate\\.mjs --rebuild ${root.replace(/[./]/g, '\\$&')}\\s*$`, 'm'),
-        );
-        expect(next).not.toMatch(/continue-on-error:\s*true/);
+    for (const { job, commands } of jobCommands(name)) {
+      commands.forEach(({ command, step, stepIndex }, index) => {
+        const npm = classifyNpmCommand(command);
+        if (npm === null) return;
+        const where = `${name}/${job}: "${command}"`;
+        if (npm.tool === 'npx') {
+          // npx はローカルに入っている bin だけ (--no = 無ければ fail・取りに行かない)。--yes / -y / -p / --package / @version 禁止。
+          expect(npm.args[0], `${where}: npx must be --no (never fetch a package)`).toBe('--no');
+          expect(npm.args.slice(1).join(' '), where).not.toMatch(/(^|\s)(-y|--yes|-p|--package)(\s|=|$)/);
+          expect(npm.args[1], `${where}: npx must name a bare local bin`).toMatch(/^[a-z][\w-]*$/);
+          return;
+        }
+        expect(npm.args.join(' '), where).not.toMatch(/--ignore-scripts=false/);
+        if (npm.subcommand === 'ci') {
+          expect(npm.args, `${where}: npm ci must not run install scripts`).toContain('--ignore-scripts');
+          const root = npm.prefix ? `${npm.prefix}/node_modules` : 'node_modules';
+          const next = commands[index + 1];
+          expect(next?.command, `${where}: gate + rebuild must be the very next command`).toBe(`node scripts/installed-scripts-gate.mjs --rebuild ${root}`);
+          expect(next.step.keys['continue-on-error'] ?? 'false', where).toBe('false');
+          expect(next.stepIndex - stepIndex, `${where}: the gate is in the same step or the next one`).toBeLessThanOrEqual(1);
+          return;
+        }
+        // gate 以外の経路で install script を走らせない / 依存を取りに行かない。
+        expect(['install', 'i', 'add', 'rebuild', 'exec', 'x', 'update', 'up'], `${where}: forbidden npm subcommand`).not.toContain(npm.subcommand);
+        expect(['run', 'run-script', 'test', 'audit', 'view', 'pack', 'publish'], `${where}: unknown npm subcommand`).toContain(npm.subcommand);
       });
-      // gate 以外の経路で install script を走らせない (npm install / npm rebuild の直書き・--ignore-scripts=false)
-      expect(job).not.toMatch(/\brun:\s*npm (?:--prefix \S+ )?(?:install|i|rebuild)\b/);
-      expect(job).not.toMatch(/--ignore-scripts=false/);
     }
   });
 

@@ -20,7 +20,11 @@
 //       node scripts/installed-scripts-gate.mjs --rebuild tools/lighthouse/node_modules
 // 判定:
 //   - registry のパッケージ: ディレクトリ名から導いた名前 (@scope/name) が INSTALL_SCRIPT_ALLOWLIST にあり、
-//     package.json の name も一致するときだけ許容 (→ --rebuild の対象)。
+//     package.json の name も一致し、**root の隣の lockfile (npm-shrinkwrap.json 優先・無ければ package-lock.json) の
+//     その path のエントリが「inBundle でない・link でない・別名でない・resolved が公式レジストリのその名前の
+//     tarball」**のときだけ許容 (→ --rebuild の対象)。bundled・取得元不明・lockfile に無い実体は allowlist の対象外 =
+//     fail (公式パッケージへの承認を、同梱や別 publisher の同名実体へ流用させない)。`npm rebuild <name>` は同名の
+//     全実体を対象にするので、allowlist の名前の実体は install script の有無に関係なく全てこの条件で確かめる。
 //   - link (symlink = workspace / file:) のパッケージ: 名前ではなく実際のリンク先 (realpath・repo 相対) が
 //     LINKED_PACKAGE_SCRIPT_ALLOWLIST にあるときだけ許容 (registry の承認を別実体へ流用させない)。rebuild はしない。
 //   - --rebuild: 全 root が通ったあと、root ごとに「その root に入っている allowlist の名前」だけを
@@ -32,9 +36,11 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { INSTALL_SCRIPT_ALLOWLIST, LINKED_PACKAGE_SCRIPT_ALLOWLIST } from './lib/installScriptAllowlist.mjs';
+import { parseRegistryTarball } from './lib/registryTarball.mjs';
 
 const INSTALL_HOOKS = ['preinstall', 'install', 'postinstall'];
-const repoRelative = (path) => relative(process.cwd(), path).split(sep).join('/');
+const toPosix = (path) => path.split(sep).join('/');
+const repoRelative = (path) => toPosix(relative(process.cwd(), path));
 
 function readManifest(dir) {
   const file = join(dir, 'package.json');
@@ -87,7 +93,47 @@ function listPackageDirs(nodeModules) {
   return out;
 }
 
-function scanScripts(nodeModules, state) {
+/** root の隣の lockfile を読む (npm と同じく npm-shrinkwrap.json を優先)。無い / 読めない / 形が違うは fail。 */
+function readLockfile(nodeModules, state) {
+  const base = dirname(resolve(nodeModules));
+  const file = ['npm-shrinkwrap.json', 'package-lock.json'].map((f) => join(base, f)).find((f) => existsSync(f));
+  if (file === undefined) {
+    state.failures.push(`${repoRelative(nodeModules)}: no npm-shrinkwrap.json / package-lock.json beside it; cannot confirm what the allowlisted packages are`);
+    return null;
+  }
+  try {
+    const lock = JSON.parse(readFileSync(file, 'utf8'));
+    const packages = lock?.packages;
+    if (packages === null || typeof packages !== 'object' || Array.isArray(packages)) {
+      state.failures.push(`${repoRelative(file)}: has no packages object (lockfileVersion >= 2 required)`);
+      return null;
+    }
+    return { file, base, packages };
+  } catch {
+    state.failures.push(`${repoRelative(file)}: cannot be parsed`);
+    return null;
+  }
+}
+
+/**
+ * allowlist の名前の実体 (dir) が、lockfile で「公式レジストリのその名前の tarball」と確かめられるか。
+ * @returns {string | null} 問題なければ null、あれば理由。
+ */
+function lockfileObjection(lock, dir, name) {
+  if (lock === null) return 'no lockfile to confirm it against';
+  const key = toPosix(relative(lock.base, dir));
+  const entry = lock.packages[key];
+  if (entry === undefined || entry === null || typeof entry !== 'object') return `not in the lockfile ${repoRelative(lock.file)} (${key})`;
+  if (entry.inBundle === true) return `a bundled copy (inBundle) in ${repoRelative(lock.file)}, not the registry package`;
+  if (entry.link === true) return `a link entry in ${repoRelative(lock.file)}, not the registry package`;
+  if (typeof entry.name === 'string' && entry.name !== name) return `an npm alias of ${entry.name} in ${repoRelative(lock.file)}`;
+  const tarball = parseRegistryTarball(entry.resolved);
+  if (tarball === null) return `resolved in ${repoRelative(lock.file)} is not an official registry tarball (${entry.resolved ?? 'missing'})`;
+  if (tarball.name !== name) return `fetched as ${tarball.name} per ${repoRelative(lock.file)}, not ${name}`;
+  return null;
+}
+
+function scanScripts(nodeModules, lock, state) {
   let real;
   try {
     real = realpathSync(nodeModules);
@@ -107,9 +153,9 @@ function scanScripts(nodeModules, state) {
       state.failures.push(`${shown}: package.json cannot be parsed, install-time scripts unknown`);
     } else {
       const triggers = installTriggers(dir, manifest, linked);
-      if (triggers.length > 0) {
-        const manifestName = typeof manifest.name === 'string' ? manifest.name : '(no name)';
-        if (linked) {
+      const manifestName = typeof manifest.name === 'string' ? manifest.name : '(no name)';
+      if (linked) {
+        if (triggers.length > 0) {
           // link はリポ内 (または外) の実体なので、registry の名前の承認を使わせず、リンク先の path で照合する。
           const target = repoRelative(realpathSync(dir));
           if (Object.hasOwn(LINKED_PACKAGE_SCRIPT_ALLOWLIST, target)) {
@@ -120,24 +166,32 @@ function scanScripts(nodeModules, state) {
                 'LINKED_PACKAGE_SCRIPT_ALLOWLIST (scripts/lib/installScriptAllowlist.mjs). A link cannot use the registry allowlist by name.',
             );
           }
-        } else if (Object.hasOwn(INSTALL_SCRIPT_ALLOWLIST, name) && manifestName === name) {
-          state.allowed.push(`${shown} [${triggers.join(', ')}]`);
-          state.rebuildNames.add(name);
-        } else if (Object.hasOwn(INSTALL_SCRIPT_ALLOWLIST, name)) {
+        }
+      } else if (Object.hasOwn(INSTALL_SCRIPT_ALLOWLIST, name)) {
+        // allowlist の名前の実体は、script の有無に関係なく (npm rebuild <name> が同名の全実体を対象にするため)
+        // manifest の name と lockfile のエントリで「公式レジストリのその名前の tarball」であることを確かめる。
+        const objection = manifestName !== name
+          ? `package.json names ${manifestName} — an alias cannot borrow an allowlisted name`
+          : lockfileObjection(lock, dir, name);
+        if (objection !== null) {
           state.failures.push(
-            `${shown}: directory name ${name} is allowlisted but package.json names ${manifestName} ` +
-              `[${triggers.join(', ')}] — an alias cannot borrow an allowlisted name`,
+            `${shown}: directory name ${name} is allowlisted but the package there is ${objection}` +
+              (triggers.length > 0 ? ` [${triggers.join(', ')}]` : '') +
+              '. The install script allowlist applies only to the official registry package of that name (CLAUDE.md 掟 16).',
           );
         } else {
-          state.failures.push(
-            `${shown}: ${manifestName} runs install-time scripts [${triggers.join(', ')}] and is not in INSTALL_SCRIPT_ALLOWLIST ` +
-              '(scripts/lib/installScriptAllowlist.mjs). Review the package before adding it (CLAUDE.md 掟 16).',
-          );
+          if (triggers.length > 0) state.allowed.push(`${shown} [${triggers.join(', ')}]`);
+          state.rebuildNames.add(name);
         }
+      } else if (triggers.length > 0) {
+        state.failures.push(
+          `${shown}: ${manifestName} runs install-time scripts [${triggers.join(', ')}] and is not in INSTALL_SCRIPT_ALLOWLIST ` +
+            '(scripts/lib/installScriptAllowlist.mjs). Review the package before adding it (CLAUDE.md 掟 16).',
+        );
       }
     }
     const nested = join(dir, 'node_modules');
-    if (existsSync(nested)) scanScripts(nested, state);
+    if (existsSync(nested)) scanScripts(nested, lock, state);
   }
 }
 
@@ -162,7 +216,8 @@ for (const root of roots) {
     continue;
   }
   const state = { visited: new Set(), scanned: 0, allowed: [], rebuildNames: new Set(), failures: [] };
-  scanScripts(root, state);
+  const lock = readLockfile(root, state);
+  scanScripts(root, lock, state);
   for (const line of state.failures) console.error(`NG ${line}`);
   bad += state.failures.length;
   console.log(`OK ${root}: ${state.scanned} packages scanned, ${state.allowed.length} with allowlisted install-time scripts`);
