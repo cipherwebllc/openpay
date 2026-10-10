@@ -13,6 +13,7 @@
 // 全て対象 (実際に verifyBudget.test.ts も 2026-09-12 に巻き込まれた)。
 export const LUA_REAL_TEST_FILES = [
   'tests/_helpers/redisLua.test.ts',
+  'tests/_helpers/redisLuaRecord.test.ts',
   'tests/lib/order/agentOrderReservation-lua.test.ts',
   'tests/lib/order/agentOrderPending-lua.test.ts',
   'tests/lib/order/agentOrderRecovery-lua.test.ts',
