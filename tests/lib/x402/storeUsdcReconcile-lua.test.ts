@@ -568,12 +568,14 @@ describe('USDC reconciliation with real Lua and receipt verification', () => {
   // 保留候補が旧フォークと確定 (正規ブロックの hash が違う) したら列から外す (再検証を続けない・採らない)。
   it('drops a deferred candidate once it is conclusively on a stale fork', async () => {
     const intent = await active();
-    patchIntent({ reconcileDeferred: [OLD] });
+    patchIntent({ reconcileDeferred: [OLD], reconcileTurn: 'scan' });
     const client = chain(intent.nonce, { latest: 50_090n, eventBlock: 42_100n, old: 'noncanonical' });
     expect(await reconcileStoreUsdcIntent(SALT, { now: CHECKED_AT, client })).toEqual({ ok: true, state: 'pending' });
     expect(client.getTransactionReceipt).toHaveBeenCalledWith({ hash: OLD });
     expect(rawIntent()).toMatchObject({ state: 'indeterminate', reconcileFromBlock: '40090' });
     expect(rawIntent().reconcileDeferred).toBeUndefined();
+    // 保留候補が無くなれば交替の印も意味を持たないので一緒に消す。
+    expect(rawIntent().reconcileTurn).toBeUndefined();
     expect(rawIntent().txHash).toBeUndefined();
   });
 
@@ -690,6 +692,51 @@ describe('USDC reconciliation with real Lua and receipt verification', () => {
     }
   });
 
+  // Codex 8 回目 P2 の再現と境界: 予算 25 秒・保存 hash OLD (receipt は 10 秒で timeout)・保留列 [MID] (receipt は 2 秒で
+  // timeout)・cursor 2,090・confirmed の replacement TX は走査で見つかる block 2,100・authorizationState に
+  // 「25 − 10 − 残り」秒。保留候補に下限の枠を必ず渡すと、残り 7 秒未満では MID の後に走査を始められず、同じ遅延が続く限り
+  // TX を一度も見つけない → 時間が足りない回は保留候補と走査の優先順を回ごとに交替し (印は intent に保存)、2 回目は走査を
+  // 先に行って TX で確定する。7 秒以上は両方に最小時間を確保できるので 1 回目に確定する。
+  it.each([
+    ['5s', 5_000, ['pending', 'settled']],
+    ['6s', 6_000, ['pending', 'settled']],
+    ['6.999s', 6_999, ['pending', 'settled']],
+    ['7s (both sides get one minimum RPC)', 7_000, ['settled']],
+  ] as const)('alternates the deferred re-verification and the scan when the remaining budget after the stored hash is %s', async (_label, remaining, expected) => {
+    const intent = await active(OLD);
+    patchIntent({ reconcileDeferred: [MID], reconcileFromBlock: '2090' });
+    const client = chain(intent.nonce, { latest: 50_090n, eventBlock: 2_100n });
+    let clock = NOW;
+    vi.mocked(client.readContract).mockImplementation(async () => { clock += 25_000 - 10_000 - remaining; return true; });
+    const receipt = vi.mocked(client.getTransactionReceipt).getMockImplementation()!;
+    vi.mocked(client.getTransactionReceipt).mockImplementation(async (args) => {
+      if (args.hash === OLD || args.hash === MID) {
+        clock += args.hash === OLD ? 10_000 : 2_000;
+        throw new Error('receipt timeout');
+      }
+      return receipt(args);
+    });
+    const spy = vi.spyOn(Date, 'now').mockImplementation(() => clock);
+    const results: string[] = [];
+    const snapshots: Record<string, unknown>[] = [];
+    try {
+      for (let run = 0; run < 8; run += 1) {
+        const result = await reconcileStoreUsdcIntent(SALT, { now: CHECKED_AT + run * 30_000, client, deadline: clock + 25_000 });
+        results.push(result.ok ? result.state : result.reason);
+        snapshots.push(rawIntent());
+        if (result.ok && result.state === 'settled') break;
+      }
+    } finally {
+      spy.mockRestore();
+    }
+    expect(results).toEqual(expected);
+    await expectSettled();
+    if (expected.length > 1) {
+      // 1 回目は印の既定 ('deferred') どおり保留候補を先に行い、走査は始められず cursor は 2,090 のまま、印は 'scan' へ反転。
+      expect(snapshots[0]).toMatchObject({ reconcileFromBlock: '2090', reconcileDeferred: [MID], reconcileTurn: 'scan' });
+    }
+  });
+
   it.each([
     ['not a list', TX],
     ['empty', []],
@@ -703,6 +750,16 @@ describe('USDC reconciliation with real Lua and receipt verification', () => {
     expect(await getStoreUsdcIntent(SALT)).toBe('corrupt');
     patchIntent({ reconcileDeferred: [TX] });
     expect(await getStoreUsdcIntent(SALT)).toMatchObject({ state: 'indeterminate', reconcileDeferred: [TX] });
+  });
+
+  it.each(['other', 1, null, ''])('rejects a malformed turn mark %j as corrupt without touching the immutable binding', async (turn) => {
+    await active();
+    patchIntent({ reconcileDeferred: [TX], reconcileTurn: turn });
+    expect(await getStoreUsdcIntent(SALT)).toBe('corrupt');
+    for (const valid of ['deferred', 'scan']) {
+      patchIntent({ reconcileTurn: valid });
+      expect(await getStoreUsdcIntent(SALT)).toMatchObject({ state: 'indeterminate', reconcileTurn: valid });
+    }
   });
 
   it.each([2_089n, 2_090n])('finds evidence at paging boundary %s', async (eventBlock) => {
