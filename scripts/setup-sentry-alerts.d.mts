@@ -1,9 +1,17 @@
 // TypeScript 型宣言: scripts/setup-sentry-alerts.mjs の export 用 (test 等から import するため)。
 
+export type TagMatch = 'eq' | 'ew' | 'sw' | 'co';
+
 export type AlertRule = {
   name: string;
+  /** 以前の name。planRules が旧名の rule を引き当てて rename (PUT) する。 */
+  legacyNames?: string[];
   description: string;
-  eventTag: string;
+  /** 複数なら TaggedEventFilter を並べて filterMatch=any (OR)。 */
+  eventTags: string[];
+  /** TaggedEventFilter の比較 (既定 eq)。 */
+  match?: TagMatch;
+  /** EventFrequencyCondition の「N 回より多い」の N (0 = 1 件目で通知)。 */
   threshold: number;
   interval: string;
 };
@@ -14,11 +22,61 @@ export type SentryRulePayload = {
   actionMatch: 'all' | 'any';
   filterMatch: 'all' | 'any';
   frequency: number;
-  conditions: Array<{ id: string; value: number; interval: string }>;
+  conditions: Array<{ id: string; comparisonType: 'count'; value: number; interval: string }>;
   filters: Array<{ id: string; key: string; match: string; value: string }>;
   actions: Array<{ id: string }>;
 };
 
+/** Sentry API (GET /rules/) が返す rule。表示用 field (name 等) が増えるので比較は planRules が絞る。 */
+export type ExistingRule = {
+  id: string;
+  name: string;
+  environment?: string | null;
+  owner?: string | null;
+  /** 'active' | 'disabled'。disabled は既定で更新対象外。 */
+  status?: string;
+  actionMatch?: string;
+  filterMatch?: string;
+  frequency?: number;
+  conditions?: Array<{ id: string; value?: number | string; interval?: string; [k: string]: unknown }>;
+  filters?: Array<{ id: string; key?: string; match?: string; value?: string; [k: string]: unknown }>;
+  actions?: Array<{ id: string; [k: string]: unknown }>;
+};
+
+export type RulePlan = {
+  create: Array<{ name: string; payload: SentryRulePayload }>;
+  update: Array<{
+    id: string;
+    name: string;
+    previousName?: string;
+    changes: string[];
+    /** 既存 rule から引き継いだ actions の class 名 (PUT で通知先を消さない)。 */
+    keptActions: string[];
+    /** 既存 rule から引き継いだ owner (担当・"team:<id>" / "user:<id>")。無ければ undefined。 */
+    keptOwner?: string;
+    /** 無効化中の rule を --include-disabled で更新する (PUT で再有効化される)。 */
+    reenable?: boolean;
+    payload: SentryRulePayload & { actions: Array<{ id: string; [k: string]: unknown }>; owner?: string };
+  }>;
+  unchanged: Array<{ id: string; name: string }>;
+  retire: Array<{ id: string; name: string }>;
+  /** 無効化 (status=disabled) 中で差分がある rule。既定では更新しない (PUT は再有効化するため)。 */
+  skippedDisabled: Array<{ id: string; name: string; changes: string[] }>;
+};
+
+export type PlanOptions = {
+  /** 無効化中の rule も update に入れる (PUT で再有効化される)。 */
+  includeDisabled?: boolean;
+};
+
 export const RULES: readonly AlertRule[];
+export const RETIRED_RULE_NAMES: readonly string[];
 export function buildRulePayload(rule: AlertRule, env?: string): SentryRulePayload;
-export function main(): Promise<void>;
+export function planRules(
+  existing: ExistingRule[],
+  rules?: readonly AlertRule[],
+  env?: string,
+  opts?: PlanOptions,
+): RulePlan;
+export function formatPlan(plan: RulePlan, env?: string): string[];
+export function main(argv?: string[]): Promise<RulePlan>;

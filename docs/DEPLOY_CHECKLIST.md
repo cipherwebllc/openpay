@@ -156,6 +156,16 @@ filter 構文の前提: `lib/logger.ts:35-58` の `reportToSentry` は `captureE
 保証)。よって Sentry の Alert Rule で `tags[event]:"scan.*"` または UI 上では
 `event:"…"` で filter 可能。
 
+上の表 (scan.* / market.rates) は Dashboard で手で作る rule。money-path (relay / x402 /
+Store / license / モバイル注文 / billing) と支払いフォームの rule は
+`scripts/setup-sentry-alerts.mjs` の `RULES` が正本 (§10.6・§11.3)。閾値は Sentry の
+「N 回より多い」の N で、money-path は 0 (= 1 件目で通知)。environment は `mainnet` だけ
+(手元の event は `local-<network>`・`lib/sentryEnvironment.ts`)。
+
+**対象外 (server から見えない)**: お店がガス代を肩代わりして送るときのガス用ウォレットは鍵も
+残高もお店の端末のブラウザ (localStorage) にあり、OpenPay のサーバは鍵もガスも持たない
+(§17.4)。server 側の Sentry rule では監視できないので、残り回数の目安は画面で出す。
+
 ### 3.3 iOS Safari 実機 QA (emulation 不能パート)
 
 playwright mobile-safari emulation で再現しない iOS 固有 quirk があるため、
@@ -1019,19 +1029,27 @@ operator demo の Gateway total は API の預入残高であり、経路の利�
       設定済か確認。**未設定の場合 `lib/logger.ts` の Sentry.captureMessage は
       silent no-op となり alert は飛ばない**。
 
-**alert rule 登録**:
+**alert rule 登録** (正本 = `scripts/setup-sentry-alerts.mjs` の `RULES`):
 - [ ] `SENTRY_AUTH_TOKEN` + `SENTRY_ORG_SLUG` + `SENTRY_PROJECT_SLUG` を取得し
-      `node scripts/setup-sentry-alerts.mjs` を **1 度実行** (idempotent、
-      `cross-chain.execute.failed` + `cross-chain.balance-query.failed` の
-      2 rule + 既存 5 rule を Sentry org に登録/skip)
-- [ ] script output で 7 rule すべての `created` or `skip (既存)` を確認
-- [ ] Sentry Dashboard → Alerts でも 7 rule の存在を目視確認
+      `node scripts/setup-sentry-alerts.mjs --dry-run` で計画 (create / update / keep / retire)
+      を確認 (GET だけ・何も変えない)
+- [ ] `node scripts/setup-sentry-alerts.mjs` で適用 (無い rule は POST、同名または旧名
+      `legacyNames` の rule は conditions / filters / environment / actionMatch / filterMatch が
+      違えば PUT で更新 = 再実行で収束)。PUT は rule 全体を上書きするので、既存の通知先
+      (Slack 等の actions) は script が引き継ぐ (計画の `[actions 保持: …]`)。通知先を変えるのは
+      Dashboard で
+- [ ] `retire` に出た rule (発火元が無くなったもの・`RETIRED_RULE_NAMES`) は script が削除しない
+      ので Sentry Dashboard → Alerts で手動削除
+- [ ] Dashboard で無効化 (disabled) 中の rule は既定では更新しない (PUT は再有効化して止めていた通知を
+      再開するため)。計画の `! skip` を見て、再有効化してよいものだけ `--include-disabled` で更新
+- [ ] Sentry Dashboard → Alerts で `RULES` と同数の rule・environment=mainnet を目視確認
 
-**threshold calibration** (alpha 初期値 = production 観測前の guess):
-- [ ] cross-chain.execute.failed = 20件/h、balance-query = 100件/h は推測値。
-      production 1 週間後に week-over-week で実 traffic baseline 算出 →
-      p95 × 2 で threshold を更新 → 旧 rule を Dashboard で delete してから
-      `scripts/setup-sentry-alerts.mjs` 再実行
+**threshold の考え方** (2026-10-10 第 7 回レビュー E6 で較正):
+- 旧閾値「alpha 想定 1000 tx/h の 5%」は実トラフィック (外部の実購入が月数件) では決済が
+  全滅しても届かなかった。money-path は閾値 0 (1 件目で通知・同じ issue への再通知は 1h に 1 回)、
+  一過性や客側の失敗が混ざるものは 2〜3、客のブラウザ由来は 10。
+- 再較正は Sentry → Issues の実頻度を見て `RULES` を直し、`--dry-run` で差分を見てから適用
+  (旧 rule の削除は不要)。
 
 **動作確認**:
 - [ ] テスト event を 1 度発火させて alert 通知が来ることを目視確認
@@ -1290,11 +1308,14 @@ gh run list --workflow=pimlico-balance.yml --repo=cipherwebllc/openpay --limit 1
 
 ```bash
 SENTRY_AUTH_TOKEN=... SENTRY_ORG_SLUG=... SENTRY_PROJECT_SLUG=... \
-  node scripts/setup-sentry-alerts.mjs
+  node scripts/setup-sentry-alerts.mjs --dry-run   # 計画だけ (GET のみ)
+SENTRY_AUTH_TOKEN=... SENTRY_ORG_SLUG=... SENTRY_PROJECT_SLUG=... \
+  node scripts/setup-sentry-alerts.mjs             # 適用 (POST / PUT)
 ```
 
-idempotent — 既に作成済 rule は skip、無ければ POST。実行履歴を私 (operator) が
-気付けるよう Sentry Dashboard → Alerts → Issue Alerts で目視確認。
+idempotent — 無い rule は POST、同名 (旧名 `legacyNames` も) の rule は差分があれば PUT、
+差分が無ければ keep。発火元の無い rule は `retire` として出すだけ (Dashboard で手動削除)。
+実行履歴を私 (operator) が気付けるよう Sentry Dashboard → Alerts → Issue Alerts で目視確認。
 
 ### §11.4 「verify-production-config.mjs」が 0 件 ✗ で deploy 認可
 
@@ -1334,7 +1355,7 @@ npm run load-test -- --url http://localhost:3000 -c 20 -d 15
 | Risk | 現状の緩和 | 将来の選択肢 |
 |---|---|---|
 | `/api/log/payment` の rate limit は KV 障害時 fail-open (KV 停止中は DDoS で Vercel function 実行費用 spike 可能) | IP hash / 匿名化 prefix ごとに 60 req / 60s (`checkReadRateLimit`)、5 KiB の streamed body cap、78 桁の decimal cap、legacy list 20k 件 cap + 35 日の inactivity TTL、UTC 日次 5,000 件の write budget。超過時は保存だけ省略して 200、`payment-log.daily-budget-exhausted` を日次 SET NX で 1 回警告 | C3/C6: IPv6 /64 bucket・per-IP 日次 sub-budget・KV 非依存の WAF 制限を検討。単一 IP でも約 84 分で日次枠を使い切れ、拒否後も KV コマンドは消費する |
-| `setup-sentry-alerts.mjs` 自動実行 CI なし (idempotent script を operator 手動実行に依存) | script は idempotent (既存 rule は skip)、人為的に rule が消えない限り再実行不要 | GH Actions workflow に sentry-setup を追加 (SENTRY_AUTH_TOKEN secret 必要) |
+| `setup-sentry-alerts.mjs` 自動実行 CI なし (idempotent script を operator 手動実行に依存) | script は idempotent (同名 rule は差分があれば PUT・無ければ keep)、`RULES` を変えたら `--dry-run` → 適用 | GH Actions workflow に sentry-setup を追加 (SENTRY_AUTH_TOKEN secret 必要) |
 | punycode deprecation build warning | §10.11 受容済 noise (修正不能、機能無影響) | upstream packages (whatwg-url / uri-js) が `require('punycode/')` 採用するまで wait |
 | **A3 デバイス共通ラッチ (2026-09-03 レビュー裁定・受容)**: 同一端末で wallet を切り替えた同一人物が、状態不明のガスレス送金の直後にもう一方の wallet で再送すると二重支払いになり得る | ラッチは wallet 単位 (端末単位にしていない)。端末単位にすると共用 POS タブレット (店頭の 1 台を客が順に使う) で**他人の支払いを誤って阻止/誤帰属**するため、被害の大きい側を避けている。pending 応答は client の standard fallback を禁止済 (relayRoute) | 再評価トリガ = メトリクスで**同一端末の複数 wallet 利用**が観測されたとき (その時点で端末ラッチ or 端末+wallet の複合キーを再検討) |
 | **A6 feeKind 束縛 (2026-09-03 レビュー裁定・受容)**: 改造クライアントは `feeKind` を送らないことで 1%/3% ではなく 2 JPYC フロアだけを払える | @handle 経由の注文は notify の `feeUncollected` で検出できる (受注側に不足が記録される)。@handle を使わない直接利用は現状ほぼ皆無で、実損は最大でも 1 注文あたり数十円規模 | 再評価トリガ = モバイル注文の流量が増えたとき、または `feeUncollected` の alert が実際に出たとき (その時点で feeKind を注文レコード側の権威値から server 決定に変える) |
@@ -1396,8 +1417,9 @@ txHash をサーバが on-chain 照合 → 30 日 tier 自動付与。詳細実�
    env が build を throw 停止。testnet は未設定だと burn になるため route が 503 で弾く)。
 3. `NEXT_PUBLIC_ENABLE_BILLING=1` をセット (build-time inline → 再デプロイ必須)。
 4. `ALPHA_ENTITLEMENT_BYPASS=0` をセット (利用権必須運用へ。server runtime)。
-5. Sentry alert を登録: `node scripts/setup-sentry-alerts.mjs` (SENTRY_AUTH_TOKEN 等必要・§11.5)。
-   billing.fee.* 4 rule が idempotent に作成される。
+5. Sentry alert を登録: `node scripts/setup-sentry-alerts.mjs --dry-run` で計画を見てから
+   `node scripts/setup-sentry-alerts.mjs` (SENTRY_AUTH_TOKEN 等必要・§11.3)。
+   billing.settle.* / billing.meter.* / billing.revenue.* の 7 rule が idempotent に作成・更新される。
 
 ### §12.3 ロールバック (安全状態へ即復帰)
 - **最速 (UI 全停止)**: `NEXT_PUBLIC_ENABLE_BILLING=0` に戻して再デプロイ → paywall/ゲートが消え
