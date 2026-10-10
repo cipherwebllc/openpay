@@ -522,6 +522,17 @@ describe('promotePayerReceiptStatus', () => {
     expect(promotePayerReceiptStatus('0xnope', 'confirmed')).toBe(false);
   });
 
+  // 第 7 回レビュー (Codex): 照会した tx とストアの控えの tx が違えば (付け替え後)、古い tx の結果を書かない。
+  it('照会した tx を渡したら、ストアの控えが同じ tx (chainId と hash・大小文字は問わない) のときだけ昇格する', () => {
+    const r = { ...buildPayerReceipt({ asset: 'jpyc', amount: '1', merchantAddress: '0xM', txHash: '0xabc', chainId: 80002 }, NOW), receiptId: 'rid-tx', status: 'pending' as const, paidAt: undefined };
+    appendPayerReceipt(r);
+    expect(promotePayerReceiptStatus('rid-tx', 'failed', { chainId: 80002, txHash: '0xdef' })).toBe(false);
+    expect(promotePayerReceiptStatus('rid-tx', 'failed', { chainId: 137, txHash: '0xabc' })).toBe(false);
+    expect(loadPayerReceipts()[0].status).toBe('pending');
+    expect(promotePayerReceiptStatus('rid-tx', 'confirmed', { chainId: 80002, txHash: '0xABC' })).toBe(true);
+    expect(loadPayerReceipts()[0].status).toBe('confirmed');
+  });
+
   // 第 7 回レビュー (Codex): 書き込みに失敗したのに true を返す偽成功にしない。
   it('保存に失敗したら false (ストアの控えは pending のまま)', () => {
     seedPending('0xq4');

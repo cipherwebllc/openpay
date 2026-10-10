@@ -1,7 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { act, renderHook } from '@testing-library/react';
 import {
+  appendPayerReceipt,
   buildPayerReceipt,
+  clearPayerReceipts,
   loadPayerReceipts,
   PAYER_RECEIPTS_STORAGE_KEY,
   type PayerReceipt,
@@ -280,5 +282,129 @@ describe('usePayerReceipts: 照合の調整 (A10)', () => {
     await advance(0);
     expect(statusOf('0xdup')).toBe('confirmed');
     expect(queried('0xdup')).toBe(1);
+  });
+
+  // Codex 3 回目の指摘: 控えの tx hash が付け替わったとき (同じ receiptId のまま)、前の tx の結果・回数を使わない。
+  describe('控えの tx hash の付け替え', () => {
+    const ID = 'gateway:80002:0xspec';
+    const TX_A = `0x${'a'.repeat(64)}`;
+    const TX_B = `0x${'b'.repeat(64)}`;
+    const withTx = (txHash: string): PayerReceipt => ({ ...pending(txHash), receiptId: ID });
+    const stored = () => loadPayerReceipts().find((r) => r.receiptId === ID);
+    const reload = () =>
+      act(() => {
+        window.dispatchEvent(new StorageEvent('storage', { key: PAYER_RECEIPTS_STORAGE_KEY }));
+      });
+
+    it('前の tx の照会中に付け替わったら、前の tx の結果を新しい tx に保存せず、新しい tx を照会して確定する', async () => {
+      const usePayerReceipts = await loadHook();
+      seed([withTx(TX_A)]);
+      const { held } = holdResponses();
+      renderHook(() => usePayerReceipts());
+      await advance(0);
+      seed([withTx(TX_B)]);
+      reload();
+      held[0].resolve('reverted');
+      await advance(0);
+      expect(stored()?.status).toBe('pending');
+      expect(stored()?.txHash).toBe(TX_B);
+      expect(queried(TX_B)).toBe(1);
+      held[1].resolve('success');
+      await advance(0);
+      expect(stored()?.status).toBe('confirmed');
+    });
+
+    it('保存のやり直しのタイマーが一覧の更新より先に動いても、前の tx の結果を新しい tx に保存しない', async () => {
+      const usePayerReceipts = await loadHook();
+      seed([withTx(TX_A)]);
+      fetchMock.mockResolvedValue('reverted');
+      const setItem = vi.spyOn(Storage.prototype, 'setItem');
+      setItem.mockImplementationOnce(() => {
+        throw new Error('QuotaExceededError');
+      });
+      renderHook(() => usePayerReceipts());
+      await advance(0);
+      setItem.mockRestore();
+      // 画面には知らせずにストアだけ付け替える (一覧は前の tx のまま)。
+      seed([withTx(TX_B)]);
+      await advance(15_000);
+      expect(stored()?.txHash).toBe(TX_B);
+      expect(stored()?.status).toBe('pending');
+    });
+
+    it('前の tx が再照会の上限に達していても、付け替わった新しい tx は最初から照会する', async () => {
+      const usePayerReceipts = await loadHook();
+      seed([withTx(TX_A)]);
+      fetchMock.mockImplementation(async (_c: number, h: string): Promise<ReceiptTxStatus> =>
+        h === TX_B ? 'success' : 'unknown',
+      );
+      renderHook(() => usePayerReceipts());
+      await advance(0);
+      for (let i = 0; i < 12; i++) await advance(5 * 60_000);
+      expect(queried(TX_A)).toBe(9);
+      seed([withTx(TX_B)]);
+      reload();
+      await advance(0);
+      expect(queried(TX_B)).toBe(1);
+      expect(stored()?.status).toBe('confirmed');
+    });
+
+    it('tx hash の大文字・小文字の違いだけなら同じ tx として扱い、照会し直さない', async () => {
+      const usePayerReceipts = await loadHook();
+      seed([withTx(TX_A)]);
+      fetchMock.mockResolvedValue('unknown');
+      renderHook(() => usePayerReceipts());
+      await advance(0);
+      seed([withTx(TX_A.toUpperCase().replace('0X', '0x'))]);
+      reload();
+      await advance(0);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // Codex 3 回目の指摘 (P3): 調整役の状態の寿命。
+  describe('調整役の状態の寿命', () => {
+    it('再照会の上限に達した後でも、全部の画面を外して開き直したら (再訪) 最初から照会する', async () => {
+      const usePayerReceipts = await loadHook();
+      seed([pending('0xrevisit')]);
+      fetchMock.mockResolvedValue('unknown');
+      const first = renderHook(() => usePayerReceipts());
+      await advance(0);
+      for (let i = 0; i < 12; i++) await advance(5 * 60_000);
+      expect(queried('0xrevisit')).toBe(9);
+      first.unmount();
+      renderHook(() => usePayerReceipts());
+      await advance(0);
+      expect(queried('0xrevisit')).toBe(10);
+    });
+
+    it('削除で一覧から外れた控えの状態は残さない (同じ控えをもう一度入れたら照会する)', async () => {
+      const usePayerReceipts = await loadHook();
+      seed([pending('0xremoved')]);
+      fetchMock.mockResolvedValue('unknown');
+      renderHook(() => usePayerReceipts());
+      await advance(0);
+      for (let i = 0; i < 12; i++) await advance(5 * 60_000);
+      expect(queried('0xremoved')).toBe(9);
+      act(() => clearPayerReceipts());
+      await advance(0);
+      act(() => appendPayerReceipt(pending('0xremoved')));
+      await advance(0);
+      expect(queried('0xremoved')).toBe(10);
+    });
+
+    it('全部の画面が外れた後に返った未確定の結果は、次に開いたときの照会を遅らせない', async () => {
+      const usePayerReceipts = await loadHook();
+      seed([pending('0xlate')]);
+      const { held } = holdResponses();
+      const first = renderHook(() => usePayerReceipts());
+      await advance(0);
+      first.unmount();
+      held[0].resolve('unknown');
+      await advance(0);
+      renderHook(() => usePayerReceipts());
+      await advance(0);
+      expect(queried('0xlate')).toBe(2);
+    });
   });
 });

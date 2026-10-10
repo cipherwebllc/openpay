@@ -31,7 +31,7 @@ export function isReconcilableReceipt(r: PayerReceipt): boolean {
 export type ReceiptReconcileResult = {
   receiptId: string;
   status: ReceiptTxStatus;
-  /** ストアの控えを昇格したか (既に pending でなければ false)。 */
+  /** ストアの控えを昇格して保存できたか (既に pending でない・控えの tx が付け替わった・保存できなかったら false)。 */
   promoted: boolean;
 };
 
@@ -51,12 +51,14 @@ export async function reconcilePendingReceipts(
   const targets = receipts.filter(isReconcilableReceipt).slice(0, max);
   return Promise.all(
     targets.map(async (r) => {
-      const status = await fetchStatus(r.chainId as number, r.txHash as string);
+      // 照会した tx。昇格はストアの控えがまだこの tx を指しているときだけ (照会の間の付け替えで古い結果を書かない)。
+      const tx = { chainId: r.chainId as number, txHash: r.txHash as string };
+      const status = await fetchStatus(tx.chainId, tx.txHash);
       const promoted =
         status === 'success'
-          ? promotePayerReceiptStatus(r.receiptId, 'confirmed')
+          ? promotePayerReceiptStatus(r.receiptId, 'confirmed', tx)
           : status === 'reverted'
-            ? promotePayerReceiptStatus(r.receiptId, 'failed')
+            ? promotePayerReceiptStatus(r.receiptId, 'failed', tx)
             : false;
       return { receiptId: r.receiptId, status, promoted };
     }),
