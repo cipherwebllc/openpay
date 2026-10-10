@@ -1,0 +1,10 @@
+{
+  "checks": [
+    "audit",
+    "e2e-prodflags",
+    "lighthouse",
+    "lua-real",
+    "playwright",
+    "test"
+  ]
+}
