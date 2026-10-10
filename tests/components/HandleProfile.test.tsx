@@ -84,7 +84,7 @@ describe('HandleProfileView', () => {
     const { container } = renderWithIntl(<HandleProfileView config={multiConfig} profile={{ font }} />);
     const root = container.firstElementChild as HTMLElement;
     expect(root).not.toHaveAttribute('style');
-    if (font === 'serif' || font === 'rounded') expect(root).toHaveClass(`font-${font}-jp`);
+    if (font === 'serif' || font === 'rounded') expect(root).toHaveClass(`handle-font-${font}`);
     else {
       expect(root.className).toBe('flex flex-col items-center text-center');
       expect(root).not.toHaveAttribute('style');
