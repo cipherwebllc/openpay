@@ -27,14 +27,17 @@ test('actual npm tarball includes types/examples and verifies through installed 
   const dir = mkdtempSync(join(tmpdir(), 'openpay-delivery-package-'));
   try {
     const npm = ['pack', '--json', '--ignore-scripts', '--cache', join(dir, 'npm-cache')];
-    const dry = manifestOf(execFileSync('npm', [...npm, '--dry-run'], { cwd: packageDir, encoding: 'utf8' }));
+    // `npm publish --dry-run` の prepublishOnly から呼ばれると npm_config_dry_run=true が環境に入り、下の本物の
+    // pack も tarball を書かなくなる (展開で落ちる)。子の npm には dry-run の設定を渡さない。
+    const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => key.toLowerCase() !== 'npm_config_dry_run'));
+    const dry = manifestOf(execFileSync('npm', [...npm, '--dry-run'], { cwd: packageDir, encoding: 'utf8', env }));
     assert.equal(dry.version, '0.10.3');
     const paths = dry.files.map((file) => file.path);
     for (const path of ['src/delivery.mjs', 'delivery.d.ts', 'src/index.mjs', 'index.d.ts', 'README.md', 'CHANGELOG.md',
       'examples/node-delivery-gate.mjs', 'examples/cloudflare-r2-delivery-gate/worker.mjs',
       'examples/cloudflare-r2-delivery-gate/wrangler.toml', 'examples/cloudflare-r2-delivery-gate/README.md']) assert.ok(paths.includes(path), path);
     assert.equal(paths.some((path) => path.startsWith('tests/')), false);
-    const pack = manifestOf(execFileSync('npm', [...npm, '--pack-destination', dir], { cwd: packageDir, encoding: 'utf8' }));
+    const pack = manifestOf(execFileSync('npm', [...npm, '--pack-destination', dir], { cwd: packageDir, encoding: 'utf8', env }));
     execFileSync('tar', ['-xzf', join(dir, pack.filename), '-C', dir]);
     const extracted = join(dir, 'package');
     const manifest = JSON.parse(readFileSync(join(extracted, 'package.json'), 'utf8'));
