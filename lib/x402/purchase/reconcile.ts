@@ -16,7 +16,7 @@ import {
   type ForwarderSettleParams,
 } from '@/lib/relay/forwarderIntent';
 import { railIntentParentKey, releaseActiveStoreRail } from '@/lib/x402/storeRailSelection';
-import { pageFetchTimeout } from '@/lib/x402/reconcileBudget';
+import { pageFetchTimeout, rpcCallOptions } from '@/lib/x402/reconcileBudget';
 import { scanReconcileBlockPages } from '@/lib/x402/reconcilePaging';
 import {
   PURCHASE_RECONCILE_LEASE_SEC,
@@ -157,6 +157,9 @@ export async function reconcilePurchaseIntent(
 ): Promise<ReconcilePurchaseIntentResult> {
   const now = options.now ?? Date.now();
   const chain = options.chain ?? defaultPurchaseReconcileChain;
+  // deadline 付き (cron) では全 RPC の直前に残り時間を見る: null = 始めずに進捗を保存して次回へ / { timeoutMs } =
+  // retry なし・本文受信までこの timeout で 1 回だけ (第 7 回レビュー B4 follow-up 2)。deadline なしは undefined (既定)。
+  const rpc = () => rpcCallOptions(options.deadline);
   const leased = await claimReconcileLease(intentSalt, now);
   if (!leased.ok) {
     if (leased.reason === 'license') return reconcileLicensePurchase(leased.intent, leased.raw, now, finalizeHostedPurchase, options.licenseChain, options.deadline);
@@ -233,14 +236,23 @@ export async function reconcilePurchaseIntent(
   }
 
   try {
-    const used = await chain.authorizationUsed(intent);
+    const usedRpc = rpc();
+    if (usedRpc === null) {
+      // 予算不足: 何も変えずに次回へ (状態・cursor は不変)。
+      const deferred = await rescheduleAfterReconcile({ intentSalt, leasedRaw, intent, now, makeIndeterminate: false });
+      return deferred === 'updated' ? { ok: true, state: 'pending' } : { ok: false, reason: 'storage' };
+    }
+    const used = usedRpc ? await chain.authorizationUsed(intent, usedRpc) : await chain.authorizationUsed(intent);
     if (used !== true) {
       const validBefore = BigInt(intent.claim.validBefore);
       const expiryDue = BigInt(Math.floor(now / 1000)) >= validBefore;
+      // 期限切れ未使用の証明 (finalized block の RPC) も予算内でだけ試み、足りなければ証明なし = reschedule。
+      const expiryRpc = used === false && expiryDue ? rpc() : undefined;
       if (
         used === false &&
         expiryDue &&
-        await chain.authorizationExpiredUnused?.(intent) === true
+        expiryRpc !== null &&
+        await (expiryRpc ? chain.authorizationExpiredUnused?.(intent, expiryRpc) : chain.authorizationExpiredUnused?.(intent)) === true
       ) {
         const failed: FailedPrebroadcastPurchaseIntent = {
           ...intent,
@@ -331,9 +343,26 @@ export async function reconcilePurchaseIntent(
       txHash: Hex,
       candidatePageStart?: bigint,
     ): Promise<ReconcilePurchaseIntentResult | null> => {
+      // 候補 1 件の照合の前に残り時間を見る。足りなければ照合せず、候補のページ (保存済み hash なら現 cursor) から延期。
+      const receiptRpc = rpc();
+      if (receiptRpc === null) {
+        const deferred = await rescheduleAfterReconcile({
+          intentSalt,
+          leasedRaw,
+          intent,
+          now,
+          ...(candidatePageStart === undefined ? {} : { fromBlock: candidatePageStart }),
+          makeIndeterminate: true,
+        });
+        return deferred === 'updated'
+          ? { ok: true, state: 'pending' }
+          : { ok: false, reason: 'storage' };
+      }
       let matches: boolean;
       try {
-        matches = await chain.receiptMatches(intent, txHash);
+        matches = receiptRpc
+          ? await chain.receiptMatches(intent, txHash, receiptRpc)
+          : await chain.receiptMatches(intent, txHash);
       } catch {
         // 走査で新しく見つけた候補の receipt 一時障害で、証拠のあるページを飛ばして cursor を進めると、
         // head が走査予算より速く進む間は再発見できない (第 7 回レビュー B3)。entitlement 未付与への
@@ -423,9 +452,14 @@ export async function reconcilePurchaseIntent(
       const resolved = await finalizeCandidate(intent.txHash);
       if (resolved) return resolved;
     }
-    const latest = await chain.latestBlock(intent);
+    const headRpc = rpc();
+    if (headRpc === null) {
+      const deferred = await rescheduleAfterReconcile({ intentSalt, leasedRaw, intent, now, makeIndeterminate: true });
+      return deferred === 'updated' ? { ok: true, state: 'pending' } : { ok: false, reason: 'storage' };
+    }
+    const latest = headRpc ? await chain.latestBlock(intent, headRpc) : await chain.latestBlock(intent);
     const anchor = BigInt(intent.anchorBlock);
-    const { candidates, nextFromBlock } = await scanReconcileBlockPages({
+    const { candidates, nextFromBlock, interrupted } = await scanReconcileBlockPages({
       anchor,
       fromBlock: intent.reconcileFromBlock ? BigInt(intent.reconcileFromBlock) : anchor,
       latest,
@@ -435,6 +469,11 @@ export async function reconcilePurchaseIntent(
     }, (fromBlock, toBlock, options) => options
       ? chain.authorizationUsedTransactions(intent, fromBlock, toBlock, options)
       : chain.authorizationUsedTransactions(intent, fromBlock, toBlock));
+    if (interrupted?.reason === 'error') {
+      // ページ取得の失敗/timeout: 取得済みページの候補は下で照合し、失敗したページの先頭を cursor に保存する
+      // (以前は候補と進捗を捨てて同じ範囲で停滞した・B4 follow-up 2)。RPC 不明は terminal に変換しない。
+      logger.warn('creator_store.purchase_reconcile_indeterminate', { intentSalt, error: interrupted.error });
+    }
     for (const [txHash, candidatePageStart] of candidates) {
       const resolved = await finalizeCandidate(txHash, candidatePageStart);
       if (resolved) return resolved;
@@ -502,7 +541,7 @@ export async function reconcilePendingPurchases(input: {
   for (const rawSalt of salts) {
     // 重い 1 件が cron の maxDuration を使い切って後続 intent と USDC rail の番を奪う波及を断つ。
     // 残りは due のまま ZSET に残るので、次回 (status ポーリング or cron) が拾う。
-    if (input.deadline !== undefined && Date.now() >= input.deadline) {
+    if (input.deadline !== undefined && rpcCallOptions(input.deadline) === null) {
       summary.deferred += 1;
       continue;
     }

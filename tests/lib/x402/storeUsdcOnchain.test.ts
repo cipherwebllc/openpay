@@ -37,9 +37,20 @@ vi.mock('@/lib/kv', () => ({
 import {
   findStoreUsdcAuthorizationTransactions,
   STORE_USDC_ADDRESS,
+  storeUsdcBoundedClient,
   type StoreUsdcPublicClient,
   verifyStoreUsdcOnchain,
 } from '@/lib/x402/storeUsdcOnchain';
+
+// B4 follow-up 2 (2): deadline 付き reconcile の全 RPC が使う、retry なし・timeout を絞った Base client。
+describe('Store USDC bounded client', () => {
+  it('builds a retry-free Base client bounded by the given timeout', () => {
+    chainsMock.transportForChain.mockClear();
+    const client = storeUsdcBoundedClient(4_321);
+    expect(typeof client.getLogs).toBe('function');
+    expect(chainsMock.transportForChain).toHaveBeenCalledWith(8453, { timeout: 4_321, retryCount: 0 });
+  });
+});
 
 // 第 7 回レビュー B4 (follow-up): deadline 付きの page 取得だけ、retry なし・残り時間で切った timeout の client を使う。
 describe('Store USDC page fetch transport bound', () => {

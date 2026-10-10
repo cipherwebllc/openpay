@@ -436,9 +436,19 @@ const SEPOLIA_PUBLIC_FALLBACKS = [
 //     が設定されていればそれを primary に前置 (専用 RPC 優先)。
 //   - その他 chain: custom RPC があればそれ、無ければ viem default (http())。
 // options = 呼び出しごとに RPC の timeout / retryCount を絞る (第 7 回レビュー B4 follow-up: reconciler の deadline
-// 付きページ取得)。省略時は viem の既定 (timeout 10 秒・retry 3 回) のまま。fallback (Ethereum) は endpoint を順に
+// 付き RPC)。省略時は viem の既定 (timeout 10 秒・retry 3 回) のまま。fallback (Ethereum) は endpoint を順に
 // 試すので、timeout を endpoint 数で割って全体が options.timeout に収まるようにする。
+// viem 2.56 の http.timeout はヘッダー受信までで本文の受信は範囲外なので、timeout 付きの transport には
+// fetchOptions.signal (AbortSignal.timeout) も付けて本文の受信まで打ち切る。signal は transport 作成時から数えるため、
+// この transport は「1 回の RPC (または 1 つの短い連続呼び出し) の直前に作って使い捨てる」前提。
 export type TransportOptions = { timeout?: number; retryCount?: number };
+
+function boundedHttpConfig(options: TransportOptions, timeout: number | undefined) {
+  return {
+    ...(timeout === undefined ? {} : { timeout, fetchOptions: { signal: AbortSignal.timeout(timeout) } }),
+    ...(options.retryCount === undefined ? {} : { retryCount: options.retryCount }),
+  };
+}
 
 export function transportForChain(chainId: number, options?: TransportOptions): Transport {
   const customUrl = customRpcUrlForChain(chainId);
@@ -449,17 +459,15 @@ export function transportForChain(chainId: number, options?: TransportOptions): 
         : SEPOLIA_PUBLIC_FALLBACKS;
     const endpoints = customUrl ? [customUrl, ...fallbacks] : [...fallbacks];
     if (!options) return fallback(endpoints.map((u) => http(u)));
-    const perEndpoint = {
-      ...(options.timeout === undefined ? {} : { timeout: Math.floor(options.timeout / endpoints.length) }),
-      ...(options.retryCount === undefined ? {} : { retryCount: options.retryCount }),
-    };
+    const perEndpointTimeout = options.timeout === undefined ? undefined : Math.floor(options.timeout / endpoints.length);
     return fallback(
-      endpoints.map((u) => http(u, perEndpoint)),
+      endpoints.map((u) => http(u, boundedHttpConfig(options, perEndpointTimeout))),
       options.retryCount === undefined ? {} : { retryCount: options.retryCount },
     );
   }
   if (!options) return customUrl ? http(customUrl) : http();
-  return customUrl ? http(customUrl, options) : http(undefined, options);
+  const config = boundedHttpConfig(options, options.timeout);
+  return customUrl ? http(customUrl, config) : http(undefined, config);
 }
 
 /** Buyer-only chain (phase 4b-1) を含めた Chain 解決。CROSS_CHAIN_TARGETS から

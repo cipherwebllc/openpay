@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   pageFetchTimeout,
+  rpcCallOptions,
   STORE_RECONCILE_CRON_MAX_DURATION_SEC,
   STORE_RECONCILE_CURSOR_RESERVE_MS,
   STORE_RECONCILE_PAGE_RPC_MIN_MS,
@@ -25,6 +26,13 @@ describe('store-reconcile page fetch budget', () => {
     expect(pageFetchTimeout(now + STORE_RECONCILE_CURSOR_RESERVE_MS + STORE_RECONCILE_PAGE_RPC_MIN_MS - 1, now)).toBeNull();
     expect(pageFetchTimeout(now + STORE_RECONCILE_CURSOR_RESERVE_MS + STORE_RECONCILE_PAGE_RPC_MIN_MS, now)).toBe(STORE_RECONCILE_PAGE_RPC_MIN_MS);
     expect(pageFetchTimeout(now - 1, now)).toBeNull();
+  });
+  // B4 follow-up 2: 全 RPC (getLogs・receipt・block・authorizationState) が同じ予算を adapter の options として受ける。
+  it('maps the page fetch budget to adapter call options (undefined = unbounded, null = do not start)', () => {
+    expect(rpcCallOptions(undefined, now)).toBeUndefined();
+    expect(rpcCallOptions(now + 25_000, now)).toEqual({ timeoutMs: STORE_RECONCILE_PAGE_RPC_TIMEOUT_MS });
+    expect(rpcCallOptions(now + STORE_RECONCILE_CURSOR_RESERVE_MS + 7_000, now)).toEqual({ timeoutMs: 7_000 });
+    expect(rpcCallOptions(now - 1, now)).toBeNull();
   });
   it('keeps the whole budget inside the cron maxDuration with room for the last fetch and the cursor save', () => {
     const { jpyc, usdc } = storeReconcileDeadlines(now);

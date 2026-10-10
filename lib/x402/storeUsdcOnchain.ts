@@ -85,6 +85,11 @@ function baseClient(timeoutMs?: number): StoreUsdcPublicClient {
   }) as unknown as StoreUsdcPublicClient;
 }
 
+/** deadline 付き reconcile の全 RPC が使う、retry なし・timeout (本文受信まで) を絞った Base client。1 回の RPC の直前に作る。 */
+export function storeUsdcBoundedClient(timeoutMs: number): StoreUsdcPublicClient {
+  return baseClient(timeoutMs);
+}
+
 export function storeUsdcAuthorizationExpiredUnused(input: {
   payer: Address;
   nonce: Hex;

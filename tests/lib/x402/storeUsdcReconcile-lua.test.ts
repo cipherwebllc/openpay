@@ -319,16 +319,28 @@ describe('USDC reconciliation with real Lua and receipt verification', () => {
     expect(await reconcileStoreUsdcIntent(SALT, { now: CHECKED_AT + 30_000, client })).toEqual({ ok: true, state: 'settled' });
   });
 
-  it('does not skip unverified pages when an RPC page fails', async () => {
+  // B4 follow-up 2: 後のページが失敗しても、取得済みページの候補はその場で照合する (以前は候補を捨てて同じ cursor で待ち、
+  // 次回に同じページを取り直して初めて settle していた)。候補が無いページの失敗は cursor をそのページの先頭に保存する。
+  it('verifies the candidates of fetched pages even when a later page fails, and saves the failed page start otherwise', async () => {
     const intent = await active();
     patchIntent({ reconcileFromBlock: '2090' });
     const client = chain(intent.nonce, { latest: 5_000n, eventBlock: 2_090n });
     vi.mocked(client.getLogs)
       .mockResolvedValueOnce([{ transactionHash: TX }])
       .mockRejectedValueOnce(new Error('RPC unavailable'));
+    expect(await reconcileStoreUsdcIntent(SALT, { now: CHECKED_AT, client })).toEqual({ ok: true, state: 'settled' });
+    expect(client.getLogs).toHaveBeenCalledTimes(2);
+  });
+
+  it('a failed page without candidates saves the failed page start as the cursor (progress, not a stall)', async () => {
+    const intent = await active();
+    patchIntent({ reconcileFromBlock: '2090' });
+    const client = chain(intent.nonce, { latest: 5_000n, eventBlock: 2_090n });
+    vi.mocked(client.getLogs)
+      .mockResolvedValueOnce([])
+      .mockRejectedValueOnce(new Error('RPC unavailable'));
     expect(await reconcileStoreUsdcIntent(SALT, { now: CHECKED_AT, client })).toEqual({ ok: true, state: 'pending' });
-    expect(await getStoreUsdcIntent(SALT)).toMatchObject({ reconcileFromBlock: '2090', nextReconcileAt: CHECKED_AT + STORE_USDC_RECONCILE_RETRY_MS });
-    expect(await reconcileStoreUsdcIntent(SALT, { now: CHECKED_AT + 30_000, client })).toEqual({ ok: true, state: 'settled' });
+    expect(await getStoreUsdcIntent(SALT)).toMatchObject({ reconcileFromBlock: '4090', nextReconcileAt: CHECKED_AT + STORE_USDC_RECONCILE_RETRY_MS });
   });
 
   it.each(['-1', '01', 90, null])('rejects malformed cursor %s without changing the immutable binding', async (cursor) => {

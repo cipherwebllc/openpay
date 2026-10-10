@@ -33,3 +33,13 @@ export function pageFetchTimeout(deadline: number | undefined, now = Date.now())
   if (remaining < STORE_RECONCILE_PAGE_RPC_MIN_MS) return null;
   return Math.min(remaining, STORE_RECONCILE_PAGE_RPC_TIMEOUT_MS);
 }
+
+/**
+ * 同じ予算を chain adapter の呼び出しオプションにしたもの。cron の全 RPC (getLogs・receipt・block・authorizationState・
+ * 期限切れ証明) が各呼び出しの直前にこれを見る: undefined = deadline なし (既定の transport) / null = 残りが 1 回の RPC に
+ * 足りないので始めない (進捗を保存して次回へ) / { timeoutMs } = retry なし・この timeout で 1 回だけ呼ぶ。
+ */
+export function rpcCallOptions(deadline: number | undefined, now = Date.now()): { timeoutMs: number } | null | undefined {
+  const timeoutMs = pageFetchTimeout(deadline, now);
+  return timeoutMs === undefined || timeoutMs === null ? timeoutMs : { timeoutMs };
+}

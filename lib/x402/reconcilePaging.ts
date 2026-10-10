@@ -13,27 +13,22 @@ type ScanRange = {
   // lib/x402/reconcileBudget の pageFetchTimeout (残り時間 − cursor 保存の予約) を渡す。打ち切りは失敗ではない。
   pageTimeout?: () => number | null;
 };
+// interrupted = ページ取得の失敗/timeout。取得済みページの候補はそのまま返し、nextFromBlock は失敗したページの先頭
+// (呼出側は候補を照合してからそこを cursor に保存する = 前進を保証・B4 follow-up 2)。
+export type ScanInterruption = { reason: 'unavailable' } | { reason: 'error'; error: unknown };
 type ScanResult = {
   candidates: Map<Hex, bigint>;
   nextFromBlock: bigint;
+  interrupted?: ScanInterruption;
 };
 export type PageFetchOptions = { timeoutMs: number };
+// The JPYC adapter throws on failure; USDC returns an unavailable sentinel. Both end the scan the same way.
 type FetchPage = (fromBlock: bigint, toBlock: bigint, options?: PageFetchOptions) => Promise<Hex[] | 'unavailable'>;
 
-// The JPYC adapter throws on failure; USDC returns an unavailable sentinel.
-// Keep those contracts without requiring an unreachable failure branch in JPYC.
-export function scanReconcileBlockPages(
-  range: ScanRange,
-  fetchPage: (fromBlock: bigint, toBlock: bigint, options?: PageFetchOptions) => Promise<Hex[]>,
-): Promise<ScanResult>;
-export function scanReconcileBlockPages(
-  range: ScanRange,
-  fetchPage: FetchPage,
-): Promise<ScanResult | 'unavailable'>;
 export async function scanReconcileBlockPages(
   { anchor, fromBlock, latest, pageBlocks, maxPages, pageTimeout }: ScanRange,
   fetchPage: FetchPage,
-): Promise<ScanResult | 'unavailable'> {
+): Promise<ScanResult> {
   if (fromBlock < anchor) fromBlock = anchor;
   const candidates = new Map<Hex, bigint>();
   let pages = 0;
@@ -43,10 +38,15 @@ export async function scanReconcileBlockPages(
     if (timeoutMs === null) break;
     const pageEnd = fromBlock + pageBlocks - 1n;
     const toBlock = pageEnd > latest ? latest : pageEnd;
-    const hashes = timeoutMs === undefined
-      ? await fetchPage(fromBlock, toBlock)
-      : await fetchPage(fromBlock, toBlock, { timeoutMs });
-    if (hashes === 'unavailable') return 'unavailable';
+    let hashes: Hex[] | 'unavailable';
+    try {
+      hashes = timeoutMs === undefined
+        ? await fetchPage(fromBlock, toBlock)
+        : await fetchPage(fromBlock, toBlock, { timeoutMs });
+    } catch (error) {
+      return { candidates, nextFromBlock: fromBlock, interrupted: { reason: 'error', error } };
+    }
+    if (hashes === 'unavailable') return { candidates, nextFromBlock: fromBlock, interrupted: { reason: 'unavailable' } };
     for (const hash of hashes) {
       if (!candidates.has(hash)) candidates.set(hash, fromBlock);
     }

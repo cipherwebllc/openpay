@@ -35,7 +35,7 @@ import {
   PURCHASE_INTENT_VERSION,
   PURCHASE_REVISION_POLICY,
 } from '@/lib/x402/purchaseIntent';
-import { pageFetchTimeout } from '@/lib/x402/reconcileBudget';
+import { pageFetchTimeout, rpcCallOptions } from '@/lib/x402/reconcileBudget';
 import { scanReconcileBlockPages } from '@/lib/x402/reconcilePaging';
 import {
   associateStoreRailIntent,
@@ -55,6 +55,7 @@ import {
   readStoreUsdcAnchorBlock,
   readStoreUsdcAuthorizationState,
   storeUsdcAuthorizationExpiredUnused,
+  storeUsdcBoundedClient,
   STORE_USDC_ADDRESS,
   STORE_USDC_CHAIN_ID,
   type StoreUsdcPublicClient,
@@ -1334,24 +1335,39 @@ export async function reconcileStoreUsdcIntent(
     await reschedule(intent, raw, now, fromBlock);
     return { ok: true, state: 'pending' };
   };
+  // deadline 付き (cron) では全 RPC の直前に残り時間を見る (第 7 回レビュー B4 follow-up 2): null = 始めずに進捗を
+  // 保存して次回へ / 残りがあれば retry なし・本文受信まで timeout を絞った client を 1 回ごとに作る。明示の client
+  // (テスト) はそのまま使い、deadline なしは既定の client (undefined)。
+  const rpcClient = (): StoreUsdcPublicClient | undefined | null => {
+    const budget = rpcCallOptions(input.deadline);
+    if (budget === null) return null;
+    if (input.client) return input.client;
+    return budget ? storeUsdcBoundedClient(budget.timeoutMs) : undefined;
+  };
+  const clientArg = (client: StoreUsdcPublicClient | undefined) => (client ? { client } : {});
+  const usedClient = rpcClient();
+  if (usedClient === null) return retry();
   const used = await readStoreUsdcAuthorizationState({
     payer: intent.claim.payer,
     nonce: intent.nonce,
-    ...(input.client ? { client: input.client } : {}),
+    ...clientArg(usedClient),
   });
   if (used === 'unavailable') {
     return retry();
   }
   if (used !== true) {
+    const expiryDue = used === false && BigInt(Math.floor(now / 1000)) >= BigInt(intent.claim.validBefore);
+    // 期限切れ未使用の証明 (finalized block の RPC) も予算内でだけ試み、足りなければ証明なし = retry。
+    const expiryClient = expiryDue ? rpcClient() : undefined;
     if (
-      used === false &&
-      BigInt(Math.floor(now / 1000)) >= BigInt(intent.claim.validBefore) &&
+      expiryDue &&
+      expiryClient !== null &&
       await storeUsdcAuthorizationExpiredUnused({
         payer: intent.claim.payer,
         nonce: intent.claim.nonce,
         validBefore: BigInt(intent.claim.validBefore),
         ...('txHash' in intent ? { txHash: intent.txHash } : {}),
-        ...(input.client ? { client: input.client } : {}),
+        ...clientArg(expiryClient),
       })
     ) {
       const failed = await failExpiredAuthorization(
@@ -1390,12 +1406,15 @@ export async function reconcileStoreUsdcIntent(
     txHash: Hex,
     candidatePageStart?: bigint,
   ): Promise<ReconcileStoreUsdcResult | null> => {
+    // 候補 1 件の照合の前に残り時間を見る。足りなければ照合せず、候補のページ (保存済み hash なら現 cursor) から延期。
+    const verifyClient = rpcClient();
+    if (verifyClient === null) return retry(candidatePageStart);
     // 旧 hash の欠落/revert が replacement の探索を止める波及を断つ。
     // ログの hash だけでは採用せず、nonce・Transfer・finality・global claim を照合する。
     const verification = await verifyStoreUsdcOnchain({
       intent: { ...intent, payer: intent.claim.payer },
       txHash,
-      ...(input.client ? { client: input.client } : {}),
+      ...clientArg(verifyClient),
     });
     // 候補の一時障害で証拠のページを飛ばすと、daily head が探索予算より速く進む間は
     // 再発見できない。entitlement 未付与への波及を断つため、そのページから再試行する。
@@ -1420,7 +1439,7 @@ export async function reconcileStoreUsdcIntent(
       intentSalt,
       txHash,
       now,
-      ...(input.client ? { client: input.client } : {}),
+      ...clientArg(verifyClient),
     });
     if (finalized.ok) return { ok: true, state: 'settled' };
     if (finalized.reason === 'storage') {
@@ -1439,7 +1458,9 @@ export async function reconcileStoreUsdcIntent(
     const resolved = await finalizeCandidate(intent.txHash);
     if (resolved) return resolved;
   }
-  const latest = await readStoreUsdcAnchorBlock(input.client);
+  const headClient = rpcClient();
+  if (headClient === null) return retry();
+  const latest = await readStoreUsdcAnchorBlock(headClient);
   if (latest === null) return retry();
   const anchor = BigInt(intent.anchorBlock);
   const scan = await scanReconcileBlockPages({
@@ -1457,8 +1478,8 @@ export async function reconcileStoreUsdcIntent(
     ...(input.client ? { client: input.client } : {}),
     ...(options ? { timeoutMs: options.timeoutMs } : {}),
   }));
-  // 途中ページの RPC 障害で未検証の候補を飛ばし、entitlement 未付与へ波及させない。
-  if (scan === 'unavailable') return retry();
+  // 途中ページの RPC 障害/timeout では、取得済みページの候補を照合してから失敗したページの先頭 (nextFromBlock) を
+  // cursor に保存する (未検証の候補を飛ばさず、同じ範囲での停滞もしない・B4 follow-up 2)。
   for (const [txHash, candidatePageStart] of scan.candidates) {
     const resolved = await finalizeCandidate(txHash, candidatePageStart);
     if (resolved) return resolved;
@@ -1515,7 +1536,7 @@ export async function reconcilePendingStoreUsdcPurchases(input: {
   const summary = { checked: 0, settled: 0, failed: 0, pending: 0, storageErrors: 0, deferred: 0 };
   for (const salt of due.value) {
     // 重い 1 件が cron の maxDuration を使い切って後続 intent の回復を止める波及を断つ。残りは due のまま残す。
-    if (input.deadline !== undefined && Date.now() >= input.deadline) {
+    if (input.deadline !== undefined && rpcCallOptions(input.deadline) === null) {
       summary.deferred += 1;
       continue;
     }

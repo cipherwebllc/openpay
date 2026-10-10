@@ -24,15 +24,16 @@ const FORWARDER_SETTLED_EVENT_ABI = parseAbi([
   'event Settled(address indexed from, bytes32 indexed nonce, address indexed merchant, uint256 merchantValue, address feeReceiver, uint256 feeValue)',
 ]);
 
+// options.timeoutMs = deadline 付き (cron) の呼び出しだけ、retry なし・この timeout (本文受信まで) で RPC を呼ぶ
+// (第 7 回レビュー B4 follow-up)。省略時は既定の transport (status route 等)。全 method が受ける。
 export type PurchaseReconcileChain = {
   // An adapter without finalized evidence must never authorize a payment unlock.
-  authorizationExpiredUnused?: (intent: ClaimedPurchaseIntentBase & { txHash?: Hex }) => Promise<boolean>;
+  authorizationExpiredUnused?: (intent: ClaimedPurchaseIntentBase & { txHash?: Hex }, options?: PageFetchOptions) => Promise<boolean>;
   authorizationUsed: (
     intent: ClaimedPurchaseIntentBase,
+    options?: PageFetchOptions,
   ) => Promise<boolean>;
-  latestBlock: (intent: ClaimedPurchaseIntentBase) => Promise<bigint>;
-  // options.timeoutMs = deadline 付き (cron) のページ取得だけ、retry なし・この timeout で RPC を呼ぶ
-  // (第 7 回レビュー B4 follow-up)。省略時は既定の transport (status route 等)。
+  latestBlock: (intent: ClaimedPurchaseIntentBase, options?: PageFetchOptions) => Promise<bigint>;
   authorizationUsedTransactions: (
     intent: ClaimedPurchaseIntentBase,
     fromBlock: bigint,
@@ -42,6 +43,7 @@ export type PurchaseReconcileChain = {
   receiptMatches: (
     intent: ClaimedPurchaseIntentBase,
     txHash: Hex,
+    options?: PageFetchOptions,
   ) => Promise<boolean>;
 };
 
@@ -57,23 +59,23 @@ function clientForIntent(intent: ClaimedPurchaseIntentBase, options?: PageFetchO
 }
 
 export const defaultPurchaseReconcileChain: PurchaseReconcileChain = {
-  authorizationExpiredUnused: (intent) => authorizationExpiredUnused({
-    client: clientForIntent(intent),
+  authorizationExpiredUnused: (intent, options) => authorizationExpiredUnused({
+    client: clientForIntent(intent, options),
     token: intent.token,
     payer: intent.claim.payer,
     nonce: intent.claim.nonce,
     validBefore: BigInt(intent.claim.validBefore),
     ...('txHash' in intent ? { txHash: intent.txHash } : {}),
   }),
-  authorizationUsed: async (intent) =>
-    clientForIntent(intent).readContract({
+  authorizationUsed: async (intent, options) =>
+    clientForIntent(intent, options).readContract({
       address: intent.token,
       abi: AUTHORIZATION_STATE_ABI,
       functionName: 'authorizationState',
       args: [intent.claim.payer, intent.claim.nonce],
     }),
-  latestBlock: async (intent) =>
-    clientForIntent(intent).getBlockNumber(),
+  latestBlock: async (intent, options) =>
+    clientForIntent(intent, options).getBlockNumber(),
   authorizationUsedTransactions: async (intent, fromBlock, toBlock, options) => {
     const logs = await clientForIntent(intent, options).getLogs({
       address: intent.token,
@@ -89,8 +91,8 @@ export const defaultPurchaseReconcileChain: PurchaseReconcileChain = {
       .map((log) => log.transactionHash)
       .filter((hash): hash is Hex => hash !== null);
   },
-  receiptMatches: async (intent, txHash) => {
-    const receipt = await clientForIntent(intent).getTransactionReceipt({
+  receiptMatches: async (intent, txHash, options) => {
+    const receipt = await clientForIntent(intent, options).getTransactionReceipt({
       hash: txHash,
     });
     if (receipt.status !== 'success') return false;

@@ -352,6 +352,8 @@ describe('transportForChain のオプション (timeout / retryCount)', () => {
     const transport = transportForChain(polygon.id, { timeout: 1_234, retryCount: 0 })({ chain: polygon }) as unknown as HttpConfig;
     expect(transport.config).toMatchObject({ timeout: 1_234, retryCount: 0 });
   });
+  // 本文受信まで打ち切る fetch signal の挙動は node 環境の tests/lib/chainsTransportBound.test.ts で固定する
+  // (この file は jsdom 環境で、fetch/Response/ReadableStream が本番の node と異なる)。
   it('fallback の chain (Ethereum) は endpoint 数で timeout を割り、全体が上限内に収まる', () => {
     const transport = transportForChain(mainnet.id, { timeout: 4_000, retryCount: 0 })({ chain: mainnet }) as unknown as HttpConfig & { value: { transports: HttpConfig[] } };
     expect(transport.config.type).toBe('fallback');

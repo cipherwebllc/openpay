@@ -2596,14 +2596,17 @@ describe('R4a differential reconcile traces (JPYC / USDC)', () => {
     }
   });
 
-  it('a failed later page discards earlier candidates and preserves the saved cursor on both rails', async () => {
+  // B4 follow-up 2: ページ取得の失敗/timeout では取得済みページの候補を照合してから「失敗したページの先頭」を
+  // cursor に保存する (以前は候補と進捗を捨てて保存済み cursor に留まり、毎回同じ範囲で停滞した)。
+  it('a failed later page verifies the candidates already fetched and saves the failed page start on both rails', async () => {
     for (const rail of rails) {
       const f = await fixture(rail);
       f.patch({ reconcileFromBlock: '12000' });
       h.publicClient.getLogs.mockResolvedValueOnce([{ transactionHash: TX_HASH }]).mockRejectedValueOnce(new Error('page unavailable'));
       await f.run();
-      expect(h.publicClient.getTransactionReceipt).not.toHaveBeenCalled();
-      expect(f.stored().reconcileFromBlock).toBe('12000');
+      expect(h.publicClient.getTransactionReceipt).toHaveBeenCalledTimes(1);
+      expect(h.publicClient.getTransactionReceipt).toHaveBeenCalledWith({ hash: TX_HASH });
+      expect(f.stored().reconcileFromBlock).toBe('14000');
       expect(f.events.at(-1)).toEqual(pendingResult);
       expect(h.loggerWarn).toHaveBeenCalledTimes(rail === 'jpyc' ? 1 : 0);
     }
