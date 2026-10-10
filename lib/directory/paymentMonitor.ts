@@ -59,8 +59,8 @@ export type PaymentChangeRow = {
   diffs?: readonly ServiceChangeDiff[];
 };
 
-/** 事業者の現況行 = 固定項目の記録 + changelog から導出した最終イベント日。 */
-export type PaymentProviderRow = PaymentProviderRecord & { lastEventDate: string };
+/** 事業者の現況行 = 固定項目の記録 (結合用の eventKeys は出さない) + changelog から導出した最終イベント日。 */
+export type PaymentProviderRow = Omit<PaymentProviderRecord, 'eventKeys'> & { lastEventDate: string };
 
 export type PaymentMonitorEnvelope = {
   schemaVersion: string;
@@ -112,33 +112,51 @@ function toRow(
   };
 }
 
+/** 決済スコープのイベントを現況行に結ぶ鍵 = slug ?? provider (どちらも記録時に固定・表示名の改名に依存しない)。 */
+function paymentEventKey(event: { slug?: string; provider?: string }): string | undefined {
+  return event.slug ?? event.provider;
+}
+
 /**
- * 事業者の現況行。snapshot は全社、delta は今回の changes に provider が現れた社だけ
- * (Service Monitor の services 行と同じ考え方)。lastEventDate は同名 provider の最新イベント日。
+ * 事業者の現況行。snapshot は全社、delta は今回返すイベントが属する社だけ (Service Monitor の services 行と
+ * 同じ考え方)。イベントとは識別子 eventKeys で結ぶ — 表示名で結ぶと、履歴の provider を固定したまま現況行の
+ * 表示名を改名したときに結べなくなる (第 7 回レビュー E17 の follow-up)。lastEventDate は属するイベントの最新日。
  */
 function providerRows(
-  rows: readonly PaymentChangeRow[],
+  returned: ReturnType<typeof scopedChangelog>,
   changelog: ReturnType<typeof scopedChangelog>,
-  bySlug: ReadonlyMap<string, DirectoryEntry>,
+  records: readonly PaymentProviderRecord[],
   mode: 'snapshot' | 'delta',
 ): { providers: PaymentProviderRow[]; totalProviders: number } {
-  const lastEventByProvider = new Map<string, string>();
+  const recordIndexByKey = new Map<string, number>();
+  records.forEach((record, index) => {
+    for (const key of record.eventKeys) recordIndexByKey.set(key, index);
+  });
+  const recordIndexOf = (event: { slug?: string; provider?: string }): number | undefined => {
+    const key = paymentEventKey(event);
+    return key === undefined ? undefined : recordIndexByKey.get(key);
+  };
+  const lastEventByRecord = new Map<number, string>();
   for (const event of changelog) {
-    const name = toRow(event, bySlug).provider;
-    const prev = lastEventByProvider.get(name);
-    if (!prev || event.date > prev) lastEventByProvider.set(name, event.date);
+    const index = recordIndexOf(event);
+    if (index === undefined) continue;
+    const prev = lastEventByRecord.get(index);
+    if (!prev || event.date > prev) lastEventByRecord.set(index, event.date);
   }
-  const changed = new Set(rows.map((r) => r.provider));
-  const providers = PAYMENT_PROVIDERS.filter(
-    (p) => mode === 'snapshot' || changed.has(p.provider),
-  ).map((p) => ({ ...p, lastEventDate: lastEventByProvider.get(p.provider) ?? p.announcedAt }));
-  return { providers, totalProviders: PAYMENT_PROVIDERS.length };
+  const changed = new Set(returned.map(recordIndexOf));
+  const providers = records.flatMap((record, index) => {
+    if (mode !== 'snapshot' && !changed.has(index)) return [];
+    const { eventKeys: _eventKeys, ...row } = record;
+    return [{ ...row, lastEventDate: lastEventByRecord.get(index) ?? record.announcedAt }];
+  });
+  return { providers, totalProviders: records.length };
 }
 
 export function createPaymentMonitorEnvelope(
   query: ServiceMonitorQuery,
   generatedAtIso: string,
   entries: readonly DirectoryEntry[] = DIRECTORY_ENTRIES,
+  providers: readonly PaymentProviderRecord[] = PAYMENT_PROVIDERS,
 ): PaymentMonitorEnvelope {
   const changelog = scopedChangelog('stablecoin-payments', entries);
   const bySlug = new Map(entries.map((entry) => [entry.slug, entry]));
@@ -173,7 +191,7 @@ export function createPaymentMonitorEnvelope(
       limit: query.limit,
     },
     changes: filtered.map((event) => toRow(event, bySlug)),
-    ...providerRows(filtered.map((event) => toRow(event, bySlug)), changelog, bySlug, mode),
+    ...providerRows(filtered, changelog, providers, mode),
     totalEvents: changelog.length,
     generatedAt: generatedAtIso,
     hasMore,

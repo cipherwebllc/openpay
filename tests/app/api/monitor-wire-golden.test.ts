@@ -98,6 +98,8 @@ function provider(name: string, announcedAt: string, slug?: string): Record<stri
   return {
     provider: name,
     ...(slug ? { slug } : {}),
+    // イベントとの結合の識別子 (応答には出ない)。ディレクトリ掲載は slug、非掲載は記録時の provider 名。
+    eventKeys: [slug ?? name],
     stage: 'pilot',
     assets: ['JPYC'],
     chains: [],

@@ -226,6 +226,50 @@ describe('createPaymentMonitorEnvelope', () => {
     expect(missing.map((e) => `${e.slug ?? '?'}|${e.date}|${e.changeCategory ?? ''}`)).toEqual([]);
   });
 
+  // 同 follow-up (Codex 4 回目): 過去イベントの provider を一括で書き換えると、公開の dedupe 手順で同じイベントが
+  // 別の鍵になり件数が増える (存在確認だけのフェンスでは検出できない)。記録済みイベントの識別 (date・changeType・
+  // changeCategory・slug・provider) を golden で固定し、書き換えと削除を検出する。新しいイベントの追加は妨げない
+  // (golden に無いものは検査しない・必要になったら足す)。
+  it('記録済みの決済スコープのイベントは provider を含めて書き換えられていない (golden)', () => {
+    const RECORDED = [
+      '2025-11-14|added|partnership||TIS / JPYC',
+      '2026-01-28|added|service_launch||HashPort Wallet for Biz',
+      '2026-02-19|added|pilot||Digital Garage / JCB / Resona HD',
+      '2026-07-07|added|pilot||MisePay (Sowaka Japan)',
+      '2026-07-13|added|service_launch||NetStars Stablecoin Pay',
+      '2026-07-13|updated|update||HashPort Wallet for Biz',
+      '2026-07-15|added|partnership||JCB / Circle',
+      '2026-08-03|added|pilot||Lawson (POS pilot)',
+      '2026-08-10|added|service_launch|dg-sps|DG Stablecoin Payment Service',
+      '2026-08-26|added|pilot||HashPort (Osaka Pref. subsidy)',
+      '2026-08-26|added|pilot||Mina Wallet / Sumitomo Mitsui Card (Osaka Pref. subsidy)',
+      '2026-08-26|added|pilot||Mi&T (Osaka Pref. subsidy)',
+      '2026-08-31|updated|fee_change||Mi&T (Osaka Pref. subsidy)',
+      '2026-09-03|updated|partnership||NetStars Stablecoin Pay',
+      '2026-09-04|verified|||HashPort (Osaka Pref. subsidy)',
+      '2026-09-04|verified|||Mina Wallet / Sumitomo Mitsui Card (Osaka Pref. subsidy)',
+      '2026-09-11|updated|partnership||NetStars Stablecoin Pay',
+      '2026-09-11|verified|||HashPort (Osaka Pref. subsidy)',
+      '2026-09-11|verified|||Mina Wallet / Sumitomo Mitsui Card (Osaka Pref. subsidy)',
+      '2026-09-11|verified|||Mi&T (Osaka Pref. subsidy)',
+      '2026-09-18|verified|||HashPort (Osaka Pref. subsidy)',
+      '2026-09-18|verified|||Mina Wallet / Sumitomo Mitsui Card (Osaka Pref. subsidy)',
+      '2026-09-18|verified|||Mi&T (Osaka Pref. subsidy)',
+      '2026-09-18|verified|||NetStars Stablecoin Pay',
+      '2026-09-23|verified|||HashPort (Osaka Pref. subsidy)',
+      '2026-09-23|verified|||Mina Wallet / Sumitomo Mitsui Card (Osaka Pref. subsidy)',
+      '2026-09-23|verified|||Mi&T (Osaka Pref. subsidy)',
+      '2026-09-23|verified|||NetStars Stablecoin Pay',
+      '2026-09-30|added|service_launch||αU wallet (KDDI / au Coincheck Digital Assets / HashPort)',
+    ];
+    const current = new Set(
+      MANUAL_CHANGELOG.filter((event) => event.scopes.includes('stablecoin-payments')).map((event) =>
+        [event.date, event.changeType, event.changeCategory ?? '', event.slug ?? '', event.provider].join('|'),
+      ),
+    );
+    expect(RECORDED.filter((tuple) => !current.has(tuple))).toEqual([]);
+  });
+
   it('E17 follow-up: snapshot → 表示名の変更 → delta でも、既存イベントの provider と dedupe キーは変わらない', () => {
     const key = (c: { slug?: string; provider: string; date: string; changeCategory?: string }) =>
       `${c.slug ?? c.provider}|${c.date}|${c.changeCategory ?? ''}`;
@@ -360,8 +404,12 @@ describe('createPaymentMonitorEnvelope', () => {
 });
 
 // 事業者の現況行 providers (2026-09-02 裁定 2/2): 固定項目・null = 確認したが公表なし・
-// provider 名は changelog と双方向に一致・delta は変更のあった社のみ・lastEventDate は導出。
+// イベントとは識別子 (eventKeys = slug か記録時に固定した provider 名) で結ぶ・delta は変更のあった社のみ・
+// lastEventDate は導出。
 import { PAYMENT_PROVIDERS, PAYMENT_INTEGRATIONS, PAYMENT_PROVIDER_STAGES } from '@/lib/directory/paymentProviders';
+
+/** 決済スコープのイベントの結合鍵 (slug、無ければ記録時に固定した provider 名)。 */
+const eventKeyOf = (event: { slug?: string; provider?: string }) => event.slug ?? event.provider ?? '';
 
 describe('createPaymentMonitorEnvelope.providers (事業者の現況行)', () => {
   it('snapshot: 全社が固定項目つきで載り、母数 totalProviders と一致', () => {
@@ -382,14 +430,65 @@ describe('createPaymentMonitorEnvelope.providers (事業者の現況行)', () =>
     }
   });
 
-  it('provider 名は changelog の provider と双方向に一致 (行の結合キー)', () => {
-    const env = createPaymentMonitorEnvelope(Q, NOW);
-    const inChanges = new Set(env.changes.map((c) => c.provider));
-    const inProviders = new Set(env.providers.map((p) => p.provider));
-    expect([...inProviders].sort()).toEqual([...inChanges].sort());
+  // 第 7 回レビュー E17 の follow-up (Codex 4 回目): 現況行とイベントを表示名で結ぶと、履歴の provider を
+  // 固定したまま現況行の表示名を改名したときに結べなくなる。結合は識別子 (eventKeys) で行い、名前は表示だけ。
+  it('識別子の対応: 決済スコープの全イベントはちょうど 1 社の eventKeys に属し、全社に 1 件以上のイベントがある', () => {
+    const payment = MANUAL_CHANGELOG.filter((event) => event.scopes.includes('stablecoin-payments'));
+    const owners = new Map<string, string[]>();
+    for (const record of PAYMENT_PROVIDERS) {
+      expect(record.eventKeys.length, record.provider).toBeGreaterThan(0);
+      // ディレクトリ掲載の事業者は slug で結ぶ (slug のイベントだけが付く)。
+      if (record.slug) expect(record.eventKeys).toContain(record.slug);
+      for (const key of record.eventKeys) owners.set(key, [...(owners.get(key) ?? []), record.provider]);
+    }
+    // 1 つの鍵が 2 社に属さない。
+    expect([...owners].filter(([, names]) => names.length > 1)).toEqual([]);
+    // どの社にも属さないイベントが無い。
+    expect(payment.filter((event) => !owners.has(eventKeyOf(event))).map(eventKeyOf)).toEqual([]);
+    // 使われない鍵・イベントの無い社が無い。
+    const used = new Set(payment.map(eventKeyOf));
+    expect([...owners.keys()].filter((key) => !used.has(key))).toEqual([]);
+    // 現況行には結合用の eventKeys を出さない (公開出力は表示名と固定項目だけ)。
+    for (const row of createPaymentMonitorEnvelope(Q, NOW).providers) expect(row).not.toHaveProperty('eventKeys');
   });
 
-  it('lastEventDate は同名 provider の最新イベント日・一次ソースが開始を明示した社だけ startedAt', () => {
+  it('Codex 4 回目の反例: ディレクトリ掲載の事業者 (DG) を改名しても、delta の現況行に載り lastEventDate も保たれる', () => {
+    const renamedProviders = PAYMENT_PROVIDERS.map((p) =>
+      p.slug === 'dg-sps' ? { ...p, provider: 'DG Stablecoin Payment Service (renamed)' } : p,
+    );
+    const delta = createPaymentMonitorEnvelope(
+      { changedSince: '2026-08-10', limit: SERVICE_MONITOR_MAX_LIMIT },
+      NOW,
+      renamedDg(),
+      renamedProviders,
+    );
+    expect(delta.changes.some((c) => c.slug === 'dg-sps')).toBe(true);
+    const dg = delta.providers.find((p) => p.slug === 'dg-sps');
+    expect(dg?.provider).toBe('DG Stablecoin Payment Service (renamed)'); // 表示は新しい名前
+    expect(dg?.lastEventDate).toBe('2026-08-10');
+    // 履歴の provider は記録時の名前で固定のまま。
+    expect(delta.changes.find((c) => c.slug === 'dg-sps')?.provider).toBe('DG Stablecoin Payment Service');
+  });
+
+  it('非掲載の事業者 (NetStars) の表示名を改名しても、過去イベント (旧い名前のまま) と結べる', () => {
+    const before = createPaymentMonitorEnvelope(Q, NOW).providers.find((p) => p.provider === 'NetStars Stablecoin Pay')!;
+    const renamedProviders = PAYMENT_PROVIDERS.map((p) =>
+      p.provider === 'NetStars Stablecoin Pay' ? { ...p, provider: 'NetStars Pay (renamed)' } : p,
+    );
+    const snapshot = createPaymentMonitorEnvelope(Q, NOW, DIRECTORY_ENTRIES, renamedProviders);
+    const after = snapshot.providers.find((p) => p.provider === 'NetStars Pay (renamed)')!;
+    expect(after.lastEventDate).toBe(before.lastEventDate); // announcedAt に落ちない
+    const delta = createPaymentMonitorEnvelope(
+      { changedSince: '2026-09-23', limit: SERVICE_MONITOR_MAX_LIMIT },
+      NOW,
+      DIRECTORY_ENTRIES,
+      renamedProviders,
+    );
+    expect(delta.changes.some((c) => c.provider === 'NetStars Stablecoin Pay')).toBe(true);
+    expect(delta.providers.map((p) => p.provider)).toContain('NetStars Pay (renamed)');
+  });
+
+  it('lastEventDate はその社に属するイベント (eventKeys) の最新日・一次ソースが開始を明示した社だけ startedAt', () => {
     const env = createPaymentMonitorEnvelope(Q, NOW);
     const dg = env.providers.find((p) => p.slug === 'dg-sps')!;
     expect(dg.stage).toBe('commercial');
