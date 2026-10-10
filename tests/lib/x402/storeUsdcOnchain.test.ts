@@ -46,9 +46,9 @@ import {
 describe('Store USDC bounded client', () => {
   it('builds a retry-free Base client bounded by the given timeout', () => {
     chainsMock.transportForChain.mockClear();
-    const client = storeUsdcBoundedClient(4_321);
+    const client = storeUsdcBoundedClient({ timeoutMs: 4_321, deadlineAt: 1_900_000_000_000 });
     expect(typeof client.getLogs).toBe('function');
-    expect(chainsMock.transportForChain).toHaveBeenCalledWith(8453, { timeout: 4_321, retryCount: 0 });
+    expect(chainsMock.transportForChain).toHaveBeenCalledWith(8453, { timeout: 4_321, retryCount: 0, deadline: 1_900_000_000_000 });
   });
 });
 
@@ -58,12 +58,13 @@ describe('Store USDC page fetch transport bound', () => {
     const getLogs = vi.fn(async () => []);
     const client = { getLogs } as unknown as StoreUsdcPublicClient;
     chainsMock.transportForChain.mockClear();
-    await findStoreUsdcAuthorizationTransactions({ payer: PAYER, nonce: NONCE, fromBlock: 1n, toBlock: 2n, client, timeoutMs: 1_234 });
+    const budget = { timeoutMs: 1_234, deadlineAt: 1_900_000_000_000 };
+    await findStoreUsdcAuthorizationTransactions({ payer: PAYER, nonce: NONCE, fromBlock: 1n, toBlock: 2n, client, budget });
     expect(getLogs).toHaveBeenCalledTimes(1); expect(chainsMock.transportForChain).not.toHaveBeenCalled();
     vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('offline'); }));
     try {
-      expect(await findStoreUsdcAuthorizationTransactions({ payer: PAYER, nonce: NONCE, fromBlock: 1n, toBlock: 2n, timeoutMs: 1_234 })).toBe('unavailable');
-      expect(chainsMock.transportForChain).toHaveBeenLastCalledWith(8453, { timeout: 1_234, retryCount: 0 });
+      expect(await findStoreUsdcAuthorizationTransactions({ payer: PAYER, nonce: NONCE, fromBlock: 1n, toBlock: 2n, budget })).toBe('unavailable');
+      expect(chainsMock.transportForChain).toHaveBeenLastCalledWith(8453, { timeout: 1_234, retryCount: 0, deadline: 1_900_000_000_000 });
       expect(await findStoreUsdcAuthorizationTransactions({ payer: PAYER, nonce: NONCE, fromBlock: 1n, toBlock: 2n })).toBe('unavailable');
       expect(chainsMock.transportForChain).toHaveBeenLastCalledWith(8453);
     } finally {

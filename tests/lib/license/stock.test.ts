@@ -504,8 +504,8 @@ describe('第 7 回レビュー B3/B4: license reconcile の候補ページ再�
       spy.mockRestore();
     }
     expect(rpc.transactions).toHaveBeenCalledTimes(2);
-    expect(rpc.transactions).toHaveBeenNthCalledWith(1, expect.anything(), 1n, 2_000n, { timeoutMs: STORE_RECONCILE_PAGE_RPC_TIMEOUT_MS });
-    expect(rpc.transactions).toHaveBeenNthCalledWith(2, expect.anything(), 2_001n, 4_000n, { timeoutMs: 7_000 });
+    expect(rpc.transactions).toHaveBeenNthCalledWith(1, expect.anything(), 1n, 2_000n, { timeoutMs: STORE_RECONCILE_PAGE_RPC_TIMEOUT_MS, deadlineAt: now + STORE_RECONCILE_PAGE_RPC_TIMEOUT_MS });
+    expect(rpc.transactions).toHaveBeenNthCalledWith(2, expect.anything(), 2_001n, 4_000n, { timeoutMs: 7_000, deadlineAt: now + 15_000 + 7_000 });
     expect(JSON.parse(h.store!.strings.get(purchaseIntentKey(i.intentSalt))!)).toMatchObject({ reconcileFromBlock: '4001' });
     expect(stock()).toMatchObject({ reserved: 1, sold: 0 });
   });
@@ -520,8 +520,9 @@ describe('第 7 回レビュー B3/B4: license reconcile の候補ページ再�
       receiptMatches: vi.fn(async () => false),
     };
     expect(await reconcilePurchaseIntent(i.intentSalt, { now, licenseChain: bounded, deadline: Date.now() + 25_000 })).toEqual({ ok: true, state: 'pending' });
-    expect(bounded.observe).toHaveBeenCalledWith(expect.anything(), { timeoutMs: STORE_RECONCILE_PAGE_RPC_TIMEOUT_MS });
-    expect(bounded.receiptMatches).toHaveBeenCalledWith(expect.anything(), TX, expect.anything(), { timeoutMs: STORE_RECONCILE_PAGE_RPC_TIMEOUT_MS });
+    const bound = expect.objectContaining({ timeoutMs: STORE_RECONCILE_PAGE_RPC_TIMEOUT_MS, deadlineAt: expect.any(Number) });
+    expect(bounded.observe).toHaveBeenCalledWith(expect.anything(), bound);
+    expect(bounded.receiptMatches).toHaveBeenCalledWith(expect.anything(), TX, expect.anything(), bound);
     const plain: LicenseReconcileChain = { ...bounded, observe: vi.fn(async () => finalized(50_000n)), receiptMatches: vi.fn(async () => false) };
     const again = await quote(); const j = await settling(again);
     expect(await reconcilePurchaseIntent(j.intentSalt, { now, licenseChain: plain })).toEqual({ ok: true, state: 'pending' });

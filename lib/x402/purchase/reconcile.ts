@@ -16,7 +16,7 @@ import {
   type ForwarderSettleParams,
 } from '@/lib/relay/forwarderIntent';
 import { railIntentParentKey, releaseActiveStoreRail } from '@/lib/x402/storeRailSelection';
-import { pageFetchTimeout, rpcCallOptions } from '@/lib/x402/reconcileBudget';
+import { rpcCallOptions } from '@/lib/x402/reconcileBudget';
 import { scanReconcileBlockPages } from '@/lib/x402/reconcilePaging';
 import {
   PURCHASE_RECONCILE_LEASE_SEC,
@@ -465,7 +465,7 @@ export async function reconcilePurchaseIntent(
       latest,
       pageBlocks: PURCHASE_RECONCILE_PAGE_BLOCKS,
       maxPages: PURCHASE_RECONCILE_MAX_PAGES,
-      ...(options.deadline === undefined ? {} : { pageTimeout: () => pageFetchTimeout(options.deadline) ?? null }),
+      ...(options.deadline === undefined ? {} : { pageBudget: () => rpcCallOptions(options.deadline) ?? null }),
     }, (fromBlock, toBlock, options) => options
       ? chain.authorizationUsedTransactions(intent, fromBlock, toBlock, options)
       : chain.authorizationUsedTransactions(intent, fromBlock, toBlock));

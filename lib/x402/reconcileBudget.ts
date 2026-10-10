@@ -37,9 +37,12 @@ export function pageFetchTimeout(deadline: number | undefined, now = Date.now())
 /**
  * 同じ予算を chain adapter の呼び出しオプションにしたもの。cron の全 RPC (getLogs・receipt・block・authorizationState・
  * 期限切れ証明) が各呼び出しの直前にこれを見る: undefined = deadline なし (既定の transport) / null = 残りが 1 回の RPC に
- * 足りないので始めない (進捗を保存して次回へ) / { timeoutMs } = retry なし・この timeout で 1 回だけ呼ぶ。
+ * 足りないので始めない (進捗を保存して次回へ) / { timeoutMs, deadlineAt } = retry なし・この timeout で呼ぶ。
+ * deadlineAt はこの呼び出しの絶対期限 (開始時刻 + timeoutMs)。transport は RPC ごとに deadlineAt までの残り時間から
+ * 新しい signal を作るので、1 つの client で続けて呼ぶ RPC (observe の 3 回・期限切れ証明) も合計がこの期限に収まり、
+ * 作成時の signal で後続が早期に abort されることはない。
  */
-export function rpcCallOptions(deadline: number | undefined, now = Date.now()): { timeoutMs: number } | null | undefined {
+export function rpcCallOptions(deadline: number | undefined, now = Date.now()): { timeoutMs: number; deadlineAt: number } | null | undefined {
   const timeoutMs = pageFetchTimeout(deadline, now);
-  return timeoutMs === undefined || timeoutMs === null ? timeoutMs : { timeoutMs };
+  return timeoutMs === undefined || timeoutMs === null ? timeoutMs : { timeoutMs, deadlineAt: now + timeoutMs };
 }

@@ -28,7 +28,8 @@ export type LicenseReconcileChain = {
 function client(intent: Claimed, options?: PageFetchOptions) {
   const chain = chainObjectForId(intent.chainId);
   if (!chain) throw new Error('unsupported license chain');
-  const transport = options ? transportForChain(intent.chainId, { timeout: options.timeoutMs, retryCount: 0 }) : transportForChain(intent.chainId);
+  // deadline = この呼び出しの絶対期限。observe の 3 RPC は 1 つの client で続けて呼ぶが、transport が RPC ごとに残り時間から signal を作るので合計が期限に収まる。
+  const transport = options ? transportForChain(intent.chainId, { timeout: options.timeoutMs, retryCount: 0, deadline: options.deadlineAt }) : transportForChain(intent.chainId);
   return createPublicClient({ chain, transport });
 }
 export const defaultLicenseReconcileChain: LicenseReconcileChain = {

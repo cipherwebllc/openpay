@@ -52,8 +52,9 @@ function clientForIntent(intent: ClaimedPurchaseIntentBase, options?: PageFetchO
   if (!chain) throw new Error('unsupported chain');
   return createPublicClient({
     chain,
+    // deadline = この呼び出しの絶対期限。transport は RPC ごとに残り時間から signal を作る (作成時の signal で後続を切らない)。
     transport: options
-      ? transportForChain(intent.chainId, { timeout: options.timeoutMs, retryCount: 0 })
+      ? transportForChain(intent.chainId, { timeout: options.timeoutMs, retryCount: 0, deadline: options.deadlineAt })
       : transportForChain(intent.chainId),
   });
 }

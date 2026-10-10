@@ -35,7 +35,7 @@ import {
   PURCHASE_INTENT_VERSION,
   PURCHASE_REVISION_POLICY,
 } from '@/lib/x402/purchaseIntent';
-import { pageFetchTimeout, rpcCallOptions } from '@/lib/x402/reconcileBudget';
+import { rpcCallOptions } from '@/lib/x402/reconcileBudget';
 import { scanReconcileBlockPages } from '@/lib/x402/reconcilePaging';
 import {
   associateStoreRailIntent,
@@ -1342,7 +1342,7 @@ export async function reconcileStoreUsdcIntent(
     const budget = rpcCallOptions(input.deadline);
     if (budget === null) return null;
     if (input.client) return input.client;
-    return budget ? storeUsdcBoundedClient(budget.timeoutMs) : undefined;
+    return budget ? storeUsdcBoundedClient(budget) : undefined;
   };
   const clientArg = (client: StoreUsdcPublicClient | undefined) => (client ? { client } : {});
   const usedClient = rpcClient();
@@ -1435,23 +1435,30 @@ export async function reconcileStoreUsdcIntent(
       if (adopted === 'storage') return { ok: false, reason: 'storage' };
       if (adopted === 'conflict') return { ok: true, state: 'pending' };
     }
+    // 採用後の finality/RPC 変化でも古い raw で再スケジュールせず、採用 hash を保つ。
+    const rescheduleLatest = async (): Promise<ReconcileStoreUsdcResult> => {
+      const latestRead = await readIntent(intentSalt);
+      if (!latestRead.ok) return { ok: false, reason: latestRead.reason };
+      if (!latestRead.intent || !latestRead.raw) return { ok: false, reason: 'not_found' };
+      if (latestRead.intent.state === 'settled') return { ok: true, state: 'settled' };
+      await reschedule(latestRead.intent, latestRead.raw, now);
+      return { ok: true, state: 'pending' };
+    };
+    // finalize 内の再照合は照合時の client を使い回さず、その時点の残り時間で予算を計算し直す (B4 follow-up 3)。
+    // 予算が無ければ採用済み hash のまま次回へ (次回は保存 hash の照合から finalize に進む)。
+    const finalizeClient = rpcClient();
+    if (finalizeClient === null) return rescheduleLatest();
     const finalized = await finalizeStoreUsdcPurchase({
       intentSalt,
       txHash,
       now,
-      ...clientArg(verifyClient),
+      ...clientArg(finalizeClient),
     });
     if (finalized.ok) return { ok: true, state: 'settled' };
     if (finalized.reason === 'storage') {
       return { ok: false, reason: 'storage' };
     }
-    // 採用後の finality/RPC 変化でも古い raw で再スケジュールせず、採用 hash を保つ。
-    const latestRead = await readIntent(intentSalt);
-    if (!latestRead.ok) return { ok: false, reason: latestRead.reason };
-    if (!latestRead.intent || !latestRead.raw) return { ok: false, reason: 'not_found' };
-    if (latestRead.intent.state === 'settled') return { ok: true, state: 'settled' };
-    await reschedule(latestRead.intent, latestRead.raw, now);
-    return { ok: true, state: 'pending' };
+    return rescheduleLatest();
   };
 
   if (intent.txHash) {
@@ -1469,14 +1476,14 @@ export async function reconcileStoreUsdcIntent(
     latest,
     pageBlocks: STORE_USDC_RECONCILE_PAGE_BLOCKS,
     maxPages: STORE_USDC_RECONCILE_MAX_PAGES,
-    ...(input.deadline === undefined ? {} : { pageTimeout: () => pageFetchTimeout(input.deadline) ?? null }),
+    ...(input.deadline === undefined ? {} : { pageBudget: () => rpcCallOptions(input.deadline) ?? null }),
   }, (fromBlock, toBlock, options) => findStoreUsdcAuthorizationTransactions({
     payer: intent.claim.payer,
     nonce: intent.nonce,
     fromBlock,
     toBlock,
     ...(input.client ? { client: input.client } : {}),
-    ...(options ? { timeoutMs: options.timeoutMs } : {}),
+    ...(options ? { budget: options } : {}),
   }));
   // 途中ページの RPC 障害/timeout では、取得済みページの候補を照合してから失敗したページの先頭 (nextFromBlock) を
   // cursor に保存する (未検証の候補を飛ばさず、同じ範囲での停滞もしない・B4 follow-up 2)。

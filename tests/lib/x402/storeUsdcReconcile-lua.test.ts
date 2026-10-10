@@ -329,6 +329,7 @@ describe('USDC reconciliation with real Lua and receipt verification', () => {
       .mockResolvedValueOnce([{ transactionHash: TX }])
       .mockRejectedValueOnce(new Error('RPC unavailable'));
     expect(await reconcileStoreUsdcIntent(SALT, { now: CHECKED_AT, client })).toEqual({ ok: true, state: 'settled' });
+    // 予算なしの走査は従来どおり全ページを集める (失敗する 2 ページ目も取りに行く)。候補が出たら止めるのは予算付きだけ。
     expect(client.getLogs).toHaveBeenCalledTimes(2);
   });
 

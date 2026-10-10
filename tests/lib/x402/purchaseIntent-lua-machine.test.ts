@@ -2596,14 +2596,30 @@ describe('R4a differential reconcile traces (JPYC / USDC)', () => {
     }
   });
 
-  // B4 follow-up 2: ページ取得の失敗/timeout では取得済みページの候補を照合してから「失敗したページの先頭」を
-  // cursor に保存する (以前は候補と進捗を捨てて保存済み cursor に留まり、毎回同じ範囲で停滞した)。
-  it('a failed later page verifies the candidates already fetched and saves the failed page start on both rails', async () => {
+  // B4 follow-up 2/3: ページ取得の失敗/timeout では「失敗したページの先頭」を cursor に保存する (以前は進捗を捨てて
+  // 保存済み cursor に留まり、毎回同じ範囲で停滞した)。候補が出たページでは走査を止めてその場で照合する。
+  it('a failed page after candidate-free pages saves the failed page start on both rails', async () => {
+    for (const rail of rails) {
+      const f = await fixture(rail);
+      f.patch({ reconcileFromBlock: '12000' });
+      h.publicClient.getLogs.mockResolvedValueOnce([]).mockRejectedValueOnce(new Error('page unavailable'));
+      await f.run();
+      expect(h.publicClient.getTransactionReceipt).not.toHaveBeenCalled();
+      expect(f.stored().reconcileFromBlock).toBe('14000');
+      expect(f.events.at(-1)).toEqual(pendingResult);
+      expect(h.loggerWarn).toHaveBeenCalledTimes(rail === 'jpyc' ? 1 : 0);
+    }
+  });
+
+  // 予算なし (status route) の走査は従来どおり全ページを集めてから照合する。後のページが失敗しても取得済みの候補は照合し、
+  // 失敗したページの先頭を cursor に保存する (予算付きの「候補が出たら止める」は unit test で固定)。
+  it('an unbounded scan verifies the candidates already fetched when a later page fails and saves the failed page start', async () => {
     for (const rail of rails) {
       const f = await fixture(rail);
       f.patch({ reconcileFromBlock: '12000' });
       h.publicClient.getLogs.mockResolvedValueOnce([{ transactionHash: TX_HASH }]).mockRejectedValueOnce(new Error('page unavailable'));
       await f.run();
+      expect(h.publicClient.getLogs).toHaveBeenCalledTimes(2);
       expect(h.publicClient.getTransactionReceipt).toHaveBeenCalledTimes(1);
       expect(h.publicClient.getTransactionReceipt).toHaveBeenCalledWith({ hash: TX_HASH });
       expect(f.stored().reconcileFromBlock).toBe('14000');

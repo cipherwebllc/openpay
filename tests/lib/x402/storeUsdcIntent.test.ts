@@ -299,21 +299,51 @@ describe('Store USDC reconciler decisions (no Lua)', () => {
       spy2.mockRestore();
     }
     expect(h.transactions).toHaveBeenCalledTimes(2);
-    expect(h.transactions).toHaveBeenNthCalledWith(1, expect.objectContaining({ fromBlock: 90n, timeoutMs: STORE_RECONCILE_PAGE_RPC_TIMEOUT_MS }));
-    expect(h.transactions).toHaveBeenNthCalledWith(2, expect.objectContaining({ fromBlock: 2_090n, timeoutMs: 7_000 }));
+    expect(h.transactions).toHaveBeenNthCalledWith(1, expect.objectContaining({ fromBlock: 90n, budget: { timeoutMs: STORE_RECONCILE_PAGE_RPC_TIMEOUT_MS, deadlineAt: NOW + STORE_RECONCILE_PAGE_RPC_TIMEOUT_MS } }));
+    expect(h.transactions).toHaveBeenNthCalledWith(2, expect.objectContaining({ fromBlock: 2_090n, budget: { timeoutMs: 7_000, deadlineAt: NOW + 15_000 + 7_000 } }));
     expect(JSON.parse(h.kvEval.mock.calls.at(-1)![2][4])).toMatchObject({ reconcileFromBlock: '4090' });
   });
 
   // B4 follow-up 2 (1): ページ取得の失敗では取得済みページの候補を照合してから失敗ページの先頭を cursor に保存する。
-  it('a failing later page keeps the candidates of fetched pages and saves the failed page start', async () => {
+  it('a failing page after candidate-free pages saves the failed page start (no stall on the old cursor)', async () => {
+    h.anchor.mockResolvedValue(50_090n);
+    h.transactions.mockImplementation(async ({ fromBlock }: { fromBlock: bigint }) => fromBlock === 2_090n ? 'unavailable' : []);
+    expect(await reconcileStoreUsdcIntent(SALT, { now: NOW })).toEqual({ ok: true, state: 'pending' });
+    expect(h.transactions).toHaveBeenCalledTimes(2);
+    expect(h.verify).not.toHaveBeenCalled();
+    expect(JSON.parse(h.kvEval.mock.calls.at(-1)![2][4])).toMatchObject({ reconcileFromBlock: '2090' });
+  });
+
+  // 3 回目 (2): 予算付き (deadline) の走査は候補が出たページで止めて照合する (後続ページは取りに行かない)。
+  // 予算なし (status route) は従来どおり全ページを集めてから照合する (候補の保留・巻き戻しの設計はここでは変えない)。
+  it('a deadline-bound scan ends at the candidate page and verifies it; an unbounded scan still collects all pages first', async () => {
     h.anchor.mockResolvedValue(50_090n);
     h.transactions.mockImplementation(async ({ fromBlock }: { fromBlock: bigint }) => fromBlock === 90n ? [TX] : fromBlock === 2_090n ? 'unavailable' : []);
     h.verify.mockResolvedValue({ ok: false, reason: 'payment_mismatch' });
-    expect(await reconcileStoreUsdcIntent(SALT, { now: NOW })).toEqual({ ok: true, state: 'pending' });
-    expect(h.transactions).toHaveBeenCalledTimes(2);
+    expect(await reconcileStoreUsdcIntent(SALT, { now: NOW, deadline: Date.now() + 25_000 })).toEqual({ ok: true, state: 'pending' });
+    expect(h.transactions).toHaveBeenCalledTimes(1);
     expect(h.verify).toHaveBeenCalledTimes(1);
     expect(h.verify).toHaveBeenCalledWith(expect.objectContaining({ txHash: TX }));
     expect(JSON.parse(h.kvEval.mock.calls.at(-1)![2][4])).toMatchObject({ reconcileFromBlock: '2090' });
+    h.transactions.mockClear(); h.verify.mockClear();
+    expect(await reconcileStoreUsdcIntent(SALT, { now: NOW })).toEqual({ ok: true, state: 'pending' });
+    expect(h.transactions).toHaveBeenCalledTimes(2);
+    expect(h.verify).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(h.kvEval.mock.calls.at(-1)![2][4])).toMatchObject({ reconcileFromBlock: '2090' });
+  });
+
+  // 3 回目 (1): 照合後の finalize は同じ client を使い回さず、再照合時に予算 (残り時間) を計算し直した client を使う。
+  it('the finalizer recomputes its RPC budget instead of reusing the verification client', async () => {
+    h.anchor.mockResolvedValue(50_090n);
+    h.transactions.mockImplementation(async ({ fromBlock }: { fromBlock: bigint }) => fromBlock === 90n ? [TX] : []);
+    const clients: unknown[] = [];
+    h.bounded.mockImplementation((budget: { timeoutMs: number; deadlineAt: number }) => { const client = { budget }; clients.push(client); return client; });
+    expect(await reconcileStoreUsdcIntent(SALT, { now: NOW, deadline: Date.now() + 25_000 })).toEqual({ ok: true, state: 'settled' });
+    // verify (候補照合) と finalize 内の再照合で、別々に作った client (それぞれの時点の予算) を渡す。
+    const verifyClients = h.verify.mock.calls.map(([input]) => (input as { client?: unknown }).client);
+    expect(verifyClients).toHaveLength(2);
+    expect(clients).toContain(verifyClients[0]); expect(clients).toContain(verifyClients[1]);
+    expect(verifyClients[1]).not.toBe(verifyClients[0]);
   });
 
   // B4 follow-up 2 (2): deadline 付きでは authorizationState・head・候補照合・finalize の RPC も残り時間で絞った client を使い、
@@ -323,7 +353,7 @@ describe('Store USDC reconciler decisions (no Lua)', () => {
     h.transactions.mockImplementation(async ({ fromBlock }: { fromBlock: bigint }) => fromBlock === 90n ? [TX] : []);
     h.verify.mockResolvedValue({ ok: false, reason: 'payment_mismatch' });
     expect(await reconcileStoreUsdcIntent(SALT, { now: NOW, deadline: Date.now() + 25_000 })).toEqual({ ok: true, state: 'pending' });
-    expect(h.bounded).toHaveBeenCalledWith(STORE_RECONCILE_PAGE_RPC_TIMEOUT_MS);
+    expect(h.bounded).toHaveBeenCalledWith(expect.objectContaining({ timeoutMs: STORE_RECONCILE_PAGE_RPC_TIMEOUT_MS, deadlineAt: expect.any(Number) }));
     expect(h.used).toHaveBeenCalledWith(expect.objectContaining({ client: h.BOUNDED }));
     expect(h.anchor).toHaveBeenCalledWith(h.BOUNDED);
     expect(h.verify).toHaveBeenCalledWith(expect.objectContaining({ txHash: TX, client: h.BOUNDED }));
@@ -337,13 +367,14 @@ describe('Store USDC reconciler decisions (no Lua)', () => {
     h.anchor.mockResolvedValue(50_090n);
     let clock = NOW;
     const spy = vi.spyOn(Date, 'now').mockImplementation(() => clock);
-    h.transactions.mockImplementation(async ({ fromBlock }: { fromBlock: bigint }) => { clock += 11_000; return fromBlock === 90n ? [TX] : []; });
+    // 候補ページの取得に 21 秒かかると、残り 4 秒 − 予約 3 秒 = 1 秒 < 最小 2 秒 → 照合せず候補ページから延期。
+    h.transactions.mockImplementation(async ({ fromBlock }: { fromBlock: bigint }) => { clock += 21_000; return fromBlock === 90n ? [TX] : []; });
     try {
       expect(await reconcileStoreUsdcIntent(SALT, { now: NOW, deadline: NOW + 25_000 })).toEqual({ ok: true, state: 'pending' });
     } finally {
       spy.mockRestore();
     }
-    expect(h.transactions).toHaveBeenCalledTimes(2);
+    expect(h.transactions).toHaveBeenCalledTimes(1);
     expect(h.verify).not.toHaveBeenCalled();
     expect(JSON.parse(h.kvEval.mock.calls.at(-1)![2][4])).toMatchObject({ reconcileFromBlock: '90' });
   });
