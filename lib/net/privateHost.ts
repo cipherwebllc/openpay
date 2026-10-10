@@ -70,7 +70,8 @@ function isPrivateIpv4(octets: number[]): boolean {
 }
 
 // IPv6 literal を 8 group (各 16bit) に展開する。末尾の埋め込み IPv4 も 2 group の hex にする。
-function expandIpv6(hostname: string): number[] | null {
+// 読めない形は null。lib/sentryEnvironment.ts (手元判定) も同じ展開を使う。
+export function expandIpv6(hostname: string): number[] | null {
   let value = hostname;
   const embeddedV4 = value.match(
     /^(.*:)(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/,

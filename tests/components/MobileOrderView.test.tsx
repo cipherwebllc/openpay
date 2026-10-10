@@ -705,10 +705,12 @@ describe('MobileOrderView', () => {
     expect(u.searchParams.get('inv')).toBe('T1234567890123');
   });
 
-  it('店名が @handle の代用名なら登録番号は付けない (発行事業者の名称にならない)', () => {
+  // 代用名かどうかは公開設定を組む側 (lib/handle/record.ts) が出所で決め、代用名なら invoiceNo を載せない。
+  // 店が付けた「@」始まりの店名は本物の名称なので、登録番号をそのまま付ける。
+  it('店が付けた「@」始まりの店名でも登録番号を付ける (代用名の判定は文字列の形でしない)', () => {
     renderWithIntl(
       <MobileOrderView
-        config={{ ...config, shopName: '@alice', invoiceNo: 'T1234567890123' }}
+        config={{ ...config, shopName: '@カフェ 銀座', invoiceNo: 'T1234567890123' }}
         handle="alice"
       />,
     );
@@ -717,7 +719,8 @@ describe('MobileOrderView', () => {
       screen.getByRole('link', { name: '支払いへ進む' }).getAttribute('href') ?? '',
       'http://localhost',
     );
-    expect(u.searchParams.get('inv')).toBeNull();
+    expect(u.searchParams.get('store')).toBe('@カフェ 銀座');
+    expect(u.searchParams.get('inv')).toBe('T1234567890123');
   });
 
   it('受注リレー flag OFF (既定): webhook/order_id を付けない (inert)', () => {

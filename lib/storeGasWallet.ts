@@ -24,6 +24,8 @@ export const STORE_GAS_SETTLE_GAS_ESTIMATE = 200_000n;
 // 入れておく目安 (ネイティブ通貨・チェーンごと・10 進の文字列)。1 回の送信 (約 13〜17 万 gas) の実測: Polygon 0.01〜0.05 POL
 // (単価 55〜274 gwei)・Kaia 約 0.003 KAIA (25 gkei)・Avalanche 約 0.0008 AVAX (5 gwei)。少額にとどめる (端末の紛失・
 // ブラウザの侵害で失いうるのは入れた分だけ)。「接続中のウォレットから補充」の既定額 (min) と 1 回の上限 (max) にも使う。
+// 画面の表示 (「1〜2」「1–2」) は locale ごとの記号なので messages (RegisterMode.storeGasWallet.fundRange) が持ち、
+// ここは数値だけ返す。
 const FUND_GUIDE: Readonly<Record<number, { min: string; max: string }>> = {
   137: { min: '1', max: '2' },
   80002: { min: '1', max: '2' },
@@ -33,13 +35,7 @@ const FUND_GUIDE: Readonly<Record<number, { min: string; max: string }>> = {
   43113: { min: '0.05', max: '0.1' },
 };
 
-/** 入れておく目安の表示 (例: 「1〜2」)。表に無いチェーンは空。 */
-export function storeGasFundGuide(chainId: number): string {
-  const g = FUND_GUIDE[chainId];
-  return g ? `${g.min}〜${g.max}` : '';
-}
-
-/** 入れておく目安の数値 (補充の既定額と 1 回の上限)。表に無いチェーンは null。 */
+/** 入れておく目安の数値 (画面の目安・補充の既定額と 1 回の上限)。表に無いチェーンは null。 */
 export function storeGasFundRange(chainId: number): { min: string; max: string } | null {
   return FUND_GUIDE[chainId] ?? null;
 }
