@@ -9,6 +9,8 @@
 //   非課税 → rate 0 / tax_free、対象外 → rate 0 / out_of_scope、カスタム → 任意 rate / custom。
 // taxRate は税額算出の source (custom はユーザ入力値)。taxCategory は CSV/freee へのマッピング鍵。
 
+import { formatUnits } from 'viem';
+import { lineChargedWei } from './discount';
 import type { TokenSymbol } from './tokens';
 
 export const TAX_CATEGORIES = [
@@ -53,38 +55,149 @@ export function defaultRateForCategory(category: TaxCategory): number | null {
   return TAX_OPTIONS.find((o) => o.category === category)?.rate ?? null;
 }
 
-/**
- * 内税 (税込) からの税額を decimals 桁に丸めて返す (token 単位汎用)。
- *   rate>0  → round(amount * rate / (100 + rate), decimals)
- *   rate<=0 → 0 (非課税 / 対象外)
- *   rate=null (未指定) → null (= 税額不明、CSV/表示は空欄)
- *   amount が非有限 → null
- * 丸めは既存 taxAmountYen と同じ Math.round 方針 (decimals 桁スケール)。会計ソフトでは
- * なく記帳補助の参考値。JPYC は decimals=0 (円)、USDC は decimals=2 (セント) を想定。
- */
-export function taxAmountDecimal(
-  amount: number,
-  rate: number | null,
-  decimals: number,
-): number | null {
-  if (rate === null || !Number.isFinite(rate)) return null;
-  if (rate <= 0) return 0;
-  if (!Number.isFinite(amount)) return null;
-  const factor = 10 ** Math.max(0, Math.floor(decimals));
-  return Math.round((amount * rate) / (100 + rate) * factor) / factor;
-}
-
 /** 税額の表示小数桁。JPYC=円 (0桁)、USDC=セント (2桁)。 */
 export function taxDisplayDecimals(token: TokenSymbol): number {
   return token === 'jpyc' ? 0 : 2;
 }
 
+// --- 消費税額 (内税) の端数処理 ------------------------------------------------
+// 1 件の会計の消費税額は「税率ごとに区分した対価 (値引き後) の合計」から、税率ごとに 1 回だけ四捨五入する
+// (インボイスの記載事項・国税庁 Q&A 問57・lib/invoice.ts)。控え・店舗の履歴・明細 CSV・履歴 CSV・レジの
+// 「うち税額」も同じ規則・同じ関数 (taxByRate) で出す。行ごとに丸めて足すと、面ごとに ±1 円ずれる
+// (第 7 回レビュー A8)。会計ソフトではなく記帳補助の値 (端数処理の方法は任意なので四捨五入)。
+
+// 正の有限な税率 (%) を 10 進の分数に (7.5 → 75/10・1e-7 → 1/10^7)。浮動小数の誤差を計算に持ち込まない。
+function rateFraction(rate: number): { num: bigint; den: bigint } {
+  // 正の有限値の String() は「整数部[.小数部][e±指数]」の形。
+  const [mantissa, expPart = '0'] = String(rate).split('e');
+  const [whole, frac = ''] = mantissa.split('.');
+  const exp = Number(expPart) - frac.length;
+  const digits = BigInt(whole + frac);
+  return exp >= 0
+    ? { num: digits * 10n ** BigInt(exp), den: 1n }
+    : { num: digits, den: 10n ** BigInt(-exp) };
+}
+
+// 内税額 (表示の最小単位) を分子・分母で。amount (= amountNum / amountDen・トークン単位) × rate / (100 + rate) × 10^displayDecimals。
+function innerTaxFraction(
+  amountNum: bigint,
+  amountDen: bigint,
+  rate: number,
+  displayDecimals: number,
+): { num: bigint; den: bigint } {
+  const r = rateFraction(rate);
+  return {
+    num: amountNum * r.num * 10n ** BigInt(displayDecimals),
+    den: amountDen * (100n * r.den + r.num),
+  };
+}
+
+// 四捨五入 (0 以上の分数・0.5 は切り上げ)。
+function roundHalfUp(num: bigint, den: bigint): bigint {
+  return (num * 2n + den) / (den * 2n);
+}
+
 /**
- * 内税 (税込) からの税額 (円・整数)。JPYC 用の薄いラッパ (decimals=0)。
- *   rate>0 → round(yen * rate / (100 + rate))、rate<=0 → 0、rate=null/非有限 yen → null。
+ * 内税額 = 税込額 × rate / (100 + rate) を、表示の最小単位 (displayDecimals 桁・JPYC は円 0 桁・USDC は
+ * セント 2 桁) で 1 回だけ四捨五入する。税込額は分数 (amountNum / amountDen・トークン単位・0 以上) で受け、
+ * 途中で丸めない。戻り値は最小単位の整数。rate が null・非有限 → null (税額不明)・0 以下 → 0 (非課税/対象外)。
  */
-export function taxAmountYen(yen: number, rate: number | null): number | null {
-  return taxAmountDecimal(yen, rate, 0);
+export function innerTaxUnits(
+  amountNum: bigint,
+  amountDen: bigint,
+  rate: number | null,
+  displayDecimals: number,
+): bigint | null {
+  if (rate === null || !Number.isFinite(rate)) return null;
+  if (rate <= 0) return 0n;
+  const f = innerTaxFraction(amountNum, amountDen, rate, displayDecimals);
+  return roundHalfUp(f.num, f.den);
+}
+
+export type TaxRateGroup = {
+  /** 税率 (%)。未指定は null。 */
+  rate: number | null;
+  /** 税率ごとの対価 (値引き後・税込) の合計 (wei)。 */
+  charged: bigint;
+  /** 税率ごとに 1 回だけ四捨五入した消費税額 (表示の最小単位)。税率が未指定 (null)・非有限は null。 */
+  tax: bigint | null;
+};
+
+/**
+ * 明細を税率ごとに束ね、税率ごとに 1 回だけ四捨五入した消費税額を出す (消費税額の単一情報源)。
+ *   - groups: 税率ごとの対価の合計と税額 (明細に出てきた順)。
+ *   - lineTax: 税率ごとの税額を行へ配った額 (表示の最小単位)。行ごとの端数を切り捨て、残りの単位を端数の
+ *     大きい順 (同じなら金額の大きい順 → 先の行) に 1 つずつ。税率ごとの合計 = その税率の税額。
+ * charged は値引き後の行の額 (wei・0 以上)。decimals はトークンの桁 (JPYC 18・USDC 6)。
+ */
+export function taxByRate(
+  lines: ReadonlyArray<{ charged: bigint; taxRate: number | null }>,
+  decimals: number,
+  displayDecimals: number,
+): { groups: TaxRateGroup[]; lineTax: Array<bigint | null> } {
+  const amountDen = 10n ** BigInt(decimals);
+  const byRate = new Map<number | null, number[]>();
+  lines.forEach((l, i) => {
+    const idx = byRate.get(l.taxRate);
+    if (idx) idx.push(i);
+    else byRate.set(l.taxRate, [i]);
+  });
+  const lineTax: Array<bigint | null> = lines.map(() => null);
+  const groups: TaxRateGroup[] = [];
+  for (const [rate, idx] of byRate) {
+    const charged = idx.reduce((s, i) => s + lines[i].charged, 0n);
+    const tax = innerTaxUnits(charged, amountDen, rate, displayDecimals);
+    groups.push({ rate, charged, tax });
+    // 税額が無い (税率が未指定) か 0 の税率は、行もそのまま (配る端数が無い)。
+    if (rate === null || tax === null || tax === 0n) {
+      for (const i of idx) lineTax[i] = tax;
+      continue;
+    }
+    const parts = idx.map((i) => {
+      const f = innerTaxFraction(lines[i].charged, amountDen, rate, displayDecimals);
+      return { i, floor: f.num / f.den, rem: f.num % f.den };
+    });
+    let left = tax - parts.reduce((s, p) => s + p.floor, 0n);
+    parts.sort((a, b) =>
+      a.rem !== b.rem
+        ? (a.rem > b.rem ? -1 : 1)
+        : lines[a.i].charged !== lines[b.i].charged
+          ? (lines[a.i].charged > lines[b.i].charged ? -1 : 1)
+          : a.i - b.i,
+    );
+    for (const p of parts) {
+      lineTax[p.i] = p.floor + (left > 0n ? 1n : 0n);
+      if (left > 0n) left -= 1n;
+    }
+  }
+  return { groups, lineTax };
+}
+
+/**
+ * 明細 (履歴・控えの HistoryLineItem・レジの会計) の消費税額。税率ごとに 1 回の端数処理 (taxByRate)。
+ *   - lineTax[i]: 税率ごとの税額を行へ配った額 (10 進の文字列)。税率が未指定・金額が読めない行は '0'。
+ *   - totalTax: 税率ごとの税額の合計 (= lineTax の合計)。
+ *   - groups: 税率ごとの対価 (値引き後) の合計と税額。
+ * 行に保存された taxAmount は読まない (旧い履歴・控えは行ごとに丸めた値で、合計がインボイスと食い違うため)。
+ * 金額や値引きが読めない行 (壊れた保存値) は税率ごとの合計に入れない (ほかの行の税額は変えない)。
+ */
+export function lineItemsTax(
+  items: ReadonlyArray<{ amount: string; discount?: string; taxRate: number | null }>,
+  decimals: number,
+  displayDecimals: number,
+): { lineTax: string[]; totalTax: string; groups: TaxRateGroup[] } {
+  const readable = items.flatMap((li, i) => {
+    const charged = lineChargedWei(li, decimals);
+    return charged === null ? [] : [{ i, charged, taxRate: li.taxRate }];
+  });
+  const { groups, lineTax } = taxByRate(readable, decimals, displayDecimals);
+  const out = items.map(() => '0');
+  readable.forEach(({ i }, j) => {
+    const t = lineTax[j];
+    if (t !== null) out[i] = formatUnits(t, displayDecimals);
+  });
+  const total = groups.reduce((s, g) => s + (g.tax ?? 0n), 0n);
+  return { lineTax: out, totalTax: formatUnits(total, displayDecimals), groups };
 }
 
 // --- 会計 CSV の税区分ラベル -------------------------------------------------
@@ -173,3 +286,4 @@ export function parseTaxRateParam(raw: string | null): number | undefined {
 export function parseTaxCategoryParam(raw: string | null): TaxCategory | undefined {
   return isTaxCategory(raw) ? raw : undefined;
 }
+

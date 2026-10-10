@@ -1346,7 +1346,7 @@ describe('history (LocalStorage)', () => {
       storeName: '',
     };
 
-    it('entryLineItems: stored currency/taxAmount/id を尊重 (再算出/上書きしない)', () => {
+    it('entryLineItems: stored currency/id を尊重・taxAmount は保存値でなく税率ごとに 1 回の端数処理で出し直す (A8)', () => {
       const e = entry({
         asset: 'jpyc',
         lineItems: [
@@ -1360,14 +1360,14 @@ describe('history (LocalStorage)', () => {
             memo: null,
             id: 'fixed-id',
             currency: 'usdc', // entry.asset(jpyc) で上書きしない
-            taxAmount: '9.99', // 再算出しない
+            taxAmount: '9.99', // 旧い保存値 (行ごとの丸め等) は読まない
           },
         ],
       });
       const [li] = entryLineItems(e);
       expect(li.id).toBe('fixed-id');
       expect(li.currency).toBe('usdc');
-      expect(li.taxAmount).toBe('9.99');
+      expect(li.taxAmount).toBe('9'); // 100 × 10/110 = 9.09 → 9 (entry の通貨 = JPYC の円単位)
     });
 
     it('isValidEntry: 不正な lineItem (currency/id/taxAmount/presety 型) は drop', () => {
@@ -1424,7 +1424,7 @@ describe('history (LocalStorage)', () => {
       expect(li.presetId).toBe('p1');
     });
 
-    it('entryTotals: USDC は 2 桁で stored taxAmount を合算', () => {
+    it('entryTotals: USDC は 2 桁 (税率ごとに 1 回: 30 × 10/110 = 2.727 → 2.73)', () => {
       const e = entry({
         asset: 'usdc',
         merchantAmount: '30000000', // 30 USDC
@@ -1435,7 +1435,7 @@ describe('history (LocalStorage)', () => {
       });
       const t = entryTotals(e);
       expect(t.total).toBe('30');
-      expect(t.totalTax).toBe('2.73'); // 0.91 + 1.82
+      expect(t.totalTax).toBe('2.73');
     });
   });
 

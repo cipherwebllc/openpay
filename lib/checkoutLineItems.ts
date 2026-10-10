@@ -1,11 +1,12 @@
 // /checkout の会計 (items + 値引き) から履歴・控えの売上明細 (HistoryLineItem) を組む。通常の支払い (CheckoutForm) と
 // お店の端末で送る支払い (StoreDeviceCheckoutForm) が共有する単一情報源。値引きは税率ごと → 明細の順に按分して
-// 行に固定し (lib/discount.ts)、行の税額は値引き後の行額から出す。値引きが無ければ従来と同じ明細になる。
+// 行に固定し (lib/discount.ts)、行の税額は値引き後の税率ごとの合計から 1 回丸めた税額を行へ配った額
+// (lib/tax.ts の taxByRate・インボイスと同じ)。値引きが無ければ値引きの欄を持たない明細になる。
 
 import { formatUnits, parseUnits } from 'viem';
 import { allocateDiscount, discountUnit } from './discount';
 import type { HistoryLineItem } from './history';
-import { taxAmountDecimal, taxDisplayDecimals, type TaxCategory } from './tax';
+import { taxByRate, taxDisplayDecimals, type TaxCategory } from './tax';
 import type { TokenSymbol } from './tokens';
 import { calcCheckoutTotal, type CheckoutItem } from './url/checkout';
 
@@ -30,14 +31,15 @@ export function buildCheckoutLineItems(args: {
   const discounts = args.discount
     ? allocateDiscount(lines, parseUnits(args.discount, decimals), discountUnit(decimals, displayDecimals))
     : lines.map(() => 0n);
+  const { lineTax } = taxByRate(
+    lines.map((l, i) => ({ charged: l.amount - discounts[i], taxRate: l.taxRate })),
+    decimals,
+    displayDecimals,
+  );
   return items.map((it, i) => {
     const { amount, taxRate, taxCategory } = lines[i];
     const lineDiscount = discounts[i];
-    const taxAmt = taxAmountDecimal(
-      Number(formatUnits(amount - lineDiscount, decimals)),
-      taxRate,
-      displayDecimals,
-    );
+    const taxAmt = lineTax[i];
     return {
       id: String(i),
       name: it.name,
@@ -48,7 +50,7 @@ export function buildCheckoutLineItems(args: {
       currency: token,
       taxRate,
       taxCategory,
-      taxAmount: taxAmt == null ? '0' : String(taxAmt),
+      taxAmount: taxAmt == null ? '0' : formatUnits(taxAmt, displayDecimals),
       memo: it.memo ?? null,
       ...(lineDiscount > 0n ? { discount: formatUnits(lineDiscount, decimals) } : {}),
     };

@@ -4,7 +4,7 @@
 
 import { formatUnits } from 'viem';
 import { pad } from '../pad';
-import { taxAmountDecimal, taxDisplayDecimals } from '../tax';
+import { lineItemsTax, taxDisplayDecimals } from '../tax';
 import {
   FEE_BREAKDOWN_VERSION,
   HISTORY_ASSET_DECIMALS,
@@ -31,63 +31,50 @@ function rawToDecimalStr(raw: string, decimals: number): string {
   return formatUnits(BigInt(raw), decimals);
 }
 
-// 1 行を正規化 (任意フィールドを補完): currency←asset / taxAmount←算出 / id←合成。
-function normalizeLineItem(
-  li: HistoryLineItem,
-  entry: HistoryEntry,
-  index: number,
-): HistoryLineItem {
-  const currency = li.currency ?? entry.asset;
-  let taxAmount = li.taxAmount;
-  if (taxAmount == null) {
-    // 税額は値引き後の行額から (レジの値引きを配った行・値引きの無い行は amount そのもの)。
-    const t = taxAmountDecimal(
-      Number(li.amount) - (li.discount !== undefined ? Number(li.discount) : 0),
-      li.taxRate,
-      taxDisplayDecimals(currency),
-    );
-    taxAmount = t == null ? '0' : String(t);
-  }
-  return { ...li, id: li.id ?? `${entry.id}-${index}`, currency, taxAmount };
-}
-
 /**
- * 表示 / CSV / freee 用に正規化済みの売上明細を返す (記帳補助)。
+ * 表示 / CSV / freee 用に正規化済みの売上明細を返す (記帳補助)。currency←asset / id←合成 /
+ * taxAmount←税率ごとに 1 回の端数処理 (lineItemsTax) で補完する。
  *   - lineItems があれば各行を補完して返す。
  *   - 無くても productName があれば「仮想 1 行」を合成 (req: 既存単品を lineItems へ変換)。
  *   - 商品情報の無い legacy (productName なし) は []。
  */
 export function entryLineItems(entry: HistoryEntry): HistoryLineItem[] {
-  if (entry.lineItems && entry.lineItems.length > 0) {
-    return entry.lineItems.map((li, i) => normalizeLineItem(li, entry, i));
-  }
+  const lines = rawEntryLineItems(entry);
+  const { lineTax } = entryLineItemsTax(lines, entry);
+  return lines.map((li, i) => ({
+    ...li,
+    id: li.id ?? `${entry.id}-${i}`,
+    currency: li.currency ?? entry.asset,
+    taxAmount: lineTax[i],
+  }));
+}
+
+// 保存された明細 (無ければ productName の仮想 1 行・どちらも無ければ [])。
+function rawEntryLineItems(entry: HistoryEntry): HistoryLineItem[] {
+  if (entry.lineItems && entry.lineItems.length > 0) return entry.lineItems;
   if (entry.productName) {
     const amount = rawToDecimalStr(
       entry.merchantAmount,
       HISTORY_ASSET_DECIMALS[entry.asset],
     );
     return [
-      normalizeLineItem(
-        {
-          name: entry.productName,
-          quantity: 1,
-          unitPrice: amount,
-          amount,
-          taxRate: entry.taxRate,
-          taxCategory: entry.taxCategory,
-          memo: entry.memo,
-        },
-        entry,
-        0,
-      ),
+      {
+        name: entry.productName,
+        quantity: 1,
+        unitPrice: amount,
+        amount,
+        taxRate: entry.taxRate,
+        taxCategory: entry.taxCategory,
+        memo: entry.memo,
+      },
     ];
   }
   return [];
 }
 
 /**
- * 派生集計 (token 単位)。税込前提なので subtotal === total (= 着金額)、totalTax は行税額の合計。
- * 保存はせず entryLineItems / merchantAmount から都度算出 (drift 回避)。
+ * 派生集計 (token 単位)。税込前提なので subtotal === total (= 着金額)、totalTax は税率ごとに 1 回の端数処理
+ * (lineItemsTax・インボイスと同じ)。保存はせず明細 / merchantAmount から都度算出 (drift 回避)。
  */
 export function entryTotals(entry: HistoryEntry): {
   subtotal: string;
@@ -98,21 +85,22 @@ export function entryTotals(entry: HistoryEntry): {
     entry.merchantAmount,
     HISTORY_ASSET_DECIMALS[entry.asset],
   );
-  const dec = taxDisplayDecimals(entry.asset);
-  const items = entryLineItems(entry);
-  let tax = 0;
-  if (items.length > 0) {
-    for (const li of items) {
-      const n = Number(li.taxAmount);
-      if (Number.isFinite(n)) tax += n;
-    }
-  } else if (entry.taxRate != null) {
-    // 明細は無いが entry に税率がある (商品名なしで税だけ指定した単品 QR 等) → 合計から算出。
-    tax = taxAmountDecimal(Number(total), entry.taxRate, dec) ?? 0;
-  }
-  const factor = 10 ** dec;
-  const totalTax = String(Math.round(tax * factor) / factor);
-  return { subtotal: total, totalTax, total };
+  const items = rawEntryLineItems(entry);
+  // 明細は無いが entry に税率がある (商品名なしで税だけ指定した単品 QR 等) → 合計の 1 行から算出。
+  const taxLines = items.length > 0
+    ? items
+    : entry.taxRate != null
+      ? [{ amount: total, taxRate: entry.taxRate }]
+      : [];
+  return { subtotal: total, totalTax: entryLineItemsTax(taxLines, entry).totalTax, total };
+}
+
+// 明細の消費税額 (税率ごとに 1 回の端数処理・lib/tax.ts の lineItemsTax) を entry の通貨の桁で。
+function entryLineItemsTax(
+  items: Parameters<typeof lineItemsTax>[0],
+  entry: HistoryEntry,
+): ReturnType<typeof lineItemsTax> {
+  return lineItemsTax(items, HISTORY_ASSET_DECIMALS[entry.asset], taxDisplayDecimals(entry.asset));
 }
 
 /** 数値 timestamp を yyyy-MM-dd HH:mm:ss (locale 形式) に整形。CSV にも UI にも使う。 */

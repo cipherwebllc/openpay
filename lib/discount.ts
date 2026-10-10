@@ -3,7 +3,7 @@
 // React/DOM 非依存の純関数。レジ (作る側)・URL の parse (受ける側)・支払い画面・履歴の明細 (配賦) が共有する。
 //
 // 税率が混ざる会計の値引きは「値引き前の税率ごとの合計」の比で按分し (インボイス Q&A の一括値引き)、
-// 値引き後の税率ごとの合計から消費税を税率ごとに 1 回丸める (lib/invoice.ts)。按分した額は支払い時に
+// 値引き後の税率ごとの合計から消費税を税率ごとに 1 回丸める (lib/tax.ts の taxByRate)。按分した額は支払い時に
 // 明細へ固定する (HistoryLineItem.discount)。後から計算し直さない (控え・CSV がずれない)。
 
 import { parseUnits } from 'viem';
@@ -176,6 +176,21 @@ export function lineDiscountWei(
   if (!DECIMAL_PATTERN.test(li.amount) || exceedsTokenPrecision(li.amount, decimals)) return null;
   const d = parseUnits(li.discount, decimals);
   return d <= parseUnits(li.amount, decimals) ? d : null;
+}
+
+/**
+ * 明細 1 行の請求額 (= 金額 − この行に配った値引き・wei)。消費税額は税率ごとにこの額を足して出す (lib/tax.ts の
+ * taxByRate)。金額・値引きが読めない行 (壊れた保存値) は null。
+ */
+export function lineChargedWei(
+  li: { amount: string; discount?: string },
+  decimals: number,
+): bigint | null {
+  if (typeof li.amount !== 'string' || !DECIMAL_PATTERN.test(li.amount) || exceedsTokenPrecision(li.amount, decimals)) {
+    return null;
+  }
+  const discount = lineDiscountWei(li, decimals);
+  return discount === null ? null : parseUnits(li.amount, decimals) - discount;
 }
 
 /** 明細に配った値引きの合計 (wei)。どこか 1 行でも壊れていれば null。 */

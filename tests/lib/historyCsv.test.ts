@@ -669,8 +669,8 @@ describe('CSV v5: 記帳補助メタ列 (商品名/税/明細・末尾追加で�
     expect(cellsByHeader(csv)('税額(円)')).toBe('91');
   });
 
-  // 混在税率 (10% と 8%) の税額は「行ごとに計算して合算」が正。以前は entry 単位の単一税率を
-  // 合計額に掛けていたため、明細CSV (lineItemsCsv) / 仕訳CSV / 履歴表示 (entryTotals) と食い違っていた。
+  // 混在税率 (10% と 8%) の税額は「税率ごとに 1 回丸めて合算」が正 (インボイスと同じ・第 7 回レビュー A8)。以前は
+  // entry 単位の単一税率を合計額に掛けていたため、明細CSV (lineItemsCsv) / 仕訳CSV / 履歴表示 (entryTotals) と食い違っていた。
   const mixedLineItems = [
     {
       name: 'コーヒー',
@@ -734,7 +734,7 @@ describe('CSV v5: 記帳補助メタ列 (商品名/税/明細・末尾追加で�
     }
   });
 
-  it('混在税率: 税額(円) は行別税額の合計 (10% 91 + 8% 222 = 313)', () => {
+  it('混在税率: 税額(円) は税率ごとの税額の合計 (10% 91 + 8% 222 = 313)', () => {
     const csv = toCsv([
       entry({
         merchantAmount: '4000000000000000000000', // 4000 JPYC
@@ -746,7 +746,7 @@ describe('CSV v5: 記帳補助メタ列 (商品名/税/明細・末尾追加で�
     expect(cellsByHeader(csv)('税額(円)')).toBe('313');
   });
 
-  it('混在税率: entry 単位の税率が残っていても行別合計を優先する', () => {
+  it('混在税率: entry 単位の税率が残っていても明細の税率ごとの合計を優先する', () => {
     const csv = toCsv([
       entry({
         merchantAmount: '4000000000000000000000',

@@ -641,6 +641,17 @@ describe('RegisterMode', () => {
       const r = await parsedCheckout();
       expect(r.ok && r.params.discount).toBeUndefined();
     });
+
+    // 第 7 回レビュー A8: 「うち税額」も控え・インボイスと同じ「税率ごとに 1 回の端数処理」。
+    it('うち税額は税率ごとに 1 回丸める (3,500 円から 3 円引き → 318 円・行ごとに丸めると 317 円)', async () => {
+      const user = userEvent.setup();
+      await cartWithCoffeeAndShirt(user);
+      await user.click(orderPanel().getByRole('button', { name: '＋ 値引きを追加' }));
+      await user.type(orderPanel().getByLabelText('値引きの金額'), '3');
+      // 値引き後 500 + 2997 (10%): 行ごと 45 + 272 = 317・税率ごと 3497 × 10/110 = 317.9 → 318。
+      const taxRow = orderPanel().getByText('うち税額').closest('div') as HTMLElement;
+      expect(within(taxRow).getByText('318 JPYC')).toBeInTheDocument();
+    });
   });
 
   it('数量を増やすと合計 (items.qty) が再計算される', async () => {
