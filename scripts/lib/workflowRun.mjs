@@ -107,6 +107,8 @@ export const PIPEFAIL_BUILD_RUN = Object.freeze([
   'node scripts/check-bundle-budget.mjs < build.log',
   '# サーバーバンドル内の Lua (EVAL 用 CAS) が minifier に壊されていないか (2026-09-06 実害)',
   'node scripts/check-lua-bundle.mjs',
+  '# client chunk にクラスの static ブロック (ES2022) が残っていないか (iOS 16.4 未満で SyntaxError・2026-10 実害)',
+  'node scripts/check-client-syntax.mjs',
 ]);
 // npm が設定として読む環境変数 (registry・ignore-scripts 等を env で差し替えさせない)。
 const NPM_CONFIG_ENV = /^npm_config_/i;
