@@ -33,6 +33,8 @@ export type ExistingRule = {
   name: string;
   environment?: string | null;
   owner?: string | null;
+  /** 'active' | 'disabled'。disabled は既定で更新対象外。 */
+  status?: string;
   actionMatch?: string;
   filterMatch?: string;
   frequency?: number;
@@ -52,15 +54,29 @@ export type RulePlan = {
     keptActions: string[];
     /** 既存 rule から引き継いだ owner (担当・"team:<id>" / "user:<id>")。無ければ undefined。 */
     keptOwner?: string;
+    /** 無効化中の rule を --include-disabled で更新する (PUT で再有効化される)。 */
+    reenable?: boolean;
     payload: SentryRulePayload & { actions: Array<{ id: string; [k: string]: unknown }>; owner?: string };
   }>;
   unchanged: Array<{ id: string; name: string }>;
   retire: Array<{ id: string; name: string }>;
+  /** 無効化 (status=disabled) 中で差分がある rule。既定では更新しない (PUT は再有効化するため)。 */
+  skippedDisabled: Array<{ id: string; name: string; changes: string[] }>;
+};
+
+export type PlanOptions = {
+  /** 無効化中の rule も update に入れる (PUT で再有効化される)。 */
+  includeDisabled?: boolean;
 };
 
 export const RULES: readonly AlertRule[];
 export const RETIRED_RULE_NAMES: readonly string[];
 export function buildRulePayload(rule: AlertRule, env?: string): SentryRulePayload;
-export function planRules(existing: ExistingRule[], rules?: readonly AlertRule[], env?: string): RulePlan;
+export function planRules(
+  existing: ExistingRule[],
+  rules?: readonly AlertRule[],
+  env?: string,
+  opts?: PlanOptions,
+): RulePlan;
 export function formatPlan(plan: RulePlan, env?: string): string[];
 export function main(argv?: string[]): Promise<RulePlan>;

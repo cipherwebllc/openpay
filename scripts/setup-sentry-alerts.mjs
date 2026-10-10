@@ -503,13 +503,32 @@ function diffRule(existing, desired) {
   if (thresholdA !== thresholdB) changes.push(`threshold ${thresholdA} → ${thresholdB}`);
   const intervalA = freqA ? freqA.interval : null;
   if (intervalA !== freqB.interval) changes.push(`interval ${intervalA} → ${freqB.interval}`);
-  // threshold / interval 以外 (追加の condition・別の比較種別 等) の違い。
-  const condA = normalizeList(existing.conditions);
-  const condB = normalizeList(desired.conditions);
-  const condOnlyFreqDiff =
-    condA.length === 1 && condB.length === 1 && freqA && (thresholdA !== thresholdB || intervalA !== freqB.interval);
-  if (!condOnlyFreqDiff && JSON.stringify(condA) !== JSON.stringify(condB)) {
-    changes.push(`conditions ${describeConditions(existing.conditions)} → ${describeConditions(desired.conditions)}`);
+  // threshold / interval 以外の違い。value と interval を除いた condition が同等なら (閾値だけの変更) 詳細は
+  // 省略し、比較種別 (comparisonType) ・比較間隔 (comparisonInterval) の変更は閾値と同時でも必ず計画に出す
+  // (threshold の行だけで隠れると、PUT が percent → count に変え comparisonInterval を消すことが見えない)。
+  const withoutValueInterval = (c) => {
+    const { value: _v, interval: _i, ...rest } = normalizeNode(c);
+    return rest;
+  };
+  const restA = (existing.conditions ?? []).map(withoutValueInterval);
+  const restB = desired.conditions.map(withoutValueInterval);
+  const sortedJson = (list) => JSON.stringify(list.map((c) => JSON.stringify(c)).sort());
+  if (sortedJson(restA) !== sortedJson(restB)) {
+    if (restA.length === 1 && restB.length === 1 && restA[0].id === restB[0].id) {
+      // 同じ 1 condition で field が違う: field ごとに出す。
+      const known = ['comparisonType', 'comparisonInterval'];
+      const others = [...new Set([...Object.keys(restA[0]), ...Object.keys(restB[0])])]
+        .filter((k) => k !== 'id' && !known.includes(k))
+        .sort();
+      const keys = [...known, ...others];
+      for (const key of keys) {
+        const a = restA[0][key] ?? '(none)';
+        const b = restB[0][key] ?? '(none)';
+        if (a !== b) changes.push(`${key} ${a} → ${b}`);
+      }
+    } else {
+      changes.push(`conditions ${describeConditions(existing.conditions)} → ${describeConditions(desired.conditions)}`);
+    }
   }
   if (Number(existing.frequency) !== desired.frequency) {
     changes.push(`frequency ${existing.frequency} → ${desired.frequency}`);
@@ -529,9 +548,11 @@ function diffRule(existing, desired) {
 }
 
 // 既存 rule 一覧 (GET の応答) と RULES から、何をどう変えるかの計画を作る (純関数・API を叩かない)。
-export function planRules(existing, rules = RULES, env = ALERT_ENV) {
+// opts.includeDisabled: 無効化 (status=disabled) 中の rule も更新する (PUT は disabled を active に戻すので、
+// 止めていた通知が再開する。既定では更新せず計画に出すだけ)。
+export function planRules(existing, rules = RULES, env = ALERT_ENV, opts = {}) {
   const byName = new Map(existing.map((r) => [r.name, r]));
-  const plan = { create: [], update: [], unchanged: [], retire: [] };
+  const plan = { create: [], update: [], unchanged: [], retire: [], skippedDisabled: [] };
   for (const rule of rules) {
     const desired = buildRulePayload(rule, env);
     const found =
@@ -558,17 +579,26 @@ export function planRules(existing, rules = RULES, env = ALERT_ENV) {
     const keptOwner = typeof found.owner === 'string' && found.owner.length > 0 ? found.owner : undefined;
     if (changes.length === 0) {
       plan.unchanged.push({ id: String(found.id), name: rule.name });
-    } else {
-      plan.update.push({
-        id: String(found.id),
-        name: rule.name,
-        previousName: found.name !== rule.name ? found.name : undefined,
-        changes,
-        keptActions: keptActions.map((a) => shortId(a.id)),
-        keptOwner,
-        payload: { ...desired, actions, ...(keptOwner !== undefined ? { owner: keptOwner } : {}) },
-      });
+      continue;
     }
+    // 無効化中の rule: Sentry の PUT (project_rule_details) は disabled を active に戻す = 止めていた通知が
+    // 再開する。status を PUT に載せても保持できる保証が無いので、既定では更新せず計画に出すだけにし、
+    // 再有効化は --include-disabled を明示したときだけ (計画にも明示)。
+    const disabled = found.status === 'disabled';
+    if (disabled && !opts.includeDisabled) {
+      plan.skippedDisabled.push({ id: String(found.id), name: rule.name, changes });
+      continue;
+    }
+    plan.update.push({
+      id: String(found.id),
+      name: rule.name,
+      previousName: found.name !== rule.name ? found.name : undefined,
+      changes,
+      keptActions: keptActions.map((a) => shortId(a.id)),
+      keptOwner,
+      ...(disabled ? { reenable: true } : {}),
+      payload: { ...desired, actions, ...(keptOwner !== undefined ? { owner: keptOwner } : {}) },
+    });
   }
   for (const name of RETIRED_RULE_NAMES) {
     const found = byName.get(name);
@@ -579,9 +609,11 @@ export function planRules(existing, rules = RULES, env = ALERT_ENV) {
 
 // dry-run の出力。1 行 1 rule (見出し + create/update/unchanged/retire)。
 export function formatPlan(plan, env = ALERT_ENV) {
+  const skipped = plan.skippedDisabled ?? [];
   const lines = [
     `[setup-sentry-alerts] plan (environment=${env}): create ${plan.create.length} / ` +
-      `update ${plan.update.length} / unchanged ${plan.unchanged.length} / retire ${plan.retire.length}`,
+      `update ${plan.update.length} / unchanged ${plan.unchanged.length} / retire ${plan.retire.length}` +
+      (skipped.length > 0 ? ` / disabled (更新しない) ${skipped.length}` : ''),
   ];
   for (const c of plan.create) {
     const cond = c.payload.conditions[0];
@@ -595,7 +627,14 @@ export function formatPlan(plan, env = ALERT_ENV) {
     if (u.keptActions.length > 0) kept.push(`actions 保持: ${u.keptActions.join(', ')}`);
     if (u.keptOwner !== undefined) kept.push(`owner 保持: ${u.keptOwner}`);
     const keptNote = kept.length > 0 ? ` [${kept.join('; ')}]` : '';
-    lines.push(`  ~ update  ${u.name} (id=${u.id}): ${u.changes.join('; ')}${keptNote}`);
+    const reenable = u.reenable ? ' ※無効化中 → PUT で再有効化される (--include-disabled)' : '';
+    lines.push(`  ~ update  ${u.name} (id=${u.id}): ${u.changes.join('; ')}${keptNote}${reenable}`);
+  }
+  for (const s of skipped) {
+    lines.push(
+      `  ! skip    ${s.name} (id=${s.id}): 無効化中のため更新しない ` +
+        `(差分あり: ${s.changes.join('; ')}・再有効化して更新するには --include-disabled)`,
+    );
   }
   for (const k of plan.unchanged) {
     lines.push(`  = keep    ${k.name} (id=${k.id})`);
@@ -630,6 +669,8 @@ async function sentryRequest({ method, path, token, body }) {
 export async function main(argv = process.argv.slice(2)) {
   const dryRun = argv.includes('--dry-run');
   const offline = argv.includes('--offline');
+  // 無効化中の rule も更新する (PUT で再有効化される)。既定では更新せず計画に出すだけ。
+  const includeDisabled = argv.includes('--include-disabled');
   if (offline && !dryRun) {
     throw new Error('--offline は --dry-run と一緒にだけ使えます (接続せずに適用はできません)。');
   }
@@ -651,7 +692,7 @@ export async function main(argv = process.argv.slice(2)) {
     console.log(`[setup-sentry-alerts] 既存 rule ${existing.length} 件 (name / legacyNames で引き当て)`);
   }
 
-  const plan = planRules(existing, RULES, ALERT_ENV);
+  const plan = planRules(existing, RULES, ALERT_ENV, { includeDisabled });
   for (const line of formatPlan(plan, ALERT_ENV)) console.log(line);
 
   if (dryRun) {
@@ -682,6 +723,10 @@ export async function main(argv = process.argv.slice(2)) {
   if (plan.retire.length > 0) {
     console.log('発火元の無い rule (Sentry Dashboard → Alerts で削除してください):');
     for (const r of plan.retire) console.log(`  - ${r.name} (id=${r.id})`);
+  }
+  if (plan.skippedDisabled.length > 0) {
+    console.log('無効化中のため更新しなかった rule (再有効化して更新するには --include-disabled):');
+    for (const s of plan.skippedDisabled) console.log(`  - ${s.name} (id=${s.id})`);
   }
   return plan;
 }

@@ -69,123 +69,131 @@ function resolveModule(specifier: string, fromPath: string): string | null {
 
 type Emits = { tags: Set<string>; respondPrefixes: Set<string> };
 
-// 1 ファイルの TypeScript AST から、`@/lib/logger` (相対 path も) から import した binding (別名を含む) の
-// .warn / .error 呼び出しの第 1 引数と、`@/lib/relay/relayRoute` から import した makeRespond の実引数を集める。
+// 与えたファイルだけから成る TypeScript Program (module 解決も lib も読まない)。識別子の symbol 解決
+// (binder) はファイル内で完結するので、import の binding・トップレベルの const・shadowing の判別に使える。
+function makeProgram(files: Map<string, string>): ts.Program {
+  const host: ts.CompilerHost = {
+    getSourceFile: (f) => {
+      const s = files.get(f);
+      return s === undefined ? undefined : ts.createSourceFile(f, s, ts.ScriptTarget.Latest, true);
+    },
+    fileExists: (f) => files.has(f),
+    readFile: (f) => files.get(f),
+    writeFile: () => {},
+    getDefaultLibFileName: () => 'lib.d.ts',
+    getCurrentDirectory: () => '',
+    getCanonicalFileName: (f) => f,
+    useCaseSensitiveFileNames: () => true,
+    getNewLine: () => '\n',
+    getDirectories: () => [],
+  };
+  return ts.createProgram(
+    [...files.keys()],
+    { noResolve: true, noLib: true, allowJs: true, jsx: ts.JsxEmit.Preserve, target: ts.ScriptTarget.Latest, module: ts.ModuleKind.ESNext },
+    host,
+  );
+}
+
+// 識別子が指す宣言 (checker の symbol 解決)。shadowing (引数・var・case 間で共有される switch のスコープ・
+// 名前付き class 式の名前・catch・分割代入…) は binder が解決するので、手書きのスコープ追跡を持たない。
+// 宣言が 1 つだけのときに返す。同じスコープに import と var が並ぶ (TS では重複宣言のエラー) ような
+// 二重の宣言は「lib/logger の binding」と言い切れないので数えない。
+function declarationOf(checker: ts.TypeChecker, id: ts.Identifier): ts.Declaration | undefined {
+  const decls = checker.getSymbolAtLocation(id)?.declarations ?? [];
+  return decls.length === 1 ? decls[0] : undefined;
+}
+
+// 宣言が `<module>` からの named import (別名を含む) で、import 元の名前が `name` か。
+function isImportOf(decl: ts.Declaration | undefined, fromPath: string, module: string, name: string): boolean {
+  if (!decl || !ts.isImportSpecifier(decl)) return false;
+  const importDecl = decl.parent.parent.parent;
+  if (!ts.isImportDeclaration(importDecl) || !ts.isStringLiteral(importDecl.moduleSpecifier)) return false;
+  return resolveModule(importDecl.moduleSpecifier.text, fromPath) === module && (decl.propertyName ?? decl.name).text === name;
+}
+
+// 宣言がトップレベルの `const X = '文字列'` なら、その文字列。
+function topLevelConstString(decl: ts.Declaration | undefined): string | null {
+  if (!decl || !ts.isVariableDeclaration(decl) || !decl.initializer || !ts.isStringLiteral(decl.initializer)) return null;
+  const list = decl.parent;
+  if (!ts.isVariableDeclarationList(list) || !(list.flags & ts.NodeFlags.Const)) return null;
+  const stmt = list.parent;
+  return ts.isVariableStatement(stmt) && ts.isSourceFile(stmt.parent) ? decl.initializer.text : null;
+}
+
+// 1 ファイルから、`@/lib/logger` (相対 path も) から import した binding (別名を含む) の .warn / .error
+// 呼び出しの第 1 引数と、`@/lib/relay/relayRoute` から import した makeRespond の実引数を集める。
 // - コメントは AST に乗らないので根拠にならない。
-// - 同名のローカル変数 `logger` (lib/logger から来ていない) は数えない (偽物の emit を実 emit と誤認しない)。
-// - テンプレートリテラルは、同じファイルの `const X = '…'` だけを参照する静的なものは解決し、
+// - 識別子は checker の symbol で解決する: import の binding を指すときだけ数え、同名のローカル変数・
+//   引数・別モジュールの logger (偽物の emit) は数えない。
+// - テンプレートリテラルは、トップレベルの `const X = '…'` だけを参照する静的なものは解決し、
 //   引数や外から来る値を含む動的なもの (`${logPrefix}.reverted`) は集めない (実配線を通した wiredTags で確かめる)。
-function extractEmits(path: string, source: string): Emits {
-  const tags = new Set<string>();
-  const respondPrefixes = new Set<string>();
-  const sf = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true);
-  const loggerBindings = new Set<string>();
-  const respondBindings = new Set<string>();
-  const constStrings = new Map<string, string>();
-  for (const stmt of sf.statements) {
-    if (ts.isImportDeclaration(stmt) && ts.isStringLiteral(stmt.moduleSpecifier)) {
-      const mod = resolveModule(stmt.moduleSpecifier.text, path);
-      const named = stmt.importClause?.namedBindings;
-      if (!named || !ts.isNamedImports(named)) continue;
-      for (const el of named.elements) {
-        const imported = (el.propertyName ?? el.name).text;
-        if (mod === 'lib/logger' && imported === 'logger') loggerBindings.add(el.name.text);
-        if (mod === 'lib/relay/relayRoute' && imported === 'makeRespond') respondBindings.add(el.name.text);
-      }
-    }
-    if (ts.isVariableStatement(stmt) && stmt.declarationList.flags & ts.NodeFlags.Const) {
-      for (const d of stmt.declarationList.declarations) {
-        if (ts.isIdentifier(d.name) && d.initializer && ts.isStringLiteral(d.initializer)) {
-          constStrings.set(d.name.text, d.initializer.text);
-        }
-      }
-    }
-  }
-  // 簡易な binding 解決: 入れ子のスコープ (関数の引数・ブロック/関数内の変数宣言・catch の引数) が同名を
-  // 宣言していたら、その中の識別子は import の binding / トップレベルの const を指していない (shadowing)。
-  // 型 checker は使わず、宣言のスコープをファイル単位で辿るだけ (十分)。
-  const bindingNames = (name: ts.BindingName, out: Set<string>): void => {
-    if (ts.isIdentifier(name)) out.add(name.text);
-    else for (const el of name.elements) if (ts.isBindingElement(el)) bindingNames(el.name, out);
-  };
-  const declaredIn = (node: ts.Node): Set<string> => {
-    const out = new Set<string>();
-    if (ts.isFunctionLike(node)) {
-      for (const p of node.parameters) bindingNames(p.name, out);
-      if ((ts.isFunctionExpression(node) || ts.isFunctionDeclaration(node)) && node.name) out.add(node.name.text);
-    }
-    if (ts.isCatchClause(node) && node.variableDeclaration) bindingNames(node.variableDeclaration.name, out);
-    const stmts = ts.isBlock(node) || ts.isModuleBlock(node) || ts.isCaseClause(node) || ts.isDefaultClause(node)
-      ? node.statements
-      : [];
-    for (const s of stmts) {
-      if (ts.isVariableStatement(s)) for (const d of s.declarationList.declarations) bindingNames(d.name, out);
-      if ((ts.isFunctionDeclaration(s) || ts.isClassDeclaration(s)) && s.name) out.add(s.name.text);
-    }
-    if ((ts.isForStatement(node) || ts.isForOfStatement(node) || ts.isForInStatement(node)) && node.initializer &&
-      ts.isVariableDeclarationList(node.initializer)) {
-      for (const d of node.initializer.declarations) bindingNames(d.name, out);
-    }
-    return out;
-  };
-  const refersToTopLevel = (id: ts.Identifier, shadowed: Set<string>): boolean => !shadowed.has(id.text);
-  const staticText = (arg: ts.Expression | undefined, shadowed: Set<string>): string | null => {
+function extractFromSourceFile(sf: ts.SourceFile, checker: ts.TypeChecker, into: Emits): void {
+  const path = sf.fileName;
+  const staticText = (arg: ts.Expression | undefined): string | null => {
     if (!arg) return null;
     if (ts.isStringLiteral(arg) || ts.isNoSubstitutionTemplateLiteral(arg)) return arg.text;
     if (ts.isTemplateExpression(arg)) {
       let out = arg.head.text;
       for (const span of arg.templateSpans) {
-        if (!ts.isIdentifier(span.expression) || !refersToTopLevel(span.expression, shadowed)) return null;
-        const v = constStrings.get(span.expression.text);
-        if (v === undefined) return null;
+        if (!ts.isIdentifier(span.expression)) return null;
+        const v = topLevelConstString(declarationOf(checker, span.expression));
+        if (v === null) return null;
         out += v + span.literal.text;
       }
       return out;
     }
     return null;
   };
-  const visit = (node: ts.Node, shadowed: Set<string>): void => {
-    const own = node === sf ? new Set<string>() : declaredIn(node);
-    const scope = own.size > 0 ? new Set([...shadowed, ...own]) : shadowed;
+  const visit = (node: ts.Node): void => {
     if (ts.isCallExpression(node)) {
-      const text = staticText(node.arguments[0], scope);
+      const text = staticText(node.arguments[0]);
       const callee = node.expression;
       if (
         text !== null &&
         ts.isPropertyAccessExpression(callee) &&
         ts.isIdentifier(callee.expression) &&
-        loggerBindings.has(callee.expression.text) &&
-        refersToTopLevel(callee.expression, scope) &&
-        (callee.name.text === 'warn' || callee.name.text === 'error')
+        (callee.name.text === 'warn' || callee.name.text === 'error') &&
+        isImportOf(declarationOf(checker, callee.expression), path, 'lib/logger', 'logger')
       ) {
-        tags.add(text);
+        into.tags.add(text);
       }
-      if (text !== null && ts.isIdentifier(callee) && respondBindings.has(callee.text) && refersToTopLevel(callee, scope)) {
-        respondPrefixes.add(text);
+      if (
+        text !== null &&
+        ts.isIdentifier(callee) &&
+        isImportOf(declarationOf(checker, callee), path, 'lib/relay/relayRoute', 'makeRespond')
+      ) {
+        into.respondPrefixes.add(text);
       }
     }
-    ts.forEachChild(node, (child) => visit(child, scope));
+    ts.forEachChild(node, visit);
   };
-  visit(sf, new Set());
-  return { tags, respondPrefixes };
+  visit(sf);
 }
 
-// app/lib/components/hooks の全ファイルから集める。
+function extractEmits(path: string, source: string): Emits {
+  const program = makeProgram(new Map([[path, source]]));
+  const into: Emits = { tags: new Set(), respondPrefixes: new Set() };
+  extractFromSourceFile(program.getSourceFile(path)!, program.getTypeChecker(), into);
+  return into;
+}
+
+// app/lib/components/hooks の全ファイルを 1 つの Program にして集める (checker は 1 つ・binder はファイルごと)。
 function collectLoggerLiteralTags(): Emits {
-  const tags = new Set<string>();
-  const respondPrefixes = new Set<string>();
+  const files = new Map<string, string>();
   for (const root of ['app', 'lib', 'components', 'hooks']) {
-    const files = readdirSync(root, { recursive: true }).filter(
+    const names = readdirSync(root, { recursive: true }).filter(
       (f): f is string => typeof f === 'string' && /\.(?:ts|tsx|mjs|js)$/.test(f),
     );
-    for (const f of files) {
+    for (const f of names) {
       const path = join(root, f);
-      const e = extractEmits(path, readFileSync(path, 'utf8'));
-      for (const t of e.tags) tags.add(t);
-      for (const p of e.respondPrefixes) respondPrefixes.add(p);
+      files.set(path, readFileSync(path, 'utf8'));
     }
   }
-  return { tags, respondPrefixes };
+  const program = makeProgram(files);
+  const checker = program.getTypeChecker();
+  const into: Emits = { tags: new Set(), respondPrefixes: new Set() };
+  for (const path of files.keys()) extractFromSourceFile(program.getSourceFile(path)!, checker, into);
+  return into;
 }
 
 // 動的な tag は実配線で確かめる: route が呼ぶ makeRespond(<AST から取った実引数の prefix>) に各 RelayResult を
@@ -453,6 +461,18 @@ describe('setup-sentry-alerts: emit 抽出器 (extractEmits) は lib/logger の 
     expect(tagsOf('lib/x.ts', head + "function f() { const logger = { warn(_m: string) {} }; logger.warn('shadow.local'); }")).toEqual([]);
     expect(tagsOf('lib/x.ts', head + "function f() { try { throw 0; } catch (logger) { (logger as any).warn('shadow.catch'); } }")).toEqual([]);
     expect(tagsOf('lib/x.ts', head + "function f({ logger }: { logger: { warn(m: string): void } }) { logger.warn('shadow.destructure'); }")).toEqual([]);
+    // var は関数スコープ: ブロックの外側でも同じ関数内なら隠す。
+    expect(tagsOf('lib/x.ts', head + "function f() { { var logger = { warn(_m: string) {} }; } logger.warn('shadow.var'); }")).toEqual([]);
+    expect(tagsOf('lib/x.ts', head + "{ var logger = { warn(_m: string) {} }; }\nlogger.warn('shadow.var.toplevel');")).toEqual([]);
+    // switch の case 節はスコープを共有する: 別の case の宣言も隠す。
+    expect(
+      tagsOf('lib/x.ts', head + "function f(k: number) { switch (k) { case 1: { break; } case 2: const logger = { warn(_m: string) {} }; break; case 3: logger.warn('shadow.case'); } }"),
+    ).toEqual([]);
+    // 名前付き class 式の名前は class 本体の中で有効。
+    expect(
+      tagsOf('lib/x.ts', head + "const C = class logger { static warn(_m: string) {} static run() { logger.warn('shadow.classexpr'); } };"),
+    ).toEqual([]);
+    expect(tagsOf('lib/x.ts', head + "class logger { static warn(_m: string) {} static run() { logger.warn('shadow.classdecl'); } }")).toEqual([]);
     // 隠されていない入れ子の関数からの呼び出しは数える。
     expect(tagsOf('lib/x.ts', head + "function f() { function g() { logger.warn('nested.ok'); } g(); }")).toEqual(['nested.ok']);
     // 別のスコープで同名を宣言しても、その外側の呼び出しには影響しない。
@@ -588,7 +608,23 @@ describe('setup-sentry-alerts: planRules / formatPlan (dry-run の出力を固�
     const stored = sentryStored(buildRulePayload(rule, 'mainnet'), '3');
     stored.conditions![0] = { ...stored.conditions![0], comparisonType: 'percent', comparisonInterval: '1d' };
     const plan = planRules([stored], RULES, 'mainnet');
-    expect(plan.update[0]?.changes).toEqual(['conditions EventFrequencyCondition → EventFrequencyCondition']);
+    expect(plan.update[0]?.changes).toEqual(['comparisonType percent → count', 'comparisonInterval 1d → (none)']);
+  });
+
+  it('閾値と比較種別が同時に変わるときも、比較種別・比較間隔の変更を計画に出す (threshold だけで隠さない・Codex P3)', () => {
+    const rule = RULES.find((r) => r.eventTags[0] === 'history.load.unreadable-entries-preserved')!;
+    const stored = sentryStored(buildRulePayload(rule, 'mainnet'), '6');
+    stored.conditions![0] = { ...stored.conditions![0], value: 100, comparisonType: 'percent', comparisonInterval: '1d' };
+    const plan = planRules([stored], RULES, 'mainnet');
+    expect(plan.update[0]?.changes).toEqual([
+      'threshold 100 → 10',
+      'comparisonType percent → count',
+      'comparisonInterval 1d → (none)',
+    ]);
+    // value / interval 以外が同じなら (閾値だけの変更) 詳細差分は出ない。
+    const onlyValue = sentryStored(buildRulePayload(rule, 'mainnet'), '6');
+    onlyValue.conditions![0] = { ...onlyValue.conditions![0], value: 100 };
+    expect(planRules([onlyValue], RULES, 'mainnet').update[0]?.changes).toEqual(['threshold 100 → 10']);
   });
 
   it('filter のキー順が違っても (match は明示) 同じ filter (Codex P3)', () => {
@@ -684,6 +720,50 @@ describe('setup-sentry-alerts: planRules / formatPlan (dry-run の出力を固�
       for (const c of plan.create) {
         expect(c.payload.actions).toEqual([{ id: 'sentry.rules.actions.notify_event.NotifyEventAction' }]);
       }
+    });
+  });
+
+  describe('無効化 (status=disabled) 中の rule は既定で更新しない (PUT は disabled を active に戻す・Codex P2)', () => {
+    const rule = RULES.find((r) => r.eventTags[0] === 'history.load.unreadable-entries-preserved')!;
+    const disabled = (): ExistingRule => {
+      const r = sentryStored(buildRulePayload(rule, 'mainnet'), '8');
+      r.conditions![0] = { ...r.conditions![0], value: 100 };
+      return { ...r, status: 'disabled' };
+    };
+
+    it('差分があっても update に入れず skippedDisabled に出す (計画に「無効化中のため更新しない」)', () => {
+      const plan = planRules([disabled()], RULES, 'mainnet');
+      expect(plan.update).toEqual([]);
+      expect(plan.unchanged).toEqual([]);
+      expect(plan.skippedDisabled).toEqual([
+        { id: '8', name: 'OpenPay: history.load.unreadable-entries-preserved spike', changes: ['threshold 100 → 10'] },
+      ]);
+      const lines = formatPlan(plan, 'mainnet');
+      expect(lines[0]).toBe(
+        `[setup-sentry-alerts] plan (environment=mainnet): create ${RULES.length - 1} / update 0 / unchanged 0 / retire 0 / disabled (更新しない) 1`,
+      );
+      expect(lines).toContain(
+        '  ! skip    OpenPay: history.load.unreadable-entries-preserved spike (id=8): 無効化中のため更新しない ' +
+          '(差分あり: threshold 100 → 10・再有効化して更新するには --include-disabled)',
+      );
+      expect(lines).toHaveLength(1 + RULES.length);
+    });
+
+    it('差分が無い無効化中の rule は unchanged のまま (再有効化もしない)', () => {
+      const same = { ...sentryStored(buildRulePayload(rule, 'mainnet'), '8'), status: 'disabled' };
+      const plan = planRules([same], RULES, 'mainnet');
+      expect(plan.unchanged).toHaveLength(1);
+      expect(plan.skippedDisabled).toEqual([]);
+    });
+
+    it('includeDisabled を明示したときだけ update に入り、計画に再有効化を明示する', () => {
+      const plan = planRules([disabled()], RULES, 'mainnet', { includeDisabled: true });
+      expect(plan.skippedDisabled).toEqual([]);
+      expect(plan.update[0]).toMatchObject({ id: '8', reenable: true, changes: ['threshold 100 → 10'] });
+      expect(formatPlan(plan, 'mainnet')).toContain(
+        '  ~ update  OpenPay: history.load.unreadable-entries-preserved spike (id=8): threshold 100 → 10 ' +
+          '[actions 保持: NotifyEventAction] ※無効化中 → PUT で再有効化される (--include-disabled)',
+      );
     });
   });
 
@@ -904,6 +984,25 @@ describe('setup-sentry-alerts: main (fetch mock 経由の挙動検証)', () => {
     expect(calls()).toEqual([['GET', 'https://sentry.io/api/0/projects/test-org/test-project/rules/']]);
     expect(plan.update).toEqual([]);
     expect(plan.unchanged).toHaveLength(RULES.length);
+  });
+
+  it('無効化中の rule には PUT を送らず、--include-disabled のときだけ送る', async () => {
+    const rule = RULES.find((r) => r.eventTags[0] === 'history.load.unreadable-entries-preserved')!;
+    const stored = sentryStored(buildRulePayload(rule, 'mainnet'), '8');
+    stored.conditions![0] = { ...stored.conditions![0], value: 100 };
+    const existing = RULES.map((r, i) => (r === rule ? { ...stored, status: 'disabled' } : sentryStored(buildRulePayload(r, 'mainnet'), String(i))));
+    fetchSpy.mockImplementation(async (_url, init) => {
+      if (init?.method === 'PUT') return new Response(JSON.stringify({ id: '8' }), { status: 200 });
+      return new Response(JSON.stringify(existing), { status: 200 });
+    });
+    const mod = await import('../../scripts/setup-sentry-alerts.mjs');
+    const plan = await mod.main([]);
+    expect(calls().map(([m]) => m)).toEqual(['GET']);
+    expect(plan.skippedDisabled.map((s) => s.id)).toEqual(['8']);
+    fetchSpy.mockClear();
+    const plan2 = await mod.main(['--include-disabled']);
+    expect(calls().map(([m, url]) => `${m} ${url.split('/rules/')[1] ?? ''}`)).toEqual(['GET ', 'PUT 8/']);
+    expect(plan2.update.map((u) => u.id)).toEqual(['8']);
   });
 
   it('--dry-run は GET だけで計画を出し、書き込みを一切しない', async () => {

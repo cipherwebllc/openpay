@@ -1040,6 +1040,8 @@ operator demo の Gateway total は API の預入残高であり、経路の利�
       Dashboard で
 - [ ] `retire` に出た rule (発火元が無くなったもの・`RETIRED_RULE_NAMES`) は script が削除しない
       ので Sentry Dashboard → Alerts で手動削除
+- [ ] Dashboard で無効化 (disabled) 中の rule は既定では更新しない (PUT は再有効化して止めていた通知を
+      再開するため)。計画の `! skip` を見て、再有効化してよいものだけ `--include-disabled` で更新
 - [ ] Sentry Dashboard → Alerts で `RULES` と同数の rule・environment=mainnet を目視確認
 
 **threshold の考え方** (2026-10-10 第 7 回レビュー E6 で較正):
