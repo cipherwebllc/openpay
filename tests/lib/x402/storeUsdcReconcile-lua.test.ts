@@ -60,7 +60,7 @@ import {
   getStoreUsdcIntent, markStoreUsdcIndeterminate, parseStoreUsdcIntent,
   readSettledStoreUsdcAccess, reconcilePendingStoreUsdcPurchases, reconcileStoreUsdcIntent,
   storeUsdcAuthorizationHash, storeUsdcIntentKey, storeUsdcPendingKey,
-  STORE_USDC_RECONCILE_MAX_REWINDS, STORE_USDC_RECONCILE_RETRY_MS,
+  STORE_USDC_RECONCILE_MAX_DEFERRED, STORE_USDC_RECONCILE_RETRY_MS,
 } from '@/lib/x402/storeUsdcIntent';
 import { STORE_USDC_ADDRESS, verifyStoreUsdcOnchain, type StoreUsdcPublicClient } from '@/lib/x402/storeUsdcOnchain';
 
@@ -69,6 +69,8 @@ const CHECKED_AT = NOW + 200_000;
 const SALT = `0x${'33'.repeat(32)}` as Hex;
 const OLD = `0x${'44'.repeat(32)}` as Hex;
 const TX = `0x${'55'.repeat(32)}` as Hex;
+// 第 3 の候補 (同じ nonce のログに現れるが確定しない tx)。
+const MID = `0x${'66'.repeat(32)}` as Hex;
 const BLOCK_HASH = `0x${'88'.repeat(32)}` as Hex;
 // 旧フォークのブロック hash (同じ番号の正規ブロックは BLOCK_HASH)。
 const FORK_HASH = `0x${'99'.repeat(32)}` as Hex;
@@ -282,8 +284,8 @@ describe('USDC reconciliation with real Lua and receipt verification', () => {
   });
 
   // 'canonical' (正規ブロックが取れて hash が違う = 旧フォークと確定) は一時障害ではなく無効な候補として飛ばす
-  // (下の「advances past ...」)。保留して巻き戻すのは正規と一致する finality 未到達・receipt 未取得・照合不能だけ。
-  it.each(['receipt', 'finality', 'rpc_unavailable', 'claim'] as const)('retries the candidate page after transient %s failure even with later pages and a growing daily head', async (failure) => {
+  // (下の「advances past ...」)。保留候補に持つのは正規と一致する finality 未到達・receipt 未取得・照合不能・読み取り障害だけ。
+  it.each(['receipt', 'finality', 'rpc_unavailable', 'claim'] as const)('keeps the candidate deferred after transient %s failure and re-verifies it while the daily head outruns the scan', async (failure) => {
     const intent = await active();
     const client = chain(intent.nonce, { latest: 50_090n, eventBlock: 2_100n });
     if (failure === 'receipt') {
@@ -300,14 +302,16 @@ describe('USDC reconciliation with real Lua and receipt verification', () => {
     expect(await reconcileStoreUsdcIntent(SALT, { now: CHECKED_AT, client })).toEqual({ ok: true, state: 'pending' });
     expect(client.getLogs).toHaveBeenCalledTimes(20);
     expect(client.getLogs).toHaveBeenLastCalledWith(expect.objectContaining({ fromBlock: 38_090n, toBlock: 40_089n }));
-    expect(await getStoreUsdcIntent(SALT)).toMatchObject({ state: 'indeterminate', reconcileFromBlock: '2090', nextReconcileAt: CHECKED_AT + STORE_USDC_RECONCILE_RETRY_MS });
+    // 確定しない候補は保留候補 (cursor と別の可変メタ) に持ち、cursor は前進する (巻き戻さない・Codex 5 回目 P2)。
+    expect(await getStoreUsdcIntent(SALT)).toMatchObject({ state: 'indeterminate', reconcileFromBlock: '40090', reconcileDeferred: [TX], nextReconcileAt: CHECKED_AT + STORE_USDC_RECONCILE_RETRY_MS });
     expect(rawIntent().txHash).toBeUndefined();
 
     // Daily Base head growth exceeds the per-run 40k scan budget; recovery must not depend on wrapping.
     vi.mocked(client.getLogs).mockClear();
     vi.mocked(client.getBlockNumber).mockResolvedValue(93_290n);
     expect(await reconcileStoreUsdcIntent(SALT, { now: CHECKED_AT + 86_400_000, client })).toEqual({ ok: true, state: 'settled' });
-    expect(client.getLogs).toHaveBeenNthCalledWith(1, expect.objectContaining({ fromBlock: 2_090n, toBlock: 4_089n }));
+    // 保留候補は走査の前に再検証されるので、ログを取り直さずに確定する。
+    expect(client.getLogs).not.toHaveBeenCalled();
     await expectSettled();
   });
 
@@ -332,16 +336,16 @@ describe('USDC reconciliation with real Lua and receipt verification', () => {
     await expectSettled();
   });
 
-  // 先のページの候補 OLD は receipt 未取得 (保留)・後のページの TX は旧フォークと確定 (飛ばす) → 採用できる候補が無く、
-  // 再試行位置は保留した最も早いページ (90)。
-  it('retries from the earliest deferred candidate page when no candidate can be adopted', async () => {
+  // 先のページの候補 OLD は receipt 未取得 (保留候補に持つ)・後のページの TX は旧フォークと確定 (飛ばす・保留しない)
+  // → 採用できる候補が無く、cursor は前進・OLD だけが次回の再検証対象。
+  it('advances the cursor and keeps only the unconfirmed candidate deferred when no candidate can be adopted', async () => {
     const intent = await active();
     const client = chain(intent.nonce, { latest: 50_090n, eventBlock: 2_100n, bad: 'canonical' });
     mixedPages(client);
     expect(await reconcileStoreUsdcIntent(SALT, { now: CHECKED_AT, client })).toEqual({ ok: true, state: 'pending' });
     expect(client.getTransactionReceipt).toHaveBeenCalledWith({ hash: OLD });
     expect(client.getTransactionReceipt).toHaveBeenCalledWith({ hash: TX });
-    expect(await getStoreUsdcIntent(SALT)).toMatchObject({ state: 'indeterminate', reconcileFromBlock: '90', reconcileRewinds: 1, nextReconcileAt: CHECKED_AT + STORE_USDC_RECONCILE_RETRY_MS });
+    expect(await getStoreUsdcIntent(SALT)).toMatchObject({ state: 'indeterminate', reconcileFromBlock: '40090', reconcileDeferred: [OLD], nextReconcileAt: CHECKED_AT + STORE_USDC_RECONCILE_RETRY_MS });
     expect(rawIntent().txHash).toBeUndefined();
     expect(h.store!.strings.has(`store:own:${PAYER.toLowerCase()}:${ID}`)).toBe(false);
   });
@@ -354,9 +358,9 @@ describe('USDC reconciliation with real Lua and receipt verification', () => {
     }));
   }
 
-  // Codex 3 回目 P2 (1): 先のページの候補 (OLD・receipt 未取得で保留) の後、後の候補が読み取り障害で中断すると、
-  // 再試行位置が後のページ (2090) に進んで先の候補 (90) が再検証されない → 再試行位置は保留したページを優先する。
-  it.each(['rpc', 'claim'] as const)('keeps the earlier deferred page when a later candidate hits a transient %s failure', async (failure) => {
+  // Codex 3 回目 P2 (1) → 5 回目で保留候補に置き換え: 先の候補 (OLD・receipt 未取得) も後の候補 (TX・読み取り障害) も
+  // 保留候補として持ち、cursor は前進する。障害が解けた次回は走査の前に両候補を再検証して replacement で確定する。
+  it.each(['rpc', 'claim'] as const)('keeps both the unconfirmed and the read-failed candidate deferred when a later candidate hits a transient %s failure', async (failure) => {
     const intent = await active();
     const client = chain(intent.nonce, { latest: 50_090n, eventBlock: 2_100n });
     mixedPages(client);
@@ -374,11 +378,13 @@ describe('USDC reconciliation with real Lua and receipt verification', () => {
     expect(await reconcileStoreUsdcIntent(SALT, { now: CHECKED_AT, client })).toEqual({ ok: true, state: 'pending' });
     expect(client.getTransactionReceipt).toHaveBeenCalledWith({ hash: OLD });
     expect(client.getTransactionReceipt).toHaveBeenCalledWith({ hash: TX });
-    expect(await getStoreUsdcIntent(SALT)).toMatchObject({ state: 'indeterminate', reconcileFromBlock: '90', nextReconcileAt: CHECKED_AT + STORE_USDC_RECONCILE_RETRY_MS });
+    expect(await getStoreUsdcIntent(SALT)).toMatchObject({ state: 'indeterminate', reconcileFromBlock: '40090', reconcileDeferred: [OLD, TX], nextReconcileAt: CHECKED_AT + STORE_USDC_RECONCILE_RETRY_MS });
     expect(rawIntent().txHash).toBeUndefined();
-    // 障害が解けた次回は、保留したページから両候補を見直して replacement で確定する。
+    // 障害が解けた次回は、走査の前に保留候補を再検証して replacement で確定する (ログは取り直さない)。
     failCanonicalLookup = false;
+    vi.mocked(client.getLogs).mockClear();
     expect(await reconcileStoreUsdcIntent(SALT, { now: CHECKED_AT + 30_000, client })).toEqual({ ok: true, state: 'settled' });
+    expect(client.getLogs).not.toHaveBeenCalled();
     await expectSettled();
   });
 
@@ -405,7 +411,7 @@ describe('USDC reconciliation with real Lua and receipt verification', () => {
     expect(await reconcileStoreUsdcIntent(SALT, { now: CHECKED_AT, client })).toEqual({ ok: true, state: 'pending' });
     expect(await getStoreUsdcIntent(SALT)).toMatchObject({ reconcileFromBlock: '40090' });
     expect(rawIntent().txHash).toBeUndefined();
-    expect(rawIntent().reconcileRewinds).toBeUndefined();
+    expect(rawIntent().reconcileDeferred).toBeUndefined();
   });
 
   // Codex 4 回目 P2 (1) の反例: 保存済みの旧 receipt が block 101、safe=100 / latest=101 で、block 101 の正規照合だけが
@@ -454,39 +460,156 @@ describe('USDC reconciliation with real Lua and receipt verification', () => {
     await expectSettled();
   });
 
-  // 保留 (正規と一致するが receipt 未取得等) による同じページへの巻き戻しは上限回数まで。超えたらその回は走査の続きへ
-  // 前進し (採否は pending のまま)、cursor はいずれ latest を越えて anchor へ戻るので候補を見失わない。
-  it('rewinds to a deferred page at most the configured number of times, then advances the cursor', async () => {
-    const intent = await active();
-    const client = chain(intent.nonce, { latest: 50_090n, eventBlock: 100n });
-    let receiptMissing = true;
+  // 候補の receipt が読めない間だけ失敗する (省略時は常に読める) 受け取り口。
+  function receiptGate(client: StoreUsdcPublicClient, missing: () => boolean) {
     const receipt = vi.mocked(client.getTransactionReceipt).getMockImplementation()!;
     vi.mocked(client.getTransactionReceipt).mockImplementation(async (args) => {
-      if (receiptMissing) throw new Error('receipt missing');
+      if (missing()) throw new Error('receipt missing');
       return receipt(args);
     });
-    for (let run = 1; run <= STORE_USDC_RECONCILE_MAX_REWINDS; run += 1) {
-      expect(await reconcileStoreUsdcIntent(SALT, { now: CHECKED_AT + run * 30_000, client })).toEqual({ ok: true, state: 'pending' });
-      expect(await getStoreUsdcIntent(SALT)).toMatchObject({ state: 'indeterminate', reconcileFromBlock: '90', reconcileRewinds: run });
+  }
+
+  // Codex 5 回目 P2 (1) の再現: 保存 hash なし・anchor 90・正しい支払いが block 100・receipt は最初の 4 回だけ取得不能・
+  // head は 50,090 から 1 日 43,200 ずつ伸び (走査は 1 回 40,000)・照合は 1 日 1 回。巻き戻しに上限を置いて前進させると、
+  // receipt が戻っても cursor は head に追いつかず anchor へも戻らない → 保留候補は cursor と独立に毎回再検証する。
+  it('re-verifies a deferred candidate every run after the cursor advanced, even when the head outruns the daily scan', async () => {
+    const intent = await active();
+    const client = chain(intent.nonce, { latest: 50_090n, eventBlock: 100n });
+    let head = 50_090n;
+    vi.mocked(client.getBlockNumber).mockImplementation(async () => head);
+    let day = 1;
+    receiptGate(client, () => day <= 4);
+    for (; day <= 4; day += 1) {
+      expect(await reconcileStoreUsdcIntent(SALT, { now: CHECKED_AT + day * 86_400_000, client })).toEqual({ ok: true, state: 'pending' });
+      expect(rawIntent().txHash).toBeUndefined();
+      head += 43_200n;
     }
-    expect(await reconcileStoreUsdcIntent(SALT, { now: CHECKED_AT + 4 * 30_000, client })).toEqual({ ok: true, state: 'pending' });
-    expect(await getStoreUsdcIntent(SALT)).toMatchObject({ state: 'indeterminate', reconcileFromBlock: '40090' });
-    expect(rawIntent().reconcileRewinds).toBeUndefined();
+    const afterOutage = rawIntent();
+    // receipt が戻った: 当該 tx を直接検証すると confirmed。
+    expect(await verifyStoreUsdcOnchain({ intent: { ...intent, payer: PAYER }, txHash: TX, client })).toMatchObject({ ok: true, state: 'confirmed' });
+    vi.mocked(client.getLogs).mockClear();
+    expect(await reconcileStoreUsdcIntent(SALT, { now: CHECKED_AT + day * 86_400_000, client })).toEqual({ ok: true, state: 'settled' });
+    await expectSettled();
+    // cursor は毎回 40,000 ずつ前進し (巻き戻さない)、TX は保留候補として持ち越され、走査の前に再検証されて確定した。
+    expect(afterOutage).toMatchObject({ reconcileFromBlock: '160090', reconcileDeferred: [TX] });
+    expect(client.getLogs).not.toHaveBeenCalled();
+  });
+
+  // Codex 5 回目 P2 (2) の再現の fixture: block 100 の候補 OLD は receipt 取得不能・block 2,100 の別候補 MID は正規照合の
+  // RPC 障害 (高さは足りている = 読み取り障害)・正しい replacement TX は 1 回の走査上限 (90..40,089) より先の block 42,100。
+  function replacementBeyondFailures(nonce: Hex) {
+    const client = chain(nonce, { latest: 50_090n, eventBlock: 42_100n });
+    vi.mocked(client.getLogs).mockImplementation(async ({ fromBlock, toBlock }) => {
+      if (100n >= fromBlock && 100n <= toBlock) return [{ transactionHash: OLD }];
+      if (2_100n >= fromBlock && 2_100n <= toBlock) return [{ transactionHash: MID }];
+      if (42_100n >= fromBlock && 42_100n <= toBlock) return [{ transactionHash: TX }];
+      return [];
+    });
+    const receipt = vi.mocked(client.getTransactionReceipt).getMockImplementation()!;
+    vi.mocked(client.getTransactionReceipt).mockImplementation(async (args) => {
+      if (args.hash === OLD) throw new Error('receipt missing');
+      return { ...(await receipt(args)), blockNumber: args.hash === MID ? 2_100n : 42_100n };
+    });
+    vi.mocked(client.getBlock).mockImplementation(async (args) => {
+      if ('blockNumber' in args) {
+        if (args.blockNumber === 2_100n) throw new Error('canonical lookup unavailable');
+        return { number: args.blockNumber, hash: BLOCK_HASH };
+      }
+      return { number: 50_090n };
+    });
+    return client;
+  }
+
+  // 照合を最大 runs 回くり返し、各回の結果と各回の後の intent を返す (settled で止める)。
+  async function reconcileRuns(client: StoreUsdcPublicClient, runs: number, options: { deadline?: () => number } = {}) {
+    const results: string[] = [];
+    const snapshots: Record<string, unknown>[] = [];
+    for (let run = 0; run < runs; run += 1) {
+      const result = await reconcileStoreUsdcIntent(SALT, {
+        now: CHECKED_AT + run * 30_000, client, ...(options.deadline ? { deadline: options.deadline() } : {}),
+      });
+      results.push(result.ok ? result.state : result.reason);
+      snapshots.push(rawIntent());
+      if (result.ok && result.state === 'settled') break;
+    }
+    return { results, snapshots };
+  }
+
+  // Codex 5 回目 P2 (2) の再現: 後の候補 (MID) の読み取り障害で候補ループを中断して先に保留したページ (90) へ戻ると、
+  // 巻き戻し上限の回数計算を通らず cursor が 90 のまま (8 回続けても replacement を一度も検証しない) → 読み取り障害の
+  // 候補も保留候補に持ち、残りの候補を検証してから共通の処理 (cursor の前進) へ進む。
+  it('keeps read-failed candidates deferred and still reaches a replacement beyond the page budget', async () => {
+    const intent = await active();
+    const client = replacementBeyondFailures(intent.nonce);
+    const { results, snapshots } = await reconcileRuns(client, 8);
+    expect(results).toEqual(['pending', 'settled']);
+    expect(client.getTransactionReceipt).toHaveBeenCalledWith({ hash: TX });
+    await expectSettled();
+    expect(snapshots[0]).toMatchObject({ state: 'indeterminate', reconcileFromBlock: '40090', reconcileDeferred: [OLD, MID] });
+    expect(snapshots[0].txHash).toBeUndefined();
+  });
+
+  // 予算付き走査 (#788: 候補が出たページで止めて照合) と組み合わせても収束する: 1 回目は OLD のページ・2 回目は MID の
+  // ページで止まり、それぞれ保留候補に持って cursor を次のページへ進める。3 回目は保留候補を再検証した後の 20 ページ目で
+  // replacement に届いて確定する (保留ページへ戻す設計では 2,090 に留まり続けた)。
+  it('converges with the budgeted scan that stops at each candidate page', async () => {
+    const intent = await active();
+    const client = replacementBeyondFailures(intent.nonce);
+    const { results, snapshots } = await reconcileRuns(client, 10, { deadline: () => Date.now() + 60_000 });
+    expect(results).toEqual(['pending', 'pending', 'settled']);
+    await expectSettled();
+    expect(snapshots[0]).toMatchObject({ reconcileFromBlock: '2090', reconcileDeferred: [OLD] });
+    expect(snapshots[1]).toMatchObject({ reconcileFromBlock: '4090', reconcileDeferred: [OLD, MID] });
+    expect(vi.mocked(client.getLogs).mock.calls.map(([args]) => args.fromBlock)).toEqual([
+      90n, 2_090n, ...Array.from({ length: 20 }, (_, page) => 4_090n + BigInt(page) * 2_000n),
+    ]);
+  });
+
+  // 保留候補が旧フォークと確定 (正規ブロックの hash が違う) したら列から外す (再検証を続けない・採らない)。
+  it('drops a deferred candidate once it is conclusively on a stale fork', async () => {
+    const intent = await active();
+    patchIntent({ reconcileDeferred: [OLD] });
+    const client = chain(intent.nonce, { latest: 50_090n, eventBlock: 42_100n, old: 'noncanonical' });
+    expect(await reconcileStoreUsdcIntent(SALT, { now: CHECKED_AT, client })).toEqual({ ok: true, state: 'pending' });
+    expect(client.getTransactionReceipt).toHaveBeenCalledWith({ hash: OLD });
+    expect(rawIntent()).toMatchObject({ state: 'indeterminate', reconcileFromBlock: '40090' });
+    expect(rawIntent().reconcileDeferred).toBeUndefined();
     expect(rawIntent().txHash).toBeUndefined();
-    // 走査が latest を越えて anchor へ戻った後、receipt が読めるようになれば確定する。
-    receiptMissing = false;
-    expect(await reconcileStoreUsdcIntent(SALT, { now: CHECKED_AT + 5 * 30_000, client })).toEqual({ ok: true, state: 'pending' });
-    expect(await getStoreUsdcIntent(SALT)).toMatchObject({ reconcileFromBlock: '90' });
-    expect(await reconcileStoreUsdcIntent(SALT, { now: CHECKED_AT + 6 * 30_000, client })).toEqual({ ok: true, state: 'settled' });
+  });
+
+  // 保留候補の列が上限まで埋まっていると新しい確定前の候補は列に入れられない → 見失わないよう cursor をその候補のページに
+  // 留める (前進しない)。receipt が読めるようになった回に同じページから再発見して確定する。
+  it('keeps the cursor at the page of a candidate that overflows the deferred list', async () => {
+    const intent = await active();
+    const stuck = Array.from({ length: STORE_USDC_RECONCILE_MAX_DEFERRED }, (_, i) => `0x${(i + 1).toString(16).padStart(64, '0')}` as Hex);
+    patchIntent({ reconcileDeferred: stuck });
+    const client = chain(intent.nonce, { latest: 50_090n, eventBlock: 2_100n });
+    let txMissing = true;
+    const receipt = vi.mocked(client.getTransactionReceipt).getMockImplementation()!;
+    vi.mocked(client.getTransactionReceipt).mockImplementation(async (args) => {
+      if (stuck.includes(args.hash) || (args.hash === TX && txMissing)) throw new Error('receipt missing');
+      return receipt(args);
+    });
+    expect(await reconcileStoreUsdcIntent(SALT, { now: CHECKED_AT, client })).toEqual({ ok: true, state: 'pending' });
+    expect(rawIntent()).toMatchObject({ state: 'indeterminate', reconcileFromBlock: '2090', reconcileDeferred: stuck });
+    txMissing = false;
+    expect(await reconcileStoreUsdcIntent(SALT, { now: CHECKED_AT + 30_000, client })).toEqual({ ok: true, state: 'settled' });
     await expectSettled();
   });
 
-  it('rejects a malformed rewind counter as corrupt without touching the immutable binding', async () => {
+  it.each([
+    ['not a list', TX],
+    ['empty', []],
+    ['not a tx hash', ['nope']],
+    ['upper-case hash', [`0x${'AB'.repeat(32)}`]],
+    ['duplicate', [TX, TX]],
+    ['too many', Array.from({ length: STORE_USDC_RECONCILE_MAX_DEFERRED + 1 }, (_, i) => `0x${(i + 1).toString(16).padStart(64, '0')}`)],
+  ])('rejects a malformed deferred list (%s) as corrupt without touching the immutable binding', async (_label, list) => {
     await active();
-    patchIntent({ reconcileRewinds: -1 });
+    patchIntent({ reconcileDeferred: list });
     expect(await getStoreUsdcIntent(SALT)).toBe('corrupt');
-    patchIntent({ reconcileRewinds: 2 });
-    expect(await getStoreUsdcIntent(SALT)).toMatchObject({ state: 'indeterminate', reconcileRewinds: 2 });
+    patchIntent({ reconcileDeferred: [TX] });
+    expect(await getStoreUsdcIntent(SALT)).toMatchObject({ state: 'indeterminate', reconcileDeferred: [TX] });
   });
 
   it.each([2_089n, 2_090n])('finds evidence at paging boundary %s', async (eventBlock) => {

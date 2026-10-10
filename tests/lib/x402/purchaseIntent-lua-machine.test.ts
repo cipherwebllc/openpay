@@ -2581,18 +2581,35 @@ describe('R4a differential reconcile traces (JPYC / USDC)', () => {
     }
   });
 
-  // 第 7 回レビュー B3: 新規候補の receipt 一時障害は両 rail とも候補のページ (12000) から再試行する
-  // (以前は JPYC だけ cursor を進めて証拠のページを飛ばしていた)。
-  it('a missing candidate receipt retries the first candidate page on both rails', async () => {
+  // 第 7 回レビュー B3: 新規候補の receipt 一時障害で両 rail とも証拠を飛ばさない (以前は JPYC だけ cursor を進めて証拠の
+  // ページを飛ばしていた)。JPYC は候補のページ (12000) から再試行する。USDC は候補を保留候補 (cursor と別の可変メタ) に
+  // 持って cursor を前進させ、次回は走査の前に再検証する (#776: 保留ページへ巻き戻す設計は、head が 1 回の走査量より
+  // 速く伸びると前進後に戻れず、読み取り障害の候補が巻き戻しの上限も迂回した)。
+  it('a missing candidate receipt keeps the evidence on both rails (JPYC: candidate page / USDC: deferred candidate)', async () => {
     for (const rail of rails) {
       const f = await fixture(rail);
       h.publicClient.getLogs.mockImplementation(async ({ fromBlock }) => fromBlock === 10_000n ? [] : [{ transactionHash: TX_HASH }]);
       h.publicClient.getTransactionReceipt.mockRejectedValue(new Error('missing receipt'));
       await f.run();
-      expect(f.stored().reconcileFromBlock).toBe('12000');
+      if (rail === 'jpyc') {
+        expect(f.stored().reconcileFromBlock).toBe('12000');
+      } else {
+        expect(f.stored()).toMatchObject({ reconcileFromBlock: '10000', reconcileDeferred: [TX_HASH] });
+      }
       expect(h.publicClient.getTransactionReceipt).toHaveBeenCalledTimes(1);
       expect(h.publicClient.getTransactionReceipt).toHaveBeenCalledWith({ hash: TX_HASH });
       expect(f.events.at(-1)).toEqual(pendingResult);
+      if (rail === 'usdc') {
+        // 次回は走査 (head) の前に保留候補の receipt を読み直し、走査で再び見つかっても同じ回には読み直さない。
+        h.publicClient.getTransactionReceipt.mockClear();
+        h.publicClient.getBlockNumber.mockClear();
+        await f.run(RECONCILE_NOW + 60_000);
+        expect(h.publicClient.getTransactionReceipt).toHaveBeenCalledTimes(1);
+        expect(h.publicClient.getTransactionReceipt).toHaveBeenCalledWith({ hash: TX_HASH });
+        expect(h.publicClient.getTransactionReceipt.mock.invocationCallOrder[0])
+          .toBeLessThan(h.publicClient.getBlockNumber.mock.invocationCallOrder[0]);
+        expect(f.stored()).toMatchObject({ reconcileDeferred: [TX_HASH] });
+      }
     }
   });
 

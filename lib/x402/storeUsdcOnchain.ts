@@ -210,7 +210,7 @@ async function hasRequiredFinality(
  * safe 到達や 15 confirmations を満たしたまま confirmed にできてしまう (第 7 回レビュー B6)。license の
  * reconcile (lib/license/reconcile.ts) と同じ照合を confirmed の前に置く。不一致は terminal にしない
  * (正当な購入を失敗化しない) — pending 'canonical' として返し、保存済み hash なら reconcile が同じ nonce の
- * replacement を正規チェーンで探し、候補ならそのページから再試行する。
+ * replacement を正規チェーンで探し、走査の候補なら採らずに飛ばす。
  */
 async function receiptIsCanonical(
   client: StoreUsdcPublicClient,
@@ -266,7 +266,7 @@ export async function verifyStoreUsdcOnchain(input: {
   if (canonical === 'unavailable') {
     // 高さが足りない receipt のブロックは、照合先のノードにまだ無いことがある (旧フォークか未到達か判別不能)
     // → 'unverified' (通常の finality 待ちとは別の理由・採らない・terminal にしない)。高さを満たしているのに
-    // 照会できないのは読み取り障害 → rpc_unavailable (呼び出し側がそのページから再試行)。
+    // 照会できないのは読み取り障害 → rpc_unavailable (呼び出し側は保留候補として次回も再検証する)。
     return finality
       ? { ok: false, reason: 'rpc_unavailable' }
       : { ok: true, state: 'pending', reason: 'unverified' };
