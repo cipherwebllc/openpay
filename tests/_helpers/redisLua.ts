@@ -378,6 +378,23 @@ export function dispatchRedisCommand(
     }
     case 'LLEN':
       return store.lists.get(key)?.length ?? 0;
+    case 'LPOS': {
+      // 先頭からの最初の一致位置 (RANK / COUNT / MAXLEN は未対応: 黙って無視して意味を取り違えない)。
+      if (args.length !== 2) throw new Error('LPOS: options are not supported by this harness');
+      requireType('list');
+      const index = (store.lists.get(key) ?? []).indexOf(args[1]);
+      return index === -1 ? false : index;
+    }
+    case 'LSET': {
+      if (args.length !== 3 || !/^-?\d+$/.test(args[1])) throw new Error('wrong number of arguments');
+      requireType('list');
+      const list = store.lists.get(key);
+      if (!list) throw new Error('no such key');
+      const index = Number(args[1]) < 0 ? list.length + Number(args[1]) : Number(args[1]);
+      if (index < 0 || index >= list.length) throw new Error('index out of range');
+      list[index] = args[2];
+      return { ok: 'OK' };
+    }
     case 'LPUSH': {
       const list = store.lists.get(key) ?? [];
       for (const value of args.slice(1)) list.unshift(value);
@@ -566,17 +583,49 @@ export async function closeRedisLuaEngine(): Promise<void> {
  * lib/ の Lua 定数をそのまま実行する。KEYS/ARGV/redis/cjson を注入し、返り値を
  * Redis の Lua → RESP 規則で変換して返す (= kvEval の呼び元が受け取る形)。
  */
+// Redis の返り値を Upstash REST の result の形にする: nil (false) は null、status reply ({ok}) は文字列 ("OK" 等)。
+function restResult(reply: RedisReply): unknown {
+  if (reply === false) return null;
+  if (typeof reply === 'object' && !Array.isArray(reply) && 'ok' in reply) return reply.ok;
+  return reply;
+}
+
 /** Upstash REST の pipeline (POST /pipeline) の応答の形: 要素ごとに {result} か {error}。1 要素の失敗で他は止まらない。
- *  Lua の nil (false) は JSON の null。 */
+ *  単発の REST と同じく、Lua の nil (false) は JSON の null・status reply は文字列。 */
 export function runRedisPipeline(store: FakeRedisStore, steps: unknown[][]): ({ result: unknown } | { error: string })[] {
   return steps.map(([command, ...args]) => {
     try {
-      const reply = dispatchRedisCommand(store, String(command), args);
-      return { result: reply === false ? null : reply };
+      return { result: restResult(dispatchRedisCommand(store, String(command), args)) };
     } catch (e) {
       return { error: 'ERR ' + (e instanceof Error ? e.message : String(e)) };
     }
   });
+}
+
+/**
+ * 本物の lib/kv.ts が送る Upstash REST (fetch) を fake store に繋ぐ。EVAL は実 Lua、/pipeline は
+ * runRedisPipeline、それ以外の単発コマンドは dispatchRedisCommand。lib/kv.ts の組み立て (EVAL の KEYS 数・
+ * SET の EX/NX) ごと検査するため、kvEval を mock せずにこれを `vi.stubGlobal('fetch', ...)` に渡す。
+ * Upstash と同じく、コマンドのエラーは HTTP 400 + {error} で返す。
+ */
+export function fakeUpstashFetch(store: FakeRedisStore) {
+  return async (url: string | URL | Request, init?: RequestInit): Promise<Response> => {
+    const body = JSON.parse(String(init?.body)) as unknown[];
+    if (String(url).endsWith('/pipeline')) {
+      return Response.json(runRedisPipeline(store, body as unknown[][]));
+    }
+    const [command, ...args] = body;
+    try {
+      if (String(command).toUpperCase() === 'EVAL') {
+        const [script, keyCount, ...rest] = args.map(String);
+        const count = Number(keyCount);
+        return Response.json({ result: await runRedisLua(script, rest.slice(0, count), rest.slice(count), store) });
+      }
+      return Response.json({ result: restResult(dispatchRedisCommand(store, String(command), args)) });
+    } catch (e) {
+      return Response.json({ error: 'ERR ' + (e instanceof Error ? e.message : String(e)) }, { status: 400 });
+    }
+  };
 }
 
 export function runRedisLua(

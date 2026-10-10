@@ -10,6 +10,7 @@ import {
   closeRedisLuaEngine,
   createFakeRedisStore,
   dispatchRedisCommand,
+  fakeUpstashFetch,
   runRedisLua,
   type FakeRedisStore,
 } from './redisLua';
@@ -181,6 +182,27 @@ describe('fake store: リストコマンド', () => {
     call('LPUSH', 'l', 'a', 'b', 'c');
     call('LTRIM', 'l', '0', '-2');
     expect(store.lists.get('l')).toEqual(['c', 'b']);
+  });
+
+  it('LPOS は先頭からの最初の一致位置 / 無ければ false。option は黙って無視せず例外', () => {
+    call('LPUSH', 'l', 'x', 'b', 'a', 'b');
+    expect(call('LPOS', 'l', 'b')).toBe(0);
+    expect(call('LPOS', 'l', 'x')).toBe(3);
+    expect(call('LPOS', 'l', 'none')).toBe(false);
+    expect(call('LPOS', 'missing', 'b')).toBe(false);
+    expect(() => call('LPOS', 'l', 'b', 'RANK', '2')).toThrow();
+  });
+
+  it('LSET は位置の要素だけを置き換え、TTL を保つ。範囲外・未存在は例外で何も書かない', () => {
+    call('LPUSH', 'l', 'c', 'b', 'a');
+    call('EXPIRE', 'l', '60');
+    expect(call('LSET', 'l', '1', 'B')).toEqual({ ok: 'OK' });
+    expect(call('LSET', 'l', '-1', 'C')).toEqual({ ok: 'OK' });
+    expect(store.lists.get('l')).toEqual(['a', 'B', 'C']);
+    expect(store.getTtl('l')).toBe(60);
+    expect(() => call('LSET', 'l', '3', 'x')).toThrow('index out of range');
+    expect(() => call('LSET', 'missing', '0', 'x')).toThrow('no such key');
+    expect(store.lists.get('l')).toEqual(['a', 'B', 'C']);
   });
 });
 
@@ -562,5 +584,35 @@ describe('restore commands', () => {
     }
     expect(call('DBSIZE')).toBe(1);
     expect(call('GET', 'v')).toBe('original');
+  });
+});
+
+describe('fakeUpstashFetch: 本物の lib/kv.ts が送る REST を fake store に繋ぐ', () => {
+  const post = (body: unknown[], path = '') =>
+    fakeUpstashFetch(store)(`https://redis.example/${path}`, { method: 'POST', body: JSON.stringify(body) });
+
+  it('単発コマンドは Upstash の {result} 形 (nil は null・status reply は文字列)', async () => {
+    expect(await (await post(['SET', 'k', 'v', 'EX', '60', 'NX'])).json()).toEqual({ result: 'OK' });
+    expect(await (await post(['SET', 'k', 'w', 'NX'])).json()).toEqual({ result: null });
+    expect(await (await post(['GET', 'k'])).json()).toEqual({ result: 'v' });
+    expect(store.getTtl('k')).toBe(60);
+  });
+
+  it('EVAL は実 Lua で KEYS 数どおりに KEYS / ARGV を分け、pipeline は要素ごとに返す', async () => {
+    expect(await (await post(['EVAL', 'return {KEYS[1], ARGV[1], #KEYS, #ARGV}', '1', 'key', 'arg'])).json())
+      .toEqual({ result: ['key', 'arg', 1, 1] });
+    expect(await (await post([['INCR', 'n'], ['EXPIRE', 'n', '10', 'NX']], 'pipeline')).json())
+      .toEqual([{ result: 1 }, { result: 1 }]);
+  });
+
+  it('pipeline も要素ごとに Upstash の形 (status reply は文字列・nil は null・失敗はその要素だけ {error})', async () => {
+    expect(await (await post([['SET', 'k', 'v'], ['GET', 'missing'], ['NOPE', 'k'], ['GET', 'k']], 'pipeline')).json())
+      .toEqual([{ result: 'OK' }, { result: null }, { error: expect.stringMatching(/^ERR /) }, { result: 'v' }]);
+  });
+
+  it('コマンドの失敗は HTTP 400 + {error} (Upstash と同じ)', async () => {
+    const res = await post(['NOPE', 'k']);
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: expect.stringMatching(/^ERR /) });
   });
 });

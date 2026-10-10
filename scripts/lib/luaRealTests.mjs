@@ -48,4 +48,12 @@ export const LUA_REAL_TEST_FILES = [
   'tests/lib/x402/storeIndex-lua.test.ts',
   'tests/lib/x402/storeUsdcReconcile-lua.test.ts',
   'tests/scripts/kv-restore-lua.test.ts',
+  'tests/lib/x402/facilitatorReservation-lua.test.ts',
+  'tests/lib/paymentClaim-lua.test.ts',
+  'tests/lib/x402/vanillaResourceClaim-lua.test.ts',
+  'tests/lib/timedGrant-lua.test.ts',
+  'tests/lib/x402/storeEntitlement-lua.test.ts',
+  'tests/lib/x402/storeUsdcRateProvider-lua.test.ts',
+  'tests/app/api/order-notify-lua.test.ts',
+  'tests/lib/kvLpushAtomic-lua.test.ts',
 ];
