@@ -1,28 +1,16 @@
-import { Noto_Serif_JP, Zen_Maru_Gothic } from 'next/font/google';
+// @handle プロフィールの字体 (serif / rounded) を当てる class 名。字体本体は handleFonts.css の
+// @font-face (public/fonts/handle/ を self-host・unicode-range で分割) — next/font/google は build 時に
+// Google から CSS を取りに行き、取得失敗で build ごと落ちるため使わない。CSS はこの module を
+// import するルート (HandleProfile / HandleProfileBuilder) にだけ載る。
+import './handleFonts.css';
 import type { HandleFont } from '@/lib/handle';
-
-const serif = Noto_Serif_JP({
-  weight: ['400', '700'],
-  subsets: ['latin'],
-  display: 'swap',
-  preload: false,
-  fallback: ['Hiragino Mincho ProN', 'Yu Mincho', 'Georgia', 'serif'],
-});
-
-const rounded = Zen_Maru_Gothic({
-  weight: ['400', '700'],
-  subsets: ['latin'],
-  display: 'swap',
-  preload: false,
-  fallback: ['Hiragino Maru Gothic ProN', 'BIZ UDPGothic', 'system-ui', 'sans-serif'],
-});
 
 export function handleFontClass(font: HandleFont | undefined): string | undefined {
   switch (font) {
     case 'serif':
-      return serif.className;
+      return 'handle-font-serif';
     case 'rounded':
-      return rounded.className;
+      return 'handle-font-rounded';
     default:
       return undefined;
   }

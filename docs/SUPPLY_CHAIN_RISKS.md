@@ -55,6 +55,19 @@
 
 これらは root を fix すれば全て連鎖解消される。
 
+## 依存外で同梱している第三者ファイル
+
+npm 依存 (package.json / lockfile) には入れず、公式 npm レジストリから一時取得した中身の一部だけをリポに置いているもの。`npm audit` / `scripts/lockfile-gate.mjs` の対象外なので、入手元と更新手順をここで持つ。
+
+### @handle プロフィールの字体 (`public/fonts/handle/`)
+
+| 項目 | 値 |
+|---|---|
+| 入手元 | `@fontsource-variable/noto-serif-jp@5.3.0` (Noto Serif JP・可変 wght 軸) と `@fontsource/zen-maru-gothic@5.3.0`。どちらも OFL-1.1・`scripts` なし (2026-10 `npm view` で確認) |
+| 置いたもの | 前者の `wght.css`、後者の `400.css` / `700.css` が参照する woff2 だけ (計 368 本・約 10.7 MiB) と各 `LICENSE` (`OFL-*.txt`)。woff と他の weight は置かない |
+| 使い方 | `components/handleFonts.css` (unicode-range つき `@font-face`・生成物) を `components/handleFonts.ts` が import する。build 時に外部へ取りに行かない (旧 `next/font/google` は Google の応答が崩れると build ごと落ちた) |
+| 更新 | 空の作業ディレクトリで `npm pack <pkg>@<ver> --ignore-scripts` → `tar -xzf` (展開物のスクリプトは実行しない) → リポで `node scripts/gen-handle-fonts.mjs <noto-serif-jp の package/> <zen-maru-gothic の package/>`。版がディレクトリ名に入るので、版を上げると URL も変わり 1 年 immutable のキャッシュ (`next.config.mjs` の `/fonts/:path*`) とぶつからない。CSS と woff2 の過不足は `tests/lib/handleFonts.test.ts` が検査する |
+
 ## 監視と再評価方針
 
 ### 自動 (CI で running)

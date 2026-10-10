@@ -264,6 +264,16 @@ describe('next.config.mjs headers() — baseline and enforced CSP (C17)', () => 
     expect(csp.get('style-src')).toEqual(["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com']);
   });
 
+  it('caches the self-hosted fonts under /fonts/ for a year as immutable, and nothing else', async () => {
+    // public/fonts/handle/<font>-<版>/ は版を上げると URL が変わる (scripts/gen-handle-fonts.mjs)。
+    const font = await headersForPath('/fonts/handle/noto-serif-jp-5.3.0/noto-serif-jp-0-wght-normal.woff2');
+    expect(font.get('Cache-Control')).toBe('public, max-age=31536000, immutable');
+    expect(font.get('X-Content-Type-Options')).toBe('nosniff');
+    for (const path of ['/', '/ja/pay', '/ja/fonts', '/api/og/handle', '/icon-512.png']) {
+      expect((await headersForPath(path)).has('Cache-Control'), path).toBe(false);
+    }
+  });
+
   it('adds only origins from public RPC/DSN settings, never credentials, paths or query tokens', async () => {
     vi.stubEnv('NEXT_PUBLIC_BASE_RPC_URL', 'https://user:secret@rpc.example.test/v2/key?token=private#fragment');
     vi.stubEnv('NEXT_PUBLIC_SENTRY_DSN', 'https://public-key@o123.ingest.us.sentry.io/456');

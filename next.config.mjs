@@ -107,8 +107,8 @@ function enforcedCsp(frameAncestors) {
     // HandleProfile, storefronts, MobileOrderView and AccountingAffiliates accept
     // third-party HTTPS images. Their explicit referrerPolicy=no-referrer stays.
     "img-src 'self' https: data: blob:",
-    // components/handleFonts.ts uses next/font/google: fonts are self-hosted. WalletConnect modal の
-    // Google Fonts だけ外部 (観測で確認)。
+    // @handle の字体は public/fonts/handle/ の self-host (components/handleFonts.css)。WalletConnect
+    // modal の Google Fonts だけ外部 (観測で確認)。
     "font-src 'self' https://fonts.gstatic.com",
     // Cloudflare Web Analytics の beacon 送信先を含める。
     `connect-src 'self' https://cloudflareinsights.com ${[...new Set([...connectOrigins, ...configuredConnectOrigins()])].join(' ')}${isDev ? ' ws://localhost:* ws://127.0.0.1:*' : ''}`,
@@ -168,6 +168,13 @@ const nextConfig = {
         // route's stricter policy here too so the global default cannot leak a
         // sensitive delivery URL via a redirect's Referer (app/api/store/delivery).
         headers: [{ key: 'Referrer-Policy', value: 'no-referrer' }],
+      },
+      {
+        source: '/fonts/:path*',
+        // public/fonts/handle/ の self-host フォント。版をディレクトリ名に持ち、中身を変えるときは
+        // 新しいディレクトリに作り直す (scripts/gen-handle-fonts.mjs) ので 1 年 immutable で配る
+        // (public/ の既定は max-age=0 で、プロフィールを開くたびに数十本の再検証が走る)。
+        headers: [{ key: 'Cache-Control', value: 'public, max-age=31536000, immutable' }],
       },
       {
         source: '/:locale(ja|en)/tip/:path*',

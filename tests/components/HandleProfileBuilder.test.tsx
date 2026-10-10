@@ -291,12 +291,12 @@ describe('HandleProfileBuilder', () => {
     for (const [name, font] of [['明朝', 'serif'], ['丸ゴシック', 'rounded']] as const) {
       fireEvent.click(screen.getByRole('radio', { name }));
       expect(screen.getByRole('radio', { name })).toBeChecked();
-      expect(root()).toHaveClass(`font-${font}-jp`);
+      expect(root()).toHaveClass(`handle-font-${font}`);
       expect(root()).not.toHaveAttribute('style');
-      expect(mini).toHaveClass(`font-${font}-jp`);
+      expect(mini).toHaveClass(`handle-font-${font}`);
       expect((mini as HTMLElement).style.fontFamily).toBe('');
       const sample = screen.getByRole('radio', { name }).nextElementSibling!;
-      expect(sample).toHaveClass(`font-${font}-jp`);
+      expect(sample).toHaveClass(`handle-font-${font}`);
       expect(sample).not.toHaveAttribute('style');
       expect(payload().profile.font).toBe(font);
     }
