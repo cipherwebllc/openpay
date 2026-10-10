@@ -420,6 +420,26 @@ describe('USDC reconciliation with real Lua and receipt verification', () => {
     await expectSettled();
   });
 
+  // 保存済み hash は finalize に直接渡す (Codex 11 回目)。finalize の 'storage' は照合の読み取り障害 (高さは足りているのに
+  // 正規ブロックを照会できない = rpc_unavailable) も含むので、保存 hash の待ちが replacement の探索を止めないよう、同じ回で
+  // 探索へ進んで正規チェーンの replacement で確定する。
+  it('still searches for the replacement when finalizing the stored hash hits a read failure', async () => {
+    const intent = await active(OLD);
+    const client = chain(intent.nonce, { latest: 50_090n, eventBlock: 2_100n, old: 'noncanonical' });
+    splitReceiptBlocks(client);
+    vi.mocked(client.getBlock).mockImplementation(async (args) => {
+      if ('blockNumber' in args) {
+        if (args.blockNumber === 100n) throw new Error('canonical lookup unavailable');
+        return { number: args.blockNumber, hash: BLOCK_HASH };
+      }
+      return { number: 50_090n };
+    });
+    expect(await reconcileStoreUsdcIntent(SALT, { now: CHECKED_AT, client })).toEqual({ ok: true, state: 'settled' });
+    expect(client.getTransactionReceipt).toHaveBeenCalledWith({ hash: OLD });
+    expect(client.getLogs).toHaveBeenCalled();
+    await expectSettled();
+  });
+
   it.each(['amount', 'canonical'] as const)('advances past conclusively mismatched candidate evidence (%s)', async (bad) => {
     const intent = await active();
     const client = chain(intent.nonce, { latest: 50_090n, eventBlock: 2_100n, bad });
@@ -781,7 +801,7 @@ describe('USDC reconciliation with real Lua and receipt verification', () => {
     return clock;
   }
 
-  // これまでの Codex 再現 (6〜10 回目) を、絶対期限を守る client で回す。予算 25 秒の cron を最大 8 回くり返して、どれも
+  // これまでの Codex 再現 (6〜11 回目) を、絶対期限を守る client で回す。予算 25 秒の cron を最大 8 回くり返して、どれも
   // 有限回で確定する (誤った確定・失敗なし)。10 回目: 保存 hash OLD の receipt が 10 秒で timeout・持ち越した TX の照合に
   // receipt / safe / canonical で各 2 秒 (計 6 秒) — 保留候補の枠を「残りの半分」(5.5 秒) にすると毎回 canonical で中断し、
   // 残りは 14 秒あるので交替にも入らず永久に pending だった → 配分をやめ、予算付きで保留候補がある回は常に交替する。
@@ -804,6 +824,13 @@ describe('USDC reconciliation with real Lua and receipt verification', () => {
     })),
     { label: 'Codex 10 (the carried candidate needs 6 s to verify)', stored: OLD, deferred: [TX], cursor: '4090', eventBlock: 2_100n,
       delays: { used: 1_000, safe: 2_000, canonical: 2_000, receipt: { [OLD]: 10_000, [TX]: 2_000 } }, failing: [OLD], runs: 2 },
+    // 11 回目: 正規・確定済みの hash を保存した intent。authorizationState 5 秒・receipt / safe / canonical 各 3 秒。reconcile
+    // 側で照合 (9 秒) してから finalize が同じ照合を繰り返すと、2 回目が保存予約を除いた期限で canonical の取得中に中断して
+    // storage になり、次回も同じことを繰り返した → 採用済みの保存 hash は finalize に直接渡して照合を 1 回にする。
+    ...[3_000, 0].map((canonical) => ({
+      label: `Codex 11 (stored confirmed hash, canonical lookup ${canonical} ms)`, stored: TX, deferred: [], eventBlock: 100n,
+      delays: { used: 5_000, safe: 3_000, canonical, receipt: { [TX]: 3_000 } }, failing: [], runs: 1,
+    })),
   ] as {
     label: string; stored?: Hex; deferred: Hex[]; cursor?: string; eventBlock: bigint; delays: RpcDelays; failing: Hex[];
     runs: number;
@@ -811,7 +838,10 @@ describe('USDC reconciliation with real Lua and receipt verification', () => {
     'settles within finite cron runs with a deadline-respecting client: $label',
     async ({ stored, deferred, cursor, eventBlock, delays, failing, runs }) => {
       const intent = await active(stored);
-      patchIntent({ reconcileDeferred: deferred, ...(cursor ? { reconcileFromBlock: cursor } : {}) });
+      patchIntent({
+        ...(deferred.length > 0 ? { reconcileDeferred: deferred } : {}),
+        ...(cursor ? { reconcileFromBlock: cursor } : {}),
+      });
       const clock = deadlineBoundChain(chain(intent.nonce, { latest: 50_090n, eventBlock }), delays, failing);
       const spy = vi.spyOn(Date, 'now').mockImplementation(() => clock.now);
       const results: string[] = [];

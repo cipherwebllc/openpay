@@ -1508,7 +1508,7 @@ export async function reconcileStoreUsdcIntent(
       //   - 'finality' / 'receipt' / 'unverified' (正規と一致・または判別不能) → 'defer'。保留候補は走査の cursor とは別に
       //     毎回再検証するので、cursor は前進だけで巻き戻さず、前進後に receipt が読めるようになっても見失わない
       //     (Codex 5 回目 P2: 「いずれ anchor へ戻る」は head が 1 日の走査量より速く伸びると成り立たない)。
-      //   保存済み hash も同じ扱い — 待ちが replacement の探索を止めない (Codex 4 回目 P2)。
+      //   保存済み hash はここを通らず finalize に直接渡し、確定しなければ同じく replacement の探索へ進む (Codex 4 回目 P2)。
       return verification.reason === 'canonical' ? 'skip' : 'defer';
     }
     if (intent.txHash !== txHash) {
@@ -1526,7 +1526,7 @@ export async function reconcileStoreUsdcIntent(
       return { ok: true, state: 'pending' };
     };
     // finalize 内の再照合は照合時の client を使い回さず、その時点の残り時間で予算を計算し直す (B4 follow-up 3)。
-    // 予算が無ければ採用済み hash のまま次回へ (次回は保存 hash の照合から finalize に進む)。
+    // 予算が無ければ採用済み hash のまま次回へ (次回は保存 hash として finalize に直接渡す)。
     const finalizeClient = rpcClient();
     if (finalizeClient === null) return rescheduleLatest();
     const finalized = await finalizeStoreUsdcPurchase({
@@ -1542,13 +1542,31 @@ export async function reconcileStoreUsdcIntent(
     return rescheduleLatest();
   };
 
-  // 1) 保存済み hash。confirmed で確定しなければ (待ち・障害・採れない) 保持したまま、同じ回で replacement の探索へ進む。
+  // 1) 保存済み hash (採用済み)。reconcile の側で照合してから finalize を呼ぶと、finalize が同じ照合 (receipt・finality・
+  //    正規ブロック・global claim) をもう一度行い、1 回の予算で照合を 2 回分払う。各 RPC が普通に遅いだけで 2 回目が期限で
+  //    中断し、次回も保存 hash から同じことを繰り返して確定しない (Codex 11 回目 P2)。採用済みの hash は採用の CAS が不要
+  //    なので、finalize をそのまま呼んで照合を 1 回にする (finalize の検査と確定 CAS はそのまま)。
+  //    confirmed なら確定。それ以外 (finality 待ち・照合不能・旧フォーク・証拠の不一致・読み取り障害・期限切れ) は保存 hash を
+  //    保持したまま、同じ回で replacement の探索へ進む — finalize の 'storage' は照合の読み取り障害も含むので、保存 hash の
+  //    待ちが探索を止めないよう探索へ進める (KV の障害なら後の保存の CAS でも失敗して監視に記録される)。intent そのものの
+  //    欠落/破損 (not_found / corrupt) だけはそのまま返す。
   if (intent.txHash) {
-    const resolved = await finalizeCandidate(intent.txHash);
-    if (resolved === 'budget') return retry();
-    if (typeof resolved !== 'string') return resolved;
-    // 保存 hash は保留候補の列に入れない (次回も保存 hash として直接検証される)。
-    undefer(intent.txHash);
+    const storedHash = intent.txHash;
+    const finalizeClient = rpcClient();
+    if (finalizeClient === null) return retry();
+    verified.add(storedHash);
+    const finalized = await finalizeStoreUsdcPurchase({
+      intentSalt,
+      txHash: storedHash,
+      now,
+      ...clientArg(finalizeClient),
+    });
+    if (finalized.ok) return { ok: true, state: 'settled' };
+    if (finalized.reason === 'not_found' || finalized.reason === 'corrupt') {
+      return { ok: false, reason: finalized.reason };
+    }
+    // 保存 hash は保留候補の列に入れない (次回も保存 hash として直接 finalize に渡す)。
+    undefer(storedHash);
   }
   // 2) 保留候補 (前回までにログで見つかった確定前の候補) を cursor と独立に再検証する。confirmed があればそれで確定。
   // 遅い候補 (receipt の timeout 等) が後続の候補を毎回待たせる波及を断つ (Codex 6 回目 P2): round robin — 照合して
