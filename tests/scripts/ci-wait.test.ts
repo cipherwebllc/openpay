@@ -4,10 +4,11 @@
 // 以前は「出てきた check が全部 SUCCESS/NEUTRAL/SKIPPED」で exit 0 だったので、e2e / lighthouse の
 // workflow run がまだ check として現れていない瞬間や、必須 job が skip された場合も緑扱いになりえた。
 // ここでは (1) 正本 scripts/ci-expected-checks.json (= EXPECTED_PR_CHECKS) が今の workflow から解析した集合と
-// 一致すること (ドリフト検出)・解析できない形 (対応文法の外) が現れたら除外せず落ちること (fail-closed)
+// 一致すること (ドリフト検出)・解析できない形 (対応する形の外) が現れたら除外せず落ちること (fail-closed)
 // (2) 欠けた check は settle しないこと (3) 期待 check は SUCCESS のみ合格であること (4) base が main 以外では
 // 期待集合を使わないこと (5) --head は完全 OID で比較すること (6) CLI は対象 PR の HEAD の JSON だけを読み、
-// 形が違えば exit 3 にすることを固定する。
+// 形が違えば exit 3 にすることを固定する。workflow は `yaml` で読む (scripts/lib/ciWaitWorkflows.mjs) ので、
+// 引用符付きの key・flow 形式・複数行の値など YAML として意味が明確な別書式は読み、ドリフトとして数える。
 import { spawnSync } from 'node:child_process';
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -16,13 +17,12 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   EXPECTED_CHECKS_PATH,
   EXPECTED_PR_CHECKS,
-  analyzeWorkflows,
   evaluateChecks,
   expectedChecksFor,
   normalizeRollup,
   parseExpectedChecksJson,
-  parseWorkflow,
 } from '../../scripts/lib/ciWait.mjs';
+import { analyzeWorkflows, parseWorkflow } from '../../scripts/lib/ciWaitWorkflows.mjs';
 
 const SCRIPT = resolve('scripts/ci-wait.mjs');
 const WORKFLOWS = resolve('.github/workflows');
@@ -50,6 +50,25 @@ function rollupOf(names: readonly string[], overrides: Record<string, { status?:
 
 const JOB = 'jobs:\n  a:\n    runs-on: x\n';
 
+/** 一時ディレクトリに workflow を書いて analyzeWorkflows の結果を返す (ディレクトリは消す)。 */
+function analyze(files: Record<string, string>) {
+  const dir = mkdtempSync(join(tmpdir(), 'ci-wait-wf-'));
+  try {
+    for (const [name, text] of Object.entries(files)) writeFileSync(join(dir, name), text);
+    return analyzeWorkflows(dir);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+/** 文書として読めない (on: / jobs: を読まずに止まる) こと。理由はすべて document: で始まる。 */
+function expectDocumentProblem(src: string) {
+  const wf = parseWorkflow(src);
+  expect(wf.unsupported.length, src).toBeGreaterThan(0);
+  for (const reason of wf.unsupported) expect(reason, src).toMatch(/^document: /);
+  expect(wf).toMatchObject({ pullRequest: false, jobs: [] });
+}
+
 describe('期待 check 集合の正本 (JSON) と workflow のドリフト検出 (fail-closed)', () => {
   it('正本の JSON は正規形で読め、EXPECTED_PR_CHECKS はそれと同じ (JS 側に別の値を持たない)', () => {
     expect(EXPECTED_CHECKS_PATH).toBe('scripts/ci-expected-checks.json');
@@ -74,12 +93,13 @@ describe('期待 check 集合の正本 (JSON) と workflow のドリフト検出
     for (const e of excluded) expect(e.reason).toBe('no pull_request trigger');
   });
 
-  it('on の形: string / 配列 / map / map の値が null・{} / quote 付きの on / block 配列 / flow map を読む', () => {
+  it('on の形: string / 配列 / map / map の値が null・{} / 引用符付きの on / block 配列 / flow map / 複数行の flow を読む', () => {
     expect(parseWorkflow(`on: pull_request\n${JOB}`).pullRequest).toBe(true);
     expect(parseWorkflow(`on: push\n${JOB}`).pullRequest).toBe(false);
     expect(parseWorkflow(`on: [push, pull_request]\n${JOB}`).pullRequest).toBe(true);
     expect(parseWorkflow(`on: [push]\n${JOB}`).pullRequest).toBe(false);
     expect(parseWorkflow(`"on": pull_request\n${JOB}`).pullRequest).toBe(true);
+    expect(parseWorkflow(`'on': pull_request\n${JOB}`).pullRequest).toBe(true);
     expect(parseWorkflow(`on:\n  push:\n    branches: [main]\n  pull_request:\n${JOB}`).pullRequest).toBe(true);
     expect(parseWorkflow(`on:\n  pull_request: {}\n${JOB}`).pullRequest).toBe(true);
     expect(parseWorkflow(`on:\n  pull_request: null\n${JOB}`).pullRequest).toBe(true);
@@ -94,51 +114,76 @@ describe('期待 check 集合の正本 (JSON) と workflow のドリフト検出
       `on: {pull_request: {}}\n${JOB}`,
       `on:\n  pull_request: {}\n${JOB}`,
       `on:\n  - pull_request\n${JOB}`,
+      // YAML として意味が明確な別書式 (以前の手書きの読み取りは unsupported にしていた)
+      `on: {push, pull_request}\n${JOB}`,
+      `on: [push,\n  pull_request]\n${JOB}`,
+      `on:\n  ? pull_request\n${JOB}`,
+      `---\non: pull_request\n${JOB}...\n`,
     ]) {
-      expect(parseWorkflow(src).unsupported, src).toEqual([]);
+      expect(parseWorkflow(src), src).toMatchObject({ pullRequest: true, unsupported: [] });
     }
   });
 
-  it('paths / paths-ignore / types は block でも flow map でも filtered に出す', () => {
+  it('paths / paths-ignore / types は block でも flow map でも (引用符付きの値でも) filtered に出す', () => {
     expect(parseWorkflow(`on:\n  pull_request:\n    paths:\n      - docs/**\n${JOB}`).filtered).toBe('paths');
     expect(parseWorkflow(`on:\n  pull_request:\n    paths-ignore: [docs/**.md]\n${JOB}`).filtered).toBe('paths-ignore');
     expect(parseWorkflow(`on:\n  pull_request:\n    types: [labeled]\n${JOB}`).filtered).toBe('types');
     expect(parseWorkflow(`on:\n  pull_request: {paths: [docs/**]}\n${JOB}`).filtered).toBe('paths');
     expect(parseWorkflow(`on: {pull_request: {paths: [docs/**], branches: [main]}}\n${JOB}`).filtered).toBe('paths');
     expect(parseWorkflow(`on:\n  pull_request:\n    branches: [main]\n${JOB}`).filtered).toBeNull();
-    // quote 付きの値は読まない (除外ではなく unsupported)
-    const quotedPaths = parseWorkflow(`on:\n  pull_request:\n    paths:\n      - "docs/**"\n${JOB}`);
-    expect(quotedPaths.filtered).toBeNull();
-    expect(quotedPaths.unsupported).toEqual(['on.pull_request.paths: unreadable list']);
-    expect(parseWorkflow(`on:\n  pull_request:\n    paths-ignore: ["**.md"]\n${JOB}`).unsupported).toEqual(['on.pull_request.paths-ignore: unreadable list']);
+    expect(parseWorkflow(`on:\n  pull_request:\n    paths:\n      - "docs/**"\n${JOB}`)).toMatchObject({ filtered: 'paths', unsupported: [] });
+    expect(parseWorkflow(`on:\n  pull_request:\n    paths-ignore: ["**.md"]\n${JOB}`)).toMatchObject({ filtered: 'paths-ignore', unsupported: [] });
+    // 配列でない・空・文字列でない要素は読まない (除外ではなく unsupported)
+    expect(parseWorkflow(`on:\n  pull_request:\n    paths: docs/**\n${JOB}`).unsupported).toEqual(['on.pull_request.paths: unreadable list']);
+    expect(parseWorkflow(`on:\n  pull_request:\n    types: []\n${JOB}`).unsupported).toEqual(['on.pull_request.types: unreadable list']);
+    expect(parseWorkflow(`on:\n  pull_request:\n    paths: [docs, {a: b}]\n${JOB}`).unsupported).toEqual(['on.pull_request.paths: unreadable list']);
+    expect(parseWorkflow(`on:\n  pull_request:\n    tags: [v1]\n${JOB}`).unsupported).toEqual(['on.pull_request.tags: unsupported key']);
   });
 
-  it('branches は main を含むときだけ main 向け PR の check に数える (block list / flow list / branches-ignore)', () => {
+  it('branches は main を含むときだけ main 向け PR の check に数える (block list / flow list / 引用符付き / branches-ignore)', () => {
     expect(parseWorkflow(`on:\n  pull_request:\n    branches: [main]\n${JOB}`).branches).toEqual(['main']);
     expect(parseWorkflow(`on:\n  pull_request:\n    branches:\n      - main\n      - release\n${JOB}`).branches).toEqual(['main', 'release']);
     expect(parseWorkflow(`on:\n  pull_request:\n    branches-ignore: [main]\n${JOB}`).branchesIgnore).toEqual(['main']);
     const glob = parseWorkflow(`on:\n  pull_request:\n    branches: [release/**]\n${JOB}`);
     expect(glob.unsupported.join()).toContain('glob');
-    expect(parseWorkflow(`on:\n  pull_request:\n    branches: ["main"]\n${JOB}`).unsupported).toEqual(['on.pull_request.branches: unreadable list']);
-    expect(parseWorkflow(`on:\n  pull_request:\n    branches:\n      - 'main'\n${JOB}`).unsupported).toEqual(['on.pull_request.branches: unreadable list']);
-    const dir = mkdtempSync(join(tmpdir(), 'ci-wait-branches-'));
-    try {
-      writeFileSync(join(dir, 'release.yml'), `on:\n  pull_request:\n    branches: [release]\njobs:\n  rel:\n    runs-on: x\n`);
-      writeFileSync(join(dir, 'ignore.yml'), `on:\n  pull_request:\n    branches-ignore: [main]\njobs:\n  ign:\n    runs-on: x\n`);
-      writeFileSync(join(dir, 'main.yml'), `on:\n  pull_request:\n    branches: [main]\njobs:\n  ok:\n    runs-on: x\n`);
-      const r = analyzeWorkflows(dir);
-      expect(r.unsupported).toEqual([]);
-      expect(r.required).toEqual(['ok']);
-      expect(r.excluded).toEqual([
-        { workflow: 'ignore.yml', reason: 'pull_request branches-ignore has main' },
-        { workflow: 'release.yml', reason: 'pull_request branches exclude main' },
-      ]);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
+    expect(parseWorkflow(`on:\n  pull_request:\n    branches: ["main"]\n${JOB}`)).toMatchObject({ branches: ['main'], unsupported: [] });
+    expect(parseWorkflow(`on:\n  pull_request:\n    branches:\n      - 'main'\n${JOB}`)).toMatchObject({ branches: ['main'], unsupported: [] });
+    expect(parseWorkflow(`on:\n  pull_request:\n    branches: []\n${JOB}`).unsupported).toEqual(['on.pull_request.branches: unreadable list']);
+    // filter pattern のエスケープ (`ma\in` は GitHub では main に一致) は完全一致で比べられないので unsupported
+    // (branches では「main を除外」、branches-ignore では「main を含まない」と誤って判定しない)
+    expect(parseWorkflow(`on:\n  pull_request:\n    branches: ['ma\\in']\n${JOB}`)).toMatchObject({
+      branches: null,
+      unsupported: ['on.pull_request.branches: escape in pattern (ma\\in)'],
+    });
+    expect(parseWorkflow(`on:\n  pull_request:\n    branches-ignore: ["ma\\\\in"]\n${JOB}`)).toMatchObject({
+      branchesIgnore: null,
+      unsupported: ['on.pull_request.branches-ignore: escape in pattern (ma\\in)'],
+    });
+    expect(analyze({
+      'esc.yml': `on:\n  pull_request:\n    branches: ['ma\\in']\njobs:\n  esc:\n    runs-on: x\n`,
+      'ign.yml': `on:\n  pull_request:\n    branches-ignore: ['ma\\in']\njobs:\n  ign:\n    runs-on: x\n`,
+    })).toEqual({
+      required: [],
+      excluded: [],
+      unsupported: [
+        { workflow: 'esc.yml', reason: 'on.pull_request.branches: escape in pattern (ma\\in)' },
+        { workflow: 'ign.yml', reason: 'on.pull_request.branches-ignore: escape in pattern (ma\\in)' },
+      ],
+    });
+    const r = analyze({
+      'release.yml': `on:\n  pull_request:\n    branches: [release]\njobs:\n  rel:\n    runs-on: x\n`,
+      'ignore.yml': `on:\n  pull_request:\n    branches-ignore: [main]\njobs:\n  ign:\n    runs-on: x\n`,
+      'main.yml': `on:\n  pull_request:\n    branches: [main]\njobs:\n  ok:\n    runs-on: x\n`,
+    });
+    expect(r.unsupported).toEqual([]);
+    expect(r.required).toEqual(['ok']);
+    expect(r.excluded).toEqual([
+      { workflow: 'ignore.yml', reason: 'pull_request branches-ignore has main' },
+      { workflow: 'release.yml', reason: 'pull_request branches exclude main' },
+    ]);
   });
 
-  it('job の check 名は name: があればそれ (quote 内の # も含む)、無ければ job id', () => {
+  it('job の check 名は name: があればそれ (引用符の中の # も含む)、無ければ job id', () => {
     const wf = parseWorkflow([
       'on: pull_request',
       'jobs:',
@@ -160,57 +205,55 @@ describe('期待 check 集合の正本 (JSON) と workflow のドリフト検出
     ]);
   });
 
-  it('on: の quote 付き / エスケープ付きのイベント名・未知の構文は「pull_request 無し」と除外せず unsupported (fail-closed)', () => {
+  it('on: のイベント名は YAML の値で判定する (引用符付きでも pull_request と読む・未知の名前は unsupported)', () => {
+    for (const src of [
+      `on:\n  push:\n  "pull_request":\n${JOB}`,
+      `on:\n  push:\n  'pull_request':\n${JOB}`,
+      `on: [push, "pull_request"]\n${JOB}`,
+      `on: "pull_request"\n${JOB}`,
+      `on:\n  - push\n  - "pull_request"\n${JOB}`,
+      `on: {"pull_request": {}}\n${JOB}`,
+      `on: {push: {}, "pull_request": {}}\n${JOB}`,
+    ]) {
+      expect(parseWorkflow(src), src).toMatchObject({ pullRequest: true, unsupported: [] });
+    }
+    expect(parseWorkflow(`on:\n  "pull_request_target":\n${JOB}`)).toMatchObject({ pullRequest: false, unsupported: [] });
     const cases: [string, string[]][] = [
-      [`on:\n  push:\n  "pull_request":\n${JOB}`, ['on: quoted key ("pull_request":)']],
-      [`on:\n  push:\n  'pull_request':\n${JOB}`, ["on: quoted key ('pull_request':)"]],
-      [`on:\n  "pull_request_target":\n${JOB}`, ['on: quoted key ("pull_request_target":)']],
-      [`on: [push, "pull_request"]\n${JOB}`, ['on: unknown event ("pull_request")']],
-      [`on: "pull_request"\n${JOB}`, ['on: unknown event ("pull_request")']],
-      [`on:\n  - push\n  - "pull_request"\n${JOB}`, ['on: unknown event ("pull_request")']],
-      [`on: {"pull_request": {}}\n${JOB}`, ['on: unreadable flow value ({"pull_request": {}})']],
-      [`on:\n  ? pull_request\n${JOB}`, ['on: unreadable line (? pull_request)']],
-      [`on:\n  push: &x\n    branches: [main]\n  <<: *x\n${JOB}`, ['on: unreadable line (<<: *x)', 'on.push: unreadable value (&x)']],
-      [`on:\n  pull_request: *x\n${JOB}`, ['on.pull_request: unreadable value (*x)']],
-      [`on:\n  pull_request: !!map {}\n${JOB}`, ['on.pull_request: unreadable value (!!map {})']],
       [`on:\n  Push:\n${JOB}`, ['on: unknown event (Push)']],
-      [`on: {push: {}, "pull_request": {}}\n${JOB}`, ['on: unreadable flow value ({push: {}, "pull_request": {}})']],
+      [`on: [Push]\n${JOB}`, ['on: unknown event (Push)']],
+      [`on:\n  - Push\n${JOB}`, ['on: unknown event (Push)']],
+      [`on: Push\n${JOB}`, ['on: unknown event (Push)']],
+      [`on: [push, pull_request: {}]\n${JOB}`, ['on: unknown event ({"pull_request":{}})']],
+      [`on:\n  - push:\n${JOB}`, ['on: unknown event ({"push":null})']],
+      [`on: [push, 1]\n${JOB}`, ['on: unknown event (1)']],
     ];
     for (const [src, expected] of cases) {
-      const wf = parseWorkflow(src);
-      expect(wf.unsupported, src).toEqual(expected);
+      expect(parseWorkflow(src).unsupported, src).toEqual(expected);
     }
-    // 対応文法だけで書かれ pull_request が無いときだけ「除外」になる
+    // 対応する形だけで書かれ pull_request が無いときだけ「除外」になる
     expect(parseWorkflow(`on:\n  push:\n    branches: [main]\n  schedule:\n    - cron: "0 0 * * *"\n  workflow_dispatch: {}\n${JOB}`).unsupported).toEqual([]);
-    expect(parseWorkflow(`"on": pull_request\n${JOB}`).unsupported).toEqual([]); // top-level の "on" だけは定型として読む
+    expect(parseWorkflow(`on: [push, workflow_dispatch]\n${JOB}`)).toMatchObject({ pullRequest: false, unsupported: [] });
   });
 
-  it('既存の cron workflow に "pull_request": を足しても除外のままにならず、ドリフト検査が赤になる (kv-backup-watch.yml の再現)', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ci-wait-quoted-'));
-    try {
-      const original = readFileSync(join(WORKFLOWS, 'kv-backup-watch.yml'), 'utf8');
-      const mutated = original.replace(/^on:\n/m, 'on:\n  "pull_request":\n');
-      expect(mutated).not.toBe(original);
-      writeFileSync(join(dir, 'kv-backup-watch.yml'), mutated);
-      const r = analyzeWorkflows(dir);
-      expect(r.excluded).toEqual([]);
-      expect(r.unsupported).toEqual([{ workflow: 'kv-backup-watch.yml', reason: 'on: quoted key ("pull_request":)' }]);
-      // 同じ変更を flow 配列で書いても同じ
-      writeFileSync(join(dir, 'kv-backup-watch.yml'), original.replace(/^on:\n  schedule:\n/m, 'on:\n  push: {}\n  schedule:\n'));
-      expect(analyzeWorkflows(dir).unsupported).toEqual([]);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
+  it('既存の cron workflow に "pull_request": を足すと除外のままにならず必須 job が増え、ドリフト検査が赤になる (kv-backup-watch.yml の再現)', () => {
+    const original = readFileSync(join(WORKFLOWS, 'kv-backup-watch.yml'), 'utf8');
+    const mutated = original.replace(/^on:\n/m, 'on:\n  "pull_request":\n');
+    expect(mutated).not.toBe(original);
+    const r = analyze({ 'kv-backup-watch.yml': mutated });
+    expect(r).toEqual({ required: ['watch'], excluded: [], unsupported: [] });
+    expect(EXPECTED_PR_CHECKS).not.toContain('watch');
+    // PR 以外のイベントを足しただけなら除外のまま
+    const pushOnly = analyze({ 'kv-backup-watch.yml': original.replace(/^on:\n {2}schedule:\n/m, 'on:\n  push: {}\n  schedule:\n') });
+    expect(pushOnly).toEqual({ required: [], excluded: [{ workflow: 'kv-backup-watch.yml', reason: 'no pull_request trigger' }], unsupported: [] });
   });
 
-  it('jobs の quote 付き key (job id・field) は unsupported', () => {
+  it('jobs の引用符付き key (job id・field) も YAML の値として読む', () => {
     const wf = parseWorkflow('on: pull_request\njobs:\n  "test":\n    runs-on: x\n  a:\n    "name": b\n    runs-on: x\n');
-    // quote 付きの job id の配下の行は、同じ原因で重ねて報告せず読み飛ばす
-    expect(wf.unsupported).toEqual(['jobs: quoted key ("test":)', 'jobs.a: quoted key ("name": b)']);
-    expect(wf.jobs.map((j) => [j.id, j.name])).toEqual([['a', 'a']]);
+    expect(wf.unsupported).toEqual([]);
+    expect(wf.jobs.map((j) => [j.id, j.name, j.conditional])).toEqual([['test', 'test', null], ['a', 'b', null]]);
   });
 
-  it('未対応の YAML の name (複数行の quote・次行に続く plain・アンカー/エイリアス/タグ・エスケープ・flow 値) は文字列として誤採用せず unsupported', () => {
+  it('name は YAML の値で読む (複数行の引用符・継続行・folded は 1 行に畳む・エスケープと二重の引用符を解く)', () => {
     const wf = parseWorkflow([
       'on: pull_request',
       'jobs:',
@@ -219,21 +262,17 @@ describe('期待 check 集合の正本 (JSON) と workflow のドリフト検出
       '      check"',
       '    runs-on: x',
       '  sq:',
-      "    name: 'added",
-      "      check'",
+      "    name: 'single",
+      "      quoted'",
       '    runs-on: x',
       '  plain:',
-      '    name: added',
-      '      check',
+      '    name: plain',
+      '      continued',
       '    runs-on: x',
-      '  anchor:',
-      '    name: &check_name test',
-      '    runs-on: x',
-      '  alias:',
-      '    name: *check_name',
-      '    runs-on: x',
-      '  tag:',
-      '    name: !!str test',
+      '  folded:',
+      '    name: >-',
+      '      long',
+      '      name',
       '    runs-on: x',
       '  esc:',
       '    name: "a\\"b"',
@@ -241,52 +280,74 @@ describe('期待 check 集合の正本 (JSON) と workflow のドリフト検出
       '  dup:',
       "    name: 'it''s'",
       '    runs-on: x',
+      '',
+    ].join('\n'));
+    expect(wf.unsupported).toEqual([]);
+    expect(wf.jobs.map((j) => [j.id, j.name, j.conditional])).toEqual([
+      ['dq', 'added check', null],
+      ['sq', 'single quoted', null],
+      ['plain', 'plain continued', null],
+      ['folded', 'long name', null],
+      ['esc', 'a"b', null],
+      ['dup', "it's", null],
+    ]);
+  });
+
+  it('check 名として採用できない name (文字列でない・空・改行や制御文字を含む・式) は誤採用せず job ごとに unsupported', () => {
+    const wf = parseWorkflow([
+      'on: pull_request',
+      'jobs:',
       '  flow:',
       '    name: [a, b]',
       '    runs-on: x',
-      '  ok:',
-      '    name: "check #1"',
+      '  number:',
+      '    name: 123',
+      '    runs-on: x',
+      '  empty:',
+      '    name:',
+      '    runs-on: x',
+      '  blank:',
+      '    name: "  "',
+      '    runs-on: x',
+      '  literal:',
+      '    name: |',
+      '      two',
+      '      lines',
+      '    runs-on: x',
+      '  newline:',
+      '    name: "a\\nb"',
+      '    runs-on: x',
+      '  tab:',
+      '    name: "a\\tb"',
+      '    runs-on: x',
+      '  expr:',
+      '    name: Build ${{ matrix.os }}',
       '    runs-on: x',
       '',
     ].join('\n'));
     expect(wf.unsupported).toEqual([]);
     expect(wf.jobs.map((j) => [j.id, j.name, j.conditional])).toEqual([
-      ['dq', 'dq', 'multi-line name'],
-      ['sq', 'sq', 'multi-line name'],
-      ['plain', 'plain', 'multi-line name'],
-      ['anchor', 'anchor', 'anchor, alias or tag in name'],
-      ['alias', 'alias', 'anchor, alias or tag in name'],
-      ['tag', 'tag', 'anchor, alias or tag in name'],
-      ['esc', 'esc', 'escape in name'],
-      ['dup', 'dup', 'quote inside name'],
-      ['flow', 'flow', 'flow value in name'],
-      ['ok', 'check #1', null],
+      ['flow', 'flow', 'name is not a string'],
+      ['number', 'number', 'name is not a string'],
+      ['empty', 'empty', 'empty name'],
+      ['blank', 'blank', 'empty name'],
+      ['literal', 'literal', 'multi-line name'],
+      ['newline', 'newline', 'multi-line name'],
+      ['tab', 'tab', 'control character in name'],
+      ['expr', 'expr', 'expression in name'],
     ]);
-    const dir = mkdtempSync(join(tmpdir(), 'ci-wait-name-'));
-    try {
-      writeFileSync(join(dir, 'a.yml'), 'on: pull_request\njobs:\n  test:\n    name: "added\n      check"\n    runs-on: x\n  b:\n    name: &n test\n    runs-on: x\n');
-      const r = analyzeWorkflows(dir);
-      expect(r.required).toEqual([]);
-      expect(r.unsupported).toEqual([
-        { workflow: 'a.yml', job: 'test', reason: 'job has multi-line name' },
-        { workflow: 'a.yml', job: 'b', reason: 'job has anchor, alias or tag in name' },
-      ]);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
   });
 
   it('解析できない形 (式や複数行の name・matrix・if・reusable workflow・条件付き親への needs・重複名・未対応の on) は unsupported', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ci-wait-unsupported-'));
-    try {
-      writeFileSync(join(dir, 'a.yml'), [
+    const r = analyze({
+      'a.yml': [
         'on: pull_request',
         'jobs:',
         '  expr:',
         '    name: Build ${{ matrix.os }}',
         '    runs-on: x',
         '  multi:',
-        '    name: >-',
+        '    name: |',
         '      long',
         '      name',
         '    runs-on: x',
@@ -312,64 +373,71 @@ describe('期待 check 集合の正本 (JSON) と workflow のドリフト検出
         '    runs-on: x',
         '  plain:',
         '    runs-on: x',
+        '  badneeds:',
+        '    needs: {a: b}',
+        '    runs-on: x',
         '',
-      ].join('\n'));
-      writeFileSync(join(dir, 'b.yml'), 'on: pull_request\njobs:\n  plain:\n    runs-on: x\n');
-      writeFileSync(join(dir, 'c.yml'), 'on: !!binary abc\njobs:\n  c:\n    runs-on: x\n');
-      writeFileSync(join(dir, 'd.yml'), 'on:\n  pull_request:\n    branches: main\njobs:\n  d:\n    runs-on: x\n');
-      const r = analyzeWorkflows(dir);
-      expect(r.required).toEqual(['fine', 'plain']);
-      const reasons = r.unsupported.map((u) => `${u.workflow}:${u.job ?? ''}:${u.reason}`);
-      expect(reasons).toEqual([
-        'a.yml:expr:job has expression in name',
-        'a.yml:multi:job has block scalar or empty name',
-        'a.yml:matrix:job has strategy:',
-        'a.yml:gated:job has if:',
-        'a.yml:child:needs gated (unknown or conditional)',
-        'a.yml:orphan:needs nobody (unknown or conditional)',
-        'a.yml:reusable:job has uses:',
-        'b.yml:plain:duplicate check name plain (also a.yml)',
-        'c.yml::on: unknown event (!!binary abc)',
-        'd.yml::on.pull_request.branches: unreadable list',
-      ]);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
+      ].join('\n'),
+      'b.yml': 'on: pull_request\njobs:\n  plain:\n    runs-on: x\n',
+      'c.yml': 'on: !!binary abc\njobs:\n  c:\n    runs-on: x\n',
+      'd.yml': 'on:\n  pull_request:\n    branches: main\njobs:\n  d:\n    runs-on: x\n',
+    });
+    expect(r.required).toEqual(['fine', 'plain', 'badneeds']);
+    const reasons = r.unsupported.map((u) => `${u.workflow}:${u.job ?? ''}:${u.reason}`);
+    expect(reasons).toEqual([
+      'a.yml::jobs.badneeds.needs: unreadable list',
+      'a.yml:expr:job has expression in name',
+      'a.yml:multi:job has multi-line name',
+      'a.yml:matrix:job has strategy:',
+      'a.yml:gated:job has if:',
+      'a.yml:child:needs gated (unknown or conditional)',
+      'a.yml:orphan:needs nobody (unknown or conditional)',
+      'a.yml:reusable:job has uses:',
+      'b.yml:plain:duplicate check name plain (also a.yml)',
+      'c.yml::document: tag (tag:yaml.org,2002:binary)',
+      'd.yml::on.pull_request.branches: unreadable list',
+    ]);
+  });
+
+  it('jobs の問題は PR で走る workflow のときだけ数える (cron の workflow は matrix / if を自由に使える)', () => {
+    const r = analyze({ 'cron.yml': 'on:\n  schedule:\n    - cron: "0 0 * * *"\njobs:\n  m:\n    if: always()\n    strategy:\n      matrix:\n        n: [1, 2]\n    runs-on: x\n' });
+    expect(r).toEqual({ required: [], excluded: [{ workflow: 'cron.yml', reason: 'no pull_request trigger' }], unsupported: [] });
   });
 });
 
-describe('文書構造とトップレベルを先に検査する (対応文法だと確かめてから除外を判定する)', () => {
+describe('文書とトップレベルを先に検査する (検査に使ってよい文書だと確かめてから除外を判定する)', () => {
   it('2 つ目のドキュメントに PR trigger を足しても、先頭だけ読んで除外しない (kv-backup-watch.yml の再現)', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ci-wait-multidoc-'));
-    try {
-      const original = readFileSync(join(WORKFLOWS, 'kv-backup-watch.yml'), 'utf8');
-      const line = original.split('\n').length; // 足した `---` の行番号
-      writeFileSync(join(dir, 'kv-backup-watch.yml'), `${original}---\non: pull_request\njobs:\n  added:\n    runs-on: x\n`);
-      const r = analyzeWorkflows(dir);
-      expect(r.excluded).toEqual([]);
-      expect(r.required).toEqual([]);
-      expect(r.unsupported).toEqual([{ workflow: 'kv-backup-watch.yml', reason: `document: document marker (line ${line}: ---)` }]);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
+    const original = readFileSync(join(WORKFLOWS, 'kv-backup-watch.yml'), 'utf8');
+    const line = original.split('\n').length; // 足した `---` の行番号
+    const r = analyze({ 'kv-backup-watch.yml': `${original}---\non: pull_request\njobs:\n  added:\n    runs-on: x\n` });
+    expect(r).toEqual({
+      required: [],
+      excluded: [],
+      unsupported: [{ workflow: 'kv-backup-watch.yml', reason: `document: MULTIPLE_DOCS (line ${line})` }],
+    });
   });
 
-  it('許すのは先頭の BOM と最初の非空行の `---` 1 つだけ (`...`・2 つ目の `---`・`--- 内容` は unsupported)', () => {
+  it('先頭の BOM・`---`・末尾の `...` は 1 つのドキュメントとして読む (2 つ目のドキュメント・`--- 内容` の後の block は unsupported)', () => {
     expect(parseWorkflow(`---\non: pull_request\n${JOB}`)).toMatchObject({ pullRequest: true, unsupported: [] });
     expect(parseWorkflow(`\uFEFF# head\n--- # doc\non: pull_request\n${JOB}`)).toMatchObject({ pullRequest: true, unsupported: [] });
-    expect(parseWorkflow(`on: push\n${JOB}...\n`).unsupported).toEqual(['document: document marker (line 5: ...)']);
-    expect(parseWorkflow(`---\n---\non: push\n${JOB}`).unsupported).toEqual(['document: document marker (line 2: ---)']);
-    expect(parseWorkflow(`--- {on: pull_request}\n${JOB}`).unsupported).toEqual(['document: document marker (line 1: --- {on: pull_request})']);
+    expect(parseWorkflow(`on: pull_request\n${JOB}...\n`)).toMatchObject({ pullRequest: true, unsupported: [] });
+    expect(parseWorkflow(`---\n---\non: push\n${JOB}`).unsupported).toEqual(['document: MULTIPLE_DOCS (line 2)']);
+    expect(parseWorkflow(`on: push\n${JOB}...\non: pull_request\n`).unsupported).toEqual(['document: MULTIPLE_DOCS (line 6)']);
+    expectDocumentProblem(`--- {on: pull_request}\n${JOB}`);
   });
 
-  it('スペース以外の indent (タブ・NBSP) は on: でも jobs: でも文書単位で unsupported', () => {
-    expect(parseWorkflow(`on:\n\tpull_request:\n${JOB}`)).toMatchObject({
-      pullRequest: false,
-      unsupported: ['document: non-space indentation (line 2)'],
-    });
-    expect(parseWorkflow('on:\n  push:\njobs:\n\tadded:\n    runs-on: x\n').unsupported).toEqual(['document: non-space indentation (line 4)']);
-    expect(parseWorkflow(`on:\n  push:\n\u00A0 pull_request:\n${JOB}`).unsupported).toEqual(['document: non-space indentation (line 3)']);
-    // indent 以外のタブ (値の前の区切り) は YAML の空白として読む
+  it('タブの字下げ・揃わない字下げ・閉じない引用符は YAML のエラーとして文書ごと unsupported', () => {
+    expect(parseWorkflow(`on:\n\tpull_request:\n${JOB}`).unsupported).toEqual(['document: TAB_AS_INDENT (line 2)']);
+    expect(parseWorkflow('on:\n  push:\njobs:\n\tadded:\n    runs-on: x\n').unsupported).toEqual(['document: TAB_AS_INDENT (line 4)']);
+    expect(parseWorkflow('on: pull_request\njobs:\n  a:\n    runs-on: x\n   b:\n    runs-on: x\n').unsupported).toEqual(['document: BAD_INDENT (line 5)']);
+    expect(parseWorkflow('on: pull_request\njobs:\n    a:\n        runs-on: x\n  b:\n    runs-on: x\n').unsupported).toEqual(['document: BAD_INDENT (line 5)']);
+    expect(parseWorkflow('on:\n    push:\n  pull_request:\njobs:\n  a:\n    runs-on: x\n').unsupported).toEqual(['document: BAD_INDENT (line 2)']);
+    expectDocumentProblem(`on: push\n  pull_request:\n${JOB}`);
+    expectDocumentProblem(`on: [push,, pull_request]\n${JOB}`);
+    expectDocumentProblem(`on:\n  pull_request:\n    paths: [a]\n      - b\n${JOB}`);
+    expectDocumentProblem(`on: "pull_request\n${JOB}`);
+    expectDocumentProblem(`  on: pull_request\n${JOB}`);
+    // 字下げ以外のタブ (値の前の区切り) は YAML の空白として読む
     expect(parseWorkflow(`on:\tpull_request\n${JOB}`)).toMatchObject({ pullRequest: true, unsupported: [] });
   });
 
@@ -387,129 +455,129 @@ describe('文書構造とトップレベルを先に検査する (対応文法�
     }
   });
 
-  it('トップレベルの quote 付き key は "on": だけ例外 ("jobs":・\'on\': は unsupported)・重複 key・key でない行も unsupported', () => {
-    expect(parseWorkflow(`"on": pull_request\n${JOB}`)).toMatchObject({ pullRequest: true, unsupported: [] });
+  it('引用符付きのトップレベルの key は YAML の値として読み、重複 key (引用符の有無を問わない)・ディレクティブ・`<<`・アンカー / エイリアスは unsupported', () => {
+    for (const src of [`"on": pull_request\n${JOB}`, `'on': pull_request\n${JOB}`, 'on: pull_request\n"jobs":\n  a:\n    runs-on: x\n']) {
+      expect(parseWorkflow(src), src).toMatchObject({ pullRequest: true, unsupported: [] });
+    }
     const cases: [string, string[]][] = [
-      ['on: pull_request\n"jobs":\n  a:\n    runs-on: x\n', ['top-level: quoted key ("jobs":)']],
-      ["on: pull_request\n'jobs':\n  a:\n    runs-on: x\n", ["top-level: quoted key ('jobs':)"]],
-      [`'on': pull_request\n${JOB}`, ["top-level: quoted key ('on': pull_request)"]],
-      [`on: push\n"on": pull_request\n${JOB}`, ['top-level: duplicate key ("on": pull_request)']],
-      [`on: push\n${JOB}jobs:\n  b:\n    runs-on: x\n`, ['top-level: duplicate key (jobs:)']],
-      [`on: push\n<<: *defaults\n${JOB}`, ['top-level: unreadable line (<<: *defaults)']],
-      [`on: push\n? jobs\n${JOB}`, ['top-level: unreadable line (? jobs)']],
-      [`%YAML 1.2\n---\non: push\n${JOB}`, ['document: document marker (line 2: ---)']],
-      [`  on: pull_request\n${JOB}`, ['top-level: indented line before the first key (line 1)']],
+      [`on: push\n"on": pull_request\n${JOB}`, ['document: DUPLICATE_KEY (line 2)']],
+      [`on: push\n${JOB}jobs:\n  b:\n    runs-on: x\n`, ['document: DUPLICATE_KEY (line 5)']],
+      [`on: push\n? jobs\n${JOB}`, ['document: DUPLICATE_KEY (line 3)']],
+      [`on: push\n<<: *defaults\n${JOB}`, ['document: merge key (<<)', 'document: alias (*defaults)']],
+      [`on: push\n<<: {jobs: {a: {runs-on: x}}}\n`, ['document: merge key (<<)']],
+      [`%YAML 1.2\n---\non: push\n${JOB}`, ['document: directive (%YAML 1.2)']],
+      // YAML 1.1 では on が真偽値の key になる (GitHub と読み方がずれる) ので、ディレクティブごと読まない
+      [`%YAML 1.1\n---\non: pull_request\n${JOB}`, ['document: directive (%YAML 1.1)', 'document: non-string key (true)']],
+      [`%TAG !e! tag:example.com,2000:\n---\non: push\n${JOB}`, ['document: directive (%TAG !e! tag:example.com,2000:)']],
+      // 既定の prefix を再宣言する %TAG は解決後の tags が既定と同じになるが、directive の存在そのものを拒否する
+      [`%TAG !! tag:yaml.org,2002:\n---\non: push\n${JOB}`, ['document: directive (%TAG !! tag:yaml.org,2002:)']],
+      // GitHub は key の中の式も展開するので、式を含む key は (評価せず) どの階層でも読まない
+      [`"\${{ 'on' }}": pull_request\n${JOB}`, ["document: expression in key (${{ 'on' }})"]],
+      [`on:\n  "\${{ 'pull_request' }}":\n${JOB}`, ["document: expression in key (${{ 'pull_request' }})"]],
+      [`on: pull_request\njobs:\n  "\${{ 'added' }}":\n    runs-on: x\n`, ["document: expression in key (${{ 'added' }})"]],
+      [`on: pull_request\njobs:\n  a:\n    "\${{ 'name' }}": x\n    runs-on: x\n`, ["document: expression in key (${{ 'name' }})"]],
+      [`on: push\n1: x\n${JOB}`, ['document: non-string key (1)']],
+      [`on: push\n? [a, b]\n: x\n${JOB}`, ['document: non-string key (["a","b"])']],
+      [`- on: pull_request\n`, ['document: the top level is not a mapping']],
+      ['', ['document: the top level is not a mapping']],
     ];
     for (const [src, expected] of cases) {
       expect(parseWorkflow(src).unsupported, src).toEqual(expected);
     }
-    // "jobs": に必須 job を足しても jobs=[] で黙って通らない
-    const dir = mkdtempSync(join(tmpdir(), 'ci-wait-quoted-jobs-'));
-    try {
-      writeFileSync(join(dir, 'a.yml'), 'on: pull_request\n"jobs":\n  added:\n    runs-on: x\n');
-      expect(analyzeWorkflows(dir)).toEqual({
-        required: [],
-        excluded: [],
-        unsupported: [{ workflow: 'a.yml', reason: 'top-level: quoted key ("jobs":)' }],
-      });
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
+    // "jobs": に足した必須 job も読んでドリフトとして数える (jobs=[] で黙って通らない)
+    expect(analyze({ 'a.yml': 'on: pull_request\n"jobs":\n  added:\n    runs-on: x\n' })).toEqual({ required: ['added'], excluded: [], unsupported: [] });
+  });
+
+  it('トップレベルの key は workflow の key だけ (NBSP で字下げしたつもりの行がトップレベルの key になった形を除外しない)', () => {
+    const nbsp = parseWorkflow(`on:\n  push:\n\u00A0 pull_request:\n${JOB}`);
+    expect(nbsp).toMatchObject({ pullRequest: false, unsupported: [`top-level: unknown key (${JSON.stringify('\u00A0 pull_request')})`] });
+    expect(analyze({ 'a.yml': `on:\n  push:\n\u00A0 pull_request:\n${JOB}` })).toEqual({
+      required: [],
+      excluded: [],
+      unsupported: [{ workflow: 'a.yml', reason: `top-level: unknown key (${JSON.stringify('\u00A0 pull_request')})` }],
+    });
+    expect(parseWorkflow(`name: x\nrun-name: y\non: push\npermissions:\n  contents: read\nenv:\n  A: b\ndefaults:\n  run:\n    shell: bash\nconcurrency:\n  group: g\n${JOB}`).unsupported).toEqual([]);
+  });
+});
+
+describe('アンカー / エイリアス / タグは今の workflow に無い形なので、どこにあっても文書ごと unsupported', () => {
+  it('on: の値・job の name・flow map の中のアンカー / エイリアス / タグ', () => {
+    const cases: [string, string[]][] = [
+      [`on: {push: &cfg {}}\n${JOB}`, ['document: anchor (&cfg)']],
+      [`on:\n  push: &cfg {}\n${JOB}`, ['document: anchor (&cfg)']],
+      [`on: {push: *cfg}\n${JOB}`, ['document: alias (*cfg)']],
+      [`on:\n  pull_request: *x\n${JOB}`, ['document: alias (*x)']],
+      [`on: {push: !!map {}}\n${JOB}`, ['document: tag (tag:yaml.org,2002:map)']],
+      [`on:\n  pull_request: !!map {}\n${JOB}`, ['document: tag (tag:yaml.org,2002:map)']],
+      [`on: {push: {branches: *b}}\n${JOB}`, ['document: alias (*b)']],
+      [`on:\n  push: &x\n    branches: [main]\n  pull_request: *x\n${JOB}`, ['document: anchor (&x)', 'document: alias (*x)']],
+      ['on: pull_request\njobs:\n  a:\n    name: &n test\n    runs-on: x\n  b:\n    name: *n\n    runs-on: x\n', ['document: anchor (&n)', 'document: alias (*n)']],
+      ['on: pull_request\njobs:\n  a:\n    name: !!str test\n    runs-on: x\n', ['document: tag (tag:yaml.org,2002:str)']],
+      ['on: pull_request\njobs:\n  a:\n    name: ! test\n    runs-on: x\n', ['document: tag (!)']],
+    ];
+    for (const [src, expected] of cases) {
+      expect(parseWorkflow(src).unsupported, src).toEqual(expected);
     }
+    expect(analyze({ 'a.yml': `on: {push: &cfg {}}\n${JOB}` })).toEqual({
+      required: [],
+      excluded: [],
+      unsupported: [{ workflow: 'a.yml', reason: 'document: anchor (&cfg)' }],
+    });
   });
 });
 
 describe('on: の entry は block map / flow map / flow 配列 / block 配列のどれでも同じ検査を通す', () => {
-  it('flow map の値もアンカー/エイリアス/タグは unsupported (on: {push: &cfg {}} を除外しない・block 形式と同じ)', () => {
-    const cases: [string, string[]][] = [
-      [`on: {push: &cfg {}}\n${JOB}`, ['on.push: unreadable value (&cfg {})']],
-      [`on:\n  push: &cfg {}\n${JOB}`, ['on.push: unreadable value (&cfg {})']],
-      [`on: {push: *cfg}\n${JOB}`, ['on.push: unreadable value (*cfg)']],
-      [`on: {push: !!map {}}\n${JOB}`, ['on.push: unreadable value (!!map {})']],
-      [`on: {push: {branches: *b}}\n${JOB}`, ['on.push: unreadable value ({branches: *b})']],
-      [`on: {push: {branches: ["main"]}}\n${JOB}`, ['on.push: unreadable value ({branches: ["main"]})']],
-      [`on: {push, pull_request}\n${JOB}`, ['on: unreadable flow value ({push, pull_request})']],
-      [`on: {push: {}, push: {}}\n${JOB}`, ['on: unreadable flow value ({push: {}, push: {}})']],
-      [`on:\n  push:\n  push:\n${JOB}`, ['on: duplicate key (push:)']],
-    ];
-    for (const [src, expected] of cases) {
-      expect(parseWorkflow(src).unsupported, src).toEqual(expected);
-    }
-    // 対応する flow map の値 (plain scalar・plain scalar の flow 配列・入れ子の flow map) は読む
+  it('重複したイベントは unsupported・対応する flow map の値 (引用符付きを含む) は読む', () => {
+    expect(parseWorkflow(`on: {push: {}, push: {}}\n${JOB}`).unsupported).toEqual(['document: DUPLICATE_KEY (line 1)']);
+    expect(parseWorkflow(`on:\n  push:\n  push:\n${JOB}`).unsupported).toEqual(['document: DUPLICATE_KEY (line 2)']);
     expect(parseWorkflow(`on: {push: {branches: [main]}, workflow_dispatch: {inputs: {x: {type: boolean}}}}\n${JOB}`).unsupported).toEqual([]);
-    const dir = mkdtempSync(join(tmpdir(), 'ci-wait-flow-anchor-'));
-    try {
-      writeFileSync(join(dir, 'a.yml'), `on: {push: &cfg {}}\n${JOB}`);
-      expect(analyzeWorkflows(dir)).toEqual({
-        required: [],
-        excluded: [],
-        unsupported: [{ workflow: 'a.yml', reason: 'on.push: unreadable value (&cfg {})' }],
-      });
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
+    expect(parseWorkflow(`on: {push: {branches: ["main"]}}\n${JOB}`).unsupported).toEqual([]);
   });
 
-  it('flow 配列・block 配列のイベント名も EVENT_NAME_RE を通す ([Push] / - Push を除外しない)', () => {
+  it('イベントの値は null / mapping / (pull_request 以外の) 配列だけ', () => {
     const cases: [string, string[]][] = [
-      [`on: [Push]\n${JOB}`, ['on: unknown event (Push)']],
-      [`on:\n  - Push\n${JOB}`, ['on: unknown event (Push)']],
-      [`on: Push\n${JOB}`, ['on: unknown event (Push)']],
-      [`on: [push, pull_request: {}]\n${JOB}`, ['on: unknown event (pull_request: {})']],
-      [`on: [push,, pull_request]\n${JOB}`, ['on: unknown event ()']],
-      [`on:\n  - push:\n${JOB}`, ['on: unknown event (push:)']],
+      [`on:\n  push: main\n${JOB}`, ['on.push: unreadable value ("main")']],
+      [`on: {push: 1}\n${JOB}`, ['on.push: unreadable value (1)']],
+      [`on:\n  pull_request:\n    - main\n${JOB}`, ['on.pull_request: unreadable value (["main"])']],
     ];
     for (const [src, expected] of cases) {
       expect(parseWorkflow(src).unsupported, src).toEqual(expected);
     }
-    expect(parseWorkflow(`on: [push, workflow_dispatch]\n${JOB}`)).toMatchObject({ pullRequest: false, unsupported: [] });
+    // schedule の cron は配列
+    expect(parseWorkflow(`on:\n  schedule:\n    - cron: '0 0 * * *'\n${JOB}`).unsupported).toEqual([]);
   });
 
-  it('on: [] / {} / null / ~ (今の workflow に無い形)・同じ行の値と次行の子の両方を持つ on: は unsupported', () => {
+  it('on: [] / {} / null / ~ / 無い (今の workflow に無い形)・文字列でも配列でも mapping でもない on: は unsupported', () => {
     const cases: [string, string[]][] = [
-      [`on: []\n${JOB}`, ['on: empty value ([])']],
-      [`on: {}\n${JOB}`, ['on: empty value ({})']],
-      [`on: null\n${JOB}`, ['on: empty value (null)']],
-      [`on: ~\n${JOB}`, ['on: empty value (~)']],
-      [`on: [ ]\n${JOB}`, ['on: empty value ([ ])']],
-      [`on: push\n  pull_request:\n${JOB}`, ['on: value with nested lines (push)']],
-      [`on: [push,\n  pull_request]\n${JOB}`, ['on: value with nested lines ([push,)']],
+      [`on: []\n${JOB}`, ['on: empty ([])']],
+      [`on: {}\n${JOB}`, ['on: empty ({})']],
+      [`on: null\n${JOB}`, ['on: empty (null)']],
+      [`on: ~\n${JOB}`, ['on: empty (null)']],
+      [`on:\n${JOB}`, ['on: empty (null)']],
+      [`on: [ ]\n${JOB}`, ['on: empty ([])']],
+      [`on: 1\n${JOB}`, ['on: unreadable value (1)']],
+      [JOB, ['on: missing']],
     ];
     for (const [src, expected] of cases) {
       expect(parseWorkflow(src).unsupported, src).toEqual(expected);
     }
-  });
-
-  it('pull_request の branches / paths は空の配列・同じ行の値と次行の子の両方を持つ形を読まない', () => {
-    expect(parseWorkflow(`on:\n  pull_request:\n    branches: []\n${JOB}`).unsupported).toEqual(['on.pull_request.branches: unreadable list']);
-    expect(parseWorkflow(`on:\n  pull_request:\n    paths: [a]\n      - b\n${JOB}`).unsupported).toEqual(['on.pull_request.paths: unreadable list']);
   });
 });
 
-describe('flow 形式の jobs は unsupported (黙って jobs=[] や誤った名前にしない)', () => {
-  it('jobs: {added-required: {...}} は jobs=[] ではなく unsupported', () => {
+describe('flow 形式の jobs も YAML の値として読む (以前は unsupported)', () => {
+  it('jobs: {added-required: {...}} の job と test: {name: actual-check, ...} の name を読み、ドリフトとして数える', () => {
     const wf = parseWorkflow('on: pull_request\njobs: {added-required: {runs-on: x}}\n');
-    expect(wf.jobs).toEqual([]);
-    expect(wf.unsupported).toEqual(['jobs: inline value ({added-required: {runs-on: x}})']);
-  });
-
-  it('test: {name: actual-check, runs-on: x} は name を test と誤読せず unsupported', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ci-wait-flowjob-'));
-    try {
-      writeFileSync(join(dir, 'a.yml'), 'on: pull_request\njobs:\n  test: {name: actual-check, runs-on: x}\n  plain:\n    runs-on: x\n');
-      writeFileSync(join(dir, 'b.yml'), 'on: pull_request\njobs: {added-required: {runs-on: x}}\n');
-      const r = analyzeWorkflows(dir);
-      expect(r.required).toEqual(['plain']);
-      expect(r.unsupported).toEqual([
-        { workflow: 'a.yml', job: 'test', reason: 'job has inline value' },
-        { workflow: 'b.yml', reason: 'jobs: inline value ({added-required: {runs-on: x}})' },
-      ]);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
+    expect(wf.unsupported).toEqual([]);
+    expect(wf.jobs).toEqual([{ id: 'added-required', name: 'added-required', conditional: null, needs: [] }]);
+    const r = analyze({
+      'a.yml': 'on: pull_request\njobs:\n  test: {name: actual-check, runs-on: x}\n  plain:\n    runs-on: x\n',
+      'b.yml': 'on: pull_request\njobs: {added-required: {runs-on: x}}\n',
+    });
+    expect(r).toEqual({ required: ['actual-check', 'plain', 'added-required'], excluded: [], unsupported: [] });
   });
 });
 
-describe('indent は最初の子から検出する (2 でも 4 でも・揃わなければ unsupported)', () => {
+describe('indent は YAML が決める (2 でも 4 でも・揃わなければ文書ごと unsupported)', () => {
   const fourSpace = [
     'on:',
     '    pull_request:',
@@ -540,36 +608,21 @@ describe('indent は最初の子から検出する (2 でも 4 でも・揃わ�
   });
 
   it('4 スペースの workflow で必須 job を足したらドリフト検査が検出する (jobs=[] で黙って通らない)', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ci-wait-indent-'));
-    try {
-      writeFileSync(join(dir, 'four.yml'), fourSpace);
-      const r = analyzeWorkflows(dir);
-      expect(r.unsupported).toEqual([]);
-      expect(r.required).toEqual(['added check', 'base']);
-      expect([...r.required].sort()).not.toEqual([...EXPECTED_PR_CHECKS].sort());
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
+    const r = analyze({ 'four.yml': fourSpace });
+    expect(r.unsupported).toEqual([]);
+    expect(r.required).toEqual(['added check', 'base']);
+    expect([...r.required].sort()).not.toEqual([...EXPECTED_PR_CHECKS].sort());
   });
 
-  it('jobs: の子が 1 つも読めない・indent が揃わない・定義が空の job は unsupported', () => {
+  it('jobs: が mapping でない・空・定義が mapping でない job は unsupported', () => {
     const list = parseWorkflow('on: pull_request\njobs:\n  - a\n');
     expect(list.jobs).toEqual([]);
-    expect(list.unsupported).toEqual(['jobs: unreadable line (- a)']);
-    const empty = parseWorkflow('on: pull_request\njobs:\n');
-    expect(empty.unsupported).toEqual(['jobs: empty']);
-    const ragged = parseWorkflow('on: pull_request\njobs:\n  a:\n    runs-on: x\n   b:\n    runs-on: x\n');
-    // 浅い `b:` の後の `runs-on: x` は job a の 2 つ目の runs-on (重複 key) になる。どちらも unsupported
-    expect(ragged.unsupported).toEqual(['jobs.a: inconsistent indent (b:)', 'jobs.a: duplicate key (runs-on: x)']);
-    expect(ragged.jobs.map((j) => j.id)).toEqual(['a']);
-    const shallow = parseWorkflow('on: pull_request\njobs:\n    a:\n        runs-on: x\n  b:\n    runs-on: x\n');
-    expect(shallow.unsupported).toEqual(['jobs: inconsistent indent (b:)']);
-    // 浅い行の後に子の深さで現れた `runs-on: x` は job として読まれるが inline value なので required にはならない
-    expect(shallow.jobs.map((j) => [j.id, j.conditional])).toEqual([['a', null], ['runs-on', 'inline value']]);
-    const bare = parseWorkflow('on: pull_request\njobs:\n  a:\n  b:\n    runs-on: x\n');
-    expect(bare.jobs.map((j) => [j.id, j.conditional])).toEqual([['a', 'empty definition'], ['b', null]]);
-    const onShallow = parseWorkflow('on:\n    push:\n  pull_request:\njobs:\n  a:\n    runs-on: x\n');
-    expect(onShallow.unsupported).toEqual(['on: inconsistent indent (pull_request:)']);
+    expect(list.unsupported).toEqual(['jobs: not a mapping (["a"])']);
+    expect(parseWorkflow('on: pull_request\njobs:\n').unsupported).toEqual(['jobs: empty']);
+    expect(parseWorkflow('on: pull_request\njobs: {}\n').unsupported).toEqual(['jobs: empty']);
+    expect(parseWorkflow('on: pull_request\n').unsupported).toEqual(['jobs: missing']);
+    const bare = parseWorkflow('on: pull_request\njobs:\n  a:\n  b:\n    runs-on: x\n  c: x\n');
+    expect(bare.jobs.map((j) => [j.id, j.conditional])).toEqual([['a', 'empty definition'], ['b', null], ['c', 'definition that is not a mapping']]);
   });
 });
 

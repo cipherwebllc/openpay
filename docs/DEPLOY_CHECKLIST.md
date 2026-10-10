@@ -710,7 +710,8 @@ resolved の書き換え) は PR レビューと lockfile-gate の形の検査�
 workflow の検査 (`tests/scripts/workflow-guards.test.ts` + `scripts/lib/workflowRun.mjs`) が守る相手は
 **保守者 (AI エージェントを含む) がうっかり** workflow に `npm install` や `npx …` を足すことで、意図的に検査を欺く
 書き方はレビューの範囲とする。ただしシェルを分解して意味を推測することはせず、npm / npx / 2 つの gate の名前を含む
-run の行は許可リストとの完全一致だけを通し (fail-closed)、読み残しうる YAML の書式は throw して、うっかりの別書式を
+run の行は許可リストとの完全一致だけを通し (fail-closed)、YAML は `yaml` パッケージ (devDependency) で読んで、
+パースエラー・複数ドキュメント・アンカー / エイリアス / タグ・重複キー・想定外の型は throw して、うっかりの別書式を
 黙って通さない。workflow で `npx` は全面禁止 (`npx --no` でも global の bin や npx の cache を実行しうるため)。bin は
 `npm run <script>` か `./node_modules/.bin/<bin>` で呼ぶ。
 
@@ -744,7 +745,7 @@ lockfile-gate を置く。**npm / npx / gate の名前を run の中の説明文
 新しい npm の呼び出しが要るときは許可リストに 1 行足し、PR レビューで決める。許可した行の実行のされ方を変える設定も止める:
 
 - workflow / job / step の `env` に `npm_config_*` (大文字小文字を問わない・取得元や ignore-scripts を差し替える) を置かない。
-  env の書式が読めなければ fail (flow・式・引用符付きの key・継続行)。
+  env が mapping でなければ fail (式など。flow 形式・引用符付きの key は YAML として読んで key を見る)。
 - install・lockfile-gate・実体 gate の step の `if:` は、無いか、install の step と同じ 1 行の文字列だけ (job の `if:` は対象外)。
 - パイプを含む `npm run build 2>&1 | tee build.log` は、step の run 全体が ci.yml の build の step の固定テンプレート
   (`PIPEFAIL_BUILD_RUN`・コメント行も含めた行の並び) と完全一致するときだけ許す。
