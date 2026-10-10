@@ -42,23 +42,70 @@ lockfile 側の依存表記も同じ・`resolved` が公式 registry」を見る
   **手編集しない** (整合しない `integrity` を書くと install が壊れる)
 
 B では、この状態の entrypoint フェンスは MCP の依存表記と lockfile の SDK version が
-食い違うので**意図どおり失敗する**。B の手順 2 で解消する。
+食い違うので**意図どおり失敗する**。B の手順 3 で解消する。
+
+---
+
+## publish の進め方 (A・B 共通)
+
+- **コードブロックは 1 つずつ実行する**。まとめて貼り付けない (途中で失敗しても
+  次のコマンドへ進んでしまう)。
+- **dry-run と本公開は別のブロック**。本公開に進む前提は、dry-run が exit 0 で終わり、
+  出力の version と同梱物 (files) を目で確かめたこと。npm は同名・同版を再公開できず、
+  公開は取り消せない。
+- **MCP に進む前提は SDK の公開が成功したこと** (`npm view openpay-x402-sdk version` が
+  新版を返す)。SDK の公開が失敗したら MCP には進まない。
 
 ---
 
 ## A の手順 (MCP の SDK 範囲を変えない)
 
-PR を CI green で squash merge してから (merge は user の指示を待つ)、main で:
+PR を CI green で squash merge してから (merge は user の指示を待つ)、main で行う。
+
+### A-1. 準備
 
 ```bash
 git checkout main && git pull
+git log -1 --oneline      # リリース PR の squash commit が HEAD にあること
 npm ci                    # SDK の node:test は root の node_modules (viem 等) を使う
+npm view openpay-x402-sdk version   # まだ旧版であること (先に誰かが出していないか)
+npm view openpay-x402-mcp version
+```
+
+### A-2. SDK を dry-run
+
+```bash
 cd packages/x402-sdk
-npm publish --dry-run     # prepublishOnly で SDK の node:test が走る・files / version を目視
+npm publish --dry-run     # prepublishOnly で SDK の node:test が走る
+```
+
+exit 0 で終わり、テストが全件 pass し、`version` が新版・`tests/` が同梱物に無いことを
+目で確かめる。どれかが違えばここで止める。
+
+### A-3. SDK を公開 (A-2 の確認が済んでから)
+
+```bash
 npm publish --access public
+npm view openpay-x402-sdk version   # 新版を返すこと
+```
+
+`npm view` が新版を返さなければ MCP には進まない。
+
+### A-4. MCP を dry-run (A-3 で SDK の新版が見えてから)
+
+```bash
 cd ../x402-mcp
 npm publish --dry-run
+```
+
+exit 0 で終わり、`version` が新版・dependencies の `openpay-x402-sdk` が想定の範囲で
+あることを目で確かめる。
+
+### A-5. MCP を公開 (A-4 の確認が済んでから)
+
+```bash
 npm publish --access public
+npm view openpay-x402-mcp version   # 新版を返すこと
 ```
 
 その後「公開後の確認とドキュメント追従」を行う。
@@ -67,15 +114,26 @@ npm publish --access public
 
 ## B の手順 (MCP が新しい SDK を必要とする)
 
-### 1. SDK を publish (作業ブランチ上)
+### 1. SDK を dry-run (作業ブランチ上)
 
 ```bash
 cd packages/x402-sdk
-npm publish --dry-run     # prepublishOnly で SDK の node:test が走る・files / version / 同梱物を目視
-npm publish --access public
+npm publish --dry-run     # prepublishOnly で SDK の node:test が走る
 ```
 
-### 2. MCP の lockfile を再生成して commit
+exit 0 で終わり、テストが全件 pass し、`version` が新版・`tests/` が同梱物に無いことを
+目で確かめる。どれかが違えばここで止める。
+
+### 2. SDK を公開 (手順 1 の確認が済んでから)
+
+```bash
+npm publish --access public
+npm view openpay-x402-sdk version   # 新版を返すこと
+```
+
+`npm view` が新版を返さなければ手順 3 以降に進まない。
+
+### 3. MCP の lockfile を再生成して commit
 
 ```bash
 cd ../x402-mcp
@@ -86,7 +144,7 @@ git add package-lock.json
 git commit                # 例: chore(mcp): SDK <ver> publish 後の lockfile を公式 registry から再生成
 ```
 
-### 3. 検証
+### 4. 検証
 
 ```bash
 npx vitest run tests/packages
@@ -94,21 +152,31 @@ node scripts/lockfile-gate.mjs
 npm run typecheck
 ```
 
-手順 2 の前に失敗していた entrypoint テストがここで green になる。ならない場合は
+手順 3 の前に失敗していた entrypoint テストがここで green になる。ならない場合は
 lockfile の `resolved` が registry を向いていないか、version が食い違っている。
 
-### 4. push → PR → CI green → squash merge
+### 5. push → PR → CI green → squash merge
 
 CI が権威 (掟 2)。`node scripts/ci-wait.mjs <PR番号>` で settle を待ち、
 nonSUCCESS=0 を確認してから merge。merge は user の指示を待つ。
 
-### 5. MCP を publish (merge 済みの main から)
+### 6. MCP を dry-run (merge 済みの main から)
 
 ```bash
 git checkout main && git pull
+git log -1 --oneline      # 手順 5 の squash commit が HEAD にあること
 cd packages/x402-mcp
 npm publish --dry-run
+```
+
+exit 0 で終わり、`version` が新版・dependencies の `openpay-x402-sdk` が
+`^<SDK 新バージョン>` であることを目で確かめる。
+
+### 7. MCP を公開 (手順 6 の確認が済んでから)
+
+```bash
 npm publish --access public
+npm view openpay-x402-mcp version   # 新版を返すこと
 ```
 
 MCP を先に publish すると、まだ存在しない SDK バージョンに依存する tarball が
@@ -148,8 +216,9 @@ llms.txt を書き換える場合は掟 14 の開示 3 点セットに従う。
   の `version`/`resolved`/`integrity`) を**手編集しない**。`integrity` は publish 済み
   tarball のハッシュで、手で正しい値は作れない (手で変えてよいのは MCP 自身の `version` 2 か所だけ)。
 - B で SDK だけ publish して MCP の追従 commit を忘れると、main は
-  entrypoint フェンスで赤いままになる。B の手順 2 まで一続きで行う。
+  entrypoint フェンスで赤いままになる。B の手順 3 まで一続きで行う。
 - A で MCP の publish を忘れても main は赤くならないが、npm の MCP は旧版のまま残る。
   `npm view openpay-x402-mcp version` で確かめる。
 - publish を取り消したくなっても `npm unpublish` は 72 時間制限や
-  再利用不可バージョンの制約がある。`--dry-run` を必ず先に通す。
+  再利用不可バージョンの制約がある。`--dry-run` を必ず先に通し、その確認が済むまで
+  本公開のコマンドを実行しない (「publish の進め方」)。
