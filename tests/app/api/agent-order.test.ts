@@ -748,6 +748,10 @@ describe('agent-order pay route', () => {
     });
 
     it('finalize が受注の時刻を返さないとき (重複で読めない等) は 200 に pickupAt を出さない', async () => {
+      // 時計を固定する (他の B12 の test と同じ)。実時計のままだと、最終受付 18:00・準備 60 分の店は
+      // Asia/Tokyo の 17 時以降に受取枠が無くなり、route が 409 store_not_accepting を返して落ちる。
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-07-10T03:00:00.000Z')); // Asia/Tokyo 12:00
       store.record = preorderShop();
       const { pay } = await load({ preorderTime: '1' });
       routeMocks.verify.mockResolvedValue(NextResponse.json({ isValid: true, payer: PAYER }));
