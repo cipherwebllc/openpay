@@ -4,7 +4,15 @@
 // (4) delta と「変更なし = changes:[]」。
 
 import { describe, expect, it } from 'vitest';
+import { MANUAL_CHANGELOG } from '@/lib/directory/changelogData';
+import { DIRECTORY_ENTRIES } from '@/lib/directory/data';
+import { JPYC_PAYMENTS_RESOURCE } from '@/lib/directory/paidResources';
 import { createPaymentMonitorEnvelope } from '@/lib/directory/paymentMonitor';
+import { USDC_PAYMENT_MONITOR } from '@/lib/directory/usdcResource';
+import {
+  JPYC_DIRECTORY_MONITOR_OPENAPI_PATHS,
+  VANILLA_DIRECTORY_OPENAPI_PATHS,
+} from '@/lib/openapi/monitor';
 import {
   createServiceMonitorEnvelope,
   SERVICE_MONITOR_MAX_LIMIT,
@@ -12,6 +20,13 @@ import {
 
 const NOW = '2026-08-27T02:00:00.000Z';
 const Q = { limit: SERVICE_MONITOR_MAX_LIMIT };
+
+/** dg-sps (ディレクトリ掲載・決済スコープのイベントを持つ) の表示名だけを変えたディレクトリ。 */
+function renamedDg() {
+  return DIRECTORY_ENTRIES.map((entry) =>
+    entry.slug === 'dg-sps' ? { ...entry, name: 'DG Stablecoin Payment Service (renamed)' } : entry,
+  );
+}
 
 describe('createPaymentMonitorEnvelope', () => {
   it('snapshot: 決済スコープの backfill (TIS/実証/JCB MOU/DG SPS) が日付昇順で載る', () => {
@@ -33,13 +48,13 @@ describe('createPaymentMonitorEnvelope', () => {
     }
   });
 
-  it('entry 紐づけイベント (dg-sps) は provider をエントリ名から導出し、イベント固有の assets/chains を優先', () => {
+  it('entry 紐づけイベント (dg-sps) は記録時の provider を持ち、イベント固有の assets/chains を優先', () => {
     const env = createPaymentMonitorEnvelope(Q, NOW);
     // service_launch は NetStars (7/13 backfill) もあるので発表日で dg-sps の行を選ぶ。
     const launch = env.changes.find(
       (c) => c.changeCategory === 'service_launch' && c.date === '2026-08-10',
     )!;
-    expect(launch.provider).toBe('DG Stablecoin Payment Service'); // entry.name 由来
+    expect(launch.provider).toBe('DG Stablecoin Payment Service'); // changelog に固定した記録時の表示名
     expect(launch.assets).toEqual(['USDC']);
     expect(launch.chains).toEqual(['base']);
     expect(launch.date).toBe('2026-08-10'); // 発表日 (ディレクトリ追加日 8/27 ではない)
@@ -181,28 +196,220 @@ describe('createPaymentMonitorEnvelope', () => {
     expect([...seen].sort()).toEqual(all.map(key).sort()); // 取りこぼしゼロ
   });
 
-  // N4: 公開している重複排除キー (provider + date + changeCategory) が実データ上も一意
-  // でなければ、エージェントは正しく dedupe しても取りこぼす。
-  it('dedupe キー provider+date+changeCategory は snapshot 全件で一意', () => {
+  // N4: 公開している重複排除キー (slug (無いときは provider) + date + changeCategory) が実データ上も
+  // 一意でなければ、エージェントは正しく dedupe しても取りこぼす。
+  it('dedupe キー slug(無いときは provider)+date+changeCategory は snapshot 全件で一意', () => {
     const rows = createPaymentMonitorEnvelope(Q, NOW).changes;
     expect(rows.length).toBeGreaterThan(0);
-    const keys = rows.map((c) => `${c.provider}|${c.date}|${c.changeCategory ?? ''}`);
+    const keys = rows.map((c) => `${c.slug ?? c.provider}|${c.date}|${c.changeCategory ?? ''}`);
     expect(new Set(keys).size, `重複キー: ${keys.filter((k, i) => keys.indexOf(k) !== i)}`).toBe(
       keys.length,
     );
   });
 
-  it('E3: snapshot の hasMore は「全イベント数 > limit」・nextChangedSince は常に generatedAt', () => {
-    const total = createPaymentMonitorEnvelope(Q, NOW).totalEvents;
+  it('E3: snapshot の hasMore は「全イベント数 > limit」・打ち切りが無ければ nextChangedSince は generatedAt', () => {
+    const full = createPaymentMonitorEnvelope(Q, NOW);
+    const total = full.totalEvents;
+    if (!full.hasMore) expect(full.nextChangedSince).toBe(NOW.slice(0, 10));
     const capped = createPaymentMonitorEnvelope({ limit: 1 }, NOW);
     expect(capped.hasMore).toBe(total > 1);
-    expect(capped.nextChangedSince).toBe(NOW.slice(0, 10));
+  });
+
+  // 第 7 回レビュー E17 の follow-up (Codex 1〜3 回目): 行の provider は `event.provider ?? entry.name` で、
+  // changelog に provider の無いイベントはディレクトリの改名に追随して変わっていた。snapshot の続きで再配信された
+  // 同じイベントが別の provider 名で届くと、provider を含む鍵では二重登録になる。決済スコープの全イベントに
+  // provider を明示して固定し (記録時の表示名・改名に追随しない)、行には不変の slug も載せる。
+  it('E17 follow-up: 決済スコープの changelog イベントは全て provider を明示している (改名に追随させない)', () => {
+    const payment = MANUAL_CHANGELOG.filter((event) => event.scopes.includes('stablecoin-payments'));
+    expect(payment.length).toBeGreaterThan(0);
+    const missing = payment.filter((event) => !event.provider || event.provider.trim() === '');
+    expect(missing.map((e) => `${e.slug ?? '?'}|${e.date}|${e.changeCategory ?? ''}`)).toEqual([]);
+  });
+
+  // 同 follow-up (Codex 4 回目): 過去イベントの provider を一括で書き換えると、公開の dedupe 手順で同じイベントが
+  // 別の鍵になり件数が増える (存在確認だけのフェンスでは検出できない)。記録済みイベントの識別 (date・changeType・
+  // changeCategory・slug・provider) を golden で固定し、書き換えと削除を検出する。新しいイベントの追加は妨げない
+  // (golden に無いものは検査しない・必要になったら足す)。
+  it('記録済みの決済スコープのイベントは provider を含めて書き換えられていない (golden)', () => {
+    const RECORDED = [
+      '2025-11-14|added|partnership||TIS / JPYC',
+      '2026-01-28|added|service_launch||HashPort Wallet for Biz',
+      '2026-02-19|added|pilot||Digital Garage / JCB / Resona HD',
+      '2026-07-07|added|pilot||MisePay (Sowaka Japan)',
+      '2026-07-13|added|service_launch||NetStars Stablecoin Pay',
+      '2026-07-13|updated|update||HashPort Wallet for Biz',
+      '2026-07-15|added|partnership||JCB / Circle',
+      '2026-08-03|added|pilot||Lawson (POS pilot)',
+      '2026-08-10|added|service_launch|dg-sps|DG Stablecoin Payment Service',
+      '2026-08-26|added|pilot||HashPort (Osaka Pref. subsidy)',
+      '2026-08-26|added|pilot||Mina Wallet / Sumitomo Mitsui Card (Osaka Pref. subsidy)',
+      '2026-08-26|added|pilot||Mi&T (Osaka Pref. subsidy)',
+      '2026-08-31|updated|fee_change||Mi&T (Osaka Pref. subsidy)',
+      '2026-09-03|updated|partnership||NetStars Stablecoin Pay',
+      '2026-09-04|verified|||HashPort (Osaka Pref. subsidy)',
+      '2026-09-04|verified|||Mina Wallet / Sumitomo Mitsui Card (Osaka Pref. subsidy)',
+      '2026-09-11|updated|partnership||NetStars Stablecoin Pay',
+      '2026-09-11|verified|||HashPort (Osaka Pref. subsidy)',
+      '2026-09-11|verified|||Mina Wallet / Sumitomo Mitsui Card (Osaka Pref. subsidy)',
+      '2026-09-11|verified|||Mi&T (Osaka Pref. subsidy)',
+      '2026-09-18|verified|||HashPort (Osaka Pref. subsidy)',
+      '2026-09-18|verified|||Mina Wallet / Sumitomo Mitsui Card (Osaka Pref. subsidy)',
+      '2026-09-18|verified|||Mi&T (Osaka Pref. subsidy)',
+      '2026-09-18|verified|||NetStars Stablecoin Pay',
+      '2026-09-23|verified|||HashPort (Osaka Pref. subsidy)',
+      '2026-09-23|verified|||Mina Wallet / Sumitomo Mitsui Card (Osaka Pref. subsidy)',
+      '2026-09-23|verified|||Mi&T (Osaka Pref. subsidy)',
+      '2026-09-23|verified|||NetStars Stablecoin Pay',
+      '2026-09-30|added|service_launch||αU wallet (KDDI / au Coincheck Digital Assets / HashPort)',
+    ];
+    const current = new Set(
+      MANUAL_CHANGELOG.filter((event) => event.scopes.includes('stablecoin-payments')).map((event) =>
+        [event.date, event.changeType, event.changeCategory ?? '', event.slug ?? '', event.provider].join('|'),
+      ),
+    );
+    expect(RECORDED.filter((tuple) => !current.has(tuple))).toEqual([]);
+  });
+
+  it('E17 follow-up: snapshot → 表示名の変更 → delta でも、既存イベントの provider と dedupe キーは変わらない', () => {
+    const key = (c: { slug?: string; provider: string; date: string; changeCategory?: string }) =>
+      `${c.slug ?? c.provider}|${c.date}|${c.changeCategory ?? ''}`;
+    const total = createPaymentMonitorEnvelope(Q, NOW).totalEvents;
+    const snapshot = createPaymentMonitorEnvelope({ limit: total - 1 }, NOW);
+    expect(snapshot.hasMore).toBe(true);
+    // ディレクトリ掲載の事業者 (改名され得る) のイベントが snapshot に入っている前提を確かめる。
+    const dgBefore = snapshot.changes.find((c) => c.slug === 'dg-sps');
+    expect(dgBefore?.provider).toBe('DG Stablecoin Payment Service');
+
+    const delta = createPaymentMonitorEnvelope(
+      { changedSince: snapshot.nextChangedSince, limit: SERVICE_MONITOR_MAX_LIMIT },
+      NOW,
+      renamedDg(),
+    );
+    expect(delta.hasMore).toBe(false);
+    const dgAfter = delta.changes.find((c) => c.slug === 'dg-sps');
+    expect(dgAfter).toBeDefined(); // 同じイベントが再配信される
+    expect(dgAfter!.provider).toBe(dgBefore!.provider); // 改名しても記録時の provider のまま
+    expect(key(dgAfter!)).toBe(key(dgBefore!));
+
+    // snapshot と delta の和集合を dedupe すると、ちょうど全イベント数になる (二重登録も取りこぼしも無い)。
+    const seen = new Set([...snapshot.changes, ...delta.changes].map(key));
+    expect(seen.size).toBe(total);
+  });
+
+  // Codex 3 回目の反例: slug を足す前の版で snapshot を保存 → DG を改名 → 新しい版の delta。
+  // provider が改名に追随すると「同じ行の provider で組んだ旧い鍵」が保存時の名前と一致せず 30 件になっていた。
+  it('E17 follow-up: 旧い版の保存 → 改名 → 新しい版の delta でも、同じ行の provider で読み替えるとちょうど全件', () => {
+    const oldKey = (c: { provider: string; date: string; changeCategory?: string }) =>
+      `${c.provider}|${c.date}|${c.changeCategory ?? ''}`;
+    const newKey = (c: { slug?: string; provider: string; date: string; changeCategory?: string }) =>
+      `${c.slug ?? c.provider}|${c.date}|${c.changeCategory ?? ''}`;
+    const total = createPaymentMonitorEnvelope(Q, NOW).totalEvents;
+    const oldSnapshot = createPaymentMonitorEnvelope({ limit: total - 1 }, NOW);
+    const stored = oldSnapshot.changes.map(({ slug: _slug, ...row }) => row); // slug の無い旧い版の行
+    const delta = createPaymentMonitorEnvelope(
+      { changedSince: oldSnapshot.nextChangedSince, limit: SERVICE_MONITOR_MAX_LIMIT },
+      NOW,
+      renamedDg(),
+    );
+    const slugged = delta.changes.filter((c) => c.slug !== undefined);
+    expect(slugged.length).toBeGreaterThan(0);
+    const rekey = new Map(slugged.map((c) => [oldKey(c), newKey(c)]));
+    const migrated = new Set([
+      ...stored.map((o) => rekey.get(oldKey(o)) ?? oldKey(o)),
+      ...delta.changes.map(newKey),
+    ]);
+    expect(migrated.size).toBe(total);
+  });
+
+  // 同 follow-up (Codex 2 回目 P2): slug を足す前の版で保存したイベントは provider + date + changeCategory の
+  // 鍵で残っている。新しい版の delta で同じイベントが slug つきで再配信されると鍵が変わり、29 件が 30 件に
+  // なる。移行の手順は「slug つきの行は、同じ行の provider で組んだ旧い鍵とも照合する」(同じ行に provider と
+  // slug の両方が載る)。旧い応答 → 新しい応答をまたいでも、この読み替えで全件が一致すること。
+  it('E17 follow-up: slug を足す前の応答 → 足した後の応答をまたいでも、同じ行の provider で旧い鍵を読み替えると全件一致', () => {
+    const oldKey = (c: { provider: string; date: string; changeCategory?: string }) =>
+      `${c.provider}|${c.date}|${c.changeCategory ?? ''}`;
+    const newKey = (c: { slug?: string; provider: string; date: string; changeCategory?: string }) =>
+      `${c.slug ?? c.provider}|${c.date}|${c.changeCategory ?? ''}`;
+    const total = createPaymentMonitorEnvelope(Q, NOW).totalEvents;
+    // 旧い版の snapshot = slug の無い行 (provider で保存されている)。
+    const oldSnapshot = createPaymentMonitorEnvelope({ limit: total - 1 }, NOW);
+    expect(oldSnapshot.hasMore).toBe(true);
+    const stored = oldSnapshot.changes.map(({ slug: _slug, ...row }) => row);
+    const delta = createPaymentMonitorEnvelope(
+      { changedSince: oldSnapshot.nextChangedSince, limit: SERVICE_MONITOR_MAX_LIMIT },
+      NOW,
+    );
+    expect(delta.hasMore).toBe(false);
+    const slugged = delta.changes.filter((c) => c.slug !== undefined);
+    expect(slugged.length).toBeGreaterThan(0); // 実際に slug つきの行が再配信される前提
+
+    // 読み替えなし: 旧い鍵と新しい鍵が混ざり、同じイベントを二重に数える (この回帰の再現)。
+    const naive = new Set([...stored.map(oldKey), ...delta.changes.map(newKey)]);
+    expect(naive.size).toBeGreaterThan(total);
+
+    // 読み替えあり: slug つきの行は同じ行の provider で旧い鍵を組めるので、保存済みの旧い鍵を新しい鍵へ移す。
+    const rekey = new Map(slugged.map((c) => [oldKey(c), newKey(c)]));
+    const migrated = new Set([
+      ...stored.map((o) => rekey.get(oldKey(o)) ?? oldKey(o)),
+      ...delta.changes.map(newKey),
+    ]);
+    expect(migrated.size).toBe(total);
+  });
+
+  it('E17 follow-up: 移行の手順 (slug つきの行は同じ行の provider で組んだ旧い鍵とも照合) を schema と OpenAPI に書いている', () => {
+    const changes = JPYC_PAYMENTS_RESOURCE.outputSchema.output.properties.changes as {
+      items: { properties: { slug: { description: string } } };
+    };
+    const texts = [
+      changes.items.properties.slug.description,
+      VANILLA_DIRECTORY_OPENAPI_PATHS[USDC_PAYMENT_MONITOR.path].get['x-agent-usage'],
+      JPYC_DIRECTORY_MONITOR_OPENAPI_PATHS['/api/paid/stablecoin-payments'].get['x-agent-usage'],
+    ];
+    for (const text of texts) {
+      expect(text).toContain('dedupe by slug+date+changeCategory');
+      expect(text).toContain('stored before slug was added');
+      expect(text).toContain('provider on the same row');
+      // provider はイベントごとに固定 (Codex 3 回目)。「改名で変わる」と書くと移行手順が成り立たない。
+      expect(text).not.toContain('can change on rename');
+    }
+    const provider = (changes.items.properties as unknown as { provider: { description: string } }).provider;
+    expect(provider.description).toContain('fixed per event');
+    expect(provider.description).not.toContain('follows the current directory name');
+  });
+
+  // E17 (第 7 回レビュー): Service Monitor と同じ。打ち切った snapshot の nextChangedSince を
+  // changedSince に渡して delta をたどれば、返さなかったイベントを全部取れる。
+  it('E17: 打ち切った snapshot の nextChangedSince から delta をたどると取りこぼしゼロ', () => {
+    const key = (c: { provider: string; date: string; changeCategory?: string }) =>
+      `${c.provider}|${c.date}|${c.changeCategory ?? ''}`;
+    const all = new Set(createPaymentMonitorEnvelope(Q, NOW).changes.map(key));
+    const limit = 3;
+    expect(all.size).toBeGreaterThan(limit); // 実際に打ち切りが起きる前提
+
+    const snapshot = createPaymentMonitorEnvelope({ limit }, NOW);
+    expect(snapshot.hasMore).toBe(true);
+    const seen = new Set(snapshot.changes.map(key));
+    let cursor = snapshot.nextChangedSince;
+    let pages = 0;
+    for (; pages < 50; pages++) {
+      const page = createPaymentMonitorEnvelope({ changedSince: cursor, limit }, NOW);
+      for (const change of page.changes) seen.add(key(change));
+      if (!page.hasMore) break;
+      expect(page.nextChangedSince > cursor).toBe(true);
+      cursor = page.nextChangedSince;
+    }
+    expect(pages).toBeLessThan(50);
+    expect([...seen].sort()).toEqual([...all].sort());
   });
 });
 
 // 事業者の現況行 providers (2026-09-02 裁定 2/2): 固定項目・null = 確認したが公表なし・
-// provider 名は changelog と双方向に一致・delta は変更のあった社のみ・lastEventDate は導出。
+// イベントとは識別子 (eventKeys = slug か記録時に固定した provider 名) で結ぶ・delta は変更のあった社のみ・
+// lastEventDate は導出。
 import { PAYMENT_PROVIDERS, PAYMENT_INTEGRATIONS, PAYMENT_PROVIDER_STAGES } from '@/lib/directory/paymentProviders';
+
+/** 決済スコープのイベントの結合鍵 (slug、無ければ記録時に固定した provider 名)。 */
+const eventKeyOf = (event: { slug?: string; provider?: string }) => event.slug ?? event.provider ?? '';
 
 describe('createPaymentMonitorEnvelope.providers (事業者の現況行)', () => {
   it('snapshot: 全社が固定項目つきで載り、母数 totalProviders と一致', () => {
@@ -223,14 +430,65 @@ describe('createPaymentMonitorEnvelope.providers (事業者の現況行)', () =>
     }
   });
 
-  it('provider 名は changelog の provider と双方向に一致 (行の結合キー)', () => {
-    const env = createPaymentMonitorEnvelope(Q, NOW);
-    const inChanges = new Set(env.changes.map((c) => c.provider));
-    const inProviders = new Set(env.providers.map((p) => p.provider));
-    expect([...inProviders].sort()).toEqual([...inChanges].sort());
+  // 第 7 回レビュー E17 の follow-up (Codex 4 回目): 現況行とイベントを表示名で結ぶと、履歴の provider を
+  // 固定したまま現況行の表示名を改名したときに結べなくなる。結合は識別子 (eventKeys) で行い、名前は表示だけ。
+  it('識別子の対応: 決済スコープの全イベントはちょうど 1 社の eventKeys に属し、全社に 1 件以上のイベントがある', () => {
+    const payment = MANUAL_CHANGELOG.filter((event) => event.scopes.includes('stablecoin-payments'));
+    const owners = new Map<string, string[]>();
+    for (const record of PAYMENT_PROVIDERS) {
+      expect(record.eventKeys.length, record.provider).toBeGreaterThan(0);
+      // ディレクトリ掲載の事業者は slug で結ぶ (slug のイベントだけが付く)。
+      if (record.slug) expect(record.eventKeys).toContain(record.slug);
+      for (const key of record.eventKeys) owners.set(key, [...(owners.get(key) ?? []), record.provider]);
+    }
+    // 1 つの鍵が 2 社に属さない。
+    expect([...owners].filter(([, names]) => names.length > 1)).toEqual([]);
+    // どの社にも属さないイベントが無い。
+    expect(payment.filter((event) => !owners.has(eventKeyOf(event))).map(eventKeyOf)).toEqual([]);
+    // 使われない鍵・イベントの無い社が無い。
+    const used = new Set(payment.map(eventKeyOf));
+    expect([...owners.keys()].filter((key) => !used.has(key))).toEqual([]);
+    // 現況行には結合用の eventKeys を出さない (公開出力は表示名と固定項目だけ)。
+    for (const row of createPaymentMonitorEnvelope(Q, NOW).providers) expect(row).not.toHaveProperty('eventKeys');
   });
 
-  it('lastEventDate は同名 provider の最新イベント日・一次ソースが開始を明示した社だけ startedAt', () => {
+  it('Codex 4 回目の反例: ディレクトリ掲載の事業者 (DG) を改名しても、delta の現況行に載り lastEventDate も保たれる', () => {
+    const renamedProviders = PAYMENT_PROVIDERS.map((p) =>
+      p.slug === 'dg-sps' ? { ...p, provider: 'DG Stablecoin Payment Service (renamed)' } : p,
+    );
+    const delta = createPaymentMonitorEnvelope(
+      { changedSince: '2026-08-10', limit: SERVICE_MONITOR_MAX_LIMIT },
+      NOW,
+      renamedDg(),
+      renamedProviders,
+    );
+    expect(delta.changes.some((c) => c.slug === 'dg-sps')).toBe(true);
+    const dg = delta.providers.find((p) => p.slug === 'dg-sps');
+    expect(dg?.provider).toBe('DG Stablecoin Payment Service (renamed)'); // 表示は新しい名前
+    expect(dg?.lastEventDate).toBe('2026-08-10');
+    // 履歴の provider は記録時の名前で固定のまま。
+    expect(delta.changes.find((c) => c.slug === 'dg-sps')?.provider).toBe('DG Stablecoin Payment Service');
+  });
+
+  it('非掲載の事業者 (NetStars) の表示名を改名しても、過去イベント (旧い名前のまま) と結べる', () => {
+    const before = createPaymentMonitorEnvelope(Q, NOW).providers.find((p) => p.provider === 'NetStars Stablecoin Pay')!;
+    const renamedProviders = PAYMENT_PROVIDERS.map((p) =>
+      p.provider === 'NetStars Stablecoin Pay' ? { ...p, provider: 'NetStars Pay (renamed)' } : p,
+    );
+    const snapshot = createPaymentMonitorEnvelope(Q, NOW, DIRECTORY_ENTRIES, renamedProviders);
+    const after = snapshot.providers.find((p) => p.provider === 'NetStars Pay (renamed)')!;
+    expect(after.lastEventDate).toBe(before.lastEventDate); // announcedAt に落ちない
+    const delta = createPaymentMonitorEnvelope(
+      { changedSince: '2026-09-23', limit: SERVICE_MONITOR_MAX_LIMIT },
+      NOW,
+      DIRECTORY_ENTRIES,
+      renamedProviders,
+    );
+    expect(delta.changes.some((c) => c.provider === 'NetStars Stablecoin Pay')).toBe(true);
+    expect(delta.providers.map((p) => p.provider)).toContain('NetStars Pay (renamed)');
+  });
+
+  it('lastEventDate はその社に属するイベント (eventKeys) の最新日・一次ソースが開始を明示した社だけ startedAt', () => {
     const env = createPaymentMonitorEnvelope(Q, NOW);
     const dg = env.providers.find((p) => p.slug === 'dg-sps')!;
     expect(dg.stage).toBe('commercial');

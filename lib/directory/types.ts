@@ -23,6 +23,7 @@ export const DIRECTORY_CHAINS = [
 
 export const DIRECTORY_LANGUAGES = ['en', 'ja'] as const;
 
+// 掲載レコードの審査段階 (data.ts の内部状態)。公開 API・UI に出るのは published だけ。
 export const DIRECTORY_STATUSES = [
   'draft',
   'review',
@@ -30,6 +31,13 @@ export const DIRECTORY_STATUSES = [
   'rejected',
   'archived',
 ] as const;
+
+/**
+ * 公開 API の `status` クエリが受け付ける値 (openapi / Bazaar の宣言もこれに一致させる)。
+ * 公開 API は published しか返さないため、内部の審査段階 (draft 等) を宣言・受理すると、
+ * エージェントがそれを指定して必ず空の結果に支払う (第 7 回レビュー E16・user 裁定 R7)。
+ */
+export const DIRECTORY_PUBLIC_STATUSES = ['published'] as const satisfies readonly DirectoryStatus[];
 
 export const DIRECTORY_SOURCE_TYPES = ['manual', 'official'] as const;
 

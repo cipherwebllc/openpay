@@ -10,8 +10,8 @@
 // - 列順は固定 (ja header)。会計ソフトへ貼り付けてもズレないよう先頭から固定。
 
 import { formatUnits } from 'viem';
-import { pad } from './pad';
 import { buildCsv } from './csv';
+import { tokyoDateKey } from './shopTime';
 // 後方互換: 既存 import (CSV_BOM/CSV_NEWLINE を @/lib/historyCsv から取得) を維持。
 export { CSV_BOM, CSV_NEWLINE } from './csv';
 import type { HistoryEntry } from './history';
@@ -288,6 +288,8 @@ export function toCsv(
   return buildCsv([HEADER, ...entries.map((e) => entryToRow(e, opts.usdcJpy))]);
 }
 
+// ファイル名の日付は会計仕訳CSV・会計明細CSV と同じ JST の暦日 (端末の時刻帯で前日にずれない・E15)。
+// 行の日時 (formatHistoryTimestamp) は画面表示・期間フィルタと同じ端末ローカルのまま (review6 F9 の TODO)。
 export function historyCsvFilename(now: Date = new Date()): string {
-  return `openpay-history-${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}.csv`;
+  return `openpay-history-${tokyoDateKey(now.getTime())}.csv`;
 }

@@ -56,7 +56,12 @@ export type ServiceChangeEvent = {
   scopes: readonly ServiceChangeScope[];
   /** ディレクトリエントリに紐づくイベントのみ。業界イベント (実証実験等) は provider を使う。 */
   slug?: string;
-  /** slug 無しイベントの表示名 (例: 'JCB / Digital Garage / Resona HD')。 */
+  /**
+   * 表示名 (例: 'JCB / Digital Garage / Resona HD')。slug 無しイベントは必須。**決済スコープ
+   * (stablecoin-payments) のイベントは slug があっても必ず明示して固定する** — 省略すると Payment Monitor の
+   * 行の provider がディレクトリの表示名 (entry.name) から導出され、改名に追随して dedupe の鍵が変わる
+   * (第 7 回レビュー E17 の follow-up・paymentMonitor.test.ts のフェンス)。
+   */
   provider?: string;
   changeType: ServiceChangeType;
   /** 決済監視ビュー用の分類 (任意)。 */

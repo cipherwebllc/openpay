@@ -21,11 +21,14 @@ export async function GET(request: Request): Promise<NextResponse> {
   const runId = new Date(started).toISOString().slice(0, 13);
   const written: number[] = [];
   const failedBuckets: number[] = [];
+  // 1 バケットの有効 Transfer が ACTIVITY_MAX_ITEMS を超えて件数だけ保存された (overflow) バケット。
+  // 窓が欠けて pointer が進まない原因を、RPC 失敗や時刻逆転と見分けられるように結果と warn へ出す (E18)。
+  const overflowBuckets: number[] = [];
   let missing: number[] = [];
   let reason = 'scan_incomplete';
   let stage: 'storage' | 'scan' = 'storage';
   const failure = (error: 'storage_error' | 'scan_incomplete') =>
-    NextResponse.json({ error }, { status: 503 });
+    NextResponse.json({ error, ...(overflowBuckets.length > 0 ? { overflowBuckets } : {}) }, { status: 503 });
   try {
     const lock = await kvSetNxGet(ACTIVITY_LOCK_KEY, randomUUID(), 55);
     // ok:false と競合を分け、KV 障害を正常なスキップとして隠さない。
@@ -90,7 +93,11 @@ export async function GET(request: Request): Promise<NextResponse> {
       }
       cutoff ??= Date.parse(bucket.toTimestamp) - ACTIVITY_WINDOW_MS;
       // 保存済みでも overflow / 時刻逆転は完全な窓ではない。既存の reader の窓へ波及させない。
-      if (bucket.overflow || (later && bucket.toTimestamp > later.fromTimestamp)) {
+      if (bucket.overflow) {
+        invalid = true;
+        overflowBuckets.push(index);
+        reason = 'bucket_overflow';
+      } else if (later && bucket.toTimestamp > later.fromTimestamp) {
         invalid = true;
         reason = 'invalid bucket window';
       }
@@ -117,6 +124,7 @@ export async function GET(request: Request): Promise<NextResponse> {
       runId, finalized: finalized.number.toString(), newest, boundary, written, missing,
       elapsedMs: Date.now() - started,
       ...(!complete ? { complete: false } : {}),
+      ...(overflowBuckets.length > 0 ? { overflowBuckets } : {}),
     });
   } catch (error) {
     // RPC / KV の例外を未処理終了にせず、run 単位の障害と衛生化した原因を残す。
@@ -124,6 +132,6 @@ export async function GET(request: Request): Promise<NextResponse> {
     return failure(stage === 'storage' ? 'storage_error' : 'scan_incomplete');
   } finally {
     // lease は自動失効。遅延 run が次の所有者の lock を解放する波及を作らない。
-    if (reason) logger.warn('jpyc.activity.run_incomplete', { written, missing, failedBuckets, reason });
+    if (reason) logger.warn('jpyc.activity.run_incomplete', { written, missing, failedBuckets, overflowBuckets, reason });
   }
 }

@@ -183,6 +183,9 @@ export const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
     date: '2026-08-10',
     scopes: ['stablecoin-payments'],
     slug: 'dg-sps',
+    // 決済スコープは slug があっても provider を明示して固定する (記録時の表示名・ディレクトリの改名に
+    // 追随させない。Payment Monitor の行の provider と dedupe の鍵を変えないため)。
+    provider: 'DG Stablecoin Payment Service',
     changeType: 'added',
     changeCategory: 'service_launch',
     assets: ['USDC'],

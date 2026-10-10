@@ -1,8 +1,8 @@
 // Japan Stablecoin Payment Monitor の「事業者の現況行」(2026-09-02 裁定 2/2)。
 // イベント (何が起きたか) に加え、**同じ固定項目で毎週確認した現況**を返す。項目が一次ソースに
 // 無ければ null — null も「確認したが公表されていない」という確認結果であり、推測で埋めない
-// (sourced-facts-only)。行の provider 名は changelog の provider 表示名と完全一致させる
-// (tests/lib/directory/paymentMonitor.test.ts が双方向に検証する)。
+// (sourced-facts-only)。現況行とイベントは表示名ではなく識別子 eventKeys で結ぶ (provider は表示だけ・
+// 改名してよい)。全イベントがちょうど 1 社に属することは tests/lib/directory/paymentMonitor.test.ts が検証する。
 //
 // 週次更新の掟: 現況が変わったら (1) ここを更新 (2) changelog に diffs 付きイベントを追記 —
 // 同一 PR で。verifiedAt は一次ソースを再確認した日。
@@ -14,10 +14,17 @@ export const PAYMENT_INTEGRATIONS = ['api', 'in-store', 'ec', 'wallet'] as const
 export type PaymentIntegration = (typeof PAYMENT_INTEGRATIONS)[number];
 
 export type PaymentProviderRecord = {
-  /** changelog の provider 表示名と一致 (行の結合キー)。 */
+  /** 表示名 (現在の名前)。改名したらここだけ変える — 結合には使わない。 */
   provider: string;
   /** ディレクトリエントリに紐づく場合のみ。 */
   slug?: string;
+  /**
+   * イベントとの結合の識別子 (応答には出さない)。決済スコープの changelog イベントは `slug ?? provider`
+   * (どちらも記録時に固定) を鍵として、この配列を持つ社の現況行に結び付く。ディレクトリ掲載の事業者は slug、
+   * 非掲載はイベントに記録した provider 名。**改名しても既存の値は消さない** (過去イベントは旧い名前のまま)。
+   * 新しい名前でイベントを記録したら、その名前をここに足す (第 7 回レビュー E17 の follow-up)。
+   */
+  eventKeys: readonly string[];
   stage: PaymentProviderStage;
   /** 対象ステーブルコイン (例 ['USDC','JPYC'])。 */
   assets: readonly string[];
@@ -50,6 +57,7 @@ const OSAKA_SUBSIDY_URL =
 export const PAYMENT_PROVIDERS: readonly PaymentProviderRecord[] = [
   {
     provider: 'TIS / JPYC',
+    eventKeys: ['TIS / JPYC'],
     stage: 'partnership',
     assets: ['JPYC'],
     chains: [],
@@ -66,6 +74,7 @@ export const PAYMENT_PROVIDERS: readonly PaymentProviderRecord[] = [
   },
   {
     provider: 'Digital Garage / JCB / Resona HD',
+    eventKeys: ['Digital Garage / JCB / Resona HD'],
     stage: 'pilot',
     assets: ['USDC', 'JPYC'],
     chains: [],
@@ -82,6 +91,7 @@ export const PAYMENT_PROVIDERS: readonly PaymentProviderRecord[] = [
   },
   {
     provider: 'JCB / Circle',
+    eventKeys: ['JCB / Circle'],
     stage: 'partnership',
     assets: ['USDC'],
     chains: [],
@@ -99,6 +109,7 @@ export const PAYMENT_PROVIDERS: readonly PaymentProviderRecord[] = [
   {
     provider: 'DG Stablecoin Payment Service',
     slug: 'dg-sps',
+    eventKeys: ['dg-sps'],
     stage: 'commercial',
     assets: ['USDC'],
     chains: ['base'],
@@ -115,6 +126,7 @@ export const PAYMENT_PROVIDERS: readonly PaymentProviderRecord[] = [
   },
   {
     provider: 'HashPort (Osaka Pref. subsidy)',
+    eventKeys: ['HashPort (Osaka Pref. subsidy)'],
     stage: 'pilot',
     assets: ['JPYC', 'USDC'],
     chains: [],
@@ -131,6 +143,7 @@ export const PAYMENT_PROVIDERS: readonly PaymentProviderRecord[] = [
   },
   {
     provider: 'Mina Wallet / Sumitomo Mitsui Card (Osaka Pref. subsidy)',
+    eventKeys: ['Mina Wallet / Sumitomo Mitsui Card (Osaka Pref. subsidy)'],
     stage: 'pilot',
     assets: ['JPYC', 'USDC'],
     chains: [],
@@ -147,6 +160,7 @@ export const PAYMENT_PROVIDERS: readonly PaymentProviderRecord[] = [
   },
   {
     provider: 'Mi&T (Osaka Pref. subsidy)',
+    eventKeys: ['Mi&T (Osaka Pref. subsidy)'],
     stage: 'pilot',
     assets: ['JPYC'],
     chains: [],
@@ -165,6 +179,7 @@ export const PAYMENT_PROVIDERS: readonly PaymentProviderRecord[] = [
   {
     // 2026-09-04 の第 2 回週次更新で追跡開始 (発表は 2026-07-13・backfill)。
     provider: 'NetStars Stablecoin Pay',
+    eventKeys: ['NetStars Stablecoin Pay'],
     stage: 'commercial',
     assets: ['USDC', 'USDT', 'JPYC'],
     chains: ['solana', 'polygon'],
@@ -185,6 +200,7 @@ export const PAYMENT_PROVIDERS: readonly PaymentProviderRecord[] = [
     // stage=commercial の根拠 = 同ページ「最短即日から決済受付を開始」「千房など多くの飲食店で利用」。
     // PR TIMES (1/28) は「開始予定」のみなので startedAt は null。
     provider: 'HashPort Wallet for Biz',
+    eventKeys: ['HashPort Wallet for Biz'],
     stage: 'commercial',
     assets: ['JPYC', 'USDC'],
     chains: [],
@@ -202,6 +218,7 @@ export const PAYMENT_PROVIDERS: readonly PaymentProviderRecord[] = [
   {
     // 2026-09-29 の第 6 回週次更新で追跡開始 (発表は 2026-07-07・backfill)。開始は 2026-07-08 (PR TIMES 本文「2026年7月8日より」)。
     provider: 'MisePay (Sowaka Japan)',
+    eventKeys: ['MisePay (Sowaka Japan)'],
     stage: 'pilot',
     assets: ['JPYC'],
     chains: [],
@@ -219,6 +236,7 @@ export const PAYMENT_PROVIDERS: readonly PaymentProviderRecord[] = [
   {
     // 2026-09-29 の第 6 回週次更新で追跡開始 (発表は 2026-08-03・backfill)。関係者限定の実証 (8/6・8/17)。
     provider: 'Lawson (POS pilot)',
+    eventKeys: ['Lawson (POS pilot)'],
     stage: 'pilot',
     assets: ['JPYC', 'USDC', 'USDT'],
     chains: [],
@@ -238,6 +256,7 @@ export const PAYMENT_PROVIDERS: readonly PaymentProviderRecord[] = [
     // JPYC を au PAY 残高 (前払式支払手段) にチャージして au PAY 加盟店で使う wallet 型 (Mina Wallet 行と同じ型)。
     // WBTC・ETH は非ステーブルコインなので assets に入れない。チェーン・精算通貨・手数料は記載なし → [] / null。
     provider: 'αU wallet (KDDI / au Coincheck Digital Assets / HashPort)',
+    eventKeys: ['αU wallet (KDDI / au Coincheck Digital Assets / HashPort)'],
     stage: 'commercial',
     assets: ['JPYC'],
     chains: [],

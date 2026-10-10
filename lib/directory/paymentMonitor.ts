@@ -13,6 +13,7 @@ import {
   type ServiceChangeDiff,
   scopedChangelog,
   takeDeltaSince,
+  takeSnapshotTail,
   type ServiceChangeCategory,
   type ServiceChangeType,
   type ServiceMonitorQuery,
@@ -36,8 +37,15 @@ export type PaymentChangeRow = {
   date: string;
   /** YYYY-MM-DD = こちらが記録した日 (収集日)。発表日と乖離する場合の監査用・任意。 */
   collectedAt?: string;
-  /** 事業者/主体の表示名。 */
+  /** 事業者/主体の表示名 = changelog に記録した時点の名前で、イベントごとに固定 (ディレクトリの改名に追随しない)。
+   * 決済スコープのイベントは provider の明示が必須 (paymentMonitor.test.ts のフェンス)。 */
   provider: string;
+  /**
+   * ディレクトリエントリに紐づくイベントだけに付く不変の識別子 (changelog の slug)。公開の dedupe キー =
+   * slug (無いときは provider) + date + changeCategory (第 7 回レビュー E17 の follow-up)。slug を足す前に
+   * 保存された鍵は provider なので、同じ行の provider で旧い鍵を組んで照合できる (provider は固定)。
+   */
+  slug?: string;
   changeType: ServiceChangeType;
   changeCategory?: ServiceChangeCategory;
   /** 対象ステーブルコイン (例 ['USDC','JPYC'])。 */
@@ -51,8 +59,8 @@ export type PaymentChangeRow = {
   diffs?: readonly ServiceChangeDiff[];
 };
 
-/** 事業者の現況行 = 固定項目の記録 + changelog から導出した最終イベント日。 */
-export type PaymentProviderRow = PaymentProviderRecord & { lastEventDate: string };
+/** 事業者の現況行 = 固定項目の記録 (結合用の eventKeys は出さない) + changelog から導出した最終イベント日。 */
+export type PaymentProviderRow = Omit<PaymentProviderRecord, 'eventKeys'> & { lastEventDate: string };
 
 export type PaymentMonitorEnvelope = {
   schemaVersion: string;
@@ -72,7 +80,9 @@ export type PaymentMonitorEnvelope = {
    * delta: 日付境界で切り上げても入り切らないイベントがある)。 */
   hasMore: boolean;
   /** 次回の delta 購入でそのまま changedSince に渡す値。hasMore=true の delta では
-   * **最初の未返却イベントの deltaEffectiveDate = max(date, collectedAt ?? date)** (返した最後の deltaEffectiveDate より必ず後 = 前進が保証され再配信なし)。 */
+   * **最初の未返却イベントの deltaEffectiveDate = max(date, collectedAt ?? date)** (返した最後の deltaEffectiveDate より必ず後 = 前進が保証され再配信なし)。
+   * hasMore=true の snapshot では返さなかったイベントの deltaEffectiveDate の最小値 (takeSnapshotTail・返したイベントが再び返ることはある)。
+   * それ以外は generatedAt の UTC 日付。 */
   nextChangedSince: string;
   notice: { code: string; detail: string; termsUrl: string };
   licenseNotice: string;
@@ -86,7 +96,10 @@ function toRow(
   return {
     date: event.date,
     ...(event.collectedAt ? { collectedAt: event.collectedAt } : {}),
+    // 決済スコープのイベントは provider を changelog に明示して固定する (改名に追随させない・フェンスあり)。
+    // entry.name 以降は明示を欠いたデータ (テスト fixture 等) の表示用の補い。
     provider: event.provider ?? entry?.name ?? event.slug ?? 'unknown',
+    ...(event.slug ? { slug: event.slug } : {}),
     changeType: event.changeType,
     ...(event.changeCategory ? { changeCategory: event.changeCategory } : {}),
     assets:
@@ -99,45 +112,68 @@ function toRow(
   };
 }
 
+/** 決済スコープのイベントを現況行に結ぶ鍵 = slug ?? provider (どちらも記録時に固定・表示名の改名に依存しない)。 */
+function paymentEventKey(event: { slug?: string; provider?: string }): string | undefined {
+  return event.slug ?? event.provider;
+}
+
 /**
- * 事業者の現況行。snapshot は全社、delta は今回の changes に provider が現れた社だけ
- * (Service Monitor の services 行と同じ考え方)。lastEventDate は同名 provider の最新イベント日。
+ * 事業者の現況行。snapshot は全社、delta は今回返すイベントが属する社だけ (Service Monitor の services 行と
+ * 同じ考え方)。イベントとは識別子 eventKeys で結ぶ — 表示名で結ぶと、履歴の provider を固定したまま現況行の
+ * 表示名を改名したときに結べなくなる (第 7 回レビュー E17 の follow-up)。lastEventDate は属するイベントの最新日。
  */
 function providerRows(
-  rows: readonly PaymentChangeRow[],
+  returned: ReturnType<typeof scopedChangelog>,
   changelog: ReturnType<typeof scopedChangelog>,
-  bySlug: ReadonlyMap<string, DirectoryEntry>,
+  records: readonly PaymentProviderRecord[],
   mode: 'snapshot' | 'delta',
 ): { providers: PaymentProviderRow[]; totalProviders: number } {
-  const lastEventByProvider = new Map<string, string>();
+  const recordIndexByKey = new Map<string, number>();
+  records.forEach((record, index) => {
+    for (const key of record.eventKeys) recordIndexByKey.set(key, index);
+  });
+  const recordIndexOf = (event: { slug?: string; provider?: string }): number | undefined => {
+    const key = paymentEventKey(event);
+    return key === undefined ? undefined : recordIndexByKey.get(key);
+  };
+  const lastEventByRecord = new Map<number, string>();
   for (const event of changelog) {
-    const name = toRow(event, bySlug).provider;
-    const prev = lastEventByProvider.get(name);
-    if (!prev || event.date > prev) lastEventByProvider.set(name, event.date);
+    const index = recordIndexOf(event);
+    if (index === undefined) continue;
+    const prev = lastEventByRecord.get(index);
+    if (!prev || event.date > prev) lastEventByRecord.set(index, event.date);
   }
-  const changed = new Set(rows.map((r) => r.provider));
-  const providers = PAYMENT_PROVIDERS.filter(
-    (p) => mode === 'snapshot' || changed.has(p.provider),
-  ).map((p) => ({ ...p, lastEventDate: lastEventByProvider.get(p.provider) ?? p.announcedAt }));
-  return { providers, totalProviders: PAYMENT_PROVIDERS.length };
+  const changed = new Set(returned.map(recordIndexOf));
+  const providers = records.flatMap((record, index) => {
+    if (mode !== 'snapshot' && !changed.has(index)) return [];
+    const { eventKeys: _eventKeys, ...row } = record;
+    return [{ ...row, lastEventDate: lastEventByRecord.get(index) ?? record.announcedAt }];
+  });
+  return { providers, totalProviders: records.length };
 }
 
 export function createPaymentMonitorEnvelope(
   query: ServiceMonitorQuery,
   generatedAtIso: string,
   entries: readonly DirectoryEntry[] = DIRECTORY_ENTRIES,
+  providers: readonly PaymentProviderRecord[] = PAYMENT_PROVIDERS,
 ): PaymentMonitorEnvelope {
   const changelog = scopedChangelog('stablecoin-payments', entries);
   const bySlug = new Map(entries.map((entry) => [entry.slug, entry]));
   const mode = query.changedSince === undefined ? 'snapshot' : 'delta';
   let filtered: ReturnType<typeof scopedChangelog>;
   let hasMore: boolean;
-  // 既定は UTC 日付 (serviceMonitor.ts と同じ inclusive 比較の理屈)。打ち切られた delta だけ
+  // 既定は UTC 日付 (serviceMonitor.ts と同じ inclusive 比較の理屈)。打ち切られた delta は
   // 「最初の未返却イベントの deltaEffectiveDate = max(date, collectedAt ?? date)」に差し替える (打ち切り分の永久ロス防止・前進の保証)。
+  // 打ち切られた snapshot は返さなかったイベントの実効日の最小値に差し替える (下の takeSnapshotTail・E17)。
   let nextChangedSince = generatedAtIso.slice(0, 10);
   if (mode === 'snapshot') {
-    hasMore = changelog.length > query.limit;
-    filtered = changelog.slice(-query.limit);
+    // 打ち切ったら返さなかったイベントの実効日の最小値を cursor にする (serviceMonitor.ts の
+    // takeSnapshotTail が単一情報源・E17)。
+    const page = takeSnapshotTail(changelog, query.limit);
+    filtered = page.taken;
+    hasMore = page.hasMore;
+    if (page.nextChangedSince !== null) nextChangedSince = page.nextChangedSince;
   } else {
     // 実効日 (max(date, collectedAt)) で照合 — 後から記録した古い date のイベントを取りこぼさない。
     // 同一実効日のグループは分割しない (serviceMonitor.ts の takeDeltaSince が単一情報源)。
@@ -155,7 +191,7 @@ export function createPaymentMonitorEnvelope(
       limit: query.limit,
     },
     changes: filtered.map((event) => toRow(event, bySlug)),
-    ...providerRows(filtered.map((event) => toRow(event, bySlug)), changelog, bySlug, mode),
+    ...providerRows(filtered, changelog, providers, mode),
     totalEvents: changelog.length,
     generatedAt: generatedAtIso,
     hasMore,

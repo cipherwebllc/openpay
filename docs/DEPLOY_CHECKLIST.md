@@ -1647,6 +1647,9 @@ flag ON + forwarder/JPYC 設定済の Amoy (80002) で 1 周する。route テ�
   `.github/workflows/jpyc-activity-cron.yml` は手動復旧用 (`workflow_dispatch` のみ)。
 - bootstrap は T−24h に届くまで (1.5s/block なら約 33 バケット)・1 run 12 件で 3〜4 run。欠けが残る間は有料 503 (settle なし)。
 - cron 停止時は最新バケットの `toTimestamp` から 4h を超えると 503 `data_stale` (settle なし)。
+- cron の結果 / `jpyc.activity.run_incomplete` の warn に `overflowBuckets` が出たら、1 バケット (1,800 block) の有効 Transfer が
+  5,000 件を超えた (件数だけ保存)。そのバケットが 24h の窓から外れるまで pointer は進まず、有料は 4h 後から 503 `data_stale`
+  (settle なし・不完全な集計は売らない)。繰り返すならバケットの分割走査を検討する (第 7 回レビュー E18)。
 - 復旧は `workflow_dispatch` を繰り返す (lock 中は 55 秒待つ)。`missing:[]` と preview の `available:true` を確認。
 - 定期実行の緑だけで判断せず、preview (`/api/jpyc/activity/preview`) の `observedAt` / `expiresAt` も監視する。
 - **resource server は加盟店が自前で 402 ゲートする前提**。facilitator はリソースを proxy / ゲートしない

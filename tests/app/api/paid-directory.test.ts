@@ -471,6 +471,21 @@ describe('paid Japan Web3 Directory APIs', () => {
     });
   });
 
+  // E16 (user 裁定 R7): 内部の審査段階 (draft 等) を指定した検索は必ず空 → 支払い要求の前に 400。
+  it.each(['draft', 'review', 'rejected', 'archived'])(
+    'E16: status=%s の検索は支払い要求の前に400にする',
+    async (status) => {
+      const { search } = await load();
+      const res = await search.GET(
+        req(`/api/paid/japan-web3-directory/search?status=${status}`),
+      );
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({ ok: false, error: 'invalid_query' });
+      expect(routeMocks.verify).not.toHaveBeenCalled();
+      expect(routeMocks.settle).not.toHaveBeenCalled();
+    },
+  );
+
   it('検索 query が不正なら支払い要求の前に400にする', async () => {
     const { search } = await load();
     const res = await search.GET(

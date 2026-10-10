@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { ACTIVITY_NOW, activityWindow, bucket } from '../../helpers/jpycActivity';
+import { ACTIVITY_NOW, RECEIVER, SENDER, activityWindow, bucket } from '../../helpers/jpycActivity';
 
 const mocks = vi.hoisted(() => ({ get: vi.fn(), mget: vi.fn(), set: vi.fn(), lock: vi.fn(), getBlock: vi.fn(), getLogs: vi.fn(), warn: vi.fn() }));
 vi.mock('@/lib/kv', () => ({ kvGet: mocks.get, kvMget: mocks.mget, kvSet: mocks.set, kvSetNxGet: mocks.lock }));
@@ -299,10 +299,44 @@ describe('activity cron', () => {
     mocks.mget.mockResolvedValue({ ok: true, value: rows.map((b) => JSON.stringify(b)) });
     const res = await GET(request());
     expect(res.status).toBe(503);
-    expect(await res.json()).toEqual({ error: 'scan_incomplete' });
+    // E18: overflow は「1 バケットの件数が上限を超えて窓が欠けた」ことを番号つきで返す (時刻逆転と区別)。
+    expect(await res.json()).toEqual(kind === 'overflow'
+      ? { error: 'scan_incomplete', overflowBuckets: [rows[48].index] }
+      : { error: 'scan_incomplete' });
     expect(mocks.set).not.toHaveBeenCalled();
     expect(mocks.warn).toHaveBeenCalledTimes(1);
     expect(mocks.warn.mock.calls[0][1].missing).toEqual([]);
+    expect(mocks.warn.mock.calls[0][1]).toMatchObject(kind === 'overflow'
+      ? { reason: 'bucket_overflow', overflowBuckets: [rows[48].index] }
+      : { reason: 'invalid bucket window', overflowBuckets: [] });
+  });
+
+  // E18 (第 7 回レビュー): 1 バケット (1,800 block) の有効 Transfer が 5,000 件を超えると、そのバケットは
+  // 件数だけを持つ overflow として保存され、窓から外れるまで約 24 時間 pointer が進まない (有料は data_stale の 503)。
+  // 欠けた原因が結果にも warn にも出ず、RPC 失敗や時刻逆転と見分けられなかった。
+  it('E18: 走査したバケットが overflow なら保存したうえで結果と warn に番号を出す (後続の走査失敗があっても番号は残る)', async () => {
+    const rows = activityWindow();
+    // 最新 N (100) だけ未保存 → 走査すると 5,001 件で overflow。続く 99 は欠けていて走査に失敗する。
+    mocks.mget.mockResolvedValue({ ok: true, value: rows.map((b, i) => i >= 58 ? null : JSON.stringify(b)) });
+    let bucket100 = true;
+    mocks.getLogs.mockImplementation(async ({ fromBlock }: { fromBlock: bigint }) => {
+      if (fromBlock >= 180_000n) {
+        if (!bucket100 || fromBlock !== 180_000n) return [];
+        bucket100 = false;
+        return Array.from({ length: 5_001 }, () => ({ args: { from: SENDER, to: RECEIVER, value: 1n } }));
+      }
+      throw new Error('rpc down');
+    });
+    const res = await GET(request());
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toMatchObject({ newest: 100, written: [100], complete: false, overflowBuckets: [100] });
+    // overflow のバケットは件数だけを持って保存される (次 run で再走査しない)。
+    const saved = JSON.parse(bucketWrites()[0][1]);
+    expect(saved).toMatchObject({ index: 100, overflow: true, items: [], eventCount: 5_001 });
+    expect(newestWrites()).toEqual([]);
+    expect(mocks.warn).toHaveBeenCalledTimes(1);
+    expect(mocks.warn.mock.calls[0][1]).toMatchObject({ overflowBuckets: [100], failedBuckets: [99] });
   });
 
   it('60件目を書けても T-24h に届かなければ boundary:null・complete:false・pointer 不変', async () => {
