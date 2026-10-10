@@ -105,9 +105,20 @@ beforeEach(() => {
 
 afterEach(() => {
   setLocks(undefined);
+  setVisibility('visible');
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
+
+/** タブを背面・前面にする (document の visibilityState と visibilitychange)。jsdom の window は 1 つなので、両方のタブに届く。 */
+function setVisibility(state: 'visible' | 'hidden', dispatch = false) {
+  Object.defineProperty(document, 'visibilityState', { value: state, configurable: true });
+  if (dispatch) {
+    act(() => {
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+  }
+}
 
 describe('別のタブの古い値で上書きしない (D10)', () => {
   beforeEach(() => {
@@ -542,6 +553,69 @@ describe('取り込まない値 (受取先を別のウォレットに変えな�
       expect(stored()).toMatchObject({ receiver: WA2, receiverSource: 'auto' });
     },
   );
+
+  it.each([
+    ['Web Locks あり', true],
+    ['Web Locks なし', false],
+  ])(
+    '背面のタブ (自動) はウォレットの切り替えに背面のまま追従せず、前面に戻って取り込んでから判定する: 前面のタブで手入力にした受取先を上書きしない (%s)',
+    async (_label, withLocks) => {
+      const W1 = getAddress('0x1010101010101010101010101010101010101010');
+      const W2 = getAddress('0x2020202020202020202020202020202020202020');
+      window.localStorage.clear();
+      await seedCanonical({ receiver: W1, receiverSource: 'auto' });
+      const locks = manualLocks();
+      setLocks(withLocks ? { request: locks.request } : undefined);
+      const flush = async () => {
+        while (locks.waiting() > 0) await locks.grant();
+      };
+      useAccountMock.mockImplementation(useTabWallet);
+      let wallet: Address = W1;
+      const wrap = ({ children }: { children: ReactNode }) => createElement(TabWallet.Provider, { value: wallet }, children);
+      const a = renderHook(() => useQrTab(), { wrapper: wrap });
+      const b = renderHook(() => useQrTab(), { wrapper: wrap });
+      await waitFor(() => expect(a.result.current.hydrated && b.result.current.hydrated).toBe(true));
+
+      // 前面の A で受取先を手入力にした。
+      act(() => a.result.current.autofill.handleManualChange(R1));
+      await flush();
+      expect(stored()).toMatchObject({ receiver: R1, receiverSource: 'manual' });
+
+      // B が背面の間にウォレットを W2 に切り替えた: B (自動のまま) は背面では追従しない。
+      setVisibility('hidden', true);
+      wallet = W2;
+      a.rerender();
+      b.rerender();
+      await flush();
+      expect(stored()).toMatchObject({ receiver: R1, receiverSource: 'manual' });
+      expect(b.result.current.settings).toMatchObject({ receiver: W1, receiverSource: 'auto' });
+
+      // B が前面に戻る: 先に A の手入力を取り込むので、W2 には置き換えない。
+      setVisibility('visible', true);
+      await flush();
+      expect(b.result.current.settings).toMatchObject({ receiver: R1, receiverSource: 'manual' });
+      expect(stored()).toMatchObject({ receiver: R1, receiverSource: 'manual' });
+    },
+  );
+
+  it('背面の間のウォレットの切り替えは、前面に戻ったときに (まだ自動なら) 追従する', async () => {
+    const W1 = getAddress('0x1010101010101010101010101010101010101010');
+    const W2 = getAddress('0x2020202020202020202020202020202020202020');
+    window.localStorage.clear();
+    await seedCanonical({ receiver: W1, receiverSource: 'auto' });
+    useAccountMock.mockImplementation(useTabWallet);
+    let wallet: Address = W1;
+    const wrap = ({ children }: { children: ReactNode }) => createElement(TabWallet.Provider, { value: wallet }, children);
+    const b = renderHook(() => useQrTab(), { wrapper: wrap });
+    await waitFor(() => expect(b.result.current.hydrated).toBe(true));
+    setVisibility('hidden', true);
+    wallet = W2;
+    b.rerender();
+    expect(b.result.current.settings.receiver).toBe(W1);
+    setVisibility('visible', true);
+    expect(b.result.current.settings).toMatchObject({ receiver: W2, receiverSource: 'auto' });
+    expect(stored()).toMatchObject({ receiver: W2, receiverSource: 'auto' });
+  });
 
   it('別のタブが保存値を消しても (clear・削除) 取り込まず、次の保存で設定全体を書き戻す', async () => {
     const a = await tab();

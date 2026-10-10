@@ -22,6 +22,9 @@
 //   BroadcastChannel で即座には取り込まない: 別のタブで受取先を打っている途中の値 (ENS 名の打ちかけ等) が、この
 //   タブで客に見せている QR に流れ込むため。前面に戻ったとき (= 店主がこのタブを操作するとき) には打ち終わっている。
 //   書いた直後にも取り込まない (接続ウォレットの切り替えに追従する自動補完など、前面にないタブも書くため)。
+//   会計の途中 (呼び出し側が holdImport で知らせる: 金額を入れた・カートに商品がある・QR を見せている) は取り込みを
+//   保留し、会計が終わったら 1 度取り込む。金額やカートは通貨を持たない数字なので、途中で別のタブの通貨・受取先を
+//   取り込むと、同じ数字のまま別の通貨・別の宛先の QR になる (500 円のつもりが 500 ドル)。
 // - 取り込むのは、sanitize を通しても変わらず、rules.importable を満たす (受取先なら確定した値 = 空欄・打ちかけでない)
 //   単位だけ。受取先が空欄になると接続ウォレットからの自動補完が走り、受取先が別のウォレットに変わってしまうため。
 //   このタブに未保存の変更がある単位には触れず、取り込むと組み合わせが崩れるなら取り込まない。消えた・壊れた保存値も
@@ -169,6 +172,7 @@ export function useLocalStorageSettings<T extends object>(
   defaultValue: T,
   sanitize: (loaded: Partial<T>) => T,
   rules: SettingsSyncRules<T> = NO_RULES as SettingsSyncRules<T>,
+  holdImport = false,
 ) {
   const [synced, setSynced] = useState<Synced<T>>(() => ({ settings: defaultValue, base: {} }));
   const [hydrated, setHydrated] = useState(false);
@@ -179,6 +183,9 @@ export function useLocalStorageSettings<T extends object>(
   // 読み込んだときの保存値と、読み込み直後の移行の書き込みがまだか。
   const loadedRef = useRef<Stored | null>(null);
   const migrateRef = useRef(false);
+  // 会計の途中で取り込みを保留しているか (holdImport の最新値) と、保留中に前面に戻った (会計が終わったら取り込む) か。
+  const holdImportRef = useRef(holdImport);
+  const importDeferredRef = useRef(false);
 
   const setSettings = useCallback<Dispatch<SetStateAction<T>>>((update) => {
     setSynced((cur) => {
@@ -223,10 +230,14 @@ export function useLocalStorageSettings<T extends object>(
         // 崩れた組み合わせは書かない (再読み込みで sanitize が黙って直し、どちらの変更とも違う値になる)。このタブの
         // 未保存の変更を取り下げ、最新の保存値を取り込む (画面には実際に保存されている値を出す)。
         logger.warn('settings write conflict', { key: storageKey, keys });
+        // 会計の途中なら保存値の取り込みは会計が終わってから (下の holdImport)。
+        const held = holdImportRef.current;
+        if (held) importDeferredRef.current = true;
         setSynced((cur) => {
           const reverted: Stored = { ...(cur.settings as Stored) };
           for (const k of keys) assign(reverted, k, cur.base);
-          return mergeRemote({ settings: reverted as T, base: cur.base }, latest, sanitize, rules);
+          const withdrawn = { settings: reverted as T, base: cur.base };
+          return held ? withdrawn : mergeRemote(withdrawn, latest, sanitize, rules);
         });
         return;
       }
@@ -271,13 +282,29 @@ export function useLocalStorageSettings<T extends object>(
     scheduleWrite();
   }, [synced, hydrated, scheduleWrite]);
 
+  const pullNow = useCallback(() => {
+    const stored = readStored(storageKey);
+    if (!stored) return;
+    setSynced((cur) => mergeRemote(cur, stored, sanitize, rules));
+  }, [storageKey, sanitize, rules]);
+
+  // 会計が終わったら (holdImport が外れたら)、保留していた取り込みを 1 度行う。
+  useEffect(() => {
+    holdImportRef.current = holdImport;
+    if (holdImport || !importDeferredRef.current) return;
+    importDeferredRef.current = false;
+    pullNow();
+  }, [holdImport, pullNow]);
+
   useEffect(() => {
     if (!hydrated) return;
     const pull = () => {
       if (document.visibilityState === 'hidden') return;
-      const stored = readStored(storageKey);
-      if (!stored) return;
-      setSynced((cur) => mergeRemote(cur, stored, sanitize, rules));
+      if (holdImportRef.current) {
+        importDeferredRef.current = true;
+        return;
+      }
+      pullNow();
     };
     window.addEventListener('focus', pull);
     document.addEventListener('visibilitychange', pull);
@@ -285,7 +312,7 @@ export function useLocalStorageSettings<T extends object>(
       window.removeEventListener('focus', pull);
       document.removeEventListener('visibilitychange', pull);
     };
-  }, [hydrated, storageKey, sanitize, rules]);
+  }, [hydrated, pullNow]);
 
   return { settings: synced.settings, setSettings, hydrated };
 }

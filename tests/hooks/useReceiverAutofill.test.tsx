@@ -166,6 +166,42 @@ describe('useReceiverAutofill', () => {
     expect(setReceiver).toHaveBeenCalledWith(A1, 'auto');
   });
 
+  it('背面のタブでは空欄の補完もウォレット切替への追従も保留し、前面に戻ったときに判定する', () => {
+    const setVisibility = (state: 'visible' | 'hidden') => {
+      Object.defineProperty(document, 'visibilityState', { value: state, configurable: true });
+      act(() => {
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+    };
+    try {
+      setAccount(A1);
+      const { setReceiver, rerender } = setup({ receiver: A1, receiverSource: 'auto', effectiveReceiver: A1, hydrated: true });
+      setVisibility('hidden');
+      setAccount(A2);
+      rerender({ receiver: A1, receiverSource: 'auto', effectiveReceiver: A1, hydrated: true });
+      expect(setReceiver).not.toHaveBeenCalled();
+      // 背面の間に切断して同じウォレットに戻っても、前面に戻ったら (接続アドレスが変わったとして) 追従する。
+      setAccount(undefined);
+      rerender({ receiver: A1, receiverSource: 'auto', effectiveReceiver: A1, hydrated: true });
+      setAccount(A2);
+      rerender({ receiver: A1, receiverSource: 'auto', effectiveReceiver: A1, hydrated: true });
+      expect(setReceiver).not.toHaveBeenCalled();
+      setVisibility('visible');
+      expect(setReceiver).toHaveBeenCalledTimes(1);
+      expect(setReceiver).toHaveBeenCalledWith(A2, 'auto');
+
+      // 空欄の補完も背面では保留する。
+      const empty = setup({ receiver: '', receiverSource: 'auto', effectiveReceiver: null, hydrated: false });
+      setVisibility('hidden');
+      empty.rerender({ receiver: '', receiverSource: 'auto', effectiveReceiver: null, hydrated: true });
+      expect(empty.setReceiver).not.toHaveBeenCalled();
+      setVisibility('visible');
+      expect(empty.setReceiver).toHaveBeenCalledWith(A2, 'auto');
+    } finally {
+      Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true });
+    }
+  });
+
   it("source='manual' はウォレット切替に追従しない (据置)", () => {
     setAccount(A1);
     const { setReceiver, rerender } = setup({

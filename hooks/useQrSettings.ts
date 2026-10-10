@@ -371,6 +371,17 @@ const SYNC_RULES: SettingsSyncRules<QrSettings> = {
   importable: { receiver: isSettledReceiverInput },
 };
 
-export function useQrSettings() {
-  return useLocalStorageSettings<QrSettings>(STORAGE_KEY, DEFAULT_SETTINGS, sanitize, SYNC_RULES);
+/**
+ * holdImport: 会計の途中 (金額を入れた・カートに商品がある・QR を見せている) なら true。その間は別のタブで変えた設定を
+ * 取り込まず、会計が終わったら取り込む (金額・カートは通貨を持たない数字なので、途中で通貨や受取先だけが変わった QR に
+ * しない)。このタブでの設定の変更と保存は保留しない。
+ */
+export function useQrSettings(options: { holdImport?: boolean } = {}) {
+  return useLocalStorageSettings<QrSettings>(
+    STORAGE_KEY,
+    DEFAULT_SETTINGS,
+    sanitize,
+    SYNC_RULES,
+    options.holdImport ?? false,
+  );
 }

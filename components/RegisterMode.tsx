@@ -139,12 +139,21 @@ function RegisterModeContent({
 }: RegisterModeProps & { shopLive?: RegisterShopLive }) {
   const t = useTranslations('RegisterMode');
   const tQr = useTranslations('QrGenerator');
-  const { settings, setSettings, hydrated } = useQrSettings();
+  const [cart, setCart] = useState<CartLine[]>([]);
+  // レジの QR も即時表示せず「QRコードを表示する」→ 全画面モーダルで提示。
+  const [qrModalOpen, setQrModalOpen] = useState(false);
+  // お店負担の QR (受け渡しを作った時点の会計で組み立てたもの・null = 出していない)。
+  const [storeQr, setStoreQr] = useState<{ id: string; url: string } | null>(null);
+  // 会計の途中 (カートに商品がある・QR を見せている) は、別のタブで変えた通貨・受取先を取り込まない。カートの単価は
+  // 通貨を持たない数字なので、取り込むと同じ数字のまま別の通貨の QR になり、「1 カート 1 通貨」の守り
+  // (addFromPreset) も素通りする。会計が終わったら取り込む (hooks/useLocalStorageSettings)。
+  const { settings, setSettings, hydrated } = useQrSettings({
+    holdImport: cart.length > 0 || qrModalOpen || storeQr !== null,
+  });
   const presetStore = useProductPresets();
   const origin = useOrigin();
   const { copied, copy } = useCopyToClipboard();
 
-  const [cart, setCart] = useState<CartLine[]>([]);
   const [receiptNo, setReceiptNo] = useState('');
   const [resolvedReceiver, setResolvedReceiver] = useState<Address | null>(null);
   // 「お店の設定」シート・商品の編集シート・開いているカートの行 (2026-10 磨き上げ P3)。
@@ -152,8 +161,6 @@ function RegisterModeContent({
   const [productsOpen, setProductsOpen] = useState(false);
   const [openLineId, setOpenLineId] = useState<string | null>(null);
   const [currencyWarning, setCurrencyWarning] = useState(false);
-  // レジの QR も即時表示せず「QRコードを表示する」→ 全画面モーダルで提示。
-  const [qrModalOpen, setQrModalOpen] = useState(false);
   // オプション付き preset をタップしたとき表示する選択モーダル (flag 裏)。
   const [optionModalPreset, setOptionModalPreset] = useState<ProductPreset | null>(null);
   const qrRef = useRef<HTMLDivElement>(null);
@@ -171,8 +178,6 @@ function RegisterModeContent({
     enabled: sdEnabled,
     device,
   } = useStoreDeviceMode();
-  // お店負担の QR (受け渡しを作った時点の会計で組み立てたもの・null = 出していない)。
-  const [storeQr, setStoreQr] = useState<{ id: string; url: string } | null>(null);
   // 「通常の QR を出す」を店員が選んだ (お店の端末で送るの QR を作れない・読み取れないとき)。
   const [forceNormalQr, setForceNormalQr] = useState(false);
   // 決済モードの 3 つ目「お店がガス代を肩代わりして送る」(決済QRタブで選び、レジは引き継ぐ・§19)。
