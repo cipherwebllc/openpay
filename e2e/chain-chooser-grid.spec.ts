@@ -1,4 +1,5 @@
 import { test, expect, type Locator } from '@playwright/test';
+import { openTipTab } from './tipTab';
 
 // jsdom では CSS が計算されないので grid 列数の regression は e2e でしか取れない。
 // 列数の判定: 全 button の boundingBox().y を 5px 粒度で round → unique 数 == 行数。
@@ -57,11 +58,8 @@ test.describe('chain chooser grid 列数 (viewport 連動)', () => {
     page,
     viewport,
   }) => {
-    await page.goto('/ja/create');
-    // タブラベルは短縮済み (旧「Tip widget (クリエイター)」→「チップ」)。
-    await page
-      .getByRole('button', { name: 'チップ' })
-      .click();
+    // 通貨の選択が設定の読み込みで既定 (JPYC) に戻らないよう、読み込みが済んでから押す (e2e/tipTab.ts)。
+    await openTipTab(page);
 
     // USDC tab に切替 (Tip default は JPYC)。CI は Arc/Arc tip 両 flag OFF、既存 chain 数を維持。
     await page.getByRole('button', { name: 'USDC' }).click();

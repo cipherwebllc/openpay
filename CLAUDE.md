@@ -21,7 +21,7 @@ node scripts/ci-wait.mjs <PR> # PR の CI settle 待ち+conclusion 判定 (--onc
 ## 不変ルール（違反すると壊れる順）
 
 1. **Prettier 厳禁**。このリポに Prettier は無い（設定・deps・package.json key すべて）。`npx prettier` を実行すると全行ダブルクオート化の巨大 diff になる。整形は ESLint（シングルクオート・2 スペース）: `npx eslint --fix` か手書き。
-2. **e2e はローカル結果を信用しない — CI が権威**。ローカル `.env.local`（recover ON・実キー）と CI（最小 env・flag OFF）で手数料表示等の描画が別物。ローカル基準で e2e を書き換えて main を赤くした実績あり。CI green を merge 条件にする。既知 flaky: `create.spec` の ChevronDown CSS transform・`tip.spec`・`chain-chooser`（mobile-safari）→ diff 無関係を確認して `gh run rerun <id> --failed`。
+2. **e2e はローカル結果を信用しない — CI が権威**。ローカル `.env.local`（recover ON・実キー）と CI（最小 env・flag OFF）で手数料表示等の描画が別物。ローカル基準で e2e を書き換えて main を赤くした実績あり。CI green を merge 条件にする。既知 flaky: `chain-chooser`（mobile-safari・WebKit の描画停止で click の stable 待ちが timeout）→ diff 無関係を確認して `gh run rerun <id> --failed`（`create.spec` の ChevronDown・`tip.spec` は 2026-10 の約 90 run で再発なしのため一覧から外した）。
 3. **`app/**/page.tsx` は規定外の value export 禁止**（default / generateMetadata / generateStaticParams / metadata 等のみ）。違反は typecheck/vitest を**通過**し `next build` でのみ落ちる（#109 で Vercel deploy 失敗）。素材/部品は components/ へ。`tests/lib/pageExports.test.ts` が CI で検査する。
 4. **可視 UI 文字列を一括変更したら全域 grep**（`components/ lib/ app/ messages/ tests/ e2e/`）で旧文言の残存ゼロを確認。**grep の出力を head で切らない**（「JPYC 公式」統一時に tests → e2e → en spec と 3 回見落とし、CI で発覚）。
 5. **i18n は messages/ja.json と en.json の完全 parity**（`tests/lib/i18nKeys.test.ts` が検証）。ただし**同名キー（signInRequired 等）が複数 namespace にある**ため、一次一致で挿入すると誤った namespace に入り、parity テストは偽陽性で pass する。挿入は必ず namespace を明示して確認。

@@ -222,9 +222,12 @@ test.describe('/scan: 実 qr-scanner 統合 (LARP 防御)', () => {
     // hasCamera() / start() のいずれかで陽性 / 陰性が確定するまで待つ。
     // Chromium headless では camera 非搭載 = no-camera / permission denied / generic error
     // のいずれかへ。我々の fix #1 で import 失敗時も error state に倒れる。
+    // 結果の見出しは全文一致で探す。部分一致だと、idle〜結果の間ずっと出ている案内文
+    // 「QR を読み取るにはカメラの許可が必要です。」にも当たり、結果が出る前に通る (= 何も確かめない) うえ、
+    // 結果が出た後は 2 要素に当たって strict mode で落ちていた (CI で retry 頼み)。
     await expect(
-      page.locator(
-        'text=/カメラの許可が必要です|この端末にカメラが見つかりません|カメラを起動できませんでした/',
+      page.getByText(
+        /^(?:カメラの許可が必要です|この端末にカメラが見つかりません|カメラを起動できませんでした)$/,
       ),
     ).toBeVisible({ timeout: 10_000 });
 
