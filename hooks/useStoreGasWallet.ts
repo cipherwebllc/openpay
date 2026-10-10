@@ -24,6 +24,7 @@ import {
   STORE_GAS_TOPUP_KEY,
   TOPUP_APPROVAL_TTL_MS,
   TOPUP_SENT_TTL_MS,
+  checkStoreGasTopUpNonce,
   finishStoreGasTopUp,
   liveStoreGasTopUps,
   markStoreGasTopUpSuspect,
@@ -233,22 +234,23 @@ export function useStoreGasWallet() {
       const client = op.hash ? clients.get(op.chainId) : undefined;
       if (!op.hash || !client || Date.now() - op.at < TOPUP_SETTLE_BY_PANEL_MS) continue;
       try {
-        const res = await resolveStoreGasTopUp(client, { ...op, hash: op.hash });
+        const res = await resolveStoreGasTopUp(client, { hash: op.hash });
         if (res.kind === 'pending') {
           // まだ証拠が無い。記録は残す (補充の画面が結果を見る・次の読み直しで片付ける)。
-          if (op.from === undefined || op.nonce === undefined) {
-            // 付帯: 送り手と nonce の組を tx から読んで記録に足す。待たない = 補助 RPC の遅れやロック待ちが、他の記録の
-            // 整理・出金の「不明」の解除 (この後段) を止めない。読めなければ次の読み直しでまた試す。
-            const hash = op.hash;
-            const id = op.id;
-            void readStoreGasTopUpSender(client, { from: op.from, hash }).then(async (sender) => {
+          // 付帯 (待たない = 補助 RPC の遅れやロック待ちが、他の記録の receipt 確認・出金の「不明」の解除 (この後段) を
+          // 止めない・記録ごとに並行・結果は後から記録に反映):
+          //   - 送り手と nonce の組が無ければ tx から読んで足す (読めなければ次の読み直しでまた試す)
+          //   - 組があれば nonce の消費を見て、消費されていれば「置き換えられた可能性」の印を付ける (警告に変えるだけ)
+          const { id, hash, from, nonce, suspect } = op;
+          if (from === undefined || nonce === undefined) {
+            void readStoreGasTopUpSender(client, { from, hash }).then(async (sender) => {
               if (sender) await withStoreGasWalletLock(async () => noteStoreGasTopUpSender(id, sender));
             });
+          } else if (!suspect) {
+            void checkStoreGasTopUpNonce(client, { from, nonce }).then(async (r) => {
+              if (r === 'consumed') await withStoreGasWalletLock(async () => markStoreGasTopUpSuspect(id));
+            });
           }
-          continue;
-        }
-        if (res.kind === 'nonce_consumed') {
-          if (!op.suspect) await withStoreGasWalletLock(async () => markStoreGasTopUpSuspect(op.id));
           continue;
         }
         // 記録を外す前に、そのチェーンの残高を読み直す (入った補充を 0 のまま見せて、注意なしに消させない)。
@@ -320,7 +322,13 @@ export function useStoreGasWallet() {
     const shown = new Map(seen.map((r) => [r.id, r]));
     const acknowledged = (r: StoreGasTopUpRecord) => {
       const s = shown.get(r.id);
-      return !!s && s.hash === r.hash && !!s.suspect === !!r.suspect && !!s.unknown === !!r.unknown;
+      return (
+        !!s &&
+        s.hash === r.hash &&
+        !!s.suspect === !!r.suspect &&
+        !!s.unknown === !!r.unknown &&
+        (s.overflow ?? 0) === (r.overflow ?? 0)
+      );
     };
     // 消すのは、いま保存されている鍵が表示中のものと同じで、その鍵への補充が途中 (このタブ・別のタブ) でないときだけ
     // (別のタブで作り直された鍵を古い表示のまま消さない・届く途中の補充の宛先の鍵を消さない)。

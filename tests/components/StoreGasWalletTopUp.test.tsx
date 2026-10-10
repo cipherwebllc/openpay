@@ -55,6 +55,7 @@ import {
   attachStoreGasTopUpHash,
   liveStoreGasTopUps,
   reserveStoreGasTopUp,
+  staleStoreGasTopUps,
 } from '@/lib/storeGasTopUp';
 
 const SHOP = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
@@ -440,6 +441,58 @@ describe('StoreGasWalletTopUp', () => {
     } finally {
       vi.useRealTimers();
       spy.mockRestore();
+    }
+  });
+
+  it('画面を離れた後に送れて hash を記録に残せなくても、送る前に置いた「送れたか分からない」の印が残り、30 分後は警告に回る (3 回目 P1)', async () => {
+    let approve!: (h: string) => void;
+    w.sendAsync.mockImplementation(() => new Promise((r) => { approve = r; }));
+    const realSetItem = Storage.prototype.setItem;
+    const spy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, k: string, val: string) {
+      if (k === 'openpay:store-gas-wallet:topup:v2' && val.includes(TX)) throw new Error('QuotaExceededError');
+      return realSetItem.call(this, k, val);
+    });
+    try {
+      const v = show();
+      await act(async () => {
+        fireEvent.click(sendButton());
+      });
+      // 送る前から「送れたか分からない」の印つきで永続化されている
+      expect(records()[0]).toMatchObject({ unknown: true });
+      v.unmount();
+      await act(async () => {
+        approve(TX);
+      });
+      const rec = records()[0];
+      expect(rec.hash).toBeUndefined();
+      expect(rec.unknown).toBe(true);
+      // 期限 (30 分) の後も消えず、警告に残る
+      expect(staleStoreGasTopUps(gas, Date.now() + 31 * 60_000).map((r) => r.id)).toEqual([rec.id]);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('ウォレットが応答しないまま画面を離れても、確認中の記録を延ばし続けない (unmount で heartbeat を止める) (3 回目 P2)', async () => {
+    w.sendAsync.mockImplementation(() => new Promise(() => {}));
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const v = show();
+      await act(async () => {
+        fireEvent.click(sendButton());
+      });
+      const before = records()[0]?.at;
+      expect(before).toBeDefined();
+      v.unmount();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(TOPUP_HEARTBEAT_MS * 2 + 100);
+      });
+      expect(records()[0]?.at).toBe(before);
+      // 延ばさないので期限の後は警告に回る (補充と鍵の削除を永久に止めない)
+      expect(liveStoreGasTopUps(gas, Date.now() + 31 * 60_000)).toEqual([]);
+      expect(staleStoreGasTopUps(gas, Date.now() + 31 * 60_000)).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
     }
   });
 

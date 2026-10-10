@@ -352,7 +352,11 @@ describe('StoreGasWalletPanel', () => {
     hold.state = ready({
       balance: 0n,
       gasPrice: 1n,
-      staleTopUps: [{ id: 's', address: ADDR, chainId: 80002, at: 1, hash: TX }],
+      staleTopUps: [
+        { id: 's', address: ADDR, chainId: 80002, at: 1, hash: TX },
+        // 溢れた分の要約 (取引へのリンクは無い・同じ警告文に含める)
+        { id: `overflow:${ADDR.toLowerCase()}`, address: ADDR, chainId: 0, at: 1, overflow: 3 },
+      ],
     });
     render(<StoreGasWalletPanel />);
     const button = screen.getByRole('button', { name: 'この端末から消す' });

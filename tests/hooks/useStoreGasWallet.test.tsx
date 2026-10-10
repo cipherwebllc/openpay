@@ -16,6 +16,10 @@ const rpc = vi.hoisted(() => ({
   txByHash: null as { nonce: number } | null,
   // hash で読む tx の応答を止める (補助 RPC が遅くても receipt の判定を止めないことの確認用)。
   hangTx: false,
+  // 送り手の nonce の応答を止める (先頭の記録の nonce RPC が遅くても後続の receipt 確認を止めないことの確認用)。
+  hangCount: false,
+  // hash ごとの receipt (指定が無ければ receiptStatus)。
+  receiptByHash: {} as Record<string, string | null>,
   chainIds: [80002] as number[],
   // この宛先の残高の応答を止める (古い鍵の読み取りが遅れて返る競合の再現用)。
   hold: null as { address: string; gate: Promise<void> } | null,
@@ -56,6 +60,7 @@ vi.mock('@/lib/chains', async (importOriginal) => {
             case 'eth_blockNumber':
               return '0x2';
             case 'eth_getTransactionCount':
+              if (rpc.hangCount) return new Promise<never>(() => {});
               return `0x${rpc.txCount.toString(16)}`;
             case 'eth_getTransactionByHash':
               if (rpc.hangTx) return new Promise<never>(() => {});
@@ -80,12 +85,14 @@ vi.mock('@/lib/chains', async (importOriginal) => {
                   };
             case 'eth_sendRawTransaction':
               return TX;
-            case 'eth_getTransactionReceipt':
-              return rpc.receiptStatus === null
+            case 'eth_getTransactionReceipt': {
+              const hash = String((params as unknown[])[0]);
+              const status = hash in rpc.receiptByHash ? rpc.receiptByHash[hash] : rpc.receiptStatus;
+              return status === null
                 ? null
                 : {
-                    status: rpc.receiptStatus,
-                    transactionHash: TX,
+                    status,
+                    transactionHash: hash,
                     blockHash: `0x${'cd'.repeat(32)}`,
                     blockNumber: '0x1',
                     transactionIndex: '0x0',
@@ -99,6 +106,7 @@ vi.mock('@/lib/chains', async (importOriginal) => {
                     logsBloom: `0x${'0'.repeat(512)}`,
                     type: '0x2',
                   };
+            }
             default:
               throw new Error(`unexpected ${method}`);
           }
@@ -110,6 +118,7 @@ vi.mock('@/lib/chains', async (importOriginal) => {
 import { useStoreGasWallet } from '@/hooks/useStoreGasWallet';
 import { STORE_GAS_WALLET_STORAGE_KEY, createStoreGasWallet } from '@/lib/storeGasWallet';
 import {
+  TOPUP_MAX_UNRESOLVED,
   TOPUP_SENT_TTL_MS,
   attachStoreGasTopUpHash,
   finishStoreGasTopUp,
@@ -140,6 +149,8 @@ describe('useStoreGasWallet', () => {
     rpc.txCount = 0;
     rpc.txByHash = null;
     rpc.hangTx = false;
+    rpc.hangCount = false;
+    rpc.receiptByHash = {};
     rpc.chainIds = [80002];
     rpc.balanceByChain = {};
     rpc.failChains = new Set();
@@ -555,6 +566,53 @@ describe('useStoreGasWallet', () => {
       expect(await result.current.remove(result.current.staleTopUps)).toBe(true);
     });
     expect(staleStoreGasTopUps(address)).toEqual([]);
+  });
+
+  it('溢れて明細を捨てた未確認の補充も、要約として警告に残り、見せてからでないと消せない (3 回目 P1)', async () => {
+    const { result } = await setup();
+    const address = result.current.address!;
+    rpc.receiptStatus = null;
+    const old = Date.now() - TOPUP_SENT_TTL_MS - 60_000;
+    for (let i = 0; i < TOPUP_MAX_UNRESOLVED + 1; i += 1) {
+      attachStoreGasTopUpHash({ id: `h${i}`, address, chainId: 80002 }, `0x${(i + 1).toString(16).padStart(64, '0')}`, old + i * 1_000);
+    }
+    reserveStoreGasTopUp(address, 80002); // 整理 → h0 は要約へ
+    finishStoreGasTopUp(liveStoreGasTopUps(address)[0].id); // いま置いた確認中の記録は片付ける
+    // 残った明細がすべて receipt で片付く
+    rpc.receiptStatus = '0x1';
+    await act(async () => {
+      await result.current.refresh();
+    });
+    expect(staleStoreGasTopUps(address).filter((r) => r.hash)).toEqual([]);
+    // 要約は残り、見せずには消せない
+    expect(result.current.staleTopUps).toEqual([expect.objectContaining({ overflow: 1, at: old })]);
+    await act(async () => {
+      expect(await result.current.remove([])).toBe(false);
+    });
+    expect(window.localStorage.getItem(STORE_GAS_WALLET_STORAGE_KEY)).not.toBeNull();
+    await act(async () => {
+      expect(await result.current.remove(result.current.staleTopUps)).toBe(true);
+    });
+    expect(staleStoreGasTopUps(address)).toEqual([]);
+  });
+
+  it('先頭の記録の nonce RPC が返らなくても、後続の記録の receipt 確認と片付けは進む (3 回目 P2)', async () => {
+    const { result } = await setup();
+    const address = result.current.address!;
+    const TX2 = `0x${'ef'.repeat(32)}` as `0x${string}`;
+    rpc.hangCount = true; // eth_getTransactionCount が永久に返らない
+    rpc.receiptByHash = { [TX]: null, [TX2]: '0x1' };
+    const at = Date.now() - 11 * 60_000;
+    attachStoreGasTopUpHash({ id: 'first', address, chainId: 80002, from: DEST, nonce: 7 }, TX as `0x${string}`, at);
+    attachStoreGasTopUpHash({ id: 'second', address, chainId: 80002 }, TX2, at + 1);
+    const outcome = await act(async () =>
+      Promise.race([
+        result.current.refresh().then(() => 'done'),
+        new Promise<string>((r) => setTimeout(() => r('timeout'), 1_500)),
+      ]),
+    );
+    expect(outcome).toBe('done');
+    expect(liveStoreGasTopUps(address).map((r) => r.id)).toEqual(['first']);
   });
 
   it('別のタブで鍵を消す・作り直すと読み直す (古いアドレスを見せたままにしない)', async () => {

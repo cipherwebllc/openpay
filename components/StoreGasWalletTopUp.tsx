@@ -42,7 +42,6 @@ import {
   attachStoreGasTopUpHash,
   finishStoreGasTopUp,
   liveStoreGasTopUps,
-  markStoreGasTopUpUnknown,
   noteStoreGasTopUpSender,
   readStoreGasTopUpSender,
   reserveStoreGasTopUp,
@@ -271,10 +270,14 @@ export function StoreGasWalletTopUp({
       ownIdRef.current = id;
       replacedRef.current = null;
       reload();
-      // 確認中は記録を延ばす (画面を離れても、確認が終わるまで)。
+      // 確認中は記録を延ばす (画面を開いている間、確認が終わるまで)。作った直後から ref で持ち、画面を閉じたら
+      // (ウォレットが応答しないままでも) cleanup で止める = 閉じた画面が記録を延ばし続けて補充と鍵の削除を永久に止めない。
+      // 止めた後は、送る前に付けた「送れたか分からない」の印が期限後に警告へ回る。
       const heartbeat = setInterval(() => {
         void withStoreGasWalletLock(async () => touchStoreGasTopUp(id));
       }, TOPUP_HEARTBEAT_MS);
+      heartbeatRef.current = heartbeat;
+      if (!mountedRef.current) clearInterval(heartbeat);
       let keepHeartbeat = false;
       try {
         const hash = await sendTransactionAsync({ to: gasAddress, value, chainId: sendChainId });
@@ -284,9 +287,8 @@ export function StoreGasWalletTopUp({
         const saved = (await attach()) || (await attach());
         if (!saved && mountedRef.current) {
           // tx を記録に残せない。この画面で見張り、確認中の記録を延ばし続ける (届く途中の宛先を消させない)。画面を閉じて
-          // いたら張らない (閉じた画面の interval が記録を延ばし続け、補充と鍵の削除を止めたままにしない)。
+          // いたら延ばさない (送る前に付けた「送れたか分からない」の印が期限後に警告へ回る)。
           setLocalSent({ id, address: gasAddress, chainId: sendChainId, at: Date.now(), hash });
-          heartbeatRef.current = heartbeat;
           keepHeartbeat = true;
         }
         // 付帯: 送った tx の送り手と nonce を同じ tx から読んで記録に足す (receipt が無くても nonce の消費で置き換えの
@@ -305,13 +307,16 @@ export function StoreGasWalletTopUp({
           // 送っていない (ウォレットで断った)。記録を片付ける。
           await withStoreGasWalletLock(async () => finishStoreGasTopUp(id));
         } else {
-          // 送れたかどうか分からない (送った後に hash の応答を失った可能性がある)。記録に印を付けて残す。30 分は同じ宛先への
-          // 補充と鍵の削除を止め、その後は消す前の警告に残る (時間では消えない = 届く途中の宛先の鍵を警告なしに消させない・A5/G2)。
-          await withStoreGasWalletLock(async () => markStoreGasTopUpUnknown(id));
+          // 送れたかどうか分からない (送った後に hash の応答を失った可能性がある)。送る前に付けた「送れたか分からない」の
+          // 印のまま記録を残す。30 分は同じ宛先への補充と鍵の削除を止め、その後は消す前の警告に残る (時間では消えない =
+          // 届く途中の宛先の鍵を警告なしに消させない・A5/G2)。
           setLocalError('unknown');
         }
       } finally {
-        if (!keepHeartbeat) clearInterval(heartbeat);
+        if (!keepHeartbeat) {
+          clearInterval(heartbeat);
+          if (heartbeatRef.current === heartbeat) heartbeatRef.current = null;
+        }
         reload();
       }
     } finally {
