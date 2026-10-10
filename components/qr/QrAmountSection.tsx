@@ -1,6 +1,7 @@
 'use client';
 
 import {
+  useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -92,6 +93,17 @@ export function QrAmountSection({
 }) {
   const t = useTranslations('QrGenerator');
   const amountInputRef = useRef<HTMLInputElement>(null);
+  // 開いたら金額欄に focus を置く (すぐ金額を打てるように)。HTML の autofocus 属性は使わない: server の HTML に
+  // 出ると focus を移すのはブラウザで、WebKit は描画が遅いと後から移し、そのとき別の要素にある focus (設定ボタンや
+  // 開いたシート) も奪う (仕様にある「もう focus があれば autofocus しない」の判定が WebKit に無い)。
+  // マウント後 (hydrate 後) に、まだ何も focus されていない (body か null) ときだけ移す。開いているモーダルや、
+  // ユーザーが先に触った要素の focus は奪わない。スクロールはしない: 移すのが hydrate の後になるので、それまでに
+  // 下へスクロールした人を金額欄まで引き戻さない (縦向きの電話や PC では金額欄は最初の画面に収まり、見た目は変わらない)。
+  useEffect(() => {
+    const active = document.activeElement;
+    if (active && active !== document.body) return;
+    amountInputRef.current?.focus({ preventScroll: true });
+  }, []);
   // 値引きを開いている間は、入力欄が「値引き前の金額」だと分かるように見出しを変える (請求金額は値引きの下に出す)。
   const amountLabel = discount?.open
     ? t('amountLabelBeforeDiscount', { symbol: deployment.displaySymbol })
@@ -235,7 +247,6 @@ export function QrAmountSection({
                 placeholder={settings.token === 'jpyc' ? '1,000' : '10.00'}
                 aria-label={amountLabel}
                 className="min-w-0 flex-1 bg-transparent text-right text-4xl font-bold tabular-nums tracking-tight text-slate-900 placeholder:text-slate-300 focus:outline-none sm:text-5xl"
-                autoFocus
               />
               <span className="shrink-0 text-lg font-semibold text-slate-500">
                 {deployment.displaySymbol}
