@@ -6,12 +6,8 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LuaFactory, type LuaEngine } from 'wasmoon';
 
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import {
   closeRedisLuaEngine,
-  compileRedisLua,
   createFakeRedisStore,
   dispatchRedisCommand,
   fakeUpstashFetch,
@@ -613,34 +609,5 @@ describe('fakeUpstashFetch: 本物の lib/kv.ts が送る REST を fake store �
     const res = await post(['NOPE', 'k']);
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({ error: expect.stringMatching(/^ERR /) });
-  });
-});
-
-describe('compileRedisLua', () => {
-  it('構文だけを見て実行しない (未知コマンドの script も通る)', async () => {
-    expect(await compileRedisLua("redis.call('NOPE'); return 1")).toBeNull();
-    expect(await compileRedisLua('if x then return 1')).toMatch(/expected/);
-  });
-});
-
-describe('実行した Lua の記録 (env LUA_REAL_COVERAGE_FILE・scripts/run-lua-tests.mjs の網)', () => {
-  it('env があれば本文を 1 行 1 JSON で重複なく追記する', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'redis-lua-coverage-'));
-    const file = join(dir, 'executed.jsonl');
-    try {
-      vi.resetModules();
-      vi.stubEnv('LUA_REAL_COVERAGE_FILE', file);
-      const harness = await import('./redisLua');
-      const local = harness.createFakeRedisStore(0);
-      await harness.runRedisLua('return 1', [], [], local);
-      await harness.runRedisLua('return 1', [], [], local);
-      await harness.runRedisLua("return 'a\\nb'", [], [], local);
-      await harness.closeRedisLuaEngine();
-      expect(readFileSync(file, 'utf8').trim().split('\n').map((line) => JSON.parse(line) as string))
-        .toEqual(['return 1', "return 'a\\nb'"]);
-    } finally {
-      vi.unstubAllEnvs();
-      rmSync(dir, { recursive: true, force: true });
-    }
   });
 });

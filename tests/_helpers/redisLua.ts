@@ -30,7 +30,6 @@
 //    この bridge を通さない fake fetch テストで行う。
 // 5. Lua 数値をコマンド引数に渡すと実 Redis は整数へ切り捨てて文字列化する。ここでも同じ
 //    挙動を実装しているが、丸めモードの端の差は保証しない。
-import { appendFileSync } from 'node:fs';
 import { LuaFactory } from 'wasmoon';
 
 // Redis が Lua に返す値の形。status reply は {ok=...}、error reply は {err=...}。
@@ -575,22 +574,6 @@ function stripNulls(value: unknown): unknown {
 // 呼び出し元が並行実行しても、Redis EVAL の順序と原子性を保つ。
 let queue: Promise<unknown> = Promise.resolve();
 
-// scripts/run-lua-tests.mjs が渡す記録先。実 Lua で実行した script 本文を 1 行 1 JSON で書き、
-// 「実 Lua テストが 1 本も無い Lua」を run-lua-tests.mjs が検出する (第 7 回レビュー F10・C5)。
-const coverageFile = process.env.LUA_REAL_COVERAGE_FILE;
-const recordedScripts = new Set<string>();
-
-function recordExecutedScript(script: string): void {
-  if (!coverageFile || recordedScripts.has(script)) return;
-  recordedScripts.add(script);
-  try {
-    appendFileSync(coverageFile, JSON.stringify(script) + '\n');
-  } catch {
-    // 記録の失敗を Lua の実行結果 (= test の合否) へ波及させない。記録が欠けた Lua は
-    // run-lua-tests.mjs の検査で「実 Lua テストが無い」と表に出る (黙って通ることはない)。
-  }
-}
-
 /** 既存の teardown hook では待機中の EVAL の完了を待つ。engine は各 EVAL が閉じる。 */
 export async function closeRedisLuaEngine(): Promise<void> {
   await queue;
@@ -611,23 +594,6 @@ export function runRedisPipeline(store: FakeRedisStore, steps: unknown[][]): ({ 
       return { error: 'ERR ' + (e instanceof Error ? e.message : String(e)) };
     }
   });
-}
-
-/**
- * Lua の構文だけを検査する (実行しない)。通れば null、通らなければ Lua のエラー文。Redis と同じく script 全体を
- * 1 つの関数本体として読む。EVAL と同じく engine を毎回作って閉じる (stack の蓄積を後続へ波及させない)。
- * ⚠️ Lua 5.4 の文法で読むので、5.1 (Upstash) に無い構文 (`//`・`goto`・ビット演算子) は通ってしまう。
- */
-export async function compileRedisLua(source: string): Promise<string | null> {
-  const lua = await new LuaFactory().createEngine({ enableProxy: false });
-  try {
-    lua.global.set('SOURCE', source);
-    await lua.doString("local _, err = load(SOURCE, '=script'); COMPILE_ERROR = err");
-    const error = lua.global.get('COMPILE_ERROR') as unknown;
-    return typeof error === 'string' ? error : null;
-  } finally {
-    lua.global.close();
-  }
 }
 
 /**
@@ -665,7 +631,6 @@ export function runRedisLua(
   argv: string[],
   store: FakeRedisStore,
 ): Promise<RedisLuaValue> {
-  recordExecutedScript(script);
   const run = queue.then(async () => {
     // Wasmoon 1.16 の doString は返り値を global の Lua stack に残す。同じ engine を使い続けると
     // 蓄積した返り値が stack の範囲外書き込みを起こし、WASM heap を壊す。

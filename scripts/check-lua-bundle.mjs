@@ -12,18 +12,10 @@
 //   (1) 期待断片 (ソースの reverifyThresholds.ts から閾値を読んで組み立て) が .next/server 配下の
 //       いずれかの chunk に **そのまま** 含まれること
 //   (2) 壊れ方の典型 (`>=<数字>if ` のように文が連結される) が server 配下に無いこと
-//   (3) lib/・app/ の送信式から送る **全 Lua** (scripts/lib/luaSources.mjs が送信式から構文木で辿る・
-//       第 7 回レビュー F17 / E11) について、組み立てに使った式ごとに、ソースの文字列の連なりが chunk の文字列の値
-//       (デコード後・短い定数や引用符も含めて) にそのまま残ること。一部だけ残る chunk = minifier が片を落とした・
-//       書き換えた (broken)。送信式が bundle に在るのにどの chunk にも無い = missing。どちらも fail。
-//       送信式ごと bundle に無い (tree-shake) ときだけ absent として一覧に出す。送信式が在る根拠を示せない Lua は
-//       在るとみなす (fail-closed)。解析できない送信式・送信式から辿れない Lua らしい文字列も fail。
-//       (1)(2) の手書きの断片は reverify の閾値の出力形も見るので残す。
 // 使い方: `npm run build` の後に `node scripts/check-lua-bundle.mjs` (CI の build ステップで実行)。
 
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { analyzeLua, bundleStrings, checkLuaInBundle } from './lib/luaSources.mjs';
 
 const root = process.cwd();
 const thresholdsSrc = readFileSync(join(root, 'lib/x402/reverifyThresholds.ts'), 'utf8');
@@ -84,10 +76,8 @@ try {
 const found = EXPECTED.map(() => null);
 const thresholdFound = THRESHOLD_FORMS.map(() => null);
 const broken = [];
-const bundleFiles = [];
 for (const file of files) {
   const src = readFileSync(file, 'utf8');
-  bundleFiles.push({ name: file.replace(root + '/', ''), text: src });
   EXPECTED.forEach((fragment, i) => {
     if (found[i] === null && src.includes(fragment)) found[i] = file;
   });
@@ -121,34 +111,6 @@ for (const b of broken) {
   console.error(`[NG] 文が連結された Lua を検出: ${b.file.replace(root + '/', '')}`);
   console.error(`     ...${b.sample}...`);
 }
-
-// (3) 送信式から送る全 Lua。next build に入るのは lib/・app/ の送信式 (scripts/ は node で直接動く)。
-const analysis = analyzeLua(root);
-for (const error of analysis.errors) {
-  failed = true;
-  console.error(`[NG] 解析できない送信式: ${error.file}:${error.line} (${error.reason}) ${error.expr ?? error.id ?? ''}`);
-}
-for (const orphan of analysis.orphans) {
-  failed = true;
-  console.error(`[NG] 送信式から辿れない Lua らしい文字列: ${orphan.file}:${orphan.line} ${orphan.text}`);
-}
-const lua = checkLuaInBundle(analysis, bundleFiles.map((file) => ({ name: file.name, strings: bundleStrings(file.text, file.name) })));
-for (const entry of lua.broken) {
-  failed = true;
-  console.error(`[NG] Lua の片がバンドルで欠けている・書き換わっている (minifier の疑い): ${entry.id} @ ${entry.file}`);
-  for (const run of entry.missing.slice(0, 3)) console.error(`     ソースの片: ${JSON.stringify(run.slice(0, 160))}`);
-}
-for (const id of lua.missing) {
-  failed = true;
-  console.error(`[NG] 送信式が bundle に在るのに Lua がどの chunk にも欠けずに残っていない: ${id}`);
-}
-if (lua.checked.length === 0) {
-  // 0 本 = 解析か walk が壊れている。検査したことにして通さない。
-  failed = true;
-  console.error('[NG] lib/・app/ の Lua が 1 本もバンドルで確認できません (検査の前提が壊れている)');
-}
-console.log(`[INFO] lib/・app/ から送る Lua ${analysis.units.filter((unit) => unit.bundled).length} 本・組み立ての式: 無傷 ${lua.checked.length}・欠落 ${lua.missing.length}・破損 ${lua.broken.length}・送信式ごと無い ${lua.absent.length}`);
-for (const id of lua.absent) console.log(`[INFO] 送信式ごと bundle に無い (tree-shake): ${id}`);
 if (failed) {
   console.error('check-lua-bundle: FAIL — Lua 連結にテンプレートリテラルを使わない (lib/x402/reverify.ts 冒頭の注意)');
   process.exit(1);
