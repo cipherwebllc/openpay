@@ -32,6 +32,7 @@ export type ExistingRule = {
   id: string;
   name: string;
   environment?: string | null;
+  owner?: string | null;
   actionMatch?: string;
   filterMatch?: string;
   frequency?: number;
@@ -49,7 +50,9 @@ export type RulePlan = {
     changes: string[];
     /** 既存 rule から引き継いだ actions の class 名 (PUT で通知先を消さない)。 */
     keptActions: string[];
-    payload: SentryRulePayload & { actions: Array<{ id: string; [k: string]: unknown }> };
+    /** 既存 rule から引き継いだ owner (担当・"team:<id>" / "user:<id>")。無ければ undefined。 */
+    keptOwner?: string;
+    payload: SentryRulePayload & { actions: Array<{ id: string; [k: string]: unknown }>; owner?: string };
   }>;
   unchanged: Array<{ id: string; name: string }>;
   retire: Array<{ id: string; name: string }>;

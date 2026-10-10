@@ -101,13 +101,41 @@ function extractEmits(path: string, source: string): Emits {
       }
     }
   }
-  const staticText = (arg: ts.Expression | undefined): string | null => {
+  // 簡易な binding 解決: 入れ子のスコープ (関数の引数・ブロック/関数内の変数宣言・catch の引数) が同名を
+  // 宣言していたら、その中の識別子は import の binding / トップレベルの const を指していない (shadowing)。
+  // 型 checker は使わず、宣言のスコープをファイル単位で辿るだけ (十分)。
+  const bindingNames = (name: ts.BindingName, out: Set<string>): void => {
+    if (ts.isIdentifier(name)) out.add(name.text);
+    else for (const el of name.elements) if (ts.isBindingElement(el)) bindingNames(el.name, out);
+  };
+  const declaredIn = (node: ts.Node): Set<string> => {
+    const out = new Set<string>();
+    if (ts.isFunctionLike(node)) {
+      for (const p of node.parameters) bindingNames(p.name, out);
+      if ((ts.isFunctionExpression(node) || ts.isFunctionDeclaration(node)) && node.name) out.add(node.name.text);
+    }
+    if (ts.isCatchClause(node) && node.variableDeclaration) bindingNames(node.variableDeclaration.name, out);
+    const stmts = ts.isBlock(node) || ts.isModuleBlock(node) || ts.isCaseClause(node) || ts.isDefaultClause(node)
+      ? node.statements
+      : [];
+    for (const s of stmts) {
+      if (ts.isVariableStatement(s)) for (const d of s.declarationList.declarations) bindingNames(d.name, out);
+      if ((ts.isFunctionDeclaration(s) || ts.isClassDeclaration(s)) && s.name) out.add(s.name.text);
+    }
+    if ((ts.isForStatement(node) || ts.isForOfStatement(node) || ts.isForInStatement(node)) && node.initializer &&
+      ts.isVariableDeclarationList(node.initializer)) {
+      for (const d of node.initializer.declarations) bindingNames(d.name, out);
+    }
+    return out;
+  };
+  const refersToTopLevel = (id: ts.Identifier, shadowed: Set<string>): boolean => !shadowed.has(id.text);
+  const staticText = (arg: ts.Expression | undefined, shadowed: Set<string>): string | null => {
     if (!arg) return null;
     if (ts.isStringLiteral(arg) || ts.isNoSubstitutionTemplateLiteral(arg)) return arg.text;
     if (ts.isTemplateExpression(arg)) {
       let out = arg.head.text;
       for (const span of arg.templateSpans) {
-        if (!ts.isIdentifier(span.expression)) return null;
+        if (!ts.isIdentifier(span.expression) || !refersToTopLevel(span.expression, shadowed)) return null;
         const v = constStrings.get(span.expression.text);
         if (v === undefined) return null;
         out += v + span.literal.text;
@@ -116,26 +144,29 @@ function extractEmits(path: string, source: string): Emits {
     }
     return null;
   };
-  const visit = (node: ts.Node): void => {
+  const visit = (node: ts.Node, shadowed: Set<string>): void => {
+    const own = node === sf ? new Set<string>() : declaredIn(node);
+    const scope = own.size > 0 ? new Set([...shadowed, ...own]) : shadowed;
     if (ts.isCallExpression(node)) {
-      const text = staticText(node.arguments[0]);
+      const text = staticText(node.arguments[0], scope);
       const callee = node.expression;
       if (
         text !== null &&
         ts.isPropertyAccessExpression(callee) &&
         ts.isIdentifier(callee.expression) &&
         loggerBindings.has(callee.expression.text) &&
+        refersToTopLevel(callee.expression, scope) &&
         (callee.name.text === 'warn' || callee.name.text === 'error')
       ) {
         tags.add(text);
       }
-      if (text !== null && ts.isIdentifier(callee) && respondBindings.has(callee.text)) {
+      if (text !== null && ts.isIdentifier(callee) && respondBindings.has(callee.text) && refersToTopLevel(callee, scope)) {
         respondPrefixes.add(text);
       }
     }
-    ts.forEachChild(node, visit);
+    ts.forEachChild(node, (child) => visit(child, scope));
   };
-  visit(sf);
+  visit(sf, new Set());
   return { tags, respondPrefixes };
 }
 
@@ -415,6 +446,30 @@ describe('setup-sentry-alerts: emit 抽出器 (extractEmits) は lib/logger の 
     expect(tagsOf('lib/x.ts', "import { logger } from '@/lib/logger';\nlogger.warn(`plain.template`);")).toEqual(['plain.template']);
   });
 
+  it('import した logger を隠す同名の引数・ローカル変数の .warn() は数えない (shadowing)', () => {
+    const head = "import { logger } from '@/lib/logger';\n";
+    expect(tagsOf('lib/x.ts', head + "function f(logger: { warn(m: string): void }) { logger.warn('shadow.param'); }")).toEqual([]);
+    expect(tagsOf('lib/x.ts', head + "const g = (logger: { warn(m: string): void }) => logger.warn('shadow.arrow');")).toEqual([]);
+    expect(tagsOf('lib/x.ts', head + "function f() { const logger = { warn(_m: string) {} }; logger.warn('shadow.local'); }")).toEqual([]);
+    expect(tagsOf('lib/x.ts', head + "function f() { try { throw 0; } catch (logger) { (logger as any).warn('shadow.catch'); } }")).toEqual([]);
+    expect(tagsOf('lib/x.ts', head + "function f({ logger }: { logger: { warn(m: string): void } }) { logger.warn('shadow.destructure'); }")).toEqual([]);
+    // 隠されていない入れ子の関数からの呼び出しは数える。
+    expect(tagsOf('lib/x.ts', head + "function f() { function g() { logger.warn('nested.ok'); } g(); }")).toEqual(['nested.ok']);
+    // 別のスコープで同名を宣言しても、その外側の呼び出しには影響しない。
+    expect(tagsOf('lib/x.ts', head + "function f(logger: unknown) { void logger; }\nlogger.warn('outside.ok');")).toEqual(['outside.ok']);
+  });
+
+  it('トップレベルの const を隠す引数・ブロック内の const で組んだテンプレートは誤解決しない', () => {
+    const head = "import { logger } from '@/lib/logger';\nconst P = 'real';\n";
+    expect(tagsOf('lib/x.ts', head + 'function f(P: string) { logger.warn(`${P}.failed`); }')).toEqual([]);
+    expect(tagsOf('lib/x.ts', head + "function f() { const P = 'other'; logger.warn(`${P}.failed`); }")).toEqual([]);
+    expect(tagsOf('lib/x.ts', head + "{ let P = 'block'; logger.warn(`${P}.failed`); }")).toEqual([]);
+    // トップレベル const を参照する入れ子の関数は解決する。
+    expect(tagsOf('lib/x.ts', head + 'function f() { logger.warn(`${P}.failed`); }')).toEqual(['real.failed']);
+    // トップレベルでも const 以外 (let) は再代入されうるので解決しない。
+    expect(tagsOf('lib/x.ts', "import { logger } from '@/lib/logger';\nlet Q = 'q';\nlogger.warn(`${Q}.failed`);")).toEqual([]);
+  });
+
   it("makeRespond の prefix は '@/lib/relay/relayRoute' からの binding の呼び出しだけ", () => {
     const ok = extractEmits('app/api/x/route.ts', "import { makeRespond } from '@/lib/relay/relayRoute';\nconst r = makeRespond('relay.x');");
     expect([...ok.respondPrefixes]).toEqual(['relay.x']);
@@ -536,12 +591,34 @@ describe('setup-sentry-alerts: planRules / formatPlan (dry-run の出力を固�
     expect(plan.update[0]?.changes).toEqual(['conditions EventFrequencyCondition → EventFrequencyCondition']);
   });
 
-  it('filter の match 未指定 (Sentry 既定 eq) と明示 eq はキー順が違っても同じ filter (Codex P3)', () => {
+  it('filter のキー順が違っても (match は明示) 同じ filter (Codex P3)', () => {
     const rule = RULES.find((r) => r.eventTags[0] === 'billing.settle.grant-failed')!;
     const stored = sentryStored(buildRulePayload(rule, 'mainnet'), '4');
-    // match を落とし、キー順も value → key → id に入れ替える。
-    stored.filters = stored.filters!.map((f) => ({ value: f.value, key: f.key, id: f.id, name: f.name }));
+    // キー順を value → match → key → id に入れ替える (補完した key が末尾に付く取り違えの回帰)。
+    stored.filters = stored.filters!.map((f) => ({ value: f.value, match: f.match, key: f.key, id: f.id, name: f.name }));
     expect(planRules([stored], RULES, 'mainnet').unchanged).toHaveLength(1);
+  });
+
+  it('filter の match が欠損/null/空の既存 rule は eq と同じ扱いにせず update (Sentry では match は必須・eq への補完は無い)', () => {
+    const rule = RULES.find((r) => r.eventTags[0] === 'billing.settle.grant-failed')!;
+    for (const match of [undefined, null, '']) {
+      const stored = sentryStored(buildRulePayload(rule, 'mainnet'), '4');
+      stored.filters = stored.filters!.map((f) => ({ ...f, match: match as string | undefined }));
+      const plan = planRules([stored], RULES, 'mainnet');
+      expect(plan.update[0]?.changes, String(match)).toEqual([
+        'filters (match なし) billing.settle.grant-failed → billing.settle.grant-failed',
+      ]);
+    }
+  });
+
+  it('comparisonType だけが欠損した既存 rule は Sentry の既定 count と同じ意味なので unchanged (補完の回帰)', () => {
+    const rule = RULES.find((r) => r.eventTags[0] === 'billing.settle.grant-failed')!;
+    const stored = sentryStored(buildRulePayload(rule, 'mainnet'), '5');
+    stored.conditions = stored.conditions!.map(({ comparisonType: _dropped, ...c }) => c);
+    expect(stored.conditions[0]).not.toHaveProperty('comparisonType');
+    const plan = planRules([stored], RULES, 'mainnet');
+    expect(plan.update.map((u) => u.changes)).toEqual([]);
+    expect(plan.unchanged).toHaveLength(1);
   });
 
   it('同名 rule の environment が違えば update (production → mainnet の取り違えを直す)', () => {
@@ -585,6 +662,21 @@ describe('setup-sentry-alerts: planRules / formatPlan (dry-run の出力を固�
         { id: 'sentry.rules.actions.notify_event.NotifyEventAction' },
       ]);
       expect(plan.update[0].changes).toEqual(['threshold 100 → 10', 'actions (none) → NotifyEventAction']);
+    });
+
+    it('既存 rule の owner (担当) を PUT payload に引き継ぐ (未指定だと Sentry の更新処理が None にする)', () => {
+      const existing: ExistingRule = { ...withActions([SLACK_ACTION]), owner: 'team:42' };
+      const plan = planRules([existing], RULES, 'mainnet');
+      expect(plan.update[0].payload.owner).toBe('team:42');
+      expect(plan.update[0].keptOwner).toBe('team:42');
+      expect(formatPlan(plan, 'mainnet')).toContain(
+        '  ~ update  OpenPay: history.load.unreadable-entries-preserved spike (id=7): threshold 100 → 10 ' +
+          '[actions 保持: SlackNotifyServiceAction; owner 保持: team:42]',
+      );
+      // owner が無い (null) 既存 rule には owner を載せない (create と同じ)。
+      const none = planRules([{ ...withActions([SLACK_ACTION]), owner: null }], RULES, 'mainnet');
+      expect(none.update[0].payload).not.toHaveProperty('owner');
+      expect(none.update[0].keptOwner).toBeUndefined();
     });
 
     it('create の actions は既定の NotifyEventAction', () => {
@@ -764,7 +856,7 @@ describe('setup-sentry-alerts: main (fetch mock 経由の挙動検証)', () => {
   });
 
   it('PUT の body は既存の Slack 通知先を保持し、POST の body は既定の NotifyEventAction だけ', async () => {
-    const existing = LEGACY_SENTRY_RULES.map((r) => ({ ...r, actions: [SLACK_ACTION] }));
+    const existing = LEGACY_SENTRY_RULES.map((r) => ({ ...r, actions: [SLACK_ACTION], owner: 'user:7' }));
     fetchSpy.mockImplementation(async (_url, init) => {
       if (init?.method === 'POST') return new Response(JSON.stringify({ id: 'new' }), { status: 201 });
       if (init?.method === 'PUT') return new Response(JSON.stringify({ id: 'upd' }), { status: 200 });
@@ -775,9 +867,13 @@ describe('setup-sentry-alerts: main (fetch mock 経由の挙動検証)', () => {
     const bodies = (method: string) =>
       fetchSpy.mock.calls.filter(([, init]) => init?.method === method).map(([, init]) => JSON.parse(init!.body as string));
     expect(bodies('PUT')).toHaveLength(13);
-    for (const body of bodies('PUT')) expect(body.actions).toEqual([SLACK_ACTION]);
+    for (const body of bodies('PUT')) {
+      expect(body.actions).toEqual([SLACK_ACTION]);
+      expect(body.owner).toBe('user:7');
+    }
     for (const body of bodies('POST')) {
       expect(body.actions).toEqual([{ id: 'sentry.rules.actions.notify_event.NotifyEventAction' }]);
+      expect(body).not.toHaveProperty('owner');
     }
   });
 

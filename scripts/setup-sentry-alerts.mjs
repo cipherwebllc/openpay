@@ -426,14 +426,12 @@ const DISPLAY_ONLY_KEYS = new Set(['name', 'label', 'prompt', 'formFields']);
 // Sentry が未指定の field に補う既定値 (GET はこの値を付けて返す)。desired と既存の両方に同じ既定値を
 // 補ってから比べ、「未指定」と「既定値を明示」を同じ意味として扱う。
 //   EventFrequencyCondition.comparisonType: 'count' (src/sentry/rules/conditions/event_frequency.py)
-//   TaggedEventFilter.match: 'eq'
+// TaggedEventFilter の match は Sentry では必須で eq への補完は無い (workflow_engine の tagged_event_handler)
+// ので補わない。欠損は「意味の定まらない filter」として差分 (update) に出す。
 function withSentryDefaults(node) {
   const out = { ...node };
   if (node.id === EVENT_FREQUENCY_CONDITION && (out.comparisonType === undefined || out.comparisonType === null)) {
     out.comparisonType = 'count';
-  }
-  if (node.id === TAGGED_EVENT_FILTER && (out.match === undefined || out.match === null || out.match === '')) {
-    out.match = 'eq';
   }
   return out;
 }
@@ -465,7 +463,8 @@ function describeFilters(filters) {
   return (filters ?? [])
     .map((f) => {
       if (f.id !== TAGGED_EVENT_FILTER || f.key !== 'event') return shortId(f.id);
-      const match = f.match ?? 'eq';
+      const match = f.match;
+      if (match === undefined || match === null || match === '') return `(match なし) ${f.value}`;
       return match === 'eq' ? String(f.value) : `${MATCH_LABEL[match] ?? match} ${f.value}`;
     })
     .join(' | ');
@@ -554,6 +553,9 @@ export function planRules(existing, rules = RULES, env = ALERT_ENV) {
       // 通知先の無い rule は何も知らせない = 無いのと同じなので、既定の通知先を付ける更新にする。
       changes.push('actions (none) → NotifyEventAction');
     }
+    // owner (担当の割り当て) も同様: PUT で未指定だと Sentry の更新処理 (project_rules/updater.py) が
+    // None にして担当が消える。既存にあるときだけそのまま載せる (create は owner なし)。
+    const keptOwner = typeof found.owner === 'string' && found.owner.length > 0 ? found.owner : undefined;
     if (changes.length === 0) {
       plan.unchanged.push({ id: String(found.id), name: rule.name });
     } else {
@@ -563,7 +565,8 @@ export function planRules(existing, rules = RULES, env = ALERT_ENV) {
         previousName: found.name !== rule.name ? found.name : undefined,
         changes,
         keptActions: keptActions.map((a) => shortId(a.id)),
-        payload: { ...desired, actions },
+        keptOwner,
+        payload: { ...desired, actions, ...(keptOwner !== undefined ? { owner: keptOwner } : {}) },
       });
     }
   }
@@ -588,8 +591,11 @@ export function formatPlan(plan, env = ALERT_ENV) {
   }
   for (const u of plan.update) {
     // 通知先は変えない (既存を保持)。何を保持したかを計画に出し、変えたいときは Dashboard で行う。
-    const kept = u.keptActions.length > 0 ? ` [actions 保持: ${u.keptActions.join(', ')}]` : '';
-    lines.push(`  ~ update  ${u.name} (id=${u.id}): ${u.changes.join('; ')}${kept}`);
+    const kept = [];
+    if (u.keptActions.length > 0) kept.push(`actions 保持: ${u.keptActions.join(', ')}`);
+    if (u.keptOwner !== undefined) kept.push(`owner 保持: ${u.keptOwner}`);
+    const keptNote = kept.length > 0 ? ` [${kept.join('; ')}]` : '';
+    lines.push(`  ~ update  ${u.name} (id=${u.id}): ${u.changes.join('; ')}${keptNote}`);
   }
   for (const k of plan.unchanged) {
     lines.push(`  = keep    ${k.name} (id=${k.id})`);
