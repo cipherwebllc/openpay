@@ -66,18 +66,13 @@ describe('GitHub Actions operation guards', () => {
     if (name === 'post-deploy-verify.yml') expect(permissions).toContain('actions: read');
   });
 
-  // Codex レビュー 4 回目 (PR #778) 2: run を YAML の別書式 (block scalar・引用符) まで読み、1 step 内の複数コマンドも
-  // 1 つずつ見る。読めない形は parseWorkflowJobs が throw して test が落ちる (fail-closed)。
-  // 5 回目 2・3: ラッパー / サブシェル / 展開 / 行継続での npm と、読み残しうる YAML (引用符付きの key・複数行の scalar・
-  // escape 付きの二重引用符・揃っていないインデント・step 0 件の job) も throw する (scripts/lib/workflowRun.mjs)。
-  // 守る相手は保守者のうっかり (docs/DEPLOY_CHECKLIST.md §7.14 の脅威モデル)。
-  // Codex レビュー (PR #778) 3 → 3 回目で「防止」: 全 workflow の全 install は `npm ci --ignore-scripts` (install
-  // script も binding.gyp の暗黙 node-gyp rebuild も走らない) にし、直後に scripts/installed-scripts-gate.mjs が
-  // 実体を走査して allowlist 外があれば fail、通ったら `--rebuild` で allowlist の名前だけ `npm rebuild` する。
-  // = allowlist 外の install script 付き依存は一度も実行されずに CI で止まる (CLAUDE.md 掟 16)。
-  // 5 回目 4: `npx --no` もローカル bin に限られない (npm 10.9 は global の bin や npx の cache を実行しうり、registry の
-  // manifest 取得にも進む) ので npx は全面禁止。規則の本体は installGuardViolations (fixture の検査は
-  // tests/scripts/workflow-run.test.ts)。
+  // 全 workflow の全 install は `npm ci --ignore-scripts` (install script も binding.gyp の暗黙 node-gyp rebuild も走らない)
+  // にし、直後の step で scripts/installed-scripts-gate.mjs が実体を走査して allowlist 外があれば fail、通ったら
+  // `--rebuild` で allowlist の名前だけ `npm rebuild` する (CLAUDE.md 掟 16・Codex レビュー (PR #778) 3 回目で「防止」)。
+  // 7 回目で run をシェルとして分解して推測する方式をやめ、npm / npx / 2 つの gate の名前を含む行は許可リストとの
+  // 完全一致だけを通す (npx は全面禁止・install と gate は step の run がその 1 行だけ)。YAML の読めない形は
+  // parseWorkflowJobs が throw する。守る相手は保守者のうっかり (docs/DEPLOY_CHECKLIST.md §7.14 の脅威モデル)。
+  // 規則の本体は scripts/lib/workflowRun.mjs の installGuardViolations (fixture の検査は tests/scripts/workflow-run.test.ts)。
   it.each(workflowFiles)('%s checks sources, installs with --ignore-scripts and rebuilds only allowlisted packages after the gate', (name) => {
     expect(installGuardViolations(workflow(name), name)).toEqual([]);
   });

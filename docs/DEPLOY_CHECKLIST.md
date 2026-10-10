@@ -709,10 +709,10 @@ resolved の書き換え) は PR レビューと lockfile-gate の形の検査�
 `bundleDependencies` / `bundledDependencies` からも判定し、同梱の内側の実体には allowlist を適用しない)。
 workflow の検査 (`tests/scripts/workflow-guards.test.ts` + `scripts/lib/workflowRun.mjs`) が守る相手は
 **保守者 (AI エージェントを含む) がうっかり** workflow に `npm install` や `npx …` を足すことで、意図的に検査を欺く
-書き方はレビューの範囲とする。ただし npm / npx を含む行で読めない形 (ラッパー・サブシェル・展開・引用・行継続、
-読み残しうる YAML の書式) は必ず throw し (fail-closed)、うっかりの別書式を黙って通さない。workflow で `npx` は
-全面禁止 (`npx --no` でも global の bin や npx の cache を実行しうるため)。bin は `npm run <script>` か
-`./node_modules/.bin/<bin>` で呼ぶ。
+書き方はレビューの範囲とする。ただしシェルを分解して意味を推測することはせず、npm / npx / 2 つの gate の名前を含む
+run の行は許可リストとの完全一致だけを通し (fail-closed)、読み残しうる YAML の書式は throw して、うっかりの別書式を
+黙って通さない。workflow で `npx` は全面禁止 (`npx --no` でも global の bin や npx の cache を実行しうるため)。bin は
+`npm run <script>` か `./node_modules/.bin/<bin>` で呼ぶ。
 
 1. **`node scripts/lockfile-gate.mjs`** (npm ci の**前**・全 workflow): Git 管理下の全 `package-lock.json` /
    `npm-shrinkwrap.json` (隠しディレクトリ含む・lockfileVersion ≥ 2 必須) の `resolved` が
@@ -736,10 +736,13 @@ workflow の検査 (`tests/scripts/workflow-guards.test.ts` + `scripts/lib/workf
    同時に見直す。
 
 workflow での書き方 (`scripts/lib/workflowRun.mjs` の `installGuardViolations` を `tests/scripts/workflow-guards.test.ts`
-が全 workflow に当てる): `npm ci` には `--ignore-scripts` をちょうど 1 回・値なしで付ける (npm は
-`--ignore-scripts false` の `false` を値として読み、scripts の無効化を解除する)。2 つの gate はそれぞれ単独のコマンドとして
-step の最後に置く。GitHub の既定の shell (`bash -e`) は pipefail を持たないので、`| tee`・`|| true`・`&`・後ろに続く
-コマンドは gate の失敗を step の成功に隠しうる (直前の `npm ci --ignore-scripts &&` だけは可)。
+が全 workflow に当てる): run の中で npm / npx / `lockfile-gate` / `installed-scripts-gate` の名前を含む行 (大文字小文字を
+問わない部分一致・コメントや echo・引用・here-doc の中も区別しない) は、前後の空白を除いた行全体が許可リスト
+(`ALLOWED_RUN_LINES`。今の workflow で使っている 12 行だけ。パイプを含む `npm run build 2>&1 | tee build.log` は同じ run の
+前の行に `set -o pipefail` があるときだけ) に完全一致しなければ fail。install の行と 2 つの gate の行は、
+その step の run がその 1 行だけで、install の step の直後の step が同じ root の実体 gate、install より前の step に
+lockfile-gate を置く。**npm / npx / gate の名前を run の中の説明文やコメントに書かない** (書くなら run の外の YAML コメントにする)。
+新しい npm の呼び出しが要るときは許可リストに 1 行足し、PR レビューで決める。
 
 allowlist の追加は「用途・何のための native build か」を 1 行書いて PR レビューで決める。lockfile-gate が
 `stale` と出した名前 (もう install script を持たない) は一覧から外す。ローカルで CI と同じ手順を再現する:
