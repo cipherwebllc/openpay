@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.10.3 — unreleased
+## 0.10.3 — 2026-10-10
 
 - Widen `isPrivatePaymentHost` / `parseSafePaymentUrl` to the same IANA
   special-purpose table the OpenPay server uses: NAT64 (`64:ff9b::/96`,
@@ -10,14 +10,15 @@
   site-local and reserved ranges are now rejected before DNS, before a custom
   transport runs and at connect time. Mapped IPv4 is judged against the full
   IPv4 table. A `::` that stands for no group is treated as malformed (rejected).
-  Public addresses next to each range stay allowed. No dependency changes.
-
-## 0.10.2 — unreleased
-
+  Public addresses next to each range stay allowed.
 - `resolveLicense` accepts `productUrl: null` (the seller released their last
   @handle). The descriptor keeps the license identity, so gates keep working;
   only the store page link is absent. Any non-null `productUrl` is validated as
-  before. `LicenseDescriptor.productUrl` is now `string | null`.
+  before. `LicenseDescriptor.productUrl` is now `string | null`. 0.10.2 and
+  earlier reject such a descriptor with `invalid_response`.
+- No dependency changes.
+
+## 0.10.2 — 2026-09-24
 
 - Fix `createDualGate` USDC authorization reuse before settlement. Reuse JPYC's
   local claim manager for v1/v2 payments, keyed by pinned chain, asset, payer and
