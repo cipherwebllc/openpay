@@ -293,3 +293,75 @@ export function classifyNpmCommand(command) {
   const subcommand = rest.find((w) => !w.startsWith('-')) ?? null;
   return { tool, subcommand, args: rest, prefix };
 }
+
+const LOCKFILE_GATE = 'node scripts/lockfile-gate.mjs';
+const INSTALLED_SCRIPTS_GATE = 'node scripts/installed-scripts-gate.mjs';
+// gate 以外の経路で install script を走らせる / 依存を取りに行く npm のサブコマンド。
+const FORBIDDEN_NPM_SUBCOMMANDS = ['install', 'i', 'add', 'rebuild', 'exec', 'x', 'update', 'up'];
+// それ以外で workflow から呼んでよいもの (未知のサブコマンドは足す前にレビューする)。
+const ALLOWED_NPM_SUBCOMMANDS = ['run', 'run-script', 'test', 'audit', 'view', 'pack', 'publish'];
+
+/**
+ * workflow 1 本の依存 install の手順と npm / npx の呼び出しを検査し、違反を返す (空配列なら OK・読めない形は throw)。
+ * 規則 (CLAUDE.md 掟 16・docs/DEPLOY_CHECKLIST.md §7.14):
+ *   - npm ci のある job は、最初の npm ci より前に `node scripts/lockfile-gate.mjs` を走らせ、そこまでの step に
+ *     continue-on-error を付けない。
+ *   - npx は全面禁止 (`npx --no` でも global の bin や npx の cache を実行しうる)。bin は `npm run <script>` か
+ *     `./node_modules/.bin/<bin>` で呼ぶ。`--no-ignore-scripts` / `--ignore-scripts=…` は書かない。
+ *   - npm ci は `--ignore-scripts` 付きで、直後のコマンド (同じ step か次の step) が
+ *     `node scripts/installed-scripts-gate.mjs --rebuild <root>/node_modules` で continue-on-error なし。
+ *   - その他の npm は ALLOWED_NPM_SUBCOMMANDS だけ (install / rebuild / exec 等は禁止)。
+ * @param {string} source workflow の YAML
+ * @param {string} [name] 違反メッセージに付けるファイル名
+ * @returns {string[]}
+ */
+export function installGuardViolations(source, name = 'workflow') {
+  const violations = [];
+  const continueOnError = (step) => step.keys['continue-on-error'] ?? 'false';
+  for (const { job, steps } of parseWorkflowJobs(source)) {
+    const commands = steps.flatMap((step, stepIndex) => step.commands.map((command) => ({ command, step, stepIndex })));
+    const install = commands.findIndex(({ command }) => {
+      const npm = classifyNpmCommand(command);
+      return npm?.tool === 'npm' && npm.subcommand === 'ci';
+    });
+    if (install !== -1) {
+      const gate = commands.findIndex(({ command }) => command === LOCKFILE_GATE);
+      if (gate === -1 || gate > install) {
+        violations.push(`${name}/${job}: ${LOCKFILE_GATE} must run before the first npm ci (pre-install source gate)`);
+      } else if (commands.slice(0, gate + 1).some(({ step }) => continueOnError(step) !== 'false')) {
+        violations.push(`${name}/${job}: no continue-on-error up to and including the source gate`);
+      }
+    }
+    commands.forEach(({ command, step, stepIndex }, index) => {
+      const npm = classifyNpmCommand(command);
+      if (npm === null) return;
+      const where = `${name}/${job}: "${command}"`;
+      if (npm.tool === 'npx') {
+        violations.push(`${where}: npx is not allowed; call ./node_modules/.bin/<bin> or npm run <script>`);
+        return;
+      }
+      // `--no-ignore-scripts` / `--ignore-scripts=false` は後ろに書くと --ignore-scripts を打ち消す。
+      if (/--no-ignore-scripts|--ignore-scripts=/.test(npm.args.join(' '))) {
+        violations.push(`${where}: --no-ignore-scripts / --ignore-scripts=<value> undo --ignore-scripts`);
+      }
+      if (npm.subcommand === 'ci') {
+        if (!npm.args.includes('--ignore-scripts')) violations.push(`${where}: npm ci must not run install scripts (--ignore-scripts)`);
+        const root = npm.prefix ? `${npm.prefix}/node_modules` : 'node_modules';
+        const next = commands[index + 1];
+        if (next?.command !== `${INSTALLED_SCRIPTS_GATE} --rebuild ${root}`) {
+          violations.push(`${where}: the next command must be ${INSTALLED_SCRIPTS_GATE} --rebuild ${root}`);
+        } else {
+          if (continueOnError(next.step) !== 'false') violations.push(`${where}: the installed-scripts gate must not continue on error`);
+          if (next.stepIndex - stepIndex > 1) violations.push(`${where}: the installed-scripts gate must be in the same step or the next one`);
+        }
+        return;
+      }
+      if (FORBIDDEN_NPM_SUBCOMMANDS.includes(npm.subcommand)) {
+        violations.push(`${where}: forbidden npm subcommand ${npm.subcommand} (installs or runs scripts outside the gate)`);
+      } else if (!ALLOWED_NPM_SUBCOMMANDS.includes(npm.subcommand)) {
+        violations.push(`${where}: unknown npm subcommand ${npm.subcommand ?? '(none)'}`);
+      }
+    });
+  }
+  return violations;
+}

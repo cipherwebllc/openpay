@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { LUA_REAL_TEST_FILES } from '../../scripts/lib/luaRealTests.mjs';
 import { listTestFiles } from '../../scripts/lib/testFileFence.mjs';
-import { classifyNpmCommand, parseWorkflowJobs } from '../../scripts/lib/workflowRun.mjs';
+import { installGuardViolations } from '../../scripts/lib/workflowRun.mjs';
 
 function workflow(name: string): string {
   return readFileSync(resolve(process.cwd(), '.github/workflows', name), 'utf8');
@@ -71,58 +71,15 @@ describe('GitHub Actions operation guards', () => {
   // 5 回目 2・3: ラッパー / サブシェル / 展開 / 行継続での npm と、読み残しうる YAML (引用符付きの key・複数行の scalar・
   // escape 付きの二重引用符・揃っていないインデント・step 0 件の job) も throw する (scripts/lib/workflowRun.mjs)。
   // 守る相手は保守者のうっかり (docs/DEPLOY_CHECKLIST.md §7.14 の脅威モデル)。
-  // 各 job のコマンド列 (step 境界つき) を返す。
-  function jobCommands(name: string) {
-    return parseWorkflowJobs(workflow(name)).map(({ job, steps }) => ({
-      job,
-      commands: steps.flatMap((step, stepIndex) => step.commands.map((command) => ({ command, step, stepIndex }))),
-    }));
-  }
-  const isNpmCi = (command: string) => classifyNpmCommand(command)?.tool === 'npm' && classifyNpmCommand(command)?.subcommand === 'ci';
-
-  it.each(workflowFiles)('%s checks registry sources before every dependency install', (name) => {
-    for (const { job, commands } of jobCommands(name)) {
-      const install = commands.findIndex(({ command }) => isNpmCi(command));
-      if (install === -1) continue;
-      const gate = commands.findIndex(({ command }) => command === 'node scripts/lockfile-gate.mjs');
-      expect(gate, `${name}/${job}: pre-install source gate`).toBeGreaterThan(-1);
-      expect(gate, `${name}/${job}: pre-install source gate`).toBeLessThan(install);
-      for (const { step } of commands.slice(0, gate + 1)) {
-        expect(step.keys['continue-on-error'] ?? 'false', `${name}/${job}: no continue-on-error before the source gate`).toBe('false');
-      }
-    }
-  });
-
   // Codex レビュー (PR #778) 3 → 3 回目で「防止」: 全 workflow の全 install は `npm ci --ignore-scripts` (install
   // script も binding.gyp の暗黙 node-gyp rebuild も走らない) にし、直後に scripts/installed-scripts-gate.mjs が
   // 実体を走査して allowlist 外があれば fail、通ったら `--rebuild` で allowlist の名前だけ `npm rebuild` する。
   // = allowlist 外の install script 付き依存は一度も実行されずに CI で止まる (CLAUDE.md 掟 16)。
-  it.each(workflowFiles)('%s installs with --ignore-scripts and rebuilds only allowlisted packages after the gate', (name) => {
-    for (const { job, commands } of jobCommands(name)) {
-      commands.forEach(({ command, step, stepIndex }, index) => {
-        const npm = classifyNpmCommand(command);
-        if (npm === null) return;
-        const where = `${name}/${job}: "${command}"`;
-        // Codex レビュー 5 回目 (PR #778) 4: `npx --no` もローカル bin に限られない (npm 10.9 は global の bin や npx の
-        // cache を実行しうり、registry の manifest 取得にも進む)。npx は全面禁止し、bin は `npm run <script>` か
-        // `./node_modules/.bin/<bin>` (lockfile で入れた実体) で直接呼ぶ。
-        expect(npm.tool, `${where}: npx is not allowed; call ./node_modules/.bin/<bin> or npm run <script>`).toBe('npm');
-        // `--no-ignore-scripts` / `--ignore-scripts=false` は後ろに書くと --ignore-scripts を打ち消す。
-        expect(npm.args.join(' '), where).not.toMatch(/--no-ignore-scripts|--ignore-scripts=/);
-        if (npm.subcommand === 'ci') {
-          expect(npm.args, `${where}: npm ci must not run install scripts`).toContain('--ignore-scripts');
-          const root = npm.prefix ? `${npm.prefix}/node_modules` : 'node_modules';
-          const next = commands[index + 1];
-          expect(next?.command, `${where}: gate + rebuild must be the very next command`).toBe(`node scripts/installed-scripts-gate.mjs --rebuild ${root}`);
-          expect(next.step.keys['continue-on-error'] ?? 'false', where).toBe('false');
-          expect(next.stepIndex - stepIndex, `${where}: the gate is in the same step or the next one`).toBeLessThanOrEqual(1);
-          return;
-        }
-        // gate 以外の経路で install script を走らせない / 依存を取りに行かない。
-        expect(['install', 'i', 'add', 'rebuild', 'exec', 'x', 'update', 'up'], `${where}: forbidden npm subcommand`).not.toContain(npm.subcommand);
-        expect(['run', 'run-script', 'test', 'audit', 'view', 'pack', 'publish'], `${where}: unknown npm subcommand`).toContain(npm.subcommand);
-      });
-    }
+  // 5 回目 4: `npx --no` もローカル bin に限られない (npm 10.9 は global の bin や npx の cache を実行しうり、registry の
+  // manifest 取得にも進む) ので npx は全面禁止。規則の本体は installGuardViolations (fixture の検査は
+  // tests/scripts/workflow-run.test.ts)。
+  it.each(workflowFiles)('%s checks sources, installs with --ignore-scripts and rebuilds only allowlisted packages after the gate', (name) => {
+    expect(installGuardViolations(workflow(name), name)).toEqual([]);
   });
 
   it('CI は typecheck 直後に full ESLint を実行する', () => {

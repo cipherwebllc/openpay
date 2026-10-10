@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { classifyNpmCommand, parseWorkflowJobs, splitCommands } from '../../scripts/lib/workflowRun.mjs';
+import { classifyNpmCommand, installGuardViolations, parseWorkflowJobs, splitCommands } from '../../scripts/lib/workflowRun.mjs';
 
 // Codex レビュー 4 回目 (PR #778) 2: workflow ガードが YAML の別書式 (`run: |`・`run: >-`・引用符付き) と
 // 1 step 内の追加コマンド (`npm ci --ignore-scripts && npm rebuild`) を見逃していた。run をこの形まで読み、
@@ -230,5 +230,46 @@ describe('splitCommands / classifyNpmCommand', () => {
     'code=$(curl -s -o /dev/null -w "%{http_code}" https://example.com)',
   ])('does not throw on commands without npm / npx: %s', (shell) => {
     expect(() => splitCommands(shell)).not.toThrow();
+  });
+});
+
+// tests/scripts/workflow-guards.test.ts が実 workflow に当てる規則 (lockfile-gate → npm ci --ignore-scripts → 実体 gate の
+// rebuild・npx 禁止・npm のサブコマンド) を fixture で確かめる。
+describe('installGuardViolations', () => {
+  const step = (run: string, extra = '') => `      - run: ${run}${extra}`;
+  const SOURCE_GATE = step('node scripts/lockfile-gate.mjs');
+  const INSTALL = step('npm ci --ignore-scripts');
+  const REBUILD = step('node scripts/installed-scripts-gate.mjs --rebuild node_modules');
+  const guard = (...steps: string[]) => installGuardViolations(workflow(steps.join('\n')), 'x.yml');
+
+  it.each([
+    ['separate steps', [SOURCE_GATE, INSTALL, REBUILD, step('npm run build')]],
+    ['npm ci and the gate in one step', [SOURCE_GATE, step('npm ci --ignore-scripts && node scripts/installed-scripts-gate.mjs --rebuild node_modules')]],
+    ['a prefixed install', [SOURCE_GATE, step('npm --prefix tools/x ci --ignore-scripts'), step('node scripts/installed-scripts-gate.mjs --rebuild tools/x/node_modules')]],
+    ['local bins and npm run / test', [step('./node_modules/.bin/vitest run'), step('npm run lint'), step('npm --prefix packages/x test')]],
+  ])('accepts %s', (_label, steps) => {
+    expect(guard(...steps)).toEqual([]);
+  });
+
+  it.each([
+    ['npx', [step('npx --no vitest run')], /npx is not allowed/],
+    ['npm install', [step('npm install')], /forbidden npm subcommand install/],
+    ['npm rebuild', [step('npm rebuild')], /forbidden npm subcommand rebuild/],
+    ['an unknown subcommand', [step('npm prune')], /unknown npm subcommand prune/],
+    ['npm ci without --ignore-scripts', [SOURCE_GATE, step('npm ci'), REBUILD], /--ignore-scripts/],
+    ['--no-ignore-scripts', [SOURCE_GATE, step('npm ci --ignore-scripts --no-ignore-scripts'), REBUILD], /undo --ignore-scripts/],
+    ['--ignore-scripts=false', [SOURCE_GATE, step('npm ci --ignore-scripts --ignore-scripts=false'), REBUILD], /undo --ignore-scripts/],
+    ['no source gate', [INSTALL, REBUILD], /lockfile-gate\.mjs must run before/],
+    ['the source gate after the install', [INSTALL, REBUILD, SOURCE_GATE], /lockfile-gate\.mjs must run before/],
+    ['continue-on-error on the source gate', [step('node scripts/lockfile-gate.mjs', '\n        continue-on-error: true'), INSTALL, REBUILD], /continue-on-error/],
+    ['no installed-scripts gate', [SOURCE_GATE, INSTALL, step('npm run build')], /next command must be/],
+    ['the gate for another root', [SOURCE_GATE, step('npm --prefix tools/x ci --ignore-scripts'), REBUILD], /tools\/x\/node_modules/],
+    ['continue-on-error on the installed-scripts gate', [SOURCE_GATE, INSTALL, step('node scripts/installed-scripts-gate.mjs --rebuild node_modules', '\n        continue-on-error: true')], /must not continue on error/],
+    ['another command between npm ci and the gate', [SOURCE_GATE, step('npm ci --ignore-scripts && echo ok'), REBUILD], /next command must be/],
+    ['the gate two steps later', [SOURCE_GATE, INSTALL, '      - uses: actions/cache@v4', REBUILD], /same step or the next one/],
+  ])('reports %s', (_label, steps, message) => {
+    const violations = guard(...steps);
+    expect(violations.length).toBeGreaterThan(0);
+    expect(violations.join('\n')).toMatch(message);
   });
 });
