@@ -96,10 +96,11 @@ function bindingNames(name: ts.BindingName, out: string[]): void {
   }
 }
 
-// `declare namespace` / 中身が型宣言だけ (interface / type / declare / 入れ子の型だけの namespace) の namespace は
-// 値を生まない (TS が JS を出さない) ので規定外 value export に数えない。
+// 中身が型宣言だけ (interface / type / type-only の re-export / 入れ子の型だけの namespace) の namespace は
+// 値を生まないので規定外 value export に数えない。`declare const/let/var/function/class/enum` を含む namespace は
+// (JS は出ないが) 値の namespace として型に現れる = Next の typeof import 検査では規定外なので数える。
+// `declare` の有無は見ない: `export declare namespace D { const v: number }` も同じ理由で値。
 function isTypeOnlyNamespace(node: ts.ModuleDeclaration): boolean {
-  if (hasModifier(node, ts.SyntaxKind.DeclareKeyword)) return true;
   const body = node.body;
   if (!body) return true;
   if (ts.isModuleDeclaration(body)) return isTypeOnlyNamespace(body); // namespace A.B {…}
@@ -108,7 +109,6 @@ function isTypeOnlyNamespace(node: ts.ModuleDeclaration): boolean {
     (s) =>
       ts.isInterfaceDeclaration(s) ||
       ts.isTypeAliasDeclaration(s) ||
-      hasModifier(s, ts.SyntaxKind.DeclareKeyword) ||
       (ts.isModuleDeclaration(s) && isTypeOnlyNamespace(s)) ||
       (ts.isExportDeclaration(s) && s.isTypeOnly),
   );
@@ -219,10 +219,22 @@ describe('export 抽出器 (regex で見逃した形を AST で拾う)', () => {
     expect(extract('export namespace Types { export interface Props {} export type Id = string; }').values).toEqual([]);
     expect(extract('export namespace Outer { export namespace Inner { export interface I {} } }').values).toEqual([]);
     expect(extract('export namespace A.B { export type T = 1; }').values).toEqual([]);
-    expect(extract('export declare namespace D { const v: number; }').values).toEqual([]);
+    expect(extract('export declare namespace D { type T = 1; interface I {} }').values).toEqual([]);
     expect(extract('export namespace Empty {}').values).toEqual([]);
+    expect(extract("export namespace R { export type { X } from './x'; }").values).toEqual([]);
     expect(extract('export namespace Mixed { export interface I {} export const v = 1; }').values).toEqual(['Mixed']);
     expect(extract('export namespace Outer { export namespace Inner { export function f() {} } }').values).toEqual(['Outer']);
+  });
+
+  it('declare const/let/var/function/class/enum を含む namespace は値の namespace (Next の typeof import 検査で規定外) として数える', () => {
+    expect(extract('export namespace N { export declare const v: number; }').values).toEqual(['N']);
+    expect(extract('export namespace N { declare let l: number; }').values).toEqual(['N']);
+    expect(extract('export namespace N { export declare var w: number; }').values).toEqual(['N']);
+    expect(extract('export namespace N { export declare function f(): void; }').values).toEqual(['N']);
+    expect(extract('export namespace N { export declare class C {} }').values).toEqual(['N']);
+    expect(extract('export namespace N { export declare enum E { A } }').values).toEqual(['N']);
+    expect(extract('export namespace N { export namespace M { export declare const v: number; } }').values).toEqual(['N']);
+    expect(extract('export declare namespace D { const v: number; }').values).toEqual(['D']);
   });
 });
 

@@ -157,15 +157,65 @@ function topLevelBlock(lines, key) {
   return { head: splitKey(lines[start]), body: lines.slice(start + 1, end) };
 }
 
-/** `- item` 行 (指定 indent) を集める。他の形が混ざれば null。 */
-function blockList(lines, indent) {
+/** 空行を除いた最初の行の indent (= その block の子の indent)。非空行が無ければ -1。 */
+function childIndent(lines) {
+  for (const line of lines) if (line.trim() !== '') return indentOf(line);
+  return -1;
+}
+
+/** `- item` 行を集める。indent は最初の行から取り、他の形が混ざれば null。 */
+function blockList(lines) {
+  const items = lines.filter((l) => l.trim() !== '');
+  if (items.length === 0) return null;
+  const indent = indentOf(items[0]);
   const out = [];
-  for (const line of lines) {
-    if (line.trim() === '') continue;
+  for (const line of items) {
     if (indentOf(line) !== indent || !line.trim().startsWith('- ')) return null;
     out.push(unquote(line.trim().slice(2)));
   }
   return out;
+}
+
+/**
+ * block の行を「子 (最初の非空行の indent) の `key: value` 行 + その下に続く行 (sub)」に分ける。
+ * indent は 2 でも 4 でも最初の子から検出する。子より浅い行・子と同じ深さで key でない行・
+ * 親の無い深い行は errors に積む (fail-closed・黙って読み飛ばさない)。
+ */
+function mapEntries(lines, label) {
+  const entries = [];
+  const errors = [];
+  const indent = childIndent(lines);
+  if (indent === -1) {
+    errors.push(`${label}: empty`);
+    return { entries, errors };
+  }
+  let current = null;
+  for (const line of lines) {
+    if (line.trim() === '') continue;
+    const depth = indentOf(line);
+    if (depth < indent) {
+      errors.push(`${label}: inconsistent indent (${line.trim()})`);
+      current = null;
+      continue;
+    }
+    if (depth === indent) {
+      const entry = splitKey(line);
+      if (!entry) {
+        errors.push(`${label}: unreadable line (${line.trim()})`);
+        current = null;
+        continue;
+      }
+      current = { key: entry.key, value: entry.value, sub: [] };
+      entries.push(current);
+      continue;
+    }
+    if (!current) {
+      errors.push(`${label}: inconsistent indent (${line.trim()})`);
+      continue;
+    }
+    current.sub.push(line);
+  }
+  return { entries, errors };
 }
 
 /** pull_request の設定 (flow map の entries か、block の行) から filtered / branches を読む。 */
@@ -178,7 +228,7 @@ function readPullRequestConfig(entries, unsupported) {
     }
     if (PR_BRANCH_KEYS.has(key)) {
       let list = flowList(value);
-      if (list === null && isEmptyValue(value) && sub) list = blockList(sub, 6);
+      if (list === null && isEmptyValue(value) && sub && sub.length > 0) list = blockList(sub);
       if (list === null) {
         unsupported.push(`on.pull_request.${key}: unreadable list`);
         continue;
@@ -229,63 +279,43 @@ function readTriggers(lines, unsupported) {
     }
     return result;
   }
-  // block 形式: `- event` の列か `event:` の map
+  // block 形式: `- event` の列か `event:` の map (子の indent は最初の行から検出・2 でも 4 でも可)
   const body = on.body.filter((l) => l.trim() !== '');
   if (body.length === 0) {
     unsupported.push('on: empty');
     return result;
   }
-  if (body.every((l) => indentOf(l) === 2 && l.trim().startsWith('- '))) {
-    const list = blockList(body, 2);
+  if (body.every((l) => l.trim().startsWith('- '))) {
+    const list = blockList(body);
+    if (!list) {
+      unsupported.push('on: unreadable list');
+      return result;
+    }
     result.pullRequest = list.includes('pull_request');
     if (result.pullRequest) result.config = readPullRequestConfig([], unsupported);
     return result;
   }
-  for (let i = 0; i < on.body.length; i++) {
-    const line = on.body[i];
-    if (line.trim() === '') continue;
-    if (indentOf(line) !== 2) continue; // sub-block は各 event のところで読む
-    const entry = splitKey(line);
-    if (!entry) {
-      unsupported.push(`on: unreadable line (${line.trim()})`);
-      continue;
+  const { entries, errors } = mapEntries(on.body, 'on');
+  for (const reason of errors) unsupported.push(reason);
+  const pr = entries.find((e) => e.key === 'pull_request');
+  if (!pr) return result;
+  result.pullRequest = true;
+  if (!isEmptyValue(pr.value)) {
+    const inner = flowMap(pr.value);
+    if (inner === null || inner === undefined || pr.sub.length > 0) {
+      unsupported.push('on.pull_request: unreadable value');
+      return result;
     }
-    if (entry.key !== 'pull_request') continue;
-    result.pullRequest = true;
-    // sub-block (indent 4 の key と、その下 indent 6 の行)
-    const sub = [];
-    for (let j = i + 1; j < on.body.length; j++) {
-      const l = on.body[j];
-      if (l.trim() === '') continue;
-      if (indentOf(l) <= 2) break;
-      sub.push(l);
-    }
-    if (!isEmptyValue(entry.value)) {
-      const inner = flowMap(entry.value);
-      if (inner === null || inner === undefined || sub.length > 0) {
-        unsupported.push('on.pull_request: unreadable value');
-        continue;
-      }
-      result.config = readPullRequestConfig(inner, unsupported);
-      continue;
-    }
-    const entries = [];
-    for (let k = 0; k < sub.length; k++) {
-      if (indentOf(sub[k]) !== 4) {
-        if (entries.length === 0) unsupported.push(`on.pull_request: unreadable line (${sub[k].trim()})`);
-        continue; // indent 6 以深は直前の key の sub として下で拾う
-      }
-      const e = splitKey(sub[k]);
-      if (!e) {
-        unsupported.push(`on.pull_request: unreadable line (${sub[k].trim()})`);
-        continue;
-      }
-      const deeper = [];
-      for (let m = k + 1; m < sub.length && indentOf(sub[m]) > 4; m++) deeper.push(sub[m]);
-      entries.push({ key: e.key, value: e.value, sub: deeper });
-    }
-    result.config = readPullRequestConfig(entries, unsupported);
+    result.config = readPullRequestConfig(inner, unsupported);
+    return result;
   }
+  if (pr.sub.length === 0) {
+    result.config = readPullRequestConfig([], unsupported);
+    return result;
+  }
+  const sub = mapEntries(pr.sub, 'on.pull_request');
+  for (const reason of sub.errors) unsupported.push(reason);
+  result.config = readPullRequestConfig(sub.entries, unsupported);
   return result;
 }
 
@@ -302,65 +332,54 @@ function readJobs(lines, unsupported) {
     unsupported.push(`jobs: inline value (${block.head.value})`);
     return jobs;
   }
-  let current = null;
-  for (let i = 0; i < block.body.length; i++) {
-    const line = block.body[i];
-    if (line.trim() === '') continue;
-    const indent = indentOf(line);
-    if (indent === 2) {
-      const entry = splitKey(line);
-      if (!entry) {
-        unsupported.push(`jobs: unreadable line (${line.trim()})`);
-        current = null;
-        continue;
-      }
-      current = { id: entry.key, name: entry.key, conditional: null, needs: [] };
-      // `test: {name: x, runs-on: y}` (flow 形式の job) は name: 等を読めないので unsupported
-      if (entry.value) current.conditional = 'inline value';
-      jobs.push(current);
+  // job の indent は jobs: 直下の最初の子から検出する (2 でも 4 でも可)。子が読めない・indent が揃わない行は unsupported
+  const { entries, errors } = mapEntries(block.body, 'jobs');
+  for (const reason of errors) unsupported.push(reason);
+  for (const entry of entries) {
+    const job = { id: entry.key, name: entry.key, conditional: null, needs: [] };
+    jobs.push(job);
+    // `test: {name: x, runs-on: y}` (flow 形式の job) は name: 等を読めないので unsupported
+    if (entry.value) {
+      job.conditional = 'inline value';
       continue;
     }
-    if (indent !== 4 || !current) continue;
-    const entry = splitKey(line);
-    if (!entry) continue;
-    const label = `jobs.${current.id}.${entry.key}`;
-    switch (entry.key) {
-      case 'name': {
-        // check 名が静的に決まらない job は、名前を推測せず「解析できない」として扱う
-        const raw = entry.value;
-        if (!raw || /^[|>]/.test(raw)) current.conditional = current.conditional ?? 'block scalar or empty name';
-        else if (raw.includes('${{')) current.conditional = current.conditional ?? 'expression in name';
-        else current.name = unquote(raw);
-        break;
-      }
-      case 'if':
-        current.conditional = current.conditional ?? 'if:';
-        break;
-      case 'strategy':
-        current.conditional = current.conditional ?? 'strategy:';
-        break;
-      case 'uses':
-        current.conditional = current.conditional ?? 'uses:';
-        break;
-      case 'needs': {
-        let list = flowList(entry.value);
-        if (list === null && entry.value && /^[\w-]+$/.test(unquote(entry.value))) list = [unquote(entry.value)];
-        if (list === null && isEmptyValue(entry.value)) {
-          const sub = [];
-          for (let j = i + 1; j < block.body.length; j++) {
-            const l = block.body[j];
-            if (l.trim() === '') continue;
-            if (indentOf(l) <= 4) break;
-            sub.push(l);
-          }
-          list = blockList(sub, 6);
+    if (entry.sub.length === 0) {
+      job.conditional = 'empty definition';
+      continue;
+    }
+    const keys = mapEntries(entry.sub, `jobs.${job.id}`);
+    for (const reason of keys.errors) unsupported.push(reason);
+    for (const field of keys.entries) {
+      const label = `jobs.${job.id}.${field.key}`;
+      switch (field.key) {
+        case 'name': {
+          // check 名が静的に決まらない job は、名前を推測せず「解析できない」として扱う
+          const raw = field.value;
+          if (!raw || /^[|>]/.test(raw)) job.conditional = job.conditional ?? 'block scalar or empty name';
+          else if (raw.includes('${{')) job.conditional = job.conditional ?? 'expression in name';
+          else job.name = unquote(raw);
+          break;
         }
-        if (list === null) unsupported.push(`${label}: unreadable list`);
-        else current.needs = list;
-        break;
+        case 'if':
+          job.conditional = job.conditional ?? 'if:';
+          break;
+        case 'strategy':
+          job.conditional = job.conditional ?? 'strategy:';
+          break;
+        case 'uses':
+          job.conditional = job.conditional ?? 'uses:';
+          break;
+        case 'needs': {
+          let list = flowList(field.value);
+          if (list === null && field.value && /^[\w-]+$/.test(unquote(field.value))) list = [unquote(field.value)];
+          if (list === null && isEmptyValue(field.value) && field.sub.length > 0) list = blockList(field.sub);
+          if (list === null) unsupported.push(`${label}: unreadable list`);
+          else job.needs = list;
+          break;
+        }
+        default:
+          break;
       }
-      default:
-        break;
     }
   }
   return jobs;
@@ -459,16 +478,18 @@ export function analyzeWorkflows(workflowsDir) {
  */
 export function parseExpectedChecks(source) {
   const stripped = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
-  const m = stripped.match(/EXPECTED_PR_CHECKS\s*=\s*Object\.freeze\(\s*\[([^\]]*)\]\s*\)/);
-  if (!m) return null;
-  const items = m[1].split(',').map((s) => s.trim()).filter(Boolean);
-  const names = [];
-  for (const item of items) {
-    const q = item.match(/^(['"])([^'"]+)\1$/);
-    if (!q) return null;
-    names.push(q[2]);
-  }
-  if (names.length === 0 || new Set(names).size !== names.length) return null;
+  // 正確な export 宣言 (行頭・識別子の境界) がちょうど 1 つ。OLD_EXPECTED_PR_CHECKS や EXPECTED_PR_CHECKS_V2 は数えない
+  const decls = [...stripped.matchAll(/^[ \t]*export\s+const\s+EXPECTED_PR_CHECKS\b/gm)];
+  if (decls.length !== 1) return null;
+  // 初期化式全体が `Object.freeze([ 'a', "b", ])` で、直後が `;` か行末であること (`.concat(…)` 等が続く式は部分採用しない)
+  const m = stripped
+    .slice(decls[0].index)
+    .match(
+      /^[ \t]*export\s+const\s+EXPECTED_PR_CHECKS\s*=\s*Object\.freeze\(\s*\[\s*((?:'[^'"\\\n]*'|"[^'"\\\n]*")(?:\s*,\s*(?:'[^'"\\\n]*'|"[^'"\\\n]*"))*\s*,?)?\s*\]\s*\)[ \t]*;?[ \t]*(?=\r?\n|$)/,
+    );
+  if (!m || !m[1]) return null;
+  const names = [...m[1].matchAll(/['"]([^'"]*)['"]/g)].map((q) => q[1]);
+  if (names.length === 0 || names.some((n) => n === '') || new Set(names).size !== names.length) return null;
   return names;
 }
 

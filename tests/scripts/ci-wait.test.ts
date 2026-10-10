@@ -227,20 +227,103 @@ describe('flow 形式の jobs は unsupported (黙って jobs=[] や誤った名
   });
 });
 
+describe('indent は最初の子から検出する (2 でも 4 でも・揃わなければ unsupported)', () => {
+  const fourSpace = [
+    'on:',
+    '    pull_request:',
+    '        branches:',
+    '            - main',
+    'jobs:',
+    '    added-required:',
+    '        name: "added check"',
+    '        runs-on: ubuntu-latest',
+    '        needs:',
+    '            - base',
+    '    base:',
+    '        runs-on: ubuntu-latest',
+    '        steps:',
+    '            - run: echo hi',
+    '',
+  ].join('\n');
+
+  it('4 スペースの workflow も on / jobs / needs / branches を読む', () => {
+    const wf = parseWorkflow(fourSpace);
+    expect(wf.unsupported).toEqual([]);
+    expect(wf.pullRequest).toBe(true);
+    expect(wf.branches).toEqual(['main']);
+    expect(wf.jobs.map((j) => [j.id, j.name, j.needs])).toEqual([
+      ['added-required', 'added check', ['base']],
+      ['base', 'base', []],
+    ]);
+  });
+
+  it('4 スペースの workflow で必須 job を足したらドリフト検査が検出する (jobs=[] で黙って通らない)', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ci-wait-indent-'));
+    try {
+      writeFileSync(join(dir, 'four.yml'), fourSpace);
+      const r = analyzeWorkflows(dir);
+      expect(r.unsupported).toEqual([]);
+      expect(r.required).toEqual(['added check', 'base']);
+      expect([...r.required].sort()).not.toEqual([...EXPECTED_PR_CHECKS].sort());
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('jobs: の子が 1 つも読めない・indent が揃わない・定義が空の job は unsupported', () => {
+    const list = parseWorkflow('on: pull_request\njobs:\n  - a\n');
+    expect(list.jobs).toEqual([]);
+    expect(list.unsupported).toEqual(['jobs: unreadable line (- a)']);
+    const empty = parseWorkflow('on: pull_request\njobs:\n');
+    expect(empty.unsupported).toEqual(['jobs: empty']);
+    const ragged = parseWorkflow('on: pull_request\njobs:\n  a:\n    runs-on: x\n   b:\n    runs-on: x\n');
+    expect(ragged.unsupported).toEqual(['jobs.a: inconsistent indent (b:)']);
+    expect(ragged.jobs.map((j) => j.id)).toEqual(['a']);
+    const shallow = parseWorkflow('on: pull_request\njobs:\n    a:\n        runs-on: x\n  b:\n    runs-on: x\n');
+    expect(shallow.unsupported).toEqual(['jobs: inconsistent indent (b:)']);
+    // 浅い行の後に子の深さで現れた `runs-on: x` は job として読まれるが inline value なので required にはならない
+    expect(shallow.jobs.map((j) => [j.id, j.conditional])).toEqual([['a', null], ['runs-on', 'inline value']]);
+    const bare = parseWorkflow('on: pull_request\njobs:\n  a:\n  b:\n    runs-on: x\n');
+    expect(bare.jobs.map((j) => [j.id, j.conditional])).toEqual([['a', 'empty definition'], ['b', null]]);
+    const onShallow = parseWorkflow('on:\n    push:\n  pull_request:\njobs:\n  a:\n    runs-on: x\n');
+    expect(onShallow.unsupported).toEqual(['on: inconsistent indent (pull_request:)']);
+  });
+});
+
 describe('対象 PR の HEAD の定数を読む (parseExpectedChecks / blobSha)', () => {
   it('このファイル自身から読んだ配列が定数と一致する (リテラルの形の固定)', () => {
     expect(parseExpectedChecks(LOCAL_LIB_SOURCE)).toEqual([...EXPECTED_PR_CHECKS]);
   });
 
-  it('quote 付き文字列の配列だけを受け付け、それ以外 (識別子・spread・空・重複・定数が無い) は null', () => {
-    expect(parseExpectedChecks("const EXPECTED_PR_CHECKS = Object.freeze(['a', \"b\"]);")).toEqual(['a', 'b']);
-    expect(parseExpectedChecks('const EXPECTED_PR_CHECKS = Object.freeze([\n  // c\n  "a", /* x */ "b",\n]);')).toEqual(['a', 'b']);
-    expect(parseExpectedChecks("const EXPECTED_PR_CHECKS = Object.freeze([a, 'b']);")).toBeNull();
-    expect(parseExpectedChecks("const EXPECTED_PR_CHECKS = Object.freeze([...BASE, 'b']);")).toBeNull();
-    expect(parseExpectedChecks('const EXPECTED_PR_CHECKS = Object.freeze([]);')).toBeNull();
-    expect(parseExpectedChecks("const EXPECTED_PR_CHECKS = Object.freeze(['a', 'a']);")).toBeNull();
-    expect(parseExpectedChecks("const EXPECTED_PR_CHECKS = ['a'];")).toBeNull();
+  it('正確な export 宣言 + quote 付き文字列の配列だけを受け付け、それ以外 (識別子・spread・空・重複・定数が無い) は null', () => {
+    expect(parseExpectedChecks("export const EXPECTED_PR_CHECKS = Object.freeze(['a', \"b\"]);")).toEqual(['a', 'b']);
+    expect(parseExpectedChecks('export const EXPECTED_PR_CHECKS = Object.freeze([\n  // c\n  "a", /* x */ "b",\n]);\nexport const X = 1;\n')).toEqual(['a', 'b']);
+    expect(parseExpectedChecks("export const EXPECTED_PR_CHECKS = Object.freeze(['a'])\n")).toEqual(['a']); // セミコロン無し + 行末
+    expect(parseExpectedChecks("export const EXPECTED_PR_CHECKS = Object.freeze([a, 'b']);")).toBeNull();
+    expect(parseExpectedChecks("export const EXPECTED_PR_CHECKS = Object.freeze([...BASE, 'b']);")).toBeNull();
+    expect(parseExpectedChecks('export const EXPECTED_PR_CHECKS = Object.freeze([]);')).toBeNull();
+    expect(parseExpectedChecks("export const EXPECTED_PR_CHECKS = Object.freeze(['a', 'a']);")).toBeNull();
+    expect(parseExpectedChecks("export const EXPECTED_PR_CHECKS = Object.freeze(['a', '']);")).toBeNull();
+    expect(parseExpectedChecks("export const EXPECTED_PR_CHECKS = Object.freeze(['a' 'b']);")).toBeNull();
+    expect(parseExpectedChecks("export const EXPECTED_PR_CHECKS = ['a'];")).toBeNull();
+    expect(parseExpectedChecks("const EXPECTED_PR_CHECKS = Object.freeze(['a']);")).toBeNull(); // export が無い
     expect(parseExpectedChecks('export const OTHER = 1;')).toBeNull();
+  });
+
+  it('実際の宣言以外に一致しない: 先行する別名の宣言・同名の 2 重宣言・初期化式の続き (.concat 等) は部分採用せず null', () => {
+    const real = "export const EXPECTED_PR_CHECKS = Object.freeze(['audit', 'test']);\n";
+    // 先に OLD_… があっても、それを採用して audit だけにしない
+    expect(parseExpectedChecks(`export const OLD_EXPECTED_PR_CHECKS = Object.freeze(['audit']);\n${real}`)).toEqual(['audit', 'test']);
+    expect(parseExpectedChecks(`const EXPECTED_PR_CHECKS_V2 = Object.freeze(['audit']);\n${real}`)).toEqual(['audit', 'test']);
+    // 同名の宣言が 2 つ・識別子だけの言及 (コメント外) は曖昧なので null
+    expect(parseExpectedChecks(`${real}${real}`)).toBeNull();
+    expect(parseExpectedChecks(`${real}export const EXPECTED_PR_CHECKS = Object.freeze(['x']);\n`)).toBeNull();
+    // 式が続く形は先頭の配列だけを読まない
+    expect(parseExpectedChecks("export const EXPECTED_PR_CHECKS = Object.freeze(['audit']).concat(['test']);\n")).toBeNull();
+    expect(parseExpectedChecks("export const EXPECTED_PR_CHECKS = Object.freeze(['audit']) /* x */ .concat(['test']);\n")).toBeNull();
+    expect(parseExpectedChecks("export const EXPECTED_PR_CHECKS = Object.freeze(['audit']), OTHER = 1;\n")).toBeNull();
+    expect(parseExpectedChecks("export const EXPECTED_PR_CHECKS = Object.freeze(['audit']); const y = 2;\n")).toBeNull();
+    expect(parseExpectedChecks("export const EXPECTED_PR_CHECKS = Object.freeze(['audit']) || ['test'];\n")).toBeNull();
   });
 
   it('blobSha は git の blob hash と同じ (GitHub contents API の sha と突き合わせられる)', () => {
@@ -474,6 +557,18 @@ describe('CLI (gh と git を偽物に差し替えて end-to-end)', () => {
     const stacked = cli(rollupOf(['test']), ['--once'], { baseRefName: 'feat/x', apiExit: 1 });
     expect(stacked.status).toBe(0);
     expect(stacked.apiCalls).toEqual([]);
+  });
+
+  it('PR 側に別名の宣言が先行しても実際の定数を使い (audit だけで早期成功しない)、式が続く形は exit 3', () => {
+    const withOld = `export const OLD_EXPECTED_PR_CHECKS = Object.freeze(['audit']);\n${LOCAL_LIB_SOURCE}`;
+    const r = cli(rollupOf(['audit']), ['--once'], { prLib: withOld });
+    expect(r.stdout.split('\n')[0]).toBe('PENDING head=4981cc5 checks=1 nonSUCCESS=0 missing=5 expected=6');
+    expect(r.status).toBe(2);
+    const concat = LOCAL_LIB_SOURCE.replace(/\]\);\n/, "]).concat(['extra']);\n");
+    expect(concat).not.toBe(LOCAL_LIB_SOURCE);
+    const c = cli(rollupOf(['audit']), ['--once'], { prLib: concat });
+    expect(c.status).toBe(3);
+    expect(c.stderr).toContain('読めず');
   });
 
   it('引数不正・gh 失敗は exit 3 のまま', () => {
