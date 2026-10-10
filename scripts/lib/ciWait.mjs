@@ -319,6 +319,25 @@ function readTriggers(lines, unsupported) {
   return result;
 }
 
+/**
+ * job の `name:` の値を check 名として採用できない理由を返す (採用できれば null)。
+ * 対応するのは 1 行の plain scalar と、同じ行で閉じる (エスケープを含まない) quote 付き scalar だけ。
+ */
+function nameProblem(raw, sub) {
+  if (!raw || /^[|>]/.test(raw)) return 'block scalar or empty name';
+  if (raw.includes('${{')) return 'expression in name';
+  if (sub.length > 0) return 'multi-line name'; // 次行に続く plain / quoted scalar (`"added` + `check"` 等)
+  if (/^[&*!]/.test(raw)) return 'anchor, alias or tag in name'; // `&check_name test` / `*check_name` / `!!str x`
+  if (/^[[{]/.test(raw)) return 'flow value in name';
+  const quote = raw[0] === '"' || raw[0] === "'" ? raw[0] : null;
+  if (quote) {
+    if (raw.length < 2 || raw[raw.length - 1] !== quote) return 'multi-line name'; // 同じ行で閉じない quote
+    if (quote === '"' && raw.includes('\\')) return 'escape in name';
+    if (raw.slice(1, -1).includes(quote)) return 'quote inside name'; // `'it''s'` の二重化等
+  }
+  return null;
+}
+
 /** `jobs:` を読み、job ごとに name / 条件 / needs を返す。読めない形は unsupported に積む。 */
 function readJobs(lines, unsupported) {
   const jobs = [];
@@ -353,10 +372,12 @@ function readJobs(lines, unsupported) {
       const label = `jobs.${job.id}.${field.key}`;
       switch (field.key) {
         case 'name': {
-          // check 名が静的に決まらない job は、名前を推測せず「解析できない」として扱う
+          // check 名が静的に決まらない job は、名前を推測せず「解析できない」として扱う。
+          // 未対応の YAML (複数行スカラー・アンカー/エイリアス/タグ・quote 内のエスケープ・flow 値) も
+          // 文字列として誤採用せず明示的に拒否する。
           const raw = field.value;
-          if (!raw || /^[|>]/.test(raw)) job.conditional = job.conditional ?? 'block scalar or empty name';
-          else if (raw.includes('${{')) job.conditional = job.conditional ?? 'expression in name';
+          const problem = nameProblem(raw, field.sub);
+          if (problem) job.conditional = job.conditional ?? problem;
           else job.name = unquote(raw);
           break;
         }
@@ -481,11 +502,13 @@ export function parseExpectedChecks(source) {
   // 正確な export 宣言 (行頭・識別子の境界) がちょうど 1 つ。OLD_EXPECTED_PR_CHECKS や EXPECTED_PR_CHECKS_V2 は数えない
   const decls = [...stripped.matchAll(/^[ \t]*export\s+const\s+EXPECTED_PR_CHECKS\b/gm)];
   if (decls.length !== 1) return null;
-  // 初期化式全体が `Object.freeze([ 'a', "b", ])` で、直後が `;` か行末であること (`.concat(…)` 等が続く式は部分採用しない)
+  // 初期化式全体が `Object.freeze([ 'a', "b", ])` で、`)` の直後 (同じ行) に `;` があり、その後は行末であること。
+  // `;` を必須にするのは、改行して `.concat(…)` を続ける式 (空行やコメントを挟んでも JS では同じ式の続き) を
+  // 「行末で確定」と誤認して先頭の配列だけ採用しないため。`;` の後は別の文なので frozen な const の値は変わらない。
   const m = stripped
     .slice(decls[0].index)
     .match(
-      /^[ \t]*export\s+const\s+EXPECTED_PR_CHECKS\s*=\s*Object\.freeze\(\s*\[\s*((?:'[^'"\\\n]*'|"[^'"\\\n]*")(?:\s*,\s*(?:'[^'"\\\n]*'|"[^'"\\\n]*"))*\s*,?)?\s*\]\s*\)[ \t]*;?[ \t]*(?=\r?\n|$)/,
+      /^[ \t]*export\s+const\s+EXPECTED_PR_CHECKS\s*=\s*Object\.freeze\(\s*\[\s*((?:'[^'"\\\n]*'|"[^'"\\\n]*")(?:\s*,\s*(?:'[^'"\\\n]*'|"[^'"\\\n]*"))*\s*,?)?\s*\]\s*\)[ \t]*;[ \t]*(?=\r?\n|$)/,
     );
   if (!m || !m[1]) return null;
   const names = [...m[1].matchAll(/['"]([^'"]*)['"]/g)].map((q) => q[1]);

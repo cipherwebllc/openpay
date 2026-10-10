@@ -141,6 +141,72 @@ describe('期待 check 集合の定数と workflow のドリフト検出 (fail-c
     ]);
   });
 
+  it('未対応の YAML の name (複数行の quote・次行に続く plain・アンカー/エイリアス/タグ・エスケープ・flow 値) は文字列として誤採用せず unsupported', () => {
+    const wf = parseWorkflow([
+      'on: pull_request',
+      'jobs:',
+      '  dq:',
+      '    name: "added',
+      '      check"',
+      '    runs-on: x',
+      '  sq:',
+      "    name: 'added",
+      "      check'",
+      '    runs-on: x',
+      '  plain:',
+      '    name: added',
+      '      check',
+      '    runs-on: x',
+      '  anchor:',
+      '    name: &check_name test',
+      '    runs-on: x',
+      '  alias:',
+      '    name: *check_name',
+      '    runs-on: x',
+      '  tag:',
+      '    name: !!str test',
+      '    runs-on: x',
+      '  esc:',
+      '    name: "a\\"b"',
+      '    runs-on: x',
+      '  dup:',
+      "    name: 'it''s'",
+      '    runs-on: x',
+      '  flow:',
+      '    name: [a, b]',
+      '    runs-on: x',
+      '  ok:',
+      '    name: "check #1"',
+      '    runs-on: x',
+      '',
+    ].join('\n'));
+    expect(wf.unsupported).toEqual([]);
+    expect(wf.jobs.map((j) => [j.id, j.name, j.conditional])).toEqual([
+      ['dq', 'dq', 'multi-line name'],
+      ['sq', 'sq', 'multi-line name'],
+      ['plain', 'plain', 'multi-line name'],
+      ['anchor', 'anchor', 'anchor, alias or tag in name'],
+      ['alias', 'alias', 'anchor, alias or tag in name'],
+      ['tag', 'tag', 'anchor, alias or tag in name'],
+      ['esc', 'esc', 'escape in name'],
+      ['dup', 'dup', 'quote inside name'],
+      ['flow', 'flow', 'flow value in name'],
+      ['ok', 'check #1', null],
+    ]);
+    const dir = mkdtempSync(join(tmpdir(), 'ci-wait-name-'));
+    try {
+      writeFileSync(join(dir, 'a.yml'), 'on: pull_request\njobs:\n  test:\n    name: "added\n      check"\n    runs-on: x\n  b:\n    name: &n test\n    runs-on: x\n');
+      const r = analyzeWorkflows(dir);
+      expect(r.required).toEqual([]);
+      expect(r.unsupported).toEqual([
+        { workflow: 'a.yml', job: 'test', reason: 'job has multi-line name' },
+        { workflow: 'a.yml', job: 'b', reason: 'job has anchor, alias or tag in name' },
+      ]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('解析できない形 (式や複数行の name・matrix・if・reusable workflow・条件付き親への needs・重複名・未対応の on) は unsupported', () => {
     const dir = mkdtempSync(join(tmpdir(), 'ci-wait-unsupported-'));
     try {
@@ -298,7 +364,8 @@ describe('対象 PR の HEAD の定数を読む (parseExpectedChecks / blobSha)'
   it('正確な export 宣言 + quote 付き文字列の配列だけを受け付け、それ以外 (識別子・spread・空・重複・定数が無い) は null', () => {
     expect(parseExpectedChecks("export const EXPECTED_PR_CHECKS = Object.freeze(['a', \"b\"]);")).toEqual(['a', 'b']);
     expect(parseExpectedChecks('export const EXPECTED_PR_CHECKS = Object.freeze([\n  // c\n  "a", /* x */ "b",\n]);\nexport const X = 1;\n')).toEqual(['a', 'b']);
-    expect(parseExpectedChecks("export const EXPECTED_PR_CHECKS = Object.freeze(['a'])\n")).toEqual(['a']); // セミコロン無し + 行末
+    expect(parseExpectedChecks("export const EXPECTED_PR_CHECKS = Object.freeze(['a']);")).toEqual(['a']); // EOF 直前
+    expect(parseExpectedChecks("export const EXPECTED_PR_CHECKS = Object.freeze(['a'])\n")).toBeNull(); // `;` 無しは式が続きうるので採用しない
     expect(parseExpectedChecks("export const EXPECTED_PR_CHECKS = Object.freeze([a, 'b']);")).toBeNull();
     expect(parseExpectedChecks("export const EXPECTED_PR_CHECKS = Object.freeze([...BASE, 'b']);")).toBeNull();
     expect(parseExpectedChecks('export const EXPECTED_PR_CHECKS = Object.freeze([]);')).toBeNull();
@@ -324,6 +391,13 @@ describe('対象 PR の HEAD の定数を読む (parseExpectedChecks / blobSha)'
     expect(parseExpectedChecks("export const EXPECTED_PR_CHECKS = Object.freeze(['audit']), OTHER = 1;\n")).toBeNull();
     expect(parseExpectedChecks("export const EXPECTED_PR_CHECKS = Object.freeze(['audit']); const y = 2;\n")).toBeNull();
     expect(parseExpectedChecks("export const EXPECTED_PR_CHECKS = Object.freeze(['audit']) || ['test'];\n")).toBeNull();
+    // 改行後の式の継続 (JS では同じ式) を「行末で確定」と誤認して先頭の配列だけ採用しない。空行・コメントを挟んでも同じ
+    expect(parseExpectedChecks("export const EXPECTED_PR_CHECKS = Object.freeze(['audit'])\n  .concat(['added-required']);\n")).toBeNull();
+    expect(parseExpectedChecks("export const EXPECTED_PR_CHECKS = Object.freeze(['audit'])\n\n  .concat(['added-required']);\n")).toBeNull();
+    expect(parseExpectedChecks("export const EXPECTED_PR_CHECKS = Object.freeze(['audit'])\n  // note\n  .concat(['added-required']);\n")).toBeNull();
+    expect(parseExpectedChecks("export const EXPECTED_PR_CHECKS = Object.freeze(['audit']) /* a\n b */ .concat(['added-required']);\n")).toBeNull();
+    expect(parseExpectedChecks("export const EXPECTED_PR_CHECKS = Object.freeze(['audit'])\n  ;\n")).toBeNull(); // `;` は同じ行に要る
+    expect(parseExpectedChecks("export const EXPECTED_PR_CHECKS = Object.freeze(['audit'])\n  [0];\n")).toBeNull();
   });
 
   it('blobSha は git の blob hash と同じ (GitHub contents API の sha と突き合わせられる)', () => {
@@ -569,6 +643,15 @@ describe('CLI (gh と git を偽物に差し替えて end-to-end)', () => {
     const c = cli(rollupOf(['audit']), ['--once'], { prLib: concat });
     expect(c.status).toBe(3);
     expect(c.stderr).toContain('読めず');
+  });
+
+  it('改行して .concat を続けた PR 側の定数は 6 件で早期成功せず exit 3 (実際の期待集合は 7 件)', () => {
+    const multiLine = LOCAL_LIB_SOURCE.replace(/\]\);\n/, "])\n  .concat(['added-required']);\n");
+    expect(multiLine).not.toBe(LOCAL_LIB_SOURCE);
+    const r = cli(rollupOf(EXPECTED_PR_CHECKS), ['--once'], { prLib: multiLine });
+    expect(r.stdout).not.toContain('SETTLED');
+    expect(r.status).toBe(3);
+    expect(r.stderr).toContain('読めず');
   });
 
   it('引数不正・gh 失敗は exit 3 のまま', () => {
