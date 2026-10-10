@@ -132,6 +132,76 @@ describe('useReceiverAutofill', () => {
     expect(setReceiver).toHaveBeenCalledWith(A2, 'auto');
   });
 
+  it("読み込み直後に source='auto' で受取先が接続アドレスと違えば、接続アドレスに追従する (再読み込み)", () => {
+    setAccount(A2);
+    const { setReceiver } = setup({ receiver: A1, receiverSource: 'auto', effectiveReceiver: A1, hydrated: true });
+    expect(setReceiver).toHaveBeenCalledWith(A2, 'auto');
+  });
+
+  it("受取先・由来だけが変わった (別のタブの設定の取り込み) ときは追従せず、その後のウォレット切替には追従する", () => {
+    const A3 = getAddress('0x3333333333333333333333333333333333333333');
+    setAccount(A1);
+    const { setReceiver, rerender } = setup({ receiver: A2, receiverSource: 'manual', effectiveReceiver: A2, hydrated: true });
+    // 別のタブで「接続中のウォレットを使う」を選んだ設定 (A3・auto) を取り込んだ。接続アドレス (A1) は変わっていない。
+    rerender({ receiver: A3, receiverSource: 'auto', effectiveReceiver: A3, hydrated: true });
+    expect(setReceiver).not.toHaveBeenCalled();
+    // このタブのウォレットが切り替わったら追従する。
+    setAccount(A2);
+    rerender({ receiver: A3, receiverSource: 'auto', effectiveReceiver: A3, hydrated: true });
+    expect(setReceiver).toHaveBeenCalledTimes(1);
+    expect(setReceiver).toHaveBeenCalledWith(A2, 'auto');
+  });
+
+  it('取り込んだ受取先のあと、切断して同じウォレットに再接続したら追従する', () => {
+    const A3 = getAddress('0x3333333333333333333333333333333333333333');
+    setAccount(A1);
+    const { setReceiver, rerender } = setup({ receiver: A2, receiverSource: 'manual', effectiveReceiver: A2, hydrated: true });
+    rerender({ receiver: A3, receiverSource: 'auto', effectiveReceiver: A3, hydrated: true });
+    setAccount(undefined);
+    rerender({ receiver: A3, receiverSource: 'auto', effectiveReceiver: A3, hydrated: true });
+    expect(setReceiver).not.toHaveBeenCalled();
+    setAccount(A1);
+    rerender({ receiver: A3, receiverSource: 'auto', effectiveReceiver: A3, hydrated: true });
+    expect(setReceiver).toHaveBeenCalledTimes(1);
+    expect(setReceiver).toHaveBeenCalledWith(A1, 'auto');
+  });
+
+  it('背面のタブでは空欄の補完もウォレット切替への追従も保留し、前面に戻ったときに判定する', () => {
+    const setVisibility = (state: 'visible' | 'hidden') => {
+      Object.defineProperty(document, 'visibilityState', { value: state, configurable: true });
+      act(() => {
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+    };
+    try {
+      setAccount(A1);
+      const { setReceiver, rerender } = setup({ receiver: A1, receiverSource: 'auto', effectiveReceiver: A1, hydrated: true });
+      setVisibility('hidden');
+      setAccount(A2);
+      rerender({ receiver: A1, receiverSource: 'auto', effectiveReceiver: A1, hydrated: true });
+      expect(setReceiver).not.toHaveBeenCalled();
+      // 背面の間に切断して同じウォレットに戻っても、前面に戻ったら (接続アドレスが変わったとして) 追従する。
+      setAccount(undefined);
+      rerender({ receiver: A1, receiverSource: 'auto', effectiveReceiver: A1, hydrated: true });
+      setAccount(A2);
+      rerender({ receiver: A1, receiverSource: 'auto', effectiveReceiver: A1, hydrated: true });
+      expect(setReceiver).not.toHaveBeenCalled();
+      setVisibility('visible');
+      expect(setReceiver).toHaveBeenCalledTimes(1);
+      expect(setReceiver).toHaveBeenCalledWith(A2, 'auto');
+
+      // 空欄の補完も背面では保留する。
+      const empty = setup({ receiver: '', receiverSource: 'auto', effectiveReceiver: null, hydrated: false });
+      setVisibility('hidden');
+      empty.rerender({ receiver: '', receiverSource: 'auto', effectiveReceiver: null, hydrated: true });
+      expect(empty.setReceiver).not.toHaveBeenCalled();
+      setVisibility('visible');
+      expect(empty.setReceiver).toHaveBeenCalledWith(A2, 'auto');
+    } finally {
+      Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true });
+    }
+  });
+
   it("source='manual' はウォレット切替に追従しない (据置)", () => {
     setAccount(A1);
     const { setReceiver, rerender } = setup({

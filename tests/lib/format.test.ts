@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { shortAddress, formatJpycYenLabel } from '@/lib/format';
+import { shortAddress, formatJpycYenLabel, isSettledReceiverInput } from '@/lib/format';
 
 describe('shortAddress', () => {
   it('42 文字の checksum address を 0x123456…1234 形式へ短縮', () => {
@@ -33,5 +33,24 @@ describe('formatJpycYenLabel', () => {
   it('1 JPYC 未満の端数は切り捨てる', () => {
     // 1.9 JPYC → ¥1
     expect(formatJpycYenLabel(1_900_000_000_000_000_000n)).toBe('¥1');
+  });
+});
+
+describe('isSettledReceiverInput (別のタブの受取先を取り込んでよいか)', () => {
+  it('0x アドレスと、ラベルの欠けていない .eth / .base.eth の名前は確定した値', () => {
+    expect(isSettledReceiverInput('0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913')).toBe(true);
+    expect(isSettledReceiverInput('0x833589fcd6edb6e08f4c7c32d4f71b54bda02913')).toBe(true);
+    expect(isSettledReceiverInput('shop.eth')).toBe(true);
+    expect(isSettledReceiverInput('shop.base.eth')).toBe(true);
+  });
+
+  it('空欄・打ちかけ・前後の空白・checksum の合わない大文字小文字は確定していない', () => {
+    expect(isSettledReceiverInput('')).toBe(false);
+    expect(isSettledReceiverInput('0x8335')).toBe(false);
+    expect(isSettledReceiverInput('shop.et')).toBe(false);
+    expect(isSettledReceiverInput('.eth')).toBe(false);
+    expect(isSettledReceiverInput('shop..eth')).toBe(false);
+    expect(isSettledReceiverInput(' shop.eth')).toBe(false);
+    expect(isSettledReceiverInput('0x833589FCD6eDb6E08f4c7C32D4f71b54bdA02913')).toBe(false);
   });
 });

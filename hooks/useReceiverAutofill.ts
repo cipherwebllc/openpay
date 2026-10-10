@@ -10,7 +10,7 @@
 // 設計意図 (要件4): ユーザが明示的に入力/選択した値は尊重し、自動補完由来の値だけウォレット
 // 切替に追従させる。未接続時はチップを出さず手入力のみ。
 
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { getAddress, type Address } from 'viem';
 import { useAccount } from 'wagmi';
 
@@ -39,19 +39,56 @@ export function useReceiverAutofill(opts: {
   // 直近に自動補完したアドレス (切替追従の冪等性確保 = 無限ループ防止)。
   const lastAutoRef = useRef<string | null>(null);
 
-  // (1) 空欄 + 接続あり + 未タッチ + hydrated → 接続アドレスを初期補完 (source='auto')。
+  // このタブが前面か。背面のタブでは接続ウォレットによる補完・追従 ((1)(2)) を保留し、前面に戻ってから判定する。
+  // 前面に戻ると同じ visibilitychange で別のタブの設定を先に取り込む (hooks/useLocalStorageSettings・同じ描画に
+  // まとまる) ので、前面のタブで店主が手入力にした受取先を、背面のタブの古い「自動」のまま接続中のウォレットで
+  // 上書きして保存しない。
+  const [visible, setVisible] = useState(
+    () => typeof document === 'undefined' || document.visibilityState !== 'hidden',
+  );
   useEffect(() => {
-    if (!hydrated || userTouchedRef.current) return;
+    const update = () => setVisible(document.visibilityState !== 'hidden');
+    update();
+    document.addEventListener('visibilitychange', update);
+    return () => document.removeEventListener('visibilitychange', update);
+  }, []);
+
+  // (1) 空欄 + 接続あり + 未タッチ + hydrated + 前面 → 接続アドレスを初期補完 (source='auto')。
+  useEffect(() => {
+    if (!hydrated || !visible || userTouchedRef.current) return;
     if (receiver.trim() !== '') return;
     if (!connected) return;
     lastAutoRef.current = connected;
     setReceiver(connected, 'auto');
-  }, [hydrated, receiver, connected, setReceiver]);
+  }, [hydrated, visible, receiver, connected, setReceiver]);
+
+  // 前回 (2) を評価したときの接続アドレス (undefined = 読み込み後まだ評価していない)。
+  const seenConnectedRef = useRef<Address | null | undefined>(undefined);
 
   // (2) ウォレット切替: source==='auto' のときのみ新アドレスへ追従。manual / 手入力は据置。
+  // 追従するのは読み込み直後と、このタブの接続アドレスが変わったときだけ。受取先・由来だけが変わったとき (別のタブで
+  // 「接続中のウォレットを使う」を選んだ設定の取り込み) は追従しない: 別のウォレットに接続しているタブが、取り込んだ
+  // 受取先を自分のウォレットに置き換えて保存し、別のタブの変更を消してしまうため (hooks/useLocalStorageSettings)。
   useEffect(() => {
-    if (!hydrated || receiverSource !== 'auto') return;
-    if (!connected || connected === lastAutoRef.current) return;
+    if (!hydrated) return;
+    if (!connected) {
+      // 切断したら追従の基準を消す (背面でも記録する): 同じウォレットへの再接続も「接続アドレスが変わった」として
+      // 追従する (取り込んだ別のタブの受取先のまま、再接続したウォレットではなく別のウォレット宛ての QR を出し続けないため)。
+      seenConnectedRef.current = null;
+      lastAutoRef.current = null;
+      return;
+    }
+    // 背面では判定を保留する (seenConnectedRef も進めない = 前面に戻ったときに、背面の間の切り替えとして判定する)。
+    if (!visible) return;
+    const seen = seenConnectedRef.current;
+    seenConnectedRef.current = connected;
+    if (receiverSource !== 'auto') return;
+    if (connected === lastAutoRef.current) return;
+    if (seen === connected) {
+      // 取り込んだ受取先をそのまま使う。以後はここを基準に、接続アドレスが変わったときだけ追従する。
+      lastAutoRef.current = connected;
+      return;
+    }
     // mount 時に既に receiver が接続アドレスと一致しているなら no-op (冗長な書込を避ける)。
     // 実際のアドレス変化 (= ウォレット切替) のときだけ setReceiver する。
     if (receiver.toLowerCase() === connected.toLowerCase()) {
@@ -60,7 +97,7 @@ export function useReceiverAutofill(opts: {
     }
     lastAutoRef.current = connected;
     setReceiver(connected, 'auto');
-  }, [hydrated, receiverSource, connected, receiver, setReceiver]);
+  }, [hydrated, visible, receiverSource, connected, receiver, setReceiver]);
 
   // 「接続中のウォレットを使う」ボタン: 明示的に接続アドレスを流し込み source='auto'
   // (= 以後の切替に追従)。ユーザの「接続を使う」意思なので userTouched は立てない。
