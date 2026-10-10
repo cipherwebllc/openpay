@@ -632,6 +632,13 @@ export async function POST(req: Request): Promise<NextResponse> {
         await releaseClaim(); // 保存できなければ pending クレームも戻す (リトライで再投入可能に)
         return fail('kv_error', 503);
       }
+      // inline 保存の Lua は 0 (未収版を保存) / 1 (徴収済み版を保存) だけを返す。kvEval は Redis の値の形までしか確かめない
+      // ので、それ以外 (nil・文字列・配列) を保存済みと読まない: 受注 0 件のまま 200 と done マーカーを返し、再送も duplicate に
+      // なって復旧できなくなる波及を断つ。保存失敗と同じく pending クレームを戻して 503 にする。
+      if (feeObligation?.collectedInline && save.value !== 0 && save.value !== 1) {
+        await releaseClaim();
+        return fail('kv_error', 503);
+      }
       if (feeObligation?.collectedInline && save.value !== 1) {
         order.feeUncollected = true;
         order.feeExpectedAmount = feeObligation.expected.toString();

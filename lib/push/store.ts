@@ -166,7 +166,7 @@ export async function upsertPushSubscription(
     includeAmount: input.includeAmount === true,
     createdAt: input.nowMs ?? Date.now(),
   };
-  const res = await kvEval<string>(
+  const res = await kvEval<unknown>(
     UPSERT_SCRIPT,
     [pushSubscriptionKey(wallet)],
     [
@@ -193,7 +193,7 @@ export async function removePushSubscription(
   target: { endpoint: string } | { endpointHash: string },
 ): Promise<StoreResult<StoredPushSubscription[]>> {
   const hash = 'endpointHash' in target ? target.endpointHash : endpointHash(target.endpoint);
-  const res = await kvEval<string>(
+  const res = await kvEval<unknown>(
     REMOVE_SCRIPT,
     [pushSubscriptionKey(wallet)],
     [hash, String(PUSH_SUBSCRIPTION_TTL_SEC)],
@@ -211,7 +211,11 @@ export async function refreshPushSubscriptionsTtl(
   return res.ok && res.value === 1;
 }
 
-function parseSubscriptionList(raw: string): StoredPushSubscription[] | null {
+function parseSubscriptionList(raw: unknown): StoredPushSubscription[] | null {
+  // 保存・削除の Lua は JSON 文字列だけを返す。kvEval は Redis の値の形 (配列を含む) までしか確かめず、['[]'] のような
+  // 配列も JSON.parse の暗黙の文字列化で通ってしまう (購読を保存していないのに作成成功・残っているのに削除成功)。
+  // 文字列でなければ既存の parse_error にする。
+  if (typeof raw !== 'string') return null;
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);

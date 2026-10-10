@@ -339,4 +339,20 @@ describe('hosted seller writes: real Lua revision semantics', () => {
     expect(await replaceHostedSellerProduct({ snapshot: current, owner: OWNER, metadata: product })).toEqual({ ok: false, reason: 'not_found' });
     expect(h.store!.strings.get(hostedContentKey(ID, 3))).toBe('orphan revision');
   });
+
+  // kvEval は Redis の値の形までしか確かめない。1 以外 (ここでは Lua を走らせない nil) を作成・更新の成功と読まない。
+  it('an unexpected reply is neither a created product nor a saved edit', async () => {
+    const before = new Map(h.store!.strings);
+    vi.mocked(kvEval).mockResolvedValueOnce({ ok: true, value: null });
+    expect(await createHostedProduct(parsed, 7100)).toEqual({ ok: false, reason: 'storage' });
+    expect(h.store!.strings).toEqual(before);
+    expect(h.store!.lists.has(hostedOwnerIndexKey(SELLER))).toBe(false);
+
+    vi.mocked(kvEval).mockResolvedValueOnce({ ok: true, value: null });
+    expect(await replaceHostedSellerProduct({
+      snapshot: await snapshot(), owner: OWNER, metadata: { ...product, title: 'Never saved' },
+      content: { kind: 'text', value: 'never saved' }, now: 9100,
+    })).toEqual({ ok: false, reason: 'storage' });
+    expect(h.store!.strings).toEqual(before);
+  });
 });

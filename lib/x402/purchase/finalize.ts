@@ -244,6 +244,10 @@ async function finalizeHostedPurchaseInternal(
   if (result.value === 0) return { ok: false, reason: 'not_found' };
   if (result.value === -3) return { ok: false, reason: 'corrupt' };
   if (result.value === -1) return { ok: false, reason: 'conflict' };
+  // FINALIZE_PURCHASE の成功は 1 (初回確定) と 2 (冪等) だけ。kvEval は Redis の値の形までしか確かめないので、それ以外を
+  // 初回確定 (finalized) と読まない: 確定済みの購入の再実行で購入数の計上と販売通知を二重に出す波及を断つ。
+  // storage にして呼出側の再試行 (冪等な 2) に委ねる。
+  if (result.value !== 1 && result.value !== 2) return { ok: false, reason: 'storage' };
 
   const access = await readSettledPurchaseAccess(input.intentSalt);
   if (!access.ok) {

@@ -16,6 +16,9 @@ const h = vi.hoisted(() => ({
   blockTimestamp: null as bigint | null,
   fail: null as ((op: string, keys: string[]) => 'before' | 'after' | undefined) | null,
   beforeEval: null as ((script: string, keys: string[], args: string[]) => void) | null,
+  // kvEval の応答の差し替え (kvEval の契約は Redis の値の形まで・script ごとの意味は呼出側が確かめる)。
+  // run() を呼べば本物の Lua を実行した結果、呼ばなければ Lua を走らせずに返した値がそのまま ok:true で届く。
+  evalReply: null as ((script: string, keys: string[], run: () => Promise<unknown>) => Promise<unknown>) | null,
   scripts: new Map<string, { keys: string[]; args: string[] }>(),
 }));
 vi.mock('next/server', async (original) => ({ ...await original<typeof import('next/server')>(), after: (fn: () => unknown) => h.tasks.push(fn) }));
@@ -57,7 +60,8 @@ vi.mock('@/lib/kv', () => {
       const failure = h.fail?.('EVAL', keys);
       if (failure === 'before') return { ok: false, reason: 'network_error' };
       try {
-        const value = await runRedisLua(script, keys, args, h.db!);
+        const run = () => runRedisLua(script, keys, args, h.db!);
+        const value = h.evalReply ? await h.evalReply(script, keys, run) : await run();
         return failure === 'after' ? { ok: false, reason: 'network_error' } : { ok: true, value };
       } catch { return { ok: false, reason: 'redis_error' }; }
     },
@@ -138,7 +142,7 @@ async function drain() { for (const task of h.tasks.splice(0)) await task(); }
 beforeEach(async () => {
   vi.resetModules(); vi.clearAllMocks(); vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(NOW);
   h.kvConfigured = true; h.authorizationUsed.mockResolvedValue(false);
-  h.db = createFakeRedisStore(NOW); h.fail = null; h.beforeEval = null; h.tasks = []; h.scripts.clear(); h.blockTimestamp = null;
+  h.db = createFakeRedisStore(NOW); h.fail = null; h.beforeEval = null; h.evalReply = null; h.tasks = []; h.scripts.clear(); h.blockTimestamp = null;
   h.shop = { owner: SELLER, config: { to: SELLER }, storefront: { chain: 'polygon', mode: 'storefront', feePayer: 'merchant', menu: [{ id: 'food', name: 'original', price: '100' }, { id: 'other', name: 'substitute', price: '100' }] } };
   for (const [key, value] of Object.entries({ NEXT_PUBLIC_NETWORK_ENV: 'testnet', NEXT_PUBLIC_ENABLE_X402_FACILITATOR: '1', NEXT_PUBLIC_ENABLE_ORDER_RELAY: '1', ENABLE_AGENT_ORDER: '1', NEXT_PUBLIC_ENABLE_ORDER_PICKUP: '1', NEXT_PUBLIC_ENABLE_PUSH_NOTIFY: '1', NEXT_PUBLIC_ENABLE_MOBILE_ORDER_FEE: '', NEXT_PUBLIC_ENABLE_SHOP_LIVE: '', NEXT_PUBLIC_ENABLE_PREORDER_TIME: '', NEXT_PUBLIC_JPYC_FORWARDER_AMOY: FORWARDER, NEXT_PUBLIC_FEE_RECEIVER_ADDRESS: FEE, NEXT_PUBLIC_JPYC_TESTNET_ADDRESS: TOKEN, X402_FEE_BPS: '100', X402_FEE_FLOOR_JPYC: '2' })) vi.stubEnv(key, value);
   h.verify.mockImplementation(async () => Response.json({ isValid: true, payer: PAYER }));

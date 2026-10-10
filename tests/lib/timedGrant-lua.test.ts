@@ -57,4 +57,23 @@ describe('GRANT_MAX_SCRIPT (real Lua)', () => {
     expect(await grantTimedMax(KEY, NOW + DAY, NOW)).toEqual({ ok: true, expiresAt: NOW + DAY });
     expect(store.getTtl(KEY)).toBe(86_400);
   });
+
+  // kvEval は Redis の値の形 (配列を含む) までしか確かめない。文字列・数でない応答で投げて支払い後の付与 route を 500 に
+  // せず、未付与 (ok:false → route の 503 と同じ txHash の再試行) にする。
+  it('応答が配列の形で届いても投げずに未付与 (ok:false) を返す', async () => {
+    const upstash = fakeUpstashFetch(store);
+    vi.stubGlobal('fetch', vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      const body = (await (await upstash(url, init)).json()) as { result?: unknown };
+      return Response.json({ result: [body.result] });
+    }));
+    await expect(grantTimedMax(KEY, NOW + DAY, NOW)).resolves.toEqual({ ok: false, expiresAt: NOW + DAY });
+  });
+
+  // Lua は max(既存, target) を返すので、確定した期限は target 以上。付与を実行していない "1" や空白 (期限 0) を付与したと
+  // 読むと、未保存のまま加入が成功し、同じ tx の再送も replay で付与をやり直さない。
+  it.each([['"1"', '1'], ['空白', ' ']])('付与を実行せずに %s が返っても付与したと読まない (ok:false)', async (_name, result) => {
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ result })));
+    await expect(grantTimedMax(KEY, NOW + DAY, NOW)).resolves.toEqual({ ok: false, expiresAt: NOW + DAY });
+    expect(store.strings.has(KEY)).toBe(false);
+  });
 });

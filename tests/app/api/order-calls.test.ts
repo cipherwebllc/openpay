@@ -14,6 +14,8 @@ const hold = vi.hoisted(() => ({
   rows: [] as string[],
   kv: {} as Record<string, string | null>,
   lastRangeKey: '',
+  // kvEval の応答の差し替え (kvEval の契約は Redis の値の形まで)。設定時は削除せず、この値を ok:true で返す。
+  reply: null as { value: unknown } | null,
 }));
 
 vi.mock('@/lib/env', async (importOriginal) => {
@@ -54,6 +56,7 @@ vi.mock('@/lib/kv', () => ({
     return { ok: true, value: hold.rows };
   },
   kvEval: async (_script: string, _keys: string[], args: string[]) => {
+    if (hold.reply) return { ok: true, value: hold.reply.value };
     const before = hold.rows.length;
     hold.rows = hold.rows.filter((raw) => {
       try {
@@ -88,6 +91,7 @@ beforeEach(() => {
   hold.rows = [];
   hold.kv = {};
   hold.lastRangeKey = '';
+  hold.reply = null;
 });
 
 describe('/api/order/calls', () => {
@@ -133,5 +137,15 @@ describe('/api/order/calls', () => {
     expect(await first.json()).toMatchObject({ ok: true, removed: 1 });
     const second = await POST(post('call-1'));
     expect(await second.json()).toMatchObject({ ok: true, removed: 0 });
+  });
+
+  // REMOVE_CALL は消した件数 (0 以上の整数) だけを返す。それ以外 (nil 等) を処理済みと読むと、呼び出しが残ったまま 200 になる。
+  it.each([['nil', null], ['文字列', '1'], ['負数', -1]])('削除の応答が %s なら 503 kv_error・呼び出しは残る', async (_name, value) => {
+    hold.rows = [JSON.stringify({ id: 'call-1', handle: 'coffee', table: '2', ts: Date.now() })];
+    hold.reply = { value };
+    const res = await POST(post('call-1'));
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({ ok: false, error: 'kv_error' });
+    expect(hold.rows).toHaveLength(1);
   });
 });

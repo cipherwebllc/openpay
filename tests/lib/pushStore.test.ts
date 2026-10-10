@@ -9,6 +9,8 @@ const kv = vi.hoisted(() => ({
   evalSpy: vi.fn(),
   getSpy: vi.fn(),
   expireSpy: vi.fn(),
+  // kvEval の応答の差し替え (kvEval の契約は Redis の値の形まで)。設定時は保存も削除もせず、この値を ok:true で返す。
+  reply: null as { value: unknown } | null,
 }));
 
 vi.mock('@/lib/env', () => ({
@@ -30,6 +32,7 @@ vi.mock('@/lib/kv', () => ({
   },
   kvEval: (_script: string, keys: string[], args: string[]) => {
     kv.evalSpy(_script, keys, args);
+    if (kv.reply) return Promise.resolve({ ok: true, value: kv.reply.value });
     const key = keys[0];
     if (args.length === 10) {
       const [
@@ -109,6 +112,7 @@ beforeEach(() => {
   kv.evalSpy.mockClear();
   kv.getSpy.mockClear();
   kv.expireSpy.mockClear();
+  kv.reply = null;
 });
 
 describe('push subscription store', () => {
@@ -209,6 +213,19 @@ describe('push subscription store', () => {
     expect(args[0]).toBe(
       createHash('sha256').update('https://push.example/sub/1').digest('hex'),
     );
+  });
+
+  // 保存・削除の Lua は JSON 文字列だけを返す。['[]'] のような配列は JSON.parse の暗黙の文字列化で通ってしまい、購読を
+  // 保存していないのに作成成功・残っているのに削除成功になる → 文字列でない応答は既存の parse_error。
+  it('文字列でない応答 ([\'[]\']) は保存・削除の成功にせず parse_error', async () => {
+    await upsertPushSubscription(WALLET, { endpoint: 'https://push.example/sub/1', keys, locale: 'ja', nowMs: 1 });
+    const stored = kv.data.get(key);
+    kv.reply = { value: ['[]'] };
+    expect(await upsertPushSubscription(WALLET, { endpoint: 'https://push.example/sub/2', keys, locale: 'ja', nowMs: 2 }))
+      .toEqual({ ok: false, reason: 'parse_error' });
+    expect(await removePushSubscription(WALLET, { endpoint: 'https://push.example/sub/1' }))
+      .toEqual({ ok: false, reason: 'parse_error' });
+    expect(kv.data.get(key)).toBe(stored);
   });
 
   it('送信成功時の TTL refresh は push key に EXPIRE 90日を打つ', async () => {

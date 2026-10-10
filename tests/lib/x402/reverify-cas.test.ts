@@ -20,7 +20,12 @@ import {
 
 // vi.mock の factory は import より前に巻き上がるので、store の実体は holder 越しに渡す
 // (factory 本体が走るのは '@/lib/kv' が最初に import された時点 = 下の代入より後)。
-const holder = vi.hoisted(() => ({ store: null as FakeRedisStore | null }));
+const holder = vi.hoisted(() => ({
+  store: null as FakeRedisStore | null,
+  // kvEval の応答の差し替え (kvEval の契約は Redis の値の形まで・script ごとの意味は呼出側が確かめる)。
+  // run() を呼べば本物の Lua を実行した結果、呼ばなければ Lua を走らせずに返した値がそのまま ok:true で届く。
+  reply: null as ((script: string, run: () => Promise<unknown>) => Promise<unknown>) | null,
+}));
 
 vi.mock('@/lib/kv', () => ({
   kvGet: async (key: string) => ({
@@ -34,10 +39,10 @@ vi.mock('@/lib/kv', () => ({
   },
   kvLpush: vi.fn(),
   // ここが本題: 受け取った script 文字列を **そのまま** Lua VM で実行する。
-  kvEval: async (script: string, keys: string[], args: string[]) => ({
-    ok: true as const,
-    value: await runRedisLua(script, keys, args, holder.store!),
-  }),
+  kvEval: async (script: string, keys: string[], args: string[]) => {
+    const run = () => runRedisLua(script, keys, args, holder.store!);
+    return { ok: true as const, value: holder.reply ? await holder.reply(script, run) : await run() };
+  },
 }));
 
 import {
@@ -79,6 +84,7 @@ function seed(overrides: Record<string, unknown> = {}) {
 beforeEach(() => {
   store = createFakeRedisStore(1_700_000_000_000);
   holder.store = store;
+  holder.reply = null;
 });
 
 afterAll(async () => {
@@ -514,5 +520,28 @@ describe('first-party reverify CAS', () => {
         'run1',
       ),
     ).toEqual({ applied: false, reason: 'malformed' });
+  });
+});
+
+// kvEval は Redis の値の形 (配列を含む) までしか確かめない。external / first-party 共通のパーサーが、Lua を走らせていない
+// (掲載は hidden のまま) のに届いた想定外の応答を、hidden からの復帰 (applied:true・hiddenAfter:false) と読まないことを固定する。
+describe('想定外の応答は適用済みにしない', () => {
+  const restored = JSON.stringify({ failures: 0, authFailures: 0, before: true, after: false });
+  it.each([
+    ['[JSON 文字列] の配列', [restored]],
+    ['真偽値の欠けた JSON', JSON.stringify({ failures: 0, authFailures: 0 })],
+    ['負の件数', JSON.stringify({ failures: -1, authFailures: 0, before: true, after: false })],
+  ])('external: %s は storage・掲載は hidden のまま', async (_name, reply) => {
+    seed({ hidden: true, verification: { failures: 3, lastCheckedAt: 'old', lastRunId: 'r0', probedUrl: URL } });
+    holder.reply = async (script, run) => script === CAS_EXTERNAL_REVERIFY ? reply : run();
+    expect(await applyExternalReverify('r1', URL, 'ok_402_openpay', 'now', 'run1'))
+      .toMatchObject({ applied: false, reason: 'storage' });
+    expect(JSON.parse(store.strings.get(resourceKey('r1'))!)).toMatchObject({ hidden: true });
+  });
+
+  it('first-party: [JSON 文字列] の配列は storage', async () => {
+    holder.reply = async (script, run) => script === CAS_FIRST_PARTY_REVERIFY ? [restored] : run();
+    expect(await applyFirstPartyReverify('/api/paid/demo', 'https://open-pay.jp/api/paid/demo', 'ok_402_openpay', 'now', 'run1'))
+      .toMatchObject({ applied: false, reason: 'storage' });
   });
 });

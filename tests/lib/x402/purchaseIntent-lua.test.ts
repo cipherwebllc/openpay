@@ -9,6 +9,9 @@ const h = vi.hoisted(() => ({
   revertAliasFix: false,
   calls: [] as { script: string; args: string[] }[],
   errors: [] as string[],
+  // kvEval の応答の差し替え (kvEval の契約は Redis の値の形まで・script ごとの意味は呼出側が確かめる)。
+  // run() を呼べば本物の Lua を実行した結果、呼ばなければ Lua を走らせずに返した値がそのまま ok:true で届く。
+  reply: null as ((script: string, run: () => Promise<unknown>) => Promise<unknown>) | null,
 }));
 vi.mock('@/lib/env', () => ({ env: { enableCreatorStore: true, enableLicenseNft: true, networkEnv: 'testnet', licenseNftAmoy: '0x3333333333333333333333333333333333333333' } }));
 vi.mock('@/lib/kv', () => ({
@@ -26,7 +29,8 @@ vi.mock('@/lib/kv', () => ({
       ? script.replace('own.latestGrant = cjson.decode(ARGV[13])', 'own.latestGrant = grant')
       : script;
     try {
-      return { ok: true, value: await runRedisLua(variant, keys, args, h.store!) };
+      const run = () => runRedisLua(variant, keys, args, h.store!);
+      return { ok: true, value: h.reply ? await h.reply(script, run) : await run() };
     } catch (error) {
       // 実 kvEval と同じく Redis script error を storage failure に変換する。
       h.errors.push(String(error));
@@ -40,7 +44,7 @@ vi.mock('@/lib/x402/facilitatorSettle', () => ({ parseFacilitatorRequest: vi.fn(
 vi.mock('@/lib/x402/paymentRedelivery', () => ({ paymentRedeliveryIdentity: vi.fn() }));
 
 import { buildForwarderNonce } from '@/lib/relay/forwarderIntent';
-import { createQuotedPurchaseIntent, claimSignedPurchaseIntent, claimPurchaseSettlement, finalizeHostedPurchase, purchaseOwnershipKey, type PurchaseAuthorizationClaim, type PurchaseOwnership } from '@/lib/x402/purchaseIntent';
+import { createQuotedPurchaseIntent, claimSignedPurchaseIntent, claimPurchaseSettlement, finalizeHostedPurchase, purchaseIntentKey, purchaseLibraryKey, purchaseOwnershipKey, readSettledPurchaseAccess, type PurchaseAuthorizationClaim, type PurchaseOwnership } from '@/lib/x402/purchaseIntent';
 import { createLicenseDefinition } from '@/lib/license/definition';
 import { LICENSE_OBLIGATION_INDEX, licenseStockKey, licenseObligationKey, licenseReservationKey } from '@/lib/license/stock';
 import { computeLicensePaymentKey } from '@/lib/license/paymentKey';
@@ -55,7 +59,7 @@ const PAYER = getAddress('0x5555555555555555555555555555555555555555');
 const NOW = 1_800_000_000_000;
 const definition = createLicenseDefinition(ID, { supply: 2, transferable: false, termsUrl: 'https://seller.example/terms', termsVersion: 'v1' }, 80002, CONTRACT);
 
-async function settling(productKind: 'digital' | 'license', sequence: number) {
+async function quotedInput(productKind: 'digital' | 'license', sequence: number) {
   const quoted = await createQuotedPurchaseIntent({
     resourceId: ID, contentRevision: 1,
     metadata: { ...(productKind === 'license' ? { productKind, license: definition } : {}), owner: MERCHANT, payTo: MERCHANT, title: 'Product', priceJpyc: '1000', contentKind: 'text', label: 'prompt' },
@@ -67,7 +71,11 @@ async function settling(productKind: 'digital' | 'license', sequence: number) {
   const i = quoted.intent;
   const nonce = buildForwarderNonce({ from: PAYER, merchant: MERCHANT, merchantValue: BigInt(i.merchantValue), feeReceiver: FEE, feeValue: BigInt(i.feeValue), validAfter: 0n, validBefore: BigInt(i.authorizationValidBeforeMax), intentSalt: i.intentSalt }, i.chainId, FORWARDER);
   const claim: PurchaseAuthorizationClaim = { payer: PAYER, token: i.token, chainId: i.chainId, forwarder: FORWARDER, commitVersion: i.commitVersion, merchant: MERCHANT, merchantValue: i.merchantValue, feeReceiver: FEE, feeValue: i.feeValue, validAfter: '0', validBefore: i.authorizationValidBeforeMax, nonce, signatureFingerprint: 'a'.repeat(64), resourceId: ID, contentRevision: 1, deploymentVersion: i.deploymentVersion, anchorBlock: '1' };
-  const input = { intentSalt: i.intentSalt, claim, authorizationHash: createHash('sha256').update(JSON.stringify(claim)).digest('hex'), now: NOW + 1000 };
+  return { intentSalt: i.intentSalt, claim, authorizationHash: createHash('sha256').update(JSON.stringify(claim)).digest('hex'), now: NOW + 1000 };
+}
+
+async function settling(productKind: 'digital' | 'license', sequence: number) {
+  const input = await quotedInput(productKind, sequence);
   expect(await claimSignedPurchaseIntent(input)).toMatchObject({ ok: true, kind: 'claimed' });
   expect(await claimPurchaseSettlement(input)).toMatchObject({ ok: true, kind: 'claimed' });
   return input;
@@ -79,6 +87,7 @@ beforeEach(() => {
   h.revertAliasFix = false;
   h.calls = [];
   h.errors = [];
+  h.reply = null;
 });
 afterAll(closeRedisLuaEngine);
 
@@ -134,4 +143,50 @@ describe('FINALIZE_PURCHASE: Upstash cjson alias regression, actual Lua', () => 
       expect(h.store!.zsets.get(LICENSE_OBLIGATION_INDEX)?.size).toBe(2);
     }
   });
+});
+
+// kvEval は Redis の値の形 (整数・文字列・nil・配列) までしか確かめない。script が返さない形を成功と読まないことを固定する。
+// script は本文の断片で見分ける (lib/x402/purchase/* は facade 経由でしか import しない)。
+const isClaimSigned = (script: string) => script.includes('decoded.claim.signatureFingerprint == ARGV[18]');
+const isFinalize = (script: string) => script.includes('own.latestGrant = cjson.decode(ARGV[13])');
+const isLibraryScore = (script: string) => script.trim() === "return redis.call('ZSCORE', KEYS[1], ARGV[1])";
+describe('unexpected kvEval replies, actual Lua', () => {
+  it('CLAIM_SIGNED_INTENT: a nil reply is not claimed; the intent stays quoted and a retry claims it', async () => {
+    const input = await quotedInput('digital', 3);
+    h.reply = async (script, run) => isClaimSigned(script) ? null : run();
+    expect(await claimSignedPurchaseIntent(input)).toEqual({ ok: false, reason: 'storage' });
+    expect(JSON.parse(h.store!.strings.get(purchaseIntentKey(input.intentSalt))!)).toMatchObject({ state: 'quoted' });
+    h.reply = null;
+    expect(await claimSignedPurchaseIntent(input)).toMatchObject({ ok: true, kind: 'claimed' });
+  });
+
+  it('FINALIZE_PURCHASE: a replayed finalize (2) arriving in another shape is not a first finalization', async () => {
+    const first = await settling('digital', 4);
+    const input = { intentSalt: first.intentSalt, txHash: toHex(104n, { size: 32 }), settledAt: NOW + 2000 };
+    expect(await finalizeHostedPurchase(input)).toMatchObject({ ok: true, kind: 'finalized' });
+    h.reply = async (script, run) => {
+      const value = await run();
+      return isFinalize(script) ? String(value) : value;
+    };
+    expect(await finalizeHostedPurchase(input)).toEqual({ ok: false, reason: 'storage' });
+    h.reply = null;
+    expect(await finalizeHostedPurchase(input)).toMatchObject({ ok: true, kind: 'idempotent' });
+  });
+
+  // ZSCORE の応答は score の文字列か nil だけ。library の欠落 (nil) が [score] / [[score]] で届くと Number() の暗黙の変換で
+  // 通ってしまい、配信が既存の修復を飛ばす → 文字列でなければ storage。
+  it.each([['[score]', (score: string) => [score]], ['[[score]]', (score: string) => [[score]]]])(
+    'READ_LIBRARY_SCORE: a missing library entry arriving as %s is storage, not a settled access', async (_name, wrap) => {
+      const first = await settling('digital', 5);
+      const input = { intentSalt: first.intentSalt, txHash: toHex(105n, { size: 32 }), settledAt: NOW + 2000 };
+      expect(await finalizeHostedPurchase(input)).toMatchObject({ ok: true, kind: 'finalized' });
+      const library = h.store!.zsets.get(purchaseLibraryKey(PAYER))!;
+      const score = String(library.get(ID));
+      library.delete(ID);
+      h.reply = async (script, run) => isLibraryScore(script) ? wrap(score) : run();
+      expect(await readSettledPurchaseAccess(input.intentSalt)).toEqual({ ok: false, reason: 'storage' });
+      h.reply = null;
+      expect(await readSettledPurchaseAccess(input.intentSalt)).toEqual({ ok: false, reason: 'corrupt' });
+    },
+  );
 });

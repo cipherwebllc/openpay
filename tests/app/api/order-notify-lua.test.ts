@@ -18,6 +18,9 @@ const h = vi.hoisted(() => ({
   tasks: [] as (() => unknown)[],
   // 次の EVAL の直前に 1 回だけ実行する (別 request の同時更新を Lua の手前に差し込む)。
   beforeEval: null as ((script: string) => void) | null,
+  // EVAL の応答の差し替え (kvEval の契約は Redis の値の形まで・script ごとの意味は呼出側が確かめる)。
+  // run() を呼べば本物の Lua を実行した結果、呼ばなければ Lua を走らせずに返した値がそのまま {result} で届く。
+  reply: null as ((script: string, run: () => Promise<unknown>) => Promise<unknown>) | null,
   evals: [] as string[],
   warn: vi.fn(),
   verify: null as unknown,
@@ -120,6 +123,7 @@ beforeEach(() => {
   h.store = createFakeRedisStore(Date.now());
   h.tasks = [];
   h.beforeEval = null;
+  h.reply = null;
   h.evals = [];
   h.warn.mockClear();
   h.verify = { ok: true, value: 970n * JPYC, merchantSource: CUSTOMER, sameSourceFeeValue: 30n * JPYC, blockNumber: 123n, receiptLogs: [] };
@@ -132,6 +136,10 @@ beforeEach(() => {
       const hook = h.beforeEval;
       h.beforeEval = null;
       hook(String(body[1]));
+    }
+    if (body[0] === 'EVAL' && h.reply) {
+      const run = async () => ((await (await upstash(url, init)).json()) as { result?: unknown }).result;
+      return Response.json({ result: await h.reply(String(body[1]), run) });
     }
     return upstash(url, init);
   }));
@@ -172,6 +180,20 @@ describe('STORE_ORDER_WITH_INLINE_FEE_CLAIM (real Lua)', () => {
     expect(orders()[0]).toMatchObject({ feeUncollected: true, feeExpectedAmount: (30n * JPYC - 1n).toString() });
     expect(h.store!.strings.get(key)).toBe(value);
     if (!key.startsWith('payment:')) expect(h.store!.strings.has(`payment:claimed:80002:${TXHASH}`)).toBe(false);
+  });
+
+  // kvEval は Redis の値の形までしか確かめない。0 / 1 以外 (ここでは Lua を走らせない nil) を保存済みと読むと、受注 0 件のまま
+  // 200 と done マーカーを返し、再送も duplicate になって復旧できない。
+  it('想定外の応答 (nil) は保存済みにせず 503・pending クレームを戻し、再送で 1 件だけ保存する', async () => {
+    h.reply = async (script, run) => script.includes('local claimed=0') ? null : run();
+    const res = await POST(req({}));
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({ ok: false, error: 'kv_error' });
+    expect(orders()).toEqual([]);
+    expect(h.store!.strings.has(`order:used:80002:${TXHASH}`)).toBe(false);
+    h.reply = null;
+    expect(await (await POST(req({}))).json()).toEqual({ ok: true, orderId: 'oid-1' });
+    expect(orders()).toHaveLength(1);
   });
 });
 

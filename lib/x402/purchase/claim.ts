@@ -351,6 +351,9 @@ export async function claimSignedPurchaseIntent(input: {
     }
     return { ok: true, kind: 'idempotent', intent: latest };
   }
+  // CLAIM_SIGNED_INTENT の成功は 1 (取得) と 2 (冪等) だけ。kvEval は Redis の値の形までしか確かめないので、それ以外を
+  // claimed と読まない: intent が quoted のまま決済レールの選択 (恒久の archive) へ進む偽成功を断つ。
+  if (result.value !== 1) return { ok: false, reason: 'storage' };
   return { ok: true, kind: 'claimed', intent: signed };
 }
 

@@ -56,6 +56,11 @@ export async function readSettledPurchaseAccess(
   if (!ownResult.ok || !purchaseResult.ok || !libraryResult.ok) {
     return { ok: false, reason: 'storage' };
   }
+  // ZSCORE の応答は score の文字列か nil だけ。kvEval は Redis の値の形 (配列を含む) までしか確かめず、[score] も下の
+  // Number() の暗黙の変換で通ってしまう (library の欠落を検出できず、配信が既存の修復を飛ばす)。文字列でなければ storage。
+  if (libraryResult.value !== null && typeof libraryResult.value !== 'string') {
+    return { ok: false, reason: 'storage' };
+  }
   if (
     ownResult.value === null ||
     purchaseResult.value === null ||

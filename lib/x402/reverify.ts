@@ -536,7 +536,7 @@ function verdictClass(verdict: ReverifyVerdict): 'ok' | 'violation' | 'transient
   return isViolationVerdict(verdict) ? 'violation' : 'transient';
 }
 
-function parseApplyResult(value: number | string): ReverifyApplyResult {
+function parseApplyResult(value: unknown): ReverifyApplyResult {
   if (typeof value === 'number') {
     const reason =
       value === -1
@@ -554,6 +554,12 @@ function parseApplyResult(value: number | string): ReverifyApplyResult {
       ? { applied: false, reason, detail: `unexpected code ${value}` }
       : { applied: false, reason };
   }
+  // 成功の応答は Lua が cjson.encode した JSON 文字列だけ。kvEval は Redis の値の形 (配列を含む) までしか確かめず、
+  // [JSON 文字列] の配列も JSON.parse の暗黙の文字列化で通ってしまうので、文字列でなければ storage にする
+  // (掲載が hidden のままなのに applied:true・hiddenAfter:false と読み、自動復帰の判定を誤る波及を断つ)。
+  if (typeof value !== 'string') {
+    return { applied: false, reason: 'storage', detail: 'unexpected result type' };
+  }
   const parsed = safeParse<{
     failures: number;
     authFailures?: number;
@@ -567,6 +573,16 @@ function parseApplyResult(value: number | string): ReverifyApplyResult {
       reason: 'storage',
       detail: `unparseable result ${String(value).slice(0, 120)}`,
     };
+  }
+  // Lua の結果は件数 (0 以上の整数) と hidden の前後 (真偽値) を必ず持つ。形が違う JSON を hidden の遷移として読まない。
+  if (
+    typeof parsed !== 'object' || Array.isArray(parsed) ||
+    !Number.isSafeInteger(parsed.failures) || parsed.failures < 0 ||
+    (parsed.authFailures !== undefined && (!Number.isSafeInteger(parsed.authFailures) || parsed.authFailures < 0)) ||
+    typeof parsed.before !== 'boolean' || typeof parsed.after !== 'boolean' ||
+    (parsed.restoreBlocked !== undefined && parsed.restoreBlocked !== 'url_taken' && parsed.restoreBlocked !== 'storage')
+  ) {
+    return { applied: false, reason: 'storage', detail: `unparseable result ${value.slice(0, 120)}` };
   }
   return {
     applied: true,
