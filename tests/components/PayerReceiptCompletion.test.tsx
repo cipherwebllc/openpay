@@ -5,8 +5,9 @@ import { PayerReceiptCompletion } from '@/components/PayerReceiptCompletion';
 import { appendPayerReceipt, buildPayerReceipt } from '@/lib/payerReceipt';
 
 // usePayerReceipts の hydrate 後 reconcile を no-op 化 (jsdom に実 RPC 無し)。
-vi.mock('@/lib/payerReceiptReconcile', () => ({
-  reconcilePendingReceipts: vi.fn(async () => 0),
+vi.mock('@/lib/payerReceiptReconcile', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/payerReceiptReconcile')>()),
+  reconcilePendingReceipts: vi.fn(async () => []),
   fetchReceiptTxStatus: vi.fn(async () => 'unknown' as const),
 }));
 

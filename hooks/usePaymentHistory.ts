@@ -128,6 +128,8 @@ type StandardSnapshot = {
     merchantTxHash: Hex;
     feeTxHash?: Hex;
     blockNumber: bigint;
+    // fee tx 自身の確定 block (手数料 leg の履歴に使う・店舗送金の block とは別)。
+    feeBlockNumber?: bigint;
   };
   phase: string;
   merchantTxHash?: Hex;
@@ -367,7 +369,8 @@ export function usePaymentHistory(
           networkFeeEquivalent: null,
           txHash: standardData.feeTxHash,
           userOpHash: null,
-          blockNumber: standardData.blockNumber,
+          // A9: 手数料 tx 自身の block (店舗送金の block を流用しない)。取れていなければ空。
+          blockNumber: standardData.feeBlockNumber ?? null,
           errorMessage: null,
           storeName: ctx.storeName,
           note: ctx.note,

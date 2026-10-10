@@ -499,6 +499,23 @@ describe('appendPayerReceipt: pending → confirmed/failed 昇格', () => {
   });
 });
 
+describe('保存値の txHash / chainId の型 (第 7 回レビュー Codex)', () => {
+  beforeEach(() => window.localStorage.clear());
+
+  it('文字列でない txHash・数でない chainId の控えは読まない (null・未設定は読む)', () => {
+    const base = buildPayerReceipt({ asset: 'jpyc', amount: '1', merchantAddress: '0xM', txHash: '0xok', chainId: 80002 }, NOW);
+    const raw = [
+      { ...base, receiptId: 'num-hash', txHash: 123 },
+      { ...base, receiptId: 'str-chain', chainId: '80002' },
+      { ...base, receiptId: 'null-hash', txHash: null, chainId: null },
+      { ...base, receiptId: 'no-hash', txHash: undefined, chainId: undefined },
+      base,
+    ];
+    window.localStorage.setItem(PAYER_RECEIPTS_STORAGE_KEY, JSON.stringify(raw));
+    expect(loadPayerReceipts().map((r) => r.receiptId)).toEqual(['null-hash', 'no-hash', base.receiptId]);
+  });
+});
+
 describe('promotePayerReceiptStatus', () => {
   beforeEach(() => window.localStorage.clear());
 
@@ -520,6 +537,28 @@ describe('promotePayerReceiptStatus', () => {
 
   it('不在 id → false', () => {
     expect(promotePayerReceiptStatus('0xnope', 'confirmed')).toBe(false);
+  });
+
+  // 第 7 回レビュー (Codex): 照会した tx とストアの控えの tx が違えば (付け替え後)、古い tx の結果を書かない。
+  it('照会した tx を渡したら、ストアの控えが同じ tx (chainId と hash・大小文字は問わない) のときだけ昇格する', () => {
+    const r = { ...buildPayerReceipt({ asset: 'jpyc', amount: '1', merchantAddress: '0xM', txHash: '0xabc', chainId: 80002 }, NOW), receiptId: 'rid-tx', status: 'pending' as const, paidAt: undefined };
+    appendPayerReceipt(r);
+    expect(promotePayerReceiptStatus('rid-tx', 'failed', { chainId: 80002, txHash: '0xdef' })).toBe(false);
+    expect(promotePayerReceiptStatus('rid-tx', 'failed', { chainId: 137, txHash: '0xabc' })).toBe(false);
+    expect(loadPayerReceipts()[0].status).toBe('pending');
+    expect(promotePayerReceiptStatus('rid-tx', 'confirmed', { chainId: 80002, txHash: '0xABC' })).toBe(true);
+    expect(loadPayerReceipts()[0].status).toBe('confirmed');
+  });
+
+  // 第 7 回レビュー (Codex): 書き込みに失敗したのに true を返す偽成功にしない。
+  it('保存に失敗したら false (ストアの控えは pending のまま)', () => {
+    seedPending('0xq4');
+    const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementationOnce(() => {
+      throw new Error('QuotaExceededError');
+    });
+    expect(promotePayerReceiptStatus('0xq4', 'confirmed')).toBe(false);
+    setItem.mockRestore();
+    expect(loadPayerReceipts()[0].status).toBe('pending');
   });
 
   it('true 時に CHANGED_EVENT を dispatch', () => {

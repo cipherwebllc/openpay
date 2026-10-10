@@ -40,8 +40,8 @@ describe('reconcilePendingReceipts', () => {
     const r = pending({ receiptId: '0xs1', txHash: '0xs1' });
     seed(r);
     const fetchStatus = vi.fn(async (): Promise<ReceiptTxStatus> => 'success');
-    const n = await reconcilePendingReceipts([r], fetchStatus);
-    expect(n).toBe(1);
+    const results = await reconcilePendingReceipts([r], fetchStatus);
+    expect(results).toEqual([{ receiptId: '0xs1', status: 'success', promoted: true }]);
     expect(fetchStatus).toHaveBeenCalledWith(CHAIN, '0xs1');
     expect(statusOf('0xs1')).toBe('confirmed');
   });
@@ -50,17 +50,17 @@ describe('reconcilePendingReceipts', () => {
     const r = pending({ receiptId: '0xr1', txHash: '0xr1' });
     seed(r);
     const fetchStatus = vi.fn(async (): Promise<ReceiptTxStatus> => 'reverted');
-    const n = await reconcilePendingReceipts([r], fetchStatus);
-    expect(n).toBe(1);
+    const results = await reconcilePendingReceipts([r], fetchStatus);
+    expect(results).toEqual([{ receiptId: '0xr1', status: 'reverted', promoted: true }]);
     expect(statusOf('0xr1')).toBe('failed');
   });
 
-  it('unknown → pending のまま・戻り値 0', async () => {
+  it('unknown → pending のまま・結果は unknown (昇格なし)', async () => {
     const r = pending({ receiptId: '0xu1', txHash: '0xu1' });
     seed(r);
     const fetchStatus = vi.fn(async (): Promise<ReceiptTxStatus> => 'unknown');
-    const n = await reconcilePendingReceipts([r], fetchStatus);
-    expect(n).toBe(0);
+    const results = await reconcilePendingReceipts([r], fetchStatus);
+    expect(results).toEqual([{ receiptId: '0xu1', status: 'unknown', promoted: false }]);
     expect(statusOf('0xu1')).toBe('pending');
   });
 
@@ -69,9 +69,10 @@ describe('reconcilePendingReceipts', () => {
     const noChain = pending({ receiptId: '0xn2', txHash: '0xn2', chainId: undefined });
     const confirmed = pending({ receiptId: '0xn3', txHash: '0xn3', status: 'confirmed' });
     const fetchStatus = vi.fn(async (): Promise<ReceiptTxStatus> => 'success');
-    const n = await reconcilePendingReceipts([noTx, noChain, confirmed], fetchStatus);
+    const results = await reconcilePendingReceipts([noTx, noChain, confirmed], fetchStatus);
     expect(fetchStatus).not.toHaveBeenCalled();
-    expect(n).toBe(0);
+    // 照会していない控えは結果に含めない (呼び出し側が照合済みと扱わない)。
+    expect(results).toEqual([]);
   });
 
   it('max 超過分は照合されない (fetcher 呼び出し回数で assert)', async () => {
@@ -79,17 +80,18 @@ describe('reconcilePendingReceipts', () => {
       pending({ receiptId: `0xm${i}`, txHash: `0xm${i}` }),
     );
     const fetchStatus = vi.fn(async (): Promise<ReceiptTxStatus> => 'unknown');
-    await reconcilePendingReceipts(receipts, fetchStatus, { max: 2 });
-    // 新しい順 (配列順) に先頭 2 件のみ照合。
+    const results = await reconcilePendingReceipts(receipts, fetchStatus, { max: 2 });
+    // 新しい順 (配列順) に先頭 2 件のみ照合。照会しなかった 3 件は結果に含めない (A10)。
+    expect(results.map((x) => x.receiptId)).toEqual(['0xm0', '0xm1']);
     expect(fetchStatus).toHaveBeenCalledTimes(2);
     expect(fetchStatus).toHaveBeenNthCalledWith(1, CHAIN, '0xm0');
     expect(fetchStatus).toHaveBeenNthCalledWith(2, CHAIN, '0xm1');
   });
 
-  it('対象が 0 件なら fetcher を呼ばず 0 を返す', async () => {
+  it('対象が 0 件なら fetcher を呼ばず空の結果を返す', async () => {
     const fetchStatus = vi.fn(async (): Promise<ReceiptTxStatus> => 'success');
-    const n = await reconcilePendingReceipts([], fetchStatus);
+    const results = await reconcilePendingReceipts([], fetchStatus);
     expect(fetchStatus).not.toHaveBeenCalled();
-    expect(n).toBe(0);
+    expect(results).toEqual([]);
   });
 });

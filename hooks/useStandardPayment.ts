@@ -33,6 +33,8 @@ type StandardPaymentResult = {
   feeTxHash?: Hex;
   // merchant tx 確定の block。受領証明として UI 表示に使う。
   blockNumber: bigint;
+  // fee tx 自身の確定 block (第 7 回レビュー A9: 手数料の履歴に店舗送金の block を流用しない)。fee tx が無ければ undefined。
+  feeBlockNumber?: bigint;
 };
 
 type PaymentIntentStorage = typeof import('@/lib/paymentIntentStorage');
@@ -887,6 +889,12 @@ export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {
       ? merchantReceipt.data.blockNumber
       : restoredMerchantBlockNumber;
 
+  // A9: 手数料の block は fee receipt 自身のもの (同内容の置換なら置換 tx の receipt = feeSettledTxHash の block)。
+  const feeBlockNumber =
+    feeSettledTxHash && feeReceipt.isSuccess && feeReceipt.data?.status === 'success'
+      ? feeReceipt.data.blockNumber
+      : undefined;
+
   // A1: 結果・履歴・控え・注文通知へ渡す hash は実際に mine された hash。
   const data: StandardPaymentResult | undefined =
     isSuccess && merchantSettledTxHash && merchantBlockNumber !== undefined
@@ -894,6 +902,7 @@ export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {
           merchantTxHash: merchantSettledTxHash,
           feeTxHash: feeSettledTxHash,
           blockNumber: merchantBlockNumber,
+          ...(feeBlockNumber !== undefined ? { feeBlockNumber } : {}),
         }
       : undefined;
 

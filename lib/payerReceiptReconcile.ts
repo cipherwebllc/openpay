@@ -20,41 +20,49 @@ export type ReceiptStatusFetcher = (
 ) => Promise<ReceiptTxStatus>;
 
 /** reconcile が一度に照合する pending 控えの既定上限 (新しい順)。 */
-const DEFAULT_MAX = 10;
+export const RECONCILE_BATCH_MAX = 10;
+
+/** 照合の対象 = 確認待ち (pending) で、照会できる txHash と chainId を持つ控え。 */
+export function isReconcilableReceipt(r: PayerReceipt): boolean {
+  return r.status === 'pending' && r.txHash != null && r.chainId != null;
+}
+
+/** 照会した控え 1 件の結果。status 'unknown' (未着・RPC 失敗) は確定していない (呼び出し側が後で再照会する)。 */
+export type ReceiptReconcileResult = {
+  receiptId: string;
+  status: ReceiptTxStatus;
+  /** ストアの控えを昇格して保存できたか (既に pending でない・控えの tx が付け替わった・保存できなかったら false)。 */
+  promoted: boolean;
+};
 
 /**
- * pending 控えを on-chain receipt と突き合わせ、確定済みを昇格する。戻り値 = 昇格件数。
+ * pending 控えを on-chain receipt と突き合わせ、確定済みを昇格する。戻り値 = 実際に照会した控えと結果
+ * (対象外・max を超えて照会しなかった控えは含まない = 呼び出し側は「照合済み」と扱わない)。
  *
- * 対象は status==='pending' かつ txHash / chainId を持つ控え。新しい順 (受け取った配列順)
- * に最大 max 件 (既定 10) を並列に fetchStatus し、'success' → confirmed、'reverted' →
- * failed に昇格、'unknown' は何もしない (pending のまま = 既存セマンティクス)。
+ * 対象は isReconcilableReceipt の控え。新しい順 (受け取った配列順) に最大 max 件 (既定 10) を並列に
+ * fetchStatus し、'success' → confirmed、'reverted' → failed に昇格、'unknown' は何もしない (pending のまま)。
  */
 export async function reconcilePendingReceipts(
   receipts: PayerReceipt[],
   fetchStatus: ReceiptStatusFetcher,
   opts: { max?: number } = {},
-): Promise<number> {
-  const max = opts.max ?? DEFAULT_MAX;
-  const targets = receipts
-    .filter(
-      (r) => r.status === 'pending' && r.txHash != null && r.chainId != null,
-    )
-    .slice(0, max);
-  if (targets.length === 0) return 0;
-
-  const results = await Promise.all(
+): Promise<ReceiptReconcileResult[]> {
+  const max = opts.max ?? RECONCILE_BATCH_MAX;
+  const targets = receipts.filter(isReconcilableReceipt).slice(0, max);
+  return Promise.all(
     targets.map(async (r) => {
-      const status = await fetchStatus(r.chainId as number, r.txHash as string);
-      if (status === 'success') {
-        return promotePayerReceiptStatus(r.receiptId, 'confirmed');
-      }
-      if (status === 'reverted') {
-        return promotePayerReceiptStatus(r.receiptId, 'failed');
-      }
-      return false;
+      // 照会した tx。昇格はストアの控えがまだこの tx を指しているときだけ (照会の間の付け替えで古い結果を書かない)。
+      const tx = { chainId: r.chainId as number, txHash: r.txHash as string };
+      const status = await fetchStatus(tx.chainId, tx.txHash);
+      const promoted =
+        status === 'success'
+          ? promotePayerReceiptStatus(r.receiptId, 'confirmed', tx)
+          : status === 'reverted'
+            ? promotePayerReceiptStatus(r.receiptId, 'failed', tx)
+            : false;
+      return { receiptId: r.receiptId, status, promoted };
     }),
   );
-  return results.filter(Boolean).length;
 }
 
 /**

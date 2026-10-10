@@ -360,6 +360,10 @@ function isValidReceipt(value: unknown): value is PayerReceipt {
   if (typeof r.amount !== 'string') return false;
   if (typeof r.merchantAddress !== 'string') return false;
   if (r.orderId !== undefined && typeof r.orderId !== 'string') return false;
+  // 任意の txHash / chainId も型まで確かめる。壊れた保存値 (数の txHash 等) が控えの照合 (hash の小文字化) や
+  // Explorer リンクで例外を投げ、控えを出す画面全体を落とす波及を断つ (読めない控えは保存のとき元の位置で残す)。
+  if (r.txHash != null && typeof r.txHash !== 'string') return false;
+  if (r.chainId != null && (typeof r.chainId !== 'number' || !Number.isFinite(r.chainId))) return false;
   if (r.lineItems !== undefined && !isValidLineItems(r.lineItems)) return false;
   if (r.discountAmount !== undefined && !isConsistentDiscount(r)) return false;
   return true;
@@ -467,26 +471,41 @@ export function backfillGatewayPayerReceipt(chainId: number, transferSpecHash: s
   broadcastChange();
 }
 
+/** 控えが指す tx (chainId と hash)。hash は大小文字を区別しない (表記の違いだけで別の tx と見なさない)。 */
+export type PayerReceiptTxRef = { chainId: number; txHash: string };
+
+export function payerReceiptHasTx(r: PayerReceipt, tx: PayerReceiptTxRef): boolean {
+  return r.chainId === tx.chainId && r.txHash?.toLowerCase() === tx.txHash.toLowerCase();
+}
+
 /**
  * pending 控えの status を on-chain 確定結果で昇格する。対象 receipt が存在し
- * status==='pending' のときのみ status を更新して保存・broadcast し true を返す。
- * 不在 / 既に non-pending の場合は false (no-op)。reconcile (lib/payerReceiptReconcile.ts)
- * が on-chain receipt と突き合わせて呼ぶ。
+ * status==='pending' のときのみ status を更新して保存・broadcast し、保存できたら true を返す。
+ * 不在 (読めない場合を含む) / 既に non-pending / 保存できなかった場合は false。reconcile
+ * (lib/payerReceiptReconcile.ts) が on-chain receipt と突き合わせて呼ぶ。
+ * tx を渡したら、ストアの控えがその tx を指しているときだけ昇格する (照会の間に控えの tx hash が付け替わったら、
+ * 古い tx の結果を新しい tx の控えに書かない)。
  */
 export function promotePayerReceiptStatus(
   receiptId: string,
   status: 'confirmed' | 'failed',
+  tx?: PayerReceiptTxRef,
 ): boolean {
   if (typeof window === 'undefined') return false;
   const current = loadPayerReceiptItems();
   const idx = current.findIndex((item) => item.receipt?.receiptId === receiptId);
   const existing = current[idx]?.receipt;
   if (existing?.status !== 'pending') return false;
+  if (tx && !payerReceiptHasTx(existing, tx)) return false;
   const next = [...current];
   next[idx] = { ...current[idx], receipt: { ...existing, status } };
   savePayerReceiptItems(next);
   broadcastChange();
-  return true;
+  // 保存できたかは読み直して確かめる。safeSet は書き込みの失敗を投げずに握るので、ここで無条件に true を返すと
+  // 呼び出し側 (控えの照合) が「保存した」と思い込み、pending のまま照合をやめてしまう (偽成功・掟 13)。
+  return loadPayerReceipts().some(
+    (r) => r.receiptId === receiptId && r.status === status && (!tx || payerReceiptHasTx(r, tx)),
+  );
 }
 
 export function removePayerReceipt(receiptId: string): void {
