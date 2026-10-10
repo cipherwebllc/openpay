@@ -17,6 +17,8 @@ import {
 } from '@/lib/x402/storePaymentSnapshot';
 
 export const STORE_LIBRARY_PAGE_SIZE = 24;
+// 1 ページの権利照合 (license) 全体の期限。holders ページ (lib/license/holders.ts) と同じ 15 秒。
+const STORE_LIBRARY_RIGHTS_DEADLINE_MS = 15_000;
 
 type LibraryCursor = {
   score: number;
@@ -330,7 +332,8 @@ export async function listStoreLibraryPage(input: {
     return { ok: false, reason: 'storage' };
   }
 
-  const ownerships: StorePurchaseOwnership[] = [];
+  // index entry と ownership を並べて持つ (flag OFF で隠す license は null)。部分ページの cursor は entry から作る。
+  const rows: { entry: LibraryIndexEntry; ownership: StorePurchaseOwnership | null }[] = [];
   for (let index = 0; index < visible.length; index += 1) {
     const entry = visible[index]!;
     const raw = ownershipResult.value[index];
@@ -343,17 +346,42 @@ export async function listStoreLibraryPage(input: {
     ) {
       return { ok: false, reason: 'corrupt' };
     }
-    if (licenseVisible(ownership.latestGrant.metadata)) ownerships.push(ownership);
+    rows.push({ entry, ownership: licenseVisible(ownership.latestGrant.metadata) ? ownership : null });
   }
 
   const items: StoreLibraryItem[] = [];
-  for (const ownership of ownerships) {
-    const definition = ownership.latestGrant.metadata.license;
-    if (!definition) { items.push(libraryItem(ownership)); continue; }
-    const { resolveLicenseRights } = await import('@/lib/license/rights');
-    const rights = await resolveLicenseRights({ address: ownership.payer, productId: ownership.resourceId, definition, ownership });
-    // 発行 tx のリンク先は購入時の定義から返し、現在の環境設定で推測させない。
-    items.push({ ...libraryItem(ownership), productKind: 'license', tokenChainId: definition.tokenChainId, ...rights });
+  // ページ全体の権利照合に 1 つの期限を共有する (第 7 回レビュー B13: 商品ごとの 6 秒窓はページ全体の上限に
+  // ならず、24 商品で約 90 秒の直列待機になり得た)。期限到達は RPC 障害と区別し、確認済みの項目と「未処理項目の
+  // 直前」の cursor を部分ページとして返す (holders と同じ形・未処理項目は飛ばさず続きの呼び出しが前進する)。
+  // 枠 (第 7 回レビュー B9) は resolver が最初の RPC の直前に 1 request 1 枠で取りページ全体で持つ。譲渡不可など
+  // RPC を使わない項目は枠にも枠の KV 障害にも触れない。
+  const deadline = Date.now() + STORE_LIBRARY_RIGHTS_DEADLINE_MS;
+  let page: Awaited<ReturnType<typeof import('@/lib/license/rightsAdmission').pageScopedLicenseRightsAdmission>> | undefined;
+  try {
+    for (let index = 0; index < rows.length; index += 1) {
+      const { ownership } = rows[index]!;
+      if (!ownership) continue;
+      const definition = ownership.latestGrant.metadata.license;
+      if (!definition) { items.push(libraryItem(ownership)); continue; }
+      if (!page) {
+        const [{ pageScopedLicenseRightsAdmission }, { acquireLicenseRightsBudget, releaseLicenseRightsBudget }] = await Promise.all([
+          import('@/lib/license/rightsAdmission'), import('@/lib/license/rightsBudget'),
+        ]);
+        page = pageScopedLicenseRightsAdmission({ acquire: acquireLicenseRightsBudget, release: releaseLicenseRightsBudget });
+      }
+      const { resolveLicenseRights } = await import('@/lib/license/rights');
+      const rights = await resolveLicenseRights({ address: ownership.payer, productId: ownership.resourceId, definition, ownership, deadline, admission: page.admission });
+      if (rights.entitled === null && index > 0 && Date.now() >= deadline) {
+        // この項目の途中で期限を越えた: 直前の entry を cursor にして、ここから次の呼び出しで再開する。
+        // 先頭の項目だけで期限を越えたときは再試行でも前進しないので、従来どおり unknown の項目として続ける。
+        const previous = rows[index - 1]!.entry;
+        return { ok: true, page: { items, nextCursor: encodeLibraryCursor({ score: previous.score, member: previous.member }) } };
+      }
+      // 発行 tx のリンク先は購入時の定義から返し、現在の環境設定で推測させない。
+      items.push({ ...libraryItem(ownership), productKind: 'license', tokenChainId: definition.tokenChainId, ...rights });
+    }
+  } finally {
+    if (page) await page.close();
   }
   const last = visible.at(-1)!;
   return {

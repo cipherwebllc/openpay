@@ -15,6 +15,12 @@ const claimState = vi.hoisted(() => ({
 }));
 
 vi.mock('server-only', () => ({}));
+const chainsMock = vi.hoisted(() => ({ transportForChain: vi.fn() }));
+vi.mock('@/lib/chains', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/chains')>();
+  chainsMock.transportForChain.mockImplementation(actual.transportForChain);
+  return { ...actual, transportForChain: chainsMock.transportForChain };
+});
 vi.mock('@/lib/kv', () => ({
   kvGet: vi.fn(async (key: string) =>
     claimState.fail
@@ -29,10 +35,43 @@ vi.mock('@/lib/kv', () => ({
 }));
 
 import {
+  findStoreUsdcAuthorizationTransactions,
   STORE_USDC_ADDRESS,
+  storeUsdcBoundedClient,
   type StoreUsdcPublicClient,
   verifyStoreUsdcOnchain,
 } from '@/lib/x402/storeUsdcOnchain';
+
+// B4 follow-up 2 (2): deadline 付き reconcile の全 RPC が使う、retry なし・timeout を絞った Base client。
+describe('Store USDC bounded client', () => {
+  it('builds a retry-free Base client bounded by the given timeout', () => {
+    chainsMock.transportForChain.mockClear();
+    const client = storeUsdcBoundedClient({ timeoutMs: 4_321, deadlineAt: 1_900_000_000_000 });
+    expect(typeof client.getLogs).toBe('function');
+    expect(chainsMock.transportForChain).toHaveBeenCalledWith(8453, { timeout: 4_321, retryCount: 0, deadline: 1_900_000_000_000 });
+  });
+});
+
+// 第 7 回レビュー B4 (follow-up): deadline 付きの page 取得だけ、retry なし・残り時間で切った timeout の client を使う。
+describe('Store USDC page fetch transport bound', () => {
+  it('builds a retry-free transport bounded by timeoutMs only when one is given; a custom client is used as-is', async () => {
+    const getLogs = vi.fn(async () => []);
+    const client = { getLogs } as unknown as StoreUsdcPublicClient;
+    chainsMock.transportForChain.mockClear();
+    const budget = { timeoutMs: 1_234, deadlineAt: 1_900_000_000_000 };
+    await findStoreUsdcAuthorizationTransactions({ payer: PAYER, nonce: NONCE, fromBlock: 1n, toBlock: 2n, client, budget });
+    expect(getLogs).toHaveBeenCalledTimes(1); expect(chainsMock.transportForChain).not.toHaveBeenCalled();
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('offline'); }));
+    try {
+      expect(await findStoreUsdcAuthorizationTransactions({ payer: PAYER, nonce: NONCE, fromBlock: 1n, toBlock: 2n, budget })).toBe('unavailable');
+      expect(chainsMock.transportForChain).toHaveBeenLastCalledWith(8453, { timeout: 1_234, retryCount: 0, deadline: 1_900_000_000_000 });
+      expect(await findStoreUsdcAuthorizationTransactions({ payer: PAYER, nonce: NONCE, fromBlock: 1n, toBlock: 2n })).toBe('unavailable');
+      expect(chainsMock.transportForChain).toHaveBeenLastCalledWith(8453);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
 
 const EVENTS = parseAbi([
   'event Transfer(address indexed from, address indexed to, uint256 value)',

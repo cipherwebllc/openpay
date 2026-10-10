@@ -20,6 +20,9 @@ vi.mock('@/lib/kv', () => ({ kvIncr: h.incr, kvEval: h.eval }));
 vi.mock('@/lib/x402/hostedStore', () => ({ getHostedProduct: h.product, getHostedContent: h.content, isHostedId: (id: string) => /^h_[0-9a-f]{32}$/.test(id) }));
 vi.mock('@/lib/x402/storeEntitlement', async (original) => ({ ...await original<typeof import('@/lib/x402/storeEntitlement')>(), readStoreOwnership: h.own }));
 vi.mock('@/lib/license/rights', () => ({ resolveLicenseRights: h.rights }));
+// 第 7 回レビュー B9: content 経路の RPC 枠は delivery の枠 (store:delivery:rpc) と別 module。delivery は自前の lease を
+// 持つので resolver に admission を渡さない (二重取得しない) ことを、ここでは枠を常に許可して固定する。
+vi.mock('@/lib/license/rightsBudget', () => ({ acquireLicenseRightsBudget: async () => 'lease', releaseLicenseRightsBudget: async () => undefined }));
 import { GET } from '@/app/api/store/delivery/[resourceId]/route';
 import { GET as contentGet } from '@/app/api/store/content/[resourceId]/route';
 import { deliveryJwks, verifyDeliveryTicket } from '@/lib/store/deliveryTicket';

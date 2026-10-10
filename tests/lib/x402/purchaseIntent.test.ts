@@ -10,10 +10,11 @@ const h = vi.hoisted(() => ({
   reads: new Map<string, (string | null)[]>(),
   kvGet: vi.fn(), kvSet: vi.fn(), kvEval: vi.fn(), warn: vi.fn(),
   client: { readContract: vi.fn(), getBlock: vi.fn(), getBlockNumber: vi.fn(), getLogs: vi.fn(), getTransactionReceipt: vi.fn() },
+  transportForChain: vi.fn(() => ({})),
 }));
 vi.mock('@/lib/kv', () => ({ kvGet: h.kvGet, kvSet: h.kvSet, kvEval: h.kvEval }));
 vi.mock('@/lib/logger', () => ({ logger: { warn: h.warn } }));
-vi.mock('@/lib/chains', () => ({ chainObjectForId: () => ({}), transportForChain: () => ({}) }));
+vi.mock('@/lib/chains', () => ({ chainObjectForId: () => ({}), transportForChain: h.transportForChain }));
 vi.mock('@/lib/x402/hostedStore', () => ({ hostedContentKey: (id: string, rev: number) => `store:hosted:content:${id}:${rev}` }));
 vi.mock('@/lib/x402/facilitatorSettle', () => ({ parseFacilitatorRequest: vi.fn() }));
 vi.mock('@/lib/x402/paymentRedelivery', () => ({ paymentRedeliveryIdentity: vi.fn() }));
@@ -30,6 +31,7 @@ import {
   type PurchaseAuthorizationClaim, type PurchaseReconcileChain, type QuotedPurchaseIntent,
   type SettledPurchaseIntent, type SettlingPurchaseIntent,
 } from '@/lib/x402/purchaseIntent';
+import { STORE_RECONCILE_CURSOR_RESERVE_MS, STORE_RECONCILE_PAGE_RPC_TIMEOUT_MS } from '@/lib/x402/reconcileBudget';
 
 const quoted = fixture.quoted as QuotedPurchaseIntent;
 const active = fixture.active as SettlingPurchaseIntent;
@@ -247,6 +249,230 @@ describe('PurchaseIntent reconciler decisions (no Lua)', () => {
     expect(await reconcilePurchaseIntent(SALT, { now: NOW, chain: adapter })).toEqual({ ok: true, state: 'settled', txHash: TX });
     expect(adapter.receiptMatches).toHaveBeenNthCalledWith(1, expect.anything(), OTHER_TX);
     expect(adapter.receiptMatches).toHaveBeenNthCalledWith(2, expect.anything(), TX);
+  });
+
+  // 第 7 回レビュー B3: 新規に発見した候補の receipt 一時障害で、証拠のあるページを飛ばして cursor を
+  // 進めない (そのページから再試行)。保存済み旧 hash の欠落は従来どおり null で replacement 探索へ進む。
+  it('retries from the candidate page when a newly discovered receipt read fails transiently', async () => {
+    const adapter = chain({
+      latestBlock: async () => BigInt(active.anchorBlock) + 50_000n,
+      authorizationUsedTransactions: vi.fn(async (_intent, fromBlock) => fromBlock === 14_000n ? [TX] : []),
+      receiptMatches: vi.fn(async () => { throw new Error('receipt unavailable'); }),
+    });
+    expect(await reconcilePurchaseIntent(SALT, { now: NOW, chain: adapter })).toEqual({ ok: true, state: 'pending' });
+    expect(adapter.receiptMatches).toHaveBeenCalledTimes(1);
+    const next = JSON.parse(h.kvEval.mock.calls.at(-1)![2][3]);
+    expect(next).toMatchObject({ state: 'indeterminate', reconcileFromBlock: '14000', nextReconcileAt: NOW + PURCHASE_RECONCILE_RETRY_MS });
+    expect(next).not.toHaveProperty('txHash');
+  });
+
+  // 第 7 回レビュー B4: cron の時間予算 (deadline) で page 取得を打ち切り、次の未取得 page を cursor に保存する。
+  it('stops paging at the deadline and persists the cursor of the next unfetched page', async () => {
+    let clock = NOW;
+    const spy = vi.spyOn(Date, 'now').mockImplementation(() => clock);
+    const adapter = chain({
+      latestBlock: async () => BigInt(active.anchorBlock) + 50_000n,
+      authorizationUsedTransactions: vi.fn(async () => { clock += 10_000; return []; }),
+    });
+    try {
+      expect(await reconcilePurchaseIntent(SALT, { now: NOW, chain: adapter, deadline: NOW + 25_000 })).toEqual({ ok: true, state: 'pending' });
+    } finally {
+      spy.mockRestore();
+    }
+    expect(adapter.authorizationUsedTransactions).toHaveBeenCalledTimes(3);
+    expect(JSON.parse(h.kvEval.mock.calls.at(-1)![2][3])).toMatchObject({ reconcileFromBlock: '16000' });
+  });
+
+  // 第 7 回レビュー B4 (follow-up): 残り時間 − cursor 保存の予約が 1 回の RPC の最小に足りなければ取得せず cursor を保存する。
+  it('does not start a page fetch that cannot finish before the cursor-save reserve, and persists the cursor', async () => {
+    let clock = NOW;
+    const spy = vi.spyOn(Date, 'now').mockImplementation(() => clock);
+    // authorizationState と head の RPC で 21 秒使うと、残り 4 秒 − 予約 3 秒 = 1 秒 < 最小 2 秒 → ページを取りに行かない。
+    const adapter = chain({
+      authorizationUsed: vi.fn(async () => { clock += 10_000; return true; }),
+      latestBlock: vi.fn(async () => { clock += 11_000; return BigInt(active.anchorBlock) + 50_000n; }),
+    });
+    try {
+      expect(await reconcilePurchaseIntent(SALT, { now: NOW, chain: adapter, deadline: NOW + 25_000 })).toEqual({ ok: true, state: 'pending' });
+    } finally {
+      spy.mockRestore();
+    }
+    expect(adapter.authorizationUsedTransactions).not.toHaveBeenCalled();
+    expect(JSON.parse(h.kvEval.mock.calls.at(-1)![2][3])).toMatchObject({ reconcileFromBlock: active.anchorBlock, state: 'indeterminate' });
+    // 最初の RPC にすら足りなければ、何も変えずに次回へ (状態も cursor も不変)。
+    const untouched = chain();
+    expect(await reconcilePurchaseIntent(SALT, { now: NOW, chain: untouched, deadline: Date.now() + STORE_RECONCILE_CURSOR_RESERVE_MS + 1_000 })).toEqual({ ok: true, state: 'pending' });
+    expect(untouched.authorizationUsed).not.toHaveBeenCalled();
+    const kept = JSON.parse(h.kvEval.mock.calls.at(-1)![2][3]);
+    expect(kept).toMatchObject({ state: 'settling' });
+    expect(kept).not.toHaveProperty('reconcileFromBlock');
+  });
+
+  it('bounds every page fetch by the remaining time so a slow RPC cannot outlive the deadline', async () => {
+    let clock = NOW;
+    const spy = vi.spyOn(Date, 'now').mockImplementation(() => clock);
+    const adapter = chain({
+      latestBlock: async () => BigInt(active.anchorBlock) + 50_000n,
+      authorizationUsedTransactions: vi.fn(async () => { clock += 15_000; return []; }),
+    });
+    try {
+      expect(await reconcilePurchaseIntent(SALT, { now: NOW, chain: adapter, deadline: NOW + 25_000 })).toEqual({ ok: true, state: 'pending' });
+    } finally {
+      spy.mockRestore();
+    }
+    // 1 ページ目は上限 10 秒・2 ページ目は残り 10 秒 − 予約 3 秒 = 7 秒・3 ページ目は始めない。
+    expect(adapter.authorizationUsedTransactions).toHaveBeenCalledTimes(2);
+    // 3 回目: 各 RPC の options は timeoutMs と「この呼び出しの絶対期限」deadlineAt (= 開始時刻 + timeoutMs) を持つ。
+    expect(adapter.authorizationUsedTransactions).toHaveBeenNthCalledWith(1, expect.anything(), 10_000n, 11_999n, { timeoutMs: STORE_RECONCILE_PAGE_RPC_TIMEOUT_MS, deadlineAt: NOW + STORE_RECONCILE_PAGE_RPC_TIMEOUT_MS });
+    expect(adapter.authorizationUsedTransactions).toHaveBeenNthCalledWith(2, expect.anything(), 12_000n, 13_999n, { timeoutMs: 7_000, deadlineAt: NOW + 15_000 + 7_000 });
+    expect(JSON.parse(h.kvEval.mock.calls.at(-1)![2][3])).toMatchObject({ reconcileFromBlock: '14000' });
+  });
+
+  it('the default adapter builds a retry-free transport bounded by the page timeout and its absolute deadline only when given', async () => {
+    h.client.getLogs.mockResolvedValue([]);
+    await defaultPurchaseReconcileChain.authorizationUsedTransactions(active, 10_000n, 11_999n, { timeoutMs: 1_234, deadlineAt: 1_900_000_000_000 });
+    expect(h.transportForChain).toHaveBeenLastCalledWith(active.chainId, { timeout: 1_234, retryCount: 0, deadline: 1_900_000_000_000 });
+    await defaultPurchaseReconcileChain.authorizationUsedTransactions(active, 10_000n, 11_999n);
+    expect(h.transportForChain).toHaveBeenLastCalledWith(active.chainId);
+  });
+
+  // 3 回目 (2): 候補が出た時点で走査を止めて照合する。後続ページを予算の限界まで取ってから照合すると、照合時点で予算が
+  // 足りず候補ページへ戻し、次回も同じ走査で予算を使い切って収束しなかった (25 秒・各ページ 3 秒・先頭ページに候補)。
+  it('stops scanning at the first page with candidates and verifies it in the same run, so repeated runs converge', async () => {
+    let clock = NOW;
+    const spy = vi.spyOn(Date, 'now').mockImplementation(() => clock);
+    const adapter = chain({
+      latestBlock: async () => BigInt(active.anchorBlock) + 50_000n,
+      authorizationUsedTransactions: vi.fn(async (_intent, fromBlock) => { clock += 3_000; return fromBlock === 10_000n ? [TX] : []; }),
+      receiptMatches: vi.fn(async () => false),
+    });
+    try {
+      const cursors: string[] = [];
+      for (let run = 0; run < 3; run += 1) {
+        const start = clock;
+        reads(key, cursors.length ? { ...active, reconcileFromBlock: cursors.at(-1) } : active);
+        expect(await reconcilePurchaseIntent(SALT, { now: NOW, chain: adapter, deadline: start + 25_000 })).toEqual({ ok: true, state: 'pending' });
+        cursors.push(JSON.parse(h.kvEval.mock.calls.at(-1)![2][3]).reconcileFromBlock);
+      }
+      // 1 回目で候補ページ (10000〜11999) だけを取って照合し、cursor は次のページへ進む。以降は候補なしで前進する。
+      expect(adapter.receiptMatches).toHaveBeenCalledTimes(1);
+      expect(adapter.receiptMatches).toHaveBeenCalledWith(expect.anything(), TX, expect.objectContaining({ timeoutMs: STORE_RECONCILE_PAGE_RPC_TIMEOUT_MS }));
+      expect(cursors[0]).toBe('12000');
+      expect(BigInt(cursors[1]!)).toBeGreaterThan(12_000n);
+      expect(BigInt(cursors[2]!)).toBeGreaterThan(BigInt(cursors[1]!));
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  // B4 follow-up 2 (1): ページ取得の失敗/timeout では、取得済みページの候補を照合してから失敗ページの先頭を cursor に保存する。
+  it('a failing page after candidate-free pages saves the failed page start (no stall on the old cursor)', async () => {
+    const adapter = chain({
+      latestBlock: async () => BigInt(active.anchorBlock) + 50_000n,
+      authorizationUsedTransactions: vi.fn(async (_intent, fromBlock) => {
+        if (fromBlock === 14_000n) throw new Error('page timeout');
+        return [];
+      }),
+    });
+    expect(await reconcilePurchaseIntent(SALT, { now: NOW, chain: adapter })).toEqual({ ok: true, state: 'pending' });
+    expect(adapter.authorizationUsedTransactions).toHaveBeenCalledTimes(3);
+    expect(adapter.receiptMatches).not.toHaveBeenCalled();
+    expect(JSON.parse(h.kvEval.mock.calls.at(-1)![2][3])).toMatchObject({ reconcileFromBlock: '14000', state: 'indeterminate' });
+    expect(h.warn).toHaveBeenCalledWith('creator_store.purchase_reconcile_indeterminate', expect.objectContaining({ intentSalt: SALT }));
+  });
+
+  // 3 回目 (2): 予算付き (deadline) の走査は候補が出たページで止めて照合する (後続ページは取りに行かない)。
+  // 予算なし (status route) は従来どおり全ページを集めてから照合する。
+  it('a deadline-bound scan ends at the candidate page and verifies it; an unbounded scan still collects all pages first', async () => {
+    const pages = vi.fn(async (_intent: unknown, fromBlock: bigint) => {
+      if (fromBlock === 12_000n) return [TX];
+      if (fromBlock === 14_000n) throw new Error('page unavailable');
+      return [];
+    });
+    const bounded = chain({ latestBlock: async () => BigInt(active.anchorBlock) + 50_000n, authorizationUsedTransactions: pages });
+    expect(await reconcilePurchaseIntent(SALT, { now: NOW, chain: bounded, deadline: Date.now() + 25_000 })).toEqual({ ok: true, state: 'pending' });
+    expect(pages).toHaveBeenCalledTimes(2);
+    expect(bounded.receiptMatches).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(bounded.receiptMatches).mock.calls[0]![1]).toBe(TX);
+    expect(JSON.parse(h.kvEval.mock.calls.at(-1)![2][3])).toMatchObject({ reconcileFromBlock: '14000', state: 'indeterminate' });
+    expect(h.warn).not.toHaveBeenCalled();
+    pages.mockClear();
+    const unbounded = chain({ latestBlock: async () => BigInt(active.anchorBlock) + 50_000n, authorizationUsedTransactions: pages });
+    expect(await reconcilePurchaseIntent(SALT, { now: NOW, chain: unbounded })).toEqual({ ok: true, state: 'pending' });
+    expect(pages).toHaveBeenCalledTimes(3);
+    expect(unbounded.receiptMatches).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(h.kvEval.mock.calls.at(-1)![2][3])).toMatchObject({ reconcileFromBlock: '14000' });
+    expect(h.warn).toHaveBeenCalledTimes(1);
+  });
+
+  // B4 follow-up 2 (2): 候補の照合・authorizationState・head の RPC にも残り時間を伝え、足りなければ照合せず候補ページから延期する。
+  it('passes the remaining-time bound to every RPC of the intent when a deadline is given, and none without one', async () => {
+    const withDeadline = chain({
+      latestBlock: vi.fn(async () => BigInt(active.anchorBlock) + 50_000n),
+      authorizationUsedTransactions: vi.fn(async (_intent, fromBlock) => fromBlock === 10_000n ? [TX] : []),
+    });
+    expect(await reconcilePurchaseIntent(SALT, { now: NOW, chain: withDeadline, deadline: Date.now() + 25_000 })).toEqual({ ok: true, state: 'pending' });
+    const bound = expect.objectContaining({ timeoutMs: STORE_RECONCILE_PAGE_RPC_TIMEOUT_MS, deadlineAt: expect.any(Number) });
+    expect(withDeadline.authorizationUsed).toHaveBeenCalledWith(expect.anything(), bound);
+    expect(withDeadline.latestBlock).toHaveBeenCalledWith(expect.anything(), bound);
+    expect(withDeadline.receiptMatches).toHaveBeenCalledWith(expect.anything(), TX, bound);
+    const without = chain({ authorizationUsedTransactions: vi.fn(async () => [TX]) });
+    expect(await reconcilePurchaseIntent(SALT, { now: NOW, chain: without })).toEqual({ ok: true, state: 'pending' });
+    expect(vi.mocked(without.authorizationUsed).mock.calls[0]).toHaveLength(1);
+    expect(vi.mocked(without.latestBlock).mock.calls[0]).toHaveLength(1);
+    expect(vi.mocked(without.receiptMatches).mock.calls[0]).toHaveLength(2);
+  });
+
+  it('defers candidate verification from the candidate page when the remaining time is below one RPC', async () => {
+    let clock = NOW;
+    const spy = vi.spyOn(Date, 'now').mockImplementation(() => clock);
+    // 候補ページの取得に 21 秒かかると、残り 4 秒 − 予約 3 秒 = 1 秒 < 最小 2 秒 → 照合せず候補ページから延期。
+    const adapter = chain({
+      latestBlock: async () => BigInt(active.anchorBlock) + 50_000n,
+      authorizationUsedTransactions: vi.fn(async (_intent, fromBlock) => { clock += 21_000; return fromBlock === 10_000n ? [TX] : []; }),
+    });
+    try {
+      expect(await reconcilePurchaseIntent(SALT, { now: NOW, chain: adapter, deadline: NOW + 25_000 })).toEqual({ ok: true, state: 'pending' });
+    } finally {
+      spy.mockRestore();
+    }
+    expect(adapter.authorizationUsedTransactions).toHaveBeenCalledTimes(1);
+    expect(adapter.receiptMatches).not.toHaveBeenCalled();
+    expect(JSON.parse(h.kvEval.mock.calls.at(-1)![2][3])).toMatchObject({ reconcileFromBlock: '10000', state: 'indeterminate' });
+  });
+
+  it('the default adapter bounds receipt, authorizationState, head and expiry RPC by the given timeout', async () => {
+    h.client.getTransactionReceipt.mockResolvedValue({ status: 'success', logs: [] });
+    h.client.readContract.mockResolvedValue(true);
+    h.client.getBlockNumber.mockResolvedValue(1n);
+    h.client.getBlock.mockResolvedValue({ number: 1n, timestamp: 0n, hash: TX });
+    const at = 1_900_000_000_000;
+    await defaultPurchaseReconcileChain.receiptMatches(active, TX, { timeoutMs: 1_234, deadlineAt: at });
+    expect(h.transportForChain).toHaveBeenLastCalledWith(active.chainId, { timeout: 1_234, retryCount: 0, deadline: at });
+    await defaultPurchaseReconcileChain.authorizationUsed(active, { timeoutMs: 1_235, deadlineAt: at });
+    expect(h.transportForChain).toHaveBeenLastCalledWith(active.chainId, { timeout: 1_235, retryCount: 0, deadline: at });
+    await defaultPurchaseReconcileChain.latestBlock(active, { timeoutMs: 1_236, deadlineAt: at });
+    expect(h.transportForChain).toHaveBeenLastCalledWith(active.chainId, { timeout: 1_236, retryCount: 0, deadline: at });
+    await defaultPurchaseReconcileChain.authorizationExpiredUnused!(active, { timeoutMs: 1_237, deadlineAt: at });
+    expect(h.transportForChain).toHaveBeenLastCalledWith(active.chainId, { timeout: 1_237, retryCount: 0, deadline: at });
+    await defaultPurchaseReconcileChain.receiptMatches(active, TX);
+    expect(h.transportForChain).toHaveBeenLastCalledWith(active.chainId);
+  });
+
+  it('a batch defers the remaining due members once less than one RPC of budget is left', async () => {
+    h.kvEval.mockResolvedValueOnce({ ok: true, value: [SALT, SALT] });
+    const adapter = chain();
+    expect(await reconcilePendingPurchases({ now: NOW, chain: adapter, deadline: Date.now() + STORE_RECONCILE_CURSOR_RESERVE_MS + 1_000 })).toMatchObject({ checked: 0, deferred: 2 });
+    expect(adapter.authorizationUsed).not.toHaveBeenCalled();
+  });
+
+  it('a batch past its deadline defers the remaining due members to the next run without touching them', async () => {
+    h.kvEval.mockResolvedValueOnce({ ok: true, value: [SALT, SALT] });
+    const adapter = chain();
+    // deadline は実時刻 (Date.now) で見る: fixture の NOW は未来なので、実時刻より前の値を渡す。
+    expect(await reconcilePendingPurchases({ now: NOW, chain: adapter, deadline: Date.now() - 1 })).toMatchObject({ checked: 0, deferred: 2, storageErrors: 0 });
+    expect(adapter.authorizationUsed).not.toHaveBeenCalled();
+    expect(h.kvEval).toHaveBeenCalledTimes(1);
   });
 
   it('reports quarantine/storage batch outcomes from KV replies', async () => {

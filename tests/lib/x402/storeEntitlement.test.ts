@@ -12,7 +12,14 @@ vi.mock('@/lib/env', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/env')>();
   return { ...actual, env: { ...actual.env, enableCreatorStore: true, get enableLicenseNft() { return licenseState.enabled; } } };
 });
-vi.mock('@/lib/license/rights', () => ({ resolveLicenseRights: vi.fn(async () => ({ entitled: true, basis: 'purchase', nft: { status: 'minted' } })) }));
+// resolver の実物は「RPC の直前に admission.acquire → 取れなければ unknown」(tests/lib/license/rights.test.ts で固定)。
+// ここでは library が 1 ページ 1 枠の admission と deadline を渡し、結果を項目に写すことだけを見る。
+vi.mock('@/lib/license/rights', () => ({ resolveLicenseRights: vi.fn(async (input: { admission?: { acquire(): Promise<string | null> } }) => {
+  if (input.admission && !await input.admission.acquire()) return { entitled: null, basis: null, nft: { status: 'unknown' } };
+  return { entitled: true, basis: 'purchase', nft: { status: 'minted' } };
+}) }));
+const rightsBudget = vi.hoisted(() => ({ acquire: vi.fn<() => Promise<string | null>>(async () => 'lease'), release: vi.fn(async () => undefined) }));
+vi.mock('@/lib/license/rightsBudget', () => ({ acquireLicenseRightsBudget: rightsBudget.acquire, releaseLicenseRightsBudget: rightsBudget.release }));
 
 vi.mock('@/lib/kv', () => ({
   kvEval,
@@ -453,4 +460,86 @@ it('購入時のライセンスチェーンを表示用に投影し、デジタ�
   if (!result.ok) throw new Error('expected page');
   expect(result.page.items[0]).toMatchObject({ productKind: 'license', tokenChainId: 80002, nft: { status: 'minted' } });
   expect(result.page.items[1]).not.toHaveProperty('tokenChainId');
+  // 第 7 回レビュー B9: 権利照合を含まないページは RPC 枠に触れない (デジタルだけのページと同じ)。
+  expect(rightsBudget.acquire).toHaveBeenCalledTimes(1); expect(rightsBudget.release).toHaveBeenCalledWith('lease');
+});
+
+// 第 7 回レビュー B13/B9: ライセンス商品が並ぶページは 1 つの deadline を全商品の権利照合に共有し、
+// 1 request につき 1 つの RPC 枠を取って照合し、枠が無ければ権利 unknown のまま購入項目と cursor を残す。
+it('shares one page deadline and one RPC admission across every license rights lookup of the page', async () => {
+  licenseState.enabled = true;
+  const { resolveLicenseRights } = await import('@/lib/license/rights');
+  const ids = [resource(3), resource(2), resource(1)];
+  const license = (id: string) => {
+    const own = JSON.parse(ownership(id));
+    own.latestGrant.metadata = { ...own.latestGrant.metadata, productKind: 'license', license: { tokenChainId: 80002 } };
+    own.grants[0].metadata = own.latestGrant.metadata;
+    return JSON.stringify(own);
+  };
+  kvEval.mockResolvedValue({ ok: true, value: flatIndex(ids) });
+  kvMget.mockResolvedValue({ ok: true, value: [license(ids[0]!), ownership(ids[1]!), license(ids[2]!)] });
+  const before = Date.now();
+  const result = await listStoreLibraryPage({ payer: PAYER, cursor: null });
+  expect(result.ok).toBe(true);
+  if (!result.ok) throw new Error('expected page');
+  expect(vi.mocked(resolveLicenseRights)).toHaveBeenCalledTimes(2);
+  const inputs = vi.mocked(resolveLicenseRights).mock.calls.map(([input]) => input as { deadline?: number; admission?: object });
+  expect(inputs[0]!.deadline).toEqual(expect.any(Number));
+  expect(inputs[1]!.deadline).toBe(inputs[0]!.deadline);
+  expect(inputs[0]!.deadline!).toBeGreaterThan(before);
+  expect(inputs[0]!.deadline!).toBeLessThanOrEqual(Date.now() + 15_000);
+  // 同じページの全項目に同じ admission (1 ページ 1 枠) を渡し、実体の枠は 1 回だけ取って close で 1 回返す。
+  expect(inputs[0]!.admission).toBeDefined(); expect(inputs[1]!.admission).toBe(inputs[0]!.admission);
+  expect(rightsBudget.acquire).toHaveBeenCalledTimes(1); expect(rightsBudget.release).toHaveBeenCalledTimes(1);
+
+  // 枠が取れないときは権利 unknown (null) で項目と cursor を落とさない。ページ内で枠を取り直さず、返すものもない。
+  vi.mocked(resolveLicenseRights).mockClear(); rightsBudget.acquire.mockClear(); rightsBudget.release.mockClear();
+  rightsBudget.acquire.mockResolvedValueOnce(null);
+  const starved = await listStoreLibraryPage({ payer: PAYER, cursor: null });
+  expect(starved.ok).toBe(true);
+  if (!starved.ok) throw new Error('expected page');
+  expect(starved.page.items.map((item) => [item.resourceId, item.entitled])).toEqual([[ids[0], null], [ids[1], undefined], [ids[2], null]]);
+  expect(starved.page.nextCursor).toBeNull();
+  expect(rightsBudget.acquire).toHaveBeenCalledTimes(1); expect(rightsBudget.release).not.toHaveBeenCalled();
+});
+
+// 第 7 回レビュー B13 (follow-up): ページ期限の到達は RPC 障害と区別し、確認済みの項目と「未処理項目の直前」の cursor を
+// 部分ページとして返す (holders と同じ形)。続きの呼び出しで前進して全件そろう。
+it('returns a partial page with a resumable cursor when the page deadline is reached mid-page', async () => {
+  licenseState.enabled = true;
+  const { resolveLicenseRights } = await import('@/lib/license/rights');
+  const ids = [resource(4), resource(3), resource(2), resource(1)];
+  const license = (id: string) => {
+    const own = JSON.parse(ownership(id));
+    own.latestGrant.metadata = { ...own.latestGrant.metadata, productKind: 'license', license: { tokenChainId: 80002 } };
+    own.grants[0].metadata = own.latestGrant.metadata;
+    return JSON.stringify(own);
+  };
+  const rows: Record<string, string> = { [ids[0]!]: license(ids[0]!), [ids[1]!]: ownership(ids[1]!), [ids[2]!]: license(ids[2]!), [ids[3]!]: license(ids[3]!) };
+  kvEval.mockImplementation(async (_script: string, _keys: string[], args: string[]) => ({ ok: true, value: flatIndex(args[0] === '1' ? ids.slice(ids.indexOf(args[2]!) + 1) : ids) }));
+  kvMget.mockImplementation(async (keys: string[]) => ({ ok: true, value: keys.map((key) => rows[key.slice(key.lastIndexOf(':') + 1)]!) }));
+  let clock = 1_700_000_000_000;
+  const spy = vi.spyOn(Date, 'now').mockImplementation(() => clock);
+  let resolved = 0; let tripped = false;
+  vi.mocked(resolveLicenseRights).mockImplementation(async () => {
+    resolved += 1;
+    // 最初の呼び出しの 2 つ目のライセンス項目 (ids[2]) の途中で 15 秒の期限を越える。
+    if (!tripped && resolved === 2) { tripped = true; clock += 16_000; return { entitled: null, basis: null, nft: { status: 'unknown' } }; }
+    return { entitled: true, basis: 'purchase', nft: { status: 'minted' } };
+  });
+  try {
+    const first = await listStoreLibraryPage({ payer: PAYER, cursor: null });
+    expect(first.ok).toBe(true);
+    if (!first.ok) throw new Error('expected page');
+    expect(first.page.items.map((item) => [item.resourceId, item.entitled])).toEqual([[ids[0], true], [ids[1], undefined]]);
+    expect(JSON.parse(Buffer.from(first.page.nextCursor!, 'base64url').toString('utf8'))).toEqual({ score: SCORE, member: ids[1] });
+    clock += 1; resolved = 0;
+    const second = await listStoreLibraryPage({ payer: PAYER, cursor: first.page.nextCursor });
+    expect(second.ok).toBe(true);
+    if (!second.ok) throw new Error('expected page');
+    expect(second.page.items.map((item) => [item.resourceId, item.entitled])).toEqual([[ids[2], true], [ids[3], true]]);
+    expect(second.page.nextCursor).toBeNull();
+  } finally {
+    spy.mockRestore();
+  }
 });

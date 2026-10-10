@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-const h = vi.hoisted(() => ({ enabled: true, auth: vi.fn(), product: vi.fn(), content: vi.fn(), own: vi.fn(), rights: vi.fn(), eval: vi.fn(), library: vi.fn() }));
+const h = vi.hoisted(() => ({ enabled: true, auth: vi.fn(), product: vi.fn(), content: vi.fn(), own: vi.fn(), rights: vi.fn(), eval: vi.fn(), library: vi.fn(), acquire: vi.fn(), release: vi.fn() }));
+vi.mock('@/lib/license/rightsBudget', () => ({ acquireLicenseRightsBudget: h.acquire, releaseLicenseRightsBudget: h.release }));
 vi.mock('@/lib/env', () => ({ env: { enableCreatorStore: true } }));
 vi.mock('@/lib/license/config', () => ({ licenseNftEnabled: () => h.enabled, licenseVisible: () => h.enabled }));
 vi.mock('@/app/api/store/_shared', () => ({ requireStoreSeller: h.auth, storePrivateJson: (body: unknown, status = 200) => NextResponse.json(body, { status, headers: { 'Cache-Control': 'private, no-store', Vary: 'Cookie' } }) }));
@@ -18,14 +19,92 @@ const getLibrary = () => library(new Request('https://open-pay.jp/api/store/libr
 beforeEach(() => {
   vi.clearAllMocks(); h.enabled = true; h.auth.mockResolvedValue({ ok: true, address: ADDRESS }); h.own.mockResolvedValue({ ok: true, ownership: null });
   h.product.mockResolvedValue({ id: ID, productKind: 'license', license: d, title: 'License', registration: { status: 'registered' }, contentAvailable: true });
-  h.content.mockResolvedValue({ kind: 'text', value: 'Private instructions' }); h.rights.mockResolvedValue({ entitled: true, basis: 'holder', nft: { status: 'minted' }, observedBlock: '100' }); h.eval.mockResolvedValue({ ok: true, value: [ID] });
+  h.content.mockResolvedValue({ kind: 'text', value: 'Private instructions' }); h.eval.mockResolvedValue({ ok: true, value: [ID] });
+  h.acquire.mockResolvedValue('lease'); h.release.mockResolvedValue(undefined);
+  // resolver の実物 (lib/license/rights.ts) は「RPC の直前に admission.acquire → 取れなければ unknown → 返却」
+  // をする (tests/lib/license/rights.test.ts で固定)。ここでは route が admission を渡すことと、その結果の
+  // HTTP への写し方だけを見る。
+  h.rights.mockImplementation(async (input: { admission?: { acquire(): Promise<string | null>; release(t: string): Promise<void> } }) => {
+    if (input.admission) {
+      const lease = await input.admission.acquire();
+      if (!lease) return { entitled: null, basis: null, nft: { status: 'unknown' } };
+      await input.admission.release(lease);
+    }
+    return { entitled: true, basis: 'holder', nft: { status: 'minted' }, observedBlock: '100' };
+  });
 });
 describe('authenticated incoming license holders', () => {
+  // 第 7 回レビュー B9: content・holders の権利照合も verify/delivery と同じ型の RPC 同時実行枠を通す。
+  // 枠は resolver が RPC の直前に取る (route は admission を渡すだけ)。holders は 1 ページ 1 枠。
+  it('passes the shared RPC admission to the resolver and releases the page slot afterwards', async () => {
+    expect((await getContent()).status).toBe(200);
+    expect(h.rights).toHaveBeenCalledWith(expect.objectContaining({ ownership: null, admission: expect.objectContaining({ acquire: expect.any(Function) }) }));
+    expect(h.acquire).toHaveBeenCalledTimes(1); expect(h.release).toHaveBeenCalledWith('lease');
+    h.acquire.mockClear(); h.release.mockClear(); h.rights.mockClear();
+    expect((await getLibrary()).status).toBe(200);
+    expect(h.acquire).toHaveBeenCalledTimes(1); expect(h.release).toHaveBeenCalledWith('lease');
+    // 第 7 回レビュー B13: holders ページの期限を商品ごとの RPC 期限に共有する。
+    expect(h.rights).toHaveBeenCalledWith(expect.objectContaining({ address: ADDRESS, productId: ID, ownership: null, deadline: expect.any(Number) }));
+  });
+  // 第 7 回レビュー B13 (follow-up): ページ期限の到達は RPC 障害と区別し、確認済みの holder と「未処理商品の直前」の
+  // cursor を部分ページとして返す (未処理商品は飛ばさない)。続きの呼び出しで前進して全件そろう。
+  describe('page deadline reached mid-page', () => {
+    const IDS = Array.from({ length: 8 }, (_, i) => 'h_' + i.toString(16).padStart(32, '0'));
+    const getLibraryFrom = (cursor: string | null) => library(new Request('https://open-pay.jp/api/store/library?source=holders' + (cursor ? '&cursor=' + cursor : '')));
+    beforeEach(() => {
+      h.eval.mockImplementation(async (_script: string, _keys: string[], args: string[]) => ({ ok: true, value: args[0] === '' ? IDS : IDS.slice(IDS.indexOf(args[0]!) + 1) }));
+      h.product.mockImplementation(async (id: string) => ({ id, productKind: 'license', license: d, title: 'License ' + id.slice(-1), registration: { status: 'registered' }, contentAvailable: true }));
+    });
+    it('returns the confirmed holders with a resumable cursor, and the next call completes the set', async () => {
+      let clock = 1_700_000_000_000;
+      const spy = vi.spyOn(Date, 'now').mockImplementation(() => clock);
+      let resolved = 0;
+      h.rights.mockImplementation(async (input: { productId: string }) => {
+        resolved += 1;
+        // 5 商品目の途中で 15 秒の期限を越える: 実物の resolver は共有期限で RPC を拒否し unknown を返す。
+        if (resolved === 5) { clock += 16_000; return { entitled: null, basis: null, nft: { status: 'unknown' } }; }
+        return { entitled: true, basis: 'holder', nft: { status: 'minted' }, observedBlock: '100', productId: input.productId };
+      });
+      try {
+        const first = await (await getLibraryFrom(null)).json();
+        expect(first).toMatchObject({ ok: true, source: 'holders', nextCursor: IDS[3] });
+        expect(first.items.map((item: { resourceId: string }) => item.resourceId)).toEqual(IDS.slice(0, 4));
+        clock += 1; resolved = 0;
+        const second = await (await getLibraryFrom(first.nextCursor)).json();
+        expect(second.items.map((item: { resourceId: string }) => item.resourceId)).toEqual(IDS.slice(4));
+        expect(second.nextCursor).toBeNull();
+      } finally {
+        spy.mockRestore();
+      }
+    });
+    it('a deadline hit before any product was confirmed is still rights unknown (the retry could not progress)', async () => {
+      let clock = 1_700_000_000_000;
+      const spy = vi.spyOn(Date, 'now').mockImplementation(() => clock);
+      h.rights.mockImplementation(async () => { clock += 16_000; return { entitled: null, basis: null, nft: { status: 'unknown' } }; });
+      try {
+        const response = await getLibraryFrom(null);
+        expect(response.status).toBe(503); expect(await response.json()).toEqual({ ok: false, error: 'license_rights_unknown' });
+      } finally {
+        spy.mockRestore();
+      }
+    });
+    it('an RPC failure before the deadline stays a 503 (not a silently shortened page)', async () => {
+      h.rights.mockResolvedValueOnce({ entitled: true, basis: 'holder', nft: { status: 'minted' } }).mockResolvedValueOnce({ entitled: null, basis: null, nft: { status: 'unknown' } });
+      expect((await getLibraryFrom(null)).status).toBe(503);
+    });
+  });
+  it('admission exhaustion is rights unknown (503), never a denial, and releases nothing', async () => {
+    h.acquire.mockResolvedValue(null);
+    const response = await getContent();
+    expect(response.status).toBe(503); expect(await response.json()).toEqual({ ok: false, error: 'license_rights_unknown' });
+    expect((await getLibrary()).status).toBe(503);
+    expect(h.release).not.toHaveBeenCalled();
+  });
   it('delivers fixed revision 1 without fabricating a purchase or transaction', async () => {
     const response = await getContent(); const body = await response.json();
     expect(body).toMatchObject({ state: 'ready', kind: 'text', value: 'Private instructions', basis: 'holder', contentRevision: 1 });
     for (const field of ['purchasedAt', 'txHash', 'intentSalt', 'revisions']) expect(body).not.toHaveProperty(field);
-    expect(h.rights).toHaveBeenCalledWith({ address: ADDRESS, productId: ID, definition: d, ownership: null }); expect(h.content).toHaveBeenCalledWith(ID, 1);
+    expect(h.rights).toHaveBeenCalledWith({ address: ADDRESS, productId: ID, definition: d, ownership: null, admission: expect.any(Object) }); expect(h.content).toHaveBeenCalledWith(ID, 1);
     expect(response.headers.get('Vary')).toBe('Cookie');
   });
   it('discovers transferable holdings independently of the purchase library', async () => {

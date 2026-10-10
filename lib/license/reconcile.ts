@@ -9,6 +9,8 @@ import { buildForwarderNonce } from '@/lib/relay/forwarderIntent';
 import type {
   PurchaseIntent, IndeterminatePurchaseIntent, ReconcilePurchaseIntentResult, finalizeHostedPurchase,
 } from '@/lib/x402/purchaseIntent';
+import { rpcCallOptions } from '@/lib/x402/reconcileBudget';
+import type { PageFetchOptions } from '@/lib/x402/reconcilePaging';
 import { licenseEvalContext, licenseLuaVariant, type LicenseExpiryEvidence } from './stock';
 
 const AUTH_ABI = parseAbi(['function authorizationState(address authorizer, bytes32 nonce) view returns (bool)']);
@@ -16,27 +18,31 @@ const USED = parseAbi(['event AuthorizationUsed(address indexed authorizer, byte
 const SETTLED = parseAbi(['event Settled(address indexed from, bytes32 indexed nonce, address indexed merchant, uint256 merchantValue, address feeReceiver, uint256 feeValue)']);
 type Claimed = Exclude<PurchaseIntent, { state: 'quoted' }>;
 export type LicenseFinalizedBlock = { number: bigint; hash: Hex; timestamp: bigint; used: boolean };
+// options.timeoutMs = deadline 付き (cron) の呼び出しだけ retry なし・この timeout (本文受信まで) で呼ぶ
+// (第 7 回レビュー B4 follow-up)。全 method が受ける。省略時は既定の transport。
 export type LicenseReconcileChain = {
-  observe(intent: Claimed): Promise<LicenseFinalizedBlock>;
-  receiptMatches(intent: Claimed, txHash: Hex, block: LicenseFinalizedBlock): Promise<boolean>;
-  transactions(intent: Claimed, from: bigint, to: bigint): Promise<Hex[]>;
+  observe(intent: Claimed, options?: PageFetchOptions): Promise<LicenseFinalizedBlock>;
+  receiptMatches(intent: Claimed, txHash: Hex, block: LicenseFinalizedBlock, options?: PageFetchOptions): Promise<boolean>;
+  transactions(intent: Claimed, from: bigint, to: bigint, options?: PageFetchOptions): Promise<Hex[]>;
 };
-function client(intent: Claimed) {
+function client(intent: Claimed, options?: PageFetchOptions) {
   const chain = chainObjectForId(intent.chainId);
   if (!chain) throw new Error('unsupported license chain');
-  return createPublicClient({ chain, transport: transportForChain(intent.chainId) });
+  // deadline = この呼び出しの絶対期限。observe の 3 RPC は 1 つの client で続けて呼ぶが、transport が RPC ごとに残り時間から signal を作るので合計が期限に収まる。
+  const transport = options ? transportForChain(intent.chainId, { timeout: options.timeoutMs, retryCount: 0, deadline: options.deadlineAt }) : transportForChain(intent.chainId);
+  return createPublicClient({ chain, transport });
 }
 export const defaultLicenseReconcileChain: LicenseReconcileChain = {
-  observe: async (intent) => {
-    const rpc = client(intent);
+  observe: async (intent, options) => {
+    const rpc = client(intent, options);
     const block = await rpc.getBlock({ blockTag: 'finalized' });
     const used = await rpc.readContract({ address: intent.token, abi: AUTH_ABI, functionName: 'authorizationState', args: [intent.claim.payer, intent.claim.nonce], blockNumber: block.number });
     const canonical = await rpc.getBlock({ blockNumber: block.number });
     if (canonical.hash !== block.hash) throw new Error('finality changed');
     return { number: block.number, hash: block.hash, timestamp: block.timestamp, used };
   },
-  receiptMatches: async (intent, txHash, finalized) => {
-    const rpc = client(intent);
+  receiptMatches: async (intent, txHash, finalized, options) => {
+    const rpc = client(intent, options);
     const receipt = await rpc.getTransactionReceipt({ hash: txHash });
     if (receipt.status !== 'success' || receipt.transactionHash !== txHash || receipt.blockNumber > finalized.number) return false;
     const canonical = await rpc.getBlock({ blockNumber: receipt.blockNumber });
@@ -48,8 +54,8 @@ export const defaultLicenseReconcileChain: LicenseReconcileChain = {
       isAddressEqual(args.merchant, intent.merchant) && args.merchantValue === BigInt(intent.merchantValue) &&
       isAddressEqual(args.feeReceiver, intent.feeReceiver) && args.feeValue === BigInt(intent.feeValue));
   },
-  transactions: async (intent, fromBlock, toBlock) => {
-    const logs = await client(intent).getLogs({ address: intent.token, event: USED, args: { authorizer: intent.claim.payer, nonce: intent.claim.nonce }, fromBlock, toBlock });
+  transactions: async (intent, fromBlock, toBlock, options) => {
+    const logs = await client(intent, options).getLogs({ address: intent.token, event: USED, args: { authorizer: intent.claim.payer, nonce: intent.claim.nonce }, fromBlock, toBlock });
     return logs.map((l) => l.transactionHash).filter((h): h is Hex => h !== null);
   },
 };
@@ -71,7 +77,8 @@ async function cas(current: PurchaseIntent, raw: string, next: PurchaseIntent, n
  * license 専用。lease の満了・ローカル時計・試行回数だけでは在庫を戻さない。
  * failed_prebroadcast も署名は生きているため、canonical payment の採用か finalized unused まで保持。
  */
-export async function reconcileLicensePurchase(current: PurchaseIntent, raw: string, now: number, finalizePurchase: typeof finalizeHostedPurchase, chain = defaultLicenseReconcileChain): Promise<ReconcilePurchaseIntentResult> {
+// deadline = 経過時間の予算 (epoch ms・第 7 回レビュー B4)。到達後はページを取りに行かず途中 cursor を保存する。
+export async function reconcileLicensePurchase(current: PurchaseIntent, raw: string, now: number, finalizePurchase: typeof finalizeHostedPurchase, chain = defaultLicenseReconcileChain, deadline?: number): Promise<ReconcilePurchaseIntentResult> {
   if (current.state === 'settled') {
     const healed = await finalizePurchase({ intentSalt: current.intentSalt, txHash: current.txHash, settledAt: current.settledAt });
     return healed.ok ? { ok: true, state: 'settled', txHash: current.txHash } : { ok: false, reason: 'storage' };
@@ -91,7 +98,10 @@ export async function reconcileLicensePurchase(current: PurchaseIntent, raw: str
   try {
     const nonce = buildForwarderNonce({ from: leased.claim.payer, merchant: leased.merchant, merchantValue: BigInt(leased.merchantValue), feeReceiver: leased.feeReceiver, feeValue: BigInt(leased.feeValue), validAfter: BigInt(leased.claim.validAfter), validBefore: BigInt(leased.claim.validBefore), intentSalt: leased.intentSalt }, leased.chainId, leased.forwarder);
     if (nonce !== leased.claim.nonce) return reschedule();
-    const block = await chain.observe(leased);
+    // deadline 付きでは全 RPC の直前に残り時間を見る (null = 始めずに次回へ・{ timeoutMs } = retry なし 1 回)。
+    const observeRpc = rpcCallOptions(deadline);
+    if (observeRpc === null) return reschedule();
+    const block = observeRpc ? await chain.observe(leased, observeRpc) : await chain.observe(leased);
     if (!block.used) {
       if (block.timestamp <= BigInt(leased.claim.validBefore)) return reschedule();
       const failed: PurchaseIntent = {
@@ -105,10 +115,16 @@ export async function reconcileLicensePurchase(current: PurchaseIntent, raw: str
       const evidence: LicenseExpiryEvidence = { blockNumber: block.number.toString(), blockHash: block.hash, timestamp: block.timestamp.toString(), authorizationUsed: false };
       return await cas(leased, leasedRaw, failed, now, evidence) ? { ok: true, state: 'failed_prebroadcast' } : { ok: false, reason: 'storage' };
     }
-    const finalize = async (hash: Hex): Promise<ReconcilePurchaseIntentResult | null> => {
+    const finalize = async (hash: Hex, candidatePageStart?: bigint): Promise<ReconcilePurchaseIntentResult | null> => {
+      // 候補 1 件の照合の前に残り時間を見る。足りなければ照合せず候補のページ (保存済み hash なら現 cursor) から延期。
+      const receiptRpc = rpcCallOptions(deadline);
+      if (receiptRpc === null) { if (candidatePageStart !== undefined) fromBlock = candidatePageStart; return reschedule(); }
       try {
-        if (!await chain.receiptMatches(leased, hash, block)) return null;
+        if (!(receiptRpc ? await chain.receiptMatches(leased, hash, block, receiptRpc) : await chain.receiptMatches(leased, hash, block))) return null;
       } catch {
+        // 走査で新しく見つけた候補の receipt 一時障害で証拠のページを飛ばさない (第 7 回レビュー B3):
+        // その候補のページを cursor に保存して次回再試行し、在庫 hold と entitlement 未付与の長期化を断つ。
+        if (candidatePageStart !== undefined) { fromBlock = candidatePageStart; return reschedule(); }
         // 欠落した旧 receipt の障害を replacement receipt の探索へ波及させない。
         return null;
       }
@@ -125,9 +141,15 @@ export async function reconcileLicensePurchase(current: PurchaseIntent, raw: str
       const result = await finalize(leased.txHash); if (result) return result;
     }
     for (let page = 0; page < 20 && fromBlock <= block.number; page++) {
+      // 時間予算は取得前に「残り時間 − cursor 保存の予約」で見て、1 回の RPC に足りなければ未取得ページの先頭を
+      // cursor に残す (打ち切りは失敗でも未払いでもない)。取るときは残り時間で切った timeout で RPC を呼ぶ。
+      const pageRpc = rpcCallOptions(deadline);
+      if (pageRpc === null) return reschedule();
       const to = fromBlock + 1999n < block.number ? fromBlock + 1999n : block.number;
-      for (const hash of await chain.transactions(leased, fromBlock, to)) {
-        const result = await finalize(hash); if (result) return result;
+      const pageStart = fromBlock;
+      const hashes = pageRpc ? await chain.transactions(leased, pageStart, to, pageRpc) : await chain.transactions(leased, pageStart, to);
+      for (const hash of hashes) {
+        const result = await finalize(hash, pageStart); if (result) return result;
       }
       fromBlock = to + 1n;
     }

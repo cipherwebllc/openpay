@@ -9,6 +9,7 @@ const h = vi.hoisted(() => ({
   kvGet: vi.fn(), kvEval: vi.fn(), warn: vi.fn(),
   verify: vi.fn(), used: vi.fn(), expired: vi.fn(), anchor: vi.fn(), transactions: vi.fn(),
   associate: vi.fn(), select: vi.fn(), release: vi.fn(),
+  bounded: vi.fn(), BOUNDED: { bounded: true },
 }));
 vi.mock('@/lib/kv', () => ({ kvGet: h.kvGet, kvEval: h.kvEval }));
 vi.mock('@/lib/logger', () => ({ logger: { warn: h.warn } }));
@@ -18,7 +19,7 @@ vi.mock('@/lib/x402/storeUsdcOnchain', () => ({
   STORE_USDC_ADDRESS: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', STORE_USDC_CHAIN_ID: 8453,
   verifyStoreUsdcOnchain: h.verify, readStoreUsdcAuthorizationState: h.used,
   storeUsdcAuthorizationExpiredUnused: h.expired, readStoreUsdcAnchorBlock: h.anchor,
-  findStoreUsdcAuthorizationTransactions: h.transactions,
+  findStoreUsdcAuthorizationTransactions: h.transactions, storeUsdcBoundedClient: h.bounded,
 }));
 
 import {
@@ -30,6 +31,7 @@ import {
   type QuotedStoreUsdcIntent, type SettledStoreUsdcIntent, type SettlingStoreUsdcIntent,
 } from '@/lib/x402/storeUsdcIntent';
 import { hostedPurchaseRecordKey, purchaseOwnershipKey } from '@/lib/x402/purchaseIntent';
+import { STORE_RECONCILE_CURSOR_RESERVE_MS, STORE_RECONCILE_PAGE_RPC_TIMEOUT_MS } from '@/lib/x402/reconcileBudget';
 import { paymentClaimKey } from '@/lib/paymentClaim';
 
 const quoted = fixture.quoted as QuotedStoreUsdcIntent;
@@ -67,6 +69,7 @@ beforeEach(() => {
   h.associate.mockReset().mockResolvedValue({ ok: true, parentIntentId: quoted.parentIntentId });
   h.select.mockReset().mockResolvedValue({ ok: true, kind: 'claimed' });
   h.release.mockReset().mockResolvedValue(true);
+  h.bounded.mockReset().mockReturnValue(h.BOUNDED);
   reads(key, active);
 });
 
@@ -252,10 +255,142 @@ describe('Store USDC reconciler decisions (no Lua)', () => {
     if (scenario === 'exhausted') expect(next.reconcileFromBlock).toBe('40090');
   });
 
+  // 第 7 回レビュー B4: cron の時間予算 (deadline) で page 取得を打ち切り、次の未取得 page を cursor に保存する。
+  it('stops paging at the deadline and persists the cursor of the next unfetched page', async () => {
+    h.anchor.mockResolvedValue(50_090n);
+    let clock = NOW;
+    const spy = vi.spyOn(Date, 'now').mockImplementation(() => clock);
+    h.transactions.mockImplementation(async () => { clock += 10_000; return []; });
+    try {
+      expect(await reconcileStoreUsdcIntent(SALT, { now: NOW, deadline: NOW + 25_000 })).toEqual({ ok: true, state: 'pending' });
+    } finally {
+      spy.mockRestore();
+    }
+    expect(h.transactions).toHaveBeenCalledTimes(3);
+    expect(JSON.parse(h.kvEval.mock.calls.at(-1)![2][4])).toMatchObject({ reconcileFromBlock: String(Number(active.anchorBlock) + 6_000), nextReconcileAt: NOW + 30_000 });
+  });
+
+  // 第 7 回レビュー B4 (follow-up): 残り時間 − 予約が 1 回の RPC の最小に足りなければ取得せず cursor を保存し、
+  // 取得するときは残り時間で切った timeout を渡す。
+  it('does not start a page fetch that cannot finish before the reserve, and bounds each fetch by the remaining time', async () => {
+    let clock = NOW;
+    const spy = vi.spyOn(Date, 'now').mockImplementation(() => clock);
+    // authorizationState と head の RPC で 21 秒使うと、残り 4 秒 − 予約 3 秒 = 1 秒 < 最小 2 秒 → ページを取りに行かない。
+    h.used.mockImplementation(async () => { clock += 10_000; return true; });
+    h.anchor.mockImplementation(async () => { clock += 11_000; return 50_090n; });
+    try {
+      expect(await reconcileStoreUsdcIntent(SALT, { now: NOW, deadline: NOW + 25_000 })).toEqual({ ok: true, state: 'pending' });
+    } finally {
+      spy.mockRestore();
+    }
+    expect(h.transactions).not.toHaveBeenCalled();
+    expect(JSON.parse(h.kvEval.mock.calls.at(-1)![2][4])).toMatchObject({ reconcileFromBlock: active.anchorBlock });
+    // 最初の RPC にすら足りなければ、何も変えずに次回へ (cursor 不変・RPC なし)。
+    h.used.mockClear().mockResolvedValue(true); h.anchor.mockClear().mockResolvedValue(50_090n);
+    expect(await reconcileStoreUsdcIntent(SALT, { now: NOW, deadline: Date.now() + STORE_RECONCILE_CURSOR_RESERVE_MS + 1_000 })).toEqual({ ok: true, state: 'pending' });
+    expect(h.used).not.toHaveBeenCalled();
+    expect(JSON.parse(h.kvEval.mock.calls.at(-1)![2][4])).not.toHaveProperty('reconcileFromBlock');
+    clock = NOW;
+    const spy2 = vi.spyOn(Date, 'now').mockImplementation(() => clock);
+    h.transactions.mockImplementation(async () => { clock += 15_000; return []; });
+    try {
+      expect(await reconcileStoreUsdcIntent(SALT, { now: NOW, deadline: NOW + 25_000 })).toEqual({ ok: true, state: 'pending' });
+    } finally {
+      spy2.mockRestore();
+    }
+    expect(h.transactions).toHaveBeenCalledTimes(2);
+    expect(h.transactions).toHaveBeenNthCalledWith(1, expect.objectContaining({ fromBlock: 90n, budget: { timeoutMs: STORE_RECONCILE_PAGE_RPC_TIMEOUT_MS, deadlineAt: NOW + STORE_RECONCILE_PAGE_RPC_TIMEOUT_MS } }));
+    expect(h.transactions).toHaveBeenNthCalledWith(2, expect.objectContaining({ fromBlock: 2_090n, budget: { timeoutMs: 7_000, deadlineAt: NOW + 15_000 + 7_000 } }));
+    expect(JSON.parse(h.kvEval.mock.calls.at(-1)![2][4])).toMatchObject({ reconcileFromBlock: '4090' });
+  });
+
+  // B4 follow-up 2 (1): ページ取得の失敗では取得済みページの候補を照合してから失敗ページの先頭を cursor に保存する。
+  it('a failing page after candidate-free pages saves the failed page start (no stall on the old cursor)', async () => {
+    h.anchor.mockResolvedValue(50_090n);
+    h.transactions.mockImplementation(async ({ fromBlock }: { fromBlock: bigint }) => fromBlock === 2_090n ? 'unavailable' : []);
+    expect(await reconcileStoreUsdcIntent(SALT, { now: NOW })).toEqual({ ok: true, state: 'pending' });
+    expect(h.transactions).toHaveBeenCalledTimes(2);
+    expect(h.verify).not.toHaveBeenCalled();
+    expect(JSON.parse(h.kvEval.mock.calls.at(-1)![2][4])).toMatchObject({ reconcileFromBlock: '2090' });
+  });
+
+  // 3 回目 (2): 予算付き (deadline) の走査は候補が出たページで止めて照合する (後続ページは取りに行かない)。
+  // 予算なし (status route) は従来どおり全ページを集めてから照合する (候補の保留・巻き戻しの設計はここでは変えない)。
+  it('a deadline-bound scan ends at the candidate page and verifies it; an unbounded scan still collects all pages first', async () => {
+    h.anchor.mockResolvedValue(50_090n);
+    h.transactions.mockImplementation(async ({ fromBlock }: { fromBlock: bigint }) => fromBlock === 90n ? [TX] : fromBlock === 2_090n ? 'unavailable' : []);
+    h.verify.mockResolvedValue({ ok: false, reason: 'payment_mismatch' });
+    expect(await reconcileStoreUsdcIntent(SALT, { now: NOW, deadline: Date.now() + 25_000 })).toEqual({ ok: true, state: 'pending' });
+    expect(h.transactions).toHaveBeenCalledTimes(1);
+    expect(h.verify).toHaveBeenCalledTimes(1);
+    expect(h.verify).toHaveBeenCalledWith(expect.objectContaining({ txHash: TX }));
+    expect(JSON.parse(h.kvEval.mock.calls.at(-1)![2][4])).toMatchObject({ reconcileFromBlock: '2090' });
+    h.transactions.mockClear(); h.verify.mockClear();
+    expect(await reconcileStoreUsdcIntent(SALT, { now: NOW })).toEqual({ ok: true, state: 'pending' });
+    expect(h.transactions).toHaveBeenCalledTimes(2);
+    expect(h.verify).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(h.kvEval.mock.calls.at(-1)![2][4])).toMatchObject({ reconcileFromBlock: '2090' });
+  });
+
+  // 3 回目 (1): 照合後の finalize は同じ client を使い回さず、再照合時に予算 (残り時間) を計算し直した client を使う。
+  it('the finalizer recomputes its RPC budget instead of reusing the verification client', async () => {
+    h.anchor.mockResolvedValue(50_090n);
+    h.transactions.mockImplementation(async ({ fromBlock }: { fromBlock: bigint }) => fromBlock === 90n ? [TX] : []);
+    const clients: unknown[] = [];
+    h.bounded.mockImplementation((budget: { timeoutMs: number; deadlineAt: number }) => { const client = { budget }; clients.push(client); return client; });
+    expect(await reconcileStoreUsdcIntent(SALT, { now: NOW, deadline: Date.now() + 25_000 })).toEqual({ ok: true, state: 'settled' });
+    // verify (候補照合) と finalize 内の再照合で、別々に作った client (それぞれの時点の予算) を渡す。
+    const verifyClients = h.verify.mock.calls.map(([input]) => (input as { client?: unknown }).client);
+    expect(verifyClients).toHaveLength(2);
+    expect(clients).toContain(verifyClients[0]); expect(clients).toContain(verifyClients[1]);
+    expect(verifyClients[1]).not.toBe(verifyClients[0]);
+  });
+
+  // B4 follow-up 2 (2): deadline 付きでは authorizationState・head・候補照合・finalize の RPC も残り時間で絞った client を使い、
+  // 足りなければ照合せず候補ページから延期する。
+  it('routes every RPC of a deadline-bound reconcile through a bounded client and none otherwise', async () => {
+    h.anchor.mockResolvedValue(50_090n);
+    h.transactions.mockImplementation(async ({ fromBlock }: { fromBlock: bigint }) => fromBlock === 90n ? [TX] : []);
+    h.verify.mockResolvedValue({ ok: false, reason: 'payment_mismatch' });
+    expect(await reconcileStoreUsdcIntent(SALT, { now: NOW, deadline: Date.now() + 25_000 })).toEqual({ ok: true, state: 'pending' });
+    expect(h.bounded).toHaveBeenCalledWith(expect.objectContaining({ timeoutMs: STORE_RECONCILE_PAGE_RPC_TIMEOUT_MS, deadlineAt: expect.any(Number) }));
+    expect(h.used).toHaveBeenCalledWith(expect.objectContaining({ client: h.BOUNDED }));
+    expect(h.anchor).toHaveBeenCalledWith(h.BOUNDED);
+    expect(h.verify).toHaveBeenCalledWith(expect.objectContaining({ txHash: TX, client: h.BOUNDED }));
+    h.bounded.mockClear(); h.used.mockClear();
+    expect(await reconcileStoreUsdcIntent(SALT, { now: NOW })).toEqual({ ok: true, state: 'pending' });
+    expect(h.bounded).not.toHaveBeenCalled();
+    expect(h.used.mock.calls[0]![0]).not.toHaveProperty('client');
+  });
+
+  it('defers candidate verification from the candidate page when the remaining time is below one RPC', async () => {
+    h.anchor.mockResolvedValue(50_090n);
+    let clock = NOW;
+    const spy = vi.spyOn(Date, 'now').mockImplementation(() => clock);
+    // 候補ページの取得に 21 秒かかると、残り 4 秒 − 予約 3 秒 = 1 秒 < 最小 2 秒 → 照合せず候補ページから延期。
+    h.transactions.mockImplementation(async ({ fromBlock }: { fromBlock: bigint }) => { clock += 21_000; return fromBlock === 90n ? [TX] : []; });
+    try {
+      expect(await reconcileStoreUsdcIntent(SALT, { now: NOW, deadline: NOW + 25_000 })).toEqual({ ok: true, state: 'pending' });
+    } finally {
+      spy.mockRestore();
+    }
+    expect(h.transactions).toHaveBeenCalledTimes(1);
+    expect(h.verify).not.toHaveBeenCalled();
+    expect(JSON.parse(h.kvEval.mock.calls.at(-1)![2][4])).toMatchObject({ reconcileFromBlock: '90' });
+  });
+
+  it('a batch past its deadline defers the remaining due members without touching them', async () => {
+    h.kvEval.mockResolvedValueOnce({ ok: true, value: [SALT, SALT] });
+    // deadline は実時刻 (Date.now) で見る: fixture の NOW は未来なので、実時刻より前の値を渡す。
+    expect(await reconcilePendingStoreUsdcPurchases({ now: NOW, deadline: Date.now() - 1 })).toEqual({ checked: 0, settled: 0, failed: 0, pending: 0, storageErrors: 0, deferred: 2 });
+    expect(h.used).not.toHaveBeenCalled();
+    expect(h.kvEval).toHaveBeenCalledTimes(1);
+  });
+
   it('quarantines corrupt/not-found members and reports batch storage failures', async () => {
     h.kvEval.mockResolvedValueOnce({ ok: true, value: ['invalid-salt', SALT] }).mockResolvedValueOnce({ ok: true, value: 1 });
     reads(key, null);
-    expect(await reconcilePendingStoreUsdcPurchases({ now: NOW })).toEqual({ checked: 2, settled: 0, failed: 0, pending: 0, storageErrors: 0 });
+    expect(await reconcilePendingStoreUsdcPurchases({ now: NOW })).toEqual({ checked: 2, settled: 0, failed: 0, pending: 0, storageErrors: 0, deferred: 0 });
     expect(h.warn).toHaveBeenCalledTimes(2);
     h.kvEval.mockResolvedValue({ ok: false });
     expect(await reconcilePendingStoreUsdcPurchases({ now: NOW })).toBe('storage');

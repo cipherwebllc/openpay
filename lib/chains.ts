@@ -435,7 +435,40 @@ const SEPOLIA_PUBLIC_FALLBACKS = [
 //   - mainnet/sepolia: 公開 fallback 列。NEXT_PUBLIC_{ETHEREUM,SEPOLIA}_RPC_URL
 //     が設定されていればそれを primary に前置 (専用 RPC 優先)。
 //   - その他 chain: custom RPC があればそれ、無ければ viem default (http())。
-export function transportForChain(chainId: number): Transport {
+// options = 呼び出しごとに RPC の timeout / retryCount / 絶対 deadline を絞る (第 7 回レビュー B4 follow-up:
+// reconciler の deadline 付き RPC)。省略時は viem の既定 (timeout 10 秒・retry 3 回) のまま。fallback (Ethereum) は
+// endpoint を順に試すので、ヘッダーの timeout を endpoint 数で割って全体が options.timeout に収まるようにする。
+// viem 2.56 の http.timeout はヘッダー受信までで本文の受信は範囲外。timeout/deadline 付きの transport は
+// **fetch の開始時に** (onFetchRequest) 「deadline までの残り時間と timeout の小さい方」から新しい abort signal を作り、
+// 本文の受信まで打ち切る。signal は RPC ごとなので、同じ client の後続 RPC (license の observe の 3 回・期限切れ証明・
+// finalize の再照合) や fallback 先が、作成時の signal で早期に abort されない。deadline を過ぎてから始まる RPC は
+// fetch 前に abort 済みの signal を受けて即座に失敗する。
+export type TransportOptions = { timeout?: number; retryCount?: number; deadline?: number };
+
+/** RPC 1 回分の abort signal。fetch の開始時に作る (本文受信まで効く)。deadline も timeout も無ければ undefined。 */
+export function rpcRequestSignal(deadline: number | undefined, timeout: number | undefined): AbortSignal | undefined {
+  const remaining = deadline === undefined ? undefined : deadline - Date.now();
+  if (remaining !== undefined && remaining <= 0) return AbortSignal.abort(new DOMException('rpc deadline passed', 'AbortError'));
+  const ms = remaining === undefined ? timeout : timeout === undefined ? remaining : Math.min(remaining, timeout);
+  return ms === undefined ? undefined : AbortSignal.timeout(ms);
+}
+
+function boundedHttpConfig(options: TransportOptions, timeout: number | undefined) {
+  const perRequestSignal = timeout === undefined && options.deadline === undefined
+    ? {}
+    : {
+        onFetchRequest: (request: Request, init: RequestInit): RequestInit & { url?: string } => ({
+          ...init, url: request.url, signal: rpcRequestSignal(options.deadline, timeout),
+        }),
+      };
+  return {
+    ...(timeout === undefined ? {} : { timeout }),
+    ...(options.retryCount === undefined ? {} : { retryCount: options.retryCount }),
+    ...perRequestSignal,
+  };
+}
+
+export function transportForChain(chainId: number, options?: TransportOptions): Transport {
   const customUrl = customRpcUrlForChain(chainId);
   if (chainId === mainnet.id || chainId === sepolia.id) {
     const fallbacks =
@@ -443,9 +476,16 @@ export function transportForChain(chainId: number): Transport {
         ? ETHEREUM_PUBLIC_FALLBACKS
         : SEPOLIA_PUBLIC_FALLBACKS;
     const endpoints = customUrl ? [customUrl, ...fallbacks] : [...fallbacks];
-    return fallback(endpoints.map((u) => http(u)));
+    if (!options) return fallback(endpoints.map((u) => http(u)));
+    const perEndpointTimeout = options.timeout === undefined ? undefined : Math.floor(options.timeout / endpoints.length);
+    return fallback(
+      endpoints.map((u) => http(u, boundedHttpConfig(options, perEndpointTimeout))),
+      options.retryCount === undefined ? {} : { retryCount: options.retryCount },
+    );
   }
-  return customUrl ? http(customUrl) : http();
+  if (!options) return customUrl ? http(customUrl) : http();
+  const config = boundedHttpConfig(options, options.timeout);
+  return customUrl ? http(customUrl, config) : http(undefined, config);
 }
 
 /** Buyer-only chain (phase 4b-1) を含めた Chain 解決。CROSS_CHAIN_TARGETS から

@@ -75,11 +75,21 @@ export type StoreUsdcPublicClient = {
   }) => Promise<readonly { transactionHash: Hex | null }[]>;
 };
 
-function baseClient(): StoreUsdcPublicClient {
+// budget = deadline 付き (cron) の呼び出しだけ retry なし・timeoutMs と絶対期限 deadlineAt で呼ぶ (第 7 回レビュー B4
+// follow-up)。transport は RPC ごとに deadlineAt までの残り時間から signal を作る (本文受信まで効く)。
+export type StoreUsdcRpcBudget = { timeoutMs: number; deadlineAt: number };
+function baseClient(budget?: StoreUsdcRpcBudget): StoreUsdcPublicClient {
   return createPublicClient({
     chain: base,
-    transport: transportForChain(base.id),
+    transport: budget === undefined
+      ? transportForChain(base.id)
+      : transportForChain(base.id, { timeout: budget.timeoutMs, retryCount: 0, deadline: budget.deadlineAt }),
   }) as unknown as StoreUsdcPublicClient;
+}
+
+/** deadline 付き reconcile の全 RPC が使う、retry なし・予算 (timeout と絶対期限) を絞った Base client。各 RPC の直前に作る。 */
+export function storeUsdcBoundedClient(budget: StoreUsdcRpcBudget): StoreUsdcPublicClient {
+  return baseClient(budget);
 }
 
 export function storeUsdcAuthorizationExpiredUnused(input: {
@@ -256,9 +266,11 @@ export async function findStoreUsdcAuthorizationTransactions(input: {
   fromBlock: bigint;
   toBlock: bigint;
   client?: StoreUsdcPublicClient;
+  // deadline 付き (cron) のページ取得の RPC 予算。client を渡す呼出 (テスト) はそのまま使う。
+  budget?: StoreUsdcRpcBudget;
 }): Promise<Hex[] | 'unavailable'> {
   try {
-    const logs = await (input.client ?? baseClient()).getLogs({
+    const logs = await (input.client ?? baseClient(input.budget)).getLogs({
       address: STORE_USDC_ADDRESS,
       event: USDC_EVENTS_ABI[1],
       args: { authorizer: input.payer, nonce: input.nonce },

@@ -29,7 +29,8 @@ vi.mock('@/lib/x402/storeUsdcIntent', () => ({
   reconcilePendingStoreUsdcPurchases: reconcileUsdcSpy,
 }));
 
-import { GET } from '@/app/api/cron/store-reconcile/route';
+import { GET, maxDuration } from '@/app/api/cron/store-reconcile/route';
+import { STORE_RECONCILE_CRON_MAX_DURATION_SEC } from '@/lib/x402/reconcileBudget';
 
 function request(token?: string): Request {
   return new Request('https://open-pay.jp/api/cron/store-reconcile', {
@@ -134,8 +135,22 @@ describe('GET /api/cron/store-reconcile', () => {
     });
     expect(response.headers.get('Cache-Control')).toBe('no-store');
     expect(reconcilePendingSpy).toHaveBeenCalledTimes(1);
-    expect(reconcilePendingSpy).toHaveBeenCalledWith();
+    expect(reconcilePendingSpy).toHaveBeenCalledWith({ deadline: expect.any(Number) });
     expect(reconcileUsdcSpy).toHaveBeenCalledTimes(1);
+  });
+
+  // 第 7 回レビュー B4: 走査量の上限だけでは cron の maxDuration を守れない。両 rail に経過時間の予算
+  // (deadline) を渡し、JPYC が重くても USDC の番が来る。
+  it('両 rail に maxDuration 内で収まる時間予算 (deadline) を渡し、USDC には JPYC の後の予算が残る', async () => {
+    const started = Date.now();
+    await GET(request('cron-test-secret'));
+    const jpyc = reconcilePendingSpy.mock.calls[0]![0] as { deadline: number };
+    const usdc = reconcileUsdcSpy.mock.calls[0]![0] as { deadline: number };
+    expect(jpyc.deadline).toBeGreaterThan(started);
+    expect(usdc.deadline).toBeGreaterThan(jpyc.deadline);
+    expect(usdc.deadline).toBeLessThan(started + maxDuration * 1000);
+    // route の maxDuration (Next は literal を要求) と予算の前提値のドリフトを止める。
+    expect(maxDuration).toBe(STORE_RECONCILE_CRON_MAX_DURATION_SEC);
   });
 
   it('pending ZSET の取得障害は 503', async () => {

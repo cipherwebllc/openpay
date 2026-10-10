@@ -517,9 +517,11 @@ describe('license Lua call sites: licenseLuaVariant script and trailing ARGV[#AR
     const result = await reconcilePurchaseIntent(L_SALT, { now: L_NOW + 2_001 });
     expect(result).toEqual({ ok: true, state: 'pending' });
     const call = vi.mocked(reconcileLicensePurchase).mock.calls[0]!;
-    expect(call).toHaveLength(5);
+    // 第 7 回レビュー B4: 6 番目は時間予算 (deadline)。cron 以外の呼出 (status route 等) は渡さない。
+    expect(call).toHaveLength(6);
     expect(call[3]).toBe(facade.finalizeHostedPurchase);
     expect(call[4]).toBeUndefined();
+    expect(call[5]).toBeUndefined();
     expect(trace()).toEqual({ gets: [L_KEY], sets: [], evals: [] });
   });
 });
@@ -619,7 +621,7 @@ describe('R3d pins: digital reconcile call sites per branch', () => {
       return { ok: true, value: 1 };
     });
     const summary = await reconcilePendingPurchases({ now: NOW, limit: 10, chain: chain() });
-    expect(summary).toEqual({ checked: 4, settled: 0, pending: 0, failedPrebroadcast: 0, storageErrors: 1 });
+    expect(summary).toEqual({ checked: 4, settled: 0, pending: 0, failedPrebroadcast: 0, storageErrors: 1, deferred: 0 });
     expect(h.warn.mock.calls.map(([event, data]) => [event, (data as { reason: string }).reason])).toEqual([
       ['creator_store.purchase_pending_quarantined', 'not_found'],
       ['creator_store.purchase_pending_quarantined', 'corrupt'],
