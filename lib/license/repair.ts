@@ -42,7 +42,9 @@ export async function repairLicenseIndexes(now = Date.now(), limit = 50): Promis
     [LICENSE_REGISTRATION_INDEX, LICENSE_DUE_INDEX, 'store:license:registration:', 'registration', 'registration:'],
   ]) {
     const r = await kvEval<number>(REBUILD, [source!, dest!, 'store:license:repair:' + kind, 'store:license:repair:quarantine'], [String(limit), String(now), prefix!, kind!, memberPrefix!]);
-    if (!r.ok || r.value < 0) return false;
+    // kvEval は Redis の値の形までしか確かめない。数でない応答 (nil・文字列・配列) は `< 0` が false になり修復済みと
+    // 読まれるので、REBUILD が返す件数 (0 以上の整数) のときだけ成功にする (修復の失敗を cron の成功で隠す波及を断つ)。
+    if (!r.ok || typeof r.value !== 'number' || r.value < 0) return false;
   }
   return true;
 }

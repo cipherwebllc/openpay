@@ -45,6 +45,21 @@ describe('A2b stateful agentOrderReservation (real Lua)', () => {
     expect((await pay.GET(request({ table: 'B6' }))).status).toBe(402);
   });
 
+  // kvEval は Redis の値の形までしか確かめない。RESERVE が返さない code (ここでは作成の 1 が文字列 '1' で届く) を既存予約
+  // (match) と読むと、この request が置いた attempt を握ったまま recovery へ回り、同じ支払いの再試行が settle できない。
+  it('an unexpected RESERVE code releases its own attempt so the same payment can settle on retry', async () => {
+    h.evalReply = async (script, _keys, run) => {
+      const value = await run();
+      return script.includes('return {1,ARGV[1]}') && Array.isArray(value) ? [String(value[0]), value[1]] : value;
+    };
+    const failed = await pay.GET(request());
+    expect(failed.status).toBe(503); expect(await failed.json()).toMatchObject({ error: 'storage_unavailable' });
+    expect(h.settle).not.toHaveBeenCalled(); expect(reservationKeys()).toHaveLength(1);
+    h.evalReply = null;
+    expect(await (await pay.GET(request())).json()).toMatchObject({ orderRegistered: true });
+    expect(h.settle).toHaveBeenCalledOnce(); expect(orders()).toHaveLength(1);
+  });
+
   it('crash after reservation and before broadcast preserves snapshot without a second settle', async () => {
     h.settle.mockRejectedValueOnce(new Error('request terminated'));
     await expect(pay.GET(request())).rejects.toThrow('request terminated');

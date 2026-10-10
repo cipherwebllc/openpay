@@ -163,6 +163,10 @@ export async function finalizeAgentOrder(input: { reservation: AgentOrderReserva
       });
     }
     if (result.value === 2) return { ok: true, duplicate: true, ...(await storedPickup(savedOrder)) };
+    // SAVE の戻り値は -2/-1/0/1/2 だけ。kvEval は Redis の値の形までしか確かめないので、それ以外 (nil・文字列・配列等) を
+    // 「保存した」と読まない: 受注が保存されていないのに orderRegistered:true を返し、同じ支払いの再試行を止める波及を断つ。
+    // storage_unavailable にして、同じヘッダの再試行 (冪等な SAVE) で確かめ直させる。
+    if (result.value !== 1) return { ok: false, reason: 'storage_unavailable' };
     return { ok: true, duplicate: false, ...pickupOf(order) };
   } finally {
     // CAS leaves another worker's lease and any completed marker intact, even after a lost ack.

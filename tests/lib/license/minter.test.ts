@@ -10,6 +10,9 @@ const h = vi.hoisted(() => ({
   rpc: { getBlock: vi.fn(), getBytecode: vi.fn(), getTransactionReceipt: vi.fn(), readContract: vi.fn(), getLogs: vi.fn(), simulateContract: vi.fn(), getTransactionCount: vi.fn(), getBalance: vi.fn(), sendRawTransaction: vi.fn(), chain: undefined as unknown },
   wallet: { prepareTransactionRequest: vi.fn(), signTransaction: vi.fn() },
   intent: vi.fn(), product: vi.fn(), confirm: vi.fn(), alert: vi.fn(), eval: vi.fn(),
+  // kvEval の応答の差し替え (kvEval の契約は Redis の値の形まで・script ごとの意味は呼出側が確かめる)。
+  // run() を呼べば本物の Lua を実行した結果、呼ばなければ Lua を走らせずに返した値がそのまま ok:true で届く。
+  reply: null as ((script: string, run: () => Promise<unknown>) => Promise<unknown>) | null,
 }));
 vi.mock('@/lib/license/config', () => ({ licenseNftEnabled: () => h.enabled }));
 vi.mock('@/lib/chains', () => ({ chainObjectForId: () => h.rpc.chain, customRpcUrlForChain: () => undefined }));
@@ -31,12 +34,14 @@ vi.mock('@/lib/kv', () => ({
     h.eval(script, keys, args);
     const isSubmit = script.includes('local active=') && JSON.parse(args[2]!).submission;
     if (isSubmit && h.failSave === 'before') { h.failSave = ''; return { ok: false }; }
-    const value = await runRedisLua(script, keys, args, h.store!);
+    const run = () => runRedisLua(script, keys, args, h.store!);
+    const value = h.reply ? await h.reply(script, run) : await run();
     if (isSubmit && h.failSave === 'after') { h.failSave = ''; return { ok: false }; }
     return { ok: true, value };
   },
 }));
 import { licenseBackoff, isLicenseRepairRun, runLicenseWorker, LICENSE_ABI } from '@/lib/license/minter';
+import { repairLicenseIndexes } from '@/lib/license/repair';
 import { LICENSE_ACTIVE_SUBMISSION, LICENSE_WORKER_LOCK, saveLicenseJob } from '@/lib/license/workerStore';
 import { createLicenseDefinition } from '@/lib/license/definition';
 import { computeLicensePaymentKey } from '@/lib/license/paymentKey';
@@ -73,7 +78,7 @@ function mintReceipt(hash: Hex) {
 beforeEach(() => {
   vi.clearAllMocks(); h.store = createFakeRedisStore(NOW); vi.spyOn(Date, 'now').mockImplementation(() => h.store!.now());
   vi.stubEnv('LICENSE_MINTER_PRIVATE_KEY', KEY); vi.stubEnv('RELAYER_PRIVATE_KEY', ''); vi.stubEnv('ALERT_WEBHOOK_URL', 'https://alerts.example');
-  h.enabled = true; h.lockError = false; h.failSave = ''; h.rpc.chain = polygonAmoy; job = fixture(); seed();
+  h.enabled = true; h.lockError = false; h.failSave = ''; h.reply = null; h.rpc.chain = polygonAmoy; job = fixture(); seed();
   h.rpc.getBlock.mockImplementation(async ({ blockNumber }) => ({ number: blockNumber ?? 100n, hash: BLOCK, timestamp: 1800000601n }));
   h.rpc.getBytecode.mockResolvedValue('0x6000');
   h.product.mockResolvedValue({ createdAt: NOW, license: definition });
@@ -417,6 +422,13 @@ describe('license worker: viem + real Lua CAS', () => {
     advance(45 * 60_000);
     await runLicenseWorker();
     expect(h.store!.strings.get(cursor)).toBeDefined();
+  });
+  // kvEval は Redis の値の形までしか確かめない。REBUILD の件数 (数) でない応答は `< 0` が false になるが、修復済みと読まない。
+  it('repairLicenseIndexes: a non-numeric REBUILD reply is a failed repair, not success', async () => {
+    h.reply = async (script, run) => script.includes('nextOffset') ? null : run();
+    expect(await repairLicenseIndexes(NOW)).toBe(false);
+    h.reply = null;
+    expect(await repairLicenseIndexes(NOW)).toBe(true);
   });
   it('isLicenseRepairRun: true only for minutes 0-14 of each UTC hour (15-minute cron・hourly repair)', () => {
     expect([0, 14, 15, 30, 45, 59].map((minute) => isLicenseRepairRun(Date.UTC(2026, 8, 26, 10, minute)))).toEqual([true, true, false, false, false, false]);

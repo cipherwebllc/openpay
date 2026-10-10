@@ -56,6 +56,17 @@ describe('A2b stateful agentOrderFinalize (real Lua)', () => {
     expect(await (await pay.GET(request())).json()).toMatchObject({ orderRegistered: true }); expect(orders()).toHaveLength(1);
   });
 
+  // kvEval は Redis の値の形 (整数・文字列・nil・配列) までしか確かめない。SAVE が返さない形 (ここでは Lua を走らせない nil) を
+  // 「保存した」と読むと、受注が無いのに orderRegistered:true を返して同じ支払いの再試行を止めてしまう。
+  it('an unexpected SAVE reply is not a registered order; the same-header retry registers exactly one', async () => {
+    h.evalReply = async (_script, keys, run) => keys.includes(listKey) ? null : run();
+    const first = await (await pay.GET(request())).json();
+    expect(first).toMatchObject({ orderRegistered: false }); expect(orders()).toEqual([]);
+    expect(h.error).toHaveBeenCalledWith('order.agent.registration_failed', expect.objectContaining({ reason: 'storage_unavailable' }));
+    h.evalReply = null;
+    expect(await (await pay.GET(request())).json()).toMatchObject({ orderRegistered: true }); expect(orders()).toHaveLength(1);
+  });
+
   it('simultaneous finalizers publish at most one order', async () => {
     await beginPending(); h.status.mockResolvedValue(settledStatus());
     const results = await Promise.all([pay.GET(request()), pay.GET(request())]);

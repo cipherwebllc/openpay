@@ -20,7 +20,12 @@ import {
   type FakeRedisStore,
 } from '../../_helpers/redisLua';
 
-const holder = vi.hoisted(() => ({ store: null as FakeRedisStore | null }));
+const holder = vi.hoisted(() => ({
+  store: null as FakeRedisStore | null,
+  // kvEval の応答の差し替え (kvEval の契約は Redis の値の形まで・script ごとの意味は呼出側が確かめる)。
+  // run() を呼べば本物の Lua を実行した結果、呼ばなければ Lua を走らせずに返した値がそのまま ok:true で届く。
+  reply: null as ((script: string, run: () => Promise<unknown>) => Promise<unknown>) | null,
+}));
 
 vi.mock('@/lib/kv', () => ({
   kvGet: async (key: string) => ({
@@ -43,10 +48,10 @@ vi.mock('@/lib/kv', () => ({
     return { ok: true as const, value: list.slice(start, end) };
   },
   // 受け取った script 文字列をそのまま Lua VM で実行する。
-  kvEval: async (script: string, keys: string[], args: string[]) => ({
-    ok: true as const,
-    value: await runRedisLua(script, keys, args, holder.store!),
-  }),
+  kvEval: async (script: string, keys: string[], args: string[]) => {
+    const run = () => runRedisLua(script, keys, args, holder.store!);
+    return { ok: true as const, value: holder.reply ? await holder.reply(script, run) : await run() };
+  },
 }));
 
 import {
@@ -119,6 +124,7 @@ function stored(id: string): Record<string, unknown> {
 beforeEach(() => {
   store = createFakeRedisStore(1_700_000_000_000);
   holder.store = store;
+  holder.reply = null;
 });
 
 afterAll(async () => {
@@ -387,6 +393,15 @@ describe('CAS_DEACTIVATE_WITH_LEDGER (本物の Lua)', () => {
     seedResource('r1', { url: 'https://a.jp/plain' });
     expect(await deactivateResource('r1', OWNER)).toEqual({ ok: true });
     expect(store.keys().filter((k) => k.startsWith('x402:hidden-url:'))).toEqual([]);
+  });
+
+  // kvEval は Redis の値の形までしか確かめない。1 / 2 以外 (ここでは Lua を走らせない nil) を削除成功と読まない。
+  it('想定外の応答 (nil) は削除成功にせず storage・掲載は有効のまま残る', async () => {
+    seedResource('r1');
+    holder.reply = async (script, run) => script === CAS_DEACTIVATE_WITH_LEDGER ? null : run();
+    expect(await deactivateResource('r1', OWNER)).toEqual({ ok: false, reason: 'storage' });
+    expect(stored('r1')).toMatchObject({ active: true });
+    expect(store.lists.get(RESOURCES_INDEX)).toEqual(['r1']);
   });
 });
 

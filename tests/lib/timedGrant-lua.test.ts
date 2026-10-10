@@ -57,4 +57,15 @@ describe('GRANT_MAX_SCRIPT (real Lua)', () => {
     expect(await grantTimedMax(KEY, NOW + DAY, NOW)).toEqual({ ok: true, expiresAt: NOW + DAY });
     expect(store.getTtl(KEY)).toBe(86_400);
   });
+
+  // kvEval は Redis の値の形 (配列を含む) までしか確かめない。文字列・数でない応答で投げて支払い後の付与 route を 500 に
+  // せず、未付与 (ok:false → route の 503 と同じ txHash の再試行) にする。
+  it('応答が配列の形で届いても投げずに未付与 (ok:false) を返す', async () => {
+    const upstash = fakeUpstashFetch(store);
+    vi.stubGlobal('fetch', vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      const body = (await (await upstash(url, init)).json()) as { result?: unknown };
+      return Response.json({ result: [body.result] });
+    }));
+    await expect(grantTimedMax(KEY, NOW + DAY, NOW)).resolves.toEqual({ ok: false, expiresAt: NOW + DAY });
+  });
 });

@@ -256,6 +256,13 @@ export async function reserveAgentOrder(input: {
     return { kind: 'unavailable' };
   }
   if (result.value[0] === -1) return { kind: 'conflict' };
+  // RESERVE の code は -2/-1/0/1 だけ。kvEval は Redis の値の形までしか確かめないので、それ以外を既存予約 (match) と
+  // 読まない: この request が置いた attempt を握ったまま recovery へ回り、同じ支払いの再試行が settle できなくなる
+  // 波及を断つ。-2 と同じく broadcast 前なので、自分の attempt だけを CAS で解放して unavailable にする。
+  if (result.value[0] !== 0 && result.value[0] !== 1) {
+    await releaseAgentOrderAttempt({ key, raw, record }, owner);
+    return { kind: 'unavailable' };
+  }
   const reservation = decodeReservation(key, result.value[1]);
   if (!reservation) {
     await releaseAgentOrderAttempt({ key, raw, record }, owner);
