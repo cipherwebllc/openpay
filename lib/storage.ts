@@ -14,12 +14,15 @@ export function safeGet<T>(key: string, fallback: T): T {
   }
 }
 
-export function safeSet<T>(key: string, value: T): void {
-  if (typeof window === 'undefined') return;
+/** 書けたら true (容量超過・private mode 等で書けなかったら false。呼び出し側は無視してもよい)。 */
+export function safeSet<T>(key: string, value: T): boolean {
+  if (typeof window === 'undefined') return false;
   try {
     window.localStorage.setItem(key, JSON.stringify(value));
+    return true;
   } catch (error) {
     logger.warn('localStorage.set failed', { key, error });
+    return false;
   }
 }
 

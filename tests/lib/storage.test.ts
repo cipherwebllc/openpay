@@ -82,6 +82,8 @@ describe('safeGet / safeSet', () => {
       },
       () => {
         expect(() => safeSet('full', { large: 'payload' })).not.toThrow();
+        // 書けなかったことは戻り値で分かる (設定の保存はこれを見て、書けたキーだけを保存済みにする)。
+        expect(safeSet('full', { large: 'payload' })).toBe(false);
       },
     );
     expect(observedThrow).toBe(true);
@@ -99,7 +101,7 @@ describe('safeGet / safeSet', () => {
       },
     );
     // 元の localStorage に戻った後の通常経路
-    safeSet('b', { v: 2 });
+    expect(safeSet('b', { v: 2 })).toBe(true);
     expect(safeGet('b', null)).toEqual({ v: 2 });
   });
 

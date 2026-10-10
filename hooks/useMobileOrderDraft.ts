@@ -31,8 +31,9 @@ import {
 import { INVOICE_REGISTRATION_INPUT_MAX } from '@/lib/invoice';
 import { validStorefrontDiscount, type StorefrontDiscount } from '@/lib/mobileOrderDiscount';
 import type { ProductPreset } from './useProductPresets';
+import { isSettledReceiverInput } from '@/lib/format';
 import type { ReceiverSource } from './useReceiverAutofill';
-import { useLocalStorageSettings } from './useLocalStorageSettings';
+import { useLocalStorageSettings, type SettingsSyncRules } from './useLocalStorageSettings';
 
 export interface MobileOrderDraft {
   receiver: string; // 生入力 (アドレス/ENS)・URL 生成時に解決
@@ -313,11 +314,24 @@ export function storefrontPartsToDraft(
   };
 }
 
+// 別のタブとの同期の決まり (hooks/useLocalStorageSettings)。組は保存も取り込みもまとめて行う: 受取先とその由来・
+// 値引きの種類と値・受付開始とラストオーダー (片方ずつ混ざると、どちらのタブでも選んでいない設定になる)。
+// 受取先は確定した値 (空欄・打ちかけでない) だけを取り込む。
+const SYNC_RULES: SettingsSyncRules<MobileOrderDraft> = {
+  groups: [
+    ['receiver', 'receiverSource'],
+    ['discountKind', 'discountValue'],
+    ['openFrom', 'lastOrder'],
+  ],
+  importable: { receiver: isSettledReceiverInput },
+};
+
 export function useMobileOrderDraft() {
   const { settings, setSettings, hydrated } = useLocalStorageSettings<MobileOrderDraft>(
     STORAGE_KEY,
     DEFAULT_MOBILE_ORDER_DRAFT,
     sanitize,
+    SYNC_RULES,
   );
 
   // useReceiverAutofill 用: receiver と source をまとめて更新する安定 setter。

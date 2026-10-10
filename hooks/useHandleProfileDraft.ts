@@ -18,7 +18,8 @@ import {
   MAX_SOCIAL_LINKS,
 } from '@/lib/handle';
 import { resolveHandleTheme, type HandleTheme } from '@/lib/handleTheme';
-import { useLocalStorageSettings } from './useLocalStorageSettings';
+import { isSettledReceiverInput } from '@/lib/format';
+import { useLocalStorageSettings, type SettingsSyncRules } from './useLocalStorageSettings';
 
 // ビルダーの下書きリンク (公開前の生入力)。既存 v1 保存値は kind 欠落の通常リンク。
 export interface DraftRegularLink {
@@ -233,10 +234,19 @@ export function sameProfileDraft(a: HandleProfileDraft, b: HandleProfileDraft): 
   return JSON.stringify(sanitize(a)) === JSON.stringify(sanitize(b));
 }
 
+// 別のタブとの同期の決まり (hooks/useLocalStorageSettings)。受け取り方法 (チェーンと通貨の組) は 1 つの組として保存も
+// 取り込みもまとめて行う (片方ずつ混ざると、どちらのタブでも選んでいない受け取り方法になる)。受取先は確定した値
+// (空欄・打ちかけでない) だけを取り込む (空欄を取り込むと、接続ウォレットで埋める処理が走る)。
+const SYNC_RULES: SettingsSyncRules<HandleProfileDraft> = {
+  groups: [['jpycPolygon', 'jpycKaia', 'jpycAvalanche', 'usdcBase', 'usdcArc']],
+  importable: { to: isSettledReceiverInput },
+};
+
 export function useHandleProfileDraft() {
   return useLocalStorageSettings<HandleProfileDraft>(
     STORAGE_KEY,
     DEFAULT_PROFILE_DRAFT,
     sanitize,
+    SYNC_RULES,
   );
 }

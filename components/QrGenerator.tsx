@@ -95,9 +95,18 @@ const StoreDeviceRegisterStatus = dynamic(
 );
 
 export function QrGenerator() {
-  const { settings: savedSettings, setSettings: saveSettings, hydrated } = useQrSettings();
   const [mode, setMode] = useState<Mode>('amount');
   const [amount, setAmount] = useState('');
+  // QR は即時表示せず「QRコードを表示する」ボタン → 全画面モーダルで提示。
+  const [qrModalOpen, setQrModalOpen] = useState(false);
+  // 「お店がガス代を肩代わりして送る」の QR (受け渡しを作った時点の会計で組み立てたもの・null = 出していない)。
+  // 受け渡しの請求額と QR の会計を必ず揃えるため、表示はこの写しから作る (後から入力が変わっても混ぜない)。
+  const [storeQr, setStoreQr] = useState<{ id: string; url: string; amountText: string } | null>(null);
+  // 会計の途中 (金額を入れた・QR を見せている) は、別のタブで変えた通貨・受取先を取り込まない (同じ金額のまま別の通貨・
+  // 宛先の QR にしない)。会計が終わったら取り込む (hooks/useLocalStorageSettings)。
+  const { settings: savedSettings, setSettings: saveSettings, hydrated } = useQrSettings({
+    holdImport: amount !== '' || qrModalOpen || storeQr !== null,
+  });
   const origin = useOrigin();
   const { copied, copy } = useCopyToClipboard();
   const { copied: eip681Copied, copy: eip681Copy } = useCopyToClipboard();
@@ -111,16 +120,11 @@ export function QrGenerator() {
   // 受取先が未設定のときは、QR を出す唯一の前提なので会計画面に受取先の欄を直接出す。読み込み後に未設定だったら
   // 出し、入力し終えても消さない (打っている途中で欄が消えない・次に開いたときは保存済みなので出ない)。
   const [receiverInline, setReceiverInline] = useState(false);
-  // QR は即時表示せず「QRコードを表示する」ボタン → 全画面モーダルで提示。
-  const [qrModalOpen, setQrModalOpen] = useState(false);
   // 「お店がガス代を肩代わりして送る」(内部名「お店の端末で送る」・flag 裏) の状態は作成ページで 1 つ。お店の端末が
   // 支払いを送っている・結果を待っている間は、このタブでも通常の QR を出さない (同じ会計を二重に払わせない・
   // 状態はタブの上に出る)。締め切っていない受け渡しは締め切ってから (署名が入っていたら端末が送るので出さない)。
   // flag OFF では今までどおりそのまま開く。
   const storeDevice = useStoreDeviceMode();
-  // 「お店がガス代を肩代わりして送る」の QR (受け渡しを作った時点の会計で組み立てたもの・null = 出していない)。
-  // 受け渡しの請求額と QR の会計を必ず揃えるため、表示はこの写しから作る (後から入力が変わっても混ぜない)。
-  const [storeQr, setStoreQr] = useState<{ id: string; url: string; amountText: string } | null>(null);
   // 店員が「通常の QR を出す」を選んだ (お店負担の QR を作れない・読み取れないとき)。
   const [forceNormalQr, setForceNormalQr] = useState(false);
   // 初回に QR モーダルを開いた「ピークモーメント」を latch。以降 A2HS hint を出す
