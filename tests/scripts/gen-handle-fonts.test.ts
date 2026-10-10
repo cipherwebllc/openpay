@@ -2,7 +2,9 @@
 // scripts/gen-handle-fonts.mjs は npm から取った展開物 (信用しない入力) を読んでリポに書く。
 // 展開物の package.json の version はディレクトリ名に入るので、`5.3.0/../../x` のような値や
 // 偽の woff2 で public/fonts/handle/ の外へ書いたり、既存のフォントを消したりしないこと。
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -97,6 +99,46 @@ describe('generateHandleFonts', () => {
     writeFileSync(join(maruPkg, 'files', 'zen-maru-gothic-0-700-normal.woff2'), 'not a font');
     expect(() => generateHandleFonts({ serifPkg, maruPkg, repo })).toThrow(/not woff2/);
     expectUntouched();
+  });
+
+  // 入力がリポ内の既存フォントを指していると、削除で読み元が消え、コピーが ENOENT で落ちて
+  // 既存フォント一式だけを失う。入力のシンボリックリンクは拒否し、それ以外の経路 (files/ ごと
+  // リンク) でも削除前に読んだ中身から書き出す。
+  it('refuses a symlinked woff2 that points at an existing font, keeping the existing files', () => {
+    setup();
+    const existingFont = join(repo, 'public/fonts/handle/zen-maru-gothic-0-700-normal.woff2');
+    writeFileSync(existingFont, WOFF2);
+    const input = join(maruPkg, 'files', 'zen-maru-gothic-0-700-normal.woff2');
+    rmSync(input);
+    symlinkSync(existingFont, input);
+    expect(() => generateHandleFonts({ serifPkg, maruPkg, repo })).toThrow(/not a regular file/);
+    expect(existsSync(sentinel)).toBe(true);
+    expect(readFileSync(existingFont)).toEqual(WOFF2);
+    expect(existsSync(join(repo, 'components/handleFonts.css'))).toBe(false);
+  });
+
+  it('refuses a symlinked LICENSE', () => {
+    setup();
+    const elsewhere = join(tmp, 'ofl.txt');
+    writeFileSync(elsewhere, OFL);
+    rmSync(join(serifPkg, 'LICENSE'));
+    symlinkSync(elsewhere, join(serifPkg, 'LICENSE'));
+    expect(() => generateHandleFonts({ serifPkg, maruPkg, repo })).toThrow(/not a regular file/);
+    expect(existsSync(sentinel)).toBe(true);
+  });
+
+  it('writes what it read before deleting even when files/ itself links into the output', () => {
+    setup();
+    // 前回の生成物と同じ場所に、入力と同名のフォントがある
+    const previous = join(repo, 'public/fonts/handle/zen-maru-gothic-5.3.0');
+    mkdirSync(previous, { recursive: true });
+    const fonts = { 'zen-maru-gothic-0-400-normal.woff2': Buffer.from('wOF2-400'), 'zen-maru-gothic-0-700-normal.woff2': Buffer.from('wOF2-700') };
+    for (const [name, data] of Object.entries(fonts)) writeFileSync(join(previous, name), data);
+    rmSync(join(maruPkg, 'files'), { recursive: true });
+    symlinkSync(previous, join(maruPkg, 'files'));
+    generateHandleFonts({ serifPkg, maruPkg, repo });
+    for (const [name, data] of Object.entries(fonts)) expect(readFileSync(join(previous, name))).toEqual(data);
+    expect(lstatSync(previous).isDirectory()).toBe(true);
   });
 
   it('refuses a LICENSE that is not the OFL 1.1 text', () => {

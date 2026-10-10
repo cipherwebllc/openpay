@@ -11,7 +11,9 @@
 // 出力: public/fonts/handle/ (一度消して作り直す: woff2 と OFL) と components/handleFonts.css。
 // 展開物は信用しない: 検査 (名前・ライセンス・scripts・版・woff2 の中身・書き込み先) をすべて
 // 終えてから消して書く。検査で止まったときは既存の public/fonts/handle/ がそのまま残る。
-import { copyFileSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+// 書き出すのは削除の前にメモリへ読んだ中身 (入力が既存フォントを指していても、削除で読み元が
+// 消えて一式を失うことがない)。
+import { lstatSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -123,16 +125,21 @@ export function generateHandleFonts({ serifPkg, maruPkg, repo }) {
     { from: join(serifPkg, 'LICENSE'), to: join(outRoot, 'OFL-NotoSerifJP.txt'), woff2: false },
     { from: join(maruPkg, 'LICENSE'), to: join(outRoot, 'OFL-ZenMaruGothic.txt'), woff2: false },
   ];
+  // 入力は通常ファイルだけ (シンボリックリンクは拒否)。検査した中身をそのまま保持して、削除の後に
+  // このバッファから書く — 入力 (や files/ ディレクトリ) が出力先を指していても読み元を失わない。
   let bytes = 0;
-  for (const c of copies) {
+  const writes = copies.map((c) => {
     assertInside(outRoot, c.to);
+    if (!lstatSync(c.from).isFile()) throw new Error(`${c.from}: not a regular file`);
+    const data = readFileSync(c.from);
     if (c.woff2) {
-      if (readFileSync(c.from).subarray(0, 4).toString('latin1') !== 'wOF2') throw new Error(`${c.from}: not woff2`);
-      bytes += statSync(c.from).size;
-    } else if (!readFileSync(c.from, 'utf8').includes('SIL OPEN FONT LICENSE Version 1.1')) {
+      if (data.subarray(0, 4).toString('latin1') !== 'wOF2') throw new Error(`${c.from}: not woff2`);
+      bytes += data.length;
+    } else if (!data.toString('utf8').includes('SIL OPEN FONT LICENSE Version 1.1')) {
       throw new Error(`${c.from}: not the OFL 1.1 text`);
     }
-  }
+    return { to: c.to, data };
+  });
 
   const blocks = [
     ...[400, 700].flatMap((w) => serifFaces.map((f) => face(SERIF_FAMILY, w, serifDir, f))),
@@ -142,7 +149,7 @@ export function generateHandleFonts({ serifPkg, maruPkg, repo }) {
 
   rmSync(outRoot, { recursive: true, force: true });
   for (const dir of dirs) mkdirSync(dir, { recursive: true });
-  for (const c of copies) copyFileSync(c.from, c.to);
+  for (const w of writes) writeFileSync(w.to, w.data);
   writeFileSync(join(repo, 'components/handleFonts.css'), css);
 
   return { woff2: copies.filter((c) => c.woff2).length, bytes, faces: blocks.length, cssChars: css.length };
