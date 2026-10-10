@@ -351,6 +351,42 @@ describe('lockfile-gate CLI', () => {
       expect(result.stderr).toContain('bundled');
     });
 
+    // Codex レビュー 5 回目 (PR #778) P1: 子のエントリから inBundle を消し resolved を公式 tarball に書き換えても、
+    // 祖先のエントリ (npm は package.json の bundleDependencies を lockfile にも書く) が同梱を宣言していれば止める。
+    it.each([
+      ['the parent lists the name', 'node_modules/parent', { bundleDependencies: ['esbuild'] }, 'node_modules/parent/node_modules/esbuild'],
+      ['the parent bundles another name (esbuild is its hoisted dependency)', 'node_modules/parent', { bundleDependencies: ['inner'] }, 'node_modules/parent/node_modules/esbuild'],
+      ['the parent declares bundledDependencies: true', 'node_modules/parent', { bundledDependencies: true }, 'node_modules/parent/node_modules/esbuild'],
+      ['an ancestor bundles the package that contains it', 'node_modules/parent', { bundleDependencies: ['inner'] }, 'node_modules/parent/node_modules/inner/node_modules/esbuild'],
+      ['a scoped ancestor bundles a scoped name', 'node_modules/@scope/parent', { bundleDependencies: ['@parcel/watcher'] }, 'node_modules/@scope/parent/node_modules/@parcel/watcher'],
+      ['a workspace declares the bundle', 'packages/ws', { bundleDependencies: ['esbuild'] }, 'packages/ws/node_modules/esbuild'],
+    ])('rejects an allowlisted name without inBundle but with a faked official resolved when %s', (_label, ancestor, bundle, path) => {
+      const name = path.slice(path.lastIndexOf('node_modules/') + 'node_modules/'.length);
+      const file = name.slice(name.lastIndexOf('/') + 1);
+      fixture('package-lock.json', JSON.stringify({ lockfileVersion: 3, packages: {
+        '': {},
+        [ancestor]: { version: '1.0.0', ...bundle },
+        [path]: { hasInstallScript: true, version: '1.0.0', resolved: `${OFFICIAL}${name}/-/${file}-1.0.0.tgz` },
+      } }));
+      const result = runGate();
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(path);
+      expect(result.stderr).toContain(`inside the bundle of ${ancestor}`);
+    });
+
+    it.each([
+      ['an empty bundleDependencies', { bundleDependencies: [] }],
+      ['bundleDependencies: false', { bundleDependencies: false }],
+    ])('accepts an allowlisted name under a parent with %s', (_label, bundle) => {
+      fixture('package-lock.json', JSON.stringify({ lockfileVersion: 3, packages: {
+        '': { bundleDependencies: ['esbuild'] }, // root の宣言は自分の publish 用 (root の依存は registry から入る)
+        'node_modules/parent': { resolved: `${OFFICIAL}parent/-/parent-1.0.0.tgz`, ...bundle },
+        'node_modules/parent/node_modules/esbuild': { hasInstallScript: true, resolved: `${OFFICIAL}esbuild/-/esbuild-1.0.0.tgz` },
+        'node_modules/esbuild': { hasInstallScript: true, resolved: `${OFFICIAL}esbuild/-/esbuild-1.0.0.tgz` },
+      } }));
+      expect(runGate().status).toBe(0);
+    });
+
     it('still accepts a bundled copy of a name outside the allowlist (no install script flag)', () => {
       fixture('package-lock.json', JSON.stringify({ lockfileVersion: 3, packages: {
         '': {},

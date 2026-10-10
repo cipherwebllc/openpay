@@ -5,6 +5,7 @@
 // だけ。dot segment (生・%2e) は URL 正規化で `/-/` より前の名前をすり替えられるので、形の検査は
 // `new URL()` で正規化した pathname に対して行い、生の文字列にも `.`/`..` の segment を許さない。
 // query / fragment / userinfo / port 指定・大文字のホスト・http は不許可 (取得元として同一でも形を 1 つに固定する)。
+// 末尾の declaresBundledDependencies は「その実体が公式 tarball ではなく親の同梱物か」の判定に使う (両 gate 共用)。
 
 export const OFFICIAL_REGISTRY_PREFIX = 'https://registry.npmjs.org/';
 
@@ -34,4 +35,22 @@ export function parseRegistryTarball(resolved) {
   const unscoped = name.slice(name.lastIndexOf('/') + 1);
   if (unscoped === '.' || unscoped === '..' || !basename.startsWith(`${unscoped}-`)) return null;
   return { name, basename };
+}
+
+/**
+ * package.json (または lockfile のエントリ) が bundleDependencies / bundledDependencies で依存を同梱すると宣言しているか。
+ * 同梱する親の node_modules の下の実体は、親の tarball の中身で入る (npm の getBundler: 宣言した名前・その推移的依存・
+ * 同梱物の中の入れ子) ので、公式レジストリのその名前の tarball ではない。npm より広めに、宣言のある親の下は全部
+ * 「同梱の内側かもしれない」とみなす。true・配列・オブジェクト以外の値も「同梱あり」とする (読めない値を同梱なしにしない)。
+ * @param {unknown} manifest
+ */
+export function declaresBundledDependencies(manifest) {
+  if (manifest === null || typeof manifest !== 'object') return false;
+  return ['bundleDependencies', 'bundledDependencies'].some((key) => {
+    const value = /** @type {Record<string, unknown>} */ (manifest)[key];
+    if (value === undefined || value === null || value === false) return false;
+    if (Array.isArray(value)) return value.length > 0;
+    if (typeof value === 'object') return Object.keys(value).length > 0;
+    return true;
+  });
 }

@@ -701,12 +701,26 @@ moderate  ws                    https://github.com/advisories/GHSA-58qx-3vcg-4xp
 CLAUDE.md 掟 16 (依存は公式 npm レジストリのみ・install script 付きの新規パッケージは個別確認) を CI で機械化する
 2 段構え (2026-10-10・第 7 回レビュー E4 / user 裁定 R4・PR #778)。
 
+**脅威モデル (何から守り、何をレビューに任せるか)**: `installed-scripts-gate` / `lockfile-gate` が守る相手は
+**悪意ある (または乗っ取られた) 第三者パッケージ** — その install script と tarball の同梱物 (bundled 依存・binding.gyp) —
+である。lockfile は npm が生成したもの (Renovate の更新を含む) を前提にし、手で改ざんされた lockfile (フラグの削除・
+resolved の書き換え) は PR レビューと lockfile-gate の形の検査で止める範囲とする。ただし lockfile の記述と実体が
+食い違うときは実体を信じる側に倒す (同梱かどうかは子の `inBundle` だけでなく、祖先の package.json の
+`bundleDependencies` / `bundledDependencies` からも判定し、同梱の内側の実体には allowlist を適用しない)。
+workflow の検査 (`tests/scripts/workflow-guards.test.ts` + `scripts/lib/workflowRun.mjs`) が守る相手は
+**保守者 (AI エージェントを含む) がうっかり** workflow に `npm install` や `npx …` を足すことで、意図的に検査を欺く
+書き方はレビューの範囲とする。ただし npm / npx を含む行で読めない形 (ラッパー・サブシェル・展開・引用・行継続、
+読み残しうる YAML の書式) は必ず throw し (fail-closed)、うっかりの別書式を黙って通さない。workflow で `npx` は
+全面禁止 (`npx --no` でも global の bin や npx の cache を実行しうるため)。bin は `npm run <script>` か
+`./node_modules/.bin/<bin>` で呼ぶ。
+
 1. **`node scripts/lockfile-gate.mjs`** (npm ci の**前**・全 workflow): Git 管理下の全 `package-lock.json` /
    `npm-shrinkwrap.json` (隠しディレクトリ含む・lockfileVersion ≥ 2 必須) の `resolved` が
    `https://registry.npmjs.org/<name>/-/<name>-<version>.tgz` の形 (dot segment・query・userinfo なし) であること、
    `.npmrc` が `legacy-peer-deps` 以外を持たないこと、`hasInstallScript: true` の名前が
    `scripts/lib/installScriptAllowlist.mjs` の `INSTALL_SCRIPT_ALLOWLIST` にあり取得元 tarball の名前と lockfile の
-   name も一致すること (npm alias による借用の拒否) を検査する。
+   name も一致すること (npm alias による借用の拒否)、allowlist の名前が同梱 (`inBundle`・祖先のエントリの
+   `bundleDependencies`) の内側に現れないことを検査する。
 2. **`npm ci --ignore-scripts`** → **`node scripts/installed-scripts-gate.mjs --rebuild <node_modules>`** (全 workflow の
    全 install の直後): `--ignore-scripts` で preinstall / install / postinstall も binding.gyp の暗黙 `node-gyp rebuild`
    も走らせずに入れ (npm 10.9 の `@npmcli/arborist` rebuild.js は `ignoreScripts` でこれらの queue を実行しない)、
@@ -714,6 +728,9 @@ CLAUDE.md 掟 16 (依存は公式 npm レジストリのみ・install script 付
    fail。通ったときだけ、その root に入っている allowlist の名前を `npm rebuild <names>` して必要な install script を
    実行する (= 従来の `npm ci` と同じ結果)。**allowlist 外の install script 付き依存は一度も実行されずに CI で止まる。**
    link (workspace) の script は名前でなく realpath を `LINKED_PACKAGE_SCRIPT_ALLOWLIST` と照合する (現状は空)。
+   allowlist の名前の実体は、lockfile の canonical path (実体の realpath を lockfile の dir からの相対にしたもの。
+   workspace の下の nested 依存は `packages/<ws>/node_modules/<name>`) のエントリが公式 tarball であり、かつ祖先が
+   依存の同梱を宣言していないときだけ rebuild の対象にする。
    注意: npm 10.9 は `--ignore-scripts` でも link の `prepare` だけは実行する (rebuild.js の links 経路は gate されて
    いない)。リポ内の link は `packages/x402-sdk` のみで prepare を持たない。link に prepare を足すときはこの一覧と
    同時に見直す。

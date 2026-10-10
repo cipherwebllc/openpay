@@ -27,12 +27,13 @@ describe('production-flag Playwright coverage (F13)', () => {
     const job = workflow.match(/^  e2e-prodflags:\n([\s\S]*?)(?=^  [\w-]+:|$(?![\s\S]))/m)?.[1];
     expect(job, 'F13: the flags-OFF job alone cannot cover relay/recover').toBeDefined();
     expect(job).not.toContain('continue-on-error:');
-    expect(job).toContain('playwright install --with-deps chromium\n');
+    // playwright は lockfile で入れた bin を直接呼ぶ (npx は workflow で全面禁止・tests/scripts/workflow-guards.test.ts)。
+    expect(job).toContain('run: ./node_modules/.bin/playwright install --with-deps chromium\n');
     expect(job).not.toContain('webkit');
     const vector = job!.indexOf('e2e/prodFlags.env');
     const exportEnv = job!.indexOf('"$GITHUB_ENV"');
     const build = job!.indexOf('run: npm run build');
-    const specs = job!.indexOf('npx --no playwright test --config=playwright.prodflags.config.ts');
+    const specs = job!.indexOf('run: time ./node_modules/.bin/playwright test --config=playwright.prodflags.config.ts');
     expect(vector).toBeGreaterThan(-1);
     expect(exportEnv).toBeGreaterThan(vector);
     expect(build).toBeGreaterThan(exportEnv);

@@ -23,11 +23,15 @@
 // binding.gyp の暗黙 node-gyp rebuild・bundled 依存・link の prepare もフラグに出ない。
 // そのため npm ci の直後に実体を走査する scripts/installed-scripts-gate.mjs を併用し (検出)、
 // lockfile の diff (このフラグが消える diff) は PR レビューで見る。
+//
+// 脅威モデル (docs/DEPLOY_CHECKLIST.md §7.14): 守る相手は悪意ある (または乗っ取られた) 第三者パッケージの
+// install script と同梱物。lockfile は npm が生成したもの (Renovate を含む) を前提にし、手で改ざんされた lockfile は
+// PR レビューとこの gate の形の検査で止める範囲 (改ざんで消せる値の最終判定は実体 gate が実体から行う)。
 
 import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { INSTALL_SCRIPT_ALLOWLIST } from './lib/installScriptAllowlist.mjs';
-import { parseRegistryTarball } from './lib/registryTarball.mjs';
+import { declaresBundledDependencies, parseRegistryTarball } from './lib/registryTarball.mjs';
 // userconfig/globalconfig 経由の別設定ファイルや proxy/CA による取得元の偽装が
 // npm ci に波及するのを防ぐ。新しいキーは用途をレビューしてから明示的に追加する。
 const ALLOWED_NPMRC_KEYS = new Set(['legacy-peer-deps']);
@@ -86,6 +90,17 @@ const packageNameOf = (path) => {
   const at = path.lastIndexOf('node_modules/');
   return at === -1 ? path : path.slice(at + 'node_modules/'.length);
 };
+// lockfile の path の祖先 (各 `node_modules/` の手前のエントリ。root '' は除く) のうち、依存の同梱
+// (bundleDependencies / bundledDependencies) を宣言しているもの。npm は宣言した親の下の名前・その推移的依存・
+// 同梱物の中の入れ子を同梱として親の tarball から入れるので、宣言のある親の下は全部「同梱の内側かもしれない」とみなす。
+const bundlingAncestorOf = (packages, path) => {
+  for (const match of path.matchAll(/(?:^|\/)node_modules\//g)) {
+    const ancestor = path.slice(0, match.index);
+    if (ancestor === '') continue;
+    if (declaresBundledDependencies(packages[ancestor])) return ancestor;
+  }
+  return null;
+};
 
 for (const file of npmrcs) {
   const lines = readFileSync(file, 'utf8').split(/\r\n|[\r\n]/);
@@ -128,13 +143,19 @@ for (const file of lockfiles) {
     const tarball = parseRegistryTarball(pkg.resolved);
     // 同梱 (inBundle) の実体は親 tarball の中身で、resolved も hasInstallScript も持たずに入る。allowlist の名前が
     // 同梱で現れると、名前の承認が別 publisher の同梱コードに流用されうる (実体 gate も `npm rebuild <name>` も
-    // 同名の全実体を対象にする) ので、install の前にここで止める。
-    if (pkg.inBundle === true && Object.hasOwn(INSTALL_SCRIPT_ALLOWLIST, packageNameOf(name))) {
-      console.error(
-        `NG ${file}: ${name} is a bundled copy of the allowlisted name ${packageNameOf(name)}; ` +
-          'the install script allowlist only applies to official registry tarballs of that name, not to bundled copies (CLAUDE.md 掟 16).',
-      );
-      bad++;
+    // 同名の全実体を対象にする) ので、install の前にここで止める。子の inBundle を消して resolved を公式 tarball に
+    // 書き換えても、祖先のエントリが同梱を宣言していれば同梱の内側として止める (Codex 5 回目 P1。祖先の宣言まで
+    // 消された lockfile は、実体 gate が親の package.json から同じ判定をする)。
+    if (Object.hasOwn(INSTALL_SCRIPT_ALLOWLIST, packageNameOf(name))) {
+      const bundler = pkg.inBundle === true ? name : bundlingAncestorOf(packages, name);
+      if (bundler !== null) {
+        console.error(
+          `NG ${file}: ${name} is ${bundler === name ? 'a bundled copy (inBundle)' : `inside the bundle of ${bundler} (bundleDependencies)`} ` +
+            `of the allowlisted name ${packageNameOf(name)}; the install script allowlist only applies to official registry ` +
+            'tarballs of that name, not to bundled copies (CLAUDE.md 掟 16).',
+        );
+        bad++;
+      }
     }
     // install script 付きは取得元に関係なく名前で allowlist 照合する (link も含む)。
     if (pkg.hasInstallScript === true) {

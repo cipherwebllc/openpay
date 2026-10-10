@@ -291,6 +291,111 @@ describe('installed-scripts-gate CLI', () => {
     });
   });
 
+  // Codex レビュー 5 回目 (PR #778) P1: 親が bundleDependencies で esbuild を同梱し、同梱物に任意の postinstall を
+  // 入れ、子の lockfile エントリから inBundle を消して resolved を公式 tarball にすると、lockfile の照合だけでは
+  // 承認されて `npm rebuild esbuild` が同梱物を実行していた。同梱かどうかは実体の祖先の package.json から判定する。
+  describe('allowlisted names inside a bundle declared by an ancestor package.json', () => {
+    const evilEsbuild = (path: string) => pkg(path, { name: 'esbuild', scripts: { postinstall: 'node steal.js' } });
+
+    it.each([
+      ['bundleDependencies listing the name', { bundleDependencies: ['esbuild'] }],
+      ['bundledDependencies: true', { bundledDependencies: true }],
+      ['bundleDependencies: true', { bundleDependencies: true }],
+      ['bundleDependencies listing another name (esbuild is its hoisted dependency)', { bundleDependencies: ['inner'] }],
+    ])('rejects a copy whose lockfile entry hides inBundle and fakes resolved when the parent declares %s', (_label, bundle) => {
+      pkg('node_modules/parent', { name: 'parent', dependencies: { esbuild: '1.0.0', inner: '1.0.0' }, ...bundle });
+      evilEsbuild('node_modules/parent/node_modules/esbuild');
+      // 攻撃者の lockfile: 親の bundleDependencies も子の inBundle も消し、子の resolved は公式の esbuild tarball
+      lock({ ...BASE, 'node_modules/parent': {}, 'node_modules/parent/node_modules/esbuild': { hasInstallScript: true } });
+      const npm = fakeNpm();
+      const result = run(['--rebuild', 'node_modules'], { PATH: npm.path });
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain('node_modules/parent/node_modules/esbuild');
+      expect(result.stderr).toContain('inside the bundle of node_modules/parent');
+      expect(npm.calls()).toEqual([]);
+    });
+
+    it('rejects a copy nested inside a bundled package (the bundler is an ancestor, not the parent)', () => {
+      pkg('node_modules/@scope/parent', { name: '@scope/parent', bundleDependencies: ['inner'] });
+      pkg('node_modules/@scope/parent/node_modules/inner', { name: 'inner' });
+      evilEsbuild('node_modules/@scope/parent/node_modules/inner/node_modules/esbuild');
+      lock({
+        ...BASE,
+        'node_modules/@scope/parent': {},
+        'node_modules/@scope/parent/node_modules/inner': {},
+        'node_modules/@scope/parent/node_modules/inner/node_modules/esbuild': { hasInstallScript: true },
+      });
+      const npm = fakeNpm();
+      const result = run(['--rebuild', 'node_modules'], { PATH: npm.path });
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain('inside the bundle of node_modules/@scope/parent');
+      expect(npm.calls()).toEqual([]);
+    });
+
+    it('still accepts a genuine copy beside an unrelated bundler and does not count the project root as a bundler', () => {
+      writeFileSync(join(root, 'package.json'), JSON.stringify({ name: 'fixture', bundleDependencies: ['esbuild'] }));
+      pkg('node_modules/bundler', { name: 'bundler', bundleDependencies: ['helper'] });
+      pkg('node_modules/bundler/node_modules/helper', { name: 'helper' });
+      pkg('node_modules/esbuild', { name: 'esbuild', scripts: { postinstall: 'node install.js' } });
+      lock({ ...BASE, 'node_modules/bundler': {}, 'node_modules/bundler/node_modules/helper': { inBundle: true, resolved: undefined }, 'node_modules/esbuild': { hasInstallScript: true } });
+      const npm = fakeNpm();
+      const result = run(['--rebuild', 'node_modules'], { PATH: npm.path });
+      expect(result.status).toBe(0);
+      expect(npm.calls()).toEqual([`${root}|rebuild esbuild`]);
+    });
+
+    it.each([[[]], [{}], [false]])('treats an empty bundle declaration (%j) as no bundle', (value) => {
+      pkg('node_modules/parent', { name: 'parent', bundleDependencies: value });
+      pkg('node_modules/parent/node_modules/esbuild', { name: 'esbuild', scripts: { postinstall: 'node install.js' } });
+      lock({ ...BASE, 'node_modules/parent': {}, 'node_modules/parent/node_modules/esbuild': { hasInstallScript: true } });
+      expect(run().status).toBe(0);
+    });
+  });
+
+  // Codex レビュー 5 回目 (PR #778) P2: link (workspace) の先の nested 依存は lockfile に `packages/ws/node_modules/x` で
+  // 載るのに、走査した path (`node_modules/ws/node_modules/x`) で引いて「lockfile に無い」と偽 red になっていた。
+  describe('nested dependencies of linked (workspace) packages', () => {
+    it.each([
+      ['unscoped link, unscoped dependency', 'ws', 'packages/ws', 'esbuild'],
+      ['scoped link, scoped dependency', '@scope/ws', 'packages/scoped-ws', '@parcel/watcher'],
+    ])('looks up the canonical lockfile path for %s', (_label, linkName, target, dep) => {
+      pkg(target, { name: linkName });
+      pkg(`${target}/node_modules/${dep}`, { name: dep, scripts: { install: 'node-gyp-build' } });
+      mkdirSync(dirname(join(root, `node_modules/${linkName}`)), { recursive: true });
+      symlinkSync(join(root, target), join(root, `node_modules/${linkName}`), 'dir');
+      lock({
+        ...BASE,
+        [`node_modules/${linkName}`]: { link: true, resolved: target },
+        [`${target}/node_modules/${dep}`]: { hasInstallScript: true },
+      });
+      const npm = fakeNpm();
+      const result = run(['--rebuild', 'node_modules'], { PATH: npm.path });
+      expect(result.stderr).toBe('');
+      expect(result.status).toBe(0);
+      expect(npm.calls()).toEqual([`${root}|rebuild ${dep}`]);
+    });
+
+    it('still rejects a nested dependency of a link that is only listed under the scanned (non-canonical) path', () => {
+      pkg('packages/ws', { name: 'ws' });
+      pkg('packages/ws/node_modules/esbuild', { name: 'esbuild', scripts: { postinstall: 'x' } });
+      symlinkSync(join(root, 'packages/ws'), join(root, 'node_modules/ws'), 'dir');
+      lock({ ...BASE, 'node_modules/ws': { link: true, resolved: 'packages/ws' }, 'node_modules/ws/node_modules/esbuild': { hasInstallScript: true } });
+      const result = run();
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain('packages/ws/node_modules/esbuild');
+    });
+
+    it('applies the bundle check to the link target too', () => {
+      pkg('packages/ws', { name: 'ws', bundleDependencies: ['esbuild'] });
+      pkg('packages/ws/node_modules/esbuild', { name: 'esbuild', scripts: { postinstall: 'x' } });
+      symlinkSync(join(root, 'packages/ws'), join(root, 'node_modules/ws'), 'dir');
+      lock({ ...BASE, 'node_modules/ws': { link: true, resolved: 'packages/ws' }, 'packages/ws/node_modules/esbuild': { hasInstallScript: true } });
+      const result = run();
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain('inside the bundle of packages/ws');
+    });
+  });
+
   // 防止の後半: 通った root だけ、その root に入っている allowlist の名前を `npm rebuild <names>` する。
   describe('--rebuild', () => {
     it('rebuilds exactly the installed allowlisted names in the root directory and succeeds', () => {

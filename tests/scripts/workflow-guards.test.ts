@@ -68,6 +68,9 @@ describe('GitHub Actions operation guards', () => {
 
   // Codex レビュー 4 回目 (PR #778) 2: run を YAML の別書式 (block scalar・引用符) まで読み、1 step 内の複数コマンドも
   // 1 つずつ見る。読めない形は parseWorkflowJobs が throw して test が落ちる (fail-closed)。
+  // 5 回目 2・3: ラッパー / サブシェル / 展開 / 行継続での npm と、読み残しうる YAML (引用符付きの key・複数行の scalar・
+  // escape 付きの二重引用符・揃っていないインデント・step 0 件の job) も throw する (scripts/lib/workflowRun.mjs)。
+  // 守る相手は保守者のうっかり (docs/DEPLOY_CHECKLIST.md §7.14 の脅威モデル)。
   // 各 job のコマンド列 (step 境界つき) を返す。
   function jobCommands(name: string) {
     return parseWorkflowJobs(workflow(name)).map(({ job, steps }) => ({
@@ -100,14 +103,12 @@ describe('GitHub Actions operation guards', () => {
         const npm = classifyNpmCommand(command);
         if (npm === null) return;
         const where = `${name}/${job}: "${command}"`;
-        if (npm.tool === 'npx') {
-          // npx はローカルに入っている bin だけ (--no = 無ければ fail・取りに行かない)。--yes / -y / -p / --package / @version 禁止。
-          expect(npm.args[0], `${where}: npx must be --no (never fetch a package)`).toBe('--no');
-          expect(npm.args.slice(1).join(' '), where).not.toMatch(/(^|\s)(-y|--yes|-p|--package)(\s|=|$)/);
-          expect(npm.args[1], `${where}: npx must name a bare local bin`).toMatch(/^[a-z][\w-]*$/);
-          return;
-        }
-        expect(npm.args.join(' '), where).not.toMatch(/--ignore-scripts=false/);
+        // Codex レビュー 5 回目 (PR #778) 4: `npx --no` もローカル bin に限られない (npm 10.9 は global の bin や npx の
+        // cache を実行しうり、registry の manifest 取得にも進む)。npx は全面禁止し、bin は `npm run <script>` か
+        // `./node_modules/.bin/<bin>` (lockfile で入れた実体) で直接呼ぶ。
+        expect(npm.tool, `${where}: npx is not allowed; call ./node_modules/.bin/<bin> or npm run <script>`).toBe('npm');
+        // `--no-ignore-scripts` / `--ignore-scripts=false` は後ろに書くと --ignore-scripts を打ち消す。
+        expect(npm.args.join(' '), where).not.toMatch(/--no-ignore-scripts|--ignore-scripts=/);
         if (npm.subcommand === 'ci') {
           expect(npm.args, `${where}: npm ci must not run install scripts`).toContain('--ignore-scripts');
           const root = npm.prefix ? `${npm.prefix}/node_modules` : 'node_modules';

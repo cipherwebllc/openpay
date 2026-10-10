@@ -7,6 +7,12 @@
 // 同じ結果)。allowlist 外の install script 付きの新規依存は**一度も実行されずに** CI で止まる
 // (CLAUDE.md 掟 16・第 7 回レビュー E4 / user 裁定 R4 → PR #778 Codex レビューで検出から防止へ)。
 //
+// 脅威モデル (docs/DEPLOY_CHECKLIST.md §7.14): 守る相手は**悪意ある (または乗っ取られた) 第三者パッケージ**の
+// install script と同梱物 (bundled 依存・binding.gyp)。lockfile は npm が生成したもの (Renovate を含む) を前提にし、
+// 手で改ざんされた lockfile はレビューと scripts/lockfile-gate.mjs で止める範囲。ただし lockfile の記述と実体が
+// 食い違うときは実体 (tarball の中身) を信じる側に倒す: 同梱かどうかは lockfile の inBundle だけでなく、実体の
+// 祖先の package.json の bundleDependencies / bundledDependencies からも判定する。
+//
 // なぜ lockfile の検査 (scripts/lockfile-gate.mjs) に加えて要るか:
 //   - hasInstallScript は npm が lockfile に書くフラグで、binding.gyp だけのパッケージ (npm が install script
 //     `node-gyp rebuild` を補う)・bundled 依存の実体・link (workspace) の prepare はフラグに出ない。
@@ -25,6 +31,12 @@
 //     tarball」**のときだけ許容 (→ --rebuild の対象)。bundled・取得元不明・lockfile に無い実体は allowlist の対象外 =
 //     fail (公式パッケージへの承認を、同梱や別 publisher の同名実体へ流用させない)。`npm rebuild <name>` は同名の
 //     全実体を対象にするので、allowlist の名前の実体は install script の有無に関係なく全てこの条件で確かめる。
+//     同梱の判定 (Codex 5 回目 P1): 祖先 (実体の realpath を `/node_modules/` ごとに遡った親・その親…。project root
+//     自身は除く) の package.json が bundleDependencies / bundledDependencies (配列・true 等) を宣言していれば、その下の実体は
+//     親の tarball の同梱物でありうる (npm は宣言した名前の推移的依存や同梱物の中の入れ子も同梱として扱う) ので、
+//     lockfile のエントリが inBundle を消し resolved を公式 tarball に書き換えていても allowlist を適用しない (= fail)。
+//     lockfile の path は実体の realpath を lockfile の dir (root の node_modules の realpath の親) からの相対にした
+//     canonical path で引く (link = workspace の下の nested 依存は `packages/x/node_modules/y` に載る・Codex 5 回目)。
 //   - link (symlink = workspace / file:) のパッケージ: 名前ではなく実際のリンク先 (realpath・repo 相対) が
 //     LINKED_PACKAGE_SCRIPT_ALLOWLIST にあるときだけ許容 (registry の承認を別実体へ流用させない)。rebuild はしない。
 //   - --rebuild: 全 root が通ったあと、root ごとに「その root に入っている allowlist の名前」だけを
@@ -36,7 +48,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { INSTALL_SCRIPT_ALLOWLIST, LINKED_PACKAGE_SCRIPT_ALLOWLIST } from './lib/installScriptAllowlist.mjs';
-import { parseRegistryTarball } from './lib/registryTarball.mjs';
+import { declaresBundledDependencies, parseRegistryTarball } from './lib/registryTarball.mjs';
 
 const INSTALL_HOOKS = ['preinstall', 'install', 'postinstall'];
 const toPosix = (path) => path.split(sep).join('/');
@@ -108,7 +120,7 @@ function readLockfile(nodeModules, state) {
       state.failures.push(`${repoRelative(file)}: has no packages object (lockfileVersion >= 2 required)`);
       return null;
     }
-    return { file, base, packages };
+    return { file, packages };
   } catch {
     state.failures.push(`${repoRelative(file)}: cannot be parsed`);
     return null;
@@ -116,12 +128,31 @@ function readLockfile(nodeModules, state) {
 }
 
 /**
- * allowlist の名前の実体 (dir) が、lockfile で「公式レジストリのその名前の tarball」と確かめられるか。
+ * 実体 (realpath) の祖先のうち、依存の同梱 (bundleDependencies / bundledDependencies) を宣言しているもの。
+ * 祖先 = 実体の path の `/node_modules/` の手前の dir を順に遡ったもの (project root 自身と、その外は除く)。
+ * @returns {string | null} 同梱の内側なら宣言している祖先の dir、そうでなければ null。
+ */
+function bundlingAncestor(realBase, realDir) {
+  let dir = realDir;
+  for (;;) {
+    const at = dir.lastIndexOf(`${sep}node_modules${sep}`);
+    if (at === -1) return null;
+    dir = dir.slice(0, at);
+    // project root の bundleDependencies は自分の publish 用で、root の依存は registry から入る (npm の inDepBundle)。
+    if (dir === realBase || !dir.startsWith(`${realBase}${sep}`)) return null;
+    const manifest = readManifest(dir);
+    // 読めない package.json は「同梱なし」にしない。
+    if (manifest !== null && (manifest.__unreadable || declaresBundledDependencies(manifest))) return dir;
+  }
+}
+
+/**
+ * allowlist の名前の実体が、lockfile で「公式レジストリのその名前の tarball」と確かめられるか。
+ * @param {string} key 実体の canonical path (realpath を lockfile の dir からの相対にしたもの)
  * @returns {string | null} 問題なければ null、あれば理由。
  */
-function lockfileObjection(lock, dir, name) {
+function lockfileObjection(lock, key, name) {
   if (lock === null) return 'no lockfile to confirm it against';
-  const key = toPosix(relative(lock.base, dir));
   const entry = lock.packages[key];
   if (entry === undefined || entry === null || typeof entry !== 'object') return `not in the lockfile ${repoRelative(lock.file)} (${key})`;
   if (entry.inBundle === true) return `a bundled copy (inBundle) in ${repoRelative(lock.file)}, not the registry package`;
@@ -169,10 +200,16 @@ function scanScripts(nodeModules, lock, state) {
         }
       } else if (Object.hasOwn(INSTALL_SCRIPT_ALLOWLIST, name)) {
         // allowlist の名前の実体は、script の有無に関係なく (npm rebuild <name> が同名の全実体を対象にするため)
-        // manifest の name と lockfile のエントリで「公式レジストリのその名前の tarball」であることを確かめる。
+        // manifest の name・祖先の同梱宣言・lockfile のエントリで「公式レジストリのその名前の tarball」であることを確かめる。
+        // link (workspace) を辿った先の nested 依存は、走査した path (node_modules/ws/node_modules/x) ではなく
+        // 実体の path (packages/ws/node_modules/x) で lockfile に載るので、realpath を project root からの相対にして引く。
+        const realDir = realpathSync(dir);
+        const bundler = bundlingAncestor(state.realBase, realDir);
         const objection = manifestName !== name
           ? `package.json names ${manifestName} — an alias cannot borrow an allowlisted name`
-          : lockfileObjection(lock, dir, name);
+          : bundler !== null
+            ? `inside the bundle of ${repoRelative(bundler)} (its package.json declares bundleDependencies), not the registry package`
+            : lockfileObjection(lock, toPosix(relative(state.realBase, realDir)), name);
         if (objection !== null) {
           state.failures.push(
             `${shown}: directory name ${name} is allowlisted but the package there is ${objection}` +
@@ -215,7 +252,10 @@ for (const root of roots) {
     bad++;
     continue;
   }
-  const state = { visited: new Set(), scanned: 0, allowed: [], rebuildNames: new Set(), failures: [] };
+  // lockfile の key は project root (root の node_modules の親) からの相対 path。実体は realpath で引くので、
+  // root の node_modules 自体が symlink (git worktree 等) でも基準の dir を realpath にそろえる。
+  const realBase = dirname(realpathSync(root));
+  const state = { visited: new Set(), scanned: 0, allowed: [], rebuildNames: new Set(), failures: [], realBase };
   const lock = readLockfile(root, state);
   scanScripts(root, lock, state);
   for (const line of state.failures) console.error(`NG ${line}`);

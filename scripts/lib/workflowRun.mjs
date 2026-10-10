@@ -1,18 +1,209 @@
 // GitHub Actions workflow (.github/workflows/*.yml) の step から `run:` のシェルを取り出し、npm / npx の呼び出しを
 // 1 つずつ検査するための純関数群 (tests/scripts/workflow-guards.test.ts が使う)。第三者の YAML パーサを足さない
-// (CLAUDE.md 掟 16) 代わりに、このリポの workflow が使う形だけを読み、**読めない形は throw する (fail-closed)**。
+// (CLAUDE.md 掟 16) 代わりに、このリポの workflow が使う形だけを読み、**読めない形・読み残しうる形は throw する
+// (fail-closed)**。
 //
-// 読める形:
-//   run: npm ci --ignore-scripts               (plain scalar・行末の " # comment" は落とす)
-//   run: 'npm ci' / run: "npm ci"              (1 行の引用符付き)
-//   run: |  / |- / |+ / > / >- / >+            (block scalar・key より深いインデントの行を本文とする)
-// 読めない形 (throw): アンカー / エイリアス (& *)・タグ (!)・flow (`[` `{`)・複数行の引用符・block scalar の
-//   インデント指示子 (|2 等)・step の外や不明な位置の run。
+// 脅威モデル (docs/DEPLOY_CHECKLIST.md §7.14): 守る相手は、保守者 (AI エージェントを含む) が**うっかり** workflow に
+// `npm install` や `npx …` を足すこと。意図的に検査を欺く書き方 (変数に入れたコマンドを後で展開する等) はレビューの
+// 範囲。ただし npm / npx という語を含むのに読めない形 (ラッパー・サブシェル・展開・引用・コメント内) と、run を
+// 読み残しうる YAML の書式は必ず throw し、うっかりの別書式を黙って通さない。
 //
-// コマンドは `&&` `||` `;` `|` と改行で分け、先頭の `time` と `VAR=value` の環境変数指定を落として、
-// 最初の語 (npm / npx / node …) で判定できる形にする。
+// 読む YAML の形 (top-level の `jobs:` 以下だけ):
+//   - job / job の key / step の key は引用符なしの `key:` か `key: value`。インデントは各階層の最初の行で決め、
+//     揃っていない行は throw。steps は `- ` で始まるブロックシーケンス (インデントなし = indentless も可) で、
+//     各 step は `- key: …` の行から始まる。
+//   - 値: plain scalar (1 行・行末の " # comment" は落とす) / 1 行の引用符付き ('…' と、`\` を含まない "…") /
+//     block scalar (`|` `|-` `|+` `>` `>-` `>+`。`>` は空行・深いインデントの行を含まないものだけ)。
+//   throw する形: タブのインデント・CR 改行・引用符付きや複合 (`?` `<<`) の key・flow (`[` `{`)・アンカー / エイリアス
+//   (`&` `*`)・タグ (`!`)・block scalar のインデント指示子 (`|2` 等)・複数行の plain / 引用符付き scalar (継続行)・
+//   `\` を含む二重引用符・空の run・同じ key の重複・揃っていないインデント・step が 0 件の job (`uses:` の job を含む)。
+//
+// シェル (splitCommands): `\` + 改行 (行継続) を bash と同じく先に取り除き、`&&` `||` `;` `|` `|&` `&` と改行で分け、
+// 先頭の `time` と `VAR=value` を落として最初の語 (npm / npx / node …) で判定できる形にする。シェル構文の完全な解析は
+// しない代わりに、npm / npx を含む行で読めないもの (上記) を throw する。
 
-const STEP_RE = /^(\s*)- /;
+const NPM_WORD = /\b(?:npm|npx)\b/;
+const KEY_LINE = /^(\w[\w-]*):(?:[ \t]+(.*))?$/;
+const BLANK_OR_COMMENT = /^\s*(?:#.*)?$/;
+// 区切り: && / || / |& / ; / | / & (ただし 2>&1 や &> のリダイレクトの & は区切りにしない)
+const SEPARATOR = /\s*(?:&&|\|\||\|&|;|\||(?<![<>])&(?!>))\s*/;
+
+function lineError(line, message) {
+  return new Error(`line ${line.at + 1}: ${message}`);
+}
+
+/** 空行・コメント行を飛ばした次の行を返す (消費しない)。インデントにタブがあれば throw。 */
+function peek(state) {
+  for (let at = state.i; at < state.lines.length; at++) {
+    const text = state.lines[at];
+    if (BLANK_OR_COMMENT.test(text)) continue;
+    if (/^ *\t/.test(text)) throw new Error(`line ${at + 1}: a tab in the indentation is not read`);
+    const indent = text.search(/\S/);
+    return { at, indent, text: text.slice(indent).trimEnd() };
+  }
+  return null;
+}
+
+/** `key:` / `key: value` を読む。引用符付き・複合 (`?` / `<<`)・flow・シーケンスの行は throw。 */
+function mappingEntry(line) {
+  const m = KEY_LINE.exec(line.text);
+  if (!m) throw lineError(line, `unreadable mapping key (quoted / complex / flow / sequence entries are not read): ${line.text}`);
+  const value = (m[2] ?? '').trim();
+  return { key: m[1], value: value.startsWith('#') ? '' : value };
+}
+
+/** key より深い行と空行・コメント行を読み飛ばす (読まない値 = env / with / strategy 等の中身)。 */
+function skipNested(state, keyIndent) {
+  while (state.i < state.lines.length) {
+    const text = state.lines[state.i];
+    if (!BLANK_OR_COMMENT.test(text) && text.search(/\S/) <= keyIndent) break;
+    state.i++;
+  }
+}
+
+/** block scalar の本文 (key より深い行) を読む。本文が無ければ ''。 */
+function readBlockScalar(state, line, keyIndent, header) {
+  const m = /^([|>])([+-]?)(?:\s+#.*)?$/.exec(header);
+  if (!m) throw lineError(line, `unsupported block scalar header (indentation indicator etc.): ${header}`);
+  const body = [];
+  let bodyIndent = null;
+  while (state.i < state.lines.length) {
+    const text = state.lines[state.i];
+    if (text.trim() === '') {
+      body.push('');
+      state.i++;
+      continue;
+    }
+    const spaces = /^ */.exec(text)[0].length;
+    if (text[spaces] === '\t' && (bodyIndent === null || spaces < bodyIndent)) {
+      throw new Error(`line ${state.i + 1}: a tab in the indentation is not read`);
+    }
+    if (bodyIndent === null) {
+      if (spaces <= keyIndent) break;
+      bodyIndent = spaces;
+    }
+    // 本文より浅い行 (コメント行を含む) で block scalar は終わる (YAML)。
+    if (spaces < bodyIndent) break;
+    body.push(text.slice(bodyIndent));
+    state.i++;
+  }
+  while (body.length > 0 && body[body.length - 1] === '') body.pop();
+  if (m[1] === '|') return body.join('\n');
+  // folded: 空行と深いインデントの行は改行として残る (YAML) ので、1 行に畳める形だけを読む。
+  if (body.some((text) => text === '' || /^\s/.test(text))) {
+    throw lineError(line, 'a folded block scalar with blank or more-indented lines is not read');
+  }
+  return body.join(' ');
+}
+
+/** step の key の値を読み、値に属する行を消費する。 */
+function readValue(state, line, keyIndent, value) {
+  if (value === '') {
+    skipNested(state, keyIndent);
+    return { kind: 'nested', text: '' };
+  }
+  if (value[0] === '|' || value[0] === '>') {
+    return { kind: 'block', text: readBlockScalar(state, line, keyIndent, value) };
+  }
+  let text;
+  if (value[0] === "'") {
+    const m = /^'((?:[^']|'')*)'(?:\s+#.*)?$/.exec(value);
+    if (!m) throw lineError(line, `a multi-line or unterminated single-quoted scalar is not read: ${value}`);
+    text = m[1].replace(/''/g, "'");
+  } else if (value[0] === '"') {
+    // `\` の escape (\n 等) は改行や別の文字を作るので、escape を含む二重引用符は読まない。
+    const m = /^"([^"\\]*)"(?:\s+#.*)?$/.exec(value);
+    if (!m) throw lineError(line, `a double-quoted scalar with escapes (\\), multiple lines or no closing quote is not read: ${value}`);
+    text = m[1];
+  } else {
+    if (/^[&*!\[\]{},%@`]/.test(value) || /^[-?:](?:\s|$)/.test(value)) {
+      throw lineError(line, `unsupported YAML (anchor / alias / tag / flow / indicator): ${value}`);
+    }
+    text = value.replace(/\s+#.*$/, '');
+  }
+  // plain / 引用符付きの scalar は次の深い行に続けられる (複数行の scalar)。続きは読まないので throw。
+  const next = peek(state);
+  if (next !== null && next.indent > keyIndent) throw lineError(next, 'a multi-line scalar (continuation line) is not read');
+  return { kind: 'scalar', text };
+}
+
+/** `- key: …` から始まる 1 step を読む。 */
+function parseStep(state, item, seqIndent) {
+  const m = /^-( +)(\S.*)$/.exec(item.text);
+  if (!m) throw lineError(item, 'a step must have its first key on the "- " line');
+  const keyIndent = seqIndent + 1 + m[1].length;
+  const keys = {};
+  let run = null;
+  let line = { at: item.at, indent: keyIndent, text: m[2] };
+  state.i = item.at + 1;
+  for (;;) {
+    const { key, value } = mappingEntry(line);
+    if (Object.hasOwn(keys, key) || (key === 'run' && run !== null)) throw lineError(line, `step has two ${key} keys`);
+    const read = readValue(state, line, keyIndent, value);
+    if (key === 'run') {
+      if (read.text.trim() === '') throw lineError(line, 'an empty run (or a run value on the following lines) is not read');
+      run = read.text;
+    } else {
+      keys[key] = read.kind === 'scalar' ? read.text : value;
+    }
+    const next = peek(state);
+    if (next === null || next.indent <= seqIndent) break;
+    if (next.indent !== keyIndent) throw lineError(next, `step keys must be at indent ${keyIndent}`);
+    line = next;
+    state.i = next.at + 1;
+  }
+  let commands = [];
+  if (run !== null) {
+    try {
+      commands = splitCommands(run);
+    } catch (error) {
+      throw lineError(item, error.message);
+    }
+  }
+  return { raw: state.lines.slice(item.at, state.i).join('\n'), keys, run, commands };
+}
+
+/** `steps:` の値 (ブロックシーケンス) を読む。 */
+function parseSteps(state, keyIndent) {
+  const first = peek(state);
+  if (first === null || first.indent < keyIndent || !/^-(?:\s|$)/.test(first.text)) {
+    throw new Error(`line ${(first?.at ?? state.lines.length - 1) + 1}: steps must be a non-empty block sequence of "- " items`);
+  }
+  const seqIndent = first.indent;
+  const steps = [];
+  for (let next = peek(state); next !== null && next.indent >= seqIndent; next = peek(state)) {
+    if (next.indent > seqIndent) throw lineError(next, `unexpected indentation in steps (items are at indent ${seqIndent})`);
+    if (!/^-(?:\s|$)/.test(next.text)) {
+      if (seqIndent === keyIndent) break; // indentless: steps と同じ高さの key で終わる
+      throw lineError(next, 'steps items must start with "- "');
+    }
+    steps.push(parseStep(state, next, seqIndent));
+  }
+  return steps;
+}
+
+/** 1 job の本文 (job の key より深い行) を読み、steps を返す。 */
+function parseJob(state, jobIndent, name) {
+  const first = peek(state);
+  if (first === null || first.indent <= jobIndent) throw new Error(`job ${name} has no body`);
+  const keyIndent = first.indent;
+  let steps = null;
+  for (let next = peek(state); next !== null && next.indent > jobIndent; next = peek(state)) {
+    if (next.indent !== keyIndent) throw lineError(next, `keys of job ${name} must be at indent ${keyIndent}`);
+    const { key, value } = mappingEntry(next);
+    state.i = next.at + 1;
+    if (key !== 'steps') {
+      skipNested(state, keyIndent);
+      continue;
+    }
+    if (steps !== null) throw lineError(next, `job ${name} has two steps keys`);
+    if (value !== '') throw lineError(next, `steps of job ${name} must be a block sequence: ${value}`);
+    steps = parseSteps(state, keyIndent);
+  }
+  // step の無い job (`uses:` で別 workflow を呼ぶ job を含む) は、中で何が走るかをここで読めない。
+  if (steps === null || steps.length === 0) throw new Error(`job ${name} has no steps to read (a job without steps, e.g. uses:, is not read)`);
+  return steps;
+}
 
 /**
  * 1 つの workflow ファイルを job ごとの step 配列に分ける。
@@ -20,143 +211,62 @@ const STEP_RE = /^(\s*)- /;
  * @returns {Array<{ job: string, steps: Array<{ raw: string, keys: Record<string, string>, run: string | null, commands: string[] }> }>}
  */
 export function parseWorkflowJobs(source) {
+  if (source.includes('\r')) throw new Error('a workflow with CR line endings is not read');
   const lines = source.split('\n');
-  const jobsAt = lines.findIndex((line) => /^jobs:\s*$/.test(line));
-  if (jobsAt === -1) throw new Error('workflow has no top-level jobs:');
+  const jobsAt = lines.findIndex((line) => /^jobs:(?:\s+#.*)?\s*$/.test(line));
+  if (jobsAt === -1) throw new Error('workflow has no top-level jobs: (block mapping) to read');
+  const state = { lines, i: jobsAt + 1 };
+  const first = peek(state);
+  if (first === null || first.indent === 0) throw new Error('jobs: has no jobs');
+  const jobIndent = first.indent;
   const jobs = [];
-  let job = null;
-  let stepsIndent = null;
-  let step = null;
-  for (let i = jobsAt + 1; i < lines.length; i++) {
-    const line = lines[i];
-    if (/^\S/.test(line) && !/^\s*#/.test(line) && line.trim() !== '') {
-      // 別の top-level key (jobs: の後ろに来る env 等) で終わり
-      break;
-    }
-    const jobHead = /^  ([\w-]+):\s*$/.exec(line);
-    if (jobHead) {
-      job = { job: jobHead[1], steps: [] };
-      jobs.push(job);
-      stepsIndent = null;
-      step = null;
-      continue;
-    }
-    if (job === null) continue;
-    if (/^\s+steps:\s*$/.test(line)) {
-      stepsIndent = line.search(/\S/);
-      continue;
-    }
-    if (stepsIndent === null) continue;
-    const stepHead = STEP_RE.exec(line);
-    if (stepHead && stepHead[1].length === stepsIndent + 2 && !/^\s*#/.test(line)) {
-      step = { lines: [line.slice(stepHead[0].length)], indent: stepHead[0].length };
-      job.steps.push(step);
-      continue;
-    }
-    if (step !== null) {
-      if (line.trim() === '') {
-        step.lines.push('');
-        continue;
-      }
-      const indent = line.search(/\S/);
-      if (/^\s*#/.test(line)) {
-        // step より浅いコメントは block scalar を終える (YAML)。深いものは本文の可能性があるので相対インデントを保つ。
-        step.lines.push(indent < step.indent ? line.trim() : line.slice(step.indent));
-        continue;
-      }
-      if (indent < step.indent) {
-        step = null; // steps の終わり (次の job key 等)
-        continue;
-      }
-      step.lines.push(line.slice(step.indent));
-    }
-  }
-  for (const j of jobs) {
-    j.steps = j.steps.map((s) => parseStep(s.lines));
+  // インデント 0 の行 (jobs: の後ろの top-level key) で jobs は終わる。
+  for (let next = peek(state); next !== null && next.indent > 0; next = peek(state)) {
+    if (next.indent !== jobIndent) throw lineError(next, `jobs must be at indent ${jobIndent}`);
+    const { key, value } = mappingEntry(next);
+    if (value !== '') throw lineError(next, `job ${key} must be a block mapping: ${value}`);
+    state.i = next.at + 1;
+    jobs.push({ job: key, steps: parseJob(state, jobIndent, key) });
   }
   return jobs;
 }
 
-/** step の行 (先頭の "- " を除いた相対インデント) から key と run を読む。 */
-function parseStep(lines) {
-  const keys = {};
-  let run = null;
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    const kv = /^([\w-]+):(.*)$/.exec(line);
-    if (!kv) continue; // 入れ子 (env の中身・with の中身) か空行
-    const key = kv[1];
-    let value = kv[2];
-    if (key !== 'run') {
-      keys[key] = value.trim();
-      continue;
-    }
-    if (run !== null) throw new Error('step has two run keys');
-    value = value.replace(/^\s+/, '');
-    const head = value.trim();
-    if (/^[&*!\[{]/.test(head)) throw new Error(`unsupported YAML in run (anchor/alias/tag/flow): ${head}`);
-    const block = /^([|>])([+-]?)\s*(#.*)?$/.exec(head);
-    if (block) {
-      const body = [];
-      let bodyIndent = null;
-      let j = i + 1;
-      for (; j < lines.length; j++) {
-        const l = lines[j];
-        if (l.trim() === '') {
-          body.push('');
-          continue;
-        }
-        const indent = l.search(/\S/);
-        if (bodyIndent === null) {
-          if (indent === 0) break;
-          bodyIndent = indent;
-        }
-        if (indent < bodyIndent) break;
-        body.push(l.slice(bodyIndent));
-      }
-      if (bodyIndent === null) throw new Error('empty block scalar in run');
-      while (body.length > 0 && body[body.length - 1] === '') body.pop();
-      run = block[1] === '>' ? body.join(' ').replace(/\s+/g, ' ').trim() : body.join('\n');
-      i = j - 1;
-      continue;
-    }
-    if (/^[|>]\d/.test(head)) throw new Error(`unsupported block scalar indentation indicator in run: ${head}`);
-    if (head.startsWith("'")) {
-      const m = /^'((?:[^']|'')*)'\s*(#.*)?$/.exec(head);
-      if (!m) throw new Error(`unsupported multi-line or unterminated single-quoted run: ${head}`);
-      run = m[1].replace(/''/g, "'");
-      continue;
-    }
-    if (head.startsWith('"')) {
-      const m = /^"((?:[^"\\]|\\.)*)"\s*(#.*)?$/.exec(head);
-      if (!m) throw new Error(`unsupported multi-line or unterminated double-quoted run: ${head}`);
-      run = m[1].replace(/\\(.)/g, '$1');
-      continue;
-    }
-    if (head === '') throw new Error('empty run');
-    run = head.replace(/\s+#.*$/, '');
-  }
-  return { raw: lines.join('\n'), keys, run, commands: run === null ? [] : splitCommands(run) };
-}
-
-/** シェルの 1 行 (複数行可) を個々のコマンドに分ける。先頭の time / 環境変数指定は落とす。 */
+/** シェル (複数行可) を個々のコマンドに分ける。先頭の time / 環境変数指定は落とす。npm / npx を読めない形は throw。 */
 export function splitCommands(shell) {
+  // 行継続は bash と同じく `\` + 改行をそのまま取り除く (`np\` + 改行 + `m install` = `npm install`)。
+  const joined = shell.replace(/\\\n/g, '');
   const out = [];
-  for (const line of shell.split('\n')) {
-    const stripped = line.replace(/^\s*#.*$/, '').trim();
-    if (stripped === '') continue;
-    for (const part of stripped.split(/\s*(?:&&|\|\||;|\|)\s*/)) {
+  for (const line of joined.split('\n')) {
+    const trimmed = line.trim();
+    if (trimmed === '') continue;
+    if (trimmed.startsWith('#')) {
+      // シェルのコメント。npm / npx を含むもの (行継続でコメントに連結された行・複数行の文字列の中身かもしれない) は読めない。
+      if (NPM_WORD.test(trimmed)) throw new Error(`npm / npx in a shell comment is not read: ${trimmed}`);
+      continue;
+    }
+    for (const part of trimmed.split(SEPARATOR)) {
       const words = part.trim().split(/\s+/).filter(Boolean);
       while (words.length > 0 && (words[0] === 'time' || /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[0]))) words.shift();
-      if (words.length > 0) out.push(words.join(' '));
+      const command = words.join(' ');
+      if (words[0] === 'npm' || words[0] === 'npx') {
+        // 引数の展開・サブシェル・引用・escape、同じコマンド内の別の npm / npx は、実際に渡る引数を読めない。
+        if (/[`$(){}'"\\]/.test(command) || NPM_WORD.test(words.slice(1).join(' '))) {
+          throw new Error(`an npm / npx command with expansions, subshells, quotes or another npm / npx is not read: ${part.trim()}`);
+        }
+      } else if (NPM_WORD.test(part)) {
+        // env npm … / bash -c 'npm …' / "$(npm …)" / xargs npm … / (npm …) / /usr/bin/npm … / n=npm 等。
+        throw new Error(`npm / npx not at the head of the command (wrapper / subshell / expansion / quote / path / assignment) is not read: ${part.trim()}`);
+      }
+      if (words.length > 0) out.push(command);
     }
   }
   return out;
 }
 
 /**
- * npm / npx の呼び出し 1 つを分類する。
- * @returns {{ tool: 'npm' | 'npx', subcommand: string | null, args: string[], prefix: string | null }}
+ * npm / npx の呼び出し 1 つを分類する (npm / npx で始まらなければ null)。
+ * `--prefix <dir>` / `--prefix=<dir>` / `-C <dir>` は prefix として取り出す (2 回以上・空は throw)。
+ * @returns {{ tool: 'npm' | 'npx', subcommand: string | null, args: string[], prefix: string | null } | null}
  */
 export function classifyNpmCommand(command) {
   const words = command.split(/\s+/);
@@ -165,12 +275,19 @@ export function classifyNpmCommand(command) {
   let prefix = null;
   const rest = [];
   for (let i = 1; i < words.length; i++) {
-    if (words[i] === '--prefix' && i + 1 < words.length) {
-      prefix = words[i + 1];
+    const word = words[i];
+    let value;
+    if (word === '--prefix' || word === '-C') {
+      value = words[i + 1] ?? '';
       i++;
+    } else if (word.startsWith('--prefix=')) {
+      value = word.slice('--prefix='.length);
+    } else {
+      rest.push(word);
       continue;
     }
-    rest.push(words[i]);
+    if (prefix !== null || value === '') throw new Error(`npm --prefix must be given once with a directory: ${command}`);
+    prefix = value;
   }
   if (tool === 'npx') return { tool, subcommand: null, args: rest, prefix };
   const subcommand = rest.find((w) => !w.startsWith('-')) ?? null;
