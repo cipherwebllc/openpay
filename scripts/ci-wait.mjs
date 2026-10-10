@@ -6,18 +6,18 @@
 // (2026-07-06 に実害)。settle 判定と conclusion 集計を単一スクリプトに固定し、
 // 呼び出し側は出力ファイルを Read して HEAD 一致と exit code だけ確認すればよい。
 //
-// 判定は「期待する check 名の集合」(scripts/lib/ciWait.mjs の EXPECTED_PR_CHECKS・workflow との
-// ドリフトは tests/scripts/ci-wait.test.ts が検出) に対して行う (第 7 回レビュー E8)。workflow run が
+// 判定は「期待する check 名の集合」(正本は scripts/ci-expected-checks.json・workflow とのドリフトは
+// tests/scripts/ci-wait.test.ts が検出) に対して行う (第 7 回レビュー E8)。workflow run が
 // まだ登録されていない・必須 job が SKIPPED のときに「出てきた分は全部 SUCCESS」で exit 0 に
 // ならないよう、期待 check が全部そろって SUCCESS のときだけ 0 を返す。期待集合を適用するのは
 // PR の base が main のときだけで、積み上げ PR (base が main 以外) は従来の判定
 // (出てきた check が全部 SUCCESS/NEUTRAL/SKIPPED) に戻し、先頭行に expected=skipped(base=…) と出す。
 // base が取れない (gh の応答に無い・空) ときは曖昧な fallback をせず exit 3 (掟 13)。
 //
-// 期待集合は「対象 PR の HEAD にある scripts/lib/ciWait.mjs」から読む (gh api contents)。必須 job と
-// 定数を同時に足した PR を main 側のスクリプトで監視しても PR 側の集合で判定するため。PR 側に
-// ファイルが無い・読めない・取得できないときは、blob hash がローカルと同一なときだけローカルの定数を
-// 使い、それ以外は exit 3 (fail-closed)。
+// 期待集合は「対象 PR の HEAD にある scripts/ci-expected-checks.json」から読む (gh api contents)。必須 job と
+// JSON を同時に足した PR を main 側のスクリプトで監視しても PR 側の集合で判定するため。PR 側にファイルが無い
+// (このファイルより前の main から分岐した PR)・取得できない・形が違うときは、base 不明と同じく曖昧な fallback
+// (ローカルの集合で代用する等) をせず exit 3 (fail-closed)。PR を main に rebase すれば読める。
 //
 // 使い方:
 //   node scripts/ci-wait.mjs <PR番号>            # settle まで待つ (既定 30 分)
@@ -29,25 +29,27 @@
 // 出力 (stdout): SETTLED/PENDING/TIMEOUT 行 (headSha 付き・missing=期待 check のうち未登録の数・
 //   expected=期待 check 数 か skipped(base=<base>)) + check 一覧 TSV (未登録の期待 check は `<name>\tMISSING`)。
 // exit code: 0 = 期待 check 全部 SUCCESS (他も合格)・1 = 失敗 check あり・2 = timeout / 未 settle・
-//   3 = 引数/gh エラー・base 不明・期待集合を PR 側から読めない・--head 不一致 (解決できない短縮 SHA を含む)。
+//   3 = 引数/gh エラー・base 不明・期待集合を PR 側から読めない・--head 不一致 (解決できない短縮 SHA を含む)・
+//   ローカルの期待集合 JSON が壊れている (lib の import 時の検証)。
 // vercel の deploy check は判定から除外する (merge 条件は repo CI のみ)。
 
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import {
-  EXPECTED_PR_CHECKS,
-  MAIN_BRANCH,
-  blobSha,
-  evaluateChecks,
-  normalizeRollup,
-  parseExpectedChecks,
-} from './lib/ciWait.mjs';
+
+// lib は import 時にローカルの scripts/ci-expected-checks.json を検証して読む (壊れていれば throw)。
+// その throw が未処理の exit 1 (= 失敗 check あり) と取り違えられないよう exit 3 にする。
+let lib;
+try {
+  lib = await import('./lib/ciWait.mjs');
+} catch (err) {
+  console.error(`scripts/lib/ciWait.mjs を読み込めません: ${err instanceof Error ? err.message : String(err)}`);
+  process.exit(3);
+}
+const { EXPECTED_CHECKS_PATH, MAIN_BRANCH, evaluateChecks, normalizeRollup, parseExpectedChecksJson } = lib;
 
 const POLL_INTERVAL_MS = 40_000;
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const LIB_PATH = 'scripts/lib/ciWait.mjs';
 
 function usageExit(msg) {
   console.error(msg);
@@ -114,43 +116,34 @@ function fetchPr() {
 }
 
 /**
- * 対象 PR の HEAD にある scripts/lib/ciWait.mjs から期待集合を読む。
- * 取れない / 読めないときは blob hash がローカルと同じときだけローカルの定数、それ以外は exit 3。
+ * 対象 PR の HEAD にある scripts/ci-expected-checks.json から期待集合を読む。
+ * 取得できない (404 = このファイルより前の main から分岐した PR を含む)・形が違うときは exit 3 (ローカルで代用しない)。
  */
 const expectedCache = new Map();
 function loadExpectedChecks(headRefOid) {
   if (expectedCache.has(headRefOid)) return expectedCache.get(headRefOid);
-  const res = spawnSync('gh', ['api', `repos/{owner}/{repo}/contents/${LIB_PATH}?ref=${headRefOid}`], {
+  const fail = (why) => {
+    console.error(`PR の HEAD ${headRefOid.slice(0, 7)} の ${EXPECTED_CHECKS_PATH} ${why}。PR を main に rebase してから再実行すること`);
+    process.exit(3);
+  };
+  const res = spawnSync('gh', ['api', `repos/{owner}/{repo}/contents/${EXPECTED_CHECKS_PATH}?ref=${headRefOid}`], {
     encoding: 'utf8',
   });
-  let remote = null;
-  if (res.status === 0) {
-    try {
-      const body = JSON.parse(res.stdout);
-      remote = {
-        sha: typeof body.sha === 'string' ? body.sha : '',
-        content: Buffer.from(String(body.content ?? ''), 'base64').toString('utf8'),
-      };
-    } catch {
-      remote = null;
+  if (res.status !== 0) fail(`を取得できません (${res.stderr?.trim() || res.stdout?.trim() || 'gh api 失敗'})`);
+  let text = '';
+  try {
+    const body = JSON.parse(res.stdout);
+    if (body?.encoding !== 'base64' || typeof body.content !== 'string') {
+      throw new Error(`encoding=${JSON.stringify(body?.encoding ?? null)}`);
     }
+    text = Buffer.from(body.content, 'base64').toString('utf8');
+  } catch (err) {
+    fail(`の gh api 応答を読めません (${err instanceof Error ? err.message : String(err)})`);
   }
-  const localSource = readFileSync(resolve(REPO_ROOT, LIB_PATH), 'utf8');
-  const localSha = blobSha(localSource);
-  let expected = remote ? parseExpectedChecks(remote.content) : null;
-  if (!expected) {
-    if (remote && remote.sha === localSha) {
-      expected = [...EXPECTED_PR_CHECKS];
-    } else {
-      const why = !remote
-        ? `PR の HEAD ${headRefOid.slice(0, 7)} から ${LIB_PATH} を取得できません (${res.stderr?.trim() || res.stdout?.trim() || 'gh api 失敗'})`
-        : `PR の HEAD ${headRefOid.slice(0, 7)} の ${LIB_PATH} から EXPECTED_PR_CHECKS を読めず、ローカル (${localSha.slice(0, 7)}) とも一致しません (${remote.sha.slice(0, 7)})`;
-      console.error(`${why}。PR を main に rebase するか、ローカルを PR の branch に合わせてから再実行すること`);
-      process.exit(3);
-    }
-  }
-  expectedCache.set(headRefOid, expected);
-  return expected;
+  const parsed = parseExpectedChecksJson(text);
+  if ('error' in parsed) fail(`を期待集合として読めません (${parsed.error})`);
+  expectedCache.set(headRefOid, parsed.checks);
+  return parsed.checks;
 }
 
 function report(label, { headSha, baseRefName, checks }, expected, verdict) {

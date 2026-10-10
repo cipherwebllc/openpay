@@ -6,37 +6,69 @@
 // SKIPPED でも緑扱いだった。merge 判定は「必須 check が全部そろって SUCCESS」を肯定形で確認する
 // (memory: feedback_merge_gate_ci_wait_only)。
 //
-// 期待集合は EXPECTED_PR_CHECKS の定数 (main 向け PR で必ず走る check 名)。実行時にローカルの
-// workflow から導出すると、監視している PR の HEAD と結び付かない (job を足した PR を main から
-// 監視すると旧集合で exit 0) ので、定数にして tests/scripts/ci-wait.test.ts が workflow とのドリフトを
-// 検出する: analyzeWorkflows() が .github/workflows を解析し、PR で必ず走る job 名の集合が定数と
-// 一致すること・解析できない形 (未対応の on の形・matrix・reusable workflow・式や複数行の name・
-// if/needs の組み合わせ・flow 形式の jobs) が PR trigger の workflow に現れたら unsupported として
-// test を落とす (fail-closed・黙って除外しない)。
+// 期待集合の正本は scripts/ci-expected-checks.json (`{"checks": [...]}` だけ・main 向け PR で必ず走る check 名)。
+// 実行時にローカルの workflow から導出すると、監視している PR の HEAD と結び付かない (job を足した PR を
+// main から監視すると旧集合で exit 0) ので、ファイルにして tests/scripts/ci-wait.test.ts が workflow との
+// ドリフトを検出する: analyzeWorkflows() が .github/workflows を解析し、PR で必ず走る job 名の集合が JSON と
+// 一致すること・解析できない形が現れたら unsupported として test を落とすこと (fail-closed・黙って除外しない)。
 //
-// CLI は定数を「対象 PR の HEAD にあるこのファイル」から読む (parseExpectedChecks): 必須 job と定数を
-// 同時に足した PR を main 側のスクリプトで監視しても、PR 側の集合で判定するため。配列リテラルの形は
-// parseExpectedChecks が読めるもの (quote 付き文字列の配列・行コメント可) に固定し、test が自分自身を
-// 読んで定数と一致することを確かめる。
+// CLI は JSON を「対象 PR の HEAD にあるファイル」から読み、parseExpectedChecksJson() で形を検証する
+// (必須 job と JSON を同時に足した PR を main 側のスクリプトで監視しても、PR 側の集合で判定するため)。
+// 正本が JS の定数だった頃は PR 側の JS ソースを字句解析して読んでいて、テンプレート文字列内の見本や別名の
+// export を定数と取り違える穴が残った。データを JSON に分け、JSON.parse + 形の検証だけで読むことで、その種の
+// 取り違えを構造的に無くす。このモジュールの EXPECTED_PR_CHECKS もローカルの同じ JSON から作る。
 //
 // 期待集合を適用するのは PR の base が main のときだけ。積み上げ PR (base が main 以外) では
 // 届かない check を待ち続けないよう、従来の判定 (出てきた check が全部 SUCCESS/NEUTRAL/SKIPPED) に戻す。
 
-import { createHash } from 'node:crypto';
 import { readdirSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 export const MAIN_BRANCH = 'main';
 
-// main 向け PR で必ず走る check 名 (job の name: か job id)。workflow の job を足す / 外す PR はここも更新する。
-export const EXPECTED_PR_CHECKS = Object.freeze([
-  'audit', // ci.yml
-  'e2e-prodflags', // e2e.yml
-  'lighthouse', // lighthouse.yml
-  'lua-real', // ci.yml
-  'playwright', // e2e.yml
-  'test', // ci.yml
-]);
+// 期待集合の正本 (repo root からの path)。workflow の job を足す / 外す PR はこのファイルも更新する。
+export const EXPECTED_CHECKS_PATH = 'scripts/ci-expected-checks.json';
+
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
+
+/**
+ * 期待集合の JSON を読む。形は `{"checks": ["audit", ...]}` だけ (余計なキー無し・空でない配列・
+ * 空でない文字列・重複無し)。重複キーは JSON.parse が黙って後勝ちにし、人が読む値と採用する値がずれるので、
+ * 正規形 (JSON.stringify(…, null, 2) + 末尾改行) と一致することも求める。読めなければ理由を返す (部分採用しない)。
+ * @param {string} text
+ * @returns {{ checks: string[] } | { error: string }}
+ */
+export function parseExpectedChecksJson(text) {
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch (err) {
+    return { error: `JSON として読めません (${err instanceof Error ? err.message : String(err)})` };
+  }
+  if (data === null || typeof data !== 'object' || Array.isArray(data)) return { error: 'トップレベルが object ではありません' };
+  const keys = Object.keys(data);
+  if (keys.length !== 1 || keys[0] !== 'checks') return { error: `キーは checks だけにすること (${keys.join(', ') || 'キー無し'})` };
+  const { checks } = data;
+  if (!Array.isArray(checks)) return { error: 'checks が配列ではありません' };
+  if (checks.length === 0) return { error: 'checks が空です' };
+  const badIndex = checks.findIndex((c) => typeof c !== 'string' || c.trim() === '');
+  if (badIndex !== -1) return { error: `checks[${badIndex}] が空でない文字列ではありません (${JSON.stringify(checks[badIndex])})` };
+  const duplicate = checks.find((c, i) => checks.indexOf(c) !== i);
+  if (duplicate !== undefined) return { error: `checks に重複があります (${duplicate})` };
+  if (text !== `${JSON.stringify(data, null, 2)}\n`) return { error: '正規形 (JSON.stringify(…, null, 2) + 末尾改行) ではありません' };
+  return { checks: [...checks] };
+}
+
+/** ローカルの正本を読む。壊れていれば throw する (空集合や古い値で黙って続けない)。 */
+function readLocalExpectedChecks() {
+  const parsed = parseExpectedChecksJson(readFileSync(join(REPO_ROOT, EXPECTED_CHECKS_PATH), 'utf8'));
+  if ('error' in parsed) throw new Error(`${EXPECTED_CHECKS_PATH}: ${parsed.error}`);
+  return parsed.checks;
+}
+
+// main 向け PR で必ず走る check 名 (ローカルの正本から作る・別に書き写さない)。
+export const EXPECTED_PR_CHECKS = Object.freeze(readLocalExpectedChecks());
 
 export const PENDING_STATES = new Set(['IN_PROGRESS', 'QUEUED', 'PENDING', 'EXPECTED']);
 // 期待集合に無い check (将来足された第三者 app 等)・base が main 以外のときの従来どおりの合格条件。
@@ -47,13 +79,37 @@ const IGNORED_CHECK_RE = /vercel/i;
 // ---------------------------------------------------------------------------
 // workflow 解析 (ドリフト検出用・実行時には使わない)
 //
-// 本格的な YAML parser は依存に無いので、GitHub Actions workflow の定型 (2 スペース indent) だけを
-// 読む行指向の parser。読めない形は黙って解釈せず unsupported に積む。
+// 脅威モデル: 守る対象は、保守者が PR で走る workflow / job をうっかり足し (または外し)、期待集合
+// (scripts/ci-expected-checks.json) の更新を忘れること。忘れたまま merge すると ci-wait は足された check を
+// 待たずに exit 0 する (偽成功)。そのため、対応文法 (下記) だけで書かれていると確かめてから「必須 / 除外」を
+// 判定し、対応文法の外は必ず unsupported にして test を落とす (fail-closed・黙って除外しない)。リポ内で意図的に
+// 検査を欺く難読化はレビューで止める範囲で、この parser の目的外 (YAML を完全に解釈することは目指さない)。
+//
+// 本格的な YAML parser は依存に無い (掟 16 で足さない) ので、GitHub Actions workflow の定型だけを読む行指向の
+// parser。検査は「文書構造 → トップレベル → on: / jobs:」の順で、文書構造かトップレベルに unsupported があれば
+// on: / jobs: は読まない (形の分からない文書から「pull_request が無い」とは言わない)。
+//   - 文書: 単一ドキュメントだけ。許すのは先頭の BOM と、最初の非空行の `---` 1 つ。2 つ目の `---`・`...`・
+//     スペース以外の indent (タブ等)・BOM 以外の制御文字 (単独の CR・YAML が改行とみなす U+0085 / U+2028 /
+//     U+2029 を含む) は文書単位で unsupported。
+//   - トップレベル: plain の `key:` だけ。quote 付きの key は `"on":` (YAML 1.1 で on が真偽値になる回避の定型)
+//     だけを例外にし、それ以外 (`"jobs":` 等)・アンカー/タグ/`? `/`<<:` 等の key でない行・重複 key は unsupported。
+//   - on: イベント名 1 つ / flow 配列 / block 配列 / flow map / block map のどの形から来ても、各 entry を同じ
+//     eventProblem() に通す (イベント名は EVENT_NAME_RE・値は空か対応する map だけ・アンカー/エイリアス/タグは
+//     unsupported)。`on: []` / `{}` / `null` は今の workflow に無い形なので unsupported。
+//   - jobs: block map だけ (indent は最初の子から検出)。check 名が静的に決まらない job は unsupported。
+// 子の行は indent で親に囲われるので、YAML が見る key はこの parser が見る行の key の部分集合になる (quote 付きの
+// key・アンカー/エイリアス・`<<:`・`? `・複数行の flow を拒否している前提で。複数行の scalar が行を飲み込むことは
+// あっても key を作り出すことはない)。
 // ---------------------------------------------------------------------------
 
 const PR_FILTER_KEYS = new Set(['paths', 'paths-ignore', 'types']);
 const PR_BRANCH_KEYS = new Set(['branches', 'branches-ignore']);
 const GLOB_RE = /[*?[\]!+]/;
+
+// 対応する scalar = quote / アンカー / エイリアス / タグ / flow 記号を含まない 1 語 (branch・path・job id・flow map の値)。
+// これ以外 (`"main"`・`&x`・`*x`・`!!str x`・`{…}`・`[…]`・空白を含む) は読めない形として null / unsupported にする。
+const PLAIN_SCALAR_RE = /^[A-Za-z0-9_][\w./*?-]*$/;
+const EVENT_NAME_RE = /^[a-z][a-z_]*$/;
 
 /** 行コメントと (quote の外の) 末尾コメントを落とす。 */
 function stripComment(line) {
@@ -83,20 +139,15 @@ function indentOf(line) {
 }
 
 /**
- * `key: value` の行を分解する。key の後に `:` が無ければ null。
- * quote 付きの key は top-level の `"on":` だけに使う (YAML 1.1 で on が真偽値扱いされる回避の定型)。
- * block 内の key (イベント名・job id・job の field) は plain のみ対応で、quote 付きは呼び出し側が unsupported にする。
+ * `key: value` の行を分解する。key の後に `:` が無ければ null。quote は key を囲む quote (plain なら null)。
+ * quote 付きの key を受け付けるのはトップレベルの `"on":` だけで、それ以外は呼び出し側が unsupported にする。
  */
 function splitKey(line) {
   const m = line.trim().match(/^(?:"([^"]+)"|'([^']+)'|([A-Za-z_][\w-]*)):(?:\s+(.*))?$/);
   if (!m) return null;
-  return { key: m[1] ?? m[2] ?? m[3], value: (m[4] ?? '').trim(), quoted: m[3] === undefined };
+  const quote = m[1] !== undefined ? '"' : m[2] !== undefined ? "'" : null;
+  return { key: m[1] ?? m[2] ?? m[3], value: (m[4] ?? '').trim(), quote };
 }
-
-// 対応する scalar = quote / アンカー / エイリアス / タグ / flow 記号を含まない 1 語 (イベント名・branch・path・job id)。
-// これ以外 (`"pull_request"`・`&x`・`*x`・`!!str x`・`{…}`・`[…]`・空白を含む) は読めない形として null / unsupported にする。
-const PLAIN_SCALAR_RE = /^[A-Za-z0-9_][\w./*?-]*$/;
-const EVENT_NAME_RE = /^[a-z][a-z_]*$/;
 
 /** flow 形式の `[a, b]` / `{a: 1, b: {c: d}}` を、ネストを尊重して要素ごとに分ける。 */
 function splitFlow(inner) {
@@ -124,16 +175,24 @@ function splitFlow(inner) {
   return parts;
 }
 
-/** `[a, b]` → ['a', 'b']。flow seq でないか、要素が plain scalar でなければ null (quote 付き等は読まない)。 */
-function flowList(value) {
+/** `[a, b]` → ['a', 'b'] (要素は生の文字列のまま・検査は呼び出し側)。flow 配列でなければ null。 */
+function flowItems(value) {
   const v = value.trim();
   if (!v.startsWith('[') || !v.endsWith(']')) return null;
-  const items = splitFlow(v.slice(1, -1));
-  if (items.some((item) => !PLAIN_SCALAR_RE.test(item))) return null;
+  return splitFlow(v.slice(1, -1));
+}
+
+/** plain scalar だけの flow 配列 (branches / paths 等) → 要素。それ以外 (quote 付きの要素等) は null。 */
+function flowList(value) {
+  const items = flowItems(value);
+  if (!items || items.some((item) => !PLAIN_SCALAR_RE.test(item))) return null;
   return items;
 }
 
-/** `{a: x, b: {..}}` → [{key, value}]。flow map でなければ null、key が quote 付き等で読めなければ undefined。 */
+/**
+ * `{a: x, b: {..}}` → [{ key, value, sub: [] }]。flow map でなければ null、
+ * 読めない (quote 付きの key・`{a, b}` のような key だけの要素・重複 key) なら undefined。
+ */
 function flowMap(value) {
   const v = value.trim();
   if (!v.startsWith('{') || !v.endsWith('}')) return null;
@@ -141,9 +200,9 @@ function flowMap(value) {
   if (!inner) return [];
   const entries = [];
   for (const part of splitFlow(inner)) {
-    const entry = splitKey(part) ?? (part.match(/^([A-Za-z_][\w-]*):$/) ? { key: part.slice(0, -1), value: '', quoted: false } : null);
-    if (!entry || entry.quoted) return undefined; // 読めない (quote 付きの key を含む)
-    entries.push(entry);
+    const entry = splitKey(part);
+    if (!entry || entry.quote || entries.some((e) => e.key === entry.key)) return undefined;
+    entries.push({ key: entry.key, value: entry.value, sub: [] });
   }
   return entries;
 }
@@ -154,18 +213,11 @@ function isEmptyValue(value) {
   return v === '' || v === '{}' || v === 'null' || v === '~';
 }
 
-/** top-level `key:` の行と、その block (次の top-level key の手前まで) を返す。 */
-function topLevelBlock(lines, key) {
-  const start = lines.findIndex((l) => l.trim() !== '' && indentOf(l) === 0 && splitKey(l)?.key === key);
-  if (start === -1) return null;
-  let end = lines.length;
-  for (let i = start + 1; i < lines.length; i++) {
-    if (lines[i].trim() !== '' && indentOf(lines[i]) === 0) {
-      end = i;
-      break;
-    }
-  }
-  return { head: splitKey(lines[start]), body: lines.slice(start + 1, end) };
+/** flow map の値として対応する形か (空・plain scalar・plain scalar の flow 配列・同じ条件の flow map)。 */
+function supportedFlowValue(value) {
+  if (isEmptyValue(value) || PLAIN_SCALAR_RE.test(value) || flowList(value)) return true;
+  const map = flowMap(value);
+  return Array.isArray(map) && map.every((e) => supportedFlowValue(e.value));
 }
 
 /** 空行を除いた最初の行の indent (= その block の子の indent)。非空行が無ければ -1。 */
@@ -174,25 +226,33 @@ function childIndent(lines) {
   return -1;
 }
 
-/** `- item` 行を集める。indent は最初の行から取り、他の形や plain でない要素 (quote 付き等) が混ざれば null。 */
-function blockList(lines) {
+/** `- item` 行を集める (要素は生の文字列)。indent が揃わない・`- ` で始まらない行があれば null。 */
+function blockItems(lines) {
   const items = lines.filter((l) => l.trim() !== '');
   if (items.length === 0) return null;
   const indent = indentOf(items[0]);
   const out = [];
   for (const line of items) {
     if (indentOf(line) !== indent || !line.trim().startsWith('- ')) return null;
-    const item = line.trim().slice(2).trim();
-    if (!PLAIN_SCALAR_RE.test(item)) return null;
-    out.push(item);
+    out.push(line.trim().slice(2).trim());
   }
   return out;
 }
 
+/** plain scalar だけの block 配列 (branches / paths 等) → 要素。それ以外 (quote 付きの要素等) は null。 */
+function blockList(lines) {
+  const items = blockItems(lines);
+  if (!items || items.some((item) => !PLAIN_SCALAR_RE.test(item))) return null;
+  return items;
+}
+
+// 読めなかった entry の子の行は、理由を積んだうえで読み飛ばす (同じ原因の行を何度も報告しない)
+const SKIP = Symbol('skip');
+
 /**
  * block の行を「子 (最初の非空行の indent) の `key: value` 行 + その下に続く行 (sub)」に分ける。
- * indent は 2 でも 4 でも最初の子から検出する。子より浅い行・子と同じ深さで key でない行・
- * 親の無い深い行は errors に積む (fail-closed・黙って読み飛ばさない)。
+ * indent は 2 でも 4 でも最初の子から検出する。子より浅い行・子と同じ深さで key でない行・quote 付きの key・
+ * 重複 key・親の無い深い行は errors に積む (fail-closed・黙って読み飛ばさない)。
  */
 function mapEntries(lines, label) {
   const entries = [];
@@ -208,28 +268,26 @@ function mapEntries(lines, label) {
     const depth = indentOf(line);
     if (depth < indent) {
       errors.push(`${label}: inconsistent indent (${line.trim()})`);
-      current = null;
+      current = SKIP;
       continue;
     }
     if (depth === indent) {
       const entry = splitKey(line);
-      if (!entry) {
-        errors.push(`${label}: unreadable line (${line.trim()})`);
-        current = null;
-        continue;
-      }
-      if (entry.quoted) {
-        // `"pull_request":` 等。YAML としては plain と同じ key だが、デコードせず読めない形として扱う (fail-closed)
-        errors.push(`${label}: quoted key (${line.trim()})`);
-        current = null;
+      // quote 付きの key (`"pull_request":` 等) は YAML としては plain と同じ key だが、デコードせず読めない形として扱う
+      const reason = !entry ? 'unreadable line' : entry.quote ? 'quoted key' : entries.some((e) => e.key === entry.key) ? 'duplicate key' : null;
+      if (reason) {
+        errors.push(`${label}: ${reason} (${line.trim()})`);
+        current = SKIP;
         continue;
       }
       current = { key: entry.key, value: entry.value, sub: [] };
       entries.push(current);
       continue;
     }
+    if (current === SKIP) continue;
     if (!current) {
       errors.push(`${label}: inconsistent indent (${line.trim()})`);
+      current = SKIP;
       continue;
     }
     current.sub.push(line);
@@ -237,7 +295,72 @@ function mapEntries(lines, label) {
   return { entries, errors };
 }
 
-/** pull_request の設定 (flow map の entries か、block の行) から filtered / branches を読む。 */
+/** BOM 以外の制御文字か (C0 の \t 以外・DEL・C1・YAML が改行とみなす U+2028 / U+2029・途中の BOM・単独の CR)。 */
+function isControlChar(ch) {
+  const c = ch.codePointAt(0);
+  return (c < 0x20 && c !== 0x09) || (c >= 0x7f && c <= 0x9f) || c === 0x2028 || c === 0x2029 || c === 0xfeff;
+}
+
+/**
+ * 文書構造とトップレベルを検査し、トップレベルの key ごとの block ({ head, body }) を返す。
+ * 問題があれば unsupported に積む (呼び出し側はそのとき on: / jobs: を読まない)。
+ */
+function readDocument(source) {
+  const unsupported = [];
+  const text = source.startsWith('﻿') ? source.slice(1) : source;
+  // CRLF の CR だけを落とし、残った CR (単独の CR = YAML では改行) は制御文字として拒否する
+  const rawLines = text.split('\n').map((line) => (line.endsWith('\r') ? line.slice(0, -1) : line));
+  const controlLine = rawLines.findIndex((line) => [...line].some(isControlChar));
+  if (controlLine !== -1) {
+    const ch = [...rawLines[controlLine]].find(isControlChar);
+    const code = ch.codePointAt(0).toString(16).toUpperCase().padStart(4, '0');
+    unsupported.push(`document: control character (U+${code} at line ${controlLine + 1})`);
+  }
+  // indent はスペースだけ (タブ・NBSP 等が混ざると YAML と indent の数え方がずれる)
+  const tabLine = rawLines.findIndex((line) => /^ *[^\S ]/.test(line));
+  if (tabLine !== -1) unsupported.push(`document: non-space indentation (line ${tabLine + 1})`);
+  const lines = rawLines.map(stripComment);
+  const first = lines.findIndex((line) => line.trim() !== '');
+  for (const [i, line] of lines.entries()) {
+    if (!/^(?:---|\.\.\.)(?:\s|$)/.test(line)) continue;
+    if (i === first && line.trimEnd() === '---') lines[i] = '';
+    else unsupported.push(`document: document marker (line ${i + 1}: ${line.trim()})`);
+  }
+  const blocks = new Map();
+  if (unsupported.length > 0) return { blocks, unsupported };
+
+  let current = null;
+  for (const [i, line] of lines.entries()) {
+    if (line.trim() === '') continue;
+    if (indentOf(line) > 0) {
+      if (current === null) {
+        unsupported.push(`top-level: indented line before the first key (line ${i + 1})`);
+        current = SKIP;
+      } else if (current !== SKIP) {
+        current.body.push(line);
+      }
+      continue;
+    }
+    const head = splitKey(line);
+    const reason = !head
+      ? 'unreadable line'
+      : head.quote && !(head.quote === '"' && head.key === 'on')
+        ? 'quoted key'
+        : blocks.has(head.key)
+          ? 'duplicate key'
+          : null;
+    if (reason) {
+      unsupported.push(`top-level: ${reason} (${line.trim()})`);
+      current = SKIP;
+      continue;
+    }
+    current = { head, body: [] };
+    blocks.set(head.key, current);
+  }
+  return { blocks, unsupported };
+}
+
+/** pull_request の設定 (flow map の entries か、block の entries) から filtered / branches を読む。 */
 function readPullRequestConfig(entries, unsupported) {
   const cfg = { filtered: null, branches: null, branchesIgnore: null };
   for (const { key, value, sub } of entries) {
@@ -245,10 +368,10 @@ function readPullRequestConfig(entries, unsupported) {
       unsupported.push(`on.pull_request.${key}: unsupported key`);
       continue;
     }
-    // 値は plain scalar の flow list か block list だけを読む (quote 付き・アンカー等は読めない形 = unsupported)
-    let list = flowList(value);
-    if (list === null && isEmptyValue(value) && sub && sub.length > 0) list = blockList(sub);
-    if (list === null) {
+    // 値は plain scalar の flow 配列 (同じ行) か block 配列 (次行以降・同じ行は空) だけを読む
+    // (quote 付き・アンカー等・空の配列は読めない形 = unsupported)
+    const list = sub.length === 0 ? flowList(value) : value === '' ? blockList(sub) : null;
+    if (list === null || list.length === 0) {
       unsupported.push(`on.pull_request.${key}: unreadable list`);
       continue;
     }
@@ -266,87 +389,94 @@ function readPullRequestConfig(entries, unsupported) {
   return cfg;
 }
 
+/** on: の値を形によらず [{ name, value, sub }] に揃える。形自体が読めなければ unsupported に積んで null。 */
+function eventEntries({ head, body }, unsupported) {
+  const { value } = head;
+  if (value !== '' && body.length > 0) {
+    unsupported.push(`on: value with nested lines (${value})`);
+    return null;
+  }
+  if (value === '') {
+    if (body.length === 0) {
+      unsupported.push('on: empty');
+      return null;
+    }
+    // block 配列 (`- event`)。要素の検査は eventProblem が他の形と同じく行う
+    if (body.every((l) => l.trim().startsWith('-'))) {
+      const items = blockItems(body);
+      if (!items) {
+        unsupported.push('on: unreadable list');
+        return null;
+      }
+      return items.map((name) => ({ name, value: '', sub: [] }));
+    }
+    // block map (`event:` + 同じ行の値 + 次行以降の子)
+    const { entries, errors } = mapEntries(body, 'on');
+    for (const reason of errors) unsupported.push(reason);
+    return entries.map(({ key, value: v, sub }) => ({ name: key, value: v, sub }));
+  }
+  let events;
+  if (value.startsWith('[')) {
+    const items = flowItems(value);
+    events = items && items.map((name) => ({ name, value: '', sub: [] }));
+  } else if (value.startsWith('{')) {
+    const map = flowMap(value);
+    events = map && map.map(({ key, value: v }) => ({ name: key, value: v, sub: [] }));
+  } else {
+    // イベント名 1 つ。`null` / `~` は空 (イベント無し) なので名前として読まない
+    events = isEmptyValue(value) ? [] : [{ name: value, value: '', sub: [] }];
+  }
+  if (!events) {
+    unsupported.push(`on: unreadable flow value (${value})`);
+    return null;
+  }
+  if (events.length === 0) {
+    unsupported.push(`on: empty value (${value})`);
+    return null;
+  }
+  return events;
+}
+
+/**
+ * on: の 1 entry を検査する。block map / flow map / flow 配列 / block 配列 / イベント名 1 つのどの形から来ても
+ * 同じこの関数を通す (形ごとに検査が違うと、片方だけ素通りする穴になる)。問題があれば理由を返す。
+ * 値は「空」か「対応する map」だけ: 同じ行の値は空 / null / {} / 対応する flow map、次行以降の子 (block) は
+ * 同じ行の値が空のときだけ。非 PR イベントの block の子 (schedule の cron 配列・workflow_dispatch の inputs 等) は
+ * indent で囲われていて on: の entry を増やせないので中身を見ない。pull_request の子は readPullRequestConfig が読む。
+ * @param {{ name: string, value: string, sub: string[] }} event
+ */
+function eventProblem({ name, value, sub }) {
+  if (!EVENT_NAME_RE.test(name)) return `on: unknown event (${name})`;
+  const ok = sub.length > 0 ? value === '' : isEmptyValue(value) || (value.startsWith('{') && supportedFlowValue(value));
+  return ok ? null : `on.${name}: unreadable value (${value})`;
+}
+
 /** `on:` を読み、PR trigger の有無と pull_request の設定を返す。 */
-function readTriggers(lines, unsupported) {
+function readTriggers(block, unsupported) {
   const result = { pullRequest: false, config: null };
-  const on = topLevelBlock(lines, 'on');
-  if (!on) {
+  if (!block) {
     unsupported.push('on: missing');
     return result;
   }
-  const value = on.head.value;
-  if (value) {
-    const list = flowList(value);
-    const map = flowMap(value);
-    if (list) {
-      result.pullRequest = list.includes('pull_request');
-      if (result.pullRequest) result.config = readPullRequestConfig([], unsupported);
-    } else if (map) {
-      for (const e of map) {
-        if (!EVENT_NAME_RE.test(e.key)) unsupported.push(`on: unknown event (${e.key})`);
-      }
-      const pr = map.find((e) => e.key === 'pull_request');
-      if (pr) {
-        result.pullRequest = true;
-        const inner = isEmptyValue(pr.value) ? [] : flowMap(pr.value);
-        if (inner === null || inner === undefined) unsupported.push('on.pull_request: unreadable flow map');
-        else result.config = readPullRequestConfig(inner, unsupported);
-      }
-    } else if (map === undefined) {
-      unsupported.push('on: unreadable flow value');
-    } else if (EVENT_NAME_RE.test(value)) {
-      // plain のイベント名 1 つ (`on: "pull_request"` のような quote 付きは読まない)
-      result.pullRequest = value === 'pull_request';
-      if (result.pullRequest) result.config = readPullRequestConfig([], unsupported);
-    } else {
-      unsupported.push(`on: unreadable value (${value})`);
-    }
-    return result;
+  const events = eventEntries(block, unsupported);
+  if (!events) return result;
+  // 「pull_request が無いので除外」と言えるのは、on: の全 entry が対応文法のときだけ (呼び出し側が unsupported を見る)
+  for (const event of events) {
+    const problem = eventProblem(event);
+    if (problem) unsupported.push(problem);
   }
-  // block 形式: `- event` の列か `event:` の map (子の indent は最初の行から検出・2 でも 4 でも可)
-  const body = on.body.filter((l) => l.trim() !== '');
-  if (body.length === 0) {
-    unsupported.push('on: empty');
-    return result;
-  }
-  if (body.every((l) => l.trim().startsWith('- '))) {
-    const list = blockList(body);
-    if (!list) {
-      unsupported.push('on: unreadable list');
-      return result;
-    }
-    result.pullRequest = list.includes('pull_request');
-    if (result.pullRequest) result.config = readPullRequestConfig([], unsupported);
-    return result;
-  }
-  const { entries, errors } = mapEntries(on.body, 'on');
-  for (const reason of errors) unsupported.push(reason);
-  // 「pull_request が無いので除外」と言えるのは、on: の全 entry が対応文法 (plain のイベント名 + 空か flow map の値) のときだけ
-  for (const e of entries) {
-    if (!EVENT_NAME_RE.test(e.key)) unsupported.push(`on: unknown event (${e.key})`);
-    else if (e.key !== 'pull_request' && !isEmptyValue(e.value) && !flowMap(e.value)) {
-      unsupported.push(`on.${e.key}: unreadable value (${e.value})`); // pull_request の値は下で読む
-    }
-  }
-  const pr = entries.find((e) => e.key === 'pull_request');
+  const pr = events.find((e) => e.name === 'pull_request');
   if (!pr) return result;
   result.pullRequest = true;
-  if (!isEmptyValue(pr.value)) {
-    const inner = flowMap(pr.value);
-    if (inner === null || inner === undefined || pr.sub.length > 0) {
-      unsupported.push('on.pull_request: unreadable value');
-      return result;
-    }
-    result.config = readPullRequestConfig(inner, unsupported);
-    return result;
+  if (eventProblem(pr)) return result;
+  if (pr.sub.length > 0) {
+    const sub = mapEntries(pr.sub, 'on.pull_request');
+    for (const reason of sub.errors) unsupported.push(reason);
+    result.config = readPullRequestConfig(sub.entries, unsupported);
+  } else {
+    // eventProblem を通った同じ行の値は空か flow map
+    result.config = readPullRequestConfig(isEmptyValue(pr.value) ? [] : flowMap(pr.value), unsupported);
   }
-  if (pr.sub.length === 0) {
-    result.config = readPullRequestConfig([], unsupported);
-    return result;
-  }
-  const sub = mapEntries(pr.sub, 'on.pull_request');
-  for (const reason of sub.errors) unsupported.push(reason);
-  result.config = readPullRequestConfig(sub.entries, unsupported);
   return result;
 }
 
@@ -370,9 +500,8 @@ function nameProblem(raw, sub) {
 }
 
 /** `jobs:` を読み、job ごとに name / 条件 / needs を返す。読めない形は unsupported に積む。 */
-function readJobs(lines, unsupported) {
+function readJobs(block, unsupported) {
   const jobs = [];
-  const block = topLevelBlock(lines, 'jobs');
   if (!block) {
     unsupported.push('jobs: missing');
     return jobs;
@@ -438,16 +567,19 @@ function readJobs(lines, unsupported) {
 }
 
 /**
- * workflow YAML を読む。
+ * workflow YAML を読む。文書構造かトップレベルに unsupported があれば on: / jobs: は読まない
+ * (pullRequest=false・jobs=[] だが、呼び出し側は unsupported を見て除外せず落とす)。
  * @param {string} source
  * @returns {{ pullRequest: boolean, filtered: string | null, branches: string[] | null, branchesIgnore: string[] | null,
  *   jobs: { id: string, name: string, conditional: string | null, needs: string[] }[], unsupported: string[] }}
  */
 export function parseWorkflow(source) {
-  const lines = source.split(/\r?\n/).map(stripComment);
-  const unsupported = [];
-  const triggers = readTriggers(lines, unsupported);
-  const jobs = readJobs(lines, unsupported);
+  const { blocks, unsupported } = readDocument(source);
+  if (unsupported.length > 0) {
+    return { pullRequest: false, filtered: null, branches: null, branchesIgnore: null, jobs: [], unsupported };
+  }
+  const triggers = readTriggers(blocks.get('on'), unsupported);
+  const jobs = readJobs(blocks.get('jobs'), unsupported);
   return {
     pullRequest: triggers.pullRequest,
     filtered: triggers.config?.filtered ?? null,
@@ -473,10 +605,11 @@ export function analyzeWorkflows(workflowsDir) {
     .sort();
   for (const file of files) {
     const wf = parseWorkflow(readFileSync(join(workflowsDir, file), 'utf8'));
-    // on: が読めない workflow は PR で走るか分からないので常に unsupported (job も数えない)
-    const onProblems = wf.unsupported.filter((r) => r.startsWith('on'));
-    if (onProblems.length > 0) {
-      for (const reason of onProblems) unsupported.push({ workflow: file, reason });
+    // 文書構造・トップレベル・on: の問題 (= jobs 以外) は PR で走るか分からないので常に unsupported (job も数えない)。
+    // jobs の問題は PR で走る workflow のときだけ数える (cron の workflow は matrix / if を自由に使える)
+    const blocking = wf.unsupported.filter((r) => !r.startsWith('jobs'));
+    if (blocking.length > 0) {
+      for (const reason of blocking) unsupported.push({ workflow: file, reason });
       continue;
     }
     if (!wf.pullRequest) {
@@ -495,7 +628,7 @@ export function analyzeWorkflows(workflowsDir) {
       excluded.push({ workflow: file, reason: `pull_request branches-ignore has ${MAIN_BRANCH}` });
       continue;
     }
-    for (const reason of wf.unsupported.filter((r) => !r.startsWith('on'))) unsupported.push({ workflow: file, reason });
+    for (const reason of wf.unsupported) unsupported.push({ workflow: file, reason });
     const byId = new Map(wf.jobs.map((j) => [j.id, j]));
     for (const job of wf.jobs) {
       if (job.conditional) {
@@ -516,41 +649,6 @@ export function analyzeWorkflows(workflowsDir) {
     }
   }
   return { required, excluded, unsupported };
-}
-
-// ---------------------------------------------------------------------------
-// 対象 PR の HEAD にあるこのファイルから定数を読む
-// ---------------------------------------------------------------------------
-
-/**
- * このファイルのソースから EXPECTED_PR_CHECKS の配列リテラルを読む。読めなければ null。
- * 形は `EXPECTED_PR_CHECKS = Object.freeze([ 'a', // comment \n 'b' ])` (quote 付き文字列のみ)。
- * @param {string} source
- * @returns {string[] | null}
- */
-export function parseExpectedChecks(source) {
-  const stripped = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
-  // 正確な export 宣言 (行頭・識別子の境界) がちょうど 1 つ。OLD_EXPECTED_PR_CHECKS や EXPECTED_PR_CHECKS_V2 は数えない
-  const decls = [...stripped.matchAll(/^[ \t]*export\s+const\s+EXPECTED_PR_CHECKS\b/gm)];
-  if (decls.length !== 1) return null;
-  // 初期化式全体が `Object.freeze([ 'a', "b", ])` で、`)` の直後 (同じ行) に `;` があり、その後は行末であること。
-  // `;` を必須にするのは、改行して `.concat(…)` を続ける式 (空行やコメントを挟んでも JS では同じ式の続き) を
-  // 「行末で確定」と誤認して先頭の配列だけ採用しないため。`;` の後は別の文なので frozen な const の値は変わらない。
-  const m = stripped
-    .slice(decls[0].index)
-    .match(
-      /^[ \t]*export\s+const\s+EXPECTED_PR_CHECKS\s*=\s*Object\.freeze\(\s*\[\s*((?:'[^'"\\\n]*'|"[^'"\\\n]*")(?:\s*,\s*(?:'[^'"\\\n]*'|"[^'"\\\n]*"))*\s*,?)?\s*\]\s*\)[ \t]*;[ \t]*(?=\r?\n|$)/,
-    );
-  if (!m || !m[1]) return null;
-  const names = [...m[1].matchAll(/['"]([^'"]*)['"]/g)].map((q) => q[1]);
-  if (names.length === 0 || names.some((n) => n === '') || new Set(names).size !== names.length) return null;
-  return names;
-}
-
-/** git の blob hash (GitHub contents API の sha と同じ)。 */
-export function blobSha(content) {
-  const bytes = Buffer.from(content, 'utf8');
-  return createHash('sha1').update(`blob ${bytes.length}\0`).update(bytes).digest('hex');
 }
 
 // ---------------------------------------------------------------------------

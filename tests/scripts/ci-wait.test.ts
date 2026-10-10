@@ -3,31 +3,36 @@
 //
 // 以前は「出てきた check が全部 SUCCESS/NEUTRAL/SKIPPED」で exit 0 だったので、e2e / lighthouse の
 // workflow run がまだ check として現れていない瞬間や、必須 job が skip された場合も緑扱いになりえた。
-// ここでは (1) 定数 EXPECTED_PR_CHECKS が今の workflow から解析した集合と一致すること (ドリフト検出)・
-// 解析できない形が PR trigger の workflow に現れたら落ちること (fail-closed) (2) 欠けた check は settle
-// しないこと (3) 期待 check は SUCCESS のみ合格であること (4) base が main 以外では期待集合を使わないこと
-// (5) --head は完全 OID で比較することを固定する。
+// ここでは (1) 正本 scripts/ci-expected-checks.json (= EXPECTED_PR_CHECKS) が今の workflow から解析した集合と
+// 一致すること (ドリフト検出)・解析できない形 (対応文法の外) が現れたら除外せず落ちること (fail-closed)
+// (2) 欠けた check は settle しないこと (3) 期待 check は SUCCESS のみ合格であること (4) base が main 以外では
+// 期待集合を使わないこと (5) --head は完全 OID で比較すること (6) CLI は対象 PR の HEAD の JSON だけを読み、
+// 形が違えば exit 3 にすることを固定する。
 import { spawnSync } from 'node:child_process';
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+  EXPECTED_CHECKS_PATH,
   EXPECTED_PR_CHECKS,
   analyzeWorkflows,
-  blobSha,
   evaluateChecks,
   expectedChecksFor,
   normalizeRollup,
-  parseExpectedChecks,
+  parseExpectedChecksJson,
   parseWorkflow,
 } from '../../scripts/lib/ciWait.mjs';
 
 const SCRIPT = resolve('scripts/ci-wait.mjs');
-const LIB = resolve('scripts/lib/ciWait.mjs');
 const WORKFLOWS = resolve('.github/workflows');
 const FULL_HEAD = '4981cc5deadbeef0000000000000000000000000';
-const LOCAL_LIB_SOURCE = readFileSync(LIB, 'utf8');
+const LOCAL_JSON = readFileSync(resolve(EXPECTED_CHECKS_PATH), 'utf8');
+
+/** 期待集合 JSON の正規形 (scripts/ci-expected-checks.json と同じ整形)。 */
+function expectedJson(checks: readonly string[]) {
+  return `${JSON.stringify({ checks }, null, 2)}\n`;
+}
 
 function run(name: string, status: string, conclusion: string) {
   return { __typename: 'CheckRun', name, status, conclusion, context: null, state: null };
@@ -45,8 +50,15 @@ function rollupOf(names: readonly string[], overrides: Record<string, { status?:
 
 const JOB = 'jobs:\n  a:\n    runs-on: x\n';
 
-describe('期待 check 集合の定数と workflow のドリフト検出 (fail-closed)', () => {
-  it('EXPECTED_PR_CHECKS は今の .github/workflows から解析した「main 向け PR で必ず走る job」と一致する', () => {
+describe('期待 check 集合の正本 (JSON) と workflow のドリフト検出 (fail-closed)', () => {
+  it('正本の JSON は正規形で読め、EXPECTED_PR_CHECKS はそれと同じ (JS 側に別の値を持たない)', () => {
+    expect(EXPECTED_CHECKS_PATH).toBe('scripts/ci-expected-checks.json');
+    const parsed = parseExpectedChecksJson(LOCAL_JSON);
+    expect(parsed).toEqual({ checks: [...EXPECTED_PR_CHECKS] });
+    expect(LOCAL_JSON).toBe(expectedJson(EXPECTED_PR_CHECKS));
+  });
+
+  it('正本の JSON は今の .github/workflows から解析した「main 向け PR で必ず走る job」と一致する', () => {
     const { required, excluded, unsupported } = analyzeWorkflows(WORKFLOWS);
     expect(unsupported, '解析できない形の workflow / job がある (parser を広げるか job を見直す)').toEqual([]);
     expect([...required].sort()).toEqual([...EXPECTED_PR_CHECKS].sort());
@@ -153,16 +165,16 @@ describe('期待 check 集合の定数と workflow のドリフト検出 (fail-c
       [`on:\n  push:\n  "pull_request":\n${JOB}`, ['on: quoted key ("pull_request":)']],
       [`on:\n  push:\n  'pull_request':\n${JOB}`, ["on: quoted key ('pull_request':)"]],
       [`on:\n  "pull_request_target":\n${JOB}`, ['on: quoted key ("pull_request_target":)']],
-      [`on: [push, "pull_request"]\n${JOB}`, ['on: unreadable value ([push, "pull_request"])']],
-      [`on: "pull_request"\n${JOB}`, ['on: unreadable value ("pull_request")']],
-      [`on:\n  - push\n  - "pull_request"\n${JOB}`, ['on: unreadable list']],
-      [`on: {"pull_request": {}}\n${JOB}`, ['on: unreadable flow value']],
+      [`on: [push, "pull_request"]\n${JOB}`, ['on: unknown event ("pull_request")']],
+      [`on: "pull_request"\n${JOB}`, ['on: unknown event ("pull_request")']],
+      [`on:\n  - push\n  - "pull_request"\n${JOB}`, ['on: unknown event ("pull_request")']],
+      [`on: {"pull_request": {}}\n${JOB}`, ['on: unreadable flow value ({"pull_request": {}})']],
       [`on:\n  ? pull_request\n${JOB}`, ['on: unreadable line (? pull_request)']],
       [`on:\n  push: &x\n    branches: [main]\n  <<: *x\n${JOB}`, ['on: unreadable line (<<: *x)', 'on.push: unreadable value (&x)']],
-      [`on:\n  pull_request: *x\n${JOB}`, ['on.pull_request: unreadable value']],
-      [`on:\n  pull_request: !!map {}\n${JOB}`, ['on.pull_request: unreadable value']],
+      [`on:\n  pull_request: *x\n${JOB}`, ['on.pull_request: unreadable value (*x)']],
+      [`on:\n  pull_request: !!map {}\n${JOB}`, ['on.pull_request: unreadable value (!!map {})']],
       [`on:\n  Push:\n${JOB}`, ['on: unknown event (Push)']],
-      [`on: {push: {}, "pull_request": {}}\n${JOB}`, ['on: unreadable flow value']],
+      [`on: {push: {}, "pull_request": {}}\n${JOB}`, ['on: unreadable flow value ({push: {}, "pull_request": {}})']],
     ];
     for (const [src, expected] of cases) {
       const wf = parseWorkflow(src);
@@ -193,8 +205,8 @@ describe('期待 check 集合の定数と workflow のドリフト検出 (fail-c
 
   it('jobs の quote 付き key (job id・field) は unsupported', () => {
     const wf = parseWorkflow('on: pull_request\njobs:\n  "test":\n    runs-on: x\n  a:\n    "name": b\n    runs-on: x\n');
-    // quote 付きの job id の後は親が無いので、その配下の行も inconsistent indent として積まれる (いずれも unsupported)
-    expect(wf.unsupported).toEqual(['jobs: quoted key ("test":)', 'jobs: inconsistent indent (runs-on: x)', 'jobs.a: quoted key ("name": b)']);
+    // quote 付きの job id の配下の行は、同じ原因で重ねて報告せず読み飛ばす
+    expect(wf.unsupported).toEqual(['jobs: quoted key ("test":)', 'jobs.a: quoted key ("name": b)']);
     expect(wf.jobs.map((j) => [j.id, j.name])).toEqual([['a', 'a']]);
   });
 
@@ -317,12 +329,159 @@ describe('期待 check 集合の定数と workflow のドリフト検出 (fail-c
         'a.yml:orphan:needs nobody (unknown or conditional)',
         'a.yml:reusable:job has uses:',
         'b.yml:plain:duplicate check name plain (also a.yml)',
-        'c.yml::on: unreadable value (!!binary abc)',
+        'c.yml::on: unknown event (!!binary abc)',
         'd.yml::on.pull_request.branches: unreadable list',
       ]);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('文書構造とトップレベルを先に検査する (対応文法だと確かめてから除外を判定する)', () => {
+  it('2 つ目のドキュメントに PR trigger を足しても、先頭だけ読んで除外しない (kv-backup-watch.yml の再現)', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ci-wait-multidoc-'));
+    try {
+      const original = readFileSync(join(WORKFLOWS, 'kv-backup-watch.yml'), 'utf8');
+      const line = original.split('\n').length; // 足した `---` の行番号
+      writeFileSync(join(dir, 'kv-backup-watch.yml'), `${original}---\non: pull_request\njobs:\n  added:\n    runs-on: x\n`);
+      const r = analyzeWorkflows(dir);
+      expect(r.excluded).toEqual([]);
+      expect(r.required).toEqual([]);
+      expect(r.unsupported).toEqual([{ workflow: 'kv-backup-watch.yml', reason: `document: document marker (line ${line}: ---)` }]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('許すのは先頭の BOM と最初の非空行の `---` 1 つだけ (`...`・2 つ目の `---`・`--- 内容` は unsupported)', () => {
+    expect(parseWorkflow(`---\non: pull_request\n${JOB}`)).toMatchObject({ pullRequest: true, unsupported: [] });
+    expect(parseWorkflow(`\uFEFF# head\n--- # doc\non: pull_request\n${JOB}`)).toMatchObject({ pullRequest: true, unsupported: [] });
+    expect(parseWorkflow(`on: push\n${JOB}...\n`).unsupported).toEqual(['document: document marker (line 5: ...)']);
+    expect(parseWorkflow(`---\n---\non: push\n${JOB}`).unsupported).toEqual(['document: document marker (line 2: ---)']);
+    expect(parseWorkflow(`--- {on: pull_request}\n${JOB}`).unsupported).toEqual(['document: document marker (line 1: --- {on: pull_request})']);
+  });
+
+  it('スペース以外の indent (タブ・NBSP) は on: でも jobs: でも文書単位で unsupported', () => {
+    expect(parseWorkflow(`on:\n\tpull_request:\n${JOB}`)).toMatchObject({
+      pullRequest: false,
+      unsupported: ['document: non-space indentation (line 2)'],
+    });
+    expect(parseWorkflow('on:\n  push:\njobs:\n\tadded:\n    runs-on: x\n').unsupported).toEqual(['document: non-space indentation (line 4)']);
+    expect(parseWorkflow(`on:\n  push:\n\u00A0 pull_request:\n${JOB}`).unsupported).toEqual(['document: non-space indentation (line 3)']);
+    // indent 以外のタブ (値の前の区切り) は YAML の空白として読む
+    expect(parseWorkflow(`on:\tpull_request\n${JOB}`)).toMatchObject({ pullRequest: true, unsupported: [] });
+  });
+
+  it('BOM 以外の制御文字 (単独の CR・U+0085・U+2028・途中の BOM・NUL) は unsupported・CRLF は読む', () => {
+    expect(parseWorkflow(`on: pull_request\r\njobs:\r\n  a:\r\n    runs-on: x\r\n`)).toMatchObject({ pullRequest: true, unsupported: [] });
+    const cases: [string, string][] = [
+      [`on: push\r  pull_request:\n${JOB}`, 'U+000D at line 1'],
+      [`on:\n  push:\u0085  pull_request:\n${JOB}`, 'U+0085 at line 2'],
+      [`on:\n  push:\u2028  pull_request:\n${JOB}`, 'U+2028 at line 2'],
+      [`on: push\uFEFF\n${JOB}`, 'U+FEFF at line 1'],
+      [`on: push\u0000\n${JOB}`, 'U+0000 at line 1'],
+    ];
+    for (const [src, where] of cases) {
+      expect(parseWorkflow(src).unsupported, JSON.stringify(src)).toEqual([`document: control character (${where})`]);
+    }
+  });
+
+  it('トップレベルの quote 付き key は "on": だけ例外 ("jobs":・\'on\': は unsupported)・重複 key・key でない行も unsupported', () => {
+    expect(parseWorkflow(`"on": pull_request\n${JOB}`)).toMatchObject({ pullRequest: true, unsupported: [] });
+    const cases: [string, string[]][] = [
+      ['on: pull_request\n"jobs":\n  a:\n    runs-on: x\n', ['top-level: quoted key ("jobs":)']],
+      ["on: pull_request\n'jobs':\n  a:\n    runs-on: x\n", ["top-level: quoted key ('jobs':)"]],
+      [`'on': pull_request\n${JOB}`, ["top-level: quoted key ('on': pull_request)"]],
+      [`on: push\n"on": pull_request\n${JOB}`, ['top-level: duplicate key ("on": pull_request)']],
+      [`on: push\n${JOB}jobs:\n  b:\n    runs-on: x\n`, ['top-level: duplicate key (jobs:)']],
+      [`on: push\n<<: *defaults\n${JOB}`, ['top-level: unreadable line (<<: *defaults)']],
+      [`on: push\n? jobs\n${JOB}`, ['top-level: unreadable line (? jobs)']],
+      [`%YAML 1.2\n---\non: push\n${JOB}`, ['document: document marker (line 2: ---)']],
+      [`  on: pull_request\n${JOB}`, ['top-level: indented line before the first key (line 1)']],
+    ];
+    for (const [src, expected] of cases) {
+      expect(parseWorkflow(src).unsupported, src).toEqual(expected);
+    }
+    // "jobs": に必須 job を足しても jobs=[] で黙って通らない
+    const dir = mkdtempSync(join(tmpdir(), 'ci-wait-quoted-jobs-'));
+    try {
+      writeFileSync(join(dir, 'a.yml'), 'on: pull_request\n"jobs":\n  added:\n    runs-on: x\n');
+      expect(analyzeWorkflows(dir)).toEqual({
+        required: [],
+        excluded: [],
+        unsupported: [{ workflow: 'a.yml', reason: 'top-level: quoted key ("jobs":)' }],
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('on: の entry は block map / flow map / flow 配列 / block 配列のどれでも同じ検査を通す', () => {
+  it('flow map の値もアンカー/エイリアス/タグは unsupported (on: {push: &cfg {}} を除外しない・block 形式と同じ)', () => {
+    const cases: [string, string[]][] = [
+      [`on: {push: &cfg {}}\n${JOB}`, ['on.push: unreadable value (&cfg {})']],
+      [`on:\n  push: &cfg {}\n${JOB}`, ['on.push: unreadable value (&cfg {})']],
+      [`on: {push: *cfg}\n${JOB}`, ['on.push: unreadable value (*cfg)']],
+      [`on: {push: !!map {}}\n${JOB}`, ['on.push: unreadable value (!!map {})']],
+      [`on: {push: {branches: *b}}\n${JOB}`, ['on.push: unreadable value ({branches: *b})']],
+      [`on: {push: {branches: ["main"]}}\n${JOB}`, ['on.push: unreadable value ({branches: ["main"]})']],
+      [`on: {push, pull_request}\n${JOB}`, ['on: unreadable flow value ({push, pull_request})']],
+      [`on: {push: {}, push: {}}\n${JOB}`, ['on: unreadable flow value ({push: {}, push: {}})']],
+      [`on:\n  push:\n  push:\n${JOB}`, ['on: duplicate key (push:)']],
+    ];
+    for (const [src, expected] of cases) {
+      expect(parseWorkflow(src).unsupported, src).toEqual(expected);
+    }
+    // 対応する flow map の値 (plain scalar・plain scalar の flow 配列・入れ子の flow map) は読む
+    expect(parseWorkflow(`on: {push: {branches: [main]}, workflow_dispatch: {inputs: {x: {type: boolean}}}}\n${JOB}`).unsupported).toEqual([]);
+    const dir = mkdtempSync(join(tmpdir(), 'ci-wait-flow-anchor-'));
+    try {
+      writeFileSync(join(dir, 'a.yml'), `on: {push: &cfg {}}\n${JOB}`);
+      expect(analyzeWorkflows(dir)).toEqual({
+        required: [],
+        excluded: [],
+        unsupported: [{ workflow: 'a.yml', reason: 'on.push: unreadable value (&cfg {})' }],
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('flow 配列・block 配列のイベント名も EVENT_NAME_RE を通す ([Push] / - Push を除外しない)', () => {
+    const cases: [string, string[]][] = [
+      [`on: [Push]\n${JOB}`, ['on: unknown event (Push)']],
+      [`on:\n  - Push\n${JOB}`, ['on: unknown event (Push)']],
+      [`on: Push\n${JOB}`, ['on: unknown event (Push)']],
+      [`on: [push, pull_request: {}]\n${JOB}`, ['on: unknown event (pull_request: {})']],
+      [`on: [push,, pull_request]\n${JOB}`, ['on: unknown event ()']],
+      [`on:\n  - push:\n${JOB}`, ['on: unknown event (push:)']],
+    ];
+    for (const [src, expected] of cases) {
+      expect(parseWorkflow(src).unsupported, src).toEqual(expected);
+    }
+    expect(parseWorkflow(`on: [push, workflow_dispatch]\n${JOB}`)).toMatchObject({ pullRequest: false, unsupported: [] });
+  });
+
+  it('on: [] / {} / null / ~ (今の workflow に無い形)・同じ行の値と次行の子の両方を持つ on: は unsupported', () => {
+    const cases: [string, string[]][] = [
+      [`on: []\n${JOB}`, ['on: empty value ([])']],
+      [`on: {}\n${JOB}`, ['on: empty value ({})']],
+      [`on: null\n${JOB}`, ['on: empty value (null)']],
+      [`on: ~\n${JOB}`, ['on: empty value (~)']],
+      [`on: [ ]\n${JOB}`, ['on: empty value ([ ])']],
+      [`on: push\n  pull_request:\n${JOB}`, ['on: value with nested lines (push)']],
+      [`on: [push,\n  pull_request]\n${JOB}`, ['on: value with nested lines ([push,)']],
+    ];
+    for (const [src, expected] of cases) {
+      expect(parseWorkflow(src).unsupported, src).toEqual(expected);
+    }
+  });
+
+  it('pull_request の branches / paths は空の配列・同じ行の値と次行の子の両方を持つ形を読まない', () => {
+    expect(parseWorkflow(`on:\n  pull_request:\n    branches: []\n${JOB}`).unsupported).toEqual(['on.pull_request.branches: unreadable list']);
+    expect(parseWorkflow(`on:\n  pull_request:\n    paths: [a]\n      - b\n${JOB}`).unsupported).toEqual(['on.pull_request.paths: unreadable list']);
   });
 });
 
@@ -400,7 +559,8 @@ describe('indent は最初の子から検出する (2 でも 4 でも・揃わ�
     const empty = parseWorkflow('on: pull_request\njobs:\n');
     expect(empty.unsupported).toEqual(['jobs: empty']);
     const ragged = parseWorkflow('on: pull_request\njobs:\n  a:\n    runs-on: x\n   b:\n    runs-on: x\n');
-    expect(ragged.unsupported).toEqual(['jobs.a: inconsistent indent (b:)']);
+    // 浅い `b:` の後の `runs-on: x` は job a の 2 つ目の runs-on (重複 key) になる。どちらも unsupported
+    expect(ragged.unsupported).toEqual(['jobs.a: inconsistent indent (b:)', 'jobs.a: duplicate key (runs-on: x)']);
     expect(ragged.jobs.map((j) => j.id)).toEqual(['a']);
     const shallow = parseWorkflow('on: pull_request\njobs:\n    a:\n        runs-on: x\n  b:\n    runs-on: x\n');
     expect(shallow.unsupported).toEqual(['jobs: inconsistent indent (b:)']);
@@ -413,54 +573,38 @@ describe('indent は最初の子から検出する (2 でも 4 でも・揃わ�
   });
 });
 
-describe('対象 PR の HEAD の定数を読む (parseExpectedChecks / blobSha)', () => {
-  it('このファイル自身から読んだ配列が定数と一致する (リテラルの形の固定)', () => {
-    expect(parseExpectedChecks(LOCAL_LIB_SOURCE)).toEqual([...EXPECTED_PR_CHECKS]);
+describe('期待集合 JSON の形の検証 (parseExpectedChecksJson)', () => {
+  it('正規形の {"checks": [空でない文字列…]} だけを受け付ける', () => {
+    expect(parseExpectedChecksJson(expectedJson(['audit', 'test']))).toEqual({ checks: ['audit', 'test'] });
+    expect(parseExpectedChecksJson(expectedJson(['check #1', 'e2e (Playwright)']))).toEqual({ checks: ['check #1', 'e2e (Playwright)'] });
   });
 
-  it('正確な export 宣言 + quote 付き文字列の配列だけを受け付け、それ以外 (識別子・spread・空・重複・定数が無い) は null', () => {
-    expect(parseExpectedChecks("export const EXPECTED_PR_CHECKS = Object.freeze(['a', \"b\"]);")).toEqual(['a', 'b']);
-    expect(parseExpectedChecks('export const EXPECTED_PR_CHECKS = Object.freeze([\n  // c\n  "a", /* x */ "b",\n]);\nexport const X = 1;\n')).toEqual(['a', 'b']);
-    expect(parseExpectedChecks("export const EXPECTED_PR_CHECKS = Object.freeze(['a']);")).toEqual(['a']); // EOF 直前
-    expect(parseExpectedChecks("export const EXPECTED_PR_CHECKS = Object.freeze(['a'])\n")).toBeNull(); // `;` 無しは式が続きうるので採用しない
-    expect(parseExpectedChecks("export const EXPECTED_PR_CHECKS = Object.freeze([a, 'b']);")).toBeNull();
-    expect(parseExpectedChecks("export const EXPECTED_PR_CHECKS = Object.freeze([...BASE, 'b']);")).toBeNull();
-    expect(parseExpectedChecks('export const EXPECTED_PR_CHECKS = Object.freeze([]);')).toBeNull();
-    expect(parseExpectedChecks("export const EXPECTED_PR_CHECKS = Object.freeze(['a', 'a']);")).toBeNull();
-    expect(parseExpectedChecks("export const EXPECTED_PR_CHECKS = Object.freeze(['a', '']);")).toBeNull();
-    expect(parseExpectedChecks("export const EXPECTED_PR_CHECKS = Object.freeze(['a' 'b']);")).toBeNull();
-    expect(parseExpectedChecks("export const EXPECTED_PR_CHECKS = ['a'];")).toBeNull();
-    expect(parseExpectedChecks("const EXPECTED_PR_CHECKS = Object.freeze(['a']);")).toBeNull(); // export が無い
-    expect(parseExpectedChecks('export const OTHER = 1;')).toBeNull();
-  });
-
-  it('実際の宣言以外に一致しない: 先行する別名の宣言・同名の 2 重宣言・初期化式の続き (.concat 等) は部分採用せず null', () => {
-    const real = "export const EXPECTED_PR_CHECKS = Object.freeze(['audit', 'test']);\n";
-    // 先に OLD_… があっても、それを採用して audit だけにしない
-    expect(parseExpectedChecks(`export const OLD_EXPECTED_PR_CHECKS = Object.freeze(['audit']);\n${real}`)).toEqual(['audit', 'test']);
-    expect(parseExpectedChecks(`const EXPECTED_PR_CHECKS_V2 = Object.freeze(['audit']);\n${real}`)).toEqual(['audit', 'test']);
-    // 同名の宣言が 2 つ・識別子だけの言及 (コメント外) は曖昧なので null
-    expect(parseExpectedChecks(`${real}${real}`)).toBeNull();
-    expect(parseExpectedChecks(`${real}export const EXPECTED_PR_CHECKS = Object.freeze(['x']);\n`)).toBeNull();
-    // 式が続く形は先頭の配列だけを読まない
-    expect(parseExpectedChecks("export const EXPECTED_PR_CHECKS = Object.freeze(['audit']).concat(['test']);\n")).toBeNull();
-    expect(parseExpectedChecks("export const EXPECTED_PR_CHECKS = Object.freeze(['audit']) /* x */ .concat(['test']);\n")).toBeNull();
-    expect(parseExpectedChecks("export const EXPECTED_PR_CHECKS = Object.freeze(['audit']), OTHER = 1;\n")).toBeNull();
-    expect(parseExpectedChecks("export const EXPECTED_PR_CHECKS = Object.freeze(['audit']); const y = 2;\n")).toBeNull();
-    expect(parseExpectedChecks("export const EXPECTED_PR_CHECKS = Object.freeze(['audit']) || ['test'];\n")).toBeNull();
-    // 改行後の式の継続 (JS では同じ式) を「行末で確定」と誤認して先頭の配列だけ採用しない。空行・コメントを挟んでも同じ
-    expect(parseExpectedChecks("export const EXPECTED_PR_CHECKS = Object.freeze(['audit'])\n  .concat(['added-required']);\n")).toBeNull();
-    expect(parseExpectedChecks("export const EXPECTED_PR_CHECKS = Object.freeze(['audit'])\n\n  .concat(['added-required']);\n")).toBeNull();
-    expect(parseExpectedChecks("export const EXPECTED_PR_CHECKS = Object.freeze(['audit'])\n  // note\n  .concat(['added-required']);\n")).toBeNull();
-    expect(parseExpectedChecks("export const EXPECTED_PR_CHECKS = Object.freeze(['audit']) /* a\n b */ .concat(['added-required']);\n")).toBeNull();
-    expect(parseExpectedChecks("export const EXPECTED_PR_CHECKS = Object.freeze(['audit'])\n  ;\n")).toBeNull(); // `;` は同じ行に要る
-    expect(parseExpectedChecks("export const EXPECTED_PR_CHECKS = Object.freeze(['audit'])\n  [0];\n")).toBeNull();
-  });
-
-  it('blobSha は git の blob hash と同じ (GitHub contents API の sha と突き合わせられる)', () => {
-    // `printf 'hello\n' | git hash-object --stdin` = ce013625030ba8dba906f756967f9e9ca394464a
-    expect(blobSha('hello\n')).toBe('ce013625030ba8dba906f756967f9e9ca394464a');
-    expect(blobSha('')).toBe('e69de29bb2d1d6434b8b29ae775ad8c2e48c5391');
+  it('壊れ方ごとに理由を返し、部分採用しない (配列でない・重複・空・JSON でない・余計なキー・正規形でない)', () => {
+    const cases: [string, string][] = [
+      ['{"checks": "audit"}\n', 'checks が配列ではありません'],
+      [`${JSON.stringify({ checks: { audit: true } }, null, 2)}\n`, 'checks が配列ではありません'],
+      [expectedJson(['audit', 'test', 'audit']), 'checks に重複があります (audit)'],
+      [expectedJson([]), 'checks が空です'],
+      [`${JSON.stringify({ checks: ['audit', ''] }, null, 2)}\n`, 'checks[1] が空でない文字列ではありません ("")'],
+      [`${JSON.stringify({ checks: ['audit', 1] }, null, 2)}\n`, 'checks[1] が空でない文字列ではありません (1)'],
+      [`${JSON.stringify({ checks: ['audit'], extra: [] }, null, 2)}\n`, 'キーは checks だけにすること (checks, extra)'],
+      [`${JSON.stringify({ expected: ['audit'] }, null, 2)}\n`, 'キーは checks だけにすること (expected)'],
+      ['{}\n', 'キーは checks だけにすること (キー無し)'],
+      ['["audit"]\n', 'トップレベルが object ではありません'],
+      ['null\n', 'トップレベルが object ではありません'],
+      ['{"checks": ["audit",]}\n', 'JSON として読めません'],
+      ["export const EXPECTED_PR_CHECKS = Object.freeze(['audit']);\n", 'JSON として読めません'],
+      ['', 'JSON として読めません'],
+      // JSON.parse は重複キーを黙って後勝ちにする (人が読む前半と採用する後半がずれる) ので正規形を求めて弾く
+      ['{\n  "checks": [\n    "audit"\n  ],\n  "checks": [\n    "audit",\n    "test"\n  ]\n}\n', '正規形'],
+      ['{"checks": ["audit", "test"]}\n', '正規形'],
+      [expectedJson(['audit']).trimEnd(), '正規形'],
+      [`﻿${expectedJson(['audit'])}`, 'JSON として読めません'],
+    ];
+    for (const [text, reason] of cases) {
+      const parsed = parseExpectedChecksJson(text);
+      expect('error' in parsed ? parsed.error : parsed, JSON.stringify(text)).toContain(reason);
+    }
   });
 });
 
@@ -538,10 +682,10 @@ describe('CLI (gh と git を偽物に差し替えて end-to-end)', () => {
     ghExit?: number;
     /** git rev-parse が返す完全 OID (null = 失敗) */
     gitResolves?: string | null;
-    /** gh api contents が返す PR 側の scripts/lib/ciWait.mjs (既定 = ローカルと同一) */
-    prLib?: string;
-    /** gh api contents が返す blob sha (既定 = prLib の blob hash) */
-    prLibSha?: string;
+    /** gh api contents が返す PR 側の scripts/ci-expected-checks.json (既定 = ローカルと同一) */
+    prJson?: string;
+    /** gh api contents の応答そのもの (既定 = prJson を base64 にした contents API の形) */
+    apiBody?: unknown;
     /** gh api contents を失敗させる exit code (404 等) */
     apiExit?: number;
   };
@@ -551,8 +695,8 @@ describe('CLI (gh と git を偽物に差し替えて end-to-end)', () => {
       headRefOid = FULL_HEAD,
       ghExit = 0,
       gitResolves = null,
-      prLib = LOCAL_LIB_SOURCE,
-      prLibSha = blobSha(prLib),
+      prJson = LOCAL_JSON,
+      apiBody = { type: 'file', encoding: 'base64', content: Buffer.from(prJson, 'utf8').toString('base64') },
       apiExit = 0,
     } = options;
     const baseRefName = 'baseRefName' in options ? options.baseRefName : 'main';
@@ -564,7 +708,7 @@ describe('CLI (gh と git を偽物に差し替えて end-to-end)', () => {
     if (baseRefName !== undefined) pr.baseRefName = baseRefName;
     writeFileSync(fixture, JSON.stringify(pr));
     const api = join(dir, 'api.json');
-    writeFileSync(api, JSON.stringify({ sha: prLibSha, encoding: 'base64', content: Buffer.from(prLib, 'utf8').toString('base64') }));
+    writeFileSync(api, JSON.stringify(apiBody));
     const apiArgs = join(dir, 'api.args');
     // 本物の gh の代わり: `gh pr view` は固定 JSON、`gh api …/contents/…` は PR 側のファイル (base64) を返す
     writeFileSync(
@@ -658,57 +802,64 @@ describe('CLI (gh と git を偽物に差し替えて end-to-end)', () => {
     }
   });
 
-  it('期待集合は対象 PR の HEAD にある scripts/lib/ciWait.mjs から読む (PR 側が 7 件ならそれを期待する)', () => {
-    const prLib = LOCAL_LIB_SOURCE.replace("'test', // ci.yml", "'test', // ci.yml\n  'added-required', // new.yml");
-    expect(parseExpectedChecks(prLib)).toEqual([...EXPECTED_PR_CHECKS, 'added-required']);
+  it('期待集合は対象 PR の HEAD にある scripts/ci-expected-checks.json だけから読む (PR 側が 7 件ならそれを期待する)', () => {
     const seven = [...EXPECTED_PR_CHECKS, 'added-required'];
-    const ok = cli(rollupOf(seven), ['--once'], { prLib });
+    const prJson = expectedJson(seven);
+    const ok = cli(rollupOf(seven), ['--once'], { prJson });
     expect(ok.stdout.split('\n')[0]).toBe('SETTLED head=4981cc5 checks=7 nonSUCCESS=0 missing=0 expected=7');
     expect(ok.status).toBe(0);
-    expect(ok.apiCalls).toEqual([`repos/{owner}/{repo}/contents/scripts/lib/ciWait.mjs?ref=${FULL_HEAD}`]);
+    // JS のソース (scripts/lib/ciWait.mjs) は読まない = テンプレート文字列内の見本や別名の export を取り違える余地が無い
+    expect(ok.apiCalls).toEqual([`repos/{owner}/{repo}/contents/scripts/ci-expected-checks.json?ref=${FULL_HEAD}`]);
     // ローカル (6 件) では全部そろっていても、PR 側の 7 件目が無ければ settle しない
-    const missing = cli(rollupOf(EXPECTED_PR_CHECKS), ['--once'], { prLib });
+    const missing = cli(rollupOf(EXPECTED_PR_CHECKS), ['--once'], { prJson });
     expect(missing.stdout.split('\n')[0]).toBe('PENDING head=4981cc5 checks=6 nonSUCCESS=0 missing=1 expected=7');
     expect(missing.stdout).toContain('added-required\tMISSING');
     expect(missing.status).toBe(2);
-  });
-
-  it('PR 側のファイルが取れない / 読めない → blob hash がローカルと同じときだけローカルの定数・それ以外は exit 3', () => {
-    const notFound = cli(rollupOf(EXPECTED_PR_CHECKS), ['--once'], { apiExit: 1 });
-    expect(notFound.status).toBe(3);
-    expect(notFound.stderr).toContain('取得できません');
-    const unreadable = 'export const EXPECTED_PR_CHECKS = somethingElse();\n';
-    const differs = cli(rollupOf(EXPECTED_PR_CHECKS), ['--once'], { prLib: unreadable });
-    expect(differs.status).toBe(3);
-    expect(differs.stderr).toContain('読めず');
-    const sameBlob = cli(rollupOf(EXPECTED_PR_CHECKS), ['--once'], { prLib: unreadable, prLibSha: blobSha(LOCAL_LIB_SOURCE) });
-    expect(sameBlob.stdout.split('\n')[0]).toBe('SETTLED head=4981cc5 checks=6 nonSUCCESS=0 missing=0 expected=6');
-    expect(sameBlob.status).toBe(0);
     // base が main 以外なら PR 側のファイルは読まない (積み上げ PR で contents API を叩かない)
     const stacked = cli(rollupOf(['test']), ['--once'], { baseRefName: 'feat/x', apiExit: 1 });
     expect(stacked.status).toBe(0);
     expect(stacked.apiCalls).toEqual([]);
   });
 
-  it('PR 側に別名の宣言が先行しても実際の定数を使い (audit だけで早期成功しない)、式が続く形は exit 3', () => {
-    const withOld = `export const OLD_EXPECTED_PR_CHECKS = Object.freeze(['audit']);\n${LOCAL_LIB_SOURCE}`;
-    const r = cli(rollupOf(['audit']), ['--once'], { prLib: withOld });
-    expect(r.stdout.split('\n')[0]).toBe('PENDING head=4981cc5 checks=1 nonSUCCESS=0 missing=5 expected=6');
-    expect(r.status).toBe(2);
-    const concat = LOCAL_LIB_SOURCE.replace(/\]\);\n/, "]).concat(['extra']);\n");
-    expect(concat).not.toBe(LOCAL_LIB_SOURCE);
-    const c = cli(rollupOf(['audit']), ['--once'], { prLib: concat });
-    expect(c.status).toBe(3);
-    expect(c.stderr).toContain('読めず');
+  it('PR の HEAD に JSON が無い (このファイルより前の main から分岐した PR) → ローカルで代用せず exit 3', () => {
+    const r = cli(rollupOf(EXPECTED_PR_CHECKS), ['--once'], { apiExit: 1 });
+    expect(r.status).toBe(3);
+    expect(r.stdout).toBe('');
+    expect(r.stderr).toContain('scripts/ci-expected-checks.json を取得できません');
+    expect(r.stderr).toContain('Not Found');
+    expect(r.stderr).toContain('rebase');
   });
 
-  it('改行して .concat を続けた PR 側の定数は 6 件で早期成功せず exit 3 (実際の期待集合は 7 件)', () => {
-    const multiLine = LOCAL_LIB_SOURCE.replace(/\]\);\n/, "])\n  .concat(['added-required']);\n");
-    expect(multiLine).not.toBe(LOCAL_LIB_SOURCE);
-    const r = cli(rollupOf(EXPECTED_PR_CHECKS), ['--once'], { prLib: multiLine });
-    expect(r.stdout).not.toContain('SETTLED');
+  it('PR 側の JSON の形が違う (配列でない・重複・空・JSON でない・余計なキー・正規形でない) → 部分採用せず exit 3', () => {
+    const broken = [
+      '{"checks": "audit"}\n',
+      expectedJson([...EXPECTED_PR_CHECKS, 'audit']),
+      expectedJson([]),
+      'not json\n',
+      `${JSON.stringify({ checks: [...EXPECTED_PR_CHECKS], extra: true }, null, 2)}\n`,
+      `{\n  "checks": [\n    "audit"\n  ],\n  "checks": ${JSON.stringify([...EXPECTED_PR_CHECKS])}\n}\n`,
+    ];
+    for (const prJson of broken) {
+      const r = cli(rollupOf(EXPECTED_PR_CHECKS), ['--once'], { prJson });
+      expect(r.status, prJson).toBe(3);
+      expect(r.stdout, prJson).toBe('');
+      expect(r.stderr, prJson).toContain('を期待集合として読めません');
+    }
+    // contents API の応答が file の base64 でない (大きすぎて content が無い等) も exit 3
+    const noContent = cli(rollupOf(EXPECTED_PR_CHECKS), ['--once'], { apiBody: { type: 'file', encoding: 'none', content: '' } });
+    expect(noContent.status).toBe(3);
+    expect(noContent.stderr).toContain('gh api 応答を読めません');
+  });
+
+  it('ローカルの JSON が壊れていると lib の import で止まり、exit 1 (失敗 check あり) と取り違えない exit 3', () => {
+    dir = mkdtempSync(join(tmpdir(), 'ci-wait-local-'));
+    mkdirSync(join(dir, 'scripts', 'lib'), { recursive: true });
+    writeFileSync(join(dir, 'scripts', 'ci-wait.mjs'), readFileSync(SCRIPT, 'utf8'));
+    writeFileSync(join(dir, 'scripts', 'lib', 'ciWait.mjs'), readFileSync(resolve('scripts/lib/ciWait.mjs'), 'utf8'));
+    writeFileSync(join(dir, EXPECTED_CHECKS_PATH), '{"checks": []}\n');
+    const r = spawnSync(process.execPath, [join(dir, 'scripts', 'ci-wait.mjs'), '773', '--once'], { encoding: 'utf8' });
     expect(r.status).toBe(3);
-    expect(r.stderr).toContain('読めず');
+    expect(r.stderr).toContain('scripts/ci-expected-checks.json: checks が空です');
   });
 
   it('引数不正・gh 失敗は exit 3 のまま', () => {
