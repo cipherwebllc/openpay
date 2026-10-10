@@ -156,12 +156,6 @@ export class PimlicoResponseUnknownError extends Error {
   }
 }
 
-export function isPimlicoResponseUnknownError(
-  error: unknown,
-): error is PimlicoResponseUnknownError {
-  return error instanceof PimlicoResponseUnknownError;
-}
-
 /** pending record store (localStorage) 自体が読めない状態。未解決 UserOp の有無を
  * 判定できないため gasless 送信を fail-closed で止める (lib/circlePending の
  * requireStorage と同じ方針)。何の波及を断つか: storage 障害で latch を失った端末が、

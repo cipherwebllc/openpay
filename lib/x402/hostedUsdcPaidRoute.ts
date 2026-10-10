@@ -43,7 +43,6 @@ import {
 } from '@/lib/x402/storeUsdcIntent';
 import {
   readStoreUsdcAnchorBlock,
-  STORE_USDC_ADDRESS,
   STORE_USDC_CHAIN_ID,
 } from '@/lib/x402/storeUsdcOnchain';
 import { quoteStoreJpycInUsdc } from '@/lib/x402/storeUsdcRateProvider';
@@ -636,8 +635,3 @@ export async function handleHostedUsdcPaidGet(
       : await quoteResponse({ req, resourceId, payer }),
   );
 }
-
-export const STORE_USDC_WIRE = {
-  chainId: STORE_USDC_CHAIN_ID,
-  asset: STORE_USDC_ADDRESS,
-} as const;

@@ -176,18 +176,17 @@ describe('standard payment intent sessionStorage', () => {
     ).toBeNull();
   });
 
-  it('register fee marker は true だけ round-trip する', () => {
-    saveStandardIntent({ ...standardIntent(), registerFee: true });
-    expect(loadStandardIntent()?.registerFee).toBe(true);
-
-    window.sessionStorage.setItem(
-      STANDARD_INTENT_STORAGE_KEY,
-      JSON.stringify({
-        ...standardIntent(),
-        registerFee: 'yes',
-      }),
-    );
-    expect(loadStandardIntent()).toBeNull();
+  it('廃止したレジ利用料の印 (registerFee) が残った旧 record も読み、印は持ち越さない (第 7 回レビュー C12)', () => {
+    // 2026-10-07 の廃止前に保存された 2 tx の途中経過でも、fee の再開は続けられる。印は claim 通知の撤去で用途が無い。
+    for (const registerFee of [true, 'yes']) {
+      window.sessionStorage.setItem(
+        STANDARD_INTENT_STORAGE_KEY,
+        JSON.stringify({ ...standardIntent(), registerFee }),
+      );
+      const loaded = loadStandardIntent();
+      expect(loaded).toEqual(standardIntent());
+      expect(loaded && 'registerFee' in loaded).toBe(false);
+    }
   });
 
   it('fee 復旧に必要な hash/block が欠けた record は破棄する', () => {

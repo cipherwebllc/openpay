@@ -1,11 +1,10 @@
 // @vitest-environment node
-// R6b: 手書きの JSON body reader 4 本と lib/httpBodyCap の readJsonBodyCapped の差を固定する。
+// R6b: 手書きの JSON body reader 3 本と lib/httpBodyCap の readJsonBodyCapped の差を固定する。
 // 置換の前提 (「観測できる挙動が同一」) を確かめるための characterization で、現行の挙動を
 // そのまま期待値にしている (直すべき挙動かどうかは B-R6 で判断する)。
 //
 // 対象:
 //   - push/subscribe の readJsonBody (req.text() → 復号後の再エンコード長で cap → JSON.parse)
-//   - register/claim の inline reader (同じ手順)
 //   - relay/jpyc/status の readBody (同じ手順・失敗はすべて invalid_payload)
 //   - lib/agent/purchasesHttp の purchasesBody (逐次読みの cap・Buffer の寛容な復号・content-type 必須)
 // 参照: readJsonBodyCapped (逐次読みの cap は生 byte・fatal な UTF-8 復号・content-type を見ない)。
@@ -23,7 +22,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const h = vi.hoisted(() => ({
-  claim: vi.fn(),
   upsert: vi.fn(),
 }));
 
@@ -35,7 +33,6 @@ vi.mock('@/lib/env', async (importOriginal) => {
       ...actual.env,
       enablePushNotify: true,
       pushVapidPublicKey: 'test-public-key',
-      enableRegisterFee: true,
       enableJpycEip3009: true,
     },
   };
@@ -57,9 +54,6 @@ vi.mock('@/lib/push/store', () => ({
   removePushSubscription: vi.fn(),
   upsertPushSubscription: h.upsert,
 }));
-vi.mock('@/lib/registerFeeClaim', () => ({
-  claimRegisterFeePayment: h.claim,
-}));
 vi.mock('@/lib/relay/relayProvider', () => ({
   PROVIDER: 'self-host',
   SUPPORTED_CHAINS: { 80002: {} },
@@ -75,7 +69,6 @@ vi.mock('@/lib/relay/forwarderSettleService', () => ({
 }));
 
 import { POST as pushSubscribePost } from '@/app/api/push/subscribe/route';
-import { POST as registerClaimPost } from '@/app/api/register/claim/route';
 import { POST as relayStatusPost } from '@/app/api/relay/jpyc/status/route';
 import { purchasesBody } from '@/lib/agent/purchasesHttp';
 import { readJsonBodyCapped } from '@/lib/httpBodyCap';
@@ -162,14 +155,6 @@ const SUBSCRIPTION = {
   keys: { p256dh: 'A'.repeat(87), auth: 'B'.repeat(22) },
 };
 const PUSH_BASE = { subscription: SUBSCRIPTION, locale: 'ja' };
-const REGISTER_BASE = {
-  chainId: 137,
-  tokenAddress: `0x${'a'.repeat(40)}`,
-  merchant: `0x${'b'.repeat(40)}`,
-  saleAmount: '100',
-  merchantTxHash: `0x${'1'.repeat(64)}`,
-  feeTxHash: `0x${'2'.repeat(64)}`,
-};
 const STATUS_BASE = {
   lookup: 'nonce',
   chainId: 80002,
@@ -196,17 +181,6 @@ const routeReaders: RouteReader[] = [
     run: async (spec) => asResult(await pushSubscribePost(requestFor('http://localhost/api/push/subscribe', spec))),
     responses: {
       accepted: { status: 200, body: '{"ok":true,"count":1}' },
-      too_large: { status: 413, body: '{"ok":false,"error":"payload_too_large"}' },
-      invalid: { status: 400, body: '{"ok":false,"error":"invalid_json"}' },
-    },
-  },
-  {
-    name: 'register/claim POST',
-    cap: MAX_BODY_BYTES,
-    base: REGISTER_BASE,
-    run: async (spec) => asResult(await registerClaimPost(requestFor('http://localhost/api/register/claim', spec))),
-    responses: {
-      accepted: { status: 200, body: '{"ok":true,"status":"claimed"}' },
       too_large: { status: 413, body: '{"ok":false,"error":"payload_too_large"}' },
       invalid: { status: 400, body: '{"ok":false,"error":"invalid_json"}' },
     },
@@ -320,7 +294,6 @@ const CASES: CaseDef[] = [
 ];
 
 beforeEach(() => {
-  h.claim.mockReset().mockResolvedValue('claimed');
   h.upsert.mockReset().mockResolvedValue({ ok: true, value: [{ endpoint: SUBSCRIPTION.endpoint }] });
 });
 
@@ -409,7 +382,6 @@ describe('上限超過時の読み取り量', () => {
 
   it.each([
     ['push/subscribe POST', (req: Request) => pushSubscribePost(req), 413],
-    ['register/claim POST', (req: Request) => registerClaimPost(req), 413],
     ['relay/jpyc/status POST', (req: Request) => relayStatusPost(req), 400],
   ] as const)('%s は req.text() で最後まで読み、cancel しない', async (_name, run, status) => {
     const { state, req } = countingRequest('http://localhost/x');

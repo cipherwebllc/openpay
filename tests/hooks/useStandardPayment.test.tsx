@@ -740,98 +740,7 @@ describe('useStandardPayment', () => {
     expect(merchantLog?.[0]?.txHash).toBe(MERCHANT_TX);
   });
 
-  it('レジ standard は plain transfer のまま送り、確定後に fee txHash を通知する (通知は phase 不変)', async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValue(new Response('{"ok":true,"status":"claimed"}'));
-    global.fetch = fetchMock;
-    const { result, rerender } = await renderReadyStandardPayment();
-    act(() => {
-      result.current.mutate({
-        tokenAddress: TOKEN,
-        merchant: MERCHANT,
-        merchantAmount: 9_950_000n,
-        feeReceiver: FEE_RECEIVER,
-        feeAmount: 50_000n,
-        saleAmount: 10_000_000n,
-        registerFee: true,
-        chainId: 84532,
-      });
-    });
-    act(() => {
-      useWriteContractMockState.a.data = MERCHANT_TX;
-      useWaitMockState.a.data = minedReceipt(MERCHANT_TX, 100n);
-      useWaitMockState.a.isSuccess = true;
-    });
-    rerender();
-    await waitFor(() =>
-      expect(useWriteContractMockB.writeContract).toHaveBeenCalled(),
-    );
-    // 顧客の署名対象は従来どおり ERC20.transfer (署名回数・ガス・フロー不変)。
-    const feeCall = useWriteContractMockB.writeContract.mock.calls[0][0];
-    expect(feeCall.functionName).toBe('transfer');
-    expect(feeCall.args).toEqual([FEE_RECEIVER, 50_000n]);
-    expect(fetchMock).not.toHaveBeenCalled();
-
-    act(() => {
-      useWriteContractMockState.b.data = FEE_TX;
-      useWaitMockState.b.data = minedReceipt(FEE_TX, 101n);
-      useWaitMockState.b.isSuccess = true;
-    });
-    rerender();
-    await waitFor(() => expect(result.current.phase).toBe('success'));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
-    expect(fetchMock.mock.calls[0][0]).toBe('/api/register/claim');
-    expect(
-      JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body)),
-    ).toEqual({
-      chainId: 84532,
-      tokenAddress: TOKEN,
-      merchant: MERCHANT,
-      saleAmount: '10000000',
-      merchantTxHash: MERCHANT_TX,
-      feeTxHash: FEE_TX,
-    });
-    expect(window.sessionStorage.getItem(STANDARD_INTENT_STORAGE_KEY)).toBeNull();
-  });
-
-  it('claim 通知の失敗は決済本体へ波及しない (success を維持・fail-open)', async () => {
-    const fetchMock = vi.fn().mockRejectedValue(new Error('offline'));
-    global.fetch = fetchMock;
-    const { result, rerender } = await renderReadyStandardPayment();
-    act(() => {
-      result.current.mutate({
-        tokenAddress: TOKEN,
-        merchant: MERCHANT,
-        merchantAmount: 9_950_000n,
-        feeReceiver: FEE_RECEIVER,
-        feeAmount: 50_000n,
-        saleAmount: 10_000_000n,
-        registerFee: true,
-        chainId: 84532,
-      });
-    });
-    act(() => {
-      useWriteContractMockState.a.data = MERCHANT_TX;
-      useWaitMockState.a.data = minedReceipt(MERCHANT_TX, 100n);
-      useWaitMockState.a.isSuccess = true;
-    });
-    rerender();
-    await waitFor(() =>
-      expect(useWriteContractMockB.writeContract).toHaveBeenCalled(),
-    );
-    act(() => {
-      useWriteContractMockState.b.data = FEE_TX;
-      useWaitMockState.b.data = minedReceipt(FEE_TX, 101n);
-      useWaitMockState.b.isSuccess = true;
-    });
-    rerender();
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
-    expect(result.current.phase).toBe('success');
-    expect(result.current.error).toBeNull();
-  });
-
-  it('registerFee 印の無い standard は通知しない (従来の /pay・/checkout 経路は不変)', async () => {
+  it('2 tx の確定後も外部へは通知しない (レジ利用料の claim 通知は 2026-10-07 の廃止で撤去・第 7 回レビュー C12)', async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValue(new Response('{"ok":true,"status":"claimed"}'));
@@ -1607,17 +1516,12 @@ describe('useStandardPayment: 置換 tx の receipt (A1)', () => {
     expect(useWriteContractMockB.writeContract).not.toHaveBeenCalled();
   });
 
-  it('同内容の置換 (高速化) は成功・保存/fee/結果/レジ通知/ログの hash は実際に mine された hash', async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValue(new Response('{"ok":true,"status":"claimed"}'));
-    global.fetch = fetchMock;
+  it('同内容の置換 (高速化) は成功・保存/fee/結果/ログの hash は実際に mine された hash', async () => {
     const { result, rerender } = await renderReadyStandardPayment();
     act(() =>
       result.current.mutate({
         ...params,
         saleAmount: 10_000_000n,
-        registerFee: true,
       }),
     );
     act(() => {
@@ -1671,10 +1575,6 @@ describe('useStandardPayment: 置換 tx の receipt (A1)', () => {
       feeTxHash: FEE_TX,
       blockNumber: 100n,
     });
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
-    expect(
-      JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body)),
-    ).toMatchObject({ merchantTxHash: MERCHANT_REPLACEMENT_TX, feeTxHash: FEE_TX });
     await waitFor(() =>
       expect(
         merchantLogs().some(
@@ -1715,7 +1615,6 @@ describe('useStandardPayment: 置換 tx の receipt (A1)', () => {
       hook.result.current.mutate({
         ...params,
         saleAmount: 10_000_000n,
-        registerFee: true,
       }),
     );
     act(() => {
@@ -1731,8 +1630,6 @@ describe('useStandardPayment: 置換 tx の receipt (A1)', () => {
   }
 
   it('fee tx が取消に置換されたら成功にせず fee-error (merchant 確定は維持・fee 再送は可)', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response('{}'));
-    global.fetch = fetchMock;
     const { result, rerender } = await confirmMerchantThenSendFee();
     act(() => {
       useWriteContractMockState.b.data = FEE_TX;
@@ -1753,8 +1650,6 @@ describe('useStandardPayment: 置換 tx の receipt (A1)', () => {
       merchantTxHash: MERCHANT_TX,
       merchantBlockNumber: '100',
     });
-    // 取消された fee tx でレジの用途通知を撃たない。
-    expect(fetchMock).not.toHaveBeenCalled();
 
     act(() => {
       useWriteContractMockState.b.error = null;
@@ -1765,7 +1660,6 @@ describe('useStandardPayment: 置換 tx の receipt (A1)', () => {
   });
 
   it('fee の取消の確定後に再照会が RPC error になっても fee-unknown に戻さず、元 hash の照会を止め、fee 再送は開いたまま (#764 P2/P3)', async () => {
-    global.fetch = vi.fn().mockResolvedValue(new Response('{}'));
     const { result, rerender } = await confirmMerchantThenSendFee();
     act(() => {
       useWriteContractMockState.b.data = FEE_TX;
@@ -1794,11 +1688,7 @@ describe('useStandardPayment: 置換 tx の receipt (A1)', () => {
     expect(useWriteContractMockB.writeContract).toHaveBeenCalledTimes(2);
   });
 
-  it('fee tx の同内容置換は success・feeTxHash とレジ通知は実際に mine された hash', async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValue(new Response('{"ok":true,"status":"claimed"}'));
-    global.fetch = fetchMock;
+  it('fee tx の同内容置換は success・feeTxHash は実際に mine された hash', async () => {
     const { result, rerender } = await confirmMerchantThenSendFee();
     act(() => {
       useWriteContractMockState.b.data = FEE_TX;
@@ -1815,10 +1705,6 @@ describe('useStandardPayment: 置換 tx の receipt (A1)', () => {
       feeTxHash: FEE_REPLACEMENT_TX,
       blockNumber: 100n,
     });
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
-    expect(
-      JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body)),
-    ).toMatchObject({ merchantTxHash: MERCHANT_TX, feeTxHash: FEE_REPLACEMENT_TX });
   });
 });
 
@@ -2096,16 +1982,11 @@ describe('useStandardPayment: 置換先の revert・実 hash の保持・遅れ�
   it.each(['fee 成功', 'fee の wallet 失敗'] as const)(
     'P2: 高速化の成功後に再照会が RPC エラーになっても実 hash を保持し、以後の照会と %s に使う',
     async (outcome) => {
-      const fetchMock = vi
-        .fn()
-        .mockResolvedValue(new Response('{"ok":true,"status":"claimed"}'));
-      global.fetch = fetchMock;
       const { result, rerender } = await renderReadyStandardPayment();
       act(() =>
         result.current.mutate({
           ...params,
           saleAmount: 10_000_000n,
-          registerFee: true,
         }),
       );
       act(() => {
@@ -2143,12 +2024,11 @@ describe('useStandardPayment: 置換先の revert・実 hash の保持・遅れ�
           useWaitMockState.b.isSuccess = true;
         });
         rerender();
-        // 2 tx の確定後に撃つ用途通知は、mine された実 hash で撃つ。
-        await waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
-        expect(
-          JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body)),
-        ).toMatchObject({ merchantTxHash: MERCHANT_REPLACEMENT_TX, feeTxHash: FEE_TX });
-        expect(window.sessionStorage.getItem(STANDARD_INTENT_STORAGE_KEY)).toBeNull();
+        // 2 tx の確定で保存した intent を片付け (fee の成功分岐まで進んだ)、mine された実 hash を保つ。
+        await waitFor(() =>
+          expect(window.sessionStorage.getItem(STANDARD_INTENT_STORAGE_KEY)).toBeNull(),
+        );
+        expect(result.current.feeTxHash).toBe(FEE_TX);
         expect(result.current.merchantTxHash).toBe(MERCHANT_REPLACEMENT_TX);
       } else {
         act(() => {

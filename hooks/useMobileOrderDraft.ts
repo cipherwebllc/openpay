@@ -2,20 +2,19 @@
 
 // モバイルオーダー店舗設定 (受取先 + 店舗 + SNS) の下書きを LocalStorage 永続化する。
 // **メニューは独立管理しない** — レジの商品プリセット (useProductPresets) を単一カタログとして
-// 共有し、draftToConfig が「有効な JPYC presets」をメニューへ変換する。二重入力なし・税率も共有。
-// ノンカストディ/DB なしの思想を維持 (店舗設定は端末ローカル・顧客へは URL に同梱して渡す)。
+// 共有し、presetsToMenu が「有効な JPYC presets」をメニューへ変換する。二重入力なし・税率も共有。
+// ノンカストディ/DB なしの思想を維持 (店舗設定は端末ローカル・公開は @handle の storefront として)。
 //
-// 下書き型 (MobileOrderDraft) は URL に載せる検証済み型 (MobileOrderConfig) とは別:
-//   - receiver は生入力 (アドレス/ENS)・URL 生成時に解決して検証 (useHandleProfileDraft と同型)。
-//   - 検証 (空/不正除外) は draftToConfig → validateOrderConfig で 1 回だけ (decode と単一情報源)。
+// 下書き型 (MobileOrderDraft) は @handle に公開する検証済み型 (StorefrontParts) とは別:
+//   - receiver は生入力 (アドレス/ENS)。公開ページの受取先は @handle (config.to) が権威。
+//   - 公開する形は draftToStorefrontParts が組み、検証 (空/不正除外) は validateStorefrontParts
+//     (公開 API と保存値の読み出しと同じ) が行う。
 //
 // useLocalStorageSettings の sanitize は useEffect 依存に入るため **モジュールレベル関数**で渡す。
 
 import { useCallback } from 'react';
-import type { Address } from 'viem';
 import { isJpycChainSlug, type JpycChainSlug } from '@/lib/chains';
 import {
-  validateOrderConfig,
   SHOP_NAME_MAX,
   TAGLINE_MAX,
   SOCIALS_MAX,
@@ -24,7 +23,6 @@ import {
   HOURS_MAX,
   PHONE_MAX,
   MOBILE_ORDER_CHAINS,
-  type MobileOrderConfig,
   type MobileOrderMode,
   type MenuItem,
   type FeePayer,
@@ -53,7 +51,7 @@ export interface MobileOrderDraft {
   invoiceNo: string; // インボイス登録番号 (任意・生入力・正規化と形式検証は validateStorefrontParts)
   acceptingOrders: boolean; // 注文受付 (既定 true)。false で公開ページの支払いを止める。
   dineIn: boolean; // 提供形態 (既定 false=テイクアウト)。true=店内 (注文時にテーブル番号を入力)。
-  // 時間系 (Phase 4・生入力)。検証 (HH:mm / 数値範囲) は draftToConfig→validateOrderConfig が行う。
+  // 時間系 (Phase 4・生入力)。検証 (HH:mm / 数値範囲) は validateStorefrontParts が行う。
   openFrom: string; // 受付開始 "HH:mm" (空=制限なし)
   lastOrder: string; // ラストオーダー "HH:mm" (空=無制限)
   minLeadMinutes: string; // 最短受け渡し分 (数値文字列・空=即時)
@@ -165,7 +163,7 @@ function sanitize(loaded: Partial<MobileOrderDraft>): MobileOrderDraft {
     acceptingOrders: loaded.acceptingOrders === false ? false : true,
     // 既定はテイクアウト (false)。明示的に true のときだけ店内 (テーブル番号) として復元。
     dineIn: loaded.dineIn === true,
-    // 時間系 (生入力)。length だけ clamp (HH:mm=5・分は最大 4 桁=1440)。検証は draftToConfig。
+    // 時間系 (生入力)。length だけ clamp (HH:mm=5・分は最大 4 桁=1440)。検証は validateStorefrontParts。
     openFrom: clampStr(loaded.openFrom, 5),
     lastOrder: clampStr(loaded.lastOrder, 5),
     minLeadMinutes: clampStr(loaded.minLeadMinutes, 4),
@@ -202,7 +200,7 @@ function presetToMenuItem(p: ProductPreset): MenuItem | null {
   if (p.category && p.category.trim()) item.category = p.category.trim();
   // おすすめ (公開ページ先頭の「おすすめ」セクション用)。true のときだけ載せる。
   if (p.recommended) item.recommended = true;
-  // オプション (サイズ/トッピング)。最終検証は validateOrderConfig→validMenuItem が行う。
+  // オプション (サイズ/トッピング)。最終検証は validateStorefrontParts→validMenuItem が行う。
   if (p.options && p.options.length > 0) item.options = p.options;
   return item;
 }
@@ -216,45 +214,41 @@ export function presetsToMenu(presets: ProductPreset[]): MenuItem[] {
 }
 
 /**
- * 下書き + 解決済み受取先 + 商品プリセット → 検証済み MobileOrderConfig or null。
- * メニューは **レジの有効な JPYC 商品** から生成 (単一カタログ)。最終検証は validateOrderConfig
- * に委譲 (decode と単一情報源)。受取先/店名/有効商品 が揃わなければ null。
+ * 下書き + メニュー → @handle に公開する店舗の部分 (StorefrontParts)。本番の公開 (MobileOrderBuilder →
+ * StorefrontPublishPanel → POST /api/handle) が使う変換で、店舗の値引きもここで載る。値は trim のみで、
+ * https・HH:mm・範囲などの検証と空/不正の除外は validateStorefrontParts (公開 API と保存値の読み出しと
+ * 同じ) に任せる。受取先は @handle が権威なので持たない。メニューが空なら null (公開不可)。
  */
-export function draftToConfig(
+export function draftToStorefrontParts(
   draft: MobileOrderDraft,
-  effectiveReceiver: Address | null,
-  presets: ProductPreset[],
-): MobileOrderConfig | null {
-  return validateOrderConfig({
-    receiver: effectiveReceiver ?? '',
-    // chain = 既定 (先頭)、chains = 顧客が選べる集合 (validateOrderConfig が 2 件以上で採用)。
-    chain: draft.chains[0] ?? 'polygon',
-    chains: draft.chains,
-    shopName: draft.shopName.trim(),
-    tagline: draft.tagline.trim(), // 空/length 超過の除外は validateOrderConfig が行う。
-    // trim のみ。https 検証 + 空/不正の除外は validateOrderConfig が行う。
-    avatar: draft.avatar.trim(),
-    cover: draft.cover.trim(),
+  menu: MenuItem[],
+): StorefrontParts | null {
+  if (menu.length === 0) return null;
+  const discount = draftDiscount(draft);
+  return {
+    chain: draft.chains[0], // 既定 (先頭)
+    chains: draft.chains, // 顧客が選べる集合 (validateStorefrontParts が 2 件以上で採用)
     mode: draft.mode,
     feePayer: draft.feePayer,
-    // trim のみ。https 検証 + 件数 slice は validateOrderConfig が行う。
-    socials: draft.socials.map((s) => s.trim()),
-    menu: presetsToMenu(presets),
-    // 店舗情報 (trim のみ・空/不正の除外は validateOrderConfig)。acceptingOrders は
-    // 停止時のみ false として保存される (true は載らない・round-trip 最小化)。
-    address: draft.address.trim(),
-    hours: draft.hours.trim(),
-    phone: draft.phone.trim(),
-    invoiceNo: draft.invoiceNo.trim(),
+    shopName: draft.shopName.trim() || undefined,
+    tagline: draft.tagline.trim() || undefined,
+    avatar: draft.avatar.trim() || undefined,
+    cover: draft.cover.trim() || undefined,
+    socials: draft.socials.map((s) => s.trim()).filter(Boolean),
+    address: draft.address.trim() || undefined,
+    hours: draft.hours.trim() || undefined,
+    phone: draft.phone.trim() || undefined,
+    invoiceNo: draft.invoiceNo.trim() || undefined, // 形式外は validateStorefrontParts が除外
     acceptingOrders: draft.acceptingOrders,
-    // 店内のときだけ true が保存される (validateOrderConfig が round-trip 最小化)。
-    dineIn: draft.dineIn,
-    // 時間系: 時刻は "HH:mm" 検証、minLeadMinutes は数値化 (空/不正は undefined=未設定)。
-    // 検証/範囲 clamp は validateOrderConfig (parseHHMM / sanitizeMinLead) に委譲。
-    openFrom: draft.openFrom.trim(),
-    lastOrder: draft.lastOrder.trim(),
-    minLeadMinutes: draft.minLeadMinutes.trim() ? Number(draft.minLeadMinutes.trim()) : undefined,
-  });
+    dineIn: draft.dineIn, // 店内なら公開ページで注文時にテーブル番号を入力させる
+    openFrom: draft.openFrom.trim() || undefined,
+    ...(draft.lastOrder.trim() ? { lastOrder: draft.lastOrder.trim() } : {}),
+    ...(draft.minLeadMinutes.trim()
+      ? { minLeadMinutes: Number(draft.minLeadMinutes.trim()) }
+      : {}),
+    ...(discount ? { discount } : {}),
+    menu,
+  };
 }
 
 /**

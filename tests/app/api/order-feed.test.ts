@@ -1,6 +1,6 @@
 // GET/POST /api/order/feed (店主の受注フィード) を実ルートで検証。
 // flag OFF=404 / 未ログイン=401 / read authz は session.address のリストのみ / KV 障害=503 (空と区別) /
-// fulfill は該当 orderId を kvLrem。orderRelay は実コード (serialize/parse)・KV と SIWE は mock。
+// fulfill 等の op は該当受注を同じ位置で新しい値に置き換える (削除しない)。orderRelay は実コード (serialize/parse)・KV と SIWE は mock。
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NextResponse } from 'next/server';

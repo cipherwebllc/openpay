@@ -253,14 +253,6 @@ export async function probeForReverifyDetailed(
   return { verdict: 'transient', authClass: 'neutral' };
 }
 
-// 後方互換の薄いラッパ (verdict だけ要る呼び元向け)。
-export async function probeForReverify(
-  url: string,
-  opts: SsrfSafeFetchOptions & { probeAtMs?: number } = {},
-): Promise<ReverifyVerdict> {
-  return (await probeForReverifyDetailed(url, opts)).verdict;
-}
-
 async function verdictFor402(res: Response): Promise<ReverifyVerdict> {
   // v2 (PAYMENT-REQUIRED ヘッダ) → v1 (JSON body) の順に見て、**どちらかが** OpenPay 方式なら
   // 成功とする — 登録時 probeGate と同じフォールバック。dual-rail 出品の 402 は v2 面が

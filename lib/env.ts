@@ -584,16 +584,6 @@ export const env = {
     'NEXT_PUBLIC_ENABLE_MOBILE_ORDER_FEE',
     process.env.NEXT_PUBLIC_ENABLE_MOBILE_ORDER_FEE,
   ),
-  // レジ (店頭POS・RegisterMode→/checkout) の OpenPay利用料を経路非依存化するフラグ (client 露出)。
-  // **既定 OFF** = レジの通常決済(standard)は従来どおり無料 → 本番完全 inert。ON のとき レジ経由の
-  // JPYC standard 決済にも既存 recover の OpenPay利用料 (recoverFeeBps・7月から1%・フロア無し) を
-  // 店舗負担で課金する (relay 経路は既存 recover が徴収済で不変)。USDC は無料据置・決済QR(/pay)・
-  // チップ・手動 checkout リンクは対象外。点灯は 7月 (recoverFeeBps=100) + 開示更新と同一リリース。
-  // 2026-10-07 にレジ通常決済の利用料を廃止し、本番は 0 (OFF)。再び点けるなら開示 3 点セットの更新が先。
-  enableRegisterFee: parseBoolFlag(
-    'NEXT_PUBLIC_ENABLE_REGISTER_FEE',
-    process.env.NEXT_PUBLIC_ENABLE_REGISTER_FEE,
-  ),
   // レジの「お店の端末のガス用ウォレット」(client 露出・plans/store-gas-wallet.md)。**既定 OFF で完全
   // inert** (レジに設定欄を出さない)。お店の端末が自分の POL でお客様の署名を送る経路 (OpenPay 利用料
   // 0) の土台。点灯は受け渡し・送信 (P2) と開示 3 点セット (P3) がそろった同一リリースで。

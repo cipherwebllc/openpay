@@ -70,8 +70,3 @@ export function splitDisplayTitle(input: DisplayTitleInput): { title: string; bo
   }
   return { title: fallback, body: '' };
 }
-
-/** 見出しだけが要る呼び元向け。 */
-export function displayTitleOf(input: DisplayTitleInput): string {
-  return splitDisplayTitle(input).title;
-}

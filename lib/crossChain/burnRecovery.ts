@@ -197,7 +197,7 @@ function assertBurnResolved(
   });
 }
 
-/** source chain の burn 1 本を「再開安全」に送り出す (settleMint と対称)。
+/** source chain の burn 1 本を「再開安全」に送り出す (executeCctp の mint 再開と対称)。
  *  marker を fail-closed で書いてから broadcast → hash 永続化 → receipt 検証、の順で、
  *  「記録の無い burn」も「burn の無い記録」も作らない。
  *  adopt (走査で一意特定した hash の採用) / proceed (既存 hash が成功済) は送金を伴わない

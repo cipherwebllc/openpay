@@ -23,7 +23,6 @@ vi.mock('@/lib/env', async (original) => {
       enableOrderRelay: true,
       enableAgentOrder: true,
       enableOrderCall: true,
-      enableRegisterFee: true,
       enableCreatorStore: true,
     },
   };
@@ -67,7 +66,6 @@ import { POST as csvPassPost } from '@/app/api/csv-pass/relay/route';
 import { POST as settlePost } from '@/app/api/facilitator/settle/route';
 import { POST as facilitatorStatusPost } from '@/app/api/facilitator/status/route';
 import { POST as orderCallPost } from '@/app/api/order/call/route';
-import { POST as registerClaimPost } from '@/app/api/register/claim/route';
 import { GET as hostedGet } from '@/app/api/paid/hosted/[id]/route';
 import { guardPaidShopsApi } from '@/app/api/shops/_shared';
 import { hashIp } from '@/lib/net/ipHash';
@@ -121,7 +119,6 @@ const admissionRoutes = [
   { name: 'shops-paid', run: guardPaidShopsApi, scope: 'shops-paid', max: 10 },
   { name: 'x402-status', run: facilitatorStatusPost, scope: 'x402-status', max: 30 },
   { name: 'order/call', run: orderCallPost, scope: 'order-call', max: 5 },
-  { name: 'register/claim', run: registerClaimPost, scope: 'register-claim', max: 60 },
 ];
 
 describe.each(admissionRoutes)('$name IP bucket', ({ run, scope, max }) => {

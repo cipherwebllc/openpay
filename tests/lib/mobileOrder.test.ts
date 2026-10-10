@@ -9,12 +9,10 @@ import {
   validateStorefrontParts,
   storefrontPartsEquivalent,
   groupMenuByCategory,
-  buildOrderUrl,
   type MenuItem,
   safeHttpUrl,
   telHref,
   mapSearchHref,
-  ORDER_PATH,
   MENU_MAX,
   SHOP_NAME_MAX,
   TAGLINE_MAX,
@@ -673,21 +671,14 @@ describe('mobileOrder: groupMenuByCategory', () => {
   });
 });
 
-describe('mobileOrder: buildOrderUrl', () => {
-  it('origin + /order?s=<token> を組み立て、token は元 config へ復号できる', () => {
+describe('mobileOrder: encodeOrderConfig (/order?s= の token)', () => {
+  it('token は元 config へ復号でき、URL 安全 (base64url のみ・%エンコード不要)', () => {
     const c = baseConfig();
-    const url = buildOrderUrl('https://open-pay.jp', c);
-    expect(url.startsWith(`https://open-pay.jp${ORDER_PATH}?s=`)).toBe(true);
-    const token = url.slice(`https://open-pay.jp${ORDER_PATH}?s=`.length);
+    const token = encodeOrderConfig(c);
     expect(decodeOrderConfig(token)).toEqual(c);
-  });
-
-  it('クエリ値は URL 安全 (base64url のみ・%エンコード不要)', () => {
-    const url = buildOrderUrl('https://open-pay.jp', baseConfig());
-    const token = url.split('?s=')[1];
     expect(token).toMatch(/^[A-Za-z0-9_-]+$/);
     // new URL で round-trip しても s パラメータが変質しない (エスケープ不要)。
-    expect(new URL(url).searchParams.get('s')).toBe(token);
+    expect(new URL(`https://open-pay.jp/order?s=${token}`).searchParams.get('s')).toBe(token);
   });
 });
 

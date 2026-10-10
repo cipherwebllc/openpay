@@ -21,7 +21,6 @@ vi.mock('@/hooks/useSiweSession', () => ({
 
 const FEE = '0x428483FbA62eDCef1E3a100d3799F6d71759c560';
 const hold = vi.hoisted(() => ({
-  registerFee: true,
   gas: '0x0000000000000000000000000000000000000abc' as string | null,
   state: { phase: 'idle' } as Record<string, unknown>,
   start: vi.fn(),
@@ -43,9 +42,6 @@ vi.mock('@/lib/env', async (importOriginal) => {
       enableStoreGasWallet: true,
       networkEnv: 'testnet',
       feeReceiver: '0x428483FbA62eDCef1E3a100d3799F6d71759c560',
-      get enableRegisterFee() {
-        return hold.registerFee;
-      },
     },
   };
 });
@@ -117,7 +113,6 @@ async function findTile(name: RegExp) {
 describe('RegisterMode × お店の端末で送る (flag ON)', () => {
   beforeEach(() => {
     window.localStorage.clear();
-    hold.registerFee = true;
     hold.gas = '0x0000000000000000000000000000000000000abc';
     hold.state = { phase: 'idle' };
     hold.start.mockReset().mockResolvedValue({ id: HS, token: 'ab'.repeat(32), expiresAt: 0, merchant: VALID, amount: '1', chainId: 80002 });
@@ -295,7 +290,7 @@ describe('RegisterMode × お店の端末で送る (flag ON)', () => {
     expect(screen.queryByText('gas-wallet-panel')).toBeNull();
   });
 
-  it('お店負担を選んでいない: 受け渡しを作らず、今のレジのまま (fee_kind も今のまま)', async () => {
+  it('お店負担を選んでいない: 受け渡しを作らず、今のレジのまま (fee_kind は付けない)', async () => {
     const user = userEvent.setup();
     seed(VALID, false);
     render(<RegisterMode />);
@@ -309,7 +304,7 @@ describe('RegisterMode × お店の端末で送る (flag ON)', () => {
     // 切替 OFF でも、通常の QR の前に切替 ON の頃の受け渡しを片付ける (遅れて署名を送らない)
     expect(hold.release).toHaveBeenCalled();
     expect(sp.get('submit')).toBeNull();
-    expect(sp.get('fee_kind')).toBe('register');
+    expect(sp.get('fee_kind')).toBeNull();
   });
 
   it('Web Locks の無いブラウザでは使えない (理由を出し、店員が「通常の QR を出す」を選ぶ)', async () => {

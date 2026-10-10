@@ -2437,13 +2437,6 @@
     "statusReceiverLabel": "受取先",
     "statusChangeLink": "変更",
     "editCurrencyConfirm": "受取先・通貨・チェーンの変更は決済QRタブで行います。編集中のカートは破棄されますが続けますか？",
-    "paymentPolicyLabel": "決済設定",
-    "paymentPolicy": {
-      "standard": "通常決済（ガス代は顧客負担）",
-      "gaslessFree": "ガスレス決済（OpenPay がガス負担）",
-      "gaslessCustomerGas": "ガスレス決済 / ガス代：お客様負担",
-      "gaslessMerchantGas": "ガスレス決済 / ガス代：店主負担"
-    },
     "showQr": "QRコードを表示する",
     "qrModalTitle": "お会計 QR コード",
     "qrModalClose": "閉じる",

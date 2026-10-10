@@ -1,7 +1,7 @@
 'use client';
 
 // @handle 恒久リンクの取得 UI。NEXT_PUBLIC_ENABLE_HANDLES OFF では何も描画しない。
-// StepCard ② の中身として描画される (枠と見出しは StepCard が提供)。
+// 親 (HandleProfileBuilder) の枠の中に描画される (枠と見出しは親が提供)。
 // SIWE サインイン → 取得済み一覧 (編集/削除) → handle 入力 + 空き確認 →
 // 現在のプロフィール設定を publish。親 (HandleProfileBuilder) が純関数で canonical 化した
 // payload (config+profile) を受け取る (受取先/方法 未確定なら payload=null)。

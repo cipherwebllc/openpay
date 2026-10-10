@@ -264,7 +264,7 @@ describe('relay route — モバイル注文 feeKind enforcement (server 権威�
   });
 
   it("flag ON + feeKind='register' (非 mobile kind): isMobileOrderFeeKind=false → recoverFeeValue にフォールバック", async () => {
-    // register は relay には送られない設計だが、防御的に POST しても mobile 扱いされない。
+    // 'register' (2026-10-07 に廃止したレジ利用料の旧種別) のような非 mobile kind を POST しても mobile 扱いされない。
     const res = await POST(
       payload({
         gasMode: 'merchant',

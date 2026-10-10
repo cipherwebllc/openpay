@@ -3,9 +3,10 @@ import { encodePacked, getAddress, type Address, type Hex } from 'viem';
 import {
   signUsdcPermit,
   getCircleUserOpGasPrice,
-  estimateCircleUserOp,
-  sendCircleUserOperation,
+  prepareAndSignCircleUserOp,
+  broadcastCircleUserOp,
   buildCircleSmartAccountClient,
+  entryPoint08Address,
   type CircleSmartAccountBundle,
 } from '@/lib/smartAccount/circleAccount';
 import { assertCirclePaymasterDeployed } from '@/lib/circlePermit';
@@ -162,88 +163,97 @@ describe('getCircleUserOpGasPrice', () => {
   });
 });
 
-describe('estimateCircleUserOp', () => {
-  it('postOp が Circle 下限 (15000) 未満なら 15000 に引上げる', async () => {
-    const estimateUserOperationGas = vi.fn(async () => ({
-      callGasLimit: 50_000n,
-      verificationGasLimit: 60_000n,
-      preVerificationGas: 40_000n,
-      paymasterVerificationGasLimit: 20_000n,
-      paymasterPostOpGasLimit: 11_360n, // bundler 推定 (下限未満)
-    }));
-    const bundle = fakeBundle({ estimateUserOperationGas });
-    const got = await estimateCircleUserOp({
-      bundle,
-      calls: [{ to: TOKEN, data: '0x' }],
-      paymasterData: '0xdead',
-      maxFeePerGas: 1n,
-      maxPriorityFeePerGas: 1n,
-    });
-    expect(got.paymasterPostOpGasLimit).toBe(15_000n);
-    // estimate には Circle 下限が渡る
-    expect(estimateUserOperationGas).toHaveBeenCalledWith(
-      expect.objectContaining({
-        paymaster: PAYMASTER,
-        paymasterData: '0xdead',
-        paymasterPostOpGasLimit: 15_000n,
-      }),
-    );
-  });
+// 本番の送信は prepare+sign → (pending store に保存) → broadcast に分かれる (lib/smartAccount/circleSend.ts)。
+// 旧「素の送信」helper (sendCircleUserOperation・estimateCircleUserOp) は本番から呼ばれず削除した
+// (第 7 回レビュー A15) ので、Circle 下限の強制と同一 op の broadcast はここで現行の境界に対して固定する。
+const SENDER = getAddress('0x2222222222222222222222222222222222222222');
 
-  it('postOp が下限以上ならその値を保持する', async () => {
-    const estimateUserOperationGas = vi.fn(async () => ({
-      callGasLimit: 1n,
-      verificationGasLimit: 1n,
-      preVerificationGas: 1n,
-      paymasterVerificationGasLimit: 1n,
-      paymasterPostOpGasLimit: 22_000n,
-    }));
-    const got = await estimateCircleUserOp({
-      bundle: fakeBundle({ estimateUserOperationGas }),
-      calls: [],
-      paymasterData: '0x',
-      maxFeePerGas: 1n,
-      maxPriorityFeePerGas: 1n,
-    });
-    expect(got.paymasterPostOpGasLimit).toBe(22_000n);
-  });
-});
+function preparedOp(postOp: bigint | undefined) {
+  return {
+    sender: SENDER,
+    nonce: 0n,
+    callData: '0xabc' as Hex,
+    callGasLimit: 50_000n,
+    verificationGasLimit: 60_000n,
+    preVerificationGas: 40_000n,
+    maxFeePerGas: 16n,
+    maxPriorityFeePerGas: 8n,
+    paymaster: PAYMASTER,
+    paymasterData: '0xpm' as Hex,
+    paymasterVerificationGasLimit: 20_000n,
+    paymasterPostOpGasLimit: postOp,
+    signature: '0x' as Hex,
+  };
+}
 
-describe('sendCircleUserOperation', () => {
-  it('完全な gas セット + paymaster + paymasterData で送信し hash を返す', async () => {
-    const request = vi.fn(async () => ({
-      standard: { maxFeePerGas: '0x10', maxPriorityFeePerGas: '0x8' },
-    }));
-    const estimateUserOperationGas = vi.fn(async () => ({
-      callGasLimit: 50_000n,
-      verificationGasLimit: 60_000n,
-      preVerificationGas: 40_000n,
-      paymasterVerificationGasLimit: 20_000n,
-      paymasterPostOpGasLimit: 16_000n,
-    }));
-    const sendUserOperation = vi.fn(async (_params: unknown) => '0xhash' as Hex);
-    const bundle = fakeBundle({
-      request,
-      estimateUserOperationGas,
-      sendUserOperation,
-    });
+function signingBundle(postOp: bigint | undefined) {
+  const request = vi.fn(async () => ({
+    standard: { maxFeePerGas: '0x10', maxPriorityFeePerGas: '0x8' },
+  }));
+  const prepareUserOperation = vi.fn(async (_params: unknown) => preparedOp(postOp));
+  const signUserOperation = vi.fn(async (_op: unknown) => `0x${'11'.repeat(65)}` as Hex);
+  const bundle = fakeBundle({ request, prepareUserOperation });
+  (bundle as { account: unknown }).account = { signUserOperation };
+  return { bundle, prepareUserOperation, signUserOperation };
+}
+
+describe('prepareAndSignCircleUserOp (Circle 下限は署名前に強制)', () => {
+  it('postOp が Circle 下限 (15000) 未満なら 15000 に引き上げた op に署名する', async () => {
+    const { bundle, prepareUserOperation, signUserOperation } = signingBundle(11_360n);
     const calls = [{ to: TOKEN, data: '0xabc' as Hex }];
-    const hash = await sendCircleUserOperation({
+    const { signedUserOp, userOpHash } = await prepareAndSignCircleUserOp({
       bundle,
       calls,
       paymasterData: '0xpm' as Hex,
     });
-    expect(hash).toBe('0xhash');
-    const sent = sendUserOperation.mock.calls[0][0] as unknown as Record<
-      string,
-      unknown
-    >;
-    expect(sent.paymaster).toBe(PAYMASTER);
-    expect(sent.paymasterData).toBe('0xpm');
-    expect(sent.maxFeePerGas).toBe(16n);
-    expect(sent.maxPriorityFeePerGas).toBe(8n);
-    expect(sent.callGasLimit).toBe(50_000n);
-    expect(sent.paymasterPostOpGasLimit).toBe(16_000n);
+    // prepare には paymaster・paymasterData・Circle 下限・standard tier の gas price が渡る。
+    expect(prepareUserOperation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        calls,
+        paymaster: PAYMASTER,
+        paymasterData: '0xpm',
+        paymasterPostOpGasLimit: 15_000n,
+        maxFeePerGas: 16n,
+        maxPriorityFeePerGas: 8n,
+      }),
+    );
+    // 署名は下限を適用した op に対して行う (署名後に書き換えない)。
+    expect(signUserOperation.mock.calls[0][0]).toMatchObject({ paymasterPostOpGasLimit: 15_000n });
+    expect(signedUserOp.paymasterPostOpGasLimit).toBe('0x3a98');
+    expect(userOpHash).toMatch(/^0x[0-9a-f]{64}$/);
+  });
+
+  it('postOp が下限以上ならその値のまま署名する', async () => {
+    const { bundle, signUserOperation } = signingBundle(22_000n);
+    const { signedUserOp } = await prepareAndSignCircleUserOp({
+      bundle,
+      calls: [],
+      paymasterData: '0x' as Hex,
+    });
+    expect(signUserOperation.mock.calls[0][0]).toMatchObject({ paymasterPostOpGasLimit: 22_000n });
+    expect(signedUserOp.paymasterPostOpGasLimit).toBe('0x55f0');
+  });
+
+  it('postOp の見積が無いときも下限で署名する', async () => {
+    const { bundle, signUserOperation } = signingBundle(undefined);
+    await prepareAndSignCircleUserOp({ bundle, calls: [], paymasterData: '0x' as Hex });
+    expect(signUserOperation.mock.calls[0][0]).toMatchObject({ paymasterPostOpGasLimit: 15_000n });
+  });
+});
+
+describe('broadcastCircleUserOp (保存済みの署名済み op をそのまま送る)', () => {
+  it('raw eth_sendUserOperation に同じ op と EntryPoint v0.8 を渡し、再試行しない', async () => {
+    const request = vi.fn(async (..._args: unknown[]) => `0x${'ab'.repeat(32)}` as Hex);
+    const signedUserOp = { sender: SENDER, nonce: '0x0', signature: '0x11' };
+    const hash = await broadcastCircleUserOp({
+      bundle: fakeBundle({ request }),
+      signedUserOp,
+    });
+    expect(hash).toBe(`0x${'ab'.repeat(32)}`);
+    expect(request).toHaveBeenCalledWith(
+      { method: 'eth_sendUserOperation', params: [signedUserOp, entryPoint08Address] },
+      { retryCount: 0 },
+    );
   });
 });
 

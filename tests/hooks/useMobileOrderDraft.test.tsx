@@ -1,11 +1,11 @@
-// useMobileOrderDraft (LS 下書き) + presetsToMenu / draftToConfig を実コードで検証。
+// useMobileOrderDraft (LS 下書き) + presetsToMenu / draftToStorefrontParts を実コードで検証。
 // メニューは独立管理せず **レジの有効な JPYC 商品 (presets)** から生成される (統合カタログ)。
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import {
   useMobileOrderDraft,
-  draftToConfig,
+  draftToStorefrontParts,
   presetsToMenu,
   menuToPresets,
   storefrontPartsToDraft,
@@ -15,7 +15,7 @@ import {
   type MobileOrderDraft,
 } from '@/hooks/useMobileOrderDraft';
 import type { ProductPreset } from '@/hooks/useProductPresets';
-import type { MenuItem, StorefrontParts } from '@/lib/mobileOrder';
+import { validateStorefrontParts, type MenuItem, type StorefrontParts } from '@/lib/mobileOrder';
 
 const STORAGE_KEY = 'openpay:mobile-order-draft:v1';
 const ADDR = '0x1111111111111111111111111111111111111111' as const;
@@ -147,11 +147,17 @@ function baseDraft(): MobileOrderDraft {
   };
 }
 
-describe('draftToConfig: 下書き + 受取先 + presets → config', () => {
-  it('受取先 + 有効商品 → config (SNS trim・menu は presets 由来)', () => {
+// 本番の公開 (MobileOrderBuilder → StorefrontPublishPanel → POST /api/handle) が使う変換。保存される形は
+// validateStorefrontParts (公開 API と保存値の読み出しと同じ検証) を通した後の値なので、そこまで通して固定する。
+function published(draft: MobileOrderDraft, presets: ProductPreset[]): StorefrontParts | null {
+  const parts = draftToStorefrontParts(draft, presetsToMenu(presets));
+  return parts ? validateStorefrontParts(parts) : null;
+}
+
+describe('draftToStorefrontParts: 下書き + メニュー → @handle に公開する店舗の部分', () => {
+  it('有効商品 → 公開する部分 (SNS・アイコンは trim・menu は presets 由来・既定値は載せない)', () => {
     const presets = [preset({ id: 'a', name: 'ブレンド', unitPrice: '500' })];
-    expect(draftToConfig(baseDraft(), ADDR, presets)).toEqual({
-      receiver: ADDR,
+    expect(published(baseDraft(), presets)).toEqual({
       chain: 'polygon',
       shopName: '珈琲スタンド',
       avatar: 'https://img.example/icon.png', // trim されて載る
@@ -162,35 +168,28 @@ describe('draftToConfig: 下書き + 受取先 + presets → config', () => {
     });
   });
 
-  it('tagline は trim して config に載る・空なら載らない (任意)', () => {
-    const presets = [preset({ id: 'a', name: 'A', unitPrice: '500' })];
-    expect(
-      draftToConfig({ ...baseDraft(), tagline: '  自家焙煎の一杯を  ' }, ADDR, presets)
-        ?.tagline,
-    ).toBe('自家焙煎の一杯を');
-    expect(
-      draftToConfig({ ...baseDraft(), tagline: '' }, ADDR, presets)?.tagline,
-    ).toBeUndefined();
+  it('有効商品ゼロ → null (公開不可)', () => {
+    expect(draftToStorefrontParts(baseDraft(), [])).toBeNull();
+    expect(draftToStorefrontParts(baseDraft(), presetsToMenu([preset({ enabled: false })]))).toBeNull();
   });
 
-  it('avatar が空/非 https のときは config に載らない (任意フィールド)', () => {
+  it('tagline は trim して載る・空なら載らない (任意)', () => {
     const presets = [preset({ id: 'a', name: 'A', unitPrice: '500' })];
-    expect(draftToConfig({ ...baseDraft(), avatar: '' }, ADDR, presets)?.avatar).toBeUndefined();
-    expect(
-      draftToConfig({ ...baseDraft(), avatar: 'http://x/icon.png' }, ADDR, presets)?.avatar,
-    ).toBeUndefined();
+    expect(published({ ...baseDraft(), tagline: '  自家焙煎の一杯を  ' }, presets)?.tagline).toBe(
+      '自家焙煎の一杯を',
+    );
+    expect(published({ ...baseDraft(), tagline: '' }, presets)?.tagline).toBeUndefined();
   });
 
-  it('受取先 null → null / 有効商品ゼロ → null', () => {
+  it('avatar が空/非 https のときは載らない (任意フィールド)', () => {
     const presets = [preset({ id: 'a', name: 'A', unitPrice: '500' })];
-    expect(draftToConfig(baseDraft(), null, presets)).toBeNull();
-    expect(draftToConfig(baseDraft(), ADDR, [])).toBeNull();
-    expect(draftToConfig(baseDraft(), ADDR, [preset({ enabled: false })])).toBeNull();
+    expect(published({ ...baseDraft(), avatar: '' }, presets)?.avatar).toBeUndefined();
+    expect(published({ ...baseDraft(), avatar: 'http://x/icon.png' }, presets)?.avatar).toBeUndefined();
   });
 
-  it('店舗情報 (住所/営業時間/電話) を trim して載せ、acceptingOrders=false を伝播', () => {
+  it('店舗情報 (住所/営業時間/電話) を trim して載せ、acceptingOrders=false を伝播・true (既定) は載せない', () => {
     const presets = [preset({ id: 'a', name: 'A', unitPrice: '500' })];
-    const cfg = draftToConfig(
+    const parts = published(
       {
         ...baseDraft(),
         address: '  東京都〇〇 1-2-3  ',
@@ -198,53 +197,93 @@ describe('draftToConfig: 下書き + 受取先 + presets → config', () => {
         phone: '  03-1234-5678  ',
         acceptingOrders: false,
       },
-      ADDR,
       presets,
     );
-    expect(cfg?.address).toBe('東京都〇〇 1-2-3');
-    expect(cfg?.hours).toBe('11:00-22:00');
-    expect(cfg?.phone).toBe('03-1234-5678');
-    expect(cfg?.acceptingOrders).toBe(false);
+    expect(parts?.address).toBe('東京都〇〇 1-2-3');
+    expect(parts?.hours).toBe('11:00-22:00');
+    expect(parts?.phone).toBe('03-1234-5678');
+    expect(parts?.acceptingOrders).toBe(false);
+    const open = published({ ...baseDraft(), acceptingOrders: true }, presets);
+    expect(open).not.toBeNull();
+    expect('acceptingOrders' in (open ?? {})).toBe(false);
   });
 
-  it('acceptingOrders=true (既定) は config に載せない (round-trip 最小化)', () => {
+  it('dineIn=true を伝播・false (既定) は載せない', () => {
     const presets = [preset({ id: 'a', name: 'A', unitPrice: '500' })];
-    const cfg = draftToConfig({ ...baseDraft(), acceptingOrders: true }, ADDR, presets);
-    expect(cfg).not.toBeNull();
-    expect('acceptingOrders' in (cfg ?? {})).toBe(false);
-  });
-
-  it('dineIn=true を config に伝播・false (既定) は載せない', () => {
-    const presets = [preset({ id: 'a', name: 'A', unitPrice: '500' })];
-    expect(draftToConfig({ ...baseDraft(), dineIn: true }, ADDR, presets)?.dineIn).toBe(true);
-    const takeout = draftToConfig({ ...baseDraft(), dineIn: false }, ADDR, presets);
+    expect(published({ ...baseDraft(), dineIn: true }, presets)?.dineIn).toBe(true);
+    const takeout = published({ ...baseDraft(), dineIn: false }, presets);
     expect('dineIn' in (takeout ?? {})).toBe(false);
   });
 
   it('時間系 (openFrom/lastOrder/minLeadMinutes): 有効値を伝播・空/不正は載せない (Phase 4)', () => {
     const presets = [preset({ id: 'a', name: 'A', unitPrice: '500' })];
-    const cfg = draftToConfig(
+    const parts = published(
       { ...baseDraft(), openFrom: '09:30', lastOrder: '21:30', minLeadMinutes: '20' },
-      ADDR,
       presets,
     );
-    expect(cfg?.openFrom).toBe('09:30');
-    expect(cfg?.lastOrder).toBe('21:30');
-    expect(cfg?.minLeadMinutes).toBe(20); // 数値化
-    // 空は未設定 (round-trip 最小化)。
-    const none = draftToConfig(baseDraft(), ADDR, presets);
+    expect(parts?.openFrom).toBe('09:30');
+    expect(parts?.lastOrder).toBe('21:30');
+    expect(parts?.minLeadMinutes).toBe(20); // 数値化
+    const none = published(baseDraft(), presets);
     expect('openFrom' in (none ?? {})).toBe(false);
     expect('lastOrder' in (none ?? {})).toBe(false);
     expect('minLeadMinutes' in (none ?? {})).toBe(false);
-    // 不正 (HH:mm でない / 非整数) は黙って drop。
-    const bad = draftToConfig(
+    const bad = published(
       { ...baseDraft(), openFrom: '9:30', lastOrder: '25:99', minLeadMinutes: 'abc' },
-      ADDR,
       presets,
     );
     expect('openFrom' in (bad ?? {})).toBe(false);
     expect('lastOrder' in (bad ?? {})).toBe(false);
     expect('minLeadMinutes' in (bad ?? {})).toBe(false);
+  });
+
+  it('店舗の値引き (割引率・割引額) を正規化して載せる・形が正しくない値と「なし」は載せない', () => {
+    const presets = [preset({ id: 'a', name: 'A', unitPrice: '500' })];
+    expect(
+      published({ ...baseDraft(), discountKind: 'percent', discountValue: ' 05 ' }, presets)?.discount,
+    ).toEqual({ kind: 'percent', value: '5' });
+    expect(
+      published({ ...baseDraft(), discountKind: 'amount', discountValue: '50' }, presets)?.discount,
+    ).toEqual({ kind: 'amount', value: '50' });
+    for (const draft of [
+      { ...baseDraft(), discountKind: 'percent' as const, discountValue: '100' },
+      { ...baseDraft(), discountKind: 'amount' as const, discountValue: '1.5' },
+      { ...baseDraft(), discountKind: 'none' as const, discountValue: '5' },
+    ]) {
+      expect('discount' in (draftToStorefrontParts(draft, presetsToMenu(presets)) ?? {})).toBe(false);
+    }
+  });
+
+  it('値引きを含む下書き → 公開 → 別端末で読み込み、で下書きと商品が元に戻る (往復)', () => {
+    const presets = [
+      preset({ id: 'a', name: 'ブレンド', unitPrice: '500', taxRate: 8, taxCategory: 'taxable_8' }),
+      preset({ id: 'b', name: 'ラテ', unitPrice: '600', sortOrder: 1 }),
+    ];
+    const draft: MobileOrderDraft = {
+      ...baseDraft(),
+      receiver: ADDR,
+      receiverSource: 'manual',
+      chains: ['polygon', 'kaia'],
+      tagline: '自家焙煎',
+      avatar: 'https://img.example/icon.png',
+      mode: 'preorder',
+      feePayer: 'customer',
+      socials: ['https://x.com/shop'],
+      address: '東京',
+      hours: '10-18',
+      phone: '03',
+      acceptingOrders: false,
+      openFrom: '09:30',
+      lastOrder: '21:30',
+      minLeadMinutes: '20',
+      discountKind: 'percent',
+      discountValue: '5',
+    };
+    const parts = published(draft, presets);
+    expect(parts).not.toBeNull();
+    expect(parts?.discount).toEqual({ kind: 'percent', value: '5' });
+    expect(storefrontPartsToDraft(parts!, ADDR)).toEqual(draft);
+    expect(presetsToMenu(menuToPresets(parts!.menu))).toEqual(presetsToMenu(presets));
   });
 });
 

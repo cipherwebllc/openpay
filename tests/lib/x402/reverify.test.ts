@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
-  probeForReverify,
   probeForReverifyDetailed,
   REVERIFY_AUTH_HIDE_THRESHOLD,
   REVERIFY_IDENTIFYING_USER_AGENT,
@@ -25,11 +24,17 @@ function response(status: number, body = ''): typeof fetch {
   return (async () => new Response(body, { status })) as typeof fetch;
 }
 
-describe('probeForReverify', () => {
+// 本番の呼び元 (cron の巡回) は probeForReverifyDetailed を使う。verdict だけを見るケースはその .verdict で検証する
+// (verdict だけ返す薄いラッパは本番から呼ばれず削除した・第 7 回レビュー F11)。
+async function probeVerdict(...args: Parameters<typeof probeForReverifyDetailed>) {
+  return (await probeForReverifyDetailed(...args)).verdict;
+}
+
+describe('probeForReverifyDetailed の verdict', () => {
   it('402 OpenPay v1/v2 を成功、完全に読めた foreign 402 を確定違反に分類', async () => {
     const v1 = response(402, JSON.stringify({ accepts: openpayAccepts }));
     expect(
-      await probeForReverify('https://x.test/paid', {
+      await probeVerdict('https://x.test/paid', {
         fetchImpl: v1,
         lookup: lookupPublic,
       }),
@@ -45,7 +50,7 @@ describe('probeForReverify', () => {
         headers: { 'payment-required': header },
       })) as typeof fetch;
     expect(
-      await probeForReverify('https://x.test/paid', {
+      await probeVerdict('https://x.test/paid', {
         fetchImpl: v2,
         lookup: lookupPublic,
       }),
@@ -56,7 +61,7 @@ describe('probeForReverify', () => {
       JSON.stringify({ accepts: [{ scheme: 'exact', network: 'base' }] }),
     );
     expect(
-      await probeForReverify('https://x.test/paid', {
+      await probeVerdict('https://x.test/paid', {
         fetchImpl: foreign,
         lookup: lookupPublic,
       }),
@@ -79,7 +84,7 @@ describe('probeForReverify', () => {
         { status: 402, headers: { 'payment-required': usdcOnlyHeader } },
       )) as typeof fetch;
     expect(
-      await probeForReverify('https://x.test/paid', {
+      await probeVerdict('https://x.test/paid', {
         fetchImpl: dual,
         lookup: lookupPublic,
       }),
@@ -92,7 +97,7 @@ describe('probeForReverify', () => {
         { status: 402, headers: { 'payment-required': usdcOnlyHeader } },
       )) as typeof fetch;
     expect(
-      await probeForReverify('https://x.test/paid', {
+      await probeVerdict('https://x.test/paid', {
         fetchImpl: bothForeign,
         lookup: lookupPublic,
       }),
@@ -105,7 +110,7 @@ describe('probeForReverify', () => {
         headers: { 'payment-required': usdcOnlyHeader },
       })) as typeof fetch;
     expect(
-      await probeForReverify('https://x.test/paid', {
+      await probeVerdict('https://x.test/paid', {
         fetchImpl: headerOnlyNoBody,
         lookup: lookupPublic,
       }),
@@ -118,7 +123,7 @@ describe('probeForReverify', () => {
     [410, 'violation_gone'],
   ] as const)('status %i → %s', async (status, verdict) => {
     expect(
-      await probeForReverify('https://x.test/paid', {
+      await probeVerdict('https://x.test/paid', {
         fetchImpl: response(status, 'ordinary response'),
         lookup: lookupPublic,
       }),
@@ -129,7 +134,7 @@ describe('probeForReverify', () => {
     'status %i は transient (failures 非加算)',
     async (status) => {
       expect(
-        await probeForReverify('https://x.test/paid', {
+        await probeVerdict('https://x.test/paid', {
           fetchImpl: response(status),
           lookup: lookupPublic,
         }),
@@ -139,7 +144,7 @@ describe('probeForReverify', () => {
 
   it('DNS/connect/timeout と 402 body failure は transient', async () => {
     expect(
-      await probeForReverify('https://x.test/paid', {
+      await probeVerdict('https://x.test/paid', {
         fetchImpl: response(200, 'ok'),
         lookup: async () => {
           throw new Error('NXDOMAIN');
@@ -147,7 +152,7 @@ describe('probeForReverify', () => {
       }),
     ).toBe('transient');
     expect(
-      await probeForReverify('https://x.test/paid', {
+      await probeVerdict('https://x.test/paid', {
         fetchImpl: (async () => {
           throw new Error('ECONNRESET');
         }) as typeof fetch,
@@ -155,7 +160,7 @@ describe('probeForReverify', () => {
       }),
     ).toBe('transient');
     expect(
-      await probeForReverify('https://x.test/paid', {
+      await probeVerdict('https://x.test/paid', {
         fetchImpl: response(402, 'x'.repeat(64 * 1024 + 1)),
         lookup: lookupPublic,
       }),
@@ -169,7 +174,7 @@ describe('probeForReverify', () => {
         headers: { server: 'cloudflare' },
       })) as typeof fetch;
     expect(
-      await probeForReverify('https://x.test/paid', {
+      await probeVerdict('https://x.test/paid', {
         fetchImpl: challenge,
         lookup: lookupPublic,
       }),
@@ -413,7 +418,7 @@ describe('cloaking (auth block) detection', () => {
 
     async function headersAt(probeAtMs: number) {
       const fetchImpl = vi.fn(async () => new Response('', { status: 503 }));
-      await probeForReverify('https://x.test/paid', {
+      await probeVerdict('https://x.test/paid', {
         fetchImpl: fetchImpl as unknown as typeof fetch,
         lookup: lookupPublic,
         probeAtMs,

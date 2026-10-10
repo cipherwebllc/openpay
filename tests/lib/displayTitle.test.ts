@@ -1,41 +1,45 @@
 import { describe, expect, it } from 'vitest';
-import { displayTitleOf, splitDisplayTitle } from '@/lib/x402/displayTitle';
+import { splitDisplayTitle, type DisplayTitleInput } from '@/lib/x402/displayTitle';
+
+// 見出しだけを見るケースは本番の変換 (splitDisplayTitle) の title で検証する
+// (title だけ返す薄いラッパは本番から呼ばれず削除した・第 7 回レビュー F11)。
+const titleOf = (input: DisplayTitleInput) => splitDisplayTitle(input).title;
 
 const base = { resource: 'https://example.jp:8443/paid/data?q=test#section', description: 'Description' };
 
-describe('displayTitleOf', () => {
+describe('splitDisplayTitle の見出し', () => {
   it('prefers the explicit title over serviceName and description', () => {
-    expect(displayTitleOf({ ...base, title: 'Product', usdc: { serviceName: 'Service' } })).toBe('Product');
+    expect(titleOf({ ...base, title: 'Product', usdc: { serviceName: 'Service' } })).toBe('Product');
   });
 
   it('uses serviceName when title is absent or empty', () => {
-    expect(displayTitleOf({ ...base, title: '', usdc: { serviceName: 'Service' } })).toBe('Service');
+    expect(titleOf({ ...base, title: '', usdc: { serviceName: 'Service' } })).toBe('Service');
   });
 
   it.each(['。', '. ', ' — ', ' – ', ': ', ' / ', '・', '：'])('cuts a long description at %s', (separator) => {
-    expect(displayTitleOf({ ...base, description: `API${separator}${'Details '.repeat(30)}` })).toBe('API');
+    expect(titleOf({ ...base, description: `API${separator}${'Details '.repeat(30)}` })).toBe('API');
   });
 
   it('uses the first separator, not the order in the separator list', () => {
-    expect(displayTitleOf({ ...base, description: 'API：Details — More. End' })).toBe('API');
+    expect(titleOf({ ...base, description: 'API：Details — More. End' })).toBe('API');
   });
 
   it('keeps a first sentence of up to 120 characters as the heading (display clamps it)', () => {
-    expect(displayTitleOf({ ...base, description: 'あ'.repeat(120) })).toBe('あ'.repeat(120));
-    expect(displayTitleOf({ ...base, description: 'あ'.repeat(49) })).toBe('あ'.repeat(49));
+    expect(titleOf({ ...base, description: 'あ'.repeat(120) })).toBe('あ'.repeat(120));
+    expect(titleOf({ ...base, description: 'あ'.repeat(49) })).toBe('あ'.repeat(49));
   });
 
   it('truncates a sentence over 120 characters to 47 characters and an ellipsis', () => {
-    expect(displayTitleOf({ ...base, description: 'あ'.repeat(121) })).toBe(`${'あ'.repeat(47)}…`);
+    expect(titleOf({ ...base, description: 'あ'.repeat(121) })).toBe(`${'あ'.repeat(47)}…`);
   });
 
   it('truncates without splitting Unicode characters', () => {
-    expect(displayTitleOf({ ...base, description: `${'😀'.repeat(121)}。詳細` })).toBe(`${'😀'.repeat(47)}…`);
+    expect(titleOf({ ...base, description: `${'😀'.repeat(121)}。詳細` })).toBe(`${'😀'.repeat(47)}…`);
   });
 
   it('drops a trailing full stop from a single-sentence description', () => {
     expect(
-      displayTitleOf({
+      titleOf({
         ...base,
         description: 'Directory of JPYC-accepting exchanges, dApps and bridges (curated JSON).',
       }),
@@ -43,16 +47,16 @@ describe('displayTitleOf', () => {
   });
 
   it('keeps the mixed Japanese/English ICP product phrase intact', () => {
-    expect(displayTitleOf({ ...base, description: 'ICP の技術調査・設計相談を 1 件完了。質問文→回答の 1 往復を人手で提供します。 / Completes one round of ICP technical research and design consultation.' }))
+    expect(titleOf({ ...base, description: 'ICP の技術調査・設計相談を 1 件完了。質問文→回答の 1 往復を人手で提供します。 / Completes one round of ICP technical research and design consultation.' }))
       .toBe('ICP の技術調査・設計相談を 1 件完了');
   });
 
   it('falls back to the URL host and pathname without query or fragment', () => {
-    expect(displayTitleOf({ ...base, description: '' })).toBe('example.jp:8443/paid/data');
+    expect(titleOf({ ...base, description: '' })).toBe('example.jp:8443/paid/data');
   });
 
   it('keeps an invalid resource string as the heading instead of throwing', () => {
-    expect(displayTitleOf({ resource: 'not a url', description: '' })).toBe('not a url');
+    expect(titleOf({ resource: 'not a url', description: '' })).toBe('not a url');
   });
 });
 
