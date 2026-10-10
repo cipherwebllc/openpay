@@ -82,12 +82,21 @@ function indentOf(line) {
   return line.length - line.trimStart().length;
 }
 
-/** `key: value` の行を分解する (key は quote 可)。key の後に `:` が無ければ null。 */
+/**
+ * `key: value` の行を分解する。key の後に `:` が無ければ null。
+ * quote 付きの key は top-level の `"on":` だけに使う (YAML 1.1 で on が真偽値扱いされる回避の定型)。
+ * block 内の key (イベント名・job id・job の field) は plain のみ対応で、quote 付きは呼び出し側が unsupported にする。
+ */
 function splitKey(line) {
   const m = line.trim().match(/^(?:"([^"]+)"|'([^']+)'|([A-Za-z_][\w-]*)):(?:\s+(.*))?$/);
   if (!m) return null;
-  return { key: m[1] ?? m[2] ?? m[3], value: (m[4] ?? '').trim() };
+  return { key: m[1] ?? m[2] ?? m[3], value: (m[4] ?? '').trim(), quoted: m[3] === undefined };
 }
+
+// 対応する scalar = quote / アンカー / エイリアス / タグ / flow 記号を含まない 1 語 (イベント名・branch・path・job id)。
+// これ以外 (`"pull_request"`・`&x`・`*x`・`!!str x`・`{…}`・`[…]`・空白を含む) は読めない形として null / unsupported にする。
+const PLAIN_SCALAR_RE = /^[A-Za-z0-9_][\w./*?-]*$/;
+const EVENT_NAME_RE = /^[a-z][a-z_]*$/;
 
 /** flow 形式の `[a, b]` / `{a: 1, b: {c: d}}` を、ネストを尊重して要素ごとに分ける。 */
 function splitFlow(inner) {
@@ -115,14 +124,16 @@ function splitFlow(inner) {
   return parts;
 }
 
-/** `[a, b]` → ['a', 'b']。flow seq でなければ null。 */
+/** `[a, b]` → ['a', 'b']。flow seq でないか、要素が plain scalar でなければ null (quote 付き等は読まない)。 */
 function flowList(value) {
   const v = value.trim();
   if (!v.startsWith('[') || !v.endsWith(']')) return null;
-  return splitFlow(v.slice(1, -1)).map(unquote).filter(Boolean);
+  const items = splitFlow(v.slice(1, -1));
+  if (items.some((item) => !PLAIN_SCALAR_RE.test(item))) return null;
+  return items;
 }
 
-/** `{a: x, b: {..}}` → [{key, value}]。flow map でなければ null。 */
+/** `{a: x, b: {..}}` → [{key, value}]。flow map でなければ null、key が quote 付き等で読めなければ undefined。 */
 function flowMap(value) {
   const v = value.trim();
   if (!v.startsWith('{') || !v.endsWith('}')) return null;
@@ -130,8 +141,8 @@ function flowMap(value) {
   if (!inner) return [];
   const entries = [];
   for (const part of splitFlow(inner)) {
-    const entry = splitKey(part) ?? (part.match(/^([\w-]+):$/) ? { key: part.slice(0, -1), value: '' } : null);
-    if (!entry) return undefined; // 読めない
+    const entry = splitKey(part) ?? (part.match(/^([A-Za-z_][\w-]*):$/) ? { key: part.slice(0, -1), value: '', quoted: false } : null);
+    if (!entry || entry.quoted) return undefined; // 読めない (quote 付きの key を含む)
     entries.push(entry);
   }
   return entries;
@@ -163,7 +174,7 @@ function childIndent(lines) {
   return -1;
 }
 
-/** `- item` 行を集める。indent は最初の行から取り、他の形が混ざれば null。 */
+/** `- item` 行を集める。indent は最初の行から取り、他の形や plain でない要素 (quote 付き等) が混ざれば null。 */
 function blockList(lines) {
   const items = lines.filter((l) => l.trim() !== '');
   if (items.length === 0) return null;
@@ -171,7 +182,9 @@ function blockList(lines) {
   const out = [];
   for (const line of items) {
     if (indentOf(line) !== indent || !line.trim().startsWith('- ')) return null;
-    out.push(unquote(line.trim().slice(2)));
+    const item = line.trim().slice(2).trim();
+    if (!PLAIN_SCALAR_RE.test(item)) return null;
+    out.push(item);
   }
   return out;
 }
@@ -205,6 +218,12 @@ function mapEntries(lines, label) {
         current = null;
         continue;
       }
+      if (entry.quoted) {
+        // `"pull_request":` 等。YAML としては plain と同じ key だが、デコードせず読めない形として扱う (fail-closed)
+        errors.push(`${label}: quoted key (${line.trim()})`);
+        current = null;
+        continue;
+      }
       current = { key: entry.key, value: entry.value, sub: [] };
       entries.push(current);
       continue;
@@ -222,26 +241,27 @@ function mapEntries(lines, label) {
 function readPullRequestConfig(entries, unsupported) {
   const cfg = { filtered: null, branches: null, branchesIgnore: null };
   for (const { key, value, sub } of entries) {
+    if (!PR_FILTER_KEYS.has(key) && !PR_BRANCH_KEYS.has(key)) {
+      unsupported.push(`on.pull_request.${key}: unsupported key`);
+      continue;
+    }
+    // 値は plain scalar の flow list か block list だけを読む (quote 付き・アンカー等は読めない形 = unsupported)
+    let list = flowList(value);
+    if (list === null && isEmptyValue(value) && sub && sub.length > 0) list = blockList(sub);
+    if (list === null) {
+      unsupported.push(`on.pull_request.${key}: unreadable list`);
+      continue;
+    }
     if (PR_FILTER_KEYS.has(key)) {
       cfg.filtered = cfg.filtered ?? key;
       continue;
     }
-    if (PR_BRANCH_KEYS.has(key)) {
-      let list = flowList(value);
-      if (list === null && isEmptyValue(value) && sub && sub.length > 0) list = blockList(sub);
-      if (list === null) {
-        unsupported.push(`on.pull_request.${key}: unreadable list`);
-        continue;
-      }
-      if (list.some((b) => GLOB_RE.test(b))) {
-        unsupported.push(`on.pull_request.${key}: glob pattern (${list.join(', ')})`);
-        continue;
-      }
-      if (key === 'branches') cfg.branches = list;
-      else cfg.branchesIgnore = list;
+    if (list.some((b) => GLOB_RE.test(b))) {
+      unsupported.push(`on.pull_request.${key}: glob pattern (${list.join(', ')})`);
       continue;
     }
-    unsupported.push(`on.pull_request.${key}: unsupported key`);
+    if (key === 'branches') cfg.branches = list;
+    else cfg.branchesIgnore = list;
   }
   return cfg;
 }
@@ -262,6 +282,9 @@ function readTriggers(lines, unsupported) {
       result.pullRequest = list.includes('pull_request');
       if (result.pullRequest) result.config = readPullRequestConfig([], unsupported);
     } else if (map) {
+      for (const e of map) {
+        if (!EVENT_NAME_RE.test(e.key)) unsupported.push(`on: unknown event (${e.key})`);
+      }
       const pr = map.find((e) => e.key === 'pull_request');
       if (pr) {
         result.pullRequest = true;
@@ -271,8 +294,9 @@ function readTriggers(lines, unsupported) {
       }
     } else if (map === undefined) {
       unsupported.push('on: unreadable flow value');
-    } else if (/^[\w-]+$/.test(unquote(value))) {
-      result.pullRequest = unquote(value) === 'pull_request';
+    } else if (EVENT_NAME_RE.test(value)) {
+      // plain のイベント名 1 つ (`on: "pull_request"` のような quote 付きは読まない)
+      result.pullRequest = value === 'pull_request';
       if (result.pullRequest) result.config = readPullRequestConfig([], unsupported);
     } else {
       unsupported.push(`on: unreadable value (${value})`);
@@ -297,6 +321,13 @@ function readTriggers(lines, unsupported) {
   }
   const { entries, errors } = mapEntries(on.body, 'on');
   for (const reason of errors) unsupported.push(reason);
+  // 「pull_request が無いので除外」と言えるのは、on: の全 entry が対応文法 (plain のイベント名 + 空か flow map の値) のときだけ
+  for (const e of entries) {
+    if (!EVENT_NAME_RE.test(e.key)) unsupported.push(`on: unknown event (${e.key})`);
+    else if (e.key !== 'pull_request' && !isEmptyValue(e.value) && !flowMap(e.value)) {
+      unsupported.push(`on.${e.key}: unreadable value (${e.value})`); // pull_request の値は下で読む
+    }
+  }
   const pr = entries.find((e) => e.key === 'pull_request');
   if (!pr) return result;
   result.pullRequest = true;

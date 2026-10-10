@@ -88,20 +88,27 @@ describe('期待 check 集合の定数と workflow のドリフト検出 (fail-c
   });
 
   it('paths / paths-ignore / types は block でも flow map でも filtered に出す', () => {
-    expect(parseWorkflow(`on:\n  pull_request:\n    paths:\n      - "docs/**"\n${JOB}`).filtered).toBe('paths');
-    expect(parseWorkflow(`on:\n  pull_request:\n    paths-ignore: ["**.md"]\n${JOB}`).filtered).toBe('paths-ignore');
+    expect(parseWorkflow(`on:\n  pull_request:\n    paths:\n      - docs/**\n${JOB}`).filtered).toBe('paths');
+    expect(parseWorkflow(`on:\n  pull_request:\n    paths-ignore: [docs/**.md]\n${JOB}`).filtered).toBe('paths-ignore');
     expect(parseWorkflow(`on:\n  pull_request:\n    types: [labeled]\n${JOB}`).filtered).toBe('types');
-    expect(parseWorkflow(`on:\n  pull_request: {paths: ["docs/**"]}\n${JOB}`).filtered).toBe('paths');
+    expect(parseWorkflow(`on:\n  pull_request: {paths: [docs/**]}\n${JOB}`).filtered).toBe('paths');
     expect(parseWorkflow(`on: {pull_request: {paths: [docs/**], branches: [main]}}\n${JOB}`).filtered).toBe('paths');
     expect(parseWorkflow(`on:\n  pull_request:\n    branches: [main]\n${JOB}`).filtered).toBeNull();
+    // quote 付きの値は読まない (除外ではなく unsupported)
+    const quotedPaths = parseWorkflow(`on:\n  pull_request:\n    paths:\n      - "docs/**"\n${JOB}`);
+    expect(quotedPaths.filtered).toBeNull();
+    expect(quotedPaths.unsupported).toEqual(['on.pull_request.paths: unreadable list']);
+    expect(parseWorkflow(`on:\n  pull_request:\n    paths-ignore: ["**.md"]\n${JOB}`).unsupported).toEqual(['on.pull_request.paths-ignore: unreadable list']);
   });
 
   it('branches は main を含むときだけ main 向け PR の check に数える (block list / flow list / branches-ignore)', () => {
     expect(parseWorkflow(`on:\n  pull_request:\n    branches: [main]\n${JOB}`).branches).toEqual(['main']);
     expect(parseWorkflow(`on:\n  pull_request:\n    branches:\n      - main\n      - release\n${JOB}`).branches).toEqual(['main', 'release']);
     expect(parseWorkflow(`on:\n  pull_request:\n    branches-ignore: [main]\n${JOB}`).branchesIgnore).toEqual(['main']);
-    const glob = parseWorkflow(`on:\n  pull_request:\n    branches: ["release/**"]\n${JOB}`);
+    const glob = parseWorkflow(`on:\n  pull_request:\n    branches: [release/**]\n${JOB}`);
     expect(glob.unsupported.join()).toContain('glob');
+    expect(parseWorkflow(`on:\n  pull_request:\n    branches: ["main"]\n${JOB}`).unsupported).toEqual(['on.pull_request.branches: unreadable list']);
+    expect(parseWorkflow(`on:\n  pull_request:\n    branches:\n      - 'main'\n${JOB}`).unsupported).toEqual(['on.pull_request.branches: unreadable list']);
     const dir = mkdtempSync(join(tmpdir(), 'ci-wait-branches-'));
     try {
       writeFileSync(join(dir, 'release.yml'), `on:\n  pull_request:\n    branches: [release]\njobs:\n  rel:\n    runs-on: x\n`);
@@ -139,6 +146,56 @@ describe('期待 check 集合の定数と workflow のドリフト検出 (fail-c
       ['named', 'check #1'],
       ['single', 'Pretty Name'],
     ]);
+  });
+
+  it('on: の quote 付き / エスケープ付きのイベント名・未知の構文は「pull_request 無し」と除外せず unsupported (fail-closed)', () => {
+    const cases: [string, string[]][] = [
+      [`on:\n  push:\n  "pull_request":\n${JOB}`, ['on: quoted key ("pull_request":)']],
+      [`on:\n  push:\n  'pull_request':\n${JOB}`, ["on: quoted key ('pull_request':)"]],
+      [`on:\n  "pull_request_target":\n${JOB}`, ['on: quoted key ("pull_request_target":)']],
+      [`on: [push, "pull_request"]\n${JOB}`, ['on: unreadable value ([push, "pull_request"])']],
+      [`on: "pull_request"\n${JOB}`, ['on: unreadable value ("pull_request")']],
+      [`on:\n  - push\n  - "pull_request"\n${JOB}`, ['on: unreadable list']],
+      [`on: {"pull_request": {}}\n${JOB}`, ['on: unreadable flow value']],
+      [`on:\n  ? pull_request\n${JOB}`, ['on: unreadable line (? pull_request)']],
+      [`on:\n  push: &x\n    branches: [main]\n  <<: *x\n${JOB}`, ['on: unreadable line (<<: *x)', 'on.push: unreadable value (&x)']],
+      [`on:\n  pull_request: *x\n${JOB}`, ['on.pull_request: unreadable value']],
+      [`on:\n  pull_request: !!map {}\n${JOB}`, ['on.pull_request: unreadable value']],
+      [`on:\n  Push:\n${JOB}`, ['on: unknown event (Push)']],
+      [`on: {push: {}, "pull_request": {}}\n${JOB}`, ['on: unreadable flow value']],
+    ];
+    for (const [src, expected] of cases) {
+      const wf = parseWorkflow(src);
+      expect(wf.unsupported, src).toEqual(expected);
+    }
+    // 対応文法だけで書かれ pull_request が無いときだけ「除外」になる
+    expect(parseWorkflow(`on:\n  push:\n    branches: [main]\n  schedule:\n    - cron: "0 0 * * *"\n  workflow_dispatch: {}\n${JOB}`).unsupported).toEqual([]);
+    expect(parseWorkflow(`"on": pull_request\n${JOB}`).unsupported).toEqual([]); // top-level の "on" だけは定型として読む
+  });
+
+  it('既存の cron workflow に "pull_request": を足しても除外のままにならず、ドリフト検査が赤になる (kv-backup-watch.yml の再現)', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ci-wait-quoted-'));
+    try {
+      const original = readFileSync(join(WORKFLOWS, 'kv-backup-watch.yml'), 'utf8');
+      const mutated = original.replace(/^on:\n/m, 'on:\n  "pull_request":\n');
+      expect(mutated).not.toBe(original);
+      writeFileSync(join(dir, 'kv-backup-watch.yml'), mutated);
+      const r = analyzeWorkflows(dir);
+      expect(r.excluded).toEqual([]);
+      expect(r.unsupported).toEqual([{ workflow: 'kv-backup-watch.yml', reason: 'on: quoted key ("pull_request":)' }]);
+      // 同じ変更を flow 配列で書いても同じ
+      writeFileSync(join(dir, 'kv-backup-watch.yml'), original.replace(/^on:\n  schedule:\n/m, 'on:\n  push: {}\n  schedule:\n'));
+      expect(analyzeWorkflows(dir).unsupported).toEqual([]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('jobs の quote 付き key (job id・field) は unsupported', () => {
+    const wf = parseWorkflow('on: pull_request\njobs:\n  "test":\n    runs-on: x\n  a:\n    "name": b\n    runs-on: x\n');
+    // quote 付きの job id の後は親が無いので、その配下の行も inconsistent indent として積まれる (いずれも unsupported)
+    expect(wf.unsupported).toEqual(['jobs: quoted key ("test":)', 'jobs: inconsistent indent (runs-on: x)', 'jobs.a: quoted key ("name": b)']);
+    expect(wf.jobs.map((j) => [j.id, j.name])).toEqual([['a', 'a']]);
   });
 
   it('未対応の YAML の name (複数行の quote・次行に続く plain・アンカー/エイリアス/タグ・エスケープ・flow 値) は文字列として誤採用せず unsupported', () => {
