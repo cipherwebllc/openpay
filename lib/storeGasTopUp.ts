@@ -19,7 +19,7 @@
 // 読み書きは鍵の Web Lock の中で呼ぶこと (lib/storeGasWallet.ts の withStoreGasWalletLock)。同じタブの変化は
 // onStoreGasTopUpChange で購読する (storage イベントは自タブに届かない)。
 
-import { TransactionReceiptNotFoundError, isAddress, isHex, type Address, type Hex } from 'viem';
+import { isAddress, isHex, type Address, type Hex } from 'viem';
 
 export const STORE_GAS_TOPUP_KEY = 'openpay:store-gas-wallet:topup:v2';
 export const TOPUP_APPROVAL_TTL_MS = 30 * 60 * 1000;
@@ -292,11 +292,10 @@ export async function resolveStoreGasTopUp(
   try {
     const receipt = await client.getTransactionReceipt({ hash: r.hash });
     return { kind: 'receipt', receipt: { status: receipt.status, transactionHash: receipt.transactionHash } };
-  } catch (e) {
-    // 「見つからない」以外 (RPC の障害) は判定できない → 途中のまま。
-    if (!(e instanceof TransactionReceiptNotFoundError)) return { kind: 'pending' };
+  } catch {
+    // まだ無い・RPC の障害のどちらも片付ける証拠にならない → 途中のまま (読み取りの失敗を補充の画面に波及させない)。
+    return { kind: 'pending' };
   }
-  return { kind: 'pending' };
 }
 
 /**
