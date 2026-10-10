@@ -1,10 +1,12 @@
 'use client';
 
 import {
+  useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type ComponentProps,
   type Dispatch,
   type ReactNode,
@@ -25,6 +27,8 @@ import { editGroupedAmount, groupAmountDigits, normalizeAmountList, truncateAmou
 export type Mode = 'amount' | 'static';
 
 type ConvertPanelProps = ComponentProps<typeof ConvertPanel>;
+
+const noopSubscribe = () => () => {};
 
 // 会計のカード (2026-10 磨き上げ P2): 先頭にお店の設定の要約 (header)、その下に金額を主役に置く
 // (金額 / よく使う金額 / 他の通貨建て / 手数料の開示)。通貨・チェーン・受取先・支払い方法は「お店の設定」シートへ。
@@ -92,6 +96,23 @@ export function QrAmountSection({
 }) {
   const t = useTranslations('QrGenerator');
   const amountInputRef = useRef<HTMLInputElement>(null);
+  // 開いたら金額欄に focus を置く (すぐ金額を打てるように)。HTML の autofocus 属性は使わない: server の HTML に
+  // 出ると focus を移すのはブラウザで、WebKit は描画が遅いと後から移し、そのとき別の要素にある focus (設定ボタンや
+  // 開いたシート) も奪う (仕様にある「もう focus があれば autofocus しない」の判定が WebKit に無い)。
+  // どう開いたかで分ける (マウントした時点の値を覚える・hydrate 中だけ server の値 true が返る)。
+  // - ページを開いた直後 (hydrate): まだ何も focus されていない (body か null) ときだけ移す。hydrate までの間に
+  //   ユーザーが移した focus は奪わない。スクロールもしない (それまでに下へスクロールした人を引き戻さない)。
+  // - タブの切替などで client だけでマウント: 押したタブのボタンに focus があっても金額欄へ移す (以前の autoFocus と同じ)。
+  // どちらでも、開いているモーダルの中の focus は奪わない。
+  const hydrating = useSyncExternalStore(noopSubscribe, () => false, () => true);
+  const mountedByHydration = useRef(hydrating);
+  useEffect(() => {
+    const active = document.activeElement;
+    if (active?.closest('[aria-modal="true"]')) return;
+    const byHydration = mountedByHydration.current;
+    if (byHydration && active && active !== document.body) return;
+    amountInputRef.current?.focus({ preventScroll: byHydration });
+  }, []);
   // 値引きを開いている間は、入力欄が「値引き前の金額」だと分かるように見出しを変える (請求金額は値引きの下に出す)。
   const amountLabel = discount?.open
     ? t('amountLabelBeforeDiscount', { symbol: deployment.displaySymbol })
@@ -235,7 +256,6 @@ export function QrAmountSection({
                 placeholder={settings.token === 'jpyc' ? '1,000' : '10.00'}
                 aria-label={amountLabel}
                 className="min-w-0 flex-1 bg-transparent text-right text-4xl font-bold tabular-nums tracking-tight text-slate-900 placeholder:text-slate-300 focus:outline-none sm:text-5xl"
-                autoFocus
               />
               <span className="shrink-0 text-lg font-semibold text-slate-500">
                 {deployment.displaySymbol}
