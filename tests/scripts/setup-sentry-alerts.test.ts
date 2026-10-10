@@ -127,6 +127,9 @@ function topLevelConstString(decl: ts.Declaration | undefined): string | null {
 //   引数・別モジュールの logger (偽物の emit) は数えない。
 // - テンプレートリテラルは、トップレベルの `const X = '…'` だけを参照する静的なものは解決し、
 //   引数や外から来る値を含む動的なもの (`${logPrefix}.reverted`) は集めない (実配線を通した wiredTags で確かめる)。
+// - 数えるのは named import (別名可) の `logger.warn/error(...)` だけ。namespace import (`import * as l` →
+//   `l.logger.warn`) や re-export 経由は数えない = 実際には送っていても「発火元なし」でこのテストが落ちる
+//   (偽 red で安全側)。落ちたら emit 側を named import に書き換える。
 function extractFromSourceFile(sf: ts.SourceFile, checker: ts.TypeChecker, into: Emits): void {
   const path = sf.fileName;
   const staticText = (arg: ts.Expression | undefined): string | null => {
