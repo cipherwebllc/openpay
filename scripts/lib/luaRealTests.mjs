@@ -58,4 +58,8 @@ export const LUA_REAL_TEST_FILES = [
   'tests/lib/x402/storeUsdcRateProvider-lua.test.ts',
   'tests/app/api/order-notify-lua.test.ts',
   'tests/lib/kvLpushAtomic-lua.test.ts',
+  'tests/lib/handleStore-lua.test.ts',
+  'tests/lib/pushStore-lua.test.ts',
+  'tests/app/api/order-call-lua.test.ts',
+  'tests/app/api/order-feed-lua.test.ts',
 ];
