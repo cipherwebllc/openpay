@@ -4,16 +4,18 @@ import { describe, expect, it } from 'vitest';
 import { ALLOWED_RUN_LINES, installGuardViolations, parseWorkflowJobs, runLines } from '../../scripts/lib/workflowRun.mjs';
 
 // Codex レビュー 4 回目 (PR #778) 2: workflow ガードが YAML の別書式 (`run: |`・`run: >-`・引用符付き) と
-// 1 step 内の追加コマンド (`npm ci --ignore-scripts && npm rebuild`) を見逃していた。run をこの形まで読み、
-// 読めない形は throw する (fail-closed)。7 回目以降、run の中身はシェルとして分解せず、npm / npx / gate の名前を
-// 含む行を許可リストと完全一致で照合する (installGuardViolations)。
+// 1 step 内の追加コマンド (`npm ci --ignore-scripts && npm rebuild`) を見逃していた。7 回目以降、run の中身はシェルと
+// して分解せず、npm / npx / gate の名前を含む行を許可リストと完全一致で照合する (installGuardViolations)。
+// YAML は `yaml` で読み (scripts/lib/workflowYaml.mjs)、パースエラー・アンカー / エイリアス / タグ・重複キー・想定外の型は
+// throw する (fail-closed)。以前の手書きの読み取りが throw していた別書式のうち YAML として意味が明確なものは、値として
+// 読んだうえで許可リストで判定する。
 
 function workflow(stepsYaml: string) {
   return `name: x\non: push\npermissions:\n  contents: read\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n${stepsYaml}`;
 }
 
 describe('parseWorkflowJobs', () => {
-  it('reads plain, quoted and block scalar runs', () => {
+  it('reads plain, quoted and block scalar runs as YAML values (keys are the step mapping)', () => {
     const jobs = parseWorkflowJobs(workflow([
       '      - uses: actions/checkout@v4',
       '      - run: npm ci --ignore-scripts # comment',
@@ -39,19 +41,21 @@ describe('parseWorkflowJobs', () => {
     ].join('\n')));
     expect(jobs).toHaveLength(1);
     const steps = jobs[0].steps;
+    // block scalar の末尾の改行 (`|` は 1 つ・`|+` は空行も) は YAML のとおり残る (runLines が落とす)
     expect(steps.map((s) => s.run)).toEqual([
       null,
       'npm ci --ignore-scripts',
       'npm ci --ignore-scripts',
       'npm ci --ignore-scripts',
-      'npm ci --ignore-scripts\nnode scripts/installed-scripts-gate.mjs --rebuild node_modules',
+      'npm ci --ignore-scripts\nnode scripts/installed-scripts-gate.mjs --rebuild node_modules\n',
       'npm ci --ignore-scripts',
-      'echo a && echo b',
+      'echo a && echo b\n\n',
       'npm ci --ignore-scripts && npm rebuild',
     ]);
     expect(steps[0].keys.uses).toBe('actions/checkout@v4');
-    expect(steps[7].keys['continue-on-error']).toBe('true');
-    expect(steps[7].keys.env).toBe('');
+    expect(steps[7].keys['continue-on-error']).toBe(true);
+    expect(steps[7].keys.env).toEqual({ FOO: 'bar' });
+    expect(steps[7].envKeys).toEqual(['FOO']);
   });
 
   it('ends a block scalar at a comment that is shallower than the step (ci.yml の run: >- の後の説明文)', () => {
@@ -74,18 +78,31 @@ describe('parseWorkflowJobs', () => {
     expect(jobs[1].steps[0].run).toBe('node x.mjs');
   });
 
+  // YAML として読めない・検査に使わない形 (workflowYaml の problems) と、想定外の型は throw する。
   it.each([
     ['alias', '      - run: *install'],
     ['anchor', '      - run: &install npm ci'],
     ['tag', '      - run: !!str npm ci'],
-    ['flow sequence', '      - run: [npm, ci]'],
-    ['flow mapping', '      - run: {a: b}'],
-    ['indentation indicator', '      - run: |2\n          npm ci'],
-    ['unterminated single quote', "      - run: 'npm ci\n          --ignore-scripts'"],
-    ['unterminated double quote', '      - run: "npm ci\n          --ignore-scripts"'],
-    ['empty block scalar', '      - run: |\n      - run: echo'],
-    ['empty run', '      - run:'],
+    ['a merge key', '      - <<: *defaults\n        run: echo'],
+    ['a merge key with an inline mapping', '      - <<: {run: npm install}\n        name: x'],
+    ['a flow sequence run (not a string)', '      - run: [npm, ci]'],
+    ['a flow mapping run (not a string)', '      - run: {a: b}'],
+    ['a number run (not a string)', '      - run: 1'],
+    ['an empty block scalar', '      - run: |\n      - run: echo'],
+    ['an empty run', '      - run:'],
+    ['a blank quoted run', '      - run: "  "'],
     ['two run keys', '      - run: a\n        run: b'],
+    ['a quoted and a plain run key', '      - run: a\n        "run": b'],
+    ['an unterminated single quote', "      - run: 'npm ci"],
+    ['an unterminated double quote', '      - run: "npm ci'],
+    ['a continuation line under another key', '      - name: x\n          run: npm install'],
+    ['a comment between a plain scalar and its continuation', '      - run: echo ok &&\n          # note\n          npm install'],
+    ['a key deeper than the step keys', '      - name: x\n         run: npm install'],
+    ['a key between the dash and the step keys', '      - name: x\n       run: npm install'],
+    ['a tab in the indentation', '      - name: x\n\trun: npm install'],
+    ['a key without a space after the colon (a plain scalar step in YAML)', '      - run:npm install'],
+    ['an empty step', '      -'],
+    ['a non-string key', '      - run: echo\n        1: npm install'],
   ])('fails closed on %s', (_label, step) => {
     expect(() => parseWorkflowJobs(workflow(step))).toThrow();
   });
@@ -94,45 +111,49 @@ describe('parseWorkflowJobs', () => {
     expect(() => parseWorkflowJobs('name: x\n')).toThrow();
   });
 
-  // Codex レビュー 5 回目 (PR #778) 3: 有効な YAML なのに読み飛ばして (throw せずに) run を見逃していた形。
-  // 「読む形」以外を読み残したら throw する。
+  // 以前の手書きの読み取りが throw していた形のうち、YAML として意味が明確なもの (引用符付きの key・継続行・escape・
+  // 次の行から始まる値・flow 形式・block scalar の字下げ指示子・folded の改行) は値として読み、npm の行を許可リストで判定する
+  // (読めない形として止めるのではなく、読んだうえで違反にする)。
   it.each([
-    ['a double-quoted step key', '      - "run": npm install'],
-    ['a single-quoted step key', "      - 'run': npm install"],
-    ['a quoted key after the first one', '      - name: x\n        "run": npm install'],
-    ['a plain scalar continued on the next line', '      - run: echo ok &&\n          npm install'],
-    ['a continuation line under another key', '      - name: x\n          run: npm install'],
-    ['a comment between a plain scalar and its continuation', '      - run: echo ok &&\n          # note\n          npm install'],
-    ['an escaped newline in a double-quoted run', '      - run: "echo ok\\nnpm install"'],
-    ['any escape in a double-quoted run', '      - run: "npm ci --ignore-scripts\\t"'],
-    ['a key deeper than the step keys', '      - name: x\n         run: npm install'],
-    ['a key between the dash and the step keys', '      - name: x\n       run: npm install'],
-    ['a tab in the indentation', '      - name: x\n\trun: npm install'],
-    ['a key without a space after the colon (a plain scalar in YAML)', '      - run:npm install'],
-    ['a merge key', '      - <<: *defaults\n        run: echo'],
-    ['a complex key', '      - ? run\n        : npm install'],
-    ['a flow mapping step', '      - {run: npm install}'],
-    ['a step whose keys start on the next line', '      -\n        run: npm install'],
-    ['a run value on the next line', '      - run:\n          npm install'],
-    ['a folded run with a blank line (kept as a newline)', '      - run: >\n          echo a\n\n          npm install'],
-    ['a folded run with a more-indented line (kept as a newline)', '      - run: >\n          echo a\n            npm install'],
-    ['a block scalar header with an indentation indicator after chomping', '      - run: |-2\n          npm ci'],
-  ])('fails closed on %s', (_label, step) => {
-    expect(() => parseWorkflowJobs(workflow(step))).toThrow();
+    ['a double-quoted step key', '      - "run": npm install', 'npm install'],
+    ['a single-quoted step key', "      - 'run': npm install", 'npm install'],
+    ['a quoted key after the first one', '      - name: x\n        "run": npm install', 'npm install'],
+    ['a plain scalar continued on the next line', '      - run: echo ok &&\n          npm install', 'echo ok && npm install'],
+    ['a multi-line single-quoted run', "      - run: 'echo ok &&\n          npm install'", 'echo ok && npm install'],
+    ['a multi-line double-quoted run', '      - run: "echo ok &&\n          npm install"', 'echo ok && npm install'],
+    ['an escaped newline in a double-quoted run', '      - run: "echo ok\\nnpm install"', 'echo ok\nnpm install'],
+    ['a complex key', '      - ? run\n        : npm install', 'npm install'],
+    ['a flow mapping step', '      - {run: npm install}', 'npm install'],
+    ['a step whose keys start on the next line', '      -\n        run: npm install', 'npm install'],
+    ['a run value on the next line', '      - run:\n          npm install', 'npm install'],
+    ['a folded run with a blank line (kept as a newline)', '      - run: >\n          echo a\n\n          npm install', 'echo a\nnpm install\n'],
+    ['a folded run with a more-indented line (kept as a newline)', '      - run: >\n          echo a\n            npm install', 'echo a\n  npm install\n'],
+    ['a block scalar header with an indentation indicator', '      - run: |2\n          npm install', 'npm install\n'],
+    ['an indentation indicator after chomping', '      - run: |-2\n          npm install', 'npm install'],
+  ])('reads %s and reports the npm line', (_label, step, run) => {
+    expect(parseWorkflowJobs(workflow(step))[0].steps.map((s) => s.run)).toEqual([run]);
+    expect(installGuardViolations(workflow(step), 'x.yml').join('\n')).toMatch(/npm install" mentions npm \/ npx \/ a gate but is not an allowed line/);
+  });
+
+  it('reads an escape in a double-quoted run as its character (a trailing tab is trimmed like any space)', () => {
+    expect(parseWorkflowJobs(workflow('      - run: "npm ci --ignore-scripts\\t"'))[0].steps[0].run).toBe('npm ci --ignore-scripts\t');
   });
 
   it.each([
-    ['steps given as a flow sequence', 'jobs:\n  a:\n    steps: []\n'],
+    ['steps given as an empty flow sequence', 'jobs:\n  a:\n    steps: []\n'],
     ['a job without steps (uses: a reusable workflow)', 'jobs:\n  a:\n    uses: ./.github/workflows/x.yml\n'],
     ['a job with an empty steps key', 'jobs:\n  a:\n    runs-on: x\n    steps:\n  b:\n    steps:\n      - run: echo\n'],
     ['steps followed by a mapping instead of a sequence', 'jobs:\n  a:\n    steps:\n      run: npm install\n'],
     ['jobs at different indentations', 'jobs:\n  a:\n    steps:\n      - run: echo\n   b:\n    steps:\n      - run: npm install\n'],
     ['a step line between the job keys and the items', 'jobs:\n  a:\n    steps:\n      - run: echo\n     - run: npm install\n'],
     ['job keys at different indentations', 'jobs:\n  a:\n    runs-on: x\n     steps:\n      - run: npm install\n'],
-    ['a quoted job key', 'jobs:\n  "a":\n    steps:\n      - run: npm install\n'],
-    ['a job given as a flow mapping', 'jobs:\n  a: {steps: [{run: npm install}]}\n'],
+    ['a job that is not a mapping', 'jobs:\n  a: npm install\n'],
     ['an empty jobs mapping', 'jobs:\nenv:\n  X: 1\n'],
-    ['CR line endings', 'jobs:\r\n  a:\r\n    steps:\r\n      - run: npm install\r\n'],
+    ['jobs given as a list', 'jobs:\n  - steps:\n      - run: npm install\n'],
+    ['a lone CR (a line break for GitHub, a character for YAML 1.2)', 'jobs:\n  a:\n    steps:\n      - run: echo\r        npm install\n'],
+    ['two documents', 'jobs:\n  a:\n    steps:\n      - run: echo\n---\njobs:\n  a:\n    steps:\n      - run: npm install\n'],
+    ['a %YAML directive', '%YAML 1.1\n---\njobs:\n  a:\n    steps:\n      - run: echo\n'],
+    ['a top level that is not a mapping', '- jobs\n'],
   ])('fails closed on %s', (_label, source) => {
     expect(() => parseWorkflowJobs(source)).toThrow();
   });
@@ -147,9 +168,17 @@ describe('parseWorkflowJobs', () => {
     ]);
   });
 
+  // 引用符付きの job id・flow 形式の job・CRLF も YAML として読む (以前は throw)。
+  it('reads a quoted job key, a job given as a flow mapping and CRLF line endings', () => {
+    expect(parseWorkflowJobs('jobs:\n  "a":\n    steps:\n      - run: npm install\n').map((j) => [j.job, j.steps[0].run])).toEqual([['a', 'npm install']]);
+    expect(parseWorkflowJobs('jobs:\n  a: {steps: [{run: npm install}]}\n').map((j) => [j.job, j.steps[0].run])).toEqual([['a', 'npm install']]);
+    expect(parseWorkflowJobs('jobs:\r\n  a:\r\n    steps:\r\n      - run: npm install\r\n').map((j) => [j.job, j.steps[0].run])).toEqual([['a', 'npm install']]);
+    expect(installGuardViolations('jobs:\n  a: {steps: [{run: npm install}]}\n', 'x.yml').join('\n')).toMatch(/x\.yml\/a step 1: "npm install" .* is not an allowed line/);
+  });
+
   it('reads trailing comments on job and steps keys and keeps comments inside literal blocks in the run', () => {
     const jobs = parseWorkflowJobs('jobs: # c\n  a: # c\n    steps: # c\n      - run: |\n          # shell comment\n          node x.mjs\n');
-    expect(jobs[0].steps[0].run).toBe('# shell comment\nnode x.mjs');
+    expect(jobs[0].steps[0].run).toBe('# shell comment\nnode x.mjs\n');
   });
 });
 
@@ -343,6 +372,10 @@ describe('installGuardViolations: env, if, the pipefail build run, defaults and 
     ['the Pimlico shape (no if on the source gate, the same if on the install and the gate)', [SOURCE_GATE, step('npm ci --omit=dev --ignore-scripts', IF_SKIP), step('node scripts/installed-scripts-gate.mjs --rebuild node_modules', IF_SKIP)], {}],
     ['a job-level if (it applies to the whole job)', SEQUENCE, { job: "    if: github.event_name == 'push'\n" }],
     ['shell on a step without npm / npx / gate lines', [...SEQUENCE, step('echo hi', '\n        shell: bash {0}')], {}],
+    // continue-on-error: false (YAML の真偽値) は「なし」と同じ
+    ['continue-on-error: false on the gates', [step('node scripts/lockfile-gate.mjs', '\n        continue-on-error: false'), INSTALL, step('node scripts/installed-scripts-gate.mjs --rebuild node_modules', '\n        continue-on-error: false')], {}],
+    // 引用符付きの if は install と同じ文字列なら同じ if
+    ['a quoted if on the gate equal to the install if', [SOURCE_GATE, step('npm ci --omit=dev --ignore-scripts', IF_SKIP), step('node scripts/installed-scripts-gate.mjs --rebuild node_modules', "\n        if: \"steps.secrets.outputs.skip != 'true'\"")], {}],
   ])('accepts %s', (_label, steps, options) => {
     const allSteps = steps[0] === SOURCE_GATE ? steps : [SOURCE_GATE, ...steps];
     expect(guard(allSteps, options)).toEqual([]);
@@ -355,17 +388,21 @@ describe('installGuardViolations: env, if, the pipefail build run, defaults and 
     ['job env', SEQUENCE, { job: '    env:\n      npm_config_registry: https://mirror.example/\n' }, /x\.yml\/build: env npm_config_registry/],
     ['install step env', [SOURCE_GATE, step('npm ci --ignore-scripts', '\n        env:\n          NPM_CONFIG_REGISTRY: https://mirror.example/'), REBUILD], {}, /step 2: env NPM_CONFIG_REGISTRY/],
     ['env of another step', [...SEQUENCE, step('npm run build', "\n        env:\n          npm_config_ignore_scripts: 'false'")], {}, /step 4: env npm_config_ignore_scripts/],
+    // YAML として読める別書式 (以前は throw): flow mapping・引用符付きの key
+    ['a flow mapping at the workflow level', SEQUENCE, { top: 'env: {NPM_CONFIG_REGISTRY: https://mirror.example/}\n' }, /x\.yml: env NPM_CONFIG_REGISTRY/],
+    ['a quoted env key', SEQUENCE, { job: '    env:\n      "NPM_CONFIG_REGISTRY": https://mirror.example/\n' }, /x\.yml\/build: env NPM_CONFIG_REGISTRY/],
+    ['a quoted top-level env key', SEQUENCE, { top: '"env":\n  NPM_CONFIG_REGISTRY: x\n' }, /x\.yml: env NPM_CONFIG_REGISTRY/],
   ])('reports npm_config_* in %s', (_label, steps, options, message) => {
     expect(guard(steps, options).join('\n')).toMatch(message);
   });
 
   it.each([
-    ['a flow mapping at the workflow level', SEQUENCE, { top: 'env: {NPM_CONFIG_REGISTRY: https://mirror.example/}\n' }],
     ['an expression at the step level', [SOURCE_GATE, step('npm ci --ignore-scripts', '\n        env: ${{ fromJSON(vars.ENV) }}'), REBUILD], {}],
-    ['a quoted env key', SEQUENCE, { job: '    env:\n      "NPM_CONFIG_REGISTRY": https://mirror.example/\n' }],
+    ['an expression at the workflow level', SEQUENCE, { top: 'env: ${{ fromJSON(vars.ENV) }}\n' }],
+    ['env given as a list', SEQUENCE, { job: '    env:\n      - NPM_CONFIG_REGISTRY=x\n' }],
     ['misaligned env keys', SEQUENCE, { job: '    env:\n      A: b\n       NPM_CONFIG_REGISTRY: x\n' }],
-    ['a quoted top-level env key', SEQUENCE, { top: '"env":\n  NPM_CONFIG_REGISTRY: x\n' }],
     ['two top-level env keys', SEQUENCE, { top: 'env:\n  A: b\n', tail: 'env:\n  NPM_CONFIG_REGISTRY: x\n' }],
+    ['an env key hidden by an anchor and a merge key', SEQUENCE, { top: 'x-npm: &npm\n  NPM_CONFIG_REGISTRY: x\nenv:\n  <<: *npm\n' }],
   ])('fails closed on env it cannot read: %s', (_label, steps, options) => {
     expect(() => guard(steps, options)).toThrow();
   });
@@ -376,6 +413,13 @@ describe('installGuardViolations: env, if, the pipefail build run, defaults and 
     ['the CI source gate only on push', [step('node scripts/lockfile-gate.mjs', "\n        if: github.event_name == 'push'"), INSTALL, REBUILD], /step 1: the if of a gate step/],
     ['the installed-scripts gate with an if the install does not have', [SOURCE_GATE, INSTALL, step('node scripts/installed-scripts-gate.mjs --rebuild node_modules', '\n        if: always()')], /step 3: the if of a gate step/],
     ['a block scalar if on the gate', [SOURCE_GATE, step('npm ci --ignore-scripts', '\n        if: |\n          true'), step('node scripts/installed-scripts-gate.mjs --rebuild node_modules', '\n        if: |\n          false')], /the if of (the install step|a gate step)/],
+    // if は文字列だけ (YAML の真偽値は install と同じでも 1 行の文字列ではない)
+    ['a boolean if on the install and the gate', [SOURCE_GATE, step('npm ci --ignore-scripts', '\n        if: true'), step('node scripts/installed-scripts-gate.mjs --rebuild node_modules', '\n        if: true')], /step 2: the if of the install step must be a single-line string[\s\S]*step 3: the if of a gate step/],
+    // 引用符の有無は値に関係しない (同じ文字列なら同じ if)
+    ['a quoted if that differs only in spaces', [SOURCE_GATE, step('npm ci --ignore-scripts', IF_SKIP), step('node scripts/installed-scripts-gate.mjs --rebuild node_modules', "\n        if: \"steps.secrets.outputs.skip  != 'true'\"")], /step 3: the if of a gate step/],
+    // continue-on-error は無いか YAML の false だけ (式・文字列の 'false' は続行しうる値として扱う)
+    ['continue-on-error given as an expression on the installed-scripts gate', [SOURCE_GATE, INSTALL, step('node scripts/installed-scripts-gate.mjs --rebuild node_modules', '\n        continue-on-error: ${{ always() }}')], /must not continue on error/],
+    ["continue-on-error given as the string 'false' on the source gate", [step('node scripts/lockfile-gate.mjs', "\n        continue-on-error: 'false'"), INSTALL, REBUILD], /no continue-on-error up to and including the source gate/],
   ])('reports %s', (_label, steps, message) => {
     expect(guard(steps).join('\n')).toMatch(message);
   });

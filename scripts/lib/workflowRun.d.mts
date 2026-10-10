@@ -1,6 +1,6 @@
 export interface WorkflowStep {
-  keys: Record<string, string>;
-  kinds: Record<string, string>;
+  /** step の mapping そのもの (YAML の値・run / env を含む) */
+  keys: Record<string, unknown>;
   envKeys: string[];
   run: string | null;
 }
