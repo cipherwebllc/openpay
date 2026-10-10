@@ -9,28 +9,46 @@
 // 現れたら CI を fail させる。第三者 linter に依存せず Node 標準 API と Git で判定する
 // (このゲート自体が新規依存を持つのは本末転倒のため)。
 //
-// 検査対象: リポ内の全 package-lock.json と Git 管理下の全 .npmrc (隠し dir も含む)。
+// 検査対象: Git 管理下の全 package-lock.json / npm-shrinkwrap.json と全 .npmrc (隠し dir も含む)。
 // npm ci より前に実行する。.npmrc の許可キーは legacy-peer-deps のみ。
-// 許容: resolved が https://registry.npmjs.org/ 始まり、または workspace link
-// (resolved がリポ内相対 path で link:true か、root package 自身のエントリ)。
+// 許容: resolved が `https://registry.npmjs.org/<name>/-/<basename>-<version>.tgz` の形 (dot segment・
+// query・fragment・userinfo・port 指定なし)、または workspace link (link:true か root package 自身)。
+// lockfileVersion は 2 以上で `packages` を持つものだけ (v1 は packages が無く検査にならない)。
+//
+// 追加 (2026-10-10・第 7 回レビュー E4・user 裁定 R4): install script を持つパッケージ
+// (lockfile の hasInstallScript) は scripts/lib/installScriptAllowlist.mjs の名前だけ許容し、
+// 新規の名前が現れたら fail。取得元が公式でも、install script 付きの新規パッケージは
+// npm ci の時点で任意コードを走らせるため、掟 16 第 2 文の「導入前の個別確認」を機械化する。
+// 注意: hasInstallScript は npm が lockfile に書く値で、手書きで消せば検査をすり抜ける。
+// binding.gyp の暗黙 node-gyp rebuild・bundled 依存・link の prepare もフラグに出ない。
+// そのため npm ci の直後に実体を走査する scripts/installed-scripts-gate.mjs を併用し (検出)、
+// lockfile の diff (このフラグが消える diff) は PR レビューで見る。
+//
+// 脅威モデル (docs/DEPLOY_CHECKLIST.md §7.14): 守る相手は悪意ある (または乗っ取られた) 第三者パッケージの
+// install script と同梱物。lockfile は npm が生成したもの (Renovate を含む) を前提にし、手で改ざんされた lockfile は
+// PR レビューとこの gate の形の検査で止める範囲 (改ざんで消せる値の最終判定は実体 gate が実体から行う)。
 
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { join } from 'node:path';
-
-const ALLOWED_PREFIX = 'https://registry.npmjs.org/';
+import { INSTALL_SCRIPT_ALLOWLIST } from './lib/installScriptAllowlist.mjs';
+import { declaresBundledDependencies, parseRegistryTarball } from './lib/registryTarball.mjs';
 // userconfig/globalconfig 経由の別設定ファイルや proxy/CA による取得元の偽装が
 // npm ci に波及するのを防ぐ。新しいキーは用途をレビューしてから明示的に追加する。
 const ALLOWED_NPMRC_KEYS = new Set(['legacy-peer-deps']);
 
-function collectLockfiles(dir, out = []) {
-  for (const name of readdirSync(dir)) {
-    if (name === 'node_modules' || name.startsWith('.')) continue;
-    const p = join(dir, name);
-    if (statSync(p).isDirectory()) collectLockfiles(p, out);
-    else if (name === 'package-lock.json') out.push(p);
+// Git 管理下のファイルだけを列挙する (隠しディレクトリも含む)。CI の npm ci が読むのは commit された
+// lockfile なので、checkout に残った未追跡の lockfile は対象外。
+function trackedFiles(patterns, what) {
+  try {
+    return execFileSync('git', ['ls-files', '-z', '--', ...patterns], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }).split('\0').filter(Boolean);
+  } catch {
+    // Git の列挙失敗が「検査対象ゼロ」の偽成功へ波及するのを防ぐ。
+    console.error(`lockfile-gate: cannot list tracked ${what}; source validation did not complete`);
+    process.exit(1);
   }
-  return out;
 }
 
 // npm の INI と同様に引用符・escape・コメントを読む。引用された設定キー
@@ -51,24 +69,39 @@ function iniToken(raw) {
   return value.replace(/\\([\\;#])|[;#].*$/g, (_match, escaped) => escaped ?? '').trim();
 }
 
-const lockfiles = collectLockfiles(process.cwd());
-let npmrcs;
-try {
-  npmrcs = execFileSync('git', ['ls-files', '-z', '--', '.npmrc', '**/.npmrc'], {
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'pipe'],
-  }).split('\0').filter(Boolean);
-} catch {
-  // Git の列挙失敗が「検査対象ゼロ」の偽成功へ波及するのを防ぐ。
-  console.error('lockfile-gate: cannot list tracked .npmrc files; source validation did not complete');
-  process.exit(1);
-}
+// 公式レジストリの tarball URL の形は scripts/lib/registryTarball.mjs (installed-scripts-gate と共用) が決める。
+
+const npmrcs = trackedFiles(['.npmrc', '**/.npmrc'], '.npmrc files');
+const lockfiles = trackedFiles(
+  ['package-lock.json', '**/package-lock.json', 'npm-shrinkwrap.json', '**/npm-shrinkwrap.json'],
+  'lockfiles',
+);
 if (lockfiles.length === 0) {
-  console.error('lockfile-gate: package-lock.json が見つかりません');
+  console.error('lockfile-gate: Git 管理下に package-lock.json / npm-shrinkwrap.json が見つかりません');
   process.exit(1);
 }
 
 let bad = 0;
+// install script を持つ名前のうち、どの lockfile にも現れなかった allowlist エントリ (= 削除候補)。
+const installScriptNamesSeen = new Set();
+// lockfile の path (例: node_modules/playwright/node_modules/fsevents) からパッケージ名を取る。
+// workspace 自身のエントリ (例: packages/x402-sdk) は node_modules/ を含まないので path をそのまま名前にする。
+const packageNameOf = (path) => {
+  const at = path.lastIndexOf('node_modules/');
+  return at === -1 ? path : path.slice(at + 'node_modules/'.length);
+};
+// lockfile の path の祖先 (各 `node_modules/` の手前のエントリ。root '' は除く) のうち、依存の同梱
+// (bundleDependencies / bundledDependencies) を宣言しているもの。npm は宣言した親の下の名前・その推移的依存・
+// 同梱物の中の入れ子を同梱として親の tarball から入れるので、宣言のある親の下は全部「同梱の内側かもしれない」とみなす。
+const bundlingAncestorOf = (packages, path) => {
+  for (const match of path.matchAll(/(?:^|\/)node_modules\//g)) {
+    const ancestor = path.slice(0, match.index);
+    if (ancestor === '') continue;
+    if (declaresBundledDependencies(packages[ancestor])) return ancestor;
+  }
+  return null;
+};
+
 for (const file of npmrcs) {
   const lines = readFileSync(file, 'utf8').split(/\r\n|[\r\n]/);
   for (const [index, line] of lines.entries()) {
@@ -86,9 +119,70 @@ for (const file of npmrcs) {
 
 for (const file of lockfiles) {
   const lock = JSON.parse(readFileSync(file, 'utf8'));
-  const packages = lock.packages ?? {};
+  // lockfileVersion 1 は packages を持たず (dependencies ツリーのみ)、検査対象ゼロで通ってしまう。
+  const version = lock?.lockfileVersion;
+  const packages = lock?.packages;
+  if (!Number.isInteger(version) || version < 2 || packages === null || typeof packages !== 'object' || Array.isArray(packages)) {
+    console.error(`NG ${file}: lockfileVersion must be >= 2 with a packages object (got lockfileVersion ${JSON.stringify(version ?? null)}); regenerate with a current npm`);
+    bad++;
+    continue;
+  }
   for (const [name, pkg] of Object.entries(packages)) {
     if (name === '') continue; // root package 自身
+    if (pkg === null || typeof pkg !== 'object') {
+      console.error(`NG ${file}: ${name} is not a package entry`);
+      bad++;
+      continue;
+    }
+    // npm は hasInstallScript を truthy で見て script を走らせるので、boolean 以外 ("true" 等) は検査を
+    // すり抜ける値として fail にする。
+    if (Object.hasOwn(pkg, 'hasInstallScript') && typeof pkg.hasInstallScript !== 'boolean') {
+      console.error(`NG ${file}: ${name} has a non-boolean hasInstallScript (${JSON.stringify(pkg.hasInstallScript)}); npm treats it as truthy`);
+      bad++;
+    }
+    const tarball = parseRegistryTarball(pkg.resolved);
+    // 同梱 (inBundle) の実体は親 tarball の中身で、resolved も hasInstallScript も持たずに入る。allowlist の名前が
+    // 同梱で現れると、名前の承認が別 publisher の同梱コードに流用されうる (実体 gate も `npm rebuild <name>` も
+    // 同名の全実体を対象にする) ので、install の前にここで止める。子の inBundle を消して resolved を公式 tarball に
+    // 書き換えても、祖先のエントリが同梱を宣言していれば同梱の内側として止める (Codex 5 回目 P1。祖先の宣言まで
+    // 消された lockfile は、実体 gate が親の package.json から同じ判定をする)。
+    if (Object.hasOwn(INSTALL_SCRIPT_ALLOWLIST, packageNameOf(name))) {
+      const bundler = pkg.inBundle === true ? name : bundlingAncestorOf(packages, name);
+      if (bundler !== null) {
+        console.error(
+          `NG ${file}: ${name} is ${bundler === name ? 'a bundled copy (inBundle)' : `inside the bundle of ${bundler} (bundleDependencies)`} ` +
+            `of the allowlisted name ${packageNameOf(name)}; the install script allowlist only applies to official registry ` +
+            'tarballs of that name, not to bundled copies (CLAUDE.md 掟 16).',
+        );
+        bad++;
+      }
+    }
+    // install script 付きは取得元に関係なく名前で allowlist 照合する (link も含む)。
+    if (pkg.hasInstallScript === true) {
+      const packageName = packageNameOf(name);
+      installScriptNamesSeen.add(packageName);
+      if (!Object.hasOwn(INSTALL_SCRIPT_ALLOWLIST, packageName)) {
+        console.error(
+          `NG ${file}: ${name} has an install script (preinstall/install/postinstall) and is not in INSTALL_SCRIPT_ALLOWLIST ` +
+            '(scripts/lib/installScriptAllowlist.mjs). Review the package before adding it (CLAUDE.md 掟 16).',
+        );
+        bad++;
+      } else {
+        // allowlist の名前でも、別名 (lockfile の name が違う) や別パッケージの tarball・取得元の分からない実体は通さない。
+        // path の名前は依存の宣言側が付ける名前なので、npm の別名 ("esbuild": "npm:evil@1.0.0") で allowlist の名前を
+        // 名乗った別のパッケージを install script ごと通しうる。取得元の tarball の名前とも一致したときだけ効かせる。
+        const fetchedName = tarball?.name ?? null;
+        const declaredName = typeof pkg.name === 'string' ? pkg.name : packageName;
+        if (fetchedName !== packageName || declaredName !== packageName) {
+          console.error(
+            `NG ${file}: ${name} has an install script and is allowlisted by name, but the package actually fetched is ` +
+              `${fetchedName ?? '(no official registry tarball)'} (lockfile name: ${declaredName}). ` +
+              'An npm alias or a non-registry source cannot borrow an allowlisted name (CLAUDE.md 掟 16).',
+          );
+          bad++;
+        }
+      }
+    }
     const resolved = pkg.resolved;
     // workspace link (例: "packages/x402-sdk" を link 参照) は resolved がリポ内
     // 相対 path。https 以外でも link エントリだけは許容する。
@@ -98,8 +192,8 @@ for (const file of lockfiles) {
       // resolved を持つエントリで起きるため、省略自体は fail にしない (過剰検出防止)。
       continue;
     }
-    if (!resolved.startsWith(ALLOWED_PREFIX)) {
-      console.error(`NG ${file}: ${name} -> ${resolved}`);
+    if (tarball === null) {
+      console.error(`NG ${file}: ${name} -> ${resolved} (not an official registry tarball URL of the form https://registry.npmjs.org/<name>/-/<name>-<version>.tgz)`);
       bad++;
     }
   }
@@ -108,9 +202,18 @@ for (const file of lockfiles) {
 
 if (bad > 0) {
   console.error(
-    `lockfile-gate: 許可されていない .npmrc 設定・依存の取得元が ${bad} 件あります。` +
-      'git URL / 独自レジストリ / http 取得は禁止 (CLAUDE.md 掟 16)。',
+    `lockfile-gate: 許可されていない .npmrc 設定・依存の取得元・install script 付きの新規パッケージが ${bad} 件あります。` +
+      'git URL / 独自レジストリ / http 取得は禁止、install script 付きの新規パッケージは個別確認のうえ allowlist に追加 (CLAUDE.md 掟 16)。',
   );
   process.exit(1);
 }
-console.log('lockfile-gate: 全 lockfile は公式 npm レジストリのみ、Git 管理下の全 .npmrc は許可キーのみです');
+// allowlist にあるが lockfile に install script 付きで現れない名前 = upstream で script が消えた/依存から外れた。
+// fail にはしない (npm update で native 依存が消えた PR を止めない) が、allowlist の掃除候補として出す。
+const stale = Object.keys(INSTALL_SCRIPT_ALLOWLIST).filter((n) => !installScriptNamesSeen.has(n));
+if (stale.length > 0) {
+  console.log(`lockfile-gate: stale install script allowlist entries (no longer have install scripts): ${stale.join(', ')}`);
+}
+console.log(
+  `lockfile-gate: 全 lockfile は公式 npm レジストリのみ、install script 付きは allowlist の ${installScriptNamesSeen.size} 名のみ、` +
+    'Git 管理下の全 .npmrc は許可キーのみです',
+);

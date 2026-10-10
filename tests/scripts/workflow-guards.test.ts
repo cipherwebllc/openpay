@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { LUA_REAL_TEST_FILES } from '../../scripts/lib/luaRealTests.mjs';
 import { listTestFiles } from '../../scripts/lib/testFileFence.mjs';
+import { installGuardViolations } from '../../scripts/lib/workflowRun.mjs';
 
 function workflow(name: string): string {
   return readFileSync(resolve(process.cwd(), '.github/workflows', name), 'utf8');
@@ -12,8 +13,48 @@ function workflow(name: string): string {
 describe('GitHub Actions operation guards', () => {
   const workflowFiles = readdirSync(resolve('.github/workflows')).filter((name) => /\.ya?ml$/.test(name));
 
-  it('Lighthouse uses the explicitly approved patch version', () => {
-    expect(workflow('lighthouse.yml')).toMatch(/^\s*npx --yes @lhci\/cli@0\.14\.0 autorun\s*$/m);
+  // 第 7 回レビュー E5: `npx --yes @lhci/cli@x` は推移的依存を実行のたびに lockfile 外で解決する
+  // (掟 16 の gate 外・LHCI_GITHUB_APP_TOKEN を持つ step)。@lhci/cli は tools/lighthouse の lockfile で固定する。
+  it('Lighthouse は lockfile 経由 (tools/lighthouse) の @lhci/cli を使い、npx で都度解決しない', () => {
+    // コメント行は除く (旧手順の説明に npx の語が出るため)。
+    const source = workflow('lighthouse.yml').split('\n').filter((line) => !/^\s*#/.test(line)).join('\n');
+    expect(source).not.toMatch(/npx\b/);
+    expect(source).not.toMatch(/@lhci\/cli@/);
+    expect(source).toMatch(/^\s*run: npm --prefix tools\/lighthouse ci --ignore-scripts\s*$/m);
+    // lockfile-gate (install script allowlist を含む) → npm ci (本体) → lhci の install の順
+    const gate = source.indexOf('run: node scripts/lockfile-gate.mjs');
+    const lhciInstall = source.indexOf('run: npm --prefix tools/lighthouse ci');
+    expect(gate).toBeGreaterThan(-1);
+    expect(lhciInstall).toBeGreaterThan(gate);
+    // Codex レビュー (PR #778) 6: autorun は collect (= .lighthouserc.json の `npm run start` でアプリと依存を起動) と
+    // upload を同じ env で回すので、LHCI_GITHUB_APP_TOKEN がアプリ側の process にも渡っていた。
+    // token は upload の step だけに渡し、collect / assert の step には env を付けない。
+    expect(source).not.toMatch(/lhci autorun/);
+    const steps = source.split(/\n(?=\s+- name: )/).filter((step) => /\blhci (collect|assert|upload)\b/.test(step));
+    const byCommand = Object.fromEntries(steps.map((step) => [step.match(/\blhci (collect|assert|upload)\b/)![1], step]));
+    expect(Object.keys(byCommand).sort()).toEqual(['assert', 'collect', 'upload']);
+    expect(byCommand.collect).not.toContain('LHCI_GITHUB_APP_TOKEN');
+    expect(byCommand.assert).not.toContain('LHCI_GITHUB_APP_TOKEN');
+    expect(byCommand.upload).toContain('LHCI_GITHUB_APP_TOKEN: ${{ secrets.LHCI_GITHUB_APP_TOKEN }}');
+    // job 全体の env に token を置かない (step の env だけ)
+    const jobEnv = source.slice(source.indexOf('\njobs:'), source.indexOf('    steps:'));
+    expect(jobEnv).not.toContain('LHCI_GITHUB_APP_TOKEN');
+    // Codex レビュー 2 回目 (PR #778) 3: upload は assertion-results.json を読んで GitHub の status を決めるので、
+    // assert の**後**に走らせる (前だとスコアに関係なく success を投稿する)。collect が成功していれば assert が
+    // 失敗しても upload は走る (status に failure を載せる)。upload の失敗は autorun と同じく警告止まり。
+    expect(source.indexOf('lhci collect')).toBeLessThan(source.indexOf('lhci assert'));
+    expect(source.indexOf('lhci assert')).toBeLessThan(source.indexOf('lhci upload'));
+    expect(byCommand.collect).toMatch(/^\s+id: collect\s*$/m);
+    expect(byCommand.upload).toMatch(/if: \$\{\{ !cancelled\(\) && steps\.collect\.outcome == 'success' \}\}/);
+    expect(byCommand.upload).toMatch(/continue-on-error:\s*true/);
+    expect(byCommand.assert).not.toMatch(/continue-on-error/);
+    expect(byCommand.assert).not.toMatch(/^\s+if:/m);
+    // 版は tools/lighthouse/package.json の exact pin と lockfile の実体で固定する (承認済み 0.14.0)。
+    const pkg = JSON.parse(readFileSync(resolve(process.cwd(), 'tools/lighthouse/package.json'), 'utf8'));
+    expect(pkg.private).toBe(true);
+    expect(pkg.devDependencies).toEqual({ '@lhci/cli': '0.14.0' });
+    const lock = JSON.parse(readFileSync(resolve(process.cwd(), 'tools/lighthouse/package-lock.json'), 'utf8'));
+    expect(lock.packages['node_modules/@lhci/cli'].version).toBe('0.14.0');
   });
 
   it.each(workflowFiles)('%s explicitly limits GITHUB_TOKEN permissions', (name) => {
@@ -25,17 +66,15 @@ describe('GitHub Actions operation guards', () => {
     if (name === 'post-deploy-verify.yml') expect(permissions).toContain('actions: read');
   });
 
-  it.each(workflowFiles)('%s checks registry sources before every dependency install', (name) => {
-    const source = workflow(name);
-    const jobs = source.slice(source.indexOf('\njobs:\n')).split(/\n  [\w-]+:\n/).slice(1);
-    for (const job of jobs) {
-      const install = job.search(/\brun:\s*npm ci\b/);
-      if (install === -1) continue;
-      const gate = job.indexOf('run: node scripts/lockfile-gate.mjs');
-      expect(gate, `${name}: pre-install source gate`).toBeGreaterThan(-1);
-      expect(gate, `${name}: pre-install source gate`).toBeLessThan(install);
-      expect(job.slice(0, gate)).not.toMatch(/continue-on-error:\s*true/);
-    }
+  // 全 workflow の全 install は `npm ci --ignore-scripts` (install script も binding.gyp の暗黙 node-gyp rebuild も走らない)
+  // にし、直後の step で scripts/installed-scripts-gate.mjs が実体を走査して allowlist 外があれば fail、通ったら
+  // `--rebuild` で allowlist の名前だけ `npm rebuild` する (CLAUDE.md 掟 16・Codex レビュー (PR #778) 3 回目で「防止」)。
+  // 7 回目で run をシェルとして分解して推測する方式をやめ、npm / npx / 2 つの gate の名前を含む行は許可リストとの
+  // 完全一致だけを通す (npx は全面禁止・install と gate は step の run がその 1 行だけ)。YAML の読めない形は
+  // parseWorkflowJobs が throw する。守る相手は保守者のうっかり (docs/DEPLOY_CHECKLIST.md §7.14 の脅威モデル)。
+  // 規則の本体は scripts/lib/workflowRun.mjs の installGuardViolations (fixture の検査は tests/scripts/workflow-run.test.ts)。
+  it.each(workflowFiles)('%s checks sources, installs with --ignore-scripts and rebuilds only allowlisted packages after the gate', (name) => {
+    expect(installGuardViolations(workflow(name), name)).toEqual([]);
   });
 
   it('CI は typecheck 直後に full ESLint を実行する', () => {

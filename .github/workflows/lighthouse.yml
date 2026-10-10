@@ -32,18 +32,53 @@ jobs:
         with:
           node-version: 22
           cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            tools/lighthouse/package-lock.json
 
+      # lockfile-gate は tools/lighthouse/package-lock.json (lhci の推移的依存) も検査する。
       - name: Check dependency sources
         run: node scripts/lockfile-gate.mjs
 
+      # install script は走らせずに入れ、gate が実体を走査して allowlist 外なら fail、通ったら allowlist の名前だけ
+      # npm rebuild する (CLAUDE.md 掟 16・docs/DEPLOY_CHECKLIST.md §7.14)。
       - name: Install
-        run: npm ci
+        run: npm ci --ignore-scripts
+
+      - name: Check installed packages for install-time scripts and rebuild the allowlisted ones
+        run: node scripts/installed-scripts-gate.mjs --rebuild node_modules
 
       - name: Build
         run: npm run build
 
-      - name: Run Lighthouse CI
-        run: |
-          npx --yes @lhci/cli@0.14.0 autorun
+      # @lhci/cli は本体の devDependencies に入れず tools/lighthouse の lockfile で固定する
+      # (旧: npx --yes @lhci/cli@0.14.0 = 推移的依存を実行のたびに最新解決・掟 16 の gate 外)。
+      # lhci の依存に install script は無い (allowlist の名前が入っていなければ gate は npm rebuild を呼ばない) ので、
+      # この job では install script を一切走らせない = 依存の侵害が LHCI_GITHUB_APP_TOKEN を持つ step へ波及する経路を断つ。
+      - name: Install Lighthouse CI (lockfile)
+        run: npm --prefix tools/lighthouse ci --ignore-scripts
+
+      - name: Check installed Lighthouse CI packages for install-time scripts
+        run: node scripts/installed-scripts-gate.mjs --rebuild tools/lighthouse/node_modules
+
+      # autorun (healthcheck → collect → assert → upload) を step に分ける。collect は .lighthouserc.json の
+      # `npm run start` でアプリとその依存を同じ env で起動するので、token を持たせない。token は upload
+      # (temporary-public-storage への保存 + GitHub の status 投稿) の step だけに渡す。
+      # 順序は autorun と同じ collect → assert → upload: upload は assert が書く assertion-results.json を読んで
+      # GitHub の status (success / failure) を決めるので、assert の前に走らせるとスコアに関係なく success を投稿する。
+      # collect が成功していれば assert が失敗しても upload は走る (status に failure を載せる)。upload の失敗は
+      # autorun と同じく警告止まりで、job の verdict は assert の結果。
+      # 残るリスク = 先行 step (npm ci の install script) が同じ runner の後続 step を書き換えうる。完全な隔離は job 分割。
+      - name: Lighthouse collect
+        id: collect
+        run: tools/lighthouse/node_modules/.bin/lhci collect
+
+      - name: Lighthouse assert
+        run: tools/lighthouse/node_modules/.bin/lhci assert
+
+      - name: Lighthouse upload
+        if: ${{ !cancelled() && steps.collect.outcome == 'success' }}
+        continue-on-error: true
+        run: tools/lighthouse/node_modules/.bin/lhci upload
         env:
           LHCI_GITHUB_APP_TOKEN: ${{ secrets.LHCI_GITHUB_APP_TOKEN }}

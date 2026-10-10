@@ -635,7 +635,11 @@ CRITICAL** advisory を GHSA URL で同定、`ALLOWED_ADVISORIES` 辞書と照�
 
 - accepted (allowlist 一致): log 表示のみ、CI pass
 - unaccepted (新規 advisory): 詳細 log + **exit 1** で CI fail
+- uncollectable (MODERATE+ なのに advisory URL が無い / via が空で allowlist と照合できない): **exit 1** で CI fail
+  (黙って捨てると accepted にも unaccepted にも数えられず通ってしまうため・第 7 回レビュー E21)
 - stale (allowlist にあるが現在検出されない): upstream fix の signal、log のみ
+- dev-scope (2 回目の `npm audit --json` で dev 依存だけに出る MODERATE+): **gate ではない**参考一覧 (§7.11 の裁定対象)。
+  2 回目の audit が失敗しても本番 gate の verdict は変えない (warn のみ)
 
 allowlist 追加 / 削除は本 §7 の update と必ず同期させること (= 監査 trail を
 両ファイルの diff で残す)。現在 allowlist:
@@ -691,6 +695,70 @@ moderate  ws                    https://github.com/advisories/GHSA-58qx-3vcg-4xp
 ```
 
 **他の advisory が追加で出現したら deploy 前に本 §7 を update + allowlist 同期**。
+
+### 7.14 CI gate: 依存の取得元と install script (`scripts/lockfile-gate.mjs` / `scripts/installed-scripts-gate.mjs`)
+
+CLAUDE.md 掟 16 (依存は公式 npm レジストリのみ・install script 付きの新規パッケージは個別確認) を CI で機械化する
+2 段構え (2026-10-10・第 7 回レビュー E4 / user 裁定 R4・PR #778)。
+
+**脅威モデル (何から守り、何をレビューに任せるか)**: `installed-scripts-gate` / `lockfile-gate` が守る相手は
+**悪意ある (または乗っ取られた) 第三者パッケージ** — その install script と tarball の同梱物 (bundled 依存・binding.gyp) —
+である。lockfile は npm が生成したもの (Renovate の更新を含む) を前提にし、手で改ざんされた lockfile (フラグの削除・
+resolved の書き換え) は PR レビューと lockfile-gate の形の検査で止める範囲とする。ただし lockfile の記述と実体が
+食い違うときは実体を信じる側に倒す (同梱かどうかは子の `inBundle` だけでなく、祖先の package.json の
+`bundleDependencies` / `bundledDependencies` からも判定し、同梱の内側の実体には allowlist を適用しない)。
+workflow の検査 (`tests/scripts/workflow-guards.test.ts` + `scripts/lib/workflowRun.mjs`) が守る相手は
+**保守者 (AI エージェントを含む) がうっかり** workflow に `npm install` や `npx …` を足すことで、意図的に検査を欺く
+書き方はレビューの範囲とする。ただしシェルを分解して意味を推測することはせず、npm / npx / 2 つの gate の名前を含む
+run の行は許可リストとの完全一致だけを通し (fail-closed)、読み残しうる YAML の書式は throw して、うっかりの別書式を
+黙って通さない。workflow で `npx` は全面禁止 (`npx --no` でも global の bin や npx の cache を実行しうるため)。bin は
+`npm run <script>` か `./node_modules/.bin/<bin>` で呼ぶ。
+
+1. **`node scripts/lockfile-gate.mjs`** (npm ci の**前**・全 workflow): Git 管理下の全 `package-lock.json` /
+   `npm-shrinkwrap.json` (隠しディレクトリ含む・lockfileVersion ≥ 2 必須) の `resolved` が
+   `https://registry.npmjs.org/<name>/-/<name>-<version>.tgz` の形 (dot segment・query・userinfo なし) であること、
+   `.npmrc` が `legacy-peer-deps` 以外を持たないこと、`hasInstallScript: true` の名前が
+   `scripts/lib/installScriptAllowlist.mjs` の `INSTALL_SCRIPT_ALLOWLIST` にあり取得元 tarball の名前と lockfile の
+   name も一致すること (npm alias による借用の拒否)、allowlist の名前が同梱 (`inBundle`・祖先のエントリの
+   `bundleDependencies`) の内側に現れないことを検査する。
+2. **`npm ci --ignore-scripts`** → **`node scripts/installed-scripts-gate.mjs --rebuild <node_modules>`** (全 workflow の
+   全 install の直後): `--ignore-scripts` で preinstall / install / postinstall も binding.gyp の暗黙 `node-gyp rebuild`
+   も走らせずに入れ (npm 10.9 の `@npmcli/arborist` rebuild.js は `ignoreScripts` でこれらの queue を実行しない)、
+   gate が node_modules の実体 (package.json の scripts・binding.gyp・link の prepare) を走査して allowlist 外があれば
+   fail。通ったときだけ、その root に入っている allowlist の名前を `npm rebuild <names>` して必要な install script を
+   実行する (= 従来の `npm ci` と同じ結果)。**allowlist 外の install script 付き依存は一度も実行されずに CI で止まる。**
+   link (workspace) の script は名前でなく realpath を `LINKED_PACKAGE_SCRIPT_ALLOWLIST` と照合する (現状は空)。
+   allowlist の名前の実体は、lockfile の canonical path (実体の realpath を lockfile の dir からの相対にしたもの。
+   workspace の下の nested 依存は `packages/<ws>/node_modules/<name>`) のエントリが公式 tarball であり、かつ祖先が
+   依存の同梱を宣言していないときだけ rebuild の対象にする。
+   注意: npm 10.9 は `--ignore-scripts` でも link の `prepare` だけは実行する (rebuild.js の links 経路は gate されて
+   いない)。リポ内の link は `packages/x402-sdk` のみで prepare を持たない。link に prepare を足すときはこの一覧と
+   同時に見直す。
+
+workflow での書き方 (`scripts/lib/workflowRun.mjs` の `installGuardViolations` を `tests/scripts/workflow-guards.test.ts`
+が全 workflow に当てる): run の中で npm / npx / `lockfile-gate` / `installed-scripts-gate` の名前を含む行 (大文字小文字を
+問わない部分一致・コメントや echo・引用・here-doc の中も区別しない) は、前後の空白を除いた行全体が許可リスト
+(`ALLOWED_RUN_LINES`。今の workflow で使っている 12 行だけ) に完全一致しなければ fail。install の行と 2 つの gate の行は、
+その step の run がその 1 行だけで、install の step の直後の step が同じ root の実体 gate、install より前の step に
+lockfile-gate を置く。**npm / npx / gate の名前を run の中の説明文やコメントに書かない** (書くなら run の外の YAML コメントにする)。
+新しい npm の呼び出しが要るときは許可リストに 1 行足し、PR レビューで決める。許可した行の実行のされ方を変える設定も止める:
+
+- workflow / job / step の `env` に `npm_config_*` (大文字小文字を問わない・取得元や ignore-scripts を差し替える) を置かない。
+  env の書式が読めなければ fail (flow・式・引用符付きの key・継続行)。
+- install・lockfile-gate・実体 gate の step の `if:` は、無いか、install の step と同じ 1 行の文字列だけ (job の `if:` は対象外)。
+- パイプを含む `npm run build 2>&1 | tee build.log` は、step の run 全体が ci.yml の build の step の固定テンプレート
+  (`PIPEFAIL_BUILD_RUN`・コメント行も含めた行の並び) と完全一致するときだけ許す。
+- workflow / job の `defaults:` (run.shell / run.working-directory) を使わない。npm / npx / gate の名前を含む行がある step に
+  `shell:` を付けない (install と実体 gate の step は working-directory も不可)。
+
+allowlist の追加は「用途・何のための native build か」を 1 行書いて PR レビューで決める。lockfile-gate が
+`stale` と出した名前 (もう install script を持たない) は一覧から外す。ローカルで CI と同じ手順を再現する:
+
+```bash
+node scripts/lockfile-gate.mjs
+npm ci --ignore-scripts
+node scripts/installed-scripts-gate.mjs --rebuild node_modules
+```
 
 ## 8. Sentry observability の前提条件
 
@@ -1332,11 +1400,14 @@ deploy 完了とみなさない。
 p99 > 上限で exit 1 (gate 化可能)。
 
 ```bash
-# preview / 本番 URL に対して (deploy 済を対象に):
-npm run load-test -- --url https://open-pay.jp -c 50 -d 30 --max-error-rate 0.01 --max-p99-ms 1500
+# preview URL に対して (deploy 済を対象に):
+npm run load-test -- --url https://openpay-<preview>.vercel.app -c 20 -d 30 --max-error-rate 0.01 --max-p99-ms 1500
 # ローカル build で baseline を取る:
 npm run start &  # 別途 build 済前提
 npm run load-test -- --url http://localhost:3000 -c 20 -d 15
+# 本番 (open-pay.jp) は --allow-prod を付けたときだけ実行でき、並列は 5 まで (第 7 回レビュー E20)。
+# Cloudflare の /api 50 req/10s ルールと Upstash のコマンド予算に当たるので、本番は短時間・低並列で:
+npm run load-test -- --url https://open-pay.jp --allow-prod -c 5 -d 15
 ```
 
 ローカル build baseline (2026-05-29 実測、Apple Silicon、concurrency=20 / 12s):

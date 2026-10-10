@@ -58,6 +58,12 @@ jobs:
         # (sh: husky: not found) を防ぐ。CI で git hooks は不要。
         run: npm ci --omit=dev --ignore-scripts
 
+      # 他の workflow と同じ gate: 実体を走査して allowlist 外の install script 付きがあれば fail、通ったら
+      # 入っている allowlist の名前 (本番依存のみ) を npm rebuild する (docs/DEPLOY_CHECKLIST.md §7.14)。
+      - name: Check installed packages for install-time scripts and rebuild the allowlisted ones
+        if: steps.secrets.outputs.skip != 'true'
+        run: node scripts/installed-scripts-gate.mjs --rebuild node_modules
+
       - name: Check Pimlico balance
         if: steps.secrets.outputs.skip != 'true'
         env:

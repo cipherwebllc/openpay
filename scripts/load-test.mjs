@@ -6,8 +6,15 @@
 // §11 の「負荷測定」ゲートをこのスクリプトで満たす。
 //
 // 使い方:
-//   node scripts/load-test.mjs --url https://open-pay.jp --concurrency 50 --duration 30
 //   npm run load-test -- --url http://localhost:3000 -c 20 -d 15
+//   node scripts/load-test.mjs --url https://openpay-<preview>.vercel.app --concurrency 20 --duration 30
+//   本番 (open-pay.jp) は --allow-prod を付けたときだけ・並列は MAX_PRODUCTION_CONCURRENCY まで:
+//   node scripts/load-test.mjs --url https://open-pay.jp --allow-prod -c 5 -d 15
+//
+// 本番ガード (第 7 回レビュー E20): 使用例をそのまま本番に向けると Cloudflare の /api rate limit
+// (50 req/10s) で自分がブロックされ、Upstash のコマンド予算と Coinbase 取得を浪費する。
+// 本番 origin は明示フラグ無しでは拒否し、並列数は本番で MAX_PRODUCTION_CONCURRENCY・
+// それ以外でも MAX_CONCURRENCY を上限にする。
 //
 // 計測対象 (重み付き mix で実トラフィックを模す):
 //   - LP (/ja)                         : SSR + static、最も多い入口
@@ -27,28 +34,64 @@ const DEFAULTS = {
   maxErrorRate: 0.01, // 1%
   maxP99Ms: Infinity,
   payTo: '0x52d4901142e2B5680027da5EB47C86CB02a3cA81',
+  allowProd: false,
 };
 
-function parseArgs(argv) {
+// 本番 origin のホスト名 (lib/agentSetup.ts の allowedHosts と同じ 'open-pay.jp' + www)。
+export const PRODUCTION_HOSTS = new Set(['open-pay.jp', 'www.open-pay.jp']);
+// 並列数の上限。本番は Cloudflare の /api 50 req/10s ルールに掛からない範囲 (mix の 5/12 が /api)。
+export const MAX_CONCURRENCY = 100;
+export const MAX_PRODUCTION_CONCURRENCY = 5;
+
+export function parseArgs(argv) {
   const opts = { ...DEFAULTS };
+  let concurrencyGiven = false;
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i];
     const next = () => argv[(i += 1)];
     if (a === '--url' || a === '-u') opts.url = next();
-    else if (a === '--concurrency' || a === '-c') opts.concurrency = Number(next());
-    else if (a === '--duration' || a === '-d') opts.duration = Number(next());
+    else if (a === '--concurrency' || a === '-c') {
+      opts.concurrency = Number(next());
+      concurrencyGiven = true;
+    } else if (a === '--duration' || a === '-d') opts.duration = Number(next());
     else if (a === '--max-error-rate') opts.maxErrorRate = Number(next());
     else if (a === '--max-p99-ms') opts.maxP99Ms = Number(next());
     else if (a === '--pay-to') opts.payTo = next();
+    else if (a === '--allow-prod') opts.allowProd = true;
     else if (a === '--help' || a === '-h') {
       console.log(
-        'usage: node scripts/load-test.mjs --url <base> [-c concurrency] [-d duration_s] [--max-error-rate 0.01] [--max-p99-ms N]',
+        'usage: node scripts/load-test.mjs --url <base> [-c concurrency] [-d duration_s] [--max-error-rate 0.01] [--max-p99-ms N] [--allow-prod]',
       );
       process.exit(0);
     }
   }
+  let target;
+  try {
+    target = new URL(opts.url);
+  } catch {
+    throw new Error(`--url must be an absolute http(s) URL (got ${opts.url})`);
+  }
+  if (target.protocol !== 'http:' && target.protocol !== 'https:') {
+    throw new Error(`--url must be an http(s) URL (got ${opts.url})`);
+  }
+  // FQDN の末尾ドット (open-pay.jp.) は同じホストに解決されるので、外してから比べる (大文字は URL が小文字化済み)。
+  const hostname = target.hostname.toLowerCase().replace(/\.$/, '');
+  const isProduction = PRODUCTION_HOSTS.has(hostname);
+  if (isProduction && !opts.allowProd) {
+    throw new Error(
+      `${hostname} is the production origin; refusing to load-test it without --allow-prod ` +
+        `(use a local build or a preview URL; production is capped at -c ${MAX_PRODUCTION_CONCURRENCY})`,
+    );
+  }
+  if (isProduction && !concurrencyGiven) opts.concurrency = MAX_PRODUCTION_CONCURRENCY;
+  const maxConcurrency = isProduction ? MAX_PRODUCTION_CONCURRENCY : MAX_CONCURRENCY;
   if (!Number.isFinite(opts.concurrency) || opts.concurrency < 1) {
     throw new Error(`--concurrency must be a positive integer (got ${opts.concurrency})`);
+  }
+  if (opts.concurrency > maxConcurrency) {
+    throw new Error(
+      `--concurrency must be at most ${maxConcurrency}${isProduction ? ' against production' : ''} (got ${opts.concurrency})`,
+    );
   }
   if (!Number.isFinite(opts.duration) || opts.duration < 1) {
     throw new Error(`--duration must be a positive number of seconds (got ${opts.duration})`);
@@ -208,7 +251,15 @@ async function main() {
   console.log('\n[load-test] OK (gate 内)');
 }
 
-main().catch((e) => {
-  console.error(`[load-test] error: ${e.stack ?? e}`);
-  process.exit(2);
-});
+// CLI entry — vitest からは import 時に main() が走らないようにガード (scripts/check-pimlico-balance.mjs と同型)。
+const isCli =
+  typeof process !== 'undefined' &&
+  process.argv[1] &&
+  import.meta.url === `file://${process.argv[1]}`;
+
+if (isCli) {
+  main().catch((e) => {
+    console.error(`[load-test] error: ${e.stack ?? e}`);
+    process.exit(2);
+  });
+}

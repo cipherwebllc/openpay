@@ -163,40 +163,40 @@ const ALLOWED_ADVISORIES = {
 // CI gate 対象 severity。LOW は監視対象外 (Section 1 のコメント参照)。
 const GATED_SEVERITIES = new Set(['moderate', 'high', 'critical']);
 
+const isRecord = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
+
 // ────────────────────────────────────────────────────────────────────
 // 1. npm audit の JSON 取得
+//   返り値: { data } (検証済み report) または { failure } (理由の文字列)。
+//   本番 gate では failure を exit 2 (監査未完了) にし、dev 参考集計では warn に留める。
 // ────────────────────────────────────────────────────────────────────
-const audit = spawnSync('npm', ['audit', '--omit=dev', '--json'], {
-  encoding: 'utf8',
-  maxBuffer: 50 * 1024 * 1024,
-});
-// endpoint / npm 起動失敗が「脆弱性ゼロ」の成功判定へ波及するのを防ぐ。
-// exit 1 は脆弱性検出と endpoint 障害の両方に使われるため、JSON の形も検査する。
-if (audit.error || audit.signal || ![0, 1].includes(audit.status)) {
-  console.error(`audit-gate: npm audit failed (status: ${audit.status}, signal: ${audit.signal ?? 'none'})`);
-  process.exit(2);
-}
-if (!audit.stdout) {
-  console.error('audit-gate: `npm audit` produced no stdout');
-  console.error(audit.stderr);
-  process.exit(2);
-}
-let data;
-try {
-  data = JSON.parse(audit.stdout);
-} catch {
-  // 壊れた endpoint 応答を成功扱いせず、監査未完了として CI を止める。
-  console.error('audit-gate: npm audit returned invalid JSON; audit did not complete');
-  process.exit(2);
-}
-const isRecord = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
-if (isRecord(data) && Object.hasOwn(data, 'error')) {
-  console.error('audit-gate: npm audit returned an endpoint/command error; audit did not complete');
-  process.exit(2);
-}
-if (!isRecord(data) || !isRecord(data.vulnerabilities) || !isRecord(data.metadata?.vulnerabilities)) {
-  console.error('audit-gate: npm audit returned an invalid report; expected vulnerabilities and metadata.vulnerabilities objects');
-  process.exit(2);
+function runNpmAudit(args) {
+  const audit = spawnSync('npm', ['audit', ...args, '--json'], {
+    encoding: 'utf8',
+    maxBuffer: 50 * 1024 * 1024,
+  });
+  // endpoint / npm 起動失敗が「脆弱性ゼロ」の成功判定へ波及するのを防ぐ。
+  // exit 1 は脆弱性検出と endpoint 障害の両方に使われるため、JSON の形も検査する。
+  if (audit.error || audit.signal || ![0, 1].includes(audit.status)) {
+    return { failure: `npm audit failed (status: ${audit.status}, signal: ${audit.signal ?? 'none'})` };
+  }
+  if (!audit.stdout) {
+    return { failure: `\`npm audit\` produced no stdout\n${audit.stderr ?? ''}` };
+  }
+  let data;
+  try {
+    data = JSON.parse(audit.stdout);
+  } catch {
+    // 壊れた endpoint 応答を成功扱いせず、監査未完了として扱う。
+    return { failure: 'npm audit returned invalid JSON; audit did not complete' };
+  }
+  if (isRecord(data) && Object.hasOwn(data, 'error')) {
+    return { failure: 'npm audit returned an endpoint/command error; audit did not complete' };
+  }
+  if (!isRecord(data) || !isRecord(data.vulnerabilities) || !isRecord(data.metadata?.vulnerabilities)) {
+    return { failure: 'npm audit returned an invalid report; expected vulnerabilities and metadata.vulnerabilities objects' };
+  }
+  return { data };
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -204,29 +204,55 @@ if (!isRecord(data) || !isRecord(data.vulnerabilities) || !isRecord(data.metadat
 //   info.via には string (= 他の脆弱 pkg 名) と object (= 実 advisory) が混在。
 //   object のみを抽出し、advisory URL を unique key として dedup する。
 //   1 advisory が複数 pkg に propagate する設計のため、影響 pkg を Set で集約。
+//
+//   集計できないもの (第 7 回レビュー E21) は uncollectable に積み、gate では fail にする:
+//   - gated severity の advisory object に url が無い (allowlist の key が作れない)
+//   - gated severity の package に via が無い / 配列でない / 空 (advisory にも他 pkg にも辿れない)
+//   黙って捨てると accepted にも unaccepted にも数えられず CI が通ってしまう。
 // ────────────────────────────────────────────────────────────────────
-/** @type {Map<string, { ghsaId: string, name: string, title: string, severity: string, url: string, packages: Set<string> }>} */
-const advisories = new Map();
-for (const [pkgName, info] of Object.entries(data.vulnerabilities)) {
-  if (!GATED_SEVERITIES.has(info.severity)) continue;
-  for (const via of info.via ?? []) {
-    if (typeof via !== 'object' || via === null) continue;
-    if (!GATED_SEVERITIES.has(via.severity)) continue;
-    if (!via.url) continue;
-    const ghsaId = via.url.split('/').pop();
-    if (!advisories.has(via.url)) {
-      advisories.set(via.url, {
-        ghsaId,
-        name: via.name,
-        title: via.title,
-        severity: via.severity,
-        url: via.url,
-        packages: new Set(),
-      });
+function collectAdvisories(data) {
+  /** @type {Map<string, { ghsaId: string, name: string, title: string, severity: string, url: string, packages: Set<string> }>} */
+  const advisories = new Map();
+  /** @type {string[]} */
+  const uncollectable = [];
+  for (const [pkgName, info] of Object.entries(data.vulnerabilities)) {
+    if (!isRecord(info) || !GATED_SEVERITIES.has(info.severity)) continue;
+    if (!Array.isArray(info.via) || info.via.length === 0) {
+      uncollectable.push(`[${String(info.severity).toUpperCase()}] ${pkgName}: advisories could not be collected (via is missing or empty)`);
+      continue;
     }
-    advisories.get(via.url).packages.add(pkgName);
+    for (const via of info.via) {
+      if (typeof via !== 'object' || via === null) continue;
+      if (!GATED_SEVERITIES.has(via.severity)) continue;
+      if (typeof via.url !== 'string' || via.url === '') {
+        uncollectable.push(
+          `[${String(via.severity).toUpperCase()}] ${pkgName}: advisory without an advisory URL cannot be matched to the allowlist (${via.name ?? '?'}: ${via.title ?? '?'})`,
+        );
+        continue;
+      }
+      const ghsaId = via.url.split('/').pop();
+      if (!advisories.has(via.url)) {
+        advisories.set(via.url, {
+          ghsaId,
+          name: via.name,
+          title: via.title,
+          severity: via.severity,
+          url: via.url,
+          packages: new Set(),
+        });
+      }
+      advisories.get(via.url).packages.add(pkgName);
+    }
   }
+  return { advisories, uncollectable };
 }
+
+const production = runNpmAudit(['--omit=dev']);
+if (production.failure) {
+  console.error(`audit-gate: ${production.failure}`);
+  process.exit(2);
+}
+const { advisories, uncollectable } = collectAdvisories(production.data);
 
 // ────────────────────────────────────────────────────────────────────
 // 3. 受容済 / 未受容に分類
@@ -249,7 +275,7 @@ const stale = Object.keys(ALLOWED_ADVISORIES).filter((id) => !detectedIds.has(id
 // 4. report 出力
 // ────────────────────────────────────────────────────────────────────
 console.log(
-  `audit-gate: MODERATE+ advisories detected: ${advisories.size} (accepted: ${accepted.length}, unaccepted: ${unaccepted.length}, stale-allowlist: ${stale.length})`,
+  `audit-gate: MODERATE+ advisories detected: ${advisories.size} (accepted: ${accepted.length}, unaccepted: ${unaccepted.length}, stale-allowlist: ${stale.length}, uncollectable: ${uncollectable.length})`,
 );
 
 if (accepted.length > 0) {
@@ -263,6 +289,11 @@ if (accepted.length > 0) {
   }
 }
 
+if (uncollectable.length > 0) {
+  console.log('\n--- UNCOLLECTABLE (CI gate failure: advisories that could not be matched to the allowlist) ---');
+  for (const line of uncollectable) console.log(`  ${line}`);
+}
+
 if (unaccepted.length > 0) {
   console.log('\n--- UNACCEPTED (CI gate failure) ---');
   for (const u of unaccepted) {
@@ -271,12 +302,18 @@ if (unaccepted.length > 0) {
     console.log(`    packages: ${[...u.packages].sort().join(', ')}`);
     console.log(`    url:      ${u.url}`);
   }
+}
+
+if (unaccepted.length > 0 || uncollectable.length > 0) {
   console.log('\nAction:');
   console.log('  1. Assess advisory in docs/DEPLOY_CHECKLIST.md §7');
   console.log(
     '  2. If accepted, add to scripts/audit-gate.mjs ALLOWED_ADVISORIES (with reason + docRef)',
   );
   console.log('  3. Otherwise upgrade dependency or swap');
+  if (uncollectable.length > 0) {
+    console.log('  4. For UNCOLLECTABLE entries, inspect `npm audit --omit=dev --json` directly (the report shape changed or the advisory has no URL)');
+  }
   process.exit(1);
 }
 
@@ -290,6 +327,30 @@ if (stale.length > 0) {
   console.log(
     '\n  (stale entries do not fail CI, but indicate upstream fix and allowlist cleanup opportunity)',
   );
+}
+
+// ────────────────────────────────────────────────────────────────────
+// 5. dev 依存を含む参考集計 (第 7 回レビュー E21・gate ではない)
+//   gate は本番依存のみ (docs/DEPLOY_CHECKLIST.md §7.11 の方針)。dev 依存だけに出る MODERATE+ は
+//   §7.11 で裁定する対象なので、黙って見えないままにせず CI ログに一覧を出す。
+//   この集計の失敗 (2 回目の npm audit の endpoint 障害等) が本番 gate の verdict に波及しないよう
+//   warn に留める (本番 gate は上で確定済み)。
+// ────────────────────────────────────────────────────────────────────
+const full = runNpmAudit([]);
+if (full.failure) {
+  console.error(`audit-gate: dev-scope audit skipped: ${full.failure}`);
+} else {
+  const dev = collectAdvisories(full.data);
+  const devOnly = [...dev.advisories.values()].filter((a) => !advisories.has(a.url));
+  console.log(
+    `\n--- Dev-scope MODERATE+ advisories (devDependencies only; not gated — see docs/DEPLOY_CHECKLIST.md §7.11): ${devOnly.length}` +
+      (dev.uncollectable.length > 0 ? ` (+${dev.uncollectable.length} uncollectable)` : '') +
+      ' ---',
+  );
+  for (const d of devOnly) {
+    console.log(`  [${d.severity.toUpperCase()}] ${d.ghsaId} ${d.name}: ${d.title} (packages: ${[...d.packages].sort().join(', ')})`);
+  }
+  for (const line of dev.uncollectable) console.log(`  ${line}`);
 }
 
 console.log('\naudit-gate: OK');

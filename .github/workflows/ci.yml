@@ -30,7 +30,10 @@ jobs:
       # http 取得の混入 (AI エージェント経由のサプライチェーン汚染含む) で fail。
       # .npmrc の redirect は npm ci が読む前に止める (Node 標準 API + Git のみ)。
       - run: node scripts/lockfile-gate.mjs
-      - run: npm ci
+      # install script は走らせずに入れ (binding.gyp の暗黙 build も含む)、gate が実体を走査して allowlist 外なら fail、
+      # 通ったら allowlist の名前だけ npm rebuild する (CLAUDE.md 掟 16・docs/DEPLOY_CHECKLIST.md §7.14)。
+      - run: npm ci --ignore-scripts
+      - run: node scripts/installed-scripts-gate.mjs --rebuild node_modules
       - name: Cache Next.js build
         uses: actions/cache@v4
         with:
@@ -47,7 +50,7 @@ jobs:
         env:
           TZ: America/Los_Angeles
         run: >-
-          npx vitest run --no-cache
+          ./node_modules/.bin/vitest run --no-cache
           tests/lib/shopTime.test.ts
           tests/lib/freeeSync.test.ts
           tests/lib/accountingCsv.test.ts
@@ -83,6 +86,8 @@ jobs:
       # e2e (playwright job) の flags-OFF build は掟 2 のとおり変えない。
       - name: Load public production flags (testnet fixtures)
         run: sed '/^[[:space:]]*#/d; /^[[:space:]]*$/d' e2e/prodFlags.env >> "$GITHUB_ENV"
+      # この step の run は scripts/lib/workflowRun.mjs の PIPEFAIL_BUILD_RUN と完全一致させる (パイプの build の行を
+      # 許す唯一の形・コメント行も含む)。変えるときは両方を同時に変える (docs/DEPLOY_CHECKLIST.md §7.14)。
       - name: Build (production flags) + bundle budget check
         run: |
           # build の失敗を tee の終了コードで隠さない (pipefail が無いと予算スクリプトのパース失敗頼みになる・第 7 回レビュー E12)
@@ -109,7 +114,10 @@ jobs:
           node-version: '22'
           cache: npm
       - run: node scripts/lockfile-gate.mjs
-      - run: npm ci
+      # install script は走らせずに入れ (binding.gyp の暗黙 build も含む)、gate が実体を走査して allowlist 外なら fail、
+      # 通ったら allowlist の名前だけ npm rebuild する (CLAUDE.md 掟 16・docs/DEPLOY_CHECKLIST.md §7.14)。
+      - run: npm ci --ignore-scripts
+      - run: node scripts/installed-scripts-gate.mjs --rebuild node_modules
       - run: node scripts/run-lua-tests.mjs
 
   audit:

@@ -70,8 +70,10 @@
     "automerge": false
   },
   "lockFileMaintenance": {
+    "description": "lockfile 全体 (推移的依存を含む) の再解決は PR を作るだけで自動 merge しない。merge は CI (lockfile-gate の install script 検査を含む) と user の明示承認を経る (第 7 回レビュー E4・user 裁定 R4)",
     "enabled": true,
-    "automerge": true,
+    "automerge": false,
     "schedule": ["before 6am on monday"]
-  }
+  },
+  "minimumReleaseAge": "7 days"
 }
