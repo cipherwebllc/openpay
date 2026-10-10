@@ -4,13 +4,27 @@ import { encodeAbiParameters, encodeEventTopics, getAddress, parseAbi, type Hex 
 import { closeRedisLuaEngine, createFakeRedisStore, runRedisLua, type FakeRedisStore } from '../../_helpers/redisLua';
 
 type LuaCall = { script: string; keys: string[]; args: string[] };
+type RpcBudget = { timeoutMs: number; deadlineAt: number };
 const h = vi.hoisted(() => ({
   store: null as FakeRedisStore | null,
   calls: [] as LuaCall[],
   failGet: false,
   failClaimOnce: false,
   failReschedule: false,
+  // 設定時だけ、予算付き reconcile が作る bounded client (と client なしのページ取得) をこの fake に差し替える。
+  bounded: null as ((budget: RpcBudget) => StoreUsdcPublicClient) | null,
 }));
+vi.mock('@/lib/x402/storeUsdcOnchain', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/x402/storeUsdcOnchain')>();
+  return {
+    ...actual,
+    storeUsdcBoundedClient: (budget: RpcBudget) => (h.bounded ? h.bounded(budget) : actual.storeUsdcBoundedClient(budget)),
+    findStoreUsdcAuthorizationTransactions: (input: Parameters<typeof actual.findStoreUsdcAuthorizationTransactions>[0]) =>
+      actual.findStoreUsdcAuthorizationTransactions(h.bounded && !input.client && input.budget
+        ? { ...input, client: h.bounded(input.budget) }
+        : input),
+  };
+});
 vi.mock('@/lib/kv', () => ({
   kvGet: async (key: string) => {
     if (h.failClaimOnce && key.startsWith('payment:claimed:')) {
@@ -177,6 +191,7 @@ beforeEach(() => {
   h.failGet = false;
   h.failClaimOnce = false;
   h.failReschedule = false;
+  h.bounded = null;
   vi.clearAllMocks();
 });
 afterAll(closeRedisLuaEngine);
@@ -608,9 +623,9 @@ describe('USDC reconciliation with real Lua and receipt verification', () => {
 
   // Codex 6 回目 P2 (2) の再現: 保留列 [OLD, MID, TX]・予算 25 秒・authorizationState 1 秒・先頭 2 件の receipt は各 10 秒で
   // timeout。毎回先頭から再検証すると 21 秒後に残りが 1 回の RPC に足りず TX の前で中断し、順序が変わらないので次回も
-  // 同じ 2 件から (8 回で TX の照合 0 回・ログ走査 0 回)。→ round robin (未確定は末尾へ) と、保留候補の照合を始められるのは
-  // その回の予算の半分までにする上限で、TX に順番が回り、走査の予算も残る。
-  it('rotates slow deferred candidates and caps their budget so a later deferred candidate and the scan still run', async () => {
+  // 同じ 2 件から (8 回で TX の照合 0 回・ログ走査 0 回)。→ round robin (未確定は末尾へ) で TX が列の先頭へ回り、保留候補と
+  // 走査の優先順の交替で走査にも順番が回る (1 回目は保留候補が全予算・2 回目は走査が先)。
+  it('rotates slow deferred candidates so a later deferred candidate and the scan both get a turn', async () => {
     const intent = await active();
     patchIntent({ reconcileDeferred: [OLD, MID, TX] });
     const client = chain(intent.nonce, { latest: 50_090n, eventBlock: 100n });
@@ -638,18 +653,19 @@ describe('USDC reconciliation with real Lua and receipt verification', () => {
     } finally {
       spy.mockRestore();
     }
-    expect(results).toEqual(['pending', 'pending', 'settled']);
+    expect(results).toEqual(['pending', 'settled']);
     expect(client.getTransactionReceipt).toHaveBeenCalledWith({ hash: TX });
-    // 保留候補の照合が予算の半分で打ち切られるので、走査も毎回走る (1 回目は TX のページで止まり、TX は保留候補なので
-    // 走査では読み直さない・2 回目はその次のページから 20 ページ)。
-    expect(logPages.slice(0, 2)).toEqual([1, 20]);
+    // 1 回目は保留候補が先で OLD・MID に予算を使い切り、走査は始められない。2 回目は走査が先 (TX のページで止まり、TX は
+    // 保留候補なので走査では読み直さない)、その後の保留候補の照合で列の先頭に回った TX が確定する。
+    expect(logPages).toEqual([0, 1]);
     await expectSettled();
   });
 
   // Codex 7 回目 P2 の再現と境界: 予算 25 秒・保存 hash OLD (receipt は 10 秒で timeout)・保留列 [TX] (TX は confirmed)・
   // authorizationState に「25 − 10 − 残り」秒。保留候補の枠を残り予算の半分だけにすると、残り 7 秒未満では枠が RPC 1 回の
   // 最小 (2 秒) に届かず TX を照合せず、走査で再発見しても保留候補なので読み直さない → 同じ遅延が続く限り永久に pending。
-  // 枠の下限を最小時間にして、全体で RPC を始められる残り (保存予約 3 秒 + 最小 2 秒 = 5 秒) 以上なら 1 件は照合する。
+  // 今は配分をやめて交替にしたので、保留候補が先の回は残り全部を使い、全体で RPC を始められる残り (保存予約 3 秒 + 最小
+  // 2 秒 = 5 秒) 以上なら照合する。
   it.each([
     ['5s (reserve + one minimum RPC)', 5_000, 'settled'],
     ['6.999s (below the old half-share threshold)', 6_999, 'settled'],
@@ -695,13 +711,13 @@ describe('USDC reconciliation with real Lua and receipt verification', () => {
   // Codex 8 回目 P2 の再現と境界: 予算 25 秒・保存 hash OLD (receipt は 10 秒で timeout)・保留列 [MID] (receipt は 2 秒で
   // timeout)・cursor 2,090・confirmed の replacement TX は走査で見つかる block 2,100・authorizationState に
   // 「25 − 10 − 残り」秒。保留候補に下限の枠を必ず渡すと、残り 7 秒未満では MID の後に走査を始められず、同じ遅延が続く限り
-  // TX を一度も見つけない → 時間が足りない回は保留候補と走査の優先順を回ごとに交替し (印は intent に保存)、2 回目は走査を
-  // 先に行って TX で確定する。7 秒以上は両方に最小時間を確保できるので 1 回目に確定する。
+  // TX を一度も見つけない → 保留候補と走査の優先順を回ごとに交替し (印は intent に保存)、2 回目は走査を先に行って TX で
+  // 確定する。7 秒以上は保留候補が先の 1 回目でも MID の後に走査の時間が残るので 1 回目に確定する。
   it.each([
     ['5s', 5_000, ['pending', 'settled']],
     ['6s', 6_000, ['pending', 'settled']],
     ['6.999s', 6_999, ['pending', 'settled']],
-    ['7s (both sides get one minimum RPC)', 7_000, ['settled']],
+    ['7s', 7_000, ['settled']],
   ] as const)('alternates the deferred re-verification and the scan when the remaining budget after the stored hash is %s', async (_label, remaining, expected) => {
     const intent = await active(OLD);
     patchIntent({ reconcileDeferred: [MID], reconcileFromBlock: '2090' });
@@ -737,12 +753,92 @@ describe('USDC reconciliation with real Lua and receipt verification', () => {
     }
   });
 
+  // 本番の bounded client と同じく RPC ごとに絶対期限 (deadlineAt) を守る fake。各 RPC は所要時間だけ時計を進め、期限を
+  // 越える RPC は期限で abort (失敗) する。reconcile には client を渡さず、本番と同じく RPC ごとに予算から bounded client を
+  // 作らせる (storeUsdcBoundedClient とページ取得をこの fake に差し替える)。
+  type RpcDelays = {
+    used?: number; head?: number; safe?: number; canonical?: number; logs?: number;
+    receipt?: Partial<Record<Hex, number>>;
+  };
+  function deadlineBoundChain(base: StoreUsdcPublicClient, delays: RpcDelays, failingReceipts: readonly Hex[]) {
+    const clock = { now: NOW };
+    const spend = async <T>(budget: RpcBudget, ms: number, run: () => Promise<T>): Promise<T> => {
+      if (clock.now + ms > budget.deadlineAt) {
+        clock.now = Math.max(clock.now, budget.deadlineAt);
+        throw new Error('aborted at the RPC deadline');
+      }
+      clock.now += ms;
+      return run();
+    };
+    h.bounded = (budget) => ({
+      readContract: (args) => spend(budget, delays.used ?? 0, () => base.readContract(args)),
+      getBlockNumber: () => spend(budget, delays.head ?? 0, () => base.getBlockNumber()),
+      getBlock: (args) => spend(budget, 'blockNumber' in args ? delays.canonical ?? 0 : delays.safe ?? 0, () => base.getBlock(args)),
+      getTransactionReceipt: (args) => spend(budget, delays.receipt?.[args.hash] ?? 0, () =>
+        failingReceipts.includes(args.hash) ? Promise.reject(new Error('receipt unavailable')) : base.getTransactionReceipt(args)),
+      getLogs: (args) => spend(budget, delays.logs ?? 0, () => base.getLogs(args)),
+    });
+    return clock;
+  }
+
+  // これまでの Codex 再現 (6〜10 回目) を、絶対期限を守る client で回す。予算 25 秒の cron を最大 8 回くり返して、どれも
+  // 有限回で確定する (誤った確定・失敗なし)。10 回目: 保存 hash OLD の receipt が 10 秒で timeout・持ち越した TX の照合に
+  // receipt / safe / canonical で各 2 秒 (計 6 秒) — 保留候補の枠を「残りの半分」(5.5 秒) にすると毎回 canonical で中断し、
+  // 残りは 14 秒あるので交替にも入らず永久に pending だった → 配分をやめ、予算付きで保留候補がある回は常に交替する。
+  it.each([
+    { label: 'Codex 6 (slow deferred candidates ahead of the confirmed one)', deferred: [OLD, MID, TX], eventBlock: 100n,
+      delays: { used: 1_000, receipt: { [OLD]: 10_000, [MID]: 10_000 } }, failing: [OLD, MID], runs: 2 },
+    ...[5_000, 6_999].map((remaining) => ({
+      label: `Codex 7 (deferred confirmed candidate, ${remaining} ms left after the stored hash)`, stored: OLD, deferred: [TX],
+      eventBlock: 100n, delays: { used: 15_000 - remaining, receipt: { [OLD]: 10_000 } }, failing: [OLD], runs: 1,
+    })),
+    ...[5_000, 6_000, 6_999, 7_000].map((remaining) => ({
+      label: `Codex 8 (slow deferred MID, payment found by the scan, ${remaining} ms left)`, stored: OLD, deferred: [MID],
+      cursor: '2090', eventBlock: 2_100n, delays: { used: 15_000 - remaining, receipt: { [OLD]: 10_000, [MID]: 2_000 } },
+      failing: [OLD, MID], runs: remaining < 7_000 ? 2 : 1,
+    })),
+    ...[6_000, 8_000].map((remaining) => ({
+      label: `Codex 9 (slow getLogs, ${remaining} ms left)`, stored: OLD, deferred: [MID], cursor: '2090', eventBlock: 2_100n,
+      delays: { used: 15_000 - remaining, logs: 1_100, receipt: { [OLD]: 10_000, [MID]: 2_000 } }, failing: [OLD, MID],
+      runs: remaining === 6_000 ? 5 : 3,
+    })),
+    { label: 'Codex 10 (the carried candidate needs 6 s to verify)', stored: OLD, deferred: [TX], cursor: '4090', eventBlock: 2_100n,
+      delays: { used: 1_000, safe: 2_000, canonical: 2_000, receipt: { [OLD]: 10_000, [TX]: 2_000 } }, failing: [OLD], runs: 2 },
+  ] as {
+    label: string; stored?: Hex; deferred: Hex[]; cursor?: string; eventBlock: bigint; delays: RpcDelays; failing: Hex[];
+    runs: number;
+  }[])(
+    'settles within finite cron runs with a deadline-respecting client: $label',
+    async ({ stored, deferred, cursor, eventBlock, delays, failing, runs }) => {
+      const intent = await active(stored);
+      patchIntent({ reconcileDeferred: deferred, ...(cursor ? { reconcileFromBlock: cursor } : {}) });
+      const clock = deadlineBoundChain(chain(intent.nonce, { latest: 50_090n, eventBlock }), delays, failing);
+      const spy = vi.spyOn(Date, 'now').mockImplementation(() => clock.now);
+      const results: string[] = [];
+      try {
+        for (let run = 0; run < 8; run += 1) {
+          const result = await reconcileStoreUsdcIntent(SALT, { now: CHECKED_AT + run * 30_000, deadline: clock.now + 25_000 });
+          results.push(result.ok ? result.state : result.reason);
+          if (result.ok && result.state === 'settled') break;
+        }
+      } finally {
+        spy.mockRestore();
+      }
+      // 確定までの回数も固定する (10 回目は 1 回目に採用した後の finalize の再照合が期限で中断し、既存の写像どおり
+      // storage を返す。次回は採用済みの保存 hash から確定する)。
+      expect(results).toHaveLength(runs);
+      expect(results.at(-1)).toBe('settled');
+      expect(results).not.toContain('failed');
+      await expectSettled();
+    },
+  );
+
   // Codex 9 回目 P2 の再現: 8 回目の条件に加えて getLogs が 1.1 秒かかる。scan 優先の回もログ取得の後に TX の照合を
   // 始める時間が残らず、照合前の TX を捨てて cursor を同じページへ戻すだけだと、毎回同じページの取得から始めて停滞する
-  // (残り 8 秒 = 半分配分の分岐でも同じ) → 照合前の候補を保留候補として持ち越し、cursor はそのページの先へ進める。
+  // (残り 8 秒でも同じ) → 照合前の候補を保留候補として持ち越し、cursor はそのページの先へ進める。
   it.each([
-    ['6s (alternating turns)', 6_000, 5],
-    ['8s (half-share split)', 8_000, 3],
+    ['6s', 6_000, 5],
+    ['8s', 8_000, 3],
   ] as const)('carries a scanned candidate it had no time to verify and settles it later when the remaining budget is %s', async (_label, remaining, settledAt) => {
     const intent = await active(OLD);
     patchIntent({ reconcileDeferred: [MID], reconcileFromBlock: '2090' });

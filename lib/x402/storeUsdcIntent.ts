@@ -35,11 +35,7 @@ import {
   PURCHASE_INTENT_VERSION,
   PURCHASE_REVISION_POLICY,
 } from '@/lib/x402/purchaseIntent';
-import {
-  rpcCallOptions,
-  STORE_RECONCILE_CURSOR_RESERVE_MS,
-  STORE_RECONCILE_PAGE_RPC_MIN_MS,
-} from '@/lib/x402/reconcileBudget';
+import { rpcCallOptions } from '@/lib/x402/reconcileBudget';
 import { scanReconcileBlockPages } from '@/lib/x402/reconcilePaging';
 import {
   associateStoreRailIntent,
@@ -185,13 +181,13 @@ type StoreUsdcIntentBase = {
    */
   reconcileDeferred?: Hex[];
   /**
-   * 時間が足りない回 (保留候補の照合と走査の両方に RPC 1 回の最小時間を確保できない回) に先に行う側。その回が終わると
-   * 反対側に反転して保存する (省略 = 'deferred')。reconcile 専用の可変メタで binding に含めない。
+   * 予算付き (cron) で保留候補がある回に先に行う側。その回が終わると反対側に反転して保存する (省略 = 'deferred')。
+   * reconcile 専用の可変メタで binding に含めない。
    */
   reconcileTurn?: StoreUsdcReconcileTurn;
 };
 
-/** 時間が足りない回の優先順: 'deferred' = 保留候補の再検証を先に / 'scan' = 走査を先に。 */
+/** 予算付きで保留候補がある回の優先順: 'deferred' = 保留候補の再検証を先に / 'scan' = 走査を先に。 */
 export type StoreUsdcReconcileTurn = 'deferred' | 'scan';
 
 export type QuotedStoreUsdcIntent = StoreUsdcIntentBase & { state: 'quoted' };
@@ -1361,8 +1357,8 @@ async function reschedule(
     nextReconcileAt: now + STORE_USDC_RECONCILE_RETRY_MS,
     ...(fromBlock === undefined ? {} : { reconcileFromBlock: fromBlock.toString() }),
   };
-  // 保留候補は候補の照合まで進んだ回だけ更新する (undefined = 今回は触らない・空 = 消す)。交替の印は時間が足りない回
-  // だけ反転して保存し (undefined = 触らない)、保留候補が無くなったら意味を持たないので一緒に消す。
+  // 保留候補は候補の照合まで進んだ回だけ更新する (undefined = 今回は触らない・空 = 消す)。交替の印は予算付きで保留候補が
+  // ある回だけ反転して保存し (undefined = 触らない)、保留候補が無くなったら意味を持たないので一緒に消す。
   if (turn !== undefined) next.reconcileTurn = turn;
   if (deferred !== undefined) {
     if (deferred.length > 0) {
@@ -1409,9 +1405,8 @@ export async function reconcileStoreUsdcIntent(
   // deadline 付き (cron) では全 RPC の直前に残り時間を見る (第 7 回レビュー B4 follow-up 2): null = 始めずに進捗を
   // 保存して次回へ / 残りがあれば retry なし・本文受信まで timeout を絞った client を 1 回ごとに作る。明示の client
   // (テスト) はそのまま使い、deadline なしは既定の client (undefined)。
-  // deadline を渡すと、その回の一部の段階 (保留候補の再検証) だけ全体より短い期限で絞る。
-  const rpcClient = (deadline = input.deadline): StoreUsdcPublicClient | undefined | null => {
-    const budget = rpcCallOptions(deadline);
+  const rpcClient = (): StoreUsdcPublicClient | undefined | null => {
+    const budget = rpcCallOptions(input.deadline);
     if (budget === null) return null;
     if (input.client) return input.client;
     return budget ? storeUsdcBoundedClient(budget) : undefined;
@@ -1491,10 +1486,9 @@ export async function reconcileStoreUsdcIntent(
   // 候補 1 件の結論: 結果 (settled / storage 等) / 'defer' = まだ確定しない (保留候補として次回も再検証) /
   // 'skip' = この候補は採れない (旧フォーク確定・証拠不一致・revert 等。保留から外す) / 'budget' = 残り時間がなく照合していない。
   type CandidateOutcome = ReconcileStoreUsdcResult | 'defer' | 'skip' | 'budget';
-  const finalizeCandidate = async (txHash: Hex, verifyDeadline?: number): Promise<CandidateOutcome> => {
+  const finalizeCandidate = async (txHash: Hex): Promise<CandidateOutcome> => {
     // 候補 1 件の照合の前に残り時間を見る。足りなければ照合せず、呼び出し側が進捗を保存して次回へ。
-    // verifyDeadline は照合 (verify) だけの期限。confirmed の後の finalize は全体の残り時間で進める。
-    const verifyClient = rpcClient(verifyDeadline);
+    const verifyClient = rpcClient();
     if (verifyClient === null) return 'budget';
     verified.add(txHash);
     // 旧 hash の欠落/revert が replacement の探索を止める波及を断つ。
@@ -1559,11 +1553,11 @@ export async function reconcileStoreUsdcIntent(
   // 2) 保留候補 (前回までにログで見つかった確定前の候補) を cursor と独立に再検証する。confirmed があればそれで確定。
   // 遅い候補 (receipt の timeout 等) が後続の候補を毎回待たせる波及を断つ (Codex 6 回目 P2): round robin — 照合して
   // 未確定だった候補は列の末尾へ回す。予算で途中終了しても、次回は未照合の候補から始まる。
-  const verifyDeferred = async (verifyDeadline?: number): Promise<ReconcileStoreUsdcResult | null> => {
+  const verifyDeferred = async (): Promise<ReconcileStoreUsdcResult | null> => {
     for (const txHash of [...deferred]) {
       if (verified.has(txHash)) continue;
-      const resolved = await finalizeCandidate(txHash, verifyDeadline);
-      // 割り当てた予算の終わり。残りの候補は列の先頭に残り、次回に先に照合される。
+      const resolved = await finalizeCandidate(txHash);
+      // 予算の終わり。残りの候補は列の先頭に残り、次回に先に照合される。
       if (resolved === 'budget') break;
       undefer(txHash);
       if (resolved === 'skip') continue;
@@ -1621,32 +1615,26 @@ export async function reconcileStoreUsdcIntent(
     return { fromBlock: overflowPageStart ?? scan.nextFromBlock };
   };
 
-  // 保留候補と走査の順序と予算 (予算付き = cron のみ。予算なしの status route は今までどおり保留候補 → 走査を全部)。
-  //   - 両方に RPC 1 回の最小時間を確保できる回 (保存予約を除く残り ≥ 最小 × 2) は、保留候補 → 走査の順で、保留候補の
-  //     照合を始められるのは残りの半分まで (走査の予算を保留候補の再検証で使い切らない・Codex 6 回目 P2)。
-  //   - 確保できない回は片方しか進められない。どちらかに固定すると、保存 hash の照合等で毎回残りが少ないとき、
-  //     遅い保留候補が走査を (または保留候補の枠が足りず confirmed の保留候補が) 永久に待たせる (Codex 7・8 回目 P2)。
-  //     intent の印 (reconcileTurn・省略 = 'deferred') の側を残り全部で先に行い、次回は反対側を先にする (印を反転して
-  //     保存)。どちらにも有限回で順番が回る。保留候補が無い回は競合しないので印を使わない。
+  // 保留候補と走査の順序 (保存済み hash の照合は上で先頭に済ませてある)。
+  //   - 予算なし (status route) と保留候補が無い回は、今までどおり保留候補 → 走査を全部。
+  //   - 予算付き (cron) で保留候補がある回は、残り時間に関係なく優先順を回ごとに交替する: intent の印 (reconcileTurn・
+  //     省略 = 'deferred') の側が残りの予算を必要なだけ使い、もう片方は残った時間で始められれば続ける。回の終わりに
+  //     印を反転して保存する。保留候補にも走査にも 2 回に 1 回は全予算の回が来る。
+  //     配分 (残りの半分まで・下限つき等) で分け合うと、どの規則でも遅延の組み合わせ次第で片方の照合が毎回枠に収まらず
+  //     (例: 正規の候補の照合に 6 秒要るのに保留候補の枠が毎回 5.5 秒)、支払い済みの購入が cron で確定しなかった
+  //     (Codex 6〜10 回目 P2)。
   //   - 既知の制限: 1 回の照合で RPC を種類ごとに 1 回ずつ終えられないほど遅い状態が続く間 (head は取れたが getLogs を
   //     始める時間が無い等) は cron では進まない (head の高さ等の途中結果は持ち越さない)。そのときも pending のままで、
   //     誤った確定にも未払いの失敗にもならず、買い手の状態確認 (status route = 予算なし) は全部を照合する。
-  let deferredDeadline: number | undefined;
   let scanFirst = false;
   let nextTurn: StoreUsdcReconcileTurn | undefined;
   if (input.deadline !== undefined && deferred.length > 0) {
-    const plannedAt = Date.now();
-    const usable = input.deadline - plannedAt - STORE_RECONCILE_CURSOR_RESERVE_MS;
-    if (usable >= STORE_RECONCILE_PAGE_RPC_MIN_MS * 2) {
-      deferredDeadline = plannedAt + STORE_RECONCILE_CURSOR_RESERVE_MS + Math.floor(usable / 2);
-    } else {
-      const turn = intent.reconcileTurn ?? 'deferred';
-      scanFirst = turn === 'scan';
-      nextTurn = scanFirst ? 'deferred' : 'scan';
-    }
+    const turn = intent.reconcileTurn ?? 'deferred';
+    scanFirst = turn === 'scan';
+    nextTurn = scanFirst ? 'deferred' : 'scan';
   }
   if (!scanFirst) {
-    const resolved = await verifyDeferred(deferredDeadline);
+    const resolved = await verifyDeferred();
     if (resolved) return resolved;
   }
   const scanned = await scanCandidates();
