@@ -245,6 +245,28 @@ export const RULES = [
     interval: '1h',
   },
   {
+    name: 'OpenPay: Store USDC 照合の保留候補が上限を超えた (creator_store.usdc_purchase_deferred_overflow)',
+    description:
+      'Store USDC の照合で、確定前の候補 (同じ nonce の tx hash) が上限 (STORE_USDC_RECONCILE_MAX_DEFERRED = 8 件) を ' +
+      '超えた。整合したチェーンでは候補は 1 件だけで、旧フォークや不整合な RPC が幻のログを返し続ける異常時にしか出ない。' +
+      '溢れている間は cursor がそのページに留まり、その先の支払いが照合されないので 1 件目で通知し、ログの intentSalt / ' +
+      'pageStart と RPC の応答を確かめる。',
+    eventTags: ['creator_store.usdc_purchase_deferred_overflow'],
+    threshold: 0,
+    interval: '1h',
+  },
+  {
+    name: 'OpenPay: Store USDC の確定が storage で失敗 (creator_store.usdc_purchase_finalize_storage_failed)',
+    description:
+      'Store USDC の照合で、保存済みの tx hash の確定 (finalize) が storage を返した = KV (Upstash) 障害か照合の読み取り ' +
+      '障害 (RPC 不達)。払ったのに解錠されない可能性がある。RPC の一時障害でも出るが、同じく RPC 不明でも出る照合系 ' +
+      '(creator_store.purchase_reconcile_indeterminate / license.reconcile_indeterminate) と同じ閾値 0・1h に揃える。' +
+      'ログの intentSalt で KV の intent と RPC を確かめる。',
+    eventTags: ['creator_store.usdc_purchase_finalize_storage_failed'],
+    threshold: 0,
+    interval: '1h',
+  },
+  {
     name: 'OpenPay: license NFT worker のジョブ失敗 (minter の資金不足を含む)',
     description:
       'license minter (lib/license/minter.ts) のジョブが失敗した (license.worker_job_failed)。原因は RPC 障害か ' +
