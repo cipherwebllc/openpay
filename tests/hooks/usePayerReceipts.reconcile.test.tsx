@@ -182,7 +182,7 @@ describe('usePayerReceipts: 照合の調整 (A10)', () => {
     expect(queried('0xstop')).toBe(1);
   });
 
-  it('確定 (成立 / 失敗) を確かめた控えは、マウントし直しても照会しない', async () => {
+  it('確定 (成立 / 失敗) を確かめた控えは、マウントし直しても照会せず、pending に戻っていれば覚えた結果で保存し直す', async () => {
     const usePayerReceipts = await loadHook();
     seed([pending('0xdone')]);
     fetchMock.mockResolvedValue('reverted');
@@ -190,11 +190,83 @@ describe('usePayerReceipts: 照合の調整 (A10)', () => {
     await advance(0);
     expect(statusOf('0xdone')).toBe('failed');
     first.unmount();
-    // ストアの控えを pending に戻しても (別タブの古い書き込み等)、このページでは確定済みとして扱う。
+    // ストアの控えが pending に戻っていても (別タブの古い書き込み等)、RPC は重ねずに確かめた結果で保存し直す。
     seed([pending('0xdone')]);
     renderHook(() => usePayerReceipts());
     await advance(60_000);
     expect(queried('0xdone')).toBe(1);
+    expect(statusOf('0xdone')).toBe('failed');
+  });
+
+  // Codex 2 回目の指摘: on-chain の結果だけで照合済みにせず、ストアへ保存できたかを見る。
+  it('成立を確かめても保存に失敗したら、RPC を重ねずに間隔を空けて保存だけやり直す', async () => {
+    const usePayerReceipts = await loadHook();
+    seed([pending('0xsavefail')]);
+    fetchMock.mockResolvedValue('success');
+    const setItem = vi.spyOn(Storage.prototype, 'setItem');
+    setItem.mockImplementationOnce(() => {
+      throw new Error('QuotaExceededError');
+    });
+    renderHook(() => usePayerReceipts());
+    await advance(0);
+    expect(queried('0xsavefail')).toBe(1);
+    expect(statusOf('0xsavefail')).toBe('pending');
+    await advance(15_000);
+    expect(statusOf('0xsavefail')).toBe('confirmed');
+    expect(queried('0xsavefail')).toBe(1);
+    setItem.mockRestore();
+  });
+
+  it('保存のときに控えを読めなかった (一時的な読み込みの失敗) ら、間隔を空けて保存だけやり直す', async () => {
+    const usePayerReceipts = await loadHook();
+    seed([pending('0xreadfail')]);
+    const { held } = holdResponses();
+    renderHook(() => usePayerReceipts());
+    await advance(0);
+    const getItem = vi.spyOn(Storage.prototype, 'getItem');
+    getItem.mockImplementationOnce(() => {
+      throw new Error('SecurityError');
+    });
+    held[0].resolve('success');
+    await advance(0);
+    getItem.mockRestore();
+    expect(statusOf('0xreadfail')).toBe('pending');
+    await advance(15_000);
+    expect(statusOf('0xreadfail')).toBe('confirmed');
+    expect(queried('0xreadfail')).toBe(1);
+  });
+
+  it('別タブの古い書き込みで pending に戻ったら (画面はそのまま)、RPC を重ねずに覚えた結果で保存し直す', async () => {
+    const usePayerReceipts = await loadHook();
+    seed([pending('0xstale-tab')]);
+    fetchMock.mockResolvedValue('success');
+    const view = renderHook(() => usePayerReceipts());
+    await advance(0);
+    expect(statusOf('0xstale-tab')).toBe('confirmed');
+    seed([pending('0xstale-tab')]);
+    act(() => {
+      window.dispatchEvent(new StorageEvent('storage', { key: PAYER_RECEIPTS_STORAGE_KEY }));
+    });
+    await advance(0);
+    expect(statusOf('0xstale-tab')).toBe('confirmed');
+    expect(view.result.current.receipts[0].status).toBe('confirmed');
+    expect(queried('0xstale-tab')).toBe(1);
+  });
+
+  // Codex 2 回目の指摘 (P3): 画面が 0 の間に古くなった一覧で照会を始めない。
+  it('画面が 0 の間に消えた控えは、もう一度マウントしたとき照会しない (最新の一覧を先に使う)', async () => {
+    const usePayerReceipts = await loadHook();
+    seed([pending('0xgone')]);
+    fetchMock.mockResolvedValue('unknown');
+    const first = renderHook(() => usePayerReceipts());
+    await advance(0);
+    expect(queried('0xgone')).toBe(1);
+    first.unmount();
+    seed([]);
+    await advance(20_000);
+    renderHook(() => usePayerReceipts());
+    await advance(0);
+    expect(queried('0xgone')).toBe(1);
   });
 
   it('同時にマウントした 2 か所から同じ控えを重ねて照会しない', async () => {

@@ -468,9 +468,9 @@ export function backfillGatewayPayerReceipt(chainId: number, transferSpecHash: s
 
 /**
  * pending 控えの status を on-chain 確定結果で昇格する。対象 receipt が存在し
- * status==='pending' のときのみ status を更新して保存・broadcast し true を返す。
- * 不在 / 既に non-pending の場合は false (no-op)。reconcile (lib/payerReceiptReconcile.ts)
- * が on-chain receipt と突き合わせて呼ぶ。
+ * status==='pending' のときのみ status を更新して保存・broadcast し、保存できたら true を返す。
+ * 不在 (読めない場合を含む) / 既に non-pending / 保存できなかった場合は false。reconcile
+ * (lib/payerReceiptReconcile.ts) が on-chain receipt と突き合わせて呼ぶ。
  */
 export function promotePayerReceiptStatus(
   receiptId: string,
@@ -485,7 +485,9 @@ export function promotePayerReceiptStatus(
   next[idx] = { ...current[idx], receipt: { ...existing, status } };
   savePayerReceiptItems(next);
   broadcastChange();
-  return true;
+  // 保存できたかは読み直して確かめる。safeSet は書き込みの失敗を投げずに握るので、ここで無条件に true を返すと
+  // 呼び出し側 (控えの照合) が「保存した」と思い込み、pending のまま照合をやめてしまう (偽成功・掟 13)。
+  return loadPayerReceipts().some((r) => r.receiptId === receiptId && r.status === status);
 }
 
 export function removePayerReceipt(receiptId: string): void {

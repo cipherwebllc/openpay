@@ -522,6 +522,17 @@ describe('promotePayerReceiptStatus', () => {
     expect(promotePayerReceiptStatus('0xnope', 'confirmed')).toBe(false);
   });
 
+  // 第 7 回レビュー (Codex): 書き込みに失敗したのに true を返す偽成功にしない。
+  it('保存に失敗したら false (ストアの控えは pending のまま)', () => {
+    seedPending('0xq4');
+    const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementationOnce(() => {
+      throw new Error('QuotaExceededError');
+    });
+    expect(promotePayerReceiptStatus('0xq4', 'confirmed')).toBe(false);
+    setItem.mockRestore();
+    expect(loadPayerReceipts()[0].status).toBe('pending');
+  });
+
   it('true 時に CHANGED_EVENT を dispatch', () => {
     seedPending('0xq3');
     const spy = vi.fn();
