@@ -644,6 +644,52 @@ describe('USDC reconciliation with real Lua and receipt verification', () => {
     await expectSettled();
   });
 
+  // Codex 7 回目 P2 の再現と境界: 予算 25 秒・保存 hash OLD (receipt は 10 秒で timeout)・保留列 [TX] (TX は confirmed)・
+  // authorizationState に「25 − 10 − 残り」秒。保留候補の枠を残り予算の半分だけにすると、残り 7 秒未満では枠が RPC 1 回の
+  // 最小 (2 秒) に届かず TX を照合せず、走査で再発見しても保留候補なので読み直さない → 同じ遅延が続く限り永久に pending。
+  // 枠の下限を最小時間にして、全体で RPC を始められる残り (保存予約 3 秒 + 最小 2 秒 = 5 秒) 以上なら 1 件は照合する。
+  it.each([
+    ['5s (reserve + one minimum RPC)', 5_000, 'settled'],
+    ['6.999s (below the old half-share threshold)', 6_999, 'settled'],
+    ['7s (the old half-share threshold)', 7_000, 'settled'],
+    ['4.999s (no RPC can start at all)', 4_999, 'pending'],
+  ] as const)('verifies a deferred candidate when the remaining budget after the stored hash is %s', async (_label, remaining, expected) => {
+    const intent = await active(OLD);
+    patchIntent({ reconcileDeferred: [TX] });
+    const client = chain(intent.nonce, { latest: 50_090n, eventBlock: 100n });
+    let clock = NOW;
+    vi.mocked(client.readContract).mockImplementation(async () => { clock += 25_000 - 10_000 - remaining; return true; });
+    const receipt = vi.mocked(client.getTransactionReceipt).getMockImplementation()!;
+    vi.mocked(client.getTransactionReceipt).mockImplementation(async (args) => {
+      if (args.hash === OLD) {
+        clock += 10_000;
+        throw new Error('receipt timeout');
+      }
+      return receipt(args);
+    });
+    const spy = vi.spyOn(Date, 'now').mockImplementation(() => clock);
+    const results: string[] = [];
+    try {
+      for (let run = 0; run < 8; run += 1) {
+        const result = await reconcileStoreUsdcIntent(SALT, { now: CHECKED_AT + run * 30_000, client, deadline: clock + 25_000 });
+        results.push(result.ok ? result.state : result.reason);
+        if (result.ok && result.state === 'settled') break;
+      }
+    } finally {
+      spy.mockRestore();
+    }
+    if (expected === 'settled') {
+      expect(results).toEqual(['settled']);
+      await expectSettled();
+    } else {
+      // 全体の残りが保存予約 + 最小時間に届かない回は、走査も含めて何も始めない (全体の予算と同じ境界)。
+      expect(results).toEqual(Array.from({ length: 8 }, () => 'pending'));
+      expect(client.getTransactionReceipt).not.toHaveBeenCalledWith({ hash: TX });
+      expect(client.getLogs).not.toHaveBeenCalled();
+      expect(rawIntent()).toMatchObject({ state: 'indeterminate', txHash: OLD, reconcileDeferred: [TX] });
+    }
+  });
+
   it.each([
     ['not a list', TX],
     ['empty', []],

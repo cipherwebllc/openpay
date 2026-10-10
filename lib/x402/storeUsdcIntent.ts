@@ -35,7 +35,11 @@ import {
   PURCHASE_INTENT_VERSION,
   PURCHASE_REVISION_POLICY,
 } from '@/lib/x402/purchaseIntent';
-import { rpcCallOptions, STORE_RECONCILE_CURSOR_RESERVE_MS } from '@/lib/x402/reconcileBudget';
+import {
+  rpcCallOptions,
+  STORE_RECONCILE_CURSOR_RESERVE_MS,
+  STORE_RECONCILE_PAGE_RPC_MIN_MS,
+} from '@/lib/x402/reconcileBudget';
 import { scanReconcileBlockPages } from '@/lib/x402/reconcilePaging';
 import {
   associateStoreRailIntent,
@@ -1532,12 +1536,16 @@ export async function reconcileStoreUsdcIntent(
   // 遅い候補 (receipt の timeout 等) が後続の候補と走査を毎回待たせる波及を断つ (Codex 6 回目 P2):
   //   - round robin: 照合して未確定だった候補は列の末尾へ回す。予算で途中終了しても、次回は未照合の候補から始まる。
   //   - 予算付き (cron) では、保留候補の照合を始められるのはその回の残り予算の半分まで。超えたら照合を打ち切って
-  //     走査へ進む (走査の予算を保留候補の再検証で使い切らない)。
+  //     走査へ進む (走査の予算を保留候補の再検証で使い切らない)。ただし枠の下限は RPC 1 回の最小時間 — 全体の残りで
+  //     RPC を始められる (残り ≥ 保存予約 + 最小時間) なら保留候補を少なくとも 1 件は始められる。半分だけにすると、
+  //     保存 hash の照合等で残りが少ない回に保留候補を 1 件も照合できず、走査で再発見しても保留候補なので読み直さず、
+  //     同じ遅延が続く限り confirmed の候補が永久に pending のまま残る (Codex 7 回目 P2)。
   const deferredDeadline = (() => {
     if (input.deadline === undefined) return undefined;
     const startedAt = Date.now();
     const usable = Math.max(0, input.deadline - startedAt - STORE_RECONCILE_CURSOR_RESERVE_MS);
-    return startedAt + STORE_RECONCILE_CURSOR_RESERVE_MS + Math.floor(usable / 2);
+    const share = Math.min(usable, Math.max(STORE_RECONCILE_PAGE_RPC_MIN_MS, Math.floor(usable / 2)));
+    return startedAt + STORE_RECONCILE_CURSOR_RESERVE_MS + share;
   })();
   for (const txHash of [...deferred]) {
     if (verified.has(txHash)) continue;
