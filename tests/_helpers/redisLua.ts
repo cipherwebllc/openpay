@@ -375,6 +375,19 @@ export function dispatchRedisCommand(
       if (args.length !== 1) throw new Error('wrong number of arguments');
       requireType('hash');
       return [...store.hashes.get(key) ?? []].flat();
+    case 'HINCRBY': {
+      // 増分も既存値も 10 進整数だけ (Redis と同じく、小数や数でない値は意味を取り違えずに例外にする)。
+      if (args.length !== 3) throw new Error('wrong number of arguments');
+      if (!/^-?\d+$/.test(args[2])) throw new Error('value is not an integer or out of range');
+      requireType('hash');
+      const hash = store.hashes.get(key) ?? new Map<string, string>();
+      const current = hash.get(args[1]);
+      if (current !== undefined && !/^-?\d+$/.test(current)) throw new Error('hash value is not an integer');
+      const next = (current === undefined ? 0 : Number(current)) + Number(args[2]);
+      hash.set(args[1], String(next));
+      store.hashes.set(key, hash);
+      return next;
+    }
     case 'ZRANGE': {
       if ((args.length !== 3 && args.length !== 4) || (args.length === 4 && args[3].toUpperCase() !== 'WITHSCORES')) throw new Error('invalid arguments');
       requireType('zset');
