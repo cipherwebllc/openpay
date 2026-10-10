@@ -1403,6 +1403,8 @@ node scripts/setup-sentry-alerts.mjs --dry-run   # create 0 / update 0 を確認
 idempotent — 無い workflow は POST、同名 (旧名 `legacyNames` も) の workflow は差分があれば PUT、
 差分が無ければ keep。発火元の無い workflow は `retire` として出すだけ (Dashboard で手動削除)、`RULES` に無い
 名前の workflow は `管理外` として触らない。実行後は Sentry Dashboard → Alerts で目視確認。
+API が異常応答を返したときは status・メソッド・path と本文のキー名だけを出す。本文の全文 (送った宛先が入りうる) は
+`SENTRY_ALERTS_DEBUG=1` を付けて再実行したときだけ表示する。
 
 ### §11.4 「verify-production-config.mjs」が 0 件 ✗ で deploy 認可
 

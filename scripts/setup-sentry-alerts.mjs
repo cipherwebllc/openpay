@@ -23,6 +23,8 @@
 //                           存在しないので指定しないこと (Sentry が存在しない environment 名を 400 で弾く)。
 //   SENTRY_API_BASE       - Sentry SaaS なら https://sentry.io 既定。
 //                           self-host なら https://sentry.example.com 等を指定
+//   SENTRY_ALERTS_DEBUG   - '1' のとき、Sentry API の異常応答の本文を全文表示する。既定は status・メソッド・path と
+//                           本文のキー名だけ (本文の値には送った宛先が入りうるため)
 //
 // 仕様根拠:
 //   - 旧 Issue Alert Rules API (/api/0/projects/{org}/{project}/rules/) は 2026-09-24 に Sentry 本体から削除され
@@ -75,8 +77,8 @@ const ISSUE_STREAM = 'issue_stream';
 const FREQUENCY_MINUTES = 60;
 // 1 ページの件数 (Sentry の OffsetPaginator の上限)。
 const PER_PAGE = 100;
-// エラー応答の本文は長くなりうる (HTML のエラーページ等) ので先頭だけ出す。
-const ERROR_BODY_MAX = 300;
+// 異常応答の本文から出すキーの path の上限 (describeErrorBody)。
+const ERROR_KEYS_MAX = 20;
 
 // 各 rule の name は冪等性 key として使う。name を変えるときは旧名を legacyNames に残す
 // (旧 workflow を rename して引き継ぐ・孤児の旧 workflow を残さない)。
@@ -682,7 +684,8 @@ function matchWorkflows(existing, rules) {
 // project の Issue Stream detector (workflow を project に結び付ける先) を 1 つに決める。
 // 1) detectors 一覧 (project で絞った応答) の type issue_stream で projectId を持つもの (projectId=null は
 //    「全 project」用の detector なので使わない)。数値の project ID が与えられたら projectId も一致させる。
-// 2) 一覧に無ければ、管理対象 (RULES の name / legacyNames) の既存 workflow の detectorIds から拾う。
+// 2) 一覧に無ければ、管理対象 (RULES の name / legacyNames) の既存 workflow の detectorIds から候補を拾う
+//    (source='workflows')。この候補は型も project も分からないので、使う前に verifyFallbackDetector で確かめる。
 // どちらでも 1 つに決まらなければ止める (detector の無い workflow は発火しない)。
 export function resolveIssueStreamDetector(detectors, workflows, project, rules = RULES) {
   const numericProject = /^\d+$/.test(project);
@@ -713,6 +716,41 @@ export function resolveIssueStreamDetector(detectors, workflows, project, rules 
   );
 }
 
+// 対象 project の数値 ID。数値で与えられたらそのまま、slug なら project で絞った detectors 一覧の projectId が
+// 1 つに揃うときだけ (Error Monitor 等の detector が持つ)。決まらなければ null。
+function projectIdOf(project, detectors) {
+  if (/^\d+$/.test(project)) return project;
+  const ids = distinct(
+    detectors.filter((d) => d.projectId !== null && d.projectId !== undefined).map((d) => String(d.projectId)),
+  );
+  return ids.length === 1 ? ids[0] : null;
+}
+
+// fallback の候補 (管理対象 workflow の接続先) を、詳細 (GET /detectors/{id}/) で確かめる: 型が issue_stream で、
+// projectId が対象 project と一致すること。error 型や別 project の detector に 28 件を結び付けると、通知が来ないか
+// 別 project の event で鳴る (その波及を断つ)。確かめられなければ止める。
+export function verifyFallbackDetector(detail, project, detectors) {
+  if (detail.type !== ISSUE_STREAM) {
+    throw new Error(
+      `管理対象 workflow の接続先 detector ${detail.id} は type ${detail.type} で、Issue Stream ではありません。` +
+        'Sentry → Monitors で project の Issue Stream を確かめてください。',
+    );
+  }
+  const projectId = projectIdOf(project, detectors);
+  if (projectId === null) {
+    throw new Error(
+      `project ${project} の ID を detectors 一覧から確かめられないので、detector ${detail.id} を使えるか判断できません。` +
+        'SENTRY_PROJECT_SLUG に数値の project ID を指定して再実行してください。',
+    );
+  }
+  if (String(detail.projectId) !== projectId) {
+    throw new Error(
+      `管理対象 workflow の接続先 detector ${detail.id} は project ${detail.projectId ?? '(全 project)'} の Issue Stream で、` +
+        `対象 project ${project} (ID ${projectId}) のものではありません。`,
+    );
+  }
+}
+
 // 既存 workflow 一覧 (GET の応答) と RULES から、何をどう変えるかの計画を作る (純関数・API を叩かない)。
 // opts.detectorId: project の Issue Stream detector の id (resolveIssueStreamDetector)。
 // opts.includeDisabled: 無効化 (enabled=false) 中の workflow も更新する (再有効化する)。既定では更新せず計画に出すだけ。
@@ -741,7 +779,9 @@ export function planRules(existing, rules = RULES, env = ALERT_ENV, opts = {}) {
     } else if (!uniform) {
       changes.push(`actions を全 action filter で共通に (${kept.map(describeAction).join(', ')})`);
     }
-    // owner (担当) も既存を引き継ぐ (create は owner なし)。
+    // owner (担当) は PUT に載せずに保持する: WorkflowValidator.update は body に owner キーがあるときだけ owner を
+    // 変える。同じ値でも送ると team の所属・権限が検証し直され、実行者がその team のメンバーでなく team:admin も
+    // 無いと、owner を変えない更新まで 400 で拒否される (その波及を断つ)。計画には保持することだけを出す。
     const keptOwner = typeof found.owner === 'string' && found.owner.length > 0 ? found.owner : undefined;
     const disabled = found.enabled === false;
     if (changes.length === 0) {
@@ -766,7 +806,6 @@ export function planRules(existing, rules = RULES, env = ALERT_ENV, opts = {}) {
       payload: {
         ...desired,
         actionFilters: desired.actionFilters.map((g) => ({ ...g, actions: actions.map((a) => structuredClone(a)) })),
-        ...(keptOwner !== undefined ? { owner: keptOwner } : {}),
       },
     });
   }
@@ -826,6 +865,38 @@ export function formatPlan(plan, env = ALERT_ENV) {
 // ---- Sentry API ------------------------------------------------------------------------------
 // token は Authorization ヘッダだけに載せ、出力やエラー文には出さない。
 
+// 異常応答の本文の要約: JSON ならキーの path (エラー項目名) だけ。値 (検証エラーの文言) には送った宛先
+// (メールの宛先の user ID 等) が入りうるので、既定では出さない (ログやチャットへの貼り付けに宛先が漏れる波及を
+// 断つ)。全文は SENTRY_ALERTS_DEBUG=1 のときだけ出す (sentryRequest)。
+export function describeErrorBody(text) {
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return `JSON でない本文・${text.length} 字`;
+  }
+  const paths = [];
+  const walk = (value, path) => {
+    if (Array.isArray(value)) {
+      if (value.every((v) => v === null || typeof v !== 'object')) {
+        if (path) paths.push(path);
+        return;
+      }
+      value.forEach((v, i) => walk(v, `${path}[${i}]`));
+      return;
+    }
+    if (value !== null && typeof value === 'object') {
+      for (const key of Object.keys(value)) walk(value[key], path ? `${path}.${key}` : key);
+      return;
+    }
+    if (path) paths.push(path);
+  };
+  walk(parsed, '');
+  if (paths.length === 0) return 'キーの無い本文';
+  const shown = paths.slice(0, ERROR_KEYS_MAX).join(', ');
+  return `本文のキー: ${shown}${paths.length > ERROR_KEYS_MAX ? ` ほか ${paths.length - ERROR_KEYS_MAX} 件` : ''}`;
+}
+
 async function sentryRequest({ method, path, token, body }) {
   const res = await fetch(`${API_BASE}${path}`, {
     method,
@@ -837,8 +908,11 @@ async function sentryRequest({ method, path, token, body }) {
   });
   if (!res.ok) {
     const text = await res.text();
-    const shown = text.length > ERROR_BODY_MAX ? `${text.slice(0, ERROR_BODY_MAX)}…` : text;
-    throw new Error(`Sentry API ${method} ${path} → ${res.status} ${res.statusText}: ${shown}`);
+    const detail =
+      process.env.SENTRY_ALERTS_DEBUG === '1'
+        ? `本文: ${text}`
+        : `${describeErrorBody(text)}・本文の全文は SENTRY_ALERTS_DEBUG=1 で表示`;
+    throw new Error(`Sentry API ${method} ${path} → ${res.status} ${res.statusText} (${detail})`);
   }
   return { data: await res.json(), link: res.headers.get('link') };
 }
@@ -907,10 +981,18 @@ export async function main(argv = process.argv.slice(2)) {
       : `projectSlug=${encodeURIComponent(project)}`;
     const detectors = await sentryGetAll(`${orgPath}/detectors/?${projectQuery}`, token);
     const detector = resolveIssueStreamDetector(detectors, existing, project);
+    if (detector.source === 'workflows') {
+      const { data: detail } = await sentryRequest({ method: 'GET', path: `${orgPath}/detectors/${detector.id}/`, token });
+      verifyFallbackDetector(detail, project, detectors);
+    }
     detectorId = detector.id;
     console.log(
       `[setup-sentry-alerts] Issue Stream detector: id=${detector.id} ` +
-        `(${detector.source === 'detectors' ? 'detectors 一覧から' : '管理対象 workflow の detectorIds から'})`,
+        `(${
+          detector.source === 'detectors'
+            ? 'detectors 一覧から'
+            : '管理対象 workflow の detectorIds から・詳細で issue_stream と project を確認済み'
+        })`,
     );
   }
 

@@ -17,6 +17,8 @@ import {
   planRules,
   formatPlan,
   resolveIssueStreamDetector,
+  verifyFallbackDetector,
+  describeErrorBody,
   nextCursor,
   type AlertRule,
   type ExistingDetector,
@@ -430,8 +432,14 @@ const legacyWorkflows = (): ExistingWorkflow[] =>
   );
 
 // Workflow Engine API の fake。GET はページング (Link ヘッダの cursor) し、POST / PUT は sentryStored で保存する。
-type FakeOptions = { workflows: ExistingWorkflow[]; detectors?: ExistingDetector[]; pageSize?: number };
-function fakeSentry({ workflows, detectors = DETECTORS, pageSize = 100 }: FakeOptions) {
+// detectors は project で絞った一覧の応答、detectorDetails は GET /detectors/{id}/ が引く先 (既定は DETECTORS 全部)。
+type FakeOptions = {
+  workflows: ExistingWorkflow[];
+  detectors?: ExistingDetector[];
+  detectorDetails?: ExistingDetector[];
+  pageSize?: number;
+};
+function fakeSentry({ workflows, detectors = DETECTORS, detectorDetails = DETECTORS, pageSize = 100 }: FakeOptions) {
   const store = new Map(workflows.map((w) => [w.id, w]));
   let nextId = 500;
   const page = (items: unknown[], url: URL) => {
@@ -456,6 +464,9 @@ function fakeSentry({ workflows, detectors = DETECTORS, pageSize = 100 }: FakeOp
       }
     }
     if (url.pathname === `/api/0/organizations/${ORG}/detectors/` && method === 'GET') return page(detectors, url);
+    const d = url.pathname.match(new RegExp(`^/api/0/organizations/${ORG}/detectors/(\\d+)/$`));
+    const detail = d ? detectorDetails.find((x) => x.id === d[1]) : undefined;
+    if (detail && method === 'GET') return new Response(JSON.stringify(detail), { status: 200 });
     const m = url.pathname.match(new RegExp(`^/api/0/organizations/${ORG}/workflows/(\\d+)/$`));
     if (m && method === 'PUT' && store.has(m[1])) {
       store.set(m[1], sentryStored(JSON.parse(String(init!.body)), m[1], store.get(m[1])));
@@ -801,6 +812,53 @@ describe('setup-sentry-alerts: resolveIssueStreamDetector / nextCursor', () => {
     expect(() => resolveIssueStreamDetector([], [managed, other], PROJECT)).toThrow(/detectorIds は 7000001,7000005/);
   });
 
+  describe('verifyFallbackDetector: fallback の候補は詳細で型と project を確かめる', () => {
+    // project で絞った一覧に Issue Stream が出ない状況 (Error Monitor・Uptime だけ・どちらも projectId を持つ)。
+    const listed = DETECTORS.filter((d) => d.type !== 'issue_stream');
+    const byId = (id: string) => DETECTORS.find((d) => d.id === id)!;
+
+    it('issue_stream で対象 project のものなら通す (slug は一覧の projectId・数値は ID そのもので照合)', () => {
+      expect(() => verifyFallbackDetector(byId(DETECTOR), PROJECT, listed)).not.toThrow();
+      expect(() => verifyFallbackDetector(byId(DETECTOR), PROJECT_ID, [])).not.toThrow();
+    });
+
+    it('Issue Stream でない detector (error 型など) は止める', () => {
+      expect(() => verifyFallbackDetector(byId('7000000'), PROJECT, listed)).toThrow(/type error で、Issue Stream ではありません/);
+    });
+
+    it('別 project・全 project 用の Issue Stream は止める', () => {
+      const elsewhere = { id: '7000009', projectId: '4500000000000002', type: 'issue_stream' };
+      expect(() => verifyFallbackDetector(elsewhere, PROJECT, listed)).toThrow(/project 4500000000000002 の Issue Stream で/);
+      expect(() => verifyFallbackDetector(elsewhere, PROJECT_ID, [])).toThrow(/対象 project 4500000000000001/);
+      expect(() => verifyFallbackDetector(byId(ALL_PROJECTS_DETECTOR), PROJECT, listed)).toThrow(/\(全 project\)/);
+    });
+
+    it('slug で project の ID が一覧から 1 つに決まらなければ (空・複数 project) 判断できないので止める', () => {
+      expect(() => verifyFallbackDetector(byId(DETECTOR), PROJECT, [])).toThrow(/確かめられない/);
+      const mixed = [...listed, { id: '7000010', projectId: '4500000000000002', type: 'error' }];
+      expect(() => verifyFallbackDetector(byId(DETECTOR), PROJECT, mixed)).toThrow(/確かめられない/);
+    });
+  });
+
+  describe('describeErrorBody: 異常応答の本文は JSON のキーの path だけ (値に宛先が入りうる)', () => {
+    it('入れ子のキーを path で出し、値は出さない', () => {
+      const body = JSON.stringify({
+        actionFilters: [{ actions: [{ config: ['user 1000001 is not a member of this organization'] }] }],
+        detail: 'invalid',
+      });
+      const out = describeErrorBody(body);
+      expect(out).toBe('本文のキー: actionFilters[0].actions[0].config, detail');
+      expect(out).not.toContain('1000001');
+    });
+
+    it('JSON でない本文は字数だけ・キーの無い本文はその旨・多すぎるキーは件数で省く', () => {
+      expect(describeErrorBody('<html>Bad Gateway</html>')).toBe('JSON でない本文・24 字');
+      expect(describeErrorBody('["only a message"]')).toBe('キーの無い本文');
+      const many = JSON.stringify(Object.fromEntries(Array.from({ length: 25 }, (_, i) => [`k${i}`, 'v'])));
+      expect(describeErrorBody(many)).toMatch(/k19 ほか 5 件$/);
+    });
+  });
+
   it('Link ヘッダの rel="next" の cursor を取り、results="false"・ヘッダ無しは null', () => {
     const link = (more: boolean) =>
       '<https://sentry.io/api/0/organizations/o/workflows/?&cursor=0:0:1>; rel="previous"; results="false"; cursor="0:0:1", ' +
@@ -906,9 +964,11 @@ describe('setup-sentry-alerts: planRules / formatPlan (dry-run の出力を固�
       '  ~ update  OpenPay: relayer の残高不足 (relay.relayer.balance_low) (id=3000003): ' +
         `rename from "relayer balance low (mainnet)"; frequency 0 → 60; ${triggers}; threshold 1 → 0 [actions 保持: email (user)]`,
     );
-    // owner (担当) があれば引き継ぐ。
+    // owner (担当) があれば保持する (PUT に owner キーを載せない = Sentry は owner を変えない)。
     const owned = prodLikeWorkflows().map((w) => (w.id === '3000003' ? { ...w, owner: 'user:1000001' } : w));
-    expect(plan(owned).update.find((u) => u.id === '3000003')!.payload.owner).toBe('user:1000001');
+    const ownedUpdate = plan(owned).update.find((u) => u.id === '3000003')!;
+    expect(ownedUpdate.keptOwner).toBe('user:1000001');
+    expect(ownedUpdate.payload).not.toHaveProperty('owner');
   });
 
   it('手作りの relay failure と relay misconfig は同じ rule に当たるので、legacyNames に両方は載せない (載せると止まる)', () => {
@@ -1127,14 +1187,14 @@ describe('setup-sentry-alerts: planRules / formatPlan (dry-run の出力を固�
       for (const g of p.update[0].payload.actionFilters) expect(g.actions).toEqual([DEFAULT_EMAIL_STORED, SLACK]);
     });
 
-    it('既存 workflow の owner (担当) を PUT payload に引き継ぎ、計画には種別だけ出す', () => {
+    it('既存 workflow の owner (担当) は PUT payload に載せずに保持し (同じ値の再送で team の権限検証を起こさない)、計画には種別だけ出す', () => {
       const p = plan([{ ...withActions([SLACK]), owner: 'team:42' }]);
-      expect(p.update[0].payload.owner).toBe('team:42');
+      expect(p.update[0].payload).not.toHaveProperty('owner');
       expect(p.update[0].keptOwner).toBe('team:42');
       expect(formatPlan(p, 'mainnet')).toContain(
         `  ~ update  ${rule.name} (id=7): threshold 100 → 10 [actions 保持: slack (specific); owner 保持: team]`,
       );
-      // owner が無い (null) 既存 workflow には owner を載せない (PUT で触らない)。
+      // owner が無い (null) 既存 workflow も owner を載せない (PUT で触らない)。
       const none = plan([{ ...withActions([SLACK]), owner: null }]);
       expect(none.update[0].payload).not.toHaveProperty('owner');
       expect(none.update[0].keptOwner).toBeUndefined();
@@ -1309,10 +1369,10 @@ describe('setup-sentry-alerts: main (Workflow Engine API の fake 経由の挙�
     expect(second.unchanged).toHaveLength(RULES.length);
   });
 
-  it('PUT の body: 既存の通知先 (メール・Slack) と owner を全組に保持し、id を含まず、enabled を明示する', async () => {
+  it('PUT の body: 既存の通知先 (メール・Slack) を全組に載せ、owner は送らずに保持し、id を含まず、enabled を明示する', async () => {
     const existing = legacyWorkflows().map((w) => ({
       ...w,
-      owner: 'user:1000001',
+      owner: 'team:42',
       actionFilters: w.actionFilters!.map((g) => ({
         ...g,
         actions: [
@@ -1321,13 +1381,16 @@ describe('setup-sentry-alerts: main (Workflow Engine API の fake 経由の挙�
         ],
       })),
     }));
-    useFake({ workflows: existing });
-    await (await load()).main([]);
+    const fake = useFake({ workflows: existing });
+    const mod = await load();
+    await mod.main([]);
     const puts = bodies('PUT');
     expect(puts).toHaveLength(13);
-    for (const { body } of puts) {
+    for (const { url, body } of puts) {
       expect(body.enabled).toBe(true);
-      expect(body.owner).toBe('user:1000001');
+      // owner キーを送らない = Sentry は owner を変えない (同じ team を送り直すと権限の再検証で 400 になりうる)。
+      expect(body).not.toHaveProperty('owner');
+      expect(fake.store.get(url.match(/\/workflows\/(\d+)\/$/)![1])!.owner).toBe('team:42');
       for (const g of body.actionFilters) expect(g.actions).toEqual([USER_EMAIL, SLACK]);
       // 送った内容が正 (id の無い要素は作り直し・送らなかった要素は削除) なので id は送らない。
       expect(JSON.stringify(body)).not.toContain('"id"');
@@ -1339,6 +1402,11 @@ describe('setup-sentry-alerts: main (Workflow Engine API の fake 経由の挙�
       for (const g of body.actionFilters) expect(g.actions).toEqual([DEFAULT_EMAIL]);
       expect(body).not.toHaveProperty('owner');
     }
+    // 2 回目は owner を含めて差分なし (owner を送らなくても往復で冪等)。
+    fetchSpy.mockClear();
+    const second = await mod.main([]);
+    expect(writes()).toEqual([]);
+    expect(second.unchanged).toHaveLength(RULES.length);
   });
 
   it('無効化中の workflow には PUT を送らず、--include-disabled のときだけ enabled: true で送る', async () => {
@@ -1390,16 +1458,55 @@ describe('setup-sentry-alerts: main (Workflow Engine API の fake 経由の挙�
     expect(writes()).toEqual([]);
   });
 
-  it('Issue Stream detector が一覧に無ければ管理対象 workflow の detectorIds を使い、それも無ければ止める', async () => {
-    useFake({ workflows: [stored(RULES[0], '1')], detectors: [] });
-    const mod = await load();
-    const plan = await mod.main(['--dry-run']);
-    expect(plan.unchanged).toHaveLength(1);
-    expect(plan.create[0].payload.detectorIds).toEqual([DETECTOR]);
-    fetchSpy.mockClear();
-    useFake({ workflows: prodUnmanagedWorkflows(), detectors: DETECTORS.filter((d) => d.id !== DETECTOR) });
-    await expect(mod.main([])).rejects.toThrow(/Issue Stream detector を特定できません/);
-    expect(writes()).toEqual([]);
+  describe('Issue Stream detector が一覧に無いときの fallback (管理対象 workflow の接続先を詳細で確かめる)', () => {
+    // project で絞った一覧に Issue Stream が出ない (Error Monitor・Uptime だけ)。
+    const listed = DETECTORS.filter((d) => d.type !== 'issue_stream');
+
+    it('接続先が対象 project の issue_stream なら、詳細を GET して確かめてから使う', async () => {
+      const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+      useFake({ workflows: [stored(RULES[0], '1')], detectors: listed });
+      const plan = await (await load()).main(['--dry-run']);
+      expect(calls()).toEqual([GET_WORKFLOWS, GET_DETECTORS, `GET ${ORG_URL}/detectors/${DETECTOR}/`]);
+      expect(plan.unchanged).toHaveLength(1);
+      expect(plan.create[0].payload.detectorIds).toEqual([DETECTOR]);
+      const out = log.mock.calls.map((c) => c.join(' ')).join('\n');
+      expect(out).toContain('管理対象 workflow の detectorIds から・詳細で issue_stream と project を確認済み');
+      log.mockRestore();
+    });
+
+    it('接続先が error 型の detector なら止め、書き込みをしない', async () => {
+      useFake({ workflows: [stored(RULES[0], '1', { detectorIds: ['7000000'] })], detectors: listed });
+      await expect((await load()).main([])).rejects.toThrow(/Issue Stream ではありません/);
+      expect(writes()).toEqual([]);
+    });
+
+    it('接続先が別 project の issue_stream なら止め、書き込みをしない', async () => {
+      const elsewhere = { id: '7000009', projectId: '4500000000000002', type: 'issue_stream' };
+      useFake({
+        workflows: [stored(RULES[0], '1', { detectorIds: ['7000009'] })],
+        detectors: listed,
+        detectorDetails: [...DETECTORS, elsewhere],
+      });
+      await expect((await load()).main([])).rejects.toThrow(/のものではありません/);
+      expect(writes()).toEqual([]);
+    });
+
+    it('slug で project の ID を一覧から確かめられなければ止める (数値の project ID なら通る)', async () => {
+      useFake({ workflows: [stored(RULES[0], '1')], detectors: [] });
+      const mod = await load();
+      await expect(mod.main([])).rejects.toThrow(/確かめられない/);
+      expect(writes()).toEqual([]);
+      fetchSpy.mockClear();
+      process.env.SENTRY_PROJECT_SLUG = PROJECT_ID;
+      const plan = await mod.main(['--dry-run']);
+      expect(plan.unchanged).toHaveLength(1);
+    });
+
+    it('管理対象 workflow にも接続先が無ければ止める', async () => {
+      useFake({ workflows: prodUnmanagedWorkflows(), detectors: listed });
+      await expect((await load()).main([])).rejects.toThrow(/Issue Stream detector を特定できません/);
+      expect(writes()).toEqual([]);
+    });
   });
 
   it('--dry-run は GET だけで計画を出し、書き込みを一切しない', async () => {
@@ -1440,17 +1547,52 @@ describe('setup-sentry-alerts: main (Workflow Engine API の fake 経由の挙�
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it('Sentry API が non-OK を返したら例外 (本文は 300 字で切る・token は出さない)', async () => {
-    fetchSpy.mockImplementation(
-      async () => new Response(`Unauthorized ${'x'.repeat(1000)}`, { status: 401, statusText: 'Unauthorized' }),
-    );
-    const err = (await (await load()).main([]).catch((e: unknown) => e)) as Error;
-    expect(err.message).toMatch(
-      /^Sentry API GET \/api\/0\/organizations\/test-org\/workflows\/\?per_page=100 → 401 Unauthorized: Unauthorized x+…$/,
-    );
-    expect(err.message).toContain(`Unauthorized ${'x'.repeat(287)}…`);
-    expect(err.message).not.toContain('x'.repeat(288));
-    expect(err.message).not.toContain('test_token');
+  describe('Sentry API が non-OK を返したら例外 (既定は status・メソッド・path と本文のキー名だけ)', () => {
+    // PUT の検証エラーの形 (値に送った宛先が入りうる)。
+    const rejected = JSON.stringify({
+      actionFilters: [{ actions: [{ config: ['user 1000001 is not a member of this organization'] }] }],
+    });
+    const failPut = () => {
+      const fake = fakeSentry({ workflows: legacyWorkflows() });
+      fetchSpy.mockImplementation(async (input, init) =>
+        init?.method === 'PUT'
+          ? new Response(rejected, { status: 400, statusText: 'Bad Request' })
+          : fake.handler(input, init),
+      );
+    };
+    afterEach(() => {
+      delete process.env.SENTRY_ALERTS_DEBUG;
+    });
+
+    it('既定では本文の値 (宛先) を出さず、キーの path と SENTRY_ALERTS_DEBUG の案内だけ', async () => {
+      failPut();
+      const err = (await (await load()).main([]).catch((e: unknown) => e)) as Error;
+      expect(err.message).toBe(
+        'Sentry API PUT /api/0/organizations/test-org/workflows/100/ → 400 Bad Request ' +
+          '(本文のキー: actionFilters[0].actions[0].config・本文の全文は SENTRY_ALERTS_DEBUG=1 で表示)',
+      );
+      expect(err.message).not.toContain('1000001');
+      expect(err.message).not.toContain('test_token');
+    });
+
+    it('SENTRY_ALERTS_DEBUG=1 のときだけ本文の全文を出す', async () => {
+      process.env.SENTRY_ALERTS_DEBUG = '1';
+      failPut();
+      const err = (await (await load()).main([]).catch((e: unknown) => e)) as Error;
+      expect(err.message).toBe(
+        `Sentry API PUT /api/0/organizations/test-org/workflows/100/ → 400 Bad Request (本文: ${rejected})`,
+      );
+      expect(err.message).not.toContain('test_token');
+    });
+
+    it('JSON でない本文 (HTML のエラーページ等) は字数だけ', async () => {
+      fetchSpy.mockImplementation(async () => new Response(`<html>${'x'.repeat(1000)}</html>`, { status: 502, statusText: 'Bad Gateway' }));
+      const err = (await (await load()).main([]).catch((e: unknown) => e)) as Error;
+      expect(err.message).toBe(
+        'Sentry API GET /api/0/organizations/test-org/workflows/?per_page=100 → 502 Bad Gateway ' +
+          '(JSON でない本文・1013 字・本文の全文は SENTRY_ALERTS_DEBUG=1 で表示)',
+      );
+    });
   });
 
   it('SENTRY_API_BASE で接続先を変えられる (self-host 等)', async () => {

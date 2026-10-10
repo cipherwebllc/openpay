@@ -93,7 +93,10 @@ export type WorkflowPlan = {
     changes: string[];
     /** 既存 workflow から引き継いだ通知先の要約 ("email (user)" 等・宛先の ID は含まない)。 */
     keptActions: string[];
-    /** 既存 workflow から引き継いだ owner (担当・"team:<id>" / "user:<id>")。無ければ undefined。 */
+    /**
+     * 既存 workflow の owner (担当・"team:<id>" / "user:<id>")。無ければ undefined。PUT には載せない
+     * (owner キーが無ければ Sentry は owner を変えない・送ると team の権限を検証し直して 400 になりうる)。
+     */
     keptOwner?: string;
     /** 無効化中の workflow を --include-disabled で更新する (再有効化する)。 */
     reenable?: boolean;
@@ -130,5 +133,13 @@ export function resolveIssueStreamDetector(
   project: string,
   rules?: readonly AlertRule[],
 ): { id: string; source: 'detectors' | 'workflows' };
+/** fallback の候補を GET /detectors/{id}/ の詳細で確かめる (issue_stream か・対象 project か)。違えば throw。 */
+export function verifyFallbackDetector(
+  detail: ExistingDetector,
+  project: string,
+  detectors: ExistingDetector[],
+): void;
+/** 異常応答の本文の要約 (JSON のキーの path だけ・値は出さない)。 */
+export function describeErrorBody(text: string): string;
 export function nextCursor(link: string | null | undefined): string | null;
 export function main(argv?: string[]): Promise<WorkflowPlan>;
