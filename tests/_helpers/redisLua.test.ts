@@ -545,6 +545,21 @@ describe('restore commands', () => {
     expect(call('HGETALL', 'h')).toEqual([]);
     expect(call('DBSIZE')).toBe(0);
   });
+  it('HINCRBY creates the key and field at 0, adds integer increments and returns the new value', () => {
+    expect(call('HINCRBY', 'h', 'f', 5)).toBe(5);
+    expect(call('HINCRBY', 'h', 'f', '-2')).toBe(3);
+    expect(call('HINCRBY', 'h', 'g', '1')).toBe(1);
+    expect(call('HGETALL', 'h')).toEqual(['f', '3', 'g', '1']);
+    // 小数の増分・数でない既存値・型違いは例外で、値を変えない (Redis と同じ)。
+    expect(() => call('HINCRBY', 'h', 'f', '1.5')).toThrow('not an integer');
+    call('HSET', 'h', 'text', 'abc');
+    expect(() => call('HINCRBY', 'h', 'text', '1')).toThrow('not an integer');
+    call('SET', 'v', 'original');
+    expect(() => call('HINCRBY', 'v', 'f', '1')).toThrow('WRONGTYPE');
+    expect(() => call('HINCRBY', 'h', 'f')).toThrow('wrong number of arguments');
+    expect(call('HGETALL', 'h')).toEqual(['f', '3', 'g', '1', 'text', 'abc']);
+    expect(call('GET', 'v')).toBe('original');
+  });
   it('ZRANGE WITHSCORES sorts ascending and formats numeric/inf scores', () => {
     call('ZADD', 'z', '2', 'b', '1.25', 'a', '-inf', 'first', '+inf', 'last');
     expect(call('ZRANGE', 'z', 0, -1, 'WITHSCORES')).toEqual(['first', '-inf', 'a', '1.25', 'b', '2', 'last', 'inf']);
