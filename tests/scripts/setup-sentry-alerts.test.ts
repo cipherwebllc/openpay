@@ -311,6 +311,10 @@ describe('setup-sentry-alerts: RULES schema', () => {
       'creator_store.purchase_pending_quarantined',
       'creator_store.usdc_purchase_pending_quarantined',
       'creator_store.usdc_purchase_reschedule_failed',
+      // 確定前の候補の溢れは異常時だけ。保存済み hash の確定の storage は RPC の一時障害でも出るが、同じく RPC 不明でも
+      // 出る照合系 (purchase_reconcile_indeterminate / license.reconcile_indeterminate) と同じ 0 に揃える。
+      'creator_store.usdc_purchase_deferred_overflow',
+      'creator_store.usdc_purchase_finalize_storage_failed',
       'license.reconcile_indeterminate',
       'order.notify.unexpected',
       'order.agent.registration_failed',
