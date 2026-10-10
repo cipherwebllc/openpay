@@ -5,7 +5,7 @@
 // - 取り込みは前面に戻ったとき (focus / visibilitychange) だけ。検証済みの値だけ・未保存の変更には触れない。
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, act, waitFor } from '@testing-library/react';
-import { useCallback } from 'react';
+import { createContext, createElement, useCallback, useContext, type ReactNode } from 'react';
 import { getAddress, type Address } from 'viem';
 import { useLocalStorageSettings } from '@/hooks/useLocalStorageSettings';
 import { useQrSettings, withChain } from '@/hooks/useQrSettings';
@@ -17,6 +17,13 @@ import { useReceiverAutofill } from '@/hooks/useReceiverAutofill';
 
 const useAccountMock = vi.fn();
 vi.mock('wagmi', () => ({ useAccount: () => useAccountMock() }));
+
+// タブごとに別のウォレットへ接続している状態 (useAccount がタブの Provider の値を返す)。
+const TabWallet = createContext<Address | undefined>(undefined);
+function useTabWallet() {
+  const address = useContext(TabWallet);
+  return address ? { address, isConnected: true } : { address: undefined, isConnected: false };
+}
 
 const KEY = 'openpay:qr-settings:v2';
 const R0: Address = getAddress('0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
@@ -396,8 +403,8 @@ describe('取り込まない値 (受取先を別のウォレットに変えな�
       (value: string, source: 'auto' | 'manual') => setSettings((s) => ({ ...s, receiver: value, receiverSource: source })),
       [setSettings],
     );
-    useReceiverAutofill({ receiver: settings.receiver, receiverSource: settings.receiverSource, effectiveReceiver: null, hydrated, setReceiver });
-    return { settings, setSettings, hydrated };
+    const autofill = useReceiverAutofill({ receiver: settings.receiver, receiverSource: settings.receiverSource, effectiveReceiver: null, hydrated, setReceiver });
+    return { settings, setSettings, hydrated, autofill };
   }
 
   beforeEach(() => {
@@ -480,6 +487,50 @@ describe('取り込まない値 (受取先を別のウォレットに変えな�
     act(() => a.current.setSettings((s) => ({ ...s, receiver: R1 })));
     expect(stored()).toMatchObject({ receiver: R1, receiverSource: 'manual' });
   });
+
+  it.each([
+    ['Web Locks あり', true],
+    ['Web Locks なし', false],
+  ])(
+    '別のウォレットに接続した 2 つのタブ: B で「接続中のウォレットを使う」を保存しても、取り込んだ A は自分のウォレットに置き換えない (%s)',
+    async (_label, withLocks) => {
+      const WA = getAddress('0x1010101010101010101010101010101010101010');
+      const WB = getAddress('0x2020202020202020202020202020202020202020');
+      const WA2 = getAddress('0x3030303030303030303030303030303030303030');
+      window.localStorage.clear();
+      await seedCanonical({ receiver: R0, receiverSource: 'manual' });
+      const locks = manualLocks();
+      setLocks(withLocks ? { request: locks.request } : undefined);
+      const flush = async () => {
+        while (locks.waiting() > 0) await locks.grant();
+      };
+      useAccountMock.mockImplementation(useTabWallet);
+      let walletA: Address = WA;
+      const wrapA = ({ children }: { children: ReactNode }) => createElement(TabWallet.Provider, { value: walletA }, children);
+      const wrapB = ({ children }: { children: ReactNode }) => createElement(TabWallet.Provider, { value: WB }, children);
+      const a = renderHook(() => useQrTab(), { wrapper: wrapA });
+      const b = renderHook(() => useQrTab(), { wrapper: wrapB });
+      await waitFor(() => expect(a.result.current.hydrated && b.result.current.hydrated).toBe(true));
+      expect(a.result.current.settings).toMatchObject({ receiver: R0, receiverSource: 'manual' });
+
+      act(() => b.result.current.autofill.useConnectedWallet());
+      await flush();
+      expect(stored()).toMatchObject({ receiver: WB, receiverSource: 'auto' });
+
+      // A を前面に戻す: B の受取先 (自動) を取り込むが、A の接続ウォレットへは置き換えない (A ではウォレットを切り替えていない)。
+      focusTab();
+      await flush();
+      expect(a.result.current.settings).toMatchObject({ receiver: WB, receiverSource: 'auto' });
+      expect(stored()).toMatchObject({ receiver: WB, receiverSource: 'auto' });
+
+      // その後に A のウォレットが実際に切り替わったときは、従来どおり追従する。
+      walletA = WA2;
+      a.rerender();
+      await flush();
+      expect(a.result.current.settings).toMatchObject({ receiver: WA2, receiverSource: 'auto' });
+      expect(stored()).toMatchObject({ receiver: WA2, receiverSource: 'auto' });
+    },
+  );
 
   it('別のタブが保存値を消しても (clear・削除) 取り込まず、次の保存で設定全体を書き戻す', async () => {
     const a = await tab();

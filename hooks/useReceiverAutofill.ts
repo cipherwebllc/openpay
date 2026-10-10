@@ -48,10 +48,24 @@ export function useReceiverAutofill(opts: {
     setReceiver(connected, 'auto');
   }, [hydrated, receiver, connected, setReceiver]);
 
+  // 前回 (2) を評価したときの接続アドレス (undefined = 読み込み後まだ評価していない)。
+  const seenConnectedRef = useRef<Address | null | undefined>(undefined);
+
   // (2) ウォレット切替: source==='auto' のときのみ新アドレスへ追従。manual / 手入力は据置。
+  // 追従するのは読み込み直後と、このタブの接続アドレスが変わったときだけ。受取先・由来だけが変わったとき (別のタブで
+  // 「接続中のウォレットを使う」を選んだ設定の取り込み) は追従しない: 別のウォレットに接続しているタブが、取り込んだ
+  // 受取先を自分のウォレットに置き換えて保存し、別のタブの変更を消してしまうため (hooks/useLocalStorageSettings)。
   useEffect(() => {
-    if (!hydrated || receiverSource !== 'auto') return;
+    if (!hydrated) return;
+    const seen = seenConnectedRef.current;
+    seenConnectedRef.current = connected;
+    if (receiverSource !== 'auto') return;
     if (!connected || connected === lastAutoRef.current) return;
+    if (seen === connected) {
+      // 取り込んだ受取先をそのまま使う。以後はここを基準に、接続アドレスが変わったときだけ追従する。
+      lastAutoRef.current = connected;
+      return;
+    }
     // mount 時に既に receiver が接続アドレスと一致しているなら no-op (冗長な書込を避ける)。
     // 実際のアドレス変化 (= ウォレット切替) のときだけ setReceiver する。
     if (receiver.toLowerCase() === connected.toLowerCase()) {

@@ -132,6 +132,26 @@ describe('useReceiverAutofill', () => {
     expect(setReceiver).toHaveBeenCalledWith(A2, 'auto');
   });
 
+  it("読み込み直後に source='auto' で受取先が接続アドレスと違えば、接続アドレスに追従する (再読み込み)", () => {
+    setAccount(A2);
+    const { setReceiver } = setup({ receiver: A1, receiverSource: 'auto', effectiveReceiver: A1, hydrated: true });
+    expect(setReceiver).toHaveBeenCalledWith(A2, 'auto');
+  });
+
+  it("受取先・由来だけが変わった (別のタブの設定の取り込み) ときは追従せず、その後のウォレット切替には追従する", () => {
+    const A3 = getAddress('0x3333333333333333333333333333333333333333');
+    setAccount(A1);
+    const { setReceiver, rerender } = setup({ receiver: A2, receiverSource: 'manual', effectiveReceiver: A2, hydrated: true });
+    // 別のタブで「接続中のウォレットを使う」を選んだ設定 (A3・auto) を取り込んだ。接続アドレス (A1) は変わっていない。
+    rerender({ receiver: A3, receiverSource: 'auto', effectiveReceiver: A3, hydrated: true });
+    expect(setReceiver).not.toHaveBeenCalled();
+    // このタブのウォレットが切り替わったら追従する。
+    setAccount(A2);
+    rerender({ receiver: A3, receiverSource: 'auto', effectiveReceiver: A3, hydrated: true });
+    expect(setReceiver).toHaveBeenCalledTimes(1);
+    expect(setReceiver).toHaveBeenCalledWith(A2, 'auto');
+  });
+
   it("source='manual' はウォレット切替に追従しない (据置)", () => {
     setAccount(A1);
     const { setReceiver, rerender } = setup({
