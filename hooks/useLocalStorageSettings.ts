@@ -8,20 +8,24 @@
 //   値を既定値で消さない。
 //
 // 同じ設定を複数のタブで開いても、古いタブの値で別のタブの変更を上書きしない (第 7 回レビュー D10)。
-// - 設定の 1 段目のキーごとに「このタブが保存値と最後に揃えた値」(base) を持つ。settings と base が食い違うキー
-//   だけが、このタブで変えた (まだ保存していない) 項目。
-// - 保存は「最新の保存値を読み直す → このタブで変えたキーだけを重ねる → 書く」。Web Locks があれば key ごとの
+// - 同期の単位は設定の 1 段目のキー。ただし組で意味を持つキー (受取先とその由来・通貨とチェーンと支払い方法 など。
+//   各 hook が rules.groups で宣言する) は組を 1 つの単位にする: 片方だけを別のタブの値にすると意味が変わるため。
+// - 単位ごとに「このタブが保存値と最後に揃えた値」(base) を持つ。settings と base が食い違う単位だけが、このタブで
+//   変えた (まだ保存していない) 項目。
+// - 保存は「最新の保存値を読み直す → このタブで変えた単位だけを重ねる → 書く」。Web Locks があれば key ごとの
 //   ロックの中で行い、別のタブの読み直しと書き込みが交差しない (ほぼ同時に書いても片方の変更が消えない)。
 //   Web Locks が無い・拒否されたときは同じ書き込みをロックなしで行う (設定全体を書いていた従来より悪くならない)。
-//   書けたときだけ base を進める (保存に失敗したら、次の変更のときにもう一度書く)。
+//   書けたときだけ base を進める (保存に失敗したら、次の変更のときにもう一度書く)。重ねた結果の組み合わせが崩れる
+//   (宣言していない組の片方ずつが混ざり sanitize で直される) なら書かず、このタブの未保存の変更を取り下げて最新の
+//   保存値を取り込む (再読み込みで黙って直される値を保存しない)。
 // - 別のタブの変更を取り込むのは、このタブが前面に戻ったとき (focus / visibilitychange) だけ。storage イベントや
 //   BroadcastChannel で即座には取り込まない: 別のタブで受取先を打っている途中の値 (ENS 名の打ちかけ等) が、この
 //   タブで客に見せている QR に流れ込むため。前面に戻ったとき (= 店主がこのタブを操作するとき) には打ち終わっている。
 //   書いた直後にも取り込まない (接続ウォレットの切り替えに追従する自動補完など、前面にないタブも書くため)。
-// - 取り込むのは sanitize を通しても変わらない (= 検証済みの) 値だけ。このタブの未保存の変更には触れず、取り込むと
-//   項目の組み合わせが崩れる (sanitize で直される項目が増える) なら取り込まない。消えた・壊れた保存値も取り込まない
-//   (受取先が空欄に戻ると接続ウォレットからの自動補完が走り、受取先が別のウォレットに変わってしまうため)。
-//   取り込まなかった値は base も進めないので、このタブが古い値で書き戻すことはない。
+// - 取り込むのは、sanitize を通しても変わらず、rules.importable を満たす (受取先なら確定した値 = 空欄・打ちかけでない)
+//   単位だけ。受取先が空欄になると接続ウォレットからの自動補完が走り、受取先が別のウォレットに変わってしまうため。
+//   このタブに未保存の変更がある単位には触れず、取り込むと組み合わせが崩れるなら取り込まない。消えた・壊れた保存値も
+//   取り込まない。取り込まなかった単位は base も進めないので、このタブが古い値で書き戻すことはない。
 
 import {
   useCallback,
@@ -35,6 +39,18 @@ import { logger } from '@/lib/logger';
 import { safeGet, safeSet } from '@/lib/storage';
 
 type Stored = Record<string, unknown>;
+
+/**
+ * 別のタブとの同期の決まり (各 hook がモジュールの定数で渡す・参照が変わると読み直しになる)。
+ * - groups: 組で意味を持つキー。保存も取り込みも組ごとに行う (片方だけが別のタブの値にならない)。
+ * - importable: 別のタブの値をこのタブに取り込んでよいか (sanitize とは別の「確定した値か」)。false の値を含む組は取り込まない。
+ */
+export type SettingsSyncRules<T> = {
+  groups?: readonly (readonly (keyof T & string)[])[];
+  importable?: { readonly [K in keyof T]?: (value: T[K]) => boolean };
+};
+
+const NO_RULES: SettingsSyncRules<never> = {};
 
 type Synced<T> = {
   settings: T;
@@ -78,30 +94,63 @@ function assign(target: Stored, key: string, source: Stored): void {
   else target[key] = source[key];
 }
 
+/** keys を同期の単位 (宣言された組・それ以外は 1 キー) に広げる。 */
+function unitsOf<T>(keys: readonly string[], rules: SettingsSyncRules<T>): string[][] {
+  const units: string[][] = [];
+  const seen = new Set<string>();
+  for (const k of keys) {
+    if (seen.has(k)) continue;
+    const unit = [...(rules.groups?.find((g) => (g as readonly string[]).includes(k)) ?? [k])];
+    for (const u of unit) seen.add(u);
+    units.push(unit);
+  }
+  return units;
+}
+
+/** next で sanitize に直されるキーのうち、local でも ground (土台にした保存値) でも直されなかったもの = 重ねて崩れたものがあるか。 */
+function mixBreaks<T>(next: Stored, local: Stored, ground: Stored, sanitize: (loaded: Partial<T>) => T): boolean {
+  const sn = sanitize(next as Partial<T>) as Stored;
+  const sl = sanitize(local as Partial<T>) as Stored;
+  const sg = sanitize(ground as Partial<T>) as Stored;
+  return Object.keys(sn).some(
+    (k) => !sameJson(sn[k], next[k]) && sameJson(sl[k], local[k]) && sameJson(sg[k], ground[k]),
+  );
+}
+
 /**
- * 保存値 (remote) のうち、このタブが揃えた値 (base) から変わったキーを取り込む。純関数 (state の更新関数の中で呼ぶ)。
- * - sanitize を通すと変わる値 (不正値・消えた必須キー) は取り込まない。
- * - このタブの未保存の変更があるキーは settings を変えず base だけ進める (このタブの変更が後で書かれて勝つ)。
+ * 保存値 (remote) のうち、このタブが揃えた値 (base) から変わった単位を取り込む。純関数 (state の更新関数の中で呼ぶ)。
+ * - このタブに未保存の変更がある単位は取り込まない (組ごとこのタブの値のまま・後で組ごと書かれる)。
+ * - sanitize を通すと変わる値 (不正値・消えた必須キー) や rules.importable を満たさない値を含む単位は取り込まない。
  * - 取り込んだ結果、sanitize で直される項目が増える (組み合わせが崩れる) なら何も取り込まない。
  */
 function mergeRemote<T>(
   cur: Synced<T>,
   remote: Stored,
   sanitize: (loaded: Partial<T>) => T,
+  rules: SettingsSyncRules<T>,
 ): Synced<T> {
   const settings = cur.settings as Stored;
   const changed = changedKeys(remote, cur.base);
   if (changed.length === 0) return cur;
   const canonical = sanitize(remote as Partial<T>) as Stored;
-  const accepted = changed.filter((k) => sameJson(canonical[k], remote[k]));
-  if (accepted.length === 0) return cur;
+  const importable = rules.importable as Record<string, ((value: unknown) => boolean) | undefined> | undefined;
 
   const nextSettings: Stored = { ...settings };
   const nextBase: Stored = { ...cur.base };
-  for (const k of accepted) {
-    if (sameJson(settings[k], cur.base[k])) assign(nextSettings, k, remote);
-    assign(nextBase, k, remote);
+  let applied = false;
+  for (const unit of unitsOf(changed, rules)) {
+    if (unit.some((k) => !sameJson(settings[k], cur.base[k]))) continue;
+    const valid = unit.every(
+      (k) => sameJson(canonical[k], remote[k]) && (importable?.[k]?.(remote[k]) ?? true),
+    );
+    if (!valid) continue;
+    for (const k of unit) {
+      assign(nextSettings, k, remote);
+      assign(nextBase, k, remote);
+    }
+    applied = true;
   }
+  if (!applied) return cur;
   const before = sanitize(settings as Partial<T>) as Stored;
   const after = sanitize(nextSettings as Partial<T>) as Stored;
   const broken = Object.keys(after).some(
@@ -119,6 +168,7 @@ export function useLocalStorageSettings<T extends object>(
   storageKey: string,
   defaultValue: T,
   sanitize: (loaded: Partial<T>) => T,
+  rules: SettingsSyncRules<T> = NO_RULES as SettingsSyncRules<T>,
 ) {
   const [synced, setSynced] = useState<Synced<T>>(() => ({ settings: defaultValue, base: {} }));
   const [hydrated, setHydrated] = useState(false);
@@ -150,7 +200,7 @@ export function useLocalStorageSettings<T extends object>(
   const writeNow = useCallback(() => {
     const { settings, base } = syncedRef.current;
     const local = settings as Stored;
-    const keys = changedKeys(local, base);
+    const keys = unitsOf(changedKeys(local, base), rules).flat();
     const migrate = migrateRef.current;
     if (keys.length === 0 && !migrate) return;
     const latest = readStored(storageKey);
@@ -160,7 +210,7 @@ export function useLocalStorageSettings<T extends object>(
       next = { ...local };
     } else {
       // 移行がまだなら、読み込んでから誰も書いていなければ読み込んだ値 (の sanitize 済み) を、書いていれば最新の保存値を
-      // sanitize したもの (別のタブの新しい値が残る) を土台にする。その上にこのタブで変えたキーだけを重ねる。
+      // sanitize したもの (別のタブの新しい値が残る) を土台にする。その上にこのタブで変えた単位だけを重ねる。
       const ground = !migrate
         ? latest
         : sameJson(latest, loadedRef.current)
@@ -168,16 +218,28 @@ export function useLocalStorageSettings<T extends object>(
           : (sanitize(latest as Partial<T>) as Stored);
       next = { ...ground };
       for (const k of keys) assign(next, k, local);
+      // 別のタブの値と混ざった (このタブの値だけではない) ときだけ、重ねた組み合わせが崩れていないかを確かめる。
+      if (changedKeys(next, local).length > 0 && mixBreaks(next, local, ground, sanitize)) {
+        // 崩れた組み合わせは書かない (再読み込みで sanitize が黙って直し、どちらの変更とも違う値になる)。このタブの
+        // 未保存の変更を取り下げ、最新の保存値を取り込む (画面には実際に保存されている値を出す)。
+        logger.warn('settings write conflict', { key: storageKey, keys });
+        setSynced((cur) => {
+          const reverted: Stored = { ...(cur.settings as Stored) };
+          for (const k of keys) assign(reverted, k, cur.base);
+          return mergeRemote({ settings: reverted as T, base: cur.base }, latest, sanitize, rules);
+        });
+        return;
+      }
     }
     if (!safeSet(storageKey, next)) return;
     migrateRef.current = false;
-    // 書いたキーだけを保存済みにする (それ以外のキーの別のタブの変更は、前面に戻ったときに取り込む)。
+    // 書いた単位だけを保存済みにする (それ以外の別のタブの変更は、前面に戻ったときに取り込む)。
     setSynced((cur) => {
-      const base: Stored = { ...cur.base };
-      for (const k of keys) assign(base, k, next);
-      return { settings: cur.settings, base };
+      const nextBase: Stored = { ...cur.base };
+      for (const k of keys) assign(nextBase, k, next);
+      return { settings: cur.settings, base: nextBase };
     });
-  }, [storageKey, sanitize]);
+  }, [storageKey, sanitize, rules]);
 
   const scheduleWrite = useCallback(() => {
     const locks = typeof navigator !== 'undefined' ? navigator.locks : undefined;
@@ -215,7 +277,7 @@ export function useLocalStorageSettings<T extends object>(
       if (document.visibilityState === 'hidden') return;
       const stored = readStored(storageKey);
       if (!stored) return;
-      setSynced((cur) => mergeRemote(cur, stored, sanitize));
+      setSynced((cur) => mergeRemote(cur, stored, sanitize, rules));
     };
     window.addEventListener('focus', pull);
     document.addEventListener('visibilitychange', pull);
@@ -223,7 +285,7 @@ export function useLocalStorageSettings<T extends object>(
       window.removeEventListener('focus', pull);
       document.removeEventListener('visibilitychange', pull);
     };
-  }, [hydrated, storageKey, sanitize]);
+  }, [hydrated, storageKey, sanitize, rules]);
 
   return { settings: synced.settings, setSettings, hydrated };
 }

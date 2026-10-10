@@ -7,6 +7,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, act, waitFor } from '@testing-library/react';
 import { useCallback } from 'react';
 import { getAddress, type Address } from 'viem';
+import { useLocalStorageSettings } from '@/hooks/useLocalStorageSettings';
 import { useQrSettings, withChain } from '@/hooks/useQrSettings';
 import { useTipSettings } from '@/hooks/useTipSettings';
 import { useMobileOrderDraft } from '@/hooks/useMobileOrderDraft';
@@ -22,6 +23,14 @@ const R0: Address = getAddress('0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
 const R1: Address = getAddress('0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb');
 const CONNECTED: Address = getAddress('0xcccccccccccccccccccccccccccccccccccccccc');
 const INVOICE = 'T1234567890123';
+
+type Pair = { limit: number; value: number };
+const PAIR_KEY = 'test:pair';
+function sanitizePair(loaded: Partial<Pair>): Pair {
+  const limit = typeof loaded.limit === 'number' ? loaded.limit : 10;
+  const value = typeof loaded.value === 'number' ? loaded.value : 0;
+  return { limit, value: Math.min(value, limit) };
+}
 
 const stored = (key = KEY) => JSON.parse(window.localStorage.getItem(key) ?? 'null');
 
@@ -284,7 +293,7 @@ describe('ほぼ同時の書き込み (Web Locks)', () => {
     expect(locks.waiting()).toBe(0);
   });
 
-  it('取り込むと項目の組み合わせが崩れる (別のタブで通貨・このタブでチェーンを同時に変えた) ときは取り込まない', async () => {
+  it('通貨・チェーン・支払い方法は組で同期する: 別のタブで通貨・このタブでチェーンを同時に変えても、崩れた組み合わせを作らない', async () => {
     await seedCanonical({ receiver: R0, receiverSource: 'manual', token: 'usdc', chain: 'base' });
     const locks = manualLocks();
     setLocks({ request: locks.request });
@@ -301,6 +310,32 @@ describe('ほぼ同時の書き込み (Web Locks)', () => {
     await locks.grant();
     expect(a.current.settings.token).toBe('usdc');
     expect(a.current.settings.chain).toBe('arbitrum');
+    // 保存も組ごと (このタブの USDC × Arbitrum)。JPYC × Arbitrum を保存して、再読み込みで Polygon に戻されない。
+    expect(stored()).toMatchObject({ token: 'usdc', chain: 'arbitrum', receiver: R0 });
+    const reloaded = renderHook(() => useQrSettings()).result;
+    await waitFor(() => expect(reloaded.current.hydrated).toBe(true));
+    expect(reloaded.current.settings).toMatchObject({ token: 'usdc', chain: 'arbitrum', payMode: a.current.settings.payMode });
+  });
+
+  it('宣言していない組み合わせが重ねて崩れるときは書かず、このタブの変更を取り下げて保存値を出す', async () => {
+    // value は limit 以下 (sanitize が組み合わせで値を決める)。組を宣言しない (= 安全網だけで守る) 場合。
+    window.localStorage.setItem(PAIR_KEY, JSON.stringify({ limit: 10, value: 5 }));
+    const locks = manualLocks();
+    setLocks({ request: locks.request });
+    const a = renderHook(() => useLocalStorageSettings<Pair>(PAIR_KEY, { limit: 10, value: 0 }, sanitizePair)).result;
+    await waitFor(() => expect(a.current.hydrated).toBe(true));
+    act(() => a.current.setSettings((s) => ({ ...s, value: 8 })));
+    // ロックを待つ間に、別のタブが上限を 6 に下げた。
+    window.localStorage.setItem(PAIR_KEY, JSON.stringify({ limit: 6, value: 5 }));
+    const setItem = vi.spyOn(Storage.prototype, 'setItem');
+    await locks.grant();
+    // { limit: 6, value: 8 } (再読み込みで value が 6 に直される) を保存しない。
+    expect(setItem).not.toHaveBeenCalled();
+    expect(stored(PAIR_KEY)).toEqual({ limit: 6, value: 5 });
+    expect(a.current.settings).toEqual({ limit: 6, value: 5 });
+    const reloaded = renderHook(() => useLocalStorageSettings<Pair>(PAIR_KEY, { limit: 10, value: 0 }, sanitizePair)).result;
+    await waitFor(() => expect(reloaded.current.hydrated).toBe(true));
+    expect(reloaded.current.settings).toEqual({ limit: 6, value: 5 });
   });
 
   it('読み込み直後の移行の書き込みも、読み込んでから別のタブが書いた値を既定値で消さない', async () => {
@@ -384,6 +419,66 @@ describe('取り込まない値 (受取先を別のウォレットに変えな�
     expect(a.current.settings.receiver).toBe(R0);
     // 正しい値 (店名) は取り込む。
     expect(a.current.settings.storeName).toBe('カフェ');
+  });
+
+  it('別のタブで受取先を空欄にしても取り込まず、自動補完で接続ウォレットに変わらない (B の空欄は保存値に残す)', async () => {
+    const a = await tab();
+    window.localStorage.setItem(KEY, JSON.stringify({ ...stored(), receiver: '', receiverSource: 'manual' }));
+    focusTab();
+    expect(a.current.settings.receiver).toBe(R0);
+    act(() => a.current.setSettings((s) => ({ ...s, storeName: 'カフェ' })));
+    expect(a.current.settings.receiver).toBe(R0);
+    expect(stored()).toMatchObject({ receiver: '', storeName: 'カフェ' });
+    expect(stored().receiver).not.toBe(CONNECTED);
+  });
+
+  it.each([
+    ['0x の途中', '0x1234'],
+    ['名前の打ちかけ', 'shop.et'],
+    ['ラベルの欠けた名前', '.eth'],
+    ['前後の空白', ` ${R1}`],
+  ])('受取先が確定していない値 (%s) は取り込まない', async (_label, receiver) => {
+    const a = await tab();
+    window.localStorage.setItem(KEY, JSON.stringify({ ...stored(), receiver }));
+    focusTab();
+    expect(a.current.settings.receiver).toBe(R0);
+  });
+
+  it('確定した受取先 (0x アドレス・名前) は取り込む', async () => {
+    const a = await tab();
+    window.localStorage.setItem(KEY, JSON.stringify({ ...stored(), receiver: 'shop.base.eth' }));
+    focusTab();
+    expect(a.current.settings.receiver).toBe('shop.base.eth');
+    window.localStorage.setItem(KEY, JSON.stringify({ ...stored(), receiver: R1 }));
+    focusTab();
+    expect(a.current.settings.receiver).toBe(R1);
+  });
+
+  it('受取先とその由来は組で同期する: 未保存の手入力は、別のタブの「自動 (接続ウォレット)」で消えない', async () => {
+    window.localStorage.clear();
+    await seedCanonical({ receiver: R0, receiverSource: 'manual' });
+    const locks = manualLocks();
+    setLocks({ request: locks.request });
+    const a = await tab();
+    act(() => a.current.setSettings((s) => ({ ...s, receiver: R1, receiverSource: 'manual' })));
+    // A がロックを待つ間に、別のタブが接続ウォレットを自動で入れた。
+    window.localStorage.setItem(KEY, JSON.stringify({ ...stored(), receiver: CONNECTED, receiverSource: 'auto' }));
+    focusTab();
+    expect(a.current.settings).toMatchObject({ receiver: R1, receiverSource: 'manual' });
+    await locks.grant();
+    expect(a.current.settings).toMatchObject({ receiver: R1, receiverSource: 'manual' });
+    expect(stored()).toMatchObject({ receiver: R1, receiverSource: 'manual' });
+    const reloaded = renderHook(() => useQrTab()).result;
+    await waitFor(() => expect(reloaded.current.hydrated).toBe(true));
+    expect(reloaded.current.settings).toMatchObject({ receiver: R1, receiverSource: 'manual' });
+  });
+
+  it('受取先だけを変えても由来と一緒に書く (別のタブの「自動」と手入力の受取先の組み合わせを保存しない)', async () => {
+    const a = await tab();
+    // A が取り込む前に、別のタブが接続ウォレットを自動で入れた。
+    window.localStorage.setItem(KEY, JSON.stringify({ ...stored(), receiver: CONNECTED, receiverSource: 'auto' }));
+    act(() => a.current.setSettings((s) => ({ ...s, receiver: R1 })));
+    expect(stored()).toMatchObject({ receiver: R1, receiverSource: 'manual' });
   });
 
   it('別のタブが保存値を消しても (clear・削除) 取り込まず、次の保存で設定全体を書き戻す', async () => {

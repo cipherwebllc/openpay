@@ -11,7 +11,8 @@ import {
   parseTipPreset,
   TIP_PRESET_MAX,
 } from '@/lib/url';
-import { useLocalStorageSettings } from './useLocalStorageSettings';
+import { isSettledReceiverInput } from '@/lib/format';
+import { useLocalStorageSettings, type SettingsSyncRules } from './useLocalStorageSettings';
 import { normalizeChainForToken, sanitizeTokenSymbol } from './useQrSettings';
 
 type TipSettings = {
@@ -223,6 +224,18 @@ function sanitize(loaded: Partial<TipSettings>): TipSettings {
   };
 }
 
+// 別のタブとの同期の決まり (hooks/useLocalStorageSettings)。組は保存も取り込みもまとめて行う: 受取先とその由来・
+// 通貨とチェーン (sanitize が組み合わせで決める)・金額とラベル (ラベルは同じ並びの金額に対応する)。
+// 受取先は確定した値 (空欄・打ちかけでない) だけを取り込む。
+const SYNC_RULES: SettingsSyncRules<TipSettings> = {
+  groups: [
+    ['receiver', 'receiverSource'],
+    ['token', 'chain'],
+    ['presets', 'presetLabels'],
+  ],
+  importable: { receiver: isSettledReceiverInput },
+};
+
 export function useTipSettings() {
-  return useLocalStorageSettings<TipSettings>(STORAGE_KEY, DEFAULT_SETTINGS, sanitize);
+  return useLocalStorageSettings<TipSettings>(STORAGE_KEY, DEFAULT_SETTINGS, sanitize, SYNC_RULES);
 }

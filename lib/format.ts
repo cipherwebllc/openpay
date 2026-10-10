@@ -19,6 +19,14 @@ export function formatJpycYenLabel(atomic: bigint): string {
   return `¥${yen.toLocaleString('en-US')}`;
 }
 
+// 受取先の入力が確定した値か (0x アドレス、または .eth / .base.eth の名前としてラベルが欠けていない形)。空欄・打ちかけ
+// (0x の途中・`shop.et`・`.eth` だけ)・前後の空白付きは false。別のタブで保存された受取先をこのタブに取り込んでよいかの
+// 判定に使う (hooks/useLocalStorageSettings: 空欄を取り込むと接続ウォレットの自動補完が走り、受取先が変わるため)。
+const SETTLED_NAME_PATTERN = /^([^\s.]+\.)+eth$/i;
+export function isSettledReceiverInput(value: string): boolean {
+  return value !== '' && value === value.trim() && (isAddress(value) || SETTLED_NAME_PATTERN.test(value));
+}
+
 // 受取人アドレス入力 (0x... or .eth/.base.eth) と AddressInput が解決した Address から
 // 実効的な受取先を導出。0x 直接入力は同期で確定、name 解決は AddressInput.onResolved 経由。
 export function pickEffectiveAddress(

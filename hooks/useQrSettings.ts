@@ -14,8 +14,9 @@ import type { SplitDraft } from '@/lib/url';
 import { PAY_MEMO_MAX, PAY_PRODUCT_NAME_MAX } from '@/lib/url';
 import { isTaxCategory, type TaxCategory } from '@/lib/tax';
 import { INVOICE_REGISTRATION_INPUT_MAX } from '@/lib/invoice';
+import { isSettledReceiverInput } from '@/lib/format';
 import { safeGet } from '@/lib/storage';
-import { useLocalStorageSettings } from './useLocalStorageSettings';
+import { useLocalStorageSettings, type SettingsSyncRules } from './useLocalStorageSettings';
 
 // token ごとに店主が最後に使っていた (受取チェーン, 決済モード)。レジは商品プリセットを押すだけで
 // token が暗黙に切り替わる (チェーン選択 UI が無い) ため、これが無いと USDC を Arc で受けたい店でも
@@ -356,6 +357,20 @@ export function readQrSettings(): QrSettings {
   return sanitize(safeGet<Partial<QrSettings>>(STORAGE_KEY, {}));
 }
 
+// 別のタブとの同期の決まり (hooks/useLocalStorageSettings)。組は保存も取り込みもまとめて行う:
+// - 受取先とその由来 (由来だけが別のタブの 'auto' になると、自動補完が手入力の受取先を接続ウォレットに置き換える)。
+// - 通貨・チェーン・支払い方法・他チェーンからの受取・通貨ごとの記憶 (sanitize が組み合わせで値を決める)。
+// - 税率と税区分。
+// 受取先は確定した値 (空欄・打ちかけでない) だけを取り込む。
+const SYNC_RULES: SettingsSyncRules<QrSettings> = {
+  groups: [
+    ['receiver', 'receiverSource'],
+    ['token', 'chain', 'payMode', 'storePays', 'crossChain', 'tokenPrefs'],
+    ['taxRate', 'taxCategory'],
+  ],
+  importable: { receiver: isSettledReceiverInput },
+};
+
 export function useQrSettings() {
-  return useLocalStorageSettings<QrSettings>(STORAGE_KEY, DEFAULT_SETTINGS, sanitize);
+  return useLocalStorageSettings<QrSettings>(STORAGE_KEY, DEFAULT_SETTINGS, sanitize, SYNC_RULES);
 }
