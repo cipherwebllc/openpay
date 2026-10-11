@@ -9,7 +9,12 @@
 // exit 0 = 全 active、1 = 1 件以上 inactive。
 
 import { spawnSync } from 'node:child_process';
-import { assessPimlicoRun, assessReceiptSigner, assessReverifyRun } from './verify-production-config-helpers.mjs';
+import {
+  assessPimlicoRun,
+  assessReceiptSigner,
+  assessReverifyRun,
+  latestCompletedRun,
+} from './verify-production-config-helpers.mjs';
 
 const BASE = process.argv[2] ?? 'https://open-pay.jp';
 
@@ -103,9 +108,9 @@ for (const [name, path] of [
       'list',
       '--workflow=pimlico-balance.yml',
       '--repo=cipherwebllc/openpay',
-      '--limit=1',
+      '--limit=5',
       '--json',
-      'databaseId',
+      'databaseId,status',
     ],
     { encoding: 'utf8' },
   );
@@ -117,9 +122,10 @@ for (const [name, path] of [
     );
   } else {
     const runs = JSON.parse(r.stdout);
-    const runId = runs[0]?.databaseId;
+    // 実行中の run はログがまだ無く「出力不在」と誤判定するので、完了した最新の run を読む。
+    const runId = latestCompletedRun(runs)?.databaseId;
     if (!runId) {
-      record('Pimlico balance cron 実行履歴', false, '直近 run なし');
+      record('Pimlico balance cron 実行履歴', false, '直近の completed run なし');
     } else {
       const log = spawnSync(
         'gh',
@@ -162,7 +168,7 @@ for (const [name, path] of [
     } catch {
       runs = [];
     }
-    const run = runs.find((candidate) => candidate.status === 'completed');
+    const run = latestCompletedRun(runs);
     if (!run) {
       const assessment = assessReverifyRun(undefined, '');
       record('Reverify cron freshness', assessment.ok, assessment.detail);

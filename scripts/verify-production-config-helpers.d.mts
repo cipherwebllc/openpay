@@ -17,6 +17,9 @@ export function assessReverifyRun(
   nowMs?: number,
 ): ReverifyRunAssessment;
 
+/** `gh run list` の結果 (新しい順) から、完了した最新の run を選ぶ (実行中の run はログがまだ無い)。 */
+export function latestCompletedRun<T extends { status?: string | null }>(runs: unknown): T | undefined;
+
 /** Pimlico 残高 cron の最新 run のログから、実際に残高を読んだかを判定する。 */
 export function assessPimlicoRun(log: string): { ok: boolean; detail: string };
 

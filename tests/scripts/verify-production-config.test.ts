@@ -3,6 +3,7 @@ import {
   assessPimlicoRun,
   assessReceiptSigner,
   assessReverifyRun,
+  latestCompletedRun,
   REVERIFY_MAX_AGE_MS,
 } from '../../scripts/verify-production-config-helpers.mjs';
 import { PIMLICO_BALANCE_HEADER } from '../../scripts/lib/pimlico-balance-output.mjs';
@@ -49,6 +50,21 @@ describe('assessReverifyRun', () => {
     ],
   ])('%s は unhealthy', (_name, run, log) => {
     expect(assessReverifyRun(run, log, NOW).ok).toBe(false);
+  });
+});
+
+describe('latestCompletedRun', () => {
+  it('実行中の run (ログがまだ無い) を飛ばし、完了した最新の run を選ぶ', () => {
+    const runs = [
+      { databaseId: 3, status: 'in_progress' },
+      { databaseId: 2, status: 'completed' },
+      { databaseId: 1, status: 'completed' },
+    ];
+    expect(latestCompletedRun(runs)).toMatchObject({ databaseId: 2 });
+  });
+  it('完了した run が無い・配列でないときは undefined', () => {
+    expect(latestCompletedRun([{ databaseId: 1, status: 'queued' }])).toBeUndefined();
+    expect(latestCompletedRun(null)).toBeUndefined();
   });
 });
 
