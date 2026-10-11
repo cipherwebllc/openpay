@@ -98,9 +98,11 @@ OpenPay generates a **QR with the amount, token, chain, and recipient fixed by t
 
   It also requires a chain whose EIP-7702 is active (see the Avalanche note below). **JPYC gasless has no such requirement** — it is a signature-only EIP-3009 relay that works in any injected wallet.
 - Standard mode is a plain ERC20 `transfer` (single transfer to the merchant).
-- The gasless network-fee bearer can be set with `gas=customer` (default) or `gas=merchant`. For **JPYC gasless in recover mode** it decides who bears the per-transaction OpenPay usage fee: `customer` adds it on top of the payment, `merchant` absorbs it from the amount received.
+- `gas=customer` / `gas=merchant` is the gasless network-fee bearer parameter of the payment URL.
 
-  For the **USDC** paymaster paths it has no effect on what OpenPay collects (OpenPay collects 0).
+  For **JPYC gasless in recover mode** the fee bearer is **fixed**, not chosen per QR: the merchant bears it on payments and the tipper adds the flat floor on tips (see [Fees](#fees)).
+
+  For the **USDC** paymaster paths the bearer remains the merchant's choice, and it has no effect on what OpenPay collects (OpenPay collects 0).
 
 ## Fees
 
