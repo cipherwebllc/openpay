@@ -11,12 +11,14 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   DISCLOSED_TIP_FEE_MODELS,
+  DISCLOSED_CCTP_FEE,
   DISCLOSED_DUAL_RAIL_USDC,
   DISCLOSED_MOBILE_ORDER_FEE,
   DISCLOSED_RECOVER_FEE,
   DISCLOSED_STORE_USDC_PAYMENT,
   DISCLOSED_X402_FEE,
   DISCLOSED_LICENSE_NFT,
+  cctpFeeDisclosureValues,
 } from '@/lib/legal';
 import {
   JPYC_PAYMENTS_RESOURCE,
@@ -288,4 +290,22 @@ it('AI エージェントが x402 で直接払うモバイル注文の利用料�
   );
   // モバイル注文の料率の文のあとに置く (人が払う注文の料率と並べて読めるように)。
   expect(feeLine.indexOf('AI エージェントが x402 で直接支払うモバイル注文')).toBeGreaterThan(feeLine.indexOf('時間指定の事前注文'));
+});
+
+// 2026-10-12: 他のチェーンから Arc 以外のチェーン宛てに払う (Circle CCTP V2) とき、Circle の転送手数料は受け取る側の
+// 着金額から差し引かれる (Arc 宛ては支払う側が上乗せ)。上限は DISCLOSED_CCTP_FEE から導いた値と全一致で照合する。
+it('他チェーンから Arc 以外への支払いは、Circle の転送手数料 (上限 = DISCLOSED_CCTP_FEE) が受け取る側の着金額から差し引かれる', () => {
+  const v = cctpFeeDisclosureValues(DISCLOSED_CCTP_FEE);
+  expectEveryMatch(
+    /Circle の転送手数料〔決済額の最大 ([\d.]+)%・([\d.]+) USDC 未満は最大 ([\d.]+) USDC〕/g,
+    [v.cctpMaxPercent, v.cctpSmallBelowUsdc, v.cctpSmallCapUsdc],
+    'cctp fee',
+  );
+  const line = lines.find((l) => l.startsWith('- 対応チェーン:'))!;
+  const arc = line.indexOf('他チェーンの USDC から Arc への支払いは Circle の転送で対応し、転送手数料は支払う側が上乗せ負担・OpenPay 徴収なし');
+  const cctp = line.indexOf(
+    `他の 6 チェーンはクロスチェーン支払い自動対応で、Circle の転送手数料〔決済額の最大 ${v.cctpMaxPercent}%・${v.cctpSmallBelowUsdc} USDC 未満は最大 ${v.cctpSmallCapUsdc} USDC〕は支払う側への上乗せではなく受け取る側の着金額から差し引かれ、OpenPay 徴収なし`,
+  );
+  expect(arc).toBeGreaterThan(-1);
+  expect(cctp).toBeGreaterThan(arc);
 });

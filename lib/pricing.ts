@@ -15,6 +15,7 @@
 import type { Metadata } from 'next';
 import { guidePageMetadata } from '@/lib/guideMetadata';
 import {
+  DISCLOSED_CCTP_FEE,
   DISCLOSED_DUAL_RAIL_USDC,
   DISCLOSED_MOBILE_ORDER_FEE,
   DISCLOSED_RECOVER_FEE,
@@ -22,6 +23,7 @@ import {
   DISCLOSED_STORE_USDC_PAYMENT,
   DISCLOSED_TIP_FEE_MODELS,
   DISCLOSED_X402_FEE,
+  cctpFeeDisclosureValues,
   disclosedStoreGasChains,
 } from '@/lib/legal';
 import {
@@ -128,6 +130,8 @@ const STORE_GAS_WEI = DISCLOSED_STORE_GAS_WALLET.feeWei;
 const STORE_GAS_WEI_JPYC = formatJpycWei(BigInt(DISCLOSED_STORE_GAS_WALLET.feeWei));
 const STORE_USDC_CHAIN = DISCLOSED_STORE_USDC_PAYMENT.chainName;
 const DUAL_RAIL_CHAIN = DISCLOSED_DUAL_RAIL_USDC.chainName;
+// 定数を引数で渡す (cctpFeeDisclosureValues の既定値は自分のモジュールの定数を読み、テストの差し替えが効かないため)。
+const CCTP_FEE = cctpFeeDisclosureValues(DISCLOSED_CCTP_FEE);
 
 const jpyc = (wei: bigint) => formatJpycWei(wei);
 
@@ -325,6 +329,7 @@ function buildJa(): PricingContent {
       `AI エージェントが x402 で支払うとき（AI ストアの API やモバイル注文など）: JPYC では、買い手が x402 利用料（価格の ${X402_PCT}・最低 ${X402_FLOOR} JPYC）を上乗せし、売り手は価格をそのまま受け取ります。モバイル注文でも、モバイル注文の利用料ではなく、この x402 利用料だけがかかります。${dualRailUsdcClause('ja')}`,
       'Arc の USDC は通常決済だけで、ネットワーク手数料もお客様が USDC で払います。ほかの通常決済と同じく、OpenPay の料金はかかりません（モバイル注文を除きます）。',
       'ほかのチェーンの USDC から Arc 宛てに払うときは、Circle の転送手数料を払う側が上乗せして負担します。OpenPay はこの分を受け取りません。',
+      `ほかのチェーンの USDC から Arc 以外のチェーン宛てに払うときは、Circle の転送手数料（Circle が決める額で、上限は金額の ${CCTP_FEE.cctpMaxPercent}%。${CCTP_FEE.cctpSmallBelowUsdc} USDC 未満の支払いでは ${CCTP_FEE.cctpSmallCapUsdc} USDC）がお店の受け取りから差し引かれます。払う側の支払いは増えません。OpenPay はこの分を受け取らず、OpenPay の料金もかかりません。`,
     ],
 
     termsTitle: 'くわしい条件',
@@ -466,6 +471,7 @@ function buildEn(): PricingContent {
       `When an AI agent pays over x402 (such as AI Store APIs or mobile orders): for JPYC, the buyer adds the x402 fee (${X402_PCT} of the price, minimum ${X402_FLOOR} JPYC), and the seller receives the price in full. Mobile orders paid this way are charged only this x402 fee, not the mobile order fee. ${dualRailUsdcClause('en')}`,
       'USDC on Arc supports standard payments only, and the customer pays the network fee in USDC as well. As with other standard payments, there is no OpenPay charge (mobile orders excepted).',
       'When paying to Arc with USDC from another chain, the payer adds Circle’s transfer fee. OpenPay receives none of it.',
+      `When paying with USDC from another chain to a chain other than Arc, Circle’s transfer fee (set by Circle, capped at ${CCTP_FEE.cctpMaxPercent}% of the amount, or ${CCTP_FEE.cctpSmallCapUsdc} USDC for payments under ${CCTP_FEE.cctpSmallBelowUsdc} USDC) is deducted from what the shop receives. The payer pays no more. OpenPay receives none of it and charges nothing.`,
     ],
 
     termsTitle: 'Full terms',

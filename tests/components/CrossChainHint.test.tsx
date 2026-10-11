@@ -303,10 +303,13 @@ describe('CrossChainHint: balance fetch + decision 表示', () => {
     // direct badge + cctp-v2 badge 両方
     expect(screen.getByText(/直接送金/)).toBeInTheDocument();
     expect(screen.getByText(/通常 \(CCTP V2\)/)).toBeInTheDocument();
-    // cross-chain option のみ「ブリッジ手数料 + ガス代」を表示 (buyer が払う実費)。
-    // direct (同一チェーン) は bridge fee 0 のため fee 行を出さない →
-    // "ブリッジ手数料" は cctp-v2 option の 1 箇所だけに現れる。
-    expect(screen.getAllByText(/ブリッジ手数料/)).toHaveLength(1);
+    // cross-chain option のみ「転送手数料 + ガス代」を表示。direct (同一チェーン) は bridge fee 0 のため
+    // fee 行を出さない → 手数料の行は cctp-v2 option の 1 箇所だけに現れる。
+    // CCTP V2 (Arc 以外の宛先) の転送手数料は請求額に上乗せされず受け取る側の着金から引かれ、表示は
+    // calldata の maxFee と同じ上限 (5 USDC × 10 bps = 0.005 USDC) なので「最大」と書く。
+    expect(screen.getAllByText(/転送手数料/)).toHaveLength(1);
+    expect(screen.getByText(/転送手数料/)).toHaveTextContent('転送手数料 最大 0.005 USDC（受け取る側の着金から差し引き）+ ガス代');
+    expect(screen.queryByText(/ブリッジ手数料/)).not.toBeInTheDocument();
     // option 別ガスタグ: directIsGasless=true なので direct=「ガスレス」、
     // cross-chain (cctp-v2)=「ガス代要」が 1 つずつ出る。
     expect(screen.getByText(/ガスレス/)).toBeInTheDocument();

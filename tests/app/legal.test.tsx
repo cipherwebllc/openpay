@@ -63,7 +63,7 @@ describe('Legal pages', () => {
         : ['seller operates', 'availability', '60 seconds', 'wallet address, product, revision and timestamps', 'does not store or serve', 'responsible for delivery', '(6)', 'third parties', 'not immediately recalled', 'holder without a purchase history', '(14)', '(7)', '(11)']) expect(clause).toContain(text);
       renderWithIntl(<TermsPage />, { locale });
       expect(screen.getByText((_, element) => element?.tagName === 'P' && !!element.textContent?.includes('(18)'))).toHaveTextContent(clause);
-      expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-10-11');
+      expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-10-12');
       expect(messages.Privacy.section3.body).toContain(locale === 'ja' ? '購入歴のないライセンス保有者' : 'license holders without a purchase history');
       expect(LEGAL_ENTITY.privacyEffectiveDate).toBe('2026-10-08');
     });
@@ -89,7 +89,7 @@ describe('Legal pages', () => {
       expect(clause(ja, 17)).toContain('公開台帳'); expect(clause(en, 17)).toContain('public ledger');
       expect(clause(ja, 17)).toContain('公開 Verify API'); expect(clause(en, 17)).toContain('public Verify API');
       expect(clause(ja, 16)).toContain('法的適合性の認定を意味しません'); expect(clause(en, 16)).toContain('not legal clearance');
-      expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-10-11');
+      expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-10-12');
     });
     it('ja: h1 と 11 条すべての title が render される', () => {
       renderWithIntl(<TermsPage />, { locale: 'ja' });
@@ -753,8 +753,10 @@ describe('Legal pages', () => {
       // 2026-10-08: 「お店がガス代を肩代わりして送る」の新設で Terms/特商法/免責/プライバシーを同日改定。
       // 2026-10-11: JPYC のチップのガス相当額の行き先・AI エージェントが x402 で払うモバイル注文の利用料を
       //   実装どおりに明記 (料金は変えない) するため Terms/特商法/免責を同日改定。プライバシーは据置。
-      expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-10-11');
-      expect(LEGAL_ENTITY.tokuteiEffectiveDate).toBe('2026-10-11');
+      // 2026-10-12: 他のチェーンから Arc 以外のチェーン宛てに払うときの Circle の転送手数料 (受取額から差し引き) を
+      //   実装どおりに明記 (料金は変えない) するため Terms/特商法を同日改定。免責・プライバシーは据置。
+      expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-10-12');
+      expect(LEGAL_ENTITY.tokuteiEffectiveDate).toBe('2026-10-12');
       expect(LEGAL_ENTITY.disclaimerEffectiveDate).toBe('2026-10-11');
       // 2026-09-10 改定案: 保護配布のチケット情報の第三者提供を追記。
       expect(LEGAL_ENTITY.privacyEffectiveDate).toBe('2026-10-08');

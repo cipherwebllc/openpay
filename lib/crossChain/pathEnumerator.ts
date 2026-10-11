@@ -16,8 +16,10 @@
 // - gateway mint (destination): ~150k gas
 // - cctp-v2 burn (source) + receive (destination): ~80k + ~120k = ~200k gas
 // - Gateway service fee: 10 bps (DEFAULT_MAX_FEE_BPS、min $0.001) — gateway.ts と同期
-// - CCTP V2 Fast fee: 5 bps (Circle docs published、min $0.001 で揃える)
-// 実機運用後に観測値で再 calibrate 推奨。
+// - CCTP V2 Fast fee: cctp.ts の maxFee と同じ式の **上限** (10 bps、min $0.001)。実際の額は Circle が定め
+//   (2026-10-11 の Iris API で 0〜2 bps)、受け取る側の mint 額から引かれる。UI は「最大」と書く
+//   (tests/app/cctpFeeDisclosure.test.tsx が maxFee と同じ値であることを固定する)。
+// gas units・ETA は実機運用後に観測値で再 calibrate 推奨。
 
 import type { MultiChainBalances } from './balance';
 import { domainForChainId, isForwardOnlyDestination } from './config';
@@ -63,8 +65,8 @@ const GAS_UNITS_CCTP_BURN_AND_RECEIVE = 200_000n;
 // === Service fee bps (Circle 公開値) ===
 // Gateway: gateway.ts の DEFAULT_MAX_FEE_BPS (10 bps) と一致
 const GATEWAY_FEE_BPS = 10n;
-// CCTP V2 Fast: Circle docs 公表値 0.5 bps だが、early access の margin で
-// gateway と同じ 10 bps を上限として保守的に見積もる (実機計測後に再評価)
+// CCTP V2 Fast: cctp.ts の maxFee (DEFAULT_CCTP_MAX_FEE_BPS・MIN_CCTP_MAX_FEE_ATOMIC) と同じ上限。
+// 見積ではなく上限なので、表示は「最大」(CrossChainSourceChooser の feeBreakdownCctp)。
 const CCTP_FAST_FEE_BPS = 10n;
 // 最低 fee (atomic USDC = 0.001 USDC = 1000)。微少額 transfer で計算結果が
 // 0/1 atomic に落ちて reject されるのを避けるための下限。
@@ -99,8 +101,9 @@ export interface EnumerateArgs {
 /** 全 viable source chain × path 組合せを返す。
  *  並び順: direct → gateway → cctp-v2、同 kind 内では balance 降順。
  *  balance 不足の chain (< requiredAtomic) は除外。
- *  各 PathOption の serviceFeeAtomic は Circle ブリッジ手数料の見積で、cross-chain
- *  path の比較用に表示する (merchant/operator が受取減で負担、顧客の支出は requiredAtomic)。 */
+ *  各 PathOption の serviceFeeAtomic は Circle ブリッジ手数料の上限 (Arc 宛ては見積の maxFee) で、cross-chain
+ *  path の比較用に表示する (CCTP は merchant/operator が受取減で負担、顧客の支出は requiredAtomic。
+ *  Arc 宛ての forward は顧客が上乗せ)。 */
 export function enumeratePathOptions(args: EnumerateArgs): PathOption[] {
   const { targetChainId, requiredAtomic, balances } = args;
   const options: PathOption[] = [];

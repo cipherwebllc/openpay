@@ -26,6 +26,7 @@ vi.mock('@/lib/legal', async (importOriginal) => {
     disclosedStoreGasChains: (locale: 'ja' | 'en') => (locale === 'ja' ? 'ChainA・ChainB' : 'ChainA and ChainB'),
     DISCLOSED_STORE_USDC_PAYMENT: { ...actual.DISCLOSED_STORE_USDC_PAYMENT, chainName: 'StoreChain' },
     DISCLOSED_DUAL_RAIL_USDC: { ...actual.DISCLOSED_DUAL_RAIL_USDC, chainName: 'DualChain' },
+    DISCLOSED_CCTP_FEE: { ...actual.DISCLOSED_CCTP_FEE, maxFeeBps: 25, minMaxFeeAtomic: 5_000 },
   };
 });
 
@@ -61,6 +62,8 @@ const EXPECTED = {
     '1,015 JPYC',
     '10,150 JPYC',
     '100 JPYC の 1.7% は 1.7 JPYC なので、最低額の 5 JPYC になります。決済額が 5 JPYC 以下のときは',
+    // Circle の転送手数料の上限 (DISCLOSED_CCTP_FEE: 25 bps・最低 5,000 atomic → 0.25%・2 USDC 未満は 0.005 USDC)。
+    '上限は金額の 0.25%。2 USDC 未満の支払いでは 0.005 USDC',
   ],
   en: [
     '1.7%',
@@ -79,13 +82,14 @@ const EXPECTED = {
     '3 JPYC (minimum)',
     '10,150 JPYC',
     '1.7% of 100 JPYC is 1.7 JPYC, so the 5 JPYC minimum applies. Gasless payments are not available for amounts of 5 JPYC or less.',
+    'capped at 0.25% of the amount, or 0.005 USDC for payments under 2 USDC',
   ],
 } as const;
 
 // 今の正本の値 (差し替えたので出てはいけない)。
 const CURRENT = {
-  ja: ['最低 2 JPYC', '最低 1 JPYC', '約 2 JPYC', '1 wei', 'Polygon', '2 JPYC（最低額）', '9,900 JPYC', '1,030 JPYC'],
-  en: ['minimum 2 JPYC', 'minimum 1 JPYC', 'about 2 JPYC', '1 wei', 'Polygon', '2 JPYC (minimum)', '9,900 JPYC', '1,030 JPYC'],
+  ja: ['最低 2 JPYC', '最低 1 JPYC', '約 2 JPYC', '1 wei', 'Polygon', '2 JPYC（最低額）', '9,900 JPYC', '1,030 JPYC', '0.1%', '0.001 USDC', '1 USDC 未満'],
+  en: ['minimum 2 JPYC', 'minimum 1 JPYC', 'about 2 JPYC', '1 wei', 'Polygon', '2 JPYC (minimum)', '9,900 JPYC', '1,030 JPYC', '0.1%', '0.001 USDC', 'under 1 USDC'],
 } as const;
 
 describe.each(['ja', 'en'] as const)('%s: 正本を差し替えると料金ページの数字が全部追従する', (locale) => {

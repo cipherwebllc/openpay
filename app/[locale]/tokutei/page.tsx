@@ -2,7 +2,7 @@
 
 import { useTranslations } from 'next-intl';
 import { LegalPageShell } from '@/components/LegalPageShell';
-import { LEGAL_ENTITY } from '@/lib/legal';
+import { LEGAL_ENTITY, cctpFeeDisclosureValues } from '@/lib/legal';
 
 const ROW_KEYS = [
   'seller',
@@ -31,6 +31,8 @@ export default function TokuteiPage() {
     address: LEGAL_ENTITY.headOffice,
     email: LEGAL_ENTITY.contactEmail,
     url: LEGAL_ENTITY.siteUrl,
+    // 「対価以外の費用」の Circle の転送手数料の上限 (lib/legal.ts の DISCLOSED_CCTP_FEE)。
+    ...cctpFeeDisclosureValues(),
   };
 
   return (
