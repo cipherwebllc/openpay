@@ -64,7 +64,7 @@ describe('bundle budget build env (--build)', () => {
         PATH: '/usr/bin',
         NEXT_PUBLIC_NETWORK_ENV: 'mainnet',
         NEXT_PUBLIC_ENABLE_REGISTER_FEE: '1',
-        NEXT_PUBLIC_ENABLE_MAV2: '1',
+        NEXT_PUBLIC_ENABLE_MOCK_WALLET: '1',
         NEXT_PUBLIC_ENABLE_HANDLES: '',
       },
       prodFlagsText: read('e2e/prodFlags.env'),
@@ -72,7 +72,9 @@ describe('bundle budget build env (--build)', () => {
     });
     // 親 shell の ON は潰す (production OFF の flag)
     expect(env.NEXT_PUBLIC_ENABLE_REGISTER_FEE).toBe('0');
-    expect(env.NEXT_PUBLIC_ENABLE_MAV2).toBe('0');
+    expect(env.NEXT_PUBLIC_ENABLE_MOCK_WALLET).toBe('0');
+    // 本番で ON の flag (2026-10-11 にベクターへ追加) はベクターの 1 になる
+    expect(env.NEXT_PUBLIC_ENABLE_MAV2).toBe('1');
     // ベクターの ON は親 shell の値より優先する
     expect(env.NEXT_PUBLIC_ENABLE_HANDLES).toBe('1');
     expect(env.NEXT_PUBLIC_ENABLE_STORE_GAS_WALLET).toBe('1');
