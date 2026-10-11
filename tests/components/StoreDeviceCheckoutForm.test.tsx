@@ -36,6 +36,7 @@ vi.mock('@/hooks/usePaymentHistory', () => ({
 
 import { StoreDeviceCheckoutForm } from '@/components/StoreDeviceCheckoutForm';
 import { addressExplorerUrl, txExplorerUrl } from '@/lib/chains';
+import { shortAddress } from '@/lib/format';
 import { resolveDeployment } from '@/lib/tokens';
 import type { CheckoutParams } from '@/lib/url';
 
@@ -271,6 +272,54 @@ describe('StoreDeviceCheckoutForm', () => {
       render(<StoreDeviceCheckoutForm params={params} />);
       const [ctx] = hold.history.at(-1) as [Record<string, unknown>];
       expect(ctx).toMatchObject({ chainId: 80002, chainSlug: 'polygon' });
+    });
+  });
+
+  describe('支払先 (店名は URL の値なので、お金が届く先を通常の /checkout と同じ形で出す)', () => {
+    const OTHER = '0x2222222222222222222222222222222222222222' as const;
+    const payTo = (addr: string) => `支払先 ${shortAddress(addr)}`;
+
+    it('支払先を出し、それは支払いで署名に渡す受取先と同じ', () => {
+      render(<StoreDeviceCheckoutForm params={params} />);
+      expect(screen.getByText(payTo(params.to))).toBeTruthy();
+      fireEvent.click(screen.getByRole('button', { name: /を支払う/ }));
+      const { merchant } = hold.pay.mock.calls[0][0] as { merchant: string };
+      expect(merchant).toBe(params.to);
+      expect(screen.getByText(payTo(merchant))).toBeTruthy();
+    });
+
+    it('英語でも同じ形 (To 0x…)', () => {
+      render(<StoreDeviceCheckoutForm params={params} />, { locale: 'en' });
+      expect(screen.getByText(`To ${shortAddress(params.to)}`)).toBeTruthy();
+    });
+
+    it('この会計で署名した後は、署名した受取先を出す (同じ受け渡しの URL の to が違っても)', () => {
+      for (const status of [
+        { phase: 'waiting', intent: INTENT, otherCheckout: false, txHint: null, confirming: false, autoStopped: false },
+        { phase: 'success', txHash: `0x${'ab'.repeat(32)}`, intent: INTENT },
+        { phase: 'used_unresolved', intent: INTENT, otherCheckout: false },
+      ]) {
+        hold.status = status;
+        const { unmount } = render(<StoreDeviceCheckoutForm params={{ ...params, to: OTHER }} />);
+        expect(screen.getByText(payTo(INTENT.merchant))).toBeTruthy();
+        expect(screen.queryByText(payTo(OTHER))).toBeNull();
+        unmount();
+      }
+    });
+
+    it('別の会計の支払いを確かめている間・その結論の後は、いま開いている QR の受取先 (前の会計の受取先ではない)', () => {
+      const prev = { ...INTENT, handoffId: 'ZZZZZZZZZZZZZZZZZZZZZZ', merchant: OTHER };
+      hold.status = { phase: 'waiting', intent: prev, otherCheckout: true, txHint: null, confirming: false, autoStopped: false };
+      const { unmount } = render(<StoreDeviceCheckoutForm params={params} />);
+      expect(screen.getByText(payTo(params.to))).toBeTruthy();
+      expect(screen.queryByText(payTo(OTHER))).toBeNull();
+      unmount();
+      // 結論が出たらこの会計を払える: 出している支払先に署名する
+      hold.status = { phase: 'previous', outcome: 'success', intent: prev, txHash: `0x${'ab'.repeat(32)}` };
+      render(<StoreDeviceCheckoutForm params={params} />);
+      expect(screen.getByText(payTo(params.to))).toBeTruthy();
+      fireEvent.click(screen.getByRole('button', { name: /を支払う/ }));
+      expect(hold.pay).toHaveBeenCalledWith(expect.objectContaining({ merchant: params.to }));
     });
   });
 
