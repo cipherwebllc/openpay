@@ -1369,7 +1369,9 @@ function PaymentDetails({ params }: { params: PayParams }) {
             token={params.token}
             // この UI の期限目安超過時は代替 cross-chain 経路 (CrossChainHint 内の独自 Pay) も封じる。
             // これがないと main ボタンを block しても cross-chain chooser から支払えてしまう。
-            enabled={params.crossChain !== false && !expired}
+            // split つきの QR も封じる: cross-chain は recipient (主受取人) へ全額を 1 件で送り、分配を黙って
+            // 無視するため (通常決済への切替を止めたのと同じ理由)。保存済み Gateway の回復は enabled と独立に残る。
+            enabled={params.crossChain !== false && !expired && !hasSplit}
             targetChainId={requiredChain.id}
             recipient={params.to}
             requiredAtomic={amountWei}

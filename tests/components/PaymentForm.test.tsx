@@ -1998,6 +1998,21 @@ describe('PaymentForm → CrossChainHint props 統合 (LARP audit C1)', () => {
     expect(props.enabled).toBe(false);
   });
 
+  it('split つきの QR → Hint の enabled=false (cross-chain は主受取人へ全額を送り分配を無視するため)', async () => {
+    const B = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+    setURL(`to=${MERCHANT}&token=usdc&amount=10&split=${B}:30`);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(20_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready', 0n);
+
+    render(<PaymentForm />);
+
+    await waitFor(() => expect(crossChainHintSpy).toHaveBeenCalled());
+    const props = crossChainHintSpy.mock.lastCall?.[0] as Record<string, unknown>;
+    expect(props.enabled).toBe(false);
+  });
+
   it.each(['pending', 'success'] as const)(
     '親の通常決済が %s の間は cross-chain execute を無効化',
     async (state) => {
