@@ -6,16 +6,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const h = vi.hoisted(() => {
   const counters = new Map<string, number>();
+  const markers = new Set<string>();
   const calls: Array<{ op: 'incr' | 'incrby'; key: string; by: number; ttl?: number }> = [];
+  const setCalls: Array<{ key: string; opts: { nx?: boolean; ttlSec?: number } }> = [];
   const afterTasks: Array<() => unknown> = [];
   const flags = {
     bps: 100,
     bpsThrows: false,
     kvThrows: false,
     kvFails: null as null | 'unconfigured' | 'network_error',
+    setFails: false,
     afterThrows: false,
   };
-  return { counters, calls, afterTasks, flags };
+  return { counters, markers, calls, setCalls, afterTasks, flags };
 });
 
 function add(op: 'incr' | 'incrby', key: string, by: number, opts?: { initialTtlSec: number }) {
@@ -31,6 +34,13 @@ vi.mock('@/lib/kv', () => ({
   kvIncr: async (key: string, opts?: { initialTtlSec: number }) => add('incr', key, 1, opts),
   kvIncrBy: async (key: string, by: number, opts?: { initialTtlSec: number }) =>
     add('incrby', key, by, opts),
+  kvSet: async (key: string, _value: string, opts: { nx?: boolean; ttlSec?: number } = {}) => {
+    h.setCalls.push({ key, opts: { ...opts } });
+    if (h.flags.setFails) return { ok: false as const, reason: 'network_error' as const };
+    if (opts.nx && h.markers.has(key)) return { ok: true as const, value: null };
+    h.markers.add(key);
+    return { ok: true as const, value: 'OK' as const };
+  },
 }));
 vi.mock('@/lib/relay/recoverFee', () => ({
   recoverFeeBps: () => {
@@ -85,12 +95,15 @@ function avoidanceWarns() {
 
 beforeEach(() => {
   h.counters.clear();
+  h.markers.clear();
   h.calls.length = 0;
+  h.setCalls.length = 0;
   h.afterTasks.length = 0;
   h.flags.bps = 100;
   h.flags.bpsThrows = false;
   h.flags.kvThrows = false;
   h.flags.kvFails = null;
+  h.flags.setFails = false;
   h.flags.afterThrows = false;
   vi.mocked(logger.warn).mockClear();
   vi.useFakeTimers();
@@ -185,6 +198,48 @@ describe('recordRecoverFeeAvoidanceAfterResponse: 応答後に KV へ数える',
 });
 
 describe('月の閾値: 受取アドレス × chain × UTC 月で 1 回だけ warn', () => {
+  it('件数と額の両方の閾値を越えても月 1 回だけ (共有の月 marker を SET NX・TTL 付き)', async () => {
+    // 1,000 JPYC のチップ = 1 件 8 JPYC を免れる。30 件目で件数、125 件目で額 (1,000 JPYC) が閾値に届く。
+    for (let i = 0; i < 130; i += 1) {
+      await recordRecoverFeeAvoidance({ chainId: POLYGON, receiver: RECEIVER, avoidedWei: 8n * JPYC });
+    }
+    const keys = feeAvoidanceKeys('2026-10', POLYGON, RECEIVER);
+    expect(h.counters.get(keys.count)).toBe(130);
+    expect(h.counters.get(keys.avoided)).toBe(130 * 800); // 1,040 JPYC = 額の閾値も越えた
+    const warns = avoidanceWarns();
+    expect(warns).toHaveLength(1);
+    expect(warns[0][1]).toMatchObject({ count: FEE_AVOIDANCE_WARN_COUNT, trigger: 'count' });
+    expect(h.setCalls[0]).toEqual({
+      key: `relay:fee-avoid:2026-10:${POLYGON}:${RECEIVER.toLowerCase()}:warned`,
+      opts: { nx: true, ttlSec: FEE_AVOIDANCE_TTL_SEC },
+    });
+    expect(h.setCalls.every((c) => c.key === keys.warned)).toBe(true);
+
+    // 翌月は別の marker なので、また 1 回出る。
+    await recordRecoverFeeAvoidance({
+      chainId: POLYGON,
+      receiver: RECEIVER,
+      avoidedWei: 1_000n * JPYC,
+      nowMs: Date.parse('2026-11-01T00:00:00.000Z'),
+    });
+    expect(avoidanceWarns()).toHaveLength(2);
+    expect(avoidanceWarns()[1][1]).toMatchObject({ month: '2026-11', trigger: 'amount' });
+  });
+
+  it('marker が KV 障害で取れなければ warn を省き、同じ月の次の対象 request で再試行する', async () => {
+    for (let i = 0; i < FEE_AVOIDANCE_WARN_COUNT - 1; i += 1) {
+      await recordRecoverFeeAvoidance({ chainId: POLYGON, receiver: RECEIVER, avoidedWei: JPYC });
+    }
+    h.flags.setFails = true;
+    await recordRecoverFeeAvoidance({ chainId: POLYGON, receiver: RECEIVER, avoidedWei: JPYC }); // 30 件目
+    expect(avoidanceWarns()).toHaveLength(0);
+    h.flags.setFails = false;
+    await recordRecoverFeeAvoidance({ chainId: POLYGON, receiver: RECEIVER, avoidedWei: JPYC }); // 31 件目
+    await recordRecoverFeeAvoidance({ chainId: POLYGON, receiver: RECEIVER, avoidedWei: JPYC }); // 32 件目
+    expect(avoidanceWarns()).toHaveLength(1);
+    expect(avoidanceWarns()[0][1]).toMatchObject({ count: 31 });
+  });
+
   it(`件数が ${FEE_AVOIDANCE_WARN_COUNT} 件目に届いた request だけが warn する`, async () => {
     for (let i = 0; i < FEE_AVOIDANCE_WARN_COUNT + 5; i += 1) {
       await recordRecoverFeeAvoidance({ chainId: POLYGON, receiver: RECEIVER, avoidedWei: JPYC });

@@ -11,16 +11,17 @@ import 'server-only';
 // 数える対象: recover の成功のうち gasMode=customer・feeKind なし (モバイル注文の利用料ではない)・
 //   決済額 × bps/10000 がフロアを超える件 (= merchant の料金表なら 1% がフロアより高くついた件)。
 // 数え方: UTC 月 × chain × 受取アドレスの key に件数 (INCR) と免れた額 (INCRBY・0.01 JPYC 単位) を足す。
-//   TTL は 100 日 (当月と前 2 か月を読める)。件数か額が月の閾値に届いた request だけが 1 回 warn する
-//   (どちらのカウンタも減らないので、閾値をまたぐ request は 1 つだけ)。
-// KV の増分: 対象 1 件ごとに 4 コマンド (INCR + EXPIRE NX と INCRBY + EXPIRE NX の pipeline 2 本)。対象外の決済は 0。
+//   TTL は 100 日 (当月と前 2 か月を読める)。件数か額が月の閾値に届いたら、両方で共有する月の marker
+//   (`…:warned`) を SET NX し、取れた request だけが warn する = 受取アドレス × chain × UTC 月で 1 回だけ。
+// KV の増分: 対象 1 件ごとに 4 コマンド (INCR + EXPIRE NX と INCRBY + EXPIRE NX の pipeline 2 本)。閾値に届いた
+//   受取アドレスは、その月の以後の件で marker の SET NX が 1 回ずつ増える。対象外の決済は 0。
 //
 // no-throw: 判定と記録は応答後 (after) に回し、KV・logger の失敗を成功済みの決済応答へ波及させない (掟 13)。
 // 決済の可否・金額・応答には一切関与しない (掟 12: 追加のみ)。
 
 import { after } from 'next/server';
 import type { GasMode } from '@/lib/fee';
-import { kvIncr, kvIncrBy } from '@/lib/kv';
+import { kvIncr, kvIncrBy, kvSet } from '@/lib/kv';
 import { logger } from '@/lib/logger';
 import { recoverFeeBps } from '@/lib/relay/recoverFee';
 
@@ -58,9 +59,13 @@ export function feeAvoidanceKeys(
   month: string,
   chainId: number,
   receiver: string,
-): { count: string; avoided: string } {
+): { count: string; avoided: string; warned: string } {
   const base = `relay:fee-avoid:${month}:${chainId}:${receiver.toLowerCase()}`;
-  return { count: `${base}:count`, avoided: `${base}:avoided_cjpyc` };
+  return {
+    count: `${base}:count`,
+    avoided: `${base}:avoided_cjpyc`,
+    warned: `${base}:warned`,
+  };
 }
 
 /**
@@ -88,7 +93,7 @@ export function recordRecoverFeeAvoidanceAfterResponse(input: FeeAvoidanceInput)
   }
 }
 
-/** 1 件を集計し、閾値をまたいだ request だけが warn する。失敗しても throw しない。 */
+/** 1 件を集計し、月の閾値に届いていれば月 1 回だけ warn する。失敗しても throw しない。 */
 export async function recordRecoverFeeAvoidance(input: {
   chainId: number;
   receiver: string;
@@ -114,22 +119,26 @@ export async function recordRecoverFeeAvoidance(input: {
       }
     }
 
-    const amountThreshold = FEE_AVOIDANCE_WARN_JPYC * 100;
-    const countCrossed = count.ok && count.value === FEE_AVOIDANCE_WARN_COUNT;
-    const amountCrossed =
-      avoided.ok &&
-      avoided.value >= amountThreshold &&
-      avoided.value - centi < amountThreshold;
-    if (countCrossed || amountCrossed) {
-      logger.warn('relay.recover.fee_avoidance', {
-        chainId: input.chainId,
-        receiver: input.receiver,
-        month,
-        count: count.ok ? count.value : null,
-        avoidedJpyc: avoided.ok ? avoided.value / 100 : null,
-        trigger: countCrossed && amountCrossed ? 'count+amount' : countCrossed ? 'count' : 'amount',
-      });
-    }
+    const countReached = count.ok && count.value >= FEE_AVOIDANCE_WARN_COUNT;
+    const amountReached =
+      avoided.ok && avoided.value >= FEE_AVOIDANCE_WARN_JPYC * 100;
+    if (!countReached && !amountReached) return;
+    // 件数と額で共有する月の marker を SET NX し、取れた request だけが warn する。片方の閾値を越えた後に
+    // もう片方を越えても、同じ月に 2 回目は出さない。marker が KV 障害で取れなければ warn を省き、
+    // 同じ月の次の対象 request が再試行する。
+    const marker = await kvSet(keys.warned, '1', {
+      nx: true,
+      ttlSec: FEE_AVOIDANCE_TTL_SEC,
+    });
+    if (!marker.ok || marker.value !== 'OK') return;
+    logger.warn('relay.recover.fee_avoidance', {
+      chainId: input.chainId,
+      receiver: input.receiver,
+      month,
+      count: count.ok ? count.value : null,
+      avoidedJpyc: avoided.ok ? avoided.value / 100 : null,
+      trigger: countReached && amountReached ? 'count+amount' : countReached ? 'count' : 'amount',
+    });
   } catch {
     // 集計 (KV・logger) の例外を、after() の後続処理や決済応答へ波及させない。
   }
