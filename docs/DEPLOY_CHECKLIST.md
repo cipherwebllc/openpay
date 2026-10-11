@@ -863,6 +863,12 @@ v0.8 対応、standard 31.5 gwei (default ceiling 50 gwei 内、margin 60%)。
       なっていること、policy で chain が受理されること、balance が
       sponsorship 想定量に対し十分であること
 
+**2026-10-12 から Disabled (現状)**:
+- 平常運用では JPYC は EIP-3009 relay を通るため、この policy を使わない。分配 (split) と JPYC の組み合わせは #824 で塞いだ。
+- `NEXT_PUBLIC_ENABLE_JPYC_EIP3009` を OFF にするなど、JPYC が sponsorship の fallback に戻る変更をするときは、**先に** Pimlico dashboard で policy を Enabled に戻す (Disabled のままだと fallback の UserOp が全て拒否される)。
+- 上限は $10 total・per user と per op は $0.1、対象チェーンは Polygon と Kaia。
+
+
 ### 9.4 Kairos testnet 実 UserOp smoke (手動、要 funded EOA)
 
 script で自動化できない部分: 実 Smart Account の EIP-7702 delegate + UserOp
@@ -1502,6 +1508,17 @@ engineering を避ける。将来 incident で demand 確認後に対処する�
   1 つでも欠けるとブラウザが cookie を黙って捨て、**ログインできない**状態になる。
   検証は `tests/app/api/auth-siwe.test.ts` (本番名 + 3 属性) と `tests/lib/siwe.test.ts`。
 
+### §11.8 SIWE セッションの緊急失効 (鍵・cookie が漏れたとき)
+
+- セッションは KV の `siwe:sess:<token>` (`<token>` は 64 桁 hex・値は `{address}`・期限 7 日)。address から token を引く索引は無いので、特定の address だけを消すことはできない。
+- 認可は毎リクエスト、cookie → KV を引いて address を得る (`app/api/auth/siwe/_session.ts`)。admin はさらに `ADMIN_WALLETS` を env から毎回読んで判定する (`lib/adminAuth.ts`・空なら全拒否)。
+- 止め方 (軽い順):
+  1. **admin の漏えい**: 該当 address を `ADMIN_WALLETS` から外して redeploy する。セッション自体は残るが admin API は 403 になる。一般の店主セッションには効かない。
+  2. **全セッションの失効**: Upstash で `siwe:sess:*` を SCAN し、見つかった key を DEL する (全員がログアウトになり、再サインインは署名 1 回)。KV のコマンド予算 (§14.9c) があるので、SCAN は COUNT を大きめにして一度で済ませる。
+  3. **最終手段**: `lib/siwe.ts` の `SESSION_COOKIE_BASE` を別の名前に変えて deploy する。reader と writer が同じ関数を使うので、旧 cookie は読まれなくなる (§11.7 と同じく全員サインアウト)。KV 側のレコードは 7 日で自然消滅するが、名前を元に戻すと復活するので、戻さない。
+- どの手順の後も、`/api/auth/siwe/me` が未ログインを返すことを確認する。
+
+
 ## §12 Phase B billing (2段階 後払い利用権) go-live SOP
 
 決済コアは無料のまま、`/history` 整形閲覧・会計CSV (basic ¥300/月) と freee 連携
@@ -2094,6 +2111,18 @@ PR A/B/C/D の採用、公開文言と第13条の施行日、Amoy E2E、以下�
    owner が `setMinter(0)` で停止し、鍵交換・影響調査・関係者通知を行う。
    mint の停止だけでは偽造済み証明は回収されない。flag OFF は売買・mint を止めても NFT 移転は止めない。
 
+### 16.4a ライセンス NFT の鍵の分離と minter 交代 (2026-10-12 に owner 移管・minter 交代済み)
+
+- owner は Vercel に置かない専用の鍵、minter は専用の hot 鍵 (`LICENSE_MINTER_PRIVATE_KEY`)、`RELAYER_PRIVATE_KEY` の relayer とは別の鍵。アドレスは公開リポに書かない。
+- owner の操作 (`setURI`・`setMinter`) は、端末の env にだけ鍵を置いて行う (§16.4 と同じ)。
+- minter の交代手順:
+  1. 新しい鍵を作る。
+  2. 新しい minter に 0.1 POL 以上を入れる (mint は 0.1 POL の reserve が要る)。
+  3. Vercel の `LICENSE_MINTER_PRIVATE_KEY` を新しい鍵に書き換える。
+  4. owner から `setMinter` を新しい minter のアドレスで呼ぶ。
+  5. Redeploy する。
+- 交代の間に mint が失敗しても、job は再試行される (§16.4 の worker は超過・失敗を切り詰めず次の run で再試行し、10 回失敗で修復へ回す)。
+
 ### 16.5 Amoy E2E と配信の確認
 
 - PUBLIC=1 の allowlist 外/空/不正 CSV、PUBLIC OFF の allowlist 内外/空、親 flag OFF を試し、登録前は 402 を出さず、登録後も明示 publish が必要と確認。
@@ -2573,3 +2602,10 @@ OpenPay は署名を最長 10 分受け渡すだけで、ガスを払わず送�
 - Sentry: 受け渡し API (`/api/register/handoff*`) の 5xx・お客様画面の `storeDeviceUnavailable`。
 - Upstash のコマンド数 (受け渡し 1 件あたり作成・読み取り・締め切りで数十件)。
 - 店主のガス用ウォレットのガス代のトークン (POL・KAIA・AVAX) は店主の負担 (OpenPay は監視しない・画面にチェーンごとの残り回数の目安を出す)。
+
+## サブドメイン運用ルール (2026-10-12)
+
+- open-pay.jp のサブドメインには、第三者が中身を書けるホスティング (docs・blog・status・フォーラムなど) を置かない。
+- サブドメインのプロジェクトを消すときは、DNS のレコードも消す (dangling DNS による乗っ取り対策)。
+- 今あるのは `gateway.open-pay.jp` (x402-jpyc-gateway・`application/json` を固定で返す) だけ。
+- 理由: セッション cookie は `SameSite=Lax` で、サブドメインは同じサイト扱いになるため、サブドメインで任意の HTML・script が動くと cookie 付きのリクエストを送られる。SIWE の CSRF 検査 (#829) と合わせた多層防御。(`__Host-` prefix によりサブドメインからの cookie 上書きは別途塞いである。§11.7)

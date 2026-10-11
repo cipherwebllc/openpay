@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { FIRST_PARTY_WALLETS } from '@/lib/externalPurchases';
 
 const wallets = [
-  { address: '0x9a76ea8fc0b9f34d34b91d453f2940932c9a7fe0', note: 'テスト買い手 / license minter' },
+  { address: '0x9a76ea8fc0b9f34d34b91d453f2940932c9a7fe0', note: 'テスト買い手 (本番のライセンス NFT の minter は 2026-10-12 に別の鍵へ交代)' },
   { address: '0x8f16ef365676c405c739175fe7a11343e864343b', note: '運営者個人 (テスト兼用)' },
   { address: '0xda33e4cee3f06b19b174e299a36fcd075f0f9674', note: 'テストネット使い捨て (mainnet でも動作確認に使用)' },
   { address: '0x52d4901142e2b5680027da5eb47c86cb02a3ca81', note: '受取ウォレット' },
