@@ -39,6 +39,7 @@ type Readiness = {
   expiresAt: number | undefined;
   standardReady: boolean;
   preview: boolean;
+  splitBlocked: boolean;
 };
 type State = {
   standard?: HookState;
@@ -84,6 +85,7 @@ const READY: Readiness = {
   expiresAt: undefined,
   standardReady: true,
   preview: false,
+  splitBlocked: false,
 };
 
 // R14 で 3 フォームの判定式は lib/paymentFlowGuards/{pay,checkout,tip}.ts へ式を変えずに移った
@@ -175,6 +177,7 @@ function buildInput(route: Route, state: State = {}) {
     expired: ready.expired,
     timeMeasured: ready.timeMeasured,
     standardReady: ready.standardReady,
+    splitBlocked: ready.splitBlocked,
   };
 }
 
@@ -280,6 +283,8 @@ const submitRows: SubmitRow[] = [
   { name: 'FX QR before time is measured', state: { ready: { expiresAt: 1_800_000_000_000, timeMeasured: false } }, pay: '000', tip: '111', checkout: '111' },
   { name: 'FX QR after time is measured', state: { ready: { expiresAt: 1_800_000_000_000 } }, pay: '111' },
   { name: 'no FX expiry before time is measured', state: { ready: { timeMeasured: false } }, pay: '111' },
+  // split つきの QR を JPYC・通常決済で払う組み合わせ (PaymentForm の splitBlock)。Pay だけが split を持つ。
+  { name: 'split QR on JPYC or standard', state: { ready: { splitBlocked: true } }, pay: '000', tip: '111', checkout: '111' },
   { name: 'Tip preview', state: { ready: { preview: true } }, pay: '111', tip: '000' },
   { name: 'same-merchant order payment hold', state: { relay: { orderPaymentHold: true } }, pay: '111', checkout: '000' },
   // post-await admission: 受付中は canSubmit だけが閉じ、await 後に読む paymentReady は開いたまま

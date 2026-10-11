@@ -44,6 +44,7 @@ import {
   buildPayUrl,
   DECIMAL_PATTERN,
   parseSplitDrafts,
+  splitSupportedForToken,
   type PayParams,
 } from '@/lib/url';
 import { buildEip681TransferUri } from '@/lib/eip681';
@@ -230,15 +231,18 @@ export function QrGenerator() {
   const payMode: PayMode = settings.payMode;
   const isStandard = payMode === 'standard';
 
-  // standard mode では split は無視する (PaymentForm 側でも無視するので URL に
-  // 含めると混乱)。それ以外では parseSplitDrafts で検証して、有効な entries
-  // のみ URL に含める。
+  // standard mode と JPYC では split を URL に入れない (/pay がどちらも送信させない)。設定 (localStorage) の
+  // split は消さずに残し、USDC のガスレスに戻すと使われる。それ以外では parseSplitDrafts で検証して、
+  // 有効な entries のみ URL に含める。
   const splitParsed = useMemo(
     () => parseSplitDrafts(settings.splits, effectiveReceiver),
     [settings.splits, effectiveReceiver],
   );
   const splitsForUrl =
-    !isStandard && splitParsed.entries && splitParsed.entries.length > 0
+    !isStandard &&
+    splitSupportedForToken(settings.token) &&
+    splitParsed.entries &&
+    splitParsed.entries.length > 0
       ? splitParsed.entries
       : undefined;
 
@@ -248,7 +252,7 @@ export function QrGenerator() {
   // sponsorship (flag off) では gas コストが発生し負担者が意味を持つ。決済側の
   // useRelay (= !isStandard && !hasSplit && provider==='eip3009-relay') かつ !useRecover
   // と同条件で free 経路を判定し、その時だけトグルを隠して gas=customer 固定にする。
-  // split 指定時は PaymentForm が relay を外し sponsorship に倒す (= 非 free) ため除外する。
+  // split 指定時は PaymentForm が relay を外す (= 非 free) ため除外する (JPYC は splitsForUrl が常に無い)。
   // 将来 JPYC が native Paymaster 対応 (forwarder 設定) されれば自動的に再表示される。
   const isFreeGasless = useMemo(() => {
     if (isStandard || splitsForUrl) return false;

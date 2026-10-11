@@ -137,6 +137,15 @@ async function openEip681(
   await user.click(summary);
 }
 
+// 売上の自動分配 (split) の欄は USDC のガスレスだけに出る (2026-10-11・JPYC は relay で分配を送れない)。
+// 分配の欄を触るテストは USDC (Base) で始める。
+function seedUsdc(): void {
+  window.localStorage.setItem(
+    'openpay:qr-settings:v2',
+    JSON.stringify({ token: 'usdc', chain: 'base' }),
+  );
+}
+
 // provider mock を各テスト前に既定 (pimlico-7702 = relay 非経路 = 負担者トグル表示) へ
 // 戻す。free 経路テストの 'eip3009-relay' 上書きが他テストへ漏れないようにする。
 beforeEach(() => {
@@ -184,9 +193,10 @@ describe('QrGenerator', () => {
       });
     });
 
-    it('split 指定時は free 判定にせず負担者トグルを表示 (PaymentForm が relay を外し非 free 経路になるため)', async () => {
-      // relay + forwarder null でも split があると決済側は sponsorship に倒れ非 free。
-      // 生成側も isFreeGasless=false とし、QR が「無料」と偽らないようトグルを出す。
+    it('JPYC では保存済みの split があっても free 判定 (分配は USDC だけ・URL に split を入れない)', async () => {
+      // 分配は USDC のガスレスだけ (2026-10-11)。JPYC では保存済みの split を URL に入れないので、決済側は
+      // relay (free) のまま。生成側も free 判定にして負担者トグルを出さず、分配の欄も出さない。
+      // 設定 (localStorage) の split は消さない (USDC に戻すと使われる = 既存の standard と同じ扱い)。
       vi.mocked(resolveJpycGaslessProvider).mockReturnValue('eip3009-relay');
       window.localStorage.setItem(
         'openpay:qr-settings:v2',
@@ -203,15 +213,102 @@ describe('QrGenerator', () => {
       );
       const user = userEvent.setup();
       render(<QrGenerator />);
-      await openStep2(user);
+      expect(await screen.findByText('ガス代不要')).toBeInTheDocument();
       await openAdvanced(user);
-      // split があるので free 扱いにならず、負担者トグルが表示される
       expect(
-        await screen.findByRole('button', { name: /顧客が gas 相当額/ }),
-      ).toBeInTheDocument();
+        screen.queryByRole('button', { name: /顧客が gas 相当額/ }),
+      ).not.toBeInTheDocument();
       expect(
-        screen.getByRole('button', { name: /店主が gas 相当額/ }),
-      ).toBeInTheDocument();
+        screen.queryByRole('button', { name: /店主が gas 相当額/ }),
+      ).not.toBeInTheDocument();
+      expect(screen.queryByText(/売上の自動分配/)).toBeNull();
+      expect(screen.queryByDisplayValue('0x2222222222222222222222222222222222222222')).toBeNull();
+      await user.click(screen.getByRole('button', { name: '完了' }));
+      await user.type(screen.getByPlaceholderText('1,000'), '5');
+      await openQrModal(user);
+      await waitFor(() => {
+        expect(screen.getByText((t) => t.startsWith('https://test.local/pay?'))).toBeInTheDocument();
+      });
+      expect(screen.queryByText((t) => t.includes('split='))).toBeNull();
+      const saved = JSON.parse(window.localStorage.getItem('openpay:qr-settings:v2') ?? '{}');
+      expect(saved.splits).toEqual([
+        { address: '0x2222222222222222222222222222222222222222', percent: '40' },
+      ]);
+    });
+  });
+
+  describe('売上の自動分配は USDC のガスレスだけ (2026-10-11)', () => {
+    const SPLIT = '0x2222222222222222222222222222222222222222';
+    const payUrlText = () =>
+      screen.getByText((t) => t.startsWith('https://test.local/pay?')).textContent ?? '';
+
+    it('JPYC に切り替えると分配の欄が消え URL から split が外れ、USDC に戻すと欄と split が戻る', async () => {
+      window.localStorage.setItem(
+        'openpay:qr-settings:v2',
+        JSON.stringify({
+          receiver: VALID,
+          token: 'usdc',
+          chain: 'base',
+          payMode: 'gasless',
+          splits: [{ address: SPLIT, percent: '30' }],
+        }),
+      );
+      const user = userEvent.setup();
+      render(<QrGenerator />);
+      await user.type(await screen.findByPlaceholderText('10.00'), '10');
+
+      // USDC: 分配の欄が出て、URL に split が入る。
+      await openShopSettings(user);
+      expect(await screen.findByText(/売上の自動分配/)).toBeInTheDocument();
+      expect(screen.getByDisplayValue(SPLIT)).toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: '完了' }));
+      await openQrModal(user);
+      await waitFor(() => expect(payUrlText()).toContain(`split=${SPLIT}%3A30`));
+      await closeQrModal(user);
+
+      // JPYC: 分配の欄を出さず、URL に split を入れない。
+      await pickInSettings(user, /^JPYC$/, { keepOpen: true });
+      await waitFor(() => expect(screen.queryByText(/売上の自動分配/)).toBeNull());
+      expect(screen.queryByDisplayValue(SPLIT)).toBeNull();
+      await user.click(screen.getByRole('button', { name: '完了' }));
+      await openQrModal(user);
+      await waitFor(() => expect(payUrlText()).toContain('token=jpyc'));
+      expect(payUrlText()).not.toContain('split=');
+      await closeQrModal(user);
+      // 設定の split は消さない (既存の standard と同じ扱い)。
+      expect(
+        JSON.parse(window.localStorage.getItem('openpay:qr-settings:v2') ?? '{}').splits,
+      ).toEqual([{ address: SPLIT, percent: '30' }]);
+
+      // USDC に戻すと、残しておいた split の欄と URL の split が戻る。
+      await pickInSettings(user, /^USDC$/, { keepOpen: true });
+      expect(await screen.findByDisplayValue(SPLIT)).toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: '完了' }));
+      await openQrModal(user);
+      await waitFor(() => expect(payUrlText()).toContain(`split=${SPLIT}%3A30`));
+    });
+
+    it('JPYC のまま開くと、保存済みの split があっても分配の欄も URL の split も出ない', async () => {
+      window.localStorage.setItem(
+        'openpay:qr-settings:v2',
+        JSON.stringify({
+          receiver: VALID,
+          token: 'jpyc',
+          chain: 'polygon',
+          payMode: 'gasless',
+          splits: [{ address: SPLIT, percent: '30' }],
+        }),
+      );
+      const user = userEvent.setup();
+      render(<QrGenerator />);
+      await user.type(await screen.findByPlaceholderText('1,000'), '1000');
+      await openShopSettings(user);
+      expect(screen.queryByText(/売上の自動分配/)).toBeNull();
+      expect(screen.queryByRole('button', { name: /\+ 受取人を追加/ })).toBeNull();
+      await user.click(screen.getByRole('button', { name: '完了' }));
+      await openQrModal(user);
+      await waitFor(() => expect(payUrlText()).toContain('token=jpyc&amount=1000'));
+      expect(payUrlText()).not.toContain('split=');
     });
   });
 
@@ -680,6 +777,7 @@ describe('QrGenerator', () => {
     });
 
     it('受取人を split 中間 index で削除しても残りが正しい順序で残る (off-by-one なし)', async () => {
+      seedUsdc();
       const user = userEvent.setup();
       render(<QrGenerator />);
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
@@ -745,6 +843,7 @@ describe('QrGenerator', () => {
     it('受信者を 3 人追加すると + 受取人を追加 ボタン自体が非表示になる (UI 条件付きレンダ)', async () => {
       // 関数内の `if (length >= MAX) return` ガードは button 条件付きレンダで unreachable。
       // このテストは UI 条件レンダの機能のみ検証する。
+      seedUsdc();
       const user = userEvent.setup();
       render(<QrGenerator />);
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
@@ -1363,12 +1462,13 @@ describe('QrGenerator', () => {
 
     it('direct ON は split state を無視 (splitsForUrl=undefined → EIP-681 表示)', async () => {
       // direct mode は OpenPay URL でも split を無視するので、EIP-681 でも同じ挙動。
-      // 「split 入力済 → direct ON で URI 表示」が期待動作。
+      // 「split 入力済 → direct ON で URI 表示」が期待動作。分配の欄は USDC だけに出る。
+      seedUsdc();
       const user = userEvent.setup();
       render(<QrGenerator />);
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
-      await user.type(screen.getByPlaceholderText('1,000'), '100');
+      await user.type(screen.getByPlaceholderText('10.00'), '100');
       await openAdvanced(user);
       await user.click(screen.getByRole('button', { name: /\+ 受取人を追加/ }));
       const splitInputs = screen.getAllByPlaceholderText('0x...');
@@ -1386,11 +1486,12 @@ describe('QrGenerator', () => {
     });
 
     it('gasless mode で split 入力中は EIP-681 非表示 (まず direct ON が必要)', async () => {
+      seedUsdc();
       const user = userEvent.setup();
       render(<QrGenerator />);
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
-      await user.type(screen.getByPlaceholderText('1,000'), '100');
+      await user.type(screen.getByPlaceholderText('10.00'), '100');
       await openAdvanced(user);
       // direct OFF のまま split 追加
       await user.click(screen.getByRole('button', { name: /\+ 受取人を追加/ }));
@@ -1923,10 +2024,11 @@ describe('QrGenerator', () => {
     });
 
     it('Web3 用語の和らげ: split label が「売上の自動分配」に変わっている', async () => {
+      seedUsdc();
       const user = userEvent.setup();
       render(<QrGenerator />);
       await openAdvanced(user);
-      // 既定 (gasless) では split field が表示される
+      // USDC のガスレスでは split field が表示される
       expect(
         await screen.findByText(/売上の自動分配/),
       ).toBeInTheDocument();
