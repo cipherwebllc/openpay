@@ -21,6 +21,9 @@ function spawnResult(stdout: string, status: number | null = 0, error?: Error, s
 async function runGate(stdout: string, status: number | null = 0, error?: Error, signal: NodeJS.Signals | null = null, devStdout?: string) {
   vi.resetModules();
   const mock = vi.mocked(spawnSync);
+  // 前の test で使われなかった mockReturnValueOnce を捨ててから設定する (vitest 4 以降の restoreAllMocks は vi.fn を戻さず、
+  // 本番の gate で落ちて dev の audit を走らせなかった test の 2 つ目の戻り値が、次の test へ持ち越される)。
+  mock.mockReset();
   mock.mockReturnValue(spawnResult(stdout, status, error, signal));
   if (devStdout !== undefined) {
     // 1 回目 = 本番依存の gate (`--omit=dev`)、2 回目 = dev を含む参考集計。

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { getAddress, type Address, type Hex } from 'viem';
@@ -117,6 +117,15 @@ async function flushStorageLoad(): Promise<void> {
   });
 }
 
+// fake timers の下で、結果が出るまで ms ずつ時間を進める。hook の動的 import の解決に要る microtask の数は vitest の版で
+// 変わり (読み込み済み module で 2.1.9 は 9・5.0.3 は 16)、順序次第で初回の読み込み (実時間) にもなるので、決まった tick 数を仮定しない。
+async function advanceUntil(ms: number, assertion: () => void): Promise<void> {
+  await vi.waitFor(async () => {
+    await act(async () => vi.advanceTimersByTimeAsync(ms));
+    assertion();
+  }, { timeout: 2000, interval: 10 });
+}
+
 function makeWrapper() {
   const qc = new QueryClient({
     defaultOptions: { mutations: { retry: false }, queries: { retry: false } },
@@ -128,7 +137,10 @@ function makeWrapper() {
 
 let signTypedData: ReturnType<typeof vi.fn>;
 let fetchSpy: ReturnType<typeof vi.fn>;
-let waitForTransactionReceipt: ReturnType<typeof vi.fn>;
+// usePublicClient の waitForTransactionReceipt に代入できる形を明示する (型の無い vi.fn は vitest 4 以降で関数の型に
+// 代入できない)。戻り値が any なのは、fixture が receipt の一部 ({ status }) だけを返すため。
+type WaitForTransactionReceipt = (args: { hash: Hex }) => Promise<any>;
+let waitForTransactionReceipt: Mock<WaitForTransactionReceipt>;
 const waitForStoredRelayReceiptMock = vi.mocked(
   waitForStoredRelayReceipt,
 );
@@ -140,7 +152,7 @@ function mount(opts?: { signImpl?: () => Promise<Hex> }) {
       : vi.fn().mockResolvedValue(`0x${'a'.repeat(130)}` as Hex);
   mockHook(useWalletClient, { data: { signTypedData } });
   mockHook(useAccount, { address: CUSTOMER, chainId: jpycDep.chainId });
-  waitForTransactionReceipt = vi.fn().mockResolvedValue({ status: 'success' });
+  waitForTransactionReceipt = vi.fn<WaitForTransactionReceipt>().mockResolvedValue({ status: 'success' });
   mockHook(usePublicClient, { waitForTransactionReceipt });
   waitForStoredRelayReceiptMock.mockResolvedValue({ status: 'success' });
 }
@@ -1466,10 +1478,7 @@ describe('A2c recovery and storage failure transitions', () => {
     mount();
     fetchSpy.mockImplementation(async () => Response.json({ ok: true, state: 'settled', txHash: finalHash }));
     const { result } = renderHook(() => useJpycEip3009Payment(jpycDep, { restoreOrderDelivery: true, orderContext: { ...ORDER_CONTEXT, totalValue: BigInt(f.record.intent.merchantValue) + BigInt(f.record.intent.feeValue) } }), { wrapper: makeWrapper() });
-    await flushStorageLoad();
-    await act(async () => vi.advanceTimersByTimeAsync(3000));
-    await flushStorageLoad();
-    expect(result.current.data).toEqual({ success: true, txHash: finalHash });
+    await advanceUntil(3000, () => expect(result.current.data).toEqual({ success: true, txHash: finalHash }));
     expect(result.current.orderDelivery?.order).toEqual(f.order);
     expect(result.current.orderDelivery?.bind).toEqual(f.bind);
     expect(result.current.orderDelivery?.txHash).toBe(finalHash);
@@ -1487,9 +1496,7 @@ describe('A2c recovery and storage failure transitions', () => {
     fetchSpy.mockImplementation(async () => Response.json(outcome === 'unused' ? { ok: true, state: 'unused', expiry: 'expired' } : { ok: true, state: 'settled', txHash: `0x${'ab'.repeat(32)}` }));
     waitForTransactionReceipt.mockResolvedValue({ status: 'reverted' });
     renderHook(() => useJpycEip3009Payment(jpycDep, { restoreOrderDelivery: true, orderContext: ORDER_CONTEXT }), { wrapper: makeWrapper() });
-    await flushStorageLoad();
-    await act(async () => vi.advanceTimersByTimeAsync(9000));
-    expect(latestOrderDelivery()).toEqual({ kind: 'empty' });
+    await advanceUntil(9000, () => expect(latestOrderDelivery()).toEqual({ kind: 'empty' }));
     expect(signTypedData).not.toHaveBeenCalled(); vi.useRealTimers();
   });
   it('IP retry retains the exact opening and signs once', async () => {
@@ -1542,13 +1549,12 @@ it('A2c lost relay response resolves the original opening; a failed resolution w
     return Response.json({ ok: true, state: 'settled', txHash: `0x${'ab'.repeat(32)}` });
   });
   const { result } = renderHook(() => useJpycEip3009Payment(jpycDep, { restoreOrderDelivery: true, orderContext: ORDER_CONTEXT }), { wrapper: makeWrapper() });
-  await flushStorageLoad();
+  await advanceUntil(0, () => expect(result.current.isRestoring).toBe(false));
   act(() => result.current.mutate({ merchant: MERCHANT, value: 300n * 10n ** 18n, order: f.order }));
-  await act(async () => vi.advanceTimersByTimeAsync(0));
+  // 署名の後・送信の前に保存した開示 (bind) を、応答が失われた後の解決と比べる。
+  await advanceUntil(0, () => expect(result.current.orderDelivery?.bind).toBeDefined());
   const opening = result.current.orderDelivery?.bind;
-  await act(async () => vi.advanceTimersByTimeAsync(3000));
-  await flushStorageLoad();
-  expect(result.current.data?.success).toBe(true);
+  await advanceUntil(3000, () => expect(result.current.data?.success).toBe(true));
   expect(result.current.orderDelivery?.bind).toEqual(opening);
   expect(result.current.orderDelivery?.state).toBe('notify-pending');
   expect(latestOrderDelivery()).toMatchObject({ kind: 'ready', record: { state: 'signed', bind: opening } });
@@ -1647,7 +1653,9 @@ describe('A2c context and authorization slot isolation', () => {
       expect(waitForTransactionReceipt).toHaveBeenCalledOnce();
     }, { timeout: 2000, interval: 10 });
     if (phase === 'settled') expect(result.current.data?.success).toBe(true);
-    rerender({ orderId: 'new' }); await flushStorageLoad();
+    // 別の会計に変えた後の読み込み直しが終わってから、遅れて届く receipt でも戻らないことを確かめる。
+    rerender({ orderId: 'new' });
+    await advanceUntil(0, () => expect(result.current.isRestoring).toBe(false));
     if (phase === 'receipt-pending') await act(async () => receipt({ status: 'success' }));
     expect(result.current.restoredIntent).toBeNull(); expect(result.current.data).toBeUndefined();
     expect(result.current.orderDelivery).toBeNull(); expect(result.current.hasActiveIntent).toBe(false);
@@ -1763,10 +1771,7 @@ describe('A2c background signed-order recovery', () => {
     let expiry: 'live' | 'expired' = 'live';
     fetchSpy.mockImplementation(async () => Response.json({ ok: true, state: 'unused', expiry }));
     const { result } = renderHook(() => useJpycEip3009Payment(jpycDep, { restoreOrderDelivery: true, orderContext: { ...ORDER_CONTEXT, orderId: 'new' } }), { wrapper: makeWrapper() });
-    await flushStorageLoad();
-    await act(async () => vi.advanceTimersByTimeAsync(0));
-    await act(async () => vi.advanceTimersByTimeAsync(9_000));
-    expect(fetchSpy.mock.calls.length).toBeGreaterThanOrEqual(2);
+    await advanceUntil(9_000, () => expect(fetchSpy.mock.calls.length).toBeGreaterThanOrEqual(2));
     expect(result.current.orderPaymentHold).toBe(true);
     expect(latestOrderDelivery()).toEqual({ kind: 'ready', record });
     act(() => result.current.mutate({ merchant: MERCHANT, value: 300n * 10n ** 18n }));

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest';
 import {
   decodeEventLog,
   decodeFunctionData,
@@ -337,15 +337,16 @@ describe('lib/crossChain/cctp iris API', () => {
 
   describe('pollIrisAttestation', () => {
     let calls: number;
-    let sleepMock: ReturnType<typeof vi.fn>;
-    let nowMock: ReturnType<typeof vi.fn>;
+    // pollIrisAttestation の sleep / now と同じ形 (型の無い vi.fn は vitest 4 以降で関数の型に代入できない)。
+    let sleepMock: Mock<(ms: number) => Promise<void>>;
+    let nowMock: Mock<() => number>;
 
     beforeEach(() => {
       calls = 0;
-      sleepMock = vi.fn().mockResolvedValue(undefined);
+      sleepMock = vi.fn<(ms: number) => Promise<void>>().mockResolvedValue(undefined);
       // 各 poll 呼出で 1000ms 進む
       let t = 0;
-      nowMock = vi.fn(() => {
+      nowMock = vi.fn<() => number>(() => {
         t += 1000;
         return t;
       });

@@ -8,6 +8,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   checkTestFileCoverage,
+  fileLevelFailures,
   listTestFiles,
   normalizeReportedFiles,
 } from '@/scripts/lib/testFileFence.mjs';
@@ -88,3 +89,35 @@ describe('checkTestFileCoverage', () => {
     ).toBe(false);
   });
 });
+
+// ファイル単位の失敗 (import 時の例外・beforeAll/afterAll の例外・test が 0 件) は numFailedTests に載らない。
+// vitest 2.1.9 / 5.0.3 の JSON reporter はどちらも、そのファイルの status を 'failed'・message を理由にする (実測)。
+describe('fileLevelFailures', () => {
+  it('status が failed のファイルを repo-relative の path と理由の 1 行目で返す', () => {
+    const failures = fileLevelFailures(
+      [
+        { name: resolve(root, 'tests/ok.test.ts'), status: 'passed', assertionResults: [{ status: 'passed' }] },
+        { name: resolve(root, 'tests/import.test.ts'), status: 'failed', message: 'probe: import-time failure\n    at x', assertionResults: [] },
+        { name: resolve(root, 'tests/after-all.test.ts'), status: 'failed', message: 'probe: afterAll failure', assertionResults: [{ status: 'passed' }] },
+        { name: resolve(root, 'tests/empty.test.ts'), status: 'failed', message: 'No test found in suite tests/empty.test.ts', assertionResults: [] },
+        { name: resolve(root, 'tests/skipped.test.ts'), status: 'skipped', assertionResults: [{ status: 'skipped' }] },
+      ],
+      root,
+    );
+    expect(failures).toEqual([
+      { file: 'tests/import.test.ts', message: 'probe: import-time failure' },
+      { file: 'tests/after-all.test.ts', message: 'probe: afterAll failure' },
+      { file: 'tests/empty.test.ts', message: 'No test found in suite tests/empty.test.ts' },
+    ]);
+  });
+
+  it('名前や理由が欠けていても、失敗したファイルを落とさない', () => {
+    expect(fileLevelFailures([{ status: 'failed' }], root)).toEqual([{ file: '(name なし)', message: '' }]);
+  });
+
+  it('testResults が配列でなければ空 (JSON が読めない場合は呼び出し側が別に fail させる)', () => {
+    expect(fileLevelFailures(undefined, root)).toEqual([]);
+    expect(fileLevelFailures({}, root)).toEqual([]);
+  });
+});
+
