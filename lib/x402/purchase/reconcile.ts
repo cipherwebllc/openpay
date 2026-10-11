@@ -16,8 +16,9 @@ import {
   type ForwarderSettleParams,
 } from '@/lib/relay/forwarderIntent';
 import { railIntentParentKey, releaseActiveStoreRail } from '@/lib/x402/storeRailSelection';
+import type { AuthorizationCancelEvidence } from '@/lib/x402/authorizationCancel';
 import { rpcCallOptions } from '@/lib/x402/reconcileBudget';
-import { scanReconcileBlockPages } from '@/lib/x402/reconcilePaging';
+import { scanReconcileBlockPages, type PageFetchOptions } from '@/lib/x402/reconcilePaging';
 import {
   PURCHASE_RECONCILE_LEASE_SEC,
   PURCHASE_RECONCILE_MAX_PAGES,
@@ -143,6 +144,58 @@ async function rescheduleAfterReconcile(input: {
     nextScore: next.nextReconcileAt ?? input.now,
   });
   return updated === 'updated' ? 'updated' : 'storage';
+}
+
+// 取り消し (cancelAuthorization) の終端。期限切れ未使用 (下の reconcilePurchaseIntent 内) と同じく intent/pending の
+// CAS の後でだけ rail を解放する。取り消された nonce は二度と使えないので、期限を待たずに終端にしてよい。
+async function terminalizeCanceledPurchase(input: {
+  intentSalt: Hex;
+  leasedRaw: string;
+  intent: SignedPurchaseIntent | SettlingPurchaseIntent | IndeterminatePurchaseIntent;
+  now: number;
+  evidence: AuthorizationCancelEvidence;
+}): Promise<ReconcilePurchaseIntentResult> {
+  const { intent, now } = input;
+  const failed: FailedPrebroadcastPurchaseIntent = {
+    ...intent,
+    state: 'failed_prebroadcast',
+    attemptId: intent.state === 'signed' ? randomBytes(32).toString('hex') : intent.attemptId,
+    attempt: intent.state === 'signed' ? 1 : intent.attempt,
+    settlementStartedAt: intent.state === 'signed' ? now : intent.settlementStartedAt,
+    leaseUntil: intent.state === 'signed' ? now : intent.leaseUntil,
+    failedAt: now,
+    failureReason: 'authorization_canceled',
+  };
+  delete failed.reconcileLeaseId;
+  delete failed.reconcileLeaseUntil;
+  // 保存 schema は failed の txHash を期限切れ未使用の証明のときだけ許す (parse.ts)。revert/消えた旧 hash は持ち越さない。
+  delete failed.txHash;
+  const updated = await casPendingIntent({
+    intentSalt: input.intentSalt,
+    expectedRaw: input.leasedRaw,
+    next: failed,
+    removePending: true,
+    nextScore: now,
+  });
+  if (updated !== 'updated') return { ok: false, reason: 'storage' };
+  logger.warn('creator_store.purchase_authorization_canceled', {
+    intentSalt: input.intentSalt,
+    cancelTransaction: input.evidence.transactionHash,
+    cancelBlock: input.evidence.blockNumber,
+  });
+  const parent = await kvGet(railIntentParentKey(input.intentSalt));
+  if (parent.ok && parent.value) {
+    await releaseActiveStoreRail({
+      parentIntentId: parent.value,
+      intentSalt: input.intentSalt,
+      payer: intent.claim.payer,
+      resourceId: intent.resourceId,
+      contentRevision: intent.contentRevision,
+      rail: 'jpyc',
+      authorizationHash: intent.authorizationHash,
+    });
+  }
+  return { ok: true, state: 'failed_prebroadcast' };
 }
 
 export async function reconcilePurchaseIntent(
@@ -459,6 +512,34 @@ export async function reconcilePurchaseIntent(
     }
     const latest = headRpc ? await chain.latestBlock(intent, headRpc) : await chain.latestBlock(intent);
     const anchor = BigInt(intent.anchorBlock);
+    // 取り消し (cancelAuthorization) の証拠は、authorizationState が使用済みなのに AuthorizationUsed の無いページで、
+    // そのページの走査の直後に探す (adapter が持つときだけの追加の読み取り。使用の log が見えた後のページは探さない)。
+    // 時間予算が足りずに探せなかったページでは走査を止め ('unavailable' = そのページの先頭を cursor に保存)、取り消しを
+    // 探していないページを飛ばして先へ進めない (後ろのページの走査で予算を使い切り、取り消しのあるページを探さないまま
+    // cursor が往復する波及を断つ)。証拠が見つかったページでも走査を止める (以後のページは読まない)。
+    const cancelScan: { evidence: AuthorizationCancelEvidence | null; usedLogSeen: boolean } = { evidence: null, usedLogSeen: false };
+    const fetchUsedPage = async (fromBlock: bigint, toBlock: bigint, pageOptions?: PageFetchOptions): Promise<Hex[] | 'unavailable'> => {
+      const hashes = pageOptions
+        ? await chain.authorizationUsedTransactions(intent, fromBlock, toBlock, pageOptions)
+        : await chain.authorizationUsedTransactions(intent, fromBlock, toBlock);
+      if (hashes.length > 0) {
+        cancelScan.usedLogSeen = true;
+        return hashes;
+      }
+      if (cancelScan.usedLogSeen || !chain.authorizationCanceled) return hashes;
+      const cancelRpc = rpc();
+      if (cancelRpc === null) return 'unavailable';
+      try {
+        cancelScan.evidence = cancelRpc
+          ? await chain.authorizationCanceled(intent, fromBlock, toBlock, cancelRpc)
+          : await chain.authorizationCanceled(intent, fromBlock, toBlock);
+      } catch {
+        // 取り消しの探索の障害を AuthorizationUsed の走査 (支払いの採用・cursor) へ波及させない。証拠なし = 従来どおり。
+        // (読み取り障害でページに留まると、後ろのページにある支払いの採用まで止まる。)
+        cancelScan.evidence = null;
+      }
+      return cancelScan.evidence ? 'unavailable' : hashes;
+    };
     const { candidates, nextFromBlock, interrupted } = await scanReconcileBlockPages({
       anchor,
       fromBlock: intent.reconcileFromBlock ? BigInt(intent.reconcileFromBlock) : anchor,
@@ -466,9 +547,7 @@ export async function reconcilePurchaseIntent(
       pageBlocks: PURCHASE_RECONCILE_PAGE_BLOCKS,
       maxPages: PURCHASE_RECONCILE_MAX_PAGES,
       ...(options.deadline === undefined ? {} : { pageBudget: () => rpcCallOptions(options.deadline) ?? null }),
-    }, (fromBlock, toBlock, options) => options
-      ? chain.authorizationUsedTransactions(intent, fromBlock, toBlock, options)
-      : chain.authorizationUsedTransactions(intent, fromBlock, toBlock));
+    }, fetchUsedPage);
     if (interrupted?.reason === 'error') {
       // ページ取得の失敗/timeout: 取得済みページの候補は下で照合し、失敗したページの先頭を cursor に保存する
       // (以前は候補と進捗を捨てて同じ範囲で停滞した・B4 follow-up 2)。RPC 不明は terminal に変換しない。
@@ -477,6 +556,11 @@ export async function reconcilePurchaseIntent(
     for (const [txHash, candidatePageStart] of candidates) {
       const resolved = await finalizeCandidate(txHash, candidatePageStart);
       if (resolved) return resolved;
+    }
+    // finalized・canonical な AuthorizationCanceled があり、走査したページに AuthorizationUsed が無い (= 一致する
+    // 支払いも無い) ときだけ終端にする。取り消しと使用は同じ nonce で両立しないので、支払い済みを未払いにしない。
+    if (cancelScan.evidence && !cancelScan.usedLogSeen) {
+      return terminalizeCanceledPurchase({ intentSalt, leasedRaw, intent, now, evidence: cancelScan.evidence });
     }
 
     const updated = await rescheduleAfterReconcile({

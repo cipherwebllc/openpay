@@ -15,6 +15,7 @@ import { sellerRoleFor } from '@/lib/license/sellerRole';
 import type { SellerRole } from '@/lib/licenseUi';
 import { clientIp, hashIpBucket } from '@/lib/net/ipHash';
 import { cloneForwardHeaders } from '@/lib/net/forwardHeaders';
+import { markHostedSettleRequest } from '@/lib/x402/hostedSettleRequest';
 import { FORWARDER_COMMIT_VERSION } from '@/lib/relay/forwarderIntent';
 import {
   getHostedContent,
@@ -701,11 +702,12 @@ async function submittedPaymentResponse(input: {
   let settleBody: SettleBody;
   try {
     settleResponse = await settlePayment(
-      new Request(new URL('/api/facilitator/settle', input.req.url), {
+      // 買い手の IP の relay-admission の枠と分ける印 (lib/x402/hostedSettleRequest)。転送ヘッダは従来どおり。
+      markHostedSettleRequest(new Request(new URL('/api/facilitator/settle', input.req.url), {
         method: 'POST',
         headers: cloneForwardHeaders(input.req),
         body: JSON.stringify(settlementBody),
-      }),
+      })),
     );
     settleBody = (await settleResponse.json()) as SettleBody;
   } catch {

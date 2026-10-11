@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { createHash } from 'node:crypto';
-import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getAddress, toHex } from 'viem';
 import { createFakeRedisStore, runRedisLua, closeRedisLuaEngine, type FakeRedisStore } from '../../_helpers/redisLua';
 
@@ -34,10 +34,13 @@ import { createQuotedPurchaseIntent, claimSignedPurchaseIntent, claimPurchaseSet
 import { createLicenseDefinition } from '@/lib/license/definition';
 import { LICENSE_DUE_INDEX, LICENSE_HOLD_INDEX, LICENSE_OBLIGATION_INDEX, licenseStockKey, licenseReservationKey, licenseQuotaKey, licenseObligationKey } from '@/lib/license/stock';
 import { repairLicenseIndexes } from '@/lib/license/repair';
-import { type LicenseReconcileChain } from '@/lib/license/reconcile';
+import { type LicenseFinalizedBlock, type LicenseReconcileChain } from '@/lib/license/reconcile';
 import { computeLicensePaymentKey } from '@/lib/license/paymentKey';
 import { STORE_RECONCILE_PAGE_RPC_TIMEOUT_MS } from '@/lib/x402/reconcileBudget';
 import { JPYC_V3_ASSET } from '@/lib/x402/types';
+import type { AuthorizationCancelEvidence } from '@/lib/x402/authorizationCancel';
+import { LICENSE_HOLD_SWEEP_WINDOW_MS, runLicenseHoldSweep } from '@/lib/license/holdSweep';
+import { logger } from '@/lib/logger';
 
 const ID = 'h_' + 'a'.repeat(32);
 const MERCHANT = getAddress('0x1111111111111111111111111111111111111111');
@@ -71,9 +74,17 @@ async function settling(input: Awaited<ReturnType<typeof quote>>) {
   if (!r.ok || r.kind !== 'claimed') throw new Error(JSON.stringify(r));
   return r.intent;
 }
-function chain(used = false, timestamp = BigInt(NOW / 1000 + 601)): LicenseReconcileChain {
-  return { observe: vi.fn(async () => ({ number: 100n, hash: toHex(10n, { size: 32 }), timestamp, used })), transactions: vi.fn(async () => [TX]), receiptMatches: vi.fn(async () => true) };
+function chain(used = false, timestamp = BigInt(NOW / 1000 + 601), canceled: AuthorizationCancelEvidence | null = null): LicenseReconcileChain {
+  return { observe: vi.fn(async () => ({ number: 100n, hash: toHex(10n, { size: 32 }), timestamp, used })), transactions: vi.fn(async () => [TX]), receiptMatches: vi.fn(async () => true), canceled: vi.fn(async () => canceled) };
 }
+// finalized・canonical な AuthorizationCanceled(payer, nonce) (adapter の判定は tests/lib/x402/authorizationCancel.test.ts)。
+const CANCEL: AuthorizationCancelEvidence = { blockNumber: '90', blockHash: toHex(90n, { size: 32 }), transactionHash: toHex(901n, { size: 32 }) };
+// 取り消し: authorizationState は true・AuthorizationUsed の log は無く、AuthorizationCanceled がある (期限前でもよい)。
+function canceledChain(timestamp = BigInt(NOW / 1000 + 100)): LicenseReconcileChain {
+  const rpc = chain(true, timestamp, CANCEL); vi.mocked(rpc.transactions).mockResolvedValue([]); vi.mocked(rpc.receiptMatches).mockResolvedValue(false);
+  return rpc;
+}
+const reservation = (salt: string) => JSON.parse(h.store!.strings.get(licenseReservationKey(ID, salt))!);
 beforeEach(() => { h.store = createFakeRedisStore(NOW); h.failBefore = false; h.failAfter = false; h.calls = []; h.enabled = true; h.evalOverride = null; counter = 0; });
 afterAll(closeRedisLuaEngine);
 
@@ -145,7 +156,12 @@ describe('license stock CAS: real Lua', () => {
     expect(await reconcilePurchaseIntent(i.intentSalt, { now: NOW + 700_000, licenseChain: chain(true) })).toMatchObject({ ok: true, state: 'settled' });
     expect(stock()).toMatchObject({ reserved: 0, sold: 1 });
   });
-  it('unknown/cancelled authorization retains a hold; OFF does not call RPC or delete it', async () => {
+  // 旧: 「unknown/cancelled authorization retains a hold」= 取り消された authorization も押さえを保持することを
+  // fail-closed として固定していた。取り消し (cancelAuthorization) は authorizationState を true にするので照合が
+  // AuthorizationUsed を永久に探し続け、支払わずに押さえた在庫が戻らなかった。2026-10-12 の user 承認で、finalized・
+  // canonical な AuthorizationCanceled があり一致する Settled / AuthorizationUsed が無いときは在庫を戻す仕様に変えた
+  // (下の 'finalized AuthorizationCanceled releases ...')。証拠の無い「使用済みだが支払いが見つからない」は従来どおり保持。
+  it('unknown used authorization without cancel evidence retains a hold; OFF does not call RPC or delete it', async () => {
     const input = await quote(); await settling(input);
     const rpc = chain(true); vi.mocked(rpc.receiptMatches).mockResolvedValue(false);
     expect(await reconcilePurchaseIntent(input.intentSalt, { now: NOW + 700_000, licenseChain: rpc })).toMatchObject({ state: 'pending' });
@@ -154,6 +170,126 @@ describe('license stock CAS: real Lua', () => {
     h.enabled = false; vi.mocked(rpc.observe).mockClear();
     await reconcilePurchaseIntent(input.intentSalt, { now: NOW + 800_000, licenseChain: rpc }); expect(rpc.observe).not.toHaveBeenCalled();
     expect(stock().reserved).toBe(1);
+  });
+  it.each(['signed', 'settling', 'indeterminate', 'failed_prebroadcast'] as const)('finalized AuthorizationCanceled releases a %s hold even before validBefore', async (state) => {
+    const input = await quote(); let i: PurchaseIntent;
+    if (state === 'signed') { await claimSignedPurchaseIntent(input); i = (await getPurchaseIntent(input.intentSalt)) as PurchaseIntent; }
+    else {
+      i = await settling(input);
+      if (state === 'indeterminate') await markPurchaseIndeterminate({ intentSalt: i.intentSalt, attemptId: i.attemptId, txHash: TX, now: NOW + 2000 });
+      // ip_rate_limited 等の broadcast 前の拒否 (hosted route が markPurchaseFailedPrebroadcast する)。
+      if (state === 'failed_prebroadcast') await markPurchaseFailedPrebroadcast({ intentSalt: i.intentSalt, attemptId: i.attemptId, reason: 'ip_rate_limited', licenseIntent: i, now: NOW + 2000 });
+    }
+    expect(stock().reserved).toBe(1);
+    const rpc = canceledChain();
+    expect(await reconcilePurchaseIntent(input.intentSalt, { now: NOW + 70_000, licenseChain: rpc })).toEqual({ ok: true, state: 'failed_prebroadcast' });
+    expect(rpc.canceled).toHaveBeenCalledWith(expect.objectContaining({ intentSalt: input.intentSalt }), 1n, 100n, expect.objectContaining({ number: 100n, used: true }));
+    expect(stock()).toMatchObject({ reserved: 0, sold: 0 });
+    expect(h.store!.strings.get(licenseQuotaKey(ID, input.claim.payer))).toBe('0');
+    expect(reservation(input.intentSalt)).toMatchObject({ state: 'released', evidence: { kind: 'authorization_canceled', authorizationCanceled: true, ...CANCEL } });
+    const stored = JSON.parse(h.store!.strings.get(purchaseIntentKey(input.intentSalt))!);
+    expect(stored).toMatchObject({ state: 'failed_prebroadcast', failureReason: 'authorization_canceled' });
+    expect(stored).not.toHaveProperty('txHash');
+    expect(parsePurchaseIntent(JSON.stringify(stored))).not.toBeNull();
+    expect(h.store!.zsets.get(LICENSE_HOLD_INDEX)?.has(input.intentSalt) ?? false).toBe(false);
+    expect(h.store!.zsets.get(purchasePendingIndexKey())?.has(input.intentSalt) ?? false).toBe(false);
+    // 終端は再照合しない (RPC も呼ばない)。戻した在庫は次の買い手が押さえられる。
+    vi.mocked(rpc.observe).mockClear();
+    expect(await reconcilePurchaseIntent(input.intentSalt, { now: NOW + 80_000, licenseChain: rpc })).toEqual({ ok: true, state: 'failed_prebroadcast' });
+    expect(rpc.observe).not.toHaveBeenCalled();
+    expect((await claimSignedPurchaseIntent(await quote(undefined, getAddress('0x6666666666666666666666666666666666666666')))).ok).toBe(true);
+    expect(stock()).toMatchObject({ reserved: 1, sold: 0 });
+  });
+  it('cancel evidence is ignored once an AuthorizationUsed log is seen, and an adapter without it keeps the hold', async () => {
+    const input = await quote(); await settling(input);
+    // AuthorizationUsed の log (照合は一致しない) がある範囲では取り消しを探さない = 在庫は保持。
+    const used = chain(true, BigInt(NOW / 1000 + 100), CANCEL); vi.mocked(used.receiptMatches).mockResolvedValue(false);
+    expect(await reconcilePurchaseIntent(input.intentSalt, { now: NOW + 70_000, licenseChain: used })).toEqual({ ok: true, state: 'pending' });
+    expect(used.canceled).not.toHaveBeenCalled();
+    expect(stock().reserved).toBe(1);
+    // 取り消しの証拠を返せない adapter (method なし・null・throw) は従来どおり保持。
+    const legacy = canceledChain(); delete (legacy as Partial<LicenseReconcileChain>).canceled;
+    expect(await reconcilePurchaseIntent(input.intentSalt, { now: NOW + 200_000, licenseChain: legacy })).toEqual({ ok: true, state: 'pending' });
+    const none = canceledChain(); vi.mocked(none.canceled!).mockResolvedValue(null);
+    expect(await reconcilePurchaseIntent(input.intentSalt, { now: NOW + 400_000, licenseChain: none })).toEqual({ ok: true, state: 'pending' });
+    const broken = canceledChain(); vi.mocked(broken.canceled!).mockRejectedValue(new Error('RPC unavailable'));
+    expect(await reconcilePurchaseIntent(input.intentSalt, { now: NOW + 600_000, licenseChain: broken })).toEqual({ ok: true, state: 'pending' });
+    expect(stock().reserved).toBe(1);
+    expect(reservation(input.intentSalt)).toMatchObject({ state: 'held' });
+  });
+  // Codex P2-1: 時間予算付き (cron) の照合で AuthorizationUsed の走査が予算を使い切ると、取り消しを探していない
+  // ページまで cursor が進み (4001 → 1 を往復)、取り消し (block 100) を永久に探さなかった。取り消しはページの走査の
+  // 直後に探し、予算が足りず探せなかったページには cursor を残す。
+  describe('cancel lookup under the cron time budget', () => {
+    const FINAL: LicenseFinalizedBlock = { number: 6000n, hash: toHex(10n, { size: 32 }), timestamp: BigInt(NOW / 1000 + 100), used: true };
+    // RPC 1 回 (使用の走査・取り消しの探索) ごとに 4 秒進む時計。予算の判定は残り − 予約 3 秒 ≥ 2 秒。
+    function budgeted(cancelBlock: bigint) {
+      let clock = NOW;
+      const spy = vi.spyOn(Date, 'now').mockImplementation(() => clock);
+      const rpc: LicenseReconcileChain = {
+        observe: vi.fn(async () => FINAL),
+        transactions: vi.fn(async () => { clock += 4_000; return []; }),
+        receiptMatches: vi.fn(async () => false),
+        canceled: vi.fn(async (_intent, from, to) => { clock += 4_000; return from <= cancelBlock && cancelBlock <= to ? { ...CANCEL, blockNumber: cancelBlock.toString() } : null; }),
+      };
+      return { rpc, spy, deadline: (ms: number) => clock + ms };
+    }
+    const cancelRanges = (rpc: LicenseReconcileChain) => vi.mocked(rpc.canceled!).mock.calls.map(([, from, to]) => [from, to]);
+    it('Codex repro (10 s left, cancel at block 100): the first page is checked for the cancel before the scan moves on', async () => {
+      const input = await quote(); await settling(input);
+      const { rpc, spy, deadline } = budgeted(100n);
+      try {
+        expect(await reconcilePurchaseIntent(input.intentSalt, { now: NOW + 70_000, licenseChain: rpc, deadline: deadline(10_000) })).toEqual({ ok: true, state: 'failed_prebroadcast' });
+      } finally { spy.mockRestore(); }
+      expect(cancelRanges(rpc)).toEqual([[1n, 2000n]]);
+      expect(stock()).toMatchObject({ reserved: 0, sold: 0 });
+      expect(reservation(input.intentSalt)).toMatchObject({ state: 'released', evidence: { kind: 'authorization_canceled', blockNumber: '100' } });
+    });
+    it('an unchecked page keeps the cursor; the next run checks it first and releases', async () => {
+      const input = await quote(); await settling(input);
+      const { rpc, spy, deadline } = budgeted(2500n);
+      try {
+        // 1 ページ目の走査と取り消しの探索・2 ページ目の走査で予算が尽き、2 ページ目の取り消しは探せない。
+        expect(await reconcilePurchaseIntent(input.intentSalt, { now: NOW + 70_000, licenseChain: rpc, deadline: deadline(13_000) })).toEqual({ ok: true, state: 'pending' });
+        expect(cancelRanges(rpc)).toEqual([[1n, 2000n]]);
+        expect(JSON.parse(h.store!.strings.get(purchaseIntentKey(input.intentSalt))!)).toMatchObject({ reconcileFromBlock: '2001' });
+        expect(stock().reserved).toBe(1);
+        expect(await reconcilePurchaseIntent(input.intentSalt, { now: NOW + 200_000, licenseChain: rpc, deadline: deadline(13_000) })).toEqual({ ok: true, state: 'failed_prebroadcast' });
+      } finally { spy.mockRestore(); }
+      expect(cancelRanges(rpc)).toEqual([[1n, 2000n], [2001n, 4000n]]);
+      expect(stock()).toMatchObject({ reserved: 0, sold: 0 });
+    });
+  });
+  it('stale cancel evidence cannot undo a racing successful settlement', async () => {
+    const input = await quote(); await settling(input); const rpc = canceledChain();
+    vi.mocked(rpc.canceled!).mockImplementation(async () => {
+      expect((await finalizeHostedPurchase({ intentSalt: input.intentSalt, txHash: TX, settledAt: NOW + 70_000 })).ok).toBe(true);
+      return CANCEL;
+    });
+    expect((await reconcilePurchaseIntent(input.intentSalt, { now: NOW + 70_000, licenseChain: rpc })).ok).toBe(false);
+    expect(stock()).toMatchObject({ reserved: 0, sold: 1 });
+    expect(await getPurchaseIntent(input.intentSalt)).toMatchObject({ state: 'settled', txHash: TX });
+    expect(reservation(input.intentSalt)).toMatchObject({ state: 'sold' });
+  });
+  it.each([
+    ['missing kind', { authorizationCanceled: true, blockNumber: '90', blockHash: CANCEL.blockHash, transactionHash: CANCEL.transactionHash }],
+    ['flag not true', { kind: 'authorization_canceled', authorizationCanceled: 'yes', blockNumber: '90', blockHash: CANCEL.blockHash, transactionHash: CANCEL.transactionHash }],
+    ['short tx hash', { kind: 'authorization_canceled', authorizationCanceled: true, blockNumber: '90', blockHash: CANCEL.blockHash, transactionHash: '0x01' }],
+    ['non-hex block hash', { kind: 'authorization_canceled', authorizationCanceled: true, blockNumber: '90', blockHash: '0x' + 'z'.repeat(64), transactionHash: CANCEL.transactionHash }],
+    ['non-numeric block', { kind: 'authorization_canceled', authorizationCanceled: true, blockNumber: 'latest', blockHash: CANCEL.blockHash, transactionHash: CANCEL.transactionHash }],
+  ] as const)('the license CAS rejects malformed cancel evidence (%s) without writes', async (_name, bad) => {
+    const input = await quote(); await settling(input); const rpc = canceledChain();
+    // 照合が作った context の evidence だけを壊して、Lua の形の検証が在庫を戻さないことを確かめる。
+    h.evalOverride = async (script, keys, args) => {
+      const ctx = JSON.parse(args.at(-1)!);
+      if (ctx.hook !== 'cas' || !ctx.evidence) return undefined;
+      const before = [...h.store!.strings.entries()];
+      const result = await runRedisLua(script, keys, [...args.slice(0, -1), JSON.stringify({ ...ctx, evidence: bad })], h.store!);
+      expect(result).toBe(-3); expect([...h.store!.strings.entries()]).toEqual(before);
+      return result;
+    };
+    expect(await reconcilePurchaseIntent(input.intentSalt, { now: NOW + 70_000, licenseChain: rpc })).toEqual({ ok: false, reason: 'storage' });
+    expect(stock().reserved).toBe(1); expect(reservation(input.intentSalt)).toMatchObject({ state: 'held' });
   });
   it.each(['stock', 'quota', 'obligation', 'index'] as const)('corrupt %s prevents partial finalization', async (bad) => {
     const input = await quote(); await settling(input);
@@ -546,5 +682,151 @@ describe('第 7 回レビュー B3/B4: license reconcile の候補ページ再�
     expect(JSON.parse(h.store!.strings.get(purchaseIntentKey(k.intentSalt))!)).toMatchObject({ reconcileFromBlock: '1' });
     // quote() ごとに在庫を seed し直すので、最後の seed に対する hold だけが残る。
     expect(stock()).toMatchObject({ reserved: 1, sold: 0 });
+  });
+});
+
+// validBefore を過ぎた押さえを 15 分おきの license-mint cron でも照合する (lib/license/holdSweep.ts)。在庫を戻すかは
+// 照合 (finalized の期限切れ未使用・取り消し) だけが決め、掃除は対象を絞るだけ。あわせて滞留の warn を出す。
+describe('license hold sweep (15 min cron) and backlog warn on real Lua', () => {
+  const OTHER = getAddress('0x6666666666666666666666666666666666666666');
+  const validBeforeMs = (input: Awaited<ReturnType<typeof quote>>) => Number(input.claim.validBefore) * 1000;
+  const sweep = (now: number, licenseChain: LicenseReconcileChain, deadline = Date.now() + 60_000) => runLicenseHoldSweep({ now, deadline, licenseChain });
+  // ip_rate_limited 等の broadcast 前の拒否で押さえが残った状態 (score = 失敗の時刻)。
+  async function failedHold(definition: ReturnType<typeof seed>, payer?: `0x${string}`) {
+    const input = await quote(definition, payer); const i = await settling(input);
+    expect(await markPurchaseFailedPrebroadcast({ intentSalt: i.intentSalt, attemptId: i.attemptId, reason: 'ip_rate_limited', licenseIntent: i, now: NOW + 2000 })).toBe('updated');
+    return input;
+  }
+  const holdScore = (salt: string, score: number) => h.store!.zsets.get(LICENSE_HOLD_INDEX)!.set(salt, score);
+  const backlogWarns = () => vi.mocked(logger.warn).mock.calls.filter(([event]) => event === 'creator_store.purchase_backlog');
+  beforeEach(() => { vi.spyOn(logger, 'warn').mockImplementation(() => undefined); });
+  afterEach(() => { vi.mocked(logger.warn).mockRestore(); });
+
+  it('releases an expired abandoned hold with the finalized expiry proof (no warn)', async () => {
+    const input = await failedHold(seed(2));
+    const rpc = chain(false);
+    const now = validBeforeMs(input) + 20 * 60_000;
+    expect(await sweep(now, rpc)).toEqual({
+      ok: true, checked: 1, released: 1, settled: 0, pending: 0, skipped: 0, storageErrors: 0, deferred: 0, staleHolds: 0,
+      backlog: { pendingCount: 0, pendingOldestWaitMs: 0, holdCount: 0, stuckHolds: 0 }, exceeded: [],
+    });
+    expect(stock()).toMatchObject({ reserved: 0, sold: 0 });
+    expect(reservation(input.intentSalt)).toMatchObject({ state: 'released', evidence: { authorizationUsed: false } });
+    expect(backlogWarns()).toEqual([]);
+  });
+
+  it('releases a cancelled hold and adopts a hold whose payment did settle', async () => {
+    const definition = seed(3);
+    const canceled = await failedHold(definition);
+    const paid = await failedHold(definition, OTHER);
+    const now = validBeforeMs(paid) + 20 * 60_000;
+    // 1 本目 (canceled) は取り消しの証拠、2 本目 (paid) は一致する支払い (receipt 照合) を返す。
+    const rpc = canceledChain(BigInt(Math.floor(now / 1000)));
+    vi.mocked(rpc.transactions).mockImplementation(async (intent) => intent.intentSalt === paid.intentSalt ? [TX] : []);
+    vi.mocked(rpc.receiptMatches).mockImplementation(async (intent) => intent.intentSalt === paid.intentSalt);
+    const result = await sweep(now, rpc);
+    expect(result).toMatchObject({ ok: true, checked: 2, released: 1, settled: 1, pending: 0, backlog: { holdCount: 0 } });
+    expect(reservation(canceled.intentSalt)).toMatchObject({ state: 'released', evidence: { kind: 'authorization_canceled' } });
+    expect(reservation(paid.intentSalt)).toMatchObject({ state: 'sold' });
+    expect(stock()).toMatchObject({ reserved: 0, sold: 1 });
+  });
+
+  it('only expired holds are reconciled: before validBefore, recently touched and beyond the window are left alone', async () => {
+    const definition = seed(3);
+    const early = await failedHold(definition);
+    const fresh = await failedHold(definition, OTHER);
+    const old = await failedHold(definition, getAddress('0x7777777777777777777777777777777777777777'));
+    const rpc = chain(false);
+    // validBefore 前 (score だけ古くしても intent の validBefore で除外する)。
+    const before = validBeforeMs(early) - 60_000;
+    for (const input of [early, fresh, old]) holdScore(input.intentSalt, before - 3_600_000);
+    expect(await sweep(before, rpc)).toMatchObject({ ok: true, checked: 0, skipped: 3, backlog: { holdCount: 3 } });
+    expect(rpc.observe).not.toHaveBeenCalled();
+    // validBefore 後: 直近 (10 分以内) に照合した押さえは次の run へ・窓 (6 時間) より古い期限は日次 cron と warn へ。
+    const after = validBeforeMs(early) + 20 * 60_000;
+    const beyond = validBeforeMs(old) + LICENSE_HOLD_SWEEP_WINDOW_MS + 60_000;
+    holdScore(early.intentSalt, beyond - 15 * 60_000);
+    holdScore(fresh.intentSalt, beyond - 15 * 60_000);
+    holdScore(old.intentSalt, beyond - 15 * 60_000);
+    // 照合の窓を過ぎた押さえは照合しないが、監視では滞留として数える (Codex P2-2: 窓と監視の範囲を分ける)。
+    expect(await sweep(beyond, rpc)).toMatchObject({ ok: true, checked: 0, skipped: 3, staleHolds: 3, backlog: { stuckHolds: 3 }, exceeded: ['stuckHolds'] });
+    expect(rpc.observe).not.toHaveBeenCalled();
+    expect(backlogWarns().at(-1)).toEqual(['creator_store.purchase_backlog', expect.objectContaining({ stuckHolds: 3, staleHolds: 3 })]);
+    holdScore(early.intentSalt, after - 15 * 60_000);
+    holdScore(fresh.intentSalt, after - 5 * 60_000);
+    holdScore(old.intentSalt, after - 5 * 60_000);
+    expect(await sweep(after, rpc)).toMatchObject({ ok: true, checked: 1, released: 1, skipped: 0, backlog: { holdCount: 2 } });
+    expect(rpc.observe).toHaveBeenCalledTimes(1);
+    expect(reservation(early.intentSalt)).toMatchObject({ state: 'released' });
+    expect(reservation(fresh.intentSalt)).toMatchObject({ state: 'held' });
+    expect(stock()).toMatchObject({ reserved: 2, sold: 0 });
+  });
+
+  // Codex P2-2: cron が 7 時間止まった後は、押さえの score (最後に触った時刻) が掃除の範囲 (7 時間) より古くなり、
+  // 以前は照合も滞留の数え上げも外れて warn が出なかった。範囲より古い押さえは件数 (ZCOUNT) で滞留に数え、見本を載せる。
+  it('a hold untouched for longer than the sweep range (cron stopped for 7 h) is still counted as stuck and warned', async () => {
+    const input = await failedHold(seed(2));
+    const rpc = chain(false);
+    const now = NOW + 2000 + 7 * 3_600_000 + 15 * 60_000;
+    const result = await sweep(now, rpc);
+    expect(result).toMatchObject({ ok: true, checked: 0, skipped: 0, staleHolds: 1, backlog: { pendingCount: 1, holdCount: 1, stuckHolds: 1 }, exceeded: ['stuckHolds'] });
+    expect(rpc.observe).not.toHaveBeenCalled();
+    expect(backlogWarns()).toEqual([['creator_store.purchase_backlog', expect.objectContaining({ stuckHolds: 1, staleHolds: 1, staleSample: [input.intentSalt] })]]);
+    expect(stock().reserved).toBe(1);
+  });
+
+  it('a hold still pending an hour after validBefore is counted as stuck and warned', async () => {
+    const input = await failedHold(seed(2));
+    // 使用済み (state true) なのに一致する支払いも取り消しの証拠も無い = 照合で戻らない。
+    const rpc = chain(true, BigInt(NOW / 1000 + 601)); vi.mocked(rpc.transactions).mockResolvedValue([]);
+    const now = validBeforeMs(input) + 2 * 3_600_000;
+    const result = await sweep(now, rpc);
+    expect(result).toMatchObject({ ok: true, checked: 1, pending: 1, backlog: { holdCount: 1, stuckHolds: 1 }, exceeded: ['stuckHolds'] });
+    expect(backlogWarns()).toEqual([['creator_store.purchase_backlog', expect.objectContaining({ holdCount: 1, stuckHolds: 1, exceeded: ['stuckHolds'] })]]);
+    expect(stock().reserved).toBe(1);
+  });
+
+  it('defers every hold when the deadline is exhausted and skips foreign or terminal members', async () => {
+    const input = await failedHold(seed(2));
+    const now = validBeforeMs(input) + 20 * 60_000;
+    const rpc = chain(false);
+    expect(await sweep(now, rpc, Date.now() - 1)).toMatchObject({ ok: true, checked: 0, deferred: 1 });
+    expect(rpc.observe).not.toHaveBeenCalled();
+    // 壊れた member・intent の無い salt・解放済み (終端) の intent は照合しない (隔離は repairLicenseIndexes の役目)。
+    expect(await sweep(now, rpc)).toMatchObject({ ok: true, released: 1 });
+    h.store!.zsets.set(LICENSE_HOLD_INDEX, new Map([[input.intentSalt, now - 15 * 60_000], ['not-a-salt', now - 15 * 60_000], [toHex(999n, { size: 32 }), now - 15 * 60_000]]));
+    vi.mocked(rpc.observe).mockClear();
+    expect(await sweep(now, rpc)).toMatchObject({ ok: true, checked: 0, skipped: 3 });
+    expect(rpc.observe).not.toHaveBeenCalled();
+  });
+
+  it('warns when pending count, oldest pending wait or hold count exceed the limits', async () => {
+    const pending = purchasePendingIndexKey();
+    const now = NOW + 100 * 3_600_000;
+    const due = new Map<string, number>();
+    for (let n = 0; n < 50; n += 1) due.set(toHex(BigInt(5000 + n), { size: 32 }), now + 60_000);
+    due.set(toHex(4999n, { size: 32 }), now - 27 * 3_600_000);
+    h.store!.zsets.set(pending, due);
+    const holds = new Map<string, number>();
+    for (let n = 0; n < 11; n += 1) holds.set(toHex(BigInt(6000 + n), { size: 32 }), now - 60_000);
+    h.store!.zsets.set(LICENSE_HOLD_INDEX, holds);
+    const result = await sweep(now, chain(false));
+    expect(result).toMatchObject({ ok: true, checked: 0, backlog: { pendingCount: 51, pendingOldestWaitMs: 27 * 3_600_000, holdCount: 11, stuckHolds: 0 } });
+    expect(result.ok && result.exceeded).toEqual(['pendingCount', 'pendingOldestWaitMs', 'holdCount']);
+    expect(backlogWarns()).toHaveLength(1);
+    // 閾値ちょうどは warn しない (超えたら)。
+    vi.mocked(logger.warn).mockClear();
+    due.delete(toHex(4999n, { size: 32 }));
+    holds.delete(toHex(6010n, { size: 32 }));
+    expect(await sweep(now, chain(false))).toMatchObject({ ok: true, backlog: { pendingCount: 50, pendingOldestWaitMs: 0, holdCount: 10 }, exceeded: [] });
+    expect(backlogWarns()).toEqual([]);
+  });
+
+  it('selects at most 20 holds per run (oldest touch first)', async () => {
+    const now = NOW + 10 * 3_600_000;
+    const holds = new Map<string, number>();
+    for (let n = 0; n < 25; n += 1) holds.set(toHex(BigInt(7000 + n), { size: 32 }), now - 3_600_000 + n);
+    h.store!.zsets.set(LICENSE_HOLD_INDEX, holds);
+    expect(await sweep(now, chain(false))).toMatchObject({ ok: true, checked: 0, skipped: 20, backlog: { holdCount: 25 } });
   });
 });

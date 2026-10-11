@@ -13,10 +13,13 @@ export const licenseQuotaKey = (id: string, payer: string) => 'x402:hosted:' + i
 export const licenseObligationKey = (key: string) => 'store:license:ob:' + key;
 
 export type LicenseExpiryEvidence = { blockNumber: string; blockHash: string; timestamp: string; authorizationUsed: false };
+/** finalized・canonical な AuthorizationCanceled(payer, nonce) の tx。取り消された nonce は期限の前後を問わず二度と使えない。 */
+export type LicenseCancelEvidence = { kind: 'authorization_canceled'; authorizationCanceled: true; blockNumber: string; blockHash: string; transactionHash: string };
+export type LicenseReleaseEvidence = LicenseExpiryEvidence | LicenseCancelEvidence;
 export type LicenseHook = 'claim' | 'settle' | 'finalize' | 'fail' | 'cas';
 
 /** 旧 Lua/引数は変更しない。検証済み license snapshot のときだけ別の EVAL に dispatch。 */
-export function licenseEvalContext(intent: PurchaseIntent, hook: LicenseHook, now: number, evidence?: LicenseExpiryEvidence) {
+export function licenseEvalContext(intent: PurchaseIntent, hook: LicenseHook, now: number, evidence?: LicenseReleaseEvidence) {
   const definition = parseLicenseDefinition(intent.metadata.license);
   if (intent.metadata.productKind !== 'license' || !definition) throw new Error('invalid license snapshot');
   const paymentKey = intent.state === 'quoted' ? '' : computeLicensePaymentKey({
@@ -96,7 +99,9 @@ const COMMIT =
   'elseif ctx.hook=="cas" then ' +
   'if ARGV[5]==ARGV[6] then ' +
   'local e=ctx.evidence; ' +
-  'if not e or e.authorizationUsed~=false or type(e.blockHash)~="string" or not string.match(e.blockHash,"^0x%x+$") or #e.blockHash~=66 or not tonumber(e.blockNumber) or not tonumber(e.timestamp) or type(current.claim)~="table" or tonumber(e.timestamp)<=tonumber(current.claim.validBefore) then return -3 end; ' +
+  // 取り消しの証拠 (LicenseCancelEvidence): 期限の比較はしない (取り消された nonce は期限前でも二度と使えない)。
+  'local canceled=type(e)=="table" and e.kind=="authorization_canceled" and e.authorizationCanceled==true and type(e.blockHash)=="string" and string.match(e.blockHash,"^0x%x+$")~=nil and #e.blockHash==66 and type(e.transactionHash)=="string" and string.match(e.transactionHash,"^0x%x+$")~=nil and #e.transactionHash==66 and tonumber(e.blockNumber)~=nil and type(current.claim)=="table"; ' +
+  'if not canceled and (not e or e.authorizationUsed~=false or type(e.blockHash)~="string" or not string.match(e.blockHash,"^0x%x+$") or #e.blockHash~=66 or not tonumber(e.blockNumber) or not tonumber(e.timestamp) or type(current.claim)~="table" or tonumber(e.timestamp)<=tonumber(current.claim.validBefore)) then return -3 end; ' +
   'if not hold() then return -3 end; reservation.state="released"; reservation.evidence=e; stock.reserved=stock.reserved-1; quota=quota-1; ' +
   'write("SET",ctx.reservationKey,cjson.encode(reservation)); write("SET",ctx.stockKey,cjson.encode(stock)); write("SET",ctx.quotaKey,tostring(quota)); write("ZREM",ctx.holdIndex,identity.intentSalt); ' +
   'else if not hold() then return -3 end; write("ZADD",ctx.holdIndex,ctx.now,identity.intentSalt) end; ' +

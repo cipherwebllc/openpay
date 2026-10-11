@@ -39,6 +39,7 @@ import { recordSettlement } from '@/lib/x402/registry';
 import { atomicToHuman, recordSettleLedgerAfterResponse } from '@/lib/x402/settleLedger';
 import { consumeFacilitatorPayment } from '@/lib/x402/facilitatorReservation';
 import { checkHostedIntentSettleAdmission } from '@/lib/x402/purchaseSettleGate';
+import { isHostedSettleRequest } from '@/lib/x402/hostedSettleRequest';
 
 const isObj = (v: unknown): v is Record<string, unknown> =>
   typeof v === 'object' && v !== null;
@@ -59,7 +60,12 @@ export async function POST(req: Request): Promise<NextResponse> {
   }
   if (
     !(await checkIpRateLimit(
-      'relay-admission',
+      // hosted paid route が同じプロセスから直接呼ぶ settle (印は外の HTTP からは作れない) は、買い手の IP の
+      // relay-admission の枠 (/api/relay/jpyc 等と共有) を先に使い切って ip_rate_limited (broadcast 前の拒否) にし、
+      // 限定在庫の押さえを支払わずに残す手を断つため、同じ IP の別の枠で数える。この枠は hosted の settle しか数えない
+      // ので、使い切るには検証 (署名・残高) を通った購入を 1 分に 120 件 settle まで進める必要がある。
+      // 外から /api/facilitator/settle を叩く経路は従来どおり relay-admission で数える (弱めない)。
+      isHostedSettleRequest(req) ? 'hosted-settle' : 'relay-admission',
       hashIpBucket(clientIp(req)),
       120,
       60,

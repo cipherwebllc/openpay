@@ -732,6 +732,22 @@ describe('hosted creator-store paid route', () => {
     });
   });
 
+  it('settle だけに hosted の印を付け (買い手の IP の relay-admission の枠と分ける)、転送ヘッダは従来どおり', async () => {
+    const route = await loadRoute();
+    const { isHostedSettleRequest } = await import('@/lib/x402/hostedSettleRequest');
+    const response = await callHosted(
+      route,
+      `/api/paid/hosted/${RESOURCE_ID}?payer=${PAYER}`,
+      { 'X-PAYMENT': paymentHeader(), 'x-vercel-forwarded-for': '172.71.0.1', 'cf-connecting-ip': '203.0.113.5' },
+    );
+    expect(response.status).toBe(200);
+    const settleRequest = routeMocks.settle.mock.calls[0][0] as Request;
+    expect(isHostedSettleRequest(settleRequest)).toBe(true);
+    expect(isHostedSettleRequest(routeMocks.verify.mock.calls[0][0] as Request)).toBe(false);
+    expect(settleRequest.headers.get('cf-connecting-ip')).toBe('203.0.113.5');
+    expect(settleRequest.headers.get('x-vercel-forwarded-for')).toBe('172.71.0.1');
+  });
+
   it('署名/body は恒久保存せず、現在の完全一致 payload と reservation token だけで broadcast する', async () => {
     routeMocks.getIntent.mockResolvedValue(intentFixture('signed'));
     routeMocks.claimedFacilitatorBody = {
