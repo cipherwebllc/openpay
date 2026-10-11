@@ -42,6 +42,8 @@ test.describe('/checkout?submit=store — the shop pays the gas', () => {
       await page.goto(`${BASE}&items=${items}${disc ? `&disc=${disc}` : ''}`);
 
       await expect(page.getByText('Test Cafe', { exact: true })).toBeVisible();
+      // 店名は URL の値なので、お金が届く先 (署名する受取先 = URL の to) を通常の /checkout と同じ形で出す。
+      await expect(page.getByText(`To ${TO.slice(0, 6)}…${TO.slice(-4)}`, { exact: true })).toBeVisible();
       const item = page.getByRole('listitem');
       await expect(item).toHaveCount(1);
       await expect(item.getByText('Lunch ×1', { exact: true })).toBeVisible();

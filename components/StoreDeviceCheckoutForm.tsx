@@ -19,7 +19,7 @@ import {
 } from '@/hooks/useStoreDevicePayment';
 import { addressExplorerUrl, chainForSlug, slugForChain, txExplorerUrl } from '@/lib/chains';
 import { env } from '@/lib/env';
-import { formatTokenAmount } from '@/lib/format';
+import { formatTokenAmount, shortAddress } from '@/lib/format';
 import { STORE_DEVICE_FEE_WEI } from '@/lib/storeDevicePayment';
 import { DEFAULT_CHAIN_FOR_SYMBOL, deploymentForSlug, resolveDeployment } from '@/lib/tokens';
 import { calcCheckoutPayable, calcCheckoutTotal, type CheckoutParams } from '@/lib/url';
@@ -49,6 +49,11 @@ export function StoreDeviceCheckoutForm({ params }: { params: CheckoutParams }) 
       : null;
   // 結論待ちの間 (この会計でも前の会計でも) は、別の支払いを勧める案内を出さない。
   const unresolved = status.phase === 'waiting';
+  // 支払先の表示 (店名は URL の値なので、お金が届く先をここで見せる)。お客様が署名する受取先は pay() に渡す
+  // params.to で、サーバーは受け渡しの受取先と違う署名を merchant_mismatch で預からない (お客様の画面には受け渡しの
+  // 受取先が届かない)。よって支払いが成り立つなら届く先はこのアドレスだけ。この会計で署名した後は、署名した値を出す。
+  // 別の会計の支払いを確かめている間も、このカードはいま開いている QR の会計なので params.to のまま。
+  const payTo: Address = frozen && frozen.handoffId === handoffId ? frozen.merchant : params.to;
   // 履歴・控え・取引のリンクのチェーンは、署名した支払い (frozen) のチェーン (第 7 回レビュー A7)。端末に残った
   // 前の会計の支払いを別チェーンの QR で開いても、前の会計のチェーンで記録する。送る経路 (pay) は今の QR のまま。
   // frozen の chainId をこのビルドで引けない (対応外のチェーン) ときだけ、今の QR の値 (従来の動き) を組ごと使う。
@@ -176,6 +181,8 @@ export function StoreDeviceCheckoutForm({ params }: { params: CheckoutParams }) 
         {params.storeName && (
           <p className="text-sm font-semibold text-slate-800">{params.storeName}</p>
         )}
+        {/* 通常の /checkout と同じ形 (支払先 0x1234…abcd)。 */}
+        <p className="mt-0.5 text-xs text-slate-500">{t('payToLabel', { addr: shortAddress(payTo) })}</p>
         <ul className="mt-2 space-y-1 text-sm">
           {params.items.map((it, i) => (
             <li key={`${it.name}-${i}`} className="flex justify-between gap-2">
