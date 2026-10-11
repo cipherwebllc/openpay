@@ -14,8 +14,10 @@
 // - phase 1 では sponsorship (JPYC) のみ。USDC ERC20 paymaster + MAv2 は
 //   組合せ未検証のため `IncompatibleSmartAccountError` に倒す (plan §10)。
 // - Pimlico bundler が MAv2 sender を実際に accept するかは publicly 未保証
-//   (調査 task #22 / R1)。Polygon Amoy + HashPort 実機 smoke で確証取るまで
-//   feature flag (NEXT_PUBLIC_ENABLE_MAV2) で OFF が default。
+//   (調査 task #22 / R1)。Polygon Amoy + HashPort 実機 smoke ではまだ確かめていない。
+//   feature flag (NEXT_PUBLIC_ENABLE_MAV2) はコードの既定 OFF だが、本番は ON
+//   (2026-10-11 に本番の bundle で確認)。JPYC は flag に関係なく EIP-3009 relay を通るので、
+//   本番でここに届くのは relay が OFF のときの JPYC sponsorship だけ (USDC は上のとおり incompatible)。
 
 import {
   http,

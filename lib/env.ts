@@ -407,8 +407,10 @@ export const env = {
   ),
   // Alchemy Modular Account v2 (MAv2) 経路の有効化フラグ。
   // HashPort wallet など EOA が MAv2 へ 7702 委任済のケースで動かす。
-  // Pimlico bundler が MAv2 sender を accept するか実機で確認するまでは
-  // 既定 OFF。'1' / 'true' で ON。
+  // コードの既定は OFF ('1' / 'true' で ON)。本番は ON (2026-10-11 に本番の bundle で確認)。
+  // JPYC は flag に関係なく EIP-3009 relay を通るので、MAv2 に届くのは Pimlico の UserOp 経路だけ
+  // (relay が OFF のときの JPYC sponsorship。mainnet の USDC は incompatible として通常決済に倒れる)。
+  // Pimlico bundler が MAv2 sender を accept するかは、実機ではまだ確かめていない。
   enableMav2: parseBoolFlag(
     'NEXT_PUBLIC_ENABLE_MAV2',
     process.env.NEXT_PUBLIC_ENABLE_MAV2,
