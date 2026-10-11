@@ -7,6 +7,14 @@ import { PIMLICO_BALANCE_HEADER } from './lib/pimlico-balance-output.mjs';
 export const REVERIFY_MAX_AGE_MS = 8 * 60 * 60 * 1000;
 
 /**
+ * `gh run list` の結果 (新しい順) から、完了した最新の run を選ぶ。実行中の run はログがまだ無いので、
+ * それを読むと「出力不在」と誤判定する (merge の push と schedule が同時に走ると起きる)。
+ */
+export function latestCompletedRun(runs) {
+  return Array.isArray(runs) ? runs.find((run) => run?.status === 'completed') : undefined;
+}
+
+/**
  * Pimlico 残高 cron の最新 run のログから、実際に残高を読んだか (見出しの出力があるか) を判定する。
  * ログには shell の SOURCE 行も含まれるので、skip は GitHub がレンダした `##[warning]Secrets 未設定` で見る。
  */
