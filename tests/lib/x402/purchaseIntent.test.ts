@@ -8,12 +8,12 @@ import fixture from '../../fixtures/x402/purchaseIntent.json';
 
 const h = vi.hoisted(() => ({
   reads: new Map<string, (string | null)[]>(),
-  kvGet: vi.fn(), kvSet: vi.fn(), kvEval: vi.fn(), warn: vi.fn(),
+  kvGet: vi.fn(), kvSet: vi.fn(), kvEval: vi.fn(), warn: vi.fn(), info: vi.fn(),
   client: { readContract: vi.fn(), getBlock: vi.fn(), getBlockNumber: vi.fn(), getLogs: vi.fn(), getTransactionReceipt: vi.fn() },
   transportForChain: vi.fn(() => ({})),
 }));
 vi.mock('@/lib/kv', () => ({ kvGet: h.kvGet, kvSet: h.kvSet, kvEval: h.kvEval }));
-vi.mock('@/lib/logger', () => ({ logger: { warn: h.warn } }));
+vi.mock('@/lib/logger', () => ({ logger: { warn: h.warn, info: h.info } }));
 vi.mock('@/lib/chains', () => ({ chainObjectForId: () => ({}), transportForChain: h.transportForChain }));
 vi.mock('@/lib/x402/hostedStore', () => ({ hostedContentKey: (id: string, rev: number) => `store:hosted:content:${id}:${rev}` }));
 vi.mock('@/lib/x402/facilitatorSettle', () => ({ parseFacilitatorRequest: vi.fn() }));
@@ -542,16 +542,48 @@ describe('PurchaseIntent reconciler decisions (no Lua)', () => {
       await expect(defaultPurchaseReconcileChain.receiptMatches(active, TX)).rejects.toThrow('finalized unsupported');
     });
 
-    it('reconcile keeps a not-yet-finalized match pending and retries from its candidate page', async () => {
+    const scanToCandidate = () => {
       h.client.readContract.mockResolvedValue(true);
       h.client.getBlockNumber.mockResolvedValue(14_500n);
       h.client.getLogs.mockImplementation(async ({ fromBlock, event }: { fromBlock: bigint; event?: { name?: string } }) =>
         event?.name === 'AuthorizationUsed' && fromBlock === 12_000n ? [{ transactionHash: TX }] : []);
-      matching(12_050n); finality(12_049n);
-      expect(await reconcilePurchaseIntent(SALT, { now: NOW })).toEqual({ ok: true, state: 'pending' });
+    };
+    const expectRetryFromCandidatePage = () => {
       const next = JSON.parse(h.kvEval.mock.calls.at(-1)![2][3]);
       expect(next).toMatchObject({ state: 'indeterminate', reconcileFromBlock: '12000', nextReconcileAt: NOW + PURCHASE_RECONCILE_RETRY_MS });
       expect(next).not.toHaveProperty('txHash');
+    };
+
+    it('reconcile keeps a not-yet-finalized match pending and retries from its candidate page', async () => {
+      scanToCandidate(); matching(12_050n); finality(12_049n);
+      expect(await reconcilePurchaseIntent(SALT, { now: NOW })).toEqual({ ok: true, state: 'pending' });
+      expectRetryFromCandidatePage();
+      // 確定を待っているだけ (not_finalized) は info。warn (Sentry) には出さない。
+      expect(h.info).toHaveBeenCalledWith('creator_store.purchase_receipt_not_finalized', { intentSalt: SALT, reason: 'not_finalized' });
+      expect(h.warn).not.toHaveBeenCalledWith('creator_store.purchase_receipt_not_finalized', expect.anything());
+    });
+
+    // Fable 最終監査 P2-2: finalized に対応しない RPC では確定しない理由がどこにも出ず、運営が観測できなかった。
+    it.each(['finalized_unavailable', 'not_canonical'] as const)('records %s as a warning and keeps the same candidate-page retry', async (reason) => {
+      scanToCandidate(); matching(12_000n);
+      if (reason === 'finalized_unavailable') h.client.getBlock.mockResolvedValue({ number: 12_100n });
+      else finality(12_100n, { 12_000: `0x${'e'.repeat(64)}` });
+      expect(await reconcilePurchaseIntent(SALT, { now: NOW })).toEqual({ ok: true, state: 'pending' });
+      expectRetryFromCandidatePage();
+      expect(h.warn).toHaveBeenCalledWith('creator_store.purchase_receipt_not_finalized', { intentSalt: SALT, reason });
+      expect(h.info).not.toHaveBeenCalled();
+    });
+
+    it('a failing logger does not change the candidate-page retry, and other receipt errors are not reported as finality', async () => {
+      scanToCandidate(); matching(12_000n); h.client.getBlock.mockResolvedValue({ number: 12_100n });
+      h.warn.mockImplementationOnce(() => { throw new Error('sentry transport down'); });
+      expect(await reconcilePurchaseIntent(SALT, { now: NOW })).toEqual({ ok: true, state: 'pending' });
+      expectRetryFromCandidatePage();
+      h.warn.mockClear(); h.kvEval.mockClear(); reads(key, active);
+      h.client.getTransactionReceipt.mockRejectedValue(new Error('receipt unavailable'));
+      expect(await reconcilePurchaseIntent(SALT, { now: NOW })).toEqual({ ok: true, state: 'pending' });
+      expectRetryFromCandidatePage();
+      expect(h.warn).not.toHaveBeenCalled(); expect(h.info).not.toHaveBeenCalled();
     });
   });
 });

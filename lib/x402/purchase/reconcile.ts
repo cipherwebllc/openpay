@@ -46,6 +46,7 @@ import {
 } from './pending';
 import {
   defaultPurchaseReconcileChain,
+  PurchaseReceiptNotFinalizedError,
   type PurchaseReconcileChain,
 } from './reconcileChain';
 
@@ -416,9 +417,20 @@ export async function reconcilePurchaseIntent(
         matches = receiptRpc
           ? await chain.receiptMatches(intent, txHash, receiptRpc)
           : await chain.receiptMatches(intent, txHash);
-      } catch {
+      } catch (error) {
         // 一致した receipt がまだ finalized・canonical と確かめられないとき (PurchaseReceiptNotFinalizedError・2026-10-12)
         // もここに来る: 確定させず、下の一時障害と同じく候補のページ (保存済み hash なら次回の読み直し) から再試行する。
+        // その理由は記録して、運営が「確定しない」原因を観測できるようにする。not_finalized (確定を待っているだけ) は info、
+        // finalized_unavailable (RPC が finalized tag に対応しない等)・not_canonical・finality_changed (RPC の不整合) は warn。
+        if (error instanceof PurchaseReceiptNotFinalizedError) {
+          try {
+            const fields = { intentSalt, reason: error.reason };
+            if (error.reason === 'not_finalized') logger.info('creator_store.purchase_receipt_not_finalized', fields);
+            else logger.warn('creator_store.purchase_receipt_not_finalized', fields);
+          } catch {
+            // 掟 13: 記録の失敗 (Sentry の transport 障害等) を、下の候補のページからの再試行 (cursor の保存) へ波及させない。
+          }
+        }
         // 走査で新しく見つけた候補の receipt 一時障害で、証拠のあるページを飛ばして cursor を進めると、
         // head が走査予算より速く進む間は再発見できない (第 7 回レビュー B3)。entitlement 未付与への
         // 波及を断つため、その候補のページから次回再試行する (USDC rail と同じ)。
