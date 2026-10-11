@@ -2,6 +2,7 @@ import 'server-only';
 
 import { randomUUID } from 'node:crypto';
 import { kvEval } from '@/lib/kv';
+import { logger } from '@/lib/logger';
 
 const KEY = 'store:license:verify:rpc';
 // インスタンスを跨ぐ RPC 同時実行上限。失効済み枠だけ回収し、crash による占有を隔離する。
@@ -22,5 +23,17 @@ export async function acquireLicenseVerifyBudget(): Promise<string | null> {
 }
 
 export async function releaseLicenseVerifyBudget(token: string): Promise<void> {
-  await kvEval(RELEASE, [KEY], [token]);
+  warnUnlessBudgetReleased('license.verify_budget_release_failed', await kvEval<number>(RELEASE, [KEY], [token]));
+}
+
+/**
+ * 枠の返却 (RELEASE = ZREM) の応答を確かめ、返せなかったときだけ warn を残す。1 = 返した。0 = 枠に無い (60 秒 lease が
+ * 返却より先に失効して回収された = 処理が lease より長く、その間は同時実行の上限が効いていなかった)。KV 障害・想定外の
+ * 応答は、枠が lease の失効まで残る (その間は枠が 1 つ減る)。
+ * 掟 13: 投げない・挙動を変えない。返却の失敗を呼出側の権利の応答・配信へ波及させない (枠は lease の失効で回収される)。
+ */
+export function warnUnlessBudgetReleased(event: string, result: { ok: true; value: unknown } | { ok: false; reason: string }): void {
+  if (result.ok && result.value === 1) return;
+  if (!result.ok) logger.warn(event, { outcome: 'storage', reason: result.reason });
+  else logger.warn(event, { outcome: result.value === 0 ? 'not_held' : 'unexpected_reply' });
 }

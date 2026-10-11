@@ -1,6 +1,7 @@
 import 'server-only';
 
 import { kvEval, kvGet } from '@/lib/kv';
+import { logger } from '@/lib/logger';
 import { LICENSE_DUE_INDEX } from './stock';
 import { licenseJobKey, parseLicenseJob, type LicenseJob } from './jobs';
 
@@ -37,7 +38,13 @@ const QUARANTINE =
 
 export async function quarantineLicenseJob(member: string, token: string): Promise<void> {
   const marker = member.startsWith('registration:') ? member : 'mint:' + member;
-  await kvEval(QUARANTINE, [LICENSE_WORKER_LOCK, LICENSE_DUE_INDEX, 'store:license:repair:quarantine'], [token, member, marker, String(Date.now())]);
+  const result = await kvEval<number>(QUARANTINE, [LICENSE_WORKER_LOCK, LICENSE_DUE_INDEX, 'store:license:repair:quarantine'], [token, member, marker, String(Date.now())]);
+  // QUARANTINE の応答: 1 = 隔離した / 0 = worker lock を失っている (書かない) / -1 = due・quarantine の key の型か時刻が不正
+  // (書かない)。1 以外は隔離されておらず、破損 job が due の先頭に残り続けるので、運営が気づけるよう warn を残す。
+  // 掟 13: 投げない・挙動を変えない。隔離の失敗を worker の run へ波及させない (呼出側は従来どおり job_corrupt で次の member へ)。
+  if (result.ok && result.value === 1) return;
+  const outcome = !result.ok ? 'storage' : result.value === 0 ? 'lock_lost' : result.value === -1 ? 'invalid_state' : 'unexpected_reply';
+  logger.warn('license.worker_quarantine_failed', { member, outcome, ...(!result.ok ? { reason: result.reason } : {}) });
 }
 
 export async function licenseDueMembers(now: number): Promise<string[] | 'storage'> {

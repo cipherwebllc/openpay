@@ -101,8 +101,35 @@ describe('delivery issuance order', () => {
     await error(await get('?revision=bad&format=no', { 'Sec-Fetch-Site': 'cross-site' }), 403, 'cross_site');
     expect(h.session).toHaveBeenCalledOnce(); expect(h.incr).not.toHaveBeenCalled(); expect(h.own).not.toHaveBeenCalled();
   });
-  it.each([undefined, 'same-origin', 'same-site', 'none'])('allows Fetch Metadata %s without requiring Origin', async (site) => {
+  // 2026-10-12 (Grok 再レビュー・user 承認): 書き込み API の CSRF 検査 (lib/net/crossOriginWrite) にそろえ、same-origin と
+  // none (ブックマーク・URL の直打ち) だけを通す。以前は cross-site だけを拒否し、same-site (サブドメイン) も通していた。
+  it.each([undefined, 'same-origin', 'none'])('allows Fetch Metadata %s without requiring Origin', async (site) => {
     expect((await get('', site ? { 'Sec-Fetch-Site': site } : undefined)).status).toBe(302);
+  });
+  it.each(['same-site', 'cross-site'])('rejects Fetch Metadata %s even with a matching Origin', async (site) => {
+    await error(await get('', { 'Sec-Fetch-Site': site, Origin: 'https://open-pay.jp' }), 403, 'cross_site');
+    expect(h.incr).not.toHaveBeenCalled(); expect(h.own).not.toHaveBeenCalled();
+  });
+  it.each([['https://open-pay.jp', 302], ['https://sub.open-pay.jp', 403], ['https://attacker.example', 403], ['null', 403]] as const)('without Fetch Metadata checks Origin %s', async (origin, status) => {
+    const response = await get('', { Origin: origin });
+    expect(response.status).toBe(status);
+    if (status === 403) await error(response, 403, 'cross_site');
+  });
+  // ライブラリの画面のリンク (<a href="/api/store/delivery/..." target="_blank" rel="noopener noreferrer">・
+  // tests/components/CreatorStoreLibrary.test.tsx が固定) は same-origin の遷移。新しいタブ (target=_blank・中クリック) で
+  // 開いても Sec-Fetch-Site は開いた画面の origin で決まるので same-origin のまま、noreferrer なので Referer も Origin も無い。
+  it.each([
+    ['link click, same or new tab', { 'Sec-Fetch-Site': 'same-origin', 'Sec-Fetch-Mode': 'navigate', 'Sec-Fetch-Dest': 'document', 'Sec-Fetch-User': '?1' }],
+    ['bookmark / typed URL', { 'Sec-Fetch-Site': 'none', 'Sec-Fetch-Mode': 'navigate', 'Sec-Fetch-Dest': 'document', 'Sec-Fetch-User': '?1' }],
+  ] as const)('the library link opens the delivery redirect: %s', async (_label, fetchMetadata) => {
+    const response = await get('?revision=3', fetchMetadata);
+    expect(response.status).toBe(302);
+    expect(response.headers.get('Location')).toMatch(/^https:\/\/files\.example\/gate\?/);
+  });
+  it('a same-origin JSON fetch from the library page is allowed', async () => {
+    const response = await get('?format=json', { 'Sec-Fetch-Site': 'same-origin', 'Sec-Fetch-Mode': 'cors', 'Sec-Fetch-Dest': 'empty', Origin: 'https://open-pay.jp' });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ ok: true, product: ID });
   });
   it.each(['?revision=0', '?revision=01', '?revision=1&revision=1', '?intentSalt=bad', '?intentSalt=' + SALT + '&intentSalt=' + SALT,
     '?revision=1.5', '?revision=9007199254740992', '?revision=3&format=no&intentSalt=bad'])('preserves selector 400: %s', async (query) => {

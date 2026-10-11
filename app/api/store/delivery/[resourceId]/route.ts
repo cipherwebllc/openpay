@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { env } from '@/lib/env';
 import { kvIncr } from '@/lib/kv';
 import { licenseNftEnabled } from '@/lib/license/config';
+import { isSameOriginGet } from '@/lib/net/crossOriginWrite';
 import { acquireDeliveryBudget, releaseDeliveryBudget } from '@/lib/store/deliveryBudget';
 import { DELIVERY_TICKET_TTL_SECONDS, deliveryTicketConfig, signDeliveryTicket } from '@/lib/store/deliveryTicket';
 import { buildDeliveryRedirect, parseDeliveryUrl } from '@/lib/store/deliveryUrl';
@@ -26,7 +27,9 @@ export async function GET(req: Request, { params }: { params: Promise<{ resource
     auth.response.headers.set('Referrer-Policy', 'no-referrer');
     return auth.response;
   }
-  if (req.headers.get('Sec-Fetch-Site') === 'cross-site') return error('cross_site', 403);
+  // 別 site・サブドメインの画面から踏ませた GET で、被害者の cookie で ticket を発行しない (書き込み API の CSRF 検査と
+  // 同じ考え方)。ライブラリのリンク (same-origin・新しいタブを含む) とブックマーク・URL の直打ち (none) は通す。
+  if (!isSameOriginGet(req)) return error('cross_site', 403);
   const selector = parseStoreContentSelector(req);
   if (!selector) return error('invalid_selector', 400);
   const formats = new URL(req.url).searchParams.getAll('format');

@@ -13,6 +13,8 @@ const h = vi.hoisted(() => ({
   // kvEval の応答の差し替え (kvEval の契約は Redis の値の形まで・script ごとの意味は呼出側が確かめる)。
   // run() を呼べば本物の Lua を実行した結果、呼ばなければ Lua を走らせずに返した値がそのまま ok:true で届く。
   reply: null as ((script: string, run: () => Promise<unknown>) => Promise<unknown>) | null,
+  // true を返した script の kvEval を KV 障害 (ok:false) にする。
+  failEval: null as ((script: string) => boolean) | null,
 }));
 vi.mock('@/lib/license/config', () => ({ licenseNftEnabled: () => h.enabled }));
 vi.mock('@/lib/chains', () => ({ chainObjectForId: () => h.rpc.chain, customRpcUrlForChain: () => undefined }));
@@ -32,6 +34,7 @@ vi.mock('@/lib/kv', () => ({
   },
   kvEval: async (script: string, keys: string[], args: string[]) => {
     h.eval(script, keys, args);
+    if (h.failEval?.(script)) return { ok: false, reason: 'network_error' };
     const isSubmit = script.includes('local active=') && JSON.parse(args[2]!).submission;
     if (isSubmit && h.failSave === 'before') { h.failSave = ''; return { ok: false }; }
     const run = () => runRedisLua(script, keys, args, h.store!);
@@ -40,6 +43,7 @@ vi.mock('@/lib/kv', () => ({
     return { ok: true, value };
   },
 }));
+import { logger } from '@/lib/logger';
 import { licenseBackoff, isLicenseRepairRun, runLicenseWorker, LICENSE_ABI } from '@/lib/license/minter';
 import { repairLicenseIndexes } from '@/lib/license/repair';
 import { LICENSE_ACTIVE_SUBMISSION, LICENSE_WORKER_LOCK, saveLicenseJob } from '@/lib/license/workerStore';
@@ -78,7 +82,7 @@ function mintReceipt(hash: Hex) {
 beforeEach(() => {
   vi.clearAllMocks(); h.store = createFakeRedisStore(NOW); vi.spyOn(Date, 'now').mockImplementation(() => h.store!.now());
   vi.stubEnv('LICENSE_MINTER_PRIVATE_KEY', KEY); vi.stubEnv('RELAYER_PRIVATE_KEY', ''); vi.stubEnv('ALERT_WEBHOOK_URL', 'https://alerts.example');
-  h.enabled = true; h.lockError = false; h.failSave = ''; h.reply = null; h.rpc.chain = polygonAmoy; job = fixture(); seed();
+  h.enabled = true; h.lockError = false; h.failSave = ''; h.reply = null; h.failEval = null; h.rpc.chain = polygonAmoy; job = fixture(); seed();
   h.rpc.getBlock.mockImplementation(async ({ blockNumber }) => ({ number: blockNumber ?? 100n, hash: BLOCK, timestamp: 1800000601n }));
   h.rpc.getBytecode.mockResolvedValue('0x6000');
   h.product.mockResolvedValue({ createdAt: NOW, license: definition });
@@ -440,10 +444,27 @@ describe('license worker: viem + real Lua CAS', () => {
     expect([0, 5, 13, 23].every((hour) => isLicenseRepairRun(Date.UTC(2026, 8, 26, hour, 3)))).toBe(true);
   });
   it('isolates corrupt jobs and leaves them in the permanent index', async () => {
+    const warn = vi.spyOn(logger, 'warn');
     const bad = toHex(123n, { size: 32 }); h.store!.zsets.set(LICENSE_DUE_INDEX, new Map([[bad, NOW - 1], [job.paymentKey, NOW]]));
     expect(await runLicenseWorker()).toMatchObject({ failed: 1, processed: 1 }); expect(current().status).toBe('submitted');
     expect(h.store!.zsets.get(LICENSE_DUE_INDEX)?.has(bad)).toBe(false);
     expect(h.store!.zsets.get('store:license:repair:quarantine')?.has('mint:' + bad)).toBe(true);
+    expect(warn).not.toHaveBeenCalledWith('license.worker_quarantine_failed', expect.anything());
+  });
+  // 2026-10-12 (Grok 再レビュー): 隔離 (QUARANTINE) の応答を捨てない。1 以外 (0 = worker lock を失った・-1 = key の型/時刻が
+  // 不正・KV 障害・想定外の応答) は隔離されていないので warn を残す。挙動は従来どおり (job_corrupt で次の member へ進む)。
+  it.each([
+    [0, 'lock_lost'], [-1, 'invalid_state'], ['1', 'unexpected_reply'], ['kv-failure', 'storage'],
+  ] as const)('warns when a corrupt job is not quarantined (reply %s → %s) and keeps processing the next member', async (reply, outcome) => {
+    const warn = vi.spyOn(logger, 'warn');
+    const bad = toHex(123n, { size: 32 }); h.store!.zsets.set(LICENSE_DUE_INDEX, new Map([[bad, NOW - 1], [job.paymentKey, NOW]]));
+    const isQuarantine = (script: string) => script.includes('ipairs({2,3})');
+    if (reply === 'kv-failure') h.failEval = isQuarantine;
+    else h.reply = async (script, run) => isQuarantine(script) ? reply : run();
+    expect(await runLicenseWorker()).toMatchObject({ failed: 1, processed: 1 }); expect(current().status).toBe('submitted');
+    expect(warn).toHaveBeenCalledWith('license.worker_quarantine_failed', expect.objectContaining({ member: bad, outcome }));
+    expect(h.store!.zsets.get(LICENSE_DUE_INDEX)?.has(bad)).toBe(true);
+    expect(h.store!.zsets.get('store:license:repair:quarantine')?.has('mint:' + bad) ?? false).toBe(false);
   });
   it('prioritizes the active hash ahead of a full page of older blocked jobs', async () => {
     await run(); const original = h.rpc.getTransactionReceipt.getMockImplementation()!; advance();

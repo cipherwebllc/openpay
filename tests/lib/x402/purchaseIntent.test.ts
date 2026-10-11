@@ -8,12 +8,12 @@ import fixture from '../../fixtures/x402/purchaseIntent.json';
 
 const h = vi.hoisted(() => ({
   reads: new Map<string, (string | null)[]>(),
-  kvGet: vi.fn(), kvSet: vi.fn(), kvEval: vi.fn(), warn: vi.fn(),
+  kvGet: vi.fn(), kvSet: vi.fn(), kvEval: vi.fn(), warn: vi.fn(), info: vi.fn(),
   client: { readContract: vi.fn(), getBlock: vi.fn(), getBlockNumber: vi.fn(), getLogs: vi.fn(), getTransactionReceipt: vi.fn() },
   transportForChain: vi.fn(() => ({})),
 }));
 vi.mock('@/lib/kv', () => ({ kvGet: h.kvGet, kvSet: h.kvSet, kvEval: h.kvEval }));
-vi.mock('@/lib/logger', () => ({ logger: { warn: h.warn } }));
+vi.mock('@/lib/logger', () => ({ logger: { warn: h.warn, info: h.info } }));
 vi.mock('@/lib/chains', () => ({ chainObjectForId: () => ({}), transportForChain: h.transportForChain }));
 vi.mock('@/lib/x402/hostedStore', () => ({ hostedContentKey: (id: string, rev: number) => `store:hosted:content:${id}:${rev}` }));
 vi.mock('@/lib/x402/facilitatorSettle', () => ({ parseFacilitatorRequest: vi.fn() }));
@@ -483,14 +483,10 @@ describe('PurchaseIntent reconciler decisions (no Lua)', () => {
   });
 
   it('default receipt adapter requires the exact Settled tuple and successful receipt', async () => {
-    const topic = (address: Address) => `0x${address.slice(2).padStart(64, '0')}` as Hex;
-    const log = {
-      address: active.forwarder,
-      topics: [keccak256(toHex('Settled(address,bytes32,address,uint256,address,uint256)')), topic(active.claim.payer), active.claim.nonce, topic(active.merchant)],
-      data: encodeAbiParameters([{ type: 'uint256' }, { type: 'address' }, { type: 'uint256' }], [BigInt(active.merchantValue), active.feeReceiver, BigInt(active.feeValue)]),
-    };
-    h.client.getTransactionReceipt.mockResolvedValue({ status: 'success', logs: [log] });
+    h.client.getTransactionReceipt.mockResolvedValue({ status: 'success', ...finalizedAt(12_000n), logs: [exactSettledLog()] });
+    finality(12_100n);
     expect(await defaultPurchaseReconcileChain.receiptMatches(active, TX)).toBe(true);
+    const log = exactSettledLog();
     for (const receipt of [{ status: 'reverted', logs: [log] }, { status: 'success', logs: [] }, { status: 'success', logs: [{ ...log, address: active.feeReceiver }] }]) {
       h.client.getTransactionReceipt.mockResolvedValue(receipt);
       expect(await defaultPurchaseReconcileChain.receiptMatches(active, TX)).toBe(false);
@@ -502,4 +498,113 @@ describe('PurchaseIntent reconciler decisions (no Lua)', () => {
     h.client.readContract.mockResolvedValue(true);
     expect(await defaultPurchaseReconcileChain.authorizationUsed(active)).toBe(true);
   });
+
+  // 2026-10-12 (Grok 再レビュー・user 承認): 照合の経路の JPYC 購入は、一致した receipt が finalized・canonical な
+  // ブロックにあるときだけ確定する (USDC rail の reconcile と同じく確定を待つ)。以前は latest の receipt で確定していた。
+  // finalized の取り方は取り消しの証明 (authorizationCancel) と license の reconcile にそろえる。
+  describe('default receipt adapter finality', () => {
+    const matching = (blockNumber: bigint) => h.client.getTransactionReceipt.mockResolvedValue({ status: 'success', ...finalizedAt(blockNumber), logs: [exactSettledLog()] });
+
+    it('accepts a matching receipt at or below a canonical finalized block', async () => {
+      matching(12_000n); finality(12_100n);
+      expect(await defaultPurchaseReconcileChain.receiptMatches(active, TX)).toBe(true);
+      expect(h.client.getBlock).toHaveBeenNthCalledWith(1, { blockTag: 'finalized' });
+      expect(h.client.getBlock).toHaveBeenNthCalledWith(2, { blockNumber: 12_000n });
+      expect(h.client.getBlock).toHaveBeenNthCalledWith(3, { blockNumber: 12_100n });
+      // receipt が finalized のブロックそのものなら、canonical の確認が finalized の再確認を兼ねる。
+      h.client.getBlock.mockClear(); finality(12_000n);
+      expect(await defaultPurchaseReconcileChain.receiptMatches(active, TX)).toBe(true);
+      expect(h.client.getBlock).toHaveBeenCalledTimes(2);
+    });
+
+    it('a non-matching receipt is false without reading finality', async () => {
+      h.client.getTransactionReceipt.mockResolvedValue({ status: 'success', ...finalizedAt(12_000n), logs: [] });
+      finality(12_100n);
+      expect(await defaultPurchaseReconcileChain.receiptMatches(active, TX)).toBe(false);
+      expect(h.client.getBlock).not.toHaveBeenCalled();
+    });
+
+    // 確定前・確定を確かめられないときは false (= 一致しない) でなく throw: false だと走査の cursor が候補のページを越えて
+    // 支払いを再発見できなくなる。throw は reconcile が「候補のページから次回再試行」に回す (receipt の一時障害と同じ)。
+    it.each([
+      ['not_finalized', () => { matching(12_101n); finality(12_100n); }],
+      ['finalized_unavailable', () => { matching(12_000n); h.client.getBlock.mockResolvedValue({ number: 12_100n }); }],
+      ['not_canonical', () => { matching(12_000n); finality(12_100n, { 12_000: `0x${'e'.repeat(64)}` }); }],
+      ['finality_changed', () => { matching(12_000n); finality(12_100n, { 12_100: `0x${'e'.repeat(64)}` }); }],
+      ['not_finalized', () => { h.client.getTransactionReceipt.mockResolvedValue({ status: 'success', blockNumber: null, blockHash: null, logs: [exactSettledLog()] }); finality(12_100n); }],
+    ] as const)('throws %s instead of confirming the purchase', async (reason, arrange) => {
+      arrange();
+      await expect(defaultPurchaseReconcileChain.receiptMatches(active, TX)).rejects.toMatchObject({ name: 'PurchaseReceiptNotFinalizedError', reason });
+    });
+
+    it('a finalized-block RPC failure propagates (never a confirmation)', async () => {
+      matching(12_000n); h.client.getBlock.mockRejectedValue(new Error('finalized unsupported'));
+      await expect(defaultPurchaseReconcileChain.receiptMatches(active, TX)).rejects.toThrow('finalized unsupported');
+    });
+
+    const scanToCandidate = () => {
+      h.client.readContract.mockResolvedValue(true);
+      h.client.getBlockNumber.mockResolvedValue(14_500n);
+      h.client.getLogs.mockImplementation(async ({ fromBlock, event }: { fromBlock: bigint; event?: { name?: string } }) =>
+        event?.name === 'AuthorizationUsed' && fromBlock === 12_000n ? [{ transactionHash: TX }] : []);
+    };
+    const expectRetryFromCandidatePage = () => {
+      const next = JSON.parse(h.kvEval.mock.calls.at(-1)![2][3]);
+      expect(next).toMatchObject({ state: 'indeterminate', reconcileFromBlock: '12000', nextReconcileAt: NOW + PURCHASE_RECONCILE_RETRY_MS });
+      expect(next).not.toHaveProperty('txHash');
+    };
+
+    it('reconcile keeps a not-yet-finalized match pending and retries from its candidate page', async () => {
+      scanToCandidate(); matching(12_050n); finality(12_049n);
+      expect(await reconcilePurchaseIntent(SALT, { now: NOW })).toEqual({ ok: true, state: 'pending' });
+      expectRetryFromCandidatePage();
+      // 確定を待っているだけ (not_finalized) は info。warn (Sentry) には出さない。
+      expect(h.info).toHaveBeenCalledWith('creator_store.purchase_receipt_not_finalized', { intentSalt: SALT, reason: 'not_finalized' });
+      expect(h.warn).not.toHaveBeenCalledWith('creator_store.purchase_receipt_not_finalized', expect.anything());
+    });
+
+    // Fable 最終監査 P2-2: finalized に対応しない RPC では確定しない理由がどこにも出ず、運営が観測できなかった。
+    it.each(['finalized_unavailable', 'not_canonical'] as const)('records %s as a warning and keeps the same candidate-page retry', async (reason) => {
+      scanToCandidate(); matching(12_000n);
+      if (reason === 'finalized_unavailable') h.client.getBlock.mockResolvedValue({ number: 12_100n });
+      else finality(12_100n, { 12_000: `0x${'e'.repeat(64)}` });
+      expect(await reconcilePurchaseIntent(SALT, { now: NOW })).toEqual({ ok: true, state: 'pending' });
+      expectRetryFromCandidatePage();
+      expect(h.warn).toHaveBeenCalledWith('creator_store.purchase_receipt_not_finalized', { intentSalt: SALT, reason });
+      expect(h.info).not.toHaveBeenCalled();
+    });
+
+    it('a failing logger does not change the candidate-page retry, and other receipt errors are not reported as finality', async () => {
+      scanToCandidate(); matching(12_000n); h.client.getBlock.mockResolvedValue({ number: 12_100n });
+      h.warn.mockImplementationOnce(() => { throw new Error('sentry transport down'); });
+      expect(await reconcilePurchaseIntent(SALT, { now: NOW })).toEqual({ ok: true, state: 'pending' });
+      expectRetryFromCandidatePage();
+      h.warn.mockClear(); h.kvEval.mockClear(); reads(key, active);
+      h.client.getTransactionReceipt.mockRejectedValue(new Error('receipt unavailable'));
+      expect(await reconcilePurchaseIntent(SALT, { now: NOW })).toEqual({ ok: true, state: 'pending' });
+      expectRetryFromCandidatePage();
+      expect(h.warn).not.toHaveBeenCalled(); expect(h.info).not.toHaveBeenCalled();
+    });
+  });
 });
+
+function exactSettledLog() {
+  const topic = (address: Address) => `0x${address.slice(2).padStart(64, '0')}` as Hex;
+  return {
+    address: active.forwarder,
+    topics: [keccak256(toHex('Settled(address,bytes32,address,uint256,address,uint256)')), topic(active.claim.payer), active.claim.nonce, topic(active.merchant)],
+    data: encodeAbiParameters([{ type: 'uint256' }, { type: 'address' }, { type: 'uint256' }], [BigInt(active.merchantValue), active.feeReceiver, BigInt(active.feeValue)]),
+  };
+}
+const blockHashOf = (blockNumber: bigint) => toHex(blockNumber, { size: 32 });
+function finalizedAt(blockNumber: bigint) {
+  return { blockNumber, blockHash: blockHashOf(blockNumber) };
+}
+// finalized tag は finalizedNumber、番号指定は各番号の canonical hash (overrides で別 fork の hash に差し替える) を返す RPC。
+function finality(finalizedNumber: bigint, overrides: Record<number, Hex> = {}) {
+  h.client.getBlock.mockImplementation(async (args: { blockTag?: string; blockNumber?: bigint }) => {
+    if (args.blockTag === 'finalized') return { number: finalizedNumber, hash: blockHashOf(finalizedNumber) };
+    const number = args.blockNumber!;
+    return { number, hash: overrides[Number(number)] ?? blockHashOf(number) };
+  });
+}
