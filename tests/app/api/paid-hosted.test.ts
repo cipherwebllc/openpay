@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { NextResponse } from 'next/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getAddress, serializeSignature, type Hex } from 'viem';
-import { HOSTED_REDELIVERY_WINDOW_MS } from '@/lib/x402/hostedRedelivery';
+import { HOSTED_REDELIVERY_AFTER_VALID_BEFORE_MS } from '@/lib/x402/hostedRedelivery';
 import { paymentSignatureFingerprint } from '@/lib/x402/paymentRedelivery';
 import { forwardingCases, paidRouteWire, unforwardedHeaders, v2PaymentHeader } from '../../helpers/paidRouteWire';
 
@@ -48,6 +48,7 @@ const routeMocks = vi.hoisted(() => ({
   notify: vi.fn(),
   warn: vi.fn(),
   rights: vi.fn(),
+  statusRateLimit: vi.fn(),
 }));
 
 vi.mock('@/lib/x402/purchaseStats', () => ({ recordHostedPurchase: routeMocks.recordPurchase }));
@@ -79,6 +80,8 @@ vi.mock('@/lib/x402/hostedStore', () => ({
 vi.mock('@/lib/x402/purchaseIntent', () => ({
   PURCHASE_DEPLOYMENT_VERSION: 'creator-store.purchase.v1',
   PURCHASE_QUOTE_TTL_SEC: 600,
+  // status API (/api/store/purchase/status) から照合させる test 用。
+  isPurchaseIntentSalt: (value: unknown) => typeof value === 'string' && /^0x[0-9a-f]{64}$/.test(value),
   buildPurchaseAuthorizationClaim: routeMocks.buildClaim,
   checkPurchaseQuoteRateLimit: routeMocks.checkQuoteRateLimit,
   claimPurchaseSettlement: routeMocks.claimSettlement,
@@ -120,6 +123,7 @@ vi.mock('@/lib/logger', () => ({
   logger: { debug: vi.fn(), info: vi.fn(), warn: routeMocks.warn, error: vi.fn() },
 }));
 vi.mock('@/lib/license/rights', () => ({ resolveLicenseRights: routeMocks.rights }));
+vi.mock('@/lib/x402/facilitatorStatusRateLimit', () => ({ checkFacilitatorStatusRateLimit: routeMocks.statusRateLimit }));
 
 vi.mock('@/lib/x402/storeRailSelection', () => ({
   associateStoreRailIntent: routeMocks.associateRail,
@@ -307,11 +311,12 @@ function paymentPayload(input?: {
   intentSalt?: string;
   omitIntentSalt?: boolean;
   signature?: string;
+  validBefore?: string;
 }) {
   const authorization: Record<string, string> = {
     from: PAYER,
     validAfter: '0',
-    validBefore: '1999999999',
+    validBefore: input?.validBefore ?? '1999999999',
   };
   if (!input?.omitIntentSalt) {
     authorization.intentSalt = input?.intentSalt ?? INTENT_SALT;
@@ -519,7 +524,7 @@ describe('hosted creator-store paid route', () => {
   it('takedown refuses fresh quotes and settled redelivery never verifies or charges again', async () => {
     routeMocks.getHostedProduct.mockResolvedValue({ ...productFixture(), saleActive: false, contentAvailable: false });
     routeMocks.getHostedContent.mockResolvedValue(null);
-    // 確定から 30 分以内の再送 (窓の外は下の「確定後の署名ヘッダー再送」で固定する)。
+    // 署名の validBefore から 20 分以内の再送 (窓の外は下の「確定後の署名ヘッダー再送」で固定する)。
     const settled = { ...intentFixture('settled'), settledAt: Date.now() - 60_000 };
     routeMocks.getIntent.mockResolvedValue(settled);
     routeMocks.readSettledAccess.mockResolvedValue({ ok: true, intent: settled, ownership: {}, purchase: {}, grant: {} });
@@ -1126,26 +1131,138 @@ describe('R2 hosted JPYC response pinning', () => {
 });
 
 // 確定後の署名ヘッダー再送は「応答を取りこぼした買い手の再試行」用。一致に要る値 (payer・resourceId・
-// 署名内容・署名の指紋) はオンチェーンの calldata から組み立てられるので、本文を返すのは確定 (settledAt)
-// から 30 分まで。恒久の再取得は SIWE の library / content API が担う。
-describe('確定後の署名ヘッダー再送は確定から 30 分まで (JPYC)', () => {
+// 署名内容・署名の指紋) はオンチェーンの calldata から組み立てられるので、本文を返すのは署名の validBefore
+// から 20 分まで。確定を記録した時刻 (settledAt) は起点にしない: 決済待ちの購入は誰でも呼べる照合
+// (status API・この route への再送) で確定し、settledAt はその照合の時刻になるため。
+// 恒久の再取得は SIWE の library / content API が担う。
+describe('確定後の署名ヘッダー再送は署名の validBefore から 20 分まで (JPYC)', () => {
   const path = `/api/paid/hosted/${RESOURCE_ID}?payer=${PAYER}`;
-  const SETTLED_AT = 1_700_000_004_000;
   const MINUTE = 60_000;
+  const SETTLED_AT = 1_700_000_004_000;
+  // 署名の validBefore (秒)。確定 (SETTLED_AT) はその 5 分前。
+  const VALID_BEFORE_SEC = Math.floor(SETTLED_AT / 1_000) + 5 * 60;
+  const VALID_BEFORE_MS = VALID_BEFORE_SEC * 1_000;
+  const VALID_BEFORE = String(VALID_BEFORE_SEC);
+  const DEADLINE = VALID_BEFORE_MS + HOSTED_REDELIVERY_AFTER_VALID_BEFORE_MS;
   let clock: ReturnType<typeof vi.spyOn>;
+
+  type ClaimedIntent = Record<string, unknown> & { claim: ReturnType<typeof claimFixture> };
+
+  /** 指定した state の intent に、validBefore を入れた claim を持たせる。 */
+  function intentWith(
+    state: Exclude<IntentState, 'quoted'>,
+    overrides: Record<string, unknown> = {},
+  ): ClaimedIntent {
+    const base = intentFixture(state) as ClaimedIntent;
+    return { ...base, claim: { ...base.claim, validBefore: VALID_BEFORE }, ...overrides };
+  }
 
   function useSettled(intent: Record<string, unknown>) {
     routeMocks.getIntent.mockResolvedValue(intent);
     routeMocks.readSettledAccess.mockResolvedValue({ ok: true, intent, ownership: {}, purchase: {}, grant: {} });
   }
 
-  async function resend(headers: HeadersInit = { 'X-PAYMENT': paymentHeader() }, at = path) {
+  async function resend(
+    headers: HeadersInit = { 'X-PAYMENT': paymentHeader({ validBefore: VALID_BEFORE }) },
+    at = path,
+  ) {
     return callHosted(await loadRoute(), at, headers);
   }
 
+  // claim は署名内容と、本物の署名の指紋 (正規化 + sha256) から導く。保存済み claim との照合も本物と
+  // 同じく「authorizationHash と指紋の完全一致」にする (定数を返す mock では一致の検証にならない)。
+  type Payload = { payload: { signature: string; authorization: Record<string, string> } };
+  function claimFor(value: unknown) {
+    const { signature, authorization } = (value as Payload).payload;
+    const fingerprint = paymentSignatureFingerprint(signature) ?? 'invalid';
+    const claim = {
+      ...claimFixture(fingerprint),
+      payer: getAddress(authorization.from),
+      validAfter: authorization.validAfter,
+      validBefore: authorization.validBefore,
+    };
+    return {
+      ok: true as const,
+      claim,
+      authorizationHash: createHash('sha256').update(JSON.stringify(claim)).digest('hex'),
+      signatureFingerprint: fingerprint,
+    };
+  }
+
+  function useExactClaimMatching() {
+    routeMocks.buildClaim.mockImplementation((input: { paymentPayload: unknown }) => claimFor(input.paymentPayload));
+    routeMocks.authorizationMatches.mockImplementation(
+      (intent: { authorizationHash: string; claim: { signatureFingerprint: string } }, claim: { signatureFingerprint: string }) =>
+        createHash('sha256').update(JSON.stringify(claim)).digest('hex') === intent.authorizationHash &&
+        claim.signatureFingerprint === intent.claim.signatureFingerprint,
+    );
+  }
+
+  // 買い手がクライアントで署名して送ったヘッダー。署名は r‖s‖v の 65 byte。
+  const r = `0x${'4d'.repeat(32)}` as Hex;
+  const s = `0x${'2c'.repeat(32)}` as Hex;
+  const buyerSignature = `${r}${s.slice(2)}1b`;
+  const buyerHeaders = () => ({
+    'X-PAYMENT': paymentHeader({ signature: buyerSignature, validBefore: VALID_BEFORE }),
+  });
+
+  /** 買い手の署名どおりの claim を保存した intent。 */
+  function buyerIntent(
+    state: 'settled' | 'indeterminate',
+    overrides: Record<string, unknown> = {},
+  ): ClaimedIntent {
+    const buyer = claimFor(paymentPayload({ signature: buyerSignature, validBefore: VALID_BEFORE }));
+    return {
+      ...(intentFixture(state) as ClaimedIntent),
+      claim: buyer.claim,
+      authorizationHash: buyer.authorizationHash,
+      ...overrides,
+    };
+  }
+
+  // 他人が見るのは forwarder settle の calldata だけ (ヘッダーは漏れていない)。
+  const calldata = {
+    from: PAYER.toLowerCase(),
+    merchant: SELLER.toLowerCase(),
+    merchantValue: 5n * 10n ** 18n,
+    feeValue: 10n ** 18n,
+    validAfter: 0n,
+    validBefore: BigInt(VALID_BEFORE_SEC),
+    intentSalt: INTENT_SALT,
+    v: 27,
+    r,
+    s,
+  };
+  function rebuiltPayload(
+    signature: string = serializeSignature({ r: calldata.r, s: calldata.s, v: BigInt(calldata.v) }),
+  ) {
+    return {
+      x402Version: 1,
+      scheme: 'exact',
+      network: 'eip155:80002',
+      payload: {
+        signature,
+        authorization: {
+          from: getAddress(calldata.from),
+          validAfter: calldata.validAfter.toString(),
+          validBefore: calldata.validBefore.toString(),
+          intentSalt: calldata.intentSalt,
+        },
+      },
+    };
+  }
+  const encode = (value: unknown) => Buffer.from(JSON.stringify(value), 'utf8').toString('base64');
+  const thirdPartyPath = `/api/paid/hosted/${RESOURCE_ID}?payer=${calldata.from}`;
+  const thirdPartyHeaders = (signature?: string) => ({
+    'X-PAYMENT': encode(rebuiltPayload(signature)),
+    'x-forwarded-for': '203.0.113.77',
+    'user-agent': 'not-the-buyer',
+  });
+
   beforeEach(() => {
     clock = vi.spyOn(Date, 'now').mockReturnValue(SETTLED_AT);
-    useSettled({ ...intentFixture('settled'), settledAt: SETTLED_AT });
+    useSettled(intentWith('settled', { settledAt: SETTLED_AT }));
+    routeMocks.statusRateLimit.mockResolvedValue(true);
   });
 
   afterEach(() => {
@@ -1153,16 +1270,16 @@ describe('確定後の署名ヘッダー再送は確定から 30 分まで (JPYC
     routeMocks.env.enableLicenseNft = false;
   });
 
-  it('窓は自社商品・agent 注文の再配信と同じ 30 分', () => {
-    expect(HOSTED_REDELIVERY_WINDOW_MS).toBe(30 * MINUTE);
+  it('窓は署名の validBefore から 20 分 (validBefore は見積もりから最大 10 分なので、見積もりから最大 30 分)', () => {
+    expect(HOSTED_REDELIVERY_AFTER_VALID_BEFORE_MS).toBe(20 * MINUTE);
   });
 
   it.each([
-    ['確定の直後', 0],
-    ['29 分後', 29 * MINUTE],
-    ['30 分の 1ms 前', HOSTED_REDELIVERY_WINDOW_MS - 1],
-  ])('%s の再送は従来どおり本文を返し、verify/settle しない', async (_label, elapsed) => {
-    clock.mockReturnValue(SETTLED_AT + elapsed);
+    ['確定の直後', SETTLED_AT],
+    ['validBefore ちょうど', VALID_BEFORE_MS],
+    ['validBefore + 20 分の 1ms 前', DEADLINE - 1],
+  ])('%s の再送は従来どおり本文を返し、verify/settle しない', async (_label, at) => {
+    clock.mockReturnValue(at);
     const response = await resend();
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({
@@ -1175,11 +1292,11 @@ describe('確定後の署名ヘッダー再送は確定から 30 分まで (JPYC
   });
 
   it.each([
-    ['ちょうど 30 分', HOSTED_REDELIVERY_WINDOW_MS],
-    ['31 分後', 31 * MINUTE],
-    ['1 年後', 365 * 24 * 60 * MINUTE],
-  ])('%s の再送は 409 で本文を返さず、購入の証拠と library を案内する', async (_label, elapsed) => {
-    clock.mockReturnValue(SETTLED_AT + elapsed);
+    ['validBefore + 20 分ちょうど', DEADLINE],
+    ['validBefore + 21 分', DEADLINE + MINUTE],
+    ['1 年後', DEADLINE + 365 * 24 * 60 * MINUTE],
+  ])('%s の再送は 409 で本文を返さず、購入の証拠と library を案内する', async (_label, at) => {
+    clock.mockReturnValue(at);
     const response = await resend();
     expect(response.status).toBe(409);
     const body = await response.json();
@@ -1192,8 +1309,8 @@ describe('確定後の署名ヘッダー再送は確定から 30 分まで (JPYC
       network: 'eip155:80002',
       library: '/store/library',
       contentApi: `/api/store/content/${RESOURCE_ID}`,
-      message: expect.stringContaining('within 30 minutes of settlement'),
-      messageJa: expect.stringContaining('確定から 30 分以内'),
+      message: expect.stringContaining('until 20 minutes after the signed payment authorization expires'),
+      messageJa: expect.stringContaining('有効期限（validBefore）から 20 分後まで'),
     });
     expect(body).not.toHaveProperty('value');
     expect(routeMocks.getHostedContent).not.toHaveBeenCalled();
@@ -1203,92 +1320,25 @@ describe('確定後の署名ヘッダー再送は確定から 30 分まで (JPYC
     expect(routeMocks.settle).not.toHaveBeenCalled();
     expect(routeMocks.warn).toHaveBeenCalledTimes(1);
     expect(routeMocks.warn).toHaveBeenCalledWith('x402.hosted.redelivery_expired', {
-      rail: 'jpyc', resourceId: RESOURCE_ID, ageSec: Math.floor(elapsed / 1_000),
+      rail: 'jpyc',
+      resourceId: RESOURCE_ID,
+      ageSec: Math.floor((at - SETTLED_AT) / 1_000),
+      sinceValidBeforeSec: Math.floor((at - VALID_BEFORE_MS) / 1_000),
     });
   });
 
-  it('forwarder settle の calldata だけから組み立てたヘッダーでも、30 分を過ぎた他人には本文を返さない', async () => {
-    // claim は署名内容と、本物の署名の指紋 (正規化 + sha256) から導く。保存済み claim との照合も本物と
-    // 同じく「authorizationHash と指紋の完全一致」にする (定数を返す mock では一致の検証にならない)。
-    type Payload = { payload: { signature: string; authorization: Record<string, string> } };
-    const claimFor = (value: unknown) => {
-      const { signature, authorization } = (value as Payload).payload;
-      const fingerprint = paymentSignatureFingerprint(signature) ?? 'invalid';
-      const claim = {
-        ...claimFixture(fingerprint),
-        payer: getAddress(authorization.from),
-        validAfter: authorization.validAfter,
-        validBefore: authorization.validBefore,
-      };
-      return {
-        ok: true as const,
-        claim,
-        authorizationHash: createHash('sha256').update(JSON.stringify(claim)).digest('hex'),
-        signatureFingerprint: fingerprint,
-      };
-    };
-    routeMocks.buildClaim.mockImplementation((input: { paymentPayload: unknown }) => claimFor(input.paymentPayload));
-    routeMocks.authorizationMatches.mockImplementation(
-      (intent: { authorizationHash: string; claim: { signatureFingerprint: string } }, claim: { signatureFingerprint: string }) =>
-        createHash('sha256').update(JSON.stringify(claim)).digest('hex') === intent.authorizationHash &&
-        claim.signatureFingerprint === intent.claim.signatureFingerprint,
-    );
-
-    // 買い手がクライアントで署名して送ったヘッダー。署名は r‖s‖v の 65 byte。
-    const r = `0x${'4d'.repeat(32)}` as Hex;
-    const s = `0x${'2c'.repeat(32)}` as Hex;
-    const buyerSignature = `${r}${s.slice(2)}1b`;
-    const buyer = claimFor(paymentPayload({ signature: buyerSignature }));
-    useSettled({
-      ...intentFixture('settled'),
-      settledAt: SETTLED_AT,
-      claim: buyer.claim,
-      authorizationHash: buyer.authorizationHash,
-    });
-
-    // 他人が見るのは forwarder settle の calldata だけ (ヘッダーは漏れていない)。
-    const calldata = {
-      from: PAYER.toLowerCase(),
-      merchant: SELLER.toLowerCase(),
-      merchantValue: 5n * 10n ** 18n,
-      feeValue: 10n ** 18n,
-      validAfter: 0n,
-      validBefore: 1_999_999_999n,
-      intentSalt: INTENT_SALT,
-      v: 27,
-      r,
-      s,
-    };
-    const rebuilt = {
-      x402Version: 1,
-      scheme: 'exact',
-      network: 'eip155:80002',
-      payload: {
-        signature: serializeSignature({ r: calldata.r, s: calldata.s, v: BigInt(calldata.v) }),
-        authorization: {
-          from: getAddress(calldata.from),
-          validAfter: calldata.validAfter.toString(),
-          validBefore: calldata.validBefore.toString(),
-          intentSalt: calldata.intentSalt,
-        },
-      },
-    };
-    const encode = (value: unknown) => Buffer.from(JSON.stringify(value), 'utf8').toString('base64');
-    const thirdPartyPath = `/api/paid/hosted/${RESOURCE_ID}?payer=${calldata.from}`;
-    const thirdParty = {
-      'X-PAYMENT': encode(rebuilt),
-      'x-forwarded-for': '203.0.113.77',
-      'user-agent': 'not-the-buyer',
-    };
+  it('forwarder settle の calldata だけから組み立てたヘッダーでも、validBefore + 20 分を過ぎた他人には本文を返さない', async () => {
+    useExactClaimMatching();
+    useSettled(buyerIntent('settled', { settledAt: SETTLED_AT }));
     // 前提: 組み立てた署名は買い手の署名と同じ (server は買い手の再試行と区別できない)。
-    expect(rebuilt.payload.signature).toBe(buyerSignature);
+    expect(rebuiltPayload().payload.signature).toBe(buyerSignature);
 
-    clock.mockReturnValue(SETTLED_AT + 29 * MINUTE);
-    const inWindow = await resend(thirdParty, thirdPartyPath);
+    clock.mockReturnValue(DEADLINE - MINUTE);
+    const inWindow = await resend(thirdPartyHeaders(), thirdPartyPath);
     expect(inWindow.status).toBe(200);
 
-    clock.mockReturnValue(SETTLED_AT + 31 * MINUTE);
-    const late = await resend(thirdParty, thirdPartyPath);
+    clock.mockReturnValue(DEADLINE + MINUTE);
+    const late = await resend(thirdPartyHeaders(), thirdPartyPath);
     expect(late.status).toBe(409);
     const text = await late.text();
     expect(text).not.toContain('paid content');
@@ -1296,8 +1346,7 @@ describe('確定後の署名ヘッダー再送は確定から 30 分まで (JPYC
 
     // 完全一致の要求は変わらない: v だけ変えた署名は窓の中でも authorization_conflict。
     clock.mockReturnValue(SETTLED_AT + MINUTE);
-    const forged = { ...rebuilt, payload: { ...rebuilt.payload, signature: `${r}${s.slice(2)}1c` } };
-    const conflict = await resend({ 'X-PAYMENT': encode(forged) }, thirdPartyPath);
+    const conflict = await resend(thirdPartyHeaders(`${r}${s.slice(2)}1c`), thirdPartyPath);
     expect(conflict.status).toBe(409);
     expect(await conflict.json()).toEqual({ ok: false, error: 'authorization_conflict' });
 
@@ -1306,10 +1355,78 @@ describe('確定後の署名ヘッダー再送は確定から 30 分まで (JPYC
     expect(routeMocks.settle).not.toHaveBeenCalled();
   });
 
-  it('初回の購入 (この request 自身が settle した応答) は settledAt に関係なく本文を返す', async () => {
-    clock.mockReturnValue(SETTLED_AT + 2 * 60 * MINUTE);
+  // 決済待ち (indeterminate) の購入は、照合が on-chain の settle を見つけたときに、照合した時刻を settledAt に
+  // して確定する (lib/x402/purchase/reconcile.ts の finalizeHostedPurchase({ settledAt: now }))。照合は status API
+  // からもこの route への再送からも、誰でも起こせる (store-reconcile の cron は 1 日 1 回)。
+  describe('決済待ちを後から照合させても、照合の時刻から窓は開かない', () => {
+    const LATE = VALID_BEFORE_MS + 3 * 60 * MINUTE;
+    let stored: ClaimedIntent;
+
+    beforeEach(() => {
+      useExactClaimMatching();
+      stored = buyerIntent('indeterminate');
+      routeMocks.getIntent.mockImplementation(async (salt: string) =>
+        salt.toLowerCase() === INTENT_SALT ? stored : null,
+      );
+      routeMocks.readSettledAccess.mockImplementation(async () => ({
+        ok: true, intent: stored, ownership: {}, purchase: {}, grant: {},
+      }));
+      routeMocks.reconcile.mockImplementation(async () => {
+        stored = buyerIntent('settled', { settledAt: Date.now() });
+        return { ok: true, state: 'settled', txHash: TX_HASH };
+      });
+    });
+
+    it('他人が status API で照合させた直後でも、calldata から組み立てたヘッダーには本文を返さない', async () => {
+      clock.mockReturnValue(LATE);
+      const { GET: status } = await import('@/app/api/store/purchase/status/route');
+      const checked = await status(new Request(`http://test.local/api/store/purchase/status?intentSalt=${INTENT_SALT}`));
+      expect(checked.status).toBe(200);
+      expect(await checked.json()).toEqual({ ok: true, state: 'settled', txHash: TX_HASH });
+      expect(routeMocks.reconcile).toHaveBeenCalledTimes(1);
+      expect(stored).toMatchObject({ state: 'settled', settledAt: LATE });
+
+      clock.mockReturnValue(LATE + MINUTE);
+      const response = await resend(thirdPartyHeaders(), thirdPartyPath);
+      expect(response.status).toBe(409);
+      const text = await response.text();
+      expect(text).not.toContain('paid content');
+      expect(JSON.parse(text)).toMatchObject({ error: 'purchase_redelivery_expired', txHash: TX_HASH });
+      expect(routeMocks.getHostedContent).not.toHaveBeenCalled();
+      expect(response.headers.has('PAYMENT-RESPONSE')).toBe(false);
+      expect(routeMocks.warn).toHaveBeenCalledWith('x402.hosted.redelivery_expired', {
+        rail: 'jpyc', resourceId: RESOURCE_ID, ageSec: 60, sinceValidBeforeSec: (3 * 60 + 1) * 60,
+      });
+    });
+
+    it('この route への再送で照合させても、同じく本文を返さない', async () => {
+      clock.mockReturnValue(LATE);
+      const response = await resend(thirdPartyHeaders(), thirdPartyPath);
+      expect(routeMocks.reconcile).toHaveBeenCalledWith(INTENT_SALT);
+      expect(stored).toMatchObject({ state: 'settled', settledAt: LATE });
+      expect(response.status).toBe(409);
+      const text = await response.text();
+      expect(text).not.toContain('paid content');
+      expect(JSON.parse(text)).toMatchObject({ error: 'purchase_redelivery_expired', txHash: TX_HASH });
+      expect(routeMocks.getHostedContent).not.toHaveBeenCalled();
+      expect(routeMocks.settle).not.toHaveBeenCalled();
+    });
+
+    it('買い手の再試行で validBefore + 20 分の内側に照合が済めば、従来どおり本文を返す', async () => {
+      clock.mockReturnValue(DEADLINE - 1);
+      const response = await resend(buyerHeaders());
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({ ok: true, value: 'paid content', txHash: TX_HASH });
+      expect(routeMocks.reconcile).toHaveBeenCalledWith(INTENT_SALT);
+      expect(routeMocks.settle).not.toHaveBeenCalled();
+      expect(routeMocks.warn).not.toHaveBeenCalled();
+    });
+  });
+
+  it('初回の購入 (この request 自身が settle した応答) は窓に関係なく本文を返す', async () => {
+    clock.mockReturnValue(DEADLINE + 2 * 60 * MINUTE);
     routeMocks.getIntent.mockImplementation(async () => intentFixture());
-    // finalize / read-back が古い settledAt を返しても (別 worker の確定等)、この request の settle 成功は窓の外。
+    // finalize / read-back が窓の外の intent を返しても (別 worker の確定等)、この request の settle 成功は窓の外。
     const response = await resend();
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ ok: true, value: 'paid content', txHash: TX_HASH });
@@ -1320,22 +1437,9 @@ describe('確定後の署名ヘッダー再送は確定から 30 分まで (JPYC
     expect(routeMocks.warn).not.toHaveBeenCalled();
   });
 
-  it('決済待ちからの再試行で確定した購入は、確定の直後なので本文を返す', async () => {
-    const now = SETTLED_AT + 3 * 60 * MINUTE; // 署名から 3 時間後に reconciler が確定した
-    clock.mockReturnValue(now);
-    useSettled({ ...intentFixture('settled'), settledAt: now - 5_000 });
-    routeMocks.getIntent.mockResolvedValueOnce(intentFixture('indeterminate'));
-    routeMocks.reconcile.mockResolvedValue({ ok: true, state: 'settled', txHash: TX_HASH });
-    const response = await resend();
-    expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ ok: true, value: 'paid content', txHash: TX_HASH });
-    expect(routeMocks.reconcile).toHaveBeenCalledWith(INTENT_SALT);
-    expect(routeMocks.settle).not.toHaveBeenCalled();
-  });
-
   it.each(['settling', 'indeterminate'] as const)('%s のままの再試行は時間に関係なく従来どおり 202 pending', async (state) => {
-    clock.mockReturnValue(SETTLED_AT + 3 * 60 * MINUTE);
-    routeMocks.getIntent.mockResolvedValue(intentFixture(state));
+    clock.mockReturnValue(DEADLINE + 3 * 60 * MINUTE);
+    routeMocks.getIntent.mockResolvedValue(intentWith(state));
     routeMocks.reconcile.mockResolvedValue({ ok: true, state: 'pending' });
     const response = await resend();
     expect(response.status).toBe(202);
@@ -1349,25 +1453,24 @@ describe('確定後の署名ヘッダー再送は確定から 30 分まで (JPYC
 
     beforeEach(() => {
       routeMocks.env.enableLicenseNft = true;
-      const base = intentFixture('settled');
+      const base = intentWith('settled', { settledAt: SETTLED_AT });
       const intent = {
         ...base,
-        settledAt: SETTLED_AT,
-        metadata: { ...base.metadata, owner: SELLER, productKind: 'license', license: definition },
+        metadata: { ...(base.metadata as Record<string, unknown>), owner: SELLER, productKind: 'license', license: definition },
       };
       routeMocks.getIntent.mockResolvedValue(intent);
       routeMocks.readSettledAccess.mockResolvedValue({ ok: true, intent, ownership, purchase: {}, grant: {} });
     });
 
     it.each([
-      ['窓の中', 29 * MINUTE, true, 200, null],
-      ['窓の中', 29 * MINUTE, false, 404, 'not_found'],
-      ['窓の中', 29 * MINUTE, null, 503, 'license_rights_unknown'],
-      ['窓の外', 31 * MINUTE, true, 409, 'purchase_redelivery_expired'],
-      ['窓の外', 31 * MINUTE, false, 404, 'not_found'],
-      ['窓の外', 31 * MINUTE, null, 503, 'license_rights_unknown'],
-    ] as const)('%s (経過 %i ms)・entitled=%s は HTTP %i', async (_label, elapsed, entitled, status, error) => {
-      clock.mockReturnValue(SETTLED_AT + elapsed);
+      ['窓の中', DEADLINE - MINUTE, true, 200, null],
+      ['窓の中', DEADLINE - MINUTE, false, 404, 'not_found'],
+      ['窓の中', DEADLINE - MINUTE, null, 503, 'license_rights_unknown'],
+      ['窓の外', DEADLINE + MINUTE, true, 409, 'purchase_redelivery_expired'],
+      ['窓の外', DEADLINE + MINUTE, false, 404, 'not_found'],
+      ['窓の外', DEADLINE + MINUTE, null, 503, 'license_rights_unknown'],
+    ] as const)('%s (時刻 %i)・entitled=%s は HTTP %i', async (_label, at, entitled, status, error) => {
+      clock.mockReturnValue(at);
       routeMocks.rights.mockResolvedValue({ entitled });
       const response = await resend();
       expect(response.status).toBe(status);

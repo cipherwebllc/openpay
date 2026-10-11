@@ -356,7 +356,7 @@ function exactClaim(input: {
   // settled/settling/indeterminate へ完全一致で再送された claim を期限切れで 409 にすると、
   // 支払い済みの恒久 entitlement と indeterminate からの回復の両方を遮断してしまう
   // (JPYC 側 buildPurchaseAuthorizationClaim の existing-claim-recovery と同じ理由)。
-  // 確定後の再送で本文を返す窓は、settledResponse が settledAt から別に区切る。
+  // 確定後の再送で本文を返す窓は、settledResponse が署名の validBefore から別に区切る。
   if (
     input.use !== 'existing-claim-recovery' &&
     (input.now >= input.intent.fxQuoteExpiresAt ||
@@ -386,11 +386,11 @@ async function settledResponse(
   }
   if (!access.ok) return errorResponse('purchase_inconsistent', 503);
   // settlement は、この request 自身が settle を呼んで成功したとき (初回の購入) だけ渡る。渡らない
-  // 呼出はすべて既存 claim への署名ヘッダーの完全一致の再送で、確定から 30 分を過ぎたら本文を返さない
-  // (一致に要る値は transferWithAuthorization の calldata から組み立てられるため・JPYC と同じ)。
+  // 呼出はすべて既存 claim への署名ヘッダーの完全一致の再送で、署名の validBefore から 20 分を過ぎたら
+  // 本文を返さない (一致に要る値は transferWithAuthorization の calldata から組み立てられるため・JPYC と同じ)。
   if (
     settlement === undefined &&
-    !hostedRedeliveryOpen(access.intent.settledAt)
+    !hostedRedeliveryOpen(access.intent.claim)
   ) {
     return hostedRedeliveryExpiredResponse({
       rail: 'usdc',
@@ -398,6 +398,7 @@ async function settledResponse(
       chainId: access.intent.chainId,
       txHash: access.intent.txHash,
       settledAt: access.intent.settledAt,
+      validBefore: access.intent.claim.validBefore,
     });
   }
   const content = await getHostedContent(

@@ -228,11 +228,12 @@ async function settledContentResponse(input: {
     if (!rights.entitled) return errorResponse('not_found', 404);
   }
   // settlement は、この request 自身が settle を呼んで成功したとき (初回の購入) だけ渡る。渡らない
-  // 呼出はすべて既存 claim への署名ヘッダーの完全一致の再送で、確定から 30 分を過ぎたら本文を返さない
-  // (一致に要る値はオンチェーンの calldata から組み立てられるため・lib/x402/hostedRedelivery.ts)。
+  // 呼出はすべて既存 claim への署名ヘッダーの完全一致の再送で、署名の validBefore から 20 分を過ぎたら
+  // 本文を返さない (一致に要る値はオンチェーンの calldata から組み立てられるため。起点を settledAt に
+  // しない理由は lib/x402/hostedRedelivery.ts)。
   if (
     input.settlement === undefined &&
-    !hostedRedeliveryOpen(access.intent.settledAt)
+    !hostedRedeliveryOpen(access.intent.claim)
   ) {
     return hostedRedeliveryExpiredResponse({
       rail: 'jpyc',
@@ -240,6 +241,7 @@ async function settledContentResponse(input: {
       chainId: access.intent.chainId,
       txHash: access.intent.txHash,
       settledAt: access.intent.settledAt,
+      validBefore: access.intent.claim.validBefore,
     });
   }
   const content = await contentForIntent(access.intent);
@@ -447,7 +449,7 @@ function exactClaimOrError(input: {
     ...input,
     // 期限は新規 broadcast admission にだけ使う。既に claim 済みの完全一致 redelivery を
     // 期限後に遮断すると、恒久 entitlement と indeterminate 回復の両方へ波及する。
-    // (確定後の再送で本文を返す窓は、settledContentResponse が settledAt から別に区切る。)
+    // (確定後の再送で本文を返す窓は、settledContentResponse が署名の validBefore から別に区切る。)
     use:
       input.intent.state === 'quoted'
         ? 'broadcast-admission'
