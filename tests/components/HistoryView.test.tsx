@@ -376,6 +376,11 @@ describe('HistoryView', () => {
     });
   });
 
+  // vitest 3 以降は test の同期部分 (appendHistory の繰り返し・render) も testTimeout (既定 5 秒) に数える
+  // (vitest 2 は最初の await の後から数えていた)。CI (coverage 付き) では vitest 2 でも 1000 件で 10.5 秒・500 件で
+  // 5.3 秒かかっていた (2026-10-11 実測) ので、上限を test ごとに明示する。1000 件の描画時間の上限は dt の assertion が持つ。
+  const BULK_TEST_TIMEOUT_MS = 30_000;
+
   describe('大量 entries の表示性能 sanity', () => {
     it('1000 件 (HISTORY_MAX_ENTRIES boundary) の entry でも render が成立する', async () => {
       for (let i = 0; i < 1000; i += 1) {
@@ -405,7 +410,7 @@ describe('HistoryView', () => {
       expect(
         screen.getByRole('button', { name: /USDC \(500\)/ }),
       ).toBeInTheDocument();
-    });
+    }, BULK_TEST_TIMEOUT_MS);
 
     it('500 件の entry を持ち、filter 切替が成立する', async () => {
       const user = userEvent.setup();
@@ -436,6 +441,6 @@ describe('HistoryView', () => {
       expect(
         screen.getByRole('button', { name: /USDC \(250\)/ }),
       ).toHaveAttribute('aria-pressed', 'true');
-    });
+    }, BULK_TEST_TIMEOUT_MS);
   });
 });
