@@ -31,6 +31,8 @@ export type CreatorStorePurchaseStateProps = {
   supportHref: string;
   /** USDC 成立時は P1 grant と同じ versioned payment snapshot を描画する。 */
   payment?: HostedUsdcPaymentSnapshot;
+  /** 決済結果が未確定のまま、status の自動確認を続けている間だけ true (確定すると自動で表示する旨を出す)。 */
+  autoChecking?: boolean;
 };
 
 export function CreatorStorePurchaseState({
@@ -41,6 +43,7 @@ export function CreatorStorePurchaseState({
   libraryHref,
   supportHref,
   payment,
+  autoChecking = false,
 }: CreatorStorePurchaseStateProps) {
   const t = useTranslations('CreatorStorePurchase');
   const tl = useTranslations('CreatorStoreLicense');
@@ -59,12 +62,16 @@ export function CreatorStorePurchaseState({
     ownershipReadBack;
   const failedPrebroadcast = paymentStatus === 'not-executed';
   const needsSupport = accessStatus === 'needs-support';
+  // 決済結果が未確定のまま status の自動確認を続けている間 (90 秒を過ぎた後の低頻度の確認) は、
+  // 決済待ち (pending) と同じ黄色の見た目と「引き渡し確認中」のラベルで出す。止めた後だけ赤と要問い合わせ。
+  const autoCheckingUnknown =
+    needsSupport && paymentStatus !== 'confirmed' && autoChecking;
   const confirmedProvisioning =
     paymentStatus === 'confirmed' && !ready && !needsSupport;
   // hook の遷移競合や描画順で access=ready が先に見えても、authoritative read-back が
   // 完了するまでは ready 表示へ波及させず provisioning に留める。
   const displayedAccessStatus =
-    accessStatus === 'ready' && !ownershipReadBack
+    (accessStatus === 'ready' && !ownershipReadBack) || autoCheckingUnknown
       ? 'provisioning'
       : accessStatus;
 
@@ -84,6 +91,10 @@ export function CreatorStorePurchaseState({
     icon = <AlertTriangle className="h-5 w-5 text-slate-500" aria-hidden />;
     title = t('notExecutedTitle');
     body = t('notExecutedBody');
+  } else if (autoCheckingUnknown) {
+    // tone と icon は pending の既定 (黄色・spinner) のまま。
+    title = t('needsSupportTitle');
+    body = t('needsSupportCheckingBody');
   } else if (needsSupport) {
     tone = 'border-red-200 bg-red-50 text-red-950';
     icon = <AlertTriangle className="h-5 w-5 text-red-600" aria-hidden />;

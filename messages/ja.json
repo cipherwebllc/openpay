@@ -1426,6 +1426,7 @@
     "needsSupportTitle": "確認に時間がかかっています",
     "needsSupportConfirmedBody": "決済は成立していますが、商品の引き渡しを確認できません。二重に支払わず、販売者へお問い合わせください。",
     "needsSupportUnknownBody": "決済結果を確定できません。二重に支払わず、販売者へお問い合わせください。",
+    "needsSupportCheckingBody": "決済結果を確認中です。確定すると、この画面に自動で表示されます。二重に支払わないでください。",
     "contactSupport": "販売者へ問い合わせる",
     "payTotal": "お支払い合計 {total} JPYC",
     "priceBreakdown": "価格 {price} JPYC + 手数料 {fee} JPYC",

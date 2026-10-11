@@ -851,6 +851,474 @@ describe('useHostedStorePurchase settlement and read-back', () => {
   });
 });
 
+// plans/hosted-redelivery-secret.md の PR-0。確定済みの購入への再送に server が本文を返さずに返す 409 を、
+// error code の名前ではなく形 (409・state settled・正規の txHash・resourceId 一致) で確定として扱う。
+// あわせて、exhausted の後の retry の時計と、exhausted の後の低頻度の status 確認を固定する。
+describe('useHostedStorePurchase: 確定済みの 409・retry の時計・exhausted の後の確認', () => {
+  const HOLD = () => new Promise<Response>(() => undefined);
+  const UPPER_TX_HASH = `0x${'EF'.repeat(32)}` as Hex;
+
+  type Respond = () => Response | Promise<Response>;
+
+  function settled409Body(
+    overrides: Record<string, unknown> = {},
+  ): Record<string, unknown> {
+    return {
+      ok: false,
+      error: 'purchase_redelivery_expired',
+      state: 'settled',
+      resourceId: RESOURCE_ID,
+      txHash: TX_HASH,
+      network: 'eip155:80002',
+      library: '/store/library',
+      contentApi: `/api/store/content/${RESOURCE_ID}`,
+      message: 'This purchase is already settled.',
+      messageJa: 'この購入は確定済みです。',
+      ...overrides,
+    };
+  }
+
+  function withoutKey(
+    body: Record<string, unknown>,
+    key: string,
+  ): Record<string, unknown> {
+    const copy = { ...body };
+    delete copy[key];
+    return copy;
+  }
+
+  function readyContent(
+    intentSalt: Hex = INTENT_SALT,
+    value = 'paid content',
+  ): Record<string, unknown> {
+    return {
+      ok: true,
+      state: 'ready',
+      resourceId: RESOURCE_ID,
+      intentSalt,
+      title: TITLE,
+      contentRevision: 1,
+      kind: 'text',
+      value,
+    };
+  }
+
+  function statusBody(state: 'pending' | 'settled' | 'failed') {
+    return state === 'settled'
+      ? { ok: true, state, txHash: TX_HASH }
+      : { ok: true, state };
+  }
+
+  /** 署名ヘッダー付きの GET・status・content を、呼ぶたびに今の handler で応答する。 */
+  function mockRoutes(routes: {
+    quote?: Respond;
+    paid: () => Respond;
+    status?: () => Respond;
+    content?: Respond;
+  }) {
+    return vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async (input, init) => {
+        const url = String(input);
+        if (url.startsWith('/api/paid/hosted/')) {
+          if (new Headers(init?.headers).has('X-PAYMENT')) {
+            return routes.paid()();
+          }
+          return (routes.quote ?? (() => jsonResponse(paymentRequired(), 402)))();
+        }
+        if (url.startsWith('/api/store/purchase/status')) {
+          return (routes.status?.() ?? HOLD)();
+        }
+        if (url.startsWith('/api/store/content/')) {
+          return (routes.content ?? HOLD)();
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      });
+  }
+
+  function countCalls(
+    fetchMock: ReturnType<typeof mockRoutes>,
+    match: (url: string, init?: RequestInit) => boolean,
+  ): number {
+    return fetchMock.mock.calls.filter(([url, init]) =>
+      match(String(url), init),
+    ).length;
+  }
+
+  const paidCalls = (fetchMock: ReturnType<typeof mockRoutes>) =>
+    countCalls(fetchMock, (_url, init) =>
+      new Headers(init?.headers).has('X-PAYMENT'),
+    );
+  const statusCalls = (fetchMock: ReturnType<typeof mockRoutes>) =>
+    countCalls(fetchMock, (url) =>
+      url.startsWith('/api/store/purchase/status'),
+    );
+  const contentCalls = (fetchMock: ReturnType<typeof mockRoutes>) =>
+    countCalls(fetchMock, (url) => url.startsWith('/api/store/content/'));
+
+  /**
+   * 時計を小刻みに進める。一度に大きく進めると、区間の終わりに発火した polling の応答 (fetch の解決 →
+   * react-query の通知 → React の更新) が区間の中で処理されきらないため、実時間に近い刻みで進める。
+   */
+  async function advance(ms: number, step = 250) {
+    for (let elapsed = 0; elapsed < ms; elapsed += step) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(Math.min(step, ms - elapsed));
+      });
+    }
+  }
+
+  /** fake timers の下で review → 署名 → 202 → 90 秒で exhausted まで進める。 */
+  async function reachExhausted(
+    result: ReturnType<typeof renderPurchase>['result'],
+  ) {
+    await act(async () => {
+      await result.current.prepare();
+    });
+    await act(async () => {
+      await result.current.purchase();
+    });
+    expect(result.current.phase).toBe('indeterminate');
+    await advance(90_000);
+    expect(result.current.phase).toBe('indeterminate-exhausted');
+  }
+
+  describe('409 の判定', () => {
+    it.each([
+      ['今の code (purchase_redelivery_expired)', settled409Body()],
+      [
+        'code を改名しても (purchase_already_settled)',
+        settled409Body({ error: 'purchase_already_settled' }),
+      ],
+      ['error code なし', withoutKey(settled409Body(), 'error')],
+      ['大文字 hex の txHash', settled409Body({ txHash: UPPER_TX_HASH })],
+    ])(
+      '409 + settled + 正規の txHash + resourceId 一致 (%s) は確定として own content へ進む',
+      async (_label, body) => {
+        const fetchMock = mockRoutes({
+          paid: () => () => jsonResponse(body, 409),
+          content: () => jsonResponse(readyContent(), 200),
+        });
+        const { result } = renderPurchase();
+        await prepare(result);
+
+        await act(async () => {
+          await result.current.purchase();
+        });
+
+        await waitFor(() => expect(result.current.phase).toBe('ready'));
+        expect(result.current.paymentStatus).toBe('confirmed');
+        expect(result.current.txHash).toBe(body.txHash);
+        expect(result.current.content?.value).toBe('paid content');
+        expect(signTypedData).toHaveBeenCalledOnce();
+        expect(paidCalls(fetchMock)).toBe(1);
+      },
+    );
+
+    it.each([
+      ['state 欠落', 409, withoutKey(settled409Body(), 'state')],
+      ["state が 'pending'", 409, settled409Body({ state: 'pending' })],
+      ['txHash 欠落', 409, withoutKey(settled409Body(), 'txHash')],
+      [
+        'txHash が短い',
+        409,
+        settled409Body({ txHash: `0x${'ef'.repeat(31)}` }),
+      ],
+      [
+        'txHash が非 hex',
+        409,
+        settled409Body({ txHash: `0x${'zz'.repeat(32)}` }),
+      ],
+      ['txHash が 0x なし', 409, settled409Body({ txHash: 'ef'.repeat(32) })],
+      ['resourceId 欠落', 409, withoutKey(settled409Body(), 'resourceId')],
+      ['resourceId が別商品', 409, settled409Body({ resourceId: 'h_other' })],
+      ['HTTP が 409 でない (500)', 500, settled409Body()],
+      ['HTTP が 409 でない (410)', 410, settled409Body()],
+    ])(
+      '%s なら確定にせず、status の確認へ倒す',
+      async (_label, status, body) => {
+        const fetchMock = mockRoutes({
+          paid: () => () => jsonResponse(body, status),
+        });
+        const { result } = renderPurchase();
+        await prepare(result);
+
+        await act(async () => {
+          await result.current.purchase();
+        });
+
+        expect(result.current.phase).toBe('indeterminate');
+        expect(result.current.paymentStatus).toBe('unknown');
+        expect(result.current.txHash).toBeNull();
+        expect(contentCalls(fetchMock)).toBe(0);
+        expect(signTypedData).toHaveBeenCalledOnce();
+      },
+    );
+
+    it('USDC でも 409 settled は確定として own content へ進む', async () => {
+      vi.spyOn(Date, 'now').mockReturnValue(USDC_NOW);
+      account.chainId = 8453;
+      const fetchMock = mockRoutes({
+        quote: () => jsonResponse(usdcPaymentRequired(), 402),
+        paid: () => () =>
+          jsonResponse(settled409Body({ network: 'eip155:8453' }), 409),
+        content: () =>
+          jsonResponse(readyContent(USDC_INTENT_SALT, 'paid with USDC'), 200),
+      });
+      const { result } = renderPurchase('usdc');
+      await prepare(result);
+
+      await act(async () => {
+        await result.current.purchase();
+      });
+
+      await waitFor(() => expect(result.current.phase).toBe('ready'));
+      expect(result.current.txHash).toBe(TX_HASH);
+      expect(result.current.content?.value).toBe('paid with USDC');
+      expect(signTypedData).toHaveBeenCalledOnce();
+      expect(
+        fetchMock.mock.calls.some(
+          ([url]) =>
+            String(url) ===
+            `/api/store/content/${RESOURCE_ID}?intentSalt=${encodeURIComponent(
+              USDC_INTENT_SALT,
+            )}`,
+        ),
+      ).toBe(true);
+    });
+  });
+
+  describe('exhausted の後の retry', () => {
+    it('retry が 409 settled を受けたら、確定として own content へ進む', async () => {
+      vi.useFakeTimers();
+      try {
+        let paid: Respond = () =>
+          jsonResponse({ ok: true, state: 'pending' }, 202);
+        const fetchMock = mockRoutes({
+          paid: () => paid,
+          status: () => () => jsonResponse(statusBody('pending'), 200),
+          content: () => jsonResponse(readyContent(), 200),
+        });
+        const { result } = renderPurchase();
+        await reachExhausted(result);
+
+        paid = () => jsonResponse(settled409Body(), 409);
+        await act(async () => {
+          await result.current.retry();
+        });
+        expect(result.current.phase).toBe('provisioning');
+        expect(result.current.txHash).toBe(TX_HASH);
+
+        await advance(1_000);
+        expect(result.current.phase).toBe('ready');
+        expect(result.current.content?.value).toBe('paid content');
+        expect(signTypedData).toHaveBeenCalledOnce();
+        expect(paidCalls(fetchMock)).toBe(2);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it.each([
+      ['202', () => jsonResponse({ ok: true, state: 'pending' }, 202)],
+      [
+        '503 (想定外の応答)',
+        () => jsonResponse({ ok: false, error: 'storage_unavailable' }, 503),
+      ],
+      [
+        '409 (settled でない)',
+        () => jsonResponse({ ok: false, error: 'purchase_intent_conflict' }, 409),
+      ],
+    ] as const)(
+      'retry が %s を受けても、すぐに exhausted へ戻らず 90 秒の確認を取り直し、status の settled を拾う',
+      async (_label, respond) => {
+        vi.useFakeTimers();
+        try {
+          let paid: Respond = () =>
+            jsonResponse({ ok: true, state: 'pending' }, 202);
+          let statusState: 'pending' | 'settled' = 'pending';
+          mockRoutes({
+            paid: () => paid,
+            status: () => () => jsonResponse(statusBody(statusState), 200),
+            content: () => jsonResponse(readyContent(), 200),
+          });
+          const { result } = renderPurchase();
+          await reachExhausted(result);
+
+          paid = respond;
+          await act(async () => {
+            await result.current.retry();
+          });
+          expect(result.current.phase).toBe('indeterminate');
+
+          await advance(1_000);
+          expect(result.current.phase).toBe('indeterminate');
+          await advance(80_000);
+          expect(result.current.phase).toBe('indeterminate');
+
+          // 3 秒おきの確認の 1 回分 (+ 応答の処理) で拾う。retry から 90 秒より前に収まる。
+          statusState = 'settled';
+          await advance(3_500);
+          expect(result.current.phase).not.toBe('indeterminate');
+          await advance(2_000);
+          expect(result.current.phase).toBe('ready');
+          expect(result.current.txHash).toBe(TX_HASH);
+          expect(signTypedData).toHaveBeenCalledOnce();
+        } finally {
+          vi.useRealTimers();
+        }
+      },
+    );
+  });
+
+  describe('exhausted の後の低頻度の status 確認', () => {
+    it('30 秒おきに確かめ続け、確定したら own content へ進む', async () => {
+      vi.useFakeTimers();
+      try {
+        let statusState: 'pending' | 'settled' = 'pending';
+        const fetchMock = mockRoutes({
+          paid: () => () => jsonResponse({ ok: true, state: 'pending' }, 202),
+          status: () => () => jsonResponse(statusBody(statusState), 200),
+          content: () => jsonResponse(readyContent(), 200),
+        });
+        const { result } = renderPurchase();
+        await reachExhausted(result);
+        expect(result.current.isAutoCheckingPayment).toBe(true);
+        expect(result.current.needsSupportReason).toBe(
+          'payment-status-timeout',
+        );
+
+        // 3 秒おきの確認は止まり、低頻度 (30 秒おき) に切り替わる。
+        const atExhausted = statusCalls(fetchMock);
+        await advance(29_000);
+        expect(statusCalls(fetchMock)).toBe(atExhausted);
+        await advance(2_000);
+        expect(statusCalls(fetchMock)).toBe(atExhausted + 1);
+        expect(result.current.phase).toBe('indeterminate-exhausted');
+
+        statusState = 'settled';
+        await advance(30_000);
+        expect(result.current.phase).not.toBe('indeterminate-exhausted');
+        await advance(2_000);
+        expect(result.current.phase).toBe('ready');
+        expect(result.current.paymentStatus).toBe('confirmed');
+        expect(result.current.txHash).toBe(TX_HASH);
+        expect(result.current.needsSupportReason).toBeNull();
+        expect(result.current.content?.value).toBe('paid content');
+        expect(signTypedData).toHaveBeenCalledOnce();
+        expect(paidCalls(fetchMock)).toBe(1);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('低頻度の確認で failed なら、支払い未実行へ収束する', async () => {
+      vi.useFakeTimers();
+      try {
+        let statusState: 'pending' | 'failed' = 'pending';
+        mockRoutes({
+          paid: () => () => jsonResponse({ ok: true, state: 'pending' }, 202),
+          status: () => () => jsonResponse(statusBody(statusState), 200),
+        });
+        const { result } = renderPurchase();
+        await reachExhausted(result);
+
+        statusState = 'failed';
+        await advance(31_000);
+        expect(result.current.phase).toBe('failed-prebroadcast');
+        expect(result.current.paymentStatus).toBe('not-executed');
+        expect(result.current.error?.message).toBe('purchase_intent_failed');
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('上限 (15 分) を越えたら確認を止め、retry でだけ取り直す', async () => {
+      vi.useFakeTimers();
+      try {
+        let statusState: 'pending' | 'settled' = 'pending';
+        const fetchMock = mockRoutes({
+          paid: () => () => jsonResponse({ ok: true, state: 'pending' }, 202),
+          status: () => () => jsonResponse(statusBody(statusState), 200),
+          content: () => jsonResponse(readyContent(), 200),
+        });
+        const { result } = renderPurchase();
+        await reachExhausted(result);
+        const atExhausted = statusCalls(fetchMock);
+
+        await advance(15 * 60_000 - 1_000);
+        expect(result.current.isAutoCheckingPayment).toBe(true);
+        await advance(1_000);
+        expect(result.current.isAutoCheckingPayment).toBe(false);
+        expect(result.current.phase).toBe('indeterminate-exhausted');
+        expect(result.current.canRetrySignedPayment).toBe(true);
+        const atLimit = statusCalls(fetchMock);
+        expect(atLimit - atExhausted).toBeLessThanOrEqual(31);
+
+        // 止めた後は、確定していても自分からは確かめない。
+        statusState = 'settled';
+        await advance(10 * 60_000);
+        expect(statusCalls(fetchMock)).toBe(atLimit);
+        expect(result.current.phase).toBe('indeterminate-exhausted');
+
+        // retry (同じ署名の再送) で確認を取り直す。
+        await act(async () => {
+          await result.current.retry();
+        });
+        expect(result.current.phase).toBe('indeterminate');
+        expect(result.current.isAutoCheckingPayment).toBe(true);
+        await advance(5_000);
+        expect(result.current.phase).toBe('ready');
+        expect(signTypedData).toHaveBeenCalledOnce();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('低頻度の確認中に SIWE が切れたら idle に戻り、確認を止める', async () => {
+      vi.useFakeTimers();
+      try {
+        let statusState: 'pending' | 'settled' = 'pending';
+        const fetchMock = mockRoutes({
+          paid: () => () => jsonResponse({ ok: true, state: 'pending' }, 202),
+          status: () => () => jsonResponse(statusBody(statusState), 200),
+          content: () => jsonResponse(readyContent(), 200),
+        });
+        const rendered = renderHook(
+          ({ sessionAddress }: { sessionAddress: Address | null }) =>
+            useHostedStorePurchase({
+              resourceId: RESOURCE_ID,
+              title: TITLE,
+              merchant: MERCHANT,
+              priceJpyc: PRICE_JPYC,
+              sessionAddress,
+            }),
+          {
+            initialProps: { sessionAddress: PAYER as Address | null },
+            wrapper: createWrapper(),
+          },
+        );
+        await reachExhausted(rendered.result);
+
+        rendered.rerender({ sessionAddress: null });
+        expect(rendered.result.current.phase).toBe('idle');
+        expect(rendered.result.current.isAutoCheckingPayment).toBe(false);
+        expect(rendered.result.current.canRetrySignedPayment).toBe(false);
+        const atExpiry = statusCalls(fetchMock);
+
+        statusState = 'settled';
+        await advance(5 * 60_000);
+        expect(statusCalls(fetchMock)).toBe(atExpiry);
+        expect(rendered.result.current.phase).toBe('idle');
+        expect(rendered.result.current.txHash).toBeNull();
+        expect(contentCalls(fetchMock)).toBe(0);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+});
+
 
 describe('license errors preserve server code', () => {
   it.each([

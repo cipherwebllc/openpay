@@ -34,6 +34,7 @@ const state = vi.hoisted(() => ({
   isBusy: false,
   signPreview: { preview: true } as Record<string, unknown> | null,
   canRetrySignedPayment: false,
+  isAutoCheckingPayment: false,
   hookInput: null as Record<string, unknown> | null,
 }));
 
@@ -83,6 +84,7 @@ vi.mock('@/hooks/useHostedStorePurchase', () => ({
     content: state.content,
     txHash: null,
     needsSupportReason: null,
+    isAutoCheckingPayment: state.isAutoCheckingPayment,
     error: state.error,
     requiredChainId: state.quote ? Number(state.quote.chainId) : null,
     isWrongChain: state.isWrongChain,
@@ -151,11 +153,16 @@ vi.mock('@/components/CreatorStorePurchaseState', () => ({
   CreatorStorePurchaseState: ({
     ownershipReadBack,
     libraryHref,
+    autoChecking,
   }: {
     ownershipReadBack: boolean;
     libraryHref: string;
+    autoChecking?: boolean;
   }) => (
-    <div data-testid="purchase-state">
+    <div
+      data-testid="purchase-state"
+      data-auto-checking={autoChecking ? 'true' : 'false'}
+    >
       {ownershipReadBack ? 'owned' : 'not-owned'}
       <a href={libraryHref}>library</a>
     </div>
@@ -205,6 +212,7 @@ beforeEach(() => {
   state.isBusy = false;
   state.signPreview = { preview: true };
   state.canRetrySignedPayment = false;
+  state.isAutoCheckingPayment = false;
   state.hookInput = null;
   state.switchChainAsync.mockResolvedValue(undefined);
   state.purchase.mockResolvedValue(undefined);
@@ -523,6 +531,31 @@ describe('CreatorStorePurchaseFlow', () => {
     expect(state.retry).toHaveBeenCalledOnce();
     expect(state.purchase).not.toHaveBeenCalled();
   });
+
+  it.each([
+    [true, 'true'],
+    [false, 'false'],
+  ] as const)(
+    'exhausted では hook の自動確認の有無 (%s) を状態表示へそのまま渡し、同じ署名の再送を残す',
+    (checking, expected) => {
+      state.phase = 'indeterminate-exhausted';
+      state.paymentStatus = 'unknown';
+      state.accessStatus = 'needs-support';
+      state.canRetrySignedPayment = true;
+      state.isAutoCheckingPayment = checking;
+      renderFlow();
+
+      expect(screen.getByTestId('purchase-state')).toHaveAttribute(
+        'data-auto-checking',
+        expected,
+      );
+      expect(
+        screen.getByRole('button', {
+          name: '同じ署名で再送する（再署名しない）',
+        }),
+      ).toBeInTheDocument();
+    },
+  );
 });
 
 // D1: aria-modal を名乗る購入ダイアログの focus 管理 (共通の useModalFocus)。
