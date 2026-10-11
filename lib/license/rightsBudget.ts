@@ -2,7 +2,7 @@ import 'server-only';
 
 import { randomUUID } from 'node:crypto';
 import { kvEval } from '@/lib/kv';
-import { LICENSE_VERIFY_BUDGET } from './verifyBudget';
+import { LICENSE_VERIFY_BUDGET, warnUnlessBudgetReleased } from './verifyBudget';
 
 // SIWE 認証済み経路 (content / library / holders) の権利照合 RPC の同時実行枠 (第 7 回レビュー B9)。
 // verify (公開 API・store:license:verify:rpc) と delivery (store:delivery:rpc) と同じ Lua (8 枠・60 秒 lease) を
@@ -19,5 +19,6 @@ export async function acquireLicenseRightsBudget(): Promise<string | null> {
 }
 
 export async function releaseLicenseRightsBudget(token: string): Promise<void> {
-  await kvEval(RELEASE, [LICENSE_RIGHTS_BUDGET_KEY], [token]);
+  // 返せなかったとき (枠に無い・KV 障害・想定外の応答) は warn だけ残す。投げない (verifyBudget の warnUnlessBudgetReleased)。
+  warnUnlessBudgetReleased('license.rights_budget_release_failed', await kvEval<number>(RELEASE, [LICENSE_RIGHTS_BUDGET_KEY], [token]));
 }

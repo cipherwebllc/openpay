@@ -417,6 +417,8 @@ export async function reconcilePurchaseIntent(
           ? await chain.receiptMatches(intent, txHash, receiptRpc)
           : await chain.receiptMatches(intent, txHash);
       } catch {
+        // 一致した receipt がまだ finalized・canonical と確かめられないとき (PurchaseReceiptNotFinalizedError・2026-10-12)
+        // もここに来る: 確定させず、下の一時障害と同じく候補のページ (保存済み hash なら次回の読み直し) から再試行する。
         // 走査で新しく見つけた候補の receipt 一時障害で、証拠のあるページを飛ばして cursor を進めると、
         // head が走査予算より速く進む間は再発見できない (第 7 回レビュー B3)。entitlement 未付与への
         // 波及を断つため、その候補のページから次回再試行する (USDC rail と同じ)。

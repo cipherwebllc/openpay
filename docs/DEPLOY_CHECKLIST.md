@@ -2365,7 +2365,9 @@ private R2 の E2E が完了するまで点灯しない。本節は env/deploy �
 `sub` は発行時セッションの wallet の主張で、提示者がその wallet 本人である証明ではない。
 購入歴のない holder の wallet も配布先へ渡る。ticket は暗号化されず、内容は読める。
 
-発行 GET は SIWE が必要。`Sec-Fetch-Site: cross-site` は 403、ヘッダ欠落の agent は許可する。
+発行 GET は SIWE が必要。`Sec-Fetch-Site` は `same-origin` と `none` (ブックマーク・URL の直打ち) だけを許可し、
+`same-site` (サブドメイン)・`cross-site` は 403 (`lib/net/crossOriginWrite.ts` の `isSameOriginGet`)。ヘッダ欠落時は
+`Origin` があれば完全一致を要求し、どちらも無い agent は許可する。
 発行結果を描画時に取得/prefetch/cache しない。302/JSON は private, no-store / no-referrer / Vary: Cookie。
 Location、JSON の url/ticket、例外、breadcrumb、売り手/CDN のアクセスログを秘匿対象として確認する。
 no-referrer は既存ログやブラウザ履歴を消さない。相対発行 href のみを content cache に保持する。

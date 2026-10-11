@@ -326,6 +326,18 @@ async function makeSettling(
   return result.intent;
 }
 
+const blockHashOf = (blockNumber: bigint): Hex => toHex(blockNumber, { size: 32 });
+
+// finalized tag は finalized() の番号、番号指定はその番号の canonical hash を返す RPC (receipt の確定の判定用)。
+function finalizedThrough(finalized: () => bigint) {
+  h.publicClient.getBlock.mockImplementation(
+    async (args: { blockTag?: string; blockNumber?: bigint }) => {
+      const number = args.blockTag === 'finalized' ? finalized() : args.blockNumber!;
+      return { number, hash: blockHashOf(number) };
+    },
+  );
+}
+
 function addressTopic(address: Address): Hex {
   return `0x${address.slice(2).padStart(64, '0')}` as Hex;
 }
@@ -1035,9 +1047,12 @@ describe('PurchaseIntent reconciler', () => {
     });
     const exactReceipt = {
       status: 'success',
+      blockNumber: ANCHOR_BLOCK + 2_100n,
+      blockHash: blockHashOf(ANCHOR_BLOCK + 2_100n),
       logs: [settledLog(settling)],
     };
     h.publicClient.getTransactionReceipt.mockResolvedValue(exactReceipt);
+    finalizedThrough(() => ANCHOR_BLOCK + 2_400n);
 
     expect(
       await defaultPurchaseReconcileChain.receiptMatches(
@@ -1159,6 +1174,53 @@ describe('PurchaseIntent reconciler', () => {
     expect(h.publicClient.getTransactionReceipt).toHaveBeenLastCalledWith({
       hash: TX_HASH,
     });
+    expect(await getPurchaseIntent(settling.intentSalt)).toMatchObject({
+      state: 'settled',
+      txHash: TX_HASH,
+    });
+  });
+
+  // 2026-10-12 (Grok 再レビュー・user 承認): 照合の経路は、一致した receipt が finalized・canonical なブロックに入るまで
+  // 確定しない (USDC rail と同じく確定を待つ)。確定前は pending のまま候補のページを cursor に残し、次の照合で確定する。
+  it('一致した receipt でも finalized より後なら確定せず、候補のページから次の照合で確定する', async () => {
+    const settling = await makeSettling({ anchorBlock: ANCHOR_BLOCK });
+    const receiptBlock = ANCHOR_BLOCK + 2_100n;
+    h.publicClient.getTransactionReceipt.mockResolvedValue({
+      status: 'success',
+      blockNumber: receiptBlock,
+      blockHash: blockHashOf(receiptBlock),
+      logs: [settledLog(settling)],
+    });
+    h.publicClient.getBlockNumber.mockResolvedValue(ANCHOR_BLOCK + 2_500n);
+    h.publicClient.getLogs.mockImplementation(
+      ({ fromBlock, event }: { fromBlock: bigint; event?: { name?: string } }) =>
+        event?.name === 'AuthorizationUsed' && fromBlock === ANCHOR_BLOCK + 2_000n
+          ? [{ transactionHash: TX_HASH }]
+          : [],
+    );
+    let finalized = receiptBlock - 1n;
+    finalizedThrough(() => finalized);
+
+    expect(
+      await reconcilePurchaseIntent(settling.intentSalt, { now: RECONCILE_NOW }),
+    ).toEqual({ ok: true, state: 'pending' });
+    const pending = await getPurchaseIntent(settling.intentSalt);
+    expect(pending).toMatchObject({
+      state: 'indeterminate',
+      reconcileFromBlock: String(ANCHOR_BLOCK + 2_000n),
+    });
+    expect(pending).not.toHaveProperty('txHash');
+    expect(
+      h.store!.zsets.get(purchasePendingIndexKey())?.has(settling.intentSalt),
+    ).toBe(true);
+    expect(h.store!.zsets.get(purchaseLibraryKey(PAYER))?.size ?? 0).toBe(0);
+
+    finalized = receiptBlock;
+    expect(
+      await reconcilePurchaseIntent(settling.intentSalt, {
+        now: RECONCILE_NOW + PURCHASE_RECONCILE_RETRY_MS,
+      }),
+    ).toEqual({ ok: true, state: 'settled', txHash: TX_HASH });
     expect(await getPurchaseIntent(settling.intentSalt)).toMatchObject({
       state: 'settled',
       txHash: TX_HASH,

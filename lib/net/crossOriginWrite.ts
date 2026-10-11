@@ -5,6 +5,7 @@ import 'server-only';
 // CORS ヘッダを出さないので、別 origin の DELETE/PATCH/PUT と application/json の POST は preflight で
 // 止まる。残る穴 = same-site からの simple request (form / text/plain の fetch) を、ここで handler の先頭で断つ。
 // cookie を使わない route (署名・支払い・Bearer で認証する route、無認証の公開の書き込み) には付けない。
+// cookie で認証する GET には isSameOriginGet (same-origin に加えて none = ブックマーク・URL の直打ちも通す) を使う。
 import { NextResponse } from 'next/server';
 
 export type CrossOriginWriteOptions = {
@@ -25,6 +26,23 @@ export type CrossOriginWriteOptions = {
 export function isSameOriginWrite(req: Request): boolean {
   const site = req.headers.get('sec-fetch-site');
   if (site !== null) return site === 'same-origin';
+  return originAbsentOrSame(req);
+}
+
+/**
+ * cookie で認証する GET (保護配布の ticket 発行など、別 site から踏ませたくない GET) 用。isSameOriginWrite と同じ順で見るが、
+ * Sec-Fetch-Site: none も通す (ブックマーク・URL の直打ち・アドレスバー = 利用者自身の操作で、別 site からは起こせない)。
+ * same-site (サブドメイン) と cross-site は拒否。Sec-Fetch-Site が無い旧ブラウザは Origin を見る。GET の遷移には Origin が
+ * 付かないことが多いので、Origin も無ければ通す (書き込みと同じ)。
+ */
+export function isSameOriginGet(req: Request): boolean {
+  const site = req.headers.get('sec-fetch-site');
+  if (site !== null) return site === 'same-origin' || site === 'none';
+  return originAbsentOrSame(req);
+}
+
+// Sec-Fetch-Site の無い request: Origin があれば request URL の origin と完全一致が必要 ("null" も拒否)、無ければ通す。
+function originAbsentOrSame(req: Request): boolean {
   const origin = req.headers.get('origin');
   if (origin !== null) return origin === new URL(req.url).origin;
   return true;

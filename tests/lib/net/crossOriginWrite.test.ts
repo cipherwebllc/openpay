@@ -2,7 +2,7 @@
 // Sec-Fetch-Site があればそれだけで決め (same-origin のみ通す)、無ければ Origin の完全一致、どちらも無ければ通す。
 // JSON の本文を読む route は Content-Type: application/json を必須にする。
 import { describe, expect, it } from 'vitest';
-import { isSameOriginWrite, rejectCrossOriginWrite } from '@/lib/net/crossOriginWrite';
+import { isSameOriginGet, isSameOriginWrite, rejectCrossOriginWrite } from '@/lib/net/crossOriginWrite';
 
 const URL_ = 'https://open-pay.jp/api/handle';
 
@@ -32,6 +32,28 @@ describe('isSameOriginWrite', () => {
     ['cross-site + Origin 一致', { 'sec-fetch-site': 'cross-site', origin: 'https://open-pay.jp' }, false],
   ] as const)('%s → %s', (_label, headers, expected) => {
     expect(isSameOriginWrite(req(headers))).toBe(expected);
+  });
+});
+
+// cookie で認証する GET (保護配布の ticket 発行) 用。書き込みと同じ順で見るが、Sec-Fetch-Site: none (ブックマーク・
+// URL の直打ち) も通す。GET の遷移には Origin が付かないことが多いので、Sec-Fetch-Site も Origin も無ければ通す。
+describe('isSameOriginGet', () => {
+  it.each([
+    ['Sec-Fetch-Site: same-origin (画面のリンク・新しいタブを含む)', { 'sec-fetch-site': 'same-origin' }, true],
+    ['Sec-Fetch-Site: none (ブックマーク・URL の直打ち)', { 'sec-fetch-site': 'none' }, true],
+    ['Sec-Fetch-Site: same-site (サブドメイン)', { 'sec-fetch-site': 'same-site' }, false],
+    ['Sec-Fetch-Site: cross-site', { 'sec-fetch-site': 'cross-site' }, false],
+    ['Sec-Fetch-Site: 空文字', { 'sec-fetch-site': '' }, false],
+    ['ヘッダ無し (Origin の無い GET の遷移・旧ブラウザ)', {}, true],
+    ['Origin が一致 (Sec-Fetch-Site 無し)', { origin: 'https://open-pay.jp' }, true],
+    ['Origin がサブドメイン', { origin: 'https://gateway.open-pay.jp' }, false],
+    ['Origin が別 site', { origin: 'https://attacker.example' }, false],
+    ['Origin: "null"', { origin: 'null' }, false],
+    ['same-origin + Origin "null" (no-referrer)', { 'sec-fetch-site': 'same-origin', origin: 'null' }, true],
+    ['same-site + Origin 一致', { 'sec-fetch-site': 'same-site', origin: 'https://open-pay.jp' }, false],
+    ['cross-site + Origin 一致', { 'sec-fetch-site': 'cross-site', origin: 'https://open-pay.jp' }, false],
+  ] as const)('%s → %s', (_label, headers, expected) => {
+    expect(isSameOriginGet(new Request(URL_, { headers }))).toBe(expected);
   });
 });
 
