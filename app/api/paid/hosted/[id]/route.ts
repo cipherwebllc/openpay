@@ -52,10 +52,7 @@ import {
   type SettledPurchaseIntent,
 } from '@/lib/x402/purchaseIntent';
 import { isFacilitatorPreBroadcastRejection } from '@/lib/x402/paymentRedelivery';
-import {
-  hostedRedeliveryExpiredResponse,
-  hostedRedeliveryOpen,
-} from '@/lib/x402/hostedRedelivery';
+import { hostedAlreadySettledResponse } from '@/lib/x402/hostedRedelivery';
 import {
   createJpycPaymentRequirements,
   type X402PaymentRequirements,
@@ -228,13 +225,11 @@ async function settledContentResponse(input: {
     if (!rights.entitled) return errorResponse('not_found', 404);
   }
   // settlement は、この request 自身が settle を呼んで成功したとき (初回の購入) だけ渡る。渡らない
-  // 呼出はすべて既存 claim への署名ヘッダーの完全一致の再送で、確定から 30 分を過ぎたら本文を返さない
-  // (一致に要る値はオンチェーンの calldata から組み立てられるため・lib/x402/hostedRedelivery.ts)。
-  if (
-    input.settlement === undefined &&
-    !hostedRedeliveryOpen(access.intent.settledAt)
-  ) {
-    return hostedRedeliveryExpiredResponse({
+  // 呼出はすべて確定済みの購入への署名ヘッダーの完全一致の再送で、本文を返さない (窓 0)。一致に要る値は
+  // オンチェーンの calldata から組み立てられ、買い手の再試行と他人を区別できないため (lib/x402/hostedRedelivery.ts)。
+  const settlement = input.settlement;
+  if (settlement === undefined) {
+    return hostedAlreadySettledResponse({
       rail: 'jpyc',
       resourceId: access.intent.resourceId,
       chainId: access.intent.chainId,
@@ -249,12 +244,6 @@ async function settledContentResponse(input: {
   if (content === null) {
     return errorResponse('content_unavailable', 503);
   }
-  const settlement = input.settlement ?? {
-    success: true,
-    transaction: access.intent.txHash,
-    network: `eip155:${access.intent.chainId}`,
-    payer: access.intent.claim.payer,
-  };
   const response = NextResponse.json({
     ok: true,
     state: 'settled',
@@ -447,7 +436,7 @@ function exactClaimOrError(input: {
     ...input,
     // 期限は新規 broadcast admission にだけ使う。既に claim 済みの完全一致 redelivery を
     // 期限後に遮断すると、恒久 entitlement と indeterminate 回復の両方へ波及する。
-    // (確定後の再送で本文を返す窓は、settledContentResponse が settledAt から別に区切る。)
+    // (確定済みの購入への再送では、settledContentResponse が本文を返さずに 409 を返す。)
     use:
       input.intent.state === 'quoted'
         ? 'broadcast-admission'
