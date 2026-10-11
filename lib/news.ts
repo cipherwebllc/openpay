@@ -56,8 +56,8 @@ export const NEWS_ITEMS: readonly NewsItem[] = [
       en: '“The shop pays the gas” now works on Kaia and Avalanche too',
     },
     body: {
-      ja: '店頭レジと、画面に表示した金額指定の決済QRで選べる「お店がガス代を肩代わりして送る」が、Polygon に加えて Kaia・Avalanche の JPYC でも使えるようになりました（JPYC・Polygon・Kaia・Avalanche）。OpenPay 利用料は 0 円のままです（お店の負担はガス代の実費。仕組み上、送金 1 回につき 1 wei がお客様の支払いに上乗せされ OpenPay へ送られます）。ガス用ウォレットは同じアドレスのまま、使うチェーンのガス代のトークン（KAIA・AVAX）を少額入れてください。印刷・保存した QR は対象外です。',
-      en: '“The shop pays the gas”, available at the in-store register and with a fixed-amount payment QR shown on screen (not printed or saved QR codes), now works with JPYC on Kaia and Avalanche as well as Polygon (JPYC on Polygon, Kaia and Avalanche). The OpenPay usage fee is 0, as before (you pay only the actual gas; by design, 1 wei is added to the customer’s payment per transfer and sent to OpenPay). Your gas wallet keeps the same address; add a little of the gas token for the chain you use (KAIA or AVAX).',
+      ja: '店頭レジと、画面に表示した金額指定の決済QRで選べる「お店がガス代を肩代わりして送る」が、Polygon に加えて Kaia・Avalanche の JPYC でも使えるようになりました（JPYC・Polygon・Kaia・Avalanche）。OpenPay 利用料は 0 円のままです（お店の負担はガス代の実費。仕組み上、送金 1 回につき 1 wei がお客様の支払いに上乗せされ OpenPay へ送られます）。ガス用ウォレットは同じアドレスのまま、使うチェーンのガス代のトークン（KAIA・AVAX）を少額入れてください。印刷・保存・URL のコピーをした QR と、金額を指定しない QR は対象外です。',
+      en: '“The shop pays the gas”, available at the in-store register and with a fixed-amount payment QR shown on screen (not QR codes that are printed, saved or copied as a URL, or that have no amount), now works with JPYC on Kaia and Avalanche as well as Polygon (JPYC on Polygon, Kaia and Avalanche). The OpenPay usage fee is 0, as before (you pay only the actual gas; by design, 1 wei is added to the customer’s payment per transfer and sent to OpenPay). Your gas wallet keeps the same address; add a little of the gas token for the chain you use (KAIA or AVAX).',
     },
     link: { href: '/guide/qr', labelJa: '使い方を見る', labelEn: 'See how it works' },
   },
@@ -70,8 +70,8 @@ export const NEWS_ITEMS: readonly NewsItem[] = [
       en: '“The shop pays the gas” is now available at the register and with payment QR',
     },
     body: {
-      ja: '決済QRの決済モードで「お店がガス代を肩代わり」を選ぶと、店頭レジや画面に表示した金額指定の決済QRで、お店の端末のガス用ウォレット（少額の POL）がガス代を払って送るようになりました（印刷・保存した QR は対象外）。お客様は署名するだけで、OpenPay 利用料は 0 円です（お店の負担はガス代の実費。仕組み上、送金 1 回につき 1 wei がお客様の支払いに上乗せされ OpenPay へ送られます）。JPYC・Polygon の会計で使えます。これまでのガスレス決済（決済額の 1%・最低 2 JPYC・店舗負担）もそのまま選べます。',
-      en: 'Choose “The shop pays the gas” as the payment mode, and at the in-store register or with a fixed-amount payment QR shown on screen (not printed or saved QR codes), your device’s gas wallet (a little POL) now pays the gas and sends the payment. Customers only sign, and the OpenPay usage fee is 0 (you pay only the actual gas; by design, 1 wei is added to the customer’s payment per transfer and sent to OpenPay). Available for JPYC on Polygon. The existing gasless payment (1% of the payment, minimum 2 JPYC, merchant-paid) remains available.',
+      ja: '決済QRの決済モードで「お店がガス代を肩代わり」を選ぶと、店頭レジや画面に表示した金額指定の決済QRで、お店の端末のガス用ウォレット（少額の POL）がガス代を払って送るようになりました（印刷・保存・URL のコピーをした QR と、金額を指定しない QR は対象外）。お客様は署名するだけで、OpenPay 利用料は 0 円です（お店の負担はガス代の実費。仕組み上、送金 1 回につき 1 wei がお客様の支払いに上乗せされ OpenPay へ送られます）。JPYC・Polygon の会計で使えます。これまでのガスレス決済（決済額の 1%・最低 2 JPYC・店舗負担）もそのまま選べます。',
+      en: 'Choose “The shop pays the gas” as the payment mode, and at the in-store register or with a fixed-amount payment QR shown on screen (not QR codes that are printed, saved or copied as a URL, or that have no amount), your device’s gas wallet (a little POL) now pays the gas and sends the payment. Customers only sign, and the OpenPay usage fee is 0 (you pay only the actual gas; by design, 1 wei is added to the customer’s payment per transfer and sent to OpenPay). Available for JPYC on Polygon. The existing gasless payment (1% of the payment, minimum 2 JPYC, merchant-paid) remains available.',
     },
     link: { href: '/guide/qr', labelJa: '使い方を見る', labelEn: 'See how it works' },
   },

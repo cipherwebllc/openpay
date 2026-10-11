@@ -48,6 +48,9 @@ const MIN = D.handoffRetentionSec / 60;
 const [y, m, d] = D.effectiveDate.split('-').map(Number);
 const JA_DATE = `${y} 年 ${m} 月 ${d} 日`;
 const EN_DATE = `${new Date(Date.UTC(y, m - 1, d)).toLocaleString('en-US', { month: 'long', timeZone: 'UTC' })} ${d}, ${y}`;
+// 対象外の QR は規約 第 5 条 (11) と同じ範囲 (印刷・保存・URL のコピー・金額なし) で書く (2026-10-11 にそろえた)。
+const JA_EXCLUDED = '印刷・保存・URL のコピーをした QR と、金額を指定しない QR は対象外';
+const EN_EXCLUDED = 'QR codes that are printed, saved or copied as a URL, or that have no amount, are not eligible';
 
 describe('「お店がガス代を肩代わりして送る」の開示 (DISCLOSED_STORE_GAS_WALLET)', () => {
   it('実装と一致する (1 wei・受け渡しの保管・mainnet の点灯チェーン = 開示したチェーン ∩ 設定済み)', () => {
@@ -98,8 +101,8 @@ describe('「お店がガス代を肩代わりして送る」の開示 (DISCLOSE
     const te = en.Tokutei.rows;
     expect(tj.serviceContent.value).toContain('お店がガス代を肩代わりして送る');
     expect(te.serviceContent.value).toContain('The shop pays the gas');
-    for (const w of ['0 円', WEI, '当社指定ウォレットへ', '印刷・保存した決済QRは対象外', CH_JA]) expect(tj.price.value).toContain(w);
-    for (const w of ['is 0', WEI, 'designated by the Company', 'printed or saved payment QR codes are not eligible', CH_EN]) {
+    for (const w of ['0 円', WEI, '当社指定ウォレットへ', '印刷・保存・URL のコピーをした決済QR および金額を指定しない決済QR は対象外', CH_JA]) expect(tj.price.value).toContain(w);
+    for (const w of ['is 0', WEI, 'designated by the Company', 'payment QR codes that are printed, saved or copied as a URL or that have no amount are not eligible', CH_EN]) {
       expect(te.price.value).toContain(w);
     }
     // 店主が払うネットワーク手数料の通貨は、対象のチェーンのネイティブトークンをすべて書く (チェーンを足したら通貨も)
@@ -133,9 +136,10 @@ describe('「お店がガス代を肩代わりして送る」の開示 (DISCLOSE
     for (const body of [en.Landing.supportFeeRegisterBody, en.Landing.supportFeePayBody, en.Landing.faqA1]) {
       for (const w of [' 0 ', WEI, 'sent to OpenPay', `JPYC on ${CH_EN} only`]) expect(body).toContain(w);
     }
-    // 決済QR のカードには「レジ」を含めない (決済QR の話に限る)・印刷/保存は対象外
+    // 決済QR のカードには「レジ」を含めない (決済QR の話に限る)・印刷/保存/URL のコピー/金額なしは対象外
     expect(ja.Landing.supportFeePayBody).not.toContain('レジ');
-    expect(ja.Landing.supportFeePayBody).toContain('印刷・保存した QR は対象外');
+    expect(ja.Landing.supportFeePayBody).toContain(JA_EXCLUDED);
+    expect(en.Landing.supportFeePayBody).toContain(EN_EXCLUDED);
   });
 
   it('画面 (決済モードの注記・お客様の支払い画面) も 1 wei の行き先を書く', () => {
@@ -148,14 +152,14 @@ describe('「お店がガス代を肩代わりして送る」の開示 (DISCLOSE
   it('/transparency の「手数料の決め方」にも出す', () => {
     const jaFee = transparencyContentFor('ja').fees.find((f) => f.startsWith('お店がガス代を肩代わりして送る')) ?? '';
     const enFee = transparencyContentFor('en').fees.find((f) => f.startsWith('The shop pays the gas')) ?? '';
-    for (const w of ['0 円', WEI, CH_JA, `最長 ${MIN} 分`, '印刷・保存した QR は対象外']) expect(jaFee).toContain(w);
-    for (const w of ['is 0', WEI, CH_EN, `up to ${MIN} minutes`, 'not eligible']) expect(enFee).toContain(w);
+    for (const w of ['0 円', WEI, CH_JA, `最長 ${MIN} 分`, JA_EXCLUDED]) expect(jaFee).toContain(w);
+    for (const w of ['is 0', WEI, CH_EN, `up to ${MIN} minutes`, EN_EXCLUDED]) expect(enFee).toContain(w);
   });
 
   it('public/llms.txt・ガイド (/guide/shop・/guide/qr・/guide/start)', () => {
     const llms = readFileSync(join(process.cwd(), 'public/llms.txt'), 'utf8');
     const line = llms.split('\n').find((l) => l.includes('お店がガス代を肩代わりして送る')) ?? '';
-    for (const w of ['0 円', WEI, CH_JA, '印刷や保存した QR は対象外', 'OpenPay へ']) expect(line).toContain(w);
+    for (const w of ['0 円', WEI, CH_JA, '印刷・保存・URL のコピーをした QR と金額を指定しない QR は対象外', 'OpenPay へ']) expect(line).toContain(w);
     // ガイドの本文も 0 円・1 wei・対象チェーン (と決済QRでは印刷/保存/コピー/金額なしは対象外) を書く
     for (const [locale, title, words, qrOnly] of [
       ['ja', 'お店がガス代を肩代わりして送る', ['0 円', WEI, `JPYC・${CH_JA} のみ`], ['印刷・保存・URL のコピー', '金額なし']],
@@ -169,16 +173,33 @@ describe('「お店がガス代を肩代わりして送る」の開示 (DISCLOSE
       }
       for (const w of qrOnly) expect(qr).toContain(w);
     }
-    // お知らせ (提供開始日・0 円・1 wei・対象チェーン・印刷/保存は対象外)
+    // お知らせ (提供開始日・0 円・1 wei・対象チェーン・印刷/保存/URL のコピー/金額なしは対象外)
     // 一番新しい「お店がガス代を肩代わりして送る」のお知らせが、いまの開示 (日付・対象チェーン) と一致する
     // (チェーンを足したらお知らせを足す・前のお知らせは過去の告知として書き換えない)。
     const news = NEWS_ITEMS.find((n) => n.id.startsWith('store-pays-gas-'));
     expect(news?.date).toBe(D.effectiveDate);
-    for (const w of ['0 円', `${D.feeWei} wei`, `JPYC・${CH_JA}`, '印刷・保存した QR は対象外']) expect(news?.body.ja).toContain(w);
-    for (const w of ['is 0', `${D.feeWei} wei`, `JPYC on ${CH_EN}`, 'not printed or saved']) expect(news?.body.en).toContain(w);
+    for (const w of ['0 円', `${D.feeWei} wei`, `JPYC・${CH_JA}`, JA_EXCLUDED]) expect(news?.body.ja).toContain(w);
+    for (const w of ['is 0', `${D.feeWei} wei`, `JPYC on ${CH_EN}`, 'not QR codes that are printed, saved or copied as a URL, or that have no amount']) expect(news?.body.en).toContain(w);
     const startJa = startGuideContentFor('ja').sections.find((s) => s.n === 8)?.defs ?? [];
     const startEn = startGuideContentFor('en').sections.find((s) => s.n === 8)?.defs ?? [];
     expect(startJa.find((x) => x.term.includes('お店がガス代を肩代わり'))?.desc).toContain(`最長 ${MIN} 分`);
     expect(startEn.find((x) => x.term.includes('The shop pays the gas'))?.desc).toContain(`within ${MIN} minutes`);
+  });
+
+  // 2026-10-11: 特商法・/transparency・LP・llms.txt・お知らせが「印刷・保存した QR」だけを対象外と書いていて、
+  // 規約 (11) (印刷・保存・URL のコピー・金額なし) より狭かった。狭い書き方が戻ってこないように、開示の面を全部見る。
+  it('対象外の QR を「印刷・保存」だけに狭めて書いた面が無い (規約 (11) の範囲にそろえる)', () => {
+    const llms = readFileSync(join(process.cwd(), 'public/llms.txt'), 'utf8');
+    const surfaces: [string, string][] = [
+      ['messages/ja.json', JSON.stringify(ja)],
+      ['messages/en.json', JSON.stringify(en)],
+      ['/transparency', JSON.stringify([transparencyContentFor('ja'), transparencyContentFor('en')])],
+      ['public/llms.txt', llms],
+      ['お知らせ', JSON.stringify(NEWS_ITEMS)],
+      ['ガイド', JSON.stringify([qrGuideContentFor('ja'), qrGuideContentFor('en'), shopGuideContentFor('ja'), shopGuideContentFor('en'), startGuideContentFor('ja'), startGuideContentFor('en')])],
+    ];
+    for (const [label, text] of surfaces) {
+      expect(text, label).not.toMatch(/印刷・保存した ?(?:決済)?QR|印刷や保存した ?QR|[Pp]rinted or saved (?:payment )?QR/);
+    }
   });
 });
