@@ -4,6 +4,9 @@ import { parseEnv } from 'node:util';
 import { describe, expect, it } from 'vitest';
 
 const read = (file: string) => readFileSync(file, 'utf8');
+// 本番フラグの宣言は README の要約と、詳細を移した docs/ENV.md (env 表)・docs/FEATURES.md (機能・料金)・docs/API.md (x402) にある。
+// 宣言行を 1 行ずつ読む検査なので、4 ファイルを連結しても検査の強さは変わらない。
+const readProdDeclarations = () => ['README.md', 'docs/ENV.md', 'docs/FEATURES.md', 'docs/API.md'].map(read).join('\n');
 
 // Collect flags from README lines by their production declaration. ON wording (live on mainnet / live in
 // production / production sets …) is kept apart from OFF wording (production sets `0` / off in production /
@@ -51,7 +54,7 @@ describe('production-flag Playwright coverage (F13)', () => {
       expect(example).toMatch(new RegExp(`^${key}=`, 'm'));
     }
     // Both the curated env table and feature prose document production light-up.
-    const expectedFlags = flagsDeclared(read('README.md'), ON_DECLARATION);
+    const expectedFlags = flagsDeclared(readProdDeclarations(), ON_DECLARATION);
     const enabledFlags = Object.keys(vector).filter((key) => key.startsWith('NEXT_PUBLIC_ENABLE_')).sort();
     // README can lag the user-confirmed production vector; require a superset.
     expect(enabledFlags).toEqual(expect.arrayContaining(expectedFlags));
@@ -65,7 +68,7 @@ describe('production-flag Playwright coverage (F13)', () => {
   it('keeps flags the README declares OFF in production out of the vector', () => {
     // Reverse fence: building a production-OFF flag (e.g. the register fee abolished on 2026-10-07) with '1'
     // would pin UI that production no longer renders (such as the abolished fee row) as the production shape.
-    const readme = read('README.md');
+    const readme = readProdDeclarations();
     const offFlags = flagsDeclared(readme, OFF_DECLARATION);
     expect(offFlags, 'the README states at least one production-OFF flag').toContain('NEXT_PUBLIC_ENABLE_REGISTER_FEE');
     // A flag declared both ON and OFF is ambiguous: fix the README wording rather than guess.

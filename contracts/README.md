@@ -173,7 +173,7 @@ forge script contracts/script/DeployLicense.s.sol:DeployLicense \
 
 `LICENSE_OWNER` と `LICENSE_MINTER` を環境に設定してから実行する (script が `vm.envAddress` で読む)。
 アプリの `NEXT_PUBLIC_LICENSE_NFT_POLYGON` / `NEXT_PUBLIC_LICENSE_NFT_AMOY` と
-`LICENSE_MINTER_PRIVATE_KEY` は PR B の env 読み取り導入時に `.env.local.example` / root README の
+`LICENSE_MINTER_PRIVATE_KEY` は PR B の env 読み取り導入時に `.env.local.example` / docs/ENV.md の
 env テーブルへ同時追加する。PR A ではアプリの env 読み取り・設定変更・flag 点灯を行わない。
 deploy 後は owner/minter/chain を照合し、minter へ POL を入金する。既存商品の義務は元の契約に固定し、
 契約アドレスの切替で供給枠をリセットしない。

@@ -61,7 +61,7 @@ describe('JPYC ライブ API の掲載メタ', () => {
     expect(line).toContain('未取得の続き（hasMore=true）');
     expect(line).toContain('truncated=true');
     expect(line).toContain('深い reorg による取りこぼしは保証外');
-    const readme = readFileSync(join(process.cwd(), 'README.md'), 'utf8');
+    const readme = readFileSync(join(process.cwd(), 'docs/API.md'), 'utf8');
     const row = readme.split('\n').find((value) => value.includes('`GET /api/paid/usdc/jpyc/transfers?chain=`'))!;
     expect(row).toContain(policy);
     expect(row).toContain('snapshot newest first, cursor delta oldest first');
@@ -161,7 +161,7 @@ describe('JPYC ライブ API の掲載メタ', () => {
     expect(USDC_JPYC_ACTIVITY.description).not.toContain('request time');
     expect(USDC_JPYC_ACTIVITY.description.split(/\.\s+/)).toHaveLength(3);
     expect(USDC_JPYC_ACTIVITY.trigger.freshnessKey).toEqual(['observedAt', 'expiresAt']);
-    const readme = readFileSync(join(process.cwd(), 'README.md'), 'utf8');
+    const readme = readFileSync(join(process.cwd(), 'docs/API.md'), 'utf8');
     const line = readme.split('\n').find((value) => value.includes('GET ' + USDC_JPYC_ACTIVITY.path));
     expect(line).toContain(USDC_JPYC_ACTIVITY.priceUsd + ' USDC');
     expect(line).toContain('/api/jpyc/activity/preview');

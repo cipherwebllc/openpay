@@ -1,10 +1,10 @@
-// 掟 9 (env を足したら .env.local.example と README の env テーブルを同時更新) の自動フェンス。
+// 掟 9 (env を足したら .env.local.example と docs/ENV.md の env テーブルを同時更新) の自動フェンス。
 //
-// これまで掟 9 は人手の規律だけで守られており、実際に README の env テーブルは
+// これまで掟 9 は人手の規律だけで守られており、実際に README (現 docs/ENV.md) の env テーブルは
 // コードが読む変数の大半を落としていた (2026-09-02 レビュー F11)。ここでは
 // アプリのコードが実際に読む `process.env.X` を単一の真実として抽出し、
 //   (1) .env.local.example に列があること
-//   (2) README の env テーブルに行 (またはワイルドカード行) があること
+//   (2) docs/ENV.md の env テーブルに行 (またはワイルドカード行) があること
 // を強制する。どちらかを忘れた PR は CI で落ちる。
 //
 // 走査対象は app/ 全体・components/・hooks/・lib/ と、ルート直下で env を読む
@@ -90,7 +90,7 @@ const exampleKeys = new Set(
   [...exampleSource.matchAll(/^#?\s*([A-Z][A-Z0-9_]*)=/gm)].map((m) => m[1]),
 );
 
-const readmeLines = readFileSync(resolve(root, 'README.md'), 'utf8').split('\n');
+const readmeLines = readFileSync(resolve(root, 'docs/ENV.md'), 'utf8').split('\n');
 const tableStart = readmeLines.findIndex((l) => l.trim() === '## Environment variables');
 const tableEndOffset = readmeLines
   .slice(tableStart + 1)
@@ -147,15 +147,15 @@ describe('env ドキュメントのドリフト検出 (掟 9)', () => {
     ).toEqual([]);
   });
 
-  it('コードが読む env は全て README の env テーブルにある', () => {
+  it('コードが読む env は全て docs/ENV.md の env テーブルにある', () => {
     const missing = allKeys.filter((k) => !documentedInReadme(k));
     expect(
       missing,
-      `README の env テーブルに未記載の env: ${missing.join(', ')}`,
+      `docs/ENV.md の env テーブルに未記載の env: ${missing.join(', ')}`,
     ).toEqual([]);
   });
 
-  it('README のワイルドカード行は少なくとも 1 つの実キーに対応する (死んだ行を残さない)', () => {
+  it('docs/ENV.md のワイルドカード行は少なくとも 1 つの実キーに対応する (死んだ行を残さない)', () => {
     const dead = readmePatterns.filter(
       (p) => p.includes('*') && !allKeys.some((k) => matchesPattern(k, p)),
     );

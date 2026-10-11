@@ -204,7 +204,7 @@ MCP は **minor 単位の pin** (`openpay-x402-mcp@0.19`) を `public/agent/setu
 `components/x402/DiscoveryExamples.tsx`・`docs/agent-templates/`・
 `packages/x402-mcp/README.md` が引用し、`tests/lib/agentSetupMd.test.ts` が検査する。
 patch リリースではそのまま真なので変えない。minor を上げたときだけ更新する
-(公開文言なので確定は user の承認を待つ)。README の「`openpay-x402-mcp` パッケージ
+(公開文言なので確定は user の承認を待つ)。docs/API.md の「`openpay-x402-mcp` パッケージ
 (≥ 0.9.0)」や SDK の「0.10.0 以降」は下限を示す表現で、新版でも真のまま。
 llms.txt を書き換える場合は掟 14 の開示 3 点セットに従う。
 

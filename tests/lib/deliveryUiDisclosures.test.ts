@@ -5,7 +5,7 @@ import en from '@/messages/en.json';
 
 describe('protected delivery disclosure drafts', () => {
   it('README and llms describe the same mechanism without changing the price fence', () => {
-    const readme = readFileSync('README.md', 'utf8').split('\n').find((line) => line.startsWith('- **Protected delivery'))!;
+    const readme = readFileSync('docs/FEATURES.md', 'utf8').split('\n').find((line) => line.startsWith('- **Protected delivery'))!;
     const llms = readFileSync('public/llms.txt', 'utf8').split('\n').find((line) => line.startsWith('- 保護配布'))!;
     for (const line of [readme, llms]) {
       for (const text of ['OFF', '60', 'EdDSA', '/.well-known/openpay-delivery-keys.json', 'SDK 0.8.0', 'openpay-x402-sdk/delivery']) expect(line).toContain(text);
