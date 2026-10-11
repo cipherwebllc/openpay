@@ -1,7 +1,7 @@
 [
   {
     "address": "0x9a76ea8fc0b9f34d34b91d453f2940932c9a7fe0",
-    "note": "テスト買い手 / license minter"
+    "note": "テスト買い手 (本番のライセンス NFT の minter は 2026-10-12 に別の鍵へ交代)"
   },
   {
     "address": "0x8f16ef365676c405c739175fe7a11343e864343b",
