@@ -6,6 +6,8 @@
 //
 // fail 条件:
 //   1. numFailedTests > 0 (assertion fail)
+//   1b. ファイル単位の失敗 (testResults[].status === 'failed': import 時の例外・beforeAll/afterAll の例外・test が 0 件の
+//      ファイル)。numFailedTests に載らず、以前は coverage の要約が出ない副作用でしか落ちていなかった (KNOWN_BROKEN_FILES は除く)
 //   2. numTotalTests === 0 (silent global skip)
 //   3. passed + failed < total かつ 未 run の test が KNOWN_BROKEN_FILES の
 //      範囲外 (= 新規 partial silent skip。regression 検知用 fence)
@@ -33,6 +35,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   checkTestFileCoverage,
+  fileLevelFailures,
   listTestFiles,
   normalizeReportedFiles,
 } from './lib/testFileFence.mjs';
@@ -139,6 +142,14 @@ child.on('exit', (code) => {
 
   if (numFailedTests > 0) {
     console.error('[run-tests] FAIL: 1 件以上 assertion failure あり');
+    process.exit(1);
+  }
+  // assertion の外でファイルごと落ちた (import 時の例外・beforeAll/afterAll の例外・test が 0 件)。numFailedTests にも
+  // 下の test 数の突き合わせにも載らないので、ファイルの status で見る。
+  const failedFiles = fileLevelFailures(testResults, process.cwd()).filter(({ file }) => !KNOWN_BROKEN_FILES.has(file));
+  if (failedFiles.length > 0) {
+    console.error(`[run-tests] FAIL: ${failedFiles.length} 件の test ファイルがファイル単位で失敗 (assertion の外の例外・test が 0 件)`);
+    for (const { file, message } of failedFiles) console.error(`  - ${file}: ${message}`);
     process.exit(1);
   }
   if (numTotalTests === 0) {

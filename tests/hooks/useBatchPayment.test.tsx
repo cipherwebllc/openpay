@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
 import { renderHook, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import {
@@ -113,9 +113,16 @@ function makeWrapper() {
 
 const GWEI = 10n ** 9n;
 
-let sendUserOperation: ReturnType<typeof vi.fn>;
-let waitForUserOperationReceipt: ReturnType<typeof vi.fn>;
-let getUserOperationGasPrice: ReturnType<typeof vi.fn>;
+// 型を付けない vi.fn (ReturnType<typeof vi.fn>) は vitest 4 以降で関数の型に代入できない (Mock<Procedure | Constructable>)。
+// smartAccountClient / pimlicoClient の関数に代入できる形を明示する。any は test が読む所だけ: sendUserOperation の
+// 引数 (calls を中身まで読む) と receipt の戻り値 (fixture は viem の receipt の一部だけを返す)。
+type SendUserOperation = (parameters: any) => Promise<Hex>;
+type WaitForUserOperationReceipt = (parameters: { hash: Hex }) => Promise<any>;
+type GasPriceTier = { maxFeePerGas: bigint; maxPriorityFeePerGas: bigint };
+type GetUserOperationGasPrice = () => Promise<{ slow: GasPriceTier; standard: GasPriceTier; fast: GasPriceTier }>;
+let sendUserOperation: Mock<SendUserOperation>;
+let waitForUserOperationReceipt: Mock<WaitForUserOperationReceipt>;
+let getUserOperationGasPrice: Mock<GetUserOperationGasPrice>;
 
 // useBatchPayment は gasless 経路でのみ呼ばれるため、'unavailable' は到達不能。
 // テストの paymasterMode も SmartAccountBundle と同じ narrow union を使う。
@@ -132,9 +139,9 @@ function mountReady(opts?: {
   const paymasterMode: GaslessPaymasterMode = opts?.paymasterMode ?? 'sponsorship';
 
   sendUserOperation = vi
-    .fn()
+    .fn<SendUserOperation>()
     .mockResolvedValue(`0x${'a'.repeat(64)}` as Hex);
-  waitForUserOperationReceipt = vi.fn().mockResolvedValue({
+  waitForUserOperationReceipt = vi.fn<WaitForUserOperationReceipt>().mockResolvedValue({
     success: true,
     actualGasCost: 1_000n,
     receipt: {
@@ -142,7 +149,7 @@ function mountReady(opts?: {
       blockNumber: 12345n,
     },
   });
-  getUserOperationGasPrice = vi.fn().mockResolvedValue({
+  getUserOperationGasPrice = vi.fn<GetUserOperationGasPrice>().mockResolvedValue({
     slow: { maxFeePerGas: maxFeePerGas / 2n, maxPriorityFeePerGas: 1n },
     standard: { maxFeePerGas, maxPriorityFeePerGas: 1n },
     fast: { maxFeePerGas, maxPriorityFeePerGas: 1n },
@@ -694,7 +701,7 @@ describe('useBatchPayment', () => {
     it('gas ceiling 取得中に 2 回連続 mutate → 両方で getUserOperationGasPrice が呼ばれる (独立した実行)', async () => {
       // gasPrice fetch を deferred にして、2 つの mutate を interleave させる
       const gates: Array<() => void> = [];
-      getUserOperationGasPrice = vi.fn().mockImplementation(
+      getUserOperationGasPrice = vi.fn<GetUserOperationGasPrice>().mockImplementation(
         () =>
           new Promise((resolve) => {
             gates.push(() =>
@@ -707,9 +714,9 @@ describe('useBatchPayment', () => {
           }),
       );
       sendUserOperation = vi
-        .fn()
+        .fn<SendUserOperation>()
         .mockResolvedValue(`0x${'a'.repeat(64)}` as Hex);
-      waitForUserOperationReceipt = vi.fn().mockResolvedValue({
+      waitForUserOperationReceipt = vi.fn<WaitForUserOperationReceipt>().mockResolvedValue({
         success: true,
         actualGasCost: 1_000n,
         receipt: {

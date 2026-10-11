@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi, afterEach, type MockInstance } from 'vitest';
 import { renderHook, act, waitFor } from '@testing-library/react';
 import { useHistory } from '@/hooks/useHistory';
 import {
@@ -156,8 +156,9 @@ describe('useHistory', () => {
   });
 
   describe('unmount で event listener cleanup (実証)', () => {
-    let addSpy: ReturnType<typeof vi.spyOn>;
-    let removeSpy: ReturnType<typeof vi.spyOn>;
+    // spy する関数の型を明示する (ReturnType<typeof vi.spyOn> は vitest 4 以降で引数の型が any でなくなる)。
+    let addSpy: MockInstance<typeof window.addEventListener>;
+    let removeSpy: MockInstance<typeof window.removeEventListener>;
 
     beforeEach(() => {
       addSpy = vi.spyOn(window, 'addEventListener');

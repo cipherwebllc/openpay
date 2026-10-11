@@ -193,6 +193,9 @@ describe('GitHub Actions operation guards', () => {
     // (判定そのものは tests/scripts/run-tests-verdict.test.ts が値で固定する)
     expect(runner).toContain("'--reporter=./scripts/lib/unhandledErrorsReporter.mjs'");
     expect(runner).toContain('evaluateUnhandled(unhandledText)');
+    // ファイル単位の失敗 (import 時の例外・afterAll の例外・test が 0 件) は numFailedTests に載らないので、ファイルの
+    // status で見る (判定の純関数は tests/scripts/test-file-fence.test.ts が値で固定する)
+    expect(runner).toContain('fileLevelFailures(testResults, process.cwd())');
     expect(runner).toContain('evaluateCoverage(text)');
     // 成功で終わるすべての出口で coverage を確かめる
     const exits = [...runner.matchAll(/process\.exit\(([^)]*)\)/g)].map((m) => m[1]);

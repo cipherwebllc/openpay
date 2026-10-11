@@ -4,9 +4,10 @@
 // 背景: scripts/lib/luaRealTests.mjs 参照。旧ハーネスの共有 Lua stack への返り値蓄積による
 // WASM heap 破損は EVAL 単位の隔離で修正済み。既存のプロセス再起動は維持し、
 // 2 回目以降を要したら warning annotation で表面化する。
-// 判定は run-tests.mjs と同じく JSON reporter (numFailedTests / 報告ファイル一覧) を信頼ソースにする:
-// 1 回でも「全ファイルが報告され・failed=0・total>0」になれば成功、MAX_ATTEMPTS 回すべて
-// 失敗したら exit 1 (= 本当に壊れているか、flaky が悪化している)。
+// 判定は run-tests.mjs と同じく JSON reporter (numFailedTests / 報告ファイル一覧 / ファイル単位の失敗) と
+// 未処理エラーの集計 (scripts/lib/unhandledErrorsReporter.mjs) を信頼ソースにする:
+// 1 回でも「全ファイルが報告され・failed=0・total>0・ファイル単位の失敗 0・未処理エラー 0」になれば成功、
+// MAX_ATTEMPTS 回すべて失敗したら exit 1 (= 本当に壊れているか、flaky が悪化している)。
 //
 // 使い方: node scripts/run-lua-tests.mjs (CI の lua-real job・ローカルでも可)
 // env: LUA_TESTS_MAX_ATTEMPTS (既定 3) / LUA_TESTS_ATTEMPT_TIMEOUT_MS (既定 600000)
@@ -16,7 +17,8 @@ import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { LUA_REAL_TEST_FILES } from './lib/luaRealTests.mjs';
-import { checkTestFileCoverage, normalizeReportedFiles } from './lib/testFileFence.mjs';
+import { checkTestFileCoverage, fileLevelFailures, normalizeReportedFiles } from './lib/testFileFence.mjs';
+import { evaluateUnhandled } from './lib/unhandledErrorsReporter.mjs';
 
 const MAX_ATTEMPTS = Number(process.env.LUA_TESTS_MAX_ATTEMPTS ?? 3);
 // 1 attempt の上限。旧ハーネスの doString 返り値蓄積による Lua stack の範囲外書き込みは、
@@ -30,6 +32,7 @@ function runOnce(attempt) {
   return new Promise((resolve) => {
     const tmp = mkdtempSync(join(tmpdir(), 'vitest-lua-'));
     const jsonOut = join(tmp, 'result.json');
+    const unhandledOut = join(tmp, 'unhandled.json');
     const args = [
       '--max-old-space-size=4096',
       './node_modules/.bin/vitest',
@@ -40,13 +43,19 @@ function runOnce(attempt) {
       '--poolOptions.forks.maxForks=1',
       '--reporter=default',
       '--reporter=json',
+      // assertion の外の未処理エラー (Unhandled Rejection / Uncaught Exception) は numFailedTests に載らないので数える。
+      '--reporter=./scripts/lib/unhandledErrorsReporter.mjs',
       `--outputFile=${jsonOut}`,
       ...LUA_REAL_TEST_FILES,
     ];
     console.log(`\n[run-lua-tests] attempt ${attempt}/${MAX_ATTEMPTS}`);
     // detached: 子 (vitest) が起動する fork worker も同じプロセスグループに入るので、timeout 時に
     // グループごと SIGKILL できる (worker だけ生き残る事故を防ぐ)。
-    const child = spawn('node', args, { stdio: 'inherit', detached: process.platform !== 'win32' });
+    const child = spawn('node', args, {
+      stdio: 'inherit',
+      detached: process.platform !== 'win32',
+      env: { ...process.env, RUN_TESTS_UNHANDLED_OUT: unhandledOut },
+    });
     let timedOut = false;
     const timer = setTimeout(() => {
       timedOut = true;
@@ -70,6 +79,12 @@ function runOnce(attempt) {
       } catch {
         console.error(`[run-lua-tests] attempt ${attempt}: JSON report unreadable (vitest exit=${code})`);
       }
+      let unhandledText = null;
+      try {
+        unhandledText = readFileSync(unhandledOut, 'utf8');
+      } catch {
+        unhandledText = null;
+      }
       rmSync(tmp, { recursive: true, force: true });
       if (!report) return resolve({ ok: false, reason: 'no-report' });
       const { numFailedTests, numTotalTests, numPassedTests, testResults } = report;
@@ -79,6 +94,23 @@ function runOnce(attempt) {
         `[run-lua-tests] attempt ${attempt}: vitest exit=${code} passed=${numPassedTests} failed=${numFailedTests} total=${numTotalTests} files=${reported.length}/${LUA_REAL_TEST_FILES.length}`,
       );
       if (numFailedTests > 0) return resolve({ ok: false, reason: `${numFailedTests} failed` });
+      // import 時の例外・beforeAll/afterAll の例外・test が 0 件のファイルは numFailedTests に載らない。
+      const failedFiles = fileLevelFailures(testResults, process.cwd());
+      if (failedFiles.length > 0) {
+        return resolve({
+          ok: false,
+          reason: `file-level failure: ${failedFiles.map(({ file, message }) => `${file} (${message})`).join(', ')}`,
+        });
+      }
+      const unhandled = evaluateUnhandled(unhandledText);
+      if (!unhandled.ok) {
+        return resolve({
+          ok: false,
+          reason: unhandled.readable
+            ? `${unhandled.count} unhandled error(s): ${unhandled.messages.join(' / ')}`
+            : 'unhandled-error summary not written (vitest did not reach the end of the run)',
+        });
+      }
       if (numTotalTests === 0) return resolve({ ok: false, reason: '0 tests ran' });
       if (numPassedTests + numFailedTests < numTotalTests) {
         return resolve({ ok: false, reason: 'partial silent skip (worker died)' });

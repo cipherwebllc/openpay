@@ -16,3 +16,9 @@ export function checkTestFileCoverage(args: {
   reported: string[];
   allowlist?: string[];
 }): { ok: boolean; missing: string[] };
+
+/** ファイル単位で失敗した test ファイル (testResults[].status === 'failed') と理由の 1 行目を返す。 */
+export function fileLevelFailures(
+  testResults: unknown,
+  root: string,
+): { file: string; message: string }[];

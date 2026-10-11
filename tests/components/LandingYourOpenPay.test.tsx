@@ -263,7 +263,10 @@ describe('YourOpenPayPage (自分のページ・P4b)', () => {
     <YourOpenPayPage fallback={<a href="#default-row">既定の行</a>} pageLabel={ja.Landing.yourOpenPayPageTitle} editLabel={ja.Landing.yourOpenPayPageEdit} />
   );
   function mockHandles(body: unknown, status = 200) {
-    return vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify(body), { status }));
+    const spy = vi.spyOn(globalThis, 'fetch');
+    // vitest 4 以降の spyOn は spy 済みの fetch に同じ spy (呼び出しの履歴つき) を返すので、毎回の spy を空から数える。
+    spy.mockClear();
+    return spy.mockResolvedValue(new Response(JSON.stringify(body), { status }));
   }
   function signIn() {
     account.status = 'connected';
@@ -370,11 +373,12 @@ describe('YourOpenPayPage (自分のページ・P4b)', () => {
     expect(await screen.findByRole('link', { name: '既定の行' })).toBeInTheDocument();
   });
   it('handle がない・取得に失敗したときは既定の行のまま (0 件と失敗を偽装しない = 既定の行に戻すだけ)', async () => {
-    mockHandles({ ok: true, max: 3, handles: [] });
+    const empty = mockHandles({ ok: true, max: 3, handles: [] });
     signIn();
     const first = renderStrip(page());
     await act(async () => {});
     expect(screen.getByRole('link', { name: '既定の行' })).toBeInTheDocument();
+    expect(empty).toHaveBeenCalledTimes(1);
     first.unmount();
     queryClient = new QueryClient();
     const failing = mockHandles({ ok: false, error: 'kv_error' }, 502);

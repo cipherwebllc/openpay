@@ -292,8 +292,20 @@ describe('useStoreDeviceRegister (レジ端末: 受け渡し → 確かめて送
 
   it('再読み込み後: 前のタブのセッションを締め切り、署名が入っていれば送る', async () => {
     window.sessionStorage.setItem(STORE_DEVICE_SESSION_KEY, JSON.stringify({ id: ID, token: TOKEN, expiresAt: nowSec() + 300, merchant: SHOP, amount: AMOUNT.toString(), chainId: 80002 }));
-    closeRes = () => json({ ok: true, closed: false, auth: AUTH, txHash: null });
+    // 起動時の確認 (最近の送信) が storeDeviceSend を読み終えてから締め切りの応答を返す (vitest 4 以降は、mock した
+    // module の動的 import が重なると後の方に本物の module が返り、mock の verifyDeviceAuth が呼ばれない)。
+    let releaseClose!: () => void;
+    const closeHeld = new Promise<void>((resolve) => { releaseClose = resolve; });
+    closeRes = () => closeHeld.then(() => json({ ok: true, closed: false, auth: AUTH, txHash: null }));
     const { result } = renderHook(() => useStoreDeviceRegister(input));
+    await act(async () => {
+      await vi.waitFor(() => expect(send.readSentMarks).toHaveBeenCalledTimes(1), { timeout: 2000 });
+    });
+    expect(send.verifyDeviceAuth).not.toHaveBeenCalled();
+    await act(async () => {
+      releaseClose();
+      await vi.waitFor(() => expect(send.verifyDeviceAuth).toHaveBeenCalledTimes(1), { timeout: 2000 });
+    });
     await advance(0);
     expect(of('/close')).toHaveLength(1);
     expect(send.verifyDeviceAuth).toHaveBeenCalledWith(

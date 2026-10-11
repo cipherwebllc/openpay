@@ -57,3 +57,21 @@ export function checkTestFileCoverage({ onDisk, reported, allowlist = [] }) {
   const missing = onDisk.filter((f) => !seen.has(f) && !allowed.has(f));
   return { ok: missing.length === 0, missing };
 }
+
+/**
+ * ファイル単位で失敗した test ファイル (testResults[].status === 'failed') を repo-relative で返す。
+ *   [{ file, message }]  message = vitest が付けた理由の 1 行目 (import 時の例外・beforeAll/afterAll の例外・
+ *   「No test found in suite」など)。
+ * なぜ必要か: この経路は numFailedTests に載らない (assertion の失敗ではない) ため、test 数ベースの判定では
+ * 通ってしまう。assertion の失敗で落ちたファイルも status は 'failed' なので一緒に返る (呼び出し側は
+ * numFailedTests を先に見る)。
+ */
+export function fileLevelFailures(testResults, root) {
+  if (!Array.isArray(testResults)) return [];
+  return testResults
+    .filter((r) => r?.status === 'failed')
+    .map((r) => ({
+      file: typeof r.name === 'string' ? relative(root, r.name).split(sep).join('/') : '(name なし)',
+      message: String(r.message ?? '').split('\n')[0],
+    }));
+}
