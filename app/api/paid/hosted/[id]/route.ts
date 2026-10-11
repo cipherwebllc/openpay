@@ -52,6 +52,10 @@ import {
 } from '@/lib/x402/purchaseIntent';
 import { isFacilitatorPreBroadcastRejection } from '@/lib/x402/paymentRedelivery';
 import {
+  hostedRedeliveryExpiredResponse,
+  hostedRedeliveryOpen,
+} from '@/lib/x402/hostedRedelivery';
+import {
   createJpycPaymentRequirements,
   type X402PaymentRequirements,
 } from '@/lib/x402/requirements';
@@ -221,6 +225,21 @@ async function settledContentResponse(input: {
     const rights = await resolveLicenseRights({ address: access.intent.claim.payer, productId: access.intent.resourceId, definition: access.intent.metadata.license, ownership: access.ownership });
     if (rights.entitled === null) return errorResponse('license_rights_unknown', 503);
     if (!rights.entitled) return errorResponse('not_found', 404);
+  }
+  // settlement は、この request 自身が settle を呼んで成功したとき (初回の購入) だけ渡る。渡らない
+  // 呼出はすべて既存 claim への署名ヘッダーの完全一致の再送で、確定から 30 分を過ぎたら本文を返さない
+  // (一致に要る値はオンチェーンの calldata から組み立てられるため・lib/x402/hostedRedelivery.ts)。
+  if (
+    input.settlement === undefined &&
+    !hostedRedeliveryOpen(access.intent.settledAt)
+  ) {
+    return hostedRedeliveryExpiredResponse({
+      rail: 'jpyc',
+      resourceId: access.intent.resourceId,
+      chainId: access.intent.chainId,
+      txHash: access.intent.txHash,
+      settledAt: access.intent.settledAt,
+    });
   }
   const content = await contentForIntent(access.intent);
   if (content === 'storage') {
@@ -427,6 +446,7 @@ function exactClaimOrError(input: {
     ...input,
     // 期限は新規 broadcast admission にだけ使う。既に claim 済みの完全一致 redelivery を
     // 期限後に遮断すると、恒久 entitlement と indeterminate 回復の両方へ波及する。
+    // (確定後の再送で本文を返す窓は、settledContentResponse が settledAt から別に区切る。)
     use:
       input.intent.state === 'quoted'
         ? 'broadcast-admission'
