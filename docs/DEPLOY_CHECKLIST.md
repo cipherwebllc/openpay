@@ -15,9 +15,9 @@ npm run typecheck && npm run lint && npm run test:run   # local 全 pass
 ### Production flag E2E (F13)
 
 公開 production ON フラグの CI スナップショットは [`e2e/prodFlags.env`](../e2e/prodFlags.env)。
-README の live 表記と user が承認した project memory の点灯記録を含み、名前は
+README・docs/ENV.md・docs/FEATURES.md・docs/API.md の live 表記と user が承認した project memory の点灯記録を含み、名前は
 `.env.local.example`・`lib/env.ts` 等の実装に合わせる (Vercel の実設定は未照合)。
-production の公開フラグを変更するときはこのファイルも確認する。README が本番 OFF と書くフラグ
+production の公開フラグを変更するときはこのファイルも確認する。README・docs が本番 OFF と書くフラグ
 (production sets `0`・off in production・off on mainnet) は入れない (`tests/scripts/e2e-prodflags.test.ts` が ON・OFF の両向きに検査)。
 ネットワークは testnet、鍵/forwarder はダミー、
 server-only フラグ/秘密は含めない。`.github/workflows/e2e.yml` の `e2e-prodflags` が同じファイルを
@@ -2160,7 +2160,7 @@ run green = archive と meta が Stored かつ status complete。partial は保�
 **監視**: `kv-backup-watch.yml` (6h ごと) が最新 complete meta の `capture.finishedAt` を見て 36h 超で赤 (取得 1 日 1 回 + GitHub の schedule の遅れを見込む・24h の RPO を保証するものではない) (通知 = workflow 失敗メール)。
 **backup job 単独の停止検知**であり、Actions 全体停止・リポの Actions 無効化・公開リポの 60 日無活動停止は検知できない (未充足)。
 
-**運用 secret** (app env ではない・`lib/env.ts` に入れない・`.env.local.example` 運用節と README に名前のみ):
+**運用 secret** (app env ではない・`lib/env.ts` に入れない・`.env.local.example` 運用節と docs/ENV.md に名前のみ):
 
 | 置き場 | 変数 | 内容 |
 |---|---|---|

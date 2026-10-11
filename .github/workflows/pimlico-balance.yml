@@ -39,7 +39,7 @@ jobs:
           # secret 未設定で kaia を skip、ある operator のみ check 対象に含める。
           if [ -z "$PIMLICO_PAYMASTER_POLYGON" ] || [ -z "$PIMLICO_PAYMASTER_BASE" ] || [ -z "$ALERT_WEBHOOK_URL" ]; then
             if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-              echo "::error::Secrets が未設定です (PIMLICO_PAYMASTER_POLYGON / PIMLICO_PAYMASTER_BASE / ALERT_WEBHOOK_URL)。README 'Pimlico balance alerts' を参照"
+              echo "::error::Secrets が未設定です (PIMLICO_PAYMASTER_POLYGON / PIMLICO_PAYMASTER_BASE / ALERT_WEBHOOK_URL)。docs/OPERATIONS.md 'Pimlico balance alerts' を参照"
               exit 1
             fi
             echo "::warning::Secrets 未設定のため scheduled run を skip (本番投入前の通常状態)"

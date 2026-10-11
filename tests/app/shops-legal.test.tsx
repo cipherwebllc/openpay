@@ -46,8 +46,8 @@ describe('Shops API legal disclosure pack', () => {
     expect(main).toContain('supplied by');
   });
 
-  it('README / llms.txt は endpoint・2 JPYC・opt-in・三値/電話除外を同期', () => {
-    const readme = readFileSync('README.md', 'utf8');
+  it('docs/API.md / llms.txt は endpoint・2 JPYC・opt-in・三値/電話除外を同期', () => {
+    const readme = readFileSync('docs/API.md', 'utf8');
     const llms = readFileSync('public/llms.txt', 'utf8');
     for (const text of [readme, llms]) {
       expect(text).toContain('/api/paid/jpyc-shops/search');

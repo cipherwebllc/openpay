@@ -12,174 +12,79 @@ OpenPay は、JPYC / USDC のウォレット送金を、店舗・イベント向
 
 ![OpenPay demo: receive (payment QR), register (POS), pay (customer)](./public/demo/sns-row.gif)
 
-### Pay-per-request APIs on Arc (x402) · Arc の USDC で買える有料 API
-
-Every USDC-priced API on open-pay.jp answers `402` with **two ways to pay the same price: USDC on Base, or USDC on [Arc](https://www.arc.io/)** (`eip155:5042`).
-The Arc option settles through the **Circle Gateway x402 facilitator** (`GatewayWalletBatched`): the buyer pays from a Gateway balance with no gas, and content is released only after the facilitator's verify + settle succeed.
-Live on Arc mainnet since 2026-09-17 — see it without a wallet:
-
-```bash
-curl -si https://open-pay.jp/api/paid/hello | grep -i '^payment-required:' | cut -d' ' -f2 | base64 -d
-# → accepts: [ eip155:8453 (USD Coin), eip155:5042 (GatewayWalletBatched) ] — same amount, same payee
-```
-
-Buy with Arc USDC from a browser wallet (no private key in the script): `node scripts/arc-gateway-buyer-smoke.mjs` · Catalogue: [`/openapi.json`](https://open-pay.jp/openapi.json) · [`/llms.txt`](https://open-pay.jp/llms.txt) · Runbook: [`docs/DEPLOY_CHECKLIST.md`](./docs/DEPLOY_CHECKLIST.md) §14.8
-
----
-
 ## Key features
 
-- **Non-custodial** — payments go directly to the merchant wallet; OpenPay never holds funds.
-- **No wallet lock-in** — any wallet that signs standard ERC20 / ERC-4337 / EIP-7702 transactions can pay; no app install required.
-- **JPYC / USDC** support (Japan's electronic payment instrument + Circle's USD stablecoin).
-- **QR-locked conditions** — amount, token, chain, and recipient are pinned per QR; customers cannot mistype them.
-- **Two payment modes** — Standard (customer pays gas in the native token) or Gasless (customer pays with just the token; for JPYC OpenPay sponsors the gas and charges a small per-transaction usage fee — **works in any wallet**, for USDC gas is paid in USDC via the paymaster **but only for EIP-7702 smart-account wallets — ordinary wallets fall back to standard**).
-- **Portal UX** — a single app with separate surfaces for paying (`/scan`), receiving (`/create`), browsing history (`/history`), and discovering on-chain services (`/explore`), all behind a shared header / bottom-nav and wallet-state badge.
-- **Block explorer link** on every receipt — merchants verify on-chain truth, not just a UI screen.
-- **Local transaction history** — per-browser LocalStorage history at `/history`, with filters (period / status / search), a JPY-converted GMV summary, CSV export, and a "latest 3" strip on the QR builder.
-- **Accounting integration** — `/history` exports income CSV in **freee**, **Money Forward**, and **Yayoi** formats (Yayoi-native in Shift_JIS), and — opt-in via `NEXT_PUBLIC_ENABLE_FREEE_SYNC` — connects to **freee over OAuth** to push income transactions in one click. Gated behind **SIWE wallet login** (no password/account) with an idempotent "sync to freee" batch (re-clicking never double-books).
-- **Sales line items & simple register** — the QR builder has an optional **accounting fields** section (product/purpose name, memo, tax rate & category, receipt no.), and `/create` adds a mobile-friendly **simple register**: add **multiple products to a cart** (from presets or typed), set per-line quantity / unit price / tax rate, and generate an itemized `/checkout` QR for the cart total. The line items travel with the payment and are recorded in `/history` as a **sales detail** (per-line product, quantity, unit price, tax rate, in-tax amount, total, receipt no.). They flow into the accounting CSVs (tax category + an item summary like “Coffee x2 / T-shirt x1” in the description), a dedicated **line-item CSV** (one row per product), and freee’s memo (one deal per transaction, items summarised — idempotent, never double-booked). One cart is a single currency. Register mode and product presets are stored locally (LocalStorage; no server DB). These are **bookkeeping aids for CSV import** — OpenPay is not a POS or accounting product, and final accounting (tax treatment, mixed-rate carts, etc.) should be confirmed in your accounting software / by a tax advisor. JPYC is treated as ¥1; tax is computed in the token’s own units (no forced JPY conversion for USDC).
-- **Mobile order & `@handle` storefronts** *(live in production)* — a store can publish a menu at `open-pay.jp/@handle` (or share a `/order` link); customers browse, add to a cart, and pay by QR, with the receiving wallet shared with the profile/tip page. Flag-gated layers add order relay to the merchant, kitchen / hall fulfillment boards (overdue orders tint amber/red, the kitchen aggregates uncooked item totals and can sort by pickup time), live sold-out toggles, open-from / last-order auto-stop and pre-order time slots, a pickup-ready customer notification, an optional customer **order memo** (allergies / requests), and a **dine-in staff-call button** bound to the customer's own paid order (see the env table).
-- **Payment push notifications** *(live in production)* — merchants get a Web Push when a payment (or mobile order) lands: SIWE-bound per-device subscriptions, server-authoritative triggers only (the relay/order paths — never client-reported logs), 60-second coalescing ("n new payments"), amount shown only per-device **opt-in**, a **"send test notification"** button, and notification tap lands on `/history` with the newest payment highlighted. On iOS, push requires the home-screen (A2HS) PWA — the panel guides users there.
-- **Installable PWA + offline receive QR** *(live in production)* — installable web app (manifest screenshots, add-to-home-screen hints at peak moments), a "today's sales" card on `/` for connected merchants, and an **offline mode for the receive screen**: once `/create` has been opened online, the page and the **last generated QR** keep working with no signal (QR is generated on-device) — for stalls, events, and basements. Payment routes are never served from cache.
-- **Printable store kit** — `/kit` prints an A4 sheet of four A6 "Cash & OpenPay accepted" counter POPs plus a door sticker; with the customer-facing payment-QR poster (token / chain logos + 3-step how-to) from `/create`, a store can be fully signposted with two sheets of paper.
-- **Reference market rate** — a lightweight strip on `/` and `/create` shows `1 USDC = ¥X.XX` via a 5-min server-cached Coinbase proxy; `1 JPYC = ¥1.00 (peg)` is fixed.
-- **Creator digital goods store** *(live in production)* — creators sell digital items on their `@handle` profile for JPYC: **URL products** (share links to PDFs / ZIPs / videos on free hosting) and **text products** (prompts, templates, up to 20k chars, stored by OpenPay for delivery). No seller fee — the buyer pays price + the x402 facilitator fee (1%, min 1 JPYC); sales settle **directly to the seller wallet** (non-custodial). Ships with a Specified-Commercial-Transactions-compliant purchase confirmation, seller-info registration, a **permanent purchase library** (re-download anytime, per-revision), purchase-provenance display (wallet / purchase ID / tx shown with the content as a resale deterrent), product images + gallery (up to 4), and **per-product share links** whose OG cards open the purchase dialog directly (`/@handle?product=…`). See `/guide/store` for a hands-on selling guide.
-- **License NFTs** *(flags default OFF)* — seller-defined access licenses with ERC-1155 proof on Polygon (Amoy for testing), paid directly to the seller in JPYC. Policy: 1–10,000 units, integer price at least 1,000 JPYC, non-transferable by default; transferable NFTs transfer the license. No usage counts or balances; purchase rights survive mint delay or failure. Seller-funded refunds are separate transfers. Sellers may pick the OpenPay standard terms template (standard-v1) or their own terms URL. `GET /api/license/verify?address=&product=` is a read-only HTTPS status API: unknown is `entitled: null`, not authentication or a signed attestation. SIWE holders can use `/api/store/content/<product>` and discover incoming licenses via `/api/store/library?source=holders` (follow `nextCursor` as `cursor`; the ordinary library remains purchase history). Ledger and Verify data are public. Third-party gating is not guaranteed. Public listing is available when `ENABLE_LICENSE_NFT_PUBLIC=1`; existing creator profile and SIWE prerequisites still apply. `GET /api/license/products/<id>` returns a public v1 product descriptor; SDK 0.7.1 accepts the product ID directly for license gates. See Terms Article 13 and deployment checklist §16.4–16.8.
-- **Protected delivery (flags default OFF)** — OpenPay checks entitlement and redirects to the seller’s host with a 60-second EdDSA ticket; it does not host the external file bytes. Public verification keys are served at `/.well-known/openpay-delivery-keys.json`, and SDK 0.8.0 provides `openpay-x402-sdk/delivery` and a private R2 Worker example. Sellers operate the destination and are responsible for its availability; tickets control access, not copying or sharing during their lifetime.
-- **x402 / AI-agent payments** *(live in production)* — a managed **JPYC x402 facilitator** with a public **AI store** (`/discovery`: searchable catalog + self-service seller registration), first-party demo resources, and the `openpay-x402-mcp` MCP package (two profiles: keyless human-pays ordering, and guarded autonomous x402 payments). Most x402 servers are USDC-only; OpenPay adds **JPYC**, and its USDC APIs accept **Base and Arc** (Arc via the Circle Gateway x402 facilitator).
+- **Non-custodial, no wallet lock-in** — payments go directly to the merchant wallet; OpenPay never holds funds.
+  Any wallet that signs standard ERC20 / ERC-4337 / EIP-7702 transactions can pay, and no app install is required.
+- **JPYC / USDC with QR-locked conditions** — amount, token, chain, and recipient are pinned per QR; customers cannot mistype them.
+- **Standard or gasless payment** — Standard: the customer pays gas in the native token.
+  Gasless: the customer pays with just the token. For JPYC, OpenPay sponsors the gas and charges a small per-transaction usage fee, and it **works in any wallet**.
+  For USDC, gas is paid in USDC via the paymaster **but only for EIP-7702 smart-account wallets — ordinary wallets fall back to standard**.
+- **Receive, register and history** — a QR builder (`/create`), a mobile-friendly simple register with an itemized cart, a block explorer link on every receipt,
+  per-browser local history (`/history`) with accounting-software CSV export, and a printable store kit (`/kit`).
+- **Mobile order & `@handle` storefronts** *(live in production)* — a store publishes a menu at `open-pay.jp/@handle` (or shares a `/order` link); customers browse, add to a cart, and pay by QR.
+  Order relay to the merchant and kitchen / hall boards are flag-gated layers.
+- **Tips and permanent `@handle` links** — a tip widget (link or embed) for creators and a link-in-bio profile that keeps resolving however often the receiver changes; `@handle` is **live on mainnet**.
+- **Notifications, PWA and offline receive QR** *(live in production)* — Web Push when a payment lands, an installable app, and a receive screen whose last QR keeps working with no signal.
+- **x402 / AI-agent payments** *(live in production)* — a managed **JPYC x402 facilitator**, a public **AI store** (`/discovery`), and the `openpay-x402-mcp` MCP package.
+  Most x402 servers are USDC-only; OpenPay adds **JPYC**, and its USDC APIs accept **Base and Arc**.
 - **OSS, self-hostable** under MIT.
 
-## Why OpenPay?
+Full feature list: [docs/FEATURES.md](./docs/FEATURES.md).
 
-Wallet-to-wallet transfers work, but a customer-typed transfer at a checkout counter is error-prone — the wrong token, wrong chain, or off-by-one amount sends money that can't be recovered.
-
-OpenPay generates a **QR with the amount, token, chain, and recipient fixed by the merchant**. The customer scans, reviews, signs — and funds land in the merchant's wallet directly. No new account to create, no merchant onboarding, no balance held by OpenPay.
-
-## Payment modes
-
-| Mode | Gas | Best for |
-|---|---|---|
-| **Standard payment (with gas)** | Customer pays in their own wallet (POL / ETH) | Web3 users who already hold native gas |
-| **Gasless payment** | For JPYC, OpenPay sponsors the gas and charges a per-transaction OpenPay usage fee (see Fees) — works in any wallet. For USDC, the customer pays gas in USDC via the Pimlico / Circle paymaster (OpenPay collects 0) — **requires an EIP-7702 smart-account wallet; ordinary wallets fall back to standard** | JPYC: any wallet. USDC: customers whose wallet is an EIP-7702 smart account |
-
-- Gasless for **JPYC** uses OpenPay's self-hosted **EIP-3009 relayer**: the customer signs a `receiveWithAuthorization` to a forwarder (or, where no forwarder is configured, a plain `transferWithAuthorization` directly to the merchant — a plain EIP-712 signature, **no EIP-7702 delegation required**, so it works in MetaMask and other injected wallets), and the relayer submits it on-chain. In the **recover** configuration (forwarder set), OpenPay sponsors the gas (POL / KAIA / AVAX) and a per-transaction **OpenPay usage fee** is split to the OpenPay fee-receiver atomically in the same transaction (see Fees); for payments the **merchant always absorbs the fee** (the customer pays the displayed price) — the per-QR gas-bearer toggle is removed for JPYC recover. Live on **Polygon, Kaia, and Avalanche C-Chain** mainnet. Pimlico / EIP-7702 sponsorship remains as an automatic fallback on Polygon / Kaia (on Avalanche, whose EIP-7702 is non-canonical, the fallback is standard mode). If the relay's HTTP response is lost mid-flight, the client **latches the signed payload** (no re-signing, no silent fallback to standard mode) and auto-resolves the outcome via a read-only status endpoint — a settled payment completes normally (receipt, order relay, history), and **double payment is structurally prevented**.
-- Gasless for **USDC** uses ERC-4337 + ERC-7702. Gas is sponsored via **Pimlico** (ERC20 paymaster) or, for USDC on Base / Arbitrum / Optimism, **Circle Paymaster v0.8** (gas paid directly in USDC; OpenPay collects 0 fee). ⚠️ **USDC gasless requires the customer's EOA to already be EIP-7702-delegated to a smart account** — an ordinary, never-delegated injected wallet cannot bootstrap the delegation (viem cannot sign the 7702 authorization over JSON-RPC), and MetaMask's own Stateless7702 smart account is currently disabled pending a viem / delegation-toolkit fix; both **fall back to standard payment** (the customer pays their own gas). It also requires a chain whose EIP-7702 is active (see the Avalanche note below). **JPYC gasless has no such requirement** — it is a signature-only EIP-3009 relay that works in any injected wallet.
-- Standard mode is a plain ERC20 `transfer` (single transfer to the merchant).
-- The gasless network-fee bearer can be set with `gas=customer` (default) or `gas=merchant`. For **JPYC gasless in recover mode** it decides who bears the per-transaction OpenPay usage fee: `customer` adds it on top of the payment, `merchant` absorbs it from the amount received. For the **USDC** paymaster paths it has no effect on what OpenPay collects (OpenPay collects 0).
+**日本語の概要**: 店舗は、金額・トークン・チェーン・受取先を固定した QR を作るだけで、お客様のウォレットから直接入金を受け取れます（アカウント登録は不要・OpenPay は資金を預かりません）。
+JPYC はどのウォレットでもガス代なしで支払えます（USDC のガス代なし決済は EIP-7702 スマートアカウントのウォレットのみで、通常のウォレットは通常決済になります）。
+JPYC のガス代なし決済では、お店側に 1 回ごとの OpenPay 利用料がかかります（詳しくは [Fees](#fees)）。
+機能の全文は [docs/FEATURES.md](./docs/FEATURES.md) にあります。
 
 ## Fees
 
-In **gasless** mode for **JPYC** (recover configuration), each payment carries a **per-transaction OpenPay usage fee** — **1% of the payment with a 2 JPYC minimum** (`max(2 JPYC, 1%)`). The fee is deducted at settlement and split to the OpenPay fee-receiver atomically in the same transaction. The fee-bearer is **fixed, not a per-QR choice**: for **payments** (`/pay`, `/checkout`, the register) the **merchant always absorbs the fee** and the **customer pays exactly the displayed price** (the merchant's net = price − fee). OpenPay never takes custody: the principal price of goods still moves customer→merchant directly on-chain, and only the usage-fee portion is split out.
+In **gasless** mode for **JPYC** (recover configuration), each payment carries a **per-transaction OpenPay usage fee** — **1% of the payment with a 2 JPYC minimum** (`max(2 JPYC, 1%)`).
+The fee is deducted at settlement and split to the OpenPay fee-receiver atomically in the same transaction.
+For **payments** (`/pay`, `/checkout`, the register) the **merchant always absorbs the fee** and the **customer pays exactly the displayed price**.
+OpenPay never takes custody: the principal price of goods still moves customer→merchant directly on-chain, and only the usage-fee portion is split out.
 
-For **tips** (`/tip`, `@handle` tip pages) the **tipper pays a flat gas-equivalent floor (about 2 JPYC)** on top of the tip — the **1% does not apply to tips** (tips stay at the flat floor).
+For **tips** (`/tip`, `@handle` tip pages) the **tipper pays a flat gas-equivalent floor (about 2 JPYC)** on top of the tip — the **1% does not apply to tips**.
 
-There are **no OpenPay usage fees** on receiving a payment itself, on **standard** (with-gas) mode outside mobile orders — including the register's standard JPYC path since 2026-10-07 (see below; the customer pays their own gas, OpenPay does not touch it), or on the **USDC** paths outside mobile orders (gas is paid by the customer in USDC via the Pimlico / Circle paymaster, or directly on Arc; OpenPay collects 0). The usage fee applies to JPYC gasless (recover) payments and tips, plus mobile orders described below. “The shop pays the gas” (register or a fixed-amount payment QR shown on screen, JPYC on Polygon, Kaia or Avalanche; flag-gated) carries no OpenPay usage fee — the shop’s device pays the gas and, by design, 1 wei is added to the customer’s payment and sent to OpenPay.
+There are **no OpenPay usage fees** on receiving a payment itself, on **standard** (with-gas) mode outside mobile orders — including the register's standard JPYC path since 2026-10-07
+(the customer pays their own gas, OpenPay does not touch it), or on the **USDC** paths outside mobile orders
+(gas is paid by the customer in USDC via the Pimlico / Circle paymaster, or directly on Arc; OpenPay collects 0).
+The usage fee applies to JPYC gasless (recover) payments and tips, plus mobile orders described below.
+“The shop pays the gas” (register or a fixed-amount payment QR shown on screen, JPYC on Polygon, Kaia or Avalanche; flag-gated) carries no OpenPay usage fee —
+the shop’s device pays the gas and, by design, 1 wei is added to the customer’s payment and sent to OpenPay.
 
-**Mobile-order system fee (flag-gated; live in production).** When `NEXT_PUBLIC_ENABLE_MOBILE_ORDER_FEE` is on (production sets `1`; code default off), payments made through a mobile-order storefront (`@handle` / `/order`) carry the OpenPay usage fee at a **mobile-order rate** (the **mobile-order system fee**) — consideration for the mobile-order *system* (shop page, menu, order management, order relay). It is **not charged in addition to** the gasless per-tx usage fee: on a mobile order only this rate applies, and the gas OpenPay sponsors is included in it (no separate gasless fee on top). It is **path-independent**: it applies whether the payment goes through the gasless relay **or** standard (with-gas) mode, so a gasless-by-other-means or standard payment does not escape it. The rate is **1%** for in-store / kiosk (`storefront`) and **3%** for pre-order mobile ordering (`preorder`) — a flat percent (no floor). For pre-order a per-store toggle picks **store-borne** (deducted from the merchant's receipt; customer sees the price only) or **customer-added** (the customer pays price + 3%). On the relay path it is enforced server-side — the relay route recomputes the rate from a code constant keyed by the order kind, so the client cannot lower it — and split to the same fee-receiver in the same transaction. It is booked as a **system fee** (not a network/gas cost) in history / CSV. `/pay`, tips, and ordinary checkout links are unaffected. Rates live in `lib/mobileOrderFee.ts`, fenced against the disclosed numbers in `lib/legal.ts` (`DISCLOSED_MOBILE_ORDER_FEE`).
+- **Mobile-order system fee** *(live in production)* — payments made through a mobile-order storefront (`@handle` / `/order`) carry the OpenPay usage fee at a **mobile-order rate**:
+  **1%** for in-store / kiosk (`storefront`) and **3%** for pre-order mobile ordering (`preorder`), a flat percent (no floor).
+  On a mobile order only this rate applies (it is not charged in addition to the gasless per-tx usage fee), and it applies on both the gasless relay and standard (with-gas) mode.
+  `/pay`, tips, and ordinary checkout links are unaffected.
+- **Digital goods store** *(live in production)* — selling digital items on `@handle` profiles carries **no seller fee**; the buyer pays the listed price plus the **x402 facilitator fee** (1% of price, min 1 JPYC) added on the buyer side.
 
-**Digital goods store (live in production).** Selling digital items on `@handle` profiles carries **no seller fee**; the buyer pays the listed price plus the **x402 facilitator fee** (1% of price, min 1 JPYC) added on the buyer side — the same fee schedule as other x402 payments, applied because store purchases settle over the x402 rail. Disclosed in Terms Article 13 and the Tokutei notice.
-
-**Register (POS) standard-payment fee — abolished on 2026-10-07.** The register's standard (with-gas) JPYC path no longer carries an OpenPay usage fee (production set `NEXT_PUBLIC_ENABLE_REGISTER_FEE` to `0`; the Terms/Tokutei disclosures state it). The flag and its fee-claim endpoint (`/api/register/claim`) have since been removed from the code, so bringing a register fee back would take new code and updated fee disclosures first. A register sale paid on the gasless **relay** path carries the regular recover fee, like any other JPYC gasless payment.
-
-This pricing is **not a percentage skim of arbitrary size**: it is a small, capped, per-transaction service fee for the gas-sponsored JPYC relay. OpenPay remains a non-custodial software / infrastructure provider rather than a payment intermediary under the Japanese Payment Services Act framework.
-
-Arc is **standard-mode only** when enabled: customers pay network fees directly in USDC, with no separate gas token needed and no OpenPay collection. Arc is always excluded from cross-chain sources. Destination forwarding is separately gated by `NEXT_PUBLIC_ENABLE_USDC_ARC_CROSSCHAIN` (default **off**); it uses CCTP V2 and Circle Forwarding Service, with the forwarding fee added to the buyer’s payment and no OpenPay collection. `NEXT_PUBLIC_ENABLE_USDC_ARC` defaults **off**.
+This pricing is **not a percentage skim of arbitrary size**: it is a small, capped, per-transaction service fee for the gas-sponsored JPYC relay.
+OpenPay remains a non-custodial software / infrastructure provider rather than a payment intermediary under the Japanese Payment Services Act framework.
+Full details (fee bearer, Arc, register history): [docs/FEATURES.md#fees](./docs/FEATURES.md#fees).
 
 ## Supported tokens and chains
 
-| Token | Merchant receiving chains | Buyer-pay-from chains (cross-chain ON) | Notes |
-|---|---|---|---|
-| **JPYC** (v3, Japan's electronic payment instrument under the revised Payment Services Act) | Polygon, Kaia, Avalanche C-Chain | same (no cross-chain) | Gasless via OpenPay's self-hosted **EIP-3009 relayer** (signature-based, no EIP-7702 needed) — live on Polygon, Kaia, and Avalanche; Pimlico / 7702 sponsorship as fallback on Polygon / Kaia. On **Avalanche** gasless is **recover-mode only** (a forwarder is required; ~2 JPYC gas floor, same as Polygon / Kaia). **Ethereum L1** JPYC receiving is also supported but **standard-mode only** — the customer pays ETH gas (L1 gas is too volatile for a sponsored relay, so there is no gasless path) — gated behind a default-off flag (`NEXT_PUBLIC_ENABLE_JPYC_ETHEREUM`, mainnet only). |
-| **USDC** (Circle native — bridged USDC.e is **not** supported) | Base, Arbitrum, Optimism, Polygon, **Ethereum L1**, **Avalanche C-Chain**, **Arc** (7 with Arc enabled) | the original 6 + **Unichain, World Chain, Sonic, Sei, HyperEVM** (11 total, via Circle Gateway / CCTP V2) | Gasless via Pimlico ERC20 Paymaster on Base / Arbitrum / Optimism / Polygon / Ethereum L1; **Circle Paymaster v0.8** runs in parallel for USDC on Base / Arbitrum / Optimism (USDC-native gas, OpenPay 0 fee). **USDC gasless additionally requires the buyer's EOA to be an EIP-7702 smart account (already delegated); ordinary / undelegated wallets fall back to standard payment** (JPYC gasless has no such requirement). **Avalanche C-Chain is standard-mode only for now** — its EIP-7702 (ACP-209) is not yet activated on mainnet, so gasless (which relies on 7702) gracefully falls back to standard payment; it re-enables automatically once ACP-209 ships. The 5 buyer-only chains are cross-chain **sources only** (they do not appear in the merchant chain chooser). Cross-chain payments require the buyer to hold native gas (ETH/POL) on the source chain — see the cross-chain notes below. |
+| Token | Merchant receiving chains | Notes |
+|---|---|---|
+| **JPYC** (v3) | Polygon, Kaia, Avalanche C-Chain | Gasless via OpenPay's self-hosted **EIP-3009 relayer** (signature-based, no EIP-7702 needed). **Ethereum L1** is also supported but **standard-mode only**, behind a default-off flag. |
+| **USDC** (Circle native — bridged USDC.e is **not** supported) | Base, Arbitrum, Optimism, Polygon, Ethereum L1, Avalanche C-Chain (standard-mode only for now), Arc (7 with Arc enabled; standard-mode only) | Gasless via the Pimlico ERC20 Paymaster or **Circle Paymaster v0.8**. **USDC gasless requires the buyer's EOA to be an EIP-7702 smart account; ordinary / undelegated wallets fall back to standard payment.** |
 
-`NEXT_PUBLIC_NETWORK_ENV=testnet` swaps mainnets for Base / Arbitrum / Optimism Sepolia + Polygon Amoy + Kairos Testnet + Sepolia + Avalanche Fuji + Unichain Sepolia + World Chain Sepolia + Sonic Blaze Testnet + Sei Testnet + HyperEVM Testnet + Arc Testnet.
+- USDC balances are chain-specific. Customers can pay from **11 chains** via Circle Gateway / CCTP V2 cross-chain, and need the source chain's native gas (ETH/POL etc.) for a cross-chain payment.
+- `NEXT_PUBLIC_NETWORK_ENV=testnet` swaps mainnets for the matching testnets.
+- Per-chain details, the payment-page chain chooser, and the tip widget: [docs/FEATURES.md](./docs/FEATURES.md#supported-tokens-and-chains).
 
-> **USDC balances are chain-specific.** The same wallet address can receive USDC on all seven merchant chains (with Arc enabled), but each chain holds a separate balance. Optional chain-abstraction via Circle Gateway / CCTP V2 is available as an augmentation when the buyer's USDC is on a different chain than the merchant's selected chain (see [docs/DEPLOY_CHECKLIST.md §10](./docs/DEPLOY_CHECKLIST.md) for status and operator verification).
-
-> **Cross-chain reach:** When the merchant enables cross-chain in the QR (default ON for USDC; Arc requires both Arc flags), customers can pay from any of **11 chains** — the 6 cross-chain receiving chains plus Unichain, World Chain, Sonic, Sei, and HyperEVM. Arc can be paid *into* from those chains via Circle forwarding (buyer-paid Circle fee), but is never a source. The print poster lists all 11 so customers know up-front which wallet works. Circle Gateway / CCTP V2 forwards the value to the merchant's selected receiving chain (~5–30 seconds end-to-end depending on path; Arc forwarding can take longer and has a separately quoted buyer-paid Circle forwarding fee).
-
-> **Cross-chain is "gas-on" for the buyer.** Eligible same-chain payments are gasless (the buyer pays gas in USDC via the paymaster). A cross-chain payment bridges from the buyer's wallet via their own EOA, so the buyer needs the **source chain's native gas (ETH/POL etc.)** — it cannot be completed with USDC alone.
-
-> **Ethereum L1 caveat:** USDC payments on Ethereum L1 support both gasless (Pimlico ERC20 Paymaster, customer pays gas in USDC) and standard modes. L1 gas is still 1–3 orders of magnitude higher than L2 — pick Base / Arbitrum / Optimism / Polygon for routine small-ticket flows; reserve Ethereum L1 for the cases where the buyer or merchant has a hard requirement (e.g. SBI VC Trade USDC withdrawals are L1-only).
-
-### Payment-page UX (cross-chain chain chooser)
-
-When a customer scans a USDC QR and has USDC on multiple chains, the payment page shows a **source-chain chooser** with the per-chain trade-offs side-by-side:
-
-- Chain name + the customer's USDC balance on that chain
-- Path badge: **Direct** (same chain as merchant, no bridge fee) · **Fast (Gateway)** (Circle Gateway, ~5s) · **Standard (CCTP V2)** (~30s)
-- Fee breakdown (cross-chain paths only): Circle bridge fee + network gas token (e.g. `ブリッジ手数料 0.005 USDC + ガス代 (ETH)`) + ETA. The Direct (same-chain) option shows no extra fee line.
-- A note that cross-chain paths need the source chain's native gas (ETH/POL) — USDC alone is not enough
-- Pre-selected default = the auto-picked best path (direct preferred, else gateway, else CCTP V2), but the customer can override
-
-The chooser is hidden when the customer has USDC on **only** the merchant's chain — in that case the regular Pay button handles it as a plain direct transfer. The chain abstraction layer is `lib/crossChain/*` (Circle Gateway + CCTP V2), see [`docs/DEPLOY_CHECKLIST.md §10`](./docs/DEPLOY_CHECKLIST.md) for the operator-verification status and [`docs/research/circle-12chain-addresses.md`](./docs/research/circle-12chain-addresses.md) for contract addresses + audit trail.
-
-### Tip widget (creator surface)
-
-Creators can **share a tip link** (`/tip/[address]`) or **embed a Tip widget** on their blog, portfolio, or GitHub README. Same chain reach as the payment page:
-
-- **JPYC** — receive tips on **Polygon, Kaia, or Avalanche C-Chain**. Default is Polygon; switch to Kaia or Avalanche in the creator dashboard chain chooser when generating the embed snippet.
-- **USDC** — receive on any of **6 receiving chains** (Base / Arbitrum / Optimism / Polygon / Ethereum L1 / Avalanche C-Chain). Fans on different chains can still tip you via **cross-chain receive** (default ON) — Circle Gateway / CCTP V2 forwards the value to your selected chain. The same cross-chain path covers fans on the 5 buyer-only chains (Unichain, World Chain, Sonic, Sei, HyperEVM). Toggle cross-chain off in the dashboard if you want same-chain transfers only.
-
-The widget is gasless-only — fans only need the tip token, no native gas (for JPYC OpenPay sponsors the gas and the tipper adds a flat gas-equivalent amount — see Fees; for USDC the fan pays gas in USDC via the Pimlico / Circle paymaster, OpenPay collects 0). Creator-defined presets, custom thank-you message and an optional thank-you link.
-
-**Link images & media embeds** — profile links can show a small **image instead of an emoji** (any https image URL, emoji fallback on error), and links to **nine supported services** — YouTube, Spotify, Audius, Niconico, Vimeo, Apple Music, TikTok, Suno, SoundCloud — can render as **embedded players** (opt-in per link, max 3 per profile). Embed iframes are built only from strictly validated IDs (never from raw user URLs) and are sandboxed. **Private tip messages (question box)** — tippers can attach a private question/message; only the recipient can read it (SIWE-unlocked inbox, kept 180 days).
-
-**Theming & branded presets** — tip pages share the six `@handle` profile themes (**Clean / Gradient / Bold / Outline / Night / Soft**) plus a free accent color, so a creator's profile and tip page can match. The theme rides the link (`theme=`; links without it render exactly as before), and the shared **OG card reflects it** too. Amount presets can carry short **emoji labels** (`preset=300|☕ コーヒー1杯` → a two-line "☕ コーヒー1杯 / 300 JPYC" button). The builder (`/create` → tip) previews the **real tip form in a phone frame** — what you see is what fans get. (**USDC** gasless relies on EIP-7702, so USDC tips on **Avalanche C-Chain** are unavailable until ACP-209 activates — fans are guided to another chain; see the Avalanche note above. **JPYC** tips on Avalanche are unaffected: JPYC gasless uses the signature-based EIP-3009 relay, not 7702.)
-
-**Sharing & social preview** — the tip builder (`/create` → tip) outputs the link with one-tap copy, a **link QR** (for print / in-person; omitted automatically if the URL is too long for a scannable code), and a **“Share on X”** button, plus two embeds: the full **`<iframe>`** widget and a paste-anywhere **“Tip” button** snippet (note / Linktree / blog). Tip links shared on X / Discord / LINE unfurl into a **dynamic OG card** (`/og/tip`, 1200×630) with the creator’s name + token + brand (Japanese names rendered via a bundled Noto Sans JP). The card stays accurate per mode — gasless JPYC/USDC say “no gas”, native POL/KAIA tips don’t (the sender pays their own gas). The OG endpoint only honours the creator name for a valid tip link (`to` + token/native); arbitrary direct hits fall back to a generic branded card.
-
-**Permanent links (`@handle`)** — a creator can reserve a memorable handle (`open-pay.jp/@alice`) that serves a **link-in-bio profile** (avatar, bio, links with emoji + one featured link, the same six switchable themes) with a tip button, and keeps resolving no matter how often they change receiver or amounts. Reservation is self-service: sign in with **SIWE** (proves wallet ownership), pick a handle (lowercase `[a-z0-9_]`, 3–30 chars; reserved/brand words blocked), and publish the current tip settings; owners can update or release their handles (up to 3 per wallet). Records live in KV — name uniqueness is an atomic `SET NX` claim and owner-scoped update/delete use a compare-and-set. Gated behind `NEXT_PUBLIC_ENABLE_HANDLES` — **live on mainnet** (production sets `1`); code default off.
-
-## Non-custodial design
+## Non-custodial design and beta notice
 
 OpenPay **never holds** merchant funds. Customer payments are sent **directly to the merchant wallet**. OpenPay does **not** issue, redeem, custody, or exchange JPYC / USDC.
 
-## How it works
+OpenPay is **beta software**. Test with small amounts first. Blockchain transactions are **irreversible** — there is no chargeback.
+Always verify recipient address, token, chain, amount, and final receipt.
+Merchants should verify actual receipt in their wallet or on a block explorer, even after the completion screen is shown.
 
-**Routes** (i18n-prefixed under `/ja` or `/en`, e.g. `/ja/create`):
-
-| Route | Purpose |
-|---|---|
-| `/` | Landing page — hero with two CTAs (📱 pay / 🏪 receive), benefits, how-it-works, FAQ |
-| `/create` | Merchant QR builder + Tip widget builder + offramp links + latest-3 history strip |
-| `/scan` | Customer scan-to-pay surface (QR scanner + connected-wallet balances + saved payment receipts); accepts payment / tip / `@handle` storefront / `/order` QRs |
-| `/history` | Local-only transaction history with CSV export |
-| `/explore` | Curated directory of external stablecoin services (exchanges / DEX / dApps / bridges / explorers) |
-| `/discovery` | **AI store** — public x402 catalog (search + category filter) with self-service seller registration (SIWE) |
-| `/pay`, `/checkout`, `/tip/[address]` | Transactional leaf surfaces — kept focused (no app-shell chrome) |
-
-Pages above the leaf surfaces share an `AppShell` with a sticky header (logo + wallet badge + locale + network pill) and a mobile bottom-nav. The leaf surfaces stay distraction-free intentionally.
-
-**Merchant**:
-1. Open <https://open-pay.jp> and click **🏪 受け取る (決済 QR を作る)** — or go directly to `/create`.
-2. Enter the merchant wallet address.
-3. Enter the amount, select token + chain + payment mode.
-4. Show or share the QR code or payment link. The latest 3 received payments appear under the form once any exist.
-
-**Customer**:
-1. Open <https://open-pay.jp> and click **📱 支払う (スキャン)** — or go directly to `/scan`.
-2. Scan the merchant QR (or land on `/pay` from an external link).
-3. Review amount, token, chain, recipient in the wallet.
-4. Sign the transaction.
-5. See the completion screen with the on-chain tx hash + explorer link, plus an **electronic receipt / payment record** (`電子レシート / 支払い控え`) of the payment.
-
-**Merchant verifies receipt** in their own wallet or on the block explorer — the completion screen alone is **not** proof of payment.
-
-### Customer-side payment receipts (`電子レシート / 支払い控え`)
-
-When a payment completes (`/pay`, `/checkout`, `/tip`), OpenPay saves an **electronic receipt / payment record** to the **payer's own browser** (LocalStorage key `openpay:payerReceipts:v1`, capped at 200, newest-first). View them on `/scan` and on the completion screen, with copy / print / JSON / CSV export.
-
-- **Stored locally only — never sent to a server.** No customer wallet address or payment history is persisted on OpenPay servers. The record holds only what is needed to confirm a payment: txHash, wallet addresses, amount, item names, tax, totals. JSON export contains no secrets.
-- **Separate from the merchant-side store** (`/history` / `openpay:history:v1`) and from freee sync — different key, different framing (`direction: 'paid'`). On a device that both pays and receives, both will appear; that is by design.
-- If the QR carried line items (`/checkout`), the receipt shows the **itemized breakdown, per-item tax, and totals**; otherwise a single virtual line is synthesized. The txHash links to the block explorer for final confirmation.
-- It **cannot be recovered** after changing devices, clearing browser data, or in private/incognito mode — print or save it to keep a copy. On `/scan` each receipt can be **deleted** individually and all receipts **cleared** at once (useful on a shared device).
-- This is **not a formal receipt, tax document, or invoice.** Final treatment should be confirmed with your organization, accounting rules, or tax advisor.
-
-## Beta notice
-
-OpenPay is **beta software**. Test with small amounts first. Blockchain transactions are **irreversible** — there is no chargeback. Always verify recipient address, token, chain, amount, and final receipt. Merchants should verify actual receipt in their wallet or on a block explorer, even after the completion screen is shown.
+OpenPay はベータ版です。まず少額でお試しください。ブロックチェーンの送金は取り消せません（チャージバックはありません）。
+送金先・トークン・チェーン・金額を必ず確認し、受け取り側もウォレットやブロックエクスプローラーで入金を確認してください。
+Known limitations: [docs/FEATURES.md#limitations](./docs/FEATURES.md#limitations).
 
 ## Quick start
 
@@ -193,7 +98,10 @@ Just visit <https://open-pay.jp>, enter your wallet, and generate a QR. No signu
 
 [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fcipherwebllc%2Fopenpay&env=NEXT_PUBLIC_NETWORK_ENV,NEXT_PUBLIC_PIMLICO_API_KEY&envDescription=Network%20env%20plus%20optional%20gasless%2FKV%20keys%3B%20see%20.env.local.example&envLink=https%3A%2F%2Fgithub.com%2Fcipherwebllc%2Fopenpay%2Fblob%2Fmain%2F.env.local.example)
 
-It deploys instantly and **boots on testnet by default**. Receiving payments works out of the box; **gasless** (Pimlico) and the **KV-backed** features (SIWE / freee / billing / payment log) need their own keys — set them in the Vercel env step (full list in [`.env.local.example`](./.env.local.example)). For **mainnet**, also set `NEXT_PUBLIC_NETWORK_ENV=mainnet` + `NEXT_PUBLIC_FEE_RECEIVER_ADDRESS` + per-chain RPC + Sentry. (Self-hosting on Netlify / Railway / any Node host works too — they just don't have a one-click button.)
+It **boots on testnet by default**, and receiving payments works out of the box.
+**Gasless** (Pimlico) and the **KV-backed** features (SIWE / billing / payment log) need their own keys.
+For **mainnet**, also set `NEXT_PUBLIC_NETWORK_ENV=mainnet` + `NEXT_PUBLIC_FEE_RECEIVER_ADDRESS` + per-chain RPC + Sentry.
+Self-hosting on Netlify / Railway / any Node host works too.
 
 Or run locally:
 
@@ -205,291 +113,34 @@ cp .env.local.example .env.local       # fill in values
 npm run dev                            # http://localhost:3000
 ```
 
-Useful scripts:
-
 ```bash
 npm run typecheck
 npm run lint
 npm run test:run
 npm run build
 npm run e2e:local                      # Playwright with stub env
-npm run load-test -- --url <base-url>  # zero-dep load test (p50/p90/p99, RPS, error rate)
 ```
 
-## Environment variables
+- Environment variables: [docs/ENV.md](./docs/ENV.md) (a curated table); every key is in [`.env.local.example`](./.env.local.example).
+- Operator runbook: [docs/DEPLOY_CHECKLIST.md](./docs/DEPLOY_CHECKLIST.md) · monitoring notes: [docs/OPERATIONS.md](./docs/OPERATIONS.md).
 
-The table below is a **curated subset** (core setup + production feature flags). The exhaustive reference is [`.env.local.example`](./.env.local.example) — every key (per-chain RPC overrides, token addresses, relay / x402 internals, gas ceilings) is documented there with inline comments; operational keys are also covered in `docs/runbooks/`.
+## For AI agents (x402)
 
-| Variable | Purpose | Required |
-|---|---|---|
-| `NEXT_PUBLIC_NETWORK_ENV` | `testnet` (default) or `mainnet` | yes |
-| `NEXT_PUBLIC_PIMLICO_API_KEY` | Gasless mode (<https://dashboard.pimlico.io>) | gasless only |
-| `NEXT_PUBLIC_PIMLICO_SPONSORSHIP_POLICY_ID` | Pimlico sponsorship policy (gasless JPYC) | gasless only |
-| `NEXT_PUBLIC_FEE_RECEIVER_ADDRESS` | Operator receiver wallet that the per-transaction OpenPay usage fee is split to. **Required on mainnet** (the env guard rejects the placeholder). It is used when the EIP-3009 forwarder (recover) mode is configured (forwarder address set per chain); with no forwarder configured a chain runs in free mode and no fee is split. | **mainnet** |
-| `RELAYER_PRIVATE_KEY` | Private key of OpenPay's self-hosted **EIP-3009 relayer** (JPYC gasless). Holds only native gas (POL / KAIA / AVAX) to submit `receiveWithAuthorization` / `transferWithAuthorization` on-chain — it **never touches customer funds** (non-custodial). Server-only. | gasless (JPYC) |
-| `NEXT_PUBLIC_RECOVER_FEE_BPS` | Per-transaction OpenPay usage-fee rate in basis points, **shared** by `/pay`, `/checkout`, and the register's relay path. **`100` (1%) — live in production** as of the July 2026 usage period (code default `0`); the floor (`max(2 JPYC, …)`) applies on the relay path. Changing it changes a *disclosed* number — the legal-text fence (`DISCLOSED_RECOVER_FEE`) and the relay-route startup divergence guard flag any drift. | optional (fee) |
-| `NEXT_PUBLIC_ENABLE_TIP_MESSAGE` | Adds an optional private message to successful JPYC gasless-relay tips. It is bearer metadata submitted in the same TLS POST as the signed payment, not data committed by the payment signature. The recipient reads it only after signing in with the receiving wallet; inboxes keep at most 200 items for up to 180 days and support deleting all items. Default **off** keeps the composer, relay side effect, and inbox API/UI fully inert. Storage is best-effort: if a relay response is lost and payment is later recovered through the status flow, Phase 1 does not backfill the message. | optional (requires KV + SIWE) |
-| `NEXT_PUBLIC_ENABLE_JPYC_AVALANCHE` | Adds **Avalanche C-Chain** (Fuji on testnet) as a JPYC receiving chain — **live on mainnet** (production sets `1`). Code default **off** keeps JPYC on Polygon + Kaia only. Avalanche is **recover-required**: gasless needs a forwarder (`NEXT_PUBLIC_JPYC_FORWARDER_AVALANCHE` + relayer AVAX) or it falls back to standard payment (so the relayer never spends AVAX in free mode). | optional |
-| `NEXT_PUBLIC_ENABLE_MOBILE_ORDER` | Mobile-order storefront feature (`@handle` shop page / `/order`) — **live on mainnet** (production sets `1`); code default **off**. | optional |
-| `NEXT_PUBLIC_ENABLE_SHOPS_API` | JPYC Shops API and the explicit shop-owner opt-in that maintains its search index/summary. Default **off**; API routes additionally require the x402 facilitator, order relay, and server-only `ENABLE_AGENT_ORDER` flags so every returned `menuUrl` remains reachable. | optional |
-| `NEXT_PUBLIC_ENABLE_ORDER_RELAY` | Order relay — delivers the paid order (items + table + settled amount) to the merchant via KV + on-chain verification. Needed for mobile ordering to be usable; requires KV configured. **Live on mainnet** (production sets `1`); code default **off**. | optional |
-| `ENABLE_ORDER_BIND_ENFORCE` | Server-only, default OFF. OFF verifies any supplied order binding and rejects malformed bindings; relay orders with no binding carry a manual-verification warning. ON requires relay/recover binding. Standard ERC-20 transfers and non-relay ERC-4337/7702 gasless payments remain unbound (accepted residual). Enable only after explicit operator approval. `bindingConflict` detection covers only orders still in the capped order list; if the unbound winning order has been trimmed, a later verified notification can receive a plain duplicate acknowledgement. | optional |
-| `NEXT_PUBLIC_ENABLE_ORDER_MEMO` | Optional customer order memo (allergies / requests), passed through same-tab `sessionStorage` to the same-origin order notify only; it is never added to the checkout URL or payment history. Structurally gated by `…ENABLE_ORDER_RELAY`. **Live on mainnet** (production sets `1`); code default **off**. | optional |
-| `NEXT_PUBLIC_ENABLE_ORDER_CALL` | Dine-in staff call: shown only on an `@handle` page with a table number and this device's matching paid receipt from the last 2 hours. The server binds `orderId` + `txHash` + table to the merchant order list and atomically enforces per-order, per-handle, and table cooldown limits. Merchant boards poll it separately; it is deliberately excluded from Web Push. Structurally gated by `…ENABLE_ORDER_RELAY`; production light-up should also set `IP_HASH_SECRET`. **Live on mainnet** (production sets `1`); code default **off**. | optional |
-| `NEXT_PUBLIC_ENABLE_SHOP_LIVE` | Live shop status for `@handle` storefronts — per-item sold-out / accepting-orders toggles, recommended items, and a register category filter & image toggle. High-frequency `shop:live:<handle>` KV record (advisory; on-chain stays authoritative). Requires KV + `…ENABLE_HANDLES` + `…ENABLE_MOBILE_ORDER`. Default **off**. | optional |
-| `NEXT_PUBLIC_ENABLE_MENU_OPTIONS` | Menu options (size / topping groups) on products. Definitions are structured; a selection is carried as the **effective unit price** (`base + Σ delta`) + a name suffix, so the checkout URL / order schema stay unchanged. Default **off**. | optional |
-| `NEXT_PUBLIC_ENABLE_ORDER_FULFILLMENT` | Order-fulfillment boards — kitchen / hall screens (`/orders/{kitchen,hall}`) with per-item cooked/served status, ready-to-serve sort, and table correction; status writes are op-based with atomic `kvEval` updates for multi-terminal safety. Requires `…ENABLE_ORDER_RELAY`. **Live on mainnet** (production sets `1`); code default **off**. | optional |
-| `NEXT_PUBLIC_ENABLE_PREORDER_TIME` | Time controls for mobile ordering — last-order auto-stop, earliest-pickup lead time, and time-specified pre-orders (15-min slots, Asia/Tokyo). `pickupAt` is advisory (money-path / URL schema unchanged). **Live on mainnet** (production sets `1`); code default **off**. | optional |
-| `NEXT_PUBLIC_ENABLE_ORDER_TOKEN` | Order **view token** — lets staff terminals view/operate the kitchen/hall boards via a link (`/orders/{kitchen,hall}?t=…`) **without holding the receiving wallet's key**: the token authorizes feed read + status ops only (never any money-path / no fund access), so staff cannot skim sales. Revoked by re-issue/delete (the feed enforces a current-token match). Requires KV + `…ENABLE_ORDER_RELAY` (and `…ENABLE_ORDER_FULFILLMENT` for the boards). Default **off**. | optional |
-| `NEXT_PUBLIC_ENABLE_ORDER_PICKUP` | **Pickup-ready customer notification** — the hall board gains a "ready for pickup (notify)" step (`markReady`) before "handed over", surfacing on the customer's status page (`/order/status?t=…`): it polls a **read-only** `GET /api/order/status` every 8s and shows received → preparing → **ready (chime + Screen Wake Lock + "keep this screen open")** → done. Foreground-only (no Web Push / Service Worker). The status token is **client-generated** (256-bit, no server key) and reverse-mapped server-side (`order:sv:<token>` → `{merchant,chainId,txHash}`, 72h TTL); the endpoint returns the **coarse state only** (no items / amount / payer — safe even if the token leaks) and is IP rate-limited. Requires KV + `…ENABLE_ORDER_RELAY` + `…ENABLE_ORDER_FULFILLMENT`. **Live on mainnet** (production sets `1`); code default **off**. | optional |
-| `NEXT_PUBLIC_ENABLE_PUSH_NOTIFY` / `NEXT_PUBLIC_PUSH_VAPID_PUBLIC_KEY` / `PUSH_VAPID_PRIVATE_KEY` / `PUSH_VAPID_SUBJECT` | Web Push payment-received notifications — **live in production** (production sets the flag + VAPID keys); code default **off**. Subscriptions are SIWE-bound to the session wallet and stored in KV (`push:subs:{wallet}`, 90-day TTL, max 5 devices). Generate VAPID keys with `npx web-push generate-vapid-keys`; `PUSH_VAPID_PRIVATE_KEY` is server-only and must never be exposed to the client. | optional (requires KV) |
-| `NEXT_PUBLIC_ENABLE_OFFLINE_QR` | **Offline receive QR** — **live in production** (production sets `1`); code default **off** = the Service Worker never intercepts `fetch` (gated by an enable marker written to Cache Storage; absent = full passthrough), `OfflineLastQr` never renders, and `public/offline.html` is unused. When on, visiting `/create` registers `/sw.js` (same script as Web Push, idempotent) and the SW responds to a **narrow** set only — same-origin `GET /_next/static/*` (cache-first, immutable) and full `navigate` requests to `/{ja,en}/create` (network-first → cache → `offline.html`). It never touches API/POST/cross-origin or the `/pay` · `/scan` · `/checkout` payment routes. `/create` also persists the last generated QR to `localStorage` (`openpay:lastQr:v1`) so it can be shown offline (QR generated on-device). Rollback = flip the flag off; the next `/create` visit sends a disable message that removes the marker and stops all interception. | optional |
-| `NEXT_PUBLIC_ENABLE_MOBILE_ORDER_FEE` | Mobile-order **system fee** (storefront 1% / pre-order 3%, path-independent — see [Fees](#fees)). **Live on mainnet** (production sets `1`); code default **off** = mobile orders are fee-free. Light-up pairs with the disclosure (`lib/news.ts` announcement) in the same release, and mobile-order chains must have a forwarder configured (the fee requires the recover path). See `docs/DEPLOY_CHECKLIST.md §13`. | optional |
-| `NEXT_PUBLIC_ENABLE_STORE_GAS_WALLET` | Enables **“The shop pays the gas”**: the third payment-mode option on the payment-QR tab (the register inherits it). For a fixed-amount QR shown on screen (register or payment-QR full screen, JPYC on Polygon, Kaia or Avalanche), the customer only signs and the shop device's **gas wallet** (a dedicated key kept only in that browser, funded with a little of the chain's native token: POL, KAIA or AVAX) pays the gas and sends the payment; OpenPay usage fee 0 (1 wei by design). Printed/saved/copied and amount-less QRs are not eligible. Requires `IP_HASH_SECRET` (hand-off sessions fail closed without it). **Live in production since 2026-10-08** (production sets `1`) on Polygon, Kaia and Avalanche; code default **off**. Light-up runbook (same day as the disclosures): docs/DEPLOY_CHECKLIST.md §17. | optional |
-| `NEXT_PUBLIC_WC_PROJECT_ID` | WalletConnect projectId (<https://cloud.reown.com>) | optional |
-| `NEXT_PUBLIC_*_RPC_URL` | Custom RPC per chain, including `NEXT_PUBLIC_ARC_RPC_URL` / `NEXT_PUBLIC_ARC_TESTNET_RPC_URL` (defaults: `https://rpc.mainnet.arc.io` / `https://rpc.testnet.arc.io`) | recommended on prod |
-| `NEXT_PUBLIC_SENTRY_DSN` / `SENTRY_AUTH_TOKEN` | Sentry client + source-map upload | recommended on prod |
-| `NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE` / `NEXT_PUBLIC_SENTRY_REPLAY_SESSION_SAMPLE_RATE` / `NEXT_PUBLIC_SENTRY_REPLAY_ERROR_SAMPLE_RATE` | Browser Sentry sampling (`0.0`–`1.0`; invalid values fall back to the defaults traces `1.0` / replay `0` / replay-on-error `0.2`, chosen to stay inside the free tier's monthly replay quota). Baked in at build time, so a change needs a redeploy. Read only when `NEXT_PUBLIC_SENTRY_DSN` is set. | optional |
-| `ETHERSCAN_API_KEY` | Server-only key for `/agent` activity. Etherscan V2 uses one key for Polygon too (free tier: 3 calls/s, 100k/day). Unset: the activity list is not shown and the page links to Polygonscan instead. | optional |
-| `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` | Upstash Redis **REST 直結** (`https://<db>.upstash.io` + REST token)。設定されていれば `KV_REST_API_*` より優先。本番はこちらを推奨 (Vercel の Storage 連携が `KV_REST_API_*` を書き換えても影響しない・docs/DEPLOY_CHECKLIST.md §1.1 ④) | optional (production: recommended) |
-| `KV_REST_API_URL` / `KV_REST_API_TOKEN` | 互換名 (Vercel Storage 連携が注入)。用途は同じ: payment log **and** SIWE sessions / **encrypted** freee tokens / entitlements / x402 registry | optional (required for SIWE + freee sync) |
-| `RELAY_DAILY_TX_CAP` / `RELAY_SUBFLOOR_DAILY_TX_CAP` / `RELAY_SUBFLOOR_PAYER_DAILY_TX_CAP` | Server-only UTC-day circuit breakers for all relay traffic, sub-floor forwarder settlements, and each signed sub-floor payer. Only non-negative finite safe integers are accepted; invalid or oversized values use safe defaults. The shared default is **500**. An unset sub-floor cap is 20% of the effective shared cap (**100** by default), and an unset payer cap is 20% of the effective sub-floor cap (**20** by default), rounded down. When the shared cap is positive, the effective sub-floor cap is clamped below it (shared `1` ⇒ sub-floor `0`); when the sub-floor cap is above `1`, the payer cap is clamped below it (sub-floor `1` allows at most payer `1`). Sub-floor `0` keeps both sub-floor caps stopped. Requires KV; storage failures follow the existing fail-open policy. | optional (recommended on prod) |
-| `IP_HASH_SECRET` | Server-only HMAC secret for best-effort IP rate limits on auth and resource-write endpoints. Generate with `openssl rand -base64 32`; unset or shorter than 32 bytes makes the IP limiter inert. Self-hosted deployments must use a trusted proxy that overwrites client-supplied `X-Forwarded-For`. Also keys (domain-separated HMAC) the session ids and device read tokens of the register's **store-device send** hand-off (`NEXT_PUBLIC_ENABLE_STORE_GAS_WALLET`): when it is unset or too short the hand-off **stops** (503) instead of degrading, and rotating it invalidates hand-off sessions in progress (they last at most 10 minutes; the register just shows a new QR). | optional (recommended on prod; required for the store-device send) |
-| `PAYMENT_LOG_ADMIN_TOKEN` | Bearer for `/api/log/payment/export` + `/stats` | optional |
-| `ADMIN_WALLETS` | Comma-separated wallet addresses allowed to read `/api/admin/billing/revenue` (requires a valid SIWE session **and** the wallet in this allowlist). Empty/unset ⇒ admin endpoints are closed (fail-closed). | optional |
-| `NEXT_PUBLIC_ENABLE_FREEE_SYNC` | Show the freee sync panel on `/history` (default **off** — dark ship) | freee only |
-| `FREEE_CLIENT_ID` / `FREEE_CLIENT_SECRET` / `FREEE_REDIRECT_URI` | freee OAuth app (server-only secret; callback `…/api/freee/callback`) | freee only |
-| `FREEE_TOKEN_ENC_KEY` | AES-256-GCM key (32 bytes as 64-char hex or base64) that encrypts freee OAuth access/refresh tokens **at rest in KV**. **Required when `NEXT_PUBLIC_ENABLE_FREEE_SYNC` is on** (an undecryptable/legacy token is treated as unusable → forces reconnect). | freee only |
-| `SIWE_ALLOWED_DOMAINS` | Extra SIWE-login domains beyond the canonical host (localhost auto-allowed in dev) | optional |
-| `ALPHA_ENTITLEMENT_BYPASS` | Open all paid features during the beta (default on; `0`/`false` to require an entitlement) | optional |
-| `NEXT_PUBLIC_ENABLE_USAGE_FEE` | **(Shelved — kept for possible future reuse, NOT the current model.)** An alternative *monthly per-account* usage-fee design (meters JPYC gasless-relay volume + an overdue soft-gate on `/history`). The **live** monetization is the **per-transaction** fee in [Fees](#fees) (`max(2 JPYC, 1%)`, deducted at settlement) — not this. Default **off**; left in place for future features. | optional |
-| `NEXT_PUBLIC_ENABLE_CSV_PASS` / `NEXT_PUBLIC_ENABLE_PRO` | Optional **accounting-CSV-download paywall** (independent of the usage fee): a per-use **24-hour CSV pass (100 JPYC)** and/or the **¥500/mo OpenPay Pro** subscription (Pro ⊇ CSV pass), paid in JPYC to the receiver wallet and auto-granted after on-chain verification of the self-submitted txHash. Default **off** and kept inert (D5). This only gates the export button: CSV is generated in the browser from the merchant’s own localStorage history, so the entitlement is **not a security boundary** and can be bypassed client-side. Enabling it requires separate approval of the charging policy and public/legal wording; `ALPHA_ENTITLEMENT_BYPASS=0` is a technical condition, not launch approval. | optional |
-| `NEXT_PUBLIC_ENABLE_WEB3_DIRECTORY` | Japan Web3 Directory free/paid APIs and OpenAPI schema. Default **off**; paid routes also require `NEXT_PUBLIC_ENABLE_X402_FACILITATOR`. | optional |
-| `X402_*` | x402 paid-API config | x402 only |
-| `CDP_API_KEY_ID` / `CDP_API_KEY_SECRET` | Coinbase CDP API key for `X402_VANILLA_FACILITATOR=cdp` (Bazaar / agentic.market indexing) | optional |
-| `NEXT_PUBLIC_ENABLE_CREATOR_STORE` | Shows the creator-store seller manager and active-product section on `@handle` profiles. Client UI only and default **off**; it never enables server APIs by itself. | optional |
-| `NEXT_PUBLIC_ENABLE_MOCK_WALLET` | **Dev only.** Adds a wagmi mock connector (hardhat test account #0) so connected-state UI can be screenshotted / e2e-driven without a real wallet. Ignored in production builds (`NODE_ENV` guard strips it), never set on Vercel. | dev only |
-| `STORE_DEV_FIXTURES` | **Dev only.** Renders the /store list with local fixture products for UI screenshots. Structurally disabled when the `VERCEL` env var is present, so fake products can never appear in production. | dev only |
-| `ENABLE_CREATOR_STORE` | Server-only creator-store seller, purchase, public purchase-status, and reconciler routes. Default **off**; every surface returns 404 while disabled. | optional |
-| `ENABLE_LICENSE_NFT` | Server-only license NFT foundation. Default **off**; requires `ENABLE_CREATOR_STORE`. Disabled licenses are hidden while records, stock holds and mint obligations remain durable. Enable only after deployment validation. | optional |
-| `NEXT_PUBLIC_ENABLE_LICENSE_NFT` | License UI child flag of `NEXT_PUBLIC_ENABLE_CREATOR_STORE`; default **off**. Cannot enable server admission. | optional |
-| `ENABLE_LICENSE_NFT_PUBLIC` | Server-only public listing switch. Default **off**; only `1` ignores the seller allowlist. Requires both server parent flags; creator profile, SIWE, seller disclosure and registration checks still apply. | optional |
-| `LICENSE_NFT_SELLER_ALLOWLIST` | Server-only comma-separated checksummed seller addresses. When public listing is off, empty or malformed means nobody may list/sell a license; ignored when `ENABLE_LICENSE_NFT_PUBLIC=1`. | optional |
-| `NEXT_PUBLIC_LICENSE_NFT_POLYGON` / `NEXT_PUBLIC_LICENSE_NFT_AMOY` | License ERC-1155 contract for new definitions on Polygon / Amoy. Existing definitions retain their original destination after rotation. | license NFT only |
-| `LICENSE_MINTER_PRIVATE_KEY` | Server-only dedicated hot minter EOA; distinct from the relay EOA and the cold contract owner. Never exposed by `lib/env.ts`. | license NFT only |
-| `ENABLE_STORE_DELIVERY_TICKET` | Server-only signed delivery tickets. Default **off**; requires `ENABLE_CREATOR_STORE` and valid signing keys. A 60-second bearer ticket attests the issuing session wallet, product and revision; possession does not prove the presenter owns that wallet. | optional |
-| `NEXT_PUBLIC_ENABLE_STORE_DELIVERY_TICKET` | Delivery UI child flag of `NEXT_PUBLIC_ENABLE_CREATOR_STORE`; default **off**. Shows the optional seller destination field and library download link; SIWE is covered by the Creator Store parent. Cannot enable server issuance. | optional |
-| `STORE_DELIVERY_SIGNING_KEYS` | Server-only CSV of Ed25519 32-byte seeds (`0x` + 64 lowercase hex digits); first signs, all publish. Empty, malformed or duplicate elements disable the whole configuration. Never read by `lib/env.ts`. Stage rotation `old,new` → wait ≥15 min → `new,old` → wait ≥15 min + 60s TTL → `new`; emergency revocation requires CDN purge and verifier refresh (see deployment checklist §16.9). Configure a stable HTTPS gate, not a presigned URL; product ID alone does not configure audience, revision mapping or private storage. | protected delivery only |
-| `CRON_SECRET` | Server-only bearer secret for the hourly `/api/cron/reverify` catalog maintenance job. If unset, the route is inert and returns 401. | production cron |
-| `ALERT_WEBHOOK_URL` | Optional Slack/Discord-compatible webhook for revalidation violations, transient checks, and hidden/restored transitions. Receives `{text, content}`. | optional |
-| `ENABLE_AGENT_ORDER` | Agent order — lets an MCP agent read a `@handle` shop's mobile-order menu (`GET /api/agent-order/menu`) and pay for a cart over x402 (`GET /api/agent-order/pay`), which reserves the server-priced order before settlement and registers it through an authorization-bound finalizer. **Server-only** (not `NEXT_PUBLIC_`, kept out of the client bundle). Gated by `NEXT_PUBLIC_ENABLE_X402_FACILITATOR` **and** `NEXT_PUBLIC_ENABLE_ORDER_RELAY` **and** this flag — any one off ⇒ all routes 404. **Live on mainnet** (production sets it); code default **off**. | optional |
-| `ENABLE_X402_DUAL_RAIL` | Dual-rail listing — relays the USDC/Base leg of a marketplace-registered API to the CDP facilitator (`/api/x402/relay/{requirements,verify,settle}`) so third-party listings can also appear on the x402 Bazaar. **Server-only** (not `NEXT_PUBLIC_`). Gated by `NEXT_PUBLIC_ENABLE_X402_FACILITATOR` **and** this flag — either off ⇒ all routes 404; additionally requires `X402_VANILLA_FACILITATOR=cdp` (CDP keys) or the relay answers 503. Listing metadata is injected from the registry record only (never from the caller). Funds go buyer → seller `payTo` directly; OpenPay takes no USDC-side fee. Default **off** (fully inert). Plan: `plans/dual-rail-listing.md`. | optional |
-| `ENABLE_X402_ARC_GATEWAY` | Arc x402 rail. Adds a second `accepts` entry (Arc USDC, `eip155:5042`) to the x402 v2 challenge of the first-party vanilla USDC endpoints (`/api/paid/hello`, `/api/paid/usdc/**`), verified and settled through the Circle Gateway x402 facilitator (no API key). Buyers pay from a Gateway balance (gasless); the seller receives into the Gateway balance of `X402_PAY_TO_ADDRESS`. Follows `X402_NETWORK` (`base` → Arc mainnet, `base-sepolia` → Arc testnet); startup error on polygon networks. The Base/CDP path is unchanged. **Server-only.** Default **off** (fully inert). Plan: `plans/arc-x402-gateway.md`. | optional |
-| `NEXT_PUBLIC_ENABLE_X402_DUAL_RAIL` | UI face of dual-rail listing — shows the "Also sell in USDC (Base)" opt-in on the marketplace listing form. Paired with server-only `ENABLE_X402_DUAL_RAIL` (turn both on together; the form opt-in without the relay would register a USDC face that 404s). Default **off**. | optional |
-| `NEXT_PUBLIC_ENABLE_HANDLES` | `@handle` permanent creator links (`open-pay.jp/@alice`). Default **off** = the `@handle` page, `/api/handle/*`, and the claim UI are all inert. Requires KV. | optional |
-| `NEXT_PUBLIC_ENABLE_AGENT_PURCHASES` | Agent purchase-history client flag and SIWE sign-in entry. Default **off**. | optional |
-| `ENABLE_AGENT_PURCHASES` | Server-only gate for all five Agent proof/purchase-history API routes. Default **off** returns 404. Requires KV; reading history requires SIWE and a one-time Agent proof binding. | optional |
-| `NEXT_PUBLIC_ENABLE_X402_FACILITATOR` | Runs OpenPay's **own** JPYC x402 facilitator (`/api/facilitator/*`, `/api/discovery`, the `/discovery` page and listing UI). Default **off** = every surface 404s. Light-up pairs with the disclosure update in the same release. | optional |
-| `NEXT_PUBLIC_ENABLE_JPYC_EIP3009` | Routes JPYC gasless payments through the EIP-3009 relay (no delegation, any injected wallet) instead of the older Pimlico 7702 path. **Live on mainnet**; code default **off**. | optional |
-| `NEXT_PUBLIC_ENABLE_USDC_ARC` | Adds Arc as a USDC receiving chain on mainnet/testnet. Standard only; gas paid directly in USDC, no separate token. No cross-chain. Default **off**. | optional |
-| `NEXT_PUBLIC_ENABLE_USDC_ARC_TIP` | Enables standard USDC tips on Arc, including @handle. Requires `NEXT_PUBLIC_ENABLE_USDC_ARC=1`. The tipper's wallet pays gas in USDC; tips from USDC on other chains are accepted when `NEXT_PUBLIC_ENABLE_USDC_ARC_CROSSCHAIN` is also on. Default **off**. | optional |
-| `NEXT_PUBLIC_ENABLE_USDC_ARC_CROSSCHAIN` | Enables explicitly selected CCTP V2 forwarding to Arc when `NEXT_PUBLIC_ENABLE_USDC_ARC` is also on. The buyer pays the quoted Circle forwarding fee on top of the price (collected in full by Circle; OpenPay collects nothing); no Gateway, no OpenPay fee leg. Recovery remains available when off. Default **off**. | optional |
-| `NEXT_PUBLIC_ENABLE_GATEWAY_CROSS_CHAIN` | Enables new Gateway cross-chain offers and execution with `1` / `true`. Default **off**; keep off until X12 (expired attestation reuse) is fixed and reviewed. Saved Gateway attestations remain visible and resumable while off; balance fetching/parsing continues. Client flag, requires a rebuild. Separate from the Arc x402 facilitator flag. | optional |
-| `NEXT_PUBLIC_ENABLE_JPYC_ETHEREUM` | Adds **Ethereum L1** as a JPYC receiving chain (mainnet only — JPYC is not deployed on Sepolia). Ethereum is **standard-mode only**: no forwarder, so the customer pays ETH gas and direct relay POSTs are refused with 503. Code default **off**. | optional |
-| `NEXT_PUBLIC_ENABLE_CIRCLE_PAYMASTER` | Circle Paymaster for USDC gasless (EIP-2612 permit; the customer pays gas in USDC, OpenPay takes nothing). Off ⇒ the previous Pimlico ERC-20 paymaster path. Base / Arbitrum / Optimism only. Default **off**. | optional |
-| `NEXT_PUBLIC_ENABLE_MAV2` | Alchemy Modular Account v2 route. Off ⇒ `pimlico-simple-7702`. Held off until the Pimlico bundler accepts MAv2 senders. Default **off**. | optional |
-| `NEXT_PUBLIC_ENABLE_METAMASK_SMART_ACCOUNT` | MetaMask Smart Account (stateless 7702). Disabled because of a viem ↔ delegation-toolkit signing incompatibility (re-verify on real devices before re-enabling). Default **off**. | optional |
-| `NEXT_PUBLIC_EXPERIMENTAL_CROSS_CHAIN_ENABLED` | Mounts the experimental cross-chain demo route (`/[locale]/experimental/cross-chain-demo`). Default **off** ⇒ the route 404s. | optional |
-| `NEXT_PUBLIC_CROSS_CHAIN_*` | Cross-chain USDC receive knobs: `…_DISABLED` targeted kill-switch (needs a rebuild — prefer Vercel Instant Rollback for a true instant disable), `…_MAX_FEE_BPS` cap on the Gateway BurnIntent max fee (default 10 bps), `…_BLOCK_OFFSET_DEFAULT` source BurnIntent block offset (default and minimum: live `withdrawalDelay()` + 10%, rounded up; Ethereum L1 block units on Arbitrum; env values ≥ 2^255 are ignored), `…_BURN_AUTORESUME` allows an **automatic** CCTP re-burn when a resumed payment proves on-chain that the previous burn was never broadcast (marker nonce unchanged, empty mempool, no `DepositForBurn` log, enough elapsed time). Default **off** ⇒ the same situation asks the buyer to check the explorer and confirm before re-sending; the burn-intent marker, revert detection and log scan stay on either way. | optional |
-| `NEXT_PUBLIC_CIRCLE_*_API_URL` | Overrides for Circle's Gateway (`…_GATEWAY_…`) and CCTP V2 iris (`…_IRIS_…`) attestation hosts. Empty ⇒ chosen automatically from `NEXT_PUBLIC_NETWORK_ENV`. An operator knob for Circle-side outages. | optional |
-| `NEXT_PUBLIC_JPYC_*_ADDRESS` / `NEXT_PUBLIC_USDC_*_ADDRESS` | Per-chain token contract overrides (JPYC and USDC, mainnet and testnet). Includes `NEXT_PUBLIC_USDC_ARC_MAINNET_ADDRESS` / `NEXT_PUBLIC_USDC_ARC_TESTNET_ADDRESS` (both default to `0x3600000000000000000000000000000000000000`, ERC-20 6 decimals; native gas USDC uses 18). Empty ⇒ the built-in deployment table. Only set these to point at a non-canonical deployment. | optional |
-| `NEXT_PUBLIC_JPYC_FORWARDER_*` | Per-chain EIP-3009 forwarder address. **Setting one switches that chain to recover mode** (one customer signature splits amount → merchant and gas-equivalent → fee receiver); empty ⇒ free mode (OpenPay pays gas, the merchant receives the full amount). Mutually exclusive with `NEXT_PUBLIC_ENABLE_USAGE_FEE` on the same chain. | optional (fee) |
-| `NEXT_PUBLIC_RELAY_GAS_FEE_JPYC*` | Recover-mode collection **floor** in whole JPYC (the charge is `max(floor, amount × NEXT_PUBLIC_RECOVER_FEE_BPS/10000)`). The bare name is the global default (2 JPYC); the `…_POLYGON` / `…_KAIA` / `…_AVALANCHE` / `…_AMOY` / `…_KAIROS` / `…_FUJI` suffixes override it per chain where native gas is worth much more. Shared by client and server (the nonce commitment must match). | optional (fee) |
-| `NEXT_PUBLIC_GAS_CEILING_*_GWEI` | Per-chain gas-price ceiling for gasless (defaults: Polygon 200 / Base 1 / Arbitrum 1 / Optimism 1). Tune from the `gas_congested` signal without redeploying. | optional |
-| `NEXT_PUBLIC_GAS_QUOTE_OVERHEAD_GAS` | UserOp gas units used for the "max gas cost" quote (defaults: USDC ERC-20 path 500,000 / JPYC sponsorship path 200,000). One value applies to both tokens. Too low ⇒ allowance shortfalls or an under-quoted margin. | optional |
-| `NEXT_PUBLIC_POL_JPYC_RATE` / `NEXT_PUBLIC_KAIA_JPYC_RATE` | JPY per native token used to price gas reimbursement (defaults POL 20 / KAIA 10, deliberately over-collecting per `docs/DEPLOY_CHECKLIST.md §9.5b`). Raise them when the native token spikes. | optional |
-| `NEXT_PUBLIC_LOG_LEVEL` | Log level (`debug` / `info` / `warn` / `error`). Default `warn`. | optional |
-| `RELAY_MAX_JPYC` | Per-relay cap in whole JPYC (abuse guard + keeps each advance small). Empty ⇒ 50,000. Provider-independent; the legacy name `GELATO_RELAY_MAX_JPYC` is still read for compatibility. | optional |
-| `RELAY_MAX_GAS_COST_WEI*` | Per-transaction native gas-cost ceiling in wei; above it the payment falls back to standard mode instead of relaying (loss guard). Empty/`0` ⇒ disabled. `…_AVALANCHE` / `…_FUJI` override it for AVAX, which is far more valuable per unit — set the Avalanche one before going live there. | optional (recommended on prod) |
-| `RELAY_LOW_BALANCE_ALERT_WEI` | Relayer native balance below which a Sentry warning fires **before** submitting, so the operator can top up ahead of `relayer_unfunded`. Empty ⇒ 0.1 native; `0` disables. | optional (recommended on prod) |
-| `RELAY_HEALTH_MIN_BALANCE_WEI` | Balance floor at which the relayer preflight probe (`/api/relay/jpyc/health`) reports `degraded:low_balance`. Advisory only — it never changes the payment path, it just suggests switching to standard payment before signing. Empty ⇒ chain default. | optional |
-| `GELATO_*` | Gelato `sponsoredCall` fallback for the relay: `GELATO_SPONSOR_API_KEY` (unset ⇒ unused; self-hosted `RELAYER_PRIVATE_KEY` takes precedence), `GELATO_RELAY_BASE_URL` (host override), and the legacy `GELATO_RELAY_MAX_JPYC` alias of `RELAY_MAX_JPYC`. | optional |
-| `OPENPAY_USAGE_FEE_*` | Server-only settings for the shelved monthly usage fee: `…_BPS` rate (empty ⇒ 100 = 1%) and `…_START_PERIOD` (`YYYY-MM`) — **unset means 0% for every period**, and transactions from that month onward are billable. Only meaningful with `NEXT_PUBLIC_ENABLE_USAGE_FEE`. | optional |
-| `BILLING_METER_DISABLED` | Server-only kill switch for the usage meter: `1` stops recording relay volume (relaying itself is unaffected). Empty ⇒ metering on, which is deliberate — volume accrues even while the fee flag is off. | optional |
-| `KV_BACKUP_REST_URL` / `KV_BACKUP_REST_TOKEN` / `KV_BACKUP_KEY` / `R2_ACCOUNT_ID` / `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` / `R2_BUCKET` / `KV_RESTORE_TARGET_TOKEN` | **運用 (GitHub Actions / 運営端末のみ・app は読まない)**: 12-hour KV fuzzy snapshots to R2. Backup uses a dedicated ACL REST token (no fallback) and a 64-hex AES key; watch uses only R2 credentials. Operator `--verify` uses the AES key. `KV_RESTORE_TARGET_TOKEN` is reserved for the separate restore task. | backup / watch operations only |
-| `UPSTASH_MGMT_EMAIL` / `UPSTASH_MGMT_API_KEY` / `UPSTASH_DB_ID` / `UPSTASH_CAP_COMMANDS` (variable) | **Operations only (GitHub Actions secrets / variable, not app env)**: daily Upstash usage watch (`.github/workflows/upstash-usage-watch.yml` → `scripts/upstash-usage-watch.mjs`). Email + a **Read Only** Upstash Developer API key + the production database id; the job calls only the stats endpoint (never the database-details endpoint, which returns connection credentials). Fails the workflow (GitHub Actions failure notification; for scheduled workflows it goes to the user who last edited the schedule, subject to notification settings) when the projected monthly commands exceed `UPSTASH_CAP_COMMANDS` (repository variable; empty ⇒ 250,000 = $0.5 at $0.2 / 100K); warns at 80% and when the reported monthly billing exceeds that dollar amount (warning only, because the billing unit is unverified). Unverified until the first run: that `total_monthly_requests` equals billed commands, the billing unit, the `dailyrequests` shape, whether the month is the UTC calendar month, and whether stats calls are counted as commands (the `probe` input measures this against a control window). | optional |
-| `PIMLICO_PAYMASTER_POLYGON` / `PIMLICO_PAYMASTER_BASE` / `PIMLICO_PAYMASTER_KAIA` | **Operations only**: paymaster addresses checked at EntryPoint 0.7 and, by default, 0.8. Polygon/Base are required; Kaia is optional. | balance cron |
-| `PIMLICO_PAYMASTER_POLYGON_V08` / `PIMLICO_PAYMASTER_BASE_V08` / `PIMLICO_PAYMASTER_KAIA_V08` | **Operations only**: optional 0.8 address overrides for the configured chains. Empty uses the existing address; an override alone does not enable alerts. | optional |
-| `ALERT_THRESHOLD_POL_V08` / `ALERT_THRESHOLD_ETH_V08` / `ALERT_THRESHOLD_KAIA_V08` | **Operations only**: opt in to 0.8 alerts with a threshold in chain-native units. Empty means informational reads only, with warnings instead of alerts or failure. | optional |
-
-**Never commit `.env.local` or private keys.** `NEXT_PUBLIC_*` values are bundled into the client — treat them as public. Production and development should use **separate** Pimlico API keys and fee receiver wallets.
-
-### Seller application examples
-
-| Variable | Purpose | Required |
-|---|---|---|
-| `MY_RESOURCE_ID` | Seller application example only (SDK >= 0.10.0): trusted listing ID from your own dashboard/config. Required by seller gates; the OpenPay server does not read this variable. | seller app |
-| `EXPECTED_RECIPIENT` | Seller application example only: required JPYC seller wallet pin (`extra.openpay.merchant`, not forwarder `payTo`). Never derive it from public discovery. | seller app |
-| `EXPECTED_USDC_RECIPIENT` | Seller application example only: additional required USDC `payTo` pin for dual gates, even when equal to the JPYC recipient. | seller app |
-
-### Local MCP client
-
-Other MCP settings are documented in the [MCP package environment table](packages/x402-mcp/README.md#environment).
-
-| Variable | Purpose | Required |
-|---|---|---|
-| `OPENPAY_ORIGIN` | MCP-only `wallet_prove` challenge/link origin and signed audience; unset or blank defaults to `https://open-pay.jp`, independently of `DISCOVERY_URL`. Override only for a trusted HTTPS origin whose verifier accepts the same audience; no credentials, path, query or fragment. Not read by the OpenPay server. | optional (MCP only) |
-
-## x402 / API / agent payments
-
-OpenPay includes **experimental** x402 protocol support for per-request paid API endpoints (AI agent / API use cases — separate from the human checkout flow). `GET /api/paid/hello` returns HTTP 402 (x402 v1 + v2 dual-stack); clients (e.g. `x402-fetch`) sign an EIP-3009 authorization and retry. OpenPay verifies + settles via an external facilitator (`X402_FACILITATOR_URL`; production uses payai — x402.org cannot settle Base mainnet) before returning content. The same vanilla path also sells `GET /api/paid/usdc/japan-web3-directory[/search]` and `GET /api/paid/usdc/stores` in USDC on Base (no OpenPay fee; listed on x402scan). Setting `X402_VANILLA_FACILITATOR=cdp` (with `CDP_API_KEY_ID`/`CDP_API_KEY_SECRET`) routes verify/settle for these USDC endpoints through the Coinbase CDP facilitator instead, which auto-indexes discoverable endpoints into the x402 Bazaar and agentic.market; unset, behavior is unchanged. With `ENABLE_X402_ARC_GATEWAY=1` the same endpoints also accept **USDC on Arc** (`eip155:5042`): the x402 v2 challenge lists a second `accepts` entry that is verified and settled through the Circle Gateway x402 facilitator (`GatewayWalletBatched` domain; buyers pay gaslessly from a Gateway balance, the seller is credited in its Gateway balance, no OpenPay fee). Base remains the CDP/Bazaar rail and is unchanged. **Client interoperability (verified with real settlements, 2026-07-29/30):** the Base USDC products are standard x402 (exact scheme) and were purchased end-to-end with the official clients `x402-fetch` 1.2 (v1 `X-PAYMENT`) and `@x402/fetch` 2.20 (v2 `PAYMENT-SIGNATURE`). The JPYC products use OpenPay's forwarder-split and require `openpay-x402-sdk` / `openpay-x402-mcp`; standard clients reject them safely **before signing** (the v1 client stops at schema validation because `eip155:137` is not in its network enum), so no funds can move. Note that `@x402/mcp`'s buyer side wraps MCP tool calls (`mcp://tool/…`) and does not target plain HTTP endpoints. The client only signs — the facilitator submits the on-chain tx and pays gas, so agents need **no native gas** on the target chain.
-
-**OpenPay's distinct angle — JPYC support.** The wider x402 ecosystem is largely USDC-only (Coinbase's reference and most public servers). OpenPay's x402 server also accepts **JPYC v3 on Polygon / Polygon Amoy**, making it usable for **JPY-denominated agent / API billing** without routing through a USD asset. USDC on Base / Base-Sepolia is also supported.
-
-**Managed JPYC facilitator + discovery** (flag-gated `NEXT_PUBLIC_ENABLE_X402_FACILITATOR` — **live in production** with real settlements; code default off). Beyond *using* an external facilitator, OpenPay can run its **own** JPYC x402 facilitator: `GET /api/facilitator/supported`, `POST /api/facilitator/verify`, `POST /api/facilitator/settle`, first-party paid resources (`GET /api/paid/demo`, `GET /api/paid/stores`), a discovery catalog (`GET /api/discovery` + `/discovery` page) and SIWE-gated resource management — owners register, edit, and remove their own listings (`POST /api/facilitator/resources`, `PATCH`/`DELETE /api/facilitator/resources/:id`; removal is a soft-delete that drops the listing from the catalog while retaining the record for settlement audit, and only the owning wallet — `merchant === SIWE session` — may edit or remove). `scripts/x402-buyer-example.mjs` is a single-file buyer example using the npm packages `openpay-x402-sdk` and `viem` for the first-party demo. It collects a **1% facilitator fee (1 JPYC minimum), added on the buyer's side** — the seller receives the listed amount in full — **non-custodially**: settlement reuses OpenPay's existing EIP-3009 forwarder (`settle()` atomically splits seller + fee in one tx; the relayer only pays gas and never touches JPYC). Each settlement returns an OpenPay-signed **receipt** verifiable offline (`POST /api/facilitator/verify-receipt`; the signer is published in `/supported`). Because the split needs an OpenPay-flavored authorization, **vanilla single-auth x402 clients are not yet compatible** (Phase 2). Registration is **abuse-moderated** — a listing must actually be payment-gated, so the server best-effort probes the URL and rejects ones that return `200` to anyone, and **scheme-checked** — a URL whose 402 advertises a non-OpenPay facilitator (e.g. USDC/Base accepts) is rejected with `gate_not_openpay` plus a copy-paste self-contained JPYC gate snippet, so the catalog promise ("payable in JPYC") stays true (registrants also attest they have the right to charge and gate it); the probe is **SSRF-hardened** (private/loopback/link-local hosts blocked, including IPv4-mapped IPv6 forms, and DNS-rebinding is re-checked at connect time). The public catalog is edge-cached and its KV reads are bounded-concurrency, so it stays responsive under agent polling. Disclosed fee numbers are pinned in `lib/legal.ts` `DISCLOSED_X402_FEE` with a divergence fence. Plan: `plans/x402-jpyc-facilitator.md`; go-live runbook: `docs/DEPLOY_CHECKLIST.md` §14.
-
-The catalog's “verified” signal is backed by an hourly maintenance loop, not a static label: it re-probes first-party and registered x402 URLs with the same SSRF protections, records the last successful check, and temporarily hides a listing after three confirmed contract violations. Transient network, rate-limit, authentication, Cloudflare-challenge, and server failures do not count toward hiding; a later valid OpenPay 402 restores the listing automatically.
-
-### Listing policy (掲載ルール)
-
-- **Required:** the listed URL must have a real payment gate that returns HTTP 402, the registrant must have the right to provide and charge for the resource, and its payment requirements must use the OpenPay JPYC method.
-- **Recommended:** provide a `docsUrl` to OpenAPI or clear documentation, state the short `license` or reuse terms, and describe what an agent receives rather than using promotional claims.
-- **Reverification and quarantine:** OpenPay rechecks listings automatically. Three consecutive confirmed contract violations temporarily hide a listing; transient network or service failures do not count, and a later successful check restores it.
-- **Prohibited listings:** fraud or impersonation, sanctions-evasion assistance, and sale of stolen or illegitimately obtained data. Non-custodial does not mean unmoderated — violating listings are removed, quarantines/removals are recorded with their reason, and sellers can appeal via the contact in the site footer.
-- **Crypto-asset services need individual review:** paying in JPYC does not legalize the service being sold. Listings that would execute crypto-asset trading, lending, token issuance, or automated asset allocation / portfolio management (e.g. DeFi vault selection or rebalancing agents), or that may constitute investment solicitation/advice under Japanese law, are subject to case-by-case review and may be refused regardless of a "for information only" disclaimer.
-- **Buyer caution (prompt injection):** paid response bodies are third-party content. Buyer agents should treat them as data, never as instructions (the MCP/SDK money guards bound the blast radius, but instruction-following is the consumer's responsibility). Listings that embed instructions aimed at buyer agents may be reported to the contact in the site footer and removed.
-
-**Agent order** (flag-gated `ENABLE_AGENT_ORDER`, **server-only, default OFF — fully inert**, additionally requires `NEXT_PUBLIC_ENABLE_X402_FACILITATOR` + `NEXT_PUBLIC_ENABLE_ORDER_RELAY`). Turns a `@handle` mobile-order shop into something an AI agent can order from end-to-end. `GET /api/agent-order/menu?h=<handle>` returns the shop's **public** menu (item ids, names, prices, `hasOptions`); `GET /api/agent-order/pay?h=&cart=&table=&pickupAt=` is an x402 resource where the cart (`base64url([{id,qty}])`) is **priced by the server from the menu** (never from a client-supplied amount) — items with options are rejected (`item_has_options`) in v1. The 402 `accepts` use the same forwarder-split rail (buyer-side 1% fee, `payTo` = the shop's `config.to`), so payment goes through the unchanged `x402_pay` path. `pickupAt` (ms) is advisory: on a preorder shop with time controls on, a value outside the shop's pickup slots (earliest-lead / last-order window, 15-minute grid) is normalized to the nearest slot when the paid order is stored, not rejected. The settled `200` `pickupAt` is authoritative (with the agent's original value as `pickupAtRequested` when it differs); `pickupAtEstimate` in the 402 challenge is advisory and may move later if the payment lands after a slot boundary. Before settlement, the route stores an immutable order snapshot for 24 hours, bound to the payment authorization; a reservation storage failure returns `503 storage_unavailable` without settling. Already-consumed authorizations without an existing agent binding, and human recover claims, are rejected with the existing `402 payment_invalid` challenge. After settlement, an internal finalizer verifies the exact forwarder `Settled` event and atomically registers the reserved order. Public `/api/order/notify` rejects a reserved authorization with `409 reserved_order`; only pre-upgrade unreserved agent records use the legacy notify path. If registration fails on the new path, payment remains successful (`200`, `paymentSettled: true`, `orderRegistered: false`, `txHash`), with `repair: {action: "do_not_pay_again", retryWithSameHeader, txHash}`. **Do not call `x402_pay` again:** it signs a new payment. `retryWithSameHeader: true` means replaying the identical signed payment header can repair registration; `false` means that retry cannot repair the identified conflict and the `txHash` is needed for investigation. Recovery is request-driven, not a background job; the 24-hour snapshot does not extend the status lookup's 10,000-block hash-discovery window. Plan: `plans/a2b-agent-order-reservation.md`.
-
-The `openpay-x402-mcp` package (≥ 0.9.0) has two explicit profiles. `openpay-order-mcp` is the keyless human-pays profile: it exposes four tools — free shop discovery with `find_shops`, then `order_menu`, `order_summary`, and `createOrderLink`; the customer opens the returned link and pays from their own wallet. Run it with `npx --yes --package=openpay-x402-mcp -- openpay-order-mcp`. The full `openpay-x402-mcp` profile exposes nine tools: the unchanged previous seven plus `find_shops` and the guarded paid-search convenience tool `search_shops` for agents that perform autonomous x402 payments.
-Node.js developers can use the `openpay-x402-sdk` npm package for guarded discovery, quotes, and x402 payments without MCP.
-First-party paid resources are dual-stack: v1 buyers still use the JSON 402 body + `X-PAYMENT` / `X-PAYMENT-RESPONSE`, while v2 buyers can use `PAYMENT-REQUIRED`, `PAYMENT-SIGNATURE`, and `PAYMENT-RESPONSE` headers. Vanilla v2 clients still need to construct the OpenPay forwarder nonce from `extra.openpay.commitVersion`; without that OpenPay-aware payload, settle rejects the payment.
-Local MCP buyers can use [`packages/x402-mcp`](./packages/x402-mcp) for guarded JPYC x402 discovery, quote, and pay tools.
-
-| Network | Asset | Status |
-|---|---|---|
-| `base` | USDC (Circle native) | mainnet |
-| `base-sepolia` | USDC (Circle native testnet) | testnet (default) |
-| `polygon` | JPYC v3 | mainnet (verified) |
-| `polygon-amoy` | JPYC v3 (testnet) | testnet |
-
-**Scope notes (different from the human checkout flow).** A paid route is pinned to **one (network, asset)** pair — agents must hold the token on that exact chain. The human checkout's Circle CCTP V2 / Gateway cross-chain bridging is **not** part of the x402 path (bridge overhead exceeds typical per-request micropayment value). Choose the network per route via `X402_NETWORK`.
-
-Wrap your own paid route in two lines:
-
-```ts
-import { withX402Payment } from '@/lib/x402/middleware';
-export const GET = withX402Payment(async () => NextResponse.json({ ok: true }));
-```
-
-Configure via `X402_*` env vars (see `.env.local.example`).
-
-## Japan Web3 Directory API
-
-The Japan Web3 Directory is a flag-gated structured dataset for discovering services connected to Japan's JPYC, USDC, Web3, and AI-agent ecosystem. Human-readable cards are available at `/ja/directory` and `/en/directory`; agents can use the JSON APIs and the OpenAPI 3.1 document at `GET /api/openapi.json`. `NEXT_PUBLIC_ENABLE_WEB3_DIRECTORY` is off by default, and paid routes additionally require the x402 facilitator flag.
-
-### Data policy
-
-Facts and OpenPay-written editorial summaries are kept separate. Unknown capabilities stay `false` or empty instead of being inferred, and only `published` records are returned. The five permitted source classes are:
-
-1. Official product or organization websites.
-2. Official documentation and help centers.
-3. Official announcements and press releases.
-4. Official source-code repositories.
-5. Operator-reviewed manual submissions from the service owner or maintainer.
-
-Do not add data through unauthorized scraping, access-control or paywall bypasses, copied third-party descriptions, personal data, rumors, or unsupported claims. A source URL, attribution, and verification date are required; current conditions must still be checked with the cited source.
-
-### Endpoints and prices
-
-| Access | Endpoint | Result | Price |
-|---|---|---|---:|
-| Free | `GET /api/directory?limit=5` | Published teaser list (maximum 5 records) | Free |
-| Free | `GET /api/directory/categories` | Published category counts | Free |
-| Free | `GET /api/directory/tags` | Published tag counts | Free |
-| Schema | `GET /api/openapi.json` | OpenAPI 3.1 for free and paid routes (also served at `GET /openapi.json` for x402 indexers) | Free |
-| x402 | `GET /api/paid/japan-web3-directory` | Full published list | 2 JPYC |
-| x402 (USDC) | `GET /api/paid/usdc/japan-web3-directory` | Full published list — standard x402, USDC on Base mainnet, no OpenPay fee (listed price is the full charge) | 0.02 USDC |
-| x402 (USDC) | `GET /api/paid/usdc/japan-web3-directory/search` | Filtered search — standard x402, USDC on Base mainnet, no OpenPay fee | 0.02 USDC |
-| x402 (USDC) | `GET /api/paid/usdc/jpyc/supply` | JPYC Supply by Chain — current contract-reported totalSupply per chain (Polygon / Kaia / Avalanche / Ethereum) with the observed block number | 0.002 USDC |
-| x402 (USDC) | `GET /api/paid/usdc/jpyc/balance?address=` | JPYC Wallet Balance — current balanceOf of any address across chains with the observed block number | 0.002 USDC |
-| x402 (USDC) | `GET /api/paid/usdc/jpyc/transfers?chain=` | Recent JPYC Transfers — Transfer events on one chain within an ≈1-hour window ending at head - depth (64 blocks on Polygon/Ethereum; 2 blocks on Kaia/Avalanche); snapshot newest first, cursor delta oldest first; optional address filter. Wait for that depth before checking a payment | 0.005 USDC |
-| x402 (USDC) | `GET /api/paid/usdc/jpyc/activity?chain=polygon&window=24h` | JPYC Network Activity — approximately 24 hours of metrics computed hourly from finalized Polygon buckets; exact range in response. Free `/api/jpyc/activity/preview?chain=polygon`; buy again when observedAt advances and before expiresAt | 0.01 USDC |
-| x402 | `GET /api/paid/japan-web3-directory/search` | Filtered search | 2 JPYC |
-| x402 | `GET /api/paid/japan-web3-directory/:slug` | One published record | 1 JPYC |
-
-The managed facilitator adds its disclosed **1% fee (minimum 1 JPYC) on the buyer's side**; the listed dataset price is paid to the seller in full. Search accepts allowlisted filters such as `keyword`, `category`, `token`, `chain`, `language`, and the `supports*` capabilities. See the OpenAPI document for the complete query schema and response envelope.
-
-Inspect the payment challenge without paying:
+OpenPay includes **experimental** x402 protocol support for per-request paid API endpoints (AI agent / API use cases — separate from the human checkout flow).
+Every USDC-priced API on open-pay.jp answers `402` with **two ways to pay the same price: USDC on Base, or USDC on [Arc](https://www.arc.io/)** (`eip155:5042`), live on Arc mainnet since 2026-09-17.
+See it without a wallet:
 
 ```bash
-curl -i https://open-pay.jp/api/paid/japan-web3-directory
+curl -si https://open-pay.jp/api/paid/hello | grep -i '^payment-required:' | cut -d' ' -f2 | base64 -d
+# → accepts: [ eip155:8453 (USD Coin), eip155:5042 (GatewayWalletBatched) ] — same amount, same payee
 ```
 
-The response is HTTP 402 and includes the payable `accepts` requirements. To sign, pay, and retry with Node.js 20+, install `openpay-x402-sdk` and `viem` in your working directory, then use the single-file [`scripts/x402-buyer-example.mjs`](./scripts/x402-buyer-example.mjs):
+OpenPay also runs a managed **JPYC x402 facilitator** and a public catalog (`/discovery`), and offers the Japan Web3 Directory API and the JPYC Shops API.
 
-```bash
-npm install openpay-x402-sdk viem
-curl -fsSL https://raw.githubusercontent.com/cipherwebllc/openpay/main/scripts/x402-buyer-example.mjs -o x402-buyer-example.mjs
-BUYER_PRIVATE_KEY=0x... RESOURCE_URL=https://open-pay.jp/api/paid/japan-web3-directory node x402-buyer-example.mjs
-```
-
-Use a dedicated buyer wallet, start on testnet, and fund it only with the amount needed for the request.
-
-### MCP use
-
-The existing `openpay-x402-mcp` flow needs no package-specific directory tool: call `discovery_search` to find the list or search resource, then use `x402_pay` to inspect the quote and make the guarded JPYC payment. Dedicated names such as `search_japan_web3_directory` are a possible future convenience API, not currently exposed tools.
-
-### Adding or updating data
-
-Directory records live in [`lib/directory/data.ts`](./lib/directory/data.ts). Submit a code PR with the factual fields, an allowed primary source, attribution, and verification date. New records move through `draft` → `review` → `published`; use `rejected` when review fails and `archived` when a previously published service should no longer appear. API and UI publication is always limited to `published` records.
-
-Directory source URLs are checked once per UTC day by the same maintenance cron. API items add `sourceCheckedAt` and three-valued `sourceOk` (`null` means no current result for that exact URL). This is only a reachability check and does not establish that the directory information is true; the editorial `verifiedAt` remains a separate human-review date.
-
-Source names, trademarks, linked content, and third-party database rights remain with their respective owners. OpenPay's original code is MIT-licensed, but that does not grant a blanket license to reuse third-party source content; each API response includes its own attribution and license notice. The directory is informational, may be incomplete or stale, and is not an endorsement or financial, legal, tax, or investment advice. Verify availability, supported networks, token contracts, fees, and regulatory eligibility with the cited official source before acting.
-
-## JPYC Shops API
-
-The Shops API uses a “discovery is free, data is paid” model. AI agents can find a shop handle and current three-valued ordering availability without a key or payment, then continue into the existing free menu and human-pays ordering flow. Richer discovery data and filters remain behind the paid x402 search. Listings are strictly opt-in: a shop appears only after its owner selects the AI-agent listing option and republishes. Responses use only information the shop has already made public, exclude phone numbers, and include per-shop attribution plus a bilingual license notice. Shops can opt out by clearing the option and republishing; the index and materialized search summary are deleted, with shared-cache removal taking up to 60 seconds.
-
-The feature is default-off and requires all four guards: `NEXT_PUBLIC_ENABLE_SHOPS_API`, `NEXT_PUBLIC_ENABLE_X402_FACILITATOR`, `NEXT_PUBLIC_ENABLE_ORDER_RELAY`, and server-only `ENABLE_AGENT_ORDER`.
-
-The “verified” foundation differs by dataset: Shops are built from owner opt-in materialized records and live availability snapshots, while the x402 catalog and Directory cited sources are continuously rechecked by the maintenance cron described above. A source reachability result is never presented as proof that its factual claims are true.
-
-| Access | Endpoint | Result | Price |
-|---|---|---|---:|
-| Free | `GET /api/shops` | Listing count plus the fixed first three samples (`name` / `mode` only) | Free |
-| Free | `GET /api/shops/find?q=&limit=10` | Name-only discovery with `handle` / `name` / `mode` / `acceptingNow` (maximum 10) | Free |
-| x402 | `GET /api/paid/jpyc-shops/search` | Filtered shop search with live ordering availability | 2 JPYC |
-| Free | `GET /api/agent-order/menu?h=<handle>` | Full public menu for a returned shop | Free |
-| Schema | `GET /api/openapi.json` | OpenAPI 3.1 for free and paid routes (also served at `GET /openapi.json` for x402 indexers) | Free |
-
-The free find endpoint accepts optional `q` (case-insensitive partial shop-name match) and `limit` (default and maximum 10). Its items contain exactly four fields: `handle`, `name`, `mode`, and `acceptingNow`. Address, opening-time fields, menu summary, `dineIn` / `mode` filtering, and live-state details are reserved for the paid search.
-
-The paid search accepts `q`, `mode`, `dineIn`, `acceptingNow`, `limit` (maximum 20), and `offset`. `acceptingNow` is intentionally three-valued: `true` means every required check definitely passes; `false` means a definite stop condition applies (static stop, pause, time boundary, no pickup slot, unavailable forwarder, or all menu items sold out); `null` means a live read failed or legacy summary data is insufficient to decide. Filtering with `acceptingNow=true` returns only `true` and never includes `null`.
-
-Inspect the 2 JPYC payment challenge without paying:
-
-```bash
-curl -i 'https://open-pay.jp/api/paid/jpyc-shops/search?q=cafe&acceptingNow=true&limit=10'
-```
-
-The managed facilitator adds its disclosed 1% fee (minimum 1 JPYC) on the buyer's side. After payment, use each result's `pageUrl` to recheck current shop details and `menuUrl` to retrieve the free public menu. Shops API data is licensed for search and ordering assistance; resale or bulk redistribution of the dataset itself is restricted.
-
-## Pimlico balance alerts
-
-A GitHub Actions cron (`scripts/check-pimlico-balance.mjs`, every 6h) reads `balanceOf(paymaster)` on EntryPoint 0.7 and 0.8 for the configured Polygon, Base, and optional Kaia addresses. Existing 0.7 thresholds remain unchanged (defaults: 5 POL, 0.01 ETH, 5 KAIA). The additional 0.8 reads are informational unless `ALERT_THRESHOLD_POL_V08`, `ALERT_THRESHOLD_ETH_V08`, or `ALERT_THRESHOLD_KAIA_V08` is set for that chain. Missing 0.8 thresholds and informational read failures produce warnings without sending alerts or failing the cron. Optional `PIMLICO_PAYMASTER_*_V08` secrets override the 0.8 address; otherwise the existing address is read. See [DEPLOY_CHECKLIST §11.2](./docs/DEPLOY_CHECKLIST.md) for setup.
-
-## Limitations
-
-- **Beta software** — test with small amounts first.
-- **Not all wallets are guaranteed** to display every chain / token correctly.
-- **Gasless depends on third-party infrastructure** (Pimlico, x402 facilitator). Outages can affect availability.
-- **Network-fee estimates may differ from actual gas costs.**
-- **Blockchain transactions are irreversible** — there is no chargeback.
-- **USDC balances are chain-specific.** The payment page chain chooser (Circle Gateway / CCTP V2) bridges them when the customer's source chain differs from the merchant's, but the chain abstraction itself has Circle as a dependency — outages on Circle's attestation API will disable cross-chain paths while same-chain direct transfers keep working. See `docs/DEPLOY_CHECKLIST.md §10` for the operator-verification status and kill-switch.
-- **Best-effort application rate limits are built in**, but they do not mitigate volumetric DoS — production deployments still need Vercel Firewall/WAF or an equivalent edge control.
-- OpenPay is **not** a wallet, exchange, custodian, or redemption provider.
+- Endpoints, prices, and the buyer example: [docs/API.md](./docs/API.md)
+- Rules for listing a paid resource: [docs/LISTING_POLICY.md](./docs/LISTING_POLICY.md)
+- MCP package: [`packages/x402-mcp`](./packages/x402-mcp) · SDK: [`packages/x402-sdk`](./packages/x402-sdk)
+- Catalogue: [`/openapi.json`](https://open-pay.jp/openapi.json) · [`/llms.txt`](https://open-pay.jp/llms.txt)
 
 ## Legal / disclaimer
 
@@ -499,15 +150,6 @@ OpenPay is **not** a wallet, exchange, custodian, or redemption provider. Users 
 - [Privacy Policy / プライバシーポリシー](https://open-pay.jp/ja/privacy)
 - [Disclaimer / 免責事項](https://open-pay.jp/ja/disclaimer)
 - [特定商取引法に基づく表記](https://open-pay.jp/ja/tokutei)
-
-## Roadmap
-
-- More tested wallets + better wallet compatibility surface
-- Improved merchant receipt verification UX
-- Per-chain native-gas → USDC/JPY approximate conversion in the chain chooser (currently shows gas units + token symbol only)
-- More x402 / agent payment examples
-- Demand-driven additional chains and tokens
-- Solana cross-chain (shelved 2026-05-24 pending Circle official confirmation that Solana is a supported **source** chain for the Forwarding Service — see [`docs/research/circle-forwarding-service.md`](./docs/research/circle-forwarding-service.md))
 
 ## Contact
 

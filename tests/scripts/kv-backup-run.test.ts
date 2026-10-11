@@ -264,7 +264,7 @@ describe('run / verify / workflows', () => {
       expect(workflow).toContain("node-version: '22'"); expect(workflow).toContain('cancel-in-progress: false');
       expect(workflow).toContain('timeout-minutes: 30'); expect(workflow).toContain('::error::'); expect(workflow).not.toContain('npm ci');
     }
-    const example = await readFile('.env.local.example', 'utf8'), readme = await readFile('README.md', 'utf8');
+    const example = await readFile('.env.local.example', 'utf8'), readme = await readFile('docs/ENV.md', 'utf8');
     for (const key of ['KV_BACKUP_REST_URL', 'KV_BACKUP_REST_TOKEN', 'KV_BACKUP_KEY', 'R2_ACCOUNT_ID', 'R2_ACCESS_KEY_ID', 'R2_SECRET_ACCESS_KEY', 'R2_BUCKET', 'KV_RESTORE_TARGET_TOKEN']) {
       expect(example).toContain(`# ${key}=`); expect(readme).toContain(`\`${key}\``);
     }

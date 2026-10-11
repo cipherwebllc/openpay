@@ -7,7 +7,7 @@
 // CSV は店主自身の localStorage 履歴からブラウザ内で生成される。利用権は UI の
 // ダウンロード操作を制御するだけで、データや CSV の security boundary (保護境界) ではない。
 // クライアント側で回避可能な任意協力の仕組みであり、server に保護対象の CSV はない。
-// 点灯前にはこの制約を前提に公開文言・法務と課金方針の明示承認が必要。README の env 表を参照。
+// 点灯前にはこの制約を前提に公開文言・法務と課金方針の明示承認が必要。docs/ENV.md の env 表を参照。
 //
 // bypass: アルファ全開放 (ALPHA_ENTITLEMENT_BYPASS・既定 ON) 中は常に active=true = 課金しない。
 // 技術上の点灯条件 (点灯承認ではない) = NEXT_PUBLIC_ENABLE_CSV_PASS=1 + ALPHA_ENTITLEMENT_BYPASS=0 + FEE_RECEIVER 設定済。

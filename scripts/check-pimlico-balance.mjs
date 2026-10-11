@@ -8,7 +8,7 @@
 // chain 追加手順:
 // 1. CHAIN_CONFIGS に entry を追加 (slug, viem chain, env 名、default 値、required)
 // 2. .github/workflows/pimlico-balance.yml の `env:` block に secret を追加
-// 3. README "Pimlico balance alerts" に新 chain の secret 名を追記
+// 3. docs/OPERATIONS.md "Pimlico balance alerts" に新 chain の secret 名を追記
 // 4. tests/scripts/check-pimlico-balance.test.ts に当該 chain の case を追加
 
 import {
