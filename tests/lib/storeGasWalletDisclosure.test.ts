@@ -173,21 +173,22 @@ describe('「お店がガス代を肩代わりして送る」の開示 (DISCLOSE
       }
       for (const w of qrOnly) expect(qr).toContain(w);
     }
-    // お知らせ (提供開始日・0 円・1 wei・対象チェーン・印刷/保存/URL のコピー/金額なしは対象外)
+    // お知らせ (提供開始日・0 円・1 wei・対象チェーン・印刷/保存は対象外)
     // 一番新しい「お店がガス代を肩代わりして送る」のお知らせが、いまの開示 (日付・対象チェーン) と一致する
     // (チェーンを足したらお知らせを足す・前のお知らせは過去の告知として書き換えない)。
     const news = NEWS_ITEMS.find((n) => n.id.startsWith('store-pays-gas-'));
     expect(news?.date).toBe(D.effectiveDate);
-    for (const w of ['0 円', `${D.feeWei} wei`, `JPYC・${CH_JA}`, JA_EXCLUDED]) expect(news?.body.ja).toContain(w);
-    for (const w of ['is 0', `${D.feeWei} wei`, `JPYC on ${CH_EN}`, 'not QR codes that are printed, saved or copied as a URL, or that have no amount']) expect(news?.body.en).toContain(w);
+    for (const w of ['0 円', `${D.feeWei} wei`, `JPYC・${CH_JA}`, '印刷・保存した QR は対象外']) expect(news?.body.ja).toContain(w);
+    for (const w of ['is 0', `${D.feeWei} wei`, `JPYC on ${CH_EN}`, 'not printed or saved']) expect(news?.body.en).toContain(w);
     const startJa = startGuideContentFor('ja').sections.find((s) => s.n === 8)?.defs ?? [];
     const startEn = startGuideContentFor('en').sections.find((s) => s.n === 8)?.defs ?? [];
     expect(startJa.find((x) => x.term.includes('お店がガス代を肩代わり'))?.desc).toContain(`最長 ${MIN} 分`);
     expect(startEn.find((x) => x.term.includes('The shop pays the gas'))?.desc).toContain(`within ${MIN} minutes`);
   });
 
-  // 2026-10-11: 特商法・/transparency・LP・llms.txt・お知らせが「印刷・保存した QR」だけを対象外と書いていて、
-  // 規約 (11) (印刷・保存・URL のコピー・金額なし) より狭かった。狭い書き方が戻ってこないように、開示の面を全部見る。
+  // 2026-10-11: 特商法・/transparency・LP・llms.txt が「印刷・保存した QR」だけを対象外と書いていて、
+  // 規約 (11) (印刷・保存・URL のコピー・金額なし) より狭かった。狭い書き方が戻ってこないように、開示の正本の面を見る。
+  // お知らせはその日の告知の記録なので書き換えず、この検査の対象にもしない (上のお知らせの検査は当時の文のまま)。
   it('対象外の QR を「印刷・保存」だけに狭めて書いた面が無い (規約 (11) の範囲にそろえる)', () => {
     const llms = readFileSync(join(process.cwd(), 'public/llms.txt'), 'utf8');
     const surfaces: [string, string][] = [
@@ -195,7 +196,6 @@ describe('「お店がガス代を肩代わりして送る」の開示 (DISCLOSE
       ['messages/en.json', JSON.stringify(en)],
       ['/transparency', JSON.stringify([transparencyContentFor('ja'), transparencyContentFor('en')])],
       ['public/llms.txt', llms],
-      ['お知らせ', JSON.stringify(NEWS_ITEMS)],
       ['ガイド', JSON.stringify([qrGuideContentFor('ja'), qrGuideContentFor('en'), shopGuideContentFor('ja'), shopGuideContentFor('en'), startGuideContentFor('ja'), startGuideContentFor('en')])],
     ];
     for (const [label, text] of surfaces) {
