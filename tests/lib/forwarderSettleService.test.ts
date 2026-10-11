@@ -47,7 +47,7 @@ vi.mock('@/lib/logger', () => ({
 }));
 vi.mock('@/lib/relay/relayProvider', () => ({
   MAX_VALUE: 10n ** 30n,
-  RELAY_LOW_BALANCE_ALERT_WEI: 0n,
+  relayLowBalanceAlertWei: () => 0n,
   relayMaxGasCostWei: () => 1n,
   jpycAddressFor: () => hold.jpyc,
   getBalance: vi.fn(async () => 10n ** 30n),

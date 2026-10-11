@@ -26,6 +26,7 @@ import {
   isKvConfigured,
 } from '@/lib/kv';
 import { logger } from '@/lib/logger';
+import { scheduleGasBudgetAlert } from './gasBudgetAlert';
 
 export const RL_MAX = 5; // window 内の最大 relay 回数 (per key)
 export const RL_WINDOW_MS = 60_000;
@@ -254,6 +255,14 @@ export async function checkGasBudget(
   // EXPIRE は毎回設定する (初回 EXPIRE が応答喪失すると TTL 無しの stale key が永続化するため・
   // Codex P2)。EXPIRE は冪等なので再設定は無害。
   await kvExpire(key, 2 * 24 * 3600);
+  // 80% 到達と枯渇 (初回の拒否) を chain × UTC 日で 1 回ずつ warn する監視。marker の SET と warn は
+  // 応答後 (after) に回り、許可の判定・戻り値・refund token には関与しない (gasBudgetAlert)。
+  scheduleGasBudgetAlert({
+    chainId,
+    budgetKey: key,
+    count: r.value,
+    cap: RELAY_DAILY_TX_CAP,
+  });
   return {
     allowed: r.value <= RELAY_DAILY_TX_CAP,
     consumed: true,

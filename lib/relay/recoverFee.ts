@@ -21,9 +21,11 @@
 // gasMode の安全性: gasMode は EIP-712 署名対象ではない (= unsigned hint) が、その偽造は
 // 有界である。'customer' を主張する payload も少なくともフロア (= floor) を払い、署名済の
 // 分割 (merchantValue/feeValue・nonce にコミット) は forwarderRecover が強制する。既知の残余
-// リスクは「店主がチップリンク経由で売上を流して 1% を回避する」経路だが、現在の規模では許容
-// (全 settle は on-chain で監査可能)。client/server は同一 payload の gasMode を鍵に同式で
-// feeValue を再計算するため nonce が一致する (両者がずれない)。
+// リスクは「チップのリンクやチップ画面で売上を受け取って 1% を回避する」経路で、お客単独でも
+// 成立する。チップは正当に customer の料金表なので、gasMode を署名に入れても forwarder を
+// 再デプロイしても塞がらない。現在の規模では許容 (2026-06-12・全 settle は on-chain で監査可能)。
+// 起きた件は lib/relay/recoverFeeAvoidance が受取アドレスごとに数える。client/server は同一 payload
+// の gasMode を鍵に同式で feeValue を再計算するため nonce が一致する (両者がずれない)。
 //
 // import 注意: forwarderConfig は recoverFee を import しない (relayGasFeeValue は floor 提供側)。
 // env も recoverFee を import しない (recoverFee → env の単方向のみ・循環なし)。

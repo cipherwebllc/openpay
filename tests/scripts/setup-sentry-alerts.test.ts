@@ -571,6 +571,14 @@ describe('setup-sentry-alerts: RULES schema', () => {
     expect(byTag('x402.facilitator.relay_error')?.eventTags).not.toContain('x402.facilitator.pending');
   });
 
+  it('中継の日次枠 (80% 到達・枯渇) は 1 rule にまとめ、chain × UTC 日で 1 回しか出ないので 1 件目で通知する', () => {
+    // relay.budget.* は SET NX で chain × UTC 日に各 1 回だけ emit される (lib/relay/gasBudgetAlert)。
+    // 枯渇はその日の残りのガスレス中継と x402 の JPYC settle を止めるので、閾値 0。
+    const budget = byTag('relay.budget.exhausted');
+    expect(budget?.eventTags).toEqual(['relay.budget.exhausted', 'relay.budget.near_exhausted']);
+    expect(budget?.threshold).toBe(0);
+  });
+
   it('支払いフォームの失敗は payment / tip / checkout を 1 rule にまとめ、smart-account.init-failed は接尾一致で 3 フォームを拾う', () => {
     const forms = byTag('payment.failed');
     expect(forms?.eventTags).toEqual(['payment.failed', 'tip.failed', 'checkout.failed']);

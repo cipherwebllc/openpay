@@ -49,8 +49,9 @@ const HUNDREDTH_NATIVE_WEI = 10n ** 16n;
 // chain 別の低残高フロア (mainnet 既定 5 native を上書き)。⚠️ Avalanche は native (AVAX ~$30) が
 // POL/KAIA (~$0.1-0.5) より桁違いに高価かつ実 gas が極小 (≈0.0000016 AVAX/件) のため、5 AVAX フロア
 // は ~320 万件分で過大 → 1 AVAX 保有でも誤って degraded:low_balance になり preflight banner が
-// 常時出てしまう。0.1 AVAX (~$3・~6 万件分) に下げる (submit 時の RELAY_LOW_BALANCE_ALERT_WEI 既定
-// 0.1 native とも整合)。フロア≠既定の chain を足すときはここに per-chain で明示する。
+// 常時出てしまう。0.1 AVAX (~$3・~6 万件分) に下げる。フロア≠既定の chain を足すときはここに per-chain で
+// 明示する。submit 時の低残高警告 (lib/relay/relayProvider の relayLowBalanceAlertWei) の chain 別既定は
+// このフロアの 2 倍 (客に degraded が見える前に operator へ届く)。ここを変えたらそちらも合わせる。
 const PER_CHAIN_LOW_BALANCE_FLOOR_WEI: Record<number, bigint> = {
   [avalanche.id]: TENTH_NATIVE_WEI,
 };

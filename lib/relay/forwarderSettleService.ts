@@ -19,7 +19,7 @@ import { env } from '@/lib/env';
 import { logger } from '@/lib/logger';
 import {
   MAX_VALUE,
-  RELAY_LOW_BALANCE_ALERT_WEI,
+  relayLowBalanceAlertWei,
   relayMaxGasCostWei,
   jpycAddressFor,
   getBalance,
@@ -154,7 +154,7 @@ export async function settleViaForwarder(
       submitSelfHost(io, target, data, {
         maxGasCostWei: relayMaxGasCostWei(chainId),
         isAuthorizationUsed,
-        lowBalanceWei: RELAY_LOW_BALANCE_ALERT_WEI,
+        lowBalanceWei: relayLowBalanceAlertWei(chainId),
         onLowBalance: (b) =>
           logger.warn('relay.relayer.balance_low', {
             chainId,

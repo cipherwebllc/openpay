@@ -34,6 +34,7 @@ import {
   relayGasFeeValue,
 } from '@/lib/relay/forwarderConfig';
 import { recoverFeeValue } from '@/lib/relay/recoverFee';
+import { recordRecoverFeeAvoidanceAfterResponse } from '@/lib/relay/recoverFeeAvoidance';
 import {
   settleViaForwarder,
   feeReceiverFor,
@@ -454,8 +455,14 @@ async function handleRecover(
   //   customer: merchantValue == billAmount (顧客が手数料を上乗せ・店舗は満額受領)
   //   merchant: merchantValue == billAmount − feeValue (店舗が手数料を吸収・顧客は表示額ちょうど)
   // 旧 client は gasMode を送らない → 'customer' に既定 (後方互換・bps=0 なら gasMode は無関係)。
-  // 不正値も 'customer' に倒す。誤った gasMode は expectedFee が署名済 feeValue と食い違い
-  // fee_value_mismatch で安全に弾かれる (悪用不可・client 値を信用しているわけではない)。
+  // 不正値も 'customer' に倒す。gasMode と署名済みの (merchantValue, feeValue) が食い違う組は
+  // expectedFee が feeValue と合わず fee_value_mismatch で弾かれる。ただし弾けるのは食い違いだけで、
+  // gasMode=customer と「merchantValue = 請求額・feeValue = フロア」を矛盾なく組めば、どの支払いでも
+  // チップの料金表 (フロアだけ) が通り、決済の料金表の 1% (bps) を払わずに済む。2026-06-12 にこれを受容した:
+  // チップのリンクやチップ画面で売上を受け取れば店主は 1% を避けられ、お客単独でも成立する。チップは正当に
+  // customer の料金表で売上と区別できないため、gasMode を署名に入れても forwarder を再デプロイしても塞がらない。
+  // 起きた件は recordRecoverFeeAvoidanceAfterResponse が受取アドレスごとに数え、閾値で warn する
+  // (DEPLOY_CHECKLIST §11.5)。
   const gasMode = raw.gasMode === 'merchant' ? 'merchant' : 'customer';
   const billAmount =
     gasMode === 'merchant'
@@ -519,6 +526,16 @@ async function handleRecover(
   if (result.kind === 'success') {
     // 月次メトリクス (運営ヒント・掟 13 no-throw)。
     recordMetricAfterResponse('relay_jpyc');
+    // 1% 回避 (gasMode=customer でフロアだけを払った件) の受取アドレス別の集計 (運営ヒント)。KV の書き込みは
+    // 応答後 (after) に回し、判定・集計の失敗は成功済みの応答へ波及させない (掟 13 no-throw)。
+    recordRecoverFeeAvoidanceAfterResponse({
+      chainId,
+      receiver: params.merchant,
+      gasMode,
+      feeKind,
+      merchantValue: params.merchantValue,
+      feeValue: expectedFee,
+    });
   }
   if (result.kind === 'success' && env.enablePushNotify) {
     // recover 経路の店主実受取額 = 検証済み params.merchantValue (forwarder.settle が店舗へ

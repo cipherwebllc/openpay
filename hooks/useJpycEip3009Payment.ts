@@ -714,8 +714,9 @@ export function useJpycEip3009Payment(
           merchantValue: merchantValue.toString(),
           feeValue: feeValue.toString(),
           // gasMode は server が billAmount を (merchantValue, feeValue) から再構成し
-          // expectedFee を求めるための検証ヒント (署名対象ではない)。誤った gasMode は
-          // expectedFee が署名済 feeValue と食い違い fee_value_mismatch で安全に弾かれる。
+          // expectedFee を求めるための検証ヒント (署名対象ではない)。(merchantValue, feeValue) と
+          // 食い違う gasMode は fee_value_mismatch で弾かれるが、矛盾なく組んだ customer は通る
+          // (= チップの料金表で 1% を払わない。2026-06-12 に受容・app/api/relay/jpyc/route.ts 参照)。
           gasMode,
           // feeKind present のとき server は recoverFeeValue ではなく mobileOrderFeeValue で
           // expectedFee を再計算する (定数表から → client 申告の率は信用しない)。署名対象では

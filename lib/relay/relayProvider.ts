@@ -114,11 +114,27 @@ export function relayMaxGasCostWei(chainId: number): bigint {
   return RELAY_MAX_GAS_COST_WEI;
 }
 // relayer の native 残高がこれ未満で submit 前に事前警告 (枯渇=relayer_unfunded の手前で Sentry 通知し
-// operator が補充できるように)。既定 0.1 native (1e17)。補充 cadence に応じ env で調整・0 で無効。
-export const RELAY_LOW_BALANCE_ALERT_WEI = (() => {
+// operator が補充できるように)。env RELAY_LOW_BALANCE_ALERT_WEI を設定すると全 chain 共通の値で上書き
+// (0 で無効)。空/不正なら下の chain 別既定。
+const RELAY_LOW_BALANCE_ALERT_WEI_OVERRIDE: bigint | null = (() => {
   const raw = process.env.RELAY_LOW_BALANCE_ALERT_WEI;
-  return raw && /^[0-9]+$/.test(raw) ? BigInt(raw) : 10n ** 17n;
+  return raw && /^[0-9]+$/.test(raw) ? BigInt(raw) : null;
 })();
+// chain 別の既定 = /api/relay/jpyc/health が客に「通常決済へ切替」を案内する degraded フロアの 2 倍。
+// 客に見える前に operator へ届くようにする。旧既定の一律 0.1 native は、Polygon では forwarder.settle
+// (~250–300k gas) の数回分しかなく、degraded (5 native) より後に鳴っていた。Avalanche は native が高価で
+// 実 gas が極小なため health フロア 0.1 AVAX の 2 倍。それ以外 (testnet) は従来の 0.1 native。
+const PER_CHAIN_LOW_BALANCE_ALERT_WEI: Record<number, bigint> = {
+  [polygon.id]: 10n * 10n ** 18n,
+  [kaia.id]: 10n * 10n ** 18n,
+  [avalanche.id]: 2n * 10n ** 17n,
+};
+export function relayLowBalanceAlertWei(chainId: number): bigint {
+  if (RELAY_LOW_BALANCE_ALERT_WEI_OVERRIDE !== null) {
+    return RELAY_LOW_BALANCE_ALERT_WEI_OVERRIDE;
+  }
+  return PER_CHAIN_LOW_BALANCE_ALERT_WEI[chainId] ?? 10n ** 17n;
+}
 
 // 対応 chain (Polygon mainnet/Amoy + Kaia mainnet/Kairos)。JPYC v3 は全 chain 同一アドレス。
 // Kaia は Gelato 非対応だが自前 relayer (KAIA gas) で中継可能。RPC 未設定時は viem の default を使う。
@@ -433,7 +449,7 @@ export function relayFreeAuthorization(
         submitSelfHost(io!, target, data, {
           maxGasCostWei: relayMaxGasCostWei(chainId),
           isAuthorizationUsed,
-          lowBalanceWei: RELAY_LOW_BALANCE_ALERT_WEI,
+          lowBalanceWei: relayLowBalanceAlertWei(chainId),
           onLowBalance: (b) =>
             logger.warn('relay.relayer.balance_low', {
               chainId,

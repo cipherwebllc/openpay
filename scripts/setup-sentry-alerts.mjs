@@ -170,10 +170,23 @@ export const RULES = [
     legacyNames: ['relayer balance low (mainnet)'],
     description:
       '自前 relayer EOA (RELAYER_PRIVATE_KEY・Polygon/Kaia/Avalanche) の native 残高が ' +
-      'RELAY_LOW_BALANCE_ALERT_WEI (既定 0.1 native) を下回った。枯渇 (relayer_unfunded → relay_error → ' +
-      '客は standard へ fallback = ガスレスが止まる) の手前の事前警告なので 1 件目で通知し、chainId の ' +
-      'relayer に POL / KAIA / AVAX を補充する。',
+      '警告の閾値 (既定は chain 別: mainnet は /api/relay/jpyc/health の degraded フロアの 2 倍 = Polygon・Kaia 10 / ' +
+      'Avalanche 0.2 native、testnet は 0.1 native。RELAY_LOW_BALANCE_ALERT_WEI で全 chain 共通に上書き) を下回った。客に「通常決済へ切替」が ' +
+      '出る前・枯渇 (relayer_unfunded → relay_error → 客は standard へ fallback = ガスレスが止まる) の手前の事前警告なので ' +
+      '1 件目で通知し、chainId の relayer に POL / KAIA / AVAX を補充する。',
     eventTags: ['relay.relayer.balance_low'],
+    threshold: 0,
+    interval: '1h',
+  },
+  {
+    name: 'OpenPay: 中継の日次枠の 80% 到達・枯渇 (relay.budget.*)',
+    description:
+      '共有日次枠 relay:budget:{chainId}:{UTC 日} (RELAY_DAILY_TX_CAP・既定 500 件・決済 relay / CSV パス / ' +
+      'x402 facilitator で共有) の 80% 到達 (relay.budget.near_exhausted) と、枯渇して拒否が始まった初回 ' +
+      '(relay.budget.exhausted = その UTC 日の残りはガスレス中継と x402 の JPYC settle が 503 daily_budget_exceeded)。' +
+      'chain × UTC 日で各 1 回だけ出る (SET NX) ので 1 件目で通知。正当な流量増なら relayer の残高と相談して ' +
+      'RELAY_DAILY_TX_CAP を上げる。偏った払い元・IP からの連打なら rate-limit 側を調べる。',
+    eventTags: ['relay.budget.exhausted', 'relay.budget.near_exhausted'],
     threshold: 0,
     interval: '1h',
   },

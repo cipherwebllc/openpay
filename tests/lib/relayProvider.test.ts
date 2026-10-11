@@ -57,3 +57,36 @@ describe('relayFreeAuthorization: checkAuthorizationUsed の provider 配線 (P1
     expect(typeof capturedDeps().checkAuthorizationUsed).toBe('function');
   });
 });
+
+// relayer の低残高の事前警告 (relay.relayer.balance_low) の閾値。旧既定の一律 0.1 native は Polygon の
+// forwarder.settle の数回分しかなく、客に degraded (5 native) が見えた後に鳴っていた。
+describe('relayLowBalanceAlertWei: chain 別の既定と env の上書き', () => {
+  const NATIVE = 10n ** 18n;
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  });
+
+  async function load(envValue: string) {
+    vi.resetModules();
+    vi.stubEnv('RELAY_LOW_BALANCE_ALERT_WEI', envValue);
+    return (await import('@/lib/relay/relayProvider')).relayLowBalanceAlertWei;
+  }
+
+  it('未設定: mainnet は health の degraded フロア (Polygon/Kaia 5・Avalanche 0.1) の 2 倍、testnet は 0.1 native', async () => {
+    const alertWei = await load('');
+    expect(alertWei(137)).toBe(10n * NATIVE);
+    expect(alertWei(8217)).toBe(10n * NATIVE);
+    expect(alertWei(43114)).toBe((2n * NATIVE) / 10n);
+    expect(alertWei(80002)).toBe(NATIVE / 10n);
+    expect(alertWei(1001)).toBe(NATIVE / 10n);
+  });
+
+  it('env は全 chain 共通の上書き・0 で無効・不正値は chain 別既定', async () => {
+    const override = await load('3000000000000000000');
+    expect(override(137)).toBe(3n * NATIVE);
+    expect(override(43114)).toBe(3n * NATIVE);
+    expect((await load('0'))(137)).toBe(0n);
+    expect((await load('1e18'))(137)).toBe(10n * NATIVE);
+  });
+});
