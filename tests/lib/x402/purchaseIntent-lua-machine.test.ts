@@ -1136,14 +1136,26 @@ describe('PurchaseIntent reconciler', () => {
         toBlock: ANCHOR_BLOCK + 1_999n,
       }),
     );
+    // 2026-10-12: 1 ページ目に AuthorizationUsed が無いので、その直後に同じページで取り消し (AuthorizationCanceled)
+    // も探す (予算切れで探さないページを飛ばさないため・Codex P2-1)。2 ページ目で使用の log が見えた後は探さない。
     expect(h.publicClient.getLogs).toHaveBeenNthCalledWith(
       2,
+      expect.objectContaining({
+        address: TOKEN,
+        event: expect.objectContaining({ name: 'AuthorizationCanceled' }),
+        fromBlock: ANCHOR_BLOCK,
+        toBlock: ANCHOR_BLOCK + 1_999n,
+      }),
+    );
+    expect(h.publicClient.getLogs).toHaveBeenNthCalledWith(
+      3,
       expect.objectContaining({
         address: TOKEN,
         fromBlock: ANCHOR_BLOCK + 2_000n,
         toBlock: ANCHOR_BLOCK + 2_500n,
       }),
     );
+    expect(h.publicClient.getLogs).toHaveBeenCalledTimes(3);
     expect(h.publicClient.getTransactionReceipt).toHaveBeenLastCalledWith({
       hash: TX_HASH,
     });
@@ -2467,11 +2479,14 @@ describe('R4a differential reconcile traces (JPYC / USDC)', () => {
 
   const pendingResult = ['result', { ok: true, state: 'pending' }];
   const scan = [['used'], ['head'], ['page', 10_000n, 11_999n], ['page', 12_000n, 13_999n], ['page', 14_000n, 14_000n]];
-  // 2026-10-12 (user 承認): JPYC は authorizationState が使用済みなのに、その回の走査に AuthorizationUsed が 1 件も
-  // 無いときだけ、同じページで AuthorizationCanceled を探す (取り消された購入を終端にして rail を解放するため)。
-  // 旧 trace は JPYC / USDC で同じだった。USDC rail の照合は変えていない。使用の log がある回は両 rail とも従来どおり。
-  const cancelScan = [['cancel-page', 10_000n, 11_999n], ['cancel-page', 12_000n, 13_999n], ['cancel-page', 14_000n, 14_000n]];
-  const scanned = (rail: Rail) => rail === 'jpyc' ? [...scan, ...cancelScan] : scan;
+  // 2026-10-12 (user 承認): JPYC は authorizationState が使用済みなのに AuthorizationUsed の無いページで、そのページの
+  // 走査の直後に AuthorizationCanceled を探す (取り消された購入を終端にして rail を解放するため・予算切れで探さない
+  // ページを飛ばさないよう交互に読む)。旧 trace は JPYC / USDC で同じだった。USDC rail の照合は変えていない。
+  // 使用の log が見えた後のページは両 rail とも従来どおり。
+  const scanned = (rail: Rail) => rail === 'jpyc'
+    ? [['used'], ['head'], ['page', 10_000n, 11_999n], ['cancel-page', 10_000n, 11_999n], ['page', 12_000n, 13_999n],
+      ['cancel-page', 12_000n, 13_999n], ['page', 14_000n, 14_000n], ['cancel-page', 14_000n, 14_000n]]
+    : scan;
   const lease = ['cas', 'lease', 'settling', null];
   const rescheduled = (rail: Rail, cursor: string | null) => ['cas', 'reschedule', rail === 'jpyc' ? 'indeterminate' : 'settling', cursor];
 
@@ -2629,7 +2644,12 @@ describe('R4a differential reconcile traces (JPYC / USDC)', () => {
     for (const rail of rails) {
       const f = await fixture(rail);
       f.patch({ reconcileFromBlock: '12000' });
-      h.publicClient.getLogs.mockResolvedValueOnce([]).mockRejectedValueOnce(new Error('page unavailable'));
+      // 1 ページ目 (12000) は空・2 ページ目 (14000) の AuthorizationUsed の取得が失敗する。JPYC が 1 ページ目の直後に
+      // 読む取り消しの探索 (AuthorizationCanceled) は空を返す (2026-10-12・Codex P2-1 で交互に読むようにした)。
+      h.publicClient.getLogs.mockImplementation(async ({ fromBlock, event }: { fromBlock: bigint; event?: { name?: string } }) => {
+        if (event?.name !== 'AuthorizationCanceled' && fromBlock === 14_000n) throw new Error('page unavailable');
+        return [];
+      });
       await f.run();
       expect(h.publicClient.getTransactionReceipt).not.toHaveBeenCalled();
       expect(f.stored().reconcileFromBlock).toBe('14000');

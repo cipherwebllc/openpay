@@ -1820,7 +1820,9 @@ flag ON + forwarder/JPYC 設定済の Amoy (80002) で 1 周する。route テ�
 - 1 回あたりの目安: レート制限の判定 3〜4 (多くの API は分・日の 2 窓で 6〜8)・funnel 3〜4・`/api/discovery` の miss は
   index 1 + 掲載数ぶんの GET + 2・license-mint (修復なし) 約 4・同 (修復あり) 約 28。2026-10-12 から license-mint は
   押さえの掃除と滞留の監視 (`lib/license/holdSweep.ts`) に 1 run 3 (押さえ・決済待ちが空のとき・EVAL 1 + ZCARD 2) を足す
-  (96 run/日で約 290/日)。期限切れの押さえを照合した run だけ、照合 (license の CAS) と数え直しの分が増える。
+  (96 run/日で約 290/日)。押さえが 1 件でもある run は ZRANGEBYSCORE と ZCOUNT の 2 (照合の窓を過ぎた古い押さえが
+  あれば見本の 1) と、範囲に入った押さえ (最大 20) の GET が増える。期限切れの押さえを照合した run だけ、照合
+  (license の CAS) と数え直しの分がさらに増える。
 - 総数は `INFO stats` の `total_commands_processed` で見られるが、複数ノードで値が分かれる (書き込みは主ノード側の値)。
 
 ### §14.9b OpenPay Agent の North Star (月間の外部 JPYC Agent 購入者数)
@@ -2096,7 +2098,8 @@ PR A/B/C/D の採用、公開文言と第13条の施行日、Amoy E2E、以下�
    最大 20 件照合する (戻すかは照合だけが決める = finalized の期限切れ未使用・または finalized・canonical な
    AuthorizationCanceled)。決済待ち (`store:intent:pending`) が 50 件超・最古の待ちが 26 時間超・押さえが 10 件超・
    validBefore から 1 時間を過ぎても戻らない押さえ、のどれかで `creator_store.purchase_backlog` を warn
-   (Sentry rule・1 件目で通知)。warn の exceeded を見て、押さえの intent (`store:intent:<salt>`) と予約
+   (Sentry rule・1 件目で通知)。照合の窓 (6 時間) を過ぎた押さえも照合はしないが滞留に数える (score が 7 時間より
+   古い押さえは件数だけ・warn の staleSample に古い順の intentSalt を最大 3 件載せる)。warn の exceeded を見て、押さえの intent (`store:intent:<salt>`) と予約
    (`x402:hosted:<id>:license:reservation:<salt>`) を確かめる。掃除の失敗は `license.hold_sweep_failed`。
    取り消し (cancelAuthorization) で戻した押さえは予約の evidence に取り消しの tx/block が残り、
    `creator_store.purchase_authorization_canceled` を warn する (通知 rule なし・記録用)。

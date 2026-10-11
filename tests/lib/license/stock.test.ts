@@ -34,7 +34,7 @@ import { createQuotedPurchaseIntent, claimSignedPurchaseIntent, claimPurchaseSet
 import { createLicenseDefinition } from '@/lib/license/definition';
 import { LICENSE_DUE_INDEX, LICENSE_HOLD_INDEX, LICENSE_OBLIGATION_INDEX, licenseStockKey, licenseReservationKey, licenseQuotaKey, licenseObligationKey } from '@/lib/license/stock';
 import { repairLicenseIndexes } from '@/lib/license/repair';
-import { type LicenseReconcileChain } from '@/lib/license/reconcile';
+import { type LicenseFinalizedBlock, type LicenseReconcileChain } from '@/lib/license/reconcile';
 import { computeLicensePaymentKey } from '@/lib/license/paymentKey';
 import { STORE_RECONCILE_PAGE_RPC_TIMEOUT_MS } from '@/lib/x402/reconcileBudget';
 import { JPYC_V3_ASSET } from '@/lib/x402/types';
@@ -216,6 +216,49 @@ describe('license stock CAS: real Lua', () => {
     expect(await reconcilePurchaseIntent(input.intentSalt, { now: NOW + 600_000, licenseChain: broken })).toEqual({ ok: true, state: 'pending' });
     expect(stock().reserved).toBe(1);
     expect(reservation(input.intentSalt)).toMatchObject({ state: 'held' });
+  });
+  // Codex P2-1: 時間予算付き (cron) の照合で AuthorizationUsed の走査が予算を使い切ると、取り消しを探していない
+  // ページまで cursor が進み (4001 → 1 を往復)、取り消し (block 100) を永久に探さなかった。取り消しはページの走査の
+  // 直後に探し、予算が足りず探せなかったページには cursor を残す。
+  describe('cancel lookup under the cron time budget', () => {
+    const FINAL: LicenseFinalizedBlock = { number: 6000n, hash: toHex(10n, { size: 32 }), timestamp: BigInt(NOW / 1000 + 100), used: true };
+    // RPC 1 回 (使用の走査・取り消しの探索) ごとに 4 秒進む時計。予算の判定は残り − 予約 3 秒 ≥ 2 秒。
+    function budgeted(cancelBlock: bigint) {
+      let clock = NOW;
+      const spy = vi.spyOn(Date, 'now').mockImplementation(() => clock);
+      const rpc: LicenseReconcileChain = {
+        observe: vi.fn(async () => FINAL),
+        transactions: vi.fn(async () => { clock += 4_000; return []; }),
+        receiptMatches: vi.fn(async () => false),
+        canceled: vi.fn(async (_intent, from, to) => { clock += 4_000; return from <= cancelBlock && cancelBlock <= to ? { ...CANCEL, blockNumber: cancelBlock.toString() } : null; }),
+      };
+      return { rpc, spy, deadline: (ms: number) => clock + ms };
+    }
+    const cancelRanges = (rpc: LicenseReconcileChain) => vi.mocked(rpc.canceled!).mock.calls.map(([, from, to]) => [from, to]);
+    it('Codex repro (10 s left, cancel at block 100): the first page is checked for the cancel before the scan moves on', async () => {
+      const input = await quote(); await settling(input);
+      const { rpc, spy, deadline } = budgeted(100n);
+      try {
+        expect(await reconcilePurchaseIntent(input.intentSalt, { now: NOW + 70_000, licenseChain: rpc, deadline: deadline(10_000) })).toEqual({ ok: true, state: 'failed_prebroadcast' });
+      } finally { spy.mockRestore(); }
+      expect(cancelRanges(rpc)).toEqual([[1n, 2000n]]);
+      expect(stock()).toMatchObject({ reserved: 0, sold: 0 });
+      expect(reservation(input.intentSalt)).toMatchObject({ state: 'released', evidence: { kind: 'authorization_canceled', blockNumber: '100' } });
+    });
+    it('an unchecked page keeps the cursor; the next run checks it first and releases', async () => {
+      const input = await quote(); await settling(input);
+      const { rpc, spy, deadline } = budgeted(2500n);
+      try {
+        // 1 ページ目の走査と取り消しの探索・2 ページ目の走査で予算が尽き、2 ページ目の取り消しは探せない。
+        expect(await reconcilePurchaseIntent(input.intentSalt, { now: NOW + 70_000, licenseChain: rpc, deadline: deadline(13_000) })).toEqual({ ok: true, state: 'pending' });
+        expect(cancelRanges(rpc)).toEqual([[1n, 2000n]]);
+        expect(JSON.parse(h.store!.strings.get(purchaseIntentKey(input.intentSalt))!)).toMatchObject({ reconcileFromBlock: '2001' });
+        expect(stock().reserved).toBe(1);
+        expect(await reconcilePurchaseIntent(input.intentSalt, { now: NOW + 200_000, licenseChain: rpc, deadline: deadline(13_000) })).toEqual({ ok: true, state: 'failed_prebroadcast' });
+      } finally { spy.mockRestore(); }
+      expect(cancelRanges(rpc)).toEqual([[1n, 2000n], [2001n, 4000n]]);
+      expect(stock()).toMatchObject({ reserved: 0, sold: 0 });
+    });
   });
   it('stale cancel evidence cannot undo a racing successful settlement', async () => {
     const input = await quote(); await settling(input); const rpc = canceledChain();
@@ -664,7 +707,7 @@ describe('license hold sweep (15 min cron) and backlog warn on real Lua', () => 
     const rpc = chain(false);
     const now = validBeforeMs(input) + 20 * 60_000;
     expect(await sweep(now, rpc)).toEqual({
-      ok: true, checked: 1, released: 1, settled: 0, pending: 0, skipped: 0, storageErrors: 0, deferred: 0,
+      ok: true, checked: 1, released: 1, settled: 0, pending: 0, skipped: 0, storageErrors: 0, deferred: 0, staleHolds: 0,
       backlog: { pendingCount: 0, pendingOldestWaitMs: 0, holdCount: 0, stuckHolds: 0 }, exceeded: [],
     });
     expect(stock()).toMatchObject({ reserved: 0, sold: 0 });
@@ -705,8 +748,10 @@ describe('license hold sweep (15 min cron) and backlog warn on real Lua', () => 
     holdScore(early.intentSalt, beyond - 15 * 60_000);
     holdScore(fresh.intentSalt, beyond - 15 * 60_000);
     holdScore(old.intentSalt, beyond - 15 * 60_000);
-    expect(await sweep(beyond, rpc)).toMatchObject({ ok: true, checked: 0, skipped: 3 });
+    // 照合の窓を過ぎた押さえは照合しないが、監視では滞留として数える (Codex P2-2: 窓と監視の範囲を分ける)。
+    expect(await sweep(beyond, rpc)).toMatchObject({ ok: true, checked: 0, skipped: 3, staleHolds: 3, backlog: { stuckHolds: 3 }, exceeded: ['stuckHolds'] });
     expect(rpc.observe).not.toHaveBeenCalled();
+    expect(backlogWarns().at(-1)).toEqual(['creator_store.purchase_backlog', expect.objectContaining({ stuckHolds: 3, staleHolds: 3 })]);
     holdScore(early.intentSalt, after - 15 * 60_000);
     holdScore(fresh.intentSalt, after - 5 * 60_000);
     holdScore(old.intentSalt, after - 5 * 60_000);
@@ -715,6 +760,19 @@ describe('license hold sweep (15 min cron) and backlog warn on real Lua', () => 
     expect(reservation(early.intentSalt)).toMatchObject({ state: 'released' });
     expect(reservation(fresh.intentSalt)).toMatchObject({ state: 'held' });
     expect(stock()).toMatchObject({ reserved: 2, sold: 0 });
+  });
+
+  // Codex P2-2: cron が 7 時間止まった後は、押さえの score (最後に触った時刻) が掃除の範囲 (7 時間) より古くなり、
+  // 以前は照合も滞留の数え上げも外れて warn が出なかった。範囲より古い押さえは件数 (ZCOUNT) で滞留に数え、見本を載せる。
+  it('a hold untouched for longer than the sweep range (cron stopped for 7 h) is still counted as stuck and warned', async () => {
+    const input = await failedHold(seed(2));
+    const rpc = chain(false);
+    const now = NOW + 2000 + 7 * 3_600_000 + 15 * 60_000;
+    const result = await sweep(now, rpc);
+    expect(result).toMatchObject({ ok: true, checked: 0, skipped: 0, staleHolds: 1, backlog: { pendingCount: 1, holdCount: 1, stuckHolds: 1 }, exceeded: ['stuckHolds'] });
+    expect(rpc.observe).not.toHaveBeenCalled();
+    expect(backlogWarns()).toEqual([['creator_store.purchase_backlog', expect.objectContaining({ stuckHolds: 1, staleHolds: 1, staleSample: [input.intentSalt] })]]);
+    expect(stock().reserved).toBe(1);
   });
 
   it('a hold still pending an hour after validBefore is counted as stuck and warned', async () => {

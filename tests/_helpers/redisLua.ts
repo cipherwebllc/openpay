@@ -494,6 +494,15 @@ export function dispatchRedisCommand(
       requireType('zset');
       return store.zsets.get(key)?.size ?? 0;
     }
+    case 'ZCOUNT': {
+      if (args.length !== 3) throw new Error('wrong number of arguments');
+      requireType('zset');
+      const min = parseRangeBound(args[1]);
+      const max = parseRangeBound(args[2]);
+      return [...(store.zsets.get(key)?.values() ?? [])].filter((score) =>
+        (min.exclusive ? score > min.value : score >= min.value) &&
+        (max.exclusive ? score < max.value : score <= max.value)).length;
+    }
     case 'ZREVRANK': {
       const zset = store.zsets.get(key);
       if (!zset) return false;

@@ -22,13 +22,13 @@ beforeEach(() => { vi.clearAllMocks(); });
 
 describe('runLicenseHoldSweep isolation', () => {
   it('reads the backlog and the sweep targets in one read-only EVAL over the hold and pending indexes', async () => {
-    h.kvEval.mockResolvedValue({ ok: true, value: [0, 0, '', []] });
+    h.kvEval.mockResolvedValue({ ok: true, value: [0, 0, '', [], 0, []] });
     expect(await runLicenseHoldSweep({ now: NOW, deadline: deadline() })).toMatchObject({ ok: true, checked: 0, backlog: { pendingCount: 0, holdCount: 0 } });
     expect(h.kvEval).toHaveBeenCalledTimes(1);
     const [script, keys, args] = h.kvEval.mock.calls[0]!;
     expect(keys).toEqual(['store:license:holds', 'store:intent:pending']);
-    // score の範囲 = [now − 7 時間, now − 10 分]・最大 20 件。
-    expect(args).toEqual([String(NOW - 7 * 3_600_000), String(NOW - 600_000), '20']);
+    // score の範囲 = [now − 7 時間, now − 10 分]・最大 20 件。7 時間より古い押さえの見本は最大 3 件。
+    expect(args).toEqual([String(NOW - 7 * 3_600_000), String(NOW - 600_000), '20', '3']);
     expect(script).not.toMatch(/"(?:SET|DEL|ZADD|ZREM|EXPIRE)"/);
     expect(h.warn).not.toHaveBeenCalled();
   });
@@ -36,9 +36,11 @@ describe('runLicenseHoldSweep isolation', () => {
   it.each([
     ['KV failure', { ok: false, reason: 'network_error' }],
     ['non-array reply', { ok: true, value: 'OK' }],
-    ['non-numeric count', { ok: true, value: ['1', 0, '', []] }],
-    ['non-string member', { ok: true, value: [1, 0, '', [7]] }],
-    ['non-numeric score', { ok: true, value: [0, 1, 'abc', []] }],
+    ['non-numeric count', { ok: true, value: ['1', 0, '', [], 0, []] }],
+    ['non-string member', { ok: true, value: [1, 0, '', [7], 0, []] }],
+    ['non-numeric score', { ok: true, value: [0, 1, 'abc', [], 0, []] }],
+    ['missing stale count', { ok: true, value: [0, 0, '', []] }],
+    ['non-string stale sample', { ok: true, value: [1, 0, '', [], 1, [7]] }],
   ] as const)('%s is storage_unavailable with a sweep warn, never a silent zero', async (_name, reply) => {
     h.kvEval.mockResolvedValue(reply);
     expect(await runLicenseHoldSweep({ now: NOW, deadline: deadline() })).toEqual({ ok: false, error: 'storage_unavailable' });
@@ -55,7 +57,7 @@ describe('runLicenseHoldSweep isolation', () => {
 
   it('intent read and reconcile storage failures are counted and warned without stopping the other holds', async () => {
     const a = `0x${'a'.repeat(64)}`; const b = `0x${'b'.repeat(64)}`;
-    h.kvEval.mockResolvedValue({ ok: true, value: [2, 0, '', [a, b]] });
+    h.kvEval.mockResolvedValue({ ok: true, value: [2, 0, '', [a, b], 0, []] });
     const intent = { metadata: { productKind: 'license' }, state: 'failed_prebroadcast', failureReason: 'ip_rate_limited', claim: { validBefore: String(NOW / 1000 - 1200) } };
     h.getIntent.mockImplementation(async (salt: string) => salt === a ? 'storage' : intent);
     h.reconcile.mockResolvedValue({ ok: false, reason: 'storage' });

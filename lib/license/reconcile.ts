@@ -151,9 +151,12 @@ export async function reconcileLicensePurchase(current: PurchaseIntent, raw: str
     if ('txHash' in leased && leased.txHash) {
       const result = await finalize(leased.txHash); if (result) return result;
     }
-    // 取り消し (cancelAuthorization) の探索に使う、AuthorizationUsed の無かったページ (走査そのものは従来どおり)。
-    const emptyPages: [bigint, bigint][] = [];
+    // 取り消し (cancelAuthorization) の証拠は、finalized で使用済みなのに AuthorizationUsed の無いページで、そのページの
+    // 走査の直後に探す (adapter が持つときだけの追加の読み取り。使用の log が見えた後のページ・支払いを採用した回は探さない)。
+    // 時間予算が足りずに探せなかったページには cursor を残し、取り消しを探していないページを飛ばして先へ進めない
+    // (後ろのページの走査で予算を使い切り、取り消しのあるページを探さないまま cursor が往復する波及を断つ)。
     let usedLogSeen = false;
+    let canceled: AuthorizationCancelEvidence | null = null;
     for (let page = 0; page < 20 && fromBlock <= block.number; page++) {
       // 時間予算は取得前に「残り時間 − cursor 保存の予約」で見て、1 回の RPC に足りなければ未取得ページの先頭を
       // cursor に残す (打ち切りは失敗でも未払いでもない)。取るときは残り時間で切った timeout で RPC を呼ぶ。
@@ -165,26 +168,23 @@ export async function reconcileLicensePurchase(current: PurchaseIntent, raw: str
       for (const hash of hashes) {
         const result = await finalize(hash, pageStart); if (result) return result;
       }
-      fromBlock = to + 1n;
-      if (hashes.length > 0) usedLogSeen = true; else emptyPages.push([pageStart, to]);
-    }
-    // finalized で使用済みなのに、この回に走査したページ (finalized 以下) に AuthorizationUsed が 1 件も無いときだけ、
-    // 同じページで取り消しの証拠を探す (adapter が持つときだけの追加の読み取り。使用の log が見えた回・支払いを採用した
-    // 回は探さない)。finalized・canonical な AuthorizationCanceled があるときだけ在庫を戻す。取り消しと使用は同じ nonce
-    // で両立しないので、売り越しにならない。
-    let canceled: AuthorizationCancelEvidence | null = null;
-    if (!usedLogSeen && chain.canceled) {
-      for (const [from, to] of emptyPages) {
+      if (hashes.length > 0) usedLogSeen = true;
+      else if (!usedLogSeen && chain.canceled) {
         const cancelRpc = rpcCallOptions(deadline);
-        if (cancelRpc === null) break;
+        // fromBlock はまだこのページの先頭 = 次の回はこのページの取り消しから探す。
+        if (cancelRpc === null) return reschedule();
         try {
-          canceled = cancelRpc ? await chain.canceled(leased, from, to, block, cancelRpc) : await chain.canceled(leased, from, to, block);
+          canceled = cancelRpc ? await chain.canceled(leased, pageStart, to, block, cancelRpc) : await chain.canceled(leased, pageStart, to, block);
         } catch {
-          // 取り消しの探索の障害を AuthorizationUsed の走査の結果 (cursor の保存・在庫の保持) へ波及させない。証拠なし = 保持のまま。
+          // 取り消しの探索の障害を AuthorizationUsed の走査 (支払いの採用・cursor) へ波及させない。証拠なし = 保持のまま。
+          // (読み取り障害でページに留まると、後ろのページにある支払いの採用まで止まる。)
           canceled = null;
         }
+        // finalized・canonical な AuthorizationCanceled があり、ここまでのページに AuthorizationUsed が無い (= 一致する
+        // 支払いも無い) ときだけ在庫を戻す。取り消しと使用は同じ nonce で両立しないので、売り越しにならない。
         if (canceled) break;
       }
+      fromBlock = to + 1n;
     }
     if (canceled) {
       const failed: PurchaseIntent = {

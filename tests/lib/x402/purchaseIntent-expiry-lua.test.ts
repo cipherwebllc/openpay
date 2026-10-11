@@ -209,18 +209,19 @@ describe.each(['jpyc', 'usdc'] as const)('%s finalized authorization expiry (rea
   describe('cancelAuthorization', () => {
     const CANCEL_TX = toHex(901n, { size: 32 });
     const CANCEL_BLOCK_HASH = toHex(400n, { size: 32 });
-    function cancelOnChain(f: Awaited<ReturnType<typeof setup>>, cancelBlock = 400n) {
+    function cancelOnChain(f: Awaited<ReturnType<typeof setup>>, cancelBlock = 400n, finalizedBlock = 500n) {
       const topics = encodeEventTopics({ abi: [AUTHORIZATION_CANCELED_EVENT], eventName: 'AuthorizationCanceled', args: { authorizer: PAYER, nonce: f.nonce } }) as Hex[];
       const token = rail === 'jpyc' ? JPYC_V3_ASSET.address : getAddress('0x41E94Eb019C0762f9Bfcf9Fb1E58725BfB0e7582');
       const log = { address: token, topics, data: '0x' as Hex, blockNumber: cancelBlock, blockHash: CANCEL_BLOCK_HASH, transactionHash: CANCEL_TX, transactionIndex: 0, logIndex: 0, removed: false };
       // 取り消し後は latest・finalized とも authorizationState が true。AuthorizationUsed の log は無い。
       h.client.readContract.mockResolvedValue(true);
-      h.client.getLogs.mockImplementation(async (args: { event?: { name?: string } }) => args.event?.name === 'AuthorizationCanceled' ? [log] : []);
+      h.client.getLogs.mockImplementation(async (args: { event?: { name?: string }; fromBlock: bigint; toBlock: bigint }) =>
+        args.event?.name === 'AuthorizationCanceled' && args.fromBlock <= cancelBlock && cancelBlock <= args.toBlock ? [log] : []);
       h.client.getTransactionReceipt.mockImplementation(async ({ hash }: { hash: Hex }) => hash === CANCEL_TX
         ? { status: 'success', blockNumber: cancelBlock, blockHash: CANCEL_BLOCK_HASH, transactionHash: CANCEL_TX, logs: [log] }
         : { status: 'reverted', blockNumber: 100n, blockHash: toHex(100n, { size: 32 }), transactionHash: hash, logs: [] });
       h.client.getBlock.mockImplementation(async (args: { blockTag?: string; blockNumber?: bigint }) => args.blockTag === 'finalized'
-        ? { number: 500n, hash: BLOCK_HASH, timestamp: f.validBefore - 100n }
+        ? { number: finalizedBlock, hash: BLOCK_HASH, timestamp: f.validBefore - 100n }
         : { number: args.blockNumber, hash: args.blockNumber === cancelBlock ? CANCEL_BLOCK_HASH : BLOCK_HASH });
     }
 
@@ -264,6 +265,33 @@ describe.each(['jpyc', 'usdc'] as const)('%s finalized authorization expiry (rea
       expect(await f.read()).toMatchObject({ state: 'indeterminate', txHash: TX });
       expect(h.store!.strings.has(f.activeKey)).toBe(true);
       expect(h.store!.zsets.get(f.pendingKey)?.has(SALT)).toBe(true);
+    });
+
+    // Codex P2-1: 時間予算付き (cron) の照合で AuthorizationUsed の走査が予算を使い切ると、取り消しを探していない
+    // ページまで cursor が進み、取り消しを永久に探さなかった。JPYC は取り消しをページの走査の直後に探し、予算が足りず
+    // 探せなかったページを cursor に残す (USDC rail の照合は変えていない)。
+    it('under the cron budget an unchecked page keeps the cursor and the next run finds the cancel', async () => {
+      if (rail === 'usdc') return;
+      const f = await setup(rail, 'indeterminate');
+      cancelOnChain(f, 2500n, 5000n);
+      h.client.getBlockNumber.mockResolvedValue(6000n);
+      // getLogs 1 回 (使用の走査・取り消しの探索) ごとに 4 秒進む時計。予算の判定は残り − 予約 3 秒 ≥ 2 秒。
+      let clock = NOW;
+      const logs = h.client.getLogs.getMockImplementation()!;
+      h.client.getLogs.mockImplementation(async (args: { event?: { name?: string }; fromBlock: bigint; toBlock: bigint }) => { clock += 4_000; return logs(args); });
+      const spy = vi.spyOn(Date, 'now').mockImplementation(() => clock);
+      const cancelRanges = () => h.client.getLogs.mock.calls.filter(([args]) => args.event?.name === 'AuthorizationCanceled').map(([args]) => [args.fromBlock, args.toBlock]);
+      const now = Number(f.validBefore - 200n) * 1000;
+      try {
+        expect(await reconcilePurchaseIntent(SALT, { now, deadline: clock + 13_000 })).toEqual({ ok: true, state: 'pending' });
+        expect(cancelRanges()).toEqual([[1n, 2000n]]);
+        expect(await f.read()).toMatchObject({ state: 'indeterminate', reconcileFromBlock: '2001' });
+        expect(h.store!.strings.has(f.activeKey)).toBe(true);
+        expect(await reconcilePurchaseIntent(SALT, { now: now + 60_000, deadline: clock + 13_000 })).toEqual({ ok: true, state: 'failed_prebroadcast' });
+      } finally { spy.mockRestore(); }
+      expect(cancelRanges()).toEqual([[1n, 2000n], [2001n, 4000n]]);
+      expect(await f.read()).toMatchObject({ state: 'failed_prebroadcast', failureReason: 'authorization_canceled' });
+      expect(h.store!.strings.has(f.activeKey)).toBe(false);
     });
 
     it('a concurrent transaction write during the cancel lookup defeats the terminal CAS', async () => {

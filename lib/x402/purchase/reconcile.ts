@@ -512,15 +512,33 @@ export async function reconcilePurchaseIntent(
     }
     const latest = headRpc ? await chain.latestBlock(intent, headRpc) : await chain.latestBlock(intent);
     const anchor = BigInt(intent.anchorBlock);
-    // 取り消し (cancelAuthorization) の探索に使う、AuthorizationUsed の無かったページ (走査そのものは従来どおり)。
-    const cancelScan: { emptyPages: [bigint, bigint][]; usedLogSeen: boolean } = { emptyPages: [], usedLogSeen: false };
-    const fetchUsedPage = async (fromBlock: bigint, toBlock: bigint, pageOptions?: PageFetchOptions): Promise<Hex[]> => {
+    // 取り消し (cancelAuthorization) の証拠は、authorizationState が使用済みなのに AuthorizationUsed の無いページで、
+    // そのページの走査の直後に探す (adapter が持つときだけの追加の読み取り。使用の log が見えた後のページは探さない)。
+    // 時間予算が足りずに探せなかったページでは走査を止め ('unavailable' = そのページの先頭を cursor に保存)、取り消しを
+    // 探していないページを飛ばして先へ進めない (後ろのページの走査で予算を使い切り、取り消しのあるページを探さないまま
+    // cursor が往復する波及を断つ)。証拠が見つかったページでも走査を止める (以後のページは読まない)。
+    const cancelScan: { evidence: AuthorizationCancelEvidence | null; usedLogSeen: boolean } = { evidence: null, usedLogSeen: false };
+    const fetchUsedPage = async (fromBlock: bigint, toBlock: bigint, pageOptions?: PageFetchOptions): Promise<Hex[] | 'unavailable'> => {
       const hashes = pageOptions
         ? await chain.authorizationUsedTransactions(intent, fromBlock, toBlock, pageOptions)
         : await chain.authorizationUsedTransactions(intent, fromBlock, toBlock);
-      if (hashes.length > 0) cancelScan.usedLogSeen = true;
-      else cancelScan.emptyPages.push([fromBlock, toBlock]);
-      return hashes;
+      if (hashes.length > 0) {
+        cancelScan.usedLogSeen = true;
+        return hashes;
+      }
+      if (cancelScan.usedLogSeen || !chain.authorizationCanceled) return hashes;
+      const cancelRpc = rpc();
+      if (cancelRpc === null) return 'unavailable';
+      try {
+        cancelScan.evidence = cancelRpc
+          ? await chain.authorizationCanceled(intent, fromBlock, toBlock, cancelRpc)
+          : await chain.authorizationCanceled(intent, fromBlock, toBlock);
+      } catch {
+        // 取り消しの探索の障害を AuthorizationUsed の走査 (支払いの採用・cursor) へ波及させない。証拠なし = 従来どおり。
+        // (読み取り障害でページに留まると、後ろのページにある支払いの採用まで止まる。)
+        cancelScan.evidence = null;
+      }
+      return cancelScan.evidence ? 'unavailable' : hashes;
     };
     const { candidates, nextFromBlock, interrupted } = await scanReconcileBlockPages({
       anchor,
@@ -539,25 +557,10 @@ export async function reconcilePurchaseIntent(
       const resolved = await finalizeCandidate(txHash, candidatePageStart);
       if (resolved) return resolved;
     }
-    // authorizationState は使用済みなのに、この回に走査したページに AuthorizationUsed が 1 件も無いときだけ、同じページで
-    // 取り消し (cancelAuthorization) の証拠を探す (adapter が持つときだけの追加の読み取り。使用の log が見えた回・
-    // 支払いを採用した回は探さない)。finalized・canonical な AuthorizationCanceled があれば終端にする。取り消しと使用は
-    // 同じ nonce で両立しないので、支払い済みを未払いにしない。
-    if (!cancelScan.usedLogSeen && chain.authorizationCanceled) {
-      for (const [fromBlock, toBlock] of cancelScan.emptyPages) {
-        const cancelRpc = rpc();
-        if (cancelRpc === null) break;
-        let evidence: AuthorizationCancelEvidence | null;
-        try {
-          evidence = cancelRpc
-            ? await chain.authorizationCanceled(intent, fromBlock, toBlock, cancelRpc)
-            : await chain.authorizationCanceled(intent, fromBlock, toBlock);
-        } catch {
-          // 取り消しの探索の障害を AuthorizationUsed の走査の結果 (cursor の保存・pending) へ波及させない。証拠なし = 従来どおり。
-          evidence = null;
-        }
-        if (evidence) return terminalizeCanceledPurchase({ intentSalt, leasedRaw, intent, now, evidence });
-      }
+    // finalized・canonical な AuthorizationCanceled があり、走査したページに AuthorizationUsed が無い (= 一致する
+    // 支払いも無い) ときだけ終端にする。取り消しと使用は同じ nonce で両立しないので、支払い済みを未払いにしない。
+    if (cancelScan.evidence && !cancelScan.usedLogSeen) {
+      return terminalizeCanceledPurchase({ intentSalt, leasedRaw, intent, now, evidence: cancelScan.evidence });
     }
 
     const updated = await rescheduleAfterReconcile({

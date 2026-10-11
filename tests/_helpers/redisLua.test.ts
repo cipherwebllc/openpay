@@ -232,6 +232,14 @@ describe('fake store: sorted set コマンド', () => {
     expect(() => call('ZCARD', 's')).toThrow('WRONGTYPE');
   });
 
+  it('ZCOUNT は score の範囲 (( で排他・-inf/+inf) の member 数 / 未存在は 0', () => {
+    expect(call('ZCOUNT', 'z', '-inf', '+inf')).toBe(3);
+    expect(call('ZCOUNT', 'z', '-inf', '(20')).toBe(1);
+    expect(call('ZCOUNT', 'z', '20', '30')).toBe(2);
+    expect(call('ZCOUNT', 'z', '(10', '(30')).toBe(1);
+    expect(call('ZCOUNT', 'missing', '-inf', '+inf')).toBe(0);
+  });
+
   it('ZREM は削除数を返し、空になればキーが消える', () => {
     expect(call('ZREM', 'z', 'a', 'nope')).toBe(1);
     expect(call('ZREM', 'z', 'b', 'c')).toBe(2);
