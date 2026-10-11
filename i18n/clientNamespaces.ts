@@ -322,6 +322,12 @@ export const ROUTE_CLIENT_NAMESPACES = {
     'SuccessOverlay',
     'UrlErrors',
   ],
+  'pricing': [
+    'ConnectButton',
+    'LocaleSwitcher',
+    'Nav',
+    'News',
+  ],
   'privacy': [
     'Privacy',
   ],

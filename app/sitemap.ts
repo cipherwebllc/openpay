@@ -22,6 +22,7 @@ const PUBLIC_ROUTES = [
   '/directory',
   '/news',
   '/transparency',
+  '/pricing',
   '/guide',
   // ガイドは目次と同じ一覧から作る (ガイドを足したときの載せ忘れを防ぐ)。
   ...GUIDE_SLUGS.map((slug) => `/guide/${slug}` as const),
