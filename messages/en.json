@@ -665,7 +665,7 @@
     "gasInfoUsdcCircle": "Pay the network fee in USDC via Circle Paymaster (official) — no need to hold native {nativeToken}. A Circle fee of about 10% is added on top of the gas cost. The figure shown is an upper-bound estimate; any surplus is not charged. OpenPay does not collect this fee.",
     "gasInfoJpyc": "Pimlico Sponsorship Paymaster covers {nativeToken} gas; you complete the payment in JPYC alone with no native ({nativeToken}) holdings required. The network fee is charged as a fixed amount based on the congestion ceiling price, so during normal periods it may exceed the actual gas (the difference is not refunded).",
     "approvalCheckLink": "Review gas approvals",
-    "splitBatchHint": "Gas is covered by OpenPay (Pimlico Sponsorship Paymaster). {count} transfers are batched in a single UserOperation.",
+    "splitBatchHint": "The network fee is paid in USDC; OpenPay does not cover it. {count} transfers are sent together with a single approval.",
     "walletSection": "Wallet",
     "switchChain": "Switch to {chainName}",
     "switchingChain": "Switching chain…",

@@ -665,7 +665,7 @@
     "gasInfoUsdcCircle": "Circle Paymaster (公式) 経由で、ネイティブトークン ({nativeToken}) を保有することなく USDC のままガスをお支払いいただけます。ガス代には約 10% の Circle 手数料が上乗せされます。表示額は上限見積で、超過分は引き落とされません。OpenPay は当該手数料を徴収しません。",
     "gasInfoJpyc": "Pimlico Sponsorship Paymaster 経由で、運営が {nativeToken} ガスを肩代わりします。お客様は JPYC のみで完結し、ネイティブトークン ({nativeToken}) を保有する必要はありません。ネットワーク手数料は混雑時の上限価格を基準に固定額で徴収するため、平常時は実際の gas を上回ることがあります (差額は返金されません)。",
     "approvalCheckLink": "ガス代承認の状況を確認",
-    "splitBatchHint": "ネットワーク手数料は OpenPay が肩代わり (Pimlico Sponsorship Paymaster)。{count} 件の transfer を 1 つの UserOperation でバッチ送信します。",
+    "splitBatchHint": "ネットワーク手数料は USDC で支払われ、OpenPay は負担しません。{count} 件の送金を 1 回の承認でまとめて送ります。",
     "walletSection": "ウォレット",
     "switchChain": "{chainName} へ切り替え",
     "switchingChain": "チェーン切替中…",

@@ -967,7 +967,14 @@ describe('PaymentForm — split (C1)', () => {
     expect(
       screen.getAllByText(/受取人 \(\d+%\)/).length,
     ).toBeGreaterThanOrEqual(2);
-    expect(screen.getByText(/3 件の transfer/)).toBeInTheDocument();
+    // USDC のガスレスはお客様側が USDC でガス代を払う (OpenPay は負担しない)。旧文言の「OpenPay が肩代わり
+    // (Pimlico Sponsorship Paymaster)」は実態と合わないので出さない。
+    expect(
+      screen.getByText(
+        'ネットワーク手数料は USDC で支払われ、OpenPay は負担しません。3 件の送金を 1 回の承認でまとめて送ります。',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/OpenPay が肩代わり/)).toBeNull();
   });
 
   it('split あり → mutate の extraRecipients が正しい (USDC 100, sponsorship gas=0)', async () => {
@@ -1046,6 +1053,34 @@ describe('PaymentForm — 分配 (split) つきの QR を払えない組み合�
     expect(btn).toBeDisabled();
     fireEvent.click(btn);
     expectNoMoneyMoved();
+  });
+
+  it('JPYC + split: 明細に受取人ごとの内訳は残し、ネットワーク手数料の行と「OpenPay が負担」の注記は出さない', () => {
+    vi.mocked(resolveJpycGaslessProvider).mockReturnValue('eip3009-relay');
+    vi.mocked(jpycForwarderFor).mockReturnValue(FORWARDER);
+    setURL(`to=${MERCHANT}&token=jpyc&amount=1000&split=${B}:30`);
+    setAccount({ connected: true, chainId: polygonAmoy.id });
+    setBalance(2000n * 10n ** 18n);
+    setSmartAccount(true);
+    render(<PaymentForm />);
+
+    expect(screen.getByText(/主受取人 \(70%\)/)).toBeInTheDocument();
+    expect(screen.getByText(/^受取人 \(30%\)/)).toBeInTheDocument();
+    expect(screen.queryByText('ネットワーク手数料')).toBeNull();
+    expect(screen.queryByText(/無料 \(OpenPay が負担\)/)).toBeNull();
+    expect(screen.queryByText(/OpenPay が負担するため/)).toBeNull();
+  });
+
+  it('USDC + split + mode=standard: ネットワーク手数料の行と通常決済の注記を出さない', () => {
+    setURL(`to=${MERCHANT}&token=usdc&amount=100&mode=standard&split=${B}:30`);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    render(<PaymentForm />);
+
+    expect(screen.getByText('この QR は通常決済では支払えません')).toBeInTheDocument();
+    expect(screen.queryByText('ネットワーク手数料')).toBeNull();
+    expect(screen.queryByText('ウォレットで支払い')).toBeNull();
+    expect(screen.queryByText(/ウォレットで transfer を 1 件承認します/)).toBeNull();
   });
 
   it('JPYC + split + 未接続: 「ウォレットを接続」へ誘導せず、押せない', () => {
@@ -1143,6 +1178,9 @@ describe('PaymentForm — 分配 (split) つきの QR を払えない組み合�
     render(<PaymentForm />);
 
     expectNoSplitNotice();
+    // 払える QR はネットワーク手数料の行と注記を従来どおり出す。
+    expect(screen.getByText(/^ネットワーク手数料見積 \(顧客負担\)/)).toBeInTheDocument();
+    expect(screen.getByText(/OpenPay は負担しません。3 件の送金/)).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: /100 USDC を支払う/ }));
     expect(mutate).toHaveBeenCalledOnce();
     const call = mutate.mock.calls[0][0];

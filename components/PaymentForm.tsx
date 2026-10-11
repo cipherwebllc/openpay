@@ -1236,7 +1236,9 @@ function PaymentDetails({ params }: { params: PayParams }) {
                 splitBreakdown ? splitBreakdown.feeAmount : breakdown.feeAmount,
               ),
             })}
-          {breakdownRow(
+          {/* 分配のため払えない QR (splitBlock) では、ネットワーク手数料の行と下の注記を出さない
+              (「OpenPay が負担」等の約束を、払えない状態で見せない)。受取人ごとの内訳は残す。 */}
+          {!splitBlocked && breakdownRow(
             isStandard
               ? { label: t('gasRowStandard'), value: t('gasRowStandardValue') }
               : useRecover
@@ -1282,21 +1284,23 @@ function PaymentDetails({ params }: { params: PayParams }) {
             {t('merchantGasHint')}
           </p>
         )}
-        <p className="mt-4 text-xs text-slate-500">
-          {isStandard
-            ? t('standardBatchHint')
-            : useRecover
-              ? t('gaslessBatchHintJpycRecover')
-              : useRelay || isJpyc
-                ? t('gaslessBatchHintJpycRelay')
-                : splitBreakdown
-                ? t('splitBatchHint', {
-                    count: splitBreakdown.recipients.length,
-                  })
-                : isErc20Paymaster
-                  ? t('gaslessBatchHintUsdc')
-                  : t('gaslessBatchHintJpyc')}
-        </p>
+        {!splitBlocked && (
+          <p className="mt-4 text-xs text-slate-500">
+            {isStandard
+              ? t('standardBatchHint')
+              : useRecover
+                ? t('gaslessBatchHintJpycRecover')
+                : useRelay || isJpyc
+                  ? t('gaslessBatchHintJpycRelay')
+                  : splitBreakdown
+                  ? t('splitBatchHint', {
+                      count: splitBreakdown.recipients.length,
+                    })
+                  : isErc20Paymaster
+                    ? t('gaslessBatchHintUsdc')
+                    : t('gaslessBatchHintJpyc')}
+          </p>
+        )}
         {approvalCheckUrl && (
           <p className="mt-2 text-xs">
             <a
