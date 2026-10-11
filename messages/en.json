@@ -269,6 +269,7 @@
     "entryShopBody": "Register products once and use them at the counter and for phone orders.",
     "entryCreatorTitle": "Creators",
     "entryCreatorBody": "Tips and digital sales from your profile. Products also appear in the Store.",
+    "entryAllGuides": "See all guides",
     "sellablesTitle": "What you can sell",
     "sellablesSubtitle": "Any digital goods. List from your @handle profile — automatically shown in the Store.",
     "sellablesBody": "Sell URLs (Google Drive, GitHub, …) or text like prompts and API keys as they are.",
@@ -444,7 +445,8 @@
       "title": "Guides by use case",
       "qr": "Start with a payment QR",
       "shop": "Start POS & mobile ordering",
-      "store": "Start creator features"
+      "store": "Start creator features",
+      "all": "See all guides"
     }
   },
   "QrGenerator": {
@@ -1851,6 +1853,7 @@
     "poweredByExpand": "Technical details",
     "copyright": "© {year} {company}",
     "links": {
+      "guides": "Guides",
       "terms": "Terms of Service",
       "privacy": "Privacy Policy",
       "disclaimer": "Disclaimer",

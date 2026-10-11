@@ -1,6 +1,7 @@
 // 用途別の 3 入口 (plans/site-ia-guides-ruling.md N1③)。
 //   決済QR → /guide/qr / レジ・モバイルオーダー → /guide/shop / クリエイター → /guide/store
 // 独立した節にせず「使い方」の末尾に短い行として置く (入口を 1 か所に・plans/lp-polish-2026-09.md P1)。
+// 3 タイルの下に全ガイドのハブ (/guide) へのテキストリンク (plans/guide-hub-sidebar.md PR-B)。
 
 import Link from 'next/link';
 import { getLocale, getTranslations } from 'next-intl/server';
@@ -50,6 +51,18 @@ export async function LandingEntryPoints() {
           </li>
         ))}
       </ul>
+      {/* 3 入口に無い用途 (お客様向け・AI・API 販売など) は全ガイドのハブ (/guide) から。
+          リンク名は可視テキストだけ (矢印は aria-hidden・掟 8)。min-h で tap target 24px 以上。 */}
+      <p className="mt-3 text-center">
+        <Link
+          href={`/${locale}/guide`}
+          prefetch={false}
+          className="group inline-flex min-h-[24px] items-center gap-1 text-sm font-semibold text-brand underline-offset-2 hover:underline"
+        >
+          {t('entryAllGuides')}
+          <ArrowRight aria-hidden className="h-4 w-4 shrink-0 transition-transform group-hover:translate-x-0.5" />
+        </Link>
+      </p>
     </div>
   );
 }
