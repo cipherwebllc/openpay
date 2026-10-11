@@ -607,6 +607,8 @@ describe('setup-sentry-alerts: RULES schema', () => {
     expect(byTag('billing.settle.promote-failed')).toBeUndefined();
   });
 
+  // app/lib/components/hooks の全ソースを同期で構文解析するので重い。vitest 3 以降は同期部分も testTimeout (既定 5 秒) に
+  // 数える (vitest 2 は数えていなかった)。CI (coverage 付き) では vitest 2 でも 6.6 秒かかっていた (2026-10-11 実測) ので上限を明示する。
   it('全 eventTag は app/lib/components/hooks のソースで実際に emit されている (tag タイポでアラート不発を防ぐ)', () => {
     // 過去バグ (Codex review で検出): 'billing.settle.grant' を指定したが実 emit は
     // 'billing.settle.grant-failed' で、アラートが永久に発火しなかった。第 7 回レビュー E6 では
@@ -646,7 +648,7 @@ describe('setup-sentry-alerts: RULES schema', () => {
         ).toBe(true);
       }
     }
-  });
+  }, 30_000);
 });
 
 describe('setup-sentry-alerts: emit 抽出器 (extractEmits) は lib/logger の binding だけを数える', () => {

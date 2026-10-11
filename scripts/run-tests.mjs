@@ -97,8 +97,8 @@ const args = [
   './node_modules/.bin/vitest',
   'run',
   '--pool=forks',
-  '--poolOptions.forks.minForks=1',
-  '--poolOptions.forks.maxForks=2',
+  // 並列は fork 2 本 (vitest 4 で poolOptions.forks.maxForks が廃止され maxWorkers に一本化。旧 option は起動時に CACError)。
+  '--maxWorkers=2',
   '--reporter=default',
   '--reporter=json',
   '--reporter=./scripts/lib/unhandledErrorsReporter.mjs',

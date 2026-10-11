@@ -38,9 +38,9 @@ function runOnce(attempt) {
       './node_modules/.bin/vitest',
       'run',
       // 実行並列度は既存の 1 fork を維持。Lua stack の蓄積はハーネスの EVAL 単位の隔離で解消。
+      // (vitest 4 で poolOptions.forks.maxForks が廃止され maxWorkers に一本化。)
       '--pool=forks',
-      '--poolOptions.forks.minForks=1',
-      '--poolOptions.forks.maxForks=1',
+      '--maxWorkers=1',
       '--reporter=default',
       '--reporter=json',
       // assertion の外の未処理エラー (Unhandled Rejection / Uncaught Exception) は numFailedTests に載らないので数える。

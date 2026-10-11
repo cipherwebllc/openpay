@@ -4,11 +4,13 @@
 // run-tests.mjs は vitest の終了コードではなく JSON reporter・未処理エラーの集計・この下限で合否を決める
 // (終了コードの理由を区別できないため) → 閾値割れもここの値で明示的に比べる。
 // 値の根拠は vitest.config.ts のコメント (実測 -2pt・回帰のみ検出)。
+// 2026-10-11 (vitest 5): statements 87 → 86・lines 87 → 89 (branches / functions は据え置き)。statements を下げたのは
+// 測り方の変更が理由 (coverage-v8 が AST で数えるようになり、分母が型やコメントの行を数えなくなった)。未カバーの数は減っている。
 export const COVERAGE_THRESHOLDS = Object.freeze({
-  statements: 87,
+  statements: 86,
   branches: 84,
   functions: 88,
-  lines: 87,
+  lines: 89,
 });
 
 // coverage-summary.json の本文 (読めなければ null) を下限と比べる。run-tests.mjs の判定を

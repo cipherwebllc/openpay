@@ -33,10 +33,12 @@
       "groupName": "tailwind-stack"
     },
     {
-      "description": "Vitest / testing-library は組で更新",
+      "description": "Vitest / testing-library は組で更新 (@vitest/coverage-v8 は peer で vitest と同じ版を要求し、vite は vitest 5 の peer で .npmrc の legacy-peer-deps のため直接依存にしてある)",
       "matchPackageNames": [
         "vitest",
+        "@vitest/coverage-v8",
         "@vitest/ui",
+        "vite",
         "@vitejs/plugin-react",
         "@testing-library/react",
         "@testing-library/dom",
