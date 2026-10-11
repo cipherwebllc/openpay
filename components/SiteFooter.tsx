@@ -36,7 +36,7 @@ export function SiteFooter() {
   const t = useTranslations('Footer');
   // @handle ページはクリエイターの「自分のページ」— OpenPay 側の宣伝味 (技術開示
   // details・SNS/ソース行・AI ストア導線) は世界観を削るので legal + copyright に
-  // 絞る (受取ページ磨き上げ P3・AlphaNotice の @handle 非表示と同じ判定)。
+  // 絞る (受取ページ磨き上げ P3・AlphaNotice の @handle 非表示と同じ判定)。ガイド (/guide) の導線も同じ扱い。
   // ライブラリ導線は購入者に有用なので残す。SSR/provider 無しは pathname が null
   // → フル表示 (従来挙動) でテスト互換。
   const pathname = usePathname();
@@ -57,6 +57,12 @@ export function SiteFooter() {
         className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2"
       >
         {/* 取引履歴は AppShell のメインメニューにあるため Footer からは外す。 */}
+        {/* 全ガイドのハブ (/guide) を先頭に。@handle ページでは AI ストアと同じく OpenPay 側の導線なので出さない。 */}
+        {!onHandlePage && (
+          <Link href="/guide" className="hover:text-slate-700 hover:underline" prefetch={false}>
+            {t('links.guides')}
+          </Link>
+        )}
         <Link href="/terms" className="hover:text-slate-700 hover:underline" prefetch={false}>
           {t('links.terms')}
         </Link>

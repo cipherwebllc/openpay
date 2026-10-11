@@ -76,6 +76,26 @@ describe('i18n: Landing namespace の全キー parity', () => {
   });
 });
 
+// ガイドのハブ (/guide) への入口 (フッター・/create の用途別ガイド)。Footer は全ページ共通の
+// SHARED namespace で、Create は namespace 全体の parity を持たないので、ここで個別に縛る。
+describe('i18n: Footer と Create.guideLinks の ja/en parity', () => {
+  it('ja.Footer と en.Footer の deep key 集合が一致', () => {
+    expect(deepKeys(ja.Footer).sort()).toEqual(deepKeys(en.Footer).sort());
+  });
+
+  it('ja.Create.guideLinks と en.Create.guideLinks のキー集合が一致し、値はすべて非空', () => {
+    expect(Object.keys(ja.Create.guideLinks).sort()).toEqual(
+      Object.keys(en.Create.guideLinks).sort(),
+    );
+    for (const m of [ja, en]) {
+      for (const value of Object.values(m.Create.guideLinks)) {
+        expect(typeof value).toBe('string');
+        expect(value).not.toBe('');
+      }
+    }
+  });
+});
+
 describe('i18n: smart account 互換性エラー (3 form 名前空間 × ja/en)', () => {
   // useSmartAccount の router が IncompatibleSmartAccountError を投げる時の
   // i18n key 2 種。HashPort などの MAv2 委任 EOA 対策で導入。

@@ -45,6 +45,20 @@ describe('SiteFooter', () => {
     ).toHaveAttribute('href', '/transparency');
   });
 
+  // 全ガイドのハブ (/guide) は nav の先頭。兄弟リンクと同じく locale なし href (middleware が /{locale}/guide へ)。
+  it.each([
+    ['ja', 'ガイド'],
+    ['en', 'Guides'],
+  ] as const)('%s: 先頭に全ガイドのハブ「%s」→ /guide (可視テキストが名前)', (locale, name) => {
+    renderWithIntl(<SiteFooter />, { locale });
+    const link = screen.getByRole('link', { name });
+    expect(link).toHaveAttribute('href', '/guide');
+    expect(link).not.toHaveAttribute('aria-label');
+    expect(link.textContent).toBe(name);
+    const nav = link.closest('nav')!;
+    expect(nav.querySelector('a')).toBe(link);
+  });
+
   it('事業者名と copyright を表示する', () => {
     renderWithIntl(<SiteFooter />, { locale: 'ja' });
     // copyright 行に LEGAL_ENTITY.companyName が含まれる
@@ -267,6 +281,8 @@ describe('SiteFooter — @handle compact (受取ページ磨き上げ P3)', () =
       }
       expect(screen.queryByText(/ステーブルコイン決済技術/)).toBeNull();
       expect(screen.queryByRole('link', { name: 'AIストア' })).toBeNull();
+      // ガイドのハブも OpenPay 側の導線なので出さない。
+      expect(screen.queryByRole('link', { name: 'ガイド' })).toBeNull();
     } finally {
       pathnameMock.value = null;
     }
@@ -278,6 +294,7 @@ describe('SiteFooter — @handle compact (受取ページ磨き上げ P3)', () =
       renderWithIntl(<SiteFooter />, { locale: 'ja' });
       expect(screen.getByText(/ステーブルコイン決済技術/)).toBeInTheDocument();
       expect(screen.getByRole('link', { name: 'OpenPay の YouTube' })).toBeInTheDocument();
+      expect(screen.getByRole('link', { name: 'ガイド' })).toHaveAttribute('href', '/guide');
     } finally {
       pathnameMock.value = null;
     }

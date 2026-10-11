@@ -325,7 +325,9 @@ function CreatePageBody() {
       </details>
       )}
 
-      {/* 販売ハブとしての用途別ガイド入口 (P5・plans/site-ia-guides-ruling.md N10)。 */}
+      {/* 販売ハブとしての用途別ガイド入口 (P5・plans/site-ia-guides-ruling.md N10)。
+          最後の行は全ガイドのハブ (/guide)。slug を足して組むと `/ja/guide/` と末尾に / が付くので、
+          ロケールより後ろのパスをそのまま持つ。 */}
       {tab !== 'profile' && (
         <section className="mt-10">
           <h2 className="text-sm font-semibold text-slate-500">
@@ -334,14 +336,15 @@ function CreatePageBody() {
           <ul className="mt-2 space-y-1.5">
             {(
               [
-                ['qr', 'qr'],
-                ['shop', 'shop'],
-                ['store', 'store'],
+                ['qr', '/guide/qr'],
+                ['shop', '/guide/shop'],
+                ['store', '/guide/store'],
+                ['all', '/guide'],
               ] as const
-            ).map(([key, slug]) => (
+            ).map(([key, path]) => (
               <li key={key}>
                 <Link
-                  href={`/${locale}/guide/${slug}`}
+                  href={`/${locale}${path}`}
                   prefetch={false}
                   className="text-sm font-medium text-emerald-700 underline-offset-2 hover:underline"
                 >

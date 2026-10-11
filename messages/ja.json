@@ -269,6 +269,7 @@
     "entryShopBody": "商品を一度登録すれば、店頭のレジでもスマホ注文でも使えます。",
     "entryCreatorTitle": "クリエイター",
     "entryCreatorBody": "プロフィールでチップとデジタル商品の販売。商品は Store にも並びます。",
+    "entryAllGuides": "すべてのガイドを見る",
     "sellablesTitle": "販売できるもの",
     "sellablesSubtitle": "デジタル商品なら、なんでも。@handle プロフィールから出品して、Store に自動掲載。",
     "sellablesBody": "Google ドライブや GitHub の URL、プロンプトや API キーも、そのまま売れます。",
@@ -444,7 +445,8 @@
       "title": "用途別ガイド",
       "qr": "決済QRを始める",
       "shop": "レジ・モバイルオーダーを始める",
-      "store": "クリエイター機能を始める"
+      "store": "クリエイター機能を始める",
+      "all": "すべてのガイドを見る"
     }
   },
   "QrGenerator": {
@@ -1851,6 +1853,7 @@
     "poweredByExpand": "技術詳細",
     "copyright": "© {year} {company}",
     "links": {
+      "guides": "ガイド",
       "terms": "利用規約",
       "privacy": "プライバシーポリシー",
       "disclaimer": "免責事項",
