@@ -535,16 +535,23 @@ audit-gate は `npm audit --omit=dev` = **本番依存のみ**を gate する。
 devDependencies も報告するため、本番 gate 外の dev advisory はここに裁定を記録し、
 GitHub 上の alert は本節を根拠に dismiss してよい。
 
-- **vitest CRITICAL (GHSA: Vitest UI server arbitrary file read/exec)**: 脆弱なのは
-  `@vitest/ui` の UI server が listen している時のみ。**本リポは @vitest/ui を導入して
-  おらず** (package-lock に不存在)、`vitest --ui` を実行しても server は起動できない =
-  攻撃面が存在しない。v2 系に修正版は無く fix は vitest@4 (major×2・config/API 破壊変更)。
-  → accepted。**vitest 4 移行は別タスク**として backlog (8,500+ tests の回帰確認込み)。
-- **vite HIGH/MODERATE (fs.deny Windows bypass / optimized-deps .map / launch-editor NTLM)**:
-  すべて dev server 経路。dev は macOS/Linux のみ・dev server は localhost 非公開・
-  Windows 固有条件は環境に存在しない。fix は vitest@4 連動 → 同上 backlog。
-- **esbuild MODERATE (dev server cross-origin read)**: 同じく dev server 限定・
-  localhost 非公開。fix は vite major 連動 → 同上。
+- ✅ **RESOLVED (2026-10-11): vitest / vite / esbuild / tinypool 系** — vitest 2.1.9 → 5.0.3・
+  @vitest/coverage-v8 → 5.0.3・@vitejs/plugin-react → 5.2.0・vite 5.4.21 → 7.3.6 (vitest 5 では vite が peer。
+  `.npmrc` の `legacy-peer-deps=true` では自動で入らないため devDependencies に明示)・esbuild 0.21.5 → 0.28.2
+  (推移的) に更新し、以下はすべて lockfile から消えた。root の `npm audit` は 61 → 55 件 (critical 2 → 0・
+  high 9 → 8・moderate 37 → 34)、`--omit=dev` (audit-gate の対象) は 46 件のまま。本番依存にも入る推移的な
+  パッケージで版が動いたのは、既存の range 内の 2 つだけ (es-module-lexer 2.3.1 → 2.3.2・
+  @jridgewell/sourcemap-codec 1.5.5 → 1.6.0)。
+  - tinypool CRITICAL ×2 (GHSA-5gmw-xhrv-c9v3 / GHSA-85c8-ppgw-ccpr): vitest 2 の依存。vitest 5 は使わない
+  - vitest CRITICAL (GHSA-5xrq-8626-4rwp・UI server): 旧裁定は「@vitest/ui 未導入で攻撃面なし → accepted」
+  - vitest / @vitest/mocker MODERATE (GHSA-82fw-gwwq-j7x9): `<4.1.11` が対象
+  - vite HIGH/MODERATE (GHSA-fx2h-pf6j-xcff / GHSA-4w7w-66w2-5vf9 / GHSA-v6wh-96g9-6wx3・dev server 経路):
+    旧裁定は「dev server は localhost 非公開・Windows 固有条件なし → accepted」。7.3.6 は修正済み (7.3.5+)
+  - esbuild MODERATE (GHSA-67mh-4wv8-2f99・dev server cross-origin read): `<=0.24.2` が対象
+
+  移行は 2 PR (先に vitest 2 / 5 の両方で通る形へ test と CI の判定を直し、次に版を上げた)。
+  ロールバックは版を上げた PR の revert (lockfile ごと戻る・`npm ci` で復元)。
+  vitest 5 で変わった既定のうち `clearMocks` は vitest.config.ts に理由つきで明示してある。
 - **js-yaml / fast-uri / @babel/core / postcss(root 直依存分)**: 2026-08-01 に
   semver 内で修正版へ更新済み (js-yaml 4.3.1 / fast-uri 3.1.5 / @babel/core 7.29.7 /
   postcss 8.5.25。next 内包 postcss は §7.2/7.9/7.10 の受容が継続)。

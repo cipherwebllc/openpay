@@ -80,26 +80,8 @@ describe('UnhandledErrorsReporter', () => {
     delete process.env.RUN_TESTS_UNHANDLED_OUT;
   });
 
-  it('onFinished の errors を数えて書き、evaluateUnhandled がそれを fail にする', () => {
-    dir = mkdtempSync(join(tmpdir(), 'run-tests-verdict-'));
-    const out = join(dir, 'unhandled.json');
-    process.env.RUN_TESTS_UNHANDLED_OUT = out;
-    new UnhandledErrorsReporter().onFinished([], [new Error('probe-uncaught')]);
-    const verdict = evaluateUnhandled(readFileSync(out, 'utf8'));
-    expect(verdict).toMatchObject({ ok: false, readable: true, count: 1 });
-    expect(verdict.messages[0]).toContain('probe-uncaught');
-  });
-
-  it('errors が無ければ 0 件を書く', () => {
-    dir = mkdtempSync(join(tmpdir(), 'run-tests-verdict-'));
-    const out = join(dir, 'unhandled.json');
-    process.env.RUN_TESTS_UNHANDLED_OUT = out;
-    new UnhandledErrorsReporter().onFinished([]);
-    expect(evaluateUnhandled(readFileSync(out, 'utf8')).ok).toBe(true);
-  });
-
-  // vitest 4 以降は onFinished を呼ばず onTestRunEnd(testModules, unhandledErrors, reason) を呼ぶ。
-  it('onTestRunEnd の unhandledErrors も数えて書く (vitest 4 以降)', () => {
+  // vitest 4 以降の実行の終わりの hook は onTestRunEnd(testModules, unhandledErrors, reason) (onFinished は呼ばれない)。
+  it('onTestRunEnd の unhandledErrors を数えて書き、evaluateUnhandled がそれを fail にする', () => {
     dir = mkdtempSync(join(tmpdir(), 'run-tests-verdict-'));
     const out = join(dir, 'unhandled.json');
     process.env.RUN_TESTS_UNHANDLED_OUT = out;
@@ -115,15 +97,5 @@ describe('UnhandledErrorsReporter', () => {
     process.env.RUN_TESTS_UNHANDLED_OUT = out;
     new UnhandledErrorsReporter().onTestRunEnd([]);
     expect(evaluateUnhandled(readFileSync(out, 'utf8')).ok).toBe(true);
-  });
-
-  it('両方の hook が呼ばれても、後の呼び出しが先の集計を上書きして件数を減らさない', () => {
-    dir = mkdtempSync(join(tmpdir(), 'run-tests-verdict-'));
-    const out = join(dir, 'unhandled.json');
-    process.env.RUN_TESTS_UNHANDLED_OUT = out;
-    const reporter = new UnhandledErrorsReporter();
-    reporter.onFinished([], [new Error('probe-first')]);
-    reporter.onTestRunEnd([], []);
-    expect(evaluateUnhandled(readFileSync(out, 'utf8'))).toMatchObject({ ok: false, count: 1 });
   });
 });
