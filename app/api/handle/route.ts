@@ -5,6 +5,7 @@
 // GET  /api/handle  → 自分が保有する handle を**レコード込み**で返す (編集 UI の prefill 用)
 
 import { NextResponse } from 'next/server';
+import { rejectCrossOriginWrite } from '@/lib/net/crossOriginWrite';
 import { env } from '@/lib/env';
 import { readJsonBodyCapped } from '@/lib/httpBodyCap';
 import { logger } from '@/lib/logger';
@@ -188,6 +189,8 @@ export async function GET() {
 
 export async function POST(req: Request) {
   if (!env.enableHandles) return notFound();
+  const csrf = rejectCrossOriginWrite(req, { json: true });
+  if (csrf) return csrf;
   // SIWE は誰でも無料で取れるので、書き込みごとの KV/外部 fetch をサーバに使わせる連打を IP で止める
   // (兄弟の SIWE 書き込み route と同じ形・第 7 回レビュー C9)。
   if (!(await checkClientIpBucketRateLimit(req, 'handle-write', 30, 60))) return rateLimited();

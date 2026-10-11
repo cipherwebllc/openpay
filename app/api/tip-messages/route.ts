@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { rejectCrossOriginWrite } from '@/lib/net/crossOriginWrite';
 import { requireSession } from '@/app/api/auth/siwe/_session';
 import { env } from '@/lib/env';
 import { checkClientIpBucketRateLimit } from '@/lib/net/clientRateLimit';
@@ -74,6 +75,8 @@ export async function GET(req: Request): Promise<NextResponse> {
 
 export async function DELETE(req: Request): Promise<NextResponse> {
   if (!env.enableTipMessage) return json({ error: 'not_found' }, 404);
+  const csrf = rejectCrossOriginWrite(req, { json: false });
+  if (csrf) return csrf;
 
   const limited = await rateLimitResponse(req);
   if (limited) return limited;

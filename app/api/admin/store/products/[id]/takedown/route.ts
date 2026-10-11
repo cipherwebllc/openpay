@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { rejectSiweCsrf } from '@/app/api/auth/siwe/_csrf';
+import { rejectCrossOriginWrite } from '@/lib/net/crossOriginWrite';
 import { requireSession } from '@/app/api/auth/siwe/_session';
 import { storePrivateJson } from '@/app/api/store/_shared';
 import { isAdminWallet } from '@/lib/adminAuth';
@@ -23,7 +23,7 @@ export async function POST(
   if (origin !== null && origin !== new URL(req.url).origin) {
     return storePrivateJson({ ok: false, error: 'cross_site_request' }, 403);
   }
-  const rejected = rejectSiweCsrf(req);
+  const rejected = rejectCrossOriginWrite(req, { json: true });
   if (rejected) {
     rejected.headers.set('Cache-Control', 'private, no-store');
     rejected.headers.set('Vary', 'Cookie');

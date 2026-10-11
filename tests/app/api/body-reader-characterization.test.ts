@@ -17,6 +17,8 @@
 //      readJsonBodyCapped は invalid_json (400)。purchasesBody は生 byte で測るので受理する。
 //   4. 早期 cancel: req.text() は cap を超えても最後まで読む。readJsonBodyCapped は超過時点で cancel する。
 //   5. content-type: purchasesBody だけが application/json を要求する (readJsonBodyCapped は見ない)。
+//      push/subscribe の reader 自体は見ないが、route は共通の CSRF 検査 (lib/net/crossOriginWrite) で
+//      application/json 以外を reader より前に 415 で返す (relay/jpyc/status は cookie を使わないので検査なし)。
 // 同一だった点: 上限ちょうど/+1 (素の ASCII)・空 body・body なし・読み取り中の stream エラー・
 // chunk 境界で分かれた多 byte 文字。
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -169,6 +171,8 @@ type RouteReader = {
   base: Record<string, unknown>;
   run: (spec: BodySpec) => Promise<{ status: number; body: string }>;
   responses: Record<Outcome, { status: number; body: string }>;
+  /** route が reader より前に application/json 以外を 415 で返すか (SIWE cookie の書き込み route の CSRF 検査)。 */
+  requiresJsonContentType: boolean;
 };
 
 const asResult = async (res: Response) => ({ status: res.status, body: await res.text() });
@@ -184,6 +188,7 @@ const routeReaders: RouteReader[] = [
       too_large: { status: 413, body: '{"ok":false,"error":"payload_too_large"}' },
       invalid: { status: 400, body: '{"ok":false,"error":"invalid_json"}' },
     },
+    requiresJsonContentType: true,
   },
   {
     name: 'relay/jpyc/status POST',
@@ -196,8 +201,11 @@ const routeReaders: RouteReader[] = [
       too_large: { status: 400, body: '{"ok":false,"error":"invalid_payload"}' },
       invalid: { status: 400, body: '{"ok":false,"error":"invalid_payload"}' },
     },
+    requiresJsonContentType: false,
   },
 ];
+
+const UNSUPPORTED_MEDIA_TYPE = { status: 415, body: '{"ok":false,"error":"unsupported_media_type"}' };
 
 type CaseDef = {
   name: string;
@@ -299,8 +307,12 @@ beforeEach(() => {
 
 describe.each(routeReaders)('$name の body reader', (reader) => {
   it.each(CASES)('$name', async (c) => {
-    const result = await reader.run(c.spec(reader.base, reader.cap));
-    expect(result).toEqual(reader.responses[c.text]);
+    const spec = c.spec(reader.base, reader.cap);
+    const result = await reader.run(spec);
+    const jsonType = spec.contentType === undefined || spec.contentType === 'application/json';
+    expect(result).toEqual(
+      reader.requiresJsonContentType && !jsonType ? UNSUPPORTED_MEDIA_TYPE : reader.responses[c.text],
+    );
   });
 });
 

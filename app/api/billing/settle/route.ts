@@ -5,6 +5,7 @@
 // JPYC・インボイス額以上」を照合し、成立すれば fee-current (S3) を延長する。二重付与は txHash
 // idempotency (KV nx・lock→result 昇格) で防止。billing flag OFF では無効。設計: docs/plans/merchant-gasless-fee-a1.md (S4)。
 import { NextResponse, after } from 'next/server';
+import { rejectCrossOriginWrite } from '@/lib/net/crossOriginWrite';
 import { createPublicClient, isHex, type Hex } from 'viem';
 import { requireSession } from '../../auth/siwe/_session';
 import { env } from '@/lib/env';
@@ -94,6 +95,8 @@ export async function POST(req: Request): Promise<NextResponse> {
       { status: 404 },
     );
   }
+  const csrf = rejectCrossOriginWrite(req, { json: true });
+  if (csrf) return csrf;
   if (!env.feeReceiverConfigured) {
     logger.error('billing.settle.misconfigured', {
       reason: 'fee_receiver_unset',

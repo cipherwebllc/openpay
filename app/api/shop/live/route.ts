@@ -4,6 +4,7 @@
 // flag NEXT_PUBLIC_ENABLE_SHOP_LIVE OFF で 404 (inert)。所有者不一致は 403・KV 障害は 503・競合は 409。
 // 設計: plans/restaurant-pos-roadmap.md §3-A。
 import { NextResponse } from 'next/server';
+import { rejectCrossOriginWrite } from '@/lib/net/crossOriginWrite';
 import { env } from '@/lib/env';
 import { readJsonBodyCapped } from '@/lib/httpBodyCap';
 import { requireSession } from '../../auth/siwe/_session';
@@ -48,6 +49,8 @@ export async function GET(req: Request): Promise<NextResponse> {
 
 export async function PATCH(req: Request): Promise<NextResponse> {
   if (!env.enableShopLive) return notFound();
+  const csrf = rejectCrossOriginWrite(req, { json: true });
+  if (csrf) return csrf;
   // SIWE は誰でも無料で取れるので、書き込みごとの KV/外部 fetch をサーバに使わせる連打を IP で止める
   // (兄弟の SIWE 書き込み route と同じ形・第 7 回レビュー C9)。
   if (!(await checkClientIpBucketRateLimit(req, 'shop-live-write', 30, 60))) return rateLimited();

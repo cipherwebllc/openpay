@@ -9,6 +9,7 @@
 // (from=forwarder) をパス購入と**絶対に誤認しない**。
 // core ロジック (ロック→検証→付与→昇格→収益) は lib/entitlementPayment に共有 (Pro と共通)。
 import { NextResponse } from 'next/server';
+import { rejectCrossOriginWrite } from '@/lib/net/crossOriginWrite';
 import { isHex } from 'viem';
 import { requireSession } from '../../auth/siwe/_session';
 import { env } from '@/lib/env';
@@ -33,6 +34,8 @@ export async function POST(req: Request): Promise<NextResponse> {
       { status: 404 },
     );
   }
+  const csrf = rejectCrossOriginWrite(req, { json: true });
+  if (csrf) return csrf;
   // FEE_RECEIVER 未設定なら 503 (未設定の宛先へ 100 JPYC を送らせない・settle と同型)。
   if (!env.feeReceiverConfigured) {
     logger.error('csvpass.subscribe.misconfigured', {

@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { rejectCrossOriginWrite } from '@/lib/net/crossOriginWrite';
 import { env } from '@/lib/env';
 import { licenseNftEnabled } from '@/lib/license/config';
 import { withSellerRole } from '@/lib/license/sellerRole';
@@ -109,6 +110,8 @@ export async function GET(req: Request): Promise<NextResponse> {
 
 export async function POST(req: Request): Promise<NextResponse> {
   if (!env.enableCreatorStore) return notFound();
+  const csrf = rejectCrossOriginWrite(req, { json: true });
+  if (csrf) return csrf;
   const auth = await requireStoreSeller(req, 'products-write');
   if (!auth.ok) return auth.response;
 

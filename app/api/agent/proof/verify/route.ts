@@ -1,3 +1,4 @@
+import { rejectCrossOriginWrite } from '@/lib/net/crossOriginWrite';
 import { bindAgent } from '@/lib/agent/bindings';
 import { parseAgentProof, verifyAgentProof } from '@/lib/agent/proof';
 import { purchasesBody, purchasesGate, purchasesJson, purchasesSession } from '@/lib/agent/purchasesHttp';
@@ -8,6 +9,8 @@ export const dynamic = 'force-dynamic';
 export async function POST(req: Request) {
   const gated = await purchasesGate(req, 'verify');
   if (gated) return gated;
+  const csrf = rejectCrossOriginWrite(req, { json: true });
+  if (csrf) return csrf;
   const body = await purchasesBody(req);
   if (!body || Object.keys(body).join(',') !== 'proof' || !parseAgentProof(body.proof)) return purchasesJson({ reason: 'malformed' }, 400);
   const session = await purchasesSession();

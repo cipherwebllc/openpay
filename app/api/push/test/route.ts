@@ -3,6 +3,7 @@
 // - 1 分 1 回の rate limit (coalescing は経由しない直接送信のため、ここで抑制する)
 // - flag OFF は 404 (購読 API と同じ inert 方針)
 import { NextResponse } from 'next/server';
+import { rejectCrossOriginWrite } from '@/lib/net/crossOriginWrite';
 import { requireSession } from '@/app/api/auth/siwe/_session';
 import { env } from '@/lib/env';
 import { checkClientIpPrefixRateLimit } from '@/lib/net/clientRateLimit';
@@ -15,6 +16,8 @@ export async function POST(req: Request): Promise<NextResponse> {
   if (!env.enablePushNotify) {
     return NextResponse.json({ error: 'not_found' }, { status: 404 });
   }
+  const csrf = rejectCrossOriginWrite(req, { json: false });
+  if (csrf) return csrf;
 
   const session = await requireSession();
   if (!session.ok) return session.response;

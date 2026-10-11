@@ -6,6 +6,7 @@
 // forbidden で弾く)。特に payTo (送金先) を他人に書き換えさせない。flag OFF は 404。
 
 import { NextResponse } from 'next/server';
+import { rejectCrossOriginWrite } from '@/lib/net/crossOriginWrite';
 import { env } from '@/lib/env';
 import { requireSession } from '@/app/api/auth/siwe/_session';
 import { readJsonBodyCapped } from '@/lib/httpBodyCap';
@@ -42,6 +43,8 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> },
 ): Promise<NextResponse> {
   if (!env.enableX402Facilitator) return notFound();
+  const csrf = rejectCrossOriginWrite(req, { json: true });
+  if (csrf) return csrf;
   if (
     !(await checkIpRateLimit(
       'x402-resource-write',
@@ -134,6 +137,8 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> },
 ): Promise<NextResponse> {
   if (!env.enableX402Facilitator) return notFound();
+  const csrf = rejectCrossOriginWrite(req, { json: false });
+  if (csrf) return csrf;
   // POST/PATCH と同じ IP limiter (取り下げの連打で KV を使わせない・第 7 回レビュー X1)。
   if (
     !(await checkIpRateLimit(

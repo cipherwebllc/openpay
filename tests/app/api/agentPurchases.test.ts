@@ -167,8 +167,12 @@ describe('Agent purchases routes', () => {
   });
 
   it('rejects non-JSON and oversized JSON even without Content-Length', async () => {
+    // 非 JSON は共通の CSRF 検査 (lib/net/crossOriginWrite) が本文を読む前に 415 で返す。
+    const nonJson = await verifyPOST(post('proof/verify', { proof: SHAPED_PROOF }, { 'content-type': 'text/plain' }));
+    expect(nonJson.status).toBe(415);
+    expect(await nonJson.json()).toEqual({ ok: false, error: 'unsupported_media_type' });
+    noStore(nonJson);
     for (const request of [
-      post('proof/verify', { proof: SHAPED_PROOF }, { 'content-type': 'text/plain' }),
       post('proof/verify', { proof: 'a'.repeat(3000) }),
       new Request('https://test.local/api/agent/proof/verify', { method: 'POST', headers: POST_HEADERS, body: '{' }),
     ]) {

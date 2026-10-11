@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { rejectCrossOriginWrite } from '@/lib/net/crossOriginWrite';
 import { env } from '@/lib/env';
 import { licenseVisible, licenseSellerAllowed } from '@/lib/license/config';
 import { withSellerRole } from '@/lib/license/sellerRole';
@@ -195,6 +196,8 @@ export async function PATCH(
   { params }: RouteContext,
 ): Promise<NextResponse> {
   if (!env.enableCreatorStore) return notFound();
+  const csrf = rejectCrossOriginWrite(req, { json: true });
+  if (csrf) return csrf;
   const auth = await requireStoreSeller(req, 'products-write');
   if (!auth.ok) return auth.response;
   const { id } = await params;

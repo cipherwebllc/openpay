@@ -10,6 +10,7 @@
 // アラート化**・未設定なら console のみ)。400 (invalid_json/invalid_op/invalid_token) は client error ゆえ
 // 意図的に無ログ (scanner/abuse でのノイズを避ける)。
 import { NextResponse } from 'next/server';
+import { rejectCrossOriginWrite } from '@/lib/net/crossOriginWrite';
 import { env } from '@/lib/env';
 import { kvLrange, kvEval, isKvConfigured } from '@/lib/kv';
 import {
@@ -75,6 +76,8 @@ const FEED_MAX_RETRY = 3;
 
 export async function POST(req: Request): Promise<NextResponse> {
   if (!env.enableOrderRelay) return notFound();
+  const csrf = rejectCrossOriginWrite(req, { json: true });
+  if (csrf) return csrf;
   // KV 検査を認可より前に (トークン経路の resolveMerchant が KV を参照するため)。
   if (!isKvConfigured()) {
     logger.warn('order.feed.kv_unavailable', { op: 'post' }); // KV env 欠落デプロイを無音にしない

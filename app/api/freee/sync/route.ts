@@ -2,6 +2,7 @@
 // クライアントが income-sale entries を送る → サーバで advisory filter + 円換算 + 冪等 createDeal。
 // 冪等性 (SET NX claim) により再クリックしても取引を重複作成しない。
 import { NextResponse } from 'next/server';
+import { rejectCrossOriginWrite } from '@/lib/net/crossOriginWrite';
 import type { HistoryEntry } from '@/lib/history';
 import { freeeEnv, createDeal } from '@/lib/freee';
 import { runFreeeSync } from '@/lib/freeeSync';
@@ -34,6 +35,8 @@ export async function POST(req: Request): Promise<NextResponse> {
   if (!appEnv.enableFreeeSync) {
     return NextResponse.json({ ok: false, error: 'freee_disabled' }, { status: 503 });
   }
+  const csrf = rejectCrossOriginWrite(req, { json: true });
+  if (csrf) return csrf;
   const session = await requireSession();
   if (!session.ok) return session.response;
 
