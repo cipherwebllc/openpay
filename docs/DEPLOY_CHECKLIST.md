@@ -548,10 +548,11 @@ GitHub 上の alert は本節を根拠に dismiss してよい。
 - **js-yaml / fast-uri / @babel/core / postcss(root 直依存分)**: 2026-08-01 に
   semver 内で修正版へ更新済み (js-yaml 4.3.1 / fast-uri 3.1.5 / @babel/core 7.29.7 /
   postcss 8.5.25。next 内包 postcss は §7.2/7.9/7.10 の受容が継続)。
-- **x402-mcp (公開パッケージ)**: @modelcontextprotocol/sdk 1.30.0 (DNS rebinding 既定
-  有効化・shared-transport leak 修正) / @hono/node-server 2.0.12 (SDK の宣言 range 内)
-  へ更新済み。stdio transport 運用のため旧版でも実害経路は薄いが、公開物のため更新を
-  優先した。**npm publish は user 承認後** (§14 の公開手順)。
+- **x402-mcp (公開パッケージ)**: @modelcontextprotocol/sdk 1.32.0 (GHSA-6qxp-vccf-f47h は
+  1.31.0 で修正・宣言 range も `^1.32.0`) と SDK 経由の推移依存 (hono 4.13.12 / fast-uri 3.1.8 /
+  ip-address 10.7.3 / qs 6.16.0 / proxy-addr 2.0.8) へ更新済み (2026-10-11・root の devDependency
+  の SDK も同じ版)。stdio transport 運用で HTTP 系 (express / hono) は実行経路に乗らないため
+  旧版でも実害経路は薄いが、公開物のため更新を優先した。**npm publish は user 承認後** (§14 の公開手順)。
 
 ### 7.12 MODERATE: `decode-uri-component` (GHSA-vcc3-ghjq-m6fr)
 
