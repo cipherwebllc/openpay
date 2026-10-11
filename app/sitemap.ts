@@ -3,6 +3,7 @@
 // 動的決済ページ・admin・API は載せない)。@handle はユーザ生成のため対象外。
 import type { MetadataRoute } from 'next';
 import { LOCALES } from '@/i18n';
+import { GUIDE_SLUGS } from '@/lib/guideNav';
 import { LICENSE_STANDARD_TERMS } from '@/lib/license/standardTerms';
 
 const SITE_URL = 'https://open-pay.jp';
@@ -21,16 +22,9 @@ const PUBLIC_ROUTES = [
   '/directory',
   '/news',
   '/transparency',
-  '/guide/start',
-  '/guide/image-url',
-  '/guide/pos',
-  '/guide/qr',
-  '/guide/shop',
-  '/guide/agent',
-  '/guide/mobile-order',
-  '/guide/ai-pay',
-  '/guide/sell',
-  '/guide/store',
+  '/guide',
+  // ガイドは目次と同じ一覧から作る (ガイドを足したときの載せ忘れを防ぐ)。
+  ...GUIDE_SLUGS.map((slug) => `/guide/${slug}` as const),
 ] as const;
 
 // 法務ページ。検索価値は低いが「サービス名 + 特商法/利用規約」で調べる

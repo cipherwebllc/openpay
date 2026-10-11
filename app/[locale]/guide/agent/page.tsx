@@ -12,6 +12,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { setRequestLocale } from 'next-intl/server';
 import { AppShell } from '@/components/AppShell';
+import { GuideFrame } from '@/components/guide/GuideFrame';
 import {
   BulletList,
   Section,
@@ -45,6 +46,7 @@ export default async function GuideAgentPage({
 
   return (
     <AppShell>
+      <GuideFrame locale={locale} current="agent">
       <article className="mx-auto max-w-3xl">
         <Link
           href={`/${locale}${c.backLink.href}`}
@@ -209,6 +211,7 @@ export default async function GuideAgentPage({
           </Link>
         </section>
       </article>
+      </GuideFrame>
     </AppShell>
   );
 }

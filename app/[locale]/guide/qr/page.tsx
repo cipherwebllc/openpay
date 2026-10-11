@@ -13,6 +13,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { getTranslations, setRequestLocale } from 'next-intl/server';
 import { AppShell } from '@/components/AppShell';
+import { GuideFrame } from '@/components/guide/GuideFrame';
 import { Section } from '@/components/guide/PosGuidePieces';
 import { GuideVideo } from '@/components/guide/GuideVideo';
 import { HOWTO_VIDEO_UI, howtoVideoFor } from '@/lib/howtoVideos';
@@ -62,6 +63,7 @@ export default async function GuideQrPage({
 
   return (
     <AppShell>
+      <GuideFrame locale={locale} current="qr">
       <article className="mx-auto max-w-3xl">
         <Link
           href={`/${locale}`}
@@ -205,6 +207,7 @@ export default async function GuideQrPage({
           </Link>
         </section>
       </article>
+      </GuideFrame>
     </AppShell>
   );
 }

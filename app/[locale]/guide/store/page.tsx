@@ -10,6 +10,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { getTranslations, setRequestLocale } from 'next-intl/server';
 import { AppShell } from '@/components/AppShell';
+import { GuideFrame } from '@/components/guide/GuideFrame';
 import { BulletList, Section } from '@/components/guide/PosGuidePieces';
 import { GuideVideo } from '@/components/guide/GuideVideo';
 import { HOWTO_VIDEO_UI, howtoVideoFor } from '@/lib/howtoVideos';
@@ -43,6 +44,7 @@ export default async function GuideStorePage({
 
   return (
     <AppShell>
+      <GuideFrame locale={locale} current="store">
       <article className="mx-auto max-w-3xl">
         <Link
           href={`/${locale}`}
@@ -371,6 +373,7 @@ export default async function GuideStorePage({
           {c.disclaimer}
         </p>
       </article>
+      </GuideFrame>
     </AppShell>
   );
 }

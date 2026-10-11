@@ -11,6 +11,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { setRequestLocale } from 'next-intl/server';
 import { AppShell } from '@/components/AppShell';
+import { GuideFrame } from '@/components/guide/GuideFrame';
 import { BulletList, Section } from '@/components/guide/PosGuidePieces';
 import { StepShot } from '@/components/guide/MobileOrderGuidePieces';
 import {
@@ -39,6 +40,7 @@ export default async function GuideMobileOrderPage({
 
   return (
     <AppShell>
+      <GuideFrame locale={locale} current="mobile-order">
       <article className="mx-auto max-w-3xl">
         <Link
           href={`/${locale}`}
@@ -109,6 +111,7 @@ export default async function GuideMobileOrderPage({
           </p>
         </Section>
       </article>
+      </GuideFrame>
     </AppShell>
   );
 }
