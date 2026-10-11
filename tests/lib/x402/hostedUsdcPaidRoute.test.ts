@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { after } from 'next/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { getAddress, type Hex } from 'viem';
+import { getAddress, serializeSignature, type Hex } from 'viem';
 import { paidRouteWire, v2PaymentHeader } from '../../helpers/paidRouteWire';
 
 // 署名 fingerprint と authorizationHash は **入力に依存する** 形で fake する (定数を返すと
@@ -34,6 +34,7 @@ const mocks = vi.hoisted(() => ({
   recordPurchase: vi.fn(),
   metric: vi.fn(),
   notify: vi.fn(),
+  warn: vi.fn(),
 }));
 
 vi.mock('server-only', () => ({}));
@@ -53,8 +54,13 @@ vi.mock('@/lib/x402/hostedStore', () => ({
   hostedPurchaseMetadata: mocks.metadata,
   sellerDisclosureComplete: mocks.disclosure,
 }));
-vi.mock('@/lib/x402/paymentRedelivery', () => ({
+// 再送の窓 (PAYMENT_REDELIVERY_TTL_SEC) は本物を使い、署名の指紋だけ入力依存の fake にする。
+vi.mock('@/lib/x402/paymentRedelivery', async (original) => ({
+  ...await original<typeof import('@/lib/x402/paymentRedelivery')>(),
   paymentSignatureFingerprint: (signature: unknown) => fakeFingerprint(signature),
+}));
+vi.mock('@/lib/logger', () => ({
+  logger: { debug: vi.fn(), info: vi.fn(), warn: mocks.warn, error: vi.fn() },
 }));
 vi.mock('@/lib/x402/purchaseIntent', () => ({
   checkPurchaseQuoteRateLimit: mocks.quoteLimit,
@@ -99,6 +105,7 @@ vi.mock('@/lib/x402/cdpJwt', () => ({
 }));
 
 import { handleHostedUsdcPaidGet } from '@/lib/x402/hostedUsdcPaidRoute';
+import { HOSTED_REDELIVERY_WINDOW_MS } from '@/lib/x402/hostedRedelivery';
 
 const NOW = 1_900_000_000_000;
 const RESOURCE_ID = `h_${'1'.repeat(32)}`;
@@ -598,7 +605,8 @@ describe('hosted USDC paid route', () => {
   describe('B4: 期限切れ後の完全一致 redelivery', () => {
     const EXPIRED_NOW = NOW + 200_000; // fxQuoteExpiresAt (NOW+180s) を過ぎている
 
-    it('settled + FX quote 期限切れでも content を返す (恒久 entitlement)', async () => {
+    // 本文を返すのは確定から 30 分以内 (窓の外は下の「確定後の署名ヘッダー再送」で固定する)。
+    it('settled + FX quote 期限切れでも、確定から 30 分以内なら content を返す', async () => {
       vi.spyOn(Date, 'now').mockReturnValue(EXPIRED_NOW);
       mocks.findIntent.mockResolvedValue(intent('settled'));
       const response = await handleHostedUsdcPaidGet(
@@ -781,6 +789,157 @@ describe('hosted USDC paid route', () => {
   });
 });
 
+// 確定後の署名ヘッダー再送は確定 (settledAt) から 30 分まで (JPYC と同じ)。一致に要る値は
+// Base の USDC transferWithAuthorization の calldata から組み立てられるため。
+describe('確定後の署名ヘッダー再送は確定から 30 分まで (USDC)', () => {
+  const SETTLED_AT = NOW + 3_000; // intent('settled').settledAt
+  const MINUTE = 60_000;
+  const resend = (header = paymentHeader()) =>
+    handleHostedUsdcPaidGet(request({ 'X-PAYMENT': header }), RESOURCE_ID, PAYER);
+
+  function settledSignedBy(signature: string, settledAt = SETTLED_AT) {
+    const base = intent('settled') as ReturnType<typeof intent> & { claim: Record<string, string> };
+    // key 順は保存済み claim のまま (fakeAuthHash は JSON.stringify 依存)。
+    const claim = { ...base.claim, signatureFingerprint: fakeFingerprint(signature) };
+    return { ...base, claim, authorizationHash: fakeAuthHash(claim), settledAt };
+  }
+
+  beforeEach(() => {
+    mocks.findIntent.mockResolvedValue(intent('settled'));
+  });
+
+  it.each([
+    ['確定の直後', 0],
+    ['29 分後', 29 * MINUTE],
+    ['30 分の 1ms 前', HOSTED_REDELIVERY_WINDOW_MS - 1],
+  ])('%s の再送は従来どおり本文を返し、facilitator を呼ばない', async (_label, elapsed) => {
+    vi.spyOn(Date, 'now').mockReturnValue(SETTLED_AT + elapsed);
+    const response = await resend();
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true, state: 'settled', value: 'paid content', txHash: TX_HASH, payment: paymentSnapshot,
+    });
+    expect(response.headers.has('PAYMENT-RESPONSE')).toBe(true);
+    expect(mocks.postFacilitator).not.toHaveBeenCalled();
+    expect(mocks.warn).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['ちょうど 30 分', HOSTED_REDELIVERY_WINDOW_MS],
+    ['31 分後', 31 * MINUTE],
+    ['1 年後', 365 * 24 * 60 * MINUTE],
+  ])('%s の再送は 409 で本文を返さず、購入の証拠と library を案内する', async (_label, elapsed) => {
+    vi.spyOn(Date, 'now').mockReturnValue(SETTLED_AT + elapsed);
+    const response = await resend();
+    expect(response.status).toBe(409);
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    const body = await response.json();
+    expect(body).toEqual({
+      ok: false,
+      error: 'purchase_redelivery_expired',
+      state: 'settled',
+      resourceId: RESOURCE_ID,
+      txHash: TX_HASH,
+      network: 'eip155:8453',
+      library: '/store/library',
+      contentApi: `/api/store/content/${RESOURCE_ID}`,
+      message: expect.stringContaining('within 30 minutes of settlement'),
+      messageJa: expect.stringContaining('確定から 30 分以内'),
+    });
+    expect(body).not.toHaveProperty('value');
+    expect(mocks.getContent).not.toHaveBeenCalled();
+    expect(response.headers.has('PAYMENT-RESPONSE')).toBe(false);
+    expect(response.headers.has('X-PAYMENT-RESPONSE')).toBe(false);
+    expect(mocks.postFacilitator).not.toHaveBeenCalled();
+    expect(mocks.warn).toHaveBeenCalledTimes(1);
+    expect(mocks.warn).toHaveBeenCalledWith('x402.hosted.redelivery_expired', {
+      rail: 'usdc', resourceId: RESOURCE_ID, ageSec: Math.floor(elapsed / 1_000),
+    });
+  });
+
+  it('transferWithAuthorization の calldata だけから組み立てたヘッダーでも、30 分を過ぎた他人には本文を返さない', async () => {
+    const r = `0x${'4d'.repeat(32)}` as Hex;
+    const s = `0x${'2c'.repeat(32)}` as Hex;
+    const buyerSignature = `${r}${s.slice(2)}1b`;
+    const settled = settledSignedBy(buyerSignature);
+    mocks.findIntent.mockResolvedValue(settled);
+    mocks.readAccess.mockResolvedValue({ ok: true, intent: settled, ownership: {}, purchase: { payment: paymentSnapshot } });
+
+    // 他人が見るのは transferWithAuthorization(from,to,value,validAfter,validBefore,nonce,v,r,s) の calldata だけ。
+    const calldata = {
+      from: PAYER.toLowerCase(),
+      to: SELLER.toLowerCase(),
+      value: 2_000_000n,
+      validAfter: 0n,
+      validBefore: BigInt(Math.floor((NOW + 180_000) / 1_000)),
+      nonce: NONCE,
+      v: 27,
+      r,
+      s,
+    };
+    const rebuild = (signature: string) => Buffer.from(JSON.stringify({
+      x402Version: 1,
+      scheme: 'exact',
+      network: 'base',
+      payload: {
+        signature,
+        authorization: {
+          from: getAddress(calldata.from),
+          to: getAddress(calldata.to),
+          value: calldata.value.toString(),
+          validAfter: calldata.validAfter.toString(),
+          validBefore: calldata.validBefore.toString(),
+          nonce: calldata.nonce,
+        },
+      },
+    }), 'utf8').toString('base64');
+    const rebuiltSignature = serializeSignature({ r: calldata.r, s: calldata.s, v: BigInt(calldata.v) });
+    // 前提: 組み立てた署名は買い手の署名と同じ (server は買い手の再試行と区別できない)。
+    expect(rebuiltSignature).toBe(buyerSignature);
+
+    vi.spyOn(Date, 'now').mockReturnValue(SETTLED_AT + 29 * MINUTE);
+    expect((await resend(rebuild(rebuiltSignature))).status).toBe(200);
+
+    vi.spyOn(Date, 'now').mockReturnValue(SETTLED_AT + 31 * MINUTE);
+    const late = await resend(rebuild(rebuiltSignature));
+    expect(late.status).toBe(409);
+    const text = await late.text();
+    expect(text).not.toContain('paid content');
+    expect(JSON.parse(text)).toMatchObject({ error: 'purchase_redelivery_expired', txHash: TX_HASH });
+
+    // 完全一致の要求は変わらない: v だけ変えた署名は窓の中でも authorization_conflict。
+    vi.spyOn(Date, 'now').mockReturnValue(SETTLED_AT + MINUTE);
+    const conflict = await resend(rebuild(`${r}${s.slice(2)}1c`));
+    expect(conflict.status).toBe(409);
+    expect(await conflict.json()).toEqual({ ok: false, error: 'authorization_conflict' });
+
+    expect(mocks.getContent).toHaveBeenCalledTimes(1);
+    expect(mocks.postFacilitator).not.toHaveBeenCalled();
+  });
+
+  it('初回の購入 (この request 自身が settle した応答) は settledAt に関係なく本文を返す', async () => {
+    // finalize / read-back が古い settledAt を返しても (別 worker の確定等)、この request の settle 成功は窓の外。
+    const stale = { ...intent('settled'), settledAt: NOW - 2 * 60 * MINUTE };
+    mocks.findIntent.mockResolvedValue(intent());
+    mocks.finalize.mockResolvedValue({ ok: true, kind: 'finalized', intent: stale, ownership: {}, purchase: { payment: paymentSnapshot } });
+    mocks.readAccess.mockResolvedValue({ ok: true, intent: stale, ownership: {}, purchase: { payment: paymentSnapshot } });
+    const response = await resend();
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ ok: true, value: 'paid content', txHash: TX_HASH });
+    expect(response.headers.has('PAYMENT-RESPONSE')).toBe(true);
+    expect(mocks.postFacilitator.mock.calls.map(([path]) => path)).toEqual(['/verify', '/settle']);
+    expect(mocks.warn).not.toHaveBeenCalled();
+  });
+
+  it.each(['settling', 'indeterminate'] as const)('%s のままの再試行は時間に関係なく従来どおり 202 pending', async (state) => {
+    vi.spyOn(Date, 'now').mockReturnValue(SETTLED_AT + 3 * 60 * MINUTE);
+    mocks.findIntent.mockResolvedValue(intent(state));
+    const response = await resend();
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toEqual({ ok: true, state: 'pending' });
+    expect(mocks.warn).not.toHaveBeenCalled();
+  });
+});
 
 describe('R2 hosted USDC response pinning', () => {
   beforeEach(() => {
