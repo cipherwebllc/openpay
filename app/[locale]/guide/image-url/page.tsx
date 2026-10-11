@@ -9,6 +9,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { setRequestLocale } from 'next-intl/server';
 import { AppShell } from '@/components/AppShell';
+import { GuideFrame } from '@/components/guide/GuideFrame';
 import { Section } from '@/components/guide/PosGuidePieces';
 import { imageGuideContentFor, imageGuideMetadata } from '@/lib/imageGuide';
 
@@ -57,6 +58,7 @@ export default async function GuideImageUrlPage({
 
   return (
     <AppShell>
+      <GuideFrame locale={locale} current="image-url">
       <article className="mx-auto max-w-3xl">
         <Link
           href={`/${locale}`}
@@ -167,6 +169,7 @@ export default async function GuideImageUrlPage({
           </ul>
         </Section>
       </article>
+      </GuideFrame>
     </AppShell>
   );
 }

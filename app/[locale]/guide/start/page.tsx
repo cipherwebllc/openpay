@@ -12,6 +12,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { getTranslations, setRequestLocale } from 'next-intl/server';
 import { AppShell } from '@/components/AppShell';
+import { GuideFrame } from '@/components/guide/GuideFrame';
 import { GuideFigure, Section } from '@/components/guide/PosGuidePieces';
 import {
   startGuideContentFor,
@@ -129,6 +130,7 @@ export default async function GuideStartPage({
 
   return (
     <AppShell>
+      <GuideFrame locale={locale} current="start">
       <article className="mx-auto max-w-3xl">
         <Link
           href={`/${locale}`}
@@ -303,6 +305,7 @@ export default async function GuideStartPage({
           </Link>
         </section>
       </article>
+      </GuideFrame>
     </AppShell>
   );
 }

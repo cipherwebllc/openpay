@@ -10,6 +10,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { setRequestLocale } from 'next-intl/server';
 import { AppShell } from '@/components/AppShell';
+import { GuideFrame } from '@/components/guide/GuideFrame';
 import {
   BulletList,
   GuideFigure,
@@ -39,6 +40,7 @@ export default async function GuidePosPage({
 
   return (
     <AppShell>
+      <GuideFrame locale={locale} current="pos">
       <article className="mx-auto max-w-3xl">
         <Link
           href={`/${locale}`}
@@ -295,6 +297,7 @@ export default async function GuidePosPage({
           </ul>
         </section>
       </article>
+      </GuideFrame>
     </AppShell>
   );
 }
