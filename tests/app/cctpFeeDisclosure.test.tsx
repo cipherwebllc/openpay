@@ -166,6 +166,31 @@ describe('② 開示の各面', () => {
     );
   });
 
+  // 2026-10-12 (user 承認): お店がクロスチェーン受取を選ぶトグルの説明から「自動変換」をなくす (交換業と誤読されうる)。
+  // Arc 宛ては forwarding で支払う側が転送手数料を上乗せするので、Arc を選んだときだけ別の文 (…Arc) を出す。
+  it('クロスチェーン受取のトグルの説明 (決済QR・チップ) は承認済みの文で、変換の語を使わない', () => {
+    const expected = {
+      ja: {
+        base: '他のチェーンの USDC も、Circle の CCTP V2 でこのチェーンの USDC として受け取れます（Circle の転送手数料が受取額から差し引かれます）。',
+        arc: '他のチェーンの USDC も、Circle の CCTP V2 でこのチェーンの USDC として受け取れます（Arc 宛ては、Circle の転送手数料を支払う側が上乗せして負担します）。',
+      },
+      en: {
+        base: "You can also receive USDC sent from other chains as USDC on this chain via Circle CCTP V2 (Circle's transfer fee is deducted from the amount you receive).",
+        arc: "You can also receive USDC sent from other chains as USDC on this chain via Circle CCTP V2 (for Arc, the sender pays Circle's transfer fee on top).",
+      },
+    } as const;
+    for (const locale of ['ja', 'en'] as const) {
+      for (const ns of ['QrGenerator', 'TipEmbedGenerator'] as const) {
+        const m = MESSAGES[locale][ns];
+        expect(m.crossChainToggleDescription, `${locale}.${ns}`).toBe(expected[locale].base);
+        expect(m.crossChainToggleDescriptionArc, `${locale}.${ns}`).toBe(expected[locale].arc);
+        for (const text of [m.crossChainToggleDescription, m.crossChainToggleDescriptionArc]) {
+          expect(text).not.toMatch(/変換|convert|auto-rout/i);
+        }
+      }
+    }
+  });
+
   it('docs/FEATURES.md の cross-chain の説明も同じ上限', () => {
     const features = readFileSync(join(process.cwd(), 'docs', 'FEATURES.md'), 'utf8');
     expect(features).toContain(

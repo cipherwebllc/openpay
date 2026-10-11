@@ -607,7 +607,7 @@ export function TipEmbedGenerator() {
                         {t('crossChainToggleLabel')}
                       </span>
                       <span className="block text-slate-500">
-                        {t('crossChainToggleDescription')}
+                        {t(settings.chain === 'arc' ? 'crossChainToggleDescriptionArc' : 'crossChainToggleDescription')}
                       </span>
                     </span>
                   </label>
@@ -695,7 +695,7 @@ export function TipEmbedGenerator() {
                     {t('crossChainToggleLabel')}
                   </span>
                   <span className="block text-slate-500">
-                    {t('crossChainToggleDescription')}
+                    {t(settings.chain === 'arc' ? 'crossChainToggleDescriptionArc' : 'crossChainToggleDescription')}
                   </span>
                 </span>
               </label>

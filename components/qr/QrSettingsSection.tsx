@@ -258,7 +258,8 @@ export function QrSettingsSection({
                 {t('crossChainToggleLabel')}
               </span>
               <span className="block text-slate-500">
-                {t('crossChainToggleDescription')}
+                {/* Arc 宛ては forwarding で支払う側が転送手数料を上乗せ、ほかは受取額から差し引かれる。 */}
+                {t(settings.chain === 'arc' ? 'crossChainToggleDescriptionArc' : 'crossChainToggleDescription')}
               </span>
             </span>
           </label>

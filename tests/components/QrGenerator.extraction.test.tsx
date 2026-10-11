@@ -365,6 +365,8 @@ describe('R11b: generated payment URL fixtures', () => {
 // 2026-10 磨き上げ P2: 画面の作りを意図して変えた (①②③ と「高度な設定」→ 会計のカード + お店の設定シート・PC の会計パネル・
 // 常に出す下部バー)。節の名前も中身で付け直したので、全シナリオを記録し直した (決済 URL のバイト一致は上の fixture が別に固定)。
 // 値引き (plans/discount-common.md PR2): 金額ありの節に「＋ 値引きを追加」の 1 行。金額欄を出す節の amount/full だけ更新。
+// 2026-10-12: クロスチェーン受取のトグルの説明から「自動変換」をなくし、転送手数料の負担を書いた (文言だけ)。
+// トグルを出す節 (usdc/advanced-crosschain・standard/advanced) の sheet/full だけ更新。
 const DOM_BASELINE: Record<string, string> = {
   'fresh-ja/empty':
     'shape=2/3/3/0 offline=77d610789dd9 grid=bf14446808c6 left=f91415023c7f amount=2e34e3aa9dfa receiver=13ed1f2ca0c1 accounting=855d11756642 preview=1a4e0aab7a49 bar=9491363e27ea full=bf1ffeb7b1d5',
@@ -403,7 +405,7 @@ const DOM_BASELINE: Record<string, string> = {
   'usdc/amount-fiat':
     'shape=2/3/2/0 offline=77d610789dd9 grid=bf14446808c6 left=f91415023c7f amount=823d98fae38c accounting=855d11756642 preview=934ceead99e8 bar=7309dd8672ad full=e8f3246aa75d',
   'usdc/advanced-crosschain':
-    'shape=2/4/2/0 offline=77d610789dd9 grid=bf14446808c6 left=f91415023c7f amount=823d98fae38c accounting=855d11756642 preview=934ceead99e8 sheet=cda92cb3c3fa bar=7309dd8672ad full=dc245bde3a98',
+    'shape=2/4/2/0 offline=77d610789dd9 grid=bf14446808c6 left=f91415023c7f amount=823d98fae38c accounting=855d11756642 preview=934ceead99e8 sheet=46c5f730444d bar=7309dd8672ad full=72f4dd8e7d28',
   'usdc/fx-applied':
     'shape=2/4/2/0 offline=77d610789dd9 grid=bf14446808c6 left=f91415023c7f amount=0606daceaa43 accounting=855d11756642 preview=1f554979d6b2 sheet=0aadf54ecd13 bar=9297eecd7c80 full=f57d79ee4fa2',
   'usdc/fx-modal':
@@ -413,7 +415,7 @@ const DOM_BASELINE: Record<string, string> = {
   'standard/closed':
     'shape=2/3/2/0 offline=77d610789dd9 grid=bf14446808c6 left=f91415023c7f amount=2c3e3cbb7f40 accounting=855d11756642 preview=4b4a106c5654 bar=75d49299c4ea full=dc64eb0dce87',
   'standard/advanced':
-    'shape=2/4/2/0 offline=77d610789dd9 grid=bf14446808c6 left=f91415023c7f amount=2c3e3cbb7f40 accounting=855d11756642 preview=4b4a106c5654 sheet=fc8d703c8b68 bar=75d49299c4ea full=15cee28f98a8',
+    'shape=2/4/2/0 offline=77d610789dd9 grid=bf14446808c6 left=f91415023c7f amount=2c3e3cbb7f40 accounting=855d11756642 preview=4b4a106c5654 sheet=1d59b71a96df bar=75d49299c4ea full=2bfe97af2de3',
   'standard/modal-eip681':
     'shape=2/4/3/0 offline=77d610789dd9 grid=bf14446808c6 left=f91415023c7f amount=2c3e3cbb7f40 accounting=855d11756642 left2=f0506b8ca563 preview=4b4a106c5654 modal=d2f3d43f1049 bar=75d49299c4ea full=e9525c17c21a',
   'recover/closed':
