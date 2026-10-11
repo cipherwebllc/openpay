@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { rejectCrossOriginWrite } from '@/lib/net/crossOriginWrite';
 import { requireSession } from '@/app/api/auth/siwe/_session';
 import { env } from '@/lib/env';
 import { isAllowedPushEndpoint } from '@/lib/push/endpoints';
@@ -53,6 +54,8 @@ export async function POST(req: Request): Promise<NextResponse> {
   if (!env.enablePushNotify) {
     return NextResponse.json({ error: 'not_found' }, { status: 404 });
   }
+  const csrf = rejectCrossOriginWrite(req, { json: true });
+  if (csrf) return csrf;
   if (!env.pushVapidPublicKey) {
     return NextResponse.json({ ok: false, error: 'push_misconfigured' }, { status: 503 });
   }
@@ -95,6 +98,8 @@ export async function DELETE(req: Request): Promise<NextResponse> {
   if (!env.enablePushNotify) {
     return NextResponse.json({ error: 'not_found' }, { status: 404 });
   }
+  const csrf = rejectCrossOriginWrite(req, { json: true });
+  if (csrf) return csrf;
 
   const session = await requireSession();
   if (!session.ok) return session.response;

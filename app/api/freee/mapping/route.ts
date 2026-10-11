@@ -3,6 +3,7 @@
 //   POST : 店主が選んだ accountItemId / taxCode を保存。
 // いずれも SIWE 必須 + freee 連携済が前提。
 import { NextResponse } from 'next/server';
+import { rejectCrossOriginWrite } from '@/lib/net/crossOriginWrite';
 import {
   freeeEnv,
   getAccountItems,
@@ -52,6 +53,8 @@ export async function POST(req: Request): Promise<NextResponse> {
   if (!appEnv.enableFreeeSync) {
     return NextResponse.json({ ok: false, error: 'freee_disabled' }, { status: 503 });
   }
+  const csrf = rejectCrossOriginWrite(req, { json: true });
+  if (csrf) return csrf;
   const session = await requireSession();
   if (!session.ok) return session.response;
   const token = await getToken(session.address);

@@ -4,6 +4,7 @@
 // DELETE /api/handle/{handle}  → 解放 (SIWE・所有者のみ)
 
 import { NextResponse } from 'next/server';
+import { rejectCrossOriginWrite } from '@/lib/net/crossOriginWrite';
 import { env } from '@/lib/env';
 import { isKvConfigured } from '@/lib/kv';
 import { requireSession } from '../../auth/siwe/_session';
@@ -63,6 +64,8 @@ export async function DELETE(
   { params }: { params: Promise<{ handle: string }> },
 ) {
   if (!env.enableHandles) return notFound();
+  const csrf = rejectCrossOriginWrite(req, { json: false });
+  if (csrf) return csrf;
   // SIWE は誰でも無料で取れるので、書き込みごとの KV/外部 fetch をサーバに使わせる連打を IP で止める
   // (兄弟の SIWE 書き込み route と同じ形・第 7 回レビュー C9)。
   if (!(await checkClientIpBucketRateLimit(req, 'handle-write', 30, 60))) return rateLimited();

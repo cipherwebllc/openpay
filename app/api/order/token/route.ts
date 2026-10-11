@@ -11,6 +11,7 @@
 // flag NEXT_PUBLIC_ENABLE_ORDER_TOKEN 既定 OFF → 404 (完全 inert)。設計: plans/restaurant-pos-roadmap.md Phase 5。
 import { randomBytes } from 'node:crypto';
 import { NextResponse } from 'next/server';
+import { rejectCrossOriginWrite } from '@/lib/net/crossOriginWrite';
 import { env } from '@/lib/env';
 import { requireSession } from '../../auth/siwe/_session';
 import { kvGet, kvSet, kvDel, isKvConfigured } from '@/lib/kv';
@@ -57,6 +58,8 @@ export async function GET(): Promise<NextResponse> {
 /** 発行 / 再発行 (rotate)。旧トークンは現行一致検証で即失効する。新トークンを 1 度だけ返す。 */
 export async function POST(req: Request): Promise<NextResponse> {
   if (!env.enableOrderToken) return notFound();
+  const csrf = rejectCrossOriginWrite(req, { json: false });
+  if (csrf) return csrf;
   // SIWE は誰でも無料で取れるので、書き込みごとの KV/外部 fetch をサーバに使わせる連打を IP で止める
   // (兄弟の SIWE 書き込み route と同じ形・第 7 回レビュー C9)。
   if (!(await checkClientIpBucketRateLimit(req, 'order-token-write', 30, 60))) return rateLimited();
@@ -97,6 +100,8 @@ export async function POST(req: Request): Promise<NextResponse> {
 /** 取消 (revoke)。受取アドレスの現行トークンを消す → 以後どのトークンも feed で弾かれる。 */
 export async function DELETE(req: Request): Promise<NextResponse> {
   if (!env.enableOrderToken) return notFound();
+  const csrf = rejectCrossOriginWrite(req, { json: false });
+  if (csrf) return csrf;
   // SIWE は誰でも無料で取れるので、書き込みごとの KV/外部 fetch をサーバに使わせる連打を IP で止める
   // (兄弟の SIWE 書き込み route と同じ形・第 7 回レビュー C9)。
   if (!(await checkClientIpBucketRateLimit(req, 'order-token-write', 30, 60))) return rateLimited();

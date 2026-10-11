@@ -18,6 +18,7 @@
 // 専用 (rate-limit / 日次予算は relayGuards 内で決済 relay と同一キーを共有 = relayer 資源の上限を回避不可)。
 
 import { NextResponse } from 'next/server';
+import { rejectCrossOriginWrite } from '@/lib/net/crossOriginWrite';
 import { isAddress, isHex, getAddress, type Hex } from 'viem';
 import { requireSession } from '../../auth/siwe/_session';
 import { env } from '@/lib/env';
@@ -54,6 +55,8 @@ export async function POST(req: Request): Promise<NextResponse> {
       { status: 404 },
     );
   }
+  const csrf = rejectCrossOriginWrite(req, { json: true });
+  if (csrf) return csrf;
   // FEE_RECEIVER 未設定なら 503 (未設定の宛先へ 100 JPYC を送らせない・subscribe と同型)。認証より前。
   if (!env.feeReceiverConfigured) {
     logger.error('csvpass.relay.misconfigured', { reason: 'fee_receiver_unset' });

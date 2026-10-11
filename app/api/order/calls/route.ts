@@ -1,5 +1,6 @@
 // 店側のスタッフ呼び出し一覧。認可主体は /api/order/feed と同じ共有 helper で解決する。
 import { NextResponse } from 'next/server';
+import { rejectCrossOriginWrite } from '@/lib/net/crossOriginWrite';
 import { env } from '@/lib/env';
 import { isKvConfigured, kvEval, kvLrange } from '@/lib/kv';
 import { logger } from '@/lib/logger';
@@ -60,6 +61,8 @@ export async function GET(req: Request): Promise<NextResponse> {
 
 export async function POST(req: Request): Promise<NextResponse> {
   if (!env.enableOrderCall) return fail('not_found', 404);
+  const csrf = rejectCrossOriginWrite(req, { json: true });
+  if (csrf) return csrf;
   const actor = await actorFor(req, 'post');
   if ('response' in actor) return actor.response;
   let body: unknown;

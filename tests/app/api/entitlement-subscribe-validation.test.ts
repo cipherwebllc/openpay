@@ -259,6 +259,7 @@ describe.each([
     let offset = 0;
     const init: RequestInit & { duplex: 'half' } = {
       method: 'POST',
+      headers: { 'content-type': 'application/json' },
       duplex: 'half',
       body: new ReadableStream<Uint8Array>({
         pull(controller) {

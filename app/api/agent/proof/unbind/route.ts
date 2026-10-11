@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { rejectCrossOriginWrite } from '@/lib/net/crossOriginWrite';
 import { unbindAgent } from '@/lib/agent/bindings';
 import { normalizeAgentAddress } from '@/lib/agent/purchaseAddress';
 import { PURCHASES_CACHE_CONTROL, purchasesBody, purchasesGate, purchasesJson, purchasesSession } from '@/lib/agent/purchasesHttp';
@@ -9,6 +10,8 @@ export const dynamic = 'force-dynamic';
 export async function POST(req: Request) {
   const gated = await purchasesGate(req, 'unbind');
   if (gated) return gated;
+  const csrf = rejectCrossOriginWrite(req, { json: true });
+  if (csrf) return csrf;
   const session = await purchasesSession();
   if (!session.ok) return session.response;
   const body = await purchasesBody(req);

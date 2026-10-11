@@ -105,19 +105,26 @@ describe('SIWE routes', () => {
   });
 
   describe.each([['nonce', noncePOST], ['verify', verifyPOST], ['logout', logoutPOST]] as const)('%s CSRF', (path, post) => {
-    function request(site: string | null, contentType: string | null) {
+    function request(site: string | null, contentType: string | null, origin: string | null = null) {
       const headers = new Headers();
       if (site !== null) headers.set('sec-fetch-site', site);
       if (contentType !== null) headers.set('content-type', contentType);
+      if (origin !== null) headers.set('origin', origin);
       return new Request(`http://localhost/api/auth/siwe/${path}`, {
         method: 'POST', headers,
         ...(contentType === null ? {} : { body: new TextEncoder().encode('{"message":"x","signature":"0x1","p":"="}') }),
       });
     }
-    it.each(['application/json', 'text/plain', null])('rejects cross-site %s before storage or cookies', async (type) => {
+    // 共通の CSRF 検査 (lib/net/crossOriginWrite) は Sec-Fetch-Site が same-origin のときだけ通す
+    // (same-site のサブドメインと none も拒否する)。
+    it.each([
+      ['cross-site', 'application/json'], ['cross-site', 'text/plain'], ['cross-site', null],
+      ['same-site', 'application/json'], ['same-site', 'text/plain'], ['same-site', null],
+      ['none', 'application/json'], ['none', null],
+    ])('rejects %s %s before storage or cookies', async (site, type) => {
       h.kvConfigured = true;
       h.cookieToken = 'live-session';
-      const res = await post(request('cross-site', type));
+      const res = await post(request(site, type));
       expect(res.status).toBe(403);
       expect(await res.json()).toEqual({ ok: false, error: 'cross_site_request' });
       expect(res.headers.has('set-cookie')).toBe(false);
@@ -135,7 +142,18 @@ describe('SIWE routes', () => {
       expect(h.kvSet).not.toHaveBeenCalled();
       expect(h.kvDel).not.toHaveBeenCalled();
     });
-    it.each(['same-origin', 'same-site', 'none', null])('handles legacy bodyless POST without Content-Type for %s', async (site) => {
+    it.each(['https://attacker.example', 'http://sub.localhost', 'null'])('rejects Origin %s without Fetch Metadata before storage or cookies', async (origin) => {
+      h.kvConfigured = true;
+      h.cookieToken = 'live-session';
+      const res = await post(request(null, 'application/json', origin));
+      expect(res.status).toBe(403);
+      expect(await res.json()).toEqual({ ok: false, error: 'cross_site_request' });
+      expect(res.headers.has('set-cookie')).toBe(false);
+      expect(h.kvSet).not.toHaveBeenCalled();
+      expect(h.kvDel).not.toHaveBeenCalled();
+      expect(h.checkIpRateLimit).not.toHaveBeenCalled();
+    });
+    it.each(['same-origin', null])('handles legacy bodyless POST without Content-Type for %s', async (site) => {
       h.kvConfigured = true;
       h.kvSet.mockResolvedValue({ ok: true, value: 'OK' });
       h.cookieToken = SESSION_TOKEN;
@@ -155,7 +173,7 @@ describe('SIWE routes', () => {
         expect(h.kvSet).not.toHaveBeenCalled();
       }
     });
-    it.each(['same-origin', 'same-site'])('rejects text/plain even for %s', async (site) => {
+    it.each(['same-origin'])('rejects text/plain even for %s', async (site) => {
       h.kvConfigured = true;
       const res = await post(request(site, 'text/plain'));
       expect(res.status).toBe(415);
@@ -163,10 +181,12 @@ describe('SIWE routes', () => {
       expect(h.kvSet).not.toHaveBeenCalled();
       expect(h.kvDel).not.toHaveBeenCalled();
     });
-    it.each(['same-origin', 'same-site', 'none', null])('preserves the JSON flow for %s', async (site) => {
+    it.each([
+      ['same-origin', null], [null, null], [null, 'http://localhost'],
+    ])('preserves the JSON flow for Sec-Fetch-Site %s / Origin %s', async (site, origin) => {
       h.kvConfigured = true;
       h.kvSet.mockResolvedValue({ ok: true, value: 'OK' });
-      const res = await post(request(site, 'Application/JSON; charset=utf-8'));
+      const res = await post(request(site, 'Application/JSON; charset=utf-8', origin));
       // Invalid SIWE messages still reach the existing validator; nonce/logout succeed.
       expect(res.status).toBe(path === 'verify' ? 400 : 200);
       if (path === 'nonce') expect(h.kvSet).toHaveBeenCalledOnce();
@@ -212,7 +232,7 @@ describe('SIWE routes', () => {
     expect(h.kvSet).toHaveBeenCalledOnce();
   });
 
-  it.each(['same-origin', 'same-site', null])('verify: valid JSON login issues a session for %s', async (site) => {
+  it.each(['same-origin', null])('verify: valid JSON login issues a session for %s', async (site) => {
     h.kvConfigured = true;
     h.kvGet.mockResolvedValue({ ok: true, value: '1' }); // 発行済みの nonce (存在だけを読む・C8)
     h.kvDel.mockResolvedValue({ ok: true, value: 1 });

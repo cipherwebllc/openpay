@@ -214,7 +214,8 @@ function request(url: string, body: unknown, ip = '203.0.113.42'): Request {
 function unreadRequest(url: string, body: unknown): { req: Request; text: ReturnType<typeof vi.fn> } {
   const text = vi.fn(async () => JSON.stringify(body));
   const req = {
-    headers: new Headers({ 'x-forwarded-for': '203.0.113.42' }),
+    // csv-pass relay は SIWE cookie の書き込みなので、CSRF 検査 (JSON 必須) を通る正規の Content-Type を付ける。
+    headers: new Headers({ 'x-forwarded-for': '203.0.113.42', 'content-type': 'application/json' }),
     text,
   } as unknown as Request;
   return { req, text };

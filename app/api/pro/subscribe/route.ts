@@ -10,6 +10,7 @@
 // core ロジック (ロック→検証→付与→昇格→収益) は lib/entitlementPayment に共有 (CSV パスと共通)。
 // 本 route は flag/feeReceiver ゲート + 入力検証 + tier config の注入だけを行う thin wrapper。
 import { NextResponse } from 'next/server';
+import { rejectCrossOriginWrite } from '@/lib/net/crossOriginWrite';
 import { isHex } from 'viem';
 import { requireSession } from '../../auth/siwe/_session';
 import { env } from '@/lib/env';
@@ -34,6 +35,8 @@ export async function POST(req: Request): Promise<NextResponse> {
       { status: 404 },
     );
   }
+  const csrf = rejectCrossOriginWrite(req, { json: true });
+  if (csrf) return csrf;
   // FEE_RECEIVER 未設定なら 503 (未設定の宛先へ 500 JPYC を送らせない・settle と同型)。
   if (!env.feeReceiverConfigured) {
     logger.error('pro.subscribe.misconfigured', {

@@ -4,6 +4,7 @@
 // flag OFF は 404。OpenPay 自身の resource は registry を経由せず discovery が生成する。
 
 import { NextResponse } from 'next/server';
+import { rejectCrossOriginWrite } from '@/lib/net/crossOriginWrite';
 import { env } from '@/lib/env';
 import { requireSession } from '@/app/api/auth/siwe/_session';
 import { readJsonBodyCapped } from '@/lib/httpBodyCap';
@@ -54,6 +55,8 @@ export async function POST(req: Request): Promise<NextResponse> {
   if (!env.enableX402Facilitator) {
     return NextResponse.json({ error: 'not_found' }, { status: 404 });
   }
+  const csrf = rejectCrossOriginWrite(req, { json: true });
+  if (csrf) return csrf;
   if (
     !(await checkIpRateLimit(
       'x402-resource-write',
