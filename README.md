@@ -56,10 +56,11 @@ the shop’s device pays the gas and, by design, 1 wei is added to the customer�
 - **Mobile-order system fee** *(live in production)* — payments made through a mobile-order storefront (`@handle` / `/order`) carry the OpenPay usage fee at a **mobile-order rate**:
   **1%** for in-store / kiosk (`storefront`) and **3%** for pre-order mobile ordering (`preorder`), a flat percent (no floor).
   On a mobile order only this rate applies (it is not charged in addition to the gasless per-tx usage fee), and it applies on both the gasless relay and standard (with-gas) mode.
+  A mobile order that an AI agent pays directly over x402 (`/api/agent-order/pay`) carries the x402 facilitator fee instead of this rate (added by the buyer; the shop receives the order amount in full).
   `/pay`, tips, and ordinary checkout links are unaffected.
 - **Digital goods store** *(live in production)* — selling digital items on `@handle` profiles carries **no seller fee**; the buyer pays the listed price plus the **x402 facilitator fee** (1% of price, min 1 JPYC) added on the buyer side.
 
-This pricing is **not a percentage skim of arbitrary size**: it is a small, capped, per-transaction service fee for the gas-sponsored JPYC relay.
+This pricing is **not a percentage skim of arbitrary size**: it is a per-transaction service fee for the gas-sponsored JPYC relay, charged at the published rate above (a percentage with a minimum and no upper cap).
 OpenPay remains a non-custodial software / infrastructure provider rather than a payment intermediary under the Japanese Payment Services Act framework.
 Full details (fee bearer, Arc, register history): [docs/FEATURES.md#fees](./docs/FEATURES.md#fees).
 

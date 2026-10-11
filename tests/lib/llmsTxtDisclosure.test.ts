@@ -259,11 +259,33 @@ it('Attestation の価格と法的証明でない旨を開示する', () => {
 });
 
 it('tip disclosure distinguishes all three fee models unconditionally', () => {
-  const tip = lines.find((line) => line.startsWith('- OpenPay 利用料:'))!.split('チップは')[1].split('クリエイターのデジタル商品')[0];
+  const feeLine = lines.find((line) => line.startsWith('- OpenPay 利用料:'))!;
+  // 下の split はチップの文を最初の「チップは」で切り出す。2 つ目が入ると別の文で切れてフェンスが素通りになる。
+  expect(feeLine.split('チップは'), '「- OpenPay 利用料:」行の「チップは」は 1 回だけ').toHaveLength(2);
+  const tip = feeLine.split('チップは')[1].split('クリエイターのデジタル商品')[0];
   expect(tip).toContain(`約 ${DISCLOSED_TIP_FEE_MODELS.jpycRelay.floorJpyc} JPYC`);
   expect(tip).toContain('USDC (Base) は送る側が Paymaster');
   expect(tip).toContain('USDC (Arc) は標準モード');
   expect(tip).toContain('ネットワーク手数料を USDC でウォレットから直接負担');
   expect(tip).toContain('いずれも OpenPay の徴収はありません');
   expect(tip).not.toMatch(/(?:全て|すべて).*ガス不要/);
+  // 2026-10-11 (D1): JPYC のガス相当額は OpenPay へ届く。「徴収なし」は USDC の文の中に限る
+  // (JPYC の文の直後に「いずれも徴収なし」を置くと、JPYC のチップからも受け取らないと読める)。
+  const usdcAt = tip.indexOf('USDC (Base) は');
+  const jpyc = tip.slice(tip.indexOf('JPYC は送る側'), usdcAt);
+  expect(jpyc).toContain('この分は OpenPay へ送られます');
+  expect(jpyc).not.toContain('徴収はありません');
+  expect(tip.slice(usdcAt)).toContain('USDC ではいずれも OpenPay の徴収はありません');
+  expect(tip.split('徴収はありません'), '「徴収はありません」は USDC の文の 1 回だけ').toHaveLength(2);
+});
+
+// 2026-10-11 (D2): AI エージェントが x402 で直接払うモバイル注文 (/api/agent-order/pay・本番 ON) は、モバイル注文の
+// 利用料ではなく x402 利用料を買い手が上乗せする。数字は上の「x402 利用料」の全一致フェンスでも照合される型にする。
+it('AI エージェントが x402 で直接払うモバイル注文の利用料を「- OpenPay 利用料:」行で開示する', () => {
+  const feeLine = lines.find((line) => line.startsWith('- OpenPay 利用料:'))!;
+  expect(feeLine).toContain(
+    `AI エージェントが x402 で直接支払うモバイル注文は、モバイル注文の利用料に代えて x402 利用料（価格の ${pct(DISCLOSED_X402_FEE.bps)}%・最低 ${DISCLOSED_X402_FEE.floorJpyc} JPYC）を買い手が上乗せ（店舗は注文額をそのまま受領）`,
+  );
+  // モバイル注文の料率の文のあとに置く (人が払う注文の料率と並べて読めるように)。
+  expect(feeLine.indexOf('AI エージェントが x402 で直接支払うモバイル注文')).toBeGreaterThan(feeLine.indexOf('時間指定の事前注文'));
 });

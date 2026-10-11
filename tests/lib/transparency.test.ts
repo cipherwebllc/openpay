@@ -6,6 +6,7 @@ import type * as TransparencyModule from '@/lib/transparency';
 import type * as TokensModule from '@/lib/tokens';
 import type * as ChainsModule from '@/lib/chains';
 import type * as LegalModule from '@/lib/legal';
+import { expectTipFeeScopedByToken } from '../_helpers/tipDisclosure';
 
 const ORIGINAL_ENV = { ...process.env };
 const LOCALES = ['ja', 'en'] as const;
@@ -139,6 +140,20 @@ describe('手数料の SOT fence', () => {
     expect(tip).toContain('USDC (Arc)');
     expect(tip).toContain(locale === 'ja' ? 'ウォレットから直接負担' : 'directly from their wallet');
     expect(tip).toContain(locale === 'ja' ? 'OpenPay の徴収はありません' : 'OpenPay collects nothing');
+    // 2026-10-11 (D1): JPYC のガス相当額は OpenPay へ届く。「徴収なし」は USDC の文に限る。
+    expectTipFeeScopedByToken(tip!, locale, '/transparency のチップ');
+  });
+
+  // 2026-10-11 (D2): モバイル注文の料率は「決済経路を問わず」だが、AI エージェントが x402 で直接払う注文
+  // (/api/agent-order/pay) は x402 facilitator の利用料 (買い手が上乗せ) だけがかかる。
+  it.each(LOCALES)('%s: モバイル注文の行は、AI エージェントが x402 で払う注文の例外を書く', (locale) => {
+    const mobile = transparency.TRANSPARENCY[locale].fees[1];
+    expect(mobile).toMatch(locale === 'ja' ? /^モバイル注文:/ : /^Mobile ordering:/);
+    expect(mobile).toContain(locale === 'ja'
+      ? 'AI エージェントが x402 で直接支払うモバイル注文には、この料率ではなく下の x402 facilitator の利用料を適用します（買い手が上乗せし、店舗は注文額をそのまま受け取ります）'
+      : 'Mobile orders that an AI agent pays directly over x402 are charged the x402 facilitator fee below instead of this rate (added by the buyer; the store receives the order amount in full)');
+    // 「下の」x402 facilitator の行が、モバイル注文の行の次にある。
+    expect(transparency.TRANSPARENCY[locale].fees[2]).toMatch(/^x402 facilitator:/);
   });
 
   it.each(LOCALES)('%s: DISCLOSED_* の全数値が対応する描画文に含まれる', (locale) => {

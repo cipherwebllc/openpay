@@ -128,7 +128,7 @@ When `NEXT_PUBLIC_ENABLE_MOBILE_ORDER_FEE` is on (production sets `1`; code defa
 
 It is **not charged in addition to** the gasless per-tx usage fee: on a mobile order only this rate applies, and the gas OpenPay sponsors is included in it (no separate gasless fee on top).
 
-It is **path-independent**: it applies whether the payment goes through the gasless relay **or** standard (with-gas) mode, so a gasless-by-other-means or standard payment does not escape it.
+It is **path-independent**: it applies whether the payment goes through the gasless relay **or** standard (with-gas) mode, so a gasless-by-other-means or standard payment does not escape it. Exception: a mobile order that an AI agent pays directly over x402 (`/api/agent-order/pay`) carries the x402 facilitator fee instead of this rate (added by the buyer; the shop receives the order amount in full).
 
 The rate is **1%** for in-store / kiosk (`storefront`) and **3%** for pre-order mobile ordering (`preorder`) — a flat percent (no floor).
 
@@ -150,7 +150,7 @@ The flag and its fee-claim endpoint (`/api/register/claim`) have since been remo
 
 A register sale paid on the gasless **relay** path carries the regular recover fee, like any other JPYC gasless payment.
 
-This pricing is **not a percentage skim of arbitrary size**: it is a small, capped, per-transaction service fee for the gas-sponsored JPYC relay.
+This pricing is **not a percentage skim of arbitrary size**: it is a per-transaction service fee for the gas-sponsored JPYC relay, charged at the published rate above (a percentage with a minimum and no upper cap).
 
 OpenPay remains a non-custodial software / infrastructure provider rather than a payment intermediary under the Japanese Payment Services Act framework.
 

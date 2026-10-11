@@ -35,6 +35,8 @@ vi.mock('@/lib/legal', async (importOriginal) => ({
     registerPercent: 1.7,
     storefrontPercent: 2,
     preorderPercent: 4,
+    // チップカードの本文 (supportFeeTipBody) もガス相当額を差し込む (2026-10-11)。
+    tipFloor: 7,
   },
 }));
 
@@ -53,6 +55,15 @@ describe.each(['ja', 'en'] as const)('%s: rendered public fee disclosure', (loca
     const { container } = render(await surface());
     expect(container).toHaveTextContent('1.7%');
     expect(container).toHaveTextContent('5 JPYC');
-    expect(container.textContent).not.toMatch(/\{(?:recover|register|storefront|preorder)/);
+    expect(container.textContent).not.toMatch(/\{(?:recover|register|storefront|preorder|tip)/);
+  });
+
+  // チップカードは トップ (LandingSupport) と導入前チェックリスト (start guide) に出る。本文の数字は直書きせず、
+  // ガス相当額 (tipFloor) と、適用しない決済額の % (recoverPercent) を差し込む。
+  it.each(surfaces.filter(([name]) => name === 'support' || name === 'start guide'))('%s: tip card body interpolates the tip floor and the recover percent', async (_, surface) => {
+    context.locale = locale;
+    const { container } = render(await surface());
+    expect(container).toHaveTextContent(locale === 'ja' ? '約 7 JPYC' : 'about 7 JPYC');
+    expect(container).toHaveTextContent(locale === 'ja' ? '決済額の 1.7% は適用しません' : 'the 1.7% does not apply');
   });
 });
