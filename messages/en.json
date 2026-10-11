@@ -1426,6 +1426,7 @@
     "needsSupportTitle": "Confirmation is taking longer than expected",
     "needsSupportConfirmedBody": "Payment is confirmed, but delivery cannot be verified. Do not pay again; contact the seller.",
     "needsSupportUnknownBody": "The payment result cannot be determined. Do not pay again; contact the seller.",
+    "needsSupportCheckingBody": "We are still checking the payment result. Once it is confirmed, it will show here automatically. Do not pay again.",
     "contactSupport": "Contact the seller",
     "payTotal": "Total to pay: {total} JPYC",
     "priceBreakdown": "Price {price} JPYC + fee {fee} JPYC",

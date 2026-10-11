@@ -297,6 +297,7 @@ export function CreatorStorePurchaseFlow({
               }
               libraryHref={`/${locale}/store/library`}
               supportHref={sellerDisclosureHref}
+              autoChecking={buyer.isAutoCheckingPayment}
               {...(buyer.paymentStatus === 'confirmed' &&
               buyer.quote?.rail === 'usdc'
                 ? { payment: buyer.quote.payment }

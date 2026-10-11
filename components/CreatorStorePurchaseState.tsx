@@ -31,6 +31,8 @@ export type CreatorStorePurchaseStateProps = {
   supportHref: string;
   /** USDC 成立時は P1 grant と同じ versioned payment snapshot を描画する。 */
   payment?: HostedUsdcPaymentSnapshot;
+  /** 決済結果が未確定のまま、status の自動確認を続けている間だけ true (確定すると自動で表示する旨を出す)。 */
+  autoChecking?: boolean;
 };
 
 export function CreatorStorePurchaseState({
@@ -41,6 +43,7 @@ export function CreatorStorePurchaseState({
   libraryHref,
   supportHref,
   payment,
+  autoChecking = false,
 }: CreatorStorePurchaseStateProps) {
   const t = useTranslations('CreatorStorePurchase');
   const tl = useTranslations('CreatorStoreLicense');
@@ -91,7 +94,9 @@ export function CreatorStorePurchaseState({
     body =
       paymentStatus === 'confirmed'
         ? t('needsSupportConfirmedBody')
-        : t('needsSupportUnknownBody');
+        : autoChecking
+          ? t('needsSupportCheckingBody')
+          : t('needsSupportUnknownBody');
   } else if (confirmedProvisioning) {
     title = t('provisioningTitle');
     body = t('provisioningBody');

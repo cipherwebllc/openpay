@@ -8,6 +8,8 @@
 //   retry()    = 保持済みの同一 X-PAYMENT header で同じ GET を再送するだけ（再署名しない）
 //   202/通信断 = intentSalt の status を自動 polling。settled 後も own content API の 200 read-back まで
 //                「購入完了」にしない
+//   409 settled = 再送への「確定済み・本文は返さない」応答。決済の確定として扱い、own content API へ進む
+//   90 秒経過   = indeterminate-exhausted。その後も上限つきの低頻度で status を確かめ、確定したら進む
 
 import {
   useCallback,
@@ -64,6 +66,11 @@ const STATUS_POLL_INTERVAL_MS = 3_000;
 const CONTENT_POLL_INTERVAL_MS = 2_000;
 const OWNERSHIP_READ_BACK_TIMEOUT_MS = 60_000;
 const PAYMENT_STATUS_RECOVERY_TIMEOUT_MS = 90_000;
+// 90 秒の確認で決まらなかった後も、確定が遅れた購入 (JPYC の照合は finality を待つので、Polygon の
+// milestone が止まると 90 秒を超える) を拾うための低頻度の確認。上限を過ぎたら止め、問い合わせへ案内する。
+const EXHAUSTED_STATUS_POLL_INTERVAL_MS = 30_000;
+const EXHAUSTED_STATUS_POLL_LIMIT_MS = 15 * 60_000;
+const TX_HASH_RE = /^0x[0-9a-fA-F]{64}$/;
 
 export type HostedStorePaymentRail = 'jpyc' | 'usdc';
 export type HostedStorePurchaseQuote =
@@ -185,12 +192,16 @@ export function useHostedStorePurchase({
     useState<HostedPurchasedContent | null>(null);
   const [needsSupportReason, setNeedsSupportReason] =
     useState<HostedStoreNeedsSupportReason | null>(null);
+  // indeterminate-exhausted の低頻度の確認が上限に達したら true。exhausted に入るたびに false へ戻す。
+  const [exhaustedStatusPollEnded, setExhaustedStatusPollEnded] =
+    useState(false);
 
   const signedRequestRef = useRef<SignedHostedRequest | null>(null);
   const currentAddressRef = useRef<Address | undefined>(address);
   const currentSessionRef = useRef<Address | null>(sessionAddress);
   const confirmedAtRef = useRef<number | null>(null);
   const indeterminateAtRef = useRef<number | null>(null);
+  const exhaustedAtRef = useRef<number | null>(null);
   const scopeRef = useRef<string | null>(null);
   const productScopeRef = useRef<string | null>(null);
   // merchant は大文字小文字の差だけでは別商品にしない (checksum/lowercase の揺れで review を捨てない)。
@@ -204,6 +215,7 @@ export function useHostedStorePurchase({
     signedRequestRef.current = null;
     confirmedAtRef.current = null;
     indeterminateAtRef.current = null;
+    exhaustedAtRef.current = null;
     setPhase('idle');
     setQuote(null);
     setSellerRole(undefined);
@@ -211,6 +223,7 @@ export function useHostedStorePurchase({
     setTxHash(null);
     setContent(null);
     setNeedsSupportReason(null);
+    setExhaustedStatusPollEnded(false);
   }, []);
 
   // connected wallet または SIWE session が変わったら、旧 wallet の private store data を
@@ -277,6 +290,7 @@ export function useHostedStorePurchase({
     signedRequestRef.current = null;
     confirmedAtRef.current = null;
     indeterminateAtRef.current = null;
+    exhaustedAtRef.current = null;
     setPhase('loading-quote');
     setQuote(null);
     setSellerRole(undefined);
@@ -284,6 +298,7 @@ export function useHostedStorePurchase({
     setTxHash(null);
     setContent(null);
     setNeedsSupportReason(null);
+    setExhaustedStatusPollEnded(false);
 
     const url = `/api/paid/hosted/${encodeURIComponent(
       resourceId,
@@ -476,7 +491,7 @@ export function useHostedStorePurchase({
           (body.kind === 'url' || body.kind === 'text') &&
           typeof body.value === 'string' &&
           typeof body.txHash === 'string' &&
-          /^0x[0-9a-fA-F]{64}$/.test(body.txHash) &&
+          TX_HASH_RE.test(body.txHash) &&
           (signed.quote.rail === 'jpyc' ||
             hostedUsdcPaymentSnapshotMatchesQuote(
               body.payment,
@@ -503,6 +518,20 @@ export function useHostedStorePurchase({
       }
       if (response.status === 202) {
         markIndeterminate();
+        return;
+      }
+      if (
+        response.status === 409 &&
+        isRecord(body) &&
+        body.state === 'settled' &&
+        typeof body.txHash === 'string' &&
+        TX_HASH_RE.test(body.txHash) &&
+        body.resourceId === resourceId
+      ) {
+        // 確定済みの購入への再送に、server が本文を返さずに返す 409 (今は purchase_redelivery_expired)。
+        // error code の名前では判定しない (server が code を改名しても揺れないため)。決済は確定として扱い、
+        // 本文は SIWE の own content API から読む (200 の value を表示に使わないのと同じ)。
+        markConfirmed(body.txHash as Hex);
         return;
       }
       if (
@@ -726,12 +755,19 @@ export function useHostedStorePurchase({
         'There is no signed hosted payment to retry',
       );
     }
+    // 再送で決まらなかった (202・想定外の応答) ときは、90 秒の確認をこの時点から取り直す。
+    // 古い時刻のままだと、exhausted の後の retry が即座に exhausted へ戻り、status の settled を拾えない。
+    indeterminateAtRef.current = null;
     // 新しい authorization/signature は組まず、保持した header をそのまま再送する。
     await submitSignedRequest(signed);
   }, [submitSignedRequest]);
 
+  const exhaustedStatusPollActive =
+    phase === 'indeterminate-exhausted' && !exhaustedStatusPollEnded;
   const shouldPollStatus =
-    phase === 'indeterminate' || phase === 'provisioning';
+    phase === 'indeterminate' ||
+    phase === 'provisioning' ||
+    exhaustedStatusPollActive;
   const statusQuery = useQuery({
     queryKey: [
       'store',
@@ -764,9 +800,11 @@ export function useHostedStorePurchase({
       return purchaseStatusFrom(body);
     },
     enabled: enabled && shouldPollStatus && quote !== null,
-    refetchInterval: shouldPollStatus
-      ? STATUS_POLL_INTERVAL_MS
-      : false,
+    refetchInterval: !shouldPollStatus
+      ? false
+      : exhaustedStatusPollActive
+        ? EXHAUSTED_STATUS_POLL_INTERVAL_MS
+        : STATUS_POLL_INTERVAL_MS,
     retry: false,
   });
 
@@ -779,6 +817,8 @@ export function useHostedStorePurchase({
       PAYMENT_STATUS_RECOVERY_TIMEOUT_MS - (Date.now() - startedAt),
     );
     const timeout = window.setTimeout(() => {
+      exhaustedAtRef.current = Date.now();
+      setExhaustedStatusPollEnded(false);
       setNeedsSupportReason('payment-status-timeout');
       setPhase('indeterminate-exhausted');
     }, remaining);
@@ -786,9 +826,26 @@ export function useHostedStorePurchase({
   }, [phase]);
 
   useEffect(() => {
+    if (!exhaustedStatusPollActive) return;
+    const startedAt = exhaustedAtRef.current;
+    if (startedAt === null) return;
+    const remaining = Math.max(
+      0,
+      EXHAUSTED_STATUS_POLL_LIMIT_MS - (Date.now() - startedAt),
+    );
+    const timeout = window.setTimeout(() => {
+      setExhaustedStatusPollEnded(true);
+    }, remaining);
+    return () => window.clearTimeout(timeout);
+  }, [exhaustedStatusPollActive]);
+
+  useEffect(() => {
     if (!statusQuery.data) return;
     if (statusQuery.data.state === 'settled') {
-      if (phase === 'indeterminate') {
+      if (
+        phase === 'indeterminate' ||
+        phase === 'indeterminate-exhausted'
+      ) {
         markConfirmed(statusQuery.data.txHash);
       } else if (phase === 'provisioning') {
         // purchase_provisioning 後も status が finalizer を駆動する。既に始めた
@@ -798,7 +855,8 @@ export function useHostedStorePurchase({
       return;
     }
     if (
-      phase === 'indeterminate' &&
+      (phase === 'indeterminate' ||
+        phase === 'indeterminate-exhausted') &&
       statusQuery.data.state === 'failed'
     ) {
       setError(new Error('purchase_intent_failed'));
@@ -912,6 +970,10 @@ export function useHostedStorePurchase({
     content,
     txHash,
     needsSupportReason,
+    // 決済の結果を status で自動確認し続けているか (indeterminate と、上限内の indeterminate-exhausted)。
+    // exhausted の案内を「確定すると自動で表示」と「販売者へ問い合わせ」に分けるために使う。
+    isAutoCheckingPayment:
+      phase === 'indeterminate' || exhaustedStatusPollActive,
     error,
     requiredChainId: quote?.chainId ?? null,
     isWrongChain: quote !== null && chainId !== quote.chainId,

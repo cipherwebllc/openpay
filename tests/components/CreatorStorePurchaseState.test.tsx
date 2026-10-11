@@ -107,4 +107,63 @@ describe('CreatorStorePurchaseState', () => {
       .toHaveTextContent('自動で確認中です');
     expect(screen.queryByText('購入完了')).toBeNull();
   });
+
+  it('90 秒を過ぎても自動確認を続けている間は、確定すると自動で表示される旨を出す', () => {
+    render(
+      <CreatorStorePurchaseState
+        {...base}
+        paymentStatus="unknown"
+        accessStatus="needs-support"
+        ownershipReadBack={false}
+        autoChecking
+      />,
+    );
+
+    expect(
+      screen.getByText(
+        '決済結果を確認中です。確定すると、この画面に自動で表示されます。二重に支払わないでください。',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/決済結果を確定できません/)).toBeNull();
+    expect(screen.queryByText('購入完了')).toBeNull();
+  });
+
+  it('自動確認を止めた後は、二重に支払わず販売者へ問い合わせる案内に戻す', () => {
+    render(
+      <CreatorStorePurchaseState
+        {...base}
+        paymentStatus="unknown"
+        accessStatus="needs-support"
+        ownershipReadBack={false}
+      />,
+    );
+
+    expect(
+      screen.getByText(
+        '決済結果を確定できません。二重に支払わず、販売者へお問い合わせください。',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/確定すると、この画面に自動で表示されます/)).toBeNull();
+    expect(
+      screen.getByRole('link', { name: '販売者へ問い合わせる' }),
+    ).toHaveAttribute('href', 'mailto:seller@example.com');
+  });
+
+  it('決済が成立した後の引き渡し不明は、自動確認の有無で文言を変えない', () => {
+    render(
+      <CreatorStorePurchaseState
+        {...base}
+        paymentStatus="confirmed"
+        accessStatus="needs-support"
+        ownershipReadBack={false}
+        autoChecking
+      />,
+    );
+
+    expect(
+      screen.getByText(
+        '決済は成立していますが、商品の引き渡しを確認できません。二重に支払わず、販売者へお問い合わせください。',
+      ),
+    ).toBeInTheDocument();
+  });
 });
