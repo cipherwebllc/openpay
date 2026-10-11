@@ -9,6 +9,7 @@ import type { QrSettings } from '@/hooks/useQrSettings';
 import { crossChainAllowed } from '@/lib/url/shared';
 import {
   SPLIT_MAX_ENTRIES,
+  splitSupportedForToken,
   type SplitDraft,
   type SplitDraftsParseResult,
   type SplitEntry,
@@ -220,7 +221,9 @@ export function QrSettingsSection({
         </Field>
       ) : null}
 
-      {showSplitAndCrossChain && !isStandard && (
+      {/* 売上の自動分配は USDC のガスレスだけ (JPYC は relay で分配を送れず、利用料を取れない経路になるため出さない)。
+          欄を出さない間も設定の split は消さない (QrGenerator が URL に入れない)。 */}
+      {showSplitAndCrossChain && !isStandard && splitSupportedForToken(settings.token) && (
         <SplitEditor
           splits={settings.splits}
           max={SPLIT_MAX_ENTRIES}

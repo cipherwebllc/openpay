@@ -1,5 +1,5 @@
 import { gatewayAttestation, encodedSpec } from '../fixtures/gateway';
-import { keccak256 } from 'viem';
+import { getAddress, keccak256 } from 'viem';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
@@ -141,6 +141,7 @@ import {
   RelayResponseUnknownError,
 } from '@/lib/relay/relayResponseError';
 import { mockHook } from '../_helpers/wagmiMock';
+import { IncompatibleSmartAccountError } from '@/lib/accountDetection';
 
 const MERCHANT: Address = '0x1111111111111111111111111111111111111111';
 const CUSTOMER: Address = '0x9999999999999999999999999999999999999999';
@@ -1001,6 +1002,182 @@ describe('PaymentForm — split (C1)', () => {
   });
 });
 
+// 分配 (split) つきの QR を払えない組み合わせ (2026-10-11 user 承認)。お金が動く前 (送信 0 件) に止め、
+// 理由を案内する。split の無い QR・USDC の split のガスレス・relay/recover の挙動は変えない (回帰も固定)。
+describe('PaymentForm — 分配 (split) つきの QR を払えない組み合わせ', () => {
+  const B = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+  const C = '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+  const FORWARDER = '0x1234567890123456789012345678901234567890';
+  const SPLIT_NOTICE_TITLES = [
+    'この QR は JPYC では支払えません',
+    'この QR は通常決済では支払えません',
+    'このウォレットではこの QR を支払えません',
+  ];
+
+  function expectNoMoneyMoved() {
+    expect(mutate).not.toHaveBeenCalled();
+    expect(relayMutate).not.toHaveBeenCalled();
+    expect(standardMutate).not.toHaveBeenCalled();
+  }
+
+  function expectNoSplitNotice() {
+    for (const title of SPLIT_NOTICE_TITLES) {
+      expect(screen.queryByText(title)).toBeNull();
+    }
+  }
+
+  it('JPYC + split (relay recover が使える chain): relay にも sponsorship にも乗せず送信 0 件・案内を出す', () => {
+    vi.mocked(resolveJpycGaslessProvider).mockReturnValue('eip3009-relay');
+    vi.mocked(jpycForwarderFor).mockReturnValue(FORWARDER);
+    setURL(`to=${MERCHANT}&token=jpyc&amount=1000&split=${B}:30,${C}:20`);
+    setAccount({ connected: true, chainId: polygonAmoy.id });
+    setBalance(2000n * 10n ** 18n);
+    setSmartAccount(true);
+    setGasQuote('ready', 0n);
+    render(<PaymentForm />);
+
+    expect(screen.getByText('この QR は JPYC では支払えません')).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'この QR は分配の設定があるため、JPYC では支払えません。お店に QR を作り直してもらってください。',
+      ),
+    ).toBeInTheDocument();
+    const btn = screen.getByRole('button', { name: 'この QR では支払えません' });
+    expect(btn).toBeDisabled();
+    fireEvent.click(btn);
+    expectNoMoneyMoved();
+  });
+
+  it('JPYC + split + 未接続: 「ウォレットを接続」へ誘導せず、押せない', () => {
+    setURL(`to=${MERCHANT}&token=jpyc&amount=1000&split=${B}:30`);
+    setAccount({ connected: false });
+    render(<PaymentForm />);
+
+    expect(screen.getByText('この QR は JPYC では支払えません')).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'この QR では支払えません' }),
+    ).toBeDisabled();
+    expect(screen.queryByRole('button', { name: /ウォレットを接続/ })).toBeNull();
+  });
+
+  it('手で作った URL (JPYC + split + mode=standard) も止める: 分配を無視した standard 送信をしない', () => {
+    setURL(`to=${MERCHANT}&token=jpyc&amount=1000&mode=standard&split=${B}:30`);
+    setAccount({ connected: true, chainId: polygonAmoy.id });
+    setBalance(2000n * 10n ** 18n);
+    render(<PaymentForm />);
+
+    expect(screen.getByText('この QR は JPYC では支払えません')).toBeInTheDocument();
+    const btn = screen.getByRole('button', { name: 'この QR では支払えません' });
+    expect(btn).toBeDisabled();
+    fireEvent.click(btn);
+    expectNoMoneyMoved();
+  });
+
+  it('手で作った URL (USDC + split + mode=standard): 全額を主受取人へ送らず、通常決済不可の案内を出す', () => {
+    setURL(`to=${MERCHANT}&token=usdc&amount=100&mode=standard&split=${B}:30`);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    render(<PaymentForm />);
+
+    expect(screen.getByText('この QR は通常決済では支払えません')).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'この QR は分配の設定があるため、通常決済（ガス代は自分で負担）では支払えません。お店に QR を作り直してもらってください。',
+      ),
+    ).toBeInTheDocument();
+    const btn = screen.getByRole('button', { name: 'この QR では支払えません' });
+    expect(btn).toBeDisabled();
+    fireEvent.click(btn);
+    expectNoMoneyMoved();
+  });
+
+  it.each([
+    ['未委任 (pristine)', new IncompatibleSmartAccountError({ delegateAddress: null, i18nKey: 'errorPristineNoBootstrap' })],
+    ['未対応の Smart Account', new IncompatibleSmartAccountError({ delegateAddress: B, i18nKey: 'errorIncompatibleSmartAccount' })],
+  ])(
+    'USDC + split + ガスレス不可のウォレット (%s): 「通常決済に切替」を出さず、ウォレットの案内を出す・送信 0 件',
+    (_label, saError) => {
+      setURL(`to=${MERCHANT}&token=usdc&amount=100&split=${B}:30`);
+      setAccount({ connected: true, chainId: baseSepolia.id });
+      setBalance(200_000_000n);
+      setSmartAccount(false, saError);
+      setGasQuote('ready', 0n);
+      render(<PaymentForm />);
+
+      expect(screen.queryByRole('button', { name: /通常決済に切替/ })).toBeNull();
+      expect(screen.getByText('このウォレットではこの QR を支払えません')).toBeInTheDocument();
+      expect(screen.getByText(/通常決済（ガス代は自分で負担）にも切り替えられません/)).toBeInTheDocument();
+      // 通常決済 UI に切り替わっていない (分配を無視する standard に倒れない)。
+      expect(screen.queryByText('通常決済（ガス代は自分で負担）')).toBeNull();
+      fireEvent.click(screen.getByRole('button', { name: /決済の準備中/ }));
+      expectNoMoneyMoved();
+    },
+  );
+
+  it('回帰: split の無い QR は従来どおり SA fallback から通常決済へ切り替えて主受取人へ送れる', async () => {
+    const user = userEvent.setup();
+    setURL(`to=${MERCHANT}&token=usdc&amount=100`);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(
+      false,
+      new IncompatibleSmartAccountError({ delegateAddress: null, i18nKey: 'errorPristineNoBootstrap' }),
+    );
+    render(<PaymentForm />);
+
+    await user.click(screen.getByRole('button', { name: /通常決済に切替/ }));
+    expectNoSplitNotice();
+    await user.click(screen.getByRole('button', { name: /100 USDC を支払う/ }));
+    expect(standardMutate).toHaveBeenCalledOnce();
+    expect(standardMutate.mock.calls[0][0].merchant).toBe(MERCHANT);
+    expect(standardMutate.mock.calls[0][0].merchantAmount).toBe(100_000_000n);
+  });
+
+  it('回帰: USDC + split のガスレスは案内を出さず、受取人ごとに 1 回で送る', async () => {
+    const user = userEvent.setup();
+    setURL(`to=${MERCHANT}&token=usdc&amount=100&split=${B}:30,${C}:20`);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready', 0n);
+    render(<PaymentForm />);
+
+    expectNoSplitNotice();
+    await user.click(screen.getByRole('button', { name: /100 USDC を支払う/ }));
+    expect(mutate).toHaveBeenCalledOnce();
+    const call = mutate.mock.calls[0][0];
+    expect(call.merchant).toBe(MERCHANT);
+    expect(call.merchantAmount).toBe(50_000_000n);
+    expect(call.extraRecipients).toEqual([
+      { to: getAddress(B), amount: 30_000_000n },
+      { to: getAddress(C), amount: 20_000_000n },
+    ]);
+    expect(relayMutate).not.toHaveBeenCalled();
+    expect(standardMutate).not.toHaveBeenCalled();
+  });
+
+  it('回帰: split の無い JPYC は relay (recover) のまま・案内を出さない', async () => {
+    const user = userEvent.setup();
+    vi.mocked(resolveJpycGaslessProvider).mockReturnValue('eip3009-relay');
+    vi.mocked(jpycForwarderFor).mockReturnValue(FORWARDER);
+    setURL(`to=${MERCHANT}&token=jpyc&amount=1000`);
+    setAccount({ connected: true, chainId: polygonAmoy.id });
+    setBalance(2000n * 10n ** 18n);
+    render(<PaymentForm />);
+
+    expectNoSplitNotice();
+    await user.click(screen.getByRole('button', { name: /1000 JPYC を支払う/ }));
+    expect(relayMutate).toHaveBeenCalledOnce();
+    expect(relayMutate.mock.calls[0][0]).toEqual({
+      merchant: MERCHANT,
+      value: 1000n * 10n ** 18n,
+      gasMode: 'merchant',
+    });
+    expect(mutate).not.toHaveBeenCalled();
+    expect(standardMutate).not.toHaveBeenCalled();
+  });
+});
+
 describe('PaymentForm — 通常決済（ガス代は自分で負担） / mode=standard', () => {
   it('バッジ「通常決済（ガス代は自分で負担）」が表示される', () => {
     setURL(`to=${MERCHANT}&token=usdc&amount=10&mode=standard`);
@@ -1695,28 +1872,27 @@ describe('PaymentForm — gas=merchant モード (店主が gas を負担)', () 
     expect(call.gasReimbursement).toBe(500_000n);
   });
 
-  it('JPYC ガス無料化: split でも gas 控除なし (受取人満額按分・徴収 0)', async () => {
-    // JPYC split (非 relay sponsorship) も無徴収。受取人は gas 控除なしで満額按分され、
-    // gasReimbursement / networkFeeEquivalent はともに 0 (feeReceiver 送金なし)。gas quote が
-    // 出ても split 按分・徴収には反映されない (effectiveGasAmount=0)。
+  it('JPYC + split: 利用料 0 の sponsorship 経路で払わせない (送信 0 件・案内を出す)', async () => {
+    // 旧「JPYC ガス無料化: split でも gas 控除なし (受取人満額按分・徴収 0)」の反転 (2026-10-11 user 承認)。
+    // JPYC の split は relay を外れて Pimlico の sponsorship (利用料 0・feeReceiver 送金なし) になるため、
+    // 送信させずに「お店に QR を作り直してもらう」案内を出す。
     const user = userEvent.setup();
     const B = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
     setURL(`to=${MERCHANT}&token=jpyc&gas=merchant&amount=1000&split=${B}:50`);
     setAccount({ connected: true, chainId: polygonAmoy.id });
     setBalance(2000n * 10n ** 18n);
     setSmartAccount(true);
-    setGasQuote('ready', 2n * 10n ** 18n); // gas quote は出るが無視される
+    setGasQuote('ready', 2n * 10n ** 18n);
     setPayment('idle');
     render(<PaymentForm />);
 
-    await user.click(screen.getByRole('button', { name: /1000 JPYC を支払う/ }));
-    const call = mutate.mock.calls[0][0];
-    // distributable = 1000 - 0 (fee) - 0 (gas) = 1000, primary 50% = 500, B 50% = 500
-    expect(call.merchantAmount).toBe(500n * 10n ** 18n);
-    expect(call.extraRecipients[0].amount).toBe(500n * 10n ** 18n);
-    expect(call.feeAmount).toBe(0n);
-    expect(call.networkFeeEquivalent).toBe(0n);
-    expect(call.gasReimbursement).toBe(0n);
+    expect(screen.getByText('この QR は JPYC では支払えません')).toBeInTheDocument();
+    const btn = screen.getByRole('button', { name: 'この QR では支払えません' });
+    expect(btn).toBeDisabled();
+    await user.click(btn);
+    expect(mutate).not.toHaveBeenCalled();
+    expect(relayMutate).not.toHaveBeenCalled();
+    expect(standardMutate).not.toHaveBeenCalled();
   });
 });
 

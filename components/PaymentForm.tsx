@@ -103,6 +103,7 @@ import {
   DECIMAL_PATTERN,
   exceedsTokenPrecision,
   parsePayParams,
+  splitSupportedForToken,
   type PayParams,
 } from '@/lib/url';
 import { formatRemaining, isExpired, secondsRemaining } from '@/lib/fx';
@@ -170,7 +171,8 @@ function PaymentDetails({ params }: { params: PayParams }) {
   // standard の receipt 復元を本線に固定する。storage 読込中は下の readiness で全経路を止める。
   const standard = useStandardPayment();
 
-  // Phase 1 relay は単発 transfer のみ。split 指定時は従来の 7702 経路へ倒す (split 対応は Phase 2)。
+  // relay は単発 transfer のみ。split 指定時は relay を外し、Pimlico の 7702 経路 (USDC は erc20 / Circle) で
+  // 受取人ごとに送る。JPYC と split の組み合わせは下の splitBlock で送信させない。
   const hasSplit = !!params.split && params.split.length > 0;
 
   // 決済経路の単一情報源 (Phase 1.1)。散在していた isStandard / useRelay / useRecover / isCircle を
@@ -205,6 +207,21 @@ function PaymentDetails({ params }: { params: PayParams }) {
   // click が競合しても、進行中 attempt が standard へ差し替わる窓を作らない。
   const route = attemptRouteRef.current ?? resolvedRoute;
   const isStandard = isStandardRoute(route);
+  // 分配 (split) つきの QR を払えない組み合わせ (2026-10-11 user 承認)。送信可否 (derivePayGuards) で
+  // お金が動く前に止め、下の案内で理由を出す。
+  //   - jpyc: JPYC の relay は 1 件の送金だけで分配を送れず、分配を送れる Pimlico の sponsorship 経路は
+  //     利用料を取れない (開示している JPYC ガスレスの利用料と食い違う)。/create も JPYC では分配を出さない。
+  //     手で作った URL・旧 QR も同じく止める。
+  //   - standard: 通常決済 (useStandardPayment) は主受取人への送金 (+ 利用料) だけで、分配を黙って無視して
+  //     全額を主受取人へ送ってしまう。手で作った mode=standard&split の URL もここで止める。
+  const splitBlock: 'jpyc' | 'standard' | null = !hasSplit
+    ? null
+    : !splitSupportedForToken(params.token)
+      ? 'jpyc'
+      : isStandard
+        ? 'standard'
+        : null;
+  const splitBlocked = splitBlock !== null;
   const isErc20Paymaster = !isStandard && paymasterMode === 'erc20';
   const useRelay = isRelayRoute(route);
   const relay = useJpycEip3009Payment(deployment);
@@ -326,10 +343,10 @@ function PaymentDetails({ params }: { params: PayParams }) {
   // (recover relay、または非 relay の paymaster 見積)。free relay (OpenPay 全額負担)
   // では gas コストが無く merchant が負担するものが無いため、旧 gas=merchant QR でも
   // 負担者バナーを出さない。会計上の金額計算 (isMerchantGas) は不変。
-  // JPYC ガス無料化 (2026-06-05): JPYC のガスレスは recover (forwarder 設定) を除き
-  // 常に無料 (OpenPay が gas を全額負担し誰からも徴収しない)。relay free 経路だけでなく、
-  // 非 relay の Pimlico sponsorship 経路 (split など) も同様に無徴収とし、決済額は全額が
-  // 店主へ届く。USDC は従来どおり (顧客が paymaster に gas を支払う)。
+  // JPYC ガス無料化 (2026-06-05) の名残: JPYC のガスレスは recover (forwarder 設定) を除き
+  // 無徴収 (OpenPay が gas を全額負担)。relay free 経路と、relay の無いときの Pimlico sponsorship 経路が
+  // これに当たる。JPYC の split は sponsorship で利用料 0 になるため splitBlock で送信させない (2026-10-11)。
+  // USDC は従来どおり (顧客が paymaster に gas を支払う)。
   const isJpyc = deployment.symbol === 'jpyc';
   // 「店主がガスを負担」表示が実態に合うのは、実際に gas コストが店主に転嫁される経路
   // のみ (USDC で gas=merchant、または JPYC recover)。JPYC の無料経路 (relay free /
@@ -371,8 +388,8 @@ function PaymentDetails({ params }: { params: PayParams }) {
     [amountWei, params.token, effectiveMode, effectiveGas, effectiveGasAmount],
   );
 
-  // standard mode では split は無視 (シンプルな EOA 直列 transfer に限定)。
-  // gas 軸は calcBreakdown と同じ effectiveGasAmount を使う (JPYC は無料経路で 0 のため
+  // standard mode の送金は主受取人だけ (EOA 直列 transfer)。split つきの QR は standard で送信させない
+  // (splitBlock)。gas 軸は calcBreakdown と同じ effectiveGasAmount を使う (JPYC は無料経路で 0 のため
   // 受取人の按分・顧客 outflow が gas で目減りしない。raw gasAmount を使うと JPYC split で
   // gasReimbursement=0 と矛盾し受取人が過少配分になる)。
   const splitBreakdown = useMemo(() => {
@@ -480,6 +497,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
     merchantUnderflow,
     expired,
     timeMeasured,
+    splitBlocked,
   });
   const standardUnknownTxHash = standard.isFeeUnknown
     ? standard.feeTxHash
@@ -502,6 +520,11 @@ function PaymentDetails({ params }: { params: PayParams }) {
       : gasless.error;
   const saFallback =
     !isStandard && !useRelay && isIncompatibleSmartAccountError(saError);
+  // split つきの QR の案内。splitBlock (送信させない組み合わせ) に加え、ガスレスの準備ができていない
+  // ウォレット (saFallback) には「通常決済へ切替」を出さず (分配を無視して全額を主受取人へ送るため)、
+  // その理由を出す ('wallet' は表示だけ・送信は saData が無いので元から止まる)。
+  const splitNotice: 'jpyc' | 'standard' | 'wallet' | null =
+    splitBlock ?? (hasSplit && saFallback ? 'wallet' : null);
   // 送信は成立したがチェーン上で revert したケース。gasless/relay は data.success===false、
   // standard は phase=*-error だが receipt 自体は成功 (status=reverted) なので Error が無い。
   // どれも success panel も error も出ず「無反応」に見える穴を、明示メッセージで塞ぐ。
@@ -849,7 +872,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
     primeChimeAudio();
     if (isStandard) {
       // standard mode: EOA から merchant transfer + fee transfer の 2 件直列。
-      // split は標準モードでは無効化されているため breakdown を直接使う。
+      // split つきの QR は standard で送信させない (splitBlock) ため breakdown を直接使う。
       standard.mutate({
         tokenAddress: deployment.address,
         merchant: params.to,
@@ -929,8 +952,8 @@ function PaymentDetails({ params }: { params: PayParams }) {
       : undefined;
 
   // 「署名安心 UX」(plans/sign-reassurance-ux.md・P1+P2)。経路別に kind を出し分ける
-  // (計画 §3.3 経路別コピーマトリクス・署名内容は不変・表示のみ)。Pimlico 7702 経路 (split の
-  // 非 relay JPYC など) はスコープ外なので出さない (計画 §2)。
+  // (計画 §3.3 経路別コピーマトリクス・署名内容は不変・表示のみ)。Pimlico 7702 経路 (USDC の erc20 など。
+  // JPYC の split は splitBlock で送信させない) はスコープ外なので出さない (計画 §2)。
   //   (a) relay free (forwarder 未設定): jpyc-relay-free フルパネル。preview は relay.mutate
   //       ({ merchant: params.to, value: amountWei }) と同一変数から導出し、ウォレットに出る
   //       生の数字 (value) と OpenPay 表示の乖離をゼロにする。testnet 等 forwarder 無し chain 用。
@@ -1136,6 +1159,26 @@ function PaymentDetails({ params }: { params: PayParams }) {
         </div>
       )}
 
+      {/* 分配 (split) つきの QR を払えない組み合わせの案内。送信は derivePayGuards の splitBlocked で止める。 */}
+      {splitNotice && (
+        <div className="rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
+          <p className="font-semibold">
+            {splitNotice === 'jpyc'
+              ? t('splitBlockedJpycTitle')
+              : splitNotice === 'standard'
+                ? t('splitBlockedStandardTitle')
+                : t('splitBlockedWalletTitle')}
+          </p>
+          <p className="mt-1 text-xs">
+            {splitNotice === 'jpyc'
+              ? t('splitBlockedJpycBody')
+              : splitNotice === 'standard'
+                ? t('splitBlockedStandardBody')
+                : t('splitBlockedWalletBody')}
+          </p>
+        </div>
+      )}
+
       {isStandard && (
         <div className="rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
           <p className="font-semibold">{t('standardModeTitle')}</p>
@@ -1147,7 +1190,8 @@ function PaymentDetails({ params }: { params: PayParams }) {
         </div>
       )}
 
-      {saFallback && (
+      {/* split つきの QR では「通常決済へ切替」を出さない (上の splitNotice が理由を案内する)。 */}
+      {saFallback && !hasSplit && (
         <SmartAccountFallbackBanner
           delegateAddress={saError.delegateAddress}
           nativeToken={nativeToken}
@@ -1352,10 +1396,10 @@ function PaymentDetails({ params }: { params: PayParams }) {
 
       <button
         type="button"
-        // 未接続時 (期限切れ除く): 押せない「ウォレットを接続」を解消し、タップで
+        // 未接続時 (期限切れ・split を払えない QR を除く): 押せない「ウォレットを接続」を解消し、タップで
         // ウォレット選択へスクロール (#266 CheckoutForm と同型・決済フロー不変)。
         onClick={
-          !expired && !isConnected
+          !expired && !splitBlocked && !isConnected
             ? () =>
                   walletSectionRef.current?.scrollIntoView({
                     behavior: 'smooth',
@@ -1363,7 +1407,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
                   })
             : onSubmit
         }
-        disabled={(expired || isConnected) && !canSubmit}
+        disabled={(expired || splitBlocked || isConnected) && !canSubmit}
         className="w-full rounded-xl bg-brand px-4 py-3 text-base font-semibold text-white shadow hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-50"
       >
         {flowPending
@@ -1372,6 +1416,8 @@ function PaymentDetails({ params }: { params: PayParams }) {
             : t('btnSending')
           : expired
             ? t('btnExpired')
+            : splitBlocked
+            ? t('btnSplitBlocked')
             : !isConnected
             ? t('btnConnect')
             : wrongChain

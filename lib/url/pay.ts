@@ -10,6 +10,7 @@
 //          旧名 "direct" は廃止。"direct" を受けたら "standard" に正規化する
 //          legacy alias を parser で提供 (既発行 QR の互換維持)。
 //   split  (任意, "0xB:30,0xC:20" 形式) — 追加受取人と分配 %。to が残余 % を取得
+//          USDC のガスレスだけ。JPYC や mode=standard との組み合わせも parse は通すが、/pay が送信させない
 //   disc   (任意) — amount に含まれる値引き (値引き前 = amount + disc)。表示と記録だけに使い、支払いの正本は
 //          amount のまま (plans/discount-common.md)。金額ありの QR だけ・為替換算 (refAmt) とは併用しない
 //
@@ -57,6 +58,14 @@ export type SplitEntry = {
 };
 
 export const SPLIT_MAX_ENTRIES = 3;
+
+// 売上の自動分配 (split) を使える通貨か。JPYC は使えない: JPYC の relay (EIP-3009) は 1 件の送金だけで
+// 分配を送れず、分配を送れる経路は OpenPay がガスを負担する Pimlico の sponsorship だけになり、利用料を
+// 取れない (開示している JPYC ガスレスの利用料と食い違う)。/create は JPYC のとき分配の欄を出さず URL にも
+// 入れない。/pay は JPYC と split の QR を送信させない (parser は通す = 案内を出せる・旧 QR を読める)。
+export function splitSupportedForToken(token: TokenSymbol): boolean {
+  return token !== 'jpyc';
+}
 
 // /pay・/checkout の記帳補助メタ (任意) の length cap。URL/QR 肥大化と自由入力の攻撃面を制限。
 export const PAY_PRODUCT_NAME_MAX = 80;

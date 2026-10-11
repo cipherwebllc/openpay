@@ -14,6 +14,7 @@ import type {
 //   (preflight の切替と競合して route が変わっても二重払いへ波及させない)。
 // - 動的 QR の FX 期限 (expired / 時刻計測前) で送信を止める (Pay だけ)。
 // - cross-chain 実行中/完了と Arc の回復 scan 完了前は直接送金を止める。
+// - 分配 (split) つきの QR を JPYC・通常決済で払う組み合わせを止める (Pay だけが split を持つ)。
 
 export type PayGuardInput = SubmitReadinessInput & {
   isStandard: boolean;
@@ -37,6 +38,8 @@ export type PayGuardInput = SubmitReadinessInput & {
   merchantUnderflow: boolean;
   expired: boolean;
   timeMeasured: boolean;
+  // split つきの QR を JPYC・通常決済 (standard) で払おうとしている (PaymentForm の splitBlock)。
+  splitBlocked: boolean;
 };
 
 export function derivePayGuards({
@@ -60,6 +63,7 @@ export function derivePayGuards({
   merchantUnderflow,
   expired,
   timeMeasured,
+  splitBlocked,
 }: PayGuardInput) {
   // relay 送信中に preflight の切替操作と競合して route が standard へ変わっていても、
   // response-unknown / IP 制限の再送封鎖を外さないため current route とは独立に判定する。
@@ -128,7 +132,10 @@ export function derivePayGuards({
     !expired &&
     // exp 付き QR は now 計測 (effect 後) まで送信不可 = 計測前 (expired=false) の
     // 初回フレームで既期限切れ QR が送信される窓を塞ぐ。
-    (params.expiresAt === undefined || timeMeasured);
+    (params.expiresAt === undefined || timeMeasured) &&
+    // split つきの QR は JPYC (利用料を取れない sponsorship 経路になる) と通常決済 (分配を無視して全額を
+    // 主受取人へ送る) では送信させない (どちらの組み合わせかは PaymentForm の splitBlock が決める)。
+    !splitBlocked;
   return {
     relayAmbiguous,
     gaslessAmbiguous,
