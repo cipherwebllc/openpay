@@ -1269,12 +1269,16 @@ function PaymentDetails({ params }: { params: PayParams }) {
                   },
           )}
           <div className="my-2 border-t border-slate-200" />
+          {/* 払えない QR (splitBlock) では手数料の行を出さないので、合計のラベルも手数料に触れない
+              「顧客支払額」(既存の customerMerchantGas) にそろえる。 */}
           {breakdownRow({
-            label: isStandard
-              ? t('customerStandard', { nativeToken })
-              : isMerchantGas
-                ? t('customerMerchantGas')
-                : t('customerCustomerGas'),
+            label: splitBlocked
+              ? t('customerMerchantGas')
+              : isStandard
+                ? t('customerStandard', { nativeToken })
+                : isMerchantGas
+                  ? t('customerMerchantGas')
+                  : t('customerCustomerGas'),
             value: fmt(totalCustomerOutflow),
             strong: true,
           })}

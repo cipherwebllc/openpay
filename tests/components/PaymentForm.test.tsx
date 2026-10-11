@@ -1033,6 +1033,12 @@ describe('PaymentForm — 分配 (split) つきの QR を払えない組み合�
     }
   }
 
+  // 明細の合計行 (区切り線の後の行) のラベル。
+  function totalRowLabel(): string | null {
+    const dts = Array.from(document.querySelectorAll('dl dt'));
+    return dts[dts.length - 1]?.textContent ?? null;
+  }
+
   it('JPYC + split (relay recover が使える chain): relay にも sponsorship にも乗せず送信 0 件・案内を出す', () => {
     vi.mocked(resolveJpycGaslessProvider).mockReturnValue('eip3009-relay');
     vi.mocked(jpycForwarderFor).mockReturnValue(FORWARDER);
@@ -1069,6 +1075,19 @@ describe('PaymentForm — 分配 (split) つきの QR を払えない組み合�
     expect(screen.queryByText('ネットワーク手数料')).toBeNull();
     expect(screen.queryByText(/無料 \(OpenPay が負担\)/)).toBeNull();
     expect(screen.queryByText(/OpenPay が負担するため/)).toBeNull();
+    // 合計のラベルも手数料に触れない既存の「顧客支払額」(customerMerchantGas) にそろえる。
+    expect(totalRowLabel()).toBe('顧客支払額');
+  });
+
+  it('JPYC + split (en): 合計のラベルは既存の「You pay」', () => {
+    setURL(`to=${MERCHANT}&token=jpyc&amount=1000&split=${B}:30`);
+    setAccount({ connected: true, chainId: polygonAmoy.id });
+    setBalance(2000n * 10n ** 18n);
+    setSmartAccount(true);
+    render(<PaymentForm />, { locale: 'en' });
+
+    expect(screen.getByText("This QR can't be paid in JPYC")).toBeInTheDocument();
+    expect(totalRowLabel()).toBe('You pay');
   });
 
   it('USDC + split + mode=standard: ネットワーク手数料の行と通常決済の注記を出さない', () => {
@@ -1081,6 +1100,7 @@ describe('PaymentForm — 分配 (split) つきの QR を払えない組み合�
     expect(screen.queryByText('ネットワーク手数料')).toBeNull();
     expect(screen.queryByText('ウォレットで支払い')).toBeNull();
     expect(screen.queryByText(/ウォレットで transfer を 1 件承認します/)).toBeNull();
+    expect(totalRowLabel()).toBe('顧客支払額');
   });
 
   it('JPYC + split + 未接続: 「ウォレットを接続」へ誘導せず、押せない', () => {
@@ -1181,6 +1201,7 @@ describe('PaymentForm — 分配 (split) つきの QR を払えない組み合�
     // 払える QR はネットワーク手数料の行と注記を従来どおり出す。
     expect(screen.getByText(/^ネットワーク手数料見積 \(顧客負担\)/)).toBeInTheDocument();
     expect(screen.getByText(/OpenPay は負担しません。3 件の送金/)).toBeInTheDocument();
+    expect(totalRowLabel()).toBe('顧客支払額 (請求金額 + ネットワーク手数料見積)');
     await user.click(screen.getByRole('button', { name: /100 USDC を支払う/ }));
     expect(mutate).toHaveBeenCalledOnce();
     const call = mutate.mock.calls[0][0];
