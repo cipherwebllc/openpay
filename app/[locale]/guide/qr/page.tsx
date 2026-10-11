@@ -173,7 +173,7 @@ export default async function GuideQrPage({
 
         <Section title={c.currenciesTitle}>
           <p className="mt-3 text-sm leading-relaxed text-slate-700">
-            {tLanding('faqA2')}
+            {tLanding('faqA2', LANDING_PAYMENT_FEE_VALUES)}
           </p>
         </Section>
 

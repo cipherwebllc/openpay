@@ -12,6 +12,7 @@
 // (recoverFee.ts ではなく env から読むことで、recoverFee を mock する下流テストに影響しない)。
 // forwarderConfig / env は legal を import し返さないため循環は生じない (legal → {forwarderConfig, env})。
 
+import { formatUnits } from 'viem';
 import { polygon, kaia, avalanche, base } from 'viem/chains';
 import { relayGasFeeValue } from '@/lib/relay/forwarderConfig';
 import { STOREFRONT_FEE_BPS, PREORDER_FEE_BPS } from '@/lib/mobileOrderFee';
@@ -140,7 +141,11 @@ export const LEGAL_ENTITY = {
   //   ② AI エージェント等が x402 ファシリテーターで支払うモバイル注文には、モバイル注文システム利用料ではなく x402
   //   ファシリテーター利用料のみを適用する (買い手が上乗せ・店主は注文額をそのまま受領) 旨を明記 (第 5 条 (8)(9))。
   //   どちらも本番の分配はこの改定の前から同じ。
-  termsEffectiveDate: '2026-10-11',
+  // 2026-10-12 改定 (料金は変えず、開示を実装に合わせる・Terms/特商法の 2 文書): 他のチェーンから Arc 以外のチェーン宛てに
+  //   支払う (Circle CCTP V2) とき、Circle の転送手数料 (上限は決済額の 0.1%・1 USDC 未満は 0.001 USDC。DISCLOSED_CCTP_FEE) が
+  //   店主の受取額から差し引かれ、顧客が支払う USDC には上乗せされず、当社は徴収しない旨を明記 (第 5 条 (3))。本番の挙動は
+  //   この改定の前から同じ。免責事項は Arc 宛ての転送手数料にも触れていないため据置。施行日は仮置き (user の承認日で確定する)。
+  termsEffectiveDate: '2026-10-12',
   // 2026-07-29 改定: 非公開チップメッセージ (質問箱 Phase 1) の取得項目 (2-1(7))・
   //   利用目的 (2-2(9))・保管期間 (最長 180 日+本人削除) を追加。実質的改定のため施行日を更新。
   // 2026-09-10 改定案: 購入歴のない保有者も含む配布先へのチケット情報の提供を明示。
@@ -150,7 +155,9 @@ export const LEGAL_ENTITY = {
   // 2026-10-08 改定: 「お店がガス代を肩代わりして送る」の新設 (Terms と同日)。
   // 2026-10-11 改定: JPYC のチップのガス相当額の行き先・AI エージェントが x402 で支払うモバイル注文の利用料 (Terms と同日)。
   disclaimerEffectiveDate: '2026-10-11',
-  tokuteiEffectiveDate: '2026-10-11',
+  // 特商法は上の 2026-10-07・10-08・10-11 の改定 (Terms と同日) に加え、2026-10-12 改定: 他のチェーンから Arc 以外の
+  //   チェーン宛てに支払うときの Circle の転送手数料 (「対価以外の費用」・Terms と同日)。
+  tokuteiEffectiveDate: '2026-10-12',
   // モバイル注文システム利用料の施行日 (本利用料を新設した開示の公表日)。doc 全体の施行日 (上記
   // 2026-06-13) とは別管理 — 本利用料は新規・任意の付加機能 (モバイル注文) に対する個別条項で、機能の
   // 提供開始 (flag 点灯) まで実際の徴収は発生しない。本文は本定数の日付を補間して表示する。
@@ -362,6 +369,34 @@ export const DISCLOSED_TIP_FEE_MODELS = {
   usdcArc: 'standard-usdc-network-fee-no-openpay-fee',
 } as const;
 
+// 他のチェーンの USDC から Arc 以外のチェーン宛てに払う (Circle CCTP V2 Fast・Arc 宛ての forwarding ではない) とき、
+// Circle の転送手数料が受け取る側の受取額から差し引かれる。その上限の開示 SOT。顧客は請求額をそのまま burn し、
+// mint される額が「請求額 − Circle の手数料」になる (lib/crossChain/executeCctp.ts)。上限は lib/crossChain/cctp.ts の
+// maxFee (金額 × maxFeeBps、ただし minMaxFeeAtomic を下回らない) で、実際の額は Circle が定める (2026-10-11 の Iris
+// API で Fast 0〜2 bps)。OpenPay の利用料は無い (lib/fee.ts の FEE_BPS_STANDARD = 0)。
+// 規約 第 5 条 (3)・特商法「対価以外の費用」・LP の FAQ (faqA2)・料金ページはこの値から描き、tests/app/cctpFeeDisclosure.test.tsx が
+// 文と cctp.ts の実装の上限との一致を見る。静的な public/llms.txt は tests/lib/llmsTxtDisclosure.test.ts がこの値と照合する。
+// ⚠️ 上限を変える = 開示の変更ゆえ、上の文書を同じ PR で直し、規約の施行日を上げること。
+export const DISCLOSED_CCTP_FEE = {
+  maxFeeBps: 10,
+  minMaxFeeAtomic: 1_000,
+  usdcDecimals: 6,
+} as const;
+
+/** 開示文に差し込む値 (ja/en 共通の文字列): 上限の割合 (%)・少額での上限 (USDC)・少額の境目 (USDC)。
+ *  ICU の補間は messages の Landing.faqA2・Terms.article5・Tokutei.rows.additionalFees が使う。
+ *  料金ページは @/lib/legal を差し替えるテストのため、定数を引数で渡す。 */
+export function cctpFeeDisclosureValues(
+  fee: { readonly maxFeeBps: number; readonly minMaxFeeAtomic: number; readonly usdcDecimals: number } = DISCLOSED_CCTP_FEE,
+) {
+  const minAtomic = BigInt(fee.minMaxFeeAtomic);
+  return {
+    cctpMaxPercent: String(fee.maxFeeBps / 100),
+    cctpSmallCapUsdc: formatUnits(minAtomic, fee.usdcDecimals),
+    cctpSmallBelowUsdc: formatUnits((minAtomic * 10_000n) / BigInt(fee.maxFeeBps), fee.usdcDecimals),
+  };
+}
+
 // LP / 導入ガイドの補間値。通常決済の無料表記からはモバイル注文を除く。下記は開示数値の参照のみで
 // 徴収額を変えない。レジの通常決済の利用料 (registerPercent) は 2026-10-07 に廃止 (本番
 // NEXT_PUBLIC_ENABLE_REGISTER_FEE=OFF と同一リリース)。その後 flag と claim route もコードから削除した
@@ -372,4 +407,6 @@ export const LANDING_PAYMENT_FEE_VALUES = {
   tipFloor: DISCLOSED_TIP_FEE_MODELS.jpycRelay.floorJpyc,
   storefrontPercent: DISCLOSED_MOBILE_ORDER_FEE.storefrontBps / 100,
   preorderPercent: DISCLOSED_MOBILE_ORDER_FEE.preorderBps / 100,
+  // FAQ (faqA2) の他チェーンから払うときの Circle の転送手数料の上限。
+  ...cctpFeeDisclosureValues(),
 } as const;

@@ -14,7 +14,8 @@
 // - chain 名 (chainNameForId、Avalanche/Unichain 等の buyer-only も解決可能)
 // - balance (USDC)
 // - path badge (direct / gateway / cctp-v2) + ETA
-// - 手数料内訳: USDC service fee + native gas (token symbol で表示、USD 換算なし)
+// - 手数料内訳: USDC service fee + native gas (token symbol で表示、USD 換算なし)。
+//   CCTP V2 (Arc 以外の宛先) の service fee は上限 (maxFee) で、受け取る側の着金から差し引かれる。
 //
 // 注: native gas を JPY/USD 換算するとレート source の運用負担が増えるため、
 // MVP では gas units + token symbol で表示。実機運用後に簡易換算 (env で
@@ -142,9 +143,12 @@ function OptionRow({
           ETA」を比較用に表示する。 */}
       {option.disabledReason && <p>{t(option.disabledReason === 'quote-unavailable' ? 'quoteUnavailable' : 'insufficientBalance')}</p>}
       {option.acceptedQuote && <p>{t('forwardTotal', { total: formatUnits(BigInt(option.acceptedQuote.grossAtomic), displayDecimals), fee: feeStr })}</p>}
+      {/* CCTP V2 (Arc 以外の宛先・見積なし) は請求額をそのまま burn し、Circle の転送手数料は受け取る側の
+          mint 額から引かれる。serviceFeeAtomic は calldata の maxFee と同じ式の上限なので「最大」と書き、
+          支払う側に上乗せされないことを示す。Arc 宛て (acceptedQuote あり) と Gateway は従来の表示。 */}
       {option.kind !== 'direct' && option.disabledReason !== 'quote-unavailable' && (
         <div className="mt-0.5 text-[11px] text-slate-500">
-          {t('feeBreakdownCrossChain', {
+          {t(option.kind === 'cctp-v2' && !option.acceptedQuote ? 'feeBreakdownCctp' : 'feeBreakdownCrossChain', {
             fee: feeStr,
             gasSymbol,
             eta: option.etaSeconds,

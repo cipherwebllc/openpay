@@ -115,7 +115,7 @@ export default async function GuideStartPage({
     if (section.slot === 'chains') {
       return (
         <p className="mt-4 rounded-2xl bg-slate-50 px-4 py-3 text-sm leading-relaxed text-slate-700">
-          {tLanding('faqA2')}
+          {tLanding('faqA2', LANDING_PAYMENT_FEE_VALUES)}
         </p>
       );
     }

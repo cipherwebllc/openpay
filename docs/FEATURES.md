@@ -176,6 +176,7 @@ Optional chain-abstraction via Circle Gateway / CCTP V2 is available as an augme
 Arc can be paid *into* from those chains via Circle forwarding (buyer-paid Circle fee), but is never a source. The print poster lists all 11 so customers know up-front which wallet works.
 
 Circle Gateway / CCTP V2 forwards the value to the merchant's selected receiving chain (~5–30 seconds end-to-end depending on path; Arc forwarding can take longer and has a separately quoted buyer-paid Circle forwarding fee).
+For destinations other than Arc (CCTP V2), the buyer burns exactly the invoiced amount and Circle's transfer fee (set by Circle, capped at 0.1% of the payment, or 0.001 USDC for payments under 1 USDC — `DISCLOSED_CCTP_FEE`) is deducted from what the merchant receives; OpenPay charges no fee on this path (Terms Article 5 (3)).
 
 > **Cross-chain is "gas-on" for the buyer.** Eligible same-chain payments are gasless (the buyer pays gas in USDC via the paymaster).
 
@@ -191,7 +192,7 @@ When a customer scans a USDC QR and has USDC on multiple chains, the payment pag
 
 - Chain name + the customer's USDC balance on that chain
 - Path badge: **Direct** (same chain as merchant, no bridge fee) · **Fast (Gateway)** (Circle Gateway, ~5s) · **Standard (CCTP V2)** (~30s)
-- Fee breakdown (cross-chain paths only): Circle bridge fee + network gas token (e.g. `ブリッジ手数料 0.005 USDC + ガス代 (ETH)`) + ETA. The Direct (same-chain) option shows no extra fee line.
+- Fee breakdown (cross-chain paths only): Circle fee + network gas token + ETA. For CCTP V2 the fee is shown as its cap and as deducted from what the recipient receives (e.g. `転送手数料 最大 0.01 USDC（受け取る側の着金から差し引き）+ ガス代 (ETH)`); Gateway and Arc forwarding show the bridge fee (e.g. `ブリッジ手数料 0.01 USDC + ガス代 (ETH)`). The Direct (same-chain) option shows no extra fee line.
 - A note that cross-chain paths need the source chain's native gas (ETH/POL) — USDC alone is not enough
 - Pre-selected default = the auto-picked best path (direct preferred, else gateway, else CCTP V2), but the customer can override
 

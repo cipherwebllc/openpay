@@ -37,6 +37,10 @@ vi.mock('@/lib/legal', async (importOriginal) => ({
     preorderPercent: 4,
     // チップカードの本文 (supportFeeTipBody) もガス相当額を差し込む (2026-10-11)。
     tipFloor: 7,
+    // 対応チェーンの説明 (faqA2) は他チェーンから払うときの Circle の転送手数料の上限を差し込む (2026-10-12)。
+    cctpMaxPercent: '0.25',
+    cctpSmallCapUsdc: '0.005',
+    cctpSmallBelowUsdc: '2',
   },
 }));
 
@@ -55,7 +59,16 @@ describe.each(['ja', 'en'] as const)('%s: rendered public fee disclosure', (loca
     const { container } = render(await surface());
     expect(container).toHaveTextContent('1.7%');
     expect(container).toHaveTextContent('5 JPYC');
-    expect(container.textContent).not.toMatch(/\{(?:recover|register|storefront|preorder|tip)/);
+    expect(container.textContent).not.toMatch(/\{(?:recover|register|storefront|preorder|tip|cctp)/);
+  });
+
+  // 導入前チェックリストと決済QRガイドは、トップの FAQ と同じ対応チェーンの説明 (faqA2) を描く。
+  it.each(surfaces.filter(([name]) => name === 'QR guide' || name === 'start guide'))('%s: chains text interpolates the Circle transfer fee cap', async (_, surface) => {
+    context.locale = locale;
+    const { container } = render(await surface());
+    expect(container).toHaveTextContent(locale === 'ja'
+      ? '決済額の最大 0.25%・2 USDC 未満は最大 0.005 USDC'
+      : 'up to 0.25% of the payment; up to 0.005 USDC for payments under 2 USDC');
   });
 
   // チップカードは トップ (LandingSupport) と導入前チェックリスト (start guide) に出る。本文の数字は直書きせず、

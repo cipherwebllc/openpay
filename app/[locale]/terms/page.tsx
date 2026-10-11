@@ -2,7 +2,7 @@
 
 import { useTranslations } from 'next-intl';
 import { LegalPageShell, LegalSection } from '@/components/LegalPageShell';
-import { LEGAL_ENTITY } from '@/lib/legal';
+import { LEGAL_ENTITY, cctpFeeDisclosureValues } from '@/lib/legal';
 
 const ARTICLES = [
   'article1',
@@ -30,6 +30,8 @@ export default function TermsPage() {
   // 賠償上限 (第9条) は lib/legal.ts の SoT を固定ロケールで 1 回整形し、ja/en の
   // 双方へ同一文字列として注入する (locale 間で表記が乖離しないことを構造保証)。
   const liabilityCap = LEGAL_ENTITY.liabilityCapJpy.toLocaleString('en-US');
+  // 第5条 (3) の Circle の転送手数料の上限も lib/legal.ts の SoT (DISCLOSED_CCTP_FEE) から差し込む。
+  const cctpFee = cctpFeeDisclosureValues();
 
   return (
     <LegalPageShell
@@ -45,7 +47,9 @@ export default function TermsPage() {
           body={
             k === 'article9'
               ? t(`${k}.body`, { amount: liabilityCap })
-              : t(`${k}.body`)
+              : k === 'article5'
+                ? t(`${k}.body`, cctpFee)
+                : t(`${k}.body`)
           }
         />
       ))}
