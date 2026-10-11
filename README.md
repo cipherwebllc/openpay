@@ -34,6 +34,7 @@ Full feature list: [docs/FEATURES.md](./docs/FEATURES.md).
 
 **日本語の概要**: 店舗は、金額・トークン・チェーン・受取先を固定した QR を作るだけで、お客様のウォレットから直接入金を受け取れます（アカウント登録は不要・OpenPay は資金を預かりません）。
 JPYC はどのウォレットでもガス代なしで支払えます（USDC のガス代なし決済は EIP-7702 スマートアカウントのウォレットのみで、通常のウォレットは通常決済になります）。
+JPYC のガス代なし決済では、お店側に 1 回ごとの OpenPay 利用料がかかります（詳しくは [Fees](#fees)）。
 機能の全文は [docs/FEATURES.md](./docs/FEATURES.md) にあります。
 
 ## Fees
