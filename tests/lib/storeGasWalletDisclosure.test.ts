@@ -61,10 +61,14 @@ describe('「お店がガス代を肩代わりして送る」の開示 (DISCLOSE
     expect(storeDeviceChainIds()).toEqual([...D.chainIds]);
   });
 
-  it('施行日 (Terms・特商法・免責・プライバシー) は新設日と同じ', () => {
-    expect(LEGAL_ENTITY.termsEffectiveDate).toBe(D.effectiveDate);
-    expect(LEGAL_ENTITY.tokuteiEffectiveDate).toBe(D.effectiveDate);
-    expect(LEGAL_ENTITY.disclaimerEffectiveDate).toBe(D.effectiveDate);
+  // 新設日に 4 文書を改定した。そのあとの改定で施行日が進むのはよい (この経路の条項を含む版のまま) が、
+  // 新設日より前に戻すと、この経路を書いていない版の日付になる。プライバシーはそのあと改定していないので同じ日のまま。
+  // (2026-10-11 に Terms・特商法・免責を、チップの行き先と AI エージェントの x402 モバイル注文の開示で改定した)
+  it('施行日 (Terms・特商法・免責・プライバシー) は新設日以降 (プライバシーは新設日と同じ)', () => {
+    for (const date of [LEGAL_ENTITY.termsEffectiveDate, LEGAL_ENTITY.tokuteiEffectiveDate, LEGAL_ENTITY.disclaimerEffectiveDate]) {
+      expect(date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      expect(date >= D.effectiveDate, `${date} は新設日 ${D.effectiveDate} 以降`).toBe(true);
+    }
     expect(LEGAL_ENTITY.privacyEffectiveDate).toBe(D.effectiveDate);
   });
 

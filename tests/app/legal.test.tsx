@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { screen } from '@testing-library/react';
+import { createTranslator } from 'next-intl';
 import { renderWithIntl } from '../_helpers/i18n';
+import { expectTipFeeScopedByToken } from '../_helpers/tipDisclosure';
 import TermsPage from '@/app/[locale]/terms/page';
 import PrivacyPage from '@/app/[locale]/privacy/page';
 import DisclaimerPage from '@/app/[locale]/disclaimer/page';
@@ -13,6 +15,7 @@ import {
   DISCLOSED_STORE_USDC_PAYMENT,
   DISCLOSED_DUAL_RAIL_USDC,
   DISCLOSED_LICENSE_NFT,
+  LANDING_PAYMENT_FEE_VALUES,
 } from '@/lib/legal';
 import { TOKEN_DEPLOYMENTS } from '@/lib/tokens';
 import { USDC_CHAINS, arc, arcTestnet, chainForSlug } from '@/lib/chains';
@@ -60,7 +63,7 @@ describe('Legal pages', () => {
         : ['seller operates', 'availability', '60 seconds', 'wallet address, product, revision and timestamps', 'does not store or serve', 'responsible for delivery', '(6)', 'third parties', 'not immediately recalled', 'holder without a purchase history', '(14)', '(7)', '(11)']) expect(clause).toContain(text);
       renderWithIntl(<TermsPage />, { locale });
       expect(screen.getByText((_, element) => element?.tagName === 'P' && !!element.textContent?.includes('(18)'))).toHaveTextContent(clause);
-      expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-10-08');
+      expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-10-11');
       expect(messages.Privacy.section3.body).toContain(locale === 'ja' ? '購入歴のないライセンス保有者' : 'license holders without a purchase history');
       expect(LEGAL_ENTITY.privacyEffectiveDate).toBe('2026-10-08');
     });
@@ -86,7 +89,7 @@ describe('Legal pages', () => {
       expect(clause(ja, 17)).toContain('公開台帳'); expect(clause(en, 17)).toContain('public ledger');
       expect(clause(ja, 17)).toContain('公開 Verify API'); expect(clause(en, 17)).toContain('public Verify API');
       expect(clause(ja, 16)).toContain('法的適合性の認定を意味しません'); expect(clause(en, 16)).toContain('not legal clearance');
-      expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-10-08');
+      expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-10-11');
     });
     it('ja: h1 と 11 条すべての title が render される', () => {
       renderWithIntl(<TermsPage />, { locale: 'ja' });
@@ -748,9 +751,11 @@ describe('Legal pages', () => {
       // 2026-09-10 改定案: 保護配布の第13条 (18) 追記 (公開前承認対象)。
       // 2026-10-07: レジの通常決済の利用料の廃止で Terms/特商法/免責を同日改定。
       // 2026-10-08: 「お店がガス代を肩代わりして送る」の新設で Terms/特商法/免責/プライバシーを同日改定。
-      expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-10-08');
-      expect(LEGAL_ENTITY.tokuteiEffectiveDate).toBe('2026-10-08');
-      expect(LEGAL_ENTITY.disclaimerEffectiveDate).toBe('2026-10-08');
+      // 2026-10-11: JPYC のチップのガス相当額の行き先・AI エージェントが x402 で払うモバイル注文の利用料を
+      //   実装どおりに明記 (料金は変えない) するため Terms/特商法/免責を同日改定。プライバシーは据置。
+      expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-10-11');
+      expect(LEGAL_ENTITY.tokuteiEffectiveDate).toBe('2026-10-11');
+      expect(LEGAL_ENTITY.disclaimerEffectiveDate).toBe('2026-10-11');
       // 2026-09-10 改定案: 保護配布のチケット情報の第三者提供を追記。
       expect(LEGAL_ENTITY.privacyEffectiveDate).toBe('2026-10-08');
     });
@@ -1500,20 +1505,59 @@ it('Arc の USDC 決済 (通常決済のみ・顧客が USDC でネットワー�
 describe('three disclosed tip fee models', () => {
   it.each(['ja', 'en'] as const)('%s: every surface distinguishes JPYC, Base and Arc', async (locale) => {
     const m = locale === 'ja' ? (await import('@/messages/ja.json')).default : (await import('@/messages/en.json')).default;
-    const surfaces = [m.Landing.supportFeeTipBody, m.Landing.faqA1,
-      m.Terms.article5.body.split('(2)')[0], m.Tokutei.rows.price.value, m.Disclaimer.section7.body];
+    // トップのチップカードは数字を ICU で差し込むので、描画と同じ値で整形してから見る。
+    const landing = createTranslator({ locale, messages: m, namespace: 'Landing', onError: (error) => { throw error; } });
+    const surfaces = [
+      ['トップのチップカード', landing('supportFeeTipBody', LANDING_PAYMENT_FEE_VALUES)],
+      ['FAQ (faqA1)', m.Landing.faqA1],
+      ['規約 第 5 条 (1)', m.Terms.article5.body.split('(2)')[0]],
+      ['特商法 役務の対価', m.Tokutei.rows.price.value],
+      ['免責 §7', m.Disclaimer.section7.body],
+    ] as const;
     expect(DISCLOSED_TIP_FEE_MODELS.usdcBase).toBe('paymaster-usdc');
     expect(DISCLOSED_TIP_FEE_MODELS.usdcArc).toBe('standard-usdc-network-fee-no-openpay-fee');
-    for (const text of surfaces) {
+    for (const [label, text] of surfaces) {
       expect(text).toContain(`${DISCLOSED_TIP_FEE_MODELS.jpycRelay.floorJpyc} JPYC`);
       expect(text).toMatch(/USDC \(Base\)[^.。]*Paymaster/);
       expect(text).toContain('USDC (Arc)');
       expect(text).toContain(locale === 'ja' ? 'ネットワーク手数料を USDC でウォレットから直接負担' : 'network fees directly in USDC from their wallet');
       expect(text).toContain(locale === 'ja' ? 'いずれも OpenPay の徴収はありません' : 'OpenPay collects nothing for any of these tips');
       expect(text).not.toMatch(/チップは(?:すべて|全て|全種類).*ガス不要|all tips (?:are )?(?:gasless|gas.free)/i);
+      // 2026-10-11 (D1): JPYC のガス相当額の行き先を書き、「徴収なし」は USDC の文に限る。
+      expectTipFeeScopedByToken(text, locale, label);
     }
     const standardClause = m.Terms.article5.body.split('(3)')[1].split('(4)')[0];
     expect(standardClause).toContain('Arc');
     expect(standardClause).toContain('USDC');
+  });
+});
+
+// 2026-10-11 (D2): AI エージェント等が x402 ファシリテーターで払うモバイル注文 (/api/agent-order/pay・本番 ON) には
+// x402 ファシリテーター利用料 (買い手が上乗せ・店主は注文額を満額) だけがかかり、モバイル注文システム利用料はかからない。
+// 規約 (8) の「決済経路に依存せず」と (9) 末尾の「モバイル注文は対象外」を、この経路のただし書きで実装に合わせた。
+describe('mobile orders paid through the x402 facilitator', () => {
+  it.each(['ja', 'en'] as const)('%s: 規約 (8)(9)・特商法・免責は、x402 で払うモバイル注文に x402 利用料だけを適用すると書く', async (locale) => {
+    const m = locale === 'ja' ? (await import('@/messages/ja.json')).default : (await import('@/messages/en.json')).default;
+    const ja = locale === 'ja';
+    const proviso = (ref: string) => ja
+      ? `ただし、AI エージェント等が${ref} x402 ファシリテーターを通じてお支払いになるモバイル注文には、モバイル注文システム利用料を適用せず、${ref} x402 ファシリテーター利用料のみを適用します (当該利用料は買い手が注文額に上乗せしてお支払いになり、店主は注文額をそのまま受領します)。`
+      : `However, for mobile orders paid by AI agents or others through the x402 facilitator ${ref}, the mobile-order system fee does not apply; only the x402 facilitator fee ${ref} applies (the buyer pays it on top of the order amount, and the Merchant receives the order amount in full).`;
+    // ただし書きは、モバイル注文システム利用料の段落の末尾 (対象外の列挙の直後) に置く。
+    const mobileEnd = ja ? 'モバイル注文以外の通常の決済リンクは対象外です。' : 'standard payment links other than mobile order are not in scope. ';
+    const x402Excluded = ja
+      ? '/pay の決済リンク・クリエイターへのチップ・店頭決済、および x402 ファシリテーターを通じずにお支払いになるモバイル注文は、本 x402 ファシリテーター利用料の対象外です。'
+      : '/pay payment links, tips to creators, in-store payments, and mobile ordering paid other than through the x402 facilitator are not subject to this x402 facilitator fee.';
+    for (const [label, body, ref, listsX402Exclusions] of [
+      ['規約 第 5 条', m.Terms.article5.body, ja ? '本条 (9) の' : 'in paragraph (9)', true],
+      ['特商法 役務の対価', m.Tokutei.rows.price.value, ja ? '後述の' : 'described below', true],
+      ['免責 §7', m.Disclaimer.section7.body, ja ? '後述の' : 'described below', false],
+    ] as const) {
+      expect(body, label).toContain(mobileEnd + proviso(ref));
+      // 旧文言 (モバイル注文をまるごと x402 利用料の対象外とする) を残さない。
+      expect(body, label).not.toContain(ja ? '店頭決済・モバイル注文は本 x402' : 'in-store payments, and mobile ordering are not subject');
+      if (listsX402Exclusions) expect(body, label).toContain(x402Excluded);
+    }
+    // 人が払うモバイル注文の料率が通常決済にもかかる (経路非依存) 旨は残す — ただし書きは例外を足すだけ。
+    expect(m.Terms.article5.body).toContain(ja ? '通常決済であっても' : 'regardless of the payment path');
   });
 });
