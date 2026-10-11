@@ -459,6 +459,37 @@ describe('lib/kv', () => {
     ]);
   });
 
+  it('kvIncrBy は INCRBY を送り、opts 付きは kvIncr と同じく EXPIRE NX との pipeline 1 往復 (2 コマンド)', async () => {
+    process.env.KV_REST_API_URL = 'https://example.upstash.io';
+    process.env.KV_REST_API_TOKEN = 'secret';
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ result: 800 }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => [{ result: 1600 }, { result: 0 }] })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => [{ error: 'ERR value is not an integer or out of range' }, { result: 0 }],
+      });
+    vi.stubGlobal('fetch', fetchMock);
+    const { kvIncrBy } = await import('@/lib/kv');
+
+    expect(await kvIncrBy('k', 800)).toEqual({ ok: true, value: 800 });
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual(['INCRBY', 'k', '800']);
+
+    expect(await kvIncrBy('k', 800, { initialTtlSec: 60 })).toEqual({ ok: true, value: 1600 });
+    expect(fetchMock.mock.calls[1][0]).toBe('https://example.upstash.io/pipeline');
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual([
+      ['INCRBY', 'k', '800'],
+      ['EXPIRE', 'k', '60', 'NX'],
+    ]);
+
+    expect(await kvIncrBy('k', 1, { initialTtlSec: 60 })).toEqual({
+      ok: false,
+      reason: 'http_error',
+      detail: 'ERR value is not an integer or out of range',
+    });
+  });
+
   it('kvIncr atomic opts: EXPIRE だけ失敗しても INCR の数は返す (取れた超過判定を捨てない)・INCR の失敗と壊れた応答は ok:false', async () => {
     process.env.KV_REST_API_URL = 'https://example.upstash.io';
     process.env.KV_REST_API_TOKEN = 'secret';

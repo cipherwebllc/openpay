@@ -300,8 +300,30 @@ export async function kvIncr(
   opts?: KvIncrAtomicOptions,
 ): Promise<KvResult<number>> {
   if (!opts) return call(['INCR', key], parseInteger);
+  return incrementWithInitialTtl(['INCR', key], key, opts);
+}
+
+// 整数加算 (INCRBY)。increment は安全な整数を渡す (Redis は 64bit 符号付き整数の範囲で加算する)。
+// opts の意味と送るコマンド数 (pipeline で常に 2) は kvIncr と同じ。月次の金額集計など、1 ずつではない
+// カウンタに使う。
+export async function kvIncrBy(
+  key: string,
+  increment: number,
+  opts?: KvIncrAtomicOptions,
+): Promise<KvResult<number>> {
+  const command = ['INCRBY', key, String(increment)];
+  if (!opts) return call(command, parseInteger);
+  return incrementWithInitialTtl(command, key, opts);
+}
+
+// kvIncr / kvIncrBy の opts 付きの本体: 加算の命令と EXPIRE NX を pipeline の 1 往復で送り、加算後の値を返す。
+async function incrementWithInitialTtl(
+  command: string[],
+  key: string,
+  opts: KvIncrAtomicOptions,
+): Promise<KvResult<number>> {
   const sent = await post('pipeline', [
-    ['INCR', key],
+    command,
     ['EXPIRE', key, String(opts.initialTtlSec), 'NX'],
   ]);
   if (!sent.ok) return sent;
