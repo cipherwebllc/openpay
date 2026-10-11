@@ -2451,8 +2451,8 @@ describe('R4a differential reconcile traces (JPYC / USDC)', () => {
     });
     h.publicClient.readContract.mockImplementation(async () => { events.push(['used']); return true; });
     h.publicClient.getBlockNumber.mockImplementation(async () => { events.push(['head']); return 14_000n; });
-    h.publicClient.getLogs.mockImplementation(async ({ fromBlock, toBlock }: { fromBlock: bigint; toBlock: bigint }) => {
-      events.push(['page', fromBlock, toBlock]);
+    h.publicClient.getLogs.mockImplementation(async ({ fromBlock, toBlock, event }: { fromBlock: bigint; toBlock: bigint; event?: { name?: string } }) => {
+      events.push([event?.name === 'AuthorizationCanceled' ? 'cancel-page' : 'page', fromBlock, toBlock]);
       return [];
     });
     h.publicClient.getTransactionReceipt.mockImplementation(async ({ hash }: { hash: Hex }) => {
@@ -2467,6 +2467,11 @@ describe('R4a differential reconcile traces (JPYC / USDC)', () => {
 
   const pendingResult = ['result', { ok: true, state: 'pending' }];
   const scan = [['used'], ['head'], ['page', 10_000n, 11_999n], ['page', 12_000n, 13_999n], ['page', 14_000n, 14_000n]];
+  // 2026-10-12 (user 承認): JPYC は authorizationState が使用済みなのに、その回の走査に AuthorizationUsed が 1 件も
+  // 無いときだけ、同じページで AuthorizationCanceled を探す (取り消された購入を終端にして rail を解放するため)。
+  // 旧 trace は JPYC / USDC で同じだった。USDC rail の照合は変えていない。使用の log がある回は両 rail とも従来どおり。
+  const cancelScan = [['cancel-page', 10_000n, 11_999n], ['cancel-page', 12_000n, 13_999n], ['cancel-page', 14_000n, 14_000n]];
+  const scanned = (rail: Rail) => rail === 'jpyc' ? [...scan, ...cancelScan] : scan;
   const lease = ['cas', 'lease', 'settling', null];
   const rescheduled = (rail: Rail, cursor: string | null) => ['cas', 'reschedule', rail === 'jpyc' ? 'indeterminate' : 'settling', cursor];
 
@@ -2489,7 +2494,7 @@ describe('R4a differential reconcile traces (JPYC / USDC)', () => {
         return used();
       });
       await f.run();
-      const body = [...scan, rescheduled(rail, '10000'), pendingResult];
+      const body = [...scanned(rail), rescheduled(rail, '10000'), pendingResult];
       expect(f.events).toEqual(rail === 'jpyc'
         ? [['get', 'intent'], lease, ['outer-used'], ['get', 'intent'], pendingResult, ...body]
         : [['get', 'intent'], ['outer-used'], ['get', 'intent'], ...body, ...body]);
@@ -2550,14 +2555,19 @@ describe('R4a differential reconcile traces (JPYC / USDC)', () => {
       f.patch({ reconcileFromBlock: cursor });
       h.publicClient.getBlockNumber.mockResolvedValue(50_001n);
       await f.run();
-      const pages = () => h.publicClient.getLogs.mock.calls.map(([range]) => [range.fromBlock, range.toBlock]);
+      const isCancel = (range: { event?: { name?: string } }) => range.event?.name === 'AuthorizationCanceled';
+      const pages = () => h.publicClient.getLogs.mock.calls.filter(([range]) => !isCancel(range)).map(([range]) => [range.fromBlock, range.toBlock]);
+      // JPYC は AuthorizationUsed の無かった同じページだけで取り消しを探す (cursor・ページ数の上限は従来どおり)。
+      const cancelPages = () => h.publicClient.getLogs.mock.calls.filter(([range]) => isCancel(range)).map(([range]) => [range.fromBlock, range.toBlock]);
       const first = cursor === '70000' ? [] : Array.from({ length: 20 }, (_, i) => [10_000n + BigInt(i) * 2_000n, 11_999n + BigInt(i) * 2_000n]);
       expect(pages()).toEqual(first);
+      expect(cancelPages()).toEqual(rail === 'jpyc' ? first : []);
       expect(f.stored().reconcileFromBlock).toBe(cursor === '70000' ? '10000' : '50000');
       h.publicClient.getLogs.mockClear();
       if (cursor !== '70000') {
         await f.run(RECONCILE_NOW + 60_000);
         expect(pages()).toEqual([[50_000n, 50_001n]]);
+        expect(cancelPages()).toEqual(rail === 'jpyc' ? [[50_000n, 50_001n]] : []);
         expect(f.stored().reconcileFromBlock).toBe('10000');
       }
     }

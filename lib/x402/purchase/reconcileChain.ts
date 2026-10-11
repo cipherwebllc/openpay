@@ -1,7 +1,8 @@
 import 'server-only';
 
 // reconcile が使う on-chain 読み取りの adapter (R3d): authorizationState・AuthorizationUsed の log・Forwarder の
-// Settled receipt の厳密照合と、finalized block での期限切れ未使用の証明。test は PurchaseReconcileChain を差し替える。
+// Settled receipt の厳密照合と、finalized block での期限切れ未使用の証明・取り消し (AuthorizationCanceled) の証明。
+// test は PurchaseReconcileChain を差し替える。
 import {
   createPublicClient,
   isAddressEqual,
@@ -10,6 +11,7 @@ import {
   type Hex,
 } from 'viem';
 import { chainObjectForId, transportForChain } from '@/lib/chains';
+import { findFinalizedAuthorizationCancel, type AuthorizationCancelEvidence } from '@/lib/x402/authorizationCancel';
 import { authorizationExpiredUnused } from '@/lib/x402/authorizationExpiry';
 import type { PageFetchOptions } from '@/lib/x402/reconcilePaging';
 import type { ClaimedPurchaseIntentBase } from './types';
@@ -45,6 +47,14 @@ export type PurchaseReconcileChain = {
     txHash: Hex,
     options?: PageFetchOptions,
   ) => Promise<boolean>;
+  // [fromBlock, toBlock] の finalized・canonical な AuthorizationCanceled(payer, nonce)。証拠を返せない adapter
+  // (この method が無いもの) は、取り消された購入を終端にしない (従来どおり pending のまま)。
+  authorizationCanceled?: (
+    intent: ClaimedPurchaseIntentBase & { txHash?: Hex },
+    fromBlock: bigint,
+    toBlock: bigint,
+    options?: PageFetchOptions,
+  ) => Promise<AuthorizationCancelEvidence | null>;
 };
 
 function clientForIntent(intent: ClaimedPurchaseIntentBase, options?: PageFetchOptions) {
@@ -114,4 +124,14 @@ export const defaultPurchaseReconcileChain: PurchaseReconcileChain = {
         args.feeValue === BigInt(intent.feeValue),
     );
   },
+  authorizationCanceled: (intent, fromBlock, toBlock, options) => findFinalizedAuthorizationCancel({
+    client: clientForIntent(intent, options),
+    token: intent.token,
+    forwarder: intent.forwarder,
+    payer: intent.claim.payer,
+    nonce: intent.claim.nonce,
+    fromBlock,
+    toBlock,
+    ...(intent.txHash ? { txHash: intent.txHash } : {}),
+  }),
 };

@@ -329,6 +329,27 @@ export const RULES = [
     threshold: 0,
     interval: '1h',
   },
+  {
+    name: 'OpenPay: Store の決済待ち・ライセンス在庫の押さえの滞留 (creator_store.purchase_backlog)',
+    description:
+      '15 分ごとの license-mint cron (lib/license/holdSweep.ts) が見た滞留: 決済待ち (store:intent:pending) が ' +
+      '50 件超・最古の待ちが 26 時間超・在庫の押さえが 10 件超・validBefore から 1 時間を過ぎても照合で戻らない押さえ、' +
+      'のどれか (warn の exceeded に出る)。支払わずに限定在庫を押さえる手口か、照合 (RPC・日次 cron) の停止のサイン ' +
+      'なので 1 件目で通知し、押さえ (store:license:holds) の intent を確かめる。',
+    eventTags: ['creator_store.purchase_backlog'],
+    threshold: 0,
+    interval: '1h',
+  },
+  {
+    name: 'OpenPay: license の押さえの掃除の失敗 (license.hold_sweep_failed)',
+    description:
+      'validBefore を過ぎた在庫の押さえを照合する 15 分ごとの掃除 (lib/license/holdSweep.ts) が KV 障害か想定外の ' +
+      '例外で回らなかった。日次の store-reconcile が拾うので急ぎではないが、続くと押さえが最長 1 日残るので ' +
+      '1 時間に 2 件超 (= 3 回連続) で通知。',
+    eventTags: ['license.hold_sweep_failed'],
+    threshold: 2,
+    interval: '1h',
+  },
   // ---- モバイル注文 (受注通知・エージェント注文) ----------------------------------------------------
   {
     name: 'OpenPay: モバイル注文の受注処理の失敗 (order.notify / order.agent)',

@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { createHash } from 'node:crypto';
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { getAddress, toHex, TransactionReceiptNotFoundError, type Hex } from 'viem';
+import { encodeEventTopics, getAddress, toHex, TransactionReceiptNotFoundError, type Hex } from 'viem';
 import { closeRedisLuaEngine, createFakeRedisStore, runRedisLua, type FakeRedisStore } from '../../_helpers/redisLua';
 
 const h = vi.hoisted(() => ({
@@ -52,6 +52,7 @@ import {
 } from '@/lib/x402/storeUsdcIntent';
 import { associateStoreRailIntent, claimStoreRailSelection, railParentArchiveKey } from '@/lib/x402/storeRailSelection';
 import { buildForwarderNonce } from '@/lib/relay/forwarderIntent';
+import { AUTHORIZATION_CANCELED_EVENT } from '@/lib/x402/authorizationCancel';
 import { JPYC_V3_ASSET } from '@/lib/x402/types';
 
 const NOW = 1_800_000_000_000;
@@ -179,9 +180,11 @@ describe.each(['jpyc', 'usdc'] as const)('%s finalized authorization expiry (rea
     expect(h.store!.strings.has(f.activeKey)).toBe(true);
   });
 
-  it.each(['used-by-replacement', 'cancelled', 'non-boolean', 'state-rpc', 'non-canonical-fork', 'finalized-rpc', 'missing-block-hash', 'missing-block-time', 'successful-candidate', 'receipt-rpc'] as const)('%s evidence keeps the payment pending and locked', async (scenario) => {
+  // 'cancelled-state-only' は旧 'cancelled' (finalized の state だけが true で、AuthorizationCanceled の log が無い)。
+  // state だけでは取り消しの証拠にならないので従来どおり pending のまま。log のある取り消しは下の 'cancelAuthorization'。
+  it.each(['used-by-replacement', 'cancelled-state-only', 'non-boolean', 'state-rpc', 'non-canonical-fork', 'finalized-rpc', 'missing-block-hash', 'missing-block-time', 'successful-candidate', 'receipt-rpc'] as const)('%s evidence keeps the payment pending and locked', async (scenario) => {
     const f = await setup(rail, 'indeterminate');
-    if (scenario === 'used-by-replacement' || scenario === 'cancelled') h.client.readContract.mockImplementation(async (args) => args.blockHash !== undefined);
+    if (scenario === 'used-by-replacement' || scenario === 'cancelled-state-only') h.client.readContract.mockImplementation(async (args) => args.blockHash !== undefined);
     if (scenario === 'non-boolean') h.client.readContract.mockResolvedValue(undefined);
     if (scenario === 'state-rpc') h.client.readContract.mockImplementation(async (args) => { if (args.blockHash !== undefined) throw new Error('archive unavailable'); return false; });
     // 前後 (finalized・canonical) は A なのに、中間の state だけ別フォーク B を正規とするノードに当たる: A の hash を
@@ -196,6 +199,90 @@ describe.each(['jpyc', 'usdc'] as const)('%s finalized authorization expiry (rea
     expect(await f.read()).toMatchObject({ state: 'indeterminate', txHash: TX });
     expect(h.store!.strings.has(f.activeKey)).toBe(true);
     expect(h.store!.zsets.get(f.pendingKey)?.has(SALT)).toBe(true);
+  });
+
+  // 旧: 取り消し (cancelAuthorization) も「証拠にならず pending のまま・rail は lock」を fail-closed として固定していた。
+  // 取り消しは authorizationState を true にするので照合が AuthorizationUsed を永久に探し続け、JPYC rail の lock と
+  // pending が残り続けた。2026-10-12 の user 承認で、finalized・canonical な AuthorizationCanceled があり一致する
+  // Settled / AuthorizationUsed が無いときは JPYC の購入を終端 (authorization_canceled) にして rail を解放する。
+  // USDC rail (ライセンスを扱わない) の照合は今回変えていないので従来どおり pending。
+  describe('cancelAuthorization', () => {
+    const CANCEL_TX = toHex(901n, { size: 32 });
+    const CANCEL_BLOCK_HASH = toHex(400n, { size: 32 });
+    function cancelOnChain(f: Awaited<ReturnType<typeof setup>>, cancelBlock = 400n) {
+      const topics = encodeEventTopics({ abi: [AUTHORIZATION_CANCELED_EVENT], eventName: 'AuthorizationCanceled', args: { authorizer: PAYER, nonce: f.nonce } }) as Hex[];
+      const token = rail === 'jpyc' ? JPYC_V3_ASSET.address : getAddress('0x41E94Eb019C0762f9Bfcf9Fb1E58725BfB0e7582');
+      const log = { address: token, topics, data: '0x' as Hex, blockNumber: cancelBlock, blockHash: CANCEL_BLOCK_HASH, transactionHash: CANCEL_TX, transactionIndex: 0, logIndex: 0, removed: false };
+      // 取り消し後は latest・finalized とも authorizationState が true。AuthorizationUsed の log は無い。
+      h.client.readContract.mockResolvedValue(true);
+      h.client.getLogs.mockImplementation(async (args: { event?: { name?: string } }) => args.event?.name === 'AuthorizationCanceled' ? [log] : []);
+      h.client.getTransactionReceipt.mockImplementation(async ({ hash }: { hash: Hex }) => hash === CANCEL_TX
+        ? { status: 'success', blockNumber: cancelBlock, blockHash: CANCEL_BLOCK_HASH, transactionHash: CANCEL_TX, logs: [log] }
+        : { status: 'reverted', blockNumber: 100n, blockHash: toHex(100n, { size: 32 }), transactionHash: hash, logs: [] });
+      h.client.getBlock.mockImplementation(async (args: { blockTag?: string; blockNumber?: bigint }) => args.blockTag === 'finalized'
+        ? { number: 500n, hash: BLOCK_HASH, timestamp: f.validBefore - 100n }
+        : { number: args.blockNumber, hash: args.blockNumber === cancelBlock ? CANCEL_BLOCK_HASH : BLOCK_HASH });
+    }
+
+    it.each(['signed', 'indeterminate'] as const)('a finalized cancel of a %s purchase terminalizes JPYC before validBefore and frees its rail', async (state) => {
+      const f = await setup(rail, state);
+      cancelOnChain(f);
+      const result = await f.reconcile(Number(f.validBefore - 200n) * 1000);
+      if (rail === 'usdc') {
+        expect(result).toEqual({ ok: true, state: 'pending' });
+        expect(h.store!.strings.has(f.activeKey)).toBe(true);
+        expect(h.store!.zsets.get(f.pendingKey)?.has(SALT)).toBe(true);
+        return;
+      }
+      expect(result).toEqual({ ok: true, state: 'failed_prebroadcast' });
+      const stored = await f.read();
+      expect(stored).toMatchObject({ state: 'failed_prebroadcast', failureReason: 'authorization_canceled' });
+      expect(stored).not.toHaveProperty('txHash');
+      expect(h.store!.zsets.get(f.pendingKey)?.has(SALT) ?? false).toBe(false);
+      expect(h.store!.strings.has(f.activeKey)).toBe(false);
+      expect(h.store!.strings.has(railParentArchiveKey(f.parentId))).toBe(true);
+      // 終端の再照合は RPC を呼ばない。
+      h.client.readContract.mockClear();
+      expect(await f.reconcile()).toEqual({ ok: true, state: 'failed_prebroadcast' });
+      expect(h.client.readContract).not.toHaveBeenCalled();
+    });
+
+    it.each(['not-finalized', 'used-log', 'stored-tx-succeeded'] as const)('%s keeps the payment pending and locked', async (scenario) => {
+      const f = await setup(rail, 'indeterminate');
+      cancelOnChain(f, scenario === 'not-finalized' ? 600n : 400n);
+      if (scenario === 'not-finalized') h.client.getBlockNumber.mockResolvedValue(700n);
+      if (scenario === 'used-log') {
+        h.client.getLogs.mockImplementation(async (args: { event?: { name?: string } }) => args.event?.name === 'AuthorizationUsed' ? [{ transactionHash: REPLACEMENT, blockNumber: 300n }] : []);
+      }
+      if (scenario === 'stored-tx-succeeded') {
+        const receipt = h.client.getTransactionReceipt.getMockImplementation()!;
+        h.client.getTransactionReceipt.mockImplementation(async (args: { hash: Hex }) => args.hash === TX
+          ? { status: 'success', blockNumber: 100n, blockHash: toHex(100n, { size: 32 }), transactionHash: TX, logs: [] }
+          : receipt(args));
+      }
+      expect(await f.reconcile(Number(f.validBefore - 200n) * 1000)).toEqual({ ok: true, state: 'pending' });
+      expect(await f.read()).toMatchObject({ state: 'indeterminate', txHash: TX });
+      expect(h.store!.strings.has(f.activeKey)).toBe(true);
+      expect(h.store!.zsets.get(f.pendingKey)?.has(SALT)).toBe(true);
+    });
+
+    it('a concurrent transaction write during the cancel lookup defeats the terminal CAS', async () => {
+      const f = await setup(rail, 'indeterminate');
+      cancelOnChain(f);
+      const logs = h.client.getLogs.getMockImplementation()!;
+      h.client.getLogs.mockImplementation(async (args: { event?: { name?: string } }) => {
+        if (args.event?.name === 'AuthorizationCanceled') {
+          const current = JSON.parse(h.store!.strings.get(f.key)!);
+          h.store!.strings.set(f.key, JSON.stringify({ ...current, txHash: REPLACEMENT }));
+        }
+        return logs(args);
+      });
+      const result = await f.reconcile(Number(f.validBefore - 200n) * 1000);
+      expect(result).not.toMatchObject({ state: 'failed_prebroadcast' });
+      expect(await f.read()).toMatchObject({ state: 'indeterminate', txHash: rail === 'jpyc' ? REPLACEMENT : TX });
+      expect(h.store!.strings.has(f.activeKey)).toBe(true);
+      expect(h.store!.zsets.get(f.pendingKey)?.has(SALT)).toBe(true);
+    });
   });
 
   it('a concurrent transaction write defeats terminal CAS and preserves the lock', async () => {

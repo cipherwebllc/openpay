@@ -6,12 +6,13 @@ import { chainObjectForId, transportForChain } from '@/lib/chains';
 import { kvEval } from '@/lib/kv';
 import { logger } from '@/lib/logger';
 import { buildForwarderNonce } from '@/lib/relay/forwarderIntent';
+import { findFinalizedAuthorizationCancel, type AuthorizationCancelEvidence } from '@/lib/x402/authorizationCancel';
 import type {
   PurchaseIntent, IndeterminatePurchaseIntent, ReconcilePurchaseIntentResult, finalizeHostedPurchase,
 } from '@/lib/x402/purchaseIntent';
 import { rpcCallOptions } from '@/lib/x402/reconcileBudget';
 import type { PageFetchOptions } from '@/lib/x402/reconcilePaging';
-import { licenseEvalContext, licenseLuaVariant, type LicenseExpiryEvidence } from './stock';
+import { licenseEvalContext, licenseLuaVariant, type LicenseCancelEvidence, type LicenseExpiryEvidence, type LicenseReleaseEvidence } from './stock';
 
 const AUTH_ABI = parseAbi(['function authorizationState(address authorizer, bytes32 nonce) view returns (bool)']);
 const USED = parseAbi(['event AuthorizationUsed(address indexed authorizer, bytes32 indexed nonce)'])[0];
@@ -24,6 +25,9 @@ export type LicenseReconcileChain = {
   observe(intent: Claimed, options?: PageFetchOptions): Promise<LicenseFinalizedBlock>;
   receiptMatches(intent: Claimed, txHash: Hex, block: LicenseFinalizedBlock, options?: PageFetchOptions): Promise<boolean>;
   transactions(intent: Claimed, from: bigint, to: bigint, options?: PageFetchOptions): Promise<Hex[]>;
+  // [from, to] (finalized 以下) の canonical な AuthorizationCanceled(payer, nonce)。この method が無い adapter は
+  // 取り消しで在庫を戻さない (従来どおり保持)。block は observe が canonical を確かめた finalized。
+  canceled?(intent: Claimed, from: bigint, to: bigint, block: LicenseFinalizedBlock, options?: PageFetchOptions): Promise<AuthorizationCancelEvidence | null>;
 };
 function client(intent: Claimed, options?: PageFetchOptions) {
   const chain = chainObjectForId(intent.chainId);
@@ -58,6 +62,12 @@ export const defaultLicenseReconcileChain: LicenseReconcileChain = {
     const logs = await client(intent, options).getLogs({ address: intent.token, event: USED, args: { authorizer: intent.claim.payer, nonce: intent.claim.nonce }, fromBlock, toBlock });
     return logs.map((l) => l.transactionHash).filter((h): h is Hex => h !== null);
   },
+  canceled: (intent, fromBlock, toBlock, block, options) => findFinalizedAuthorizationCancel({
+    client: client(intent, options), token: intent.token, forwarder: intent.forwarder,
+    payer: intent.claim.payer, nonce: intent.claim.nonce, fromBlock, toBlock,
+    finalized: { number: block.number, hash: block.hash },
+    ...('txHash' in intent && intent.txHash ? { txHash: intent.txHash } : {}),
+  }),
 };
 
 const CAS =
@@ -65,7 +75,7 @@ const CAS =
   'redis.call("SET",KEYS[1],ARGV[4]); ' +
   'if ARGV[5]==ARGV[6] then redis.call("ZREM",KEYS[2],ARGV[7]); else redis.call("ZADD",KEYS[2],ARGV[8],ARGV[7]); end; return 1; ';
 
-async function cas(current: PurchaseIntent, raw: string, next: PurchaseIntent, now: number, evidence?: LicenseExpiryEvidence): Promise<boolean> {
+async function cas(current: PurchaseIntent, raw: string, next: PurchaseIntent, now: number, evidence?: LicenseReleaseEvidence): Promise<boolean> {
   const r = await kvEval<number>(licenseLuaVariant(CAS), ['store:intent:' + current.intentSalt, 'store:intent:pending'], [
     '0', raw, '-1', JSON.stringify(next), evidence ? 'remove' : 'keep', 'remove', current.intentSalt,
     String(next.nextReconcileAt ?? now), '1', 'none', 'zset', 'table', '-2', licenseEvalContext(current, 'cas', now, evidence),
@@ -75,7 +85,8 @@ async function cas(current: PurchaseIntent, raw: string, next: PurchaseIntent, n
 
 /**
  * license 専用。lease の満了・ローカル時計・試行回数だけでは在庫を戻さない。
- * failed_prebroadcast も署名は生きているため、canonical payment の採用か finalized unused まで保持。
+ * failed_prebroadcast も署名は生きているため、canonical payment の採用か finalized unused、または
+ * finalized・canonical な取り消し (AuthorizationCanceled) まで保持。
  */
 // deadline = 経過時間の予算 (epoch ms・第 7 回レビュー B4)。到達後はページを取りに行かず途中 cursor を保存する。
 export async function reconcileLicensePurchase(current: PurchaseIntent, raw: string, now: number, finalizePurchase: typeof finalizeHostedPurchase, chain = defaultLicenseReconcileChain, deadline?: number): Promise<ReconcilePurchaseIntentResult> {
@@ -84,7 +95,7 @@ export async function reconcileLicensePurchase(current: PurchaseIntent, raw: str
     return healed.ok ? { ok: true, state: 'settled', txHash: current.txHash } : { ok: false, reason: 'storage' };
   }
   if (current.state === 'quoted') return { ok: true, state: 'pending' };
-  if (current.state === 'failed_prebroadcast' && current.failureReason === 'authorization_expired_unused') return { ok: true, state: 'failed_prebroadcast' };
+  if (current.state === 'failed_prebroadcast' && (current.failureReason === 'authorization_expired_unused' || current.failureReason === 'authorization_canceled')) return { ok: true, state: 'failed_prebroadcast' };
   if ((current.reconcileLeaseUntil ?? 0) > now || (current.state === 'settling' && current.leaseUntil > now)) return { ok: true, state: 'pending' };
   const leased: Claimed = { ...current, reconcileLeaseId: randomBytes(32).toString('hex'), reconcileLeaseUntil: now + 120_000, nextReconcileAt: now + 120_000 };
   if (!await cas(current, raw, leased, now)) return { ok: true, state: 'pending' };
@@ -140,6 +151,9 @@ export async function reconcileLicensePurchase(current: PurchaseIntent, raw: str
     if ('txHash' in leased && leased.txHash) {
       const result = await finalize(leased.txHash); if (result) return result;
     }
+    // 取り消し (cancelAuthorization) の探索に使う、AuthorizationUsed の無かったページ (走査そのものは従来どおり)。
+    const emptyPages: [bigint, bigint][] = [];
+    let usedLogSeen = false;
     for (let page = 0; page < 20 && fromBlock <= block.number; page++) {
       // 時間予算は取得前に「残り時間 − cursor 保存の予約」で見て、1 回の RPC に足りなければ未取得ページの先頭を
       // cursor に残す (打ち切りは失敗でも未払いでもない)。取るときは残り時間で切った timeout で RPC を呼ぶ。
@@ -152,6 +166,45 @@ export async function reconcileLicensePurchase(current: PurchaseIntent, raw: str
         const result = await finalize(hash, pageStart); if (result) return result;
       }
       fromBlock = to + 1n;
+      if (hashes.length > 0) usedLogSeen = true; else emptyPages.push([pageStart, to]);
+    }
+    // finalized で使用済みなのに、この回に走査したページ (finalized 以下) に AuthorizationUsed が 1 件も無いときだけ、
+    // 同じページで取り消しの証拠を探す (adapter が持つときだけの追加の読み取り。使用の log が見えた回・支払いを採用した
+    // 回は探さない)。finalized・canonical な AuthorizationCanceled があるときだけ在庫を戻す。取り消しと使用は同じ nonce
+    // で両立しないので、売り越しにならない。
+    let canceled: AuthorizationCancelEvidence | null = null;
+    if (!usedLogSeen && chain.canceled) {
+      for (const [from, to] of emptyPages) {
+        const cancelRpc = rpcCallOptions(deadline);
+        if (cancelRpc === null) break;
+        try {
+          canceled = cancelRpc ? await chain.canceled(leased, from, to, block, cancelRpc) : await chain.canceled(leased, from, to, block);
+        } catch {
+          // 取り消しの探索の障害を AuthorizationUsed の走査の結果 (cursor の保存・在庫の保持) へ波及させない。証拠なし = 保持のまま。
+          canceled = null;
+        }
+        if (canceled) break;
+      }
+    }
+    if (canceled) {
+      const failed: PurchaseIntent = {
+        ...leased, state: 'failed_prebroadcast', attemptId: 'attemptId' in leased ? leased.attemptId : randomBytes(32).toString('hex'),
+        attempt: 'attempt' in leased ? leased.attempt : 1, settlementStartedAt: now, leaseUntil: now,
+        failedAt: now, failureReason: 'authorization_canceled',
+      };
+      // 期限切れ未使用と同じく、旧 hash を failed record へ持ち越さない (parser)。証拠は reservation に保存する。
+      delete (failed as unknown as { txHash?: Hex }).txHash;
+      delete failed.reconcileLeaseId; delete failed.reconcileLeaseUntil;
+      const evidence: LicenseCancelEvidence = {
+        kind: 'authorization_canceled', authorizationCanceled: true,
+        blockNumber: canceled.blockNumber, blockHash: canceled.blockHash, transactionHash: canceled.transactionHash,
+      };
+      if (!await cas(leased, leasedRaw, failed, now, evidence)) return { ok: false, reason: 'storage' };
+      logger.warn('creator_store.purchase_authorization_canceled', {
+        intentSalt: leased.intentSalt, productKind: 'license',
+        cancelTransaction: canceled.transactionHash, cancelBlock: canceled.blockNumber,
+      });
+      return { ok: true, state: 'failed_prebroadcast' };
     }
     if (fromBlock > block.number) fromBlock = BigInt(leased.anchorBlock);
     return reschedule();

@@ -225,6 +225,13 @@ describe('fake store: sorted set コマンド', () => {
     expect(call('ZSCORE', 'missing', 'b')).toBe(false);
   });
 
+  it('ZCARD は member 数 / 未存在は 0 / 別の型は WRONGTYPE', () => {
+    expect(call('ZCARD', 'z')).toBe(3);
+    expect(call('ZCARD', 'missing')).toBe(0);
+    call('SET', 's', 'v');
+    expect(() => call('ZCARD', 's')).toThrow('WRONGTYPE');
+  });
+
   it('ZREM は削除数を返し、空になればキーが消える', () => {
     expect(call('ZREM', 'z', 'a', 'nope')).toBe(1);
     expect(call('ZREM', 'z', 'b', 'c')).toBe(2);
