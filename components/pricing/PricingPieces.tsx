@@ -73,7 +73,8 @@ export function SummaryCard({ item }: { item: PricingSummaryCase }) {
           <span className="text-sm font-semibold text-slate-600">{item.focalSub}</span>
         ) : null}
       </p>
-      <p className="mt-2 text-sm leading-relaxed text-slate-600">{item.detail}</p>
+      {/* 文節で改行する (「…ありませ / ん」のような 1 文字の孤立を防ぐ・Safari は通常の改行)。 */}
+      <p className="mt-2 text-sm leading-relaxed text-slate-600 [word-break:auto-phrase]">{item.detail}</p>
     </li>
   );
 }

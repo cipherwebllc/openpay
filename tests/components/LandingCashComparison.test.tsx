@@ -32,11 +32,12 @@ describe('LandingCashComparison', () => {
     expect(screen.getByText('導入費と機器')).toBeInTheDocument();
     expect(screen.getByText('解約縛り')).toBeInTheDocument();
 
-    // 手数料セルは「通常決済は無料 (レジ含む)・ガスレスは % と最低額」を区別する (2026-10-07 レジの通常決済の利用料を廃止)。
+    // 手数料セルは「ガスレスは % と最低額・通常決済は無料 (レジも決済QRも・モバイル注文を除く)」を区別する
+    // (2026-10-07 レジの通常決済の利用料を廃止・2026-10-12 モバイル注文の料率は料金ページへ)。
     expect(screen.getByText('1.98〜3.24%')).toBeInTheDocument();
     expect(screen.getByText('ガスレス 1%')).toBeInTheDocument();
     expect(
-      screen.getByText(/お客様がガス代を払う通常決済は OpenPay 利用料無料（レジ含む）。ガスレス JPYC は 1%・最低 2 JPYC/),
+      screen.getByText('ガス代込みで 1%・最低 2 JPYC（店舗負担）。通常決済はレジも決済QRも利用料無料（モバイル注文を除く）。'),
     ).toBeInTheDocument();
 
     // 脚注 (一般的な料率の例)
@@ -48,11 +49,13 @@ describe('LandingCashComparison', () => {
     ).toHaveAttribute('href', '/ja/kit');
   });
 
-  it('円⇄JPYC の 1:1 図解とシミュレータ (client 子) を描画', async () => {
+  it('シミュレータ (client 子) を描画し、1:1 の帯は出さない (「なぜ今」・JPYC の注記と重なるので外した)', async () => {
     const ui = await LandingCashComparison();
     render(ui);
-    expect(screen.getByText('円と JPYC は 1:1')).toBeInTheDocument();
-    expect(screen.getByText('1:1 で換金')).toBeInTheDocument();
     expect(screen.getByTestId('savings-simulator')).toBeInTheDocument();
+    expect(screen.queryByText('円と JPYC は 1:1')).toBeNull();
+    // 店頭キットへの入口は節の末尾 (試算の後ろ)。
+    const kit = screen.getByRole('link', { name: '店頭キットを印刷する (無料)' });
+    expect(screen.getByTestId('savings-simulator').compareDocumentPosition(kit) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });

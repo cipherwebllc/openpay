@@ -14,6 +14,7 @@ import { getTranslations } from 'next-intl/server';
 import { Coins, Rocket, Zap, UserCheck } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { LandingSectionHeader } from '@/components/LandingSectionHeader';
+import { PAYER_TONE } from '@/components/pricing/PayerPill';
 
 // i18n key は `benefits${BenefitId}{Focal,Title,Body}` で命名統一済 (messages/*.json)、
 // 1 つの BenefitId discriminator から template literal で 3 key を派生させる。
@@ -35,17 +36,16 @@ const CARDS: readonly BenefitCard[] = [
 // merchant / customer ごとの card tone。merchant=emerald (LandingHowItWorks の
 // merchant 列と整合)、customer=blue (同・customer 列)。背景は両者とも bg-white で
 // 固定なので card className に直接置く (TONE には残さない)。
+// ピルは料金のカード (PayerPill) と同じ型 (淡い地 + 細い枠・12px) にそろえる (plans/lp-polish-2026-10.md P2)。
 const TONE = {
   merchant: {
-    focal: 'text-emerald-600',
-    pillBg: 'bg-emerald-100',
-    pillInk: 'text-emerald-800',
+    focal: PAYER_TONE.shop.focal,
+    pill: PAYER_TONE.shop.pill,
     iconInk: 'text-emerald-500',
   },
   customer: {
-    focal: 'text-blue-600',
-    pillBg: 'bg-blue-100',
-    pillInk: 'text-blue-800',
+    focal: PAYER_TONE.customer.focal,
+    pill: PAYER_TONE.customer.pill,
     iconInk: 'text-blue-500',
   },
 } as const satisfies Record<BenefitCard['audience'], unknown>;
@@ -71,11 +71,11 @@ export async function LandingBenefits() {
           return (
             <li
               key={id}
-              className="flex flex-col rounded-2xl bg-white p-5 shadow-card ring-1 ring-slate-200/70 [container-type:inline-size] sm:p-6"
+              className="flex flex-col rounded-2xl bg-white p-5 shadow-card ring-1 ring-slate-200/70 [container-type:inline-size] [word-break:auto-phrase] sm:p-6"
             >
               <div className="flex items-center justify-between">
                 <span
-                  className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${c.pillBg} ${c.pillInk}`}
+                  className={`inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-semibold ring-1 ring-inset ${c.pill}`}
                 >
                   {t(AUDIENCE_LABEL_KEY[audience])}
                 </span>
@@ -95,7 +95,7 @@ export async function LandingBenefits() {
               <h3 className="mt-3 text-sm font-semibold text-slate-900 sm:text-base">
                 {t(`benefits${id}Title`)}
               </h3>
-              <p className="mt-2 text-xs leading-relaxed text-slate-600 sm:text-sm">
+              <p className="mt-2 text-[13px] leading-relaxed text-slate-600 sm:text-sm">
                 {t(`benefits${id}Body`, LANDING_PAYMENT_FEE_VALUES)}
               </p>
             </li>

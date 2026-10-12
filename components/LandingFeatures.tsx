@@ -1,6 +1,7 @@
 // 3 つの特長カード (gasless / multi-chain / non-custodial)。Server Component。
 
-import { getTranslations } from 'next-intl/server';
+import Link from 'next/link';
+import { getLocale, getTranslations } from 'next-intl/server';
 import { Fuel, Network, Lock } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { ChainLogo } from '@/components/AssetLogo';
@@ -70,6 +71,7 @@ const TONE: Record<FeatureCard['tone'], { border: string; bg: string; ink: strin
 
 export async function LandingFeatures() {
   const t = await getTranslations('Landing');
+  const locale = await getLocale();
 
   return (
     <section className="mt-16 sm:mt-28">
@@ -91,7 +93,20 @@ export async function LandingFeatures() {
               <h3 className="text-base font-semibold text-slate-900">
                 {t(titleKey)}
               </h3>
-              <p className="text-sm leading-relaxed text-slate-700">{t(bodyKey)}</p>
+              {/* ガス代不要の条件 (誰がガス代を払うか) は料金ページが説明する (plans/lp-polish-2026-10.md P2)。 */}
+              <p className="text-sm leading-relaxed text-slate-700">
+                {t.rich(bodyKey, {
+                  pricing: (chunks) => (
+                    <Link
+                      href={`/${locale}/pricing`}
+                      prefetch={false}
+                      className="font-medium text-brand underline underline-offset-2 hover:text-brand-dark"
+                    >
+                      {chunks}
+                    </Link>
+                  ),
+                })}
+              </p>
               {/* チェーン名の文章列挙をロゴ行で置換 (視覚補完・alt はロゴ側の既定)。 */}
               {chains && (
                 <div className="mt-1 flex flex-wrap items-center gap-2">

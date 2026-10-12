@@ -84,6 +84,9 @@ export function BulletList({
 // 手順の番号のバッジ (全ガイドで 1 つの型・plans/guide-ux-polish.md フェーズ 1)。以前は濃淡 2 色と大きさ 3 種が混ざっていた。
 export const STEP_BADGE =
   'flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-sm font-bold text-white';
+/** お客様 (支払う側) の手順の番号。色だけ blue (お店 = emerald / お客様 = blue の配色)。 */
+export const STEP_BADGE_CUSTOMER =
+  'flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-blue-600 text-sm font-bold text-white';
 
 export function StepList({ steps }: { steps: readonly GuideStep[] }) {
   return (

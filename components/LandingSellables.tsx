@@ -64,7 +64,7 @@ export async function LandingSellables() {
         <Link
           href={`/${locale}/create?tab=profile`}
           prefetch={false}
-          className="inline-flex items-center gap-2 rounded-xl bg-brand px-5 py-3 text-sm font-bold text-white shadow-sm transition-all hover:-translate-y-0.5 hover:bg-brand-dark"
+          className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-brand px-5 py-3 text-sm font-semibold text-white shadow-sm transition-all hover:-translate-y-0.5 hover:bg-brand-dark"
         >
           {t('sellablesCtaSell')}
           <ArrowRight className="h-4 w-4" aria-hidden />
@@ -72,7 +72,7 @@ export async function LandingSellables() {
         <Link
           href={`/${locale}/guide/store`}
           prefetch={false}
-          className="inline-flex items-center gap-2 rounded-xl border border-slate-300 bg-white px-5 py-3 text-sm font-bold text-slate-700 transition-colors hover:bg-slate-50"
+          className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-700 ring-1 ring-inset ring-slate-300 transition-colors hover:bg-slate-50"
         >
           <BookOpen className="h-4 w-4" aria-hidden />
           {t('sellablesCtaGuide')}

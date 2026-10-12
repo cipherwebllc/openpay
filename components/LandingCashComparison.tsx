@@ -1,18 +1,17 @@
 // 「現金に戻したお店へ」セクション (Server Component)。
 // ターゲット = カード / コード決済の手数料が痛くて現金に戻した飲食 / 小売店主。
-// crypto 語彙を避け、①現金を否定しない比較表 ②円⇄JPYC の 1:1 図解
-// ③節約シミュレータ (client) で「損ゼロで置ける選択肢」を直感的に訴求する。
+// crypto 語彙を避け、①現金を否定しない比較表 ②節約シミュレータ (client) で「損ゼロで置ける選択肢」を
+// 直感的に訴求する。円⇄JPYC の 1:1 の帯は「なぜ今」・JPYC の注記と重なるので外した (2026-10-12 plans/lp-polish-2026-10.md P1-5)。
 //
 // 見出しスケールは他の Landing セクション (LandingBenefits) と揃える
 // (text-2xl sm:text-3xl・中央)。手数料の数字は hero / 開示と整合させ、
-// OpenPay はレジ JPYC の料率・ガスレス最低額・無料の範囲を併記する。比較先の料率は脚注で例示。
+// OpenPay はガスレスの料率・最低額・無料の範囲を併記する (モバイル注文の料率は料金ページへ)。比較先の料率は脚注で例示。
 
 import { LANDING_PAYMENT_FEE_VALUES } from '@/lib/legal';
 import Link from 'next/link';
 import { getLocale, getTranslations } from 'next-intl/server';
-import { ArrowRight } from 'lucide-react';
-import { TokenLogo } from '@/components/AssetLogo';
 import { SavingsSimulator } from '@/components/SavingsSimulator';
+import { GUIDE_SECONDARY_ACTION } from '@/components/guide/GuideHeader';
 import { LandingSectionHeader } from '@/components/LandingSectionHeader';
 
 // 比較表の行定義。i18n key は `cashCell{Row}{Col}` で命名統一。
@@ -32,7 +31,7 @@ export async function LandingCashComparison() {
     <section className="mt-16 sm:mt-28">
       <LandingSectionHeader eyebrow={t('eyebrowShops')} title={t('cashTitle')} lead={t('cashSubtitle')} />
 
-      {/* PC (lg 以上) は 左 = 比較表・1:1 の帯 / 右 = 試算 の 2 列 (縦に積むと 1 画面半・plans/lp-polish-2026-09.md P2)。 */}
+      {/* PC (lg 以上) は 左 = 比較表 / 右 = 試算 の 2 列 (縦に積むと 1 画面半・plans/lp-polish-2026-09.md P2)。 */}
       <div className="mx-auto max-w-3xl lg:grid lg:max-w-none lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)] lg:items-start lg:gap-8">
         <div className="min-w-0">
         {/* 比較表: モバイルでも 3 列が 1 画面に収まるよう圧縮 (結論の OpenPay 列を隠さない)。overflow-x-auto は保険。
@@ -74,7 +73,7 @@ export async function LandingCashComparison() {
                   <td className="bg-brand/5 px-2 py-3 sm:px-4 text-center font-semibold text-slate-900">
                     {t(`cashCell${id}OpenPay`, LANDING_PAYMENT_FEE_VALUES)}
                     {id === 'Fee' && (
-                      <span className="mt-1 block text-[11px] font-normal leading-snug text-slate-600">
+                      <span className="mt-1 block text-xs font-normal leading-snug text-slate-600">
                         {t('cashCellFeeOpenPayNote', LANDING_PAYMENT_FEE_VALUES)}
                       </span>
                     )}
@@ -85,83 +84,25 @@ export async function LandingCashComparison() {
           </table>
         </div>
 
-        <p className="mx-auto mt-3 max-w-3xl text-[11px] leading-relaxed text-slate-500">
+        <p className="mx-auto mt-3 max-w-3xl text-xs leading-relaxed text-slate-500">
           {t('cashTableFootnote')}
         </p>
-        <div className="mx-auto mt-4 flex max-w-3xl justify-center">
-          <Link
-            href={`/${locale}/kit`}
-            prefetch={false}
-            className="inline-flex items-center rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-card hover:border-brand hover:text-brand-dark"
-          >
-            {t('cashStoreKitCta')}
-          </Link>
-        </div>
-
-        {/* 円⇄JPYC の 1:1 図解: 円 → (購入) → JPYC → (JPYC EX で 1:1 換金) → 円。帯の地色の上では slate-600 以上 (AA)。
-            既存 FAQ / MarketRates の表現を踏襲し、新しい法的主張は発明しない。大きなカードにせず 1 本の帯にする
-            (直前の「なぜ今」で 1 JPYC = 1 円は伝えてあるので、ここは「円に戻せる」道筋だけを短く・plans/lp-polish-2026-09.md P1)。 */}
-        <div className="mx-auto mt-6 max-w-3xl rounded-2xl bg-slate-100/70 px-4 py-4 sm:px-6">
-          <div className="flex flex-col items-center gap-3 sm:flex-row sm:justify-between sm:gap-6">
-            <h3 className="shrink-0 text-sm font-bold text-slate-900 sm:text-base">{t('cashFlowTitle')}</h3>
-            <div className="flex items-center gap-2 sm:gap-3">
-              <FlowStep label={t('cashFlowYen')}>
-                <span className="text-base font-bold text-slate-700">¥</span>
-              </FlowStep>
-              <FlowArrow label={t('cashFlowBuy')} />
-              <FlowStep label="JPYC">
-                <TokenLogo symbol="jpyc" size={24} alt="JPYC" />
-              </FlowStep>
-              <FlowArrow label={t('cashFlowRedeem')} />
-              <FlowStep label={t('cashFlowBackYen')}>
-                <span className="text-base font-bold text-slate-700">¥</span>
-              </FlowStep>
-            </div>
-          </div>
-          <p className="mt-3 text-center text-xs leading-relaxed text-slate-600 sm:text-right">
-            {/* JPYC EX はテキストリンク (新規タブ)。href/描画は LandingFaq の <jpycEx> と同一パターン。 */}
-            {t.rich('cashFlowNote', {
-              jpycEx: (chunks) => (
-                <a
-                  href="https://jpyc.co.jp/"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="font-medium text-brand underline underline-offset-2 hover:text-brand-dark"
-                >
-                  {chunks}
-                </a>
-              ),
-            })}
-          </p>
-        </div>
         </div>
         {/* 節約シミュレータ (client) */}
         <div className="min-w-0 lg:mt-8 lg:[&>*:first-child]:mt-0">
           <SavingsSimulator />
         </div>
       </div>
+      {/* 店頭キット (印刷物) への入口は、比較と試算を読み終えた節の末尾に置く (ボタンの型はガイドの従ボタンと同じ)。 */}
+      <div className="mt-8 flex justify-center">
+        <Link
+          href={`/${locale}/kit`}
+          prefetch={false}
+          className={GUIDE_SECONDARY_ACTION}
+        >
+          {t('cashStoreKitCta')}
+        </Link>
+      </div>
     </section>
-  );
-}
-
-// 1:1 図解の 1 段 (丸 + ラベル)。
-function FlowStep({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <span className="flex flex-col items-center">
-      <span className="flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-white">
-        {children}
-      </span>
-      <span className="mt-1 text-[11px] font-semibold text-slate-600">{label}</span>
-    </span>
-  );
-}
-
-// 1:1 図解の矢印 (装飾の矢印 + 可視ラベル)。
-function FlowArrow({ label }: { label: string }) {
-  return (
-    <span className="flex flex-col items-center text-slate-400">
-      <ArrowRight className="h-4 w-4" aria-hidden />
-      <span className="mt-1 whitespace-nowrap text-[10px] text-slate-600">{label}</span>
-    </span>
   );
 }
