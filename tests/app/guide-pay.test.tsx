@@ -27,6 +27,7 @@ describe('/guide/pay', () => {
     const video = locale === 'ja' ? [HOWTO_VIDEO_UI.sectionTitle] : [];
     expect(within(article).getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual([
       c.needTitle,
+      c.walletTitle,
       c.stepsTitle,
       ...video,
       c.signTitle,
@@ -72,6 +73,25 @@ describe('/guide/pay', () => {
     expect(official).toHaveAttribute('href', 'https://jpyc.co.jp/');
     expect(official).toHaveAttribute('target', '_blank');
     expect(official.getAttribute('rel')).toContain('noopener');
+
+    // ウォレットを選ぶ: MetaMask・HashPort Wallet・マイナウォレットの 3 つと、WalletConnect の 4 手順 (お客様の青い番号)。
+    const walletSec = screen.getByRole('heading', { level: 2, name: c.walletTitle }).closest('section')!;
+    for (const w of c.wallets) {
+      expect(within(walletSec).getByText(w.name)).toBeInTheDocument();
+      expect(within(walletSec).getByText(w.body)).toBeInTheDocument();
+    }
+    expect(within(walletSec).getByRole('heading', { level: 3, name: c.wcTitle })).toBeInTheDocument();
+    const wcList = within(walletSec).getByText(c.wcSteps[0].title).closest('ol')!;
+    const wcBadges = within(wcList).getAllByRole('listitem').map((li) => li.querySelector('span')!);
+    expect(wcBadges.map((b) => b.textContent)).toEqual(['1', '2', '3', '4']);
+    for (const badge of wcBadges) expect(badge.className).toContain('bg-blue-600');
+    expect(within(walletSec).getByText(c.wcTip)).toBeInTheDocument();
+
+    // ウォレット選びの note 記事も別タブ (noopener)。
+    const note = screen.getByRole('link', { name: `${c.jpycNoteLink.label} →` });
+    expect(note).toHaveAttribute('href', 'https://note.com/masia02/n/ned04a4cdb00a');
+    expect(note).toHaveAttribute('target', '_blank');
+    expect(note.getAttribute('rel')).toContain('noopener');
 
     // 目次の現在地はこのガイド (PC とスマホの 2 つの nav で 1 個ずつ)。
     const current = container.querySelectorAll('a[aria-current="page"]');

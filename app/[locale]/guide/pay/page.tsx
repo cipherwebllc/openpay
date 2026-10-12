@@ -61,6 +61,24 @@ export default async function GuidePayPage({
           <BulletList items={c.need} marker="✓" markerClassName="text-emerald-600" />
         </Section>
 
+        {/* ウォレットを選ぶ: MetaMask が基本・初めての方には JPYC EX が組み込まれたウォレット。MetaMask 以外は WalletConnect で
+            つなぐ (一覧は英語なので、検索の言葉まで書く・2026-10-13 user「WalletConnect 経由で使えるがわかりづらい」)。 */}
+        <Section title={c.walletTitle}>
+          <p className="mt-3 text-sm leading-relaxed text-slate-700">{c.walletLead}</p>
+          <ul className="mt-4 space-y-3">
+            {c.wallets.map((w) => (
+              <li key={w.name} className="rounded-xl bg-white p-4 shadow-card ring-1 ring-slate-200/70">
+                <p className="text-sm font-semibold text-slate-900">{w.name}</p>
+                <p className="mt-1 text-sm leading-relaxed text-slate-700">{w.body}</p>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-3 text-xs leading-relaxed text-slate-500">{c.walletNote}</p>
+          <h3 className="mt-8 text-base font-semibold text-slate-900">{c.wcTitle}</h3>
+          <StepList steps={c.wcSteps} badgeClassName={STEP_BADGE_CUSTOMER} />
+          <GuideCallout kind="tip">{c.wcTip}</GuideCallout>
+        </Section>
+
         <Section title={c.stepsTitle}>
           <StepList steps={c.steps} badgeClassName={STEP_BADGE_CUSTOMER} />
           <GuideCallout kind="tip">{c.stepsTip}</GuideCallout>
@@ -99,6 +117,16 @@ export default async function GuidePayPage({
               className="text-sm font-semibold text-emerald-700 underline-offset-2 hover:underline"
             >
               {c.jpycLink.label} →
+            </a>
+          </p>
+          <p className="mt-2">
+            <a
+              href={c.jpycNoteLink.href}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-sm font-semibold text-emerald-700 underline-offset-2 hover:underline"
+            >
+              {c.jpycNoteLink.label} →
             </a>
           </p>
         </Section>
