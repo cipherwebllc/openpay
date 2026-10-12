@@ -22,8 +22,9 @@ export function GuideCallout({
 }) {
   const { box, icon: Icon, iconTone } = KINDS[kind];
   return (
-    <div className={`flex gap-3 rounded-xl px-4 py-3 text-sm leading-relaxed ring-1 ${box} ${className ?? 'mt-4'}`}>
-      <Icon className={`mt-0.5 h-4 w-4 shrink-0 ${iconTone}`} aria-hidden />
+    // 文字は本文と同じ大きさ (注意書きは本文の中でいちばん大事な行のため)。
+    <div className={`flex gap-3 rounded-xl px-4 py-3 text-[15px] leading-7 ring-1 sm:text-[16px] ${box} ${className ?? 'mt-4'}`}>
+      <Icon className={`mt-1.5 h-4 w-4 shrink-0 ${iconTone}`} aria-hidden />
       <div className="min-w-0">{children}</div>
     </div>
   );

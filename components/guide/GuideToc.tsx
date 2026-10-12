@@ -23,6 +23,8 @@ export function GuideToc({ title }: { title: string }) {
     headings.forEach((heading, index) => {
       if (!heading.id) heading.id = `section-${index + 1}`;
     });
+    // PC (lg 以上) は余白があるので最初から開いておく (スマホは閉じて本文を先に見せる)。
+    if (ref.current && window.matchMedia('(min-width: 1024px)').matches) ref.current.open = true;
     setItems(
       headings.map((heading) => ({
         id: heading.id,

@@ -7,7 +7,9 @@ import Link from 'next/link';
 
 export function GuideTitle({ children }: { children: ReactNode }) {
   return (
-    <h1 className="text-3xl font-bold leading-tight tracking-tight text-slate-900 sm:text-4xl">{children}</h1>
+    // auto-phrase: 日本語を文節の切れ目で改行する (「け）」だけ・「注 / 文」のような割れを防ぐ)。対応しない
+    // ブラウザ (Safari) は通常の改行のまま。text-balance は日本語で語の途中を割るので使わない。
+    <h1 className="text-3xl font-bold leading-tight tracking-tight text-slate-900 [word-break:auto-phrase] sm:text-4xl">{children}</h1>
   );
 }
 

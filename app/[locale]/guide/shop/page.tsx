@@ -103,11 +103,6 @@ export default async function GuideShopPage({
           </div>
         </header>
 
-        {video && (
-          <Section title={HOWTO_VIDEO_UI.sectionTitle} toc={false}>
-            <GuideVideo video={video} />
-          </Section>
-        )}
 
         <Section title={c.relationTitle}>
           <p className="mt-3 text-sm leading-relaxed text-slate-700">
@@ -130,6 +125,13 @@ export default async function GuideShopPage({
             ))}
           </div>
         </Section>
+
+        {/* 動画は「できること」の後 (ヒーロー画像の直後に画像が 2 枚続かないように)。 */}
+        {video && (
+          <Section title={HOWTO_VIDEO_UI.sectionTitle} toc={false}>
+            <GuideVideo video={video} />
+          </Section>
+        )}
 
         <Section title={c.flowTitle}>
           <ol className="mt-4 space-y-3">

@@ -10,6 +10,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { getTranslations, setRequestLocale } from 'next-intl/server';
 import { AppShell } from '@/components/AppShell';
+import { ArrowRight } from 'lucide-react';
 import { GuideFrame } from '@/components/guide/GuideFrame';
 import { CodeBlock } from '@/components/guide/AgentGuidePieces';
 import { GuideCallout } from '@/components/guide/GuideCallout';
@@ -47,6 +48,7 @@ export default async function GuideStorePage({
   const deliveryGuide = env.enableStoreDeliveryTicketUi ? deliveryStoreGuideContentFor(locale) : null;
   const licenseGuide = env.enableLicenseNftUi ? licenseStoreGuideContentFor(locale) : null;
   const tCatalog = await getTranslations({ locale, namespace: 'StoreCatalog' });
+  const tLanding = await getTranslations({ locale, namespace: 'Landing' });
 
   return (
     <AppShell>
@@ -149,6 +151,14 @@ export default async function GuideStorePage({
           <p className="mt-3 text-sm leading-relaxed text-slate-700">
             {c.feeBody}
           </p>
+          <Link
+            href={`/${locale}/pricing`}
+            prefetch={false}
+            className="mt-2 inline-flex min-h-11 items-center gap-1 text-sm font-semibold text-emerald-700 hover:text-emerald-900"
+          >
+            {tLanding('supportFeeDetailsLink')}
+            <ArrowRight className="h-4 w-4" aria-hidden />
+          </Link>
         </Section>
 
         <Section title={c.startTitle}>
@@ -267,24 +277,34 @@ export default async function GuideStorePage({
           </div>
         </Section>
 
-        {licenseGuide ? <Section title={licenseGuide.heading}>
-          <div className="space-y-4 text-sm leading-relaxed text-slate-700">
-            <p>{licenseGuide.intro}</p>
-            <h3 className="font-semibold text-slate-900">{licenseGuide.fieldsHeading}</h3>
-            <p>{licenseGuide.fields}</p>
-            <p>{licenseGuide.publish}</p>
-            <h3 className="font-semibold text-slate-900">{licenseGuide.integrationHeading}</h3>
-            <p>{licenseGuide.integration}</p>
-            <CodeBlock code={licenseGuide.integrationSnippet} />
-            <ul className="list-disc space-y-2 pl-5"><li>{licenseGuide.entry}</li><li>{licenseGuide.metered}</li></ul>
-            <h3 className="font-semibold text-slate-900">{licenseGuide.verifyHeading}</h3>
-            <p>{licenseGuide.verifyBody}</p>
-            <CodeBlock code={licenseGuide.verifyCommand} />
-            <h3 className="font-semibold text-slate-900">{licenseGuide.policyHeading}</h3>
-            <p>{licenseGuide.policy}</p>
-            <p>{licenseGuide.rights}</p>
-          </div>
-        </Section> : null}
+        {licenseGuide ? (
+          // 開発者向けの手順なので、リードだけ常に見せ、4 つの話 (登録・組み込み・確認・ポリシー) はたためるカードにする。
+          <Section title={licenseGuide.heading}>
+            <p className="mt-3 text-sm leading-relaxed text-slate-700">{licenseGuide.intro}</p>
+            <div className="mt-4 space-y-3">
+              <GuideDisclosure summary={<h3 className="text-sm font-semibold text-slate-900 sm:text-base">{licenseGuide.fieldsHeading}</h3>}>
+                <p className="text-sm leading-relaxed text-slate-700">{licenseGuide.fields}</p>
+                <p className="mt-3 text-sm leading-relaxed text-slate-700">{licenseGuide.publish}</p>
+              </GuideDisclosure>
+              <GuideDisclosure summary={<h3 className="text-sm font-semibold text-slate-900 sm:text-base">{licenseGuide.integrationHeading}</h3>}>
+                <p className="text-sm leading-relaxed text-slate-700">{licenseGuide.integration}</p>
+                <CodeBlock code={licenseGuide.integrationSnippet} />
+                <ul className="mt-3 list-disc space-y-2 pl-5">
+                  <li className="text-sm leading-relaxed text-slate-700">{licenseGuide.entry}</li>
+                  <li className="text-sm leading-relaxed text-slate-700">{licenseGuide.metered}</li>
+                </ul>
+              </GuideDisclosure>
+              <GuideDisclosure summary={<h3 className="text-sm font-semibold text-slate-900 sm:text-base">{licenseGuide.verifyHeading}</h3>}>
+                <p className="text-sm leading-relaxed text-slate-700">{licenseGuide.verifyBody}</p>
+                <CodeBlock code={licenseGuide.verifyCommand} />
+              </GuideDisclosure>
+              <GuideDisclosure summary={<h3 className="text-sm font-semibold text-slate-900 sm:text-base">{licenseGuide.policyHeading}</h3>}>
+                <p className="text-sm leading-relaxed text-slate-700">{licenseGuide.policy}</p>
+                <p className="mt-3 text-sm leading-relaxed text-slate-700">{licenseGuide.rights}</p>
+              </GuideDisclosure>
+            </div>
+          </Section>
+        ) : null}
 
         {deliveryGuide ? <div id="protected-delivery" className="scroll-mt-24">
           <Section title={deliveryGuide.heading}>
@@ -312,7 +332,12 @@ export default async function GuideStorePage({
             {c.commonSections.map((section) => (
               <GuideDisclosure
                 key={section.title}
-                summary={<h3 className="text-sm font-semibold text-slate-900 sm:text-base">{section.title}</h3>}
+                summary={
+                  <>
+                    <h3 className="text-sm font-semibold text-slate-900 sm:text-base">{section.title}</h3>
+                    <p className="mt-1 text-sm leading-relaxed text-slate-600">{section.summary}</p>
+                  </>
+                }
               >
                 {section.body ? (
                   <p className="text-sm leading-relaxed text-slate-700">

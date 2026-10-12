@@ -28,7 +28,6 @@ export type GuideCostRow = {
 export type GuideContent = {
   readonly metaTitle: string;
   readonly metaDescription: string;
-  readonly title: string;
   readonly subtitle: string;
   readonly lead: string;
   readonly heroImage: GuideImage;
@@ -108,7 +107,6 @@ const ja: GuideContent = {
   metaTitle: '今お使いのPOSレジでJPYC（円ステーブルコイン）を受け取る運用ガイド',
   metaDescription:
     'システム連携なしで今日から。既存の無料POSレジに「OpenPay」決済を足して、JPYC（円ステーブルコイン）で受け取る2台持ち運用の手順。',
-  title: '今お使いの POS レジで、JPYC（円ステーブルコイン）を受け取る',
   subtitle: 'システム連携なしで「今日から」始める「2 台持ち」運用ガイド',
   lead: 'いまの POS レジはそのまま、OpenPay を「横に置くだけ」。開発も連携も不要。設定は一度だけ、慣れれば会計は約 10 秒です。',
   heroImage: { file: 'hero.webp', alt: 'OpenPay の決済QR 作成画面 (金額 1200 JPYC) と、店名・金額入りの決済用 QR コード (スマホ 2 台の実画面)' },
@@ -263,7 +261,6 @@ const en: GuideContent = {
   metaTitle: 'Accept JPYC payments with your existing POS register',
   metaDescription:
     'Start today, no system integration. Add an 「OpenPay」 tender to your existing free POS and receive JPYC (a JPY stablecoin) with a simple two-device workflow.',
-  title: 'Accept JPYC payments with the POS register you already use',
   subtitle: 'A “two-device” workflow you can start today — no system integration',
   lead: 'Keep your current POS and simply place OpenPay beside it. No development, no integration. Set up once — checkout takes about 10 seconds with practice.',
   heroImage: { file: 'hero.webp', alt: 'OpenPay payment-QR screen (1200 JPYC) and the generated QR with shop name and amount (two real phone screens)' },

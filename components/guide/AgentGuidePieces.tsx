@@ -1,8 +1,11 @@
+
 // /guide/agent の追加 presentational ヘルパ (PosGuidePieces の Section/BulletList/StepList/GuideFigure
 // を再利用しつつ、この面固有の 2 部品だけを最小追加する)。
 //
 // hooks/context を使わない純 presentational なので Server/Client どちらでも描画でき、jsdom で
-// 実描画テストできる (tests/components/AgentGuidePieces.test.tsx)。
+// 実描画テストできる (tests/components/AgentGuidePieces.test.tsx)。CodeBlock の「コピー」だけは client の小部品。
+
+import { CopyCodeButton } from '@/components/guide/CopyCodeButton';
 
 // ページ冒頭のヒーロー画像 (実 UI 3 画面の合成: AI 会話→事前充填→決済手前)。装飾 SVG でなく実 UI
 // 撮影ゆえ public/guide-agent/ に置く (public/guide/ は posGuide の孤児検査対象なので分離)。width/height
@@ -43,9 +46,11 @@ export function CodeBlock({
   const scrolls = code.split('\n').some((line) => line.length > CODE_WRAP_MAX);
   return (
     <div className="mt-4">
-      {label ? (
-        <p className="mb-2 text-xs font-medium text-slate-500">{label}</p>
-      ) : null}
+      {/* 名前の行の右に「コピー」(貼るためのコードを全文写せる)。 */}
+      <div className="mb-2 flex items-end justify-between gap-3">
+        {label ? <p className="text-xs font-medium text-slate-500">{label}</p> : <span />}
+        <CopyCodeButton code={code} />
+      </div>
       <div
         className={
           scrolls

@@ -171,11 +171,25 @@ export default async function GuideSellPage({
               marker="•"
               markerClassName="text-emerald-600"
             />
-            {c.bazaarNote.map((note) => (
-              <p key={note} className="mt-3 text-sm leading-relaxed text-slate-700">
-                {note}
-              </p>
-            ))}
+            {c.bazaarNote.map((note) => {
+              // 文中の URL はリンクにする (素の文字のまま 3 行に折れていた)。
+              const [before, url] = note.split(/(?=https:\/\/)/);
+              return (
+                <p key={note} className="mt-3 text-sm leading-relaxed text-slate-700">
+                  {before}
+                  {url ? (
+                    <a
+                      href={url}
+                      target="_blank"
+                      rel="noreferrer noopener"
+                      className="break-all font-medium text-emerald-700 underline decoration-emerald-300 underline-offset-2 hover:text-emerald-900"
+                    >
+                      {url}
+                    </a>
+                  ) : null}
+                </p>
+              );
+            })}
           </div>
         </Section>
 

@@ -104,11 +104,6 @@ export default async function GuideQrPage({
           </div>
         </header>
 
-        {video && (
-          <Section title={HOWTO_VIDEO_UI.sectionTitle} toc={false}>
-            <GuideVideo video={video} />
-          </Section>
-        )}
 
         <Section title={c.forWhoTitle}>
           <div className="mt-3 flex flex-wrap gap-1.5">
@@ -138,6 +133,13 @@ export default async function GuideQrPage({
             ))}
           </div>
         </Section>
+
+        {/* 動画は「できること」の後 (ヒーロー画像の直後に画像が 2 枚続かないように)。 */}
+        {video && (
+          <Section title={HOWTO_VIDEO_UI.sectionTitle} toc={false}>
+            <GuideVideo video={video} />
+          </Section>
+        )}
 
         <Section title={c.receiveFlowTitle}>
           <StepList steps={c.receiveFlowSteps} />
