@@ -39,8 +39,12 @@ export default async function GuideShopPage({
   const { locale } = await params;
   setRequestLocale(locale);
   const c = shopGuideContentFor(locale);
-  // このページはレジとモバイルオーダーの両方を扱うので、動画も 2 本 (レジ → モバイルオーダーの順・ja だけ)。
-  const videos = [howtoVideoFor(locale, 'register'), howtoVideoFor(locale, 'mobileOrder')].filter((v) => v !== null);
+  // このページはレジとモバイルオーダーの両方を扱うので、動画も 3 本 (レジ → モバイルオーダー → 受注の順・ja だけ)。
+  const videos = [
+    howtoVideoFor(locale, 'register'),
+    howtoVideoFor(locale, 'mobileOrder'),
+    howtoVideoFor(locale, 'orders'),
+  ].filter((v) => v !== null);
   const tLanding = await getTranslations({ locale, namespace: 'Landing' });
 
   const fees = [
