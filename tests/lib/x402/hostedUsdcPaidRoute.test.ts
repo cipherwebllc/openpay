@@ -35,6 +35,7 @@ const mocks = vi.hoisted(() => ({
   metric: vi.fn(),
   notify: vi.fn(),
   warn: vi.fn(),
+  info: vi.fn(),
 }));
 
 vi.mock('server-only', () => ({}));
@@ -54,13 +55,13 @@ vi.mock('@/lib/x402/hostedStore', () => ({
   hostedPurchaseMetadata: mocks.metadata,
   sellerDisclosureComplete: mocks.disclosure,
 }));
-// 再送の窓 (PAYMENT_REDELIVERY_TTL_SEC) は本物を使い、署名の指紋だけ入力依存の fake にする。
+// 署名の指紋だけ入力依存の fake にする。
 vi.mock('@/lib/x402/paymentRedelivery', async (original) => ({
   ...await original<typeof import('@/lib/x402/paymentRedelivery')>(),
   paymentSignatureFingerprint: (signature: unknown) => fakeFingerprint(signature),
 }));
 vi.mock('@/lib/logger', () => ({
-  logger: { debug: vi.fn(), info: vi.fn(), warn: mocks.warn, error: vi.fn() },
+  logger: { debug: vi.fn(), info: mocks.info, warn: mocks.warn, error: vi.fn() },
 }));
 vi.mock('@/lib/x402/purchaseIntent', () => ({
   checkPurchaseQuoteRateLimit: mocks.quoteLimit,
@@ -105,7 +106,6 @@ vi.mock('@/lib/x402/cdpJwt', () => ({
 }));
 
 import { handleHostedUsdcPaidGet } from '@/lib/x402/hostedUsdcPaidRoute';
-import { HOSTED_REDELIVERY_WINDOW_MS } from '@/lib/x402/hostedRedelivery';
 
 const NOW = 1_900_000_000_000;
 const RESOURCE_ID = `h_${'1'.repeat(32)}`;
@@ -590,10 +590,12 @@ describe('hosted USDC paid route', () => {
     mocks.getContent.mockResolvedValue(null);
     mocks.findIntent.mockResolvedValue(intent('settled'));
     expect((await handleHostedUsdcPaidGet(request(), RESOURCE_ID, PAYER)).status).toBe(404);
+    // 確定済みの購入への再送は、取り下げに関係なく本文を読まずに 409 (下の「確定済みの購入への署名ヘッダー再送」で固定する)。
     const paid = await handleHostedUsdcPaidGet(request({ 'X-PAYMENT': paymentHeader() }), RESOURCE_ID, PAYER);
-    expect(paid.status).toBe(503);
-    expect(await paid.json()).toEqual({ ok: false, error: 'content_unavailable' });
+    expect(paid.status).toBe(409);
+    expect(await paid.json()).toMatchObject({ ok: false, error: 'purchase_already_settled', state: 'settled', txHash: TX_HASH });
     expect(paid.headers.has('PAYMENT-REQUIRED')).toBe(false);
+    expect(mocks.getContent).not.toHaveBeenCalled();
     expect(mocks.createIntent).not.toHaveBeenCalled();
     expect(mocks.postFacilitator).not.toHaveBeenCalled();
     expect(mocks.claimSigned).not.toHaveBeenCalled();
@@ -605,8 +607,9 @@ describe('hosted USDC paid route', () => {
   describe('B4: 期限切れ後の完全一致 redelivery', () => {
     const EXPIRED_NOW = NOW + 200_000; // fxQuoteExpiresAt (NOW+180s) を過ぎている
 
-    // 本文を返すのは確定から 30 分以内 (窓の外は下の「確定後の署名ヘッダー再送」で固定する)。
-    it('settled + FX quote 期限切れでも、確定から 30 分以内なら content を返す', async () => {
+    // 確定済みの購入への再送は本文を返さない (下の「確定済みの購入への署名ヘッダー再送」で固定する)。
+    // 期限切れで purchase_intent_expired にはせず、確定済みの 409 (購入の証拠と library の案内) を返す。
+    it('settled + FX quote 期限切れでも purchase_intent_expired ではなく、確定済みの 409 を返す', async () => {
       vi.spyOn(Date, 'now').mockReturnValue(EXPIRED_NOW);
       mocks.findIntent.mockResolvedValue(intent('settled'));
       const response = await handleHostedUsdcPaidGet(
@@ -614,13 +617,16 @@ describe('hosted USDC paid route', () => {
         RESOURCE_ID,
         PAYER,
       );
-      expect(response.status).toBe(200);
-      await expect(response.json()).resolves.toMatchObject({
-        ok: true,
+      expect(response.status).toBe(409);
+      const body = await response.json();
+      expect(body).toMatchObject({
+        ok: false,
+        error: 'purchase_already_settled',
         state: 'settled',
-        value: 'paid content',
         txHash: TX_HASH,
       });
+      expect(body).not.toHaveProperty('value');
+      expect(mocks.readAccess).toHaveBeenCalledTimes(1);
       expect(mocks.postFacilitator).not.toHaveBeenCalled();
     });
 
@@ -789,9 +795,10 @@ describe('hosted USDC paid route', () => {
   });
 });
 
-// 確定後の署名ヘッダー再送は確定 (settledAt) から 30 分まで (JPYC と同じ)。一致に要る値は
-// Base の USDC transferWithAuthorization の calldata から組み立てられるため。
-describe('確定後の署名ヘッダー再送は確定から 30 分まで (USDC)', () => {
+// 確定済みの購入への署名ヘッダーの再送では、本文 (value) を返さない (窓 0・JPYC と同じ)。一致に要る値は
+// Base の USDC transferWithAuthorization の calldata から組み立てられるため。本文を返すのは、その request
+// 自身が settle を呼んで成功した初回の応答だけ。
+describe('確定済みの購入への署名ヘッダー再送では本文を返さない (USDC・窓 0)', () => {
   const SETTLED_AT = NOW + 3_000; // intent('settled').settledAt
   const MINUTE = 60_000;
   const resend = (header = paymentHeader()) =>
@@ -804,60 +811,75 @@ describe('確定後の署名ヘッダー再送は確定から 30 分まで (USDC
     return { ...base, claim, authorizationHash: fakeAuthHash(claim), settledAt };
   }
 
-  beforeEach(() => {
-    mocks.findIntent.mockResolvedValue(intent('settled'));
-  });
+  /** hooks/useHostedStorePurchase が 409 を確定として扱う条件 (error code の名前は見ない)。 */
+  function browserTreatsAsSettled(status: number, body: Record<string, unknown>): boolean {
+    return (
+      status === 409 &&
+      body.state === 'settled' &&
+      typeof body.txHash === 'string' &&
+      /^0x[0-9a-fA-F]{64}$/.test(body.txHash) &&
+      body.resourceId === RESOURCE_ID
+    );
+  }
 
-  it.each([
-    ['確定の直後', 0],
-    ['29 分後', 29 * MINUTE],
-    ['30 分の 1ms 前', HOSTED_REDELIVERY_WINDOW_MS - 1],
-  ])('%s の再送は従来どおり本文を返し、facilitator を呼ばない', async (_label, elapsed) => {
-    vi.spyOn(Date, 'now').mockReturnValue(SETTLED_AT + elapsed);
-    const response = await resend();
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toMatchObject({
-      ok: true, state: 'settled', value: 'paid content', txHash: TX_HASH, payment: paymentSnapshot,
-    });
-    expect(response.headers.has('PAYMENT-RESPONSE')).toBe(true);
-    expect(mocks.postFacilitator).not.toHaveBeenCalled();
-    expect(mocks.warn).not.toHaveBeenCalled();
-  });
-
-  it.each([
-    ['ちょうど 30 分', HOSTED_REDELIVERY_WINDOW_MS],
-    ['31 分後', 31 * MINUTE],
-    ['1 年後', 365 * 24 * 60 * MINUTE],
-  ])('%s の再送は 409 で本文を返さず、購入の証拠と library を案内する', async (_label, elapsed) => {
-    vi.spyOn(Date, 'now').mockReturnValue(SETTLED_AT + elapsed);
-    const response = await resend();
+  async function expectAlreadySettled(response: Response): Promise<Record<string, unknown>> {
     expect(response.status).toBe(409);
     expect(response.headers.get('cache-control')).toBe('no-store');
-    const body = await response.json();
+    const text = await response.text();
+    expect(text).not.toContain('paid content');
+    const body = JSON.parse(text) as Record<string, unknown>;
     expect(body).toEqual({
       ok: false,
-      error: 'purchase_redelivery_expired',
+      error: 'purchase_already_settled',
       state: 'settled',
       resourceId: RESOURCE_ID,
       txHash: TX_HASH,
       network: 'eip155:8453',
       library: '/store/library',
       contentApi: `/api/store/content/${RESOURCE_ID}`,
-      message: expect.stringContaining('within 30 minutes of settlement'),
-      messageJa: expect.stringContaining('確定から 30 分以内'),
+      message: expect.stringContaining('(/store/library)'),
+      messageJa: expect.stringContaining('（/store/library）'),
     });
     expect(body).not.toHaveProperty('value');
-    expect(mocks.getContent).not.toHaveBeenCalled();
+    expect(body).not.toHaveProperty('payment');
+    expect(body.message).not.toMatch(/\d+ minutes/);
+    expect(body.messageJa).not.toMatch(/\d+ 分/);
     expect(response.headers.has('PAYMENT-RESPONSE')).toBe(false);
     expect(response.headers.has('X-PAYMENT-RESPONSE')).toBe(false);
+    return body;
+  }
+
+  beforeEach(() => {
+    mocks.findIntent.mockResolvedValue(intent('settled'));
+  });
+
+  it.each([
+    ['確定と同じ時刻', 0],
+    ['確定の 1 秒後', 1_000],
+    ['29 分後', 29 * MINUTE],
+    ['1 年後', 365 * 24 * 60 * MINUTE],
+  ])('%s の再送でも 409 で本文を読まずに返さず、購入の証拠と library を案内する', async (_label, elapsed) => {
+    vi.spyOn(Date, 'now').mockReturnValue(SETTLED_AT + elapsed);
+    await expectAlreadySettled(await resend());
+    expect(mocks.getContent).not.toHaveBeenCalled();
     expect(mocks.postFacilitator).not.toHaveBeenCalled();
-    expect(mocks.warn).toHaveBeenCalledTimes(1);
-    expect(mocks.warn).toHaveBeenCalledWith('x402.hosted.redelivery_expired', {
+    // 窓 0 では正規の再試行もここを通るので、Sentry に送る warn ではなく info で残す。
+    expect(mocks.warn).not.toHaveBeenCalled();
+    expect(mocks.info).toHaveBeenCalledTimes(1);
+    expect(mocks.info).toHaveBeenCalledWith('x402.hosted.redelivery_refused', {
       rail: 'usdc', resourceId: RESOURCE_ID, ageSec: Math.floor(elapsed / 1_000),
     });
   });
 
-  it('transferWithAuthorization の calldata だけから組み立てたヘッダーでも、30 分を過ぎた他人には本文を返さない', async () => {
+  it('契約: 409 はブラウザ (PR-0) が確定として扱う形 (409・state settled・正規の txHash・resourceId 一致)', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(SETTLED_AT + 1_000);
+    const response = await resend();
+    const status = response.status;
+    const body = await expectAlreadySettled(response);
+    expect(browserTreatsAsSettled(status, body)).toBe(true);
+  });
+
+  it('transferWithAuthorization の calldata だけから組み立てたヘッダーでも、確定の 1 秒後から本文を返さない', async () => {
     const r = `0x${'4d'.repeat(32)}` as Hex;
     const s = `0x${'2c'.repeat(32)}` as Hex;
     const buyerSignature = `${r}${s.slice(2)}1b`;
@@ -897,47 +919,52 @@ describe('確定後の署名ヘッダー再送は確定から 30 分まで (USDC
     // 前提: 組み立てた署名は買い手の署名と同じ (server は買い手の再試行と区別できない)。
     expect(rebuiltSignature).toBe(buyerSignature);
 
-    vi.spyOn(Date, 'now').mockReturnValue(SETTLED_AT + 29 * MINUTE);
-    expect((await resend(rebuild(rebuiltSignature))).status).toBe(200);
+    for (const elapsed of [1_000, 29 * MINUTE]) {
+      vi.spyOn(Date, 'now').mockReturnValue(SETTLED_AT + elapsed);
+      await expectAlreadySettled(await resend(rebuild(rebuiltSignature)));
+    }
 
-    vi.spyOn(Date, 'now').mockReturnValue(SETTLED_AT + 31 * MINUTE);
-    const late = await resend(rebuild(rebuiltSignature));
-    expect(late.status).toBe(409);
-    const text = await late.text();
-    expect(text).not.toContain('paid content');
-    expect(JSON.parse(text)).toMatchObject({ error: 'purchase_redelivery_expired', txHash: TX_HASH });
-
-    // 完全一致の要求は変わらない: v だけ変えた署名は窓の中でも authorization_conflict。
+    // 完全一致の要求は変わらない: v だけ変えた署名は authorization_conflict。
     vi.spyOn(Date, 'now').mockReturnValue(SETTLED_AT + MINUTE);
     const conflict = await resend(rebuild(`${r}${s.slice(2)}1c`));
     expect(conflict.status).toBe(409);
     expect(await conflict.json()).toEqual({ ok: false, error: 'authorization_conflict' });
 
-    expect(mocks.getContent).toHaveBeenCalledTimes(1);
+    expect(mocks.getContent).not.toHaveBeenCalled();
     expect(mocks.postFacilitator).not.toHaveBeenCalled();
   });
 
-  it('初回の購入 (この request 自身が settle した応答) は settledAt に関係なく本文を返す', async () => {
-    // finalize / read-back が古い settledAt を返しても (別 worker の確定等)、この request の settle 成功は窓の外。
+  it('初回の購入 (この request 自身が settle した応答) は settledAt に関係なく本文を返す (回帰)', async () => {
+    // finalize / read-back が古い settledAt を返しても (別 worker の確定等)、この request の settle 成功は本文を返す。
     const stale = { ...intent('settled'), settledAt: NOW - 2 * 60 * MINUTE };
     mocks.findIntent.mockResolvedValue(intent());
     mocks.finalize.mockResolvedValue({ ok: true, kind: 'finalized', intent: stale, ownership: {}, purchase: { payment: paymentSnapshot } });
     mocks.readAccess.mockResolvedValue({ ok: true, intent: stale, ownership: {}, purchase: { payment: paymentSnapshot } });
     const response = await resend();
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toMatchObject({ ok: true, value: 'paid content', txHash: TX_HASH });
+    await expect(response.json()).resolves.toMatchObject({ ok: true, value: 'paid content', txHash: TX_HASH, payment: paymentSnapshot });
     expect(response.headers.has('PAYMENT-RESPONSE')).toBe(true);
     expect(mocks.postFacilitator.mock.calls.map(([path]) => path)).toEqual(['/verify', '/settle']);
     expect(mocks.warn).not.toHaveBeenCalled();
+    expect(mocks.info).not.toHaveBeenCalledWith('x402.hosted.redelivery_refused', expect.anything());
   });
 
-  it.each(['settling', 'indeterminate'] as const)('%s のままの再試行は時間に関係なく従来どおり 202 pending', async (state) => {
+  it('signed の再送で、settle の claim が確定済み (別の request が確定させた) を返したときも本文を返さない', async () => {
+    mocks.findIntent.mockResolvedValue(intent('signed'));
+    mocks.claimSettlement.mockResolvedValue({ ok: true, kind: 'settled', intent: intent('settled') });
+    await expectAlreadySettled(await resend());
+    expect(mocks.claimSettlement).toHaveBeenCalledTimes(1);
+    expect(mocks.postFacilitator).not.toHaveBeenCalled();
+  });
+
+  it.each(['settling', 'indeterminate'] as const)('%s のままの再送は時間に関係なく従来どおり 202 pending (回帰)', async (state) => {
     vi.spyOn(Date, 'now').mockReturnValue(SETTLED_AT + 3 * 60 * MINUTE);
     mocks.findIntent.mockResolvedValue(intent(state));
     const response = await resend();
     expect(response.status).toBe(202);
     await expect(response.json()).resolves.toEqual({ ok: true, state: 'pending' });
     expect(mocks.warn).not.toHaveBeenCalled();
+    expect(mocks.info).not.toHaveBeenCalled();
   });
 });
 

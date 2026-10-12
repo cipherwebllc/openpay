@@ -528,7 +528,7 @@ export function useHostedStorePurchase({
         TX_HASH_RE.test(body.txHash) &&
         body.resourceId === resourceId
       ) {
-        // 確定済みの購入への再送に、server が本文を返さずに返す 409 (今は purchase_redelivery_expired)。
+        // 確定済みの購入への再送に、server が本文を返さずに返す 409 (purchase_already_settled・lib/x402/hostedRedelivery.ts)。
         // error code の名前では判定しない (server が code を改名しても揺れないため)。決済は確定として扱い、
         // 本文は SIWE の own content API から読む (200 の value を表示に使わないのと同じ)。
         markConfirmed(body.txHash as Hex);

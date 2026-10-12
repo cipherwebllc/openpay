@@ -83,6 +83,7 @@ import {
 import {
   HostedPurchaseWireError,
 } from '@/lib/x402/hostedPurchaseWire';
+import { hostedAlreadySettledResponse } from '@/lib/x402/hostedRedelivery';
 
 function jsonResponse(body: unknown, status: number): Response {
   return new Response(JSON.stringify(body), {
@@ -865,7 +866,7 @@ describe('useHostedStorePurchase: 確定済みの 409・retry の時計・exhaus
   ): Record<string, unknown> {
     return {
       ok: false,
-      error: 'purchase_redelivery_expired',
+      error: 'purchase_already_settled',
       state: 'settled',
       resourceId: RESOURCE_ID,
       txHash: TX_HASH,
@@ -985,10 +986,11 @@ describe('useHostedStorePurchase: 確定済みの 409・retry の時計・exhaus
 
   describe('409 の判定', () => {
     it.each([
-      ['今の code (purchase_redelivery_expired)', settled409Body()],
+      ['今の code (purchase_already_settled)', settled409Body()],
       [
-        'code を改名しても (purchase_already_settled)',
-        settled409Body({ error: 'purchase_already_settled' }),
+        // deploy の入れ替えの間は、旧い server がこの code を返しうる。
+        '旧い code (purchase_redelivery_expired)',
+        settled409Body({ error: 'purchase_redelivery_expired' }),
       ],
       ['error code なし', withoutKey(settled409Body(), 'error')],
       ['大文字 hex の txHash', settled409Body({ txHash: UPPER_TX_HASH })],
@@ -1085,6 +1087,64 @@ describe('useHostedStorePurchase: 確定済みの 409・retry の時計・exhaus
             )}`,
         ),
       ).toBe(true);
+    });
+
+    // 契約: server (lib/x402/hostedRedelivery) が確定済みの購入への再送に実際に返す 409 を、手で書いた本文ではなく
+    // そのまま受けて確定として扱う。server が形 (409・state settled・txHash・resourceId) を崩すとここで落ちる。
+    it('契約: server が実際に返す確定済みの 409 (JPYC) を確定として own content へ進む', async () => {
+      const fetchMock = mockRoutes({
+        paid: () => () =>
+          hostedAlreadySettledResponse({
+            rail: 'jpyc',
+            resourceId: RESOURCE_ID,
+            chainId: 80002,
+            txHash: TX_HASH,
+            settledAt: Date.now() - 1_000,
+          }),
+        content: () => jsonResponse(readyContent(), 200),
+      });
+      const { result } = renderPurchase();
+      await prepare(result);
+
+      await act(async () => {
+        await result.current.purchase();
+      });
+
+      await waitFor(() => expect(result.current.phase).toBe('ready'));
+      expect(result.current.paymentStatus).toBe('confirmed');
+      expect(result.current.txHash).toBe(TX_HASH);
+      expect(result.current.content?.value).toBe('paid content');
+      expect(paidCalls(fetchMock)).toBe(1);
+    });
+
+    it('契約: server が実際に返す確定済みの 409 (USDC) を確定として own content へ進む', async () => {
+      vi.spyOn(Date, 'now').mockReturnValue(USDC_NOW);
+      account.chainId = 8453;
+      const fetchMock = mockRoutes({
+        quote: () => jsonResponse(usdcPaymentRequired(), 402),
+        paid: () => () =>
+          hostedAlreadySettledResponse({
+            rail: 'usdc',
+            resourceId: RESOURCE_ID,
+            chainId: 8453,
+            txHash: TX_HASH,
+            settledAt: USDC_NOW - 1_000,
+          }),
+        content: () =>
+          jsonResponse(readyContent(USDC_INTENT_SALT, 'paid with USDC'), 200),
+      });
+      const { result } = renderPurchase('usdc');
+      await prepare(result);
+
+      await act(async () => {
+        await result.current.purchase();
+      });
+
+      await waitFor(() => expect(result.current.phase).toBe('ready'));
+      expect(result.current.paymentStatus).toBe('confirmed');
+      expect(result.current.txHash).toBe(TX_HASH);
+      expect(result.current.content?.value).toBe('paid with USDC');
+      expect(paidCalls(fetchMock)).toBe(1);
     });
   });
 
