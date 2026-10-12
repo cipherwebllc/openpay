@@ -41,11 +41,11 @@ function leaves(value: unknown, at: string, sink: [string, string][]): void {
   }
 }
 
-// slug・group id は文言ではないので除く (/guide/ai-pay の "ai" 等)。
+// slug・group id・関連ページの path は文言ではないので除く (/guide/ai-pay の "ai" 等)。
 function copyLeaves(locale: string): [string, string][] {
   const sink: [string, string][] = [];
   leaves(guideNavFor(locale), locale, sink);
-  return sink.filter(([at]) => !/\.(slug|id)$/.test(at));
+  return sink.filter(([at]) => !/\.(slug|id|path)$/.test(at));
 }
 
 describe('guideNav content', () => {
@@ -87,6 +87,26 @@ describe('guideNav content', () => {
     expect(new Set(slugs).size).toBe(slugs.length);
   });
 
+  // ハブ末尾の「関連ページ」はガイドではないページ (料金 /pricing)。GUIDE_SLUGS・グループ・目次 (items) には入れない。
+  it('関連ページ: 料金 (/pricing) のカード 1 枚・ja/en 同じ並び・ガイドの slug や目次には入らない', () => {
+    expect(guideNavFor('ja').related).toEqual({
+      title: '関連ページ',
+      items: [{ id: 'pricing', path: '/pricing', label: '料金', summary: '機能ごとに、だれが払うかと計算例をまとめています。' }],
+    });
+    expect(guideNavFor('en').related).toEqual({
+      title: 'Related',
+      items: [{ id: 'pricing', path: '/pricing', label: 'Pricing', summary: 'Who pays what for each feature, with worked examples.' }],
+    });
+    for (const locale of LOCALES) {
+      const nav = guideNavFor(locale);
+      for (const item of nav.related.items) {
+        expect((GUIDE_SLUGS as readonly string[]).includes(item.id)).toBe(false);
+        expect(Object.keys(nav.items)).not.toContain(item.id);
+        expect(nav.groups.flatMap((g) => g.items.map((i) => i.slug as string))).not.toContain(item.id);
+      }
+    }
+  });
+
   it('qr / shop の説明は LP の入口 (Landing.entryQrBody / entryShopBody) と同文', () => {
     for (const [locale, messages] of [['ja', ja], ['en', en]] as const) {
       const { items } = guideNavFor(locale);
@@ -100,8 +120,15 @@ describe('guideNav content', () => {
     const FORBIDDEN =
       /[0-9]+\s*(%|JPYC|円|時間|日間)|無料|手数料|利用料|ガス|\bgas\b|\bfree\b|\bfees?\b|USDC|Polygon|Kaia|Avalanche|\bBase\b|Ethereum|Arbitrum|Optimism|\bArc\b|World\s?Chain|Sonic|\bSei\b|Unichain|HyperEVM|Hyperliquid/i;
     for (const locale of LOCALES) {
-      for (const [at, text] of copyLeaves(locale)) {
+      const copy = copyLeaves(locale);
+      for (const [at, text] of copy) {
         expect(FORBIDDEN.test(text), `${at} に可変情報: ${text}`).toBe(false);
+      }
+      // 関連ページ (料金) の見出し・カードの文言もこのフェンスの対象に入っている。
+      const { related } = guideNavFor(locale);
+      const texts = copy.map(([, text]) => text);
+      for (const text of [related.title, ...related.items.flatMap((i) => [i.label, i.summary])]) {
+        expect(texts, `${locale}: 関連ページの「${text}」がフェンスの対象外`).toContain(text);
       }
     }
     // 正規表現そのものの誤検出がないこと (R2-5 で実際に起きた型)。

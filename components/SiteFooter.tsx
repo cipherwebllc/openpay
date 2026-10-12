@@ -63,6 +63,12 @@ export function SiteFooter() {
             {t('links.guides')}
           </Link>
         )}
+        {/* 料金 (/pricing) は「ガイド」の直後。ガイドと違い @handle ページでも出す: 特商法・運用透明性と同じ
+            開示寄りのリンクで、チップ・デジタル商品の買い手がだれが何を払うかを確かめられるようにする
+            (plans/pricing-page.md §2.6)。 */}
+        <Link href="/pricing" className="hover:text-slate-700 hover:underline" prefetch={false}>
+          {t('links.pricing')}
+        </Link>
         <Link href="/terms" className="hover:text-slate-700 hover:underline" prefetch={false}>
           {t('links.terms')}
         </Link>

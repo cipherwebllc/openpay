@@ -96,6 +96,20 @@ describe('i18n: Footer と Create.guideLinks の ja/en parity', () => {
   });
 });
 
+// 特商法表記 (Tokutei) は rows の各 {label, value} に加え、役務の対価の下に料金ページ (/pricing) への
+// 1 行 (priceSeeAlso・t.rich の <link>) を持つ。片方のロケールだけに足す/消すのを防ぐ。
+describe('i18n: Tokutei の ja/en parity', () => {
+  it('ja.Tokutei と en.Tokutei の deep key 集合が一致', () => {
+    expect(deepKeys(ja.Tokutei).sort()).toEqual(deepKeys(en.Tokutei).sort());
+  });
+
+  it('priceSeeAlso は ja/en とも <link>…</link> をちょうど 1 つ持つ', () => {
+    for (const m of [ja, en]) {
+      expect(m.Tokutei.priceSeeAlso.match(/<link>[^<]+<\/link>/g)).toHaveLength(1);
+    }
+  });
+});
+
 describe('i18n: smart account 互換性エラー (3 form 名前空間 × ja/en)', () => {
   // useSmartAccount の router が IncompatibleSmartAccountError を投げる時の
   // i18n key 2 種。HashPort などの MAv2 委任 EOA 対策で導入。

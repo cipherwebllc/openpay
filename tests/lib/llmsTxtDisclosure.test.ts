@@ -234,6 +234,21 @@ describe('public/llms.txt 開示同期 (掟 14③)', () => {
     expect(line).toContain('provider はイベントごとに記録時の名前で固定され、改名に追随しない');
   });
 
+  // 料金ページ (/pricing) の行は「主要ページ」の「OpenPay トップ」の直後。料率は「- OpenPay 利用料:」行が正で、
+  // この行に数字を書くと上の全一致フェンスの外で料率の面が 1 つ増える (掟 14③) ので、数字を入れない。
+  it('主要ページに料金ページの行があり、その行に料率・金額の数字を書かない', () => {
+    const at = lines.findIndex((l) => l.startsWith('- [料金](https://open-pay.jp/ja/pricing):'));
+    expect(at, 'llms.txt に料金ページ (https://open-pay.jp/ja/pricing) の行が無い').toBeGreaterThan(-1);
+    expect(lines[at - 1]).toMatch(/^- \[OpenPay トップ\]\(https:\/\/open-pay\.jp\/ja\):/);
+    const line = lines[at];
+    expect(line).not.toMatch(/\d+\s*%/);
+    expect(line).not.toMatch(/\d+\s*JPYC/);
+    expect(line).not.toMatch(/\d+\s*(?:USDC|wei|円)/);
+    expect(line).toContain('料率は上の「OpenPay 利用料」と同じ');
+    // 「上の」が指す「- OpenPay 利用料:」行は、この行より前にある。
+    expect(lines.findIndex((l) => l.startsWith('- OpenPay 利用料:'))).toBeLessThan(at);
+  });
+
   it('Activity は独立した価格・preview・observedAt/expiresAt の再購入ルールを持つ', () => {
     const line = lineMentioning(USDC_JPYC_ACTIVITY.path);
     expect(line).toContain(USDC_JPYC_ACTIVITY.priceUsd + ' USDC');

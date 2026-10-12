@@ -484,6 +484,33 @@ describe('Legal pages', () => {
       ).toBeInTheDocument();
     });
 
+    // 料金ページ (/pricing) への 1 行は「役務の対価」の dd の下に足すだけ (plans/pricing-page.md §2.6)。
+    // 法定表示の本文 (rows.price.value) は変えず、本文の外のキー (Tokutei.priceSeeAlso) に置く → 施行日も上げない。
+    it.each([
+      ['ja', '料金', '役務の対価 (OpenPay 利用料)', '最終更新日'],
+      ['en', 'Pricing', 'Consideration for the Service (OpenPay Usage Fee)', 'Last updated'],
+    ] as const)('%s: 役務の対価の下に料金ページへのリンク「%s」・本文と施行日は変えない', async (locale, name, label, updated) => {
+      const m = locale === 'ja' ? (await import('@/messages/ja.json')).default : (await import('@/messages/en.json')).default;
+      const t = createTranslator({ locale, messages: m, namespace: 'Tokutei', onError: (error) => { throw error; } });
+      renderWithIntl(<TokuteiPage />, { locale });
+
+      const link = screen.getByRole('link', { name });
+      expect(link).toHaveAttribute('href', `/${locale}/pricing`);
+      expect(link).not.toHaveAttribute('aria-label');
+      // 役務の対価の行の dd の中にあり、料金ページへのリンクはこの 1 本だけ。
+      const dd = screen.getByText(label).nextElementSibling!;
+      expect(dd.tagName).toBe('DD');
+      expect(dd).toContainElement(link);
+      expect(screen.getAllByRole('link').filter((a) => a.getAttribute('href')?.endsWith('/pricing'))).toEqual([link]);
+      // 本文はそのまま dd の先頭に入り、リンクの 1 行は本文の後ろの別の段。
+      expect(dd.firstChild?.textContent).toBe(t('rows.price.value'));
+      expect(m.Tokutei.rows.price.value).not.toMatch(/<link>|\/pricing|料金のページ|Pricing page/);
+      expect(link.closest('span')!.textContent).toBe(m.Tokutei.priceSeeAlso.replace(/<\/?link>/g, ''));
+      // リンクの追加は改定ではないので、最終更新日は前回の改定日 (2026-10-12) のまま。
+      expect(LEGAL_ENTITY.tokuteiEffectiveDate).toBe('2026-10-12');
+      expect(screen.getByText(new RegExp(`${updated}:\\s*${LEGAL_ENTITY.tokuteiEffectiveDate}`))).toBeInTheDocument();
+    });
+
     it('役務の対価: per-tx OpenPay 利用料 (決済額の 1%・最低 2 JPYC / JPYC ガスレス限定 / 負担者は店主選択)、旧 % 都度手数料 (1.0%/0.5%) と旧 最低 5 JPYC 文の不在 (regression guard)', () => {
       renderWithIntl(<TokuteiPage />, { locale: 'ja' });
       const main = screen.getByRole('main');

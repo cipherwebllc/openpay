@@ -37,6 +37,13 @@ const GUIDE_GROUPS: readonly { id: GuideGroupId; slugs: readonly GuideSlug[] }[]
   { id: 'more', slugs: ['image-url'] },
 ];
 
+// ハブの末尾「関連ページ」に並べる、ガイドではないページ (plans/pricing-page.md §2.6)。
+// GUIDE_SLUGS (ディレクトリと 1:1 のフェンス) と目次のサイドバーには入れない。path は locale なし。
+type RelatedPageId = 'pricing';
+const RELATED_PAGES: readonly { id: RelatedPageId; path: `/${string}` }[] = [
+  { id: 'pricing', path: '/pricing' },
+];
+
 type GuideNavCopy = {
   /** 目次の名前 (PC サイドバーの見出し・スマホのバー)。nav の a11y 名もこの可視テキストから。 */
   readonly navTitle: string;
@@ -49,6 +56,9 @@ type GuideNavCopy = {
   readonly groupTitles: Readonly<Record<GuideGroupId, string>>;
   /** label = 目次とハブのカードの名前 / summary = ハブのカードの 1 行説明。 */
   readonly items: Readonly<Record<GuideSlug, { readonly label: string; readonly summary: string }>>;
+  /** ハブ末尾の「関連ページ」節の見出しと、そのカードの名前 / 1 行説明。 */
+  readonly relatedTitle: string;
+  readonly relatedItems: Readonly<Record<RelatedPageId, { readonly label: string; readonly summary: string }>>;
 };
 
 const JA: GuideNavCopy = {
@@ -106,6 +116,13 @@ const JA: GuideNavCopy = {
     'image-url': {
       label: '画像 URL の用意のしかた',
       summary: 'プロフィール・商品・お店のアイコンに使う画像の URL を用意する方法。',
+    },
+  },
+  relatedTitle: '関連ページ',
+  relatedItems: {
+    pricing: {
+      label: '料金',
+      summary: '機能ごとに、だれが払うかと計算例をまとめています。',
     },
   },
 };
@@ -167,6 +184,13 @@ const EN: GuideNavCopy = {
       summary: 'How to get an image URL for your profile, products and shop icon.',
     },
   },
+  relatedTitle: 'Related',
+  relatedItems: {
+    pricing: {
+      label: 'Pricing',
+      summary: 'Who pays what for each feature, with worked examples.',
+    },
+  },
 };
 
 export type GuideNavItem = {
@@ -181,12 +205,22 @@ export type GuideNavGroup = {
   readonly items: readonly GuideNavItem[];
 };
 
-export type GuideNav = Omit<GuideNavCopy, 'groupTitles'> & {
+export type GuideRelatedItem = {
+  readonly id: RelatedPageId;
+  /** locale なしのパス (描画側で `/${locale}` を前に付ける)。 */
+  readonly path: `/${string}`;
+  readonly label: string;
+  readonly summary: string;
+};
+
+export type GuideNav = Omit<GuideNavCopy, 'groupTitles' | 'relatedTitle' | 'relatedItems'> & {
   readonly groups: readonly GuideNavGroup[];
+  /** ハブ末尾の「関連ページ」(目次のサイドバーには出さない)。 */
+  readonly related: { readonly title: string; readonly items: readonly GuideRelatedItem[] };
 };
 
 function build(copy: GuideNavCopy): GuideNav {
-  const { groupTitles, items, ...frame } = copy;
+  const { groupTitles, items, relatedTitle, relatedItems, ...frame } = copy;
   return {
     ...frame,
     items,
@@ -195,6 +229,10 @@ function build(copy: GuideNavCopy): GuideNav {
       title: groupTitles[id],
       items: slugs.map((slug) => ({ slug, ...items[slug] })),
     })),
+    related: {
+      title: relatedTitle,
+      items: RELATED_PAGES.map(({ id, path }) => ({ id, path, ...relatedItems[id] })),
+    },
   };
 }
 
