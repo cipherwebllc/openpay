@@ -14,6 +14,9 @@
 import type { Metadata } from 'next';
 import { guidePageMetadata } from '@/lib/guideMetadata';
 
+// 運営者の note 記事「JPYC 運用ガイド (ウォレット準備〜換金・運用)」(lib/startGuide.ts の JPYC_NOTE_GUIDE と同じ・test で照合)。
+export const PAY_GUIDE_JPYC_NOTE = 'https://note.com/masia02/n/ned04a4cdb00a';
+
 export type PayGuideStep = {
   readonly n: number;
   readonly title: string;
@@ -38,6 +41,16 @@ export type PayGuideContent = {
   readonly needTitle: string;
   readonly need: readonly string[];
 
+  // ウォレットを選ぶ (MetaMask が基本・初めての方には JPYC EX が組み込まれた HashPort Wallet / マイナウォレット・2026-10-13 user)。
+  // HashPort Wallet / マイナウォレットで OpenPay の決済完了まで確かめ済み (user)。つなぎ方は WalletConnect。
+  readonly walletTitle: string;
+  readonly walletLead: string;
+  readonly wallets: readonly { readonly name: string; readonly body: string }[];
+  readonly walletNote: string;
+  readonly wcTitle: string;
+  readonly wcSteps: readonly PayGuideStep[];
+  readonly wcTip: string;
+
   readonly stepsTitle: string;
   readonly steps: readonly PayGuideStep[];
   readonly stepsTip: string;
@@ -55,6 +68,8 @@ export type PayGuideContent = {
   readonly jpycBody: readonly string[];
   readonly jpycCallout: string;
   readonly jpycLink: { readonly href: string; readonly label: string };
+  // 運営者の note 記事 (ウォレット選び〜換金)。lib/startGuide.ts の導入前チェックリストと同じ記事・同じ名前。
+  readonly jpycNoteLink: { readonly href: string; readonly label: string };
 
   readonly faqTitle: string;
   readonly faq: readonly { readonly q: string; readonly a: string }[];
@@ -81,9 +96,53 @@ const JA: PayGuideContent = {
   needTitle: '用意するもの',
   need: [
     'スマートフォン (カメラで QR を読めれば OK)',
-    'JPYC が入った自分のウォレット (MetaMask など)',
+    'JPYC が入った自分のウォレット (MetaMask が基本です。初めての方には HashPort Wallet やマイナウォレットもおすすめ。下の「ウォレットを選ぶ」へ)',
     'ガスレス決済の QR なら、ガス代用の POL などは要りません (「通常決済（ガス代は自分で負担）」と出る QR では必要です)',
   ],
+
+  walletTitle: 'ウォレットを選ぶ',
+  walletLead:
+    'MetaMask が基本です。初めての方には、アプリの中に JPYC EX が組み込まれていて、JPYC を手に入れる (発行) ことも日本円に戻す (償還) こともアプリの中でできる、HashPort Wallet やマイナウォレットもおすすめです。',
+  wallets: [
+    {
+      name: 'MetaMask',
+      body: 'いちばん広く使われているウォレットです。MetaMask のアプリの中のブラウザで支払い画面を開くと、そのまま接続できます。',
+    },
+    {
+      name: 'HashPort Wallet',
+      body: 'アプリの中で JPYC の発行・償還ができます。OpenPay には WalletConnect でつなぎます。',
+    },
+    {
+      name: 'マイナウォレット',
+      body: 'マイナンバーカードを使うウォレットです。アプリの中で JPYC の発行・償還ができます。OpenPay には WalletConnect でつなぎます。',
+    },
+  ],
+  walletNote:
+    'アプリの中で発行・償還するときも、JPYC EX の登録と本人確認が必要です。くわしくは各ウォレットと JPYC 公式の案内をご覧ください。',
+  wcTitle: 'WalletConnect でつなぐ',
+  wcSteps: [
+    {
+      n: 1,
+      title: '「WalletConnect」を押す',
+      body: '支払い画面の「ウォレット」、または「スキャンして支払う」の右上の「接続」から「WalletConnect」を押します。',
+    },
+    {
+      n: 2,
+      title: '英語の名前でウォレットを探す',
+      body: 'スマホでは「All Wallets」の一覧が出ます。検索欄に英語で「HashPort」または「Myna」と入れて、ウォレットを選びます (カタカナでは見つかりません)。ウォレットのアプリが開きます。',
+    },
+    {
+      n: 3,
+      title: 'アプリで接続を承認する',
+      body: 'ウォレットのアプリで接続を承認したら、ブラウザに戻ります。',
+    },
+    {
+      n: 4,
+      title: '支払いもアプリで承認する',
+      body: '「支払う」を押すと、ウォレットのアプリに確認の画面が出ます (出ないときはアプリを開きます)。金額と送り先を確かめて承認し、ブラウザに戻ります。',
+    },
+  ],
+  wcTip: 'パソコンで支払い画面を開いたときは、表示された QR を、スマホのウォレットのアプリで読み取ってつなぎます。',
 
   stepsTitle: '支払いの流れ',
   steps: [
@@ -146,11 +205,13 @@ const JA: PayGuideContent = {
   jpycTitle: 'JPYC を手に入れる',
   jpycBody: [
     'JPYC は、発行元の JPYC EX で手に入れられます。本人確認のうえ発行予約をし、指定の銀行口座へ日本円を振り込むと、登録したウォレットに JPYC が届きます。',
+    'HashPort Wallet とマイナウォレットは、アプリの中に JPYC EX が組み込まれていて、アプリから発行・償還の手続きができます。',
     'OpenPay は JPYC の発行・販売・交換をしていません。手に入れ方や条件は変わることがあるので、JPYC 公式サイトで最新の情報を確かめてください。',
   ],
   jpycCallout:
     'JPYC EX が対応するネットワークと、お店の QR のネットワークが同じとは限りません。どのネットワークの JPYC が要るかは、支払い画面のいちばん上で確かめられます。',
   jpycLink: { href: JPYC_OFFICIAL, label: 'JPYC 公式サイトで最新の情報を見る' },
+  jpycNoteLink: { href: PAY_GUIDE_JPYC_NOTE, label: 'JPYC 運用ガイド (ウォレット準備〜換金・運用) — note' },
 
   faqTitle: 'うまくいかないとき',
   faq: [
@@ -176,7 +237,7 @@ const JA: PayGuideContent = {
     },
     {
       q: 'スマホでウォレットにつながらない',
-      a: 'MetaMask などウォレットアプリの中のブラウザで OpenPay を開くと、接続と署名がスムーズです。画面に「MetaMask で開く」が出たら、それを押してください。',
+      a: 'MetaMask などウォレットアプリの中のブラウザで OpenPay を開くと、接続と署名がスムーズです。画面に「MetaMask で開く」が出たら、それを押してください。HashPort Wallet やマイナウォレットは「WalletConnect」から、検索欄に英語で「HashPort」「Myna」と入れて選びます。',
     },
     {
       q: '手数料はかかる？',
@@ -208,9 +269,53 @@ const EN: PayGuideContent = {
   needTitle: 'What you need',
   need: [
     'A smartphone (any camera that can scan a QR)',
-    'Your own wallet with JPYC in it (e.g. MetaMask)',
+    'Your own wallet with JPYC in it (MetaMask is the standard. If you are new to wallets, HashPort Wallet or MynaWallet are good choices too — see “Choosing a wallet” below)',
     'For a gasless QR you need no POL or other gas token (a QR marked “Standard (you pay gas)” does need one)',
   ],
+
+  walletTitle: 'Choosing a wallet',
+  walletLead:
+    'MetaMask is the standard. If you are new to wallets, HashPort Wallet and MynaWallet are good choices too: JPYC EX is built into these apps, so you can get JPYC (issuance) and turn it back into yen (redemption) inside the app.',
+  wallets: [
+    {
+      name: 'MetaMask',
+      body: 'The most widely used wallet. Open the payment screen in the browser inside the MetaMask app and it connects as is.',
+    },
+    {
+      name: 'HashPort Wallet',
+      body: 'Issue and redeem JPYC inside the app. Connect it to OpenPay with WalletConnect.',
+    },
+    {
+      name: 'MynaWallet',
+      body: 'A wallet that uses the My Number Card (Japan’s individual number card). Issue and redeem JPYC inside the app. Connect it to OpenPay with WalletConnect.',
+    },
+  ],
+  walletNote:
+    'Issuing or redeeming inside these apps still requires a JPYC EX account and identity verification. See the guidance from each wallet and from JPYC for details.',
+  wcTitle: 'Connecting with WalletConnect',
+  wcSteps: [
+    {
+      n: 1,
+      title: 'Tap “WalletConnect”',
+      body: 'On the payment screen, tap “WalletConnect” under “Wallet”, or from “Connect” at the top right of “Scan to pay”.',
+    },
+    {
+      n: 2,
+      title: 'Search for the wallet by its English name',
+      body: 'On a phone, an “All Wallets” list appears. Type “HashPort” or “Myna” in the search box and pick your wallet. The wallet app opens.',
+    },
+    {
+      n: 3,
+      title: 'Approve the connection in the app',
+      body: 'Approve the connection in the wallet app, then return to the browser.',
+    },
+    {
+      n: 4,
+      title: 'Approve the payment in the app too',
+      body: 'When you tap pay, a confirmation appears in the wallet app (open the app if it does not). Check the amount and the recipient, approve, then return to the browser.',
+    },
+  ],
+  wcTip: 'If you opened the payment screen on a computer, scan the QR shown there with the wallet app on your phone to connect.',
 
   stepsTitle: 'How to pay',
   steps: [
@@ -273,11 +378,13 @@ const EN: PayGuideContent = {
   jpycTitle: 'Getting JPYC',
   jpycBody: [
     'You can get JPYC from JPYC EX, run by its issuer (for residents of Japan). After identity verification, you reserve an issuance and transfer Japanese yen to the designated bank account, and the JPYC arrives in your registered wallet.',
+    'HashPort Wallet and MynaWallet have JPYC EX built in, so you can start issuance and redemption from inside the app.',
     'OpenPay does not issue, sell or exchange JPYC. How to get it and the conditions can change, so check the latest information on the JPYC official site.',
   ],
   jpycCallout:
     'The networks JPYC EX supports are not necessarily the network of the shop’s QR. The top of the payment screen shows which network’s JPYC you need.',
   jpycLink: { href: JPYC_OFFICIAL, label: 'See the latest on the JPYC official site' },
+  jpycNoteLink: { href: PAY_GUIDE_JPYC_NOTE, label: 'JPYC handling guide (wallet setup to redemption) — note (Japanese)' },
 
   faqTitle: 'If something goes wrong',
   faq: [
@@ -303,7 +410,7 @@ const EN: PayGuideContent = {
     },
     {
       q: 'My wallet will not connect on my phone',
-      a: 'Opening OpenPay in the browser inside your wallet app (e.g. MetaMask) makes connecting and signing smoother. If “Open in MetaMask” appears on the screen, tap it.',
+      a: 'Opening OpenPay in the browser inside your wallet app (e.g. MetaMask) makes connecting and signing smoother. If “Open in MetaMask” appears on the screen, tap it. For HashPort Wallet or MynaWallet, use “WalletConnect” and type “HashPort” or “Myna” in the search box.',
     },
     {
       q: 'Are there any fees?',

@@ -9,7 +9,8 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import ja from '@/messages/ja.json';
 import en from '@/messages/en.json';
-import { payGuideContentFor, payGuideMetadata } from '@/lib/payGuide';
+import { PAY_GUIDE_JPYC_NOTE, payGuideContentFor, payGuideMetadata } from '@/lib/payGuide';
+import { startGuideContentFor } from '@/lib/startGuide';
 import { guideNavFor } from '@/lib/guideNav';
 import { getExchangeLink } from '@/lib/links';
 import { AUTHORIZATION_VALIDITY_WINDOW_SEC } from '@/lib/jpycEip3009';
@@ -179,6 +180,14 @@ describe('payGuide content', () => {
       expect(c.related[1].label).toBe(nav.items.agent.label);
       expect(c.related[2].label.startsWith(nav.related.items[0].label)).toBe(true);
       expect(c.scanCta.label).toBe((locale === 'en' ? en : ja).Scan.pageTitle);
+    }
+  });
+
+  it('ウォレット選びの note 記事は導入前チェックリスト (lib/startGuide.ts) と同じ記事', () => {
+    const startNote = startGuideContentFor('ja').sections.flatMap((sec) => sec.externalLinks ?? []).find((l) => l.href.includes('note.com'));
+    expect(startNote?.href).toBe(PAY_GUIDE_JPYC_NOTE);
+    for (const locale of LOCALES) {
+      expect(payGuideContentFor(locale).jpycNoteLink.href).toBe(PAY_GUIDE_JPYC_NOTE);
     }
   });
 
