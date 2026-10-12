@@ -10,6 +10,10 @@ import Link from 'next/link';
 import { setRequestLocale } from 'next-intl/server';
 import { AppShell } from '@/components/AppShell';
 import { GuideFrame } from '@/components/guide/GuideFrame';
+import { GuideDisclosure } from '@/components/guide/GuideDisclosure';
+import { guideNavFor } from '@/lib/guideNav';
+import { GUIDE_PRIMARY_ACTION, GuideActions, GuideLead, GuideSubtitle, GuideTitle } from '@/components/guide/GuideHeader';
+import { GuideToc } from '@/components/guide/GuideToc';
 import {
   BulletList,
   Section,
@@ -53,22 +57,24 @@ export default async function GuideAiPayPage({
         <Link
           href={`/${locale}${c.backLink.href}`}
           prefetch={false}
-          className="text-sm font-medium text-emerald-700 hover:text-emerald-900"
+          className="inline-flex min-h-11 items-center text-xs font-medium text-slate-500 hover:text-slate-900"
         >
           {c.backLink.label}
         </Link>
 
-        <header className="mt-4">
-          <h1 className="text-2xl font-bold text-slate-900 sm:text-3xl">
-            {c.title}
-          </h1>
-          <p className="mt-4 text-sm leading-relaxed text-slate-700">
+        <header className="mt-2">
+          <GuideTitle>{guideNavFor(locale).items['ai-pay'].label}</GuideTitle>
+          <GuideSubtitle>{c.title}</GuideSubtitle>
+          <GuideLead>
             {c.subtitle}
-          </p>
+          </GuideLead>
+                  <GuideActions actions={[{ href: `/${locale}${c.ctaButtonHref}`, label: c.ctaButton }]} />
         </header>
 
+        <GuideToc title={guideNavFor(locale).tocTitle} />
+
         {video && (
-          <Section title={HOWTO_VIDEO_UI.sectionTitle}>
+          <Section title={HOWTO_VIDEO_UI.sectionTitle} toc={false}>
             <GuideVideo video={video} />
           </Section>
         )}
@@ -79,20 +85,33 @@ export default async function GuideAiPayPage({
           </p>
           <StepList
             steps={c.mechanismSteps}
-            badgeClassName="bg-emerald-600 text-white"
           />
           <p className="mt-4 rounded-xl bg-emerald-50 p-4 text-sm leading-relaxed text-emerald-900 ring-1 ring-emerald-200/70">
             {c.receiptNote}
           </p>
         </Section>
 
-        <Section title={c.quickSetupTitle}>
-          <Link href={`/${locale}${c.agentLink.href}`} prefetch={false} className="mt-3 inline-block text-sm font-medium text-emerald-700 underline">
+        {/* 3 つのセットアップは 1 つの節にまとめ、選び方を先に 1 文で示してから、たためるカードにする (A は開いて出す)。 */}
+        <Section title={c.setupChooseTitle}>
+          <p className="mt-2 text-sm leading-relaxed text-slate-600">{c.setupChooseLead}</p>
+          <div className="mt-4 space-y-3">
+          <GuideDisclosure
+            defaultOpen
+            summary={
+              <>
+                <h3 className="text-base font-semibold text-slate-900">{c.quickSetupTitle}</h3>
+                <p className="mt-1 text-xs font-medium text-emerald-700">{c.setupFor[0]}</p>
+              </>
+            }
+          >
+          <Link href={`/${locale}${c.agentLink.href}`} prefetch={false} className="inline-block text-sm font-medium text-emerald-700 underline">
             {c.agentLink.label}
           </Link>
-          <p className="mt-3 text-sm leading-relaxed text-slate-700">
-            {c.quickSetupBody}
-          </p>
+          {c.quickSetupBody.map((para) => (
+            <p key={para} className="mt-3 text-sm leading-relaxed text-slate-700">
+              {para}
+            </p>
+          ))}
           <CodeBlock
             label={c.quickSetupConfigLabel}
             code={c.quickSetupConfig}
@@ -100,10 +119,17 @@ export default async function GuideAiPayPage({
           <p className="mt-3 rounded-xl bg-amber-50 p-4 text-sm font-medium leading-relaxed text-amber-900 ring-1 ring-amber-200">
             {c.privateKeyWarning}
           </p>
-        </Section>
+          </GuideDisclosure>
 
-        <Section title={c.stewardTitle}>
-          <p className="mt-3 text-sm leading-relaxed text-slate-700">
+          <GuideDisclosure
+            summary={
+              <>
+                <h3 className="text-base font-semibold text-slate-900">{c.stewardTitle}</h3>
+                <p className="mt-1 text-xs font-medium text-emerald-700">{c.setupFor[1]}</p>
+              </>
+            }
+          >
+          <p className="text-sm leading-relaxed text-slate-700">
             {c.stewardBody}
           </p>
           <a
@@ -130,10 +156,17 @@ export default async function GuideAiPayPage({
           <p className="mt-3 rounded-xl bg-slate-50 p-4 text-sm leading-relaxed text-slate-700 ring-1 ring-slate-200/70">
             {c.stewardRecommendation}
           </p>
-        </Section>
+          </GuideDisclosure>
 
-        <Section title={c.thirdPartyTitle}>
-          <p className="mt-3 text-sm leading-relaxed text-slate-700">
+          <GuideDisclosure
+            summary={
+              <>
+                <h3 className="text-base font-semibold text-slate-900">{c.thirdPartyTitle}</h3>
+                <p className="mt-1 text-xs font-medium text-emerald-700">{c.setupFor[2]}</p>
+              </>
+            }
+          >
+          <p className="text-sm leading-relaxed text-slate-700">
             {c.thirdPartyBody}
           </p>
           <BulletList
@@ -144,6 +177,8 @@ export default async function GuideAiPayPage({
           <Link href={`/${locale}${c.thirdPartyLink.href}`} prefetch={false} className="mt-3 inline-block text-sm font-medium text-emerald-700 underline">
             {c.thirdPartyLink.label}
           </Link>
+          </GuideDisclosure>
+          </div>
         </Section>
 
         <Section title={c.guardsTitle}>
@@ -197,7 +232,6 @@ export default async function GuideAiPayPage({
           </p>
           <StepList
             steps={c.jpycSteps}
-            badgeClassName="bg-emerald-100 text-emerald-700"
           />
           <AddressCallout
             label={c.jpycAddressLabel}
@@ -217,13 +251,13 @@ export default async function GuideAiPayPage({
         </Section>
 
         <section className="mt-12 rounded-[1.5rem] bg-gradient-to-br from-emerald-50 to-teal-50/60 p-6 text-center ring-1 ring-emerald-200/60 sm:p-8">
-          <h2 className="text-lg font-bold text-emerald-900">{c.ctaTitle}</h2>
+          <h2 data-toc="skip" className="text-lg font-bold text-emerald-900">{c.ctaTitle}</h2>
           <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-slate-700">
             {c.ctaBody}
           </p>
           <Link
             href={`/${locale}${c.ctaButtonHref}`}
-            className="mt-5 inline-flex items-center justify-center rounded-xl bg-emerald-600 px-6 py-3 text-sm font-semibold text-white shadow-sm transition-all hover:-translate-y-0.5 hover:bg-emerald-700 hover:shadow-card-hover active:translate-y-0"
+            className={`mt-5 ${GUIDE_PRIMARY_ACTION}`}
           >
             {c.ctaButton}
           </Link>

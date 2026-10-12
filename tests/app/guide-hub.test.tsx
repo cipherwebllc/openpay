@@ -18,16 +18,23 @@ describe('/guide hub', () => {
     expect(screen.getByRole('heading', { level: 1, name: nav.hubTitle })).toBeInTheDocument();
     expect(screen.getByText(nav.hubLead)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: nav.backHome })).toHaveAttribute('href', `/${locale}`);
-    // 5 グループの後ろ (末尾) に「関連ページ」。
+    // 冒頭に「はじめての方へ」、5 グループの後ろ (末尾) に「関連ページ」。
     expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual([
+      nav.hubStartTitle,
       ...nav.groups.map((g) => g.title),
       nav.related.title,
+    ]);
+    // 「はじめての方へ」は導入前チェックリスト → 決済QR の順の 2 本 (番号つき)。
+    const start = screen.getByRole('heading', { level: 2, name: nav.hubStartTitle }).closest('section')!;
+    expect(within(start).getAllByRole('link').map((a) => a.getAttribute('href'))).toEqual([
+      `/${locale}/guide/start`,
+      `/${locale}/guide/qr`,
     ]);
 
     const main = screen.getByRole('main');
     const cards = within(main)
       .getAllByRole('link')
-      .filter((a) => a.getAttribute('href')?.startsWith(`/${locale}/guide/`));
+      .filter((a) => !start.contains(a) && a.getAttribute('href')?.startsWith(`/${locale}/guide/`));
     expect(cards.map((a) => a.getAttribute('href'))).toEqual(
       GUIDE_SLUGS.map((slug) => `/${locale}/guide/${slug}`),
     );

@@ -47,9 +47,14 @@ const RELATED_PAGES: readonly { id: RelatedPageId; path: `/${string}` }[] = [
 type GuideNavCopy = {
   /** 目次の名前 (PC サイドバーの見出し・スマホのバー)。nav の a11y 名もこの可視テキストから。 */
   readonly navTitle: string;
+  /** 長いガイドのページの頭の下に置く「このページの内容」(components/guide/GuideToc.tsx)。 */
+  readonly tocTitle: string;
   /** 目次の先頭リンク (→ /guide) とハブの h1。 */
   readonly hubTitle: string;
   readonly hubLead: string;
+  /** ハブの冒頭の「はじめての方へ」(読む順のおすすめ・導入前チェックリスト → 決済QR)。 */
+  readonly hubStartTitle: string;
+  readonly hubStartLead: string;
   readonly backHome: string;
   readonly metaTitle: string;
   readonly metaDescription: string;
@@ -63,8 +68,11 @@ type GuideNavCopy = {
 
 const JA: GuideNavCopy = {
   navTitle: 'ガイド一覧',
+  tocTitle: 'このページの内容',
   hubTitle: 'OpenPay でできること',
   hubLead: 'やりたいことに合わせて、ガイドを選んでください。',
+  hubStartTitle: 'はじめての方へ',
+  hubStartLead: 'お店で受け取るなら、この順に読むと迷わず始められます。',
   backHome: '← OpenPay トップへ',
   metaTitle: 'OpenPay でできること — ガイド一覧',
   metaDescription:
@@ -129,8 +137,11 @@ const JA: GuideNavCopy = {
 
 const EN: GuideNavCopy = {
   navTitle: 'Guides',
+  tocTitle: 'On this page',
   hubTitle: 'What you can do with OpenPay',
   hubLead: 'Pick the guide that matches what you want to do.',
+  hubStartTitle: 'New here?',
+  hubStartLead: 'To start taking payments in a shop, read these in order.',
   backHome: '← Back to OpenPay',
   metaTitle: 'What you can do with OpenPay — all guides',
   metaDescription:

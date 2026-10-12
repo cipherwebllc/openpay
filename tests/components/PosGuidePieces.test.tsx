@@ -94,13 +94,13 @@ describe('BulletList', () => {
 });
 
 describe('StepList', () => {
-  it('steps を n/title/body + badgeClassName で描画', () => {
+  it('steps を n/title/body と共通の番号バッジで描画', () => {
     const steps = [
       { n: 1, title: 'まず', body: '一歩目' },
       { n: 2, title: 'つぎ', body: '二歩目' },
     ] as const;
     const { container } = render(
-      <StepList steps={steps} badgeClassName="bg-emerald-600 text-white" />,
+      <StepList steps={steps} />,
     );
     expect(container.querySelectorAll('li')).toHaveLength(2);
     expect(screen.getByText('まず')).toBeInTheDocument();

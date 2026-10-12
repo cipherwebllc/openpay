@@ -80,8 +80,8 @@ const JA: StartGuideContent = {
 
   heroTitle: 'JPYC決済を始める前に、確認しておきたい 8 つのこと',
   heroLead: [
-    'OpenPay は、専用端末も加盟店契約もなしに、ウォレットひとつで JPYC 決済を始められます。売上は OpenPay が預からず、決済と同時にあなたのウォレットへ直接届きます。導入費用は 0 円です。',
-    '一方で、JPYC はブロックチェーン上のお金です。売上の受け取り方、日本円への戻し方、返金のしかたが、カードや QR コード決済とは違います。本格的に使い始める前に、次の 8 つを確認してください。',
+    'OpenPay は、専用端末も加盟店契約もなしに、ウォレットひとつで JPYC 決済を始められます (導入費用は 0 円)。売上は決済と同時にあなたのウォレットへ届き、OpenPay は預かりません。',
+    'ただし JPYC はブロックチェーン上のお金です。受け取り方・日本円への戻し方・返金のしかたがカードや QR コード決済と違うので、始める前に次の 8 つを確認してください。',
   ],
 
   checklistTitle: 'まず、この 5 つを一周してみる',
@@ -102,7 +102,7 @@ const JA: StartGuideContent = {
       body: [
         'OpenPay で JPYC を受け取るには、対応ウォレットを用意します。店舗でもクリエイターでも、受け取る側の流れは 3 ステップです。',
         'JPYC そのものを手に入れるなら、発行元の JPYC EX が使えます。本人確認のうえ発行予約をし、指定の銀行口座へ日本円を振り込むと、登録したウォレットに JPYC が届きます。',
-        'お店の受け取り用には、Google・LINE・メールで作れる UPBOND Wallet も使えます。受け取りにガス代はかかりませんが、UPBOND から送るとき (返金や JPYC EX での償還) は、ガス代として少額の POL が必要です。お客様の支払い用には使えません。',
+        'お店の受け取り用には、Google・LINE・メールで作れる UPBOND Wallet も使えます (お客様の支払い用には使えません)。受け取りにガス代はかかりませんが、UPBOND から送るとき (返金・JPYC EX での償還) は、ガス代として少額の POL が必要です。',
       ],
       flow: ['ウォレットを準備', 'OpenPay に接続', '受取先を設定'],
       callout: {
@@ -191,9 +191,11 @@ const JA: StartGuideContent = {
       title: '売上と会計の記録を残す',
       body: [
         '取引履歴は CSV に出力できます。transaction hash から、ブロックチェーン上の取引をいつでも再確認できます。',
-        'インボイス登録番号を設定すると、お客様の控えに適格簡易請求書の記載事項 (店名・登録番号・税率ごとの金額と消費税) が出ます。控えはお客様の端末に保存されます。適格簡易請求書を交付できるのは、小売・飲食・写真・旅行・タクシー・駐車場など、不特定多数を相手にする事業です。それ以外の事業では、宛名などを書いた適格請求書が必要です。店舗側も交付した内容の写しの保存が必要です。履歴 CSV の消費税は商品ごとに計算するため、控えの税率ごとの消費税と差が出ることがあります (明細の数や金額によります)。',
-        '最低限、次を残しておくと後から追跡しやすくなります。',
+        'インボイス登録番号を設定すると、お客様の控えに適格簡易請求書の記載事項 (店名・登録番号・税率ごとの金額と消費税) が出ます。控えはお客様の端末に保存されます。',
+        '適格簡易請求書を交付できるのは、小売・飲食・写真・旅行・タクシー・駐車場など、不特定多数を相手にする事業です。それ以外の事業では、宛名などを書いた適格請求書が必要です。店舗側も交付した内容の写しの保存が必要です。',
+        '履歴 CSV の消費税は商品ごとに計算するため、控えの税率ごとの消費税と差が出ることがあります (明細の数や金額によります)。',
         '税務・会計の具体的な処理は、法人か個人か、会計方針、取引内容によって変わります。OpenPay は特定の仕訳方法を示しません。必要に応じて税理士等の専門家にご確認ください。',
+        '最低限、次を残しておくと後から追跡しやすくなります。',
       ],
       bullets: [
         '取引日時',
@@ -383,9 +385,11 @@ const EN: StartGuideContent = {
       title: 'Keep sales and accounting records',
       body: [
         'Transaction history exports to CSV, and any transaction hash lets you re-check the on-chain record at any time.',
-        "If you set your invoice registration number, customer receipts show the items required for a simplified qualified invoice (shop name, registration number, and the amount and consumption tax for each tax rate). The receipt is stored on the customer's device. Simplified qualified invoices can be issued by businesses that serve many unspecified customers, such as retail, restaurants, photo studios, travel, taxis and parking. Other businesses need a qualified invoice that includes the buyer's name and other details. You also need to keep a copy of what you issued. The history CSV calculates consumption tax per item, so it can differ from the per-rate tax on the receipt depending on the number and amounts of items.",
-        'At minimum, keeping the following makes later reconciliation straightforward.',
+        "If you set your invoice registration number, customer receipts show the items required for a simplified qualified invoice (shop name, registration number, and the amount and consumption tax for each tax rate). The receipt is stored on the customer's device.",
+        "Simplified qualified invoices can be issued by businesses that serve many unspecified customers, such as retail, restaurants, photo studios, travel, taxis and parking. Other businesses need a qualified invoice that includes the buyer's name and other details. You also need to keep a copy of what you issued.",
+        'The history CSV calculates consumption tax per item, so it can differ from the per-rate tax on the receipt depending on the number and amounts of items.',
         'How this is treated for tax and accounting depends on whether you are incorporated, your accounting policy, and the nature of each transaction. OpenPay does not prescribe a bookkeeping treatment; consult a tax professional as needed.',
+        'At minimum, keeping the following makes later reconciliation straightforward.',
       ],
       bullets: [
         'Date and time',

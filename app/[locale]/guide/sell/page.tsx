@@ -10,11 +10,11 @@ import Link from 'next/link';
 import { setRequestLocale } from 'next-intl/server';
 import { AppShell } from '@/components/AppShell';
 import { GuideFrame } from '@/components/guide/GuideFrame';
-import {
-  BulletList,
-  Section,
-  StepList,
-} from '@/components/guide/PosGuidePieces';
+import { GuideDisclosure } from '@/components/guide/GuideDisclosure';
+import { guideNavFor } from '@/lib/guideNav';
+import { GUIDE_PRIMARY_ACTION, GuideActions, GuideLead, GuideSubtitle, GuideTitle } from '@/components/guide/GuideHeader';
+import { GuideToc } from '@/components/guide/GuideToc';
+import { STEP_BADGE, BulletList, Section, StepList } from '@/components/guide/PosGuidePieces';
 import { CodeBlock } from '@/components/guide/AgentGuidePieces';
 import { guideSellMetadata, sellGuideContentFor } from '@/lib/sellGuide';
 
@@ -41,91 +41,69 @@ export default async function GuideSellPage({
     <AppShell>
       <GuideFrame locale={locale} current="sell">
       <article className="mx-auto max-w-3xl">
-        <Link
-          href={`/${locale}`}
-          prefetch={false}
-          className="text-sm font-medium text-emerald-700 hover:text-emerald-900"
-        >
-          {c.backHome}
-        </Link>
 
-        <header className="mt-4">
-          <h1 className="text-2xl font-bold text-slate-900 sm:text-3xl">
-            {c.title}
-          </h1>
-          <p className="mt-4 text-sm leading-relaxed text-slate-700">
+        <header>
+          <GuideTitle>{guideNavFor(locale).items['sell'].label}</GuideTitle>
+          <GuideSubtitle>{c.title}</GuideSubtitle>
+          <GuideLead>
             {c.subtitle}
-          </p>
+          </GuideLead>
+                  <GuideActions actions={[{ href: `/${locale}${c.ctaButtonHref}`, label: c.ctaButton }]} />
         </header>
 
-        <Section title={c.proofTitle}>
-          <div className="mt-4 rounded-2xl bg-white p-5 shadow-card ring-1 ring-emerald-200/70">
-            <p className="text-sm leading-relaxed text-slate-700">
-              {c.proofIntro}
-            </p>
-            <p className="mt-3 text-sm leading-relaxed text-slate-700">
-              {c.proofFlow}{' '}
-              <a
-                href={c.proofTransaction.href}
-                target="_blank"
-                rel="noreferrer noopener"
-                className="break-all font-mono font-medium text-emerald-700 underline decoration-emerald-300 underline-offset-2 hover:text-emerald-900"
-              >
-                {c.proofTransaction.label}
-              </a>
-            </p>
-            <p className="mt-3 text-sm leading-relaxed text-slate-700">
-              {c.proofOutcome}
-            </p>
-            <p className="mt-3 text-sm leading-relaxed text-slate-700">
-              {c.proofArticleLead}{' '}
-              <a
-                href={c.proofArticle.href}
-                target="_blank"
-                rel="noreferrer noopener"
-                className="font-medium text-emerald-700 underline decoration-emerald-300 underline-offset-2 hover:text-emerald-900"
-              >
-                {c.proofArticle.label}
-              </a>
-            </p>
-          </div>
-        </Section>
+        <GuideToc title={guideNavFor(locale).tocTitle} />
 
         <Section title={c.routesTitle}>
           <p className="mt-3 text-sm leading-relaxed text-slate-700">
             {c.routesIntro}
           </p>
-          <ol className="mt-5 list-decimal space-y-6 pl-5 marker:font-semibold marker:text-emerald-700">
-            <li className="rounded-2xl bg-white p-5 shadow-card ring-1 ring-slate-200/70">
-              <h3 className="text-base font-semibold text-slate-900">
-                {c.noCodeTitle}
-              </h3>
-              <p className="mt-2 text-sm leading-relaxed text-slate-700">
-                {c.noCodeBody}
-              </p>
+          <ol className="mt-5 space-y-3">
+            <li>
+              <GuideDisclosure
+                defaultOpen
+                summary={
+                  <>
+                    <h3 className="flex items-center gap-3 text-base font-semibold text-slate-900">
+                      <span className={STEP_BADGE}>1</span>
+                      {c.noCodeTitle}
+                    </h3>
+                    <p className="mt-2 text-sm leading-relaxed text-slate-600">
+                      {c.noCodeBody}
+                    </p>
+                  </>
+                }
+              >
               <a
                 href={c.noCodeLink.href}
                 target="_blank"
                 rel="noreferrer noopener"
-                className="mt-3 inline-flex text-sm font-medium text-emerald-700 underline decoration-emerald-300 underline-offset-2 hover:text-emerald-900"
+                className="inline-flex text-sm font-medium text-emerald-700 underline decoration-emerald-300 underline-offset-2 hover:text-emerald-900"
               >
                 {c.noCodeLink.label}
               </a>
               <CodeBlock label={c.noCodeEnvLabel} code={c.noCodeEnv} />
+              </GuideDisclosure>
             </li>
 
-            <li className="rounded-2xl bg-white p-5 shadow-card ring-1 ring-slate-200/70">
-              <h3 className="text-base font-semibold text-slate-900">
-                {c.sdkTitle}
-              </h3>
-              <p className="mt-2 text-sm leading-relaxed text-slate-700">
-                {c.sdkBody}
-              </p>
+            <li>
+              <GuideDisclosure
+                                summary={
+                  <>
+                    <h3 className="flex items-center gap-3 text-base font-semibold text-slate-900">
+                      <span className={STEP_BADGE}>2</span>
+                      {c.sdkTitle}
+                    </h3>
+                    <p className="mt-2 text-sm leading-relaxed text-slate-600">
+                      {c.sdkBody}
+                    </p>
+                  </>
+                }
+              >
               <a
                 href={c.sdkPackage.href}
                 target="_blank"
                 rel="noreferrer noopener"
-                className="mt-3 inline-flex text-sm font-medium text-emerald-700 underline decoration-emerald-300 underline-offset-2 hover:text-emerald-900"
+                className="inline-flex text-sm font-medium text-emerald-700 underline decoration-emerald-300 underline-offset-2 hover:text-emerald-900"
               >
                 {c.sdkPackage.label}
               </a>
@@ -138,21 +116,30 @@ export default async function GuideSellPage({
               <p className="mt-3 rounded-xl bg-amber-50 p-4 text-xs leading-relaxed text-amber-900 ring-1 ring-amber-200">
                 {c.sdkSplitNote}
               </p>
+              </GuideDisclosure>
             </li>
 
-            <li className="rounded-2xl bg-white p-5 shadow-card ring-1 ring-slate-200/70">
-              <h3 className="text-base font-semibold text-slate-900">
-                {c.snippetTitle}
-              </h3>
-              <p className="mt-2 text-sm leading-relaxed text-slate-700">
-                {c.snippetBody}
-              </p>
+            <li>
+              <GuideDisclosure
+                                summary={
+                  <>
+                    <h3 className="flex items-center gap-3 text-base font-semibold text-slate-900">
+                      <span className={STEP_BADGE}>3</span>
+                      {c.snippetTitle}
+                    </h3>
+                    <p className="mt-2 text-sm leading-relaxed text-slate-600">
+                      {c.snippetBody}
+                    </p>
+                  </>
+                }
+              >
               <Link
                 href={`/${locale}${c.snippetLink.href}`}
-                className="mt-3 inline-flex text-sm font-medium text-emerald-700 underline decoration-emerald-300 underline-offset-2 hover:text-emerald-900"
+                className="inline-flex text-sm font-medium text-emerald-700 underline decoration-emerald-300 underline-offset-2 hover:text-emerald-900"
               >
                 {c.snippetLink.label}
               </Link>
+              </GuideDisclosure>
             </li>
           </ol>
           <div className="mt-5 rounded-xl bg-emerald-50 p-4 ring-1 ring-emerald-200/70">
@@ -168,7 +155,6 @@ export default async function GuideSellPage({
         <Section title={c.listingTitle}>
           <StepList
             steps={c.listingSteps}
-            badgeClassName="bg-emerald-600 text-white"
           />
           <Link
             href={`/${locale}${c.registrationLink.href}`}
@@ -185,7 +171,25 @@ export default async function GuideSellPage({
               marker="•"
               markerClassName="text-emerald-600"
             />
-            <p className="mt-3 text-sm leading-relaxed text-slate-700">{c.bazaarNote}</p>
+            {c.bazaarNote.map((note) => {
+              // 文中の URL はリンクにする (素の文字のまま 3 行に折れていた)。
+              const [before, url] = note.split(/(?=https:\/\/)/);
+              return (
+                <p key={note} className="mt-3 text-sm leading-relaxed text-slate-700">
+                  {before}
+                  {url ? (
+                    <a
+                      href={url}
+                      target="_blank"
+                      rel="noreferrer noopener"
+                      className="break-all font-medium text-emerald-700 underline decoration-emerald-300 underline-offset-2 hover:text-emerald-900"
+                    >
+                      {url}
+                    </a>
+                  ) : null}
+                </p>
+              );
+            })}
           </div>
         </Section>
 
@@ -232,14 +236,48 @@ export default async function GuideSellPage({
           </p>
         </Section>
 
+        {/* 実売の証拠は手順の後 (手順を知りたい人が先に読む)。 */}
+        <Section title={c.proofTitle}>
+          <div className="mt-4 rounded-2xl bg-white p-5 shadow-card ring-1 ring-emerald-200/70">
+            <p className="text-sm leading-relaxed text-slate-700">
+              {c.proofIntro}
+            </p>
+            <p className="mt-3 text-sm leading-relaxed text-slate-700">
+              {c.proofFlow}{' '}
+              <a
+                href={c.proofTransaction.href}
+                target="_blank"
+                rel="noreferrer noopener"
+                className="break-all font-mono font-medium text-emerald-700 underline decoration-emerald-300 underline-offset-2 hover:text-emerald-900"
+              >
+                {c.proofTransaction.label}
+              </a>
+            </p>
+            <p className="mt-3 text-sm leading-relaxed text-slate-700">
+              {c.proofOutcome}
+            </p>
+            <p className="mt-3 text-sm leading-relaxed text-slate-700">
+              {c.proofArticleLead}{' '}
+              <a
+                href={c.proofArticle.href}
+                target="_blank"
+                rel="noreferrer noopener"
+                className="font-medium text-emerald-700 underline decoration-emerald-300 underline-offset-2 hover:text-emerald-900"
+              >
+                {c.proofArticle.label}
+              </a>
+            </p>
+          </div>
+        </Section>
+
         <section className="mt-12 rounded-[1.5rem] bg-gradient-to-br from-emerald-50 to-teal-50/60 p-6 text-center ring-1 ring-emerald-200/60 sm:p-8">
-          <h2 className="text-lg font-bold text-emerald-900">{c.ctaTitle}</h2>
+          <h2 data-toc="skip" className="text-lg font-bold text-emerald-900">{c.ctaTitle}</h2>
           <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-slate-700">
             {c.ctaBody}
           </p>
           <Link
             href={`/${locale}${c.ctaButtonHref}`}
-            className="mt-5 inline-flex items-center justify-center rounded-xl bg-emerald-600 px-6 py-3 text-sm font-semibold text-white shadow-sm transition-all hover:-translate-y-0.5 hover:bg-emerald-700 hover:shadow-card-hover active:translate-y-0"
+            className={`mt-5 ${GUIDE_PRIMARY_ACTION}`}
           >
             {c.ctaButton}
           </Link>

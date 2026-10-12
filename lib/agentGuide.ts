@@ -55,9 +55,7 @@ export type AgentGuideContent = {
   readonly metaTitle: string;
   readonly metaDescription: string;
   readonly title: string;
-  readonly subtitle: string;
   readonly lead: string;
-  readonly audience: string;
   readonly heroImage: {
     readonly src: string;
     readonly alt: string;
@@ -79,7 +77,8 @@ export type AgentGuideContent = {
   readonly setupTitle: string;
   readonly setupIntro: string;
   readonly setupSteps: readonly GuideStep[];
-  readonly setupEnvironmentNote: string;
+  /** クラウド環境で使うときの注意 (たためるカードの見出しと短い箇条)。 */
+  readonly setupEnvironmentNote: { readonly title: string; readonly items: readonly string[] };
   readonly configLabel: string;
   readonly configCode: string;
   readonly configNote: string;
@@ -123,10 +122,7 @@ const ja: AgentGuideContent = {
   metaDescription:
     '日本語がわからなくても、OpenPay モバイルオーダー対応のお店なら、自分の AI（Claude など）に頼んで注文できます。支払いは決済リンクを開いて自分のウォレットで JPYC を 1 タップ。OpenPay は通貨の交換・両替を行いません。',
   title: '日本語がわからなくても、OpenPay モバイルオーダーなら AI で注文できる',
-  subtitle: '支払いは、あなたのウォレットで。',
   lead: 'OpenPay モバイルオーダーに対応したお店なら、あなたの AI アシスタント（Claude など）に母国語で相談するだけで、メニューを読んで注文を組み、決済リンクを作ってくれます。あとはリンクを開いて内容を確認し、自分のウォレットで JPYC を 1 タップ払うだけ。',
-  audience:
-    '対象：自分の AI（Claude / ChatGPT など）と暗号資産ウォレットを使える訪日の方・早期利用者向け。',
   heroImage: {
     src: HERO_SRC,
     alt: 'AI との会話（母国語）→ 注文が事前充填された決済画面 → 自分のウォレットで支払い、の 3 画面',
@@ -177,8 +173,15 @@ const ja: AgentGuideContent = {
       body: '店名を伝えてお店を探すよう頼めば、AI が find_shops で店舗ハンドルを見つけ、order_menu でメニューを読み込みます（鍵は不要です）。',
     },
   ],
-  setupEnvironmentNote:
-    'PC のローカルで動く Claude Code / Codex なら Local Wallet・Kova・MetaMask Agent Wallet・Steward が使えます。スマホの Claude アプリの Code やブラウザ版 Claude Code は使い捨てのクラウド環境のため、Local Wallet は鍵ごと消えます（JPYC を入れないでください）。Kova も同じ環境に CLI と資格情報が必要で使えません。MetaMask Agent Wallet も MCP と同じマシンに mm のログイン状態が必要で使えません。「人が支払う」（openpay-order-mcp）は鍵不要でどこでも使えますが、登録はセッションごとに消えることがあります。クラウドから Agent に支払わせるなら、自分のサーバで署名する Steward を使ってください。',
+  setupEnvironmentNote: {
+    title: 'クラウド環境（スマホの Claude アプリ・ブラウザ版 Claude Code）で使うとき',
+    items: [
+      'PC のローカルで動く Claude Code / Codex なら、Local Wallet・Kova・MetaMask Agent Wallet・Steward が使えます。',
+      'スマホの Claude アプリの Code やブラウザ版 Claude Code は使い捨てのクラウド環境です。Local Wallet は鍵ごと消えるので、JPYC を入れないでください。',
+      'Kova と MetaMask Agent Wallet は、CLI とログイン状態が同じマシンに要るため使えません。',
+      '「人が支払う」（openpay-order-mcp）は鍵不要でどこでも使えます（登録はセッションごとに消えることがあります）。クラウドから Agent に支払わせるなら、自分のサーバで署名する Steward を使ってください。',
+    ],
+  },
   configLabel: '設定例（支払い用の鍵は不要）',
   configCode: MCP_CONFIG_JSON,
   configNote:
@@ -292,10 +295,7 @@ const en: AgentGuideContent = {
   metaDescription:
     "Even if you don't read Japanese, at shops that use OpenPay mobile order you can ask your AI (such as Claude) to place the order. You pay by opening the checkout link and tapping once in your own wallet with JPYC. OpenPay does not exchange or convert currencies.",
   title: "Can't read Japanese? Order at OpenPay shops with your AI",
-  subtitle: 'You pay — from your own wallet.',
   lead: 'At shops that use OpenPay mobile order, talk to your AI assistant (such as Claude) in your own language. It reads the menu, builds the order, and creates a checkout link. You just open the link, review it, and pay JPYC with one tap in your own wallet.',
-  audience:
-    'For visitors and early adopters who can use their own AI (Claude / ChatGPT, etc.) and a crypto wallet.',
   heroImage: {
     src: HERO_SRC,
     alt: 'Three screens: chatting with an AI in your language → the order pre-filled on the checkout screen → paying from your own wallet',
@@ -346,8 +346,15 @@ const en: AgentGuideContent = {
       body: 'Ask the AI to find a shop by name. It uses find_shops to get the handle, then order_menu to read the menu (no key needed).',
     },
   ],
-  setupEnvironmentNote:
-    "Claude Code or Codex on your PC can use Local Wallet, Kova, MetaMask Agent Wallet, or Steward. The Claude mobile app's Code tab and Claude Code on the web use disposable cloud environments: a Local Wallet disappears with its key (do not fund it), and Kova cannot run without its CLI and credentials on the same machine. MetaMask Agent Wallet also needs an mm session on the same machine as the MCP and cannot run there. Human pays (openpay-order-mcp) needs no key and works anywhere, but registration may disappear between sessions. For agent payments from the cloud, use Steward, which signs on your own server.",
+  setupEnvironmentNote: {
+    title: 'Using it in a cloud environment (the Claude mobile app or Claude Code on the web)',
+    items: [
+      'Claude Code or Codex on your PC can use Local Wallet, Kova, MetaMask Agent Wallet, or Steward.',
+      "The Claude mobile app's Code tab and Claude Code on the web are disposable cloud environments. A Local Wallet disappears with its key, so do not fund it.",
+      'Kova and MetaMask Agent Wallet cannot run there: they need their CLI and login on the same machine.',
+      'Human pays (openpay-order-mcp) needs no key and works anywhere (registration may disappear between sessions). For agent payments from the cloud, use Steward, which signs on your own server.',
+    ],
+  },
   configLabel: 'Example config (no payment key needed)',
   configCode: MCP_CONFIG_JSON,
   configNote:

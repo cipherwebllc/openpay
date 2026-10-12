@@ -1,8 +1,11 @@
+
 // /guide/agent の追加 presentational ヘルパ (PosGuidePieces の Section/BulletList/StepList/GuideFigure
 // を再利用しつつ、この面固有の 2 部品だけを最小追加する)。
 //
 // hooks/context を使わない純 presentational なので Server/Client どちらでも描画でき、jsdom で
-// 実描画テストできる (tests/components/AgentGuidePieces.test.tsx)。
+// 実描画テストできる (tests/components/AgentGuidePieces.test.tsx)。CodeBlock の「コピー」だけは client の小部品。
+
+import { CopyCodeButton } from '@/components/guide/CopyCodeButton';
 
 // ページ冒頭のヒーロー画像 (実 UI 3 画面の合成: AI 会話→事前充填→決済手前)。装飾 SVG でなく実 UI
 // 撮影ゆえ public/guide-agent/ に置く (public/guide/ は posGuide の孤児検査対象なので分離)。width/height
@@ -28,6 +31,9 @@ export function GuideHero({
 
 // MCP 設定 JSON 等のコードブロック。長い行は overflow-x-auto で内側スクロールさせ、ページ本文を
 // 横にはみ出させない (掟: grid_cols1_mobile_overflow の水平あふれ回避)。
+// これより長い行を含むコードは折り返さずに横スクロールにする (390px の画面で 12px の等幅が 1 行に入る目安)。
+const CODE_WRAP_MAX = 44;
+
 export function CodeBlock({
   label,
   code,
@@ -35,14 +41,31 @@ export function CodeBlock({
   label?: string;
   code: string;
 }) {
+  // 短い行だけのブロック (env・JSON・1 行のコマンド) は折り返して全部見せる。長い行を含むコード (プログラム) は
+  // 横にスクロールさせ、右端をぼかして「続きがある」と分かるようにする (以前は 390px で行が黙って切れていた)。
+  const scrolls = code.split('\n').some((line) => line.length > CODE_WRAP_MAX);
   return (
     <div className="mt-4">
-      {label ? (
-        <p className="mb-2 text-xs font-medium text-slate-500">{label}</p>
-      ) : null}
-      <pre className="overflow-x-auto rounded-xl bg-slate-900 p-4 text-xs leading-relaxed text-slate-100 ring-1 ring-slate-700">
-        <code>{code}</code>
-      </pre>
+      {/* 名前の行の右に「コピー」(貼るためのコードを全文写せる)。 */}
+      <div className="mb-2 flex items-end justify-between gap-3">
+        {label ? <p className="text-xs font-medium text-slate-500">{label}</p> : <span />}
+        <CopyCodeButton code={code} />
+      </div>
+      <div
+        className={
+          scrolls
+            ? 'relative after:pointer-events-none after:absolute after:inset-y-px after:right-px after:w-8 after:rounded-r-xl after:bg-gradient-to-l after:from-slate-900 after:content-[""]'
+            : undefined
+        }
+      >
+        <pre
+          className={`rounded-xl bg-slate-900 p-4 text-xs leading-relaxed text-slate-100 ring-1 ring-slate-700 ${
+            scrolls ? 'overflow-x-auto [scrollbar-width:thin]' : 'whitespace-pre-wrap break-all'
+          }`}
+        >
+          <code>{code}</code>
+        </pre>
+      </div>
     </div>
   );
 }

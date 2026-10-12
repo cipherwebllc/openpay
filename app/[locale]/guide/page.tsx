@@ -9,7 +9,8 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { setRequestLocale } from 'next-intl/server';
 import { AppShell } from '@/components/AppShell';
-import { GuideHubGroups, GuideHubRelated } from '@/components/guide/GuideHubPieces';
+import { GuideHubGroups, GuideHubRelated, GuideHubStart } from '@/components/guide/GuideHubPieces';
+import { GuideLead, GuideTitle } from '@/components/guide/GuideHeader';
 import { guideHubMetadata, guideNavFor } from '@/lib/guideNav';
 
 export async function generateMetadata({
@@ -43,14 +44,12 @@ export default async function GuideHubPage({
         </Link>
 
         <header className="mt-4">
-          <h1 className="text-[1.75rem] font-bold leading-tight tracking-tight text-slate-900 sm:text-4xl">
-            {nav.hubTitle}
-          </h1>
-          <p className="mt-4 max-w-2xl text-sm leading-relaxed text-slate-700 sm:text-base">
-            {nav.hubLead}
-          </p>
+          <GuideTitle>{nav.hubTitle}</GuideTitle>
+          <GuideLead>{nav.hubLead}</GuideLead>
         </header>
 
+        {/* 読む順のおすすめ (はじめての方へ)。グループの一覧の前に置き、最初の 1 本で迷わないようにする。 */}
+        <GuideHubStart locale={locale} nav={nav} />
         <GuideHubGroups locale={locale} nav={nav} />
         {/* 末尾にガイド以外の関連ページ (料金)。GUIDE_SLUGS と目次には入れない (plans/pricing-page.md §2.6)。 */}
         <GuideHubRelated locale={locale} nav={nav} />

@@ -183,15 +183,15 @@ describe('AI_PAY_GUIDE: MCP 設定と金銭ガード', () => {
     // プレースホルダ鍵 (`0x...`) 入りの設定は MCP が起動時に拒否する → 設定に鍵の変数を戻さない
     expect(c.quickSetupConfig).not.toContain('PRIVATE_KEY');
     expect(c.quickSetupConfig).not.toContain('env-key');
-    expect(c.quickSetupBody).toContain('wallet_init');
-    expect(c.quickSetupBody).toContain('wallet_status');
+    expect(c.quickSetupBody.join('')).toContain('wallet_init');
+    expect(c.quickSetupBody.join('')).toContain('wallet_status');
     expect(c.privateKeyWarning).toContain('wallet.json');
     // /agent・MCP README の threat model と同じ強さ: 利用者としてコマンドを実行できるものは鍵を読める。
     // 「AI には渡らない」とだけ書くと、シェルを持つ Agent (Claude Code / Codex) に対して過剰な断定になる。
     expect(c.privateKeyWarning).toMatch(/コマンドを実行できるもの|run commands as you/);
     // 提示する設定に POLYGON_RPC_URL は無い → wallet_status の jpycBalance は null。残高は入金用リンクで見る。
     expect(c.quickSetupConfig).not.toContain('POLYGON_RPC_URL');
-    expect(c.quickSetupBody).toMatch(/残高は入金用のリンク|balance via the funding link/);
+    expect(c.quickSetupBody.join(' ')).toMatch(/残高は入金用のリンク|balance via the funding link/);
   });
 
   it('AI ストアの MCP 案内 (Facilitator.mcpWalletInit) も ja/en とも wallet_init の流れ', () => {

@@ -10,7 +10,9 @@ import Link from 'next/link';
 import { setRequestLocale } from 'next-intl/server';
 import { AppShell } from '@/components/AppShell';
 import { GuideFrame } from '@/components/guide/GuideFrame';
-import { Section } from '@/components/guide/PosGuidePieces';
+import { guideNavFor } from '@/lib/guideNav';
+import { GuideLead, GuideSubtitle, GuideTitle } from '@/components/guide/GuideHeader';
+import { STEP_BADGE, Section } from '@/components/guide/PosGuidePieces';
 import { imageGuideContentFor, imageGuideMetadata } from '@/lib/imageGuide';
 
 export async function generateMetadata({
@@ -60,25 +62,14 @@ export default async function GuideImageUrlPage({
     <AppShell>
       <GuideFrame locale={locale} current="image-url">
       <article className="mx-auto max-w-3xl">
-        <Link
-          href={`/${locale}`}
-          prefetch={false}
-          className="text-sm font-medium text-emerald-700 hover:text-emerald-900"
-        >
-          {c.backHome}
-        </Link>
 
-        <header className="mt-4">
-          <h1 className="text-[1.75rem] font-bold leading-tight tracking-tight text-slate-900 sm:text-4xl">
-            {c.heroTitle}
-          </h1>
+        <header>
+          <GuideTitle>{guideNavFor(locale).items['image-url'].label}</GuideTitle>
+          <GuideSubtitle>{c.heroTitle}</GuideSubtitle>
           {c.heroLead.map((p) => (
-            <p
-              key={p}
-              className="mt-4 max-w-2xl text-sm leading-relaxed text-slate-700 sm:text-base"
-            >
+            <GuideLead key={p}>
               {p}
-            </p>
+            </GuideLead>
           ))}
           <p className="mt-5 text-sm font-bold text-slate-900">{c.flowTitle}</p>
           <Flow steps={c.flow} />
@@ -95,7 +86,7 @@ export default async function GuideImageUrlPage({
               <ol className="mt-4 space-y-3">
                 {section.steps.map((step, i) => (
                   <li key={step.title} className="flex items-start gap-3">
-                    <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-emerald-100 text-sm font-bold text-emerald-800">
+                    <span className={STEP_BADGE}>
                       {i + 1}
                     </span>
                     <span className="text-sm leading-relaxed text-slate-700">
@@ -138,7 +129,7 @@ export default async function GuideImageUrlPage({
         ))}
 
         <section className="mt-12 rounded-[1.5rem] bg-gradient-to-br from-emerald-50 to-teal-50/60 p-6 ring-1 ring-emerald-200/60 sm:p-8">
-          <h2 className="text-lg font-bold text-emerald-900">{c.quickTitle}</h2>
+          <h2 data-toc="skip" className="text-lg font-bold text-emerald-900">{c.quickTitle}</h2>
           <ol className="mt-4 space-y-2.5">
             {c.quickSteps.map((step, i) => (
               <li key={step} className="flex items-start gap-3">

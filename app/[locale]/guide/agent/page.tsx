@@ -13,6 +13,11 @@ import Link from 'next/link';
 import { setRequestLocale } from 'next-intl/server';
 import { AppShell } from '@/components/AppShell';
 import { GuideFrame } from '@/components/guide/GuideFrame';
+import { GuideFaq } from '@/components/guide/GuideFaq';
+import { GuideDisclosure } from '@/components/guide/GuideDisclosure';
+import { guideNavFor } from '@/lib/guideNav';
+import { GUIDE_PRIMARY_ACTION, GuideActions, GuideLead, GuideSubtitle, GuideTitle } from '@/components/guide/GuideHeader';
+import { GuideToc } from '@/components/guide/GuideToc';
 import {
   BulletList,
   Section,
@@ -51,30 +56,26 @@ export default async function GuideAgentPage({
         <Link
           href={`/${locale}${c.backLink.href}`}
           prefetch={false}
-          className="text-sm font-medium text-emerald-700 hover:text-emerald-900"
+          className="inline-flex min-h-11 items-center text-xs font-medium text-slate-500 hover:text-slate-900"
         >
           {c.backLink.label}
         </Link>
 
-        <header className="mt-4">
-          <h1 className="text-2xl font-bold text-slate-900 sm:text-3xl">
-            {c.title}
-          </h1>
-          <p className="mt-2 text-base font-medium text-emerald-700">
-            {c.subtitle}
-          </p>
-          <p className="mt-4 text-sm leading-relaxed text-slate-700">{c.lead}</p>
-          <p className="mt-3 text-xs leading-relaxed text-slate-500">
-            {c.audience}
-          </p>
+        <header className="mt-2">
+          <GuideTitle>{guideNavFor(locale).items['agent'].label}</GuideTitle>
+          <GuideSubtitle>{c.title}</GuideSubtitle>
+          <GuideLead>{c.lead}</GuideLead>
+                  <GuideActions actions={[{ href: `/${locale}${c.ctaButtonHref}`, label: c.ctaButton }]} />
         </header>
+
+        <GuideToc title={guideNavFor(locale).tocTitle} />
 
         <GuideHero image={c.heroImage} />
 
         {/* できること / できないこと */}
         <div className="mt-8 grid gap-6 sm:grid-cols-2">
           <section className="rounded-2xl bg-white p-5 shadow-card ring-1 ring-emerald-200/70">
-            <h2 className="text-base font-semibold text-emerald-900">
+            <h2 data-toc="skip" className="text-base font-semibold text-emerald-900">
               {c.canDoTitle}
             </h2>
             <BulletList
@@ -85,7 +86,7 @@ export default async function GuideAgentPage({
           </section>
 
           <section className="rounded-2xl bg-white p-5 shadow-card ring-1 ring-slate-200/70">
-            <h2 className="text-base font-semibold text-slate-900">
+            <h2 data-toc="skip" className="text-base font-semibold text-slate-900">
               {c.cannotTitle}
             </h2>
             <BulletList
@@ -116,11 +117,14 @@ export default async function GuideAgentPage({
           </p>
           <StepList
             steps={c.setupSteps}
-            badgeClassName="bg-emerald-100 text-emerald-700"
           />
-          <p className="mt-3 text-sm leading-relaxed text-slate-700">
-            {c.setupEnvironmentNote}
-          </p>
+          <div className="mt-4">
+            <GuideDisclosure
+              summary={<h3 className="text-sm font-semibold text-slate-900">{c.setupEnvironmentNote.title}</h3>}
+            >
+              <BulletList items={c.setupEnvironmentNote.items} marker="•" markerClassName="text-emerald-600" />
+            </GuideDisclosure>
+          </div>
           <CodeBlock label={c.configLabel} code={c.configCode} />
           <p className="mt-3 text-xs leading-relaxed text-slate-500">
             {c.configNote}
@@ -130,7 +134,6 @@ export default async function GuideAgentPage({
         <Section title={c.flowTitle}>
           <StepList
             steps={c.flowSteps}
-            badgeClassName="bg-emerald-600 text-white"
           />
         </Section>
 
@@ -140,7 +143,6 @@ export default async function GuideAgentPage({
           </p>
           <StepList
             steps={c.jpycSteps}
-            badgeClassName="bg-emerald-100 text-emerald-700"
           />
           <AddressCallout
             label={c.jpycAddressLabel}
@@ -185,27 +187,18 @@ export default async function GuideAgentPage({
         </Section>
 
         <Section title={c.faqTitle}>
-          <dl className="mt-4 space-y-5">
-            {c.faqs.map((f) => (
-              <div key={f.q}>
-                <dt className="text-sm font-semibold text-slate-900">{f.q}</dt>
-                <dd className="mt-1 text-sm leading-relaxed text-slate-700">
-                  {f.a}
-                </dd>
-              </div>
-            ))}
-          </dl>
+          <GuideFaq items={c.faqs} />
         </Section>
 
         {/* CTA */}
         <section className="mt-12 rounded-[1.5rem] bg-gradient-to-br from-emerald-50 to-teal-50/60 p-6 text-center ring-1 ring-emerald-200/60 sm:p-8">
-          <h2 className="text-lg font-bold text-emerald-900">{c.ctaTitle}</h2>
+          <h2 data-toc="skip" className="text-lg font-bold text-emerald-900">{c.ctaTitle}</h2>
           <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-slate-700">
             {c.ctaBody}
           </p>
           <Link
             href={`/${locale}${c.ctaButtonHref}`}
-            className="mt-5 inline-flex items-center justify-center rounded-xl bg-emerald-600 px-6 py-3 text-sm font-semibold text-white shadow-sm transition-all hover:-translate-y-0.5 hover:bg-emerald-700 hover:shadow-card-hover active:translate-y-0"
+            className={`mt-5 ${GUIDE_PRIMARY_ACTION}`}
           >
             {c.ctaButton}
           </Link>

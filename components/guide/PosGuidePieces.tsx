@@ -22,16 +22,32 @@ export const FIGURE_DIMS: Record<string, { w: number; h: number }> = {
 };
 
 // 標準セクション (mt-10 + 見出し)。カード型の できること/cannot・CTA は独自スタイルなので使わない。
+/**
+ * ガイドの節。`badge` を渡すと見出しの左に番号のバッジを出す (見出しの文字に「1.」を入れない)。
+ * `toc={false}` は「このページの内容」(GuideToc) に載せない節 (動画・関連ガイドなど)。
+ * GuideToc は data-toc-label (バッジを除いた見出し) を読む。
+ */
 export function Section({
   title,
   children,
+  badge,
+  toc = true,
 }: {
   title: string;
   children: ReactNode;
+  badge?: number | string;
+  toc?: boolean;
 }) {
   return (
-    <section className="mt-10">
-      <h2 className="text-xl font-bold text-slate-900">{title}</h2>
+    <section className="mt-12">
+      <h2
+        data-toc={toc ? undefined : 'skip'}
+        data-toc-label={title}
+        className="flex items-start gap-3 text-xl font-bold tracking-tight text-slate-900 sm:text-2xl"
+      >
+        {badge !== undefined ? <span className={`${STEP_BADGE} mt-0.5 sm:mt-1`}>{badge}</span> : null}
+        <span className="min-w-0">{title}</span>
+      </h2>
       {children}
     </section>
   );
@@ -65,20 +81,16 @@ export function BulletList({
 }
 
 // 番号付きステップ (準備=淡色バッジ / 会計フロー=濃色バッジ・バッジ配色のみ可変)。
-export function StepList({
-  steps,
-  badgeClassName,
-}: {
-  steps: readonly GuideStep[];
-  badgeClassName: string;
-}) {
+// 手順の番号のバッジ (全ガイドで 1 つの型・plans/guide-ux-polish.md フェーズ 1)。以前は濃淡 2 色と大きさ 3 種が混ざっていた。
+export const STEP_BADGE =
+  'flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-sm font-bold text-white';
+
+export function StepList({ steps }: { steps: readonly GuideStep[] }) {
   return (
     <ol className="mt-4 space-y-4">
       {steps.map((step) => (
         <li key={step.n} className="flex items-start gap-3">
-          <span
-            className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-sm font-bold ${badgeClassName}`}
-          >
+          <span className={STEP_BADGE}>
             {step.n}
           </span>
           <div>
