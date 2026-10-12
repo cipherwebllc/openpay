@@ -36,8 +36,9 @@ export const DIRECTORY_ENTRIES = [
     // 2026-08-27: Kaia 対応 (発行・償還・アドレス登録) + 発行上限 1日→1回 100万円 (PR TIMES 2026-05-15)
     // 2026-09-25: UPBOND Wallet の接続に対応 (JPYC 公式 X・第 6 回週次更新)
     // 2026-10-06: マイナウォレットが JPYC EX 連携 API で発行・償還をアプリ内で完結 (PR TIMES・第 7 回週次更新)
+    // 2026-10-13 (第 8 回): JPYC EX 連携 API の提供開始 (7/13) を changelog に補充 (エントリの事実は不変)
     ...provenance('https://jpyc.co.jp/', 'JPYC株式会社', 'official', {
-      verifiedAt: '2026-10-08',
+      verifiedAt: '2026-10-13',
       updatedAt: '2026-10-06',
     }),
     facts: {
@@ -113,7 +114,7 @@ export const DIRECTORY_ENTRIES = [
     // 2026-08-27: 電子決済手段等取引業者に登録 (金融庁登録一覧・第00002号・取扱 USDC)。
     // 取扱開始時期は未発表のため tokens は空のまま (sourced-facts-only)。
     ...provenance('https://coincheck.com/', 'コインチェック株式会社', 'official', {
-      verifiedAt: '2026-09-23',
+      verifiedAt: '2026-10-13',
       updatedAt: '2026-09-04',
     }),
     facts: {
@@ -225,11 +226,12 @@ export const DIRECTORY_ENTRIES = [
     status: 'published',
     // 2026-08-27: Kaia 追加 = 4 チェーンで発行・流通 (PR TIMES 2026-05-15)
     // 2026-10-08 (第 7 回): αU wallet の Ponta→JPYC 交換・RatioFX との MOU は changelog のみ (エントリの事実は不変)
+    // 2026-10-13 (第 8 回): 公取委への情報提供 (10/09) と、補充 2 件 (5/26 ダイナースのポイント交換・7/22 AZ-COM 丸和) も changelog のみ
     ...provenance(
       'https://corporate.jpyc.co.jp/news/posts/jpyc-ex-launch',
       'JPYC株式会社',
       'official',
-      { verifiedAt: '2026-10-08', updatedAt: '2026-08-27' },
+      { verifiedAt: '2026-10-13', updatedAt: '2026-08-27' },
     ),
     facts: {
       description: '日本円と連動するよう設計された電子決済手段のステーブルコイン。',
