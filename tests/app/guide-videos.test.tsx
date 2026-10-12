@@ -1,5 +1,5 @@
 // 使い方動画が 4 つのガイドページに正しく入っていることを実描画で検査する。
-// - ja: 決めた動画だけ (/guide/shop はレジ → モバイルオーダーの 2 本・ほかは 1 本。サムネイルの alt = 動画のタイトル・
+// - ja: 決めた動画だけ (/guide/shop はレジ → モバイルオーダー → 受注の 3 本・ほかは 1 本。サムネイルの alt = 動画のタイトル・
 //   YouTube リンクの ID が一致・押す前は iframe なし)
 // - en: 動画の節そのものを出さない (動画は日本語のため)
 import { describe, expect, it, vi } from 'vitest';
@@ -16,7 +16,7 @@ vi.mock('@/components/AppShell', () => ({ AppShell: ({ children }: { children: R
 type Page = (props: { params: Promise<{ locale: string }> }) => Promise<React.ReactElement>;
 const PAGES: Array<[string, Page, readonly HowtoVideoKey[]]> = [
   ['/guide/qr', GuideQrPage as Page, ['qr']],
-  ['/guide/shop', GuideShopPage as Page, ['register', 'mobileOrder']],
+  ['/guide/shop', GuideShopPage as Page, ['register', 'mobileOrder', 'orders']],
   ['/guide/ai-pay', GuideAiPayPage as Page, ['agent']],
   ['/guide/store', GuideStorePage as Page, ['creator']],
 ];
