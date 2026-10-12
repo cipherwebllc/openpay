@@ -6,8 +6,7 @@ import { test, expect } from '@playwright/test';
 // mobile-safari の click の待ちで時間を使い切らないよう、click は使わない。
 
 const FEATURES_JA = [
-  '決済QR',
-  'レジ（POS）',
+  '決済QR・レジ（POS）',
   'モバイル注文',
   'チップ',
   'デジタル商品',
@@ -15,13 +14,20 @@ const FEATURES_JA = [
 ];
 
 test.describe('料金ページ', () => {
-  test('/ja/pricing: 見出しと 6 つの機能が見え、横にはみ出さない', async ({ page }) => {
+  test('/ja/pricing: 見出しと 5 つの機能が見え、計算機が動き、横にはみ出さない', async ({ page }) => {
     await page.goto('/ja/pricing');
     await expect(page.getByRole('heading', { level: 1, name: '料金' })).toBeVisible();
+    await expect(page.getByRole('heading', { level: 2, name: '料金がかかるのは、この 4 つです' })).toBeVisible();
+    const fees = page.locator('section[aria-labelledby="pricing-fees"]');
     for (const name of FEATURES_JA) {
-      await expect(page.getByRole('heading', { level: 3, name, exact: true })).toBeVisible();
+      await expect(fees.getByRole('heading', { level: 3, name, exact: true })).toBeVisible();
     }
-    await expect(page.getByRole('table')).toHaveCount(3);
+    // 計算機は 1,000 JPYC で描かれ、金額を変えると結果が変わる (click は使わず fill だけ)。
+    const amount = page.getByLabel('金額', { exact: true });
+    await expect(amount).toHaveValue('1,000');
+    await amount.fill('10000');
+    await expect(amount).toHaveValue('10,000');
+    await expect(page.locator('section[aria-labelledby="pricing-calc"]')).toContainText('9,900');
     const overflow = await page.evaluate(
       () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
     );
@@ -31,6 +37,8 @@ test.describe('料金ページ', () => {
   test('/en/pricing: 見出しが英語', async ({ page }) => {
     await page.goto('/en/pricing');
     await expect(page.getByRole('heading', { level: 1, name: 'Pricing' })).toBeVisible();
-    await expect(page.getByRole('heading', { level: 3, name: 'The shop pays the gas', exact: true })).toBeVisible();
+    await expect(
+      page.locator('section[aria-labelledby="pricing-fees"]').getByRole('heading', { level: 3, name: 'The shop pays the gas', exact: true }),
+    ).toBeVisible();
   });
 });
