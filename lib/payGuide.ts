@@ -13,6 +13,7 @@
 
 import type { Metadata } from 'next';
 import { guidePageMetadata } from '@/lib/guideMetadata';
+import { WALLET_GUIDE_EN, WALLET_GUIDE_JA, type WalletGuideContent } from '@/lib/walletGuide';
 
 // 運営者の note 記事「JPYC 運用ガイド (ウォレット準備〜換金・運用)」(lib/startGuide.ts の JPYC_NOTE_GUIDE と同じ・test で照合)。
 export const PAY_GUIDE_JPYC_NOTE = 'https://note.com/masia02/n/ned04a4cdb00a';
@@ -29,7 +30,7 @@ export type PayGuideLink = {
   readonly label: string;
 };
 
-export type PayGuideContent = {
+export type PayGuideContent = WalletGuideContent & {
   readonly metaTitle: string;
   readonly metaDescription: string;
 
@@ -41,15 +42,7 @@ export type PayGuideContent = {
   readonly needTitle: string;
   readonly need: readonly string[];
 
-  // ウォレットを選ぶ (MetaMask が基本・初めての方には JPYC EX が組み込まれた HashPort Wallet / マイナウォレット・2026-10-13 user)。
-  // HashPort Wallet / マイナウォレットで OpenPay の決済完了まで確かめ済み (user)。つなぎ方は WalletConnect。
-  readonly walletTitle: string;
-  readonly walletLead: string;
-  readonly wallets: readonly { readonly name: string; readonly body: string }[];
-  readonly walletNote: string;
-  readonly wcTitle: string;
-  readonly wcSteps: readonly PayGuideStep[];
-  readonly wcTip: string;
+  // ウォレットを選ぶ・WalletConnect の手順は lib/walletGuide.ts (モバイルオーダーのガイドと共通) を継ぐ。
 
   readonly stepsTitle: string;
   readonly steps: readonly PayGuideStep[];
@@ -100,49 +93,7 @@ const JA: PayGuideContent = {
     'ガスレス決済の QR なら、ガス代用の POL などは要りません (「通常決済（ガス代は自分で負担）」と出る QR では必要です)',
   ],
 
-  walletTitle: 'ウォレットを選ぶ',
-  walletLead:
-    'MetaMask が基本です。初めての方には、アプリの中に JPYC EX が組み込まれていて、JPYC を手に入れる (発行) ことも日本円に戻す (償還) こともアプリの中でできる、HashPort Wallet やマイナウォレットもおすすめです。',
-  wallets: [
-    {
-      name: 'MetaMask',
-      body: 'いちばん広く使われているウォレットです。MetaMask のアプリの中のブラウザで支払い画面を開くと、そのまま接続できます。',
-    },
-    {
-      name: 'HashPort Wallet',
-      body: 'アプリの中で JPYC の発行・償還ができます。OpenPay には WalletConnect でつなぎます。',
-    },
-    {
-      name: 'マイナウォレット',
-      body: 'マイナンバーカードを使うウォレットです。アプリの中で JPYC の発行・償還ができます。OpenPay には WalletConnect でつなぎます。',
-    },
-  ],
-  walletNote:
-    'アプリの中で発行・償還するときも、JPYC EX の登録と本人確認が必要です。くわしくは各ウォレットと JPYC 公式の案内をご覧ください。',
-  wcTitle: 'WalletConnect でつなぐ',
-  wcSteps: [
-    {
-      n: 1,
-      title: '「WalletConnect」を押す',
-      body: '支払い画面の「ウォレット」、または「スキャンして支払う」の右上の「接続」から「WalletConnect」を押します。',
-    },
-    {
-      n: 2,
-      title: '英語の名前でウォレットを探す',
-      body: 'スマホでは「All Wallets」の一覧が出ます。検索欄に英語で「HashPort」または「Myna」と入れて、ウォレットを選びます (カタカナでは見つかりません)。ウォレットのアプリが開きます。',
-    },
-    {
-      n: 3,
-      title: 'アプリで接続を承認する',
-      body: 'ウォレットのアプリで接続を承認したら、ブラウザに戻ります。',
-    },
-    {
-      n: 4,
-      title: '支払いもアプリで承認する',
-      body: '「支払う」を押すと、ウォレットのアプリに確認の画面が出ます (出ないときはアプリを開きます)。金額と送り先を確かめて承認し、ブラウザに戻ります。',
-    },
-  ],
-  wcTip: 'パソコンで支払い画面を開いたときは、表示された QR を、スマホのウォレットのアプリで読み取ってつなぎます。',
+  ...WALLET_GUIDE_JA,
 
   stepsTitle: '支払いの流れ',
   steps: [
@@ -273,49 +224,7 @@ const EN: PayGuideContent = {
     'For a gasless QR you need no POL or other gas token (a QR marked “Standard (you pay gas)” does need one)',
   ],
 
-  walletTitle: 'Choosing a wallet',
-  walletLead:
-    'MetaMask is the standard. If you are new to wallets, HashPort Wallet and MynaWallet are good choices too: JPYC EX is built into these apps, so you can get JPYC (issuance) and turn it back into yen (redemption) inside the app.',
-  wallets: [
-    {
-      name: 'MetaMask',
-      body: 'The most widely used wallet. Open the payment screen in the browser inside the MetaMask app and it connects as is.',
-    },
-    {
-      name: 'HashPort Wallet',
-      body: 'Issue and redeem JPYC inside the app. Connect it to OpenPay with WalletConnect.',
-    },
-    {
-      name: 'MynaWallet',
-      body: 'A wallet that uses the My Number Card (Japan’s individual number card). Issue and redeem JPYC inside the app. Connect it to OpenPay with WalletConnect.',
-    },
-  ],
-  walletNote:
-    'Issuing or redeeming inside these apps still requires a JPYC EX account and identity verification. See the guidance from each wallet and from JPYC for details.',
-  wcTitle: 'Connecting with WalletConnect',
-  wcSteps: [
-    {
-      n: 1,
-      title: 'Tap “WalletConnect”',
-      body: 'On the payment screen, tap “WalletConnect” under “Wallet”, or from “Connect” at the top right of “Scan to pay”.',
-    },
-    {
-      n: 2,
-      title: 'Search for the wallet by its English name',
-      body: 'On a phone, an “All Wallets” list appears. Type “HashPort” or “Myna” in the search box and pick your wallet. The wallet app opens.',
-    },
-    {
-      n: 3,
-      title: 'Approve the connection in the app',
-      body: 'Approve the connection in the wallet app, then return to the browser.',
-    },
-    {
-      n: 4,
-      title: 'Approve the payment in the app too',
-      body: 'When you tap pay, a confirmation appears in the wallet app (open the app if it does not). Check the amount and the recipient, approve, then return to the browser.',
-    },
-  ],
-  wcTip: 'If you opened the payment screen on a computer, scan the QR shown there with the wallet app on your phone to connect.',
+  ...WALLET_GUIDE_EN,
 
   stepsTitle: 'How to pay',
   steps: [

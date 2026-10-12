@@ -16,6 +16,8 @@ import { GuideFaq } from '@/components/guide/GuideFaq';
 import { GUIDE_PRIMARY_ACTION, GuideActions, GuideLead, GuideSubtitle, GuideTitle } from '@/components/guide/GuideHeader';
 import { BulletList, Section } from '@/components/guide/PosGuidePieces';
 import { StepShot } from '@/components/guide/MobileOrderGuidePieces';
+import { WalletChoice } from '@/components/guide/WalletChoice';
+import { walletGuideContentFor } from '@/lib/walletGuide';
 import {
   mobileOrderGuideContentFor,
   mobileOrderGuideMetadata,
@@ -39,6 +41,7 @@ export default async function GuideMobileOrderPage({
   const { locale } = await params;
   setRequestLocale(locale);
   const c = mobileOrderGuideContentFor(locale);
+  const wallet = walletGuideContentFor(locale);
 
   return (
     <AppShell>
@@ -58,6 +61,11 @@ export default async function GuideMobileOrderPage({
 
         <Section title={c.needTitle}>
           <BulletList items={c.need} marker="✓" markerClassName="text-emerald-600" />
+        </Section>
+
+        {/* ウォレットを選ぶ (「JPYC で支払う」と共通の案内・lib/walletGuide.ts)。 */}
+        <Section title={wallet.walletTitle}>
+          <WalletChoice content={wallet} />
         </Section>
 
         <Section title={c.stepsTitle}>
@@ -88,6 +96,15 @@ export default async function GuideMobileOrderPage({
 
         <Section title={c.relatedTitle} toc={false}>
           <p className="mt-3 text-sm">
+            <Link
+              href={`/${locale}/guide/pay`}
+              prefetch={false}
+              className="font-medium text-emerald-700 underline underline-offset-2 hover:text-emerald-900"
+            >
+              {c.relatedPayGuide}
+            </Link>
+          </p>
+          <p className="mt-2 text-sm">
             <Link
               href={`/${locale}/guide/agent`}
               prefetch={false}

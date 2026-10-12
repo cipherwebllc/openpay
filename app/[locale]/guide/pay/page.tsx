@@ -14,6 +14,7 @@ import { GuideFrame } from '@/components/guide/GuideFrame';
 import { GuideCallout } from '@/components/guide/GuideCallout';
 import { GuideFaq } from '@/components/guide/GuideFaq';
 import { GuideVideo } from '@/components/guide/GuideVideo';
+import { WalletChoice } from '@/components/guide/WalletChoice';
 import { GUIDE_PRIMARY_ACTION, GuideActions, GuideLead, GuideSubtitle, GuideTitle } from '@/components/guide/GuideHeader';
 import { GuideToc } from '@/components/guide/GuideToc';
 import { BulletList, STEP_BADGE_CUSTOMER, Section, StepList } from '@/components/guide/PosGuidePieces';
@@ -62,21 +63,9 @@ export default async function GuidePayPage({
         </Section>
 
         {/* ウォレットを選ぶ: MetaMask が基本・初めての方には JPYC EX が組み込まれたウォレット。MetaMask 以外は WalletConnect で
-            つなぐ (一覧は英語なので、検索の言葉まで書く・2026-10-13 user「WalletConnect 経由で使えるがわかりづらい」)。 */}
+            つなぐ (一覧は英語なので、検索の言葉まで書く)。モバイルオーダーのガイドと共通 (components/guide/WalletChoice)。 */}
         <Section title={c.walletTitle}>
-          <p className="mt-3 text-sm leading-relaxed text-slate-700">{c.walletLead}</p>
-          <ul className="mt-4 space-y-3">
-            {c.wallets.map((w) => (
-              <li key={w.name} className="rounded-xl bg-white p-4 shadow-card ring-1 ring-slate-200/70">
-                <p className="text-sm font-semibold text-slate-900">{w.name}</p>
-                <p className="mt-1 text-sm leading-relaxed text-slate-700">{w.body}</p>
-              </li>
-            ))}
-          </ul>
-          <p className="mt-3 text-xs leading-relaxed text-slate-500">{c.walletNote}</p>
-          <h3 className="mt-8 text-base font-semibold text-slate-900">{c.wcTitle}</h3>
-          <StepList steps={c.wcSteps} badgeClassName={STEP_BADGE_CUSTOMER} />
-          <GuideCallout kind="tip">{c.wcTip}</GuideCallout>
+          <WalletChoice content={c} />
         </Section>
 
         <Section title={c.stepsTitle}>
