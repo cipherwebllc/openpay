@@ -59,7 +59,8 @@ export default function TokuteiPage() {
               {t(`rows.${key}.value`, placeholders)}
               {/* 役務の対価の下に、機能ごとの料金と計算例 (/pricing) への 1 行 (plans/pricing-page.md §2.6)。
                   法定表示の本文 (rows.price.value) と施行日は変えない (リンクの追加だけ)。
-                  リンク名は可視テキスト (掟 8)・min-h-11 で tap target 44px。 */}
+                  リンク名は可視テキスト (掟 8)。文中のリンクなので min-h-11 は付けない (WCAG 2.5.8 の inline の例外・
+                  付けると折り返した行の前に 44px の隙間が出る)。 */}
               {key === 'price' && (
                 <span className="mt-2 block">
                   {t.rich('priceSeeAlso', {
@@ -67,7 +68,7 @@ export default function TokuteiPage() {
                       <Link
                         href={`/${locale}/pricing`}
                         prefetch={false}
-                        className="inline-flex min-h-11 items-center font-medium text-emerald-700 underline decoration-emerald-300 underline-offset-2 hover:text-emerald-900"
+                        className="font-medium text-emerald-700 underline decoration-emerald-300 underline-offset-2 hover:text-emerald-900"
                       >
                         {chunks}
                       </Link>
