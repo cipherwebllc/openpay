@@ -43,6 +43,7 @@ export type MobileOrderGuideContent = {
 
   readonly relatedTitle: string;
   readonly relatedAgentGuide: string;
+  readonly relatedPayGuide: string;
 };
 
 const STEP_W = 390;
@@ -61,7 +62,7 @@ const JA: MobileOrderGuideContent = {
   needTitle: '用意するもの',
   need: [
     'スマートフォン (カメラで QR を読めれば OK)',
-    'JPYC が入った暗号資産ウォレット (MetaMask など)',
+    'JPYC が入った暗号資産ウォレット (MetaMask が基本です。初めての方には HashPort Wallet やマイナウォレットもおすすめ。下の「ウォレットを選ぶ」へ)',
     'アプリのインストール・会員登録は不要です',
   ],
 
@@ -155,6 +156,7 @@ const JA: MobileOrderGuideContent = {
 
   relatedTitle: '関連ガイド',
   relatedAgentGuide: 'AI で注文するガイド (訪日・海外のお客様向け)',
+  relatedPayGuide: 'JPYC で支払う (ウォレットの選び方・支払いの基本)',
 };
 
 const EN: MobileOrderGuideContent = {
@@ -170,7 +172,7 @@ const EN: MobileOrderGuideContent = {
   needTitle: 'What you need',
   need: [
     'A smartphone (any camera that can scan a QR)',
-    'A crypto wallet with JPYC (e.g. MetaMask)',
+    'A crypto wallet with JPYC (MetaMask is the standard. If you are new to wallets, HashPort Wallet or MynaWallet are good choices too — see “Choosing a wallet” below)',
     'No app install or sign-up required',
   ],
 
@@ -264,6 +266,7 @@ const EN: MobileOrderGuideContent = {
 
   relatedTitle: 'Related guides',
   relatedAgentGuide: 'How to order with AI (for visitors to Japan)',
+  relatedPayGuide: 'Pay with JPYC (choosing a wallet and the basics of paying)',
 };
 
 export function mobileOrderGuideContentFor(locale: string): MobileOrderGuideContent {
