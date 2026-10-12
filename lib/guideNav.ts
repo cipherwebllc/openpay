@@ -5,6 +5,7 @@
 // ガイドページを直接描画する既存テスト (getTranslations を mock) を壊さない。
 // ⚠️ 料率・「無料」・「0 円」・ガス・チェーン名・通貨名は入れない (掟 14 の同期面を増やさない)。
 // tests/lib/guideNav.test.ts が全 leaf を検査する。料金に触れたくなったら lib/legal.ts の DISCLOSED_* 経由にする。
+// 例外は JPYC の名前だけ (ガイドの主題そのもの: pay の名前・ai-pay の説明)。対応通貨の一覧 (USDC など) は入れない。
 // ⚠️ トップの入口 (components/LandingEntryPoints.tsx) も start/qr/shop/store の label・summary をここから読む (文言の出どころは 1 つ)。
 
 import type { Metadata } from 'next';
@@ -16,6 +17,7 @@ export const GUIDE_SLUGS = [
   'qr',
   'shop',
   'pos',
+  'pay',
   'mobile-order',
   'agent',
   'store',
@@ -31,7 +33,7 @@ type GuideGroupId = 'shops' | 'customers' | 'creators' | 'ai' | 'more';
 // グループと並びは ja/en 共通 (文言だけをロケールごとに持つ)。
 const GUIDE_GROUPS: readonly { id: GuideGroupId; slugs: readonly GuideSlug[] }[] = [
   { id: 'shops', slugs: ['start', 'qr', 'shop', 'pos'] },
-  { id: 'customers', slugs: ['mobile-order', 'agent'] },
+  { id: 'customers', slugs: ['pay', 'mobile-order', 'agent'] },
   { id: 'creators', slugs: ['store'] },
   { id: 'ai', slugs: ['ai-pay', 'sell'] },
   { id: 'more', slugs: ['image-url'] },
@@ -101,6 +103,10 @@ const JA: GuideNavCopy = {
       label: '今お使いの POS レジと併用',
       summary: 'システム連携なしで、今お使いのレジに「OpenPay」決済を足す 2 台持ちの運用。',
     },
+    pay: {
+      label: 'JPYC で支払う',
+      summary: 'お店の QR を読み取って、自分のウォレットで支払う。いちばん基本の支払い方です。',
+    },
     'mobile-order': {
       label: 'モバイルオーダーのやり方',
       summary: 'お店の QR を読み取って、スマホで注文・支払い。アプリのインストールは要りません。',
@@ -169,6 +175,10 @@ const EN: GuideNavCopy = {
     pos: {
       label: 'Use with your current POS',
       summary: 'Add OpenPay as a payment method on the register you already use — two devices, no integration.',
+    },
+    pay: {
+      label: 'Pay with JPYC',
+      summary: "Scan the shop's QR code and pay from your own wallet. The most basic way to pay.",
     },
     'mobile-order': {
       label: 'How to use mobile order',

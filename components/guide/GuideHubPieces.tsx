@@ -15,6 +15,7 @@ import {
   Plug,
   QrCode,
   ReceiptText,
+  ScanLine,
   Smartphone,
   Store,
   type LucideIcon,
@@ -23,11 +24,13 @@ import { STEP_BADGE } from '@/components/guide/PosGuidePieces';
 import type { GuideNav, GuideRelatedItem, GuideSlug } from '@/lib/guideNav';
 
 // store の Palette・qr の QrCode・shop の Store は LP の入口 (components/LandingEntryPoints.tsx) と同じ。
+// pay の ScanLine は下のナビの「決済」(/scan・components/navItems.tsx) と同じ。
 const GUIDE_ICONS: Record<GuideSlug, LucideIcon> = {
   start: ClipboardCheck,
   qr: QrCode,
   shop: Store,
   pos: Calculator,
+  pay: ScanLine,
   'mobile-order': Smartphone,
   agent: Languages,
   store: Palette,

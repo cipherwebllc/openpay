@@ -8,7 +8,7 @@ import { render, screen, within } from '@testing-library/react';
 import { GuideFrame } from '@/components/guide/GuideFrame';
 import { GUIDE_SLUGS, guideNavFor } from '@/lib/guideNav';
 
-// prefetch の指定を DOM で見えるようにする (既定のままだと PC で 1 ページごとに他のガイド約 10 本の RSC を先読みする)。
+// prefetch の指定を DOM で見えるようにする (既定のままだと PC で 1 ページごとに他のガイド約 11 本の RSC を先読みする)。
 vi.mock('next/link', () => ({
   default: ({ prefetch, children, ...rest }: { prefetch?: boolean; children: React.ReactNode; href: string }) => (
     <a data-prefetch={String(prefetch)} {...rest}>
@@ -49,7 +49,7 @@ describe('GuideFrame', () => {
     }
   });
 
-  it.each(['ja', 'en'] as const)('%s: 各 nav は先頭がハブ、続いて 10 本のガイドへのリンク', (locale) => {
+  it.each(['ja', 'en'] as const)('%s: 各 nav は先頭がハブ、続いて 11 本のガイドへのリンク', (locale) => {
     const nav = guideNavFor(locale);
     renderFrame(locale, 'store');
     for (const landmark of screen.getAllByRole('navigation', { name: nav.navTitle })) {
@@ -90,7 +90,8 @@ describe('GuideFrame', () => {
   it('目次のリンクは prefetch しない設定で、印刷では目次を消して grid も解く', () => {
     const { container } = renderFrame('ja', 'qr');
     const links = [...container.querySelectorAll('a')];
-    expect(links).toHaveLength(22);
+    // PC とスマホの 2 つの nav × (ハブ 1 本 + ガイド全部)。
+    expect(links).toHaveLength(2 * (1 + GUIDE_SLUGS.length));
     for (const link of links) expect(link).toHaveAttribute('data-prefetch', 'false');
     const frame = container.firstElementChild as HTMLElement;
     expect(frame.className).toContain('lg:grid');
