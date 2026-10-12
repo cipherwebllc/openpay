@@ -424,7 +424,7 @@ function buildJa(): PricingContent {
         scope: `店頭レジ・画面に表示した金額指定の決済QR／JPYC（${disclosedStoreGasChains('ja')}）`,
         standard: [{ rail: null, value: '提供なし' }],
         gasless: [{ rail: 'JPYC', value: `${STORE_GAS_WEI} wei` }],
-        payers: [shop('ガス代の実費'), { tone: 'customer', label: 'お客様が払う', note: null }],
+        payers: [{ tone: 'customer', label: 'お客様が払う', note: null }],
         details: [
           'OpenPay 利用料は 0 円です。ガス代は、お店の端末のガス用ウォレットが実費で払います。',
           `仕組み上、送金 1 回につき ${STORE_GAS_WEI} wei（${STORE_GAS_WEI_JPYC} JPYC）がお客様の支払いに上乗せされ、OpenPay に届きます。`,
@@ -639,7 +639,7 @@ function buildEn(): PricingContent {
         scope: `In-store register or a fixed-amount payment QR shown on screen — JPYC on ${disclosedStoreGasChains('en')}`,
         standard: [{ rail: null, value: 'Not offered' }],
         gasless: [{ rail: 'JPYC', value: `${STORE_GAS_WEI} wei` }],
-        payers: [shop('The actual gas'), { tone: 'customer', label: 'Customer pays', note: null }],
+        payers: [{ tone: 'customer', label: 'Customer pays', note: null }],
         details: [
           'OpenPay usage fee: 0. The gas wallet on the shop’s device pays the actual gas.',
           `By design, ${STORE_GAS_WEI} wei (${STORE_GAS_WEI_JPYC} JPYC) is added to the customer’s payment per transfer and goes to OpenPay.`,

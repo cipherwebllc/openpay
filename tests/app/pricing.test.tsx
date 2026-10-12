@@ -71,7 +71,8 @@ describe.each(['ja', 'en'] as const)('%s /pricing', (locale) => {
       for (const value of [...row.standard, ...row.gasless]) expect(text, row.id).toContain(value.value);
       for (const payer of row.payers) expect(text, row.id).toContain(payer.label);
       const details = item.querySelector('details');
-      expect(details?.querySelector('summary')?.textContent).toBe(content.detailsLabel);
+      // 見える文字は「くわしく」・読み上げは機能名つき (5 つを区別する)。
+      expect(details?.querySelector('summary')?.textContent).toBe(`${content.detailsLabel}（${row.name}）`);
       for (const detail of row.details) expect(details?.textContent, row.id).toContain(detail);
     });
     // スマホで見出しの行の代わりに 2 つの決済の意味を書く (md 以上は読み上げだけ)。

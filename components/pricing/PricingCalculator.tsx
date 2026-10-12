@@ -163,7 +163,7 @@ export function PricingCalculator({
 
   return (
     <div className="rounded-2xl bg-white p-4 shadow-card ring-1 ring-slate-200/70 sm:p-6">
-      <div className="grid grid-cols-1 gap-6 md:grid-cols-[17rem_minmax(0,1fr)] md:grid-rows-[auto_1fr] md:gap-x-10 md:gap-y-6">
+      <div className="grid grid-cols-1 gap-6 md:grid-cols-[15rem_minmax(0,1fr)] md:grid-rows-[auto_1fr] md:gap-x-8 md:gap-y-6 lg:grid-cols-[17rem_minmax(0,1fr)] lg:gap-x-10">
         <div>
           <label htmlFor={inputId} className="text-sm font-semibold text-slate-900">
             {copy.amountLabel}
@@ -184,7 +184,7 @@ export function PricingCalculator({
             />
             <span className="pr-4 text-sm font-semibold text-slate-500">{copy.unit}</span>
           </div>
-          <div className="mt-3 flex flex-wrap items-center gap-2">
+          <div className="mt-3 flex flex-wrap items-center gap-2 md:gap-1.5 lg:gap-2">
             <span className="text-xs text-slate-500">{copy.presetsLabel}</span>
             {presets.map((preset) => {
               const active = digits === String(preset);
@@ -195,7 +195,7 @@ export function PricingCalculator({
                   aria-pressed={active}
                   onClick={() => setDigits(String(preset))}
                   // hover はマウスのある端末だけ (タッチでは押した後に色が残るため)。
-                  className={`inline-flex min-h-11 items-center rounded-full px-4 text-sm font-semibold tabular-nums ring-1 ring-inset ${
+                  className={`inline-flex min-h-11 items-center rounded-full px-4 text-sm font-semibold tabular-nums ring-1 ring-inset md:px-3 lg:px-4 ${
                     active
                       ? 'bg-brand text-white ring-brand'
                       : 'bg-white text-slate-700 ring-slate-200 [@media(hover:hover)]:hover:bg-slate-50'

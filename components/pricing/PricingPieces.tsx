@@ -4,8 +4,9 @@
 //
 // 見た目の方針 (迷わない・疲れない):
 // - 冒頭の 4 枚のカードで「いつ・いくら・だれが」を先に答える (LP の利用料カードと同じ配色とビッグナンバー)。
-// - 機能ごとの料金は 1 枚の面に行を並べる。md 以上は表のように列をそろえ (見出しの行は見た目だけ)、
-//   スマホは各行の中で「通常決済 / ガスレス決済 / 払う人」を縦に並べる。DOM は 1 つ (dl)。
+// - 機能ごとの料金は 1 枚の面に行を並べる。lg 以上は表のように列をそろえ (見出しの行は見た目だけ)、
+//   それより狭い幅 (スマホと iPad の縦) は各行の中で「通常決済 / ガスレス決済 / 払う人」を縦に並べる。DOM は 1 つ (dl)。
+//   md (768px) から列にすると、iPad の縦で払う人のピルが列からはみ出す (2026-10-12 実測)。
 // - 説明の文は「くわしく」(details) にたたむ。値そのもの (料率・払う人) は常に見せる。
 // aria-label は付けない (名前はすべて可視テキスト・掟 8)。アイコンは aria-hidden。
 
@@ -97,8 +98,8 @@ export function TrustList({ items }: { items: readonly string[] }) {
 }
 
 // 表の列の幅 (見出しの行と各行で同じ値を使い、md 以上で列をそろえる)。
-const ROW_GRID = 'md:grid-cols-[minmax(0,13rem)_minmax(0,1fr)]';
-const CELL_GRID = 'md:grid-cols-[minmax(0,0.9fr)_minmax(0,1.3fr)_minmax(0,1fr)]';
+const ROW_GRID = 'lg:grid-cols-[minmax(0,13rem)_minmax(0,1fr)]';
+const CELL_GRID = 'lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.3fr)_minmax(0,1fr)]';
 
 // 「なし」「提供なし」は料金がかからない (払うものがない) ので、料金の値より弱く見せる。
 function isNone(value: string): boolean {
@@ -124,9 +125,9 @@ function PayerCell({ payers }: { payers: readonly PricingPayer[] }) {
   return (
     <ul className="space-y-1.5">
       {payers.map((payer) => (
-        <li key={`${payer.label}:${payer.note}`} className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+        <li key={`${payer.label}:${payer.note}`} className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm lg:block">
           <PayerPill payer={payer} />
-          {payer.note ? <span className="text-xs text-slate-500">{payer.note}</span> : null}
+          {payer.note ? <span className="text-xs text-slate-500 lg:mt-0.5 lg:block">{payer.note}</span> : null}
         </li>
       ))}
     </ul>
@@ -152,7 +153,7 @@ export function FeeTableHead({
   return (
     <div
       aria-hidden
-      className={`hidden gap-4 border-b border-slate-200 pb-3 pl-5 pr-28 pt-4 text-xs font-semibold text-slate-700 md:grid ${ROW_GRID}`}
+      className={`hidden gap-4 border-b border-slate-200 pb-3 pl-5 pr-28 pt-4 text-xs font-semibold text-slate-700 lg:grid ${ROW_GRID}`}
     >
       <span>{colFeature}</span>
       <span className={`grid gap-4 ${CELL_GRID}`}>
@@ -190,33 +191,35 @@ export function FeeRow({
     { dt: dtPayer, dd: <PayerCell payers={row.payers} /> },
   ];
   return (
-    <li className="relative px-4 pb-2 pt-4 sm:px-5 md:pb-4 md:pr-28">
+    <li className="relative px-4 pb-2 pt-4 sm:px-5 lg:pb-4 lg:pr-28">
       {/* base の grid-cols-1 は必須 (スマホで横にはみ出さない)。 */}
-      <div className={`grid grid-cols-1 gap-3 md:gap-4 ${ROW_GRID}`}>
+      <div className={`grid grid-cols-1 gap-3 lg:gap-4 ${ROW_GRID}`}>
         <div className="min-w-0">
           <h3 className="flex items-center gap-2 text-base font-semibold text-slate-900">
             <Icon className="h-5 w-5 shrink-0 text-brand" aria-hidden />
             {row.name}
           </h3>
-          {row.scope ? <p className="mt-1 text-xs leading-relaxed text-slate-500 md:pl-7">{row.scope}</p> : null}
+          {row.scope ? <p className="mt-1 text-xs leading-relaxed text-slate-500 lg:pl-7">{row.scope}</p> : null}
         </div>
-        <dl className={`grid grid-cols-1 gap-2.5 md:gap-4 ${CELL_GRID}`}>
+        <dl className={`grid grid-cols-1 gap-2.5 lg:gap-4 ${CELL_GRID}`}>
           {cells.map((cell) => (
-            <div key={cell.dt} className="grid min-w-0 grid-cols-[6.5rem_minmax(0,1fr)] items-baseline gap-3 md:block">
-              <dt className="text-xs font-semibold text-slate-500 md:sr-only">{cell.dt}</dt>
+            <div key={cell.dt} className="grid min-w-0 grid-cols-[6.5rem_minmax(0,1fr)] items-baseline gap-3 lg:block">
+              <dt className="text-xs font-semibold text-slate-500 lg:sr-only">{cell.dt}</dt>
               <dd className="min-w-0">{cell.dd}</dd>
             </div>
           ))}
         </dl>
       </div>
-      <details className="group md:static">
+      <details className="group lg:static">
         {/* スマホは行の末尾 (押した所のすぐ下に中身が出る)。md 以上は行の右上 (li の pr-28 で列と重ならない)。
             色は灰: 緑は「お店が払う」の色なので、リンクの意味と混ぜない。 */}
-        <summary className="inline-flex min-h-11 cursor-pointer list-none items-center gap-1 text-sm font-medium text-slate-600 hover:text-slate-900 md:absolute md:right-5 md:top-3 [&::-webkit-details-marker]:hidden">
+        <summary className="inline-flex min-h-11 cursor-pointer list-none items-center gap-1 text-sm font-medium text-slate-600 lg:absolute lg:right-5 lg:top-1.5 [@media(hover:hover)]:hover:text-slate-900 [&::-webkit-details-marker]:hidden">
           {detailsLabel}
+          {/* 読み上げで 5 つの「くわしく」を区別する (可視の文字を先頭に含むので名前の一致 WCAG 2.5.3 を保つ)。 */}
+          <span className="sr-only">（{row.name}）</span>
           <ChevronDown className="h-4 w-4 transition-transform group-open:rotate-180" aria-hidden />
         </summary>
-        <ul className="mb-2 space-y-2 border-l-2 border-slate-200 pl-3 text-sm leading-relaxed text-slate-600 md:mb-0 md:mt-3 md:ml-7">
+        <ul className="mb-2 space-y-2 border-l-2 border-slate-200 pl-3 text-sm leading-relaxed text-slate-600 lg:mb-0 lg:mt-3 lg:ml-7">
           {row.details.map((detail) => (
             <li key={detail}>{detail}</li>
           ))}
@@ -233,7 +236,7 @@ export function OtherCases({ titles, bodies }: { titles: readonly string[]; bodi
       {titles.map((title, index) => (
         <li key={title}>
           <details className="group">
-            <summary className="flex min-h-14 cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-50 sm:px-5 sm:text-base [&::-webkit-details-marker]:hidden">
+            <summary className="flex min-h-14 cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm font-semibold text-slate-900 sm:px-5 sm:text-base [@media(hover:hover)]:hover:bg-slate-50 [&::-webkit-details-marker]:hidden">
               {title}
               <ChevronDown className="h-5 w-5 shrink-0 text-slate-400 transition-transform group-open:rotate-180" aria-hidden />
             </summary>
