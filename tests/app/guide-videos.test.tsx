@@ -8,6 +8,7 @@ import GuideQrPage from '@/app/[locale]/guide/qr/page';
 import GuideShopPage from '@/app/[locale]/guide/shop/page';
 import GuideAiPayPage from '@/app/[locale]/guide/ai-pay/page';
 import GuideStorePage from '@/app/[locale]/guide/store/page';
+import GuidePayPage from '@/app/[locale]/guide/pay/page';
 import { HOWTO_VIDEOS, HOWTO_VIDEO_UI, type HowtoVideoKey } from '@/lib/howtoVideos';
 
 vi.mock('next-intl/server', () => ({ setRequestLocale: vi.fn(), getTranslations: async () => (key: string) => key }));
@@ -19,6 +20,7 @@ const PAGES: Array<[string, Page, readonly HowtoVideoKey[]]> = [
   ['/guide/shop', GuideShopPage as Page, ['register', 'mobileOrder', 'orders']],
   ['/guide/ai-pay', GuideAiPayPage as Page, ['agent']],
   ['/guide/store', GuideStorePage as Page, ['creator']],
+  ['/guide/pay', GuidePayPage as Page, ['pay']],
 ];
 
 describe('ガイドページの使い方動画', () => {

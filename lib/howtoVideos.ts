@@ -3,7 +3,7 @@
 // 焼き込みなので ja のページにだけ出す (howtoVideoFor が en では null を返す)。
 // サムネイルは public/guide/videos/<file> (動画のタイトル画面)。押すまで YouTube へは通信しない。
 
-export type HowtoVideoKey = 'qr' | 'register' | 'mobileOrder' | 'orders' | 'agent' | 'creator';
+export type HowtoVideoKey = 'qr' | 'register' | 'mobileOrder' | 'orders' | 'pay' | 'agent' | 'creator';
 
 export type HowtoVideo = {
   readonly youtubeId: string;
@@ -39,6 +39,12 @@ export const HOWTO_VIDEOS: Readonly<Record<HowtoVideoKey, HowtoVideo>> = {
     title: 'OpenPay の使い方｜お店向け：モバイルオーダーの受注',
     duration: '1:44',
     thumbnail: '/guide/videos/orders.webp',
+  },
+  pay: {
+    youtubeId: '7rxgw-BChyI',
+    title: 'OpenPay の使い方｜お客様向け：JPYC で支払う',
+    duration: '1:53',
+    thumbnail: '/guide/videos/pay.webp',
   },
   agent: {
     youtubeId: '9l_23O6wsC8',

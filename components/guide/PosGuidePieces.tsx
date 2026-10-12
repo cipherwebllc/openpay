@@ -88,12 +88,19 @@ export const STEP_BADGE =
 export const STEP_BADGE_CUSTOMER =
   'flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-blue-600 text-sm font-bold text-white';
 
-export function StepList({ steps }: { steps: readonly GuideStep[] }) {
+/** `badgeClassName` にお客様の手順は STEP_BADGE_CUSTOMER を渡す (既定はお店の STEP_BADGE)。 */
+export function StepList({
+  steps,
+  badgeClassName = STEP_BADGE,
+}: {
+  steps: readonly GuideStep[];
+  badgeClassName?: string;
+}) {
   return (
     <ol className="mt-4 space-y-4">
       {steps.map((step) => (
         <li key={step.n} className="flex items-start gap-3">
-          <span className={STEP_BADGE}>
+          <span className={badgeClassName}>
             {step.n}
           </span>
           <div>
