@@ -39,7 +39,8 @@ export default async function GuideShopPage({
   const { locale } = await params;
   setRequestLocale(locale);
   const c = shopGuideContentFor(locale);
-  const video = howtoVideoFor(locale, 'mobileOrder');
+  // このページはレジとモバイルオーダーの両方を扱うので、動画も 2 本 (レジ → モバイルオーダーの順・ja だけ)。
+  const videos = [howtoVideoFor(locale, 'register'), howtoVideoFor(locale, 'mobileOrder')].filter((v) => v !== null);
   const tLanding = await getTranslations({ locale, namespace: 'Landing' });
 
   const fees = [
@@ -127,9 +128,13 @@ export default async function GuideShopPage({
         </Section>
 
         {/* 動画は「できること」の後 (ヒーロー画像の直後に画像が 2 枚続かないように)。 */}
-        {video && (
+        {videos.length > 0 && (
           <Section title={HOWTO_VIDEO_UI.sectionTitle} toc={false}>
-            <GuideVideo video={video} />
+            <div className="space-y-8">
+              {videos.map((v) => (
+                <GuideVideo key={v.youtubeId} video={v} />
+              ))}
+            </div>
           </Section>
         )}
 
