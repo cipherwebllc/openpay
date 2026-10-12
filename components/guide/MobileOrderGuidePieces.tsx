@@ -3,12 +3,13 @@
 // 縦長スクショ用に実寸 width/height を受けて CLS を防ぐ専用 figure を持つ。
 
 import type { MobileOrderGuideStep } from '@/lib/mobileOrderGuide';
+import { STEP_BADGE } from '@/components/guide/PosGuidePieces';
 
 export function StepShot({ step }: { step: MobileOrderGuideStep }) {
   return (
     <li className="grid gap-4 sm:grid-cols-[1fr_240px] sm:items-start sm:gap-6">
       <div className="flex items-start gap-3">
-        <span className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-emerald-600 text-base font-bold text-white">
+        <span className={STEP_BADGE}>
           {step.n}
         </span>
         <div>

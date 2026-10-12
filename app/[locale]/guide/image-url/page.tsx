@@ -10,7 +10,8 @@ import Link from 'next/link';
 import { setRequestLocale } from 'next-intl/server';
 import { AppShell } from '@/components/AppShell';
 import { GuideFrame } from '@/components/guide/GuideFrame';
-import { Section } from '@/components/guide/PosGuidePieces';
+import { GuideLead, GuideTitle } from '@/components/guide/GuideHeader';
+import { STEP_BADGE, Section } from '@/components/guide/PosGuidePieces';
 import { imageGuideContentFor, imageGuideMetadata } from '@/lib/imageGuide';
 
 export async function generateMetadata({
@@ -60,25 +61,15 @@ export default async function GuideImageUrlPage({
     <AppShell>
       <GuideFrame locale={locale} current="image-url">
       <article className="mx-auto max-w-3xl">
-        <Link
-          href={`/${locale}`}
-          prefetch={false}
-          className="text-sm font-medium text-emerald-700 hover:text-emerald-900"
-        >
-          {c.backHome}
-        </Link>
 
-        <header className="mt-4">
-          <h1 className="text-[1.75rem] font-bold leading-tight tracking-tight text-slate-900 sm:text-4xl">
+        <header>
+          <GuideTitle>
             {c.heroTitle}
-          </h1>
+          </GuideTitle>
           {c.heroLead.map((p) => (
-            <p
-              key={p}
-              className="mt-4 max-w-2xl text-sm leading-relaxed text-slate-700 sm:text-base"
-            >
+            <GuideLead key={p}>
               {p}
-            </p>
+            </GuideLead>
           ))}
           <p className="mt-5 text-sm font-bold text-slate-900">{c.flowTitle}</p>
           <Flow steps={c.flow} />
@@ -95,7 +86,7 @@ export default async function GuideImageUrlPage({
               <ol className="mt-4 space-y-3">
                 {section.steps.map((step, i) => (
                   <li key={step.title} className="flex items-start gap-3">
-                    <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-emerald-100 text-sm font-bold text-emerald-800">
+                    <span className={STEP_BADGE}>
                       {i + 1}
                     </span>
                     <span className="text-sm leading-relaxed text-slate-700">

@@ -14,7 +14,8 @@ import Link from 'next/link';
 import { getTranslations, setRequestLocale } from 'next-intl/server';
 import { AppShell } from '@/components/AppShell';
 import { GuideFrame } from '@/components/guide/GuideFrame';
-import { Section } from '@/components/guide/PosGuidePieces';
+import { GUIDE_PRIMARY_ACTION, GUIDE_SECONDARY_ACTION, GuideLead, GuideTitle } from '@/components/guide/GuideHeader';
+import { STEP_BADGE, Section } from '@/components/guide/PosGuidePieces';
 import { GuideVideo } from '@/components/guide/GuideVideo';
 import { HOWTO_VIDEO_UI, howtoVideoFor } from '@/lib/howtoVideos';
 import { qrGuideContentFor, qrGuideMetadata } from '@/lib/qrGuide';
@@ -34,7 +35,7 @@ function StepList({ steps }: { steps: readonly string[] }) {
     <ol className="mt-4 space-y-3">
       {steps.map((step, i) => (
         <li key={step} className="flex items-start gap-3">
-          <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-emerald-100 text-sm font-bold text-emerald-800">
+          <span className={STEP_BADGE}>
             {i + 1}
           </span>
           <span className="text-sm leading-relaxed text-slate-700">{step}</span>
@@ -65,38 +66,31 @@ export default async function GuideQrPage({
     <AppShell>
       <GuideFrame locale={locale} current="qr">
       <article className="mx-auto max-w-3xl">
-        <Link
-          href={`/${locale}`}
-          prefetch={false}
-          className="text-sm font-medium text-emerald-700 hover:text-emerald-900"
-        >
-          {c.backHome}
-        </Link>
 
-        <header className="mt-4">
-          <h1 className="text-[1.75rem] font-bold leading-tight tracking-tight text-slate-900 sm:text-4xl">
+        <header>
+          <GuideTitle>
             {c.heroTitle}
-          </h1>
-          <p className="mt-4 max-w-2xl text-sm leading-relaxed text-slate-700 sm:text-base">
+          </GuideTitle>
+          <GuideLead>
             {c.heroLead}
-          </p>
-          <div className="mt-5 flex flex-wrap gap-3">
+          </GuideLead>
+          <div className="mt-6 flex flex-wrap gap-3">
             <Link
               href={`/${locale}/create`}
               prefetch={false}
-              className="inline-flex items-center justify-center rounded-xl bg-emerald-600 px-6 py-3 text-sm font-semibold text-white shadow-sm transition-all hover:-translate-y-0.5 hover:bg-emerald-700 hover:shadow-card-hover active:translate-y-0"
+              className={GUIDE_PRIMARY_ACTION}
             >
               {c.heroCtaCreate}
             </Link>
             <Link
               href={`/${locale}/scan`}
               prefetch={false}
-              className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-6 py-3 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50"
+              className={GUIDE_SECONDARY_ACTION}
             >
               {c.heroCtaScan}
             </Link>
           </div>
-          <div className="mt-7 overflow-hidden rounded-[1.75rem] bg-white shadow-lift ring-1 ring-slate-200/60">
+          <div className="mt-8 overflow-hidden rounded-[1.75rem] bg-white shadow-lift ring-1 ring-slate-200/60">
             <Image
               src="/landing/hero-qr-payment.avif"
               alt={c.heroVisualAlt}
@@ -201,7 +195,7 @@ export default async function GuideQrPage({
           <Link
             href={`/${locale}/create`}
             prefetch={false}
-            className="mt-5 inline-flex items-center justify-center rounded-xl bg-emerald-600 px-6 py-3 text-sm font-semibold text-white shadow-sm transition-all hover:-translate-y-0.5 hover:bg-emerald-700 hover:shadow-card-hover active:translate-y-0"
+            className={`mt-5 ${GUIDE_PRIMARY_ACTION}`}
           >
             {c.ctaLabel}
           </Link>

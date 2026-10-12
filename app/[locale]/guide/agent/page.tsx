@@ -13,6 +13,9 @@ import Link from 'next/link';
 import { setRequestLocale } from 'next-intl/server';
 import { AppShell } from '@/components/AppShell';
 import { GuideFrame } from '@/components/guide/GuideFrame';
+import { guideNavFor } from '@/lib/guideNav';
+import { GUIDE_PRIMARY_ACTION, GuideActions, GuideLead, GuideSubtitle, GuideTitle } from '@/components/guide/GuideHeader';
+import { GuideToc } from '@/components/guide/GuideToc';
 import {
   BulletList,
   Section,
@@ -51,23 +54,26 @@ export default async function GuideAgentPage({
         <Link
           href={`/${locale}${c.backLink.href}`}
           prefetch={false}
-          className="text-sm font-medium text-emerald-700 hover:text-emerald-900"
+          className="inline-flex min-h-11 items-center text-sm font-medium text-emerald-700 hover:text-emerald-900"
         >
           {c.backLink.label}
         </Link>
 
-        <header className="mt-4">
-          <h1 className="text-2xl font-bold text-slate-900 sm:text-3xl">
+        <header className="mt-2">
+          <GuideTitle>
             {c.title}
-          </h1>
-          <p className="mt-2 text-base font-medium text-emerald-700">
+          </GuideTitle>
+          <GuideSubtitle>
             {c.subtitle}
-          </p>
-          <p className="mt-4 text-sm leading-relaxed text-slate-700">{c.lead}</p>
-          <p className="mt-3 text-xs leading-relaxed text-slate-500">
+          </GuideSubtitle>
+          <GuideLead>{c.lead}</GuideLead>
+          <p className="mt-3 max-w-2xl text-sm leading-relaxed text-slate-500">
             {c.audience}
           </p>
+                  <GuideActions actions={[{ href: `/${locale}${c.ctaButtonHref}`, label: c.ctaButton }]} />
         </header>
+
+        <GuideToc title={guideNavFor(locale).tocTitle} />
 
         <GuideHero image={c.heroImage} />
 
@@ -116,7 +122,6 @@ export default async function GuideAgentPage({
           </p>
           <StepList
             steps={c.setupSteps}
-            badgeClassName="bg-emerald-100 text-emerald-700"
           />
           <p className="mt-3 text-sm leading-relaxed text-slate-700">
             {c.setupEnvironmentNote}
@@ -130,7 +135,6 @@ export default async function GuideAgentPage({
         <Section title={c.flowTitle}>
           <StepList
             steps={c.flowSteps}
-            badgeClassName="bg-emerald-600 text-white"
           />
         </Section>
 
@@ -140,7 +144,6 @@ export default async function GuideAgentPage({
           </p>
           <StepList
             steps={c.jpycSteps}
-            badgeClassName="bg-emerald-100 text-emerald-700"
           />
           <AddressCallout
             label={c.jpycAddressLabel}
@@ -205,7 +208,7 @@ export default async function GuideAgentPage({
           </p>
           <Link
             href={`/${locale}${c.ctaButtonHref}`}
-            className="mt-5 inline-flex items-center justify-center rounded-xl bg-emerald-600 px-6 py-3 text-sm font-semibold text-white shadow-sm transition-all hover:-translate-y-0.5 hover:bg-emerald-700 hover:shadow-card-hover active:translate-y-0"
+            className={`mt-5 ${GUIDE_PRIMARY_ACTION}`}
           >
             {c.ctaButton}
           </Link>

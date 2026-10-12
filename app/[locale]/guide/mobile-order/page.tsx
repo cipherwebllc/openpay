@@ -12,6 +12,7 @@ import Link from 'next/link';
 import { setRequestLocale } from 'next-intl/server';
 import { AppShell } from '@/components/AppShell';
 import { GuideFrame } from '@/components/guide/GuideFrame';
+import { GUIDE_PRIMARY_ACTION, GuideActions, GuideLead, GuideSubtitle, GuideTitle } from '@/components/guide/GuideHeader';
 import { BulletList, Section } from '@/components/guide/PosGuidePieces';
 import { StepShot } from '@/components/guide/MobileOrderGuidePieces';
 import {
@@ -42,22 +43,16 @@ export default async function GuideMobileOrderPage({
     <AppShell>
       <GuideFrame locale={locale} current="mobile-order">
       <article className="mx-auto max-w-3xl">
-        <Link
-          href={`/${locale}`}
-          prefetch={false}
-          className="text-sm font-medium text-emerald-700 hover:text-emerald-900"
-        >
-          {c.backHome}
-        </Link>
 
-        <header className="mt-4">
-          <h1 className="text-2xl font-bold text-slate-900 sm:text-3xl">
+        <header>
+          <GuideTitle>
             {c.title}
-          </h1>
-          <p className="mt-2 text-base font-medium text-emerald-700">
+          </GuideTitle>
+          <GuideSubtitle>
             {c.subtitle}
-          </p>
-          <p className="mt-4 text-sm leading-relaxed text-slate-700">{c.lead}</p>
+          </GuideSubtitle>
+          <GuideLead>{c.lead}</GuideLead>
+                  <GuideActions actions={[{ href: c.tryUrl, label: c.tryCta }]} />
         </header>
 
         <Section title={c.needTitle}>
@@ -93,7 +88,7 @@ export default async function GuideMobileOrderPage({
           </p>
           <a
             href={c.tryUrl}
-            className="mt-5 inline-flex items-center justify-center rounded-xl bg-emerald-600 px-6 py-3 text-sm font-semibold text-white shadow-sm transition-all hover:-translate-y-0.5 hover:bg-emerald-700 hover:shadow-card-hover active:translate-y-0"
+            className={`mt-5 ${GUIDE_PRIMARY_ACTION}`}
           >
             {c.tryCta}
           </a>

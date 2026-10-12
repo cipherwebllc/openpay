@@ -68,6 +68,11 @@ export type StoreGuideContent = {
   };
   readonly basicsBody: string;
   readonly basicsPoint: string;
+  /** 配布の方法 (methods) をまとめる節の見出しと一文。各方法はたためるカードで、選んだものだけ開いて読む。 */
+  readonly methodsTitle: string;
+  readonly methodsLead: string;
+  /** たためるカードの「方法 N」の表示 (N を足す)。 */
+  readonly methodLabel: string;
 
   readonly methods: readonly StoreGuideMethod[];
 
@@ -185,6 +190,9 @@ const JA: StoreGuideContent = {
   basicsPoint:
     '出品はすべて共通で、「受け取る」ページの「プロフ」タブ →「デジタル商品」から。初回のみ販売者情報 (氏名または名称・連絡先) の登録が必要です (特定商取引法対応)。1 ウォレットにつき 24 商品まで、価格は 1〜1,000,000 の整数 JPYC。',
 
+  methodsTitle: '配布のしかたを選ぶ',
+  methodsLead: '使うサービスを 1 つ選んで、手順を開いてください。迷ったら、外部サービスが要らないテキスト商品から。',
+  methodLabel: '方法',
   methods: [
     {
       n: 1,
@@ -450,6 +458,9 @@ const EN: StoreGuideContent = {
   basicsPoint:
     'All listings start from the Create page → Profile tab → Digital products. First-time sellers register seller information (name and contact — required by the Specified Commercial Transactions Act). Up to 24 products per wallet; prices are whole JPYC from 1 to 1,000,000.',
 
+  methodsTitle: 'Choose how to deliver',
+  methodsLead: 'Pick one service and open its steps. If unsure, start with a text product — no outside service needed.',
+  methodLabel: 'Method',
   methods: [
     {
       n: 1,

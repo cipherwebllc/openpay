@@ -39,9 +39,10 @@ test.describe('ガイドの目次と /guide ハブ', () => {
     await expect(page).toHaveURL(/\/ja\/guide\/start$/);
   });
 
-  test('/ja/guide: 見出しと、main の中に 10 本のガイドへのリンク', async ({ page }) => {
+  test('/ja/guide: 見出しと、main の中にガイドへのリンク (はじめての方へ 2 本 + 一覧 10 本)', async ({ page }) => {
     await page.goto('/ja/guide');
     await expect(page.getByRole('heading', { level: 1, name: 'OpenPay でできること' })).toBeVisible();
-    await expect(page.getByRole('main').locator('a[href^="/ja/guide/"]')).toHaveCount(10);
+    // 「はじめての方へ」(導入前チェックリスト・決済QR の 2 本) + 5 グループの 10 本。
+    await expect(page.getByRole('main').locator('a[href^="/ja/guide/"]')).toHaveCount(12);
   });
 });

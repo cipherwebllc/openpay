@@ -92,7 +92,10 @@ export function GuideFrame({
           <GuideNavList locale={locale} nav={nav} current={current} idPrefix="guide-nav-desktop" />
         </nav>
       </div>
-      <div className="min-w-0">
+      {/* break-words: 本文の切れ目のない長い文字列 (アドレス・URL) が折り返せずに画面の右へはみ出すのを防ぐ
+          (sell で 390px 幅が 529px になっていた)。[&_h2]:scroll-mt-24: 「このページの内容」から飛んだ見出しが
+          固定ヘッダーに隠れないようにする。 */}
+      <div className="min-w-0 break-words [&_h2]:scroll-mt-24">
         <nav
           aria-labelledby="guide-nav-title-mobile"
           className="mx-auto mb-4 max-w-3xl lg:hidden print:hidden"

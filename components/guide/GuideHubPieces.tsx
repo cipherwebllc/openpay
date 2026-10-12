@@ -19,6 +19,7 @@ import {
   Store,
   type LucideIcon,
 } from 'lucide-react';
+import { STEP_BADGE } from '@/components/guide/PosGuidePieces';
 import type { GuideNav, GuideRelatedItem, GuideSlug } from '@/lib/guideNav';
 
 // store の Palette・qr の QrCode・shop の Store は LP の入口 (components/LandingEntryPoints.tsx) と同じ。
@@ -108,6 +109,37 @@ export function GuideHubRelated({ locale, nav }: { locale: string; nav: GuideNav
           </li>
         ))}
       </ul>
+    </section>
+  );
+}
+
+/** ハブの冒頭の「はじめての方へ」: お店で受け取る人に読む順 (導入前チェックリスト → 決済QR) を番号で示す。 */
+export function GuideHubStart({ locale, nav }: { locale: string; nav: GuideNav }) {
+  const steps = (['start', 'qr'] as const).map((slug) => ({ slug, ...nav.items[slug] }));
+  return (
+    <section
+      aria-labelledby="guide-hub-start"
+      className="mt-8 rounded-2xl bg-emerald-50/70 p-5 ring-1 ring-inset ring-emerald-200/70 sm:p-6"
+    >
+      <h2 id="guide-hub-start" className="text-base font-bold text-emerald-900">
+        {nav.hubStartTitle}
+      </h2>
+      <p className="mt-1 text-sm leading-relaxed text-slate-700">{nav.hubStartLead}</p>
+      <ol className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-3">
+        {steps.map((item, index) => (
+          <li key={item.slug}>
+            <Link
+              href={`/${locale}/guide/${item.slug}`}
+              prefetch={false}
+              className="flex min-h-14 items-center gap-3 rounded-xl bg-white px-4 py-3 text-sm font-semibold text-slate-900 shadow-card ring-1 ring-emerald-200/60 transition-colors hover:bg-emerald-50"
+            >
+              <span className={STEP_BADGE}>{index + 1}</span>
+              <span className="min-w-0 flex-1">{item.label}</span>
+              <ArrowRight className="h-4 w-4 shrink-0 text-emerald-700" aria-hidden />
+            </Link>
+          </li>
+        ))}
+      </ol>
     </section>
   );
 }

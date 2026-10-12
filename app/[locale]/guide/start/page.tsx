@@ -13,7 +13,10 @@ import Link from 'next/link';
 import { getTranslations, setRequestLocale } from 'next-intl/server';
 import { AppShell } from '@/components/AppShell';
 import { GuideFrame } from '@/components/guide/GuideFrame';
-import { GuideFigure, Section } from '@/components/guide/PosGuidePieces';
+import { guideNavFor } from '@/lib/guideNav';
+import { GUIDE_PRIMARY_ACTION, GuideActions, GuideLead, GuideTitle } from '@/components/guide/GuideHeader';
+import { GuideToc } from '@/components/guide/GuideToc';
+import { STEP_BADGE, GuideFigure, Section } from '@/components/guide/PosGuidePieces';
 import {
   startGuideContentFor,
   startGuideMetadata,
@@ -132,45 +135,34 @@ export default async function GuideStartPage({
     <AppShell>
       <GuideFrame locale={locale} current="start">
       <article className="mx-auto max-w-3xl">
-        <Link
-          href={`/${locale}`}
-          prefetch={false}
-          className="text-sm font-medium text-emerald-700 hover:text-emerald-900"
-        >
-          {c.backHome}
-        </Link>
 
-        <header className="mt-4">
-          <h1 className="text-[1.75rem] font-bold leading-tight tracking-tight text-slate-900 sm:text-4xl">
+        <header>
+          <GuideTitle>
             {c.heroTitle}
-          </h1>
+          </GuideTitle>
           {c.heroLead.map((p) => (
-            <p
-              key={p}
-              className="mt-4 max-w-2xl text-sm leading-relaxed text-slate-700 sm:text-base"
-            >
+            <GuideLead key={p}>
               {p}
-            </p>
+            </GuideLead>
           ))}
+                  <GuideActions actions={[{ href: `/${locale}/create`, label: c.ctaLabel }]} />
         </header>
+
+        <GuideToc title={guideNavFor(locale).tocTitle} />
 
         <section className="mt-8 rounded-[1.5rem] bg-gradient-to-br from-emerald-50 to-teal-50/60 p-5 ring-1 ring-emerald-200/60 sm:p-6">
           <h2 className="text-lg font-bold text-emerald-900">
             {c.checklistTitle}
           </h2>
-          <ul className="mt-4 space-y-2.5">
-            {c.checklistItems.map((item) => (
+          {/* 順番に試す行動なので番号で示す (押せないチェックボックスの四角は「押せる」と誤解させた)。 */}
+          <ol className="mt-4 space-y-2.5">
+            {c.checklistItems.map((item, index) => (
               <li key={item} className="flex items-start gap-3">
-                <span
-                  aria-hidden
-                  className="mt-0.5 h-5 w-5 flex-shrink-0 rounded-md border-2 border-emerald-400 bg-white"
-                />
-                <span className="text-sm font-medium leading-relaxed text-slate-800">
-                  {item}
-                </span>
+                <span className={STEP_BADGE}>{index + 1}</span>
+                <span className="pt-0.5 text-sm font-medium leading-relaxed text-slate-800">{item}</span>
               </li>
             ))}
-          </ul>
+          </ol>
           <p className="mt-4 text-sm leading-relaxed text-slate-700">
             {c.checklistLead}
           </p>
@@ -299,7 +291,7 @@ export default async function GuideStartPage({
           <Link
             href={`/${locale}/create`}
             prefetch={false}
-            className="mt-5 inline-flex items-center justify-center rounded-xl bg-emerald-600 px-6 py-3 text-sm font-semibold text-white shadow-sm transition-all hover:-translate-y-0.5 hover:bg-emerald-700 hover:shadow-card-hover active:translate-y-0"
+            className={`mt-5 ${GUIDE_PRIMARY_ACTION}`}
           >
             {c.ctaLabel}
           </Link>

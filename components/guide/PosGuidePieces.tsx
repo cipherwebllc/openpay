@@ -30,8 +30,8 @@ export function Section({
   children: ReactNode;
 }) {
   return (
-    <section className="mt-10">
-      <h2 className="text-xl font-bold text-slate-900">{title}</h2>
+    <section className="mt-12">
+      <h2 className="text-xl font-bold tracking-tight text-slate-900 sm:text-2xl">{title}</h2>
       {children}
     </section>
   );
@@ -65,20 +65,16 @@ export function BulletList({
 }
 
 // 番号付きステップ (準備=淡色バッジ / 会計フロー=濃色バッジ・バッジ配色のみ可変)。
-export function StepList({
-  steps,
-  badgeClassName,
-}: {
-  steps: readonly GuideStep[];
-  badgeClassName: string;
-}) {
+// 手順の番号のバッジ (全ガイドで 1 つの型・plans/guide-ux-polish.md フェーズ 1)。以前は濃淡 2 色と大きさ 3 種が混ざっていた。
+export const STEP_BADGE =
+  'flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-sm font-bold text-white';
+
+export function StepList({ steps }: { steps: readonly GuideStep[] }) {
   return (
     <ol className="mt-4 space-y-4">
       {steps.map((step) => (
         <li key={step.n} className="flex items-start gap-3">
-          <span
-            className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-sm font-bold ${badgeClassName}`}
-          >
+          <span className={STEP_BADGE}>
             {step.n}
           </span>
           <div>

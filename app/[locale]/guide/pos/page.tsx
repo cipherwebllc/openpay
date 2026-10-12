@@ -11,6 +11,9 @@ import Link from 'next/link';
 import { setRequestLocale } from 'next-intl/server';
 import { AppShell } from '@/components/AppShell';
 import { GuideFrame } from '@/components/guide/GuideFrame';
+import { guideNavFor } from '@/lib/guideNav';
+import { GUIDE_PRIMARY_ACTION, GuideActions, GuideLead, GuideSubtitle, GuideTitle } from '@/components/guide/GuideHeader';
+import { GuideToc } from '@/components/guide/GuideToc';
 import {
   BulletList,
   GuideFigure,
@@ -42,26 +45,22 @@ export default async function GuidePosPage({
     <AppShell>
       <GuideFrame locale={locale} current="pos">
       <article className="mx-auto max-w-3xl">
-        <Link
-          href={`/${locale}`}
-          prefetch={false}
-          className="text-sm font-medium text-emerald-700 hover:text-emerald-900"
-        >
-          {c.backHome}
-        </Link>
 
-        <header className="mt-4">
-          <h1 className="text-2xl font-bold text-slate-900 sm:text-3xl">
+        <header>
+          <GuideTitle>
             {c.title}
-          </h1>
-          <p className="mt-2 text-base font-medium text-emerald-700">
+          </GuideTitle>
+          <GuideSubtitle>
             {c.subtitle}
-          </p>
-          <p className="mt-4 text-sm leading-relaxed text-slate-700">{c.lead}</p>
-          <p className="mt-3 text-xs leading-relaxed text-slate-500">
+          </GuideSubtitle>
+          <GuideLead>{c.lead}</GuideLead>
+          <p className="mt-3 max-w-2xl text-sm leading-relaxed text-slate-500">
             {c.audience}
           </p>
+                  <GuideActions actions={[{ href: `/${locale}${c.ctaButtonHref}`, label: c.ctaButton }]} />
         </header>
+
+        <GuideToc title={guideNavFor(locale).tocTitle} />
 
         <GuideFigure image={c.heroImage} />
 
@@ -108,7 +107,6 @@ export default async function GuidePosPage({
         <Section title={c.setupTitle}>
           <StepList
             steps={c.setupSteps}
-            badgeClassName="bg-emerald-100 text-emerald-700"
           />
           <GuideFigure image={c.setupImage} />
         </Section>
@@ -116,7 +114,6 @@ export default async function GuidePosPage({
         <Section title={c.flowTitle}>
           <StepList
             steps={c.flowSteps}
-            badgeClassName="bg-emerald-600 text-white"
           />
           <GuideFigure image={c.flowImage} />
           <p className="rounded-xl bg-amber-50 p-4 text-sm leading-relaxed text-amber-900 ring-1 ring-amber-200">
@@ -255,18 +252,15 @@ export default async function GuidePosPage({
           </p>
           <Link
             href={`/${locale}${c.ctaButtonHref}`}
-            className="mt-5 inline-flex items-center justify-center rounded-xl bg-emerald-600 px-6 py-3 text-sm font-semibold text-white shadow-sm transition-all hover:-translate-y-0.5 hover:bg-emerald-700 hover:shadow-card-hover active:translate-y-0"
+            className={`mt-5 ${GUIDE_PRIMARY_ACTION}`}
           >
             {c.ctaButton}
           </Link>
         </section>
 
         {/* 関連ガイド (P5 相互リンク): 決済QR LP / レジ・モバイルオーダー LP へ。 */}
-        <section className="mt-10">
-          <h2 className="text-sm font-semibold text-slate-500">
-            {c.relatedTitle}
-          </h2>
-          <ul className="mt-2 space-y-1.5">
+        <Section title={c.relatedTitle}>
+          <ul className="mt-3 space-y-1.5">
             <li>
               <Link
                 href={`/${locale}/guide/start`}
@@ -295,7 +289,7 @@ export default async function GuidePosPage({
               </Link>
             </li>
           </ul>
-        </section>
+        </Section>
       </article>
       </GuideFrame>
     </AppShell>

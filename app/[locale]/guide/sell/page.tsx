@@ -10,6 +10,9 @@ import Link from 'next/link';
 import { setRequestLocale } from 'next-intl/server';
 import { AppShell } from '@/components/AppShell';
 import { GuideFrame } from '@/components/guide/GuideFrame';
+import { guideNavFor } from '@/lib/guideNav';
+import { GUIDE_PRIMARY_ACTION, GuideActions, GuideLead, GuideTitle } from '@/components/guide/GuideHeader';
+import { GuideToc } from '@/components/guide/GuideToc';
 import {
   BulletList,
   Section,
@@ -41,22 +44,18 @@ export default async function GuideSellPage({
     <AppShell>
       <GuideFrame locale={locale} current="sell">
       <article className="mx-auto max-w-3xl">
-        <Link
-          href={`/${locale}`}
-          prefetch={false}
-          className="text-sm font-medium text-emerald-700 hover:text-emerald-900"
-        >
-          {c.backHome}
-        </Link>
 
-        <header className="mt-4">
-          <h1 className="text-2xl font-bold text-slate-900 sm:text-3xl">
+        <header>
+          <GuideTitle>
             {c.title}
-          </h1>
-          <p className="mt-4 text-sm leading-relaxed text-slate-700">
+          </GuideTitle>
+          <GuideLead>
             {c.subtitle}
-          </p>
+          </GuideLead>
+                  <GuideActions actions={[{ href: `/${locale}${c.ctaButtonHref}`, label: c.ctaButton }]} />
         </header>
+
+        <GuideToc title={guideNavFor(locale).tocTitle} />
 
         <Section title={c.proofTitle}>
           <div className="mt-4 rounded-2xl bg-white p-5 shadow-card ring-1 ring-emerald-200/70">
@@ -168,7 +167,6 @@ export default async function GuideSellPage({
         <Section title={c.listingTitle}>
           <StepList
             steps={c.listingSteps}
-            badgeClassName="bg-emerald-600 text-white"
           />
           <Link
             href={`/${locale}${c.registrationLink.href}`}
@@ -239,7 +237,7 @@ export default async function GuideSellPage({
           </p>
           <Link
             href={`/${locale}${c.ctaButtonHref}`}
-            className="mt-5 inline-flex items-center justify-center rounded-xl bg-emerald-600 px-6 py-3 text-sm font-semibold text-white shadow-sm transition-all hover:-translate-y-0.5 hover:bg-emerald-700 hover:shadow-card-hover active:translate-y-0"
+            className={`mt-5 ${GUIDE_PRIMARY_ACTION}`}
           >
             {c.ctaButton}
           </Link>
