@@ -101,6 +101,22 @@ export const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
     ],
   },
   {
+    // 週次更新 第 8 回 (2026-10-13) で記録漏れを補充 (発表は 2026-05-26 の PR TIMES)。changeCategory は
+    // αU wallet の Ponta→JPYC 交換 (9/30) と同じ update。交換後の JPYC のチェーンは個別の記載なし → 書かない。
+    date: '2026-05-26',
+    collectedAt: '2026-10-13',
+    scopes: ['jpyc-services'],
+    slug: 'jpyc',
+    changeType: 'updated',
+    changeCategory: 'update',
+    assets: ['JPYC'],
+    summary:
+      'Sumitomo Mitsui Trust Club, JPYC Inc. and HashPort launched a service on 2026-06-01 that exchanges Diners Club Card and TRUST CLUB Card reward points for JPYC in HashPort Wallet, a non-custodial wallet (2,500 and 4,000 points respectively per 1,000 JPYC). A campaign from 2026-06-01 to 2026-11-30 returns 500 points per 1,000 JPYC exchanged (planned for mid-January 2027). The release says the service does not settle the exchanged amounts and so is neither crypto-asset exchange business nor electronic payment instruments exchange business. The chain for the exchanged JPYC is not specified.',
+    summaryJa:
+      '三井住友トラストクラブ・JPYC・HashPort が 2026-06-01 から、ダイナースクラブカード / TRUST CLUB カードのリワードポイントを、ノンカストディアルウォレット「HashPort Wallet」上で JPYC に交換するサービスを開始 (1,000 JPYC あたりダイナースは 2,500 ポイント・TRUST CLUB は 4,000 ポイント)。6/1〜11/30 のキャンペーンで 1,000 JPYC の交換ごとに 500 ポイントを還元 (2027 年 1 月中旬予定)。ポイント交換額の精算を行わない等により、暗号資産交換業・電子決済手段等取引業には該当しないと説明。交換した JPYC のチェーンは個別の記載なし。',
+    sourceUrl: 'https://prtimes.jp/main/html/rd/p/000000320.000054018.html',
+  },
+  {
     // 週次更新 第 6 回 (2026-09-29) で追跡開始 (発表は 2026-07-07・backfill)。
     date: '2026-07-07',
     collectedAt: '2026-09-29',
@@ -152,6 +168,22 @@ export const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
     sourceUrl: 'https://prtimes.jp/main/html/rd/p/000000182.000046288.html',
   },
   {
+    // 週次更新 第 8 回 (2026-10-13) で記録漏れを補充 (発表は 2026-07-13 の PR TIMES)。10/06 のマイナウォレット
+    // 連携 (jpyc-ex 行) はこの API。HashPort Wallet の連携は副見出し「開始」・本文「予定」と食い違うので両方書く。
+    date: '2026-07-13',
+    collectedAt: '2026-10-13',
+    scopes: ['jpyc-services'],
+    slug: 'jpyc-ex',
+    changeType: 'updated',
+    changeCategory: 'update',
+    assets: ['JPYC'],
+    summary:
+      'JPYC Inc. began providing the JPYC EX integration API for wallets and services that use JPYC: login and account linking to JPYC EX, a path to the issuance and redemption screens on JPYC EX, help with wallet-address registration, and status sync after issuance or redemption. Review, additional authentication and final acceptance stay with JPYC Inc.; Simplex Inc. supported the implementation as development partner. The subheading says the HashPort Wallet integration has started, while the body says it is planned. Fees and chains are not stated.',
+    summaryJa:
+      'JPYC 社がウォレット・JPYC 利用サービス向けに「JPYC EX 連携 API」の提供を開始。JPYC EX へのログイン・アカウント連携、発行・償還手続画面への導線、ウォレットアドレス登録の補助、手続後のステータス連携を提供する。審査・追加認証・申込みの最終受付と確定は従来どおり JPYC 社。開発パートナーはシンプレクス。導入事例の HashPort Wallet との連携は、副見出しでは「開始」、本文では「予定」と書かれている。料金・対象チェーンは記載なし。',
+    sourceUrl: 'https://prtimes.jp/main/html/rd/p/000000324.000054018.html',
+  },
+  {
     date: '2026-07-15',
     scopes: ['stablecoin-payments'],
     provider: 'JCB / Circle',
@@ -163,6 +195,21 @@ export const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
     summaryJa:
       'JCB が Circle 関連会社とステーブルコイン活用の協業検討に関する基本合意書 (MOU) を締結。社内 USDC 資金移動の実証から、クロスボーダー・加盟店決済も検討対象に。',
     sourceUrl: 'https://prtimes.jp/main/html/rd/p/000001423.000011361.html',
+  },
+  {
+    // 週次更新 第 8 回 (2026-10-13) で記録漏れを補充 (発表は 2026-07-22 の PR TIMES)。締結日・開始日・出資額は記載なし。
+    date: '2026-07-22',
+    collectedAt: '2026-10-13',
+    scopes: ['jpyc-services'],
+    slug: 'jpyc',
+    changeType: 'updated',
+    changeCategory: 'partnership',
+    assets: ['JPYC'],
+    summary:
+      "JPYC Inc. concluded a memorandum on a capital and business alliance with AZ-COM Maruwa Holdings, a major logistics company. The plan proceeds in stages: (1) a JPYC-based payment platform, later offered to outside companies (payment agency, incentive distribution), (2) AZ-COM's own wallet app for JPYC loyalty programs and campaigns with instant rewards, and (3) smart contracts that pay automatically when delivery completion is confirmed. Start dates, the investment amount and the stake are not disclosed.",
+    summaryJa:
+      'JPYC 社が物流大手の AZ-COM 丸和ホールディングスと「資本提携及び業務提携に関する覚書」を締結。段階的に (1) JPYC を使った決済プラットフォームの構築と、将来の外部企業向けサービス (決済代行・インセンティブ配布) への展開 (2) AZ-COM 社独自のウォレットアプリで JPYC を使ったロイヤリティプログラム・キャンペーン (即時報酬付与) (3) スマートコントラクトで配送完了の確認と連動した自動支払い、を進める。開始日・出資額・出資比率は記載なし。',
+    sourceUrl: 'https://prtimes.jp/main/html/rd/p/000000327.000054018.html',
   },
   {
     // 週次更新 第 6 回 (2026-09-29) で追跡開始 (発表は 2026-08-03・backfill)。
@@ -750,6 +797,91 @@ export const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
     summaryJa:
       'JPYC 社が RatioFX と MOU を締結。ステーブルコイン FX・クロスボーダー決済・デジタル資産インフラでの協力を探る。稼働日・対象チェーン・手数料は未公表。',
     sourceUrl: 'https://x.com/jpyc_official/status/2108085042459398248',
+  },
+  {
+    // 週次更新 第 8 回 (2026-10-13)。JPYC 社 PR TIMES。決済スコープには入れない (新しい決済サービスではなく、
+    // 公取委への情報提供と導入店の優遇についての同社の考え方の公表)。
+    date: '2026-10-09',
+    collectedAt: '2026-10-13',
+    scopes: ['jpyc-services'],
+    slug: 'jpyc',
+    changeType: 'updated',
+    changeCategory: 'update',
+    assets: ['JPYC'],
+    summary:
+      "JPYC Inc. announced that on 2026-09-14 it gave the Japan Fair Trade Commission information on competition in the cashless payment market in light of stablecoin payments and on how JPYC works; it notes this was not a consultation or report on a specific case and that the release states its own view, not the JFTC's. It also set out its view that merchants passing the cost savings of JPYC payments on to customers as discounts or free shipping is a free business decision that serves consumers; because card companies' merchant terms differ, merchants with concerns can contact its merchant consultation desk. JPYC is accepted at more than 150 merchants, and JPYC Inc. charges merchants no fee.",
+    summaryJa:
+      'JPYC 社が、2026-09-14 に公正取引委員会へ、ステーブルコイン決済の登場を踏まえたキャッシュレス決済市場の競争環境と JPYC の仕組み・取組みについて情報提供したと発表 (特定の事案に関する相談・申告ではなく、リリースは同社の考え方で公取委の見解ではないと明記)。あわせて、導入店が JPYC 決済によるコスト削減分を割引や送料無料などでお客様に還元するのは自由な経営判断で、消費者利益にかなうとの考え方を公表。カード会社の加盟店規約は事業者ごとに異なるため、不安があれば同社の導入店向け相談窓口へと案内。導入店は 150 以上で、同社は導入店から加盟店手数料を徴収しない。',
+    sourceUrl: 'https://prtimes.jp/main/html/rd/p/000000332.000054018.html',
+  },
+  {
+    // 週次更新 第 8 回 (2026-10-13)。金融庁の登録一覧 PDF (本文も読んで確認)。
+    date: '2026-10-13',
+    collectedAt: '2026-10-13',
+    scopes: ['jpyc-services'],
+    slug: 'coincheck',
+    changeType: 'verified',
+    assets: ['USDC'],
+    summary:
+      'Re-verified against the FSA registry of Electronic Payment Instruments Exchange Service Providers (still as of 2026-08-27): two registrants, SBI VC Trade (No. 00001) and Coincheck (No. 00002, USDC); no new registration.',
+    summaryJa:
+      '金融庁の電子決済手段等取引業者登録一覧 (令和 8 年 8 月 27 日現在のまま) で再確認: 登録は SBI VC トレード (第00001号) とコインチェック (第00002号・USDC) の 2 社で、新規登録なし。',
+    sourceUrl: 'https://www.fsa.go.jp/menkyo/menkyoj/denshikessaisyudan.pdf',
+  },
+  {
+    date: '2026-10-13',
+    collectedAt: '2026-10-13',
+    scopes: ['stablecoin-payments'],
+    provider: 'HashPort (Osaka Pref. subsidy)',
+    changeType: 'verified',
+    assets: ['JPYC', 'USDC'],
+    summary:
+      'Re-verified on the Osaka Prefecture page (still last updated 2026-08-26): HashPort pilot schedule unchanged.',
+    summaryJa:
+      '大阪府公式ページ (更新日 2026-08-26 のまま) で再確認: HashPort の実証予定に変更なし。',
+    sourceUrl:
+      'https://www.pref.osaka.lg.jp/o020060/kikaku/osaka-kokusaikinyu/senkuteki_hojokin.html',
+  },
+  {
+    date: '2026-10-13',
+    collectedAt: '2026-10-13',
+    scopes: ['stablecoin-payments'],
+    provider: 'Mina Wallet / Sumitomo Mitsui Card (Osaka Pref. subsidy)',
+    changeType: 'verified',
+    assets: ['JPYC', 'USDC'],
+    summary:
+      'Re-verified on the Osaka Prefecture page (still last updated 2026-08-26): Mina Wallet / Sumitomo Mitsui Card pilot schedule unchanged.',
+    summaryJa:
+      '大阪府公式ページ (更新日 2026-08-26 のまま) で再確認: マイナウォレット / 三井住友カードの実証予定に変更なし。',
+    sourceUrl:
+      'https://www.pref.osaka.lg.jp/o020060/kikaku/osaka-kokusaikinyu/senkuteki_hojokin.html',
+  },
+  {
+    date: '2026-10-13',
+    collectedAt: '2026-10-13',
+    scopes: ['stablecoin-payments'],
+    provider: 'Mi&T (Osaka Pref. subsidy)',
+    changeType: 'verified',
+    assets: ['JPYC'],
+    summary:
+      'Re-verified on the Osaka Prefecture page (still last updated 2026-08-26): Mi&T pilot (merchant fee 1.0%, planned mid-November 2026 to mid-March 2027) unchanged.',
+    summaryJa:
+      '大阪府公式ページ (更新日 2026-08-26 のまま) で再確認: Mi&T の実証 (手数料 1.0%・2026 年 11 月中旬〜2027 年 3 月中旬予定) に変更なし。',
+    sourceUrl:
+      'https://www.pref.osaka.lg.jp/o020060/kikaku/osaka-kokusaikinyu/senkuteki_hojokin.html',
+  },
+  {
+    date: '2026-10-13',
+    collectedAt: '2026-10-13',
+    scopes: ['stablecoin-payments'],
+    provider: 'NetStars Stablecoin Pay',
+    changeType: 'verified',
+    assets: ['JPYC', 'USDT'],
+    summary:
+      'Re-verified on the NetStars news list: no stablecoin announcement after the 2026-09-11 Kaia MOU (the 2026-10-06 teppay news is not about stablecoins); no launch date, fee or chain change published for Stablecoin Pay.',
+    summaryJa:
+      'ネットスターズ公式ニュース一覧で再確認: 2026-09-11 の Kaia MOU 以降、ステーブルコインの発表なし (10/06 の teppay はステーブルコイン以外)。Stablecoin Pay の稼働日・手数料・対応チェーンの変更は未公表のまま。',
+    sourceUrl: 'https://www.netstars.co.jp/news/',
   },
 ];
 
