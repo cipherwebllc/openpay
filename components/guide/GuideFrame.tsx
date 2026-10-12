@@ -95,7 +95,9 @@ export function GuideFrame({
       {/* break-words: 本文の切れ目のない長い文字列 (アドレス・URL) が折り返せずに画面の右へはみ出すのを防ぐ
           (sell で 390px 幅が 529px になっていた)。[&_h2]:scroll-mt-24: 「このページの内容」から飛んだ見出しが
           固定ヘッダーに隠れないようにする。 */}
-      <div className="min-w-0 break-words [&_h2]:scroll-mt-24">
+      {/* 本文の段落と箇条書き (text-sm) は 15px・行間 1.85 (sm 以上は 16px) にする。日本語 14px の長い段落は
+          スマホで読み疲れるため (plans/guide-ux-polish.md フェーズ 3)。注記 (text-xs) はそのまま。 */}
+      <div className="min-w-0 break-words [&_h2]:scroll-mt-24 [&_li.text-sm]:text-[15px] [&_li.text-sm]:leading-7 [&_p.text-sm]:text-[15px] [&_p.text-sm]:leading-7 sm:[&_li.text-sm]:text-base sm:[&_p.text-sm]:text-base">
         <nav
           aria-labelledby="guide-nav-title-mobile"
           className="mx-auto mb-4 max-w-3xl lg:hidden print:hidden"

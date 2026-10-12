@@ -11,6 +11,8 @@ import Link from 'next/link';
 import { getTranslations, setRequestLocale } from 'next-intl/server';
 import { AppShell } from '@/components/AppShell';
 import { GuideFrame } from '@/components/guide/GuideFrame';
+import { CodeBlock } from '@/components/guide/AgentGuidePieces';
+import { GuideCallout } from '@/components/guide/GuideCallout';
 import { GuideDisclosure } from '@/components/guide/GuideDisclosure';
 import { guideNavFor } from '@/lib/guideNav';
 import { GUIDE_PRIMARY_ACTION, GUIDE_SECONDARY_ACTION, GuideLead, GuideSubtitle, GuideTitle } from '@/components/guide/GuideHeader';
@@ -54,9 +56,8 @@ export default async function GuideStorePage({
         {/* --- LP 前半 (P2 総合案内化): Hero → 誰向け → できること → 商品例 →
             手数料 → 始め方。後半は既存の操作ガイド (opsTitle 以下) を全て保持。 --- */}
         <header>
-          <GuideTitle>
-            {c.heroTitle}
-          </GuideTitle>
+          <GuideTitle>{guideNavFor(locale).items['store'].label}</GuideTitle>
+          <GuideSubtitle>{c.heroTitle}</GuideSubtitle>
           <GuideLead>
             {c.heroLead}
           </GuideLead>
@@ -94,7 +95,7 @@ export default async function GuideStorePage({
         <GuideToc title={guideNavFor(locale).tocTitle} />
 
         {video && (
-          <Section title={HOWTO_VIDEO_UI.sectionTitle}>
+          <Section title={HOWTO_VIDEO_UI.sectionTitle} toc={false}>
             <GuideVideo video={video} />
           </Section>
         )}
@@ -166,12 +167,10 @@ export default async function GuideStorePage({
         </Section>
 
         {/* --- ここから既存の操作ガイド (6 つの方法・全文維持) --- */}
-        {/* 後半 (操作ガイド) の始まり。区切り線と一段大きい見出しで「ここから手順」を示す。 */}
-        <header className="mt-16 border-t border-slate-200 pt-10">
-          <h2 className="text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">{c.opsTitle}</h2>
-          <GuideSubtitle>{c.subtitle}</GuideSubtitle>
-          <GuideLead>{c.lead}</GuideLead>
-        </header>
+        {/* 後半 (販売の手順) の始まり。ほかと同じ節にして、リードで「何をするか」を 1 段落で示す。 */}
+        <Section title={c.opsTitle}>
+          <p className="mt-3 text-sm leading-relaxed text-slate-700">{c.lead}</p>
+        </Section>
 
         <Section title={c.basicsTitle}>
           {/* スマホでは横スクロールの表をやめ、1 行を 1 枚のカードにして列名をラベルとして出す
@@ -217,9 +216,7 @@ export default async function GuideStorePage({
           <p className="mt-4 text-sm leading-relaxed text-slate-700">
             {c.basicsBody}
           </p>
-          <p className="mt-3 rounded-xl bg-blue-50 px-4 py-3 text-sm leading-relaxed text-slate-700 ring-1 ring-blue-100">
-            💡 {c.basicsPoint}
-          </p>
+          <GuideCallout kind="tip" className="mt-3">{c.basicsPoint}</GuideCallout>
         </Section>
 
         {/* 6 つの配布方法は 1 つの節にまとめ、たためるカードにする (選んだものだけ開いて読む)。最速の 1 つ目は開いて出す。 */}
@@ -260,14 +257,10 @@ export default async function GuideStorePage({
                   ))}
                 </ol>
                 {m.note ? (
-                  <p className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-sm leading-relaxed text-amber-950 ring-1 ring-amber-200">
-                    ⚠️ {m.note}
-                  </p>
+                  <GuideCallout kind="warn" className="mt-4">{m.note}</GuideCallout>
                 ) : null}
                 {m.point ? (
-                  <p className="mt-4 rounded-xl bg-blue-50 px-4 py-3 text-sm leading-relaxed text-slate-700 ring-1 ring-blue-100">
-                    💡 {m.point}
-                  </p>
+                  <GuideCallout kind="tip" className="mt-4">{m.point}</GuideCallout>
                 ) : null}
               </GuideDisclosure>
             ))}
@@ -282,11 +275,11 @@ export default async function GuideStorePage({
             <p>{licenseGuide.publish}</p>
             <h3 className="font-semibold text-slate-900">{licenseGuide.integrationHeading}</h3>
             <p>{licenseGuide.integration}</p>
-            <pre className="overflow-x-auto whitespace-pre-wrap break-words rounded-xl bg-slate-950 p-4 text-xs text-slate-100"><code>{licenseGuide.integrationSnippet}</code></pre>
+            <CodeBlock code={licenseGuide.integrationSnippet} />
             <ul className="list-disc space-y-2 pl-5"><li>{licenseGuide.entry}</li><li>{licenseGuide.metered}</li></ul>
             <h3 className="font-semibold text-slate-900">{licenseGuide.verifyHeading}</h3>
             <p>{licenseGuide.verifyBody}</p>
-            <pre className="overflow-x-auto whitespace-pre-wrap break-words rounded-xl bg-slate-950 p-4 text-xs text-slate-100"><code>{licenseGuide.verifyCommand}</code></pre>
+            <CodeBlock code={licenseGuide.verifyCommand} />
             <h3 className="font-semibold text-slate-900">{licenseGuide.policyHeading}</h3>
             <p>{licenseGuide.policy}</p>
             <p>{licenseGuide.rights}</p>
@@ -361,13 +354,11 @@ export default async function GuideStorePage({
             marker="•"
             markerClassName="text-emerald-600"
           />
-          <p className="mt-4 rounded-xl bg-blue-50 px-4 py-3 text-sm leading-relaxed text-slate-700 ring-1 ring-blue-100">
-            💡 {c.promoPoint}
-          </p>
+          <GuideCallout kind="tip" className="mt-4">{c.promoPoint}</GuideCallout>
         </Section>
 
         <section className="mt-12 rounded-[1.5rem] bg-gradient-to-br from-emerald-50 to-teal-50/60 p-6 text-center ring-1 ring-emerald-200/60 sm:p-8">
-          <h2 className="text-lg font-bold text-emerald-900">{c.ctaTitle}</h2>
+          <h2 data-toc="skip" className="text-lg font-bold text-emerald-900">{c.ctaTitle}</h2>
           <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-slate-700">
             {c.ctaBody}
           </p>

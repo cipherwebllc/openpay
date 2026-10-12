@@ -113,7 +113,8 @@ export type AiPayGuideContent = JpycSectionContent & {
   /** A/B/C それぞれの「こんな人向け」(カードの見出しの下の 1 行)。 */
   readonly setupFor: readonly [string, string, string];
   readonly quickSetupTitle: string;
-  readonly quickSetupBody: string;
+  /** 短い段落に分けて出す (設定 → 入金と確認)。 */
+  readonly quickSetupBody: readonly string[];
   readonly quickSetupConfigLabel: string;
   readonly quickSetupConfig: string;
   readonly privateKeyWarning: string;
@@ -224,8 +225,10 @@ const ja: AiPayGuideContent = {
     'Kova・MetaMask Agent Wallet を使っている人向け',
   ],
   quickSetupTitle: 'セットアップ A: 手軽に始める (ローカルウォレット)',
-  quickSetupBody:
-    '秘密鍵を設定に貼る必要はありません。下の設定を Claude Desktop に追加して再起動し、AI に「wallet_init を呼んで」と頼むと、MCP があなたのマシン上に専用ウォレットを作り、アドレスと入金用のリンクだけを返します。そのアドレスへ使う分だけ JPYC を送れば、支払いが有効になります。残高は入金用のリンク (Agent ページ) で、支払い上限は wallet_status で確認できます。',
+  quickSetupBody: [
+    '秘密鍵を設定に貼る必要はありません。下の設定を Claude Desktop に追加して再起動し、AI に「wallet_init を呼んで」と頼むと、MCP があなたのマシン上に専用ウォレットを作り、アドレスと入金用のリンクだけを返します。',
+    'そのアドレスへ使う分だけ JPYC を送れば、支払えるようになります。残高は入金用のリンク (Agent ページ) で、支払い上限は wallet_status で確認できます。',
+  ],
   quickSetupConfigLabel: 'Claude Desktop の設定 JSON',
   quickSetupConfig: MCP_CONFIG_JSON,
   privateKeyWarning:
@@ -360,8 +363,10 @@ const en: AiPayGuideContent = {
     'If you use Kova or the MetaMask Agent Wallet',
   ],
   quickSetupTitle: 'Setup A: the easy path (local wallet)',
-  quickSetupBody:
-    'You never paste a private key into the config. Add the config below to Claude Desktop, restart it, and ask your AI to “call wallet_init”. The MCP creates a dedicated wallet on your machine and returns only its address and a funding link. Send just the JPYC you intend to use to that address and paying is enabled. Check the balance via the funding link (the Agent page) and the spending limits with wallet_status.',
+  quickSetupBody: [
+    'You never paste a private key into the config. Add the config below to Claude Desktop, restart it, and ask your AI to “call wallet_init”. The MCP creates a dedicated wallet on your machine and returns only its address and a funding link.',
+    'Send just the JPYC you intend to use to that address and paying is enabled. Check the balance via the funding link (the Agent page) and the spending limits with wallet_status.',
+  ],
   quickSetupConfigLabel: 'Claude Desktop config JSON',
   quickSetupConfig: MCP_CONFIG_JSON,
   privateKeyWarning:

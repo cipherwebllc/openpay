@@ -13,6 +13,8 @@ import Link from 'next/link';
 import { setRequestLocale } from 'next-intl/server';
 import { AppShell } from '@/components/AppShell';
 import { GuideFrame } from '@/components/guide/GuideFrame';
+import { GuideFaq } from '@/components/guide/GuideFaq';
+import { GuideDisclosure } from '@/components/guide/GuideDisclosure';
 import { guideNavFor } from '@/lib/guideNav';
 import { GUIDE_PRIMARY_ACTION, GuideActions, GuideLead, GuideSubtitle, GuideTitle } from '@/components/guide/GuideHeader';
 import { GuideToc } from '@/components/guide/GuideToc';
@@ -54,22 +56,15 @@ export default async function GuideAgentPage({
         <Link
           href={`/${locale}${c.backLink.href}`}
           prefetch={false}
-          className="inline-flex min-h-11 items-center text-sm font-medium text-emerald-700 hover:text-emerald-900"
+          className="inline-flex min-h-11 items-center text-xs font-medium text-slate-500 hover:text-slate-900"
         >
           {c.backLink.label}
         </Link>
 
         <header className="mt-2">
-          <GuideTitle>
-            {c.title}
-          </GuideTitle>
-          <GuideSubtitle>
-            {c.subtitle}
-          </GuideSubtitle>
+          <GuideTitle>{guideNavFor(locale).items['agent'].label}</GuideTitle>
+          <GuideSubtitle>{c.title}</GuideSubtitle>
           <GuideLead>{c.lead}</GuideLead>
-          <p className="mt-3 max-w-2xl text-sm leading-relaxed text-slate-500">
-            {c.audience}
-          </p>
                   <GuideActions actions={[{ href: `/${locale}${c.ctaButtonHref}`, label: c.ctaButton }]} />
         </header>
 
@@ -80,7 +75,7 @@ export default async function GuideAgentPage({
         {/* できること / できないこと */}
         <div className="mt-8 grid gap-6 sm:grid-cols-2">
           <section className="rounded-2xl bg-white p-5 shadow-card ring-1 ring-emerald-200/70">
-            <h2 className="text-base font-semibold text-emerald-900">
+            <h2 data-toc="skip" className="text-base font-semibold text-emerald-900">
               {c.canDoTitle}
             </h2>
             <BulletList
@@ -91,7 +86,7 @@ export default async function GuideAgentPage({
           </section>
 
           <section className="rounded-2xl bg-white p-5 shadow-card ring-1 ring-slate-200/70">
-            <h2 className="text-base font-semibold text-slate-900">
+            <h2 data-toc="skip" className="text-base font-semibold text-slate-900">
               {c.cannotTitle}
             </h2>
             <BulletList
@@ -123,9 +118,13 @@ export default async function GuideAgentPage({
           <StepList
             steps={c.setupSteps}
           />
-          <p className="mt-3 text-sm leading-relaxed text-slate-700">
-            {c.setupEnvironmentNote}
-          </p>
+          <div className="mt-4">
+            <GuideDisclosure
+              summary={<h3 className="text-sm font-semibold text-slate-900">{c.setupEnvironmentNote.title}</h3>}
+            >
+              <BulletList items={c.setupEnvironmentNote.items} marker="•" markerClassName="text-emerald-600" />
+            </GuideDisclosure>
+          </div>
           <CodeBlock label={c.configLabel} code={c.configCode} />
           <p className="mt-3 text-xs leading-relaxed text-slate-500">
             {c.configNote}
@@ -188,21 +187,12 @@ export default async function GuideAgentPage({
         </Section>
 
         <Section title={c.faqTitle}>
-          <dl className="mt-4 space-y-5">
-            {c.faqs.map((f) => (
-              <div key={f.q}>
-                <dt className="text-sm font-semibold text-slate-900">{f.q}</dt>
-                <dd className="mt-1 text-sm leading-relaxed text-slate-700">
-                  {f.a}
-                </dd>
-              </div>
-            ))}
-          </dl>
+          <GuideFaq items={c.faqs} />
         </Section>
 
         {/* CTA */}
         <section className="mt-12 rounded-[1.5rem] bg-gradient-to-br from-emerald-50 to-teal-50/60 p-6 text-center ring-1 ring-emerald-200/60 sm:p-8">
-          <h2 className="text-lg font-bold text-emerald-900">{c.ctaTitle}</h2>
+          <h2 data-toc="skip" className="text-lg font-bold text-emerald-900">{c.ctaTitle}</h2>
           <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-slate-700">
             {c.ctaBody}
           </p>

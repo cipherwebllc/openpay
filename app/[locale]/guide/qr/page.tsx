@@ -14,7 +14,9 @@ import Link from 'next/link';
 import { getTranslations, setRequestLocale } from 'next-intl/server';
 import { AppShell } from '@/components/AppShell';
 import { GuideFrame } from '@/components/guide/GuideFrame';
-import { GUIDE_PRIMARY_ACTION, GUIDE_SECONDARY_ACTION, GuideLead, GuideTitle } from '@/components/guide/GuideHeader';
+import { guideNavFor } from '@/lib/guideNav';
+import { GuideFeeList } from '@/components/guide/GuideFee';
+import { GUIDE_PRIMARY_ACTION, GUIDE_SECONDARY_ACTION, GuideLead, GuideSubtitle, GuideTitle } from '@/components/guide/GuideHeader';
 import { STEP_BADGE, Section } from '@/components/guide/PosGuidePieces';
 import { GuideVideo } from '@/components/guide/GuideVideo';
 import { HOWTO_VIDEO_UI, howtoVideoFor } from '@/lib/howtoVideos';
@@ -68,9 +70,8 @@ export default async function GuideQrPage({
       <article className="mx-auto max-w-3xl">
 
         <header>
-          <GuideTitle>
-            {c.heroTitle}
-          </GuideTitle>
+          <GuideTitle>{guideNavFor(locale).items['qr'].label}</GuideTitle>
+          <GuideSubtitle>{c.heroTitle}</GuideSubtitle>
           <GuideLead>
             {c.heroLead}
           </GuideLead>
@@ -104,7 +105,7 @@ export default async function GuideQrPage({
         </header>
 
         {video && (
-          <Section title={HOWTO_VIDEO_UI.sectionTitle}>
+          <Section title={HOWTO_VIDEO_UI.sectionTitle} toc={false}>
             <GuideVideo video={video} />
           </Section>
         )}
@@ -147,22 +148,18 @@ export default async function GuideQrPage({
         </Section>
 
         <Section title={c.feeTitle}>
-          <div className="mt-4 rounded-2xl border border-slate-200/80 bg-white p-4 shadow-[0_2px_8px_-2px_rgba(15,23,42,0.07)]">
-            <div className="flex items-baseline gap-2">
-              <span className="text-xl font-bold text-slate-900">
-                {tLanding('supportFeePayFocal', LANDING_PAYMENT_FEE_VALUES)}
-              </span>
-              <h3 className="text-sm font-bold text-slate-900">
-                {tLanding('supportFeePayTitle')}
-              </h3>
-            </div>
-            <p className="mt-1.5 text-sm leading-relaxed text-slate-600">
-              {tLanding('supportFeePayBody', LANDING_PAYMENT_FEE_VALUES)}
-            </p>
-          </div>
-          <p className="mt-3 text-sm leading-relaxed text-slate-600">
-            {tLanding('supportFeeNote')}
-          </p>
+          <GuideFeeList
+            items={[
+              {
+                focal: tLanding('supportFeePayFocal', LANDING_PAYMENT_FEE_VALUES),
+                title: tLanding('supportFeePayTitle'),
+                body: tLanding('supportFeePayBody', LANDING_PAYMENT_FEE_VALUES),
+              },
+            ]}
+            note={tLanding('supportFeeNote')}
+            pricingHref={`/${locale}/pricing`}
+            pricingLabel={tLanding('supportFeeDetailsLink')}
+          />
         </Section>
 
         <Section title={c.currenciesTitle}>
@@ -188,7 +185,7 @@ export default async function GuideQrPage({
         </Section>
 
         <section className="mt-12 rounded-[1.5rem] bg-gradient-to-br from-emerald-50 to-teal-50/60 p-6 text-center ring-1 ring-emerald-200/60 sm:p-8">
-          <h2 className="text-lg font-bold text-emerald-900">{c.ctaTitle}</h2>
+          <h2 data-toc="skip" className="text-lg font-bold text-emerald-900">{c.ctaTitle}</h2>
           <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-slate-700">
             {c.ctaBody}
           </p>

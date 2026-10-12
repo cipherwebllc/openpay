@@ -10,7 +10,8 @@ import Link from 'next/link';
 import { setRequestLocale } from 'next-intl/server';
 import { AppShell } from '@/components/AppShell';
 import { GuideFrame } from '@/components/guide/GuideFrame';
-import { GuideLead, GuideTitle } from '@/components/guide/GuideHeader';
+import { guideNavFor } from '@/lib/guideNav';
+import { GuideLead, GuideSubtitle, GuideTitle } from '@/components/guide/GuideHeader';
 import { STEP_BADGE, Section } from '@/components/guide/PosGuidePieces';
 import { imageGuideContentFor, imageGuideMetadata } from '@/lib/imageGuide';
 
@@ -63,9 +64,8 @@ export default async function GuideImageUrlPage({
       <article className="mx-auto max-w-3xl">
 
         <header>
-          <GuideTitle>
-            {c.heroTitle}
-          </GuideTitle>
+          <GuideTitle>{guideNavFor(locale).items['image-url'].label}</GuideTitle>
+          <GuideSubtitle>{c.heroTitle}</GuideSubtitle>
           {c.heroLead.map((p) => (
             <GuideLead key={p}>
               {p}
@@ -129,7 +129,7 @@ export default async function GuideImageUrlPage({
         ))}
 
         <section className="mt-12 rounded-[1.5rem] bg-gradient-to-br from-emerald-50 to-teal-50/60 p-6 ring-1 ring-emerald-200/60 sm:p-8">
-          <h2 className="text-lg font-bold text-emerald-900">{c.quickTitle}</h2>
+          <h2 data-toc="skip" className="text-lg font-bold text-emerald-900">{c.quickTitle}</h2>
           <ol className="mt-4 space-y-2.5">
             {c.quickSteps.map((step, i) => (
               <li key={step} className="flex items-start gap-3">

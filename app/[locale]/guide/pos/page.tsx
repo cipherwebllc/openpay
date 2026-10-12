@@ -11,6 +11,7 @@ import Link from 'next/link';
 import { setRequestLocale } from 'next-intl/server';
 import { AppShell } from '@/components/AppShell';
 import { GuideFrame } from '@/components/guide/GuideFrame';
+import { GuideFaq } from '@/components/guide/GuideFaq';
 import { guideNavFor } from '@/lib/guideNav';
 import { GUIDE_PRIMARY_ACTION, GuideActions, GuideLead, GuideSubtitle, GuideTitle } from '@/components/guide/GuideHeader';
 import { GuideToc } from '@/components/guide/GuideToc';
@@ -47,16 +48,11 @@ export default async function GuidePosPage({
       <article className="mx-auto max-w-3xl">
 
         <header>
-          <GuideTitle>
-            {c.title}
-          </GuideTitle>
+          <GuideTitle>{guideNavFor(locale).items['pos'].label}</GuideTitle>
           <GuideSubtitle>
             {c.subtitle}
           </GuideSubtitle>
           <GuideLead>{c.lead}</GuideLead>
-          <p className="mt-3 max-w-2xl text-sm leading-relaxed text-slate-500">
-            {c.audience}
-          </p>
                   <GuideActions actions={[{ href: `/${locale}${c.ctaButtonHref}`, label: c.ctaButton }]} />
         </header>
 
@@ -67,7 +63,7 @@ export default async function GuidePosPage({
         {/* できること / できないこと */}
         <div className="mt-8 grid gap-6 sm:grid-cols-2">
           <section className="rounded-2xl bg-white p-5 shadow-card ring-1 ring-emerald-200/70">
-            <h2 className="text-base font-semibold text-emerald-900">
+            <h2 data-toc="skip" className="text-base font-semibold text-emerald-900">
               {c.canDoTitle}
             </h2>
             <BulletList
@@ -78,7 +74,7 @@ export default async function GuidePosPage({
           </section>
 
           <section className="rounded-2xl bg-white p-5 shadow-card ring-1 ring-slate-200/70">
-            <h2 className="text-base font-semibold text-slate-900">
+            <h2 data-toc="skip" className="text-base font-semibold text-slate-900">
               {c.cannotTitle}
             </h2>
             <BulletList
@@ -187,8 +183,9 @@ export default async function GuidePosPage({
 
         <Section title={c.costTitle}>
           <div className="mt-4 overflow-x-auto">
-            <table className="w-full border-collapse text-sm">
-              <thead>
+            {/* スマホでは 1 行を 1 枚のカードにし、列名をラベルとして出す (3 列だと 390px で 1 文字ずつ折れた)。 */}
+            <table className="w-full border-collapse text-sm max-sm:block">
+              <thead className="max-sm:sr-only">
                 <tr className="border-b border-slate-200 text-left">
                   <th className="py-2 pr-3 font-medium text-slate-500" />
                   <th className="py-2 pr-3 font-semibold text-slate-700">
@@ -199,22 +196,28 @@ export default async function GuidePosPage({
                   </th>
                 </tr>
               </thead>
-              <tbody>
+              <tbody className="max-sm:block max-sm:space-y-3">
                 {c.costRows.map((row) => (
                   <tr
                     key={row.label}
-                    className="border-b border-slate-100 align-top"
+                    className="border-b border-slate-100 align-top max-sm:block max-sm:rounded-xl max-sm:border-0 max-sm:bg-white max-sm:p-4 max-sm:shadow-card max-sm:ring-1 max-sm:ring-slate-200/70"
                   >
                     <th
                       scope="row"
-                      className="py-3 pr-3 text-left font-medium text-slate-600"
+                      className="py-3 pr-3 text-left font-medium text-slate-600 max-sm:block max-sm:p-0 max-sm:pb-2 max-sm:text-base max-sm:font-semibold max-sm:text-slate-900"
                     >
                       {row.label}
                     </th>
-                    <td className="py-3 pr-3 leading-relaxed text-slate-600">
+                    <td
+                      data-label={c.costColCard}
+                      className="py-3 pr-3 leading-relaxed text-slate-600 max-sm:block max-sm:py-1 max-sm:before:block max-sm:before:text-xs max-sm:before:font-semibold max-sm:before:text-slate-500 max-sm:before:content-[attr(data-label)]"
+                    >
                       {row.card}
                     </td>
-                    <td className="py-3 leading-relaxed text-slate-800">
+                    <td
+                      data-label={c.costColOpenpay}
+                      className="py-3 leading-relaxed text-slate-800 max-sm:block max-sm:py-1 max-sm:before:block max-sm:before:text-xs max-sm:before:font-semibold max-sm:before:text-emerald-800 max-sm:before:content-[attr(data-label)]"
+                    >
                       {row.openpay}
                     </td>
                   </tr>
@@ -232,34 +235,10 @@ export default async function GuidePosPage({
         </Section>
 
         <Section title={c.faqTitle}>
-          <dl className="mt-4 space-y-5">
-            {c.faqs.map((f) => (
-              <div key={f.q}>
-                <dt className="text-sm font-semibold text-slate-900">{f.q}</dt>
-                <dd className="mt-1 text-sm leading-relaxed text-slate-700">
-                  {f.a}
-                </dd>
-              </div>
-            ))}
-          </dl>
+          <GuideFaq items={c.faqs} />
         </Section>
 
-        {/* CTA */}
-        <section className="mt-12 rounded-[1.5rem] bg-gradient-to-br from-emerald-50 to-teal-50/60 p-6 text-center ring-1 ring-emerald-200/60 sm:p-8">
-          <h2 className="text-lg font-bold text-emerald-900">{c.ctaTitle}</h2>
-          <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-slate-700">
-            {c.ctaBody}
-          </p>
-          <Link
-            href={`/${locale}${c.ctaButtonHref}`}
-            className={`mt-5 ${GUIDE_PRIMARY_ACTION}`}
-          >
-            {c.ctaButton}
-          </Link>
-        </section>
-
-        {/* 関連ガイド (P5 相互リンク): 決済QR LP / レジ・モバイルオーダー LP へ。 */}
-        <Section title={c.relatedTitle}>
+        <Section title={c.relatedTitle} toc={false}>
           <ul className="mt-3 space-y-1.5">
             <li>
               <Link
@@ -290,6 +269,22 @@ export default async function GuidePosPage({
             </li>
           </ul>
         </Section>
+
+        {/* CTA */}
+        <section className="mt-12 rounded-[1.5rem] bg-gradient-to-br from-emerald-50 to-teal-50/60 p-6 text-center ring-1 ring-emerald-200/60 sm:p-8">
+          <h2 data-toc="skip" className="text-lg font-bold text-emerald-900">{c.ctaTitle}</h2>
+          <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-slate-700">
+            {c.ctaBody}
+          </p>
+          <Link
+            href={`/${locale}${c.ctaButtonHref}`}
+            className={`mt-5 ${GUIDE_PRIMARY_ACTION}`}
+          >
+            {c.ctaButton}
+          </Link>
+        </section>
+
+        {/* 関連ガイド (P5 相互リンク): 決済QR LP / レジ・モバイルオーダー LP へ。 */}
       </article>
       </GuideFrame>
     </AppShell>

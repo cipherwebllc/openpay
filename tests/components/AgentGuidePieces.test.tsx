@@ -13,12 +13,22 @@ import {
 import { AGENT_GUIDE } from '@/lib/agentGuide';
 
 describe('CodeBlock', () => {
-  it('code を pre>code に描画し overflow-x-auto で水平スクロール', () => {
+  it('短い行だけのコードは pre>code で折り返して全部見せる (横スクロールにしない)', () => {
     const { container } = render(<CodeBlock code={'{\n  "a": 1\n}'} />);
     const pre = container.querySelector('pre');
     expect(pre).not.toBeNull();
-    expect(pre).toHaveClass('overflow-x-auto');
+    expect(pre).toHaveClass('whitespace-pre-wrap');
+    expect(pre).not.toHaveClass('overflow-x-auto');
     expect(pre?.querySelector('code')?.textContent).toBe('{\n  "a": 1\n}');
+  });
+
+  it('長い行を含むコードは横スクロールにし、右端をぼかして続きがあると示す', () => {
+    const long = `export async function GET(request) { return gate.handle(request, '${'x'.repeat(40)}'); }`;
+    const { container } = render(<CodeBlock code={long} />);
+    const pre = container.querySelector('pre');
+    expect(pre).toHaveClass('overflow-x-auto');
+    expect(pre).not.toHaveClass('whitespace-pre-wrap');
+    expect(pre?.parentElement?.className).toContain('after:bg-gradient-to-l');
   });
 
   it('label 有り → 見出し文言を描画 / 無し → 描画しない', () => {

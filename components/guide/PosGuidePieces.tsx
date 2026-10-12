@@ -22,16 +22,32 @@ export const FIGURE_DIMS: Record<string, { w: number; h: number }> = {
 };
 
 // 標準セクション (mt-10 + 見出し)。カード型の できること/cannot・CTA は独自スタイルなので使わない。
+/**
+ * ガイドの節。`badge` を渡すと見出しの左に番号のバッジを出す (見出しの文字に「1.」を入れない)。
+ * `toc={false}` は「このページの内容」(GuideToc) に載せない節 (動画・関連ガイドなど)。
+ * GuideToc は data-toc-label (バッジを除いた見出し) を読む。
+ */
 export function Section({
   title,
   children,
+  badge,
+  toc = true,
 }: {
   title: string;
   children: ReactNode;
+  badge?: number | string;
+  toc?: boolean;
 }) {
   return (
     <section className="mt-12">
-      <h2 className="text-xl font-bold tracking-tight text-slate-900 sm:text-2xl">{title}</h2>
+      <h2
+        data-toc={toc ? undefined : 'skip'}
+        data-toc-label={title}
+        className="flex items-start gap-3 text-xl font-bold tracking-tight text-slate-900 sm:text-2xl"
+      >
+        {badge !== undefined ? <span className={`${STEP_BADGE} mt-0.5 sm:mt-1`}>{badge}</span> : null}
+        <span className="min-w-0">{title}</span>
+      </h2>
       {children}
     </section>
   );

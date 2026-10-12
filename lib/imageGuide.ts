@@ -39,8 +39,7 @@ const JA: ImageGuideContent = {
 
   heroTitle: 'OpenPayで画像を設定する方法',
   heroLead: [
-    'OpenPay では、できるだけユーザーのデータを OpenPay 側で預からない設計にしています。そのため、画像をアップロードするのではなく、インターネット上に公開されている画像の URL (https://〜) を設定する方式を採用しています。',
-    '難しそうに見えますが、やることは簡単です。',
+    'OpenPay に画像はアップロードしません。インターネットに公開されている画像の URL (https://〜) を貼るだけで表示できます。やることは 3 つです。',
   ],
   flowTitle: 'やることはこれだけ',
   flow: ['画像をアップロード', '画像 URL をコピー', 'OpenPay に貼り付け'],
@@ -138,8 +137,7 @@ const EN: ImageGuideContent = {
 
   heroTitle: 'Setting images on OpenPay',
   heroLead: [
-    'OpenPay is designed to hold as little of your data as possible. So instead of uploading images to OpenPay, you set the URL (https://…) of an image that is publicly available on the internet.',
-    'It sounds technical, but the whole job is simple.',
+    'You don’t upload images to OpenPay. Paste the URL (https://…) of an image that is public on the internet and it shows up. There are three steps.',
   ],
   flowTitle: 'The whole flow',
   flow: ['Upload the image', 'Copy the image URL', 'Paste it into OpenPay'],

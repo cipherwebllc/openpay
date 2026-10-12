@@ -13,8 +13,10 @@ import Link from 'next/link';
 import { getTranslations, setRequestLocale } from 'next-intl/server';
 import { AppShell } from '@/components/AppShell';
 import { GuideFrame } from '@/components/guide/GuideFrame';
+import { GuideFeeList } from '@/components/guide/GuideFee';
+import { GuideCallout } from '@/components/guide/GuideCallout';
 import { guideNavFor } from '@/lib/guideNav';
-import { GUIDE_PRIMARY_ACTION, GuideActions, GuideLead, GuideTitle } from '@/components/guide/GuideHeader';
+import { GUIDE_PRIMARY_ACTION, GuideActions, GuideLead, GuideSubtitle, GuideTitle } from '@/components/guide/GuideHeader';
 import { GuideToc } from '@/components/guide/GuideToc';
 import { STEP_BADGE, GuideFigure, Section } from '@/components/guide/PosGuidePieces';
 import {
@@ -31,19 +33,6 @@ export async function generateMetadata({
   const { locale } = await params;
   setRequestLocale(locale);
   return startGuideMetadata(locale);
-}
-
-// 利用料カード 1 枚。数値は messages (掟 14 フェンス済み) から来る。
-function FeeCard({ focal, title, body }: { focal: string; title: string; body: string }) {
-  return (
-    <div className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-[0_2px_8px_-2px_rgba(15,23,42,0.07)]">
-      <div className="flex items-baseline gap-2">
-        <span className="text-lg font-bold text-slate-900">{focal}</span>
-        <h3 className="text-sm font-bold text-slate-900">{title}</h3>
-      </div>
-      <p className="mt-1.5 text-sm leading-relaxed text-slate-600">{body}</p>
-    </div>
-  );
 }
 
 function Flow({ steps }: { steps: readonly string[] }) {
@@ -66,15 +55,7 @@ function Flow({ steps }: { steps: readonly string[] }) {
 }
 
 function Callout({ kind, text }: { kind: 'warn' | 'tip'; text: string }) {
-  const tone =
-    kind === 'warn'
-      ? 'border-amber-200 bg-amber-50 text-amber-900'
-      : 'border-sky-200 bg-sky-50 text-sky-900';
-  return (
-    <p className={`mt-4 rounded-2xl border px-4 py-3 text-sm leading-relaxed ${tone}`}>
-      {text}
-    </p>
-  );
+  return <GuideCallout kind={kind}>{text}</GuideCallout>;
 }
 
 export default async function GuideStartPage({
@@ -98,21 +79,16 @@ export default async function GuideStartPage({
   function renderSlot(section: StartGuideSection) {
     if (section.slot === 'fee') {
       return (
-        <>
-          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
-            {feeCards.map((k) => (
-              <FeeCard
-                key={k}
-                focal={tLanding(`supportFee${k}Focal`, LANDING_PAYMENT_FEE_VALUES)}
-                title={tLanding(`supportFee${k}Title`)}
-                body={tLanding(`supportFee${k}Body`, LANDING_PAYMENT_FEE_VALUES)}
-              />
-            ))}
-          </div>
-          <p className="mt-3 text-sm leading-relaxed text-slate-600">
-            {tLanding('supportFeeNote')}
-          </p>
-        </>
+        <GuideFeeList
+          items={feeCards.map((k) => ({
+            focal: tLanding(`supportFee${k}Focal`, LANDING_PAYMENT_FEE_VALUES),
+            title: tLanding(`supportFee${k}Title`),
+            body: tLanding(`supportFee${k}Body`, LANDING_PAYMENT_FEE_VALUES),
+          }))}
+          note={tLanding('supportFeeNote')}
+          pricingHref={`/${locale}/pricing`}
+          pricingLabel={tLanding('supportFeeDetailsLink')}
+        />
       );
     }
     if (section.slot === 'chains') {
@@ -137,9 +113,8 @@ export default async function GuideStartPage({
       <article className="mx-auto max-w-3xl">
 
         <header>
-          <GuideTitle>
-            {c.heroTitle}
-          </GuideTitle>
+          <GuideTitle>{guideNavFor(locale).items['start'].label}</GuideTitle>
+          <GuideSubtitle>{c.heroTitle}</GuideSubtitle>
           {c.heroLead.map((p) => (
             <GuideLead key={p}>
               {p}
@@ -151,7 +126,7 @@ export default async function GuideStartPage({
         <GuideToc title={guideNavFor(locale).tocTitle} />
 
         <section className="mt-8 rounded-[1.5rem] bg-gradient-to-br from-emerald-50 to-teal-50/60 p-5 ring-1 ring-emerald-200/60 sm:p-6">
-          <h2 className="text-lg font-bold text-emerald-900">
+          <h2 data-toc="skip" className="text-lg font-bold text-emerald-900">
             {c.checklistTitle}
           </h2>
           {/* 順番に試す行動なので番号で示す (押せないチェックボックスの四角は「押せる」と誤解させた)。 */}
@@ -169,7 +144,7 @@ export default async function GuideStartPage({
         </section>
 
         {c.sections.map((section) => (
-          <Section key={section.n} title={`${section.n}. ${section.title}`}>
+          <Section key={section.n} badge={section.n} title={section.title}>
             {section.body.map((p) => (
               <p key={p} className="mt-3 text-sm leading-relaxed text-slate-700">
                 {p}
@@ -276,7 +251,7 @@ export default async function GuideStartPage({
         </Section>
 
         <section className="mt-12 rounded-[1.5rem] bg-gradient-to-br from-emerald-50 to-teal-50/60 p-6 text-center ring-1 ring-emerald-200/60 sm:p-8">
-          <h2 className="text-lg font-bold text-emerald-900">{c.ctaTitle}</h2>
+          <h2 data-toc="skip" className="text-lg font-bold text-emerald-900">{c.ctaTitle}</h2>
           {c.ctaBody.map((p) => (
             <p
               key={p}

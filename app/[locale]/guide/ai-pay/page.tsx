@@ -12,7 +12,7 @@ import { AppShell } from '@/components/AppShell';
 import { GuideFrame } from '@/components/guide/GuideFrame';
 import { GuideDisclosure } from '@/components/guide/GuideDisclosure';
 import { guideNavFor } from '@/lib/guideNav';
-import { GUIDE_PRIMARY_ACTION, GuideActions, GuideLead, GuideTitle } from '@/components/guide/GuideHeader';
+import { GUIDE_PRIMARY_ACTION, GuideActions, GuideLead, GuideSubtitle, GuideTitle } from '@/components/guide/GuideHeader';
 import { GuideToc } from '@/components/guide/GuideToc';
 import {
   BulletList,
@@ -57,15 +57,14 @@ export default async function GuideAiPayPage({
         <Link
           href={`/${locale}${c.backLink.href}`}
           prefetch={false}
-          className="inline-flex min-h-11 items-center text-sm font-medium text-emerald-700 hover:text-emerald-900"
+          className="inline-flex min-h-11 items-center text-xs font-medium text-slate-500 hover:text-slate-900"
         >
           {c.backLink.label}
         </Link>
 
         <header className="mt-2">
-          <GuideTitle>
-            {c.title}
-          </GuideTitle>
+          <GuideTitle>{guideNavFor(locale).items['ai-pay'].label}</GuideTitle>
+          <GuideSubtitle>{c.title}</GuideSubtitle>
           <GuideLead>
             {c.subtitle}
           </GuideLead>
@@ -75,7 +74,7 @@ export default async function GuideAiPayPage({
         <GuideToc title={guideNavFor(locale).tocTitle} />
 
         {video && (
-          <Section title={HOWTO_VIDEO_UI.sectionTitle}>
+          <Section title={HOWTO_VIDEO_UI.sectionTitle} toc={false}>
             <GuideVideo video={video} />
           </Section>
         )}
@@ -108,9 +107,11 @@ export default async function GuideAiPayPage({
           <Link href={`/${locale}${c.agentLink.href}`} prefetch={false} className="inline-block text-sm font-medium text-emerald-700 underline">
             {c.agentLink.label}
           </Link>
-          <p className="mt-3 text-sm leading-relaxed text-slate-700">
-            {c.quickSetupBody}
-          </p>
+          {c.quickSetupBody.map((para) => (
+            <p key={para} className="mt-3 text-sm leading-relaxed text-slate-700">
+              {para}
+            </p>
+          ))}
           <CodeBlock
             label={c.quickSetupConfigLabel}
             code={c.quickSetupConfig}
@@ -250,7 +251,7 @@ export default async function GuideAiPayPage({
         </Section>
 
         <section className="mt-12 rounded-[1.5rem] bg-gradient-to-br from-emerald-50 to-teal-50/60 p-6 text-center ring-1 ring-emerald-200/60 sm:p-8">
-          <h2 className="text-lg font-bold text-emerald-900">{c.ctaTitle}</h2>
+          <h2 data-toc="skip" className="text-lg font-bold text-emerald-900">{c.ctaTitle}</h2>
           <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-slate-700">
             {c.ctaBody}
           </p>

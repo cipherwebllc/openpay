@@ -127,7 +127,8 @@ export type SellGuideContent = {
   readonly bazaarTitle: string;
   readonly bazaarIntro: string;
   readonly bazaarItems: readonly string[];
-  readonly bazaarNote: string;
+  /** 短い段落に分けて出す (1 段落 = 1 つの話)。 */
+  readonly bazaarNote: readonly string[];
 
   readonly jobDescTitle: string;
   readonly jobDescIntro: string;
@@ -254,8 +255,11 @@ const ja: SellGuideContent = {
     '発行される dual-rail スニペット（x402Gate）をあなたのサーバーに設置 — 402 に JPYC と USDC が並び、USDC 支払いは OpenPay が CDP（Coinbase Developer Platform）の facilitator へ中継',
     '実購入が 1 件 settle されると Bazaar のカタログに反映（掲載メタは OpenPay が出品情報から自動で付与）',
   ],
-  bazaarNote:
-    '自前の CDP 鍵や標準 x402 ゲートの自作は不要です。支払いは購入者からあなたの Base アドレスへ直接届き、OpenPay は売上を預かりません（USDC 送金は取消不能）。すでに JPYC で出品済みの API を後から USDC 対応にした場合も、サーバーのゲートを dual-rail 版スニペット（x402Gate）へ貼り替えてください — 貼り替えるまで USDC では購入できません。購入側の注意: 標準クライアント x402-fetch（1.2.0 現在）は JPYC 面の表記に未対応で dual-rail 402 の解析に失敗するため、USDC 購入例スクリプトを用意しています: https://raw.githubusercontent.com/cipherwebllc/openpay/main/scripts/x402-dual-buyer-example.mjs',
+  bazaarNote: [
+    '自前の CDP 鍵や標準 x402 ゲートの自作は不要です。支払いは購入者からあなたの Base アドレスへ直接届き、OpenPay は売上を預かりません（USDC 送金は取消不能）。',
+    'すでに JPYC で出品済みの API を USDC 対応にするときは、サーバーのゲートを dual-rail 版スニペット（x402Gate）へ貼り替えてください。貼り替えるまで USDC では購入できません。',
+    '購入側の注意: 標準クライアント x402-fetch（1.2.0 現在）は dual-rail 402 を解析できないため、USDC 購入例スクリプトを用意しています: https://raw.githubusercontent.com/cipherwebllc/openpay/main/scripts/x402-dual-buyer-example.mjs',
+  ],
 
   jobDescTitle: '説明文は「何を完了するか」で書く',
   jobDescIntro:
@@ -280,7 +284,6 @@ const ja: SellGuideContent = {
     '掲載禁止: 詐欺・なりすまし、制裁回避の支援、窃取・不正取得したデータの販売。ノンカストディは「無審査」という意味ではなく、違反する掲載は削除します。',
     '暗号資産の取引実行・貸借・トークン発行・資産配分/自動運用 (DeFi Vault 選定等)・投資勧誘/助言にあたる出品は自動掲載の対象外で、個別確認のうえ可否を判断します。「情報提供のみ」の注記があっても実態で判断し、JPYC で支払えることはサービスの適法性を保証しません。',
     '隔離・削除は理由を記録します。誤りと考える場合はサイトフッターの連絡先から異議申立てできます。',
-    '暗号資産の取引・貸借・発行の実行や、投資助言・勧誘に該当し得る商品は個別審査の対象です。決済手段が JPYC であることは、販売するサービス自体の適法性を保証しません。',
   ],
 
   pricingTitle: '値付けのヒント',
@@ -409,8 +412,11 @@ const en: SellGuideContent = {
     'Install the generated dual-rail snippet (x402Gate) on your server — the 402 carries both JPYC and USDC, and OpenPay relays USDC payments to the CDP (Coinbase Developer Platform) facilitator',
     'After one real purchase settles, the listing appears in the Bazaar catalog (OpenPay attaches the listing metadata from your registration automatically)',
   ],
-  bazaarNote:
-    'No CDP keys or hand-rolled standard x402 gate needed. Payments go directly from the buyer to your Base address; OpenPay never holds your proceeds (USDC transfers are irreversible). If you enable USDC on an API that was already listed for JPYC, replace the gate on your server with the dual-rail snippet (x402Gate) — buyers cannot pay in USDC until you do. Buyer note: the standard x402-fetch client (as of 1.2.0) fails to parse dual-rail 402s because of the JPYC leg’s network naming; a reference USDC buyer script is available: https://raw.githubusercontent.com/cipherwebllc/openpay/main/scripts/x402-dual-buyer-example.mjs',
+  bazaarNote: [
+    'No CDP keys or hand-rolled standard x402 gate needed. Payments go directly from the buyer to your Base address; OpenPay never holds your proceeds (USDC transfers are irreversible).',
+    'To enable USDC on an API already listed for JPYC, replace the gate on your server with the dual-rail snippet (x402Gate). Buyers cannot pay in USDC until you do.',
+    'Buyer note: the standard client x402-fetch (as of 1.2.0) cannot parse a dual-rail 402, so there is a USDC buyer example script: https://raw.githubusercontent.com/cipherwebllc/openpay/main/scripts/x402-dual-buyer-example.mjs',
+  ],
 
   jobDescTitle: 'Describe the job your listing completes',
   jobDescIntro:
@@ -435,7 +441,6 @@ const en: SellGuideContent = {
     'Prohibited listings: fraud or impersonation, sanctions-evasion assistance, and sale of stolen or illegitimately obtained data. Non-custodial does not mean unmoderated — violating listings are removed.',
     'Listings that execute crypto-asset trading, lending, token issuance, or automated asset allocation / portfolio management (e.g. DeFi vault selection), or that may constitute investment solicitation or advice, are not auto-listed: they get case-by-case review, judged by substance regardless of a "for information only" disclaimer. Being payable in JPYC does not make a service lawful.',
     'Quarantines and removals are recorded with their reason. If you believe one is mistaken, appeal via the contact in the site footer.',
-    'Listings that would execute crypto-asset trading, lending, or token issuance, or that may constitute investment solicitation or advice, are subject to case-by-case review. Paying in JPYC does not legalize the service being sold.',
   ],
 
   pricingTitle: 'Pricing tips',

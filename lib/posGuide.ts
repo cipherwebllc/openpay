@@ -31,7 +31,6 @@ export type GuideContent = {
   readonly title: string;
   readonly subtitle: string;
   readonly lead: string;
-  readonly audience: string;
   readonly heroImage: GuideImage;
 
   readonly canDoTitle: string;
@@ -109,40 +108,38 @@ const ja: GuideContent = {
   metaTitle: '今お使いのPOSレジでJPYC（円ステーブルコイン）を受け取る運用ガイド',
   metaDescription:
     'システム連携なしで今日から。既存の無料POSレジに「OpenPay」決済を足して、JPYC（円ステーブルコイン）で受け取る2台持ち運用の手順。',
-  title: '今お使いのPOSレジで、JPYC（円ステーブルコイン）を受け取る',
-  subtitle: 'システム連携なしで“今日から”始める「2台持ち」運用ガイド',
-  lead: 'いまのPOSレジはそのまま、OpenPay を“横に置くだけ”。開発も連携も不要。設定は一度だけ、慣れれば会計は約10秒です。',
-  audience:
-    '対象：POSレジ（無料アプリ可）を使っている／これから使う店舗オーナーさん（小売・飲食・サロン・ポップアップなど）。',
-  heroImage: { file: 'hero.webp', alt: 'OpenPay の決済QR作成画面 (金額 1200 JPYC) と、店名・金額入りの決済用 QR コード (スマホ 2 台の実画面)' },
+  title: '今お使いの POS レジで、JPYC（円ステーブルコイン）を受け取る',
+  subtitle: 'システム連携なしで「今日から」始める「2 台持ち」運用ガイド',
+  lead: 'いまの POS レジはそのまま、OpenPay を「横に置くだけ」。開発も連携も不要。設定は一度だけ、慣れれば会計は約 10 秒です。',
+  heroImage: { file: 'hero.webp', alt: 'OpenPay の決済QR 作成画面 (金額 1200 JPYC) と、店名・金額入りの決済用 QR コード (スマホ 2 台の実画面)' },
 
   canDoTitle: 'できること',
   canDo: [
-    '既存POSの売上データに「OpenPay決済」を残しながら、JPYC（円ステーブルコイン）で受け取れる',
-    '着金はあなたのウォレットに直接・即時（OpenPayは預かりません＝ノンカストディ）',
-    '会計ソフト向けのCSVは「履歴」からいつでも出力できる',
+    '既存 POS の売上データに「OpenPay 決済」を残しながら、JPYC（円ステーブルコイン）で受け取れる',
+    '着金はあなたのウォレットに直接・即時（OpenPay は預かりません＝ノンカストディ）',
+    '会計ソフト向けの CSV は「履歴」からいつでも出力できる',
   ],
   cannotTitle: 'できないこと / 注意',
   cannot: [
-    'レジとOpenPayは自動連携しません。金額はOpenPayにもう一度入力します（＝「2台持ち」）',
-    '会計を締める前に、OpenPay画面で「支払い完了」を必ず目視確認してください（ブロックチェーン決済は完了後の取り消しができません）',
-    'お客様側にウォレットとJPYCが必要です（暗号資産に慣れたお客様・常連さんから始めるのがおすすめ）',
+    'レジと OpenPay は自動連携しません。金額は OpenPay にもう一度入力します（＝「2 台持ち」）',
+    '会計を締める前に、OpenPay 画面で「支払い完了」を必ず目視確認してください（ブロックチェーン決済は完了後の取り消しができません）',
+    'お客様側にウォレットと JPYC が必要です（暗号資産に慣れたお客様・常連さんから始めるのがおすすめ）',
   ],
 
   needTitle: '必要なもの',
   need: [
-    'POSレジ（無料アプリで可）… 会計・売上記録用',
-    'スマホ or タブレット1台 … OpenPayの決済QRを表示（レジと別端末が楽。同じ端末でも可）',
-    'あなたの受取ウォレット（MetaMask等のアドレス）… JPYCの着金先',
+    'POS レジ（無料アプリで可）… 会計・売上記録用',
+    'スマホ or タブレット 1 台 … OpenPay の決済QR を表示（レジと別端末が楽。同じ端末でも可）',
+    'あなたの受取ウォレット（MetaMask 等のアドレス）… JPYC の着金先',
     'お客様 … ウォレット＋JPYC（Polygon / Kaia / Avalanche のいずれか）',
   ],
 
   overviewTitle: '仕組み（全体像）',
   overviewBody:
-    'レジは「売上の記録」係、OpenPayは「JPYCの受け取り」係。別々に動かして、閉店後に突き合わせるだけです。',
-  overviewImage: { file: 'overview-flow.svg', alt: 'POSレジ→OpenPay→突合 の3ステップ全体像' },
+    'レジは「売上の記録」係、OpenPay は「JPYC の受け取り」係。別々に動かして、閉店後に突き合わせるだけです。',
+  overviewImage: { file: 'overview-flow.svg', alt: 'POS レジ→OpenPay→突合 の 3 ステップ全体像' },
 
-  setupTitle: 'STEP 0 ― 最初の一度だけの準備（約5分）',
+  setupTitle: 'STEP 0：最初の一度だけの準備（約 5 分）',
   setupSteps: [
     {
       n: 1,
@@ -151,13 +148,13 @@ const ja: GuideContent = {
     },
     {
       n: 2,
-      title: 'POSレジに「OpenPay」決済ボタンを追加',
-      body: 'レジの「その他決済」枠に名称「OpenPay」のボタンを1つ追加します（ほとんどの無料POSにあります）。これでレジ側に売上が残ります。',
+      title: 'POS レジに「OpenPay」決済ボタンを追加',
+      body: 'レジの「その他決済」枠に名称「OpenPay」のボタンを 1 つ追加します（ほとんどの無料 POS にあります）。これでレジ側に売上が残ります。',
     },
   ],
-  setupImage: { file: 'pos-add-method.svg', alt: 'POSレジの支払い方法に「OpenPay」を追加した設定画面の模式図' },
+  setupImage: { file: 'pos-add-method.svg', alt: 'POS レジの支払い方法に「OpenPay」を追加した設定画面の模式図' },
 
-  flowTitle: '毎回の会計フロー（4ステップ・慣れれば約10秒）',
+  flowTitle: '毎回の会計フロー（4 ステップ・慣れれば約 10 秒）',
   flowSteps: [
     {
       n: 1,
@@ -166,79 +163,79 @@ const ja: GuideContent = {
     },
     {
       n: 2,
-      title: 'OpenPay で同じ金額のQRを表示',
-      body: '別端末（またはレジ端末）でOpenPayに同じ金額を入力してQRを表示。厳密に合わせたい場合はレシート番号を「メモ」へ（任意）。',
+      title: 'OpenPay で同じ金額の QR を表示',
+      body: '別端末（またはレジ端末）で OpenPay に同じ金額を入力して QR を表示。厳密に合わせたい場合はレシート番号を「メモ」へ（任意）。',
     },
     {
       n: 3,
       title: 'お客様がスキャンして支払い',
-      body: '画面のQRを提示。お客様はご自分のウォレットで読み取り、JPYCで支払います（ガス代はかかりません）。',
+      body: '画面の QR を提示。お客様はご自分のウォレットで読み取り、JPYC で支払います（ガス代はかかりません）。',
     },
     {
       n: 4,
       title: '着金を確認してからレジを締める',
-      body: 'QR画面の「残高の増加を検知」は、この支払いを特定するものではありません。取引履歴やブロックチェーン Explorer で該当する支払いを確認してから、商品をお渡し・レジを締めます。',
+      body: 'QR 画面の「残高の増加を検知」は、この支払いを特定するものではありません。取引履歴やブロックチェーン Explorer で該当する支払いを確認してから、商品をお渡し・レジを締めます。',
     },
   ],
-  flowImage: { file: 'four-steps.svg', alt: '会計→QR表示→スキャン→完了確認 の4ステップ' },
+  flowImage: { file: 'four-steps.svg', alt: '会計→QR 表示→スキャン→完了確認 の 4 ステップ' },
   successImage: { file: 'payment-success.svg', alt: 'お客様のスマホに表示される支払い完了画面' },
   successCaption:
     '※お客様側の完了画面の例です。店舗側の「残高の増加を検知」は目安です。該当する支払いは取引履歴で確認してください。',
   safetyNote:
     '重要：着金を確認する前に商品を渡さないでください。逆に、一度完了した決済は取り消せません（直接あなたのウォレットに着金済みです）。',
 
-  reconcileTitle: '閉店後 ― 売上の付け合わせ',
+  reconcileTitle: '閉店後：売上の付け合わせ',
   reconcileBody:
-    'レジの「OpenPay決済」合計と、OpenPayの着金記録を突き合わせます。',
+    'レジの「OpenPay 決済」合計と、OpenPay の着金記録を突き合わせます。',
   reconcileBullets: [
-    '基本：POS の売上額と時刻で照合（例：14:32 の ¥1,200）。※履歴の表示はご利用料（約 1%・最低 約 2 JPYC）差引後の純額（例：1,188 JPYC）。行を開くと売上総額（1,200 JPYC）を確認できます',
-    '厳密：会計時にメモへ入れたレシート番号で1対1照合',
-    'まとめて：「履歴」のCSVをレジの「その他決済」明細と突合。freee／マネーフォワード／弥生の取込形式に対応しています',
+    '基本：POS の売上額と時刻で照合（例：14:32 の ¥1,200）。※履歴の表示はご利用料（約 1% ・最低 約 2 JPYC）差引後の純額（例：1,188 JPYC）。行を開くと売上総額（1,200 JPYC）を確認できます',
+    '厳密：会計時にメモへ入れたレシート番号で 1 対 1 照合',
+    'まとめて：「履歴」の CSV をレジの「その他決済」明細と突合。freee／マネーフォワード／弥生の取込形式に対応しています',
   ],
-  reconcileImage: { file: 'history-reconcile.svg', alt: 'POSの明細とOpenPayの履歴を時刻・番号で突き合わせる図（履歴一覧は純額表示）' },
+  reconcileImage: { file: 'history-reconcile.svg', alt: 'POS の明細と OpenPay の履歴を時刻・番号で突き合わせる図（履歴一覧は純額表示）' },
 
-  posTitle: 'どのPOSレジを使えばいい？（無料で始められるレジ）',
+  posTitle: 'どの POS レジを使えばいい？（無料で始められるレジ）',
   posBody:
-    'いまのレジのままでOK。これから選ぶなら、「その他決済」枠のある無料POSアプリと相性抜群です。',
+    'いまのレジのままで OK。これから選ぶなら、「その他決済」枠のある無料 POS アプリと相性抜群です。',
   posExamples: ['Square POS', 'Airレジ', 'スマレジ', 'ユビレジ'],
   posCaveat:
-    '※各POSの無料プランの有無・条件・手数料は変わることがあります。導入前に各社の最新の公式情報をご確認ください。',
+    '※各 POS の無料プランの有無・条件・手数料は変わることがあります。導入前に各社の最新の公式情報をご確認ください。',
   affiliateAdLabel: '広告',
   posAffiliate: {
     name: 'スマレジ',
     href: SMAREGI_AFFILIATE_URL,
     blurb:
-      '国内で広く使われるクラウド POS。レジ会計はスマレジ、JPYC の受け取りは OpenPay の2台持ちで、無理なく始められます。',
+      '国内で広く使われるクラウド POS。レジ会計はスマレジ、JPYC の受け取りは OpenPay の 2 台持ちで、無理なく始められます。',
     cta: 'スマレジを見る',
   },
 
   costTitle: 'コストのイメージ',
   costColCard: '一般的なカード決済',
-  costColOpenpay: '無料POS × OpenPay',
+  costColOpenpay: '無料 POS × OpenPay',
   costRows: [
-    { label: '決済手数料', card: '約3%程度（例）', openpay: 'ご利用料 約1%（最低 約2 JPYC）・着金から自動差引（最新は利用規約参照）' },
+    { label: '決済手数料', card: '約 3% 程度（例）', openpay: 'ご利用料 約 1%（最低 約 2 JPYC）・着金から自動差引（最新は利用規約参照）' },
     { label: '入金', card: '数日後・締めあり', openpay: '即時・直接あなたのウォレットへ' },
     { label: '預かり', card: '決済会社が一旦預かる', openpay: 'ノンカストディ（誰も預からない）' },
   ],
   costNote:
     '※手数料の最新・正確な条件は OpenPay の利用規約・特定商取引法に基づく表記をご確認ください。比較は一般的な例であり、契約条件により異なります。',
   feeNote:
-    '着金額について：ガスレス決済ではご利用料（決済額の約 1%・最低 約 2 JPYC）が自動で差し引かれ、残りが着金します（例：¥1,200 → 約 ¥1,188）。POS に記録されるのは売上額のため、着金額はそれより少なくなります。正確な料率は利用規約・特定商取引法に基づく表記をご確認ください。',
-  costImage: { file: 'cost-compare.svg', alt: 'カード決済と無料POS×OpenPayのコスト比較イメージ' },
+    '着金額について：ガスレス決済ではご利用料（決済額の約 1% ・最低 約 2 JPYC）が自動で差し引かれ、残りが着金します（例：¥1,200 → 約 ¥1,188）。POS に記録されるのは売上額のため、着金額はそれより少なくなります。正確な料率は利用規約・特定商取引法に基づく表記をご確認ください。',
+  costImage: { file: 'cost-compare.svg', alt: 'カード決済と無料 POS×OpenPay のコスト比較イメージ' },
 
   faqTitle: 'よくある質問',
   faqs: [
     {
-      q: 'レジとOpenPayが自動でつながらないのは面倒では？',
+      q: 'レジと OpenPay が自動でつながらないのは面倒では？',
       a: '金額の再入力という一手間の代わりに、開発も審査も待ち時間もゼロで今日から。利用が増えたらシステム連携も検討できます。',
     },
     {
       q: 'お客様にウォレットがないと使えない？',
-      a: 'はい。まずは暗号資産に慣れた常連さんから。「JPYCで払える店」を少しずつ広げていくのがおすすめです。',
+      a: 'はい。まずは暗号資産に慣れた常連さんから。「JPYC で払える店」を少しずつ広げていくのがおすすめです。',
     },
     {
       q: '二重に売上が記録されない？',
-      a: 'レジは「売上の記録」、OpenPayは「実際の着金」を担います。閉店時に金額（またはレシート番号）で突き合わせれば、ズレを防げます。',
+      a: 'レジは「売上の記録」、OpenPay は「実際の着金」を担います。閉店時に金額（またはレシート番号）で突き合わせれば、ズレを防げます。',
     },
     {
       q: '返金したいときは？',
@@ -251,26 +248,24 @@ const ja: GuideContent = {
   ],
 
   ctaTitle: 'まずは試してみる',
-  ctaBody: '決済QRの作成は無料・登録不要です。受取ウォレットを接続して、最初のQRを作ってみましょう。',
+  ctaBody: '決済QR の作成は無料・登録不要です。受取ウォレットを接続して、最初の QR を作ってみましょう。',
   ctaButton: '決済QRを作成する',
   ctaButtonHref: '/create',
 
   backHome: '← トップにもどる',
   relatedTitle: '関連ガイド',
   relatedStart: '導入前チェックリスト — 始める前に確認する 8 つのこと',
-  relatedQr: 'まずはシンプルに — 決済QRガイド',
+  relatedQr: 'まずはシンプルに — 決済QR ガイド',
   relatedShop: '商品登録から注文受付まで — レジ・モバイルオーダー',
 };
 
 const en: GuideContent = {
   metaTitle: 'Accept JPYC payments with your existing POS register',
   metaDescription:
-    'Start today, no system integration. Add an “OpenPay” tender to your existing free POS and receive JPYC (a JPY stablecoin) with a simple two-device workflow.',
+    'Start today, no system integration. Add an 「OpenPay」 tender to your existing free POS and receive JPYC (a JPY stablecoin) with a simple two-device workflow.',
   title: 'Accept JPYC payments with the POS register you already use',
   subtitle: 'A “two-device” workflow you can start today — no system integration',
   lead: 'Keep your current POS and simply place OpenPay beside it. No development, no integration. Set up once — checkout takes about 10 seconds with practice.',
-  audience:
-    'For shop owners who use (or can start using) a POS register (a free app is fine) — retail, food, salons, pop-ups.',
   heroImage: { file: 'hero.webp', alt: 'OpenPay payment-QR screen (1200 JPYC) and the generated QR with shop name and amount (two real phone screens)' },
 
   canDoTitle: 'What you can do',

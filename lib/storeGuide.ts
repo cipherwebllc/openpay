@@ -58,7 +58,6 @@ export type StoreGuideContent = {
   readonly opsTitle: string;
 
   readonly title: string;
-  readonly subtitle: string;
   readonly lead: string;
 
   readonly basicsTitle: string;
@@ -161,11 +160,10 @@ const JA: StoreGuideContent = {
     '販売者情報を登録して、商品を追加する',
     'プロフィールの URL を SNS で共有する — 公開した商品は Store にも並びます',
   ],
-  opsTitle: '販売のヒント: 無料サービスで始めるデジタル商品販売',
+  opsTitle: '販売の手順',
 
   title: '無料サービスで始めるデジタル商品販売',
-  subtitle: '6 つの方法と手順',
-  lead: `サーバーも決済契約も不要。無料のクラウドサービスにコンテンツを置き、OpenPay の @handle プロフィールで販売する実践レシピ集です。価格は JPYC 建てで、支払いは JPYC (Polygon) が基本です。商品ごとに USDC (${STORE_USDC_CHAIN}) 購入も許可できます。JPYC 購入では買い手が価格の 1%・最低 1 JPYC の利用料を負担し、USDC 購入の OpenPay x402 利用料と売り手手数料はありません。`,
+  lead: `サーバーも決済契約も不要。無料のクラウドサービスにコンテンツを置き、OpenPay の @handle プロフィールで販売します。価格は JPYC 建てで、支払いは JPYC (Polygon) が基本です。商品ごとに USDC (${STORE_USDC_CHAIN}) 購入も許可できます。手数料は上の「手数料」のとおりです。`,
 
   basicsTitle: 'まず仕組みを 30 秒で',
   basicsTable: {
@@ -298,7 +296,7 @@ const JA: StoreGuideContent = {
       bullets: [
         'シークレットウィンドウ (未ログイン) でリンクが開けるか',
         'リンク先に個人情報や他の非公開ファイルが見えていないか (フォルダごと共有は避け、ファイル単位で)',
-        `価格は整数 JPYC か (JPYC 購入では購入者が別途 利用料 最低 1 JPYC・価格の 1% を負担し、USDC 購入では OpenPay x402 利用料は ${STORE_USDC_FEE_PERCENT}% です)`,
+        '価格は整数 JPYC で登録したか (利用料は上の「手数料」のとおり)',
         '課税事業者の場合、価格は消費税を含む総額 (税込) で登録しているか',
         '無料サービス側の規約で商用利用・再配布形態が許されているか',
         '配布 URL に期限が設定されていないか (期限付きリンクは購入者が後から開けなくなります)',
@@ -429,11 +427,10 @@ const EN: StoreGuideContent = {
     'Register seller information and add products',
     'Share your profile URL on social media — published products also appear in the Store',
   ],
-  opsTitle: 'Selling tips: digital product sales with free services',
+  opsTitle: 'How to sell',
 
   title: 'Sell digital goods with free services',
-  subtitle: '6 methods, step by step',
-  lead: `No server, no merchant contract. Put your content on a free cloud service and sell it on your OpenPay @handle profile. Prices remain denominated in JPYC and JPYC on Polygon is the primary payment method; you can also allow USDC purchases on ${STORE_USDC_CHAIN} per product. Buyers pay 1% (min 1 JPYC) for JPYC purchases, while the OpenPay x402 usage fee for USDC purchases and the seller fee are both ${STORE_USDC_FEE_PERCENT}%.`,
+  lead: `No server, no merchant contract. Put your content on a free cloud service and sell it on your OpenPay @handle profile. Prices are in JPYC and JPYC on Polygon is the primary payment method; you can also allow USDC purchases on ${STORE_USDC_CHAIN} per product. Fees are as in “Fees” above.`,
 
   basicsTitle: 'The mechanics in 30 seconds',
   basicsTable: {
@@ -566,7 +563,7 @@ const EN: StoreGuideContent = {
       bullets: [
         'Does the link open in a private window (no login)?',
         'Does the destination expose personal data or other private files? (Share single files, not folders.)',
-        `Is the price whole JPYC? (For JPYC purchases, buyers additionally pay 1%, min 1 JPYC; for USDC purchases, the OpenPay x402 usage fee is ${STORE_USDC_FEE_PERCENT}%.)`,
+        'Is the price a whole number of JPYC? (Fees are as in “Fees” above.)',
         'If you are a taxable business for Japanese consumption tax, is the price tax-inclusive?',
         'Do the free service’s terms allow commercial use in this form?',
         'Does the delivery URL have an expiry? (Expiring links stop working for buyers later.)',

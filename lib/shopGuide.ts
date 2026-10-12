@@ -64,7 +64,7 @@ const JA: ShopGuideContent = {
   heroCtaRegister: 'レジを始める',
   heroCtaMobile: 'モバイルオーダーを作る',
   heroVisualAlt:
-    'お客様がスマホでメニューから注文して JPYC で支払い、店舗のタブレットに着金済みの新規注文が届くまでの流れの図解',
+    'モバイルオーダーの注文画面 2 台。左はメニュー (カフェラテ・バスクチーズケーキ)、右はテーブル番号と注文内容 (合計 1680 JPYC) と「支払いへ進む」ボタン',
 
   relationTitle: 'レジとモバイルオーダーの関係',
   relationBody:
@@ -82,7 +82,7 @@ const JA: ShopGuideContent = {
     },
     {
       title: 'お店がガス代を肩代わりして送る',
-      body: '店頭レジや、画面に表示した金額指定の決済QRでは、お店の端末のガス用ウォレット（少額のガス代のトークン: POL・KAIA・AVAX）がガス代を払って送る設定も選べます（JPYC・Polygon・Kaia・Avalanche のみ。決済QRの決済モードで選び、レジも同じ設定）。お客様は署名するだけで、OpenPay 利用料は 0 円（ガス代は実費・仕組み上 1 wei）。',
+      body: '店頭レジと、画面に表示した金額指定の決済QRで、お店の端末のガス用ウォレット（POL・KAIA・AVAX）がガス代を払う設定を選べます（JPYC・Polygon・Kaia・Avalanche のみ）。お客様は署名するだけで、OpenPay 利用料は 0 円（ガス代は実費・仕組み上 1 wei）。',
     },
     {
       title: 'モバイルオーダー',
@@ -153,7 +153,7 @@ const EN: ShopGuideContent = {
   heroCtaRegister: 'Start the POS',
   heroCtaMobile: 'Create mobile ordering',
   heroVisualAlt:
-    'Diagram of a customer ordering from a phone menu, paying in JPYC, and the shop tablet receiving a paid order',
+    'Two phones showing the mobile order screen: the menu (café latte, Basque cheesecake) on the left, and the table number, order summary (1680 JPYC total) and the button to proceed to payment on the right',
 
   relationTitle: 'How POS and mobile ordering relate',
   relationBody:
@@ -171,7 +171,7 @@ const EN: ShopGuideContent = {
     },
     {
       title: 'The shop pays the gas',
-      body: 'At the in-store register and with a fixed-amount payment QR shown on screen, the shop can also have its device’s gas wallet (a little of the gas token: POL, KAIA or AVAX) pay the gas and send the payment (JPYC on Polygon, Kaia and Avalanche only; choose it as the payment mode on the payment QR tab; the register uses the same setting). Customers only sign, and the OpenPay usage fee is 0 (the shop pays the actual gas; 1 wei by design).',
+      body: 'At the in-store register and with a fixed-amount payment QR shown on screen, the gas wallet on the shop’s device (POL, KAIA or AVAX) can pay the gas (JPYC on Polygon, Kaia and Avalanche only). Customers only sign, and the OpenPay usage fee is 0 (the actual gas; 1 wei by design).',
     },
     {
       title: 'Mobile ordering',
