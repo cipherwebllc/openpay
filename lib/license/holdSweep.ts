@@ -89,13 +89,15 @@ export type LicenseHoldSweepResult =
 // 足りない分の [範囲の先頭, cursor] の古い順をこの順に並べる (2 つの範囲は重ならない)。cursor が無い・数字でない・
 // 範囲の外なら従来どおり範囲の先頭から読む。score は ms の整数 (stock.ts の ctx.now は整数を検査済み) なので
 // 数字だけの値を cursor として使い、そのまま範囲の端に渡す。key の型違いは EVAL の失敗 = storage。
+// 読み足しの件数は math.floor で整数にそろえる (本番の Lua 5.1 では `/` の結果も "17" になるが、テストの wasmoon (Lua 5.4)
+// では "17.0" になり、Redis の LIMIT は小数を受け付けない・tests/_helpers/redisLua.ts の KNOWN DIVERGENCES 1)。
 const SNAPSHOT =
   'local hc=redis.call("ZCARD",KEYS[1]); local holds={}; local stale=0; local sample={}; ' +
   'if hc>0 then local lim=tonumber(ARGV[3]); local cur=false; ' +
   'if KEYS[3] then cur=redis.call("GET",KEYS[3]); ' +
   'if not (cur and string.match(cur,"^%d+$") and tonumber(cur)>=tonumber(ARGV[1]) and tonumber(cur)<=tonumber(ARGV[2])) then cur=false end end; ' +
   'if cur then holds=redis.call("ZRANGEBYSCORE",KEYS[1],"("..cur,ARGV[2],"WITHSCORES","LIMIT",0,lim); ' +
-  'if #holds<2*lim then local wrap=redis.call("ZRANGEBYSCORE",KEYS[1],ARGV[1],cur,"WITHSCORES","LIMIT",0,lim-#holds/2); ' +
+  'if #holds<2*lim then local wrap=redis.call("ZRANGEBYSCORE",KEYS[1],ARGV[1],cur,"WITHSCORES","LIMIT",0,lim-math.floor(#holds/2)); ' +
   'for i=1,#wrap do holds[#holds+1]=wrap[i] end end ' +
   'else holds=redis.call("ZRANGEBYSCORE",KEYS[1],ARGV[1],ARGV[2],"WITHSCORES","LIMIT",0,lim) end; ' +
   'stale=redis.call("ZCOUNT",KEYS[1],"-inf","("..ARGV[1]); ' +
