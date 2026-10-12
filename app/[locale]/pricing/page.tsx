@@ -1,16 +1,24 @@
-// /pricing: 機能ごとの OpenPay の料金・払う人・計算例 (plans/pricing-page.md)。
+// /pricing: 機能ごとの OpenPay の料金・払う人・計算例 (plans/pricing-page.md・plans/pricing-ux-polish.md)。
 //
 // 本文は lib/pricing.ts (ja/en 同梱・数字は lib/legal.ts の DISCLOSED_* から差し込む)。
-// 計算例は lib/pricingExamples.ts (実際の分け方と同じ式)。部品は components/pricing/PricingPieces.tsx。
+// 計算機は components/pricing/PricingCalculator.tsx (client・式は lib/pricingMath.ts・料率はここで組み立てて渡す)。
+// 部品は components/pricing/PricingPieces.tsx。
 // 掟 3: default / generateMetadata 以外を export しない。リンクはすべて prefetch={false}。
 
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { setRequestLocale } from 'next-intl/server';
 import { AppShell } from '@/components/AppShell';
-import { BulletList, Section } from '@/components/guide/PosGuidePieces';
-import { ExampleTable, FeeCard } from '@/components/pricing/PricingPieces';
+import { PricingCalculator } from '@/components/pricing/PricingCalculator';
+import {
+  FeeRow,
+  FeeTableHead,
+  OtherCases,
+  SummaryCard,
+  TrustList,
+} from '@/components/pricing/PricingPieces';
 import { pricingContentFor, pricingMetadata } from '@/lib/pricing';
+import { PRICING_EXAMPLE_AMOUNTS, disclosedPricingRates } from '@/lib/pricingExamples';
 
 export async function generateMetadata({
   params,
@@ -24,6 +32,17 @@ export async function generateMetadata({
 
 const LINK_CLASS =
   'font-medium text-emerald-700 underline decoration-emerald-300 underline-offset-2 hover:text-emerald-900';
+
+function SectionHeading({ id, title, lead }: { id: string; title: string; lead?: string }) {
+  return (
+    <div className="max-w-2xl">
+      <h2 id={id} className="text-xl font-bold tracking-tight text-slate-900 sm:text-2xl">
+        {title}
+      </h2>
+      {lead ? <p className="mt-2 text-sm leading-relaxed text-slate-600">{lead}</p> : null}
+    </div>
+  );
+}
 
 export default async function PricingPage({
   params,
@@ -41,50 +60,88 @@ export default async function PricingPage({
         <Link
           href={`/${locale}`}
           prefetch={false}
-          className="text-sm font-medium text-emerald-700 hover:text-emerald-900"
+          className="inline-flex min-h-11 items-center text-sm font-medium text-emerald-700 hover:text-emerald-900"
         >
           {content.backHome}
         </Link>
 
-        <header className="mt-4">
-          <h1 className="text-2xl font-bold text-slate-900 sm:text-3xl">{content.title}</h1>
-          <p className="mt-4 text-base leading-relaxed text-slate-800">{content.lead}</p>
-          <BulletList items={content.cases} marker="•" markerClassName="text-emerald-600" />
-          <p className="mt-4 text-sm leading-relaxed text-slate-700">{content.storeGasNote}</p>
-          <p className="mt-4 rounded-xl bg-slate-50 p-4 text-sm leading-relaxed text-slate-700 ring-1 ring-slate-200">
-            {content.aside}
-          </p>
+        <header className="mt-2">
+          <h1 className="text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">{content.title}</h1>
+          <p className="mt-3 max-w-2xl text-base leading-relaxed text-slate-700 sm:text-lg">{content.lead}</p>
         </header>
 
-        <Section title={content.feesTitle}>
+        <section aria-labelledby="pricing-summary" className="mt-8 sm:mt-10">
+          <SectionHeading id="pricing-summary" title={content.summaryTitle} />
           {/* base の grid-cols-1 は必須 (スマホで横にはみ出さない)。 */}
-          <ul className="mt-4 grid grid-cols-1 gap-3">
-            {content.rows.map((row) => (
-              <FeeCard
-                key={row.id}
-                row={row}
-                dtStandard={content.dtStandard}
-                dtGasless={content.dtGasless}
-                dtPayer={content.dtPayer}
-              />
+          <ul className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4">
+            {content.summary.map((item) => (
+              <SummaryCard key={item.id} item={item} />
             ))}
           </ul>
-        </Section>
+          <div className="mt-4">
+            <TrustList items={content.trust} />
+          </div>
+        </section>
 
-        <Section title={content.examplesTitle}>
-          <p className="mt-3 text-sm leading-relaxed text-slate-700">{content.examplesLead}</p>
-          {content.examples.map((table) => (
-            <ExampleTable key={table.caption} table={table} />
-          ))}
-          <p className="mt-6 text-sm leading-relaxed text-slate-700">{content.storeGasExample}</p>
-        </Section>
+        <section aria-labelledby="pricing-calc" className="mt-14 sm:mt-16">
+          <SectionHeading id="pricing-calc" title={content.calc.title} lead={content.calc.lead} />
+          <div className="mt-5">
+            <PricingCalculator
+              copy={content.calc}
+              rates={disclosedPricingRates()}
+              presets={PRICING_EXAMPLE_AMOUNTS.gasless}
+              defaultAmount={PRICING_EXAMPLE_AMOUNTS.preorderSplit}
+            />
+          </div>
+        </section>
 
-        <Section title={content.otherTitle}>
-          <BulletList items={content.otherItems} marker="•" markerClassName="text-emerald-600" />
-        </Section>
+        <section aria-labelledby="pricing-fees" className="mt-14 sm:mt-16">
+          <SectionHeading id="pricing-fees" title={content.feesTitle} lead={content.feesLead} />
+          <div className="mt-4 overflow-hidden rounded-2xl bg-white shadow-card ring-1 ring-slate-200/70">
+            {/* lg より狭い幅では見出しの行が無いので、2 つの決済の意味を表の上の帯に書く (lg 以上は見出しの行が見せる)。 */}
+            <dl className="flex flex-wrap gap-x-4 gap-y-1 border-b border-slate-100 bg-slate-50 px-4 py-2.5 text-xs text-slate-500 lg:sr-only">
+              <div className="flex gap-1.5">
+                <dt className="font-semibold text-slate-700">{content.dtStandard}</dt>
+                <dd>{content.dtStandardDef}</dd>
+              </div>
+              <div className="flex gap-1.5">
+                <dt className="font-semibold text-slate-700">{content.dtGasless}</dt>
+                <dd>{content.dtGaslessDef}</dd>
+              </div>
+            </dl>
+            <FeeTableHead
+              colFeature={content.colFeature}
+              dtStandard={content.dtStandard}
+              dtStandardDef={content.dtStandardDef}
+              dtGasless={content.dtGasless}
+              dtGaslessDef={content.dtGaslessDef}
+              dtPayer={content.dtPayer}
+            />
+            <ul className="divide-y divide-slate-100">
+              {content.rows.map((row) => (
+                <FeeRow
+                  key={row.id}
+                  row={row}
+                  dtStandard={content.dtStandard}
+                  dtGasless={content.dtGasless}
+                  dtPayer={content.dtPayer}
+                  detailsLabel={content.detailsLabel}
+                />
+              ))}
+            </ul>
+          </div>
+        </section>
 
-        <Section title={content.termsTitle}>
-          <p className="mt-3 text-sm leading-relaxed text-slate-700">
+        <section aria-labelledby="pricing-other" className="mt-14 sm:mt-16">
+          <SectionHeading id="pricing-other" title={content.otherTitle} />
+          <div className="mt-4">
+            <OtherCases titles={content.otherTitles} bodies={content.otherItems} />
+          </div>
+        </section>
+
+        {/* 正確な条件は規約と特商法 (脚注)。 */}
+        <footer className="mt-12 border-t border-slate-200 pt-6">
+          <p className="text-sm leading-relaxed text-slate-600">
             {content.termsBefore}
             <Link href={`/${locale}${termsLink.href}`} prefetch={false} className={LINK_CLASS}>
               {termsLink.label}
@@ -95,7 +152,7 @@ export default async function PricingPage({
             </Link>
             {content.termsAfter}
           </p>
-        </Section>
+        </footer>
       </article>
     </AppShell>
   );

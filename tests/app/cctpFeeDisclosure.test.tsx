@@ -154,15 +154,18 @@ describe('② 開示の各面', () => {
   });
 
   it('料金ページ「このほかの場合」は Arc 宛ての項目の後に、上限から描いた項目を置く', () => {
-    const ja = PRICING.ja.otherItems;
-    const en = PRICING.en.otherItems;
-    expect(ja.at(-2)).toContain('Arc 宛てに払うときは、Circle の転送手数料を払う側が上乗せして負担します');
-    expect(ja.at(-1)).toBe(
-      `ほかのチェーンの USDC から Arc 以外のチェーン宛てに払うときは、Circle の転送手数料（Circle が決める額で、上限は金額の ${V.cctpMaxPercent}%。${V.cctpSmallBelowUsdc} USDC 未満の支払いでは ${V.cctpSmallCapUsdc} USDC）がお店の受け取りから差し引かれます。払う側の支払いは増えません。OpenPay はこの分を受け取らず、OpenPay の料金もかかりません。`,
+    const ja = PRICING.ja;
+    const en = PRICING.en;
+    expect(ja.otherTitles.at(-2)).toBe('USDC を別のチェーンから Arc へ払うとき');
+    expect(ja.otherItems.at(-2)).toBe('Circle の転送手数料は、払う側が上乗せして負担します。OpenPay はこの分を受け取りません。');
+    expect(ja.otherTitles.at(-1)).toBe('USDC を別のチェーンから Arc 以外へ払うとき');
+    expect(ja.otherItems.at(-1)).toBe(
+      `Circle の転送手数料（Circle が決める額で、上限は金額の ${V.cctpMaxPercent}%。${V.cctpSmallBelowUsdc} USDC 未満の支払いでは ${V.cctpSmallCapUsdc} USDC）が、お店の受け取りから差し引かれます。払う側の支払いは増えません。OpenPay はこの分を受け取らず、料金もかかりません。`,
     );
-    expect(en.at(-2)).toContain('When paying to Arc with USDC from another chain, the payer adds Circle’s transfer fee');
-    expect(en.at(-1)).toBe(
-      `When paying with USDC from another chain to a chain other than Arc, Circle’s transfer fee (set by Circle, capped at ${V.cctpMaxPercent}% of the amount, or ${V.cctpSmallCapUsdc} USDC for payments under ${V.cctpSmallBelowUsdc} USDC) is deducted from what the shop receives. The payer pays no more. OpenPay receives none of it and charges nothing.`,
+    expect(en.otherTitles.at(-2)).toBe('USDC from another chain to Arc');
+    expect(en.otherItems.at(-2)).toContain('The payer adds Circle’s transfer fee');
+    expect(en.otherItems.at(-1)).toBe(
+      `Circle’s transfer fee (set by Circle, capped at ${V.cctpMaxPercent}% of the amount, or ${V.cctpSmallCapUsdc} USDC for payments under ${V.cctpSmallBelowUsdc} USDC) is deducted from what the shop receives. The payer pays no more. OpenPay receives none of it and charges nothing.`,
     );
   });
 
