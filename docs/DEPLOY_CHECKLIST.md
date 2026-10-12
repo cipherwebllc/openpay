@@ -1839,7 +1839,9 @@ flag ON + forwarder/JPYC 設定済の Amoy (80002) で 1 周する。route テ�
   押さえの掃除と滞留の監視 (`lib/license/holdSweep.ts`) に 1 run 3 (押さえ・決済待ちが空のとき・EVAL 1 + ZCARD 2) を足す
   (96 run/日で約 290/日)。押さえが 1 件でもある run は ZRANGEBYSCORE と ZCOUNT の 2 (照合の窓を過ぎた古い押さえが
   あれば見本の 1) と、範囲に入った押さえ (最大 20) の GET が増える。期限切れの押さえを照合した run だけ、照合
-  (license の CAS) と数え直しの分がさらに増える。
+  (license の CAS) と数え直しの分がさらに増える。前回の続きから読む cursor (`store:license:holds:sweep_cursor`) は、
+  押さえが 1 件でもある run だけ GET 1 (cursor が範囲にあって続きが 20 件に満たなければ先頭から読み足す
+  ZRANGEBYSCORE 1)・押さえを処理した run だけ SET 1 を足す (押さえが 0 件の run は 0 = 上の 3 のまま・数え直しは読まない)。
 - 総数は `INFO stats` の `total_commands_processed` で見られるが、複数ノードで値が分かれる (書き込みは主ノード側の値)。
 
 ### §14.9b OpenPay Agent の North Star (月間の外部 JPYC Agent 購入者数)
@@ -2113,7 +2115,9 @@ PR A/B/C/D の採用、公開文言と第13条の施行日、Amoy E2E、以下�
    **在庫の押さえの掃除と滞留の監視 (2026-10-12)**: 同じ cron が発行 worker の後 (開始から 50 秒まで) に
    `lib/license/holdSweep.ts` を回す。押さえ (`store:license:holds`) のうち validBefore を過ぎ 6 時間以内のものを
    最大 20 件照合する (戻すかは照合だけが決める = finalized の期限切れ未使用・または finalized・canonical な
-   AuthorizationCanceled)。決済待ち (`store:intent:pending`) が 50 件超・最古の待ちが 26 時間超・押さえが 10 件超・
+   AuthorizationCanceled)。照合しても決着しない押さえは score が動かないので、次の run は前回最後に処理した押さえの
+   score (`store:license:holds:sweep_cursor`・TTL 7 時間) の続きから読み、足りない分を範囲の先頭から読み足す
+   (締切で後回しにした押さえより先には進めない)。決済待ち (`store:intent:pending`) が 50 件超・最古の待ちが 26 時間超・押さえが 10 件超・
    validBefore から 1 時間を過ぎても戻らない押さえ、のどれかで `creator_store.purchase_backlog` を warn
    (Sentry rule・1 件目で通知)。照合の窓 (6 時間) を過ぎた押さえも照合はしないが滞留に数える (score が 7 時間より
    古い押さえは件数だけ・warn の staleSample に古い順の intentSalt を最大 3 件載せる)。warn の exceeded を見て、押さえの intent (`store:intent:<salt>`) と予約

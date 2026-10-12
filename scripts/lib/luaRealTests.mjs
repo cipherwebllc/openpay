@@ -30,6 +30,7 @@ export const LUA_REAL_TEST_FILES = [
   'tests/lib/license/minter.test.ts',
   'tests/lib/license/product.test.ts',
   'tests/lib/license/stock.test.ts',
+  'tests/lib/license/holdSweep-lua.test.ts',
   'tests/lib/license/holders-lua.test.ts',
   'tests/lib/license/registration-lua.test.ts',
   'tests/lib/shopLiveStore-lua.test.ts',

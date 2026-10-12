@@ -39,7 +39,7 @@ import { computeLicensePaymentKey } from '@/lib/license/paymentKey';
 import { STORE_RECONCILE_PAGE_RPC_TIMEOUT_MS } from '@/lib/x402/reconcileBudget';
 import { JPYC_V3_ASSET } from '@/lib/x402/types';
 import type { AuthorizationCancelEvidence } from '@/lib/x402/authorizationCancel';
-import { LICENSE_HOLD_SWEEP_WINDOW_MS, runLicenseHoldSweep } from '@/lib/license/holdSweep';
+import { LICENSE_HOLD_SWEEP_CURSOR_KEY, LICENSE_HOLD_SWEEP_WINDOW_MS, runLicenseHoldSweep } from '@/lib/license/holdSweep';
 import { logger } from '@/lib/logger';
 
 const ID = 'h_' + 'a'.repeat(32);
@@ -828,5 +828,19 @@ describe('license hold sweep (15 min cron) and backlog warn on real Lua', () => 
     for (let n = 0; n < 25; n += 1) holds.set(toHex(BigInt(7000 + n), { size: 32 }), now - 3_600_000 + n);
     h.store!.zsets.set(LICENSE_HOLD_INDEX, holds);
     expect(await sweep(now, chain(false))).toMatchObject({ ok: true, checked: 0, skipped: 20, backlog: { holdCount: 25 } });
+  });
+
+  // 押さえの score は照合が決着しないと動かないので、毎回先頭の 20 件だけを読むと後ろの押さえが 15 分おきには照合されない。
+  // 次の run は前回の続き (cursor = 最後に処理した押さえの score) から読み、足りない分を範囲の先頭から読み足す。
+  it('the next run continues after the last processed hold and wraps to the start of the range', async () => {
+    const now = NOW + 10 * 3_600_000;
+    const score = (n: number) => now - 3_600_000 + n;
+    h.store!.zsets.set(LICENSE_HOLD_INDEX, new Map(Array.from({ length: 25 }, (_, n) => [toHex(BigInt(7000 + n), { size: 32 }), score(n)])));
+    expect(await sweep(now, chain(false))).toMatchObject({ ok: true, checked: 0, skipped: 20, backlog: { holdCount: 25 } });
+    expect(h.store!.strings.get(LICENSE_HOLD_SWEEP_CURSOR_KEY)).toBe(String(score(19)));
+    expect(h.store!.getTtl(LICENSE_HOLD_SWEEP_CURSOR_KEY)).toBe(7 * 3600);
+    // 2 回目: 21〜25 件目と、範囲の先頭から 1〜15 件目。
+    expect(await sweep(now + 15 * 60_000, chain(false))).toMatchObject({ ok: true, checked: 0, skipped: 20, backlog: { holdCount: 25 } });
+    expect(h.store!.strings.get(LICENSE_HOLD_SWEEP_CURSOR_KEY)).toBe(String(score(14)));
   });
 });

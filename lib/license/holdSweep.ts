@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { kvEval } from '@/lib/kv';
+import { kvEval, kvSet } from '@/lib/kv';
 import { logger } from '@/lib/logger';
 import {
   getPurchaseIntent, isPurchaseIntentSalt, purchasePendingIndexKey, reconcilePurchaseIntent,
@@ -28,6 +28,13 @@ export const LICENSE_HOLD_SWEEP_WINDOW_MS = 6 * 3_600_000;
 // score の下限 = 窓 + 1 時間。窓の中の押さえは score ≥ validBefore − 10 分なので必ず範囲に入る。窓を出て照合しなく
 // なった押さえは score が更新されず、1 時間で範囲から外れて後ろの押さえの枠を塞がない。
 const SWEEP_LOOKBACK_MS = LICENSE_HOLD_SWEEP_WINDOW_MS + 3_600_000;
+// 前回の run が最後に処理した (照合した・対象外にした) 押さえの score。押さえの score は claim・fail・照合の状態の
+// 書き込みでしか動かず、照合が pending で終わる (finality 待ち・RPC の失敗など) と古いまま残る。範囲の先頭から
+// 毎回 20 件を読むと、決着しない押さえが 20 件以上あるか、古い押さえが締切を使い切る run が続くと、それより新しい
+// 押さえが 15 分おきには照合されない。次の run はこの続き (score がこれより大きい側) から読み、足りない分を範囲の
+// 先頭から読み足す。TTL は範囲 (7 時間) と同じ: それより古い cursor は範囲の外で、使わずに先頭から読む。
+export const LICENSE_HOLD_SWEEP_CURSOR_KEY = LICENSE_HOLD_INDEX + ':sweep_cursor';
+const SWEEP_CURSOR_TTL_SEC = SWEEP_LOOKBACK_MS / 1000;
 // validBefore からこれを過ぎても照合で戻らない押さえを「滞留」として warn に数える。
 export const LICENSE_HOLD_STUCK_MS = 3_600_000;
 // 照合の窓 (6 時間) と監視の範囲は分ける: 窓を過ぎて照合しなくなった押さえも滞留として数える。
@@ -73,22 +80,39 @@ export type LicenseHoldSweepResult =
   | { ok: false; error: 'storage_unavailable' | 'sweep_failed' };
 
 // 監視の数と掃除の対象を 1 回の EVAL で読む (読み取りのみ)。空なら EVAL + ZCARD 2 回の 3 コマンド
-// (Upstash は EVAL 自体と中の redis.call を数える・DEPLOY_CHECKLIST §14.9c)。押さえがあれば ZRANGEBYSCORE と
-// ZCOUNT (score が 7 時間より古い押さえ) の 2・その古い押さえがあれば見本の ZRANGEBYSCORE 1 を足す。
-// key の型違いは EVAL の失敗 = storage。
+// (Upstash は EVAL 自体と中の redis.call を数える・DEPLOY_CHECKLIST §14.9c)。押さえが 0 件なら cursor は読まない。
+// 押さえがあれば ZRANGEBYSCORE と ZCOUNT (score が 7 時間より古い押さえ) の 2 に、cursor の GET 1 (KEYS[3] を渡した
+// ときだけ・数え直しでは渡さない)・cursor が範囲にあって続きが LIMIT に満たなければ範囲の先頭からの
+// ZRANGEBYSCORE 1・古い押さえがあれば見本の ZRANGEBYSCORE 1 を足す。cursor の書き込み (SET 1) は EVAL の外で、
+// 押さえを処理した run だけ。
+// 掃除の対象は member と score を交互に並べて返す (WITHSCORES)。cursor がある run は (cursor, 範囲の末尾] の古い順と、
+// 足りない分の [範囲の先頭, cursor] の古い順をこの順に並べる (2 つの範囲は重ならない)。cursor が無い・数字でない・
+// 範囲の外なら従来どおり範囲の先頭から読む。score は ms の整数 (stock.ts の ctx.now は整数を検査済み) なので
+// 数字だけの値を cursor として使い、そのまま範囲の端に渡す。key の型違いは EVAL の失敗 = storage。
 const SNAPSHOT =
   'local hc=redis.call("ZCARD",KEYS[1]); local holds={}; local stale=0; local sample={}; ' +
-  'if hc>0 then holds=redis.call("ZRANGEBYSCORE",KEYS[1],ARGV[1],ARGV[2],"LIMIT",0,tonumber(ARGV[3])); ' +
+  'if hc>0 then local lim=tonumber(ARGV[3]); local cur=false; ' +
+  'if KEYS[3] then cur=redis.call("GET",KEYS[3]); ' +
+  'if not (cur and string.match(cur,"^%d+$") and tonumber(cur)>=tonumber(ARGV[1]) and tonumber(cur)<=tonumber(ARGV[2])) then cur=false end end; ' +
+  'if cur then holds=redis.call("ZRANGEBYSCORE",KEYS[1],"("..cur,ARGV[2],"WITHSCORES","LIMIT",0,lim); ' +
+  'if #holds<2*lim then local wrap=redis.call("ZRANGEBYSCORE",KEYS[1],ARGV[1],cur,"WITHSCORES","LIMIT",0,lim-#holds/2); ' +
+  'for i=1,#wrap do holds[#holds+1]=wrap[i] end end ' +
+  'else holds=redis.call("ZRANGEBYSCORE",KEYS[1],ARGV[1],ARGV[2],"WITHSCORES","LIMIT",0,lim) end; ' +
   'stale=redis.call("ZCOUNT",KEYS[1],"-inf","("..ARGV[1]); ' +
   'if stale>0 then sample=redis.call("ZRANGEBYSCORE",KEYS[1],"-inf","("..ARGV[1],"LIMIT",0,tonumber(ARGV[4])) end end; ' +
   'local pc=redis.call("ZCARD",KEYS[2]); local oldest=""; ' +
   'if pc>0 then oldest=redis.call("ZRANGE",KEYS[2],0,0,"WITHSCORES")[2] end; ' +
   'return {hc,pc,oldest,holds,stale,sample}; ';
 
-type Snapshot = { holdCount: number; pendingCount: number; pendingOldestScore: number | null; holds: string[]; staleCount: number; staleSample: string[] };
+type SweepHold = { salt: string; score: number };
+type Snapshot = { holdCount: number; pendingCount: number; pendingOldestScore: number | null; holds: SweepHold[]; staleCount: number; staleSample: string[] };
 
-async function readSnapshot(now: number): Promise<Snapshot | 'storage'> {
-  const r = await kvEval<unknown>(SNAPSHOT, [LICENSE_HOLD_INDEX, purchasePendingIndexKey()], [
+// withCursor = 掃除の対象を cursor の続きから読む (最初の読み取り)。数え直しは件数だけを使うので cursor の key を
+// 渡さない (cursor を読まず、従来どおり範囲の先頭から読む)。
+async function readSnapshot(now: number, withCursor: boolean): Promise<Snapshot | 'storage'> {
+  const keys = [LICENSE_HOLD_INDEX, purchasePendingIndexKey()];
+  if (withCursor) keys.push(LICENSE_HOLD_SWEEP_CURSOR_KEY);
+  const r = await kvEval<unknown>(SNAPSHOT, keys, [
     String(now - SWEEP_LOOKBACK_MS), String(now - SWEEP_IDLE_MS), String(LICENSE_HOLD_SWEEP_LIMIT), String(STALE_SAMPLE),
   ]);
   if (!r.ok || !Array.isArray(r.value)) return 'storage';
@@ -99,7 +123,21 @@ async function readSnapshot(now: number): Promise<Snapshot | 'storage'> {
     const members = value === undefined || value === null ? [] : value;
     return Array.isArray(members) && members.every((m) => typeof m === 'string') ? members as string[] : null;
   };
-  const holdList = list(holds); const staleSample = list(sample);
+  // member と score の組。score が数でない応答を cursor に書いて、次の run の読み取りを狂わせない。
+  const withScores = (value: unknown): SweepHold[] | null => {
+    const flat = value === undefined || value === null ? [] : value;
+    if (!Array.isArray(flat) || flat.length % 2 !== 0) return null;
+    const pairs: SweepHold[] = [];
+    for (let i = 0; i < flat.length; i += 2) {
+      const salt: unknown = flat[i]; const raw: unknown = flat[i + 1];
+      if (typeof salt !== 'string' || (typeof raw !== 'string' && typeof raw !== 'number') || raw === '') return null;
+      const holdScore = Number(raw);
+      if (!Number.isFinite(holdScore)) return null;
+      pairs.push({ salt, score: holdScore });
+    }
+    return pairs;
+  };
+  const holdList = withScores(holds); const staleSample = list(sample);
   if (!holdList || !staleSample) return 'storage';
   const score = oldest === '' ? null : Number(oldest);
   if (score !== null && !Number.isFinite(score)) return 'storage';
@@ -114,7 +152,7 @@ export async function runLicenseHoldSweep(options: {
 }): Promise<LicenseHoldSweepResult> {
   try {
     const now = options.now ?? Date.now();
-    const snapshot = await readSnapshot(now);
+    const snapshot = await readSnapshot(now, true);
     if (snapshot === 'storage') {
       logger.warn('license.hold_sweep_failed', { reason: 'storage' });
       return { ok: false, error: 'storage_unavailable' };
@@ -123,11 +161,14 @@ export async function runLicenseHoldSweep(options: {
     let stuckHolds = 0;
     // 照合の窓を過ぎた押さえ (score が 7 時間より古い押さえは件数だけ・掃除の範囲のものは下で数える)。
     let staleHolds = snapshot.staleCount;
-    for (const salt of snapshot.holds) {
+    // 最後に処理した (照合した・対象外にした) 押さえの score = 次の run の cursor。締切で後回しにした押さえ
+    // (締切は一度過ぎると戻らないので末尾に並ぶ) と intent を読めなかった押さえでは進めない = 次の run が先に見る。
+    let lastScore: number | null = null;
+    for (const { salt, score } of snapshot.holds) {
       // 予算切れは打ち切り (残りは次の run・日次 cron が拾う)。失敗や未払いには変換しない。
       if (rpcCallOptions(options.deadline) === null) { summary.deferred += 1; continue; }
       // 壊れた member の隔離は repairLicenseIndexes (毎時) の役目。ここでは読まずに飛ばす。
-      if (!isPurchaseIntentSalt(salt)) { summary.skipped += 1; continue; }
+      if (!isPurchaseIntentSalt(salt)) { summary.skipped += 1; lastScore = score; continue; }
       const intent = await getPurchaseIntent(salt);
       if (intent === 'storage') { summary.storageErrors += 1; continue; }
       if (
@@ -135,13 +176,13 @@ export async function runLicenseHoldSweep(options: {
         intent.state === 'quoted' || intent.state === 'settled' ||
         (intent.state === 'failed_prebroadcast' &&
           (intent.failureReason === 'authorization_expired_unused' || intent.failureReason === 'authorization_canceled'))
-      ) { summary.skipped += 1; continue; }
+      ) { summary.skipped += 1; lastScore = score; continue; }
       const validBeforeMs = Number(intent.claim.validBefore) * 1000;
       // 期限が来たものだけ (期限前の押さえは購入の途中か、status の照合に任せる)。
-      if (!Number.isFinite(validBeforeMs) || validBeforeMs > now) { summary.skipped += 1; continue; }
+      if (!Number.isFinite(validBeforeMs) || validBeforeMs > now) { summary.skipped += 1; lastScore = score; continue; }
       // 窓より古いものは照合しない (日次 cron と status に任せる) が、滞留として数えて warn に出す。
-      if (validBeforeMs < now - LICENSE_HOLD_SWEEP_WINDOW_MS) { summary.skipped += 1; staleHolds += 1; continue; }
-      summary.checked += 1;
+      if (validBeforeMs < now - LICENSE_HOLD_SWEEP_WINDOW_MS) { summary.skipped += 1; lastScore = score; staleHolds += 1; continue; }
+      summary.checked += 1; lastScore = score;
       const result = await reconcilePurchaseIntent(salt, {
         now, deadline: options.deadline, ...(options.licenseChain ? { licenseChain: options.licenseChain } : {}),
       });
@@ -153,9 +194,15 @@ export async function runLicenseHoldSweep(options: {
         if (validBeforeMs + LICENSE_HOLD_STUCK_MS < now) stuckHolds += 1;
       }
     }
+    // 処理した押さえがある run だけ cursor を書く (SET 1・押さえが無い run・全部を後回しにした run は書かない)。
+    // 書けなくても次の run が前の cursor (か範囲の先頭) から読むだけで、在庫の判定と監視の数には波及しない。
+    if (lastScore !== null) {
+      const saved = await kvSet(LICENSE_HOLD_SWEEP_CURSOR_KEY, String(lastScore), { ttlSec: SWEEP_CURSOR_TTL_SEC });
+      if (!saved.ok) logger.warn('license.hold_sweep_failed', { reason: 'storage', step: 'cursor' });
+    }
     // 照合した run だけ数え直す (戻した押さえ・終端にした決済待ちを数えない)。照合しなかった run は最初の読み取りの
     // まま (追加の KV コマンドなし)。数え直しの失敗は最初の読み取りで代える (多めに数える側 = warn を黙らせない)。
-    const recount = summary.checked > 0 ? await readSnapshot(now) : snapshot;
+    const recount = summary.checked > 0 ? await readSnapshot(now, false) : snapshot;
     const counts = recount === 'storage' ? snapshot : recount;
     const backlog: PurchaseBacklog = {
       pendingCount: counts.pendingCount,
