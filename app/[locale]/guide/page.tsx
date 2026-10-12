@@ -9,7 +9,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { setRequestLocale } from 'next-intl/server';
 import { AppShell } from '@/components/AppShell';
-import { GuideHubGroups } from '@/components/guide/GuideHubPieces';
+import { GuideHubGroups, GuideHubRelated } from '@/components/guide/GuideHubPieces';
 import { guideHubMetadata, guideNavFor } from '@/lib/guideNav';
 
 export async function generateMetadata({
@@ -52,6 +52,8 @@ export default async function GuideHubPage({
         </header>
 
         <GuideHubGroups locale={locale} nav={nav} />
+        {/* 末尾にガイド以外の関連ページ (料金)。GUIDE_SLUGS と目次には入れない (plans/pricing-page.md §2.6)。 */}
+        <GuideHubRelated locale={locale} nav={nav} />
       </article>
     </AppShell>
   );

@@ -59,6 +59,20 @@ describe('SiteFooter', () => {
     expect(nav.querySelector('a')).toBe(link);
   });
 
+  // 料金ページ (/pricing) は「ガイド」の直後。兄弟リンクと同じく locale なし href (middleware が /{locale}/pricing へ)。
+  it.each([
+    ['ja', '料金', 'ガイド'],
+    ['en', 'Pricing', 'Guides'],
+  ] as const)('%s: 「ガイド」の次に料金「%s」→ /pricing (可視テキストが名前)', (locale, name, guides) => {
+    renderWithIntl(<SiteFooter />, { locale });
+    const link = screen.getByRole('link', { name });
+    expect(link).toHaveAttribute('href', '/pricing');
+    expect(link).not.toHaveAttribute('aria-label');
+    expect(link.textContent).toBe(name);
+    const anchors: HTMLElement[] = Array.from(link.closest('nav')!.querySelectorAll('a'));
+    expect(anchors.indexOf(link)).toBe(anchors.indexOf(screen.getByRole('link', { name: guides })) + 1);
+  });
+
   it('事業者名と copyright を表示する', () => {
     renderWithIntl(<SiteFooter />, { locale: 'ja' });
     // copyright 行に LEGAL_ENTITY.companyName が含まれる
@@ -283,6 +297,11 @@ describe('SiteFooter — @handle compact (受取ページ磨き上げ P3)', () =
       expect(screen.queryByRole('link', { name: 'AIストア' })).toBeNull();
       // ガイドのハブも OpenPay 側の導線なので出さない。
       expect(screen.queryByRole('link', { name: 'ガイド' })).toBeNull();
+      // 料金は特商法・運用透明性と同じ開示寄りのリンクなので @handle でも出す (買い手が負担を確かめられる)。
+      const pricing = screen.getByRole('link', { name: '料金' });
+      expect(pricing).toHaveAttribute('href', '/pricing');
+      // ガイドが無いので nav の先頭に来る。
+      expect(pricing.closest('nav')!.querySelector('a')).toBe(pricing);
     } finally {
       pathnameMock.value = null;
     }

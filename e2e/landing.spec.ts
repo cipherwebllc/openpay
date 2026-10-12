@@ -322,6 +322,10 @@ test.describe('landing / (LP)', () => {
     await expect(
       support.getByText(/応援いただけると励みになります/),
     ).toBeVisible();
+    // 利用料の注記の下に、機能ごとの料金と計算例 (/ja/pricing) への入口 (名前 = 可視テキスト)。
+    const pricing = support.getByRole('link', { name: '機能ごとの料金と計算例を見る' });
+    await expect(pricing).toBeVisible();
+    await expect(pricing).toHaveAttribute('href', '/ja/pricing');
     // 応援は単一の「応援プロフカード」に集約 (旧トークン別 5 ボタンを撤去)。カード全体が
     // @openpay_jp プロフ (link-in-bio) への 1 link。a11y 名は内側の可視テキストから導出される
     // (aria-label は付けない — label-content-name-mismatch を避けるため)。

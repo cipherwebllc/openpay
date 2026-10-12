@@ -12,8 +12,10 @@ import type { CSSProperties } from 'react';
 import { LANDING_PAYMENT_FEE_VALUES } from '@/lib/legal';
 import { focalFitCqi } from '@/lib/focalFit';
 import Image from 'next/image';
-import { getTranslations } from 'next-intl/server';
+import Link from 'next/link';
+import { getLocale, getTranslations } from 'next-intl/server';
 import {
+  ArrowRight,
   Heart,
   QrCode,
   Calculator,
@@ -58,6 +60,7 @@ const FEE_AUDIENCE_LABEL_KEY = {
 
 export async function LandingSupport() {
   const t = await getTranslations('Landing');
+  const locale = await getLocale();
 
   return (
     <section className="mt-16 sm:mt-28">
@@ -108,6 +111,18 @@ export async function LandingSupport() {
 
       <p className="mx-auto mt-6 max-w-2xl text-center text-xs leading-relaxed text-slate-500">
         {t('supportFeeNote')}
+      </p>
+      {/* 機能ごとの料金と計算例 (/pricing) への入口 (plans/pricing-page.md §2.6)。カード 5 枚はそのまま。
+          リンク名は可視テキストだけ (矢印は aria-hidden・掟 8)。min-h-11 で tap target 44px (WCAG 2.5.8)。 */}
+      <p className="mt-2 text-center">
+        <Link
+          href={`/${locale}/pricing`}
+          prefetch={false}
+          className="group inline-flex min-h-11 items-center gap-1 text-sm font-semibold text-brand underline-offset-2 hover:underline"
+        >
+          {t('supportFeeDetailsLink')}
+          <ArrowRight aria-hidden className="h-4 w-4 shrink-0 transition-transform group-hover:translate-x-0.5" />
+        </Link>
       </p>
 
       <div className="mx-auto mt-10 max-w-xl text-center">

@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { createTranslator } from 'next-intl';
-import { render } from '@testing-library/react';
+import { render, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import ja from '@/messages/ja.json';
 import en from '@/messages/en.json';
@@ -78,5 +78,21 @@ describe.each(['ja', 'en'] as const)('%s: rendered public fee disclosure', (loca
     const { container } = render(await surface());
     expect(container).toHaveTextContent(locale === 'ja' ? '約 7 JPYC' : 'about 7 JPYC');
     expect(container).toHaveTextContent(locale === 'ja' ? '決済額の 1.7% は適用しません' : 'the 1.7% does not apply');
+  });
+
+  // 利用料カードの下 (supportFeeNote の下) に、機能ごとの料金と計算例 (/{locale}/pricing) への入口。
+  // リンク名は可視テキストだけ (矢印は aria-hidden・掟 8)。
+  it('support: links to /{locale}/pricing with its visible text as the name', async () => {
+    context.locale = locale;
+    const { container } = render(await LandingSupport());
+    const m = (locale === 'ja' ? ja : en).Landing;
+    const name = m.supportFeeDetailsLink;
+    const link = within(container).getByRole('link', { name });
+    expect(link).toHaveAttribute('href', `/${locale}/pricing`);
+    expect(link).not.toHaveAttribute('aria-label');
+    expect(link.textContent).toBe(name);
+    expect(link.querySelector('svg')).toHaveAttribute('aria-hidden');
+    // 置き場所は利用料の注記 (supportFeeNote) のすぐ下。
+    expect(link.closest('p')!.previousElementSibling).toHaveTextContent(m.supportFeeNote);
   });
 });
