@@ -3,16 +3,14 @@
 // 画像 public/landing/mobileorder.webp (1280x670) が見出し / 注文フロー / 価値訴求を内包した
 // 完成バナーのため、ここでは SEO / a11y 用に読めるテキスト (見出し + リード文 + 画像 alt) と、
 // 実際にクリックできる CTA を補う (画像内の文字は検索/読み上げに乗らないため)。主 CTA は店舗作成
-// = コンバージョンの /create?tab=mobileOrder、副リンクは解説記事 (note・外部・別タブ)。
+// = コンバージョンの /create?tab=mobileOrder、副リンクはお店向けのガイド (/guide/shop)。お客様向けのやり方・AI 注文の
+// ガイドは /guide/shop とガイドのハブから辿る (2026-10-12 plans/lp-polish-2026-10.md P1-2: ガイドへの入口を絞る)。
 // モバイルオーダーは本番公開済 (ENABLE_MOBILE_ORDER ON) ゆえ CTA 先は即機能する。
 
 import Image from 'next/image';
 import Link from 'next/link';
 import { getLocale, getTranslations } from 'next-intl/server';
-import { ArrowRight, ExternalLink } from 'lucide-react';
-
-// masia02 氏 (運営) による解説記事。外部依存ゆえ参照は1箇所に集約する。
-const NOTE_ARTICLE_URL = 'https://note.com/masia02/n/nf19e91b84ef4';
+import { ArrowRight } from 'lucide-react';
 
 export async function LandingMobileOrder() {
   const locale = await getLocale();
@@ -41,34 +39,15 @@ export async function LandingMobileOrder() {
                 {t('mobileOrderBannerCta')}
                 <ArrowRight className="h-4 w-4" aria-hidden />
               </Link>
-              <a
-                href={NOTE_ARTICLE_URL}
-                target="_blank"
-                rel="noopener noreferrer"
+              <Link
+                href={`/${locale}/guide/shop`}
+                prefetch={false}
                 className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-white/80 px-6 py-3 sm:whitespace-nowrap text-sm font-semibold text-slate-700 ring-1 ring-slate-200/80 transition-colors hover:bg-white hover:text-emerald-800 hover:ring-emerald-300"
               >
                 {t('mobileOrderBannerLearnMore')}
-                <ExternalLink className="h-4 w-4" aria-hidden />
-              </a>
+                <ArrowRight className="h-4 w-4" aria-hidden />
+              </Link>
             </div>
-            {/* お客様向けの副導線: やり方ガイド (/guide/mobile-order) と AI 注文ガイド (/guide/agent)。
-                店側 CTA の下に控えめなテキストリンクで置く (guide/pos を「使い方」に置くのと同じ体裁)。 */}
-            <p className="mt-4 flex flex-col items-center gap-1.5 text-sm sm:flex-row sm:flex-wrap sm:justify-center sm:gap-x-4 lg:justify-start">
-              <Link
-                href={`/${locale}/guide/mobile-order`}
-                prefetch={false}
-                className="font-medium text-emerald-700 underline underline-offset-2 hover:text-emerald-900"
-              >
-                {t('mobileOrderBannerHowToGuide')}
-              </Link>
-              <Link
-                href={`/${locale}/guide/agent`}
-                prefetch={false}
-                className="font-medium text-emerald-700 underline underline-offset-2 hover:text-emerald-900"
-              >
-                {t('mobileOrderBannerAgentGuide')}
-              </Link>
-            </p>
           </div>
 
           {/* バナー画像はそのまま主 CTA への大きなクリック領域にする (画像内の擬似ボタンを実リンク化)。

@@ -1,6 +1,6 @@
 // トップページ = 紹介 LP。Server Component (LCP / SEO 優先)。
 // AppShell (Client) の中に Server-rendered の各 Landing* セクションを並べる。
-// Phase 5 で Hero と本文セクションの間に MarketRates strip を挿入する。
+// 並び: ヒーロー → モバイルオーダー → 本文 → 使い方 → 料金 (4 つの場合) → FAQ → 信頼 (応援カードを含む締め)。
 
 import { setRequestLocale } from 'next-intl/server';
 import { RouteMessages } from '@/i18n/RouteMessages';
@@ -19,7 +19,6 @@ import { LandingMobileOrder } from '@/components/LandingMobileOrder';
 import { LandingFaq } from '@/components/LandingFaq';
 import { LandingSupport } from '@/components/LandingSupport';
 import { LandingTrust } from '@/components/LandingTrust';
-import { MarketRates } from '@/components/MarketRates';
 import { LandingBand } from '@/components/LandingSectionHeader';
 import { LandingYourOpenPay } from '@/components/LandingYourOpenPay';
 
@@ -41,9 +40,7 @@ export default async function HomePage({
             ヒーローの下だと PC ではヒーローの画像の下 (1 画面目の外) になり、戻ってきた人が自分の道具へすぐ行けない。 */}
         <LandingYourOpenPay />
         <LandingHero />
-        <div className="mt-6">
-          <MarketRates />
-        </div>
+        {/* 市場レートの帯はトップから外した (初めての訪問者の判断に要らない・2026-10-12 user 裁定)。 */}
         {/* 決済 QR はコモディティ化 (競合も 0% JPYC QR)。差別化はその先の店舗オペレーション =
             モバイル注文を Hero 直下へ昇格し「決済だけでない深さ」を最初に見せる (定番/インフラ positioning)。 */}
         <LandingMobileOrder />
@@ -69,11 +66,13 @@ export default async function HomePage({
           <LandingFeatures />
           <LandingUseCases />
         </LandingBand>
-        {/* 3 ステップは「使いたくなった読者」への締め (シーンの後・FAQ の前)。用途別の 3 入口 (旧「用途から選ぶ」) も
-            ここに統合する (入口を 1 か所に・plans/lp-polish-2026-09.md P1)。 */}
+        {/* 3 ステップは「使いたくなった読者」への締め (シーンの後・料金と FAQ の前)。ガイドへの入口 4 枚 (導入前チェックリスト・
+            決済QR・レジとモバイルオーダー・クリエイター) もここだけに置く (入口を 1 か所に・plans/lp-polish-2026-10.md P1-2)。 */}
         <LandingHowItWorks />
-        <LandingFaq />
+        {/* 料金 (4 つの場合) は FAQ の前: 「はじめ方」を読んだ直後の判断材料として数字を先に見せる (2026-10-12)。
+            運営の応援カードは料金の話ではないので、締め (LandingTrust) に置く。 */}
         <LandingSupport />
+        <LandingFaq />
         <LandingTrust />
       </AppShell>
     </RouteMessages>

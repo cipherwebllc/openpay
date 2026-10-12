@@ -299,7 +299,6 @@ export const ROUTE_CLIENT_NAMESPACES = {
     'ConnectButton',
     'Landing',
     'LocaleSwitcher',
-    'Market',
     'Nav',
     'News',
     'Today',

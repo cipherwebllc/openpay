@@ -5,7 +5,7 @@
 // ガイドページを直接描画する既存テスト (getTranslations を mock) を壊さない。
 // ⚠️ 料率・「無料」・「0 円」・ガス・チェーン名・通貨名は入れない (掟 14 の同期面を増やさない)。
 // tests/lib/guideNav.test.ts が全 leaf を検査する。料金に触れたくなったら lib/legal.ts の DISCLOSED_* 経由にする。
-// ⚠️ qr / shop の説明は LP の Landing.entryQrBody / entryShopBody と同文 (片方だけ変えるとずれる・掟 4 の grep)。
+// ⚠️ トップの入口 (components/LandingEntryPoints.tsx) も start/qr/shop/store の label・summary をここから読む (文言の出どころは 1 つ)。
 
 import type { Metadata } from 'next';
 import { guidePageMetadata } from '@/lib/guideMetadata';

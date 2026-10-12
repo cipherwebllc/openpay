@@ -30,7 +30,7 @@ test.describe('landing / (LP)', () => {
 
     // 2 大 CTA
     const scanCta = page.getByRole('link', { name: /支払う \(スキャン\)/ });
-    const createCta = page.getByRole('link', { name: /受け取る \(決済 QR を作る\)/ });
+    const createCta = page.getByRole('link', { name: /受け取る \(決済QRを作る\)/ });
     await expect(scanCta).toBeVisible();
     await expect(createCta).toBeVisible();
     await expect(scanCta).toHaveAttribute('href', '/ja/scan');
@@ -45,8 +45,7 @@ test.describe('landing / (LP)', () => {
       const result = await page.evaluate(() => {
         const focals = [...document.querySelectorAll('[data-focal]')];
         const overflowing = focals.flatMap((p) => {
-          // 数字が入る枠 (文字サイズの基準 = container-type を持つ要素) を基準に測る。利用料の行は左の列、
-          // 導入メリットはカード (li) そのもの。
+          // 数字が入る枠 (文字サイズの基準 = container-type を持つ要素) を基準に測る。導入メリットはカード (li) そのもの。
           const card = p.closest('[class*="container-type"]') ?? p.closest('li');
           if (!card) return [p.textContent];
           const contentRight = card.getBoundingClientRect().right - Number.parseFloat(getComputedStyle(card).paddingRight);
@@ -224,8 +223,7 @@ test.describe('landing / (LP)', () => {
   }) => {
     await page.goto('/ja');
     await expect(page.getByRole('heading', { name: 'よくある質問' })).toBeVisible();
-    // FAQ 質問は <summary> 要素。featuresGaslessBody が同じ質問文を引用するため
-    // (「…『本当にガス代は不要ですか?』で説明しています」)、getByText だと <p> と二重一致する。
+    // FAQ 質問は <summary> 要素。質問文はほかの節の文と重なり得るので (getByText だと二重一致する)、
     // <summary> に限定して FAQ アコーディオンの質問を一意に取る。
     const q1 = page.locator('summary', { hasText: '本当にガス代は不要ですか?' });
     await expect(q1).toBeVisible();
@@ -308,34 +306,33 @@ test.describe('landing / (LP)', () => {
     await expect(github).toHaveAttribute('rel', 'noopener noreferrer');
   });
 
-  test('ja: OpenPay 利用料 セクション — 説明 + 応援プロフカード (@openpay_jp へ 1 link に集約)', async ({
+  test('ja: 料金の節 — 料金がかかる 4 つの場合 + 料金ページへの入口・応援カードは締め (@openpay_jp へ 1 link)', async ({
     page,
   }) => {
     await page.goto('/ja');
-    const support = page
+    // 料金ページ (/pricing) の冒頭と同じ 4 つの場合のカード (2026-10-12 user 裁定: 長い説明は料金ページへ)。
+    const pricingSection = page
       .locator('section')
-      .filter({ has: page.getByRole('heading', { name: 'OpenPay 利用料について' }) });
-    await expect(support).toBeVisible();
-    // 利用料ポリシーの説明 (recover ピボット後: JPYC ガスレスは利用料あり / 通常決済・顧客 gas 負担の
-    // USDC は対象外=無料) + 応援依頼文。
-    await expect(support.getByText(/売上は預かりません/)).toBeVisible();
-    await expect(
-      support.getByText(/応援いただけると励みになります/),
-    ).toBeVisible();
-    // 利用料の注記の下に、機能ごとの料金と計算例 (/ja/pricing) への入口 (名前 = 可視テキスト)。
-    const pricing = support.getByRole('link', { name: '機能ごとの料金と計算例を見る' });
+      .filter({ has: page.getByRole('heading', { level: 2, name: '料金がかかるのは、この 4 つです' }) });
+    await expect(pricingSection).toBeVisible();
+    await expect(pricingSection.getByRole('listitem')).toHaveCount(4);
+    await expect(pricingSection.getByText(/売上は預かりません/)).toBeVisible();
+    // 機能ごとの料金と計算例 (/ja/pricing) への入口 (名前 = 可視テキスト)。
+    const pricing = pricingSection.getByRole('link', { name: '機能ごとの料金と計算例を見る' });
     await expect(pricing).toBeVisible();
     await expect(pricing).toHaveAttribute('href', '/ja/pricing');
-    // 応援は単一の「応援プロフカード」に集約 (旧トークン別 5 ボタンを撤去)。カード全体が
-    // @openpay_jp プロフ (link-in-bio) への 1 link。a11y 名は内側の可視テキストから導出される
-    // (aria-label は付けない — label-content-name-mismatch を避けるため)。
-    const tipLinks = support.getByRole('link', { name: /応援/ });
-    await expect(tipLinks).toHaveCount(1);
-    const card = support.getByRole('link', { name: /@openpay_jp/ });
-    await expect(card).toHaveAttribute(
-      'href',
-      'https://open-pay.jp/@openpay_jp',
-    );
+    // 料金の節に応援の導線は置かない (締めへ移した)。
+    await expect(pricingSection.getByRole('link', { name: /応援/ })).toHaveCount(0);
+
+    // 応援は締めの節 (オープン技術と透明性の下) の単一の「応援プロフカード」。カード全体が @openpay_jp プロフ
+    // (link-in-bio) への 1 link。a11y 名は内側の可視テキストから導出される (aria-label は付けない — 掟 8)。
+    const closing = page
+      .locator('section')
+      .filter({ has: page.getByRole('heading', { level: 2, name: '人にも、AIにも。オープンな決済を。' }) });
+    await expect(closing.getByText(/応援いただけると励みになります/)).toBeVisible();
+    const card = closing.getByRole('link', { name: /@openpay_jp/ });
+    await expect(card).toHaveCount(1);
+    await expect(card).toHaveAttribute('href', 'https://open-pay.jp/@openpay_jp');
     await expect(card).toHaveAttribute('target', '_blank');
     await expect(card).toHaveAttribute('rel', 'noopener noreferrer');
     // カード内に @handle と CTA が見える (プロフ訴求 + 応援動線)
@@ -343,7 +340,33 @@ test.describe('landing / (LP)', () => {
     await expect(card).toContainText('応援する');
   });
 
-  test('ja: モバイルオーダー訴求バナー — 画像 + 主CTA(/create?tab=mobileOrder) + note 解説リンク', async ({
+  test('ja: ガイドへの入口は「使い方」の中の 4 枚 + すべてのガイド・料金の節は FAQ より前', async ({ page }) => {
+    await page.goto('/ja');
+    const howItWorks = page
+      .locator('section')
+      .filter({ has: page.getByRole('heading', { level: 2, name: '使い方' }) });
+    await expect(howItWorks.getByRole('heading', { level: 3, name: 'ガイドを選ぶ' })).toBeVisible();
+    // 入口はトップでここ 1 か所 (plans/lp-polish-2026-10.md P1-2)。導入前チェックリストが先頭。
+    const tiles = howItWorks.getByRole('list').filter({ has: page.locator('a[href="/ja/guide/start"]') }).getByRole('link');
+    await expect(tiles).toHaveCount(4);
+    expect(await tiles.evaluateAll((links) => links.map((a) => a.getAttribute('href')))).toEqual([
+      '/ja/guide/start',
+      '/ja/guide/qr',
+      '/ja/guide/shop',
+      '/ja/guide/store',
+    ]);
+    await expect(howItWorks.getByRole('link', { name: 'すべてのガイドを見る' })).toHaveAttribute('href', '/ja/guide');
+
+    // 料金の節は「使い方」の後・FAQ の前 (2026-10-12 user 裁定)。
+    const pricingTop = (await page.getByRole('heading', { level: 2, name: '料金がかかるのは、この 4 つです' }).boundingBox())?.y;
+    const faqTop = (await page.getByRole('heading', { level: 2, name: 'よくある質問' }).boundingBox())?.y;
+    const howTop = (await howItWorks.getByRole('heading', { level: 2, name: '使い方' }).boundingBox())?.y;
+    expect(howTop).toBeDefined();
+    expect(pricingTop).toBeGreaterThan(howTop!);
+    expect(faqTop).toBeGreaterThan(pricingTop!);
+  });
+
+  test('ja: モバイルオーダー訴求バナー — 画像 + 主CTA(/create?tab=mobileOrder) + お店向けガイド (/guide/shop)', async ({
     page,
   }) => {
     await page.goto('/ja');
@@ -356,13 +379,9 @@ test.describe('landing / (LP)', () => {
     // 主CTA → /create?tab=mobileOrder (flag に依らず href は固定)。
     const cta = banner.getByRole('link', { name: 'モバイルオーダーを作る' });
     await expect(cta).toHaveAttribute('href', '/ja/create?tab=mobileOrder');
-    // 解説記事 (note) は外部・別タブ。
-    const note = banner.getByRole('link', { name: '詳しい使い方を見る' });
-    await expect(note).toHaveAttribute(
-      'href',
-      'https://note.com/masia02/n/nf19e91b84ef4',
-    );
-    await expect(note).toHaveAttribute('target', '_blank');
-    await expect(note).toHaveAttribute('rel', 'noopener noreferrer');
+    // 副リンクはお店向けのガイド (サイト内)。お客様向けのガイドは /guide/shop とハブから辿る。
+    const guide = banner.getByRole('link', { name: '詳しい使い方を見る' });
+    await expect(guide).toHaveAttribute('href', '/ja/guide/shop');
+    await expect(guide).not.toHaveAttribute('target', '_blank');
   });
 });

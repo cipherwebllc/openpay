@@ -7,8 +7,6 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import sitemap from '@/app/sitemap';
 import { GUIDE_SLUGS, guideHubMetadata, guideNavFor } from '@/lib/guideNav';
-import ja from '@/messages/ja.json';
-import en from '@/messages/en.json';
 
 const LOCALES = ['ja', 'en'] as const;
 const GUIDE_DIR = path.join(process.cwd(), 'app', '[locale]', 'guide');
@@ -104,14 +102,6 @@ describe('guideNav content', () => {
         expect(Object.keys(nav.items)).not.toContain(item.id);
         expect(nav.groups.flatMap((g) => g.items.map((i) => i.slug as string))).not.toContain(item.id);
       }
-    }
-  });
-
-  it('qr / shop の説明は LP の入口 (Landing.entryQrBody / entryShopBody) と同文', () => {
-    for (const [locale, messages] of [['ja', ja], ['en', en]] as const) {
-      const { items } = guideNavFor(locale);
-      expect(items.qr.summary).toBe(messages.Landing.entryQrBody);
-      expect(items.shop.summary).toBe(messages.Landing.entryShopBody);
     }
   });
 

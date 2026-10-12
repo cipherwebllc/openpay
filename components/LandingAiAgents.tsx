@@ -67,12 +67,12 @@ export async function LandingAiAgents() {
         </div>
       </div>
 
-      {/* 主導線は /agent (Agent を接続して試す)。/agent は flag なしで常に公開。 */}
+      {/* 主導線は /agent (Agent を接続して試す)。/agent は flag なしで常に公開。ボタンの形 (角丸・高さ 44px) はガイドとそろえる。 */}
       <div className="mt-8 flex flex-col items-center">
         <Link
           href={`/${locale}/agent`}
           prefetch={false}
-          className="inline-flex w-full items-center justify-center whitespace-nowrap rounded-full bg-blue-600 px-6 py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 active:scale-[0.98] sm:w-auto sm:text-base"
+          className="inline-flex min-h-11 w-full items-center justify-center whitespace-nowrap rounded-xl bg-blue-600 px-6 py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 active:scale-[0.98] sm:w-auto sm:text-base"
         >
           {t('aiEraCtaAgent')}
         </Link>
@@ -86,7 +86,7 @@ export async function LandingAiAgents() {
           <Link
             href={`/${locale}/discovery`}
             prefetch={false}
-            className="inline-flex items-center justify-center whitespace-nowrap rounded-full border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700 shadow-sm transition-colors hover:border-blue-300 hover:text-brand active:scale-[0.98] sm:px-5 sm:py-2.5 sm:text-sm"
+            className="inline-flex min-h-11 items-center justify-center whitespace-nowrap rounded-xl bg-white px-4 text-sm font-semibold text-slate-700 ring-1 ring-inset ring-slate-300 transition-colors hover:bg-slate-50 hover:text-brand active:scale-[0.98] sm:px-5"
           >
             {t('aiEraCtaStore')}
           </Link>
@@ -94,14 +94,14 @@ export async function LandingAiAgents() {
         <Link
           href={`/${locale}/guide/ai-pay`}
           prefetch={false}
-          className="inline-flex items-center justify-center whitespace-nowrap rounded-full border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700 shadow-sm transition-colors hover:border-blue-300 hover:text-brand active:scale-[0.98] sm:px-5 sm:py-2.5 sm:text-sm"
+          className="inline-flex min-h-11 items-center justify-center whitespace-nowrap rounded-xl bg-white px-4 text-sm font-semibold text-slate-700 ring-1 ring-inset ring-slate-300 transition-colors hover:bg-slate-50 hover:text-brand active:scale-[0.98] sm:px-5"
         >
           {t('aiEraCtaPay')}
         </Link>
         <Link
           href={`/${locale}/guide/sell`}
           prefetch={false}
-          className="inline-flex items-center justify-center whitespace-nowrap rounded-full border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700 shadow-sm transition-colors hover:border-blue-300 hover:text-brand active:scale-[0.98] sm:px-5 sm:py-2.5 sm:text-sm"
+          className="inline-flex min-h-11 items-center justify-center whitespace-nowrap rounded-xl bg-white px-4 text-sm font-semibold text-slate-700 ring-1 ring-inset ring-slate-300 transition-colors hover:bg-slate-50 hover:text-brand active:scale-[0.98] sm:px-5"
         >
           {t('aiEraCtaSell')}
         </Link>

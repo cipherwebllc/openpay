@@ -1,7 +1,7 @@
 // USDC → JPY レート (Coinbase の公開 API・lib/usdcJpyRate.ts) を取得して JSON で返す軽量プロキシ。
 //
 // 目的:
-//   - LP と /create の MarketRates strip 用の単一データソース
+//   - /create・履歴の円換算用の単一データソース
 //   - 取得元への直接 client fetch は IP ごとの rate limit に当たりやすいため、
 //     Next route で集約 + revalidate: 300 で server 側 1 req/5min
 //     に圧縮 (per-IP ではなく per-region/edge cache)

@@ -258,7 +258,7 @@ OpenPay **never holds** merchant funds. Customer payments are sent **directly to
 Pages above the leaf surfaces share an `AppShell` with a sticky header (logo + wallet badge + locale + network pill) and a mobile bottom-nav. The leaf surfaces stay distraction-free intentionally.
 
 **Merchant**:
-1. Open <https://open-pay.jp> and click **🏪 受け取る (決済 QR を作る)** — or go directly to `/create`.
+1. Open <https://open-pay.jp> and click **🏪 受け取る (決済QRを作る)** — or go directly to `/create`.
 2. Enter the merchant wallet address.
 3. Enter the amount, select token + chain + payment mode.
 4. Show or share the QR code or payment link. The latest 3 received payments appear under the form once any exist.

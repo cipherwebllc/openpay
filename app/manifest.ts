@@ -5,7 +5,7 @@ export default function manifest(): MetadataRoute.Manifest {
     name: 'OpenPay',
     short_name: 'OpenPay',
     description:
-      'ウォレットアドレス 1 つで導入できる、ガスレス決済 QR & Tip widget。',
+      'ウォレットアドレス 1 つで導入できる、ガスレス決済QR & Tip widget。',
     start_url: '/',
     scope: '/',
     display: 'standalone',

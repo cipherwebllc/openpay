@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import ja from '@/messages/ja.json';
 import en from '@/messages/en.json';
 import { LandingBenefits } from '@/components/LandingBenefits';
+import { PRICING } from '@/lib/pricing';
 import { LandingSupport } from '@/components/LandingSupport';
 import { LandingCashComparison } from '@/components/LandingCashComparison';
 import QrGuide from '@/app/[locale]/guide/qr/page';
@@ -47,7 +48,6 @@ vi.mock('@/lib/legal', async (importOriginal) => ({
 describe.each(['ja', 'en'] as const)('%s: rendered public fee disclosure', (locale) => {
   const surfaces = [
     ['benefits', () => LandingBenefits()],
-    ['support', () => LandingSupport()],
     ['comparison', () => LandingCashComparison()],
     ['QR guide', () => QrGuide({ params: Promise.resolve({ locale }) })],
     ['shop guide', () => ShopGuide({ params: Promise.resolve({ locale }) })],
@@ -71,13 +71,31 @@ describe.each(['ja', 'en'] as const)('%s: rendered public fee disclosure', (loca
       : 'up to 0.25% of the payment; up to 0.005 USDC for payments under 2 USDC');
   });
 
-  // チップカードは トップ (LandingSupport) と導入前チェックリスト (start guide) に出る。本文の数字は直書きせず、
+  // チップカードは導入前チェックリスト (start guide) に出る。本文の数字は直書きせず、
   // ガス相当額 (tipFloor) と、適用しない決済額の % (recoverPercent) を差し込む。
-  it.each(surfaces.filter(([name]) => name === 'support' || name === 'start guide'))('%s: tip card body interpolates the tip floor and the recover percent', async (_, surface) => {
+  // (トップの利用料は 2026-10-12 から料金ページと同じ「4 つの場合」のカード = 下の support のテスト)
+  it.each(surfaces.filter(([name]) => name === 'start guide'))('%s: tip card body interpolates the tip floor and the recover percent', async (_, surface) => {
     context.locale = locale;
     const { container } = render(await surface());
     expect(container).toHaveTextContent(locale === 'ja' ? '約 7 JPYC' : 'about 7 JPYC');
     expect(container).toHaveTextContent(locale === 'ja' ? '決済額の 1.7% は適用しません' : 'the 1.7% does not apply');
+  });
+
+  // トップの利用料は料金ページ冒頭と同じ「料金がかかる 4 つの場合」(lib/pricing.ts の summary・料率は DISCLOSED_*)。
+  // 機能ごとの長い説明 (supportFee*Body) はトップに出さない (2026-10-12 user 裁定・料金ページとガイドに残る)。
+  it('support: 料金がかかる 4 つの場合のカード (料金ページと同じ)・リードは料金ページの承認済みの文', async () => {
+    context.locale = locale;
+    const { container } = render(await LandingSupport());
+    const pricing = PRICING[locale];
+    expect(container).toHaveTextContent(pricing.lead);
+    for (const item of pricing.summary) {
+      const card = within(container).getByRole('heading', { level: 3, name: item.name }).closest('li')!;
+      expect(card).toHaveTextContent(item.focal);
+      expect(card).toHaveTextContent(item.feeName);
+      expect(card).toHaveTextContent(item.payer.label);
+    }
+    const m = (locale === 'ja' ? ja : en).Landing;
+    expect(container).not.toHaveTextContent(m.supportFeeRegisterTitle);
   });
 
   // 利用料カードの下 (supportFeeNote の下) に、機能ごとの料金と計算例 (/{locale}/pricing) への入口。

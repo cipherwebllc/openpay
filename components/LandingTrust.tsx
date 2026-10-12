@@ -3,6 +3,7 @@
 
 import Link from 'next/link';
 import { getLocale, getTranslations } from 'next-intl/server';
+import { LandingSupportCard } from '@/components/LandingSupportCard';
 
 export async function LandingTrust() {
   const [locale, t] = await Promise.all([
@@ -28,7 +29,7 @@ export async function LandingTrust() {
           <Link
             href={`/${locale}/create`}
             prefetch={false}
-            className="inline-flex w-full items-center justify-center rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-all hover:-translate-y-0.5 hover:bg-blue-700 hover:shadow-card-hover active:translate-y-0 active:scale-[0.98] sm:w-auto"
+            className="inline-flex min-h-11 w-full items-center justify-center rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-all hover:-translate-y-0.5 hover:bg-blue-700 hover:shadow-card-hover active:translate-y-0 active:scale-[0.98] sm:w-auto"
           >
             {t('closingCtaStart')}
           </Link>
@@ -36,7 +37,7 @@ export async function LandingTrust() {
             href="https://github.com/cipherwebllc/openpay"
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-white px-5 py-2.5 text-sm font-semibold text-slate-900 shadow-sm transition-all hover:-translate-y-0.5 hover:bg-slate-100 hover:shadow-card-hover active:translate-y-0 active:scale-[0.98] sm:w-auto"
+            className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-white px-5 py-2.5 text-sm font-semibold text-slate-900 shadow-sm transition-all hover:-translate-y-0.5 hover:bg-slate-100 hover:shadow-card-hover active:translate-y-0 active:scale-[0.98] sm:w-auto"
           >
             <GithubIcon />
             {t('trustGithubLabel')} ↗
@@ -51,9 +52,11 @@ export async function LandingTrust() {
             {t('trustBody')}
           </p>
         </div>
+        {/* 運営の応援 (オープンな運営の文脈で・料金の節から移した)。 */}
+        <LandingSupportCard />
         {/* 技術スタックは開発者向け補足として小さく出す (一般読者には trustBody
             だけで充足、開発者は具体技術名で OpenPay の構成を検証できる)。 */}
-        <p className="mx-auto mt-6 max-w-2xl text-[11px] leading-relaxed text-slate-400">
+        <p className="mx-auto mt-6 max-w-2xl text-xs leading-relaxed text-slate-400">
           {t('trustTechStack')}
         </p>
       </div>

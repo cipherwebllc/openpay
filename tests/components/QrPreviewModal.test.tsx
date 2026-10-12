@@ -9,7 +9,7 @@ import en from '@/messages/en.json';
 const LABELS = {
   title: '決済用 QR コード',
   close: '閉じる',
-  eyebrow: 'OpenPay ステーブルコイン決済 QR',
+  eyebrow: 'OpenPay ステーブルコイン決済QR',
   print: '印刷',
   copy: 'URLをコピー',
   copied: 'コピー済み',
