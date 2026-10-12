@@ -4,6 +4,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import GuidePayPage, { generateMetadata } from '@/app/[locale]/guide/pay/page';
+import { HOWTO_VIDEO_UI } from '@/lib/howtoVideos';
 import { guideNavFor } from '@/lib/guideNav';
 import { payGuideContentFor } from '@/lib/payGuide';
 
@@ -22,9 +23,12 @@ describe('/guide/pay', () => {
     expect(screen.getByText(c.lead)).toBeInTheDocument();
 
     // 本文の見出しの順 (このページの内容に載る節 → 関連ガイド → 末尾の行動ボタンの箱)。
+    // 使い方動画は日本語なので ja だけ、手順の後に「動画で見る」の節 (目次には載せない)。
+    const video = locale === 'ja' ? [HOWTO_VIDEO_UI.sectionTitle] : [];
     expect(within(article).getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual([
       c.needTitle,
       c.stepsTitle,
+      ...video,
       c.signTitle,
       c.receiptTitle,
       c.jpycTitle,
@@ -34,7 +38,7 @@ describe('/guide/pay', () => {
     ]);
     // 関連ガイドと行動ボタンの箱は「このページの内容」に載せない。
     const skipped = [...article.querySelectorAll('h2[data-toc="skip"]')].map((h) => h.textContent);
-    expect(skipped).toEqual([c.relatedTitle, c.ctaTitle]);
+    expect(skipped).toEqual([...video, c.relatedTitle, c.ctaTitle]);
 
     // 手順は 6 つ・お客様の番号 (blue)。
     const steps = screen.getByRole('heading', { level: 2, name: c.stepsTitle }).closest('section')!;

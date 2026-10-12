@@ -2,7 +2,7 @@
 //
 // content SOT は lib/payGuide.ts (ja/en 同梱・構成は 2026-10-12 user 承認)。h1 は目次の名前 (lib/guideNav.ts)。
 // お客様の手順なので番号のバッジは blue (STEP_BADGE_CUSTOMER・お店 = emerald / お客様 = blue)。
-// 料金は本文に書かず /pricing へのリンクにする (掟 14)。使い方動画は YouTube の公開後に別 PR で足す (lib/howtoVideos.ts)。
+// 料金は本文に書かず /pricing へのリンクにする (掟 14)。使い方動画 (lib/howtoVideos.ts の pay・画面はサンプル) は支払いの流れの後。
 // SEO 価値がある集客コンテンツなので noindex は設定しない (guide/* 共通方針)。
 // 掟 3: このファイルは default / generateMetadata 以外を export しない。
 
@@ -13,10 +13,12 @@ import { AppShell } from '@/components/AppShell';
 import { GuideFrame } from '@/components/guide/GuideFrame';
 import { GuideCallout } from '@/components/guide/GuideCallout';
 import { GuideFaq } from '@/components/guide/GuideFaq';
+import { GuideVideo } from '@/components/guide/GuideVideo';
 import { GUIDE_PRIMARY_ACTION, GuideActions, GuideLead, GuideSubtitle, GuideTitle } from '@/components/guide/GuideHeader';
 import { GuideToc } from '@/components/guide/GuideToc';
 import { BulletList, STEP_BADGE_CUSTOMER, Section, StepList } from '@/components/guide/PosGuidePieces';
 import { guideNavFor } from '@/lib/guideNav';
+import { HOWTO_VIDEO_UI, howtoVideoFor } from '@/lib/howtoVideos';
 import { payGuideContentFor, payGuideMetadata } from '@/lib/payGuide';
 
 export async function generateMetadata({
@@ -39,6 +41,7 @@ export default async function GuidePayPage({
   const c = payGuideContentFor(locale);
   const nav = guideNavFor(locale);
   const scanHref = `/${locale}${c.scanCta.path}`;
+  const video = howtoVideoFor(locale, 'pay');
 
   return (
     <AppShell>
@@ -62,6 +65,13 @@ export default async function GuidePayPage({
           <StepList steps={c.steps} badgeClassName={STEP_BADGE_CUSTOMER} />
           <GuideCallout kind="tip">{c.stepsTip}</GuideCallout>
         </Section>
+
+        {/* 動画は手順の後 (流れを読んでから、同じ流れを動画で確かめる・ja だけ)。 */}
+        {video && (
+          <Section title={HOWTO_VIDEO_UI.sectionTitle} toc={false}>
+            <GuideVideo video={video} />
+          </Section>
+        )}
 
         <Section title={c.signTitle}>
           <p className="mt-3 text-sm leading-relaxed text-slate-700">{c.signLead}</p>
