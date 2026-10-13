@@ -215,8 +215,23 @@ export default async function GuideStartPage({
             {section.callout ? (
               <Callout kind={section.callout.kind} text={section.callout.text} />
             ) : null}
-            {section.externalLinks ? (
+            {section.guideLinks ? (
               <ul className="mt-3 space-y-1.5">
+                {section.guideLinks.map((link) => (
+                  <li key={link.path}>
+                    <Link
+                      href={`/${locale}${link.path}`}
+                      prefetch={false}
+                      className="text-sm font-semibold text-emerald-700 underline-offset-2 hover:underline"
+                    >
+                      {link.label} →
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+            {section.externalLinks ? (
+              <ul className={`${section.guideLinks ? 'mt-1.5' : 'mt-3'} space-y-1.5`}>
                 {section.externalLinks.map((link) => (
                   <li key={link.href}>
                     <a

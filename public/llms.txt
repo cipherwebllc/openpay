@@ -27,6 +27,7 @@ OpenPay is an open-source, non-custodial payment layer for the Japanese yen stab
 - [レジ・モバイルオーダーガイド](https://open-pay.jp/ja/guide/shop): 商品・メニューを一度登録して店頭レジとモバイルオーダーで共通利用する店舗運営者向け LP 兼ガイド (受注管理・売上履歴・電子レシート・会計 CSV)
 - [今お使いの POS レジとの併用ガイド](https://open-pay.jp/ja/guide/pos): 既存のPOSレジと併用する運用ガイド
 - [JPYC で支払う](https://open-pay.jp/ja/guide/pay): お客様向け。お店の OpenPay の QR を読み取って、自分のウォレットから JPYC で支払う手順 (「スキャンして支払う」・ウォレット接続・ガスレス決済の署名は 1 回で Approve を求めない・電子レシートはこのブラウザにだけ保存・JPYC の入手は JPYC 公式・うまくいかないときの対処)
+- [ウォレットを選ぶ](https://open-pay.jp/ja/guide/wallet): お客様向け。JPYC で支払うためのウォレットの選び方 (MetaMask が基本・初めての方には JPYC EX が組み込まれた HashPort Wallet / マイナウォレット)・お店の QR はスマホのカメラか「スキャンして支払う」で読み取る (HashPort Wallet・マイナウォレットのアプリの QR 読み取りでは開けない・MetaMask は開ける)・WalletConnect でのつなぎ方
 - [モバイルオーダーのやり方](https://open-pay.jp/ja/guide/mobile-order): お店の QR を読み取って、スマホで注文・支払い。アプリのインストールは要りません。
 - [店頭キット](https://open-pay.jp/ja/kit): 決済QRポスター等の印刷キット
 - [受け取りを始める](https://open-pay.jp/ja/create): 決済QR・モバイルオーダーの作成

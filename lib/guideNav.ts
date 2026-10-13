@@ -18,6 +18,7 @@ export const GUIDE_SLUGS = [
   'shop',
   'pos',
   'pay',
+  'wallet',
   'mobile-order',
   'agent',
   'store',
@@ -33,7 +34,7 @@ type GuideGroupId = 'shops' | 'customers' | 'creators' | 'ai' | 'more';
 // グループと並びは ja/en 共通 (文言だけをロケールごとに持つ)。
 const GUIDE_GROUPS: readonly { id: GuideGroupId; slugs: readonly GuideSlug[] }[] = [
   { id: 'shops', slugs: ['start', 'qr', 'shop', 'pos'] },
-  { id: 'customers', slugs: ['pay', 'mobile-order', 'agent'] },
+  { id: 'customers', slugs: ['pay', 'wallet', 'mobile-order', 'agent'] },
   { id: 'creators', slugs: ['store'] },
   { id: 'ai', slugs: ['ai-pay', 'sell'] },
   { id: 'more', slugs: ['image-url'] },
@@ -106,6 +107,10 @@ const JA: GuideNavCopy = {
     pay: {
       label: 'JPYC で支払う',
       summary: 'お店の QR を読み取って、自分のウォレットで支払う。いちばん基本の支払い方です。',
+    },
+    wallet: {
+      label: 'ウォレットを選ぶ',
+      summary: '支払いに使うウォレットの選び方と、お店の QR の読み取り方・つなぎ方。',
     },
     'mobile-order': {
       label: 'モバイルオーダーのやり方',
@@ -180,6 +185,10 @@ const EN: GuideNavCopy = {
       label: 'Pay with JPYC',
       summary: "Scan the shop's QR code and pay from your own wallet. The most basic way to pay.",
     },
+    wallet: {
+      label: 'Choosing a wallet',
+      summary: "Which wallet to pay with, how to scan the shop's QR and how to connect.",
+    },
     'mobile-order': {
       label: 'How to use mobile order',
       summary: "Scan the shop's QR code, then order and pay on your phone. No app to install.",
@@ -201,7 +210,7 @@ const EN: GuideNavCopy = {
       summary: 'Add a 402 gate to your existing API and turn it into a product AI can buy.',
     },
     'image-url': {
-      label: 'How to prepare an image URL',
+      label: 'Preparing an image URL',
       summary: 'How to get an image URL for your profile, products and shop icon.',
     },
   },

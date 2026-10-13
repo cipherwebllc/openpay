@@ -192,6 +192,12 @@ export const ROUTE_CLIENT_NAMESPACES = {
     'Nav',
     'News',
   ],
+  'guide/wallet': [
+    'ConnectButton',
+    'LocaleSwitcher',
+    'Nav',
+    'News',
+  ],
   'guide/pos': [
     'ConnectButton',
     'LocaleSwitcher',

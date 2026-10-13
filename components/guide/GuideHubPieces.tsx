@@ -18,6 +18,7 @@ import {
   ScanLine,
   Smartphone,
   Store,
+  Wallet,
   type LucideIcon,
 } from 'lucide-react';
 import { STEP_BADGE } from '@/components/guide/PosGuidePieces';
@@ -31,6 +32,7 @@ const GUIDE_ICONS: Record<GuideSlug, LucideIcon> = {
   shop: Store,
   pos: Calculator,
   pay: ScanLine,
+  wallet: Wallet,
   'mobile-order': Smartphone,
   agent: Languages,
   store: Palette,

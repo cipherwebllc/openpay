@@ -1,9 +1,16 @@
-// お客様のウォレットの案内 (選び方 + WalletConnect のつなぎ方) の content SOT (ja/en)。
-// 「JPYC で支払う」(lib/payGuide.ts) と「モバイルオーダーのやり方」(app/[locale]/guide/mobile-order) の両方が使う
-// (片方だけ直してずれないよう 1 か所に)。描画は components/guide/WalletChoice.tsx。
+// /guide/wallet「ウォレットを選ぶ」(お客様向け) の content SOT (ja/en)。2026-10-13 user「ウォレットを選ぶだけでページ作った方が良い」。
+// 選び方・お店の QR の読み取り方・WalletConnect のつなぎ方をこの 1 ページにまとめ、「JPYC で支払う」(app/[locale]/guide/pay) と
+// 「モバイルオーダーのやり方」(app/[locale]/guide/mobile-order) には短い案内 (summary) とこのページへのリンクだけを置く
+// (components/guide/WalletSummary.tsx・片方だけ直してずれないよう文言は 1 か所に)。
 // user 方針 (2026-10-13): MetaMask が基本・初めての方には JPYC EX が組み込まれた HashPort Wallet / マイナウォレット
 // (どちらも OpenPay の決済完了まで user が確認済み)。つなぎ方は WalletConnect で、一覧は英語なので検索の言葉まで書く。
-// ⚠️ 料率・チェーン名・「無料」/free は書かない (tests/lib/payGuide.test.ts が payGuide 経由でこの文言も検査する)。
+// お店の QR (OpenPay の支払いの URL) は、ウォレットのアプリの QR 読み取りでは開けないことがある (2026-10-13 user が実機で確認:
+// MetaMask は外部リンクとして開ける・マイナウォレットは動かない・HashPort Wallet は「支払い」で読むと「このQRコードでは
+// 支払えません。支払い用QRをご確認ください。」と出る) → スマホのカメラか「スキャンして支払う」で読む。
+// ⚠️ 料率・チェーン名・「無料」/free は書かない (tests/lib/walletGuide.test.ts が検査する)。
+
+import type { Metadata } from 'next';
+import { guidePageMetadata } from '@/lib/guideMetadata';
 
 export type WalletGuideStep = {
   readonly n: number;
@@ -11,18 +18,56 @@ export type WalletGuideStep = {
   readonly body: string;
 };
 
+/** サイト内のページへのリンク (path は locale なし・描画側で `/${locale}` を前に付ける)。 */
+export type WalletGuideLink = {
+  readonly path: string;
+  readonly label: string;
+};
+
 export type WalletGuideContent = {
-  readonly walletTitle: string;
+  readonly metaTitle: string;
+  readonly metaDescription: string;
+  readonly subtitle: string;
+  readonly lead: string;
+  /** ページの頭の行動ボタン (「スキャンして支払う」= /scan)。 */
+  readonly scanCta: WalletGuideLink;
+
+  /** 「JPYC で支払う」「モバイルオーダーのやり方」に置く短い案内と、このページへのリンクの文字。 */
+  readonly summary: string;
+  readonly summaryLink: string;
+
+  readonly walletsTitle: string;
   readonly walletLead: string;
   readonly wallets: readonly { readonly name: string; readonly body: string }[];
   readonly walletNote: string;
+
+  readonly scanTitle: string;
+  readonly scanLead: string;
+  readonly scanWays: readonly { readonly name: string; readonly body: string }[];
+  readonly scanNote: string;
+
   readonly wcTitle: string;
   readonly wcSteps: readonly WalletGuideStep[];
+  /** パソコンで支払い画面を開いたときの WalletConnect の QR (お店の QR とは別)。 */
   readonly wcTip: string;
+
+  readonly relatedTitle: string;
+  readonly related: readonly WalletGuideLink[];
 };
 
-export const WALLET_GUIDE_JA: WalletGuideContent = {
-  walletTitle: 'ウォレットを選ぶ',
+const JA: WalletGuideContent = {
+  metaTitle: 'ウォレットを選ぶ — JPYC で支払うためのウォレットとつなぎ方',
+  metaDescription:
+    'OpenPay で JPYC を支払うためのウォレットの選び方。MetaMask が基本で、初めての方には HashPort Wallet やマイナウォレットもおすすめ。お店の QR の読み取り方と、WalletConnect でのつなぎ方。',
+  subtitle: 'JPYC で支払うための、ウォレットの選び方とつなぎ方。',
+  lead: 'OpenPay で支払うには、JPYC が入った自分のウォレットが要ります。OpenPay のアプリのインストールや会員登録は要りません。おすすめのウォレットと、お店の QR の読み取り方、ウォレットのつなぎ方をまとめました。',
+  scanCta: { path: '/scan', label: 'スキャンして支払う' },
+
+  summary:
+    'MetaMask が基本です。初めての方には、アプリの中で JPYC の発行・償還ができる HashPort Wallet やマイナウォレットもおすすめです。お店の QR は、スマホのカメラか「スキャンして支払う」で読み取ってください (HashPort Wallet やマイナウォレットのアプリの QR 読み取りでは開けません)。',
+  summaryLink: 'ウォレットの選び方・QR の読み取り方・つなぎ方',
+
+  walletsTitle: 'おすすめのウォレット',
   walletLead:
     'MetaMask が基本です。初めての方には、アプリの中に JPYC EX が組み込まれていて、JPYC を手に入れる (発行) ことも日本円に戻す (償還) こともアプリの中でできる、HashPort Wallet やマイナウォレットもおすすめです。',
   wallets: [
@@ -40,7 +85,23 @@ export const WALLET_GUIDE_JA: WalletGuideContent = {
     },
   ],
   walletNote:
-    'アプリの中で発行・償還するときも、JPYC EX の登録と本人確認が必要です。くわしくは各ウォレットと JPYC 公式の案内をご覧ください。',
+    'お店の受け取り用にも、同じウォレットが使えます。アプリの中で発行・償還するときも、JPYC EX の登録と本人確認が必要です。くわしくは各ウォレットと JPYC 公式の案内をご覧ください。',
+
+  scanTitle: 'お店の QR の読み取り方',
+  scanLead: 'お店の QR は、次のどちらかで読み取ります。支払い画面が開いたら、そこでウォレットをつなぎます。',
+  scanWays: [
+    {
+      name: 'スマホのカメラ',
+      body: 'カメラのアプリで QR を写すと、ブラウザで支払い画面が開きます。',
+    },
+    {
+      name: '「スキャンして支払う」',
+      body: 'OpenPay の「決済」から開いて、「カメラを起動」で読み取ります。先にウォレットをつないでおけば、お店では読み取って承認するだけです。',
+    },
+  ],
+  scanNote:
+    'お店の QR は、ウォレットのアプリの QR 読み取りでは開けないことがあります。MetaMask は開けますが、HashPort Wallet とマイナウォレットは開けません (HashPort Wallet の「支払い」で読み取ると「このQRコードでは支払えません」と出ます)。スマホのカメラか「スキャンして支払う」で読み取ってください。',
+
   wcTitle: 'WalletConnect でつなぐ',
   wcSteps: [
     {
@@ -64,11 +125,28 @@ export const WALLET_GUIDE_JA: WalletGuideContent = {
       body: '「支払う」を押すと、ウォレットのアプリに確認の画面が出ます (出ないときはアプリを開きます)。金額と送り先を確かめて承認し、ブラウザに戻ります。',
     },
   ],
-  wcTip: 'パソコンで支払い画面を開いたときは、表示された QR を、スマホのウォレットのアプリで読み取ってつなぎます。',
+  wcTip: 'パソコンで支払い画面を開いたときは、そこに出る接続用の QR を、スマホのウォレットのアプリで読み取ってつなぎます (お店の QR とは別のものです)。',
+
+  relatedTitle: '関連ガイド',
+  related: [
+    { path: '/guide/pay', label: 'JPYC で支払う' },
+    { path: '/guide/mobile-order', label: 'モバイルオーダーのやり方' },
+  ],
 };
 
-export const WALLET_GUIDE_EN: WalletGuideContent = {
-  walletTitle: 'Choosing a wallet',
+const EN: WalletGuideContent = {
+  metaTitle: 'Choosing a wallet — wallets for paying with JPYC and how to connect them',
+  metaDescription:
+    'Which wallet to use for paying with JPYC on OpenPay. MetaMask is the standard; if you are new to wallets, HashPort Wallet and MynaWallet are good choices too. How to scan the shop’s QR and how to connect with WalletConnect.',
+  subtitle: 'Which wallet to use for paying with JPYC, and how to connect it.',
+  lead: 'To pay with OpenPay you need your own wallet with JPYC in it. You do not need to install an OpenPay app or sign up. Here are the recommended wallets, how to scan the shop’s QR, and how to connect your wallet.',
+  scanCta: { path: '/scan', label: 'Scan to pay' },
+
+  summary:
+    'MetaMask is the standard. If you are new to wallets, HashPort Wallet and MynaWallet are good choices too: you can issue and redeem JPYC inside these apps. Scan the shop’s QR with your phone camera or with “Scan to pay” (the QR scanners in the HashPort Wallet and MynaWallet apps cannot open it).',
+  summaryLink: 'Choosing a wallet, scanning the QR and connecting',
+
+  walletsTitle: 'Recommended wallets',
   walletLead:
     'MetaMask is the standard. If you are new to wallets, HashPort Wallet and MynaWallet are good choices too: JPYC EX is built into these apps, so you can get JPYC (issuance) and turn it back into yen (redemption) inside the app.',
   wallets: [
@@ -86,7 +164,23 @@ export const WALLET_GUIDE_EN: WalletGuideContent = {
     },
   ],
   walletNote:
-    'Issuing or redeeming inside these apps still requires a JPYC EX account and identity verification. See the guidance from each wallet and from JPYC for details.',
+    'The same wallets work for receiving at your shop. Issuing or redeeming inside these apps still requires a JPYC EX account and identity verification. See the guidance from each wallet and from JPYC for details.',
+
+  scanTitle: 'Scanning the shop’s QR',
+  scanLead: 'Scan the shop’s QR in one of these two ways. Once the payment screen opens, connect your wallet there.',
+  scanWays: [
+    {
+      name: 'Your phone camera',
+      body: 'Point the camera app at the QR and the payment screen opens in your browser.',
+    },
+    {
+      name: '“Scan to pay”',
+      body: 'Open it from “Pay” in OpenPay and scan with “Start camera”. If you connect your wallet beforehand, at the shop you only scan and approve.',
+    },
+  ],
+  scanNote:
+    'The QR scanner inside a wallet app may not open the shop’s QR. MetaMask can, but HashPort Wallet and MynaWallet cannot (scanning it with “支払い” (Pay) in HashPort Wallet shows a message that the QR cannot be used for payment). Scan with your phone camera or with “Scan to pay” instead.',
+
   wcTitle: 'Connecting with WalletConnect',
   wcSteps: [
     {
@@ -110,9 +204,25 @@ export const WALLET_GUIDE_EN: WalletGuideContent = {
       body: 'When you tap pay, a confirmation appears in the wallet app (open the app if it does not). Check the amount and the recipient, approve, then return to the browser.',
     },
   ],
-  wcTip: 'If you opened the payment screen on a computer, scan the QR shown there with the wallet app on your phone to connect.',
+  wcTip: 'If you opened the payment screen on a computer, scan the connection QR shown there with the wallet app on your phone (this is not the shop’s QR).',
+
+  relatedTitle: 'Related guides',
+  related: [
+    { path: '/guide/pay', label: 'Pay with JPYC' },
+    { path: '/guide/mobile-order', label: 'How to use mobile order' },
+  ],
 };
 
 export function walletGuideContentFor(locale: string): WalletGuideContent {
-  return locale === 'en' ? WALLET_GUIDE_EN : WALLET_GUIDE_JA;
+  return locale === 'en' ? EN : JA;
+}
+
+export function walletGuideMetadata(locale: string): Metadata {
+  const c = walletGuideContentFor(locale);
+  return guidePageMetadata({
+    locale,
+    path: '/guide/wallet',
+    title: `${c.metaTitle} · OpenPay`,
+    description: c.metaDescription,
+  });
 }

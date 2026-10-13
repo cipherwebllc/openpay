@@ -36,6 +36,8 @@ export type StartGuideSection = {
     readonly label: string;
     readonly href: string;
   }[];
+  /** サイト内のガイドへのリンク (path は locale なし・同じタブで開く)。外部リンクより前に出す。 */
+  readonly guideLinks?: readonly { readonly label: string; readonly path: `/${string}` }[];
   /** 本文中の図版 (public/guide/*.svg・寸法は PosGuidePieces の FIGURE_DIMS)。 */
   readonly figure?: GuideImage;
   /** messages 側の開示を差し込む位置 (数値の直書きを増やさないため)。 */
@@ -102,13 +104,14 @@ const JA: StartGuideContent = {
       body: [
         'OpenPay で JPYC を受け取るには、対応ウォレットを用意します。店舗でもクリエイターでも、受け取る側の流れは 3 ステップです。',
         'JPYC そのものを手に入れるなら、発行元の JPYC EX が使えます。本人確認のうえ発行予約をし、指定の銀行口座へ日本円を振り込むと、登録したウォレットに JPYC が届きます。',
-        'お店の受け取り用には、Google・LINE・メールで作れる UPBOND Wallet も使えます (お客様の支払い用には使えません)。受け取りにガス代はかかりませんが、UPBOND から送るとき (返金・JPYC EX での償還) は、ガス代として少額の POL が必要です。',
+        'ウォレットは MetaMask が基本です。初めての方には、アプリの中で JPYC の発行・償還ができる HashPort Wallet やマイナウォレットもおすすめです。選び方は「ウォレットを選ぶ」にまとめています。',
       ],
       flow: ['ウォレットを準備', 'OpenPay に接続', '受取先を設定'],
       callout: {
         kind: 'warn',
         text: 'JPYC EX が対応するチェーンと、OpenPay が決済に対応するチェーンは同じではありません。受け取ったチェーンと決済で使うチェーンが噛み合うかは、導入時に必ず確認してください。',
       },
+      guideLinks: [{ label: 'ウォレットを選ぶ', path: '/guide/wallet' }],
       externalLinks: [
         { label: 'JPYC 公式サイトで最新条件を見る', href: JPYC_OFFICIAL },
         {
@@ -293,13 +296,14 @@ const EN: StartGuideContent = {
       body: [
         'To receive JPYC through OpenPay you need a supported wallet. Whether you run a shop or sell as a creator, receiving is three steps.',
         'To obtain JPYC itself, you can use JPYC EX, run by the issuer. After identity verification you reserve an issuance and wire yen to the specified bank account; JPYC then arrives in your registered wallet.',
-        'For receiving at your shop, you can also use UPBOND Wallet, which you create with Google, LINE or email. Receiving costs no gas, but sending from UPBOND (refunds or redemption at JPYC EX) needs a small amount of POL for gas. It cannot be used to pay as a customer.',
+        'MetaMask is the standard wallet. If you are new to wallets, HashPort Wallet and MynaWallet are good choices too: you can issue and redeem JPYC inside these apps. See “Choosing a wallet” for how to choose.',
       ],
       flow: ['Set up a wallet', 'Connect to OpenPay', 'Set the receiving address'],
       callout: {
         kind: 'warn',
         text: 'The chains JPYC EX supports and the chains OpenPay settles on are not the same set. Before you roll out, confirm that the chain you receive on matches the chain you intend to accept payments on.',
       },
+      guideLinks: [{ label: 'Choosing a wallet', path: '/guide/wallet' }],
       externalLinks: [
         {
           label: 'Check current terms on the JPYC official site',

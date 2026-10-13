@@ -9,6 +9,7 @@ import { describe, it, expect } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { startGuideContentFor, startGuideMetadata } from '@/lib/startGuide';
+import { guideNavFor } from '@/lib/guideNav';
 import { ORDER_LIST_MAX, ORDER_LIST_TTL_SEC } from '@/lib/orderRelay';
 import { TIP_MESSAGE_TTL_SEC } from '@/lib/tipMessages';
 
@@ -174,6 +175,18 @@ describe('startGuide content', () => {
       const hrefs = links.map((l) => l.href);
       expect(hrefs).toContain('https://jpyc.co.jp/');
       expect(hrefs).toContain('https://note.com/masia02/n/ned04a4cdb00a');
+    }
+  });
+
+  // 2026-10-13 user: UPBOND Wallet はウェブウォレットで癖がある (送るとき POL が要る・お客様の支払いには使えない) ので、
+  // §1 では名指しで勧めず「ウォレットを選ぶ」(/guide/wallet) へ案内する。
+  it('§1 JPYC を準備する は「ウォレットを選ぶ」へリンクし、UPBOND Wallet を勧めない', () => {
+    for (const locale of ['ja', 'en'] as const) {
+      const s1 = startGuideContentFor(locale).sections[0];
+      expect(s1.guideLinks).toEqual([{ label: guideNavFor(locale).items.wallet.label, path: '/guide/wallet' }]);
+      expect(existsSync(join(process.cwd(), 'app', '[locale]', 'guide', 'wallet', 'page.tsx'))).toBe(true);
+      expect(s1.body.join('\n')).toContain('HashPort Wallet');
+      expect(JSON.stringify(startGuideContentFor(locale))).not.toContain('UPBOND');
     }
   });
 });
