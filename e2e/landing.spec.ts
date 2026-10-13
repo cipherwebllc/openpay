@@ -188,6 +188,17 @@ test.describe('landing / (LP)', () => {
     const scanLink = howItWorks.getByRole('link', { name: 'スキャン', exact: true });
     await expect(scanLink).toHaveAttribute('href', '/ja/scan');
     await expect(howItWorks.getByText('ウォレットで署名 → 完了')).toBeVisible();
+
+    // 操作の短い動画 3 本 (決済QR → レジ → お客様の支払い)。再生できるかはブラウザの動画形式の対応に左右される
+    // (Playwright の Chromium は H.264 を再生しない) ので、ここでは並びと止めるボタンの有無だけを見る。
+    await expect(howItWorks.getByRole('region', { name: '実際の画面で見る（スマホ）' })).toBeVisible();
+    expect(
+      await howItWorks.locator('video source').evaluateAll((els) => els.map((e) => e.getAttribute('src'))),
+    ).toEqual(['/demo/lp-qr.mp4', '/demo/lp-register.mp4', '/demo/lp-pay.mp4']);
+    await expect(howItWorks.getByText('① 決済QR で受け取る')).toBeVisible();
+    await expect(howItWorks.getByText('② レジで会計する')).toBeVisible();
+    await expect(howItWorks.getByText('③ お客様が支払う')).toBeVisible();
+    await expect(howItWorks.getByRole('button', { name: /^動画を(止める|再生)$/ })).toBeVisible();
   });
 
   test('ja: FAQ-A4 は JPYC EX (jpyc.co.jp) と 受け取る (/create) のテキストリンクを含む', async ({

@@ -109,6 +109,26 @@ beforeEach(() => {
   }
 });
 
+// jsdom は IntersectionObserver と動画の再生 (HTMLMediaElement.play/pause) を実装しない。トップの操作の動画
+// (LandingDemoVideos) はトップ全体を描くテストでも描かれるので、既定は「何も起きない」スタブにする。
+// 画面に入ったときの動きを確かめるテスト (tests/components/LandingDemoVideos.test.tsx) は body 内で上書きする。
+beforeEach(() => {
+  if (typeof window === 'undefined') return;
+  if (!('IntersectionObserver' in window)) {
+    class NoopIntersectionObserver {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+      takeRecords() {
+        return [];
+      }
+    }
+    vi.stubGlobal('IntersectionObserver', NoopIntersectionObserver);
+  }
+  vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined);
+  vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {});
+});
+
 afterEach(() => {
   cleanup();
   // `// @vitest-environment node` を宣言したファイル (Lua ランナー系: wasmoon の
