@@ -16,7 +16,8 @@ import { GuideFaq } from '@/components/guide/GuideFaq';
 import { GUIDE_PRIMARY_ACTION, GuideActions, GuideLead, GuideSubtitle, GuideTitle } from '@/components/guide/GuideHeader';
 import { BulletList, Section } from '@/components/guide/PosGuidePieces';
 import { StepShot } from '@/components/guide/MobileOrderGuidePieces';
-import { WalletChoice } from '@/components/guide/WalletChoice';
+import { WalletSummary } from '@/components/guide/WalletSummary';
+import { guideNavFor } from '@/lib/guideNav';
 import { walletGuideContentFor } from '@/lib/walletGuide';
 import {
   mobileOrderGuideContentFor,
@@ -63,9 +64,9 @@ export default async function GuideMobileOrderPage({
           <BulletList items={c.need} marker="✓" markerClassName="text-emerald-600" />
         </Section>
 
-        {/* ウォレットを選ぶ (「JPYC で支払う」と共通の案内・lib/walletGuide.ts)。 */}
-        <Section title={wallet.walletTitle}>
-          <WalletChoice content={wallet} />
+        {/* ウォレットを選ぶ: 短い案内と /guide/wallet へのリンク (「JPYC で支払う」と共通・lib/walletGuide.ts)。 */}
+        <Section title={guideNavFor(locale).items.wallet.label}>
+          <WalletSummary locale={locale} content={wallet} />
         </Section>
 
         <Section title={c.stepsTitle}>

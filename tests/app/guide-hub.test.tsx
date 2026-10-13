@@ -1,5 +1,5 @@
 // /guide ハブ (「OpenPay でできること」) を実描画で検証する: h1・5 グループの h2・
-// 11 本のカード (href と、可視テキストから成るリンク名)・末尾の「関連ページ」(料金 /pricing)・
+// 12 本のカード (href と、可視テキストから成るリンク名)・末尾の「関連ページ」(料金 /pricing)・
 // aria-label を使わないこと (掟 8)・metadata。
 
 import { describe, expect, it, vi } from 'vitest';
@@ -11,7 +11,7 @@ vi.mock('next-intl/server', () => ({ setRequestLocale: vi.fn() }));
 vi.mock('@/components/AppShell', () => ({ AppShell: ({ children }: { children: React.ReactNode }) => <main>{children}</main> }));
 
 describe('/guide hub', () => {
-  it.each(['ja', 'en'] as const)('%s: h1・リード・5 グループ・11 本のカード・末尾の関連ページ', async (locale) => {
+  it.each(['ja', 'en'] as const)('%s: h1・リード・5 グループ・12 本のカード・末尾の関連ページ', async (locale) => {
     const nav = guideNavFor(locale);
     const { container } = render(await GuideHubPage({ params: Promise.resolve({ locale }) }));
 

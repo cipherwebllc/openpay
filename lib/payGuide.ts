@@ -13,7 +13,6 @@
 
 import type { Metadata } from 'next';
 import { guidePageMetadata } from '@/lib/guideMetadata';
-import { WALLET_GUIDE_EN, WALLET_GUIDE_JA, type WalletGuideContent } from '@/lib/walletGuide';
 
 // 運営者の note 記事「JPYC 運用ガイド (ウォレット準備〜換金・運用)」(lib/startGuide.ts の JPYC_NOTE_GUIDE と同じ・test で照合)。
 export const PAY_GUIDE_JPYC_NOTE = 'https://note.com/masia02/n/ned04a4cdb00a';
@@ -30,7 +29,7 @@ export type PayGuideLink = {
   readonly label: string;
 };
 
-export type PayGuideContent = WalletGuideContent & {
+export type PayGuideContent = {
   readonly metaTitle: string;
   readonly metaDescription: string;
 
@@ -42,7 +41,7 @@ export type PayGuideContent = WalletGuideContent & {
   readonly needTitle: string;
   readonly need: readonly string[];
 
-  // ウォレットを選ぶ・WalletConnect の手順は lib/walletGuide.ts (モバイルオーダーのガイドと共通) を継ぐ。
+  // ウォレットを選ぶ・QR の読み取り方・WalletConnect の手順は /guide/wallet (lib/walletGuide.ts)。このページには短い案内だけを置く。
 
   readonly stepsTitle: string;
   readonly steps: readonly PayGuideStep[];
@@ -92,8 +91,6 @@ const JA: PayGuideContent = {
     'JPYC が入った自分のウォレット (MetaMask が基本です。初めての方には HashPort Wallet やマイナウォレットもおすすめ。下の「ウォレットを選ぶ」へ)',
     'ガスレス決済の QR なら、ガス代用の POL などは要りません (「通常決済（ガス代は自分で負担）」と出る QR では必要です)',
   ],
-
-  ...WALLET_GUIDE_JA,
 
   stepsTitle: '支払いの流れ',
   steps: [
@@ -223,8 +220,6 @@ const EN: PayGuideContent = {
     'Your own wallet with JPYC in it (MetaMask is the standard. If you are new to wallets, HashPort Wallet or MynaWallet are good choices too — see “Choosing a wallet” below)',
     'For a gasless QR you need no POL or other gas token (a QR marked “Standard (you pay gas)” does need one)',
   ],
-
-  ...WALLET_GUIDE_EN,
 
   stepsTitle: 'How to pay',
   steps: [

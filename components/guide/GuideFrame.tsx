@@ -16,9 +16,11 @@ import { guideNavFor, type GuideNav, type GuideSlug } from '@/lib/guideNav';
 
 // リンクの見た目は親にまとめる (各 <a> に長い class を並べると目次 2 つ分 HTML が膨らむ・計画レビュー R3)。
 // 現在地は色に加えて左の線と太字で示す (色だけに頼らない)。
-// 縦の詰め方 (py-[3px]・グループ間 2.5) は、1366x768 のノート PC でも PC の目次が切れない高さ (550px 以下・ガイド 11 本・
-// en で 2 行に折れる 3 本を含む) に収めるため。リンクの高さは 26px で、タップ領域の 24px (WCAG 2.5.8) は満たす。
-// (2026-10-12: /guide/pay を足して en が 566px になり、py-1 (28px) から詰めた。)
+// 縦の詰め方 (py-[3px]・グループ間 2.5) は、1366x768 のノート PC でも PC の目次が切れない高さ (550px 以下・ガイド 12 本・
+// en で 2 行に折れる 2 本を含む) に収めるため。リンクの高さは 26px で、タップ領域の 24px (WCAG 2.5.8) は満たす。
+// (2026-10-12: /guide/pay を足して en が 566px になり、py-1 (28px) から詰めた。
+// 2026-10-13: /guide/wallet を足して en が 568px になったので、2 行に折れていた en の「How to prepare an image URL」を
+// 1 行に収まる「Preparing an image URL」に縮めた。)
 const LIST_CLASS =
   'space-y-2.5 text-sm [&_a]:block [&_a]:rounded-r-lg [&_a]:border-l-2 [&_a]:border-transparent [&_a]:px-3 [&_a]:py-[3px] [&_a]:leading-5 [&_a]:text-slate-700 [&_a:hover]:bg-slate-50 [&_a:hover]:text-slate-900 [&_a:focus-visible]:outline-none [&_a:focus-visible]:ring-2 [&_a:focus-visible]:ring-emerald-500 [&_a[aria-current=page]]:border-emerald-600 [&_a[aria-current=page]]:bg-emerald-50 [&_a[aria-current=page]]:font-semibold [&_a[aria-current=page]]:text-emerald-800';
 

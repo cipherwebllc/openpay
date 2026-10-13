@@ -14,13 +14,14 @@ import { GuideFrame } from '@/components/guide/GuideFrame';
 import { GuideCallout } from '@/components/guide/GuideCallout';
 import { GuideFaq } from '@/components/guide/GuideFaq';
 import { GuideVideo } from '@/components/guide/GuideVideo';
-import { WalletChoice } from '@/components/guide/WalletChoice';
+import { WalletSummary } from '@/components/guide/WalletSummary';
 import { GUIDE_PRIMARY_ACTION, GuideActions, GuideLead, GuideSubtitle, GuideTitle } from '@/components/guide/GuideHeader';
 import { GuideToc } from '@/components/guide/GuideToc';
 import { BulletList, STEP_BADGE_CUSTOMER, Section, StepList } from '@/components/guide/PosGuidePieces';
 import { guideNavFor } from '@/lib/guideNav';
 import { HOWTO_VIDEO_UI, howtoVideoFor } from '@/lib/howtoVideos';
 import { payGuideContentFor, payGuideMetadata } from '@/lib/payGuide';
+import { walletGuideContentFor } from '@/lib/walletGuide';
 
 export async function generateMetadata({
   params,
@@ -62,10 +63,10 @@ export default async function GuidePayPage({
           <BulletList items={c.need} marker="✓" markerClassName="text-emerald-600" />
         </Section>
 
-        {/* ウォレットを選ぶ: MetaMask が基本・初めての方には JPYC EX が組み込まれたウォレット。MetaMask 以外は WalletConnect で
-            つなぐ (一覧は英語なので、検索の言葉まで書く)。モバイルオーダーのガイドと共通 (components/guide/WalletChoice)。 */}
-        <Section title={c.walletTitle}>
-          <WalletChoice content={c} />
+        {/* ウォレットを選ぶ: 短い案内と /guide/wallet へのリンク (選び方・QR の読み取り方・つなぎ方はそのページ)。
+            モバイルオーダーのガイドと共通 (components/guide/WalletSummary)。 */}
+        <Section title={nav.items.wallet.label}>
+          <WalletSummary locale={locale} content={walletGuideContentFor(locale)} />
         </Section>
 
         <Section title={c.stepsTitle}>
