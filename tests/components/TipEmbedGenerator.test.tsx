@@ -200,7 +200,7 @@ describe('TipEmbedGenerator — 初期表示', () => {
   });
 });
 
-describe('TipEmbedGenerator — 受け取った質問 inbox', () => {
+describe('TipEmbedGenerator — 受け取った応援メッセージ inbox', () => {
   it('flag OFF は子を mount せず、QueryClient 無しでも API を呼ばない', async () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch');
     siwe.isSignedIn = true;

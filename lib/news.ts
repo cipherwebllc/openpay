@@ -337,12 +337,12 @@ export const NEWS_ITEMS: readonly NewsItem[] = [
     date: '2026-07-29',
     category: 'feature',
     title: {
-      ja: 'チップに非公開の質問・メッセージを添えられるようになりました（質問箱）',
-      en: 'Tips can now carry a private question or message',
+      ja: 'チップに非公開の応援メッセージを添えられるようになりました',
+      en: 'Tips can now carry a private message of support',
     },
     body: {
-      ja: 'チップを送るとき、非公開の質問やメッセージを添えられるようになりました。読めるのは受け取った本人だけで、ウォレットでログインした受信箱で確認できます (保存は 180 日間)。\nクリエイターの「質問箱」としてもお使いいただけます。受け取り手数料は従来どおりかかりません。',
-      en: 'You can now attach a private question or message when sending a tip. Only the recipient can read it, in an inbox unlocked by wallet sign-in (messages are kept for 180 days).\nIt doubles as a creator question box. Receiving tips remains fee-free.',
+      ja: 'チップを送るとき、非公開の応援メッセージを添えられるようになりました。読めるのは受け取った本人だけで、ウォレットでログインした受信箱で確認できます (保存は 180 日間)。受け取り手数料は従来どおりかかりません。',
+      en: 'You can now attach a private message of support when sending a tip. Only the recipient can read it, in an inbox unlocked by wallet sign-in (messages are kept for 180 days). Receiving tips remains fee-free.',
     },
   },
   {

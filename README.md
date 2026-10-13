@@ -154,9 +154,9 @@ OpenPay is **not** a wallet, exchange, custodian, or redemption provider. Users 
 
 ## Contact
 
-Want to build OpenPay's payment stack (JPYC/USDC payments, AI-agent payments) into your own service? Reach us on the [OpenPay Discord](https://discord.gg/Cfywb3aNWg), or add a message to a JPYC tip from the "Support" section of [@cipherweb](https://open-pay.jp/en/@cipherweb) (only the recipient can read it).
+Want to build OpenPay's payment stack (JPYC/USDC payments, AI-agent payments) into your own service? Reach us on the [OpenPay Discord](https://discord.gg/Cfywb3aNWg).
 
-OpenPay の仕組み（JPYC・USDC 決済、AI エージェントの支払い）を自社のサービスに組み込みたい方は、[OpenPay の Discord](https://discord.gg/Cfywb3aNWg) か、[@cipherweb のページ](https://open-pay.jp/ja/@cipherweb)の「応援する」からメッセージを添えてご相談ください（読めるのは本人だけです）。
+OpenPay の仕組み（JPYC・USDC 決済、AI エージェントの支払い）を自社のサービスに組み込みたい方は、[OpenPay の Discord](https://discord.gg/Cfywb3aNWg) からご相談ください。
 
 ## License
 
