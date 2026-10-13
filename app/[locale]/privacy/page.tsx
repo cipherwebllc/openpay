@@ -32,6 +32,14 @@ export default function PrivacyPage() {
         title={t('sectionShops.title')}
         body={t('sectionShops.body')}
       />
+      {/* 外部送信規律 (電気通信事業法 27 条の 12) の公表: 3-2 の後に置き、以降の番号は変えない。
+          フッターの「外部送信」(/privacy#external) から直接開く。送信先の一覧は next.config.mjs の CSP と
+          tests/lib/externalTransmissionDisclosure.test.ts で突き合わせる。 */}
+      <LegalSection
+        id="external"
+        title={t('sectionExternal.title')}
+        body={t('sectionExternal.body')}
+      />
       <LegalSection title={t('section4.title')} body={t('section4.body')} />
       {/* Web Push 通知 (任意): 保管期間 (4) と安全管理措置 (6) の間に配置。表示番号は「5.」。 */}
       <LegalSection

@@ -75,6 +75,10 @@ export function SiteFooter() {
         <Link href="/privacy" className="hover:text-slate-700 hover:underline" prefetch={false}>
           {t('links.privacy')}
         </Link>
+        {/* 外部送信規律の公表 (プライバシーポリシー 3-3) への直リンク。全ページのフッターから辿れるようにする。 */}
+        <Link href="/privacy#external" className="hover:text-slate-700 hover:underline" prefetch={false}>
+          {t('links.external')}
+        </Link>
         <Link
           href="/disclaimer"
           className="hover:text-slate-700 hover:underline"
