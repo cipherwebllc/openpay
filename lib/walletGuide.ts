@@ -2,8 +2,10 @@
 // 選び方・お店の QR の読み取り方・WalletConnect のつなぎ方をこの 1 ページにまとめ、「JPYC で支払う」(app/[locale]/guide/pay) と
 // 「モバイルオーダーのやり方」(app/[locale]/guide/mobile-order) には短い案内 (summary) とこのページへのリンクだけを置く
 // (components/guide/WalletSummary.tsx・片方だけ直してずれないよう文言は 1 か所に)。
-// user 方針 (2026-10-13): MetaMask が基本・初めての方には JPYC EX が組み込まれた HashPort Wallet / マイナウォレット
-// (どちらも OpenPay の決済完了まで user が確認済み)。つなぎ方は WalletConnect で、一覧は英語なので検索の言葉まで書く。
+// user 方針 (2026-10-13): MetaMask が基本・初めての方には JPYC EX が組み込まれたマイナウォレット / HashPort Wallet
+// (どちらも OpenPay の決済完了まで user が確認済み)。マイナウォレットを先に出して推す (JPYC EX の本人確認にもマイナンバー
+// カードを使うため・user「マイナウォレットを押したい」)。HashPort Wallet も推薦に残す (user「推薦から外すことはない」)。
+// つなぎ方は WalletConnect で、一覧は英語なので検索の言葉まで書く。
 // お店の QR (OpenPay の支払いの URL) は、ウォレットのアプリの QR 読み取りでは開けないことがある (2026-10-13 user が実機で確認:
 // MetaMask は外部リンクとして開ける・マイナウォレットは動かない・HashPort Wallet は「支払い」で読むと「このQRコードでは
 // 支払えません。支払い用QRをご確認ください。」と出る) → スマホのカメラか「スキャンして支払う」で読む。
@@ -58,30 +60,30 @@ export type WalletGuideContent = {
 const JA: WalletGuideContent = {
   metaTitle: 'ウォレットを選ぶ — JPYC で支払うためのウォレットとつなぎ方',
   metaDescription:
-    'OpenPay で JPYC を支払うためのウォレットの選び方。MetaMask が基本で、初めての方には HashPort Wallet やマイナウォレットもおすすめ。お店の QR の読み取り方と、WalletConnect でのつなぎ方。',
+    'OpenPay で JPYC を支払うためのウォレットの選び方。MetaMask が基本で、初めての方にはマイナウォレットや HashPort Wallet もおすすめ。お店の QR の読み取り方と、WalletConnect でのつなぎ方。',
   subtitle: 'JPYC で支払うための、ウォレットの選び方とつなぎ方。',
   lead: 'OpenPay で支払うには、JPYC が入った自分のウォレットが要ります。OpenPay のアプリのインストールや会員登録は要りません。おすすめのウォレットと、お店の QR の読み取り方、ウォレットのつなぎ方をまとめました。',
   scanCta: { path: '/scan', label: 'スキャンして支払う' },
 
   summary:
-    'MetaMask が基本です。初めての方には、アプリの中で JPYC の発行・償還ができる HashPort Wallet やマイナウォレットもおすすめです。お店の QR は、スマホのカメラか「スキャンして支払う」で読み取ってください (HashPort Wallet やマイナウォレットのアプリの QR 読み取りでは開けません)。',
+    'MetaMask が基本です。初めての方には、アプリの中で JPYC の発行・償還ができるマイナウォレットや HashPort Wallet もおすすめです。お店の QR は、スマホのカメラか「スキャンして支払う」で読み取ってください (マイナウォレットや HashPort Wallet のアプリの QR 読み取りでは開けません)。',
   summaryLink: 'ウォレットの選び方・QR の読み取り方・つなぎ方',
 
   walletsTitle: 'おすすめのウォレット',
   walletLead:
-    'MetaMask が基本です。初めての方には、アプリの中に JPYC EX が組み込まれていて、JPYC を手に入れる (発行) ことも日本円に戻す (償還) こともアプリの中でできる、HashPort Wallet やマイナウォレットもおすすめです。',
+    'MetaMask が基本です。初めての方には、アプリの中に JPYC EX が組み込まれていて、JPYC を手に入れる (発行) ことも日本円に戻す (償還) こともアプリの中でできる、マイナウォレットや HashPort Wallet もおすすめです。',
   wallets: [
     {
       name: 'MetaMask',
       body: 'いちばん広く使われているウォレットです。MetaMask のアプリの中のブラウザで支払い画面を開くと、そのまま接続できます。',
     },
     {
-      name: 'HashPort Wallet',
-      body: 'アプリの中で JPYC の発行・償還ができます。OpenPay には WalletConnect でつなぎます。',
+      name: 'マイナウォレット',
+      body: 'マイナンバーカードを使うウォレットです。JPYC EX の本人確認にもマイナンバーカードを使うので、はじめての方に向いています。アプリの中で JPYC の発行・償還ができます。OpenPay には WalletConnect でつなぎます。',
     },
     {
-      name: 'マイナウォレット',
-      body: 'マイナンバーカードを使うウォレットです。アプリの中で JPYC の発行・償還ができます。OpenPay には WalletConnect でつなぎます。',
+      name: 'HashPort Wallet',
+      body: 'アプリの中で JPYC の発行・償還ができます。OpenPay には WalletConnect でつなぎます。',
     },
   ],
   walletNote:
@@ -100,7 +102,7 @@ const JA: WalletGuideContent = {
     },
   ],
   scanNote:
-    'お店の QR は、ウォレットのアプリの QR 読み取りでは開けないことがあります。MetaMask は開けますが、HashPort Wallet とマイナウォレットは開けません (HashPort Wallet の「支払い」で読み取ると「このQRコードでは支払えません」と出ます)。スマホのカメラか「スキャンして支払う」で読み取ってください。',
+    'お店の QR は、ウォレットのアプリの QR 読み取りでは開けないことがあります。MetaMask は開けますが、マイナウォレットと HashPort Wallet は開けません (HashPort Wallet の「支払い」で読み取ると「このQRコードでは支払えません」と出ます)。スマホのカメラか「スキャンして支払う」で読み取ってください。',
 
   wcTitle: 'WalletConnect でつなぐ',
   wcSteps: [
@@ -112,7 +114,7 @@ const JA: WalletGuideContent = {
     {
       n: 2,
       title: '英語の名前でウォレットを探す',
-      body: 'スマホでは「All Wallets」の一覧が出ます。検索欄に英語で「HashPort」または「Myna」と入れて、ウォレットを選びます (カタカナでは見つかりません)。ウォレットのアプリが開きます。',
+      body: 'スマホでは「All Wallets」の一覧が出ます。検索欄に英語で「Myna」または「HashPort」と入れて、ウォレットを選びます (カタカナでは見つかりません)。ウォレットのアプリが開きます。',
     },
     {
       n: 3,
@@ -137,30 +139,30 @@ const JA: WalletGuideContent = {
 const EN: WalletGuideContent = {
   metaTitle: 'Choosing a wallet — wallets for paying with JPYC and how to connect them',
   metaDescription:
-    'Which wallet to use for paying with JPYC on OpenPay. MetaMask is the standard; if you are new to wallets, HashPort Wallet and MynaWallet are good choices too. How to scan the shop’s QR and how to connect with WalletConnect.',
+    'Which wallet to use for paying with JPYC on OpenPay. MetaMask is the standard; if you are new to wallets, MynaWallet and HashPort Wallet are good choices too. How to scan the shop’s QR and how to connect with WalletConnect.',
   subtitle: 'Which wallet to use for paying with JPYC, and how to connect it.',
   lead: 'To pay with OpenPay you need your own wallet with JPYC in it. You do not need to install an OpenPay app or sign up. Here are the recommended wallets, how to scan the shop’s QR, and how to connect your wallet.',
   scanCta: { path: '/scan', label: 'Scan to pay' },
 
   summary:
-    'MetaMask is the standard. If you are new to wallets, HashPort Wallet and MynaWallet are good choices too: you can issue and redeem JPYC inside these apps. Scan the shop’s QR with your phone camera or with “Scan to pay” (the QR scanners in the HashPort Wallet and MynaWallet apps cannot open it).',
+    'MetaMask is the standard. If you are new to wallets, MynaWallet and HashPort Wallet are good choices too: you can issue and redeem JPYC inside these apps. Scan the shop’s QR with your phone camera or with “Scan to pay” (the QR scanners in the MynaWallet and HashPort Wallet apps cannot open it).',
   summaryLink: 'Choosing a wallet, scanning the QR and connecting',
 
   walletsTitle: 'Recommended wallets',
   walletLead:
-    'MetaMask is the standard. If you are new to wallets, HashPort Wallet and MynaWallet are good choices too: JPYC EX is built into these apps, so you can get JPYC (issuance) and turn it back into yen (redemption) inside the app.',
+    'MetaMask is the standard. If you are new to wallets, MynaWallet and HashPort Wallet are good choices too: JPYC EX is built into these apps, so you can get JPYC (issuance) and turn it back into yen (redemption) inside the app.',
   wallets: [
     {
       name: 'MetaMask',
       body: 'The most widely used wallet. Open the payment screen in the browser inside the MetaMask app and it connects as is.',
     },
     {
-      name: 'HashPort Wallet',
-      body: 'Issue and redeem JPYC inside the app. Connect it to OpenPay with WalletConnect.',
+      name: 'MynaWallet',
+      body: 'A wallet that uses the My Number Card (Japan’s individual number card). JPYC EX also uses the My Number Card for identity verification, so it suits first-time users. Issue and redeem JPYC inside the app. Connect it to OpenPay with WalletConnect.',
     },
     {
-      name: 'MynaWallet',
-      body: 'A wallet that uses the My Number Card (Japan’s individual number card). Issue and redeem JPYC inside the app. Connect it to OpenPay with WalletConnect.',
+      name: 'HashPort Wallet',
+      body: 'Issue and redeem JPYC inside the app. Connect it to OpenPay with WalletConnect.',
     },
   ],
   walletNote:
@@ -179,7 +181,7 @@ const EN: WalletGuideContent = {
     },
   ],
   scanNote:
-    'The QR scanner inside a wallet app may not open the shop’s QR. MetaMask can, but HashPort Wallet and MynaWallet cannot (scanning it with “支払い” (Pay) in HashPort Wallet shows a message that the QR cannot be used for payment). Scan with your phone camera or with “Scan to pay” instead.',
+    'The QR scanner inside a wallet app may not open the shop’s QR. MetaMask can, but MynaWallet and HashPort Wallet cannot (scanning it with “支払い” (Pay) in HashPort Wallet shows a message that the QR cannot be used for payment). Scan with your phone camera or with “Scan to pay” instead.',
 
   wcTitle: 'Connecting with WalletConnect',
   wcSteps: [
@@ -191,7 +193,7 @@ const EN: WalletGuideContent = {
     {
       n: 2,
       title: 'Search for the wallet by its English name',
-      body: 'On a phone, an “All Wallets” list appears. Type “HashPort” or “Myna” in the search box and pick your wallet. The wallet app opens.',
+      body: 'On a phone, an “All Wallets” list appears. Type “Myna” or “HashPort” in the search box and pick your wallet. The wallet app opens.',
     },
     {
       n: 3,
