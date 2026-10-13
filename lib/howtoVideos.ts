@@ -17,9 +17,9 @@ export type HowtoVideo = {
 
 export const HOWTO_VIDEOS: Readonly<Record<HowtoVideoKey, HowtoVideo>> = {
   qr: {
-    youtubeId: '2uGhrn2islQ',
+    youtubeId: 'hgAJMoc7yyE',
     title: 'OpenPay の使い方｜お店向け：決済QRを作って JPYC を受け取る',
-    duration: '1:21',
+    duration: '1:44',
     thumbnail: '/guide/videos/qr.webp',
   },
   register: {
