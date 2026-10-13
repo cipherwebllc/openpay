@@ -72,11 +72,13 @@ describe('walletGuide content', () => {
   it('お店の QR はスマホのカメラか「スキャンして支払う」で読む・ウォレットのアプリの読み取りでは開かないものがある', () => {
     const jaC = walletGuideContentFor('ja');
     expect(jaC.scanWays.map((w) => w.name)).toEqual(['スマホのカメラ', `「${ja.Scan.pageTitle}」`]);
-    expect(jaC.scanNote).toContain('MetaMask は開けますが、マイナウォレットなどは開けません');
-    expect(jaC.summary).toContain('ウォレットのアプリの QR 読み取りでは開かないものがあります');
+    // 2026-10-13 user 実機: MetaMask は開ける・HashPort Wallet (「支払い」で読むとエラー)・マイナウォレットは開けない。
+    expect(jaC.scanNote).toContain('MetaMask は開けますが、HashPort Wallet とマイナウォレットは開けません');
+    expect(jaC.scanNote).toContain('「このQRコードでは支払えません」');
+    expect(jaC.summary).toContain('HashPort Wallet やマイナウォレットのアプリの QR 読み取りでは開けません');
     const enC = walletGuideContentFor('en');
     expect(enC.scanWays.map((w) => w.name)).toEqual(['Your phone camera', `“${en.Scan.pageTitle}”`]);
-    expect(enC.scanNote).toContain('MetaMask can, but MynaWallet and some others cannot');
+    expect(enC.scanNote).toContain('MetaMask can, but HashPort Wallet and MynaWallet cannot');
     // パソコンの接続用 QR (WalletConnect) はお店の QR とは別、と書く (読み取り方の注意と取り違えない)。
     expect(jaC.wcTip).toContain('お店の QR とは別');
     expect(enC.wcTip).toContain('not the shop’s QR');

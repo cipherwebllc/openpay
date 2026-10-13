@@ -4,8 +4,9 @@
 // (components/guide/WalletSummary.tsx・片方だけ直してずれないよう文言は 1 か所に)。
 // user 方針 (2026-10-13): MetaMask が基本・初めての方には JPYC EX が組み込まれた HashPort Wallet / マイナウォレット
 // (どちらも OpenPay の決済完了まで user が確認済み)。つなぎ方は WalletConnect で、一覧は英語なので検索の言葉まで書く。
-// お店の QR (OpenPay の支払いの URL) は、ウォレットのアプリの QR 読み取りでは開かないものがある (MetaMask は開ける・
-// マイナウォレットなどは開けない。2026-10-13 user が実機で確認) → スマホのカメラか「スキャンして支払う」で読む。
+// お店の QR (OpenPay の支払いの URL) は、ウォレットのアプリの QR 読み取りでは開けないことがある (2026-10-13 user が実機で確認:
+// MetaMask は外部リンクとして開ける・マイナウォレットは動かない・HashPort Wallet は「支払い」で読むと「このQRコードでは
+// 支払えません。支払い用QRをご確認ください。」と出る) → スマホのカメラか「スキャンして支払う」で読む。
 // ⚠️ 料率・チェーン名・「無料」/free は書かない (tests/lib/walletGuide.test.ts が検査する)。
 
 import type { Metadata } from 'next';
@@ -63,7 +64,7 @@ const JA: WalletGuideContent = {
   scanCta: { path: '/scan', label: 'スキャンして支払う' },
 
   summary:
-    'MetaMask が基本です。初めての方には、アプリの中で JPYC の発行・償還ができる HashPort Wallet やマイナウォレットもおすすめです。お店の QR は、スマホのカメラか「スキャンして支払う」で読み取ってください (ウォレットのアプリの QR 読み取りでは開かないものがあります)。',
+    'MetaMask が基本です。初めての方には、アプリの中で JPYC の発行・償還ができる HashPort Wallet やマイナウォレットもおすすめです。お店の QR は、スマホのカメラか「スキャンして支払う」で読み取ってください (HashPort Wallet やマイナウォレットのアプリの QR 読み取りでは開けません)。',
   summaryLink: 'ウォレットの選び方・QR の読み取り方・つなぎ方',
 
   walletsTitle: 'おすすめのウォレット',
@@ -99,7 +100,7 @@ const JA: WalletGuideContent = {
     },
   ],
   scanNote:
-    'ウォレットのアプリの QR 読み取りでは、支払い画面が開かないものがあります。MetaMask は開けますが、マイナウォレットなどは開けません。そのときは、スマホのカメラか「スキャンして支払う」で読み取ってください。',
+    'お店の QR は、ウォレットのアプリの QR 読み取りでは開けないことがあります。MetaMask は開けますが、HashPort Wallet とマイナウォレットは開けません (HashPort Wallet の「支払い」で読み取ると「このQRコードでは支払えません」と出ます)。スマホのカメラか「スキャンして支払う」で読み取ってください。',
 
   wcTitle: 'WalletConnect でつなぐ',
   wcSteps: [
@@ -142,7 +143,7 @@ const EN: WalletGuideContent = {
   scanCta: { path: '/scan', label: 'Scan to pay' },
 
   summary:
-    'MetaMask is the standard. If you are new to wallets, HashPort Wallet and MynaWallet are good choices too: you can issue and redeem JPYC inside these apps. Scan the shop’s QR with your phone camera or with “Scan to pay” (some wallet apps cannot open it from their own QR scanner).',
+    'MetaMask is the standard. If you are new to wallets, HashPort Wallet and MynaWallet are good choices too: you can issue and redeem JPYC inside these apps. Scan the shop’s QR with your phone camera or with “Scan to pay” (the QR scanners in the HashPort Wallet and MynaWallet apps cannot open it).',
   summaryLink: 'Choosing a wallet, scanning the QR and connecting',
 
   walletsTitle: 'Recommended wallets',
@@ -178,7 +179,7 @@ const EN: WalletGuideContent = {
     },
   ],
   scanNote:
-    'Some wallet apps cannot open the payment screen from their own QR scanner. MetaMask can, but MynaWallet and some others cannot. In that case, scan with your phone camera or with “Scan to pay”.',
+    'The QR scanner inside a wallet app may not open the shop’s QR. MetaMask can, but HashPort Wallet and MynaWallet cannot (scanning it with “支払い” (Pay) in HashPort Wallet shows a message that the QR cannot be used for payment). Scan with your phone camera or with “Scan to pay” instead.',
 
   wcTitle: 'Connecting with WalletConnect',
   wcSteps: [
