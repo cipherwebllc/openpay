@@ -104,7 +104,7 @@ const JA: StartGuideContent = {
       body: [
         'OpenPay で JPYC を受け取るには、対応ウォレットを用意します。店舗でもクリエイターでも、受け取る側の流れは 3 ステップです。',
         'JPYC そのものを手に入れるなら、発行元の JPYC EX が使えます。本人確認のうえ発行予約をし、指定の銀行口座へ日本円を振り込むと、登録したウォレットに JPYC が届きます。',
-        'ウォレットは MetaMask が基本です。初めての方には、アプリの中で JPYC の発行・償還ができる HashPort Wallet やマイナウォレットもおすすめです。選び方は「ウォレットを選ぶ」にまとめています。',
+        'ウォレットは MetaMask が基本です。初めての方には、アプリの中で JPYC の発行・償還ができるマイナウォレットや HashPort Wallet もおすすめです。選び方は「ウォレットを選ぶ」にまとめています。',
       ],
       flow: ['ウォレットを準備', 'OpenPay に接続', '受取先を設定'],
       callout: {
@@ -296,7 +296,7 @@ const EN: StartGuideContent = {
       body: [
         'To receive JPYC through OpenPay you need a supported wallet. Whether you run a shop or sell as a creator, receiving is three steps.',
         'To obtain JPYC itself, you can use JPYC EX, run by the issuer. After identity verification you reserve an issuance and wire yen to the specified bank account; JPYC then arrives in your registered wallet.',
-        'MetaMask is the standard wallet. If you are new to wallets, HashPort Wallet and MynaWallet are good choices too: you can issue and redeem JPYC inside these apps. See “Choosing a wallet” for how to choose.',
+        'MetaMask is the standard wallet. If you are new to wallets, MynaWallet and HashPort Wallet are good choices too: you can issue and redeem JPYC inside these apps. See “Choosing a wallet” for how to choose.',
       ],
       flow: ['Set up a wallet', 'Connect to OpenPay', 'Set the receiving address'],
       callout: {

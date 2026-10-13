@@ -139,7 +139,7 @@
     "faqQ2": "Can I receive both JPYC and USDC?",
     "faqA2": "Both are supported: JPYC for JPY-denominated receipts, USDC for Web3 or international customers. JPYC supports Polygon / Kaia / Avalanche / Ethereum (standard mode only on Ethereum); USDC supports Base / Arbitrum / Optimism / Polygon / Ethereum / Avalanche / Arc. Choose in the QR builder; Circle CCTP V2 handles other source chains (for destinations other than Arc, Circle's transfer fee [up to {cctpMaxPercent}% of the payment; up to {cctpSmallCapUsdc} USDC for payments under {cctpSmallBelowUsdc} USDC] is deducted from what the shop receives rather than added for the sender, and no OpenPay fee applies; payments into Arc are forwarded by Circle; the sender pays Circle's forwarding fee on top and OpenPay collects nothing; paying out of Arc to other chains is not supported). Arc is standard-only: gas is paid in USDC, so no separate token is needed.",
     "faqQ3": "What if the customer has no wallet?",
-    "faqA3": "Recommend MetaMask or Rabby on desktop, and HashPort Wallet / Myna Wallet / MetaMask Mobile on phones. Multiple wallets are detected automatically.",
+    "faqA3": "Recommend MetaMask or Rabby on desktop, and Myna Wallet / HashPort Wallet / MetaMask Mobile on phones. Multiple wallets are detected automatically.",
     "faqQ4": "How do I convert JPYC / USDC to JPY?",
     "faqA4": "Redeem JPYC 1:1 at <jpycEx>JPYC EX</jpycEx>, or sell USDC via SBI VC Trade and other Japanese exchanges. Links are on the <create>Receive</create> page.",
     "faqQ5": "Where is transaction history stored?",

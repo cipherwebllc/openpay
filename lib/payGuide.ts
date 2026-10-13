@@ -88,7 +88,7 @@ const JA: PayGuideContent = {
   needTitle: '用意するもの',
   need: [
     'スマートフォン (カメラで QR を読めれば OK)',
-    'JPYC が入った自分のウォレット (MetaMask が基本です。初めての方には HashPort Wallet やマイナウォレットもおすすめ。下の「ウォレットを選ぶ」へ)',
+    'JPYC が入った自分のウォレット (MetaMask が基本です。初めての方にはマイナウォレットや HashPort Wallet もおすすめ。下の「ウォレットを選ぶ」へ)',
     'ガスレス決済の QR なら、ガス代用の POL などは要りません (「通常決済（ガス代は自分で負担）」と出る QR では必要です)',
   ],
 
@@ -153,7 +153,7 @@ const JA: PayGuideContent = {
   jpycTitle: 'JPYC を手に入れる',
   jpycBody: [
     'JPYC は、発行元の JPYC EX で手に入れられます。本人確認のうえ発行予約をし、指定の銀行口座へ日本円を振り込むと、登録したウォレットに JPYC が届きます。',
-    'HashPort Wallet とマイナウォレットは、アプリの中に JPYC EX が組み込まれていて、アプリから発行・償還の手続きができます。',
+    'マイナウォレットと HashPort Wallet は、アプリの中に JPYC EX が組み込まれていて、アプリから発行・償還の手続きができます。',
     'OpenPay は JPYC の発行・販売・交換をしていません。手に入れ方や条件は変わることがあるので、JPYC 公式サイトで最新の情報を確かめてください。',
   ],
   jpycCallout:
@@ -185,7 +185,7 @@ const JA: PayGuideContent = {
     },
     {
       q: 'スマホでウォレットにつながらない',
-      a: 'MetaMask などウォレットアプリの中のブラウザで OpenPay を開くと、接続と署名がスムーズです。画面に「MetaMask で開く」が出たら、それを押してください。HashPort Wallet やマイナウォレットは「WalletConnect」から、検索欄に英語で「HashPort」「Myna」と入れて選びます。',
+      a: 'MetaMask などウォレットアプリの中のブラウザで OpenPay を開くと、接続と署名がスムーズです。画面に「MetaMask で開く」が出たら、それを押してください。マイナウォレットや HashPort Wallet は「WalletConnect」から、検索欄に英語で「Myna」「HashPort」と入れて選びます。',
     },
     {
       q: '手数料はかかる？',
@@ -217,7 +217,7 @@ const EN: PayGuideContent = {
   needTitle: 'What you need',
   need: [
     'A smartphone (any camera that can scan a QR)',
-    'Your own wallet with JPYC in it (MetaMask is the standard. If you are new to wallets, HashPort Wallet or MynaWallet are good choices too — see “Choosing a wallet” below)',
+    'Your own wallet with JPYC in it (MetaMask is the standard. If you are new to wallets, MynaWallet or HashPort Wallet are good choices too — see “Choosing a wallet” below)',
     'For a gasless QR you need no POL or other gas token (a QR marked “Standard (you pay gas)” does need one)',
   ],
 
@@ -282,7 +282,7 @@ const EN: PayGuideContent = {
   jpycTitle: 'Getting JPYC',
   jpycBody: [
     'You can get JPYC from JPYC EX, run by its issuer (for residents of Japan). After identity verification, you reserve an issuance and transfer Japanese yen to the designated bank account, and the JPYC arrives in your registered wallet.',
-    'HashPort Wallet and MynaWallet have JPYC EX built in, so you can start issuance and redemption from inside the app.',
+    'MynaWallet and HashPort Wallet have JPYC EX built in, so you can start issuance and redemption from inside the app.',
     'OpenPay does not issue, sell or exchange JPYC. How to get it and the conditions can change, so check the latest information on the JPYC official site.',
   ],
   jpycCallout:
@@ -314,7 +314,7 @@ const EN: PayGuideContent = {
     },
     {
       q: 'My wallet will not connect on my phone',
-      a: 'Opening OpenPay in the browser inside your wallet app (e.g. MetaMask) makes connecting and signing smoother. If “Open in MetaMask” appears on the screen, tap it. For HashPort Wallet or MynaWallet, use “WalletConnect” and type “HashPort” or “Myna” in the search box.',
+      a: 'Opening OpenPay in the browser inside your wallet app (e.g. MetaMask) makes connecting and signing smoother. If “Open in MetaMask” appears on the screen, tap it. For MynaWallet or HashPort Wallet, use “WalletConnect” and type “Myna” or “HashPort” in the search box.',
     },
     {
       q: 'Are there any fees?',

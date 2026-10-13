@@ -62,7 +62,7 @@ const JA: MobileOrderGuideContent = {
   needTitle: '用意するもの',
   need: [
     'スマートフォン (カメラで QR を読めれば OK)',
-    'JPYC が入った暗号資産ウォレット (MetaMask が基本です。初めての方には HashPort Wallet やマイナウォレットもおすすめ。下の「ウォレットを選ぶ」へ)',
+    'JPYC が入った暗号資産ウォレット (MetaMask が基本です。初めての方にはマイナウォレットや HashPort Wallet もおすすめ。下の「ウォレットを選ぶ」へ)',
     'アプリのインストール・会員登録は不要です',
   ],
 
@@ -172,7 +172,7 @@ const EN: MobileOrderGuideContent = {
   needTitle: 'What you need',
   need: [
     'A smartphone (any camera that can scan a QR)',
-    'A crypto wallet with JPYC (MetaMask is the standard. If you are new to wallets, HashPort Wallet or MynaWallet are good choices too — see “Choosing a wallet” below)',
+    'A crypto wallet with JPYC (MetaMask is the standard. If you are new to wallets, MynaWallet or HashPort Wallet are good choices too — see “Choosing a wallet” below)',
     'No app install or sign-up required',
   ],
 
