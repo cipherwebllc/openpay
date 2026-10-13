@@ -65,6 +65,7 @@ import {
 import { recoverFeeValue } from '@/lib/relay/recoverFee';
 import { relayErrorKey } from '@/lib/relay/relayErrorMessage';
 import { isFallbackSafeRelayError } from '@/lib/relay/relayResponseError';
+import { isUserRejection } from '@/lib/walletErrors';
 import { derivePayGuards } from '@/lib/paymentFlowGuards/pay';
 import { useErc20BalanceAndChain } from '@/hooks/useErc20BalanceAndChain';
 import { type GasMode } from '@/lib/fee';
@@ -505,6 +506,12 @@ function PaymentDetails({ params }: { params: PayParams }) {
   // 未接続時に最下部 CTA からウォレット選択セクションへ誘導するためのアンカー。
   const walletSectionRef = useRef<HTMLElement | null>(null);
 
+  // お客様がウォレットで署名を拒否した (自分で取り消した) のは失敗ではない。「ガスレス決済を完了
+  // できませんでした」や通常決済への切替を出さずに送信前の画面へ戻し、Sentry にも送らない
+  // (ConnectButton と同じ扱い)。拒否の件数は useJpycEip3009Payment が payment.sign_rejected (info)
+  // で数えている。switchToStandard の二重払い防止は生の relay.error で判定する (拒否は fallback-safe
+  // なので、取り消したあとも通常決済へ切り替えられる)。
+  const relayError = relay.error && !isUserRejection(relay.error) ? relay.error : null;
   // gas congested は gasless モード固有の早期 abort。i18n された案内文に
   // 差し替え (standard モードは paymaster を経由しないため対象外)。
   // gasQuote の失敗は Pimlico RPC エラーで生表示するとユーザに技術詳細が
@@ -516,7 +523,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
       ? null
       : standard.error
     : useRelay
-      ? relay.error
+      ? relayError
       : gasless.error;
   const saFallback =
     !isStandard && !useRelay && isIncompatibleSmartAccountError(saError);
@@ -565,29 +572,31 @@ function PaymentDetails({ params }: { params: PayParams }) {
     useRelay &&
     !relay.isPending &&
     !relayAmbiguous &&
-    isFallbackSafeRelayError(relay.error);
+    isFallbackSafeRelayError(relayError);
   // B1 Layer B (preflight): relay 経路で relayer が degraded、かつ顧客がまだ submit していない
   // (relay.error なし・relay.data なし) ときに、署名 *前* に「通常決済へ切替」を先回りで促す。
-  // Layer A (relay.error) とは独立に評価する (両方 true にはならない・!relay.error が排他)。
+  // Layer A (relay.error) とは独立に評価する (両方 true にはならない・!relayError が排他)。
   const relayPreflightActive =
     useRelay &&
     relayHealth.degraded &&
     !relay.isPending &&
     !relayAmbiguous &&
-    !relay.error &&
+    !relayError &&
     !relay.data;
   // Layer A の banner 文言 (per-error friendly)。Layer A は汎用 error box を「置換」する (同じ relay
   // error が二重表示になるのを防ぐ) が、Layer B は「additive」に出す (汎用 error box を抑止しない)。
-  const relayFallbackMessage = isFallbackSafeRelayError(relay.error)
-    ? t(relayErrorKey(relay.error))
+  const relayFallbackMessage = isFallbackSafeRelayError(relayError)
+    ? t(relayErrorKey(relayError))
     : '';
 
+  // ウォレットでの取り消しは失敗として数えない (Sentry の *.failed 通知を鳴らさない)。
   useEffect(() => {
-    if (gasless.error) logger.error('payment.failed', { error: gasless.error });
+    if (gasless.error && !isUserRejection(gasless.error))
+      logger.error('payment.failed', { error: gasless.error });
   }, [gasless.error]);
 
   useEffect(() => {
-    if (standard.error)
+    if (standard.error && !isUserRejection(standard.error))
       logger.error('payment.standard.failed', { error: standard.error });
   }, [standard.error]);
 
@@ -618,8 +627,8 @@ function PaymentDetails({ params }: { params: PayParams }) {
   }, [standard.data]);
 
   useEffect(() => {
-    if (relay.error) logger.error('payment.relay.failed', { error: relay.error });
-  }, [relay.error]);
+    if (relayError) logger.error('payment.relay.failed', { error: relayError });
+  }, [relayError]);
 
   useEffect(() => {
     if (relay.data) {
