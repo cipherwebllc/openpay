@@ -74,6 +74,7 @@ import {
 import { recoverFeeValue } from '@/lib/relay/recoverFee';
 import { relayErrorKey } from '@/lib/relay/relayErrorMessage';
 import { isFallbackSafeRelayError } from '@/lib/relay/relayResponseError';
+import { isUserRejection } from '@/lib/walletErrors';
 import { deriveTipGuards } from '@/lib/paymentFlowGuards/tip';
 import { DEFAULT_CHAIN_FOR_SYMBOL, deploymentForSlug } from '@/lib/tokens';
 import {
@@ -394,13 +395,17 @@ export function TipForm({
     (isStandard && standard.isMerchantError && !standard.error) ||
     (!isStandard && !useRelay && !!gasless.data && !gasless.data.success) ||
     (useRelay && !!relay.data && !relay.data.success && !relay.data.pending);
+  // お客様がウォレットで署名を拒否した (自分で取り消した) のは失敗ではない。「ガスレス送金を完了
+  // できませんでした」を出さずに送信前の画面へ戻し、Sentry にも送らない (ConnectButton と同じ扱い)。
+  // 拒否の件数は useJpycEip3009Payment が payment.sign_rejected (info) で数えている。
+  const relayError = relay.error && !isUserRejection(relay.error) ? relay.error : null;
   // relay の error は code 文字列 (rate_limited 等) なので friendly i18n に差し替える。
   const flowError = isStandard
     ? standard.isUnknown ? null : standard.error
     : relayAmbiguous || gaslessAmbiguous
     ? null
     : useRelay
-      ? relay.error
+      ? relayError
       : gasless.error;
   const flowErrorMessage = useRelay
     ? isFallbackSafeRelayError(flowError)
@@ -417,13 +422,15 @@ export function TipForm({
         : null) ??
       (revertedNoFeedback ? t('errorReverted') : null));
 
+  // ウォレットでの取り消しは失敗として数えない (Sentry の *.failed 通知を鳴らさない)。
   useEffect(() => {
-    if (gasless.error) logger.error('tip.failed', { error: gasless.error });
+    if (gasless.error && !isUserRejection(gasless.error))
+      logger.error('tip.failed', { error: gasless.error });
   }, [gasless.error]);
 
   useEffect(() => {
-    if (relay.error) logger.error('tip.relay.failed', { error: relay.error });
-  }, [relay.error]);
+    if (relayError) logger.error('tip.relay.failed', { error: relayError });
+  }, [relayError]);
 
   useEffect(() => {
     if (saError) logger.error('tip.smart-account.init-failed', { error: saError });

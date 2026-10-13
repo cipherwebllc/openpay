@@ -51,6 +51,7 @@ import {
 } from '@/lib/mobileOrderFee';
 import { relayErrorKey } from '@/lib/relay/relayErrorMessage';
 import { isFallbackSafeRelayError } from '@/lib/relay/relayResponseError';
+import { isUserRejection } from '@/lib/walletErrors';
 import { deriveCheckoutGuards } from '@/lib/paymentFlowGuards/checkout';
 import { generateStatusToken } from '@/lib/orderStatusToken';
 import { isOrderTokenLike } from '@/lib/orderToken';
@@ -464,6 +465,12 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   const paymentReadyRef = useRef(paymentReady);
   paymentReadyRef.current = paymentReady;
 
+  // お客様がウォレットで署名を拒否した (自分で取り消した) のは失敗ではない。「ガスレス決済を完了
+  // できませんでした」や通常決済への切替を出さずに送信前の画面へ戻し、Sentry にも送らない
+  // (ConnectButton と同じ扱い)。拒否の件数は useJpycEip3009Payment が payment.sign_rejected (info)
+  // で数えている。switchToStandard の二重払い防止は生の relay.error で判定する (拒否は fallback-safe
+  // なので、取り消したあとも通常決済へ切り替えられる)。
+  const relayError = relay.error && !isUserRejection(relay.error) ? relay.error : null;
   const flowError = relayAmbiguous || gaslessAmbiguous
     ? null
     : isStandard
@@ -471,7 +478,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
       ? null
       : standard.error
     : useRelay
-      ? relay.error
+      ? relayError
       : gasless.error;
   const saFallback =
     !isStandard && !useRelay && isIncompatibleSmartAccountError(saError);
@@ -510,7 +517,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
     useRelay &&
     !relay.isPending &&
     !relayAmbiguous &&
-    isFallbackSafeRelayError(relay.error);
+    isFallbackSafeRelayError(relayError);
   // B1 Layer B (preflight): relay 経路で relayer が degraded、かつ顧客がまだ submit していない
   // (relay.error なし・relay.data なし) ときに、署名 *前* に同じ banner で「通常決済へ切替」を促す。
   // 優先順位: relay.error → Layer A (per-error 文言) / それ以外で preflight-degraded → Layer B
@@ -520,12 +527,12 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
     relayHealth.degraded &&
     !relay.isPending &&
     !relayAmbiguous &&
-    !relay.error &&
+    !relayError &&
     !relay.data;
   // Layer A は汎用 error box を「置換」する (relay error の二重表示防止)、Layer B は「additive」
-  // に出す (汎用 error box を抑止しない)。両者は !relay.error で排他。
-  const relayFallbackMessage = isFallbackSafeRelayError(relay.error)
-    ? t(relayErrorKey(relay.error))
+  // に出す (汎用 error box を抑止しない)。両者は !relayError で排他。
+  const relayFallbackMessage = isFallbackSafeRelayError(relayError)
+    ? t(relayErrorKey(relayError))
     : '';
 
   const [redirectIn, setRedirectIn] = useState<number | null>(null);
@@ -615,12 +622,14 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
     (isStandard && standard.restoredFromStorage) ||
     (useRelay && relay.restoredIntent != null);
 
+  // ウォレットでの取り消しは失敗として数えない (Sentry の *.failed 通知を鳴らさない)。
   useEffect(() => {
-    if (gasless.error) logger.error('checkout.failed', { error: gasless.error });
+    if (gasless.error && !isUserRejection(gasless.error))
+      logger.error('checkout.failed', { error: gasless.error });
   }, [gasless.error]);
 
   useEffect(() => {
-    if (standard.error)
+    if (standard.error && !isUserRejection(standard.error))
       logger.error('checkout.standard.failed', { error: standard.error });
   }, [standard.error]);
 
@@ -633,8 +642,8 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   }, [activeQuote.error]);
 
   useEffect(() => {
-    if (relay.error) logger.error('checkout.relay.failed', { error: relay.error });
-  }, [relay.error]);
+    if (relayError) logger.error('checkout.relay.failed', { error: relayError });
+  }, [relayError]);
 
   useEffect(() => {
     if (relay.data) {

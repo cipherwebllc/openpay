@@ -219,6 +219,7 @@ function setRelay(
     >;
     isRestoring?: boolean;
     hasActiveIntent?: boolean;
+    errMsg?: string;
   },
 ) {
   relayMutate = vi.fn();
@@ -235,7 +236,7 @@ function setRelay(
           : undefined,
     error:
       state === 'error'
-        ? new Error('rate_limited')
+        ? new Error(opts?.errMsg ?? 'rate_limited')
         : state === 'response-unknown'
           ? new RelayResponseUnknownError()
           : state === 'ip-rate-limited'
@@ -1699,6 +1700,24 @@ describe('TipForm — EIP-3009 relay (JPYC)', () => {
     setRelay('error');
     render(<TipForm params={JPYC_PARAMS} />);
     expect(screen.getByText(/短時間に送金が集中/)).toBeInTheDocument();
+  });
+
+  // 2026-10-13 本番: ウォレットで署名を拒否しただけで tip.relay.failed が Sentry に上がり、画面にも
+  // 「ガスレス送金を完了できませんでした」が出ていた。取り消しは失敗ではない。
+  it('relay で署名を拒否 → 失敗表示も Sentry 送信もせず、送信前の画面に戻る', () => {
+    setRelay('error', { errMsg: 'User rejected the request.\n\nDetails: User rejected the request.\nVersion: viem@2.56.3' });
+    render(<TipForm params={JPYC_PARAMS} />);
+    expect(screen.queryByText(/完了できませんでした/)).toBeNull();
+    expect(screen.queryByText(/User rejected/)).toBeNull();
+    expect(screen.getByRole('button', { name: /100 JPYC を送る/ })).toBeEnabled();
+    expect(loggerError).not.toHaveBeenCalledWith('tip.relay.failed', expect.anything());
+  });
+
+  it('relay の拒否以外の失敗は従来どおり tip.relay.failed を記録する', () => {
+    setRelay('error', { errMsg: 'boom' });
+    render(<TipForm params={JPYC_PARAMS} />);
+    expect(screen.getByText(/完了できませんでした/)).toBeInTheDocument();
+    expect(loggerError).toHaveBeenCalledWith('tip.relay.failed', { error: expect.any(Error) });
   });
 
   it('relay は smart account 不要 — saData 無しでも送信ボタンが活性', () => {

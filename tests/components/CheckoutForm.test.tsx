@@ -2185,6 +2185,30 @@ describe('CheckoutForm — JPYC EIP-3009 relay 経路', () => {
     ).toBeInTheDocument();
   });
 
+  // 2026-10-13 本番: ウォレットで署名を拒否しただけで relay の失敗として Sentry に上がり、画面にも
+  // 「完了できませんでした」と通常決済への切替が出ていた。取り消しは失敗ではない。
+  it('署名を拒否 → 失敗表示・切替 banner・Sentry 送信を出さず、送信前の画面に戻る', () => {
+    setupRelayReady();
+    setRelayPayment('error', { errMsg: 'User rejected the request.\n\nDetails: User rejected the request.\nVersion: viem@2.56.3' });
+    render(<CheckoutForm params={JPYC_PARAMS} />);
+    expect(screen.queryByText(/ガスレス決済が一時的に利用できません/)).toBeNull();
+    expect(screen.queryByText(/完了できませんでした/)).toBeNull();
+    expect(screen.queryByText(/User rejected/)).toBeNull();
+    expect(screen.getByRole('button', { name: /を支払う/ })).toBeEnabled();
+    expect(
+      vi.mocked(logger.error).mock.calls.filter(([event]) => event === 'checkout.relay.failed'),
+    ).toHaveLength(0);
+  });
+
+  it('拒否以外の relay 失敗は従来どおり checkout.relay.failed を記録する', () => {
+    setupRelayReady();
+    setRelayPayment('error', { errMsg: 'boom' });
+    render(<CheckoutForm params={JPYC_PARAMS} />);
+    expect(
+      vi.mocked(logger.error).mock.calls.filter(([event]) => event === 'checkout.relay.failed'),
+    ).toHaveLength(1);
+  });
+
   it('relay error: 切替ボタンを押すと standard モードへ (banner 消滅 + 通常決済バッジ表示)', async () => {
     const user = userEvent.setup();
     setupRelayReady();

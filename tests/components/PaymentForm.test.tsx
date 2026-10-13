@@ -948,6 +948,23 @@ describe('PaymentForm — 送信フロー', () => {
     expect(screen.getByText(/エラー/)).toBeInTheDocument();
     expect(screen.getByText(/prefund/)).toBeInTheDocument();
   });
+
+  // ウォレットでの取り消しは失敗ではない (Sentry の payment.failed 通知を鳴らさない)。
+  it.each([
+    ['拒否', false, new Error('User rejected the request.\n\nDetails: User rejected the request.\nVersion: viem@2.56.3')],
+    ['拒否以外', true, new Error("AA21 didn't pay prefund")],
+  ] as const)('ガスレス送信の%s → payment.failed を記録するか = %s', (_label, logged, err) => {
+    const errorSpy = vi.spyOn(logger, 'error').mockImplementation(() => {});
+    setURL(`to=${MERCHANT}&token=usdc&amount=10`);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(20_000_000n);
+    setSmartAccount(true);
+    setPayment('error', err);
+    render(<PaymentForm />);
+    const calls = errorSpy.mock.calls.filter(([msg]) => msg === 'payment.failed');
+    expect(calls).toHaveLength(logged ? 1 : 0);
+    errorSpy.mockRestore();
+  });
 });
 
 describe('PaymentForm — split (C1)', () => {
@@ -2409,6 +2426,29 @@ describe('PaymentForm — relay 失敗時の通常決済フォールバック (B
     setRelay('error', { errMsg });
   }
 
+  // 2026-10-13 本番: ウォレットで署名を拒否しただけで relay の失敗として Sentry に上がり、画面にも
+  // 「完了できませんでした」と通常決済への切替が出ていた。取り消しは失敗ではない。
+  it('署名を拒否 → 失敗表示・切替 banner・Sentry 送信を出さず、送信前の画面に戻る', () => {
+    const errorSpy = vi.spyOn(logger, 'error').mockImplementation(() => {});
+    setupRelayError('User rejected the request.\n\nDetails: User rejected the request.\nVersion: viem@2.56.3');
+    render(<PaymentForm />);
+    expect(screen.queryByText(/ガスレス決済が一時的に利用できません/)).toBeNull();
+    expect(screen.queryByText(/完了できませんでした/)).toBeNull();
+    expect(screen.queryByText(/User rejected/)).toBeNull();
+    expect(screen.getByRole('button', { name: /300 JPYC を支払う/ })).toBeEnabled();
+    expect(errorSpy.mock.calls.filter(([msg]) => msg === 'payment.relay.failed')).toHaveLength(0);
+    errorSpy.mockRestore();
+  });
+
+  it('拒否以外の relay 失敗は従来どおり payment.relay.failed を記録する', () => {
+    const errorSpy = vi.spyOn(logger, 'error').mockImplementation(() => {});
+    setupRelayError('boom');
+    render(<PaymentForm />);
+    expect(screen.getByText(/ガスレス決済が一時的に利用できません/)).toBeInTheDocument();
+    expect(errorSpy.mock.calls.filter(([msg]) => msg === 'payment.relay.failed')).toHaveLength(1);
+    errorSpy.mockRestore();
+  });
+
   it('auto recovery→成功で成功描画/控え/履歴を各 1 回だけ確定する', async () => {
     window.localStorage.clear();
     vi.mocked(resolveJpycGaslessProvider).mockReturnValue('eip3009-relay');
@@ -2699,6 +2739,16 @@ describe('PaymentForm — relayer preflight degraded (B1 Layer B)', () => {
     expect(
       screen.getAllByText(/ガスレス決済が一時的に利用できません/),
     ).toHaveLength(1);
+  });
+
+  it('degraded で署名を拒否したあとは、まだ送っていないので preflight 文言を出す', () => {
+    setupRelayFree();
+    vi.mocked(useRelayHealth).mockReturnValue({ degraded: true });
+    setRelay('error', { errMsg: 'User rejected the request.\n\nDetails: User rejected the request.\nVersion: viem@2.56.3' });
+    render(<PaymentForm />);
+    expect(
+      screen.getByText(/ガスレス決済が現在混雑\/一時的に利用しづらい可能性があります/),
+    ).toBeInTheDocument();
   });
 
   it('degraded でも submit 済 (relay.data あり) なら preflight banner を出さない', () => {
