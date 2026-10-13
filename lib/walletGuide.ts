@@ -13,6 +13,7 @@
 
 import type { Metadata } from 'next';
 import { guidePageMetadata } from '@/lib/guideMetadata';
+import { PAY_GUIDE_JPYC_NOTE } from '@/lib/payGuide';
 
 export type WalletGuideStep = {
   readonly n: number;
@@ -40,12 +41,15 @@ export type WalletGuideContent = {
 
   readonly walletsTitle: string;
   readonly walletLead: string;
-  readonly wallets: readonly { readonly name: string; readonly body: string }[];
+  /** id は描画側のアイコンの対応にだけ使う (MetaMask は同梱の公式 SVG・ほかは一般のアイコン。公式ロゴの素材は未入手)。 */
+  readonly wallets: readonly { readonly id: 'metamask' | 'myna' | 'hashport'; readonly name: string; readonly body: string }[];
   readonly walletNote: string;
+  /** 運営者の note 記事 (ウォレット準備〜換金・運用)。「JPYC で支払う」の jpycNoteLink と同じ記事・同じ名前 (test で照合)。 */
+  readonly noteLink: { readonly href: string; readonly label: string };
 
   readonly scanTitle: string;
   readonly scanLead: string;
-  readonly scanWays: readonly { readonly name: string; readonly body: string }[];
+  readonly scanWays: readonly { readonly id: 'camera' | 'scan'; readonly name: string; readonly body: string }[];
   readonly scanNote: string;
 
   readonly wcTitle: string;
@@ -74,29 +78,35 @@ const JA: WalletGuideContent = {
     'MetaMask が基本です。初めての方には、アプリの中に JPYC EX が組み込まれていて、JPYC を手に入れる (発行) ことも日本円に戻す (償還) こともアプリの中でできる、マイナウォレットや HashPort Wallet もおすすめです。',
   wallets: [
     {
+      id: 'metamask',
       name: 'MetaMask',
       body: 'いちばん広く使われているウォレットです。MetaMask のアプリの中のブラウザで支払い画面を開くと、そのまま接続できます。',
     },
     {
+      id: 'myna',
       name: 'マイナウォレット',
       body: 'マイナンバーカードを使うウォレットです。JPYC EX の本人確認にもマイナンバーカードを使うので、はじめての方に向いています。アプリの中で JPYC の発行・償還ができます。OpenPay には WalletConnect でつなぎます。',
     },
     {
+      id: 'hashport',
       name: 'HashPort Wallet',
       body: 'アプリの中で JPYC の発行・償還ができます。OpenPay には WalletConnect でつなぎます。',
     },
   ],
   walletNote:
     'お店の受け取り用にも、同じウォレットが使えます。アプリの中で発行・償還するときも、JPYC EX の登録と本人確認が必要です。くわしくは各ウォレットと JPYC 公式の案内をご覧ください。',
+  noteLink: { href: PAY_GUIDE_JPYC_NOTE, label: 'JPYC 運用ガイド (ウォレット準備〜換金・運用) — note' },
 
   scanTitle: 'お店の QR の読み取り方',
   scanLead: 'お店の QR は、次のどちらかで読み取ります。支払い画面が開いたら、そこでウォレットをつなぎます。',
   scanWays: [
     {
+      id: 'camera',
       name: 'スマホのカメラ',
       body: 'カメラのアプリで QR を写すと、ブラウザで支払い画面が開きます。',
     },
     {
+      id: 'scan',
       name: '「スキャンして支払う」',
       body: 'OpenPay の「決済」から開いて、「カメラを起動」で読み取ります。先にウォレットをつないでおけば、お店では読み取って承認するだけです。',
     },
@@ -153,29 +163,35 @@ const EN: WalletGuideContent = {
     'MetaMask is the standard. If you are new to wallets, MynaWallet and HashPort Wallet are good choices too: JPYC EX is built into these apps, so you can get JPYC (issuance) and turn it back into yen (redemption) inside the app.',
   wallets: [
     {
+      id: 'metamask',
       name: 'MetaMask',
       body: 'The most widely used wallet. Open the payment screen in the browser inside the MetaMask app and it connects as is.',
     },
     {
+      id: 'myna',
       name: 'MynaWallet',
       body: 'A wallet that uses the My Number Card (Japan’s individual number card). JPYC EX also uses the My Number Card for identity verification, so it suits first-time users. Issue and redeem JPYC inside the app. Connect it to OpenPay with WalletConnect.',
     },
     {
+      id: 'hashport',
       name: 'HashPort Wallet',
       body: 'Issue and redeem JPYC inside the app. Connect it to OpenPay with WalletConnect.',
     },
   ],
   walletNote:
     'The same wallets work for receiving at your shop. Issuing or redeeming inside these apps still requires a JPYC EX account and identity verification. See the guidance from each wallet and from JPYC for details.',
+  noteLink: { href: PAY_GUIDE_JPYC_NOTE, label: 'JPYC handling guide (wallet setup to redemption) — note (Japanese)' },
 
   scanTitle: 'Scanning the shop’s QR',
   scanLead: 'Scan the shop’s QR in one of these two ways. Once the payment screen opens, connect your wallet there.',
   scanWays: [
     {
+      id: 'camera',
       name: 'Your phone camera',
       body: 'Point the camera app at the QR and the payment screen opens in your browser.',
     },
     {
+      id: 'scan',
       name: '“Scan to pay”',
       body: 'Open it from “Pay” in OpenPay and scan with “Start camera”. If you connect your wallet beforehand, at the shop you only scan and approve.',
     },

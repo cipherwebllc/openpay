@@ -35,6 +35,20 @@ describe('/guide/wallet', () => {
       expect(within(wallets).getByText(w.name)).toBeInTheDocument();
       expect(within(wallets).getByText(w.body)).toBeInTheDocument();
     }
+    // カードの左のマーク: MetaMask は同梱の公式 SVG・ほかは一般のアイコン (飾りなので読み上げない)。
+    const walletCards = within(wallets).getAllByRole('listitem');
+    expect(walletCards).toHaveLength(c.wallets.length);
+    expect(walletCards[0].querySelector('img')).toHaveAttribute('src', '/wallets/MetaMask.svg');
+    for (const card of walletCards) {
+      const mark = card.querySelector('img, svg')!;
+      expect(mark).not.toBeNull();
+      expect(mark.getAttribute('aria-hidden')).toBe('true');
+    }
+    // 節の下部に note 記事 (別タブ・noopener)。
+    const note = within(wallets).getByRole('link', { name: `${c.noteLink.label} →` });
+    expect(note).toHaveAttribute('href', 'https://note.com/masia02/n/ned04a4cdb00a');
+    expect(note).toHaveAttribute('target', '_blank');
+    expect(note.getAttribute('rel')).toContain('noopener');
 
     const scan = screen.getByRole('heading', { level: 2, name: c.scanTitle }).closest('section')!;
     for (const way of c.scanWays) expect(within(scan).getByText(way.body)).toBeInTheDocument();
