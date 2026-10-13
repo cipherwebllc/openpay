@@ -32,15 +32,19 @@ export function Section({
   children,
   badge,
   toc = true,
+  id,
 }: {
   title: string;
   children: ReactNode;
   badge?: number | string;
   toc?: boolean;
+  /** ほかのページから #id で飛んでくる節だけに付ける (無い h2 は GuideToc が section-<番号> を振る)。 */
+  id?: string;
 }) {
   return (
     <section className="mt-12">
       <h2
+        id={id}
         data-toc={toc ? undefined : 'skip'}
         data-toc-label={title}
         className="flex items-start gap-3 text-xl font-bold tracking-tight text-slate-900 sm:text-2xl"

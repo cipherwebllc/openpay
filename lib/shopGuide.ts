@@ -46,6 +46,7 @@ export type ShopGuideContent = {
   readonly guideLinkPos: string;
   readonly guideLinkCustomer: string;
   readonly guideLinkAgent: string;
+  readonly guideLinkDiscount: string;
 
   readonly ctaTitle: string;
   readonly ctaBody: string;
@@ -134,6 +135,7 @@ const JA: ShopGuideContent = {
   guideLinkPos: '今お使いの POS レジと併用する運用ガイド',
   guideLinkCustomer: 'お客様向け: モバイルオーダーのやり方',
   guideLinkAgent: 'お客様向け: AI に相談して注文する (訪日客向け)',
+  guideLinkDiscount: 'JPYC 払いで割引する — 決済QR・レジ・モバイルオーダーの値引き',
 
   ctaTitle: '今日から、専用端末なしで',
   ctaBody:
@@ -223,6 +225,7 @@ const EN: ShopGuideContent = {
   guideLinkPos: 'Running alongside your current POS register',
   guideLinkCustomer: 'For customers: how to order from your phone',
   guideLinkAgent: 'For customers: order by asking your AI (for visitors to Japan)',
+  guideLinkDiscount: 'Discounts for paying with JPYC — Payment QR, register and mobile ordering',
 
   ctaTitle: 'Start today, no dedicated terminal',
   ctaBody:

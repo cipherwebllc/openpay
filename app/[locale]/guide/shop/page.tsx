@@ -66,6 +66,7 @@ export default async function GuideShopPage({
     { href: `/${locale}/guide/pos`, label: c.guideLinkPos },
     { href: `/${locale}/guide/mobile-order`, label: c.guideLinkCustomer },
     { href: `/${locale}/guide/agent`, label: c.guideLinkAgent },
+    { href: `/${locale}/guide/qr#jpyc-discount`, label: c.guideLinkDiscount },
   ];
 
   return (

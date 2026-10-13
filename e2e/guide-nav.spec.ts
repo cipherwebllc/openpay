@@ -39,6 +39,18 @@ test.describe('ガイドの目次と /guide ハブ', () => {
     await expect(page).toHaveURL(/\/ja\/guide\/start$/);
   });
 
+  test('/ja/guide/shop の「JPYC 払いで割引する」から /ja/guide/qr の節へ飛び、見出しが画面に入る', async ({ page }) => {
+    await page.goto('/ja/guide/shop');
+    await page.getByRole('main').getByRole('link', { name: /^JPYC 払いで割引する/ }).click();
+    await expect(page).toHaveURL(/\/ja\/guide\/qr#jpyc-discount$/);
+    const heading = page.getByRole('heading', { level: 2, name: 'JPYC 払いで割引する' });
+    await expect(heading).toBeInViewport();
+    await expect(page.getByRole('link', { name: 'JPYC 社の発表（2026 年 10 月 9 日・PR TIMES）' })).toHaveAttribute(
+      'href',
+      'https://prtimes.jp/main/html/rd/p/000000332.000054018.html',
+    );
+  });
+
   test('/ja/guide: 見出しと、main の中にガイドへのリンク (はじめての方へ 2 本 + 一覧 11 本)', async ({ page }) => {
     await page.goto('/ja/guide');
     await expect(page.getByRole('heading', { level: 1, name: 'OpenPay でできること' })).toBeVisible();

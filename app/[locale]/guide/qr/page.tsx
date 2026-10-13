@@ -17,10 +17,15 @@ import { GuideFrame } from '@/components/guide/GuideFrame';
 import { guideNavFor } from '@/lib/guideNav';
 import { GuideFeeList } from '@/components/guide/GuideFee';
 import { GUIDE_PRIMARY_ACTION, GUIDE_SECONDARY_ACTION, GuideLead, GuideSubtitle, GuideTitle } from '@/components/guide/GuideHeader';
-import { STEP_BADGE, Section } from '@/components/guide/PosGuidePieces';
+import { BulletList, STEP_BADGE, Section } from '@/components/guide/PosGuidePieces';
 import { GuideVideo } from '@/components/guide/GuideVideo';
 import { HOWTO_VIDEO_UI, howtoVideoFor } from '@/lib/howtoVideos';
 import { qrGuideContentFor, qrGuideMetadata } from '@/lib/qrGuide';
+import { GuideCallout } from '@/components/guide/GuideCallout';
+
+// JPYC 社の発表 (2026-10-09・割引などの優遇についての同社の考え方と導入店向け相談窓口)。窓口のメールアドレスは
+// 載せずに発表へリンクする (公開の連絡先にメールアドレスを書かない方針)。
+const JPYC_DISCOUNT_RELEASE_URL = 'https://prtimes.jp/main/html/rd/p/000000332.000054018.html';
 
 export async function generateMetadata({
   params,
@@ -162,6 +167,24 @@ export default async function GuideQrPage({
             pricingHref={`/${locale}/pricing`}
             pricingLabel={tLanding('supportFeeDetailsLink')}
           />
+        </Section>
+
+        <Section title={c.discountTitle} id="jpyc-discount">
+          <p className="mt-3 text-sm leading-relaxed text-slate-700">{c.discountLead}</p>
+          <BulletList items={c.discountPoints} marker="•" markerClassName="text-emerald-600" />
+          <GuideCallout kind="warn">
+            <p>{c.discountCaution}</p>
+            <p className="mt-1">
+              <a
+                href={JPYC_DISCOUNT_RELEASE_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-semibold underline underline-offset-2"
+              >
+                {c.discountSourceLabel}
+              </a>
+            </p>
+          </GuideCallout>
         </Section>
 
         <Section title={c.currenciesTitle}>
