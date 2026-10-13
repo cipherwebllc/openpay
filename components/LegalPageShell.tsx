@@ -48,9 +48,10 @@ export function LegalPageShell({
   );
 }
 
-export function LegalSection({ title, body }: { title: string; body: string }) {
+// id はフッター等からの節への直リンク用 (例: /privacy#external)。sticky ヘッダーに隠れないよう余白を取る。
+export function LegalSection({ title, body, id }: { title: string; body: string; id?: string }) {
   return (
-    <section>
+    <section id={id} className={id ? 'scroll-mt-20' : undefined}>
       <h2 className="mb-1.5 text-base font-semibold text-slate-900">{title}</h2>
       <p className="whitespace-pre-line text-sm leading-relaxed text-slate-700">
         {body}

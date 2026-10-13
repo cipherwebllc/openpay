@@ -65,14 +65,19 @@ describe('「お店がガス代を肩代わりして送る」の開示 (DISCLOSE
   });
 
   // 新設日に 4 文書を改定した。そのあとの改定で施行日が進むのはよい (この経路の条項を含む版のまま) が、
-  // 新設日より前に戻すと、この経路を書いていない版の日付になる。プライバシーはそのあと改定していないので同じ日のまま。
-  // (2026-10-11 に Terms・特商法・免責を、チップの行き先と AI エージェントの x402 モバイル注文の開示で改定した)
-  it('施行日 (Terms・特商法・免責・プライバシー) は新設日以降 (プライバシーは新設日と同じ)', () => {
-    for (const date of [LEGAL_ENTITY.termsEffectiveDate, LEGAL_ENTITY.tokuteiEffectiveDate, LEGAL_ENTITY.disclaimerEffectiveDate]) {
+  // 新設日より前に戻すと、この経路を書いていない版の日付になる。
+  // (2026-10-11 に Terms・特商法・免責を、チップの行き先と AI エージェントの x402 モバイル注文の開示で改定した。
+  //  2026-10-13 にプライバシーを、外部送信規律の公表で改定した)
+  it('施行日 (Terms・特商法・免責・プライバシー) は新設日以降', () => {
+    for (const date of [
+      LEGAL_ENTITY.termsEffectiveDate,
+      LEGAL_ENTITY.tokuteiEffectiveDate,
+      LEGAL_ENTITY.disclaimerEffectiveDate,
+      LEGAL_ENTITY.privacyEffectiveDate,
+    ]) {
       expect(date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
       expect(date >= D.effectiveDate, `${date} は新設日 ${D.effectiveDate} 以降`).toBe(true);
     }
-    expect(LEGAL_ENTITY.privacyEffectiveDate).toBe(D.effectiveDate);
   });
 
   it('規約: 定義 (6)(c)・第 3 条・第 5 条 (1) の除外・(11) (対象・対象外・0 円・1 wei の行き先・10 分・新設日)', () => {

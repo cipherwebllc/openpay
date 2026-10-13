@@ -65,7 +65,7 @@ describe('Legal pages', () => {
       expect(screen.getByText((_, element) => element?.tagName === 'P' && !!element.textContent?.includes('(18)'))).toHaveTextContent(clause);
       expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-10-12');
       expect(messages.Privacy.section3.body).toContain(locale === 'ja' ? '購入歴のないライセンス保有者' : 'license holders without a purchase history');
-      expect(LEGAL_ENTITY.privacyEffectiveDate).toBe('2026-10-08');
+      expect(LEGAL_ENTITY.privacyEffectiveDate).toBe('2026-10-13');
     });
 
     it('第13条: license の政策値・売り手・権利・返金・公開情報を同じ namespace 内で固定する', async () => {
@@ -786,7 +786,8 @@ describe('Legal pages', () => {
       expect(LEGAL_ENTITY.tokuteiEffectiveDate).toBe('2026-10-12');
       expect(LEGAL_ENTITY.disclaimerEffectiveDate).toBe('2026-10-11');
       // 2026-09-10 改定案: 保護配布のチケット情報の第三者提供を追記。
-      expect(LEGAL_ENTITY.privacyEffectiveDate).toBe('2026-10-08');
+      // 2026-10-13: 外部送信規律の公表 (3-3 外部送信について)・委託先の追加でプライバシーだけ改定。
+      expect(LEGAL_ENTITY.privacyEffectiveDate).toBe('2026-10-13');
     });
   });
 
