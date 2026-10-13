@@ -34,7 +34,7 @@ function copyLeaves(locale: string): [string, string][] {
   };
   walk(walletGuideContentFor(locale), locale);
   // リンク先 (path) は文言ではないので除く。
-  return sink.filter(([at]) => !/\.path$/.test(at));
+  return sink.filter(([at]) => !/\.(path|href)$/.test(at));
 }
 
 describe('walletGuide content', () => {
@@ -67,6 +67,12 @@ describe('walletGuide content', () => {
       expect(c.wcSteps[1].body).toContain('HashPort');
       expect(c.wcSteps[1].body).toContain('Myna');
     }
+    // カードのマークの対応 (MetaMask は同梱の公式 SVG を使う)。
+    for (const locale of LOCALES) {
+      expect(walletGuideContentFor(locale).wallets.map((w) => w.id)).toEqual(['metamask', 'myna', 'hashport']);
+      expect(walletGuideContentFor(locale).scanWays.map((w) => w.id)).toEqual(['camera', 'scan']);
+    }
+    expect(existsSync(path.join(process.cwd(), 'public', 'wallets', 'MetaMask.svg'))).toBe(true);
     // マイナウォレットは「JPYC EX の本人確認にもマイナンバーカード」ではじめての方に向く、と書く (user「マイナウォレットを押したい」)。
     expect(walletGuideContentFor('ja').wallets[1].body).toContain('はじめての方に向いています');
     expect(walletGuideContentFor('en').wallets[1].body).toContain('suits first-time users');
@@ -108,6 +114,12 @@ describe('walletGuide content', () => {
       for (const { path: p } of [c.scanCta, ...c.related]) {
         expect(existsSync(path.join(PAGE_DIR, ...p.split('/').filter(Boolean), 'page.tsx')), `${p} の page.tsx が無い`).toBe(true);
       }
+    }
+  });
+
+  it('おすすめのウォレットの下の note 記事は「JPYC で支払う」と同じ記事・同じ名前', () => {
+    for (const locale of LOCALES) {
+      expect(walletGuideContentFor(locale).noteLink).toEqual(payGuideContentFor(locale).jpycNoteLink);
     }
   });
 

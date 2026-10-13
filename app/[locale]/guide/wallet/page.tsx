@@ -8,8 +8,10 @@
 // SEO 価値がある集客コンテンツなので noindex は設定しない (guide/* 共通方針)。
 // 掟 3: このファイルは default / generateMetadata 以外を export しない。
 
+import type { ReactNode } from 'react';
 import type { Metadata } from 'next';
 import Link from 'next/link';
+import { Camera, IdCard, ScanLine, Wallet } from 'lucide-react';
 import { setRequestLocale } from 'next-intl/server';
 import { AppShell } from '@/components/AppShell';
 import { GuideFrame } from '@/components/guide/GuideFrame';
@@ -30,13 +32,32 @@ export async function generateMetadata({
   return walletGuideMetadata(locale);
 }
 
-function NamedCards({ items }: { items: readonly { readonly name: string; readonly body: string }[] }) {
+// カードの左のマーク (飾りなので読み上げない・名前は隣の可視の文字)。MetaMask は接続ボタンと同じ同梱の公式 SVG
+// (public/wallets/MetaMask.svg)。マイナウォレット・HashPort Wallet は公式ロゴの素材を入手していないので、一般のアイコン
+// (マイナンバーカード = IdCard・財布 = Wallet) で代える。公式ロゴの素材を使ってよいと確かめられたら差し替える。
+const ICON_TILE = 'flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-50 ring-1 ring-slate-200/70';
+const ICON_CLASS = 'h-5 w-5 text-slate-600';
+const CARD_ICONS: Record<string, ReactNode> = {
+  metamask: (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img src="/wallets/MetaMask.svg" alt="" aria-hidden width={24} height={24} className="h-6 w-6 object-contain" />
+  ),
+  myna: <IdCard aria-hidden className={ICON_CLASS} />,
+  hashport: <Wallet aria-hidden className={ICON_CLASS} />,
+  camera: <Camera aria-hidden className={ICON_CLASS} />,
+  scan: <ScanLine aria-hidden className={ICON_CLASS} />,
+};
+
+function NamedCards({ items }: { items: readonly { readonly id: string; readonly name: string; readonly body: string }[] }) {
   return (
     <ul className="mt-4 space-y-3">
       {items.map((item) => (
-        <li key={item.name} className="rounded-xl bg-white p-4 shadow-card ring-1 ring-slate-200/70">
-          <p className="text-sm font-semibold text-slate-900">{item.name}</p>
-          <p className="mt-1 text-sm leading-relaxed text-slate-700">{item.body}</p>
+        <li key={item.id} className="flex gap-3 rounded-xl bg-white p-4 shadow-card ring-1 ring-slate-200/70">
+          <span className={ICON_TILE}>{CARD_ICONS[item.id]}</span>
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-slate-900">{item.name}</p>
+            <p className="mt-1 text-sm leading-relaxed text-slate-700">{item.body}</p>
+          </div>
         </li>
       ))}
     </ul>
@@ -71,6 +92,17 @@ export default async function GuideWalletPage({
           <p className="mt-3 text-sm leading-relaxed text-slate-700">{c.walletLead}</p>
           <NamedCards items={c.wallets} />
           <p className="mt-3 text-xs leading-relaxed text-slate-500">{c.walletNote}</p>
+          {/* ウォレットの公式リンクは置かず、ウォレット準備〜換金・運用をまとめた運営者の note 記事へ (「JPYC で支払う」と同じ記事)。 */}
+          <p className="mt-4">
+            <a
+              href={c.noteLink.href}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-sm font-semibold text-emerald-700 underline-offset-2 hover:underline"
+            >
+              {c.noteLink.label} →
+            </a>
+          </p>
         </Section>
 
         <Section title={c.scanTitle}>
