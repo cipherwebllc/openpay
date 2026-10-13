@@ -1366,7 +1366,7 @@ describe('TipForm — EIP-3009 relay (JPYC)', () => {
     const rendered = render(<TipForm params={JPYC_PARAMS} preview />);
 
     const composer = screen.getByRole('textbox', {
-      name: '質問やメッセージ (任意)',
+      name: '応援メッセージ (任意)',
     });
     expect(composer).toHaveAttribute('maxlength', '300');
     // placeholder は記入例 (ラベル/プライバシー行との三重復唱を解消・2026-08-02)。
@@ -1382,7 +1382,7 @@ describe('TipForm — EIP-3009 relay (JPYC)', () => {
     render(<TipForm params={JPYC_PARAMS} />);
     expect(
       screen.queryByRole('textbox', {
-        name: '質問やメッセージ (任意)',
+        name: '応援メッセージ (任意)',
       }),
     ).toBeNull();
   });
@@ -1393,14 +1393,14 @@ describe('TipForm — EIP-3009 relay (JPYC)', () => {
     const rendered = render(<TipForm params={JPYC_PARAMS} />);
     expect(
       screen.queryByRole('textbox', {
-        name: '質問やメッセージ (任意)',
+        name: '応援メッセージ (任意)',
       }),
     ).toBeNull();
 
     rendered.rerender(<TipForm params={USDC_PARAMS} />);
     expect(
       screen.queryByRole('textbox', {
-        name: '質問やメッセージ (任意)',
+        name: '応援メッセージ (任意)',
       }),
     ).toBeNull();
   });
@@ -1415,11 +1415,11 @@ describe('TipForm — EIP-3009 relay (JPYC)', () => {
 
     expect(
       screen.getByRole('textbox', {
-        name: '質問やメッセージ (任意)',
+        name: '応援メッセージ (任意)',
       }),
     ).toBeDisabled();
     expect(
-      screen.getByText('1 JPYC 以上のチップで質問を添えられます'),
+      screen.getByText('1 JPYC 以上のチップに応援メッセージを添えられます'),
     ).toBeInTheDocument();
   });
 
@@ -1440,7 +1440,7 @@ describe('TipForm — EIP-3009 relay (JPYC)', () => {
 
     await user.type(
       screen.getByRole('textbox', {
-        name: '質問やメッセージ (任意)',
+        name: '応援メッセージ (任意)',
       }),
       privateMessage,
     );
