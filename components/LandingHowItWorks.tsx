@@ -11,6 +11,7 @@ import { LandingEntryPoints } from '@/components/LandingEntryPoints';
 import { Smartphone, Store } from 'lucide-react';
 import { LandingSectionHeader } from '@/components/LandingSectionHeader';
 import { STEP_BADGE, STEP_BADGE_CUSTOMER } from '@/components/guide/PosGuidePieces';
+import { LandingDemoVideos } from '@/components/LandingDemoVideos';
 
 export async function LandingHowItWorks() {
   const locale = await getLocale();
@@ -41,9 +42,34 @@ export async function LandingHowItWorks() {
     <section className="mt-16 sm:mt-28">
       <LandingSectionHeader eyebrow={t('eyebrowStart')} title={t('howItWorksTitle')} lead={t('howItWorksSubtitle')} />
 
-      {/* 操作デモの動画 3 本は旧 UI (ALPHA の帯・旧ヘッダ・CoinGecko 表記) だったので外した (2026-10-12 user 裁定)。
-          今の画面で撮り直したら、手順のカードの上に戻す (plans/lp-polish-2026-10.md P2)。旧素材は public/demo/*-mobile.{mp4,gif}
-          と *-poster.png に残してある (scripts/gen-intro-video.mjs の素材・撮り直しの作り方は memory の LP デモ動画)。 */}
+      {/* 操作の短い動画 3 本 (2026-10-13 にいまの画面で撮り直した)。旧 UI の 3 本 (public/demo/*-mobile.*) は
+          README の GIF と scripts/gen-intro-video.mjs の素材なので残してある。 */}
+      <LandingDemoVideos
+        caption={t('howItWorksDemoCaption')}
+        note={t('howItWorksDemoNote')}
+        pauseLabel={t('howItWorksDemoPause')}
+        playLabel={t('howItWorksDemoPlay')}
+        demos={[
+          {
+            src: '/demo/lp-qr.mp4',
+            poster: '/demo/lp-qr-poster.webp',
+            label: t('howItWorksDemoQr'),
+            description: t('howItWorksDemoQrAlt'),
+          },
+          {
+            src: '/demo/lp-register.mp4',
+            poster: '/demo/lp-register-poster.webp',
+            label: t('howItWorksDemoRegister'),
+            description: t('howItWorksDemoRegisterAlt'),
+          },
+          {
+            src: '/demo/lp-pay.mp4',
+            poster: '/demo/lp-pay-poster.webp',
+            label: t('howItWorksDemoPay'),
+            description: t('howItWorksDemoPayAlt'),
+          },
+        ]}
+      />
       <div className="mt-8 grid gap-6 sm:grid-cols-2">
         <article className="rounded-2xl bg-white p-6 shadow-card ring-1 ring-slate-200/70">
           <h3 className="flex items-center gap-2 text-base font-semibold text-emerald-900">
