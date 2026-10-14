@@ -14,6 +14,7 @@ import { useTranslations } from 'next-intl';
 import { Search } from 'lucide-react';
 import { env } from '@/lib/env';
 import { storeProductPath } from '@/lib/storeProductLink';
+import { filterStoreListings } from '@/lib/store/listingFilter';
 import { CreatorStoreDeliveryBadge } from '@/components/CreatorStoreDeliveryBadge';
 import { CreatorStoreLicenseDetails } from '@/components/CreatorStoreLicenseDetails';
 import { CreatorStorefrontProductArtwork } from '@/components/CreatorStorefrontProductArtwork';
@@ -38,25 +39,10 @@ export function StoreBrowser({
   const [query, setQuery] = useState(initialQuery);
   const [category, setCategory] = useState('');
 
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return listings.filter((listing) => {
-      if (listing.productKind === 'license' && !env.enableLicenseNftUi) return false;
-      if (category && listing.category !== category) return false;
-      if (!q) return true;
-      const haystack = [
-        listing.title,
-        listing.desc ?? '',
-        // '@' 付きで持つ — プロフの「すべての商品を見る」リンク (?q=@handle) と
-        // 素の handle 入力の両方に substring 一致させる
-        `@${listing.handle}`,
-        ...(listing.tags ?? []),
-      ]
-        .join('\n')
-        .toLowerCase();
-      return haystack.includes(q);
-    });
-  }, [listings, query, category]);
+  const filtered = useMemo(
+    () => filterStoreListings(listings, { query, category }),
+    [listings, query, category],
+  );
 
   return (
     <div>
