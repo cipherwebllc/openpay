@@ -3,10 +3,17 @@
 > The detailed API reference behind the [README](../README.md). Listing rules live in [LISTING_POLICY.md](./LISTING_POLICY.md).
 > README の詳しい版です（x402・AI エージェント決済・API・料金表）。掲載ルールは [LISTING_POLICY.md](./LISTING_POLICY.md) にあります。
 
+- [Checkout links](#checkout-links--リンクで決済を受け取る)
 - [Pay-per-request APIs on Arc](#pay-per-request-apis-on-arc-x402--arc-の-usdc-で買える有料-api)
 - [x402 / API / agent payments](#x402--api--agent-payments)
 - [Japan Web3 Directory API](#japan-web3-directory-api)
 - [JPYC Shops API](#jpyc-shops-api)
+
+## Checkout links · リンクで決済を受け取る
+
+`https://open-pay.jp/ja/checkout?to=…&token=jpyc&items=…` opens a JPYC / USDC payment page from URL parameters alone — only the receiving address is needed (no API key, no sign-up). After payment the page redirects to `success_url` with `tx_hash` and related values; those can be tampered with, so verify the payment on-chain. There is no webhook. Parameters, the redirect fields and the on-chain verification steps (with a Node.js example) are in [CHECKOUT.md](./CHECKOUT.md) (Japanese).
+
+URL のパラメーターだけで支払いページを開けるリンクです。パラメーター・支払い後に返る値・オンチェーンで入金を確かめる手順は [CHECKOUT.md](./CHECKOUT.md) にあります。
 
 ## Pay-per-request APIs on Arc (x402) · Arc の USDC で買える有料 API
 

@@ -31,6 +31,7 @@ OpenPay is an open-source, non-custodial payment layer for the Japanese yen stab
 - [モバイルオーダーのやり方](https://open-pay.jp/ja/guide/mobile-order): お店の QR を読み取って、スマホで注文・支払い。アプリのインストールは要りません。
 - [店頭キット](https://open-pay.jp/ja/kit): 決済QRポスター等の印刷キット
 - [受け取りを始める](https://open-pay.jp/ja/create): 決済QR・モバイルオーダーの作成
+- [リンクで決済を受け取る（開発者向け）](https://github.com/cipherwebllc/openpay/blob/main/docs/CHECKOUT.md): `https://open-pay.jp/ja/checkout?to=&token=&items=&order_id=&success_url=` のリンクひとつで JPYC / USDC の支払いページを開ける（受取アドレスだけで使え、API キー・登録は不要）。支払い後は success_url に tx_hash などを付けて戻すが、URL は書き換えられるのでオンチェーンで入金を確かめる手順つき（webhook はない）
 - [OpenPay Store](https://open-pay.jp/ja/store): クリエイターが公開したデジタル商品 (プロンプト・素材・ドキュメント・3D 等) を横断検索し、JPYC または出品者が許可した USDC (Base) で購入できるマーケットプレイス。プロフィール (@handle) の公開商品と自動連動
 - [クリエイターガイド](https://open-pay.jp/ja/guide/store): プロフィール (@handle)・チップ受付 (JPYC / USDC(Base・Arc)・Arc は標準モード)・デジタル商品販売の LP 兼ガイド。無料サービス (Google ドライブ・Notion・YouTube 限定公開等) と組み合わせて JPYC 販売する 6 つの方法と手順つき
 - [English](https://open-pay.jp/en): English version of the site
