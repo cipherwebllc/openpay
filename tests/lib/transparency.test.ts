@@ -9,6 +9,8 @@ import type * as LegalModule from '@/lib/legal';
 import { expectTipFeeScopedByToken } from '../_helpers/tipDisclosure';
 
 const ORIGINAL_ENV = { ...process.env };
+const POLYGON_FORWARDER = '0x0F4560a777415580F0680F8B56a79B0022C6B848';
+const KAIA_FORWARDER = '0x1111111111111111111111111111111111111111';
 const LOCALES = ['ja', 'en'] as const;
 
 let transparency: typeof TransparencyModule;
@@ -43,6 +45,11 @@ beforeAll(async () => {
   );
   vi.stubEnv('NEXT_PUBLIC_PIMLICO_API_KEY', 'test_pimlico_key');
   vi.stubEnv('NEXT_PUBLIC_PIMLICO_SPONSORSHIP_POLICY_ID', 'sp_test');
+  // forwarder 表は実効アドレスから作る: Polygon / Kaia だけ設定し、Avalanche は未設定 (= 載らない)。
+  vi.stubEnv('NEXT_PUBLIC_ENABLE_USAGE_FEE', '');
+  vi.stubEnv('NEXT_PUBLIC_JPYC_FORWARDER_POLYGON', POLYGON_FORWARDER);
+  vi.stubEnv('NEXT_PUBLIC_JPYC_FORWARDER_KAIA', KAIA_FORWARDER);
+  vi.stubEnv('NEXT_PUBLIC_JPYC_FORWARDER_AVALANCHE', '');
 
   transparency = await import('@/lib/transparency');
   tokens = await import('@/lib/tokens');
@@ -203,5 +210,35 @@ describe('mainnet コントラクト表の SOT fence', () => {
         });
       }
     }
+  });
+});
+
+describe('ガスレス JPYC の forwarder 表と検証手順の SOT fence', () => {
+  it('実効 forwarder (jpycForwarderFor) だけを載せ、未設定のチェーンは載せない', () => {
+    const chainName = (id: number) =>
+      chains.supportedChains.find((item) => item.id === id)?.name;
+    for (const locale of LOCALES) {
+      expect(transparency.TRANSPARENCY[locale].forwarders).toEqual([
+        { chain: chainName(137), address: POLYGON_FORWARDER },
+        { chain: chainName(8217), address: KAIA_FORWARDER },
+      ]);
+    }
+  });
+
+  it('forwarder が第三者の監査を受けていないことを書き、「監査済み」とは書かない', () => {
+    const ja = transparency.TRANSPARENCY.ja.forwarderNote;
+    const en = transparency.TRANSPARENCY.en.forwarderNote;
+    expect(ja).toContain('第三者の監査会社による監査はまだ受けていません');
+    expect(ja).not.toContain('監査済');
+    expect(en).toContain('has not yet been audited by a third-party audit firm');
+  });
+
+  it('検証手順のリンク先 docs/CHECKOUT.md がリポにある', async () => {
+    const { existsSync } = await import('node:fs');
+    for (const locale of LOCALES) {
+      const { href } = transparency.TRANSPARENCY[locale].verifyGuide;
+      expect(href).toBe('https://github.com/cipherwebllc/openpay/blob/main/docs/CHECKOUT.md');
+    }
+    expect(existsSync('docs/CHECKOUT.md')).toBe(true);
   });
 });

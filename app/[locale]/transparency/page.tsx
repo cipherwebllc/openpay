@@ -108,6 +108,46 @@ export default async function TransparencyPage({
               </tbody>
             </table>
           </div>
+          {content.forwarders.length > 0 ? (
+            <>
+              <h3 className="mt-6 text-sm font-bold text-slate-900">
+                {content.forwardersTitle}
+              </h3>
+              <div className="mt-3 overflow-hidden rounded-2xl bg-white shadow-card ring-1 ring-slate-200/70">
+                <table className="w-full table-fixed text-left text-sm">
+                  <colgroup>
+                    <col className="w-[30%]" />
+                    <col className="w-[70%]" />
+                  </colgroup>
+                  <thead className="bg-slate-50 text-xs text-slate-600">
+                    <tr>
+                      <th scope="col" className="px-3 py-3 font-semibold sm:px-4">
+                        {content.contractHeaders.chain}
+                      </th>
+                      <th scope="col" className="px-3 py-3 font-semibold sm:px-4">
+                        {content.contractHeaders.address}
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {content.forwarders.map((forwarder) => (
+                      <tr key={forwarder.chain}>
+                        <td className="break-words px-3 py-3 text-slate-700 sm:px-4">
+                          {forwarder.chain}
+                        </td>
+                        <td className="break-all px-3 py-3 font-mono text-xs text-slate-700 sm:px-4">
+                          {forwarder.address}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <p className="mt-3 text-sm leading-relaxed text-slate-700">
+                {content.forwarderNote}
+              </p>
+            </>
+          ) : null}
           <p className="mt-3 rounded-xl bg-amber-50 p-4 text-sm leading-relaxed text-amber-900 ring-1 ring-amber-200">
             {content.contractNote}
           </p>
@@ -123,6 +163,16 @@ export default async function TransparencyPage({
             label={content.receiptEndpointLabel}
             code={content.receiptEndpoint}
           />
+          <p className="mt-4 text-sm leading-relaxed">
+            <a
+              href={content.verifyGuide.href}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-semibold text-emerald-700 underline decoration-emerald-300 underline-offset-2 hover:text-emerald-900"
+            >
+              {content.verifyGuide.label}
+            </a>
+          </p>
         </Section>
 
         <Section title={content.feesTitle}>

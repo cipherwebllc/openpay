@@ -4,6 +4,7 @@
 // 新しい約束を作らず、既存の実装・開示を 1 ページに集約する:
 // - 手数料の数値は lib/legal.ts の DISCLOSED_* を補間する。
 // - コントラクト表は lib/tokens.ts の TOKEN_DEPLOYMENTS から mainnet のみを抽出する。
+// - ガスレス JPYC の forwarder 表は lib/relay/forwarderConfig.ts の実効アドレス (jpycForwarderFor) から作る。
 // - AI ストア掲載ルールは lib/sellGuide.ts の既存 quality 文言を再利用する。
 
 import {
@@ -16,6 +17,7 @@ import {
 } from './legal';
 import { sellGuideContentFor } from './sellGuide';
 import { supportedChains } from './chains';
+import { jpycForwarderFor } from './relay/forwarderConfig';
 import { TOKEN_DEPLOYMENTS } from './tokens';
 
 export type TransparencyLocale = 'ja' | 'en';
@@ -27,6 +29,11 @@ type TransparencyLink = {
 
 export type TransparencyContract = {
   readonly token: string;
+  readonly chain: string;
+  readonly address: string;
+};
+
+export type TransparencyForwarder = {
   readonly chain: string;
   readonly address: string;
 };
@@ -51,12 +58,18 @@ export type TransparencyContent = {
     readonly address: string;
   };
   readonly contracts: readonly TransparencyContract[];
+  readonly forwardersTitle: string;
+  /** ガスレス JPYC を提供しているチェーンの forwarder (未設定のチェーンは載せない)。 */
+  readonly forwarders: readonly TransparencyForwarder[];
+  readonly forwarderNote: string;
   readonly contractNote: string;
 
   readonly verificationTitle: string;
   readonly verificationItems: readonly string[];
   readonly receiptEndpointLabel: string;
   readonly receiptEndpoint: string;
+  /** OpenPay を信じずに入金を確かめる手順 (docs/CHECKOUT.md)。 */
+  readonly verifyGuide: TransparencyLink;
 
   readonly feesTitle: string;
   readonly fees: readonly string[];
@@ -116,7 +129,21 @@ const MAINNET_CONTRACTS: readonly TransparencyContract[] =
     ];
   });
 
+// 支払いの検証で照合する実効 forwarder。決済経路と同じ jpycForwarderFor を使い、別表を持たない
+// (a1 利用料が ON で recover を止めているときは載せない = 実際に使われるアドレスだけを見せる)。
+const JPYC_FORWARDERS: readonly TransparencyForwarder[] = TOKEN_DEPLOYMENTS.flatMap(
+  (deployment) => {
+    if (deployment.symbol !== 'jpyc') return [];
+    const forwarder = jpycForwarderFor(deployment.chainId);
+    const chain = supportedChains.find((item) => item.id === deployment.chainId);
+    if (!forwarder || !chain) return [];
+    return [{ chain: chain.name, address: forwarder }];
+  },
+);
+
 const RECEIPT_ENDPOINT = '/api/facilitator/verify-receipt';
+const VERIFY_GUIDE_HREF =
+  'https://github.com/cipherwebllc/openpay/blob/main/docs/CHECKOUT.md';
 
 const jaSellGuide = sellGuideContentFor('ja');
 const enSellGuide = sellGuideContentFor('en');
@@ -144,6 +171,10 @@ const ja: TransparencyContent = {
     address: 'コントラクトアドレス',
   },
   contracts: MAINNET_CONTRACTS,
+  forwardersTitle: 'JPYC ガスレス決済の forwarder コントラクト',
+  forwarders: JPYC_FORWARDERS,
+  forwarderNote:
+    'ガスレス決済では、この forwarder がお客様の署名 1 つで JPYC を受け取り、同じ取引の中で店舗の受取分と OpenPay 利用料に分けて送ります。forwarder は試験運用（alpha）の段階で、第三者の監査会社による監査はまだ受けていません。',
   contractNote:
     'アドレスは、必ずこのページまたは OpenPay・各発行者の公式発表と照合してください。',
 
@@ -156,6 +187,10 @@ const ja: TransparencyContent = {
   ],
   receiptEndpointLabel: '署名レシート検証 API',
   receiptEndpoint: RECEIPT_ENDPOINT,
+  verifyGuide: {
+    label: 'OpenPay を信じなくても入金を確かめられる手順（開発者向け・GitHub）',
+    href: VERIFY_GUIDE_HREF,
+  },
 
   feesTitle: '4. 手数料の決め方',
   fees: [
@@ -241,6 +276,10 @@ const en: TransparencyContent = {
     address: 'Contract address',
   },
   contracts: MAINNET_CONTRACTS,
+  forwardersTitle: 'Forwarder contracts for gasless JPYC payments',
+  forwarders: JPYC_FORWARDERS,
+  forwarderNote:
+    'In a gasless payment, the forwarder receives JPYC with a single customer signature and, in the same transaction, splits it into the store’s amount and the OpenPay fee. The forwarder is in a trial (alpha) stage and has not yet been audited by a third-party audit firm.',
   contractNote:
     'Always compare an address with this page or an official announcement from OpenPay and the relevant issuer.',
 
@@ -253,6 +292,10 @@ const en: TransparencyContent = {
   ],
   receiptEndpointLabel: 'Signed-receipt verification API',
   receiptEndpoint: RECEIPT_ENDPOINT,
+  verifyGuide: {
+    label: 'How to verify a payment without trusting OpenPay (for developers, GitHub, in Japanese)',
+    href: VERIFY_GUIDE_HREF,
+  },
 
   feesTitle: '4. How fees are determined',
   fees: [
