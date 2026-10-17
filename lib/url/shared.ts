@@ -119,9 +119,9 @@ export function parseGasParam(gasRaw: string | null): GasMode {
 }
 
 // mode の legacy alias 解決: 旧名 "direct" は "standard" に正規化。standard/direct 以外
-// (未指定 / 不明値含む) は既定 gasless。pay/checkout で同一の最終 ternary を共有する。
-// ⚠️ pay.ts は本 ternary の前段で不明 mode を error で弾く別ゲートを持つ (checkout は持たない)。
-// その検証差はここでは吸収しない — 呼出側が各々処理する。
+// (未指定) は既定 gasless。pay/checkout で同一の最終 ternary を共有する。
+// ⚠️ 不明 mode は pay.ts / checkout.ts とも本 ternary の前段で invalidMode として弾く (呼出側の返却形が
+// 異なるため、検証はここでは持たない)。
 export function resolveModeAlias(modeRaw: string | null): PayMode {
   return modeRaw === 'standard' || modeRaw === 'direct' ? 'standard' : 'gasless';
 }

@@ -1861,15 +1861,31 @@ describe('CheckoutParams mode 同期', () => {
     if (r.ok) expect(r.params.mode).toBe('standard');
   });
 
-  it('checkout parse: 不明 mode は default gasless に倒す (UI を壊さない設計)', async () => {
+  it('checkout parse: 不明 mode は invalidMode で止める (打ち間違いで店舗負担の利用料を発生させない)', async () => {
     const { parseCheckoutParams } = await import('@/lib/url');
-    const r = parseCheckoutParams(
-      new URLSearchParams(
-        `to=${MERCHANT_LOC}&token=usdc&items=A:1:10&mode=meta`,
-      ),
-    );
-    expect(r.ok).toBe(true);
-    if (r.ok) expect(r.params.mode).toBe('gasless');
+    for (const mode of ['meta', 'Standard', 'standrad', '']) {
+      const r = parseCheckoutParams(
+        new URLSearchParams(
+          `to=${MERCHANT_LOC}&token=usdc&items=A:1:10&mode=${mode}`,
+        ),
+      );
+      expect(r.ok, `mode=${mode}`).toBe(false);
+      if (!r.ok) expect(r.urlError.code).toBe('invalidMode');
+    }
+  });
+
+  it('checkout parse: mode 省略と mode=gasless は gasless・mode=standard は standard', async () => {
+    const { parseCheckoutParams } = await import('@/lib/url');
+    const base = `to=${MERCHANT_LOC}&token=usdc&items=A:1:10`;
+    for (const [query, expected] of [
+      [base, 'gasless'],
+      [`${base}&mode=gasless`, 'gasless'],
+      [`${base}&mode=standard`, 'standard'],
+    ] as const) {
+      const r = parseCheckoutParams(new URLSearchParams(query));
+      expect(r.ok, query).toBe(true);
+      if (r.ok) expect(r.params.mode).toBe(expected);
+    }
   });
 
   it('checkout build: mode=standard + gas=merchant → URL に mode のみ (gas は出ない)', async () => {

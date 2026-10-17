@@ -11,7 +11,8 @@
 //   description     (任意, 説明文 200 文字まで)
 //   customer_email  (任意, 240 文字まで、prefill 用 — クライアントは送信しない)
 //   gas             ("customer" | "merchant", 省略時 customer)
-//   mode            ("gasless" | "standard", 省略時 gasless) ※ standard のときのみ URL に出力
+//   mode            ("gasless" | "standard", 省略時 gasless・旧名 "direct" は standard・それ以外は invalidMode)
+//                   ※ standard のときのみ URL に出力
 //   success_url     (任意, http(s) — 決済成功後 redirect 先)
 //   cancel_url      (任意, http(s) — 「中止して戻る」リンク)
 //   webhook         (任意, http(s) — OpenPay 自身の受注 notify (同一 origin の /api/order/notify?h=)
@@ -369,9 +370,17 @@ export function parseCheckoutParams(
   }
 
   const gas: GasMode = parseGasParam(gasRaw);
-  // mode は /pay と同じ legacy alias (direct → standard) を適用。それ以外の不明値は
-  // checkout では default の gasless に倒す (請求書文脈では UI を壊さない方が大事)。
-  // ⚠️ pay.ts と違い不明 mode を error で弾くゲートは持たない (silently gasless)。
+  // mode は /pay と同じく gasless / standard と旧名 direct (→ standard) だけを受け付け、不明値は止める
+  // (2026-10-17 user 裁定)。黙って既定の gasless に倒すと、打ち間違えたリンクで店舗負担の利用料が
+  // 発生してしまう (下の「お店の端末で送る」を fail-closed にしているのと同じ理由)。
+  if (
+    modeRaw !== null &&
+    modeRaw !== 'gasless' &&
+    modeRaw !== 'standard' &&
+    modeRaw !== 'direct'
+  ) {
+    return { ok: false, ...urlFail('invalidMode') };
+  }
   const mode: PayMode = resolveModeAlias(modeRaw);
 
   // お店の端末で送る QR は fail-closed: 条件に合わなければ「使えない」と止める (未知の submit 値も同じ)。
