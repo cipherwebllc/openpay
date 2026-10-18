@@ -993,6 +993,10 @@ describe('i18n: Nav / Landing 名前空間 (AppShell + LP, ja/en parity)', () =>
     'useCase5Title',
     'useCase5Body',
     'useCase5ImageAlt',
+    // 活用例のモバイルオーダー (2026-10-19 user・店舗・イベント出店の次に並べる)。
+    'useCase8Title',
+    'useCase8Body',
+    'useCase8ImageAlt',
     // 技術詳細は Trust「オープン技術と透明性」の技術スタックに一本化
     // (旧 featuresGaslessTech は撤去)。
     'trustTechStack',
