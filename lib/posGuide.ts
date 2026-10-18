@@ -120,7 +120,7 @@ const ja: GuideContent = {
   cannotTitle: 'できないこと / 注意',
   cannot: [
     'レジと OpenPay は自動連携しません。金額は OpenPay にもう一度入力します（＝「2 台持ち」）',
-    '会計を締める前に、OpenPay 画面で「支払い完了」を必ず目視確認してください（ブロックチェーン決済は完了後の取り消しができません）',
+    '会計を締める前に、OpenPay の画面で「支払い完了」を必ず目で確かめてください（ブロックチェーン決済は完了後に取り消せません）',
     'お客様側にウォレットと JPYC が必要です（暗号資産に慣れたお客様・常連さんから始めるのがおすすめ）',
   ],
 
@@ -172,7 +172,7 @@ const ja: GuideContent = {
     {
       n: 4,
       title: '着金を確認してからレジを締める',
-      body: 'QR 画面の「残高の増加を検知」は、この支払いを特定するものではありません。取引履歴やブロックチェーン Explorer で該当する支払いを確認してから、商品をお渡し・レジを締めます。',
+      body: 'QR 画面の「残高の増加を検知」は、この支払いを特定するものではありません。取引履歴かブロックチェーン Explorer で該当する支払いを確かめてから、商品を渡してレジを締めます。',
     },
   ],
   flowImage: { file: 'four-steps.svg', alt: '会計→QR 表示→スキャン→完了確認 の 4 ステップ' },
@@ -186,7 +186,7 @@ const ja: GuideContent = {
   reconcileBody:
     'レジの「OpenPay 決済」合計と、OpenPay の着金記録を突き合わせます。',
   reconcileBullets: [
-    '基本：POS の売上額と時刻で照合（例：14:32 の ¥1,200）。※履歴の表示はご利用料（約 1% ・最低 約 2 JPYC）差引後の純額（例：1,188 JPYC）。行を開くと売上総額（1,200 JPYC）を確認できます',
+    '基本：POS の売上額と時刻で照合（例：14:32 の ¥1,200）。履歴は利用料を引いた純額（例：1,188 JPYC）で、行を開くと売上総額（1,200 JPYC）が出ます',
     '厳密：会計時にメモへ入れたレシート番号で 1 対 1 照合',
     'まとめて：「履歴」の CSV をレジの「その他決済」明細と突合。freee／マネーフォワード／弥生の取込形式に対応しています',
   ],
@@ -216,9 +216,9 @@ const ja: GuideContent = {
     { label: '預かり', card: '決済会社が一旦預かる', openpay: 'ノンカストディ（誰も預からない）' },
   ],
   costNote:
-    '※手数料の最新・正確な条件は OpenPay の利用規約・特定商取引法に基づく表記をご確認ください。比較は一般的な例であり、契約条件により異なります。',
+    '※手数料の最新・正確な条件は、利用規約・特定商取引法に基づく表記をご確認ください。比較は一般的な例で、契約条件により異なります。',
   feeNote:
-    '着金額について：ガスレス決済ではご利用料（決済額の約 1% ・最低 約 2 JPYC）が自動で差し引かれ、残りが着金します（例：¥1,200 → 約 ¥1,188）。POS に記録されるのは売上額のため、着金額はそれより少なくなります。正確な料率は利用規約・特定商取引法に基づく表記をご確認ください。',
+    '着金額について：ガスレス決済ではご利用料（決済額の約 1%・最低 約 2 JPYC）が自動で差し引かれて着金します（例：¥1,200 → 約 ¥1,188）。POS に記録される売上額より、着金額は少なくなります。',
   costImage: { file: 'cost-compare.svg', alt: 'カード決済と無料 POS×OpenPay のコスト比較イメージ' },
 
   faqTitle: 'よくある質問',
@@ -326,7 +326,7 @@ const en: GuideContent = {
     {
       n: 4,
       title: 'Confirm the payment, then close',
-      body: 'The QR screen’s “Balance increase detected” hint does not identify this payment. Verify the relevant payment in transaction history or a blockchain explorer before handing over goods and closing the sale.',
+      body: 'The QR screen’s “Balance increase detected” hint does not identify this payment. Check the payment in transaction history or a blockchain explorer before handing over goods and closing the sale.',
     },
   ],
   flowImage: { file: 'four-steps.svg', alt: 'Four steps: ring up → show QR → scan → confirm' },
@@ -340,7 +340,7 @@ const en: GuideContent = {
   reconcileBody:
     'Match your POS “OpenPay” total against OpenPay’s received records.',
   reconcileBullets: [
-    'Basic: match by POS sale amount and time (e.g. ¥1,200 at 14:32). History shows the net after the usage fee (~1%, min ~2 JPYC) — e.g. 1,188 JPYC. Open the entry to see the gross sale amount (1,200 JPYC)',
+    'Basic: match by POS sale amount and time (e.g. ¥1,200 at 14:32). History shows the net after the usage fee (e.g. 1,188 JPYC); open the entry to see the gross sale amount (1,200 JPYC)',
     'Precise: one-to-one match by the receipt number you put in the memo',
     'In bulk: export CSV from “History” and match against POS “other payment” entries. Supports freee / Money Forward / Yayoi import formats',
   ],
@@ -372,7 +372,7 @@ const en: GuideContent = {
   costNote:
     '* For the latest, exact fee terms, see OpenPay’s Terms / legal notice. The comparison is a general example and varies by contract.',
   feeNote:
-    'About the amount received: the usage fee (about 1%, minimum about 2 JPYC) is auto-deducted at settlement and the rest settles to your wallet (e.g. ¥1,200 → about ¥1,188). Your POS records the sale amount, so the wallet receipt is slightly less. See the Terms / legal notice for exact rates.',
+    'About the amount received: the usage fee (about 1%, minimum about 2 JPYC) is auto-deducted at settlement (e.g. ¥1,200 → about ¥1,188), so you receive slightly less than the sale amount your POS records.',
   costImage: { file: 'cost-compare.svg', alt: 'Cost comparison: card payment vs free POS × OpenPay' },
 
   faqTitle: 'FAQ',

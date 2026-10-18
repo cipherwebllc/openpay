@@ -159,7 +159,7 @@ const ja: SellGuideContent = {
     '既存 API や AI エージェントを 402 ゲートで JPYC 課金化し、OpenPay の AI ストアに無料掲載する手順。SDK、コピペスニペット、ノーコードゲートウェイと実売事例を紹介します。',
   title: 'API を、AI が買える商品にする',
   subtitle:
-    '402 ゲートを 1 つ立てて AI ストアに掲載すると、Claude などの AI エージェントが JPYC で都度購入できます。掲載無料・売上は満額直接着金。利用料は決済額の 1%（最低 1 JPYC）・支払う側の上乗せです。ノンカストディ。',
+    '402 ゲートを 1 つ立てて AI ストアに掲載すると、Claude などの AI エージェントが JPYC で都度購入できます。掲載は無料、売上は満額があなたへ直接届きます（ノンカストディ）。利用料は決済額の 1%（最低 1 JPYC）・支払う側の上乗せです。',
   backHome: '← トップにもどる',
 
   proofTitle: '実売の証拠',
@@ -193,7 +193,7 @@ const ja: SellGuideContent = {
   noCodeEnv: NO_CODE_ENV,
   sdkTitle: 'SDK（数行）',
   sdkBody:
-    'openpay-x402-sdk 0.10.0 以降で、自分の出品の resourceUrl・resourceId・expectedRecipient（JPYC 受取先）を createJpycGate に設定します。ID と受取先は自分の管理画面・設定から取得し、discovery 応答から設定しないでください。',
+    'openpay-x402-sdk 0.10.0 以降で、自分の出品の resourceUrl・resourceId・expectedRecipient（JPYC 受取先）を createJpycGate に設定します。ID と受取先は自分の管理画面から取り、discovery 応答から設定しないでください。',
   sdkPackage: {
     label: 'openpay-x402-sdk を npm で開く',
     href: SDK_NPM_URL,
@@ -229,7 +229,7 @@ const ja: SellGuideContent = {
     {
       n: 2,
       title: 'AI ストアで登録',
-      body: 'ウォレット接続（SIWE）後、URL、価格（JPYC の整数）、説明、カテゴリ、正当性表明を入力します。任意項目の「表示名」はカタログの見出しに、「いつ使うか」はエージェントが購入を判断する 1 行になるので、できるだけ埋めてください（Docs URL・利用条件も任意）。説明はエージェントが読む前提で、何が返るかを淡々と書きます。',
+      body: 'ウォレット接続（SIWE）後、URL・価格（JPYC の整数）・説明・カテゴリ・正当性表明を入力します。任意の「表示名」はカタログの見出しに、「いつ使うか」はエージェントが購入を判断する 1 行になるので、できるだけ埋めます（Docs URL・利用条件も任意）。説明には、何が返るかを淡々と書きます。',
     },
     {
       n: 3,
@@ -316,7 +316,7 @@ const en: SellGuideContent = {
     'Monetize an existing API or AI agent in JPYC with a 402 gate and list it in the OpenPay AI Store for free. Includes SDK, copy-paste, no-code paths, and a real sale case study.',
   title: 'Turn your API into a product AI can buy',
   subtitle:
-    "Put up one 402 gate and list it in the AI Store, and AI agents such as Claude can buy it per request with JPYC. Listing is free, and the full listed price settles directly to you. The fee is 1% of the payment (minimum 1 JPYC), added on the payer's side. Non-custodial.",
+    "Put up one 402 gate and list it in the AI Store, and AI agents such as Claude can buy it per request with JPYC. Listing is free, and the full listed price reaches you directly (non-custodial). The fee is 1% of the payment (minimum 1 JPYC), added on the payer's side.",
   backHome: '← Back to home',
 
   proofTitle: 'Proof of a real sale',
@@ -386,7 +386,7 @@ const en: SellGuideContent = {
     {
       n: 2,
       title: 'Register in the AI Store',
-      body: 'Connect your wallet (SIWE), then enter the URL, price (a whole number of JPYC), description, category, and the legitimacy declaration. Fill the optional “Display name” (the catalog heading) and “When to use” (the one line an agent uses to decide to buy) whenever you can; Docs URL and terms are optional too. Write the description for an agent: state plainly what the response contains.',
+      body: 'Connect your wallet (SIWE), then enter the URL, price (a whole number of JPYC), description, category and the legitimacy declaration. Fill the optional “Display name” (the catalog heading) and “When to use” (the one line an agent uses to decide to buy) whenever you can; Docs URL and terms are optional too. In the description, state plainly what comes back.',
     },
     {
       n: 3,

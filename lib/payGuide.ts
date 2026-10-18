@@ -82,14 +82,14 @@ const JA: PayGuideContent = {
     'OpenPay の QR を置いているお店で、JPYC で支払う手順。用意するもの、支払いの流れ、署名で求められること、電子レシート、JPYC の手に入れ方、うまくいかないときの対処をまとめました。',
 
   subtitle: 'お店の QR を読み取って、自分のウォレットで承認するだけ。',
-  lead: 'OpenPay の QR を置いているお店では、スマホで QR を読み取り、自分のウォレットで承認するだけで JPYC で支払えます。OpenPay のアプリのインストールや会員登録は要りません。代金はあなたのウォレットからお店のウォレットへ送られ、OpenPay は預かりません。',
+  lead: 'OpenPay のアプリや会員登録は要りません。代金はあなたのウォレットからお店へ直接送られ、OpenPay は預かりません。',
   scanCta: { path: '/scan', label: 'スキャンして支払う' },
 
   needTitle: '用意するもの',
   need: [
     'スマートフォン (カメラで QR を読めれば OK)',
-    'JPYC が入った自分のウォレット (MetaMask が基本です。初めての方にはマイナウォレットや HashPort Wallet もおすすめ。下の「ウォレットを選ぶ」へ)',
-    'ガスレス決済の QR なら、ガス代用の POL などは要りません (「通常決済（ガス代は自分で負担）」と出る QR では必要です)',
+    'JPYC が入った自分のウォレット (MetaMask が基本。初めての方にはマイナウォレットや HashPort Wallet も)',
+    'ガスレス決済の QR なら、ガス代用の POL などは要りません (「通常決済（ガス代は自分で負担）」の QR では必要)',
   ],
 
   stepsTitle: '支払いの流れ',
@@ -97,32 +97,32 @@ const JA: PayGuideContent = {
     {
       n: 1,
       title: '「スキャンして支払う」を開く',
-      body: 'OpenPay の「決済」から開きます (スマホでは画面の下、パソコンでは上)。ホーム画面に追加しておくと、次からはアイコンをタップするだけで開けます。',
+      body: 'OpenPay の「決済」から開きます (スマホは画面の下、パソコンは上)。ホーム画面に追加すると、次からアイコンひとつで開けます。',
     },
     {
       n: 2,
       title: 'ウォレットを接続する',
-      body: '右上の「接続」から、JPYC が入ったウォレットを接続します。お店に行く前に接続しておけば、お店では QR を読み取って署名するだけです。接続すると、JPYC の残高もこの画面で確かめられます。',
+      body: '右上の「接続」から、JPYC が入ったウォレットを接続します。お店に行く前に接続しておくと、お店では読み取って署名するだけです。',
     },
     {
       n: 3,
       title: 'お店の QR を読み取る',
-      body: '「カメラを起動」を押して、お店の QR を枠に収めます。カメラが使えないときは「URL を貼り付けて続行」に、お店から受け取った支払いの URL を貼り付けます。読み取ると、支払い画面が開きます。',
+      body: '「カメラを起動」を押して、お店の QR を枠に収めます。カメラが使えないときは「URL を貼り付けて続行」に、支払いの URL を貼り付けます。',
     },
     {
       n: 4,
       title: '金額を確かめて「支払う」を押す',
-      body: '支払い画面のいちばん上に、金額とネットワークが出ます。金額を確かめて、「◯◯ JPYC を支払う」のような金額入りのボタンを押します。金額の入っていない QR では、お店に言われた金額を入力します。ネットワークの切り替えを求められたら、先に切り替えます。',
+      body: 'いちばん上の金額とネットワークを確かめて、「◯◯ JPYC を支払う」を押します。金額の入っていない QR では、お店に言われた金額を入力します。ネットワークの切り替えを求められたら、先に切り替えます。',
     },
     {
       n: 5,
       title: 'ウォレットで確かめて承認する',
-      body: 'ウォレットのアプリに確認画面が出ます。金額と送り先が支払い画面の表示と同じかを確かめてから、承認 (署名) します。',
+      body: 'ウォレットの確認画面で、金額と送り先が支払い画面と同じかを確かめてから、承認 (署名) します。',
     },
     {
       n: 6,
       title: '完了画面と控えを確かめる',
-      body: '「決済完了」と出たら、お店の人に画面を見せて、確かめてもらったら閉じます。その下に、支払いの控え (電子レシート) が出ます。',
+      body: '「決済完了」と出たら、お店の人に画面を見せます。その下に控え (電子レシート) が出ます。',
     },
   ],
   stepsTip:
@@ -130,7 +130,7 @@ const JA: PayGuideContent = {
 
   signTitle: '署名で求められること',
   signLead:
-    'ガスレス決済では、ウォレットで求められるのは「署名」1 回だけです。署名で何が起きるかは、支払い画面の「支払う」ボタンの上にも出ます。',
+    'ガスレス決済でウォレットに求められるのは「署名」1 回だけです。同じ説明が「支払う」ボタンの上にも出ます。',
   sign: [
     '署名は 1 回だけ。この 1 回の支払いにだけ有効です',
     'Approve (利用許可) は求めません。残高へのアクセス権は渡りません',
@@ -139,7 +139,7 @@ const JA: PayGuideContent = {
     '署名は 5 分以内に自動で失効し、1 回しか使えません',
   ],
   signNote:
-    '「通常決済（ガス代は自分で負担）」の QR では、ウォレットにふつうの送金の確認が出ます。どちらの場合も、金額や送り先が支払い画面の表示と違うときは、承認せずに止めてください。',
+    '「通常決済（ガス代は自分で負担）」の QR では、ふつうの送金の確認が出ます。どちらも、金額や送り先が支払い画面と違うときは承認しないでください。',
 
   receiptTitle: '控え (電子レシート)',
   receipt: [
@@ -152,12 +152,11 @@ const JA: PayGuideContent = {
 
   jpycTitle: 'JPYC を手に入れる',
   jpycBody: [
-    'JPYC は、発行元の JPYC EX で手に入れられます。本人確認のうえ発行予約をし、指定の銀行口座へ日本円を振り込むと、登録したウォレットに JPYC が届きます。',
-    'マイナウォレットと HashPort Wallet は、アプリの中に JPYC EX が組み込まれていて、アプリから発行・償還の手続きができます。',
-    'OpenPay は JPYC の発行・販売・交換をしていません。手に入れ方や条件は変わることがあるので、JPYC 公式サイトで最新の情報を確かめてください。',
+    'JPYC は、発行元の JPYC EX で手に入ります (本人確認 → 発行予約 → 銀行振込)。マイナウォレットと HashPort Wallet なら、アプリの中から手続きできます。',
+    'OpenPay は JPYC の発行・販売・交換をしていません。条件は変わることがあるので、JPYC 公式サイトで最新の情報を確かめてください。',
   ],
   jpycCallout:
-    'JPYC EX が対応するネットワークと、お店の QR のネットワークが同じとは限りません。どのネットワークの JPYC が要るかは、支払い画面のいちばん上で確かめられます。',
+    'JPYC EX のネットワークと、お店の QR のネットワークが同じとは限りません。必要なネットワークは、支払い画面のいちばん上で確かめられます。',
   jpycLink: { href: JPYC_OFFICIAL, label: 'JPYC 公式サイトで最新の情報を見る' },
   jpycNoteLink: { href: PAY_GUIDE_JPYC_NOTE, label: 'JPYC 運用ガイド (ウォレット準備〜換金・運用) — note' },
 
@@ -165,7 +164,7 @@ const JA: PayGuideContent = {
   faq: [
     {
       q: '「ガスレス決済が一時的に利用できません」と出た',
-      a: 'ガスレス決済が混み合っているか、一時的に使えない状態です。ウォレットにガス代用のトークン (POL など。画面に名前が出ます) があれば、「通常支払い（自分でガスを払う）に切り替える」を押して、そのまま支払えます。このときのガス代は、あなたのウォレットから払われます。持っていないときは、少し時間をおいてからもう一度お試しください。',
+      a: '混み合っているか、一時的に使えない状態です。ガス代用のトークン (POL など・画面に名前が出ます) があれば、「通常支払い（自分でガスを払う）に切り替える」でそのまま払えます (ガス代はあなたのウォレットから)。なければ、少し待ってからもう一度お試しください。',
     },
     {
       q: '「残高が不足しています」と出た',
@@ -173,23 +172,23 @@ const JA: PayGuideContent = {
     },
     {
       q: '持っている JPYC と、お店の QR のネットワークが違う',
-      a: '同じ JPYC でも、ネットワーク (チェーン) が違うと別の残高になり、そのままでは支払えません。お店に、お持ちの JPYC のネットワークで支払えるか相談してください。どのネットワークにいくらあるかは、「スキャンして支払う」の「保有残高」で確かめられます。',
+      a: '同じ JPYC でも、ネットワーク (チェーン) が違うと別の残高になり、そのままでは払えません。お持ちのネットワークで払えるか、お店に相談してください。どこにいくらあるかは「スキャンして支払う」の「保有残高」で確かめられます。',
     },
     {
       q: '「送信結果を確認中」「送信済み・確認待ち」と出た',
-      a: '支払いはネットワークに送られていて、結果を確かめているところです。二重に払わないよう、もう一度支払わずに、画面の案内に従って結果を確かめてください。',
+      a: '支払いは送られていて、結果を確かめているところです。二重に払わないよう、もう一度払わずに、画面の案内に従ってください。',
     },
     {
       q: '支払いを取り消したい・返金してほしい',
-      a: 'ブロックチェーン上の送金は、あとから取り消せません。払い間違えたときや返金してほしいときは、お店に相談してください。返金は、お店からあなたのウォレットへの別の送金になります。OpenPay は代金を預かっていないため、OpenPay から返金することはできません。',
+      a: 'ブロックチェーン上の送金は、あとから取り消せません。払い間違えや返金は、お店に相談してください。返金はお店からあなたのウォレットへの別の送金で、代金を預からない OpenPay からは返金できません。',
     },
     {
       q: 'スマホでウォレットにつながらない',
-      a: 'MetaMask などウォレットアプリの中のブラウザで OpenPay を開くと、接続と署名がスムーズです。画面に「MetaMask で開く」が出たら、それを押してください。マイナウォレットや HashPort Wallet は「WalletConnect」から、検索欄に英語で「Myna」「HashPort」と入れて選びます。',
+      a: 'MetaMask などウォレットアプリの中のブラウザで開くと、接続と署名がスムーズです (画面に「MetaMask で開く」が出たら押します)。マイナウォレットや HashPort Wallet は「WalletConnect」から、検索欄に「Myna」「HashPort」と入れて選びます。',
     },
     {
       q: '手数料はかかる？',
-      a: '支払う金額は、支払い画面の明細に出ます。ガスレス決済の QR なら、ガス代を払う必要はありません。「通常決済（ガス代は自分で負担）」の QR では、ウォレットからガス代が払われます。OpenPay の利用料とだれが払うかは、「料金」のページにまとめています。',
+      a: '支払う金額は、支払い画面の明細に出ます。ガスレス決済の QR ならガス代は要りません。「通常決済（ガス代は自分で負担）」の QR では、ウォレットからガス代が払われます。OpenPay の利用料とだれが払うかは「料金」にまとめています。',
     },
   ],
 
@@ -202,7 +201,7 @@ const JA: PayGuideContent = {
 
   ctaTitle: 'お店に行く前に、準備しておく',
   ctaBody:
-    '「スキャンして支払う」でウォレットを接続し、JPYC の残高を確かめておけば、お店では QR を読み取って署名するだけです。',
+    '「スキャンして支払う」でウォレットを接続し、残高を確かめておけば、お店では読み取って署名するだけです。',
 };
 
 const EN: PayGuideContent = {
@@ -211,14 +210,14 @@ const EN: PayGuideContent = {
     'How to pay with JPYC at shops that display an OpenPay QR code: what you need, the steps, what the signature asks for, digital receipts, how to get JPYC, and what to do when something goes wrong.',
 
   subtitle: 'Scan the shop’s QR code, then approve in your own wallet.',
-  lead: 'At shops that display an OpenPay QR code, scan it with your phone and approve in your own wallet to pay in JPYC. There is no OpenPay app to install and no sign-up. The payment goes from your wallet to the shop’s wallet; OpenPay never holds it.',
+  lead: 'No OpenPay app and no sign-up. The payment goes straight from your wallet to the shop; OpenPay never holds it.',
   scanCta: { path: '/scan', label: 'Scan to pay' },
 
   needTitle: 'What you need',
   need: [
     'A smartphone (any camera that can scan a QR)',
-    'Your own wallet with JPYC in it (MetaMask is the standard. If you are new to wallets, MynaWallet or HashPort Wallet are good choices too — see “Choosing a wallet” below)',
-    'For a gasless QR you need no POL or other gas token (a QR marked “Standard (you pay gas)” does need one)',
+    'Your own wallet with JPYC in it (MetaMask is the standard; MynaWallet or HashPort Wallet are good choices if you are new to wallets)',
+    'For a gasless QR you need no POL or other gas token (a QR marked “Standard (you pay gas)” does)',
   ],
 
   stepsTitle: 'How to pay',
@@ -226,32 +225,32 @@ const EN: PayGuideContent = {
     {
       n: 1,
       title: 'Open “Scan to pay”',
-      body: 'Open it from “Pay” in OpenPay (at the bottom on a phone, at the top on a computer). Add it to your home screen and next time it opens with one tap.',
+      body: 'Open it from “Pay” in OpenPay (bottom on a phone, top on a computer). Add it to your home screen to open it with one tap next time.',
     },
     {
       n: 2,
       title: 'Connect your wallet',
-      body: 'Use “Connect” at the top right to connect the wallet that holds your JPYC. Connect before you go to the shop, and at the shop you only scan the QR and sign. Once connected, this screen also shows your JPYC balance.',
+      body: 'Use “Connect” at the top right to connect the wallet that holds your JPYC. Connect before you go, and at the shop you only scan and sign.',
     },
     {
       n: 3,
       title: 'Scan the shop’s QR code',
-      body: 'Tap “Start camera” and fit the shop’s QR in the frame. If the camera is not available, open “Paste a URL instead” and paste the payment URL the shop gave you. The payment screen opens once the QR is read.',
+      body: 'Tap “Start camera” and fit the shop’s QR in the frame. If the camera is not available, paste the payment URL into “Paste a URL instead”.',
     },
     {
       n: 4,
       title: 'Check the amount and tap “Pay”',
-      body: 'The amount and the network are shown at the top of the payment screen. Check the amount, then tap the button with the amount on it, such as “Pay ◯◯ JPYC”. For a QR without an amount, enter the amount the shop tells you. If you are asked to switch the network, switch it first.',
+      body: 'Check the amount and network at the top, then tap “Pay ◯◯ JPYC”. For a QR without an amount, enter the amount the shop tells you. If asked to switch the network, switch it first.',
     },
     {
       n: 5,
       title: 'Check and approve in your wallet',
-      body: 'Your wallet app shows a confirmation screen. Check that the amount and the recipient match the payment screen, then approve (sign).',
+      body: 'On your wallet’s confirmation screen, check that the amount and recipient match the payment screen, then approve (sign).',
     },
     {
       n: 6,
       title: 'Check the completion screen and your receipt',
-      body: 'When “Payment complete” appears, show the screen to the shop staff and close it once they have checked. Your payment record (digital receipt) appears below.',
+      body: 'When “Payment complete” appears, show the screen to the shop staff. Your digital receipt appears below it.',
     },
   ],
   stepsTip:
@@ -259,7 +258,7 @@ const EN: PayGuideContent = {
 
   signTitle: 'What the signature asks for',
   signLead:
-    'For a gasless payment, your wallet asks for just one signature. What the signature does is also shown on the payment screen, just above the “Pay” button.',
+    'For a gasless payment, your wallet asks for just one signature. The same summary appears above the “Pay” button.',
   sign: [
     'One signature, valid only for this one payment',
     'No Approve (spending allowance) is requested; no access to your balance is granted',
@@ -268,7 +267,7 @@ const EN: PayGuideContent = {
     'The signature expires automatically within 5 minutes and can be used only once',
   ],
   signNote:
-    'For a QR marked “Standard (you pay gas)”, your wallet shows an ordinary transfer confirmation. In either case, if the amount or the recipient differs from the payment screen, stop and do not approve.',
+    'For a QR marked “Standard (you pay gas)”, you see an ordinary transfer confirmation. Either way, if the amount or recipient differs from the payment screen, do not approve.',
 
   receiptTitle: 'Your receipt (digital receipt)',
   receipt: [
@@ -281,12 +280,11 @@ const EN: PayGuideContent = {
 
   jpycTitle: 'Getting JPYC',
   jpycBody: [
-    'You can get JPYC from JPYC EX, run by its issuer (for residents of Japan). After identity verification, you reserve an issuance and transfer Japanese yen to the designated bank account, and the JPYC arrives in your registered wallet.',
-    'MynaWallet and HashPort Wallet have JPYC EX built in, so you can start issuance and redemption from inside the app.',
-    'OpenPay does not issue, sell or exchange JPYC. How to get it and the conditions can change, so check the latest information on the JPYC official site.',
+    'You can get JPYC from JPYC EX, run by its issuer, for residents of Japan (identity check → reserve issuance → bank transfer). MynaWallet and HashPort Wallet let you do this from inside the app.',
+    'OpenPay does not issue, sell or exchange JPYC. Conditions can change, so check the latest information on the JPYC official site.',
   ],
   jpycCallout:
-    'The networks JPYC EX supports are not necessarily the network of the shop’s QR. The top of the payment screen shows which network’s JPYC you need.',
+    'The networks JPYC EX supports are not necessarily the network of the shop’s QR. The top of the payment screen shows which one you need.',
   jpycLink: { href: JPYC_OFFICIAL, label: 'See the latest on the JPYC official site' },
   jpycNoteLink: { href: PAY_GUIDE_JPYC_NOTE, label: 'JPYC handling guide (wallet setup to redemption) — note (Japanese)' },
 
@@ -294,7 +292,7 @@ const EN: PayGuideContent = {
   faq: [
     {
       q: '“Gasless payment is temporarily unavailable” appears',
-      a: 'Gasless payment is congested or temporarily unavailable. If your wallet holds a gas token (such as POL — the screen shows its name), tap “Switch to standard payment (you pay gas)” to pay right away. The gas is then paid from your wallet. If you do not have one, wait a little and try again.',
+      a: 'It is congested or temporarily unavailable. If you hold a gas token (such as POL — the screen shows its name), tap “Switch to standard payment (you pay gas)” to pay right away, with gas paid from your wallet. If not, wait a little and try again.',
     },
     {
       q: '“Insufficient balance” appears',
@@ -302,23 +300,23 @@ const EN: PayGuideContent = {
     },
     {
       q: 'My JPYC is on a different network from the shop’s QR',
-      a: 'Even the same JPYC is a separate balance on each network, so it cannot pay as is. Ask the shop whether you can pay on the network your JPYC is on. “Holdings” in “Scan to pay” shows how much you have on each network.',
+      a: 'Even the same JPYC is a separate balance on each network, so it cannot pay as is. Ask the shop whether you can pay on your network. “Holdings” in “Scan to pay” shows how much you have on each.',
     },
     {
       q: '“Checking submission status” or “Submitted — awaiting confirmation” appears',
-      a: 'Your payment has been sent to the network and the result is being checked. To avoid paying twice, do not pay again; follow the on-screen guidance to check the result.',
+      a: 'Your payment has been sent and the result is being checked. To avoid paying twice, do not pay again; follow the on-screen guidance.',
     },
     {
       q: 'I want to cancel or get a refund',
-      a: 'Transfers on a blockchain cannot be reversed afterwards. If you paid by mistake or want a refund, talk to the shop. A refund is a separate transfer from the shop to your wallet. OpenPay does not hold payments, so it cannot refund you.',
+      a: 'Blockchain transfers cannot be reversed. If you paid by mistake or want a refund, talk to the shop. A refund is a separate transfer from the shop to your wallet; OpenPay never holds payments, so it cannot refund you.',
     },
     {
       q: 'My wallet will not connect on my phone',
-      a: 'Opening OpenPay in the browser inside your wallet app (e.g. MetaMask) makes connecting and signing smoother. If “Open in MetaMask” appears on the screen, tap it. For MynaWallet or HashPort Wallet, use “WalletConnect” and type “Myna” or “HashPort” in the search box.',
+      a: 'Opening OpenPay in your wallet app’s browser (e.g. MetaMask) makes connecting and signing smoother (tap “Open in MetaMask” if it appears). For MynaWallet or HashPort Wallet, use “WalletConnect” and search for “Myna” or “HashPort”.',
     },
     {
       q: 'Are there any fees?',
-      a: 'The amount you pay is shown in the breakdown on the payment screen. With a gasless QR you do not pay gas. With a QR marked “Standard (you pay gas)”, gas is paid from your wallet. The OpenPay usage fee and who pays it are on the Pricing page.',
+      a: 'The amount you pay is shown in the breakdown on the payment screen. A gasless QR needs no gas; with a QR marked “Standard (you pay gas)”, gas is paid from your wallet. The OpenPay usage fee and who pays it are on the Pricing page.',
     },
   ],
 
@@ -331,7 +329,7 @@ const EN: PayGuideContent = {
 
   ctaTitle: 'Get ready before you go',
   ctaBody:
-    'Connect your wallet in “Scan to pay” and check your JPYC balance beforehand, and at the shop you only scan the QR and sign.',
+    'Connect your wallet in “Scan to pay” and check your balance beforehand; at the shop you only scan and sign.',
 };
 
 /** 未知ロケールは ja (既存 guide の contentFor と同じ規約)。 */

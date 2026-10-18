@@ -55,7 +55,6 @@ export type StoreGuideContent = {
   readonly startTitle: string;
   readonly startSteps: readonly string[];
   /** 後半 = 既存の操作ガイド (6 つの方法) の通し見出し */
-  readonly opsTitle: string;
 
   readonly title: string;
   readonly lead: string;
@@ -162,10 +161,9 @@ const JA: StoreGuideContent = {
     '販売者情報を登録して、商品を追加する',
     'プロフィールの URL を SNS で共有する — 公開した商品は Store にも並びます',
   ],
-  opsTitle: '販売の手順',
 
   title: '無料サービスで始めるデジタル商品販売',
-  lead: `サーバーも決済契約も不要。無料のクラウドサービスにコンテンツを置き、OpenPay の @handle プロフィールで販売します。価格は JPYC 建てで、支払いは JPYC (Polygon) が基本です。商品ごとに USDC (${STORE_USDC_CHAIN}) 購入も許可できます。手数料は上の「手数料」のとおりです。`,
+  lead: `サーバーも決済契約も不要。無料のクラウドサービスにコンテンツを置き、OpenPay の @handle プロフィールで販売します。価格は JPYC 建てで、商品ごとに USDC (${STORE_USDC_CHAIN}) 購入も許可できます。`,
 
   basicsTitle: 'まず仕組みを 30 秒で',
   basicsTable: {
@@ -186,7 +184,7 @@ const JA: StoreGuideContent = {
     ],
   },
   basicsBody:
-    'OpenPay のデジタル商品は 2 タイプだけです。つまり「ファイルは無料サービスに置き、その共有リンクを商品にする」のが URL 型の基本戦略です。購入者は支払い完了と同時にリンク (または本文) を受け取り、以後もライブラリからいつでも再取得できます。',
+    'デジタル商品は 2 タイプだけです。URL 型は「ファイルを無料サービスに置き、その共有リンクを商品にする」のが基本。購入者は支払いと同時にリンク (または本文) を受け取り、以後もライブラリからいつでも受け取り直せます。',
   basicsPoint:
     '出品はすべて共通で、「受け取る」ページの「プロフ」タブ →「デジタル商品」から。初回のみ販売者情報 (氏名または名称・連絡先) の登録が必要です (特定商取引法対応)。1 ウォレットにつき 24 商品まで、価格は 1〜1,000,000 の整数 JPYC。',
 
@@ -359,13 +357,13 @@ const JA: StoreGuideContent = {
 
   promoTitle: '売れるための一工夫',
   promoBullets: [
-    'プロフィールを店構えにする — @handle ページの見出し機能で「📦 販売中」「🔗 リンク」を区切り、商品の説明文 (200 字) で「誰の・何が・どう解決するか」を一行目に書く。',
-    '無料版で信頼を作る — note や X に無料のダイジェスト版を出し、「完全版は @handle で」と誘導する。買う前に品質が分かる商品は強い。',
-    '最初の商品は安く・具体的に — 「◯◯用プロンプト 3 本セット 5 JPYC」のような、迷わず買える価格から始めて実績と感想を集める。',
-    '商品リンクを X でシェアする — 商品管理の「シェア用リンクをコピー」で商品カード付きのリンクを共有できる。更新のたびに発信すれば、既購入者の満足と新規の購入理由が同時に生まれる。',
+    'プロフィールを店構えに — 見出し機能で「📦 販売中」「🔗 リンク」を区切り、説明文の一行目に「誰の・何を・どう解決するか」を書く。',
+    '無料版で信頼を作る — note や X に無料のダイジェストを出し、「完全版は @handle で」と誘導する。',
+    '最初は安く・具体的に — 「◯◯用プロンプト 3 本セット 5 JPYC」のような迷わず買える価格で、実績と感想を集める。',
+    '商品リンクを X でシェア — 「シェア用リンクをコピー」で商品カード付きのリンクを共有できる。更新のたびに発信する。',
   ],
   promoPoint:
-    `価格は JPYC 建てで、支払いは JPYC (Polygon) または商品ごとに許可した USDC (${STORE_USDC_CHAIN})。購入者はウォレットだけで買えて、あなたのウォレットに直接着金します。売上の受け取りに月額費用や振込申請はありません。`,
+    `購入者はウォレットだけで買え、売上はあなたのウォレットに直接届きます。月額費用も振込申請もありません。`,
 
   ctaTitle: 'さっそく出品する',
   ctaBody: '出品は無料。ウォレットがあれば 5 分で最初の商品を並べられます。',
@@ -437,10 +435,9 @@ const EN: StoreGuideContent = {
     'Register seller information and add products',
     'Share your profile URL on social media — published products also appear in the Store',
   ],
-  opsTitle: 'How to sell',
 
   title: 'Sell digital goods with free services',
-  lead: `No server, no merchant contract. Put your content on a free cloud service and sell it on your OpenPay @handle profile. Prices are in JPYC and JPYC on Polygon is the primary payment method; you can also allow USDC purchases on ${STORE_USDC_CHAIN} per product. Fees are as in “Fees” above.`,
+  lead: `No server, no merchant contract. Put your content on a free cloud service and sell it on your OpenPay @handle profile. Prices are in JPYC, and you can also allow USDC purchases on ${STORE_USDC_CHAIN} per product.`,
 
   basicsTitle: 'The mechanics in 30 seconds',
   basicsTable: {
@@ -461,7 +458,7 @@ const EN: StoreGuideContent = {
     ],
   },
   basicsBody:
-    'OpenPay digital products come in just two types. The core strategy for URL products: host the file on a free service and sell the share link. Buyers receive the link (or text) the moment payment completes, and can re-fetch it anytime from their library.',
+    'Digital products come in just two types. For URL products, the core idea is to host the file on a free service and sell the share link. Buyers receive the link (or text) the moment they pay, and can get it again anytime from their library.',
   basicsPoint:
     'All listings start from the Create page → Profile tab → Digital products. First-time sellers register seller information (name and contact — required by the Specified Commercial Transactions Act). Up to 24 products per wallet; prices are whole JPYC from 1 to 1,000,000.',
 
@@ -634,13 +631,13 @@ const EN: StoreGuideContent = {
 
   promoTitle: 'Small moves that sell',
   promoBullets: [
-    'Make your profile a storefront — use @handle headings to separate “📦 For sale” and “🔗 Links”, and open each 200-char description with who it is for, what it is, and what it solves.',
-    'Build trust with a free version — publish a free digest on your blog or X and point to the full version on your @handle. Products whose quality is visible before purchase sell.',
-    'Start cheap and concrete — something like “3 prompts for X, 5 JPYC” collects sales and reviews without buyer hesitation.',
-    'Share product links on X — “Copy share link” in product management gives you a link with a product card. Announcing each update satisfies existing buyers and creates new reasons to buy at once.',
+    'Make your profile a storefront — use headings to separate “📦 For sale” and “🔗 Links”, and open each description with who it is for, what it is and what it solves.',
+    'Build trust with a free version — publish a free digest on your blog or X and point to the full version on your @handle.',
+    'Start cheap and concrete — something like “3 prompts for X, 5 JPYC” collects sales and reviews without hesitation.',
+    'Share product links on X — “Copy share link” gives you a link with a product card. Announce each update.',
   ],
   promoPoint:
-    `Prices are denominated in JPYC, with payment in JPYC on Polygon or, where enabled per product, USDC on ${STORE_USDC_CHAIN}. Buyers pay with just a wallet, and sales land directly in your wallet — no monthly fees, no payout requests.`,
+    `Buyers pay with just a wallet, and sales land directly in your wallet — no monthly fees, no payout requests.`,
 
   ctaTitle: 'List your first product',
   ctaBody: 'Listing is free. With a wallet, your first product can be live in five minutes.',

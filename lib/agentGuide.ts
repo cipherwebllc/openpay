@@ -71,8 +71,6 @@ export type AgentGuideContent = {
   readonly needTitle: string;
   readonly need: readonly string[];
 
-  readonly overviewTitle: string;
-  readonly overviewBody: string;
 
   readonly setupTitle: string;
   readonly setupIntro: string;
@@ -94,6 +92,8 @@ export type AgentGuideContent = {
   readonly jpycAddressChainNote: string;
   readonly jpycLegacyWarning: string;
   readonly jpycGasNote: string;
+  /** jpycNoGasNote (MetaMask のガス込みスワップ) をたたむ「くわしく」の名前。 */
+  readonly jpycNoGasLabel: string;
   readonly jpycNoGasNote: string;
   readonly jpycLiquidityNote: string;
 
@@ -122,7 +122,7 @@ const ja: AgentGuideContent = {
   metaDescription:
     '日本語がわからなくても、OpenPay モバイルオーダー対応のお店なら、自分の AI（Claude など）に頼んで注文できます。支払いは決済リンクを開いて自分のウォレットで JPYC を 1 タップ。OpenPay は通貨の交換・両替を行いません。',
   title: '日本語がわからなくても、OpenPay モバイルオーダーなら AI で注文できる',
-  lead: 'OpenPay モバイルオーダーに対応したお店なら、あなたの AI アシスタント（Claude など）に母国語で相談するだけで、メニューを読んで注文を組み、決済リンクを作ってくれます。あとはリンクを開いて内容を確認し、自分のウォレットで JPYC を 1 タップ払うだけ。',
+  lead: 'あなたの AI（Claude など）に母国語で相談するだけ。AI がメニューを読んで注文を組み、決済リンクを作ります。あなたはリンクを開いて確認し、自分のウォレットで JPYC を払うだけです。',
   heroImage: {
     src: HERO_SRC,
     alt: 'AI との会話（母国語）→ 注文が事前充填された決済画面 → 自分のウォレットで支払い、の 3 画面',
@@ -132,14 +132,14 @@ const ja: AgentGuideContent = {
 
   canDoTitle: 'できること',
   canDo: [
-    'AI がお店のメニューを母国語で相談に乗り、注文を組み、決済リンク（createOrderLink）を作る',
-    'あなたが決済画面で店舗名と明細・合計を確認し、自分のウォレットで 1 タップ支払い',
-    'お店にはあなたの支払いから JPYC（円ステーブルコイン）が直接・即時に着金（ノンカストディ）',
+    'AI がメニューを母国語で説明し、注文を組んで決済リンク（createOrderLink）を作る',
+    'あなたが決済画面で店舗名・明細・合計を確かめ、自分のウォレットで支払う',
+    'JPYC（円ステーブルコイン）はあなたからお店へ直接・すぐに届く（ノンカストディ）',
   ],
   cannotTitle: 'できないこと（＝あえてしないこと）',
   cannot: [
-    'AI に支払いは任せません。AI は財布（秘密鍵）を持たず、支払いは必ずあなたが最終承認します',
-    'OpenPay は暗号資産の交換・両替を行いません。JPYC の入手（スワップ）はご自身で外部サービスを使います',
+    'AI は支払いません。財布（秘密鍵）を持たず、支払いは必ずあなたが承認します',
+    'OpenPay は暗号資産の交換・両替を行いません。JPYC の入手（スワップ）は、ご自身で外部サービスを使います',
   ],
 
   needTitle: '必要なもの',
@@ -149,28 +149,24 @@ const ja: AgentGuideContent = {
     'Polygon 上の JPYC（少量の POL＝ガス代も）。入手方法は下記「JPYC の入手」へ',
   ],
 
-  overviewTitle: '全体像',
-  overviewBody:
-    'AI は「注文を組む手」と「決済リンクを作る係」。実際に支払うのはあなたです。AI に相談 → 決済リンクを受け取る → スマホで開いて内容を確認 → 自分のウォレットで JPYC を支払う。お店にはあなたのウォレットから直接着金します（OpenPay は誰の資金も預かりません）。',
-
   setupTitle: 'セットアップ（AI に MCP を追加）',
   setupIntro:
-    'openpay-x402-mcp の order profile（openpay-order-mcp）は、無料のお店発見（find_shops）・メニュー取得・支払額の確認・決済リンク作成だけを AI から使えるようにする MCP サーバーです。AI が自動決済するツールは含まれず、ウォレットの鍵も設定に含めません。',
+    'openpay-order-mcp（openpay-x402-mcp の order profile）は、お店探し（find_shops）・メニュー取得・支払額の確認・決済リンク作成だけを AI に使わせる MCP サーバーです。自動で支払うツールはなく、鍵も設定に入れません。',
   setupSteps: [
     {
       n: 1,
       title: 'AI クライアントの MCP 設定を開く',
-      body: 'お使いの AI クライアントの MCP 設定（mcpServers）を開きます。現在の手順は MCP 対応クライアント（Claude Desktop・Claude Code）向けです。MCP に対応する他の AI クライアントでも、同じ npx コマンドで追加できます。',
+      body: 'AI クライアント（Claude Desktop・Claude Code など）の MCP 設定（mcpServers）を開きます。MCP に対応する他のクライアントでも、同じ npx コマンドで追加できます。',
     },
     {
       n: 2,
       title: '下記の設定を追加して再起動',
-      body: '次のブロックを mcpServers に追加して保存し、クライアントを再起動します。npx が openpay-x402-mcp パッケージを取得し、鍵なしの openpay-order-mcp を起動します（Node.js 20 以上が必要）。',
+      body: '下のブロックを mcpServers に追加して保存し、クライアントを再起動します（Node.js 20 以上が必要）。',
     },
     {
       n: 3,
       title: 'AI に頼んでみる',
-      body: '店名を伝えてお店を探すよう頼めば、AI が find_shops で店舗ハンドルを見つけ、order_menu でメニューを読み込みます（鍵は不要です）。',
+      body: '店名を伝えてお店を探すよう頼むと、AI が find_shops でお店を見つけ、order_menu でメニューを読み込みます。',
     },
   ],
   setupEnvironmentNote: {
@@ -185,40 +181,40 @@ const ja: AgentGuideContent = {
   configLabel: '設定例（支払い用の鍵は不要）',
   configCode: MCP_CONFIG_JSON,
   configNote:
-    'この設定にはウォレットの秘密鍵を入れません（AI は支払いをしないため）。パッケージの詳細は npm の openpay-x402-mcp をご覧ください。',
+    'この設定に秘密鍵は入れません（AI は支払わないため）。詳細は npm の openpay-x402-mcp をご覧ください。',
 
   flowTitle: '注文の流れ',
   flowSteps: [
     {
       n: 1,
       title: 'AI に相談して注文を決める',
-      body: '「近くの @（店舗）で、辛さ控えめのラーメンを 1 つ」のように母国語で相談します。AI がメニューを読み、価格を確認して注文を組みます。',
+      body: '「近くの @（店舗）で、辛さ控えめのラーメンを 1 つ」のように母国語で相談します。AI がメニューと価格を確かめて注文を組みます。',
     },
     {
       n: 2,
       title: 'AI に決済リンクを作ってもらう',
-      body: 'AI が createOrderLink で open-pay.jp/@（店舗）?cart=… の決済リンクを返します。この時点では支払いは発生しません。受取先・価格はリンクに含まれず、店舗のハンドルからサーバーで都度解決されます。',
+      body: 'AI が createOrderLink で open-pay.jp/@（店舗）?cart=… の決済リンクを返します。まだ支払いは起きません（受取先と価格は、お店のハンドルからサーバーがその都度決めます）。',
     },
     {
       n: 3,
       title: 'リンクを開いて内容を確認',
-      body: 'スマホでリンクを開くと、店舗名・明細・合計（JPYC）が表示されます。店舗名と金額を必ず確認してください。',
+      body: 'スマホでリンクを開くと、店舗名・明細・合計（JPYC）が出ます。店舗名と金額を必ず確かめてください。',
     },
     {
       n: 4,
       title: '自分のウォレットで 1 タップ支払い',
-      body: '内容が正しければ、あなたのウォレットで署名して支払います。JPYC がお店のウォレットに直接着金します（ノンカストディ）。',
+      body: '正しければ、あなたのウォレットで署名して支払います。JPYC はお店のウォレットへ直接届きます。',
     },
   ],
 
   jpycTitle: 'JPYC の入手（Polygon）',
   jpycBody:
-    '支払いには Polygon 上の JPYC を使います。手持ちの USDC などがあれば、外部の DEX（分散型取引所・例：Uniswap の Polygon の USDC/JPYC プール）でご自身でスワップして入手できます。OpenPay は交換・両替を行わないため、スワップはお客様ご自身の操作になります。',
+    '支払いには Polygon 上の JPYC を使います。手持ちの USDC などは、外部の DEX（分散型取引所・例：Uniswap の Polygon の USDC/JPYC プール）でご自身でスワップできます。OpenPay は交換・両替を行いません。',
   jpycSteps: [
     {
       n: 1,
       title: 'Polygon に切り替え、少量の POL を用意',
-      body: 'ウォレットのネットワークを Polygon にし、スワップの手数料（ガス代）用に少量の POL を用意します。',
+      body: 'ウォレットのネットワークを Polygon にし、ガス代用に少量の POL を用意します。',
     },
     {
       n: 2,
@@ -228,7 +224,7 @@ const ja: AgentGuideContent = {
     {
       n: 3,
       title: 'スワップ前にコントラクトアドレスを必ず確認',
-      body: '受け取る JPYC のコントラクトアドレスが、下記の正しい v3 アドレスと一致するか必ず確認してください。似た名前の別トークンに注意。',
+      body: '受け取る JPYC のアドレスが、下の正しい v3 アドレスと一致するか必ず確かめてください。似た名前の別トークンに注意。',
     },
   ],
   jpycAddressLabel: 'JPYC（v3）コントラクトアドレス',
@@ -238,8 +234,9 @@ const ja: AgentGuideContent = {
   jpycLegacyWarning:
     '注意：旧プリペイド型の JPYC v1（0x431d… で始まる別トークン）と間違えないでください。スワップ先は必ず上記 v3 アドレスに。',
   jpycGasNote: 'スワップの実行には、少量の POL（ガス代）が必要です。',
+  jpycNoGasLabel: 'ガス代（POL）が無いとき',
   jpycNoGasNote:
-    'ガス代（POL）が無いとき：MetaMask の「Gas Station（ガス込みスワップ）」を使うと、Polygon では POL を持っていなくても、手持ちの USDC などからガス代を払って USDC→JPYC のスワップができます（Base / Arbitrum も対応・スマートアカウントへの自動アップグレードが必要／Optimism 等は非対応で少量の ETH が別途必要）。※この機能は MetaMask が提供するもので、OpenPay は関与しません。対応チェーン・トークンや混雑状況により成立しない場合があります。',
+    'MetaMask の「Gas Station（ガス込みスワップ）」を使うと、Polygon では POL を持っていなくても、手持ちの USDC などからガス代を払って USDC→JPYC のスワップができます（Base / Arbitrum も対応・スマートアカウントへの自動アップグレードが必要／Optimism 等は非対応で少量の ETH が別途必要）。※この機能は MetaMask が提供するもので、OpenPay は関与しません。対応チェーン・トークンや混雑状況により成立しない場合があります。',
   jpycLiquidityNote:
     'DEX の流動性・レート・プールは変動します。スワップ実行時に最新の状況をご確認ください。',
 
@@ -255,8 +252,8 @@ const ja: AgentGuideContent = {
     '支払いはすべて、あなたのウォレットから、あなたの操作で行われます。',
   safety: [
     'ノンカストディ — OpenPay も AI も、あなたの資金を預かりません。',
-    '署名は 1 回だけ — 支払い時に 1 回署名するだけ。AI に秘密鍵やウォレットを渡す必要はありません。',
-    '払う前に確認 — 決済画面で店舗名と金額（JPYC）を必ず確認してから署名してください。',
+    '署名は 1 回だけ — AI に秘密鍵やウォレットを渡す必要はありません。',
+    '払う前に確認 — 決済画面で店舗名と金額（JPYC）を確かめてから署名します。',
   ],
   safetyNote:
     'ブロックチェーンの支払いは、完了後の取り消しができません。店舗名と金額を確認してから支払ってください。',
@@ -265,25 +262,25 @@ const ja: AgentGuideContent = {
   faqs: [
     {
       q: 'AI が勝手に支払ってしまいませんか？',
-      a: 'いいえ。このガイドの方法では、AI は決済リンクを作るだけで、支払いは必ずあなたがウォレットで承認します。AI に秘密鍵を渡す必要はありません。',
+      a: 'いいえ。AI は決済リンクを作るだけで、支払いは必ずあなたがウォレットで承認します。秘密鍵を渡す必要もありません。',
     },
     {
       q: '日本語がわからなくても使えますか？',
-      a: 'はい。AI には母国語で相談できます。決済画面は日本語・英語に対応し、ブラウザのページ翻訳も併用できます。',
+      a: 'はい。AI には母国語で相談できます。決済画面は日本語と英語に対応し、ブラウザの翻訳も使えます。',
     },
     {
       q: 'JPYC を持っていません。',
-      a: '上記「JPYC の入手」の通り、Polygon の DEX で手持ちのトークンからスワップして入手できます。OpenPay は交換を行わないため、スワップはご自身で行ってください。',
+      a: '「JPYC の入手」のとおり、Polygon の DEX で手持ちのトークンからスワップできます。OpenPay は交換を行わないため、スワップはご自身で行ってください。',
     },
     {
       q: '支払う金額はどこで分かりますか？',
-      a: '決済画面に表示される合計（JPYC）が支払う金額です。店舗側の利用料などの詳細は、OpenPay の利用規約・特定商取引法に基づく表記をご確認ください。',
+      a: '決済画面の合計（JPYC）が支払う金額です。店舗側の利用料などは、利用規約と特定商取引法に基づく表記をご確認ください。',
     },
   ],
 
   ctaTitle: 'AIストアを見てみる',
   ctaBody:
-    'openpay-order-mcp を AI に追加すれば、鍵を渡さずに母国語で日本のお店への注文を組み立てられます。支払いに対応したリソースは「AIストア」で確認できます。',
+    'openpay-order-mcp を AI に追加すれば、鍵を渡さずに、母国語で日本のお店に注文できます。支払いに対応したリソースは「AIストア」で見られます。',
   ctaButton: 'AIストアを見る',
   ctaButtonHref: '/discovery',
 
@@ -295,7 +292,7 @@ const en: AgentGuideContent = {
   metaDescription:
     "Even if you don't read Japanese, at shops that use OpenPay mobile order you can ask your AI (such as Claude) to place the order. You pay by opening the checkout link and tapping once in your own wallet with JPYC. OpenPay does not exchange or convert currencies.",
   title: "Can't read Japanese? Order at OpenPay shops with your AI",
-  lead: 'At shops that use OpenPay mobile order, talk to your AI assistant (such as Claude) in your own language. It reads the menu, builds the order, and creates a checkout link. You just open the link, review it, and pay JPYC with one tap in your own wallet.',
+  lead: 'Just talk to your AI (such as Claude) in your own language. It reads the menu, builds the order and creates a checkout link; you open the link, review it and pay JPYC from your own wallet.',
   heroImage: {
     src: HERO_SRC,
     alt: 'Three screens: chatting with an AI in your language → the order pre-filled on the checkout screen → paying from your own wallet',
@@ -305,13 +302,13 @@ const en: AgentGuideContent = {
 
   canDoTitle: 'What you can do',
   canDo: [
-    'Your AI discusses the menu in your language, builds the order, and creates a checkout link (createOrderLink)',
-    'You review the shop name, line items, and total on the checkout screen, then pay with one tap from your own wallet',
-    'The shop receives JPYC (a JPY stablecoin) directly and instantly from your payment (non-custodial)',
+    'Your AI explains the menu in your language, builds the order and creates a checkout link (createOrderLink)',
+    'You check the shop name, line items and total on the checkout screen, then pay from your own wallet',
+    'JPYC (a JPY stablecoin) goes straight from you to the shop, instantly (non-custodial)',
   ],
   cannotTitle: "What it does not do (by design)",
   cannot: [
-    "The AI does not pay for you. It holds no wallet (no private key), and you always give final approval",
+    "The AI does not pay for you. It holds no wallet (no private key), and you always approve the payment",
     'OpenPay does not exchange or convert crypto. You obtain JPYC (by swapping) yourself using an external service',
   ],
 
@@ -322,28 +319,24 @@ const en: AgentGuideContent = {
     'JPYC on Polygon (plus a little POL for gas). See “Getting JPYC” below',
   ],
 
-  overviewTitle: 'How it works',
-  overviewBody:
-    'The AI is the “hands that build the order” and the “link maker”. You are the one who pays. Ask the AI → receive a checkout link → open it on your phone and review it → pay JPYC from your own wallet. The shop receives funds directly from your wallet (OpenPay never custodies anyone’s funds).',
-
   setupTitle: 'Setup (add the MCP to your AI)',
   setupIntro:
-    'The order profile in openpay-x402-mcp (openpay-order-mcp) lets your AI find a shop for free with find_shops, read its menu, check the amount, and create a checkout link. It includes no autonomous-payment tools, so no wallet key goes into the config.',
+    'openpay-order-mcp (the order profile in openpay-x402-mcp) lets your AI only find a shop (find_shops), read its menu, check the amount and create a checkout link. It has no tools that pay, and no key goes into the config.',
   setupSteps: [
     {
       n: 1,
       title: 'Open your AI client’s MCP settings',
-      body: 'Open the MCP settings (mcpServers) of your AI client. These steps target MCP-capable clients (Claude Desktop, Claude Code). Other MCP-capable AI clients can add it with the same npx command.',
+      body: 'Open the MCP settings (mcpServers) of your AI client (Claude Desktop, Claude Code, etc.). Other MCP-capable clients can add it with the same npx command.',
     },
     {
       n: 2,
       title: 'Add the config below and restart',
-      body: 'Add the block below to mcpServers, save, and restart the client. npx fetches the openpay-x402-mcp package and starts the keyless openpay-order-mcp profile (Node.js 20+ required).',
+      body: 'Add the block below to mcpServers, save and restart the client (Node.js 20+ required).',
     },
     {
       n: 3,
       title: 'Ask your AI',
-      body: 'Ask the AI to find a shop by name. It uses find_shops to get the handle, then order_menu to read the menu (no key needed).',
+      body: 'Ask the AI to find a shop by name. It uses find_shops to find it, then order_menu to read the menu.',
     },
   ],
   setupEnvironmentNote: {
@@ -358,40 +351,40 @@ const en: AgentGuideContent = {
   configLabel: 'Example config (no payment key needed)',
   configCode: MCP_CONFIG_JSON,
   configNote:
-    'This config contains no wallet private key (the AI does not pay). For package details, see openpay-x402-mcp on npm.',
+    'No private key goes in this config (the AI does not pay). See openpay-x402-mcp on npm for details.',
 
   flowTitle: 'The ordering flow',
   flowSteps: [
     {
       n: 1,
       title: 'Decide the order with your AI',
-      body: 'Say, in your language, “one ramen, mild spice, at @(shop) nearby”. The AI reads the menu, checks prices, and builds the order.',
+      body: 'Say, in your language, “one ramen, mild spice, at @(shop) nearby”. The AI checks the menu and prices and builds the order.',
     },
     {
       n: 2,
       title: 'Have your AI create a checkout link',
-      body: 'The AI returns a checkout link like open-pay.jp/@(shop)?cart=… via createOrderLink. No payment happens yet. The recipient and prices are not in the link — they are resolved server-side from the shop’s handle.',
+      body: 'The AI returns a checkout link like open-pay.jp/@(shop)?cart=… via createOrderLink. No payment happens yet (the recipient and prices are resolved server-side from the shop’s handle each time).',
     },
     {
       n: 3,
       title: 'Open the link and review',
-      body: 'Open the link on your phone to see the shop name, line items, and total (JPYC). Always confirm the shop name and amount.',
+      body: 'Open the link on your phone to see the shop name, line items and total (JPYC). Always check the shop name and amount.',
     },
     {
       n: 4,
       title: 'Pay with one tap from your wallet',
-      body: 'If it looks right, sign and pay from your own wallet. JPYC settles directly to the shop’s wallet (non-custodial).',
+      body: 'If it looks right, sign and pay from your own wallet. JPYC goes directly to the shop’s wallet.',
     },
   ],
 
   jpycTitle: 'Getting JPYC (on Polygon)',
   jpycBody:
-    'Payment uses JPYC on Polygon. If you hold USDC or similar, you can swap it for JPYC yourself on an external DEX (e.g. Uniswap’s USDC/JPYC pool on Polygon). Because OpenPay does not exchange or convert currencies, the swap is something you do yourself.',
+    'Payment uses JPYC on Polygon. You can swap USDC or similar for JPYC yourself on an external DEX (e.g. Uniswap’s USDC/JPYC pool on Polygon). OpenPay does not exchange or convert currencies.',
   jpycSteps: [
     {
       n: 1,
       title: 'Switch to Polygon and get a little POL',
-      body: 'Set your wallet network to Polygon and keep a little POL for the swap fee (gas).',
+      body: 'Set your wallet network to Polygon and keep a little POL for gas.',
     },
     {
       n: 2,
@@ -401,7 +394,7 @@ const en: AgentGuideContent = {
     {
       n: 3,
       title: 'Verify the contract address before swapping',
-      body: 'Make sure the JPYC you receive matches the correct v3 contract address below. Beware of similarly named different tokens.',
+      body: 'Make sure the JPYC you receive matches the correct v3 address below. Beware of similarly named tokens.',
     },
   ],
   jpycAddressLabel: 'JPYC (v3) contract address',
@@ -411,8 +404,9 @@ const en: AgentGuideContent = {
   jpycLegacyWarning:
     'Note: do not confuse it with the legacy prepaid JPYC v1 (a different token starting 0x431d…). Always swap into the v3 address above.',
   jpycGasNote: 'Running the swap needs a little POL (gas).',
+  jpycNoGasLabel: 'If you have no gas (POL)',
   jpycNoGasNote:
-    "No POL for gas? With MetaMask's “Gas Station” (gas-included swaps), on Polygon you can swap USDC→JPYC paying the fee from your USDC even without holding POL (Base / Arbitrum are supported too, and your account is auto-upgraded to a smart account; Optimism and others are not supported and need a little ETH separately). Note: this is a MetaMask feature — OpenPay is not involved — and a swap may not go through depending on the chain, tokens, or network congestion.",
+    "With MetaMask's “Gas Station” (gas-included swaps), on Polygon you can swap USDC→JPYC paying the fee from your USDC even without holding POL (Base / Arbitrum are supported too, and your account is auto-upgraded to a smart account; Optimism and others are not supported and need a little ETH separately). Note: this is a MetaMask feature — OpenPay is not involved — and a swap may not go through depending on the chain, tokens, or network congestion.",
   jpycLiquidityNote:
     'DEX liquidity, rates, and pools change over time. Please check the latest conditions when you swap.',
 
@@ -427,8 +421,8 @@ const en: AgentGuideContent = {
   safetyBody: 'Every payment happens from your own wallet, with your own action.',
   safety: [
     'Non-custodial — neither OpenPay nor the AI holds your funds.',
-    'One signature only — you sign once at payment time. You never hand a private key or wallet to the AI.',
-    'Confirm before paying — always check the shop name and amount (JPYC) on the checkout screen before signing.',
+    'One signature only — you never hand a private key or wallet to the AI.',
+    'Check before paying — confirm the shop name and amount (JPYC) on the checkout screen before signing.',
   ],
   safetyNote:
     'Blockchain payments cannot be reversed once complete. Confirm the shop name and amount before you pay.',
@@ -437,25 +431,25 @@ const en: AgentGuideContent = {
   faqs: [
     {
       q: 'Could the AI pay on its own?',
-      a: 'No. In this guide, the AI only creates a checkout link; you always approve payment in your wallet. You do not give a private key to the AI.',
+      a: 'No. The AI only creates a checkout link; you always approve the payment in your wallet, and you never give it a private key.',
     },
     {
       q: "Can I use it if I don't read Japanese?",
-      a: 'Yes. You can talk to the AI in your own language. The checkout screen supports Japanese and English, and you can also use your browser’s page translation.',
+      a: 'Yes. You can talk to the AI in your own language. The checkout screen supports Japanese and English, and your browser can translate it too.',
     },
     {
       q: "I don't have JPYC.",
-      a: 'As in “Getting JPYC” above, you can swap from a token you hold on a Polygon DEX. Because OpenPay does not exchange, you perform the swap yourself.',
+      a: 'As in “Getting JPYC”, you can swap from a token you hold on a Polygon DEX. OpenPay does not exchange, so you perform the swap yourself.',
     },
     {
       q: 'Where do I see the amount to pay?',
-      a: 'The total (JPYC) shown on the checkout screen is what you pay. For details such as the shop-side usage fee, see OpenPay’s Terms and legal notice.',
+      a: 'The total (JPYC) on the checkout screen is what you pay. For the shop-side usage fee and other details, see the Terms and legal notice.',
     },
   ],
 
   ctaTitle: 'Explore the AI store',
   ctaBody:
-    'Add openpay-order-mcp to your AI and build orders at Japanese shops in your own language without handing it a key. Payable resources are listed in the “AI store”.',
+    'Add openpay-order-mcp to your AI and order at Japanese shops in your own language, without handing it a key. Payable resources are listed in the “AI store”.',
   ctaButton: 'Open the AI store',
   ctaButtonHref: '/discovery',
 

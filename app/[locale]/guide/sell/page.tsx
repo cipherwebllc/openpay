@@ -162,10 +162,17 @@ export default async function GuideSellPage({
           >
             {c.registrationLink.label}
           </Link>
-          {/* Bazaar は別の発見面 (USDC/Base/CDP)。出品者の「Bazaar にも載る?」の誤解を先回りで解く。 */}
-          <div className="mt-6 rounded-2xl bg-white p-5 shadow-card ring-1 ring-slate-200/70">
-            <h3 className="text-base font-semibold text-slate-900">{c.bazaarTitle}</h3>
-            <p className="mt-2 text-sm leading-relaxed text-slate-700">{c.bazaarIntro}</p>
+          {/* Bazaar は別の発見面 (USDC/Base/CDP)。出品者の「Bazaar にも載る?」の誤解を先回りで解く。
+              任意の拡張なので、見出しと要点だけを見せて本文はたたむ (plans/guide-ux-polish-2.md P3)。 */}
+          <div className="mt-6">
+          <GuideDisclosure
+            summary={
+              <>
+                <h3 className="text-base font-semibold text-slate-900">{c.bazaarTitle}</h3>
+                <p className="mt-2 text-sm leading-relaxed text-slate-600">{c.bazaarIntro}</p>
+              </>
+            }
+          >
             <BulletList
               items={c.bazaarItems}
               marker="•"
@@ -190,6 +197,7 @@ export default async function GuideSellPage({
                 </p>
               );
             })}
+          </GuideDisclosure>
           </div>
         </Section>
 
