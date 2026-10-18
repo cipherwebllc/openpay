@@ -18,10 +18,12 @@ import { GuideDisclosure } from '@/components/guide/GuideDisclosure';
 import { guideNavFor } from '@/lib/guideNav';
 import { GuideActions, GuideLead, GuideSubtitle, GuideTitle } from '@/components/guide/GuideHeader';
 import { GuideCta } from '@/components/guide/GuideEnd';
+import { GuideCallout } from '@/components/guide/GuideCallout';
 import { GuideToc } from '@/components/guide/GuideToc';
 import {
   BulletList,
   Section,
+  STEP_BADGE_CUSTOMER,
   StepList,
 } from '@/components/guide/PosGuidePieces';
 import {
@@ -79,7 +81,6 @@ export default async function GuideAgentPage({
             <BulletList
               items={c.canDo}
               marker="✓"
-              markerClassName="text-emerald-600"
             />
           </section>
 
@@ -90,7 +91,6 @@ export default async function GuideAgentPage({
             <BulletList
               items={c.cannot}
               marker="•"
-              markerClassName="text-slate-400"
             />
           </section>
         </div>
@@ -99,7 +99,6 @@ export default async function GuideAgentPage({
           <BulletList
             items={c.need}
             marker="•"
-            markerClassName="text-emerald-600"
           />
         </Section>
 
@@ -107,11 +106,9 @@ export default async function GuideAgentPage({
           <p className="mt-3 text-sm leading-relaxed text-slate-700">
             {c.setupIntro}
           </p>
-          <StepList
-            steps={c.setupSteps}
-          />
+          <StepList steps={c.setupSteps} badgeClassName={STEP_BADGE_CUSTOMER} />
           <GuideDisclosure variant="subtle" summary={c.setupEnvironmentNote.title}>
-            <BulletList items={c.setupEnvironmentNote.items} marker="•" markerClassName="text-slate-400" />
+            <BulletList items={c.setupEnvironmentNote.items} marker="•" />
           </GuideDisclosure>
           <CodeBlock label={c.configLabel} code={c.configCode} />
           <p className="mt-3 text-xs leading-relaxed text-slate-500">
@@ -120,18 +117,14 @@ export default async function GuideAgentPage({
         </Section>
 
         <Section title={c.flowTitle}>
-          <StepList
-            steps={c.flowSteps}
-          />
+          <StepList steps={c.flowSteps} badgeClassName={STEP_BADGE_CUSTOMER} />
         </Section>
 
         <Section title={c.jpycTitle}>
           <p className="mt-3 text-sm leading-relaxed text-slate-700">
             {c.jpycBody}
           </p>
-          <StepList
-            steps={c.jpycSteps}
-          />
+          <StepList steps={c.jpycSteps} badgeClassName={STEP_BADGE_CUSTOMER} />
           <AddressCallout
             label={c.jpycAddressLabel}
             address={c.jpycAddress}
@@ -151,13 +144,13 @@ export default async function GuideAgentPage({
 
         {/* 重要なお知らせ (交換業回避・投資助言でない・公式確認) — 目立たせる */}
         <Section title={c.disclosuresTitle}>
-          <div className="mt-3 rounded-xl bg-amber-50 p-4 ring-1 ring-amber-200">
-            <BulletList
-              items={c.disclosures}
-              marker="•"
-              markerClassName="text-amber-700"
-            />
-          </div>
+          <GuideCallout kind="warn">
+            <ul className="list-disc space-y-1 pl-4 marker:text-amber-500">
+              {c.disclosures.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+          </GuideCallout>
         </Section>
 
         <Section title={c.safetyTitle}>
@@ -167,11 +160,8 @@ export default async function GuideAgentPage({
           <BulletList
             items={c.safety}
             marker="•"
-            markerClassName="text-emerald-600"
           />
-          <p className="mt-4 rounded-xl bg-amber-50 p-4 text-sm leading-relaxed text-amber-900 ring-1 ring-amber-200">
-            {c.safetyNote}
-          </p>
+          <GuideCallout kind="warn">{c.safetyNote}</GuideCallout>
         </Section>
 
         <Section title={c.faqTitle}>

@@ -61,7 +61,7 @@ export default async function GuideMobileOrderPage({
         </header>
 
         <Section title={c.needTitle}>
-          <BulletList items={c.need} marker="✓" markerClassName="text-emerald-600" />
+          <BulletList items={c.need} marker="✓" />
         </Section>
 
         {/* ウォレットを選ぶ: 短い案内と /guide/wallet へのリンク (「JPYC で支払う」と共通・lib/walletGuide.ts)。 */}

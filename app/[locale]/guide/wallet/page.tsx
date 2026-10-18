@@ -20,6 +20,7 @@ import { GuideToc } from '@/components/guide/GuideToc';
 import { STEP_BADGE_CUSTOMER, Section, StepList } from '@/components/guide/PosGuidePieces';
 import { guideNavFor } from '@/lib/guideNav';
 import { walletGuideContentFor, walletGuideMetadata } from '@/lib/walletGuide';
+import { GuideMoreLink } from '@/components/guide/GuideLink';
 
 export async function generateMetadata({
   params,
@@ -93,14 +94,9 @@ export default async function GuideWalletPage({
           <p className="mt-3 text-xs leading-relaxed text-slate-500">{c.walletNote}</p>
           {/* ウォレットの公式リンクは置かず、ウォレット準備〜換金・運用をまとめた運営者の note 記事へ (「JPYC で支払う」と同じ記事)。 */}
           <p className="mt-4">
-            <a
-              href={c.noteLink.href}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-sm font-semibold text-emerald-700 underline-offset-2 hover:underline"
-            >
-              {c.noteLink.label} →
-            </a>
+            <GuideMoreLink href={c.noteLink.href} external>
+              {c.noteLink.label}
+            </GuideMoreLink>
           </p>
         </Section>
 

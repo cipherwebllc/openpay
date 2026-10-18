@@ -32,13 +32,19 @@ export function GuideLead({ children, className }: { children: ReactNode; classN
  * 「こんな人に向いています」。見出しの節にせず、リードの下の小さなラベルとチップにする
  * (中身がチップだけの h2 を本文の目次に並べない・plans/guide-ux-polish-2.md P3)。
  */
+/**
+ * ガイドの中の札 (対象者・利用シーン・カテゴリ・POS の名前など)。押せる UI と見分けがつくよう、影・枠・緑・太字を使わない
+ * 平らな灰色の 1 つの型にそろえる (plans/guide-ux-polish-2.md P5)。
+ */
+export const GUIDE_TAG = 'rounded-md bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600';
+
 export function GuideAudience({ title, chips }: { title: string; chips: readonly string[] }) {
   return (
     <div className="mt-4">
       <p className="text-xs font-semibold text-slate-500">{title}</p>
       <ul className="mt-1.5 flex flex-wrap gap-1.5">
         {chips.map((chip) => (
-          <li key={chip} className="rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-semibold text-emerald-700">
+          <li key={chip} className={GUIDE_TAG}>
             {chip}
           </li>
         ))}
@@ -79,6 +85,13 @@ export function GuideActions({ actions, className }: { actions: readonly GuideAc
   );
 }
 
+/** 和文 100 字ほど (英数字は半分に数える) を超える説明。日本語と英語でほぼ同じ項目が長いと判定される。 */
+function isLongText(text: string): boolean {
+  let weight = 0;
+  for (const ch of text) weight += ch.charCodeAt(0) < 128 ? 0.5 : 1;
+  return weight > 100;
+}
+
 /**
  * 「できること」の一覧。機能ごとに影付きのカードを並べず、1 枚の白い箱にチェック付きの行を並べる
  * (PC は 2 列)。スマホで 1 機能 = 1 枚のカードが縦に続き、同じ形の箱で疲れていたのを軽くする
@@ -88,7 +101,8 @@ export function GuideFeatureList({ items }: { items: readonly { readonly title: 
   return (
     <ul className="mt-4 grid grid-cols-1 gap-x-8 gap-y-5 rounded-2xl bg-white p-5 shadow-card ring-1 ring-slate-200/70 sm:grid-cols-2 sm:p-6">
       {items.map((f) => (
-        <li key={f.title} className="flex items-start gap-3">
+        // 説明の長い項目 (条件つきの機能など) は 2 列の片側に細長く積まず、横いっぱいにする (P5)。
+        <li key={f.title} className={`flex items-start gap-3 ${isLongText(f.body) ? 'sm:col-span-2' : ''}`}>
           <span className="mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full bg-emerald-50 ring-1 ring-inset ring-emerald-200/70">
             <Check className="h-3 w-3 text-emerald-700" aria-hidden strokeWidth={3} />
           </span>

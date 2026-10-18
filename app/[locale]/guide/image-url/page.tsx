@@ -12,7 +12,8 @@ import { GuideFrame } from '@/components/guide/GuideFrame';
 import { guideNavFor } from '@/lib/guideNav';
 import { GuideLead, GuideSubtitle, GuideTitle } from '@/components/guide/GuideHeader';
 import { GuideCta, GuideRelated } from '@/components/guide/GuideEnd';
-import { STEP_BADGE, GuideFlow, Section } from '@/components/guide/PosGuidePieces';
+import { GuideCallout } from '@/components/guide/GuideCallout';
+import { BulletList, STEP_BADGE, Section } from '@/components/guide/PosGuidePieces';
 import { imageGuideContentFor, imageGuideMetadata } from '@/lib/imageGuide';
 
 export async function generateMetadata({
@@ -39,7 +40,6 @@ export default async function GuideImageUrlPage({
     <AppShell wide>
       <GuideFrame locale={locale} current="image-url">
       <article className="mx-auto max-w-3xl">
-
         <header>
           <GuideTitle>{guideNavFor(locale).items['image-url'].label}</GuideTitle>
           <GuideSubtitle>{c.heroTitle}</GuideSubtitle>
@@ -48,8 +48,6 @@ export default async function GuideImageUrlPage({
               {p}
             </GuideLead>
           ))}
-          <p className="mt-5 text-sm font-bold text-slate-900">{c.flowTitle}</p>
-          <GuideFlow steps={c.flow} />
         </header>
 
         {c.sections.map((section) => (
@@ -76,50 +74,12 @@ export default async function GuideImageUrlPage({
                 ))}
               </ol>
             ) : null}
-            {section.bullets ? (
-              <ul className="mt-3 space-y-2">
-                {section.bullets.map((item) => (
-                  <li
-                    key={item}
-                    className="flex items-start gap-2 text-sm leading-relaxed text-slate-700"
-                  >
-                    <span aria-hidden className="mt-0.5 text-emerald-600">
-                      •
-                    </span>
-                    <span>{item}</span>
-                  </li>
-                ))}
-              </ul>
-            ) : null}
+            {section.bullets ? <BulletList items={section.bullets} marker="•" /> : null}
             {section.callout ? (
-              <p
-                className={`mt-4 rounded-2xl border px-4 py-3 text-sm leading-relaxed ${
-                  section.callout.kind === 'warn'
-                    ? 'border-amber-200 bg-amber-50 text-amber-900'
-                    : 'border-sky-200 bg-sky-50 text-sky-900'
-                }`}
-              >
-                {section.callout.text}
-              </p>
+              <GuideCallout kind={section.callout.kind}>{section.callout.text}</GuideCallout>
             ) : null}
           </Section>
         ))}
-
-        <section className="mt-12 rounded-[1.5rem] bg-gradient-to-br from-emerald-50 to-teal-50/60 p-6 ring-1 ring-emerald-200/60 sm:p-8">
-          <h2 data-toc="skip" className="text-lg font-bold text-emerald-900">{c.quickTitle}</h2>
-          <ol className="mt-4 space-y-2.5">
-            {c.quickSteps.map((step, i) => (
-              <li key={step} className="flex items-start gap-3">
-                <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-white text-xs font-bold text-emerald-800 ring-1 ring-emerald-300">
-                  {i + 1}
-                </span>
-                <span className="text-sm font-medium leading-relaxed text-slate-800">
-                  {step}
-                </span>
-              </li>
-            ))}
-          </ol>
-        </section>
 
         <GuideRelated locale={locale} current="image-url" links={['store', 'shop']} />
       </article>

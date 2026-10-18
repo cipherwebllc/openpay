@@ -10,10 +10,11 @@ import Link from 'next/link';
 import { setRequestLocale } from 'next-intl/server';
 import { AppShell } from '@/components/AppShell';
 import { GuideFrame } from '@/components/guide/GuideFrame';
-import { GuideDisclosure } from '@/components/guide/GuideDisclosure';
+import { GuideDisclosure, GuideDisclosureGroup } from '@/components/guide/GuideDisclosure';
 import { guideNavFor } from '@/lib/guideNav';
 import { GuideActions, GuideLead, GuideSubtitle, GuideTitle } from '@/components/guide/GuideHeader';
 import { GuideCta } from '@/components/guide/GuideEnd';
+import { GuideCallout } from '@/components/guide/GuideCallout';
 import { GuideToc } from '@/components/guide/GuideToc';
 import {
   BulletList,
@@ -26,6 +27,7 @@ import {
 } from '@/components/guide/AgentGuidePieces';
 import { GuideVideo } from '@/components/guide/GuideVideo';
 import { HOWTO_VIDEO_UI, howtoVideoFor } from '@/lib/howtoVideos';
+import { GuideMoreLink, GuideTxLink } from '@/components/guide/GuideLink';
 import {
   aiPayGuideContentFor,
   guideAiPayMetadata,
@@ -79,15 +81,13 @@ export default async function GuideAiPayPage({
           <StepList
             steps={c.mechanismSteps}
           />
-          <p className="mt-4 rounded-xl bg-emerald-50 p-4 text-sm leading-relaxed text-emerald-900 ring-1 ring-emerald-200/70">
-            {c.receiptNote}
-          </p>
+          <GuideCallout kind="info">{c.receiptNote}</GuideCallout>
         </Section>
 
         {/* 3 つのセットアップは 1 つの節にまとめ、選び方を先に 1 文で示してから、たためるカードにする (A は開いて出す)。 */}
         <Section title={c.setupChooseTitle}>
           <p className="mt-2 text-sm leading-relaxed text-slate-600">{c.setupChooseLead}</p>
-          <div className="mt-4 space-y-3">
+          <GuideDisclosureGroup>
           <GuideDisclosure
             defaultOpen
             summary={
@@ -97,9 +97,7 @@ export default async function GuideAiPayPage({
               </>
             }
           >
-          <Link href={`/${locale}${c.agentLink.href}`} prefetch={false} className="inline-block text-sm font-medium text-emerald-700 underline">
-            {c.agentLink.label}
-          </Link>
+          <GuideMoreLink href={`/${locale}${c.agentLink.href}`}>{c.agentLink.label}</GuideMoreLink>
           {c.quickSetupBody.map((para) => (
             <p key={para} className="mt-3 text-sm leading-relaxed text-slate-700">
               {para}
@@ -109,9 +107,7 @@ export default async function GuideAiPayPage({
             label={c.quickSetupConfigLabel}
             code={c.quickSetupConfig}
           />
-          <p className="mt-3 rounded-xl bg-amber-50 p-4 text-sm font-medium leading-relaxed text-amber-900 ring-1 ring-amber-200">
-            {c.privateKeyWarning}
-          </p>
+          <GuideCallout kind="warn">{c.privateKeyWarning}</GuideCallout>
           </GuideDisclosure>
 
           <GuideDisclosure
@@ -125,14 +121,9 @@ export default async function GuideAiPayPage({
           <p className="text-sm leading-relaxed text-slate-700">
             {c.stewardBody}
           </p>
-          <a
-            href={c.stewardProject.href}
-            target="_blank"
-            rel="noreferrer noopener"
-            className="mt-3 inline-flex text-sm font-medium text-emerald-700 underline decoration-emerald-300 underline-offset-2 hover:text-emerald-900"
-          >
+          <GuideMoreLink href={c.stewardProject.href} external className="mt-3">
             {c.stewardProject.label}
-          </a>
+          </GuideMoreLink>
           <CodeBlock label={c.stewardEnvLabel} code={c.stewardEnv} />
           <p className="mt-3 text-sm leading-relaxed text-slate-700">
             {c.stewardSetupLead}
@@ -165,20 +156,18 @@ export default async function GuideAiPayPage({
           <BulletList
             items={c.thirdPartyFacts}
             marker="•"
-            markerClassName="text-emerald-600"
           />
-          <Link href={`/${locale}${c.thirdPartyLink.href}`} prefetch={false} className="mt-3 inline-block text-sm font-medium text-emerald-700 underline">
+          <GuideMoreLink href={`/${locale}${c.thirdPartyLink.href}`} className="mt-3">
             {c.thirdPartyLink.label}
-          </Link>
+          </GuideMoreLink>
           </GuideDisclosure>
-          </div>
+          </GuideDisclosureGroup>
         </Section>
 
         <Section title={c.guardsTitle}>
           <BulletList
             items={c.guards}
             marker="•"
-            markerClassName="text-emerald-600"
           />
         </Section>
 
@@ -187,17 +176,9 @@ export default async function GuideAiPayPage({
           <p className="mt-3 text-sm leading-relaxed text-slate-700">
             {c.tryFlow}
           </p>
-          <p className="mt-4 rounded-2xl bg-white p-5 text-sm leading-relaxed text-slate-700 shadow-card ring-1 ring-emerald-200/70">
-            {c.proofIntro}{' '}
-            <a
-              href={c.proofTransaction.href}
-              target="_blank"
-              rel="noreferrer noopener"
-              className="break-all font-mono font-medium text-emerald-700 underline decoration-emerald-300 underline-offset-2 hover:text-emerald-900"
-            >
-              {c.proofTransaction.label}
-            </a>
-          </p>
+          <GuideCallout kind="info">
+            {c.proofIntro} <GuideTxLink href={c.proofTransaction.href} hash={c.proofTransaction.label} />
+          </GuideCallout>
         </Section>
 
         {/* MCP 対応フレームワーク横展開 (AWS Strands Agents) — 実証 tx 付き */}
@@ -206,17 +187,9 @@ export default async function GuideAiPayPage({
             {c.strandsBody}
           </p>
           <CodeBlock label={c.strandsCodeLabel} code={c.strandsCode} />
-          <p className="mt-4 rounded-2xl bg-white p-5 text-sm leading-relaxed text-slate-700 shadow-card ring-1 ring-emerald-200/70">
-            {c.strandsProofIntro}{' '}
-            <a
-              href={c.strandsProofTransaction.href}
-              target="_blank"
-              rel="noreferrer noopener"
-              className="break-all font-mono font-medium text-emerald-700 underline decoration-emerald-300 underline-offset-2 hover:text-emerald-900"
-            >
-              {c.strandsProofTransaction.label}
-            </a>
-          </p>
+          <GuideCallout kind="info">
+            {c.strandsProofIntro} <GuideTxLink href={c.strandsProofTransaction.href} hash={c.strandsProofTransaction.label} />
+          </GuideCallout>
         </Section>
 
         <Section title={c.jpycTitle}>

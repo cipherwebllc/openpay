@@ -17,7 +17,6 @@ export type QrGuideContent = {
   readonly heroLead: string;
   readonly heroCtaCreate: string;
   readonly heroCtaScan: string;
-  readonly heroVisualAlt: string;
 
   readonly forWhoTitle: string;
   readonly forWhoChips: readonly string[];
@@ -44,6 +43,8 @@ export type QrGuideContent = {
   readonly discountSourceLabel: string;
 
   readonly currenciesTitle: string;
+  /** 対応通貨の開示 (Landing.faqA2) のうち、他チェーンから払うとき (CCTP)・Arc の細部をたたむ「くわしく」の名前。 */
+  readonly currenciesDetailsLabel: string;
 
 
   readonly ctaTitle: string;
@@ -62,8 +63,6 @@ const JA: QrGuideContent = {
     '金額を入れて QR を見せるだけ。専用端末なしで、スマホから JPYC を受け取れます。導入費 0 円・契約も不要です。',
   heroCtaCreate: '決済QRを作る',
   heroCtaScan: '支払いを試す',
-  heroVisualAlt:
-    '店舗カウンターで顧客がスマホで QR 決済し、店舗端末に受取完了が表示されているイラスト',
 
   forWhoTitle: 'こんな人に向いています',
   forWhoChips: [
@@ -136,6 +135,7 @@ const JA: QrGuideContent = {
   discountSourceLabel: 'JPYC 社の発表（2026 年 10 月 9 日・PR TIMES）',
 
   currenciesTitle: '対応通貨・チェーン',
+  currenciesDetailsLabel: 'ほかのチェーンから払うとき・Arc の条件',
 
 
   ctaTitle: 'まずは 1 枚、QR を作ってみる',
@@ -155,8 +155,6 @@ const EN: QrGuideContent = {
     'Enter an amount and show the QR code. Accept JPYC from your phone with no dedicated terminal, zero setup cost, and no contract.',
   heroCtaCreate: 'Create a payment QR',
   heroCtaScan: 'Try paying',
-  heroVisualAlt:
-    'Illustration of a customer paying by scanning a QR code at a shop counter while the merchant tablet shows payment received',
 
   forWhoTitle: 'Who this is for',
   forWhoChips: [
@@ -229,6 +227,7 @@ const EN: QrGuideContent = {
   discountSourceLabel: 'JPYC Inc. release (October 9, 2026, PR TIMES, Japanese)',
 
   currenciesTitle: 'Supported currencies & chains',
+  currenciesDetailsLabel: 'Paying from another chain, and Arc',
 
 
   ctaTitle: 'Make your first QR',

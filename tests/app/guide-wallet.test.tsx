@@ -44,7 +44,7 @@ describe('/guide/wallet', () => {
       expect(mark.getAttribute('aria-hidden')).toBe('true');
     }
     // 節の下部に note 記事 (別タブ・noopener)。
-    const note = within(wallets).getByRole('link', { name: `${c.noteLink.label} →` });
+    const note = within(wallets).getByRole('link', { name: c.noteLink.label });
     expect(note).toHaveAttribute('href', 'https://note.com/masia02/n/ned04a4cdb00a');
     expect(note).toHaveAttribute('target', '_blank');
     expect(note.getAttribute('rel')).toContain('noopener');

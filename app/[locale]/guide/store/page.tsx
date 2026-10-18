@@ -6,7 +6,6 @@
 // 掟 3: このファイルは default / generateMetadata 以外を export しない。
 
 import type { Metadata } from 'next';
-import Image from 'next/image';
 import Link from 'next/link';
 import { getTranslations, setRequestLocale } from 'next-intl/server';
 import { AppShell } from '@/components/AppShell';
@@ -14,9 +13,9 @@ import { ArrowRight } from 'lucide-react';
 import { GuideFrame } from '@/components/guide/GuideFrame';
 import { CodeBlock } from '@/components/guide/AgentGuidePieces';
 import { GuideCallout } from '@/components/guide/GuideCallout';
-import { GuideDisclosure } from '@/components/guide/GuideDisclosure';
+import { GuideDisclosure, GuideDisclosureGroup } from '@/components/guide/GuideDisclosure';
 import { guideNavFor } from '@/lib/guideNav';
-import { GUIDE_PRIMARY_ACTION, GUIDE_SECONDARY_ACTION, GuideLead, GuideSubtitle, GuideTitle, GuideAudience, GuideFeatureList } from '@/components/guide/GuideHeader';
+import { GUIDE_TAG, GUIDE_PRIMARY_ACTION, GUIDE_SECONDARY_ACTION, GuideLead, GuideSubtitle, GuideTitle, GuideAudience, GuideFeatureList } from '@/components/guide/GuideHeader';
 import { GuideCta } from '@/components/guide/GuideEnd';
 import { GuideToc } from '@/components/guide/GuideToc';
 import { STEP_BADGE, BulletList, Section } from '@/components/guide/PosGuidePieces';
@@ -25,6 +24,7 @@ import { HOWTO_VIDEO_UI, howtoVideoFor } from '@/lib/howtoVideos';
 import { storeGuideContentFor, storeGuideMetadata, licenseStoreGuideContentFor, deliveryStoreGuideContentFor, DELIVERY_SDK_README_URL } from '@/lib/storeGuide';
 import { HOSTED_PRODUCT_CATEGORIES } from '@/lib/x402/storeMeta';
 import { env } from '@/lib/env';
+import { GuideMoreLink } from '@/components/guide/GuideLink';
 
 export async function generateMetadata({
   params,
@@ -56,7 +56,7 @@ export default async function GuideStorePage({
       <GuideFrame locale={locale} current="store">
       <article className="mx-auto max-w-3xl">
 
-        {/* --- LP 前半 (P2 総合案内化): Hero → 誰向け → できること → 商品例 →
+        {/* --- LP 前半 (P2 総合案内化): 頭 (写真なし・P5) → 誰向け → できること → 商品例 →
             手数料 → 始め方。後半は既存の操作ガイド (opsTitle 以下) を全て保持。 --- */}
         <header>
           <GuideTitle>{guideNavFor(locale).items['store'].label}</GuideTitle>
@@ -83,17 +83,6 @@ export default async function GuideStorePage({
               </Link>
             ) : null}
           </div>
-          <div className="mt-8 overflow-hidden rounded-[1.75rem] bg-white shadow-lift ring-1 ring-slate-200/60">
-            <Image
-              src="/guide/hero-creator.avif"
-              alt={c.heroVisualAlt}
-              width={1400}
-              height={787}
-              priority
-              sizes="(min-width: 768px) 768px, calc(100vw - 2rem)"
-              className="h-auto w-full object-cover"
-            />
-          </div>
         </header>
 
         <GuideToc title={guideNavFor(locale).tocTitle} />
@@ -112,7 +101,7 @@ export default async function GuideStorePage({
           {/* 押せるボタンに見えないよう、影と枠のない平らな札にする (選ぶ UI ではなく一覧)。 */}
           <ul className="mt-3 flex flex-wrap gap-1.5">
             {HOSTED_PRODUCT_CATEGORIES.map((category) => (
-              <li key={category} className="rounded-md bg-slate-100 px-2.5 py-1 text-sm font-medium text-slate-700">
+              <li key={category} className={GUIDE_TAG}>
                 {tCatalog(`categories.${category}`)}
               </li>
             ))}
@@ -204,27 +193,16 @@ export default async function GuideStorePage({
             (見出し・所要時間・向いているものだけで選べる・plans/guide-ux-polish-2.md P3)。 */}
         <Section title={c.methodsTitle}>
           <p className="mt-2 text-sm leading-relaxed text-slate-600">{c.methodsLead}</p>
-          <div className="mt-4 space-y-3">
+          <GuideDisclosureGroup>
             {c.methods.map((m) => (
               <GuideDisclosure
                 key={m.n}
                 summary={
                   <>
-                    <p className="text-xs font-semibold text-emerald-700">
-                      {c.methodLabel} {m.n}
-                    </p>
-                    <h3 className="mt-0.5 text-base font-semibold text-slate-900">{m.title}</h3>
+                    <h3 className="text-base font-semibold text-slate-900">{m.title}</h3>
                     <p className="mt-1 text-xs font-medium text-slate-500">{m.tagline}</p>
-                    <div className="mt-2 flex flex-wrap gap-1.5">
-                      {m.fits.map((fit) => (
-                        <span
-                          key={fit}
-                          className="rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-semibold text-emerald-700"
-                        >
-                          {fit}
-                        </span>
-                      ))}
-                    </div>
+                    {/* 向いているものは札を並べず 1 行の文字にする (6 行 × 4 枚の札で箱が騒がしくならないように)。 */}
+                    <p className="mt-1 text-xs text-slate-500">{m.fits.join(' · ')}</p>
                   </>
                 }
               >
@@ -245,14 +223,14 @@ export default async function GuideStorePage({
                 ) : null}
               </GuideDisclosure>
             ))}
-          </div>
+          </GuideDisclosureGroup>
         </Section>
 
         {licenseGuide ? (
           // 開発者向けの手順なので、リードだけ常に見せ、4 つの話 (登録・組み込み・確認・ポリシー) はたためるカードにする。
           <Section title={licenseGuide.heading}>
             <p className="mt-3 text-sm leading-relaxed text-slate-700">{licenseGuide.intro}</p>
-            <div className="mt-4 space-y-3">
+            <GuideDisclosureGroup>
               <GuideDisclosure summary={<h3 className="text-sm font-semibold text-slate-900 sm:text-base">{licenseGuide.fieldsHeading}</h3>}>
                 <p className="text-sm leading-relaxed text-slate-700">{licenseGuide.fields}</p>
                 <p className="mt-3 text-sm leading-relaxed text-slate-700">{licenseGuide.publish}</p>
@@ -273,7 +251,7 @@ export default async function GuideStorePage({
                 <p className="text-sm leading-relaxed text-slate-700">{licenseGuide.policy}</p>
                 <p className="mt-3 text-sm leading-relaxed text-slate-700">{licenseGuide.rights}</p>
               </GuideDisclosure>
-            </div>
+            </GuideDisclosureGroup>
           </Section>
         ) : null}
 
@@ -299,7 +277,7 @@ export default async function GuideStorePage({
 
         {/* 共通の注意点は見出しだけを並べ、本文はたたむ (8 項目を縦に読ませない)。 */}
         <Section title={c.commonTitle}>
-          <div className="mt-4 space-y-3">
+          <GuideDisclosureGroup>
             {c.commonSections.map((section) => (
               <GuideDisclosure
                 key={section.title}
@@ -321,12 +299,11 @@ export default async function GuideStorePage({
                   <BulletList
                     items={section.bullets}
                     marker={section.body ? '•' : '✓'}
-                    markerClassName="text-emerald-600"
                   />
                 ) : null}
               </GuideDisclosure>
             ))}
-          </div>
+          </GuideDisclosureGroup>
         </Section>
 
         <Section title={c.startLinkTitle}>
@@ -334,13 +311,7 @@ export default async function GuideStorePage({
             {c.startLinkBody}
           </p>
           <p className="mt-3">
-            <Link
-              href={`/${locale}/guide/start`}
-              prefetch={false}
-              className="text-sm font-semibold text-emerald-700 underline-offset-2 hover:underline"
-            >
-              {c.startLinkLabel} →
-            </Link>
+            <GuideMoreLink href={`/${locale}/guide/start`}>{c.startLinkLabel}</GuideMoreLink>
           </p>
         </Section>
 
@@ -348,7 +319,6 @@ export default async function GuideStorePage({
           <BulletList
             items={c.promoBullets}
             marker="•"
-            markerClassName="text-emerald-600"
           />
           <GuideCallout kind="tip" className="mt-4">{c.promoPoint}</GuideCallout>
         </Section>

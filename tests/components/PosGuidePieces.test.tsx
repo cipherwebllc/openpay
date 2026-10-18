@@ -67,14 +67,8 @@ describe('GuideFigure', () => {
 });
 
 describe('BulletList', () => {
-  it('items を li 化し marker(aria-hidden) + markerClassName + テキストを描画', () => {
-    const { container } = render(
-      <BulletList
-        items={['りんご', 'みかん']}
-        marker="✓"
-        markerClassName="text-emerald-600"
-      />,
-    );
+  it('items を li 化し marker(aria-hidden) + テキストを描画・✓ は緑 / • は灰 (記号で色が決まる)', () => {
+    const { container, rerender } = render(<BulletList items={['りんご', 'みかん']} marker="✓" />);
     expect(container.querySelectorAll('li')).toHaveLength(2);
     expect(screen.getByText('りんご')).toBeInTheDocument();
     expect(screen.getByText('みかん')).toBeInTheDocument();
@@ -84,11 +78,13 @@ describe('BulletList', () => {
       expect(m).toHaveClass('text-emerald-600');
       expect(m.textContent).toBe('✓');
     });
+    rerender(<BulletList items={['りんご']} marker="•" />);
+    expect(container.querySelector('span[aria-hidden]')).toHaveClass('text-slate-400');
   });
 
   it('items 空 → li 0 個', () => {
     const { container } = render(
-      <BulletList items={[]} marker="•" markerClassName="text-slate-400" />,
+      <BulletList items={[]} marker="•" />,
     );
     expect(container.querySelectorAll('li')).toHaveLength(0);
   });

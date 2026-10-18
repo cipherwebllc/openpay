@@ -10,14 +10,16 @@ import Link from 'next/link';
 import { setRequestLocale } from 'next-intl/server';
 import { AppShell } from '@/components/AppShell';
 import { GuideFrame } from '@/components/guide/GuideFrame';
-import { GuideDisclosure } from '@/components/guide/GuideDisclosure';
+import { GuideDisclosure, GuideDisclosureGroup } from '@/components/guide/GuideDisclosure';
 import { guideNavFor } from '@/lib/guideNav';
 import { GuideActions, GuideLead, GuideSubtitle, GuideTitle } from '@/components/guide/GuideHeader';
 import { GuideCta } from '@/components/guide/GuideEnd';
+import { GuideCallout } from '@/components/guide/GuideCallout';
 import { GuideToc } from '@/components/guide/GuideToc';
 import { BulletList, Section, StepList } from '@/components/guide/PosGuidePieces';
 import { CodeBlock } from '@/components/guide/AgentGuidePieces';
 import { guideSellMetadata, sellGuideContentFor } from '@/lib/sellGuide';
+import { GuideMoreLink, GuideTxLink } from '@/components/guide/GuideLink';
 
 export async function generateMetadata({
   params,
@@ -62,7 +64,7 @@ export default async function GuideSellPage({
             {c.routesIntro}
           </p>
           {/* 3 つは順番ではなく選ぶもの。手順の番号 (塗りの丸) と見分けるため A・B・C の角丸の札にする。 */}
-          <ul className="mt-5 space-y-3">
+          <GuideDisclosureGroup as="ul" className="mt-5">
             <li>
               <GuideDisclosure
                 defaultOpen
@@ -78,14 +80,9 @@ export default async function GuideSellPage({
                   </>
                 }
               >
-              <a
-                href={c.noCodeLink.href}
-                target="_blank"
-                rel="noreferrer noopener"
-                className="inline-flex text-sm font-medium text-emerald-700 underline decoration-emerald-300 underline-offset-2 hover:text-emerald-900"
-              >
+              <GuideMoreLink href={c.noCodeLink.href} external>
                 {c.noCodeLink.label}
-              </a>
+              </GuideMoreLink>
               <CodeBlock label={c.noCodeEnvLabel} code={c.noCodeEnv} />
               </GuideDisclosure>
             </li>
@@ -104,23 +101,16 @@ export default async function GuideSellPage({
                   </>
                 }
               >
-              <a
-                href={c.sdkPackage.href}
-                target="_blank"
-                rel="noreferrer noopener"
-                className="inline-flex text-sm font-medium text-emerald-700 underline decoration-emerald-300 underline-offset-2 hover:text-emerald-900"
-              >
+              <GuideMoreLink href={c.sdkPackage.href} external>
                 {c.sdkPackage.label}
-              </a>
+              </GuideMoreLink>
               <CodeBlock label={c.sdkInstallLabel} code={c.sdkInstall} />
               <CodeBlock label={c.sdkOneShotLabel} code={c.sdkOneShotCode} />
               <p className="mt-4 text-sm leading-relaxed text-slate-700">
                 {c.sdkSplitIntro}
               </p>
               <CodeBlock label={c.sdkSplitLabel} code={c.sdkSplitCode} />
-              <p className="mt-3 rounded-xl bg-amber-50 p-4 text-xs leading-relaxed text-amber-900 ring-1 ring-amber-200">
-                {c.sdkSplitNote}
-              </p>
+              <GuideCallout kind="warn">{c.sdkSplitNote}</GuideCallout>
               </GuideDisclosure>
             </li>
 
@@ -138,23 +128,14 @@ export default async function GuideSellPage({
                   </>
                 }
               >
-              <Link
-                href={`/${locale}${c.snippetLink.href}`}
-                className="inline-flex text-sm font-medium text-emerald-700 underline decoration-emerald-300 underline-offset-2 hover:text-emerald-900"
-              >
-                {c.snippetLink.label}
-              </Link>
+              <GuideMoreLink href={`/${locale}${c.snippetLink.href}`}>{c.snippetLink.label}</GuideMoreLink>
               </GuideDisclosure>
             </li>
-          </ul>
-          <div className="mt-5 rounded-xl bg-emerald-50 p-4 ring-1 ring-emerald-200/70">
-            <h3 className="text-sm font-semibold text-emerald-900">
-              {c.authorityTitle}
-            </h3>
-            <p className="mt-1 text-sm leading-relaxed text-slate-700">
-              {c.authorityBody}
-            </p>
-          </div>
+          </GuideDisclosureGroup>
+          <GuideCallout kind="info" className="mt-5">
+            <h3 className="font-semibold text-slate-900">{c.authorityTitle}</h3>
+            <p className="mt-0.5">{c.authorityBody}</p>
+          </GuideCallout>
         </Section>
 
         <Section title={c.listingTitle}>
@@ -181,7 +162,6 @@ export default async function GuideSellPage({
             <BulletList
               items={c.bazaarItems}
               marker="•"
-              markerClassName="text-emerald-600"
             />
             {c.bazaarNote.map((note) => {
               // 文中の URL はリンクにする (素の文字のまま 3 行に折れていた)。
@@ -214,7 +194,6 @@ export default async function GuideSellPage({
           <BulletList
             items={c.jobDescItems}
             marker="•"
-            markerClassName="text-emerald-600"
           />
           <p className="mt-4 rounded-2xl bg-white p-5 text-sm leading-relaxed text-slate-700 shadow-card ring-1 ring-emerald-200/70">
             <span className="mb-1 block text-xs font-semibold text-emerald-700">
@@ -228,7 +207,6 @@ export default async function GuideSellPage({
           <BulletList
             items={c.quality}
             marker="•"
-            markerClassName="text-emerald-600"
           />
         </Section>
 
@@ -239,7 +217,6 @@ export default async function GuideSellPage({
           <BulletList
             items={c.pricingExamples}
             marker="•"
-            markerClassName="text-emerald-600"
           />
           <p className="mt-4 text-sm leading-relaxed text-slate-700">
             {c.pricingAdvice}
@@ -256,15 +233,7 @@ export default async function GuideSellPage({
               {c.proofIntro}
             </p>
             <p className="mt-3 text-sm leading-relaxed text-slate-700">
-              {c.proofFlow}{' '}
-              <a
-                href={c.proofTransaction.href}
-                target="_blank"
-                rel="noreferrer noopener"
-                className="break-all font-mono font-medium text-emerald-700 underline decoration-emerald-300 underline-offset-2 hover:text-emerald-900"
-              >
-                {c.proofTransaction.label}
-              </a>
+              {c.proofFlow} <GuideTxLink href={c.proofTransaction.href} hash={c.proofTransaction.label} />
             </p>
             <p className="mt-3 text-sm leading-relaxed text-slate-700">
               {c.proofOutcome}

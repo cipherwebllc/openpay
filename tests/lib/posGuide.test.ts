@@ -187,15 +187,14 @@ describe('public/guide: 図版ファイルの実在と整合 (リンク切れ防
     }
   });
 
-  it('想定図版がすべて存在する (pos 7 枚 + start 1 枚)', () => {
+  // 会計の 4 ステップの図とコスト比較のグラフは、手順の一覧と表の繰り返しだったので外した (plans/guide-ux-polish-2.md P5)。
+  it('想定図版がすべて存在する (pos 5 枚 + start 1 枚)', () => {
     const expected = [
       'hero.webp',
       'overview-flow.svg',
       'pos-add-method.svg',
-      'four-steps.svg',
       'payment-success.svg',
       'history-reconcile.svg',
-      'cost-compare.svg',
       // /guide/start (返金は取消ではない の概念図)
       'refund-not-reversal.svg',
     ];

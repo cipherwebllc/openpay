@@ -8,14 +8,13 @@
 
 import { LANDING_PAYMENT_FEE_VALUES } from '@/lib/legal';
 import type { Metadata } from 'next';
-import Image from 'next/image';
 import Link from 'next/link';
 import { getTranslations, setRequestLocale } from 'next-intl/server';
 import { AppShell } from '@/components/AppShell';
 import { GuideFrame } from '@/components/guide/GuideFrame';
 import { guideNavFor } from '@/lib/guideNav';
 import { GuideFeeList } from '@/components/guide/GuideFee';
-import { GUIDE_PRIMARY_ACTION, GUIDE_SECONDARY_ACTION, GuideLead, GuideSubtitle, GuideTitle, GuideFeatureList } from '@/components/guide/GuideHeader';
+import { GUIDE_TAG, GUIDE_PRIMARY_ACTION, GUIDE_SECONDARY_ACTION, GuideLead, GuideSubtitle, GuideTitle, GuideFeatureList } from '@/components/guide/GuideHeader';
 import { GuideCta, GuideRelated } from '@/components/guide/GuideEnd';
 import { STEP_BADGE, Section } from '@/components/guide/PosGuidePieces';
 import { GuideVideo } from '@/components/guide/GuideVideo';
@@ -89,19 +88,7 @@ export default async function GuideShopPage({
               {c.heroCtaMobile}
             </Link>
           </div>
-          <div className="mt-8 overflow-hidden rounded-[1.75rem] bg-white shadow-lift ring-1 ring-slate-200/60">
-            <Image
-              src="/landing/mobileorder.webp"
-              alt={c.heroVisualAlt}
-              width={1280}
-              height={670}
-              priority
-              sizes="(min-width: 768px) 768px, calc(100vw - 2rem)"
-              className="h-auto w-full object-cover"
-            />
-          </div>
         </header>
-
 
         <Section title={c.relationTitle}>
           <p className="mt-3 text-sm leading-relaxed text-slate-700">
@@ -113,7 +100,7 @@ export default async function GuideShopPage({
           <GuideFeatureList items={c.features} />
         </Section>
 
-        {/* 動画は「できること」の後 (ヒーロー画像の直後に画像が 2 枚続かないように)。 */}
+        {/* 動画は「できること」の後 (ページの頭は文字と行動ボタンだけにして軽くする・P5)。 */}
         {videos.length > 0 && (
           <Section title={HOWTO_VIDEO_UI.sectionTitle} toc={false}>
             <div className="space-y-3">
@@ -144,7 +131,7 @@ export default async function GuideShopPage({
             {c.sceneChips.map((chip) => (
               <span
                 key={chip}
-                className="rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-semibold text-emerald-700"
+                className={GUIDE_TAG}
               >
                 {chip}
               </span>

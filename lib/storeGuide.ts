@@ -39,7 +39,6 @@ export type StoreGuideContent = {
   readonly heroTitle: string;
   readonly heroLead: string;
   readonly heroCtaProfile: string;
-  readonly heroVisualAlt: string;
   readonly heroCtaStore: string;
   readonly forWhoTitle: string;
   readonly forWhoChips: readonly string[];
@@ -70,7 +69,6 @@ export type StoreGuideContent = {
   readonly methodsTitle: string;
   readonly methodsLead: string;
   /** たためるカードの「方法 N」の表示 (N を足す)。 */
-  readonly methodLabel: string;
 
   readonly methods: readonly StoreGuideMethod[];
 
@@ -109,8 +107,6 @@ const JA: StoreGuideContent = {
   heroLead:
     'ウォレットアドレスだけで、プロフィール作成・チップ受付・デジタル商品販売を始められます。アカウント登録も月額費用も不要です。',
   heroCtaProfile: 'プロフィールを作る',
-  heroVisualAlt:
-    '自宅デスクでノート PC にクリエイタープロフィールとデジタル商品カードを表示し、スマホで OpenPay を開いているイラスト',
   heroCtaStore: 'Store を見る',
   forWhoTitle: 'こんな人に向いています',
   forWhoChips: [
@@ -190,7 +186,6 @@ const JA: StoreGuideContent = {
 
   methodsTitle: '配布のしかたを選ぶ',
   methodsLead: '使うサービスを 1 つ選んで、手順を開いてください。迷ったら、外部サービスが要らないテキスト商品から。',
-  methodLabel: '方法',
   methods: [
     {
       n: 1,
@@ -288,12 +283,12 @@ const JA: StoreGuideContent = {
   commonTitle: '共通の注意点 (重要)',
   commonSections: [
     {
-      title: '1. リンクの秘匿性 = 商品価値',
+      title: 'リンクの秘匿性 = 商品価値',
       summary: 'URL を知る人は誰でも開けます。数百〜数千円相当の商品が向いています。',
       body: 'URL 型はどの方法でも「URL を知っている人は誰でも開ける」仕組みです。技術的なコピー防止 (DRM) はなく、再配布の禁止は利用規約ベースの約束になります。高額商品や流出ダメージが大きいものより、「数百〜数千円相当で、買った方が探すより速い」価格帯・内容が最も相性が良いゾーンです。',
     },
     {
-      title: '2. 出品前チェックリスト',
+      title: '出品前チェックリスト',
       summary: 'リンクの公開範囲・価格・説明など、出品前に確かめる項目です。',
       bullets: [
         'シークレットウィンドウ (未ログイン) でリンクが開けるか',
@@ -308,27 +303,27 @@ const JA: StoreGuideContent = {
       ],
     },
     {
-      title: '3. リンクを消さない',
+      title: 'リンクを消さない',
       summary: '外部のファイルを消すと、購入者への提供が止まります。',
       body: '販売を停止しても、購入済みの人はライブラリから商品を受け取り続けられます。外部サービス側でファイルやリンクを削除すると、その購入者への提供が止まってしまいます。商品を引退させるときは「OpenPay 側で販売停止 → 外部ファイルはしばらく残す」の順で。',
     },
     {
-      title: '4. 内容を更新したいとき',
+      title: '内容を更新したいとき',
       summary: 'リンクはそのままで中身を更新できるサービスを選ぶと楽です。',
       body: 'OpenPay の商品編集で URL や本文を変更すると新しい版として保存されます。Notion や Google ドライブのようにリンクはそのままで中身だけ更新できるサービスを選んでおくと、更新運用がいちばん楽です。',
     },
     {
-      title: '5. 販売者としての表示義務',
+      title: '販売者としての表示義務',
       summary: '継続して売るなら、氏名・住所・連絡先の表示が必要になることがあります。',
       body: 'デジタル商品を継続的・反復的に販売する場合、特定商取引法にもとづく表示が必要になることがあります。OpenPay は購入画面に、販売者のウォレットアドレス・価格・提供方法・撤回の可否などを自動で表示します。これに加えて、あなた自身の氏名または名称・住所・連絡先などは、出品時の「法定表示の追加事項」欄に記載してください。事業として販売するかどうか、開示がどこまで必要かは個々の状況で変わります。判断がつかない場合は専門家にご確認ください。',
     },
     {
-      title: '6. 提供開始後は自己都合の撤回ができない',
+      title: '提供開始後は自己都合の撤回ができない',
       summary: '返金は取り消しではなく別の送金です。説明を正確に書くことが最大の防御です。',
       body: 'デジタル商品の性質上、提供を開始した後の自己都合による申込みの撤回・契約解除はできません。オンチェーンの送金も技術上取り消せません。ただし、これは「売り切ったら終わり」という意味ではありません。商品が提供されない場合や、説明と著しく異なる場合、購入者は解除・返金・代替提供を求めることができます。その際の返金は、元の取引を取り消すのではなく、あなたから購入者へ別途送金する形になります。だからこそ、説明を正確に書くことが最大の防御になります。',
     },
     {
-      title: '7. 購入者のライブラリを守る',
+      title: '購入者のライブラリを守る',
       summary: '購入者が受け取れるのは、外部の URL が生きている間だけです。',
       body: '購入者は「ライブラリ」から、購入した商品をあとから何度でも受け取れます。この仕組みは、あなたが用意した外部の URL が生きていることが前提です。',
       bullets: [
@@ -338,7 +333,7 @@ const JA: StoreGuideContent = {
       ],
     },
     {
-      title: '8. USDC 販売を有効にするとき',
+      title: 'USDC 販売を有効にするとき',
       summary: `受取アドレスが ${STORE_USDC_CHAIN} でも操作できるかを、販売前に確かめます。`,
       body: `出品フォームで「USDC での購入も許可する」を ON にすると、購入者は JPYC 建て価格から換算された USDC を ${STORE_USDC_CHAIN} チェーンで支払い、表示された受取アドレスへ直接送金します。`,
       bullets: [
@@ -383,8 +378,6 @@ const EN: StoreGuideContent = {
   heroLead:
     'All you need is a wallet address: create a profile, receive tips, and sell digital products. No account signup, no monthly fee.',
   heroCtaProfile: 'Create your profile',
-  heroVisualAlt:
-    'Illustration of a creator at a home desk with a laptop showing a creator profile and digital product cards, holding a phone with OpenPay open',
   heroCtaStore: 'Browse the Store',
   forWhoTitle: 'Who this is for',
   forWhoChips: [
@@ -464,7 +457,6 @@ const EN: StoreGuideContent = {
 
   methodsTitle: 'Choose how to deliver',
   methodsLead: 'Pick one service and open its steps. If unsure, start with a text product — no outside service needed.',
-  methodLabel: 'Method',
   methods: [
     {
       n: 1,
@@ -562,12 +554,12 @@ const EN: StoreGuideContent = {
   commonTitle: 'Common cautions (important)',
   commonSections: [
     {
-      title: '1. Link secrecy is the product value',
+      title: 'Link secrecy is the product value',
       summary: 'Anyone with the URL can open it. Best for items worth a few hundred to a few thousand yen.',
       body: 'With every method, a URL product means anyone who knows the URL can open it. There is no technical copy protection (DRM); redistribution is prohibited by terms, not by technology. The sweet spot is content priced in the few-hundred-to-few-thousand-yen range where buying is faster than hunting — not high-ticket items where a leak would hurt badly.',
     },
     {
-      title: '2. Pre-listing checklist',
+      title: 'Pre-listing checklist',
       summary: 'Points to check before listing: link access, price, description and more.',
       bullets: [
         'Does the link open in a private window (no login)?',
@@ -582,27 +574,27 @@ const EN: StoreGuideContent = {
       ],
     },
     {
-      title: '3. Never delete the link',
+      title: 'Never delete the link',
       summary: 'Deleting the external file stops delivery to buyers.',
       body: 'Even after you stop selling, existing buyers keep receiving the product from their library. Deleting the file or link on the external service cuts them off. To retire a product: stop the sale on OpenPay first, and keep the external file up for a while.',
     },
     {
-      title: '4. When updating content',
+      title: 'When updating content',
       summary: 'Pick a service that lets you update the content behind the same link.',
       body: 'Editing the URL or text on OpenPay saves a new revision. Services like Notion or Google Drive, where the link stays stable while the content changes, make update operations easiest.',
     },
     {
-      title: '5. Your disclosure duties as a seller',
+      title: 'Your disclosure duties as a seller',
       summary: 'If you sell repeatedly, you may need to show your name, address and contact details.',
       body: 'Selling digital products on a continuing, repeated basis may require disclosures under Japan’s Act on Specified Commercial Transactions. OpenPay automatically shows the seller wallet address, price, delivery method, and withdrawal terms on the purchase screen. Beyond that, your own name or business name, address, and contact details go in the "additional statutory disclosures" field when you list. Whether you are selling as a business, and how much disclosure is required, depends on your situation — consult a professional if you are unsure.',
     },
     {
-      title: '6. No change of mind after delivery starts',
+      title: 'No change of mind after delivery starts',
       summary: 'Refunds are a separate transfer, not a reversal. An accurate description is your best protection.',
       body: 'Given the nature of digital products, a buyer cannot withdraw or cancel for their own convenience once delivery has started, and on-chain transfers cannot be reversed. That does not mean the sale is the end of your obligations: if the product is not delivered, or differs materially from its description, buyers can seek cancellation, a refund, or a replacement. Such a refund is not a reversal of the original transaction — you send a separate transfer to the buyer. Writing an accurate description is therefore your best protection.',
     },
     {
-      title: '7. Protect your buyers’ library',
+      title: 'Protect your buyers’ library',
       summary: 'Buyers can receive the item only while your external URL works.',
       body: 'Buyers can re-download what they purchased from their library at any time. That depends on the external URL you provided staying alive.',
       bullets: [
@@ -612,7 +604,7 @@ const EN: StoreGuideContent = {
       ],
     },
     {
-      title: '8. When enabling USDC sales',
+      title: 'When enabling USDC sales',
       summary: `Before you start selling, check that you can operate the receiving address on ${STORE_USDC_CHAIN}.`,
       body: `When you turn on “Also allow purchases with USDC” in the listing form, the buyer pays the USDC amount converted from the JPYC-denominated price on ${STORE_USDC_CHAIN}, directly to the displayed receiving address.`,
       bullets: [

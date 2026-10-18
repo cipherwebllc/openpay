@@ -22,6 +22,7 @@ import { guideNavFor } from '@/lib/guideNav';
 import { HOWTO_VIDEO_UI, howtoVideoFor } from '@/lib/howtoVideos';
 import { payGuideContentFor, payGuideMetadata } from '@/lib/payGuide';
 import { walletGuideContentFor } from '@/lib/walletGuide';
+import { GuideMoreLink } from '@/components/guide/GuideLink';
 
 export async function generateMetadata({
   params,
@@ -60,7 +61,7 @@ export default async function GuidePayPage({
         <GuideToc title={nav.tocTitle} />
 
         <Section title={c.needTitle}>
-          <BulletList items={c.need} marker="✓" markerClassName="text-emerald-600" />
+          <BulletList items={c.need} marker="✓" />
         </Section>
 
         {/* ウォレットを選ぶ: 短い案内と /guide/wallet へのリンク (選び方・QR の読み取り方・つなぎ方はそのページ)。
@@ -83,12 +84,12 @@ export default async function GuidePayPage({
 
         <Section title={c.signTitle}>
           <p className="mt-3 text-sm leading-relaxed text-slate-700">{c.signLead}</p>
-          <BulletList items={c.sign} marker="✓" markerClassName="text-emerald-600" />
+          <BulletList items={c.sign} marker="✓" />
           <GuideCallout kind="warn">{c.signNote}</GuideCallout>
         </Section>
 
         <Section title={c.receiptTitle}>
-          <BulletList items={c.receipt} marker="•" markerClassName="text-slate-400" />
+          <BulletList items={c.receipt} marker="•" />
           <p className="mt-3 text-xs leading-relaxed text-slate-500">{c.receiptNote}</p>
         </Section>
 
@@ -99,26 +100,18 @@ export default async function GuidePayPage({
             </p>
           ))}
           <GuideCallout kind="warn">{c.jpycCallout}</GuideCallout>
-          <p className="mt-4">
-            <a
-              href={c.jpycLink.href}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-sm font-semibold text-emerald-700 underline-offset-2 hover:underline"
-            >
-              {c.jpycLink.label} →
-            </a>
-          </p>
-          <p className="mt-2">
-            <a
-              href={c.jpycNoteLink.href}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-sm font-semibold text-emerald-700 underline-offset-2 hover:underline"
-            >
-              {c.jpycNoteLink.label} →
-            </a>
-          </p>
+          <ul className="mt-4 space-y-2">
+            <li>
+              <GuideMoreLink href={c.jpycLink.href} external>
+                {c.jpycLink.label}
+              </GuideMoreLink>
+            </li>
+            <li>
+              <GuideMoreLink href={c.jpycNoteLink.href} external>
+                {c.jpycNoteLink.label}
+              </GuideMoreLink>
+            </li>
+          </ul>
         </Section>
 
         <Section title={c.faqTitle}>
