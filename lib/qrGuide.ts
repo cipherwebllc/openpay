@@ -63,7 +63,7 @@ const JA: QrGuideContent = {
 
   heroTitle: '最短 30 秒で始める JPYC 決済QR',
   heroLead:
-    '金額を入力して QR コードを提示するだけ。専用端末なしで、スマホから JPYC を受け取れます。導入費 0 円・契約も不要です。',
+    '金額を入れて QR を見せるだけ。専用端末なしで、スマホから JPYC を受け取れます。導入費 0 円・契約も不要です。',
   heroCtaCreate: '決済QRを作る',
   heroCtaScan: '支払いを試す',
   heroVisualAlt:
@@ -99,7 +99,7 @@ const JA: QrGuideContent = {
     },
     {
       title: '電子レシート',
-      body: 'お客様は支払い控えをブラウザに保存できます。レシートプリンターは不要です。インボイス登録番号を設定すると、控えに登録番号と税率ごとの金額・消費税も出ます。',
+      body: 'お客様は支払い控えをブラウザに保存できます (レシートプリンターは不要)。インボイス登録番号を設定すると、控えに登録番号と税率ごとの金額・消費税も出ます。',
     },
     {
       title: '会計向け CSV',
@@ -128,11 +128,11 @@ const JA: QrGuideContent = {
 
   discountTitle: 'JPYC 払いで割引する',
   discountLead:
-    '決済QR とレジには「値引き」があります。JPYC で払うお客様に割引したいときは、金額を入れたあと「＋ 値引きを追加」で割引率か金額を入れてから QR を出します（値引きは、金額を指定した QR に付けられます）。',
+    '決済QR とレジには「値引き」があります。金額を入れたあと「＋ 値引きを追加」で割引率か金額を入れてから QR を出します（金額を指定した QR に付けられます）。',
   discountPoints: [
     'お客様の支払い画面と控えには、値引き前の金額・値引き・お支払いの額が出ます。取引履歴と会計用の CSV にも値引きが残ります。',
     '利用料と、控えに出る消費税は、値引き後の金額で計算されます。',
-    '店頭で伝えるときは、「設定」の「ポスターの補足文」に「JPYC 払いで 5% 引き」のように書くと、印刷するポスターに出ます。ポスターの文言と QR の値引きは別々に入れるので、同じ内容にそろえてください。',
+    '店頭で伝えるときは、「設定」の「ポスターの補足文」に「JPYC 払いで 5% 引き」のように書くと、印刷するポスターに出ます。ポスターの文言と QR の値引きは別々なので、同じ内容にそろえてください。',
     'モバイルオーダーは、「モバイル注文」タブの「値引き（任意）」で、公開したお店のページの全品に割引率か割引額を付けられます（AI エージェントが自分で払う注文には付きません）。',
   ],
   discountCaution:
@@ -196,7 +196,7 @@ const EN: QrGuideContent = {
     },
     {
       title: 'Digital receipts',
-      body: 'Customers keep a payment record in their browser. No receipt printer needed. Set your invoice registration number and the record also shows it, with the amount and consumption tax for each tax rate.',
+      body: 'Customers keep a payment record in their browser (no receipt printer needed). Set your invoice registration number and the record also shows it, with the amount and consumption tax for each tax rate.',
     },
     {
       title: 'Accounting CSV',
@@ -225,11 +225,11 @@ const EN: QrGuideContent = {
 
   discountTitle: 'Discounts for paying with JPYC',
   discountLead:
-    'Payment QR and the register both have a “Discount” option. To give customers who pay in JPYC a discount, enter the amount, then use “+ Add a discount” to set a percentage or an amount before showing the QR (discounts work on QRs with a set amount).',
+    'Payment QR and the register both have a “Discount” option. Enter the amount, then use “+ Add a discount” to set a percentage or an amount before showing the QR (it works on QRs with a set amount).',
   discountPoints: [
     'The customer’s payment screen and receipt show the price before the discount, the discount and the amount paid. Your history and the accounting CSV keep the discount too.',
     'The OpenPay fee and the consumption tax shown on receipts are calculated on the amount after the discount.',
-    'To tell customers in store, write something like “5% off when you pay with JPYC” in “Poster note” under Settings; it appears on the printed poster. The poster text and the QR discount are entered separately, so keep them the same.',
+    'To tell customers in store, write something like “5% off when you pay with JPYC” in “Poster note” under Settings; it appears on the printed poster. The poster text and the QR discount are separate, so keep them the same.',
     'For mobile ordering, “Discount (optional)” in the Mobile order tab applies a percentage or a fixed discount to every item on your published shop page (not applied to orders an AI agent pays for itself).',
   ],
   discountCaution:

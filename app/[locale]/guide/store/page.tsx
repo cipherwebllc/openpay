@@ -16,7 +16,7 @@ import { CodeBlock } from '@/components/guide/AgentGuidePieces';
 import { GuideCallout } from '@/components/guide/GuideCallout';
 import { GuideDisclosure } from '@/components/guide/GuideDisclosure';
 import { guideNavFor } from '@/lib/guideNav';
-import { GUIDE_PRIMARY_ACTION, GUIDE_SECONDARY_ACTION, GuideLead, GuideSubtitle, GuideTitle } from '@/components/guide/GuideHeader';
+import { GUIDE_PRIMARY_ACTION, GUIDE_SECONDARY_ACTION, GuideLead, GuideSubtitle, GuideTitle, GuideAudience, GuideFeatureList } from '@/components/guide/GuideHeader';
 import { GuideToc } from '@/components/guide/GuideToc';
 import { STEP_BADGE, BulletList, Section } from '@/components/guide/PosGuidePieces';
 import { GuideVideo } from '@/components/guide/GuideVideo';
@@ -63,6 +63,7 @@ export default async function GuideStorePage({
           <GuideLead>
             {c.heroLead}
           </GuideLead>
+          <GuideAudience title={c.forWhoTitle} chips={c.forWhoChips} />
           <div className="mt-6 flex flex-wrap gap-3">
             <Link
               href={`/${locale}/create?tab=profile`}
@@ -102,33 +103,8 @@ export default async function GuideStorePage({
           </Section>
         )}
 
-        <Section title={c.forWhoTitle}>
-          <div className="mt-3 flex flex-wrap gap-1.5">
-            {c.forWhoChips.map((chip) => (
-              <span
-                key={chip}
-                className="rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-semibold text-emerald-700"
-              >
-                {chip}
-              </span>
-            ))}
-          </div>
-        </Section>
-
         <Section title={c.featuresTitle}>
-          <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
-            {c.features.map((f) => (
-              <div
-                key={f.title}
-                className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-[0_2px_8px_-2px_rgba(15,23,42,0.07)]"
-              >
-                <h3 className="text-sm font-bold text-slate-900">{f.title}</h3>
-                <p className="mt-1.5 text-sm leading-relaxed text-slate-600">
-                  {f.body}
-                </p>
-              </div>
-            ))}
-          </div>
+          <GuideFeatureList items={c.features} />
         </Section>
 
         <Section title={c.categoriesTitle}>
@@ -176,13 +152,9 @@ export default async function GuideStorePage({
           </ol>
         </Section>
 
-        {/* --- ここから既存の操作ガイド (6 つの方法・全文維持) --- */}
-        {/* 後半 (販売の手順) の始まり。ほかと同じ節にして、リードで「何をするか」を 1 段落で示す。 */}
-        <Section title={c.opsTitle}>
-          <p className="mt-3 text-sm leading-relaxed text-slate-700">{c.lead}</p>
-        </Section>
-
+        {/* --- ここから操作ガイド (後半)。「販売の手順」のリードは仕組みの節の頭に置く (中身が 1 段落だけの節をなくした)。 --- */}
         <Section title={c.basicsTitle}>
+          <p className="mt-3 text-sm leading-relaxed text-slate-700">{c.lead}</p>
           {/* スマホでは横スクロールの表をやめ、1 行を 1 枚のカードにして列名をラベルとして出す
               (以前は 560px の表が 390px の画面で右に隠れていた)。sm 以上は表のまま。 */}
           <div className="mt-4 sm:overflow-x-auto">
@@ -229,14 +201,14 @@ export default async function GuideStorePage({
           <GuideCallout kind="tip" className="mt-3">{c.basicsPoint}</GuideCallout>
         </Section>
 
-        {/* 6 つの配布方法は 1 つの節にまとめ、たためるカードにする (選んだものだけ開いて読む)。最速の 1 つ目は開いて出す。 */}
+        {/* 6 つの配布方法は 1 つの節にまとめ、たためるカードにする (選んだものだけ開いて読む)。どれも閉じて始める
+            (見出し・所要時間・向いているものだけで選べる・plans/guide-ux-polish-2.md P3)。 */}
         <Section title={c.methodsTitle}>
           <p className="mt-2 text-sm leading-relaxed text-slate-600">{c.methodsLead}</p>
           <div className="mt-4 space-y-3">
-            {c.methods.map((m, index) => (
+            {c.methods.map((m) => (
               <GuideDisclosure
                 key={m.n}
-                defaultOpen={index === 0}
                 summary={
                   <>
                     <p className="text-xs font-semibold text-emerald-700">

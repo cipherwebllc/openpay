@@ -246,6 +246,7 @@ describe('AI_PAY_GUIDE: agent guide の JPYC 入手文言を一字不変で再�
     'jpycAddressChainNote',
     'jpycLegacyWarning',
     'jpycGasNote',
+    'jpycNoGasLabel',
     'jpycNoGasNote',
     'jpycLiquidityNote',
   ] as const;

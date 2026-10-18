@@ -35,6 +35,7 @@ type JpycSectionContent = Pick<
   | 'jpycAddressChainNote'
   | 'jpycLegacyWarning'
   | 'jpycGasNote'
+  | 'jpycNoGasLabel'
   | 'jpycNoGasNote'
   | 'jpycLiquidityNote'
 >;
@@ -174,6 +175,7 @@ function jpycSectionFor(locale: AiPayGuideLocale): JpycSectionContent {
     jpycAddressChainNote: c.jpycAddressChainNote,
     jpycLegacyWarning: c.jpycLegacyWarning,
     jpycGasNote: c.jpycGasNote,
+    jpycNoGasLabel: c.jpycNoGasLabel,
     jpycNoGasNote: c.jpycNoGasNote,
     jpycLiquidityNote: c.jpycLiquidityNote,
   };
@@ -185,7 +187,7 @@ const ja: AiPayGuideContent = {
     'Claude などの AI エージェントが AI ストアのデータ・API・AI への相談を JPYC で都度購入するための設定手順。専用少額ウォレット、Kova / MetaMask Agent Wallet、Steward、金銭ガード、実例を紹介します。',
   title: 'あなたの AI に、支払う力を。',
   subtitle:
-    'Claude などの AI エージェントが、AI ストアのデータ・API・AI への相談を JPYC で都度購入できるようになります。数分のセットアップで、支払いは数円から。',
+    'Claude などの AI エージェントが、AI ストアのデータ・API・AI への相談を JPYC で都度購入できます。数分のセットアップで、支払いは数円から。',
   backLink: { label: '← OpenPay Agent', href: '/agent' },
 
   mechanismTitle: '仕組み (30 秒)',
@@ -226,13 +228,13 @@ const ja: AiPayGuideContent = {
   ],
   quickSetupTitle: 'セットアップ A: 手軽に始める (ローカルウォレット)',
   quickSetupBody: [
-    '秘密鍵を設定に貼る必要はありません。下の設定を Claude Desktop に追加して再起動し、AI に「wallet_init を呼んで」と頼むと、MCP があなたのマシン上に専用ウォレットを作り、アドレスと入金用のリンクだけを返します。',
-    'そのアドレスへ使う分だけ JPYC を送れば、支払えるようになります。残高は入金用のリンク (Agent ページ) で、支払い上限は wallet_status で確認できます。',
+    '秘密鍵を設定に貼る必要はありません。下の設定を Claude Desktop に追加して再起動し、AI に「wallet_init を呼んで」と頼むと、あなたのマシンに専用ウォレットができ、アドレスと入金用のリンクだけが返ります。',
+    'そのアドレスへ使う分だけ JPYC を送れば支払えます。残高は入金用のリンク (Agent ページ)、支払い上限は wallet_status で確かめられます。',
   ],
   quickSetupConfigLabel: 'Claude Desktop の設定 JSON',
   quickSetupConfig: MCP_CONFIG_JSON,
   privateKeyWarning:
-    '注意：鍵はあなたのマシンのファイル（~/.openpay-x402/wallet.json）に平文で保存されます。会話にも OpenPay にも出ませんが、あなたとしてコマンドを実行できるもの（シェルを使える AI エージェントを含む）はこの鍵を読めます。入れるのは失ってもよい少額だけにしてください。OpenPay は鍵を復元できません。',
+    '注意：鍵はあなたのマシンのファイル（~/.openpay-x402/wallet.json）に平文で保存されます。会話にも OpenPay にも出ませんが、あなたとしてコマンドを実行できるもの（シェルを使える AI エージェントを含む）は読めます。入れるのは失ってもよい少額だけに。OpenPay は鍵を復元できません。',
 
   stewardTitle: 'セットアップ B: 安全に運用する (Steward)',
   stewardBody:
@@ -254,11 +256,11 @@ const ja: AiPayGuideContent = {
 
   thirdPartyTitle: 'セットアップ C: 第三者の Agent Wallet に署名だけを頼む (Kova / MetaMask Agent Wallet)',
   thirdPartyBody:
-    '鍵を自分の PC に置かず、Kova (Komlock lab) または MetaMask Agent Wallet の server wallet に署名だけを頼む構成です。OpenPay はどちらの鍵も資格情報も受け取りません。MCP の設定は SIGNER_MODE=kova または SIGNER_MODE=metamask と公開アドレス (Kova は wallet 名も) だけで、Agent ページの設定生成から作れます。ウォレットの作成やログインは、あなた自身がそれぞれの CLI で行います。',
+    '鍵を自分の PC に置かず、Kova (Komlock lab) か MetaMask Agent Wallet の server wallet に署名だけを頼む構成です。OpenPay はどちらの鍵も資格情報も受け取りません。設定は SIGNER_MODE=kova または SIGNER_MODE=metamask と公開アドレス (Kova は wallet 名も) だけで、Agent ページの設定生成から作れます。ウォレットの作成とログインは、それぞれの CLI であなたが行います。',
   thirdPartyFacts: [
-    '実測で分かっていること: Kova (0.1.2) と MetaMask Agent Wallet (7.0.0) の policy (許可チェーン・送金上限) は、この支払い方式で使う署名には効きませんでした。金額の上限として効くのは MCP の設定 (下の金銭ガード) だけです。',
-    '「第三者の wallet なら安心」ではなく、「鍵を PC に置かない」ための選択肢です。そのマシンで CLI にログイン済みなら、CLI から MCP の上限を経ずに直接署名・送金できます。入れるのは失ってもよい少額だけにしてください。',
-    'スマホの Claude アプリの Code やブラウザ版 Claude Code のような使い捨てのクラウド環境では使えません。CLI とログイン状態が MCP と同じマシンに要るためです。',
+    '実測では、Kova (0.1.2) と MetaMask Agent Wallet (7.0.0) の policy (許可チェーン・送金上限) は、この支払いの署名に効きませんでした。金額の上限として効くのは MCP の設定 (下の金銭ガード) だけです。',
+    '「鍵を PC に置かない」ための選択肢で、「第三者の wallet なら安心」ではありません。CLI にログイン済みのマシンでは、MCP の上限を経ずに署名・送金できます。入れるのは失ってもよい少額だけに。',
+    '使い捨てのクラウド環境 (スマホの Claude アプリの Code・ブラウザ版 Claude Code) では使えません。CLI とログインが MCP と同じマシンに要るためです。',
   ],
   thirdPartyLink: { label: 'Agent ページの設定生成で作る', href: '/agent' },
 
@@ -293,7 +295,7 @@ const ja: AiPayGuideContent = {
   ctaButtonHref: '/discovery',
   strandsTitle: 'Strands Agents (AWS) からも使える',
   strandsBody:
-    'Claude Desktop に限らず、MCP を話せるエージェントフレームワークなら同じ構成で JPYC 購入ができます。AWS の Strands Agents なら、MCPClient に openpay-x402-mcp を渡すだけです。環境変数（署名モード・支払い上限）はセットアップ A/B と共通です。',
+    'MCP を話せるエージェントフレームワークなら、同じ構成で JPYC を購入できます。AWS の Strands Agents なら、MCPClient に openpay-x402-mcp を渡すだけです（環境変数はセットアップ A/B と共通）。',
   strandsCodeLabel: 'Strands Agents (Python) の最小コード',
   strandsCode: STRANDS_SAMPLE,
   strandsProofIntro:
@@ -323,7 +325,7 @@ const en: AiPayGuideContent = {
     'Set up Claude or another AI agent to buy data, APIs, and AI consultations from the AI Store with JPYC. Covers a dedicated low-balance wallet, Kova / MetaMask Agent Wallet, Steward, money guards, and a real example.',
   title: 'Give your AI the power to pay.',
   subtitle:
-    'AI agents such as Claude can buy data, APIs, and consultations with other AIs from the AI Store, paying JPYC per use. Setup takes minutes, and purchases start at just a few yen.',
+    'AI agents such as Claude can buy data, APIs and consultations with other AIs from the AI Store, paying JPYC per use. Setup takes minutes; purchases start at a few yen.',
   backLink: { label: '← OpenPay Agent', href: '/agent' },
 
   mechanismTitle: 'How it works (30 seconds)',
@@ -364,13 +366,13 @@ const en: AiPayGuideContent = {
   ],
   quickSetupTitle: 'Setup A: the easy path (local wallet)',
   quickSetupBody: [
-    'You never paste a private key into the config. Add the config below to Claude Desktop, restart it, and ask your AI to “call wallet_init”. The MCP creates a dedicated wallet on your machine and returns only its address and a funding link.',
-    'Send just the JPYC you intend to use to that address and paying is enabled. Check the balance via the funding link (the Agent page) and the spending limits with wallet_status.',
+    'You never paste a private key into the config. Add the config below to Claude Desktop, restart it and ask your AI to “call wallet_init”: a dedicated wallet is created on your machine, and only its address and a funding link come back.',
+    'Send just the JPYC you intend to use to that address and you can pay. Check the balance via the funding link (the Agent page) and the spending limits with wallet_status.',
   ],
   quickSetupConfigLabel: 'Claude Desktop config JSON',
   quickSetupConfig: MCP_CONFIG_JSON,
   privateKeyWarning:
-    'Caution: the key is stored in plain text in a file on your machine (~/.openpay-x402/wallet.json). It never enters the chat or reaches OpenPay, but anything that can run commands as you — including an AI agent with shell access — can read it. Fund it only with a small amount you can afford to lose. OpenPay cannot recover the key.',
+    'Caution: the key is stored in plain text in a file on your machine (~/.openpay-x402/wallet.json). It never enters the chat or reaches OpenPay, but anything that can run commands as you — including an AI agent with shell access — can read it. Fund it only with a small amount you can afford to lose; OpenPay cannot recover the key.',
 
   stewardTitle: 'Setup B: safer operation (Steward)',
   stewardBody:
@@ -392,11 +394,11 @@ const en: AiPayGuideContent = {
 
   thirdPartyTitle: 'Setup C: ask a third-party agent wallet only for signatures (Kova / MetaMask Agent Wallet)',
   thirdPartyBody:
-    'Keep the key off your PC and let a Kova (Komlock lab) wallet or a MetaMask Agent Wallet server wallet sign only. OpenPay never receives either key or any credentials. The MCP config is just SIGNER_MODE=kova or SIGNER_MODE=metamask plus the public address (and the wallet name for Kova); the Agent page config generator builds it. You create the wallet and sign in with each CLI yourself.',
+    'Keep the key off your PC and let a Kova (Komlock lab) wallet or a MetaMask Agent Wallet server wallet only sign. OpenPay never receives either key or any credentials. The config is just SIGNER_MODE=kova or SIGNER_MODE=metamask plus the public address (and the wallet name for Kova), built by the Agent page config generator. You create the wallet and sign in with each CLI yourself.',
   thirdPartyFacts: [
-    'What our tests showed: the Kova (0.1.2) and MetaMask Agent Wallet (7.0.0) policies (allowed chains, outflow limits) did not apply to the signature this payment method uses. The only amount caps that apply are the MCP settings (the money guards below).',
-    'This is not “a third-party wallet makes it safe” but “keep the key off the PC”. A CLI already signed in on that machine can sign or send directly, bypassing the MCP caps. Fund it only with a small amount you can afford to lose.',
-    'It does not work in disposable cloud environments such as the Claude mobile app’s Code tab or Claude Code on the web, because the CLI and its login must live on the same machine as the MCP.',
+    'In our tests, the Kova (0.1.2) and MetaMask Agent Wallet (7.0.0) policies (allowed chains, outflow limits) did not apply to this payment’s signature. The only amount caps that apply are the MCP settings (the money guards below).',
+    'This is about keeping the key off the PC, not “a third-party wallet makes it safe”. On a machine where the CLI is signed in, it can sign or send directly, bypassing the MCP caps. Fund it only with a small amount you can afford to lose.',
+    'It does not work in disposable cloud environments (the Claude mobile app’s Code tab, Claude Code on the web), because the CLI and its login must be on the same machine as the MCP.',
   ],
   thirdPartyLink: { label: 'Build it in the Agent page config generator', href: '/agent' },
 
@@ -431,7 +433,7 @@ const en: AiPayGuideContent = {
   ctaButtonHref: '/discovery',
   strandsTitle: 'Works from Strands Agents (AWS) too',
   strandsBody:
-    'Any agent framework that speaks MCP can buy in JPYC with the same setup — not just Claude Desktop. With AWS Strands Agents, just hand openpay-x402-mcp to an MCPClient. The environment variables (signer mode, spend limits) are the same as Setup A/B.',
+    'Any agent framework that speaks MCP can buy in JPYC with the same setup. With AWS Strands Agents, just hand openpay-x402-mcp to an MCPClient (the environment variables are the same as Setup A/B).',
   strandsCodeLabel: 'Minimal Strands Agents (Python) code',
   strandsCode: STRANDS_SAMPLE,
   strandsProofIntro:

@@ -4,6 +4,7 @@
 
 import type { ReactNode } from 'react';
 import Link from 'next/link';
+import { Check } from 'lucide-react';
 
 export function GuideTitle({ children }: { children: ReactNode }) {
   return (
@@ -21,6 +22,25 @@ export function GuideSubtitle({ children }: { children: ReactNode }) {
 export function GuideLead({ children, className }: { children: ReactNode; className?: string }) {
   return (
     <p className={`mt-4 max-w-2xl text-base leading-relaxed text-slate-600 ${className ?? ''}`}>{children}</p>
+  );
+}
+
+/**
+ * 「こんな人に向いています」。見出しの節にせず、リードの下の小さなラベルとチップにする
+ * (中身がチップだけの h2 を本文の目次に並べない・plans/guide-ux-polish-2.md P3)。
+ */
+export function GuideAudience({ title, chips }: { title: string; chips: readonly string[] }) {
+  return (
+    <div className="mt-4">
+      <p className="text-xs font-semibold text-slate-500">{title}</p>
+      <ul className="mt-1.5 flex flex-wrap gap-1.5">
+        {chips.map((chip) => (
+          <li key={chip} className="rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-semibold text-emerald-700">
+            {chip}
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 
@@ -53,5 +73,28 @@ export function GuideActions({ actions, className }: { actions: readonly GuideAc
         ),
       )}
     </div>
+  );
+}
+
+/**
+ * 「できること」の一覧。機能ごとに影付きのカードを並べず、1 枚の白い箱にチェック付きの行を並べる
+ * (PC は 2 列)。スマホで 1 機能 = 1 枚のカードが縦に続き、同じ形の箱で疲れていたのを軽くする
+ * (plans/guide-ux-polish-2.md P3)。見出しは h3 (節の h2 の下)。
+ */
+export function GuideFeatureList({ items }: { items: readonly { readonly title: string; readonly body: string }[] }) {
+  return (
+    <ul className="mt-4 grid grid-cols-1 gap-x-8 gap-y-5 rounded-2xl bg-white p-5 shadow-card ring-1 ring-slate-200/70 sm:grid-cols-2 sm:p-6">
+      {items.map((f) => (
+        <li key={f.title} className="flex items-start gap-3">
+          <span className="mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full bg-emerald-50 ring-1 ring-inset ring-emerald-200/70">
+            <Check className="h-3 w-3 text-emerald-700" aria-hidden strokeWidth={3} />
+          </span>
+          <div className="min-w-0">
+            <h3 className="text-sm font-bold text-slate-900">{f.title}</h3>
+            <p className="mt-1 text-sm leading-relaxed text-slate-600">{f.body}</p>
+          </div>
+        </li>
+      ))}
+    </ul>
   );
 }

@@ -15,7 +15,7 @@ import { AppShell } from '@/components/AppShell';
 import { GuideFrame } from '@/components/guide/GuideFrame';
 import { guideNavFor } from '@/lib/guideNav';
 import { GuideFeeList } from '@/components/guide/GuideFee';
-import { GUIDE_PRIMARY_ACTION, GUIDE_SECONDARY_ACTION, GuideLead, GuideSubtitle, GuideTitle } from '@/components/guide/GuideHeader';
+import { GUIDE_PRIMARY_ACTION, GUIDE_SECONDARY_ACTION, GuideLead, GuideSubtitle, GuideTitle, GuideFeatureList } from '@/components/guide/GuideHeader';
 import { STEP_BADGE, Section } from '@/components/guide/PosGuidePieces';
 import { GuideVideo } from '@/components/guide/GuideVideo';
 import { HOWTO_VIDEO_UI, howtoVideoFor } from '@/lib/howtoVideos';
@@ -117,19 +117,7 @@ export default async function GuideShopPage({
         </Section>
 
         <Section title={c.featuresTitle}>
-          <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
-            {c.features.map((f) => (
-              <div
-                key={f.title}
-                className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-[0_2px_8px_-2px_rgba(15,23,42,0.07)]"
-              >
-                <h3 className="text-sm font-bold text-slate-900">{f.title}</h3>
-                <p className="mt-1.5 text-sm leading-relaxed text-slate-600">
-                  {f.body}
-                </p>
-              </div>
-            ))}
-          </div>
+          <GuideFeatureList items={c.features} />
         </Section>
 
         {/* 動画は「できること」の後 (ヒーロー画像の直後に画像が 2 枚続かないように)。 */}

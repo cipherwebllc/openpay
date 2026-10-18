@@ -18,6 +18,7 @@ import { GuideCallout } from '@/components/guide/GuideCallout';
 import { guideNavFor } from '@/lib/guideNav';
 import { GUIDE_PRIMARY_ACTION, GuideActions, GuideLead, GuideSubtitle, GuideTitle } from '@/components/guide/GuideHeader';
 import { GuideToc } from '@/components/guide/GuideToc';
+import { GuideDisclosure } from '@/components/guide/GuideDisclosure';
 import { STEP_BADGE, GuideFigure, Section } from '@/components/guide/PosGuidePieces';
 import {
   startGuideContentFor,
@@ -92,10 +93,11 @@ export default async function GuideStartPage({
       );
     }
     if (section.slot === 'chains') {
+      // 対応チェーン・通貨の開示 (Landing.faqA2・掟 14 フェンス済み) は細部なので「くわしく」にたたむ (文言は不変)。
       return (
-        <p className="mt-4 rounded-2xl bg-slate-50 px-4 py-3 text-sm leading-relaxed text-slate-700">
-          {tLanding('faqA2', LANDING_PAYMENT_FEE_VALUES)}
-        </p>
+        <GuideDisclosure variant="subtle" summary={c.chainsDetailsLabel}>
+          <p className="text-sm leading-relaxed">{tLanding('faqA2', LANDING_PAYMENT_FEE_VALUES)}</p>
+        </GuideDisclosure>
       );
     }
     return null;
@@ -172,30 +174,29 @@ export default async function GuideStartPage({
               </ul>
             ) : null}
             {section.afterBullets ? (
-              <>
-                <p className="mt-4 text-sm leading-relaxed text-slate-700">
-                  {section.afterBullets.body}
-                </p>
-                {/* 参考情報は地色付きの小箱に落として、決めごと (bullets) と主従を保つ。 */}
-                <div className="mt-4 rounded-2xl bg-slate-50 px-4 py-3.5">
-                  <p className="text-xs font-bold text-slate-500">
-                    {section.afterBullets.title}
+              // 参考情報は「くわしく」にたたみ、決めごと (bullets) との主従を保つ。
+              <GuideDisclosure variant="subtle" summary={section.afterBullets.title}>
+                <p className="text-sm leading-relaxed">{section.afterBullets.body}</p>
+                <ul className="space-y-1.5">
+                  {section.afterBullets.items.map((item) => (
+                    <li key={item} className="flex items-start gap-2 text-sm leading-relaxed">
+                      <span aria-hidden className="mt-0.5 text-slate-400">
+                        ・
+                      </span>
+                      <span>{item}</span>
+                    </li>
+                  ))}
+                </ul>
+              </GuideDisclosure>
+            ) : null}
+            {section.details ? (
+              <GuideDisclosure variant="subtle" summary={section.details.summary}>
+                {section.details.body.map((p) => (
+                  <p key={p} className="text-sm leading-relaxed">
+                    {p}
                   </p>
-                  <ul className="mt-2 space-y-1.5">
-                    {section.afterBullets.items.map((item) => (
-                      <li
-                        key={item}
-                        className="flex items-start gap-2 text-sm leading-relaxed text-slate-600"
-                      >
-                        <span aria-hidden className="mt-0.5 text-slate-400">
-                          ・
-                        </span>
-                        <span>{item}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              </>
+                ))}
+              </GuideDisclosure>
             ) : null}
             {section.defs ? (
               <dl className="mt-4 space-y-3">

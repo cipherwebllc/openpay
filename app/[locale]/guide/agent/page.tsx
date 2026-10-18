@@ -105,12 +105,6 @@ export default async function GuideAgentPage({
           />
         </Section>
 
-        <Section title={c.overviewTitle}>
-          <p className="mt-3 text-sm leading-relaxed text-slate-700">
-            {c.overviewBody}
-          </p>
-        </Section>
-
         <Section title={c.setupTitle}>
           <p className="mt-3 text-sm leading-relaxed text-slate-700">
             {c.setupIntro}
@@ -118,13 +112,9 @@ export default async function GuideAgentPage({
           <StepList
             steps={c.setupSteps}
           />
-          <div className="mt-4">
-            <GuideDisclosure
-              summary={<h3 className="text-sm font-semibold text-slate-900">{c.setupEnvironmentNote.title}</h3>}
-            >
-              <BulletList items={c.setupEnvironmentNote.items} marker="•" markerClassName="text-emerald-600" />
-            </GuideDisclosure>
-          </div>
+          <GuideDisclosure variant="subtle" summary={c.setupEnvironmentNote.title}>
+            <BulletList items={c.setupEnvironmentNote.items} marker="•" markerClassName="text-slate-400" />
+          </GuideDisclosure>
           <CodeBlock label={c.configLabel} code={c.configCode} />
           <p className="mt-3 text-xs leading-relaxed text-slate-500">
             {c.configNote}
@@ -153,9 +143,9 @@ export default async function GuideAgentPage({
           <p className="mt-3 text-sm leading-relaxed text-slate-700">
             {c.jpycGasNote}
           </p>
-          <p className="mt-2 rounded-xl bg-slate-50 p-4 text-xs leading-relaxed text-slate-600 ring-1 ring-slate-200/70">
-            {c.jpycNoGasNote}
-          </p>
+          <GuideDisclosure variant="subtle" summary={c.jpycNoGasLabel}>
+            <p className="text-sm leading-relaxed">{c.jpycNoGasNote}</p>
+          </GuideDisclosure>
           <p className="mt-2 text-xs leading-relaxed text-slate-500">
             {c.jpycLiquidityNote}
           </p>
