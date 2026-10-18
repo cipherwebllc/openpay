@@ -90,11 +90,13 @@ describe('createPaymentMonitorEnvelope', () => {
     // + 第 6 回 (9/29) の 3 件 (9/22 kaia × DOZN MOU・9/25 jpyc-ex UPBOND Wallet・9/29 jpyc Upbit 出金) = 18 件
     // + 第 7 回 (10/08) の 3 件 (9/30 jpyc αU wallet・10/06 jpyc-ex マイナウォレット・10/08 jpyc × RatioFX MOU) = 21 件
     // + 第 8 回 (10/13 記録) の 5 件 (5/26 jpyc ダイナースのポイント交換・7/13 jpyc-ex 連携 API・7/22 jpyc × AZ-COM 丸和
-    //   の backfill 3 件・10/09 jpyc 公取委への情報提供・10/13 coincheck verified) = 26 件。
+    //   の backfill 3 件・10/09 jpyc 公取委への情報提供・10/13 coincheck verified) = 26 件
+    // + 第 9 回 (10/18 記録) の 4 件 (10/14 kaia CR の対象に JPYC・10/16 jpyc-ex Polygon 発行遅延・10/17 jpyc-ex 臨時メンテ・
+    //   10/18 coincheck verified) = 30 件。
     // 決済スコープ専用の 8/10 DG SPS launch・8/26 大阪府採択 3 件・8/31 Mi&T・9/04 verified 2 件・
     // 9/11 の 4 件 (NetStars 更新 + verified 3)・9/18 verified 4 件・9/23 verified 4 件・
     // 第 6 回で 9/29 に記録した backfill 3 件が混ざれば 40 件になる = スコープ分離の証明。
-    expect(jpyc.changes).toHaveLength(26);
+    expect(jpyc.changes).toHaveLength(30);
     expect(jpyc.changes.every((c) => c.slug !== undefined)).toBe(true);
     // 応答に内部ルーティング用 scopes を漏らさない。
     expect(jpyc.changes[0]).not.toHaveProperty('scopes');
@@ -113,8 +115,9 @@ describe('createPaymentMonitorEnvelope', () => {
     // + 第 7 回 (10/08 記録) の 3 件 (7/13 HashPort Wallet for Biz 更新の backfill・9/03 NetStars × imToken MOU の backfill・
     //   9/30 αU wallet 追加) = 26 件
     // + 第 8 回 (10/13) の verified 4 件 (大阪府 3 社・NetStars) = 30 件
+    // + 第 9 回 (10/18 記録) の 5 件 (10/13 HashPort Wallet for Biz の JPYC 円表示・verified 4 件) = 35 件
     // (以前の backfill 3 件 = TIS/DG 実証/JCB は collectedAt が無く date < 8/10 なので含まない)
-    expect(delta.changes).toHaveLength(30);
+    expect(delta.changes).toHaveLength(35);
     expect(delta.changes[0].date).toBe('2026-08-10');
     // 並びは実効日順なので、date が cursor より古い backfill が混ざる (collectedAt は必ず cursor 以降)。
     expect(delta.changes.every((c) => (c.collectedAt ?? c.date) >= '2026-08-10')).toBe(true);
@@ -513,9 +516,10 @@ describe('createPaymentMonitorEnvelope.providers (事業者の現況行)', () =>
     // + 9/18 verified 4 件 + 9/23 verified 4 件 + 9/04 記録の backfill (7/13 NetStars added) = 19 イベント・
     // + 第 6 回で 9/29 に記録した backfill 3 件 = 22 イベント + 第 7 回 (10/08 記録) の 3 件 (HashPort Wallet for Biz 7/13 更新・
     // NetStars × imToken 9/03・αU wallet 9/30 追加) = 25 イベント + 第 8 回 (10/13) の verified 4 件 (大阪府 3 社・NetStars)
-    // = 29 イベント。現況行は大阪 3 社 + NetStars + 第 6 回の 3 社 (HashPort Wallet for Biz・MisePay・ローソン)
-    // + 第 7 回の αU wallet の 8 社分 (第 8 回の verified は既存の社なので増えない)
-    expect(delta.changes).toHaveLength(29);
+    // = 29 イベント + 第 9 回 (10/18 記録) の 5 件 (HashPort Wallet for Biz 10/13・verified 4 件) = 34 イベント。
+    // 現況行は大阪 3 社 + NetStars + 第 6 回の 3 社 (HashPort Wallet for Biz・MisePay・ローソン)
+    // + 第 7 回の αU wallet の 8 社分 (第 8・9 回のイベントは既存の社なので増えない)
+    expect(delta.changes).toHaveLength(34);
     expect(delta.providers.map((p) => p.region).sort()).toEqual(['Japan', 'Japan', 'Japan', 'Japan', 'Japan', 'Osaka', 'Osaka', 'Osaka']);
     // 第 2 回週次更新: 現況が変わった社は changelog の diffs と行の値が一致する (同一 PR の掟)。
     const mit = delta.providers.find((p) => p.provider.startsWith('Mi&T'))!;

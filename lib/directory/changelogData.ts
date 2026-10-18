@@ -883,6 +883,139 @@ export const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
       'ネットスターズ公式ニュース一覧で再確認: 2026-09-11 の Kaia MOU 以降、ステーブルコインの発表なし (10/06 の teppay はステーブルコイン以外)。Stablecoin Pay の稼働日・手数料・対応チェーンの変更は未公表のまま。',
     sourceUrl: 'https://www.netstars.co.jp/news/',
   },
+  {
+    // 週次更新 第 9 回 (2026-10-18)。表示の換算基準の変更で、For Biz の手数料・対象資産・導入方式は不変。
+    // 変更前の表示方法は投稿に明記が無いので diffs は付けない (sourced-facts-only)。
+    date: '2026-10-13',
+    collectedAt: '2026-10-18',
+    scopes: ['stablecoin-payments'],
+    provider: 'HashPort Wallet for Biz',
+    changeType: 'updated',
+    changeCategory: 'update',
+    assets: ['JPYC'],
+    summary:
+      'HashPort said that from HashPort Wallet v3.23.1 (2026-10-13) JPYC is displayed at 1 JPYC = 1 yen, and that Ponta point exchange and HashPort Wallet for Biz payments are priced on that 1 JPYC = 1 yen basis. Other stablecoins are shown at a floating price.',
+    summaryJa:
+      'HashPort が、HashPort Wallet v3.23.1 (2026-10-13) から JPYC を 1JPYC＝1円で表示し、Ponta ポイント交換と For Biz 決済も 1JPYC＝1円を基準にした価格になると告知。ほかのステーブルコインは変動価格で表示。',
+    sourceUrl: 'https://x.com/hashport_io/status/2109891259322270113',
+  },
+  {
+    // 週次更新 第 9 回 (2026-10-18)。Grok の X 検索 (@KaiaChain_JP) で見つけ、PR TIMES の本文で確認。
+    // 報酬の倍率・利回りは発表に無く、1:10 は「貢献額の認定基準で報酬倍率ではない」と原文が明記 (そのとおり書く)。
+    // 最初の Period の条件は Kaia Japan 公式 X 2110173996180189279。
+    date: '2026-10-14',
+    collectedAt: '2026-10-18',
+    scopes: ['jpyc-services'],
+    slug: 'kaia',
+    changeType: 'updated',
+    changeCategory: 'update',
+    assets: ['JPYC'],
+    chains: ['kaia'],
+    summary:
+      'KAIA DLT Foundation announced that JPYC becomes an eligible asset of its Contribution Reward (CR) program from Epoch 4, starting at block 230,342,400 (planned around 09:40 JST on 2026-10-21; the exact time depends on block production); until then USDT was the only eligible stablecoin. JPYC deposited in the Unifi wallet is recognised as a contribution on the same basis as USDT when the same wallet stakes KAIA (recognising USD 1 of stablecoin requires 10 KAIA staked; the foundation says this 1:10 ratio is a recognition standard, not a reward multiplier). JPYC is converted to a USDT equivalent using the epoch average price from the Orakl oracle. Recognition is not applied retroactively to epochs before the start; to be recognised from the first period, the JPYC deposit and KAIA staking must be in place before that block.',
+    summaryJa:
+      'KAIA DLT Foundation が、貢献報酬 (CR) プログラムの対象資産に JPYC を追加すると発表。2026-10-21 開始の Epoch 4 (ブロック高 230,342,400・同日 9:40 頃の予定で、ブロック生成状況により前後) から適用し、これまで対象のステーブルコインは USDT のみ。Unifi ウォレットに預け入れた JPYC は、同じウォレットで KAIA をステーキングしていれば USDT と同じ基準で貢献と認定される (ステーブルコイン 1 米ドル相当の認定に 10 KAIA のステーキングが必要・この 1:10 の比率は認定基準で報酬倍率ではないと記載)。JPYC はオラクル Orakl の Epoch 平均価格で USDT 相当額に換算。適用開始前の Epoch には遡って適用されず、最初の Period から認定されるには、そのブロック到達前に Unifi への JPYC 預け入れと同じウォレットでの KAIA ステーキングが必要。',
+    sourceUrl: 'https://prtimes.jp/main/html/rd/p/000000029.000154579.html',
+  },
+  {
+    // 週次更新 第 9 回。9/17 の発行予約の一時停止 (同 slug) と同じ扱いの運用情報。時刻は公式お知らせの原文どおり。
+    date: '2026-10-16',
+    collectedAt: '2026-10-18',
+    scopes: ['jpyc-services'],
+    slug: 'jpyc-ex',
+    changeType: 'updated',
+    changeCategory: 'update',
+    assets: ['JPYC'],
+    chains: ['polygon'],
+    summary:
+      'JPYC EX reported a delay in JPYC issuance on Polygon from around 15:00 JST on 2026-10-16. The delay was resolved the same day and the delayed issuances were being processed in order. Issuance on other networks and redemption on all networks were not delayed. No cause was published.',
+    summaryJa:
+      'JPYC EX で 2026-10-16 の 15 時頃から Polygon の JPYC 発行処理に遅延が発生。同日中に解消し、遅延していた発行を順次処理。他のネットワークの発行と、すべてのネットワークの償還には遅延なし。原因は公表なし。',
+    sourceUrl: 'https://faq.jpyc.co.jp/s/article/announce-0041',
+  },
+  {
+    // 週次更新 第 9 回。開始は 10/17 21:40・完了は 10/18 9:00 (公式お知らせ announce-0042)。
+    date: '2026-10-17',
+    collectedAt: '2026-10-18',
+    scopes: ['jpyc-services'],
+    slug: 'jpyc-ex',
+    changeType: 'updated',
+    changeCategory: 'update',
+    assets: ['JPYC'],
+    summary:
+      'JPYC EX ran unscheduled system maintenance from 21:40 JST on 2026-10-17, during which the various JPYC EX services, including issuance and redemption, were unavailable. The maintenance ended at 09:00 JST on 2026-10-18 and the service returned to normal. No reason was published.',
+    summaryJa:
+      'JPYC EX が 2026-10-17 21:40 から臨時のシステムメンテナンスを実施し、その間は発行・償還を含む JPYC EX の各種サービスが利用不可。2026-10-18 9:00 に完了し、通常どおり利用可能に。理由は公表なし。',
+    sourceUrl: 'https://faq.jpyc.co.jp/s/article/announce-0042',
+  },
+  {
+    date: '2026-10-18',
+    collectedAt: '2026-10-18',
+    scopes: ['jpyc-services'],
+    slug: 'coincheck',
+    changeType: 'verified',
+    assets: ['USDC'],
+    summary:
+      'Re-verified against the FSA registry of Electronic Payment Instruments Exchange Service Providers (still as of 2026-08-27): two registrants, SBI VC Trade (No. 00001) and Coincheck (No. 00002, USDC); no new registration.',
+    summaryJa:
+      '金融庁の電子決済手段等取引業者登録一覧 (令和 8 年 8 月 27 日現在のまま) で再確認: 登録は SBI VC トレード (第00001号) とコインチェック (第00002号・USDC) の 2 社で、新規登録なし。',
+    sourceUrl: 'https://www.fsa.go.jp/menkyo/menkyoj/denshikessaisyudan.pdf',
+  },
+  {
+    date: '2026-10-18',
+    collectedAt: '2026-10-18',
+    scopes: ['stablecoin-payments'],
+    provider: 'HashPort (Osaka Pref. subsidy)',
+    changeType: 'verified',
+    assets: ['JPYC', 'USDC'],
+    summary:
+      'Re-verified on the Osaka Prefecture page (still last updated 2026-08-26): HashPort pilot schedule unchanged.',
+    summaryJa:
+      '大阪府公式ページ (更新日 2026-08-26 のまま) で再確認: HashPort の実証予定に変更なし。',
+    sourceUrl:
+      'https://www.pref.osaka.lg.jp/o020060/kikaku/osaka-kokusaikinyu/senkuteki_hojokin.html',
+  },
+  {
+    date: '2026-10-18',
+    collectedAt: '2026-10-18',
+    scopes: ['stablecoin-payments'],
+    provider: 'Mina Wallet / Sumitomo Mitsui Card (Osaka Pref. subsidy)',
+    changeType: 'verified',
+    assets: ['JPYC', 'USDC'],
+    summary:
+      'Re-verified on the Osaka Prefecture page (still last updated 2026-08-26): Mina Wallet / Sumitomo Mitsui Card pilot schedule unchanged.',
+    summaryJa:
+      '大阪府公式ページ (更新日 2026-08-26 のまま) で再確認: マイナウォレット / 三井住友カードの実証予定に変更なし。',
+    sourceUrl:
+      'https://www.pref.osaka.lg.jp/o020060/kikaku/osaka-kokusaikinyu/senkuteki_hojokin.html',
+  },
+  {
+    date: '2026-10-18',
+    collectedAt: '2026-10-18',
+    scopes: ['stablecoin-payments'],
+    provider: 'Mi&T (Osaka Pref. subsidy)',
+    changeType: 'verified',
+    assets: ['JPYC'],
+    summary:
+      'Re-verified on the Osaka Prefecture page (still last updated 2026-08-26): Mi&T pilot (merchant fee 1.0%, planned mid-November 2026 to mid-March 2027) unchanged.',
+    summaryJa:
+      '大阪府公式ページ (更新日 2026-08-26 のまま) で再確認: Mi&T の実証 (手数料 1.0%・2026 年 11 月中旬〜2027 年 3 月中旬予定) に変更なし。',
+    sourceUrl:
+      'https://www.pref.osaka.lg.jp/o020060/kikaku/osaka-kokusaikinyu/senkuteki_hojokin.html',
+  },
+  {
+    date: '2026-10-18',
+    collectedAt: '2026-10-18',
+    scopes: ['stablecoin-payments'],
+    provider: 'NetStars Stablecoin Pay',
+    changeType: 'verified',
+    assets: ['JPYC', 'USDT'],
+    summary:
+      'Re-verified on the NetStars news list: no stablecoin announcement after the 2026-09-11 Kaia MOU (the 2026-10-06 teppay news is not about stablecoins); no launch date, fee or chain change published for Stablecoin Pay.',
+    summaryJa:
+      'ネットスターズ公式ニュース一覧で再確認: 2026-09-11 の Kaia MOU 以降、ステーブルコインの発表なし (10/06 の teppay はステーブルコイン以外)。Stablecoin Pay の稼働日・手数料・対応チェーンの変更は未公表のまま。',
+    sourceUrl: 'https://www.netstars.co.jp/news/',
+  },
 ];
 
 // ディレクトリ初期公開日。baseline の 'added' はこの固定日に立てる — entry.updatedAt 由来に

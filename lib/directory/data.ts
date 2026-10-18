@@ -37,8 +37,9 @@ export const DIRECTORY_ENTRIES = [
     // 2026-09-25: UPBOND Wallet の接続に対応 (JPYC 公式 X・第 6 回週次更新)
     // 2026-10-06: マイナウォレットが JPYC EX 連携 API で発行・償還をアプリ内で完結 (PR TIMES・第 7 回週次更新)
     // 2026-10-13 (第 8 回): JPYC EX 連携 API の提供開始 (7/13) を changelog に補充 (エントリの事実は不変)
+    // 2026-10-18 (第 9 回): 10/16 の Polygon 発行遅延・10/17〜18 の臨時メンテナンスは changelog のみ (エントリの事実は不変)
     ...provenance('https://jpyc.co.jp/', 'JPYC株式会社', 'official', {
-      verifiedAt: '2026-10-13',
+      verifiedAt: '2026-10-18',
       updatedAt: '2026-10-06',
     }),
     facts: {
@@ -114,7 +115,7 @@ export const DIRECTORY_ENTRIES = [
     // 2026-08-27: 電子決済手段等取引業者に登録 (金融庁登録一覧・第00002号・取扱 USDC)。
     // 取扱開始時期は未発表のため tokens は空のまま (sourced-facts-only)。
     ...provenance('https://coincheck.com/', 'コインチェック株式会社', 'official', {
-      verifiedAt: '2026-10-13',
+      verifiedAt: '2026-10-18',
       updatedAt: '2026-09-04',
     }),
     facts: {
@@ -325,7 +326,8 @@ export const DIRECTORY_ENTRIES = [
     nameJa: 'Kaia',
     status: 'published',
     // 2026-09-22: DOZN と JPYC → 韓国ウォン精算の検証 MOU (Kaia Japan 公式 X・第 6 回週次更新)
-    ...provenance('https://www.kaia.io/ja/about', 'Kaia DLT Foundation', 'official', { verifiedAt: '2026-09-29', updatedAt: '2026-09-22' }),
+    // 2026-10-18 (第 9 回): 貢献報酬プログラム CR の対象資産に JPYC を追加 (10/14 発表) は changelog のみ (エントリの事実は不変)
+    ...provenance('https://www.kaia.io/ja/about', 'Kaia DLT Foundation', 'official', { verifiedAt: '2026-10-18', updatedAt: '2026-09-22' }),
     facts: {
       description: 'アジア圏のステーブルコイン利用を対象に含むEVM互換レイヤー1ネットワーク。',
       category: 'network',
