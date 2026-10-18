@@ -902,6 +902,7 @@ export const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
   {
     // 週次更新 第 9 回 (2026-10-18)。Grok の X 検索 (@KaiaChain_JP) で見つけ、PR TIMES の本文で確認。
     // 報酬の倍率・利回りは発表に無く、1:10 は「貢献額の認定基準で報酬倍率ではない」と原文が明記 (そのとおり書く)。
+    // 最初の Period の条件は Kaia Japan 公式 X 2110173996180189279。
     date: '2026-10-14',
     collectedAt: '2026-10-18',
     scopes: ['jpyc-services'],
@@ -911,9 +912,9 @@ export const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
     assets: ['JPYC'],
     chains: ['kaia'],
     summary:
-      'KAIA DLT Foundation announced that JPYC becomes an eligible asset of its Contribution Reward (CR) program from Epoch 4, starting at block 230,342,400 (planned around 09:40 JST on 2026-10-21); until then only USDT was eligible. JPYC deposited in the Unifi wallet counts as a contribution on the same basis as USDT when the same wallet stakes KAIA (10 KAIA staked per USD 1 of stablecoin recognised; the foundation says this ratio is a recognition standard, not a reward multiplier). JPYC is converted to a USDT equivalent using the epoch average price from the Orakl oracle. Deposits made before the start are not counted retroactively.',
+      'KAIA DLT Foundation announced that JPYC becomes an eligible asset of its Contribution Reward (CR) program from Epoch 4, starting at block 230,342,400 (planned around 09:40 JST on 2026-10-21; the exact time depends on block production); until then USDT was the only eligible stablecoin. JPYC deposited in the Unifi wallet is recognised as a contribution on the same basis as USDT when the same wallet stakes KAIA (recognising USD 1 of stablecoin requires 10 KAIA staked; the foundation says this 1:10 ratio is a recognition standard, not a reward multiplier). JPYC is converted to a USDT equivalent using the epoch average price from the Orakl oracle. Recognition is not applied retroactively to epochs before the start; to be recognised from the first period, the JPYC deposit and KAIA staking must be in place before that block.',
     summaryJa:
-      'KAIA DLT Foundation が、貢献報酬 (CR) プログラムの対象資産に JPYC を追加すると発表。2026-10-21 開始の Epoch 4 (ブロック高 230,342,400・同日 9:40 頃の予定) から適用し、これまでの対象は USDT のみ。Unifi ウォレットに預け入れた JPYC は、同じウォレットで KAIA をステーキングしていれば USDT と同じ基準で貢献と認定される (ステーブルコイン 1 米ドル相当につき 10 KAIA のステーキングが必要・この比率は認定基準で報酬倍率ではないと記載)。JPYC はオラクル Orakl の Epoch 平均価格で USDT 相当額に換算。開始前の預け入れは遡及しない。',
+      'KAIA DLT Foundation が、貢献報酬 (CR) プログラムの対象資産に JPYC を追加すると発表。2026-10-21 開始の Epoch 4 (ブロック高 230,342,400・同日 9:40 頃の予定で、ブロック生成状況により前後) から適用し、これまで対象のステーブルコインは USDT のみ。Unifi ウォレットに預け入れた JPYC は、同じウォレットで KAIA をステーキングしていれば USDT と同じ基準で貢献と認定される (ステーブルコイン 1 米ドル相当の認定に 10 KAIA のステーキングが必要・この 1:10 の比率は認定基準で報酬倍率ではないと記載)。JPYC はオラクル Orakl の Epoch 平均価格で USDT 相当額に換算。適用開始前の Epoch には遡って適用されず、最初の Period から認定されるには、そのブロック到達前に Unifi への JPYC 預け入れと同じウォレットでの KAIA ステーキングが必要。',
     sourceUrl: 'https://prtimes.jp/main/html/rd/p/000000029.000154579.html',
   },
   {
