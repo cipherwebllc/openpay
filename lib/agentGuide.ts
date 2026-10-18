@@ -142,7 +142,7 @@ const ja: AgentGuideContent = {
     'OpenPay は暗号資産の交換・両替を行いません。JPYC の入手（スワップ）は、ご自身で外部サービスを使います',
   ],
 
-  needTitle: '必要なもの',
+  needTitle: '用意するもの',
   need: [
     'MCP に対応した AI クライアント（Claude Desktop / Claude Code など）',
     '暗号資産ウォレット（MetaMask などの、あなたのウォレット）',

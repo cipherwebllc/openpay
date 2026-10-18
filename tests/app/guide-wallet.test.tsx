@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import GuideWalletPage from '@/app/[locale]/guide/wallet/page';
 import { guideNavFor } from '@/lib/guideNav';
+import { payGuideContentFor } from '@/lib/payGuide';
 import { walletGuideContentFor } from '@/lib/walletGuide';
 
 vi.mock('next-intl/server', () => ({ setRequestLocale: vi.fn() }));
@@ -21,12 +22,16 @@ describe('/guide/wallet', () => {
     expect(screen.getByRole('heading', { level: 1, name: nav.items.wallet.label })).toBeInTheDocument();
     expect(screen.getByText(c.subtitle)).toBeInTheDocument();
     expect(screen.getByText(c.lead)).toBeInTheDocument();
-    expect(within(article).getByRole('link', { name: c.scanCta.label })).toHaveAttribute('href', `/${locale}/scan`);
+    // 「スキャンして支払う」は頭と末尾の帯 (「JPYC で支払う」と同じ帯) の 2 か所・どちらも /{locale}/scan。
+    const scanLinks = within(article).getAllByRole('link', { name: c.scanCta.label });
+    expect(scanLinks).toHaveLength(2);
+    for (const link of scanLinks) expect(link).toHaveAttribute('href', `/${locale}/scan`);
 
     expect(within(article).getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual([
       c.walletsTitle,
       c.scanTitle,
       c.wcTitle,
+      payGuideContentFor(locale).ctaTitle,
     ]);
 
     const wallets = screen.getByRole('heading', { level: 2, name: c.walletsTitle }).closest('section')!;

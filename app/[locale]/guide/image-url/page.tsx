@@ -11,9 +11,9 @@ import { AppShell } from '@/components/AppShell';
 import { GuideFrame } from '@/components/guide/GuideFrame';
 import { guideNavFor } from '@/lib/guideNav';
 import { GuideLead, GuideSubtitle, GuideTitle } from '@/components/guide/GuideHeader';
-import { GuideCta, GuideRelated } from '@/components/guide/GuideEnd';
+import { GuideRelated } from '@/components/guide/GuideEnd';
 import { GuideCallout } from '@/components/guide/GuideCallout';
-import { BulletList, STEP_BADGE, Section } from '@/components/guide/PosGuidePieces';
+import { BulletList, Section, StepList } from '@/components/guide/PosGuidePieces';
 import { imageGuideContentFor, imageGuideMetadata } from '@/lib/imageGuide';
 
 export async function generateMetadata({
@@ -57,23 +57,7 @@ export default async function GuideImageUrlPage({
                 {p}
               </p>
             ))}
-            {section.steps ? (
-              <ol className="mt-4 space-y-3">
-                {section.steps.map((step, i) => (
-                  <li key={step.title} className="flex items-start gap-3">
-                    <span className={STEP_BADGE}>
-                      {i + 1}
-                    </span>
-                    <span className="text-sm leading-relaxed text-slate-700">
-                      <span className="font-semibold text-slate-900">
-                        {step.title}
-                      </span>{' '}
-                      — {step.body}
-                    </span>
-                  </li>
-                ))}
-              </ol>
-            ) : null}
+            {section.steps ? <StepList steps={section.steps.map((step, i) => ({ n: i + 1, ...step }))} /> : null}
             {section.bullets ? <BulletList items={section.bullets} marker="•" /> : null}
             {section.callout ? (
               <GuideCallout kind={section.callout.kind}>{section.callout.text}</GuideCallout>

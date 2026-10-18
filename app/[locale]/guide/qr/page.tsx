@@ -17,7 +17,7 @@ import { guideNavFor } from '@/lib/guideNav';
 import { GuideFeeList } from '@/components/guide/GuideFee';
 import { GUIDE_PRIMARY_ACTION, GUIDE_SECONDARY_ACTION, GuideLead, GuideSubtitle, GuideTitle, GuideAudience, GuideFeatureList } from '@/components/guide/GuideHeader';
 import { GuideCta, GuideRelated } from '@/components/guide/GuideEnd';
-import { BulletList, STEP_BADGE, STEP_BADGE_CUSTOMER, Section } from '@/components/guide/PosGuidePieces';
+import { BulletList, STEP_BADGE_CUSTOMER, Section, StepLines } from '@/components/guide/PosGuidePieces';
 import { GuideVideo } from '@/components/guide/GuideVideo';
 import { HOWTO_VIDEO_UI, howtoVideoFor } from '@/lib/howtoVideos';
 import { qrGuideContentFor, qrGuideMetadata } from '@/lib/qrGuide';
@@ -37,22 +37,6 @@ export async function generateMetadata({
   const { locale } = await params;
   setRequestLocale(locale);
   return qrGuideMetadata(locale);
-}
-
-// badgeClassName: お客様側の流れは STEP_BADGE_CUSTOMER (青)・お店側は既定の STEP_BADGE。
-function StepList({ steps, badgeClassName = STEP_BADGE }: { steps: readonly string[]; badgeClassName?: string }) {
-  return (
-    <ol className="mt-4 space-y-3">
-      {steps.map((step, i) => (
-        <li key={step} className="flex items-start gap-3">
-          <span className={badgeClassName}>
-            {i + 1}
-          </span>
-          <span className="text-sm leading-relaxed text-slate-700">{step}</span>
-        </li>
-      ))}
-    </ol>
-  );
 }
 
 export default async function GuideQrPage({
@@ -111,11 +95,11 @@ export default async function GuideQrPage({
         )}
 
         <Section title={c.receiveFlowTitle}>
-          <StepList steps={c.receiveFlowSteps} />
+          <StepLines steps={c.receiveFlowSteps} />
         </Section>
 
         <Section title={c.payFlowTitle}>
-          <StepList steps={c.payFlowSteps} badgeClassName={STEP_BADGE_CUSTOMER} />
+          <StepLines steps={c.payFlowSteps} badgeClassName={STEP_BADGE_CUSTOMER} />
         </Section>
 
         <Section title={c.feeTitle}>

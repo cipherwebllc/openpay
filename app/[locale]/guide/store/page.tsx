@@ -18,7 +18,7 @@ import { guideNavFor } from '@/lib/guideNav';
 import { GUIDE_TAG, GUIDE_PRIMARY_ACTION, GUIDE_SECONDARY_ACTION, GuideLead, GuideSubtitle, GuideTitle, GuideAudience, GuideFeatureList } from '@/components/guide/GuideHeader';
 import { GuideCta } from '@/components/guide/GuideEnd';
 import { GuideToc } from '@/components/guide/GuideToc';
-import { STEP_BADGE, BulletList, Section } from '@/components/guide/PosGuidePieces';
+import { BulletList, Section, StepLines } from '@/components/guide/PosGuidePieces';
 import { GuideVideo } from '@/components/guide/GuideVideo';
 import { HOWTO_VIDEO_UI, howtoVideoFor } from '@/lib/howtoVideos';
 import { storeGuideContentFor, storeGuideMetadata, licenseStoreGuideContentFor, deliveryStoreGuideContentFor, DELIVERY_SDK_README_URL } from '@/lib/storeGuide';
@@ -126,18 +126,7 @@ export default async function GuideStorePage({
         </Section>
 
         <Section title={c.startTitle}>
-          <ol className="mt-4 space-y-3">
-            {c.startSteps.map((step, i) => (
-              <li key={step} className="flex items-start gap-3">
-                <span className={STEP_BADGE}>
-                  {i + 1}
-                </span>
-                <span className="text-sm leading-relaxed text-slate-700">
-                  {step}
-                </span>
-              </li>
-            ))}
-          </ol>
+          <StepLines steps={c.startSteps} />
         </Section>
 
         {/* --- ここから操作ガイド (後半)。「販売の手順」のリードは仕組みの節の頭に置く (中身が 1 段落だけの節をなくした)。 --- */}
@@ -171,7 +160,7 @@ export default async function GuideStorePage({
                         data-label={c.basicsTable.headers[i]}
                         className={`border border-slate-200 px-3 py-2 align-top leading-relaxed text-slate-700 max-sm:block max-sm:border-0 max-sm:px-0 max-sm:py-1 ${
                           i === 0
-                            ? 'font-semibold text-slate-900 max-sm:pb-2 max-sm:text-base'
+                            ? 'font-semibold text-slate-900 max-sm:pb-2 max-sm:text-base sm:whitespace-nowrap'
                             : 'max-sm:before:block max-sm:before:text-xs max-sm:before:font-semibold max-sm:before:text-slate-500 max-sm:before:content-[attr(data-label)]'
                         }`}
                       >
@@ -207,14 +196,7 @@ export default async function GuideStorePage({
                 }
               >
                 <p className="text-sm leading-relaxed text-slate-700">{m.intro}</p>
-                <ol className="mt-4 space-y-3">
-                  {m.steps.map((step, i) => (
-                    <li key={step} className="flex items-start gap-3">
-                      <span className={STEP_BADGE}>{i + 1}</span>
-                      <span className="pt-0.5 text-sm leading-relaxed text-slate-700">{step}</span>
-                    </li>
-                  ))}
-                </ol>
+                <StepLines steps={m.steps} />
                 {m.note ? (
                   <GuideCallout kind="warn" className="mt-4">{m.note}</GuideCallout>
                 ) : null}
@@ -258,14 +240,7 @@ export default async function GuideStorePage({
         {deliveryGuide ? <div id="protected-delivery" className="scroll-mt-24">
           <Section title={deliveryGuide.heading}>
             <p className="mt-3 text-sm leading-relaxed text-slate-700">{deliveryGuide.intro}</p>
-            <ol className="mt-4 space-y-3">
-              {deliveryGuide.steps.map((step, i) => (
-                <li key={step} className="flex items-start gap-3">
-                  <span className={STEP_BADGE}>{i + 1}</span>
-                  <span className="min-w-0 break-words text-sm leading-relaxed text-slate-700">{step}</span>
-                </li>
-              ))}
-            </ol>
+            <StepLines steps={deliveryGuide.steps} />
             <ul className="mt-4 list-disc space-y-2 pl-5 text-sm leading-relaxed text-slate-700">
               {deliveryGuide.caveats.map((caveat) => <li key={caveat}>{caveat}</li>)}
             </ul>

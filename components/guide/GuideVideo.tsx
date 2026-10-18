@@ -11,6 +11,7 @@ import { GUIDE_INLINE_LINK } from '@/components/guide/GuideLink';
 import {
   HOWTO_VIDEO_UI,
   howtoVideoEmbedUrl,
+  howtoVideoShortTitle,
   howtoVideoWatchUrl,
   type HowtoVideo,
 } from '@/lib/howtoVideos';
@@ -68,7 +69,7 @@ export function GuideVideo({ video }: { video: HowtoVideo }) {
           className="block w-full cursor-pointer text-left after:absolute after:inset-0 after:rounded-2xl focus-visible:outline-none"
         >
           <span className="block text-sm font-semibold leading-snug text-slate-900 [word-break:auto-phrase]">
-            {video.title}
+            {howtoVideoShortTitle(video)}
           </span>
           <span className="mt-1 block text-xs font-medium text-emerald-700">
             {HOWTO_VIDEO_UI.play}（{video.duration}）

@@ -158,9 +158,6 @@ export type AiPayGuideContent = JpycSectionContent & {
   readonly sdkLead: string;
   readonly sdkLink: AiPayGuideLink;
   readonly sdkTail: string;
-  readonly sellerLead: string;
-  readonly sellerLink: AiPayGuideLink;
-  readonly sellerTail: string;
 };
 
 function jpycSectionFor(locale: AiPayGuideLocale): JpycSectionContent {
@@ -309,12 +306,6 @@ const ja: AiPayGuideContent = {
     href: SDK_NPM_URL,
   },
   sdkTail: 'を利用できます。',
-  sellerLead: 'API や AI エージェントを売る側の手順は、',
-  sellerLink: {
-    label: 'API を売るガイド',
-    href: '/guide/sell',
-  },
-  sellerTail: 'をご覧ください。',
 };
 
 const en: AiPayGuideContent = {
@@ -446,12 +437,6 @@ const en: AiPayGuideContent = {
     href: SDK_NPM_URL,
   },
   sdkTail: ' directly.',
-  sellerLead: 'To sell an API or AI agent, see ',
-  sellerLink: {
-    label: 'the API selling guide',
-    href: '/guide/sell',
-  },
-  sellerTail: '.',
 };
 
 export const AI_PAY_GUIDE: Record<AiPayGuideLocale, AiPayGuideContent> = {

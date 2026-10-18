@@ -9,7 +9,7 @@ import GuideShopPage from '@/app/[locale]/guide/shop/page';
 import GuideAiPayPage from '@/app/[locale]/guide/ai-pay/page';
 import GuideStorePage from '@/app/[locale]/guide/store/page';
 import GuidePayPage from '@/app/[locale]/guide/pay/page';
-import { HOWTO_VIDEOS, HOWTO_VIDEO_UI, type HowtoVideoKey } from '@/lib/howtoVideos';
+import { HOWTO_VIDEOS, HOWTO_VIDEO_UI, howtoVideoShortTitle, type HowtoVideoKey } from '@/lib/howtoVideos';
 
 vi.mock('next-intl/server', () => ({ setRequestLocale: vi.fn(), getTranslations: async () => (key: string) => key }));
 vi.mock('@/components/AppShell', () => ({ AppShell: ({ children }: { children: React.ReactNode }) => <main>{children}</main> }));
@@ -34,7 +34,7 @@ describe('ガイドページの使い方動画', () => {
     expect(links).toHaveLength(videos.length);
     videos.forEach((video, i) => {
       expect(buttons[i]).toHaveTextContent(`${HOWTO_VIDEO_UI.play}（${video.duration}）`);
-      expect(buttons[i]).toHaveTextContent(video.title);
+      expect(buttons[i]).toHaveTextContent(howtoVideoShortTitle(video));
       expect(links[i]).toHaveAttribute('href', `https://www.youtube.com/watch?v=${video.youtubeId}`);
     });
     // 押すまで YouTube の iframe は作らない。

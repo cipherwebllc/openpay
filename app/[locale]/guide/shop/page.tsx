@@ -16,7 +16,7 @@ import { guideNavFor } from '@/lib/guideNav';
 import { GuideFeeList } from '@/components/guide/GuideFee';
 import { GUIDE_TAG, GUIDE_PRIMARY_ACTION, GUIDE_SECONDARY_ACTION, GuideLead, GuideSubtitle, GuideTitle, GuideFeatureList } from '@/components/guide/GuideHeader';
 import { GuideCta, GuideRelated } from '@/components/guide/GuideEnd';
-import { STEP_BADGE, Section } from '@/components/guide/PosGuidePieces';
+import { Section, StepLines } from '@/components/guide/PosGuidePieces';
 import { GuideVideo } from '@/components/guide/GuideVideo';
 import { HOWTO_VIDEO_UI, howtoVideoFor } from '@/lib/howtoVideos';
 import { shopGuideContentFor, shopGuideMetadata } from '@/lib/shopGuide';
@@ -112,18 +112,7 @@ export default async function GuideShopPage({
         )}
 
         <Section title={c.flowTitle}>
-          <ol className="mt-4 space-y-3">
-            {c.flowSteps.map((step, i) => (
-              <li key={step} className="flex items-start gap-3">
-                <span className={STEP_BADGE}>
-                  {i + 1}
-                </span>
-                <span className="text-sm leading-relaxed text-slate-700">
-                  {step}
-                </span>
-              </li>
-            ))}
-          </ol>
+          <StepLines steps={c.flowSteps} />
         </Section>
 
         <Section title={c.scenesTitle}>
@@ -149,18 +138,7 @@ export default async function GuideShopPage({
         </Section>
 
         <Section title={c.startTitle}>
-          <ol className="mt-4 space-y-3">
-            {c.startSteps.map((step, i) => (
-              <li key={step} className="flex items-start gap-3">
-                <span className={STEP_BADGE}>
-                  {i + 1}
-                </span>
-                <span className="text-sm leading-relaxed text-slate-700">
-                  {step}
-                </span>
-              </li>
-            ))}
-          </ol>
+          <StepLines steps={c.startSteps} />
         </Section>
 
         <GuideCta title={c.ctaTitle} action={{ href: `/${locale}/create?tab=register`, label: c.ctaLabel }}>

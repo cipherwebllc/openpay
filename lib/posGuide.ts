@@ -50,8 +50,6 @@ export type GuideContent = {
 
   readonly flowTitle: string;
   readonly flowSteps: readonly GuideStep[];
-  readonly successImage: GuideImage;
-  readonly successCaption: string;
   readonly safetyNote: string;
 
   readonly reconcileTitle: string;
@@ -118,7 +116,7 @@ const ja: GuideContent = {
     'お客様側にウォレットと JPYC が必要です（暗号資産に慣れたお客様・常連さんから始めるのがおすすめ）',
   ],
 
-  needTitle: '必要なもの',
+  needTitle: '用意するもの',
   need: [
     'POS レジ（無料アプリで可）… 会計・売上記録用',
     'スマホ or タブレット 1 台 … OpenPay の決済QR を表示（レジと別端末が楽。同じ端末でも可）',
@@ -169,9 +167,6 @@ const ja: GuideContent = {
       body: 'QR 画面の「残高の増加を検知」は、この支払いを特定するものではありません。取引履歴かブロックチェーン Explorer で該当する支払いを確かめてから、商品を渡してレジを締めます。',
     },
   ],
-  successImage: { file: 'payment-success.svg', alt: 'お客様のスマホに表示される支払い完了画面' },
-  successCaption:
-    '※お客様側の完了画面の例です。店舗側の「残高の増加を検知」は目安です。該当する支払いは取引履歴で確認してください。',
   safetyNote:
     '重要：着金を確認する前に商品を渡さないでください。逆に、一度完了した決済は取り消せません（直接あなたのウォレットに着金済みです）。',
 
@@ -317,9 +312,6 @@ const en: GuideContent = {
       body: 'The QR screen’s “Balance increase detected” hint does not identify this payment. Check the payment in transaction history or a blockchain explorer before handing over goods and closing the sale.',
     },
   ],
-  successImage: { file: 'payment-success.svg', alt: 'The payment-complete screen shown on the customer’s phone' },
-  successCaption:
-    '* Example of the customer’s completion screen. The merchant’s “Balance increase detected” hint is advisory. Verify the relevant payment in transaction history.',
   safetyNote:
     'Important: do not hand over goods before confirming receipt. Conversely, a completed payment cannot be reversed (it has settled directly to your wallet).',
 

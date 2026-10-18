@@ -75,6 +75,14 @@ export function howtoVideoEmbedUrl(video: HowtoVideo): string {
   return `${HOWTO_VIDEO_EMBED_ORIGIN}/embed/${video.youtubeId}?autoplay=1&rel=0`;
 }
 
+/**
+ * ガイドの中の動画カードに出す短い題。YouTube の題の頭の「OpenPay の使い方｜」と対象者 (「お店向け：」など) は、
+ * ガイドの中では分かりきっているので省く (3 本並ぶと頭が同じ文で揃って読みにくい・P6)。再生後の iframe の title は元の題。
+ */
+export function howtoVideoShortTitle(video: HowtoVideo): string {
+  return video.title.replace(/^OpenPay の使い方｜(?:[^：]+：)?/, '');
+}
+
 export function howtoVideoWatchUrl(video: HowtoVideo): string {
   return `https://www.youtube.com/watch?v=${video.youtubeId}`;
 }

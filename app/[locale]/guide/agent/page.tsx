@@ -98,7 +98,7 @@ export default async function GuideAgentPage({
         <Section title={c.needTitle}>
           <BulletList
             items={c.need}
-            marker="•"
+            marker="✓"
           />
         </Section>
 
