@@ -1,9 +1,10 @@
-// 「こんな用途に使えます」: OpenPay の利用シーン 5 種を提示。
+// 「こんな用途に使えます」: OpenPay の利用シーンを提示 (8 枚・PC は 4 列 × 2 段)。
 // Server Component。
 //
 // LandingBenefits (汎用メリット) と LandingHowItWorks (操作フロー) の間に置き、
 // 訪問者が「自分ごと化」できる具体的な scenario を見せる:
-//   1. 店舗・イベント出店 (実店舗 / フリマ)
+//   1. 店舗・イベント出店 (実店舗 / フリマ・写真は決済QR ガイドと同じ店頭の写真)
+//   8. モバイルオーダー (1 の次に並べる・画面はレジ・モバイルオーダーのガイドと同じ)
 //   2. Web3 イベント物販 (ETHTokyo / Devcon 等)
 //   3. クリエイター Tip widget (LP に Tip 導線を持たせる)
 //   4. DAO / コミュニティ会費
@@ -13,7 +14,7 @@
 // 提供しているが、トップから見えにくかった)。
 
 import Image from 'next/image';
-import { Bot, Gift, Landmark, Palette, ShoppingBag, Store, Ticket, type LucideIcon } from 'lucide-react';
+import { Bot, Gift, Landmark, Palette, ShoppingBag, Smartphone, Store, Ticket, type LucideIcon } from 'lucide-react';
 import { getTranslations } from 'next-intl/server';
 import { LandingSectionHeader } from '@/components/LandingSectionHeader';
 
@@ -21,8 +22,15 @@ const USE_CASES = [
   {
     id: '1',
     icon: Store,
-    image: '/landing/usecase-store-event.avif',
+    // 2026-10-19 user: ガイドから外した写真を活用例へ (元の 1400x787 を 960x540 に縮めた版)。
+    image: '/landing/usecase-qr-payment.avif',
     altKey: 'useCase1ImageAlt',
+  },
+  {
+    id: '8',
+    icon: Smartphone,
+    image: '/landing/usecase-mobile-order.avif',
+    altKey: 'useCase8ImageAlt',
   },
   {
     id: '2',
@@ -53,7 +61,7 @@ const USE_CASES = [
   {
     id: '6',
     icon: ShoppingBag,
-    image: '/landing/usecase-digital-goods.avif',
+    image: '/landing/usecase-creator-store.avif',
     altKey: 'useCase6ImageAlt',
   },
   {
