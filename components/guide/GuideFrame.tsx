@@ -10,13 +10,13 @@
 // 印刷: 目次は消し、grid の箱も print:block にする (消した目次の跡の 13rem の列に本文が潰れないように)。
 // xl (1280px) 以上: AppShell wide で幅を max-w-7xl に広げ、右に 3 列目の「このページの内容」(GuideOnThisPage・
 // 読んでいる節を示す) を置く。本文の頭の折りたたみ (GuideToc) は xl では隠す。
-// 本文の後に「前へ / 次へ」(目次の並び順で前後のガイド・最初の前はハブ) を置く。
+// 本文の後に「前へ / 次へ」(同じ対象者のグループの中で前後のガイド・グループの端はハブ) を置く。
 
 import type { ReactNode } from 'react';
 import Link from 'next/link';
 import { ArrowLeft, ArrowRight, ChevronDown } from 'lucide-react';
 import { GuideOnThisPage } from '@/components/guide/GuideOnThisPage';
-import { GUIDE_SLUGS, guideNavFor, type GuideNav, type GuideSlug } from '@/lib/guideNav';
+import { guideNavFor, guidePagerFor, type GuideNav, type GuideSlug } from '@/lib/guideNav';
 
 // リンクの見た目は親にまとめる (各 <a> に長い class を並べると目次 2 つ分 HTML が膨らむ・計画レビュー R3)。
 // 現在地は色に加えて左の線と太字で示す (色だけに頼らない)。
@@ -107,8 +107,9 @@ export function GuideFrame({
           固定ヘッダーに隠れないようにする。 */}
       {/* 本文の段落と箇条書き (text-sm) は 15px (sm 以上は 16px)・行間 28px にする (text-base は行間も 24px に戻すので
           文字の大きさだけを text-[16px] で当てる)。日本語 14px の長い段落は
-          スマホで読み疲れるため (plans/guide-ux-polish.md フェーズ 3)。注記 (text-xs) はそのまま。 */}
-      <div className="min-w-0 break-words [&_h2]:scroll-mt-24 [&_li.text-sm]:text-[15px] [&_li.text-sm]:leading-7 [&_p.text-sm]:text-[15px] [&_p.text-sm]:leading-7 sm:[&_li.text-sm]:text-[16px] sm:[&_p.text-sm]:text-[16px]">
+          スマホで読み疲れるため (plans/guide-ux-polish.md フェーズ 3)。注記 (text-xs) はそのまま。
+          text-wrap: pretty で、段落の最後の行に「す。」だけが残る折り返しを避ける (対応しないブラウザは通常の折り返し)。 */}
+      <div className="min-w-0 break-words [text-wrap:pretty] [&_h2]:scroll-mt-24 [&_li.text-sm]:text-[15px] [&_li.text-sm]:leading-7 [&_p.text-sm]:text-[15px] [&_p.text-sm]:leading-7 sm:[&_li.text-sm]:text-[16px] sm:[&_p.text-sm]:text-[16px]">
         <nav
           aria-labelledby="guide-nav-title-mobile"
           className="mx-auto mb-4 max-w-3xl lg:hidden print:hidden"
@@ -144,26 +145,22 @@ export function GuideFrame({
 const PAGER_LINK =
   'group flex min-h-16 flex-col justify-center rounded-xl border border-slate-200 bg-white px-4 py-3 transition-colors hover:border-emerald-300 hover:bg-emerald-50/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500';
 
-/** 本文の後の「前へ / 次へ」。最初のガイドの「前へ」はハブ・最後のガイドに「次へ」は無い。スマホは縦に積み「次へ」を上にする。 */
+/** 本文の後の「前へ / 次へ」(前後は lib/guideNav.ts の guidePagerFor)。スマホは縦に積み「次へ」を上にする。 */
 function GuidePager({ locale, nav, current }: { locale: string; nav: GuideNav; current: GuideSlug }) {
-  const index = GUIDE_SLUGS.indexOf(current);
-  const prevSlug = index > 0 ? GUIDE_SLUGS[index - 1] : null;
-  const nextSlug = index < GUIDE_SLUGS.length - 1 ? GUIDE_SLUGS[index + 1] : null;
-  const prev = prevSlug
-    ? { href: `/${locale}/guide/${prevSlug}`, label: nav.items[prevSlug].label }
-    : { href: `/${locale}/guide`, label: nav.hubTitle };
+  const { prev, next } = guidePagerFor(locale, current);
   return (
-    <div className="mx-auto mt-14 grid max-w-3xl gap-3 border-t border-slate-200 pt-6 sm:grid-cols-2 print:hidden">
-      <Link href={prev.href} prefetch={false} className={PAGER_LINK}>
+    <div className="mx-auto mt-12 grid max-w-3xl gap-3 border-t border-slate-200 pt-6 sm:grid-cols-2 print:hidden">
+      {/* 次が無い (1 本だけのグループ) ときは、ハブへ戻る 1 枚を横いっぱいにする (右に空きを残さない)。 */}
+      <Link href={prev.href} prefetch={false} className={next ? PAGER_LINK : `${PAGER_LINK} sm:col-span-2`}>
         <span className="flex items-center gap-1 text-xs font-medium text-slate-500">
           <ArrowLeft className="h-3.5 w-3.5" aria-hidden />
           {nav.prevLabel}
         </span>
         <span className="mt-0.5 text-sm font-semibold text-slate-900 group-hover:text-emerald-800">{prev.label}</span>
       </Link>
-      {nextSlug ? (
+      {next ? (
         <Link
-          href={`/${locale}/guide/${nextSlug}`}
+          href={next.href}
           prefetch={false}
           className={`${PAGER_LINK} order-first sm:order-none sm:col-start-2 sm:items-end sm:text-right`}
         >
@@ -171,9 +168,7 @@ function GuidePager({ locale, nav, current }: { locale: string; nav: GuideNav; c
             {nav.nextLabel}
             <ArrowRight className="h-3.5 w-3.5" aria-hidden />
           </span>
-          <span className="mt-0.5 text-sm font-semibold text-slate-900 group-hover:text-emerald-800">
-            {nav.items[nextSlug].label}
-          </span>
+          <span className="mt-0.5 text-sm font-semibold text-slate-900 group-hover:text-emerald-800">{next.label}</span>
         </Link>
       ) : null}
     </div>

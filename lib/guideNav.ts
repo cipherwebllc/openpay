@@ -55,10 +55,12 @@ type GuideNavCopy = {
   /** ガイドの末尾の「前へ / 次へ」(目次の並び順で 1 つ前と 1 つ後のガイド)。 */
   readonly prevLabel: string;
   readonly nextLabel: string;
+  /** ガイドの末尾の関連ガイドの 1 行の見出し (どのガイドも同じ名前・GuideRelated)。 */
+  readonly relatedGuidesTitle: string;
   /** 目次の先頭リンク (→ /guide) とハブの h1。 */
   readonly hubTitle: string;
   readonly hubLead: string;
-  /** ハブの冒頭の「はじめての方へ」(読む順のおすすめ・導入前チェックリスト → 決済QR)。 */
+  /** ハブのお店向けのパネルの「はじめての方へ」(読む順のおすすめ・番号 1〜4 = ガイドの「次へ」の順)。 */
   readonly hubStartTitle: string;
   readonly hubStartLead: string;
   readonly backHome: string;
@@ -67,8 +69,7 @@ type GuideNavCopy = {
   readonly groupTitles: Readonly<Record<GuideGroupId, string>>;
   /** label = 目次とハブのカードの名前 / summary = ハブのカードの 1 行説明。 */
   readonly items: Readonly<Record<GuideSlug, { readonly label: string; readonly summary: string }>>;
-  /** ハブ末尾の「関連ページ」節の見出しと、そのカードの名前 / 1 行説明。 */
-  readonly relatedTitle: string;
+  /** ガイド以外のページ (料金) の名前 / 1 行説明 (ハブでは「補足」の中に並べる・関連ガイドの 1 行からも指せる)。 */
   readonly relatedItems: Readonly<Record<RelatedPageId, { readonly label: string; readonly summary: string }>>;
 };
 
@@ -77,6 +78,7 @@ const JA: GuideNavCopy = {
   tocTitle: 'このページの内容',
   prevLabel: '前へ',
   nextLabel: '次へ',
+  relatedGuidesTitle: '関連ガイド',
   hubTitle: 'OpenPay でできること',
   hubLead: 'やりたいことに合わせて、ガイドを選んでください。',
   hubStartTitle: 'はじめての方へ',
@@ -127,7 +129,7 @@ const JA: GuideNavCopy = {
     },
     store: {
       label: 'チップ・デジタル商品販売',
-      summary: 'プロフィールでチップを受け付け、デジタル商品を販売。クリエイター向け。',
+      summary: 'プロフィールでチップを受け付け、デジタル商品を販売。',
     },
     'ai-pay': {
       label: 'AI が支払う',
@@ -142,7 +144,6 @@ const JA: GuideNavCopy = {
       summary: 'プロフィール・商品・お店のアイコンに使う画像の URL を用意する方法。',
     },
   },
-  relatedTitle: '関連ページ',
   relatedItems: {
     pricing: {
       label: '料金',
@@ -156,6 +157,7 @@ const EN: GuideNavCopy = {
   tocTitle: 'On this page',
   prevLabel: 'Previous',
   nextLabel: 'Next',
+  relatedGuidesTitle: 'Related guides',
   hubTitle: 'What you can do with OpenPay',
   hubLead: 'Pick the guide that matches what you want to do.',
   hubStartTitle: 'New here?',
@@ -206,7 +208,7 @@ const EN: GuideNavCopy = {
     },
     store: {
       label: 'Tips & digital product sales',
-      summary: 'Take tips and sell digital products from your profile. For creators.',
+      summary: 'Take tips and sell digital products from your profile.',
     },
     'ai-pay': {
       label: 'Let your AI pay',
@@ -221,7 +223,6 @@ const EN: GuideNavCopy = {
       summary: 'How to get an image URL for your profile, products and shop icon.',
     },
   },
-  relatedTitle: 'Related',
   relatedItems: {
     pricing: {
       label: 'Pricing',
@@ -250,14 +251,14 @@ export type GuideRelatedItem = {
   readonly summary: string;
 };
 
-export type GuideNav = Omit<GuideNavCopy, 'groupTitles' | 'relatedTitle' | 'relatedItems'> & {
+export type GuideNav = Omit<GuideNavCopy, 'groupTitles' | 'relatedItems'> & {
   readonly groups: readonly GuideNavGroup[];
-  /** ハブ末尾の「関連ページ」(目次のサイドバーには出さない)。 */
-  readonly related: { readonly title: string; readonly items: readonly GuideRelatedItem[] };
+  /** ガイド以外のページ (料金)。ハブの「補足」と関連ガイドの 1 行に出す (目次のサイドバーには出さない)。 */
+  readonly related: { readonly items: readonly GuideRelatedItem[] };
 };
 
 function build(copy: GuideNavCopy): GuideNav {
-  const { groupTitles, items, relatedTitle, relatedItems, ...frame } = copy;
+  const { groupTitles, items, relatedItems, ...frame } = copy;
   return {
     ...frame,
     items,
@@ -267,7 +268,6 @@ function build(copy: GuideNavCopy): GuideNav {
       items: slugs.map((slug) => ({ slug, ...items[slug] })),
     })),
     related: {
-      title: relatedTitle,
       items: RELATED_PAGES.map(({ id, path }) => ({ id, path, ...relatedItems[id] })),
     },
   };
@@ -279,6 +279,27 @@ const NAV_EN = build(EN);
 /** 未知ロケールは ja (既存 guide の contentFor と同じ規約)。 */
 export function guideNavFor(locale: string): GuideNav {
   return locale === 'en' ? NAV_EN : NAV_JA;
+}
+
+export type GuidePagerLink = { readonly href: string; readonly label: string };
+
+/**
+ * 本文の後の「前へ / 次へ」(GuideFrame)。同じ対象者のグループの中だけで前後を出す (お客様向けのガイドの前に
+ * お店向けを勧めない・plans/guide-ux-polish-2.md P4)。グループの端は、その側をハブ (ガイド一覧) にする。
+ * グループに 1 本しかないときは next = null (ハブを 2 回出さない)。関連ガイドの 1 行 (GuideRelated) は、
+ * ここに出るリンクを重ねて出さない。
+ */
+export function guidePagerFor(locale: string, current: GuideSlug): { prev: GuidePagerLink; next: GuidePagerLink | null } {
+  const nav = guideNavFor(locale);
+  const items = nav.groups.find((g) => g.items.some((item) => item.slug === current))?.items ?? [];
+  const index = items.findIndex((item) => item.slug === current);
+  const hub = { href: `/${locale}/guide`, label: nav.hubTitle };
+  const prevItem = index > 0 ? items[index - 1] : null;
+  const nextItem = index >= 0 && index < items.length - 1 ? items[index + 1] : null;
+  return {
+    prev: prevItem ? { href: `/${locale}/guide/${prevItem.slug}`, label: prevItem.label } : hub,
+    next: nextItem ? { href: `/${locale}/guide/${nextItem.slug}`, label: nextItem.label } : prevItem ? hub : null,
+  };
 }
 
 /** /guide ハブの metadata (canonical /{locale}/guide・hreflang ja/en・OG は既定の og-home.webp)。 */

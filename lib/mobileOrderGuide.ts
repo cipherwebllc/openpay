@@ -41,9 +41,6 @@ export type MobileOrderGuideContent = {
   readonly tryCta: string;
   readonly tryUrl: string;
 
-  readonly relatedTitle: string;
-  readonly relatedAgentGuide: string;
-  readonly relatedPayGuide: string;
 };
 
 const STEP_W = 390;
@@ -154,9 +151,6 @@ const JA: MobileOrderGuideContent = {
   tryCta: 'サンプル店舗を開く',
   tryUrl: 'https://open-pay.jp/@openpay_test',
 
-  relatedTitle: '関連ガイド',
-  relatedAgentGuide: 'AI で注文するガイド (訪日・海外のお客様向け)',
-  relatedPayGuide: 'JPYC で支払う (ウォレットの選び方・支払いの基本)',
 };
 
 const EN: MobileOrderGuideContent = {
@@ -264,9 +258,6 @@ const EN: MobileOrderGuideContent = {
   tryCta: 'Open the sample shop',
   tryUrl: 'https://open-pay.jp/@openpay_test',
 
-  relatedTitle: 'Related guides',
-  relatedAgentGuide: 'How to order with AI (for visitors to Japan)',
-  relatedPayGuide: 'Pay with JPYC (choosing a wallet and the basics of paying)',
 };
 
 export function mobileOrderGuideContentFor(locale: string): MobileOrderGuideContent {

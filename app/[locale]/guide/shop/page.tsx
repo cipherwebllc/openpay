@@ -16,6 +16,7 @@ import { GuideFrame } from '@/components/guide/GuideFrame';
 import { guideNavFor } from '@/lib/guideNav';
 import { GuideFeeList } from '@/components/guide/GuideFee';
 import { GUIDE_PRIMARY_ACTION, GUIDE_SECONDARY_ACTION, GuideLead, GuideSubtitle, GuideTitle, GuideFeatureList } from '@/components/guide/GuideHeader';
+import { GuideCta, GuideRelated } from '@/components/guide/GuideEnd';
 import { STEP_BADGE, Section } from '@/components/guide/PosGuidePieces';
 import { GuideVideo } from '@/components/guide/GuideVideo';
 import { HOWTO_VIDEO_UI, howtoVideoFor } from '@/lib/howtoVideos';
@@ -60,14 +61,6 @@ export default async function GuideShopPage({
     },
   ];
 
-  const guideLinks = [
-    { href: `/${locale}/guide/start`, label: c.guideLinkStart },
-    { href: `/${locale}/guide/image-url`, label: c.guideLinkImage },
-    { href: `/${locale}/guide/pos`, label: c.guideLinkPos },
-    { href: `/${locale}/guide/mobile-order`, label: c.guideLinkCustomer },
-    { href: `/${locale}/guide/agent`, label: c.guideLinkAgent },
-    { href: `/${locale}/guide/qr#jpyc-discount`, label: c.guideLinkDiscount },
-  ];
 
   return (
     <AppShell wide>
@@ -123,7 +116,7 @@ export default async function GuideShopPage({
         {/* 動画は「できること」の後 (ヒーロー画像の直後に画像が 2 枚続かないように)。 */}
         {videos.length > 0 && (
           <Section title={HOWTO_VIDEO_UI.sectionTitle} toc={false}>
-            <div className="space-y-8">
+            <div className="space-y-3">
               {videos.map((v) => (
                 <GuideVideo key={v.youtubeId} video={v} />
               ))}
@@ -183,35 +176,14 @@ export default async function GuideShopPage({
           </ol>
         </Section>
 
-        <Section title={c.guidesTitle}>
-          <ul className="mt-3 space-y-2">
-            {guideLinks.map((link) => (
-              <li key={link.href}>
-                <Link
-                  href={link.href}
-                  prefetch={false}
-                  className="text-sm font-semibold text-emerald-700 underline-offset-2 hover:underline"
-                >
-                  {link.label} →
-                </Link>
-              </li>
-            ))}
-          </ul>
-        </Section>
-
-        <section className="mt-12 rounded-[1.5rem] bg-gradient-to-br from-emerald-50 to-teal-50/60 p-6 text-center ring-1 ring-emerald-200/60 sm:p-8">
-          <h2 data-toc="skip" className="text-lg font-bold text-emerald-900">{c.ctaTitle}</h2>
-          <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-slate-700">
-            {c.ctaBody}
-          </p>
-          <Link
-            href={`/${locale}/create?tab=register`}
-            prefetch={false}
-            className={`mt-5 ${GUIDE_PRIMARY_ACTION}`}
-          >
-            {c.ctaLabel}
-          </Link>
-        </section>
+        <GuideCta title={c.ctaTitle} action={{ href: `/${locale}/create?tab=register`, label: c.ctaLabel }}>
+          <p>{c.ctaBody}</p>
+        </GuideCta>
+        <GuideRelated
+          locale={locale}
+          current="shop"
+          links={['mobile-order', 'image-url', { href: `/${locale}/guide/qr#jpyc-discount`, label: c.guideLinkDiscount }]}
+        />
       </article>
       </GuideFrame>
     </AppShell>

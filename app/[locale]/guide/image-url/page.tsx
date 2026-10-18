@@ -6,13 +6,13 @@
 // 掟 3: このファイルは default / generateMetadata 以外を export しない。
 
 import type { Metadata } from 'next';
-import Link from 'next/link';
 import { setRequestLocale } from 'next-intl/server';
 import { AppShell } from '@/components/AppShell';
 import { GuideFrame } from '@/components/guide/GuideFrame';
 import { guideNavFor } from '@/lib/guideNav';
 import { GuideLead, GuideSubtitle, GuideTitle } from '@/components/guide/GuideHeader';
-import { STEP_BADGE, Section } from '@/components/guide/PosGuidePieces';
+import { GuideCta, GuideRelated } from '@/components/guide/GuideEnd';
+import { STEP_BADGE, GuideFlow, Section } from '@/components/guide/PosGuidePieces';
 import { imageGuideContentFor, imageGuideMetadata } from '@/lib/imageGuide';
 
 export async function generateMetadata({
@@ -25,25 +25,6 @@ export async function generateMetadata({
   return imageGuideMetadata(locale);
 }
 
-function Flow({ steps }: { steps: readonly string[] }) {
-  return (
-    <div className="mt-4 flex flex-wrap items-center gap-x-2 gap-y-2">
-      {steps.map((step, i) => (
-        <span key={step} className="flex items-center gap-2">
-          {i > 0 ? (
-            <span aria-hidden className="text-slate-400">
-              →
-            </span>
-          ) : null}
-          <span className="rounded-xl bg-slate-100 px-3 py-1.5 text-sm font-semibold text-slate-700">
-            {step}
-          </span>
-        </span>
-      ))}
-    </div>
-  );
-}
-
 export default async function GuideImageUrlPage({
   params,
 }: {
@@ -53,10 +34,6 @@ export default async function GuideImageUrlPage({
   setRequestLocale(locale);
   const c = imageGuideContentFor(locale);
 
-  const guideLinks = [
-    { href: `/${locale}/guide/store`, label: c.guideLinkStore },
-    { href: `/${locale}/guide/shop`, label: c.guideLinkShop },
-  ];
 
   return (
     <AppShell wide>
@@ -72,7 +49,7 @@ export default async function GuideImageUrlPage({
             </GuideLead>
           ))}
           <p className="mt-5 text-sm font-bold text-slate-900">{c.flowTitle}</p>
-          <Flow steps={c.flow} />
+          <GuideFlow steps={c.flow} />
         </header>
 
         {c.sections.map((section) => (
@@ -144,21 +121,7 @@ export default async function GuideImageUrlPage({
           </ol>
         </section>
 
-        <Section title={c.guidesTitle}>
-          <ul className="mt-3 space-y-2">
-            {guideLinks.map((link) => (
-              <li key={link.href}>
-                <Link
-                  href={link.href}
-                  prefetch={false}
-                  className="text-sm font-semibold text-emerald-700 underline-offset-2 hover:underline"
-                >
-                  {link.label} →
-                </Link>
-              </li>
-            ))}
-          </ul>
-        </Section>
+        <GuideRelated locale={locale} current="image-url" links={['store', 'shop']} />
       </article>
       </GuideFrame>
     </AppShell>

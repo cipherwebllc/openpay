@@ -1,7 +1,7 @@
 // /guide ハブ (「OpenPay でできること」) のグループのパネル (plans/guide-hub-sidebar.md §2.5・plans/guide-ux-polish-2.md P2)。
 // page.tsx に規定外の export を作らないため部品に分ける (掟 3)。hook なしの同期部品 (jsdom で描画テスト可)。
 // Hero 画像は使わず lucide のアイコンだけ (server で SVG になり client JS は増えない)。
-// 最後のパネル「関連ページ」はガイド以外のページ (料金) への行。
+// 料金 (ガイド以外のページ) の行は「補足」の中に置く。
 
 import type { ReactNode } from 'react';
 import Link from 'next/link';
@@ -48,7 +48,7 @@ const RELATED_ICONS: Record<GuideRelatedItem['id'], LucideIcon> = {
 };
 
 // ハブの 1 行 (ガイドと関連ページで共通)。リンク名 = タイトル + 説明 (可視テキストだけ・掟 8)。
-// 頭はアイコンのタイル。「はじめての方へ」の 2 本 (導入前チェックリスト・決済QR) は番号のバッジにして読む順を示す。
+// 頭はアイコンのタイル。「はじめての方へ」(お店向けの 4 本) は番号のバッジにして読む順を示す。
 function HubRow({
   href,
   Icon,
@@ -66,7 +66,7 @@ function HubRow({
     <Link
       href={href}
       prefetch={false}
-      className="group flex items-start gap-3 rounded-xl px-3 py-3 transition-colors hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
+      className="group flex items-start gap-3 rounded-xl px-3 py-3 transition-colors hover:bg-slate-100/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
     >
       {step ? (
         <span className={`${STEP_BADGE} mt-0.5`}>{step}</span>
@@ -76,10 +76,10 @@ function HubRow({
         </span>
       )}
       <span className="min-w-0 flex-1">
-        <span className="block text-[15px] font-semibold leading-snug text-slate-900 group-hover:text-emerald-800">
+        <span className="block text-[15px] font-semibold leading-snug text-slate-900 [word-break:auto-phrase] group-hover:text-emerald-800">
           {label}
         </span>
-        <span className="mt-0.5 block text-[13px] leading-relaxed text-slate-500">{summary}</span>
+        <span className="mt-0.5 block text-[13px] leading-relaxed text-slate-500 [text-wrap:pretty] [word-break:auto-phrase]">{summary}</span>
       </span>
       <ChevronRight
         aria-hidden
@@ -94,16 +94,19 @@ function HubPanel({
   title,
   badge,
   lead,
+  bare = false,
   children,
 }: {
   id: string;
   title: string;
   badge?: string;
   lead?: string;
+  /** true: 外枠の箱を付けない (本数の少ない従のグループ)。 */
+  bare?: boolean;
   children: ReactNode;
 }) {
   return (
-    <section aria-labelledby={id} className="rounded-2xl bg-white p-2 ring-1 ring-slate-200/80">
+    <section aria-labelledby={id} className={bare ? 'p-2' : 'rounded-2xl bg-white p-2 ring-1 ring-slate-200/80'}>
       <div className="px-3 pb-1 pt-3">
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
           <h2 id={id} className="text-base font-bold text-slate-900">
@@ -123,49 +126,57 @@ function HubPanel({
 }
 
 /**
- * ガイドのグループをパネルに並べる (PC は 2 列)。お店向けのパネルの頭に「はじめての方へ」を置き、
- * 導入前チェックリスト → 決済QR を番号で示す (同じガイドを別の箱で二重に並べない)。
- * 補足 (1 本) と関連ページ (料金) は最後の段に小さなパネル 2 つで並べる (1 枚だけの節が右に空かないように)。
+ * ガイドのグループを並べる。主な 2 グループ (お店向け・お客様向け) は箱のパネルを 2 列に (同じ段は高さをそろえる)。
+ * お店向けのパネルの頭に「はじめての方へ」を置き、4 本に読む順の番号を付ける (ガイドの「次へ」と同じ順)。
+ * 残り (クリエイター・AI・補足) は 1〜2 本ずつと短いので、箱にせず罫線の下に並べる (PC は 3 列)。
+ * ガイドではない料金 (/pricing) は「補足」に入れる (1 本だけの節を 2 つ並べない・plans/guide-ux-polish-2.md P4)。
+ * 目次のサイドバー (GuideFrame) には料金を出さない (plans/pricing-page.md §2.6)。
  */
 export function GuideHubPanels({ locale, nav }: { locale: string; nav: GuideNav }) {
-  const startOrder: Partial<Record<GuideSlug, number>> = { start: 1, qr: 2 };
-  return (
-    // base の grid-cols-1 は必須 (スマホで横にはみ出さない)。
-    <div className="mt-8 grid grid-cols-1 gap-4 md:grid-cols-2 md:items-start">
-      {nav.groups.map((group) => (
-        <HubPanel
-          key={group.id}
-          id={`guide-hub-${group.id}`}
-          title={group.title}
-          badge={group.id === 'shops' ? nav.hubStartTitle : undefined}
-          lead={group.id === 'shops' ? nav.hubStartLead : undefined}
-        >
-          {group.items.map((item) => (
-            <li key={item.slug}>
+  const primary = new Set(['shops', 'customers']);
+  const groupPanel = (group: GuideNav['groups'][number], bare: boolean) => (
+    <HubPanel
+      key={group.id}
+      id={`guide-hub-${group.id}`}
+      title={group.title}
+      badge={group.id === 'shops' ? nav.hubStartTitle : undefined}
+      lead={group.id === 'shops' ? nav.hubStartLead : undefined}
+      bare={bare}
+    >
+      {group.items.map((item, index) => (
+        <li key={item.slug}>
+          <HubRow
+            href={`/${locale}/guide/${item.slug}`}
+            Icon={GUIDE_ICONS[item.slug]}
+            step={group.id === 'shops' ? index + 1 : undefined}
+            label={item.label}
+            summary={item.summary}
+          />
+        </li>
+      ))}
+      {group.id === 'more'
+        ? nav.related.items.map((item) => (
+            <li key={item.id}>
               <HubRow
-                href={`/${locale}/guide/${item.slug}`}
-                Icon={GUIDE_ICONS[item.slug]}
-                step={group.id === 'shops' ? startOrder[item.slug] : undefined}
+                href={`/${locale}${item.path}`}
+                Icon={RELATED_ICONS[item.id]}
                 label={item.label}
                 summary={item.summary}
               />
             </li>
-          ))}
-        </HubPanel>
-      ))}
-      {/* ガイドではないページ (料金 /pricing)。目次のサイドバー (GuideFrame) には出さない (plans/pricing-page.md §2.6)。 */}
-      <HubPanel id="guide-hub-related" title={nav.related.title}>
-        {nav.related.items.map((item) => (
-          <li key={item.id}>
-            <HubRow
-              href={`/${locale}${item.path}`}
-              Icon={RELATED_ICONS[item.id]}
-              label={item.label}
-              summary={item.summary}
-            />
-          </li>
-        ))}
-      </HubPanel>
-    </div>
+          ))
+        : null}
+    </HubPanel>
+  );
+  return (
+    <>
+      {/* base の grid-cols-1 は必須 (スマホで横にはみ出さない)。 */}
+      <div className="mt-8 grid grid-cols-1 gap-4 md:grid-cols-2">
+        {nav.groups.filter((group) => primary.has(group.id)).map((group) => groupPanel(group, false))}
+      </div>
+      <div className="mt-8 grid grid-cols-1 gap-x-4 gap-y-2 border-t border-slate-200 pt-4 md:grid-cols-2 lg:grid-cols-3">
+        {nav.groups.filter((group) => !primary.has(group.id)).map((group) => groupPanel(group, true))}
+      </div>
+    </>
   );
 }

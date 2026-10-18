@@ -8,12 +8,12 @@
 // 掟 3: このファイルは default / generateMetadata 以外を export しない。
 
 import type { Metadata } from 'next';
-import Link from 'next/link';
 import { setRequestLocale } from 'next-intl/server';
 import { AppShell } from '@/components/AppShell';
 import { GuideFrame } from '@/components/guide/GuideFrame';
 import { GuideFaq } from '@/components/guide/GuideFaq';
-import { GUIDE_PRIMARY_ACTION, GuideActions, GuideLead, GuideSubtitle, GuideTitle } from '@/components/guide/GuideHeader';
+import { GuideActions, GuideLead, GuideSubtitle, GuideTitle } from '@/components/guide/GuideHeader';
+import { GuideCta, GuideRelated } from '@/components/guide/GuideEnd';
 import { BulletList, Section } from '@/components/guide/PosGuidePieces';
 import { StepShot } from '@/components/guide/MobileOrderGuidePieces';
 import { WalletSummary } from '@/components/guide/WalletSummary';
@@ -57,7 +57,7 @@ export default async function GuideMobileOrderPage({
             {c.subtitle}
           </GuideSubtitle>
           <GuideLead>{c.lead}</GuideLead>
-                  <GuideActions actions={[{ href: c.tryUrl, label: c.tryCta }]} />
+          <GuideActions actions={[{ href: c.tryUrl, label: c.tryCta }]} />
         </header>
 
         <Section title={c.needTitle}>
@@ -81,40 +81,12 @@ export default async function GuideMobileOrderPage({
           <GuideFaq items={c.faq} />
         </Section>
 
-        {/* サンプル店舗 CTA (外部同一オリジンの @handle ページ) */}
-        <section className="mt-12 rounded-[1.5rem] bg-gradient-to-br from-emerald-50 to-teal-50/60 p-6 text-center ring-1 ring-emerald-200/60 sm:p-8">
-          <h2 data-toc="skip" className="text-lg font-bold text-emerald-900">{c.tryTitle}</h2>
-          <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-slate-700">
-            {c.tryBody}
-          </p>
-          <a
-            href={c.tryUrl}
-            className={`mt-5 ${GUIDE_PRIMARY_ACTION}`}
-          >
-            {c.tryCta}
-          </a>
-        </section>
+        {/* サンプル店舗 (同じオリジンの @handle ページ・本番の絶対 URL なので a) */}
+        <GuideCta title={c.tryTitle} action={{ href: c.tryUrl, label: c.tryCta }}>
+          <p>{c.tryBody}</p>
+        </GuideCta>
 
-        <Section title={c.relatedTitle} toc={false}>
-          <p className="mt-3 text-sm">
-            <Link
-              href={`/${locale}/guide/pay`}
-              prefetch={false}
-              className="font-medium text-emerald-700 underline underline-offset-2 hover:text-emerald-900"
-            >
-              {c.relatedPayGuide}
-            </Link>
-          </p>
-          <p className="mt-2 text-sm">
-            <Link
-              href={`/${locale}/guide/agent`}
-              prefetch={false}
-              className="font-medium text-emerald-700 underline underline-offset-2 hover:text-emerald-900"
-            >
-              {c.relatedAgentGuide}
-            </Link>
-          </p>
-        </Section>
+        <GuideRelated locale={locale} current="mobile-order" links={['pay', 'agent']} />
       </article>
       </GuideFrame>
     </AppShell>

@@ -65,10 +65,6 @@ export type StartGuideContent = {
   /** slot 'chains' (対応チェーンと通貨の開示) をたたむ「くわしく」の名前。 */
   readonly chainsDetailsLabel: string;
 
-  readonly guidesTitle: string;
-  readonly guideLinkQr: string;
-  readonly guideLinkShop: string;
-  readonly guideLinkPos: string;
 
   readonly ctaTitle: string;
   readonly ctaBody: readonly string[];
@@ -113,7 +109,6 @@ const JA: StartGuideContent = {
         'ウォレットは MetaMask が基本です。初めての方には、アプリの中で JPYC の発行・償還ができるマイナウォレットや HashPort Wallet もおすすめです。',
         'JPYC そのものは、発行元の JPYC EX で手に入ります (本人確認 → 発行予約 → 銀行振込)。',
       ],
-      flow: ['ウォレットを準備', 'OpenPay に接続', '受取先を設定'],
       callout: {
         kind: 'warn',
         text: 'JPYC EX が扱うチェーンと、OpenPay が決済に対応するチェーンは同じではありません。使うチェーンが両方で使えるか、導入時に確認してください。',
@@ -264,15 +259,10 @@ const JA: StartGuideContent = {
 
   chainsDetailsLabel: '対応しているチェーンと通貨',
 
-  guidesTitle: '機能ごとの使い方',
-  guideLinkQr: '決済QR — スマホでかんたん受取',
-  guideLinkShop: 'レジ・モバイル注文 — 商品登録から注文受付まで',
-  guideLinkPos: '今お使いの POS レジと併用する運用ガイド',
 
   ctaTitle: '最初は少額で',
   ctaBody: [
     'すべての売上を JPYC に切り替える必要はありません。まずは、JPYC で払いたいお客様のために選択肢をひとつ増やすところから。',
-    '使われるようになったら、決済QR からレジ・モバイル注文へ広げられます。',
   ],
   ctaKicker: '導入費用 0 円、契約不要。売上はあなたのウォレットへ直接届きます。',
   ctaLabel: '決済QRを作ってみる',
@@ -310,7 +300,6 @@ const EN: StartGuideContent = {
         'MetaMask is the standard wallet. If you are new to wallets, MynaWallet and HashPort Wallet are good choices too: you can issue and redeem JPYC inside these apps.',
         'You can obtain JPYC itself from JPYC EX, run by the issuer (identity check → reserve issuance → bank transfer).',
       ],
-      flow: ['Set up a wallet', 'Connect to OpenPay', 'Set the receiving address'],
       callout: {
         kind: 'warn',
         text: 'The chains JPYC EX supports and the chains OpenPay settles on are not the same set. Before you start, confirm that the chain you plan to use works on both.',
@@ -464,15 +453,10 @@ const EN: StartGuideContent = {
 
   chainsDetailsLabel: 'Supported chains and currencies',
 
-  guidesTitle: 'How each feature works',
-  guideLinkQr: 'Payment QR — accept payments from your phone',
-  guideLinkShop: 'POS & mobile ordering — from product setup to order intake',
-  guideLinkPos: 'Running alongside your current POS register',
 
   ctaTitle: 'Start small',
   ctaBody: [
     'You do not have to move every sale to JPYC. Start by adding one option for the customers who want to pay in JPYC.',
-    'Once it is being used, you can extend from payment QRs to the register and mobile ordering.',
   ],
   ctaKicker:
     'Zero setup cost, no contract. Sales land straight in your wallet.',

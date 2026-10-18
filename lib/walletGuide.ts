@@ -57,8 +57,6 @@ export type WalletGuideContent = {
   /** パソコンで支払い画面を開いたときの WalletConnect の QR (お店の QR とは別)。 */
   readonly wcTip: string;
 
-  readonly relatedTitle: string;
-  readonly related: readonly WalletGuideLink[];
 };
 
 const JA: WalletGuideContent = {
@@ -139,11 +137,6 @@ const JA: WalletGuideContent = {
   ],
   wcTip: 'パソコンで支払い画面を開いたときは、そこに出る接続用の QR を、スマホのウォレットのアプリで読み取ってつなぎます (お店の QR とは別のものです)。',
 
-  relatedTitle: '関連ガイド',
-  related: [
-    { path: '/guide/pay', label: 'JPYC で支払う' },
-    { path: '/guide/mobile-order', label: 'モバイルオーダーのやり方' },
-  ],
 };
 
 const EN: WalletGuideContent = {
@@ -224,11 +217,6 @@ const EN: WalletGuideContent = {
   ],
   wcTip: 'If you opened the payment screen on a computer, scan the connection QR shown there with the wallet app on your phone (this is not the shop’s QR).',
 
-  relatedTitle: 'Related guides',
-  related: [
-    { path: '/guide/pay', label: 'Pay with JPYC' },
-    { path: '/guide/mobile-order', label: 'How to use mobile order' },
-  ],
 };
 
 export function walletGuideContentFor(locale: string): WalletGuideContent {

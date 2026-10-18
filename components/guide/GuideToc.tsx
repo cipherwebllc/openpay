@@ -10,6 +10,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { ChevronDown, ListTree } from 'lucide-react';
+import { guideTocText } from '@/components/guide/GuideOnThisPage';
 
 type TocItem = { readonly id: string; readonly text: string };
 
@@ -27,7 +28,7 @@ export function GuideToc({ title }: { title: string }) {
     setItems(
       headings.map((heading) => ({
         id: heading.id,
-        text: (heading.dataset.tocLabel ?? heading.textContent ?? '').trim(),
+        text: guideTocText(heading),
       })),
     );
   }, []);
@@ -50,7 +51,7 @@ export function GuideToc({ title }: { title: string }) {
           <li key={item.id}>
             <a
               href={`#${item.id}`}
-              className="flex min-h-10 items-center rounded-lg px-3 py-2 leading-snug text-slate-700 [@media(hover:hover)]:hover:bg-slate-50 [@media(hover:hover)]:hover:text-slate-900"
+              className="flex min-h-10 items-center rounded-lg px-3 py-2 leading-snug text-slate-700 [word-break:auto-phrase] [@media(hover:hover)]:hover:bg-slate-50 [@media(hover:hover)]:hover:text-slate-900"
             >
               {item.text}
             </a>

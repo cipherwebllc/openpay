@@ -10,8 +10,21 @@ import { useEffect, useRef, useState } from 'react';
 
 type Item = { readonly id: string; readonly text: string };
 
-// 固定ヘッダーの下端 (約 72px) + 余白。これより上に頭が出た見出しを「読んでいる節」とみなす。
-const ACTIVE_OFFSET_PX = 120;
+/**
+ * 目次に出す見出しの名前。数字と和文の間の半角スペースは改行しない空白にする (幅の狭い目次で
+ * 「（約 5 / 分）」のように数字と単位が別の行に分かれないように)。GuideToc も同じ名前を使う。
+ */
+export function guideTocText(heading: HTMLElement): string {
+  return (heading.dataset.tocLabel ?? heading.textContent ?? '')
+    .trim()
+    .replace(/(?<=\d) (?=[^\x00-\x7f])|(?<=[^\x00-\x7f]) (?=\d)/g, '\u00a0');
+}
+
+// 見出しが画面の上 1/3 に入ったら「読んでいる節」とみなす (固定ヘッダーの下端 + 余白の 120px より下は見る)。
+// 以前の 120px 固定だと、見出しが画面の上の方に見えていても前の節が光ったままだった。
+function activeOffset(): number {
+  return Math.max(120, Math.round(window.innerHeight / 3));
+}
 
 export function GuideOnThisPage({ title }: { title: string }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -28,7 +41,7 @@ export function GuideOnThisPage({ title }: { title: string }) {
     setItems(
       headings.map((heading) => ({
         id: heading.id,
-        text: (heading.dataset.tocLabel ?? heading.textContent ?? '').trim(),
+        text: guideTocText(heading),
       })),
     );
     if (headings.length < 2) return;
@@ -41,7 +54,7 @@ export function GuideOnThisPage({ title }: { title: string }) {
         window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 2;
       let current = headings[0];
       for (const heading of headings) {
-        if (heading.getBoundingClientRect().top <= ACTIVE_OFFSET_PX) current = heading;
+        if (heading.getBoundingClientRect().top <= activeOffset()) current = heading;
         else break;
       }
       setActiveId(atBottom ? headings[headings.length - 1].id : current.id);
@@ -74,7 +87,7 @@ export function GuideOnThisPage({ title }: { title: string }) {
                   <a
                     href={`#${item.id}`}
                     aria-current={active ? 'location' : undefined}
-                    className={`-ml-px block border-l-2 py-1 pl-3 pr-1 transition-colors ${
+                    className={`-ml-px block border-l-2 py-1 pl-3 pr-1 transition-colors [word-break:auto-phrase] ${
                       active
                         ? 'border-emerald-600 font-semibold text-emerald-800'
                         : 'border-transparent text-slate-500 hover:border-slate-300 hover:text-slate-800'

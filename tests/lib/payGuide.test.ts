@@ -166,19 +166,12 @@ describe('payGuide content', () => {
     expect(payGuideContentFor('en').sign.join('\n')).toContain(`expires automatically within ${minutes} minutes and can be used only once`);
   });
 
-  it('リンク先: 「スキャンして支払う」(/scan)・関連ガイド・料金のページが実在する', () => {
+  // 関連ガイドの行き先と名前は描画側 (GuideRelated) が目次 (guideNav) から取る (tests/app/guide-pay.test.tsx)。
+  it('リンク先: 「スキャンして支払う」(/scan) のページが実在する', () => {
     for (const locale of LOCALES) {
       const c = payGuideContentFor(locale);
-      const nav = guideNavFor(locale);
       expect(c.scanCta.path).toBe('/scan');
-      expect(c.related.map((l) => l.path)).toEqual(['/guide/mobile-order', '/guide/agent', '/pricing']);
-      for (const { path: p } of [c.scanCta, ...c.related]) {
-        expect(existsSync(path.join(PAGE_DIR, ...p.split('/').filter(Boolean), 'page.tsx')), `${p} の page.tsx が無い`).toBe(true);
-      }
-      // 関連ガイドの名前は目次と同じ (文言の出どころを 1 つにそろえる)。
-      expect(c.related[0].label).toBe(nav.items['mobile-order'].label);
-      expect(c.related[1].label).toBe(nav.items.agent.label);
-      expect(c.related[2].label.startsWith(nav.related.items[0].label)).toBe(true);
+      expect(existsSync(path.join(PAGE_DIR, 'scan', 'page.tsx'))).toBe(true);
       expect(c.scanCta.label).toBe((locale === 'en' ? en : ja).Scan.pageTitle);
     }
   });

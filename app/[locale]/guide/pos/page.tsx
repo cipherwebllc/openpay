@@ -7,13 +7,13 @@
 // SEO 価値がある集客コンテンツなので noindex は設定しない (explore と同方針)。
 
 import type { Metadata } from 'next';
-import Link from 'next/link';
 import { setRequestLocale } from 'next-intl/server';
 import { AppShell } from '@/components/AppShell';
 import { GuideFrame } from '@/components/guide/GuideFrame';
 import { GuideFaq } from '@/components/guide/GuideFaq';
 import { guideNavFor } from '@/lib/guideNav';
-import { GUIDE_PRIMARY_ACTION, GuideActions, GuideLead, GuideSubtitle, GuideTitle } from '@/components/guide/GuideHeader';
+import { GuideActions, GuideLead, GuideSubtitle, GuideTitle } from '@/components/guide/GuideHeader';
+import { GuideCta, GuideRelated } from '@/components/guide/GuideEnd';
 import { GuideToc } from '@/components/guide/GuideToc';
 import {
   BulletList,
@@ -53,7 +53,7 @@ export default async function GuidePosPage({
             {c.subtitle}
           </GuideSubtitle>
           <GuideLead>{c.lead}</GuideLead>
-                  <GuideActions actions={[{ href: `/${locale}${c.ctaButtonHref}`, label: c.ctaButton }]} />
+          <GuideActions actions={[{ href: `/${locale}${c.ctaButtonHref}`, label: c.ctaButton }]} />
         </header>
 
         <GuideToc title={guideNavFor(locale).tocTitle} />
@@ -238,53 +238,10 @@ export default async function GuidePosPage({
           <GuideFaq items={c.faqs} />
         </Section>
 
-        <Section title={c.relatedTitle} toc={false}>
-          <ul className="mt-3 space-y-1.5">
-            <li>
-              <Link
-                href={`/${locale}/guide/start`}
-                prefetch={false}
-                className="text-sm font-medium text-emerald-700 underline-offset-2 hover:underline"
-              >
-                {c.relatedStart} →
-              </Link>
-            </li>
-            <li>
-              <Link
-                href={`/${locale}/guide/qr`}
-                prefetch={false}
-                className="text-sm font-medium text-emerald-700 underline-offset-2 hover:underline"
-              >
-                {c.relatedQr} →
-              </Link>
-            </li>
-            <li>
-              <Link
-                href={`/${locale}/guide/shop`}
-                prefetch={false}
-                className="text-sm font-medium text-emerald-700 underline-offset-2 hover:underline"
-              >
-                {c.relatedShop} →
-              </Link>
-            </li>
-          </ul>
-        </Section>
-
-        {/* CTA */}
-        <section className="mt-12 rounded-[1.5rem] bg-gradient-to-br from-emerald-50 to-teal-50/60 p-6 text-center ring-1 ring-emerald-200/60 sm:p-8">
-          <h2 data-toc="skip" className="text-lg font-bold text-emerald-900">{c.ctaTitle}</h2>
-          <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-slate-700">
-            {c.ctaBody}
-          </p>
-          <Link
-            href={`/${locale}${c.ctaButtonHref}`}
-            className={`mt-5 ${GUIDE_PRIMARY_ACTION}`}
-          >
-            {c.ctaButton}
-          </Link>
-        </section>
-
-        {/* 関連ガイド (P5 相互リンク): 決済QR LP / レジ・モバイルオーダー LP へ。 */}
+        <GuideCta title={c.ctaTitle} action={{ href: `/${locale}${c.ctaButtonHref}`, label: c.ctaButton }}>
+          <p>{c.ctaBody}</p>
+        </GuideCta>
+        <GuideRelated locale={locale} current="pos" links={['start', 'qr', 'shop']} />
       </article>
       </GuideFrame>
     </AppShell>

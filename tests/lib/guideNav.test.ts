@@ -86,13 +86,11 @@ describe('guideNav content', () => {
   });
 
   // ハブ末尾の「関連ページ」はガイドではないページ (料金 /pricing)。GUIDE_SLUGS・グループ・目次 (items) には入れない。
-  it('関連ページ: 料金 (/pricing) のカード 1 枚・ja/en 同じ並び・ガイドの slug や目次には入らない', () => {
+  it('ガイド以外のページ: 料金 (/pricing) の 1 行・ja/en 同じ並び・ガイドの slug や目次には入らない', () => {
     expect(guideNavFor('ja').related).toEqual({
-      title: '関連ページ',
       items: [{ id: 'pricing', path: '/pricing', label: '料金', summary: '機能ごとに、だれが払うかと計算例をまとめています。' }],
     });
     expect(guideNavFor('en').related).toEqual({
-      title: 'Related',
       items: [{ id: 'pricing', path: '/pricing', label: 'Pricing', summary: 'Who pays what for each feature, with worked examples.' }],
     });
     for (const locale of LOCALES) {
@@ -114,10 +112,10 @@ describe('guideNav content', () => {
       for (const [at, text] of copy) {
         expect(FORBIDDEN.test(text), `${at} に可変情報: ${text}`).toBe(false);
       }
-      // 関連ページ (料金) の見出し・カードの文言もこのフェンスの対象に入っている。
+      // 料金の行の文言と、関連ガイドの 1 行の見出しもこのフェンスの対象に入っている。
       const { related } = guideNavFor(locale);
       const texts = copy.map(([, text]) => text);
-      for (const text of [related.title, ...related.items.flatMap((i) => [i.label, i.summary])]) {
+      for (const text of [guideNavFor(locale).relatedGuidesTitle, ...related.items.flatMap((i) => [i.label, i.summary])]) {
         expect(texts, `${locale}: 関連ページの「${text}」がフェンスの対象外`).toContain(text);
       }
     }
@@ -136,8 +134,9 @@ describe('guideNav content', () => {
 
   it.each(GUIDE_SLUGS)('/guide/%s の page.tsx は GuideFrame に自分の slug を渡す (現在地を取り違えない)', (slug) => {
     const source = readFileSync(path.join(GUIDE_DIR, slug, 'page.tsx'), 'utf8');
-    expect(source).toContain('<GuideFrame');
-    expect(source.match(/current="([^"]+)"/g)).toEqual([`current="${slug}"`]);
+    expect(source).toMatch(new RegExp(`<GuideFrame[^>]*current="${slug}"`));
+    // 関連ガイドの 1 行 (GuideRelated) も current を受け取る。どれも自分の slug であること。
+    expect(new Set(source.match(/current="([^"]+)"/g))).toEqual(new Set([`current="${slug}"`]));
   });
 
   it('sitemap に /guide と全ガイドが ja / en で載る', () => {

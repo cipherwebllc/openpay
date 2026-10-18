@@ -7,7 +7,6 @@
 // 掟 3: このファイルは default / generateMetadata 以外を export しない。
 
 import type { Metadata } from 'next';
-import Link from 'next/link';
 import { setRequestLocale } from 'next-intl/server';
 import { AppShell } from '@/components/AppShell';
 import { GuideFrame } from '@/components/guide/GuideFrame';
@@ -15,7 +14,8 @@ import { GuideCallout } from '@/components/guide/GuideCallout';
 import { GuideFaq } from '@/components/guide/GuideFaq';
 import { GuideVideo } from '@/components/guide/GuideVideo';
 import { WalletSummary } from '@/components/guide/WalletSummary';
-import { GUIDE_PRIMARY_ACTION, GuideActions, GuideLead, GuideSubtitle, GuideTitle } from '@/components/guide/GuideHeader';
+import { GuideActions, GuideLead, GuideSubtitle, GuideTitle } from '@/components/guide/GuideHeader';
+import { GuideCta, GuideRelated } from '@/components/guide/GuideEnd';
 import { GuideToc } from '@/components/guide/GuideToc';
 import { BulletList, STEP_BADGE_CUSTOMER, Section, StepList } from '@/components/guide/PosGuidePieces';
 import { guideNavFor } from '@/lib/guideNav';
@@ -125,31 +125,10 @@ export default async function GuidePayPage({
           <GuideFaq items={c.faq} />
         </Section>
 
-        <Section title={c.relatedTitle} toc={false}>
-          <ul className="mt-3 space-y-2">
-            {c.related.map((link) => (
-              <li key={link.path}>
-                <Link
-                  href={`/${locale}${link.path}`}
-                  prefetch={false}
-                  className="text-sm font-semibold text-emerald-700 underline-offset-2 hover:underline"
-                >
-                  {link.label} →
-                </Link>
-              </li>
-            ))}
-          </ul>
-        </Section>
-
-        <section className="mt-12 rounded-[1.5rem] bg-gradient-to-br from-emerald-50 to-teal-50/60 p-6 text-center ring-1 ring-emerald-200/60 sm:p-8">
-          <h2 data-toc="skip" className="text-lg font-bold text-emerald-900 [word-break:auto-phrase]">
-            {c.ctaTitle}
-          </h2>
-          <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-slate-700">{c.ctaBody}</p>
-          <Link href={scanHref} prefetch={false} className={`mt-5 ${GUIDE_PRIMARY_ACTION}`}>
-            {c.scanCta.label}
-          </Link>
-        </section>
+        <GuideCta title={c.ctaTitle} action={{ href: scanHref, label: c.scanCta.label }}>
+          <p>{c.ctaBody}</p>
+        </GuideCta>
+        <GuideRelated locale={locale} current="pay" links={['mobile-order', 'agent', 'pricing']} />
       </article>
       </GuideFrame>
     </AppShell>

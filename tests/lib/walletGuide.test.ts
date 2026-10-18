@@ -104,16 +104,10 @@ describe('walletGuide content', () => {
     }
   });
 
-  it('リンク先: 「スキャンして支払う」(/scan)・関連ガイドが実在し、名前は「JPYC で支払う」と目次と同じ', () => {
+  // 前後のガイド (JPYC で支払う・モバイルオーダー) へは「前へ / 次へ」で行く (tests/app/guide-wallet.test.tsx)。
+  it('リンク先: 「スキャンして支払う」(/scan) は「JPYC で支払う」と同じ', () => {
     for (const locale of LOCALES) {
-      const c = walletGuideContentFor(locale);
-      const nav = guideNavFor(locale);
-      expect(c.scanCta).toEqual(payGuideContentFor(locale).scanCta);
-      expect(c.related.map((l) => l.path)).toEqual(['/guide/pay', '/guide/mobile-order']);
-      expect(c.related.map((l) => l.label)).toEqual([nav.items.pay.label, nav.items['mobile-order'].label]);
-      for (const { path: p } of [c.scanCta, ...c.related]) {
-        expect(existsSync(path.join(PAGE_DIR, ...p.split('/').filter(Boolean), 'page.tsx')), `${p} の page.tsx が無い`).toBe(true);
-      }
+      expect(walletGuideContentFor(locale).scanCta).toEqual(payGuideContentFor(locale).scanCta);
     }
   });
 

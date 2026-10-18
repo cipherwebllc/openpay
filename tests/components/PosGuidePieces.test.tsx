@@ -11,6 +11,7 @@ import {
   FIGURE_DIMS,
   GuideFigure,
   Section,
+  guideHeadingId,
   StepList,
 } from '@/components/guide/PosGuidePieces';
 import { POS_GUIDE } from '@/lib/posGuide';
@@ -122,6 +123,22 @@ describe('Section', () => {
       screen.getByRole('heading', { level: 2, name: '見出しA' }),
     ).toBeInTheDocument();
     expect(screen.getByText('本文B')).toBeInTheDocument();
+  });
+
+  it('見出しの id は題名から server で決まる (#題名 の深いリンクが JS なしで効く)・id を渡せばそれを使う', () => {
+    render(
+      <>
+        <Section title="毎回の会計（約 10 秒）">
+          <p>本文</p>
+        </Section>
+        <Section title="値引き" id="jpyc-discount">
+          <p>本文</p>
+        </Section>
+      </>,
+    );
+    expect(screen.getByRole('heading', { level: 2, name: '毎回の会計（約 10 秒）' })).toHaveAttribute('id', '毎回の会計約-10-秒');
+    expect(screen.getByRole('heading', { level: 2, name: '値引き' })).toHaveAttribute('id', 'jpyc-discount');
+    expect(guideHeadingId('  Who pays, and how much? ')).toBe('Who-pays-and-how-much');
   });
 });
 

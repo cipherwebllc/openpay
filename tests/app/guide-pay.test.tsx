@@ -23,7 +23,7 @@ describe('/guide/pay', () => {
     expect(screen.getByText(c.subtitle)).toBeInTheDocument();
     expect(screen.getByText(c.lead)).toBeInTheDocument();
 
-    // 本文の見出しの順 (このページの内容に載る節 → 関連ガイド → 末尾の行動ボタンの箱)。
+    // 本文の見出しの順 (このページの内容に載る節 → 末尾の行動の帯 → 関連ガイド)。
     // 使い方動画は日本語なので ja だけ、手順の後に「動画で見る」の節 (目次には載せない)。
     const video = locale === 'ja' ? [HOWTO_VIDEO_UI.sectionTitle] : [];
     expect(within(article).getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual([
@@ -35,12 +35,12 @@ describe('/guide/pay', () => {
       c.receiptTitle,
       c.jpycTitle,
       c.faqTitle,
-      c.relatedTitle,
       c.ctaTitle,
+      nav.relatedGuidesTitle,
     ]);
-    // 関連ガイドと行動ボタンの箱は「このページの内容」に載せない。
+    // 行動の帯と関連ガイドは「このページの内容」に載せない。
     const skipped = [...article.querySelectorAll('h2[data-toc="skip"]')].map((h) => h.textContent);
-    expect(skipped).toEqual([...video, c.relatedTitle, c.ctaTitle]);
+    expect(skipped).toEqual([...video, c.ctaTitle, nav.relatedGuidesTitle]);
 
     // 手順は 6 つ・お客様の番号 (blue)。
     const steps = screen.getByRole('heading', { level: 2, name: c.stepsTitle }).closest('section')!;
@@ -62,7 +62,13 @@ describe('/guide/pay', () => {
     for (const link of scanLinks) expect(link).toHaveAttribute('href', `/${locale}/scan`);
 
     // 関連ガイドと料金。
-    const related = screen.getByRole('heading', { level: 2, name: c.relatedTitle }).closest('section')!;
+    // 関連ガイドの名前は目次 (guideNav) と同じ。
+    const related = screen.getByRole('heading', { level: 2, name: nav.relatedGuidesTitle }).closest('section')!;
+    expect(within(related).getAllByRole('link').map((a) => a.textContent)).toEqual([
+      nav.items['mobile-order'].label,
+      nav.items.agent.label,
+      nav.related.items[0].label,
+    ]);
     expect(within(related).getAllByRole('link').map((a) => a.getAttribute('href'))).toEqual([
       `/${locale}/guide/mobile-order`,
       `/${locale}/guide/agent`,

@@ -16,10 +16,11 @@ import { GuideFrame } from '@/components/guide/GuideFrame';
 import { GuideFeeList } from '@/components/guide/GuideFee';
 import { GuideCallout } from '@/components/guide/GuideCallout';
 import { guideNavFor } from '@/lib/guideNav';
-import { GUIDE_PRIMARY_ACTION, GuideActions, GuideLead, GuideSubtitle, GuideTitle } from '@/components/guide/GuideHeader';
+import { GuideLead, GuideSubtitle, GuideTitle } from '@/components/guide/GuideHeader';
+import { GuideCta, GuideRelated } from '@/components/guide/GuideEnd';
 import { GuideToc } from '@/components/guide/GuideToc';
 import { GuideDisclosure } from '@/components/guide/GuideDisclosure';
-import { STEP_BADGE, GuideFigure, Section } from '@/components/guide/PosGuidePieces';
+import { GuideFigure, GuideFlow, Section } from '@/components/guide/PosGuidePieces';
 import {
   startGuideContentFor,
   startGuideMetadata,
@@ -34,25 +35,6 @@ export async function generateMetadata({
   const { locale } = await params;
   setRequestLocale(locale);
   return startGuideMetadata(locale);
-}
-
-function Flow({ steps }: { steps: readonly string[] }) {
-  return (
-    <div className="mt-4 flex flex-wrap items-center gap-x-2 gap-y-2">
-      {steps.map((step, i) => (
-        <span key={step} className="flex items-center gap-2">
-          {i > 0 ? (
-            <span aria-hidden className="text-slate-400">
-              →
-            </span>
-          ) : null}
-          <span className="rounded-xl bg-slate-100 px-3 py-1.5 text-sm font-semibold text-slate-700">
-            {step}
-          </span>
-        </span>
-      ))}
-    </div>
-  );
 }
 
 function Callout({ kind, text }: { kind: 'warn' | 'tip'; text: string }) {
@@ -103,17 +85,11 @@ export default async function GuideStartPage({
     return null;
   }
 
-  const guideLinks = [
-    { href: `/${locale}/guide/qr`, label: c.guideLinkQr },
-    { href: `/${locale}/guide/shop`, label: c.guideLinkShop },
-    { href: `/${locale}/guide/pos`, label: c.guideLinkPos },
-  ];
 
   return (
     <AppShell wide>
       <GuideFrame locale={locale} current="start">
       <article className="mx-auto max-w-3xl">
-
         <header>
           <GuideTitle>{guideNavFor(locale).items['start'].label}</GuideTitle>
           <GuideSubtitle>{c.heroTitle}</GuideSubtitle>
@@ -122,20 +98,22 @@ export default async function GuideStartPage({
               {p}
             </GuideLead>
           ))}
-                  <GuideActions actions={[{ href: `/${locale}/create`, label: c.ctaLabel }]} />
         </header>
 
         <GuideToc title={guideNavFor(locale).tocTitle} />
 
-        <section className="mt-8 rounded-[1.5rem] bg-gradient-to-br from-emerald-50 to-teal-50/60 p-5 ring-1 ring-emerald-200/60 sm:p-6">
-          <h2 data-toc="skip" className="text-lg font-bold text-emerald-900">
+        <section className="mt-8 rounded-2xl bg-emerald-50/70 p-5 ring-1 ring-inset ring-emerald-200/70 sm:p-6">
+          <h2 data-toc="skip" className="text-base font-bold text-slate-900">
             {c.checklistTitle}
           </h2>
-          {/* 順番に試す行動なので番号で示す (押せないチェックボックスの四角は「押せる」と誤解させた)。 */}
+          {/* 順番に試す行動なので番号で示す (押せないチェックボックスの四角は「押せる」と誤解させた)。
+              下の節の番号 (塗りのバッジ 1〜8) と取り違えないよう、白地に枠の小さな番号にする。 */}
           <ol className="mt-4 space-y-2.5">
             {c.checklistItems.map((item, index) => (
               <li key={item} className="flex items-start gap-3">
-                <span className={STEP_BADGE}>{index + 1}</span>
+                <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-white text-xs font-bold text-emerald-700 ring-1 ring-inset ring-emerald-300">
+                  {index + 1}
+                </span>
                 <span className="pt-0.5 text-sm font-medium leading-relaxed text-slate-800">{item}</span>
               </li>
             ))}
@@ -156,7 +134,7 @@ export default async function GuideStartPage({
             {section.figure ? (
               <GuideFigure image={section.figure} className="mt-5" />
             ) : null}
-            {section.flow ? <Flow steps={section.flow} /> : null}
+            {section.flow ? <GuideFlow steps={section.flow} /> : null}
             {renderSlot(section)}
             {section.bullets ? (
               <ul className="mt-3 space-y-2">
@@ -250,43 +228,13 @@ export default async function GuideStartPage({
           </Section>
         ))}
 
-        <Section title={c.guidesTitle}>
-          <ul className="mt-3 space-y-2">
-            {guideLinks.map((link) => (
-              <li key={link.href}>
-                <Link
-                  href={link.href}
-                  prefetch={false}
-                  className="text-sm font-semibold text-emerald-700 underline-offset-2 hover:underline"
-                >
-                  {link.label} →
-                </Link>
-              </li>
-            ))}
-          </ul>
-        </Section>
-
-        <section className="mt-12 rounded-[1.5rem] bg-gradient-to-br from-emerald-50 to-teal-50/60 p-6 text-center ring-1 ring-emerald-200/60 sm:p-8">
-          <h2 data-toc="skip" className="text-lg font-bold text-emerald-900">{c.ctaTitle}</h2>
+        <GuideCta title={c.ctaTitle} action={{ href: `/${locale}/create`, label: c.ctaLabel }}>
           {c.ctaBody.map((p) => (
-            <p
-              key={p}
-              className="mx-auto mt-2 max-w-xl text-sm leading-relaxed text-slate-700"
-            >
-              {p}
-            </p>
+            <p key={p}>{p}</p>
           ))}
-          <p className="mx-auto mt-4 max-w-xl text-sm font-semibold leading-relaxed text-emerald-900">
-            {c.ctaKicker}
-          </p>
-          <Link
-            href={`/${locale}/create`}
-            prefetch={false}
-            className={`mt-5 ${GUIDE_PRIMARY_ACTION}`}
-          >
-            {c.ctaLabel}
-          </Link>
-        </section>
+          <p className="font-semibold text-emerald-900">{c.ctaKicker}</p>
+        </GuideCta>
+        <GuideRelated locale={locale} current="start" links={['qr', 'shop', 'pos']} />
       </article>
       </GuideFrame>
     </AppShell>

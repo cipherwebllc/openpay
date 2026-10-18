@@ -26,9 +26,6 @@ export type ImageGuideContent = {
   readonly sections: readonly ImageGuideSection[];
   readonly quickTitle: string;
   readonly quickSteps: readonly string[];
-  readonly guidesTitle: string;
-  readonly guideLinkStore: string;
-  readonly guideLinkShop: string;
 };
 
 const JA: ImageGuideContent = {
@@ -124,9 +121,6 @@ const JA: ImageGuideContent = {
     'シークレットウィンドウで公開ページを開き、画像を確認',
   ],
 
-  guidesTitle: '関連ガイド',
-  guideLinkStore: 'クリエイター向け — チップ・デジタル商品販売',
-  guideLinkShop: 'レジ・モバイル注文 — 商品登録から注文受付まで',
 };
 
 const EN: ImageGuideContent = {
@@ -219,9 +213,6 @@ const EN: ImageGuideContent = {
     'Open your public page in a private window and confirm the image shows',
   ],
 
-  guidesTitle: 'Related guides',
-  guideLinkStore: 'For creators — tips & digital product sales',
-  guideLinkShop: 'POS & mobile ordering — from product setup to order intake',
 };
 
 export function imageGuideContentFor(locale: string): ImageGuideContent {
