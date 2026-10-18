@@ -149,8 +149,6 @@ export type SellGuideContent = {
   readonly ctaBody: string;
   readonly ctaButton: string;
   readonly ctaButtonHref: string;
-  readonly buyerGuideLead: string;
-  readonly buyerGuideLink: SellGuideLink;
 };
 
 const ja: SellGuideContent = {
@@ -249,7 +247,7 @@ const ja: SellGuideContent = {
 
   bazaarTitle: 'x402 Bazaar / agentic.market にも載せる（USDC 併売）',
   bazaarIntro:
-    'このページの出品（JPYC・Polygon）は /api/discovery と OpenPay の MCP / SDK からエージェントに発見されます。さらに出品フォームの「USDC (Base) でも販売する」を有効にすると、同じ API を Coinbase の x402 Bazaar / agentic.market にも掲載できます:',
+    'このページの出品（JPYC・Polygon）は /api/discovery と OpenPay の MCP / SDK からエージェントに発見されます。さらに出品フォームの「USDC (Base) でも販売する」を有効にすると、同じ API を Coinbase の x402 Bazaar / agentic.market にも掲載できます。',
   bazaarItems: [
     '出品フォームで USDC 価格（USD）と受取アドレス（Base）を設定 — OpenPay の USDC 側手数料は 0%',
     '発行される dual-rail スニペット（x402Gate）をあなたのサーバーに設置 — 402 に JPYC と USDC が並び、USDC 支払いは OpenPay が CDP（Coinbase Developer Platform）の facilitator へ中継',
@@ -303,11 +301,6 @@ const ja: SellGuideContent = {
     '掲載は無料です。まず 402 ゲートを用意し、URL と価格、返すデータの説明を登録してください。',
   ctaButton: '出品する',
   ctaButtonHref: '/discovery',
-  buyerGuideLead: '買う側の設定と安全な購入手順は、',
-  buyerGuideLink: {
-    label: 'AI が支払うガイド',
-    href: '/guide/ai-pay',
-  },
 };
 
 const en: SellGuideContent = {
@@ -406,7 +399,7 @@ const en: SellGuideContent = {
 
   bazaarTitle: 'Also appear on the x402 Bazaar / agentic.market (sell in USDC too)',
   bazaarIntro:
-    'Listings on this page (JPYC on Polygon) are discovered by agents via /api/discovery and the OpenPay MCP / SDK. In addition, enable “Also sell in USDC (Base)” on the listing form to put the same API on Coinbase’s x402 Bazaar / agentic.market:',
+    'Listings on this page (JPYC on Polygon) are discovered by agents via /api/discovery and the OpenPay MCP / SDK. In addition, enable “Also sell in USDC (Base)” on the listing form to put the same API on Coinbase’s x402 Bazaar / agentic.market.',
   bazaarItems: [
     'Set a USDC price (USD) and a receiving address (Base) on the listing form — OpenPay takes 0% on the USDC side',
     'Install the generated dual-rail snippet (x402Gate) on your server — the 402 carries both JPYC and USDC, and OpenPay relays USDC payments to the CDP (Coinbase Developer Platform) facilitator',
@@ -460,11 +453,6 @@ const en: SellGuideContent = {
     'Listing is free. Prepare a 402 gate, then register its URL, price, and a description of the data it returns.',
   ctaButton: 'List now',
   ctaButtonHref: '/discovery',
-  buyerGuideLead: 'For buyer setup and safe purchasing, see ',
-  buyerGuideLink: {
-    label: 'the AI payments guide',
-    href: '/guide/ai-pay',
-  },
 };
 
 export const SELL_GUIDE: Record<SellGuideLocale, SellGuideContent> = { ja, en };

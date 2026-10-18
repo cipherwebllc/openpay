@@ -149,7 +149,7 @@ const JA: StoreGuideContent = {
   categoriesTitle: '販売できる商品の例',
   categoriesExamples:
     'PDF・電子書籍・プロンプト・ソースコード・API・MCP サーバー・イラスト・NFT・動画・音源・BGM・テンプレート・3D モデル・VRM・Unity 素材・ゲーム素材 など。',
-  feeTitle: '手数料',
+  feeTitle: '利用料',
   feeBody: `売り手手数料はありません。JPYC 購入では、買い手が商品価格に加えて x402 利用料 (${X402_RATE_JA}) を負担します。USDC 購入 (${STORE_USDC_CHAIN}) の OpenPay x402 利用料は ${STORE_USDC_FEE_PERCENT}% (無料) です。チップの受け取りにも手数料はありません。`,
   startTitle: '始め方 (3 ステップ)',
   startSteps: [

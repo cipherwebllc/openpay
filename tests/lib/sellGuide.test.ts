@@ -123,12 +123,12 @@ describe('SELL_GUIDE: 主要リンク', () => {
     expect(c.sdkPackage.href).toBe(expected.npm);
   });
 
-  it.each(LOCALES)('%s: discovery と買い手ガイドの内部リンクが正しい', (loc) => {
+  // 買い手ガイド (/guide/ai-pay) へは末尾の「前へ」で行く (帯の下段に同じ行き先を重ねない)。
+  it.each(LOCALES)('%s: discovery への内部リンクが正しい', (loc) => {
     const c = SELL_GUIDE[loc];
     expect(c.snippetLink.href).toBe('/discovery');
     expect(c.registrationLink.href).toBe('/discovery');
     expect(c.ctaButtonHref).toBe('/discovery');
-    expect(c.buyerGuideLink.href).toBe('/guide/ai-pay');
   });
 
   it('ja/en で tx・URL がすべて同一', () => {

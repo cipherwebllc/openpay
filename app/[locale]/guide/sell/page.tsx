@@ -6,7 +6,6 @@
 // 掟 3: このファイルは default / generateMetadata 以外を export しない。
 
 import type { Metadata } from 'next';
-import Link from 'next/link';
 import { setRequestLocale } from 'next-intl/server';
 import { AppShell } from '@/components/AppShell';
 import { GuideFrame } from '@/components/guide/GuideFrame';
@@ -142,12 +141,9 @@ export default async function GuideSellPage({
           <StepList
             steps={c.listingSteps}
           />
-          <Link
-            href={`/${locale}${c.registrationLink.href}`}
-            className="mt-5 inline-flex items-center justify-center rounded-xl bg-white px-4 py-2 text-sm font-semibold text-emerald-700 shadow-sm ring-1 ring-emerald-200 transition-colors hover:bg-emerald-50"
-          >
-            {c.registrationLink.label}
-          </Link>
+          <p className="mt-5">
+            <GuideMoreLink href={`/${locale}${c.registrationLink.href}`}>{c.registrationLink.label}</GuideMoreLink>
+          </p>
           {/* Bazaar は別の発見面 (USDC/Base/CDP)。出品者の「Bazaar にも載る?」の誤解を先回りで解く。
               任意の拡張なので、見出しと要点だけを見せて本文はたたむ (plans/guide-ux-polish-2.md P3)。 */}
           <div className="mt-6">
@@ -221,9 +217,7 @@ export default async function GuideSellPage({
           <p className="mt-4 text-sm leading-relaxed text-slate-700">
             {c.pricingAdvice}
           </p>
-          <p className="mt-3 rounded-xl bg-slate-50 p-4 text-sm leading-relaxed text-slate-700 ring-1 ring-slate-200/70">
-            {c.pricingGuard}
-          </p>
+          <GuideCallout kind="info" className="mt-3">{c.pricingGuard}</GuideCallout>
         </Section>
 
         {/* 実売の証拠は手順の後 (手順を知りたい人が先に読む)。 */}
@@ -255,17 +249,6 @@ export default async function GuideSellPage({
         <GuideCta
           title={c.ctaTitle}
           action={{ href: `/${locale}${c.ctaButtonHref}`, label: c.ctaButton }}
-          footer={
-            <p>
-              {c.buyerGuideLead}
-              <Link
-                href={`/${locale}${c.buyerGuideLink.href}`}
-                className="font-medium text-emerald-700 underline decoration-emerald-300 underline-offset-2 hover:text-emerald-900"
-              >
-                {c.buyerGuideLink.label}
-              </Link>
-            </p>
-          }
         >
           <p>{c.ctaBody}</p>
         </GuideCta>

@@ -15,7 +15,6 @@ export const FIGURE_DIMS: Record<string, { w: number; h: number }> = {
   'hero.webp': { w: 1280, h: 640 },
   'overview-flow.svg': { w: 1000, h: 320 },
   'pos-add-method.svg': { w: 760, h: 480 },
-  'payment-success.svg': { w: 420, h: 720 },
   'history-reconcile.svg': { w: 1000, h: 420 },
   'refund-not-reversal.svg': { w: 1000, h: 500 },
 };
@@ -118,6 +117,24 @@ export function StepList({
               {step.body}
             </p>
           </div>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+/**
+ * 題のない 1 行ずつの手順 (決済QR の流れ・レジの手順・ストアの始め方など)。li に text-sm を付けて、GuideFrame の本文の
+ * 拡大 (15px / sm 以上 16px・行間 28px) を効かせる (以前は span の text-sm で、手順だけ本文より小さい 14px だった・P6)。
+ * お客様の手順は badgeClassName={STEP_BADGE_CUSTOMER}。
+ */
+export function StepLines({ steps, badgeClassName = STEP_BADGE }: { steps: readonly string[]; badgeClassName?: string }) {
+  return (
+    <ol className="mt-4 space-y-3">
+      {steps.map((step, i) => (
+        <li key={step} className="flex items-start gap-3 text-sm leading-relaxed text-slate-700">
+          <span className={badgeClassName}>{i + 1}</span>
+          <span className="min-w-0 break-words">{step}</span>
         </li>
       ))}
     </ol>

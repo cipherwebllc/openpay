@@ -20,6 +20,8 @@ import { GuideToc } from '@/components/guide/GuideToc';
 import { STEP_BADGE_CUSTOMER, Section, StepList } from '@/components/guide/PosGuidePieces';
 import { guideNavFor } from '@/lib/guideNav';
 import { walletGuideContentFor, walletGuideMetadata } from '@/lib/walletGuide';
+import { payGuideContentFor } from '@/lib/payGuide';
+import { GuideCta } from '@/components/guide/GuideEnd';
 import { GuideMoreLink } from '@/components/guide/GuideLink';
 
 export async function generateMetadata({
@@ -72,6 +74,7 @@ export default async function GuideWalletPage({
   const { locale } = await params;
   setRequestLocale(locale);
   const c = walletGuideContentFor(locale);
+  const pay = payGuideContentFor(locale);
   const nav = guideNavFor(locale);
 
   return (
@@ -110,6 +113,11 @@ export default async function GuideWalletPage({
           <StepList steps={c.wcSteps} badgeClassName={STEP_BADGE_CUSTOMER} />
           <GuideCallout kind="tip">{c.wcTip}</GuideCallout>
         </Section>
+
+        {/* 終わり方は「JPYC で支払う」と同じ帯 (文言も同じ・ほかのガイドと同じ型にそろえる・P6)。 */}
+        <GuideCta title={pay.ctaTitle} action={{ href: `/${locale}${c.scanCta.path}`, label: c.scanCta.label }}>
+          <p>{pay.ctaBody}</p>
+        </GuideCta>
       </article>
       </GuideFrame>
     </AppShell>

@@ -88,7 +88,7 @@ export default async function GuidePosPage({
         <Section title={c.needTitle}>
           <BulletList
             items={c.need}
-            marker="•"
+            marker="✓"
           />
         </Section>
 
@@ -103,7 +103,7 @@ export default async function GuidePosPage({
           <StepList
             steps={c.setupSteps}
           />
-          <GuideFigure image={c.setupImage} />
+          <GuideFigure image={c.setupImage} className="mx-auto my-6 max-w-md" />
         </Section>
 
         <Section title={c.flowTitle}>
@@ -111,11 +111,6 @@ export default async function GuidePosPage({
             steps={c.flowSteps}
           />
           <GuideCallout kind="warn">{c.safetyNote}</GuideCallout>
-          <GuideFigure
-            image={c.successImage}
-            caption={c.successCaption}
-            className="mx-auto mt-6 max-w-[260px]"
-          />
         </Section>
 
         <Section title={c.reconcileTitle}>

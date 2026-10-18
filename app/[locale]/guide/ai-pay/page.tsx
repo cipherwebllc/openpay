@@ -1,7 +1,7 @@
 // /guide/ai-pay: AI エージェント自身が JPYC で自律支払いする買い手向けガイド。
 //
 // content SOT は lib/aiPayGuide.ts (ja/en 同梱)。描画は PosGuidePieces の
-// Section/BulletList/StepList と AgentGuidePieces の CodeBlock/AddressCallout を再利用する。
+// Section/BulletList/StepList (払う側の手順なので青の番号) と AgentGuidePieces の CodeBlock/AddressCallout を再利用する。
 // SEO 集客コンテンツなので noindex は設定しない。
 // 掟 3: このファイルは default / generateMetadata 以外を export しない。
 
@@ -19,6 +19,7 @@ import { GuideToc } from '@/components/guide/GuideToc';
 import {
   BulletList,
   Section,
+  STEP_BADGE_CUSTOMER,
   StepList,
 } from '@/components/guide/PosGuidePieces';
 import {
@@ -27,7 +28,7 @@ import {
 } from '@/components/guide/AgentGuidePieces';
 import { GuideVideo } from '@/components/guide/GuideVideo';
 import { HOWTO_VIDEO_UI, howtoVideoFor } from '@/lib/howtoVideos';
-import { GuideMoreLink, GuideTxLink } from '@/components/guide/GuideLink';
+import { GUIDE_INLINE_LINK, GuideMoreLink, GuideTxLink } from '@/components/guide/GuideLink';
 import {
   aiPayGuideContentFor,
   guideAiPayMetadata,
@@ -78,9 +79,7 @@ export default async function GuideAiPayPage({
           <p className="mt-3 text-sm leading-relaxed text-slate-700">
             {c.mechanismIntro}
           </p>
-          <StepList
-            steps={c.mechanismSteps}
-          />
+          <StepList steps={c.mechanismSteps} badgeClassName={STEP_BADGE_CUSTOMER} />
           <GuideCallout kind="info">{c.receiptNote}</GuideCallout>
         </Section>
 
@@ -137,9 +136,7 @@ export default async function GuideAiPayPage({
             </a>
             {c.stewardSetupTail}
           </p>
-          <p className="mt-3 rounded-xl bg-slate-50 p-4 text-sm leading-relaxed text-slate-700 ring-1 ring-slate-200/70">
-            {c.stewardRecommendation}
-          </p>
+          <GuideCallout kind="info" className="mt-3">{c.stewardRecommendation}</GuideCallout>
           </GuideDisclosure>
 
           <GuideDisclosure
@@ -196,9 +193,7 @@ export default async function GuideAiPayPage({
           <p className="mt-3 text-sm leading-relaxed text-slate-700">
             {c.jpycBody}
           </p>
-          <StepList
-            steps={c.jpycSteps}
-          />
+          <StepList steps={c.jpycSteps} badgeClassName={STEP_BADGE_CUSTOMER} />
           <AddressCallout
             label={c.jpycAddressLabel}
             address={c.jpycAddress}
@@ -220,30 +215,13 @@ export default async function GuideAiPayPage({
           title={c.ctaTitle}
           action={{ href: `/${locale}${c.ctaButtonHref}`, label: c.ctaButton }}
           footer={
-            <>
-              <p>
-                {c.sdkLead}
-                <a
-                  href={c.sdkLink.href}
-                  target="_blank"
-                  rel="noreferrer noopener"
-                  className="font-medium text-emerald-700 underline decoration-emerald-300 underline-offset-2 hover:text-emerald-900"
-                >
-                  {c.sdkLink.label}
-                </a>
-                {c.sdkTail}
-              </p>
-              <p>
-                {c.sellerLead}
-                <Link
-                  href={`/${locale}${c.sellerLink.href}`}
-                  className="font-medium text-emerald-700 underline decoration-emerald-300 underline-offset-2 hover:text-emerald-900"
-                >
-                  {c.sellerLink.label}
-                </Link>
-                {c.sellerTail}
-              </p>
-            </>
+            <p>
+              {c.sdkLead}
+              <a href={c.sdkLink.href} target="_blank" rel="noreferrer noopener" className={GUIDE_INLINE_LINK}>
+                {c.sdkLink.label}
+              </a>
+              {c.sdkTail}
+            </p>
           }
         >
           <p>{c.ctaBody}</p>

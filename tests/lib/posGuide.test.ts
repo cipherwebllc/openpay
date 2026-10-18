@@ -187,13 +187,13 @@ describe('public/guide: 図版ファイルの実在と整合 (リンク切れ防
     }
   });
 
-  // 会計の 4 ステップの図とコスト比較のグラフは、手順の一覧と表の繰り返しだったので外した (plans/guide-ux-polish-2.md P5)。
-  it('想定図版がすべて存在する (pos 5 枚 + start 1 枚)', () => {
+  // 会計の 4 ステップの図・コスト比較のグラフ (P5)・お客様の完了画面の絵 (P6) は、手順の一覧と表の繰り返しだったので外した。
+  // 「残高の増加を検知は目安」は手順 4 の本文に残す (下の X10)。
+  it('想定図版がすべて存在する (pos 4 枚 + start 1 枚)', () => {
     const expected = [
       'hero.webp',
       'overview-flow.svg',
       'pos-add-method.svg',
-      'payment-success.svg',
       'history-reconcile.svg',
       // /guide/start (返金は取消ではない の概念図)
       'refund-not-reversal.svg',
@@ -265,12 +265,6 @@ describe('POS_GUIDE: 文言フェンス (回帰防止)', () => {
     }
   });
 
-  it('完了画像は顧客側の画面であることをキャプションで明示', () => {
-    expect(POS_GUIDE.ja.successCaption).toContain('お客様');
-    expect(POS_GUIDE.ja.successCaption).toContain('残高の増加を検知');
-    expect(POS_GUIDE.en.successCaption).toMatch(/customer/i);
-    expect(POS_GUIDE.en.successCaption).toMatch(/Balance increase detected/i);
-  });
 
   it('安全注記は「着金を確認する前に渡さない」(完了表示頼みにしない)', () => {
     expect(POS_GUIDE.ja.safetyNote).toContain('着金を確認する前');
@@ -278,18 +272,6 @@ describe('POS_GUIDE: 文言フェンス (回帰防止)', () => {
   });
 });
 
-// ── (5b) 完了画像 SVG の文言フェンス (顧客側・旧文言の混入防止) ────
-describe('payment-success.svg: 顧客側の文言になっている', () => {
-  const svg = readFileSync(join(GUIDE_DIR, 'payment-success.svg'), 'utf8');
-
-  it('「支払い完了」を含む', () => {
-    expect(svg).toContain('支払い完了');
-  });
-  it('店舗/受領目線の旧文言 (受け取りました / 着金済み) を含まない', () => {
-    expect(svg).not.toContain('受け取りました');
-    expect(svg).not.toContain('着金済み');
-  });
-});
 
 it('X10: POS flow does not authorize handing over goods from a balance hint', () => {
   expect(POS_GUIDE.ja.flowSteps[3].body).toContain('この支払いを特定');

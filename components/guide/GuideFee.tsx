@@ -4,7 +4,7 @@
 
 import Link from 'next/link';
 import { ArrowRight } from 'lucide-react';
-import { GuideDisclosure } from '@/components/guide/GuideDisclosure';
+import { GuideDisclosure, GuideDisclosureGroup } from '@/components/guide/GuideDisclosure';
 
 export type GuideFeeItem = { readonly focal: string; readonly title: string; readonly body: string };
 
@@ -21,7 +21,8 @@ export function GuideFeeList({
 }) {
   return (
     <>
-      <div className="mt-4 space-y-3">
+      {/* 複数の場合は 1 枚の箱に区切り線で並べる (store・sell と同じ GuideDisclosureGroup・P6)。 */}
+      <GuideDisclosureGroup>
         {items.map((item) => (
           <GuideDisclosure
             key={item.title}
@@ -35,7 +36,7 @@ export function GuideFeeList({
             <p className="text-sm leading-relaxed text-slate-600">{item.body}</p>
           </GuideDisclosure>
         ))}
-      </div>
+      </GuideDisclosureGroup>
       <p className="mt-3 text-sm leading-relaxed text-slate-600">{note}</p>
       <Link
         href={pricingHref}

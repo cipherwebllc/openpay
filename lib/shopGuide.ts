@@ -123,7 +123,7 @@ const JA: ShopGuideContent = {
     '届いた注文と売上履歴を確認する — 必要なら会計 CSV を出力',
   ],
 
-  guideLinkDiscount: 'JPYC 払いで割引する — 決済QR・レジ・モバイルオーダーの値引き',
+  guideLinkDiscount: 'JPYC 払いで割引する',
 
   ctaTitle: '今日から、専用端末なしで',
   ctaBody:
@@ -207,7 +207,7 @@ const EN: ShopGuideContent = {
     'Check incoming orders and sales history — export accounting CSV if needed',
   ],
 
-  guideLinkDiscount: 'Discounts for paying with JPYC — Payment QR, register and mobile ordering',
+  guideLinkDiscount: 'Discounts for paying with JPYC',
 
   ctaTitle: 'Start today, no dedicated terminal',
   ctaBody:

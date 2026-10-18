@@ -4,7 +4,7 @@ import { describe, it, expect } from 'vitest';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { GuideVideo } from '@/components/guide/GuideVideo';
-import { HOWTO_VIDEOS, HOWTO_VIDEO_UI } from '@/lib/howtoVideos';
+import { HOWTO_VIDEOS, HOWTO_VIDEO_UI, howtoVideoShortTitle } from '@/lib/howtoVideos';
 
 const video = HOWTO_VIDEOS.creator;
 
@@ -21,7 +21,9 @@ describe('GuideVideo', () => {
     expect(link).toHaveAttribute('href', `https://www.youtube.com/watch?v=${video.youtubeId}`);
     expect(link).toHaveAttribute('target', '_blank');
     expect(link).toHaveAttribute('rel', 'noopener noreferrer');
-    expect(within(button).getByText(video.title)).toBeInTheDocument();
+    // カードの題は頭の「OpenPay の使い方｜クリエイター向け：」を省いた短い題 (再生後の iframe の title は元の題)。
+    expect(within(button).getByText(howtoVideoShortTitle(video))).toBeInTheDocument();
+    expect(howtoVideoShortTitle(video)).not.toContain('OpenPay の使い方');
   });
 
   it('押すと youtube-nocookie の iframe (自動再生・origin だけの Referer・sandbox) に替わる', () => {

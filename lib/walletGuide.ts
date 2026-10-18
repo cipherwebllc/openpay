@@ -68,7 +68,7 @@ const JA: WalletGuideContent = {
   scanCta: { path: '/scan', label: 'スキャンして支払う' },
 
   summary:
-    'MetaMask が基本です。初めての方には、アプリの中で JPYC の発行・償還ができるマイナウォレットや HashPort Wallet もおすすめです。お店の QR は、スマホのカメラか「スキャンして支払う」で読み取ってください (マイナウォレットや HashPort Wallet のアプリの QR 読み取りでは開けません)。',
+    'お店の QR は、スマホのカメラか「スキャンして支払う」で読み取ってください (マイナウォレットや HashPort Wallet のアプリの QR 読み取りでは開けません)。',
   summaryLink: 'ウォレットの選び方・QR の読み取り方・つなぎ方',
 
   walletsTitle: 'おすすめのウォレット',
@@ -148,7 +148,7 @@ const EN: WalletGuideContent = {
   scanCta: { path: '/scan', label: 'Scan to pay' },
 
   summary:
-    'MetaMask is the standard. If you are new to wallets, MynaWallet and HashPort Wallet are good choices too: you can issue and redeem JPYC inside these apps. Scan the shop’s QR with your phone camera or with “Scan to pay” (the QR scanners in the MynaWallet and HashPort Wallet apps cannot open it).',
+    'Scan the shop’s QR with your phone camera or with “Scan to pay” (the QR scanners in the MynaWallet and HashPort Wallet apps cannot open it).',
   summaryLink: 'Choosing a wallet, scanning the QR and connecting',
 
   walletsTitle: 'Recommended wallets',
