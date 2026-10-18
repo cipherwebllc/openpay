@@ -59,7 +59,7 @@ export default async function GuideImageUrlPage({
   ];
 
   return (
-    <AppShell>
+    <AppShell wide>
       <GuideFrame locale={locale} current="image-url">
       <article className="mx-auto max-w-3xl">
 

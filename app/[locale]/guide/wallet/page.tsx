@@ -75,7 +75,7 @@ export default async function GuideWalletPage({
   const nav = guideNavFor(locale);
 
   return (
-    <AppShell>
+    <AppShell wide>
       <GuideFrame locale={locale} current="wallet">
       <article className="mx-auto max-w-3xl">
 

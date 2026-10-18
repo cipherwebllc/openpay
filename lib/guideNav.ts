@@ -52,6 +52,9 @@ type GuideNavCopy = {
   readonly navTitle: string;
   /** 長いガイドのページの頭の下に置く「このページの内容」(components/guide/GuideToc.tsx)。 */
   readonly tocTitle: string;
+  /** ガイドの末尾の「前へ / 次へ」(目次の並び順で 1 つ前と 1 つ後のガイド)。 */
+  readonly prevLabel: string;
+  readonly nextLabel: string;
   /** 目次の先頭リンク (→ /guide) とハブの h1。 */
   readonly hubTitle: string;
   readonly hubLead: string;
@@ -72,6 +75,8 @@ type GuideNavCopy = {
 const JA: GuideNavCopy = {
   navTitle: 'ガイド一覧',
   tocTitle: 'このページの内容',
+  prevLabel: '前へ',
+  nextLabel: '次へ',
   hubTitle: 'OpenPay でできること',
   hubLead: 'やりたいことに合わせて、ガイドを選んでください。',
   hubStartTitle: 'はじめての方へ',
@@ -149,6 +154,8 @@ const JA: GuideNavCopy = {
 const EN: GuideNavCopy = {
   navTitle: 'Guides',
   tocTitle: 'On this page',
+  prevLabel: 'Previous',
+  nextLabel: 'Next',
   hubTitle: 'What you can do with OpenPay',
   hubLead: 'Pick the guide that matches what you want to do.',
   hubStartTitle: 'New here?',

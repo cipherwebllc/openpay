@@ -1,6 +1,7 @@
 'use client';
 
-// 長いガイドの「このページの内容」(plans/guide-ux-polish.md フェーズ 1)。ページの頭の下に、たたんで置く。
+// 長いガイドの「このページの内容」(plans/guide-ux-polish.md フェーズ 1)。ページの頭の下に、たたんで置く
+// (どの幅でも最初は閉じる・xl 以上は右の列の GuideOnThisPage が代わりに出るので隠す)。
 // 見出しの一覧は、描画後に同じ article の h2 を集めて作る (ページごとに一覧を書かない = 見出しを足しても
 // ずれない)。data-toc="skip" の h2 (動画・関連ガイド・行動ボタンの箱・小さなカード) は載せない。名前は
 // data-toc-label (番号のバッジを除いた見出し) を優先する。番号は付けない (見出し側の番号と二重になるため)。
@@ -23,8 +24,6 @@ export function GuideToc({ title }: { title: string }) {
     headings.forEach((heading, index) => {
       if (!heading.id) heading.id = `section-${index + 1}`;
     });
-    // PC (lg 以上) は余白があるので最初から開いておく (スマホは閉じて本文を先に見せる)。
-    if (ref.current && window.matchMedia('(min-width: 1024px)').matches) ref.current.open = true;
     setItems(
       headings.map((heading) => ({
         id: heading.id,
@@ -36,7 +35,7 @@ export function GuideToc({ title }: { title: string }) {
   return (
     <details
       ref={ref}
-      className="group/toc mt-6 rounded-xl border border-slate-200 bg-white print:hidden"
+      className="group/toc mt-6 rounded-xl border border-slate-200 bg-white xl:hidden print:hidden"
     >
       <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 rounded-xl px-4 text-sm font-semibold text-slate-900 [&::-webkit-details-marker]:hidden">
         <ListTree className="h-4 w-4 shrink-0 text-slate-500" aria-hidden />

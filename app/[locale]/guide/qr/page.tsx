@@ -70,7 +70,7 @@ export default async function GuideQrPage({
   ];
 
   return (
-    <AppShell>
+    <AppShell wide>
       <GuideFrame locale={locale} current="qr">
       <article className="mx-auto max-w-3xl">
 

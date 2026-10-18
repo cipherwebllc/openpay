@@ -46,7 +46,7 @@ export default async function GuidePayPage({
   const video = howtoVideoFor(locale, 'pay');
 
   return (
-    <AppShell>
+    <AppShell wide>
       <GuideFrame locale={locale} current="pay">
       <article className="mx-auto max-w-3xl">
 

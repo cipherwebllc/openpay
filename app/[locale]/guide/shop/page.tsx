@@ -70,7 +70,7 @@ export default async function GuideShopPage({
   ];
 
   return (
-    <AppShell>
+    <AppShell wide>
       <GuideFrame locale={locale} current="shop">
       <article className="mx-auto max-w-3xl">
 

@@ -51,7 +51,7 @@ export default async function GuideStorePage({
   const tLanding = await getTranslations({ locale, namespace: 'Landing' });
 
   return (
-    <AppShell>
+    <AppShell wide>
       <GuideFrame locale={locale} current="store">
       <article className="mx-auto max-w-3xl">
 
