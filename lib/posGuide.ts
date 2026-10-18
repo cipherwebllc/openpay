@@ -50,7 +50,6 @@ export type GuideContent = {
 
   readonly flowTitle: string;
   readonly flowSteps: readonly GuideStep[];
-  readonly flowImage: GuideImage;
   readonly successImage: GuideImage;
   readonly successCaption: string;
   readonly safetyNote: string;
@@ -80,7 +79,6 @@ export type GuideContent = {
   readonly costRows: readonly GuideCostRow[];
   readonly costNote: string;
   readonly feeNote: string;
-  readonly costImage: GuideImage;
 
   readonly faqTitle: string;
   readonly faqs: readonly GuideFaq[];
@@ -171,7 +169,6 @@ const ja: GuideContent = {
       body: 'QR 画面の「残高の増加を検知」は、この支払いを特定するものではありません。取引履歴かブロックチェーン Explorer で該当する支払いを確かめてから、商品を渡してレジを締めます。',
     },
   ],
-  flowImage: { file: 'four-steps.svg', alt: '会計→QR 表示→スキャン→完了確認 の 4 ステップ' },
   successImage: { file: 'payment-success.svg', alt: 'お客様のスマホに表示される支払い完了画面' },
   successCaption:
     '※お客様側の完了画面の例です。店舗側の「残高の増加を検知」は目安です。該当する支払いは取引履歴で確認してください。',
@@ -215,7 +212,6 @@ const ja: GuideContent = {
     '※手数料の最新・正確な条件は、利用規約・特定商取引法に基づく表記をご確認ください。比較は一般的な例で、契約条件により異なります。',
   feeNote:
     '着金額について：ガスレス決済ではご利用料（決済額の約 1%・最低 約 2 JPYC）が自動で差し引かれて着金します（例：¥1,200 → 約 ¥1,188）。POS に記録される売上額より、着金額は少なくなります。',
-  costImage: { file: 'cost-compare.svg', alt: 'カード決済と無料 POS×OpenPay のコスト比較イメージ' },
 
   faqTitle: 'よくある質問',
   faqs: [
@@ -243,7 +239,7 @@ const ja: GuideContent = {
 
   ctaTitle: 'まずは試してみる',
   ctaBody: '決済QR の作成は無料・登録不要です。受取ウォレットを接続して、最初の QR を作ってみましょう。',
-  ctaButton: '決済QRを作成する',
+  ctaButton: '決済QRを作る',
   ctaButtonHref: '/create',
 
   backHome: '← トップにもどる',
@@ -321,7 +317,6 @@ const en: GuideContent = {
       body: 'The QR screen’s “Balance increase detected” hint does not identify this payment. Check the payment in transaction history or a blockchain explorer before handing over goods and closing the sale.',
     },
   ],
-  flowImage: { file: 'four-steps.svg', alt: 'Four steps: ring up → show QR → scan → confirm' },
   successImage: { file: 'payment-success.svg', alt: 'The payment-complete screen shown on the customer’s phone' },
   successCaption:
     '* Example of the customer’s completion screen. The merchant’s “Balance increase detected” hint is advisory. Verify the relevant payment in transaction history.',
@@ -365,7 +360,6 @@ const en: GuideContent = {
     '* For the latest, exact fee terms, see OpenPay’s Terms / legal notice. The comparison is a general example and varies by contract.',
   feeNote:
     'About the amount received: the usage fee (about 1%, minimum about 2 JPYC) is auto-deducted at settlement (e.g. ¥1,200 → about ¥1,188), so you receive slightly less than the sale amount your POS records.',
-  costImage: { file: 'cost-compare.svg', alt: 'Cost comparison: card payment vs free POS × OpenPay' },
 
   faqTitle: 'FAQ',
   faqs: [

@@ -26,7 +26,7 @@ describe('/guide/mobile-order のウォレットの案内', () => {
     // 「JPYC で支払う」と同じ短い案内と /guide/wallet へのリンク (選び方・QR の読み取り方・つなぎ方はそのページ)。
     const sec = screen.getByRole('heading', { level: 2, name: nav.items.wallet.label }).closest('section')!;
     expect(within(sec).getByText(w.summary)).toBeInTheDocument();
-    expect(within(sec).getByRole('link', { name: `${w.summaryLink} →` })).toHaveAttribute('href', `/${locale}/guide/wallet`);
+    expect(within(sec).getByRole('link', { name: w.summaryLink })).toHaveAttribute('href', `/${locale}/guide/wallet`);
 
     // 用意するもののウォレットの項目から「ウォレットを選ぶ」へ誘導する。
     expect(c.need.some((item) => item.includes('HashPort Wallet') && item.includes(nav.items.wallet.label))).toBe(true);

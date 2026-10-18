@@ -21,11 +21,7 @@ export type ImageGuideContent = {
   readonly backHome: string;
   readonly heroTitle: string;
   readonly heroLead: readonly string[];
-  readonly flowTitle: string;
-  readonly flow: readonly string[];
   readonly sections: readonly ImageGuideSection[];
-  readonly quickTitle: string;
-  readonly quickSteps: readonly string[];
 };
 
 const JA: ImageGuideContent = {
@@ -36,10 +32,8 @@ const JA: ImageGuideContent = {
 
   heroTitle: 'アップロードは不要。公開されている画像の URL を貼るだけです。',
   heroLead: [
-    'インターネットに公開されている画像の URL (https://〜) を、OpenPay の画像の欄に貼ると表示されます。やることは 3 つです。',
+    'インターネットに公開されている画像の URL (https://〜) を、OpenPay の画像の欄に貼ると表示されます。',
   ],
-  flowTitle: 'やることはこれだけ',
-  flow: ['画像をアップロード', '画像 URL をコピー', 'OpenPay に貼り付け'],
 
   sections: [
     {
@@ -62,7 +56,7 @@ const JA: ImageGuideContent = {
         },
         {
           title: 'OpenPay へ貼り付ける',
-          body: 'コピーした URL を OpenPay の「画像 URL」欄へ貼り付けて保存します。例えばモバイル注文では、設定した画像が注文ページの先頭に丸く表示されます。',
+          body: 'コピーした URL を OpenPay の「画像 URL」欄へ貼り付けて保存します。例えばモバイルオーダーでは、設定した画像が注文ページの先頭に丸く表示されます。',
         },
       ],
     },
@@ -113,13 +107,6 @@ const JA: ImageGuideContent = {
     },
   ],
 
-  quickTitle: '迷ったらこれだけ',
-  quickSteps: [
-    'Imgur などへ画像をアップロード',
-    'https:// から始まる画像 URL をコピー',
-    'OpenPay の「画像 URL」に貼り付け',
-    'シークレットウィンドウで公開ページを開き、画像を確認',
-  ],
 
 };
 
@@ -131,10 +118,8 @@ const EN: ImageGuideContent = {
 
   heroTitle: 'No upload needed — just paste the URL of a public image.',
   heroLead: [
-    'Paste the URL (https://…) of an image that is public on the internet into an image field in OpenPay and it shows up. There are three steps.',
+    'Paste the URL (https://…) of an image that is public on the internet into an image field in OpenPay and it shows up.',
   ],
-  flowTitle: 'The whole flow',
-  flow: ['Upload the image', 'Copy the image URL', 'Paste it into OpenPay'],
 
   sections: [
     {
@@ -205,13 +190,6 @@ const EN: ImageGuideContent = {
     },
   ],
 
-  quickTitle: 'If you remember one thing',
-  quickSteps: [
-    'Upload the image to a service like Imgur',
-    'Copy the image URL starting with https://',
-    'Paste it into the "Image URL" field on OpenPay',
-    'Open your public page in a private window and confirm the image shows',
-  ],
 
 };
 

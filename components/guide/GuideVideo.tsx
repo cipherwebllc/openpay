@@ -7,6 +7,7 @@
 import { useEffect, useRef, useState } from 'react';
 import Image from 'next/image';
 import { Play } from 'lucide-react';
+import { GUIDE_INLINE_LINK } from '@/components/guide/GuideLink';
 import {
   HOWTO_VIDEO_UI,
   howtoVideoEmbedUrl,
@@ -88,7 +89,7 @@ function YouTubeLink({ video }: { video: HowtoVideo }) {
       href={howtoVideoWatchUrl(video)}
       target="_blank"
       rel="noopener noreferrer"
-      className="font-medium text-slate-500 underline underline-offset-2 hover:text-slate-800"
+      className={GUIDE_INLINE_LINK}
     >
       {HOWTO_VIDEO_UI.openOnYouTube}
     </a>

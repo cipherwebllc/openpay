@@ -12,7 +12,9 @@ import { AppShell } from '@/components/AppShell';
 import { GuideFrame } from '@/components/guide/GuideFrame';
 import { GuideFaq } from '@/components/guide/GuideFaq';
 import { guideNavFor } from '@/lib/guideNav';
-import { GuideActions, GuideLead, GuideSubtitle, GuideTitle } from '@/components/guide/GuideHeader';
+import { ArrowUpRight } from 'lucide-react';
+import { GUIDE_TAG, GUIDE_SECONDARY_ACTION, GuideActions, GuideLead, GuideSubtitle, GuideTitle } from '@/components/guide/GuideHeader';
+import { GuideCallout } from '@/components/guide/GuideCallout';
 import { GuideCta, GuideRelated } from '@/components/guide/GuideEnd';
 import { GuideToc } from '@/components/guide/GuideToc';
 import {
@@ -69,7 +71,6 @@ export default async function GuidePosPage({
             <BulletList
               items={c.canDo}
               marker="✓"
-              markerClassName="text-emerald-600"
             />
           </section>
 
@@ -80,7 +81,6 @@ export default async function GuidePosPage({
             <BulletList
               items={c.cannot}
               marker="•"
-              markerClassName="text-slate-400"
             />
           </section>
         </div>
@@ -89,7 +89,6 @@ export default async function GuidePosPage({
           <BulletList
             items={c.need}
             marker="•"
-            markerClassName="text-emerald-600"
           />
         </Section>
 
@@ -111,10 +110,7 @@ export default async function GuidePosPage({
           <StepList
             steps={c.flowSteps}
           />
-          <GuideFigure image={c.flowImage} />
-          <p className="rounded-xl bg-amber-50 p-4 text-sm leading-relaxed text-amber-900 ring-1 ring-amber-200">
-            {c.safetyNote}
-          </p>
+          <GuideCallout kind="warn">{c.safetyNote}</GuideCallout>
           <GuideFigure
             image={c.successImage}
             caption={c.successCaption}
@@ -129,7 +125,6 @@ export default async function GuidePosPage({
           <BulletList
             items={c.reconcileBullets}
             marker="•"
-            markerClassName="text-emerald-600"
           />
           <GuideFigure image={c.reconcileImage} />
         </Section>
@@ -146,7 +141,7 @@ export default async function GuidePosPage({
             {c.posExamples.map((name) => (
               <li
                 key={name}
-                className="rounded-full bg-white px-3 py-1 text-sm text-slate-700 shadow-card ring-1 ring-slate-200/70"
+                className={GUIDE_TAG}
               >
                 {name}
               </li>
@@ -154,7 +149,9 @@ export default async function GuidePosPage({
           </ul>
           {/* POS アフィリエイト (承認済)。景表法 (ステマ規制) 対応で affiliateAdLabel「広告」を
               併記し、rel="sponsored nofollow" + target=_blank で開く (lib/explore.ts と同思想)。 */}
-          <div className="mt-4 rounded-xl bg-emerald-50/60 p-4 ring-1 ring-emerald-200/70">
+          {/* 広告は OpenPay の行動 (緑の帯・緑のボタン) と見分けがつくよう、白地 + 灰色の枠 + 従のボタンにする
+              (有料の掲載が公式のおすすめに見えないように)。 */}
+          <div className="mt-4 rounded-xl bg-white p-4 ring-1 ring-slate-200">
             <div className="flex items-center gap-2">
               <span className="rounded bg-slate-200 px-1.5 py-0.5 text-[10px] font-medium text-slate-500">
                 {c.affiliateAdLabel}
@@ -170,10 +167,10 @@ export default async function GuidePosPage({
               href={c.posAffiliate.href}
               target="_blank"
               rel="sponsored nofollow noopener noreferrer"
-              className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-emerald-700"
+              className={`mt-3 gap-1.5 ${GUIDE_SECONDARY_ACTION}`}
             >
               {c.posAffiliate.cta}
-              <span aria-hidden>→</span>
+              <ArrowUpRight className="h-4 w-4" aria-hidden />
             </a>
           </div>
           <p className="mt-3 text-xs leading-relaxed text-slate-500">
@@ -225,13 +222,10 @@ export default async function GuidePosPage({
               </tbody>
             </table>
           </div>
-          <p className="mt-4 rounded-xl bg-emerald-50 p-4 text-sm leading-relaxed text-emerald-900 ring-1 ring-emerald-200/70">
-            {c.feeNote}
-          </p>
+          <GuideCallout kind="info">{c.feeNote}</GuideCallout>
           <p className="mt-3 text-xs leading-relaxed text-slate-500">
             {c.costNote}
           </p>
-          <GuideFigure image={c.costImage} />
         </Section>
 
         <Section title={c.faqTitle}>

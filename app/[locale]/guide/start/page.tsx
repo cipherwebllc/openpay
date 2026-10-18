@@ -9,7 +9,6 @@
 
 import { LANDING_PAYMENT_FEE_VALUES } from '@/lib/legal';
 import type { Metadata } from 'next';
-import Link from 'next/link';
 import { getTranslations, setRequestLocale } from 'next-intl/server';
 import { AppShell } from '@/components/AppShell';
 import { GuideFrame } from '@/components/guide/GuideFrame';
@@ -21,6 +20,7 @@ import { GuideCta, GuideRelated } from '@/components/guide/GuideEnd';
 import { GuideToc } from '@/components/guide/GuideToc';
 import { GuideDisclosure } from '@/components/guide/GuideDisclosure';
 import { GuideFigure, GuideFlow, Section } from '@/components/guide/PosGuidePieces';
+import { GuideMoreLink } from '@/components/guide/GuideLink';
 import {
   startGuideContentFor,
   startGuideMetadata,
@@ -177,12 +177,10 @@ export default async function GuideStartPage({
               </GuideDisclosure>
             ) : null}
             {section.defs ? (
-              <dl className="mt-4 space-y-3">
+              // 5 枚の別カードにせず、1 枚の箱に区切り線で並べる (よくある質問と同じ型・文言は不変・P5)。
+              <dl className="mt-4 divide-y divide-slate-100 rounded-2xl bg-white shadow-card ring-1 ring-slate-200/70">
                 {section.defs.map((d) => (
-                  <div
-                    key={d.term}
-                    className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-[0_2px_8px_-2px_rgba(15,23,42,0.07)]"
-                  >
+                  <div key={d.term} className="px-4 py-3.5 sm:px-5">
                     <dt className="text-sm font-bold text-slate-900">{d.term}</dt>
                     <dd className="mt-1 text-sm leading-relaxed text-slate-600">
                       {d.desc}
@@ -198,13 +196,7 @@ export default async function GuideStartPage({
               <ul className="mt-3 space-y-1.5">
                 {section.guideLinks.map((link) => (
                   <li key={link.path}>
-                    <Link
-                      href={`/${locale}${link.path}`}
-                      prefetch={false}
-                      className="text-sm font-semibold text-emerald-700 underline-offset-2 hover:underline"
-                    >
-                      {link.label} →
-                    </Link>
+                    <GuideMoreLink href={`/${locale}${link.path}`}>{link.label}</GuideMoreLink>
                   </li>
                 ))}
               </ul>
@@ -213,14 +205,9 @@ export default async function GuideStartPage({
               <ul className={`${section.guideLinks ? 'mt-1.5' : 'mt-3'} space-y-1.5`}>
                 {section.externalLinks.map((link) => (
                   <li key={link.href}>
-                    <a
-                      href={link.href}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-sm font-semibold text-emerald-700 underline-offset-2 hover:underline"
-                    >
-                      {link.label} →
-                    </a>
+                    <GuideMoreLink href={link.href} external>
+                      {link.label}
+                    </GuideMoreLink>
                   </li>
                 ))}
               </ul>

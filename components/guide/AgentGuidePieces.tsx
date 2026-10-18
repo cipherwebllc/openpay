@@ -5,6 +5,7 @@
 // hooks/context を使わない純 presentational なので Server/Client どちらでも描画でき、jsdom で
 // 実描画テストできる (tests/components/AgentGuidePieces.test.tsx)。CodeBlock の「コピー」だけは client の小部品。
 
+import { TriangleAlert } from 'lucide-react';
 import { CopyCodeButton } from '@/components/guide/CopyCodeButton';
 
 // ページ冒頭のヒーロー画像 (実 UI 3 画面の合成: AI 会話→事前充填→決済手前)。装飾 SVG でなく実 UI
@@ -90,8 +91,10 @@ export function AddressCallout({
         {address}
       </p>
       <p className="mt-2 text-xs leading-relaxed text-slate-500">{chainNote}</p>
-      <p className="mt-2 rounded-lg bg-amber-50 p-2 text-xs leading-relaxed text-amber-900 ring-1 ring-amber-200">
-        {legacyWarning}
+      {/* カードの中に箱を重ねず、警告のアイコン付きの 1 行にする。 */}
+      <p className="mt-2 flex gap-1.5 text-xs leading-relaxed text-amber-800">
+        <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+        <span>{legacyWarning}</span>
       </p>
     </div>
   );

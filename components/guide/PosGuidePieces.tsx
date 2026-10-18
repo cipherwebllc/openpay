@@ -15,10 +15,8 @@ export const FIGURE_DIMS: Record<string, { w: number; h: number }> = {
   'hero.webp': { w: 1280, h: 640 },
   'overview-flow.svg': { w: 1000, h: 320 },
   'pos-add-method.svg': { w: 760, h: 480 },
-  'four-steps.svg': { w: 1100, h: 280 },
   'payment-success.svg': { w: 420, h: 720 },
   'history-reconcile.svg': { w: 1000, h: 420 },
-  'cost-compare.svg': { w: 900, h: 360 },
   'refund-not-reversal.svg': { w: 1000, h: 500 },
 };
 
@@ -70,16 +68,10 @@ export function Section({
   );
 }
 
-// 箇条書き (できること=✓ / その他=•・マーカー色のみ可変)。
-export function BulletList({
-  items,
-  marker,
-  markerClassName,
-}: {
-  items: readonly string[];
-  marker: string;
-  markerClassName: string;
-}) {
+// 箇条書き (できること・確かめること = ✓ (緑) / 事実の列挙 = • (灰))。マーカーの色は記号で決め、ページごとに変えない
+// (以前は • が緑・灰・琥珀でページごとに違った・plans/guide-ux-polish-2.md P5)。
+export function BulletList({ items, marker }: { items: readonly string[]; marker: '✓' | '•' }) {
+  const markerClassName = marker === '✓' ? 'text-emerald-600' : 'text-slate-400';
   return (
     <ul className="mt-3 space-y-2">
       {items.map((item) => (

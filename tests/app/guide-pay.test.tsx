@@ -76,7 +76,7 @@ describe('/guide/pay', () => {
     ]);
 
     // JPYC 公式は別タブ (noopener)。
-    const official = screen.getByRole('link', { name: `${c.jpycLink.label} →` });
+    const official = screen.getByRole('link', { name: c.jpycLink.label });
     expect(official).toHaveAttribute('href', 'https://jpyc.co.jp/');
     expect(official).toHaveAttribute('target', '_blank');
     expect(official.getAttribute('rel')).toContain('noopener');
@@ -85,11 +85,11 @@ describe('/guide/pay', () => {
     const w = walletGuideContentFor(locale);
     const walletSec = screen.getByRole('heading', { level: 2, name: nav.items.wallet.label }).closest('section')!;
     expect(within(walletSec).getByText(w.summary)).toBeInTheDocument();
-    expect(within(walletSec).getByRole('link', { name: `${w.summaryLink} →` })).toHaveAttribute('href', `/${locale}/guide/wallet`);
+    expect(within(walletSec).getByRole('link', { name: w.summaryLink })).toHaveAttribute('href', `/${locale}/guide/wallet`);
     expect(within(walletSec).queryByRole('heading', { level: 3 })).toBeNull();
 
     // ウォレット選びの note 記事も別タブ (noopener)。
-    const note = screen.getByRole('link', { name: `${c.jpycNoteLink.label} →` });
+    const note = screen.getByRole('link', { name: c.jpycNoteLink.label });
     expect(note).toHaveAttribute('href', 'https://note.com/masia02/n/ned04a4cdb00a');
     expect(note).toHaveAttribute('target', '_blank');
     expect(note.getAttribute('rel')).toContain('noopener');

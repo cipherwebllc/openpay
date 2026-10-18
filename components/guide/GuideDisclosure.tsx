@@ -47,3 +47,26 @@ export function GuideDisclosure({
     </details>
   );
 }
+
+/**
+ * 並んだ「たためるカード」(variant='card') を 1 枚の箱にまとめ、行を区切り線で分ける (よくある質問と同じ型)。
+ * 選んで開く手順 (配布方法・出品の経路・セットアップ) や注意点が箱の山にならないようにする (plans/guide-ux-polish-2.md P5)。
+ * 子は GuideDisclosure を直接並べる (li で包むときは as="ul")。中の「くわしく」(subtle) には効かない (直下の details だけ)。
+ */
+export function GuideDisclosureGroup({
+  children,
+  as: Tag = 'div',
+  className,
+}: {
+  children: ReactNode;
+  as?: 'div' | 'ul';
+  className?: string;
+}) {
+  return (
+    <Tag
+      className={`divide-y divide-slate-100 overflow-hidden rounded-2xl bg-white shadow-card ring-1 ring-slate-200/70 [&>details]:rounded-none [&>details]:shadow-none [&>details]:ring-0 [&>details>summary]:rounded-none [&>li>details]:rounded-none [&>li>details]:shadow-none [&>li>details]:ring-0 [&>li>details>summary]:rounded-none ${className ?? 'mt-4'}`}
+    >
+      {children}
+    </Tag>
+  );
+}

@@ -66,7 +66,6 @@ export default async function TransparencyPage({
           <BulletList
             items={content.custodyItems}
             marker="•"
-            markerClassName="text-emerald-600"
           />
         </Section>
 
@@ -157,7 +156,6 @@ export default async function TransparencyPage({
           <BulletList
             items={content.verificationItems}
             marker="•"
-            markerClassName="text-emerald-600"
           />
           <CodeBlock
             label={content.receiptEndpointLabel}
@@ -179,7 +177,6 @@ export default async function TransparencyPage({
           <BulletList
             items={content.fees}
             marker="•"
-            markerClassName="text-emerald-600"
           />
           <p className="mt-4 text-sm leading-relaxed text-slate-700">
             {content.feeDetailsLead}{' '}
@@ -201,7 +198,6 @@ export default async function TransparencyPage({
           <BulletList
             items={content.refundsItems}
             marker="•"
-            markerClassName="text-emerald-600"
           />
         </Section>
 
@@ -209,7 +205,6 @@ export default async function TransparencyPage({
           <BulletList
             items={content.uncertaintyItems}
             marker="•"
-            markerClassName="text-emerald-600"
           />
         </Section>
 
@@ -217,7 +212,6 @@ export default async function TransparencyPage({
           <BulletList
             items={content.listings}
             marker="•"
-            markerClassName="text-emerald-600"
           />
         </Section>
 
@@ -225,7 +219,6 @@ export default async function TransparencyPage({
           <BulletList
             items={content.metricsItems}
             marker="•"
-            markerClassName="text-emerald-600"
           />
         </Section>
 
