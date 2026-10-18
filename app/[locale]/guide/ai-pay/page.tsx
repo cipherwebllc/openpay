@@ -51,7 +51,7 @@ export default async function GuideAiPayPage({
   const video = howtoVideoFor(locale, 'agent');
 
   return (
-    <AppShell>
+    <AppShell wide>
       <GuideFrame locale={locale} current="ai-pay">
       <article className="mx-auto max-w-3xl">
         <Link

@@ -1,5 +1,5 @@
-// /guide ハブ (「OpenPay でできること」) を実描画で検証する: h1・5 グループの h2・
-// 12 本のカード (href と、可視テキストから成るリンク名)・末尾の「関連ページ」(料金 /pricing)・
+// /guide ハブ (「OpenPay でできること」) を実描画で検証する: h1・5 グループのパネルの h2・
+// 12 本の行 (href と、可視テキストから成るリンク名)・末尾の「関連ページ」(料金 /pricing)・
 // aria-label を使わないこと (掟 8)・metadata。
 
 import { describe, expect, it, vi } from 'vitest';
@@ -11,37 +11,44 @@ vi.mock('next-intl/server', () => ({ setRequestLocale: vi.fn() }));
 vi.mock('@/components/AppShell', () => ({ AppShell: ({ children }: { children: React.ReactNode }) => <main>{children}</main> }));
 
 describe('/guide hub', () => {
-  it.each(['ja', 'en'] as const)('%s: h1・リード・5 グループ・12 本のカード・末尾の関連ページ', async (locale) => {
+  it.each(['ja', 'en'] as const)('%s: h1・リード・5 グループのパネル・12 本の行 (重複なし)・末尾の関連ページ', async (locale) => {
     const nav = guideNavFor(locale);
     const { container } = render(await GuideHubPage({ params: Promise.resolve({ locale }) }));
 
     expect(screen.getByRole('heading', { level: 1, name: nav.hubTitle })).toBeInTheDocument();
     expect(screen.getByText(nav.hubLead)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: nav.backHome })).toHaveAttribute('href', `/${locale}`);
-    // 冒頭に「はじめての方へ」、5 グループの後ろ (末尾) に「関連ページ」。
+    // 5 グループのパネルの後ろ (末尾) に「関連ページ」。「はじめての方へ」は別の箱にせず、お店向けのパネルの頭の目印。
     expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual([
-      nav.hubStartTitle,
       ...nav.groups.map((g) => g.title),
       nav.related.title,
     ]);
-    // 「はじめての方へ」は導入前チェックリスト → 決済QR の順の 2 本 (番号つき)。
-    const start = screen.getByRole('heading', { level: 2, name: nav.hubStartTitle }).closest('section')!;
-    expect(within(start).getAllByRole('link').map((a) => a.getAttribute('href'))).toEqual([
-      `/${locale}/guide/start`,
-      `/${locale}/guide/qr`,
+    const shops = screen.getByRole('heading', { level: 2, name: nav.groups[0].title }).closest('section')!;
+    expect(within(shops).getByText(nav.hubStartTitle)).toBeInTheDocument();
+    expect(within(shops).getByText(nav.hubStartLead)).toBeInTheDocument();
+    // 読む順の番号は導入前チェックリスト (1) → 決済QR (2) の 2 本だけ。
+    const steps = within(shops)
+      .getAllByRole('link')
+      .filter((a) => /^\d/.test(a.textContent ?? ''))
+      .map((a) => [a.textContent?.[0], a.getAttribute('href')]);
+    expect(steps).toEqual([
+      ['1', `/${locale}/guide/start`],
+      ['2', `/${locale}/guide/qr`],
     ]);
 
+    // 同じガイドを二重に並べない (12 本が 1 回ずつ・目次の順)。
     const main = screen.getByRole('main');
     const cards = within(main)
       .getAllByRole('link')
-      .filter((a) => !start.contains(a) && a.getAttribute('href')?.startsWith(`/${locale}/guide/`));
+      .filter((a) => a.getAttribute('href')?.startsWith(`/${locale}/guide/`));
     expect(cards.map((a) => a.getAttribute('href'))).toEqual(
       GUIDE_SLUGS.map((slug) => `/${locale}/guide/${slug}`),
     );
     // リンク名 = タイトル + 説明 (どちらも可視テキスト)
     for (const group of nav.groups) {
       for (const item of group.items) {
-        const card = screen.getByRole('link', { name: `${item.label} ${item.summary}` });
+        const step = group.id === 'shops' && (item.slug === 'start' || item.slug === 'qr') ? `${item.slug === 'start' ? 1 : 2} ` : '';
+        const card = screen.getByRole('link', { name: `${step}${item.label} ${item.summary}` });
         expect(card).toHaveAttribute('href', `/${locale}/guide/${item.slug}`);
       }
     }

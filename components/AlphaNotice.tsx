@@ -26,6 +26,8 @@ export function AlphaNotice() {
   // pathname=null (router provider 無し=テスト等) は通常ページ扱いで従来どおり表示。
   const pathname = usePathname();
   const onHandlePage = isHandlePagePath(pathname);
+  // ガイドは xl 以上でヘッダーと本文が max-w-7xl に広がる (AppShell wide)。帯の文字の頭もそろえる。
+  const onGuidePage = /^\/[a-z]{2}\/guide(\/|$)/.test(pathname ?? '');
   // 既定は表示 (SSR / 初回ペイント / テストで開示が必ず出る)。過去に閉じた利用者のみ mount 後に隠す。
   const [dismissed, setDismissed] = useState(false);
   useEffect(() => {
@@ -44,7 +46,7 @@ export function AlphaNotice() {
       aria-label={t('label')}
       className="border-b border-amber-100 bg-amber-50/80 print:hidden"
     >
-      <div className="mx-auto flex max-w-5xl items-start gap-2 px-4 py-1.5">
+      <div className={`mx-auto flex max-w-5xl items-start gap-2 px-4 py-1.5${onGuidePage ? ' xl:max-w-7xl' : ''}`}>
         <TriangleAlert
           className="mt-px h-3.5 w-3.5 flex-shrink-0 text-amber-500"
           aria-hidden

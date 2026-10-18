@@ -90,8 +90,8 @@ describe('GuideFrame', () => {
   it('目次のリンクは prefetch しない設定で、印刷では目次を消して grid も解く', () => {
     const { container } = renderFrame('ja', 'qr');
     const links = [...container.querySelectorAll('a')];
-    // PC とスマホの 2 つの nav × (ハブ 1 本 + ガイド全部)。
-    expect(links).toHaveLength(2 * (1 + GUIDE_SLUGS.length));
+    // PC とスマホの 2 つの nav × (ハブ 1 本 + ガイド全部) + 本文の後の「前へ / 次へ」2 本。
+    expect(links).toHaveLength(2 * (1 + GUIDE_SLUGS.length) + 2);
     for (const link of links) expect(link).toHaveAttribute('data-prefetch', 'false');
     const frame = container.firstElementChild as HTMLElement;
     expect(frame.className).toContain('lg:grid');
@@ -100,5 +100,27 @@ describe('GuideFrame', () => {
       // PC の nav は print:hidden の列の中、スマホの nav はそれ自体が print:hidden
       expect(landmark.closest('.print\\:hidden')).not.toBeNull();
     }
+  });
+
+  it('本文の後の「前へ / 次へ」は目次の並び順・最初の前はハブ・最後に次は無い', () => {
+    const nav = guideNavFor('ja');
+    const pager = (slug: (typeof GUIDE_SLUGS)[number]) => {
+      const { container, unmount } = renderFrame('ja', slug);
+      const links = [...container.querySelectorAll('a')].filter(
+        (a) => a.textContent?.startsWith(nav.prevLabel) || a.textContent?.startsWith(nav.nextLabel),
+      );
+      const result = links.map((a) => [a.textContent?.startsWith(nav.prevLabel) ? 'prev' : 'next', a.getAttribute('href')]);
+      unmount();
+      return result;
+    };
+    expect(pager('start')).toEqual([
+      ['prev', '/ja/guide'],
+      ['next', '/ja/guide/qr'],
+    ]);
+    expect(pager('pay')).toEqual([
+      ['prev', '/ja/guide/pos'],
+      ['next', '/ja/guide/wallet'],
+    ]);
+    expect(pager('image-url')).toEqual([['prev', '/ja/guide/sell']]);
   });
 });

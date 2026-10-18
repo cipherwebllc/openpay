@@ -43,7 +43,7 @@ export default async function GuidePosPage({
   const c = guideContentFor(locale);
 
   return (
-    <AppShell>
+    <AppShell wide>
       <GuideFrame locale={locale} current="pos">
       <article className="mx-auto max-w-3xl">
 

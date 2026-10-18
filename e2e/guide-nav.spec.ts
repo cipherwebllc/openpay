@@ -51,10 +51,10 @@ test.describe('ガイドの目次と /guide ハブ', () => {
     );
   });
 
-  test('/ja/guide: 見出しと、main の中にガイドへのリンク (はじめての方へ 2 本 + 一覧 12 本)', async ({ page }) => {
+  test('/ja/guide: 見出しと、main の中にガイドへのリンク (5 グループのパネルに 12 本・重複なし)', async ({ page }) => {
     await page.goto('/ja/guide');
     await expect(page.getByRole('heading', { level: 1, name: 'OpenPay でできること' })).toBeVisible();
-    // 「はじめての方へ」(導入前チェックリスト・決済QR の 2 本) + 5 グループの 12 本。
-    await expect(page.getByRole('main').locator('a[href^="/ja/guide/"]')).toHaveCount(14);
+    // 「はじめての方へ」はお店向けのパネルの番号 (1・2) で示し、別の箱で二重に並べない。
+    await expect(page.getByRole('main').locator('a[href^="/ja/guide/"]')).toHaveCount(12);
   });
 });

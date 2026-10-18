@@ -38,7 +38,7 @@ export default async function GuideSellPage({
   const c = sellGuideContentFor(locale);
 
   return (
-    <AppShell>
+    <AppShell wide>
       <GuideFrame locale={locale} current="sell">
       <article className="mx-auto max-w-3xl">
 

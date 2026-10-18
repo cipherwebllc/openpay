@@ -20,7 +20,7 @@ import type { Locale } from '@/i18n';
 // 結合度が低い。
 const BRAND_NAME = 'OpenPay';
 
-export function AppHeader() {
+export function AppHeader({ wide = false }: { wide?: boolean } = {}) {
   const locale = useLocale() as Locale;
 
   return (
@@ -29,7 +29,8 @@ export function AppHeader() {
           増えて溢れたため、padding/gap/ロゴ高を base で詰め sm+ で従来値へ戻す。
           ロゴは min-w-0 + flex-shrink で最終手段の圧縮を許し、言語切替が画面外へ
           飛び出すのを防ぐ。 */}
-      <div className="mx-auto flex max-w-5xl items-center gap-2 px-3 py-3 sm:gap-4 sm:px-4">
+      {/* wide = ガイドの docs 型 (AppShell と同じく xl 以上で max-w-7xl・本文の 3 列と端をそろえる)。 */}
+      <div className={`mx-auto flex max-w-5xl items-center gap-2 px-3 py-3 sm:gap-4 sm:px-4${wide ? ' xl:max-w-7xl' : ''}`}>
         <h1 className="min-w-0 flex-shrink">
           <Link
             href={`/${locale}`}

@@ -45,7 +45,7 @@ export default async function GuideMobileOrderPage({
   const wallet = walletGuideContentFor(locale);
 
   return (
-    <AppShell>
+    <AppShell wide>
       <GuideFrame locale={locale} current="mobile-order">
       <article className="mx-auto max-w-3xl">
 

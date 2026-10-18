@@ -11,11 +11,15 @@ import type { ReactNode } from 'react';
 import { AppHeader } from './AppHeader';
 import { BottomNav } from './BottomNav';
 
-export function AppShell({ children }: { children: ReactNode }) {
+/**
+ * wide: ガイド (/guide/*) の docs 型の幅。xl (1280px) 以上だけ main とヘッダーを max-w-7xl に広げ、
+ * 左の目次・本文・右の「このページの内容」の 3 列を置く。xl 未満はほかのページと同じ max-w-5xl。
+ */
+export function AppShell({ children, wide = false }: { children: ReactNode; wide?: boolean }) {
   return (
     <>
-      <AppHeader />
-      <main className="mx-auto w-full max-w-5xl px-4 pb-24 pt-6 md:pb-10">
+      <AppHeader wide={wide} />
+      <main className={`mx-auto w-full max-w-5xl px-4 pb-24 pt-6 md:pb-10${wide ? ' xl:max-w-7xl' : ''}`}>
         {children}
       </main>
       <BottomNav />

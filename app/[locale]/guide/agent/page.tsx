@@ -50,7 +50,7 @@ export default async function GuideAgentPage({
   const c = agentGuideContentFor(locale);
 
   return (
-    <AppShell>
+    <AppShell wide>
       <GuideFrame locale={locale} current="agent">
       <article className="mx-auto max-w-3xl">
         <Link

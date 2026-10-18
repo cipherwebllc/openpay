@@ -108,7 +108,7 @@ export default async function GuideStartPage({
   ];
 
   return (
-    <AppShell>
+    <AppShell wide>
       <GuideFrame locale={locale} current="start">
       <article className="mx-auto max-w-3xl">
 
