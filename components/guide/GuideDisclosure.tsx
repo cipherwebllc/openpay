@@ -24,7 +24,7 @@ export function GuideDisclosure({
     return (
       <details open={defaultOpen} className="group mt-4 rounded-xl bg-slate-50 ring-1 ring-inset ring-slate-200/70">
         <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold text-slate-700 [@media(hover:hover)]:hover:bg-slate-100/70 [&::-webkit-details-marker]:hidden">
-          <span className="min-w-0 flex-1">{summary}</span>
+          <span className="min-w-0 flex-1 [word-break:auto-phrase]">{summary}</span>
           <ChevronDown
             className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-open:rotate-180"
             aria-hidden
@@ -37,7 +37,7 @@ export function GuideDisclosure({
   return (
     <details open={defaultOpen} className="group rounded-2xl bg-white shadow-card ring-1 ring-slate-200/70">
       <summary className="flex cursor-pointer list-none items-start gap-3 rounded-2xl px-4 py-4 sm:px-5 [@media(hover:hover)]:hover:bg-slate-50 [&::-webkit-details-marker]:hidden">
-        <div className="min-w-0 flex-1">{summary}</div>
+        <div className="min-w-0 flex-1 [word-break:auto-phrase]">{summary}</div>
         <ChevronDown
           className="mt-0.5 h-5 w-5 shrink-0 text-slate-500 transition-transform group-open:rotate-180"
           aria-hidden

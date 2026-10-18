@@ -132,7 +132,9 @@ describe('Section', () => {
         </Section>
       </>,
     );
-    expect(screen.getByRole('heading', { level: 2, name: '毎回の会計（約 10 秒）' })).toHaveAttribute('id', '毎回の会計約-10-秒');
+    // 表示は数字と単位を NBSP でつなぐ (改行で離さない)・id は元の題名から。
+    const heading = screen.getByRole('heading', { level: 2, name: '毎回の会計（約\u00a010\u00a0秒）' });
+    expect(heading).toHaveAttribute('id', '毎回の会計約-10-秒');
     expect(screen.getByRole('heading', { level: 2, name: '値引き' })).toHaveAttribute('id', 'jpyc-discount');
     expect(guideHeadingId('  Who pays, and how much? ')).toBe('Who-pays-and-how-much');
   });

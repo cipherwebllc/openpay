@@ -164,7 +164,7 @@
     "supportFeeMobileFocal": "{storefrontPercent}% / {preorderPercent}%",
     "supportFeeMobileTitle": "モバイル注文",
     "supportFeeMobileBody": "店内・券売機は {storefrontPercent}%（店舗負担）、時間指定の事前注文は {preorderPercent}%（店舗の選択で店舗負担またはお客様上乗せ）。通常決済も対象で、ガスレス利用料との重複なし（当社が肩代わりする gas 込み）。",
-    "supportFeeTipFocal": "約2JPYC",
+    "supportFeeTipFocal": "約 {tipFloor} JPYC",
     "supportFeeTipTitle": "チップ",
     "supportFeeTipBody": "受け取り手数料はなし。JPYC は送るお客様がガス代相当（約 {tipFloor} JPYC）を上乗せし、この分は OpenPay へ送られます（決済額の {recoverPercent}% は適用しません）。USDC のチップは、USDC (Base) では送る側が Paymaster にガスを USDC で支払い、USDC (Arc) では送る側がネットワーク手数料を USDC でウォレットから直接負担します。いずれも OpenPay の徴収はありません。",
     "supportFeeNote": "利用料を除く商品代金はあなたのウォレットへ直接着金します（売上は預かりません）。通常決済のネットワーク手数料はお客様負担です。詳細は利用規約へ。",
@@ -297,7 +297,7 @@
     "useCase8Body": "テーブルや店先の QR から、お客様のスマホで注文と支払い。アプリは要りません。",
     "useCase8ImageAlt": "カフェのモバイルオーダーの画面 (メニュー・数量・テーブル番号・注文内容) を表示したスマホ 2 台",
     "supportFeeStoreTitle": "デジタル商品",
-    "supportFeeStoreFocal": "JPYC 1%",
+    "supportFeeStoreFocal": "1%",
     "supportFeeStoreBody": "JPYC 購入では、買い手が x402 利用料として価格の 1%・最低 1 JPYC を負担します。売り手手数料はありません。USDC 購入 (Base) では OpenPay の x402 利用料は 0% (無料) です。"
   },
   "Today": {

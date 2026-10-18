@@ -164,7 +164,7 @@
     "supportFeeMobileFocal": "{storefrontPercent}% / {preorderPercent}%",
     "supportFeeMobileTitle": "Mobile order",
     "supportFeeMobileBody": "In-store/kiosk: {storefrontPercent}%, merchant-paid. Time-specified pre-orders: {preorderPercent}%, paid by the merchant or added to the customer total at the store’s choice. Applies to standard payments too, with no additional gasless usage fee (sponsored gas included).",
-    "supportFeeTipFocal": "≈2 JPYC",
+    "supportFeeTipFocal": "≈{tipFloor} JPYC",
     "supportFeeTipTitle": "Tips",
     "supportFeeTipBody": "No fee to receive. For JPYC tips, the sender adds the gas-equivalent amount (about {tipFloor} JPYC), which goes to OpenPay; the {recoverPercent}% does not apply. For USDC tips, on USDC (Base) the sender pays gas in USDC to the Paymaster, and on USDC (Arc) the sender pays network fees directly in USDC from their wallet as a standard payment. OpenPay collects nothing for any of these tips.",
     "supportFeeNote": "The sale amount less the usage fee lands directly in your wallet (we never hold funds). Customers pay network fees for standard payments. See the Terms for details.",
@@ -297,7 +297,7 @@
     "useCase8Body": "Customers order and pay on their own phones from a QR at the table or counter. No app needed.",
     "useCase8ImageAlt": "Two phones showing a café’s mobile-order screen (menu, quantity, table number and order summary)",
     "supportFeeStoreTitle": "Digital goods",
-    "supportFeeStoreFocal": "JPYC 1%",
+    "supportFeeStoreFocal": "1%",
     "supportFeeStoreBody": "For JPYC purchases, the buyer pays the x402 usage fee: 1% of the price, minimum 1 JPYC. No seller fee. For USDC purchases on Base, the OpenPay x402 usage fee is 0% (free)."
   },
   "Today": {

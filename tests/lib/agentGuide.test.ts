@@ -90,11 +90,12 @@ describe('guideAgentMetadata: メタデータ組立', () => {
 
 // ── (2) ja/en parity + 全 leaf 非空 ───────────────────────────────
 describe('AGENT_GUIDE: ja/en 構造 parity と非空', () => {
-  it.each(LOCALES)('%s: 頭の従のボタンは OpenPay Agent (/agent) を開く (タイトルの上の戻るリンクはやめた・ガイドの頭の形をそろえる)', (loc) => {
+  it.each(LOCALES)('%s: 頭と末尾のボタンは OpenPay Agent (/agent・「人が支払う」の設定を作る) を開く (AI ストアではない・2026-10-19 user)', (loc) => {
     const c = AGENT_GUIDE[loc];
-    expect(c.consoleLink.href).toBe('/agent');
-    expect(c.consoleLink.label).toContain('OpenPay Agent');
-    expect(c.consoleLink.label).not.toMatch(/もどる|戻る|Back|←/i);
+    expect(c.ctaButtonHref).toBe('/agent');
+    expect(c.ctaButton).toContain('OpenPay Agent');
+    expect(c.ctaBody).toContain('openpay-order-mcp');
+    expect(c.ctaButton).not.toMatch(/もどる|戻る|Back|←|AIストア|AI store/i);
   });
 
   it('ja と en のトップレベルキーが完全一致', () => {

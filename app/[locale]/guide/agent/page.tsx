@@ -60,12 +60,9 @@ export default async function GuideAgentPage({
           <GuideTitle>{guideNavFor(locale).items['agent'].label}</GuideTitle>
           <GuideSubtitle>{c.title}</GuideSubtitle>
           <GuideLead>{c.lead}</GuideLead>
-          <GuideActions
-            actions={[
-              { href: `/${locale}${c.ctaButtonHref}`, label: c.ctaButton },
-              { href: `/${locale}${c.consoleLink.href}`, label: c.consoleLink.label },
-            ]}
-          />
+          {/* 行き先は OpenPay Agent (「人が支払う」の設定を作るページ)。AI ストア (/discovery) はデータ・API の一覧で、
+              お店の注文とは別 (2026-10-19 user)。 */}
+          <GuideActions actions={[{ href: `/${locale}${c.ctaButtonHref}`, label: c.ctaButton }]} />
         </header>
 
         <GuideToc title={guideNavFor(locale).tocTitle} />

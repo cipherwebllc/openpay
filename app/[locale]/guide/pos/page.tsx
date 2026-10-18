@@ -20,6 +20,7 @@ import { GuideToc } from '@/components/guide/GuideToc';
 import {
   BulletList,
   GuideFigure,
+  GuideFlow,
   Section,
   StepList,
 } from '@/components/guide/PosGuidePieces';
@@ -96,7 +97,7 @@ export default async function GuidePosPage({
           <p className="mt-3 text-sm leading-relaxed text-slate-700">
             {c.overviewBody}
           </p>
-          <GuideFigure image={c.overviewImage} />
+          <GuideFlow steps={c.overviewFlow} />
         </Section>
 
         <Section title={c.setupTitle}>
@@ -121,7 +122,8 @@ export default async function GuidePosPage({
             items={c.reconcileBullets}
             marker="•"
           />
-          <GuideFigure image={c.reconcileImage} />
+          {/* 図の文字はスマホでは読めない大きさになるので sm 以上だけ (本文と箇条書きが同じことを言う・P7)。 */}
+          <GuideFigure image={c.reconcileImage} className="my-6 hidden sm:block" />
         </Section>
 
         <Section title={c.posTitle}>
@@ -175,7 +177,7 @@ export default async function GuidePosPage({
 
         <Section title={c.costTitle}>
           <div className="mt-4 overflow-x-auto">
-            {/* スマホでは 1 行を 1 枚のカードにし、列名をラベルとして出す (3 列だと 390px で 1 文字ずつ折れた)。 */}
+            {/* スマホでは 1 行を 1 段にし、列名をラベルとして出す (3 列だと 390px で 1 文字ずつ折れた)。段は 1 枚の箱に区切り線で並べる (P7)。 */}
             <table className="w-full border-collapse text-sm max-sm:block">
               <thead className="max-sm:sr-only">
                 <tr className="border-b border-slate-200 text-left">
@@ -188,11 +190,11 @@ export default async function GuidePosPage({
                   </th>
                 </tr>
               </thead>
-              <tbody className="max-sm:block max-sm:space-y-3">
+              <tbody className="max-sm:block max-sm:divide-y max-sm:divide-slate-100 max-sm:overflow-hidden max-sm:rounded-2xl max-sm:bg-white max-sm:shadow-card max-sm:ring-1 max-sm:ring-slate-200/70">
                 {c.costRows.map((row) => (
                   <tr
                     key={row.label}
-                    className="border-b border-slate-100 align-top max-sm:block max-sm:rounded-xl max-sm:border-0 max-sm:bg-white max-sm:p-4 max-sm:shadow-card max-sm:ring-1 max-sm:ring-slate-200/70"
+                    className="border-b border-slate-100 align-top max-sm:block max-sm:border-0 max-sm:p-4"
                   >
                     <th
                       scope="row"

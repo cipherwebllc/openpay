@@ -24,6 +24,7 @@ import { qrGuideContentFor, qrGuideMetadata } from '@/lib/qrGuide';
 import { GuideCallout } from '@/components/guide/GuideCallout';
 import { GuideDisclosure } from '@/components/guide/GuideDisclosure';
 import { splitBeforeSentence } from '@/lib/guideText';
+import { GuideToc } from '@/components/guide/GuideToc';
 
 // JPYC 社の発表 (2026-10-09・割引などの優遇についての同社の考え方と導入店向け相談窓口)。窓口のメールアドレスは
 // 載せずに発表へリンクする (公開の連絡先にメールアドレスを書かない方針)。
@@ -64,7 +65,6 @@ export default async function GuideQrPage({
           <GuideLead>
             {c.heroLead}
           </GuideLead>
-          <GuideAudience title={c.forWhoTitle} chips={c.forWhoChips} />
           <div className="mt-6 flex flex-wrap gap-3">
             <Link
               href={`/${locale}/create`}
@@ -81,7 +81,11 @@ export default async function GuideQrPage({
               {c.heroCtaScan}
             </Link>
           </div>
+          {/* 対象者の札は行動ボタンの下 (主ボタンを札の 2〜3 行で押し下げない・P7)。 */}
+          <GuideAudience title={c.forWhoTitle} chips={c.forWhoChips} />
         </header>
+
+        <GuideToc title={guideNavFor(locale).tocTitle} />
 
         <Section title={c.featuresTitle}>
           <GuideFeatureList items={c.features} />

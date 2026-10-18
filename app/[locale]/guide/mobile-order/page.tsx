@@ -19,6 +19,7 @@ import { StepShot } from '@/components/guide/MobileOrderGuidePieces';
 import { WalletSummary } from '@/components/guide/WalletSummary';
 import { guideNavFor } from '@/lib/guideNav';
 import { walletGuideContentFor } from '@/lib/walletGuide';
+import { GuideToc } from '@/components/guide/GuideToc';
 import {
   mobileOrderGuideContentFor,
   mobileOrderGuideMetadata,
@@ -59,6 +60,8 @@ export default async function GuideMobileOrderPage({
           <GuideLead>{c.lead}</GuideLead>
           <GuideActions actions={[{ href: c.tryUrl, label: c.tryCta }]} />
         </header>
+
+        <GuideToc title={guideNavFor(locale).tocTitle} />
 
         <Section title={c.needTitle}>
           <BulletList items={c.need} marker="✓" />

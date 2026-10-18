@@ -6,7 +6,8 @@ import type { ReactNode } from 'react';
 import { Info, Lightbulb, TriangleAlert, type LucideIcon } from 'lucide-react';
 
 const KINDS: Record<'tip' | 'warn' | 'info', { box: string; icon: LucideIcon; iconTone: string }> = {
-  tip: { box: 'bg-blue-50 text-slate-700 ring-blue-100', icon: Lightbulb, iconTone: 'text-blue-600' },
+  // tip は中立の灰色 + 電球 (青は「お客様の手順」の色に取っておく・P7)。info とは記号で見分ける。
+  tip: { box: 'bg-slate-50 text-slate-700 ring-slate-200/70', icon: Lightbulb, iconTone: 'text-amber-500' },
   warn: { box: 'bg-amber-50 text-amber-950 ring-amber-200', icon: TriangleAlert, iconTone: 'text-amber-600' },
   info: { box: 'bg-slate-50 text-slate-700 ring-slate-200/70', icon: Info, iconTone: 'text-slate-500' },
 };

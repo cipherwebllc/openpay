@@ -34,7 +34,7 @@ export default async function GuideHubPage({
 
   return (
     <AppShell wide>
-      <article className="mx-auto max-w-4xl">
+      <article className="mx-auto max-w-4xl [line-break:strict]">
         <Link
           href={`/${locale}`}
           prefetch={false}

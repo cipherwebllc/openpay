@@ -6,6 +6,7 @@
 
 import type { ReactNode } from 'react';
 import { ArrowDown, ArrowRight } from 'lucide-react';
+import { keepNumbersTogether } from '@/lib/guideText';
 import type { GuideImage, GuideStep } from '@/lib/posGuide';
 
 // public/guide/<file> の SVG 図版の intrinsic 寸法 (CLS 防止の width/height 用)。
@@ -13,7 +14,6 @@ import type { GuideImage, GuideStep } from '@/lib/posGuide';
 // (未登録だと下の ?? フォールバックで誤比率描画になるため・黙殺防止)。
 export const FIGURE_DIMS: Record<string, { w: number; h: number }> = {
   'hero.webp': { w: 1280, h: 640 },
-  'overview-flow.svg': { w: 1000, h: 320 },
   'pos-add-method.svg': { w: 760, h: 480 },
   'history-reconcile.svg': { w: 1000, h: 420 },
   'refund-not-reversal.svg': { w: 1000, h: 500 },
@@ -60,7 +60,7 @@ export function Section({
         className="flex items-start gap-3 text-xl font-bold tracking-tight text-slate-900 [word-break:auto-phrase] sm:text-2xl"
       >
         {badge !== undefined ? <span className={`${STEP_BADGE} mt-0.5 sm:mt-1`}>{badge}</span> : null}
-        <span className="min-w-0">{title}</span>
+        <span className="min-w-0">{keepNumbersTogether(title)}</span>
       </h2>
       {children}
     </section>

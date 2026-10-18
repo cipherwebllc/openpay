@@ -58,7 +58,7 @@ const JA: QrGuideContent = {
     '金額を入力して QR コードを提示するだけ。専用端末なしで、スマホから JPYC を受け取れます。導入費 0 円・契約不要・売上はウォレットへ直接着金。',
   backHome: '← OpenPay トップへ',
 
-  heroTitle: '最短 30 秒で始める JPYC 決済QR',
+  heroTitle: '最短 30 秒で始められます',
   heroLead:
     '金額を入れて QR を見せるだけ。専用端末なしで、スマホから JPYC を受け取れます。導入費 0 円・契約も不要です。',
   heroCtaCreate: '決済QRを作る',
@@ -150,7 +150,7 @@ const EN: QrGuideContent = {
     'Enter an amount and show a QR code — accept JPYC from your phone with no dedicated terminal. Zero setup cost, no contract, sales settle straight to your wallet.',
   backHome: '← Back to OpenPay',
 
-  heroTitle: 'A JPYC payment QR in 30 seconds',
+  heroTitle: 'Ready in 30 seconds',
   heroLead:
     'Enter an amount and show the QR code. Accept JPYC from your phone with no dedicated terminal, zero setup cost, and no contract.',
   heroCtaCreate: 'Create a payment QR',

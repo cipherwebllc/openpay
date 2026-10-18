@@ -7,6 +7,7 @@
 // a11y: nav の名前は可視の見出しを aria-labelledby で指す (aria-label は使わない・掟 8)。
 
 import { useEffect, useRef, useState } from 'react';
+import { keepNumbersTogether } from '@/lib/guideText';
 
 type Item = { readonly id: string; readonly text: string };
 
@@ -15,9 +16,7 @@ type Item = { readonly id: string; readonly text: string };
  * 「（約 5 / 分）」のように数字と単位が別の行に分かれないように)。GuideToc も同じ名前を使う。
  */
 export function guideTocText(heading: HTMLElement): string {
-  return (heading.dataset.tocLabel ?? heading.textContent ?? '')
-    .trim()
-    .replace(/(?<=\d) (?=[^\x00-\x7f])|(?<=[^\x00-\x7f]) (?=\d)/g, '\u00a0');
+  return keepNumbersTogether((heading.dataset.tocLabel ?? heading.textContent ?? '').trim());
 }
 
 // 見出しが画面の上 1/3 に入ったら「読んでいる節」とみなす (固定ヘッダーの下端 + 余白の 120px より下は見る)。
