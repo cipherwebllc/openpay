@@ -281,7 +281,8 @@ export function guideNavFor(locale: string): GuideNav {
   return locale === 'en' ? NAV_EN : NAV_JA;
 }
 
-export type GuidePagerLink = { readonly href: string; readonly label: string };
+/** hub = true: 行き先はガイド一覧 (グループの端・GuidePager は「前へ / 次へ」でなく「ガイド一覧」と出す)。 */
+export type GuidePagerLink = { readonly href: string; readonly label: string; readonly hub?: boolean };
 
 /**
  * 本文の後の「前へ / 次へ」(GuideFrame)。同じ対象者のグループの中だけで前後を出す (お客様向けのガイドの前に
@@ -293,7 +294,7 @@ export function guidePagerFor(locale: string, current: GuideSlug): { prev: Guide
   const nav = guideNavFor(locale);
   const items = nav.groups.find((g) => g.items.some((item) => item.slug === current))?.items ?? [];
   const index = items.findIndex((item) => item.slug === current);
-  const hub = { href: `/${locale}/guide`, label: nav.hubTitle };
+  const hub = { href: `/${locale}/guide`, label: nav.hubTitle, hub: true };
   const prevItem = index > 0 ? items[index - 1] : null;
   const nextItem = index >= 0 && index < items.length - 1 ? items[index + 1] : null;
   return {

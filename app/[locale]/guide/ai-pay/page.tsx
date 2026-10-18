@@ -83,12 +83,11 @@ export default async function GuideAiPayPage({
           <GuideCallout kind="info">{c.receiptNote}</GuideCallout>
         </Section>
 
-        {/* 3 つのセットアップは 1 つの節にまとめ、選び方を先に 1 文で示してから、たためるカードにする (A は開いて出す)。 */}
+        {/* 3 つのセットアップは 1 つの節にまとめ、選び方を先に 1 文で示してから、たためるカードにする (どれも閉じて始め、3 つを並べて選ばせる・P7)。 */}
         <Section title={c.setupChooseTitle}>
           <p className="mt-2 text-sm leading-relaxed text-slate-600">{c.setupChooseLead}</p>
           <GuideDisclosureGroup>
           <GuideDisclosure
-            defaultOpen
             summary={
               <>
                 <h3 className="text-base font-semibold text-slate-900">{c.quickSetupTitle}</h3>

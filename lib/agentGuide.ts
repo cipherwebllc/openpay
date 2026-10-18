@@ -114,7 +114,6 @@ export type AgentGuideContent = {
   readonly ctaButtonHref: string;
 
   /** ページ上部のリンク。トップへはヘッダのロゴで戻れるので、文脈上の親 (/agent) を指す。 */
-  readonly consoleLink: { readonly label: string; readonly href: string };
 };
 
 const ja: AgentGuideContent = {
@@ -278,13 +277,11 @@ const ja: AgentGuideContent = {
     },
   ],
 
-  ctaTitle: 'AIストアを見てみる',
+  ctaTitle: 'OpenPay Agent で設定を作る',
   ctaBody:
-    'openpay-order-mcp を AI に追加すれば、鍵を渡さずに、母国語で日本のお店に注文できます。支払いに対応したリソースは「AIストア」で見られます。',
-  ctaButton: 'AIストアを見る',
-  ctaButtonHref: '/discovery',
-
-  consoleLink: { label: 'OpenPay Agent を開く', href: '/agent' },
+    'OpenPay Agent で「人が支払う」を選ぶと、AI に追加する設定 (openpay-order-mcp) をコピーできます。鍵は要らず、支払いは毎回あなたが自分のウォレットで承認します。',
+  ctaButton: 'OpenPay Agent を開く',
+  ctaButtonHref: '/agent',
 };
 
 const en: AgentGuideContent = {
@@ -447,13 +444,11 @@ const en: AgentGuideContent = {
     },
   ],
 
-  ctaTitle: 'Explore the AI store',
+  ctaTitle: 'Set it up in OpenPay Agent',
   ctaBody:
-    'Add openpay-order-mcp to your AI and order at Japanese shops in your own language, without handing it a key. Payable resources are listed in the “AI store”.',
-  ctaButton: 'Open the AI store',
-  ctaButtonHref: '/discovery',
-
-  consoleLink: { label: 'Open OpenPay Agent', href: '/agent' },
+    'Choose “Human pays” in OpenPay Agent to copy the config (openpay-order-mcp) to add to your AI. No key is needed, and you approve every payment in your own wallet.',
+  ctaButton: 'Open OpenPay Agent',
+  ctaButtonHref: '/agent',
 };
 
 export const AGENT_GUIDE: Record<AgentGuideLocale, AgentGuideContent> = { ja, en };

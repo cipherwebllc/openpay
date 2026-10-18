@@ -30,7 +30,7 @@ const JA: ImageGuideContent = {
     'OpenPay は画像を預からず、公開されている画像の URL (https://〜) を設定する方式です。Imgur などへのアップロードから URL の確認方法、つまずきやすいポイントまでを 1 ページで案内します。',
   backHome: '← OpenPay トップへ',
 
-  heroTitle: 'アップロードは不要。公開されている画像の URL を貼るだけです。',
+  heroTitle: 'アップロードは不要です',
   heroLead: [
     'インターネットに公開されている画像の URL (https://〜) を、OpenPay の画像の欄に貼ると表示されます。',
   ],
@@ -116,7 +116,7 @@ const EN: ImageGuideContent = {
     'OpenPay never stores your images — you set a public image URL (https://…) instead. This page walks through uploading to a service like Imgur, copying the right URL, and the common pitfalls.',
   backHome: '← Back to OpenPay',
 
-  heroTitle: 'No upload needed — just paste the URL of a public image.',
+  heroTitle: 'No upload needed',
   heroLead: [
     'Paste the URL (https://…) of an image that is public on the internet into an image field in OpenPay and it shows up.',
   ],

@@ -66,7 +66,6 @@ export default async function GuideSellPage({
           <GuideDisclosureGroup as="ul" className="mt-5">
             <li>
               <GuideDisclosure
-                defaultOpen
                 summary={
                   <>
                     <h3 className="flex items-center gap-3 text-base font-semibold text-slate-900">

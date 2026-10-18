@@ -19,7 +19,7 @@ import { GuideLead, GuideSubtitle, GuideTitle } from '@/components/guide/GuideHe
 import { GuideCta, GuideRelated } from '@/components/guide/GuideEnd';
 import { GuideToc } from '@/components/guide/GuideToc';
 import { GuideDisclosure } from '@/components/guide/GuideDisclosure';
-import { GuideFigure, GuideFlow, Section } from '@/components/guide/PosGuidePieces';
+import { BulletList, GuideFigure, GuideFlow, Section } from '@/components/guide/PosGuidePieces';
 import { GuideMoreLink } from '@/components/guide/GuideLink';
 import {
   startGuideContentFor,
@@ -106,18 +106,8 @@ export default async function GuideStartPage({
           <h2 data-toc="skip" className="text-base font-bold text-slate-900">
             {c.checklistTitle}
           </h2>
-          {/* 順番に試す行動なので番号で示す (押せないチェックボックスの四角は「押せる」と誤解させた)。
-              下の節の番号 (塗りのバッジ 1〜8) と取り違えないよう、白地に枠の小さな番号にする。 */}
-          <ol className="mt-4 space-y-2.5">
-            {c.checklistItems.map((item, index) => (
-              <li key={item} className="flex items-start gap-3">
-                <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-white text-xs font-bold text-emerald-700 ring-1 ring-inset ring-emerald-300">
-                  {index + 1}
-                </span>
-                <span className="pt-0.5 text-sm font-medium leading-relaxed text-slate-800">{item}</span>
-              </li>
-            ))}
-          </ol>
+          {/* 一周して確かめることなので ✓ の箇条書きにする (番号は下の 8 つの節だけに使う・番号の型を 1 つにする・P7)。 */}
+          <BulletList items={c.checklistItems} marker="✓" />
           <p className="mt-4 text-sm leading-relaxed text-slate-700">
             {c.checklistLead}
           </p>
@@ -132,25 +122,12 @@ export default async function GuideStartPage({
             ))}
             {/* 図版は本文直後 — 概念の理解を助けるものなので、箇条書きより前に置く。 */}
             {section.figure ? (
-              <GuideFigure image={section.figure} className="mt-5" />
+              // 図の文字はスマホでは読めない大きさになるので sm 以上だけ (本文が同じことを言う・P7)。
+              <GuideFigure image={section.figure} className="mt-5 hidden sm:block" />
             ) : null}
             {section.flow ? <GuideFlow steps={section.flow} /> : null}
             {renderSlot(section)}
-            {section.bullets ? (
-              <ul className="mt-3 space-y-2">
-                {section.bullets.map((item) => (
-                  <li
-                    key={item}
-                    className="flex items-start gap-2 text-sm leading-relaxed text-slate-700"
-                  >
-                    <span aria-hidden className="mt-0.5 text-emerald-600">
-                      •
-                    </span>
-                    <span>{item}</span>
-                  </li>
-                ))}
-              </ul>
-            ) : null}
+            {section.bullets ? <BulletList items={section.bullets} marker="•" /> : null}
             {section.afterBullets ? (
               // 参考情報は「くわしく」にたたみ、決めごと (bullets) との主従を保つ。
               <GuideDisclosure variant="subtle" summary={section.afterBullets.title}>

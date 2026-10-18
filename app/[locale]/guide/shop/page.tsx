@@ -20,6 +20,7 @@ import { Section, StepLines } from '@/components/guide/PosGuidePieces';
 import { GuideVideo } from '@/components/guide/GuideVideo';
 import { HOWTO_VIDEO_UI, howtoVideoFor } from '@/lib/howtoVideos';
 import { shopGuideContentFor, shopGuideMetadata } from '@/lib/shopGuide';
+import { GuideToc } from '@/components/guide/GuideToc';
 
 export async function generateMetadata({
   params,
@@ -89,6 +90,8 @@ export default async function GuideShopPage({
             </Link>
           </div>
         </header>
+
+        <GuideToc title={guideNavFor(locale).tocTitle} />
 
         <Section title={c.relationTitle}>
           <p className="mt-3 text-sm leading-relaxed text-slate-700">

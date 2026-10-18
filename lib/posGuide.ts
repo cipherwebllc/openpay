@@ -42,7 +42,8 @@ export type GuideContent = {
 
   readonly overviewTitle: string;
   readonly overviewBody: string;
-  readonly overviewImage: GuideImage;
+  /** 仕組みの 3 段の流れ (HTML のチップ・以前の SVG はスマホで文字が 5px ほどになり読めなかった・P7)。 */
+  readonly overviewFlow: readonly string[];
 
   readonly setupTitle: string;
   readonly setupSteps: readonly GuideStep[];
@@ -127,7 +128,7 @@ const ja: GuideContent = {
   overviewTitle: '仕組み',
   overviewBody:
     'レジは「売上の記録」係、OpenPay は「JPYC の受け取り」係。別々に動かして、閉店後に突き合わせるだけです。',
-  overviewImage: { file: 'overview-flow.svg', alt: 'POS レジ→OpenPay→突合 の 3 ステップ全体像' },
+  overviewFlow: ['POS レジで売上を記録', 'OpenPay で JPYC を受け取る', '閉店後に金額・番号で突き合わせる'],
 
   setupTitle: '最初の一度だけの準備（約 5 分）',
   setupSteps: [
@@ -272,7 +273,7 @@ const en: GuideContent = {
   overviewTitle: 'How it works',
   overviewBody:
     'The POS records the sale; OpenPay receives the JPYC. They run separately — you just reconcile after closing.',
-  overviewImage: { file: 'overview-flow.svg', alt: 'Overview: POS register → OpenPay → reconcile' },
+  overviewFlow: ['Record the sale on the POS', 'Receive JPYC with OpenPay', 'Reconcile by amount and number after closing'],
 
   setupTitle: 'One-time setup (about 5 minutes)',
   setupSteps: [

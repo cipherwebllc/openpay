@@ -35,3 +35,12 @@ export function splitBeforeSentence(text: string, needle: string): [string, stri
   const join = (parts: string[]) => parts.join(/[。]$/.test(parts[0] ?? '') ? '' : ' ');
   return [join(sentences.slice(0, at)), join(sentences.slice(at))];
 }
+
+/**
+ * 数字と和文の間の半角スペースを改行しない空白 (NBSP) にする。「8 / つのこと」「2 / 台持ち」「約 5 / 分」のように、数字と
+ * 単位・助数詞が別の行に分かれるのを防ぐ (iOS Safari は word-break: auto-phrase に対応しないため、文字で止める・P7)。
+ * 英語どうしの空白 (数字と英字) はそのまま。
+ */
+export function keepNumbersTogether(text: string): string {
+  return text.replace(/(?<=\d) (?=[^\x00-\x7f])|(?<=[^\x00-\x7f]) (?=\d)/g, '\u00a0');
+}

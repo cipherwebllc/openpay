@@ -14,7 +14,7 @@
 
 import type { ReactNode } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, ArrowRight, ChevronDown } from 'lucide-react';
+import { ArrowLeft, ArrowRight, ChevronDown, ChevronRight, LayoutList } from 'lucide-react';
 import { GuideOnThisPage } from '@/components/guide/GuideOnThisPage';
 import { guideNavFor, guidePagerFor, type GuideNav, type GuideSlug } from '@/lib/guideNav';
 
@@ -108,26 +108,28 @@ export function GuideFrame({
       {/* 本文の段落と箇条書き (text-sm) は 15px (sm 以上は 16px)・行間 28px にする (text-base は行間も 24px に戻すので
           文字の大きさだけを text-[16px] で当てる)。日本語 14px の長い段落は
           スマホで読み疲れるため (plans/guide-ux-polish.md フェーズ 3)。注記 (text-xs) はそのまま。
-          text-wrap: pretty で、段落の最後の行に「す。」だけが残る折り返しを避ける (対応しないブラウザは通常の折り返し)。 */}
-      <div className="min-w-0 break-words [text-wrap:pretty] [&_h2]:scroll-mt-24 [&_li.text-sm]:text-[15px] [&_li.text-sm]:leading-7 [&_p.text-sm]:text-[15px] [&_p.text-sm]:leading-7 sm:[&_li.text-sm]:text-[16px] sm:[&_p.text-sm]:text-[16px]">
+          text-wrap: pretty で、段落の最後の行に「す。」だけが残る折り返しを避ける (対応しないブラウザは通常の折り返し)。
+          line-break: strict で、行頭に「ー」や小さい「ォ」が来る折り返しを避ける (iOS Safari も対応・P7)。 */}
+      <div className="min-w-0 break-words [line-break:strict] [text-wrap:pretty] [&_h2]:scroll-mt-24 [&_li.text-sm]:text-[15px] [&_li.text-sm]:leading-7 [&_p.text-sm]:text-[15px] [&_p.text-sm]:leading-7 sm:[&_li.text-sm]:text-[16px] sm:[&_p.text-sm]:text-[16px]">
+        {/* スマホは枠のない 1 行のパンくず (ガイド一覧 › 今のガイド)。本文の前に白い箱を 2 本 (これと「このページの内容」)
+            重ねない (plans/guide-ux-polish-2.md P7)。押すと下に一覧の箱が開く。 */}
         <nav
           aria-labelledby="guide-nav-title-mobile"
-          className="mx-auto mb-4 max-w-3xl lg:hidden print:hidden"
+          className="mx-auto mb-2 max-w-3xl lg:hidden print:hidden"
         >
-          <details className="group/guidenav rounded-xl border border-slate-200 bg-white">
-            <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 rounded-xl px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 [&::-webkit-details-marker]:hidden">
-              <span id="guide-nav-title-mobile" className="shrink-0 font-semibold text-slate-900">
+          <details className="group/guidenav">
+            <summary className="flex min-h-11 cursor-pointer list-none items-center gap-1.5 rounded-lg text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 [&::-webkit-details-marker]:hidden">
+              <span id="guide-nav-title-mobile" className="shrink-0 font-semibold text-emerald-700">
                 {nav.navTitle}
               </span>
-              <span className="min-w-0 flex-1 truncate text-slate-500">
-                {nav.items[current].label}
-              </span>
+              <ChevronRight className="h-3.5 w-3.5 shrink-0 text-slate-400" aria-hidden />
+              <span className="min-w-0 truncate text-slate-500">{nav.items[current].label}</span>
               <ChevronDown
                 className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-open/guidenav:rotate-180"
                 aria-hidden
               />
             </summary>
-            <div className="border-t border-slate-100 px-1 py-3">
+            <div className="mt-1 rounded-xl border border-slate-200 bg-white px-1 py-3 shadow-sm">
               <GuideNavList locale={locale} nav={nav} current={current} idPrefix="guide-nav-mobile" />
             </div>
           </details>
@@ -151,10 +153,11 @@ function GuidePager({ locale, nav, current }: { locale: string; nav: GuideNav; c
   return (
     <div className="mx-auto mt-12 grid max-w-3xl gap-3 border-t border-slate-200 pt-6 sm:grid-cols-2 print:hidden">
       {/* 次が無い (1 本だけのグループ) ときは、ハブへ戻る 1 枚を横いっぱいにする (右に空きを残さない)。 */}
+      {/* 行き先がハブ (グループの端) のときは「前へ / 次へ」ではなく「ガイド一覧」と言う (前のガイドではないため・P7)。 */}
       <Link href={prev.href} prefetch={false} className={next ? PAGER_LINK : `${PAGER_LINK} sm:col-span-2`}>
         <span className="flex items-center gap-1 text-xs font-medium text-slate-500">
-          <ArrowLeft className="h-3.5 w-3.5" aria-hidden />
-          {nav.prevLabel}
+          {prev.hub ? <LayoutList className="h-3.5 w-3.5" aria-hidden /> : <ArrowLeft className="h-3.5 w-3.5" aria-hidden />}
+          {prev.hub ? nav.navTitle : nav.prevLabel}
         </span>
         <span className="mt-0.5 text-sm font-semibold text-slate-900 group-hover:text-emerald-800">{prev.label}</span>
       </Link>
@@ -165,8 +168,8 @@ function GuidePager({ locale, nav, current }: { locale: string; nav: GuideNav; c
           className={`${PAGER_LINK} order-first sm:order-none sm:col-start-2 sm:items-end sm:text-right`}
         >
           <span className="flex items-center gap-1 text-xs font-medium text-slate-500">
-            {nav.nextLabel}
-            <ArrowRight className="h-3.5 w-3.5" aria-hidden />
+            {next.hub ? nav.navTitle : nav.nextLabel}
+            {next.hub ? <LayoutList className="h-3.5 w-3.5" aria-hidden /> : <ArrowRight className="h-3.5 w-3.5" aria-hidden />}
           </span>
           <span className="mt-0.5 text-sm font-semibold text-slate-900 group-hover:text-emerald-800">{next.label}</span>
         </Link>

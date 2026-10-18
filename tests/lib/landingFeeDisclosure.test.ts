@@ -98,7 +98,8 @@ describe('LandingSupport 料率カード ↔ DISCLOSED 料率 (drift フェン�
       expect(t('supportFeeTipBody', LANDING_PAYMENT_FEE_VALUES)).toContain(`${floorJpyc} JPYC`);
       // デジタル商品カード: JPYC を主表示にして買い手 x402 1%・最低 1 JPYC、
       // USDC (Base) は OpenPay x402 利用料 0%・売り手手数料なし。
-      expect(t('supportFeeStoreFocal', LANDING_PAYMENT_FEE_VALUES)).toBe(`JPYC ${x402Pct}%`);
+      // 太字の料率はほかの機能と同じ書き方 (「1%」・2026-10-19 user「利用料そろえる」)。JPYC と USDC の違いは本文。
+      expect(t('supportFeeStoreFocal', LANDING_PAYMENT_FEE_VALUES)).toBe(`${x402Pct}%`);
       expect(t('supportFeeStoreBody', LANDING_PAYMENT_FEE_VALUES)).toContain(`${x402Pct}%`);
       expect(t('supportFeeStoreBody', LANDING_PAYMENT_FEE_VALUES)).toContain(`${x402FloorJpyc} JPYC`);
       expect(t('supportFeeStoreBody', LANDING_PAYMENT_FEE_VALUES)).toContain(
@@ -107,6 +108,8 @@ describe('LandingSupport 料率カード ↔ DISCLOSED 料率 (drift フェン�
       expect(t('supportFeeStoreBody', LANDING_PAYMENT_FEE_VALUES)).toContain(`${storeUsdcPct}%`);
       // チップカードの focal も顧客負担の実額 (ガス相当 約 2 JPYC)
       expect(t('supportFeeTipFocal', LANDING_PAYMENT_FEE_VALUES)).toContain(`${floorJpyc}`);
+      // 数字と単位の間は本文と同じく空白 (ja「約 2 JPYC」・en「≈2 JPYC」)。
+      expect(t('supportFeeTipFocal', LANDING_PAYMENT_FEE_VALUES)).toMatch(/(約 \d+ JPYC|≈\d+ JPYC)/);
     });
   }
 

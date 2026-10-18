@@ -15,6 +15,7 @@ import { GuideRelated } from '@/components/guide/GuideEnd';
 import { GuideCallout } from '@/components/guide/GuideCallout';
 import { BulletList, Section, StepList } from '@/components/guide/PosGuidePieces';
 import { imageGuideContentFor, imageGuideMetadata } from '@/lib/imageGuide';
+import { GuideToc } from '@/components/guide/GuideToc';
 
 export async function generateMetadata({
   params,
@@ -49,6 +50,8 @@ export default async function GuideImageUrlPage({
             </GuideLead>
           ))}
         </header>
+
+        <GuideToc title={guideNavFor(locale).tocTitle} />
 
         {c.sections.map((section) => (
           <Section key={section.title} title={section.title}>

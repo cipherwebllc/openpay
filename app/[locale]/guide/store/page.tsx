@@ -64,7 +64,6 @@ export default async function GuideStorePage({
           <GuideLead>
             {c.heroLead}
           </GuideLead>
-          <GuideAudience title={c.forWhoTitle} chips={c.forWhoChips} />
           <div className="mt-6 flex flex-wrap gap-3">
             <Link
               href={`/${locale}/create?tab=profile`}
@@ -83,6 +82,8 @@ export default async function GuideStorePage({
               </Link>
             ) : null}
           </div>
+          {/* 対象者の札は行動ボタンの下 (主ボタンを札の 2〜3 行で押し下げない・P7)。 */}
+          <GuideAudience title={c.forWhoTitle} chips={c.forWhoChips} />
         </header>
 
         <GuideToc title={guideNavFor(locale).tocTitle} />
@@ -148,11 +149,11 @@ export default async function GuideStorePage({
                   ))}
                 </tr>
               </thead>
-              <tbody className="max-sm:block max-sm:space-y-3">
+              <tbody className="max-sm:block max-sm:divide-y max-sm:divide-slate-100 max-sm:overflow-hidden max-sm:rounded-2xl max-sm:bg-white max-sm:shadow-card max-sm:ring-1 max-sm:ring-slate-200/70">
                 {c.basicsTable.rows.map((row) => (
                   <tr
                     key={row[0]}
-                    className="max-sm:block max-sm:rounded-xl max-sm:bg-white max-sm:p-4 max-sm:shadow-card max-sm:ring-1 max-sm:ring-slate-200/70"
+                    className="max-sm:block max-sm:p-4"
                   >
                     {row.map((cell, i) => (
                       <td
@@ -190,12 +191,13 @@ export default async function GuideStorePage({
                   <>
                     <h3 className="text-base font-semibold text-slate-900">{m.title}</h3>
                     <p className="mt-1 text-xs font-medium text-slate-500">{m.tagline}</p>
-                    {/* 向いているものは札を並べず 1 行の文字にする (6 行 × 4 枚の札で箱が騒がしくならないように)。 */}
-                    <p className="mt-1 text-xs text-slate-500">{m.fits.join(' · ')}</p>
+
                   </>
                 }
               >
                 <p className="text-sm leading-relaxed text-slate-700">{m.intro}</p>
+                {/* 向いているものは閉じた要約に出さず、開いた中の 1 行にする (要約は題と所要時間の 2 行・P7)。 */}
+                <p className="mt-2 text-xs text-slate-500">{m.fits.join(' · ')}</p>
                 <StepLines steps={m.steps} />
                 {m.note ? (
                   <GuideCallout kind="warn" className="mt-4">{m.note}</GuideCallout>
@@ -206,6 +208,8 @@ export default async function GuideStorePage({
               </GuideDisclosure>
             ))}
           </GuideDisclosureGroup>
+          {/* 外部サービスの仕様の注記は配布方法の節の中へ (帯と前後の間にぽつんと置かない・読める濃さ・P7)。 */}
+          <p className="mt-3 text-xs leading-relaxed text-slate-500">{c.disclaimer}</p>
         </Section>
 
         {licenseGuide ? (
@@ -220,10 +224,7 @@ export default async function GuideStorePage({
               <GuideDisclosure summary={<h3 className="text-sm font-semibold text-slate-900 sm:text-base">{licenseGuide.integrationHeading}</h3>}>
                 <p className="text-sm leading-relaxed text-slate-700">{licenseGuide.integration}</p>
                 <CodeBlock code={licenseGuide.integrationSnippet} />
-                <ul className="mt-3 list-disc space-y-2 pl-5">
-                  <li className="text-sm leading-relaxed text-slate-700">{licenseGuide.entry}</li>
-                  <li className="text-sm leading-relaxed text-slate-700">{licenseGuide.metered}</li>
-                </ul>
+                <BulletList items={[licenseGuide.entry, licenseGuide.metered]} marker="•" />
               </GuideDisclosure>
               <GuideDisclosure summary={<h3 className="text-sm font-semibold text-slate-900 sm:text-base">{licenseGuide.verifyHeading}</h3>}>
                 <p className="text-sm leading-relaxed text-slate-700">{licenseGuide.verifyBody}</p>
@@ -241,11 +242,11 @@ export default async function GuideStorePage({
           <Section title={deliveryGuide.heading}>
             <p className="mt-3 text-sm leading-relaxed text-slate-700">{deliveryGuide.intro}</p>
             <StepLines steps={deliveryGuide.steps} />
-            <ul className="mt-4 list-disc space-y-2 pl-5 text-sm leading-relaxed text-slate-700">
-              {deliveryGuide.caveats.map((caveat) => <li key={caveat}>{caveat}</li>)}
-            </ul>
+            <BulletList items={deliveryGuide.caveats} marker="•" />
             <p className="mt-4 text-sm">
-              <a href={DELIVERY_SDK_README_URL} target="_blank" rel="noopener noreferrer" className="font-semibold text-emerald-700 underline underline-offset-2 hover:text-emerald-900">{deliveryGuide.sdkLink}</a>
+              <GuideMoreLink href={DELIVERY_SDK_README_URL} external>
+                {deliveryGuide.sdkLink}
+              </GuideMoreLink>
             </p>
           </Section>
         </div> : null}
@@ -302,9 +303,6 @@ export default async function GuideStorePage({
           <p>{c.ctaBody}</p>
         </GuideCta>
 
-        <p className="mt-10 text-xs leading-relaxed text-slate-400">
-          {c.disclaimer}
-        </p>
       </article>
       </GuideFrame>
     </AppShell>

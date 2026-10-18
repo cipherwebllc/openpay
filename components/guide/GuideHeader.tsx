@@ -5,12 +5,32 @@
 import type { ReactNode } from 'react';
 import Link from 'next/link';
 import { Check } from 'lucide-react';
+import { keepNumbersTogether } from '@/lib/guideText';
+
+/** 文字の子は数字と単位を離さない (keepNumbersTogether)。要素の子はそのまま。 */
+function keepNumbers(children: ReactNode): ReactNode {
+  return typeof children === 'string' ? keepNumbersTogether(children) : children;
+}
 
 export function GuideTitle({ children }: { children: ReactNode }) {
+  // 末尾の全角の括弧書き (「（訪日客向け）」など) は補足として小さく灰色にし、1 語として折り返す
+  // (h1 の 2 行目に括弧書きだけが落ちて見出しが割れるのを防ぐ・P7)。
+  const qualifier = typeof children === 'string' ? /^(.*?)(（[^（）]+）)$/.exec(children) : null;
   return (
     // auto-phrase: 日本語を文節の切れ目で改行する (「け）」だけ・「注 / 文」のような割れを防ぐ)。対応しない
     // ブラウザ (Safari) は通常の改行のまま。text-balance は日本語で語の途中を割るので使わない。
-    <h1 className="text-3xl font-bold leading-tight tracking-tight text-slate-900 [word-break:auto-phrase] sm:text-4xl">{children}</h1>
+    <h1 className="text-3xl font-bold leading-tight tracking-tight text-slate-900 [word-break:auto-phrase] sm:text-4xl">
+      {qualifier ? (
+        <>
+          {keepNumbersTogether(qualifier[1])}
+          <span className="inline-block align-baseline text-[0.6em] font-semibold tracking-normal text-slate-500">
+            {qualifier[2]}
+          </span>
+        </>
+      ) : (
+        keepNumbers(children)
+      )}
+    </h1>
   );
 }
 
@@ -19,12 +39,12 @@ export function GuideTitle({ children }: { children: ReactNode }) {
  * 弱く見せる (スマホで h2 と 2px しか差がなく、見出しの強弱が崩れていた・plans/guide-ux-polish-2.md P4)。
  */
 export function GuideSubtitle({ children }: { children: ReactNode }) {
-  return <p className="mt-3 text-lg font-medium leading-snug text-slate-700 [word-break:auto-phrase]">{children}</p>;
+  return <p className="mt-3 text-lg font-medium leading-snug text-slate-700 [word-break:auto-phrase]">{keepNumbers(children)}</p>;
 }
 
 export function GuideLead({ children, className }: { children: ReactNode; className?: string }) {
   return (
-    <p className={`mt-4 max-w-2xl text-base leading-relaxed text-slate-600 ${className ?? ''}`}>{children}</p>
+    <p className={`mt-4 max-w-2xl text-base leading-relaxed text-slate-600 ${className ?? ''}`}>{keepNumbers(children)}</p>
   );
 }
 
