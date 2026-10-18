@@ -118,7 +118,7 @@
     "howItWorksMerchantTitle": "受け取る (店舗)",
     "howItWorksMerchantStep1": "受取ウォレットアドレスを入力",
     "howItWorksMerchantStep2": "金額・通貨・チェーンを選択",
-    "howItWorksMerchantStep3": "QR を印刷して掲示、またはスマホ・タブレットで提示",
+    "howItWorksMerchantStep3": "できた QR をお客様に見せる (印刷して置いてもOK)",
     "howItWorksCustomerTitle": "支払う (顧客)",
     "howItWorksCustomerStep1": "右上の「接続」でウォレット接続",
     "howItWorksCustomerStep2": "店舗 QR を <scan>スキャン</scan>",

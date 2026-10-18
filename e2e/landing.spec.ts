@@ -175,10 +175,8 @@ test.describe('landing / (LP)', () => {
     await expect(howItWorks).toBeVisible();
     // merchant 3 step
     await expect(howItWorks.getByText('受取ウォレットアドレスを入力')).toBeVisible();
-    // step3: 印刷 or スマホ提示 の両パターン
-    await expect(
-      howItWorks.getByText(/QR を印刷して掲示.*スマホ・タブレットで提示/),
-    ).toBeVisible();
+    // step3: 画面で見せる・印刷して置く の両パターン (決済QR ガイドの受け取りの流れと同じ文・2026-10-19 user)
+    await expect(howItWorks.getByText('できた QR をお客様に見せる (印刷して置いてもOK)')).toBeVisible();
     // customer 3 step
     await expect(
       howItWorks.getByText('右上の「接続」でウォレット接続'),

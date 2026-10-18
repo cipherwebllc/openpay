@@ -118,7 +118,7 @@
     "howItWorksMerchantTitle": "Receive (merchant)",
     "howItWorksMerchantStep1": "Enter your receiving wallet address",
     "howItWorksMerchantStep2": "Pick the amount, token and chain",
-    "howItWorksMerchantStep3": "Print the QR, or show it on a phone / tablet.",
+    "howItWorksMerchantStep3": "Show the QR to the customer (printing it works too)",
     "howItWorksCustomerTitle": "Pay (customer)",
     "howItWorksCustomerStep1": "Use top-right \"Connect\" to connect.",
     "howItWorksCustomerStep2": "<scan>Scan</scan> the merchant QR",
