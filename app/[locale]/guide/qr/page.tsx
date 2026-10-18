@@ -25,6 +25,7 @@ import { GuideCallout } from '@/components/guide/GuideCallout';
 import { GuideDisclosure } from '@/components/guide/GuideDisclosure';
 import { splitBeforeSentence } from '@/lib/guideText';
 import { GuideToc } from '@/components/guide/GuideToc';
+import { GuideMoreLink } from '@/components/guide/GuideLink';
 
 // JPYC 社の発表 (2026-10-09・割引などの優遇についての同社の考え方と導入店向け相談窓口)。窓口のメールアドレスは
 // 載せずに発表へリンクする (公開の連絡先にメールアドレスを書かない方針)。
@@ -127,14 +128,9 @@ export default async function GuideQrPage({
           <GuideCallout kind="warn">
             <p>{c.discountCaution}</p>
             <p className="mt-1">
-              <a
-                href={JPYC_DISCOUNT_RELEASE_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="font-semibold underline underline-offset-2"
-              >
+              <GuideMoreLink href={JPYC_DISCOUNT_RELEASE_URL} external>
                 {c.discountSourceLabel}
-              </a>
+              </GuideMoreLink>
             </p>
           </GuideCallout>
         </Section>

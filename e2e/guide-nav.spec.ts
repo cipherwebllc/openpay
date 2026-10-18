@@ -45,7 +45,7 @@ test.describe('ガイドの目次と /guide ハブ', () => {
     await expect(page).toHaveURL(/\/ja\/guide\/qr#jpyc-discount$/);
     const heading = page.getByRole('heading', { level: 2, name: 'JPYC 払いで割引する' });
     await expect(heading).toBeInViewport();
-    await expect(page.getByRole('link', { name: 'JPYC 社の発表（2026 年 10 月 9 日・PR TIMES）' })).toHaveAttribute(
+    await expect(page.getByRole('link', { name: 'JPYC 社の発表 (2026 年 10 月 9 日・PR TIMES)' })).toHaveAttribute(
       'href',
       'https://prtimes.jp/main/html/rd/p/000000332.000054018.html',
     );

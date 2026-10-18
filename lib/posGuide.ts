@@ -30,7 +30,6 @@ export type GuideContent = {
   readonly metaDescription: string;
   readonly subtitle: string;
   readonly lead: string;
-  readonly heroImage: GuideImage;
 
   readonly canDoTitle: string;
   readonly canDo: readonly string[];
@@ -102,7 +101,6 @@ const ja: GuideContent = {
     'システム連携なしで今日から。既存の無料POSレジに「OpenPay」決済を足して、JPYC（円ステーブルコイン）で受け取る2台持ち運用の手順。',
   subtitle: 'システム連携なしで「今日から」始める「2 台持ち」運用ガイド',
   lead: 'いまの POS レジはそのまま、OpenPay を「横に置くだけ」。開発も連携も不要。設定は一度だけ、慣れれば会計は約 10 秒です。',
-  heroImage: { file: 'hero.webp', alt: 'OpenPay の決済QR 作成画面 (金額 1200 JPYC) と、店名・金額入りの決済用 QR コード (スマホ 2 台の実画面)' },
 
   canDoTitle: 'できること',
   canDo: [
@@ -130,7 +128,7 @@ const ja: GuideContent = {
     'レジは「売上の記録」係、OpenPay は「JPYC の受け取り」係。別々に動かして、閉店後に突き合わせるだけです。',
   overviewFlow: ['POS レジで売上を記録', 'OpenPay で JPYC を受け取る', '閉店後に金額・番号で突き合わせる'],
 
-  setupTitle: '最初の一度だけの準備（約 5 分）',
+  setupTitle: '最初の一度だけの準備 (約 5 分)',
   setupSteps: [
     {
       n: 1,
@@ -145,7 +143,7 @@ const ja: GuideContent = {
   ],
   setupImage: { file: 'pos-add-method.svg', alt: 'POS レジの支払い方法に「OpenPay」を追加した設定画面の模式図' },
 
-  flowTitle: '毎回の会計（慣れれば約 10 秒）',
+  flowTitle: '毎回の会計 (慣れれば約 10 秒)',
   flowSteps: [
     {
       n: 1,
@@ -247,7 +245,6 @@ const en: GuideContent = {
     'Start today, no system integration. Add an 「OpenPay」 tender to your existing free POS and receive JPYC (a JPY stablecoin) with a simple two-device workflow.',
   subtitle: 'A “two-device” workflow you can start today — no system integration',
   lead: 'Keep your current POS and simply place OpenPay beside it. No development, no integration. Set up once — checkout takes about 10 seconds with practice.',
-  heroImage: { file: 'hero.webp', alt: 'OpenPay payment-QR screen (1200 JPYC) and the generated QR with shop name and amount (two real phone screens)' },
 
   canDoTitle: 'What you can do',
   canDo: [

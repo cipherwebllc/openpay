@@ -135,7 +135,7 @@ const ja: AgentGuideContent = {
     'あなたが決済画面で店舗名・明細・合計を確かめ、自分のウォレットで支払う',
     'JPYC（円ステーブルコイン）はあなたからお店へ直接・すぐに届く（ノンカストディ）',
   ],
-  cannotTitle: 'できないこと（＝あえてしないこと）',
+  cannotTitle: 'できないこと (＝あえてしないこと)',
   cannot: [
     'AI は支払いません。財布（秘密鍵）を持たず、支払いは必ずあなたが承認します',
     'OpenPay は暗号資産の交換・両替を行いません。JPYC の入手（スワップ）は、ご自身で外部サービスを使います',
@@ -148,7 +148,7 @@ const ja: AgentGuideContent = {
     'Polygon 上の JPYC（少量の POL＝ガス代も）。入手方法は下記「JPYC の入手」へ',
   ],
 
-  setupTitle: 'セットアップ（AI に MCP を追加）',
+  setupTitle: 'セットアップ (AI に MCP を追加)',
   setupIntro:
     'openpay-order-mcp（openpay-x402-mcp の order profile）は、お店探し（find_shops）・メニュー取得・支払額の確認・決済リンク作成だけを AI に使わせる MCP サーバーです。自動で支払うツールはなく、鍵も設定に入れません。',
   setupSteps: [
@@ -169,7 +169,7 @@ const ja: AgentGuideContent = {
     },
   ],
   setupEnvironmentNote: {
-    title: 'クラウド環境（スマホの Claude アプリ・ブラウザ版 Claude Code）で使うとき',
+    title: 'クラウド環境 (スマホの Claude アプリ・ブラウザ版 Claude Code) で使うとき',
     items: [
       'PC のローカルで動く Claude Code / Codex なら、Local Wallet・Kova・MetaMask Agent Wallet・Steward が使えます。',
       'スマホの Claude アプリの Code やブラウザ版 Claude Code は使い捨てのクラウド環境です。Local Wallet は鍵ごと消えるので、JPYC を入れないでください。',
@@ -177,7 +177,7 @@ const ja: AgentGuideContent = {
       '「人が支払う」（openpay-order-mcp）は鍵不要でどこでも使えます（登録はセッションごとに消えることがあります）。クラウドから Agent に支払わせるなら、自分のサーバで署名する Steward を使ってください。',
     ],
   },
-  configLabel: '設定例（支払い用の鍵は不要）',
+  configLabel: '設定例 (支払い用の鍵は不要)',
   configCode: MCP_CONFIG_JSON,
   configNote:
     'この設定に秘密鍵は入れません（AI は支払わないため）。詳細は npm の openpay-x402-mcp をご覧ください。',
@@ -206,7 +206,7 @@ const ja: AgentGuideContent = {
     },
   ],
 
-  jpycTitle: 'JPYC の入手（Polygon）',
+  jpycTitle: 'JPYC の入手 (Polygon)',
   jpycBody:
     '支払いには Polygon 上の JPYC を使います。手持ちの USDC などは、外部の DEX（分散型取引所・例：Uniswap の Polygon の USDC/JPYC プール）でご自身でスワップできます。OpenPay は交換・両替を行いません。',
   jpycSteps: [
@@ -226,14 +226,14 @@ const ja: AgentGuideContent = {
       body: '受け取る JPYC のアドレスが、下の正しい v3 アドレスと一致するか必ず確かめてください。似た名前の別トークンに注意。',
     },
   ],
-  jpycAddressLabel: 'JPYC（v3）コントラクトアドレス',
+  jpycAddressLabel: 'JPYC (v3) コントラクトアドレス',
   jpycAddress: JPYC_CONTRACT_ADDRESS,
   jpycAddressChainNote:
     'このアドレスは Polygon / Kaia / Avalanche / Ethereum で共通です（JPYC v3）。',
   jpycLegacyWarning:
     '注意：旧プリペイド型の JPYC v1（0x431d… で始まる別トークン）と間違えないでください。スワップ先は必ず上記 v3 アドレスに。',
   jpycGasNote: 'スワップの実行には、少量の POL（ガス代）が必要です。',
-  jpycNoGasLabel: 'ガス代（POL）が無いとき',
+  jpycNoGasLabel: 'ガス代 (POL) が無いとき',
   jpycNoGasNote:
     'MetaMask の「Gas Station（ガス込みスワップ）」を使うと、Polygon では POL を持っていなくても、手持ちの USDC などからガス代を払って USDC→JPYC のスワップができます（Base / Arbitrum も対応・スマートアカウントへの自動アップグレードが必要／Optimism 等は非対応で少量の ETH が別途必要）。※この機能は MetaMask が提供するもので、OpenPay は関与しません。対応チェーン・トークンや混雑状況により成立しない場合があります。',
   jpycLiquidityNote:

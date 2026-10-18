@@ -132,7 +132,7 @@ const JA: QrGuideContent = {
   ],
   discountCaution:
     'クレジットカードなどの加盟店規約には、支払い方法によって価格を変えることを制限する条項がある場合があります。内容は会社ごとに違うので、契約している規約を確かめてください。JPYC 社は 2026 年 10 月 9 日の発表で、支払い方法ごとの価格や条件は加盟店の自由な経営判断に委ねられるべきという同社の考え方を示し、規約との関係で不安がある導入店向けの相談窓口を案内しています。これは JPYC 社の考え方で、公正取引委員会の見解ではありません。OpenPay は、個々の規約のもとで割引ができるかどうかは判断しません。',
-  discountSourceLabel: 'JPYC 社の発表（2026 年 10 月 9 日・PR TIMES）',
+  discountSourceLabel: 'JPYC 社の発表 (2026 年 10 月 9 日・PR TIMES)',
 
   currenciesTitle: '対応通貨・チェーン',
   currenciesDetailsLabel: 'ほかのチェーンから払うとき・Arc の条件',

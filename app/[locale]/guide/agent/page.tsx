@@ -67,8 +67,6 @@ export default async function GuideAgentPage({
 
         <GuideToc title={guideNavFor(locale).tocTitle} />
 
-        <GuideHero image={c.heroImage} />
-
         {/* できること / できないこと */}
         <div className="mt-8 grid gap-6 sm:grid-cols-2">
           <section className="rounded-2xl bg-white p-5 shadow-card ring-1 ring-emerald-200/70">
@@ -113,8 +111,10 @@ export default async function GuideAgentPage({
           </p>
         </Section>
 
+        {/* AI との会話 → 注文ページ → 支払いの 3 画面は、ページの頭ではなく注文の流れの図にする (頭を軽く・P8)。 */}
         <Section title={c.flowTitle}>
           <StepList steps={c.flowSteps} badgeClassName={STEP_BADGE_CUSTOMER} />
+          <GuideHero image={c.heroImage} />
         </Section>
 
         <Section title={c.jpycTitle}>

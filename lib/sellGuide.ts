@@ -180,7 +180,7 @@ const ja: SellGuideContent = {
   routesTitle: '出品の 3 経路',
   routesIntro:
     '既存 API をどこまで触れるかに合わせて、難易度の低い順に選べます。',
-  noCodeTitle: 'ノーコード（推奨・5 分）',
+  noCodeTitle: 'ノーコード (推奨・5 分)',
   noCodeBody:
     'x402-jpyc-gateway の「Deploy with Vercel」からデプロイし、次の env を 3 つ設定します。既存 API は変更ゼロで課金化できます。',
   noCodeLink: {
@@ -189,7 +189,7 @@ const ja: SellGuideContent = {
   },
   noCodeEnvLabel: 'Vercel に設定する env',
   noCodeEnv: NO_CODE_ENV,
-  sdkTitle: 'SDK（数行）',
+  sdkTitle: 'SDK (数行)',
   sdkBody:
     'openpay-x402-sdk 0.10.0 以降で、自分の出品の resourceUrl・resourceId・expectedRecipient（JPYC 受取先）を createJpycGate に設定します。ID と受取先は自分の管理画面から取り、discovery 応答から設定しないでください。',
   sdkPackage: {
@@ -206,7 +206,7 @@ const ja: SellGuideContent = {
   sdkSplitCode: SDK_SPLIT,
   sdkSplitNote:
     '本体処理または決済に失敗したときは、有料データを返しません。買い手に課金せず本体処理の失敗を返すには、settle() の前にエラー応答を返します。',
-  snippetTitle: 'コピペスニペット（依存ゼロ）',
+  snippetTitle: 'コピペスニペット (依存ゼロ)',
   snippetBody:
     'AI ストアの登録フォームには、Node 18+ で動く自己完結の 402 ゲートスニペットがあります。依存パッケージを増やさず、そのまま既存 API の前段に置けます。',
   snippetLink: {
@@ -245,7 +245,7 @@ const ja: SellGuideContent = {
     href: '/discovery',
   },
 
-  bazaarTitle: 'x402 Bazaar / agentic.market にも載せる（USDC 併売）',
+  bazaarTitle: 'x402 Bazaar / agentic.market にも載せる (USDC 併売)',
   bazaarIntro:
     'このページの出品（JPYC・Polygon）は /api/discovery と OpenPay の MCP / SDK からエージェントに発見されます。さらに出品フォームの「USDC (Base) でも販売する」を有効にすると、同じ API を Coinbase の x402 Bazaar / agentic.market にも掲載できます。',
   bazaarItems: [

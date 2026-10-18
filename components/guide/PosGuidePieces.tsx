@@ -13,7 +13,6 @@ import type { GuideImage, GuideStep } from '@/lib/posGuide';
 // POS_GUIDE が参照する全 file がここに entry を持つことを test で強制する
 // (未登録だと下の ?? フォールバックで誤比率描画になるため・黙殺防止)。
 export const FIGURE_DIMS: Record<string, { w: number; h: number }> = {
-  'hero.webp': { w: 1280, h: 640 },
   'pos-add-method.svg': { w: 760, h: 480 },
   'history-reconcile.svg': { w: 1000, h: 420 },
   'refund-not-reversal.svg': { w: 1000, h: 500 },
