@@ -45,10 +45,6 @@ export type QrGuideContent = {
 
   readonly currenciesTitle: string;
 
-  readonly guidesTitle: string;
-  readonly guideLinkStart: string;
-  readonly guideLinkPos: string;
-  readonly guideLinkShop: string;
 
   readonly ctaTitle: string;
   readonly ctaBody: string;
@@ -141,10 +137,6 @@ const JA: QrGuideContent = {
 
   currenciesTitle: '対応通貨・チェーン',
 
-  guidesTitle: '次のステップ',
-  guideLinkStart: '導入前チェックリスト — 始める前に確認する 8 つのこと',
-  guideLinkPos: '今お使いの POS レジと併用する運用ガイド',
-  guideLinkShop: '商品登録から注文受付まで — レジ・モバイルオーダー',
 
   ctaTitle: 'まずは 1 枚、QR を作ってみる',
   ctaBody:
@@ -238,10 +230,6 @@ const EN: QrGuideContent = {
 
   currenciesTitle: 'Supported currencies & chains',
 
-  guidesTitle: 'Next steps',
-  guideLinkStart: 'Before you start — eight things to check',
-  guideLinkPos: 'Running alongside your current POS register',
-  guideLinkShop: 'From product setup to order intake — POS & mobile ordering',
 
   ctaTitle: 'Make your first QR',
   ctaBody:

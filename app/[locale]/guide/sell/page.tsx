@@ -12,9 +12,10 @@ import { AppShell } from '@/components/AppShell';
 import { GuideFrame } from '@/components/guide/GuideFrame';
 import { GuideDisclosure } from '@/components/guide/GuideDisclosure';
 import { guideNavFor } from '@/lib/guideNav';
-import { GUIDE_PRIMARY_ACTION, GuideActions, GuideLead, GuideSubtitle, GuideTitle } from '@/components/guide/GuideHeader';
+import { GuideActions, GuideLead, GuideSubtitle, GuideTitle } from '@/components/guide/GuideHeader';
+import { GuideCta } from '@/components/guide/GuideEnd';
 import { GuideToc } from '@/components/guide/GuideToc';
-import { STEP_BADGE, BulletList, Section, StepList } from '@/components/guide/PosGuidePieces';
+import { BulletList, Section, StepList } from '@/components/guide/PosGuidePieces';
 import { CodeBlock } from '@/components/guide/AgentGuidePieces';
 import { guideSellMetadata, sellGuideContentFor } from '@/lib/sellGuide';
 
@@ -27,6 +28,9 @@ export async function generateMetadata({
   setRequestLocale(locale);
   return guideSellMetadata(locale);
 }
+
+const ROUTE_BADGE =
+  'flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-emerald-50 text-sm font-bold text-emerald-700 ring-1 ring-inset ring-emerald-200';
 
 export default async function GuideSellPage({
   params,
@@ -48,7 +52,7 @@ export default async function GuideSellPage({
           <GuideLead>
             {c.subtitle}
           </GuideLead>
-                  <GuideActions actions={[{ href: `/${locale}${c.ctaButtonHref}`, label: c.ctaButton }]} />
+          <GuideActions actions={[{ href: `/${locale}${c.ctaButtonHref}`, label: c.ctaButton }]} />
         </header>
 
         <GuideToc title={guideNavFor(locale).tocTitle} />
@@ -57,14 +61,15 @@ export default async function GuideSellPage({
           <p className="mt-3 text-sm leading-relaxed text-slate-700">
             {c.routesIntro}
           </p>
-          <ol className="mt-5 space-y-3">
+          {/* 3 つは順番ではなく選ぶもの。手順の番号 (塗りの丸) と見分けるため A・B・C の角丸の札にする。 */}
+          <ul className="mt-5 space-y-3">
             <li>
               <GuideDisclosure
                 defaultOpen
                 summary={
                   <>
                     <h3 className="flex items-center gap-3 text-base font-semibold text-slate-900">
-                      <span className={STEP_BADGE}>1</span>
+                      <span className={ROUTE_BADGE}>A</span>
                       {c.noCodeTitle}
                     </h3>
                     <p className="mt-2 text-sm leading-relaxed text-slate-600">
@@ -87,10 +92,10 @@ export default async function GuideSellPage({
 
             <li>
               <GuideDisclosure
-                                summary={
+                summary={
                   <>
                     <h3 className="flex items-center gap-3 text-base font-semibold text-slate-900">
-                      <span className={STEP_BADGE}>2</span>
+                      <span className={ROUTE_BADGE}>B</span>
                       {c.sdkTitle}
                     </h3>
                     <p className="mt-2 text-sm leading-relaxed text-slate-600">
@@ -121,10 +126,10 @@ export default async function GuideSellPage({
 
             <li>
               <GuideDisclosure
-                                summary={
+                summary={
                   <>
                     <h3 className="flex items-center gap-3 text-base font-semibold text-slate-900">
-                      <span className={STEP_BADGE}>3</span>
+                      <span className={ROUTE_BADGE}>C</span>
                       {c.snippetTitle}
                     </h3>
                     <p className="mt-2 text-sm leading-relaxed text-slate-600">
@@ -141,7 +146,7 @@ export default async function GuideSellPage({
               </Link>
               </GuideDisclosure>
             </li>
-          </ol>
+          </ul>
           <div className="mt-5 rounded-xl bg-emerald-50 p-4 ring-1 ring-emerald-200/70">
             <h3 className="text-sm font-semibold text-emerald-900">
               {c.authorityTitle}
@@ -166,7 +171,7 @@ export default async function GuideSellPage({
               任意の拡張なので、見出しと要点だけを見せて本文はたたむ (plans/guide-ux-polish-2.md P3)。 */}
           <div className="mt-6">
           <GuideDisclosure
-            summary={
+                summary={
               <>
                 <h3 className="text-base font-semibold text-slate-900">{c.bazaarTitle}</h3>
                 <p className="mt-2 text-sm leading-relaxed text-slate-600">{c.bazaarIntro}</p>
@@ -278,27 +283,23 @@ export default async function GuideSellPage({
           </div>
         </Section>
 
-        <section className="mt-12 rounded-[1.5rem] bg-gradient-to-br from-emerald-50 to-teal-50/60 p-6 text-center ring-1 ring-emerald-200/60 sm:p-8">
-          <h2 data-toc="skip" className="text-lg font-bold text-emerald-900">{c.ctaTitle}</h2>
-          <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-slate-700">
-            {c.ctaBody}
-          </p>
-          <Link
-            href={`/${locale}${c.ctaButtonHref}`}
-            className={`mt-5 ${GUIDE_PRIMARY_ACTION}`}
-          >
-            {c.ctaButton}
-          </Link>
-          <p className="mt-5 text-sm leading-relaxed text-slate-600">
-            {c.buyerGuideLead}
-            <Link
-              href={`/${locale}${c.buyerGuideLink.href}`}
-              className="font-medium text-emerald-700 underline decoration-emerald-300 underline-offset-2 hover:text-emerald-900"
-            >
-              {c.buyerGuideLink.label}
-            </Link>
-          </p>
-        </section>
+        <GuideCta
+          title={c.ctaTitle}
+          action={{ href: `/${locale}${c.ctaButtonHref}`, label: c.ctaButton }}
+          footer={
+            <p>
+              {c.buyerGuideLead}
+              <Link
+                href={`/${locale}${c.buyerGuideLink.href}`}
+                className="font-medium text-emerald-700 underline decoration-emerald-300 underline-offset-2 hover:text-emerald-900"
+              >
+                {c.buyerGuideLink.label}
+              </Link>
+            </p>
+          }
+        >
+          <p>{c.ctaBody}</p>
+        </GuideCta>
       </article>
       </GuideFrame>
     </AppShell>

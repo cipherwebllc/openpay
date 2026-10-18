@@ -17,6 +17,7 @@ import { GuideFrame } from '@/components/guide/GuideFrame';
 import { guideNavFor } from '@/lib/guideNav';
 import { GuideFeeList } from '@/components/guide/GuideFee';
 import { GUIDE_PRIMARY_ACTION, GUIDE_SECONDARY_ACTION, GuideLead, GuideSubtitle, GuideTitle, GuideAudience, GuideFeatureList } from '@/components/guide/GuideHeader';
+import { GuideCta, GuideRelated } from '@/components/guide/GuideEnd';
 import { BulletList, STEP_BADGE, Section } from '@/components/guide/PosGuidePieces';
 import { GuideVideo } from '@/components/guide/GuideVideo';
 import { HOWTO_VIDEO_UI, howtoVideoFor } from '@/lib/howtoVideos';
@@ -63,11 +64,6 @@ export default async function GuideQrPage({
   const video = howtoVideoFor(locale, 'qr');
   const tLanding = await getTranslations({ locale, namespace: 'Landing' });
 
-  const guideLinks = [
-    { href: `/${locale}/guide/start`, label: c.guideLinkStart },
-    { href: `/${locale}/guide/pos`, label: c.guideLinkPos },
-    { href: `/${locale}/guide/shop`, label: c.guideLinkShop },
-  ];
 
   return (
     <AppShell wide>
@@ -169,35 +165,10 @@ export default async function GuideQrPage({
           </p>
         </Section>
 
-        <Section title={c.guidesTitle}>
-          <ul className="mt-3 space-y-2">
-            {guideLinks.map((link) => (
-              <li key={link.href}>
-                <Link
-                  href={link.href}
-                  prefetch={false}
-                  className="text-sm font-semibold text-emerald-700 underline-offset-2 hover:underline"
-                >
-                  {link.label} →
-                </Link>
-              </li>
-            ))}
-          </ul>
-        </Section>
-
-        <section className="mt-12 rounded-[1.5rem] bg-gradient-to-br from-emerald-50 to-teal-50/60 p-6 text-center ring-1 ring-emerald-200/60 sm:p-8">
-          <h2 data-toc="skip" className="text-lg font-bold text-emerald-900">{c.ctaTitle}</h2>
-          <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-slate-700">
-            {c.ctaBody}
-          </p>
-          <Link
-            href={`/${locale}/create`}
-            prefetch={false}
-            className={`mt-5 ${GUIDE_PRIMARY_ACTION}`}
-          >
-            {c.ctaLabel}
-          </Link>
-        </section>
+        <GuideCta title={c.ctaTitle} action={{ href: `/${locale}/create`, label: c.ctaLabel }}>
+          <p>{c.ctaBody}</p>
+        </GuideCta>
+        <GuideRelated locale={locale} current="qr" links={['start', 'shop', 'pos']} />
       </article>
       </GuideFrame>
     </AppShell>

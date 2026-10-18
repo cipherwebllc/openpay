@@ -14,9 +14,12 @@ export function GuideTitle({ children }: { children: ReactNode }) {
   );
 }
 
-/** h1 の下の一文 (要点)。緑の色は「お店」の意味に使うので、ここは濃い灰色にする。 */
+/**
+ * h1 の下の一文 (要点)。緑の色は「お店」の意味に使うので灰色にする。太さは中くらいにして、本文の h2 (太字) より
+ * 弱く見せる (スマホで h2 と 2px しか差がなく、見出しの強弱が崩れていた・plans/guide-ux-polish-2.md P4)。
+ */
 export function GuideSubtitle({ children }: { children: ReactNode }) {
-  return <p className="mt-3 text-lg font-semibold leading-snug text-slate-800">{children}</p>;
+  return <p className="mt-3 text-lg font-medium leading-snug text-slate-700 [word-break:auto-phrase]">{children}</p>;
 }
 
 export function GuideLead({ children, className }: { children: ReactNode; className?: string }) {

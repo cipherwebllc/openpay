@@ -27,7 +27,6 @@ describe('/guide/wallet', () => {
       c.walletsTitle,
       c.scanTitle,
       c.wcTitle,
-      c.relatedTitle,
     ]);
 
     const wallets = screen.getByRole('heading', { level: 2, name: c.walletsTitle }).closest('section')!;
@@ -60,9 +59,12 @@ describe('/guide/wallet', () => {
     for (const badge of badges) expect(badge.className).toContain('bg-blue-600');
     expect(within(wc).getByText(c.wcTip)).toBeInTheDocument();
 
-    for (const link of c.related) {
-      expect(within(article).getByRole('link', { name: `${link.label} →` })).toHaveAttribute('href', `/${locale}${link.path}`);
-    }
+    // 関連ガイド (JPYC で支払う・モバイルオーダー) は、すぐ下の「前へ / 次へ」と同じ行き先なので 1 行を出さない。
+    expect(within(article).queryByRole('heading', { level: 2, name: nav.relatedGuidesTitle })).toBeNull();
+    const pagerHrefs = [...container.querySelectorAll('a')]
+      .filter((a) => a.textContent?.startsWith(nav.prevLabel) || a.textContent?.startsWith(nav.nextLabel))
+      .map((a) => a.getAttribute('href'));
+    expect(pagerHrefs).toEqual([`/${locale}/guide/pay`, `/${locale}/guide/mobile-order`]);
 
     // 目次の現在地はこのページ (PC・スマホの 2 つの nav で 1 個ずつ)。
     const current = container.querySelectorAll('nav a[aria-current="page"]');

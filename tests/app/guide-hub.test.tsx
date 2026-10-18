@@ -1,5 +1,5 @@
-// /guide ハブ (「OpenPay でできること」) を実描画で検証する: h1・5 グループのパネルの h2・
-// 12 本の行 (href と、可視テキストから成るリンク名)・末尾の「関連ページ」(料金 /pricing)・
+// /guide ハブ (「OpenPay でできること」) を実描画で検証する: h1・5 グループの h2・
+// 12 本の行 (href と、可視テキストから成るリンク名)・「補足」の中の料金 (/pricing)・
 // aria-label を使わないこと (掟 8)・metadata。
 
 import { describe, expect, it, vi } from 'vitest';
@@ -11,22 +11,19 @@ vi.mock('next-intl/server', () => ({ setRequestLocale: vi.fn() }));
 vi.mock('@/components/AppShell', () => ({ AppShell: ({ children }: { children: React.ReactNode }) => <main>{children}</main> }));
 
 describe('/guide hub', () => {
-  it.each(['ja', 'en'] as const)('%s: h1・リード・5 グループのパネル・12 本の行 (重複なし)・末尾の関連ページ', async (locale) => {
+  it.each(['ja', 'en'] as const)('%s: h1・リード・5 グループ・12 本の行 (重複なし)・補足の中の料金', async (locale) => {
     const nav = guideNavFor(locale);
     const { container } = render(await GuideHubPage({ params: Promise.resolve({ locale }) }));
 
     expect(screen.getByRole('heading', { level: 1, name: nav.hubTitle })).toBeInTheDocument();
     expect(screen.getByText(nav.hubLead)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: nav.backHome })).toHaveAttribute('href', `/${locale}`);
-    // 5 グループのパネルの後ろ (末尾) に「関連ページ」。「はじめての方へ」は別の箱にせず、お店向けのパネルの頭の目印。
-    expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual([
-      ...nav.groups.map((g) => g.title),
-      nav.related.title,
-    ]);
+    // 5 グループだけ (料金は「補足」の中)。「はじめての方へ」は別の箱にせず、お店向けのパネルの頭の目印。
+    expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual(nav.groups.map((g) => g.title));
     const shops = screen.getByRole('heading', { level: 2, name: nav.groups[0].title }).closest('section')!;
     expect(within(shops).getByText(nav.hubStartTitle)).toBeInTheDocument();
     expect(within(shops).getByText(nav.hubStartLead)).toBeInTheDocument();
-    // 読む順の番号は導入前チェックリスト (1) → 決済QR (2) の 2 本だけ。
+    // 読む順の番号はお店向けの 4 本 (ガイドの「次へ」と同じ順)。
     const steps = within(shops)
       .getAllByRole('link')
       .filter((a) => /^\d/.test(a.textContent ?? ''))
@@ -34,6 +31,8 @@ describe('/guide hub', () => {
     expect(steps).toEqual([
       ['1', `/${locale}/guide/start`],
       ['2', `/${locale}/guide/qr`],
+      ['3', `/${locale}/guide/shop`],
+      ['4', `/${locale}/guide/pos`],
     ]);
 
     // 同じガイドを二重に並べない (12 本が 1 回ずつ・目次の順)。
@@ -46,18 +45,22 @@ describe('/guide hub', () => {
     );
     // リンク名 = タイトル + 説明 (どちらも可視テキスト)
     for (const group of nav.groups) {
-      for (const item of group.items) {
-        const step = group.id === 'shops' && (item.slug === 'start' || item.slug === 'qr') ? `${item.slug === 'start' ? 1 : 2} ` : '';
+      for (const [index, item] of group.items.entries()) {
+        const step = group.id === 'shops' ? `${index + 1} ` : '';
         const card = screen.getByRole('link', { name: `${step}${item.label} ${item.summary}` });
         expect(card).toHaveAttribute('href', `/${locale}/guide/${item.slug}`);
       }
     }
-    // 関連ページ: 料金 (/{locale}/pricing) のカード 1 枚。リンク名 = タイトル + 説明 (可視テキスト)。
+    // 料金 (/{locale}/pricing) の行は「補足」の中 (画像 URL のガイドの後)。リンク名 = タイトル + 説明 (可視テキスト)。
     const pricing = nav.related.items.find((i) => i.id === 'pricing')!;
     const pricingCard = screen.getByRole('link', { name: `${pricing.label} ${pricing.summary}` });
     expect(pricingCard).toHaveAttribute('href', `/${locale}/pricing`);
-    const relatedSection = screen.getByRole('heading', { level: 2, name: nav.related.title }).closest('section')!;
-    expect(within(relatedSection).getAllByRole('link')).toEqual([pricingCard]);
+    const more = nav.groups.find((g) => g.id === 'more')!;
+    const moreSection = screen.getByRole('heading', { level: 2, name: more.title }).closest('section')!;
+    expect(within(moreSection).getAllByRole('link').map((a) => a.getAttribute('href'))).toEqual([
+      `/${locale}/guide/image-url`,
+      `/${locale}/pricing`,
+    ]);
     // ハブには目次 (ガイド一覧の nav) を出さない
     expect(screen.queryByRole('navigation', { name: nav.navTitle })).toBeNull();
     expect(container.querySelectorAll('[aria-label]')).toHaveLength(0);

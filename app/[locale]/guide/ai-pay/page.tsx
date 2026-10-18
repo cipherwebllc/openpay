@@ -12,7 +12,8 @@ import { AppShell } from '@/components/AppShell';
 import { GuideFrame } from '@/components/guide/GuideFrame';
 import { GuideDisclosure } from '@/components/guide/GuideDisclosure';
 import { guideNavFor } from '@/lib/guideNav';
-import { GUIDE_PRIMARY_ACTION, GuideActions, GuideLead, GuideSubtitle, GuideTitle } from '@/components/guide/GuideHeader';
+import { GuideActions, GuideLead, GuideSubtitle, GuideTitle } from '@/components/guide/GuideHeader';
+import { GuideCta } from '@/components/guide/GuideEnd';
 import { GuideToc } from '@/components/guide/GuideToc';
 import {
   BulletList,
@@ -54,21 +55,13 @@ export default async function GuideAiPayPage({
     <AppShell wide>
       <GuideFrame locale={locale} current="ai-pay">
       <article className="mx-auto max-w-3xl">
-        <Link
-          href={`/${locale}${c.backLink.href}`}
-          prefetch={false}
-          className="inline-flex min-h-11 items-center text-xs font-medium text-slate-500 hover:text-slate-900"
-        >
-          {c.backLink.label}
-        </Link>
-
-        <header className="mt-2">
+        <header>
           <GuideTitle>{guideNavFor(locale).items['ai-pay'].label}</GuideTitle>
           <GuideSubtitle>{c.title}</GuideSubtitle>
           <GuideLead>
             {c.subtitle}
           </GuideLead>
-                  <GuideActions actions={[{ href: `/${locale}${c.ctaButtonHref}`, label: c.ctaButton }]} />
+          <GuideActions actions={[{ href: `/${locale}${c.ctaButtonHref}`, label: c.ctaButton }]} />
         </header>
 
         <GuideToc title={guideNavFor(locale).tocTitle} />
@@ -250,40 +243,38 @@ export default async function GuideAiPayPage({
           </p>
         </Section>
 
-        <section className="mt-12 rounded-[1.5rem] bg-gradient-to-br from-emerald-50 to-teal-50/60 p-6 text-center ring-1 ring-emerald-200/60 sm:p-8">
-          <h2 data-toc="skip" className="text-lg font-bold text-emerald-900">{c.ctaTitle}</h2>
-          <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-slate-700">
-            {c.ctaBody}
-          </p>
-          <Link
-            href={`/${locale}${c.ctaButtonHref}`}
-            className={`mt-5 ${GUIDE_PRIMARY_ACTION}`}
-          >
-            {c.ctaButton}
-          </Link>
-          <p className="mt-5 text-sm leading-relaxed text-slate-600">
-            {c.sdkLead}
-            <a
-              href={c.sdkLink.href}
-              target="_blank"
-              rel="noreferrer noopener"
-              className="font-medium text-emerald-700 underline decoration-emerald-300 underline-offset-2 hover:text-emerald-900"
-            >
-              {c.sdkLink.label}
-            </a>
-            {c.sdkTail}
-          </p>
-          <p className="mt-2 text-sm leading-relaxed text-slate-600">
-            {c.sellerLead}
-            <Link
-              href={`/${locale}${c.sellerLink.href}`}
-              className="font-medium text-emerald-700 underline decoration-emerald-300 underline-offset-2 hover:text-emerald-900"
-            >
-              {c.sellerLink.label}
-            </Link>
-            {c.sellerTail}
-          </p>
-        </section>
+        <GuideCta
+          title={c.ctaTitle}
+          action={{ href: `/${locale}${c.ctaButtonHref}`, label: c.ctaButton }}
+          footer={
+            <>
+              <p>
+                {c.sdkLead}
+                <a
+                  href={c.sdkLink.href}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                  className="font-medium text-emerald-700 underline decoration-emerald-300 underline-offset-2 hover:text-emerald-900"
+                >
+                  {c.sdkLink.label}
+                </a>
+                {c.sdkTail}
+              </p>
+              <p>
+                {c.sellerLead}
+                <Link
+                  href={`/${locale}${c.sellerLink.href}`}
+                  className="font-medium text-emerald-700 underline decoration-emerald-300 underline-offset-2 hover:text-emerald-900"
+                >
+                  {c.sellerLink.label}
+                </Link>
+                {c.sellerTail}
+              </p>
+            </>
+          }
+        >
+          <p>{c.ctaBody}</p>
+        </GuideCta>
       </article>
       </GuideFrame>
     </AppShell>

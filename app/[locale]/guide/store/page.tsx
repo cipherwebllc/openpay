@@ -17,6 +17,7 @@ import { GuideCallout } from '@/components/guide/GuideCallout';
 import { GuideDisclosure } from '@/components/guide/GuideDisclosure';
 import { guideNavFor } from '@/lib/guideNav';
 import { GUIDE_PRIMARY_ACTION, GUIDE_SECONDARY_ACTION, GuideLead, GuideSubtitle, GuideTitle, GuideAudience, GuideFeatureList } from '@/components/guide/GuideHeader';
+import { GuideCta } from '@/components/guide/GuideEnd';
 import { GuideToc } from '@/components/guide/GuideToc';
 import { STEP_BADGE, BulletList, Section } from '@/components/guide/PosGuidePieces';
 import { GuideVideo } from '@/components/guide/GuideVideo';
@@ -108,16 +109,14 @@ export default async function GuideStorePage({
         </Section>
 
         <Section title={c.categoriesTitle}>
-          <div className="mt-3 flex flex-wrap gap-2">
+          {/* 押せるボタンに見えないよう、影と枠のない平らな札にする (選ぶ UI ではなく一覧)。 */}
+          <ul className="mt-3 flex flex-wrap gap-1.5">
             {HOSTED_PRODUCT_CATEGORIES.map((category) => (
-              <span
-                key={category}
-                className="rounded-full bg-white px-3.5 py-1.5 text-sm font-semibold text-slate-700 shadow-[0_2px_8px_-2px_rgba(15,23,42,0.07)] ring-1 ring-slate-200"
-              >
+              <li key={category} className="rounded-md bg-slate-100 px-2.5 py-1 text-sm font-medium text-slate-700">
                 {tCatalog(`categories.${category}`)}
-              </span>
+              </li>
             ))}
-          </div>
+          </ul>
           <p className="mt-4 text-sm leading-relaxed text-slate-700">
             {c.categoriesExamples}
           </p>
@@ -354,19 +353,9 @@ export default async function GuideStorePage({
           <GuideCallout kind="tip" className="mt-4">{c.promoPoint}</GuideCallout>
         </Section>
 
-        <section className="mt-12 rounded-[1.5rem] bg-gradient-to-br from-emerald-50 to-teal-50/60 p-6 text-center ring-1 ring-emerald-200/60 sm:p-8">
-          <h2 data-toc="skip" className="text-lg font-bold text-emerald-900">{c.ctaTitle}</h2>
-          <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-slate-700">
-            {c.ctaBody}
-          </p>
-          <Link
-            href={`/${locale}/create?tab=profile`}
-            prefetch={false}
-            className={`mt-5 ${GUIDE_PRIMARY_ACTION}`}
-          >
-            {c.ctaLabel}
-          </Link>
-        </section>
+        <GuideCta title={c.ctaTitle} action={{ href: `/${locale}/create?tab=profile`, label: c.ctaLabel }}>
+          <p>{c.ctaBody}</p>
+        </GuideCta>
 
         <p className="mt-10 text-xs leading-relaxed text-slate-400">
           {c.disclaimer}

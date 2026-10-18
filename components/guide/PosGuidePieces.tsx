@@ -5,6 +5,7 @@
 // hooks/context を使わないため Server/Client どちらでも描画可。
 
 import type { ReactNode } from 'react';
+import { ArrowDown, ArrowRight } from 'lucide-react';
 import type { GuideImage, GuideStep } from '@/lib/posGuide';
 
 // public/guide/<file> の SVG 図版の intrinsic 寸法 (CLS 防止の width/height 用)。
@@ -27,6 +28,18 @@ export const FIGURE_DIMS: Record<string, { w: number; h: number }> = {
  * `toc={false}` は「このページの内容」(GuideToc) に載せない節 (動画・関連ガイドなど)。
  * GuideToc は data-toc-label (バッジを除いた見出し) を読む。
  */
+/**
+ * 見出しの id。題名から作り、server の HTML に出す (#id で開いた・再読み込みしたときも飛べる)。
+ * 以前は描画後に JS で section-<番号> を振っていて、直接開くと先頭で止まり、節を足すと番号がずれた
+ * (plans/guide-ux-polish-2.md P4)。空白は '-'、区切りの記号は除く。題名を変えると id も変わる。
+ */
+export function guideHeadingId(title: string): string {
+  return title
+    .trim()
+    .replace(/[()（）「」『』【】、。・:：,.?？!！"'“”‘’]/g, '')
+    .replace(/\s+/g, '-');
+}
+
 export function Section({
   title,
   children,
@@ -44,10 +57,10 @@ export function Section({
   return (
     <section className="mt-12">
       <h2
-        id={id}
+        id={id ?? guideHeadingId(title)}
         data-toc={toc ? undefined : 'skip'}
         data-toc-label={title}
-        className="flex items-start gap-3 text-xl font-bold tracking-tight text-slate-900 sm:text-2xl"
+        className="flex items-start gap-3 text-xl font-bold tracking-tight text-slate-900 [word-break:auto-phrase] sm:text-2xl"
       >
         {badge !== undefined ? <span className={`${STEP_BADGE} mt-0.5 sm:mt-1`}>{badge}</span> : null}
         <span className="min-w-0">{title}</span>
@@ -113,6 +126,28 @@ export function StepList({
               {step.body}
             </p>
           </div>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+/**
+ * 「A → B → C」の流れのチップ (start の償還・image-url の手順)。スマホは縦に積んで下向きの矢印にし、
+ * 折り返しで矢印だけが行頭に取り残されるのを避ける (plans/guide-ux-polish-2.md P4)。sm 以上は横に並べる。
+ */
+export function GuideFlow({ steps }: { steps: readonly string[] }) {
+  return (
+    <ol className="mt-4 flex flex-col items-start gap-1 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-2 sm:gap-y-2">
+      {steps.map((step, i) => (
+        <li key={step} className="flex flex-col items-start gap-1 sm:flex-row sm:items-center sm:gap-2">
+          {i > 0 ? (
+            <span aria-hidden className="pl-4 text-slate-400 sm:pl-0">
+              <ArrowDown className="h-3.5 w-3.5 sm:hidden" />
+              <ArrowRight className="hidden h-3.5 w-3.5 sm:block" />
+            </span>
+          ) : null}
+          <span className="rounded-xl bg-slate-100 px-3 py-1.5 text-sm font-semibold text-slate-700">{step}</span>
         </li>
       ))}
     </ol>

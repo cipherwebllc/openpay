@@ -16,7 +16,8 @@ import { GuideFrame } from '@/components/guide/GuideFrame';
 import { GuideFaq } from '@/components/guide/GuideFaq';
 import { GuideDisclosure } from '@/components/guide/GuideDisclosure';
 import { guideNavFor } from '@/lib/guideNav';
-import { GUIDE_PRIMARY_ACTION, GuideActions, GuideLead, GuideSubtitle, GuideTitle } from '@/components/guide/GuideHeader';
+import { GuideActions, GuideLead, GuideSubtitle, GuideTitle } from '@/components/guide/GuideHeader';
+import { GuideCta } from '@/components/guide/GuideEnd';
 import { GuideToc } from '@/components/guide/GuideToc';
 import {
   BulletList,
@@ -53,19 +54,16 @@ export default async function GuideAgentPage({
     <AppShell wide>
       <GuideFrame locale={locale} current="agent">
       <article className="mx-auto max-w-3xl">
-        <Link
-          href={`/${locale}${c.backLink.href}`}
-          prefetch={false}
-          className="inline-flex min-h-11 items-center text-xs font-medium text-slate-500 hover:text-slate-900"
-        >
-          {c.backLink.label}
-        </Link>
-
-        <header className="mt-2">
+        <header>
           <GuideTitle>{guideNavFor(locale).items['agent'].label}</GuideTitle>
           <GuideSubtitle>{c.title}</GuideSubtitle>
           <GuideLead>{c.lead}</GuideLead>
-                  <GuideActions actions={[{ href: `/${locale}${c.ctaButtonHref}`, label: c.ctaButton }]} />
+          <GuideActions
+            actions={[
+              { href: `/${locale}${c.ctaButtonHref}`, label: c.ctaButton },
+              { href: `/${locale}${c.consoleLink.href}`, label: c.consoleLink.label },
+            ]}
+          />
         </header>
 
         <GuideToc title={guideNavFor(locale).tocTitle} />
@@ -181,18 +179,9 @@ export default async function GuideAgentPage({
         </Section>
 
         {/* CTA */}
-        <section className="mt-12 rounded-[1.5rem] bg-gradient-to-br from-emerald-50 to-teal-50/60 p-6 text-center ring-1 ring-emerald-200/60 sm:p-8">
-          <h2 data-toc="skip" className="text-lg font-bold text-emerald-900">{c.ctaTitle}</h2>
-          <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-slate-700">
-            {c.ctaBody}
-          </p>
-          <Link
-            href={`/${locale}${c.ctaButtonHref}`}
-            className={`mt-5 ${GUIDE_PRIMARY_ACTION}`}
-          >
-            {c.ctaButton}
-          </Link>
-        </section>
+        <GuideCta title={c.ctaTitle} action={{ href: `/${locale}${c.ctaButtonHref}`, label: c.ctaButton }}>
+          <p>{c.ctaBody}</p>
+        </GuideCta>
       </article>
       </GuideFrame>
     </AppShell>

@@ -91,10 +91,6 @@ export type GuideContent = {
   readonly ctaButtonHref: string;
 
   readonly backHome: string;
-  readonly relatedTitle: string;
-  readonly relatedStart: string;
-  readonly relatedQr: string;
-  readonly relatedShop: string;
 };
 
 // スマレジ (クラウド POS) の A8.net アフィリエイトリンク。ja/en 共通。クリック計測は a8mat 付き
@@ -132,12 +128,12 @@ const ja: GuideContent = {
     'お客様 … ウォレット＋JPYC（Polygon / Kaia / Avalanche のいずれか）',
   ],
 
-  overviewTitle: '仕組み（全体像）',
+  overviewTitle: '仕組み',
   overviewBody:
     'レジは「売上の記録」係、OpenPay は「JPYC の受け取り」係。別々に動かして、閉店後に突き合わせるだけです。',
   overviewImage: { file: 'overview-flow.svg', alt: 'POS レジ→OpenPay→突合 の 3 ステップ全体像' },
 
-  setupTitle: 'STEP 0：最初の一度だけの準備（約 5 分）',
+  setupTitle: '最初の一度だけの準備（約 5 分）',
   setupSteps: [
     {
       n: 1,
@@ -152,7 +148,7 @@ const ja: GuideContent = {
   ],
   setupImage: { file: 'pos-add-method.svg', alt: 'POS レジの支払い方法に「OpenPay」を追加した設定画面の模式図' },
 
-  flowTitle: '毎回の会計フロー（4 ステップ・慣れれば約 10 秒）',
+  flowTitle: '毎回の会計（慣れれば約 10 秒）',
   flowSteps: [
     {
       n: 1,
@@ -192,7 +188,7 @@ const ja: GuideContent = {
   ],
   reconcileImage: { file: 'history-reconcile.svg', alt: 'POS の明細と OpenPay の履歴を時刻・番号で突き合わせる図（履歴一覧は純額表示）' },
 
-  posTitle: 'どの POS レジを使えばいい？（無料で始められるレジ）',
+  posTitle: 'どの POS レジを使えばいい？',
   posBody:
     'いまのレジのままで OK。これから選ぶなら、「その他決済」枠のある無料 POS アプリと相性抜群です。',
   posExamples: ['Square POS', 'Airレジ', 'スマレジ', 'ユビレジ'],
@@ -251,10 +247,6 @@ const ja: GuideContent = {
   ctaButtonHref: '/create',
 
   backHome: '← トップにもどる',
-  relatedTitle: '関連ガイド',
-  relatedStart: '導入前チェックリスト — 始める前に確認する 8 つのこと',
-  relatedQr: 'まずはシンプルに — 決済QR ガイド',
-  relatedShop: '商品登録から注文受付まで — レジ・モバイルオーダー',
 };
 
 const en: GuideContent = {
@@ -291,7 +283,7 @@ const en: GuideContent = {
     'The POS records the sale; OpenPay receives the JPYC. They run separately — you just reconcile after closing.',
   overviewImage: { file: 'overview-flow.svg', alt: 'Overview: POS register → OpenPay → reconcile' },
 
-  setupTitle: 'STEP 0 — One-time setup (about 5 minutes)',
+  setupTitle: 'One-time setup (about 5 minutes)',
   setupSteps: [
     {
       n: 1,
@@ -306,7 +298,7 @@ const en: GuideContent = {
   ],
   setupImage: { file: 'pos-add-method.svg', alt: 'A POS settings mockup adding an “OpenPay” payment method' },
 
-  flowTitle: 'Every checkout (4 steps, ~10 seconds once used to it)',
+  flowTitle: 'Every checkout (about 10 seconds with practice)',
   flowSteps: [
     {
       n: 1,
@@ -346,7 +338,7 @@ const en: GuideContent = {
   ],
   reconcileImage: { file: 'history-reconcile.svg', alt: 'Matching POS entries with OpenPay history by time and receipt number (history lists the net amount)' },
 
-  posTitle: 'Which POS should you use? (POS apps you can start free)',
+  posTitle: 'Which POS should you use?',
   posBody:
     'Keep your current POS if you have one. Choosing new? Free POS apps with an “other payment” slot pair best.',
   posExamples: ['Square POS', 'Airレジ', 'スマレジ (Smaregi)', 'ユビレジ (Ubiregi)'],
@@ -405,10 +397,6 @@ const en: GuideContent = {
   ctaButtonHref: '/create',
 
   backHome: '← Back to home',
-  relatedTitle: 'Related guides',
-  relatedStart: 'Before you start — eight things to check',
-  relatedQr: 'Keep it simple — the payment QR guide',
-  relatedShop: 'From product setup to order intake — POS & mobile ordering',
 };
 
 export const POS_GUIDE: Record<GuideLocale, GuideContent> = { ja, en };

@@ -66,8 +66,6 @@ export type PayGuideContent = {
   readonly faqTitle: string;
   readonly faq: readonly { readonly q: string; readonly a: string }[];
 
-  readonly relatedTitle: string;
-  readonly related: readonly PayGuideLink[];
 
   readonly ctaTitle: string;
   readonly ctaBody: string;
@@ -192,12 +190,6 @@ const JA: PayGuideContent = {
     },
   ],
 
-  relatedTitle: '関連ガイド',
-  related: [
-    { path: '/guide/mobile-order', label: 'モバイルオーダーのやり方' },
-    { path: '/guide/agent', label: 'AI に頼んで注文（訪日客向け）' },
-    { path: '/pricing', label: '料金 — 機能ごとに、だれが払うか' },
-  ],
 
   ctaTitle: 'お店に行く前に、準備しておく',
   ctaBody:
@@ -320,12 +312,6 @@ const EN: PayGuideContent = {
     },
   ],
 
-  relatedTitle: 'Related guides',
-  related: [
-    { path: '/guide/mobile-order', label: 'How to use mobile order' },
-    { path: '/guide/agent', label: 'Order with your AI (for visitors to Japan)' },
-    { path: '/pricing', label: 'Pricing — who pays what, by feature' },
-  ],
 
   ctaTitle: 'Get ready before you go',
   ctaBody:

@@ -10,7 +10,6 @@
 
 import type { ReactNode } from 'react';
 import type { Metadata } from 'next';
-import Link from 'next/link';
 import { Camera, IdCard, ScanLine, Wallet } from 'lucide-react';
 import { setRequestLocale } from 'next-intl/server';
 import { AppShell } from '@/components/AppShell';
@@ -114,22 +113,6 @@ export default async function GuideWalletPage({
         <Section title={c.wcTitle}>
           <StepList steps={c.wcSteps} badgeClassName={STEP_BADGE_CUSTOMER} />
           <GuideCallout kind="tip">{c.wcTip}</GuideCallout>
-        </Section>
-
-        <Section title={c.relatedTitle} toc={false}>
-          <ul className="mt-3 space-y-2">
-            {c.related.map((link) => (
-              <li key={link.path}>
-                <Link
-                  href={`/${locale}${link.path}`}
-                  prefetch={false}
-                  className="text-sm font-semibold text-emerald-700 underline-offset-2 hover:underline"
-                >
-                  {link.label} →
-                </Link>
-              </li>
-            ))}
-          </ul>
         </Section>
       </article>
       </GuideFrame>

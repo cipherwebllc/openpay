@@ -102,7 +102,7 @@ describe('GuideFrame', () => {
     }
   });
 
-  it('本文の後の「前へ / 次へ」は目次の並び順・最初の前はハブ・最後に次は無い', () => {
+  it('本文の後の「前へ / 次へ」は同じ対象者のグループの中だけ・グループの端はハブ・1 本だけのグループはハブだけ', () => {
     const nav = guideNavFor('ja');
     const pager = (slug: (typeof GUIDE_SLUGS)[number]) => {
       const { container, unmount } = renderFrame('ja', slug);
@@ -113,14 +113,22 @@ describe('GuideFrame', () => {
       unmount();
       return result;
     };
+    // お店向け: start → qr → shop → pos
     expect(pager('start')).toEqual([
       ['prev', '/ja/guide'],
       ['next', '/ja/guide/qr'],
     ]);
+    expect(pager('pos')).toEqual([
+      ['prev', '/ja/guide/shop'],
+      ['next', '/ja/guide'],
+    ]);
+    // お客様向けの先頭 pay の「前へ」は、お店向けの pos ではなくハブ
     expect(pager('pay')).toEqual([
-      ['prev', '/ja/guide/pos'],
+      ['prev', '/ja/guide'],
       ['next', '/ja/guide/wallet'],
     ]);
-    expect(pager('image-url')).toEqual([['prev', '/ja/guide/sell']]);
+    // 1 本だけのグループ (クリエイター向け・補足) はハブだけ
+    expect(pager('store')).toEqual([['prev', '/ja/guide']]);
+    expect(pager('image-url')).toEqual([['prev', '/ja/guide']]);
   });
 });

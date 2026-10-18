@@ -1,5 +1,5 @@
 // 使い方動画が 4 つのガイドページに正しく入っていることを実描画で検査する。
-// - ja: 決めた動画だけ (/guide/shop はレジ → モバイルオーダー → 受注の 3 本・ほかは 1 本。サムネイルの alt = 動画のタイトル・
+// - ja: 決めた動画だけ (/guide/shop はレジ → モバイルオーダー → 受注の 3 本・ほかは 1 本。ボタンの名前に動画のタイトル・
 //   YouTube リンクの ID が一致・押す前は iframe なし)
 // - en: 動画の節そのものを出さない (動画は日本語のため)
 import { describe, expect, it, vi } from 'vitest';
@@ -34,7 +34,7 @@ describe('ガイドページの使い方動画', () => {
     expect(links).toHaveLength(videos.length);
     videos.forEach((video, i) => {
       expect(buttons[i]).toHaveTextContent(`${HOWTO_VIDEO_UI.play}（${video.duration}）`);
-      expect(screen.getByAltText(video.title)).toBeInTheDocument();
+      expect(buttons[i]).toHaveTextContent(video.title);
       expect(links[i]).toHaveAttribute('href', `https://www.youtube.com/watch?v=${video.youtubeId}`);
     });
     // 押すまで YouTube の iframe は作らない。

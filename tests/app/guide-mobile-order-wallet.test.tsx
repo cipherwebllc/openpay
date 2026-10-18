@@ -31,10 +31,12 @@ describe('/guide/mobile-order のウォレットの案内', () => {
     // 用意するもののウォレットの項目から「ウォレットを選ぶ」へ誘導する。
     expect(c.need.some((item) => item.includes('HashPort Wallet') && item.includes(nav.items.wallet.label))).toBe(true);
 
-    // 関連ガイド: JPYC で支払う → AI で注文。
-    const related = screen.getByRole('link', { name: c.relatedPayGuide });
-    expect(related).toHaveAttribute('href', `/${locale}/guide/pay`);
-    expect(screen.getByRole('link', { name: c.relatedAgentGuide })).toHaveAttribute('href', `/${locale}/guide/agent`);
+    // 関連ガイド: JPYC で支払う。AI で注文 (/guide/agent) は「次へ」と同じ行き先なので 1 行には重ねない。
+    const related = screen.getByRole('heading', { level: 2, name: nav.relatedGuidesTitle }).closest('section')!;
+    expect(within(related).getAllByRole('link').map((a) => [a.textContent, a.getAttribute('href')])).toEqual([
+      [nav.items.pay.label, `/${locale}/guide/pay`],
+    ]);
+    expect(screen.getByRole('link', { name: new RegExp(`^${nav.nextLabel}`) })).toHaveAttribute('href', `/${locale}/guide/agent`);
 
     expect(container.querySelectorAll('article [aria-label]')).toHaveLength(0);
   });
