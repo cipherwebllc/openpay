@@ -37,7 +37,7 @@ describe('listStoreListingsCached', () => {
   it('公開データを 60 秒だけ共有キャッシュする (tag 付き)', () => {
     expect(STORE_LISTINGS_REVALIDATE_SEC).toBe(60);
     expect(cacheState.options).toEqual({ revalidate: 60, tags: ['store-listings'] });
-    expect(cacheState.keyParts).toEqual(['store-listings-v1']);
+    expect(cacheState.keyParts).toEqual(['store-listings-v2']);
   });
 
   it('成功した一覧はキャッシュから返し、KV を読み直さない', async () => {

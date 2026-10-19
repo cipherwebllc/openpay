@@ -14,6 +14,7 @@ function fx(
   return {
     id: `h_${'f'.repeat(30)}${String(n).padStart(2, '0')}`,
     label: 'download',
+    contentKind: 'url',
     handle: 'fixture',
     updatedAt: 1754300000000 + n,
     totalJpyc: String(price + fee),

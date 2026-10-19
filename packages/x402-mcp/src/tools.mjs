@@ -298,8 +298,9 @@ async function readJson(res) {
   }
 }
 
+// query の部分一致の対象。title と trigger (いつ使うか) も含める (AI が用途の言葉で探せるように)。
 function itemText(item) {
-  return [item.resource, item.description, item.category]
+  return [item.resource, item.title, item.description, item.trigger, item.category]
     .filter((value) => typeof value === 'string')
     .join(' ')
     .toLowerCase();
@@ -322,14 +323,28 @@ function summarizeDiscoveryItem(item) {
     priceAtomic !== null && feeAtomic !== null ? priceAtomic + feeAtomic : null;
 
   return {
+    ...optionalString(item, 'id'),
     resource: item.resource,
+    ...optionalString(item, 'title'),
     description: item.description,
+    // いつ使うか (出品者が書いた 1 行)・ドキュメント・利用条件・更新日 (ISO)・最後に動作を確かめた日 (ISO)。
+    // どれも /api/discovery にある値をそのまま渡す (無ければ出さない)。official は OpenPay 自身の出品だけ true。
+    ...optionalString(item, 'trigger'),
     category: item.category,
     priceJpyc: priceAtomic === null ? item.priceJpyc : formatAtomicJpyc(priceAtomic),
     feeJpyc: feeAtomic === null ? null : formatAtomicJpyc(feeAtomic),
     totalJpyc: totalAtomic === null ? null : formatAtomicJpyc(totalAtomic),
     network: item.network ?? accept?.network,
+    ...optionalString(item, 'docsUrl'),
+    ...optionalString(item, 'license'),
+    ...optionalString(item, 'updatedAt'),
+    ...optionalString(item, 'verifiedAt'),
+    ...(item.official === true ? { official: true } : {}),
   };
+}
+
+function optionalString(item, key) {
+  return typeof item[key] === 'string' && item[key].length > 0 ? { [key]: item[key] } : {};
 }
 
 function requireArgsObject(args) {

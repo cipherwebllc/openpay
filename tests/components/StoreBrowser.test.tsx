@@ -3,13 +3,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, screen } from '@testing-library/react';
 import { renderWithIntl } from '../_helpers/i18n';
 import { StoreBrowser } from '@/components/StoreBrowser';
-import type { StoreListing } from '@/lib/x402/storeListing';
+import type { StoreCardListing } from '@/lib/x402/storeListing';
 
 const state = vi.hoisted(() => ({ licenseEnabled: false }));
 vi.mock('@/lib/env', () => ({ env: { get enableLicenseNftUi() { return state.licenseEnabled; } } }));
 beforeEach(() => { state.licenseEnabled = false; });
 
-const LISTINGS: StoreListing[] = [
+const LISTINGS: StoreCardListing[] = [
   {
     id: `h_${'a'.repeat(32)}`,
     title: 'AI プロンプト集',

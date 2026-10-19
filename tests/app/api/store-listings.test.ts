@@ -37,18 +37,22 @@ const LISTINGS = [
     totalJpyc: '101',
     feeJpyc: '1',
     protectedDelivery: true,
+    contentKind: 'text',
+    details: '業務別に 40 本。各プロンプトに使い方の注釈つき。',
+    specs: [{ label: '本数', value: '40' }],
+    demoUrl: 'https://example.com/demo',
     // 型の外 (ホワイトリストで落ちること)
     owner: OWNER,
     payTo: OWNER,
     deliveryUrl: 'https://drive.example.com/secret-file',
     contentUrl: 'https://cdn.example.com/content',
-    contentKind: 'url',
   },
   {
     id: ID_B,
     title: 'VRM アバター',
     priceJpyc: '500',
     label: 'download',
+    contentKind: 'url',
     category: '3d-game',
     tags: ['vrm'],
     handle: 'bob',
@@ -77,11 +81,12 @@ function req(query = ''): Request {
 }
 
 async function load(
-  flags: Partial<{ store: string; licenseUi: string }> = {},
+  flags: Partial<{ store: string; licenseUi: string; licenseApi: string }> = {},
 ): Promise<Route> {
   vi.stubEnv('ENABLE_CREATOR_STORE', flags.store ?? '1');
   vi.stubEnv('NEXT_PUBLIC_ENABLE_CREATOR_STORE', flags.store ?? '1');
   vi.stubEnv('NEXT_PUBLIC_ENABLE_LICENSE_NFT', flags.licenseUi ?? '');
+  vi.stubEnv('ENABLE_LICENSE_NFT', flags.licenseApi ?? '');
   vi.resetModules();
   return (await import('@/app/api/store/listings/route')) as Route;
 }
@@ -133,7 +138,9 @@ describe('GET /api/store/listings', () => {
     expect((await items(res)).map((item) => item.id)).toEqual([ID_A, ID_B]);
   });
 
-  it('ホワイトリストの項目だけを返す (納品物・保護配布・ライセンス内訳・ウォレット等は出ない)', async () => {
+  // 2026-10-19: 納品形式・保護配布の有無・詳しい説明・仕様表・「実際に試す」は AI 向けに足した (どれも @handle の商品ページで
+  // 公開済みの表示専用の値・plans/ai-store-agent-metadata.md)。納品物そのもの・ライセンス内訳・ウォレットは今も出さない。
+  it('ホワイトリストの項目だけを返す (納品物・ライセンス内訳・ウォレット等は出ない)', async () => {
     const { GET } = await load({ licenseUi: '1' });
     const [full, minimal, license] = await items(await GET(req()));
     expect(full).toEqual({
@@ -149,6 +156,11 @@ describe('GET /api/store/listings', () => {
       category: 'ai',
       tags: ['chatgpt', 'business'],
       handle: 'alice',
+      deliveryFormat: 'prompt',
+      protectedDelivery: true,
+      details: '業務別に 40 本。各プロンプトに使い方の注釈つき。',
+      specs: [{ label: '本数', value: '40' }],
+      demoUrl: 'https://example.com/demo',
       updatedAt: 3000,
       url: `https://open-pay.jp${storeProductPath('alice', ID_A, 'ja')}&from=agent`,
     });
@@ -163,6 +175,8 @@ describe('GET /api/store/listings', () => {
       category: '3d-game',
       tags: ['vrm'],
       handle: 'bob',
+      deliveryFormat: 'download',
+      protectedDelivery: false,
       updatedAt: 2000,
       url: `https://open-pay.jp${storeProductPath('bob', ID_B, 'ja')}&from=agent`,
     });
@@ -177,6 +191,8 @@ describe('GET /api/store/listings', () => {
       tags: [],
       handle: 'alice',
       productKind: 'license',
+      // contentKind と label の組が既知の形式に当たらないときは、納品形式を出さない (fixture は contentKind なし)。
+      protectedDelivery: false,
       updatedAt: 1000,
       url: `https://open-pay.jp${storeProductPath('alice', ID_C, 'ja')}&from=agent`,
     });
@@ -185,15 +201,23 @@ describe('GET /api/store/listings', () => {
       OWNER,
       'secret-file',
       'cdn.example.com',
-      'protectedDelivery',
       'deliveryUrl',
+      'contentUrl',
       'termsHash',
       'sellerRole',
-      'label',
       'contentKind',
+      'licenseUrl', // ライセンスの公開 API (ENABLE_LICENSE_NFT) が OFF のときは出さない
     ]) {
       expect(serialized).not.toContain(leaked);
     }
+  });
+
+  it('ライセンスの公開 API が ON のときだけ、ライセンス商品に licenseUrl (利用条件などの公開記述子) を付ける', async () => {
+    const { GET } = await load({ licenseUi: '1', licenseApi: '1' });
+    const listed = await items(await GET(req()));
+    const license = listed.find((item) => item.id === ID_C)!;
+    expect(license.licenseUrl).toBe(`https://open-pay.jp/api/license/products/${ID_C}`);
+    expect(listed.filter((item) => item.id !== ID_C).every((item) => !('licenseUrl' in item))).toBe(true);
   });
 
   it('url は storeProductPath の絶対 URL + from=agent (locale で言語を選ぶ・既定 ja)', async () => {

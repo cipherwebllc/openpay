@@ -163,7 +163,7 @@ The x402 profile exposes 13 tools; the order profile exposes 4.
 | `wallet_status` | x402 | No | `{}`: signer address/error, Polygon JPYC balance/source, effective limits/spend, allowed hosts, catalog trust, and funding URL. |
 | `wallet_history` | x402 | No | `{limit?: 1..50}` (default 10): recent local purchase attempts, outcomes, verified receipt amounts, and coverage. Incomplete local history; no totals or proof of payment. |
 | `wallet_prove` | x402 | No | `{}`: sign a five-minute, single-use link to bind the Agent to a signed-in OpenPay account for server-side purchase history. Keystore/env-key only; do not share the link. |
-| `discovery_search` | x402 | No | Search `DISCOVERY_URL` and show resource, category, price, fee, and total. |
+| `discovery_search` | x402 | No | Search `DISCOVERY_URL` (`query` matches resource, title, description, when-to-use and category) and show resource, title, description, when-to-use (`trigger`), category, price, fee, total, network, and — when the catalog has them — `id`, `docsUrl`, `license`, `updatedAt` / `verifiedAt` (ISO) and `official`. |
 | `x402_quote` | x402 | No | Fetch a 402 challenge and report whether local guards would allow payment. |
 | `x402_pay` | x402 | Yes | Sign and retry with `X-PAYMENT` only after all guards pass. Requires `maxTotalJpyc`. |
 | `order_menu` | order, x402 | No | Read an OpenPay `@handle` shop's public mobile-order menu (`{handle}`): item ids, names, prices, and `hasOptions`. No key needed. |

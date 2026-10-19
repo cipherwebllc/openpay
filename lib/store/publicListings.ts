@@ -4,13 +4,18 @@ import 'server-only';
 // 利用者に渡すための読み取り専用 API。購入は既存の @handle 商品 deep link が担う (money-path 不変)。
 //
 // 応答はホワイトリストで明示的に詰め替える。StoreListing をそのまま返さない —
-// 納品物・保護配布・ライセンスの内訳・出品者のウォレットなど、一覧カードに要らない情報を
+// 納品物 (配布先 URL・本文)・ライセンスの内訳・出品者のウォレットなど、公開しない情報を
 // 将来 StoreListing に足しても、この API へ波及しないようにするため。
+// 2026-10-19 (AI ストアの商品情報を AI に届ける・plans/ai-store-agent-metadata.md): 納品形式・保護配布の有無・
+// 詳しい説明・仕様表・「実際に試す」の URL を足した。どれも @handle の商品ページで既に公開している表示専用の値で、
+// 保護配布は「出品者が署名チケットでの配布を設定したか」の boolean だけ (保証ではない・lib/license/schema.ts と同じ言い方)。
 
 import { DEFAULT_LOCALE, isLocale, type Locale } from '@/i18n';
 import { isValidHandleFormat, normalizeHandle } from '@/lib/handle';
 import { storeProductPath } from '@/lib/storeProductLink';
 import { OPENPAY_CANONICAL_ORIGIN } from '@/lib/x402/firstParty';
+import { licenseNftEnabled } from '@/lib/license/config';
+import { deliveryFormatOf, type DeliveryFormatId } from '@/lib/store/deliveryFormat';
 import type { StoreListing } from '@/lib/x402/storeListing';
 import {
   isHostedProductCategory,
@@ -52,6 +57,17 @@ export type PublicStoreListing = {
   tags: string[];
   handle: string;
   productKind?: 'license';
+  /** ライセンス商品の公開記述子 (利用条件の termsUrl・販売数・譲渡可否など)。ライセンス NFT が有効なときだけ。 */
+  licenseUrl?: string;
+  /** 納品形式 (download / pdf / zip / external = URL で受け取る・prompt / api = 本文で受け取る)。 */
+  deliveryFormat?: DeliveryFormatId;
+  /** 出品者が署名チケットでの配布 (保護配布) を設定したか。保護や提供の保証ではない。 */
+  protectedDelivery: boolean;
+  /** 詳しい説明 (≤2000 字)・仕様表 (≤8 行)・「実際に試す」の https URL。商品ページと同じ表示専用の値。 */
+  details?: string;
+  specs?: { label: string; value: string }[];
+  demoUrl?: string;
+  /** 最終更新 (epoch ミリ秒・出品・編集のたびに更新。/api/discovery の ISO 文字列とは形式が違う)。 */
   updatedAt: number;
   /** 購入用の絶対 URL (@handle の商品 deep link + from=agent)。 */
   url: string;
@@ -113,6 +129,8 @@ export function toPublicStoreListing(
   listing: StoreListing,
   locale: Locale,
 ): PublicStoreListing {
+  // contentKind と label の組が既知の形式に当たらない (現行の入力検証では作れない) ときは、形式を出さない。
+  const format = deliveryFormatOf({ contentKind: listing.contentKind, label: listing.label });
   return {
     id: listing.id,
     title: listing.title,
@@ -127,6 +145,14 @@ export function toPublicStoreListing(
     tags: [...(listing.tags ?? [])],
     handle: listing.handle,
     ...(listing.productKind === 'license' ? { productKind: 'license' as const } : {}),
+    ...(listing.productKind === 'license' && licenseNftEnabled()
+      ? { licenseUrl: `${OPENPAY_CANONICAL_ORIGIN}/api/license/products/${listing.id}` }
+      : {}),
+    ...(format ? { deliveryFormat: format } : {}),
+    protectedDelivery: listing.protectedDelivery === true,
+    ...(listing.details ? { details: listing.details } : {}),
+    ...(listing.specs?.length ? { specs: listing.specs.map(({ label, value }) => ({ label, value })) } : {}),
+    ...(listing.demoUrl ? { demoUrl: listing.demoUrl } : {}),
     updatedAt: listing.updatedAt,
     url: storeListingPurchaseUrl(listing.handle, listing.id, locale),
   };

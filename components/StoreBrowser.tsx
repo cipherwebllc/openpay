@@ -22,14 +22,14 @@ import {
   HOSTED_PRODUCT_CATEGORIES,
   productTypeForLabel,
 } from '@/lib/x402/storeMeta';
-import type { StoreListing } from '@/lib/x402/storeListing';
+import type { StoreCardListing } from '@/lib/x402/storeListing';
 
 export function StoreBrowser({
   listings,
   locale,
   initialQuery = '',
 }: {
-  listings: readonly StoreListing[];
+  listings: readonly StoreCardListing[];
   locale: string;
   /** /store?q= の事前入力 (プロフの「すべての商品を見る」導線)。 */
   initialQuery?: string;
