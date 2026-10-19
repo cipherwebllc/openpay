@@ -9,6 +9,7 @@ import 'server-only';
 // 2026-10-19 (AI ストアの商品情報を AI に届ける・plans/ai-store-agent-metadata.md): 納品形式・保護配布の有無・
 // 詳しい説明・仕様表・「実際に試す」の URL を足した。どれも @handle の商品ページで既に公開している表示専用の値で、
 // 保護配布は「出品者が署名チケットでの配布を設定したか」の boolean だけ (保証ではない・lib/license/schema.ts と同じ言い方)。
+// 同日 (優先 2・plans/store-usage-terms.md): 出品者が選んだ利用条件 (商用利用・改変・再配布の可否と補足) を足した。
 
 import { DEFAULT_LOCALE, isLocale, type Locale } from '@/i18n';
 import { isValidHandleFormat, normalizeHandle } from '@/lib/handle';
@@ -16,6 +17,7 @@ import { storeProductPath } from '@/lib/storeProductLink';
 import { OPENPAY_CANONICAL_ORIGIN } from '@/lib/x402/firstParty';
 import { licenseNftEnabled } from '@/lib/license/config';
 import { deliveryFormatOf, type DeliveryFormatId } from '@/lib/store/deliveryFormat';
+import { USAGE_PERMISSION_KEYS, type StoreUsageTerms } from '@/lib/store/usageTerms';
 import type { StoreListing } from '@/lib/x402/storeListing';
 import {
   isHostedProductCategory,
@@ -67,6 +69,9 @@ export type PublicStoreListing = {
   details?: string;
   specs?: { label: string; value: string }[];
   demoUrl?: string;
+  /** 出品者が選んだ利用条件 (allowed / not_allowed と補足)。選ばれていない項目は出さない (= 記載なし・
+   * 利用規約第 13 条の既定 = 購入者本人の私的利用に限り再配布不可)。OpenPay は内容を保証しない。 */
+  usage?: StoreUsageTerms;
   /** 最終更新 (epoch ミリ秒・出品・編集のたびに更新。/api/discovery の ISO 文字列とは形式が違う)。 */
   updatedAt: number;
   /** 購入用の絶対 URL (@handle の商品 deep link + from=agent)。 */
@@ -125,6 +130,17 @@ export function storeListingPurchaseUrl(
   return `${OPENPAY_CANONICAL_ORIGIN}${storeProductPath(handle, productId, locale)}&from=${STORE_LISTINGS_LINK_FROM}`;
 }
 
+/** 利用条件も項目ごとに詰め替える (保存形に項目が増えても、この API へ黙って波及させない)。 */
+function publicUsage(usage: StoreUsageTerms): StoreUsageTerms {
+  const result: StoreUsageTerms = {};
+  for (const key of USAGE_PERMISSION_KEYS) {
+    const value = usage[key];
+    if (value) result[key] = value;
+  }
+  if (usage.note) result.note = usage.note;
+  return result;
+}
+
 export function toPublicStoreListing(
   listing: StoreListing,
   locale: Locale,
@@ -153,6 +169,7 @@ export function toPublicStoreListing(
     ...(listing.details ? { details: listing.details } : {}),
     ...(listing.specs?.length ? { specs: listing.specs.map(({ label, value }) => ({ label, value })) } : {}),
     ...(listing.demoUrl ? { demoUrl: listing.demoUrl } : {}),
+    ...(listing.usage ? { usage: publicUsage(listing.usage) } : {}),
     updatedAt: listing.updatedAt,
     url: storeListingPurchaseUrl(listing.handle, listing.id, locale),
   };

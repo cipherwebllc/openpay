@@ -7,6 +7,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import { deliveryFormatOf } from '@/lib/store/deliveryFormat';
+import type { StoreUsageTerms } from '@/lib/store/usageTerms';
 import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Store } from 'lucide-react';
@@ -41,6 +42,10 @@ const EMPTY_PRODUCT_FORM: ProductForm = {
   details: '',
   specs: '',
   demoUrl: '',
+  usageCommercial: '',
+  usageModify: '',
+  usageRedistribute: '',
+  usageNote: '',
   priceJpyc: '',
   contentKind: 'url',
   label: 'download',
@@ -52,6 +57,17 @@ const EMPTY_PRODUCT_FORM: ProductForm = {
   saleActive: false,
   usdcEnabled: true,
 };
+
+// 選ばなかった項目は送らない (= 記載なし)。
+function usagePayloadOf(form: ProductForm): StoreUsageTerms | null {
+  const usage: StoreUsageTerms = {
+    ...(form.usageCommercial ? { commercial: form.usageCommercial } : {}),
+    ...(form.usageModify ? { modify: form.usageModify } : {}),
+    ...(form.usageRedistribute ? { redistribute: form.usageRedistribute } : {}),
+    ...(form.usageNote.trim() ? { note: form.usageNote.trim() } : {}),
+  };
+  return Object.keys(usage).length ? usage : null;
+}
 
 const EMPTY_SELLER_FORM: SellerForm = {
   name: '',
@@ -283,6 +299,10 @@ function SignedInSellerPanel({
         details: product.details ?? '',
         specs: product.specs?.map(({ label, value }) => `${label}: ${value}`).join('\n') ?? '',
         demoUrl: product.demoUrl ?? '',
+        usageCommercial: product.usage?.commercial ?? '',
+        usageModify: product.usage?.modify ?? '',
+        usageRedistribute: product.usage?.redistribute ?? '',
+        usageNote: product.usage?.note ?? '',
         emoji: product.emoji ?? '',
         imageUrl: product.imageUrl ?? '',
         deliveryUrl: product.deliveryUrl ?? '',
@@ -329,6 +349,8 @@ function SignedInSellerPanel({
                 : { label: line.trim(), value: '' };
             }) : null,
             demoUrl: form.demoUrl.trim() || null,
+            // license 商品は専用の利用条件を持つので送らない (server も拒否する)。普通の商品は常に送り、空なら null で消す。
+            ...(form.productKind === 'license' ? {} : { usage: usagePayloadOf(form) }),
             emoji: form.emoji.trim() || null,
             imageUrl: form.imageUrl.trim() || null,
             // Mutable delivery metadata stays outside the immutable license/content fields.

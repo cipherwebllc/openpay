@@ -257,15 +257,16 @@ describe('seller extraction DOM and request pins', () => {
   // 2026-10 プロフ磨き上げ P5 で採り直した: 外枠 (rounded-3xl p-6 sm:p-8 → rounded-2xl p-5) と見出し
   // (アイコンの四角 + text-lg → 他のカードと同じ text-sm の見出し) だけを他のカードに揃えた差分。
   // 同 P6 で販売者情報の要約の名前に inline-block (名前の途中で折り返さない) を足して採り直した。
+  // 2026-10-19 普通の商品の「利用条件」の欄 (見せ方の中の 3 つの選択と補足) を足して採り直した (license の 4 つは不変)。
   const domHashes: Record<string, string> = {
-    'ja/empty': '7c5718cbc1fe202e944ca72620527bedd7e48d7e825ec0b948d2401b7885a916',
-    'ja/list': 'c5e3c51d98aa458b062298c17f94085bacbe306334a829461a94497add55a39e',
-    'ja/digital-edit': '9020415269cf5f930e8afce9165013dd6547722280407ec76803547317b676e5',
+    'ja/empty': '2928368da9157034c7edddc9acb888c6eb25f46f92c05719607e03000a3e3da4',
+    'ja/list': 'a07402873ba40dd0c1321da5e56fb1446c095f5f5afa6aa608116f4c051a4289',
+    'ja/digital-edit': 'c4afe7acaa6be8d487b710a2c72d0846e68d004c094ab4396b3300938e87a479',
     'ja/license-new': 'b6f261cf226bb487a3d3d7362c3cc68974c6e04281e50a713d96fb9ee1d1acc9',
     'ja/license-edit': '1c932215893fe5c616975671f4f80fd6a68aa6bd080c2c2da3fe2cbb3e8ec1d5',
-    'en/empty': '2c6b7bf9819d05a90260a82c1d1e4769da0c3bae0cf743ffc5fe016f2389397c',
-    'en/list': '390540f6e20b8e2c3862b7d6dc3e5b7603be653aeb716b728fc939067832f34f',
-    'en/digital-edit': '0a50bbf02dee67ab38fe1fd66cbdcaba89f73bc570fd4d095f27919f500378cd',
+    'en/empty': 'b9e5003c13ade557a1c35b3286d80d862e54770c8cd504f727eb7daf97d3c1a1',
+    'en/list': '069e92092c4c10564985296a784f087ad3afba6d42ab828d02b0bcc293d3ac27',
+    'en/digital-edit': '4e9611158bff17e900793c733057c62d203fc180657eb0977519faf7727dc6b3',
     'en/license-new': '06cb3e2df0c52c33417abcf4c9aa9f126d73cd23101ee5b587c8c7193512ffe4',
     'en/license-edit': '557164b3b03b90cbca195dddfbda3bb52dee42566ed62a467a14215267f09615',
   };
@@ -302,7 +303,7 @@ describe('seller extraction DOM and request pins', () => {
     await waitFor(() => expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(true));
     expect(fetchMock.mock.calls.find(([, init]) => init?.method === 'POST')).toEqual(['/api/store/products', {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: '{"title":"New","desc":null,"details":null,"specs":null,"demoUrl":null,"emoji":null,"imageUrl":null,'
+      body: '{"title":"New","desc":null,"details":null,"specs":null,"demoUrl":null,"usage":null,"emoji":null,"imageUrl":null,'
         + (delivery ? '"deliveryUrl":"",' : '')
         + '"galleryUrls":[],"priceJpyc":"500","contentKind":"url","content":"https://example.com/private","label":"download","category":null,"tags":[],"handle":"alice","featured":false,"saleActive":false,"usdcEnabled":true}',
     }]);
@@ -330,7 +331,8 @@ describe('seller request pins for update, license and sale toggles', () => {
     id: 'h_rich', payTo: A, title: 'Rich', desc: 'Short', emoji: '🎁', imageUrl: 'https://img.example/a.png',
     deliveryUrl: 'https://files.example/gate', galleryUrls: ['https://img.example/b.png', 'https://img.example/c.png'],
     details: 'Long details', specs: [{ label: 'Format', value: 'PDF' }, { label: 'Pages', value: '12' }],
-    demoUrl: 'https://demo.example/try', priceJpyc: '1200', contentKind: 'url', label: 'pdf', category: 'documents',
+    demoUrl: 'https://demo.example/try', usage: { commercial: 'allowed', redistribute: 'not_allowed', note: 'Credit please' },
+    priceJpyc: '1200', contentKind: 'url', label: 'pdf', category: 'documents',
     tags: ['guide', 'pdf'], handle: 'bob', featured: true, saleActive: true, usdcEnabled: true, contentAvailable: true,
   };
   const license = {
@@ -388,7 +390,8 @@ describe('seller request pins for update, license and sale toggles', () => {
     expect(writes(fetchMock)).toEqual([['/api/store/products/h_rich', {
       method: 'PATCH', headers: JSON_HEADERS,
       body: '{"title":"Rich","desc":"Short","details":"Long details","specs":[{"label":"Format","value":"PDF"},{"label":"Pages","value":"12"}],'
-        + '"demoUrl":"https://demo.example/try","emoji":"🎁","imageUrl":"https://img.example/a.png",'
+        + '"demoUrl":"https://demo.example/try","usage":{"commercial":"allowed","redistribute":"not_allowed","note":"Credit please"},'
+        + '"emoji":"🎁","imageUrl":"https://img.example/a.png",'
         + (delivery ? '"deliveryUrl":"https://files.example/gate",' : '')
         + '"galleryUrls":["https://img.example/b.png","https://img.example/c.png"],"priceJpyc":"1200","contentKind":"url",'
         + '"content":"https://private.example/file","label":"pdf","category":"documents","tags":["guide","pdf"],"handle":"bob",'
@@ -406,14 +409,14 @@ describe('seller request pins for update, license and sale toggles', () => {
     const clear: Record<string, string> = {
       '説明 (任意)': '   ', 詳しい説明: '', 仕様: ' ', '実際に試せる URL': '', '絵文字 (任意)': ' ', '画像 URL (任意)': '',
       '追加画像 URL (任意・最大 4)': '\n', 'カテゴリー (任意)': '', 'タグ (任意・カンマ区切り・最大 5 個)': ' , ',
-      掲載するプロフィール: '',
+      掲載するプロフィール: '', 商用利用: '', 再配布・再販売: '', '補足 (200 字まで・例: クレジット表記をお願いします)': ' ',
     };
     for (const [label, value] of Object.entries(clear)) fireEvent.change(screen.getByLabelText(label), { target: { value } });
     if (delivery) fireEvent.change(screen.getByLabelText('保護配布先URL'), { target: { value: '' } });
     await submitEditor(fetchMock);
     expect(writes(fetchMock)).toEqual([['/api/store/products/h_rich', {
       method: 'PATCH', headers: JSON_HEADERS,
-      body: '{"title":"Rich","desc":null,"details":null,"specs":null,"demoUrl":null,"emoji":null,"imageUrl":null,'
+      body: '{"title":"Rich","desc":null,"details":null,"specs":null,"demoUrl":null,"usage":null,"emoji":null,"imageUrl":null,'
         + (delivery ? '"deliveryUrl":"",' : '')
         + '"galleryUrls":[],"priceJpyc":"1200","contentKind":"url","content":"https://private.example/file","label":"pdf",'
         + '"category":null,"tags":[],"handle":null,"featured":true,"saleActive":true,"usdcEnabled":true}',
@@ -486,11 +489,11 @@ describe('seller request pins for update, license and sale toggles', () => {
 describe('seller extraction DOM pins for error states', () => {
   // domHash (<svg> の中身だけ除く) の基準値。分割前の merge-base 164f49c2 で採取した。
   // code の移動では採り直さない (落ちたら DOM か文言が変わっている)。2026-10 P5 で外枠と見出しの class だけ採り直し。
-  // 同 P6 で販売者情報の要約の名前に inline-block を足して採り直し。
+  // 同 P6 で販売者情報の要約の名前に inline-block を足して採り直し。2026-10-19 利用条件の欄を足して errors の 2 つを採り直し。
   const domHashes: Record<string, string> = {
-    'ja/errors': '020a54824d590a8f2f15cdee2276c4a299fd33f4afcee4c427e2b7a6c44b3fd7',
+    'ja/errors': '38c518192cfa722f917bd41969102210cea1b7463a14c84418acb44df2b86104',
     'ja/license-invalid': 'aecd955b97e808230428d5416e3e9a6e4f8d567a2d252ba489f87fcce3b049f0',
-    'en/errors': '823d93225ac5aa9d32853c9b7d6299f83b6b2c530d9a2d3ecec356840bbde343',
+    'en/errors': 'c6387e6cbbeb68202fdc33adb5cdf78ba23d922a96d03f3654da6c4dc2be8fae',
     'en/license-invalid': '0d072e8e086d1d9fb41d7073cc8cfe6718b6b7ed90e77dbac4e082c363a3eabd',
   };
   it.each((['ja', 'en'] as const).flatMap((locale) => ['errors', 'license-invalid'].map((mode) => ({ locale, mode }))))('$locale $mode DOM bytes', async ({ locale, mode }) => {

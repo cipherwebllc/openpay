@@ -27,6 +27,7 @@ const DETAIL_MESSAGE_KEYS: Record<string, string> = {
   'invalid details': 'detailInvalidDetails',
   'invalid specs': 'detailInvalidSpecs',
   'invalid demoUrl': 'detailInvalidDemoUrl',
+  'invalid usage': 'detailInvalidUsage',
   'invalid imageUrl': 'detailInvalidImageUrl',
   'invalid deliveryUrl': 'detailInvalidDeliveryUrl',
   'too many gallery images': 'detailTooManyGalleryImages',

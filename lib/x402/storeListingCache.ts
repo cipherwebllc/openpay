@@ -5,11 +5,12 @@ import 'server-only';
 // - 出品・非公開化・価格変更の反映は最大 60 秒遅れる。購入時は商品と在庫をその場で読み直すので、
 //   キャッシュの古さが決済や在庫の判定へ波及することはない。
 // - KV 障害 (null) はキャッシュしない: 例外で unstable_cache を抜け、次の表示で読み直す。
-// - 1 件の大きさ: AI 向けの表示専用の詳細 (details ≤2000 字・specs ≤8 行) も入る (公開一覧 API 用)。Vercel Data Cache は
+// - 1 件の大きさ: AI 向けの表示専用の詳細 (details ≤2000 字・specs ≤8 行・usage の補足 ≤200 字) も入る (公開一覧 API 用)。Vercel Data Cache は
 //   1 item 2 MB が上限で、超えると黙ってキャッシュされず毎回 KV を読む (Upstash の予算を食う)。文字数の上限は
 //   直列化後の大きさを縛らない (エスケープで 1 文字が数バイトになる・200 件で 2 MB を超えうる・Codex レビュー P2)。
 //   そこで保存の前に大きさを測り、予算を超えたら AI 向けの詳細を大きい順 (details → specs) に落とす
 //   (fitStoreListingsForCache)。一覧の本体 (価格・題名・購入リンク) は残し、キャッシュが黙って無効になる波及を断つ。
+//   usage (利用条件) は小さく (上限いっぱいでも 200 件で約 0.2 MB)、買う判断に直接かかわるので落とさない。
 import { unstable_cache } from 'next/cache';
 import { logger } from '@/lib/logger';
 import { listStoreListings, type StoreListing } from '@/lib/x402/storeListing';

@@ -301,6 +301,7 @@ export default async function HandlePage({
       ...(product.details ? { details: product.details } : {}),
       ...(product.specs ? { specs: product.specs } : {}),
       ...(product.demoUrl ? { demoUrl: product.demoUrl } : {}),
+      ...(product.usage ? { usage: product.usage } : {}),
       ...(product.galleryUrls
         ? { galleryUrls: product.galleryUrls }
         : {}),

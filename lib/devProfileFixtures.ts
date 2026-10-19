@@ -56,7 +56,7 @@ export const DEV_FIXTURE_HOSTED_PRODUCTS: HostedProduct[] = [
     tags: ['GLB', 'Unity'],
     // 商品詳細 P1 (plans/store-product-detail.md) の表示検証用: 長文・仕様表・「実際に試す」。
     details:
-      'カフェの内装一式をローポリで揃えた GLB キットです。\n\n【内容物】カウンター、テーブル 3 種、椅子 4 種、照明 2 種、観葉植物、メニューボード。すべて 1 ファイルにまとめた版と、パーツごとに分けた版の両方が入っています。\n\n【使い方】Hyperfy / Three.js / Unity にそのまま読み込めます。原点は床面の中央、単位はメートルです。\n\n【利用条件】商用利用可・改変可・クレジット不要。素材そのものの再配布と再販売はできません。',
+      'カフェの内装一式をローポリで揃えた GLB キットです。\n\n【内容物】カウンター、テーブル 3 種、椅子 4 種、照明 2 種、観葉植物、メニューボード。すべて 1 ファイルにまとめた版と、パーツごとに分けた版の両方が入っています。\n\n【使い方】Hyperfy / Three.js / Unity にそのまま読み込めます。原点は床面の中央、単位はメートルです。',
     specs: [
       { label: '形式', value: 'GLB (glTF 2.0)' },
       { label: 'ファイルサイズ', value: '12.4 MB' },
@@ -65,6 +65,8 @@ export const DEV_FIXTURE_HOSTED_PRODUCTS: HostedProduct[] = [
       { label: '対応', value: 'Hyperfy・Three.js・Unity・Blender' },
     ],
     demoUrl: 'https://example.com/world/cafe-kit',
+    // 利用条件 (plans/store-usage-terms.md) の表示検証用: 可・不可・記載なし (選ばなかった項目) の 3 つと補足。
+    usage: { commercial: 'allowed', redistribute: 'not_allowed', note: 'クレジット表記は不要です。' },
     // featured 厳選の再現用 (これ以外の 3 商品はプロフで隠れる = ディープリンク検証)。
     featured: true,
     // USDC 購入 UI (P2) の dev 検証用: 支払い方法選択が出る側の代表。

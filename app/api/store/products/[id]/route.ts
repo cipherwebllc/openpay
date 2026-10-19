@@ -46,6 +46,7 @@ const PRODUCT_PATCH_KEYS = new Set([
   'details',
   'specs',
   'demoUrl',
+  'usage',
   'priceJpyc',
   'contentKind',
   'label',
@@ -256,6 +257,8 @@ export async function PATCH(
 
   if (raw.productKind !== undefined && raw.productKind !== product.productKind) return storePrivateJson({ ok: false, error: 'product_kind_immutable' }, 400);
   if (raw.license !== undefined || (product.productKind === 'license' && (raw.usdcEnabled === true || raw.content !== undefined || raw.contentKind !== undefined || raw.priceJpyc !== undefined))) return storePrivateJson({ ok: false, error: 'license_definition_immutable' }, 400);
+  // license 商品は専用の利用条件を持つ。更新の parse は license を知らないので、ここで拒否する。
+  if (product.productKind === 'license' && raw.usage !== undefined) return storePrivateJson({ ok: false, error: 'invalid_product', detail: 'invalid usage' }, 400);
   if (product.productKind === 'license' && raw.saleActive === true && !licenseSellerAllowed(auth.address)) return storePrivateJson({ ok: false, error: 'forbidden' }, 403);
   if (product.productKind === 'license' && raw.saleActive === true && product.registration?.status !== 'registered') return storePrivateJson({ ok: false, error: 'license_registration_pending' }, 409);
 
@@ -298,6 +301,7 @@ export async function PATCH(
         ...(product.details ? { details: product.details } : {}),
         ...(product.specs ? { specs: product.specs } : {}),
         ...(product.demoUrl ? { demoUrl: product.demoUrl } : {}),
+        ...(product.usage ? { usage: product.usage } : {}),
         ...(product.desc ? { desc: product.desc } : {}),
         ...(product.emoji ? { emoji: product.emoji } : {}),
         ...(product.deliveryUrl ? { deliveryUrl: product.deliveryUrl } : {}),
@@ -359,6 +363,7 @@ export async function PATCH(
     details: raw.details !== undefined ? raw.details : product.details,
     specs: raw.specs !== undefined ? raw.specs : product.specs,
     demoUrl: raw.demoUrl !== undefined ? raw.demoUrl : product.demoUrl,
+    usage: raw.usage !== undefined ? raw.usage : product.usage,
     galleryUrls:
       raw.galleryUrls !== undefined
         ? raw.galleryUrls
@@ -471,6 +476,7 @@ export async function PATCH(
       ...(parsed.product.details ? { details: parsed.product.details } : {}),
       ...(parsed.product.specs ? { specs: parsed.product.specs } : {}),
       ...(parsed.product.demoUrl ? { demoUrl: parsed.product.demoUrl } : {}),
+      ...(parsed.product.usage ? { usage: parsed.product.usage } : {}),
       ...(parsed.product.desc ? { desc: parsed.product.desc } : {}),
       ...(parsed.product.emoji ? { emoji: parsed.product.emoji } : {}),
       ...(parsed.product.deliveryUrl ? { deliveryUrl: parsed.product.deliveryUrl } : {}),

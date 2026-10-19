@@ -26,6 +26,7 @@ vi.mock('@/lib/kv', () => ({
 }));
 
 import { POST } from '@/app/api/store/products/route';
+import { PATCH } from '@/app/api/store/products/[id]/route';
 import { parseLicenseDefinition } from '@/lib/license/definition';
 import { LICENSE_STANDARD_TERMS } from '@/lib/license/standardTerms';
 import { licenseRegistrationJobKey } from '@/lib/license/product';
@@ -73,5 +74,30 @@ describe('POST license creation terms through the real parser and storage', () =
     expect(response.status).toBe(400);
     expect(await response.json()).toMatchObject({ error: 'invalid_product', detail: 'invalid license' });
     expect(h.writes).toBe(0);
+  });
+});
+
+// license 商品は専用の利用条件を持つので、普通の商品の「利用条件」の欄を作成でも更新でも受けない。
+// 更新の parse は license を知らないので、route で拒否していることを固定する。
+describe('usage on license products', () => {
+  const json = (body: unknown) => ({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  it('rejects usage on creation and on update without writes', async () => {
+    const rejected = await POST(new Request('https://open-pay.jp/api/store/products', json({
+      title: 'License', productKind: 'license', license: custom, priceJpyc: '1000', contentKind: 'text', content: '', usage: { commercial: 'allowed' },
+    })));
+    expect(rejected.status).toBe(400);
+    expect(await rejected.json()).toMatchObject({ error: 'invalid_product', detail: 'invalid usage' });
+    expect(h.writes).toBe(0);
+    const created = await post(custom);
+    const { product } = await created.json();
+    const writes = h.writes;
+    const patched = await PATCH(
+      new Request(`https://open-pay.jp/api/store/products/${product.id}`, { ...json({ title: 'License', usage: { commercial: 'allowed' } }), method: 'PATCH' }),
+      { params: Promise.resolve({ id: product.id }) },
+    );
+    expect(patched.status).toBe(400);
+    expect(await patched.json()).toMatchObject({ error: 'invalid_product', detail: 'invalid usage' });
+    expect(h.writes).toBe(writes);
+    expect(JSON.parse(h.store!.strings.get('x402:hosted:' + product.id)!)).not.toHaveProperty('usage');
   });
 });

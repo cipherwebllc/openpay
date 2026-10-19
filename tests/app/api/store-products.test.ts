@@ -784,7 +784,10 @@ describe('creator store seller routes', () => {
 
 
 describe('store product details P1 routes', () => {
-  const detailFields = { details: '内容物\n使い方', specs: [{ label: '形式', value: 'GLB' }], demoUrl: 'https://example.com/demo' };
+  const detailFields = {
+    details: '内容物\n使い方', specs: [{ label: '形式', value: 'GLB' }], demoUrl: 'https://example.com/demo',
+    usage: { commercial: 'allowed', redistribute: 'not_allowed', note: 'クレジット表記をお願いします' },
+  };
   beforeEach(async () => {
     // 表示メタの検証は実 parser を通し、KV 書込みだけ既存 boundary mock に閉じる。
     const actual = await vi.importActual<typeof import('@/lib/x402/hostedStore')>('@/lib/x402/hostedStore');
@@ -808,10 +811,10 @@ describe('store product details P1 routes', () => {
 
   it('通常 PATCH と販売切替で省略値を保持し、更新・null クリアできる', async () => {
     getHostedProductUpdateSnapshot.mockResolvedValue({ product: { ...baseProduct, ...detailFields }, token: 'snapshot' });
-    const changes = { details: '更新後', specs: [{ label: 'サイズ', value: '12 MB' }], demoUrl: 'https://example.com/v2' };
+    const changes = { details: '更新後', specs: [{ label: 'サイズ', value: '12 MB' }], demoUrl: 'https://example.com/v2', usage: { modify: 'allowed' } };
     for (const [patch, expected] of [
       [{ title: '更新' }, detailFields], [{ saleActive: true }, detailFields], [changes, changes],
-      [{ details: null, specs: null, demoUrl: null }, null],
+      [{ details: null, specs: null, demoUrl: null, usage: null }, null],
     ] as const) {
       const result = await patchProduct(request(`/api/store/products/${ID}`, 'PATCH', patch), { params: Promise.resolve({ id: ID }) });
       expect(result.status).toBe(200);
@@ -839,6 +842,11 @@ describe('store product details P1 routes', () => {
     ['specs', Array.from({ length: 9 }, () => ({ label: '形式', value: 'GLB' })), 'invalid specs'],
     ['demoUrl', 'http://example.com/demo', 'invalid demoUrl'],
     ['demoUrl', 12, 'invalid demoUrl'],
+    ['usage', { commercial: 'yes' }, 'invalid usage'],
+    ['usage', { other: 'allowed' }, 'invalid usage'],
+    ['usage', { note: 'x'.repeat(201) }, 'invalid usage'],
+    ['usage', ['allowed'], 'invalid usage'],
+    ['usage', 'allowed', 'invalid usage'],
   ])('不正な %s を POST/PATCH とも 400 と詳細エラーで拒否する (%j)', async (field, value, error) => {
     const responses = [
       await createProduct(request('/api/store/products', 'POST', validBody({ [field]: value }))),

@@ -2,6 +2,7 @@ import { useLocale, useTranslations } from 'next-intl';
 import Link from 'next/link';
 import { env } from '@/lib/env';
 import type { StoreLicenseProduct } from '@/lib/licenseUi';
+import type { StoreUsageTerms } from '@/lib/store/usageTerms';
 import { CreatorStoreDeliveryBadge } from '@/components/CreatorStoreDeliveryBadge';
 import { CreatorStoreLicenseDetails } from '@/components/CreatorStoreLicenseDetails';
 import { formatUnits } from 'viem';
@@ -25,6 +26,7 @@ export type CreatorStorefrontProduct = StoreLicenseProduct & {
   details?: string;
   specs?: readonly { label: string; value: string }[];
   demoUrl?: string;
+  usage?: StoreUsageTerms;
   priceJpyc: string;
   /** 保存値 true の商品だけ、購入 modal 内で USDC rail を選べる。 */
   usdcEnabled?: true;
@@ -199,6 +201,7 @@ export function CreatorStorefrontSection({
                         ...(product.details ? { details: product.details } : {}),
                         ...(product.specs ? { specs: product.specs } : {}),
                         ...(product.demoUrl ? { demoUrl: product.demoUrl } : {}),
+                        ...(product.usage ? { usage: product.usage } : {}),
                         ...(product.galleryUrls
                           ? { galleryUrls: product.galleryUrls }
                           : {}),

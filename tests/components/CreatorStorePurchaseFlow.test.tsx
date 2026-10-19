@@ -256,6 +256,22 @@ describe('CreatorStorePurchaseFlow', () => {
     expect(container.querySelector('dl')).toBeNull();
     expect(screen.queryByRole('heading', { name: '仕様' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: '実際に試す' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: '利用条件' })).not.toBeInTheDocument();
+  });
+
+  it.each(['ja', 'en'] as const)('利用条件は 3 行とも出し、選ばれていない項目は「記載なし」・補足と注記を添える (%s)', (locale) => {
+    state.phase = 'idle';
+    state.quote = null;
+    renderFlow(locale, { ...PRODUCT, usage: { commercial: 'allowed', redistribute: 'not_allowed', note: 'クレジット表記をお願いします' } });
+    const section = screen.getByRole('heading', { name: locale === 'ja' ? '利用条件' : 'Usage terms' }).closest('section')!;
+    expect([...section.querySelectorAll('dt')].map((node) => node.textContent)).toEqual(
+      locale === 'ja' ? ['商用利用', '改変', '再配布・再販売', '補足'] : ['Commercial use', 'Modification', 'Redistribution and resale', 'Notes'],
+    );
+    expect([...section.querySelectorAll('dd')].map((node) => node.textContent)).toEqual(
+      locale === 'ja' ? ['可', '記載なし', '不可', 'クレジット表記をお願いします'] : ['Allowed', 'Not stated', 'Not allowed', 'クレジット表記をお願いします'],
+    );
+    expect(section).toHaveTextContent(locale === 'ja' ? 'OpenPay は内容の正確性を確認・保証しません' : 'OpenPay does not check or guarantee their accuracy');
+    expect(state.hookInput).not.toHaveProperty('usage');
   });
 
   it('開始画面でメイン画像を表示し、サムネイルで切替・読込失敗時に fallback する', () => {

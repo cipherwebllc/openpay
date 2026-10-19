@@ -15,12 +15,14 @@ import { CreatorStoreDeliveryBadge } from '@/components/CreatorStoreDeliveryBadg
 import { CreatorStoreLicenseDetails } from '@/components/CreatorStoreLicenseDetails';
 import { CreatorStorePurchaseConfirmation } from '@/components/CreatorStorePurchaseConfirmation';
 import { CreatorStorePurchaseState } from '@/components/CreatorStorePurchaseState';
+import { CreatorStoreUsageTerms } from '@/components/CreatorStoreUsageTerms';
 import { ExternalImage } from '@/components/ExternalImage';
 import { useHostedStorePurchase } from '@/hooks/useHostedStorePurchase';
 import { useModalFocus } from '@/hooks/useModalFocus';
 import { useSiweSession } from '@/hooks/useSiweSession';
 import { useStoreCacheScope } from '@/hooks/useStoreCacheScope';
 import { buildHostedPurchaseSignPreview } from '@/lib/x402/hostedPurchaseWire';
+import type { StoreUsageTerms } from '@/lib/store/usageTerms';
 
 export type CreatorStorePurchaseFlowProps = {
   open: boolean;
@@ -34,6 +36,7 @@ export type CreatorStorePurchaseFlowProps = {
     details?: string;
     specs?: readonly { label: string; value: string }[];
     demoUrl?: string;
+    usage?: StoreUsageTerms;
     priceJpyc: string;
     merchant: Address;
     usdcEnabled?: true;
@@ -243,6 +246,7 @@ export function CreatorStorePurchaseFlow({
                   ...(product.description
                     ? { description: product.description }
                     : {}),
+                  ...(product.usage ? { usage: product.usage } : {}),
                 }}
                 priceJpyc={buyer.quote.priceJpyc}
                 paidUsdc={buyer.quote.paidUsdc}
@@ -270,6 +274,7 @@ export function CreatorStorePurchaseFlow({
                   ...(product.description
                     ? { description: product.description }
                     : {}),
+                  ...(product.usage ? { usage: product.usage } : {}),
                 }}
                 priceJpyc={buyer.quote.merchantValueJpyc}
                 feeJpyc={buyer.quote.feeValueJpyc}
@@ -404,6 +409,7 @@ export function CreatorStorePurchaseFlow({
                 </dl>
               </section>
             ) : null}
+            <CreatorStoreUsageTerms usage={product.usage} />
             {product.demoUrl ? (
               <a href={product.demoUrl} target="_blank" rel="noopener noreferrer nofollow" className="mt-5 inline-flex min-h-11 items-center gap-2 rounded-xl border border-brand px-4 py-2 text-sm font-bold text-brand hover:bg-blue-50">
                 {t('tryDemo')} <span aria-hidden="true">↗</span>

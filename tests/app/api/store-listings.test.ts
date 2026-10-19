@@ -41,6 +41,8 @@ const LISTINGS = [
     details: '業務別に 40 本。各プロンプトに使い方の注釈つき。',
     specs: [{ label: '本数', value: '40' }],
     demoUrl: 'https://example.com/demo',
+    // 保存形に無い項目 (extra) は利用条件の中でも詰め替えで落ちること
+    usage: { commercial: 'allowed', redistribute: 'not_allowed', note: 'クレジット表記をお願いします', extra: 'allowed' },
     // 型の外 (ホワイトリストで落ちること)
     owner: OWNER,
     payTo: OWNER,
@@ -161,6 +163,7 @@ describe('GET /api/store/listings', () => {
       details: '業務別に 40 本。各プロンプトに使い方の注釈つき。',
       specs: [{ label: '本数', value: '40' }],
       demoUrl: 'https://example.com/demo',
+      usage: { commercial: 'allowed', redistribute: 'not_allowed', note: 'クレジット表記をお願いします' },
       updatedAt: 3000,
       url: `https://open-pay.jp${storeProductPath('alice', ID_A, 'ja')}&from=agent`,
     });

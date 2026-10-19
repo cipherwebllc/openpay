@@ -162,6 +162,7 @@ describe('CreatorStorefrontSection', () => {
       details: 'カードには出さない詳しい説明',
       specs: [{ label: '形式', value: 'GLB' }],
       demoUrl: 'https://example.com/demo',
+      usage: { commercial: 'allowed' as const },
       imageUrl: 'https://cdn.example.com/product.png',
       galleryUrls: [
         'https://cdn.example.com/product-side.png',
@@ -190,6 +191,7 @@ describe('CreatorStorefrontSection', () => {
             details: secondProduct.details,
             specs: secondProduct.specs,
             demoUrl: secondProduct.demoUrl,
+            usage: secondProduct.usage,
             usdcEnabled: true,
           }),
         }),
