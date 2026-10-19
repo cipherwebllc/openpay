@@ -369,13 +369,29 @@ describe('GET /api/og/handle', () => {
     expect(hosted.listAvailableForOwner).toHaveBeenCalledWith(RECORD.owner);
     expect(text).toContain('AI プロンプト集');
     expect(text).toContain('🧠');
-    expect(text).toContain('1,200 JPYC · Polygon');
+    // 価格 1200 + 買い手負担 x402 手数料 12 = 支払総額 (商品カード・購入画面と同じ値)
+    expect(text).toContain('1,212 JPYC · Polygon');
     expect(text).toContain('山田太郎 · @masia');
     expect(text).not.toContain('Web3 クリエイター');
     expect(text).not.toContain('FORGED');
     expect(text).not.toContain('999999');
     expect(ssrf.fetchSafe).not.toHaveBeenCalled();
   });
+
+  // Codex P3: 端数のある支払総額を切り捨てずに描く (4950 + 49.5 = 4999.5)。ja / en とも。
+  it.each([['ja', '4,999.5 JPYC · Polygon'], ['en', '4,999.5 JPYC · Polygon']])(
+    '端数のある支払総額を切り捨てずに商品カードへ描く (%s)',
+    async (locale, chip) => {
+      const productId = `h_${'f'.repeat(32)}`;
+      h.enableCreatorStore = true;
+      h.enableCreatorStoreUi = true;
+      hosted.listAvailableForOwner.mockResolvedValue([
+        { id: productId, title: 'Kit', priceJpyc: '4950', saleActive: true, contentAvailable: true },
+      ]);
+      const { element } = await callGet(`h=masia&locale=${locale}&product=${productId}`);
+      expect(collectText(element).join(' ')).toContain(chip);
+    },
+  );
 
   it('商品画像は KV 権威 URL を既存 avatar pipeline で data URL 化して描く', async () => {
     const productId = `h_${'d'.repeat(32)}`;

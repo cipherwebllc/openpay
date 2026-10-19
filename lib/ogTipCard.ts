@@ -468,7 +468,8 @@ export interface ProductOgInput {
   title: string;
   emoji?: string;
   imageUrl?: string;
-  priceJpyc: string;
+  /** 買い手の支払総額 (手数料込み・lib/store/purchaseTotal)。 */
+  totalJpyc: string;
   locale: TipOgLocale;
 }
 
@@ -492,7 +493,7 @@ export function buildProductOgModel(input: ProductOgInput): ProductOgModel {
     : '';
   const imageUrl = input.imageUrl?.trim();
   const price = new Intl.NumberFormat(input.locale).format(
-    Number(input.priceJpyc),
+    Number(input.totalJpyc),
   );
   const color =
     input.color && COLOR_PATTERN.test(input.color)
