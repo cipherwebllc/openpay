@@ -28,11 +28,12 @@ import { checkIpRateLimit } from '@/lib/relay/relayGuards';
 import { x402Config } from './config';
 import { getResource, type X402Resource } from './registry';
 import {
-  arcMarkKey,
+  arcMarkIdentity,
+  beginArcSettle,
   claimArcPending,
   markArcSettled,
   readArcMark,
-  releaseArcPending,
+  releaseArcSettling,
   type ArcMarkState,
 } from './relayArcMarks';
 import {
@@ -209,16 +210,14 @@ function pinnedRail(pinned: unknown, accepts: PreparedAccepts): FacilitatorRail 
   return accepts.arc && deepStrictEqual(p, toV2Accept(accepts.arc)) ? 'arc-gateway' : null;
 }
 
-function alreadyUsedJudgment(state: ArcMarkState): Record<string, unknown> {
-  return {
-    isValid: false,
-    invalidReason: state === 'settled' ? 'authorization_already_used' : 'authorization_in_use',
-  };
+function usedReason(state: ArcMarkState | 'in_use'): string {
+  return state === 'settled' ? 'authorization_already_used' : 'authorization_in_use';
 }
 
 /**
  * Arc 面の verify / settle。Circle Gateway へ中継し、使用済み署名の使い回しを KV の印で止める
- * (relayArcMarks.ts の冒頭コメント)。掲載メタは Gateway に送らない (Bazaar は CDP 専用)。
+ * (relayArcMarks.ts の冒頭コメントの状態遷移)。掲載メタは Gateway に送らない (Bazaar は CDP 専用)。
+ * 印による拒否も facilitator の判定と同じ形 (200 + isValid/success:false) で返す。
  */
 async function relayArc(
   action: 'verify' | 'settle',
@@ -227,13 +226,25 @@ async function relayArc(
 ): Promise<NextResponse> {
   const { resource, accepts } = target;
   const arcAccept = accepts.arc!;
-  const key = arcMarkKey(arcAccept.network, body.paymentPayload.payload);
-  if (!key) return jsonError(400, 'invalid_payment_payload');
+  const id = arcMarkIdentity(arcAccept.network, body.paymentPayload.payload);
+  if (!id) return jsonError(400, 'invalid_payment_payload');
 
   if (action === 'verify') {
-    const before = await readArcMark(key);
-    if (before === 'settled' || before === 'pending') {
-      return noStore(NextResponse.json(alreadyUsedJudgment(before)));
+    const before = await readArcMark(id);
+    if (before !== 'none' && before !== 'unavailable') {
+      return noStore(NextResponse.json({ isValid: false, invalidReason: usedReason(before) }));
+    }
+  } else {
+    // settle は verify を通った同じ署名の処理中の印があるときだけ進める (決済中の隙間に別の verify を
+    // 通さない・不正な署名の settle で正規の印を動かさない)。KV 障害時は fail-open で進む。
+    const started = await beginArcSettle(id);
+    if (started === 'not_verified') {
+      return noStore(
+        NextResponse.json({ success: false, errorReason: 'authorization_not_verified' }),
+      );
+    }
+    if (started === 'in_use' || started === 'settled') {
+      return noStore(NextResponse.json({ success: false, errorReason: usedReason(started) }));
     }
   }
 
@@ -251,6 +262,8 @@ async function relayArc(
       )
     ).body;
   } catch (e) {
+    // settle の結果が分からない (決済されたかもしれない) ので、印は決済済み側に倒す。
+    if (action === 'settle') await markArcSettled(id);
     logger.warn('x402.dualrail.facilitator_unavailable', {
       action,
       rail: 'arc-gateway',
@@ -262,16 +275,16 @@ async function relayArc(
 
   if (action === 'verify') {
     if (judgment.isValid === true) {
-      const claimed = await claimArcPending(key);
-      if (claimed === 'settled' || claimed === 'pending') {
-        return noStore(NextResponse.json(alreadyUsedJudgment(claimed)));
+      const claimed = await claimArcPending(id);
+      if (claimed !== 'none' && claimed !== 'unavailable') {
+        return noStore(NextResponse.json({ isValid: false, invalidReason: usedReason(claimed) }));
       }
     }
     return noStore(NextResponse.json(judgment));
   }
 
   if (judgment.success === true) {
-    await markArcSettled(key);
+    await markArcSettled(id);
     const transaction =
       typeof judgment.transaction === 'string' ? judgment.transaction : null;
     logger.info('x402.dualrail.settled', { resourceId: resource.id, rail: 'arc-gateway', transaction });
@@ -289,12 +302,23 @@ async function relayArc(
     });
     return noStore(NextResponse.json({ ...judgment, network: arcAccept.network }));
   }
+  if (judgment.success !== false) {
+    // 2xx でも判定の形をしていない応答。決済されたかもしれないので印は決済済み側に倒し、判定なし (503)。
+    await markArcSettled(id);
+    logger.warn('x402.dualrail.facilitator_unavailable', {
+      action,
+      rail: 'arc-gateway',
+      resourceId: resource.id,
+      error: 'indeterminate settle judgment',
+    });
+    return jsonError(503, 'facilitator_unavailable');
+  }
   // nonce_already_used は Gateway が「使用済み」を明言した確定シグナル。消すと、決済済みの印の書き込みが
   // 一度落ちただけで再送 → verify 通過 → 上流実行 → 印削除… が回り続ける。
   if (judgment.errorReason === 'nonce_already_used') {
-    await markArcSettled(key);
+    await markArcSettled(id);
   } else {
-    await releaseArcPending(key);
+    await releaseArcSettling(id);
   }
   return noStore(NextResponse.json(judgment));
 }

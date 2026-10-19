@@ -1,11 +1,13 @@
+// @vitest-environment node
 // dual-rail リレーの Arc (Circle Gateway) 面の unit テスト。
 // 検証の柱: (1) Arc はリレーの flag・Arc rail・出品者のオプトインが揃ったときだけ出て、既存 4 フィールドは
 // Arc の有無で変わらない、(2) Arc の受取先は出品者の usdc.payTo、(3) pin の形で rail を決め、復号した rail と
 // 食い違えば 409、(4) Arc は Circle Gateway へ (CDP は呼ばない)・掲載メタは送らない、(5) 使用済み署名の
-// 使い回しを KV の印で止める (fail-open)。
+// 使い回しを KV の印で止める (fail-open)。印は lib/kv.ts の実装ごと fake Upstash (本物の Lua) に繋ぐ。
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { afterAll, describe, it, expect, beforeEach, vi } from 'vitest';
 import { getAddress } from 'viem';
+import { closeRedisLuaEngine, createFakeRedisStore, fakeUpstashFetch, type FakeRedisStore } from '@/tests/_helpers/redisLua';
 
 const state = vi.hoisted(() => ({
   flags: {
@@ -15,7 +17,6 @@ const state = vi.hoisted(() => ({
   },
   arcEnabled: true,
   resource: null as unknown,
-  kv: new Map<string, string>(),
   kvDown: false,
 }));
 
@@ -74,35 +75,6 @@ vi.mock('@/lib/relay/relayGuards', () => ({
   checkIpRateLimit: vi.fn(async () => true),
 }));
 
-// relayArcMarks が使う KV の最小の in-memory 実装 (GET / SET [EX] / SET NX GET / 「pending のときだけ DEL」の EVAL)。
-vi.mock('@/lib/kv', () => {
-  const down = () => ({ ok: false as const, error: 'kv_down' });
-  return {
-    kvGet: vi.fn(async (key: string) =>
-      state.kvDown ? down() : { ok: true as const, value: state.kv.get(key) ?? null },
-    ),
-    kvSet: vi.fn(async (key: string, value: string) => {
-      if (state.kvDown) return down();
-      state.kv.set(key, value);
-      return { ok: true as const, value: 'OK' as const };
-    }),
-    kvSetNxGet: vi.fn(async (key: string, value: string) => {
-      if (state.kvDown) return down();
-      const prev = state.kv.get(key) ?? null;
-      if (prev === null) state.kv.set(key, value);
-      return { ok: true as const, value: prev };
-    }),
-    kvEval: vi.fn(async (_script: string, keys: string[], args: string[]) => {
-      if (state.kvDown) return down();
-      if (state.kv.get(keys[0]) === args[0]) {
-        state.kv.delete(keys[0]);
-        return { ok: true as const, value: 1 };
-      }
-      return { ok: true as const, value: 0 };
-    }),
-  };
-});
-
 import {
   handleDualRailRelay,
   handleDualRailRequirements,
@@ -159,14 +131,21 @@ function decodeHeader(value: string): Record<string, unknown> {
   return JSON.parse(Buffer.from(value, 'base64').toString('utf8')) as Record<string, unknown>;
 }
 
-function signatureHeader(accepted: unknown, authorization: Record<string, unknown> = {}): string {
+const SIGNATURE = `0x${'cd'.repeat(32)}${'22'.repeat(32)}1b`;
+const OTHER_SIGNATURE = `0x${'ee'.repeat(32)}${'22'.repeat(32)}1b`;
+
+function signatureHeader(
+  accepted: unknown,
+  authorization: Record<string, unknown> = {},
+  signature = SIGNATURE,
+): string {
   return Buffer.from(
     JSON.stringify({
       x402Version: 2,
       accepted,
       payload: {
         authorization: { from: BUYER, to: SELLER_USDC, value: '5000', nonce: NONCE, ...authorization },
-        signature: `0x${'cd'.repeat(65)}`,
+        signature,
       },
     }),
     'utf8',
@@ -174,6 +153,11 @@ function signatureHeader(accepted: unknown, authorization: Record<string, unknow
 }
 
 const fetchMock = vi.fn();
+let store: FakeRedisStore;
+const upstash = (url: string | URL | Request, init?: RequestInit) =>
+  state.kvDown
+    ? Promise.resolve(new Response('down', { status: 503 }))
+    : fakeUpstashFetch(store)(url, init);
 
 function replies(...bodies: Array<[number, unknown]>) {
   for (const [status, body] of bodies) {
@@ -187,6 +171,10 @@ function urlsCalled(): string[] {
   return fetchMock.mock.calls.map(([url]) => String(url));
 }
 
+function markKeys(): string[] {
+  return [...store.strings.keys()].filter((key) => key.startsWith('x402:relay:arc:'));
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   state.flags.enableX402DualRail = true;
@@ -194,12 +182,18 @@ beforeEach(() => {
   state.flags.enableX402DualRailArc = true;
   state.arcEnabled = true;
   state.resource = record();
-  state.kv.clear();
   state.kvDown = false;
+  store = createFakeRedisStore(1_790_000_000_000);
+  vi.stubEnv('UPSTASH_REDIS_REST_URL', 'https://redis.example');
+  vi.stubEnv('UPSTASH_REDIS_REST_TOKEN', 'test-only');
   fetchMock.mockReset();
   ledger.record.mockReset();
-  vi.stubGlobal('fetch', fetchMock);
+  vi.stubGlobal('fetch', vi.fn((url: string | URL | Request, init?: RequestInit) =>
+    String(url).startsWith('https://redis.example') ? upstash(url, init) : fetchMock(url, init),
+  ));
 });
+
+afterAll(closeRedisLuaEngine);
 
 describe('requirements: Arc face', () => {
   it('adds an Arc face paid to the seller USDC address, without changing the existing fields', async () => {
@@ -323,7 +317,11 @@ describe('verify / settle: Arc rail', () => {
 
   it('fixes the settlement network to the local CAIP-2 in the response and the ledger', async () => {
     const { arc } = await requirements();
-    replies([200, { success: true, transaction: 'gw-uuid-1', network: 'eip155:1', payer: BUYER }]);
+    replies([200, { isValid: true }], [200, { success: true, transaction: 'gw-uuid-1', network: 'eip155:1', payer: BUYER }]);
+    await handleDualRailRelay(
+      post('verify', { resourceId: 'res-1', paymentSignatureHeader: signatureHeader(arc!.v2Accept) }),
+      'verify',
+    );
 
     const res = await handleDualRailRelay(
       post('settle', { resourceId: 'res-1', paymentSignatureHeader: signatureHeader(arc!.v2Accept) }),
@@ -336,7 +334,10 @@ describe('verify / settle: Arc rail', () => {
       network: 'eip155:5042',
       payer: BUYER,
     });
-    expect(urlsCalled()).toEqual(['https://gateway.example/v1/x402/settle']);
+    expect(urlsCalled()).toEqual([
+      'https://gateway.example/v1/x402/verify',
+      'https://gateway.example/v1/x402/settle',
+    ]);
     expect(ledger.record).toHaveBeenCalledWith(
       expect.objectContaining({
         source: 'usdc-dual-rail',
@@ -428,7 +429,7 @@ describe('pins and rail agreement', () => {
   });
 });
 
-describe('used-signature marks (Arc only)', () => {
+describe('used-signature marks (Arc only, real Lua)', () => {
   async function verify(header: string) {
     return handleDualRailRelay(post('verify', { resourceId: 'res-1', paymentSignatureHeader: header }), 'verify');
   }
@@ -436,26 +437,31 @@ describe('used-signature marks (Arc only)', () => {
     return handleDualRailRelay(post('settle', { resourceId: 'res-1', paymentSignatureHeader: header }), 'settle');
   }
 
-  it('answers authorization_in_use for the same signature while a payment is in progress', async () => {
+  it('holds a pending mark for 15 minutes while a payment is in progress', async () => {
     const { arc } = await requirements();
     const header = signatureHeader(arc!.v2Accept);
-    replies([200, { isValid: true }]);
+    replies([200, { isValid: true }], [200, { isValid: true }]);
     expect(await (await verify(header)).json()).toEqual({ isValid: true });
+    expect(markKeys()).toHaveLength(1);
+    expect(markKeys()[0]).toMatch(/^x402:relay:arc:v1:[0-9a-f]{64}$/);
+    expect(store.getTtl(markKeys()[0])).toBe(900);
 
-    const again = await verify(header);
-    expect(await again.json()).toEqual({ isValid: false, invalidReason: 'authorization_in_use' });
+    expect(await (await verify(header)).json()).toEqual({ isValid: false, invalidReason: 'authorization_in_use' });
     expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    store.advance(900_000);
+    expect(await (await verify(header)).json()).toEqual({ isValid: true });
   });
 
-  it('answers authorization_already_used after a successful settle, without calling Gateway', async () => {
+  it('answers authorization_already_used for 604900 seconds after a successful settle', async () => {
     const { arc } = await requirements();
     const header = signatureHeader(arc!.v2Accept);
     replies([200, { isValid: true }], [200, { success: true, transaction: 'gw-uuid-2' }]);
     await verify(header);
     await settle(header);
+    expect(store.getTtl(markKeys()[0])).toBe(604_900);
 
-    const replay = await verify(header);
-    expect(await replay.json()).toEqual({ isValid: false, invalidReason: 'authorization_already_used' });
+    expect(await (await verify(header)).json()).toEqual({ isValid: false, invalidReason: 'authorization_already_used' });
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
@@ -463,14 +469,67 @@ describe('used-signature marks (Arc only)', () => {
     const { arc } = await requirements();
     const header = signatureHeader(arc!.v2Accept);
     replies([200, { isValid: true }], [200, { isValid: true }]);
-
     const [a, b] = await Promise.all([verify(header), verify(header)]);
     const judgments = [await a.json(), await b.json()];
     expect(judgments).toContainEqual({ isValid: true });
     expect(judgments).toContainEqual({ isValid: false, invalidReason: 'authorization_in_use' });
   });
 
-  it('releases the mark when settle is declined, so the same signature can be retried', async () => {
+  it('refuses a settle that never went through verify, without calling Gateway', async () => {
+    const { arc } = await requirements();
+    const res = await settle(signatureHeader(arc!.v2Accept));
+    expect(await res.json()).toEqual({ success: false, errorReason: 'authorization_not_verified' });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('does not let a settle with another signature for the same nonce touch the verified mark', async () => {
+    const { arc } = await requirements();
+    const header = signatureHeader(arc!.v2Accept);
+    replies([200, { isValid: true }]);
+    await verify(header);
+
+    const forged = await settle(signatureHeader(arc!.v2Accept, {}, OTHER_SIGNATURE));
+    expect(await forged.json()).toEqual({ success: false, errorReason: 'authorization_in_use' });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(await (await verify(header)).json()).toEqual({ isValid: false, invalidReason: 'authorization_in_use' });
+  });
+
+  it('lets only one of two concurrent settles of the same signature reach Gateway', async () => {
+    const { arc } = await requirements();
+    const header = signatureHeader(arc!.v2Accept);
+    replies([200, { isValid: true }], [200, { success: true, transaction: 'gw-uuid-4' }]);
+    await verify(header);
+    const [a, b] = await Promise.all([settle(header), settle(header)]);
+    const judgments = [await a.json(), await b.json()];
+    expect(judgments).toContainEqual(expect.objectContaining({ success: true }));
+    // The loser sees the mark either mid-settle (in use) or after it (already used).
+    expect(judgments).toContainEqual({
+      success: false,
+      errorReason: expect.stringMatching(/^authorization_(in_use|already_used)$/),
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('blocks verify while the settle is running at Gateway', async () => {
+    const { arc } = await requirements();
+    const header = signatureHeader(arc!.v2Accept);
+    replies([200, { isValid: true }]);
+    await verify(header);
+    let releaseSettle!: () => void;
+    fetchMock.mockImplementationOnce(() => new Promise<Response>((resolve) => {
+      releaseSettle = () => resolve(new Response(JSON.stringify({ success: true }), { status: 200 }));
+    }));
+    const settling = settle(header);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+
+    expect(await (await verify(header)).json()).toEqual({ isValid: false, invalidReason: 'authorization_in_use' });
+    releaseSettle();
+    await settling;
+    expect(await (await verify(header)).json()).toEqual({ isValid: false, invalidReason: 'authorization_already_used' });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('releases the mark when settle is explicitly declined, so the same signature can be retried', async () => {
     const { arc } = await requirements();
     const header = signatureHeader(arc!.v2Accept);
     replies(
@@ -480,7 +539,7 @@ describe('used-signature marks (Arc only)', () => {
     );
     await verify(header);
     await settle(header);
-
+    expect(markKeys()).toHaveLength(0);
     expect(await (await verify(header)).json()).toEqual({ isValid: true });
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
@@ -491,31 +550,22 @@ describe('used-signature marks (Arc only)', () => {
     replies([200, { isValid: true }], [200, { success: false, errorReason: 'nonce_already_used' }]);
     await verify(header);
     await settle(header);
-
-    expect(await (await verify(header)).json()).toEqual({
-      isValid: false,
-      invalidReason: 'authorization_already_used',
-    });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(await (await verify(header)).json()).toEqual({ isValid: false, invalidReason: 'authorization_already_used' });
   });
 
-  it('keeps the mark when settle has no judgment (503)', async () => {
+  it.each([
+    ['an empty 2xx body', () => replies([200, {}])],
+    ['a non-boolean success', () => replies([200, { success: 'true' }])],
+    ['a Gateway outage', () => replies([500, { error: 'down' }])],
+  ])('treats %s at settle as possibly settled: 503 and the mark stays', async (_, arrange) => {
     const { arc } = await requirements();
     const header = signatureHeader(arc!.v2Accept);
-    replies([200, { isValid: true }], [500, { error: 'down' }]);
-    await verify(header);
-    expect((await settle(header)).status).toBe(503);
-
-    expect(await (await verify(header)).json()).toEqual({ isValid: false, invalidReason: 'authorization_in_use' });
-  });
-
-  it('stores marks under their own prefix, keyed without the signature', async () => {
-    const { arc } = await requirements();
     replies([200, { isValid: true }]);
-    await verify(signatureHeader(arc!.v2Accept));
-    const keys = [...state.kv.keys()];
-    expect(keys).toHaveLength(1);
-    expect(keys[0]).toMatch(/^x402:relay:arc:v1:[0-9a-f]{64}$/);
+    await verify(header);
+    arrange();
+    expect((await settle(header)).status).toBe(503);
+    expect(await (await verify(header)).json()).toEqual({ isValid: false, invalidReason: 'authorization_already_used' });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it('fails open when KV is unavailable', async () => {
@@ -531,6 +581,6 @@ describe('used-signature marks (Arc only)', () => {
     const r = await requirements();
     replies([200, { isValid: true }]);
     await verify(signatureHeader(r.v2Accept));
-    expect(state.kv.size).toBe(0);
+    expect(markKeys()).toHaveLength(0);
   });
 });

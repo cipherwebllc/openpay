@@ -34,6 +34,7 @@ export const LUA_REAL_TEST_FILES = [
   'tests/lib/license/registration-lua.test.ts',
   'tests/lib/shopLiveStore-lua.test.ts',
   'tests/lib/tipMessages-lua.test.ts',
+  'tests/lib/x402/dualRailRelayArc-lua.test.ts',
   'tests/lib/x402/funnel-lua.test.ts',
   'tests/lib/agent/bindings.test.ts',
   'tests/lib/license/verifyBudget.test.ts',
