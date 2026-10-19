@@ -23,8 +23,47 @@ vi.mock('next/cache', () => ({
 
 const list = vi.hoisted(() => vi.fn());
 vi.mock('@/lib/x402/storeListing', () => ({ listStoreListings: list }));
+const warn = vi.hoisted(() => vi.fn());
+vi.mock('@/lib/logger', () => ({ logger: { warn } }));
 
-import { listStoreListingsCached, STORE_LISTINGS_REVALIDATE_SEC } from '@/lib/x402/storeListingCache';
+import {
+  fitStoreListingsForCache,
+  listStoreListingsCached,
+  STORE_LISTINGS_CACHE_BUDGET_BYTES,
+  STORE_LISTINGS_REVALIDATE_SEC,
+} from '@/lib/x402/storeListingCache';
+import type { StoreListing } from '@/lib/x402/storeListing';
+import {
+  MAX_HOSTED_DESC_LEN,
+  MAX_HOSTED_DETAILS_LEN,
+  MAX_HOSTED_SPECS,
+  MAX_HOSTED_SPEC_LABEL_LEN,
+  MAX_HOSTED_SPEC_VALUE_LEN,
+  MAX_HOSTED_TITLE_LEN,
+} from '@/lib/x402/hostedStore';
+import { STORE_INDEX_MAX_IDS } from '@/lib/x402/storeIndex';
+
+/** 入力の上限いっぱい・エスケープで膨らむ文字 (\) だけで作った、いちばん重い掲載。 */
+function heaviest(n: number): StoreListing {
+  const heavy = (len: number) => '\\'.repeat(len);
+  return {
+    id: `h_${String(n).padStart(32, '0')}`,
+    title: heavy(MAX_HOSTED_TITLE_LEN),
+    desc: heavy(MAX_HOSTED_DESC_LEN),
+    priceJpyc: '1000000',
+    totalJpyc: '1010000',
+    feeJpyc: '10000',
+    label: 'download',
+    contentKind: 'url',
+    handle: 'shop',
+    updatedAt: 1,
+    details: heavy(MAX_HOSTED_DETAILS_LEN),
+    specs: Array.from({ length: MAX_HOSTED_SPECS }, () => ({
+      label: heavy(MAX_HOSTED_SPEC_LABEL_LEN),
+      value: heavy(MAX_HOSTED_SPEC_VALUE_LEN),
+    })),
+  } as StoreListing;
+}
 
 const LISTING = { id: 'h_1', title: 'fixture', priceJpyc: '100', totalJpyc: '101', feeJpyc: '1', handle: 'shop', updatedAt: 1, label: 'data' };
 
@@ -57,5 +96,45 @@ describe('listStoreListingsCached', () => {
   it('想定外の例外はそのまま投げる (null に丸めない)', async () => {
     list.mockRejectedValueOnce(new Error('boom'));
     await expect(listStoreListingsCached()).rejects.toThrow('boom');
+  });
+});
+
+// Codex レビュー P2: 文字数の上限は直列化後の大きさを縛らない。Data Cache の 1 件 2 MB を超えると黙ってキャッシュされず、
+// 毎回 KV を読む。保存の前に大きさを測り、AI 向けの詳細を落として必ず収める。
+describe('fitStoreListingsForCache', () => {
+  beforeEach(() => warn.mockReset());
+
+  it('いちばん重い掲載 (上限 200 件・入力の上限いっぱい・エスケープで膨らむ文字) でも予算に収め、本体は残す', () => {
+    const listings = Array.from({ length: STORE_INDEX_MAX_IDS }, (_, i) => heaviest(i));
+    const fitted = fitStoreListingsForCache(listings);
+    const size = Buffer.byteLength(JSON.stringify(JSON.stringify(fitted.listings)), 'utf8');
+    expect(size).toBeLessThanOrEqual(STORE_LISTINGS_CACHE_BUDGET_BYTES);
+    expect(fitted.dropped.length).toBeGreaterThan(0);
+    expect(fitted.listings).toHaveLength(STORE_INDEX_MAX_IDS);
+    expect(fitted.listings.map((listing) => listing.id)).toEqual(listings.map((listing) => listing.id));
+    expect(fitted.listings.every((listing) => listing.priceJpyc === '1000000' && listing.handle === 'shop')).toBe(true);
+  });
+
+  it('予算内なら何も落とさない (詳細も残す)', () => {
+    const listings = [heaviest(1), heaviest(2)];
+    expect(fitStoreListingsForCache(listings)).toEqual({ listings, dropped: [] });
+  });
+
+  it('details を落とせば足りるときは specs を残す', () => {
+    const listings = [heaviest(1)];
+    const onlyDetailsBudget = Buffer.byteLength(JSON.stringify(JSON.stringify([{ ...listings[0], details: undefined }])), 'utf8');
+    const fitted = fitStoreListingsForCache(listings, onlyDetailsBudget);
+    expect(fitted.dropped).toEqual(['details']);
+    expect(fitted.listings[0].specs).toHaveLength(MAX_HOSTED_SPECS);
+    expect('details' in fitted.listings[0]).toBe(false);
+  });
+
+  it('キャッシュに入れる前に収め、落としたら警告を残す', async () => {
+    list.mockReset();
+    cacheState.stored = undefined;
+    list.mockResolvedValue(Array.from({ length: STORE_INDEX_MAX_IDS }, (_, i) => heaviest(i)));
+    const cached = (await listStoreListingsCached())!;
+    expect(Buffer.byteLength(JSON.stringify(JSON.stringify(cached)), 'utf8')).toBeLessThanOrEqual(STORE_LISTINGS_CACHE_BUDGET_BYTES);
+    expect(warn).toHaveBeenCalledWith('store.listings_cache.trimmed', expect.objectContaining({ count: STORE_INDEX_MAX_IDS }));
   });
 });
