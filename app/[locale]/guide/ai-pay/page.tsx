@@ -91,7 +91,7 @@ export default async function GuideAiPayPage({
             summary={
               <>
                 <h3 className="text-base font-semibold text-slate-900">{c.quickSetupTitle}</h3>
-                <p className="mt-1 text-xs font-medium text-emerald-700">{c.setupFor[0]}</p>
+                <p className="mt-1 text-xs font-medium text-slate-500">{c.setupFor[0]}</p>
               </>
             }
           >
@@ -112,7 +112,7 @@ export default async function GuideAiPayPage({
             summary={
               <>
                 <h3 className="text-base font-semibold text-slate-900">{c.stewardTitle}</h3>
-                <p className="mt-1 text-xs font-medium text-emerald-700">{c.setupFor[1]}</p>
+                <p className="mt-1 text-xs font-medium text-slate-500">{c.setupFor[1]}</p>
               </>
             }
           >
@@ -142,7 +142,7 @@ export default async function GuideAiPayPage({
             summary={
               <>
                 <h3 className="text-base font-semibold text-slate-900">{c.thirdPartyTitle}</h3>
-                <p className="mt-1 text-xs font-medium text-emerald-700">{c.setupFor[2]}</p>
+                <p className="mt-1 text-xs font-medium text-slate-500">{c.setupFor[2]}</p>
               </>
             }
           >
@@ -216,7 +216,7 @@ export default async function GuideAiPayPage({
           footer={
             <p>
               {c.sdkLead}
-              <a href={c.sdkLink.href} target="_blank" rel="noreferrer noopener" className={GUIDE_INLINE_LINK}>
+              <a href={c.sdkLink.href} target="_blank" rel="noreferrer noopener" className={`whitespace-nowrap ${GUIDE_INLINE_LINK}`}>
                 {c.sdkLink.label}
               </a>
               {c.sdkTail}

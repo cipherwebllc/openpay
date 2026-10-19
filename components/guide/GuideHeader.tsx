@@ -13,9 +13,10 @@ function keepNumbers(children: ReactNode): ReactNode {
 }
 
 export function GuideTitle({ children }: { children: ReactNode }) {
-  // 末尾の全角の括弧書き (「（訪日客向け）」など) は補足として小さく灰色にし、1 語として折り返す
-  // (h1 の 2 行目に括弧書きだけが落ちて見出しが割れるのを防ぐ・P7)。
-  const qualifier = typeof children === 'string' ? /^(.*?)(（[^（）]+）)$/.exec(children) : null;
+  // 末尾の括弧書き (「(訪日客向け)」など) は補足として小さく灰色にし、1 語として折り返す
+  // (h1 の 2 行目に括弧書きだけが落ちて見出しが割れるのを防ぐ・P7)。見出しの括弧は半角 + 前に空白にそろえている (P8)。
+  // 前の空白は 1 つ目の捕捉に残す (落とすと「注文(訪日客向け)」「AI(for …)」とくっつく・Codex レビュー)。
+  const qualifier = typeof children === 'string' ? /^(.*?)(\([^()]+\)|（[^（）]+）)$/.exec(children) : null;
   return (
     // auto-phrase: 日本語を文節の切れ目で改行する (「け）」だけ・「注 / 文」のような割れを防ぐ)。対応しない
     // ブラウザ (Safari) は通常の改行のまま。text-balance は日本語で語の途中を割るので使わない。

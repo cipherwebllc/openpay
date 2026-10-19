@@ -33,7 +33,7 @@ describe('ガイドページの使い方動画', () => {
     const links = screen.getAllByRole('link', { name: HOWTO_VIDEO_UI.openOnYouTube });
     expect(links).toHaveLength(videos.length);
     videos.forEach((video, i) => {
-      expect(buttons[i]).toHaveTextContent(`${HOWTO_VIDEO_UI.play}（${video.duration}）`);
+      expect(buttons[i]).toHaveTextContent(`${HOWTO_VIDEO_UI.play} (${video.duration})`);
       expect(buttons[i]).toHaveTextContent(howtoVideoShortTitle(video));
       expect(links[i]).toHaveAttribute('href', `https://www.youtube.com/watch?v=${video.youtubeId}`);
     });

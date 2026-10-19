@@ -9,7 +9,6 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { getTranslations, setRequestLocale } from 'next-intl/server';
 import { AppShell } from '@/components/AppShell';
-import { ArrowRight } from 'lucide-react';
 import { GuideFrame } from '@/components/guide/GuideFrame';
 import { CodeBlock } from '@/components/guide/AgentGuidePieces';
 import { GuideCallout } from '@/components/guide/GuideCallout';
@@ -25,6 +24,8 @@ import { storeGuideContentFor, storeGuideMetadata, licenseStoreGuideContentFor, 
 import { HOSTED_PRODUCT_CATEGORIES } from '@/lib/x402/storeMeta';
 import { env } from '@/lib/env';
 import { GuideMoreLink } from '@/components/guide/GuideLink';
+import { GuideFeeList } from '@/components/guide/GuideFee';
+import { LANDING_PAYMENT_FEE_VALUES } from '@/lib/legal';
 
 export async function generateMetadata({
   params,
@@ -112,18 +113,26 @@ export default async function GuideStorePage({
           </p>
         </Section>
 
+        {/* 利用料はほかのガイドと同じ型 (太字の料率 + 名前・説明はたたむ)。文言は掟 14 フェンス済みの Landing.supportFee*。
+            下の一文 (feeBody・開示の定数から) はそのまま注記として残す (P8)。 */}
         <Section title={c.feeTitle}>
-          <p className="mt-3 text-sm leading-relaxed text-slate-700">
-            {c.feeBody}
-          </p>
-          <Link
-            href={`/${locale}/pricing`}
-            prefetch={false}
-            className="mt-2 inline-flex min-h-11 items-center gap-1 text-sm font-semibold text-emerald-700 hover:text-emerald-900"
-          >
-            {tLanding('supportFeeDetailsLink')}
-            <ArrowRight className="h-4 w-4" aria-hidden />
-          </Link>
+          <GuideFeeList
+            items={[
+              {
+                focal: tLanding('supportFeeStoreFocal', LANDING_PAYMENT_FEE_VALUES),
+                title: tLanding('supportFeeStoreTitle'),
+                body: tLanding('supportFeeStoreBody', LANDING_PAYMENT_FEE_VALUES),
+              },
+              {
+                focal: tLanding('supportFeeTipFocal', LANDING_PAYMENT_FEE_VALUES),
+                title: tLanding('supportFeeTipTitle'),
+                body: tLanding('supportFeeTipBody', LANDING_PAYMENT_FEE_VALUES),
+              },
+            ]}
+            note={c.feeBody}
+            pricingHref={`/${locale}/pricing`}
+            pricingLabel={tLanding('supportFeeDetailsLink')}
+          />
         </Section>
 
         <Section title={c.startTitle}>
@@ -138,11 +147,11 @@ export default async function GuideStorePage({
           <div className="mt-4 sm:overflow-x-auto">
             <table className="w-full border-collapse text-sm max-sm:block sm:min-w-[560px]">
               <thead className="max-sm:sr-only">
-                <tr>
+                <tr className="border-b border-slate-200">
                   {c.basicsTable.headers.map((h) => (
                     <th
                       key={h}
-                      className="border border-slate-200 bg-slate-50 px-3 py-2 text-left text-xs font-semibold text-slate-500"
+                      className="py-2 pr-3 text-left text-xs font-semibold text-slate-500"
                     >
                       {h}
                     </th>
@@ -153,13 +162,13 @@ export default async function GuideStorePage({
                 {c.basicsTable.rows.map((row) => (
                   <tr
                     key={row[0]}
-                    className="max-sm:block max-sm:p-4"
+                    className="border-b border-slate-100 max-sm:block max-sm:border-0 max-sm:p-4"
                   >
                     {row.map((cell, i) => (
                       <td
                         key={cell}
                         data-label={c.basicsTable.headers[i]}
-                        className={`border border-slate-200 px-3 py-2 align-top leading-relaxed text-slate-700 max-sm:block max-sm:border-0 max-sm:px-0 max-sm:py-1 ${
+                        className={`py-3 pr-3 align-top leading-relaxed text-slate-700 max-sm:block max-sm:px-0 max-sm:py-1 ${
                           i === 0
                             ? 'font-semibold text-slate-900 max-sm:pb-2 max-sm:text-base sm:whitespace-nowrap'
                             : 'max-sm:before:block max-sm:before:text-xs max-sm:before:font-semibold max-sm:before:text-slate-500 max-sm:before:content-[attr(data-label)]'

@@ -12,10 +12,10 @@ describe('GuideVideo', () => {
   it('最初は小さなカード (飾りのサムネイル・題名・再生の文字) だけで、iframe は無い', () => {
     const { container } = render(<GuideVideo video={video} />);
     expect(container.querySelector('iframe')).toBeNull();
-    const button = screen.getByRole('button', { name: new RegExp(`${HOWTO_VIDEO_UI.play}（${video.duration}）`) });
+    const button = screen.getByRole('button', { name: new RegExp(`${HOWTO_VIDEO_UI.play} \\(${video.duration}\\)`) });
     // a11y 名は可視テキスト (題名と再生の文字) から決まる (aria-label は使わない)。サムネイルは飾り (alt="")。
     expect(button).not.toHaveAttribute('aria-label');
-    expect(button).toHaveTextContent(`${HOWTO_VIDEO_UI.play}（${video.duration}）`);
+    expect(button).toHaveTextContent(`${HOWTO_VIDEO_UI.play} (${video.duration})`);
     expect(container.querySelector('img')).toHaveAttribute('alt', '');
     const link = screen.getByRole('link', { name: HOWTO_VIDEO_UI.openOnYouTube });
     expect(link).toHaveAttribute('href', `https://www.youtube.com/watch?v=${video.youtubeId}`);

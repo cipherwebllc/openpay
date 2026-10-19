@@ -61,7 +61,6 @@ export default async function GuidePosPage({
 
         <GuideToc title={guideNavFor(locale).tocTitle} />
 
-        <GuideFigure image={c.heroImage} />
 
         {/* できること / できないこと */}
         <div className="mt-8 grid gap-6 sm:grid-cols-2">

@@ -24,6 +24,7 @@ import {
   BulletList,
   Section,
   STEP_BADGE_CUSTOMER,
+  guideHeadingId,
   StepList,
 } from '@/components/guide/PosGuidePieces';
 import {
@@ -32,6 +33,7 @@ import {
   GuideHero,
 } from '@/components/guide/AgentGuidePieces';
 import { agentGuideContentFor, guideAgentMetadata } from '@/lib/agentGuide';
+import { GuideMoreLink } from '@/components/guide/GuideLink';
 
 export async function generateMetadata({
   params,
@@ -67,8 +69,6 @@ export default async function GuideAgentPage({
 
         <GuideToc title={guideNavFor(locale).tocTitle} />
 
-        <GuideHero image={c.heroImage} />
-
         {/* できること / できないこと */}
         <div className="mt-8 grid gap-6 sm:grid-cols-2">
           <section className="rounded-2xl bg-white p-5 shadow-card ring-1 ring-emerald-200/70">
@@ -97,6 +97,10 @@ export default async function GuideAgentPage({
             items={c.need}
             marker="✓"
           />
+          {/* JPYC の入手方法は同じページの節へ飛ぶリンクにする (長いページで「下記」を探させない・P8)。 */}
+          <p className="mt-3">
+            <GuideMoreLink href={`#${guideHeadingId(c.jpycTitle)}`}>{c.jpycTitle}</GuideMoreLink>
+          </p>
         </Section>
 
         <Section title={c.setupTitle}>
@@ -113,8 +117,10 @@ export default async function GuideAgentPage({
           </p>
         </Section>
 
+        {/* AI との会話 → 注文ページ → 支払いの 3 画面は、ページの頭ではなく注文の流れの図にする (頭を軽く・P8)。 */}
         <Section title={c.flowTitle}>
           <StepList steps={c.flowSteps} badgeClassName={STEP_BADGE_CUSTOMER} />
+          <GuideHero image={c.heroImage} />
         </Section>
 
         <Section title={c.jpycTitle}>

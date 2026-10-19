@@ -20,20 +20,20 @@ import { startGuideContentFor } from '@/lib/startGuide';
 describe('GuideFigure', () => {
   it('img を /guide/<file> + FIGURE_DIMS の width/height + alt + lazy で描画', () => {
     const { container } = render(
-      <GuideFigure image={{ file: 'hero.webp', alt: 'ヒーロー図' }} />,
+      <GuideFigure image={{ file: 'pos-add-method.svg', alt: 'ヒーロー図' }} />,
     );
     const img = container.querySelector('img');
     expect(img).not.toBeNull();
-    expect(img).toHaveAttribute('src', '/guide/hero.webp');
+    expect(img).toHaveAttribute('src', '/guide/pos-add-method.svg');
     expect(img).toHaveAttribute('alt', 'ヒーロー図');
-    expect(img).toHaveAttribute('width', String(FIGURE_DIMS['hero.webp'].w));
-    expect(img).toHaveAttribute('height', String(FIGURE_DIMS['hero.webp'].h));
+    expect(img).toHaveAttribute('width', String(FIGURE_DIMS['pos-add-method.svg'].w));
+    expect(img).toHaveAttribute('height', String(FIGURE_DIMS['pos-add-method.svg'].h));
     expect(img).toHaveAttribute('loading', 'lazy');
   });
 
   it('caption 無し → figcaption を描画しない', () => {
     const { container } = render(
-      <GuideFigure image={{ file: 'hero.webp', alt: 'a' }} />,
+      <GuideFigure image={{ file: 'pos-add-method.svg', alt: 'a' }} />,
     );
     expect(container.querySelector('figcaption')).toBeNull();
   });
@@ -41,7 +41,7 @@ describe('GuideFigure', () => {
   it('caption 有り → figcaption に文言を描画', () => {
     render(
       <GuideFigure
-        image={{ file: 'hero.webp', alt: 'a' }}
+        image={{ file: 'pos-add-method.svg', alt: 'a' }}
         caption="これは例です"
       />,
     );
@@ -51,12 +51,12 @@ describe('GuideFigure', () => {
 
   it('className 既定は my-6 / 指定で上書き', () => {
     const { container, rerender } = render(
-      <GuideFigure image={{ file: 'hero.webp', alt: 'a' }} />,
+      <GuideFigure image={{ file: 'pos-add-method.svg', alt: 'a' }} />,
     );
     expect(container.querySelector('figure')).toHaveClass('my-6');
     rerender(
       <GuideFigure
-        image={{ file: 'hero.webp', alt: 'a' }}
+        image={{ file: 'pos-add-method.svg', alt: 'a' }}
         className="mx-auto max-w-[260px]"
       />,
     );
@@ -182,8 +182,8 @@ describe('FIGURE_DIMS: guide content 参照との整合', () => {
 
 // ── 実データ統合: 実 POS_GUIDE で描画して src/dims が一致 ──
 describe('GuideFigure × 実 POS_GUIDE データ', () => {
-  it('heroImage 実描画で src=/guide/<file>・dims=FIGURE_DIMS・alt が一致', () => {
-    const img = POS_GUIDE.ja.heroImage;
+  it('setupImage 実描画で src=/guide/<file>・dims=FIGURE_DIMS・alt が一致', () => {
+    const img = POS_GUIDE.ja.setupImage;
     const { container } = render(<GuideFigure image={img} />);
     const el = container.querySelector('img');
     expect(el).toHaveAttribute('src', `/guide/${img.file}`);

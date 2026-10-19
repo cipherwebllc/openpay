@@ -30,7 +30,6 @@ export type GuideContent = {
   readonly metaDescription: string;
   readonly subtitle: string;
   readonly lead: string;
-  readonly heroImage: GuideImage;
 
   readonly canDoTitle: string;
   readonly canDo: readonly string[];
@@ -102,27 +101,26 @@ const ja: GuideContent = {
     'システム連携なしで今日から。既存の無料POSレジに「OpenPay」決済を足して、JPYC（円ステーブルコイン）で受け取る2台持ち運用の手順。',
   subtitle: 'システム連携なしで「今日から」始める「2 台持ち」運用ガイド',
   lead: 'いまの POS レジはそのまま、OpenPay を「横に置くだけ」。開発も連携も不要。設定は一度だけ、慣れれば会計は約 10 秒です。',
-  heroImage: { file: 'hero.webp', alt: 'OpenPay の決済QR 作成画面 (金額 1200 JPYC) と、店名・金額入りの決済用 QR コード (スマホ 2 台の実画面)' },
 
   canDoTitle: 'できること',
   canDo: [
-    '既存 POS の売上データに「OpenPay 決済」を残しながら、JPYC（円ステーブルコイン）で受け取れる',
-    '着金はあなたのウォレットに直接・即時（OpenPay は預かりません＝ノンカストディ）',
+    '既存 POS の売上データに「OpenPay 決済」を残しながら、JPYC (円ステーブルコイン) で受け取れる',
+    '着金はあなたのウォレットに直接・即時 (OpenPay は預かりません＝ノンカストディ)',
     '会計ソフト向けの CSV は「履歴」からいつでも出力できる',
   ],
   cannotTitle: 'できないこと / 注意',
   cannot: [
-    'レジと OpenPay は自動連携しません。金額は OpenPay にもう一度入力します（＝「2 台持ち」）',
-    '会計を締める前に、OpenPay の画面で「支払い完了」を必ず目で確かめてください（ブロックチェーン決済は完了後に取り消せません）',
-    'お客様側にウォレットと JPYC が必要です（暗号資産に慣れたお客様・常連さんから始めるのがおすすめ）',
+    'レジと OpenPay は自動連携しません。金額は OpenPay にもう一度入力します (＝「2 台持ち」)',
+    '会計を締める前に、OpenPay の画面で「支払い完了」を必ず目で確かめてください (ブロックチェーン決済は完了後に取り消せません)',
+    'お客様側にウォレットと JPYC が必要です (暗号資産に慣れたお客様・常連さんから始めるのがおすすめ)',
   ],
 
   needTitle: '用意するもの',
   need: [
-    'POS レジ（無料アプリで可）… 会計・売上記録用',
-    'スマホ or タブレット 1 台 … OpenPay の決済QR を表示（レジと別端末が楽。同じ端末でも可）',
-    'あなたの受取ウォレット（MetaMask 等のアドレス）… JPYC の着金先',
-    'お客様 … ウォレット＋JPYC（Polygon / Kaia / Avalanche のいずれか）',
+    'POS レジ (無料アプリで可) … 会計・売上記録用',
+    'スマホ or タブレット 1 台 … OpenPay の決済QR を表示 (レジと別端末が楽。同じ端末でも可)',
+    'あなたの受取ウォレット (MetaMask 等のアドレス) … JPYC の着金先',
+    'お客様 … ウォレット＋JPYC (Polygon / Kaia / Avalanche のいずれか)',
   ],
 
   overviewTitle: '仕組み',
@@ -130,22 +128,22 @@ const ja: GuideContent = {
     'レジは「売上の記録」係、OpenPay は「JPYC の受け取り」係。別々に動かして、閉店後に突き合わせるだけです。',
   overviewFlow: ['POS レジで売上を記録', 'OpenPay で JPYC を受け取る', '閉店後に金額・番号で突き合わせる'],
 
-  setupTitle: '最初の一度だけの準備（約 5 分）',
+  setupTitle: '最初の一度だけの準備 (約 5 分)',
   setupSteps: [
     {
       n: 1,
       title: 'OpenPay で受取先を設定',
-      body: 'open-pay.jp で受取ウォレットを接続し、「決済QR」で受取先と通貨（JPYC）を確認。よく使う金額はプリセット登録が速いです。',
+      body: 'open-pay.jp で受取ウォレットを接続し、「決済QR」で受取先と通貨 (JPYC) を確認。よく使う金額はプリセット登録が速いです。',
     },
     {
       n: 2,
       title: 'POS レジに「OpenPay」決済ボタンを追加',
-      body: 'レジの「その他決済」枠に名称「OpenPay」のボタンを 1 つ追加します（ほとんどの無料 POS にあります）。これでレジ側に売上が残ります。',
+      body: 'レジの「その他決済」枠に名称「OpenPay」のボタンを 1 つ追加します (ほとんどの無料 POS にあります)。これでレジ側に売上が残ります。',
     },
   ],
   setupImage: { file: 'pos-add-method.svg', alt: 'POS レジの支払い方法に「OpenPay」を追加した設定画面の模式図' },
 
-  flowTitle: '毎回の会計（慣れれば約 10 秒）',
+  flowTitle: '毎回の会計 (慣れれば約 10 秒)',
   flowSteps: [
     {
       n: 1,
@@ -155,12 +153,12 @@ const ja: GuideContent = {
     {
       n: 2,
       title: 'OpenPay で同じ金額の QR を表示',
-      body: '別端末（またはレジ端末）で OpenPay に同じ金額を入力して QR を表示。厳密に合わせたい場合はレシート番号を「メモ」へ（任意）。',
+      body: '別端末 (またはレジ端末) で OpenPay に同じ金額を入力して QR を表示。厳密に合わせたい場合はレシート番号を「メモ」へ (任意)。',
     },
     {
       n: 3,
       title: 'お客様がスキャンして支払い',
-      body: '画面の QR を提示。お客様はご自分のウォレットで読み取り、JPYC で支払います（ガス代はかかりません）。',
+      body: '画面の QR を提示。お客様はご自分のウォレットで読み取り、JPYC で支払います (ガス代はかかりません)。',
     },
     {
       n: 4,
@@ -169,17 +167,17 @@ const ja: GuideContent = {
     },
   ],
   safetyNote:
-    '重要：着金を確認する前に商品を渡さないでください。逆に、一度完了した決済は取り消せません（直接あなたのウォレットに着金済みです）。',
+    '重要: 着金を確認する前に商品を渡さないでください。逆に、一度完了した決済は取り消せません (直接あなたのウォレットに着金済みです)。',
 
-  reconcileTitle: '閉店後：売上の付け合わせ',
+  reconcileTitle: '閉店後: 売上の付け合わせ',
   reconcileBody:
     'レジの「OpenPay 決済」合計と、OpenPay の着金記録を突き合わせます。',
   reconcileBullets: [
-    '基本：POS の売上額と時刻で照合（例：14:32 の ¥1,200）。履歴は利用料を引いた純額（例：1,188 JPYC）で、行を開くと売上総額（1,200 JPYC）が出ます',
-    '厳密：会計時にメモへ入れたレシート番号で 1 対 1 照合',
-    'まとめて：「履歴」の CSV をレジの「その他決済」明細と突合。freee／マネーフォワード／弥生の取込形式に対応しています',
+    '基本: POS の売上額と時刻で照合 (例: 14:32 の ¥1,200)。履歴は利用料を引いた純額 (例: 1,188 JPYC) で、行を開くと売上総額 (1,200 JPYC) が出ます',
+    '厳密: 会計時にメモへ入れたレシート番号で 1 対 1 照合',
+    'まとめて: 「履歴」の CSV をレジの「その他決済」明細と突合。freee／マネーフォワード／弥生の取込形式に対応しています',
   ],
-  reconcileImage: { file: 'history-reconcile.svg', alt: 'POS の明細と OpenPay の履歴を時刻・番号で突き合わせる図（履歴一覧は純額表示）' },
+  reconcileImage: { file: 'history-reconcile.svg', alt: 'POS の明細と OpenPay の履歴を時刻・番号で突き合わせる図 (履歴一覧は純額表示)' },
 
   posTitle: 'どの POS レジを使えばいい？',
   posBody:
@@ -200,14 +198,14 @@ const ja: GuideContent = {
   costColCard: '一般的なカード決済',
   costColOpenpay: '無料 POS × OpenPay',
   costRows: [
-    { label: '決済手数料', card: '約 3% 程度（例）', openpay: 'ご利用料 約 1%（最低 約 2 JPYC）・着金から自動差引（最新は利用規約参照）' },
+    { label: '決済手数料', card: '約 3% 程度 (例)', openpay: '利用料 約 1% (最低 約 2 JPYC)・着金から自動差引 (最新は利用規約参照)' },
     { label: '入金', card: '数日後・締めあり', openpay: '即時・直接あなたのウォレットへ' },
-    { label: '預かり', card: '決済会社が一旦預かる', openpay: 'ノンカストディ（誰も預からない）' },
+    { label: '預かり', card: '決済会社が一旦預かる', openpay: 'ノンカストディ (誰も預からない)' },
   ],
   costNote:
     '※手数料の最新・正確な条件は、利用規約・特定商取引法に基づく表記をご確認ください。比較は一般的な例で、契約条件により異なります。',
   feeNote:
-    '着金額について：ガスレス決済ではご利用料（決済額の約 1%・最低 約 2 JPYC）が自動で差し引かれて着金します（例：¥1,200 → 約 ¥1,188）。POS に記録される売上額より、着金額は少なくなります。',
+    '着金額について: ガスレス決済では利用料 (決済額の約 1%・最低 約 2 JPYC) が自動で差し引かれて着金します (例: ¥1,200 → 約 ¥1,188)。POS に記録される売上額より、着金額は少なくなります。',
 
   faqTitle: 'よくある質問',
   faqs: [
@@ -221,11 +219,11 @@ const ja: GuideContent = {
     },
     {
       q: '二重に売上が記録されない？',
-      a: 'レジは「売上の記録」、OpenPay は「実際の着金」を担います。閉店時に金額（またはレシート番号）で突き合わせれば、ズレを防げます。',
+      a: 'レジは「売上の記録」、OpenPay は「実際の着金」を担います。閉店時に金額 (またはレシート番号) で突き合わせれば、ズレを防げます。',
     },
     {
       q: '返金したいときは？',
-      a: 'ブロックチェーン決済は自動の取り消しがありません。返金はお客様のウォレットへ手動で送金してください（レジ側も通常の返金処理を）。',
+      a: 'ブロックチェーン決済は自動の取り消しがありません。返金はお客様のウォレットへ手動で送金してください (レジ側も通常の返金処理を)。',
     },
     {
       q: 'ネットが繋がらない場所でも使える？',
@@ -247,7 +245,6 @@ const en: GuideContent = {
     'Start today, no system integration. Add an 「OpenPay」 tender to your existing free POS and receive JPYC (a JPY stablecoin) with a simple two-device workflow.',
   subtitle: 'A “two-device” workflow you can start today — no system integration',
   lead: 'Keep your current POS and simply place OpenPay beside it. No development, no integration. Set up once — checkout takes about 10 seconds with practice.',
-  heroImage: { file: 'hero.webp', alt: 'OpenPay payment-QR screen (1200 JPYC) and the generated QR with shop name and amount (two real phone screens)' },
 
   canDoTitle: 'What you can do',
   canDo: [

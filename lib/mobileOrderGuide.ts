@@ -44,7 +44,13 @@ export type MobileOrderGuideContent = {
 };
 
 const STEP_W = 390;
-const STEP_H = 744;
+// 手順の画面は、その手順で触る部分 (店名とチェーン・選択シート・テーブル番号とカート・支払い明細とウォレット) だけを
+// 切り出した高さ (全景の 744 だと幅 240 で約 460px になり、2 行の本文の横に大きな空きができた・P8)。
+// 手順 1 は注文ページの頭 (店名とチェーンの選択まで)。
+const STEP_TOP_H = 398;
+const STEP_SHOT_H = 420;
+// 手順 2・3 は下から開く選択シートとカート (チェーンの選択から下) だけ。
+const STEP_SHEET_H = 386;
 
 const JA: MobileOrderGuideContent = {
   metaTitle: 'モバイルオーダーのやり方 — QR を読んでスマホで注文・JPYC で支払い',
@@ -71,9 +77,9 @@ const JA: MobileOrderGuideContent = {
       body: '店頭やテーブルの QR をスマホのカメラで読み取ると、お店の注文ページが開きます。',
       image: {
         file: 'step1.png',
-        alt: 'お店の注文ページが開いた画面 (店名とメニュー)',
+        alt: 'お店の注文ページが開いた画面 (店名と支払いチェーンの選択)',
         width: STEP_W,
-        height: STEP_H,
+        height: STEP_TOP_H,
       },
     },
     {
@@ -84,7 +90,7 @@ const JA: MobileOrderGuideContent = {
         file: 'step2.png',
         alt: '商品のオプション (サイズ M / L) を選ぶ画面',
         width: STEP_W,
-        height: STEP_H,
+        height: STEP_SHEET_H,
       },
     },
     {
@@ -95,7 +101,7 @@ const JA: MobileOrderGuideContent = {
         file: 'step3.png',
         alt: 'テーブル番号を入れて支払いへ進むカート画面',
         width: STEP_W,
-        height: STEP_H,
+        height: STEP_SHEET_H,
       },
     },
     {
@@ -106,7 +112,7 @@ const JA: MobileOrderGuideContent = {
         file: 'step4.png',
         alt: '注文内容と支払い額を確認してウォレットを接続する画面',
         width: STEP_W,
-        height: STEP_H,
+        height: STEP_SHOT_H,
       },
     },
     {
@@ -117,7 +123,7 @@ const JA: MobileOrderGuideContent = {
         file: 'step5.png',
         alt: '受付番号が表示された注文状況の画面',
         width: STEP_W,
-        height: 420,
+        height: STEP_SHOT_H,
       },
     },
   ],
@@ -178,9 +184,9 @@ const EN: MobileOrderGuideContent = {
       body: 'Scan the QR at the counter or table with your camera. The shop menu page opens.',
       image: {
         file: 'step1.png',
-        alt: 'The shop order page with its menu',
+        alt: 'The shop order page with the shop name and the payment chain choice',
         width: STEP_W,
-        height: STEP_H,
+        height: STEP_TOP_H,
       },
     },
     {
@@ -191,7 +197,7 @@ const EN: MobileOrderGuideContent = {
         file: 'step2.png',
         alt: 'Choosing item options (size M / L)',
         width: STEP_W,
-        height: STEP_H,
+        height: STEP_SHEET_H,
       },
     },
     {
@@ -202,7 +208,7 @@ const EN: MobileOrderGuideContent = {
         file: 'step3.png',
         alt: 'Cart with table number and pay button',
         width: STEP_W,
-        height: STEP_H,
+        height: STEP_SHEET_H,
       },
     },
     {
@@ -213,7 +219,7 @@ const EN: MobileOrderGuideContent = {
         file: 'step4.png',
         alt: 'Checkout page with order summary and wallet connect',
         width: STEP_W,
-        height: STEP_H,
+        height: STEP_SHOT_H,
       },
     },
     {
@@ -224,7 +230,7 @@ const EN: MobileOrderGuideContent = {
         file: 'step5.png',
         alt: 'Order status screen with an order number',
         width: STEP_W,
-        height: 420,
+        height: STEP_SHOT_H,
       },
     },
   ],
