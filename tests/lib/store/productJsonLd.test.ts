@@ -43,8 +43,9 @@ describe('storeProductJsonLd', () => {
       image: ['https://img.example/a.png', 'https://img.example/b.png'],
       category: '3D・ゲーム',
       url: `https://open-pay.jp/ja/@fixture?product=${ID}`,
-      inLanguage: 'ja',
     });
+    // inLanguage は Product の項目ではなく、ページの言語は商品の言語でもない (Codex P2)
+    expect(ld).not.toHaveProperty('inLanguage');
     const offer = ld.offers as Offer;
     expect(offer).toMatchObject({
       '@type': 'Offer',
@@ -131,11 +132,10 @@ describe('storeProductJsonLd', () => {
     }
   });
 
-  it('en の商品ページは url と inLanguage だけが変わり、@id は同じ', () => {
+  it('en の商品ページは url だけが変わり、@id は同じ', () => {
     const ja = build();
     const en = build({}, { locale: 'en' });
     expect(en['@id']).toBe(ja['@id']);
     expect(en.url).toBe(`https://open-pay.jp/en/@fixture?product=${ID}`);
-    expect(en.inLanguage).toBe('en');
   });
 });

@@ -97,7 +97,6 @@ export function storeProductJsonLd(input: StoreProductJsonLdInput): Record<strin
     image: images.length > 0 ? images : [`${origin}${input.fallbackImagePath}`],
     ...(input.categoryName ? { category: input.categoryName } : {}),
     url,
-    inLanguage: locale,
     ...(properties.length > 0 ? { additionalProperty: properties } : {}),
     offers: {
       '@type': 'Offer',
