@@ -200,7 +200,7 @@ grep -rn "openpay-x402-sdk" --exclude-dir=node_modules --exclude-dir=.git . | gr
 ```
 
 対象は README / `docs/` / `public/` / `components/` / `lib/` 等。
-MCP は **minor 単位の pin** (`openpay-x402-mcp@0.19`) を `public/agent/setup.md`・
+MCP は **minor 単位の pin** (`openpay-x402-mcp@0.20`) を `public/agent/setup.md`・
 `components/x402/DiscoveryExamples.tsx`・`docs/agent-templates/`・
 `packages/x402-mcp/README.md` が引用し、`tests/lib/agentSetupMd.test.ts` が検査する。
 patch リリースではそのまま真なので変えない。minor を上げたときだけ更新する

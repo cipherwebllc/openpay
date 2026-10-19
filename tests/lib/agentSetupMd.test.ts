@@ -10,9 +10,9 @@ describe('agent setup document drift fences', () => {
     expect(md).toContain('**The only mm commands the agent may run are `mm auth status --json` and `mm wallet address --json`.**');
     expect(md).toContain('Never run `mm login`, `mm init`, `mm policy`, `mm trading-mode`, `mm wallet requests`, `mm wallet select`, `mm transfer`, or any `mm sign-*` command (including `mm wallet sign-*`).');
     const branch = md.slice(md.indexOf('### MetaMask: alternative to Steps 3 and 5'), md.indexOf('## Step 4: Verify'));
-    for (const text of ['npm install -g @metamask/agent-wallet', 'Server wallet', 'Guard Mode', 'person performs setup themselves', '/agent config generator', 'SIGNER_MODE=metamask', 'METAMASK_AGENT_ADDRESS=<0x…>', 'openpay-x402-mcp@0.19', 'signerMode: metamask', "Skip Step 5's `wallet_init`", 'wallet_prove', '7.0.0', 'no 2FA', 'allowed_chains', 'outflow limits', 'bypassing', 'afford to lose', 'Windows', 'BYOK', 'MFA', 'reject it inside MetaMask itself', 'MM_CLI_TOKEN', 'MM_MNEMONIC', 'MM_PASSWORD']) expect(branch).toContain(text);
+    for (const text of ['npm install -g @metamask/agent-wallet', 'Server wallet', 'Guard Mode', 'person performs setup themselves', '/agent config generator', 'SIGNER_MODE=metamask', 'METAMASK_AGENT_ADDRESS=<0x…>', 'openpay-x402-mcp@0.20', 'signerMode: metamask', "Skip Step 5's `wallet_init`", 'wallet_prove', '7.0.0', 'no 2FA', 'allowed_chains', 'outflow limits', 'bypassing', 'afford to lose', 'Windows', 'BYOK', 'MFA', 'reject it inside MetaMask itself', 'MM_CLI_TOKEN', 'MM_MNEMONIC', 'MM_PASSWORD']) expect(branch).toContain(text);
     expect(md).toContain('MetaMask mode does not work in a cloud sandbox');
-    expect(md).toContain('The commands below pin `@0.19`');
+    expect(md).toContain('The commands below pin `@0.20`');
     expect(md).toContain('For MetaMask, report only the public address');
   });
   it('keeps the Kova branch public-only and discloses the measured policy limitation', () => {

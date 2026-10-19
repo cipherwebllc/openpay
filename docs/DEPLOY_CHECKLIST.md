@@ -559,7 +559,7 @@ GitHub 上の alert は本節を根拠に dismiss してよい。
   1.31.0 で修正・宣言 range も `^1.32.0`) と SDK 経由の推移依存 (hono 4.13.12 / fast-uri 3.1.8 /
   ip-address 10.7.3 / qs 6.16.0 / proxy-addr 2.0.8) へ更新済み (2026-10-11・root の devDependency
   の SDK も同じ版)。stdio transport 運用で HTTP 系 (express / hono) は実行経路に乗らないため
-  旧版でも実害経路は薄いが、公開物のため更新を優先した。**npm publish は user 承認後** (§14 の公開手順)。
+  旧版でも実害経路は薄いが、公開物のため更新を優先した。**openpay-x402-mcp 0.20.0 として 2026-10-19 に publish 済み** (公開 tarball と main の pack が一致)。
 
 ### 7.12 MODERATE: `decode-uri-component` (GHSA-vcc3-ghjq-m6fr)
 
