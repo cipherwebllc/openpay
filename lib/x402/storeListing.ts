@@ -36,6 +36,13 @@ export type StoreListing = {
   /** 保存値 true のときだけ Base USDC rail を提示できる。 */
   usdcEnabled?: true;
   label: HostedProduct['label'];
+  /** 納品の種類 (url = 配布先の URL・text = 本文)。label と合わせて納品形式 (lib/store/deliveryFormat) を決める。 */
+  contentKind: HostedProduct['contentKind'];
+  /** 表示専用の詳細 (@handle の商品ページで公開済み・購入 snapshot 非対象)。公開一覧 API (AI 向け) にだけ渡し、
+   * /store のカードには渡さない (toStoreCardListing で落とす・HTML を太らせない)。 */
+  details?: string;
+  specs?: readonly { label: string; value: string }[];
+  demoUrl?: string;
   category?: string;
   tags?: readonly string[];
   /** 出品者の公開 handle (先頭 1 件)。カードの遷移先 /@handle?product=id に使う。 */
@@ -46,6 +53,15 @@ export type StoreListing = {
   totalJpyc: string;
   feeJpyc: string;
 };
+
+/** /store のカード (client) に渡す形。AI 向けの表示専用の詳細は渡さない。 */
+export type StoreCardListing = Omit<StoreListing, 'contentKind' | 'details' | 'specs' | 'demoUrl'>;
+
+/** /store のカードへ渡す前に、カードに要らない AI 向けの詳細を落とす (/store の HTML を増やさない)。 */
+export function toStoreCardListing(listing: StoreListing): StoreCardListing {
+  const { contentKind: _contentKind, details: _details, specs: _specs, demoUrl: _demoUrl, ...card } = listing;
+  return card;
+}
 
 /**
  * 掲載一覧 (newest-first)。KV 障害は null (空と区別し、呼び出し側がエラー表示に倒す)。
@@ -115,6 +131,10 @@ export async function listStoreListings(): Promise<StoreListing[] | null> {
       priceJpyc: product.priceJpyc,
       ...(product.usdcEnabled === true ? { usdcEnabled: true } : {}),
       label: product.label,
+      contentKind: product.contentKind,
+      ...(product.details ? { details: product.details } : {}),
+      ...(product.specs?.length ? { specs: product.specs } : {}),
+      ...(product.demoUrl ? { demoUrl: product.demoUrl } : {}),
       ...(product.category ? { category: product.category } : {}),
       ...(product.tags ? { tags: product.tags } : {}),
       handle,

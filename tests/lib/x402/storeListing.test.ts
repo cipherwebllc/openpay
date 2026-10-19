@@ -81,6 +81,35 @@ describe('listStoreListings', () => {
     expect(JSON.stringify(out)).not.toContain(OWNER_A);
   });
 
+  it('AI 向けの表示専用の詳細 (納品の種類・詳しい説明・仕様表・「実際に試す」) を運び、/store のカードの形では落とす', async () => {
+    const m = await mod();
+    mocks.ids = ['h_1', 'h_2'];
+    mocks.products = [
+      product('h_1', OWNER_A, {
+        details: '詳しい説明',
+        specs: [{ label: '形式', value: 'PDF' }],
+        demoUrl: 'https://example.com/demo',
+      }),
+      product('h_2', OWNER_A, { contentKind: 'url', label: 'download', specs: [] }),
+    ];
+    mocks.handles.set(OWNER_A.toLowerCase(), ['alice']);
+    const out = (await m.listStoreListings())!;
+    expect(out[0]).toMatchObject({
+      contentKind: 'text',
+      details: '詳しい説明',
+      specs: [{ label: '形式', value: 'PDF' }],
+      demoUrl: 'https://example.com/demo',
+    });
+    // 無いもの・空の仕様表は運ばない
+    expect(out[1].contentKind).toBe('url');
+    expect(['details', 'specs', 'demoUrl'].filter((key) => key in out[1])).toEqual([]);
+    // /store のカード (client) にはどれも渡さない (HTML を太らせない)
+    for (const card of out.map(m.toStoreCardListing)) {
+      expect(['contentKind', 'details', 'specs', 'demoUrl'].filter((key) => key in card)).toEqual([]);
+      expect(card.id).toBeTruthy();
+    }
+  });
+
   it('product.handle が owner の所有なら帰属はそれを最優先・非所有なら先頭へ fallback', async () => {
     const m = await mod();
     mocks.ids = ['h_1', 'h_2'];

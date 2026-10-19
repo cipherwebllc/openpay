@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.20.0 — unreleased
+
+- `discovery_search` now passes through the catalog fields that `/api/discovery` already returns, so agents can compare listings without opening each one: `id`, `title`, `trigger` (when to use), `docsUrl`, `license`, `updatedAt` and `verifiedAt` (ISO 8601), and `official: true` for OpenPay's own listings. Fields are omitted when the catalog has no value. Price, fee and total are computed as before.
+- `query` now also matches `title` and `trigger` (previously resource, description and category only). The tool name, description and input schema are unchanged.
+- No dependency changes.
+
 ## 0.19.1 — 2026-10-10
 
 - Make the CLI signer child environment symmetric: the Kova child no longer

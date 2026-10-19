@@ -15,6 +15,7 @@ import { AppShell } from '@/components/AppShell';
 import { StoreBrowser } from '@/components/StoreBrowser';
 import { env } from '@/lib/env';
 import { listStoreListingsCached } from '@/lib/x402/storeListingCache';
+import { toStoreCardListing } from '@/lib/x402/storeListing';
 import { STORE_DEV_FIXTURE_LISTINGS } from '@/lib/devStoreFixtures';
 import { guidePageMetadata } from '@/lib/guideMetadata';
 
@@ -86,7 +87,7 @@ export default async function StorePage({
               {t('storageError')}
             </p>
           ) : (
-            <StoreBrowser listings={listings} locale={locale} initialQuery={initialQuery} />
+            <StoreBrowser listings={listings.map(toStoreCardListing)} locale={locale} initialQuery={initialQuery} />
           )}
         </div>
 
