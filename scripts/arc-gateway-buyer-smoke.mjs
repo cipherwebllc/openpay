@@ -5,13 +5,17 @@
 //   node scripts/arc-gateway-buyer-smoke.mjs            # mainnet (https://open-pay.jp・Arc 5042)
 //   node scripts/arc-gateway-buyer-smoke.mjs --testnet  # testnet (http://localhost:3141・Arc 5042002)
 //   → http://localhost:4599 をウォレットのあるブラウザで開く
+//   第三者の出品 (dual-rail relay の Arc 面・DEPLOY_CHECKLIST §14.8b) を買う場合は、TARGET と支払い先の
+//   path の接頭辞を明示する:
+//     TARGET=https://gateway.open-pay.jp PAID_PATH_PREFIX=/api/consult PAID_PATH='/api/consult?q=hello' \
+//       node scripts/arc-gateway-buyer-smoke.mjs
 //   ウォレットが別の端末にある場合: HOST=0.0.0.0 で起動し、その端末から http://<この Mac の IP>:4599
 //
 // 役割分担: このサーバが 402 の取得・検査・支払いリクエストの送信を行い (CORS を避ける)、ページは
 // window.ethereum でチェーン切替・USDC の Gateway deposit・EIP-712 署名だけを行う。
 //
 // 安全柵 (署名させる前にサーバ側で必ず検査し、1 つでも外れたら拒否):
-//   - 支払い先 path は /api/paid/ 配下のみ
+//   - 支払い先 path は /api/paid/ 配下のみ (第三者の出品を買うときだけ PAID_PATH_PREFIX で明示的に変える)
 //   - accept.network / asset / extra.verifyingContract が既知の Arc・USDC・Gateway Wallet と完全一致
 //   - accept.amount <= MAX_ATOMIC (既定 50000 = $0.05。env MAX_USDC で変更)
 //   - 署名は TransferWithAuthorization のみ・value は accept.amount と同値・to は accept.payTo
@@ -49,6 +53,11 @@ const NET = TESTNET
 const USDC = '0x3600000000000000000000000000000000000000';
 const GATEWAY_DOMAIN = 26; // Circle domain for Arc
 const MAX_ATOMIC = BigInt(Math.round(Number(process.env.MAX_USDC ?? '0.05') * 1e6));
+const PAID_PATH_PREFIX = process.env.PAID_PATH_PREFIX ?? '/api/paid/';
+const DEFAULT_PATH = process.env.PAID_PATH ?? '/api/paid/hello';
+if (!PAID_PATH_PREFIX.startsWith('/') || !DEFAULT_PATH.startsWith(PAID_PATH_PREFIX)) {
+  throw new Error('PAID_PATH must start with PAID_PATH_PREFIX, which must start with /');
+}
 
 // withdraw (売り手の Gateway 残高 → 同じウォレットの Arc USDC)。同一チェーンは transfer fee なし・
 // burn の gas fee は Arc で $0.0035 (Gateway fees)。maxFee はその上限として 0.02 USDC に固定する。
@@ -112,7 +121,9 @@ function buildWithdrawTypedData(from, atomic) {
 const eq = (a, b) => typeof a === 'string' && typeof b === 'string' && a.toLowerCase() === b.toLowerCase();
 
 async function fetchChallenge(path) {
-  if (typeof path !== 'string' || !path.startsWith('/api/paid/')) throw new Error('path must start with /api/paid/');
+  if (typeof path !== 'string' || !path.startsWith(PAID_PATH_PREFIX)) {
+    throw new Error(`path must start with ${PAID_PATH_PREFIX}`);
+  }
   const res = await fetch(`${NET.target}${path}`);
   const header = res.headers.get('payment-required');
   if (res.status !== 402 || !header) throw new Error(`expected 402 + PAYMENT-REQUIRED (got ${res.status})`);
@@ -162,7 +173,13 @@ const server = createServer(async (req, res) => {
       return res.end(PAGE);
     }
     if (req.method === 'GET' && url.pathname === '/api/config') {
-      return json(res, 200, { ...NET, usdc: USDC, maxAtomic: MAX_ATOMIC.toString(), testnet: TESTNET });
+      return json(res, 200, {
+        ...NET,
+        usdc: USDC,
+        maxAtomic: MAX_ATOMIC.toString(),
+        testnet: TESTNET,
+        defaultPath: DEFAULT_PATH,
+      });
     }
     if (req.method === 'GET' && url.pathname === '/api/balance') {
       return json(res, 200, await gatewayBalance(url.searchParams.get('address')));
@@ -346,6 +363,7 @@ $('connect').onclick = async () => {
     if (!window.ethereum) throw new Error('ウォレット拡張 (window.ethereum) が見つかりません');
     cfg = await (await fetch('/api/config')).json();
     $('net').textContent = '— ' + cfg.label + ' (' + cfg.chainId + ') → ' + cfg.target;
+    $('path').value = cfg.defaultPath;
     [account] = await call('eth_requestAccounts', []);
     try {
       await call('wallet_switchEthereumChain', [{ chainId: hex(cfg.chainId) }]);
