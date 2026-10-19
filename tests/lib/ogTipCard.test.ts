@@ -366,6 +366,11 @@ describe('buildProductOgModel / buildProductOgImageUrl', () => {
     expect(card.imageUrl).toBe('https://cdn.example.com/product.png');
     // 手数料込みの支払総額を出す (端数もそのまま・2026-10-19 user 裁定)
     expect(card.chips).toEqual(['1,212 JPYC · Polygon']);
+    // 端数 (価格 4950 + 手数料 49.5・価格 101 + 手数料 1.01) も切り捨てない (Codex P3)
+    for (const locale of ['ja', 'en'] as const) {
+      expect(buildProductOgModel({ handle: 'masia', title: 'Kit', totalJpyc: '4999.5', locale }).chips).toEqual(['4,999.5 JPYC · Polygon']);
+      expect(buildProductOgModel({ handle: 'masia', title: 'Kit', totalJpyc: '102.01', locale }).chips).toEqual(['102.01 JPYC · Polygon']);
+    }
     expect(card.handleLine).toBe('山田太郎 · @masia');
     expect(card.footer).toBe('デジタル商品を購入');
     expect(card.accent).toBe('#2563eb');

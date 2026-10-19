@@ -378,6 +378,21 @@ describe('GET /api/og/handle', () => {
     expect(ssrf.fetchSafe).not.toHaveBeenCalled();
   });
 
+  // Codex P3: 端数のある支払総額を切り捨てずに描く (4950 + 49.5 = 4999.5)。ja / en とも。
+  it.each([['ja', '4,999.5 JPYC · Polygon'], ['en', '4,999.5 JPYC · Polygon']])(
+    '端数のある支払総額を切り捨てずに商品カードへ描く (%s)',
+    async (locale, chip) => {
+      const productId = `h_${'f'.repeat(32)}`;
+      h.enableCreatorStore = true;
+      h.enableCreatorStoreUi = true;
+      hosted.listAvailableForOwner.mockResolvedValue([
+        { id: productId, title: 'Kit', priceJpyc: '4950', saleActive: true, contentAvailable: true },
+      ]);
+      const { element } = await callGet(`h=masia&locale=${locale}&product=${productId}`);
+      expect(collectText(element).join(' ')).toContain(chip);
+    },
+  );
+
   it('商品画像は KV 権威 URL を既存 avatar pipeline で data URL 化して描く', async () => {
     const productId = `h_${'d'.repeat(32)}`;
     const imageUrl = 'https://cdn.example.com/product.png';
