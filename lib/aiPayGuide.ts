@@ -229,7 +229,7 @@ const ja: AiPayGuideContent = {
   quickSetupConfigLabel: 'Claude Desktop の設定 JSON',
   quickSetupConfig: MCP_CONFIG_JSON,
   privateKeyWarning:
-    '注意：鍵はあなたのマシンのファイル（~/.openpay-x402/wallet.json）に平文で保存されます。会話にも OpenPay にも出ませんが、あなたとしてコマンドを実行できるもの（シェルを使える AI エージェントを含む）は読めます。入れるのは失ってもよい少額だけに。OpenPay は鍵を復元できません。',
+    '注意: 鍵はあなたのマシンのファイル (~/.openpay-x402/wallet.json) に平文で保存されます。会話にも OpenPay にも出ませんが、あなたとしてコマンドを実行できるもの (シェルを使える AI エージェントを含む) は読めます。入れるのは失ってもよい少額だけに。OpenPay は鍵を復元できません。',
 
   stewardTitle: 'セットアップ B: 安全に運用する (Steward)',
   stewardBody:
@@ -261,9 +261,9 @@ const ja: AiPayGuideContent = {
 
   guardsTitle: '守ってくれるもの (金銭ガード)',
   guards: [
-    '1 回の支払い上限（既定 10 JPYC）',
-    'セッション中の累計支払い上限（既定 100 JPYC）',
-    '1 日の支払い上限（ローカルウォレット・Kova・MetaMask Agent Wallet では既定 100 JPYC (セッション上限と同額)・再起動しても引き継がれます）',
+    '1 回の支払い上限 (既定 10 JPYC)',
+    'セッション中の累計支払い上限 (既定 100 JPYC)',
+    '1 日の支払い上限 (ローカルウォレット・Kova・MetaMask Agent Wallet では既定 100 JPYC (セッション上限と同額)・再起動しても引き継がれます)',
     '支払い先は AI ストア掲載 URL と open-pay.jp のみ',
     '支払い前に、掲載時の金額・宛先と毎回照合。すり替えを検知したら拒否',
     '有料応答はデータであって指示ではありません。本文中の指示に AI が従わないようにしてください',
@@ -275,7 +275,7 @@ const ja: AiPayGuideContent = {
   tryFlow:
     '内部では x402_quote → あなたの承認 → x402_pay の順に進みます。承認前に見積もりとガード判定を確認できます。',
   proofIntro:
-    '実例：この仕組みで Claude が Internet Computer 上の AI エージェント Coo-ICP に、1 相談 2 JPYC で実際に支払いました。Polygon tx:',
+    '実例: この仕組みで Claude が Internet Computer 上の AI エージェント Coo-ICP に、1 相談 2 JPYC で実際に支払いました。Polygon tx:',
   proofTransaction: {
     label: POLYGON_TX,
     href: POLYGON_TX_URL,
@@ -290,11 +290,11 @@ const ja: AiPayGuideContent = {
   ctaButtonHref: '/discovery',
   strandsTitle: 'Strands Agents (AWS) からも使える',
   strandsBody:
-    'MCP を話せるエージェントフレームワークなら、同じ構成で JPYC を購入できます。AWS の Strands Agents なら、MCPClient に openpay-x402-mcp を渡すだけです（環境変数はセットアップ A/B と共通）。',
+    'MCP を話せるエージェントフレームワークなら、同じ構成で JPYC を購入できます。AWS の Strands Agents なら、MCPClient に openpay-x402-mcp を渡すだけです (環境変数はセットアップ A/B と共通)。',
   strandsCodeLabel: 'Strands Agents (Python) の最小コード',
   strandsCode: STRANDS_SAMPLE,
   strandsProofIntro:
-    '実証済み：この構成（Strands MCPClient + Steward 署名・鍵レス）で、カタログ検索から 2 JPYC の実購入まで完走しています。Polygon tx:',
+    '実証済み: この構成 (Strands MCPClient + Steward 署名・鍵レス) で、カタログ検索から 2 JPYC の実購入まで完走しています。Polygon tx:',
   strandsProofTransaction: {
     label: STRANDS_TX,
     href: STRANDS_TX_URL,

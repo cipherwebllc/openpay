@@ -121,46 +121,46 @@ const ja: AgentGuideContent = {
   metaDescription:
     '日本語がわからなくても、OpenPay モバイルオーダー対応のお店なら、自分の AI（Claude など）に頼んで注文できます。支払いは決済リンクを開いて自分のウォレットで JPYC を 1 タップ。OpenPay は通貨の交換・両替を行いません。',
   title: '日本語がわからなくても、OpenPay モバイルオーダーなら AI で注文できる',
-  lead: 'あなたの AI（Claude など）に母国語で相談するだけ。AI がメニューを読んで注文を組み、決済リンクを作ります。あなたはリンクを開いて確認し、自分のウォレットで JPYC を払うだけです。',
+  lead: 'あなたの AI (Claude など) に母国語で相談するだけ。AI がメニューを読んで注文を組み、決済リンクを作ります。あなたはリンクを開いて確認し、自分のウォレットで JPYC を払うだけです。',
   heroImage: {
     src: HERO_SRC,
-    alt: 'AI との会話（母国語）→ 注文が事前充填された決済画面 → 自分のウォレットで支払い、の 3 画面',
+    alt: 'AI との会話 (母国語) → 注文が事前充填された決済画面 → 自分のウォレットで支払い、の 3 画面',
     width: HERO_WIDTH,
     height: HERO_HEIGHT,
   },
 
   canDoTitle: 'できること',
   canDo: [
-    'AI がメニューを母国語で説明し、注文を組んで決済リンク（createOrderLink）を作る',
+    'AI がメニューを母国語で説明し、注文を組んで決済リンク (createOrderLink) を作る',
     'あなたが決済画面で店舗名・明細・合計を確かめ、自分のウォレットで支払う',
-    'JPYC（円ステーブルコイン）はあなたからお店へ直接・すぐに届く（ノンカストディ）',
+    'JPYC (円ステーブルコイン) はあなたからお店へ直接・すぐに届く (ノンカストディ)',
   ],
   cannotTitle: 'できないこと (＝あえてしないこと)',
   cannot: [
-    'AI は支払いません。財布（秘密鍵）を持たず、支払いは必ずあなたが承認します',
-    'OpenPay は暗号資産の交換・両替を行いません。JPYC の入手（スワップ）は、ご自身で外部サービスを使います',
+    'AI は支払いません。財布 (秘密鍵) を持たず、支払いは必ずあなたが承認します',
+    'OpenPay は暗号資産の交換・両替を行いません。JPYC の入手 (スワップ) は、ご自身で外部サービスを使います',
   ],
 
   needTitle: '用意するもの',
   need: [
-    'MCP に対応した AI クライアント（Claude Desktop / Claude Code など）',
-    '暗号資産ウォレット（MetaMask などの、あなたのウォレット）',
-    'Polygon 上の JPYC（少量の POL＝ガス代も）',
+    'MCP に対応した AI クライアント (Claude Desktop / Claude Code など)',
+    '暗号資産ウォレット (MetaMask などの、あなたのウォレット)',
+    'Polygon 上の JPYC (少量の POL＝ガス代も)',
   ],
 
   setupTitle: 'セットアップ (AI に MCP を追加)',
   setupIntro:
-    'openpay-order-mcp（openpay-x402-mcp の order profile）は、お店探し（find_shops）・メニュー取得・支払額の確認・決済リンク作成だけを AI に使わせる MCP サーバーです。自動で支払うツールはなく、鍵も設定に入れません。',
+    'openpay-order-mcp (openpay-x402-mcp の order profile) は、お店探し (find_shops)・メニュー取得・支払額の確認・決済リンク作成だけを AI に使わせる MCP サーバーです。自動で支払うツールはなく、鍵も設定に入れません。',
   setupSteps: [
     {
       n: 1,
       title: 'AI クライアントの MCP 設定を開く',
-      body: 'AI クライアント（Claude Desktop・Claude Code など）の MCP 設定（mcpServers）を開きます。MCP に対応する他のクライアントでも、同じ npx コマンドで追加できます。',
+      body: 'AI クライアント (Claude Desktop・Claude Code など) の MCP 設定 (mcpServers) を開きます。MCP に対応する他のクライアントでも、同じ npx コマンドで追加できます。',
     },
     {
       n: 2,
       title: '下記の設定を追加して再起動',
-      body: '下のブロックを mcpServers に追加して保存し、クライアントを再起動します（Node.js 20 以上が必要）。',
+      body: '下のブロックを mcpServers に追加して保存し、クライアントを再起動します (Node.js 20 以上が必要)。',
     },
     {
       n: 3,
@@ -174,13 +174,13 @@ const ja: AgentGuideContent = {
       'PC のローカルで動く Claude Code / Codex なら、Local Wallet・Kova・MetaMask Agent Wallet・Steward が使えます。',
       'スマホの Claude アプリの Code やブラウザ版 Claude Code は使い捨てのクラウド環境です。Local Wallet は鍵ごと消えるので、JPYC を入れないでください。',
       'Kova と MetaMask Agent Wallet は、CLI とログイン状態が同じマシンに要るため使えません。',
-      '「人が支払う」（openpay-order-mcp）は鍵不要でどこでも使えます（登録はセッションごとに消えることがあります）。クラウドから Agent に支払わせるなら、自分のサーバで署名する Steward を使ってください。',
+      '「人が支払う」(openpay-order-mcp) は鍵不要でどこでも使えます (登録はセッションごとに消えることがあります)。クラウドから Agent に支払わせるなら、自分のサーバで署名する Steward を使ってください。',
     ],
   },
   configLabel: '設定例 (支払い用の鍵は不要)',
   configCode: MCP_CONFIG_JSON,
   configNote:
-    'この設定に秘密鍵は入れません（AI は支払わないため）。詳細は npm の openpay-x402-mcp をご覧ください。',
+    'この設定に秘密鍵は入れません (AI は支払わないため)。詳細は npm の openpay-x402-mcp をご覧ください。',
 
   flowTitle: '注文の流れ',
   flowSteps: [
@@ -192,12 +192,12 @@ const ja: AgentGuideContent = {
     {
       n: 2,
       title: 'AI に決済リンクを作ってもらう',
-      body: 'AI が createOrderLink で open-pay.jp/@（店舗）?cart=… の決済リンクを返します。まだ支払いは起きません（受取先と価格は、お店のハンドルからサーバーがその都度決めます）。',
+      body: 'AI が createOrderLink で open-pay.jp/@（店舗）?cart=… の決済リンクを返します。まだ支払いは起きません (受取先と価格は、お店のハンドルからサーバーがその都度決めます)。',
     },
     {
       n: 3,
       title: 'リンクを開いて内容を確認',
-      body: 'スマホでリンクを開くと、店舗名・明細・合計（JPYC）が出ます。店舗名と金額を必ず確かめてください。',
+      body: 'スマホでリンクを開くと、店舗名・明細・合計 (JPYC) が出ます。店舗名と金額を必ず確かめてください。',
     },
     {
       n: 4,
@@ -208,7 +208,7 @@ const ja: AgentGuideContent = {
 
   jpycTitle: 'JPYC の入手 (Polygon)',
   jpycBody:
-    '支払いには Polygon 上の JPYC を使います。手持ちの USDC などは、外部の DEX（分散型取引所・例：Uniswap の Polygon の USDC/JPYC プール）でご自身でスワップできます。OpenPay は交換・両替を行いません。',
+    '支払いには Polygon 上の JPYC を使います。手持ちの USDC などは、外部の DEX (分散型取引所・例: Uniswap の Polygon の USDC/JPYC プール) でご自身でスワップできます。OpenPay は交換・両替を行いません。',
   jpycSteps: [
     {
       n: 1,
@@ -229,21 +229,21 @@ const ja: AgentGuideContent = {
   jpycAddressLabel: 'JPYC (v3) コントラクトアドレス',
   jpycAddress: JPYC_CONTRACT_ADDRESS,
   jpycAddressChainNote:
-    'このアドレスは Polygon / Kaia / Avalanche / Ethereum で共通です（JPYC v3）。',
+    'このアドレスは Polygon / Kaia / Avalanche / Ethereum で共通です (JPYC v3)。',
   jpycLegacyWarning:
-    '注意：旧プリペイド型の JPYC v1（0x431d… で始まる別トークン）と間違えないでください。スワップ先は必ず上記 v3 アドレスに。',
-  jpycGasNote: 'スワップの実行には、少量の POL（ガス代）が必要です。',
+    '注意: 旧プリペイド型の JPYC v1 (0x431d… で始まる別トークン) と間違えないでください。スワップ先は必ず上記 v3 アドレスに。',
+  jpycGasNote: 'スワップの実行には、少量の POL (ガス代) が必要です。',
   jpycNoGasLabel: 'ガス代 (POL) が無いとき',
   jpycNoGasNote:
-    'MetaMask の「Gas Station（ガス込みスワップ）」を使うと、Polygon では POL を持っていなくても、手持ちの USDC などからガス代を払って USDC→JPYC のスワップができます（Base / Arbitrum も対応・スマートアカウントへの自動アップグレードが必要／Optimism 等は非対応で少量の ETH が別途必要）。※この機能は MetaMask が提供するもので、OpenPay は関与しません。対応チェーン・トークンや混雑状況により成立しない場合があります。',
+    'MetaMask の「Gas Station（ガス込みスワップ）」を使うと、Polygon では POL を持っていなくても、手持ちの USDC などからガス代を払って USDC→JPYC のスワップができます (Base / Arbitrum も対応・スマートアカウントへの自動アップグレードが必要／Optimism 等は非対応で少量の ETH が別途必要)。※この機能は MetaMask が提供するもので、OpenPay は関与しません。対応チェーン・トークンや混雑状況により成立しない場合があります。',
   jpycLiquidityNote:
     'DEX の流動性・レート・プールは変動します。スワップ実行時に最新の状況をご確認ください。',
 
   disclosuresTitle: '重要なお知らせ',
   disclosures: [
-    'OpenPay は暗号資産の交換・両替を行いません。スワップはお客様ご自身が外部サービス（DEX 等）で行うものです。',
+    'OpenPay は暗号資産の交換・両替を行いません。スワップはお客様ご自身が外部サービス (DEX 等) で行うものです。',
     '本ガイドは情報提供であり、投資助言ではありません。',
-    'トークンのコントラクトアドレスは、必ず JPYC の公式情報（JPYC EX・jpyc.co.jp）でご確認ください。',
+    'トークンのコントラクトアドレスは、必ず JPYC の公式情報 (JPYC EX・jpyc.co.jp) でご確認ください。',
   ],
 
   safetyTitle: '安全に使うために',
@@ -252,7 +252,7 @@ const ja: AgentGuideContent = {
   safety: [
     'ノンカストディ — OpenPay も AI も、あなたの資金を預かりません。',
     '署名は 1 回だけ — AI に秘密鍵やウォレットを渡す必要はありません。',
-    '払う前に確認 — 決済画面で店舗名と金額（JPYC）を確かめてから署名します。',
+    '払う前に確認 — 決済画面で店舗名と金額 (JPYC) を確かめてから署名します。',
   ],
   safetyNote:
     'ブロックチェーンの支払いは、完了後の取り消しができません。店舗名と金額を確認してから支払ってください。',
@@ -273,7 +273,7 @@ const ja: AgentGuideContent = {
     },
     {
       q: '支払う金額はどこで分かりますか？',
-      a: '決済画面の合計（JPYC）が支払う金額です。店舗側の利用料などは、利用規約と特定商取引法に基づく表記をご確認ください。',
+      a: '決済画面の合計 (JPYC) が支払う金額です。店舗側の利用料などは、利用規約と特定商取引法に基づく表記をご確認ください。',
     },
   ],
 

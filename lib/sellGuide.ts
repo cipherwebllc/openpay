@@ -191,7 +191,7 @@ const ja: SellGuideContent = {
   noCodeEnv: NO_CODE_ENV,
   sdkTitle: 'SDK (数行)',
   sdkBody:
-    'openpay-x402-sdk 0.10.0 以降で、自分の出品の resourceUrl・resourceId・expectedRecipient（JPYC 受取先）を createJpycGate に設定します。ID と受取先は自分の管理画面から取り、discovery 応答から設定しないでください。',
+    'openpay-x402-sdk 0.10.0 以降で、自分の出品の resourceUrl・resourceId・expectedRecipient (JPYC 受取先) を createJpycGate に設定します。ID と受取先は自分の管理画面から取り、discovery 応答から設定しないでください。',
   sdkPackage: {
     label: 'openpay-x402-sdk を npm で開く',
     href: SDK_NPM_URL,
@@ -227,7 +227,7 @@ const ja: SellGuideContent = {
     {
       n: 2,
       title: 'AI ストアで登録',
-      body: 'ウォレット接続（SIWE）後、URL・価格（JPYC の整数）・説明・カテゴリ・正当性表明を入力します。任意の「表示名」はカタログの見出しに、「いつ使うか」はエージェントが購入を判断する 1 行になるので、できるだけ埋めます（Docs URL・利用条件も任意）。説明には、何が返るかを淡々と書きます。',
+      body: 'ウォレット接続 (SIWE) 後、URL・価格 (JPYC の整数)・説明・カテゴリ・正当性表明を入力します。任意の「表示名」はカタログの見出しに、「いつ使うか」はエージェントが購入を判断する 1 行になるので、できるだけ埋めます (Docs URL・利用条件も任意)。説明には、何が返るかを淡々と書きます。',
     },
     {
       n: 3,
@@ -247,16 +247,16 @@ const ja: SellGuideContent = {
 
   bazaarTitle: 'x402 Bazaar / agentic.market にも載せる (USDC 併売)',
   bazaarIntro:
-    'このページの出品（JPYC・Polygon）は /api/discovery と OpenPay の MCP / SDK からエージェントに発見されます。さらに出品フォームの「USDC (Base) でも販売する」を有効にすると、同じ API を Coinbase の x402 Bazaar / agentic.market にも掲載できます。',
+    'このページの出品 (JPYC・Polygon) は /api/discovery と OpenPay の MCP / SDK からエージェントに発見されます。さらに出品フォームの「USDC (Base) でも販売する」を有効にすると、同じ API を Coinbase の x402 Bazaar / agentic.market にも掲載できます。',
   bazaarItems: [
     '出品フォームで USDC 価格（USD）と受取アドレス（Base）を設定 — OpenPay の USDC 側手数料は 0%',
-    '発行される dual-rail スニペット（x402Gate）をあなたのサーバーに設置 — 402 に JPYC と USDC が並び、USDC 支払いは OpenPay が CDP（Coinbase Developer Platform）の facilitator へ中継',
-    '実購入が 1 件 settle されると Bazaar のカタログに反映（掲載メタは OpenPay が出品情報から自動で付与）',
+    '発行される dual-rail スニペット (x402Gate) をあなたのサーバーに設置 — 402 に JPYC と USDC が並び、USDC 支払いは OpenPay が CDP (Coinbase Developer Platform) の facilitator へ中継',
+    '実購入が 1 件 settle されると Bazaar のカタログに反映 (掲載メタは OpenPay が出品情報から自動で付与)',
   ],
   bazaarNote: [
-    '自前の CDP 鍵や標準 x402 ゲートの自作は不要です。支払いは購入者からあなたの Base アドレスへ直接届き、OpenPay は売上を預かりません（USDC 送金は取消不能）。',
-    'すでに JPYC で出品済みの API を USDC 対応にするときは、サーバーのゲートを dual-rail 版スニペット（x402Gate）へ貼り替えてください。貼り替えるまで USDC では購入できません。',
-    '購入側の注意: 標準クライアント x402-fetch（1.2.0 現在）は dual-rail 402 を解析できないため、USDC 購入例スクリプトを用意しています: https://raw.githubusercontent.com/cipherwebllc/openpay/main/scripts/x402-dual-buyer-example.mjs',
+    '自前の CDP 鍵や標準 x402 ゲートの自作は不要です。支払いは購入者からあなたの Base アドレスへ直接届き、OpenPay は売上を預かりません (USDC 送金は取消不能)。',
+    'すでに JPYC で出品済みの API を USDC 対応にするときは、サーバーのゲートを dual-rail 版スニペット (x402Gate) へ貼り替えてください。貼り替えるまで USDC では購入できません。',
+    '購入側の注意: 標準クライアント x402-fetch (1.2.0 現在) は dual-rail 402 を解析できないため、USDC 購入例スクリプトを用意しています: https://raw.githubusercontent.com/cipherwebllc/openpay/main/scripts/x402-dual-buyer-example.mjs',
   ],
 
   jobDescTitle: '説明文は「何を完了するか」で書く',

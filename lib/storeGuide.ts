@@ -666,17 +666,17 @@ const LICENSE_STORE_GUIDE_JA = {
   heading: '利用ライセンスを売る',
   intro: 'サービスの入口や利用範囲を、買い手のウォレットに結び付けて販売する商品です。NFT はライセンスの証明で、権利は購入時点で有効になります。投資や利益分配、値上がり益を目的とする商品ではありません。',
   fieldsHeading: '登録する項目',
-  fields: '商品タイプで「利用ライセンス NFT」を選び、ライセンス名・販売数・整数 JPYC の価格・譲渡（既定は不可）を入力します。利用条件は OpenPay 標準テンプレート (standard-v1) を選ぶか、自分の https URL と利用条件のバージョン（例: v1）を指定できます。利用開始の案内は任意のテキストです。利用条件には提供範囲と期間、従量料金の有無、発行失敗時の対応期限、返金と終了時の通知・救済を記載してください。',
+  fields: '商品タイプで「利用ライセンス NFT」を選び、ライセンス名・販売数・整数 JPYC の価格・譲渡 (既定は不可) を入力します。利用条件は OpenPay 標準テンプレート (standard-v1) を選ぶか、自分の https URL と利用条件のバージョン (例: v1) を指定できます。利用開始の案内は任意のテキストです。利用条件には提供範囲と期間、従量料金の有無、発行失敗時の対応期限、返金と終了時の通知・救済を記載してください。',
   publish: '作成した商品は登録待ちになります。登録状態を更新し、登録済みになってから「公開する」で販売を開始します。作成後は価格・販売数・譲渡・利用条件・案内を変更できません。販売停止では既存の購入記録は消えません。',
   integrationHeading: 'サービスへの組み込み方',
-  integration: 'SDK 0.10.0 の組み合わせです。LICENSE_PRODUCT_ID と LICENSE_SESSION_SECRET に加え、都度課金には自分の出品 ID（MY_RESOURCE_ID）と JPYC 受取先（EXPECTED_RECIPIENT）を設定します。ID と受取先は discovery 応答から設定しないでください。商品 ID からチェーンと NFT の定義を取得します。Polygon の RPC URL は任意です。session.origin は組み込むサービスの URL に置き換えます。入口の本人確認と、使った分の支払いを分けて考えます。',
-  entry: 'createLicenseGate：ウォレット署名で本人を確認し、入口のライセンスを確認する。',
-  metered: 'createJpycGate：実際の API 利用などを、別の x402 都度課金にする。',
+  integration: 'SDK 0.10.0 の組み合わせです。LICENSE_PRODUCT_ID と LICENSE_SESSION_SECRET に加え、都度課金には自分の出品 ID (MY_RESOURCE_ID) と JPYC 受取先 (EXPECTED_RECIPIENT) を設定します。ID と受取先は discovery 応答から設定しないでください。商品 ID からチェーンと NFT の定義を取得します。Polygon の RPC URL は任意です。session.origin は組み込むサービスの URL に置き換えます。入口の本人確認と、使った分の支払いを分けて考えます。',
+  entry: 'createLicenseGate: ウォレット署名で本人を確認し、入口のライセンスを確認する。',
+  metered: 'createJpycGate: 実際の API 利用などを、別の x402 都度課金にする。',
   verifyHeading: 'Verify API で状態を確認する',
   verifyBody: 'ADDRESS を確認するウォレット、PRODUCT_ID を商品 ID に置き換えます。HTTPS の状態 API であり、本人認証や持ち運べる署名証明ではありません。entitled が null の場合は確認できていないため、非保有と断定せず再確認します。',
   policyHeading: '商品ポリシー',
-  policy: 'Polygon の JPYC のみ（検証は Amoy）。販売数は {minSupply}〜{maxSupply}、価格は整数の {minPrice} JPYC 以上です。USDC は利用できません。ライセンスにも関連するサーバー上の権利にも利用回数・残高は持たせません。一般出品の開放時は、プロフィール・サインイン等の出品要件を満たすクリエイターが利用できます。これらは商品ポリシーであり、法的適合性の認定ではありません。',
-  rights: '譲渡不可なら burn（焼却）しても購入記録に基づく権利は残ります。譲渡可なら発行後の権利は保有者に移り、譲渡・burn した分を元の保有者は利用できません。返金は売り手からの別送金です。NFT の発行・譲渡・burn とウォレット情報は公開台帳や Verify API で公開されます。',
+  policy: 'Polygon の JPYC のみ (検証は Amoy)。販売数は {minSupply}〜{maxSupply}、価格は整数の {minPrice} JPYC 以上です。USDC は利用できません。ライセンスにも関連するサーバー上の権利にも利用回数・残高は持たせません。一般出品の開放時は、プロフィール・サインイン等の出品要件を満たすクリエイターが利用できます。これらは商品ポリシーであり、法的適合性の認定ではありません。',
+  rights: '譲渡不可なら burn (焼却) しても購入記録に基づく権利は残ります。譲渡可なら発行後の権利は保有者に移り、譲渡・burn した分を元の保有者は利用できません。返金は売り手からの別送金です。NFT の発行・譲渡・burn とウォレット情報は公開台帳や Verify API で公開されます。',
 };
 
 const LICENSE_STORE_GUIDE_EN = {
@@ -731,7 +731,7 @@ const DELIVERY_STORE_GUIDE_JA = {
   intro: '保護配布を使うと、ファイル本体を OpenPay に預けずに、権利のある購入者と保有者だけに配布できます。設定は出品者側で行います。',
   steps: [
     'ファイルを Cloudflare R2 などの非公開ストレージに置きます。公開 URL から直接取得できないようにします。',
-    'SDK 0.8.0 の examples/cloudflare-r2-delivery-gate を用意し、OPENPAY_PRODUCT_ID（商品 ID）、AUDIENCE（Worker の HTTPS オリジン）、OBJECT_KEYS（版とファイルの対応）、FILES（非公開 R2 の binding）を設定して、wrangler deploy でデプロイします。',
+    'SDK 0.8.0 の examples/cloudflare-r2-delivery-gate を用意し、OPENPAY_PRODUCT_ID (商品 ID)、AUDIENCE (Worker の HTTPS オリジン)、OBJECT_KEYS (版とファイルの対応)、FILES (非公開 R2 の binding) を設定して、wrangler deploy でデプロイします。',
     '出品フォームの「保護配布先URL」に Worker の固定 URL を入れて保存します。期限付きのファイル URL は使いません。',
     '権利のあるウォレットでログインし、ライブラリの「保護ダウンロードを開く」で確認します。',
   ],
