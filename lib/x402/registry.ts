@@ -59,6 +59,7 @@ export type X402ResourceUsdc = {
   payTo: string; // USDC (Base) 受取先 (checksum)
   priceUsd: string; // "0.005" 形式 (USD・$ なし・小数 6 桁まで)
   serviceName?: string; // CDP Bazaar の検索・カード表示名 (任意・≤60 字)
+  arc?: boolean; // Arc (Circle Gateway) でも販売する出品者の同意。受取先は payTo を共用・EOA 必須
 };
 
 export type X402Resource = {
@@ -276,7 +277,16 @@ export function parseResourceInput(
       }
       serviceName = cleaned;
     }
-    usdc = { payTo: usdcPayTo, priceUsd, ...(serviceName ? { serviceName } : {}) };
+    // Arc 同意: true のときだけ項目を付ける (undefined/false は付けない = 既存の保存形と byte 一致)。
+    if (u.arc !== undefined && u.arc !== false && u.arc !== true) {
+      return { ok: false, reason: 'invalid_usdc_arc' };
+    }
+    usdc = {
+      payTo: usdcPayTo,
+      priceUsd,
+      ...(serviceName ? { serviceName } : {}),
+      ...(u.arc === true ? { arc: true } : {}),
+    };
   }
   return {
     ok: true,

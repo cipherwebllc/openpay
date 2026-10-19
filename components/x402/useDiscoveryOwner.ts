@@ -23,6 +23,7 @@ const EMPTY_FORM = {
   usdcPriceUsd: '',
   usdcPayTo: '',
   usdcServiceName: '',
+  usdcArc: false,
 };
 
 export function useDiscoveryOwner(address: string | undefined, isSignedIn: boolean) {
@@ -87,6 +88,7 @@ export function useDiscoveryOwner(address: string | undefined, isSignedIn: boole
       usdcPriceUsd: r.usdc?.priceUsd ?? '',
       usdcPayTo: r.usdc?.payTo ?? '',
       usdcServiceName: r.usdc?.serviceName ?? '',
+      usdcArc: r.usdc?.arc === true,
     });
     setCreated(null);
     setNotice(null);
@@ -143,6 +145,8 @@ export function useDiscoveryOwner(address: string | undefined, isSignedIn: boole
                 ...(form.usdcServiceName.trim()
                   ? { serviceName: form.usdcServiceName.trim() }
                   : {}),
+                // Arc 同意は true のときだけ送る (OFF = 編集で外す)。
+                ...(form.usdcArc ? { arc: true } : {}),
               },
             }
           : {}),

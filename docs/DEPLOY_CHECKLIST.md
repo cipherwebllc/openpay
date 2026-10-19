@@ -1947,6 +1947,19 @@ PAYMENT-RESPONSE `{success:true, transaction:'904f72e8-f03d-4bd6-9df4-865e7b24d5
 - KV 未設定/障害時の claim は fail-open (§14.6 と同じ)。Arc は Base と違い **on-chain nonce のバックストップが無い**
   (verify が使用済み nonce を通す) が、settle 失敗時は content を返さないため解錠はされない (無駄な content 生成のみ)。
 
+### §14.8b 第三者向け Arc (dual-rail relay) — go-live
+
+第三者の出品 (`usdc.arc === true`) に Arc (Circle Gateway・v2 のみ) 面を出す go-live 手順。点灯は user。
+
+1. `ENABLE_X402_ARC_GATEWAY` が ON であること (§14.8・first-party の Arc flag。relay の Arc 面もこれに従う)。
+2. `ENABLE_X402_DUAL_RAIL_ARC` (server-only) と `NEXT_PUBLIC_ENABLE_X402_DUAL_RAIL_ARC` (出品フォームの Arc 欄) を **同時に** ON。
+3. **開示 3 点セット (LP の FAQ・利用規約・llms.txt) に第三者 Arc の記述を同期** (掟 14)。文言は運営判断で、ここでは「必要」とだけ記す。同一リリースで merge → deploy。
+4. Circle Gateway の引き出し署名の制約 (ERC-1271 = コントラクトウォレットで引き出せるか) を一次資料で確認する。確認できるまで出品フォームの「受取先は EOA」の注意は維持。
+5. 公式出品でオプトイン (`usdc.arc`) → Arc testnet / mainnet で実購入を確認 (402 の v2 accepts に Arc が並ぶ・200・Gateway 残高)。Base 側 (CDP Bazaar) 掲載の回帰も確認。あわせて **Gateway Wallet の残高が足りない買い手の verify が `isValid:false` になる**ことも確かめる (使い回し防止は同じ署名の再送だけを止めるので、残高不足のまま署名し直して上流を動かせないかは Gateway の verify が残高を見ることに依存する)。
+6. kill switch: `ENABLE_X402_DUAL_RAIL_ARC` を外して再デプロイ。402 から第三者の Arc accept が消え、**進行中の Arc 支払いの settle も止まる** (pin 付きは 409・pin なしは 400 で、買い手は課金されない。その支払いで出品者サーバーが動かした上流は無駄になる)。Base 経路は不変。止める前に急ぐ必要がなければ、先に `NEXT_PUBLIC_ENABLE_X402_DUAL_RAIL_ARC` を外して新しいオプトインを止め、出品者のキャッシュ (支払いなし最長 30 分) が切れてから server flag を外すと、進行中の支払いを落とす数を減らせる。
+7. **KV 障害中は使い回し防止 (R4) が効かない (fail-open)**。障害時は Arc 面の売上リスクを許容するか、kill switch で止めるかを運用判断する。また、verify の時点で KV が落ちていて印が無いまま settle の時点で KV が戻った支払いは `authorization_not_verified` で 1 回だけ落ちる (買い手は課金されず、新しい署名で再試行できる。出品者の上流 1 回分は無駄になる)。
+8. 処理中の印は 15 分 (`ARC_PENDING_TTL_SEC`)。出品者サーバーの上流処理がこれを超えると settle が `authorization_not_verified` になる。relay や出品者サーバーの maxDuration を 15 分超に伸ばすときは、この値も合わせて見直す。
+
 ## §15 Web Push 着金通知 go-live SOP
 
 決済/受注の成功を店主端末に Web Push で届ける (`/history` の PushNotifyPanel + 素の `public/sw.js`)。

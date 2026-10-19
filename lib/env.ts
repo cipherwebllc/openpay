@@ -758,6 +758,19 @@ export const env = {
     'NEXT_PUBLIC_ENABLE_X402_DUAL_RAIL',
     process.env.NEXT_PUBLIC_ENABLE_X402_DUAL_RAIL,
   ),
+  // 第三者向け dual-rail relay で Arc (Circle Gateway) 面を出す kill switch。**server-only**。
+  // 既定 OFF。出すには既存の ENABLE_X402_ARC_GATEWAY (x402Config.arcGateway.enabled) と
+  // 出品の usdc.arc === true も必要 (3 条件 AND)。'1' / 'true' で ON。
+  enableX402DualRailArc: parseBoolFlag(
+    'ENABLE_X402_DUAL_RAIL_ARC',
+    process.env.ENABLE_X402_DUAL_RAIL_ARC,
+  ),
+  // 上記 Arc 面の **UI 面** (出品フォームの Arc オプトイン欄)。既定 OFF。
+  // 点灯は server の ENABLE_X402_DUAL_RAIL_ARC と同時 (UI だけ先に出すと期待違いを作る)。
+  enableX402DualRailArcUi: parseBoolFlag(
+    'NEXT_PUBLIC_ENABLE_X402_DUAL_RAIL_ARC',
+    process.env.NEXT_PUBLIC_ENABLE_X402_DUAL_RAIL_ARC,
+  ),
   // Sentry browser DSN。未設定なら instrumentation-client.ts:7-12 が no-op に
   // 倒れ、logger.warn/error は console のみで Sentry へ送られない。本番では
   // 観測ゼロ = 事故検知不能のため、mainnet では下記の guard で deploy を中止。
