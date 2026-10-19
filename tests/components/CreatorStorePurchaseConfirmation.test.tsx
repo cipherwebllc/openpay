@@ -140,7 +140,7 @@ describe('CreatorStorePurchaseConfirmation — 特商法 12 条の 6 fence', () 
   it('出品者が利用条件を選んだ商品は「利用許諾」の行を要約に置き換え、記載のない項目の扱いと注記を添える', () => {
     renderConfirmation({ usage: { commercial: 'allowed', modify: 'not_allowed', note: 'クレジット表記をお願いします' } });
     const row = screen.getByText('利用許諾').parentElement as HTMLElement;
-    expect(within(row).getAllByRole('listitem').map((item) => item.textContent)).toEqual(['商用利用可', '改変不可', '再配布・再販売記載なし']);
+    expect(within(row).getAllByRole('listitem').map((item) => item.textContent)).toEqual(['商用利用:可', '改変:不可', '再配布・再販売:記載なし']);
     expect(within(row).getByText('補足: クレジット表記をお願いします')).toBeInTheDocument();
     expect(within(row).getByText(/OpenPay は内容の正確性を確認・保証しません/))
       .toHaveTextContent('利用規約第 13 条のとおり購入者本人の私的利用に限られ、再配布はできません');

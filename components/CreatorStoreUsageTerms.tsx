@@ -26,7 +26,8 @@ export function CreatorStoreUsageTerms({ usage, variant = 'section' }: { usage?:
         <ul className="space-y-1">
           {USAGE_PERMISSION_KEYS.map((key) => (
             <li key={key} className="flex flex-wrap gap-x-2">
-              <span>{t(ROW_LABEL_KEYS[key])}</span>
+              {/* 区切りを見える文字で出す (読み上げで「商用利用可」と続けて読まれないように)。 */}
+              <span>{t(ROW_LABEL_KEYS[key])}:</span>
               {valueOf(key)}
             </li>
           ))}
