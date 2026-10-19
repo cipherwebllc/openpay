@@ -121,7 +121,7 @@ vi.mock('@/components/CreatorStorePurchaseConfirmation', () => ({
     onBack,
     onConfirm,
   }: {
-    product?: { sellerRole?: string };
+    product?: { sellerRole?: string; usage?: unknown };
     priceJpyc: string;
     feeJpyc: string;
     totalJpyc: string;
@@ -132,7 +132,7 @@ vi.mock('@/components/CreatorStorePurchaseConfirmation', () => ({
     onBack: () => void;
     onConfirm: () => void;
   }) => (
-    <div data-testid="confirmation" data-seller-role={product?.sellerRole}>
+    <div data-testid="confirmation" data-seller-role={product?.sellerRole} data-usage={product?.usage ? JSON.stringify(product.usage) : undefined}>
       <span>
         {rail === 'usdc'
           ? `usdc:${priceJpyc}/${paidUsdc}`
@@ -446,6 +446,20 @@ describe('CreatorStorePurchaseFlow', () => {
     expect(screen.getByTestId('confirmation')).toHaveTextContent(
       'usdc:100/0.67',
     );
+  });
+
+  // Codex レビュー P3: 購入モーダルの利用条件が、署名直前の確認画面 (両レール) まで届くことを固定する。
+  // 欠けると確認画面だけ既定の「私的利用に限り再配布不可」に戻り、モーダルと食い違う。
+  it.each(['jpyc', 'usdc'] as const)('利用条件を最終確認へそのまま渡す (%s)', (rail) => {
+    const usage = { commercial: 'allowed', modify: 'not_allowed', note: 'クレジット表記をお願いします' } as const;
+    if (rail === 'usdc') {
+      state.quote = {
+        rail: 'usdc', chainId: 8453, priceJpyc: '100', paidUsdc: '0.67', merchant: PRODUCT.merchant,
+        payment: { quote: { rateScaled: '150000000', rateFetchedAt: 1_800_000_000_000, fxQuoteExpiresAt: 1_800_000_180_000 } },
+      };
+    }
+    renderFlow('ja', { ...PRODUCT, usage, ...(rail === 'usdc' ? { usdcEnabled: true as const } : {}) });
+    expect(JSON.parse(screen.getByTestId('confirmation').getAttribute('data-usage')!)).toEqual(usage);
   });
 
   it('検証済み quote を最終確認へ渡し、確定操作でのみ purchase を呼ぶ', () => {
