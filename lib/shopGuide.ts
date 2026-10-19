@@ -93,7 +93,7 @@ const JA: ShopGuideContent = {
     },
     {
       title: 'お店がガス代を肩代わりして送る',
-      body: '店頭レジと、画面に表示した金額指定の決済QRで、お店の端末のガス用ウォレット（POL・KAIA・AVAX）がガス代を払う設定を選べます（JPYC・Polygon・Kaia・Avalanche のみ）。お客様は署名するだけで、OpenPay 利用料は 0 円（ガス代は実費・仕組み上 1 wei）。',
+      body: '店頭レジと、画面に表示した金額指定の決済QRで、お店の端末のガス用ウォレット (POL・KAIA・AVAX) がガス代を払う設定を選べます (JPYC・Polygon・Kaia・Avalanche のみ)。お客様は署名するだけで、OpenPay 利用料は 0 円 (ガス代は実費・仕組み上 1 wei)。',
     },
   ],
 

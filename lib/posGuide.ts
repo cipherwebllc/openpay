@@ -198,9 +198,9 @@ const ja: GuideContent = {
   costColCard: '一般的なカード決済',
   costColOpenpay: '無料 POS × OpenPay',
   costRows: [
-    { label: '決済手数料', card: '約 3% 程度（例）', openpay: '利用料 約 1%（最低 約 2 JPYC）・着金から自動差引（最新は利用規約参照）' },
+    { label: '決済手数料', card: '約 3% 程度 (例)', openpay: '利用料 約 1% (最低 約 2 JPYC)・着金から自動差引 (最新は利用規約参照)' },
     { label: '入金', card: '数日後・締めあり', openpay: '即時・直接あなたのウォレットへ' },
-    { label: '預かり', card: '決済会社が一旦預かる', openpay: 'ノンカストディ（誰も預からない）' },
+    { label: '預かり', card: '決済会社が一旦預かる', openpay: 'ノンカストディ (誰も預からない)' },
   ],
   costNote:
     '※手数料の最新・正確な条件は、利用規約・特定商取引法に基づく表記をご確認ください。比較は一般的な例で、契約条件により異なります。',
