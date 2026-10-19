@@ -283,6 +283,7 @@ export async function replaceHostedSellerProduct(input: {
     | 'details'
     | 'specs'
     | 'demoUrl'
+    | 'usage'
     | 'priceJpyc'
     | 'label'
     | 'category'
@@ -306,7 +307,7 @@ export async function replaceHostedSellerProduct(input: {
     return { ok: false, reason: 'forbidden' };
   }
   // 同じ tokenId に異なる経済条件/本文を混ぜず、登録前の販売開始も拒否する。
-  if (current.productKind === 'license' && (!licenseVisible(current) || input.content || input.metadata.priceJpyc !== current.priceJpyc || input.metadata.usdcEnabled || (input.metadata.saleActive && (current.registration?.status !== 'registered' || !licenseSellerAllowed(current.owner))))) return { ok: false, reason: 'forbidden' };
+  if (current.productKind === 'license' && (!licenseVisible(current) || input.content || input.metadata.priceJpyc !== current.priceJpyc || input.metadata.usdcEnabled || input.metadata.usage || (input.metadata.saleActive && (current.registration?.status !== 'registered' || !licenseSellerAllowed(current.owner))))) return { ok: false, reason: 'forbidden' };
   const revision = current.contentRevision + (input.content ? 1 : 0);
   const updatedAt = Math.max(
     input.now ?? Date.now(),
@@ -328,6 +329,7 @@ export async function replaceHostedSellerProduct(input: {
     ...(input.metadata.details ? { details: input.metadata.details } : {}),
     ...(input.metadata.specs?.length ? { specs: input.metadata.specs } : {}),
     ...(input.metadata.demoUrl ? { demoUrl: input.metadata.demoUrl } : {}),
+    ...(input.metadata.usage ? { usage: input.metadata.usage } : {}),
     priceJpyc: input.metadata.priceJpyc,
     contentKind: input.content?.kind ?? current.contentKind,
     label: input.metadata.label,

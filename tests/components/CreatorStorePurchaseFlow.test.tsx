@@ -121,7 +121,7 @@ vi.mock('@/components/CreatorStorePurchaseConfirmation', () => ({
     onBack,
     onConfirm,
   }: {
-    product?: { sellerRole?: string };
+    product?: { sellerRole?: string; usage?: unknown };
     priceJpyc: string;
     feeJpyc: string;
     totalJpyc: string;
@@ -132,7 +132,7 @@ vi.mock('@/components/CreatorStorePurchaseConfirmation', () => ({
     onBack: () => void;
     onConfirm: () => void;
   }) => (
-    <div data-testid="confirmation" data-seller-role={product?.sellerRole}>
+    <div data-testid="confirmation" data-seller-role={product?.sellerRole} data-usage={product?.usage ? JSON.stringify(product.usage) : undefined}>
       <span>
         {rail === 'usdc'
           ? `usdc:${priceJpyc}/${paidUsdc}`
@@ -256,6 +256,22 @@ describe('CreatorStorePurchaseFlow', () => {
     expect(container.querySelector('dl')).toBeNull();
     expect(screen.queryByRole('heading', { name: '仕様' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: '実際に試す' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: '利用条件' })).not.toBeInTheDocument();
+  });
+
+  it.each(['ja', 'en'] as const)('利用条件は 3 行とも出し、選ばれていない項目は「記載なし」・補足と注記を添える (%s)', (locale) => {
+    state.phase = 'idle';
+    state.quote = null;
+    renderFlow(locale, { ...PRODUCT, usage: { commercial: 'allowed', redistribute: 'not_allowed', note: 'クレジット表記をお願いします' } });
+    const section = screen.getByRole('heading', { name: locale === 'ja' ? '利用条件' : 'Usage terms' }).closest('section')!;
+    expect([...section.querySelectorAll('dt')].map((node) => node.textContent)).toEqual(
+      locale === 'ja' ? ['商用利用', '改変', '再配布・再販売', '補足'] : ['Commercial use', 'Modification', 'Redistribution and resale', 'Notes'],
+    );
+    expect([...section.querySelectorAll('dd')].map((node) => node.textContent)).toEqual(
+      locale === 'ja' ? ['可', '記載なし', '不可', 'クレジット表記をお願いします'] : ['Allowed', 'Not stated', 'Not allowed', 'クレジット表記をお願いします'],
+    );
+    expect(section).toHaveTextContent(locale === 'ja' ? 'OpenPay は内容の正確性を確認・保証しません' : 'OpenPay does not check or guarantee their accuracy');
+    expect(state.hookInput).not.toHaveProperty('usage');
   });
 
   it('開始画面でメイン画像を表示し、サムネイルで切替・読込失敗時に fallback する', () => {
@@ -430,6 +446,20 @@ describe('CreatorStorePurchaseFlow', () => {
     expect(screen.getByTestId('confirmation')).toHaveTextContent(
       'usdc:100/0.67',
     );
+  });
+
+  // Codex レビュー P3: 購入モーダルの利用条件が、署名直前の確認画面 (両レール) まで届くことを固定する。
+  // 欠けると確認画面だけ既定の「私的利用に限り再配布不可」に戻り、モーダルと食い違う。
+  it.each(['jpyc', 'usdc'] as const)('利用条件を最終確認へそのまま渡す (%s)', (rail) => {
+    const usage = { commercial: 'allowed', modify: 'not_allowed', note: 'クレジット表記をお願いします' } as const;
+    if (rail === 'usdc') {
+      state.quote = {
+        rail: 'usdc', chainId: 8453, priceJpyc: '100', paidUsdc: '0.67', merchant: PRODUCT.merchant,
+        payment: { quote: { rateScaled: '150000000', rateFetchedAt: 1_800_000_000_000, fxQuoteExpiresAt: 1_800_000_180_000 } },
+      };
+    }
+    renderFlow('ja', { ...PRODUCT, usage, ...(rail === 'usdc' ? { usdcEnabled: true as const } : {}) });
+    expect(JSON.parse(screen.getByTestId('confirmation').getAttribute('data-usage')!)).toEqual(usage);
   });
 
   it('検証済み quote を最終確認へ渡し、確定操作でのみ purchase を呼ぶ', () => {

@@ -9,6 +9,7 @@ import 'server-only';
 import { getAddress, isAddress, type Address } from 'viem';
 import { LABELS, type HostedLabel } from '@/lib/x402/storeWire';
 import { parseDeliveryUrl } from '@/lib/store/deliveryUrl';
+import { isUsagePermission, MAX_USAGE_NOTE_LEN, USAGE_PERMISSION_KEYS, type StoreUsageTerms } from '@/lib/store/usageTerms';
 import { LICENSE_DEFAULT_INSTRUCTIONS, parseLicenseDefinition, parseLicenseRegistration, parseLicenseCreationTerms, type LicenseDefinition, type LicenseRegistration, type LicenseTermsInput } from '@/lib/license/definition';
 import { licenseDeployment, licenseSellerAllowed } from '@/lib/license/config';
 import { isValidHandleFormat, normalizeHandle } from '@/lib/handle';
@@ -64,6 +65,8 @@ export type HostedProduct = {
   details?: string;
   specs?: readonly { label: string; value: string }[];
   demoUrl?: string;
+  /** 出品者が選んだ利用条件 (表示専用・購入 snapshot 非対象・license 商品は持たない)。lib/store/usageTerms。 */
+  usage?: StoreUsageTerms;
   /** human JPYC 整数の文字列 (売り手受領額。買い手は別途 x402 手数料を上乗せ)。 */
   priceJpyc: string;
   contentKind: HostedContentKind;
@@ -151,6 +154,30 @@ function parseDetails(raw: unknown): string | undefined {
   return [...cleaned].length <= MAX_HOSTED_DETAILS_LEN ? cleaned : undefined;
 }
 
+/**
+ * 利用条件。選ばなかった項目 (未指定・null・'') は保存しない。項目が 1 つも無ければ usage ごと持たない。
+ * invalid = 不正な値があった — 出品入力は拒否し、KV 読込は不正な項目だけ落とす (仕様表と同じ寛容読込)。
+ */
+function parseUsage(raw: unknown): { usage?: StoreUsageTerms; invalid: boolean } {
+  if (raw === undefined || raw === null) return { invalid: false };
+  if (typeof raw !== 'object' || Array.isArray(raw)) return { invalid: true };
+  const r = raw as Record<string, unknown>;
+  let invalid = Object.keys(r).some((key) => key !== 'note' && !(USAGE_PERMISSION_KEYS as readonly string[]).includes(key));
+  const usage: StoreUsageTerms = {};
+  for (const key of USAGE_PERMISSION_KEYS) {
+    const value = r[key];
+    if (value === undefined || value === null || value === '') continue;
+    if (isUsagePermission(value)) usage[key] = value;
+    else invalid = true;
+  }
+  if (r.note !== undefined && r.note !== null && r.note !== '') {
+    const note = sanitizeLine(r.note, MAX_USAGE_NOTE_LEN);
+    if (note) usage.note = note;
+    else invalid = true;
+  }
+  return { ...(Object.keys(usage).length ? { usage } : {}), invalid };
+}
+
 function parseSpec(raw: unknown): { label: string; value: string } | undefined {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
   const row = raw as Record<string, unknown>;
@@ -215,6 +242,7 @@ export type HostedProductInput = {
   details?: unknown;
   specs?: unknown;
   demoUrl?: unknown;
+  usage?: unknown;
   priceJpyc: unknown;
   contentKind: unknown;
   label?: unknown;
@@ -319,6 +347,9 @@ export function parseHostedInput(input: HostedProductInput): ParsedHostedInput {
   }
   const demoUrl = parseOptionalDisplayUrl(input.demoUrl);
   if (demoUrl === undefined) return { ok: false, error: 'invalid demoUrl' };
+  // license 商品は専用の利用条件 (standard-v1 / termsUrl) を持つので、二重の表示を作らない。
+  const usage = parseUsage(input.usage);
+  if (usage.invalid || (isLicense && usage.usage)) return { ok: false, error: 'invalid usage' };
 
   if (typeof input.priceJpyc !== 'string' || !DECIMAL_RE.test(input.priceJpyc)) {
     return { ok: false, error: 'invalid price' };
@@ -409,6 +440,7 @@ export function parseHostedInput(input: HostedProductInput): ParsedHostedInput {
       ...(details ? { details } : {}),
       ...(specs.length ? { specs } : {}),
       ...(demoUrl ? { demoUrl } : {}),
+      ...(usage.usage ? { usage: usage.usage } : {}),
       priceJpyc: price.toString(),
       contentKind,
       label,
@@ -496,6 +528,7 @@ export function parseStoredHostedProduct(raw: unknown): HostedProduct | null {
       if (row) specs.push(row);
     }
   }
+  const usage = r.productKind === 'license' ? undefined : parseUsage(r.usage).usage;
   // category/tags: 不正値は落として商品自体は残す (emoji と同じ寛容読込)。
   const category = isHostedProductCategory(r.category) ? r.category : undefined;
   const storedTags = parseHostedTags(r.tags);
@@ -517,6 +550,7 @@ export function parseStoredHostedProduct(raw: unknown): HostedProduct | null {
     ...(details ? { details } : {}),
     ...(specs.length ? { specs } : {}),
     ...(demoUrl ? { demoUrl } : {}),
+    ...(usage ? { usage } : {}),
     priceJpyc: r.priceJpyc,
     contentKind: r.contentKind,
     label,

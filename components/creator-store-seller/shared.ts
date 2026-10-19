@@ -3,6 +3,7 @@
 import type { HostedLabel } from '@/lib/x402/hostedStore';
 import type { StoreLicenseProduct } from '@/lib/licenseUi';
 import type { LicenseFormFields } from '@/components/CreatorStoreLicenseFields';
+import type { StoreUsageTerms, UsagePermission } from '@/lib/store/usageTerms';
 
 export type ProductSummary = StoreLicenseProduct & {
   registration?: { status: 'pending' | 'registered' | 'failed' };
@@ -17,6 +18,7 @@ export type ProductSummary = StoreLicenseProduct & {
   details?: string;
   specs?: readonly { label: string; value: string }[];
   demoUrl?: string;
+  usage?: StoreUsageTerms;
   priceJpyc: string;
   contentKind: 'url' | 'text';
   label: HostedLabel;
@@ -54,6 +56,11 @@ export type ProductForm = LicenseFormFields & {
   details: string;
   specs: string;
   demoUrl: string;
+  /** 利用条件の選択。'' = 記載しない。 */
+  usageCommercial: UsagePermission | '';
+  usageModify: UsagePermission | '';
+  usageRedistribute: UsagePermission | '';
+  usageNote: string;
   priceJpyc: string;
   contentKind: 'url' | 'text';
   label: HostedLabel;

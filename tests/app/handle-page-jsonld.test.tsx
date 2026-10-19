@@ -344,6 +344,7 @@ describe('@handle ProfilePage JSON-LD', () => {
         details: '内容物\n使い方',
         specs: [{ label: '形式', value: 'GLB' }],
         demoUrl: 'https://example.com/demo',
+        usage: { commercial: 'allowed', note: 'クレジット表記をお願いします' },
         imageUrl: 'https://cdn.example.com/product.png',
         galleryUrls: [
           'https://cdn.example.com/product-side.png',
@@ -375,6 +376,7 @@ describe('@handle ProfilePage JSON-LD', () => {
         details: '内容物\n使い方',
         specs: [{ label: '形式', value: 'GLB' }],
         demoUrl: 'https://example.com/demo',
+        usage: { commercial: 'allowed', note: 'クレジット表記をお願いします' },
         imageUrl: 'https://cdn.example.com/product.png',
         galleryUrls: [
           'https://cdn.example.com/product-side.png',

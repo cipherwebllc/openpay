@@ -42,6 +42,7 @@ import {
   MAX_HOSTED_TITLE_LEN,
 } from '@/lib/x402/hostedStore';
 import { STORE_INDEX_MAX_IDS } from '@/lib/x402/storeIndex';
+import { MAX_USAGE_NOTE_LEN } from '@/lib/store/usageTerms';
 
 /** 入力の上限いっぱい・エスケープで膨らむ文字 (\) だけで作った、いちばん重い掲載。 */
 function heaviest(n: number): StoreListing {
@@ -62,6 +63,8 @@ function heaviest(n: number): StoreListing {
       label: heavy(MAX_HOSTED_SPEC_LABEL_LEN),
       value: heavy(MAX_HOSTED_SPEC_VALUE_LEN),
     })),
+    // 利用条件は落とさない (小さく、買う判断に直接かかわる)。上限いっぱいでも予算に収まることを下で固定する。
+    usage: { commercial: 'not_allowed', modify: 'not_allowed', redistribute: 'not_allowed', note: heavy(MAX_USAGE_NOTE_LEN) },
   } as StoreListing;
 }
 
@@ -113,6 +116,7 @@ describe('fitStoreListingsForCache', () => {
     expect(fitted.listings).toHaveLength(STORE_INDEX_MAX_IDS);
     expect(fitted.listings.map((listing) => listing.id)).toEqual(listings.map((listing) => listing.id));
     expect(fitted.listings.every((listing) => listing.priceJpyc === '1000000' && listing.handle === 'shop')).toBe(true);
+    expect(fitted.listings.every((listing) => listing.usage?.note?.length === MAX_USAGE_NOTE_LEN)).toBe(true);
   });
 
   it('予算内なら何も落とさない (詳細も残す)', () => {

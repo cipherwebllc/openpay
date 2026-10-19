@@ -10,10 +10,17 @@ import { useTranslations } from 'next-intl';
 import Link from 'next/link';
 import { env } from '@/lib/env';
 import { DELIVERY_FORMATS, deliveryFormatFields, type DeliveryFormatId } from '@/lib/store/deliveryFormat';
+import { MAX_USAGE_NOTE_LEN, type UsagePermission } from '@/lib/store/usageTerms';
 import { HOSTED_PRODUCT_CATEGORIES } from '@/lib/x402/storeMeta';
 import { CreatorStoreLicenseFields } from '@/components/CreatorStoreLicenseFields';
 import { errorCode, errorDetailKey, errorMessageKey } from './request';
 import { inputClass, type EditingProductState, type MutationView, type ProductForm } from './shared';
+
+const USAGE_FIELDS = [
+  { field: 'usageCommercial', labelKey: 'usageCommercialLabel' },
+  { field: 'usageModify', labelKey: 'usageModifyLabel' },
+  { field: 'usageRedistribute', labelKey: 'usageRedistributeLabel' },
+] as const;
 
 type Props = {
   productForm: ProductForm;
@@ -287,6 +294,41 @@ export function ProductEditorSection({
               />
               <p id="creator-store-product-demo-url-hint" className="mt-1 text-xs text-slate-500">{t('demoUrlHint')}</p>
             </div>
+            {/* license 商品は専用の利用条件 (standard-v1 / termsUrl) を持つので、この欄は出さない。 */}
+            {isLicense ? null : (
+              <fieldset className="sm:col-span-2" aria-describedby="creator-store-product-usage-hint">
+                <legend className="text-sm font-medium text-slate-700">{t('usageLegend')}</legend>
+                <p id="creator-store-product-usage-hint" className="mt-1 text-xs text-slate-500">{t('usageHint')}</p>
+                <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                  {USAGE_FIELDS.map(({ field, labelKey }) => (
+                    <label key={field} htmlFor={`creator-store-product-${field}`} className="block text-sm text-slate-700">
+                      {t(labelKey)}
+                      <select
+                        id={`creator-store-product-${field}`}
+                        value={productForm[field]}
+                        onChange={(event) => updateProduct({ [field]: event.target.value as UsagePermission | '' })}
+                        className={inputClass}
+                      >
+                        <option value="">{t('usageChoiceUnset')}</option>
+                        <option value="allowed">{t('usageChoiceAllowed')}</option>
+                        <option value="not_allowed">{t('usageChoiceNotAllowed')}</option>
+                      </select>
+                    </label>
+                  ))}
+                </div>
+                <label htmlFor="creator-store-product-usage-note" className="mt-3 block text-sm text-slate-700">
+                  {t('usageNoteLabel')}
+                  <input
+                    id="creator-store-product-usage-note"
+                    type="text"
+                    maxLength={MAX_USAGE_NOTE_LEN}
+                    value={productForm.usageNote}
+                    onChange={(event) => updateProduct({ usageNote: event.target.value })}
+                    className={inputClass}
+                  />
+                </label>
+              </fieldset>
+            )}
             <label
               htmlFor="creator-store-product-image-url"
               className="block text-sm font-medium text-slate-700"

@@ -104,6 +104,11 @@ describe('license product foundation', () => {
     expect(await edit(p.id, { priceJpyc: '2000' })).toMatchObject({ ok: false });
     expect(await edit(p.id, { usdcEnabled: true })).toMatchObject({ ok: false });
     expect(await edit(p.id, {}, { kind: 'text', value: 'new' })).toMatchObject({ ok: false });
+    // license 商品は専用の利用条件 (standard-v1 / termsUrl) を持つ。普通の商品の「利用条件」の欄は作成・更新・読込のどこでも持たない。
+    expect(await edit(p.id, { usage: { commercial: 'allowed' } })).toMatchObject({ ok: false });
+    expect(parseHostedInput({ ...base, usage: { commercial: 'allowed' } })).toEqual({ ok: false, error: 'invalid usage' });
+    expect(parseHostedInput({ ...base, usage: null }).ok).toBe(true);
+    expect(parseStoredHostedProduct(JSON.stringify({ ...p, usage: { commercial: 'allowed' } }))).not.toHaveProperty('usage');
     const snapshot = await getHostedProductUpdateSnapshot(p.id); if (!snapshot || snapshot === 'storage') throw new Error('no snapshot');
     const update = await replaceHostedSellerProduct({ snapshot, owner: OWNER, metadata: { ...p, title: 'Cosmetic edit', imageUrl: 'https://seller.example/cover.png' } });
     expect(update).toMatchObject({ ok: true, product: { title: 'Cosmetic edit', license: p.license, registration: p.registration } });

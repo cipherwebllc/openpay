@@ -195,8 +195,8 @@ describe('CreatorStoreSellerPanel', () => {
       expect(field).not.toBeRequired();
       expect(field.closest('form')).toBe(screen.getByLabelText('商品名').closest('form'));
     }
-    // 任意の表示メタ (詳しい説明・仕様・実際に試せる URL) もこの折りたたみに入る = 第 1 ブロックを伸ばさない
-    expect(details.querySelectorAll('input, select, textarea')).toHaveLength(8);
+    // 任意の表示メタ (詳しい説明・仕様・実際に試せる URL・利用条件の 3 つの選択と補足) もこの折りたたみに入る = 第 1 ブロックを伸ばさない
+    expect(details.querySelectorAll('input, select, textarea')).toHaveLength(12);
     fireEvent.click(summary);
     expect(screen.getByLabelText('画像 URL (任意)')).toBeVisible();
     fireEvent.click(summary);
@@ -416,6 +416,7 @@ describe('CreatorStoreSellerPanel', () => {
     ['invalid details', /詳しい説明は最大 2,000 字/],
     ['invalid specs', /仕様は最大 8 行/],
     ['invalid demoUrl', /実際に試せる URL は https/],
+    ['invalid usage', /利用条件の補足は 200 字以内の 1 行/],
     ['invalid imageUrl', /画像 URL は https:\/\//],
     ['invalid deliveryUrl', /保護配布先は https:\/\//],
     ['too many gallery images', /追加画像は最大 4 枚/],
@@ -967,10 +968,13 @@ describe('利用ライセンスの出品', () => {
     fireEvent.change(screen.getByLabelText('利用条件 URL（https）'), { target: { value: 'http://invalid.example' } });
     fireEvent.change(screen.getByLabelText('利用条件のバージョン (例: v1)'), { target: { value: 'custom-v9' } });
     fireEvent.click(standard);
+    // license 商品は専用の利用条件を持つので、普通の商品の「利用条件」の欄は出さない。
+    expect(screen.queryByRole('group', { name: '利用条件 (任意)' })).not.toBeInTheDocument();
     fireEvent.submit(screen.getByLabelText('ライセンス名').closest('form')!);
     await screen.findByText('登録状態: 登録待ち');
     const request = fetchMock.mock.calls.find(([, init]) => init?.method === 'POST');
     expect(JSON.parse(String(request?.[1]?.body)).license).toEqual({ supply: 10, transferable: false, termsPreset: 'standard-v1' });
+    expect(JSON.parse(String(request?.[1]?.body))).not.toHaveProperty('usage');
   });
   it('English form shows the same choices, version label and help', async () => {
     setup(); renderPanel(undefined, 'en');
@@ -1041,7 +1045,8 @@ describe('利用ライセンスの出品', () => {
     await waitFor(() => expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'PATCH')).toHaveLength(2));
     const body = JSON.parse(String(fetchMock.mock.calls.filter(([, init]) => init?.method === 'PATCH')[1][1]?.body));
     expect(body.title).toBe('更新した名前');
-    for (const key of ['license', 'priceJpyc', 'contentKind', 'content', 'productKind', 'payTo']) expect(body).not.toHaveProperty(key);
+    // license 商品は専用の利用条件を持つので、普通の商品の「利用条件」の欄は送らない (server も拒否する)。
+    for (const key of ['license', 'priceJpyc', 'contentKind', 'content', 'productKind', 'payTo', 'usage']) expect(body).not.toHaveProperty(key);
   });
   it('ライセンス flag OFF はタイプ選択とライセンス商品を表示しない', async () => {
     setup('registered'); state.licenseEnabled = false; renderPanel();
@@ -1117,6 +1122,7 @@ describe('商品詳細フォーム', () => {
   function setup(existing = false) {
     const product = { id: 'h_' + 'b'.repeat(32), payTo: ADDRESS, title: '詳細付き商品', priceJpyc: '5000', contentKind: 'url', label: 'download', saleActive: false, contentAvailable: true,
       details: '内容物\n使い方', specs: [{ label: '形式', value: 'GLB' }, { label: 'サイズ', value: '12 MB' }], demoUrl: 'https://example.com/demo',
+      usage: { commercial: 'allowed', modify: 'not_allowed', note: 'クレジット表記をお願いします' },
     };
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (url === '/api/store/seller') return response({ ok: true, seller: null });
@@ -1187,6 +1193,51 @@ describe('商品詳細フォーム', () => {
     await waitFor(() => expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'PATCH')).toBe(true));
     const payload = JSON.parse(String(fetchMock.mock.calls.find(([, init]) => init?.method === 'PATCH')?.[1]?.body));
     expect(payload).toMatchObject({ details: null, specs: null, demoUrl: null });
+  });
+
+  it.each([false, true])('利用条件は「見せ方」の中で選び、選ばなければ null・選んだ項目と補足だけを送る (filled=%s)', async (filled) => {
+    const { fetchMock } = setup();
+    renderPanel();
+    await screen.findByText(/商品はまだありません/);
+    fireEvent.change(screen.getByLabelText('商品名'), { target: { value: '新商品' } });
+    fireEvent.change(screen.getByLabelText('価格 (JPYC)'), { target: { value: '5000' } });
+    fireEvent.change(screen.getByLabelText('提供する URL'), { target: { value: 'https://example.com/download' } });
+    fireEvent.click(screen.getByText('2. 見せ方 (任意)'));
+    const group = screen.getByRole('group', { name: '利用条件 (任意)' });
+    expect(group).toHaveAccessibleDescription(/選ばなかった項目は「記載なし」と表示します/);
+    for (const label of ['商用利用', '改変', '再配布・再販売']) {
+      const select = within(group).getByLabelText(label);
+      expect(select).toHaveValue('');
+      expect([...select.querySelectorAll('option')].map((option) => option.textContent)).toEqual(['記載しない', '可', '不可']);
+    }
+    expect(within(group).getByLabelText(/^補足/)).toHaveAttribute('maxLength', '200');
+    if (filled) {
+      fireEvent.change(within(group).getByLabelText('商用利用'), { target: { value: 'allowed' } });
+      fireEvent.change(within(group).getByLabelText('再配布・再販売'), { target: { value: 'not_allowed' } });
+      fireEvent.change(within(group).getByLabelText(/^補足/), { target: { value: ' クレジット表記をお願いします ' } });
+    }
+    fireEvent.submit(screen.getByLabelText('商品名').closest('form')!);
+    await waitFor(() => expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(true));
+    const payload = JSON.parse(String(fetchMock.mock.calls.find(([, init]) => init?.method === 'POST')?.[1]?.body));
+    expect(payload.usage).toEqual(filled ? { commercial: 'allowed', redistribute: 'not_allowed', note: 'クレジット表記をお願いします' } : null);
+  });
+
+  it('編集時に利用条件を復元し、全部「記載しない」に戻すと null で消す', async () => {
+    const { fetchMock } = setup(true);
+    renderPanel();
+    fireEvent.click(await screen.findByRole('button', { name: '編集' }));
+    await screen.findByRole('heading', { name: '商品を編集' });
+    const group = screen.getByRole('group', { name: '利用条件 (任意)' });
+    expect(within(group).getByLabelText('商用利用')).toHaveValue('allowed');
+    expect(within(group).getByLabelText('改変')).toHaveValue('not_allowed');
+    expect(within(group).getByLabelText('再配布・再販売')).toHaveValue('');
+    expect(within(group).getByLabelText(/^補足/)).toHaveValue('クレジット表記をお願いします');
+    for (const label of ['商用利用', '改変']) fireEvent.change(within(group).getByLabelText(label), { target: { value: '' } });
+    fireEvent.change(within(group).getByLabelText(/^補足/), { target: { value: '  ' } });
+    fireEvent.submit(screen.getByLabelText('商品名').closest('form')!);
+    await waitFor(() => expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'PATCH')).toBe(true));
+    const payload = JSON.parse(String(fetchMock.mock.calls.find(([, init]) => init?.method === 'PATCH')?.[1]?.body));
+    expect(payload.usage).toBeNull();
   });
 
   it('コロンなし・空ラベル・空値の行を黙って捨てず、server 検証に渡す', async () => {

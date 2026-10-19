@@ -9,13 +9,17 @@ import { ArrowLeft, ExternalLink, ReceiptText } from 'lucide-react';
 import { env } from '@/lib/env';
 import type { StoreLicenseProduct } from '@/lib/licenseUi';
 import { CreatorStoreLicenseDisclosures } from '@/components/CreatorStoreLicenseDisclosures';
+import { CreatorStoreUsageTerms } from '@/components/CreatorStoreUsageTerms';
 import { SignReassurance } from '@/components/SignReassurance';
 import type { JpycRecoverSignPreview } from '@/lib/signPreview';
+import type { StoreUsageTerms } from '@/lib/store/usageTerms';
 
 type CreatorStorePurchaseConfirmationCommonProps = {
   product: StoreLicenseProduct & {
     title: string;
     description?: string;
+    /** 出品者が選んだ利用条件。あれば「利用許諾」の行を既定文から置き換える。 */
+    usage?: StoreUsageTerms;
   };
   sellerDisclosureHref: string;
   supportHref: string;
@@ -239,7 +243,7 @@ export function CreatorStorePurchaseConfirmation(
                 {t('licenseLabel')}
               </dt>
               <dd className="mt-1 text-sm leading-relaxed text-slate-700">
-                {t('licenseValue')}
+                {product.usage ? <CreatorStoreUsageTerms usage={product.usage} variant="summary" /> : t('licenseValue')}
               </dd>
             </div>
             <div className="py-3">

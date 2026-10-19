@@ -89,6 +89,7 @@ describe('listStoreListings', () => {
         details: '詳しい説明',
         specs: [{ label: '形式', value: 'PDF' }],
         demoUrl: 'https://example.com/demo',
+        usage: { commercial: 'allowed', note: 'クレジット表記をお願いします' },
       }),
       product('h_2', OWNER_A, { contentKind: 'url', label: 'download', specs: [] }),
     ];
@@ -99,13 +100,14 @@ describe('listStoreListings', () => {
       details: '詳しい説明',
       specs: [{ label: '形式', value: 'PDF' }],
       demoUrl: 'https://example.com/demo',
+      usage: { commercial: 'allowed', note: 'クレジット表記をお願いします' },
     });
     // 無いもの・空の仕様表は運ばない
     expect(out[1].contentKind).toBe('url');
-    expect(['details', 'specs', 'demoUrl'].filter((key) => key in out[1])).toEqual([]);
+    expect(['details', 'specs', 'demoUrl', 'usage'].filter((key) => key in out[1])).toEqual([]);
     // /store のカード (client) にはどれも渡さない (HTML を太らせない)
     for (const card of out.map(m.toStoreCardListing)) {
-      expect(['contentKind', 'details', 'specs', 'demoUrl'].filter((key) => key in card)).toEqual([]);
+      expect(['contentKind', 'details', 'specs', 'demoUrl', 'usage'].filter((key) => key in card)).toEqual([]);
       expect(card.id).toBeTruthy();
     }
   });

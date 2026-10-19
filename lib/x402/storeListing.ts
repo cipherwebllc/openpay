@@ -43,6 +43,8 @@ export type StoreListing = {
   details?: string;
   specs?: readonly { label: string; value: string }[];
   demoUrl?: string;
+  /** 出品者が選んだ利用条件 (同上・表示専用)。 */
+  usage?: HostedProduct['usage'];
   category?: string;
   tags?: readonly string[];
   /** 出品者の公開 handle (先頭 1 件)。カードの遷移先 /@handle?product=id に使う。 */
@@ -55,11 +57,11 @@ export type StoreListing = {
 };
 
 /** /store のカード (client) に渡す形。AI 向けの表示専用の詳細は渡さない。 */
-export type StoreCardListing = Omit<StoreListing, 'contentKind' | 'details' | 'specs' | 'demoUrl'>;
+export type StoreCardListing = Omit<StoreListing, 'contentKind' | 'details' | 'specs' | 'demoUrl' | 'usage'>;
 
 /** /store のカードへ渡す前に、カードに要らない AI 向けの詳細を落とす (/store の HTML を増やさない)。 */
 export function toStoreCardListing(listing: StoreListing): StoreCardListing {
-  const { contentKind: _contentKind, details: _details, specs: _specs, demoUrl: _demoUrl, ...card } = listing;
+  const { contentKind: _contentKind, details: _details, specs: _specs, demoUrl: _demoUrl, usage: _usage, ...card } = listing;
   return card;
 }
 
@@ -135,6 +137,7 @@ export async function listStoreListings(): Promise<StoreListing[] | null> {
       ...(product.details ? { details: product.details } : {}),
       ...(product.specs?.length ? { specs: product.specs } : {}),
       ...(product.demoUrl ? { demoUrl: product.demoUrl } : {}),
+      ...(product.usage ? { usage: product.usage } : {}),
       ...(product.category ? { category: product.category } : {}),
       ...(product.tags ? { tags: product.tags } : {}),
       handle,

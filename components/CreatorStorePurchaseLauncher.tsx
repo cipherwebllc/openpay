@@ -9,6 +9,7 @@ import { useTranslations } from 'next-intl';
 import { env } from '@/lib/env';
 import type { Address } from 'viem';
 import type { StoreLicenseProduct } from '@/lib/licenseUi';
+import type { StoreUsageTerms } from '@/lib/store/usageTerms';
 
 const CreatorStorePurchaseFlow = dynamic(
   () =>
@@ -29,6 +30,7 @@ export type CreatorStorePurchaseLauncherProps = {
     details?: string;
     specs?: readonly { label: string; value: string }[];
     demoUrl?: string;
+    usage?: StoreUsageTerms;
     priceJpyc: string;
     merchant: Address;
     usdcEnabled?: true;

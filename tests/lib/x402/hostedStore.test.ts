@@ -1037,6 +1037,7 @@ describe('商品詳細メタ: レビュー指摘の固定', () => {
     const plain = parseHostedInput(baseInput({}));
     const rich = parseHostedInput(baseInput({
       details: '内容物', specs: [{ label: '形式', value: 'GLB' }], demoUrl: 'https://example.com/demo',
+      usage: { commercial: 'allowed', modify: 'not_allowed', redistribute: 'not_allowed', note: '補足' },
       imageUrl: 'https://example.com/a.png', galleryUrls: ['https://example.com/b.png'], tags: ['3d'], category: '3d-game',
     }));
     if (!plain.ok || !rich.ok) throw new Error('setup');
@@ -1050,7 +1051,7 @@ describe('商品詳細メタ: レビュー指摘の固定', () => {
 describe('商品詳細メタの保存と寛容読込', () => {
   it('作成・公開読込・編集・クリアを通じて保存し、購入 snapshot は不変', async () => {
     const m = await mod();
-    const details = { details: '内容物\n使い方', specs: [{ label: '形式', value: 'GLB' }], demoUrl: 'https://example.com/demo' };
+    const details = { details: '内容物\n使い方', specs: [{ label: '形式', value: 'GLB' }], demoUrl: 'https://example.com/demo', usage: { commercial: 'allowed' as const, note: 'クレジット表記をお願いします' } };
     const parsed = m.parseHostedInput(baseInput(details));
     if (!parsed.ok) throw new Error(parsed.error);
     const created = await m.createHostedProduct(parsed);
@@ -1059,7 +1060,7 @@ describe('商品詳細メタの保存と寛容読込', () => {
     expect(await m.listAvailableHostedForOwner(OWNER)).toEqual([expect.objectContaining(details)]);
     const purchase = m.hostedPurchaseMetadata(created.product);
     for (const key of Object.keys(details)) expect(purchase).not.toHaveProperty(key);
-    for (const metadata of [{ ...details, details: '更新後', specs: [{ label: 'サイズ', value: '12 MB' }], demoUrl: 'https://example.com/v2' }, {}]) {
+    for (const metadata of [{ ...details, details: '更新後', specs: [{ label: 'サイズ', value: '12 MB' }], demoUrl: 'https://example.com/v2', usage: { redistribute: 'not_allowed' as const } }, {}]) {
       const snapshot = await m.getHostedProductUpdateSnapshot(created.product.id);
       if (!snapshot || snapshot === 'storage') throw new Error('setup');
       const updated = await m.replaceHostedSellerProduct({ snapshot, owner: OWNER, metadata: {
@@ -1094,5 +1095,49 @@ describe('商品詳細メタの保存と寛容読込', () => {
       specs: [null, { label: '', value: 'bad' }, ...Array.from({ length: 9 }, () => row)],
     }));
     expect(product).toMatchObject({ details: 'A\nB', demoUrl: 'https://example.com/demo', specs: Array.from({ length: 8 }, () => ({ label: '形式', value: 'GLB' })) });
+  });
+});
+
+describe('利用条件 (usage・表示専用)', () => {
+  it('選んだ項目だけを保存し、選ばなかった項目・空の usage は持たない', async () => {
+    const { parseHostedInput } = await mod();
+    const all = { commercial: 'allowed', modify: 'not_allowed', redistribute: 'allowed', note: 'クレジット表記をお願いします' };
+    const parsed = parseHostedInput(baseInput({ usage: all }));
+    expect(parsed.ok && parsed.product.usage).toEqual(all);
+    const partial = parseHostedInput(baseInput({ usage: { commercial: 'not_allowed', modify: '', redistribute: null } }));
+    expect(partial.ok && partial.product.usage).toEqual({ commercial: 'not_allowed' });
+    for (const usage of [undefined, null, {}, { commercial: '', note: '' }, { modify: null, note: null }]) {
+      const empty = parseHostedInput(baseInput({ usage }));
+      expect(empty.ok).toBe(true);
+      if (empty.ok) expect(empty.product).not.toHaveProperty('usage');
+    }
+  });
+
+  it('補足は 1 行・制御文字除去・200 字まで。不正な値や未知の項目は拒否する', async () => {
+    const { parseHostedInput } = await mod();
+    const cleaned = parseHostedInput(baseInput({ usage: { note: ' 改行\r\nと\u200b制御\u0000文字 ' } }));
+    expect(cleaned.ok && cleaned.product.usage).toEqual({ note: '改行 と制御文字' });
+    expect(parseHostedInput(baseInput({ usage: { note: 'あ'.repeat(200) } })).ok).toBe(true);
+    for (const usage of [
+      { note: 'あ'.repeat(201) }, { note: ' \u0000 ' }, { note: 12 }, { commercial: 'yes' }, { commercial: true },
+      { modify: 'ALLOWED' }, { resale: 'allowed' }, 'allowed', ['allowed'], 1,
+    ]) {
+      expect(parseHostedInput(baseInput({ usage }))).toEqual({ ok: false, error: 'invalid usage' });
+    }
+  });
+
+  it('KV 読込: 不正な項目だけ落として商品と正しい項目は残す', async () => {
+    const m = await mod();
+    const parsed = m.parseHostedInput(baseInput());
+    if (!parsed.ok) throw new Error(parsed.error);
+    const valid = { ...parsed.product, id: 'h_' + 'b'.repeat(32), createdAt: 1 };
+    const mixed = m.parseStoredHostedProduct(JSON.stringify({ ...valid, usage: { commercial: 'allowed', modify: 'maybe', redistribute: 1, note: 'x'.repeat(201), extra: 'allowed' } }));
+    expect(mixed?.title).toBe(valid.title);
+    expect(mixed?.usage).toEqual({ commercial: 'allowed' });
+    for (const usage of ['allowed', [], { modify: 'maybe' }]) {
+      const product = m.parseStoredHostedProduct(JSON.stringify({ ...valid, usage }));
+      expect(product?.title).toBe(valid.title);
+      expect(product).not.toHaveProperty('usage');
+    }
   });
 });
