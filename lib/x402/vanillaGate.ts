@@ -133,7 +133,7 @@ export type PreparedAccepts = {
 };
 
 /** どの facilitator へ verify/settle を送るか。既定 (Base) は従来どおり CDP/payai。 */
-type FacilitatorRail = 'base' | 'arc-gateway';
+export type FacilitatorRail = 'base' | 'arc-gateway';
 
 function buildAcceptsCore(args: {
   resourceUrl: string;
@@ -172,22 +172,31 @@ function buildAccepts(resource: VanillaPaidResource): PreparedAccepts {
   // 503 に落とす波及を断つため (掟 6)。本物の config は常に {enabled:boolean} を持つ。
   const arc = x402Config.arcGateway;
   if (arc?.enabled !== true) return core;
-  // Arc accept: 同じ resource・同じ USD 価格を Arc USDC (6 桁) で。署名 domain は Gateway Wallet
-  // (USDC の domain ではない) なので extra に name/version/verifyingContract を載せる — Circle の
-  // client はこの extra から EIP-712 domain を組み立てる。有効期間は Gateway の下限 (3 日) を満たす 7 日+。
+  return { ...core, arc: arcAcceptFor(core, arc.payTo) };
+}
+
+/**
+ * Arc accept: 同じ resource・同じ USD 価格を Arc USDC (6 桁) で。署名 domain は Gateway Wallet
+ * (USDC の domain ではない) なので extra に name/version/verifyingContract を載せる — Circle の
+ * client はこの extra から EIP-712 domain を組み立てる。有効期間は Gateway の下限 (3 日) を満たす 7 日+。
+ * first-party (payTo = 自社) と dual-rail リレー (payTo = 出品者) が同一の生成規則を共有する。
+ * 呼び出し側が arcGateway.enabled を確認してから呼ぶ。
+ */
+function arcAcceptFor(core: PreparedAccepts, payTo: string): PaymentRequirementsV1 {
+  const arc = x402Config.arcGateway;
+  if (arc?.enabled !== true) {
+    throw new Error('arc gateway rail is not enabled');
+  }
   return {
-    ...core,
-    arc: {
-      ...core.v1,
-      network: arc.caip2,
-      payTo: arc.payTo,
-      asset: arc.usdc,
-      maxTimeoutSeconds: ARC_GATEWAY_MAX_TIMEOUT_SECONDS,
-      extra: {
-        name: 'GatewayWalletBatched',
-        version: '1',
-        verifyingContract: arc.gatewayWallet,
-      },
+    ...core.v1,
+    network: arc.caip2,
+    payTo,
+    asset: arc.usdc,
+    maxTimeoutSeconds: ARC_GATEWAY_MAX_TIMEOUT_SECONDS,
+    extra: {
+      name: 'GatewayWalletBatched',
+      version: '1',
+      verifyingContract: arc.gatewayWallet,
     },
   };
 }
@@ -196,14 +205,19 @@ function buildAccepts(resource: VanillaPaidResource): PreparedAccepts {
  * dual-rail リレー (出品者の USDC 面) 用: payTo を出品者受取先に差し替えた accepts。
  * first-party の buildAccepts と同一の生成規則 (asset/extra/network/期限) を共有し、
  * リレーと 402 表面の要件がずれる余地を残さない。設定不正 (network が base 系でない等) は throw。
+ * `arc: true` (リレーの Arc flag ON かつ出品者のオプトイン) のときだけ、Arc の面も出品者の
+ * payTo で付ける (Arc の rail 自体が無効なら付けない)。
  */
 export function buildRelayAccepts(args: {
   resourceUrl: string;
   description: string;
   price: string;
   payTo: string;
+  arc?: boolean;
 }): PreparedAccepts {
-  return buildAcceptsCore(args);
+  const core = buildAcceptsCore(args);
+  if (args.arc !== true || x402Config.arcGateway?.enabled !== true) return core;
+  return { ...core, arc: arcAcceptFor(core, args.payTo) };
 }
 
 function noStore(res: NextResponse): NextResponse {
@@ -359,6 +373,23 @@ export function decodeVanillaPaymentHeader(
 ): FacilitatorV1Body | null {
   if (headers.v2) return v2HeaderToBody(headers.v2, accepts);
   if (headers.v1) return v1HeaderToBody(headers.v1, accepts);
+  return null;
+}
+
+/**
+ * decodeVanillaPaymentHeader と同じ規則で、どの rail の accept に一致したかも返す
+ * (dual-rail リレーの Arc 面が使う)。v1 X-PAYMENT は常に Base (Gateway は v2 のみ)。
+ * 既存の decodeVanillaPaymentHeader の挙動は変えない。
+ */
+export function decodeVanillaPaymentHeaderWithRail(
+  headers: { v2: string | null; v1: string | null },
+  accepts: PreparedAccepts,
+): { body: FacilitatorV1Body; rail: FacilitatorRail } | null {
+  if (headers.v2) return v2HeaderToRailBody(headers.v2, accepts);
+  if (headers.v1) {
+    const body = v1HeaderToBody(headers.v1, accepts);
+    return body ? { body, rail: 'base' } : null;
+  }
   return null;
 }
 

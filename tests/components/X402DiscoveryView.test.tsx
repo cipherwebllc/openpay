@@ -23,7 +23,7 @@ vi.mock('@/components/ConnectButton', () => ({
   ConnectButton: () => <button type="button">ウォレットを接続</button>,
 }));
 // dual-rail UI flag だけ差し替え可能にする (他の env は実値)。既定 OFF = 従来描画。
-const envState = vi.hoisted(() => ({ enableX402DualRailUi: false }));
+const envState = vi.hoisted(() => ({ enableX402DualRailUi: false, enableX402DualRailArcUi: false }));
 vi.mock('@/lib/env', async (importOriginal) => {
   const mod = await importOriginal<typeof import('@/lib/env')>();
   return {
@@ -32,7 +32,9 @@ vi.mock('@/lib/env', async (importOriginal) => {
       get: (t, p) =>
         p === 'enableX402DualRailUi'
           ? envState.enableX402DualRailUi
-          : (t as Record<string | symbol, unknown>)[p],
+          : p === 'enableX402DualRailArcUi'
+            ? envState.enableX402DualRailArcUi
+            : (t as Record<string | symbol, unknown>)[p],
     }),
   };
 });
@@ -102,6 +104,7 @@ beforeEach(() => {
   state.address = undefined;
   state.signedIn = false;
   envState.enableX402DualRailUi = false;
+  envState.enableX402DualRailArcUi = false;
   // onEdit はフォームへ scrollIntoView する (jsdom 未実装)。
   Element.prototype.scrollIntoView = vi.fn();
   global.fetch = vi.fn(async () => ({
@@ -1053,6 +1056,84 @@ describe('X402DiscoveryView dual-rail USDC 面 (flag ゲート)', () => {
     );
     const sentBody = JSON.parse(String((postCall![1] as RequestInit).body));
     expect(sentBody.usdc).toEqual({ priceUsd: '0.01', serviceName: 'New API' });
+  });
+
+  async function fillUsdcForm() {
+    state.connected = true;
+    state.address = '0x2222222222222222222222222222222222222222';
+    state.signedIn = true;
+    const fetchFn = installRoutingFetch([]);
+    renderView();
+    fireEvent.change(await screen.findByPlaceholderText('https://api.example.jp/paid/weather'), {
+      target: { value: 'https://api.example.jp/paid/new' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('東京の 48 時間天気予報 (JSON)'), {
+      target: { value: '新しい有料 API' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('3'), { target: { value: '500' } });
+    fireEvent.click(
+      screen.getByRole('checkbox', { name: 'USDC (Base) でも販売する — x402 Bazaar に掲載' }),
+    );
+    fireEvent.change(screen.getByPlaceholderText('0.005'), { target: { value: '0.01' } });
+    return fetchFn;
+  }
+  const postedBody = (fetchFn: ReturnType<typeof installRoutingFetch>) => {
+    const call = fetchFn.mock.calls.find(
+      ([u, init]) =>
+        u === '/api/facilitator/resources' && (init as RequestInit | undefined)?.method === 'POST',
+    );
+    return JSON.parse(String((call![1] as RequestInit).body));
+  };
+
+  it('Arc UI flag OFF: USDC 欄が出ていても Arc 欄は出ない', async () => {
+    envState.enableX402DualRailUi = true;
+    await fillUsdcForm();
+    expect(screen.queryByRole('checkbox', { name: 'Arc (Circle Gateway) でも販売する' })).not.toBeInTheDocument();
+  });
+
+  it('Arc UI flag ON: Arc 欄が出てチェックすると usdc.arc:true が POST される', async () => {
+    envState.enableX402DualRailUi = true;
+    envState.enableX402DualRailArcUi = true;
+    const fetchOn = await fillUsdcForm();
+    const arc = screen.getByRole('checkbox', { name: 'Arc (Circle Gateway) でも販売する' });
+    // 説明文: 事前入金・引き出し・EOA・SDK 版は提示しない
+    expect(screen.getByText(/Circle Gateway Wallet への事前入金/)).toBeInTheDocument();
+    expect(screen.getByText(/EOA（通常のウォレット）/)).toBeInTheDocument();
+    expect(screen.getByText(/Circle Gateway Wallet への事前入金/)).toHaveTextContent(/openpay-x402-sdk/);
+    fireEvent.click(arc);
+    fireEvent.click(screen.getByRole('checkbox', { name: /正当な権利/ }));
+    fireEvent.click(screen.getByRole('button', { name: '登録する' }));
+    await waitFor(() => expect(fetchOn).toHaveBeenCalledWith('/api/facilitator/resources', expect.objectContaining({ method: 'POST' })));
+    expect(postedBody(fetchOn).usdc).toEqual({ priceUsd: '0.01', arc: true });
+  });
+
+  it('Arc 未チェックなら usdc に arc を含めない', async () => {
+    envState.enableX402DualRailUi = true;
+    envState.enableX402DualRailArcUi = true;
+    const fetchFn = await fillUsdcForm();
+    fireEvent.click(screen.getByRole('checkbox', { name: /正当な権利/ }));
+    fireEvent.click(screen.getByRole('button', { name: '登録する' }));
+    await waitFor(() => expect(fetchFn).toHaveBeenCalledWith('/api/facilitator/resources', expect.objectContaining({ method: 'POST' })));
+    expect(postedBody(fetchFn).usdc).toEqual({ priceUsd: '0.01' });
+  });
+
+  it('編集時は保存済みの arc を反映し、そのまま PATCH でも arc:true を送る', async () => {
+    const fetchFn = renderAsOwner([
+      { ...USDC_OWNED, usdc: { ...USDC_OWNED.usdc, arc: true } } as typeof USDC_OWNED,
+    ]);
+    fireEvent.click(await screen.findByRole('button', { name: '編集' }));
+    expect(screen.getByRole('checkbox', { name: 'Arc (Circle Gateway) でも販売する' })).toBeChecked();
+    fireEvent.click(screen.getByRole('button', { name: '更新する' }));
+    await waitFor(() =>
+      expect(fetchFn).toHaveBeenCalledWith(
+        `/api/facilitator/resources/${USDC_OWNED.id}`,
+        expect.objectContaining({ method: 'PATCH' }),
+      ),
+    );
+    const call = fetchFn.mock.calls.find(
+      ([u, init]) => String(u).startsWith('/api/facilitator/resources/') && (init as RequestInit | undefined)?.method === 'PATCH',
+    );
+    expect(JSON.parse(String((call![1] as RequestInit).body)).usdc.arc).toBe(true);
   });
 
   it('flag OFF でも既存の USDC 面は編集 (PATCH) で黙って消えない (prefill 維持)', async () => {

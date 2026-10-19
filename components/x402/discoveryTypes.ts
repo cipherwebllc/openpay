@@ -57,5 +57,5 @@ export type OwnedResource = {
   /** 定期再検証の状態。authFailures は 401/403/別ドメイン転送の連続回数 (欠落 = 0)。 */
   verification?: { authFailures?: number };
   /** dual-rail の USDC/Base 面 (任意)。 */
-  usdc?: { payTo: string; priceUsd: string; serviceName?: string };
+  usdc?: { payTo: string; priceUsd: string; serviceName?: string; arc?: boolean };
 };

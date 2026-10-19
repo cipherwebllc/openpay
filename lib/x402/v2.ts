@@ -180,7 +180,7 @@ export function isPaymentPayloadV2(value: unknown): value is PaymentPayloadV2 {
   );
 }
 
-function deepStrictEqual(a: unknown, b: unknown): boolean {
+export function deepStrictEqual(a: unknown, b: unknown): boolean {
   if (Object.is(a, b)) return true;
 
   if (Array.isArray(a) || Array.isArray(b)) {

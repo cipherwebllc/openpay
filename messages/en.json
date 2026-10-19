@@ -3163,6 +3163,8 @@
     "formUsdcPayToHint": "Leave blank to receive at the same address as JPYC.",
     "formUsdcServiceNameLabel": "Display name (for Bazaar search, optional)",
     "formUsdcServiceName": "e.g. Weather Forecast API",
+    "formUsdcArcEnable": "Also sell on Arc (Circle Gateway)",
+    "formUsdcArcHint": "Buyers must pre-deposit into a Circle Gateway Wallet. Revenue lands in the Gateway balance of your receiving address and must be withdrawn. The receiving address must be an EOA (a regular wallet) — a contract wallet may be unable to withdraw. Listings served by the SDK (openpay-x402-sdk) do not offer Arc (the x402-jpyc-gateway version is required). The Bazaar listing is on the Base side.",
     "errorUsdcPrice": "Invalid USDC price. Enter digits without a $ sign (e.g. 0.005).",
     "errorUsdcPayTo": "Invalid USDC receiving address.",
     "usdcFaceMeta": "+ {price} USDC",

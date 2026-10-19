@@ -57,6 +57,34 @@ describe('lib/env (module-load validation)', () => {
     expect(mod.env.enableWeb3Directory).toBe(true);
   });
 
+  it('dual-rail Arc の server / UI flag は独立し、どちらも既定 OFF (1/true だけ受理)', async () => {
+    vi.resetModules();
+    delete process.env.ENABLE_X402_DUAL_RAIL_ARC;
+    delete process.env.NEXT_PUBLIC_ENABLE_X402_DUAL_RAIL_ARC;
+    let mod = await import('@/lib/env');
+    expect(mod.env.enableX402DualRailArc).toBe(false);
+    expect(mod.env.enableX402DualRailArcUi).toBe(false);
+
+    vi.resetModules();
+    process.env.ENABLE_X402_DUAL_RAIL_ARC = '1';
+    mod = await import('@/lib/env');
+    expect(mod.env.enableX402DualRailArc).toBe(true);
+    expect(mod.env.enableX402DualRailArcUi).toBe(false);
+
+    vi.resetModules();
+    delete process.env.ENABLE_X402_DUAL_RAIL_ARC;
+    process.env.NEXT_PUBLIC_ENABLE_X402_DUAL_RAIL_ARC = 'true';
+    mod = await import('@/lib/env');
+    expect(mod.env.enableX402DualRailArc).toBe(false);
+    expect(mod.env.enableX402DualRailArcUi).toBe(true);
+
+    vi.resetModules();
+    process.env.NEXT_PUBLIC_ENABLE_X402_DUAL_RAIL_ARC = 'yes';
+    mod = await import('@/lib/env');
+    expect(mod.env.enableX402DualRailArcUi).toBe(false);
+    delete process.env.NEXT_PUBLIC_ENABLE_X402_DUAL_RAIL_ARC;
+  });
+
   it('Creator Store の server / UI flag は独立し、どちらも既定 OFF', async () => {
     vi.resetModules();
     delete process.env.ENABLE_CREATOR_STORE;

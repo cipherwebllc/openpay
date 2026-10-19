@@ -205,6 +205,27 @@ export function DiscoveryRegistrationForm({
                   }
                 />
               </Field>
+              {/* Arc (Circle Gateway) オプトイン。flag OFF でも既存の同意 (prefill) は見せる。 */}
+              {(env.enableX402DualRailArcUi || form.usdcArc) && (
+                <div>
+                  <label className="flex cursor-pointer items-center gap-2.5">
+                    <input
+                      type="checkbox"
+                      checked={form.usdcArc}
+                      onChange={(e) =>
+                        setForm((f) => ({ ...f, usdcArc: e.target.checked }))
+                      }
+                      className="h-4 w-4 shrink-0 rounded border-slate-300 text-brand focus:ring-brand/30"
+                    />
+                    <span className="text-xs font-semibold text-slate-700">
+                      {t('formUsdcArcEnable')}
+                    </span>
+                  </label>
+                  <p className="mt-1.5 pl-6 text-xs leading-relaxed text-slate-500">
+                    {t('formUsdcArcHint')}
+                  </p>
+                </div>
+              )}
             </div>
           )}
         </div>

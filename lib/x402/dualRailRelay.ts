@@ -28,17 +28,29 @@ import { checkIpRateLimit } from '@/lib/relay/relayGuards';
 import { x402Config } from './config';
 import { getResource, type X402Resource } from './registry';
 import {
+  arcMarkKey,
+  claimArcPending,
+  markArcSettled,
+  readArcMark,
+  releaseArcPending,
+  type ArcMarkState,
+} from './relayArcMarks';
+import {
   buildRelayAccepts,
-  decodeVanillaPaymentHeader,
+  decodeVanillaPaymentHeaderWithRail,
   postFacilitator,
+  postFacilitatorWithStatus,
+  type FacilitatorRail,
   type PreparedAccepts,
 } from './vanillaGate';
 import {
   buildBazaarQueryExtensionV2,
   buildPaymentRequiredV2,
+  deepStrictEqual,
   encodePaymentRequiredHeaderValue,
   toV2Accept,
 } from './v2';
+import type { FacilitatorV1Body } from './v2';
 
 export const RELAY_BODY_MAX_BYTES = 32 * 1024; // v2 支払い封筒 (base64) + 余白
 export const RELAY_RATE_LIMIT_MAX = 60;
@@ -106,6 +118,9 @@ async function resolveTarget(
       description: resource.description,
       price: resource.usdc.priceUsd,
       payTo: resource.usdc.payTo,
+      // Arc 面はリレーの Arc flag と出品者のオプトインの両方が揃ったときだけ (Arc rail 自体の
+      // ENABLE_X402_ARC_GATEWAY も buildRelayAccepts が確認する)。
+      arc: env.enableX402DualRailArc && resource.usdc.arc === true,
     });
   } catch (e) {
     // network が base 系でない等の設定不正。壊れた要件を配らない。
@@ -151,14 +166,137 @@ export async function handleDualRailRequirements(req: Request): Promise<NextResp
     bazaar: buildBazaarQueryExtensionV2(),
     error: 'payment_required',
   });
+  // Arc 面は既存 4 フィールドを変えずに `arc` として足す。既存の paymentRequiredHeader に Arc を
+  // 混ぜると、稼働中の出品者サーバー / SDK の pin 検証 (全 accepts が Base であること) が両レールを
+  // 止めるため。Arc を知るクライアントは 402 のヘッダを arc.paymentRequiredHeader (Base + Arc の
+  // 完成形) に差し替える — 組み立てさせない (ドリフト防止)。
+  const arc = accepts.arc
+    ? (() => {
+        const arcV2Accept = toV2Accept(accepts.arc);
+        return {
+          v2Accept: arcV2Accept,
+          paymentRequiredHeader: encodePaymentRequiredHeaderValue({
+            ...paymentRequired,
+            accepts: [v2Accept, arcV2Accept],
+          }),
+        };
+      })()
+    : undefined;
   return noStore(
     NextResponse.json({
       resourceId: resource.id,
       v1Accepts: accepts.v1,
       v2Accept,
       paymentRequiredHeader: encodePaymentRequiredHeaderValue(paymentRequired),
+      ...(arc ? { arc } : {}),
     }),
   );
+}
+
+const BASE_MONEY_FIELDS = ['payTo', 'maxAmountRequired', 'asset', 'network', 'scheme'] as const;
+
+/**
+ * 出品者サーバーが送った pin (paymentRequirements) がどの rail の現行条件と一致するか。
+ * pin の形で rail を決める: v1 形 (maxAmountRequired を持つ) = Base は従来の 5 項目、
+ * v2 形 = Arc はリレー自身の Arc accept と構造的に完全一致。どれとも一致しなければ null (409)。
+ */
+function pinnedRail(pinned: unknown, accepts: PreparedAccepts): FacilitatorRail | null {
+  if (typeof pinned !== 'object' || pinned === null || Array.isArray(pinned)) return null;
+  const p = pinned as Record<string, unknown>;
+  if ('maxAmountRequired' in p) {
+    return BASE_MONEY_FIELDS.every((field) => p[field] === accepts.v1[field]) ? 'base' : null;
+  }
+  return accepts.arc && deepStrictEqual(p, toV2Accept(accepts.arc)) ? 'arc-gateway' : null;
+}
+
+function alreadyUsedJudgment(state: ArcMarkState): Record<string, unknown> {
+  return {
+    isValid: false,
+    invalidReason: state === 'settled' ? 'authorization_already_used' : 'authorization_in_use',
+  };
+}
+
+/**
+ * Arc 面の verify / settle。Circle Gateway へ中継し、使用済み署名の使い回しを KV の印で止める
+ * (relayArcMarks.ts の冒頭コメント)。掲載メタは Gateway に送らない (Bazaar は CDP 専用)。
+ */
+async function relayArc(
+  action: 'verify' | 'settle',
+  body: FacilitatorV1Body,
+  target: RelayTarget,
+): Promise<NextResponse> {
+  const { resource, accepts } = target;
+  const arcAccept = accepts.arc!;
+  const key = arcMarkKey(arcAccept.network, body.paymentPayload.payload);
+  if (!key) return jsonError(400, 'invalid_payment_payload');
+
+  if (action === 'verify') {
+    const before = await readArcMark(key);
+    if (before === 'settled' || before === 'pending') {
+      return noStore(NextResponse.json(alreadyUsedJudgment(before)));
+    }
+  }
+
+  let judgment: Record<string, unknown>;
+  try {
+    judgment = (
+      await postFacilitatorWithStatus(
+        `/${action}`,
+        body,
+        {
+          accept: toV2Accept(arcAccept),
+          resource: { resourceUrl: resource.url, description: resource.description },
+        },
+        'arc-gateway',
+      )
+    ).body;
+  } catch (e) {
+    logger.warn('x402.dualrail.facilitator_unavailable', {
+      action,
+      rail: 'arc-gateway',
+      resourceId: resource.id,
+      error: e instanceof Error ? e.message : String(e),
+    });
+    return jsonError(503, 'facilitator_unavailable');
+  }
+
+  if (action === 'verify') {
+    if (judgment.isValid === true) {
+      const claimed = await claimArcPending(key);
+      if (claimed === 'settled' || claimed === 'pending') {
+        return noStore(NextResponse.json(alreadyUsedJudgment(claimed)));
+      }
+    }
+    return noStore(NextResponse.json(judgment));
+  }
+
+  if (judgment.success === true) {
+    await markArcSettled(key);
+    const transaction =
+      typeof judgment.transaction === 'string' ? judgment.transaction : null;
+    logger.info('x402.dualrail.settled', { resourceId: resource.id, rail: 'arc-gateway', transaction });
+    // network は Gateway のエコーではなくローカルの CAIP-2 (台帳と応答の両方)。transaction は Gateway の UUID。
+    recordSettleLedgerAfterResponse({
+      at: new Date().toISOString(),
+      source: 'usdc-dual-rail',
+      network: arcAccept.network,
+      resource: resource.url,
+      payer: typeof judgment.payer === 'string' ? judgment.payer : null,
+      payTo: arcAccept.payTo,
+      amount: atomicToHuman(arcAccept.maxAmountRequired, 6),
+      asset: 'USDC',
+      tx: transaction,
+    });
+    return noStore(NextResponse.json({ ...judgment, network: arcAccept.network }));
+  }
+  // nonce_already_used は Gateway が「使用済み」を明言した確定シグナル。消すと、決済済みの印の書き込みが
+  // 一度落ちただけで再送 → verify 通過 → 上流実行 → 印削除… が回り続ける。
+  if (judgment.errorReason === 'nonce_already_used') {
+    await markArcSettled(key);
+  } else {
+    await releaseArcPending(key);
+  }
+  return noStore(NextResponse.json(judgment));
 }
 
 /**
@@ -191,26 +329,38 @@ export async function handleDualRailRelay(
   // Listing edits must not substitute money terms after the seller pins them. Display metadata
   // is excluded so description/URL edits do not break payment; all forwarded fields, including
   // the fixed USDC domain/timeout, still come from the registry/config, never this snapshot.
-  const pinned = b.paymentRequirements;
-  const moneyFields = ['payTo', 'maxAmountRequired', 'asset', 'network', 'scheme'] as const;
-  if ('paymentRequirements' in b && (
-    typeof pinned !== 'object' || pinned === null || Array.isArray(pinned) ||
-    moneyFields.some((field) => (pinned as Record<string, unknown>)[field] !== accepts.v1[field])
-  )) {
-    logger.warn('x402.dualrail.requirements_mismatch', { resourceId: resource.id, action });
-    return jsonError(409, 'requirements_mismatch');
+  // The pin is checked before decoding the payment; its shape names the rail it pins.
+  let pinRail: FacilitatorRail | null = null;
+  if ('paymentRequirements' in b) {
+    pinRail = pinnedRail(b.paymentRequirements, accepts);
+    if (pinRail === null) {
+      logger.warn('x402.dualrail.requirements_mismatch', { resourceId: resource.id, action });
+      return jsonError(409, 'requirements_mismatch');
+    }
   }
 
   const v2Header =
     typeof b.paymentSignatureHeader === 'string' ? b.paymentSignatureHeader : null;
   const v1Header = typeof b.paymentHeader === 'string' ? b.paymentHeader : null;
-  const facilitatorBody = decodeVanillaPaymentHeader(
-    { v2: v2Header, v1: v1Header },
-    accepts,
-  );
-  if (!facilitatorBody) {
+  const decoded = decodeVanillaPaymentHeaderWithRail({ v2: v2Header, v1: v1Header }, accepts);
+  if (!decoded) {
     return jsonError(400, 'invalid_payment_payload');
   }
+  // A seller server that pinned one rail must not be charged on another: its terms for the
+  // other rail were never checked (e.g. a stale face that does not know Arc yet). 409 makes it
+  // refetch the requirements and ask the buyer again.
+  if (pinRail !== null && decoded.rail !== pinRail) {
+    logger.warn('x402.dualrail.requirements_mismatch', {
+      resourceId: resource.id,
+      action,
+      reason: 'rail_mismatch',
+    });
+    return jsonError(409, 'requirements_mismatch');
+  }
+  if (decoded.rail === 'arc-gateway') {
+    return relayArc(action, decoded.body, resolved.target);
+  }
+  const facilitatorBody = decoded.body;
 
   try {
     const judgment = await postFacilitator(`/${action}`, facilitatorBody, {

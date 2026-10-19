@@ -856,6 +856,44 @@ describe('lib/x402/registry usdc (dual-rail 面)', () => {
     expect(off.ok).toBe(true);
     expect((await getResource('u2'))?.usdc).toBeUndefined();
   });
+
+  it('parse: usdc.arc === true は arc:true で保存される', () => {
+    const r = parseResourceInput({ ...base, usdc: { priceUsd: '0.005', arc: true } }, OWNER);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.input.usdc).toEqual({ payTo: OWNER, priceUsd: '0.005', arc: true });
+  });
+
+  it.each([[undefined], [false]])('parse: usdc.arc=%s は項目なし (既存の保存形と byte 一致)', (arc) => {
+    const withArc = parseResourceInput({ ...base, usdc: { priceUsd: '0.005', arc } }, OWNER);
+    const without = parseResourceInput({ ...base, usdc: { priceUsd: '0.005' } }, OWNER);
+    expect(withArc.ok && without.ok).toBe(true);
+    if (withArc.ok && without.ok) {
+      expect(Object.keys(withArc.input.usdc!)).not.toContain('arc');
+      expect(JSON.stringify(withArc.input.usdc)).toBe(JSON.stringify(without.input.usdc));
+    }
+  });
+
+  it.each([['true'], ['1'], [1], [0], [null], [{}], [[]]])('parse: usdc.arc=%j → invalid_usdc_arc', (arc) => {
+    expect(parseResourceInput({ ...base, usdc: { priceUsd: '1', arc } }, OWNER)).toEqual({
+      ok: false,
+      reason: 'invalid_usdc_arc',
+    });
+  });
+
+  it('store: owner の update で arc を付け外しできる', async () => {
+    await createResource(input({ usdc: { payTo: OWNER, priceUsd: '1' } }), 'u3', 1000);
+    expect((await getResource('u3'))?.usdc).toEqual({ payTo: OWNER, priceUsd: '1' });
+    const on = await updateResource(
+      'u3', OWNER, input({ usdc: { payTo: OWNER, priceUsd: '1', arc: true } }), 2000,
+    );
+    expect(on.ok).toBe(true);
+    expect((await getResource('u3'))?.usdc).toEqual({ payTo: OWNER, priceUsd: '1', arc: true });
+    const off = await updateResource(
+      'u3', OWNER, input({ usdc: { payTo: OWNER, priceUsd: '1' } }), 3000,
+    );
+    expect(off.ok).toBe(true);
+    expect((await getResource('u3'))?.usdc).toEqual({ payTo: OWNER, priceUsd: '1' });
+  });
 });
 
 
