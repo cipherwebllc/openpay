@@ -1,10 +1,10 @@
 # Changelog
 
-## 0.20.0 — unreleased
+## 0.20.0 — 2026-10-19
 
 - `discovery_search` now passes through the catalog fields that `/api/discovery` already returns, so agents can compare listings without opening each one: `id`, `title`, `trigger` (when to use), `docsUrl`, `license`, `updatedAt` and `verifiedAt` (ISO 8601), and `official: true` for OpenPay's own listings. Fields are omitted when the catalog has no value. Price, fee and total are computed as before.
 - `query` now also matches `title` and `trigger` (previously resource, description and category only). The tool name, description and input schema are unchanged.
-- No dependency changes.
+- Raise the `@modelcontextprotocol/sdk` range from `^1.18.0` to `^1.32.0` (GHSA-6qxp-vccf-f47h is fixed in 1.31.0). The server only uses the stdio transport, so the HTTP transports the advisory affects were not in use. The `openpay-x402-sdk` range stays `^0.10.1`.
 
 ## 0.19.1 — 2026-10-10
 
