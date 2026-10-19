@@ -15,9 +15,11 @@
 //          [MAX_USDC=0.01] node scripts/x402-dual-buyer-example.mjs
 //      openpay-x402-mcp (SIGNER_MODE=keystore) がこの端末に作ったウォレット (~/.openpay-x402/wallet.json・
 //      OPENPAY_X402_HOME で変更可) を、MCP と同じ読み込み処理 (packages/x402-mcp/src/keystore.mjs・権限と
-//      ファイルの差し替えを検査) で読む。このリポジトリの checkout の中で実行したときだけ使える。
-//      同じアドレスを Base でも使うので、Base の USDC をそのアドレスへ入れておく。MCP の JPYC の上限と
-//      購入履歴 (wallet_history) の対象外 — このスクリプトの上限は MAX_USDC だけ。
+//      ファイルの差し替えを検査) で読む。**信頼できる、手を加えていない OpenPay の checkout からだけ実行する**
+//      (隣の packages/ を import するので、置き場所ごと差し替えられた tree で実行するとウォレットを渡すことになる)。
+//      同じアドレスを Base でも使うので、Base の USDC をそのアドレスへ入れておく。MCP と共有するのは鍵のファイル
+//      だけで、MCP の JPYC の上限 (1 回・セッション・1 日)・host/カタログの制限・購入履歴 (wallet_history) は
+//      効かない。上限は MAX_USDC (1 回の実行ごと・実行をまたいで合算しない) だけ。
 //
 // 金銭ガード:
 //   - asset が Base mainnet の native USDC (0x8335…2913) でなければ支払わない
