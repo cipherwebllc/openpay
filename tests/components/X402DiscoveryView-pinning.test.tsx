@@ -175,55 +175,55 @@ describe('R10a pre-extraction pinning', () => {
     expect(await captureDom('ja')).toMatchInlineSnapshot(`
       {
         "cold": {
-          "all": "1c47365f113338a03a1ef2302dfeb60d2767376ae137b811dc9e5e11466551a8",
+          "all": "64eb0fce3747954f705e7d04fa86a16cb28b3725dba9fb7b05859960da234431",
           "parts": [
             "h2 3282793f6040 Featured fixture",
             "section a211614bb375 カタログ発見: /api/dis",
             "section 4aebca8732f0 API を出品する402 ゲート",
             "section c44df4912dbc 2円で試す1 JPYC + 手数",
-            "section 2e2d752cb243 エージェントから払う (MCP)",
+            "section 3f23d608d1c7 エージェントから払う (MCP)",
           ],
         },
         "connected": {
-          "all": "fd88180a4729fa742a234c7ae447e63701de91f0af9f67d260b848f4126b56d6",
+          "all": "5461de6adb2ff0579d32e6852990efbf756727297dbe0dde73beec04e4694d6f",
           "parts": [
             "h2 3282793f6040 Featured fixture",
             "section dd9b0d67eeae カタログ発見: /api/dis",
             "section 11a99a5e761d API を出品する402 ゲート",
             "section c44df4912dbc 2円で試す1 JPYC + 手数",
-            "section 2e2d752cb243 エージェントから払う (MCP)",
+            "section 3f23d608d1c7 エージェントから払う (MCP)",
           ],
         },
         "disconnected": {
-          "all": "2c5b83e84f2cff541fd87ff2ccc520b769c2de836f9e6ecc67efd5047ff181a3",
+          "all": "1b165f498e76c7f9873d2b8f65952208ebaf1f92db0de849c340ebf968638d79",
           "parts": [
             "h2 3282793f6040 Featured fixture",
             "section dd9b0d67eeae カタログ発見: /api/dis",
             "section 4aebca8732f0 API を出品する402 ゲート",
             "section c44df4912dbc 2円で試す1 JPYC + 手数",
-            "section 2e2d752cb243 エージェントから払う (MCP)",
+            "section 3f23d608d1c7 エージェントから払う (MCP)",
           ],
         },
         "editing": {
-          "all": "f8db382f7d2084ac4ba9ae0db3e0cc04bc90d626b41b5ecc41790b6ca0cb38bf",
+          "all": "441b58b79836cf95c07df2e1d95d6b03963d86866e2631b1d1ba35fe8cf94c07",
           "parts": [
             "section 84703605eed1 あなたの登録登録済みの掲載を編集",
             "section 31746fad37e1 掲載を編集402 ゲートを置くだ",
             "h2 3282793f6040 Featured fixture",
             "section dd9b0d67eeae カタログ発見: /api/dis",
             "section c44df4912dbc 2円で試す1 JPYC + 手数",
-            "section 2e2d752cb243 エージェントから払う (MCP)",
+            "section 3f23d608d1c7 エージェントから払う (MCP)",
           ],
         },
         "signedIn": {
-          "all": "6146cf5fe38669233379eb9a5c5980186c471f3bdde7ade0aceb5c8de3d66c2f",
+          "all": "a2174ce3f3166d75149255e9cd7c57b8bdc2bbb7a3c75e73d7eceff82efc0c08",
           "parts": [
             "section 84703605eed1 あなたの登録登録済みの掲載を編集",
             "section b06f68f9c88e 新しい API を出品する402",
             "h2 3282793f6040 Featured fixture",
             "section dd9b0d67eeae カタログ発見: /api/dis",
             "section c44df4912dbc 2円で試す1 JPYC + 手数",
-            "section 2e2d752cb243 エージェントから払う (MCP)",
+            "section 3f23d608d1c7 エージェントから払う (MCP)",
           ],
         },
       }
@@ -234,55 +234,55 @@ describe('R10a pre-extraction pinning', () => {
     expect(await captureDom('en')).toMatchInlineSnapshot(`
       {
         "cold": {
-          "all": "c5547f98f904bcdb1892e05a12f1fe4bd974b68b1fdc6017c1bffc1129718f67",
+          "all": "3e7178fa530f58f208a01dfc9ebdf06afd86418978bbd4b5d47d0f49ae7f0076",
           "parts": [
             "h2 3282793f6040 Featured fixture",
             "section ab55932553c8 CatalogDiscover ",
             "section 10cccfe6a706 List your APIPut",
             "section 1afd73681508 Try it for ¥2A 1",
-            "section af24342cfab7 Pay from an agen",
+            "section 7182bce57c3d Pay from an agen",
           ],
         },
         "connected": {
-          "all": "3165511c21689d5858ffac907cd55a6a446d9e66740a2761bb1771cb87bdfa43",
+          "all": "d7e027e0ecb72a5e9c817842f01654b73eb5490b0207162ae279a92c3e649bc1",
           "parts": [
             "h2 3282793f6040 Featured fixture",
             "section f780b219f7b8 CatalogDiscover ",
             "section 9b97e28051f0 List your APIPut",
             "section 1afd73681508 Try it for ¥2A 1",
-            "section af24342cfab7 Pay from an agen",
+            "section 7182bce57c3d Pay from an agen",
           ],
         },
         "disconnected": {
-          "all": "84e8c2413d938d6b1ada6a42777a667c938b3606b5215009469bc6b293e51479",
+          "all": "a4480bd4f51160ae0667890df30d86e4678ff89b93c5b695f866f24a8b0b06e7",
           "parts": [
             "h2 3282793f6040 Featured fixture",
             "section f780b219f7b8 CatalogDiscover ",
             "section 10cccfe6a706 List your APIPut",
             "section 1afd73681508 Try it for ¥2A 1",
-            "section af24342cfab7 Pay from an agen",
+            "section 7182bce57c3d Pay from an agen",
           ],
         },
         "editing": {
-          "all": "8a1d1c592bc4c3ea02a969332d4b2092d0fdd24944ca70e9d68a88f769cbae35",
+          "all": "d197af7a5a63fc08b4fb2928ef728f5bcb531011cab7574f556386f828782dd6",
           "parts": [
             "section 01e8bbeef899 Your registratio",
             "section 5e647a682509 Edit listingPut ",
             "h2 3282793f6040 Featured fixture",
             "section f780b219f7b8 CatalogDiscover ",
             "section 1afd73681508 Try it for ¥2A 1",
-            "section af24342cfab7 Pay from an agen",
+            "section 7182bce57c3d Pay from an agen",
           ],
         },
         "signedIn": {
-          "all": "b516d4c067ae265d2982fb6b41dfff6c9743d58d1ddd7c32c1d807c7f54c84e3",
+          "all": "39b82de5a6d2dbab87187aca3ba90176f36d05414ff69cc123a5e4eee52060e8",
           "parts": [
             "section 01e8bbeef899 Your registratio",
             "section 4b3f28bf78f6 List a new APIPu",
             "h2 3282793f6040 Featured fixture",
             "section f780b219f7b8 CatalogDiscover ",
             "section 1afd73681508 Try it for ¥2A 1",
-            "section af24342cfab7 Pay from an agen",
+            "section 7182bce57c3d Pay from an agen",
           ],
         },
       }
@@ -515,116 +515,116 @@ describe('R10a pre-extraction pinning', () => {
     expect(dom).toMatchInlineSnapshot(`
       {
         "catalog": {
-          "all": "3441d3d73eeb346206dc63b59a9dc04e558a8e294a24b51c115ff3dc130613df",
+          "all": "8cd2cf03f6a51783581a63f845522fba63b79c728a4e6a14901b1de3afad0048",
           "parts": [
             "h2 3282793f6040 Featured fixture",
             "section 9ad10c8006d7 カタログ発見: /api/dis",
             "section 4aebca8732f0 API を出品する402 ゲート",
             "section c44df4912dbc 2円で試す1 JPYC + 手数",
-            "section 2e2d752cb243 エージェントから払う (MCP)",
+            "section 3f23d608d1c7 エージェントから払う (MCP)",
           ],
         },
         "category": {
-          "all": "585791e168560f2164b3f79c1e3db1798ff49c7d158432e2477f20d5533cf443",
+          "all": "af5dbc3b7f3a85130a758c6319bc81857e5a3d9f14a558f602a098810d0c3761",
           "parts": [
             "h2 3282793f6040 Featured fixture",
             "section 08658fa17ca5 カタログ発見: /api/dis",
             "section 4aebca8732f0 API を出品する402 ゲート",
             "section c44df4912dbc 2円で試す1 JPYC + 手数",
-            "section 2e2d752cb243 エージェントから払う (MCP)",
+            "section 3f23d608d1c7 エージェントから払う (MCP)",
           ],
         },
         "confirmDelete": {
-          "all": "a1f598174468ddb618fc8c128a81deed7de4538eeb57f479d746baa5c9d3be9d",
+          "all": "4e44e271f80ce31c501a4ebf6540763321e17625cc7d33577dbdae5e74f9b916",
           "parts": [
             "section 0110dfa05888 あなたの登録登録済みの掲載を編集",
             "section 6a4aea4e7945 新しい API を出品する402",
             "h2 3282793f6040 Featured fixture",
             "section 08658fa17ca5 カタログ発見: /api/dis",
             "section c44df4912dbc 2円で試す1 JPYC + 手数",
-            "section 2e2d752cb243 エージェントから払う (MCP)",
+            "section 3f23d608d1c7 エージェントから払う (MCP)",
           ],
         },
         "created": {
-          "all": "f14c4550c7cda742dbb6db5906b6a2a71169377abc7433459402ded032954838",
+          "all": "ffe7d11442fa672f36d50d3f0a4930c46f28ba2095bc5084e968863cd9e4b7ef",
           "parts": [
             "section 0f61c4f24311 あなたの登録登録済みの掲載を編集",
             "section 6a4aea4e7945 新しい API を出品する402",
             "h2 3282793f6040 Featured fixture",
             "section 08658fa17ca5 カタログ発見: /api/dis",
             "section c44df4912dbc 2円で試す1 JPYC + 手数",
-            "section 2e2d752cb243 エージェントから払う (MCP)",
+            "section 3f23d608d1c7 エージェントから払う (MCP)",
           ],
         },
         "gateError": {
-          "all": "340d29dc8f0252a40fe7642b1905a0a85faff2ba60bdfbacdd7ea1f7f682118b",
+          "all": "dae8614c09c03e14be605f0bc645af16592331e7b95f17b5ac5cbd1ea636499f",
           "parts": [
             "section 40e1101c8a4b API を出品する402 ゲート",
             "h2 3282793f6040 Featured fixture",
             "section 08658fa17ca5 カタログ発見: /api/dis",
             "section c44df4912dbc 2円で試す1 JPYC + 手数",
-            "section 2e2d752cb243 エージェントから払う (MCP)",
+            "section 3f23d608d1c7 エージェントから払う (MCP)",
           ],
         },
         "gateErrorCopied": {
-          "all": "7b57cc6c5dfa9819c336268f8069452016ae2436c2de6970ca20fe240b1ab670",
+          "all": "adaf0312fdd3027e2dfdc5822c7d3015a1573dd12eae8dcf43c9533738eba76b",
           "parts": [
             "section b7fa88a6bee1 API を出品する402 ゲート",
             "h2 3282793f6040 Featured fixture",
             "section 08658fa17ca5 カタログ発見: /api/dis",
             "section c44df4912dbc 2円で試す1 JPYC + 手数",
-            "section 2e2d752cb243 エージェントから払う (MCP)",
+            "section 3f23d608d1c7 エージェントから払う (MCP)",
           ],
         },
         "noResults": {
-          "all": "75706e5c29ad84e3928cec5159154ab2b5dabd6ec2703121f8384be76057eead",
+          "all": "386483db6aac02602a3e4c6d55d3a029aa0b3b9b268bd8f36743f2bfeda7e034",
           "parts": [
             "h2 3282793f6040 Featured fixture",
             "section 791a15eb8f7b カタログ発見: /api/dis",
             "section 4aebca8732f0 API を出品する402 ゲート",
             "section c44df4912dbc 2円で試す1 JPYC + 手数",
-            "section 2e2d752cb243 エージェントから払う (MCP)",
+            "section 3f23d608d1c7 エージェントから払う (MCP)",
           ],
         },
         "ownerEmpty": {
-          "all": "61ae509479fa20b5820b1c06027325ddf5c07ced29e18d0134b553f60c4eb2f4",
+          "all": "60c4db42a38f0b79d588fcf56ccfc6a99e620508d037a04d1bf9746059cc0b04",
           "parts": [
             "section 49ecc65baa39 API を出品する402 ゲート",
             "h2 3282793f6040 Featured fixture",
             "section 08658fa17ca5 カタログ発見: /api/dis",
             "section c44df4912dbc 2円で試す1 JPYC + 手数",
-            "section 2e2d752cb243 エージェントから払う (MCP)",
+            "section 3f23d608d1c7 エージェントから払う (MCP)",
           ],
         },
         "shownMore": {
-          "all": "c36ac97868125e89bd97033e6f2a3e271b4d2474355c8de0a7f55649254d25d5",
+          "all": "0db515e6fc72d5f8c197b91e286159f96d7505a8a5601e69e6f22c988a454f8e",
           "parts": [
             "h2 3282793f6040 Featured fixture",
             "section 4a0bb42f32b0 カタログ発見: /api/dis",
             "section 4aebca8732f0 API を出品する402 ゲート",
             "section c44df4912dbc 2円で試す1 JPYC + 手数",
-            "section 2e2d752cb243 エージェントから払う (MCP)",
+            "section 3f23d608d1c7 エージェントから払う (MCP)",
           ],
         },
         "snippetOpen": {
-          "all": "42a54d3aff7e8a82bdb881a1eddabcdf64c0efed2df69167de4636689e7defc3",
+          "all": "495c5a8d1f5d6b0e6caf0f8f5c7c7cebee532bc198d5014f5cb7a38631e40f48",
           "parts": [
             "section 3382428b4640 あなたの登録登録済みの掲載を編集",
             "section 6a4aea4e7945 新しい API を出品する402",
             "h2 3282793f6040 Featured fixture",
             "section 08658fa17ca5 カタログ発見: /api/dis",
             "section c44df4912dbc 2円で試す1 JPYC + 手数",
-            "section 2e2d752cb243 エージェントから払う (MCP)",
+            "section 3f23d608d1c7 エージェントから払う (MCP)",
           ],
         },
         "usdcFilter": {
-          "all": "15866e55a1511c0a08a0c8a89a09d8e084ec8b0e563f15765690582eb8669059",
+          "all": "e41c608f3b64690065f79d354fbb79eeda5a7a3650a918f9068da85e8d0748c0",
           "parts": [
             "h2 3282793f6040 Featured fixture",
             "section 3893e6bac7f7 カタログ発見: /api/dis",
             "section 4aebca8732f0 API を出品する402 ゲート",
             "section c44df4912dbc 2円で試す1 JPYC + 手数",
-            "section 2e2d752cb243 エージェントから払う (MCP)",
+            "section 3f23d608d1c7 エージェントから払う (MCP)",
           ],
         },
       }
@@ -744,13 +744,13 @@ describe('R10a pre-extraction pinning', () => {
     expect(screen.getByText('まだ登録されたリソースはありません。')).toBeInTheDocument();
     expect(hashDom(view.container)).toMatchInlineSnapshot(`
       {
-        "all": "59621d986e8afe8a069029c454906f5c6d9d3d032da4692fc8fd0ac920bb7d97",
+        "all": "f17b298c7cd907e6c4292f78c3fd4c92b11b8e9511f95cc8a876ff278f1fca89",
         "parts": [
           "h2 3282793f6040 Featured fixture",
           "section 2ced173074d3 カタログ発見: /api/dis",
           "section 4aebca8732f0 API を出品する402 ゲート",
           "section c44df4912dbc 2円で試す1 JPYC + 手数",
-          "section 2e2d752cb243 エージェントから払う (MCP)",
+          "section 3f23d608d1c7 エージェントから払う (MCP)",
         ],
       }
     `);

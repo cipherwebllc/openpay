@@ -23,7 +23,7 @@ Ask the person which one they want if they have not said.
 | **Human pays** — "don't hand the AI a wallet" | `openpay-order-mcp` | The person, from their own wallet, approving the final payment themselves. You find a shop, read the menu, state the total, and create a checkout link. | No |
 | **Agent pays** — "give the AI a budget" | `openpay-x402-mcp` | You, from a dedicated low-balance agent wallet, inside the local limits. | Yes — created locally in Step 5, or a Kova or MetaMask wallet the person manages (see the corresponding branch); nobody types or pastes a key |
 
-Both ship in one npm package, `openpay-x402-mcp` (Node.js 20 or newer). The commands below pin `@0.19`. The local wallet arrived in 0.15; 0.16 adds `wallet_history`, a local log of what this agent bought; 0.18 adds Kova; 0.19 adds MetaMask Agent Wallet.
+Both ship in one npm package, `openpay-x402-mcp` (Node.js 20 or newer). The commands below pin `@0.20`. The local wallet arrived in 0.15; 0.16 adds `wallet_history`, a local log of what this agent bought; 0.18 adds Kova; 0.19 adds MetaMask Agent Wallet; 0.20 makes `discovery_search` return each listing's title, when to use it, docs, license and update dates.
 
 For **Human pays**, do Step 3 with the `openpay-order` server and no env, then skip to Step 4a. There is nothing to fund and no limit to set, because you never touch a wallet.
 
@@ -63,7 +63,7 @@ Use the form for your host, substituting the agreed amounts.
 Claude Code:
 
 ```bash
-claude mcp add openpay-x402 -e SIGNER_MODE=keystore -e MAX_PER_CALL_JPYC=10 -e MAX_SESSION_JPYC=100 -e MAX_DAILY_JPYC=300 -e ALLOWED_HOSTS=open-pay.jp -e CATALOG_TRUST=true -- npx --yes openpay-x402-mcp@0.19
+claude mcp add openpay-x402 -e SIGNER_MODE=keystore -e MAX_PER_CALL_JPYC=10 -e MAX_SESSION_JPYC=100 -e MAX_DAILY_JPYC=300 -e ALLOWED_HOSTS=open-pay.jp -e CATALOG_TRUST=true -- npx --yes openpay-x402-mcp@0.20
 ```
 
 Codex CLI (`~/.codex/config.toml`):
@@ -71,7 +71,7 @@ Codex CLI (`~/.codex/config.toml`):
 ```toml
 [mcp_servers.openpay-x402]
 command = "npx"
-args = ["--yes", "openpay-x402-mcp@0.19"]
+args = ["--yes", "openpay-x402-mcp@0.20"]
 
 [mcp_servers.openpay-x402.env]
 SIGNER_MODE = "keystore"
@@ -85,7 +85,7 @@ CATALOG_TRUST = "true"
 Hermes:
 
 ```bash
-hermes mcp add openpay-x402 --command npx --env SIGNER_MODE=keystore MAX_PER_CALL_JPYC=10 MAX_SESSION_JPYC=100 MAX_DAILY_JPYC=300 ALLOWED_HOSTS=open-pay.jp CATALOG_TRUST=true --args --yes openpay-x402-mcp@0.19
+hermes mcp add openpay-x402 --command npx --env SIGNER_MODE=keystore MAX_PER_CALL_JPYC=10 MAX_SESSION_JPYC=100 MAX_DAILY_JPYC=300 ALLOWED_HOSTS=open-pay.jp CATALOG_TRUST=true --args --yes openpay-x402-mcp@0.20
 ```
 
 Any other MCP host (JSON `mcpServers` form, e.g. Claude Desktop):
@@ -95,7 +95,7 @@ Any other MCP host (JSON `mcpServers` form, e.g. Claude Desktop):
   "mcpServers": {
     "openpay-x402": {
       "command": "npx",
-      "args": ["--yes", "openpay-x402-mcp@0.19"],
+      "args": ["--yes", "openpay-x402-mcp@0.20"],
       "env": {
         "SIGNER_MODE": "keystore",
         "MAX_PER_CALL_JPYC": "10",
@@ -109,7 +109,7 @@ Any other MCP host (JSON `mcpServers` form, e.g. Claude Desktop):
 }
 ```
 
-Human pays uses the server name `openpay-order`, the args `["--yes", "--package=openpay-x402-mcp@0.19", "--", "openpay-order-mcp"]`, and no `env`.
+Human pays uses the server name `openpay-order`, the args `["--yes", "--package=openpay-x402-mcp@0.20", "--", "openpay-order-mcp"]`, and no `env`.
 
 If a server with the same name already exists, tell the person and ask before replacing it. An existing entry may already hold a key: do not print its `env` values — name the variables only.
 
@@ -117,12 +117,12 @@ If a server with the same name already exists, tell the person and ask before re
 
 Kova (Komlock lab) is a third-party Execution Provider. OpenPay does not receive Kova keys or credentials. The person installs Kova separately, runs `kova init`, and checks the public wallet address with `kova wallet info`. **The person performs owner operations themselves; never run them for the person.** Ask only for the wallet name and public EVM address, never a private key or credential.
 
-`command -v kova` must find the CLI. If the MCP host restricts `PATH`, its MCP environment must include the directory containing that executable and the usual system executable directories. Kova is separate from npm package `openpay-x402-mcp@0.19`; this adapter supports macOS/Linux, not Windows.
+`command -v kova` must find the CLI. If the MCP host restricts `PATH`, its MCP environment must include the directory containing that executable and the usual system executable directories. Kova is separate from npm package `openpay-x402-mcp@0.20`; this adapter supports macOS/Linux, not Windows.
 
 Use the agreed limits from Step 2, replacing `<name>` and `<0x…>` before running this Claude Code example:
 
 ```bash
-claude mcp add openpay-x402 -e SIGNER_MODE=kova -e KOVA_WALLET=<name> -e KOVA_AGENT_ADDRESS=<0x…> -e MAX_PER_CALL_JPYC=10 -e MAX_SESSION_JPYC=100 -e MAX_DAILY_JPYC=300 -e ALLOWED_HOSTS=open-pay.jp -e CATALOG_TRUST=true -- npx --yes openpay-x402-mcp@0.19
+claude mcp add openpay-x402 -e SIGNER_MODE=kova -e KOVA_WALLET=<name> -e KOVA_AGENT_ADDRESS=<0x…> -e MAX_PER_CALL_JPYC=10 -e MAX_SESSION_JPYC=100 -e MAX_DAILY_JPYC=300 -e ALLOWED_HOSTS=open-pay.jp -e CATALOG_TRUST=true -- npx --yes openpay-x402-mcp@0.20
 ```
 
 If `openpay-x402` is already registered for keystore, you may register Kova under a different name, such as `openpay-kova`, to keep both entries.
@@ -164,7 +164,7 @@ The CLI must be on the MCP host's `PATH`. If the host restricts `PATH`, include 
 Use the agreed limits from Step 2, replacing `<0x…>` before running this Claude Code example:
 
 ```bash
-claude mcp add openpay-x402 -e SIGNER_MODE=metamask -e METAMASK_AGENT_ADDRESS=<0x…> -e MAX_PER_CALL_JPYC=10 -e MAX_SESSION_JPYC=100 -e MAX_DAILY_JPYC=300 -e ALLOWED_HOSTS=open-pay.jp -e CATALOG_TRUST=true -- npx --yes openpay-x402-mcp@0.19
+claude mcp add openpay-x402 -e SIGNER_MODE=metamask -e METAMASK_AGENT_ADDRESS=<0x…> -e MAX_PER_CALL_JPYC=10 -e MAX_SESSION_JPYC=100 -e MAX_DAILY_JPYC=300 -e ALLOWED_HOSTS=open-pay.jp -e CATALOG_TRUST=true -- npx --yes openpay-x402-mcp@0.20
 ```
 
 If `openpay-x402` is already registered for another mode, you may register MetaMask under a different name, such as `openpay-metamask`, to keep both entries. For other hosts, use the Step 3 form: set `SIGNER_MODE=metamask`, add `METAMASK_AGENT_ADDRESS`, and retain the limits, `ALLOWED_HOSTS`, and `CATALOG_TRUST`. Never add `MM_CLI_TOKEN`, `MM_MNEMONIC`, or `MM_PASSWORD`; the MCP rejects them at startup.

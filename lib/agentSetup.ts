@@ -21,7 +21,7 @@ export const AGENT_MCP_PACKAGE = 'openpay-x402-mcp';
  * 遡って変えてしまい、Web を戻しても取り消せない。MCP の publish 前は Web の pin が
  * 1 minor 遅れることを許容する (tests/lib/agentSetup.test.ts)。Kova を選べる pin は 0.18 以降、MetaMask は 0.19 以降。
  */
-export const AGENT_MCP_VERSION = '0.19';
+export const AGENT_MCP_VERSION = '0.20';
 export const AGENT_MCP_SPEC = `${AGENT_MCP_PACKAGE}@${AGENT_MCP_VERSION}`;
 export const AGENT_PAYS_SERVER = 'openpay-x402';
 export const HUMAN_PAYS_SERVER = 'openpay-order';
