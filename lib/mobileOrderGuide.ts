@@ -44,9 +44,10 @@ export type MobileOrderGuideContent = {
 };
 
 const STEP_W = 390;
-const STEP_H = 744;
-// 手順 2〜5 は、その手順で触る部分 (選択シート・テーブル番号とカート・支払い明細とウォレット) だけを切り出した高さ
-// (全景の 744 だと幅 240 で約 460px になり、2 行の本文の横に大きな空きができた・P8)。手順 1 は全景のまま。
+// 手順の画面は、その手順で触る部分 (店名とチェーン・選択シート・テーブル番号とカート・支払い明細とウォレット) だけを
+// 切り出した高さ (全景の 744 だと幅 240 で約 460px になり、2 行の本文の横に大きな空きができた・P8)。
+// 手順 1 は注文ページの頭 (店名とチェーンの選択まで)。
+const STEP_TOP_H = 398;
 const STEP_SHOT_H = 420;
 // 手順 2・3 は下から開く選択シートとカート (チェーンの選択から下) だけ。
 const STEP_SHEET_H = 386;
@@ -76,9 +77,9 @@ const JA: MobileOrderGuideContent = {
       body: '店頭やテーブルの QR をスマホのカメラで読み取ると、お店の注文ページが開きます。',
       image: {
         file: 'step1.png',
-        alt: 'お店の注文ページが開いた画面 (店名とメニュー)',
+        alt: 'お店の注文ページが開いた画面 (店名と支払いチェーンの選択)',
         width: STEP_W,
-        height: STEP_H,
+        height: STEP_TOP_H,
       },
     },
     {
@@ -183,9 +184,9 @@ const EN: MobileOrderGuideContent = {
       body: 'Scan the QR at the counter or table with your camera. The shop menu page opens.',
       image: {
         file: 'step1.png',
-        alt: 'The shop order page with its menu',
+        alt: 'The shop order page with the shop name and the payment chain choice',
         width: STEP_W,
-        height: STEP_H,
+        height: STEP_TOP_H,
       },
     },
     {

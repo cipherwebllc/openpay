@@ -72,7 +72,7 @@ export function GuideVideo({ video }: { video: HowtoVideo }) {
             {howtoVideoShortTitle(video)}
           </span>
           <span className="mt-1 block text-xs font-medium text-emerald-700">
-            {HOWTO_VIDEO_UI.play}（{video.duration}）
+            {HOWTO_VIDEO_UI.play} ({video.duration})
           </span>
         </button>
         {/* カードの上に重ねて押せるようにする (ボタンの ::after より上)。 */}

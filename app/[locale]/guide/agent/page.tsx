@@ -24,6 +24,7 @@ import {
   BulletList,
   Section,
   STEP_BADGE_CUSTOMER,
+  guideHeadingId,
   StepList,
 } from '@/components/guide/PosGuidePieces';
 import {
@@ -32,6 +33,7 @@ import {
   GuideHero,
 } from '@/components/guide/AgentGuidePieces';
 import { agentGuideContentFor, guideAgentMetadata } from '@/lib/agentGuide';
+import { GuideMoreLink } from '@/components/guide/GuideLink';
 
 export async function generateMetadata({
   params,
@@ -95,6 +97,10 @@ export default async function GuideAgentPage({
             items={c.need}
             marker="✓"
           />
+          {/* JPYC の入手方法は同じページの節へ飛ぶリンクにする (長いページで「下記」を探させない・P8)。 */}
+          <p className="mt-3">
+            <GuideMoreLink href={`#${guideHeadingId(c.jpycTitle)}`}>{c.jpycTitle}</GuideMoreLink>
+          </p>
         </Section>
 
         <Section title={c.setupTitle}>

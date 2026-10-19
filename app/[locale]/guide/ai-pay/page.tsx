@@ -216,7 +216,7 @@ export default async function GuideAiPayPage({
           footer={
             <p>
               {c.sdkLead}
-              <a href={c.sdkLink.href} target="_blank" rel="noreferrer noopener" className={GUIDE_INLINE_LINK}>
+              <a href={c.sdkLink.href} target="_blank" rel="noreferrer noopener" className={`whitespace-nowrap ${GUIDE_INLINE_LINK}`}>
                 {c.sdkLink.label}
               </a>
               {c.sdkTail}

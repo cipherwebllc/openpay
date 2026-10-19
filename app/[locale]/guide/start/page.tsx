@@ -169,18 +169,15 @@ export default async function GuideStartPage({
             {section.callout ? (
               <Callout kind={section.callout.kind} text={section.callout.text} />
             ) : null}
-            {section.guideLinks ? (
-              <ul className="mt-3 space-y-1.5">
-                {section.guideLinks.map((link) => (
+            {section.guideLinks || section.externalLinks ? (
+              // サイト内 (→) と別サイト (↗) のリンクを 1 行に並べる (3 本を縦に積んだ太字の塊にしない・P8)。
+              <ul className="mt-3 flex flex-wrap gap-x-5 gap-y-2">
+                {section.guideLinks?.map((link) => (
                   <li key={link.path}>
                     <GuideMoreLink href={`/${locale}${link.path}`}>{link.label}</GuideMoreLink>
                   </li>
                 ))}
-              </ul>
-            ) : null}
-            {section.externalLinks ? (
-              <ul className={`${section.guideLinks ? 'mt-1.5' : 'mt-3'} space-y-1.5`}>
-                {section.externalLinks.map((link) => (
+                {section.externalLinks?.map((link) => (
                   <li key={link.href}>
                     <GuideMoreLink href={link.href} external>
                       {link.label}

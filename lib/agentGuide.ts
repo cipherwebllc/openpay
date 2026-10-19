@@ -145,7 +145,7 @@ const ja: AgentGuideContent = {
   need: [
     'MCP に対応した AI クライアント（Claude Desktop / Claude Code など）',
     '暗号資産ウォレット（MetaMask などの、あなたのウォレット）',
-    'Polygon 上の JPYC（少量の POL＝ガス代も）。入手方法は下記「JPYC の入手」へ',
+    'Polygon 上の JPYC（少量の POL＝ガス代も）',
   ],
 
   setupTitle: 'セットアップ (AI に MCP を追加)',
@@ -313,7 +313,7 @@ const en: AgentGuideContent = {
   need: [
     'An MCP-capable AI client (Claude Desktop / Claude Code, etc.)',
     'A crypto wallet (your own wallet, e.g. MetaMask)',
-    'JPYC on Polygon (plus a little POL for gas). See “Getting JPYC” below',
+    'JPYC on Polygon (plus a little POL for gas)',
   ],
 
   setupTitle: 'Setup (add the MCP to your AI)',

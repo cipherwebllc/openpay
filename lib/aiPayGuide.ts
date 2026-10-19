@@ -305,7 +305,7 @@ const ja: AiPayGuideContent = {
     label: 'openpay-x402-sdk',
     href: SDK_NPM_URL,
   },
-  sdkTail: 'を利用できます。',
+  sdkTail: ' を利用できます。',
 };
 
 const en: AiPayGuideContent = {
