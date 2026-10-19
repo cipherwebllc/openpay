@@ -446,3 +446,62 @@ it('keeps owner deliveryUrl out of public HTML/JSON-LD and the RSC-to-client pro
   expect(JSON.stringify(state.renderedStorefrontProducts)).not.toContain(deliveryUrl);
   expect(container.innerHTML).not.toContain(deliveryUrl);
 });
+
+// 商品ページ (?product=) の schema.org Product/Offer (plans/store-product-jsonld.md)。ProfilePage とは別 gate・
+// プロフ本体には出さない・私的な項目はページの詰め替え経路でも出ない (Fable の計画レビュー必須 1)。
+describe('@handle 商品ページの Product JSON-LD', () => {
+  const PRODUCT_ID = `h_${'e'.repeat(32)}`;
+  const DELIVERY = 'https://files.example/private-delivery-sentinel';
+  function product(over: Record<string, unknown> = {}) {
+    return {
+      id: PRODUCT_ID, owner: ADDR, payTo: ADDR, title: 'Kit', priceJpyc: '500', contentKind: 'url', label: 'download',
+      contentRevision: 1, saleActive: true, contentAvailable: true, createdAt: 1, deliveryUrl: DELIVERY,
+      registration: { status: 'registered', txHash: '0xREGISTRATION_SENTINEL' },
+      usage: { commercial: 'allowed' }, ...over,
+    };
+  }
+  function scriptsOf(container: HTMLElement) {
+    return jsonLdScripts(container).map((script) => JSON.parse(script.textContent ?? '') as Record<string, unknown>);
+  }
+  beforeEach(() => {
+    state.enableCreatorStore = true;
+    state.enableCreatorStoreUi = true;
+  });
+
+  it('載っている商品の ?product= だけ ProfilePage に加えて Product を出し、私的な項目は JSON-LD に出ない', async () => {
+    state.hostedProducts = [product()];
+    const { container } = await renderHandlePage(record(), { product: PRODUCT_ID });
+    const scripts = scriptsOf(container);
+    expect(scripts.map((value) => value['@type'])).toEqual(['ProfilePage', 'Product']);
+    expect(scripts[1]).toMatchObject({
+      name: 'Kit',
+      url: expect.stringMatching(new RegExp(`^https://open-pay\\.jp/ja/@jsonld\\d+\\?product=${PRODUCT_ID}$`)),
+      offers: { price: '505', priceCurrency: 'JPYC', availability: 'https://schema.org/InStock', seller: { '@type': 'Person', name: '山田太郎' } },
+    });
+    const ld = jsonLdScripts(container).map((script) => script.textContent).join('');
+    for (const leaked of [DELIVERY, ADDR, ADDR.toLowerCase(), 'REGISTRATION_SENTINEL']) expect(ld).not.toContain(leaked);
+    expect(container.innerHTML).not.toContain(DELIVERY);
+  });
+
+  it('ProfilePage が出ないプロフ (内容なし) でも、商品ページなら Product だけ出す (gate は独立)', async () => {
+    state.hostedProducts = [product()];
+    const { container } = await renderHandlePage(record({ profile: {} }), { product: PRODUCT_ID });
+    expect(scriptsOf(container).map((value) => value['@type'])).toEqual(['Product']);
+  });
+
+  it('?product= なし・ページに無い id・商品の storage 障害では Product を出さない', async () => {
+    state.hostedProducts = [product()];
+    expect(scriptsOf((await renderHandlePage(record())).container).map((value) => value['@type'])).toEqual(['ProfilePage']);
+    expect(scriptsOf((await renderHandlePage(record(), { product: `h_${'f'.repeat(32)}` })).container).map((value) => value['@type'])).toEqual(['ProfilePage']);
+    state.hostedProducts = null;
+    expect(scriptsOf((await renderHandlePage(record(), { product: PRODUCT_ID })).container).map((value) => value['@type'])).toEqual(['ProfilePage']);
+  });
+
+  it('商品名の </script> 注入は script の外に出ず、JSON.parse で元の値へ戻る', async () => {
+    const title = '</script><script>alert(1)</script>';
+    state.hostedProducts = [product({ title })];
+    const { container } = await renderHandlePage(record(), { product: PRODUCT_ID });
+    expect(container.querySelectorAll('script')).toHaveLength(2);
+    expect(scriptsOf(container)[1].name).toBe(title);
+  });
+});

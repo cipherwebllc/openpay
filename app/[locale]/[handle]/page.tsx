@@ -44,6 +44,10 @@ import {
 import { decodeAgentCart } from '@/lib/agentOrder';
 import { searchParamsFromNext, type RouteSearch } from '@/lib/url';
 import { JsonLd, SITE_URL } from '@/components/StructuredData';
+import { storeProductJsonLd } from '@/lib/store/productJsonLd';
+import { isHostedProductCategory } from '@/lib/x402/storeMeta';
+import { licenseNftEnabled } from '@/lib/license/config';
+import { OPENPAY_CANONICAL_ORIGIN } from '@/lib/x402/firstParty';
 import {
   buildTipMeta,
   buildStorefrontMeta,
@@ -333,6 +337,37 @@ export default async function HandlePage({
   // @handle 経路に限定** (受取先・価格は KV 権威の handle レコードから再解決 = receiver スプーフィング
   // 不成立・C1)。cart は untrusted ゆえ decodeAgentCart が全項目検証し不正は null (= 事前充填なし)。
   // menu との突合・グレース劣化・改ざん無害化は MobileOrderView (resolvePrefillCart) が担う。
+  // 商品ページ (?product= が今ページに載っている商品) だけ schema.org Product/Offer を出す
+  // (plans/store-product-jsonld.md)。プロフ本体には出さない (同じ商品を 2 か所で主張しない)。
+  // ProfilePage とは別 gate (hasProfile に依らない)。詰め替えは storeProductJsonLd の明示項目だけ。
+  const jsonLdProduct = autoOpenProductId
+    ? creatorProducts.find((product) => product.id === autoOpenProductId)
+    : undefined;
+  let productJsonLd: Record<string, unknown> | null = null;
+  if (jsonLdProduct) {
+    const tp = await getTranslations({ locale, namespace: 'CreatorStorePurchase' });
+    const tCatalog = await getTranslations({ locale, namespace: 'StoreCatalog' });
+    productJsonLd = storeProductJsonLd({
+      product: jsonLdProduct,
+      handle: normalized,
+      locale,
+      origin: SITE_URL,
+      sellerName: record.config.name?.trim() || `@${normalized}`,
+      ...(isHostedProductCategory(jsonLdProduct.category) ? { categoryName: tCatalog(`categories.${jsonLdProduct.category}`) } : {}),
+      fallbackImagePath: buildProductOgImageUrl(normalized, locale === 'en' ? 'en' : 'ja', jsonLdProduct.id),
+      ...(jsonLdProduct.productKind === 'license' && licenseNftEnabled()
+        ? { licenseDescriptorUrl: `${OPENPAY_CANONICAL_ORIGIN}/api/license/products/${jsonLdProduct.id}` }
+        : {}),
+      labels: {
+        price: tp('priceLabel'),
+        fee: tp('feeLabel'),
+        usageHeading: tp('usageHeading'),
+        usage: { commercial: tp('usageCommercial'), modify: tp('usageModify'), redistribute: tp('usageRedistribute') },
+        usageNote: tp('usageNote'),
+        usageDisclaimer: tp('usageDisclaimer'),
+      },
+    });
+  }
   const cartParam = storefront ? routeSearch.get('cart') : null;
   const initialCart = cartParam ? decodeAgentCart(cartParam) : null;
   // SEO/AIEO (S2): 公開プロフィールを ProfilePage.mainEntity=Person で機械可読化。
@@ -381,6 +416,7 @@ export default async function HandlePage({
       data-handle-theme={darkFooter ? 'night' : undefined}
     >
       {profileJsonLd && <JsonLd value={profileJsonLd} />}
+      {productJsonLd && <JsonLd value={productJsonLd} />}
       {/* link-in-bio のみアクセントの背景ウォッシュ (storefront は独自の意匠なので付けない)。
           clean = 現行どおり上部 h-96 の淡いウォッシュ。他テーマは全画面 (inset-0) を覆う地色。 */}
       {!storefront && (
