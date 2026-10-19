@@ -6,9 +6,18 @@
 // dual-rail 402 では支払い先を選ぶ前に throw する。本スクリプトは network==='base' の accept
 // だけを選び、EIP-3009 (TransferWithAuthorization) に署名して X-PAYMENT で支払う。
 //
-// 使い方 (鍵はファイルに書かない・env で渡す):
-//   BUYER_PRIVATE_KEY=0x... RESOURCE_URL=https://seller.example/api/paid/x \
-//     [MAX_USDC=0.01] node x402-dual-buyer-example.mjs
+// 使い方 (署名する鍵はどちらか 1 つ):
+//   1. 鍵を env で渡す (このファイル単体で動く・鍵はファイルに書かない):
+//        BUYER_PRIVATE_KEY=0x... RESOURCE_URL=https://seller.example/api/paid/x \
+//          [MAX_USDC=0.01] node x402-dual-buyer-example.mjs
+//   2. OpenPay Agent のウォレットで署名する (鍵を入力しない・画面にも出さない):
+//        USE_AGENT_WALLET=1 RESOURCE_URL=https://seller.example/api/paid/x \
+//          [MAX_USDC=0.01] node scripts/x402-dual-buyer-example.mjs
+//      openpay-x402-mcp (SIGNER_MODE=keystore) がこの端末に作ったウォレット (~/.openpay-x402/wallet.json・
+//      OPENPAY_X402_HOME で変更可) を、MCP と同じ読み込み処理 (packages/x402-mcp/src/keystore.mjs・権限と
+//      ファイルの差し替えを検査) で読む。このリポジトリの checkout の中で実行したときだけ使える。
+//      同じアドレスを Base でも使うので、Base の USDC をそのアドレスへ入れておく。MCP の JPYC の上限と
+//      購入履歴 (wallet_history) の対象外 — このスクリプトの上限は MAX_USDC だけ。
 //
 // 金銭ガード:
 //   - asset が Base mainnet の native USDC (0x8335…2913) でなければ支払わない
@@ -34,11 +43,40 @@ if (!m) {
 const MAX_ATOMIC = BigInt(m[1]) * 1_000_000n + BigInt((m[2] ?? '').padEnd(6, '0'));
 
 const pk = process.env.BUYER_PRIVATE_KEY;
-if (!pk || !pk.startsWith('0x')) {
-  console.error('BUYER_PRIVATE_KEY env (0x...) が必要です');
+const useAgentWallet = process.env.USE_AGENT_WALLET === '1';
+if (useAgentWallet && pk) {
+  console.error('BUYER_PRIVATE_KEY と USE_AGENT_WALLET=1 はどちらか 1 つにしてください (どちらの鍵で払うかを曖昧にしない)');
   process.exit(1);
 }
-const account = privateKeyToAccount(pk);
+let account;
+if (useAgentWallet) {
+  let loadWallet;
+  try {
+    ({ loadWallet } = await import(new URL('../packages/x402-mcp/src/keystore.mjs', import.meta.url).href));
+  } catch (error) {
+    // このファイルだけを取得して実行した場合 (売り手ガイドのリンク) に、何が足りないかを示す。
+    console.error(`USE_AGENT_WALLET=1 は OpenPay のリポジトリの中で実行してください (packages/x402-mcp/src/keystore.mjs を読めません: ${error.code ?? error.message})`);
+    process.exit(1);
+  }
+  let wallet;
+  try {
+    wallet = await loadWallet();
+  } catch (error) {
+    console.error('OpenPay Agent のウォレットを読めません:', error.message);
+    process.exit(1);
+  }
+  if (!wallet) {
+    console.error('OpenPay Agent のウォレットがありません (MCP の wallet_init で作る・OPENPAY_X402_HOME を確かめる)');
+    process.exit(1);
+  }
+  account = privateKeyToAccount(wallet.secret.privateKey);
+} else {
+  if (!pk || !pk.startsWith('0x')) {
+    console.error('BUYER_PRIVATE_KEY env (0x...) か USE_AGENT_WALLET=1 が必要です');
+    process.exit(1);
+  }
+  account = privateKeyToAccount(pk);
+}
 console.log('buyer :', account.address);
 console.log('buying:', TARGET);
 
