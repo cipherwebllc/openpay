@@ -369,7 +369,8 @@ describe('GET /api/og/handle', () => {
     expect(hosted.listAvailableForOwner).toHaveBeenCalledWith(RECORD.owner);
     expect(text).toContain('AI プロンプト集');
     expect(text).toContain('🧠');
-    expect(text).toContain('1,200 JPYC · Polygon');
+    // 価格 1200 + 買い手負担 x402 手数料 12 = 支払総額 (商品カード・購入画面と同じ値)
+    expect(text).toContain('1,212 JPYC · Polygon');
     expect(text).toContain('山田太郎 · @masia');
     expect(text).not.toContain('Web3 クリエイター');
     expect(text).not.toContain('FORGED');

@@ -235,7 +235,8 @@ describe('@handle generateMetadata', () => {
 
     expect(m.title).toBe('AI プロンプト集 — 山田太郎');
     expect(m.description).toBe(
-      '仕事で使えるテンプレート 1200 JPYC (Polygon)',
+      // 価格 1200 + 買い手負担 x402 手数料 12 = 支払総額 (商品カード・購入画面・JSON-LD と同じ値)
+      '仕事で使えるテンプレート 1212 JPYC (Polygon)',
     );
     expect(JSON.stringify(m.openGraph?.images)).toContain(
       `product=${PRODUCT_ID}`,
@@ -252,7 +253,7 @@ describe('@handle generateMetadata', () => {
     const m = await call('%40masia', 'en', PRODUCT_ID);
 
     expect(m.description).toBe(
-      'Buy this digital product on OpenPay. 1200 JPYC (Polygon)',
+      'Buy this digital product on OpenPay. 1212 JPYC (Polygon)',
     );
   });
 

@@ -24,6 +24,7 @@ import {
   listAvailableHostedForOwner,
 } from '@/lib/x402/hostedStore';
 import { displaySymbolFor } from '@/lib/tokens';
+import { hostedPurchaseTotalJpyc } from '@/lib/store/purchaseTotal';
 import {
   buildTipOgModel,
   tipModelToCard,
@@ -169,7 +170,8 @@ export async function GET(req: Request): Promise<ImageResponse> {
         title: product.title,
         ...(product.emoji ? { emoji: product.emoji } : {}),
         ...(product.imageUrl ? { imageUrl: product.imageUrl } : {}),
-        priceJpyc: product.priceJpyc,
+        // 手数料込みの支払総額 (商品カード・購入画面と同じ値・2026-10-19 user 裁定)。
+        totalJpyc: hostedPurchaseTotalJpyc(product.priceJpyc),
         locale,
       });
       const productImage = productCard.imageUrl

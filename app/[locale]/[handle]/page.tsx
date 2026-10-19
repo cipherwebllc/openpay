@@ -45,6 +45,7 @@ import { decodeAgentCart } from '@/lib/agentOrder';
 import { searchParamsFromNext, type RouteSearch } from '@/lib/url';
 import { JsonLd, SITE_URL } from '@/components/StructuredData';
 import { storeProductJsonLd } from '@/lib/store/productJsonLd';
+import { hostedPurchaseTotalJpyc } from '@/lib/store/purchaseTotal';
 import { isHostedProductCategory } from '@/lib/x402/storeMeta';
 import { licenseNftEnabled } from '@/lib/license/config';
 import { OPENPAY_CANONICAL_ORIGIN } from '@/lib/x402/firstParty';
@@ -141,7 +142,8 @@ export async function generateMetadata({
             namespace: 'CreatorStorefront',
           })
         )('productMetaFallback');
-      const description = `${descriptionBase} ${product.priceJpyc} JPYC (Polygon)`;
+      // 価格は手数料込みの支払総額 (商品カード・購入画面・JSON-LD と同じ値・2026-10-19 user 裁定)。
+      const description = `${descriptionBase} ${hostedPurchaseTotalJpyc(product.priceJpyc)} JPYC (Polygon)`;
       const productImage = buildProductOgImageUrl(
         normalized,
         ogLocale,
