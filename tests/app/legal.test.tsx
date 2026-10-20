@@ -187,9 +187,10 @@ describe('Legal pages', () => {
       expect(en.Terms.article5.body).toMatch(/USDC transfers are technically irreversible/);
 
       // 出品者が Arc も有効にした出品: Circle Gateway の残高から払い、売上は出品者の Gateway 残高 (引き出しは出品者)。
-      const clause10 = (body: string) => body.split('(10)')[1]?.split('(11)')[0] ?? '';
-      for (const fact of [`${disclosed.arcChainName} チェーン上の ${disclosed.asset}`, `あらかじめ ${disclosed.arcSettlement}`, '入金した残高から行われ', '出品者の指定ウォレットの Circle Gateway 上の残高', '自ら引き出す', '引き出しを代行しません', 'Circle Gateway で精算された支払いも、当社が取り消すことはできません']) expect(clause10(ja.Terms.article5.body)).toContain(fact);
-      for (const fact of [`${disclosed.asset} on the ${disclosed.arcChainName} chain`, `deposited in advance with ${disclosed.arcSettlement}`, 'credited to the Circle Gateway balance of the lister\'s designated wallet', 'withdrawing it from Circle Gateway themselves', 'does not withdraw on the lister\'s behalf', 'cannot reverse payments settled through Circle Gateway']) expect(clause10(en.Terms.article5.body)).toContain(fact);
+      // (4) が「本条 (10)」を参照するので、段落は書き出しで切り出す。
+      const clause10 = (body: string, head: string) => body.includes(head) ? body.slice(body.indexOf(head)).split('(11)')[0] : '';
+      for (const fact of [`${disclosed.arcChainName} チェーン上の ${disclosed.asset}`, `あらかじめ ${disclosed.arcSettlement}`, '入金した残高から行われ', '出品者の指定ウォレットの Circle Gateway 上の残高', '自ら引き出す', '引き出しを代行しません', 'Circle Gateway で精算された支払いも、当社が取り消すことはできません']) expect(clause10(ja.Terms.article5.body, '(10) AI ストアへの出品者')).toContain(fact);
+      for (const fact of [`${disclosed.asset} on the ${disclosed.arcChainName} chain`, `deposited in advance with ${disclosed.arcSettlement}`, 'credited to the Circle Gateway balance of the lister\'s designated wallet', 'withdrawing it from Circle Gateway themselves', 'does not withdraw on the lister\'s behalf', 'cannot reverse payments settled through Circle Gateway']) expect(clause10(en.Terms.article5.body, '(10) For resources whose lister')).toContain(fact);
     });
   });
 
@@ -788,10 +789,11 @@ describe('Legal pages', () => {
       // 2026-10-12: 他のチェーンから Arc 以外のチェーン宛てに払うときの Circle の転送手数料 (受取額から差し引き) を
       //   実装どおりに明記 (料金は変えない) するため Terms/特商法を同日改定。免責・プライバシーは据置。
       // 2026-10-21: 第三者出品の USDC 併売に Arc (Circle Gateway) での支払いを追加し、「Arc は通常決済のみ」に x402 の
-      //   Circle Gateway 経由の支払いを除く旨を足すため Terms/特商法を同日改定 (料金は変えない)。免責・プライバシーは据置。
+      //   Circle Gateway 経由の支払いを除く旨を足し、「店主の指定ウォレットへ直接送金」にも Gateway 経由の例外を足すため
+      //   Terms/特商法/免責を同日改定 (料金は変えない)。プライバシーは据置。
       expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-10-21');
       expect(LEGAL_ENTITY.tokuteiEffectiveDate).toBe('2026-10-21');
-      expect(LEGAL_ENTITY.disclaimerEffectiveDate).toBe('2026-10-11');
+      expect(LEGAL_ENTITY.disclaimerEffectiveDate).toBe('2026-10-21');
       // 2026-09-10 改定案: 保護配布のチケット情報の第三者提供を追記。
       // 2026-10-13: 外部送信規律の公表 (3-3 外部送信について)・委託先の追加でプライバシーだけ改定。
       expect(LEGAL_ENTITY.privacyEffectiveDate).toBe('2026-10-13');
@@ -1541,6 +1543,11 @@ it('Arc の USDC 決済 (通常決済のみ・顧客が USDC でネットワー�
   expect(ja.Tokutei.rows.additionalFees.value).toContain('AI エージェント等が x402 により Circle Gateway を通じて支払う場合を除きます');
   expect(en.Terms.article5.body).toContain('except payments made via x402 through Circle Gateway');
   expect(en.Tokutei.rows.additionalFees.value).toContain('except payments that AI agents and others make via x402 through Circle Gateway');
+  // 「店主の指定ウォレットへ直接送金」の言い切り (第 3 条・第 5 条 (4)・特商法の支払時期・免責事項の冒頭) にも Gateway の例外。
+  const gatewayJa = '受取先の指定ウォレットの Circle Gateway 上の残高に計上され';
+  const gatewayEn = 'credited to the Circle Gateway balance of the payee\'s designated wallet';
+  for (const text of [ja.Terms.article3.body, ja.Terms.article5.body.split('(4)')[1]?.split('(5)')[0] ?? '', ja.Tokutei.rows.paymentTiming.value, ja.Disclaimer.intro]) expect(text).toContain(gatewayJa);
+  for (const text of [en.Terms.article3.body, en.Terms.article5.body.split('(4)')[1]?.split('(5)')[0] ?? '', en.Tokutei.rows.paymentTiming.value, en.Disclaimer.intro]) expect(text).toContain(gatewayEn);
 });
 
 // 開示リリースのフェンスは ambient feature flags と無関係に常時実行する。

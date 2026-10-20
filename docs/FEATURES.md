@@ -239,7 +239,7 @@ Records live in KV — name uniqueness is an atomic `SET NX` claim and owner-sco
 
 ## Non-custodial design
 
-OpenPay **never holds** merchant funds. Customer payments are sent **directly to the merchant wallet**. OpenPay does **not** issue, redeem, custody, or exchange JPYC / USDC.
+OpenPay **never holds** merchant funds. Customer payments are sent **directly to the merchant wallet** (x402 payments through Circle Gateway are credited to the payee's Circle Gateway balance instead, and the payee withdraws them; OpenPay still never holds them). OpenPay does **not** issue, redeem, custody, or exchange JPYC / USDC.
 
 ## How it works
 

@@ -55,9 +55,8 @@ const GATEWAY_DOMAIN = 26; // Circle domain for Arc
 const MAX_ATOMIC = BigInt(Math.round(Number(process.env.MAX_USDC ?? '0.05') * 1e6));
 const PAID_PATH_PREFIX = process.env.PAID_PATH_PREFIX ?? '/api/paid/';
 const DEFAULT_PATH = process.env.PAID_PATH ?? '/api/paid/hello';
-if (!PAID_PATH_PREFIX.startsWith('/') || !DEFAULT_PATH.startsWith(PAID_PATH_PREFIX)) {
-  throw new Error('PAID_PATH must start with PAID_PATH_PREFIX, which must start with /');
-}
+if (!PAID_PATH_PREFIX.startsWith('/')) throw new Error('PAID_PATH_PREFIX must start with /');
+paidUrl(DEFAULT_PATH);
 
 // withdraw (売り手の Gateway 残高 → 同じウォレットの Arc USDC)。同一チェーンは transfer fee なし・
 // burn の gas fee は Arc で $0.0035 (Gateway fees)。maxFee はその上限として 0.02 USDC に固定する。
@@ -120,11 +119,20 @@ function buildWithdrawTypedData(from, atomic) {
 
 const eq = (a, b) => typeof a === 'string' && typeof b === 'string' && a.toLowerCase() === b.toLowerCase();
 
+// 支払い先は正規化した URL で検査する (`..`・`%2e%2e`・`//host` で TARGET や PAID_PATH_PREFIX の外へ出られないように)。
+function paidUrl(path) {
+  if (typeof path !== 'string' || !path.startsWith('/')) throw new Error(`path must start with ${PAID_PATH_PREFIX}`);
+  const base = new URL(NET.target);
+  const url = new URL(path, base);
+  const inside = PAID_PATH_PREFIX.endsWith('/')
+    ? url.pathname.startsWith(PAID_PATH_PREFIX)
+    : url.pathname === PAID_PATH_PREFIX || url.pathname.startsWith(`${PAID_PATH_PREFIX}/`);
+  if (url.origin !== base.origin || !inside) throw new Error(`path must stay under ${NET.target}${PAID_PATH_PREFIX}`);
+  return url;
+}
+
 async function fetchChallenge(path) {
-  if (typeof path !== 'string' || !path.startsWith(PAID_PATH_PREFIX)) {
-    throw new Error(`path must start with ${PAID_PATH_PREFIX}`);
-  }
-  const res = await fetch(`${NET.target}${path}`);
+  const res = await fetch(paidUrl(path), { redirect: 'error' });
   const header = res.headers.get('payment-required');
   if (res.status !== 402 || !header) throw new Error(`expected 402 + PAYMENT-REQUIRED (got ${res.status})`);
   const required = JSON.parse(Buffer.from(header, 'base64').toString('utf8'));
@@ -236,7 +244,8 @@ const server = createServer(async (req, res) => {
       if (!/^0x[0-9a-fA-F]{130}$/.test(signature ?? '')) throw new Error('signature must be 65 bytes hex');
       const payload = { x402Version: 2, resource: required.resource, accepted: accept, payload: { signature, authorization } };
       const started = Date.now();
-      const paid = await fetch(`${NET.target}${path}`, {
+      const paid = await fetch(paidUrl(path), {
+        redirect: 'error',
         headers: { 'PAYMENT-SIGNATURE': Buffer.from(JSON.stringify(payload)).toString('base64') },
       });
       const pr = paid.headers.get('payment-response');

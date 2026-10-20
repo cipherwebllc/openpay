@@ -256,7 +256,7 @@ const ja: SellGuideContent = {
   bazaarNote: [
     '自前の CDP 鍵や標準 x402 ゲートの自作は不要です。Base での支払いは購入者からあなたの Base アドレスへ直接届き、OpenPay は売上を預かりません (USDC 送金は取消不能)。',
     'すでに JPYC で出品済みの API を USDC 対応にするときは、サーバーのゲートを dual-rail 版スニペット (x402Gate) へ貼り替えてください。貼り替えるまで USDC では購入できません。',
-    'Arc の USDC でも売るには、出品フォームで「Arc (Circle Gateway) でも販売する」も有効にします (ノーコードゲートウェイ x402-jpyc-gateway で動かしている出品だけが対象で、SDK 版のゲートは Arc を提示しません)。Arc の支払いは Circle Gateway で精算され、買い手は事前に Gateway へ入金しておく必要があります。売上は受取アドレスの Gateway 残高に入るので、あなたが引き出して受け取ります (OpenPay の手数料はなし・Bazaar への掲載は Base 側だけ)。受取アドレスは EOA (通常のウォレット) を推奨します。',
+    'Arc の USDC でも売るには、出品フォームで「Arc (Circle Gateway) でも販売する」も有効にします (ノーコードゲートウェイ x402-jpyc-gateway で動かしている出品だけが対象で、SDK 版のゲートは Arc を提示しません)。Arc の支払いは Circle Gateway で精算され、買い手は事前に Gateway へ入金し、EOA (通常のウォレット) で署名する必要があります。売上は受取アドレスの Gateway 残高に入るので、あなたが引き出して受け取ります (OpenPay の手数料はなし・Bazaar への掲載は Base 側だけ)。受取アドレスは EOA (通常のウォレット) を推奨します — コントラクトウォレット (Safe など) は Circle の標準の引き出し手順を使えず、Circle の別の手順 (ERC-1271 の署名や delegate の登録) が必要です (実際に引き出した例は未確認)。',
     '購入側の注意: 標準クライアント x402-fetch (1.2.0 現在) は dual-rail 402 を解析できないため、USDC 購入例スクリプトを用意しています: https://raw.githubusercontent.com/cipherwebllc/openpay/main/scripts/x402-dual-buyer-example.mjs',
   ],
 
@@ -409,7 +409,7 @@ const en: SellGuideContent = {
   bazaarNote: [
     'No CDP keys or hand-rolled standard x402 gate needed. Base payments go directly from the buyer to your Base address; OpenPay never holds your proceeds (USDC transfers are irreversible).',
     'To enable USDC on an API already listed for JPYC, replace the gate on your server with the dual-rail snippet (x402Gate). Buyers cannot pay in USDC until you do.',
-    'To also sell for USDC on Arc, turn on “Also sell on Arc (Circle Gateway)” in the listing form (only for listings served by the no-code x402-jpyc-gateway; the SDK gate does not offer Arc). Arc payments settle through Circle Gateway, and buyers must deposit into Gateway beforehand. Revenue lands in the Gateway balance of your receiving address, which you withdraw yourself (no OpenPay fee; only the Base side is listed on the Bazaar). An EOA (a regular wallet) is recommended as the receiving address.',
+    'To also sell for USDC on Arc, turn on “Also sell on Arc (Circle Gateway)” in the listing form (only for listings served by the no-code x402-jpyc-gateway; the SDK gate does not offer Arc). Arc payments settle through Circle Gateway, and buyers must deposit into Gateway beforehand and sign with an EOA (a regular wallet). Revenue lands in the Gateway balance of your receiving address, which you withdraw yourself (no OpenPay fee; only the Base side is listed on the Bazaar). An EOA (a regular wallet) is recommended as the receiving address — a contract wallet (such as a Safe) cannot use Circle’s standard withdrawal flow and needs Circle’s alternative path (an ERC-1271 signature or a registered delegate); no real-world withdrawal has been confirmed yet.',
     'Buyer note: the standard client x402-fetch (as of 1.2.0) cannot parse a dual-rail 402, so there is a USDC buyer example script: https://raw.githubusercontent.com/cipherwebllc/openpay/main/scripts/x402-dual-buyer-example.mjs',
   ],
 

@@ -124,7 +124,8 @@ export type PreparedAccepts = {
   /** CAIP-2 命名 — v2 ヘッダと accepted 照合に使う。 */
   v1Caip2: PaymentRequirementsV1;
   /**
-   * Arc rail (Circle Gateway x402 facilitator)。first-party の 402 だけが付ける (flag ON 時)。
+   * Arc rail (Circle Gateway x402 facilitator)。first-party の 402 (ENABLE_X402_ARC_GATEWAY) と、出品者が Arc を有効にした
+   * 第三者出品の relay requirements (buildRelayAccepts・ENABLE_X402_DUAL_RAIL_ARC) が付ける。
    * **v2 面 (PAYMENT-REQUIRED / accepted 照合) にのみ**現れ、v1 body と facilitator の v1 wire には出ない —
    * Gateway は x402 v2 のみで、v1 クライアントには支払えない accept を見せないため。
    * network は最初から CAIP-2 (`eip155:5042`)。plans/arc-x402-gateway.md。
