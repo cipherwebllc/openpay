@@ -91,6 +91,9 @@ const BUDGETS_KB = {
   '/[locale]/store': 264,
   '/[locale]/billing': 336,
   '/[locale]/discovery': 315,
+  // 2026-10-20: Arc の売上を受け取るページ (wagmi・viem・Circle Gateway の部品)。flag OFF でも route の client は
+  // build に入るので表に載せる。実測 377 + 5。
+  '/[locale]/discovery/arc-payout': 382,
   // 実験ページ (本番導線なし)。UNBUDGETED_MAX_KB を超えるので表に載せる。実測 357 + 5。
   '/[locale]/experimental/cross-chain-demo': 362,
   // 2026-10-10 F2: 実測 194 + 5。

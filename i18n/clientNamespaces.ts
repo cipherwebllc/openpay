@@ -138,6 +138,13 @@ export const ROUTE_CLIENT_NAMESPACES = {
   'disclaimer': [
     'Disclaimer',
   ],
+  'discovery/arc-payout': [
+    'ArcPayout',
+    'ConnectButton',
+    'LocaleSwitcher',
+    'Nav',
+    'News',
+  ],
   'discovery': [
     'ConnectButton',
     'Facilitator',

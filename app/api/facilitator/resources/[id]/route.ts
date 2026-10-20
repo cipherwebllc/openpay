@@ -20,6 +20,7 @@ import {
   deactivateResource,
   getResource,
 } from '@/lib/x402/registry';
+import { arcPayToRejection } from '@/lib/x402/arcPayToReachability';
 import { isFreelyAccessible, probeGate } from '@/lib/x402/moderation';
 import { buildPaywallSnippet } from '@/lib/x402/paywallSnippet';
 import {
@@ -89,6 +90,10 @@ export async function PATCH(
   }
   const parsed = parseResourceInput(body.value, session.address);
   if (!parsed.ok) return NextResponse.json({ error: parsed.reason }, { status: 400 });
+
+  // 新規登録と同じ Arc 受取先の検査。同意済みで受取先も同じ編集は検査しない (existing=null なら検査する)。
+  const arcRejection = await arcPayToRejection(parsed.input.usdc, existing?.usdc);
+  if (arcRejection) return NextResponse.json({ error: arcRejection.error }, { status: arcRejection.status });
 
   // 差し替え URL の moderation は **owner かつ resource 存在時のみ** 実行 (probe を owner に限定)。
   // existing=null (未存在/outage) は probe せず updateResource の判定 (not_found/storage) に委ねる。

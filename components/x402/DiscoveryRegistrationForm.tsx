@@ -2,7 +2,8 @@
 
 // 認証後の出品フォームだけを遅延読み込みする。下書き・mutation は eager な facade で維持する。
 
-import { useTranslations } from 'next-intl';
+import Link from 'next/link';
+import { useLocale, useTranslations } from 'next-intl';
 import { CheckCircle2, ChevronDown } from 'lucide-react';
 import { Field } from '@/components/Field';
 import { env } from '@/lib/env';
@@ -26,6 +27,7 @@ export function DiscoveryRegistrationForm({
   address: string | undefined;
 }) {
   const t = useTranslations('Facilitator');
+  const locale = useLocale();
   const {
     form, setForm, editId, created, notice, usdcReminder,
     error, errorSnippet, attested, setAttested, ownedQuery, owned, onCancelEdit, submitMutation,
@@ -52,9 +54,13 @@ export function DiscoveryRegistrationForm({
               ? t('errorUsdcPrice')
               : error === 'invalid_usdc_pay_to'
                 ? t('errorUsdcPayTo')
-                : error
-                  ? t('errorGeneric', { reason: error })
-                  : null;
+                : error === 'usdc_arc_contract_pay_to'
+                  ? t('errorUsdcArcContract')
+                  : error === 'usdc_arc_check_unavailable'
+                    ? t('errorUsdcArcCheckUnavailable')
+                    : error
+                      ? t('errorGeneric', { reason: error })
+                      : null;
 
   const formCategories = ['api', 'data', 'mcp'];
   const legacyCategory = owned.find((resource) => resource.id === editId)?.category;
@@ -224,6 +230,15 @@ export function DiscoveryRegistrationForm({
                   <p className="mt-1.5 pl-6 text-xs leading-relaxed text-slate-500">
                     {t('formUsdcArcHint')}
                   </p>
+                  {env.enableArcPayoutUi && (
+                    <Link
+                      href={`/${locale}/discovery/arc-payout`}
+                      prefetch={false}
+                      className="mt-1 inline-flex pl-6 text-xs font-medium text-brand underline-offset-2 hover:text-brand-dark hover:underline"
+                    >
+                      {t('arcPayoutCta')}
+                    </Link>
+                  )}
                 </div>
               )}
             </div>

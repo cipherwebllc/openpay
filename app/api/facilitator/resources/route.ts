@@ -12,6 +12,7 @@ import { logger } from '@/lib/logger';
 import { clientIp, hashIpBucket } from '@/lib/net/ipHash';
 import { checkIpRateLimit } from '@/lib/relay/relayGuards';
 import { redactUrlForTelemetry } from '@/lib/telemetryRedaction';
+import { arcPayToRejection } from '@/lib/x402/arcPayToReachability';
 import { isFreelyAccessible, probeGate } from '@/lib/x402/moderation';
 import { buildPaywallSnippet } from '@/lib/x402/paywallSnippet';
 import {
@@ -108,6 +109,10 @@ export async function POST(req: Request): Promise<NextResponse> {
   if (count >= MAX_RESOURCES_PER_MERCHANT) {
     return NextResponse.json({ error: 'too_many_resources' }, { status: 429 });
   }
+
+  // Arc に同意した出品の受取先がコントラクトなら断る (Arc の売上を引き出せない受取先・plans/arc-gateway-payout.md)。
+  const arcRejection = await arcPayToRejection(parsed.input.usdc);
+  if (arcRejection) return NextResponse.json({ error: arcRejection.error }, { status: arcRejection.status });
 
   // モデレーション: 無料で公開されている URL の価格付き登録を弾く (probe で 200 を確認したら拒否)。
   // 402/401/403/エラー/タイムアウトは通す (fail-open)。private/loopback は parseResourceInput で既に排除。

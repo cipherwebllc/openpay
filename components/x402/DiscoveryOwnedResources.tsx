@@ -3,8 +3,10 @@
 // 出品者の「あなたの登録」一覧 (SIWE 済みかつ 1 件以上のときだけ描画)。編集・削除 (確認つき)・
 // スニペット再表示・hidden (要対応) の案内。状態は useDiscoveryOwner / useDiscoveryDisplay から受け取る。
 
-import { useTranslations } from 'next-intl';
+import Link from 'next/link';
+import { useLocale, useTranslations } from 'next-intl';
 import { AlertTriangle, Check, Code2, Copy, Pencil, Trash2 } from 'lucide-react';
+import { env } from '@/lib/env';
 import { REVERIFY_AUTH_HIDE_THRESHOLD } from '@/lib/x402/reverifyThresholds';
 import { isHttpsUrl, type DiscoveryDisplay } from './discoveryDisplay';
 import type { OwnedResource } from './discoveryTypes';
@@ -29,6 +31,7 @@ export function DiscoveryOwnedResources({
   isSignedIn: boolean;
 }) {
   const t = useTranslations('Facilitator');
+  const locale = useLocale();
   const {
     owned, snippetOpenId, setSnippetOpenId, confirmDeleteId, setConfirmDeleteId, deleteMutation,
     onEdit, setNotice,
@@ -43,6 +46,16 @@ export function DiscoveryOwnedResources({
         <section>
           <h3 className="text-base font-bold text-slate-900">{t('yourResourcesTitle')}</h3>
           <p className="mt-1 text-sm text-slate-500">{t('yourResourcesSubtitle')}</p>
+          {/* Arc に同意した出品があれば、Arc の売上 (受取アドレスの Gateway 残高) を受け取るページへ。 */}
+          {env.enableArcPayoutUi && owned.some((r) => r.usdc?.arc === true) && (
+            <Link
+              href={`/${locale}/discovery/arc-payout`}
+              prefetch={false}
+              className="mt-1.5 inline-flex text-xs font-medium text-brand underline-offset-2 hover:text-brand-dark hover:underline"
+            >
+              {t('arcPayoutCta')}
+            </Link>
+          )}
           <ul className="mt-4 space-y-3">
             {owned.map((r) => (
               <li
