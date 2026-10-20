@@ -160,11 +160,7 @@ export const LEGAL_ENTITY = {
   // 2026-10-13 改定: 外部送信規律 (電気通信事業法 27 条の 12) の公表として 3-3「外部送信について」を新設。委託先に
   //   Cloudflare・Upstash・Sentry (Functional Software) を追加し、1-(3) の解析・エラー監視を実態に合わせた。
   //   施行日は仮置き (user の承認日で確定する)。
-  // 2026-10-20 改定: 委託先に Coinbase, Inc. (x402 の Base の USDC の検証・精算・Coinbase Developer Platform) を追加し、
-  //   Circle の項に Circle Gateway (x402 の Arc の USDC の検証・精算) を足した。どちらも当社のサーバーから買い手・受取先の
-  //   ウォレットアドレス・金額・署名を受け取る (同じ種類の情報を受け取る Alchemy・Pimlico と同じ扱い)。これまでの x402 の
-  //   Base / Arc の支払いから使っていたが載っていなかった。第三者出品の Arc の点灯と同じリリース (Terms と同日)。
-  privacyEffectiveDate: '2026-10-20',
+  privacyEffectiveDate: '2026-10-13',
   // 2026-10-07 改定: レジの通常決済の利用料の廃止 (Terms と同日)。
   // 2026-10-08 改定: 「お店がガス代を肩代わりして送る」の新設 (Terms と同日)。
   // 2026-10-11 改定: JPYC のチップのガス相当額の行き先・AI エージェントが x402 で支払うモバイル注文の利用料 (Terms と同日)。
