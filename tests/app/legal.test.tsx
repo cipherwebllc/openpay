@@ -65,7 +65,7 @@ describe('Legal pages', () => {
       expect(screen.getByText((_, element) => element?.tagName === 'P' && !!element.textContent?.includes('(18)'))).toHaveTextContent(clause);
       expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-10-20');
       expect(messages.Privacy.section3.body).toContain(locale === 'ja' ? '購入歴のないライセンス保有者' : 'license holders without a purchase history');
-      expect(LEGAL_ENTITY.privacyEffectiveDate).toBe('2026-10-13');
+      expect(LEGAL_ENTITY.privacyEffectiveDate).toBe('2026-10-20');
     });
 
     it('第13条: license の政策値・売り手・権利・返金・公開情報を同じ namespace 内で固定する', async () => {
@@ -243,6 +243,11 @@ describe('Legal pages', () => {
       expect(sectionBody?.textContent).toMatch(/Paymaster/);
       // 当社徴収0の明示 (paymasterMode='erc20' の真正性: 顧客が USDC で gas 負担)。
       expect(sectionBody?.textContent).toMatch(/徴収・取得することはありません/);
+      // x402 の USDC の検証・精算の送信先 (2026-10-20)。CDP は委託先 (規約上のデータ処理者)、Circle Gateway は委託先ではない。
+      expect(sectionBody?.textContent).toContain('- Coinbase, Inc. およびその関連会社 (米国): x402 による Base の USDC の支払いの検証および精算 (Coinbase Developer Platform)。');
+      expect(sectionBody?.textContent).toContain('Circle Technology Services, LLC (米国) が提供する Circle Gateway に送信します');
+      expect(sectionBody?.textContent).toContain('買い手が Circle Gateway を通じた支払いを選んだ場合に限り');
+      expect(sectionBody?.textContent).toContain('同社は当社の委託先ではなく、同社のプライバシーポリシーに従って');
     });
 
     it('en: section 3 に Circle Paymaster 委託先開示 + 当社徴収0', () => {
@@ -255,6 +260,10 @@ describe('Legal pages', () => {
       expect(sectionBody?.textContent).toContain('Circle');
       expect(sectionBody?.textContent).toMatch(/Paymaster/);
       expect(sectionBody?.textContent).toMatch(/does not collect or receive/i);
+      expect(sectionBody?.textContent).toContain('- Coinbase, Inc. and its affiliates (United States): verification and settlement of USDC payments on Base made via x402 (Coinbase Developer Platform).');
+      expect(sectionBody?.textContent).toContain('to Circle Gateway, provided by Circle Technology Services, LLC (United States)');
+      expect(sectionBody?.textContent).toContain('only where the buyer chooses to pay through Circle Gateway');
+      expect(sectionBody?.textContent).toContain('Circle is not our service provider and handles this information under its own privacy policy');
     });
 
     // 外部レビュー対応: Cookie/localStorage 正確化 + 要配慮個人情報 非取得 +
@@ -790,13 +799,14 @@ describe('Legal pages', () => {
       //   実装どおりに明記 (料金は変えない) するため Terms/特商法を同日改定。免責・プライバシーは据置。
       // 2026-10-20: 第三者出品の USDC 併売に Arc (Circle Gateway) での支払いを追加し、「Arc は通常決済のみ」に x402 の
       //   Circle Gateway 経由の支払いを除く旨を足し、「店主の指定ウォレットへ直接送金」にも Gateway 経由の例外を足すため
-      //   Terms/特商法/免責を同日改定 (料金は変えない)。プライバシーは据置。
+      //   Terms/特商法/免責を同日改定 (料金は変えない)。プライバシーも同日に別の改定 (x402 の USDC の送信先の開示)。
       expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-10-20');
       expect(LEGAL_ENTITY.tokuteiEffectiveDate).toBe('2026-10-20');
       expect(LEGAL_ENTITY.disclaimerEffectiveDate).toBe('2026-10-20');
       // 2026-09-10 改定案: 保護配布のチケット情報の第三者提供を追記。
       // 2026-10-13: 外部送信規律の公表 (3-3 外部送信について)・委託先の追加でプライバシーだけ改定。
-      expect(LEGAL_ENTITY.privacyEffectiveDate).toBe('2026-10-13');
+      // 2026-10-20: x402 の USDC の検証・精算の送信先 (CDP を委託先に・Circle Gateway を別の段落で) を開示。
+      expect(LEGAL_ENTITY.privacyEffectiveDate).toBe('2026-10-20');
     });
   });
 
