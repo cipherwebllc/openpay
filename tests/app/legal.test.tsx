@@ -247,7 +247,8 @@ describe('Legal pages', () => {
       expect(sectionBody?.textContent).toContain('- Coinbase, Inc. およびその関連会社 (米国): x402 による Base の USDC の支払いの検証および精算 (Coinbase Developer Platform)。');
       expect(sectionBody?.textContent).toContain('Circle Technology Services, LLC (米国) が提供する Circle Gateway に送信します');
       expect(sectionBody?.textContent).toContain('買い手が Circle Gateway を通じた支払いを選んだ場合に限り');
-      expect(sectionBody?.textContent).toContain('同社は当社の委託先ではなく、同社のプライバシーポリシーに従って');
+      expect(sectionBody?.textContent).toContain('同社は、この支払いに関する情報を、当社の委託先としてではなく、同社のプライバシーポリシーに従って');
+      expect(sectionBody?.textContent).toContain('買い手の署名および承認の情報 (有効期間・nonce 等)、購入する API の URL・説明等');
     });
 
     it('en: section 3 に Circle Paymaster 委託先開示 + 当社徴収0', () => {
@@ -263,7 +264,8 @@ describe('Legal pages', () => {
       expect(sectionBody?.textContent).toContain('- Coinbase, Inc. and its affiliates (United States): verification and settlement of USDC payments on Base made via x402 (Coinbase Developer Platform).');
       expect(sectionBody?.textContent).toContain('to Circle Gateway, provided by Circle Technology Services, LLC (United States)');
       expect(sectionBody?.textContent).toContain('only where the buyer chooses to pay through Circle Gateway');
-      expect(sectionBody?.textContent).toContain('Circle is not our service provider and handles this information under its own privacy policy');
+      expect(sectionBody?.textContent).toContain('For these payments, Circle does not act as our data processor and handles this information under its own privacy policy');
+      expect(sectionBody?.textContent).toContain('authorization details (including validity times and nonce), the URL, description and similar details of the API being purchased');
     });
 
     // 外部レビュー対応: Cookie/localStorage 正確化 + 要配慮個人情報 非取得 +
