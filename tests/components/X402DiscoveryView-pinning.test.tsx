@@ -205,10 +205,10 @@ describe('R10a pre-extraction pinning', () => {
           ],
         },
         "editing": {
-          "all": "441b58b79836cf95c07df2e1d95d6b03963d86866e2631b1d1ba35fe8cf94c07",
+          "all": "6e0cfdc86523b0f1c159cebba54e6b2d8cad9bf5ecb47250bfb3f11e2dc04e69",
           "parts": [
             "section 84703605eed1 あなたの登録登録済みの掲載を編集",
-            "section 31746fad37e1 掲載を編集402 ゲートを置くだ",
+            "section 25702af5f8f8 掲載を編集402 ゲートを置くだ",
             "h2 3282793f6040 Featured fixture",
             "section dd9b0d67eeae カタログ発見: /api/dis",
             "section c44df4912dbc 2円で試す1 JPYC + 手数",
@@ -216,10 +216,10 @@ describe('R10a pre-extraction pinning', () => {
           ],
         },
         "signedIn": {
-          "all": "a2174ce3f3166d75149255e9cd7c57b8bdc2bbb7a3c75e73d7eceff82efc0c08",
+          "all": "af644433fe254faf44c2dac09743bdf60c42c3b22658ecf4faa1c5924d95207c",
           "parts": [
             "section 84703605eed1 あなたの登録登録済みの掲載を編集",
-            "section b06f68f9c88e 新しい API を出品する402",
+            "section 016d5beedaeb 新しい API を出品する402",
             "h2 3282793f6040 Featured fixture",
             "section dd9b0d67eeae カタログ発見: /api/dis",
             "section c44df4912dbc 2円で試す1 JPYC + 手数",
@@ -264,10 +264,10 @@ describe('R10a pre-extraction pinning', () => {
           ],
         },
         "editing": {
-          "all": "d197af7a5a63fc08b4fb2928ef728f5bcb531011cab7574f556386f828782dd6",
+          "all": "1ea25110fd9feb77996552f71b772305ffe6d0d1b9b1de6b79d8915d841b022e",
           "parts": [
             "section 01e8bbeef899 Your registratio",
-            "section 5e647a682509 Edit listingPut ",
+            "section cb79bb273e4d Edit listingPut ",
             "h2 3282793f6040 Featured fixture",
             "section f780b219f7b8 CatalogDiscover ",
             "section 1afd73681508 Try it for ¥2A 1",
@@ -275,10 +275,10 @@ describe('R10a pre-extraction pinning', () => {
           ],
         },
         "signedIn": {
-          "all": "39b82de5a6d2dbab87187aca3ba90176f36d05414ff69cc123a5e4eee52060e8",
+          "all": "8d6f70fd37f73c263ac9509473f624525c577695f77410ca83137ecf80dc3394",
           "parts": [
             "section 01e8bbeef899 Your registratio",
-            "section 4b3f28bf78f6 List a new APIPu",
+            "section e566f3ea601c List a new APIPu",
             "h2 3282793f6040 Featured fixture",
             "section f780b219f7b8 CatalogDiscover ",
             "section 1afd73681508 Try it for ¥2A 1",
@@ -535,10 +535,10 @@ describe('R10a pre-extraction pinning', () => {
           ],
         },
         "confirmDelete": {
-          "all": "4e44e271f80ce31c501a4ebf6540763321e17625cc7d33577dbdae5e74f9b916",
+          "all": "acb0392a3ef7b8a2461c28631e2cd693d004d30c86778ec8fa9af13052890b7c",
           "parts": [
             "section 0110dfa05888 あなたの登録登録済みの掲載を編集",
-            "section 6a4aea4e7945 新しい API を出品する402",
+            "section e76ad6df9773 新しい API を出品する402",
             "h2 3282793f6040 Featured fixture",
             "section 08658fa17ca5 カタログ発見: /api/dis",
             "section c44df4912dbc 2円で試す1 JPYC + 手数",
@@ -546,10 +546,10 @@ describe('R10a pre-extraction pinning', () => {
           ],
         },
         "created": {
-          "all": "ffe7d11442fa672f36d50d3f0a4930c46f28ba2095bc5084e968863cd9e4b7ef",
+          "all": "0a404f866d82c4af6ad575bf001fd6db60406d1eb8a2043ce985f0ef73cabbee",
           "parts": [
             "section 0f61c4f24311 あなたの登録登録済みの掲載を編集",
-            "section 6a4aea4e7945 新しい API を出品する402",
+            "section e76ad6df9773 新しい API を出品する402",
             "h2 3282793f6040 Featured fixture",
             "section 08658fa17ca5 カタログ発見: /api/dis",
             "section c44df4912dbc 2円で試す1 JPYC + 手数",
@@ -557,9 +557,9 @@ describe('R10a pre-extraction pinning', () => {
           ],
         },
         "gateError": {
-          "all": "dae8614c09c03e14be605f0bc645af16592331e7b95f17b5ac5cbd1ea636499f",
+          "all": "93609d016d05d938e5ef0d0682a85126b5cf77f49163ec79c67f390a27db5efe",
           "parts": [
-            "section 40e1101c8a4b API を出品する402 ゲート",
+            "section cb291401f2b5 API を出品する402 ゲート",
             "h2 3282793f6040 Featured fixture",
             "section 08658fa17ca5 カタログ発見: /api/dis",
             "section c44df4912dbc 2円で試す1 JPYC + 手数",
@@ -567,9 +567,9 @@ describe('R10a pre-extraction pinning', () => {
           ],
         },
         "gateErrorCopied": {
-          "all": "adaf0312fdd3027e2dfdc5822c7d3015a1573dd12eae8dcf43c9533738eba76b",
+          "all": "97c1ffce3be7d937e4c3883a9cc380cc9f1219089987dc9755c19b2aa0797016",
           "parts": [
-            "section b7fa88a6bee1 API を出品する402 ゲート",
+            "section b29ea16962cc API を出品する402 ゲート",
             "h2 3282793f6040 Featured fixture",
             "section 08658fa17ca5 カタログ発見: /api/dis",
             "section c44df4912dbc 2円で試す1 JPYC + 手数",
@@ -587,9 +587,9 @@ describe('R10a pre-extraction pinning', () => {
           ],
         },
         "ownerEmpty": {
-          "all": "60c4db42a38f0b79d588fcf56ccfc6a99e620508d037a04d1bf9746059cc0b04",
+          "all": "8c36e16a3caf10a446279fcd0f9b311310fead21d13729ccb9b609313c65e58a",
           "parts": [
-            "section 49ecc65baa39 API を出品する402 ゲート",
+            "section bc7b5f8f84c3 API を出品する402 ゲート",
             "h2 3282793f6040 Featured fixture",
             "section 08658fa17ca5 カタログ発見: /api/dis",
             "section c44df4912dbc 2円で試す1 JPYC + 手数",
@@ -607,10 +607,10 @@ describe('R10a pre-extraction pinning', () => {
           ],
         },
         "snippetOpen": {
-          "all": "495c5a8d1f5d6b0e6caf0f8f5c7c7cebee532bc198d5014f5cb7a38631e40f48",
+          "all": "8333202355c48b449b603f5d137da9d610f9340e014f37c6969aa9e7c0cd5541",
           "parts": [
             "section 3382428b4640 あなたの登録登録済みの掲載を編集",
-            "section 6a4aea4e7945 新しい API を出品する402",
+            "section e76ad6df9773 新しい API を出品する402",
             "h2 3282793f6040 Featured fixture",
             "section 08658fa17ca5 カタログ発見: /api/dis",
             "section c44df4912dbc 2円で試す1 JPYC + 手数",

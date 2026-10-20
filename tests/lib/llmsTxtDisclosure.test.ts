@@ -156,6 +156,14 @@ describe('public/llms.txt 開示同期 (掟 14③)', () => {
       'dual-rail',
     );
     expect(llms).toContain(`USDC（${DISCLOSED_DUAL_RAIL_USDC.chainName}・標準 x402）`);
+    // 第三者出品の Arc (出品者のオプトイン) は Circle Gateway で精算し、売上は出品者の Gateway 残高に入る。
+    expect(llms).toContain(`${DISCLOSED_DUAL_RAIL_USDC.arcChainName}（\`eip155:${DISCLOSED_DUAL_RAIL_USDC.arcChainId}\`）の USDC も提示する`);
+    expect(llms).toContain('売上は出品者の受取アドレスの Gateway 残高に入り出品者が引き出す');
+    expect(llms).not.toContain('第三者出品の USDC 面は Base のみ');
+    expect(llms).toContain('ノーコードゲートウェイ x402-jpyc-gateway で動かしている出品は（SDK 版のゲートは Arc を提示しない）');
+    // 「Arc は通常決済のみ」「店舗のウォレットへ直接着金」にも x402 の Circle Gateway 経由の例外。
+    expect(llms).toContain('Arc は通常決済のみ〔x402 で Circle Gateway を通す支払いは除く・後述〕');
+    expect(llms).toContain('直接・即時に着金（x402 で Circle Gateway を通す Arc の支払いは、受取先の Gateway 残高に入り受取先が引き出す');
   });
 
   // E17: FIRST_PARTY_RESOURCES はカタログ flag で伸び縮みするので、全 flag を ON にして

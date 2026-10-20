@@ -44,6 +44,8 @@ With `ENABLE_X402_ARC_GATEWAY=1` the same endpoints also accept **USDC on Arc** 
 
 Base remains the CDP/Bazaar rail and is unchanged.
 
+Third-party listings that sell in USDC too (dual-rail, relayed by `/api/x402/relay/*`) get the same Arc option when the seller also opts in (`usdc.arc` on the listing), serves the listing with the no-code `x402-jpyc-gateway` (the `openpay-x402-sdk` gate keeps Base only), and `ENABLE_X402_DUAL_RAIL_ARC=1`: the relay's requirements add an Arc face (x402 v2 only, same amount and payee as Base) settled through Circle Gateway (buyers pre-deposit into Gateway and sign with an EOA), and revenue lands in the seller's Gateway balance, which the seller withdraws. OpenPay takes no fee. The catalog JSON's `usdc` field does not say whether a listing offers Arc; read the 402's `accepts`.
+
 **Client interoperability (verified with real settlements, 2026-07-29/30):** the Base USDC products are standard x402 (exact scheme) and were purchased end-to-end with the official clients `x402-fetch` 1.2 (v1 `X-PAYMENT`) and `@x402/fetch` 2.20 (v2 `PAYMENT-SIGNATURE`).
 
 The JPYC products use OpenPay's forwarder-split and require `openpay-x402-sdk` / `openpay-x402-mcp`; standard clients reject them safely **before signing** (the v1 client stops at schema validation because `eip155:137` is not in its network enum), so no funds can move.

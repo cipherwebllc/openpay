@@ -14,7 +14,7 @@ OpenPay は、JPYC / USDC のウォレット送金を、店舗・イベント向
 
 ## Key features
 
-- **Non-custodial, no wallet lock-in** — payments go directly to the merchant wallet; OpenPay never holds funds.
+- **Non-custodial, no wallet lock-in** — payments go directly to the merchant wallet (x402 payments on Arc land in the payee's Circle Gateway balance for withdrawal); OpenPay never holds funds.
   Any wallet that signs standard ERC20 / ERC-4337 / EIP-7702 transactions can pay, and no app install is required.
 - **JPYC / USDC with QR-locked conditions** — amount, token, chain, and recipient are pinned per QR; customers cannot mistype them.
 - **Standard or gasless payment** — Standard: the customer pays gas in the native token.
@@ -77,7 +77,7 @@ Full details (fee bearer, Arc, register history): [docs/FEATURES.md#fees](./docs
 
 ## Non-custodial design and beta notice
 
-OpenPay **never holds** merchant funds. Customer payments are sent **directly to the merchant wallet**. OpenPay does **not** issue, redeem, custody, or exchange JPYC / USDC.
+OpenPay **never holds** merchant funds. Customer payments are sent **directly to the merchant wallet** (x402 payments through Circle Gateway are credited to the payee's Circle Gateway balance instead, and the payee withdraws them; OpenPay still never holds them). OpenPay does **not** issue, redeem, custody, or exchange JPYC / USDC.
 
 OpenPay is **beta software**. Test with small amounts first. Blockchain transactions are **irreversible** — there is no chargeback.
 Always verify recipient address, token, chain, amount, and final receipt.
@@ -137,6 +137,7 @@ curl -si https://open-pay.jp/api/paid/hello | grep -i '^payment-required:' | cut
 ```
 
 OpenPay also runs a managed **JPYC x402 facilitator** and a public catalog (`/discovery`), and offers the Japan Web3 Directory API and the JPYC Shops API.
+Third-party catalog listings can also sell in USDC: on Base (relayed to the Coinbase CDP facilitator) and, when the seller also opts in and serves the listing with the no-code [x402-jpyc-gateway](https://github.com/cipherwebllc/x402-jpyc-gateway) (the `openpay-x402-sdk` gate stays Base-only), on Arc through Circle Gateway (buyers pay from a Gateway balance; revenue lands in the seller's Gateway balance). OpenPay takes no fee on the USDC side.
 
 - Endpoints, prices, and the buyer example: [docs/API.md](./docs/API.md)
 - Rules for listing a paid resource: [docs/LISTING_POLICY.md](./docs/LISTING_POLICY.md)

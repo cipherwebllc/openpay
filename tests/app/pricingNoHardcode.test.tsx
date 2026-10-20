@@ -25,7 +25,7 @@ vi.mock('@/lib/legal', async (importOriginal) => {
     DISCLOSED_STORE_GAS_WALLET: { ...actual.DISCLOSED_STORE_GAS_WALLET, feeWei: 7 },
     disclosedStoreGasChains: (locale: 'ja' | 'en') => (locale === 'ja' ? 'ChainA・ChainB' : 'ChainA and ChainB'),
     DISCLOSED_STORE_USDC_PAYMENT: { ...actual.DISCLOSED_STORE_USDC_PAYMENT, chainName: 'StoreChain' },
-    DISCLOSED_DUAL_RAIL_USDC: { ...actual.DISCLOSED_DUAL_RAIL_USDC, chainName: 'DualChain' },
+    DISCLOSED_DUAL_RAIL_USDC: { ...actual.DISCLOSED_DUAL_RAIL_USDC, chainName: 'DualChain', arcChainName: 'DualArcChain' },
     DISCLOSED_CCTP_FEE: { ...actual.DISCLOSED_CCTP_FEE, maxFeeBps: 25, minMaxFeeAtomic: 5_000 },
   };
 });
@@ -50,6 +50,7 @@ const EXPECTED = {
     'ChainA・ChainB',
     'StoreChain',
     'DualChain',
+    'DualArcChain',
     '983',
     '980',
     '960',
@@ -68,6 +69,7 @@ const EXPECTED = {
     'ChainA and ChainB',
     'StoreChain',
     'DualChain',
+    'DualArcChain',
     '983',
     '1,040',
     '1,015',

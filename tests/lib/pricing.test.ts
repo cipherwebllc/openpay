@@ -93,6 +93,7 @@ describe('⑤ 開示値が本文に入る (今の正本)', () => {
     expect(text).toContain(locale === 'ja' ? `最低 ${xf} JPYC` : `minimum ${xf} JPYC`);
     expect(text).toContain(DISCLOSED_STORE_USDC_PAYMENT.chainName);
     expect(text).toContain(DISCLOSED_DUAL_RAIL_USDC.chainName);
+    expect(text).toContain(DISCLOSED_DUAL_RAIL_USDC.arcChainName);
     expect(text).toContain(disclosedStoreGasChains(locale));
     expect(text).toContain(`${DISCLOSED_STORE_GAS_WALLET.feeWei} wei`);
   });

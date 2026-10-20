@@ -159,9 +159,9 @@ const ja: TransparencyContent = {
 
   custodyTitle: '1. 資金を保管しない',
   custodyItems: [
-    '決済は買い手のウォレットから売り手のウォレットへ直接送金され、OpenPay は商品代金を受領・保管・精算しません。',
+    '決済は買い手のウォレットから売り手のウォレットへ直接送金され、OpenPay は商品代金を受領・保管・精算しません。x402 で Circle Gateway を通す支払い（Arc）は売り手の Circle Gateway 上の残高に入り、売り手が自分で引き出します（資金は OpenPay を経由しません）。',
     'ガスレス JPYC の recover 経路では、forwarder コントラクトが 1 トランザクション内で売り手の受取分と OpenPay 利用料を原子的に分割するだけで、OpenPay が残高を保持する瞬間はありません。',
-    '売上は売り手のウォレットへ直接着金するため、OpenPay による引き出し承認は不要です。',
+    '売上は売り手のウォレット（Circle Gateway を通す支払いでは売り手の Gateway 残高）へ直接入るため、OpenPay による引き出し承認は不要です。',
   ],
 
   contractsTitle: '2. 対応トークンとコントラクト',
@@ -264,9 +264,9 @@ const en: TransparencyContent = {
 
   custodyTitle: '1. We do not custody funds',
   custodyItems: [
-    'Payments move directly from the buyer’s wallet to the seller’s wallet. OpenPay does not receive, hold, or settle the purchase principal.',
+    'Payments move directly from the buyer’s wallet to the seller’s wallet. OpenPay does not receive, hold, or settle the purchase principal. Payments made via x402 through Circle Gateway (Arc) are credited to the seller’s Circle Gateway balance, and the seller withdraws them; the funds never pass through OpenPay.',
     'On the gasless JPYC recover path, the forwarder contract only splits the seller amount and the OpenPay fee atomically within one transaction. There is no moment when OpenPay holds the balance.',
-    'Sales settle directly to the seller’s wallet, so no withdrawal approval from OpenPay is required.',
+    'Sales settle directly to the seller’s wallet (or, for payments through Circle Gateway, the seller’s Gateway balance), so no withdrawal approval from OpenPay is required.',
   ],
 
   contractsTitle: '2. Supported tokens and contracts',
