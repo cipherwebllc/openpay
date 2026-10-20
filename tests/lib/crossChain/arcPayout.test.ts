@@ -2,7 +2,7 @@
 // 資金に関わる約束を固定する: 自分宛て・Arc → Arc・額 + 手数料 = 残高 (残高 0)・maxFee = 手数料ちょうど・
 // Circle の応答を自分の署名と照合してから受け取りの取引を送る・失効した attestation は送らない。
 import { describe, expect, it, vi } from 'vitest';
-import { getAddress, keccak256, pad, parseUnits, type Hex } from 'viem';
+import { getAddress, keccak256, pad, parseAbiItem, parseUnits, toEventSelector, type Hex } from 'viem';
 import {
   ArcPayoutError,
   arcPayoutChain,
@@ -22,7 +22,20 @@ import { gatewayAttestation } from '../../fixtures/gateway';
 
 const DEPOSITOR = getAddress('0x52d4901142e2b5680027da5eb47c86cb02a3ca81');
 const ARC_USDC = '0x3600000000000000000000000000000000000000';
+const ARC_USDC_FOR_LOG = ARC_USDC as Hex;
 const BASE = 'https://gateway.test';
+const SPEC_HASH = `0x${'5a'.repeat(32)}` as Hex;
+
+/** GatewayMinter の AttestationUsed のログ (2026-10-21 の本番の取引と同じ形: transferSpecHash は topics[3])。 */
+function attestationUsedLog(transferSpecHash: Hex) {
+  return {
+    address: GATEWAY_MINTER_ADDRESS,
+    topics: [
+      toEventSelector(parseAbiItem('event AttestationUsed(address indexed token, address indexed recipient, bytes32 indexed transferSpecHash, uint32 sourceDomain, bytes32 sourceDepositor, bytes32 sourceSigner, uint256 value)')),
+      pad(ARC_USDC_FOR_LOG), pad(DEPOSITOR), transferSpecHash,
+    ],
+  };
+}
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -179,7 +192,10 @@ function harness(opts: { balances?: string[]; fee?: string; transfer?: (intent: 
       minter.minted = true;
       return { status: 'success', transactionHash: hash, blockNumber: 500n };
     }),
-    getTransactionReceipt: vi.fn(async ({ hash }: { hash: Hex }) => ({ status: 'success', transactionHash: hash, to: GATEWAY_MINTER_ADDRESS })),
+    // 既定: この引き出しの受け取り (GatewayMinter の AttestationUsed・spec hash 一致) を含む成功した取引
+    getTransactionReceipt: vi.fn(async ({ hash }: { hash: Hex }) => ({
+      status: 'success', transactionHash: hash, to: GATEWAY_MINTER_ADDRESS, logs: [attestationUsedLog(SPEC_HASH)],
+    })),
   };
   const deps = {
     walletClient: walletClient as never, publicClient: publicClient as never, switchChainAsync, fetch, baseUrl: BASE,
@@ -241,7 +257,7 @@ describe('requestArcPayout', () => {
 describe('completeArcPayout (受け取りの取引)', () => {
   const TX = `0x${'ab'.repeat(32)}` as Hex;
   const base: ArcPayoutAttestation = {
-    depositor: DEPOSITOR, attestation: '0xaa', signature: '0xbb', transferSpecHash: `0x${'5a'.repeat(32)}`,
+    depositor: DEPOSITOR, attestation: '0xaa', signature: '0xbb', transferSpecHash: SPEC_HASH,
     expiresAtBlock: 1_000n, value: parseUnits('0.027', 6),
   };
 
@@ -341,9 +357,24 @@ describe('completeArcPayout (受け取りの取引)', () => {
     await expect(completeArcPayout({ ...base, txHash: TX }, h.deps)).resolves.toBe(TX);
     h.publicClient.getTransactionReceipt.mockResolvedValueOnce(null as never);
     await expect(completeArcPayout({ ...base, txHash: TX }, h.deps)).resolves.toBeNull();
-    h.publicClient.getTransactionReceipt.mockResolvedValueOnce({ status: 'success', transactionHash: TX, to: DEPOSITOR } as never);
+    // 成功しても、この引き出しの受け取りの記録 (AttestationUsed) が無い取引 (取り消し・別の引き出し) は返さない
+    h.publicClient.getTransactionReceipt.mockResolvedValueOnce({ status: 'success', transactionHash: TX, to: GATEWAY_MINTER_ADDRESS, logs: [] } as never);
+    await expect(completeArcPayout({ ...base, txHash: TX }, h.deps)).resolves.toBeNull();
+    h.publicClient.getTransactionReceipt.mockResolvedValueOnce({
+      status: 'success', transactionHash: TX, to: GATEWAY_MINTER_ADDRESS, logs: [attestationUsedLog(`0x${'99'.repeat(32)}`)],
+    } as never);
     await expect(completeArcPayout({ ...base, txHash: TX }, h.deps)).resolves.toBeNull();
     expect(h.walletClient.sendTransaction).not.toHaveBeenCalled();
+  });
+
+  it('EIP-7702 のスマートアカウントが委任の仕組みを経由して送った (to が GatewayMinter でない) 取引も、受け取りの記録があれば返す', async () => {
+    const h = harness();
+    h.minter.minted = true;
+    // 2026-10-21 の本番の引き出し: to = 委任の仕組みのコントラクト・GatewayMinter の AttestationUsed を含む
+    h.publicClient.getTransactionReceipt.mockResolvedValueOnce({
+      status: 'success', transactionHash: TX, to: '0xdb9b1e94b5b69df7e401ddbede43491141047db3', logs: [attestationUsedLog(SPEC_HASH)],
+    } as never);
+    await expect(completeArcPayout({ ...base, txHash: TX }, h.deps)).resolves.toBe(TX);
   });
 
   it('まだ送っていないとき、記録を読めなければ送らない', async () => {
