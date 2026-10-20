@@ -78,6 +78,19 @@ describe('checkArcPayToReachability', () => {
     for (const [, options] of mocks.transportForChain.mock.calls) expect(options).toEqual({ timeout: 4_000, retryCount: 0 });
   });
 
+  it('route の締め切りを RPC に渡し、過ぎていたら RPC を呼ばずに rpc_unavailable', async () => {
+    const startedAt = Date.now();
+    await expect(arcPayToRejection({ payTo: PAY_TO, arc: true }, undefined, startedAt)).resolves.toBeNull();
+    for (const [, options] of mocks.transportForChain.mock.calls) {
+      expect(options).toEqual({ timeout: 4_000, retryCount: 0, deadline: startedAt + 11_000 });
+    }
+    mocks.transportForChain.mockClear();
+    await expect(arcPayToRejection({ payTo: PAY_TO, arc: true }, undefined, Date.now() - 11_000)).resolves.toEqual({
+      error: 'usdc_arc_check_unavailable', status: 503,
+    });
+    expect(mocks.transportForChain).not.toHaveBeenCalled();
+  });
+
   it('RPC 障害は EOA と誤認せず rpc_unavailable (fail-closed)', async () => {
     mocks.codes.set(5042, new Error('timeout'));
     await expect(checkArcPayToReachability(PAY_TO)).resolves.toEqual({ ok: false, reason: 'rpc_unavailable' });

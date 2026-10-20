@@ -12,6 +12,8 @@ export type ArcPayToReachability =
 
 /** 1 回の RPC の上限 (Base と Arc は並行・再試行なし)。 */
 export const ARC_PAYTO_RPC_TIMEOUT_MS = 4_000;
+/** route (maxDuration 15 秒) に入ってから、この検査の RPC を待ってよい時間 (残りは後の処理と応答に残す)。 */
+export const ARC_PAYTO_ROUTE_BUDGET_MS = 11_000;
 
 /**
  * 出品の「Arc (Circle Gateway) でも販売する」の受取先 fence (plans/arc-gateway-payout.md・user 裁定 2026-10-20)。
@@ -22,14 +24,20 @@ export const ARC_PAYTO_RPC_TIMEOUT_MS = 4_000;
  * 受取先が Base か Arc でコードを持つ (7702 の委任は除く) なら Arc の同意を受け付けない。
  * 網は x402 の network に追従 (base-sepolia → Base Sepolia + Arc testnet・それ以外 → Base + Arc mainnet)。
  */
-export async function checkArcPayToReachability(rawPayTo: string): Promise<ArcPayToReachability> {
+export async function checkArcPayToReachability(
+  rawPayTo: string,
+  opts: { deadline?: number } = {},
+): Promise<ArcPayToReachability> {
   if (!isAddress(rawPayTo)) return { ok: false, reason: 'invalid' };
   const payTo = getAddress(rawPayTo);
+  // route の締め切りを過ぎていたら RPC を呼ばずに 503 (前の処理で時間を使い切ったとき)。
+  if (opts.deadline !== undefined && Date.now() >= opts.deadline) return { ok: false, reason: 'rpc_unavailable' };
   const chains = x402Config.network === 'base-sepolia' ? [baseSepolia, arcTestnet] : [base, arc];
   // 登録の route は maxDuration 15 秒。RPC が応答しないときも、その前に 503 (rpc_unavailable) を返せるよう
   // 1 回 4 秒で区切り、再試行しない (viem の既定は 10 秒 × 再試行 3 回で、再試行の待ちは Retry-After にも従うため
   // route ごと打ち切られて決めた 503 を返せない)。再試行は出品者が保存し直すことで足りる。
-  const transport = { timeout: ARC_PAYTO_RPC_TIMEOUT_MS, retryCount: 0 };
+  // route の締め切り (opts.deadline) があれば、それより先は待たない。
+  const transport = { timeout: ARC_PAYTO_RPC_TIMEOUT_MS, retryCount: 0, ...(opts.deadline !== undefined ? { deadline: opts.deadline } : {}) };
   try {
     const codes = await Promise.all(
       chains.map((chain) =>
@@ -54,10 +62,15 @@ type UsdcFace = { payTo: string; arc?: boolean } | undefined;
 export async function arcPayToRejection(
   next: UsdcFace,
   prev?: UsdcFace,
+  /** route に入った時刻 (Date.now())。RPC はここから ARC_PAYTO_ROUTE_BUDGET_MS までしか待たない。 */
+  routeStartedAt?: number,
 ): Promise<{ error: 'usdc_arc_contract_pay_to' | 'usdc_arc_check_unavailable' | 'invalid_usdc_pay_to'; status: 400 | 503 } | null> {
   if (next?.arc !== true) return null;
   if (prev?.arc === true && prev.payTo === next.payTo) return null;
-  const checked = await checkArcPayToReachability(next.payTo);
+  const checked = await checkArcPayToReachability(
+    next.payTo,
+    routeStartedAt === undefined ? {} : { deadline: routeStartedAt + ARC_PAYTO_ROUTE_BUDGET_MS },
+  );
   if (checked.ok) return null;
   if (checked.reason === 'contract_wallet') return { error: 'usdc_arc_contract_pay_to', status: 400 };
   if (checked.reason === 'rpc_unavailable') return { error: 'usdc_arc_check_unavailable', status: 503 };

@@ -62,7 +62,8 @@ describe('POST /api/facilitator/resources', () => {
     const res = await POST(req());
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({ error: 'usdc_arc_contract_pay_to' });
-    expect(h.arcPayToRejection).toHaveBeenCalledWith(USDC_ARC);
+    // 3 つ目は route に入った時刻 (RPC を route の締め切りまでしか待たない)
+    expect(h.arcPayToRejection).toHaveBeenCalledWith(USDC_ARC, undefined, expect.any(Number));
     expect(h.createResource).not.toHaveBeenCalled();
   });
 
@@ -86,13 +87,13 @@ describe('PATCH /api/facilitator/resources/[id]', () => {
   it('変更後の USDC 面と、保存済みの USDC 面を渡して検査する (同意済み・同じ受取先は検査側が飛ばす)', async () => {
     const res = await PATCH(req(), ctx);
     expect(res.status).toBe(200);
-    expect(h.arcPayToRejection).toHaveBeenCalledWith(USDC_ARC, { payTo: WALLET, priceUsd: '0.01', arc: true });
+    expect(h.arcPayToRejection).toHaveBeenCalledWith(USDC_ARC, { payTo: WALLET, priceUsd: '0.01', arc: true }, expect.any(Number));
   });
 
   it('保存済みが読めない (null) ときは前の値なしで検査する', async () => {
     h.getResource.mockResolvedValue(null);
     await PATCH(req(), ctx);
-    expect(h.arcPayToRejection).toHaveBeenCalledWith(USDC_ARC, undefined);
+    expect(h.arcPayToRejection).toHaveBeenCalledWith(USDC_ARC, undefined, expect.any(Number));
   });
 
   it('断られたら更新しない', async () => {

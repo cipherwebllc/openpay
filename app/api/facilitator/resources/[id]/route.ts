@@ -43,6 +43,7 @@ export async function PATCH(
   req: Request,
   { params }: { params: Promise<{ id: string }> },
 ): Promise<NextResponse> {
+  const startedAt = Date.now();
   if (!env.enableX402Facilitator) return notFound();
   const csrf = rejectCrossOriginWrite(req, { json: true });
   if (csrf) return csrf;
@@ -92,7 +93,7 @@ export async function PATCH(
   if (!parsed.ok) return NextResponse.json({ error: parsed.reason }, { status: 400 });
 
   // 新規登録と同じ Arc 受取先の検査。同意済みで受取先も同じ編集は検査しない (existing=null なら検査する)。
-  const arcRejection = await arcPayToRejection(parsed.input.usdc, existing?.usdc);
+  const arcRejection = await arcPayToRejection(parsed.input.usdc, existing?.usdc, startedAt);
   if (arcRejection) return NextResponse.json({ error: arcRejection.error }, { status: arcRejection.status });
 
   // 差し替え URL の moderation は **owner かつ resource 存在時のみ** 実行 (probe を owner に限定)。

@@ -251,8 +251,12 @@ const MINTER_USED_ABI = parseAbi(['function isTransferSpecHashUsed(bytes32 trans
 async function readArcPayoutOutcome(
   publicClient: PublicClient,
   attestation: ArcPayoutAttestation,
+  /** 確定した取引のブロック。読み取り先の RPC がそこまで追いついていなければ投げる (古い状態で「受け取っていない」と
+   *  決めて、送り直しを許さないため)。 */
+  atLeastBlock?: bigint,
 ): Promise<'minted' | 'expired' | 'open'> {
   const head = await publicClient.getBlockNumber({ cacheTime: 0 });
+  if (atLeastBlock !== undefined && head < atLeastBlock) throw new Error('Arc RPC has not reached the receipt block');
   const used = await publicClient.readContract({
     address: GATEWAY_MINTER_ADDRESS,
     abi: MINTER_USED_ABI,
@@ -292,7 +296,9 @@ export async function completeArcPayout(
   const before = txHash
     ? await readArcPayoutOutcome(publicClient, attestation).catch(() => null)
     : await readArcPayoutOutcome(publicClient, attestation);
-  if (before === 'minted') return txHash ?? null;
+  // 受け取り済み: 自分が送った取引で受け取ったと確かめられたときだけ、その hash を返す (結果が分からない間に
+  // ウォレットが置き換えた取引で受け取っていたら、残した hash は受け取りの取引ではない)。
+  if (before === 'minted') return txHash ? await ownMintHash(publicClient, txHash) : null;
   if (before === 'expired') throw new ArcPayoutError('attestation_expired');
 
   if (!txHash) {
@@ -309,7 +315,7 @@ export async function completeArcPayout(
 
   deps.onStep?.('confirming');
   let minedHash: Hex = txHash;
-  let mined = false;
+  let minedBlock: bigint | undefined;
   try {
     const receipt = await publicClient.waitForTransactionReceipt({
       hash: txHash,
@@ -321,14 +327,20 @@ export async function completeArcPayout(
       },
     });
     minedHash = receipt.transactionHash;
-    mined = true;
+    minedBlock = receipt.blockNumber;
   } catch {
     // RPC 障害・時間切れ: 取引は届いているかもしれない。下の状態の読み取りで決める。
   }
-  const after = await readArcPayoutOutcome(publicClient, attestation).catch(() => null);
+  const after = await readArcPayoutOutcome(publicClient, attestation, minedBlock).catch(() => null);
   if (after === 'minted') return minedHash;
   if (after === 'expired') throw new ArcPayoutError('attestation_expired');
-  throw new ArcPayoutError(after === 'open' && mined ? 'mint_not_completed' : 'confirm_unknown');
+  throw new ArcPayoutError(after === 'open' && minedBlock !== undefined ? 'mint_not_completed' : 'confirm_unknown');
+}
+
+/** 残した hash の取引が GatewayMinter への成功した取引なら、その hash。確かめられなければ null (リンクを出さない)。 */
+async function ownMintHash(publicClient: PublicClient, txHash: Hex): Promise<Hex | null> {
+  const receipt = await publicClient.getTransactionReceipt({ hash: txHash }).catch(() => null);
+  return receipt?.status === 'success' && receipt.to?.toLowerCase() === GATEWAY_MINTER_ADDRESS.toLowerCase() ? txHash : null;
 }
 
 export type ArcPayoutErrorCode =

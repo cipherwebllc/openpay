@@ -53,6 +53,7 @@ export async function GET(): Promise<NextResponse> {
 }
 
 export async function POST(req: Request): Promise<NextResponse> {
+  const startedAt = Date.now();
   if (!env.enableX402Facilitator) {
     return NextResponse.json({ error: 'not_found' }, { status: 404 });
   }
@@ -111,7 +112,7 @@ export async function POST(req: Request): Promise<NextResponse> {
   }
 
   // Arc に同意した出品の受取先がコントラクトなら断る (Arc の売上を引き出せない受取先・plans/arc-gateway-payout.md)。
-  const arcRejection = await arcPayToRejection(parsed.input.usdc);
+  const arcRejection = await arcPayToRejection(parsed.input.usdc, undefined, startedAt);
   if (arcRejection) return NextResponse.json({ error: arcRejection.error }, { status: arcRejection.status });
 
   // モデレーション: 無料で公開されている URL の価格付き登録を弾く (probe で 200 を確認したら拒否)。
