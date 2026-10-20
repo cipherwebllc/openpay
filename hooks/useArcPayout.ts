@@ -116,19 +116,18 @@ export function useArcPayout() {
 
   // 引き出し元のアドレス → 進み具合。表示中のアカウントを切り替えても消さない。
   const [flows, setFlows] = useState<Readonly<Record<string, ArcPayoutFlow>>>({});
-  // クリックの時点の値を読むための写し (描画の後に更新する)。
+  // クリックの時点の値を読むための写し。書き換えと同時に更新する (描画の後の effect で写すと、描画と effect の
+  // 間のクリックが古い値を読み、続きの送信や 10 分の制限を見落とす)。
   const flowsRef = useRef(flows);
   const inflight = useRef(new Set<string>());
   const current = useRef<Address | undefined>(address);
-  useEffect(() => {
-    flowsRef.current = flows;
-  }, [flows]);
   useEffect(() => {
     current.current = address;
   }, [address]);
 
   const setFlowFor = useCallback((who: Address, flow: ArcPayoutFlow) => {
-    setFlows((all) => ({ ...all, [who]: flow }));
+    flowsRef.current = { ...flowsRef.current, [who]: flow };
+    setFlows(flowsRef.current);
   }, []);
   const refresh = useCallback(
     (who: Address) => void queryClient.invalidateQueries({ queryKey: ['arcPayout', who] }),

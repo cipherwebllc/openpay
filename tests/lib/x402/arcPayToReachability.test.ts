@@ -72,13 +72,10 @@ describe('checkArcPayToReachability', () => {
     expect(mocks.transportForChain.mock.calls.map(([id]) => id).sort((a, b) => a - b)).toEqual([84532, 5042002]);
   });
 
-  it('RPC は時間を区切って呼ぶ (route の 15 秒より前に 503 を返すため・viem の既定は 10 秒 × 3 回)', async () => {
+  it('RPC は 1 回 4 秒・再試行なしで呼ぶ (route の 15 秒より前に 503 を返すため・viem の既定は 10 秒 × 3 回 + Retry-After)', async () => {
     await checkArcPayToReachability(PAY_TO);
-    for (const [, options] of mocks.transportForChain.mock.calls) {
-      expect(options).toMatchObject({ timeout: 3_000, retryCount: 1 });
-      expect(options.deadline).toBeGreaterThan(Date.now());
-      expect(options.deadline).toBeLessThanOrEqual(Date.now() + 6_000);
-    }
+    expect(mocks.transportForChain).toHaveBeenCalledTimes(2);
+    for (const [, options] of mocks.transportForChain.mock.calls) expect(options).toEqual({ timeout: 4_000, retryCount: 0 });
   });
 
   it('RPC 障害は EOA と誤認せず rpc_unavailable (fail-closed)', async () => {

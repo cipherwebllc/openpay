@@ -252,8 +252,9 @@ describe('completeArcPayout (受け取りの取引)', () => {
       account: DEPOSITOR, to: GATEWAY_MINTER_ADDRESS, chain: arcPayoutChain(),
     }));
     expect(onBroadcast).toHaveBeenCalledWith(TX);
+    // 受け取りの記録は、失効の判定と同じブロックの時点で読む
     expect(h.publicClient.readContract).toHaveBeenCalledWith(expect.objectContaining({
-      address: GATEWAY_MINTER_ADDRESS, functionName: 'isTransferSpecHashUsed', args: [base.transferSpecHash],
+      address: GATEWAY_MINTER_ADDRESS, functionName: 'isTransferSpecHashUsed', args: [base.transferSpecHash], blockNumber: 500n,
     }));
   });
 
@@ -272,7 +273,10 @@ describe('completeArcPayout (受け取りの取引)', () => {
       h.minter.minted = true;
       return { status: 'success', transactionHash: REPRICED };
     });
-    await expect(completeArcPayout(base, h.deps)).resolves.toBe(REPRICED);
+    const onBroadcast = vi.fn();
+    await expect(completeArcPayout(base, { ...h.deps, onBroadcast })).resolves.toBe(REPRICED);
+    // 置き換え後の hash も残す (この後の読み取りが失敗しても、確かめ直しは置き換え後の取引を見る)
+    expect(onBroadcast).toHaveBeenLastCalledWith(REPRICED);
   });
 
   it('ウォレットで取り消した (同じ nonce の別の取引が成功した) ら、成功と言わずに送り直せるようにする', async () => {
@@ -305,6 +309,30 @@ describe('completeArcPayout (受け取りの取引)', () => {
       throw new Error('rpc timeout');
     });
     await expect(completeArcPayout(base, h.deps)).resolves.toBe(TX);
+  });
+
+  it('送った取引が消えて receipt が出ないまま失効したら attestation_expired で終わる (確かめ直しを続けさせない)', async () => {
+    const h = harness();
+    h.publicClient.waitForTransactionReceipt.mockRejectedValue(new Error('not found'));
+    h.publicClient.getBlockNumber.mockResolvedValueOnce(900n).mockResolvedValue(1_001n);
+    await expect(completeArcPayout({ ...base, txHash: TX }, h.deps)).rejects.toMatchObject({ code: 'attestation_expired' });
+    expect(h.walletClient.sendTransaction).not.toHaveBeenCalled();
+  });
+
+  it('確定の後に記録を読めない (RPC 障害) なら confirm_unknown — 「送り直せる」とは言わない', async () => {
+    const h = harness();
+    h.publicClient.waitForTransactionReceipt.mockImplementationOnce(async ({ hash }: { hash: Hex }) => {
+      h.minter.readFails = true;
+      return { status: 'success', transactionHash: hash };
+    });
+    await expect(completeArcPayout(base, h.deps)).rejects.toMatchObject({ code: 'confirm_unknown' });
+  });
+
+  it('まだ送っていないとき、記録を読めなければ送らない', async () => {
+    const h = harness();
+    h.minter.readFails = true;
+    await expect(completeArcPayout(base, h.deps)).rejects.toThrow('rpc down');
+    expect(h.walletClient.sendTransaction).not.toHaveBeenCalled();
   });
 
   it('失効 (Arc のブロック高が maxBlockHeight を過ぎた) attestation は送らない', async () => {
