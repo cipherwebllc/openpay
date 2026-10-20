@@ -9,7 +9,7 @@
 // (circlefin/evm-gateway-contracts Burns.sol)。額 = 残高 − 手数料・maxFee = 手数料ちょうどで署名する。
 // Circle がこの maxFee を受け付けなければ /v1/transfer が拒否する (余裕を足して再署名はしない・user 裁定)。
 
-import { getAddress, parseAbi, parseAbiItem, parseUnits, toEventSelector, type Address, type Hex, type PublicClient, type WalletClient } from 'viem';
+import { getAddress, parseAbi, parseAbiItem, parseUnits, toEventSelector, type Address, type Hex, type Log, type PublicClient, type WalletClient } from 'viem';
 import { chainForSlug } from '../chains';
 import { deploymentForSlug } from '../tokens';
 import { CIRCLE_GATEWAY_API_BASE_URL, GATEWAY_MINTER_ADDRESS, GATEWAY_WALLET_ADDRESS } from './config';
@@ -316,6 +316,7 @@ export async function completeArcPayout(
   deps.onStep?.('confirming');
   let minedHash: Hex = txHash;
   let minedBlock: bigint | undefined;
+  let minedLogs: readonly Log[] | undefined;
   try {
     const receipt = await publicClient.waitForTransactionReceipt({
       hash: txHash,
@@ -328,11 +329,17 @@ export async function completeArcPayout(
     });
     minedHash = receipt.transactionHash;
     minedBlock = receipt.blockNumber;
+    minedLogs = receipt.status === 'success' ? receipt.logs : [];
   } catch {
     // RPC 障害・時間切れ: 取引は届いているかもしれない。下の状態の読み取りで決める。
   }
   const after = await readArcPayoutOutcome(publicClient, attestation, minedBlock).catch(() => null);
-  if (after === 'minted') return minedHash;
+  // 受け取り済み: リンクに出す hash は、この引き出しを受け取った取引と確かめられたものだけ (時間切れの間に置き換えた
+  // 取引で受け取っていた・確定した取引が取り消しで別の人が受け取っていた、などは null = リンクを出さない)。
+  if (after === 'minted') {
+    if (minedLogs) return logsMintThis(minedLogs, attestation.transferSpecHash) ? minedHash : null;
+    return ownMintHash(publicClient, minedHash, attestation.transferSpecHash);
+  }
   if (after === 'expired') throw new ArcPayoutError('attestation_expired');
   throw new ArcPayoutError(after === 'open' && minedBlock !== undefined ? 'mint_not_completed' : 'confirm_unknown');
 }
@@ -349,12 +356,15 @@ const ATTESTATION_USED_TOPIC = toEventSelector(parseAbiItem(
  */
 async function ownMintHash(publicClient: PublicClient, txHash: Hex, transferSpecHash: Hex): Promise<Hex | null> {
   const receipt = await publicClient.getTransactionReceipt({ hash: txHash }).catch(() => null);
-  if (receipt?.status !== 'success') return null;
-  const minted = receipt.logs.some((log) =>
+  return receipt?.status === 'success' && logsMintThis(receipt.logs, transferSpecHash) ? txHash : null;
+}
+
+/** 取引のログに、この引き出し (transferSpecHash) の GatewayMinter の AttestationUsed があるか。 */
+function logsMintThis(logs: readonly Log[], transferSpecHash: Hex): boolean {
+  return logs.some((log) =>
     log.address.toLowerCase() === GATEWAY_MINTER_ADDRESS.toLowerCase() &&
     log.topics[0]?.toLowerCase() === ATTESTATION_USED_TOPIC &&
     log.topics[3]?.toLowerCase() === transferSpecHash.toLowerCase());
-  return minted ? txHash : null;
 }
 
 export type ArcPayoutErrorCode =
