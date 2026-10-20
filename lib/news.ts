@@ -34,8 +34,8 @@ export type NewsItem = {
 // 表示順を強制しないが、可読性のため宣言時点でも新しい順に並べる。
 export const NEWS_ITEMS: readonly NewsItem[] = [
   {
-    id: 'x402-dual-rail-arc-2026-10-21',
-    date: '2026-10-21',
+    id: 'x402-dual-rail-arc-2026-10-20',
+    date: '2026-10-20',
     category: 'feature',
     title: { ja: '第三者の出品も Arc の USDC で販売できます', en: 'Third-party listings can now also sell in USDC on Arc' },
     body: {
@@ -190,8 +190,8 @@ export const NEWS_ITEMS: readonly NewsItem[] = [
     category: 'feature',
     title: { ja: 'AI 向け有料 API が Arc の USDC でも支払えます', en: 'Paid APIs for AI agents now accept USDC on Arc' },
     body: {
-      ja: 'OpenPay 自身の USDC 版有料 API (x402) に、Base に加えて Arc の支払い方法を追加しました。Arc は Circle Gateway の x402 facilitator で精算し、AI エージェントは Gateway 残高からガス不要で支払えます。価格は Base と同額で、OpenPay の手数料上乗せはありません。Base (標準 x402) は従来どおりです。Store の USDC 購入と第三者出品の USDC 面は引き続き Base のみです。\n※ 2026-10-21 の更新により、第三者出品の USDC 面は「Base のみ」から「出品者が有効にすれば Arc でも支払える」へ置き換えられました。Store の USDC 購入は引き続き Base のみです。',
-      en: 'OpenPay\'s own USDC-priced paid APIs (x402) now offer Arc alongside Base. Arc payments settle through the Circle Gateway x402 facilitator, so agents pay gaslessly from a Gateway balance. Prices match Base and OpenPay adds no fee. Base (standard x402) is unchanged. Store USDC purchases and third-party USDC listings remain Base-only.\nNote: superseded by the 2026-10-21 update — third-party USDC listings can now also be paid on Arc when the seller enables it. Store USDC purchases remain Base-only.',
+      ja: 'OpenPay 自身の USDC 版有料 API (x402) に、Base に加えて Arc の支払い方法を追加しました。Arc は Circle Gateway の x402 facilitator で精算し、AI エージェントは Gateway 残高からガス不要で支払えます。価格は Base と同額で、OpenPay の手数料上乗せはありません。Base (標準 x402) は従来どおりです。Store の USDC 購入と第三者出品の USDC 面は引き続き Base のみです。\n※ 2026-10-20 の更新により、第三者出品の USDC 面は「Base のみ」から「出品者が有効にすれば Arc でも支払える」へ置き換えられました。Store の USDC 購入は引き続き Base のみです。',
+      en: 'OpenPay\'s own USDC-priced paid APIs (x402) now offer Arc alongside Base. Arc payments settle through the Circle Gateway x402 facilitator, so agents pay gaslessly from a Gateway balance. Prices match Base and OpenPay adds no fee. Base (standard x402) is unchanged. Store USDC purchases and third-party USDC listings remain Base-only.\nNote: superseded by the 2026-10-20 update — third-party USDC listings can now also be paid on Arc when the seller enables it. Store USDC purchases remain Base-only.',
     },
     link: { href: '/discovery', labelJa: 'AI ストアを見る', labelEn: 'Open the AI store' },
   },

@@ -63,9 +63,9 @@ describe('Legal pages', () => {
         : ['seller operates', 'availability', '60 seconds', 'wallet address, product, revision and timestamps', 'does not store or serve', 'responsible for delivery', '(6)', 'third parties', 'not immediately recalled', 'holder without a purchase history', '(14)', '(7)', '(11)']) expect(clause).toContain(text);
       renderWithIntl(<TermsPage />, { locale });
       expect(screen.getByText((_, element) => element?.tagName === 'P' && !!element.textContent?.includes('(18)'))).toHaveTextContent(clause);
-      expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-10-21');
+      expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-10-20');
       expect(messages.Privacy.section3.body).toContain(locale === 'ja' ? '購入歴のないライセンス保有者' : 'license holders without a purchase history');
-      expect(LEGAL_ENTITY.privacyEffectiveDate).toBe('2026-10-13');
+      expect(LEGAL_ENTITY.privacyEffectiveDate).toBe('2026-10-20');
     });
 
     it('第13条: license の政策値・売り手・権利・返金・公開情報を同じ namespace 内で固定する', async () => {
@@ -89,7 +89,7 @@ describe('Legal pages', () => {
       expect(clause(ja, 17)).toContain('公開台帳'); expect(clause(en, 17)).toContain('public ledger');
       expect(clause(ja, 17)).toContain('公開 Verify API'); expect(clause(en, 17)).toContain('public Verify API');
       expect(clause(ja, 16)).toContain('法的適合性の認定を意味しません'); expect(clause(en, 16)).toContain('not legal clearance');
-      expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-10-21');
+      expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-10-20');
     });
     it('ja: h1 と 11 条すべての title が render される', () => {
       renderWithIntl(<TermsPage />, { locale: 'ja' });
@@ -243,6 +243,9 @@ describe('Legal pages', () => {
       expect(sectionBody?.textContent).toMatch(/Paymaster/);
       // 当社徴収0の明示 (paymasterMode='erc20' の真正性: 顧客が USDC で gas 負担)。
       expect(sectionBody?.textContent).toMatch(/徴収・取得することはありません/);
+      // x402 の USDC の検証・精算を中継する先 (Base は CDP・Arc は Circle Gateway) も委託先 (2026-10-20)。
+      expect(sectionBody?.textContent).toContain('x402 による Arc の USDC の支払いの検証および精算 (Circle Gateway)');
+      expect(sectionBody?.textContent).toContain('Coinbase, Inc. (米国): x402 による Base の USDC の支払いの検証および精算 (Coinbase Developer Platform)');
     });
 
     it('en: section 3 に Circle Paymaster 委託先開示 + 当社徴収0', () => {
@@ -255,6 +258,8 @@ describe('Legal pages', () => {
       expect(sectionBody?.textContent).toContain('Circle');
       expect(sectionBody?.textContent).toMatch(/Paymaster/);
       expect(sectionBody?.textContent).toMatch(/does not collect or receive/i);
+      expect(sectionBody?.textContent).toContain('verification and settlement of USDC payments on Arc made via x402 (Circle Gateway)');
+      expect(sectionBody?.textContent).toContain('Coinbase, Inc. (United States): verification and settlement of USDC payments on Base made via x402 (Coinbase Developer Platform)');
     });
 
     // 外部レビュー対応: Cookie/localStorage 正確化 + 要配慮個人情報 非取得 +
@@ -512,8 +517,8 @@ describe('Legal pages', () => {
       expect(dd.firstChild?.textContent).toBe(t('rows.price.value'));
       expect(m.Tokutei.rows.price.value).not.toMatch(/<link>|\/pricing|料金のページ|Pricing page/);
       expect(link.closest('span')!.textContent).toBe(m.Tokutei.priceSeeAlso.replace(/<\/?link>/g, ''));
-      // リンクの追加は改定ではないので、最終更新日は前回の改定日 (2026-10-21) のまま。
-      expect(LEGAL_ENTITY.tokuteiEffectiveDate).toBe('2026-10-21');
+      // リンクの追加は改定ではないので、最終更新日は前回の改定日 (2026-10-20) のまま。
+      expect(LEGAL_ENTITY.tokuteiEffectiveDate).toBe('2026-10-20');
       expect(screen.getByText(new RegExp(`${updated}:\\s*${LEGAL_ENTITY.tokuteiEffectiveDate}`))).toBeInTheDocument();
     });
 
@@ -788,15 +793,15 @@ describe('Legal pages', () => {
       //   実装どおりに明記 (料金は変えない) するため Terms/特商法/免責を同日改定。プライバシーは据置。
       // 2026-10-12: 他のチェーンから Arc 以外のチェーン宛てに払うときの Circle の転送手数料 (受取額から差し引き) を
       //   実装どおりに明記 (料金は変えない) するため Terms/特商法を同日改定。免責・プライバシーは据置。
-      // 2026-10-21: 第三者出品の USDC 併売に Arc (Circle Gateway) での支払いを追加し、「Arc は通常決済のみ」に x402 の
+      // 2026-10-20: 第三者出品の USDC 併売に Arc (Circle Gateway) での支払いを追加し、「Arc は通常決済のみ」に x402 の
       //   Circle Gateway 経由の支払いを除く旨を足し、「店主の指定ウォレットへ直接送金」にも Gateway 経由の例外を足すため
-      //   Terms/特商法/免責を同日改定 (料金は変えない)。プライバシーは据置。
-      expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-10-21');
-      expect(LEGAL_ENTITY.tokuteiEffectiveDate).toBe('2026-10-21');
-      expect(LEGAL_ENTITY.disclaimerEffectiveDate).toBe('2026-10-21');
+      //   Terms/特商法/免責を同日改定 (料金は変えない)。プライバシーも同日に、委託先へ Coinbase (CDP) と Circle Gateway を足した。
+      expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-10-20');
+      expect(LEGAL_ENTITY.tokuteiEffectiveDate).toBe('2026-10-20');
+      expect(LEGAL_ENTITY.disclaimerEffectiveDate).toBe('2026-10-20');
       // 2026-09-10 改定案: 保護配布のチケット情報の第三者提供を追記。
       // 2026-10-13: 外部送信規律の公表 (3-3 外部送信について)・委託先の追加でプライバシーだけ改定。
-      expect(LEGAL_ENTITY.privacyEffectiveDate).toBe('2026-10-13');
+      expect(LEGAL_ENTITY.privacyEffectiveDate).toBe('2026-10-20');
     });
   });
 
@@ -1538,7 +1543,7 @@ it('Arc の USDC 決済 (通常決済のみ・顧客が USDC でネットワー�
   expect(ja.Tokutei.rows.additionalFees.value).toContain('Arc チェーンの USDC 決済は通常決済のみ');
   expect(en.Terms.article5.body).toContain('USDC payments on the Arc chain are standard payments only: customers pay network fees directly in USDC, and the Company collects nothing');
   expect(en.Tokutei.rows.additionalFees.value).toContain('USDC payments on the Arc chain are standard payments only');
-  // 2026-10-21: x402 の Circle Gateway 経由の Arc の支払い (第三者出品・OpenPay 自身の有料 API) は通常決済ではない。
+  // 2026-10-20: x402 の Circle Gateway 経由の Arc の支払い (第三者出品・OpenPay 自身の有料 API) は通常決済ではない。
   expect(ja.Terms.article5.body).toContain('x402 により Circle Gateway を通じて行う支払い (本項の支払いを含みます) を除きます');
   expect(ja.Tokutei.rows.additionalFees.value).toContain('AI エージェント等が x402 により Circle Gateway を通じて支払う場合を除きます');
   expect(en.Terms.article5.body).toContain('except payments made via x402 through Circle Gateway');
