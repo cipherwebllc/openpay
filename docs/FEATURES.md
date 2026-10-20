@@ -15,7 +15,7 @@
 
 ## Key features
 
-- **Non-custodial** — payments go directly to the merchant wallet; OpenPay never holds funds.
+- **Non-custodial** — payments go directly to the merchant wallet (x402 payments on Arc land in the payee's Circle Gateway balance for withdrawal); OpenPay never holds funds.
 - **No wallet lock-in** — any wallet that signs standard ERC20 / ERC-4337 / EIP-7702 transactions can pay; no app install required.
 - **JPYC / USDC** support (Japan's electronic payment instrument + Circle's USD stablecoin).
 - **QR-locked conditions** — amount, token, chain, and recipient are pinned per QR; customers cannot mistype them.

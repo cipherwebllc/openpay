@@ -14,7 +14,7 @@ OpenPay は、JPYC / USDC のウォレット送金を、店舗・イベント向
 
 ## Key features
 
-- **Non-custodial, no wallet lock-in** — payments go directly to the merchant wallet; OpenPay never holds funds.
+- **Non-custodial, no wallet lock-in** — payments go directly to the merchant wallet (x402 payments on Arc land in the payee's Circle Gateway balance for withdrawal); OpenPay never holds funds.
   Any wallet that signs standard ERC20 / ERC-4337 / EIP-7702 transactions can pay, and no app install is required.
 - **JPYC / USDC with QR-locked conditions** — amount, token, chain, and recipient are pinned per QR; customers cannot mistype them.
 - **Standard or gasless payment** — Standard: the customer pays gas in the native token.
