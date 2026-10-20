@@ -10,6 +10,10 @@ export type ArcPayToReachability =
   | { ok: true; payTo: Address }
   | { ok: false; reason: 'contract_wallet' | 'rpc_unavailable' | 'invalid' };
 
+/** 1 回の RPC の上限と、検査全体の締め切り (Base と Arc は並行・再試行 1 回込み)。 */
+export const ARC_PAYTO_RPC_TIMEOUT_MS = 3_000;
+export const ARC_PAYTO_RPC_DEADLINE_MS = 6_000;
+
 /**
  * 出品の「Arc (Circle Gateway) でも販売する」の受取先 fence (plans/arc-gateway-payout.md・user 裁定 2026-10-20)。
  *
@@ -23,10 +27,13 @@ export async function checkArcPayToReachability(rawPayTo: string): Promise<ArcPa
   if (!isAddress(rawPayTo)) return { ok: false, reason: 'invalid' };
   const payTo = getAddress(rawPayTo);
   const chains = x402Config.network === 'base-sepolia' ? [baseSepolia, arcTestnet] : [base, arc];
+  // 登録の route は maxDuration 15 秒。RPC が応答しないときも、その前に 503 (rpc_unavailable) を返せるよう
+  // 時間を区切る (viem の既定は 10 秒 × 再試行 3 回で、route ごと打ち切られて決めた 503 を返せない)。
+  const transport = { timeout: ARC_PAYTO_RPC_TIMEOUT_MS, retryCount: 1, deadline: Date.now() + ARC_PAYTO_RPC_DEADLINE_MS };
   try {
     const codes = await Promise.all(
       chains.map((chain) =>
-        createPublicClient({ chain, transport: transportForChain(chain.id) }).getBytecode({ address: payTo }),
+        createPublicClient({ chain, transport: transportForChain(chain.id, transport) }).getBytecode({ address: payTo }),
       ),
     );
     return codes.some(isNonDelegatedContractCode) ? { ok: false, reason: 'contract_wallet' } : { ok: true, payTo };

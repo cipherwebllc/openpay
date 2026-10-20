@@ -29,12 +29,15 @@ function Row({ label, value }: { label: string; value: string }) {
   );
 }
 
-function failureMessage(t: ReturnType<typeof useTranslations<'ArcPayout'>>, failure: ArcPayoutFailure, canRetry: boolean): string {
+function failureMessage(t: ReturnType<typeof useTranslations<'ArcPayout'>>, failure: ArcPayoutFailure, canContinue: boolean): string {
   switch (failure.code) {
     case 'account_changed':
+    case 'mint_not_completed':
       return t('errorMintNotSent');
+    case 'confirm_unknown':
+      return t('errorConfirmUnknown');
     case 'rejected':
-      return canRetry ? t('errorMintNotSent') : t('errorRejected');
+      return canContinue ? t('errorMintNotSent') : t('errorRejected');
     case 'circle_rejected':
       return t('errorCircleRejected', { status: failure.status });
     case 'circle_unknown':
@@ -45,9 +48,8 @@ function failureMessage(t: ReturnType<typeof useTranslations<'ArcPayout'>>, fail
       return t('errorLoad');
     case 'attestation_expired':
       return t('errorExpired');
-    case 'mint_reverted':
     case 'failed':
-      return canRetry ? t('errorMintNotSent') : t('errorFailed');
+      return canContinue ? t('errorMintNotSent') : t('errorFailed');
   }
 }
 
@@ -68,7 +70,7 @@ function Summary({ status, t }: { status: ArcPayoutStatus; t: ReturnType<typeof 
 
 export function ArcPayoutPanel() {
   const t = useTranslations('ArcPayout');
-  const { address, status, flow, withdraw, retryMint, reload, walletReady, arcChainId } = useArcPayout();
+  const { address, status, flow, otherPending, withdraw, continueMint, reload, walletReady, arcChainId } = useArcPayout();
 
   if (!address) {
     return (
@@ -93,13 +95,11 @@ export function ArcPayoutPanel() {
     blocker = t('errorBelowFee', { fee: usdc(data.fee) });
   } else if (data?.gas === 0n) blocker = t('noGas');
 
+  // 進み具合はアドレスごと (hooks/useArcPayout.ts)。続きを送れるのは、表示中のアドレス自身の引き出しだけ。
   const pending = flow.phase === 'failed' ? flow.pending : undefined;
-  // 受け取りの取引を送れるのは引き出し元のアカウントだけ。別のアカウントなら元に戻すよう案内する。
-  const otherAccount = pending && pending.depositor !== address ? pending.depositor : null;
-  const canRetry = !!pending && !otherAccount;
   // Circle の応答が分からなかった直後は、10 分 (失効して残高に戻るまで) 引き出し直させない。
   const coolingDown = flow.phase === 'failed' && flow.retryAfter !== undefined && Date.now() < flow.retryAfter;
-  const explorer = flow.phase === 'done' ? txExplorerUrl(arcChainId, flow.txHash) : undefined;
+  const explorer = flow.phase === 'done' && flow.txHash ? txExplorerUrl(arcChainId, flow.txHash) : undefined;
 
   return (
     <section className="mt-6 rounded-xl border border-slate-200 bg-slate-50 p-4">
@@ -134,20 +134,25 @@ export function ArcPayoutPanel() {
       {flow.phase === 'failed' && (
         <p role="alert" className="mt-4 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-900 ring-1 ring-rose-200">
           {failureMessage(t, flow.failure, !!pending)}
-          {otherAccount && <> {t('switchBack', { address: shortAddress(otherAccount) })}</>}
+        </p>
+      )}
+
+      {otherPending && (
+        <p role="status" className="mt-4 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900 ring-1 ring-amber-200">
+          {t('switchBack', { address: shortAddress(otherPending) })}
         </p>
       )}
 
       <div className="mt-4 flex flex-wrap items-center gap-3">
-        {canRetry ? (
-          <button type="button" className={BTN} disabled={working} onClick={() => void retryMint()}>
-            {t('retryMint')}
+        {pending ? (
+          <button type="button" className={BTN} disabled={working} onClick={() => void continueMint()}>
+            {pending.txHash ? t('confirmAgain') : t('retryMint')}
           </button>
         ) : (
           <button
             type="button"
             className={BTN}
-            disabled={working || coolingDown || !!otherAccount || !!blocker || !data || !walletReady}
+            disabled={working || coolingDown || !!blocker || !data || !walletReady}
             onClick={() => void withdraw()}
           >
             {t('withdraw')}

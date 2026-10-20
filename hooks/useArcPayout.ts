@@ -2,14 +2,16 @@
 
 // 「Arc の売上を受け取る」ページの状態 (plans/arc-gateway-payout.md)。
 // 読むもの: 接続中のアドレスの Arc の Gateway 残高・Circle の手数料・コントラクトかどうか・ガス代用の Arc の USDC。
-// 引き出し: lib/crossChain/arcPayout.ts の requestArcPayout (署名 → attestation) → sendArcPayoutMint (受け取りの取引)。
+// 引き出し: lib/crossChain/arcPayout.ts の requestArcPayout (署名 → attestation) → completeArcPayout (受け取りの取引)。
 //
 // 二重に引き出さない・別のアドレスの結果を混ぜないための決まり:
+//   - 進み具合は引き出し元のアドレスごとに持つ (表示中のアカウントを切り替えても、元のアドレスの記録は消えない)。
 //   - 押した瞬間に (描画を待たず) ref でアドレスごとに二度押しを止める。
-//   - Circle の応答が分からない (時間切れ・5xx・照合の不一致) ときは、新しい署名で引き出し直させない。受け付けられて
-//     いた場合も 10 分で失効して残高に戻るので、10 分待って読み直してもらう。
-//   - attestation (10 分有効) は画面の state にだけ持つ。受け取りの取引に失敗したら、失効までは同じ attestation で
-//     再送できる。送れるのは引き出し元のアカウントだけ (途中でアカウントが変わったら、元に戻すよう案内する)。
+//   - Circle の応答が分からない (時間切れ・5xx・照合の不一致) ときは、そのアドレスで 10 分間は新しい署名で引き出し直させない。
+//     受け付けられていた場合も、10 分で失効して残高に戻る。
+//   - attestation (10 分有効) は画面の state にだけ持つ。受け取りの取引は、失効までは同じ attestation で続きを送れる。
+//     送った取引の hash は送った直後に残し、結果が分からなければ送り直さずに確かめ直す (受け取りの成否は
+//     GatewayMinter の記録で決める)。続きを送れるのは引き出し元のアカウントだけ。
 //     再読み込みで失われても、未使用の attestation は失効後に残高へ戻る (資金は失われない)。
 //   - 署名・attestation は console にも Sentry にも出さない。
 
@@ -22,12 +24,13 @@ import { chainForSlug } from '@/lib/chains';
 import {
   ArcPayoutError,
   arcPayoutChain,
+  completeArcPayout,
   fetchArcPayoutFee,
   readArcPayoutBalance,
   requestArcPayout,
-  sendArcPayoutMint,
   type ArcPayoutAttestation,
   type ArcPayoutBalance,
+  type ArcPayoutErrorCode,
   type ArcPayoutStep,
 } from '@/lib/crossChain/arcPayout';
 import { GatewayTransferRejectedError } from '@/lib/crossChain/gateway';
@@ -51,13 +54,14 @@ export type ArcPayoutFailure =
   | { code: 'circle_rejected'; status: number }
   | { code: 'circle_unknown' }
   | { code: 'account_changed' }
-  | { code: 'below_fee' | 'balance_unavailable' | 'attestation_expired' | 'mint_reverted' | 'failed' };
+  | { code: ArcPayoutErrorCode | 'failed' };
 
 export type ArcPayoutFlow =
   | { phase: 'idle' }
   | { phase: ArcPayoutStep }
-  | { phase: 'done'; value: bigint; txHash: Hex }
-  // pending があれば、失効までは受け取りの取引だけを再送できる。retryAfter までは引き出し直させない。
+  | { phase: 'done'; value: bigint; txHash: Hex | null }
+  // pending があれば、失効までは受け取りの取引の続きを送れる (txHash があれば、まず確かめ直す)。
+  // retryAfter までは新しい署名で引き出し直させない。
   | { phase: 'failed'; failure: ArcPayoutFailure; pending?: ArcPayoutAttestation; retryAfter?: number };
 
 /** step = 失敗したときに進んでいた段階。依頼の途中で通信が切れたら、受け付けられた可能性がある。 */
@@ -72,6 +76,8 @@ export function arcPayoutFailureOf(err: unknown, step: ArcPayoutStep | undefined
   if (step === 'requesting') return { code: 'circle_unknown' };
   return { code: 'failed' };
 }
+
+const IDLE: ArcPayoutFlow = { phase: 'idle' };
 
 export function useArcPayout() {
   const { address } = useAccount();
@@ -108,17 +114,22 @@ export function useArcPayout() {
     },
   });
 
-  const [flow, setFlow] = useState<ArcPayoutFlow>({ phase: 'idle' });
+  // 引き出し元のアドレス → 進み具合。表示中のアカウントを切り替えても消さない。
+  const [flows, setFlows] = useState<Readonly<Record<string, ArcPayoutFlow>>>({});
+  // クリックの時点の値を読むための写し (描画の後に更新する)。
+  const flowsRef = useRef(flows);
   const inflight = useRef(new Set<string>());
-  const owner = useRef<Address | undefined>(address);
-
-  // アカウントが変わったら途中の表示を捨てる。ただし受け取りを待つ attestation は、元のアカウントに戻したときに
-  // 再送できるよう残す (再送は引き出し元のアカウントだけ)。
+  const current = useRef<Address | undefined>(address);
   useEffect(() => {
-    owner.current = address;
-    setFlow((current) => (current.phase === 'failed' && current.pending ? current : { phase: 'idle' }));
+    flowsRef.current = flows;
+  }, [flows]);
+  useEffect(() => {
+    current.current = address;
   }, [address]);
 
+  const setFlowFor = useCallback((who: Address, flow: ArcPayoutFlow) => {
+    setFlows((all) => ({ ...all, [who]: flow }));
+  }, []);
   const refresh = useCallback(
     (who: Address) => void queryClient.invalidateQueries({ queryKey: ['arcPayout', who] }),
     [queryClient],
@@ -126,74 +137,93 @@ export function useArcPayout() {
 
   const finish = useCallback(async (from: Address, pending: ArcPayoutAttestation) => {
     if (!walletClient || !arcClient) return;
-    const step = (phase: ArcPayoutStep) => { if (owner.current === from) setFlow({ phase }); };
+    let latest = pending;
     try {
-      const txHash = await sendArcPayoutMint(pending, { walletClient, publicClient: arcClient, switchChainAsync, onStep: step });
-      if (owner.current === from) setFlow({ phase: 'done', value: pending.value, txHash });
+      const txHash = await completeArcPayout(pending, {
+        walletClient,
+        publicClient: arcClient,
+        switchChainAsync,
+        onStep: (phase) => setFlowFor(from, { phase }),
+        onBroadcast: (hash) => { latest = { ...pending, txHash: hash }; },
+      });
+      setFlowFor(from, { phase: 'done', value: pending.value, txHash });
     } catch (err) {
-      // 失効した attestation は再送させない (残高に戻るのを待つ)。それ以外は失効まで同じ attestation で再送できる。
       const failure = arcPayoutFailureOf(err, undefined);
-      setFlow({ phase: 'failed', failure, ...(failure.code === 'attestation_expired' ? {} : { pending }) });
+      // 失効したら続きは無い (残高に戻るのを待つ)。受け取りにならなかったと確かめた取引は忘れて送り直せるようにする。
+      // それ以外 (結果が分からない・ウォレットで断った・読み取りの失敗) は送った取引の hash ごと残し、まず確かめ直す。
+      const next = failure.code === 'attestation_expired'
+        ? undefined
+        : failure.code === 'mint_not_completed' ? { ...latest, txHash: undefined } : latest;
+      setFlowFor(from, { phase: 'failed', failure, ...(next ? { pending: next } : {}) });
     } finally {
       refresh(from);
     }
-  }, [arcClient, refresh, switchChainAsync, walletClient]);
+  }, [arcClient, refresh, setFlowFor, switchChainAsync, walletClient]);
 
   const withdraw = useCallback(async () => {
     if (!address || !walletClient || !arcClient || inflight.current.has(address)) return;
-    if (flow.phase === 'failed' && flow.retryAfter !== undefined && Date.now() < flow.retryAfter) return;
+    const prior = flowsRef.current[address];
+    if (prior?.phase === 'failed' && prior.retryAfter !== undefined && Date.now() < prior.retryAfter) return;
+    if (prior?.phase === 'failed' && prior.pending) return;
     const from = address;
     inflight.current.add(from);
     let last: ArcPayoutStep | undefined;
-    const step = (phase: ArcPayoutStep) => {
-      last = phase;
-      if (owner.current === from) setFlow({ phase });
-    };
     try {
       let pending: ArcPayoutAttestation;
       try {
-        pending = await requestArcPayout(from, { walletClient, publicClient: arcClient, switchChainAsync, onStep: step });
+        pending = await requestArcPayout(from, {
+          walletClient,
+          publicClient: arcClient,
+          switchChainAsync,
+          onStep: (phase) => { last = phase; setFlowFor(from, { phase }); },
+        });
       } catch (err) {
         const failure = arcPayoutFailureOf(err, last);
-        if (owner.current === from) {
-          setFlow({
-            phase: 'failed',
-            failure,
-            ...(failure.code === 'circle_unknown' ? { retryAfter: Date.now() + ARC_PAYOUT_UNKNOWN_COOLDOWN_MS } : {}),
-          });
-        }
+        setFlowFor(from, {
+          phase: 'failed',
+          failure,
+          ...(failure.code === 'circle_unknown' ? { retryAfter: Date.now() + ARC_PAYOUT_UNKNOWN_COOLDOWN_MS } : {}),
+        });
         refresh(from);
         return;
       }
-      if (owner.current !== from) {
-        // 署名の後にアカウントが変わった: 送らずに残し、元のアカウントに戻したら再送できるようにする。
-        setFlow({ phase: 'failed', failure: { code: 'account_changed' }, pending });
+      if (current.current !== from) {
+        // 署名の後にアカウントが変わった: 送らずに残し、元のアカウントに戻したら続きを送れるようにする。
+        setFlowFor(from, { phase: 'failed', failure: { code: 'account_changed' }, pending });
         return;
       }
       await finish(from, pending);
     } finally {
       inflight.current.delete(from);
     }
-  }, [address, arcClient, finish, flow, refresh, switchChainAsync, walletClient]);
+  }, [address, arcClient, finish, refresh, setFlowFor, switchChainAsync, walletClient]);
 
-  const retryMint = useCallback(async () => {
-    if (!address || flow.phase !== 'failed' || !flow.pending) return;
-    // 受け取りの取引を送れるのは引き出し元のアカウントだけ。
-    if (flow.pending.depositor !== address || inflight.current.has(address)) return;
+  /** 受け取りの取引の続き (送った取引があればまず確かめ直す)。引き出し元のアカウントだけ。 */
+  const continueMint = useCallback(async () => {
+    if (!address || inflight.current.has(address)) return;
+    const flow = flowsRef.current[address];
+    if (flow?.phase !== 'failed' || !flow.pending || flow.pending.depositor !== address) return;
     inflight.current.add(address);
     try {
       await finish(address, flow.pending);
     } finally {
       inflight.current.delete(address);
     }
-  }, [address, finish, flow]);
+  }, [address, finish]);
+
+  const flow = (address && flows[address]) || IDLE;
+  // 別のアカウントの引き出しで、受け取りの取引の続きが残っているもの (そのアカウントに戻すよう案内する)。
+  const otherPending = Object.entries(flows).find(
+    ([who, f]) => who !== address && f.phase === 'failed' && !!f.pending,
+  )?.[0] as Address | undefined;
 
   return {
     address,
     status,
     flow,
+    otherPending,
     withdraw,
-    retryMint,
+    continueMint,
     reload: () => (address ? refresh(address) : undefined),
     walletReady: !!walletClient,
     arcChainId: arc.id,

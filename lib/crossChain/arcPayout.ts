@@ -9,7 +9,7 @@
 // (circlefin/evm-gateway-contracts Burns.sol)。額 = 残高 − 手数料・maxFee = 手数料ちょうどで署名する。
 // Circle がこの maxFee を受け付けなければ /v1/transfer が拒否する (余裕を足して再署名はしない・user 裁定)。
 
-import { getAddress, parseUnits, type Address, type Hex, type PublicClient, type WalletClient } from 'viem';
+import { getAddress, parseAbi, parseUnits, type Address, type Hex, type PublicClient, type WalletClient } from 'viem';
 import { chainForSlug } from '../chains';
 import { deploymentForSlug } from '../tokens';
 import { CIRCLE_GATEWAY_API_BASE_URL, GATEWAY_MINTER_ADDRESS, GATEWAY_WALLET_ADDRESS } from './config';
@@ -178,10 +178,14 @@ export type ArcPayoutAttestation = {
   depositor: Address;
   attestation: Hex;
   signature: Hex;
+  /** GatewayMinter が受け取り済みかを記録する鍵 (keccak256(TransferSpec))。受け取りの成否はこれで決める。 */
+  transferSpecHash: Hex;
   /** Arc のブロック高 (attestation の maxBlockHeight)。これを過ぎると gatewayMint は失敗し、残高に戻る。
    *  失効は壁時計でなくこのブロック高で判定する (Circle の文書は「10 分」)。 */
   expiresAtBlock: bigint;
   value: bigint;
+  /** 送った受け取りの取引。結果が分かるまでは、送り直さずにこれの結果を確かめる。 */
+  txHash?: Hex;
 };
 
 export type ArcPayoutStep = 'switching' | 'signing' | 'requesting' | 'minting' | 'confirming';
@@ -230,35 +234,93 @@ export async function requestArcPayout(
     depositor: getAddress(depositor),
     attestation: att.attestation,
     signature: att.signature,
+    transferSpecHash: decoded.transferSpecHash,
     expiresAtBlock: decoded.maxBlockHeight,
     value: plan.value,
   };
 }
 
-/** 全額の引き出しの後半: 受け取りの取引 (gatewayMint) を自分のウォレットから Arc で送る。再送にも使う。 */
-export async function sendArcPayoutMint(
-  attestation: ArcPayoutAttestation,
-  deps: Omit<WalletDeps, 'fetch' | 'baseUrl'> & { onStep?: (step: ArcPayoutStep) => void },
-): Promise<Hex> {
-  const chainId = arcPayoutChain().id;
-  await ensureWalletChain(deps.walletClient, deps.switchChainAsync, chainId);
-  if ((await deps.publicClient.getBlockNumber({ cacheTime: 0 })) > attestation.expiresAtBlock) {
-    throw new ArcPayoutError('attestation_expired');
-  }
-  deps.onStep?.('minting');
-  const hash = await deps.walletClient.sendTransaction({
-    account: attestation.depositor,
-    chain: arcPayoutChain(),
-    to: GATEWAY_MINTER_ADDRESS,
-    data: encodeGatewayMintCalldata(attestation.attestation, attestation.signature),
+const MINTER_USED_ABI = parseAbi(['function isTransferSpecHashUsed(bytes32 transferSpecHash) view returns (bool)']);
+
+/** GatewayMinter がこの引き出しを受け取り済みか (送った取引の receipt でなく、コントラクトの記録で決める)。 */
+async function isArcPayoutMinted(publicClient: PublicClient, transferSpecHash: Hex): Promise<boolean> {
+  return publicClient.readContract({
+    address: GATEWAY_MINTER_ADDRESS,
+    abi: MINTER_USED_ABI,
+    functionName: 'isTransferSpecHashUsed',
+    args: [transferSpecHash],
   });
-  deps.onStep?.('confirming');
-  const receipt = await deps.publicClient.waitForTransactionReceipt({ hash });
-  if (receipt.status !== 'success') throw new ArcPayoutError('mint_reverted');
-  return hash;
 }
 
-export type ArcPayoutErrorCode = 'balance_unavailable' | 'below_fee' | 'attestation_expired' | 'mint_reverted';
+/** 受け取りの取引の確定を待つ時間。過ぎたら「結果を確かめ直す」(送り直さない)。 */
+const MINT_RECEIPT_TIMEOUT_MS = 120_000;
+
+/**
+ * 全額の引き出しの後半: 受け取りの取引 (gatewayMint) を自分のウォレットから Arc で送り、受け取れたかを確かめる。
+ * 再送・確かめ直しにも使う。成否は GatewayMinter の記録 (isTransferSpecHashUsed) で決める — 取引の receipt だけでは、
+ * ウォレットでの取り消し (同じ nonce の別の取引) が成功の receipt を返すことがある (viem の onReplaced)。
+ *
+ * - 受け取り済み → 受け取った取引の hash を返す (別の人が送って受け取り済みなら null)。
+ * - 送った取引があり結果が分からない (receipt を待てない) → `confirm_unknown`。送り直さない (同じ attestation の
+ *   二重の受け取りは Gateway が拒むが、ガスの無駄と「失敗」の誤表示を避ける)。
+ * - 送った取引が受け取りにならなかった (revert・取り消し) → `mint_not_completed` (失効までは送り直せる)。
+ * - 失効した → `attestation_expired` (残高に戻るのを待つ)。
+ */
+export async function completeArcPayout(
+  attestation: ArcPayoutAttestation,
+  deps: Omit<WalletDeps, 'fetch' | 'baseUrl'> & {
+    onStep?: (step: ArcPayoutStep) => void;
+    /** 送った直後に呼ぶ (hash を画面に残し、結果が分からなくても送り直さないため)。 */
+    onBroadcast?: (txHash: Hex) => void;
+  },
+): Promise<Hex | null> {
+  const { publicClient } = deps;
+  if (await isArcPayoutMinted(publicClient, attestation.transferSpecHash)) return attestation.txHash ?? null;
+
+  let txHash = attestation.txHash;
+  if (!txHash) {
+    if ((await publicClient.getBlockNumber({ cacheTime: 0 })) > attestation.expiresAtBlock) {
+      throw new ArcPayoutError('attestation_expired');
+    }
+    await ensureWalletChain(deps.walletClient, deps.switchChainAsync, arcPayoutChain().id);
+    deps.onStep?.('minting');
+    txHash = await deps.walletClient.sendTransaction({
+      account: attestation.depositor,
+      chain: arcPayoutChain(),
+      to: GATEWAY_MINTER_ADDRESS,
+      data: encodeGatewayMintCalldata(attestation.attestation, attestation.signature),
+    });
+    deps.onBroadcast?.(txHash);
+  }
+
+  deps.onStep?.('confirming');
+  let minedHash: Hex = txHash;
+  try {
+    const receipt = await publicClient.waitForTransactionReceipt({
+      hash: txHash,
+      timeout: MINT_RECEIPT_TIMEOUT_MS,
+      // 手数料の上げ直し (repriced) は同じ受け取りの取引。取り消し・置き換えは下の記録の確認で「受け取っていない」になる。
+      onReplaced: (replacement) => { minedHash = replacement.transaction.hash; },
+    });
+    minedHash = receipt.transactionHash;
+  } catch {
+    // RPC 障害・時間切れ: 取引は届いているかもしれない。記録で受け取り済みと分かれば成功、そうでなければ確かめ直しを促す。
+    if (await isArcPayoutMinted(publicClient, attestation.transferSpecHash).catch(() => false)) return txHash;
+    throw new ArcPayoutError('confirm_unknown');
+  }
+  if (await isArcPayoutMinted(publicClient, attestation.transferSpecHash)) return minedHash;
+  if ((await publicClient.getBlockNumber({ cacheTime: 0 })) > attestation.expiresAtBlock) {
+    throw new ArcPayoutError('attestation_expired');
+  }
+  throw new ArcPayoutError('mint_not_completed');
+}
+
+export type ArcPayoutErrorCode =
+  | 'balance_unavailable'
+  | 'below_fee'
+  | 'attestation_expired'
+  | 'confirm_unknown'
+  | 'mint_not_completed';
 
 export class ArcPayoutError extends Error {
   constructor(public readonly code: ArcPayoutErrorCode) {

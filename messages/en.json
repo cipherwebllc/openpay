@@ -3147,7 +3147,9 @@
     "errorMintNotSent": "The receiving transaction has not completed. Within 10 minutes of signing you can send it again (after that it is cancelled and the amount returns to the balance).",
     "errorExpired": "More than 10 minutes passed since signing, so the withdrawal was cancelled. The amount returns to the balance shortly.",
     "errorFailed": "The withdrawal did not complete. The balance is unchanged or returns in about 10 minutes. Wait a moment and reload.",
-    "switchBack": "Only the withdrawing account ({address}) can send the receiving transaction. Switch back to that account in your wallet."
+    "switchBack": "A withdrawal from {address} still has a receiving transaction to finish. Only that account can send it — switch back to it in your wallet (after 10 minutes from signing it is cancelled and the amount returns to the balance).",
+    "confirmAgain": "Check the receiving transaction again",
+    "errorConfirmUnknown": "The receiving transaction was sent, but its result could not be confirmed yet. Do not resend — check the result again (it shows as complete if the funds were received)."
   },
   "Facilitator": {
     "readMore": "Read more",

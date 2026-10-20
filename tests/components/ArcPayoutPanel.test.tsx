@@ -1,6 +1,7 @@
 // 「Arc の売上を受け取る」の画面 (components/arcPayout/ArcPayoutPanel.tsx + hooks/useArcPayout.ts)。
 // 押せない理由の出し分け・全額の表示・二度押し・Circle の応答が分からないときに引き出し直させない・
-// 受け取りの取引の再送 (失効まで・引き出し元のアカウントだけ)・署名をログに出さないこと、を固定する。
+// 受け取りの取引の続き (失効まで・引き出し元のアカウントだけ・送った取引は送り直さずに確かめ直す)・
+// アカウントを切り替えても 10 分の制限が消えないこと・署名をログに出さないこと、を固定する。
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -45,7 +46,7 @@ vi.mock('@/lib/crossChain/arcPayout', async (importOriginal) => {
       return s.fee;
     },
     requestArcPayout: s.request,
-    sendArcPayoutMint: s.mint,
+    completeArcPayout: s.mint,
   };
 });
 
@@ -54,7 +55,10 @@ import { ArcPayoutError } from '@/lib/crossChain/arcPayout';
 import { GatewayTransferRejectedError } from '@/lib/crossChain/gateway';
 
 const t = messages.ArcPayout;
-const pending = { depositor: A, attestation: SECRET_ATT, signature: SECRET_SIG, expiresAtBlock: 9_999n, value: 27_000n };
+const pending = {
+  depositor: A, attestation: SECRET_ATT, signature: SECRET_SIG, transferSpecHash: `0x${'5a'.repeat(32)}` as Hex,
+  expiresAtBlock: 9_999n, value: 27_000n,
+};
 
 function renderPanel() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -167,7 +171,7 @@ describe('ArcPayoutPanel の引き出し', () => {
     expect(s.request).toHaveBeenCalledTimes(1);
   });
 
-  it('受け取りの取引に失敗したら、新しく署名させずに同じ attestation で再送できる', async () => {
+  it('受け取りの取引に失敗したら、新しく署名させずに同じ attestation で続きを送れる', async () => {
     s.mint.mockRejectedValueOnce(new Error('user rejected the request')).mockResolvedValueOnce(TX);
     renderPanel();
     await waitFor(() => expect(withdrawButton()).toBeEnabled());
@@ -177,10 +181,44 @@ describe('ArcPayoutPanel の引き出し', () => {
     expect(await screen.findByText(t.done.replace('{amount}', '0.027'), { exact: false })).toBeInTheDocument();
     expect(s.request).toHaveBeenCalledTimes(1);
     expect(s.mint).toHaveBeenCalledTimes(2);
-    expect(s.mint.mock.calls[1]![0]).toBe(pending);
+    expect(s.mint.mock.calls[1]![0]).toEqual(pending);
   });
 
-  it('失効した attestation は再送させない (残高に戻るのを待つ)', async () => {
+  it('送った取引の結果が分からないときは、送った hash を残して「確かめ直す」(送り直しではない)', async () => {
+    const SENT = `0x${'cd'.repeat(32)}` as Hex;
+    s.mint
+      .mockImplementationOnce(async (_p: unknown, deps: { onBroadcast?: (hash: Hex) => void }) => {
+        deps.onBroadcast?.(SENT);
+        throw new ArcPayoutError('confirm_unknown');
+      })
+      .mockResolvedValueOnce(SENT);
+    renderPanel();
+    await waitFor(() => expect(withdrawButton()).toBeEnabled());
+    fireEvent.click(withdrawButton());
+    expect(await screen.findByText(t.errorConfirmUnknown)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: t.retryMint })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: t.confirmAgain }));
+    expect(await screen.findByText(t.done.replace('{amount}', '0.027'), { exact: false })).toBeInTheDocument();
+    expect(s.mint.mock.calls[1]![0]).toEqual({ ...pending, txHash: SENT });
+  });
+
+  it('受け取りにならなかったと確かめた取引 (取り消し・revert) は忘れて、送り直せる', async () => {
+    const SENT = `0x${'cd'.repeat(32)}` as Hex;
+    s.mint
+      .mockImplementationOnce(async (_p: unknown, deps: { onBroadcast?: (hash: Hex) => void }) => {
+        deps.onBroadcast?.(SENT);
+        throw new ArcPayoutError('mint_not_completed');
+      })
+      .mockResolvedValueOnce(TX);
+    renderPanel();
+    await waitFor(() => expect(withdrawButton()).toBeEnabled());
+    fireEvent.click(withdrawButton());
+    fireEvent.click(await screen.findByRole('button', { name: t.retryMint }));
+    await screen.findByText(t.done.replace('{amount}', '0.027'), { exact: false });
+    expect(s.mint.mock.calls[1]![0]).toEqual({ ...pending, txHash: undefined });
+  });
+
+  it('失効した attestation は続きを送らせない (残高に戻るのを待つ)', async () => {
     s.mint.mockRejectedValue(new ArcPayoutError('attestation_expired'));
     renderPanel();
     await waitFor(() => expect(withdrawButton()).toBeEnabled());
@@ -189,24 +227,61 @@ describe('ArcPayoutPanel の引き出し', () => {
     expect(screen.queryByRole('button', { name: t.retryMint })).not.toBeInTheDocument();
   });
 
-  it('再送できるのは引き出し元のアカウントだけ。別のアカウントでは元に戻すよう案内し、戻せば再送できる', async () => {
+  it('続きを送れるのは引き出し元のアカウントだけ。別のアカウントでは元に戻すよう案内し、戻せば続きを送れる', async () => {
     s.mint.mockRejectedValueOnce(new Error('user rejected the request')).mockResolvedValueOnce(TX);
     const view = renderPanel();
     await waitFor(() => expect(withdrawButton()).toBeEnabled());
     fireEvent.click(withdrawButton());
-    expect(await screen.findByText(t.errorMintNotSent, { exact: false })).toBeInTheDocument();
+    expect(await screen.findByText(t.errorMintNotSent)).toBeInTheDocument();
 
     s.address = B;
     view.rerenderPanel();
-    expect(await screen.findByText(t.switchBack.replace('{address}', '0x52d4…cA81'), { exact: false })).toBeInTheDocument();
+    expect(await screen.findByText(t.switchBack.replace('{address}', '0x52d4…cA81'))).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: t.retryMint })).not.toBeInTheDocument();
-    expect(withdrawButton()).toBeDisabled();
 
     s.address = A;
     view.rerenderPanel();
     fireEvent.click(await screen.findByRole('button', { name: t.retryMint }));
     expect(await screen.findByText(t.done.replace('{amount}', '0.027'), { exact: false })).toBeInTheDocument();
-    expect(s.mint.mock.calls[1]![0]).toBe(pending);
+    expect(s.mint.mock.calls[1]![0]).toEqual(pending);
+  });
+
+  it('Circle の応答が分からない後で A→B→A と切り替えても、A の 10 分の制限は消えない', async () => {
+    s.request.mockImplementation(async (_from: string, deps: { onStep?: (step: string) => void }) => {
+      deps.onStep?.('requesting');
+      throw new GatewayTransferRejectedError(503, 'busy');
+    });
+    const view = renderPanel();
+    await waitFor(() => expect(withdrawButton()).toBeEnabled());
+    fireEvent.click(withdrawButton());
+    expect(await screen.findByText(t.errorCircleUnknown)).toBeInTheDocument();
+    s.address = B;
+    view.rerenderPanel();
+    await waitFor(() => expect(screen.queryByText(t.errorCircleUnknown)).not.toBeInTheDocument());
+    s.address = A;
+    view.rerenderPanel();
+    expect(await screen.findByText(t.errorCircleUnknown)).toBeInTheDocument();
+    await waitFor(() => expect(withdrawButton()).toBeDisabled());
+    fireEvent.click(withdrawButton());
+    expect(s.request).toHaveBeenCalledTimes(1);
+  });
+
+  it('Circle の応答を待つ間に B へ切り替えても、A の結果 (10 分の制限) は A に記録される', async () => {
+    let fail!: () => void;
+    s.request.mockImplementation((_from: string, deps: { onStep?: (step: string) => void }) => new Promise((_, reject) => {
+      deps.onStep?.('requesting');
+      fail = () => reject(new GatewayTransferRejectedError(504, 'timeout'));
+    }));
+    const view = renderPanel();
+    await waitFor(() => expect(withdrawButton()).toBeEnabled());
+    fireEvent.click(withdrawButton());
+    s.address = B;
+    view.rerenderPanel();
+    await act(async () => fail());
+    s.address = A;
+    view.rerenderPanel();
+    expect(await screen.findByText(t.errorCircleUnknown)).toBeInTheDocument();
+    await waitFor(() => expect(withdrawButton()).toBeDisabled());
   });
 
   it('署名・attestation を console に出さない', async () => {

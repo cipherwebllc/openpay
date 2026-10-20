@@ -2,7 +2,7 @@
 // 資金に関わる約束を固定する: 自分宛て・Arc → Arc・額 + 手数料 = 残高 (残高 0)・maxFee = 手数料ちょうど・
 // Circle の応答を自分の署名と照合してから受け取りの取引を送る・失効した attestation は送らない。
 import { describe, expect, it, vi } from 'vitest';
-import { getAddress, pad, parseUnits, type Hex } from 'viem';
+import { getAddress, keccak256, pad, parseUnits, type Hex } from 'viem';
 import {
   ArcPayoutError,
   arcPayoutChain,
@@ -11,11 +11,12 @@ import {
   planArcPayout,
   readArcPayoutBalance,
   requestArcPayout,
-  sendArcPayoutMint,
+  completeArcPayout,
   type ArcPayoutAttestation,
 } from '@/lib/crossChain/arcPayout';
 import { GATEWAY_MINTER_ADDRESS, GATEWAY_WALLET_ADDRESS } from '@/lib/crossChain/config';
 import { GatewayTransferRejectedError } from '@/lib/crossChain/gateway';
+import { encodeGatewayTransferSpec } from '@/lib/crossChain/gatewayAttestation';
 import { CIRCLE_DOMAIN_ARC, type BurnIntent } from '@/lib/crossChain/types';
 import { gatewayAttestation } from '../../fixtures/gateway';
 
@@ -165,15 +166,24 @@ function harness(opts: { balances?: string[]; fee?: string; transfer?: (intent: 
     sendTransaction: vi.fn(async () => `0x${'ab'.repeat(32)}` as Hex),
   };
   const switchChainAsync = vi.fn(async ({ chainId: next }: { chainId: number }) => { chainId = next; });
+  // GatewayMinter の受け取り済みの記録 (isTransferSpecHashUsed)。受け取りの取引が成功したら true にする。
+  const minter = { minted: false, readFails: false };
   const publicClient = {
-    readContract: vi.fn(async () => 1_000n),
+    readContract: vi.fn(async ({ functionName }: { functionName: string }) => {
+      if (functionName === 'withdrawalDelay') return 1_000n;
+      if (minter.readFails) throw new Error('rpc down');
+      return minter.minted;
+    }),
     getBlockNumber: vi.fn(async () => 500n),
-    waitForTransactionReceipt: vi.fn(async () => ({ status: 'success' })),
+    waitForTransactionReceipt: vi.fn(async ({ hash }: { hash: Hex }) => {
+      minter.minted = true;
+      return { status: 'success', transactionHash: hash };
+    }),
   };
   const deps = {
     walletClient: walletClient as never, publicClient: publicClient as never, switchChainAsync, fetch, baseUrl: BASE,
   };
-  return { deps, walletClient, publicClient, switchChainAsync, fetch, signed };
+  return { deps, walletClient, publicClient, switchChainAsync, fetch, signed, minter };
 }
 
 describe('requestArcPayout', () => {
@@ -186,6 +196,9 @@ describe('requestArcPayout', () => {
     expect(h.signed[0]!.spec.value).toBe(46_500n);
     expect(h.signed[0]!.maxFee).toBe(3_500n);
     expect(pending).toMatchObject({ depositor: DEPOSITOR, value: 46_500n, expiresAtBlock: 2_000n });
+    // 受け取りの成否を GatewayMinter の記録で確かめる鍵 = 署名した TransferSpec の hash
+    expect(pending.transferSpecHash).toBe(keccak256(encodeGatewayTransferSpec(h.signed[0]!.spec)));
+    expect(pending.txHash).toBeUndefined();
   });
 
   it('別のチェーンにいたら Arc へ切り替えてから署名する', async () => {
@@ -224,29 +237,88 @@ describe('requestArcPayout', () => {
   });
 });
 
-describe('sendArcPayoutMint', () => {
-  const pending: ArcPayoutAttestation = {
-    depositor: DEPOSITOR, attestation: '0xaa', signature: '0xbb', expiresAtBlock: 1_000n, value: parseUnits('0.027', 6),
+describe('completeArcPayout (受け取りの取引)', () => {
+  const TX = `0x${'ab'.repeat(32)}` as Hex;
+  const base: ArcPayoutAttestation = {
+    depositor: DEPOSITOR, attestation: '0xaa', signature: '0xbb', transferSpecHash: `0x${'5a'.repeat(32)}`,
+    expiresAtBlock: 1_000n, value: parseUnits('0.027', 6),
   };
 
-  it('引き出し元のアカウントから Arc の GatewayMinter へ gatewayMint を送り、成功の receipt を待つ', async () => {
+  it('引き出し元のアカウントから Arc の GatewayMinter へ送り、送った直後に hash を知らせ、記録で受け取りを確かめる', async () => {
     const h = harness();
-    await expect(sendArcPayoutMint(pending, h.deps)).resolves.toBe(`0x${'ab'.repeat(32)}`);
+    const onBroadcast = vi.fn();
+    await expect(completeArcPayout(base, { ...h.deps, onBroadcast })).resolves.toBe(TX);
     expect(h.walletClient.sendTransaction).toHaveBeenCalledWith(expect.objectContaining({
       account: DEPOSITOR, to: GATEWAY_MINTER_ADDRESS, chain: arcPayoutChain(),
     }));
+    expect(onBroadcast).toHaveBeenCalledWith(TX);
+    expect(h.publicClient.readContract).toHaveBeenCalledWith(expect.objectContaining({
+      address: GATEWAY_MINTER_ADDRESS, functionName: 'isTransferSpecHashUsed', args: [base.transferSpecHash],
+    }));
+  });
+
+  it('すでに受け取り済み (記録あり) なら送らない', async () => {
+    const h = harness();
+    h.minter.minted = true;
+    await expect(completeArcPayout(base, h.deps)).resolves.toBeNull();
+    expect(h.walletClient.sendTransaction).not.toHaveBeenCalled();
+  });
+
+  it('手数料の上げ直し (repriced) で確定したら、確定した取引の hash を返す', async () => {
+    const h = harness();
+    const REPRICED = `0x${'cd'.repeat(32)}` as Hex;
+    h.publicClient.waitForTransactionReceipt.mockImplementationOnce(async (args: unknown) => {
+      (args as { onReplaced: (r: unknown) => void }).onReplaced({ reason: 'repriced', transaction: { hash: REPRICED } });
+      h.minter.minted = true;
+      return { status: 'success', transactionHash: REPRICED };
+    });
+    await expect(completeArcPayout(base, h.deps)).resolves.toBe(REPRICED);
+  });
+
+  it('ウォレットで取り消した (同じ nonce の別の取引が成功した) ら、成功と言わずに送り直せるようにする', async () => {
+    const h = harness();
+    const CANCEL = `0x${'ee'.repeat(32)}` as Hex;
+    h.publicClient.waitForTransactionReceipt.mockImplementationOnce(async (args: unknown) => {
+      (args as { onReplaced: (r: unknown) => void }).onReplaced({ reason: 'cancelled', transaction: { hash: CANCEL } });
+      return { status: 'success', transactionHash: CANCEL };
+    });
+    await expect(completeArcPayout(base, h.deps)).rejects.toMatchObject({ code: 'mint_not_completed' });
+  });
+
+  it('receipt を待てない (RPC 障害) なら confirm_unknown — 確かめ直しは同じ hash の結果を見て、送り直さない', async () => {
+    const h = harness();
+    h.publicClient.waitForTransactionReceipt.mockRejectedValueOnce(new Error('rpc timeout'));
+    const onBroadcast = vi.fn();
+    await expect(completeArcPayout(base, { ...h.deps, onBroadcast })).rejects.toMatchObject({ code: 'confirm_unknown' });
+    expect(onBroadcast).toHaveBeenCalledWith(TX);
+
+    // 確かめ直し (hash つき): 送らずに同じ hash の receipt を待ち、記録で受け取りを確かめる
+    await expect(completeArcPayout({ ...base, txHash: TX }, h.deps)).resolves.toBe(TX);
+    expect(h.walletClient.sendTransaction).toHaveBeenCalledTimes(1);
+    expect(h.publicClient.waitForTransactionReceipt).toHaveBeenLastCalledWith(expect.objectContaining({ hash: TX }));
+  });
+
+  it('receipt を待てなくても、記録で受け取り済みと分かれば成功', async () => {
+    const h = harness();
+    h.publicClient.waitForTransactionReceipt.mockImplementationOnce(async () => {
+      h.minter.minted = true;
+      throw new Error('rpc timeout');
+    });
+    await expect(completeArcPayout(base, h.deps)).resolves.toBe(TX);
   });
 
   it('失効 (Arc のブロック高が maxBlockHeight を過ぎた) attestation は送らない', async () => {
     const h = harness();
     h.publicClient.getBlockNumber.mockResolvedValue(1_001n);
-    await expect(sendArcPayoutMint(pending, h.deps)).rejects.toMatchObject({ code: 'attestation_expired' });
+    await expect(completeArcPayout(base, h.deps)).rejects.toMatchObject({ code: 'attestation_expired' });
     expect(h.walletClient.sendTransaction).not.toHaveBeenCalled();
   });
 
-  it('取引が revert したら成功と言わない', async () => {
+  it('取引が revert して記録も無ければ成功と言わない (失効前は送り直せる・失効後は attestation_expired)', async () => {
     const h = harness();
-    h.publicClient.waitForTransactionReceipt.mockResolvedValue({ status: 'reverted' });
-    await expect(sendArcPayoutMint(pending, h.deps)).rejects.toMatchObject({ code: 'mint_reverted' });
+    h.publicClient.waitForTransactionReceipt.mockResolvedValue({ status: 'reverted', transactionHash: TX });
+    await expect(completeArcPayout(base, h.deps)).rejects.toMatchObject({ code: 'mint_not_completed' });
+    h.publicClient.getBlockNumber.mockResolvedValueOnce(500n).mockResolvedValueOnce(1_001n);
+    await expect(completeArcPayout(base, h.deps)).rejects.toMatchObject({ code: 'attestation_expired' });
   });
 });
