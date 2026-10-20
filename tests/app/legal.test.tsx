@@ -63,7 +63,7 @@ describe('Legal pages', () => {
         : ['seller operates', 'availability', '60 seconds', 'wallet address, product, revision and timestamps', 'does not store or serve', 'responsible for delivery', '(6)', 'third parties', 'not immediately recalled', 'holder without a purchase history', '(14)', '(7)', '(11)']) expect(clause).toContain(text);
       renderWithIntl(<TermsPage />, { locale });
       expect(screen.getByText((_, element) => element?.tagName === 'P' && !!element.textContent?.includes('(18)'))).toHaveTextContent(clause);
-      expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-10-20');
+      expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-10-21');
       expect(messages.Privacy.section3.body).toContain(locale === 'ja' ? '購入歴のないライセンス保有者' : 'license holders without a purchase history');
       expect(LEGAL_ENTITY.privacyEffectiveDate).toBe('2026-10-20');
     });
@@ -89,7 +89,7 @@ describe('Legal pages', () => {
       expect(clause(ja, 17)).toContain('公開台帳'); expect(clause(en, 17)).toContain('public ledger');
       expect(clause(ja, 17)).toContain('公開 Verify API'); expect(clause(en, 17)).toContain('public Verify API');
       expect(clause(ja, 16)).toContain('法的適合性の認定を意味しません'); expect(clause(en, 16)).toContain('not legal clearance');
-      expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-10-20');
+      expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-10-21');
     });
     it('ja: h1 と 11 条すべての title が render される', () => {
       renderWithIntl(<TermsPage />, { locale: 'ja' });
@@ -191,6 +191,11 @@ describe('Legal pages', () => {
       const clause10 = (body: string, head: string) => body.includes(head) ? body.slice(body.indexOf(head)).split('(11)')[0] : '';
       for (const fact of [`${disclosed.arcChainName} チェーン上の ${disclosed.asset}`, `あらかじめ ${disclosed.arcSettlement}`, '入金した残高から行われ', '出品者の指定ウォレットの Circle Gateway 上の残高', '自ら引き出す', '引き出しを代行しません', 'Circle Gateway で精算された支払いも、当社が取り消すことはできません']) expect(clause10(ja.Terms.article5.body, '(10) AI ストアへの出品者')).toContain(fact);
       for (const fact of [`${disclosed.asset} on the ${disclosed.arcChainName} chain`, `deposited in advance with ${disclosed.arcSettlement}`, 'credited to the Circle Gateway balance of the lister\'s designated wallet', 'withdrawing it from Circle Gateway themselves', 'does not withdraw on the lister\'s behalf', 'cannot reverse payments settled through Circle Gateway']) expect(clause10(en.Terms.article5.body, '(10) For resources whose lister')).toContain(fact);
+      // 引き出しの画面 (2026-10-21): 当社は画面を出すだけで、署名と受け取りの取引は出品者・手数料も出品者負担・コントラクトは不可。
+      for (const fact of ['引き出しのための画面を提供します', '出品者の指定ウォレットによる署名', '出品者が送信する受け取りの取引', 'Circle Gateway の手数料および受け取りの取引のネットワーク手数料は出品者が負担', 'コントラクトウォレットの場合は、Arc での販売を有効にできません']) expect(clause10(ja.Terms.article5.body, '(10) AI ストアへの出品者')).toContain(fact);
+      for (const fact of ['provides a screen for withdrawing', 'signature of the lister\'s designated wallet', 'receiving transaction sent by the lister', 'the lister bears the Circle Gateway fee charged on each withdrawal and the network fee of the receiving transaction', 'If the designated wallet is a contract wallet, selling on Arc cannot be enabled']) expect(clause10(en.Terms.article5.body, '(10) For resources whose lister')).toContain(fact);
+      expect(ja.Tokutei.rows.additionalFees.value).toContain('引き出した売上の受け取りには Arc のネットワーク手数料 (USDC) がかかりますが、当社はいずれも徴収しません');
+      expect(en.Tokutei.rows.additionalFees.value).toContain('receiving withdrawn proceeds incurs an Arc network fee (in USDC); the Company collects none of them');
     });
   });
 
@@ -523,8 +528,8 @@ describe('Legal pages', () => {
       expect(dd.firstChild?.textContent).toBe(t('rows.price.value'));
       expect(m.Tokutei.rows.price.value).not.toMatch(/<link>|\/pricing|料金のページ|Pricing page/);
       expect(link.closest('span')!.textContent).toBe(m.Tokutei.priceSeeAlso.replace(/<\/?link>/g, ''));
-      // リンクの追加は改定ではないので、最終更新日は前回の改定日 (2026-10-20) のまま。
-      expect(LEGAL_ENTITY.tokuteiEffectiveDate).toBe('2026-10-20');
+      // リンクの追加は改定ではないので、最終更新日は前回の改定日 (2026-10-21) のまま。
+      expect(LEGAL_ENTITY.tokuteiEffectiveDate).toBe('2026-10-21');
       expect(screen.getByText(new RegExp(`${updated}:\\s*${LEGAL_ENTITY.tokuteiEffectiveDate}`))).toBeInTheDocument();
     });
 
@@ -802,8 +807,10 @@ describe('Legal pages', () => {
       // 2026-10-20: 第三者出品の USDC 併売に Arc (Circle Gateway) での支払いを追加し、「Arc は通常決済のみ」に x402 の
       //   Circle Gateway 経由の支払いを除く旨を足し、「店主の指定ウォレットへ直接送金」にも Gateway 経由の例外を足すため
       //   Terms/特商法/免責を同日改定 (料金は変えない)。プライバシーも同日に別の改定 (x402 の USDC の送信先の開示)。
-      expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-10-20');
-      expect(LEGAL_ENTITY.tokuteiEffectiveDate).toBe('2026-10-20');
+      // 2026-10-21: Arc の売上を受け取る画面 (当社は画面だけ・署名と受け取りの取引と手数料は出品者・コントラクトは不可) を
+      //   Terms 第 5 条 (10) と特商法「対価以外の費用」に足すため同日改定 (料金は変えない)。免責は据置。
+      expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-10-21');
+      expect(LEGAL_ENTITY.tokuteiEffectiveDate).toBe('2026-10-21');
       expect(LEGAL_ENTITY.disclaimerEffectiveDate).toBe('2026-10-20');
       // 2026-09-10 改定案: 保護配布のチケット情報の第三者提供を追記。
       // 2026-10-13: 外部送信規律の公表 (3-3 外部送信について)・委託先の追加でプライバシーだけ改定。

@@ -34,6 +34,17 @@ export type NewsItem = {
 // 表示順を強制しないが、可読性のため宣言時点でも新しい順に並べる。
 export const NEWS_ITEMS: readonly NewsItem[] = [
   {
+    id: 'arc-payout-2026-10-21',
+    date: '2026-10-21',
+    category: 'feature',
+    title: { ja: 'Arc で売れた売上を OpenPay の画面で受け取れます', en: 'Receive your Arc proceeds from an OpenPay page' },
+    body: {
+      ja: 'AI ストアで Arc (Circle Gateway) での販売を有効にしている出品者は、「Arc の売上を受け取る」ページで受取アドレスのウォレットをつなぐと、Gateway 残高を全額 Arc の USDC として引き出せます。ウォレットで署名 1 回と受け取りの取引 1 回を行います。引き出すたびに Circle の手数料 (現在 0.0035 USDC) が残高から引かれ、受け取りの取引のネットワーク手数料 (Arc の USDC) はご自身のウォレットから払います。OpenPay の手数料はかかりません。受取アドレスがコントラクトウォレットの出品は、Arc での販売を有効にできなくなりました。',
+      en: 'Sellers who sell on Arc (Circle Gateway) in the AI Store can connect the receiving wallet on the “Receive Arc proceeds” page and withdraw the whole Gateway balance as USDC on Arc, with one signature and one receiving transaction in the wallet. Circle’s fee (currently 0.0035 USDC) is deducted from the balance on every withdrawal, and the network fee of the receiving transaction (USDC on Arc) is paid from your own wallet. OpenPay charges no fee. Listings whose receiving address is a contract wallet can no longer enable selling on Arc.',
+    },
+    link: { href: '/discovery/arc-payout', labelJa: '売上を受け取る', labelEn: 'Receive proceeds' },
+  },
+  {
     id: 'x402-dual-rail-arc-2026-10-20',
     date: '2026-10-20',
     category: 'feature',
