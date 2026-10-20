@@ -57,7 +57,7 @@ export function X402DiscoveryView({
   /** USDC (Base・標準 x402) 商品。server が静的に渡す (lib/x402/usdcCatalog)。 */
   usdcItems?: readonly UsdcCatalogItem[];
   /** first-party の USDC 商品が Arc (Circle Gateway) でも払えるとき true (表示専用・server が flag から渡す)。
-   *  第三者出品の USDC 面 (dual-rail) は Base のみなので対象外。 */
+   *  第三者出品の Arc は出品者ごとのオプトインで、カタログ JSON には出ない (402 の accepts で決まる) ので対象外。 */
   usdcArc?: boolean;
   /** 更新型商品の鮮度 (path キー)。server が静的に渡す (lib/directory/monitorFreshness)。 */
   freshnessByPath?: Readonly<Record<string, MonitorFreshness>>;

@@ -145,7 +145,12 @@ export const LEGAL_ENTITY = {
   //   支払う (Circle CCTP V2) とき、Circle の転送手数料 (上限は決済額の 0.1%・1 USDC 未満は 0.001 USDC。DISCLOSED_CCTP_FEE) が
   //   店主の受取額から差し引かれ、顧客が支払う USDC には上乗せされず、当社は徴収しない旨を明記 (第 5 条 (3))。本番の挙動は
   //   この改定の前から同じ。免責事項は Arc 宛ての転送手数料にも触れていないため据置。施行日は仮置き (user の承認日で確定する)。
-  termsEffectiveDate: '2026-10-12',
+  // 2026-10-21 改定 (料金は変えない・Terms/特商法の 2 文書): 第三者出品の USDC 併売に、出品者が有効にした場合の
+  //   Arc (Circle Gateway) での支払いを追加 (第 5 条 (10))。買い手は Circle Gateway の残高から払い、売上は出品者の
+  //   Gateway 残高に入り出品者が自分で引き出す (当社は預からない)・当社利用料 0% は共通。「Arc は通常決済のみ」の文に
+  //   x402 の Circle Gateway 経由の支払いを除く旨を足した (OpenPay 自身の USDC 版有料 API の Arc も同じ経路)。
+  //   ENABLE_X402_DUAL_RAIL_ARC の点灯と同じリリースで公開する (DEPLOY_CHECKLIST §14.8b)。施行日は仮置き (点灯日で確定する)。
+  termsEffectiveDate: '2026-10-21',
   // 2026-07-29 改定: 非公開チップメッセージ (質問箱 Phase 1) の取得項目 (2-1(7))・
   //   利用目的 (2-2(9))・保管期間 (最長 180 日+本人削除) を追加。実質的改定のため施行日を更新。
   // 2026-09-10 改定案: 購入歴のない保有者も含む配布先へのチケット情報の提供を明示。
@@ -160,7 +165,9 @@ export const LEGAL_ENTITY = {
   disclaimerEffectiveDate: '2026-10-11',
   // 特商法は上の 2026-10-07・10-08・10-11 の改定 (Terms と同日) に加え、2026-10-12 改定: 他のチェーンから Arc 以外の
   //   チェーン宛てに支払うときの Circle の転送手数料 (「対価以外の費用」・Terms と同日)。
-  tokuteiEffectiveDate: '2026-10-12',
+  // 2026-10-21 改定: x402 の Circle Gateway 経由の Arc の支払い (支払いごとのネットワーク手数料なし・Gateway への入金と
+  //   引き出しの費用は Circle の条件・当社は徴収しない) を「対価以外の費用」に明記 (Terms と同日)。
+  tokuteiEffectiveDate: '2026-10-21',
   // モバイル注文システム利用料の施行日 (本利用料を新設した開示の公表日)。doc 全体の施行日 (上記
   // 2026-06-13) とは別管理 — 本利用料は新規・任意の付加機能 (モバイル注文) に対する個別条項で、機能の
   // 提供開始 (flag 点灯) まで実際の徴収は発生しない。本文は本定数の日付を補間して表示する。
@@ -329,11 +336,17 @@ export const DISCLOSED_LICENSE_NFT = {
 // 当社利用料 0%。Terms 第 5 条 (10)・/guide/sell・public/llms.txt はこのチェーン/資産/料率と
 // 一致しなければならない (フェンス: tests/app/legal.test.tsx)。
 // ⚠️ 料率を変える = 開示の変更ゆえ、必ず Terms 改定 (第 10 条の手続) + フェンス更新を伴うこと。
+// arc*: 出品者が「Arc (Circle Gateway) でも販売する」も有効にした出品だけの追加の支払い方法
+// (ENABLE_X402_DUAL_RAIL_ARC・listing の usdc.arc)。買い手は Circle Gateway の残高から払い、売上は出品者の
+// payTo の Gateway 残高に入る (出品者が自分で引き出す)。料率は openPayFeeBps を共有する。
 export const DISCLOSED_DUAL_RAIL_USDC = {
   chainId: base.id,
   chainName: 'Base',
   asset: 'USDC',
   openPayFeeBps: 0,
+  arcChainId: 5042, // lib/chains.ts の arc.id (legal は chains を import しない)
+  arcChainName: 'Arc',
+  arcSettlement: 'Circle Gateway',
 } as const;
 
 // 実 x402 料率 (env 由来・lib/x402/facilitatorConfig.ts) が開示済みの数値 (DISCLOSED_X402_FEE) と乖離して

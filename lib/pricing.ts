@@ -176,6 +176,7 @@ const STORE_GAS_WEI = DISCLOSED_STORE_GAS_WALLET.feeWei;
 const STORE_GAS_WEI_JPYC = formatJpycWei(BigInt(DISCLOSED_STORE_GAS_WALLET.feeWei));
 const STORE_USDC_CHAIN = DISCLOSED_STORE_USDC_PAYMENT.chainName;
 const DUAL_RAIL_CHAIN = DISCLOSED_DUAL_RAIL_USDC.chainName;
+const DUAL_RAIL_ARC_CHAIN = DISCLOSED_DUAL_RAIL_USDC.arcChainName;
 // 定数を引数で渡す (cctpFeeDisclosureValues の既定値は自分のモジュールの定数を読み、テストの差し替えが効かないため)。
 const CCTP_FEE = cctpFeeDisclosureValues(DISCLOSED_CCTP_FEE);
 
@@ -205,12 +206,12 @@ function dualRailUsdcClause(locale: PricingLocale): string {
   const bps = DISCLOSED_DUAL_RAIL_USDC.openPayFeeBps;
   if (bps === 0) {
     return locale === 'ja'
-      ? `USDC で売られているもの（AI ストアの第三者出品は ${DUAL_RAIL_CHAIN}）には、OpenPay の料金はかかりません。`
-      : `Items sold for USDC (third-party AI Store listings use ${DUAL_RAIL_CHAIN}) carry no OpenPay charge.`;
+      ? `USDC で売られているもの（AI ストアの第三者出品は ${DUAL_RAIL_CHAIN}。出品者が有効にしていれば ${DUAL_RAIL_ARC_CHAIN} も）には、OpenPay の料金はかかりません。`
+      : `Items sold for USDC (third-party AI Store listings use ${DUAL_RAIL_CHAIN}, plus ${DUAL_RAIL_ARC_CHAIN} where the seller enables it) carry no OpenPay charge.`;
   }
   return locale === 'ja'
-    ? `AI ストアの第三者出品を USDC（${DUAL_RAIL_CHAIN}）で買うときは、価格の ${percentLabel(bps)} がかかります。`
-    : `Third-party AI Store listings bought with USDC (${DUAL_RAIL_CHAIN}) carry ${percentLabel(bps)} of the price.`;
+    ? `AI ストアの第三者出品を USDC（${DUAL_RAIL_CHAIN}。出品者が有効にしていれば ${DUAL_RAIL_ARC_CHAIN} も）で買うときは、価格の ${percentLabel(bps)} がかかります。`
+    : `Third-party AI Store listings bought with USDC (${DUAL_RAIL_CHAIN}, or ${DUAL_RAIL_ARC_CHAIN} where the seller enables it) carry ${percentLabel(bps)} of the price.`;
 }
 
 // チップの USDC は開示の方式名で書き分ける (方式を足すと never で型エラーになり、ここを直すまで通らない)。
@@ -442,7 +443,7 @@ function buildJa(): PricingContent {
     ],
     otherItems: [
       `JPYC では、買い手が x402 利用料（価格の ${X402_PCT}・最低 ${X402_FLOOR} JPYC）を上乗せし、売り手は価格をそのまま受け取ります（AI ストアの API やモバイル注文など）。モバイル注文でも、モバイル注文の利用料ではなく、この x402 利用料だけがかかります。${dualRailUsdcClause('ja')}`,
-      '通常決済だけで、ネットワーク手数料もお客様が USDC で払います。OpenPay の料金はかかりません（モバイル注文を除きます）。',
+      '通常決済だけで、ネットワーク手数料もお客様が USDC で払います。OpenPay の料金はかかりません（モバイル注文を除きます）。AI エージェントが x402 で払うときは Circle Gateway を通すので、支払いのたびのネットワーク手数料はかかりません（Circle Gateway への USDC の出し入れには、別に費用がかかることがあります）。',
       'Circle の転送手数料は、払う側が上乗せして負担します。OpenPay はこの分を受け取りません。',
       `Circle の転送手数料（Circle が決める額で、上限は金額の ${CCTP_FEE.cctpMaxPercent}%。${CCTP_FEE.cctpSmallBelowUsdc} USDC 未満の支払いでは ${CCTP_FEE.cctpSmallCapUsdc} USDC）が、お店の受け取りから差し引かれます。払う側の支払いは増えません。OpenPay はこの分を受け取らず、料金もかかりません。`,
     ],
@@ -657,7 +658,7 @@ function buildEn(): PricingContent {
     ],
     otherItems: [
       `For JPYC, the buyer adds the x402 fee (${X402_PCT} of the price, minimum ${X402_FLOOR} JPYC), and the seller receives the price in full (such as AI Store APIs or mobile orders). Mobile orders paid this way are charged only this x402 fee, not the mobile order fee. ${dualRailUsdcClause('en')}`,
-      'Standard payments only; the customer pays the network fee in USDC as well. There is no OpenPay charge (mobile orders excepted).',
+      'Standard payments only; the customer pays the network fee in USDC as well. There is no OpenPay charge (mobile orders excepted). When an AI agent pays over x402, the payment goes through Circle Gateway, so there is no network fee per payment (moving USDC into or out of Circle Gateway may cost extra).',
       'The payer adds Circle’s transfer fee. OpenPay receives none of it.',
       `Circle’s transfer fee (set by Circle, capped at ${CCTP_FEE.cctpMaxPercent}% of the amount, or ${CCTP_FEE.cctpSmallCapUsdc} USDC for payments under ${CCTP_FEE.cctpSmallBelowUsdc} USDC) is deducted from what the shop receives. The payer pays no more. OpenPay receives none of it and charges nothing.`,
     ],

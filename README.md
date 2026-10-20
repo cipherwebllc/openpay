@@ -137,6 +137,7 @@ curl -si https://open-pay.jp/api/paid/hello | grep -i '^payment-required:' | cut
 ```
 
 OpenPay also runs a managed **JPYC x402 facilitator** and a public catalog (`/discovery`), and offers the Japan Web3 Directory API and the JPYC Shops API.
+Third-party catalog listings can also sell in USDC: on Base (relayed to the Coinbase CDP facilitator) and, when the seller also opts in, on Arc through Circle Gateway (buyers pay from a Gateway balance; revenue lands in the seller's Gateway balance). OpenPay takes no fee on the USDC side.
 
 - Endpoints, prices, and the buyer example: [docs/API.md](./docs/API.md)
 - Rules for listing a paid resource: [docs/LISTING_POLICY.md](./docs/LISTING_POLICY.md)

@@ -34,6 +34,17 @@ export type NewsItem = {
 // 表示順を強制しないが、可読性のため宣言時点でも新しい順に並べる。
 export const NEWS_ITEMS: readonly NewsItem[] = [
   {
+    id: 'x402-dual-rail-arc-2026-10-21',
+    date: '2026-10-21',
+    category: 'feature',
+    title: { ja: '第三者の出品も Arc の USDC で販売できます', en: 'Third-party listings can now also sell in USDC on Arc' },
+    body: {
+      ja: 'AI ストアの出品を USDC (Base) でも販売している出品者は、出品フォームで「Arc (Circle Gateway) でも販売する」を有効にすると、Arc の USDC でも同じ価格で販売できます (ノーコードゲートウェイ x402-jpyc-gateway で動かしている出品が対象です)。買い手は Circle Gateway に入金した残高からガス不要で払い、売上は受取アドレスの Gateway 残高に入るので、出品者が引き出して受け取ります。OpenPay の手数料はかかりません。Base での販売と x402 Bazaar への掲載は従来どおりです。',
+      en: 'Sellers who already offer an AI Store listing in USDC (Base) can turn on “Also sell on Arc (Circle Gateway)” in the listing form to sell it for USDC on Arc at the same price (for listings served by the no-code x402-jpyc-gateway). Buyers pay gaslessly from a balance deposited in Circle Gateway, and revenue lands in the Gateway balance of your receiving address, which you withdraw yourself. OpenPay charges no fee. Selling on Base and the x402 Bazaar listing are unchanged.',
+    },
+    link: { href: '/guide/sell', labelJa: '販売ガイドを読む', labelEn: 'Read the selling guide' },
+  },
+  {
     id: 'discount-register-qr-mobile-order-2026-10-09',
     date: '2026-10-09',
     category: 'feature',
@@ -179,8 +190,8 @@ export const NEWS_ITEMS: readonly NewsItem[] = [
     category: 'feature',
     title: { ja: 'AI 向け有料 API が Arc の USDC でも支払えます', en: 'Paid APIs for AI agents now accept USDC on Arc' },
     body: {
-      ja: 'OpenPay 自身の USDC 版有料 API (x402) に、Base に加えて Arc の支払い方法を追加しました。Arc は Circle Gateway の x402 facilitator で精算し、AI エージェントは Gateway 残高からガス不要で支払えます。価格は Base と同額で、OpenPay の手数料上乗せはありません。Base (標準 x402) は従来どおりです。Store の USDC 購入と第三者出品の USDC 面は引き続き Base のみです。',
-      en: 'OpenPay\'s own USDC-priced paid APIs (x402) now offer Arc alongside Base. Arc payments settle through the Circle Gateway x402 facilitator, so agents pay gaslessly from a Gateway balance. Prices match Base and OpenPay adds no fee. Base (standard x402) is unchanged. Store USDC purchases and third-party USDC listings remain Base-only.',
+      ja: 'OpenPay 自身の USDC 版有料 API (x402) に、Base に加えて Arc の支払い方法を追加しました。Arc は Circle Gateway の x402 facilitator で精算し、AI エージェントは Gateway 残高からガス不要で支払えます。価格は Base と同額で、OpenPay の手数料上乗せはありません。Base (標準 x402) は従来どおりです。Store の USDC 購入と第三者出品の USDC 面は引き続き Base のみです。\n※ 2026-10-21 の更新により、第三者出品の USDC 面は「Base のみ」から「出品者が有効にすれば Arc でも支払える」へ置き換えられました。Store の USDC 購入は引き続き Base のみです。',
+      en: 'OpenPay\'s own USDC-priced paid APIs (x402) now offer Arc alongside Base. Arc payments settle through the Circle Gateway x402 facilitator, so agents pay gaslessly from a Gateway balance. Prices match Base and OpenPay adds no fee. Base (standard x402) is unchanged. Store USDC purchases and third-party USDC listings remain Base-only.\nNote: superseded by the 2026-10-21 update — third-party USDC listings can now also be paid on Arc when the seller enables it. Store USDC purchases remain Base-only.',
     },
     link: { href: '/discovery', labelJa: 'AI ストアを見る', labelEn: 'Open the AI store' },
   },
