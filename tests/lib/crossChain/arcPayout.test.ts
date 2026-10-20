@@ -2,7 +2,7 @@
 // 資金に関わる約束を固定する: 自分宛て・Arc → Arc・額 + 手数料 = 残高 (残高 0)・maxFee = 手数料ちょうど・
 // Circle の応答を自分の署名と照合してから受け取りの取引を送る・失効した attestation は送らない。
 import { describe, expect, it, vi } from 'vitest';
-import { getAddress, keccak256, pad, parseUnits, type Hex } from 'viem';
+import { getAddress, keccak256, pad, parseAbiItem, parseUnits, toEventSelector, type Hex } from 'viem';
 import {
   ArcPayoutError,
   arcPayoutChain,
@@ -22,7 +22,20 @@ import { gatewayAttestation } from '../../fixtures/gateway';
 
 const DEPOSITOR = getAddress('0x52d4901142e2b5680027da5eb47c86cb02a3ca81');
 const ARC_USDC = '0x3600000000000000000000000000000000000000';
+const ARC_USDC_FOR_LOG = ARC_USDC as Hex;
 const BASE = 'https://gateway.test';
+const SPEC_HASH = `0x${'5a'.repeat(32)}` as Hex;
+
+/** GatewayMinter の AttestationUsed のログ (2026-10-21 の本番の取引と同じ形: transferSpecHash は topics[3])。 */
+function attestationUsedLog(transferSpecHash: Hex) {
+  return {
+    address: GATEWAY_MINTER_ADDRESS,
+    topics: [
+      toEventSelector(parseAbiItem('event AttestationUsed(address indexed token, address indexed recipient, bytes32 indexed transferSpecHash, uint32 sourceDomain, bytes32 sourceDepositor, bytes32 sourceSigner, uint256 value)')),
+      pad(ARC_USDC_FOR_LOG), pad(DEPOSITOR), transferSpecHash,
+    ],
+  };
+}
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -177,9 +190,12 @@ function harness(opts: { balances?: string[]; fee?: string; transfer?: (intent: 
     getBlockNumber: vi.fn(async () => 500n),
     waitForTransactionReceipt: vi.fn(async ({ hash }: { hash: Hex }) => {
       minter.minted = true;
-      return { status: 'success', transactionHash: hash, blockNumber: 500n };
+      return { status: 'success', transactionHash: hash, blockNumber: 500n, logs: [attestationUsedLog(SPEC_HASH)] };
     }),
-    getTransactionReceipt: vi.fn(async ({ hash }: { hash: Hex }) => ({ status: 'success', transactionHash: hash, to: GATEWAY_MINTER_ADDRESS })),
+    // 既定: この引き出しの受け取り (GatewayMinter の AttestationUsed・spec hash 一致) を含む成功した取引
+    getTransactionReceipt: vi.fn(async ({ hash }: { hash: Hex }) => ({
+      status: 'success', transactionHash: hash, to: GATEWAY_MINTER_ADDRESS, logs: [attestationUsedLog(SPEC_HASH)],
+    })),
   };
   const deps = {
     walletClient: walletClient as never, publicClient: publicClient as never, switchChainAsync, fetch, baseUrl: BASE,
@@ -241,7 +257,7 @@ describe('requestArcPayout', () => {
 describe('completeArcPayout (受け取りの取引)', () => {
   const TX = `0x${'ab'.repeat(32)}` as Hex;
   const base: ArcPayoutAttestation = {
-    depositor: DEPOSITOR, attestation: '0xaa', signature: '0xbb', transferSpecHash: `0x${'5a'.repeat(32)}`,
+    depositor: DEPOSITOR, attestation: '0xaa', signature: '0xbb', transferSpecHash: SPEC_HASH,
     expiresAtBlock: 1_000n, value: parseUnits('0.027', 6),
   };
 
@@ -272,7 +288,7 @@ describe('completeArcPayout (受け取りの取引)', () => {
     h.publicClient.waitForTransactionReceipt.mockImplementationOnce(async (args: unknown) => {
       (args as { onReplaced: (r: unknown) => void }).onReplaced({ reason: 'repriced', transaction: { hash: REPRICED } });
       h.minter.minted = true;
-      return { status: 'success', transactionHash: REPRICED, blockNumber: 500n };
+      return { status: 'success', transactionHash: REPRICED, blockNumber: 500n, logs: [attestationUsedLog(SPEC_HASH)] };
     });
     const onBroadcast = vi.fn();
     await expect(completeArcPayout(base, { ...h.deps, onBroadcast })).resolves.toBe(REPRICED);
@@ -285,7 +301,7 @@ describe('completeArcPayout (受け取りの取引)', () => {
     const CANCEL = `0x${'ee'.repeat(32)}` as Hex;
     h.publicClient.waitForTransactionReceipt.mockImplementationOnce(async (args: unknown) => {
       (args as { onReplaced: (r: unknown) => void }).onReplaced({ reason: 'cancelled', transaction: { hash: CANCEL } });
-      return { status: 'success', transactionHash: CANCEL, blockNumber: 500n };
+      return { status: 'success', transactionHash: CANCEL, blockNumber: 500n, logs: [] };
     });
     await expect(completeArcPayout(base, h.deps)).rejects.toMatchObject({ code: 'mint_not_completed' });
   });
@@ -324,14 +340,14 @@ describe('completeArcPayout (受け取りの取引)', () => {
     const h = harness();
     h.publicClient.waitForTransactionReceipt.mockImplementationOnce(async ({ hash }: { hash: Hex }) => {
       h.minter.readFails = true;
-      return { status: 'success', transactionHash: hash, blockNumber: 500n };
+      return { status: 'success', transactionHash: hash, blockNumber: 500n, logs: [] };
     });
     await expect(completeArcPayout(base, h.deps)).rejects.toMatchObject({ code: 'confirm_unknown' });
   });
 
   it('取引の確定より古い状態 (遅れた RPC) で「受け取っていない」と決めない — confirm_unknown のまま送り直させない', async () => {
     const h = harness();
-    h.publicClient.waitForTransactionReceipt.mockResolvedValueOnce({ status: 'success', transactionHash: TX, blockNumber: 600n });
+    h.publicClient.waitForTransactionReceipt.mockResolvedValueOnce({ status: 'success', transactionHash: TX, blockNumber: 600n, logs: [] });
     await expect(completeArcPayout(base, h.deps)).rejects.toMatchObject({ code: 'confirm_unknown' });
   });
 
@@ -341,9 +357,45 @@ describe('completeArcPayout (受け取りの取引)', () => {
     await expect(completeArcPayout({ ...base, txHash: TX }, h.deps)).resolves.toBe(TX);
     h.publicClient.getTransactionReceipt.mockResolvedValueOnce(null as never);
     await expect(completeArcPayout({ ...base, txHash: TX }, h.deps)).resolves.toBeNull();
-    h.publicClient.getTransactionReceipt.mockResolvedValueOnce({ status: 'success', transactionHash: TX, to: DEPOSITOR } as never);
+    // 成功しても、この引き出しの受け取りの記録 (AttestationUsed) が無い取引 (取り消し・別の引き出し) は返さない
+    h.publicClient.getTransactionReceipt.mockResolvedValueOnce({ status: 'success', transactionHash: TX, to: GATEWAY_MINTER_ADDRESS, logs: [] } as never);
+    await expect(completeArcPayout({ ...base, txHash: TX }, h.deps)).resolves.toBeNull();
+    h.publicClient.getTransactionReceipt.mockResolvedValueOnce({
+      status: 'success', transactionHash: TX, to: GATEWAY_MINTER_ADDRESS, logs: [attestationUsedLog(`0x${'99'.repeat(32)}`)],
+    } as never);
     await expect(completeArcPayout({ ...base, txHash: TX }, h.deps)).resolves.toBeNull();
     expect(h.walletClient.sendTransaction).not.toHaveBeenCalled();
+  });
+
+  it('EIP-7702 のスマートアカウントが委任の仕組みを経由して送った (to が GatewayMinter でない) 取引も、受け取りの記録があれば返す', async () => {
+    const h = harness();
+    h.minter.minted = true;
+    // 2026-10-21 の本番の引き出し: to = 委任の仕組みのコントラクト・GatewayMinter の AttestationUsed を含む
+    h.publicClient.getTransactionReceipt.mockResolvedValueOnce({
+      status: 'success', transactionHash: TX, to: '0xdb9b1e94b5b69df7e401ddbede43491141047db3', logs: [attestationUsedLog(SPEC_HASH)],
+    } as never);
+    await expect(completeArcPayout({ ...base, txHash: TX }, h.deps)).resolves.toBe(TX);
+  });
+
+  it('確定を待つ間 (時間切れ) に置き換えた取引で受け取っていたら、元の hash を返さない (リンクを出さない)', async () => {
+    const h = harness();
+    h.publicClient.waitForTransactionReceipt.mockImplementationOnce(async () => {
+      h.minter.minted = true;
+      throw new Error('timeout');
+    });
+    // 元の取引は確定していない (receipt なし)
+    h.publicClient.getTransactionReceipt.mockResolvedValueOnce(null as never);
+    await expect(completeArcPayout(base, h.deps)).resolves.toBeNull();
+  });
+
+  it('確定した取引が取り消しで、受け取りは別の取引だったら、その hash を返さない', async () => {
+    const h = harness();
+    const CANCEL = `0x${'ee'.repeat(32)}` as Hex;
+    h.publicClient.waitForTransactionReceipt.mockImplementationOnce(async () => {
+      h.minter.minted = true;
+      return { status: 'success', transactionHash: CANCEL, blockNumber: 500n, logs: [] };
+    });
+    await expect(completeArcPayout(base, h.deps)).resolves.toBeNull();
   });
 
   it('まだ送っていないとき、記録を読めなければ送らない', async () => {
@@ -362,7 +414,7 @@ describe('completeArcPayout (受け取りの取引)', () => {
 
   it('取引が revert して記録も無ければ成功と言わない (失効前は送り直せる・失効後は attestation_expired)', async () => {
     const h = harness();
-    h.publicClient.waitForTransactionReceipt.mockResolvedValue({ status: 'reverted', transactionHash: TX, blockNumber: 500n });
+    h.publicClient.waitForTransactionReceipt.mockResolvedValue({ status: 'reverted', transactionHash: TX, blockNumber: 500n, logs: [] });
     await expect(completeArcPayout(base, h.deps)).rejects.toMatchObject({ code: 'mint_not_completed' });
     h.publicClient.getBlockNumber.mockResolvedValueOnce(500n).mockResolvedValueOnce(1_001n);
     await expect(completeArcPayout(base, h.deps)).rejects.toMatchObject({ code: 'attestation_expired' });

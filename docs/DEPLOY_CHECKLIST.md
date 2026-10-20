@@ -1971,7 +1971,7 @@ PAYMENT-RESPONSE `{success:true, transaction:'904f72e8-f03d-4bd6-9df4-865e7b24d5
 
 Arc の売上 (受取アドレスの Gateway 残高・domain 26) を、受取アドレスのウォレットが `/discovery/arc-payout` で全額 Arc へ引き出す。計画は `plans/arc-gateway-payout.md` (user 裁定 2026-10-20: 引き出し先は Arc のみ・受け取りの取引のガスは出品者・手数料ちょうどで署名して残高 0 を狙う・コントラクトの受取先は登録で断る・専用ページ 1 枚)。点灯は user。
 
-- 仕組み: すべてブラウザ内。残高 `POST /v1/balances`、手数料は `POST /v1/estimate?enableForwarder=true` の `fees.perIntent[].baseFee` (+ `transferFee`) を読むだけ (forwarder は使わない。forwarder なしの応答は余裕込みの推奨 maxFee 0.00385 しか返さない)。額 = 残高 − 手数料・maxFee = 手数料で BurnIntent に署名 → `POST /v1/transfer` → attestation を自分の spec と照合 → 受取アドレスのウォレットが Arc で `gatewayMint` を送る (ガスは Arc の USDC・実測 127k〜158k gas ≈ 0.003 USDC)。OpenPay のサーバーは関与せず、鍵もガスも持たない。
+- 仕組み: すべてブラウザ内。残高 `POST /v1/balances`、手数料は `POST /v1/estimate?enableForwarder=true` の `fees.perIntent[].baseFee` (+ `transferFee`) を読むだけ (forwarder は使わない。forwarder なしの応答は余裕込みの推奨 maxFee 0.00385 しか返さない)。額 = 残高 − 手数料・maxFee = 手数料で BurnIntent に署名 → `POST /v1/transfer` → attestation を自分の spec と照合 → 受取アドレスのウォレットが Arc で `gatewayMint` を送る (ガスは Arc の USDC・EOA から直接なら実測 127k〜158k gas ≈ 0.003 USDC、EIP-7702 のスマートアカウントが委任の仕組みを経由すると 229k gas ≈ 0.0049 USDC。開示の目安は「1 回 0.003〜0.005 USDC 程度・ウォレットの送り方で変わる」)。OpenPay のサーバーは関与せず、鍵もガスも持たない。
 - 失敗時: Circle の拒否 (4xx) は残高そのまま。時間切れ・5xx・照合の不一致は「受け付けられた可能性」→ 画面はそのアドレスで 10 分 (attestation の有効期間) 引き出し直させない (表示中のアカウントを切り替えても消えない)。受け取りの成否は GatewayMinter の記録 `isTransferSpecHashUsed(transferSpecHash)` で決め、失効の判定と同じブロックの時点で読む (receipt だけでは、ウォレットでの取り消しが成功の receipt を返すことがある。記録が無いままそのブロックが maxBlockHeight を過ぎていれば、以後の受け取りは起きないので「取り消し・残高に戻る」で終える)。送った取引の hash (置き換え後の hash も) は送った直後に残し、結果が分からなければ送り直さずに確かめ直す。受け取りにならなかったと確かめたら、attestation の maxBlockHeight (Arc のブロック高) までは同じ attestation で送り直せる (引き出し元のアカウントだけ)。未使用の attestation は失効すると残高に戻る (Circle technical guide)。
 - 登録の fence (flag なし・#879 の Arc 同意に即効): `usdc.arc === true` の登録・変更で受取先の code を Base と Arc で見て (RPC は 1 回 4 秒・再試行なし・route に入ってから 11 秒まで・既存の 2 つの probe と並行)、コントラクト (7702 の委任を除く) は 400 `usdc_arc_contract_pay_to`、RPC 障害は 503 `usdc_arc_check_unavailable` (fail-closed・Arc の同意を外せば保存できる)。同意済みで受取先も同じ編集は見ない。2026-10-20 時点で公開一覧から辿れる Arc 出品 3 件の受取先はすべて `0x52d4…cA81` (Base・Arc とも EOA)。
 
@@ -1980,7 +1980,7 @@ Arc の売上 (受取アドレスの Gateway 残高・domain 26) を、受取ア
 3. Vercel (Production) に `NEXT_PUBLIC_ENABLE_ARC_PAYOUT=1` (build 時に埋め込まれるので、次のデプロイから効く)。
 4. 開示の PR を merge (このデプロイで flag と開示が同時に出る)。
 5. 確認 (毎回この 1 つの方法): `https://open-pay.jp/ja/discovery/arc-payout` で受取アドレス (`0x52d4…cA81`) のウォレットをつなぐ → 残高・手数料・受け取る額を見る → 「全額を引き出す」→ ウォレットで Arc への切り替え・署名・受け取りの取引を承認 → 完了の表示と取引のリンク。`POST /v1/balances` が `balance: "0.000000"` になり、Arc の取引で受取アドレスに受け取る額が届いたことを確かめる。
-   - 未確定 (この確認で決まる): Circle が maxFee = 手数料ちょうどを受け付けるか (拒否なら止めて user に相談・余裕を足して再署名はしない)、実際に引かれる手数料が maxFee と同じか (少なければ差額が残る)、`/v1/balances` に引き当てがすぐ反映されるか。
+   - **確認済み (2026-10-21 03:25 JST・0x52d4…cA81)**: Gateway 残高 0.030500 → 「全額を引き出す」→ 0.027 USDC を受け取り、残高 `0.000000` (即時に反映)。Circle は maxFee = baseFee ちょうど (3500) を受け付け、実際に引かれた手数料も 0.0035 (残り 0)。受け取りの取引 `0x9c1dfa4d…74cf4` (block 26985384・GatewayMinter の AttestationUsed あり)。このときウォレット (MetaMask と見られる) は 0x52d4 を EIP-7702 のスマートアカウントにして委任の仕組み (`0xdb9b1e94…`) 経由で送ったので、`to` は GatewayMinter でなく、ガスは 229,288 gas = 0.00493 USDC。→ 受け取りの取引かどうかの判定は `to` でなく AttestationUsed (spec hash) で見る。0x52d4 は Arc で 7702 の委任つき (`0xef0100…`) になったので、次の引き出しで署名が Circle に通るかを確かめる。
 6. 戻すとき: `NEXT_PUBLIC_ENABLE_ARC_PAYOUT` を外して再デプロイ (ページは 404)。進行中の引き出しは、未使用なら 10 分で残高に戻る。
 
 ## §15 Web Push 着金通知 go-live SOP
