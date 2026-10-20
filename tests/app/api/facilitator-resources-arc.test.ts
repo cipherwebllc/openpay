@@ -8,6 +8,7 @@ const h = vi.hoisted(() => ({
   createResource: vi.fn(),
   updateResource: vi.fn(),
   getResource: vi.fn(),
+  isFreelyAccessible: vi.fn(),
   input: {} as Record<string, unknown>,
 }));
 
@@ -27,7 +28,7 @@ vi.mock('@/lib/x402/resourceRequestGuards', () => ({
   RESOURCE_RATE_LIMIT_WINDOW_SEC: 60,
 }));
 vi.mock('@/lib/httpBodyCap', () => ({ readJsonBodyCapped: async () => ({ ok: true, value: {} }) }));
-vi.mock('@/lib/x402/moderation', () => ({ isFreelyAccessible: async () => false, probeGate: async () => 'openpay' }));
+vi.mock('@/lib/x402/moderation', () => ({ isFreelyAccessible: h.isFreelyAccessible, probeGate: async () => 'openpay' }));
 vi.mock('@/lib/x402/arcPayToReachability', () => ({ arcPayToRejection: h.arcPayToRejection }));
 vi.mock('@/lib/logger', () => ({ logger: { warn: vi.fn(), info: vi.fn(), error: vi.fn() } }));
 vi.mock('@/lib/x402/registry', () => ({
@@ -51,6 +52,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   h.input = { url: 'https://seller.example/api', payTo: WALLET, usdc: USDC_ARC };
   h.arcPayToRejection.mockResolvedValue(null);
+  h.isFreelyAccessible.mockResolvedValue(false);
   h.createResource.mockResolvedValue({ ok: true, resource: { id: 'r1', url: 'https://seller.example/api', payTo: WALLET } });
   h.updateResource.mockResolvedValue({ ok: true, resource: { id: 'r1', url: 'https://seller.example/api', payTo: WALLET } });
   h.getResource.mockResolvedValue({ id: 'r1', merchant: WALLET, usdc: { payTo: WALLET, priceUsd: '0.01', arc: true } });
@@ -72,6 +74,21 @@ describe('POST /api/facilitator/resources', () => {
     const res = await POST(req());
     expect(res.status).toBe(503);
     expect(h.createResource).not.toHaveBeenCalled();
+  });
+
+  it('検査は probe と並行に走る (順に待つと route の 15 秒を超えうる)・保存の前に結果を見る', async () => {
+    let releaseProbe!: (v: boolean) => void;
+    h.isFreelyAccessible.mockImplementation(() => new Promise((resolve) => { releaseProbe = resolve; }));
+    let releaseArc!: (v: null) => void;
+    h.arcPayToRejection.mockImplementation(() => new Promise((resolve) => { releaseArc = resolve; }));
+    const pending = POST(req());
+    await vi.waitFor(() => expect(h.isFreelyAccessible).toHaveBeenCalled());
+    expect(h.arcPayToRejection).toHaveBeenCalled();
+    releaseProbe(false);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(h.createResource).not.toHaveBeenCalled();
+    releaseArc(null);
+    expect((await pending).status).toBe(201);
   });
 
   it('通れば保存する', async () => {

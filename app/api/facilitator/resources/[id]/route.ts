@@ -93,8 +93,8 @@ export async function PATCH(
   if (!parsed.ok) return NextResponse.json({ error: parsed.reason }, { status: 400 });
 
   // 新規登録と同じ Arc 受取先の検査。同意済みで受取先も同じ編集は検査しない (existing=null なら検査する)。
-  const arcRejection = await arcPayToRejection(parsed.input.usdc, existing?.usdc, startedAt);
-  if (arcRejection) return NextResponse.json({ error: arcRejection.error }, { status: arcRejection.status });
+  // 新規登録と同じく、下の probe と並行に走らせて更新の前に結果を見る (順に待つと route の 15 秒を超えうる)。
+  const arcCheck = arcPayToRejection(parsed.input.usdc, existing?.usdc, startedAt);
 
   // 差し替え URL の moderation は **owner かつ resource 存在時のみ** 実行 (probe を owner に限定)。
   // existing=null (未存在/outage) は probe せず updateResource の判定 (not_found/storage) に委ねる。
@@ -124,6 +124,9 @@ export async function PATCH(
       { status: 422 },
     );
   }
+
+  const arcRejection = await arcCheck;
+  if (arcRejection) return NextResponse.json({ error: arcRejection.error }, { status: arcRejection.status });
 
   const result = await updateResource(id, session.address, parsed.input);
   if (!result.ok) {
