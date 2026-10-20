@@ -12,6 +12,7 @@ import { logger } from '@/lib/logger';
 import { clientIp, hashIpBucket } from '@/lib/net/ipHash';
 import { checkIpRateLimit } from '@/lib/relay/relayGuards';
 import { redactUrlForTelemetry } from '@/lib/telemetryRedaction';
+import { arcPayToRejection } from '@/lib/x402/arcPayToReachability';
 import { isFreelyAccessible, probeGate } from '@/lib/x402/moderation';
 import { buildPaywallSnippet } from '@/lib/x402/paywallSnippet';
 import {
@@ -52,6 +53,7 @@ export async function GET(): Promise<NextResponse> {
 }
 
 export async function POST(req: Request): Promise<NextResponse> {
+  const startedAt = Date.now();
   if (!env.enableX402Facilitator) {
     return NextResponse.json({ error: 'not_found' }, { status: 404 });
   }
@@ -109,6 +111,11 @@ export async function POST(req: Request): Promise<NextResponse> {
     return NextResponse.json({ error: 'too_many_resources' }, { status: 429 });
   }
 
+  // Arc に同意した出品の受取先がコントラクトなら断る (Arc の売上を引き出せない受取先・plans/arc-gateway-payout.md)。
+  // 下の 2 つの probe (各 5 秒まで) と並行に走らせ、保存の前に結果を見る (順に待つと route の 15 秒を超えうる)。
+  // 読むだけの検査で例外を出さないので、probe で先に返すときに待たずに残しても副作用は無い。
+  const arcCheck = arcPayToRejection(parsed.input.usdc, undefined, startedAt);
+
   // モデレーション: 無料で公開されている URL の価格付き登録を弾く (probe で 200 を確認したら拒否)。
   // 402/401/403/エラー/タイムアウトは通す (fail-open)。private/loopback は parseResourceInput で既に排除。
   if (await isFreelyAccessible(parsed.input.url)) {
@@ -133,6 +140,9 @@ export async function POST(req: Request): Promise<NextResponse> {
       { status: 422 },
     );
   }
+
+  const arcRejection = await arcCheck;
+  if (arcRejection) return NextResponse.json({ error: arcRejection.error }, { status: arcRejection.status });
 
   const id = crypto.randomUUID();
   const created = await createResource(parsed.input, id, Date.now());

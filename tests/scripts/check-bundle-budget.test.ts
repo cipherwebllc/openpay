@@ -8,7 +8,7 @@ const TIP_ROW = '├ ƒ /[locale]/tip/[address]                       12.5 kB   
 const MANIFEST_ROW = '├ ○ /manifest.webmanifest                           620 B         194 kB';
 const SHARED_ROW = '+ First Load JS shared by all                      193 kB';
 
-// 予算対象の route (2026-10-10 第 7 回レビュー F2/E22 で締め直した表と同じ 17 件)。
+// 予算対象の route (2026-10-10 第 7 回レビュー F2/E22 で締め直した表と同じ 17 件 + 2026-10-20 の Arc の売上の受け取りページ)。
 const BUDGETED = [
   '/_not-found',
   '/[locale]',
@@ -18,6 +18,7 @@ const BUDGETED = [
   '/[locale]/checkout',
   '/[locale]/create',
   '/[locale]/discovery',
+  '/[locale]/discovery/arc-payout',
   '/[locale]/experimental/cross-chain-demo',
   '/[locale]/history',
   '/[locale]/order',
@@ -49,6 +50,7 @@ Route (app)                                          Size  First Load JS
 ├   └ /en/checkout
 ├ ● /[locale]/create                              44.3 kB         364 kB
 ├ ● /[locale]/discovery                           28.3 kB         310 kB
+├ ● /[locale]/discovery/arc-payout                21.8 kB         377 kB
 ├ ● /[locale]/experimental/cross-chain-demo       18.2 kB         357 kB
 ├ ● /[locale]/guide/qr                              417 B         258 kB
 ├ ● /[locale]/history                               35 kB         407 kB
@@ -108,6 +110,7 @@ describe('check-bundle-budget CLI', () => {
     ['/[locale]/store', 264],
     ['/[locale]/billing', 336],
     ['/[locale]/discovery', 315],
+    ['/[locale]/discovery/arc-payout', 382],
   ])('budgets %s at %i kB (measured + 5)', (route, budget) => {
     const result = runGate(NORMAL_BUILD_OUTPUT);
     expect(result.stdout).toContain(`[OK] ${route}: `);

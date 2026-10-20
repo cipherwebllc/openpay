@@ -771,6 +771,13 @@ export const env = {
     'NEXT_PUBLIC_ENABLE_X402_DUAL_RAIL_ARC',
     process.env.NEXT_PUBLIC_ENABLE_X402_DUAL_RAIL_ARC,
   ),
+  // 「Arc の売上を受け取る」ページ (/discovery/arc-payout) と入口のリンク。既定 OFF。
+  // 受取アドレスのウォレットが Gateway 残高を Arc へ引き出す (署名・送信ともウォレット内・サーバーは関与しない)。
+  // 点灯は開示 (規約・出品フォーム・/guide/sell・llms.txt) の更新と同じデプロイで。
+  enableArcPayoutUi: parseBoolFlag(
+    'NEXT_PUBLIC_ENABLE_ARC_PAYOUT',
+    process.env.NEXT_PUBLIC_ENABLE_ARC_PAYOUT,
+  ),
   // Sentry browser DSN。未設定なら instrumentation-client.ts:7-12 が no-op に
   // 倒れ、logger.warn/error は console のみで Sentry へ送られない。本番では
   // 観測ゼロ = 事故検知不能のため、mainnet では下記の guard で deploy を中止。

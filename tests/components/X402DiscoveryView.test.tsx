@@ -23,7 +23,7 @@ vi.mock('@/components/ConnectButton', () => ({
   ConnectButton: () => <button type="button">ウォレットを接続</button>,
 }));
 // dual-rail UI flag だけ差し替え可能にする (他の env は実値)。既定 OFF = 従来描画。
-const envState = vi.hoisted(() => ({ enableX402DualRailUi: false, enableX402DualRailArcUi: false }));
+const envState = vi.hoisted(() => ({ enableX402DualRailUi: false, enableX402DualRailArcUi: false, enableArcPayoutUi: false }));
 vi.mock('@/lib/env', async (importOriginal) => {
   const mod = await importOriginal<typeof import('@/lib/env')>();
   return {
@@ -34,7 +34,9 @@ vi.mock('@/lib/env', async (importOriginal) => {
           ? envState.enableX402DualRailUi
           : p === 'enableX402DualRailArcUi'
             ? envState.enableX402DualRailArcUi
-            : (t as Record<string | symbol, unknown>)[p],
+            : p === 'enableArcPayoutUi'
+              ? envState.enableArcPayoutUi
+              : (t as Record<string | symbol, unknown>)[p],
     }),
   };
 });
@@ -105,6 +107,7 @@ beforeEach(() => {
   state.signedIn = false;
   envState.enableX402DualRailUi = false;
   envState.enableX402DualRailArcUi = false;
+  envState.enableArcPayoutUi = false;
   // onEdit はフォームへ scrollIntoView する (jsdom 未実装)。
   Element.prototype.scrollIntoView = vi.fn();
   global.fetch = vi.fn(async () => ({
@@ -1105,6 +1108,29 @@ describe('X402DiscoveryView dual-rail USDC 面 (flag ゲート)', () => {
     fireEvent.click(screen.getByRole('button', { name: '登録する' }));
     await waitFor(() => expect(fetchOn).toHaveBeenCalledWith('/api/facilitator/resources', expect.objectContaining({ method: 'POST' })));
     expect(postedBody(fetchOn).usdc).toEqual({ priceUsd: '0.01', arc: true });
+  });
+
+  it('受け取りページの flag ON: Arc 欄の下と、Arc に同意した出品がある「あなたの登録」に受け取りページへのリンク', async () => {
+    envState.enableArcPayoutUi = true;
+    renderAsOwner([{ ...USDC_OWNED, usdc: { ...USDC_OWNED.usdc, arc: true } } as typeof USDC_OWNED]);
+    const links = await screen.findAllByRole('link', { name: /Arc の売上を受け取る/ });
+    expect(links[0]).toHaveAttribute('href', '/ja/discovery/arc-payout');
+    fireEvent.click(screen.getByRole('button', { name: '編集' }));
+    expect(screen.getAllByRole('link', { name: /Arc の売上を受け取る/ })).toHaveLength(2);
+  });
+
+  it('受け取りページの flag ON でも、Arc に同意した出品が無ければ「あなたの登録」にリンクを出さない', async () => {
+    envState.enableArcPayoutUi = true;
+    renderAsOwner([USDC_OWNED]);
+    await screen.findByRole('button', { name: '編集' });
+    expect(screen.queryByRole('link', { name: /Arc の売上を受け取る/ })).not.toBeInTheDocument();
+  });
+
+  it('受け取りページの flag OFF (既定) ではリンクを出さない', async () => {
+    renderAsOwner([{ ...USDC_OWNED, usdc: { ...USDC_OWNED.usdc, arc: true } } as typeof USDC_OWNED]);
+    fireEvent.click(await screen.findByRole('button', { name: '編集' }));
+    expect(screen.getByRole('checkbox', { name: 'Arc (Circle Gateway) でも販売する' })).toBeChecked();
+    expect(screen.queryByRole('link', { name: /Arc の売上を受け取る/ })).not.toBeInTheDocument();
   });
 
   it('Arc 未チェックなら usdc に arc を含めない', async () => {

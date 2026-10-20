@@ -85,6 +85,24 @@ describe('lib/env (module-load validation)', () => {
     delete process.env.NEXT_PUBLIC_ENABLE_X402_DUAL_RAIL_ARC;
   });
 
+  it('Arc の売上を受け取るページの flag は既定 OFF (1/true だけ受理)', async () => {
+    vi.resetModules();
+    delete process.env.NEXT_PUBLIC_ENABLE_ARC_PAYOUT;
+    let mod = await import('@/lib/env');
+    expect(mod.env.enableArcPayoutUi).toBe(false);
+
+    vi.resetModules();
+    process.env.NEXT_PUBLIC_ENABLE_ARC_PAYOUT = '1';
+    mod = await import('@/lib/env');
+    expect(mod.env.enableArcPayoutUi).toBe(true);
+
+    vi.resetModules();
+    process.env.NEXT_PUBLIC_ENABLE_ARC_PAYOUT = 'yes';
+    mod = await import('@/lib/env');
+    expect(mod.env.enableArcPayoutUi).toBe(false);
+    delete process.env.NEXT_PUBLIC_ENABLE_ARC_PAYOUT;
+  });
+
   it('Creator Store の server / UI flag は独立し、どちらも既定 OFF', async () => {
     vi.resetModules();
     delete process.env.ENABLE_CREATOR_STORE;
