@@ -160,7 +160,7 @@ const ja: AgentGuideContent = {
     {
       n: 2,
       title: '下記の設定を追加して再起動',
-      body: '下のブロックを mcpServers に追加して保存し、クライアントを再起動します (Node.js 20 以上が必要)。',
+      body: '下のブロックを mcpServers に追加して保存し、クライアントを再起動します (Node.js 22 以上が必要)。',
     },
     {
       n: 3,
@@ -328,7 +328,7 @@ const en: AgentGuideContent = {
     {
       n: 2,
       title: 'Add the config below and restart',
-      body: 'Add the block below to mcpServers, save and restart the client (Node.js 20+ required).',
+      body: 'Add the block below to mcpServers, save and restart the client (Node.js 22+ required).',
     },
     {
       n: 3,

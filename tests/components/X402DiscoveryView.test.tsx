@@ -1050,7 +1050,7 @@ describe('X402DiscoveryView', () => {
     fireEvent.click(await screen.findByText('2円で試す'));
     expect(
       screen.getByText(
-        'curl・Node.js 20+・npm を使い、下の手順で 402→支払い→解錠を体験できます。',
+        'curl・Node.js 22+・npm を使い、下の手順で 402→支払い→解錠を体験できます。',
       ),
     ).toBeInTheDocument();
     const copyButtons = screen.getAllByRole('button', { name: 'コピー' });

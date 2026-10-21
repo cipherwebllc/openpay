@@ -185,7 +185,7 @@ Inspect the payment challenge without paying:
 curl -i https://open-pay.jp/api/paid/japan-web3-directory
 ```
 
-The response is HTTP 402 and includes the payable `accepts` requirements. To sign, pay, and retry with Node.js 20+, install `openpay-x402-sdk` and `viem` in your working directory, then use the single-file [`scripts/x402-buyer-example.mjs`](../scripts/x402-buyer-example.mjs):
+The response is HTTP 402 and includes the payable `accepts` requirements. To sign, pay, and retry with Node.js 22+, install `openpay-x402-sdk` and `viem` in your working directory, then use the single-file [`scripts/x402-buyer-example.mjs`](../scripts/x402-buyer-example.mjs):
 
 ```bash
 npm install openpay-x402-sdk viem

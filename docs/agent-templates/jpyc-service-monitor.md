@@ -80,7 +80,7 @@ MCP の `x402_pay` ツールに上記 URL を渡すだけで、402 チャレン�
 
 ## スクリプト例(鍵は env で渡す・ファイルに書かない)
 
-JPYC 版(Polygon・ガス不要・Node.js 20+。作業ディレクトリに npm パッケージをインストール):
+JPYC 版(Polygon・ガス不要・Node.js 22+。作業ディレクトリに npm パッケージをインストール):
 
 ```bash
 npm install openpay-x402-sdk viem

@@ -23,7 +23,7 @@ Ask the person which one they want if they have not said.
 | **Human pays** — "don't hand the AI a wallet" | `openpay-order-mcp` | The person, from their own wallet, approving the final payment themselves. You find a shop, read the menu, state the total, and create a checkout link. | No |
 | **Agent pays** — "give the AI a budget" | `openpay-x402-mcp` | You, from a dedicated low-balance agent wallet, inside the local limits. | Yes — created locally in Step 5, or a Kova or MetaMask wallet the person manages (see the corresponding branch); nobody types or pastes a key |
 
-Both ship in one npm package, `openpay-x402-mcp` (Node.js 20 or newer). The commands below pin `@0.20`. The local wallet arrived in 0.15; 0.16 adds `wallet_history`, a local log of what this agent bought; 0.18 adds Kova; 0.19 adds MetaMask Agent Wallet; 0.20 makes `discovery_search` return each listing's title, when to use it, docs, license and update dates.
+Both ship in one npm package, `openpay-x402-mcp` (Node.js 22 or newer). The commands below pin `@0.20`. The local wallet arrived in 0.15; 0.16 adds `wallet_history`, a local log of what this agent bought; 0.18 adds Kova; 0.19 adds MetaMask Agent Wallet; 0.20 makes `discovery_search` return each listing's title, when to use it, docs, license and update dates.
 
 For **Human pays**, do Step 3 with the `openpay-order` server and no env, then skip to Step 4a. There is nothing to fund and no limit to set, because you never touch a wallet.
 

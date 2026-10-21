@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.20.1 — unreleased
+
+- Raise `engines.node` from `>=20` to `>=22`. Node.js 20 reached end-of-life and does not receive security releases (for example the October 2026 release that fixes the Brotli decoder used when `fetch` decodes a `br` response). The tools and their inputs are unchanged.
+
 ## 0.20.0 — 2026-10-19
 
 - `discovery_search` now passes through the catalog fields that `/api/discovery` already returns, so agents can compare listings without opening each one: `id`, `title`, `trigger` (when to use), `docsUrl`, `license`, `updatedAt` and `verifiedAt` (ISO 8601), and `official: true` for OpenPay's own listings. Fields are omitted when the catalog has no value. Price, fee and total are computed as before.
