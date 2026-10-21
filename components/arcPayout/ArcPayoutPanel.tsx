@@ -9,7 +9,12 @@ import { ConnectButton } from '@/components/ConnectButton';
 import { txExplorerUrl } from '@/lib/chains';
 import { planArcPayout } from '@/lib/crossChain/arcPayout';
 import { shortAddress } from '@/lib/format';
-import { useArcPayout, type ArcPayoutFailure, type ArcPayoutStatus } from '@/hooks/useArcPayout';
+import {
+  useArcPayout,
+  type ArcPayoutFailure,
+  type ArcPayoutGasShortfall,
+  type ArcPayoutStatus,
+} from '@/hooks/useArcPayout';
 
 const BTN =
   'rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-50';
@@ -44,17 +49,8 @@ function Row({ label, value }: { label: string; value: string }) {
   );
 }
 
-function failureMessage(
-  t: ReturnType<typeof useTranslations<'ArcPayout'>>,
-  failure: ArcPayoutFailure,
-  canContinue: boolean,
-  gasNow: bigint | undefined,
-): string {
+function failureMessage(t: ReturnType<typeof useTranslations<'ArcPayout'>>, failure: ArcPayoutFailure, canContinue: boolean): string {
   switch (failure.code) {
-    case 'insufficient_gas':
-      return failure.balance !== undefined && failure.shortfall !== undefined
-        ? t('errorGasShort', { balance: arcGas(failure.balance), shortfall: arcGasCeil(failure.shortfall) })
-        : t('errorGasShortUnknown', { balance: gasNow === undefined ? '—' : arcGas(gasNow) });
     case 'account_changed':
     case 'mint_not_completed':
       return t('errorMintNotSent');
@@ -75,6 +71,17 @@ function failureMessage(
     case 'failed':
       return canContinue ? t('errorMintNotSent') : t('errorFailed');
   }
+}
+
+/** ガス代の不足の診断の文。額が読めたら「いま / あと」、読めなければ目安とガス代用の残高。 */
+function gasShortfallMessage(
+  t: ReturnType<typeof useTranslations<'ArcPayout'>>,
+  gas: ArcPayoutGasShortfall,
+  gasNow: bigint | undefined,
+): string {
+  return gas.balance !== undefined && gas.shortfall !== undefined
+    ? t('errorGasShort', { balance: arcGas(gas.balance), shortfall: arcGasCeil(gas.shortfall) })
+    : t('errorGasShortUnknown', { balance: gasNow === undefined ? '—' : arcGas(gasNow) });
 }
 
 function Summary({ status, t }: { status: ArcPayoutStatus; t: ReturnType<typeof useTranslations<'ArcPayout'>> }) {
@@ -157,7 +164,9 @@ export function ArcPayoutPanel() {
 
       {flow.phase === 'failed' && (
         <p role="alert" className="mt-4 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-900 ring-1 ring-rose-200">
-          {failureMessage(t, flow.failure, !!pending, data?.gas)}
+          {flow.gasShortfall
+            ? gasShortfallMessage(t, flow.gasShortfall, data?.gas)
+            : failureMessage(t, flow.failure, !!pending)}
         </p>
       )}
 

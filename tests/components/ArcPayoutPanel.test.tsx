@@ -454,4 +454,51 @@ describe('ArcPayoutPanel: ガス代の不足で受け取りの取引を送れな
     expect(screen.getByText(t.done.replace('{amount}', '0.027'), { exact: false })).toBeInTheDocument();
     expect(screen.queryByText(/足りません/)).not.toBeInTheDocument();
   });
+
+  it('下限は満たしても送信がノードの残高不足 (ウォレットの上乗せ分) なら、額なしで原因を出す', async () => {
+    s.mint.mockRejectedValueOnce(
+      new TransactionExecutionError(new InsufficientFundsError(), { account: null, chain: undefined }),
+    );
+    renderPanel();
+    await waitFor(() => expect(withdrawButton()).toBeEnabled());
+    fireEvent.click(withdrawButton());
+    expect(await screen.findByText(t.errorGasShortUnknown.replace('{balance}', '0.117'))).toBeInTheDocument();
+    expect(s.estimateGas).toHaveBeenCalled();
+  });
+
+  it('診断の間に入金して読み直したら、古い残高の診断は捨てて入金後の残高で診断し直す', async () => {
+    let open!: () => void;
+    s.estimateGate = new Promise<void>((resolve) => { open = resolve; });
+    s.gas = 88_524_328_342_942n;
+    s.mintEstimate = { gas: 200_000n, baseFee: 20_000_000_000n };
+    s.mint.mockRejectedValueOnce(new Error('user rejected the request'));
+    renderPanel();
+    await waitFor(() => expect(withdrawButton()).toBeEnabled());
+    fireEvent.click(withdrawButton());
+    expect(await screen.findByText(t.errorMintNotSent)).toBeInTheDocument();
+    // 入金 (0.117 USDC) してから読み直す。
+    s.gas = 117_000_000_000_000_000n;
+    fireEvent.click(screen.getByRole('button', { name: t.reload }));
+    await act(async () => open());
+    await waitFor(() => expect(s.estimateGas).toHaveBeenCalledTimes(2));
+    expect(screen.getByText(t.errorMintNotSent)).toBeInTheDocument();
+    expect(screen.queryByText(/足りません/)).not.toBeInTheDocument();
+  });
+
+  it('不足の表示が出た後に入金して読み直したら、不足の表示を消す (入金後の残高で足りていれば従来の文)', async () => {
+    s.gas = 88_524_328_342_942n;
+    s.mintEstimate = { gas: 200_000n, baseFee: 20_000_000_000n };
+    s.mint.mockRejectedValueOnce(new Error('user rejected the request'));
+    renderPanel();
+    await waitFor(() => expect(withdrawButton()).toBeEnabled());
+    fireEvent.click(withdrawButton());
+    expect(await screen.findByText(/足りません/)).toBeInTheDocument();
+    s.gas = 117_000_000_000_000_000n;
+    fireEvent.click(screen.getByRole('button', { name: t.reload }));
+    expect(await screen.findByText(t.errorMintNotSent)).toBeInTheDocument();
+    await waitFor(() => expect(s.estimateGas).toHaveBeenCalledTimes(2));
+    expect(screen.queryByText(/足りません/)).not.toBeInTheDocument();
+    // 続きは送れる。
+    expect(screen.getByRole('button', { name: t.retryMint })).toBeEnabled();
+  });
 });
