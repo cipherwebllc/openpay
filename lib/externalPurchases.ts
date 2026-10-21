@@ -1,5 +1,5 @@
 // /transparency 「9. 外部からの実購入 (オンチェーン記録)」の単一情報源。
-// 出典 = 受取ウォレット宛の ERC-20 着金 (Base: Alchemy asset transfers・最終集計 2026-10-17)。
+// 出典 = 受取ウォレット宛の ERC-20 着金 (Base: Alchemy asset transfers・最終集計 2026-10-20)。
 // 掟: 自社・関係者ウォレット (FIRST_PARTY_WALLETS) の動作確認決済は載せない (8. 実績の数え方と同じ)。
 // 週次更新で末尾に追記する (日付昇順)。金額は表示価格の実払い額。商品名は精算記録 (KV) が要るので載せない。
 // 一部はインデクサー (x402scan / x402 List 等) の検証購入の可能性があるが、第三者が実 USDC を払い
@@ -24,7 +24,7 @@ export type ExternalPurchase = {
 export const FIRST_PARTY_WALLETS: readonly string[] = firstPartyWallets.map(({ address }) => address);
 
 /** 集計時点 (週次更新で進める)。 */
-export const EXTERNAL_PURCHASES_AS_OF = '2026-10-17';
+export const EXTERNAL_PURCHASES_AS_OF = '2026-10-20';
 
 export const EXTERNAL_PURCHASES: readonly ExternalPurchase[] = [
   { chain: 'base', date: '2026-07-19', amount: '0.01', asset: 'USDC', payer: '0x7e571e959cc7c75ccdd2eac24f8775ea2eaa2f09', tx: '0xdea66bfcd77d7c439774b344b64b5750b111b71a3fb23eaee6c24a6947eeed53' },
@@ -81,6 +81,13 @@ export const EXTERNAL_PURCHASES: readonly ExternalPurchase[] = [
   { chain: 'base', date: '2026-10-14', amount: '0.001', asset: 'USDC', payer: '0xa1d1c0cf717402ff3651aa4873ccf96410b01978', tx: '0x1e8f652c2b954678b4063c1dcec01bb0f5ce949f7842d75b9bcabcc5aceac204' },
   { chain: 'base', date: '2026-10-16', amount: '0.001', asset: 'USDC', payer: '0x7e6abf81352b2115fd939b5dd2c568993339dc60', tx: '0x187c3385cfc7fec266c0a764c65388599589e6df37d3f9cecabf3021b9794488' },
   { chain: 'base', date: '2026-10-17', amount: '0.01', asset: 'USDC', payer: '0xcc09c1131c53013f386b0ceaf9319d94f8c540d8', tx: '0x1ef5608dee4939df123b4ce3afc10c0f9064530f380f63d37613d8a4d9228143' },
+  { chain: 'base', date: '2026-10-19', amount: '0.001', asset: 'USDC', payer: '0x9d42eba8868cfd38a50ba615ee0cf903f1bbece9', tx: '0x4a7f0d794e49bdd5a46a8796904be6f5a0e91215ca33fe34b4b48d32ff96b651' },
+  { chain: 'base', date: '2026-10-19', amount: '0.006', asset: 'USDC', payer: '0x54e163e9b8edda194d83f46add921bfa5fc5f4e0', tx: '0x72d504ddb73d25c4ba13b24beed7cb2dc0d6c4becc57a1aeb3f604d7cda804f8' },
+  { chain: 'base', date: '2026-10-19', amount: '0.01', asset: 'USDC', payer: '0x54e163e9b8edda194d83f46add921bfa5fc5f4e0', tx: '0x8e50fcd2f51f607f6d0ca71c634c9ddd2f06b98aa5dffcd8da7426c0e3648b9d' },
+  { chain: 'base', date: '2026-10-19', amount: '0.01', asset: 'USDC', payer: '0x54e163e9b8edda194d83f46add921bfa5fc5f4e0', tx: '0x9ba4f1e1219695f9c330ad8fc6504f17e02f50ad596d29fe0b733f400657fbfc' },
+  { chain: 'base', date: '2026-10-19', amount: '0.01', asset: 'USDC', payer: '0x54e163e9b8edda194d83f46add921bfa5fc5f4e0', tx: '0xe2ba67c4c3a668b1053c7903614222dfc83b2efc5ae3a99ab26af44fead81777' },
+  { chain: 'base', date: '2026-10-19', amount: '0.01', asset: 'USDC', payer: '0xcb4cf336349504e167c26d5c8b9238e12d70bbb8', tx: '0x854488bbc2c19a2dc1d7d1d5388d85348d2f3670ddb14fd9476e4b4a36230fd6' },
+  { chain: 'base', date: '2026-10-20', amount: '0.02', asset: 'USDC', payer: '0xc9c7b38c0942914fc8ea12063bc92dcd3b581670', tx: '0x331f6cbb608f4568d570feb4539e21dff2a382339080e4762d9d36f142b5a093' },
 ];
 
 export function externalPurchaseSummary(rows: readonly ExternalPurchase[] = EXTERNAL_PURCHASES): {
