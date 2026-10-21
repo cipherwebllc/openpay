@@ -16,6 +16,7 @@ import {
 } from '@/lib/directory/query';
 import { env } from '@/lib/env';
 import { shopsApiEnabled } from '@/lib/shops/flags';
+import { isArcGatewayFlagOn } from '@/lib/x402/arcGatewayFlag';
 
 export async function generateMetadata({
   params,
@@ -43,6 +44,8 @@ export default async function DirectoryPage({
   if (!env.enableWeb3Directory) notFound();
 
   const t = await getTranslations('Directory');
+  // USDC 版が Arc (Circle Gateway) でも払えるか。表示専用 — 402 の中身は vanilla gate が決める。
+  const usdcArc = isArcGatewayFlagOn();
   const copy: DirectoryUiCopy = {
     title: t('title'),
     description: t('description'),
@@ -53,12 +56,12 @@ export default async function DirectoryPage({
     agentDescription: t('agentDescription'),
     pricingTitle: t('pricingTitle'),
     endpointLabel: t('endpointLabel'),
-    priceLabel: t('priceLabel'),
     listEndpoint: t('listEndpoint'),
     searchEndpoint: t('searchEndpoint'),
     detailEndpoint: t('detailEndpoint'),
+    licensedEndpoint: t('licensedEndpoint'),
     shopsSearchEndpoint: t('shopsSearchEndpoint'),
-    feeNote: t('feeNote'),
+    feeNote: usdcArc ? t('feeNoteArc') : t('feeNote'),
     statsTitle: t('statsTitle'),
     entriesLabel: t('entriesLabel'),
     categoriesLabel: t('categoriesLabel'),
@@ -66,6 +69,7 @@ export default async function DirectoryPage({
     apiUrlTitle: t('apiUrlTitle'),
     apiUrlDescription: t('apiUrlDescription'),
     apiUrlCopyLabel: t('apiUrlCopyLabel'),
+    apiUrlUsdcCopyLabel: t('apiUrlUsdcCopyLabel'),
     tryTitle: t('tryTitle'),
     tryDescription: t('tryDescription'),
     curlLabel: t('curlLabel'),
@@ -91,6 +95,7 @@ export default async function DirectoryPage({
         stats={directoryStats(DIRECTORY_ENTRIES)}
         copy={copy}
         showShopsApi={shopsApiEnabled()}
+        usdcArc={usdcArc}
       />
     </AppShell>
   );

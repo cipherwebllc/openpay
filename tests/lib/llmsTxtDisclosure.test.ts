@@ -21,10 +21,12 @@ import {
   cctpFeeDisclosureValues,
 } from '@/lib/legal';
 import {
+  DIRECTORY_DETAIL_PRICE_JPYC,
   JPYC_PAYMENTS_RESOURCE,
   JPYC_SERVICES_RESOURCE,
 } from '@/lib/directory/paidResources';
 import {
+  USDC_DIRECTORY_DETAIL,
   USDC_DIRECTORY_LICENSED,
   USDC_DIRECTORY_LIST,
   USDC_DIRECTORY_SEARCH,
@@ -204,6 +206,16 @@ describe('public/llms.txt 開示同期 (掟 14③)', () => {
     ]) {
       expect(lineMentioning(r.path), r.path).toContain(`${r.priceUsd} USDC`);
     }
+  });
+
+  it('1 件 (slug) の価格 = SoT (JPYC は額面 + 利用料・USDC は上乗せなし)', () => {
+    expect(priceSegment('/api/paid/japan-web3-directory/{slug}')).toContain(
+      `1 件 ${DIRECTORY_DETAIL_PRICE_JPYC} JPYC + `,
+    );
+    const line = lineMentioning(USDC_DIRECTORY_DETAIL.path);
+    const from = line.indexOf(`\`GET ${USDC_DIRECTORY_DETAIL.path}`);
+    const segment = line.slice(from, line.indexOf('）', from));
+    expect(segment).toContain(`1 件 ${USDC_DIRECTORY_DETAIL.priceUsd} USDC`);
   });
 
   it('licensed export copy uses the price SoT', () => {

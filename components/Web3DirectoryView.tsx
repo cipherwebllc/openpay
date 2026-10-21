@@ -17,7 +17,20 @@ import { CopyableField } from '@/components/CopyableField';
 import {
   DIRECTORY_LIST_API_URL,
   DIRECTORY_OPENAPI_PATH,
+  DIRECTORY_USDC_LIST_API_URL,
 } from '@/lib/directory/urls';
+import {
+  DIRECTORY_DETAIL_PRICE_JPYC,
+  DIRECTORY_LIST_RESOURCE,
+  DIRECTORY_SEARCH_RESOURCE,
+} from '@/lib/directory/paidResources';
+import {
+  USDC_DIRECTORY_DETAIL,
+  USDC_DIRECTORY_LICENSED,
+  USDC_DIRECTORY_LIST,
+  USDC_DIRECTORY_SEARCH,
+} from '@/lib/directory/usdcResource';
+import { JPYC_SHOPS_SEARCH_RESOURCE } from '@/lib/shops/paidResources';
 import type {
   DirectoryCategory,
   DirectoryEntry,
@@ -34,11 +47,12 @@ export type DirectoryUiCopy = {
   agentDescription: string;
   pricingTitle: string;
   endpointLabel: string;
-  priceLabel: string;
   listEndpoint: string;
   searchEndpoint: string;
   detailEndpoint: string;
+  licensedEndpoint: string;
   shopsSearchEndpoint: string;
+  /** JPYC の利用料 (買い手上乗せ) と USDC の上乗せなしを 1 文で (USDC の Arc 有無で文言が変わる)。 */
   feeNote: string;
   statsTitle: string;
   entriesLabel: string;
@@ -47,6 +61,7 @@ export type DirectoryUiCopy = {
   apiUrlTitle: string;
   apiUrlDescription: string;
   apiUrlCopyLabel: string;
+  apiUrlUsdcCopyLabel: string;
   tryTitle: string;
   tryDescription: string;
   curlLabel: string;
@@ -90,6 +105,7 @@ export function Web3DirectoryView({
   stats,
   copy,
   showShopsApi = false,
+  usdcArc = false,
 }: {
   locale: Locale;
   entries: readonly DirectoryEntry[];
@@ -101,7 +117,10 @@ export function Web3DirectoryView({
   };
   copy: DirectoryUiCopy;
   showShopsApi?: boolean;
+  /** USDC 版が Arc (Circle Gateway) でも払えるとき true (表示専用・server が flag から渡す)。 */
+  usdcArc?: boolean;
 }) {
+  const usdcRail = usdcArc ? 'USDC · Base / Arc' : 'USDC · Base';
   const grouped = new Map<DirectoryCategory, DirectoryEntry[]>();
   for (const entry of entries) {
     const categoryEntries = grouped.get(entry.facts.category) ?? [];
@@ -299,18 +318,37 @@ export function Web3DirectoryView({
                         {copy.endpointLabel}
                       </th>
                       <th className="px-3 py-2 text-right font-medium">
-                        {copy.priceLabel}
+                        JPYC · Polygon
+                      </th>
+                      <th className="px-3 py-2 text-right font-medium">
+                        {usdcRail}
                       </th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-white/10 text-slate-200">
-                    <PriceRow label={copy.listEndpoint} price="2 JPYC" />
-                    <PriceRow label={copy.searchEndpoint} price="2 JPYC" />
-                    <PriceRow label={copy.detailEndpoint} price="1 JPYC" />
+                    <PriceRow
+                      label={copy.listEndpoint}
+                      jpyc={DIRECTORY_LIST_RESOURCE.priceJpyc}
+                      usdc={USDC_DIRECTORY_LIST.priceUsd}
+                    />
+                    <PriceRow
+                      label={copy.searchEndpoint}
+                      jpyc={DIRECTORY_SEARCH_RESOURCE.priceJpyc}
+                      usdc={USDC_DIRECTORY_SEARCH.priceUsd}
+                    />
+                    <PriceRow
+                      label={copy.detailEndpoint}
+                      jpyc={DIRECTORY_DETAIL_PRICE_JPYC}
+                      usdc={USDC_DIRECTORY_DETAIL.priceUsd}
+                    />
+                    <PriceRow
+                      label={copy.licensedEndpoint}
+                      usdc={USDC_DIRECTORY_LICENSED.priceUsd}
+                    />
                     {showShopsApi ? (
                       <PriceRow
                         label={copy.shopsSearchEndpoint}
-                        price="2 JPYC"
+                        jpyc={JPYC_SHOPS_SEARCH_RESOURCE.priceJpyc}
                       />
                     ) : null}
                   </tbody>
@@ -330,12 +368,23 @@ export function Web3DirectoryView({
               <p className="mt-1 text-xs leading-relaxed text-slate-400">
                 {copy.apiUrlDescription}
               </p>
-              <div className="mt-3 rounded-xl bg-white/5 p-3 ring-1 ring-inset ring-white/10">
-                <CopyableField
-                  value={DIRECTORY_LIST_API_URL}
-                  label={copy.apiUrlCopyLabel}
-                  className="text-xs text-sky-300"
-                />
+              <div className="mt-3 space-y-3 rounded-xl bg-white/5 p-3 ring-1 ring-inset ring-white/10">
+                <div>
+                  <p className="mb-1 text-[11px] font-medium text-slate-400">JPYC · Polygon</p>
+                  <CopyableField
+                    value={DIRECTORY_LIST_API_URL}
+                    label={copy.apiUrlCopyLabel}
+                    className="text-xs text-sky-300"
+                  />
+                </div>
+                <div>
+                  <p className="mb-1 text-[11px] font-medium text-slate-400">{usdcRail}</p>
+                  <CopyableField
+                    value={DIRECTORY_USDC_LIST_API_URL}
+                    label={copy.apiUrlUsdcCopyLabel}
+                    className="text-xs text-sky-300"
+                  />
+                </div>
               </div>
             </div>
 
@@ -384,12 +433,16 @@ function StatCard({ label, value }: { label: string; value: string }) {
   );
 }
 
-function PriceRow({ label, price }: { label: string; price: string }) {
+/** 価格は SoT (paidResources / usdcResource) の数値文字列。その通貨で売っていない行は「—」。 */
+function PriceRow({ label, jpyc, usdc }: { label: string; jpyc?: string; usdc?: string }) {
   return (
     <tr>
       <td className="px-3 py-2.5">{label}</td>
-      <td className="px-3 py-2.5 text-right font-semibold text-white">
-        {price}
+      <td className="px-3 py-2.5 text-right font-semibold tabular-nums text-white">
+        {jpyc ? `${jpyc} JPYC` : <span className="font-normal text-slate-500">—</span>}
+      </td>
+      <td className="px-3 py-2.5 text-right font-semibold tabular-nums text-white">
+        {usdc ? `${usdc} USDC` : <span className="font-normal text-slate-500">—</span>}
       </td>
     </tr>
   );

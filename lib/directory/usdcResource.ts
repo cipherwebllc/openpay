@@ -46,6 +46,27 @@ export const USDC_DIRECTORY_SEARCH = {
     "Filter the Japan Web3 Directory by category, token, chain or capability — the same sourced, date-stamped records as the full export, without pulling rows your agent doesn't need.",
 } as const;
 
+// 1 件の詳細 (slug 指定)。価格 $0.01 (2026-10-21 user 裁定): JPYC 版の 1 件 (1 JPYC + 利用料 1 JPYC
+// = 2 JPYC) と概ね等価で、一覧・検索 ($0.02) より安い。path は slug テンプレートなので、有料カタログ・
+// Bazaar には載せない (固定 URL でないとインデクサが `{slug}` を実 URL として probe し 404 になる・
+// JPYC 版と同じ判断)。発見面は /openapi.json と llms.txt だけ。
+export const USDC_DIRECTORY_DETAIL = {
+  /** openapi・llms.txt の表記。実 URL は usdcDirectoryDetailPath(slug)。 */
+  path: '/api/paid/usdc/japan-web3-directory/{slug}',
+  serviceName: 'Japan Web3 Directory Entry',
+  tags: ['japan', 'web3', 'directory', 'jpyc', 'usdc', 'sourced-data'],
+  price: '$0.01',
+  priceUsd: '0.01',
+} as const;
+
+export function usdcDirectoryDetailPath(slug: string): string {
+  return USDC_DIRECTORY_DETAIL.path.replace('{slug}', slug);
+}
+
+export function usdcDirectoryDetailDescription(slug: string): string {
+  return `Japan Web3 Directory record for ${slug}: official source URL, last-verified date, category, tokens, chains and capabilities.`;
+}
+
 /** 応答 1 行の例 (実データ jpyc-ex を短縮)。一覧と検索で共用。 */
 const DIRECTORY_ROW_EXAMPLE = {
   slug: 'jpyc-ex',

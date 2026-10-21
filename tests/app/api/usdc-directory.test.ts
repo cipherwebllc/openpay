@@ -421,3 +421,116 @@ it('E2: exports all 51 published rows and excludes drafts', async () => {
     Array.from({ length: 51 }, (_, i) => `published-${i}`),
   );
 });
+
+describe('GET /api/paid/usdc/japan-web3-directory/[slug]', () => {
+  const DETAIL = 'https://open-pay.jp/api/paid/usdc/japan-web3-directory/jpyc-ex';
+
+  async function loadDetail(
+    flags: { directory?: string; testMode?: string } = {},
+  ): Promise<{ GET: (req: Request, ctx: { params: Promise<{ slug: string }> }) => Promise<Response> }> {
+    vi.stubEnv('NEXT_PUBLIC_ENABLE_WEB3_DIRECTORY', flags.directory ?? '1');
+    vi.stubEnv('X402_NETWORK', 'base');
+    vi.stubEnv('X402_PAY_TO_ADDRESS', SELLER);
+    vi.stubEnv('X402_FACILITATOR_URL', FACILITATOR);
+    vi.stubEnv('X402_TEST_MODE', flags.testMode ?? '');
+    vi.resetModules();
+    return (await import(
+      '@/app/api/paid/usdc/japan-web3-directory/[slug]/route'
+    )) as never;
+  }
+  const ctx = (slug: string) => ({ params: Promise.resolve({ slug }) });
+
+  it('flag OFF → 404', async () => {
+    const route = await loadDetail({ directory: '' });
+    expect((await route.GET(new Request(DETAIL), ctx('jpyc-ex'))).status).toBe(404);
+  });
+
+  it.each(['no-such-slug', 'directory-draft-fixture'])(
+    '存在しない / 非公開の slug (%s) は支払い要求より先に 404 (署名も課金もさせない)',
+    async (slug) => {
+      const route = await loadDetail();
+      const res = await route.GET(
+        new Request(`https://open-pay.jp/api/paid/usdc/japan-web3-directory/${slug}`, {
+          headers: { 'x-payment': b64(V1_PAYLOAD) },
+        }),
+        ctx(slug),
+      );
+      expect(res.status).toBe(404);
+      expect(await res.json()).toEqual({ ok: false, error: 'not_found' });
+      expect(fetchMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it('支払いなし → dual-stack 402 ($0.01 = 10000 atomic・resource は slug の canonical URL・Bazaar 宣言なし)', async () => {
+    const route = await loadDetail();
+    const res = await route.GET(new Request(DETAIL), ctx('jpyc-ex'));
+    expect(res.status).toBe(402);
+    const body = (await res.json()) as {
+      accepts: { resource: string; maxAmountRequired: string; outputSchema?: unknown }[];
+    };
+    expect(body.accepts[0].resource).toBe(DETAIL);
+    expect(body.accepts[0].maxAmountRequired).toBe('10000');
+    expect(body.accepts[0].outputSchema).toBeUndefined();
+    const v2 = JSON.parse(
+      Buffer.from(res.headers.get('PAYMENT-REQUIRED')!, 'base64').toString(),
+    ) as { resource: { url: string }; extensions?: Record<string, unknown> };
+    expect(v2.resource.url).toBe(DETAIL);
+    expect(v2.extensions?.bazaar).toBeUndefined();
+  });
+
+  // 0.01 USDC (10000 atomic) の支払い。共有の V1_PAYLOAD は一覧の 0.02 (20000) なので使わない。
+  const DETAIL_PAYLOAD = {
+    ...V1_PAYLOAD,
+    payload: {
+      ...V1_PAYLOAD.payload,
+      authorization: { ...V1_PAYLOAD.payload.authorization, value: '10000' },
+    },
+  };
+
+  it('static な兄弟 (search / licensed) と衝突する slug を掲載データに持たない', async () => {
+    const { DIRECTORY_ENTRIES } = await vi.importActual<typeof import('@/lib/directory/data')>('@/lib/directory/data');
+    // Next の router は static segment を [slug] より優先するため、同名 slug の 1 件は買えなくなる。
+    for (const reserved of ['search', 'licensed']) {
+      expect(DIRECTORY_ENTRIES.map((entry) => entry.slug)).not.toContain(reserved);
+    }
+  });
+
+  it('v1 payment → verify→content→settle で 1 件の封筒 (facilitator へは 10000 atomic・slug の URL)', async () => {
+    facilitatorOk();
+    const route = await loadDetail();
+    const res = await route.GET(
+      new Request(DETAIL, { headers: { 'x-payment': b64(DETAIL_PAYLOAD) } }),
+      ctx('jpyc-ex'),
+    );
+    expect(res.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    for (const [url, init] of fetchMock.mock.calls as [string, RequestInit][]) {
+      const sent = JSON.parse(String(init.body)) as {
+        paymentPayload: { payload: { authorization: { value: string } } };
+        paymentRequirements: { maxAmountRequired: string; resource: string };
+      };
+      expect(String(url)).toMatch(/\/(verify|settle)$/);
+      expect(sent.paymentRequirements.maxAmountRequired).toBe('10000');
+      expect(sent.paymentRequirements.resource).toBe(DETAIL);
+      expect(sent.paymentPayload.payload.authorization.value).toBe('10000');
+    }
+    const body = (await res.json()) as { query: { slug: string }; items: { slug: string }[]; total: number };
+    expect(body.query).toEqual({ slug: 'jpyc-ex' });
+    expect(body.total).toBe(1);
+    expect(body.items.map((item) => item.slug)).toEqual(['jpyc-ex']);
+  });
+
+  it('snapshot 読み取り失敗 → 503 で settle しない (買い手は課金されない)', async () => {
+    facilitatorOk();
+    verificationMocks.snapshot = null;
+    const route = await loadDetail();
+    const res = await route.GET(
+      new Request(DETAIL, { headers: { 'x-payment': b64(DETAIL_PAYLOAD) } }),
+      ctx('jpyc-ex'),
+    );
+    expect(res.status).toBe(503);
+    // verify だけ呼ばれ、settle は呼ばれない。
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0][0])).toMatch(/\/verify$/);
+  });
+});

@@ -7,6 +7,7 @@ import {
   DIRECTORY_SEARCH_RESOURCE,
 } from '@/lib/directory/paidResources';
 import {
+  USDC_DIRECTORY_DETAIL,
   USDC_DIRECTORY_LICENSED,
   USDC_DIRECTORY_LIST,
   USDC_DIRECTORY_SEARCH,
@@ -347,6 +348,42 @@ export const DIRECTORY_OPENAPI_PATHS = {
           },
         },
         ...PAID_RESPONSES,
+      },
+    },
+  },
+  [USDC_DIRECTORY_DETAIL.path]: {
+    get: {
+      tags: ['Directory Paid'],
+      summary: 'Unlock one published directory entry (USDC)',
+      description: `Same record as /api/paid/japan-web3-directory/{slug}, sold via standard x402 (exact scheme) in USDC through an external facilitator. No OpenPay fee is added; the listed price (${USDC_DIRECTORY_DETAIL.priceUsd} USDC) is the full charge. Unknown or non-published slugs return 404 before any payment challenge or settlement.`,
+      parameters: [
+        {
+          name: 'slug',
+          in: 'path',
+          required: true,
+          schema: { type: 'string' },
+        },
+      ],
+      // x-payment-info を付けない理由は JPYC 版の {slug} と同じ (テンプレート path をインデクサに probe させない)。
+      'x-price-usd': Number(USDC_DIRECTORY_DETAIL.priceUsd),
+      'x-payment-protocol': 'x402',
+      'x-payment-asset': 'USDC',
+      'x-payment-chains': usdcPaymentChains(),
+      responses: {
+        '200': {
+          description: 'One-entry directory envelope after settlement',
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/DirectoryEnvelope' },
+            },
+          },
+        },
+        '402': {
+          description:
+            'Standard x402 payment challenge (USDC, exact scheme, single transferWithAuthorization).',
+        },
+        '404': { $ref: '#/components/responses/NotFound' },
+        '503': { $ref: '#/components/responses/StorageUnavailable' },
       },
     },
   },
