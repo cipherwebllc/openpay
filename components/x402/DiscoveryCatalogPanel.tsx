@@ -373,36 +373,42 @@ export function DiscoveryCatalogPanel({
                 <li key={entry.key} className={CARD_CLASS}>
                   {cardHead({
                     category: item.category,
-                    priceNode: effectiveCurrency === 'usdc' && usdcPrice ? (
-                      // USDC で絞っているときは USDC の価格を主役に (上乗せなし)。JPYC の合計は細字で併記。
-                      <div className="shrink-0 text-right">
-                        <div className="text-[15px] font-bold tabular-nums text-slate-900">
-                          {t('payUsdc', { amount: usdcPrice })}
-                        </div>
-                        <div className="text-[11px] text-slate-500">{t('usdcNoFee')}</div>
-                        <div className="text-[11px] tabular-nums text-slate-500">
-                          {t('jpycAltMeta', { total: total ?? item.priceJpyc })}
-                        </div>
-                      </div>
-                    ) : (
-                      // 買い手の意思決定基準は合計 (2026-07-31 user 裁定): 合計を太字主役・
-                      // 価格+手数料は細字の内訳 (常時表示)。fee 不明 (非 JPYC 等) は従来の価格表示。
-                      <div className="shrink-0 text-right">
-                        <div className="text-[15px] font-bold tabular-nums text-slate-900">
-                          {total ?? item.priceJpyc} JPYC
-                        </div>
-                        {total && fee && (
-                          <div className="text-[11px] tabular-nums text-slate-500">
-                            {t('feeBreakdown', { price: item.priceJpyc, fee })}
+                    // 価格は通貨ごとに「金額 + その通貨の注記」を常に組で出す (JPYC = 手数料の内訳・USDC = 上乗せなし)。
+                    // 買い手の意思決定基準は合計 (2026-07-31 user 裁定): 主役の通貨は合計を太字、もう一方は「または」で細字。
+                    // USDC で絞っているときだけ USDC を主役にする。fee 不明 (非 JPYC 等) は内訳を出さず価格だけ。
+                    priceNode: (() => {
+                      const jpycBreakdown =
+                        total && fee ? t('feeBreakdown', { price: item.priceJpyc, fee }) : null;
+                      const usdcFirst = effectiveCurrency === 'usdc' && usdcPrice;
+                      const sub = 'text-[11px] tabular-nums text-slate-500';
+                      return usdcFirst ? (
+                        <div className="shrink-0 text-right">
+                          <div className="text-[15px] font-bold tabular-nums text-slate-900">
+                            {t('payUsdc', { amount: usdcPrice })}
                           </div>
-                        )}
-                        {usdcPrice && (
-                          <div className="text-[11px] font-semibold tabular-nums text-sky-700">
-                            {t('usdcAltMeta', { price: usdcPrice })}
+                          <div className={sub}>{t('usdcNoFee')}</div>
+                          <div className="mt-0.5 text-[11px] font-semibold tabular-nums text-slate-600">
+                            {t('jpycAltMeta', { total: total ?? item.priceJpyc })}
                           </div>
-                        )}
-                      </div>
-                    ),
+                          {jpycBreakdown && <div className={sub}>{jpycBreakdown}</div>}
+                        </div>
+                      ) : (
+                        <div className="shrink-0 text-right">
+                          <div className="text-[15px] font-bold tabular-nums text-slate-900">
+                            {total ?? item.priceJpyc} JPYC
+                          </div>
+                          {jpycBreakdown && <div className={sub}>{jpycBreakdown}</div>}
+                          {usdcPrice && (
+                            <>
+                              <div className="mt-0.5 text-[11px] font-semibold tabular-nums text-sky-700">
+                                {t('usdcAltMeta', { price: usdcPrice })}
+                              </div>
+                              <div className={sub}>{t('usdcNoFee')}</div>
+                            </>
+                          )}
+                        </div>
+                      );
+                    })(),
                     title: item.title,
                     usdc: item.usdc,
                     license: item.license,

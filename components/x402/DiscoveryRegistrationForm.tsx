@@ -141,7 +141,8 @@ export function DiscoveryRegistrationForm({
                     : 'border-slate-300 bg-white text-slate-600 hover:border-brand'
                 }`}
               >
-                {CATEGORY_LABEL_KEYS[category] ? t(CATEGORY_LABEL_KEYS[category]) : category}
+                {/* 自前のキーだけを訳す (constructor / toString 等の継承プロパティに当てない)。 */}
+                {Object.hasOwn(CATEGORY_LABEL_KEYS, category) ? t(CATEGORY_LABEL_KEYS[category]) : category}
               </button>
             ))}
           </div>

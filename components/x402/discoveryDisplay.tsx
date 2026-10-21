@@ -83,11 +83,13 @@ export function useDiscoveryDisplay(
   // URL をコピーするチップ。表示は scheme を外した短い形・押すと全 URL をコピー。
   // a11y 名は可視テキスト (URL) を含める (掟 8)。component でなく関数で返し no-unstable-nested-components を避ける。
   const urlChip = (key: string, url: string) => {
-    const copied = copiedKey === key;
+    // コピー済みの判定は URL ごと: 同じカードでも通貨の切り替えでコピー先が変わったら、前の表示を持ち越さない。
+    const chipKey = `${key}|${url}`;
+    const copied = copiedKey === chipKey;
     return (
       <button
         type="button"
-        onClick={() => copyText(key, url)}
+        onClick={() => copyText(chipKey, url)}
         title={url}
         className="inline-flex min-w-0 items-center gap-1.5 rounded-lg bg-slate-50 px-2.5 py-1.5 text-xs text-slate-600 ring-1 ring-inset ring-slate-200 transition hover:bg-slate-100 hover:text-slate-800"
       >

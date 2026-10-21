@@ -13,6 +13,7 @@ import { renderWithIntl } from '../_helpers/i18n';
 // R10b: owner 一覧・フォームは findBy で dynamic 読み込み後の描画を待ち、DOM hash は R10a の値を保つ。
 // 2026-10-21: AI ストアの磨き上げ (カードを 5 要素に・双子を 1 枚に・出品者の状態・節の並び) で DOM が変わったため、全 hash を意図して採り直し。
 // 同日、ページ幅を広げたのに合わせ出品フォームの入力欄を max-w-2xl に抑えたので、出品節の hash だけ再採取。
+// 同日、Codex の指摘で価格の両通貨の注記 (JPYC の内訳・USDC の上乗せなし) を常に組で出すようにしたので、カタログと登録一覧の hash を再採取。
 // 2026-09-26: 「2円で試す」節の SDK 例を鍵の入力方式 (read -s・コマンド行に鍵を書かない) に変更したため、当該節と all の hash を意図して更新。
 
 const auth = vi.hoisted(() => ({
@@ -189,38 +190,38 @@ describe('R10a pre-extraction pinning', () => {
           ],
         },
         "connected": {
-          "all": "fccd01cdfe2e5a6b2c837b7d9937d65bbf3bab11a559d7cfa22df311a98790bf",
+          "all": "4892f58b99e91f779e49c38fa1a1e82d298adbf693df5abc9d6140953c8cfb7d",
           "parts": [
             "h2 3282793f6040 Featured fixture",
-            "section 143908225b07 カタログ2カタログ検索すべて2J",
+            "section 1fac2d0e1926 カタログ2カタログ検索すべて2J",
             "section cc86360b7152 エージェントから使う発見: /a",
             "section 736596090ae5 API を出品する402 ゲート",
           ],
         },
         "disconnected": {
-          "all": "cfe813ea04b59aa4ba19b6d0cecaffb0a3dfef53841f8c243380d9a5904a6328",
+          "all": "fbb31494f8cc4e141bf4a11d2be7db29c311b75cb80f8e95928fe55cbfce7a8a",
           "parts": [
             "h2 3282793f6040 Featured fixture",
-            "section 143908225b07 カタログ2カタログ検索すべて2J",
+            "section 1fac2d0e1926 カタログ2カタログ検索すべて2J",
             "section cc86360b7152 エージェントから使う発見: /a",
             "section 894a12bf6e73 API を出品する402 ゲート",
           ],
         },
         "editing": {
-          "all": "b972922ed1e3e2eb3c787b4525249694f0c99444ca96ec182c788b2fe698eae0",
+          "all": "9b214105c379923310d629da9a7cf885a49d075740b81028b4c91995acdee66a",
           "parts": [
-            "section aa1622ba9426 あなたの登録公開中 0非表示 1",
+            "section 493dd455d9cc あなたの登録公開中 0非表示 1",
             "section a0493931b17f 掲載を編集402 ゲートを置くだ",
-            "section 143908225b07 カタログ2カタログ検索すべて2J",
+            "section 1fac2d0e1926 カタログ2カタログ検索すべて2J",
             "section cc86360b7152 エージェントから使う発見: /a",
           ],
         },
         "signedIn": {
-          "all": "b8be4a2a374bf13e53add3ac5f51f471b9e7d1099cb4f4ef863f1e4139a377f1",
+          "all": "ccf8cb2c837873bdb85817a8ae4a97eaac0ee399ac22b5fd5097175ba891ec69",
           "parts": [
-            "section aa1622ba9426 あなたの登録公開中 0非表示 1",
+            "section 493dd455d9cc あなたの登録公開中 0非表示 1",
             "section b726c8455542 新しい API を出品する402",
-            "section 143908225b07 カタログ2カタログ検索すべて2J",
+            "section 1fac2d0e1926 カタログ2カタログ検索すべて2J",
             "section cc86360b7152 エージェントから使う発見: /a",
           ],
         },
@@ -241,38 +242,38 @@ describe('R10a pre-extraction pinning', () => {
           ],
         },
         "connected": {
-          "all": "d52b4b3d45a1ccc972d70638cd32ec3b6e97686ffc7102bd375722ca87b11bb1",
+          "all": "f9801cd0a1600c053fa3a4aaa1795cd3798cea1a3e81ded4a8e9944341774485",
           "parts": [
             "h2 3282793f6040 Featured fixture",
-            "section 43e84a622688 Catalog2Catalog ",
+            "section 1de5065a04e5 Catalog2Catalog ",
             "section 64ecb66ae251 Use from your ag",
             "section 97edfb049437 List your APIPut",
           ],
         },
         "disconnected": {
-          "all": "0696b69252669144a32a63c1d88b4949414acb0ace8fd148e4509262aa58336c",
+          "all": "a927fd16c980b38c9931ff678274b5d91a02dfd846416b267940c3bf74bda4ee",
           "parts": [
             "h2 3282793f6040 Featured fixture",
-            "section 43e84a622688 Catalog2Catalog ",
+            "section 1de5065a04e5 Catalog2Catalog ",
             "section 64ecb66ae251 Use from your ag",
             "section fc5d4ee7b2fa List your APIPut",
           ],
         },
         "editing": {
-          "all": "742ad6d56aaef01807e9866073e251b77fa54822f1fbcb807154fb0d53c44475",
+          "all": "ecdd551fc06799edcecdb5bd355be5f9a86167fa212383177a099eb0e0c6b9cb",
           "parts": [
-            "section 609432e5df36 Your registratio",
+            "section afebba364463 Your registratio",
             "section 96b03316a4c1 Edit listingPut ",
-            "section 43e84a622688 Catalog2Catalog ",
+            "section 1de5065a04e5 Catalog2Catalog ",
             "section 64ecb66ae251 Use from your ag",
           ],
         },
         "signedIn": {
-          "all": "bde87b05e02684d364cc730d1dcbc535644204a7b06a0bb3f449783514e4382d",
+          "all": "d63da4651f17f830c37cb0046d67e5e13f6268b1bc436c0f69aaebc92b7f1c8a",
           "parts": [
-            "section 609432e5df36 Your registratio",
+            "section afebba364463 Your registratio",
             "section 31a170cefdd8 List a new APIPu",
-            "section 43e84a622688 Catalog2Catalog ",
+            "section 1de5065a04e5 Catalog2Catalog ",
             "section 64ecb66ae251 Use from your ag",
           ],
         },
@@ -507,45 +508,45 @@ describe('R10a pre-extraction pinning', () => {
     expect(dom).toMatchInlineSnapshot(`
       {
         "catalog": {
-          "all": "4e3d89081ccb762e46cf07ac309859c2b5d2a449fb353a1262086ce4d386f528",
+          "all": "c7b08605cf81f186d9fd676048c7f11500138967355074ebff316de89a8601ac",
           "parts": [
             "h2 3282793f6040 Featured fixture",
-            "section 07d74d825448 カタログ11カタログ検索すべて1",
+            "section 6a89d637dcf5 カタログ11カタログ検索すべて1",
             "section cc86360b7152 エージェントから使う発見: /a",
             "section 894a12bf6e73 API を出品する402 ゲート",
           ],
         },
         "confirmDelete": {
-          "all": "f4d6b5fd3ada4c42d4f83eba0f34aa105fddffd6db2f772f07ea479110046692",
+          "all": "9f2ec6666f4b9fafb5215130ad99bd61db1e47f1d07eb1daa69375cb733cac40",
           "parts": [
             "section 830bfebf3f3b あなたの登録公開中 1Regis",
             "section acdf6c8f6494 新しい API を出品する402",
-            "section 69ed89eb4b80 カタログ11カタログ検索すべて1",
+            "section 7db619c045a2 カタログ11カタログ検索すべて1",
             "section cc86360b7152 エージェントから使う発見: /a",
           ],
         },
         "created": {
-          "all": "a0e3ae9b56ce73f7a1629913e714ac0e6c6d81aad33961a2393c58eafab2a3f8",
+          "all": "839e9a8f651cbac3a984f9a7713efaf24d5fa63c7d8b209ba0c217a0d3a92a66",
           "parts": [
             "section 16a9d57db594 あなたの登録公開中 1Regis",
             "section acdf6c8f6494 新しい API を出品する402",
-            "section 69ed89eb4b80 カタログ11カタログ検索すべて1",
+            "section 7db619c045a2 カタログ11カタログ検索すべて1",
             "section cc86360b7152 エージェントから使う発見: /a",
           ],
         },
         "gateError": {
-          "all": "9b0166a1acf97dae3072898866ef1adb639fd3680915bc2c05cffbc7ed0b5244",
+          "all": "22e5a2cadd1b46cb12d6397bea25c2059d3d2220eff2e719651412f01cfd5a32",
           "parts": [
             "section 62c6845f2ccf API を出品する402 ゲート",
-            "section 69ed89eb4b80 カタログ11カタログ検索すべて1",
+            "section 7db619c045a2 カタログ11カタログ検索すべて1",
             "section cc86360b7152 エージェントから使う発見: /a",
           ],
         },
         "gateErrorCopied": {
-          "all": "baff7b8bd7ab9d20afc93b00ebe16e1d0350eb69f2e152e3e0f2f77392fcfedd",
+          "all": "4c33373a9b629da5b3865b284cdbce2ea3e4992243f127aee2dcc7b8a46c6bed",
           "parts": [
             "section f13c67891263 API を出品する402 ゲート",
-            "section 69ed89eb4b80 カタログ11カタログ検索すべて1",
+            "section 7db619c045a2 カタログ11カタログ検索すべて1",
             "section cc86360b7152 エージェントから使う発見: /a",
           ],
         },
@@ -559,45 +560,45 @@ describe('R10a pre-extraction pinning', () => {
           ],
         },
         "ownerEmpty": {
-          "all": "2957e6b4d87fa51c6a55ceadd3e0d8ff614b9828f9745ce907c785578fd32e2e",
+          "all": "3a4ef591c2b4321bfb30ae78b0d40c863241b1ee883cbba8a6204ddaec78026c",
           "parts": [
             "section 89332c7ebb76 API を出品する402 ゲート",
-            "section 69ed89eb4b80 カタログ11カタログ検索すべて1",
+            "section 7db619c045a2 カタログ11カタログ検索すべて1",
             "section cc86360b7152 エージェントから使う発見: /a",
           ],
         },
         "search": {
-          "all": "a38eafaca7f90418164fa6bbfafb887893254e3ef501be1888c725967618e440",
+          "all": "40a2f8df3bf13319579d6d69124d062521140bb80afaab0004cda315d45ac618",
           "parts": [
             "h2 3282793f6040 Featured fixture",
-            "section cad602e1932d カタログ11カタログ検索すべて1",
+            "section 486c337946fd カタログ11カタログ検索すべて1",
             "section cc86360b7152 エージェントから使う発見: /a",
             "section 894a12bf6e73 API を出品する402 ゲート",
           ],
         },
         "shownMore": {
-          "all": "7cf0be7d8eb1a590f89ffc11c14eed8be949acbe85f0cffe53f4bb5ff6b4423f",
+          "all": "0839aef7095a9a3bdfba604338c568a6724e4ac8cb28971f14f1a81a72fd6564",
           "parts": [
             "h2 3282793f6040 Featured fixture",
-            "section 69ed89eb4b80 カタログ11カタログ検索すべて1",
+            "section 7db619c045a2 カタログ11カタログ検索すべて1",
             "section cc86360b7152 エージェントから使う発見: /a",
             "section 894a12bf6e73 API を出品する402 ゲート",
           ],
         },
         "snippetOpen": {
-          "all": "6cbfa54575922b663605d27b5f4ac177a5787956f4b940187260d2c69f1be00f",
+          "all": "458f03705fcad5897f26448ba60f6c82edddd61946e6512aac9cfe8f1ba1b148",
           "parts": [
             "section b5e37fa7a587 あなたの登録公開中 1Regis",
             "section acdf6c8f6494 新しい API を出品する402",
-            "section 69ed89eb4b80 カタログ11カタログ検索すべて1",
+            "section 7db619c045a2 カタログ11カタログ検索すべて1",
             "section cc86360b7152 エージェントから使う発見: /a",
           ],
         },
         "usdcFilter": {
-          "all": "cdd6118a1ec832ec41737a645d727dc7b3ffb75e22d0b07bf0f38e0f535d882f",
+          "all": "ef50c62d9f26bc6586701a9c8cd0720f045d42065e8d3745ac7a0ea0adde801b",
           "parts": [
             "h2 3282793f6040 Featured fixture",
-            "section fcd29d747081 カタログ11カタログ検索すべて1",
+            "section 27a10b4921f0 カタログ11カタログ検索すべて1",
             "section cc86360b7152 エージェントから使う発見: /a",
             "section 894a12bf6e73 API を出品する402 ゲート",
           ],

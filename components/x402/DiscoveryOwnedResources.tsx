@@ -87,9 +87,14 @@ export function DiscoveryOwnedResources({
                     <span className="shrink-0 text-right text-[15px] font-bold tabular-nums text-slate-900">
                       {r.priceJpyc} JPYC
                       {r.usdc && (
-                        <span className="block text-[11px] font-semibold text-sky-700">
-                          {t('usdcAltMeta', { price: r.usdc.priceUsd })}
-                        </span>
+                        <>
+                          <span className="mt-0.5 block text-[11px] font-semibold text-sky-700">
+                            {t('usdcAltMeta', { price: r.usdc.priceUsd })}
+                          </span>
+                          <span className="block text-[11px] font-normal text-slate-500">
+                            {t('usdcNoFee')}
+                          </span>
+                        </>
                       )}
                     </span>
                   ),

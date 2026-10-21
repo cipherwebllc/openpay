@@ -303,6 +303,16 @@ describe('X402DiscoveryView', () => {
     await waitFor(() => expect(details).not.toHaveAttribute('open'));
   });
 
+  it.each(['constructor', 'toString', '__proto__'])(
+    '編集: 継承プロパティ名のカテゴリー (%s) も生の文字列で表示する (訳語表の継承キーに当てない)',
+    async (category) => {
+      renderAsOwner([{ ...OWNED, category }]);
+      fireEvent.click(await screen.findByRole('button', { name: '編集' }));
+      expect(screen.getByRole('button', { name: category })).toHaveAttribute('aria-pressed', 'true');
+      expect(screen.queryByText(/native code|Facilitator\./)).not.toBeInTheDocument();
+    },
+  );
+
   it('編集: 旧カテゴリーを第 4 chip として選択表示し、他カテゴリーへ変更できる', async () => {
     const fetchFn = renderAsOwner([{ ...OWNED, category: 'legacy' }]);
     fireEvent.click(await screen.findByRole('button', { name: '編集' }));
@@ -1350,8 +1360,10 @@ describe('X402DiscoveryView 公開カタログの dual (USDC 併売) 表示', ()
     renderView();
     const card = (await screen.findByText(DUAL_ITEM.description)).closest('li');
     expect(within(card!).getByText('または 0.02 USDC')).toBeInTheDocument();
-    // JPYC の合計が主役のまま。
+    // JPYC の合計が主役のまま。両通貨の注記 (JPYC の内訳・USDC の上乗せなし) は常に組で出る。
     expect(within(card!).getByText('1010 JPYC')).toBeInTheDocument();
+    expect(within(card!).getByText('1000 + 手数料 10')).toBeInTheDocument();
+    expect(within(card!).getByText('上乗せなし')).toBeInTheDocument();
     const plain = screen.getByText(ITEM.description).closest('li');
     expect(within(plain!).queryByText(/USDC/)).not.toBeInTheDocument();
   });
@@ -1368,6 +1380,8 @@ describe('X402DiscoveryView 公開カタログの dual (USDC 併売) 表示', ()
     expect(within(card).getByText('0.02 USDC')).toHaveClass('font-bold');
     expect(within(card).getByText('上乗せなし')).toBeInTheDocument();
     expect(within(card).getByText('または 1010 JPYC')).toBeInTheDocument();
+    // USDC が主役でも JPYC の手数料の内訳は消さない (2026-07-31 裁定・Codex P1)。
+    expect(within(card).getByText('1000 + 手数料 10')).toBeInTheDocument();
     expect(within(card).queryByText('または 0.02 USDC')).not.toBeInTheDocument();
   });
 
@@ -1660,7 +1674,9 @@ describe('X402DiscoveryView 公式商品の双子 (JPYC 面 + USDC 面を 1 枚�
     const card = screen.getByText('JPYC Stores').closest('li')!;
     expect(within(card).getByText('公式')).toBeInTheDocument();
     expect(within(card).getByText('2 JPYC')).toBeInTheDocument();
+    expect(within(card).getByText('1 + 手数料 1')).toBeInTheDocument();
     expect(within(card).getByText('または 0.002 USDC')).toBeInTheDocument();
+    expect(within(card).getByText('上乗せなし')).toBeInTheDocument();
   });
 
   it('USDC の絞り込みにも検索 (USDC 側の名前・path) にも双子が当たり、第三者の JPYC 出品は外れる', async () => {
@@ -1689,11 +1705,17 @@ describe('X402DiscoveryView 公式商品の双子 (JPYC 面 + USDC 面を 1 枚�
     const jpycCard = screen.getByText('JPYC Stores').closest('li')!;
     fireEvent.click(within(jpycCard).getAllByRole('button', { name: /^コピー open-pay\.jp/ })[0]);
     expect(writeText).toHaveBeenLastCalledWith(JPYC_URL);
+    await waitFor(() =>
+      expect(within(jpycCard).getAllByRole('button', { name: /^コピーしました/ })).toHaveLength(1),
+    );
 
     fireEvent.click(screen.getByRole('button', { name: 'USDC 2' }));
     const card = screen.getByText('JPYC Stores').closest('li')!;
+    // コピー先が USDC 面に変わったら、JPYC 面の「コピーしました」を持ち越さない (Codex P2)。
+    expect(within(card).queryByRole('button', { name: /^コピーしました/ })).not.toBeInTheDocument();
     expect(within(card).getByText('0.002 USDC')).toHaveClass('font-bold');
     expect(within(card).getByText('または 2 JPYC')).toBeInTheDocument();
+    expect(within(card).getByText('1 + 手数料 1')).toBeInTheDocument();
     fireEvent.click(within(card).getAllByRole('button', { name: /^コピー open-pay\.jp/ })[0]);
     expect(writeText).toHaveBeenLastCalledWith(USDC_URL);
   });
