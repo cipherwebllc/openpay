@@ -74,7 +74,8 @@ export function DiscoveryRegistrationForm({
     formCategories.push(legacyCategory);
   }
   return (
-    <div className="mt-4 space-y-3">
+    // 入力欄は読みやすい幅に抑える (ページは 2 列のカタログに合わせて広い)。
+    <div className="mt-4 max-w-2xl space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p
           title={address}

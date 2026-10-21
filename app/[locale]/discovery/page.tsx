@@ -74,7 +74,7 @@ export default async function DiscoveryPage({
 
   return (
     <AppShell>
-      <div className="mx-auto w-full max-w-2xl">
+      <div className="mx-auto w-full max-w-4xl">
         {/* 見出し = 1 行の要約 + 通貨 2 つ + 2 つの入口 (使う / 出品する)。x402 の仕組みと利用料の説明は
             カタログの脚注と「エージェントから使う」節へ (冒頭で読ませる文章を最小にする・2026-10-21 磨き上げ)。
             「受取は直接着金」は出品者向けの事実なので出品節の説明に置く。 */}
