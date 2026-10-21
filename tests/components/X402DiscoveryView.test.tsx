@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { act, screen, waitFor, fireEvent, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { renderWithIntl } from '../_helpers/i18n';
+import type * as React from 'react';
 
 // wagmi / SIWE を最小モック (実 wallet グラフを描画せず OOM を避ける)。
 const state = vi.hoisted(() => ({
@@ -44,6 +45,7 @@ vi.mock('@/lib/env', async (importOriginal) => {
 import { X402DiscoveryView } from '@/components/X402DiscoveryView';
 import { AGENT_MCP_SPEC } from '@/lib/agentSetup';
 import { MAX_RESOURCES_PER_MERCHANT } from '@/lib/x402/registry';
+import { FIRST_PARTY_SUMMARY_JA } from '@/lib/x402/catalogSummaryJa';
 
 const ITEM = {
   resource: 'https://api.example.jp/paid/translate',
@@ -121,14 +123,29 @@ afterEach(() => {
 
 // X402DiscoveryView は useQuery/useMutation を使うため QueryClientProvider が要る。
 // テスト毎に新しい QueryClient を作りキャッシュを分離する (retry:false で失敗を即時に反映)。
-function renderView(): ReturnType<typeof renderWithIntl> {
+function renderView(
+  props: Partial<React.ComponentProps<typeof X402DiscoveryView>> = {},
+  locale: 'ja' | 'en' = 'ja',
+): ReturnType<typeof renderWithIntl> {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return renderWithIntl(
     <QueryClientProvider client={qc}>
-      <X402DiscoveryView maxResourcesPerMerchant={MAX_RESOURCES_PER_MERCHANT} featured={<h2>Featured APIs</h2>} />
+      <X402DiscoveryView
+        maxResourcesPerMerchant={MAX_RESOURCES_PER_MERCHANT}
+        featured={<h2>Featured APIs</h2>}
+        {...props}
+      />
     </QueryClientProvider>,
+    { locale },
   );
 }
+
+// カードの「詳しく」を開く (トリガー・全 URL・検証日・利用条件は開いたときだけ描画される)。
+function openDetails(card: HTMLElement): void {
+  fireEvent.click(within(card).getByRole('button', { name: /^(詳しく|Details)$/ }));
+}
+const catalogSection = () => screen.getByRole('heading', { name: /^カタログ/ }).closest('section')!;
+const catalogCards = () => within(catalogSection()).queryAllByRole('listitem');
 
 // owner サインイン状態で描画する共通ヘルパ。
 function renderAsOwner(owned: OwnedFixture[] = [OWNED]): ReturnType<typeof vi.fn> {
@@ -151,6 +168,7 @@ describe('X402DiscoveryView', () => {
     })) as unknown as typeof fetch;
     renderView();
 
+    openDetails((await screen.findByText('JP→EN 翻訳 API です')).closest('li')!);
     expect(await screen.findByText(`更新: ${expected}`)).toHaveAttribute('datetime', updatedAt);
   });
 
@@ -158,9 +176,12 @@ describe('X402DiscoveryView', () => {
     renderView();
     // カタログ (公開・wallet 不要) が描画される。
     expect(await screen.findByText('JP→EN 翻訳 API です')).toBeInTheDocument();
-    expect(screen.getByText(ITEM.resource)).toBeInTheDocument();
-    // fee 注記 (手数料 10 JPYC)。
-    expect(screen.getByText(/手数料 10 JPYC/)).toBeInTheDocument();
+    // URL は scheme を外した短い形のコピーチップ (全 URL は「詳しく」の中)。
+    expect(screen.getByRole('button', { name: /api\.example\.jp\/…\/translate/ })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: ITEM.resource })).not.toBeInTheDocument();
+    // 価格は合計が主役・内訳 (価格 + 手数料) は常時表示。
+    expect(screen.getByText('1010 JPYC')).toBeInTheDocument();
+    expect(screen.getByText('1000 + 手数料 10')).toBeInTheDocument();
     // 未接続 → 登録には接続を促す。
     expect(screen.getByText('出品するにはウォレットを接続')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'ウォレットを接続' })).toBeInTheDocument();
@@ -195,24 +216,57 @@ describe('X402DiscoveryView', () => {
     expect(within(registrationHeading.closest('section')!).getByRole('button', { name: 'ウォレットでサインイン' })).toBeInTheDocument();
   });
 
-  it('owner: あなたの登録 → 閉じたフォーム → featured → カタログ、summary で手動開閉', async () => {
+  it('owner: あなたの登録 → 閉じたフォーム → カタログ (注目バナーは出さない)、summary で手動開閉', async () => {
     renderAsOwner();
     const owned = await screen.findByText(OWNED.description);
     await screen.findByPlaceholderText('https://api.example.jp/paid/weather');
     const summary = screen.getByText('新しい API を出品する');
     const details = summary.closest('details')!;
-    const featured = screen.getByRole('heading', { name: 'Featured APIs' });
-    const catalog = screen.getByRole('heading', { name: 'カタログ' });
-    for (const [before, after] of [[owned, summary], [summary, featured], [featured, catalog]]) {
+    const catalog = await screen.findByRole('heading', { name: /^カタログ/ });
+    expect(screen.queryByRole('heading', { name: 'Featured APIs' })).not.toBeInTheDocument();
+    for (const [before, after] of [[owned, summary], [summary, catalog]]) {
       expect(before.compareDocumentPosition(after) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     }
     expect(details).not.toHaveAttribute('open');
     fireEvent.click(summary);
     await waitFor(() => expect(details).toHaveAttribute('open'));
-    fireEvent.click(await screen.findByRole('button', { name: 'data' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'データ' }));
     expect(details).toHaveAttribute('open');
     fireEvent.click(summary);
     await waitFor(() => expect(details).not.toHaveAttribute('open'));
+  });
+
+  it('節の並び: 閲覧者は カタログ → #agent → #sell、出品者は あなたの登録 → 出品 → カタログ', async () => {
+    const view = renderView();
+    await screen.findByText('JP→EN 翻訳 API です');
+    const order = (root: ParentNode) =>
+      [...root.querySelectorAll('section')]
+        .map((el) => el.id || el.querySelector('h3')?.textContent)
+        .filter((x): x is string => Boolean(x) && ['カタログ', 'agent', 'sell', 'あなたの登録'].some((k) => x === k || x!.startsWith(k)));
+    const visitor = order(view.container);
+    expect(visitor.map((x) => (x.startsWith('カタログ') ? 'catalog' : x))).toEqual(['catalog', 'agent', 'sell']);
+    expect(screen.getByRole('heading', { name: 'Featured APIs' })).toBeInTheDocument();
+    view.unmount();
+
+    state.connected = true;
+    state.address = OWNED.payTo;
+    state.signedIn = true;
+    installRoutingFetch([OWNED]);
+    const seller = renderView();
+    await screen.findByText(OWNED.description);
+    await screen.findByPlaceholderText('https://api.example.jp/paid/weather');
+    const sellerOrder = order(seller.container).map((x) => (x.startsWith('カタログ') ? 'catalog' : x));
+    expect(sellerOrder.indexOf('あなたの登録')).toBeLessThan(sellerOrder.indexOf('sell'));
+    expect(sellerOrder.indexOf('sell')).toBeLessThan(sellerOrder.indexOf('catalog'));
+    expect(screen.queryByRole('heading', { name: 'Featured APIs' })).not.toBeInTheDocument();
+  });
+
+  it('未サインイン (接続済み): サインインの横に「署名 1 回・無料・送金なし」の注記を出す', async () => {
+    state.connected = true;
+    state.address = OWNED.payTo;
+    renderView();
+    expect(await screen.findByRole('button', { name: 'ウォレットでサインイン' })).toBeInTheDocument();
+    expect(screen.getByText('署名は 1 回だけ。無料で、送金はしません。')).toBeInTheDocument();
   });
 
   it.each([0, 1, 79, 80])('登録件数 %i: 0 件は非表示、80% 未満は短縮、80% 以上は上限付き', async (count) => {
@@ -253,8 +307,8 @@ describe('X402DiscoveryView', () => {
     const fetchFn = renderAsOwner([{ ...OWNED, category: 'legacy' }]);
     fireEvent.click(await screen.findByRole('button', { name: '編集' }));
     expect(screen.getByRole('button', { name: 'legacy' })).toHaveAttribute('aria-pressed', 'true');
-    fireEvent.click(screen.getByRole('button', { name: 'mcp' }));
-    expect(screen.getByRole('button', { name: 'mcp' })).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(screen.getByRole('button', { name: 'MCP' }));
+    expect(screen.getByRole('button', { name: 'MCP' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByRole('button', { name: 'legacy' })).toHaveAttribute('aria-pressed', 'false');
     fireEvent.click(screen.getByRole('button', { name: '更新する' }));
     await waitFor(() => expect(fetchFn).toHaveBeenCalledWith(
@@ -276,7 +330,7 @@ describe('X402DiscoveryView', () => {
     })) as unknown as typeof fetch;
     renderView();
 
-    const search = await screen.findByPlaceholderText('名前・URL で検索');
+    const search = await screen.findByPlaceholderText('名前・説明・URL で検索');
     fireEvent.change(search, { target: { value: 'WEATHER data' } });
     expect(screen.getByText(weather.description)).toBeInTheDocument();
     expect(screen.queryByText(ITEM.description)).not.toBeInTheDocument();
@@ -289,57 +343,68 @@ describe('X402DiscoveryView', () => {
     expect(screen.getByText(weather.description)).toBeInTheDocument();
   });
 
-  it('カテゴリ chip: 実在カテゴリと件数だけを表示し、切替で絞り込む', async () => {
-    const dataItem = {
-      ...ITEM,
-      resource: 'https://data.example.jp/paid/directory',
-      description: '店舗データ',
-      category: 'data',
-    };
+  it('通貨の切り替え: すべて / JPYC / USDC の件数を出し、切替で絞り込む (種類の chip は出さない)', async () => {
+    const dual = { ...ITEM, resource: 'https://api.example.jp/paid/dual', description: 'Dual API', usdc: { priceUsd: '0.02' } };
+    const dataItem = { ...ITEM, resource: 'https://data.example.jp/paid/directory', description: '店舗データ', category: 'data' };
     global.fetch = vi.fn(async () => ({
       ok: true,
-      json: async () => ({
-        items: [
-          ITEM,
-          {
-            ...ITEM,
-            resource: 'https://api.example.jp/two',
-            description: 'Second API',
-          },
-          dataItem,
-        ],
-      }),
+      json: async () => ({ items: [ITEM, dual, dataItem] }),
     })) as unknown as typeof fetch;
-    renderView();
+    renderView({
+      usdcItems: [
+        { resource: 'https://open-pay.jp/api/paid/usdc/jpyc/supply', title: 'Supply', description: 'live supply', priceUsd: '0.002', category: 'data' },
+      ],
+    });
 
-    expect(await screen.findByRole('button', { name: 'すべて 3' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'api 2' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'data 1' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /mcp/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /content/ })).not.toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'すべて 4' })).toHaveAttribute('aria-pressed', 'true');
+    // JPYC = JPYC 出品 3 件・USDC = USDC 商品 1 + USDC 併売 1。
+    expect(screen.getByRole('button', { name: 'JPYC 3' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'USDC 2' })).toBeInTheDocument();
+    // 種類 (api / data) の絞り込みは廃止。
+    expect(screen.queryByRole('button', { name: /^(api|data|mcp) \d/ })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'data 1' }));
-    expect(screen.getByText(dataItem.description)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'USDC 2' }));
+    expect(screen.getByRole('button', { name: 'USDC 2' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByText('Dual API')).toBeInTheDocument();
+    expect(screen.getByText('Supply')).toBeInTheDocument();
     expect(screen.queryByText(ITEM.description)).not.toBeInTheDocument();
+    expect(screen.queryByText(dataItem.description)).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'すべて 3' }));
+    fireEvent.click(screen.getByRole('button', { name: 'JPYC 3' }));
     expect(screen.getByText(ITEM.description)).toBeInTheDocument();
+    expect(screen.getByText(dataItem.description)).toBeInTheDocument();
+    expect(screen.queryByText('Supply')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'すべて 4' }));
+    expect(catalogCards()).toHaveLength(4);
+  });
+
+  it('通貨チップは USDC 商品が無い (JPYC だけの) ときは出さない', async () => {
+    renderView();
+    await screen.findByText(ITEM.description);
+    expect(screen.queryByRole('button', { name: /^すべて/ })).not.toBeInTheDocument();
   });
 
   it('検索・カテゴリで 0 件になると該当なしの空状態を表示', async () => {
     renderView();
-    fireEvent.change(await screen.findByPlaceholderText('名前・URL で検索'), {
+    fireEvent.change(await screen.findByPlaceholderText('名前・説明・URL で検索'), {
       target: { value: '存在しないリソース' },
     });
     expect(screen.getByText('該当するリソースがありません')).toBeInTheDocument();
     expect(screen.queryByText(ITEM.description)).not.toBeInTheDocument();
   });
 
-  it('filter 後も first-party を先頭にした元の並び順を維持する', async () => {
-    const firstParty = {
+  it('filter 後も first-party を先頭にした元の並び順を維持する (公式の 1 JPYC デモは一覧に出さない)', async () => {
+    const demo = {
       ...ITEM,
       resource: 'https://open-pay.jp/api/paid/demo',
       description: 'OpenPay demo',
+      official: true,
+    };
+    const firstParty = {
+      ...ITEM,
+      resource: 'https://open-pay.jp/api/paid/some-official',
+      description: 'OpenPay official API',
       official: true,
     };
     const merchant = {
@@ -349,22 +414,48 @@ describe('X402DiscoveryView', () => {
     };
     global.fetch = vi.fn(async () => ({
       ok: true,
-      json: async () => ({ items: [firstParty, merchant, { ...ITEM, category: 'data' }] }),
+      json: async () => ({ items: [demo, firstParty, merchant, { ...ITEM, resource: 'https://data.example.jp/paid/dataset', description: 'Dataset', category: 'data' }] }),
     })) as unknown as typeof fetch;
     renderView();
 
-    fireEvent.click(await screen.findByRole('button', { name: 'api 2' }));
+    await screen.findByText(firstParty.description);
+    // デモは「2円で試す」に任せて一覧から外す。
+    expect(screen.queryByText(demo.description)).not.toBeInTheDocument();
+    expect(catalogCards()).toHaveLength(3);
+    fireEvent.change(screen.getByPlaceholderText('名前・説明・URL で検索'), { target: { value: 'api' } });
     const firstCard = screen.getByText(firstParty.description).closest('li');
     const merchantCard = screen.getByText(merchant.description).closest('li');
+    expect(screen.queryByText('Dataset')).not.toBeInTheDocument();
     expect(firstCard?.nextElementSibling).toBe(merchantCard);
     expect(within(firstCard!).getByText('公式')).toBeInTheDocument();
+  });
+
+  it('同じ /api/paid/demo の URL でも official でない第三者の出品は一覧に出す', async () => {
+    const thirdParty = {
+      ...ITEM,
+      resource: 'https://seller.example.jp/api/paid/demo',
+      description: 'Third party demo path',
+    };
+    const forgedOnOfficialHost = {
+      ...ITEM,
+      resource: 'https://open-pay.jp/api/paid/demo',
+      description: 'Not flagged official',
+    };
+    global.fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ items: [thirdParty, forgedOnOfficialHost] }),
+    })) as unknown as typeof fetch;
+    renderView();
+    expect(await screen.findByText(thirdParty.description)).toBeInTheDocument();
+    expect(screen.getByText(forgedOnOfficialHost.description)).toBeInTheDocument();
+    expect(catalogCards()).toHaveLength(2);
   });
 
   it('公式バッジは server の official:true だけを信頼し、URL 一致だけでは付けない', async () => {
     const serverOfficial = {
       ...ITEM,
-      resource: 'https://open-pay.jp/api/paid/demo',
-      description: 'OpenPay demo',
+      resource: 'https://open-pay.jp/api/paid/some-official',
+      description: 'OpenPay official API',
       official: true,
     };
     const forged = {
@@ -382,9 +473,11 @@ describe('X402DiscoveryView', () => {
     const forgedCard = screen.getByText(forged.description).closest('li');
     expect(within(officialCard!).getByText('公式')).toBeInTheDocument();
     expect(within(forgedCard!).queryByText('公式')).not.toBeInTheDocument();
+    // 偽の公式 (official でない) には日本語の要約も差し替えない。
+    expect(within(forgedCard!).queryByText(FIRST_PARTY_SUMMARY_JA['/api/paid/stores'])).not.toBeInTheDocument();
   });
 
-  it('リソース URL は https のみ安全な外部リンクにする', async () => {
+  it('リソース URL は https のみ安全な外部リンクにする (全 URL のリンクは「詳しく」の中)', async () => {
     const insecure = {
       ...ITEM,
       resource: 'http://api.example.jp/paid/insecure',
@@ -397,7 +490,13 @@ describe('X402DiscoveryView', () => {
     })) as unknown as typeof fetch;
     renderView();
 
-    const secureLink = await screen.findByRole('link', { name: ITEM.resource });
+    await screen.findByText(ITEM.description);
+    // 閉じている間は全 URL を出さない (短いコピーチップのみ)。
+    expect(screen.queryByRole('link', { name: ITEM.resource })).not.toBeInTheDocument();
+    expect(screen.queryByText(insecure.resource)).not.toBeInTheDocument();
+    for (const button of screen.getAllByRole('button', { name: '詳しく' })) fireEvent.click(button);
+
+    const secureLink = screen.getByRole('link', { name: ITEM.resource });
     expect(secureLink).toHaveAttribute('href', ITEM.resource);
     expect(secureLink).toHaveAttribute('target', '_blank');
     expect(secureLink).toHaveAttribute('rel', 'noreferrer noopener');
@@ -405,7 +504,15 @@ describe('X402DiscoveryView', () => {
     expect(screen.getByText(insecure.resource)).toBeInTheDocument();
   });
 
-  it('カタログ比較メタ行に相対検証日・更新日・license・安全な Docs リンクを表示', async () => {
+  it('URL のコピーチップは scheme を外し host/…/最後の区切りに縮める', async () => {
+    renderView();
+    const chip = await screen.findByRole('button', { name: /api\.example\.jp\/…\/translate/ });
+    expect(chip).toHaveAttribute('title', ITEM.resource);
+    expect(chip).toHaveTextContent('api.example.jp/…/translate');
+    expect(chip).not.toHaveTextContent('https://');
+  });
+
+  it('カタログ比較メタ: 検証日・更新日・license は「詳しく」の中、安全な Docs リンクは常時表示', async () => {
     vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-07-14T12:00:00.000Z'));
     const compared = {
       ...ITEM,
@@ -420,23 +527,28 @@ describe('X402DiscoveryView', () => {
     })) as unknown as typeof fetch;
     renderView();
 
-    expect(await screen.findByText('検証: 2日前')).toHaveAttribute(
-      'datetime',
-      compared.verifiedAt,
-    );
-    expect(screen.getByText('更新: 2026-07-13')).toHaveAttribute(
-      'datetime',
-      compared.updatedAt,
-    );
-    expect(screen.queryByText('利用条件: Commercial use with attribution.')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '続きを読む' }));
-    expect(
-      screen.getByText('利用条件: Commercial use with attribution.'),
-    ).toBeInTheDocument();
-    const docs = screen.getByRole('link', { name: 'Docs' });
+    const card = (await screen.findByText(ITEM.description)).closest('li')!;
+    const docs = within(card).getByRole('link', { name: 'Docs' });
     expect(docs).toHaveAttribute('href', compared.docsUrl);
     expect(docs).toHaveAttribute('target', '_blank');
     expect(docs).toHaveAttribute('rel', 'noreferrer noopener');
+    expect(screen.queryByText('検証: 2日前')).not.toBeInTheDocument();
+    expect(screen.queryByText('更新: 2026-07-13')).not.toBeInTheDocument();
+    expect(screen.queryByText('利用条件: Commercial use with attribution.')).not.toBeInTheDocument();
+    openDetails(card);
+    expect(screen.getByText('検証: 2日前')).toHaveAttribute('datetime', compared.verifiedAt);
+    expect(screen.getByText('更新: 2026-07-13')).toHaveAttribute('datetime', compared.updatedAt);
+    expect(screen.getByText('利用条件: Commercial use with attribution.')).toBeInTheDocument();
+  });
+
+  it('Docs が https でないカタログ出品には Docs リンクを出さない', async () => {
+    global.fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ items: [{ ...ITEM, docsUrl: 'http://docs.example.jp/x' }] }),
+    })) as unknown as typeof fetch;
+    renderView();
+    await screen.findByText(ITEM.description);
+    expect(screen.queryByRole('link', { name: 'Docs' })).not.toBeInTheDocument();
   });
 
   it('サインイン済: 登録フォーム (URL/価格 入力) を表示', async () => {
@@ -500,7 +612,32 @@ describe('X402DiscoveryView', () => {
     expect(screen.getByRole('button', { name: '削除' })).toBeInTheDocument();
   });
 
-  it('owner: Docs・利用条件をカード直下へ同じ meta 行で表示し、非 HTTPS Docs は出さない', async () => {
+  it('owner: 公開中 / 非表示の件数を見出しの横に、各カードに状態チップを出す', async () => {
+    renderAsOwner([
+      OWNED,
+      { ...OWNED, id: 'res-2', url: 'https://api.example.jp/paid/h1', description: '隠れた掲載 1', hidden: true, paywallSnippet: 'snip' },
+      { ...OWNED, id: 'res-3', url: 'https://api.example.jp/paid/h2', description: '隠れた掲載 2', hidden: true, paywallSnippet: 'snip' },
+    ]);
+    const heading = await screen.findByRole('heading', { name: 'あなたの登録' });
+    const header = heading.parentElement!;
+    expect(within(header).getByText('公開中 1')).toBeInTheDocument();
+    expect(within(header).getByText('非表示 2')).toBeInTheDocument();
+    const live = screen.getByText(OWNED.description).closest('li')!;
+    expect(within(live).getByText('公開中')).toBeInTheDocument();
+    expect(within(live).queryByText('非表示')).not.toBeInTheDocument();
+    const hidden = screen.getByText('隠れた掲載 1').closest('li')!;
+    expect(within(hidden).getByText('非表示')).toBeInTheDocument();
+    expect(within(hidden).queryByText('公開中')).not.toBeInTheDocument();
+  });
+
+  it('owner: 非表示が無いときは「非表示 N」の件数を出さない', async () => {
+    renderAsOwner();
+    const heading = await screen.findByRole('heading', { name: 'あなたの登録' });
+    expect(within(heading.parentElement!).getByText('公開中 1')).toBeInTheDocument();
+    expect(within(heading.parentElement!).queryByText(/^非表示/)).not.toBeInTheDocument();
+  });
+
+  it('owner: Docs は常時表示・利用条件は「詳しく」の中、非 HTTPS Docs は出さない', async () => {
     const ownedWithMeta = {
       ...OWNED,
       docsUrl: 'https://docs.example.jp/owned.json',
@@ -519,37 +656,32 @@ describe('X402DiscoveryView', () => {
     const card = description.closest('li')!;
     const docs = within(card).getByRole('link', { name: 'Docs' });
     expect(within(card).queryByText('利用条件: Attribution required.')).not.toBeInTheDocument();
-    fireEvent.click(within(card).getByRole('button', { name: '続きを読む' }));
-    const license = within(card).getByText('利用条件: Attribution required.');
-    const metaRow = docs.parentElement!;
-    expect(metaRow.previousElementSibling).toBe(description.parentElement);
-    expect(metaRow).toHaveClass('flex-wrap', 'items-baseline', 'text-[11px]');
-    expect(
-      docs.compareDocumentPosition(license) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
+    openDetails(card);
+    expect(within(card).getByText('利用条件: Attribution required.')).toBeInTheDocument();
     expect(docs).toHaveAttribute('href', ownedWithMeta.docsUrl);
     expect(docs).toHaveAttribute('target', '_blank');
     expect(docs).toHaveAttribute('rel', 'noreferrer noopener');
 
     const unsafeCard = screen.getByText(ownedWithUnsafeDocs.description).closest('li')!;
     expect(within(unsafeCard).queryByRole('link', { name: 'Docs' })).not.toBeInTheDocument();
-    expect(unsafeCard.querySelector('.items-baseline')).not.toBeInTheDocument();
   });
 
-  it('owner: hidden の自リソースに要対応バッジとゲートスニペットを再掲', async () => {
+  it('owner: hidden の自リソースは理由を 1 文で示し、ゲートのスニペットは「直し方」を開いたときだけ見せる', async () => {
     const repairSnippet = 'export async function GET() { return new Response(null, { status: 402 }); }';
     renderAsOwner([{ ...OWNED, hidden: true, paywallSnippet: repairSnippet }]);
 
-    expect(await screen.findByText('要対応')).toBeInTheDocument();
-    expect(
-      screen.getByText(/公開カタログから一時的に非表示/),
-    ).toBeInTheDocument();
-    expect(screen.getByText(repairSnippet)).toBeInTheDocument();
+    const reason = await screen.findByText(/OpenPay の JPYC ゲートを確認できず、一時的に非表示です。/);
+    const card = reason.closest('li')!;
+    expect(within(card).getByText('非表示')).toBeInTheDocument();
+    expect(screen.queryByText('要対応')).not.toBeInTheDocument();
+    expect(screen.getByText(repairSnippet)).not.toBeVisible();
+    fireEvent.click(within(card).getByText('直し方'));
+    expect(screen.getByText(repairSnippet)).toBeVisible();
   });
 
   // N-4: 401/403・別ドメイン転送で締め出されて hidden になった掲載に「JPYC ゲートを確認できな
   // かった」と出すのは誤案内。直し方 (probe を通す) が違うので文面とスニペットの有無を分ける。
-  it('owner: 締め出しで hidden になった掲載には再検証拒否の案内を出しスニペットは出さない', async () => {
+  it('owner: 締め出しで hidden になった掲載には再検証拒否の案内を出し、直し方もスニペットも出さない', async () => {
     const repairSnippet = 'export async function GET() { return new Response(null, { status: 402 }); }';
     renderAsOwner([
       {
@@ -560,11 +692,11 @@ describe('X402DiscoveryView', () => {
       },
     ]);
 
-    expect(await screen.findByText('要対応')).toBeInTheDocument();
     expect(
-      screen.getByText(/再検証のアクセスが拒否（401\/403、または別ドメインへの転送）された/),
+      await screen.findByText(/再検証のアクセスが拒否された（401\/403・別ドメインへの転送）/),
     ).toBeInTheDocument();
-    expect(screen.queryByText(/公開カタログから一時的に非表示/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/ゲートを確認できず/)).not.toBeInTheDocument();
+    expect(screen.queryByText('直し方')).not.toBeInTheDocument();
     expect(screen.queryByText(repairSnippet)).not.toBeInTheDocument();
   });
 
@@ -578,12 +710,9 @@ describe('X402DiscoveryView', () => {
       },
     ]);
 
-    expect(
-      await screen.findByText(/公開カタログから一時的に非表示/),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByText(/再検証のアクセスが拒否/),
-    ).not.toBeInTheDocument();
+    expect(await screen.findByText(/ゲートを確認できず/)).toBeInTheDocument();
+    expect(screen.getByText('直し方')).toBeInTheDocument();
+    expect(screen.queryByText(/再検証のアクセスが拒否/)).not.toBeInTheDocument();
   });
 
   it('登録上限: N/100 を amber 表示し、警告とともに新規登録を事前 disable', async () => {
@@ -630,8 +759,11 @@ describe('X402DiscoveryView', () => {
     expect(screen.getByDisplayValue(ownedWithComparison.title)).toBeInTheDocument();
     expect(screen.getByDisplayValue(ownedWithComparison.trigger)).toBeInTheDocument();
     expect(screen.getByText('任意項目（名前・用途・Docs・条件）').closest('details')).toHaveAttribute('open');
-    expect(screen.getByText(ownedWithComparison.title)).toBeInTheDocument();
-    expect(screen.getByText(ownedWithComparison.trigger)).toBeInTheDocument();
+    const ownedCard = screen.getByText(ownedWithComparison.title).closest('li')!;
+    // 購入トリガーはカードの「詳しく」の中。
+    expect(within(ownedCard).queryByText(ownedWithComparison.trigger)).not.toBeInTheDocument();
+    openDetails(ownedCard);
+    expect(within(ownedCard).getByText(ownedWithComparison.trigger)).toBeInTheDocument();
     fireEvent.change(screen.getByDisplayValue(ownedWithComparison.title), { target: { value: '' } });
     fireEvent.change(screen.getByDisplayValue(ownedWithComparison.trigger), { target: { value: '' } });
     // 価格を書き換えて更新。
@@ -717,9 +849,9 @@ describe('X402DiscoveryView', () => {
       target: { value: '商用利用可・要帰属' },
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'data' }));
-    expect(screen.getByRole('button', { name: 'data' })).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByRole('button', { name: 'api' })).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(screen.getByRole('button', { name: 'データ' }));
+    expect(screen.getByRole('button', { name: 'データ' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'API' })).toHaveAttribute('aria-pressed', 'false');
 
     // 境界: 表明前は登録ボタン disabled・案内文を表示。
     const submit = screen.getByRole('button', { name: '登録する' });
@@ -871,11 +1003,11 @@ describe('X402DiscoveryView', () => {
     });
     renderView();
     await screen.findByText('JP→EN 翻訳 API です');
-    await act(async () => fireEvent.click(screen.getByLabelText('コピー')));
-    expect(screen.queryByLabelText('コピーしました')).not.toBeInTheDocument();
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: /^コピー api\.example\.jp/ })));
+    expect(screen.queryByRole('button', { name: /^コピーしました/ })).not.toBeInTheDocument();
   });
 
-  it('コピー: カタログ URL のコピーボタンで clipboard に書き込み「コピーしました」に変化', async () => {
+  it('コピー: カタログ URL のコピーチップで clipboard に全 URL を書き込み「コピーしました」に変化', async () => {
     const writeText = vi.fn();
     Object.defineProperty(navigator, 'clipboard', {
       value: { writeText },
@@ -883,16 +1015,19 @@ describe('X402DiscoveryView', () => {
     });
     renderView();
     await screen.findByText('JP→EN 翻訳 API です');
-    fireEvent.click(screen.getByLabelText('コピー'));
-    // 実出力: clipboard にカタログ URL が渡る。
+    fireEvent.click(screen.getByRole('button', { name: /^コピー api\.example\.jp/ }));
+    // 実出力: 表示は短くても clipboard には全 URL が渡る。
     expect(writeText).toHaveBeenCalledWith(ITEM.resource);
     // フィードバック: ラベルが「コピーしました」に変わる。
-    expect(await screen.findByLabelText('コピーしました')).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /^コピーしました api\.example\.jp/ })).toBeInTheDocument();
   });
 
-  it('カタログ: 支払い計 (価格 1000 + 手数料 10 = 1010 JPYC) を表示', async () => {
+  it('カタログ: 合計 (価格 1000 + 手数料 10 = 1010 JPYC) を太字で、内訳を常時表示', async () => {
     renderView();
-    expect(await screen.findByText('支払い計 1010 JPYC')).toBeInTheDocument();
+    const total = await screen.findByText('1010 JPYC');
+    expect(total).toHaveClass('font-bold');
+    expect(screen.getByText('1000 + 手数料 10')).toBeInTheDocument();
+    expect(screen.queryByText(/支払い計/)).not.toBeInTheDocument();
   });
 
   it('2円 demo セクション: curl と buyer script コマンドをコピーできる', async () => {
@@ -921,7 +1056,7 @@ describe('X402DiscoveryView', () => {
       configurable: true,
     });
     renderView();
-    const title = await screen.findByText('エージェントから払う (MCP)');
+    const title = await screen.findByText('MCP で使う');
     fireEvent.click(title);
     const copyButtons = screen.getAllByRole('button', { name: 'コピー' });
     for (const button of copyButtons) fireEvent.click(button);
@@ -941,7 +1076,13 @@ describe('X402DiscoveryView', () => {
     const guardBullets = within(details)
       .getAllByRole('listitem')
       .map((item) => item.textContent);
+    // 強制する 5 点 (SDK / MCP) に続けて MCP の既定値 3 点を並べる。
     expect(guardBullets).toEqual([
+      '1 回・累計・日次の支払い上限',
+      '登録済み商品との金銭条件の照合 (すり替えを拒否)',
+      '商品 URL と resource の固定',
+      '支払い結果の検証可能な証跡 (receipt とオンチェーン取引)',
+      '決済に失敗した場合は商品を解錠しない',
       '1 回の上限 10 JPYC',
       '累計上限 100 JPYC',
       '支払い先はカタログ掲載 URL と open-pay.jp のみ',
@@ -979,8 +1120,8 @@ describe('X402DiscoveryView', () => {
       }),
     })) as unknown as typeof fetch;
     renderView();
-    expect(await screen.findByText(/手数料 2\.5 JPYC/)).toBeInTheDocument();
-    expect(screen.getByText('支払い計 252.5 JPYC')).toBeInTheDocument();
+    expect(await screen.findByText('250 + 手数料 2.5')).toBeInTheDocument();
+    expect(screen.getByText('252.5 JPYC')).toBeInTheDocument();
   });
 
   it('空カタログ: catalogEmpty を表示', async () => {
@@ -1024,8 +1165,6 @@ describe('X402DiscoveryView dual-rail USDC 面 (flag ゲート)', () => {
     fireEvent.change(await screen.findByPlaceholderText('https://api.example.jp/paid/weather'), {
       target: { value: 'https://api.example.jp/paid/new' },
     });
-    // flag ON では発見面の注記も dual-rail 版。
-    expect(screen.getByText('掲載先: /api/discovery と MCP / SDK（JPYC・Polygon）。USDC 併売で x402 Bazaar にも。')).toBeInTheDocument();
     fireEvent.change(screen.getByPlaceholderText('東京の 48 時間天気予報 (JSON)'), {
       target: { value: '新しい有料 API' },
     });
@@ -1191,7 +1330,7 @@ describe('X402DiscoveryView dual-rail USDC 面 (flag ゲート)', () => {
 
   it('owned カードに USDC 面の価格を併記する', async () => {
     renderAsOwner([USDC_OWNED]);
-    expect(await screen.findByText('+ 0.005 USDC')).toBeInTheDocument();
+    expect(await screen.findByText('または 0.005 USDC')).toBeInTheDocument();
   });
 });
 
@@ -1203,18 +1342,33 @@ describe('X402DiscoveryView 公開カタログの dual (USDC 併売) 表示', ()
     usdc: { priceUsd: '0.02' },
   };
 
-  it('dual 出品カードに USDC チップと「+ 0.02 USDC」を併記する', async () => {
+  it('dual 出品カードに「または 0.02 USDC」を併記する (非 dual には付かない)', async () => {
     global.fetch = vi.fn(async () => ({
       ok: true,
       json: async () => ({ items: [ITEM, DUAL_ITEM] }),
     })) as unknown as typeof fetch;
     renderView();
     const card = (await screen.findByText(DUAL_ITEM.description)).closest('li');
-    expect(within(card!).getByText('USDC')).toBeInTheDocument();
-    expect(within(card!).getByText('+ 0.02 USDC')).toBeInTheDocument();
-    // 非 dual カードには付かない。
+    expect(within(card!).getByText('または 0.02 USDC')).toBeInTheDocument();
+    // JPYC の合計が主役のまま。
+    expect(within(card!).getByText('1010 JPYC')).toBeInTheDocument();
     const plain = screen.getByText(ITEM.description).closest('li');
-    expect(within(plain!).queryByText('USDC')).not.toBeInTheDocument();
+    expect(within(plain!).queryByText(/USDC/)).not.toBeInTheDocument();
+  });
+
+  it('USDC で絞ると dual 出品の価格は USDC が主役、JPYC の合計は「または」で併記', async () => {
+    global.fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ items: [ITEM, DUAL_ITEM] }),
+    })) as unknown as typeof fetch;
+    renderView();
+    await screen.findByText(DUAL_ITEM.description);
+    fireEvent.click(screen.getByRole('button', { name: 'USDC 1' }));
+    const card = screen.getByText(DUAL_ITEM.description).closest('li')!;
+    expect(within(card).getByText('0.02 USDC')).toHaveClass('font-bold');
+    expect(within(card).getByText('上乗せなし')).toBeInTheDocument();
+    expect(within(card).getByText('または 1010 JPYC')).toBeInTheDocument();
+    expect(within(card).queryByText('または 0.02 USDC')).not.toBeInTheDocument();
   });
 
   it('通貨フィルタ: USDC を選ぶと dual 出品もマッチする (件数にも数える)', async () => {
@@ -1322,17 +1476,17 @@ describe('X402DiscoveryView — Monitor の鮮度表示', () => {
       '/api/paid/usdc/jpyc/services': { latestEventDate: '2026-08-27', totalEvents: 11 },
     });
     await waitFor(() => expect(screen.getByText('JPYC Service Monitor')).toBeInTheDocument());
-    const line = screen.getByText('最終イベント 2026-08-27・全 11 件・週次更新');
+    const line = screen.getByText('週次更新・最新 2026-08-27・11 件');
     expect(line).toBeInTheDocument();
     // 同じ文言が他カードに漏れていない (1 箇所のみ)。
-    expect(screen.getAllByText(/最終イベント/)).toHaveLength(1);
+    expect(screen.getAllByText(/週次更新・最新/)).toHaveLength(1);
     expect(line.closest('li')).toHaveTextContent('JPYC Service Monitor');
   });
 
   it('freshnessByPath 省略時 (flag OFF 等) は何も出ない', async () => {
     renderWithFreshness(undefined);
     await waitFor(() => expect(screen.getByText('JPYC Service Monitor')).toBeInTheDocument());
-    expect(screen.queryByText(/最終イベント/)).toBeNull();
+    expect(screen.queryByText(/週次更新・最新/)).toBeNull();
   });
 });
 
@@ -1345,17 +1499,18 @@ describe('X402DiscoveryView readable cards', () => {
     renderView();
   }
 
-  it('renders title as the heading and description as a separate body', async () => {
+  it('renders title as the heading and description as a separate clamped body', async () => {
     catalog([{ ...ITEM, title: 'Translation API' }]);
     const heading = await screen.findByText('Translation API');
     const body = screen.getByText(ITEM.description);
-    expect(heading).toHaveClass('text-sm', 'font-bold', 'line-clamp-2');
-    expect(body).toHaveClass('text-xs', 'text-slate-500', 'line-clamp-3');
-    expect(heading.nextElementSibling).toBe(body);
-    expect(screen.queryByRole('button', { name: '続きを読む' })).not.toBeInTheDocument();
+    expect(heading).toHaveClass('text-[15px]', 'font-bold', 'line-clamp-3');
+    expect(body).toHaveClass('text-[13px]', 'text-slate-600', 'line-clamp-2');
+    // 見出し行 (名前 + 価格) の直後が本文。
+    expect(heading.parentElement!.nextElementSibling).toBe(body);
+    expect(screen.getByRole('button', { name: '詳しく' })).toHaveAttribute('aria-expanded', 'false');
   });
 
-  it('expands and collapses description, trigger and license independently per card', async () => {
+  it('expands and collapses trigger and license (in details) independently per card; Docs stays visible', async () => {
     const description = 'Long description '.repeat(10);
     const trigger = 'When you need translated data '.repeat(6);
     catalog([
@@ -1363,20 +1518,22 @@ describe('X402DiscoveryView readable cards', () => {
       { ...ITEM, resource: `${ITEM.resource}/other`, description: 'Another API', license: 'Other license' },
     ]);
     const card = (await screen.findByText('Translation API')).closest('li')!;
-    const more = within(card).getByRole('button', { name: '続きを読む' });
+    const more = within(card).getByRole('button', { name: '詳しく' });
     expect(more).toHaveAttribute('aria-expanded', 'false');
     expect(within(card).queryByText('利用条件: Attribution required.')).not.toBeInTheDocument();
+    expect(within(card).queryByText(trigger.trim())).not.toBeInTheDocument();
     expect(within(card).getByRole('link', { name: 'Docs' })).toBeInTheDocument();
-    expect(within(card).getByText(trigger.trim())).toHaveClass('line-clamp-2');
+    expect(within(card).getByText(description.trim())).toHaveClass('line-clamp-2');
     fireEvent.click(more);
     expect(within(card).getByRole('button', { name: '閉じる' })).toHaveAttribute('aria-expanded', 'true');
-    expect(within(card).getByText(description.trim())).not.toHaveClass('line-clamp-3');
-    expect(within(card).getByText(trigger.trim())).not.toHaveClass('line-clamp-2');
+    expect(within(card).getByText(description.trim())).not.toHaveClass('line-clamp-2');
+    expect(within(card).getByText(trigger.trim())).toBeInTheDocument();
     expect(within(card).getByText('利用条件: Attribution required.')).toBeInTheDocument();
     expect(screen.queryByText('利用条件: Other license')).not.toBeInTheDocument();
     fireEvent.click(within(card).getByRole('button', { name: '閉じる' }));
-    expect(within(card).getByText(description.trim())).toHaveClass('line-clamp-3');
+    expect(within(card).getByText(description.trim())).toHaveClass('line-clamp-2');
     expect(within(card).queryByText('利用条件: Attribution required.')).not.toBeInTheDocument();
+    expect(within(card).queryByText(trigger.trim())).not.toBeInTheDocument();
   });
 
   it.each([true, false])('avoids duplicate resource key warnings (payTo present: %s)', async (withPayTo) => {
@@ -1389,14 +1546,19 @@ describe('X402DiscoveryView readable cards', () => {
     })));
     const first = (await screen.findByText('Seller one')).closest('li')!;
     const second = screen.getByText('Seller two').closest('li')!;
-    fireEvent.click(within(first).getByRole('button', { name: '続きを読む' }));
-    expect(within(second).getByRole('button', { name: '続きを読む' })).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(within(first).getByRole('button', { name: '詳しく' }));
+    expect(within(first).getByRole('button', { name: '閉じる' })).toHaveAttribute('aria-expanded', 'true');
+    expect(within(second).getByRole('button', { name: '詳しく' })).toHaveAttribute('aria-expanded', 'false');
     expect(errors.mock.calls.filter((args) => /same key|unique.*key/i.test(args.join(' ')))).toEqual([]);
   });
 
-  it('shows a toggle for a long trigger even with a short description and no license', async () => {
-    catalog([{ ...ITEM, trigger: 'Trigger '.repeat(18) }]);
-    expect(await screen.findByRole('button', { name: '続きを読む' })).toBeInTheDocument();
+  it('keeps a long trigger out of the card face (it lives in details)', async () => {
+    const trigger = 'Trigger '.repeat(18).trim();
+    catalog([{ ...ITEM, trigger }]);
+    const card = (await screen.findByText(ITEM.description)).closest('li')!;
+    expect(within(card).queryByText(trigger)).not.toBeInTheDocument();
+    openDetails(card);
+    expect(within(card).getByText(trigger)).toBeInTheDocument();
   });
 });
 
@@ -1436,14 +1598,213 @@ describe('X402DiscoveryView catalog paging', () => {
     expect(screen.queryByRole('button', { name: /さらに/ })).not.toBeInTheDocument();
   });
 
-  it('resets the limit when the filter changes', async () => {
+  it('resets the limit when the search changes', async () => {
     catalog(many);
     await screen.findByText('Item 0');
     fireEvent.click(screen.getByRole('button', { name: 'さらに 2 件を表示' }));
     expect(screen.getByText('Item 9')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /^api/ }));
+    fireEvent.change(screen.getByPlaceholderText('名前・説明・URL で検索'), { target: { value: 'item' } });
     expect(screen.getByText('Item 7')).toBeInTheDocument();
     expect(screen.queryByText('Item 8')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'さらに 1 件を表示' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'さらに 2 件を表示' })).toBeInTheDocument();
+  });
+});
+
+describe('X402DiscoveryView 公式商品の双子 (JPYC 面 + USDC 面を 1 枚に)', () => {
+  const JPYC_URL = 'https://open-pay.jp/api/paid/stores';
+  const USDC_URL = 'https://open-pay.jp/api/paid/usdc/stores';
+  const JPYC_TWIN = {
+    resource: JPYC_URL,
+    title: 'JPYC Stores',
+    description: 'Sourced list of venues that accept JPYC.',
+    category: 'data',
+    priceJpyc: '1',
+    official: true,
+    accepts: [{ extra: { openpay: { feeValue: (10n ** 18n).toString() } } }],
+  };
+  const USDC_TWIN = {
+    resource: USDC_URL,
+    title: 'Stores (USDC edition)',
+    description: 'Same list, paid in USDC.',
+    priceUsd: '0.002',
+    category: 'data' as const,
+    jpycTwinPath: '/api/paid/stores',
+  };
+  const USDC_ONLY = {
+    resource: 'https://open-pay.jp/api/paid/usdc/jpyc/supply',
+    title: 'JPYC Supply by Chain',
+    description: 'live supply',
+    priceUsd: '0.002',
+    category: 'data' as const,
+  };
+  function catalogFetch(items: unknown[]) {
+    global.fetch = vi.fn(async () => ({ ok: true, json: async () => ({ items }) })) as unknown as typeof fetch;
+  }
+  const writeText = vi.fn();
+  beforeEach(() => {
+    writeText.mockReset();
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+  });
+
+  it('同じ公式商品の JPYC 面と USDC 面は 1 枚になり、すべて / JPYC / USDC の件数が重複なく数えられる', async () => {
+    catalogFetch([JPYC_TWIN, ITEM]);
+    renderView({ usdcItems: [USDC_TWIN, USDC_ONLY] });
+    await screen.findByText('JPYC Stores');
+    // 双子 1 + 第三者 1 + USDC だけの 1 = 3 枚 (双子の USDC 面は別カードにならない)。
+    expect(catalogCards()).toHaveLength(3);
+    expect(screen.queryByText('Stores (USDC edition)')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'すべて 3' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'JPYC 2' })).toBeInTheDocument();
+    // USDC = 双子 (USDC でも買える) + USDC だけの商品。
+    expect(screen.getByRole('button', { name: 'USDC 2' })).toBeInTheDocument();
+    const card = screen.getByText('JPYC Stores').closest('li')!;
+    expect(within(card).getByText('公式')).toBeInTheDocument();
+    expect(within(card).getByText('2 JPYC')).toBeInTheDocument();
+    expect(within(card).getByText('または 0.002 USDC')).toBeInTheDocument();
+  });
+
+  it('USDC の絞り込みにも検索 (USDC 側の名前・path) にも双子が当たり、第三者の JPYC 出品は外れる', async () => {
+    catalogFetch([JPYC_TWIN, ITEM]);
+    renderView({ usdcItems: [USDC_TWIN, USDC_ONLY] });
+    await screen.findByText('JPYC Stores');
+    fireEvent.click(screen.getByRole('button', { name: 'USDC 2' }));
+    expect(screen.getByText('JPYC Stores')).toBeInTheDocument();
+    expect(screen.getByText('JPYC Supply by Chain')).toBeInTheDocument();
+    expect(screen.queryByText(ITEM.description)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'すべて 3' }));
+    const search = screen.getByPlaceholderText('名前・説明・URL で検索');
+    fireEvent.change(search, { target: { value: 'usdc edition' } });
+    expect(catalogCards()).toHaveLength(1);
+    expect(screen.getByText('JPYC Stores')).toBeInTheDocument();
+    fireEvent.change(search, { target: { value: '/usdc/stores' } });
+    expect(catalogCards()).toHaveLength(1);
+    expect(screen.getByText('JPYC Stores')).toBeInTheDocument();
+  });
+
+  it('USDC で絞ると価格は USDC が主役・コピーするのも USDC 面の URL', async () => {
+    catalogFetch([JPYC_TWIN, ITEM]);
+    renderView({ usdcItems: [USDC_TWIN, USDC_ONLY] });
+    await screen.findByText('JPYC Stores');
+    const jpycCard = screen.getByText('JPYC Stores').closest('li')!;
+    fireEvent.click(within(jpycCard).getAllByRole('button', { name: /^コピー open-pay\.jp/ })[0]);
+    expect(writeText).toHaveBeenLastCalledWith(JPYC_URL);
+
+    fireEvent.click(screen.getByRole('button', { name: 'USDC 2' }));
+    const card = screen.getByText('JPYC Stores').closest('li')!;
+    expect(within(card).getByText('0.002 USDC')).toHaveClass('font-bold');
+    expect(within(card).getByText('または 2 JPYC')).toBeInTheDocument();
+    fireEvent.click(within(card).getAllByRole('button', { name: /^コピー open-pay\.jp/ })[0]);
+    expect(writeText).toHaveBeenLastCalledWith(USDC_URL);
+  });
+
+  it('「詳しく」には通貨ごとの URL を別々にコピーできるチップが並ぶ (全 URL のリンクは出さない)', async () => {
+    catalogFetch([JPYC_TWIN]);
+    renderView({ usdcItems: [USDC_TWIN] });
+    const card = (await screen.findByText('JPYC Stores')).closest('li')!;
+    openDetails(card);
+    const details = within(card).getByRole('list');
+    expect(within(details).getByText('JPYC · Polygon')).toBeInTheDocument();
+    expect(within(details).getByText('USDC · Base')).toBeInTheDocument();
+    expect(within(card).queryByRole('link', { name: JPYC_URL })).not.toBeInTheDocument();
+    const chips = within(details).getAllByRole('button');
+    expect(chips).toHaveLength(2);
+    fireEvent.click(chips[0]);
+    expect(writeText).toHaveBeenLastCalledWith(JPYC_URL);
+    fireEvent.click(chips[1]);
+    expect(writeText).toHaveBeenLastCalledWith(USDC_URL);
+  });
+
+  it('JPYC 面が無い (取得できない / 非表示) ときは USDC 面を 1 枚だけ単独で出す', async () => {
+    catalogFetch([]);
+    renderView({ usdcItems: [USDC_TWIN] });
+    expect(await screen.findByText('Stores (USDC edition)')).toBeInTheDocument();
+    expect(catalogCards()).toHaveLength(1);
+    const card = screen.getByText('Stores (USDC edition)').closest('li')!;
+    expect(within(card).getByText('0.002 USDC')).toBeInTheDocument();
+    expect(within(card).getByText('上乗せなし')).toBeInTheDocument();
+    // JPYC 出品が無いので通貨の切り替えは出ない。
+    expect(screen.queryByRole('button', { name: /^すべて/ })).not.toBeInTheDocument();
+  });
+
+  it('双子の対応は official な JPYC 面にだけ効く (第三者が同じ path を登録しても畳まない)', async () => {
+    catalogFetch([{ ...JPYC_TWIN, official: undefined, title: 'Impostor Stores' }]);
+    renderView({ usdcItems: [USDC_TWIN] });
+    await screen.findByText('Impostor Stores');
+    expect(catalogCards()).toHaveLength(2);
+    expect(screen.getByText('Stores (USDC edition)')).toBeInTheDocument();
+  });
+});
+
+describe('X402DiscoveryView 公式商品の日本語の要約', () => {
+  const STORES = {
+    ...ITEM,
+    resource: 'https://open-pay.jp/api/paid/stores',
+    title: 'JPYC Stores',
+    description: 'Sourced list of venues that accept JPYC.',
+    official: true,
+  };
+  const SUMMARY = FIRST_PARTY_SUMMARY_JA['/api/paid/stores'];
+
+  it('ja: 公式商品は日本語の要約を出し、原文の description は出さない', async () => {
+    global.fetch = vi.fn(async () => ({ ok: true, json: async () => ({ items: [STORES] }) })) as unknown as typeof fetch;
+    renderView();
+    expect(await screen.findByText(SUMMARY)).toBeInTheDocument();
+    expect(screen.queryByText(STORES.description)).not.toBeInTheDocument();
+  });
+
+  it('en: 原文のまま (要約に差し替えない)', async () => {
+    global.fetch = vi.fn(async () => ({ ok: true, json: async () => ({ items: [STORES] }) })) as unknown as typeof fetch;
+    renderView({}, 'en');
+    expect(await screen.findByText(STORES.description)).toBeInTheDocument();
+    expect(screen.queryByText(SUMMARY)).not.toBeInTheDocument();
+  });
+
+  it('第三者 (official でない) の出品は同じ path でも差し替えない', async () => {
+    global.fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ items: [{ ...STORES, official: undefined, title: 'Other Stores' }] }),
+    })) as unknown as typeof fetch;
+    renderView();
+    expect(await screen.findByText(STORES.description)).toBeInTheDocument();
+    expect(screen.queryByText(SUMMARY)).not.toBeInTheDocument();
+  });
+
+  it('日本語の要約の語でも検索で見つかる (原文には無い語)', async () => {
+    global.fetch = vi.fn(async () => ({ ok: true, json: async () => ({ items: [STORES, ITEM] }) })) as unknown as typeof fetch;
+    renderView();
+    await screen.findByText(SUMMARY);
+    fireEvent.change(screen.getByPlaceholderText('名前・説明・URL で検索'), { target: { value: '取引所' } });
+    expect(screen.getByText(SUMMARY)).toBeInTheDocument();
+    expect(screen.queryByText(ITEM.description)).not.toBeInTheDocument();
+  });
+
+  it('USDC 単独の公式商品にも日本語の要約を出す', async () => {
+    global.fetch = vi.fn(async () => ({ ok: true, json: async () => ({ items: [] }) })) as unknown as typeof fetch;
+    renderView({
+      usdcItems: [
+        { resource: 'https://open-pay.jp/api/paid/usdc/jpyc/supply', title: 'Supply', description: 'live supply', priceUsd: '0.002', category: 'data' },
+      ],
+    });
+    expect(await screen.findByText(FIRST_PARTY_SUMMARY_JA['/api/paid/usdc/jpyc/supply'])).toBeInTheDocument();
+    expect(screen.queryByText('live supply')).not.toBeInTheDocument();
+  });
+});
+
+describe('X402DiscoveryView 該当なしと「条件をクリア」', () => {
+  it('検索語と通貨の絞り込みを 1 回で戻す', async () => {
+    const dual = { ...ITEM, resource: 'https://api.example.jp/paid/dual', description: 'Dual API', usdc: { priceUsd: '0.02' } };
+    global.fetch = vi.fn(async () => ({ ok: true, json: async () => ({ items: [ITEM, dual] }) })) as unknown as typeof fetch;
+    renderView();
+    await screen.findByText('Dual API');
+    fireEvent.click(screen.getByRole('button', { name: 'USDC 1' }));
+    const search = screen.getByPlaceholderText('名前・説明・URL で検索');
+    fireEvent.change(search, { target: { value: 'translate' } });
+    expect(screen.getByText('該当するリソースがありません')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '条件をクリア' }));
+    expect(search).toHaveValue('');
+    expect(screen.getByRole('button', { name: 'すべて 2' })).toHaveAttribute('aria-pressed', 'true');
+    expect(catalogCards()).toHaveLength(2);
+    expect(screen.queryByText('該当するリソースがありません')).not.toBeInTheDocument();
   });
 });

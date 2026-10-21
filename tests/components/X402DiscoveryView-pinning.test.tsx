@@ -11,6 +11,7 @@ import { renderWithIntl } from '../_helpers/i18n';
 // 認証/アカウント切替を跨ぐ下書きと進行中の mutation・owned/公開カタログ両方の invalidate を固定する。
 // B-R10c: 下書きの破棄と古い mutation の UI 反映抑止・送信元だけの owned 無効化は意図して変更。
 // R10b: owner 一覧・フォームは findBy で dynamic 読み込み後の描画を待ち、DOM hash は R10a の値を保つ。
+// 2026-10-21: AI ストアの磨き上げ (カードを 5 要素に・双子を 1 枚に・出品者の状態・節の並び) で DOM が変わったため、全 hash を意図して採り直し。
 // 2026-09-26: 「2円で試す」節の SDK 例を鍵の入力方式 (read -s・コマンド行に鍵を書かない) に変更したため、当該節と all の hash を意図して更新。
 
 const auth = vi.hoisted(() => ({
@@ -88,6 +89,9 @@ async function ownerReady(title = 'Owned fixture') {
   // 一覧とフォームは別 chunk なので、片方の到着だけでは DOM pin / 操作を始めない。
   await Promise.all([screen.findByText(title), screen.findByPlaceholderText(URL_PLACEHOLDER)]);
 }
+// URL のコピーチップの名前は可視テキスト (scheme を外した短い URL) から導かれる。
+const COPY_CATALOG = /^コピー example\.com\/…\/fixture/;
+const COPIED_CATALOG = /^コピーしました example\.com\/…\/fixture/;
 function catalogCard() {
   return screen.getByText('Catalog fixture').closest('li')!;
 }
@@ -175,55 +179,48 @@ describe('R10a pre-extraction pinning', () => {
     expect(await captureDom('ja')).toMatchInlineSnapshot(`
       {
         "cold": {
-          "all": "64eb0fce3747954f705e7d04fa86a16cb28b3725dba9fb7b05859960da234431",
+          "all": "47cb910d43cf10bcebe7ab6d5ab8c035d71a21741110d4bb99fdaa60a30c659f",
           "parts": [
             "h2 3282793f6040 Featured fixture",
-            "section a211614bb375 カタログ発見: /api/dis",
-            "section 4aebca8732f0 API を出品する402 ゲート",
-            "section c44df4912dbc 2円で試す1 JPYC + 手数",
-            "section 3f23d608d1c7 エージェントから払う (MCP)",
+            "section 450e0ebd864f カタログ",
+            "section cc86360b7152 エージェントから使う発見: /a",
+            "section 894a12bf6e73 API を出品する402 ゲート",
           ],
         },
         "connected": {
-          "all": "5461de6adb2ff0579d32e6852990efbf756727297dbe0dde73beec04e4694d6f",
+          "all": "fccd01cdfe2e5a6b2c837b7d9937d65bbf3bab11a559d7cfa22df311a98790bf",
           "parts": [
             "h2 3282793f6040 Featured fixture",
-            "section dd9b0d67eeae カタログ発見: /api/dis",
-            "section 11a99a5e761d API を出品する402 ゲート",
-            "section c44df4912dbc 2円で試す1 JPYC + 手数",
-            "section 3f23d608d1c7 エージェントから払う (MCP)",
+            "section 143908225b07 カタログ2カタログ検索すべて2J",
+            "section cc86360b7152 エージェントから使う発見: /a",
+            "section 736596090ae5 API を出品する402 ゲート",
           ],
         },
         "disconnected": {
-          "all": "1b165f498e76c7f9873d2b8f65952208ebaf1f92db0de849c340ebf968638d79",
+          "all": "cfe813ea04b59aa4ba19b6d0cecaffb0a3dfef53841f8c243380d9a5904a6328",
           "parts": [
             "h2 3282793f6040 Featured fixture",
-            "section dd9b0d67eeae カタログ発見: /api/dis",
-            "section 4aebca8732f0 API を出品する402 ゲート",
-            "section c44df4912dbc 2円で試す1 JPYC + 手数",
-            "section 3f23d608d1c7 エージェントから払う (MCP)",
+            "section 143908225b07 カタログ2カタログ検索すべて2J",
+            "section cc86360b7152 エージェントから使う発見: /a",
+            "section 894a12bf6e73 API を出品する402 ゲート",
           ],
         },
         "editing": {
-          "all": "6e0cfdc86523b0f1c159cebba54e6b2d8cad9bf5ecb47250bfb3f11e2dc04e69",
+          "all": "78d460810a1302bf1a81f63376734ee7f6e03becc50190cc1e57a3b3cbded797",
           "parts": [
-            "section 84703605eed1 あなたの登録登録済みの掲載を編集",
-            "section 25702af5f8f8 掲載を編集402 ゲートを置くだ",
-            "h2 3282793f6040 Featured fixture",
-            "section dd9b0d67eeae カタログ発見: /api/dis",
-            "section c44df4912dbc 2円で試す1 JPYC + 手数",
-            "section 3f23d608d1c7 エージェントから払う (MCP)",
+            "section aa1622ba9426 あなたの登録公開中 0非表示 1",
+            "section ca5cd5d66c45 掲載を編集402 ゲートを置くだ",
+            "section 143908225b07 カタログ2カタログ検索すべて2J",
+            "section cc86360b7152 エージェントから使う発見: /a",
           ],
         },
         "signedIn": {
-          "all": "af644433fe254faf44c2dac09743bdf60c42c3b22658ecf4faa1c5924d95207c",
+          "all": "317fb9e4c944585eb981b63cad5e84ee3612859dd8134d273742b38c518b8111",
           "parts": [
-            "section 84703605eed1 あなたの登録登録済みの掲載を編集",
-            "section 016d5beedaeb 新しい API を出品する402",
-            "h2 3282793f6040 Featured fixture",
-            "section dd9b0d67eeae カタログ発見: /api/dis",
-            "section c44df4912dbc 2円で試す1 JPYC + 手数",
-            "section 3f23d608d1c7 エージェントから払う (MCP)",
+            "section aa1622ba9426 あなたの登録公開中 0非表示 1",
+            "section a2374fe47db5 新しい API を出品する402",
+            "section 143908225b07 カタログ2カタログ検索すべて2J",
+            "section cc86360b7152 エージェントから使う発見: /a",
           ],
         },
       }
@@ -234,55 +231,48 @@ describe('R10a pre-extraction pinning', () => {
     expect(await captureDom('en')).toMatchInlineSnapshot(`
       {
         "cold": {
-          "all": "3e7178fa530f58f208a01dfc9ebdf06afd86418978bbd4b5d47d0f49ae7f0076",
+          "all": "a47cb1b531a87d03b807790257a33808607eed56c3a3913088bf969fc3a54b93",
           "parts": [
             "h2 3282793f6040 Featured fixture",
-            "section ab55932553c8 CatalogDiscover ",
-            "section 10cccfe6a706 List your APIPut",
-            "section 1afd73681508 Try it for ¥2A 1",
-            "section 7182bce57c3d Pay from an agen",
+            "section c2deb3c3a026 Catalog",
+            "section 64ecb66ae251 Use from your ag",
+            "section fc5d4ee7b2fa List your APIPut",
           ],
         },
         "connected": {
-          "all": "d7e027e0ecb72a5e9c817842f01654b73eb5490b0207162ae279a92c3e649bc1",
+          "all": "d52b4b3d45a1ccc972d70638cd32ec3b6e97686ffc7102bd375722ca87b11bb1",
           "parts": [
             "h2 3282793f6040 Featured fixture",
-            "section f780b219f7b8 CatalogDiscover ",
-            "section 9b97e28051f0 List your APIPut",
-            "section 1afd73681508 Try it for ¥2A 1",
-            "section 7182bce57c3d Pay from an agen",
+            "section 43e84a622688 Catalog2Catalog ",
+            "section 64ecb66ae251 Use from your ag",
+            "section 97edfb049437 List your APIPut",
           ],
         },
         "disconnected": {
-          "all": "a4480bd4f51160ae0667890df30d86e4678ff89b93c5b695f866f24a8b0b06e7",
+          "all": "0696b69252669144a32a63c1d88b4949414acb0ace8fd148e4509262aa58336c",
           "parts": [
             "h2 3282793f6040 Featured fixture",
-            "section f780b219f7b8 CatalogDiscover ",
-            "section 10cccfe6a706 List your APIPut",
-            "section 1afd73681508 Try it for ¥2A 1",
-            "section 7182bce57c3d Pay from an agen",
+            "section 43e84a622688 Catalog2Catalog ",
+            "section 64ecb66ae251 Use from your ag",
+            "section fc5d4ee7b2fa List your APIPut",
           ],
         },
         "editing": {
-          "all": "1ea25110fd9feb77996552f71b772305ffe6d0d1b9b1de6b79d8915d841b022e",
+          "all": "37f4729873f2650c3e449f65ea8e8b93dfec1710bcd57e2247163306e88853c0",
           "parts": [
-            "section 01e8bbeef899 Your registratio",
-            "section cb79bb273e4d Edit listingPut ",
-            "h2 3282793f6040 Featured fixture",
-            "section f780b219f7b8 CatalogDiscover ",
-            "section 1afd73681508 Try it for ¥2A 1",
-            "section 7182bce57c3d Pay from an agen",
+            "section 609432e5df36 Your registratio",
+            "section 2a723b0fdf84 Edit listingPut ",
+            "section 43e84a622688 Catalog2Catalog ",
+            "section 64ecb66ae251 Use from your ag",
           ],
         },
         "signedIn": {
-          "all": "8d6f70fd37f73c263ac9509473f624525c577695f77410ca83137ecf80dc3394",
+          "all": "f1cd5c66a0831d5762b81a490d6752c56d2569d33764c2a79c8a52d17d0b25fd",
           "parts": [
-            "section 01e8bbeef899 Your registratio",
-            "section e566f3ea601c List a new APIPu",
-            "h2 3282793f6040 Featured fixture",
-            "section f780b219f7b8 CatalogDiscover ",
-            "section 1afd73681508 Try it for ¥2A 1",
-            "section 7182bce57c3d Pay from an agen",
+            "section 609432e5df36 Your registratio",
+            "section d2ac3938b9ad List a new APIPu",
+            "section 43e84a622688 Catalog2Catalog ",
+            "section 64ecb66ae251 Use from your ag",
           ],
         },
       }
@@ -295,8 +285,8 @@ describe('R10a pre-extraction pinning', () => {
     const view = mount();
     await screen.findByText('Catalog fixture');
     fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'Catalog' } });
-    fireEvent.click(within(catalogCard()).getByRole('button', { name: '続きを読む' }));
-    fireEvent.click(within(catalogCard()).getByRole('button', { name: 'コピー' }));
+    fireEvent.click(within(catalogCard()).getByRole('button', { name: '詳しく' }));
+    fireEvent.click(within(catalogCard()).getByRole('button', { name: COPY_CATALOG }));
     auth.connected = true;
     auth.address = ADDRESS_A;
     view.refresh();
@@ -313,12 +303,12 @@ describe('R10a pre-extraction pinning', () => {
     await act(async () => clipboard.resolve());
     expect(screen.getByRole('searchbox')).toHaveValue('Catalog');
     expect(within(catalogCard()).getByRole('button', { name: '閉じる' })).toHaveAttribute('aria-expanded', 'true');
-    expect(within(catalogCard()).getByRole('button', { name: 'コピーしました' })).toBeInTheDocument();
+    expect(within(catalogCard()).getByRole('button', { name: COPIED_CATALOG })).toBeInTheDocument();
     expect(within(catalogCard()).getByText('利用条件: Catalog license')).toBeInTheDocument();
     // コピー済み表示は owner カードと公開カタログで 1 つを共有する (別カードのコピーで前の表示が消える)。
     vi.mocked(navigator.clipboard.writeText).mockResolvedValue();
-    fireEvent.click(within(screen.getByText('Owned fixture').closest('li')!).getByLabelText('コピー'));
-    await waitFor(() => expect(within(catalogCard()).getByRole('button', { name: 'コピー' })).toBeInTheDocument());
+    fireEvent.click(within(screen.getByText('Owned fixture').closest('li')!).getByRole('button', { name: /^コピー example\.com\/owned/ }));
+    await waitFor(() => expect(within(catalogCard()).getByRole('button', { name: COPY_CATALOG })).toBeInTheDocument());
     auth.signedIn = false;
     view.refresh();
     expect(screen.queryByText('Owned fixture')).not.toBeInTheDocument();
@@ -337,7 +327,7 @@ describe('R10a pre-extraction pinning', () => {
     await screen.findByPlaceholderText(URL_PLACEHOLDER);
     fireEvent.click(await screen.findByRole('button', { name: '編集' }));
     fireEvent.change(screen.getByPlaceholderText(URL_PLACEHOLDER), { target: { value: 'https://example.com/draft' } });
-    fireEvent.click(within(screen.getByText('Owned fixture').closest('li')!).getByRole('button', { name: '続きを読む' }));
+    fireEvent.click(within(screen.getByText('Owned fixture').closest('li')!).getByRole('button', { name: '詳しく' }));
     if (transition === 'wallet switch') {
       owner(ADDRESS_B);
       view.refresh();
@@ -431,7 +421,8 @@ describe('R10a pre-extraction pinning', () => {
     ]));
     expect(view.qc.getQueryState(['x402', 'owned', ADDRESS_A])?.isInvalidated).toBe(true);
     expect(screen.queryByText('Catalog fixture')).not.toBeInTheDocument();
-    expect(view.container.querySelectorAll('.animate-pulse')).toHaveLength(2);
+    // 再取得中はカードの形の骨組み (4 枚・各 1 つのアイコン枠 = rounded-xl の pulse)。
+    expect(view.container.querySelectorAll('.animate-pulse.rounded-xl')).toHaveLength(4);
     await act(async () => {
       pendingCatalog.resolve(reply({ items: [{ ...ITEM, title: 'Refetched catalog' }] }));
       pendingOwned.resolve(reply({ resources: [OWNED] }));
@@ -481,8 +472,8 @@ describe('R10a pre-extraction pinning', () => {
     fireEvent.click(screen.getByRole('button', { name: /^USDC\s*3$/ }));
     dom.usdcFilter = hashDom(view.container);
     fireEvent.click(screen.getByRole('button', { name: /^すべて\s*\d+$/ }));
-    fireEvent.click(screen.getByRole('button', { name: /^mcp\s*3$/ }));
-    dom.category = hashDom(view.container);
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'Extra item' } });
+    dom.search = hashDom(view.container);
     fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'zzz-no-match' } });
     dom.noResults = hashDom(view.container);
     fireEvent.change(screen.getByRole('searchbox'), { target: { value: '' } });
@@ -515,170 +506,159 @@ describe('R10a pre-extraction pinning', () => {
     expect(dom).toMatchInlineSnapshot(`
       {
         "catalog": {
-          "all": "8cd2cf03f6a51783581a63f845522fba63b79c728a4e6a14901b1de3afad0048",
+          "all": "4e3d89081ccb762e46cf07ac309859c2b5d2a449fb353a1262086ce4d386f528",
           "parts": [
             "h2 3282793f6040 Featured fixture",
-            "section 9ad10c8006d7 カタログ発見: /api/dis",
-            "section 4aebca8732f0 API を出品する402 ゲート",
-            "section c44df4912dbc 2円で試す1 JPYC + 手数",
-            "section 3f23d608d1c7 エージェントから払う (MCP)",
-          ],
-        },
-        "category": {
-          "all": "af5dbc3b7f3a85130a758c6319bc81857e5a3d9f14a558f602a098810d0c3761",
-          "parts": [
-            "h2 3282793f6040 Featured fixture",
-            "section 08658fa17ca5 カタログ発見: /api/dis",
-            "section 4aebca8732f0 API を出品する402 ゲート",
-            "section c44df4912dbc 2円で試す1 JPYC + 手数",
-            "section 3f23d608d1c7 エージェントから払う (MCP)",
+            "section 07d74d825448 カタログ11カタログ検索すべて1",
+            "section cc86360b7152 エージェントから使う発見: /a",
+            "section 894a12bf6e73 API を出品する402 ゲート",
           ],
         },
         "confirmDelete": {
-          "all": "acb0392a3ef7b8a2461c28631e2cd693d004d30c86778ec8fa9af13052890b7c",
+          "all": "6ced0c2e2ac415165407907881aaf7c1a897538502eda354290ed228a7975fe4",
           "parts": [
-            "section 0110dfa05888 あなたの登録登録済みの掲載を編集",
-            "section e76ad6df9773 新しい API を出品する402",
-            "h2 3282793f6040 Featured fixture",
-            "section 08658fa17ca5 カタログ発見: /api/dis",
-            "section c44df4912dbc 2円で試す1 JPYC + 手数",
-            "section 3f23d608d1c7 エージェントから払う (MCP)",
+            "section 830bfebf3f3b あなたの登録公開中 1Regis",
+            "section 27cdc7002246 新しい API を出品する402",
+            "section 69ed89eb4b80 カタログ11カタログ検索すべて1",
+            "section cc86360b7152 エージェントから使う発見: /a",
           ],
         },
         "created": {
-          "all": "0a404f866d82c4af6ad575bf001fd6db60406d1eb8a2043ce985f0ef73cabbee",
+          "all": "66cc247c7432e801c31dd14063eaac983be698ba5a61bf64cf01324c2a47cea8",
           "parts": [
-            "section 0f61c4f24311 あなたの登録登録済みの掲載を編集",
-            "section e76ad6df9773 新しい API を出品する402",
-            "h2 3282793f6040 Featured fixture",
-            "section 08658fa17ca5 カタログ発見: /api/dis",
-            "section c44df4912dbc 2円で試す1 JPYC + 手数",
-            "section 3f23d608d1c7 エージェントから払う (MCP)",
+            "section 16a9d57db594 あなたの登録公開中 1Regis",
+            "section 27cdc7002246 新しい API を出品する402",
+            "section 69ed89eb4b80 カタログ11カタログ検索すべて1",
+            "section cc86360b7152 エージェントから使う発見: /a",
           ],
         },
         "gateError": {
-          "all": "93609d016d05d938e5ef0d0682a85126b5cf77f49163ec79c67f390a27db5efe",
+          "all": "e31047fdb7e24de93bfba59ffd2a204ab58eaddf54ca7f03bd71dc9b63860c16",
           "parts": [
-            "section cb291401f2b5 API を出品する402 ゲート",
-            "h2 3282793f6040 Featured fixture",
-            "section 08658fa17ca5 カタログ発見: /api/dis",
-            "section c44df4912dbc 2円で試す1 JPYC + 手数",
-            "section 3f23d608d1c7 エージェントから払う (MCP)",
+            "section 3099eab39508 API を出品する402 ゲート",
+            "section 69ed89eb4b80 カタログ11カタログ検索すべて1",
+            "section cc86360b7152 エージェントから使う発見: /a",
           ],
         },
         "gateErrorCopied": {
-          "all": "97c1ffce3be7d937e4c3883a9cc380cc9f1219089987dc9755c19b2aa0797016",
+          "all": "2e46d239df6098d5e5db7d3b7145cb827aca4dc188c0ba3409000cf69c0b1c6d",
           "parts": [
-            "section b29ea16962cc API を出品する402 ゲート",
-            "h2 3282793f6040 Featured fixture",
-            "section 08658fa17ca5 カタログ発見: /api/dis",
-            "section c44df4912dbc 2円で試す1 JPYC + 手数",
-            "section 3f23d608d1c7 エージェントから払う (MCP)",
+            "section ef6f93fdf35e API を出品する402 ゲート",
+            "section 69ed89eb4b80 カタログ11カタログ検索すべて1",
+            "section cc86360b7152 エージェントから使う発見: /a",
           ],
         },
         "noResults": {
-          "all": "386483db6aac02602a3e4c6d55d3a029aa0b3b9b268bd8f36743f2bfeda7e034",
+          "all": "a71b3b222eb802a168070351ff6dcdc9304e4232347234b50453c0bce4ead37d",
           "parts": [
             "h2 3282793f6040 Featured fixture",
-            "section 791a15eb8f7b カタログ発見: /api/dis",
-            "section 4aebca8732f0 API を出品する402 ゲート",
-            "section c44df4912dbc 2円で試す1 JPYC + 手数",
-            "section 3f23d608d1c7 エージェントから払う (MCP)",
+            "section e04054ebff25 カタログ11カタログ検索すべて1",
+            "section cc86360b7152 エージェントから使う発見: /a",
+            "section 894a12bf6e73 API を出品する402 ゲート",
           ],
         },
         "ownerEmpty": {
-          "all": "8c36e16a3caf10a446279fcd0f9b311310fead21d13729ccb9b609313c65e58a",
+          "all": "0532d77897210b6e4e349de9c448626c607cf32a181072290f40888a3219204e",
           "parts": [
-            "section bc7b5f8f84c3 API を出品する402 ゲート",
+            "section eb205b1b9c3a API を出品する402 ゲート",
+            "section 69ed89eb4b80 カタログ11カタログ検索すべて1",
+            "section cc86360b7152 エージェントから使う発見: /a",
+          ],
+        },
+        "search": {
+          "all": "a38eafaca7f90418164fa6bbfafb887893254e3ef501be1888c725967618e440",
+          "parts": [
             "h2 3282793f6040 Featured fixture",
-            "section 08658fa17ca5 カタログ発見: /api/dis",
-            "section c44df4912dbc 2円で試す1 JPYC + 手数",
-            "section 3f23d608d1c7 エージェントから払う (MCP)",
+            "section cad602e1932d カタログ11カタログ検索すべて1",
+            "section cc86360b7152 エージェントから使う発見: /a",
+            "section 894a12bf6e73 API を出品する402 ゲート",
           ],
         },
         "shownMore": {
-          "all": "0db515e6fc72d5f8c197b91e286159f96d7505a8a5601e69e6f22c988a454f8e",
+          "all": "7cf0be7d8eb1a590f89ffc11c14eed8be949acbe85f0cffe53f4bb5ff6b4423f",
           "parts": [
             "h2 3282793f6040 Featured fixture",
-            "section 4a0bb42f32b0 カタログ発見: /api/dis",
-            "section 4aebca8732f0 API を出品する402 ゲート",
-            "section c44df4912dbc 2円で試す1 JPYC + 手数",
-            "section 3f23d608d1c7 エージェントから払う (MCP)",
+            "section 69ed89eb4b80 カタログ11カタログ検索すべて1",
+            "section cc86360b7152 エージェントから使う発見: /a",
+            "section 894a12bf6e73 API を出品する402 ゲート",
           ],
         },
         "snippetOpen": {
-          "all": "8333202355c48b449b603f5d137da9d610f9340e014f37c6969aa9e7c0cd5541",
+          "all": "6e0cd2a3194c7375396f384c214cd767239831155ca07f8ae83ed31e35c88cf9",
           "parts": [
-            "section 3382428b4640 あなたの登録登録済みの掲載を編集",
-            "section e76ad6df9773 新しい API を出品する402",
-            "h2 3282793f6040 Featured fixture",
-            "section 08658fa17ca5 カタログ発見: /api/dis",
-            "section c44df4912dbc 2円で試す1 JPYC + 手数",
-            "section 3f23d608d1c7 エージェントから払う (MCP)",
+            "section b5e37fa7a587 あなたの登録公開中 1Regis",
+            "section 27cdc7002246 新しい API を出品する402",
+            "section 69ed89eb4b80 カタログ11カタログ検索すべて1",
+            "section cc86360b7152 エージェントから使う発見: /a",
           ],
         },
         "usdcFilter": {
-          "all": "e41c608f3b64690065f79d354fbb79eeda5a7a3650a918f9068da85e8d0748c0",
+          "all": "cdd6118a1ec832ec41737a645d727dc7b3ffb75e22d0b07bf0f38e0f535d882f",
           "parts": [
             "h2 3282793f6040 Featured fixture",
-            "section 3893e6bac7f7 カタログ発見: /api/dis",
-            "section 4aebca8732f0 API を出品する402 ゲート",
-            "section c44df4912dbc 2円で試す1 JPYC + 手数",
-            "section 3f23d608d1c7 エージェントから払う (MCP)",
+            "section fcd29d747081 カタログ11カタログ検索すべて1",
+            "section cc86360b7152 エージェントから使う発見: /a",
+            "section 894a12bf6e73 API を出品する402 ゲート",
           ],
         },
       }
     `);
   });
 
-  // 並び替えは型の異なる要素を同じ位置に置くので、サインイン/サインアウトのたびに featured・公開カタログ・
-  // 出品フォームの節は作り直され、非制御の <details> 開閉と focus を失う。末尾の「試す」「MCP」の節は位置が
-  // 変わらないので同じ node のまま開閉を保つ。分割前 (origin/main) の挙動をそのまま固定する (良し悪しの判断
-  // ではない): panel に key を足す・並べ方や要素の型を変えると落ちる。
+  // 並び替えは型の異なる要素を同じ位置に置くので、サインイン/サインアウトのたびに featured (閲覧者のみ)・公開カタログ・
+  // 出品フォームの節は作り直され、非制御の <details> 開閉と focus を失う。「エージェントから使う」節 (DiscoveryExamples) は
+  // 閲覧者・出品者どちらの並びでも同じ位置 (2 番目の子) なので同じ node のまま、中の「試す」「MCP」の開閉も保つ。
+  // 2026-10-21: 出品フォームの節は閲覧者では末尾 (#sell)・出品者ではカタログの前に動く。購入ガードは常時 1 行になり
+  // <details> ではなくなった (中身は MCP の節の中)。現在の挙動を固定する: panel に key を足す・並べ方や要素の型を変えると落ちる。
   it('pins which sections remount (losing uncontrolled <details> state and focus) at sign-in and sign-out', async () => {
     const view = mount();
     await screen.findByText('Catalog fixture');
     const nodes = () => ({
-      featured: screen.getByText('Featured fixture'),
+      featured: screen.queryByText('Featured fixture'),
       catalog: screen.getByRole('searchbox').closest('section')!,
       registration: registrationSection(),
-      guards: detailsOf('購入ガード'),
       search: screen.getByRole('searchbox'),
+      agent: document.getElementById('agent')!,
       tryIt: detailsOf('2円で試す'),
-      mcp: detailsOf('エージェントから払う (MCP)'),
+      mcp: detailsOf('MCP で使う'),
     });
     type Nodes = ReturnType<typeof nodes>;
     const openAndFocus = (n: Nodes) => {
-      n.guards.open = true;
       n.tryIt.open = true;
       n.mcp.open = true;
       n.search.focus();
       expect(document.activeElement).toBe(n.search);
     };
     const expectRemountedAround = (before: Nodes, after: Nodes) => {
-      for (const key of ['featured', 'catalog', 'registration', 'guards', 'search'] as const) {
+      for (const key of ['catalog', 'registration', 'search'] as const) {
         expect(after[key], key).not.toBe(before[key]);
         expect(before[key].isConnected, key).toBe(false);
       }
-      expect(after.guards.open).toBe(false);
+      // 注目バナーは閲覧者にだけある: あった側の node は外れる。
+      if (before.featured) expect(before.featured.isConnected).toBe(false);
       expect(document.activeElement).toBe(document.body);
+      expect(after.agent).toBe(before.agent);
       expect(after.tryIt).toBe(before.tryIt);
       expect(after.mcp).toBe(before.mcp);
       expect(after.tryIt.open).toBe(true);
       expect(after.mcp.open).toBe(true);
     };
     const signedOut = nodes();
+    expect(signedOut.featured).not.toBeNull();
     openAndFocus(signedOut);
     owner();
     view.refresh();
     await ownerReady();
     const signedIn = nodes();
+    expect(signedIn.featured).toBeNull();
     expectRemountedAround(signedOut, signedIn);
     openAndFocus(signedIn);
     auth.signedIn = false;
     view.refresh();
     expect(screen.queryByText('Owned fixture')).not.toBeInTheDocument();
-    expectRemountedAround(signedIn, nodes());
+    const signedOutAgain = nodes();
+    expect(signedOutAgain.featured).not.toBeNull();
+    expectRemountedAround(signedIn, signedOutAgain);
   });
 
   // owned が 0 → 1 件になると出品フォームは <details> に畳まれ、中身 (入力欄) は作り直される (節自体は残る)。
@@ -708,16 +688,16 @@ describe('R10a pre-extraction pinning', () => {
     mount();
     await screen.findByText('Catalog fixture');
     const tryIt = detailsOf('2円で試す');
-    const mcp = detailsOf('エージェントから払う (MCP)');
+    const mcp = detailsOf('MCP で使う');
     fireEvent.click(within(mcp).getByRole('button', { name: 'コピー' }));
     await within(mcp).findByRole('button', { name: 'コピーしました' });
-    expect(within(catalogCard()).getByRole('button', { name: 'コピー' })).toBeInTheDocument();
-    fireEvent.click(within(catalogCard()).getByRole('button', { name: 'コピー' }));
-    await within(catalogCard()).findByRole('button', { name: 'コピーしました' });
+    expect(within(catalogCard()).getByRole('button', { name: COPY_CATALOG })).toBeInTheDocument();
+    fireEvent.click(within(catalogCard()).getByRole('button', { name: COPY_CATALOG }));
+    await within(catalogCard()).findByRole('button', { name: COPIED_CATALOG });
     expect(within(mcp).getByRole('button', { name: 'コピー' })).toBeInTheDocument();
     fireEvent.click(within(tryIt).getAllByRole('button', { name: 'コピー' })[0]);
     await within(tryIt).findByRole('button', { name: 'コピーしました' });
-    expect(within(catalogCard()).getByRole('button', { name: 'コピー' })).toBeInTheDocument();
+    expect(within(catalogCard()).getByRole('button', { name: COPY_CATALOG })).toBeInTheDocument();
     expect(within(mcp).getByRole('button', { name: 'コピー' })).toBeInTheDocument();
     expect(vi.mocked(navigator.clipboard.writeText).mock.calls.map(([text]) => text.split('\n')[0])).toEqual([
       '{', 'https://example.com/api/paid/fixture', 'curl -i https://open-pay.jp/api/paid/demo',
@@ -744,13 +724,12 @@ describe('R10a pre-extraction pinning', () => {
     expect(screen.getByText('まだ登録されたリソースはありません。')).toBeInTheDocument();
     expect(hashDom(view.container)).toMatchInlineSnapshot(`
       {
-        "all": "f17b298c7cd907e6c4292f78c3fd4c92b11b8e9511f95cc8a876ff278f1fca89",
+        "all": "d2de6b1f4b856d05ddd76d1e2a5301c15dcd1d6d6c4ae4d171eb296211765cf1",
         "parts": [
           "h2 3282793f6040 Featured fixture",
-          "section 2ced173074d3 カタログ発見: /api/dis",
-          "section 4aebca8732f0 API を出品する402 ゲート",
-          "section c44df4912dbc 2円で試す1 JPYC + 手数",
-          "section 3f23d608d1c7 エージェントから払う (MCP)",
+          "section bc24fd3f229f カタログまだ登録されたリソースは",
+          "section de335d52f1a0 エージェントから使う発見: /a",
+          "section 894a12bf6e73 API を出品する402 ゲート",
         ],
       }
     `);
