@@ -3787,12 +3787,16 @@ describe('A2c saved-order-only notification', () => {
     sessionStorage.setItem('openpay:order-memo:fixed', 'before signing');
     const { unmount } = render(<CheckoutForm params={{ ...JPYC_PARAMS, orderId: 'fixed', webhook: `${location.origin}/api/order/notify?h=alice` }} />);
     await user.click(screen.getByRole('button', { name: /を支払う/ }));
+    // 署名までに注文の束縛 (lib/orderBind) を非同期で読む。並列実行の負荷で遅れても落ちないよう、呼ばれるまで待つ。
+    await waitFor(() => expect(relayMutate).toHaveBeenCalledOnce());
     const order = relayMutate.mock.calls[0][0].order;
     expect(order).toMatchObject({ orderId: 'fixed', customerMemo: 'before signing', handle: 'alice' });
     expect(isOrderTokenLike(order.statusToken)).toBe(true);
     unmount(); setupRelayReady(); relayMutate.mockClear();
     render(<CheckoutForm params={{ ...JPYC_PARAMS, webhook: 'https://third.example/api/order/notify?h=alice' }} />);
     await user.click(screen.getByRole('button', { name: /を支払う/ }));
+    // 署名までに注文の束縛 (lib/orderBind) を非同期で読む。並列実行の負荷で遅れても落ちないよう、呼ばれるまで待つ。
+    await waitFor(() => expect(relayMutate).toHaveBeenCalledOnce());
     expect(relayMutate.mock.calls[0][0].order).toBeUndefined();
   });
   it('lazy binding chunk loading cannot turn repeated submit clicks into two payments', async () => {
@@ -3892,6 +3896,8 @@ describe('A2c saved-order-only notification', () => {
     const user = userEvent.setup(); setupRelayReady(); feeFlags.enableOrderPickup = false;
     render(<CheckoutForm params={{ ...JPYC_PARAMS, webhook: `${location.origin}/api/order/notify?h=alice` }} />);
     await user.click(screen.getByRole('button', { name: /を支払う/ }));
+    // 署名までに注文の束縛 (lib/orderBind) を非同期で読む。並列実行の負荷で遅れても落ちないよう、呼ばれるまで待つ。
+    await waitFor(() => expect(relayMutate).toHaveBeenCalledOnce());
     expect(relayMutate.mock.calls[0][0].order.statusToken).toBe('');
   });
   it('lost acknowledgement retains the opening; manual notification retry sends identical bytes and clears only on ok:true', async () => {
