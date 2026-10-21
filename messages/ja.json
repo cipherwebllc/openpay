@@ -3157,7 +3157,7 @@
     "pillJpyc": "JPYC · Polygon",
     "pillUsdc": "USDC · Base",
     "pillUsdcArc": "USDC · Base / Arc",
-    "jumpUse": "AI から使う",
+    "jumpUse": "エージェントから使う",
     "jumpSell": "API を出品する",
     "monitorFreshness": "週次更新・最新 {date}・{count} 件",
     "registerTitle": "API を出品する",

@@ -3157,7 +3157,7 @@
     "pillJpyc": "JPYC · Polygon",
     "pillUsdc": "USDC · Base",
     "pillUsdcArc": "USDC · Base / Arc",
-    "jumpUse": "Use from AI",
+    "jumpUse": "Use from your agent",
     "jumpSell": "Sell your API",
     "monitorFreshness": "Updated weekly · latest {date} · {count} events",
     "registerTitle": "List your API",

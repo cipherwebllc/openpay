@@ -199,7 +199,7 @@ export function DiscoveryCatalogPanel({
         <h3 className="flex items-baseline gap-2 text-base font-bold text-slate-900">
           {t('catalogTitle')}
           {!loading && entries.length > 0 && (
-            <span className="text-sm font-semibold tabular-nums text-slate-400">{entries.length}</span>
+            <span className="text-sm font-semibold tabular-nums text-slate-500">{entries.length}</span>
           )}
         </h3>
         {!loading && entries.length > 0 && (
@@ -239,11 +239,12 @@ export function DiscoveryCatalogPanel({
                       className={`inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-semibold transition ${
                         active
                           ? 'bg-white text-slate-900 shadow-sm ring-1 ring-slate-200'
-                          : 'text-slate-500 hover:text-slate-800'
+                          : 'text-slate-600 hover:text-slate-900'
                       }`}
                     >
                       {label}
-                      <span className={`text-xs tabular-nums ${active ? 'text-slate-400' : 'text-slate-400/80'}`}>
+                      {/* 件数は文字の太さで控えめにし、色は AA (4.5:1) を保つ (slate-500 は slate-100 の上で不足)。 */}
+                      <span className={`text-xs font-normal tabular-nums ${active ? 'text-slate-500' : 'text-slate-600'}`}>
                         {count}
                       </span>
                     </button>

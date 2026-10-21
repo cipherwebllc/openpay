@@ -175,7 +175,7 @@ describe('/discovery directory featured card', () => {
     });
     render(ui);
 
-    expect(screen.getByRole('link', { name: /AI から使う/ })).toHaveAttribute('href', '#agent');
+    expect(screen.getByRole('link', { name: /エージェントから使う/ })).toHaveAttribute('href', '#agent');
     expect(screen.getByRole('link', { name: /API を出品する/ })).toHaveAttribute('href', '#sell');
     expect(screen.getByText('JPYC · Polygon')).toBeInTheDocument();
     expect(screen.getByText(/^USDC · Base/)).toBeInTheDocument();
