@@ -30,6 +30,11 @@ function arcGas(atomic: bigint): string {
   return formatUnits(micro, 6);
 }
 
+/** 足りない額は 6 桁で切り上げる (切り捨てると、その額を入れてもまだ足りない)。 */
+function arcGasCeil(atomic: bigint): string {
+  return formatUnits((atomic + 10n ** 12n - 1n) / 10n ** 12n, 6);
+}
+
 function Row({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-baseline justify-between gap-3 py-1.5">
@@ -39,8 +44,17 @@ function Row({ label, value }: { label: string; value: string }) {
   );
 }
 
-function failureMessage(t: ReturnType<typeof useTranslations<'ArcPayout'>>, failure: ArcPayoutFailure, canContinue: boolean): string {
+function failureMessage(
+  t: ReturnType<typeof useTranslations<'ArcPayout'>>,
+  failure: ArcPayoutFailure,
+  canContinue: boolean,
+  gasNow: bigint | undefined,
+): string {
   switch (failure.code) {
+    case 'insufficient_gas':
+      return failure.balance !== undefined && failure.shortfall !== undefined
+        ? t('errorGasShort', { balance: arcGas(failure.balance), shortfall: arcGasCeil(failure.shortfall) })
+        : t('errorGasShortUnknown', { balance: gasNow === undefined ? '—' : arcGas(gasNow) });
     case 'account_changed':
     case 'mint_not_completed':
       return t('errorMintNotSent');
@@ -143,7 +157,7 @@ export function ArcPayoutPanel() {
 
       {flow.phase === 'failed' && (
         <p role="alert" className="mt-4 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-900 ring-1 ring-rose-200">
-          {failureMessage(t, flow.failure, !!pending)}
+          {failureMessage(t, flow.failure, !!pending, data?.gas)}
         </p>
       )}
 

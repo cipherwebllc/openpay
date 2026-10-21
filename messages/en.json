@@ -3146,6 +3146,8 @@
     "errorCircleRejected": "Circle did not accept the withdrawal (HTTP {status}). The balance is unchanged.",
     "errorCircleUnknown": "No response was received from Circle. Even if it was accepted, the amount returns to the balance in about 10 minutes. Wait a moment and reload.",
     "errorMintNotSent": "The receiving transaction has not completed. Within 10 minutes of signing you can send it again (after that it is cancelled and the amount returns to the balance).",
+    "errorGasShort": "This wallet does not have enough USDC on Arc to pay the network fee for the receiving transaction (it has {balance} USDC; add at least {shortfall} USDC more). Add it, then press \"Send the receiving transaction again\" within 10 minutes of signing (after that it is cancelled and the amount returns to the balance).",
+    "errorGasShortUnknown": "This wallet does not have enough USDC on Arc to pay the network fee for the receiving transaction (it has {balance} USDC; one transaction takes about 0.003–0.005 USDC). Add it, then press \"Send the receiving transaction again\" within 10 minutes of signing (after that it is cancelled and the amount returns to the balance).",
     "errorExpired": "More than 10 minutes passed since signing, so the withdrawal was cancelled. The amount returns to the balance shortly.",
     "errorFailed": "The withdrawal did not complete. The balance is unchanged or returns in about 10 minutes. Wait a moment and reload.",
     "switchBack": "A withdrawal from {address} still has a receiving transaction to finish. Only that account can send it — switch back to it in your wallet (after 10 minutes from signing it is cancelled and the amount returns to the balance).",
