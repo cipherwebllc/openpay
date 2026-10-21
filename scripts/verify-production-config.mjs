@@ -10,16 +10,15 @@
 
 import { spawnSync } from 'node:child_process';
 import {
-  assessNodeRuntime,
   assessPimlicoRun,
   assessReceiptSigner,
   assessReverifyRun,
+  checkNodeRuntime,
   latestCompletedRun,
   summarizeChecks,
 } from './verify-production-config-helpers.mjs';
 
 const BASE = process.argv[2] ?? 'https://open-pay.jp';
-const NODE_RUNTIME_TIMEOUT_MS = 10_000;
 
 const checks = [];
 // severity 'warn' の扱いは summarizeChecks (失敗しても exit 1 にせず ::warning:: だけ出す)。
@@ -105,31 +104,8 @@ for (const [name, path] of [
 //   Vercel は Node の patch を自動で配るが、届いたかは外から見えない → CRON_SECRET で守った /api/cron/runtime で読む。
 //   配布待ちは operator が直せないので warn (exit 1 にしない)。公開ログなので正確な版は出さない (assessNodeRuntime)。
 {
-  const name = 'Production Node runtime (security minimum)';
-  const secret = process.env.CRON_SECRET;
-  if (!secret) {
-    record(name, false, 'CRON_SECRET 未設定 — 確認できない', { severity: 'warn' });
-  } else {
-    let assessment;
-    // 通信の失敗で script ごと落ちる・応答が止まって job の 10 分を使い切ると、warn の check が全体を赤にするので、
-    // この check の中で止める (期限は本文の読み取りまで効く)。
-    try {
-      const r = await fetch(`${BASE}/api/cron/runtime`, {
-        headers: { authorization: `Bearer ${secret}` },
-        signal: AbortSignal.timeout(NODE_RUNTIME_TIMEOUT_MS),
-      });
-      let body = null;
-      try {
-        body = await r.json();
-      } catch {
-        body = null;
-      }
-      assessment = assessNodeRuntime(r.status, body);
-    } catch {
-      assessment = { ok: false, detail: '/api/cron/runtime に接続できない' };
-    }
-    record(name, assessment.ok, assessment.detail, { severity: 'warn' });
-  }
+  const assessment = await checkNodeRuntime(BASE, process.env.CRON_SECRET);
+  record('Production Node runtime (security minimum)', assessment.ok, assessment.detail, { severity: 'warn' });
 }
 
 // --- (5) GH Actions Pimlico balance cron が actual check 実行か (skip でないか) ---

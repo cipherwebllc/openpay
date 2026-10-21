@@ -27,10 +27,19 @@ export function assessPimlicoRun(log: string): { ok: boolean; detail: string };
 export function assessReceiptSigner(status: number, body: unknown): { ok: boolean; detail: string };
 
 /** Node の 2026-10 のセキュリティ修正が入った最小の版 (major → [major, minor, patch])。 */
-export const NODE_RUNTIME_MINIMUM: Record<number, [number, number, number]>;
+export const NODE_RUNTIME_MINIMUM: Partial<Record<number, [number, number, number]>>;
 
 /** 本番の関数の Node の版がセキュリティ修正の入った版以上か (detail に正確な版は書かない)。 */
 export function assessNodeRuntime(status: number, body: unknown): { ok: boolean; detail: string };
+
+export const NODE_RUNTIME_TIMEOUT_MS: number;
+
+/** /api/cron/runtime を CRON_SECRET で読んで判定する (通信の失敗・停止は固定の文言で NG・例外の中身は出さない)。 */
+export function checkNodeRuntime(
+  base: string,
+  secret: string | undefined,
+  options?: { fetchImpl?: typeof fetch; timeoutMs?: number },
+): Promise<{ ok: boolean; detail: string }>;
 
 export type ProductionCheck = { name: string; ok: boolean; detail: string; severity?: 'error' | 'warn' };
 

@@ -1,9 +1,12 @@
-import { describe, expect, it } from 'vitest';
+import { createServer, type Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   assessNodeRuntime,
   assessPimlicoRun,
   assessReceiptSigner,
   assessReverifyRun,
+  checkNodeRuntime,
   latestCompletedRun,
   NODE_RUNTIME_MINIMUM,
   REVERIFY_MAX_AGE_MS,
@@ -175,5 +178,67 @@ describe('summarizeChecks', () => {
     const { lines, exitCode } = summarizeChecks([ok, runtimeNg, configNg]);
     expect(exitCode).toBe(1);
     expect(lines.at(-1)).toBe('⚠ 1/3 件 inactive — 上記詳細を確認');
+  });
+});
+
+describe('checkNodeRuntime', () => {
+  const SECRET = 'cron-secret-value';
+  let server: Server | undefined;
+
+  afterEach(async () => {
+    server?.closeAllConnections();
+    await new Promise((resolve) => server ? server.close(resolve) : resolve(undefined));
+    server = undefined;
+  });
+
+  // 実際の fetch で期限を確かめるため、手元に止まるサーバを立てる (応答の頭の前か、本文の途中で止める)。
+  async function stallingServer(stage: 'headers' | 'body'): Promise<string> {
+    server = createServer((_req, res) => {
+      if (stage === 'body') {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.write('{"node":"v24.2');
+      }
+    });
+    await new Promise<void>((resolve) => server!.listen(0, '127.0.0.1', resolve));
+    return `http://127.0.0.1:${(server!.address() as AddressInfo).port}`;
+  }
+
+  it('CRON_SECRET が無ければ通信せずに NG', async () => {
+    const fetchImpl = vi.fn();
+    expect(await checkNodeRuntime('https://open-pay.jp', undefined, { fetchImpl })).toEqual({
+      ok: false,
+      detail: 'CRON_SECRET 未設定 — 確認できない',
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('Bearer で /api/cron/runtime を読み、版を判定する', async () => {
+    const fetchImpl = vi.fn(async () => Response.json({ node: 'v24.22.1' }));
+    expect(await checkNodeRuntime('https://open-pay.jp', SECRET, { fetchImpl })).toEqual({
+      ok: true,
+      detail: expect.stringContaining('major 24'),
+    });
+    expect(fetchImpl).toHaveBeenCalledWith('https://open-pay.jp/api/cron/runtime', expect.objectContaining({
+      headers: { authorization: `Bearer ${SECRET}` },
+      signal: expect.any(AbortSignal),
+    }));
+  });
+
+  it('通信の例外は固定の文言にし、例外の中身 (秘密・版) を出さない', async () => {
+    const fetchImpl = vi.fn(async () => {
+      throw new Error(`connect failed Bearer ${SECRET} v24.22.0`);
+    });
+    const { ok, detail } = await checkNodeRuntime('https://open-pay.jp', SECRET, { fetchImpl });
+    expect(ok).toBe(false);
+    expect(detail).toBe('/api/cron/runtime に接続できない');
+  });
+
+  it.each([['headers' as const], ['body' as const]])('応答が止まっても (%s) 期限で NG にして先へ進む', async (stage) => {
+    const base = await stallingServer(stage);
+    const started = Date.now();
+    const { ok, detail } = await checkNodeRuntime(base, SECRET, { timeoutMs: 100 });
+    expect(ok).toBe(false);
+    expect(detail).not.toMatch(/\d+\.\d+\.\d+/);
+    expect(Date.now() - started).toBeLessThan(5_000);
   });
 });

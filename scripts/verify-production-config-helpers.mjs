@@ -107,6 +107,32 @@ export function assessNodeRuntime(status, body) {
     : { ok: false, detail: `major ${major}: セキュリティ修正の入った版より古い (Vercel の配布待ち)` };
 }
 
+export const NODE_RUNTIME_TIMEOUT_MS = 10_000;
+
+/**
+ * /api/cron/runtime を CRON_SECRET で読み、assessNodeRuntime で判定する。
+ * 通信の失敗で script ごと落ちる・応答が止まって job の 10 分を使い切ると、warn の check が全体を赤にするので、
+ * ここで止めて固定の文言を返す (例外の中身は公開ログに出さない)。期限は本文の読み取りまで効く。
+ */
+export async function checkNodeRuntime(base, secret, { fetchImpl = fetch, timeoutMs = NODE_RUNTIME_TIMEOUT_MS } = {}) {
+  if (!secret) return { ok: false, detail: 'CRON_SECRET 未設定 — 確認できない' };
+  try {
+    const r = await fetchImpl(`${base}/api/cron/runtime`, {
+      headers: { authorization: `Bearer ${secret}` },
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    let body = null;
+    try {
+      body = await r.json();
+    } catch {
+      body = null;
+    }
+    return assessNodeRuntime(r.status, body);
+  } catch {
+    return { ok: false, detail: '/api/cron/runtime に接続できない' };
+  }
+}
+
 /**
  * 検査の結果を、出力する行と exit code にまとめる。
  * severity 'warn' の失敗は ::warning:: を出すだけで exit 1 にしない。operator が直せない待ち (Vercel の配布待ち等)
