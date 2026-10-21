@@ -94,37 +94,38 @@ const PROFILES: Profile[] = [
 // 再採取 (差分は 200 応答の schema/example への slug の追加と、x-agent-usage の dedupe キーの説明だけ)。
 // 続けて x-agent-usage に slug が付く前に保存したイベントの照合手順を足したので再採取 (差分は Payment Monitor の x-agent-usage 2 本だけ)。
 // さらに provider をイベントごとに固定したので、USDC 版の x-agent-usage の「改名で変わる」を直して再採取 (差分はその 1 文だけ)。
+// USDC 版の 1 件 (/api/paid/usdc/japan-web3-directory/{slug}・2026-10-21) の operation を足したので、directory を含む構成を再採取。
 const EXPECTED_SHA256: Record<string, string> = {
   'all-on':
-    'ec131172dd862e8377c83820ce550f5d65c273a60fd4af5e6d5344daedfc3252',
+    '74bc48246d5c1298bf73bd70d79825f35a758fc03c0b201896b6eaea62443842',
   'all-on+arc':
-    'ad046ac30f673c0eb358d9d840933d8bb5255327a78981a706534550688cc874',
+    '26059a0be162ef5c8a73d9a454ec68f222fa62fdb82a66bb2f9598593c71fa6c',
   'all-on+mainnet':
-    '6d847a8c4fc7107b16cdaf78128d44d45c1e5edf3c7fd600332302a8447fd9fb',
+    '902d2699b74713e05e61c03613e0186345aa3379a0566af631ed331ba75fc9ad',
   'all-on+mainnet+avalanche+ethereum':
-    'fd9a2072328e3688caae436784538b1dec38773a8e2c92b834d3660cf4699488',
+    '68d9aec5d1e0ba43dfae92eedcdbc56ae8a4132d2419f26d579f3a0c753210ca',
   'all-on+fee':
-    '63adf900f467ca6e3ae3bf44d34c65217b623a9d01d463a9ded2cb07ecab9e36',
+    '0d3ed2b426436b918b9f7e5a23b7eb88234b4c3e6e36d71a0ad320defe3e8091',
   'all-on+default-hello-price':
-    '5bc16abf5a084afefc08da2f1c82ca845f337700dc625b113b7f29ce1a4b99d3',
+    'a75e55f1e652f8e0c43f86f8c38f20ddc6508b00ea337087f0d1fb6984d53c87',
   'all-on+invalid-hello-price-unlisted':
-    'a3af0b09df497c33305ce0060a966f9a8c1d9cf3feb901776dbac77930f5411f',
+    'c4f068b515ddbc2c4b5a4c934def92665f8ebad77424d46a12377ccfe1c94c44',
   'directory-only':
-    '8aa55afdc1f16731f5e289002aca149f4de5b63f23fd242617b86b9c3b526a81',
+    '2627bfcc3478068d536bda0ee09257a5919202fcc4a4baf96f4742c64e6f3cab',
   'facilitator-only':
     '21ac634fe16c274ca3f1d66ef903d77839c67a4c92963b11b168d71418a191e0',
   'facilitator+shops':
     '935bca12f86224bafc76c3761bd32e5faaeda7398fde7ba557ab68b5618ee3b7',
   'directory+facilitator':
-    '2550f1dc7bb550d7c6cb7211e3d434417b6def6ea18278d97b880758e1b5a31f',
+    '1afdfc6385935b4316785beea5a9763647c51249eb2c49b4aa4deb2f07ae1a3c',
   'license-only':
     'bdf3b0b4b901d5174663e0a74ebd070fb202326f20cee6bf9c193779fa2ac250',
   'directory+license-child-only':
-    '8aa55afdc1f16731f5e289002aca149f4de5b63f23fd242617b86b9c3b526a81',
+    '2627bfcc3478068d536bda0ee09257a5919202fcc4a4baf96f4742c64e6f3cab',
   'late-mutation':
     '2e63ea53cf8c0c69e29f523b0c99f2d75f39456995e9d9a22c282f3918bb7dee',
   'late-facilitator':
-    'ca57dc1b29e7c026523fac40da5ecd9b89a32a131e64b0f8adbe41e52fe659ec',
+    'ace8bfcb3ca787eefaabe2252093b2c07e9b85537372dbcdb4ff7c32b3b6e8fc',
 };
 
 // all-on の paths の key 順 (spread 順の固定)。
@@ -138,6 +139,7 @@ const EXPECTED_ALL_ON_PATHS: string[] = [
   '/api/paid/usdc/japan-web3-directory/licensed',
   '/api/paid/usdc/japan-web3-directory/search',
   '/api/paid/japan-web3-directory/{slug}',
+  '/api/paid/usdc/japan-web3-directory/{slug}',
   '/api/shops',
   '/api/shops/find',
   '/api/paid/jpyc-shops/search',

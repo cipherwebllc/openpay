@@ -36,7 +36,7 @@ OpenPay includes **experimental** x402 protocol support for per-request paid API
 
 OpenPay verifies + settles via an external facilitator (`X402_FACILITATOR_URL`; production uses payai — x402.org cannot settle Base mainnet) before returning content.
 
-The same vanilla path also sells `GET /api/paid/usdc/japan-web3-directory[/search]` and `GET /api/paid/usdc/stores` in USDC on Base (no OpenPay fee; listed on x402scan).
+The same vanilla path also sells `GET /api/paid/usdc/japan-web3-directory[/search|/:slug]` and `GET /api/paid/usdc/stores` in USDC on Base (no OpenPay fee; listed on x402scan).
 
 Setting `X402_VANILLA_FACILITATOR=cdp` (with `CDP_API_KEY_ID`/`CDP_API_KEY_SECRET`) routes verify/settle for these USDC endpoints through the Coinbase CDP facilitator instead, which auto-indexes discoverable endpoints into the x402 Bazaar and agentic.market; unset, behavior is unchanged.
 
@@ -167,6 +167,7 @@ A source URL, attribution, and verification date are required; current condition
 | x402 | `GET /api/paid/japan-web3-directory` | Full published list | 2 JPYC |
 | x402 (USDC) | `GET /api/paid/usdc/japan-web3-directory` | Full published list — standard x402, USDC on Base mainnet, no OpenPay fee (listed price is the full charge) | 0.02 USDC |
 | x402 (USDC) | `GET /api/paid/usdc/japan-web3-directory/search` | Filtered search — standard x402, USDC on Base mainnet, no OpenPay fee | 0.02 USDC |
+| x402 (USDC) | `GET /api/paid/usdc/japan-web3-directory/:slug` | One published record — standard x402, USDC, no OpenPay fee; unknown slugs return 404 before any payment | 0.01 USDC |
 | x402 (USDC) | `GET /api/paid/usdc/jpyc/supply` | JPYC Supply by Chain — current contract-reported totalSupply per chain (Polygon / Kaia / Avalanche / Ethereum) with the observed block number | 0.002 USDC |
 | x402 (USDC) | `GET /api/paid/usdc/jpyc/balance?address=` | JPYC Wallet Balance — current balanceOf of any address across chains with the observed block number | 0.002 USDC |
 | x402 (USDC) | `GET /api/paid/usdc/jpyc/transfers?chain=` | Recent JPYC Transfers — Transfer events on one chain within an ≈1-hour window ending at head - depth (64 blocks on Polygon/Ethereum; 2 blocks on Kaia/Avalanche); snapshot newest first, cursor delta oldest first; optional address filter. Wait for that depth before checking a payment | 0.005 USDC |

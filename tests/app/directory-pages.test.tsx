@@ -105,6 +105,27 @@ describe('/directory page', () => {
     expect(screen.queryByText('Directory Draft Fixture')).toBeNull();
     expect(screen.getByText('一覧')).toBeInTheDocument();
     expect(screen.getAllByText('2 JPYC')).toHaveLength(2);
+    // USDC の列 (価格 SoT から): 一覧・検索 0.02 / 1 件 0.01 / 商用ライセンス付き 1。JPYC で売らない行は「—」。
+    expect(screen.getAllByText('0.02 USDC')).toHaveLength(2);
+    expect(screen.getByText('0.01 USDC')).toBeInTheDocument();
+    const licensedRow = screen.getByText('一覧 + 商用利用ライセンス').closest('tr')!;
+    expect(licensedRow).toHaveTextContent('—');
+    expect(licensedRow).toHaveTextContent('1 USDC');
+    // USDC 版の一覧 URL もコピーできる。
+    expect(
+      screen.getByText('https://open-pay.jp/api/paid/usdc/japan-web3-directory'),
+    ).toBeInTheDocument();
+  });
+
+  it('Arc の flag が ON なら USDC の列と URL の見出しが Base / Arc を名乗る', async () => {
+    vi.stubEnv('ENABLE_X402_ARC_GATEWAY', '1');
+    const ui = await DirectoryPage({
+      params: Promise.resolve({ locale: 'ja' }),
+    });
+    render(ui);
+    expect(screen.getAllByText('USDC · Base / Arc').length).toBe(2);
+    expect(screen.getByText(/Arc は Circle Gateway/)).toBeInTheDocument();
+    vi.unstubAllEnvs();
   });
 
   it('flag OFF では notFound', async () => {

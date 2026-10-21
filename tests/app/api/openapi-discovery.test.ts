@@ -406,9 +406,16 @@ describe('/openapi.json × Arc rail', () => {
     'x-payment-chains'?: string[];
     'x-payment-info'?: { protocols: { x402?: { network?: string; facilitator?: string } }[] };
   };
+  // slug テンプレート path は x-payment-info を意図的に持たない (インデクサに `{slug}` を probe させない) ので、
+  // 支払い方法の宣言は x-payment-chains だけで照合する。
+  const isTemplate = (path: string) => path.includes('{');
   const usdcOps = (d: Doc): UsdcOp[] =>
     Object.entries(d.paths)
-      .filter(([path]) => path === '/api/paid/hello' || path.startsWith('/api/paid/usdc/'))
+      .filter(([path]) => (path === '/api/paid/hello' || path.startsWith('/api/paid/usdc/')) && !isTemplate(path))
+      .map(([, ops]) => ops.get as UsdcOp);
+  const usdcTemplateOps = (d: Doc): UsdcOp[] =>
+    Object.entries(d.paths)
+      .filter(([path]) => path.startsWith('/api/paid/usdc/') && isTemplate(path))
       .map(([, ops]) => ops.get as UsdcOp);
 
   afterEach(() => {
@@ -421,6 +428,12 @@ describe('/openapi.json × Arc rail', () => {
     for (const op of ops) {
       expect(op['x-payment-chains']).toEqual(['Base']);
       expect(op['x-payment-info']?.protocols.map((p) => p.x402?.network)).toEqual(['eip155:8453']);
+    }
+    const templates = usdcTemplateOps(await doc());
+    expect(templates.length).toBe(1);
+    for (const op of templates) {
+      expect(op['x-payment-chains']).toEqual(['Base']);
+      expect(op['x-payment-info']).toBeUndefined();
     }
   });
 
@@ -436,6 +449,10 @@ describe('/openapi.json × Arc rail', () => {
         'eip155:5042',
       ]);
       expect(op['x-payment-info']?.protocols[1]?.x402?.facilitator).toBe('circle-gateway');
+    }
+    for (const op of usdcTemplateOps(d)) {
+      expect(op['x-payment-chains']).toEqual(['Base', 'Arc']);
+      expect(op['x-payment-info']).toBeUndefined();
     }
     const jpyc = Object.entries(d.paths)
       .filter(([path]) => path.startsWith('/api/paid/') && path !== '/api/paid/hello' && !path.startsWith('/api/paid/usdc/'))
