@@ -1016,6 +1016,88 @@ export const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
       'ネットスターズ公式ニュース一覧で再確認: 2026-09-11 の Kaia MOU 以降、ステーブルコインの発表なし (10/06 の teppay はステーブルコイン以外)。Stablecoin Pay の稼働日・手数料・対応チェーンの変更は未公表のまま。',
     sourceUrl: 'https://www.netstars.co.jp/news/',
   },
+  {
+    date: '2026-10-19',
+    collectedAt: '2026-10-21',
+    scopes: ['jpyc-services'],
+    slug: 'jpyc-ex',
+    changeType: 'updated',
+    changeCategory: 'update',
+    assets: ['JPYC'],
+    summary:
+      'JPYC EX suspended new account opening for system maintenance from 18:20 JST on 2026-10-19; existing account holders could keep using the service as usual. The maintenance ended at 20:00 JST on 2026-10-20 and all services, including new account opening, returned to normal. No reason was published.',
+    summaryJa:
+      'JPYC EX がシステムメンテナンスのため 2026-10-19 18:20 から新規アカウントの開設を一時停止 (既存のアカウントは通常どおり利用可)。2026-10-20 20:00 に完了し、新規アカウントの開設を含むすべてのサービスが通常どおり利用可能に。理由は公表なし。',
+    sourceUrl: 'https://faq.jpyc.co.jp/s/article/announce-0043',
+  },
+  {
+    date: '2026-10-21',
+    collectedAt: '2026-10-21',
+    scopes: ['jpyc-services'],
+    slug: 'coincheck',
+    changeType: 'verified',
+    assets: ['USDC'],
+    summary:
+      'Re-verified against the FSA registry of Electronic Payment Instruments Exchange Service Providers (still as of 2026-08-27): two registrants, SBI VC Trade (No. 00001) and Coincheck (No. 00002, USDC); no new registration.',
+    summaryJa:
+      '金融庁の電子決済手段等取引業者登録一覧 (令和 8 年 8 月 27 日現在のまま) で再確認: 登録は SBI VC トレード (第00001号) とコインチェック (第00002号・USDC) の 2 社で、新規登録なし。',
+    sourceUrl: 'https://www.fsa.go.jp/menkyo/menkyoj/denshikessaisyudan.pdf',
+  },
+  {
+    date: '2026-10-21',
+    collectedAt: '2026-10-21',
+    scopes: ['stablecoin-payments'],
+    provider: 'HashPort (Osaka Pref. subsidy)',
+    changeType: 'verified',
+    assets: ['JPYC', 'USDC'],
+    summary:
+      'Re-verified on the Osaka Prefecture page (still last updated 2026-08-26): HashPort pilot schedule unchanged.',
+    summaryJa:
+      '大阪府公式ページ (更新日 2026-08-26 のまま) で再確認: HashPort の実証予定に変更なし。',
+    sourceUrl:
+      'https://www.pref.osaka.lg.jp/o020060/kikaku/osaka-kokusaikinyu/senkuteki_hojokin.html',
+  },
+  {
+    date: '2026-10-21',
+    collectedAt: '2026-10-21',
+    scopes: ['stablecoin-payments'],
+    provider: 'Mina Wallet / Sumitomo Mitsui Card (Osaka Pref. subsidy)',
+    changeType: 'verified',
+    assets: ['JPYC', 'USDC'],
+    summary:
+      'Re-verified on the Osaka Prefecture page (still last updated 2026-08-26): Mina Wallet / Sumitomo Mitsui Card pilot schedule unchanged.',
+    summaryJa:
+      '大阪府公式ページ (更新日 2026-08-26 のまま) で再確認: マイナウォレット / 三井住友カードの実証予定に変更なし。',
+    sourceUrl:
+      'https://www.pref.osaka.lg.jp/o020060/kikaku/osaka-kokusaikinyu/senkuteki_hojokin.html',
+  },
+  {
+    date: '2026-10-21',
+    collectedAt: '2026-10-21',
+    scopes: ['stablecoin-payments'],
+    provider: 'Mi&T (Osaka Pref. subsidy)',
+    changeType: 'verified',
+    assets: ['JPYC'],
+    summary:
+      'Re-verified on the Osaka Prefecture page (still last updated 2026-08-26): Mi&T pilot (merchant fee 1.0%, planned mid-November 2026 to mid-March 2027) unchanged.',
+    summaryJa:
+      '大阪府公式ページ (更新日 2026-08-26 のまま) で再確認: Mi&T の実証 (手数料 1.0%・2026 年 11 月中旬〜2027 年 3 月中旬予定) に変更なし。',
+    sourceUrl:
+      'https://www.pref.osaka.lg.jp/o020060/kikaku/osaka-kokusaikinyu/senkuteki_hojokin.html',
+  },
+  {
+    date: '2026-10-21',
+    collectedAt: '2026-10-21',
+    scopes: ['stablecoin-payments'],
+    provider: 'NetStars Stablecoin Pay',
+    changeType: 'verified',
+    assets: ['JPYC', 'USDT'],
+    summary:
+      'Re-verified on the NetStars news list: no stablecoin announcement after the 2026-09-11 Kaia MOU (the 2026-10-06 teppay news is not about stablecoins); no launch date, fee or chain change published for Stablecoin Pay.',
+    summaryJa:
+      'ネットスターズ公式ニュース一覧で再確認: 2026-09-11 の Kaia MOU 以降、ステーブルコインの発表なし (10/06 の teppay はステーブルコイン以外)。Stablecoin Pay の稼働日・手数料・対応チェーンの変更は未公表のまま。',
+    sourceUrl: 'https://www.netstars.co.jp/news/',
+  },
 ];
 
 // ディレクトリ初期公開日。baseline の 'added' はこの固定日に立てる — entry.updatedAt 由来に
