@@ -18,6 +18,7 @@ import { GuideToc } from '@/components/guide/GuideToc';
 import { BulletList, Section, StepList } from '@/components/guide/PosGuidePieces';
 import { CodeBlock } from '@/components/guide/AgentGuidePieces';
 import { guideSellMetadata, sellGuideContentFor } from '@/lib/sellGuide';
+import { splitTextLinks } from '@/lib/textLinks';
 import { GuideMoreLink, GuideTxLink } from '@/components/guide/GuideLink';
 
 export async function generateMetadata({
@@ -158,25 +159,27 @@ export default async function GuideSellPage({
               items={c.bazaarItems}
               marker="•"
             />
-            {c.bazaarNote.map((note) => {
-              // 文中の URL はリンクにする (素の文字のまま 3 行に折れていた)。
-              const [before, url] = note.split(/(?=https:\/\/)/);
-              return (
-                <p key={note} className="mt-3 text-sm leading-relaxed text-slate-700">
-                  {before}
-                  {url ? (
+            {c.bazaarNote.map((note) => (
+              // 文中の URL はリンクにする (素の文字のまま 3 行に折れていた)。URL は文の途中にも置くので、
+              // URL の部分だけを切り出す (lib/textLinks.ts)。
+              <p key={note} className="mt-3 text-sm leading-relaxed text-slate-700">
+                {splitTextLinks(note).map((part, i) =>
+                  part.kind === 'text' ? (
+                    part.text
+                  ) : (
                     <a
-                      href={url}
+                      key={i}
+                      href={part.href}
                       target="_blank"
                       rel="noreferrer noopener"
                       className="break-all font-medium text-emerald-700 underline decoration-emerald-300 underline-offset-2 hover:text-emerald-900"
                     >
-                      {url}
+                      {part.href}
                     </a>
-                  ) : null}
-                </p>
-              );
-            })}
+                  ),
+                )}
+              </p>
+            ))}
           </GuideDisclosure>
           </div>
         </Section>
