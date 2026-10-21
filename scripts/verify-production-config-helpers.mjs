@@ -79,3 +79,58 @@ export function assessReceiptSigner(status, body) {
     detail: 'receiptSigner が null — X402_RECEIPT_SIGNING_KEY 未設定/不正。受領証明が出ず、署名付きの有料商品は 503 で売れない',
   };
 }
+
+// Node の 2026-10 のセキュリティ修正 (Brotli の展開の範囲外書き込み CVE-2026-111497 ほか) が入った最小の版。
+// 本番は出品者の URL を取りに行って本文を読む (lib/x402/moderation.ts) ので、これより古いと突かれる経路が残る。
+// 次の Node のセキュリティ修正が出たら、ここを上げる。
+export const NODE_RUNTIME_MINIMUM = { 22: [22, 23, 4], 24: [24, 22, 1], 26: [26, 12, 1] };
+
+/**
+ * 本番の関数の Node の版 (/api/cron/runtime) が、セキュリティ修正の入った版以上か。
+ * 結果は公開リポの Actions のログに出るので、detail には正確な版を書かない (major と以上/未満だけ)。
+ */
+export function assessNodeRuntime(status, body) {
+  if (status !== 200) {
+    return { ok: false, detail: `HTTP ${status} (/api/cron/runtime が読めない)` };
+  }
+  const version = body && typeof body === 'object' ? body.node : undefined;
+  const match = typeof version === 'string' ? /^v?(\d+)\.(\d+)\.(\d+)$/.exec(version) : null;
+  if (!match) return { ok: false, detail: '版を読み取れない' };
+  const [major, minor, patch] = match.slice(1).map(Number);
+  const minimum = NODE_RUNTIME_MINIMUM[major];
+  if (!minimum) {
+    return { ok: false, detail: `major ${major}: 最小の版が決まっていない (NODE_RUNTIME_MINIMUM に足す)` };
+  }
+  const atLeast = minor !== minimum[1] ? minor > minimum[1] : patch >= minimum[2];
+  return atLeast
+    ? { ok: true, detail: `major ${major}: セキュリティ修正の入った版以上` }
+    : { ok: false, detail: `major ${major}: セキュリティ修正の入った版より古い (Vercel の配布待ち)` };
+}
+
+/**
+ * 検査の結果を、出力する行と exit code にまとめる。
+ * severity 'warn' の失敗は ::warning:: を出すだけで exit 1 にしない。operator が直せない待ち (Vercel の配布待ち等)
+ * が何日も赤を続けると、直すべき設定漏れの検知が赤慣れで埋もれるため。
+ */
+export function summarizeChecks(checks) {
+  const lines = ['Production config verification:'];
+  let failed = 0;
+  let warned = 0;
+  for (const c of checks) {
+    const warn = !c.ok && c.severity === 'warn';
+    lines.push(`  ${c.ok ? '✓' : warn ? '⚠' : '✗'} ${c.name}`, `      ${c.detail}`);
+    if (warn) {
+      warned += 1;
+      lines.push(`::warning title=${c.name}::${c.detail}`);
+    } else if (!c.ok) {
+      failed += 1;
+    }
+  }
+  lines.push('');
+  if (failed > 0) {
+    lines.push(`⚠ ${failed}/${checks.length} 件 inactive — 上記詳細を確認`);
+    return { lines, exitCode: 1 };
+  }
+  lines.push(`✅ ${checks.length - warned}/${checks.length} 件 active${warned > 0 ? ` (警告 ${warned} 件)` : ''}`);
+  return { lines, exitCode: 0 };
+}

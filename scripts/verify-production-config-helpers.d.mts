@@ -25,3 +25,14 @@ export function assessPimlicoRun(log: string): { ok: boolean; detail: string };
 
 /** /api/facilitator/supported の receiptSigner が入っているか (署名付きの有料商品が売れる状態か)。 */
 export function assessReceiptSigner(status: number, body: unknown): { ok: boolean; detail: string };
+
+/** Node の 2026-10 のセキュリティ修正が入った最小の版 (major → [major, minor, patch])。 */
+export const NODE_RUNTIME_MINIMUM: Record<number, [number, number, number]>;
+
+/** 本番の関数の Node の版がセキュリティ修正の入った版以上か (detail に正確な版は書かない)。 */
+export function assessNodeRuntime(status: number, body: unknown): { ok: boolean; detail: string };
+
+export type ProductionCheck = { name: string; ok: boolean; detail: string; severity?: 'error' | 'warn' };
+
+/** 検査の結果を出力の行と exit code にまとめる (warn の失敗は ::warning:: だけで exit 1 にしない)。 */
+export function summarizeChecks(checks: ProductionCheck[]): { lines: string[]; exitCode: 0 | 1 };

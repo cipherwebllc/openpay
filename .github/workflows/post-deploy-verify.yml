@@ -4,6 +4,8 @@ name: Post-deploy production config verify
 # 主目的: Sentry DSN / Pimlico balance cron secrets が prod で active か検証
 # (verify-production-config.mjs)。設定漏れがあれば workflow を fail させ、
 # operator notification を発火する (GitHub UI / 通知 email)。
+# 本番の関数の Node がセキュリティ修正の入った版以上かも見る (CRON_SECRET で /api/cron/runtime を読む)。
+# こちらは Vercel の配布待ちで operator が直せないので、fail させず ::warning:: だけ出す。
 #
 # 起動 trigger:
 #   - main push 後 5 分待機 (Vercel deploy 完了見込み)
@@ -51,4 +53,5 @@ jobs:
       - name: Verify production env config
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: node scripts/verify-production-config.mjs "$PROD_BASE_URL"
