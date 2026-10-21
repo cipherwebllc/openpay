@@ -76,7 +76,7 @@ describe('createPaymentMonitorEnvelope', () => {
     expect(env.changes.some((c) => c.provider === 'Aegis')).toBe(false);
   });
 
-  it('スコープ分離 (逆): 決済専用イベントは JPYC Service Monitor に載らない — 8/01 以降の delta は 18 件', () => {
+  it('スコープ分離 (逆): 決済専用イベントは JPYC Service Monitor に載らない — 8/01 以降の delta は 49 件', () => {
     const jpyc = createServiceMonitorEnvelope(
       { changedSince: '2026-08-01', limit: SERVICE_MONITOR_MAX_LIMIT },
       {},
@@ -93,11 +93,12 @@ describe('createPaymentMonitorEnvelope', () => {
     //   の backfill 3 件・10/09 jpyc 公取委への情報提供・10/13 coincheck verified) = 26 件
     // + 第 9 回 (10/18 記録) の 4 件 (10/14 kaia CR の対象に JPYC・10/16 jpyc-ex Polygon 発行遅延・10/17 jpyc-ex 臨時メンテ・
     //   10/18 coincheck verified) = 30 件
-    // + 第 10 回 (10/21 記録) の 2 件 (10/19 jpyc-ex 新規アカウント開設の一時停止・10/21 coincheck verified) = 32 件。
+    // + 第 10 回 (10/21 記録) の 2 件 (10/19 jpyc-ex 新規アカウント開設の一時停止・10/21 coincheck verified) = 32 件
+    // + ディレクトリ拡充 (10/21 記録) の手書き added 17 件 (jpyc-services スコープ・実効日 = 10/21) = 49 件。
     // 決済スコープ専用の 8/10 DG SPS launch・8/26 大阪府採択 3 件・8/31 Mi&T・9/04 verified 2 件・
     // 9/11 の 4 件 (NetStars 更新 + verified 3)・9/18 verified 4 件・9/23 verified 4 件・
-    // 第 6 回で 9/29 に記録した backfill 3 件が混ざれば 40 件になる = スコープ分離の証明。
-    expect(jpyc.changes).toHaveLength(32);
+    // 第 6 回で 9/29 に記録した backfill 3 件が混ざれば 57 件になる (決済専用 8 件分の差・拡充 17 件は jpyc-services 専用) = スコープ分離の証明。
+    expect(jpyc.changes).toHaveLength(49);
     expect(jpyc.changes.every((c) => c.slug !== undefined)).toBe(true);
     // 応答に内部ルーティング用 scopes を漏らさない。
     expect(jpyc.changes[0]).not.toHaveProperty('scopes');

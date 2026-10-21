@@ -19,7 +19,8 @@ describe('directory query pure functions', () => {
   it('公開一覧から draft を必ず除外する', () => {
     const published = publishedDirectoryEntries(DIRECTORY_ENTRIES);
     expect(published.length).toBeGreaterThanOrEqual(15);
-    expect(published.length).toBeLessThanOrEqual(25);
+    // 件数の上限は暴走検知用の sanity cap (掲載の追加で緩める。2026-10-21 の拡充 17 件で 25 → 60)。
+    expect(published.length).toBeLessThanOrEqual(60);
     expect(published.every((entry) => entry.status === 'published')).toBe(true);
     expect(published.some((entry) => entry.slug === 'directory-draft-fixture')).toBe(
       false,
@@ -148,7 +149,7 @@ describe('directory query pure functions', () => {
       generatedAt: '2026-07-13T00:00:00.000Z',
       dataFreshness: {
         oldest: '2026-07-13',
-        newestVerifiedAt: '2026-09-04', // 週次更新 (第 2 回) の再検証日
+        newestVerifiedAt: '2026-10-21', // supportsUsdc の絞り込みに 2026-10-21 の拡充分 (verifiedAt 10-21) が入る
         oldestSourceCheckedAt: null,
       },
     });
@@ -206,7 +207,7 @@ describe('directory query pure functions', () => {
     expect(directoryStats(DIRECTORY_ENTRIES)).toEqual({
       entryCount: publishedDirectoryEntries(DIRECTORY_ENTRIES).length,
       categoryCount: directoryCategoryCounts(DIRECTORY_ENTRIES).length,
-      lastUpdated: '2026-10-06', // 週次更新 (第 7 回・jpyc-ex のマイナウォレット連携 10/06)
+      lastUpdated: '2026-10-21', // 2026-10-21 の拡充 (提供中 17 件の追加・updatedAt)
     });
   });
 

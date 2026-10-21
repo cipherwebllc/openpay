@@ -46,6 +46,7 @@ const DIRECTORY_QUERY_PARAMETERS = [
       type: 'string',
       enum: [
         'arbitrum',
+        'arc',
         'avalanche',
         'base',
         'ethereum',
