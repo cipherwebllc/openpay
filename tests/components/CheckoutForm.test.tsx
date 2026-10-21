@@ -502,7 +502,9 @@ async function submitRelayThenSucceed(
   },
 ) {
   await user.click(screen.getByRole('button', { name: /を支払う/ }));
-  expect(relayMutate).toHaveBeenCalledOnce();
+  // 同一オリジンの通知先では、署名までに注文の束縛 (lib/orderBind) を非同期で読む。並列実行の負荷で遅れても
+  // 落ちないよう、呼ばれるまで待つ (読み込みを 50ms 遅らせると、待たない書き方は 0 回で落ちることを確かめた)。
+  await waitFor(() => expect(relayMutate).toHaveBeenCalledOnce());
   const order = relayMutate.mock.calls[0][0].order;
   const record = order ? resolveOrderDelivery(bindingFixture('free', order, opts.variables.value).record, opts.txHash) : undefined;
   if (record) saveOrderDelivery(record);
