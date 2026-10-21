@@ -501,4 +501,20 @@ describe('ArcPayoutPanel: ガス代の不足で受け取りの取引を送れな
     // 続きは送れる。
     expect(screen.getByRole('button', { name: t.retryMint })).toBeEnabled();
   });
+
+  it('ウォレットの上乗せ分の不足で出た表示も、入金して読み直したら残高だけで判定し直して消す', async () => {
+    s.mint.mockRejectedValueOnce(
+      new TransactionExecutionError(new InsufficientFundsError(), { account: null, chain: undefined }),
+    );
+    renderPanel();
+    await waitFor(() => expect(withdrawButton()).toBeEnabled());
+    fireEvent.click(withdrawButton());
+    expect(await screen.findByText(/足りません/)).toBeInTheDocument();
+    s.gas = 1_000_000_000_000_000_000n; // 入金して 1 USDC
+    fireEvent.click(screen.getByRole('button', { name: t.reload }));
+    expect(await screen.findByText(t.errorMintNotSent)).toBeInTheDocument();
+    await waitFor(() => expect(s.estimateGas).toHaveBeenCalledTimes(2));
+    expect(screen.queryByText(/足りません/)).not.toBeInTheDocument();
+  });
 });
+

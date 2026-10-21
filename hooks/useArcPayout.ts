@@ -186,11 +186,12 @@ export function useArcPayout() {
   }, [arcClient, setFlowFor]);
 
   // 読み直し: 残高を読み直し、送れなかった後なら入金後の残高でガス代の不足を診断し直す (古い残高・不足額を残さない)。
+  // 前回の送信の「残高不足」も捨てる (入金で解消したかは、読み直した残高でしか分からない)。
   const reload = useCallback(() => {
     if (!address) return;
     const flow = flowsRef.current[address];
     if (flow?.phase === 'failed') {
-      const fresh: ArcPayoutFailed = { ...flow, gasShortfall: undefined };
+      const fresh: ArcPayoutFailed = { ...flow, gasShortfall: undefined, sendInsufficient: undefined };
       setFlowFor(address, fresh);
       diagnose(address, fresh);
     }
