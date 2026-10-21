@@ -233,12 +233,15 @@ describe('checkNodeRuntime', () => {
     expect(detail).toBe('/api/cron/runtime に接続できない');
   });
 
-  it.each([['headers' as const], ['body' as const]])('応答が止まっても (%s) 期限で NG にして先へ進む', async (stage) => {
+  // detail で止まった段階を確かめる: 頭の前なら fetch 自体が中断 (接続できない)、本文の途中なら頭は届いて
+  // 本文の読み取りが中断 (版を読み取れない)。期限は遅い CI でも頭が届く余裕を持たせて 1 秒。
+  it.each([
+    ['headers' as const, '/api/cron/runtime に接続できない'],
+    ['body' as const, '版を読み取れない'],
+  ])('応答が止まっても (%s) 期限で NG にして先へ進む', async (stage, expected) => {
     const base = await stallingServer(stage);
     const started = Date.now();
-    const { ok, detail } = await checkNodeRuntime(base, SECRET, { timeoutMs: 100 });
-    expect(ok).toBe(false);
-    expect(detail).not.toMatch(/\d+\.\d+\.\d+/);
-    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(await checkNodeRuntime(base, SECRET, { timeoutMs: 1_000 })).toEqual({ ok: false, detail: expected });
+    expect(Date.now() - started).toBeLessThan(4_000);
   });
 });
