@@ -422,34 +422,37 @@ describe('completeArcPayout (受け取りの取引)', () => {
   });
 });
 
-// 送れなかった後の原因の表示だけに使う読み取り。必要額 = 見積もった gas × maxFeePerGas (ウォレットが確かめる上限)。
+// 送れなかった後の原因の表示だけに使う読み取り。必要額は下限 = 見積もった gas × いまの base fee
+// (どのウォレットもこれ未満では送れない・わざとの取り消しを不足と誤って言わない)。
 describe('readArcMintGasShortfall (受け取りの取引のガス代の不足)', () => {
   const attestation: ArcPayoutAttestation = {
     depositor: DEPOSITOR, attestation: '0xaa', signature: '0xbb', transferSpecHash: SPEC_HASH,
     expiresAtBlock: 9_999n, value: 27_000n,
   };
-  function client(gas: bigint, maxFeePerGas: bigint, balance: bigint) {
+  function client(gas: bigint, baseFeePerGas: bigint | null, balance: bigint) {
     return {
       estimateGas: vi.fn(async () => gas),
-      estimateFeesPerGas: vi.fn(async () => ({ maxFeePerGas, maxPriorityFeePerGas: 1n })),
+      getBlock: vi.fn(async () => ({ baseFeePerGas })),
       getBalance: vi.fn(async () => balance),
     };
   }
 
-  it('受け取りの取引 (GatewayMinter・depositor から) を見積もり、足りない額を返す', async () => {
+  it('受け取りの取引 (GatewayMinter・depositor から) を見積もり、下限との差を返す', async () => {
     const c = client(200_000n, 20_000_000_000n, 1_000_000_000_000_000n);
     const out = await readArcMintGasShortfall(c as never, attestation);
     expect(out).toEqual({ balance: 1_000_000_000_000_000n, shortfall: 3_000_000_000_000_000n });
     expect(c.estimateGas).toHaveBeenCalledWith(expect.objectContaining({ account: DEPOSITOR, to: GATEWAY_MINTER_ADDRESS }));
+    expect(c.getBlock).toHaveBeenCalledWith({ blockTag: 'latest' });
     expect(c.getBalance).toHaveBeenCalledWith({ address: DEPOSITOR });
   });
 
-  it('足りていれば shortfall = 0 (ちょうどの額も足りている扱い)', async () => {
+  it('下限以上あれば shortfall = 0 (ちょうどの額も足りている扱い)', async () => {
     expect(await readArcMintGasShortfall(client(200_000n, 20n, 4_000_000n) as never, attestation)).toEqual({ balance: 4_000_000n, shortfall: 0n });
     expect(await readArcMintGasShortfall(client(1n, 1n, 10n) as never, attestation)).toEqual({ balance: 10n, shortfall: 0n });
   });
 
-  it('読み取りの失敗は投げる (呼び出し側が従来の表示に戻す)', async () => {
+  it('base fee の無いブロック・読み取りの失敗は投げる (呼び出し側が従来の表示に戻す)', async () => {
+    await expect(readArcMintGasShortfall(client(1n, null, 1n) as never, attestation)).rejects.toThrow('arc_payout_no_base_fee');
     const c = client(1n, 1n, 1n);
     c.estimateGas.mockRejectedValueOnce(new Error('rpc down'));
     await expect(readArcMintGasShortfall(c as never, attestation)).rejects.toThrow('rpc down');

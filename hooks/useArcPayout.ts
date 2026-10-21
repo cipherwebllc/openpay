@@ -17,7 +17,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { BaseError, InsufficientFundsError, type Address, type Hex } from 'viem';
+import { BaseError, InsufficientFundsError, type Address, type Hex, type PublicClient } from 'viem';
 import { useAccount, usePublicClient, useSwitchChain, useWalletClient } from 'wagmi';
 import { isNonDelegatedContractCode } from '@/lib/accountCode';
 import { chainForSlug } from '@/lib/chains';
@@ -71,6 +71,23 @@ export type ArcPayoutFlow =
 /** viem がノードの「残高不足」(gas × 手数料 + value) と分類したエラーか。 */
 function isInsufficientFunds(err: unknown): boolean {
   return err instanceof BaseError && err.walk((e) => e instanceof InsufficientFundsError) !== null;
+}
+
+/**
+ * 受け取りの取引を送れなかったのがガス代の不足のせいか (表示のための診断・投げない)。不足の額が分かれば額つき、
+ * 額は分からないが見積もりか送信のエラーがノードの残高不足なら額なし、それ以外 (足りている・読めない) は null。
+ */
+async function gasShortfallFailure(
+  client: PublicClient,
+  pending: ArcPayoutAttestation,
+  sendError: unknown,
+): Promise<ArcPayoutFailure | null> {
+  try {
+    const { balance, shortfall } = await readArcMintGasShortfall(client, pending);
+    return shortfall > 0n ? { code: 'insufficient_gas', balance, shortfall } : null;
+  } catch (readError) {
+    return isInsufficientFunds(readError) || isInsufficientFunds(sendError) ? { code: 'insufficient_gas' } : null;
+  }
 }
 
 export function arcPayoutFailureOf(err: unknown, step: ArcPayoutStep | undefined): ArcPayoutFailure {
@@ -155,25 +172,24 @@ export function useArcPayout() {
       });
       setFlowFor(from, { phase: 'done', value: pending.value, txHash });
     } catch (err) {
-      let failure: ArcPayoutFailure = arcPayoutFailureOf(err, undefined);
+      const failure = arcPayoutFailureOf(err, undefined);
       // 失効したら続きは無い (残高に戻るのを待つ)。受け取りにならなかったと確かめた取引は忘れて送り直せるようにする。
       // それ以外 (結果が分からない・ウォレットで断った・読み取りの失敗) は送った取引の hash ごと残し、まず確かめ直す。
       const next = failure.code === 'attestation_expired'
         ? undefined
         : failure.code === 'mint_not_completed' ? { ...latest, txHash: undefined } : latest;
-      // 受け取りの取引を送れなかった (まだ送っていない) ときだけ、ガス代の不足が原因かを確かめ、原因と足りない額を出す。
-      // ウォレットによっては残高不足だと確認画面で送れず「取り消し」として返るので、エラーの種類だけでは決めない。
-      // 表示だけの分類で、続きの送り方 (next) は変えない。
+      const failed: ArcPayoutFlow = { phase: 'failed', failure, ...(next ? { pending: next } : {}) };
+      setFlowFor(from, failed);
+      // 受け取りの取引を送れなかった (まだ送っていない) ときだけ、ガス代の不足が原因かを後から確かめて表示に足す。
+      // ウォレットによっては残高不足だと確認画面で送れず「取り消し」で返るので、エラーの種類だけでは決めない。
+      // 表示だけの分類で、続きの送り方 (next) は変えない。失敗の表示と送り直しを先に確定し、診断を待たせない
+      // (診断の読み取りが止まっても、10 分の送り直しの時間を食わないため)。
       if (next && !next.txHash && (failure.code === 'rejected' || failure.code === 'failed')) {
-        // 付帯の読み取りの失敗で失敗の表示そのものを巻き込まない (読めなければ従来の文のまま)。
-        const gas = await readArcMintGasShortfall(arcClient, next).catch(() => null);
-        if (gas && gas.shortfall > 0n) {
-          failure = { code: 'insufficient_gas', balance: gas.balance, shortfall: gas.shortfall };
-        } else if (!gas && isInsufficientFunds(err)) {
-          failure = { code: 'insufficient_gas' };
-        }
+        void gasShortfallFailure(arcClient, next, err).then((gasFailure) => {
+          // 診断の間に送り直した・別の結果になったら、古い診断で上書きしない。
+          if (gasFailure && flowsRef.current[from] === failed) setFlowFor(from, { ...failed, failure: gasFailure });
+        });
       }
-      setFlowFor(from, { phase: 'failed', failure, ...(next ? { pending: next } : {}) });
     } finally {
       refresh(from);
     }
