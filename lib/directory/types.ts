@@ -13,6 +13,7 @@ export const DIRECTORY_TOKENS = ['jpyc', 'usdc'] as const;
 
 export const DIRECTORY_CHAINS = [
   'arbitrum',
+  'arc',
   'avalanche',
   'base',
   'ethereum',

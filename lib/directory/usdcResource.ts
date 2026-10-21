@@ -118,7 +118,7 @@ export const USDC_DIRECTORY_SEARCH_BAZAAR = {
       token: { type: 'string', enum: ['jpyc', 'usdc'] },
       chain: {
         type: 'string',
-        enum: ['arbitrum', 'avalanche', 'base', 'ethereum', 'kaia', 'optimism', 'polygon'],
+        enum: ['arbitrum', 'arc', 'avalanche', 'base', 'ethereum', 'kaia', 'optimism', 'polygon'],
       },
       language: { type: 'string', enum: ['en', 'ja'] },
       supportsJpyc: { type: 'string', enum: ['true', 'false'] },

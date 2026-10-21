@@ -1113,6 +1113,211 @@ export const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
       'ネットスターズ公式ニュース一覧で再確認: 2026-09-11 の Kaia MOU 以降、ステーブルコインの発表なし (10/06 の teppay はステーブルコイン以外)。Stablecoin Pay の稼働日・手数料・対応チェーンの変更は未公表のまま。',
     sourceUrl: 'https://www.netstars.co.jp/news/',
   },
+  // ── 第 11 回拡充 (2026-10-21): 提供中の 17 件を追加。date = 一次ソースの発表日 (特定できないものは収集日) ──
+  {
+    date: '2026-10-21',
+    collectedAt: '2026-10-21',
+    scopes: ['jpyc-services'],
+    slug: 'hashport-wallet',
+    changeType: 'added',
+    summary:
+      'HashPort Wallet, a non-custodial wallet app handling JPYC and USDC, was added to the directory.',
+    summaryJa:
+      'JPYC と USDC を扱うノンカストディアルのウォレット「HashPort Wallet」をディレクトリに追加。',
+    sourceUrl: 'https://wallet.hashport.com/',
+  },
+  {
+    date: '2026-09-30',
+    collectedAt: '2026-10-21',
+    scopes: ['jpyc-services'],
+    slug: 'alpha-u-wallet',
+    changeType: 'added',
+    summary:
+      'αU wallet launched as an au PAY mini app (KDDI, au Coincheck Digital Assets, HashPort); Ponta points can be exchanged for JPYC and JPYC can be charged to the au PAY balance; added to the directory.',
+    summaryJa:
+      '「αU wallet」が au PAY アプリのミニアプリとして提供開始 (KDDI・au Coincheck Digital Assets・HashPort)。Ponta ポイントを JPYC に交換でき、JPYC を au PAY 残高にチャージできる。',
+    sourceUrl: 'https://newsroom.kddi.com/news/detail/kddi_nr-1182_4741.html',
+  },
+  {
+    date: '2026-05-22',
+    collectedAt: '2026-10-21',
+    scopes: ['jpyc-services'],
+    slug: 'unifi',
+    changeType: 'added',
+    summary:
+      'LINE NEXT officially adopted JPYC in its Unifi wallet, so JPYC on Kaia can be used from the LINE app (payments and transfers to follow); added to the directory.',
+    summaryJa:
+      'LINE NEXT のウォレット「Unifi」が JPYC を正式採用し、LINE アプリから Kaia 上の JPYC を使えるように (決済・送金は順次)。',
+    sourceUrl: 'https://prtimes.jp/main/html/rd/p/000000318.000054018.html',
+  },
+  {
+    date: '2026-07-21',
+    collectedAt: '2026-10-21',
+    scopes: ['jpyc-services'],
+    slug: 'myna-wallet',
+    changeType: 'added',
+    summary:
+      'Mina Wallet, a wallet verified with the My Number Card, became generally available; from v1.2.2 it supports the JPYC EX integration for issuance and redemption inside the app; added to the directory.',
+    summaryJa:
+      'マイナンバーカードで本人確認する「マイナウォレット」が一般提供を開始。v1.2.2 以上で JPYC EX 連携に対応し、アプリ内で JPYC の発行・償還まで完結する。',
+    sourceUrl: 'https://www.mynawallet.co.jp/',
+  },
+  {
+    date: '2026-10-21',
+    collectedAt: '2026-10-21',
+    scopes: ['jpyc-services'],
+    slug: 'startale-app',
+    changeType: 'added',
+    summary:
+      'Startale App, an app for swaps and payments with Startale USD (USDSC) on Soneium and USDC deposits via Earn, was added to the directory.',
+    summaryJa:
+      'Soneium 上の Startale USD (USDSC) のスワップ・決済と、Earn での USDC 入金に使える「Startale App」をディレクトリに追加。',
+    sourceUrl: 'https://startale.com/',
+  },
+  {
+    date: '2026-01-28',
+    collectedAt: '2026-10-21',
+    scopes: ['jpyc-services'],
+    slug: 'hashport-wallet-for-biz',
+    changeType: 'added',
+    summary:
+      'HashPort Wallet for Biz, a stablecoin payment service for businesses, was added to the directory (service started 2026-01-28; no payment, monthly or registration fees for merchants).',
+    summaryJa:
+      '企業向けステーブルコイン決済「HashPort Wallet for Biz」をディレクトリに追加 (2026-01-28 提供開始・加盟店の決済手数料・月額・登録料は無料)。',
+    sourceUrl: 'https://wallet.hashport.com/news/forbiz',
+  },
+  {
+    date: '2026-07-13',
+    collectedAt: '2026-10-21',
+    scopes: ['jpyc-services'],
+    slug: 'netstars-stablecoin-pay',
+    changeType: 'added',
+    summary:
+      'NetStars Stablecoin Pay, a stablecoin payment service for StarPay merchants (USDC, USDT and JPYC on Solana and Polygon; merchant fee 0.98%), was added to the directory.',
+    summaryJa:
+      'ネットスターズの StarPay 加盟店向け「Stablecoin Pay」(USDC・USDT・JPYC を Solana/Polygon で受付・加盟店手数料 0.98%) をディレクトリに追加。',
+    sourceUrl: 'https://prtimes.jp/main/html/rd/p/000000185.000019526.html',
+  },
+  {
+    date: '2025-11-21',
+    collectedAt: '2026-10-21',
+    scopes: ['jpyc-services'],
+    slug: 'hashport-card',
+    changeType: 'added',
+    summary:
+      'HashPort Card, a credit card with Nudge whose balance can be repaid in JPYC, was added to the directory (issuance started 2025-11-21; rewards in JPYC on Avalanche).',
+    summaryJa:
+      'HashPort とナッジのクレジットカード「HashPort カード」をディレクトリに追加 (2025-11-21 発行開始・JPYC で返済でき、還元は Avalanche の JPYC)。',
+    sourceUrl: 'https://wallet.hashport.com/news/crypto_credit_card',
+  },
+  {
+    date: '2026-06-01',
+    collectedAt: '2026-10-21',
+    scopes: ['jpyc-services'],
+    slug: 'diners-trust-club-jpyc',
+    changeType: 'added',
+    summary:
+      'Diners Club / TRUST CLUB reward points became exchangeable for JPYC on HashPort Wallet (Sumitomo Mitsui Trust Club, JPYC and HashPort); the service was added to the directory.',
+    summaryJa:
+      'ダイナースクラブ / TRUST CLUB のリワードポイントを HashPort Wallet 上で JPYC に交換できる仕組みをディレクトリに追加 (三井住友トラストクラブ・JPYC・HashPort の共同・2026-06-01 開始)。',
+    sourceUrl: 'https://prtimes.jp/main/html/rd/p/000000320.000054018.html',
+  },
+  {
+    date: '2026-07-21',
+    collectedAt: '2026-10-21',
+    scopes: ['jpyc-services'],
+    slug: 'uniple-checkout',
+    changeType: 'added',
+    summary:
+      'uniple checkout, a plugin that adds JPYC payments to e-commerce sites (technical preview for x402 product sync and Hosted MCP), was added to the directory.',
+    summaryJa:
+      'EC サイトに JPYC 決済を足すプラグイン「uniple checkout」をディレクトリに追加 (2026-07-21 提供開始・x402 の商品同期と Hosted MCP はテクニカルプレビュー)。',
+    sourceUrl: 'https://uniple.io/?lang=ja',
+  },
+  {
+    date: '2026-10-21',
+    collectedAt: '2026-10-21',
+    scopes: ['jpyc-services'],
+    slug: 'jpysc',
+    changeType: 'added',
+    summary:
+      'JPYSC, a yen-pegged stablecoin issued by SBI Shinsei Trust Bank (currently tradable at SBI VC Trade, held in-account only), was added to the directory.',
+    summaryJa:
+      'SBI 新生信託銀行が発行する日本円連動ステーブルコイン「JPYSC」をディレクトリに追加 (現在は SBI VC トレードで売買でき、保有は口座内に限る)。',
+    sourceUrl: 'https://www.sbivc.co.jp/jpysc',
+  },
+  {
+    date: '2026-10-21',
+    collectedAt: '2026-10-21',
+    scopes: ['jpyc-services'],
+    slug: 'startale-usd',
+    changeType: 'added',
+    summary:
+      'Startale USD (USDSC), a USD-pegged stablecoin issued by Startale Group on the M0 platform and offered on Soneium, was added to the directory.',
+    summaryJa:
+      'Startale Group が M0 の基盤で発行し Soneium 上で提供する米ドル連動ステーブルコイン「Startale USD (USDSC)」をディレクトリに追加。',
+    sourceUrl: 'https://usd.startale.com/',
+  },
+  {
+    date: '2026-09-16',
+    collectedAt: '2026-10-21',
+    scopes: ['jpyc-services'],
+    slug: 'arc',
+    changeType: 'added',
+    summary:
+      'Circle launched the Arc public mainnet, an L1 where network fees are paid in USDC (SBI Group and Sumitomo Corporation are founding validators); Arc was added to the directory.',
+    summaryJa:
+      'Circle が L1「Arc」のパブリックメインネットを開始 (ネットワーク手数料は USDC・SBI グループと住友商事が創設バリデーター)。ディレクトリに追加。',
+    sourceUrl: 'https://www.circle.com/pressroom/circle-launches-arc-mainnet-an-economic-operating-system-for-the-internet',
+  },
+  {
+    date: '2026-10-21',
+    collectedAt: '2026-10-21',
+    scopes: ['jpyc-services'],
+    slug: 'soneium',
+    changeType: 'added',
+    summary:
+      'Soneium, an Ethereum layer 2 (mainnet chain ID 1868) where Startale USD (USDSC) circulates, was added to the directory.',
+    summaryJa:
+      'Startale USD (USDSC) が流通する Ethereum のレイヤー 2「Soneium」(メインネット chain ID 1868) をディレクトリに追加。',
+    sourceUrl: 'https://docs.soneium.org/docs/builders/overview',
+  },
+  {
+    date: '2026-07-05',
+    collectedAt: '2026-10-21',
+    scopes: ['jpyc-services'],
+    slug: 'erpc-x402-solana-rpc',
+    changeType: 'added',
+    summary:
+      'ERPC x402 Solana RPC, a Solana RPC billed per use via x402 in USDC (Validators DAO and ELSOUL LABO; settled through the Coinbase CDP facilitator), was added to the directory.',
+    summaryJa:
+      'Solana の RPC を x402 と USDC で従量課金する「ERPC x402 Solana RPC」をディレクトリに追加 (Validators DAO と ELSOUL LABO・決済は Coinbase CDP の facilitator)。',
+    sourceUrl: 'https://prtimes.jp/main/html/rd/p/000000483.000105962.html',
+  },
+  {
+    date: '2026-10-21',
+    collectedAt: '2026-10-21',
+    scopes: ['jpyc-services'],
+    slug: 'circle-gateway',
+    changeType: 'added',
+    summary:
+      'Circle Gateway, a developer service for one USDC balance across chains with gas-free x402 nanopayments (minimum 0.000001 USD), was added to the directory.',
+    summaryJa:
+      '複数チェーンの USDC 残高をまとめ、x402 のガス不要の少額支払い (最小 0.000001 ドル) を提供する「Circle Gateway」をディレクトリに追加。',
+    sourceUrl: 'https://developers.circle.com/gateway',
+  },
+  {
+    date: '2026-10-21',
+    collectedAt: '2026-10-21',
+    scopes: ['jpyc-services'],
+    slug: 'coinbase-x402-facilitator',
+    changeType: 'added',
+    summary:
+      'Coinbase CDP x402 Facilitator, a hosted facilitator that verifies and settles x402 payments (1,000 free per month, then 0.001 USD each), was added to the directory.',
+    summaryJa:
+      'x402 の支払いを検証・精算する Coinbase のホスト型 facilitator をディレクトリに追加 (毎月 1,000 件まで無料・超過分は 1 件 0.001 ドル)。',
+    sourceUrl: 'https://docs.cdp.coinbase.com/x402/seller/facilitator',
+  },
 ];
 
 // ディレクトリ初期公開日。baseline の 'added' はこの固定日に立てる — entry.updatedAt 由来に

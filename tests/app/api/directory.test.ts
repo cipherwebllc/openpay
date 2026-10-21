@@ -245,7 +245,7 @@ describe('free Japan Web3 Directory APIs', () => {
     };
     expect(categoryRes.headers.get('cache-control')).toContain('s-maxage=60');
     expect(categoryBody.items.find((item) => item.category === 'wallet')?.count).toBe(
-      3,
+      8, // 既存 3 + 2026-10-21 の拡充で wallet 5 件
     );
 
     const tagBody = (await (
