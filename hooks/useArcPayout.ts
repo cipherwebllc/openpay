@@ -17,7 +17,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { type Address, type Hex } from 'viem';
+import { BaseError, InsufficientFundsError, type Address, type Hex, type PublicClient } from 'viem';
 import { useAccount, usePublicClient, useSwitchChain, useWalletClient } from 'wagmi';
 import { isNonDelegatedContractCode } from '@/lib/accountCode';
 import { chainForSlug } from '@/lib/chains';
@@ -26,6 +26,7 @@ import {
   arcPayoutChain,
   completeArcPayout,
   fetchArcPayoutFee,
+  readArcMintGasShortfall,
   readArcPayoutBalance,
   requestArcPayout,
   type ArcPayoutAttestation,
@@ -62,9 +63,46 @@ export type ArcPayoutFlow =
   | { phase: 'done'; value: bigint; txHash: Hex | null }
   // pending があれば、失効までは受け取りの取引の続きを送れる (txHash があれば、まず確かめ直す)。
   // retryAfter までは新しい署名で引き出し直させない。
-  | { phase: 'failed'; failure: ArcPayoutFailure; pending?: ArcPayoutAttestation; retryAfter?: number };
+  | {
+      phase: 'failed';
+      failure: ArcPayoutFailure;
+      pending?: ArcPayoutAttestation;
+      retryAfter?: number;
+      /** 送信のエラーがノードの残高不足だった (読み直して診断し直すときにも使う)。 */
+      sendInsufficient?: boolean;
+      /** 受け取りの取引をガス代の不足で送れなかったという診断 (表示だけ・後から付く)。 */
+      gasShortfall?: ArcPayoutGasShortfall;
+    };
+
+/** ガス代 (ウォレットの Arc の USDC) の不足の診断。額は読めたときだけ (ウォレットの上乗せ分の不足などは額なし)。 */
+export type ArcPayoutGasShortfall = { balance?: bigint; shortfall?: bigint };
+type ArcPayoutFailed = Extract<ArcPayoutFlow, { phase: 'failed' }>;
 
 /** step = 失敗したときに進んでいた段階。依頼の途中で通信が切れたら、受け付けられた可能性がある。 */
+/** viem がノードの「残高不足」(gas × 手数料 + value) と分類したエラーか。 */
+function isInsufficientFunds(err: unknown): boolean {
+  return err instanceof BaseError && err.walk((e) => e instanceof InsufficientFundsError) !== null;
+}
+
+/**
+ * 受け取りの取引を送れなかったのがガス代の不足のせいか (表示のための診断・投げない)。
+ * 下限 (gas × base fee) にも足りなければ額つき。下限は満たすが送信がノードの残高不足だった (ウォレットの上乗せ分の
+ * 不足)、または見積もり自体が残高不足で失敗したなら額なし。それ以外 (足りている・読めない) は null。
+ */
+async function diagnoseGasShortfall(
+  client: PublicClient,
+  pending: ArcPayoutAttestation,
+  sendInsufficient: boolean,
+): Promise<ArcPayoutGasShortfall | null> {
+  try {
+    const { balance, shortfall } = await readArcMintGasShortfall(client, pending);
+    if (shortfall > 0n) return { balance, shortfall };
+    return sendInsufficient ? {} : null;
+  } catch (readError) {
+    return isInsufficientFunds(readError) || sendInsufficient ? {} : null;
+  }
+}
+
 export function arcPayoutFailureOf(err: unknown, step: ArcPayoutStep | undefined): ArcPayoutFailure {
   if (err instanceof ArcPayoutError) return { code: err.code };
   if (err instanceof GatewayTransferRejectedError) {
@@ -134,6 +172,32 @@ export function useArcPayout() {
     [queryClient],
   );
 
+  // 受け取りの取引を送れなかった (まだ送っていない) ときだけ、ガス代の不足が原因かを後から確かめて表示に足す。
+  // ウォレットによっては残高不足だと確認画面で送れず「取り消し」で返るので、エラーの種類だけでは決めない。
+  // 表示だけで、続きの送り方は変えない。失敗の表示と送り直しは先に確定し、診断を待たせない
+  // (診断の読み取りが止まっても、10 分の送り直しの時間を食わないため)。
+  const diagnose = useCallback((from: Address, failed: ArcPayoutFailed) => {
+    if (!arcClient || !failed.pending || failed.pending.txHash) return;
+    if (failed.failure.code !== 'rejected' && failed.failure.code !== 'failed') return;
+    void diagnoseGasShortfall(arcClient, failed.pending, failed.sendInsufficient === true).then((gasShortfall) => {
+      // 診断の間に送り直した・読み直した・別の結果になったら、古い診断で上書きしない。
+      if (gasShortfall && flowsRef.current[from] === failed) setFlowFor(from, { ...failed, gasShortfall });
+    });
+  }, [arcClient, setFlowFor]);
+
+  // 読み直し: 残高を読み直し、送れなかった後なら入金後の残高でガス代の不足を診断し直す (古い残高・不足額を残さない)。
+  // 前回の送信の「残高不足」も捨てる (入金で解消したかは、読み直した残高でしか分からない)。
+  const reload = useCallback(() => {
+    if (!address) return;
+    const flow = flowsRef.current[address];
+    if (flow?.phase === 'failed') {
+      const fresh: ArcPayoutFailed = { ...flow, gasShortfall: undefined, sendInsufficient: undefined };
+      setFlowFor(address, fresh);
+      diagnose(address, fresh);
+    }
+    refresh(address);
+  }, [address, diagnose, refresh, setFlowFor]);
+
   const finish = useCallback(async (from: Address, pending: ArcPayoutAttestation) => {
     if (!walletClient || !arcClient) return;
     let latest = pending;
@@ -153,11 +217,18 @@ export function useArcPayout() {
       const next = failure.code === 'attestation_expired'
         ? undefined
         : failure.code === 'mint_not_completed' ? { ...latest, txHash: undefined } : latest;
-      setFlowFor(from, { phase: 'failed', failure, ...(next ? { pending: next } : {}) });
+      const failed: ArcPayoutFailed = {
+        phase: 'failed',
+        failure,
+        ...(next ? { pending: next } : {}),
+        ...(isInsufficientFunds(err) ? { sendInsufficient: true } : {}),
+      };
+      setFlowFor(from, failed);
+      diagnose(from, failed);
     } finally {
       refresh(from);
     }
-  }, [arcClient, refresh, setFlowFor, switchChainAsync, walletClient]);
+  }, [arcClient, diagnose, refresh, setFlowFor, switchChainAsync, walletClient]);
 
   const withdraw = useCallback(async () => {
     if (!address || !walletClient || !arcClient || inflight.current.has(address)) return;
@@ -223,7 +294,7 @@ export function useArcPayout() {
     otherPending,
     withdraw,
     continueMint,
-    reload: () => (address ? refresh(address) : undefined),
+    reload,
     walletReady: !!walletClient,
     arcChainId: arc.id,
   };

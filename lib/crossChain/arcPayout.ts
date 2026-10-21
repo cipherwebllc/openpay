@@ -367,6 +367,31 @@ function logsMintThis(logs: readonly Log[], transferSpecHash: Hex): boolean {
     log.topics[3]?.toLowerCase() === transferSpecHash.toLowerCase());
 }
 
+/**
+ * 受け取りの取引のネットワーク手数料に対して、ウォレットの Arc の USDC (ネイティブ・18 桁) が足りないか。
+ * 受け取りの取引を送れなかった後の表示 (原因と足りない額) のためだけに読む — 送るかどうかの判断や送り方には使わない。
+ * 必要額は下限 = 見積もった gas × いまの base fee で数える (どのウォレットもこれ未満では送れない)。下限なので、
+ * 「足りない」と言えるのは本当に足りないときだけ (わざと取り消した人を不足と誤って言わない)。実際に要る額は
+ * ウォレットが上乗せする分だけ多いので、表示は「あと X 以上」。足りていれば shortfall = 0。
+ */
+export async function readArcMintGasShortfall(
+  publicClient: PublicClient,
+  attestation: ArcPayoutAttestation,
+): Promise<{ balance: bigint; shortfall: bigint }> {
+  const [gas, block, balance] = await Promise.all([
+    publicClient.estimateGas({
+      account: attestation.depositor,
+      to: GATEWAY_MINTER_ADDRESS,
+      data: encodeGatewayMintCalldata(attestation.attestation, attestation.signature),
+    }),
+    publicClient.getBlock({ blockTag: 'latest' }),
+    publicClient.getBalance({ address: attestation.depositor }),
+  ]);
+  if (block.baseFeePerGas === null) throw new Error('arc_payout_no_base_fee');
+  const need = gas * block.baseFeePerGas;
+  return { balance, shortfall: need > balance ? need - balance : 0n };
+}
+
 export type ArcPayoutErrorCode =
   | 'balance_unavailable'
   | 'below_fee'

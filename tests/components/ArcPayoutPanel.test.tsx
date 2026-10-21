@@ -5,7 +5,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import type { Hex } from 'viem';
+import { InsufficientFundsError, TransactionExecutionError, type Hex } from 'viem';
 import { renderWithIntl } from '../_helpers/i18n';
 import messages from '../../messages/ja.json';
 
@@ -24,6 +24,12 @@ const s = vi.hoisted(() => ({
   request: vi.fn(),
   mint: vi.fn(),
   switchChainAsync: vi.fn(),
+  // 受け取りの取引のガス代の見積もり (送れなかった後の原因の表示だけに使う)。Error なら読み取りの失敗。
+  // 必要額の下限 = gas × base fee。
+  mintEstimate: { gas: 100_000n, baseFee: 1_000_000_000n } as { gas: bigint; baseFee: bigint } | Error,
+  estimateGas: vi.fn(),
+  // 見積もりを止めておく (診断の待ちが失敗の表示・送り直しを塞がないことの確認用)。
+  estimateGate: null as Promise<void> | null,
 }));
 
 vi.mock('wagmi', () => ({
@@ -31,6 +37,16 @@ vi.mock('wagmi', () => ({
   usePublicClient: ({ chainId }: { chainId: number }) => ({
     getCode: async () => (chainId === 5042 || chainId === 5042002 ? s.code.arc : s.code.base),
     getBalance: async () => s.gas,
+    estimateGas: async (args: unknown) => {
+      s.estimateGas(args);
+      if (s.estimateGate) await s.estimateGate;
+      if (s.mintEstimate instanceof Error) throw s.mintEstimate;
+      return s.mintEstimate.gas;
+    },
+    getBlock: async () => {
+      if (s.mintEstimate instanceof Error) throw s.mintEstimate;
+      return { baseFeePerGas: s.mintEstimate.baseFee };
+    },
   }),
   useWalletClient: () => ({ data: { account: s.address } }),
   useSwitchChain: () => ({ switchChainAsync: s.switchChainAsync }),
@@ -88,6 +104,9 @@ beforeEach(() => {
   s.request.mockReset().mockResolvedValue(pending);
   s.mint.mockReset().mockResolvedValue(TX);
   s.switchChainAsync.mockReset();
+  s.mintEstimate = { gas: 100_000n, baseFee: 1_000_000_000n };
+  s.estimateGas.mockReset();
+  s.estimateGate = null;
 });
 afterEach(() => vi.restoreAllMocks());
 
@@ -313,3 +332,189 @@ describe('ArcPayoutPanel の引き出し', () => {
     expect(logged).not.toContain(SECRET_ATT.slice(2, 40));
   });
 });
+
+// 受け取りの取引をガス代の不足で送れなかったとき、原因と足りない額を出す (表示だけ・続きの送り方は変えない)。
+// ウォレットによっては残高不足だと確認画面で送れず「取り消し」として返るので、エラーの種類だけでは決めない。
+describe('ArcPayoutPanel: ガス代の不足で受け取りの取引を送れなかったとき', () => {
+  it('取り消しで返っても、見積もりで足りなければ「いま / あと」の額と、10 分以内にもう一度送る案内を出す', async () => {
+    s.gas = 88_524_328_342_942n; // 0.000088… USDC
+    s.mintEstimate = { gas: 200_000n, baseFee: 20_000_000_000n }; // 必要の下限 0.004 USDC
+    s.mint.mockRejectedValueOnce(new Error('user rejected the request')).mockResolvedValueOnce(TX);
+    renderPanel();
+    await waitFor(() => expect(withdrawButton()).toBeEnabled());
+    fireEvent.click(withdrawButton());
+    // あと = 0.004 − 0.000088524… を 6 桁で切り上げ = 0.003912 (切り捨てると入れてもまだ足りない)。
+    expect(
+      await screen.findByText(t.errorGasShort.replace('{balance}', '0.000088').replace('{shortfall}', '0.003912')),
+    ).toBeInTheDocument();
+    expect(s.estimateGas).toHaveBeenCalledWith(expect.objectContaining({ account: A }));
+    // 続きは同じ attestation で送れる (新しく署名させない)。
+    fireEvent.click(screen.getByRole('button', { name: t.retryMint }));
+    expect(await screen.findByText(t.done.replace('{amount}', '0.027'), { exact: false })).toBeInTheDocument();
+    expect(s.request).toHaveBeenCalledTimes(1);
+    expect(s.mint.mock.calls[1]![0]).toEqual(pending);
+  });
+
+  it('ガス代が足りていれば、取り消しは従来どおりの文 (原因をガス代にしない)', async () => {
+    s.mint.mockRejectedValueOnce(new Error('user rejected the request'));
+    renderPanel();
+    await waitFor(() => expect(withdrawButton()).toBeEnabled());
+    fireEvent.click(withdrawButton());
+    expect(await screen.findByText(t.errorMintNotSent)).toBeInTheDocument();
+    expect(screen.queryByText(/足りません/)).not.toBeInTheDocument();
+  });
+
+  it('見積もりを読めなくても、ノードの残高不足のエラーなら原因を出す (額は目安とガス代用の残高)', async () => {
+    s.mintEstimate = new Error('rpc down');
+    s.mint.mockRejectedValueOnce(
+      new TransactionExecutionError(new InsufficientFundsError(), { account: null, chain: undefined }),
+    );
+    renderPanel();
+    await waitFor(() => expect(withdrawButton()).toBeEnabled());
+    fireEvent.click(withdrawButton());
+    expect(await screen.findByText(t.errorGasShortUnknown.replace('{balance}', '0.117'))).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: t.retryMint })).toBeInTheDocument();
+  });
+
+  it('見積もりを読めず原因も分からなければ、従来どおりの文 (付帯の読み取りの失敗で表示を巻き込まない)', async () => {
+    s.mintEstimate = new Error('rpc down');
+    s.mint.mockRejectedValueOnce(new Error('user rejected the request'));
+    renderPanel();
+    await waitFor(() => expect(withdrawButton()).toBeEnabled());
+    fireEvent.click(withdrawButton());
+    expect(await screen.findByText(t.errorMintNotSent)).toBeInTheDocument();
+  });
+
+  it('送った後の失敗 (結果が分からない) は見積もらず、従来どおり確かめ直す', async () => {
+    const SENT = `0x${'cd'.repeat(32)}` as Hex;
+    s.mintEstimate = { gas: 200_000n, baseFee: 20_000_000_000_000n };
+    s.mint.mockImplementationOnce(async (_p: unknown, deps: { onBroadcast?: (hash: Hex) => void }) => {
+      deps.onBroadcast?.(SENT);
+      throw new ArcPayoutError('confirm_unknown');
+    });
+    renderPanel();
+    await waitFor(() => expect(withdrawButton()).toBeEnabled());
+    fireEvent.click(withdrawButton());
+    expect(await screen.findByText(t.errorConfirmUnknown)).toBeInTheDocument();
+    expect(s.estimateGas).not.toHaveBeenCalled();
+  });
+
+  it('必要額は下限 (gas × いまの base fee) で判定する: 下限以上あれば、わざとの取り消しを不足と言わない', async () => {
+    // 下限 0.004 USDC・残高 0.0044 USDC (viem の推奨上限 base fee × 1.2 だと 0.0048 で「不足」になってしまう額)。
+    s.gas = 4_400_000_000_000_000n;
+    s.mintEstimate = { gas: 200_000n, baseFee: 20_000_000_000n };
+    s.mint.mockRejectedValueOnce(new Error('user rejected the request'));
+    renderPanel();
+    await waitFor(() => expect(withdrawButton()).toBeEnabled());
+    fireEvent.click(withdrawButton());
+    expect(await screen.findByText(t.errorMintNotSent)).toBeInTheDocument();
+    await waitFor(() => expect(s.estimateGas).toHaveBeenCalled());
+    expect(screen.queryByText(/足りません/)).not.toBeInTheDocument();
+  });
+
+  it('見積もり自体がノードの残高不足で失敗したら、その原因を拾う (額は目安)', async () => {
+    s.mintEstimate = new InsufficientFundsError();
+    s.mint.mockRejectedValueOnce(new Error('user rejected the request'));
+    renderPanel();
+    await waitFor(() => expect(withdrawButton()).toBeEnabled());
+    fireEvent.click(withdrawButton());
+    expect(await screen.findByText(t.errorGasShortUnknown.replace('{balance}', '0.117'))).toBeInTheDocument();
+  });
+
+  it('診断を待たずに失敗の表示と送り直しを出し、診断が後から届けば原因に差し替える', async () => {
+    let open!: () => void;
+    s.estimateGate = new Promise<void>((resolve) => { open = resolve; });
+    s.gas = 88_524_328_342_942n;
+    s.mintEstimate = { gas: 200_000n, baseFee: 20_000_000_000n };
+    s.mint.mockRejectedValueOnce(new Error('user rejected the request'));
+    renderPanel();
+    await waitFor(() => expect(withdrawButton()).toBeEnabled());
+    fireEvent.click(withdrawButton());
+    // 診断が止まっていても、失敗の表示と送り直しのボタンはすぐ出る。
+    expect(await screen.findByText(t.errorMintNotSent)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: t.retryMint })).toBeEnabled();
+    await act(async () => open());
+    expect(
+      await screen.findByText(t.errorGasShort.replace('{balance}', '0.000088').replace('{shortfall}', '0.003912')),
+    ).toBeInTheDocument();
+  });
+
+  it('診断の間に送り直して受け取れたら、遅れて届いた診断で上書きしない', async () => {
+    let open!: () => void;
+    s.estimateGate = new Promise<void>((resolve) => { open = resolve; });
+    s.gas = 88_524_328_342_942n;
+    s.mintEstimate = { gas: 200_000n, baseFee: 20_000_000_000n };
+    s.mint.mockRejectedValueOnce(new Error('user rejected the request')).mockResolvedValueOnce(TX);
+    renderPanel();
+    await waitFor(() => expect(withdrawButton()).toBeEnabled());
+    fireEvent.click(withdrawButton());
+    fireEvent.click(await screen.findByRole('button', { name: t.retryMint }));
+    expect(await screen.findByText(t.done.replace('{amount}', '0.027'), { exact: false })).toBeInTheDocument();
+    await act(async () => open());
+    expect(screen.getByText(t.done.replace('{amount}', '0.027'), { exact: false })).toBeInTheDocument();
+    expect(screen.queryByText(/足りません/)).not.toBeInTheDocument();
+  });
+
+  it('下限は満たしても送信がノードの残高不足 (ウォレットの上乗せ分) なら、額なしで原因を出す', async () => {
+    s.mint.mockRejectedValueOnce(
+      new TransactionExecutionError(new InsufficientFundsError(), { account: null, chain: undefined }),
+    );
+    renderPanel();
+    await waitFor(() => expect(withdrawButton()).toBeEnabled());
+    fireEvent.click(withdrawButton());
+    expect(await screen.findByText(t.errorGasShortUnknown.replace('{balance}', '0.117'))).toBeInTheDocument();
+    expect(s.estimateGas).toHaveBeenCalled();
+  });
+
+  it('診断の間に入金して読み直したら、古い残高の診断は捨てて入金後の残高で診断し直す', async () => {
+    let open!: () => void;
+    s.estimateGate = new Promise<void>((resolve) => { open = resolve; });
+    s.gas = 88_524_328_342_942n;
+    s.mintEstimate = { gas: 200_000n, baseFee: 20_000_000_000n };
+    s.mint.mockRejectedValueOnce(new Error('user rejected the request'));
+    renderPanel();
+    await waitFor(() => expect(withdrawButton()).toBeEnabled());
+    fireEvent.click(withdrawButton());
+    expect(await screen.findByText(t.errorMintNotSent)).toBeInTheDocument();
+    // 入金 (0.117 USDC) してから読み直す。
+    s.gas = 117_000_000_000_000_000n;
+    fireEvent.click(screen.getByRole('button', { name: t.reload }));
+    await act(async () => open());
+    await waitFor(() => expect(s.estimateGas).toHaveBeenCalledTimes(2));
+    expect(screen.getByText(t.errorMintNotSent)).toBeInTheDocument();
+    expect(screen.queryByText(/足りません/)).not.toBeInTheDocument();
+  });
+
+  it('不足の表示が出た後に入金して読み直したら、不足の表示を消す (入金後の残高で足りていれば従来の文)', async () => {
+    s.gas = 88_524_328_342_942n;
+    s.mintEstimate = { gas: 200_000n, baseFee: 20_000_000_000n };
+    s.mint.mockRejectedValueOnce(new Error('user rejected the request'));
+    renderPanel();
+    await waitFor(() => expect(withdrawButton()).toBeEnabled());
+    fireEvent.click(withdrawButton());
+    expect(await screen.findByText(/足りません/)).toBeInTheDocument();
+    s.gas = 117_000_000_000_000_000n;
+    fireEvent.click(screen.getByRole('button', { name: t.reload }));
+    expect(await screen.findByText(t.errorMintNotSent)).toBeInTheDocument();
+    await waitFor(() => expect(s.estimateGas).toHaveBeenCalledTimes(2));
+    expect(screen.queryByText(/足りません/)).not.toBeInTheDocument();
+    // 続きは送れる。
+    expect(screen.getByRole('button', { name: t.retryMint })).toBeEnabled();
+  });
+
+  it('ウォレットの上乗せ分の不足で出た表示も、入金して読み直したら残高だけで判定し直して消す', async () => {
+    s.mint.mockRejectedValueOnce(
+      new TransactionExecutionError(new InsufficientFundsError(), { account: null, chain: undefined }),
+    );
+    renderPanel();
+    await waitFor(() => expect(withdrawButton()).toBeEnabled());
+    fireEvent.click(withdrawButton());
+    expect(await screen.findByText(/足りません/)).toBeInTheDocument();
+    s.gas = 1_000_000_000_000_000_000n; // 入金して 1 USDC
+    fireEvent.click(screen.getByRole('button', { name: t.reload }));
+    expect(await screen.findByText(t.errorMintNotSent)).toBeInTheDocument();
+    await waitFor(() => expect(s.estimateGas).toHaveBeenCalledTimes(2));
+    expect(screen.queryByText(/足りません/)).not.toBeInTheDocument();
+  });
+});
+
