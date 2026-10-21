@@ -491,16 +491,19 @@ export const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
     sourceUrl:
       'https://www.pref.osaka.lg.jp/o020060/kikaku/osaka-kokusaikinyu/senkuteki_hojokin.html',
   },
+  // 2026-10-21 訂正 (第 10 回・Codex 指摘): 府のページと交付決定事業一覧に手数料は無い (1.0% の出典は Mi&T の
+  // 自社リリース 8/31) ので文から外し、collectedAt を上げて再配信する (同じ鍵の訂正の掟)。
   {
     date: '2026-09-11',
+    collectedAt: '2026-10-21',
     scopes: ['stablecoin-payments'],
     provider: 'Mi&T (Osaka Pref. subsidy)',
     changeType: 'verified',
     assets: ['JPYC'],
     summary:
-      'Re-verified on the Osaka Prefecture page (still last updated 2026-08-26): Mi&T pilot (merchant fee 1.0%, planned mid-November 2026 to mid-March 2027) unchanged.',
+      'Re-verified on the Osaka Prefecture page and its award list (still last updated 2026-08-26): Mi&T pilot schedule (mid-November 2026 to mid-March 2027, about five shops) unchanged.',
     summaryJa:
-      '大阪府公式ページ (更新日 2026-08-26 のまま) で再確認: Mi&T の実証 (手数料 1.0%・2026 年 11 月中旬〜2027 年 3 月中旬予定) に変更なし。',
+      '大阪府公式ページと交付決定事業一覧 (更新日 2026-08-26 のまま) で再確認: Mi&T の実証の予定 (2026 年 11 月中旬〜2027 年 3 月中旬・5 店舗程度) に変更なし。',
     sourceUrl:
       'https://www.pref.osaka.lg.jp/o020060/kikaku/osaka-kokusaikinyu/senkuteki_hojokin.html',
   },
@@ -585,16 +588,19 @@ export const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
     sourceUrl:
       'https://www.pref.osaka.lg.jp/o020060/kikaku/osaka-kokusaikinyu/senkuteki_hojokin.html',
   },
+  // 2026-10-21 訂正 (第 10 回・Codex 指摘): 府のページと交付決定事業一覧に手数料は無い (1.0% の出典は Mi&T の
+  // 自社リリース 8/31) ので文から外し、collectedAt を上げて再配信する (同じ鍵の訂正の掟)。
   {
     date: '2026-09-18',
+    collectedAt: '2026-10-21',
     scopes: ['stablecoin-payments'],
     provider: 'Mi&T (Osaka Pref. subsidy)',
     changeType: 'verified',
     assets: ['JPYC'],
     summary:
-      'Re-verified on the Osaka Prefecture page (still last updated 2026-08-26): Mi&T pilot (merchant fee 1.0%, planned mid-November 2026 to mid-March 2027) unchanged.',
+      'Re-verified on the Osaka Prefecture page and its award list (still last updated 2026-08-26): Mi&T pilot schedule (mid-November 2026 to mid-March 2027, about five shops) unchanged.',
     summaryJa:
-      '大阪府公式ページ (更新日 2026-08-26 のまま) で再確認: Mi&T の実証 (手数料 1.0%・2026 年 11 月中旬〜2027 年 3 月中旬予定) に変更なし。',
+      '大阪府公式ページと交付決定事業一覧 (更新日 2026-08-26 のまま) で再確認: Mi&T の実証の予定 (2026 年 11 月中旬〜2027 年 3 月中旬・5 店舗程度) に変更なし。',
     sourceUrl:
       'https://www.pref.osaka.lg.jp/o020060/kikaku/osaka-kokusaikinyu/senkuteki_hojokin.html',
   },
@@ -666,16 +672,19 @@ export const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
     sourceUrl:
       'https://www.pref.osaka.lg.jp/o020060/kikaku/osaka-kokusaikinyu/senkuteki_hojokin.html',
   },
+  // 2026-10-21 訂正 (第 10 回・Codex 指摘): 府のページと交付決定事業一覧に手数料は無い (1.0% の出典は Mi&T の
+  // 自社リリース 8/31) ので文から外し、collectedAt を上げて再配信する (同じ鍵の訂正の掟)。
   {
     date: '2026-09-23',
+    collectedAt: '2026-10-21',
     scopes: ['stablecoin-payments'],
     provider: 'Mi&T (Osaka Pref. subsidy)',
     changeType: 'verified',
     assets: ['JPYC'],
     summary:
-      'Re-verified on the Osaka Prefecture page (still last updated 2026-08-26): Mi&T pilot (merchant fee 1.0%, planned mid-November 2026 to mid-March 2027) unchanged.',
+      'Re-verified on the Osaka Prefecture page and its award list (still last updated 2026-08-26): Mi&T pilot schedule (mid-November 2026 to mid-March 2027, about five shops) unchanged.',
     summaryJa:
-      '大阪府公式ページ (更新日 2026-08-26 のまま) で再確認: Mi&T の実証 (手数料 1.0%・2026 年 11 月中旬〜2027 年 3 月中旬予定) に変更なし。',
+      '大阪府公式ページと交付決定事業一覧 (更新日 2026-08-26 のまま) で再確認: Mi&T の実証の予定 (2026 年 11 月中旬〜2027 年 3 月中旬・5 店舗程度) に変更なし。',
     sourceUrl:
       'https://www.pref.osaka.lg.jp/o020060/kikaku/osaka-kokusaikinyu/senkuteki_hojokin.html',
   },
@@ -856,17 +865,19 @@ export const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
     sourceUrl:
       'https://www.pref.osaka.lg.jp/o020060/kikaku/osaka-kokusaikinyu/senkuteki_hojokin.html',
   },
+  // 2026-10-21 訂正 (第 10 回・Codex 指摘): 府のページと交付決定事業一覧に手数料は無い (1.0% の出典は Mi&T の
+  // 自社リリース 8/31) ので文から外し、collectedAt を上げて再配信する (同じ鍵の訂正の掟)。
   {
     date: '2026-10-13',
-    collectedAt: '2026-10-13',
+    collectedAt: '2026-10-21',
     scopes: ['stablecoin-payments'],
     provider: 'Mi&T (Osaka Pref. subsidy)',
     changeType: 'verified',
     assets: ['JPYC'],
     summary:
-      'Re-verified on the Osaka Prefecture page (still last updated 2026-08-26): Mi&T pilot (merchant fee 1.0%, planned mid-November 2026 to mid-March 2027) unchanged.',
+      'Re-verified on the Osaka Prefecture page and its award list (still last updated 2026-08-26): Mi&T pilot schedule (mid-November 2026 to mid-March 2027, about five shops) unchanged.',
     summaryJa:
-      '大阪府公式ページ (更新日 2026-08-26 のまま) で再確認: Mi&T の実証 (手数料 1.0%・2026 年 11 月中旬〜2027 年 3 月中旬予定) に変更なし。',
+      '大阪府公式ページと交付決定事業一覧 (更新日 2026-08-26 のまま) で再確認: Mi&T の実証の予定 (2026 年 11 月中旬〜2027 年 3 月中旬・5 店舗程度) に変更なし。',
     sourceUrl:
       'https://www.pref.osaka.lg.jp/o020060/kikaku/osaka-kokusaikinyu/senkuteki_hojokin.html',
   },
@@ -989,17 +1000,19 @@ export const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
     sourceUrl:
       'https://www.pref.osaka.lg.jp/o020060/kikaku/osaka-kokusaikinyu/senkuteki_hojokin.html',
   },
+  // 2026-10-21 訂正 (第 10 回・Codex 指摘): 府のページと交付決定事業一覧に手数料は無い (1.0% の出典は Mi&T の
+  // 自社リリース 8/31) ので文から外し、collectedAt を上げて再配信する (同じ鍵の訂正の掟)。
   {
     date: '2026-10-18',
-    collectedAt: '2026-10-18',
+    collectedAt: '2026-10-21',
     scopes: ['stablecoin-payments'],
     provider: 'Mi&T (Osaka Pref. subsidy)',
     changeType: 'verified',
     assets: ['JPYC'],
     summary:
-      'Re-verified on the Osaka Prefecture page (still last updated 2026-08-26): Mi&T pilot (merchant fee 1.0%, planned mid-November 2026 to mid-March 2027) unchanged.',
+      'Re-verified on the Osaka Prefecture page and its award list (still last updated 2026-08-26): Mi&T pilot schedule (mid-November 2026 to mid-March 2027, about five shops) unchanged.',
     summaryJa:
-      '大阪府公式ページ (更新日 2026-08-26 のまま) で再確認: Mi&T の実証 (手数料 1.0%・2026 年 11 月中旬〜2027 年 3 月中旬予定) に変更なし。',
+      '大阪府公式ページと交付決定事業一覧 (更新日 2026-08-26 のまま) で再確認: Mi&T の実証の予定 (2026 年 11 月中旬〜2027 年 3 月中旬・5 店舗程度) に変更なし。',
     sourceUrl:
       'https://www.pref.osaka.lg.jp/o020060/kikaku/osaka-kokusaikinyu/senkuteki_hojokin.html',
   },
