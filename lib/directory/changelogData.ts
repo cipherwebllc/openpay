@@ -1211,7 +1211,7 @@ export const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
     sourceUrl: 'https://wallet.hashport.com/news/crypto_credit_card',
   },
   {
-    date: '2026-06-01',
+    date: '2026-05-26',
     collectedAt: '2026-10-21',
     scopes: ['jpyc-services'],
     slug: 'diners-trust-club-jpyc',
