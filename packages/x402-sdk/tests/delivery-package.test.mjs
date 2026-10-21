@@ -43,7 +43,7 @@ test('actual npm tarball includes types/examples and verifies through installed 
     const manifest = JSON.parse(readFileSync(join(extracted, 'package.json'), 'utf8'));
     assert.deepEqual(manifest.exports['.'], { types: './index.d.ts', import: './src/index.mjs' });
     assert.deepEqual(manifest.exports['./delivery'], { types: './delivery.d.ts', import: './src/delivery.mjs' });
-    assert.equal(manifest.engines.node, '>=20'); assert.deepEqual(manifest.dependencies, { viem: '^2.45.0' });
+    assert.equal(manifest.engines.node, '>=22'); assert.deepEqual(manifest.dependencies, { viem: '^2.45.0' });
     assert.doesNotMatch(readFileSync(join(extracted, 'src/index.mjs'), 'utf8'), /delivery/);
     assert.doesNotMatch(readFileSync(join(extracted, 'index.d.ts'), 'utf8'), /Delivery|delivery\.mjs/);
     const source = readFileSync(join(extracted, 'src/delivery.mjs'), 'utf8');

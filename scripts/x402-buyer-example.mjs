@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // OpenPay の JPYC forwarder-split 402 を 1 回購入するリファレンス買い手。
 //
-// 使い方 (Node.js 20+・鍵はファイルにもコマンド行にも書かない・入力で受けて env で渡す):
+// 使い方 (Node.js 22+・鍵はファイルにもコマンド行にも書かない・入力で受けて env で渡す):
 //   npm install openpay-x402-sdk viem
 //   read -s BUYER_PRIVATE_KEY && export BUYER_PRIVATE_KEY   # 専用の少額ウォレットの鍵だけ
 //   [RESOURCE_URL=https://open-pay.jp/api/paid/x] [MAX_JPYC=5] node scripts/x402-buyer-example.mjs

@@ -3302,7 +3302,7 @@
     "copied": "コピーしました",
     "tryTitle": "2円で試す",
     "trySubtitle": "1 JPYC + 手数料 1 JPYC のデモで、402 → 支払い → 解錠を体験。",
-    "tryIntro": "curl・Node.js 20+・npm を使い、下の手順で 402→支払い→解錠を体験できます。",
+    "tryIntro": "curl・Node.js 22+・npm を使い、下の手順で 402→支払い→解錠を体験できます。",
     "tryStep1": "まず 402 と accepts を見る",
     "tryStep2": "npm パッケージをインストールし、Node スクリプトで署名して再リクエストする",
     "tryStep3": "1 JPYC + 手数料 1 JPYC、合計 2 JPYC で JSON が解錠されます。",

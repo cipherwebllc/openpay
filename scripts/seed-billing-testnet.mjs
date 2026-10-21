@@ -2,7 +2,7 @@
 // testnet 専用: a1 利用料 E2E の「前月シード」を Upstash REST 経由で正しく投入するヘルパー。
 // 手動 redis CLI で起きがちな JSON の quote 壊れ / アドレス大文字小文字ミスを回避する。
 //
-// 使い方 (Node 20+):
+// 使い方 (Node 22+):
 //   node --env-file=.env.local scripts/seed-billing-testnet.mjs                    # dry-run (既定・書き込まない)
 //   node --env-file=.env.local scripts/seed-billing-testnet.mjs 0xMerchant         # dry-run・店主を明示
 //   SEED_TESTNET_OK=1 node --env-file=.env.local scripts/seed-billing-testnet.mjs --apply

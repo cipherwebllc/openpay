@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.10.4 — unreleased
+
+- Raise `engines.node` from `>=20` to `>=22`. Node.js 20 reached end-of-life and
+  does not receive security releases (for example the October 2026 release that
+  fixes the Brotli decoder used when `fetch` decodes a `br` response). The code
+  is unchanged.
+
 ## 0.10.3 — 2026-10-10
 
 - Widen `isPrivatePaymentHost` / `parseSafePaymentUrl` to the same IANA

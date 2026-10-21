@@ -1,6 +1,6 @@
 # openpay-x402-sdk
 
-Node.js 20+ SDK for discovering, quoting, and buying OpenPay x402 resources priced
+Node.js 22+ SDK for discovering, quoting, and buying OpenPay x402 resources priced
 in JPYC. It ships as plain ESM and has no build step.
 
 Wire compatibility: x402 v1 transport (JSON 402 body with `x402Version: 1`, plus the
@@ -525,8 +525,7 @@ issuance does not revoke an attacker's signing ability or recall downloaded byte
 
 | Runtime | Delivery subpath requirement / acceptance |
 | --- | --- |
-| Node 20.19+ | Global WebCrypto with standard Ed25519; package engine remains Node >=20. |
-| Node 22.13+ | Same Web API entry point. |
+| Node 22.13+ | Global WebCrypto with standard Ed25519; the package engine is Node >=22. |
 | Node 24 | Same Web API entry point. |
 | Cloudflare Workers | Standard `Ed25519`, no `nodejs_compat`. Verified end-to-end on a real Worker + private R2 deployment with SDK 0.8.1 (2026-09-10); re-run the smoke when you change the compatibility date. |
 

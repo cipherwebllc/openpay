@@ -8,7 +8,7 @@
     "openpay-order-mcp": "src/order.mjs"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "files": [
     "scripts/steward-bootstrap.mjs",
