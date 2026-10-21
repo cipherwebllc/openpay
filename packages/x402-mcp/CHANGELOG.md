@@ -1,8 +1,9 @@
 # Changelog
 
-## 0.20.1 — unreleased
+## 0.20.1 — 2026-10-22
 
 - Raise `engines.node` from `>=20` to `>=22`. Node.js 20 reached end-of-life and does not receive security releases (for example the October 2026 release that fixes the Brotli decoder used when `fetch` decodes a `br` response). The tools and their inputs are unchanged.
+- README: the setup examples now pin `openpay-x402-mcp@0.20` (they still said `@0.19` in the 0.20.0 tarball).
 
 ## 0.20.0 — 2026-10-19
 

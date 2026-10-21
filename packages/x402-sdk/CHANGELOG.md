@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.10.4 — unreleased
+## 0.10.4 — 2026-10-22
 
 - Raise `engines.node` from `>=20` to `>=22`. Node.js 20 reached end-of-life and
   does not receive security releases (for example the October 2026 release that
