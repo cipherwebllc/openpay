@@ -576,9 +576,9 @@ export const DIRECTORY_ENTRIES = [
       supportsMcp: false,
     },
     editorial: {
-      summaryJa: 'JPYCとUSDCを持ち運ぶ国内ウォレットを探すときの公式アプリです。',
+      summaryJa: 'JPYCとUSDCを扱える、HashPortのノンカストディアルウォレットです。',
       summaryEn:
-        'An official wallet app to consider for holding JPYC and USDC in Japan.',
+        'HashPort\'s non-custodial wallet for JPYC and USDC.',
     },
   },
   {
@@ -642,17 +642,17 @@ export const DIRECTORY_ENTRIES = [
     name: 'Mina Wallet',
     nameJa: 'マイナウォレット',
     status: 'published',
-    ...provenance('https://www.mynawallet.co.jp/', 'マイナウォレット株式会社', 'official', {
+    ...provenance('https://prtimes.jp/main/html/rd/p/000000013.000125732.html', 'マイナウォレット株式会社', 'official', {
       verifiedAt: '2026-10-21',
       updatedAt: '2026-10-21',
     }),
     facts: {
       description:
-        'マイナンバーカードで本人確認するウォレット (2026年7月21日に一般提供)。v1.2.2 以上で JPYC EX 連携に対応し、アプリ内で JPYC の発行・償還まで完結できる。',
+        'マイナンバーカードで本人確認するノンカストディアルのウォレット。v1.2.2 以上で JPYC EX 連携に対応し、アプリ内で JPYC の発行・償還まで完結できる (償還の送金は Ethereum)。',
       category: 'wallet',
       tags: ['Japan', 'wallet', 'My Number Card'],
       tokens: ['jpyc'],
-      chains: ['arbitrum', 'avalanche', 'base', 'ethereum', 'optimism', 'polygon'],
+      chains: ['ethereum'],
       languages: ['ja', 'en'],
       supportsJpyc: true,
       supportsUsdc: false,
@@ -676,7 +676,7 @@ export const DIRECTORY_ENTRIES = [
     }),
     facts: {
       description:
-        'Startale のアプリ。Soneium 上で Startale USD (USDSC) のスワップ・決済に使え、Earn は USDC の入金を受け付ける。Soneium はチェーン一覧の対象外のため chains には入れていない。',
+        'Startale のアプリ。Soneium 上で Startale USD (USDSC) のスワップ・決済に使え、Earn は USDC の入金を受け付ける。',
       category: 'wallet',
       tags: ['wallet', 'Soneium', 'USDC'],
       tokens: ['usdc'],
@@ -732,7 +732,7 @@ export const DIRECTORY_ENTRIES = [
     }),
     facts: {
       description:
-        'StarPay 加盟店向けのステーブルコイン決済 (2026年7月13日に申込受付開始)。USDC・USDT・JPYC を 1 つのアプリで受け付け、Solana と Polygon に対応する (Solana はチェーン一覧の対象外)。加盟店手数料は 0.98%。',
+        'StarPay 加盟店向けのステーブルコイン決済 (2026年7月13日に申込受付開始)。USDC・USDT・JPYC を 1 つのアプリで受け付け、Solana と Polygon に対応する。加盟店手数料は 0.98%。',
       category: 'payment',
       tags: ['Japan', 'merchant', 'StarPay'],
       tokens: ['jpyc', 'usdc'],
@@ -800,9 +800,9 @@ export const DIRECTORY_ENTRIES = [
       supportsMcp: false,
     },
     editorial: {
-      summaryJa: 'ダイナースクラブ/TRUST CLUBのポイントをJPYCに交換できる公式の案内です。',
+      summaryJa: 'ダイナースクラブ/TRUST CLUBのポイントをJPYCに交換できるサービスです。',
       summaryEn:
-        'The official notice on exchanging Diners Club / TRUST CLUB points for JPYC.',
+        'A service for exchanging Diners Club / TRUST CLUB points for JPYC.',
     },
   },
   {
@@ -856,9 +856,9 @@ export const DIRECTORY_ENTRIES = [
       supportsMcp: false,
     },
     editorial: {
-      summaryJa: 'SBI新生信託銀行が発行する円連動ステーブルコインの公式ページです。',
+      summaryJa: 'SBI新生信託銀行が発行する、円連動のステーブルコインです。',
       summaryEn:
-        'The official page for the yen-pegged stablecoin issued by SBI Shinsei Trust Bank.',
+        'A yen-pegged stablecoin issued by SBI Shinsei Trust Bank.',
     },
   },
   {
@@ -872,7 +872,7 @@ export const DIRECTORY_ENTRIES = [
     }),
     facts: {
       description:
-        'Startale Group が M0 の基盤で発行する米ドル連動のステーブルコイン。Soneium 上で提供される (Soneium はチェーン一覧の対象外)。',
+        'Startale Group が M0 の基盤で発行する米ドル連動のステーブルコイン。Soneium 上で提供される。',
       category: 'stablecoin',
       tags: ['USD', 'stablecoin', 'Soneium'],
       tokens: [],
@@ -884,9 +884,9 @@ export const DIRECTORY_ENTRIES = [
       supportsMcp: false,
     },
     editorial: {
-      summaryJa: 'Soneium上で提供される米ドル連動ステーブルコインの公式ページです。',
+      summaryJa: 'Soneium上で提供される、米ドル連動のステーブルコインです。',
       summaryEn:
-        'The official page for a USD-pegged stablecoin offered on Soneium.',
+        'A USD-pegged stablecoin offered on Soneium.',
     },
   },
   {
@@ -912,9 +912,9 @@ export const DIRECTORY_ENTRIES = [
       supportsMcp: false,
     },
     editorial: {
-      summaryJa: 'USDCでネットワーク手数料を払うCircleのL1チェーンの公式発表です。',
+      summaryJa: 'ネットワーク手数料をUSDCで払う、CircleのL1ブロックチェーンです。',
       summaryEn:
-        'Circle\'s official announcement of an L1 chain where network fees are paid in USDC.',
+        'Circle\'s L1 blockchain where network fees are paid in USDC.',
     },
   },
   {
@@ -928,7 +928,7 @@ export const DIRECTORY_ENTRIES = [
     }),
     facts: {
       description:
-        'Ethereum のレイヤー 2 (メインネット・chain ID 1868)。Startale USD (USDSC) が流通する。チェーン一覧の対象外のため chains は空。',
+        'Ethereum のレイヤー 2 (メインネット・chain ID 1868)。Startale USD (USDSC) が流通する。',
       category: 'network',
       tags: ['Ethereum', 'L2', 'Soneium'],
       tokens: [],
@@ -940,9 +940,9 @@ export const DIRECTORY_ENTRIES = [
       supportsMcp: false,
     },
     editorial: {
-      summaryJa: 'Startale USDが流通するEthereumレイヤー2の開発者向け公式ドキュメントです。',
+      summaryJa: 'Startale USDが流通する、Ethereumのレイヤー2です。',
       summaryEn:
-        'The official builder docs for an Ethereum layer 2 where Startale USD circulates.',
+        'An Ethereum layer 2 where Startale USD circulates.',
     },
   },
   {
@@ -956,7 +956,7 @@ export const DIRECTORY_ENTRIES = [
     }),
     facts: {
       description:
-        'Solana の RPC を x402 で従量課金する API (USDC・2026年7月5日公開・Validators DAO と ELSOUL LABO)。決済は Coinbase CDP の facilitator を使う。Solana はチェーン一覧の対象外。',
+        'Solana の RPC を x402 で従量課金する API (USDC・2026年7月5日公開・Validators DAO と ELSOUL LABO)。決済は Coinbase CDP の facilitator を使う。',
       category: 'api',
       tags: ['x402', 'Solana', 'RPC'],
       tokens: ['usdc'],
@@ -968,9 +968,9 @@ export const DIRECTORY_ENTRIES = [
       supportsMcp: false,
     },
     editorial: {
-      summaryJa: 'Solana RPCをx402とUSDCで従量課金で使えるAPIの公式発表です。',
+      summaryJa: 'Solana RPCをx402とUSDCで従量課金で使えるAPIです。',
       summaryEn:
-        'The official announcement of a Solana RPC API billed per use via x402 in USDC.',
+        'A Solana RPC API billed per use via x402 in USDC.',
     },
   },
   {
@@ -1012,7 +1012,7 @@ export const DIRECTORY_ENTRIES = [
     }),
     facts: {
       description:
-        'x402 の支払いを検証・精算する Coinbase のホスト型 facilitator。ドル建ての価格は各ネットワークの既定の USDC で支払われ、メインネットは Base・Polygon・Arbitrum ほかに対応 (Monad・World・Solana はチェーン一覧の対象外)。毎月 1,000 件まで無料、超過分は 1 件 0.001 ドル。',
+        'x402 の支払いを検証・精算する Coinbase のホスト型 facilitator。ドル建ての価格は各ネットワークの既定の USDC で支払われ、メインネットは Base・Polygon・Arbitrum・Monad・World・Solana に対応。毎月 1,000 件まで無料、超過分は 1 件 0.001 ドル。',
       category: 'developer-tool',
       tags: ['x402', 'facilitator', 'USDC'],
       tokens: ['usdc'],

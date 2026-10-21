@@ -1151,16 +1151,16 @@ export const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
     sourceUrl: 'https://prtimes.jp/main/html/rd/p/000000318.000054018.html',
   },
   {
-    date: '2026-07-21',
+    date: '2026-10-06',
     collectedAt: '2026-10-21',
     scopes: ['jpyc-services'],
     slug: 'myna-wallet',
     changeType: 'added',
     summary:
-      'Mina Wallet, a wallet verified with the My Number Card, became generally available; from v1.2.2 it supports the JPYC EX integration for issuance and redemption inside the app; added to the directory.',
+      'Mina Wallet, a non-custodial wallet verified with the My Number Card, was added to the directory: from v1.2.2 it completes JPYC issuance and redemption inside the app through the JPYC EX integration.',
     summaryJa:
-      'マイナンバーカードで本人確認する「マイナウォレット」が一般提供を開始。v1.2.2 以上で JPYC EX 連携に対応し、アプリ内で JPYC の発行・償還まで完結する。',
-    sourceUrl: 'https://www.mynawallet.co.jp/',
+      'マイナンバーカードで本人確認するノンカストディアルの「マイナウォレット」をディレクトリに追加。v1.2.2 以上で JPYC EX 連携により、アプリ内で JPYC の発行・償還まで完結する。',
+    sourceUrl: 'https://prtimes.jp/main/html/rd/p/000000013.000125732.html',
   },
   {
     date: '2026-10-21',
