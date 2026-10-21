@@ -9,7 +9,6 @@ import { useLocale, useTranslations } from 'next-intl';
 import { ChevronDown, Plus, Wallet } from 'lucide-react';
 import type { useSiweSession } from '@/hooks/useSiweSession';
 import { ConnectButton } from '@/components/ConnectButton';
-import { env } from '@/lib/env';
 import type { DiscoveryDisplay } from './discoveryDisplay';
 import type { DiscoveryOwner } from './useDiscoveryOwner';
 
@@ -72,12 +71,6 @@ export function DiscoveryRegistrationSection({
             <p className={`${collapsible ? '' : 'mt-0.5 '}text-sm leading-relaxed text-slate-500`}>
               {t('registerSubtitle')}
             </p>
-            {/* 発見面の明示: USDC 併売の有無に合わせて掲載先を案内する。 */}
-            <p className="mt-1.5 text-xs leading-relaxed text-slate-500">
-              {env.enableX402DualRailUi
-                ? t('listingDiscoveryNoteDualRail')
-                : t('listingDiscoveryNote')}
-            </p>
             {/* 出品の詳細手順+実売事例は /guide/sell が持つ (フォームは要点のみ)。 */}
             <Link
               href={`/${locale}/guide/sell`}
@@ -89,24 +82,29 @@ export function DiscoveryRegistrationSection({
           </div>
         </div>
 
+        {/* 未接続: 接続の選択肢は控えめ (secondary) に。閲覧者の多くは買い手なので、出品の入口が
+            ページで一番強い色にならないようにする。未サインイン: 署名の意味 (無料・送金なし) を 1 行で添える。 */}
         {!isConnected ? (
-          <div className="mt-4 flex flex-col gap-3 rounded-xl bg-slate-50 px-3 py-2.5 text-sm text-slate-600 sm:flex-row sm:items-center sm:justify-between">
-            <p className="flex items-center gap-2">
+          <div className="mt-4 rounded-xl bg-slate-50 p-3 text-sm text-slate-600">
+            <p className="mb-2.5 flex items-center gap-2">
               <Wallet className="h-4 w-4 shrink-0 text-slate-400" aria-hidden />
               <span>{t('connectPrompt')}</span>
             </p>
-            <ConnectButton />
+            <ConnectButton variant="secondary" />
           </div>
         ) : !isSignedIn ? (
-          <button
-            type="button"
-            onClick={() => void signIn(t('signInStatement'))}
-            disabled={isSigningIn}
-            className="mt-4 inline-flex items-center gap-2 rounded-xl bg-brand px-4 py-2.5 text-sm font-semibold text-white shadow-card transition hover:-translate-y-0.5 hover:bg-brand-dark hover:shadow-card-hover active:translate-y-0 disabled:opacity-50 disabled:hover:translate-y-0"
-          >
-            <Wallet className="h-4 w-4" aria-hidden />
-            {isSigningIn ? t('signingIn') : t('signInCta')}
-          </button>
+          <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2">
+            <button
+              type="button"
+              onClick={() => void signIn(t('signInStatement'))}
+              disabled={isSigningIn}
+              className="inline-flex items-center gap-2 rounded-xl bg-brand px-4 py-2.5 text-sm font-semibold text-white shadow-card transition hover:-translate-y-0.5 hover:bg-brand-dark hover:shadow-card-hover active:translate-y-0 disabled:opacity-50 disabled:hover:translate-y-0"
+            >
+              <Wallet className="h-4 w-4" aria-hidden />
+              {isSigningIn ? t('signingIn') : t('signInCta')}
+            </button>
+            <p className="text-xs text-slate-500">{t('signInNote')}</p>
+          </div>
         ) : (
           <DiscoveryRegistrationForm
             owner={owner}
@@ -119,7 +117,7 @@ export function DiscoveryRegistrationSection({
   );
 
   return (
-    <section ref={registrationRef} className="rounded-2xl bg-white p-5 shadow-card ring-1 ring-slate-200/70 sm:p-6">
+    <section id="sell" ref={registrationRef} className="scroll-mt-24 rounded-2xl bg-white p-5 shadow-card ring-1 ring-slate-200/70 sm:p-6">
       {collapsible ? (
         <details
           className="group/registration"

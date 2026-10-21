@@ -107,6 +107,22 @@ describe('ArcPayoutPanel の表示', () => {
     await waitFor(() => expect(withdrawButton()).toBeEnabled());
   });
 
+  // ガス代用の残高は 18 桁のネイティブ値。6 桁に切り捨てて出す (端数のままでは読めない)。
+  // 0 より大きいが 6 桁では 0 になる額は「< 0.000001」(0 と出すと「入っていない」と誤解させる)。
+  it.each([
+    ['きりのよい額', 117_000_000_000_000_000n, '0.117 USDC'],
+    ['18 桁の端数は 6 桁に切り捨て (四捨五入しない)', 1_234_567_890_123_456_789n, '1.234567 USDC'],
+    ['6 桁ちょうどの最小単位', 10n ** 12n, '0.000001 USDC'],
+    ['最小単位に満たない非 0', 10n ** 12n - 1n, '< 0.000001 USDC'],
+    ['1 wei', 1n, '< 0.000001 USDC'],
+  ])('ガス代用の残高: %s', async (_label, gas, shown) => {
+    s.gas = gas;
+    renderPanel();
+    const label = await screen.findByText(t.gasLabel);
+    expect(label.parentElement).toHaveTextContent(shown);
+    expect(label.parentElement).not.toHaveTextContent(/\.\d{7,}/);
+  });
+
   it.each([
     ['Arc でコントラクト', () => { s.code.arc = '0x6000'; }, t.contractWallet],
     ['Base でコントラクト', () => { s.code.base = '0x6000'; }, t.contractWallet],

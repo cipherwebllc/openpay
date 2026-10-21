@@ -9,6 +9,7 @@ import { env } from '@/lib/env';
 import { LEGAL_ENTITY } from '@/lib/legal';
 import { shopsApiEnabled } from '@/lib/shops/flags';
 import { JPYC_SHOPS_SEARCH_RESOURCE } from '@/lib/shops/paidResources';
+import { X402_DEMO_PATH } from '@/lib/x402/demoPath';
 import { x402FacilitatorConfig } from '@/lib/x402/facilitatorConfig';
 
 export const OPENPAY_CANONICAL_ORIGIN = new URL(LEGAL_ENTITY.siteUrl).origin;
@@ -53,7 +54,7 @@ export type FirstPartyResource = {
 
 export const FIRST_PARTY_RESOURCES = [
   {
-    path: '/api/paid/demo',
+    path: X402_DEMO_PATH,
     title: 'x402 Demo',
     priceJpyc: '1',
     category: 'api',

@@ -96,35 +96,33 @@ export function X402DiscoveryView({
     />
   );
   const catalogSection = (
-    <DiscoveryCatalogPanel
-      catalog={catalog}
-      display={display}
-      usdcItems={usdcItems}
-      usdcArc={usdcArc}
-    />
+    <DiscoveryCatalogPanel catalog={catalog} display={display} usdcArc={usdcArc} />
   );
 
-  // セクションの中身を変えず、閲覧者と売り手で並びだけを切り替える。
+  // セクションの中身を変えず、閲覧者と売り手で並びだけを切り替える。閲覧者は買い手の導線
+  // (カタログ → エージェントから使う) を先に、出品は最後に置く。DiscoveryExamples は両方の並びで
+  // 同じ位置 (2 番目の子) に置き、サインインの前後で開いた <details> を失わない。
   const sellerMode = isSignedIn;
 
   return (
     <div className="space-y-6">
       {sellerMode ? (
+        // 出品者には注目バナー (宣伝) を出さない: 自分の登録 → 出品 → カタログの順に絞る。
         <>
           {ownedResourcesSection}
           {registrationSection}
-          {featured}
           {catalogSection}
         </>
       ) : (
         <>
           {featured}
           {catalogSection}
-          {registrationSection}
         </>
       )}
 
-      <DiscoveryExamples display={display} />
+      <DiscoveryExamples display={display} showUsdcDiscovery={usdcItems.length > 0} />
+
+      {!sellerMode && registrationSection}
     </div>
   );
 }

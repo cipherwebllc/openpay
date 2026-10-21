@@ -71,10 +71,20 @@ vi.mock('@/components/CopyableField', () => ({
   CopyableField: ({ value }: { value: string }) => <span>{value}</span>,
 }));
 
+const viewProps = vi.hoisted(() => ({
+  usdcItems: [] as Array<{ resource: string; jpycTwinPath?: string }>,
+}));
 vi.mock('@/components/X402DiscoveryView', () => ({
-  X402DiscoveryView: ({ featured }: { featured?: ReactNode }) => (
-    <div data-testid="discovery-view">{featured}</div>
-  ),
+  X402DiscoveryView: ({
+    featured,
+    usdcItems,
+  }: {
+    featured?: ReactNode;
+    usdcItems?: Array<{ resource: string; jpycTwinPath?: string }>;
+  }) => {
+    viewProps.usdcItems = usdcItems ?? [];
+    return <div data-testid="discovery-view">{featured}</div>;
+  },
 }));
 
 import DirectoryPage from '@/app/[locale]/directory/page';
@@ -141,6 +151,52 @@ describe('/discovery directory featured card', () => {
       'href',
       '/directory',
     );
+  });
+
+  it('注目は細いバナー 1 枚のリンク: 件数と最終更新だけで、説明・価格・カテゴリ数は出さない', async () => {
+    const ui = await DiscoveryPage({
+      params: Promise.resolve({ locale: 'ja' }),
+    });
+    render(ui);
+
+    const banner = screen.getByRole('link', { name: /詳しく/ });
+    expect(banner).toHaveAttribute('href', '/directory');
+    expect(banner).toHaveTextContent('注目の構造化データ API');
+    expect(banner).toHaveTextContent('Japan Web3 Directory');
+    expect(banner).toHaveTextContent(/データ件数 \d+/);
+    expect(banner).toHaveTextContent(/最終更新 /);
+    expect(banner).not.toHaveTextContent('カテゴリ');
+    expect(banner).not.toHaveTextContent('1〜2 JPYC');
+  });
+
+  it('見出しは通貨 2 つと 2 つの入口 (#agent / #sell)。「受取は直接着金」のピルは出さない', async () => {
+    const ui = await DiscoveryPage({
+      params: Promise.resolve({ locale: 'ja' }),
+    });
+    render(ui);
+
+    expect(screen.getByRole('link', { name: /エージェントから使う/ })).toHaveAttribute('href', '#agent');
+    expect(screen.getByRole('link', { name: /API を出品する/ })).toHaveAttribute('href', '#sell');
+    expect(screen.getByText('JPYC · Polygon')).toBeInTheDocument();
+    expect(screen.getByText(/^USDC · Base/)).toBeInTheDocument();
+    expect(screen.queryByText('受取は直接着金')).toBeNull();
+  });
+
+  it('view へ渡す USDC 商品は、双子の対応がある商品にだけ jpycTwinPath を付ける', async () => {
+    const { JPYC_TWIN_BY_USDC_PATH } = await import('@/lib/x402/catalogTwins');
+    const ui = await DiscoveryPage({
+      params: Promise.resolve({ locale: 'ja' }),
+    });
+    render(ui);
+
+    expect(viewProps.usdcItems.length).toBeGreaterThan(0);
+    for (const item of viewProps.usdcItems) {
+      expect(item.jpycTwinPath, item.resource).toBe(
+        JPYC_TWIN_BY_USDC_PATH[new URL(item.resource).pathname],
+      );
+    }
+    expect(viewProps.usdcItems.some((item) => item.jpycTwinPath)).toBe(true);
+    expect(viewProps.usdcItems.some((item) => !item.jpycTwinPath)).toBe(true);
   });
 
   it('directory flag OFF のとき featured 導線を表示しない', async () => {

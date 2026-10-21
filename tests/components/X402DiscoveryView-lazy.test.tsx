@@ -119,7 +119,7 @@ it('keeps auth eager and preserves drafts, expansion and pending feedback when t
   fireEvent.change(input, { target: { value: 'https://example.com/draft' } });
   fireEvent.click(screen.getByRole('checkbox', { name: '正当な権利と支払い制限を確認しました' }));
   const card = screen.getByText('Catalog fixture').closest('li')!;
-  fireEvent.click(within(card).getByRole('button', { name: '続きを読む' }));
+  fireEvent.click(within(card).getByRole('button', { name: '詳しく' }));
   fireEvent.click(screen.getByRole('button', { name: '登録する' }));
   await waitFor(() => expect(screen.getByRole('button', { name: '登録中…' })).toBeDisabled());
 

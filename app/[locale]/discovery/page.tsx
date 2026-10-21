@@ -5,7 +5,7 @@ import type { Metadata } from 'next';
 import { getTranslations, setRequestLocale } from 'next-intl/server';
 import { hasLocale } from 'next-intl';
 import { notFound } from 'next/navigation';
-import { Bot, Globe, LockOpen } from 'lucide-react';
+import { ArrowDown } from 'lucide-react';
 import { LOCALES } from '@/i18n';
 import { AppShell } from '@/components/AppShell';
 import {
@@ -20,6 +20,7 @@ import { directoryStats } from '@/lib/directory/query';
 import { env } from '@/lib/env';
 import { MAX_RESOURCES_PER_MERCHANT } from '@/lib/x402/registry';
 import { isArcGatewayFlagOn } from '@/lib/x402/arcGatewayFlag';
+import { withJpycTwins } from '@/lib/x402/catalogTwins';
 import { USDC_CATALOG_ITEMS } from '@/lib/x402/usdcCatalog';
 
 export const runtime = 'nodejs';
@@ -65,10 +66,7 @@ export default async function DiscoveryPage({
     ? {
         eyebrow: directoryT('featuredEyebrow'),
         title: directoryT('title'),
-        description: directoryT('description'),
-        price: directoryT('featuredPrice'),
         entriesLabel: directoryT('entriesLabel'),
-        categoriesLabel: directoryT('categoriesLabel'),
         lastUpdatedLabel: directoryT('lastUpdatedLabel'),
         detailsLabel: directoryT('featuredDetails'),
       }
@@ -76,34 +74,43 @@ export default async function DiscoveryPage({
 
   return (
     <AppShell>
-      <div className="mx-auto w-full max-w-2xl">
-        {/* 見出しは 1 行の要約 + 通貨ピルだけ。x402 の仕組み説明と利用料は /guide/ai-pay とカタログ脚注へ
-            (ページ冒頭で読ませる文章を最小にする・2026-08-24 磨き上げ)。 */}
+      <div className="mx-auto w-full max-w-4xl">
+        {/* 見出し = 1 行の要約 + 通貨 2 つ + 2 つの入口 (使う / 出品する)。x402 の仕組みと利用料の説明は
+            カタログの脚注と「エージェントから使う」節へ (冒頭で読ませる文章を最小にする・2026-10-21 磨き上げ)。
+            「受取は直接着金」は出品者向けの事実なので出品節の説明に置く。 */}
         <div className="mb-5">
           <h2 className="text-xl font-bold text-slate-900">{t('title')}</h2>
           <p className="mt-1 text-sm text-slate-500">{t('subtitle')}</p>
-          <div className="mt-3 flex flex-wrap items-center gap-1.5 text-[11px] font-semibold">
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-2.5 py-1 text-amber-800 ring-1 ring-amber-200">
-              <Bot className="h-3.5 w-3.5" aria-hidden />
-              {t('pillJpyc')}
-            </span>
-            {usdcItems.length > 0 && (
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-sky-50 px-2.5 py-1 text-sky-800 ring-1 ring-sky-200">
-                <Globe className="h-3.5 w-3.5" aria-hidden />
-                {usdcArc ? t('pillUsdcArc') : t('pillUsdc')}
-              </span>
-            )}
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-emerald-800 ring-1 ring-emerald-200">
-              <LockOpen className="h-3.5 w-3.5" aria-hidden />
-              {t('pillDirect')}
-            </span>
+          <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
+            <ul className="flex flex-wrap items-center gap-1.5 text-xs font-medium text-slate-600">
+              <li className="inline-flex items-center gap-1.5 rounded-full bg-white px-2.5 py-1 ring-1 ring-slate-200">
+                <span className="h-1.5 w-1.5 rounded-full bg-amber-500" aria-hidden />
+                {t('pillJpyc')}
+              </li>
+              {usdcItems.length > 0 && (
+                <li className="inline-flex items-center gap-1.5 rounded-full bg-white px-2.5 py-1 ring-1 ring-slate-200">
+                  <span className="h-1.5 w-1.5 rounded-full bg-sky-500" aria-hidden />
+                  {usdcArc ? t('pillUsdcArc') : t('pillUsdc')}
+                </li>
+              )}
+            </ul>
+            <nav className="flex items-center gap-3 text-xs font-semibold">
+              <a href="#agent" className="inline-flex items-center gap-1 text-brand hover:text-brand-dark">
+                {t('jumpUse')}
+                <ArrowDown className="h-3.5 w-3.5" aria-hidden />
+              </a>
+              <a href="#sell" className="inline-flex items-center gap-1 text-brand hover:text-brand-dark">
+                {t('jumpSell')}
+                <ArrowDown className="h-3.5 w-3.5" aria-hidden />
+              </a>
+            </nav>
           </div>
         </div>
         {/* WebMCP 対応エージェント向けの read-only tools (未対応ブラウザでは no-op・描画なし) */}
         <WebMcpDiscoveryTools usdcItems={usdcItems} />
         <X402DiscoveryView
           maxResourcesPerMerchant={MAX_RESOURCES_PER_MERCHANT}
-          usdcItems={usdcItems}
+          usdcItems={withJpycTwins(usdcItems)}
           usdcArc={usdcArc}
           freshnessByPath={env.enableWeb3Directory ? monitorFreshnessByPath() : undefined}
           featured={

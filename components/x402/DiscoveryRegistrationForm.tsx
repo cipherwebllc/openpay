@@ -13,6 +13,12 @@ import { PaywallSnippet } from './PaywallSnippet';
 import type { DiscoveryOwner } from './useDiscoveryOwner';
 
 const RESOURCE_DOCS_URL_MAX = 512;
+/** 種類の表示名 (保存する値は api / data / mcp のまま)。旧来の値は生の文字列で出す。 */
+const CATEGORY_LABEL_KEYS: Readonly<Record<string, 'formCategoryApi' | 'formCategoryData' | 'formCategoryMcp'>> = {
+  api: 'formCategoryApi',
+  data: 'formCategoryData',
+  mcp: 'formCategoryMcp',
+};
 const RESOURCE_LICENSE_MAX = 60;
 
 export function DiscoveryRegistrationForm({
@@ -68,7 +74,8 @@ export function DiscoveryRegistrationForm({
     formCategories.push(legacyCategory);
   }
   return (
-    <div className="mt-4 space-y-3">
+    // 入力欄は読みやすい幅に抑える (ページは 2 列のカタログに合わせて広い)。
+    <div className="mt-4 max-w-2xl space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p
           title={address}
@@ -134,7 +141,8 @@ export function DiscoveryRegistrationForm({
                     : 'border-slate-300 bg-white text-slate-600 hover:border-brand'
                 }`}
               >
-                {category}
+                {/* 自前のキーだけを訳す (constructor / toString 等の継承プロパティに当てない)。 */}
+                {Object.hasOwn(CATEGORY_LABEL_KEYS, category) ? t(CATEGORY_LABEL_KEYS[category]) : category}
               </button>
             ))}
           </div>

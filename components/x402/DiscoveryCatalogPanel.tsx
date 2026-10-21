@@ -4,21 +4,23 @@
 // 検索・通貨/種類チップ・ページングを持つ。wagmi / SIWE / 出品者専用の部品に依存しない。
 
 import { useMemo, useState } from 'react';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { formatUnits } from 'viem';
 import { useQuery } from '@tanstack/react-query';
-import { Boxes, CheckCircle2, ChevronDown, Search, ShieldCheck } from 'lucide-react';
+import { Boxes, Search } from 'lucide-react';
 import { tokyoDateKey } from '@/lib/shopTime';
-import { AGENTIC_MARKET_URL, X402_LIST_URL, type UsdcCatalogItem } from '@/lib/x402/usdcCatalog';
+import { FIRST_PARTY_SUMMARY_JA } from '@/lib/x402/catalogSummaryJa';
+import { X402_DEMO_PATH } from '@/lib/x402/demoPath';
+import { AGENTIC_MARKET_URL, type UsdcCatalogItem } from '@/lib/x402/usdcCatalog';
 import { isHttpsUrl, type DiscoveryDisplay } from './discoveryDisplay';
 import type { CatalogCurrency, CatalogEntry, DiscoveryItem } from './discoveryTypes';
 
 const EMPTY_DISCOVERY_ITEMS: DiscoveryItem[] = [];
+const CARD_CLASS =
+  'rounded-2xl bg-white p-4 shadow-card ring-1 ring-slate-200/70 transition hover:shadow-card-hover';
 /** カタログの初期表示件数。超える分は「さらに N 件を表示」で開く (モバイルの全長を抑える)。 */
 const CATALOG_PAGE_SIZE = 8;
 const DAY_MS = 24 * 60 * 60 * 1_000;
-const CATALOG_CATEGORIES = ['api', 'data', 'mcp', 'content'] as const;
-type CatalogCategory = (typeof CATALOG_CATEGORIES)[number];
 
 function isoDate(value: string | undefined): string | null {
   if (!value) return null;
@@ -31,6 +33,11 @@ function verifiedDaysAgo(value: string | null | undefined, now: number): number 
   const timestamp = Date.parse(value);
   if (!Number.isFinite(timestamp)) return null;
   return Math.max(0, Math.floor((now - timestamp) / DAY_MS));
+}
+
+/** USDC でも買えるか (USDC 商品・JPYC 出品の USDC 併売 (dual)・公式の双子)。 */
+function payableInUsdc(e: CatalogEntry): boolean {
+  return e.kind === 'usdc' || Boolean(e.item.usdc) || Boolean(e.usdcTwin);
 }
 
 function feeAtomicOf(item: DiscoveryItem): bigint | null {
@@ -47,7 +54,6 @@ function feeAtomicOf(item: DiscoveryItem): bigint | null {
 // panel が再マウントされても検索語・フィルタ・表示件数を失わないよう、状態は呼び出し元に置く)。
 export function useDiscoveryCatalog(usdcItems: readonly UsdcCatalogItem[]) {
   const [catalogSearch, setCatalogSearch] = useState('');
-  const [catalogCategory, setCatalogCategory] = useState<CatalogCategory | null>(null);
   const [catalogCurrency, setCatalogCurrency] = useState<CatalogCurrency>('all');
 
   // 公開カタログ (誰でも閲覧)。/api/discovery を react-query で取得。loading には isFetching を使い、
@@ -64,80 +70,98 @@ export function useDiscoveryCatalog(usdcItems: readonly UsdcCatalogItem[]) {
     retry: false,
   });
 
-  const items = catalogQuery.data ?? EMPTY_DISCOVERY_ITEMS;
+  // 公式の 1 JPYC デモは人間向けの一覧から外す (「2円で試す」節が受け持つ・/api/discovery と 402 は不変)。
+  // 先頭が「hello を解錠するだけのデモ」だと何が買えるストアかが伝わらないため (2026-10-21 磨き上げ)。
+  const items = useMemo(
+    () =>
+      (catalogQuery.data ?? EMPTY_DISCOVERY_ITEMS).filter(
+        (item) => !(item.official === true && new URL(item.resource).pathname === X402_DEMO_PATH),
+      ),
+    [catalogQuery.data],
+  );
   const loading = catalogQuery.isFetching;
   // JPYC (動的) と USDC (静的) を 1 つの一覧に。JPYC は server 順
   // (公式 → 検証済の第三者 → 未検証の第三者・各 tier 内の順序は維持) を保ち、その後に USDC を並べる。
-  const entries = useMemo<CatalogEntry[]>(
-    () => [
-      ...items.map((item, index) => ({
+  // 公式の双子 (同じ商品の JPYC 面と USDC 面) は JPYC のカードにまとめる。JPYC 面が取れない
+  // (/api/discovery の失敗・非表示) ときは USDC 単独のカードのまま出す。
+  const entries = useMemo<CatalogEntry[]>(() => {
+    const twinByJpycPath = new Map(
+      usdcItems.flatMap((u) => (u.jpycTwinPath ? [[u.jpycTwinPath, u] as const] : [])),
+    );
+    const jpycEntries = items.map((item, index) => {
+      const usdcTwin =
+        item.official === true ? twinByJpycPath.get(new URL(item.resource).pathname) : undefined;
+      return {
         kind: 'jpyc' as const,
         // 同一 URL の重複登録 (別販売者・同一販売者の二重登録) でも key が衝突しないよう index を含める。
         key: `jpyc:${index}:${item.resource}`,
         category: item.category.trim().toLowerCase(),
-        // dual (USDC 併売) 出品は "usdc" のテキスト検索でも見つかるようにする。
-        searchText: `${item.description} ${item.resource}${item.usdc ? ' usdc' : ''}`.toLowerCase(),
+        // USDC でも買える出品 (dual・双子) は "usdc" のテキスト検索でも見つかるようにする。
+        // 公式商品は日本語の要約でも見つかるようにする (カードに出る文で探せないと迷う)。
+        searchText: [
+          item.title ?? '',
+          item.description,
+          item.resource,
+          item.official === true ? (FIRST_PARTY_SUMMARY_JA[new URL(item.resource).pathname] ?? '') : '',
+          item.usdc || usdcTwin ? 'usdc' : '',
+          usdcTwin ? `${usdcTwin.title} ${usdcTwin.resource}` : '',
+        ]
+          .join(' ')
+          .toLowerCase(),
         item,
-      })),
-      ...usdcItems.map((item) => ({
-        kind: 'usdc' as const,
-        key: `usdc:${item.resource}`,
-        category: item.category,
-        searchText: `${item.title} ${item.description} ${item.resource}`.toLowerCase(),
-        item,
-      })),
-    ],
-    [items, usdcItems],
-  );
-  // 通貨チップは USDC で買える商品があるときだけ出す (無ければ従来どおりカテゴリのみ)。
-  // dual (JPYC 出品の USDC 併売) は両方の通貨フィルタにマッチし、USDC 側の件数にも数える。
-  const dualCount = useMemo(() => items.filter((i) => i.usdc).length, [items]);
-  const showCurrencyChips = (usdcItems.length > 0 || dualCount > 0) && items.length > 0;
-  const currencyCounts = { jpyc: items.length, usdc: usdcItems.length + dualCount };
+        usdcTwin,
+      };
+    });
+    const folded = new Set(jpycEntries.flatMap((e) => (e.usdcTwin ? [e.usdcTwin.resource] : [])));
+    return [
+      ...jpycEntries,
+      ...usdcItems
+        .filter((item) => !folded.has(item.resource))
+        .map((item) => ({
+          kind: 'usdc' as const,
+          key: `usdc:${item.resource}`,
+          category: item.category,
+          searchText: [
+            item.title,
+            item.description,
+            item.resource,
+            FIRST_PARTY_SUMMARY_JA[new URL(item.resource).pathname] ?? '',
+          ]
+            .join(' ')
+            .toLowerCase(),
+          item,
+        })),
+    ];
+  }, [items, usdcItems]);
+  // 通貨の切り替えは USDC で買える商品があるときだけ出す (無ければ絞り込みなし)。
+  // USDC でも買える JPYC 出品 (dual・双子) は両方の通貨に数え、両方の絞り込みに出る。
+  const usdcCount = entries.filter(payableInUsdc).length;
+  const showCurrencyChips = usdcCount > 0 && items.length > 0;
+  const currencyCounts = { jpyc: items.length, usdc: usdcCount };
   const effectiveCurrency: CatalogCurrency = showCurrencyChips ? catalogCurrency : 'all';
   const currencyEntries = useMemo(
     () =>
       effectiveCurrency === 'all'
         ? entries
-        : entries.filter(
-            (e) =>
-              e.kind === effectiveCurrency ||
-              (effectiveCurrency === 'usdc' && e.kind === 'jpyc' && Boolean(e.item.usdc)),
-          ),
+        : entries.filter((e) => (effectiveCurrency === 'jpyc' ? e.kind === 'jpyc' : payableInUsdc(e))),
     [effectiveCurrency, entries],
   );
-  const categoryCounts = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const entry of currencyEntries) {
-      counts.set(entry.category, (counts.get(entry.category) ?? 0) + 1);
-    }
-    return counts;
-  }, [currencyEntries]);
-  const availableCategories = CATALOG_CATEGORIES.filter(
-    (category) => (categoryCounts.get(category) ?? 0) > 0,
-  );
-  const effectiveCatalogCategory =
-    catalogCategory && availableCategories.includes(catalogCategory)
-      ? catalogCategory
-      : null;
   const visibleEntries = useMemo(() => {
     const search = catalogSearch.trim().toLowerCase();
-    return currencyEntries.filter((entry) => {
-      if (effectiveCatalogCategory && entry.category !== effectiveCatalogCategory) return false;
-      return search === '' || entry.searchText.includes(search);
-    });
-  }, [catalogSearch, effectiveCatalogCategory, currencyEntries]);
+    return search === ''
+      ? currencyEntries
+      : currencyEntries.filter((entry) => entry.searchText.includes(search));
+  }, [catalogSearch, currencyEntries]);
   // 表示上限は絞り込み条件ごとに持つ (条件が変わったら初期件数に戻る)。effect ではなく key 照合で導出。
-  const filterKey = `${catalogSearch.trim().toLowerCase()}|${effectiveCurrency}|${effectiveCatalogCategory ?? ''}`;
+  const filterKey = `${catalogSearch.trim().toLowerCase()}|${effectiveCurrency}`;
   const [catalogShown, setCatalogShown] = useState<{ key: string; limit: number } | null>(null);
   const catalogLimit = catalogShown?.key === filterKey ? catalogShown.limit : CATALOG_PAGE_SIZE;
   const pagedEntries = visibleEntries.slice(0, catalogLimit);
   const hiddenCount = visibleEntries.length - pagedEntries.length;
 
   return {
-    loading, entries, showCurrencyChips, currencyCounts, effectiveCurrency, currencyEntries,
-    categoryCounts, availableCategories, effectiveCatalogCategory, visibleEntries, filterKey,
-    catalogLimit, pagedEntries, hiddenCount, catalogSearch, setCatalogSearch, setCatalogCategory,
+    loading, entries, showCurrencyChips, currencyCounts, effectiveCurrency, visibleEntries,
+    filterKey, catalogLimit, pagedEntries, hiddenCount, catalogSearch, setCatalogSearch,
     setCatalogCurrency, setCatalogShown,
   };
 }
@@ -147,126 +171,37 @@ export type DiscoveryCatalog = ReturnType<typeof useDiscoveryCatalog>;
 export function DiscoveryCatalogPanel({
   catalog,
   display,
-  usdcItems,
   usdcArc,
 }: {
   catalog: DiscoveryCatalog;
   display: DiscoveryDisplay;
-  usdcItems: readonly UsdcCatalogItem[];
   usdcArc: boolean;
 }) {
   const t = useTranslations('Facilitator');
   const {
-    loading, entries, showCurrencyChips, currencyCounts, effectiveCurrency, currencyEntries,
-    categoryCounts, availableCategories, effectiveCatalogCategory, visibleEntries, filterKey,
-    catalogLimit, pagedEntries, hiddenCount, catalogSearch, setCatalogSearch, setCatalogCategory,
+    loading, entries, showCurrencyChips, currencyCounts, effectiveCurrency, visibleEntries,
+    filterKey, catalogLimit, pagedEntries, hiddenCount, catalogSearch, setCatalogSearch,
     setCatalogCurrency, setCatalogShown,
   } = catalog;
-  const { cardHead, expandedKeys } = display;
-
-  // フィルタチップ (通貨 / 種類で共用)。component でなく関数で返し no-unstable-nested-components を避ける。
-  const chip = (opts: {
-    key?: string;
-    label: string;
-    count: number;
-    active: boolean;
-    onClick: () => void;
-    tone?: 'primary' | 'secondary';
-  }) => {
-    const secondary = opts.tone === 'secondary';
-    return (
-      <button
-        key={opts.key ?? opts.label}
-        type="button"
-        onClick={opts.onClick}
-        aria-pressed={opts.active}
-        className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition ${
-          opts.active
-            ? secondary
-              ? 'border-slate-800 bg-slate-800 text-white'
-              : 'border-brand bg-brand text-white'
-            : 'border-slate-300 bg-white text-slate-600 hover:border-brand'
-        }`}
-      >
-        {opts.label}
-        <span className={opts.active ? 'text-white/75' : 'text-slate-400'}>{opts.count}</span>
-      </button>
-    );
-  };
+  const locale = useLocale();
+  const { cardHead, urlChip } = display;
+  // 公式商品の日本語の要約 (表示専用)。英語ページと第三者の出品は原文のまま。
+  const summaryFor = (url: string) =>
+    locale === 'ja' ? FIRST_PARTY_SUMMARY_JA[new URL(url).pathname] : undefined;
+  const usdcRail = usdcArc ? t('pillUsdcArc') : t('pillUsdc');
 
   return (
     <>
       {/* 公開カタログ */}
       <section>
-        <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-          <h3 className="text-base font-bold text-slate-900">{t('catalogTitle')}</h3>
-          {/* 発見面: JPYC は /api/discovery、USDC は CDP Bazaar / agentic.market。1 行で済ませる。 */}
-          <p className="text-xs text-slate-500">
-            {t('catalogDiscoverPrefix')}
-            <code className="rounded bg-slate-100 px-1 py-0.5 font-mono text-[11px] text-slate-600">
-              /api/discovery
-            </code>
-            {usdcItems.length > 0 && (
-              <>
-                {t('catalogDiscoverJoin')}
-                <a
-                  href={AGENTIC_MARKET_URL}
-                  target="_blank"
-                  rel="noreferrer noopener"
-                  className="font-medium text-brand underline-offset-2 hover:text-brand-dark hover:underline"
-                >
-                  {t('catalogDiscoverBazaar')}
-                </a>
-                {' / '}
-                {/* OpenPay 自身の USDC データ API の掲載先 (2026-09-15 承認)。第三者出品の自動掲載先ではない。 */}
-                <a
-                  href={X402_LIST_URL}
-                  target="_blank"
-                  rel="noreferrer noopener"
-                  className="font-medium text-brand underline-offset-2 hover:text-brand-dark hover:underline"
-                >
-                  {t('catalogDiscoverX402List')}
-                </a>
-              </>
-            )}
-          </p>
-        </div>
-        {/* 自律購入の買い手が最初に知りたい「暴走しないか」を 1 行で答え、詳細は折りたたむ
-            (実装済みの事実だけを書き、売り手のあらゆる挙動を防ぐ保証とは書かない)。 */}
-        <details className="group mt-3 rounded-xl border border-slate-200 bg-slate-50/70">
-          <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-xs text-slate-600">
-            <ShieldCheck className="h-4 w-4 shrink-0 text-brand" aria-hidden />
-            <span className="min-w-0 flex-1">
-              <span className="font-semibold text-slate-800">{t('guardsTitle')}</span>
-              <span className="ml-1.5 text-slate-500">{t('guardsSummary')}</span>
-            </span>
-            <ChevronDown
-              className="h-3.5 w-3.5 shrink-0 text-slate-400 transition group-open:rotate-180"
-              aria-hidden
-            />
-          </summary>
-          <ul className="space-y-1 border-t border-slate-200/70 px-3 py-2.5">
-            {[
-              t('guardsLimit'),
-              t('guardsMatch'),
-              t('guardsResource'),
-              t('guardsReceipt'),
-              t('guardsUnlock'),
-            ].map((line) => (
-              <li
-                key={line}
-                className="flex items-start gap-1.5 text-xs leading-relaxed text-slate-700"
-              >
-                <CheckCircle2
-                  className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600"
-                  aria-hidden
-                />
-                <span>{line}</span>
-              </li>
-            ))}
-            <li className="pt-1 text-[11px] leading-relaxed text-slate-500">{t('guardsNote')}</li>
-          </ul>
-        </details>
+        {/* 見出しは件数だけ。発見面 (/api/discovery・Bazaar) と購入ガードは開発者向けなので
+            「エージェントから使う」節 (DiscoveryExamples) に置く (2026-10-21 磨き上げ)。 */}
+        <h3 className="flex items-baseline gap-2 text-base font-bold text-slate-900">
+          {t('catalogTitle')}
+          {!loading && entries.length > 0 && (
+            <span className="text-sm font-semibold tabular-nums text-slate-500">{entries.length}</span>
+          )}
+        </h3>
         {!loading && entries.length > 0 && (
           <div className="mt-4 space-y-2.5">
             <label className="relative block">
@@ -283,78 +218,56 @@ export function DiscoveryCatalogPanel({
                 className="w-full rounded-xl border border-slate-200 bg-white py-2.5 pl-9 pr-3 text-sm text-slate-800 shadow-card placeholder:text-slate-400 focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/15"
               />
             </label>
-            {/* 1 行目 = 通貨 (すべて / JPYC / USDC)、2 行目 = 種類。USDC が無い環境は従来の 1 行
-                (すべて + 種類)。「すべて」は常に 1 つだけ (2 つあると何の「すべて」か迷う)。 */}
-            <div className="flex flex-wrap items-center gap-1.5">
-              {chip({
-                label: t('catalogCategoryAll'),
-                count: showCurrencyChips ? entries.length : currencyEntries.length,
-                active: showCurrencyChips
-                  ? effectiveCurrency === 'all'
-                  : effectiveCatalogCategory === null,
-                onClick: () => {
-                  setCatalogCurrency('all');
-                  setCatalogCategory(null);
-                },
-              })}
-              {showCurrencyChips &&
-                (
+            {/* 通貨の切り替え 1 行 (すべて / JPYC / USDC)。種類 (api / data) の絞り込みは件数が少なく
+                カードのアイコンで足りるので外した (2026-10-21 磨き上げ)。USDC 商品が無い環境では出さない。 */}
+            {showCurrencyChips && (
+              <div className="flex rounded-xl bg-slate-100 p-1">
+                {(
                   [
+                    ['all', t('catalogCategoryAll'), entries.length],
                     ['jpyc', t('currencyJpyc'), currencyCounts.jpyc],
                     ['usdc', t('currencyUsdc'), currencyCounts.usdc],
                   ] as const
-                ).map(([value, label, count]) =>
-                  chip({
-                    key: value,
-                    label,
-                    count,
-                    active: effectiveCurrency === value,
-                    onClick: () => {
-                      setCatalogCurrency(value);
-                      setCatalogCategory(null);
-                    },
-                  }),
-                )}
-              {!showCurrencyChips &&
-                availableCategories.map((category) =>
-                  chip({
-                    key: category,
-                    label: category,
-                    count: categoryCounts.get(category) ?? 0,
-                    active: effectiveCatalogCategory === category,
-                    onClick: () => setCatalogCategory(category),
-                  }),
-                )}
-            </div>
-            {showCurrencyChips && availableCategories.length > 1 && (
-              <div className="flex flex-wrap items-center gap-1.5">
-                {availableCategories.map((category) => {
-                  const active = effectiveCatalogCategory === category;
-                  return chip({
-                    key: category,
-                    label: category,
-                    count: categoryCounts.get(category) ?? 0,
-                    active,
-                    tone: 'secondary',
-                    onClick: () => setCatalogCategory(active ? null : category),
-                  });
+                ).map(([value, label, count]) => {
+                  const active = effectiveCurrency === value;
+                  return (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => setCatalogCurrency(value)}
+                      aria-pressed={active}
+                      className={`inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-semibold transition ${
+                        active
+                          ? 'bg-white text-slate-900 shadow-sm ring-1 ring-slate-200'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      {label}
+                      {/* 件数は文字の太さで控えめにし、色は AA (4.5:1) を保つ (slate-500 は slate-100 の上で不足)。 */}
+                      <span className={`text-xs font-normal tabular-nums ${active ? 'text-slate-500' : 'text-slate-600'}`}>
+                        {count}
+                      </span>
+                    </button>
+                  );
                 })}
               </div>
             )}
-            {/* 利用料の脚注 (JPYC は買い手上乗せ 1%・最低 1 JPYC / USDC は上乗せなし)。開示 SoT は LP・法務。 */}
-            <p className="text-[11px] leading-relaxed text-slate-500">
-              {showCurrencyChips
-                ? usdcArc
-                  ? t('catalogFeeNoteBothArc')
-                  : t('catalogFeeNoteBoth')
-                : t('catalogFeeNoteJpyc')}
-            </p>
           </div>
         )}
         {loading ? (
+          // カードと同じ形の骨組み (読み込み後にレイアウトが跳ねないように)。
           <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2" aria-hidden>
-            <div className="h-24 animate-pulse rounded-2xl bg-slate-100" />
-            <div className="h-24 animate-pulse rounded-2xl bg-slate-100" />
+            {[0, 1, 2, 3].map((i) => (
+              <div key={i} className="flex gap-3 rounded-2xl bg-white p-4 ring-1 ring-slate-200/70">
+                <div className="h-9 w-9 shrink-0 animate-pulse rounded-xl bg-slate-100" />
+                <div className="min-w-0 flex-1 space-y-2">
+                  <div className="h-4 w-2/3 animate-pulse rounded bg-slate-100" />
+                  <div className="h-3 w-full animate-pulse rounded bg-slate-100" />
+                  <div className="h-3 w-4/5 animate-pulse rounded bg-slate-100" />
+                  <div className="h-7 w-1/2 animate-pulse rounded-lg bg-slate-100" />
+                </div>
+              </div>
+            ))}
           </div>
         ) : entries.length === 0 ? (
           <div className="mt-4 flex flex-col items-center gap-2 rounded-2xl bg-white px-6 py-10 text-center shadow-card ring-1 ring-slate-200/70">
@@ -369,54 +282,68 @@ export function DiscoveryCatalogPanel({
               <Search className="h-6 w-6" aria-hidden />
             </span>
             <p className="mt-1 text-sm text-slate-500">{t('catalogNoResults')}</p>
+            {/* 行き止まりにしない: 検索語と通貨の絞り込みを 1 回で戻す。 */}
+            <button
+              type="button"
+              onClick={() => {
+                setCatalogSearch('');
+                setCatalogCurrency('all');
+              }}
+              className="mt-1 text-sm font-semibold text-brand hover:text-brand-dark hover:underline"
+            >
+              {t('catalogClearFilters')}
+            </button>
           </div>
         ) : (
-          <ul className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+          // items-start: 「詳しく」を開いたカードに隣のカードの高さを揃えない (空白の塊を作らない)。
+          <ul className="mt-4 grid grid-cols-1 items-start gap-3 sm:grid-cols-2">
             {pagedEntries.map((entry) => {
               if (entry.kind === 'usdc') {
                 const u = entry.item;
                 return (
-                  <li
-                    key={entry.key}
-                    className="group rounded-2xl bg-white p-4 shadow-card ring-1 ring-slate-200/70 transition hover:-translate-y-0.5 hover:shadow-card-hover"
-                  >
+                  <li key={entry.key} className={CARD_CLASS}>
                     {cardHead({
                       category: u.category,
-                      currency: 'usdc',
                       title: u.title,
                       description: u.description,
                       url: u.resource,
                       copyKey: `cat-${entry.key}`,
+                      summary: summaryFor(u.resource),
                       priceNode: (
                         <div className="shrink-0 text-right">
-                          <div className="text-sm font-bold text-slate-900">
+                          <div className="text-[15px] font-bold tabular-nums text-slate-900">
                             {t('payUsdc', { amount: u.priceUsd })}
                           </div>
                           <div className="text-[11px] text-slate-500">{t('usdcNoFee')}</div>
                         </div>
                       ),
+                      detailLines: [
+                        <span key="network">
+                          {usdcArc ? t('usdcNetworkMetaArc') : t('usdcNetworkMeta')}
+                          <span aria-hidden className="mx-1.5 text-slate-300">·</span>
+                          <a
+                            href={AGENTIC_MARKET_URL}
+                            target="_blank"
+                            rel="noreferrer noopener"
+                            className="font-medium text-brand hover:text-brand-dark hover:underline"
+                          >
+                            {t('bazaarListed')}
+                          </a>
+                        </span>,
+                      ],
                     })}
-                    <div className="mt-2 flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-[11px] leading-relaxed text-slate-500">
-                      <a
-                        href={AGENTIC_MARKET_URL}
-                        target="_blank"
-                        rel="noreferrer noopener"
-                        className="shrink-0 font-medium text-brand hover:text-brand-dark hover:underline"
-                      >
-                        {t('bazaarListed')}
-                      </a>
-                      <span>{usdcArc ? t('usdcNetworkMetaArc') : t('usdcNetworkMeta')}</span>
-                    </div>
                   </li>
                 );
               }
               const item = entry.item;
+              const twin = entry.usdcTwin;
+              const usdcPrice = item.usdc?.priceUsd ?? twin?.priceUsd;
+              // USDC で絞っているときは、双子のカードのコピー先も USDC 面にする。
+              const primaryUrl = effectiveCurrency === 'usdc' && twin ? twin.resource : item.resource;
               const feeAtomic = feeAtomicOf(item);
               const verifiedDays = verifiedDaysAgo(item.verifiedAt, Date.now());
               const updatedDate = isoDate(item.updatedAt);
               const docsUrl = item.docsUrl && isHttpsUrl(item.docsUrl) ? item.docsUrl : null;
-              const hasComparisonMeta =
-                verifiedDays !== null || updatedDate !== null || Boolean(item.license && expandedKeys.has(`cat-${entry.key}`)) || docsUrl !== null;
               // atomic JPYC → 表示 (小数あり)。1% 手数料は price/100 で端数が出るため、整数除算だと
               // 切り捨てて誤表示する → formatUnits で小数を保つ。合計も atomic で加算してから整形する。
               const fee = feeAtomic === null ? null : formatUnits(feeAtomic, 18);
@@ -428,87 +355,99 @@ export function DiscoveryCatalogPanel({
                   total = null;
                 }
               }
+              const dates = [
+                verifiedDays !== null ? (
+                  <time key="verified" dateTime={item.verifiedAt ?? undefined}>
+                    {verifiedDays === 0
+                      ? t('verifiedTodayMeta')
+                      : t('verifiedMeta', { days: verifiedDays })}
+                  </time>
+                ) : null,
+                updatedDate !== null ? (
+                  <time key="updated" dateTime={item.updatedAt}>
+                    {t('updatedMeta', { date: updatedDate })}
+                  </time>
+                ) : null,
+              ].filter(Boolean);
               return (
-                <li
-                  key={entry.key}
-                  className="group rounded-2xl bg-white p-4 shadow-card ring-1 ring-slate-200/70 transition hover:-translate-y-0.5 hover:shadow-card-hover"
-                >
+                <li key={entry.key} className={CARD_CLASS}>
                   {cardHead({
                     category: item.category,
-                    currency: showCurrencyChips ? 'jpyc' : undefined,
-                    dualUsdc: Boolean(item.usdc),
-                    priceNode: (
-                      // 買い手の意思決定基準は合計 (2026-07-31 user 裁定): 合計を太字主役・
-                      // 価格+手数料は細字の内訳。fee 不明 (非 JPYC 等) は従来の価格表示。
-                      <div className="shrink-0 text-right">
-                        {total ? (
-                          <>
-                            <div className="text-sm font-bold text-slate-900">
-                              {t('payTotal', { total })}
-                            </div>
-                            <div className="text-[11px] text-slate-500">
-                              {item.priceJpyc} JPYC
-                              {fee && (
-                                <span className="ml-1">
-                                  {t('feeNote', { fee })}
-                                </span>
-                              )}
-                            </div>
-                          </>
-                        ) : (
-                          <div className="text-sm font-bold text-slate-900">
-                            {item.priceJpyc} JPYC
+                    // 価格は通貨ごとに「金額 + その通貨の注記」を常に組で出す (JPYC = 手数料の内訳・USDC = 上乗せなし)。
+                    // 買い手の意思決定基準は合計 (2026-07-31 user 裁定): 主役の通貨は合計を太字、もう一方は「または」で細字。
+                    // USDC で絞っているときだけ USDC を主役にする。fee 不明 (非 JPYC 等) は内訳を出さず価格だけ。
+                    priceNode: (() => {
+                      const jpycBreakdown =
+                        total && fee ? t('feeBreakdown', { price: item.priceJpyc, fee }) : null;
+                      const usdcFirst = effectiveCurrency === 'usdc' && usdcPrice;
+                      const sub = 'text-[11px] tabular-nums text-slate-500';
+                      return usdcFirst ? (
+                        <div className="shrink-0 text-right">
+                          <div className="text-[15px] font-bold tabular-nums text-slate-900">
+                            {t('payUsdc', { amount: usdcPrice })}
                           </div>
-                        )}
-                        {item.usdc && (
-                          <div className="text-[11px] font-semibold text-sky-700">
-                            {t('usdcFaceMeta', { price: item.usdc.priceUsd })}
+                          <div className={sub}>{t('usdcNoFee')}</div>
+                          <div className="mt-0.5 text-[11px] font-semibold tabular-nums text-slate-600">
+                            {t('jpycAltMeta', { total: total ?? item.priceJpyc })}
                           </div>
-                        )}
-                      </div>
-                    ),
+                          {jpycBreakdown && <div className={sub}>{jpycBreakdown}</div>}
+                        </div>
+                      ) : (
+                        <div className="shrink-0 text-right">
+                          <div className="text-[15px] font-bold tabular-nums text-slate-900">
+                            {total ?? item.priceJpyc} JPYC
+                          </div>
+                          {jpycBreakdown && <div className={sub}>{jpycBreakdown}</div>}
+                          {usdcPrice && (
+                            <>
+                              <div className="mt-0.5 text-[11px] font-semibold tabular-nums text-sky-700">
+                                {t('usdcAltMeta', { price: usdcPrice })}
+                              </div>
+                              <div className={sub}>{t('usdcNoFee')}</div>
+                            </>
+                          )}
+                        </div>
+                      );
+                    })(),
                     title: item.title,
                     usdc: item.usdc,
                     license: item.license,
                     description: item.description,
                     trigger: item.trigger,
-                    url: item.resource,
+                    url: primaryUrl,
                     copyKey: `cat-${entry.key}`,
                     official: item.official === true,
+                    summary: item.official === true ? summaryFor(item.resource) : undefined,
+                    docsUrl,
+                    fullUrlInDetails: !twin,
+                    detailLines: [
+                      // 双子は通貨ごとに URL が違うので、両方をコピーできる形で並べる。
+                      ...(twin
+                        ? [
+                            <span key="rails" className="flex flex-col gap-1.5">
+                              {(
+                                [
+                                  ['jpyc', t('pillJpyc'), item.resource],
+                                  ['usdc', usdcRail, twin.resource],
+                                ] as const
+                              ).map(([rail, label, url]) => (
+                                <span key={rail} className="flex min-w-0 flex-col items-start gap-1">
+                                  <span className="text-slate-500">{label}</span>
+                                  {urlChip(`cat-${entry.key}-${rail}`, url)}
+                                </span>
+                              ))}
+                            </span>,
+                          ]
+                        : []),
+                      ...(dates.length > 0
+                        ? [
+                            <span key="dates" className="flex flex-wrap gap-x-3">
+                              {dates}
+                            </span>,
+                          ]
+                        : []),
+                    ],
                   })}
-                  {hasComparisonMeta && (
-                    // 折り返し必須: nowrap+横スクロールだと利用条件の長文で Docs リンクが画面外に
-                    // 隠れて実質不到達になる (本番実害)。区切りは wrap に耐える中点で表現する。
-                    <div className="mt-2 flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-[11px] leading-relaxed text-slate-500">
-                      {verifiedDays !== null && (
-                        <time dateTime={item.verifiedAt ?? undefined} className="shrink-0">
-                          {verifiedDays === 0
-                            ? t('verifiedTodayMeta')
-                            : t('verifiedMeta', { days: verifiedDays })}
-                        </time>
-                      )}
-                      {updatedDate !== null && (
-                        <time dateTime={item.updatedAt} className="shrink-0">
-                          {t('updatedMeta', { date: updatedDate })}
-                        </time>
-                      )}
-                      {docsUrl && (
-                        <a
-                          href={docsUrl}
-                          target="_blank"
-                          rel="noreferrer noopener"
-                          className="shrink-0 font-medium text-brand hover:text-brand-dark hover:underline"
-                        >
-                          {t('docsLink')}
-                        </a>
-                      )}
-                      {item.license && expandedKeys.has(`cat-${entry.key}`) && (
-                        <span className="min-w-0">
-                          {t('licenseMeta', { license: item.license })}
-                        </span>
-                      )}
-                    </div>
-                  )}
                 </li>
               );
             })}
@@ -524,6 +463,17 @@ export function DiscoveryCatalogPanel({
               {t('catalogShowMore', { count: hiddenCount })}
             </button>
           </div>
+        )}
+        {/* 利用料の脚注 (JPYC は買い手上乗せ 1%・最低 1 JPYC / USDC は上乗せなし)。開示 SoT は LP・法務。
+            一覧の前に割り込ませず、一覧の後に 1 行で置く。 */}
+        {!loading && entries.length > 0 && (
+          <p className="mt-4 text-xs leading-relaxed text-slate-500">
+            {showCurrencyChips
+              ? usdcArc
+                ? t('catalogFeeNoteBothArc')
+                : t('catalogFeeNoteBoth')
+              : t('catalogFeeNoteJpyc')}
+          </p>
         )}
       </section>
     </>
