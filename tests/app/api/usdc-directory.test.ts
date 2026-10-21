@@ -478,15 +478,42 @@ describe('GET /api/paid/usdc/japan-web3-directory/[slug]', () => {
     expect(v2.extensions?.bazaar).toBeUndefined();
   });
 
-  it('v1 payment → verify→content→settle で 1 件の封筒', async () => {
+  // 0.01 USDC (10000 atomic) の支払い。共有の V1_PAYLOAD は一覧の 0.02 (20000) なので使わない。
+  const DETAIL_PAYLOAD = {
+    ...V1_PAYLOAD,
+    payload: {
+      ...V1_PAYLOAD.payload,
+      authorization: { ...V1_PAYLOAD.payload.authorization, value: '10000' },
+    },
+  };
+
+  it('static な兄弟 (search / licensed) と衝突する slug を掲載データに持たない', async () => {
+    const { DIRECTORY_ENTRIES } = await vi.importActual<typeof import('@/lib/directory/data')>('@/lib/directory/data');
+    // Next の router は static segment を [slug] より優先するため、同名 slug の 1 件は買えなくなる。
+    for (const reserved of ['search', 'licensed']) {
+      expect(DIRECTORY_ENTRIES.map((entry) => entry.slug)).not.toContain(reserved);
+    }
+  });
+
+  it('v1 payment → verify→content→settle で 1 件の封筒 (facilitator へは 10000 atomic・slug の URL)', async () => {
     facilitatorOk();
     const route = await loadDetail();
     const res = await route.GET(
-      new Request(DETAIL, { headers: { 'x-payment': b64(V1_PAYLOAD) } }),
+      new Request(DETAIL, { headers: { 'x-payment': b64(DETAIL_PAYLOAD) } }),
       ctx('jpyc-ex'),
     );
     expect(res.status).toBe(200);
     expect(fetchMock).toHaveBeenCalledTimes(2);
+    for (const [url, init] of fetchMock.mock.calls as [string, RequestInit][]) {
+      const sent = JSON.parse(String(init.body)) as {
+        paymentPayload: { payload: { authorization: { value: string } } };
+        paymentRequirements: { maxAmountRequired: string; resource: string };
+      };
+      expect(String(url)).toMatch(/\/(verify|settle)$/);
+      expect(sent.paymentRequirements.maxAmountRequired).toBe('10000');
+      expect(sent.paymentRequirements.resource).toBe(DETAIL);
+      expect(sent.paymentPayload.payload.authorization.value).toBe('10000');
+    }
     const body = (await res.json()) as { query: { slug: string }; items: { slug: string }[]; total: number };
     expect(body.query).toEqual({ slug: 'jpyc-ex' });
     expect(body.total).toBe(1);
@@ -498,7 +525,7 @@ describe('GET /api/paid/usdc/japan-web3-directory/[slug]', () => {
     verificationMocks.snapshot = null;
     const route = await loadDetail();
     const res = await route.GET(
-      new Request(DETAIL, { headers: { 'x-payment': b64(V1_PAYLOAD) } }),
+      new Request(DETAIL, { headers: { 'x-payment': b64(DETAIL_PAYLOAD) } }),
       ctx('jpyc-ex'),
     );
     expect(res.status).toBe(503);
