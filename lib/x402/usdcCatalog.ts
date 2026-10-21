@@ -26,6 +26,8 @@ export type UsdcCatalogItem = {
   /** USD 文字列 (例 '0.002')。 */
   priceUsd: string;
   category: 'data';
+  /** 同じ商品の JPYC 面の path (AI ストアの表示専用・lib/x402/catalogTwins.ts が server で付ける)。 */
+  jpycTwinPath?: string;
 };
 
 /** agentic.market の OpenPay サービスページ (2026-08-24 実ブラウザで描画確認)。 */

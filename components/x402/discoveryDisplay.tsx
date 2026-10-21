@@ -6,7 +6,18 @@
 
 import { useState, type ReactNode } from 'react';
 import { useTranslations } from 'next-intl';
-import { Activity, Boxes, Check, Code2, Copy, Database, FileText, Sparkles } from 'lucide-react';
+import {
+  Activity,
+  BadgeCheck,
+  Boxes,
+  Check,
+  ChevronDown,
+  Code2,
+  Copy,
+  Database,
+  FileText,
+  Sparkles,
+} from 'lucide-react';
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard';
 import { splitDisplayTitle } from '@/lib/x402/displayTitle';
 import type { MonitorFreshness } from '@/lib/directory/monitorFreshness';
@@ -18,6 +29,23 @@ function categoryIcon(category: string) {
   if (c.includes('mcp')) return Boxes;
   if (c.includes('content') || c.includes('doc') || c.includes('text')) return FileText;
   return Code2;
+}
+
+/**
+ * カードに出す短い URL。scheme を外し、path は最後の区切りだけ残す (open-pay.jp/…/search)。
+ * 末尾で切ると同じ host の商品が全部「open-pay.jp/api/pa…」になり見分けられないため。
+ * 不正 URL は生文字列のまま (owned 一覧の入力途中値)。
+ */
+function shortUrl(value: string): string {
+  try {
+    const url = new URL(value);
+    const segments = url.pathname.split('/').filter(Boolean);
+    if (segments.length === 0) return url.host;
+    if (segments.length === 1) return `${url.host}/${segments[0]}`;
+    return `${url.host}/…/${segments[segments.length - 1]}`;
+  } catch {
+    return value;
+  }
 }
 
 export function isHttpsUrl(value: string): boolean {
@@ -52,26 +80,32 @@ export function useDiscoveryDisplay(
     if (await copy(text)) setCopiedKey(key);
   }
 
-  // コピーボタン (URL / スニペット)。key 単位でコピー済みフィードバック。component ではなく関数で
-  // 返すことで no-unstable-nested-components を避ける。
-  const copyBtn = (k: string, text: string) => (
-    <button
-      type="button"
-      onClick={() => copyText(k, text)}
-      aria-label={copiedKey === k ? t('copied') : t('copy')}
-      title={copiedKey === k ? t('copied') : t('copy')}
-      className="shrink-0 rounded-md p-1 text-slate-500 transition hover:bg-slate-100 hover:text-slate-700"
-    >
-      {copiedKey === k ? (
-        <Check className="h-3.5 w-3.5 text-emerald-600" aria-hidden />
-      ) : (
-        <Copy className="h-3.5 w-3.5" aria-hidden />
-      )}
-    </button>
-  );
+  // URL をコピーするチップ。表示は scheme を外した短い形・押すと全 URL をコピー。
+  // a11y 名は可視テキスト (URL) を含める (掟 8)。component でなく関数で返し no-unstable-nested-components を避ける。
+  const urlChip = (key: string, url: string) => {
+    const copied = copiedKey === key;
+    return (
+      <button
+        type="button"
+        onClick={() => copyText(key, url)}
+        title={url}
+        className="inline-flex min-w-0 items-center gap-1.5 rounded-lg bg-slate-50 px-2.5 py-1.5 text-xs text-slate-600 ring-1 ring-inset ring-slate-200 transition hover:bg-slate-100 hover:text-slate-800"
+      >
+        {copied ? (
+          <Check className="h-3.5 w-3.5 shrink-0 text-emerald-600" aria-hidden />
+        ) : (
+          <Copy className="h-3.5 w-3.5 shrink-0" aria-hidden />
+        )}
+        <span className="sr-only">{copied ? t('copied') : t('copy')} </span>
+        <span className="truncate">{shortUrl(url)}</span>
+      </button>
+    );
+  };
 
-  // resource カード共通の頭部 (アイコン + カテゴリ + 価格 + 説明 + URL/コピー)。owned 一覧と公開カタログで
-  // 共有する。priceNode は右肩の価格表示 (owned=価格のみ / catalog=価格+手数料+合計) を呼び元が差し込む。
+  // resource カード共通の本体 (公開カタログと出品者の一覧で共有)。常時表示は 5 要素に絞る:
+  // 種類アイコン + 名前 (+公式) / 価格 (呼び元の priceNode) / 1〜2 行の要約 / URL のコピー + Docs / 「詳しく」。
+  // トリガー・全 URL・利用条件・検証日などは「詳しく」を開いたときだけ (2026-10-21 磨き上げ・視覚的な疲れを減らす)。
+  // 価格の内訳 (JPYC の手数料・USDC の上乗せなし) は priceNode 側で常時表示する (2026-07-31 user 裁定)。
   const cardHead = (opts: {
     category: string;
     priceNode: ReactNode;
@@ -80,127 +114,160 @@ export function useDiscoveryDisplay(
     usdc?: { serviceName?: string };
     license?: string;
     description: string;
-    /** 購入トリガー (任意)。見出しの下に控えめに出す (JA ページで英文が主役にならないように)。 */
+    /** 購入トリガー (任意)。「詳しく」の中に出す (JA ページで英文が主役にならないように)。 */
     trigger?: string;
     url: string;
     copyKey: string;
     official?: boolean;
-    /** 通貨チップ (JPYC/USDC 混在時のみ)。 */
-    currency?: 'jpyc' | 'usdc';
-    /** dual (JPYC 出品の USDC 併売): JPYC チップの隣に USDC チップも出す。 */
-    dualUsdc?: boolean;
+    /** 常時表示の Docs リンク (https のみ・呼び元で検査済み)。 */
+    docsUrl?: string | null;
+    /** 「詳しく」の中に足す行 (検証日・支払い方法など)。 */
+    detailLines?: ReactNode[];
+    /** 本文の差し替え (公式商品の日本語の要約・lib/x402/catalogSummaryJa.ts)。 */
+    summary?: string;
+    /** false = 「詳しく」に全 URL の行を出さない (双子のように通貨ごとの URL を detailLines で出すとき)。 */
+    fullUrlInDetails?: boolean;
+    /** 見出しに続けて置く状態チップ (出品者の一覧の公開中 / 非表示)。 */
+    badge?: ReactNode;
   }) => {
-    // 見出し = 名前 (無ければ description の先頭文)・本文 = 見出しと重複しない残り。
-    const { title, body } = splitDisplayTitle({ ...opts, resource: opts.url });
+    // 見出し = 名前 (無ければ description の先頭文)・本文 = 見出しと重複しない残り (要約があればそれ)。
+    const split = splitDisplayTitle({ ...opts, resource: opts.url });
+    const title = split.title;
+    const body = opts.summary ?? split.body;
     const expanded = expandedKeys.has(opts.copyKey);
-    // 「続きを読む」は clamp で隠れ得る長文か、折りたたみ時に出さない利用条件があるカードだけ。
-    const canExpand =
-      title.length > 60 ||
-      body.length > 120 ||
-      (opts.trigger?.length ?? 0) > 120 ||
-      Boolean(opts.license);
     const Icon = categoryIcon(opts.category);
     const urlIsHttps = isHttpsUrl(opts.url);
     // 更新型商品の「生きている」証拠 (最終イベント日・総件数)。該当商品にだけ出す。
     const freshness = freshnessFor(opts.url);
-    // 階層: チップ行 + 価格 → 見出し → 補足 (トリガー / title があるときの説明) → URL。
-    // 説明を価格の隣の狭い列に入れると英文が 1 語ずつ折り返して読めない (2 カラム時に実害)。
-    return (
-      <div>
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-            <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-slate-600">
-              <Icon className="h-3 w-3 text-brand" aria-hidden />
-              {opts.category}
-            </span>
-            {opts.currency && (
-              <span
-                className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold tracking-wide ${
-                  opts.currency === 'usdc'
-                    ? 'bg-sky-50 text-sky-700 ring-1 ring-sky-200'
-                    : 'bg-amber-50 text-amber-700 ring-1 ring-amber-200'
-                }`}
+    const detailLines = [
+      ...(opts.trigger
+        ? [
+            <span key="trigger" className="flex items-start gap-1.5">
+              <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0 text-brand" aria-hidden />
+              <span>{opts.trigger}</span>
+            </span>,
+          ]
+        : []),
+      ...(opts.fullUrlInDetails === false
+        ? []
+        : [
+            urlIsHttps ? (
+              <a
+                key="url"
+                href={opts.url}
+                target="_blank"
+                rel="noreferrer noopener"
+                className="break-all font-mono text-slate-500 underline-offset-2 hover:text-brand hover:underline"
               >
-                {opts.currency === 'usdc' ? 'USDC' : 'JPYC'}
+                {opts.url}
+              </a>
+            ) : (
+              <span key="url" className="break-all font-mono text-slate-500">
+                {opts.url}
               </span>
-            )}
-            {opts.dualUsdc && opts.currency !== 'usdc' && (
-              <span className="shrink-0 rounded-full bg-sky-50 px-2 py-0.5 text-[10px] font-bold tracking-wide text-sky-700 ring-1 ring-sky-200">
-                USDC
-              </span>
-            )}
-            {opts.official && (
-              <span className="shrink-0 rounded-full bg-brand/10 px-2 py-0.5 text-[10px] font-semibold text-brand-dark">
-                {t('officialBadge')}
-              </span>
-            )}
-          </div>
-          {opts.priceNode}
-        </div>
-        <p
-          className={`mt-2 text-sm font-bold leading-snug text-slate-900 ${expanded ? '' : 'line-clamp-2'}`}
+            ),
+          ]),
+      ...(opts.license
+        ? [<span key="license">{t('licenseMeta', { license: opts.license })}</span>]
+        : []),
+      ...(opts.detailLines ?? []),
+    ];
+    return (
+      <div className="flex gap-3">
+        <span
+          aria-hidden
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-600"
         >
-          {title}
-        </p>
-        {body && body !== title && (
-          <p className={`mt-1 text-xs leading-relaxed text-slate-500 ${expanded ? '' : 'line-clamp-3'}`}>
-            {body}
-          </p>
-        )}
-        {opts.trigger && (
-          <p className="mt-1 flex items-start gap-1.5 text-xs leading-relaxed text-slate-500">
-            <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0 text-brand" aria-hidden />
-            <span className={expanded ? '' : 'line-clamp-2'}>{opts.trigger}</span>
-          </p>
-        )}
-        {canExpand && (
-          <button
-            type="button"
-            aria-expanded={expanded}
-            className="mt-1 text-xs font-medium text-brand hover:text-brand-dark hover:underline"
-            onClick={() => setExpandedKeys((keys) => {
-              const next = new Set(keys);
-              if (next.has(opts.copyKey)) next.delete(opts.copyKey);
-              else next.add(opts.copyKey);
-              return next;
-            })}
-          >
-            {expanded ? t('readLess') : t('readMore')}
-          </button>
-        )}
-        {freshness && (
-          <p className="mt-1 flex items-center gap-1.5 text-xs leading-relaxed text-emerald-700">
-            <Activity className="h-3.5 w-3.5 shrink-0" aria-hidden />
-            <span>
-              {t('monitorFreshness', {
-                date: freshness.latestEventDate,
-                count: freshness.totalEvents,
-              })}
-            </span>
-          </p>
-        )}
-        <div className="mt-1.5 flex items-center gap-1.5">
-          {urlIsHttps ? (
-            <a
-              href={opts.url}
-              target="_blank"
-              rel="noreferrer noopener"
-              className="min-w-0 truncate font-mono text-xs text-slate-500 underline-offset-2 transition hover:text-brand hover:underline"
+          <Icon className="h-[18px] w-[18px]" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start justify-between gap-3">
+            <p
+              className={`min-w-0 text-[15px] font-bold leading-snug text-slate-900 ${expanded ? '' : 'line-clamp-3'}`}
             >
-              {opts.url}
-            </a>
-          ) : (
-            <span className="min-w-0 truncate font-mono text-xs text-slate-500">
-              {opts.url}
-            </span>
+              {title}
+              {/* 状態・公式は見出しに続けて置く (別の行にすると全カードが 1 行ずつ高くなる)。間は通常の空白に
+                  して、折り返したときに行頭で字下げされないようにする。 */}
+              {opts.badge && (
+                <>
+                  {' '}
+                  <span className="inline-block align-middle">{opts.badge}</span>
+                </>
+              )}
+              {opts.official && (
+                <>
+                  {' '}
+                <span className="inline-flex translate-y-[-1px] items-center gap-0.5 whitespace-nowrap align-middle text-[11px] font-semibold text-brand">
+                  <BadgeCheck className="h-3.5 w-3.5" aria-hidden />
+                  {t('officialBadge')}
+                </span>
+                </>
+              )}
+            </p>
+            {opts.priceNode}
+          </div>
+          {body && body !== title && (
+            <p
+              className={`mt-1.5 text-[13px] leading-relaxed text-slate-600 ${expanded ? '' : 'line-clamp-2'}`}
+            >
+              {body}
+            </p>
           )}
-          {copyBtn(opts.copyKey, opts.url)}
+          {freshness && (
+            <p className="mt-1.5 flex items-center gap-1.5 text-xs text-emerald-700">
+              <Activity className="h-3.5 w-3.5 shrink-0" aria-hidden />
+              <span>
+                {t('monitorFreshness', {
+                  date: freshness.latestEventDate,
+                  count: freshness.totalEvents,
+                })}
+              </span>
+            </p>
+          )}
+          <div className="mt-3 flex items-center gap-2">
+            {/* URL のコピーが買い手 (エージェントの設定者) の主な操作。 */}
+            {urlChip(opts.copyKey, opts.url)}
+            {opts.docsUrl && (
+              <a
+                href={opts.docsUrl}
+                target="_blank"
+                rel="noreferrer noopener"
+                className="shrink-0 text-xs font-semibold text-brand hover:text-brand-dark hover:underline"
+              >
+                {t('docsLink')}
+              </a>
+            )}
+            <button
+              type="button"
+              aria-expanded={expanded}
+              className="ml-auto inline-flex shrink-0 items-center gap-0.5 text-xs font-semibold text-slate-500 hover:text-slate-800"
+              onClick={() => setExpandedKeys((keys) => {
+                const next = new Set(keys);
+                if (next.has(opts.copyKey)) next.delete(opts.copyKey);
+                else next.add(opts.copyKey);
+                return next;
+              })}
+            >
+              {expanded ? t('readLess') : t('detailsLabel')}
+              <ChevronDown
+                className={`h-3.5 w-3.5 transition ${expanded ? 'rotate-180' : ''}`}
+                aria-hidden
+              />
+            </button>
+          </div>
+          {expanded && (
+            <ul className="mt-3 space-y-1.5 border-t border-slate-100 pt-3 text-xs leading-relaxed text-slate-600">
+              {detailLines.map((line, i) => (
+                <li key={i}>{line}</li>
+              ))}
+            </ul>
+          )}
         </div>
       </div>
     );
   };
 
-  return { copiedKey, copyText, expandedKeys, cardHead };
+  return { copiedKey, copyText, expandedKeys, cardHead, urlChip };
 }
 
 export type DiscoveryDisplay = ReturnType<typeof useDiscoveryDisplay>;

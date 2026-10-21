@@ -5,7 +5,7 @@
 
 import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
-import { AlertTriangle, Check, Code2, Copy, Pencil, Trash2 } from 'lucide-react';
+import { AlertTriangle, Check, ChevronDown, Code2, Copy, Pencil, Trash2 } from 'lucide-react';
 import { env } from '@/lib/env';
 import { REVERIFY_AUTH_HIDE_THRESHOLD } from '@/lib/x402/reverifyThresholds';
 import { isHttpsUrl, type DiscoveryDisplay } from './discoveryDisplay';
@@ -36,28 +36,47 @@ export function DiscoveryOwnedResources({
     owned, snippetOpenId, setSnippetOpenId, confirmDeleteId, setConfirmDeleteId, deleteMutation,
     onEdit, setNotice,
   } = owner;
-  const { cardHead, expandedKeys, copiedKey, copyText } = display;
+  const { cardHead, copiedKey, copyText } = display;
   const resourceActionCls =
-    'inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:border-brand hover:text-brand-dark';
+    'inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-100 hover:text-slate-900';
+  const hiddenCount = owned.filter((r) => r.hidden === true).length;
+  const liveCount = owned.length - hiddenCount;
 
   return isSignedIn && owned.length > 0 ? (
       <>
-        {/* あなたの登録 (owner のみ・編集/削除) */}
+        {/* あなたの登録 (owner のみ・編集/削除)。見出しの横に公開中 / 非表示の件数を出し、
+            要対応の有無を一目でわかるようにする (2026-10-21 磨き上げ)。 */}
         <section>
-          <h3 className="text-base font-bold text-slate-900">{t('yourResourcesTitle')}</h3>
-          <p className="mt-1 text-sm text-slate-500">{t('yourResourcesSubtitle')}</p>
+          <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+            <h3 className="text-base font-bold text-slate-900">{t('yourResourcesTitle')}</h3>
+            <p className="flex items-center gap-3 text-xs font-semibold tabular-nums">
+              <span className="inline-flex items-center gap-1.5 text-emerald-700">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" aria-hidden />
+                {t('ownedLiveCount', { count: liveCount })}
+              </span>
+              {hiddenCount > 0 && (
+                <span className="inline-flex items-center gap-1.5 text-amber-700">
+                  <span className="h-1.5 w-1.5 rounded-full bg-amber-500" aria-hidden />
+                  {t('ownedHiddenCount', { count: hiddenCount })}
+                </span>
+              )}
+            </p>
+          </div>
           {/* Arc に同意した出品があれば、Arc の売上 (受取アドレスの Gateway 残高) を受け取るページへ。 */}
           {env.enableArcPayoutUi && owned.some((r) => r.usdc?.arc === true) && (
             <Link
               href={`/${locale}/discovery/arc-payout`}
               prefetch={false}
-              className="mt-1.5 inline-flex text-xs font-medium text-brand underline-offset-2 hover:text-brand-dark hover:underline"
+              className="mt-1.5 inline-flex text-xs font-semibold text-brand underline-offset-2 hover:text-brand-dark hover:underline"
             >
               {t('arcPayoutCta')}
             </Link>
           )}
-          <ul className="mt-4 space-y-3">
-            {owned.map((r) => (
+          <ul className="mt-3 space-y-3">
+            {owned.map((r) => {
+              const hidden = r.hidden === true;
+              const authBlocked = isAuthBlockedHide(r);
+              return (
               <li
                 key={r.id}
                 className="rounded-2xl bg-white p-4 shadow-card ring-1 ring-slate-200/70"
@@ -65,11 +84,11 @@ export function DiscoveryOwnedResources({
                 {cardHead({
                   category: r.category,
                   priceNode: (
-                    <span className="shrink-0 text-right text-sm font-bold text-slate-900">
+                    <span className="shrink-0 text-right text-[15px] font-bold tabular-nums text-slate-900">
                       {r.priceJpyc} JPYC
                       {r.usdc && (
                         <span className="block text-[11px] font-semibold text-sky-700">
-                          {t('usdcFaceMeta', { price: r.usdc.priceUsd })}
+                          {t('usdcAltMeta', { price: r.usdc.priceUsd })}
                         </span>
                       )}
                     </span>
@@ -81,48 +100,45 @@ export function DiscoveryOwnedResources({
                   license: r.license,
                   url: r.url,
                   copyKey: `owned-${r.id}`,
-                })}
-                {(Boolean(r.license && expandedKeys.has(`owned-${r.id}`)) || Boolean(r.docsUrl && isHttpsUrl(r.docsUrl))) && (
-                  <div className="mt-2 flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-[11px] leading-relaxed text-slate-500">
-                    {r.docsUrl && isHttpsUrl(r.docsUrl) && (
-                      <a
-                        href={r.docsUrl}
-                        target="_blank"
-                        rel="noreferrer noopener"
-                        className="shrink-0 font-medium text-brand hover:text-brand-dark hover:underline"
-                      >
-                        {t('docsLink')}
-                      </a>
-                    )}
-                    {r.license && expandedKeys.has(`owned-${r.id}`) && (
-                      <span className="min-w-0">
-                        {t('licenseMeta', { license: r.license })}
-                      </span>
-                    )}
-                  </div>
-                )}
-                {r.hidden === true && (isAuthBlockedHide(r) || r.paywallSnippet) ? (
-                  <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 p-3">
-                    <p className="inline-flex items-center gap-1.5 rounded-full bg-amber-200 px-2.5 py-1 text-xs font-bold text-amber-900">
-                      <AlertTriangle className="h-3.5 w-3.5" aria-hidden />
-                      {t('requiresActionBadge')}
-                    </p>
-                    <p className="mt-2 text-sm leading-relaxed text-amber-900">
-                      {isAuthBlockedHide(r)
-                        ? t('requiresActionAuthBody')
-                        : t('requiresActionBody')}
-                    </p>
-                    {/* 締め出しが理由のときはゲートのスニペットを出しても直らない。 */}
-                    {!isAuthBlockedHide(r) && r.paywallSnippet ? (
-                      <PaywallSnippet
-                        snippet={r.paywallSnippet}
-                        copyKey={`repair-snippet-${r.id}`}
-                        copied={copiedKey === `repair-snippet-${r.id}`}
-                        onCopy={copyText}
-                        title={t('snippetTitle')}
-                        copyLabel={t('copy')}
-                        copiedLabel={t('copied')}
+                  docsUrl: r.docsUrl && isHttpsUrl(r.docsUrl) ? r.docsUrl : null,
+                  badge: (
+                    <span
+                      className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[11px] font-semibold ${
+                        hidden ? 'bg-amber-50 text-amber-800' : 'bg-emerald-50 text-emerald-700'
+                      }`}
+                    >
+                      <span
+                        className={`h-1.5 w-1.5 rounded-full ${hidden ? 'bg-amber-500' : 'bg-emerald-500'}`}
+                        aria-hidden
                       />
+                      {hidden ? t('ownedStatusHidden') : t('ownedStatusLive')}
+                    </span>
+                  ),
+                })}
+                {/* 非表示の理由は 1 文。直し方 (ゲートのスニペット) は開いたときだけ。締め出しが理由のときは
+                    スニペットを出しても直らない (出品側が再検証のアクセスを許可する必要がある)。 */}
+                {hidden && (authBlocked || r.paywallSnippet) ? (
+                  <div className="mt-3 rounded-xl bg-amber-50 px-3 py-2.5 ring-1 ring-inset ring-amber-200">
+                    <p className="flex items-start gap-2 text-[13px] leading-relaxed text-amber-900">
+                      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+                      <span>{authBlocked ? t('requiresActionAuthBody') : t('requiresActionBody')}</span>
+                    </p>
+                    {!authBlocked && r.paywallSnippet ? (
+                      <details className="group mt-1.5 pl-6">
+                        <summary className="inline-flex cursor-pointer list-none items-center gap-1 text-xs font-semibold text-amber-900 hover:underline">
+                          {t('fixHowTo')}
+                          <ChevronDown className="h-3.5 w-3.5 transition group-open:rotate-180" aria-hidden />
+                        </summary>
+                        <PaywallSnippet
+                          snippet={r.paywallSnippet}
+                          copyKey={`repair-snippet-${r.id}`}
+                          copied={copiedKey === `repair-snippet-${r.id}`}
+                          onCopy={copyText}
+                          title={t('snippetTitle')}
+                          copyLabel={t('copy')}
+                          copiedLabel={t('copied')}
+                        />
+                      </details>
                     ) : null}
                   </div>
                 ) : null}
@@ -166,10 +182,11 @@ export function DiscoveryOwnedResources({
                     </button>
                   </div>
                 ) : (
-                  <div className="mt-3 flex items-center gap-2 border-t border-slate-100 pt-3">
+                  <div className="-mx-1.5 mt-3 flex items-center gap-1 border-t border-slate-100 pt-2">
                     <button
                       type="button"
                       onClick={() => setSnippetOpenId(snippetOpenId === r.id ? null : r.id)}
+                      aria-expanded={snippetOpenId === r.id}
                       className={resourceActionCls}
                     >
                       <Code2 className="h-3.5 w-3.5" aria-hidden />
@@ -189,7 +206,7 @@ export function DiscoveryOwnedResources({
                         setConfirmDeleteId(r.id);
                         setNotice(null);
                       }}
-                      className={`${resourceActionCls} border-red-200 text-red-600 hover:border-red-400 hover:text-red-700`}
+                      className="ml-auto inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-red-600 transition hover:bg-red-50 hover:text-red-700"
                     >
                       <Trash2 className="h-3.5 w-3.5" aria-hidden />
                       {t('deleteCta')}
@@ -197,7 +214,8 @@ export function DiscoveryOwnedResources({
                   </div>
                 )}
               </li>
-            ))}
+              );
+            })}
           </ul>
         </section>
       </>

@@ -20,6 +20,16 @@ function usdc(atomic: bigint): string {
   return formatUnits(atomic, 6);
 }
 
+/**
+ * ウォレットの Arc の USDC (ネイティブ・18 桁) の表示。6 桁で切り捨てる (18 桁の端数をそのまま出すと読めない)。
+ * 0 より大きいが 6 桁で 0 になる額は「< 0.000001」(0 と表示すると「入っていない」と誤解させる)。
+ */
+function arcGas(atomic: bigint): string {
+  const micro = atomic / 10n ** 12n;
+  if (atomic > 0n && micro === 0n) return '< 0.000001';
+  return formatUnits(micro, 6);
+}
+
 function Row({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-baseline justify-between gap-3 py-1.5">
@@ -63,7 +73,7 @@ function Summary({ status, t }: { status: ArcPayoutStatus; t: ReturnType<typeof 
       <Row label={t('pendingLabel')} value={pending === null ? t('pendingUnknown') : `${usdc(pending)} USDC`} />
       {typeof status.fee === 'bigint' && <Row label={t('feeLabel')} value={`${usdc(status.fee)} USDC`} />}
       {plan?.ok && <Row label={t('receiveLabel')} value={`${usdc(plan.value)} USDC`} />}
-      <Row label={t('gasLabel')} value={`${formatUnits(status.gas, 18)} USDC`} />
+      <Row label={t('gasLabel')} value={`${arcGas(status.gas)} USDC`} />
     </dl>
   );
 }

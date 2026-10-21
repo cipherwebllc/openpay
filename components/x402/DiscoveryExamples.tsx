@@ -5,10 +5,12 @@
 
 import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
-import { Boxes, Check, ChevronDown, Code2, Copy } from 'lucide-react';
+import { Boxes, Check, CheckCircle2, ChevronDown, Code2, Copy, ShieldCheck } from 'lucide-react';
+import { X402_DEMO_PATH } from '@/lib/x402/demoPath';
+import { AGENTIC_MARKET_URL, X402_LIST_URL } from '@/lib/x402/usdcCatalog';
 import type { DiscoveryDisplay } from './discoveryDisplay';
 
-const DEMO_RESOURCE_URL = 'https://open-pay.jp/api/paid/demo';
+const DEMO_RESOURCE_URL = `https://open-pay.jp${X402_DEMO_PATH}`;
 const BUYER_SCRIPT_URL =
   'https://raw.githubusercontent.com/cipherwebllc/openpay/main/scripts/x402-buyer-example.mjs';
 const DEMO_CURL = `curl -i ${DEMO_RESOURCE_URL}`;
@@ -37,7 +39,14 @@ const BUYER_SCRIPT_COMMAND = [
   `RESOURCE_URL=${DEMO_RESOURCE_URL} node x402-buyer-example.mjs`,
 ].join('\n');
 
-export function DiscoveryExamples({ display }: { display: DiscoveryDisplay }) {
+export function DiscoveryExamples({
+  display,
+  showUsdcDiscovery,
+}: {
+  display: DiscoveryDisplay;
+  /** USDC 商品があるとき、発見面に x402 Bazaar / x402-list も並べる。 */
+  showUsdcDiscovery: boolean;
+}) {
   const t = useTranslations('Facilitator');
   const locale = useLocale();
   const { copiedKey, copyText } = display;
@@ -61,12 +70,150 @@ export function DiscoveryExamples({ display }: { display: DiscoveryDisplay }) {
   );
 
   return (
-    <>
+    <section id="agent" className="scroll-mt-24 space-y-3">
+      <h3 className="text-base font-bold text-slate-900">{t('agentSectionTitle')}</h3>
+      {/* 発見面: JPYC は /api/discovery、USDC は CDP Bazaar / agentic.market と x402-list。 */}
+      <p className="text-xs leading-relaxed text-slate-500">
+        {t('catalogDiscoverPrefix')}
+        <code className="rounded bg-slate-100 px-1 py-0.5 font-mono text-[11px] text-slate-600">
+          /api/discovery
+        </code>
+        {showUsdcDiscovery && (
+          <>
+            {t('catalogDiscoverJoin')}
+            <a
+              href={AGENTIC_MARKET_URL}
+              target="_blank"
+              rel="noreferrer noopener"
+              className="font-medium text-brand underline-offset-2 hover:text-brand-dark hover:underline"
+            >
+              {t('catalogDiscoverBazaar')}
+            </a>
+            {' / '}
+            {/* OpenPay 自身の USDC データ API の掲載先 (2026-09-15 承認)。第三者出品の自動掲載先ではない。 */}
+            <a
+              href={X402_LIST_URL}
+              target="_blank"
+              rel="noreferrer noopener"
+              className="font-medium text-brand underline-offset-2 hover:text-brand-dark hover:underline"
+            >
+              {t('catalogDiscoverX402List')}
+            </a>
+          </>
+        )}
+      </p>
+      {/* 自律購入の買い手が最初に知りたい「暴走しないか」を常に見える 1 行で答える。中身 (上限・照合・証跡) は
+          MCP の節に既定値と並べて置く (実装済みの事実だけを書き、売り手のあらゆる挙動を防ぐ保証とは書かない)。 */}
+      <p className="flex items-center gap-1.5 text-xs font-medium text-emerald-700">
+        <ShieldCheck className="h-4 w-4 shrink-0" aria-hidden />
+        <span>
+          {t('guardsTitle')}: {t('guardsSummary')}
+        </span>
+      </p>
+      {/* エージェント導線: npm 公開済みの買い手 MCP (openpay-x402-mcp)。設定 JSON を貼るだけ。 */}
+      <section>
+        <details className="group overflow-hidden rounded-2xl bg-white shadow-card ring-1 ring-slate-200/70">
+          <summary className="flex cursor-pointer list-none items-center gap-3 p-4 transition hover:bg-slate-50">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-700">
+              <Boxes className="h-5 w-5" aria-hidden />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-base font-bold text-slate-900">
+                {t('mcpTitle')}
+              </span>
+              <span className="mt-0.5 block text-sm leading-relaxed text-slate-500">
+                {t('mcpSubtitle')}
+              </span>
+            </span>
+            <ChevronDown
+              className="h-4 w-4 shrink-0 text-slate-500 transition group-open:rotate-180"
+              aria-hidden
+            />
+          </summary>
+
+          <div className="space-y-3 border-t border-slate-100 p-4">
+            <div className="rounded-xl bg-slate-950 p-3">
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <a
+                  href="https://www.npmjs.com/package/openpay-x402-mcp"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="min-w-0 truncate text-xs font-medium text-sky-300 hover:text-sky-200"
+                >
+                  openpay-x402-mcp
+                </a>
+                {copyCodeBtn('mcp-config', MCP_CONFIG_SNIPPET)}
+              </div>
+              <pre className="overflow-x-auto text-xs leading-relaxed text-slate-100">
+                {MCP_CONFIG_SNIPPET}
+              </pre>
+            </div>
+            <p className="text-xs leading-relaxed text-slate-600">
+              {t('mcpWalletInit')}
+            </p>
+            {/* 購入ガード: SDK / MCP が強制する事実と、MCP の既定値。 */}
+            <div className="rounded-xl bg-emerald-50/60 p-3 ring-1 ring-inset ring-emerald-100">
+              <p className="flex items-center gap-1.5 text-xs font-semibold text-emerald-800">
+                <ShieldCheck className="h-4 w-4 shrink-0" aria-hidden />
+                {t('guardsTitle')}
+              </p>
+              <ul className="mt-2 space-y-1">
+                {[
+                  t('guardsLimit'),
+                  t('guardsMatch'),
+                  t('guardsResource'),
+                  t('guardsReceipt'),
+                  t('guardsUnlock'),
+                ].map((line) => (
+                  <li key={line} className="flex items-start gap-1.5 text-xs leading-relaxed text-slate-700">
+                    <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600" aria-hidden />
+                    <span>{line}</span>
+                  </li>
+                ))}
+              </ul>
+              <ul className="mt-2 list-disc space-y-0.5 pl-5 text-xs leading-relaxed text-slate-600">
+                <li>{t('mcpGuardPerCall')}</li>
+                <li>{t('mcpGuardCumulative')}</li>
+                <li>{t('mcpGuardDestinations')}</li>
+              </ul>
+              <p className="mt-2 text-[11px] leading-relaxed text-slate-500">{t('guardsNote')}</p>
+            </div>
+            <a
+              href="https://www.npmjs.com/package/openpay-x402-mcp"
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex text-xs font-medium text-brand hover:text-brand-dark hover:underline"
+            >
+              {t('mcpMore')}
+            </a>
+            <p className="text-xs leading-relaxed text-slate-600">
+              {mcpSdkNotePrefix}
+              <a
+                href="https://www.npmjs.com/package/openpay-x402-sdk"
+                target="_blank"
+                rel="noreferrer"
+                className="font-medium text-brand hover:text-brand-dark hover:underline"
+              >
+                {mcpSdkPackageName}
+              </a>
+              {mcpSdkNoteSuffix}
+            </p>
+            {/* 初回セットアップ (ウォレット/Steward/ガード) の全手順は /guide/ai-pay へ。 */}
+            <Link
+              href={`/${locale}/guide/ai-pay`}
+              prefetch={false}
+              className="inline-flex text-xs font-medium text-brand underline-offset-2 hover:text-brand-dark hover:underline"
+            >
+              {t('aiPayGuideCta')}
+            </Link>
+          </div>
+        </details>
+      </section>
       {/* 1 JPYC の first-party demo。長い buyer script は raw を参照し、ページには最小コマンドだけ載せる。 */}
       <section>
         <details className="group overflow-hidden rounded-2xl bg-white shadow-card ring-1 ring-slate-200/70">
           <summary className="flex cursor-pointer list-none items-center gap-3 p-4 transition hover:bg-slate-50">
-            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-900 text-white">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-700">
               <Code2 className="h-5 w-5" aria-hidden />
             </span>
             <span className="min-w-0 flex-1">
@@ -142,83 +289,6 @@ export function DiscoveryExamples({ display }: { display: DiscoveryDisplay }) {
         </details>
       </section>
 
-      {/* エージェント導線: npm 公開済みの買い手 MCP (openpay-x402-mcp)。設定 JSON を貼るだけ。 */}
-      <section>
-        <details className="group overflow-hidden rounded-2xl bg-white shadow-card ring-1 ring-slate-200/70">
-          <summary className="flex cursor-pointer list-none items-center gap-3 p-4 transition hover:bg-slate-50">
-            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-900 text-white">
-              <Boxes className="h-5 w-5" aria-hidden />
-            </span>
-            <span className="min-w-0 flex-1">
-              <span className="block text-base font-bold text-slate-900">
-                {t('mcpTitle')}
-              </span>
-              <span className="mt-0.5 block text-sm leading-relaxed text-slate-500">
-                {t('mcpSubtitle')}
-              </span>
-            </span>
-            <ChevronDown
-              className="h-4 w-4 shrink-0 text-slate-500 transition group-open:rotate-180"
-              aria-hidden
-            />
-          </summary>
-
-          <div className="space-y-3 border-t border-slate-100 p-4">
-            <div className="rounded-xl bg-slate-950 p-3">
-              <div className="mb-2 flex items-center justify-between gap-3">
-                <a
-                  href="https://www.npmjs.com/package/openpay-x402-mcp"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="min-w-0 truncate text-xs font-medium text-sky-300 hover:text-sky-200"
-                >
-                  openpay-x402-mcp
-                </a>
-                {copyCodeBtn('mcp-config', MCP_CONFIG_SNIPPET)}
-              </div>
-              <pre className="overflow-x-auto text-xs leading-relaxed text-slate-100">
-                {MCP_CONFIG_SNIPPET}
-              </pre>
-            </div>
-            <p className="text-xs leading-relaxed text-slate-600">
-              {t('mcpWalletInit')}
-            </p>
-            <ul className="list-disc space-y-1.5 pl-5 text-xs leading-relaxed text-slate-600">
-              <li>{t('mcpGuardPerCall')}</li>
-              <li>{t('mcpGuardCumulative')}</li>
-              <li>{t('mcpGuardDestinations')}</li>
-            </ul>
-            <a
-              href="https://www.npmjs.com/package/openpay-x402-mcp"
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex text-xs font-medium text-brand hover:text-brand-dark hover:underline"
-            >
-              {t('mcpMore')}
-            </a>
-            <p className="text-xs leading-relaxed text-slate-600">
-              {mcpSdkNotePrefix}
-              <a
-                href="https://www.npmjs.com/package/openpay-x402-sdk"
-                target="_blank"
-                rel="noreferrer"
-                className="font-medium text-brand hover:text-brand-dark hover:underline"
-              >
-                {mcpSdkPackageName}
-              </a>
-              {mcpSdkNoteSuffix}
-            </p>
-            {/* 初回セットアップ (ウォレット/Steward/ガード) の全手順は /guide/ai-pay へ。 */}
-            <Link
-              href={`/${locale}/guide/ai-pay`}
-              prefetch={false}
-              className="inline-flex text-xs font-medium text-brand underline-offset-2 hover:text-brand-dark hover:underline"
-            >
-              {t('aiPayGuideCta')}
-            </Link>
-          </div>
-        </details>
-      </section>
-    </>
+    </section>
   );
 }

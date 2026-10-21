@@ -26,7 +26,15 @@ export type CatalogCurrency = 'all' | 'jpyc' | 'usdc';
 
 /** JPYC と USDC を同じ一覧に並べるための共通形。 */
 export type CatalogEntry =
-  | { kind: 'jpyc'; key: string; category: string; searchText: string; item: DiscoveryItem }
+  | {
+      kind: 'jpyc';
+      key: string;
+      category: string;
+      searchText: string;
+      item: DiscoveryItem;
+      /** 同じ公式商品の USDC 面 (path が違う双子)。あれば 1 枚のカードにまとめ、USDC 単独のカードは出さない。 */
+      usdcTwin?: UsdcCatalogItem;
+    }
   | { kind: 'usdc'; key: string; category: string; searchText: string; item: UsdcCatalogItem };
 
 export type RegisteredResource = {
