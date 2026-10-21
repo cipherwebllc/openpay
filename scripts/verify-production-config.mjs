@@ -13,14 +13,17 @@ import {
   assessPimlicoRun,
   assessReceiptSigner,
   assessReverifyRun,
+  checkNodeRuntime,
   latestCompletedRun,
+  summarizeChecks,
 } from './verify-production-config-helpers.mjs';
 
 const BASE = process.argv[2] ?? 'https://open-pay.jp';
 
 const checks = [];
-function record(name, ok, detail) {
-  checks.push({ name, ok, detail });
+// severity 'warn' の扱いは summarizeChecks (失敗しても exit 1 にせず ::warning:: だけ出す)。
+function record(name, ok, detail, { severity = 'error' } = {}) {
+  checks.push({ name, ok, detail, severity });
 }
 
 // --- (1) Sentry DSN が prod bundle に含まれているか ---
@@ -95,6 +98,14 @@ for (const [name, path] of [
   }
   const assessment = assessReceiptSigner(r.status, body);
   record('x402 receipt signer (X402_RECEIPT_SIGNING_KEY)', assessment.ok, assessment.detail);
+}
+
+// --- (4c) 本番の関数の Node が、セキュリティ修正の入った版以上か ---
+//   Vercel は Node の patch を自動で配るが、届いたかは外から見えない → CRON_SECRET で守った /api/cron/runtime で読む。
+//   配布待ちは operator が直せないので warn (exit 1 にしない)。公開ログなので正確な版は出さない (assessNodeRuntime)。
+{
+  const assessment = await checkNodeRuntime(BASE, process.env.CRON_SECRET);
+  record('Production Node runtime (security minimum)', assessment.ok, assessment.detail, { severity: 'warn' });
 }
 
 // --- (5) GH Actions Pimlico balance cron が actual check 実行か (skip でないか) ---
@@ -194,17 +205,6 @@ for (const [name, path] of [
 }
 
 // --- output ---
-console.log('Production config verification:');
-let failed = 0;
-for (const c of checks) {
-  const mark = c.ok ? '✓' : '✗';
-  console.log(`  ${mark} ${c.name}`);
-  console.log(`      ${c.detail}`);
-  if (!c.ok) failed += 1;
-}
-console.log('');
-if (failed > 0) {
-  console.log(`⚠ ${failed}/${checks.length} 件 inactive — 上記詳細を確認`);
-  process.exit(1);
-}
-console.log(`✅ ${checks.length}/${checks.length} 件 active`);
+const summary = summarizeChecks(checks);
+for (const line of summary.lines) console.log(line);
+if (summary.exitCode !== 0) process.exit(summary.exitCode);
