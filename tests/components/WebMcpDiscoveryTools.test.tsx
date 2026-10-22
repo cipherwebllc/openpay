@@ -1,5 +1,6 @@
 // WebMCP spike (components/WebMcpDiscoveryTools) の検証。
-// 柱: (1) 未対応ブラウザで no-op、(2) 3 tools の登録/解除、(3) 各 tool の契約 —
+// 柱: (1) 未対応ブラウザで no-op、(2) 3 tools の登録/解除 (仕様の document.modelContext + signal・
+// 旧い navigator.modelContext の予備)、(3) 各 tool の契約 —
 // search の統合/絞り込み・schema の openapi 参照・prepare の 402 素通し、
 // (4) 安全境界: resource は同一 origin の /api/* のみ・支払い実行はしない (402 以外は throw)。
 
@@ -40,16 +41,38 @@ function json(body: unknown, status = 200) {
 }
 
 async function toolResult(
-  tool: { execute: (args: Record<string, unknown>) => Promise<{ content: Array<{ text: string }> }> },
+  tool: { execute: (args: Record<string, unknown>) => Promise<string> },
   args: Record<string, unknown>,
 ) {
-  const res = await tool.execute(args);
-  return JSON.parse(res.content[0].text) as Record<string, unknown>;
+  return JSON.parse(await tool.execute(args)) as Record<string, unknown>;
+}
+
+type RegisterCall = { name: string; annotations?: Record<string, unknown>; signal?: AbortSignal };
+
+/** registerTool の呼び出しを記録する modelContext。registerResult で戻り値 (Promise 等) を差し替える。 */
+function fakeModelContext(registerResult: () => unknown = () => Promise.resolve()) {
+  const calls: RegisterCall[] = [];
+  const unregistered: string[] = [];
+  return {
+    calls,
+    unregistered,
+    context: {
+      registerTool: (
+        tool: { name: string; annotations?: Record<string, unknown> },
+        options?: { signal?: AbortSignal },
+      ) => {
+        calls.push({ name: tool.name, annotations: tool.annotations, signal: options?.signal });
+        return registerResult();
+      },
+      unregisterTool: (name: string) => unregistered.push(name),
+    },
+  };
 }
 
 afterEach(() => {
   cleanup();
   delete (navigator as Navigator & { modelContext?: unknown }).modelContext;
+  delete (document as Document & { modelContext?: unknown }).modelContext;
 });
 
 describe('normalizeResourceArg (安全境界)', () => {
@@ -149,20 +172,65 @@ describe('WebMcpDiscoveryTools component', () => {
     expect(container.innerHTML).toBe('');
   });
 
-  it('対応ブラウザでは 3 tools を登録し、unmount で解除する', () => {
-    const registered: string[] = [];
-    const unregistered: string[] = [];
-    (navigator as Navigator & { modelContext?: unknown }).modelContext = {
-      registerTool: (tool: { name: string }) => registered.push(tool.name),
-      unregisterTool: (name: string) => unregistered.push(name),
-    };
+  it('仕様の document.modelContext に 3 tools を signal つきで登録し、unmount で signal を abort する', () => {
+    const mc = fakeModelContext();
+    (document as Document & { modelContext?: unknown }).modelContext = mc.context;
     const { unmount } = render(<WebMcpDiscoveryTools usdcItems={USDC_ITEMS} />);
-    expect(registered).toEqual([
+    expect(mc.calls.map((c) => c.name)).toEqual([
       'search_paid_resources',
       'get_resource_schema',
       'prepare_purchase',
     ]);
+    const signals = mc.calls.map((c) => c.signal);
+    expect(signals.every((s) => s instanceof AbortSignal && !s.aborted)).toBe(true);
     unmount();
-    expect(unregistered).toEqual(registered);
+    expect(signals.every((s) => s?.aborted)).toBe(true);
+  });
+
+  it('3 tools とも読み取りだけの印・出品者の文章を返す search と prepare には「信頼できない内容」の印', () => {
+    // prepare は 402 の accepts[].description に出品者の商品名が入る (app/api/paid/hosted/[id]/route.ts)。
+    const mc = fakeModelContext();
+    (document as Document & { modelContext?: unknown }).modelContext = mc.context;
+    render(<WebMcpDiscoveryTools usdcItems={USDC_ITEMS} />);
+    expect(Object.fromEntries(mc.calls.map((c) => [c.name, c.annotations]))).toEqual({
+      search_paid_resources: { readOnlyHint: true, untrustedContentHint: true },
+      get_resource_schema: { readOnlyHint: true },
+      prepare_purchase: { readOnlyHint: true, untrustedContentHint: true },
+    });
+  });
+
+  it('document と navigator の両方にあれば document を使う', () => {
+    const doc = fakeModelContext();
+    const nav = fakeModelContext();
+    (document as Document & { modelContext?: unknown }).modelContext = doc.context;
+    (navigator as Navigator & { modelContext?: unknown }).modelContext = nav.context;
+    render(<WebMcpDiscoveryTools usdcItems={USDC_ITEMS} />);
+    expect(doc.calls).toHaveLength(3);
+    expect(nav.calls).toHaveLength(0);
+  });
+
+  it('旧い navigator.modelContext (signal なし) にも登録し、unmount で unregisterTool する', () => {
+    const mc = fakeModelContext(() => undefined);
+    (navigator as Navigator & { modelContext?: unknown }).modelContext = mc.context;
+    const { unmount } = render(<WebMcpDiscoveryTools usdcItems={USDC_ITEMS} />);
+    const names = mc.calls.map((c) => c.name);
+    expect(names).toHaveLength(3);
+    unmount();
+    expect(mc.unregistered).toEqual(names);
+  });
+
+  it('登録の reject (二重登録・解除時の AbortError) や同期の throw でもページは描画を続け、未処理の reject を残さない', async () => {
+    const rejecting = fakeModelContext(() => Promise.reject(new DOMException('dup', 'InvalidStateError')));
+    (document as Document & { modelContext?: unknown }).modelContext = rejecting.context;
+    const { unmount } = render(<WebMcpDiscoveryTools usdcItems={USDC_ITEMS} />);
+    await new Promise((resolve) => setTimeout(resolve, 0)); // reject の後始末を待つ (未処理なら vitest が落とす)
+    unmount();
+
+    const throwing = fakeModelContext(() => {
+      throw new Error('experimental API mismatch');
+    });
+    (document as Document & { modelContext?: unknown }).modelContext = throwing.context;
+    expect(() => render(<WebMcpDiscoveryTools usdcItems={USDC_ITEMS} />)).not.toThrow();
+    expect(throwing.calls).toHaveLength(3);
   });
 });
