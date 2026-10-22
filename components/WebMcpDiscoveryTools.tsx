@@ -12,9 +12,12 @@
 // 掟 (承認境界・裁定項目 5 と整合): **支払いの実行はツール化しない**。prepare_purchase は
 // 402 の支払い要件を返すだけで、署名・送金は購入者自身のウォレットツール (MCP/スクリプト) の
 // 責任として明示する。tool の fetch 先は同一 origin の /api/* のみ (任意 URL を叩かせない)。
-// 3 tools とも annotations.readOnlyHint。出品者の書いた文章を返す search と prepare_purchase (402 の
-// accepts[].description に商品名が入る) には untrustedContentHint (エージェントが出品文の中の指示に
-// 従わないよう、ブラウザとエージェントに知らせる)。get_resource_schema は自前の openapi.json だけを返す。
+// annotations: search と schema は readOnlyHint。prepare_purchase は支払わないが、402 を取るときに
+// サーバーが見積もりの記録 (期限つき・hosted 商品など) を作ることがあるので readOnlyHint を付けない。
+// 出品者の書いた文章を返す search と prepare (402 の accepts[].description に商品名が入る) には
+// untrustedContentHint (エージェントが出品文の中の指示に従わないよう、ブラウザとエージェントに知らせる)。
+// get_resource_schema は自前の openapi.json だけを返す。
+// execute は値をそのまま返す (仕様は戻り値を JSON に変換するので、文字列で返すと二重になる)。
 // WebMCP 未対応ブラウザでは何もしない (UI 描画なし・既存ページに影響ゼロ)。
 
 import { useEffect } from 'react';
@@ -25,8 +28,8 @@ type WebMcpTool = {
   title: string;
   description: string;
   inputSchema: Record<string, unknown>;
-  annotations: { readOnlyHint: true; untrustedContentHint?: true };
-  execute: (args: Record<string, unknown>) => Promise<string>;
+  annotations: { readOnlyHint?: true; untrustedContentHint?: true };
+  execute: (args: Record<string, unknown>) => Promise<Record<string, unknown>>;
 };
 
 type ModelContext = {
@@ -41,10 +44,6 @@ function findModelContext(): ModelContext | undefined {
     (document as Document & { modelContext?: ModelContext }).modelContext ??
     (navigator as Navigator & { modelContext?: ModelContext }).modelContext
   );
-}
-
-function textResult(value: unknown): string {
-  return JSON.stringify(value);
 }
 
 /** tool 引数の resource を同一 origin の /api/* パスに正規化する。それ以外は null。 */
@@ -131,7 +130,7 @@ export function buildWebMcpTools(
         const filtered = keyword
           ? items.filter((item) => JSON.stringify(item).toLowerCase().includes(keyword))
           : items;
-        return textResult({ items: filtered.slice(0, 50), total: filtered.length });
+        return { items: filtered.slice(0, 50), total: filtered.length };
       },
     },
     {
@@ -161,7 +160,7 @@ export function buildWebMcpTools(
         };
         const op = spec.paths?.[pathname]?.get;
         if (!op) throw new Error(`no schema for ${pathname}`);
-        return textResult({
+        return {
           path: pathname,
           method: 'GET',
           summary: op.summary,
@@ -173,13 +172,13 @@ export function buildWebMcpTools(
               | Record<string, { content?: Record<string, { example?: unknown }> }>
               | undefined
           )?.['200']?.content?.['application/json']?.example,
-        });
+        };
       },
     },
     {
       name: 'prepare_purchase',
       title: 'Get payment requirements (no payment)',
-      annotations: { readOnlyHint: true, untrustedContentHint: true },
+      annotations: { untrustedContentHint: true },
       description:
         'Fetch the x402 payment requirements (HTTP 402 accepts) for one OpenPay paid resource, without paying. This tool NEVER signs or executes a payment — use your own wallet tooling (openpay-x402-mcp or the buyer scripts) to pay.',
       inputSchema: {
@@ -200,11 +199,11 @@ export function buildWebMcpTools(
           throw new Error(`expected 402 challenge, got HTTP ${res.status}`);
         }
         const body = (await res.json()) as { accepts?: unknown[] };
-        return textResult({
+        return {
           resource: `${origin}${path}`,
           accepts: body.accepts ?? [],
           note: 'Payment execution is out of scope for this tool. Sign and pay with your own x402 wallet tooling; amounts are shown in the accepts entries (JPYC 18 decimals on Polygon, USDC 6 decimals on Base).',
-        });
+        };
       },
     },
   ];

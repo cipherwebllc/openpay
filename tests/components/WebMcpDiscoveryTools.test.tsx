@@ -4,6 +4,7 @@
 // search の統合/絞り込み・schema の openapi 参照・prepare の 402 素通し、
 // (4) 安全境界: resource は同一 origin の /api/* のみ・支払い実行はしない (402 以外は throw)。
 
+import { StrictMode } from 'react';
 import { describe, expect, it, vi, afterEach } from 'vitest';
 import { render, cleanup } from '@testing-library/react';
 import {
@@ -41,10 +42,13 @@ function json(body: unknown, status = 200) {
 }
 
 async function toolResult(
-  tool: { execute: (args: Record<string, unknown>) => Promise<string> },
+  tool: { execute: (args: Record<string, unknown>) => Promise<Record<string, unknown>> },
   args: Record<string, unknown>,
 ) {
-  return JSON.parse(await tool.execute(args)) as Record<string, unknown>;
+  // 仕様は戻り値を JSON に変換してエージェントへ渡すので、値は素のオブジェクトで、変換できること。
+  const value = await tool.execute(args);
+  expect(typeof value).toBe('object');
+  return JSON.parse(JSON.stringify(value)) as Record<string, unknown>;
 }
 
 type RegisterCall = { name: string; annotations?: Record<string, unknown>; signal?: AbortSignal };
@@ -65,6 +69,26 @@ function fakeModelContext(registerResult: () => unknown = () => Promise.resolve(
         return registerResult();
       },
       unregisterTool: (name: string) => unregistered.push(name),
+    },
+  };
+}
+
+/**
+ * 仕様の登録表に近い modelContext (unregisterTool は無い): 同じ名前の二重登録は InvalidStateError で reject、
+ * signal の abort でその場で表から消す (仕様の「unregister a tool」は同期)。
+ */
+function specModelContext() {
+  const registered = new Set<string>();
+  return {
+    registered,
+    context: {
+      registerTool: (tool: { name: string }, options?: { signal?: AbortSignal }) => {
+        if (registered.has(tool.name)) return Promise.reject(new DOMException(tool.name, 'InvalidStateError'));
+        if (options?.signal?.aborted) return Promise.reject(new DOMException('aborted', 'AbortError'));
+        registered.add(tool.name);
+        options?.signal?.addEventListener('abort', () => registered.delete(tool.name), { once: true });
+        return Promise.resolve();
+      },
     },
   };
 }
@@ -187,7 +211,7 @@ describe('WebMcpDiscoveryTools component', () => {
     expect(signals.every((s) => s?.aborted)).toBe(true);
   });
 
-  it('3 tools とも読み取りだけの印・出品者の文章を返す search と prepare には「信頼できない内容」の印', () => {
+  it('search と schema は読み取りだけの印・出品者の文章を返す search と prepare には「信頼できない内容」の印', () => {
     // prepare は 402 の accepts[].description に出品者の商品名が入る (app/api/paid/hosted/[id]/route.ts)。
     const mc = fakeModelContext();
     (document as Document & { modelContext?: unknown }).modelContext = mc.context;
@@ -195,8 +219,22 @@ describe('WebMcpDiscoveryTools component', () => {
     expect(Object.fromEntries(mc.calls.map((c) => [c.name, c.annotations]))).toEqual({
       search_paid_resources: { readOnlyHint: true, untrustedContentHint: true },
       get_resource_schema: { readOnlyHint: true },
-      prepare_purchase: { readOnlyHint: true, untrustedContentHint: true },
+      // 支払わないが、402 を取るときに見積もりの記録 (期限つき) を作ることがあるので「読み取りだけ」ではない。
+      prepare_purchase: { untrustedContentHint: true },
     });
+  });
+
+  it('StrictMode のマウントし直し (登録 → abort → 再登録) のあとも 3 tools が登録されたまま、unmount で消える', () => {
+    const mc = specModelContext();
+    (document as Document & { modelContext?: unknown }).modelContext = mc.context;
+    const { unmount } = render(
+      <StrictMode>
+        <WebMcpDiscoveryTools usdcItems={USDC_ITEMS} />
+      </StrictMode>,
+    );
+    expect([...mc.registered].sort()).toEqual(['get_resource_schema', 'prepare_purchase', 'search_paid_resources']);
+    unmount();
+    expect(mc.registered.size).toBe(0);
   });
 
   it('document と navigator の両方にあれば document を使う', () => {
