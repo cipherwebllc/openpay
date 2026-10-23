@@ -14,6 +14,8 @@ This needs a shell and write access to your own MCP configuration (Claude Code, 
 
 6. **The only mm commands the agent may run are `mm auth status --json` and `mm wallet address --json`.** Never run `mm login`, `mm init`, `mm policy`, `mm trading-mode`, `mm wallet requests`, `mm wallet select`, `mm transfer`, or any `mm sign-*` command (including `mm wallet sign-*`). All payments and proof signatures must go through the MCP tools. The MetaMask setup commands below are for the person to run themselves.
 
+7. **Never change the limits or the payment state yourself.** Only the person sets or changes `MAX_*`, `ALLOWED_HOSTS`, and `CATALOG_TRUST`; in Step 3 you write exactly the values they agreed, nothing else. After setup, never edit this MCP's config entry, restart it to reset the session cap, or edit or delete anything under `~/.openpay-x402/` (`spend.json`, `purchases.jsonl`, `wallet.json`). These limits are files on this machine, so anything with shell access as this user, including you, could change them; they hold only while you leave them alone. If a task needs a higher limit, stop and ask the person to change it.
+
 ## Step 1: Choose a mode
 
 Ask the person which one they want if they have not said.
@@ -223,11 +225,12 @@ Report, in the person's language:
 
 1. The mode and the config entry you wrote, without any secret value. For Kova, report only the wallet name and public address as wallet identifiers, never credentials. For MetaMask, report only the public address as the wallet identifier, never login credentials.
 2. The limits now in that entry, stated as local limits enforced by the MCP on this machine.
-3. The agent wallet address and the `fundingUrl` for funding it and checking its JPYC balance.
-4. The JPYC resources this agent can buy right now, and the price, fee, and total you quoted for one.
-5. What is left for the person: send JPYC to the wallet address.
-6. That no payment was made.
-7. How to stop and what happens to leftover funds, from the section below.
+3. What the limits do not cover: they stop overspending through the MCP tools, but anything that can run shell commands as this user, including an AI agent, could change them or the local ledger. The person should set and change the limits themselves, keep the wallet balance small (the balance is the real ceiling), and check actual spending in Activity on the `fundingUrl` page.
+4. The agent wallet address and the `fundingUrl` for funding it and checking its JPYC balance.
+5. The JPYC resources this agent can buy right now, and the price, fee, and total you quoted for one.
+6. What is left for the person: send JPYC to the wallet address.
+7. That no payment was made.
+8. How to stop and what happens to leftover funds, from the section below.
 
 ## Stopping and leftover funds
 

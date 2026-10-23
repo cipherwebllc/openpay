@@ -165,6 +165,7 @@ export default async function GuideAiPayPage({
             items={c.guards}
             marker="•"
           />
+          <p className="mt-3 text-sm leading-relaxed text-slate-700">{c.guardsCaveat}</p>
         </Section>
 
         <Section title={c.tryTitle}>

@@ -231,6 +231,16 @@ Ordering flow (autonomous): `find_shops` → `order_menu` → pick items → `or
 Catalog admission is exact URL only, including the query string. A query
 variant needs its own reviewed listing or an explicitly allowlisted host.
 
+**The limits are local settings, not a wall against shell access.** They stop an
+agent from overspending through this MCP's tools: no tool argument can raise them,
+and no tool lets the agent edit the config, the ledger, or the signer. But they live in the
+host's MCP config and in `~/.openpay-x402/` on the same machine, so anything that
+can run shell commands as this user, including an AI agent with shell access, can
+edit them or delete `spend.json` (which resets the day's total). Let the person,
+not the agent, set and change them; keep the wallet balance small, because the
+balance is the real ceiling; and confirm actual spending on-chain or on `/agent`.
+See also the local wallet threat model below.
+
 ## Local purchase history
 
 `wallet_history` (0.16.0+) reads recent attempts recorded by `x402_pay`, including

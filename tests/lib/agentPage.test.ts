@@ -107,7 +107,7 @@ describe('agent page content', () => {
   });
   it.each(['ja', 'en'])('provides all disclosure and toggle copy in %s', (locale) => {
     const c = agentPageContentFor(locale);
-    expect(c.safety.summary).toHaveLength(3);
+    expect(c.safety.summary).toHaveLength(4);
     for (const value of [...c.safety.summary, c.safety.detailsLabel, c.connect.promptExpand, c.connect.promptCollapse, c.wallet.changeAddress, c.wallet.closeFund]) {
       expect(value.length).toBeGreaterThan(0);
     }
@@ -117,6 +117,7 @@ describe('agent page content', () => {
       body: '支払い上限と接続先の制限は、Agent を動かすマシン上の MCP/SDK が適用するローカルの安全設定です。OpenPay のサーバーは上限を知らず、保証もしません。このページが設定を書き換えることもありません。',
       points: [
         '専用の Agent Wallet には、使ってよい金額だけを入れてください。残高が実質的な上限になります。',
+        '上限は AI アプリの MCP 設定に、1 日の使用額と購入の記録はこのマシンの ~/.openpay-x402 にあります。どちらもシェルを使える AI なら書き換えられるので、上限を決める・変えるのはあなたが行ってください。実際に支払った額は、このページの「アクティビティ」と「購入」で確かめられます (チェーンと OpenPay 側の記録)。',
         'このページに秘密鍵の入力欄はありません。鍵を求める OpenPay の画面があれば偽物です。',
         'ウォレットの鍵は、Agent を動かすあなたのマシン上で MCP が作って保管します。会話にも OpenPay にも出ません。ただし、あなたとしてコマンドを実行できるものはこの鍵を読めます。入れるのは失ってもよい少額だけにしてください。OpenPay は鍵を復元できません。',
         'どこで動かすかで選べる方式が変わります。PC のローカルで動く Claude Code / Codex なら Local Wallet・Kova・MetaMask Agent Wallet・Steward のどれでも使えます。スマホの Claude アプリの Code やブラウザ版 Claude Code はクラウド上の使い捨て環境で動くため、そこに Local Wallet を作ると鍵ごと消えます (JPYC を入れないでください)。Kova もその環境に CLI と資格情報が必要なので使えません。MetaMask Agent Wallet も MCP と同じマシンに mm のログイン状態が必要なので使えません。スマホやブラウザからは「人が支払う」(決済リンクを自分のウォレットで承認) を選ぶか、Agent に支払わせたい場合は Steward を使ってください。',
@@ -130,6 +131,7 @@ describe('agent page content', () => {
       body: "Spending limits and allowed hosts are local safety settings applied by the MCP/SDK on the machine that runs your agent. OpenPay's servers do not know them and do not guarantee them. This page never changes your agent's settings.",
       points: [
         'Fund the dedicated agent wallet only with what you are willing to spend. Its balance is the effective ceiling.',
+        "The limits are in your AI app's MCP settings, and the daily total and purchase log are in ~/.openpay-x402 on this machine. An AI that can run shell commands can change both, so set or change the limits yourself. Check what was actually paid in Activity and Purchases on this page (on-chain and OpenPay's records).",
         'This page has no private-key field. Any OpenPay screen asking for a key is fake.',
         'The wallet key is created and kept by the MCP on your own machine, where your agent runs. It never enters the chat or reaches OpenPay. Anything that can run commands as you can still read it, so fund it only with a small amount you can afford to lose. OpenPay cannot recover the key.',
         "Where the agent runs decides which mode you can use. Claude Code or Codex on your own PC can use the Local Wallet, Kova, MetaMask Agent Wallet, or Steward. The Claude mobile app's Code tab and Claude Code on the web run in a disposable cloud environment: a Local Wallet created there disappears with its key (do not fund it), and Kova needs its CLI and credentials on the same machine, so it does not work there either. MetaMask Agent Wallet also needs an mm session on the same machine as the MCP and cannot run there. From a phone or browser, choose Human pays (approve the payment link in your own wallet), or use Steward if the agent must pay.",
