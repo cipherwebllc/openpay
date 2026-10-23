@@ -226,6 +226,14 @@ describe('AI_PAY_GUIDE: MCP 設定と金銭ガード', () => {
       /data|データ/,
     );
   });
+
+  // 2026-10-23: 上限はこのマシンの設定なので、シェルを使える AI は書き換えられる。「守ってくれるもの」の一覧だけで
+  // 終わらせず、上限は人が決める・残高が本当の上限、を同じ節に置く。
+  it.each(LOCALES)('%s: 金銭ガードの但し書き (シェルを使える AI は上限を書き換えられる・残高が本当の上限)', (loc) => {
+    const caveat = AI_PAY_GUIDE[loc].guardsCaveat;
+    expect(caveat).toMatch(loc === 'ja' ? /シェル/ : /shell commands/);
+    expect(caveat).toMatch(loc === 'ja' ? /残高が本当の上限/ : /The balance is the real ceiling/);
+  });
 });
 
 describe('AI_PAY_GUIDE: agent guide の JPYC 入手文言を一字不変で再利用', () => {

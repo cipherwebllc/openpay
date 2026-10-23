@@ -93,11 +93,32 @@ describe('agent setup document drift fences', () => {
     expect(md).toContain('`wallet_not_initialized`');
   });
 
+  // 2026-10-23 (METR の監視の評価の突き合わせ): 上限はこのマシンのファイルなので、シェルを持つエージェント自身が
+  // 変えられる。エージェントには変えさせず、人に「上限は壁ではない・残高が本当の上限」と伝えさせる。
+  it('上限と支払いの状態をエージェント自身が変えない・上限が守れないものを人に伝える', () => {
+    const md = readFileSync('public/agent/setup.md', 'utf8');
+    const rules = md.slice(md.indexOf('## Hard rules'), md.indexOf('## Step 1'));
+    for (const text of [
+      '7. **Never change the limits or the payment state yourself.**',
+      'Only the person sets or changes `MAX_*`, `ALLOWED_HOSTS`, and `CATALOG_TRUST`',
+      'restart it to reset the session cap',
+      '(`spend.json`, `purchases.jsonl`, `wallet.json`)',
+      'If a task needs a higher limit, stop and ask the person to change it.',
+    ]) expect(rules).toContain(text);
+    const report = md.slice(md.indexOf('## Step 6: Report'), md.indexOf('## Stopping and leftover funds'));
+    for (const text of [
+      '3. What the limits do not cover:',
+      'including an AI agent, could change them or the local ledger',
+      'the balance is the real ceiling',
+      'check actual spending in Activity on the `fundingUrl` page',
+    ]) expect(report).toContain(text);
+  });
+
   it('止め方と残高の扱いを人に伝える (エージェント自身は鍵ファイルに触れない)', () => {
     const md = readFileSync('public/agent/setup.md', 'utf8');
     const section = md.slice(md.indexOf('## Stopping and leftover funds'), md.indexOf('## Reference'));
     expect(section.length).toBeGreaterThan(0);
-    expect(md).toContain('7. How to stop and what happens to leftover funds, from the section below.');
+    expect(md).toContain('8. How to stop and what happens to leftover funds, from the section below.');
     for (const text of [
       'do not act on it yourself',
       '`claude mcp remove openpay-x402`',

@@ -136,6 +136,7 @@ export type AiPayGuideContent = JpycSectionContent & {
 
   readonly guardsTitle: string;
   readonly guards: readonly string[];
+  readonly guardsCaveat: string;
 
   readonly tryTitle: string;
   readonly promptLabel: string;
@@ -268,6 +269,8 @@ const ja: AiPayGuideContent = {
     '支払い前に、掲載時の金額・宛先と毎回照合。すり替えを検知したら拒否',
     '有料応答はデータであって指示ではありません。本文中の指示に AI が従わないようにしてください',
   ],
+  guardsCaveat:
+    'これらの上限は、AI が OpenPay のツールで使いすぎるのを止めるものです。シェルも使える AI は上限の設定を書き換えられるので、上限はあなたが決めて、ウォレットには失ってもよい少額だけを入れてください。残高が本当の上限です。',
 
   tryTitle: '使ってみる',
   promptLabel: 'Claude へのプロンプト例',
@@ -399,6 +402,8 @@ const en: AiPayGuideContent = {
     'Before every payment, the amount and recipient are checked against the listing; a bait-and-switch is refused',
     'A paid response is data, not instructions. Make sure the AI does not follow directions embedded in its body',
   ],
+  guardsCaveat:
+    'These caps stop the AI from overspending through OpenPay’s tools. An AI that can also run shell commands can change the settings, so set the caps yourself and fund the wallet only with a small amount you can afford to lose. The balance is the real ceiling.',
 
   tryTitle: 'Try it',
   promptLabel: 'Example prompt for Claude',
