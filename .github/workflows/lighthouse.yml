@@ -31,6 +31,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          check-latest: true # ランナーの cache の版が古い (セキュリティ修正前) ままでも、22 系の最新を使う
           cache: npm
           cache-dependency-path: |
             package-lock.json
