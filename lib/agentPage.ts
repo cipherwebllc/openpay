@@ -35,6 +35,8 @@ export type AgentPageContent = {
     readonly openInNote: string;
     readonly shellNote: string;
     readonly setupLinkLabel: string;
+    /** setup.md と同じ手順を Agent Skill (skills/openpay-agent) として入れる 1 行の前置き。コマンドは AGENT_SKILL_INSTALL。 */
+    readonly skillNote: string;
     readonly promptExpand: string;
     readonly promptCollapse: string;
     /** Wallet を表示中 (接続済みの再訪) に、たたんだカードへ出す 1 行と開くボタン。 */
@@ -281,6 +283,7 @@ const ja: AgentPageContent = {
     openInNote: 'アプリが入っていれば、プロンプト入りで開きます (Claude は Claude Code)。送信はあなたが行います。',
     shellNote: 'シェルを使える Agent (Claude Code・Codex CLI・Hermes など) 向けです。チャットだけの環境は、下の「自分で設定を書く」へ。',
     setupLinkLabel: 'Agent が読む手順 (setup.md) を見る',
+    skillNote: '同じ手順を Agent Skill としても配っています:',
     promptExpand: '全文を表示',
     promptCollapse: 'たたむ',
     againLead: '別の Agent や端末をつなぐときも、同じプロンプトを渡すだけです。',
@@ -565,6 +568,7 @@ const en: AgentPageContent = {
     openInNote: 'If the app is installed, it opens with the prompt filled in (Claude opens in Claude Code). You press send.',
     shellNote: 'For agents with shell access, such as Claude Code, Codex CLI, and Hermes. For chat-only hosts, use “Write the config yourself” below.',
     setupLinkLabel: 'Read the instructions your agent follows (setup.md)',
+    skillNote: 'The same instructions are also available as an Agent Skill:',
     promptExpand: 'Show full prompt',
     promptCollapse: 'Collapse',
     againLead: 'To connect another agent or machine, hand it the same prompt.',

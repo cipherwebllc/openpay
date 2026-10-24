@@ -14,6 +14,17 @@ Wire compatibility: x402 v1 transport (JSON 402 body with `x402Version: 1`, plus
 `X-PAYMENT` / `X-PAYMENT-RESPONSE` headers) with the OpenPay `extra.openpay`
 forwarder-split extension.
 
+An agent with a shell can set this package up by following
+https://open-pay.jp/agent/setup.md. The same instructions are published as an
+[Agent Skill](https://agentskills.io/) at `skills/openpay-agent` in the OpenPay
+repository. The skill contains instructions only, with no bundled scripts:
+
+```bash
+npx skills add cipherwebllc/openpay
+# or, with the GitHub CLI
+gh skill install cipherwebllc/openpay openpay-agent
+```
+
 ## Order profile (keyless, human pays)
 
 ### Install / run

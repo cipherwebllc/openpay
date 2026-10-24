@@ -14,6 +14,11 @@
 import { isAddress } from 'viem';
 
 export const AGENT_SETUP_URL = 'https://open-pay.jp/agent/setup.md';
+/**
+ * setup.md と同じ本文の Agent Skill (リポの skills/openpay-agent/SKILL.md) を入れるコマンド。
+ * 本文の一致は tests/lib/agentSkill.test.ts が固定する。/agent・llms.txt・MCP README が同じ文字列を引用する。
+ */
+export const AGENT_SKILL_INSTALL = 'npx skills add cipherwebllc/openpay';
 
 export const AGENT_MCP_PACKAGE = 'openpay-x402-mcp';
 /**
