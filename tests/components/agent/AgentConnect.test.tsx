@@ -4,7 +4,7 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { track } from '@vercel/analytics';
 import { AgentConnect } from '@/components/agent/AgentConnect';
-import { buildSetupPrompt } from '@/lib/agentSetup';
+import { AGENT_SKILL_INSTALL, buildSetupPrompt } from '@/lib/agentSetup';
 import { agentPageContentFor } from '@/lib/agentPage';
 import { resetAgentView, setAgentHasWallet } from '@/hooks/useAgentView';
 
@@ -52,6 +52,9 @@ describe('AgentConnect', () => {
     expect(container.textContent).toContain(C.shellNote);
     expect(container.querySelector('.rounded-full')).toBeNull();
     expect(screen.getByRole('link', { name: /setup\.md/ })).toHaveAttribute('href', '/agent/setup.md');
+    // setup.md と同じ本文の Agent Skill を入れるコマンドを、注記の後ろに文字で出す (ボタンにしない)。
+    expect(container.textContent).toContain(`${C.skillNote} ${AGENT_SKILL_INSTALL}`);
+    expect(screen.getByText(AGENT_SKILL_INSTALL).tagName).toBe('CODE');
     expect(screen.getByRole('button', { name: C.promptExpand })).toHaveAttribute('aria-expanded', 'false');
     expect(container.querySelector('pre')).toHaveClass('max-h-40');
     await user.click(screen.getByRole('button', { name: 'Copy setup prompt' }));

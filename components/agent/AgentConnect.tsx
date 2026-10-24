@@ -4,7 +4,7 @@ import { useState, type ReactNode } from 'react';
 import { useAgentHasWallet } from '@/hooks/useAgentView';
 import { useCopyToClipboard, useHydrationSafeAvailable } from '@/hooks/useCopyToClipboard';
 import type { AgentPageContent } from '@/lib/agentPage';
-import { AGENT_OPEN_IN_APPS, buildOpenInLink, buildSetupPrompt } from '@/lib/agentSetup';
+import { AGENT_OPEN_IN_APPS, AGENT_SKILL_INSTALL, buildOpenInLink, buildSetupPrompt } from '@/lib/agentSetup';
 import { trackAgentEvent } from '@/lib/agentTrack';
 
 // 文言は server page から props で受ける (lib/agentPage → lib/legal を client bundle に入れない)。
@@ -59,6 +59,10 @@ export function AgentConnect({ locale, c, children }: { locale: string; c: Agent
         <p className="mt-3 text-xs leading-relaxed text-slate-500">
           {c.openInNote} {c.shellNote}{' '}
           <a href="/agent/setup.md" className="text-emerald-700 underline">{c.setupLinkLabel}</a>
+        </p>
+        <p className="mt-2 text-xs leading-relaxed text-slate-500">
+          {c.skillNote}{' '}
+          <code className="break-all rounded bg-slate-100 px-1 py-0.5 font-mono text-slate-700">{AGENT_SKILL_INSTALL}</code>
         </p>
         {children ? <div className="mt-6 border-t border-slate-200 pt-5">{children}</div> : null}
       </div>
