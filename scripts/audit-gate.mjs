@@ -158,6 +158,21 @@ const ALLOWED_ADVISORIES = {
       'stream-json を自前コードから直接使う (Assembler / StreamValues に外部入力を流す) 変更',
     ],
   },
+  'GHSA-mrhx-c7xc-m3w5': {
+    pkg: 'zod',
+    summary:
+      'Zod can exhaust memory while validating oversized constrained collections (配列の検証で失敗した要素ごとの issue を上限なく溜める・<4.6.6)',
+    chain:
+      '@aa-sdk/core@4.88.3・@account-kit/infra@4.88.3・viem → abitype・wagmi → @wagmi/connectors → @walletconnect/ethereum-provider@2.21.1 → … → zod@3.25.76 / @reown/appkit-wallet@1.7.8 → zod@3.22.4 (exact pin) / devDependencies の @modelcontextprotocol/sdk@1.32.0・@x402/core@2.17.0 → zod@3.25.76 (porto の zod 4 は範囲内の 4.6.7 へ更新済み)',
+    reason:
+      'サーバーで外部入力に届かない (2026-10-24 確認): app/api・lib・hooks・components に zod の import はゼロ。next build の出力で zod 本体を含む server chunk は 1 つだけで、読むのは [handle]・pay・checkout・tip のページの SSR (ウォレット接続・スマートアカウントの依存が内部で使う検証) で、app/api の route は 1 つも読まない → 攻撃者が大きな配列を zod に渡すサーバーの経路が無い。ブラウザでも検証するのは依存の内部の値で、最悪でも利用者自身のタブが重くなるだけ (資金・サーバーへの影響なし・§7.12 と同型)。修正は zod 4.6.6 以降だけで 3.x に修正版が無く、zod 3 を使う依存 (@aa-sdk・@account-kit・abitype・@reown/appkit-wallet の exact pin・@modelcontextprotocol/sdk・@x402/core) を zod 4 へ override すると API が変わって壊れる → 依存側が zod>=4.6.6 へ移るのを待つ accepted risk (2026-10-24・この追加は PR の merge で user が承認)。',
+    docRef: 'docs/DEPLOY_CHECKLIST.md §7.15',
+    reviewTriggers: [
+      'zod 3 を使う依存が zod>=4.6.6 へ移った版を出す → 更新して allowlist を見直す',
+      'app/api やサーバーの処理で外部入力の検証に zod を使う変更 (即再評価)',
+      'zod 3.x の通常の parse で同種のメモリ枯渇が起きる具体的な報告',
+    ],
+  },
 };
 
 // CI gate 対象 severity。LOW は監視対象外 (Section 1 のコメント参照)。
