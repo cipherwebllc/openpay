@@ -24,6 +24,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+          check-latest: true # ランナーの cache の版が古い (セキュリティ修正前) ままでも、22 系の最新を使う
           cache: npm
       # 依存の取得元 gate (2026-07-20 採用): 全 package-lock.json が公式 npm
       # レジストリのみから解決されていることを検査。git URL / 独自レジストリ /
@@ -116,6 +117,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+          check-latest: true # ランナーの cache の版が古い (セキュリティ修正前) ままでも、22 系の最新を使う
           cache: npm
       - run: node scripts/lockfile-gate.mjs
       # install script は走らせずに入れ (binding.gyp の暗黙 build も含む)、gate が実体を走査して allowlist 外なら fail、
@@ -131,6 +133,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+          check-latest: true # ランナーの cache の版が古い (セキュリティ修正前) ままでも、22 系の最新を使う
           cache: npm
       # lockfile と .npmrc の取得元を、npm のネットワークアクセスより前に検査する。
       - run: node scripts/lockfile-gate.mjs
