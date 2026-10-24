@@ -58,18 +58,27 @@ export function bridgeLookupResult(
   }
 }
 
-// 応答ヘッダ (名前と値が交互に並ぶ undici の rawHeaders) の Content-Encoding に br が含まれるか。
-export function hasBrotliContentEncoding(rawHeaders: ReadonlyArray<Buffer | string>): boolean {
+// undici の fetch がそのまま渡すか、gzip / deflate の展開器だけで展開する圧縮方式 (br は含めない)。
+const SAFE_CONTENT_CODINGS = new Set(['', 'identity', 'gzip', 'x-gzip', 'deflate']);
+
+const latin1 = (value: Buffer | string): string => (typeof value === 'string' ? value : value.toString('latin1'));
+
+// 応答ヘッダ (名前と値が交互に並ぶ undici の rawHeaders) の Content-Encoding が SAFE_CONTENT_CODINGS だけか。
+// undici の fetch と同じく latin1 で読み、小文字化・カンマ区切り・trim で比べる (UTF-8 で読むと `\xA0br` の 0xA0 を
+// trim できず、undici だけが br と読む)。知らない方式も止めて、読み方がずれても br を通さない側に倒す。
+export function hasOnlySafeContentEncoding(rawHeaders: ReadonlyArray<Buffer | string>): boolean {
   for (let i = 0; i + 1 < rawHeaders.length; i += 2) {
-    if (String(rawHeaders[i]).toLowerCase() !== 'content-encoding') continue;
-    if (String(rawHeaders[i + 1]).split(',').some((coding) => coding.trim().toLowerCase() === 'br')) return true;
+    if (latin1(rawHeaders[i]).toLowerCase() !== 'content-encoding') continue;
+    const codings = latin1(rawHeaders[i + 1]).toLowerCase().split(',');
+    if (codings.some((coding) => !SAFE_CONTENT_CODINGS.has(coding.trim()))) return false;
   }
-  return false;
+  return true;
 }
 
 // CVE-2026-111497 (Node 同梱の Brotli の展開で範囲外書き込み → 任意コード実行) の波及を断つ: 出品者や利用者が
 // 選べる URL の応答を、Node の Brotli 展開器に渡さない。undici の fetch は Accept-Encoding に関係なく
-// `Content-Encoding: br` を展開するので、fetch が展開器を作る onHeaders の手前で止める (throw は undici の
+// `Content-Encoding: br` を展開するので、gzip / deflate 以外の圧縮の応答は、fetch が展開器を作る onHeaders の
+// 手前で止める (redirect の manual / error でも展開器は先に作られる・throw は undici の
 // Request が abort に変え、fetch は reject する = fetchSsrfSafe の null・呼び元の既存の「判定不能」の扱い)。
 // 本番の Node が修正版 (scripts/verify-production-config-helpers.mjs の NODE_RUNTIME_MINIMUM) 以上になったら外してよい。
 export const refuseBrotliResponses: Dispatcher.DispatcherComposeInterceptor = (dispatch) => (opts, handler) =>
@@ -79,7 +88,7 @@ export const refuseBrotliResponses: Dispatcher.DispatcherComposeInterceptor = (d
     onUpgrade: (statusCode, headers, socket) => handler.onUpgrade?.(statusCode, headers, socket),
     onResponseStarted: () => handler.onResponseStarted?.(),
     onHeaders: (statusCode, headers, resume, statusText) => {
-      if (hasBrotliContentEncoding(headers)) throw new Error('brotli_response_refused');
+      if (!hasOnlySafeContentEncoding(headers)) throw new Error('content_encoding_refused');
       return handler.onHeaders?.(statusCode, headers, resume, statusText) ?? true;
     },
     onData: (chunk) => handler.onData?.(chunk) ?? true,

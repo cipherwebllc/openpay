@@ -7,29 +7,36 @@ import type { AddressInfo } from 'node:net';
 import zlib from 'node:zlib';
 import { Agent, fetch as undiciFetch } from 'undici';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { fetchSsrfSafe, hasBrotliContentEncoding, refuseBrotliResponses } from '@/lib/x402/moderation';
+import { fetchSsrfSafe, hasOnlySafeContentEncoding, refuseBrotliResponses } from '@/lib/x402/moderation';
 
 const BODY = JSON.stringify({ ok: true });
+
+// 頼まれた圧縮方式に関係なく返す (悪意のあるサーバの振る舞い)。
+// Node は header の文字列を latin1 で書くので、' ' は 0xA0 の 1 バイトで届く。
+const ROUTES: Record<string, { status?: number; headers: Record<string, string>; body: Buffer | string }> = {
+  '/br': { headers: { 'content-encoding': 'br' }, body: zlib.brotliCompressSync(BODY) },
+  '/nbsp-br': { headers: { 'content-encoding': ' br' }, body: zlib.brotliCompressSync(BODY) },
+  '/br-nbsp': { headers: { 'content-encoding': 'br ' }, body: zlib.brotliCompressSync(BODY) },
+  '/gzip-tab-br': { headers: { 'content-encoding': 'gzip,\tBR' }, body: zlib.brotliCompressSync(zlib.gzipSync(BODY)) },
+  '/redirect-br': {
+    status: 302,
+    headers: { 'content-encoding': 'br', location: '/plain' },
+    body: zlib.brotliCompressSync(BODY),
+  },
+  '/zstd': { headers: { 'content-encoding': 'zstd' }, body: BODY },
+  '/gzip': { headers: { 'content-encoding': 'gzip' }, body: zlib.gzipSync(BODY) },
+  '/identity': { headers: { 'content-encoding': 'identity' }, body: BODY },
+  '/plain': { headers: {}, body: BODY },
+};
 
 let server: Server;
 let origin: string;
 
 beforeAll(async () => {
   server = createServer((req, res) => {
-    // 頼まれた圧縮方式に関係なく返す (悪意のあるサーバの振る舞い)。
-    if (req.url === '/br') {
-      res.writeHead(200, { 'content-type': 'application/json', 'content-encoding': 'br' });
-      res.end(zlib.brotliCompressSync(BODY));
-    } else if (req.url === '/gzip-br') {
-      res.writeHead(200, { 'content-type': 'application/json', 'content-encoding': 'gzip, BR' });
-      res.end(zlib.gzipSync(zlib.brotliCompressSync(BODY)));
-    } else if (req.url === '/gzip') {
-      res.writeHead(200, { 'content-type': 'application/json', 'content-encoding': 'gzip' });
-      res.end(zlib.gzipSync(BODY));
-    } else {
-      res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(BODY);
-    }
+    const route = ROUTES[req.url ?? ''] ?? ROUTES['/plain'];
+    res.writeHead(route.status ?? 200, { 'content-type': 'application/json', ...route.headers });
+    res.end(route.body);
   });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -40,14 +47,23 @@ afterAll(async () => {
 });
 
 const noBrHeaders = { 'accept-encoding': 'gzip, deflate' };
+const BROTLI_CASES: Array<[string, RequestRedirect]> = [
+  ['/br', 'manual'],
+  ['/nbsp-br', 'manual'],
+  ['/br-nbsp', 'manual'],
+  ['/gzip-tab-br', 'manual'],
+  ['/redirect-br', 'manual'],
+  ['/redirect-br', 'error'],
+];
 
 describe('lib/x402/moderation refuseBrotliResponses (本物の undici fetch)', () => {
-  it('対照: 止めないと、br を頼まなくても fetch は Brotli 展開器を作る', async () => {
+  it.each(BROTLI_CASES)('対照 %s (redirect %s): 止めないと、br を頼まなくても fetch は Brotli 展開器を作る', async (path, redirect) => {
     const spy = vi.spyOn(zlib, 'createBrotliDecompress');
     const dispatcher = new Agent();
     try {
-      const res = await undiciFetch(`${origin}/br`, { headers: noBrHeaders, dispatcher });
-      expect(await res.text()).toBe(BODY);
+      await undiciFetch(`${origin}${path}`, { headers: noBrHeaders, redirect, dispatcher })
+        .then((res) => res.arrayBuffer())
+        .catch(() => null);
       expect(spy).toHaveBeenCalled();
     } finally {
       spy.mockRestore();
@@ -55,24 +71,27 @@ describe('lib/x402/moderation refuseBrotliResponses (本物の undici fetch)', (
     }
   });
 
-  it.each(['/br', '/gzip-br'])('%s: 展開器を作らずに fetch を reject する', async (path) => {
-    const spy = vi.spyOn(zlib, 'createBrotliDecompress');
-    const dispatcher = new Agent().compose(refuseBrotliResponses);
-    try {
-      const error = await undiciFetch(`${origin}${path}`, { headers: noBrHeaders, dispatcher }).then(
-        () => null,
-        (err: unknown) => err,
-      );
-      expect(error).toBeInstanceOf(TypeError);
-      expect(((error as TypeError).cause as Error).message).toBe('brotli_response_refused');
-      expect(spy).not.toHaveBeenCalled();
-    } finally {
-      spy.mockRestore();
-      await dispatcher.close();
-    }
-  });
+  it.each([...BROTLI_CASES, ['/zstd', 'manual'] as [string, RequestRedirect]])(
+    '%s (redirect %s): 展開器を作らずに fetch を reject する',
+    async (path, redirect) => {
+      const spy = vi.spyOn(zlib, 'createBrotliDecompress');
+      const dispatcher = new Agent().compose(refuseBrotliResponses);
+      try {
+        const error = await undiciFetch(`${origin}${path}`, { headers: noBrHeaders, redirect, dispatcher }).then(
+          () => null,
+          (err: unknown) => err,
+        );
+        expect(error).toBeInstanceOf(TypeError);
+        expect(((error as TypeError).cause as Error).message).toBe('content_encoding_refused');
+        expect(spy).not.toHaveBeenCalled();
+      } finally {
+        spy.mockRestore();
+        await dispatcher.close();
+      }
+    },
+  );
 
-  it.each(['/gzip', '/plain'])('%s: 今までどおり読める', async (path) => {
+  it.each(['/gzip', '/identity', '/plain'])('%s: 今までどおり読める', async (path) => {
     const dispatcher = new Agent().compose(refuseBrotliResponses);
     try {
       const res = await undiciFetch(`${origin}${path}`, { headers: noBrHeaders, dispatcher });
@@ -84,21 +103,29 @@ describe('lib/x402/moderation refuseBrotliResponses (本物の undici fetch)', (
   });
 });
 
-describe('lib/x402/moderation hasBrotliContentEncoding', () => {
-  const raw = (...pairs: string[]) => pairs.map((value) => Buffer.from(value));
+describe('lib/x402/moderation hasOnlySafeContentEncoding', () => {
+  const raw = (...pairs: Array<string | number[]>) =>
+    pairs.map((value) => (typeof value === 'string' ? Buffer.from(value, 'latin1') : Buffer.from(value)));
 
   it.each([
-    [raw('Content-Encoding', 'br'), true],
-    [raw('content-type', 'application/json', 'content-encoding', 'gzip, br'), true],
-    [raw('content-encoding', ' BR '), true],
-    [raw('content-encoding', 'gzip', 'content-encoding', 'br'), true],
-    [raw('content-encoding', 'gzip'), false],
+    [raw('Content-Encoding', 'br'), false],
+    [raw('content-type', 'application/json', 'content-encoding', 'gzip, br'), false],
+    [raw('content-encoding', ' BR '), false],
+    [raw('content-encoding', [0xa0, 0x62, 0x72]), false],
+    [raw('content-encoding', [0x62, 0x72, 0xa0]), false],
+    [raw('content-encoding', 'gzip,\tbr'), false],
+    [raw('content-encoding', 'gzip', 'content-encoding', 'br'), false],
     [raw('content-encoding', 'brotli'), false],
-    [raw('x-content-encoding', 'br'), false],
-    [raw('content-type', 'br'), false],
-    [[], false],
+    [raw('content-encoding', 'zstd'), false],
+    [raw('content-encoding', 'gzip'), true],
+    [raw('content-encoding', 'X-GZIP, deflate'), true],
+    [raw('content-encoding', 'identity'), true],
+    [raw('content-encoding', ''), true],
+    [raw('x-content-encoding', 'br'), true],
+    [raw('content-type', 'br'), true],
+    [[], true],
   ])('%#', (headers, expected) => {
-    expect(hasBrotliContentEncoding(headers)).toBe(expected);
+    expect(hasOnlySafeContentEncoding(headers)).toBe(expected);
   });
 });
 
