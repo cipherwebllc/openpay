@@ -16,7 +16,9 @@ env:
 
 jobs:
   playwright:
-    runs-on: ubuntu-latest
+    # ubuntu-latest は 2026-10-24 に Ubuntu 26.04 へ移り、Playwright 1.59 は 26.04 の chromium を入れられない
+    # ("Playwright does not support chromium on ubuntu26.04-x64")。26.04 に対応した Playwright へ上げるまで 24.04 に固定する。
+    runs-on: ubuntu-24.04
     # chromium+webkit の 2 ブラウザ suite が 20 分に収まらず cancelled していたため 30 分へ。
     timeout-minutes: 30
     env:
@@ -62,7 +64,8 @@ jobs:
           retention-days: 7
 
   e2e-prodflags:
-    runs-on: ubuntu-latest
+    # playwright job と同じ理由で 24.04 に固定する。
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     # Fail the job on regressions, including smoke failures (no advisory override).
     steps:

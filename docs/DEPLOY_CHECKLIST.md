@@ -635,6 +635,38 @@ wagmi → @wagmi/connectors@6.2.0 → @walletconnect/ethereum-provider@2.21.1
   OpenPay は jayson の TCP/TLS を使わない → 外部入力が Assembler に届く経路が無い。JSONC の部品は 1.9.1 に存在しない
 - 同時に [GHSA-68fv-2mgg-jv7q](https://github.com/advisories/GHSA-68fv-2mgg-jv7q) (source-map-js・HIGH) は in-range の 1.2.2 へ lockfile 更新で解消 (allowlist 追加なし)
 
+### 7.15 HIGH: `zod` (GHSA-mrhx-c7xc-m3w5)・同時に undici を更新 (2026-10-24)
+
+**Root advisory**: [GHSA-mrhx-c7xc-m3w5](https://github.com/advisories/GHSA-mrhx-c7xc-m3w5)
+— 配列のスキーマの検証で、失敗した要素ごとの issue を上限なく溜めてメモリを使い切る (zod <4.6.6・修正は 4.6.6 以降だけ)
+
+**Propagation chain**:
+```
+@aa-sdk/core@4.88.3・@account-kit/infra@4.88.3・viem → abitype・wagmi → … → zod@3.25.76
+@reown/appkit-wallet@1.7.8 → zod@3.22.4 (exact pin)
+devDependencies: @modelcontextprotocol/sdk@1.32.0・@x402/core@2.17.0 → zod@3.25.76
+porto@0.2.35 → zod 4 (範囲 ^4.1.5) は 4.3.6 → 4.6.7 へ lockfile 更新で解消
+```
+
+**Reachability for OpenPay**: サーバーで外部入力に届かない —
+- app/api・lib・hooks・components に zod の import はゼロ
+- next build の出力で zod 本体を含む server chunk は 1 つだけで、読むのは `[handle]`・`pay`・`checkout`・`tip` のページの SSR
+  (ウォレット接続・スマートアカウントの依存が内部で使う検証)。app/api の route は 1 つも読まない
+  → 攻撃者が大きな配列を zod に渡すサーバーの経路が無い
+- ブラウザでも検証するのは依存の内部の値で、最悪でも利用者自身のタブが重くなるだけ (§7.12 と同型)
+- 3.x に修正版が無く、zod 3 を使う依存を zod 4 へ override すると API が変わって壊れる
+  → 依存側が zod>=4.6.6 へ移るのを待つ accepted risk (2026-10-24・PR の merge で user が承認)
+
+**Reassess triggers**:
+- zod 3 を使う依存が zod>=4.6.6 へ移った版を出す → 更新して allowlist を見直す
+- app/api やサーバーの処理で外部入力の検証に zod を使う変更 (**その PR で即再評価**)
+- zod 3.x の通常の parse で同種のメモリ枯渇が起きる具体的な報告
+
+**同時に解消 (allowlist 追加なし)**: undici を 6.28.1 → 6.29.1 に更新。
+[GHSA-xjj6-f33q-929c](https://github.com/advisories/GHSA-xjj6-f33q-929c) (HIGH: content-encoding が 5 つを超える応答の後で接続を閉じられると Node のプロセスが落ちる) と
+[GHSA-4qv8-2p9j-2685](https://github.com/advisories/GHSA-4qv8-2p9j-2685) (EventSource のメモリ)。出品者の URL を取りに行く `fetchSsrfSafe` (lib/x402/moderation.ts) は npm の undici を使うので、この更新で直る。
+Node 本体の fetch (同梱の undici) は Node の更新を待つ (§ 本番の Node の確認は post-deploy-verify)。
+
 ### 7.7 CI gate: allowlist 方式 (`scripts/audit-gate.mjs`)
 
 `.github/workflows/ci.yml` の audit step は `node scripts/audit-gate.mjs` を呼ぶ。
