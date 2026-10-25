@@ -1,5 +1,5 @@
-// ブランドメッセージで締めつつ、技術スタックと GitHub link で信頼性を開示する。
-// Server Component。SiteFooter は legal nav 中心のため、別の切り口を維持する。
+// ブランドメッセージで締めつつ、GitHub link とオープン技術の一文で信頼性を開示する。技術用語の羅列は置かない
+// (2026-10-25 引き算・技術は GitHub と運用透明性ページ)。Server Component。SiteFooter は legal nav 中心のため、別の切り口を維持する。
 
 import Link from 'next/link';
 import { getLocale, getTranslations } from 'next-intl/server';

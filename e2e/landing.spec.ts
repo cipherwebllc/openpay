@@ -30,7 +30,9 @@ test.describe('landing / (LP)', () => {
     ).toBeVisible();
 
     // 主ボタンは 1 つ (お店が最初にすること)。旧 2 大 CTA は無い。
-    const createCta = page.getByRole('link', { name: '決済QRを作る（無料）' });
+    // 締めの節にも同じ名前のボタンがある (行動を 1 つにそろえた) ので、ヒーローの節の中で探す。
+    const hero = page.locator('section').filter({ has: page.getByRole('heading', { name: 'お店のJPYC決済を、利用料0円から。' }) });
+    const createCta = hero.getByRole('link', { name: '決済QRを作る（無料）' });
     await expect(createCta).toBeVisible();
     await expect(createCta).toHaveAttribute('href', '/ja/create');
     expect(await page.getByRole('link', { name: /支払う \(スキャン\)/ }).count()).toBe(0);
@@ -114,7 +116,7 @@ test.describe('landing / (LP)', () => {
     expect(cls).toBeLessThan(0.01);
   });
 
-  test('en: Hero の 2 CTA は英語表記で描画される', async ({ page }) => {
+  test('en: Hero と主な節の見出し・主ボタンが英語で描画される', async ({ page }) => {
     await page.goto('/en');
     await expect(
       page.getByRole('heading', { name: 'Never wait for your sales.' }),
@@ -130,8 +132,12 @@ test.describe('landing / (LP)', () => {
     ).toBeVisible();
     await expect(page.getByRole('heading', { name: 'JPYC payments for your shop, from ¥0 in fees.' })).toBeVisible();
     await expect(page.getByRole('navigation', { name: 'Not a shop?' }).getByRole('link', { name: /For customers/ })).toHaveAttribute('href', '/en/guide/pay');
+    // 締めの節にも同じ名前のボタンがあるので、ヒーローの節の中で探す。
     await expect(
-      page.getByRole('link', { name: 'Create a payment QR (free)' }),
+      page
+        .locator('section')
+        .filter({ has: page.getByRole('heading', { name: 'JPYC payments for your shop, from ¥0 in fees.' }) })
+        .getByRole('link', { name: 'Create a payment QR (free)' }),
     ).toHaveAttribute('href', '/en/create');
   });
 
