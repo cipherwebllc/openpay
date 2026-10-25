@@ -5,7 +5,10 @@
 //
 // 見出しスケールは他の Landing セクション (LandingBenefits) と揃える
 // (text-2xl sm:text-3xl・中央)。手数料の数字は hero / 開示と整合させ、
-// OpenPay はガスレスの料率・最低額・無料の範囲を併記する (モバイル注文の料率は料金ページへ)。比較先の料率は脚注で例示。
+// OpenPay は「0円〜」と、その条件 (お客様がガス代を払う通常決済)・上の端 (ガスレスの料率と最低額) を同じセルに置く
+// (条件を脚注に逃がすと有利誤認の懸念が残る・2026-10-25)。モバイル注文の料率は料金ページへ。
+// カード・コード決済の列は、決済会社ごとに違う項目 (入金の時期・導入費) を一律に断定しない (景品表示法)。
+// 解約縛りの行は外した: 縛りのない決済会社がある (2026-10 各社公式で確認)。比較先の料率は例であることをセルと脚注に書く。
 
 import { LANDING_PAYMENT_FEE_VALUES } from '@/lib/legal';
 import Link from 'next/link';
@@ -15,12 +18,11 @@ import { GUIDE_SECONDARY_ACTION } from '@/components/guide/GuideHeader';
 import { LandingSectionHeader } from '@/components/LandingSectionHeader';
 
 // 比較表の行定義。i18n key は `cashCell{Row}{Col}` で命名統一。
-type RowId = 'Fee' | 'Settle' | 'Setup' | 'Lock';
+type RowId = 'Fee' | 'Settle' | 'Setup';
 const ROWS: readonly { id: RowId; labelKey: string }[] = [
   { id: 'Fee', labelKey: 'cashRowFee' },
   { id: 'Settle', labelKey: 'cashRowSettle' },
   { id: 'Setup', labelKey: 'cashRowSetup' },
-  { id: 'Lock', labelKey: 'cashRowLock' },
 ];
 
 export async function LandingCashComparison() {
@@ -64,18 +66,28 @@ export async function LandingCashComparison() {
                   >
                     {t(labelKey)}
                   </th>
-                  <td className="px-2 py-3 sm:px-4 text-center text-slate-600">
+                  {/* 現金の列は短い語だけ (0%・その場・0円)。狭い幅で「その/場」と折れないようにする。 */}
+                  <td className="whitespace-nowrap px-2 py-3 sm:px-4 text-center text-slate-600">
                     {t(`cashCell${id}Cash`)}
                   </td>
                   <td className="px-2 py-3 sm:px-4 text-center text-slate-600">
                     {t(`cashCell${id}Card`)}
                   </td>
                   <td className="bg-brand/5 px-2 py-3 sm:px-4 text-center font-semibold text-slate-900">
-                    {t(`cashCell${id}OpenPay`, LANDING_PAYMENT_FEE_VALUES)}
-                    {id === 'Fee' && (
-                      <span className="mt-1 block text-xs font-normal leading-snug text-slate-600">
-                        {t('cashCellFeeOpenPayNote', LANDING_PAYMENT_FEE_VALUES)}
-                      </span>
+                    {id === 'Fee' ? (
+                      <>
+                        <span className="block text-lg font-bold leading-tight text-brand-dark sm:text-xl">
+                          {t('cashCellFeeOpenPay')}
+                        </span>
+                        <span className="mt-1 block text-xs font-semibold leading-snug text-slate-800">
+                          {t('cashCellFeeOpenPayCondition')}
+                        </span>
+                        <span className="mt-1 block text-xs font-normal leading-snug text-slate-600">
+                          {t('cashCellFeeOpenPayNote', LANDING_PAYMENT_FEE_VALUES)}
+                        </span>
+                      </>
+                    ) : (
+                      t(`cashCell${id}OpenPay`)
                     )}
                   </td>
                 </tr>

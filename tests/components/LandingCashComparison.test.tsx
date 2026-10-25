@@ -16,7 +16,7 @@ vi.mock('@/components/SavingsSimulator', () => ({
 }));
 
 describe('LandingCashComparison', () => {
-  it('見出し・サブ・比較表の 4 行と OpenPay 列の framing を描画', async () => {
+  it('見出し・サブ・比較表の 3 行と OpenPay 列の framing を描画', async () => {
     const ui = await LandingCashComparison();
     render(ui);
 
@@ -26,24 +26,28 @@ describe('LandingCashComparison', () => {
       screen.getByText('そのまま追加できる選択肢です。'),
     ).toBeInTheDocument();
 
-    // 比較表の 4 行ラベル
+    // 比較表の 3 行ラベル。解約縛りの行は外した (縛りのない決済会社がある・景品表示法の有利誤認を避ける・2026-10-25)。
     expect(screen.getByText('決済手数料')).toBeInTheDocument();
     expect(screen.getByText('入金')).toBeInTheDocument();
     expect(screen.getByText('導入費と機器')).toBeInTheDocument();
-    expect(screen.getByText('解約縛り')).toBeInTheDocument();
+    expect(screen.queryByText('解約縛り')).toBeNull();
 
-    // 手数料セルは「ガスレスは % と最低額・通常決済は無料 (レジも決済QRも・モバイル注文を除く)」を区別する
-    // (2026-10-07 レジの通常決済の利用料を廃止・2026-10-12 モバイル注文の料率は料金ページへ)。
-    expect(screen.getByText('1.98〜3.24%')).toBeInTheDocument();
-    expect(screen.getByText('ガスレス 1%')).toBeInTheDocument();
-    expect(
-      screen.getByText('ガス代込みで 1%・最低 2 JPYC（店舗負担）。通常決済はレジも決済QRも利用料無料（モバイル注文を除く）。'),
-    ).toBeInTheDocument();
+    // OpenPay の手数料セル: 「0円〜」と、その条件 (お客様がガス代を払う通常決済) と上の端 (ガスレスの料率と最低額) を
+    // 同じセルに置く (条件を脚注だけに置かない)。
+    const feeCell = screen.getByText('0円〜').closest('td')!;
+    expect(feeCell).toHaveTextContent('お客様がガス代を払う通常決済（レジ・決済QR）');
+    expect(feeCell).toHaveTextContent('ガスレス決済は 1%・最低 2 JPYC（店舗負担）。モバイル注文は別料金。');
+    expect(screen.queryByText('ガスレス 1%')).toBeNull();
 
-    // 脚注 (一般的な料率の例)
-    expect(
-      screen.getByText(/カード 3.24%・コード決済 1.98% は一般的な料率の例/),
-    ).toBeInTheDocument();
+    // カード・コード決済の列は、決済会社ごとに違う項目を一律に断定しない。料率は例であることをセルに書く。
+    expect(screen.getByText('1.98〜3.24%（例）')).toBeInTheDocument();
+    expect(screen.getAllByText('契約により異なる')).toHaveLength(2);
+    expect(screen.queryByText('月2回・翌月')).toBeNull();
+    expect(screen.queryByText('端末代・月額')).toBeNull();
+
+    // 脚注: 公表料率の例・時点・会社やプランで違う
+    expect(screen.getByText(/主な決済会社が公表している料率の例です（2026年10月時点）/)).toBeInTheDocument();
+    expect(screen.getByText(/料率・入金の時期・費用は、決済会社やプランにより異なります/)).toBeInTheDocument();
     expect(
       screen.getByRole('link', { name: '店頭キットを印刷する (無料)' }),
     ).toHaveAttribute('href', '/ja/kit');

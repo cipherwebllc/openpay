@@ -54,8 +54,11 @@ describe('standard-payment fee scope (review 6 regression)', () => {
       storefrontPercent: storefrontPct,
       preorderPercent: preorderPct,
     };
+    // 比較表の OpenPay の手数料セルは、条件 (Condition) と注 (Note) を同じセルに並べる → 2 つをつないで読む。
+    const disclosure = (key: 'cashCellFeeOpenPayNote' | 'benefitsFeeBody' | 'supportFeeRegisterBody') =>
+      key === 'cashCellFeeOpenPayNote' ? `${t('cashCellFeeOpenPayCondition')} ${t(key, values)}` : t(key, values);
     it.each(['cashCellFeeOpenPayNote', 'benefitsFeeBody', 'supportFeeRegisterBody'] as const)(`${locale}: %s discloses merchant-paid register JPYC including standard mode`, (key) => {
-      const text = t(key, values);
+      const text = disclosure(key);
       expect(text).toMatch(locale === 'ja' ? /レジ/ : /register/i);
       expect(text).toMatch(locale === 'ja' ? /通常決済/ : /standard/i);
       expect(text).toMatch(locale === 'ja' ? /店舗.{0,4}負担/ : /merchant.{0,4}(?:paid|bears)/i);
