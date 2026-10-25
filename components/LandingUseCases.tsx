@@ -1,4 +1,5 @@
-// 「こんな用途に使えます」: OpenPay の利用シーンを提示 (8 枚・PC は 4 列 × 2 段)。
+// 「こんな用途に使えます」: お店の利用シーン 4 枚 (PC は 4 列 × 1 段)。クリエイター・DAO・デジタル販売・AI 向け API の
+// 4 枚は外した: それぞれ「クリエイター向け」「AI・開発者向け」の節が持つ (2026-10-25 引き算・plans/lp-polish-2026-10-25.md)。
 // Server Component。
 //
 // LandingBenefits (汎用メリット) と LandingHowItWorks (操作フロー) の間に置き、
@@ -39,36 +40,10 @@ const USE_CASES = [
     altKey: 'useCase2ImageAlt',
   },
   {
-    id: '3',
-    icon: Palette,
-    image: '/landing/usecase-creator-tip.avif',
-    altKey: 'useCase3ImageAlt',
-  },
-  {
-    id: '4',
-    icon: Landmark,
-    image: '/landing/usecase-community-dues.avif',
-    altKey: 'useCase4ImageAlt',
-  },
-  {
     id: '5',
     icon: Gift,
     image: '/landing/usecase-popup-payment.avif',
     altKey: 'useCase5ImageAlt',
-  },
-  // LP 再構成 P2 (2026-08-04): 販売プラットフォーム化の 2 シーン。画像は Codex image_gen
-  // で既存 5 枚とスタイルを揃えて生成 (960x540 avif)。
-  {
-    id: '6',
-    icon: ShoppingBag,
-    image: '/landing/usecase-creator-store.avif',
-    altKey: 'useCase6ImageAlt',
-  },
-  {
-    id: '7',
-    icon: Bot,
-    image: '/landing/usecase-ai-api.avif',
-    altKey: 'useCase7ImageAlt',
   },
 ] as const satisfies readonly { id: string; icon: LucideIcon; image: string; altKey: string }[];
 

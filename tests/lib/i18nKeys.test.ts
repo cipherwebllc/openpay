@@ -910,10 +910,6 @@ describe('i18n: Nav / Landing 名前空間 (AppShell + LP, ja/en parity)', () =>
     'howItWorksMerchantStep1',
     'howItWorksMerchantStep2',
     'howItWorksMerchantStep3',
-    'howItWorksCustomerTitle',
-    'howItWorksCustomerStep1',
-    'howItWorksCustomerStep2',
-    'howItWorksCustomerStep3',
     // FAQ (Q6/A6「OpenPay の手数料はいくらか」は「利用料について」の節へ移したあと表示されなくなったので廃止・2026-09-28)
     'faqTitle',
     'faqQ1',
@@ -978,12 +974,6 @@ describe('i18n: Nav / Landing 名前空間 (AppShell + LP, ja/en parity)', () =>
     'useCase2Title',
     'useCase2Body',
     'useCase2ImageAlt',
-    'useCase3Title',
-    'useCase3Body',
-    'useCase3ImageAlt',
-    'useCase4Title',
-    'useCase4Body',
-    'useCase4ImageAlt',
     'useCase5Title',
     'useCase5Body',
     'useCase5ImageAlt',
@@ -993,7 +983,6 @@ describe('i18n: Nav / Landing 名前空間 (AppShell + LP, ja/en parity)', () =>
     'useCase8ImageAlt',
     // 技術詳細は Trust「オープン技術と透明性」の技術スタックに一本化
     // (旧 featuresGaslessTech は撤去)。
-    'trustTechStack',
   ] as const;
 
   for (const key of NAV_KEYS) {
