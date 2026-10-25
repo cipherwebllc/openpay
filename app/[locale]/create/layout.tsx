@@ -17,7 +17,8 @@ export async function generateMetadata({
   return routeMetadata({
     locale,
     path: '/create',
-    name: { ja: '受け取る', en: 'Receive' },
+    // ナビの名前 (販売) と同じ。決済QR・レジ・モバイルオーダー・自分のページをまとめた画面。
+    name: { namespace: 'Nav', key: 'sell' },
   });
 }
 

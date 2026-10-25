@@ -25,10 +25,10 @@ describe('routeMetadata', () => {
     }
   });
 
-  it('固定名 (messages に無い /create) も ja / en で出る', async () => {
-    const name = { ja: '受け取る', en: 'Receive' };
-    expect((await routeMetadata({ locale: 'ja', path: '/create', name })).title).toBe('受け取る | OpenPay');
-    expect((await routeMetadata({ locale: 'en', path: '/create', name })).title).toBe('Receive | OpenPay');
+  it('固定名 (messages に無い名前) も ja / en で出る', async () => {
+    const name = { ja: '見本', en: 'Example' };
+    expect((await routeMetadata({ locale: 'ja', path: '/example', name })).title).toBe('見本 | OpenPay');
+    expect((await routeMetadata({ locale: 'en', path: '/example', name })).title).toBe('Example | OpenPay');
   });
 
   it('noindex の画面 (pay / orders) は robots を noindex にし、canonical を付けない', async () => {
