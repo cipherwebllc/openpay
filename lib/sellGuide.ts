@@ -154,7 +154,7 @@ export type SellGuideContent = {
 const ja: SellGuideContent = {
   metaTitle: 'API を売るガイド — 402 ゲートで AI ストアに出品',
   metaDescription:
-    '既存 API や AI エージェントを 402 ゲートで JPYC 課金化し、OpenPay の AI ストアに無料掲載する手順。SDK、コピペスニペット、ノーコードゲートウェイと実売事例を紹介します。',
+    '既存 API や AI エージェントを 402 ゲートで JPYC 課金化し、OpenPay の AI ストアに無料掲載する手順。SDK、コピペスニペット、コードを書かずに使えるゲートウェイと実売事例を紹介します。',
   title: 'API を、AI が買える商品にする',
   subtitle:
     '402 ゲートを 1 つ立てて AI ストアに掲載すると、Claude などの AI エージェントが JPYC で都度購入できます。掲載は無料、売上は満額があなたへ直接届きます（ノンカストディ）。利用料は決済額の 1%（最低 1 JPYC）・支払う側の上乗せです。',
@@ -180,7 +180,7 @@ const ja: SellGuideContent = {
   routesTitle: '出品の 3 経路',
   routesIntro:
     '既存 API をどこまで触れるかに合わせて、難易度の低い順に選べます。',
-  noCodeTitle: 'ノーコード (推奨・5 分)',
+  noCodeTitle: 'コードを書かずに (推奨・5 分)',
   noCodeBody:
     'x402-jpyc-gateway の「Deploy with Vercel」からデプロイし、次の env を 3 つ設定します。既存 API は変更ゼロで課金化できます。',
   noCodeLink: {
@@ -256,7 +256,7 @@ const ja: SellGuideContent = {
   bazaarNote: [
     '自前の CDP 鍵や標準 x402 ゲートの自作は不要です。Base での支払いは購入者からあなたの Base アドレスへ直接届き、OpenPay は売上を預かりません (USDC 送金は取消不能)。',
     'すでに JPYC で出品済みの API を USDC 対応にするときは、サーバーのゲートを dual-rail 版スニペット (x402Gate) へ貼り替えてください。貼り替えるまで USDC では購入できません。',
-    'Arc の USDC でも売るには、出品フォームで「Arc (Circle Gateway) でも販売する」も有効にします (ノーコードゲートウェイ x402-jpyc-gateway で動かしている出品だけが対象で、SDK 版のゲートは Arc を提示しません)。Arc の支払いは Circle Gateway で精算され、買い手は事前に Gateway へ入金し、EOA (通常のウォレット) で署名する必要があります。売上は受取アドレスの Gateway 残高に入ります。受け取るには、OpenPay の「Arc の売上を受け取る」ページ (https://open-pay.jp/ja/discovery/arc-payout) で受取アドレスのウォレットをつなぎ、全額を Arc の USDC として引き出します (署名 1 回と受け取りの取引 1 回・精算待ちの分は Circle の精算の後)。引き出すたびに Circle の手数料 (現在 1 回 0.0035 USDC) が残高から引かれ、受け取りの取引のネットワーク手数料 (Arc の USDC・1 回 0.003〜0.005 USDC 程度・ウォレットの送り方で変わります) はあなたのウォレットから払うので、先に Arc の USDC を少し用意してください (OpenPay の手数料はなし・Bazaar への掲載は Base 側だけ)。受取アドレスは EOA (通常のウォレット) に限ります — コントラクトウォレット (Safe など) では Arc を有効にできません。',
+    'Arc の USDC でも売るには、出品フォームで「Arc (Circle Gateway) でも販売する」も有効にします (コードを書かずに使えるゲートウェイ x402-jpyc-gateway で動かしている出品だけが対象で、SDK 版のゲートは Arc を提示しません)。Arc の支払いは Circle Gateway で精算され、買い手は事前に Gateway へ入金し、EOA (通常のウォレット) で署名する必要があります。売上は受取アドレスの Gateway 残高に入ります。受け取るには、OpenPay の「Arc の売上を受け取る」ページ (https://open-pay.jp/ja/discovery/arc-payout) で受取アドレスのウォレットをつなぎ、全額を Arc の USDC として引き出します (署名 1 回と受け取りの取引 1 回・精算待ちの分は Circle の精算の後)。引き出すたびに Circle の手数料 (現在 1 回 0.0035 USDC) が残高から引かれ、受け取りの取引のネットワーク手数料 (Arc の USDC・1 回 0.003〜0.005 USDC 程度・ウォレットの送り方で変わります) はあなたのウォレットから払うので、先に Arc の USDC を少し用意してください (OpenPay の手数料はなし・Bazaar への掲載は Base 側だけ)。受取アドレスは EOA (通常のウォレット) に限ります — コントラクトウォレット (Safe など) では Arc を有効にできません。',
     '購入側の注意: 標準クライアント x402-fetch (1.2.0 現在) は dual-rail 402 を解析できないため、USDC 購入例スクリプトを用意しています: https://raw.githubusercontent.com/cipherwebllc/openpay/main/scripts/x402-dual-buyer-example.mjs',
   ],
 
@@ -307,7 +307,7 @@ const ja: SellGuideContent = {
 const en: SellGuideContent = {
   metaTitle: 'Sell your API — add a 402 gate and list it in the AI Store',
   metaDescription:
-    'Monetize an existing API or AI agent in JPYC with a 402 gate and list it in the OpenPay AI Store for free. Includes SDK, copy-paste, no-code paths, and a real sale case study.',
+    'Monetize an existing API or AI agent in JPYC with a 402 gate and list it in the OpenPay AI Store for free. Includes the SDK, copy-paste snippets, a gateway you can use without writing code, and a real sale case study.',
   title: 'Turn your API into a product AI can buy',
   subtitle:
     "Put up one 402 gate and list it in the AI Store, and AI agents such as Claude can buy it per request with JPYC. Listing is free, and the full listed price reaches you directly (non-custodial). The fee is 1% of the payment (minimum 1 JPYC), added on the payer's side.",
@@ -333,7 +333,7 @@ const en: SellGuideContent = {
   routesTitle: 'Three ways to list',
   routesIntro:
     'Choose by how much of the existing API you can change, starting with the easiest path.',
-  noCodeTitle: 'No code (recommended · 5 minutes)',
+  noCodeTitle: 'Without writing code (recommended · 5 minutes)',
   noCodeBody:
     'Use “Deploy with Vercel” from x402-jpyc-gateway, then set the three env values below. Your existing API needs no changes.',
   noCodeLink: {
@@ -409,7 +409,7 @@ const en: SellGuideContent = {
   bazaarNote: [
     'No CDP keys or hand-rolled standard x402 gate needed. Base payments go directly from the buyer to your Base address; OpenPay never holds your proceeds (USDC transfers are irreversible).',
     'To enable USDC on an API already listed for JPYC, replace the gate on your server with the dual-rail snippet (x402Gate). Buyers cannot pay in USDC until you do.',
-    'To also sell for USDC on Arc, turn on “Also sell on Arc (Circle Gateway)” in the listing form (only for listings served by the no-code x402-jpyc-gateway; the SDK gate does not offer Arc). Arc payments settle through Circle Gateway, and buyers must deposit into Gateway beforehand and sign with an EOA (a regular wallet). Revenue lands in the Gateway balance of your receiving address. To receive it, connect the receiving wallet on OpenPay’s “Receive Arc proceeds” page (https://open-pay.jp/en/discovery/arc-payout) and withdraw the whole balance as USDC on Arc (one signature and one receiving transaction; amounts awaiting settlement become available after Circle settles them). Circle’s fee (currently 0.0035 USDC per withdrawal) is deducted from the balance, and the network fee for the receiving transaction (USDC on Arc, about 0.003–0.005 USDC each time, depending on how your wallet sends it) is paid from your wallet, so keep a little USDC on Arc ready first (no OpenPay fee; only the Base side is listed on the Bazaar). The receiving address must be an EOA (a regular wallet) — Arc cannot be enabled for a contract wallet (such as a Safe).',
+    'To also sell for USDC on Arc, turn on “Also sell on Arc (Circle Gateway)” in the listing form (only for listings served by x402-jpyc-gateway, the gateway you can use without writing code; the SDK gate does not offer Arc). Arc payments settle through Circle Gateway, and buyers must deposit into Gateway beforehand and sign with an EOA (a regular wallet). Revenue lands in the Gateway balance of your receiving address. To receive it, connect the receiving wallet on OpenPay’s “Receive Arc proceeds” page (https://open-pay.jp/en/discovery/arc-payout) and withdraw the whole balance as USDC on Arc (one signature and one receiving transaction; amounts awaiting settlement become available after Circle settles them). Circle’s fee (currently 0.0035 USDC per withdrawal) is deducted from the balance, and the network fee for the receiving transaction (USDC on Arc, about 0.003–0.005 USDC each time, depending on how your wallet sends it) is paid from your wallet, so keep a little USDC on Arc ready first (no OpenPay fee; only the Base side is listed on the Bazaar). The receiving address must be an EOA (a regular wallet) — Arc cannot be enabled for a contract wallet (such as a Safe).',
     'Buyer note: the standard client x402-fetch (as of 1.2.0) cannot parse a dual-rail 402, so there is a USDC buyer example script: https://raw.githubusercontent.com/cipherwebllc/openpay/main/scripts/x402-dual-buyer-example.mjs',
   ],
 

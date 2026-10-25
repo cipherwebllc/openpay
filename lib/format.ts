@@ -36,3 +36,13 @@ export function pickEffectiveAddress(
   if (isAddress(raw)) return getAddress(raw);
   return resolved;
 }
+
+// 10 進の数字文字列 ("4999.5"・"-1234567.89") の整数部だけに 3 桁区切りを入れる。
+// float を経由しない (Number() / Intl は桁落ち・丸めを起こす) ので、小数部は 1 文字も変えない。
+// 数字の形でない入力 ("abc"・空文字) はそのまま返す (表示用途: 壊れた値でも落とさず元の文字を見せる)。
+export function groupDecimalString(value: string): string {
+  const m = /^(-?)(\d+)(\.\d+)?$/.exec(value);
+  if (!m) return value;
+  const [, sign, int, frac = ''] = m;
+  return `${sign}${int.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}${frac}`;
+}

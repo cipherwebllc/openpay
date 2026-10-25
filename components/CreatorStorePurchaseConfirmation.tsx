@@ -7,6 +7,7 @@
 import { useLocale, useTranslations } from 'next-intl';
 import { ArrowLeft, ExternalLink, ReceiptText } from 'lucide-react';
 import { env } from '@/lib/env';
+import { groupDecimalString } from '@/lib/format';
 import type { StoreLicenseProduct } from '@/lib/licenseUi';
 import { CreatorStoreLicenseDisclosures } from '@/components/CreatorStoreLicenseDisclosures';
 import { CreatorStoreUsageTerms } from '@/components/CreatorStoreUsageTerms';
@@ -145,7 +146,7 @@ export function CreatorStorePurchaseConfirmation(
             <div className="flex items-center justify-between gap-4 px-4 py-3 text-sm">
               <dt className="text-slate-600">{t('priceLabel')}</dt>
               <dd className="font-semibold tabular-nums text-slate-900">
-                {priceJpyc} JPYC
+                {groupDecimalString(priceJpyc)} JPYC
               </dd>
             </div>
             {isUsdc ? (
@@ -178,7 +179,7 @@ export function CreatorStorePurchaseConfirmation(
                 {isUsdc ? t('usdcTotalLabel') : t('totalLabel')}
               </dt>
               <dd className="text-lg font-black tabular-nums text-brand-dark">
-                {isUsdc ? `${props.paidUsdc} USDC` : `${props.totalJpyc} JPYC`}
+                {isUsdc ? `${props.paidUsdc} USDC` : `${groupDecimalString(props.totalJpyc)} JPYC`}
               </dd>
             </div>
           </dl>

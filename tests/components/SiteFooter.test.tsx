@@ -221,58 +221,31 @@ describe('SiteFooter', () => {
     }
   });
 
-  // 3-step UI refactor (2026-05-23): poweredBy を soft + 技術詳細 (<details>) に
-  // 分離。一般店主には「Web3」用語を出さず (ネガティブ印象回避)、開発者は
-  // summary click で展開して ERC-4337 等の技術ラベルを確認できる。
-  describe('poweredBy soft + 技術詳細', () => {
-    it('ja: summary に soft 文言 (ステーブルコイン決済技術)、展開で ERC-4337 等の技術ラベル', () => {
-      renderWithIntl(<SiteFooter />, { locale: 'ja' });
+  // 全ページのフッターから技術の羅列を外した (2026-10-25 user 裁定・技術は運用透明性ページと GitHub にある)。
+  describe('技術の羅列を出さない・お問い合わせ (Discord)', () => {
+    it.each(['ja', 'en'] as const)('%s: 技術ラベルの <details> が無い', (locale) => {
+      const { container } = renderWithIntl(<SiteFooter />, { locale });
       const footer = screen.getByRole('contentinfo');
-      // summary 文言 (default visible)
-      expect(footer.textContent).toContain(
-        'ステーブルコイン決済技術を利用しています',
-      );
-      // 旧の生 powered-by 文字列は summary に出ない (展開 trigger としてのみ存在)
-      expect(footer.textContent).toContain('技術詳細');
-      // 技術ラベル文字列は <details> 内に存在 (closed でも DOM にはある)。
-      // 現行アーキテクチャに更新済: 旧 Pimlico/permissionless.js 中心 →
-      // EIP-3009 (JPYC) / Circle Paymaster (USDC) / CCTP V2 (cross-chain) を前面に。
-      expect(footer.textContent).toContain('EIP-3009');
-      expect(footer.textContent).toContain('Circle Paymaster');
-      expect(footer.textContent).toContain('CCTP V2');
-      expect(footer.textContent).toContain('ERC-4337');
-      expect(footer.textContent).toContain('ERC-7702');
-    });
-
-    it('en: 同じ構造で英訳 (Powered by stablecoin payment technology / Technical details)', () => {
-      renderWithIntl(<SiteFooter />, { locale: 'en' });
-      const footer = screen.getByRole('contentinfo');
-      expect(footer.textContent).toContain(
-        'Powered by stablecoin payment technology',
-      );
-      expect(footer.textContent).toContain('Technical details');
-      expect(footer.textContent).toContain('ERC-4337');
-    });
-
-    it('<details> 要素の初期状態は closed (技術詳細は折り畳まれている)', () => {
-      const { container } = renderWithIntl(<SiteFooter />, { locale: 'ja' });
-      // footer 内の details (poweredBy の折り畳み)
-      const detailsEls = container.querySelectorAll('details');
-      // poweredBy の <details> 要素は 1 つ存在
-      const poweredByDetails = Array.from(detailsEls).find((d) =>
-        d.textContent?.includes('ステーブルコイン決済技術'),
-      );
-      expect(poweredByDetails).toBeDefined();
-      expect(poweredByDetails!.open).toBe(false);
-    });
-
-    it('ja: summary に「Web3」リテラルが出ない (一般層に対する用語回避の regression guard)', () => {
-      renderWithIntl(<SiteFooter />, { locale: 'ja' });
-      const footer = screen.getByRole('contentinfo');
-      // <details> closed 状態 (default) の visible summary 部分に「Web3」が無いこと。
-      // 展開後の技術ラベル群には Web3 用語は元から含まれないので、textContent 全体で
-      // 「Web3」が出現しないことを fence する。
+      for (const label of ['EIP-3009', 'Circle Paymaster', 'CCTP V2', 'ERC-4337', 'ERC-7702', 'Pimlico']) {
+        expect(footer.textContent).not.toContain(label);
+      }
+      expect(container.querySelector('details')).toBeNull();
       expect(footer.textContent).not.toMatch(/Web3/);
+    });
+
+    it.each([
+      ['ja', 'お問い合わせ (Discord)'],
+      ['en', 'Contact (Discord)'],
+    ] as const)('%s: リンク列にお問い合わせがあり、行き先は SNS 行の Discord と同じ URL (メールアドレスは載せない)', (locale, name) => {
+      renderWithIntl(<SiteFooter />, { locale });
+      const contact = screen.getByRole('link', { name });
+      expect(contact).toHaveAttribute('href', 'https://discord.gg/Cfywb3aNWg');
+      expect(contact).toHaveAttribute('target', '_blank');
+      expect(contact).toHaveAttribute('rel', 'noopener noreferrer');
+      expect(contact.closest('nav')).not.toBeNull();
+      const icon = screen.getByRole('link', { name: locale === 'ja' ? 'OpenPay の Discord' : 'OpenPay on Discord' });
+      expect(icon.getAttribute('href')).toBe(contact.getAttribute('href'));
+      expect(screen.getByRole('contentinfo').textContent).not.toMatch(/@[a-z0-9-]+\.(com|jp)/i);
     });
   });
 });
@@ -293,7 +266,7 @@ describe('SiteFooter — @handle compact (受取ページ磨き上げ P3)', () =
       for (const name of ['OpenPay の X (旧 Twitter)', 'OpenPay の YouTube', 'note (OpenPay マガジン)', 'OpenPay の Discord', 'ソースコード (GitHub)']) {
         expect(screen.queryByRole('link', { name })).toBeNull();
       }
-      expect(screen.queryByText(/ステーブルコイン決済技術/)).toBeNull();
+      expect(screen.queryByRole('link', { name: 'お問い合わせ (Discord)' })).toBeNull();
       expect(screen.queryByRole('link', { name: 'AIストア' })).toBeNull();
       // ガイドのハブも OpenPay 側の導線なので出さない。
       expect(screen.queryByRole('link', { name: 'ガイド' })).toBeNull();
@@ -311,7 +284,7 @@ describe('SiteFooter — @handle compact (受取ページ磨き上げ P3)', () =
     pathnameMock.value = '/ja/create';
     try {
       renderWithIntl(<SiteFooter />, { locale: 'ja' });
-      expect(screen.getByText(/ステーブルコイン決済技術/)).toBeInTheDocument();
+      expect(screen.getByRole('link', { name: 'お問い合わせ (Discord)' })).toBeInTheDocument();
       expect(screen.getByRole('link', { name: 'OpenPay の YouTube' })).toBeInTheDocument();
       expect(screen.getByRole('link', { name: 'ガイド' })).toHaveAttribute('href', '/guide');
     } finally {

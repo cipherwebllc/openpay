@@ -67,8 +67,8 @@ describe('license public details and confirmation', () => {
   it('最終確認で第13条のライセンス開示と合計を示す', () => {
     renderWithIntl(confirmation());
     for (const key of ['sellerOperator', 'scopeLabel', 'scopeBody', 'meteredBody', 'issueBody', 'refundBody', 'nonTransferBody', 'publicBody'] as const) expect(screen.getByText(ja.CreatorStoreLicense[key])).toBeInTheDocument();
-    expect(within(screen.getByText('支払総額（価格 + 手数料）').parentElement!).getByText('1010 JPYC')).toBeInTheDocument();
-    expect(screen.getByText('商品価格').parentElement).toHaveTextContent('1000 JPYC');
+    expect(within(screen.getByText('支払総額（価格 + 手数料）').parentElement!).getByText('1,010 JPYC')).toBeInTheDocument();
+    expect(screen.getByText('商品価格').parentElement).toHaveTextContent('1,000 JPYC');
     expect(screen.getByText('買い手負担 x402 手数料').parentElement).toHaveTextContent('10 JPYC');
     expect(screen.getByRole('link', { name: '利用条件（バージョン 2）' })).toHaveAttribute('href', license.termsUrl);
     expect(screen.queryByText(/購入者本人の私的利用に限り/)).not.toBeInTheDocument();

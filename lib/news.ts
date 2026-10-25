@@ -50,8 +50,8 @@ export const NEWS_ITEMS: readonly NewsItem[] = [
     category: 'feature',
     title: { ja: '第三者の出品も Arc の USDC で販売できます', en: 'Third-party listings can now also sell in USDC on Arc' },
     body: {
-      ja: 'AI ストアの出品を USDC (Base) でも販売している出品者は、出品フォームで「Arc (Circle Gateway) でも販売する」を有効にすると、Arc の USDC でも同じ価格で販売できます (ノーコードゲートウェイ x402-jpyc-gateway で動かしている出品が対象です)。買い手は Circle Gateway に入金した残高からガス不要で払い、売上は受取アドレスの Gateway 残高に入るので、出品者が引き出して受け取ります。OpenPay の手数料はかかりません。Base での販売と x402 Bazaar への掲載は従来どおりです。',
-      en: 'Sellers who already offer an AI Store listing in USDC (Base) can turn on “Also sell on Arc (Circle Gateway)” in the listing form to sell it for USDC on Arc at the same price (for listings served by the no-code x402-jpyc-gateway). Buyers pay gaslessly from a balance deposited in Circle Gateway, and revenue lands in the Gateway balance of your receiving address, which you withdraw yourself. OpenPay charges no fee. Selling on Base and the x402 Bazaar listing are unchanged.',
+      ja: 'AI ストアの出品を USDC (Base) でも販売している出品者は、出品フォームで「Arc (Circle Gateway) でも販売する」を有効にすると、Arc の USDC でも同じ価格で販売できます (コードを書かずに使えるゲートウェイ x402-jpyc-gateway で動かしている出品が対象です)。買い手は Circle Gateway に入金した残高からガス不要で払い、売上は受取アドレスの Gateway 残高に入るので、出品者が引き出して受け取ります。OpenPay の手数料はかかりません。Base での販売と x402 Bazaar への掲載は従来どおりです。',
+      en: 'Sellers who already offer an AI Store listing in USDC (Base) can turn on “Also sell on Arc (Circle Gateway)” in the listing form to sell it for USDC on Arc at the same price (for listings served by x402-jpyc-gateway, the gateway you can use without writing code). Buyers pay gaslessly from a balance deposited in Circle Gateway, and revenue lands in the Gateway balance of your receiving address, which you withdraw yourself. OpenPay charges no fee. Selling on Base and the x402 Bazaar listing are unchanged.',
     },
     link: { href: '/guide/sell', labelJa: '販売ガイドを読む', labelEn: 'Read the selling guide' },
   },

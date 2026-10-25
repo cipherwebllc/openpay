@@ -166,8 +166,8 @@ test.describe('landing / (LP)', () => {
   }) => {
     await page.goto('/ja');
     await expect(page.getByRole('heading', { name: 'OpenPay の特長' })).toBeVisible();
-    // ガスレス特長カードの見出しは「ガス代不要」(featuresGaslessTitle)。
-    await expect(page.getByRole('heading', { name: 'ガス代不要' })).toBeVisible();
+    // ガスレス特長カードの見出しは「ガス代なしでも払える」(featuresGaslessTitle)。
+    await expect(page.getByRole('heading', { name: 'ガス代なしでも払える' })).toBeVisible();
     await expect(
       page.getByRole('heading', { name: 'マルチチェーン対応' }),
     ).toBeVisible();

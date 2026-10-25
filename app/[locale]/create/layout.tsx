@@ -2,8 +2,24 @@
 // (namespace 一覧は i18n/clientNamespaces.ts が単一情報源)。
 // setRequestLocale は入れ子 layout でも必須。省略すると getMessages() が headers()
 // 経由になり、このルートが静的プリレンダリングから外れて毎リクエスト SSR になる。
+import type { Metadata } from 'next';
 import { setRequestLocale } from 'next-intl/server';
+import { routeMetadata } from '@/lib/routeMetadata';
 import { RouteMessages } from '@/i18n/RouteMessages';
+
+// <title> はページ名 + OpenPay (指定が無いと総合 title = トップと同じになる)。
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ locale: string }>;
+}): Promise<Metadata> {
+  const { locale } = await params;
+  return routeMetadata({
+    locale,
+    path: '/create',
+    name: { ja: '受け取る', en: 'Receive' },
+  });
+}
 
 export default async function Layout({
   children,

@@ -73,7 +73,7 @@
     "wipNote": "Feature highlights, market info, transaction history, and external services will be added in upcoming updates.",
     "featuresTitle": "Why OpenPay",
     "featuresSubtitle": "No sign-up or custody—just your wallet.",
-    "featuresGaslessTitle": "No gas fees",
+    "featuresGaslessTitle": "Pay without gas",
     "featuresGaslessBody": "Pay with JPYC / USDC alone. See <pricing>Pricing</pricing> for conditions.",
     "featuresMultichainTitle": "Multi-chain",
     "featuresMultichainBody": "JPYC on 4 chains, USDC on 7. Pay from USDC on other chains too (Arc has no gasless mode).",
@@ -128,7 +128,7 @@
     "faqQ3": "What if the customer has no wallet?",
     "faqA3": "Recommend MetaMask or Rabby on desktop, and Myna Wallet / HashPort Wallet / MetaMask Mobile on phones. Multiple wallets are detected automatically.",
     "faqQ4": "How do I convert JPYC / USDC to JPY?",
-    "faqA4": "Redeem JPYC 1:1 at <jpycEx>JPYC EX</jpycEx>, or sell USDC via SBI VC Trade and other Japanese exchanges. Links are on the <create>Receive</create> page.",
+    "faqA4": "JPYC can be redeemed for 1 yen at <jpycEx>JPYC EX</jpycEx>; USDC can be sold via SBI VC Trade and other Japanese exchanges. Links are on the <create>Receive</create> page.",
     "faqQ5": "Where is transaction history stored?",
     "faqA5": "History stays in browser LocalStorage, not on OpenPay servers. Export CSV or verify recorded transaction hashes on Etherscan / Polygonscan.",
     "faqQ7": "What are JPYC and USDC?",
@@ -219,7 +219,7 @@
     "whyStablecoinTitle": "Why stablecoins, why now",
     "whyStablecoinSubtitle": "Digital money that works like yen.",
     "whyItem1Title": "Think in yen",
-    "whyItem1Body": "1 JPYC = 1 yen, so pricing and paying stay intuitive.",
+    "whyItem1Body": "1 JPYC can be redeemed for 1 yen at JPYC EX, so pricing and paying stay intuitive.",
     "whyItem3Title": "Built for small amounts",
     "whyItem3Body": "Even tiny tips and small digital products are easy to buy and sell.",
     "jpycNoteTitle": "What is JPYC?",
@@ -355,7 +355,7 @@
     "cashJpycAccepted": "Cash & JPYC accepted",
     "jpycAcceptedHeadline": "JPYC accepted",
     "cashLabel": "Cash",
-    "pegPill": "1 JPYC = ¥1",
+    "pegPill": "Redeemable for ¥1 at JPYC EX",
     "siteUrl": "open-pay.jp"
   },
   "Create": {
@@ -1825,9 +1825,6 @@
     "moreLink": "Details"
   },
   "Footer": {
-    "poweredBySoft": "Powered by stablecoin payment technology",
-    "poweredByTech": "EIP-3009 · Circle Paymaster · CCTP V2 · ERC-4337 · ERC-7702 · Pimlico",
-    "poweredByExpand": "Technical details",
     "copyright": "© {year} {company}",
     "links": {
       "guides": "Guides",
@@ -1839,7 +1836,8 @@
       "tokutei": "Business Disclosure",
       "transparency": "Operational Transparency",
       "discovery": "AI Store",
-      "storeLibrary": "Purchase library"
+      "storeLibrary": "Purchase library",
+      "contact": "Contact (Discord)"
     },
     "sourceLink": "Source on GitHub",
     "xLink": "OpenPay on X",
@@ -1953,7 +1951,7 @@
     "summaryGmv": "GMV ≈ ¥{amount}",
     "gmvApproxChip": "incl. estimate",
     "gmvRateUnavailable": "GMV (JPY): — (rate unavailable)",
-    "gmvReferenceNote": "* JPYC at 1:1; USDC via its anchor price or current rate (estimate).",
+    "gmvReferenceNote": "* JPYC counted as 1 JPYC = 1 yen; USDC via its original yen price or the current rate (estimate).",
     "filterEmpty": "No transactions match the filters. Try changing them.",
     "columnAnchor": "Priced in (FX)",
     "affiliateHeading": "Cloud accounting software",
@@ -3321,6 +3319,7 @@
       "download": "Download",
       "external-link": "External Link",
       "api": "API",
+      "license": "License",
       "other": "Other"
     }
   },

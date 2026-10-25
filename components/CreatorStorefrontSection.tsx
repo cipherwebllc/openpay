@@ -1,6 +1,7 @@
 import { useLocale, useTranslations } from 'next-intl';
 import Link from 'next/link';
 import { env } from '@/lib/env';
+import { groupDecimalString } from '@/lib/format';
 import type { StoreLicenseProduct } from '@/lib/licenseUi';
 import type { StoreUsageTerms } from '@/lib/store/usageTerms';
 import { CreatorStoreDeliveryBadge } from '@/components/CreatorStoreDeliveryBadge';
@@ -177,9 +178,7 @@ export function CreatorStorefrontSection({
                       {/* 買い手の意思決定基準は実際に払う合計 (2026-07-31 user 裁定)。fee 式は
                           購入 hook が server quote を照合するのと同一関数 = 表示と実請求の乖離なし。 */}
                       {t('cardTotal', {
-                        total: new Intl.NumberFormat(locale).format(
-                          Number(totalJpycOf(product.priceJpyc)),
-                        ),
+                        total: groupDecimalString(totalJpycOf(product.priceJpyc)),
                       })}
                       {/* USDC 可の商品だけ控えめに追記 (一覧では目立たせない — 契約 表示階層)。 */}
                       {product.usdcEnabled === true

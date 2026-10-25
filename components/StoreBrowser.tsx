@@ -13,6 +13,7 @@ import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { Search } from 'lucide-react';
 import { env } from '@/lib/env';
+import { groupDecimalString } from '@/lib/format';
 import { storeProductPath } from '@/lib/storeProductLink';
 import { filterStoreListings } from '@/lib/store/listingFilter';
 import { CreatorStoreDeliveryBadge } from '@/components/CreatorStoreDeliveryBadge';
@@ -134,12 +135,12 @@ export function StoreBrowser({
                   <span className="mt-0.5 truncate text-[11px] text-slate-500">
                     @{listing.handle}
                     <span className="mx-1 text-slate-300">·</span>
-                    {tCatalog(`types.${productTypeForLabel(listing.label)}`)}
+                    {tCatalog(`types.${listing.productKind === 'license' ? 'license' : productTypeForLabel(listing.label)}`)}
                   </span>
                   {/* 買い手の意思決定基準は合計 (2026-07-31 user 裁定・プロフカードと同形)。
                       狭カードで「JPYC / · Polygon」が泣き別れしないよう nowrap+truncate。 */}
                   <span className="mt-1.5 truncate whitespace-nowrap text-sm font-black text-slate-900">
-                    {t('cardTotal', { total: listing.totalJpyc })}
+                    {t('cardTotal', { total: groupDecimalString(listing.totalJpyc) })}
                     <span className="ml-1 text-[10px] font-semibold text-slate-500">
                       {/* USDC 可の商品だけ控えめに追記 (一覧では目立たせない — 契約 表示階層)。 */}
                       {listing.usdcEnabled === true ? '· Polygon +USDC' : '· Polygon'}

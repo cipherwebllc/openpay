@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { shortAddress, formatJpycYenLabel, isSettledReceiverInput } from '@/lib/format';
+import { shortAddress, formatJpycYenLabel, isSettledReceiverInput, groupDecimalString } from '@/lib/format';
 
 describe('shortAddress', () => {
   it('42 文字の checksum address を 0x123456…1234 形式へ短縮', () => {
@@ -52,5 +52,26 @@ describe('isSettledReceiverInput (別のタブの受取先を取り込んでよ�
     expect(isSettledReceiverInput('shop..eth')).toBe(false);
     expect(isSettledReceiverInput(' shop.eth')).toBe(false);
     expect(isSettledReceiverInput('0x833589FCD6eDb6E08f4c7C32D4f71b54bdA02913')).toBe(false);
+  });
+});
+
+describe('groupDecimalString', () => {
+  it('整数部だけに 3 桁区切りを入れ、小数部は 1 文字も変えない', () => {
+    expect(groupDecimalString('4999.5')).toBe('4,999.5');
+    expect(groupDecimalString('499.95')).toBe('499.95');
+    expect(groupDecimalString('1234567')).toBe('1,234,567');
+    expect(groupDecimalString('1000.123456789012345678')).toBe('1,000.123456789012345678');
+    expect(groupDecimalString('999')).toBe('999');
+    expect(groupDecimalString('-12345.60')).toBe('-12,345.60');
+  });
+
+  it('float 化しない (2^53 を超える桁でも桁落ちしない)', () => {
+    expect(groupDecimalString('12345678901234567890.1')).toBe('12,345,678,901,234,567,890.1');
+  });
+
+  it('数字の形でない入力はそのまま返す', () => {
+    expect(groupDecimalString('')).toBe('');
+    expect(groupDecimalString('abc')).toBe('abc');
+    expect(groupDecimalString('1e5')).toBe('1e5');
   });
 });
