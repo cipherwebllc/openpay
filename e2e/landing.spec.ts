@@ -15,7 +15,7 @@ test.describe('landing / (LP)', () => {
     await expect(
       page.getByRole('heading', { name: 'お店のJPYC決済を、利用料0円から。' }),
     ).toBeVisible();
-    await expect(page.getByText('お客様がガス代を払う通常決済なら、利用料は0円。', { exact: false })).toBeVisible();
+    await expect(page.getByText('お客様がガス代を払う通常決済なら、利用料は0円（モバイル注文を除く）。', { exact: false })).toBeVisible();
     await expect(
       page.getByRole('heading', { name: '売上を待たない。' }),
     ).toBeVisible();
