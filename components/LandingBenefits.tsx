@@ -1,11 +1,12 @@
-// 導入メリット (4 cards: 店舗 3 + 顧客 1)。Server Component。
+// お店向けの導入メリット (4 cards)。Server Component。
 //
 // LandingFeatures (技術特長) と差別化して「実利・実用メリット」をビッグナンバー
 // フォーカルで訴求する。レイアウトは mobile 2 col / desktop 4 col。
 //
-// Fee カードはレジ JPYC の店舗負担率を表示し、ガスレスの最低額と無料の範囲を本文に示す。
-//
-// audience pill のカラーは LandingHowItWorks (merchant=emerald / customer=blue) と整合。
+// Fee カードは「0円〜」を前に出し、条件 (お客様がガス代を払う通常決済) とガスレスの料率・最低額を本文に示す
+// (2026-10-25 user 指摘: 強みの 0 円が埋もれていた)。2 枚目は 0 が並ばないよう「スマホ1つ」にした。
+// 店舗 / 顧客のピルは外した (章ラベル「お店向け」が宛名を持つ・4 枚目は見出しで「お客様は」と書く)。
+// 数字の色は LandingHowItWorks (merchant=emerald / customer=blue) と整合。
 
 import type { CSSProperties } from 'react';
 import { LANDING_PAYMENT_FEE_VALUES } from '@/lib/legal';
@@ -36,24 +37,16 @@ const CARDS: readonly BenefitCard[] = [
 // merchant / customer ごとの card tone。merchant=emerald (LandingHowItWorks の
 // merchant 列と整合)、customer=blue (同・customer 列)。背景は両者とも bg-white で
 // 固定なので card className に直接置く (TONE には残さない)。
-// ピルは料金のカード (PayerPill) と同じ型 (淡い地 + 細い枠・12px) にそろえる (plans/lp-polish-2026-10.md P2)。
 const TONE = {
   merchant: {
     focal: PAYER_TONE.shop.focal,
-    pill: PAYER_TONE.shop.pill,
-    iconInk: 'text-emerald-500',
+    iconBox: 'bg-emerald-50 text-emerald-600',
   },
   customer: {
     focal: PAYER_TONE.customer.focal,
-    pill: PAYER_TONE.customer.pill,
-    iconInk: 'text-blue-500',
+    iconBox: 'bg-blue-50 text-blue-600',
   },
 } as const satisfies Record<BenefitCard['audience'], unknown>;
-
-const AUDIENCE_LABEL_KEY = {
-  merchant: 'benefitsAudienceMerchant',
-  customer: 'benefitsAudienceCustomer',
-} as const satisfies Record<BenefitCard['audience'], string>;
 
 export async function LandingBenefits() {
   const t = await getTranslations('Landing');
@@ -73,14 +66,9 @@ export async function LandingBenefits() {
               key={id}
               className="flex flex-col rounded-2xl bg-white p-5 shadow-card ring-1 ring-slate-200/70 [container-type:inline-size] [word-break:auto-phrase] sm:p-6"
             >
-              <div className="flex items-center justify-between">
-                <span
-                  className={`inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-semibold ring-1 ring-inset ${c.pill}`}
-                >
-                  {t(AUDIENCE_LABEL_KEY[audience])}
-                </span>
-                <Icon className={`h-5 w-5 ${c.iconInk}`} aria-hidden />
-              </div>
+              <span className={`grid h-9 w-9 place-items-center rounded-xl ${c.iconBox}`}>
+                <Icon className="h-5 w-5" aria-hidden />
+              </span>
 
               {/* focal: ビッグナンバー。文字サイズを「最大 (2.25rem / sm 3rem)」と「カード幅に収まる
                   大きさ」の小さい方にして 1 行に収める (lib/focalFit.ts)。未知の書体で収まらなければ空白で折り返す。 */}

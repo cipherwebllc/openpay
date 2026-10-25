@@ -72,6 +72,11 @@ describe('standard-payment fee scope (review 6 regression)', () => {
       expect(text).toContain(`${recoverPct}%`);
       expect(text).toContain(`${floorJpyc} JPYC`);
     });
+    // ヒーローの「0円」(2026-10-25): 条件 (お客様がガス代を払う通常決済) と、無料から除くモバイル注文を同じ文に書く。
+    it(`${locale}: heroBody の 0 円は通常決済の条件とモバイル注文の除外を同じ文に持つ`, () => {
+      const text = t('heroBody');
+      expect(text).toMatch(locale === 'ja' ? /ガス代を払う通常決済なら、利用料は0円（モバイル注文を除く）/ : /Standard payments, where the customer pays gas, cost you nothing \(mobile orders excepted\)/);
+    });
     // 2026-10-07: レジの通常決済の利用料を廃止 → 通常決済の無料から除くのはモバイル注文だけ。
     it(`${locale}: QR and simulator exemptions exclude only mobile orders (register standard is free)`, () => {
       for (const key of ['supportFeePayBody', 'cashSimNote'] as const) {

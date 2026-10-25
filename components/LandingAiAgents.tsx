@@ -28,7 +28,8 @@ export async function LandingAiAgents() {
   const t = await getTranslations('Landing');
 
   return (
-    <section className="mt-16 sm:mt-28">
+    <section id="lp-ai" className="mt-16 scroll-mt-24 sm:mt-28">
+      {/* ヒーローの「AI・開発者向け」から飛んでくる節 (ヘッダの下に見出しが隠れないよう余白を取る)。 */}
       <LandingSectionHeader eyebrow={t('eyebrowAgent')} title={t('aiEraTitle')} lead={t('aiEraBody')} />
 
       {/* 囲み (枠 + ラベル) は見た目だけの重ね描き。読み上げは各マスの「OpenPay はここ」で伝える。

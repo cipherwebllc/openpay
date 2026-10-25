@@ -1,9 +1,9 @@
 import { test, expect } from '@playwright/test';
 
 test.describe('landing / (LP)', () => {
-  // Phase 1: LP は Hero 2 CTA + WIP プレースホルダの骨格。Phase 2 で features /
-  // FAQ を加える際に本 spec を拡張する。
-  test('ja: Hero に 2 大 CTA (📱 支払う / 🏪 受け取る) と AppShell が描画される', async ({
+  // 2026-10-25: 5 秒で誰向けか分かるよう、ヒーローはお店向けの見出し + 主ボタン 1 つ (決済QRを作る) +
+  // お店以外の方の入口 1 行 (クリエイター向け / AI・開発者向け / お客様向け)。旧「支払う / 受け取る」の 2 大 CTA は撤去。
+  test('ja: Hero はお店向けの見出し・主ボタン 1 つ・お店以外の方の入口を描画する', async ({
     page,
   }) => {
     await page.goto('/ja');
@@ -11,10 +11,11 @@ test.describe('landing / (LP)', () => {
     // AppHeader: logo は alt='OpenPay' の h1
     await expect(page.getByRole('heading', { name: 'OpenPay' }).first()).toBeVisible();
 
-    // Hero leadline (h2) — 「スマホひとつで、JPYCを支払いにも販売にも」(総合案内化 P1)
+    // Hero leadline (h2) — お店向け。「0円〜」の条件 (通常決済) は副文に同じ文で書く。
     await expect(
-      page.getByRole('heading', { name: /スマホひとつで、JPYCを支払いにも販売にも/ }),
+      page.getByRole('heading', { name: 'お店のJPYC決済を、利用料0円から。' }),
     ).toBeVisible();
+    await expect(page.getByText('お客様がガス代を払う通常決済なら、利用料は0円（モバイル注文を除く）。', { exact: false })).toBeVisible();
     await expect(
       page.getByRole('heading', { name: '売上を待たない。' }),
     ).toBeVisible();
@@ -28,13 +29,16 @@ test.describe('landing / (LP)', () => {
       page.getByRole('heading', { name: '人にも、AIにも。オープンな決済を。' }),
     ).toBeVisible();
 
-    // 2 大 CTA
-    const scanCta = page.getByRole('link', { name: /支払う \(スキャン\)/ });
-    const createCta = page.getByRole('link', { name: /受け取る \(決済QRを作る\)/ });
-    await expect(scanCta).toBeVisible();
+    // 主ボタンは 1 つ (お店が最初にすること)。旧 2 大 CTA は無い。
+    const createCta = page.getByRole('link', { name: '決済QRを作る（無料）' });
     await expect(createCta).toBeVisible();
-    await expect(scanCta).toHaveAttribute('href', '/ja/scan');
     await expect(createCta).toHaveAttribute('href', '/ja/create');
+    expect(await page.getByRole('link', { name: /支払う \(スキャン\)/ }).count()).toBe(0);
+    // お店以外の方の入口 (ガイドの目次と同じ名前)。Store の flag で販売の節が無いときは販売のガイドへ。
+    const audience = page.getByRole('navigation', { name: 'お店以外の方は' });
+    await expect(audience.getByRole('link', { name: /クリエイター向け/ })).toHaveAttribute('href', /^(#lp-sell|\/ja\/guide\/store)$/);
+    await expect(audience.getByRole('link', { name: /AI・開発者向け/ })).toHaveAttribute('href', '#lp-ai');
+    await expect(audience.getByRole('link', { name: /お客様向け/ })).toHaveAttribute('href', '/ja/guide/pay');
   });
 
   // 2026-09-26: 1 行固定のビッグナンバー (en "No sign-up" 等) が狭いカードからはみ出し、
@@ -103,7 +107,7 @@ test.describe('landing / (LP)', () => {
     await expect(strip).toBeVisible();
     // ヒーローより前にある (1 画面目で自分の道具へ行ける)。
     const stripBox = await strip.boundingBox();
-    const heroBox = await page.getByRole('heading', { name: /スマホひとつで、JPYCを支払いにも販売にも/ }).boundingBox();
+    const heroBox = await page.getByRole('heading', { name: 'お店のJPYC決済を、利用料0円から。' }).boundingBox();
     expect(stripBox && heroBox && stripBox.y < heroBox.y).toBe(true);
     // 枠が後から出入りすると、ヒーロー以下が丸ごと動いて 0.1 前後になる。最初の描画から場所を取っていれば 0。
     const cls = await page.evaluate(() => (window as unknown as { __cls: number }).__cls);
@@ -124,10 +128,11 @@ test.describe('landing / (LP)', () => {
         name: 'Open payments — for people and AI.',
       }),
     ).toBeVisible();
-    await expect(page.getByRole('link', { name: /Pay \(Scan\)/ })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'JPYC payments for your shop, from ¥0 in fees.' })).toBeVisible();
+    await expect(page.getByRole('navigation', { name: 'Not a shop?' }).getByRole('link', { name: /For customers/ })).toHaveAttribute('href', '/en/guide/pay');
     await expect(
-      page.getByRole('link', { name: /Receive \(Create payment QR\)/ }),
-    ).toBeVisible();
+      page.getByRole('link', { name: 'Create a payment QR (free)' }),
+    ).toHaveAttribute('href', '/en/create');
   });
 
   test('mobile: BottomNav に 決済/販売/マイページ が出る (P4・Store は flag 連動)', async ({
@@ -245,37 +250,38 @@ test.describe('landing / (LP)', () => {
     await expect(a1Body).toBeVisible();
   });
 
-  test('ja: Benefits セクション — Fee「1%」 + 4 focal + 店舗 3 / 顧客 1', async ({
+  test('ja: Benefits セクション — Fee「0円〜」(通常決済の条件つき) + 4 focal・宛名は章ラベル', async ({
     page,
   }) => {
     await page.goto('/ja');
-    // Fee カードはレジ JPYC の店舗負担率とガスレスの最低額を併記する。
-    // focal のビッグナンバーは 1% のまま。Cost / Settlement / NoSignup と合わせ 4 cards。
-    // 「売上を待たない。」が導入メリットの見出し (旧・独立節を統合)。「導入メリット」は章ラベル。
+    // 2026-10-25: 強みの 0 円を先頭に出す。条件 (お客様がガス代を払う通常決済) とガスレスの料率・最低額は同じカードの本文。
+    // 2 枚目は 0 が並ばないよう「スマホ1つ」。店舗 / 顧客のピルは外し、章ラベル「お店向け」が宛名を持つ。
     const benefits = page
       .locator('section')
       .filter({ has: page.getByRole('heading', { name: '売上を待たない。' }) });
     await expect(benefits).toBeVisible();
+    await expect(benefits.getByText('お店向け', { exact: true })).toBeVisible();
     // 4 focal text (ビッグナンバー) — Benefits section 内に scope
-    await expect(benefits.getByText('1%', { exact: true })).toBeVisible();
-    await expect(benefits.getByText('¥0', { exact: true })).toBeVisible();
+    await expect(benefits.getByText('0円〜', { exact: true })).toBeVisible();
+    await expect(benefits.getByText('スマホ1つ', { exact: true })).toBeVisible();
     await expect(benefits.getByText('数秒', { exact: true })).toBeVisible();
     expect(await benefits.getByText('登録不要').count()).toBeGreaterThanOrEqual(1);
-    // 旧 % 訴求「0.5%」と旧「0%」永続コミット文脈は撤去済 (regression fence)
+    // 旧 % 訴求「0.5%」と旧「0%」永続コミット文脈は撤去済 (regression fence)。「0円〜」は条件つきの開始値で、永続の約束ではない。
     expect(await benefits.getByText('0.5%', { exact: true }).count()).toBe(0);
     expect(await benefits.getByText('0%', { exact: true }).count()).toBe(0);
-    // 4 title (Fee カードはガスレス決済の利用料。2026-10-07 にレジの通常決済の利用料を廃止)
+    // Fee カードの本文に条件とガスレスの料率・最低額 (店舗負担)
+    const feeCard = benefits.locator('li').filter({ has: page.getByRole('heading', { name: '決済の利用料' }) });
+    await expect(feeCard).toContainText('お客様がガス代を払う通常決済は、レジ・決済QRとも0円。');
+    await expect(feeCard).toContainText('ガスレスは決済額の 1%・最低 2 JPYC（店舗負担）。モバイル注文は別料金。');
+    // 4 title
     await expect(
-      benefits.getByRole('heading', { name: 'ガスレス決済の利用料' }),
-    ).toBeVisible();
-    await expect(
-      benefits.getByRole('heading', { name: '導入コスト 0 円' }),
+      benefits.getByRole('heading', { name: '端末も契約も不要' }),
     ).toBeVisible();
     await expect(
       benefits.getByRole('heading', { name: '即時着金' }),
     ).toBeVisible();
     await expect(
-      benefits.getByRole('heading', { name: '会員登録不要' }),
+      benefits.getByRole('heading', { name: 'お客様は会員登録なし' }),
     ).toBeVisible();
     expect(
       await benefits.getByRole('heading', { name: '手数料が安い' }).count(),
@@ -283,9 +289,9 @@ test.describe('landing / (LP)', () => {
     expect(
       await benefits.getByRole('heading', { name: '決済手数料ゼロ' }).count(),
     ).toBe(0);
-    // audience pill: 店舗 3 / 顧客 1 — 4 cards
-    expect(await benefits.getByText('店舗', { exact: true }).count()).toBe(3);
-    expect(await benefits.getByText('顧客', { exact: true }).count()).toBe(1);
+    // 店舗 / 顧客のピルは無い
+    expect(await benefits.getByText('店舗', { exact: true }).count()).toBe(0);
+    expect(await benefits.getByText('顧客', { exact: true }).count()).toBe(0);
   });
 
   test('ja: Trust セクションに GitHub link (target=_blank + rel=noopener)', async ({
