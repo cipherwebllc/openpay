@@ -38,7 +38,9 @@ export async function LandingEntryPoints() {
                 <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-emerald-50">
                   <Icon className="h-5 w-5 text-emerald-700" aria-hidden />
                 </span>
-                <span className="min-w-0 flex-1">
+                {/* 320px 幅では 1 文節 (「導入前チェックリスト」) がカードの幅を超えてページが横にはみ出していたので、
+                    収まらないときだけ文節の途中でも折る (overflow-wrap:anywhere・390px 以上は今までどおり文節で折れる)。 */}
+                <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">
                   <span className="flex items-center gap-1 text-sm font-bold leading-snug text-slate-900">
                     {item.label}
                     <ArrowRight

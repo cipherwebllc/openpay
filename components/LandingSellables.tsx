@@ -23,11 +23,11 @@ export async function LandingSellables() {
     <section id="lp-sell" className="mt-16 scroll-mt-24 sm:mt-28">
       {/* ヒーローの「クリエイター向け」から飛んでくる節 (ヘッダの下に見出しが隠れないよう余白を取る)。 */}
       <LandingSectionHeader eyebrow={t('eyebrowSell')} title={t('sellablesTitle')} lead={t('sellablesSubtitle')} />
-      <div className="mx-auto mt-7 flex max-w-2xl flex-wrap justify-center gap-2">
+      <div className="mx-auto mt-7 flex max-w-2xl flex-wrap justify-center gap-1.5 sm:gap-2">
         {HOSTED_PRODUCT_CATEGORIES.map((category) => (
           <span
             key={category}
-            className="rounded-full bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-[0_2px_8px_-2px_rgba(15,23,42,0.07)] ring-1 ring-slate-200"
+            className="rounded-full bg-white px-3 py-1.5 text-[13px] font-semibold text-slate-700 shadow-[0_2px_8px_-2px_rgba(15,23,42,0.07)] ring-1 ring-slate-200 sm:px-4 sm:py-2 sm:text-sm"
           >
             {tCatalog(`categories.${category}`)}
           </span>
