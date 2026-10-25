@@ -137,14 +137,17 @@ describe('⑥ 言い回し', () => {
       expect(storeGas?.gasless).toEqual([
         { rail: 'JPYC', value: locale === 'ja' ? `0 円（+${DISCLOSED_STORE_GAS_WALLET.feeWei} wei）` : `¥0 (+${DISCLOSED_STORE_GAS_WALLET.feeWei} wei)` },
       ]);
-      expect(storeGas?.payers[0].tone).toBe('shop');
+      // OpenPay に届くのは 1 wei だけで、お客様の支払いに上乗せされる。ガス代はお店の端末 (注に書く)。
+      expect(storeGas?.payers[0].tone).toBe('customer');
       expect(storeGas?.payers[0].note).toContain(`${DISCLOSED_STORE_GAS_WALLET.feeWei} wei`);
       expect(storeGas?.details.join('')).toContain(locale === 'ja' ? 'OpenPay に届きます' : 'goes to OpenPay');
       expect(storeGas?.details.join('')).toContain(locale === 'ja' ? 'OpenPay 利用料は 0 円' : 'OpenPay usage fee: 0');
     }
-    // 払う人の dt は「払う人」(お店がガス代を肩代わりの行は中身がガス代と 1 wei で、利用料ではない)。
-    expect(PRICING.ja.dtPayer).toBe('払う人');
-    expect(PRICING.en.dtPayer).toBe('Who pays');
+    // 列は「料金を払う人」= OpenPay に届く料金を払う人 (2026-10-25 user: 「払う人」だけだと、左の 2 列のガス代の話に
+    // 引かれてガス代を払う人と読まれる)。総称の「料金」にするのは、チップの「ガス代相当」も利用料ではないため。
+    expect(PRICING.ja.dtPayer).toBe('料金を払う人');
+    expect(PRICING.ja.dtPayerDef).toBe('OpenPay に届く料金。ガス代とは別');
+    expect(PRICING.en.dtPayer).toBe('Who pays OpenPay');
   });
 
   it('JPYC のチップは「OpenPay に届く」・USDC のチップは「OpenPay は受け取らない」(D1 の再発防止)', () => {

@@ -143,6 +143,7 @@ export function FeeTableHead({
   dtGasless,
   dtGaslessDef,
   dtPayer,
+  dtPayerDef,
 }: {
   colFeature: string;
   dtStandard: string;
@@ -150,6 +151,7 @@ export function FeeTableHead({
   dtGasless: string;
   dtGaslessDef: string;
   dtPayer: string;
+  dtPayerDef: string;
 }) {
   return (
     <div
@@ -166,7 +168,10 @@ export function FeeTableHead({
           {dtGasless}
           <span className="block font-normal text-slate-500">{dtGaslessDef}</span>
         </span>
-        <span>{dtPayer}</span>
+        <span>
+          {dtPayer}
+          <span className="block font-normal text-slate-500">{dtPayerDef}</span>
+        </span>
       </span>
     </div>
   );

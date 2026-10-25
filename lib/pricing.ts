@@ -162,6 +162,8 @@ export type PricingContent = {
   readonly dtGasless: string;
   readonly dtGaslessDef: string;
   readonly dtPayer: string;
+  /** 料金を払う人の意味 (左の 2 列がガス代の話なので、ガス代を払う人と読まれないよう添える)。 */
+  readonly dtPayerDef: string;
   readonly detailsLabel: string;
   readonly rows: readonly PricingRow[];
   /** 払う人のまとまりの見出し (PRICING_ROW_GROUPS の id ごと)。 */
@@ -369,7 +371,8 @@ function buildJa(): PricingContent {
     dtStandardDef: 'お客様がガス代を払う',
     dtGasless: 'ガスレス決済',
     dtGaslessDef: 'ガス代なしで払える',
-    dtPayer: '払う人',
+    dtPayer: '料金を払う人',
+    dtPayerDef: 'OpenPay に届く料金。ガス代とは別',
     detailsLabel: 'くわしく',
     rows: [
       {
@@ -410,7 +413,7 @@ function buildJa(): PricingContent {
         scope: `店頭レジ・画面に表示した金額指定の決済QR／JPYC（${disclosedStoreGasChains('ja')}）`,
         standard: [{ rail: null, value: '提供なし' }],
         gasless: [{ rail: 'JPYC', value: `0 円（+${STORE_GAS_WEI} wei）` }],
-        payers: [{ tone: 'shop', label: 'ガス代はお店', note: `${STORE_GAS_WEI} wei はお客様の支払いに上乗せ` }],
+        payers: [{ tone: 'customer', label: 'お客様が払う', note: `${STORE_GAS_WEI} wei だけ。ガス代はお店の端末が払う` }],
         details: [
           'OpenPay 利用料は 0 円です。ガス代は、お店の端末のガス用ウォレットが実費で払います。',
           `仕組み上、送金 1 回につき ${STORE_GAS_WEI} wei（${STORE_GAS_WEI_JPYC} JPYC）がお客様の支払いに上乗せされ、OpenPay に届きます。`,
@@ -589,7 +592,8 @@ function buildEn(): PricingContent {
     dtStandardDef: 'the customer pays gas',
     dtGasless: 'Gasless',
     dtGaslessDef: 'no gas needed',
-    dtPayer: 'Who pays',
+    dtPayer: 'Who pays OpenPay',
+    dtPayerDef: 'What goes to OpenPay, not gas',
     detailsLabel: 'Details',
     rows: [
       {
@@ -630,7 +634,7 @@ function buildEn(): PricingContent {
         scope: `In-store register or a fixed-amount payment QR shown on screen — JPYC on ${disclosedStoreGasChains('en')}`,
         standard: [{ rail: null, value: 'Not offered' }],
         gasless: [{ rail: 'JPYC', value: `¥0 (+${STORE_GAS_WEI} wei)` }],
-        payers: [{ tone: 'shop', label: 'Shop pays gas', note: `${STORE_GAS_WEI} wei is added to the customer's payment` }],
+        payers: [{ tone: 'customer', label: 'Customer pays', note: `Only ${STORE_GAS_WEI} wei. Gas is paid by the shop's device.` }],
         details: [
           'OpenPay usage fee: 0. The gas wallet on the shop’s device pays the actual gas.',
           `By design, ${STORE_GAS_WEI} wei (${STORE_GAS_WEI_JPYC} JPYC) is added to the customer’s payment per transfer and goes to OpenPay.`,

@@ -98,7 +98,7 @@ export default async function PricingPage({
         <section aria-labelledby="pricing-fees" className="mt-14 sm:mt-16">
           <SectionHeading id="pricing-fees" title={content.feesTitle} lead={content.feesLead} />
           <div className="mt-4 overflow-hidden rounded-2xl bg-white shadow-card ring-1 ring-slate-200/70">
-            {/* lg より狭い幅では見出しの行が無いので、2 つの決済の意味を表の上の帯に書く (lg 以上は見出しの行が見せる)。 */}
+            {/* lg より狭い幅では見出しの行が無いので、2 つの決済と「料金を払う人」の意味を表の上の帯に書く (lg 以上は見出しの行が見せる)。 */}
             <dl className="flex flex-wrap gap-x-4 gap-y-1 border-b border-slate-100 bg-slate-50 px-4 py-2.5 text-xs text-slate-500 lg:sr-only">
               <div className="flex gap-1.5">
                 <dt className="font-semibold text-slate-700">{content.dtStandard}</dt>
@@ -108,6 +108,10 @@ export default async function PricingPage({
                 <dt className="font-semibold text-slate-700">{content.dtGasless}</dt>
                 <dd>{content.dtGaslessDef}</dd>
               </div>
+              <div className="flex gap-1.5">
+                <dt className="font-semibold text-slate-700">{content.dtPayer}</dt>
+                <dd>{content.dtPayerDef}</dd>
+              </div>
             </dl>
             <FeeTableHead
               colFeature={content.colFeature}
@@ -116,6 +120,7 @@ export default async function PricingPage({
               dtGasless={content.dtGasless}
               dtGaslessDef={content.dtGaslessDef}
               dtPayer={content.dtPayer}
+              dtPayerDef={content.dtPayerDef}
             />
             {/* 払う人ごとのまとまり (お店 / チップを送る方 / デジタル商品・AI の買い手)。読む人が自分の行だけを見られる。 */}
             <ul className="divide-y divide-slate-100">
