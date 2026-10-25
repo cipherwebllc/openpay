@@ -1,5 +1,5 @@
-// ブランドメッセージで締めつつ、技術スタックと GitHub link で信頼性を開示する。
-// Server Component。SiteFooter は legal nav 中心のため、別の切り口を維持する。
+// ブランドメッセージで締めつつ、GitHub link とオープン技術の一文で信頼性を開示する。技術用語の羅列は置かない
+// (2026-10-25 引き算・技術は GitHub と運用透明性ページ)。Server Component。SiteFooter は legal nav 中心のため、別の切り口を維持する。
 
 import Link from 'next/link';
 import { getLocale, getTranslations } from 'next-intl/server';
@@ -54,11 +54,6 @@ export async function LandingTrust() {
         </div>
         {/* 運営の応援 (オープンな運営の文脈で・料金の節から移した)。 */}
         <LandingSupportCard />
-        {/* 技術スタックは開発者向け補足として小さく出す (一般読者には trustBody
-            だけで充足、開発者は具体技術名で OpenPay の構成を検証できる)。 */}
-        <p className="mx-auto mt-6 max-w-2xl text-xs leading-relaxed text-slate-400">
-          {t('trustTechStack')}
-        </p>
       </div>
     </section>
   );

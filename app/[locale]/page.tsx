@@ -49,9 +49,10 @@ export default async function HomePage({
         {/* 章「店舗の実利」を白の帯でまとめる (地色と交互にしてリズムを作る・plans/lp-polish-2026-09.md P2)。 */}
         <LandingBand>
           <LandingBenefits />
-          {/* 総合案内化 P1 (plans/site-ia-guides-ruling.md): 初訪問者の前提知識「なぜステーブルコイン/JPYCとは」。 */}
-          <LandingWhyStablecoin />
           <LandingCashComparison />
+          {/* 総合案内化 P1 (plans/site-ia-guides-ruling.md): 初訪問者の前提知識「なぜステーブルコイン/JPYCとは」。
+              お店向けの 2 節 (導入メリット・現金比較) を続けて読ませ、前提知識はその後ろに置く (2026-10-25)。 */}
+          <LandingWhyStablecoin />
         </LandingBand>
         {/* 販売セクション (plans/lp-restructure-ruling.md P2)。店舗向けの後に
             「決済だけでなく販売プラットフォーム」への広がりを見せる。カテゴリは

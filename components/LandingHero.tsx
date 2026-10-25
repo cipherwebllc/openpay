@@ -36,7 +36,10 @@ export async function LandingHero() {
         aria-hidden
         className="pointer-events-none absolute inset-x-0 -top-16 -z-10 mx-auto h-72 max-w-3xl bg-[radial-gradient(60%_60%_at_50%_0%,rgba(59,130,246,0.16),transparent_72%)]"
       />
-      <div className="mx-auto grid max-w-5xl items-center gap-9 pt-4 sm:pt-10 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)] lg:gap-12 lg:pt-12">
+      {/* 再訪の接続者 (直前の「あなたの OpenPay」帯が data-returning=yes) には写真を出さず、文字だけの短いヒーローにする
+          (帯で自分の道具へ行ける人に、宣伝の写真で 1 画面目を使わせない)。帯の有無は描画前 script が決めるので、
+          最初の描画から写真の場所を取らない (後から動かない・CLS 0)。 */}
+      <div className="mx-auto grid max-w-5xl items-center gap-9 pt-4 sm:pt-10 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)] lg:gap-12 lg:pt-12 lg:[[data-returning=yes]+section_&]:grid-cols-1">
         <div className="text-center lg:text-left">
           <p className="inline-flex items-center gap-1.5 rounded-full border border-blue-200/70 bg-blue-50/90 px-3 py-1 text-xs font-semibold tracking-wide text-brand">
             <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-brand" />
@@ -85,7 +88,7 @@ export async function LandingHero() {
           </nav>
         </div>
 
-        <div className="overflow-hidden rounded-[1.75rem] bg-white shadow-lift ring-1 ring-slate-200/60">
+        <div className="overflow-hidden rounded-[1.75rem] bg-white shadow-lift ring-1 ring-slate-200/60 [[data-returning=yes]+section_&]:hidden">
           <Image
             src="/landing/hero-overview.avif"
             alt={t('heroVisualAlt')}

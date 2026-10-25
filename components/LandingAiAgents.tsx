@@ -1,27 +1,12 @@
-// 決済手段の変遷と、AI エージェントが支払う次の時代を示す。Server Component。
-// OpenPay が受け持つのは QR 決済 (人が払う) から AI が支払うまで。AI だけを強調すると
-// 「OpenPay = AI の支払い」と読まれるので、2 つをまとめて 1 つの「OpenPay はここ」で囲む。
+// AI・開発者向けの節: AI エージェントが JPYC で支払う・API を売る入口。Server Component。
+// 決済手段の変遷の図 (現金 → カード → QR → AI・#672) は外した: 宛名を「AI・開発者向け」にした節では、読者が決めるのに
+// 要るのは「何がつながるか」と入口で、図は装飾だった (2026-10-25 引き算・plans/lp-polish-2026-10-25.md)。
+// 「OpenPay = AI の支払いだけ」に見えない役目は、お店向けのヒーローとこの節の宛名が持つ。
 
 import Link from 'next/link';
 import { getLocale, getTranslations } from 'next-intl/server';
-import { Banknote, Bot, CreditCard, QrCode } from 'lucide-react';
-import type { LucideIcon } from 'lucide-react';
 import { env } from '@/lib/env';
 import { LandingSectionHeader } from '@/components/LandingSectionHeader';
-
-type EraStep = {
-  Icon: LucideIcon;
-  labelKey: 'aiEraCash' | 'aiEraCard' | 'aiEraQr' | 'aiEraAgent';
-  openPay?: true;
-};
-
-// OpenPay の 2 マスは末尾に並べる (囲みの位置 = PC は右半分・スマホは下半分、を前提にしている)。
-const ERA_STEPS: readonly EraStep[] = [
-  { Icon: Banknote, labelKey: 'aiEraCash' },
-  { Icon: CreditCard, labelKey: 'aiEraCard' },
-  { Icon: QrCode, labelKey: 'aiEraQr', openPay: true },
-  { Icon: Bot, labelKey: 'aiEraAgent', openPay: true },
-];
 
 export async function LandingAiAgents() {
   const locale = await getLocale();
@@ -31,42 +16,6 @@ export async function LandingAiAgents() {
     <section id="lp-ai" className="mt-16 scroll-mt-24 sm:mt-28">
       {/* ヒーローの「AI・開発者向け」から飛んでくる節 (ヘッダの下に見出しが隠れないよう余白を取る)。 */}
       <LandingSectionHeader eyebrow={t('eyebrowAgent')} title={t('aiEraTitle')} lead={t('aiEraBody')} />
-
-      {/* 囲み (枠 + ラベル) は見た目だけの重ね描き。読み上げは各マスの「OpenPay はここ」で伝える。
-          行の高さは auto-rows-fr でそろえるので (文字を大きくしてラベルが折り返しても)、囲みは PC で右半分・スマホで下半分に一致する。
-          スマホは 2×2 (下の段 = QR と AI) で、縦 4 段の半分の高さにする。区切り線は 1px の隙間 (gap-px) で引く。 */}
-      <div className="relative mt-12">
-        <ol className="grid auto-rows-fr grid-cols-2 gap-px overflow-hidden rounded-3xl border border-slate-200/80 bg-slate-200 shadow-card sm:grid-cols-4">
-          {ERA_STEPS.map(({ Icon, labelKey, openPay }) => (
-            <li
-              key={labelKey}
-              className={`flex flex-col items-center justify-center gap-3 p-4 text-center sm:min-h-44 sm:gap-4 sm:p-5 ${
-                openPay ? 'bg-blue-50' : 'bg-white'
-              }`}
-            >
-              <span
-                className={`flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-2xl ${
-                  openPay ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'
-                }`}
-              >
-                <Icon className="h-6 w-6" strokeWidth={1.75} aria-hidden />
-              </span>
-              <span className={`text-sm font-semibold ${openPay ? 'text-brand' : 'text-slate-700'}`}>
-                {t(labelKey)}
-                {openPay ? <span className="sr-only"> {t('aiEraNow')}</span> : null}
-              </span>
-            </li>
-          ))}
-        </ol>
-        <div
-          aria-hidden
-          className="pointer-events-none absolute inset-x-0 bottom-0 top-1/2 rounded-b-3xl border-2 border-blue-500 sm:inset-y-0 sm:left-1/2 sm:right-0 sm:rounded-bl-none sm:rounded-r-3xl"
-        >
-          <span className="absolute left-1/2 top-0 -translate-x-1/2 -translate-y-1/2 whitespace-nowrap rounded-full bg-blue-600 px-3 py-1 text-xs font-semibold text-white shadow-sm">
-            {t('aiEraNow')}
-          </span>
-        </div>
-      </div>
 
       {/* 主導線は /agent (Agent を接続して試す)。/agent は flag なしで常に公開。ボタンの形 (角丸・高さ 44px) はガイドとそろえる。 */}
       <div className="mt-8 flex flex-col items-center">

@@ -30,7 +30,9 @@ test.describe('landing / (LP)', () => {
     ).toBeVisible();
 
     // 主ボタンは 1 つ (お店が最初にすること)。旧 2 大 CTA は無い。
-    const createCta = page.getByRole('link', { name: '決済QRを作る（無料）' });
+    // 締めの節にも同じ名前のボタンがある (行動を 1 つにそろえた) ので、ヒーローの節の中で探す。
+    const hero = page.locator('section').filter({ has: page.getByRole('heading', { name: 'お店のJPYC決済を、利用料0円から。' }) });
+    const createCta = hero.getByRole('link', { name: '決済QRを作る（無料）' });
     await expect(createCta).toBeVisible();
     await expect(createCta).toHaveAttribute('href', '/ja/create');
     expect(await page.getByRole('link', { name: /支払う \(スキャン\)/ }).count()).toBe(0);
@@ -114,7 +116,7 @@ test.describe('landing / (LP)', () => {
     expect(cls).toBeLessThan(0.01);
   });
 
-  test('en: Hero の 2 CTA は英語表記で描画される', async ({ page }) => {
+  test('en: Hero と主な節の見出し・主ボタンが英語で描画される', async ({ page }) => {
     await page.goto('/en');
     await expect(
       page.getByRole('heading', { name: 'Never wait for your sales.' }),
@@ -130,8 +132,12 @@ test.describe('landing / (LP)', () => {
     ).toBeVisible();
     await expect(page.getByRole('heading', { name: 'JPYC payments for your shop, from ¥0 in fees.' })).toBeVisible();
     await expect(page.getByRole('navigation', { name: 'Not a shop?' }).getByRole('link', { name: /For customers/ })).toHaveAttribute('href', '/en/guide/pay');
+    // 締めの節にも同じ名前のボタンがあるので、ヒーローの節の中で探す。
     await expect(
-      page.getByRole('link', { name: 'Create a payment QR (free)' }),
+      page
+        .locator('section')
+        .filter({ has: page.getByRole('heading', { name: 'JPYC payments for your shop, from ¥0 in fees.' }) })
+        .getByRole('link', { name: 'Create a payment QR (free)' }),
     ).toHaveAttribute('href', '/en/create');
   });
 
@@ -170,7 +176,7 @@ test.describe('landing / (LP)', () => {
     ).toBeVisible();
   });
 
-  test('ja: HowItWorks セクションに merchant + customer の 3-step が出る', async ({
+  test('ja: HowItWorks セクションに お店の 3-step と操作の動画が出る (お客様の 3-step は外した)', async ({
     page,
   }) => {
     await page.goto('/ja');
@@ -182,15 +188,8 @@ test.describe('landing / (LP)', () => {
     await expect(howItWorks.getByText('受取ウォレットアドレスを入力')).toBeVisible();
     // step3: 画面で見せる・印刷して置く の両パターン (決済QR ガイドの受け取りの流れと同じ文・2026-10-19 user)
     await expect(howItWorks.getByText('できた QR をお客様に見せる (印刷して置いてもOK)')).toBeVisible();
-    // customer 3 step
-    await expect(
-      howItWorks.getByText('右上の「接続」でウォレット接続'),
-    ).toBeVisible();
-    // step 2: 「スキャン」テキストリンクが /scan を指す (HowItWorks 内に scope して
-    // TopNav / Hero CTA の同名 link との strict mode 衝突を回避)
-    const scanLink = howItWorks.getByRole('link', { name: 'スキャン', exact: true });
-    await expect(scanLink).toHaveAttribute('href', '/ja/scan');
-    await expect(howItWorks.getByText('ウォレットで署名 → 完了')).toBeVisible();
+    // customer 3 step はトップの読者 (お店) 向けでないので外した (2026-10-25)。支払う流れは動画の ③ と支払い方のガイド。
+    expect(await howItWorks.getByText('右上の「接続」でウォレット接続').count()).toBe(0);
 
     // 操作の短い動画 3 本 (決済QR → レジ → お客様の支払い)。再生できるかはブラウザの動画形式の対応に左右される
     // (Playwright の Chromium は H.264 を再生しない) ので、ここでは並びと止めるボタンの有無だけを見る。

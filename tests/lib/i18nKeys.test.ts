@@ -910,10 +910,6 @@ describe('i18n: Nav / Landing 名前空間 (AppShell + LP, ja/en parity)', () =>
     'howItWorksMerchantStep1',
     'howItWorksMerchantStep2',
     'howItWorksMerchantStep3',
-    'howItWorksCustomerTitle',
-    'howItWorksCustomerStep1',
-    'howItWorksCustomerStep2',
-    'howItWorksCustomerStep3',
     // FAQ (Q6/A6「OpenPay の手数料はいくらか」は「利用料について」の節へ移したあと表示されなくなったので廃止・2026-09-28)
     'faqTitle',
     'faqQ1',
@@ -953,9 +949,8 @@ describe('i18n: Nav / Landing 名前空間 (AppShell + LP, ja/en parity)', () =>
     'supportTipRequest',
     'supportProfileTagline',
     'supportProfileCta',
-    // Benefits section (4 cards × {focal, title, body} + section meta)。Phase 1 で
-    // Fee カードは「永久に取引額連動の手数料を取らない」永続コミットメントとして
-    // focal="0%" に再構成 (旧 focal="0.5%" の規制論的に危うい % 訴求は撤去)。
+    // Benefits section (4 cards × {focal, title, body} + section meta)。Fee カードの focal は「0円〜」で、条件
+    // (お客様がガス代を払う通常決済) とガスレスの料率・最低額を本文に持つ (2026-10-25)。永続の約束 (旧「0%」) ではない。
     'benefitsTitle',
     'benefitsFeeFocal',
     'benefitsFeeTitle',
@@ -978,12 +973,6 @@ describe('i18n: Nav / Landing 名前空間 (AppShell + LP, ja/en parity)', () =>
     'useCase2Title',
     'useCase2Body',
     'useCase2ImageAlt',
-    'useCase3Title',
-    'useCase3Body',
-    'useCase3ImageAlt',
-    'useCase4Title',
-    'useCase4Body',
-    'useCase4ImageAlt',
     'useCase5Title',
     'useCase5Body',
     'useCase5ImageAlt',
@@ -993,7 +982,6 @@ describe('i18n: Nav / Landing 名前空間 (AppShell + LP, ja/en parity)', () =>
     'useCase8ImageAlt',
     // 技術詳細は Trust「オープン技術と透明性」の技術スタックに一本化
     // (旧 featuresGaslessTech は撤去)。
-    'trustTechStack',
   ] as const;
 
   for (const key of NAV_KEYS) {

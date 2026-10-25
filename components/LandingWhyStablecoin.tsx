@@ -6,9 +6,7 @@
 import { getTranslations } from 'next-intl/server';
 import {
   JapaneseYen,
-  Wallet,
   Coins,
-  Users,
   ExternalLink,
   type LucideIcon,
 } from 'lucide-react';
@@ -18,11 +16,11 @@ import { GuideCallout } from '@/components/guide/GuideCallout';
 // JPYC 入門+運用・ウォレット選びの note 記事 (2026-08-05 user 指示で追加)。
 const JPYC_NOTE_ARTICLE_URL = 'https://note.com/masia02/n/ned04a4cdb00a';
 
-const ITEMS: readonly { key: 1 | 2 | 3 | 4; icon: LucideIcon }[] = [
+// 「ウォレットから直接」(導入メリットの即時着金と重なる) と「広がる使いみち」(ヒーローの入口と重なる) は外した
+// (2026-10-25 引き算)。円の感覚と小額・オンラインの 2 つだけを残す。
+const ITEMS: readonly { key: 1 | 3; icon: LucideIcon }[] = [
   { key: 1, icon: JapaneseYen },
-  { key: 2, icon: Wallet },
   { key: 3, icon: Coins },
-  { key: 4, icon: Users },
 ];
 
 export async function LandingWhyStablecoin() {
@@ -31,20 +29,19 @@ export async function LandingWhyStablecoin() {
   return (
     <section className="mt-16 sm:mt-28">
       <LandingSectionHeader eyebrow={t('eyebrowWhy')} title={t('whyStablecoinTitle')} lead={t('whyStablecoinSubtitle')} />
-      {/* スマホでも 2×2 の小さなタイル (1 列の大きなカード 4 枚 ≒ 2 画面ぶんを半分に・plans/lp-polish-2026-09.md P1)。
-          PC (lg) の 4 列はタイルが細いので、アイコンを見出しの上に置く (横に並べると見出しが折り返しアイコンが潰れる)。
+      {/* スマホも PC も 2 枚を横に並べる小さなタイル。
           狭いタイルで語の途中 (「強 / い」) で折れないよう、文節の切れ目で改行する (Safari は通常の改行のまま)。 */}
-      <div className="mx-auto mt-8 grid max-w-4xl grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
+      <div className="mx-auto mt-8 grid max-w-4xl grid-cols-2 gap-3 sm:gap-4">
         {ITEMS.map(({ key, icon: Icon }) => (
           <div
             key={key}
             className="flex flex-col rounded-2xl border border-slate-200/80 bg-white p-4 shadow-[0_2px_8px_-2px_rgba(15,23,42,0.07)] [word-break:auto-phrase] sm:p-5"
           >
-            <span className="flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:gap-3 lg:flex-col lg:items-start lg:gap-2">
+            <span className="flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:gap-3">
               <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-brand/10 sm:h-10 sm:w-10">
                 <Icon className="h-5 w-5 text-brand" aria-hidden />
               </span>
-              <span className="text-sm font-bold text-slate-900 sm:text-lg lg:text-base">
+              <span className="text-sm font-bold text-slate-900 sm:text-lg">
                 {t(`whyItem${key}Title`)}
               </span>
             </span>

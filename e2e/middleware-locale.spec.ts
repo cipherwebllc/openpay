@@ -31,8 +31,12 @@ test.describe('middleware: next-intl locale prefix / redirect', () => {
     await expect(
       page.getByRole('heading', { name: 'JPYC payments for your shop, from ¥0 in fees.' }),
     ).toBeVisible();
+    // 締めの節にも同じ名前のボタンがあるので、ヒーローの節の中で探す。
     await expect(
-      page.getByRole('link', { name: 'Create a payment QR (free)' }),
+      page
+        .locator('section')
+        .filter({ has: page.getByRole('heading', { name: 'JPYC payments for your shop, from ¥0 in fees.' }) })
+        .getByRole('link', { name: 'Create a payment QR (free)' }),
     ).toBeVisible();
   });
 

@@ -1,20 +1,13 @@
-// 「こんな用途に使えます」: OpenPay の利用シーンを提示 (8 枚・PC は 4 列 × 2 段)。
-// Server Component。
-//
-// LandingBenefits (汎用メリット) と LandingHowItWorks (操作フロー) の間に置き、
-// 訪問者が「自分ごと化」できる具体的な scenario を見せる:
+// 「こんな用途に使えます」: お店の利用シーン 4 枚 (PC は 4 列 × 1 段)。クリエイター・DAO・デジタル販売・AI 向け API の
+// 4 枚は外した: それぞれ「クリエイター向け」「AI・開発者向け」の節が持つ (2026-10-25 引き算・plans/lp-polish-2026-10-25.md)。
+// Server Component。特長 (LandingFeatures) と使い方 (LandingHowItWorks) の間に置き、お店が「自分ごと化」できる場面を見せる:
 //   1. 店舗・イベント出店 (実店舗 / フリマ・写真は決済QR ガイドと同じ店頭の写真)
 //   8. モバイルオーダー (1 の次に並べる・画面はレジ・モバイルオーダーのガイドと同じ)
 //   2. Web3 イベント物販 (ETHTokyo / Devcon 等)
-//   3. クリエイター Tip widget (LP に Tip 導線を持たせる)
-//   4. DAO / コミュニティ会費
 //   5. ポップアップ / 少額決済 (クレカが割に合わない単価)
-//
-// Tip widget の存在感を LP にも持たせる狙いも兼ねる (機能としては /create タブで
-// 提供しているが、トップから見えにくかった)。
 
 import Image from 'next/image';
-import { Bot, Gift, Landmark, Palette, ShoppingBag, Smartphone, Store, Ticket, type LucideIcon } from 'lucide-react';
+import { Gift, Smartphone, Store, Ticket, type LucideIcon } from 'lucide-react';
 import { getTranslations } from 'next-intl/server';
 import { LandingSectionHeader } from '@/components/LandingSectionHeader';
 
@@ -39,36 +32,10 @@ const USE_CASES = [
     altKey: 'useCase2ImageAlt',
   },
   {
-    id: '3',
-    icon: Palette,
-    image: '/landing/usecase-creator-tip.avif',
-    altKey: 'useCase3ImageAlt',
-  },
-  {
-    id: '4',
-    icon: Landmark,
-    image: '/landing/usecase-community-dues.avif',
-    altKey: 'useCase4ImageAlt',
-  },
-  {
     id: '5',
     icon: Gift,
     image: '/landing/usecase-popup-payment.avif',
     altKey: 'useCase5ImageAlt',
-  },
-  // LP 再構成 P2 (2026-08-04): 販売プラットフォーム化の 2 シーン。画像は Codex image_gen
-  // で既存 5 枚とスタイルを揃えて生成 (960x540 avif)。
-  {
-    id: '6',
-    icon: ShoppingBag,
-    image: '/landing/usecase-creator-store.avif',
-    altKey: 'useCase6ImageAlt',
-  },
-  {
-    id: '7',
-    icon: Bot,
-    image: '/landing/usecase-ai-api.avif',
-    altKey: 'useCase7ImageAlt',
   },
 ] as const satisfies readonly { id: string; icon: LucideIcon; image: string; altKey: string }[];
 
