@@ -6,7 +6,7 @@ import type { ReactNode } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import PricingPage, { generateMetadata } from '@/app/[locale]/pricing/page';
-import { PRICING } from '@/lib/pricing';
+import { PRICING, PRICING_ROW_GROUPS, PRICING_ROW_IDS } from '@/lib/pricing';
 
 vi.mock('next-intl/server', () => ({ setRequestLocale: vi.fn() }));
 vi.mock('@/components/AppShell', () => ({
@@ -20,7 +20,7 @@ describe.each(['ja', 'en'] as const)('%s /pricing', (locale) => {
     return render(await PricingPage({ params: Promise.resolve({ locale }) }));
   }
 
-  it('見出しの並び: h1 → 4 つの場合 (h3) → 計算機の 4 場面 (h3) → 機能ごとの 5 行 (h3)', async () => {
+  it('見出しの並び: h1 → 4 つの場合 (h3) → 計算機の 4 場面 (h3) → 払う人のまとまり (h3) → 機能ごとの 5 行 (h4)', async () => {
     await renderPage();
     expect(screen.getByRole('heading', { level: 1, name: content.title })).toBeInTheDocument();
     expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual([
@@ -32,8 +32,23 @@ describe.each(['ja', 'en'] as const)('%s /pricing', (locale) => {
     expect(screen.getAllByRole('heading', { level: 3 }).map((h) => h.textContent)).toEqual([
       ...content.summary.map((item) => item.name),
       ...content.calc.modes.map((mode) => mode.name),
-      ...content.rows.map((row) => row.name),
+      ...PRICING_ROW_GROUPS.map((group) => content.rowGroupTitles[group.id]),
     ]);
+    expect(screen.getAllByRole('heading', { level: 4 }).map((h) => h.textContent)).toEqual(content.rows.map((row) => row.name));
+  });
+
+  it('機能ごとの表は払う人のまとまり (お店 / チップを送る方 / デジタル商品・AI の買い手) に分かれ、各行は 1 回ずつ', async () => {
+    const { container } = await renderPage();
+    const fees = container.querySelector<HTMLElement>('section[aria-labelledby="pricing-fees"]');
+    if (!fees) throw new Error('fees section');
+    expect(PRICING_ROW_GROUPS.flatMap((group) => group.rowIds)).toEqual([...PRICING_ROW_IDS]);
+    for (const group of PRICING_ROW_GROUPS) {
+      const groupItem = within(fees).getByRole('heading', { level: 3, name: content.rowGroupTitles[group.id] }).closest('li');
+      if (!groupItem) throw new Error(group.id);
+      expect(within(groupItem).getAllByRole('heading', { level: 4 }).map((h) => h.textContent)).toEqual(
+        group.rowIds.map((id) => content.rows.find((row) => row.id === id)?.name),
+      );
+    }
   });
 
   it('冒頭の文・4 つの場合の料率と払う人・2 つの安心材料・最低額の説明', async () => {

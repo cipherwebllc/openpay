@@ -17,7 +17,7 @@ import {
   SummaryCard,
   TrustList,
 } from '@/components/pricing/PricingPieces';
-import { pricingContentFor, pricingMetadata } from '@/lib/pricing';
+import { PRICING_ROW_GROUPS, pricingContentFor, pricingMetadata } from '@/lib/pricing';
 import { PRICING_EXAMPLE_AMOUNTS, disclosedPricingRates } from '@/lib/pricingExamples';
 
 export async function generateMetadata({
@@ -117,16 +117,29 @@ export default async function PricingPage({
               dtGaslessDef={content.dtGaslessDef}
               dtPayer={content.dtPayer}
             />
+            {/* 払う人ごとのまとまり (お店 / チップを送る方 / デジタル商品・AI の買い手)。読む人が自分の行だけを見られる。 */}
             <ul className="divide-y divide-slate-100">
-              {content.rows.map((row) => (
-                <FeeRow
-                  key={row.id}
-                  row={row}
-                  dtStandard={content.dtStandard}
-                  dtGasless={content.dtGasless}
-                  dtPayer={content.dtPayer}
-                  detailsLabel={content.detailsLabel}
-                />
+              {PRICING_ROW_GROUPS.map((group) => (
+                <li key={group.id}>
+                  <h3 className="bg-slate-50 px-4 py-2 text-xs font-bold tracking-wide text-slate-600 sm:px-5">
+                    {content.rowGroupTitles[group.id]}
+                  </h3>
+                  <ul className="divide-y divide-slate-100">
+                    {group.rowIds.map((rowId) => {
+                      const row = content.rows.find((r) => r.id === rowId);
+                      return row ? (
+                        <FeeRow
+                          key={row.id}
+                          row={row}
+                          dtStandard={content.dtStandard}
+                          dtGasless={content.dtGasless}
+                          dtPayer={content.dtPayer}
+                          detailsLabel={content.detailsLabel}
+                        />
+                      ) : null;
+                    })}
+                  </ul>
+                </li>
               ))}
             </ul>
           </div>
