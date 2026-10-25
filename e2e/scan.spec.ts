@@ -140,13 +140,17 @@ test.describe('/scan: URL 手入力 fallback', () => {
 });
 
 test.describe('/scan: home (LP) からの導線', () => {
-  test('LP の Hero "📱 支払う (スキャン)" CTA をクリック → /ja/scan へ遷移', async ({
+  test('LP の「お客様向け」→ 支払い方のガイド →「スキャンして支払う」→ /ja/scan へ遷移', async ({
     page,
   }) => {
     await page.goto('/ja');
-    // 旧 demand-gating banner ("レジ前で素早く決済") は Phase 1 で LP の
-    // 2 大 CTA に置換された。新 CTA を辿る。
-    const cta = page.getByRole('link', { name: /支払う \(スキャン\)/ });
+    // 2026-10-25: ヒーローの 2 大 CTA (支払う / 受け取る) を撤去し、お客様にはお店以外の方の入口 1 行から
+    // 支払い方のガイドへ案内する (トップの主役はお店)。ガイドの主ボタンからスキャンへ進む。
+    const entry = page.getByRole('navigation', { name: 'お店以外の方は' }).getByRole('link', { name: /お客様向け/ });
+    await expect(entry).toBeVisible();
+    await entry.click();
+    await expect(page).toHaveURL(/\/ja\/guide\/pay/);
+    const cta = page.getByRole('link', { name: 'スキャンして支払う' }).first();
     await expect(cta).toBeVisible();
     await cta.click();
     await expect(page).toHaveURL(/\/ja\/scan/);

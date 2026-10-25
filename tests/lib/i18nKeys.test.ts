@@ -884,13 +884,9 @@ describe('i18n: Nav / Landing 名前空間 (AppShell + LP, ja/en parity)', () =>
     'tagline',
     'heroLeadline',
     'heroBody',
+    'heroCta',
+    'heroAudienceLead',
     'heroVisualAlt',
-    'ctaScanTitle',
-    'ctaScanBody',
-    'ctaScanButton',
-    'ctaCreateTitle',
-    'ctaCreateBody',
-    'ctaCreateButton',
     'wipNote',
     // Features section (3 cards)
     'featuresTitle',
@@ -961,8 +957,6 @@ describe('i18n: Nav / Landing 名前空間 (AppShell + LP, ja/en parity)', () =>
     // Fee カードは「永久に取引額連動の手数料を取らない」永続コミットメントとして
     // focal="0%" に再構成 (旧 focal="0.5%" の規制論的に危うい % 訴求は撤去)。
     'benefitsTitle',
-    'benefitsAudienceMerchant',
-    'benefitsAudienceCustomer',
     'benefitsFeeFocal',
     'benefitsFeeTitle',
     'benefitsFeeBody',

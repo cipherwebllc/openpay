@@ -20,7 +20,8 @@ export async function LandingSellables() {
   const locale = await getLocale();
 
   return (
-    <section className="mt-16 sm:mt-28">
+    <section id="lp-sell" className="mt-16 scroll-mt-24 sm:mt-28">
+      {/* ヒーローの「クリエイター向け」から飛んでくる節 (ヘッダの下に見出しが隠れないよう余白を取る)。 */}
       <LandingSectionHeader eyebrow={t('eyebrowSell')} title={t('sellablesTitle')} lead={t('sellablesSubtitle')} />
       <div className="mx-auto mt-7 flex max-w-2xl flex-wrap justify-center gap-2">
         {HOSTED_PRODUCT_CATEGORIES.map((category) => (

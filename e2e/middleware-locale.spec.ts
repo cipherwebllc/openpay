@@ -23,16 +23,16 @@ test.describe('middleware: next-intl locale prefix / redirect', () => {
     ).toBeVisible();
   });
 
-  test('/en は 200 + 英語 LP (Hero leadline + 2 CTA)', async ({ page }) => {
+  test('/en は 200 + 英語 LP (Hero leadline + 主ボタン)', async ({ page }) => {
     const response = await page.goto('/en');
     expect(response?.status()).toBe(200);
     // Phase 1 で / は QR タブから LP に置換。LP の英語 leadline + Hero CTA を
     // assert する (旧「Payment QR (merchant)」タブ button は /create に移動)。
     await expect(
-      page.getByRole('heading', { name: /One phone to pay and sell with JPYC/ }),
+      page.getByRole('heading', { name: 'JPYC payments for your shop, from ¥0 in fees.' }),
     ).toBeVisible();
     await expect(
-      page.getByRole('link', { name: /Pay \(Scan\)/ }),
+      page.getByRole('link', { name: 'Create a payment QR (free)' }),
     ).toBeVisible();
   });
 
