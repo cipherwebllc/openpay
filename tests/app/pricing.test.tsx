@@ -93,6 +93,7 @@ describe.each(['ja', 'en'] as const)('%s /pricing', (locale) => {
     // スマホで見出しの行の代わりに 2 つの決済の意味を書く (md 以上は読み上げだけ)。
     expect(screen.getByText(content.dtStandardDef, { selector: 'dd' })).toBeInTheDocument();
     expect(screen.getByText(content.dtGaslessDef, { selector: 'dd' })).toBeInTheDocument();
+    expect(screen.getByText(content.dtPayerDef, { selector: 'dd' })).toBeInTheDocument();
   });
 
   it('計算機は 1,000 JPYC で描かれ、引き算 (お店が払う) と足し算 (買い手が払う) を出す', async () => {
