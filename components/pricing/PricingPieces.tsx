@@ -196,10 +196,11 @@ export function FeeRow({
       {/* base の grid-cols-1 は必須 (スマホで横にはみ出さない)。 */}
       <div className={`grid grid-cols-1 gap-3 lg:gap-4 ${ROW_GRID}`}>
         <div className="min-w-0">
-          <h3 className="flex items-center gap-2 text-base font-semibold text-slate-900">
+          {/* 見出しは h4: 払う人のまとまり (h3) の下に並ぶ。 */}
+          <h4 className="flex items-center gap-2 text-base font-semibold text-slate-900">
             <Icon className="h-5 w-5 shrink-0 text-brand" aria-hidden />
             {row.name}
-          </h3>
+          </h4>
           {row.scope ? <p className="mt-1 text-xs leading-relaxed text-slate-500 lg:pl-7">{row.scope}</p> : null}
         </div>
         <dl className={`grid grid-cols-1 gap-2.5 lg:gap-4 ${CELL_GRID}`}>

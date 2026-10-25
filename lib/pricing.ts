@@ -65,9 +65,20 @@ export type PricingSummaryCase = {
   readonly detail: string;
 };
 
-/** 行の並び (テストが ja/en でこの並びを確かめる)。 */
-export const PRICING_ROW_IDS = ['pay', 'mobile', 'tip', 'store', 'storeGas'] as const;
+/** 行の並び (テストが ja/en でこの並びを確かめる)。払う人のまとまり (PRICING_ROW_GROUPS) の順と同じ。 */
+export const PRICING_ROW_IDS = ['pay', 'mobile', 'storeGas', 'tip', 'store'] as const;
 export type PricingRowId = (typeof PRICING_ROW_IDS)[number];
+
+/**
+ * 機能ごとの表を、料金を払う人 (読む人) ごとにまとめる (2026-10-25 外部レビュー: 料金をお店 / チップを送る方 / AI の買い手に
+ * 分けて見せる)。お店がガス代を肩代わりする行は、利用料 0 円のお店の機能なのでお店のまとまりに入れる。
+ */
+export const PRICING_ROW_GROUPS = [
+  { id: 'shop', rowIds: ['pay', 'mobile', 'storeGas'] },
+  { id: 'tipper', rowIds: ['tip'] },
+  { id: 'buyer', rowIds: ['store'] },
+] as const satisfies readonly { id: string; rowIds: readonly PricingRowId[] }[];
+export type PricingRowGroupId = (typeof PRICING_ROW_GROUPS)[number]['id'];
 
 /** 表の 1 マスの値。rail = 決済の種類 (JPYC・USDC など・無ければ null)・value = OpenPay に届く料金。 */
 export type PricingValue = {
@@ -153,6 +164,8 @@ export type PricingContent = {
   readonly dtPayer: string;
   readonly detailsLabel: string;
   readonly rows: readonly PricingRow[];
+  /** 払う人のまとまりの見出し (PRICING_ROW_GROUPS の id ごと)。 */
+  readonly rowGroupTitles: Readonly<Record<PricingRowGroupId, string>>;
 
   readonly otherTitle: string;
   readonly otherTitles: readonly string[];
@@ -346,6 +359,11 @@ function buildJa(): PricingContent {
 
     feesTitle: '機能ごとの料金',
     feesLead: '金額は OpenPay に届く料金です（ガス代は含みません）。',
+    rowGroupTitles: {
+      shop: 'お店',
+      tipper: 'チップを送る方',
+      buyer: 'デジタル商品・AI の買い手',
+    },
     colFeature: '機能',
     dtStandard: '通常決済',
     dtStandardDef: 'お客様がガス代を払う',
@@ -387,6 +405,19 @@ function buildJa(): PricingContent {
         ],
       },
       {
+        id: 'storeGas',
+        name: 'お店がガス代を肩代わりして送る',
+        scope: `店頭レジ・画面に表示した金額指定の決済QR／JPYC（${disclosedStoreGasChains('ja')}）`,
+        standard: [{ rail: null, value: '提供なし' }],
+        gasless: [{ rail: 'JPYC', value: `0 円（+${STORE_GAS_WEI} wei）` }],
+        payers: [{ tone: 'shop', label: 'ガス代はお店', note: `${STORE_GAS_WEI} wei はお客様の支払いに上乗せ` }],
+        details: [
+          'OpenPay 利用料は 0 円です。ガス代は、お店の端末のガス用ウォレットが実費で払います。',
+          `仕組み上、送金 1 回につき ${STORE_GAS_WEI} wei（${STORE_GAS_WEI_JPYC} JPYC）がお客様の支払いに上乗せされ、OpenPay に届きます。`,
+          '印刷・保存・URL をコピーした QR と、金額を指定しない QR は対象外です。',
+        ],
+      },
+      {
         id: 'tip',
         name: 'チップ',
         scope: null,
@@ -417,19 +448,6 @@ function buildJa(): PricingContent {
           'デジタル商品はガス代なしで買えます（通常決済はありません）。',
           'JPYC の x402 利用料は、買い手が価格に上乗せします。売り手の手数料はありません。',
           `USDC (${STORE_USDC_CHAIN}): ${storeUsdcFee('ja')}。`,
-        ],
-      },
-      {
-        id: 'storeGas',
-        name: 'お店がガス代を肩代わりして送る',
-        scope: `店頭レジ・画面に表示した金額指定の決済QR／JPYC（${disclosedStoreGasChains('ja')}）`,
-        standard: [{ rail: null, value: '提供なし' }],
-        gasless: [{ rail: 'JPYC', value: `0 円（+${STORE_GAS_WEI} wei）` }],
-        payers: [{ tone: 'shop', label: 'ガス代はお店', note: `${STORE_GAS_WEI} wei はお客様の支払いに上乗せ` }],
-        details: [
-          'OpenPay 利用料は 0 円です。ガス代は、お店の端末のガス用ウォレットが実費で払います。',
-          `仕組み上、送金 1 回につき ${STORE_GAS_WEI} wei（${STORE_GAS_WEI_JPYC} JPYC）がお客様の支払いに上乗せされ、OpenPay に届きます。`,
-          '印刷・保存・URL をコピーした QR と、金額を指定しない QR は対象外です。',
         ],
       },
     ],
@@ -561,6 +579,11 @@ function buildEn(): PricingContent {
 
     feesTitle: 'Charges by feature',
     feesLead: 'Amounts are what goes to OpenPay (gas not included).',
+    rowGroupTitles: {
+      shop: 'Shops',
+      tipper: 'Tip senders',
+      buyer: 'Buyers of digital goods and AI',
+    },
     colFeature: 'Feature',
     dtStandard: 'Standard',
     dtStandardDef: 'the customer pays gas',
@@ -602,6 +625,19 @@ function buildEn(): PricingContent {
         ],
       },
       {
+        id: 'storeGas',
+        name: 'The shop pays the gas',
+        scope: `In-store register or a fixed-amount payment QR shown on screen — JPYC on ${disclosedStoreGasChains('en')}`,
+        standard: [{ rail: null, value: 'Not offered' }],
+        gasless: [{ rail: 'JPYC', value: `¥0 (+${STORE_GAS_WEI} wei)` }],
+        payers: [{ tone: 'shop', label: 'Shop pays gas', note: `${STORE_GAS_WEI} wei is added to the customer's payment` }],
+        details: [
+          'OpenPay usage fee: 0. The gas wallet on the shop’s device pays the actual gas.',
+          `By design, ${STORE_GAS_WEI} wei (${STORE_GAS_WEI_JPYC} JPYC) is added to the customer’s payment per transfer and goes to OpenPay.`,
+          'QR codes that are printed, saved or copied as a URL, or that have no amount, are not eligible.',
+        ],
+      },
+      {
         id: 'tip',
         name: 'Tips',
         scope: null,
@@ -632,19 +668,6 @@ function buildEn(): PricingContent {
           'Digital goods are bought without gas (there is no standard payment).',
           'The buyer adds the JPYC x402 fee to the price. No seller fee.',
           `USDC (${STORE_USDC_CHAIN}): ${storeUsdcFee('en')}.`,
-        ],
-      },
-      {
-        id: 'storeGas',
-        name: 'The shop pays the gas',
-        scope: `In-store register or a fixed-amount payment QR shown on screen — JPYC on ${disclosedStoreGasChains('en')}`,
-        standard: [{ rail: null, value: 'Not offered' }],
-        gasless: [{ rail: 'JPYC', value: `¥0 (+${STORE_GAS_WEI} wei)` }],
-        payers: [{ tone: 'shop', label: 'Shop pays gas', note: `${STORE_GAS_WEI} wei is added to the customer's payment` }],
-        details: [
-          'OpenPay usage fee: 0. The gas wallet on the shop’s device pays the actual gas.',
-          `By design, ${STORE_GAS_WEI} wei (${STORE_GAS_WEI_JPYC} JPYC) is added to the customer’s payment per transfer and goes to OpenPay.`,
-          'QR codes that are printed, saved or copied as a URL, or that have no amount, are not eligible.',
         ],
       },
     ],
