@@ -1,7 +1,7 @@
 // LP「なぜ今、ステーブルコインなのか + JPYCとは」— トップ総合案内化 P1
 // (plans/site-ia-guides-ruling.md N1・2026-08-04 user 承認)。初訪問者向けの前提知識を
 // 1 セクションに統合する (2 分割は LP の縦長化に対して冗長という裁定)。
-// 投資・価格上昇の訴求はしない。1 JPYC = 1 円は言い切る (2026-08-05 user 裁定)。
+// 投資・価格上昇の訴求はしない。1 JPYC = 1 円は言い切らず、JPYC EX で 1 円として払い戻せる事実で書く (2026-10-25 user 裁定・規約の免責はペッグを保証しない)。
 
 import { getTranslations } from 'next-intl/server';
 import {

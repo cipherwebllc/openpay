@@ -1,7 +1,7 @@
 // 全 page 共通の footer。app/[locale]/layout.tsx から 1 度だけ render される。
 // 役割は (1) legal page (/terms /privacy /disclaimer) への導線、(2) 事業者表記
-// + copyright、(3) 技術スタックの soft 表示 (一般向けは「ステーブルコイン決済技術」、
-// <details> 展開で ERC-4337 等の技術ラベル開示)。
+// + copyright、(3) お問い合わせ (Discord) と SNS 行。技術スタックの羅列はここに置かない
+// (技術は運用透明性ページと GitHub にある・2026-10-25 user 裁定)。
 //
 // QR ポスター印刷時は不要なので `print:hidden` で全体を非表示にする。
 
@@ -21,6 +21,9 @@ import {
   YOUTUBE_ICON_PATH,
 } from '@/lib/socialIconPaths';
 
+// 公開のメールアドレスは載せず、お問い合わせの行き先は Discord (2026-10-25 user 裁定)。SNS 行の Discord と同じ URL を共有する。
+const DISCORD_URL = 'https://discord.gg/Cfywb3aNWg';
+
 // 最下段の SNS・ソースのアイコン行。アイコンは @handle の SNS 行と同じ simple-icons (lib/socialIconPaths.ts)。
 // 文字が無いので a11y 名は aria-label (= title のツールチップと同じ文言) で付ける。
 // size は見た目の大きさをそろえるための px (横長の YouTube は少し大きく、塗りの多い note は小さく)。
@@ -28,7 +31,7 @@ const SOCIAL_LINKS = [
   { href: 'https://x.com/openpay_jp', labelKey: 'xLink', path: X_ICON_PATH, size: 14 },
   { href: 'https://www.youtube.com/@openpay_jp?sub_confirmation=1', labelKey: 'youtubeLink', path: YOUTUBE_ICON_PATH, size: 18 },
   { href: 'https://note.com/masia02/m/mf28261a21eb1', labelKey: 'noteLink', path: NOTE_ICON_PATH, size: 13 },
-  { href: 'https://discord.gg/Cfywb3aNWg', labelKey: 'discordLink', path: DISCORD_ICON_PATH, size: 16 },
+  { href: DISCORD_URL, labelKey: 'discordLink', path: DISCORD_ICON_PATH, size: 16 },
   { href: 'https://github.com/cipherwebllc/openpay', labelKey: 'sourceLink', path: GITHUB_ICON_PATH, size: 16 },
 ] as const;
 
@@ -121,6 +124,17 @@ export function SiteFooter() {
             {t('links.storeLibrary')}
           </Link>
         )}
+        {/* お問い合わせ (Discord)。@handle ページでは SNS 行と同じく OpenPay 側の導線なので出さない。 */}
+        {!onHandlePage && (
+          <a
+            href={DISCORD_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="hover:text-slate-700 hover:underline"
+          >
+            {t('links.contact')}
+          </a>
+        )}
       </nav>
       <p className="mt-3 text-slate-500">
         {t('copyright', {
@@ -128,22 +142,6 @@ export function SiteFooter() {
           company: LEGAL_ENTITY.companyName,
         })}
       </p>
-      {/* 一般店主には Web3 用語 (ERC-4337 等) は不要だが、開発者向け透明性は
-          残したいので <details> で折り畳む。summary は soft な日本語/英語、
-          展開時に技術ラベルを表示。review (2026-05-23) #15 対応。 */}
-      {onHandlePage ? null : (
-      <details className="mt-1 inline-block text-slate-500 marker:hidden">
-        {/* min-h + inline-flex で tap target 高さを 24px 以上に確保 (a11y target-size)。
-            inline-flex のままなので <details> の inline-block レイアウトは不変。 */}
-        <summary className="inline-flex min-h-[24px] cursor-pointer list-none items-center justify-center hover:text-slate-700">
-          {t('poweredBySoft')}{' '}
-          <span className="text-[10px] underline-offset-2 hover:underline">
-            ({t('poweredByExpand')})
-          </span>
-        </summary>
-        <span className="ml-1">{t('poweredByTech')}</span>
-      </details>
-      )}
       {onHandlePage ? null : (
       <p className="mt-2 flex items-center justify-center gap-3 text-slate-500">
         {SOCIAL_LINKS.map(({ href, labelKey, path, size }) => (

@@ -449,24 +449,11 @@ test.describe('create /create (QR generator + Tip widget tab)', () => {
     await expect(printBtn.locator('svg')).toHaveCount(1);
   });
 
-  test('ja: Footer poweredBy は soft 文言で表示、技術詳細は <details> 展開で出る', async ({
-    page,
-  }) => {
+  test('ja: Footer に技術の羅列は無く、お問い合わせ (Discord) がある', async ({ page }) => {
     await page.goto('/ja/create');
     const footer = page.locator('footer');
-    // soft 文言 (default visible)
-    await expect(
-      footer.getByText('ステーブルコイン決済技術を利用しています'),
-    ).toBeVisible();
-    // 技術ラベルは default 折り畳まれていて DOM には存在するが <details> 内
-    const techDetails = footer.locator(
-      'details:has(summary:has-text("ステーブルコイン決済技術"))',
-    );
-    await expect(techDetails).not.toHaveAttribute('open', /.*/);
-    // 展開
-    await techDetails.locator('summary').click();
-    await expect(techDetails).toHaveAttribute('open', '');
-    await expect(footer.getByText(/ERC-4337/)).toBeVisible();
+    await expect(footer.getByRole('link', { name: 'お問い合わせ (Discord)' })).toBeVisible();
+    await expect(footer.getByText(/ERC-4337/)).toHaveCount(0);
   });
 
   // a11y: 「設定」ボタンは native button なので Enter / Space で開き、Escape で閉じて focus が戻る (実 OS イベント)。

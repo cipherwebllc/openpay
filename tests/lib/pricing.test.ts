@@ -134,7 +134,11 @@ describe('⑥ 言い回し', () => {
     expect(PRICING.en.summaryTitle).not.toMatch(/\bonly\b/);
     for (const locale of LOCALES) {
       const storeGas = PRICING[locale].rows.find((row) => row.id === 'storeGas');
-      expect(storeGas?.gasless).toEqual([{ rail: 'JPYC', value: `${DISCLOSED_STORE_GAS_WALLET.feeWei} wei` }]);
+      expect(storeGas?.gasless).toEqual([
+        { rail: 'JPYC', value: locale === 'ja' ? `0 円（+${DISCLOSED_STORE_GAS_WALLET.feeWei} wei）` : `¥0 (+${DISCLOSED_STORE_GAS_WALLET.feeWei} wei)` },
+      ]);
+      expect(storeGas?.payers[0].tone).toBe('shop');
+      expect(storeGas?.payers[0].note).toContain(`${DISCLOSED_STORE_GAS_WALLET.feeWei} wei`);
       expect(storeGas?.details.join('')).toContain(locale === 'ja' ? 'OpenPay に届きます' : 'goes to OpenPay');
       expect(storeGas?.details.join('')).toContain(locale === 'ja' ? 'OpenPay 利用料は 0 円' : 'OpenPay usage fee: 0');
     }

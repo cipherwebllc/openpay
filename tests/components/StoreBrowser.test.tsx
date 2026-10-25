@@ -120,3 +120,21 @@ it.each([true, false, undefined])('protectedDelivery=%s controls the store card 
   if (protectedDelivery) { expect(badge).toBeVisible(); expect(badge).not.toHaveAttribute('title'); }
   else expect(badge).not.toBeInTheDocument();
 });
+
+it('ライセンス商品の種別は「ライセンス」(保存の label は api のまま)・通常の api は「API」', () => {
+  state.licenseEnabled = true; // OFF ではライセンス商品は一覧に出ない
+  const license = { ...LISTINGS[0], label: 'api' as const, productKind: 'license' as const };
+  const { unmount } = renderWithIntl(<StoreBrowser listings={[license]} locale="ja" />, { locale: 'ja' });
+  expect(document.body.textContent).toContain('@alice·ライセンス');
+  expect(document.body.textContent).not.toContain('@alice·API');
+  unmount();
+  state.licenseEnabled = false;
+  renderWithIntl(<StoreBrowser listings={[{ ...LISTINGS[0], label: 'api' as const }]} locale="en" />, { locale: 'en' });
+  expect(document.body.textContent).toContain('@alice·API');
+});
+
+it('価格は整数部に 3 桁区切り・小数部はそのまま (float にしない)', () => {
+  renderWithIntl(<StoreBrowser listings={[{ ...LISTINGS[0], totalJpyc: '4999.5' }, { ...LISTINGS[1], totalJpyc: '12345678901234567890.123' }]} locale="ja" />, { locale: 'ja' });
+  expect(screen.getByText('4,999.5 JPYC')).toBeInTheDocument();
+  expect(screen.getByText('12,345,678,901,234,567,890.123 JPYC')).toBeInTheDocument();
+});

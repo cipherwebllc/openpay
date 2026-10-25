@@ -139,7 +139,7 @@ const JA: StartGuideContent = {
       n: 3,
       title: '必要なら日本円に戻す',
       body: [
-        '1 JPYC = 1 円です。日本円に戻したいときは、JPYC EX で償還できます。',
+        '日本円に戻したいときは、JPYC EX で 1 JPYC を 1 円として払い戻せます。',
         '手数料・所要時間・上限額は変わることがあります。償還の前に JPYC 公式の最新条件を確認してください。',
       ],
       flow: [
@@ -333,7 +333,7 @@ const EN: StartGuideContent = {
       n: 3,
       title: 'Convert back to yen when you need to',
       body: [
-        '1 JPYC = 1 yen. When you want yen, you can redeem through JPYC EX.',
+        'When you want yen, you can redeem 1 JPYC for 1 yen through JPYC EX.',
         'Fees, processing time and limits can change. Check the current terms on JPYC official channels before you redeem.',
       ],
       flow: [

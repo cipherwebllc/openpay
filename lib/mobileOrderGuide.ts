@@ -5,6 +5,11 @@
 
 import type { Metadata } from 'next';
 import { guidePageMetadata } from '@/lib/guideMetadata';
+import { DISCLOSED_MOBILE_ORDER_FEE } from '@/lib/legal';
+import { percentLabel } from '@/lib/pricingMath';
+
+// 事前注文の利用料率は開示定数 (掟 14 の単一情報源) から作る。手書きすると改定で FAQ だけ古くなる。
+const PREORDER_PCT = percentLabel(DISCLOSED_MOBILE_ORDER_FEE.preorderBps);
 
 export type MobileOrderGuideStep = {
   readonly n: number;
@@ -140,7 +145,7 @@ const JA: MobileOrderGuideContent = {
     },
     {
       q: '手数料やガス代はかかる？',
-      a: 'かかりません。表示された金額だけを支払います。',
+      a: `ガス代はかかりません。支払うのは注文画面に表示された合計だけです。時間指定の事前注文では、お店の設定によりモバイルオーダーの利用料（${PREORDER_PCT}）が合計に含まれることがあります。`,
     },
     {
       q: 'お店の値引きはどうなる？',
@@ -247,7 +252,7 @@ const EN: MobileOrderGuideContent = {
     },
     {
       q: 'Are there fees or gas costs?',
-      a: 'No. You pay exactly the amount displayed.',
+      a: `There is no gas cost. You pay only the total shown on the order screen. For scheduled pre-orders, depending on the shop’s setting, the mobile-order fee (${PREORDER_PCT}) may be included in that total.`,
     },
     {
       q: 'Does the shop’s discount apply?',

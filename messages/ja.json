@@ -73,7 +73,7 @@
     "wipNote": "機能紹介・市場情報・取引履歴・外部サービスへの導線は順次拡充予定です。",
     "featuresTitle": "OpenPay の特長",
     "featuresSubtitle": "登録も預かりもなし。ウォレットだけで完結。",
-    "featuresGaslessTitle": "ガス代不要",
+    "featuresGaslessTitle": "ガス代なしでも払える",
     "featuresGaslessBody": "JPYC / USDC の残高だけで支払い。条件は<pricing>料金ページ</pricing>へ。",
     "featuresMultichainTitle": "マルチチェーン対応",
     "featuresMultichainBody": "JPYC は 4、USDC は 7 チェーン。別チェーンの USDC からも支払えます（Arc はガスレス非対応）。",
@@ -128,7 +128,7 @@
     "faqQ3": "ウォレットを持っていない顧客はどうしますか?",
     "faqA3": "MetaMask や Rabby、スマホではマイナウォレット / HashPort Wallet / MetaMask Mobile 等をご案内ください。複数のウォレットは自動で検出します。",
     "faqQ4": "受け取った JPYC / USDC を日本円に換金するには?",
-    "faqA4": "JPYC は <jpycEx>JPYC EX</jpycEx> で 1:1 換金、USDC は SBI VC トレード等で売却できます。取引所リンクは <create>受け取る</create> ページ下部にあります。",
+    "faqA4": "JPYC は <jpycEx>JPYC EX</jpycEx> で 1 円として払い戻せます。USDC は SBI VC トレード等で売却できます。取引所リンクは <create>受け取る</create> ページ下部にあります。",
     "faqQ5": "取引履歴はどこに保存されますか?",
     "faqA5": "履歴はブラウザの LocalStorage のみに保存し、OpenPay サーバへは送信しません。CSV 出力に対応し、transaction hash から Etherscan 等で再確認できます。",
     "faqQ7": "JPYC・USDC とは何ですか?",
@@ -219,7 +219,7 @@
     "whyStablecoinTitle": "なぜ今、ステーブルコインなのか",
     "whyStablecoinSubtitle": "円と同じ感覚で使える、デジタルなお金。",
     "whyItem1Title": "円の感覚のまま",
-    "whyItem1Body": "1 JPYC = 1 円。値付けも支払いも、円の感覚のまま使えます。",
+    "whyItem1Body": "1 JPYC は JPYC EX で 1 円として払い戻せます。値付けも支払いも、円の感覚のまま。",
     "whyItem3Title": "小額・オンラインに強い",
     "whyItem3Body": "数十円のチップやデジタル商品も、気軽に売り買いできます。",
     "jpycNoteTitle": "JPYCとは",
@@ -296,7 +296,7 @@
     "title": "Japan Web3 Directory",
     "description": "日本の JPYC・USDC・Web3・AI エージェント関連サービスを検索できる構造化データ API。",
     "catalogTitle": "公開ディレクトリ",
-    "catalogDescription": "一次情報を確認した published エントリだけをカテゴリ別に掲載しています。",
+    "catalogDescription": "一次情報を確認した公開中のエントリだけをカテゴリ別に掲載しています。",
     "officialSite": "公式サイト",
     "agentTitle": "AI エージェント向け API",
     "agentDescription": "x402 の 402 チャレンジから JPYC か USDC で都度支払いし、構造化 JSON を取得できます。",
@@ -355,7 +355,7 @@
     "cashJpycAccepted": "現金・JPYC 使えます",
     "jpycAcceptedHeadline": "JPYC 使えます",
     "cashLabel": "現金",
-    "pegPill": "1 JPYC = ¥1",
+    "pegPill": "1 JPYC＝1円で払い戻し",
     "siteUrl": "open-pay.jp"
   },
   "Create": {
@@ -1825,9 +1825,6 @@
     "moreLink": "詳細"
   },
   "Footer": {
-    "poweredBySoft": "ステーブルコイン決済技術を利用しています",
-    "poweredByTech": "EIP-3009 · Circle Paymaster · CCTP V2 · ERC-4337 · ERC-7702 · Pimlico",
-    "poweredByExpand": "技術詳細",
     "copyright": "© {year} {company}",
     "links": {
       "guides": "ガイド",
@@ -1839,7 +1836,8 @@
       "tokutei": "特商法表記",
       "transparency": "運用透明性",
       "discovery": "AIストア",
-      "storeLibrary": "購入済みライブラリ"
+      "storeLibrary": "購入済みライブラリ",
+      "contact": "お問い合わせ (Discord)"
     },
     "sourceLink": "ソースコード (GitHub)",
     "xLink": "OpenPay の X (旧 Twitter)",
@@ -1953,7 +1951,7 @@
     "summaryGmv": "円換算 GMV ≈ ¥{amount}",
     "gmvApproxChip": "概算含む",
     "gmvRateUnavailable": "円換算 GMV: — (為替レート取得不可)",
-    "gmvReferenceNote": "※ JPYC は1:1、USDC は元の円価格 (anchor) または現在レートで概算換算。",
+    "gmvReferenceNote": "※ JPYC は 1 JPYC＝1 円として、USDC は元の円価格または現在のレートで概算換算。",
     "filterEmpty": "条件に一致する取引がありません。フィルタを変更してください。",
     "columnAnchor": "建て (FX換算)",
     "affiliateHeading": "クラウド会計ソフト",
@@ -3321,6 +3319,7 @@
       "download": "ダウンロード",
       "external-link": "外部リンク",
       "api": "API",
+      "license": "ライセンス",
       "other": "その他"
     }
   },
