@@ -65,8 +65,9 @@ export const DIRECTORY_ENTRIES = [
     name: 'SBI VC Trade',
     nameJa: 'SBI VCトレード',
     status: 'published',
+    // 2026-10-27 (第 11 回): Shinhan Card との基本合意 (10/21 発表) は changelog のみ (エントリの事実は不変)
     ...provenance('https://www.sbivc.co.jp/', 'SBI VCトレード株式会社', 'official', {
-      verifiedAt: '2026-09-04',
+      verifiedAt: '2026-10-27',
     }),
     facts: {
       description: '日本円建ての取引を提供し、USDCを取り扱う国内暗号資産交換業者。',
@@ -116,7 +117,7 @@ export const DIRECTORY_ENTRIES = [
     // 2026-08-27: 電子決済手段等取引業者に登録 (金融庁登録一覧・第00002号・取扱 USDC)。
     // 取扱開始時期は未発表のため tokens は空のまま (sourced-facts-only)。
     ...provenance('https://coincheck.com/', 'コインチェック株式会社', 'official', {
-      verifiedAt: '2026-10-21',
+      verifiedAt: '2026-10-27',
       updatedAt: '2026-09-04',
     }),
     facts: {
@@ -229,11 +230,12 @@ export const DIRECTORY_ENTRIES = [
     // 2026-08-27: Kaia 追加 = 4 チェーンで発行・流通 (PR TIMES 2026-05-15)
     // 2026-10-08 (第 7 回): αU wallet の Ponta→JPYC 交換・RatioFX との MOU は changelog のみ (エントリの事実は不変)
     // 2026-10-13 (第 8 回): 公取委への情報提供 (10/09) と、補充 2 件 (5/26 ダイナースのポイント交換・7/22 AZ-COM 丸和) も changelog のみ
+    // 2026-10-27 (第 11 回): SBJ 銀行・LINE NEXT との覚書 (10/21 発表) は changelog のみ (エントリの事実は不変)
     ...provenance(
       'https://corporate.jpyc.co.jp/news/posts/jpyc-ex-launch',
       'JPYC株式会社',
       'official',
-      { verifiedAt: '2026-10-13', updatedAt: '2026-08-27' },
+      { verifiedAt: '2026-10-27', updatedAt: '2026-08-27' },
     ),
     facts: {
       description: '日本円と連動するよう設計された電子決済手段のステーブルコイン。',
@@ -328,7 +330,8 @@ export const DIRECTORY_ENTRIES = [
     status: 'published',
     // 2026-09-22: DOZN と JPYC → 韓国ウォン精算の検証 MOU (Kaia Japan 公式 X・第 6 回週次更新)
     // 2026-10-18 (第 9 回): 貢献報酬プログラム CR の対象資産に JPYC を追加 (10/14 発表) は changelog のみ (エントリの事実は不変)
-    ...provenance('https://www.kaia.io/ja/about', 'Kaia DLT Foundation', 'official', { verifiedAt: '2026-10-18', updatedAt: '2026-09-22' }),
+    // 2026-10-27 (第 11 回): その Epoch 4 の開始 (10/21) も changelog のみ
+    ...provenance('https://www.kaia.io/ja/about', 'Kaia DLT Foundation', 'official', { verifiedAt: '2026-10-27', updatedAt: '2026-09-22' }),
     facts: {
       description: 'アジア圏のステーブルコイン利用を対象に含むEVM互換レイヤー1ネットワーク。',
       category: 'network',

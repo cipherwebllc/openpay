@@ -1318,6 +1318,130 @@ export const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
       'x402 の支払いを検証・精算する Coinbase のホスト型 facilitator をディレクトリに追加 (毎月 1,000 件まで無料・超過分は 1 件 0.001 ドル)。',
     sourceUrl: 'https://docs.cdp.coinbase.com/x402/seller/facilitator',
   },
+  // ── 週次更新 第 11 回 (2026-10-27) ──
+  {
+    // JPYC 社 PR TIMES (覚書の締結日は 2026-10-20・発表は 10/21)。決済スコープには入れない (PoC に向けた協業の
+    // 発表で、決済サービスの開始ではない)。Unifi のエントリは事実が変わらないので、このイベントだけにする。
+    date: '2026-10-21',
+    collectedAt: '2026-10-27',
+    scopes: ['jpyc-services'],
+    slug: 'jpyc',
+    changeType: 'updated',
+    changeCategory: 'partnership',
+    assets: ['JPYC'],
+    summary:
+      'JPYC Inc. signed a memorandum of understanding (dated 2026-10-20) on a business partnership with SBJ Bank and LINE NEXT, to work toward a proof of concept (PoC) of a bank-account-linked top-up function using JPYC. SBJ Bank provides bank accounts and banking infrastructure, LINE NEXT digital wallets including Unifi, and JPYC Inc. technical support for issuance and redemption. The PoC start date, chains and fees are not disclosed.',
+    summaryJa:
+      'JPYC 社が SBJ 銀行・LINE NEXT と業務提携に関する覚書を締結 (2026-10-20 付)。JPYC を使った銀行口座連携型のチャージ機能の概念実証 (PoC) に向けて協業する。SBJ 銀行は銀行口座とバンキングインフラ、LINE NEXT は Unifi を含むデジタルウォレット、JPYC 社は発行・償還の技術支援を担う。PoC の開始時期・対象チェーン・手数料は未公表。',
+    sourceUrl: 'https://prtimes.jp/main/html/rd/p/000000333.000054018.html',
+  },
+  {
+    // Kaia Japan 公式 X の記事 (本文は fxtwitter API で確認)。10/14 の発表 (上の 10/14 の行・PR TIMES
+    // 000000029.000154579 で「Epoch 4 = ブロック高 230,342,400 から」) どおり Epoch 4 が始まったことの記録。
+    // 同じ記事にある未払いの CR 報酬 (KAIA) のバーンは KAIA 自体の話なので書かない。
+    // 差分は feature にする: 記事は「Epoch 3 までは USDT のみ → JPYC も対象」と前後を明示するが、assets
+    // (= Kaia の対応ステーブルコイン) に書くと「Kaia は USDT だけだった」と読めてしまう。
+    date: '2026-10-21',
+    collectedAt: '2026-10-27',
+    scopes: ['jpyc-services'],
+    slug: 'kaia',
+    changeType: 'updated',
+    changeCategory: 'update',
+    assets: ['JPYC'],
+    chains: ['kaia'],
+    diffs: [{ field: 'feature', previousValue: null, currentValue: 'contribution-reward-jpyc' }],
+    summary:
+      'Epoch 4 of Contribution Reward (CR) Mission 1 started at block 230,342,400, as announced on 2026-10-14: JPYC deposited in Unifi is now recognised as a contribution on the same basis as USDT (through Epoch 3, only USDT deposited in SuperEarn or Unifi counted). Deposits made during Epochs 1 to 3 are not counted retroactively, and a setup completed after that block is recognised from the next period.',
+    summaryJa:
+      '2026-10-14 の発表どおり、貢献報酬 (CR) Mission 1 の Epoch 4 がブロック高 230,342,400 から開始。Unifi に預け入れた JPYC が USDT と同じ基準で貢献の認定対象になった (Epoch 3 までは SuperEarn か Unifi に預けた USDT のみ)。Epoch 1〜3 の期間の預け入れには遡って適用されず、そのブロック到達後に設定を終えた場合は次の Period から認定される。',
+    sourceUrl: 'https://x.com/KaiaChain_JP/status/2112758503282823279',
+  },
+  {
+    // PR TIMES (2026-10-21 10:00)。決済スコープには入れない。決済スコープは現況行 (PAYMENT_PROVIDERS) で追う
+    // 決済事業者のイベントで、新しい事業者は加盟店決済の提供か実証が具体的になった時点で足す。今回は実店舗決済との
+    // 連携を「検討」する基本合意で、具体策は今後公表 (SBI VC トレードは交換業者として jpyc-services で追う)。
+    date: '2026-10-21',
+    collectedAt: '2026-10-27',
+    scopes: ['jpyc-services'],
+    slug: 'sbi-vc-trade',
+    changeType: 'updated',
+    changeCategory: 'partnership',
+    summary:
+      'SBI XDC Network APAC and SBI VC Trade signed a memorandum of understanding with Shinhan Card (South Korea) toward a blockchain-based global payment ecosystem. The three companies plan to study cross-border payments using stablecoins and, through pilots, how digital assets including yen-denominated stablecoins can be linked with in-store payment services. Specific initiatives are to be announced later.',
+    summaryJa:
+      'SBI XDC Network APAC と SBI VC トレードが、韓国の Shinhan Card とブロックチェーン基盤のグローバル決済エコシステム構築に向けた基本合意書 (MOU) を締結。3 社はステーブルコインを使ったクロスボーダー決済や、円建てステーブルコインをはじめとするデジタルアセットと実店舗決済サービスの連携の可能性を、実証実験を通じて検討する予定。具体的な取り組みは今後順次公表。',
+    sourceUrl: 'https://prtimes.jp/main/html/rd/p/000000225.000059421.html',
+  },
+  {
+    date: '2026-10-27',
+    collectedAt: '2026-10-27',
+    scopes: ['jpyc-services'],
+    slug: 'coincheck',
+    changeType: 'verified',
+    assets: ['USDC'],
+    summary:
+      'Re-verified against the FSA registry of Electronic Payment Instruments Exchange Service Providers (still as of 2026-08-27): two registrants, SBI VC Trade (No. 00001) and Coincheck (No. 00002, USDC); no new registration.',
+    summaryJa:
+      '金融庁の電子決済手段等取引業者登録一覧 (令和 8 年 8 月 27 日現在のまま) で再確認: 登録は SBI VC トレード (第00001号) とコインチェック (第00002号・USDC) の 2 社で、新規登録なし。',
+    sourceUrl: 'https://www.fsa.go.jp/menkyo/menkyoj/denshikessaisyudan.pdf',
+  },
+  {
+    date: '2026-10-27',
+    collectedAt: '2026-10-27',
+    scopes: ['stablecoin-payments'],
+    provider: 'HashPort (Osaka Pref. subsidy)',
+    changeType: 'verified',
+    assets: ['JPYC', 'USDC'],
+    summary:
+      'Re-verified on the Osaka Prefecture page and its award list (both still dated 2026-08-26): HashPort pilot schedule (an assumed one week or more between January and March 2027) unchanged.',
+    summaryJa:
+      '大阪府公式ページと交付決定事業一覧 (いずれも 2026-08-26 のまま) で再確認: HashPort の実証の予定 (2027 年 1〜3 月の間で 1 週間以上を想定) に変更なし。',
+    sourceUrl:
+      'https://www.pref.osaka.lg.jp/o020060/kikaku/osaka-kokusaikinyu/senkuteki_hojokin.html',
+  },
+  {
+    date: '2026-10-27',
+    collectedAt: '2026-10-27',
+    scopes: ['stablecoin-payments'],
+    provider: 'Mina Wallet / Sumitomo Mitsui Card (Osaka Pref. subsidy)',
+    changeType: 'verified',
+    assets: ['JPYC', 'USDC'],
+    summary:
+      'Re-verified on the Osaka Prefecture page and its award list (both still dated 2026-08-26): Mina Wallet / Sumitomo Mitsui Card pilot schedule (around October 2026 to February 2027, a few days to about a month) unchanged.',
+    summaryJa:
+      '大阪府公式ページと交付決定事業一覧 (いずれも 2026-08-26 のまま) で再確認: マイナウォレット / 三井住友カードの実証の予定 (2026 年 10 月〜2027 年 2 月頃の間で数日〜1 か月程度) に変更なし。',
+    sourceUrl:
+      'https://www.pref.osaka.lg.jp/o020060/kikaku/osaka-kokusaikinyu/senkuteki_hojokin.html',
+  },
+  {
+    date: '2026-10-27',
+    collectedAt: '2026-10-27',
+    scopes: ['stablecoin-payments'],
+    provider: 'Mi&T (Osaka Pref. subsidy)',
+    changeType: 'verified',
+    assets: ['JPYC'],
+    // 府のページと採択一覧 (PDF) にあるのは実施時期と規模だけ。手数料 1.0% の出典は Mi&T の自社リリース (8/31) なので、
+    // この再確認の文には書かない (府のページで確かめたことにしない)。
+    summary:
+      'Re-verified on the Osaka Prefecture page and its award list (both still dated 2026-08-26): Mi&T pilot schedule (mid-November 2026 to mid-March 2027, about five shops) unchanged.',
+    summaryJa:
+      '大阪府公式ページと交付決定事業一覧 (いずれも 2026-08-26 のまま) で再確認: Mi&T の実証の予定 (2026 年 11 月中旬〜2027 年 3 月中旬・5 店舗程度) に変更なし。',
+    sourceUrl:
+      'https://www.pref.osaka.lg.jp/o020060/kikaku/osaka-kokusaikinyu/senkuteki_hojokin.html',
+  },
+  {
+    date: '2026-10-27',
+    collectedAt: '2026-10-27',
+    scopes: ['stablecoin-payments'],
+    provider: 'NetStars Stablecoin Pay',
+    changeType: 'verified',
+    assets: ['JPYC', 'USDT'],
+    summary:
+      'Re-verified on the NetStars news list: no stablecoin announcement after the 2026-09-11 Kaia MOU (the later items, Stripe on 2026-09-30 and teppay on 2026-10-06, are about code payments); no launch date, fee or chain change published for Stablecoin Pay.',
+    summaryJa:
+      'ネットスターズ公式ニュース一覧で再確認: 2026-09-11 の Kaia MOU 以降、ステーブルコインの発表なし (その後の 9/30 の Stripe と 10/06 の teppay はコード決済の話)。Stablecoin Pay の稼働日・手数料・対応チェーンの変更は未公表のまま。',
+    sourceUrl: 'https://www.netstars.co.jp/news/',
+  },
 ];
 
 // ディレクトリ初期公開日。baseline の 'added' はこの固定日に立てる — entry.updatedAt 由来に
