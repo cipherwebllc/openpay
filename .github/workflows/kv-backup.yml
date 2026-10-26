@@ -15,6 +15,12 @@ env:
 jobs:
   backup:
     runs-on: ubuntu-latest
+    # secrets は environment「main-only」(使えるブランチは main だけ) に置く。repo 単位の secrets は
+    # どのブランチの workflow からも読めるため (2026-10 Gheist: 盗んだトークンで新しいブランチに workflow を置いて抜く)。
+    # deployment: false = デプロイの記録は作らない。
+    environment:
+      name: main-only
+      deployment: false
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
