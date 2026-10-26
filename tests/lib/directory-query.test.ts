@@ -149,7 +149,7 @@ describe('directory query pure functions', () => {
       generatedAt: '2026-07-13T00:00:00.000Z',
       dataFreshness: {
         oldest: '2026-07-13',
-        newestVerifiedAt: '2026-10-21', // supportsUsdc の絞り込みに 2026-10-21 の拡充分 (verifiedAt 10-21) が入る
+        newestVerifiedAt: '2026-10-27', // supportsUsdc の絞り込みに週次更新 第 11 回 (2026-10-27) で再検証したエントリ (verifiedAt 10-27) が入る
         oldestSourceCheckedAt: null,
       },
     });
