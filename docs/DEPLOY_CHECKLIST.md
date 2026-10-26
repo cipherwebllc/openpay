@@ -1391,6 +1391,12 @@ DEPLOY 前に operator が **Vercel project env** + **GitHub Actions secrets** �
 設定済かを確認すべき env。設定漏れは silent 失敗 (script は no-op、cron は
 graceful skip) で気付けないため、`verify-production-config.mjs` で必ず明示確認。
 
+GitHub Actions の運用 secret は environment `main-only` (Settings → Environments・Deployment branches は `main` だけ) に置く。
+運用 workflow 7 本 (kv-backup / kv-backup-watch / upstash-usage-watch / pimlico-balance / jpyc-activity-cron /
+reverify-cron / post-deploy-verify) はこの environment で動く (`deployment: false` でデプロイの記録は作らない)。
+repo 単位の secrets はどのブランチの workflow からも読めるため (2026-10 Gheist: 盗んだトークンで `ci-sync-*` ブランチに
+workflow を置き、secrets をログに出して抜く)。同じ名前なら environment の値が repo 単位の値より優先される。
+
 ### §11.1 Vercel project env (production scope)
 
 | Env var | 必須? | 未設定時の影響 |
@@ -2285,9 +2291,9 @@ run green = archive と meta が Stored かつ status complete。partial は保�
 
 | 置き場 | 変数 | 内容 |
 |---|---|---|
-| GitHub secrets | `KV_BACKUP_REST_URL` / `KV_BACKUP_REST_TOKEN` | Upstash REST URL と **ACL user の token** (`ACL GENTOKEN` → `ACL SETUSER kvbackup on ><token> +scan +type +pttl +get +llen +lrange +scard +smembers +sscan +zcard +zrange +hlen +hgetall +hscan +multi +exec +ping +dbsize ~x402:hosted:* ~store:* ~payment:claimed:* ~billing:settled:* ~x402:settle:ledger:* ~x402:settle:payer:* ~agent:bound:* ~agent:owner:*` → `ACL RESTTOKEN kvbackup <token>`)。prefix 限定で SCAN が通らなければ `~*` に変更し「CI token は DB 全体の読取権を持つ」を受容 (書込は不可のまま)。full token への fallback は無い |
-| GitHub secrets | `KV_BACKUP_KEY` | `openssl rand -hex 32`。1Password にも保管。ローテは新鍵で次回 full・旧鍵は keyId 付きで archive が残る間保持 |
-| GitHub secrets | `R2_ACCOUNT_ID` / `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` / `R2_BUCKET` | R2 API token (bucket 限定 Object Read & Write・削除防止は不可)。bucket lifecycle 180 日 (短縮は user 裁定) |
+| GitHub secrets (`main-only`) | `KV_BACKUP_REST_URL` / `KV_BACKUP_REST_TOKEN` | Upstash REST URL と **ACL user の token** (`ACL GENTOKEN` → `ACL SETUSER kvbackup on ><token> +scan +type +pttl +get +llen +lrange +scard +smembers +sscan +zcard +zrange +hlen +hgetall +hscan +multi +exec +ping +dbsize ~x402:hosted:* ~store:* ~payment:claimed:* ~billing:settled:* ~x402:settle:ledger:* ~x402:settle:payer:* ~agent:bound:* ~agent:owner:*` → `ACL RESTTOKEN kvbackup <token>`)。prefix 限定で SCAN が通らなければ `~*` に変更し「CI token は DB 全体の読取権を持つ」を受容 (書込は不可のまま)。full token への fallback は無い |
+| GitHub secrets (`main-only`) | `KV_BACKUP_KEY` | `openssl rand -hex 32`。1Password にも保管。ローテは新鍵で次回 full・旧鍵は keyId 付きで archive が残る間保持 |
+| GitHub secrets (`main-only`) | `R2_ACCOUNT_ID` / `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` / `R2_BUCKET` | R2 API token (bucket 限定 Object Read & Write・削除防止は不可)。bucket lifecycle 180 日 (短縮は user 裁定) |
 | 運営端末 | `KV_RESTORE_TARGET_TOKEN` / `KV_BACKUP_KEY` | 復元先 DB の token (backup 用と別名・CLI 引数/URL/ログに出さない) と復号鍵 |
 
 受入 (使い捨て DB/bucket): ACL token で必要読取が全て成功し `SET`/`DEL`/`EVAL` の直接実行と `/multi-exec` 内混入が拒否される・`ACL GETUSER` で effective 権限確認・
