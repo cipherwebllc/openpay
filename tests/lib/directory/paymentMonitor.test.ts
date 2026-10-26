@@ -97,9 +97,8 @@ describe('createPaymentMonitorEnvelope', () => {
     // + ディレクトリ拡充 (10/21 記録) の手書き added 17 件 (jpyc-services スコープ・実効日 = 10/21) = 49 件
     // + 第 11 回 (10/27 記録) の 4 件 (10/21 jpyc の SBJ 銀行・LINE NEXT との覚書・10/21 kaia の CR Epoch 4 開始・
     //   10/21 sbi-vc-trade の Shinhan Card との基本合意・10/27 coincheck verified) = 53 件。
-    // 決済スコープ専用の 8/10 DG SPS launch・8/26 大阪府採択 3 件・8/31 Mi&T・9/04 verified 2 件・
-    // 9/11 の 4 件 (NetStars 更新 + verified 3)・9/18 verified 4 件・9/23 verified 4 件・
-    // 第 6 回で 9/29 に記録した backfill 3 件が混ざれば 57 件になる (決済専用 8 件分の差・拡充 17 件は jpyc-services 専用) = スコープ分離の証明。
+    // 決済スコープ専用のイベント (8/10 DG SPS launch・大阪府採択・Mi&T・各回の verified・backfill など) が混ざれば
+    // この件数より増え、slug の無いイベントも入る = スコープ分離の証明 (下の slug の検査と合わせて見る)。
     expect(jpyc.changes).toHaveLength(53);
     expect(jpyc.changes.every((c) => c.slug !== undefined)).toBe(true);
     // 応答に内部ルーティング用 scopes を漏らさない。

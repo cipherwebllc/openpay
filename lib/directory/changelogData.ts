@@ -1336,8 +1336,11 @@ export const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
     sourceUrl: 'https://prtimes.jp/main/html/rd/p/000000333.000054018.html',
   },
   {
-    // Kaia Japan 公式 X の記事 (本文は fxtwitter API で確認)。10/14 の発表 (上の行) どおり Epoch 4 が始まったことの記録。
+    // Kaia Japan 公式 X の記事 (本文は fxtwitter API で確認)。10/14 の発表 (上の 10/14 の行・PR TIMES
+    // 000000029.000154579 で「Epoch 4 = ブロック高 230,342,400 から」) どおり Epoch 4 が始まったことの記録。
     // 同じ記事にある未払いの CR 報酬 (KAIA) のバーンは KAIA 自体の話なので書かない。
+    // 差分は feature にする: 記事は「Epoch 3 までは USDT のみ → JPYC も対象」と前後を明示するが、assets
+    // (= Kaia の対応ステーブルコイン) に書くと「Kaia は USDT だけだった」と読めてしまう。
     date: '2026-10-21',
     collectedAt: '2026-10-27',
     scopes: ['jpyc-services'],
@@ -1346,6 +1349,7 @@ export const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
     changeCategory: 'update',
     assets: ['JPYC'],
     chains: ['kaia'],
+    diffs: [{ field: 'feature', previousValue: null, currentValue: 'contribution-reward-jpyc' }],
     summary:
       'Epoch 4 of Contribution Reward (CR) Mission 1 started at block 230,342,400, as announced on 2026-10-14: JPYC deposited in Unifi is now recognised as a contribution on the same basis as USDT (through Epoch 3, only USDT deposited in SuperEarn or Unifi counted). Deposits made during Epochs 1 to 3 are not counted retroactively, and a setup completed after that block is recognised from the next period.',
     summaryJa:
@@ -1353,8 +1357,9 @@ export const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
     sourceUrl: 'https://x.com/KaiaChain_JP/status/2112758503282823279',
   },
   {
-    // PR TIMES (2026-10-21 10:00)。決済スコープには入れない (クロスボーダー決済と実店舗決済の連携を「検討」する
-    // 基本合意で、決済サービスの開始ではない・具体策は今後公表)。
+    // PR TIMES (2026-10-21 10:00)。決済スコープには入れない。決済スコープは現況行 (PAYMENT_PROVIDERS) で追う
+    // 決済事業者のイベントで、新しい事業者は加盟店決済の提供か実証が具体的になった時点で足す。今回は実店舗決済との
+    // 連携を「検討」する基本合意で、具体策は今後公表 (SBI VC トレードは交換業者として jpyc-services で追う)。
     date: '2026-10-21',
     collectedAt: '2026-10-27',
     scopes: ['jpyc-services'],
@@ -1402,9 +1407,9 @@ export const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
     changeType: 'verified',
     assets: ['JPYC', 'USDC'],
     summary:
-      'Re-verified on the Osaka Prefecture page and its award list (both still dated 2026-08-26): Mina Wallet / Sumitomo Mitsui Card pilot schedule (around October 2026 to February 2027, a few days to about a month) unchanged; no start announced yet.',
+      'Re-verified on the Osaka Prefecture page and its award list (both still dated 2026-08-26): Mina Wallet / Sumitomo Mitsui Card pilot schedule (around October 2026 to February 2027, a few days to about a month) unchanged.',
     summaryJa:
-      '大阪府公式ページと交付決定事業一覧 (いずれも 2026-08-26 のまま) で再確認: マイナウォレット / 三井住友カードの実証の予定 (2026 年 10 月〜2027 年 2 月頃の間で数日〜1 か月程度) に変更なし。開始の発表はまだない。',
+      '大阪府公式ページと交付決定事業一覧 (いずれも 2026-08-26 のまま) で再確認: マイナウォレット / 三井住友カードの実証の予定 (2026 年 10 月〜2027 年 2 月頃の間で数日〜1 か月程度) に変更なし。',
     sourceUrl:
       'https://www.pref.osaka.lg.jp/o020060/kikaku/osaka-kokusaikinyu/senkuteki_hojokin.html',
   },

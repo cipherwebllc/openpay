@@ -1,5 +1,5 @@
 // /transparency 「9. 外部からの実購入 (オンチェーン記録)」の単一情報源。
-// 出典 = 受取ウォレット宛の ERC-20 着金 (Base: Alchemy asset transfers・最終集計 2026-10-20)。
+// 出典 = 受取ウォレット宛の ERC-20 着金 (Base: Alchemy asset transfers・最終集計は EXTERNAL_PURCHASES_AS_OF)。
 // 掟: 自社・関係者ウォレット (FIRST_PARTY_WALLETS) の動作確認決済は載せない (8. 実績の数え方と同じ)。
 // 週次更新で末尾に追記する (日付昇順)。金額は表示価格の実払い額。商品名は精算記録 (KV) が要るので載せない。
 // 一部はインデクサー (x402scan / x402 List 等) の検証購入の可能性があるが、第三者が実 USDC を払い
