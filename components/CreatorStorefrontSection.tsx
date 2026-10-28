@@ -54,6 +54,7 @@ export function CreatorStorefrontSection({
   products,
   accent,
   theme,
+  layout = 'list',
   sellerDisclosureHref,
   viewAllHref,
   hiddenCount = 0,
@@ -61,6 +62,8 @@ export function CreatorStorefrontSection({
   products: readonly CreatorStorefrontProduct[];
   accent: string;
   theme: HandleTheme;
+  /** 'grid' = 商品のあるプロフの PC 表示 (md 以上で 2 列・見出しは lg で左寄せ)。スマホは 'list' と同じ 1 列。 */
+  layout?: 'list' | 'grid';
   sellerDisclosureHref: string;
   /** 厳選ショーケースで省いた商品がある場合の「すべての商品を見る」導線 (/store?q=@handle)。 */
   viewAllHref?: string;
@@ -79,7 +82,7 @@ export function CreatorStorefrontSection({
       aria-labelledby="creator-storefront-heading"
       className="mb-7 w-full"
     >
-      <div className="mb-3 text-center">
+      <div className={`mb-3 text-center${layout === 'grid' ? ' lg:text-left' : ''}`}>
         <h2
           id="creator-storefront-heading"
           className={`text-base font-bold ${
@@ -101,7 +104,13 @@ export function CreatorStorefrontSection({
           引き算 = カテゴリ/#タグ・手数料内訳をカードから除去 (内訳は購入モーダルの開示に
           一本化・合計額表示は維持 = 2026-07-31 user 裁定)。説明は 2 行でクランプ
           (生 URL などの長文ノイズを抑える。全文は購入モーダルが表示する)。 */}
-      <ul className="space-y-3">
+      <ul
+        className={
+          layout === 'grid'
+            ? 'grid grid-cols-1 gap-3 md:grid-cols-2 md:gap-4'
+            : 'space-y-3'
+        }
+      >
         {visibleProducts.map((product) => (
           <li
             key={product.id}
@@ -218,7 +227,7 @@ export function CreatorStorefrontSection({
         ))}
       </ul>
       {viewAllHref && hiddenCount > 0 ? (
-        <p className="mt-3 text-center">
+        <p className={`mt-3 text-center${layout === 'grid' ? ' lg:text-left' : ''}`}>
           <Link
             href={viewAllHref}
             prefetch={false}
@@ -231,7 +240,7 @@ export function CreatorStorefrontSection({
         </p>
       ) : null}
       {/* 購入済みの訪問者向けの常設導線 (購入完了画面以外からライブラリへ戻る唯一の入口の一つ)。 */}
-      <p className="mt-3 text-center">
+      <p className={`mt-3 text-center${layout === 'grid' ? ' lg:text-left' : ''}`}>
         <Link
           href={`/${locale}/store/library`}
           prefetch={false}

@@ -432,13 +432,22 @@ export default async function HandlePage({
   const pageTheme = handlePageTheme(accent, theme);
   const darkFooter = !storefront && pageTheme.dark;
   const sellerName = record.config.name?.trim() || `@${normalized}`;
+  // 商品が 2 つ以上あるプロフ (?product= なし) は PC で広げ、lg で左にプロフィールと応援・右に商品 (md 以上で 2 列) にする。
+  // 商品が 0〜1 つのプロフ (応援だけの link-in-bio など) と店舗ページは従来の細い 1 列のまま
+  // (1 つだと 2 列の片側が空く)。スマホはどれも従来どおり。
+  const wideProfile = !storefront && !focusProduct && creatorProducts.length >= 2;
   const viewAllHref = `/${locale}/store?q=${encodeURIComponent(`@${normalized}`)}`;
 
   return (
     <main
-      // 商品ページだけ PC で広げる (スマホは従来の幅)。pb-28 = スマホの画面下の固定購入バーにフッターが隠れない余白。
+      // 商品ページと商品のあるプロフだけ PC で広げる (スマホは従来の幅)。
+      // pb-28 = スマホの画面下の固定購入バー (商品ページ) にフッターが隠れない余白。
       className={`mx-auto w-full max-w-md px-4 pt-5 ${
-        focusProduct ? 'pb-28 md:max-w-3xl lg:max-w-6xl lg:pb-12' : 'pb-12'
+        focusProduct
+          ? 'pb-28 md:max-w-3xl lg:max-w-6xl lg:pb-12'
+          : wideProfile
+            ? 'pb-12 md:max-w-3xl lg:max-w-6xl'
+            : 'pb-12'
       }`}
       data-handle-theme={darkFooter ? 'night' : undefined}
     >
@@ -529,9 +538,24 @@ export default async function HandlePage({
           </div>
         </>
       ) : (
-        <>
+        // wideProfile: スマホと md は従来の順 (プロフィール → 商品 → 応援) の 1 列。lg は grid の位置指定で
+        // 左にプロフィールと応援 (link-in-bio の幅)・右に商品 (2 行ぶん)。左列は sticky にしない
+        // (応援フォームを開くと画面より縦に長くなり、下が隠れる)。
+        <div
+          className={
+            wideProfile
+              ? 'lg:grid lg:grid-cols-[22rem_minmax(0,1fr)] lg:gap-x-12'
+              : undefined
+          }
+        >
           {hasProfile && (
-            <div className="mb-7">
+            <div
+              className={`mb-7${
+                wideProfile
+                  ? ' mx-auto max-w-md lg:col-start-1 lg:row-start-1 lg:mx-0'
+                  : ''
+              }`}
+            >
               <HandleProfileView
                 config={record.config}
                 profile={profile}
@@ -540,23 +564,42 @@ export default async function HandlePage({
             </div>
           )}
           {creatorProducts.length > 0 ? (
-            <CreatorStorefrontSection
-              products={creatorProducts}
-              accent={accent}
-              theme={theme}
-              sellerDisclosureHref={`/${locale}/store/seller/${record.owner}`}
-              {...(profileSelection.hiddenCount > 0
-                ? {
-                    viewAllHref,
-                    hiddenCount: profileSelection.hiddenCount,
-                  }
-                : {})}
-            />
+            <div
+              className={
+                wideProfile
+                  ? 'lg:col-start-2 lg:row-span-2 lg:row-start-1'
+                  : undefined
+              }
+            >
+              <CreatorStorefrontSection
+                products={creatorProducts}
+                accent={accent}
+                theme={theme}
+                layout={wideProfile ? 'grid' : 'list'}
+                sellerDisclosureHref={`/${locale}/store/seller/${record.owner}`}
+                {...(profileSelection.hiddenCount > 0
+                  ? {
+                      viewAllHref,
+                      hiddenCount: profileSelection.hiddenCount,
+                    }
+                  : {})}
+              />
+            </div>
           ) : null}
           {/* 受取方法メニュー (複数なら選択ボタン、1つなら TipForm 直描画)。決済本体は TipForm に委譲。
               theme は見出し/説明の可読色のみ調整 (night)・決済動作は不変 (掟12)。 */}
-          <ReceiveMethodPicker config={record.config} theme={theme} />
-        </>
+          <div
+            className={
+              wideProfile
+                ? `mx-auto max-w-md lg:col-start-1 lg:mx-0 lg:self-start ${
+                    hasProfile ? 'lg:row-start-2' : 'lg:row-start-1'
+                  }`
+                : undefined
+            }
+          >
+            <ReceiveMethodPicker config={record.config} theme={theme} />
+          </div>
+        </div>
       )}
       {/* link-in-bio フッター: (1) 取消不可の開示を簡潔に再掲 (共通 AlphaNotice はこのページでは
           出さないため・本体は /disclaimer)、(2) "Powered by OpenPay" で OpenPay 本体への導線 +

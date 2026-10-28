@@ -12,6 +12,7 @@ const state = vi.hoisted(() => ({
   hostedProducts: [] as unknown[] | null,
   renderedStorefrontProducts: [] as unknown[],
   renderedFocusProduct: undefined as Record<string, unknown> | undefined,
+  renderedStorefrontLayout: undefined as string | undefined,
   renderedOtherProducts: [] as Array<{ id: string }>,
   record: null as unknown,
 }));
@@ -98,10 +99,13 @@ vi.mock('@/components/MobileOrderView', () => ({
 vi.mock('@/components/CreatorStorefrontSection', () => ({
   CreatorStorefrontSection: ({
     products,
+    layout,
   }: {
     products: Array<{ id: string }>;
+    layout?: string;
   }) => {
     state.renderedStorefrontProducts = products;
+    state.renderedStorefrontLayout = layout;
     return (
       <div data-testid="creator-storefront">
         {products.map((product) => product.id).join(',')}
@@ -461,6 +465,27 @@ describe('@handle ProfilePage JSON-LD', () => {
     });
     expect(state.renderedFocusProduct).toBeUndefined();
     expect(miss.container.querySelector('[data-testid="creator-storefront"]')).not.toBeNull();
+  });
+
+  it('商品が 2 つ以上のプロフは PC で広げて 2 列 (grid)・0〜1 つは従来の細い 1 列のまま', async () => {
+    state.enableCreatorStore = true;
+    state.enableCreatorStoreUi = true;
+    const base = { owner: ADDR, payTo: ADDR, priceJpyc: '500', contentKind: 'url', label: 'download', contentRevision: 1, saleActive: true, contentAvailable: true, createdAt: 1 };
+    state.hostedProducts = [{ ...base, id: `h_${'1'.repeat(32)}`, title: 'A' }, { ...base, id: `h_${'2'.repeat(32)}`, title: 'B' }];
+    const wide = await renderHandlePage(record());
+    expect(state.renderedStorefrontLayout).toBe('grid');
+    expect(wide.container.querySelector('main')).toHaveClass('md:max-w-3xl', 'lg:max-w-6xl');
+    expect(wide.container.querySelector('[data-testid="creator-storefront"]')!.parentElement).toHaveClass('lg:col-start-2', 'lg:row-span-2');
+
+    state.hostedProducts = [{ ...base, id: `h_${'1'.repeat(32)}`, title: 'A' }];
+    const single = await renderHandlePage(record());
+    expect(state.renderedStorefrontLayout).toBe('list');
+    expect(single.container.querySelector('main')).toHaveClass('max-w-md');
+    expect(single.container.querySelector('main')).not.toHaveClass('md:max-w-3xl');
+
+    state.hostedProducts = [];
+    const none = await renderHandlePage(record());
+    expect(none.container.querySelector('main')).not.toHaveClass('md:max-w-3xl');
   });
 
   it('厳選 (featured) で隠れた商品も ?product= なら商品ページとして出す', async () => {

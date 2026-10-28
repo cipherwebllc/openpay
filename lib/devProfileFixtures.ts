@@ -67,7 +67,8 @@ export const DEV_FIXTURE_HOSTED_PRODUCTS: HostedProduct[] = [
     demoUrl: 'https://example.com/world/cafe-kit',
     // 利用条件 (plans/store-usage-terms.md) の表示検証用: 可・不可・記載なし (選ばなかった項目) の 3 つと補足。
     usage: { commercial: 'allowed', redistribute: 'not_allowed', note: 'クレジット表記は不要です。' },
-    // featured 厳選の再現用 (これ以外の 3 商品はプロフで隠れる = ディープリンク検証)。
+    // featured 厳選の再現用 (1・2 の 2 商品を厳選・残りの 2 商品はプロフで隠れる = ディープリンク検証)。
+    // 2 つ以上なので、PC ではプロフが 2 列 (左にプロフィールと応援・右に商品) になる。
     featured: true,
     // USDC 購入 UI (P2) の dev 検証用: 支払い方法選択が出る側の代表。
     usdcEnabled: true,
@@ -78,6 +79,7 @@ export const DEV_FIXTURE_HOSTED_PRODUCTS: HostedProduct[] = [
     imageUrl: '/landing/usecase-creator-tip.avif',
     desc: 'ループ対応の BGM 10 曲入り。',
     category: 'music',
+    featured: true,
   }),
   fx(3, {
     title: 'AI プロンプト 100 選',
