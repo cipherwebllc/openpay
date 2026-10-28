@@ -31,6 +31,9 @@ export const STORE_DEV_FIXTURE_LISTINGS: readonly StoreListing[] = [
     category: '3d-game',
     tags: ['GLB', 'Unity'],
     desc: 'GLTF 3D モデル (.glb)。商用利用可。',
+    // USDC でも買える商品と保護配布の表示検証用。
+    usdcEnabled: true,
+    protectedDelivery: true,
   }),
   fx(2, {
     title: '和風ジングル素材集 vol.2',

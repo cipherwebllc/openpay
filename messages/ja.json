@@ -1159,6 +1159,7 @@
     "editProductHeading": "商品を編集",
     "titleLabel": "商品名",
     "descLabel": "説明 (任意)",
+    "descHint": "何に使えるか・対応環境・含まれるファイルを短く書くと、買う人が選びやすくなります。商品カードと SNS の説明文に使われます。",
     "emojiLabel": "絵文字 (任意)",
     "imageUrlLabel": "画像 URL (任意)",
     "imageUrlHint": "画像はサーバー（例: imgur.com）にアップロードした https:// の URL を貼り付けてください。",
@@ -1279,15 +1280,15 @@
     "libraryLink": "購入済みの商品はライブラリで見られます",
     "cardTotal": "{total} JPYC",
     "viewAllProducts": "すべての商品を見る ({count} 件)",
-    "protectedDeliveryBadge": "保護配布",
+    "protectedDeliveryBadge": "保護配布（購入・保有を確認してから配布）",
     "focus": {
       "sellerLabel": "出品者",
       "aboutHeading": "商品について",
       "deliveryHeading": "受け取り方",
       "sellerInfoHeading": "販売者情報",
-      "otherProductsHeading": "このクリエイターの他の商品",
-      "usdcAlso": "USDC<chain>（Base）</chain> でも購入可"
-    }
+      "otherProductsHeading": "このクリエイターの他の商品"
+    },
+    "usdcAlso": "USDC<chain>（Base）</chain> でも購入可"
   },
   "CreatorStorePurchase": {
     "tryDemo": "実際に試す",
@@ -3354,7 +3355,10 @@
     "ecosystemLink": "関連リンク集",
     "transparencyLink": "運用透明性",
     "relatedLabel": "関連ページ",
-    "backToStore": "Store に戻る"
+    "backToStore": "Store に戻る",
+    "noJpycLabel": "JPYC をお持ちでない方へ",
+    "noJpycGetLink": "JPYC を手に入れる",
+    "noJpycWalletLink": "ウォレットを選ぶ"
   },
   "MePage": {
     "metaTitle": "マイページ — OpenPay",

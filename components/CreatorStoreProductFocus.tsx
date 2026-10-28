@@ -13,6 +13,7 @@ import { CreatorStoreProductGallery } from '@/components/CreatorStoreProductGall
 import { CreatorStorePurchaseLauncher } from '@/components/CreatorStorePurchaseLauncher';
 import { CreatorStoreUsageTerms } from '@/components/CreatorStoreUsageTerms';
 import { CreatorStorefrontProductArtwork } from '@/components/CreatorStorefrontProductArtwork';
+import { JpycPolygonTag, UsdcAlsoNote } from '@/components/StorePaymentRails';
 import type { CreatorStorefrontProduct } from '@/components/CreatorStorefrontSection';
 
 // 商品ページ (/{locale}/@handle?product=<id>) の主役。その商品の画像・名前・出品者・支払総額・購入ボタン・
@@ -103,29 +104,16 @@ export function CreatorStoreProductFocus({
           </Link>
         </p>
 
-        {/* 支払い方法は「1,212 JPYC (Polygon) · USDC でも購入可」の形で、JPYC は Polygon・USDC は Base の
-            ロゴを添える (「Polygon · USDC」だと Polygon の USDC と読める・2026-10-28 user 指摘)。
-            ロゴは装飾で、チェーン名は可視の「Polygon」と読み上げ用の「(Base)」で伝える (掟 8)。 */}
+        {/* 支払い方法の表記は Store 一覧・プロフのカードと共通 (StorePaymentRails)。 */}
         <p className="mt-5 flex flex-wrap items-baseline gap-x-2 gap-y-1">
           <span className="text-3xl font-black tracking-tight text-slate-900">
             {total}
           </span>
-          <span className="whitespace-nowrap text-sm font-semibold text-slate-600">
-            (
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/chains/polygon.svg" alt="" aria-hidden className="mr-0.5 inline h-4 w-4 align-[-3px]" />
-            Polygon)
-          </span>
+          <JpycPolygonTag className="text-sm font-semibold text-slate-600" />
         </p>
         {product.usdcEnabled === true && !isLicense ? (
-          <p className="mt-1.5 flex items-center gap-1 text-sm text-slate-600">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/chains/base.svg" alt="" aria-hidden className="h-4 w-4 rounded-[3px]" />
-            <span>
-              {t.rich('focus.usdcAlso', {
-                chain: (chunks) => <span className="sr-only">{chunks}</span>,
-              })}
-            </span>
+          <p className="mt-1.5">
+            <UsdcAlsoNote className="text-sm text-slate-600" />
           </p>
         ) : null}
         <CreatorStoreDeliveryBadge protectedDelivery={product.protectedDelivery} />

@@ -55,14 +55,17 @@ describe('CreatorStorefrontSection', () => {
     ).toBeInTheDocument();
     expect(screen.getByText('AI プロンプト集')).toBeInTheDocument();
     expect(screen.getByText('仕事で使えるテンプレート')).toBeInTheDocument();
-    expect(screen.getByText(/1,212 JPYC · Polygon/)).toBeInTheDocument();
-    // usdcEnabled でない商品に +USDC バッジは出ない (既定表示の回帰)。
-    expect(screen.queryByText(/\+USDC/)).not.toBeInTheDocument();
+    // 価格は「1,212 JPYC (◇Polygon)」で、Polygon のロゴは装飾 (StorePaymentRails)。
+    const price = screen.getByText(/1,212 JPYC/);
+    expect(price).toHaveTextContent('1,212 JPYC (Polygon)');
+    expect(price.querySelector('img[src="/chains/polygon.svg"]')).toHaveAttribute('alt', '');
+    // usdcEnabled でない商品に USDC の案内は出ない (既定表示の回帰)。
+    expect(screen.queryByText(/USDC/)).not.toBeInTheDocument();
     expect(screen.getByText('🧠')).toHaveAttribute('aria-hidden', 'true');
     expect(screen.getByRole('button', { name: '購入する' })).toBeEnabled();
   });
 
-  it('usdcEnabled 商品は価格行に控えめな +USDC を追記する', () => {
+  it('usdcEnabled 商品は Base のロゴつきで「USDC でも購入可」を控えめに添える (Polygon の USDC と読ませない)', () => {
     renderWithIntl(
       <CreatorStorefrontSection
         products={[{ ...PRODUCT, usdcEnabled: true as const }]}
@@ -71,9 +74,13 @@ describe('CreatorStorefrontSection', () => {
         sellerDisclosureHref="/ja/store/seller/0x1234"
       />,
     );
-    expect(
-      screen.getByText(/1,212 JPYC · Polygon \+USDC/),
-    ).toBeInTheDocument();
+    const container = document.body;
+    expect(screen.getByText(/1,212 JPYC/)).toHaveTextContent('1,212 JPYC (Polygon)');
+    const base = container.querySelector('img[src="/chains/base.svg"]')!;
+    expect(base).toHaveAttribute('alt', '');
+    // 見た目は「USDC でも購入可」・読み上げでは「USDC（Base） でも購入可」。
+    expect(base.parentElement).toHaveTextContent('USDC（Base） でも購入可');
+    expect(base.parentElement!.querySelector('.sr-only')).toHaveTextContent('（Base）');
   });
 
   it('商品画像を装飾表示し、読込失敗時は絵文字または ✦ へ戻す', () => {
@@ -235,7 +242,7 @@ it('ライセンス公開情報と sellerRole を購入 launcher から modal �
 
 it('profile product badge and modal props retain only the public boolean', async () => {
   renderWithIntl(<CreatorStorefrontSection products={[{ ...PRODUCT, protectedDelivery: true }]} accent="#2563eb" theme="clean" sellerDisclosureHref="/ja/store/seller/0x1234" />);
-  expect(screen.getByText('保護配布', { exact: true })).toBeVisible();
+  expect(screen.getByText('保護配布（購入・保有を確認してから配布）', { exact: true })).toBeVisible();
   fireEvent.click(screen.getByRole('button', { name: '購入する' }));
   await waitFor(() => expect(purchaseFlowSpy).toHaveBeenCalled());
   expect(purchaseFlowSpy.mock.lastCall?.[0].product.protectedDelivery).toBe(true);

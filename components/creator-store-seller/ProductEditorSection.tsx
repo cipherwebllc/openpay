@@ -114,9 +114,14 @@ export function ProductEditorSection({
             onChange={(event) =>
               updateProduct({ desc: event.target.value })
             }
+            aria-describedby="creator-store-product-desc-hint"
             className={`${inputClass}${isLicense ? ' min-h-11' : ''}`} 
           />
         </label>
+        {/* 書き方の手がかり (任意・label 外 = a11y 名は「説明 (任意)」のまま)。 */}
+        <p id="creator-store-product-desc-hint" className="-mt-3 text-xs text-slate-500 sm:col-span-2">
+          {t('descHint')}
+        </p>
         {!isLicense ? <>
         <label
           htmlFor="creator-store-product-delivery-format"
