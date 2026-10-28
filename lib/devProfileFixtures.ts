@@ -67,8 +67,9 @@ export const DEV_FIXTURE_HOSTED_PRODUCTS: HostedProduct[] = [
     demoUrl: 'https://example.com/world/cafe-kit',
     // 利用条件 (plans/store-usage-terms.md) の表示検証用: 可・不可・記載なし (選ばなかった項目) の 3 つと補足。
     usage: { commercial: 'allowed', redistribute: 'not_allowed', note: 'クレジット表記は不要です。' },
-    // featured 厳選の再現用 (1・2 の 2 商品を厳選・残りの 2 商品はプロフで隠れる = ディープリンク検証)。
-    // 2 つ以上なので、PC ではプロフが 2 列 (左にプロフィールと応援・右に商品) になる。
+    // featured 厳選の再現用 (1〜4 の 4 商品を厳選・5・6 はプロフで隠れる = ディープリンク検証)。
+    // 2 つ以上なので PC ではプロフが 2 列 (左にプロフィールと応援・右に商品)。4 つで商品の列が左の列より
+    // 長くなる (e2e/prodflags/handle-profile-layout.spec.ts が位置を測る前提)。
     featured: true,
     // USDC 購入 UI (P2) の dev 検証用: 支払い方法選択が出る側の代表。
     usdcEnabled: true,
@@ -89,6 +90,7 @@ export const DEV_FIXTURE_HOSTED_PRODUCTS: HostedProduct[] = [
     label: 'prompt',
     desc: '仕事で使えるテンプレート集。購入後すぐテキストで届きます。',
     category: 'ai',
+    featured: true,
   }),
   fx(4, {
     title: 'イベント出店チェックリスト (PDF)',
@@ -96,5 +98,21 @@ export const DEV_FIXTURE_HOSTED_PRODUCTS: HostedProduct[] = [
     imageUrl: '/landing/usecase-store-event.avif',
     label: 'pdf',
     category: 'documents',
+    featured: true,
+  }),
+  // 厳選から外れてプロフでは隠れる商品 (?product= のディープリンクで商品ページとして出る)。
+  fx(5, {
+    title: 'ローポリ 観葉植物セット',
+    priceJpyc: '600',
+    emoji: '🌿',
+    desc: '鉢植え 8 種の 3D モデル (.glb)。',
+    category: '3d-game',
+  }),
+  fx(6, {
+    title: '効果音パック (SE 50 種)',
+    priceJpyc: '400',
+    emoji: '🔊',
+    label: 'zip',
+    category: 'music',
   }),
 ];
