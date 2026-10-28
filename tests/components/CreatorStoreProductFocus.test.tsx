@@ -154,6 +154,20 @@ describe('CreatorStoreProductFocus', () => {
     expect(delivery).not.toHaveTextContent('ライブラリから何度でも再ダウンロードできます');
   });
 
+  it('license 商品の利用条件は出品者が選んだ条件へのリンクだけで、既定の文 (私的利用に限る) は出さない', () => {
+    licenseFlags.enabled = true;
+    renderFocus({
+      ...PRODUCT,
+      label: 'api',
+      productKind: 'license',
+      license: { supply: 100, remaining: 99, transferable: false, termsUrl: 'https://example.com/terms', termsVersion: 'v1' },
+    });
+    const section = screen.getByRole('heading', { level: 2, name: '利用条件' }).closest('section')!;
+    expect(within(section).getByRole('link', { name: '利用条件（バージョン v1）' })).toHaveAttribute('href', 'https://example.com/terms');
+    expect(section).not.toHaveTextContent('私的利用');
+    expect(document.body).not.toHaveTextContent('販売者が別途定めない限り');
+  });
+
   it('長いホスト名の「実際に試す」は折り返せる', () => {
     renderFocus({ ...PRODUCT, demoUrl: `https://${'a'.repeat(63)}.example.com/world` });
     const host = screen.getByText(`${'a'.repeat(63)}.example.com`);

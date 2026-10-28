@@ -44,6 +44,10 @@ export function CreatorStoreProductFocus({
     total: groupDecimalString(hostedPurchaseTotalJpyc(product.priceJpyc)),
   });
   const isLicense = product.productKind === 'license';
+  // license 商品の利用条件は出品者が選んだ URL と版 (NFT の定義に記録される) だけ。署名前の最終確認
+  // (CreatorStorePurchaseConfirmation) と同じく、既定の文 (私的利用に限る) とは中身が違うので並べない。
+  // ライセンスの表示が OFF のときは page 側が license 商品を渡さない。
+  const licenseTerms = isLicense ? product.license : undefined;
   const typeLabel = tCatalog(
     `types.${isLicense ? 'license' : productTypeForLabel(product.label)}`,
   );
@@ -201,13 +205,25 @@ export function CreatorStoreProductFocus({
         ) : null}
 
         {/* 利用条件は常に出す。出品者が選んでいない商品は、購入画面の「利用許諾」と同じ既定の文
-            (利用規約第 13 条 (6)) を出す (○× の記号ではなく文字で・読み上げで意味が通るように)。 */}
+            (利用規約第 13 条 (6)) を出す (○× の記号ではなく文字で・読み上げで意味が通るように)。
+            license 商品は最終確認と同じく、出品者が選んだ利用条件へのリンクだけを出す。 */}
         {product.usage ? (
           <CreatorStoreUsageTerms usage={product.usage} placement="page" />
         ) : (
           <section className="max-w-prose">
             <h2 className={sectionHeading}>{tp('usageHeading')}</h2>
-            <p className="mt-2 text-sm leading-relaxed text-slate-700">{tp('licenseValue')}</p>
+            {licenseTerms ? (
+              <a
+                href={licenseTerms.termsUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-1 inline-flex min-h-11 items-center text-sm font-semibold text-indigo-800 underline underline-offset-2"
+              >
+                {tl('termsLink', { version: licenseTerms.termsVersion })}
+              </a>
+            ) : (
+              <p className="mt-2 text-sm leading-relaxed text-slate-700">{tp('licenseValue')}</p>
+            )}
           </section>
         )}
 
