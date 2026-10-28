@@ -248,6 +248,30 @@ describe('CreatorStorePurchaseFlow', () => {
     expect(state.hookInput).not.toHaveProperty('demoUrl');
   });
 
+  it('商品ページから開いたとき (showProductDetails=false) は画像・説明・仕様・利用条件・デモを繰り返さず、商品名と支払総額は出す', () => {
+    state.phase = 'idle';
+    state.quote = null;
+    const { container } = renderWithIntl(
+      <CreatorStorePurchaseFlow
+        open
+        product={{ ...PRODUCT, description: '短い説明', details: '詳しい説明', imageUrl: 'https://images.example/a.png',
+          specs: [{ label: '形式', value: 'GLB' }], demoUrl: 'https://example.com/demo', usage: { commercial: 'allowed' } }}
+        sellerDisclosureHref="/ja/store/seller/0xseller"
+        onClose={vi.fn()}
+        showProductDetails={false}
+      />,
+    );
+    expect(screen.getByRole('heading', { name: 'Prompt' })).toBeVisible();
+    expect(container.querySelector('img')).toBeNull();
+    expect(screen.queryByText('短い説明')).not.toBeInTheDocument();
+    expect(screen.queryByText('詳しい説明')).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: '仕様' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: '利用条件' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /^実際に試す/ })).not.toBeInTheDocument();
+    // 金額の開示は省かない (価格 100 + 利用料 = 支払総額)。
+    expect(container.textContent).toMatch(/101/);
+  });
+
   it('詳細未設定の商品には空の詳細欄・仕様表・デモリンクを出さない', () => {
     state.phase = 'idle';
     state.quote = null;

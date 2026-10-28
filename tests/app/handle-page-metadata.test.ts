@@ -243,6 +243,25 @@ describe('@handle generateMetadata', () => {
     );
     expect(JSON.stringify(m.twitter)).toContain('summary_large_image');
     expect(listAvailableHostedForOwner).toHaveBeenCalledWith(ADDR);
+    // 正式な URL は ?product= だけを残す (from=store 等は付けない)・言語別 URL も同じ商品。
+    expect(m.alternates).toEqual({
+      canonical: `/ja/@masia?product=${PRODUCT_ID}`,
+      languages: {
+        ja: `/ja/@masia?product=${PRODUCT_ID}`,
+        en: `/en/@masia?product=${PRODUCT_ID}`,
+      },
+    });
+  });
+
+  it('掲載先 handle が別のプロフの商品は、このプロフの商品ページとして扱わない (本体と同じ条件)', async () => {
+    h.enableCreatorStore = true;
+    h.enableCreatorStoreUi = true;
+    h.hostedProducts = [{ ...PRODUCT, handle: 'other-profile' }];
+
+    const m = await call('%40masia', 'ja', PRODUCT_ID);
+
+    expect(m.title).toBe('山田太郎 (@masia) — OpenPay');
+    expect(m.alternates?.canonical).toBe('/ja/@masia');
   });
 
   it('商品説明がない場合は locale 別の定型文と価格を description にする', async () => {
@@ -267,6 +286,10 @@ describe('@handle generateMetadata', () => {
     expect(m.title).toBe('山田太郎 (@masia) — OpenPay');
     expect(m.description).toBe('Web3 クリエイター');
     expect(JSON.stringify(m.openGraph?.images)).not.toContain('product=');
+    expect(m.alternates).toEqual({
+      canonical: '/ja/@masia',
+      languages: { ja: '/ja/@masia', en: '/en/@masia' },
+    });
   });
 
   it('storefront 公開時は product 指定を無視して既存店舗 meta を維持する', async () => {

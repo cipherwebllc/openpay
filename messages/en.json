@@ -1273,12 +1273,21 @@
       "zip": "ZIP",
       "prompt": "Prompt",
       "api": "API",
-      "external": "External link"
+      "external": "External link",
+      "license": "License"
     },
     "libraryLink": "View your purchased items in the library",
     "cardTotal": "{total} JPYC",
     "viewAllProducts": "View all products ({count})",
-    "protectedDeliveryBadge": "Protected delivery"
+    "protectedDeliveryBadge": "Protected delivery",
+    "focus": {
+      "sellerLabel": "Seller",
+      "aboutHeading": "About this product",
+      "deliveryHeading": "How you receive it",
+      "sellerInfoHeading": "Seller information",
+      "otherProductsHeading": "More from this creator",
+      "usdcAlso": "USDC<chain> (Base)</chain> also accepted"
+    }
   },
   "CreatorStorePurchase": {
     "tryDemo": "Try it out",

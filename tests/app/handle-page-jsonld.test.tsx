@@ -11,7 +11,8 @@ const state = vi.hoisted(() => ({
   enableCreatorStoreUi: false,
   hostedProducts: [] as unknown[] | null,
   renderedStorefrontProducts: [] as unknown[],
-  renderedAutoOpenProductId: undefined as string | undefined,
+  renderedFocusProduct: undefined as Record<string, unknown> | undefined,
+  renderedOtherProducts: [] as Array<{ id: string }>,
   record: null as unknown,
 }));
 const listAvailableHostedForOwner = vi.hoisted(() => vi.fn());
@@ -97,18 +98,29 @@ vi.mock('@/components/MobileOrderView', () => ({
 vi.mock('@/components/CreatorStorefrontSection', () => ({
   CreatorStorefrontSection: ({
     products,
-    autoOpenProductId,
   }: {
     products: Array<{ id: string }>;
-    autoOpenProductId?: string;
   }) => {
     state.renderedStorefrontProducts = products;
-    state.renderedAutoOpenProductId = autoOpenProductId;
     return (
       <div data-testid="creator-storefront">
         {products.map((product) => product.id).join(',')}
       </div>
     );
+  },
+}));
+
+vi.mock('@/components/CreatorStoreProductFocus', () => ({
+  CreatorStoreProductFocus: ({ product }: { product: Record<string, unknown> }) => {
+    state.renderedFocusProduct = product;
+    return <div data-testid="product-focus">{String(product.id)}</div>;
+  },
+}));
+
+vi.mock('@/components/CreatorStoreOtherProducts', () => ({
+  CreatorStoreOtherProducts: ({ products }: { products: Array<{ id: string }> }) => {
+    state.renderedOtherProducts = products;
+    return <div data-testid="other-products">{products.map((product) => product.id).join(',')}</div>;
   },
 }));
 
@@ -172,7 +184,8 @@ async function renderHandlePage(
 ): Promise<RenderResult> {
   state.record = nextRecord;
   state.enableMobileOrder = options.mobileOrder ?? false;
-  state.renderedAutoOpenProductId = undefined;
+  state.renderedFocusProduct = undefined;
+  state.renderedOtherProducts = [];
   const handle = options.handle ?? `jsonld${handleSequence++}`;
   const ui = await HandlePage({
     params: Promise.resolve({ locale: 'ja', handle: `%40${handle}` }),
@@ -205,7 +218,8 @@ beforeEach(() => {
   state.enableCreatorStoreUi = false;
   state.hostedProducts = [];
   state.renderedStorefrontProducts = [];
-  state.renderedAutoOpenProductId = undefined;
+  state.renderedFocusProduct = undefined;
+  state.renderedOtherProducts = [];
   state.record = null;
   listAvailableHostedForOwner.mockImplementation(
     async () => state.hostedProducts,
@@ -406,33 +420,73 @@ describe('@handle ProfilePage JSON-LD', () => {
     ).toBeNull();
   });
 
-  it('product deep link は販売可能リストに一致する商品だけ auto open 対象にする', async () => {
+  it('product deep link は販売可能リストに一致する商品だけを商品ページとして先頭に出し、他の商品はその下に回す', async () => {
     state.enableCreatorStore = true;
     state.enableCreatorStoreUi = true;
     const productId = `h_${'c'.repeat(32)}`;
+    const otherId = `h_${'b'.repeat(32)}`;
+    const base = {
+      owner: ADDR,
+      payTo: ADDR,
+      priceJpyc: '500',
+      contentKind: 'url',
+      label: 'download',
+      contentRevision: 1,
+      saleActive: true,
+      contentAvailable: true,
+      createdAt: 1,
+      deliveryUrl: 'https://files.example/private-delivery-sentinel',
+    };
     state.hostedProducts = [
-      {
-        id: productId,
-        owner: ADDR,
-        payTo: ADDR,
-        title: 'Deep link product',
-        priceJpyc: '500',
-        contentKind: 'url',
-        label: 'download',
-        contentRevision: 1,
-        saleActive: true,
-        contentAvailable: true,
-        createdAt: 1,
-      },
+      { ...base, id: otherId, title: 'Other product' },
+      { ...base, id: productId, title: 'Deep link product' },
     ];
 
-    await renderHandlePage(record(), { product: productId });
-    expect(state.renderedAutoOpenProductId).toBe(productId);
+    const { container } = await renderHandlePage(record(), { product: productId });
+    // サーバーの HTML の時点で、指定した商品が本文の先頭 (他の商品より前) にある。
+    const focus = container.querySelector('[data-testid="product-focus"]');
+    const others = container.querySelector('[data-testid="other-products"]');
+    expect(focus?.textContent).toBe(productId);
+    expect(others?.textContent).toBe(otherId);
+    expect(focus!.compareDocumentPosition(others!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // 商品ページではプロフの商品カード一覧 (購入モーダル付き) を出さない。
+    expect(container.querySelector('[data-testid="creator-storefront"]')).toBeNull();
+    // 出品者の私的な配布先は商品ページの client props にも出ない。
+    expect(JSON.stringify(state.renderedFocusProduct)).not.toContain('private-delivery-sentinel');
+    expect(container.innerHTML).not.toContain('private-delivery-sentinel');
 
-    await renderHandlePage(record(), {
+    // 一致しない id は従来どおりのプロフィール。
+    const miss = await renderHandlePage(record(), {
       product: `h_${'d'.repeat(32)}`,
     });
-    expect(state.renderedAutoOpenProductId).toBeUndefined();
+    expect(state.renderedFocusProduct).toBeUndefined();
+    expect(miss.container.querySelector('[data-testid="creator-storefront"]')).not.toBeNull();
+  });
+
+  it('厳選 (featured) で隠れた商品も ?product= なら商品ページとして出す', async () => {
+    state.enableCreatorStore = true;
+    state.enableCreatorStoreUi = true;
+    const hiddenId = `h_${'9'.repeat(32)}`;
+    const featuredId = `h_${'8'.repeat(32)}`;
+    const base = { owner: ADDR, payTo: ADDR, priceJpyc: '500', contentKind: 'url', label: 'download', contentRevision: 1, saleActive: true, contentAvailable: true, createdAt: 1 };
+    state.hostedProducts = [
+      { ...base, id: featuredId, title: 'Featured', featured: true },
+      { ...base, id: hiddenId, title: 'Hidden' },
+    ];
+    await renderHandlePage(record(), { product: hiddenId });
+    expect(state.renderedFocusProduct?.id).toBe(hiddenId);
+    expect(state.renderedOtherProducts.map((product) => product.id)).toEqual([featuredId]);
+  });
+
+  it('他の商品は厳選を先に残りを続けて最大 8 件 (厳選がその商品だけでも他の商品を出す)', async () => {
+    state.enableCreatorStore = true;
+    state.enableCreatorStoreUi = true;
+    const base = { owner: ADDR, payTo: ADDR, priceJpyc: '500', contentKind: 'url', label: 'download', contentRevision: 1, saleActive: true, contentAvailable: true, createdAt: 1 };
+    const ids = Array.from({ length: 11 }, (_, index) => `h_${String(index).padStart(32, '0')}`);
+    state.hostedProducts = ids.map((id, index) => ({ ...base, id, title: `P${index}`, ...(index === 0 || index === 5 ? { featured: true } : {}) }));
+    await renderHandlePage(record(), { product: ids[0] });
+    expect(state.renderedFocusProduct?.id).toBe(ids[0]);
+    expect(state.renderedOtherProducts.map((product) => product.id)).toEqual([ids[5], ids[1], ids[2], ids[3], ids[4], ids[6], ids[7], ids[8]]);
   });
 });
 

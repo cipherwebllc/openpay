@@ -154,7 +154,7 @@ describe('CreatorStorefrontSection', () => {
     expect(screen.getByText('Prompt')).toBeInTheDocument();
   });
 
-  it('autoOpenProductId が一致する商品の購入フローだけを開く', async () => {
+  it('押した商品の購入フローだけを開き、詳しい説明・画像・仕様・利用条件を modal へ渡す', async () => {
     const secondProduct = {
       ...PRODUCT,
       id: `h_${'b'.repeat(32)}`,
@@ -176,9 +176,9 @@ describe('CreatorStorefrontSection', () => {
         accent="#2563eb"
         theme="clean"
         sellerDisclosureHref="/ja/store/seller/0x1234"
-        autoOpenProductId={secondProduct.id}
       />,
     );
+    fireEvent.click(screen.getAllByRole('button', { name: '購入する' })[1]);
 
     await waitFor(() => {
       expect(purchaseFlowSpy).toHaveBeenCalledWith(
@@ -206,6 +206,14 @@ describe('CreatorStorefrontSection', () => {
   });
 });
 
+
+it('license 商品の種類は保存上の label (api) ではなく Store 一覧と同じ「ライセンス」で出す', () => {
+  licenseFlags.enabled = true;
+  const product = { ...PRODUCT, label: 'api' as const, productKind: 'license' as const, license: { supply: 15, remaining: 11, transferable: false, termsUrl: 'https://example.com/terms', termsVersion: '1' } };
+  renderWithIntl(<CreatorStorefrontSection products={[product]} accent="#2563eb" theme="clean" sellerDisclosureHref="/ja/store/seller/0x1234" />);
+  expect(screen.getByText('ライセンス')).toBeInTheDocument();
+  expect(screen.queryByText('API')).not.toBeInTheDocument();
+});
 
 it('ライセンス公開情報と sellerRole を購入 launcher から modal へ渡す', async () => {
   licenseFlags.enabled = true;

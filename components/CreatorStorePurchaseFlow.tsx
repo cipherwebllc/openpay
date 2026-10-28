@@ -8,6 +8,7 @@ import { ConnectButton } from '@/components/ConnectButton';
 import { formatUnits } from 'viem';
 import { hostedPurchaseFeeValue } from '@/lib/x402/hostedPurchaseWire';
 import { STORE_REPORT_EMAIL } from '@/lib/x402/storeMeta';
+import { demoHost } from '@/lib/store/demoHost';
 import type { Address } from 'viem';
 import { licensePurchaseErrorCode, type StoreLicenseProduct } from '@/lib/licenseUi';
 import { env } from '@/lib/env';
@@ -16,7 +17,7 @@ import { CreatorStoreLicenseDetails } from '@/components/CreatorStoreLicenseDeta
 import { CreatorStorePurchaseConfirmation } from '@/components/CreatorStorePurchaseConfirmation';
 import { CreatorStorePurchaseState } from '@/components/CreatorStorePurchaseState';
 import { CreatorStoreUsageTerms } from '@/components/CreatorStoreUsageTerms';
-import { ExternalImage } from '@/components/ExternalImage';
+import { CreatorStoreProductGallery } from '@/components/CreatorStoreProductGallery';
 import { useHostedStorePurchase } from '@/hooks/useHostedStorePurchase';
 import { useModalFocus } from '@/hooks/useModalFocus';
 import { useSiweSession } from '@/hooks/useSiweSession';
@@ -43,22 +44,21 @@ export type CreatorStorePurchaseFlowProps = {
   };
   sellerDisclosureHref: string;
   onClose: () => void;
+  /**
+   * 開始画面に商品の画像・説明・仕様・利用条件・「実際に試す」を出すか (既定 true)。
+   * 商品ページ (?product=) から開くときは同じ内容がページ本体にあるので false で重複を省く。
+   * 金額・支払い方法・署名前の最終確認 (利用許諾の行を含む) は常に出す。
+   */
+  showProductDetails?: boolean;
 };
 
 
-/** demoUrl のホスト名 (表示用)。保存時に https 検証済みだが、壊れた値で描画を落とさない。 */
-function demoHost(url: string): string {
-  try {
-    return new URL(url).hostname;
-  } catch {
-    return '';
-  }
-}
 export function CreatorStorePurchaseFlow({
   open,
   product,
   sellerDisclosureHref,
   onClose,
+  showProductDetails = true,
 }: CreatorStorePurchaseFlowProps) {
   const t = useTranslations('CreatorStorePurchase');
   const locale = useLocale();
@@ -370,12 +370,14 @@ export function CreatorStorePurchaseFlow({
           // 主見出しに昇格し「購入の準備」は eyebrow へ。説明全文をここで表示する
           // (プロフカードの line-clamp-2 の受け皿)。金額開示・CTA・通報は不変。
           <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white text-center shadow-2xl">
-            <CreatorStorePurchaseGallery
-              key={product.id}
-              imageUrl={product.imageUrl}
-              galleryUrls={product.galleryUrls}
-              labelledBy="creator-store-purchase-product-title"
-            />
+            {showProductDetails ? (
+              <CreatorStoreProductGallery
+                key={product.id}
+                imageUrl={product.imageUrl}
+                galleryUrls={product.galleryUrls}
+                labelledBy="creator-store-purchase-product-title"
+              />
+            ) : null}
             <div className="p-6 sm:p-8">
             <p className="text-xs font-bold uppercase tracking-[0.16em] text-brand">
               {t('startHeading')}
@@ -386,36 +388,40 @@ export function CreatorStorePurchaseFlow({
             >
               {product.title}
             </h2>
-            {product.description ? (
-              <p className="mx-auto mt-3 max-w-prose whitespace-pre-wrap break-words text-left text-sm leading-relaxed text-slate-600">
-                {product.description}
-              </p>
-            ) : null}
-            {product.details ? (
-              <p className="mx-auto mt-5 max-w-prose whitespace-pre-line break-words text-left text-sm leading-relaxed text-slate-700">
-                {product.details}
-              </p>
-            ) : null}
-            {product.specs?.length ? (
-              <section className="mx-auto mt-5 max-w-prose text-left">
-                <h3 className="text-sm font-bold text-slate-900">{t('specsHeading')}</h3>
-                <dl className="mt-2 grid grid-cols-[minmax(0,1fr)_minmax(0,2fr)] text-sm">
-                  {product.specs.map(({ label, value }, index) => (
-                    <div key={index} className="contents">
-                      <dt className="break-words border-b border-slate-200 py-2 pr-3 font-medium text-slate-700">{label}</dt>
-                      <dd className="break-words border-b border-slate-200 py-2 text-slate-600">{value}</dd>
-                    </div>
-                  ))}
-                </dl>
-              </section>
-            ) : null}
-            <CreatorStoreUsageTerms usage={product.usage} />
-            {product.demoUrl ? (
-              <a href={product.demoUrl} target="_blank" rel="noopener noreferrer nofollow" className="mt-5 inline-flex min-h-11 items-center gap-2 rounded-xl border border-brand px-4 py-2 text-sm font-bold text-brand hover:bg-blue-50">
-                {t('tryDemo')} <span aria-hidden="true">↗</span>
-                {/* 遷移先を読めるようにホスト名を併記 (出品者が指定した外部 URL・OpenPay の管理外)。 */}
-                <span className="font-normal text-slate-500">{demoHost(product.demoUrl)}</span>
-              </a>
+            {showProductDetails ? (
+              <>
+                {product.description ? (
+                  <p className="mx-auto mt-3 max-w-prose whitespace-pre-wrap break-words text-left text-sm leading-relaxed text-slate-600">
+                    {product.description}
+                  </p>
+                ) : null}
+                {product.details ? (
+                  <p className="mx-auto mt-5 max-w-prose whitespace-pre-line break-words text-left text-sm leading-relaxed text-slate-700">
+                    {product.details}
+                  </p>
+                ) : null}
+                {product.specs?.length ? (
+                  <section className="mx-auto mt-5 max-w-prose text-left">
+                    <h3 className="text-sm font-bold text-slate-900">{t('specsHeading')}</h3>
+                    <dl className="mt-2 grid grid-cols-[minmax(0,1fr)_minmax(0,2fr)] text-sm">
+                      {product.specs.map(({ label, value }, index) => (
+                        <div key={index} className="contents">
+                          <dt className="break-words border-b border-slate-200 py-2 pr-3 font-medium text-slate-700">{label}</dt>
+                          <dd className="break-words border-b border-slate-200 py-2 text-slate-600">{value}</dd>
+                        </div>
+                      ))}
+                    </dl>
+                  </section>
+                ) : null}
+                <CreatorStoreUsageTerms usage={product.usage} />
+                {product.demoUrl ? (
+                  <a href={product.demoUrl} target="_blank" rel="noopener noreferrer nofollow" className="mt-5 inline-flex min-h-11 items-center gap-2 rounded-xl border border-brand px-4 py-2 text-sm font-bold text-brand hover:bg-blue-50">
+                    {t('tryDemo')} <span aria-hidden="true">↗</span>
+                    {/* 遷移先を読めるようにホスト名を併記 (出品者が指定した外部 URL・OpenPay の管理外)。 */}
+                    <span className="font-normal text-slate-500">{demoHost(product.demoUrl)}</span>
+                  </a>
+                ) : null}
+              </>
             ) : null}
             <CreatorStoreDeliveryBadge protectedDelivery={product.protectedDelivery} />
             <CreatorStoreLicenseDetails product={product} />
@@ -586,103 +592,6 @@ export function CreatorStorePurchaseFlow({
           </div>
         )}
       </div>
-    </div>
-  );
-}
-
-function CreatorStorePurchaseGallery({
-  imageUrl,
-  galleryUrls,
-  labelledBy,
-}: {
-  imageUrl?: string;
-  galleryUrls?: readonly string[];
-  labelledBy: string;
-}) {
-  const images = [
-    ...(imageUrl ? [{ id: 'main', url: imageUrl }] : []),
-    ...(galleryUrls ?? []).map((url, index) => ({
-      id: `gallery-${index}`,
-      url,
-    })),
-  ].map((image, position) => ({ ...image, position }));
-  const [selectedImageId, setSelectedImageId] = useState<string | null>(null);
-  const [failedImageIds, setFailedImageIds] = useState<readonly string[]>([]);
-  const visibleImages = images.filter(
-    (image) => !failedImageIds.includes(image.id),
-  );
-  const selectedImage =
-    visibleImages.find((image) => image.id === selectedImageId) ??
-    visibleImages[0] ??
-    null;
-
-  const hideFailedImage = (imageId: string) => {
-    // 第三者画像 1 枚の障害を残りのギャラリー表示へ波及させない。
-    setFailedImageIds((current) =>
-      current.includes(imageId) ? current : [...current, imageId],
-    );
-  };
-
-  if (!selectedImage) return null;
-
-  return (
-    <div>
-      {/* 任意の第三者 https 画像。referrerPolicy で hotlink トラッキングを抑制する。
-          パネル最上部のフルブリード (P3 ショーケース化・角丸は親の overflow-hidden)。
-          開いた直後に見える主画像なので lazy にしない。 */}
-      <ExternalImage
-        src={selectedImage.url}
-        alt=""
-        aria-hidden
-        width={640}
-        height={360}
-        referrerPolicy="no-referrer"
-        loading={undefined}
-        decoding="async"
-        className="aspect-[16/9] max-h-80 w-full bg-slate-100 object-cover"
-        onError={() => hideFailedImage(selectedImage.id)}
-      />
-      {visibleImages.length >= 2 ? (
-        <div
-          role="group"
-          aria-labelledby={labelledBy}
-          className="mt-3 flex flex-wrap justify-center gap-2 px-4"
-        >
-          {visibleImages.map((image) => {
-            const selected = image.id === selectedImage.id;
-            return (
-              <button
-                key={image.id}
-                type="button"
-                aria-pressed={selected}
-                onClick={() => setSelectedImageId(image.id)}
-                className={`rounded-xl border bg-white p-1 transition-colors focus:outline-none focus:ring-2 focus:ring-brand/40 ${
-                  selected
-                    ? 'border-brand text-brand-dark ring-2 ring-brand/30'
-                    : 'border-slate-200 text-slate-500 hover:border-slate-300'
-                }`}
-              >
-                <ExternalImage
-                  src={image.url}
-                  alt=""
-                  aria-hidden
-                  width={48}
-                  height={48}
-                  referrerPolicy="no-referrer"
-                  loading="lazy"
-                  decoding="async"
-                  className="h-12 w-12 rounded-lg object-cover"
-                  onError={() => hideFailedImage(image.id)}
-                />
-                {/* 掟 8: button の a11y 名は aria-label ではなく、この可視番号から導出する。 */}
-                <span className="mt-0.5 block text-center text-[10px] font-bold">
-                  {image.position + 1}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-      ) : null}
     </div>
   );
 }

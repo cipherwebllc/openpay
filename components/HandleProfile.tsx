@@ -93,10 +93,13 @@ export function HandleProfileView({
   config,
   profile,
   handle,
+  nameAs = 'h1',
 }: {
   config: HandleTipConfig;
   profile: HandleProfile;
   handle?: string;
+  /** 名前の見出しの階層。商品ページ (?product=) では商品名が h1 なので h2 にする。 */
+  nameAs?: 'h1' | 'h2';
 }) {
   const [coverFailed, setCoverFailed] = useState(false);
   // 画像の読込失敗をプロフィール全体へ波及させず、URL 修正時は再試行する。
@@ -119,6 +122,7 @@ export function HandleProfileView({
   const showAvatarImg = !!profile.avatar && !avatarFailed;
   const socials = profile.socials ?? [];
   const links = profile.links ?? [];
+  const NameHeading = nameAs;
 
   return (
     <div className={['flex flex-col items-center text-center', handleFontClass(profile.font)].filter(Boolean).join(' ')}>
@@ -161,14 +165,14 @@ export function HandleProfileView({
       </div>
 
       {config.name && (
-        <h1
+        <NameHeading
           className={`mt-5 text-[1.7rem] font-extrabold leading-tight tracking-tight${
             tk.inkColor ? '' : ' text-slate-900'
           }`}
           style={tk.inkColor ? { color: tk.inkColor } : undefined}
         >
           {config.name}
-        </h1>
+        </NameHeading>
       )}
       {handle && (
         <p
