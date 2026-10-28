@@ -41,6 +41,7 @@ export const ROUTE_CLIENT_NAMESPACES = {
     'PaymentForm',
     'SignReassurance',
     'SmartAccountFallback',
+    'StoreCatalog',
     'SuccessOverlay',
     'TipForm',
     'UrlErrors',

@@ -9,7 +9,9 @@ const ROW_LABEL_KEYS: Record<UsagePermissionKey, 'usageCommercial' | 'usageModif
 
 // 出品者が選んだ利用条件。選ばなかった項目も「記載なし」として 3 行とも出す (未記載 = Terms 第 13 条 (6) の既定)。
 // variant='section' は購入モーダルの節 (仕様表と同じ型)・'summary' は署名直前の確認画面の「利用許諾」の行の中身。
-export function CreatorStoreUsageTerms({ usage, variant = 'section' }: { usage?: StoreUsageTerms; variant?: 'section' | 'summary' }) {
+// placement は 'section' の置き場所: 'modal' = 中央寄せ・見出し h3 (商品名 h2 の下)、
+// 'page' = 商品ページ (?product=) の左寄せの節・見出し h2 (商品名 h1 の下)。
+export function CreatorStoreUsageTerms({ usage, variant = 'section', placement = 'modal' }: { usage?: StoreUsageTerms; variant?: 'section' | 'summary'; placement?: 'modal' | 'page' }) {
   const t = useTranslations('CreatorStorePurchase');
   if (!usage) return null;
   const valueOf = (key: UsagePermissionKey) => {
@@ -38,9 +40,10 @@ export function CreatorStoreUsageTerms({ usage, variant = 'section' }: { usage?:
     );
   }
 
+  const Heading = placement === 'page' ? 'h2' : 'h3';
   return (
-    <section className="mx-auto mt-5 max-w-prose text-left">
-      <h3 className="text-sm font-bold text-slate-900">{t('usageHeading')}</h3>
+    <section className={placement === 'page' ? 'max-w-prose' : 'mx-auto mt-5 max-w-prose text-left'}>
+      <Heading className={`${placement === 'page' ? 'text-base' : 'text-sm'} font-bold text-slate-900`}>{t('usageHeading')}</Heading>
       <dl className="mt-2 grid grid-cols-[minmax(0,1fr)_minmax(0,2fr)] text-sm">
         {USAGE_PERMISSION_KEYS.map((key) => (
           <div key={key} className="contents">

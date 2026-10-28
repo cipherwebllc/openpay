@@ -44,6 +44,9 @@ import {
 import { decodeAgentCart } from '@/lib/agentOrder';
 import { searchParamsFromNext, type RouteSearch } from '@/lib/url';
 import { JsonLd, SITE_URL } from '@/components/StructuredData';
+import { CreatorStoreProductFocus } from '@/components/CreatorStoreProductFocus';
+import { CreatorStoreOtherProducts } from '@/components/CreatorStoreOtherProducts';
+import { storeProductPath } from '@/lib/storeProductLink';
 import { storeProductJsonLd } from '@/lib/store/productJsonLd';
 import { hostedPurchaseTotalJpyc } from '@/lib/store/purchaseTotal';
 import { isHostedProductCategory } from '@/lib/x402/storeMeta';
@@ -66,6 +69,8 @@ import { stripControlChars } from '@/lib/sanitize';
 // cache() でリクエスト単位にメモ化し KV への重複 REST I/O を1回に潰す
 // (結果の不整合も防ぐ)。引数は primitive に限定し、両呼出しで同じ owner 文字列を渡す。
 const resolveHandleCached = cache(resolveHandle);
+// 商品ページの「このクリエイターの他の商品」の最大件数 (PC の 4 列で 2 行)。
+const OTHER_PRODUCTS_LIMIT = 8;
 const listAvailableHostedForOwnerCached = cache(listAvailableHostedForOwner);
 
 export async function generateMetadata({
@@ -96,13 +101,20 @@ export async function generateMetadata({
   // OGP 画像 (/api/og/handle) は同じ KV レコードから storefront を検出し、店舗カード or
   // プロフカードを描き分ける (URL は共通なのでここでは渡し分け不要)。
   const ogImage = buildHandleOgImageUrl(normalized, ogLocale);
+  // 正式な URL (canonical) と言語別 URL。from=store / from=agent / cart 等の一時パラメータは含めず、
+  // 商品ページだけ ?product= を残す (同じ商品の URL が重複扱いにならないように)。
   const toMeta = (
     title: string,
     description: string,
     image: string = ogImage,
+    path: string = `/@${encodeURIComponent(normalized)}`,
   ): Metadata => ({
     title,
     description,
+    alternates: {
+      canonical: `/${ogLocale}${path}`,
+      languages: { ja: `/ja${path}`, en: `/en${path}` },
+    },
     openGraph: {
       title,
       description,
@@ -128,8 +140,10 @@ export async function generateMetadata({
     productId
   ) {
     const products = await listAvailableHostedForOwnerCached(record.owner);
+    // 本体と同じ条件 (掲載先 handle の指定があればそのプロフだけ) で商品ページかを決める。
     const product = products?.find((candidate) => candidate.id === productId &&
-      (env.enableLicenseNftUi || candidate.productKind !== 'license'));
+      (env.enableLicenseNftUi || candidate.productKind !== 'license') &&
+      (!candidate.handle || candidate.handle === normalized));
     if (product) {
       const sellerName = c.name?.trim() || `@${normalized}`;
       const title = `${product.title} — ${sellerName}`;
@@ -149,7 +163,12 @@ export async function generateMetadata({
         ogLocale,
         product.id,
       );
-      return toMeta(title, description, productImage);
+      return toMeta(
+        title,
+        description,
+        productImage,
+        storeProductPath(normalized, product.id),
+      );
     }
   }
 
@@ -275,52 +294,6 @@ export default async function HandlePage({
   // 厳選ショーケース: featured があればそれだけ表示し、残りは Store への
   // 「すべての商品を見る」リンクが受ける (selectProfileProducts)。
   const profileSelection = selectProfileProducts(scopedHosted);
-  // ?product= ディープリンク (Store カード等) が厳選で隠れた商品を指す場合は、その商品
-  // だけ末尾に足して描画する — カード (= 購入モーダルの土台) が無いと autoOpen が
-  // 成立せず「Store から開くとモーダルが出ない」実害 (2026-08-05 iPhone 実機・user 報告)。
-  const deepLinkProductId = routeSearch.get('product');
-  const deepLinkedHidden =
-    deepLinkProductId &&
-    !profileSelection.shown.some((p) => p.id === deepLinkProductId)
-      ? scopedHosted.find((p) => p.id === deepLinkProductId)
-      : undefined;
-  const shownProducts = deepLinkedHidden
-    ? [...profileSelection.shown, deepLinkedHidden]
-    : profileSelection.shown;
-  // viewAll の件数 (hidden + shown = 全商品数) が追加表示分で二重計上されないよう調整。
-  const hiddenCountForView =
-    profileSelection.hiddenCount - (deepLinkedHidden ? 1 : 0);
-  const licenseSummaries = await licenseSummariesFor(shownProducts);
-  const creatorProducts: CreatorStorefrontProduct[] = shownProducts.map(
-    (product) => ({
-      id: product.id,
-      ...(env.enableLicenseNftUi && product.productKind === 'license' && product.license ? {
-        productKind: 'license' as const,
-        license: licenseSummaries.get(product.id),
-        sellerRole: sellerRoleFor(product.owner),
-        sellerName: record.config.name?.trim() || `@${normalized}`,
-      } : {}),
-      title: product.title,
-      ...(product.desc ? { desc: product.desc } : {}),
-      ...(product.emoji ? { emoji: product.emoji } : {}),
-      ...(product.imageUrl ? { imageUrl: product.imageUrl } : {}),
-      ...(product.details ? { details: product.details } : {}),
-      ...(product.specs ? { specs: product.specs } : {}),
-      ...(product.demoUrl ? { demoUrl: product.demoUrl } : {}),
-      ...(product.usage ? { usage: product.usage } : {}),
-      ...(product.galleryUrls
-        ? { galleryUrls: product.galleryUrls }
-        : {}),
-      priceJpyc: product.priceJpyc,
-      ...(product.usdcEnabled === true ? { usdcEnabled: true as const } : {}),
-      payTo: product.payTo,
-      contentKind: product.contentKind,
-      protectedDelivery: parseDeliveryUrl(product.deliveryUrl).ok,
-      label: product.label,
-      ...(product.category ? { category: product.category } : {}),
-      ...(product.tags ? { tags: product.tags } : {}),
-    }),
-  );
   const requestedProductId =
     !storefront && env.enableCreatorStoreUi && env.enableCreatorStore
       ? routeSearch.get('product')
@@ -329,11 +302,60 @@ export default async function HandlePage({
   // クリエイターの世界観を保つため OpenPay 側の導線を足さない)。表示専用。
   const fromStore =
     requestedProductId !== null && routeSearch.get('from') === 'store';
-  const autoOpenProductId =
-    requestedProductId &&
-    creatorProducts.some((product) => product.id === requestedProductId)
-      ? requestedProductId
-      : undefined;
+  // 商品ページ (?product= が販売中の商品に一致): その商品をページ上部に大きく出し (サーバーの HTML の時点で先頭)、
+  // 他の商品・プロフィール・応援はその下に回す。購入画面は自動では開かない (ページ自体が商品の詳しい表示で、
+  // 訪問者が「購入する」を押してから開く)。厳選 (featured) で隠れた商品も商品ページとして出す
+  // (2026-08-05 iPhone 実機・user 報告「Store から開くと商品が出ない」の再発防止)。一致しない id は従来どおりのプロフィール。
+  const focusSource = requestedProductId
+    ? scopedHosted.find((product) => product.id === requestedProductId)
+    : undefined;
+  // 商品ページの「このクリエイターの他の商品」: 厳選を先に、残りを続けて最大 8 件 (PC で 2 行)。
+  // 厳選だけにすると、厳選がその商品 1 つのとき他の商品が 1 件も出ない。
+  const otherSources = focusSource
+    ? [
+        ...profileSelection.shown,
+        ...scopedHosted.filter((product) => !profileSelection.shown.includes(product)),
+      ]
+        .filter((product) => product.id !== focusSource.id)
+        .slice(0, OTHER_PRODUCTS_LIMIT)
+    : [];
+  const listedProducts = focusSource
+    ? [focusSource, ...otherSources]
+    : profileSelection.shown;
+  const licenseSummaries = await licenseSummariesFor(listedProducts);
+  const toCreatorProduct = (
+    product: (typeof scopedHosted)[number],
+  ): CreatorStorefrontProduct => ({
+    id: product.id,
+    ...(env.enableLicenseNftUi && product.productKind === 'license' && product.license ? {
+      productKind: 'license' as const,
+      license: licenseSummaries.get(product.id),
+      sellerRole: sellerRoleFor(product.owner),
+      sellerName: record.config.name?.trim() || `@${normalized}`,
+    } : {}),
+    title: product.title,
+    ...(product.desc ? { desc: product.desc } : {}),
+    ...(product.emoji ? { emoji: product.emoji } : {}),
+    ...(product.imageUrl ? { imageUrl: product.imageUrl } : {}),
+    ...(product.details ? { details: product.details } : {}),
+    ...(product.specs ? { specs: product.specs } : {}),
+    ...(product.demoUrl ? { demoUrl: product.demoUrl } : {}),
+    ...(product.usage ? { usage: product.usage } : {}),
+    ...(product.galleryUrls
+      ? { galleryUrls: product.galleryUrls }
+      : {}),
+    priceJpyc: product.priceJpyc,
+    ...(product.usdcEnabled === true ? { usdcEnabled: true as const } : {}),
+    payTo: product.payTo,
+    contentKind: product.contentKind,
+    protectedDelivery: parseDeliveryUrl(product.deliveryUrl).ok,
+    label: product.label,
+    ...(product.category ? { category: product.category } : {}),
+    ...(product.tags ? { tags: product.tags } : {}),
+  });
+  const creatorProducts = listedProducts.map(toCreatorProduct);
+  const focusProduct = focusSource ? creatorProducts[0] : undefined;
+  const otherProducts = focusSource ? creatorProducts.slice(1) : [];
   // インバウンド・エージェント注文 (plans/inbound-agent-order.md §2): 旅行者の AI が組んだ注文を
   // `?cart=<base64url>` で受け、MobileOrderView に事前充填する。**self-contained ?s= トークンは使わず
   // @handle 経路に限定** (受取先・価格は KV 権威の handle レコードから再解決 = receiver スプーフィング
@@ -342,9 +364,7 @@ export default async function HandlePage({
   // 商品ページ (?product= が今ページに載っている商品) だけ schema.org Product/Offer を出す
   // (plans/store-product-jsonld.md)。プロフ本体には出さない (同じ商品を 2 か所で主張しない)。
   // ProfilePage とは別 gate (hasProfile に依らない)。詰め替えは storeProductJsonLd の明示項目だけ。
-  const jsonLdProduct = autoOpenProductId
-    ? creatorProducts.find((product) => product.id === autoOpenProductId)
-    : undefined;
+  const jsonLdProduct = focusProduct;
   let productJsonLd: Record<string, unknown> | null = null;
   if (jsonLdProduct) {
     const tp = await getTranslations({ locale, namespace: 'CreatorStorePurchase' });
@@ -411,10 +431,15 @@ export default async function HandlePage({
   const theme = resolveHandleTheme(record.profile?.theme);
   const pageTheme = handlePageTheme(accent, theme);
   const darkFooter = !storefront && pageTheme.dark;
+  const sellerName = record.config.name?.trim() || `@${normalized}`;
+  const viewAllHref = `/${locale}/store?q=${encodeURIComponent(`@${normalized}`)}`;
 
   return (
     <main
-      className="mx-auto w-full max-w-md px-4 pb-12 pt-5"
+      // 商品ページだけ PC で広げる (スマホは従来の幅)。pb-28 = スマホの画面下の固定購入バーにフッターが隠れない余白。
+      className={`mx-auto w-full max-w-md px-4 pt-5 ${
+        focusProduct ? 'pb-28 md:max-w-3xl lg:max-w-6xl lg:pb-12' : 'pb-12'
+      }`}
       data-handle-theme={darkFooter ? 'night' : undefined}
     >
       {profileJsonLd && <JsonLd value={profileJsonLd} />}
@@ -472,6 +497,37 @@ export default async function HandlePage({
           live={live}
           initialCart={initialCart}
         />
+      ) : focusProduct ? (
+        <>
+          <CreatorStoreProductFocus
+            product={focusProduct}
+            sellerName={sellerName}
+            profileHref={`/${locale}/@${normalized}`}
+            sellerDisclosureHref={`/${locale}/store/seller/${record.owner}`}
+          />
+          <CreatorStoreOtherProducts
+            products={otherProducts}
+            handle={normalized}
+            fromStore={fromStore}
+            dark={darkFooter}
+            viewAllHref={viewAllHref}
+            totalCount={scopedHosted.length}
+          />
+          {/* プロフィールと応援は従来の幅 (link-in-bio の 1 列) のまま下に置く。名前の見出しは商品名 (h1) の下なので h2。 */}
+          <div className="mx-auto mt-12 max-w-md">
+            {hasProfile && (
+              <div className="mb-7">
+                <HandleProfileView
+                  config={record.config}
+                  profile={profile}
+                  handle={normalized}
+                  nameAs="h2"
+                />
+              </div>
+            )}
+            <ReceiveMethodPicker config={record.config} theme={theme} />
+          </div>
+        </>
       ) : (
         <>
           {hasProfile && (
@@ -489,11 +545,10 @@ export default async function HandlePage({
               accent={accent}
               theme={theme}
               sellerDisclosureHref={`/${locale}/store/seller/${record.owner}`}
-              autoOpenProductId={autoOpenProductId}
-              {...(hiddenCountForView > 0
+              {...(profileSelection.hiddenCount > 0
                 ? {
-                    viewAllHref: `/${locale}/store?q=${encodeURIComponent(`@${normalized}`)}`,
-                    hiddenCount: hiddenCountForView,
+                    viewAllHref,
+                    hiddenCount: profileSelection.hiddenCount,
                   }
                 : {})}
             />

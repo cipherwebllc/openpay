@@ -1273,12 +1273,21 @@
       "zip": "ZIP",
       "prompt": "プロンプト",
       "api": "API",
-      "external": "外部リンク"
+      "external": "外部リンク",
+      "license": "ライセンス"
     },
     "libraryLink": "購入済みの商品はライブラリで見られます",
     "cardTotal": "{total} JPYC",
     "viewAllProducts": "すべての商品を見る ({count} 件)",
-    "protectedDeliveryBadge": "保護配布"
+    "protectedDeliveryBadge": "保護配布",
+    "focus": {
+      "sellerLabel": "出品者",
+      "aboutHeading": "商品について",
+      "deliveryHeading": "受け取り方",
+      "sellerInfoHeading": "販売者情報",
+      "otherProductsHeading": "このクリエイターの他の商品",
+      "usdcAlso": "USDC<chain>（Base）</chain> でも購入可"
+    }
   },
   "CreatorStorePurchase": {
     "tryDemo": "実際に試す",

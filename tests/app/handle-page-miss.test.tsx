@@ -13,7 +13,6 @@ const state = vi.hoisted(() => ({
   enableCreatorStoreUi: false,
   hostedProducts: [] as unknown[] | null,
   renderedStorefrontProducts: [] as unknown[],
-  renderedAutoOpenProductId: undefined as string | undefined,
   record: null as unknown,
 }));
 const listAvailableHostedForOwner = vi.hoisted(() => vi.fn());
@@ -108,13 +107,10 @@ vi.mock('@/components/MobileOrderView', () => ({
 vi.mock('@/components/CreatorStorefrontSection', () => ({
   CreatorStorefrontSection: ({
     products,
-    autoOpenProductId,
   }: {
     products: Array<{ id: string }>;
-    autoOpenProductId?: string;
   }) => {
     state.renderedStorefrontProducts = products;
-    state.renderedAutoOpenProductId = autoOpenProductId;
     return (
       <div data-testid="creator-storefront">
         {products.map((product) => product.id).join(',')}

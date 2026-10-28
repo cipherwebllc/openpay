@@ -54,7 +54,6 @@ export function CreatorStorefrontSection({
   accent,
   theme,
   sellerDisclosureHref,
-  autoOpenProductId,
   viewAllHref,
   hiddenCount = 0,
 }: {
@@ -62,7 +61,6 @@ export function CreatorStorefrontSection({
   accent: string;
   theme: HandleTheme;
   sellerDisclosureHref: string;
-  autoOpenProductId?: string;
   /** 厳選ショーケースで省いた商品がある場合の「すべての商品を見る」導線 (/store?q=@handle)。 */
   viewAllHref?: string;
   hiddenCount?: number;
@@ -157,7 +155,8 @@ export function CreatorStorefrontSection({
                           : 'bg-slate-100 text-slate-700'
                       }`}
                     >
-                      {t(`labels.${product.label}`)}
+                      {/* license 商品の label は保存上 'api' だが、種類は Store 一覧と同じ「ライセンス」で出す。 */}
+                      {t(`labels.${product.productKind === 'license' ? 'license' : product.label}`)}
                     </span>
                     <span
                       className={`flex items-center gap-1 rounded-full px-2 py-1 text-xs font-bold ${
@@ -212,7 +211,6 @@ export function CreatorStorefrontSection({
                       }}
                       sellerDisclosureHref={sellerDisclosureHref}
                       inverted={inverted}
-                      autoOpen={product.id === autoOpenProductId}
                     />
                   </div>
                 </div>
