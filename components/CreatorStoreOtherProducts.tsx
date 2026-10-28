@@ -73,7 +73,7 @@ export function CreatorStoreOtherProducts({
           <Link
             href={viewAllHref}
             prefetch={false}
-            className={`text-xs font-semibold underline-offset-2 hover:underline ${
+            className={`inline-flex min-h-11 items-center text-xs font-semibold underline-offset-2 hover:underline ${
               dark ? 'text-white/80' : 'text-brand'
             }`}
           >

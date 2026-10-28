@@ -37,6 +37,7 @@ export function CreatorStoreProductFocus({
   const t = useTranslations('CreatorStorefront');
   const tp = useTranslations('CreatorStorePurchase');
   const tCatalog = useTranslations('StoreCatalog');
+  const tl = useTranslations('CreatorStoreLicense');
   const locale = useLocale();
   const total = t('cardTotal', {
     total: groupDecimalString(hostedPurchaseTotalJpyc(product.priceJpyc)),
@@ -91,12 +92,12 @@ export function CreatorStoreProductFocus({
         >
           {product.title}
         </h1>
-        <p className="mt-2 text-sm text-slate-600">
-          {t('focus.sellerLabel')}{' '}
+        <p className="mt-1 flex flex-wrap items-center gap-x-1.5 text-sm text-slate-600">
+          {t('focus.sellerLabel')}
           <Link
             href={profileHref}
             prefetch={false}
-            className="font-semibold text-slate-800 underline-offset-2 hover:underline"
+            className="inline-flex min-h-11 items-center font-semibold text-slate-800 underline-offset-2 hover:underline"
           >
             {sellerName}
           </Link>
@@ -170,11 +171,12 @@ export function CreatorStoreProductFocus({
             href={product.demoUrl}
             target="_blank"
             rel="noopener noreferrer nofollow"
-            className="mt-3 flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-brand px-4 py-2 text-sm font-bold text-brand hover:bg-blue-50"
+            className="mt-3 flex min-h-11 w-full flex-wrap items-center justify-center gap-x-2 rounded-xl border border-brand px-4 py-2 text-sm font-bold text-brand hover:bg-blue-50"
           >
             {tp('tryDemo')} <span aria-hidden="true">↗</span>
-            {/* 遷移先を読めるようにホスト名を併記 (出品者が指定した外部 URL・OpenPay の管理外)。 */}
-            <span className="font-normal text-slate-500">{demoHost(product.demoUrl)}</span>
+            {/* 遷移先を読めるようにホスト名を併記 (出品者が指定した外部 URL・OpenPay の管理外)。
+                長いホスト名 (63 字のラベル等) でもボタンからはみ出さないよう折り返す。 */}
+            <span className="min-w-0 break-all font-normal text-slate-500">{demoHost(product.demoUrl)}</span>
           </a>
         ) : null}
       </div>
@@ -221,11 +223,14 @@ export function CreatorStoreProductFocus({
           </section>
         )}
 
-        {/* 受け取り方は購入画面の開示と同じ文 (提供中である限り再取得できる・言い切らない)。 */}
+        {/* 受け取り方は署名前の最終確認と同じ文 (提供中である限り再取得できる・言い切らない)。
+            license 商品は最終確認と同じく、ウォレットへ NFT が届く案内に替える。 */}
         <section className="max-w-prose">
           <h2 className={sectionHeading}>{t('focus.deliveryHeading')}</h2>
           <p className="mt-2 text-sm leading-relaxed text-slate-700">{tp('deliveryTimingValue')}</p>
-          <p className="mt-2 text-sm leading-relaxed text-slate-700">{tp('redownload')}</p>
+          <p className="mt-2 text-sm leading-relaxed text-slate-700">
+            {isLicense ? tl('deliveryNotice') : tp('redownload')}
+          </p>
           <Link
             href={`/${locale}/store/library`}
             prefetch={false}

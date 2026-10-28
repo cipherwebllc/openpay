@@ -98,7 +98,9 @@ export function CreatorStorePurchaseLauncher({
             {t('purchase')}
           </button>
         </div>
-        {!inlineVisible && !open ? (
+        {/* 購入画面を開いている間も外さない (画面全体を覆う購入画面の下に隠れる)。閉じたときに
+            押したこのボタンへ focus を戻せるように (外すと戻し先が消えて focus が迷子になる)。 */}
+        {!inlineVisible ? (
           <div className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200 bg-white/95 px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 shadow-[0_-8px_24px_-12px_rgba(15,23,42,0.25)] backdrop-blur lg:hidden">
             <div className="mx-auto flex max-w-3xl items-center gap-3">
               <p className="min-w-0 flex-1">

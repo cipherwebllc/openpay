@@ -146,8 +146,11 @@ describe('CreatorStorePurchaseLauncher', () => {
           expect.objectContaining({ open: true, showProductDetails: false }),
         );
       });
-      // 購入画面を開いている間は固定バーを出さない (画面下で重ならない)。
-      expect(screen.getAllByRole('button', { name: '購入する' })).toHaveLength(1);
+      // 購入画面を開いている間も固定バーのボタンは外さない (閉じたときの focus の戻し先)。
+      const stickyButton = screen.getAllByRole('button', { name: '購入する' })[1];
+      expect(stickyButton).toBeInTheDocument();
+      act(() => observerCallback?.([{ isIntersecting: false }]));
+      expect(screen.getAllByRole('button', { name: '購入する' })[1]).toBe(stickyButton);
       unmount();
       expect(disconnect).toHaveBeenCalled();
     });

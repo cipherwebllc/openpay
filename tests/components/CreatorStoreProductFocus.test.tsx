@@ -148,6 +148,17 @@ describe('CreatorStoreProductFocus', () => {
     });
     expect(container.textContent).toContain('ライセンス');
     expect(container.textContent).not.toContain('API');
+    // 受け取り方は最終確認と同じく、ウォレットへ NFT が届く案内 (ライブラリの再ダウンロードの文ではない)。
+    const delivery = screen.getByRole('heading', { level: 2, name: '受け取り方' }).closest('section')!;
+    expect(delivery).toHaveTextContent('NFT は購入後、通常数分で支払いに使ったウォレットへ届きます');
+    expect(delivery).not.toHaveTextContent('ライブラリから何度でも再ダウンロードできます');
+  });
+
+  it('長いホスト名の「実際に試す」は折り返せる', () => {
+    renderFocus({ ...PRODUCT, demoUrl: `https://${'a'.repeat(63)}.example.com/world` });
+    const host = screen.getByText(`${'a'.repeat(63)}.example.com`);
+    expect(host).toHaveClass('min-w-0', 'break-all');
+    expect(host.parentElement).toHaveClass('flex-wrap');
   });
 
   it('英語でも見出しと既定の利用条件を出す', () => {
