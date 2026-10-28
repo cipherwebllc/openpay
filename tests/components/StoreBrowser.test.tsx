@@ -116,7 +116,7 @@ it('ライセンスカードの外部条件リンクを商品リンク内に入�
 
 it.each([true, false, undefined])('protectedDelivery=%s controls the store card badge', (protectedDelivery) => {
   renderWithIntl(<StoreBrowser listings={[{ ...LISTINGS[0], protectedDelivery }]} locale="ja" />);
-  const badge = screen.queryByText('保護配布', { exact: true });
+  const badge = screen.queryByText('保護配布（購入を確認してから配布）', { exact: true });
   if (protectedDelivery) { expect(badge).toBeVisible(); expect(badge).not.toHaveAttribute('title'); }
   else expect(badge).not.toBeInTheDocument();
 });
@@ -131,6 +131,18 @@ it('ライセンス商品の種別は「ライセンス」(保存の label は a
   state.licenseEnabled = false;
   renderWithIntl(<StoreBrowser listings={[{ ...LISTINGS[0], label: 'api' as const }]} locale="en" />, { locale: 'en' });
   expect(document.body.textContent).toContain('@alice·API');
+});
+
+it('価格は「JPYC (◇Polygon)」・USDC 可の商品だけ次の行に Base のロゴつきで「USDC でも購入可」', () => {
+  const { container } = renderWithIntl(
+    <StoreBrowser listings={[{ ...LISTINGS[0], usdcEnabled: true }, { ...LISTINGS[1], usdcEnabled: undefined }]} locale="ja" />,
+  );
+  const cards = [...container.querySelectorAll('li')];
+  expect(cards[0]).toHaveTextContent('JPYC (Polygon)');
+  expect(cards[0]).toHaveTextContent('USDC（Base） でも購入可');
+  expect(cards[0].querySelector('img[src="/chains/base.svg"]')).toHaveAttribute('alt', '');
+  expect(cards[1]).toHaveTextContent('JPYC (Polygon)');
+  expect(cards[1]).not.toHaveTextContent('USDC');
 });
 
 it('価格は整数部に 3 桁区切り・小数部はそのまま (float にしない)', () => {

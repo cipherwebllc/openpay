@@ -749,5 +749,5 @@ describe('license purchase flow', () => {
 it.each(['ja', 'en'] as const)('%s: product modal renders a configured delivery badge', (locale) => {
   state.phase = 'idle'; state.quote = null;
   renderFlow(locale, { ...PRODUCT, protectedDelivery: true });
-  expect(screen.getByText(locale === 'ja' ? '保護配布' : 'Protected delivery', { exact: true })).toBeVisible();
+  expect(screen.getByText(locale === 'ja' ? '保護配布（購入を確認してから配布）' : 'Protected delivery (sent after purchase is verified)', { exact: true })).toBeVisible();
 });

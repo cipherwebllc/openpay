@@ -20,6 +20,8 @@ describe('/guide/pay', () => {
     const article = container.querySelector('article')!;
 
     expect(screen.getByRole('heading', { level: 1, name: nav.items.pay.label })).toBeInTheDocument();
+    // Store 一覧の「JPYC をお持ちでない方へ」から飛んでくる節 (#get-jpyc)。
+    expect(container.querySelector('#get-jpyc')).toHaveTextContent(c.jpycTitle);
     expect(screen.getByText(c.subtitle)).toBeInTheDocument();
     expect(screen.getByText(c.lead)).toBeInTheDocument();
 

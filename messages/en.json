@@ -1159,6 +1159,7 @@
     "editProductHeading": "Edit product",
     "titleLabel": "Title",
     "descLabel": "Description (optional)",
+    "descHint": "Briefly say what it is for, what it works with, and which files are included. Shown on product cards and in social previews.",
     "emojiLabel": "Emoji (optional)",
     "imageUrlLabel": "Image URL (optional)",
     "imageUrlHint": "Paste an https:// URL of an image uploaded to a host (e.g. imgur.com).",
@@ -1279,15 +1280,15 @@
     "libraryLink": "View your purchased items in the library",
     "cardTotal": "{total} JPYC",
     "viewAllProducts": "View all products ({count})",
-    "protectedDeliveryBadge": "Protected delivery",
+    "protectedDeliveryBadge": "Protected delivery (sent after purchase is verified)",
     "focus": {
       "sellerLabel": "Seller",
       "aboutHeading": "About this product",
       "deliveryHeading": "How you receive it",
       "sellerInfoHeading": "Seller information",
-      "otherProductsHeading": "More from this creator",
-      "usdcAlso": "USDC<chain> (Base)</chain> also accepted"
-    }
+      "otherProductsHeading": "More from this creator"
+    },
+    "usdcAlso": "USDC<chain> (Base)</chain> also accepted"
   },
   "CreatorStorePurchase": {
     "tryDemo": "Try it out",
@@ -3354,7 +3355,10 @@
     "ecosystemLink": "Related links",
     "transparencyLink": "Operational transparency",
     "relatedLabel": "Related pages",
-    "backToStore": "Back to Store"
+    "backToStore": "Back to Store",
+    "noJpycLabel": "Don't have JPYC yet?",
+    "noJpycGetLink": "Get JPYC",
+    "noJpycWalletLink": "Choose a wallet"
   },
   "MePage": {
     "metaTitle": "My Page — OpenPay",

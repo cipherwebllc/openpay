@@ -15,6 +15,7 @@ import {
 } from '@/lib/handleTheme';
 import { CreatorStorePurchaseLauncher } from '@/components/CreatorStorePurchaseLauncher';
 import { CreatorStorefrontProductArtwork } from '@/components/CreatorStorefrontProductArtwork';
+import { JpycPolygonTag, UsdcAlsoNote } from '@/components/StorePaymentRails';
 
 export type CreatorStorefrontProduct = StoreLicenseProduct & {
   protectedDelivery?: boolean;
@@ -159,30 +160,19 @@ export function CreatorStorefrontSection({
                       {t(`labels.${product.productKind === 'license' ? 'license' : product.label}`)}
                     </span>
                     <span
-                      className={`flex items-center gap-1 rounded-full px-2 py-1 text-xs font-bold ${
+                      className={`rounded-full px-2 py-1 text-xs font-bold ${
                         inverted
                           ? 'bg-white/15 text-white'
                           : 'bg-slate-100 text-slate-700'
                       }`}
                     >
-                      {/* 支払いチェーンの明示 (2026-07-30 user 要望): a11y 名は可視テキスト
-                          「Polygon」から導出し、ロゴは装飾 (掟 8)。 */}
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src="/chains/polygon.svg"
-                        alt=""
-                        aria-hidden
-                        className="h-3.5 w-3.5"
-                      />
                       {/* 買い手の意思決定基準は実際に払う合計 (2026-07-31 user 裁定)。fee 式は
-                          購入 hook が server quote を照合するのと同一関数 = 表示と実請求の乖離なし。 */}
+                          購入 hook が server quote を照合するのと同一関数 = 表示と実請求の乖離なし。
+                          支払いチェーンは「(◇Polygon)」で価格に結び付ける (StorePaymentRails)。 */}
                       {t('cardTotal', {
                         total: groupDecimalString(totalJpycOf(product.priceJpyc)),
-                      })}
-                      {/* USDC 可の商品だけ控えめに追記 (一覧では目立たせない — 契約 表示階層)。 */}
-                      {product.usdcEnabled === true
-                        ? ' · Polygon +USDC'
-                        : ' · Polygon'}
+                      })}{' '}
+                      <JpycPolygonTag className="font-semibold" />
                     </span>
                     <CreatorStorePurchaseLauncher
                       product={{
@@ -213,6 +203,14 @@ export function CreatorStorefrontSection({
                       inverted={inverted}
                     />
                   </div>
+                  {/* USDC 可の商品だけ、Base のロゴつきで控えめに添える (一覧では目立たせない — 契約 表示階層)。 */}
+                  {product.usdcEnabled === true ? (
+                    <p className="mt-2">
+                      <UsdcAlsoNote
+                        className={`text-xs ${inverted ? 'text-white/80' : 'text-slate-500'}`}
+                      />
+                    </p>
+                  ) : null}
                 </div>
               </div>
             </div>

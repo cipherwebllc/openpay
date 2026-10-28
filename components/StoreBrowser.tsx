@@ -19,6 +19,7 @@ import { filterStoreListings } from '@/lib/store/listingFilter';
 import { CreatorStoreDeliveryBadge } from '@/components/CreatorStoreDeliveryBadge';
 import { CreatorStoreLicenseDetails } from '@/components/CreatorStoreLicenseDetails';
 import { CreatorStorefrontProductArtwork } from '@/components/CreatorStorefrontProductArtwork';
+import { JpycPolygonTag, UsdcAlsoNote } from '@/components/StorePaymentRails';
 import {
   HOSTED_PRODUCT_CATEGORIES,
   productTypeForLabel,
@@ -113,7 +114,8 @@ export function StoreBrowser({
         // image-top カード。引き算 = 手数料内訳・カテゴリチップ・#タグはカードから
         // 除去 (内訳は購入モーダルで開示・カテゴリはフィルタ行が担う・タグは検索に
         // 効いたまま)。合計額の表示は維持 (2026-07-31 user 裁定)。
-        <ul className={`mt-4 grid ${env.enableLicenseNftUi ? 'grid-cols-1' : 'grid-cols-2'} gap-3 sm:grid-cols-3 sm:gap-4`}>
+        // 列: スマホは従来どおり (ライセンス UI では 1 列)・sm 2 → md 3 → lg 4 (PC の幅を使う)。
+        <ul className={`mt-4 grid ${env.enableLicenseNftUi ? 'grid-cols-1' : 'grid-cols-2'} gap-3 sm:grid-cols-2 sm:gap-4 md:grid-cols-3 lg:grid-cols-4`}>
           {filtered.map((listing) => (
             <li key={listing.id}>
               <Link
@@ -138,14 +140,15 @@ export function StoreBrowser({
                     {tCatalog(`types.${listing.productKind === 'license' ? 'license' : productTypeForLabel(listing.label)}`)}
                   </span>
                   {/* 買い手の意思決定基準は合計 (2026-07-31 user 裁定・プロフカードと同形)。
-                      狭カードで「JPYC / · Polygon」が泣き別れしないよう nowrap+truncate。 */}
+                      支払いチェーンは「(◇Polygon)」で価格に結び付け、USDC 可の商品だけ Base のロゴつきで
+                      次の行に控えめに添える (StorePaymentRails・一覧では目立たせない — 契約 表示階層)。 */}
                   <span className="mt-1.5 truncate whitespace-nowrap text-sm font-black text-slate-900">
-                    {t('cardTotal', { total: groupDecimalString(listing.totalJpyc) })}
-                    <span className="ml-1 text-[10px] font-semibold text-slate-500">
-                      {/* USDC 可の商品だけ控えめに追記 (一覧では目立たせない — 契約 表示階層)。 */}
-                      {listing.usdcEnabled === true ? '· Polygon +USDC' : '· Polygon'}
-                    </span>
+                    {t('cardTotal', { total: groupDecimalString(listing.totalJpyc) })}{' '}
+                    <JpycPolygonTag className="text-[11px] font-semibold text-slate-500" />
                   </span>
+                  {listing.usdcEnabled === true ? (
+                    <UsdcAlsoNote className="mt-0.5 text-[11px] text-slate-500" />
+                  ) : null}
                 </span>
               </Link>
               <CreatorStoreLicenseDetails product={{ ...listing, sellerName: `@${listing.handle}` }} variant="card" />

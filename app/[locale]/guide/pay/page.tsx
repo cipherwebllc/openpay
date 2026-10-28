@@ -93,7 +93,8 @@ export default async function GuidePayPage({
           <p className="mt-3 text-xs leading-relaxed text-slate-500">{c.receiptNote}</p>
         </Section>
 
-        <Section title={c.jpycTitle}>
+        {/* id: Store 一覧の「JPYC をお持ちでない方へ」から飛んでくる節。 */}
+        <Section title={c.jpycTitle} id="get-jpyc">
           {c.jpycBody.map((p) => (
             <p key={p} className="mt-3 text-sm leading-relaxed text-slate-700">
               {p}
