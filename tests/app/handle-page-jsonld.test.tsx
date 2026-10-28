@@ -476,6 +476,8 @@ describe('@handle ProfilePage JSON-LD', () => {
     expect(state.renderedStorefrontLayout).toBe('grid');
     expect(wide.container.querySelector('main')).toHaveClass('md:max-w-3xl', 'lg:max-w-6xl');
     expect(wide.container.querySelector('[data-testid="creator-storefront"]')!.parentElement).toHaveClass('lg:col-start-2', 'lg:row-span-2');
+    // 1 行目はプロフィールの高さちょうど (商品の列が長くてもプロフィールと応援の間を空けない)。
+    expect(wide.container.querySelector('[data-testid="creator-storefront"]')!.parentElement!.parentElement).toHaveClass('lg:grid', 'lg:grid-rows-[auto_1fr]');
 
     state.hostedProducts = [{ ...base, id: `h_${'1'.repeat(32)}`, title: 'A' }];
     const single = await renderHandlePage(record());

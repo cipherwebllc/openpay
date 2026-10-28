@@ -541,10 +541,12 @@ export default async function HandlePage({
         // wideProfile: スマホと md は従来の順 (プロフィール → 商品 → 応援) の 1 列。lg は grid の位置指定で
         // 左にプロフィールと応援 (link-in-bio の幅)・右に商品 (2 行ぶん)。左列は sticky にしない
         // (応援フォームを開くと画面より縦に長くなり、下が隠れる)。
+        // grid-rows-[auto_1fr]: 1 行目はプロフィールの高さちょうど。商品の列が長いとき、伸びた分が auto の 2 行に
+        // 分けて足されてプロフィールと応援の間が空くのを防ぐ (余りは 1fr の 2 行目 = 応援の下が受ける)。
         <div
           className={
             wideProfile
-              ? 'lg:grid lg:grid-cols-[22rem_minmax(0,1fr)] lg:gap-x-12'
+              ? 'lg:grid lg:grid-cols-[22rem_minmax(0,1fr)] lg:grid-rows-[auto_1fr] lg:gap-x-12'
               : undefined
           }
         >
