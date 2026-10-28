@@ -36,6 +36,9 @@ export default defineConfig({
     url: 'http://127.0.0.1:3100',
     reuseExistingServer: false,
     timeout: 120_000,
-    env: prodFlags,
+    // STORE_DEV_FIXTURES: server だけが実行時に読む開発用の見本 (/ja/@fixture を KV なしで描く)。
+    // NEXT_PUBLIC ではないので prodFlags.env (本番の公開 flag の写し) には入れず、ここで足す。
+    // /store は server flag ENABLE_CREATOR_STORE が無いので 404 のまま (見本は他のページへ出ない)。
+    env: { ...prodFlags, STORE_DEV_FIXTURES: '1' },
   },
 });
