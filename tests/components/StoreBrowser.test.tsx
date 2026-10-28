@@ -116,7 +116,7 @@ it('ライセンスカードの外部条件リンクを商品リンク内に入�
 
 it.each([true, false, undefined])('protectedDelivery=%s controls the store card badge', (protectedDelivery) => {
   renderWithIntl(<StoreBrowser listings={[{ ...LISTINGS[0], protectedDelivery }]} locale="ja" />);
-  const badge = screen.queryByText('保護配布（購入を確認してから配布）', { exact: true });
+  const badge = screen.queryByText('保護配布（購入・保有を確認してから配布）', { exact: true });
   if (protectedDelivery) { expect(badge).toBeVisible(); expect(badge).not.toHaveAttribute('title'); }
   else expect(badge).not.toBeInTheDocument();
 });

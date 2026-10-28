@@ -1280,7 +1280,7 @@
     "libraryLink": "購入済みの商品はライブラリで見られます",
     "cardTotal": "{total} JPYC",
     "viewAllProducts": "すべての商品を見る ({count} 件)",
-    "protectedDeliveryBadge": "保護配布（購入を確認してから配布）",
+    "protectedDeliveryBadge": "保護配布（購入・保有を確認してから配布）",
     "focus": {
       "sellerLabel": "出品者",
       "aboutHeading": "商品について",

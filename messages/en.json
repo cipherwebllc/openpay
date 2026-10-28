@@ -1280,7 +1280,7 @@
     "libraryLink": "View your purchased items in the library",
     "cardTotal": "{total} JPYC",
     "viewAllProducts": "View all products ({count})",
-    "protectedDeliveryBadge": "Protected delivery (sent after purchase is verified)",
+    "protectedDeliveryBadge": "Protected delivery (sent after purchase or ownership is verified)",
     "focus": {
       "sellerLabel": "Seller",
       "aboutHeading": "About this product",

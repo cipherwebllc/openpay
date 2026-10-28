@@ -47,8 +47,11 @@ function listing(id: string, title: string, handle = 'yamada') {
   };
 }
 
-async function renderStore(locale = 'ja') {
-  return render(await StorePage({ params: Promise.resolve({ locale }) }));
+async function renderStore(locale = 'ja', q?: string) {
+  return render(await StorePage({
+    params: Promise.resolve({ locale }),
+    ...(q === undefined ? {} : { searchParams: Promise.resolve({ q }) }),
+  }));
 }
 
 function jsonLd(container: HTMLElement) {
@@ -79,6 +82,12 @@ describe('/store', () => {
     });
     expect(JSON.stringify(itemList)).not.toContain('1010');
     expect(JSON.stringify(itemList)).not.toContain('詳しい説明');
+  });
+
+  it('?q= で絞り込んだ表示 (canonical は /store) には ItemList を出さない (画面に出ていない商品を並べない)', async () => {
+    state.listings = [listing(`h_${'a'.repeat(32)}`, 'ローポリ カフェ'), listing(`h_${'b'.repeat(32)}`, 'ジングル素材', 'sound')];
+    expect(jsonLd((await renderStore('ja', '@sound')).container)).toEqual([]);
+    expect(jsonLd((await renderStore('ja', '')).container)).toHaveLength(1);
   });
 
   it('商品ゼロと保存先の障害では ItemList を出さない', async () => {

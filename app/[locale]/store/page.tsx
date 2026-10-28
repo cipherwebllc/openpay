@@ -73,8 +73,9 @@ export default async function StorePage({
   const initialQuery = typeof rawQ === 'string' ? rawQ.slice(0, 100) : '';
   // 一覧の機械可読化 (schema.org ItemList)。各商品の名前と商品ページの URL だけを並べる
   // (価格・在庫などは各商品ページの Product に一本化し、2 か所で主張しない)。
+  // ?q= で絞り込んだ表示 (canonical は /store) には出さない (画面に出ていない商品を並べない)。
   const itemListJsonLd =
-    listings && listings.length > 0
+    !initialQuery && listings && listings.length > 0
       ? {
           '@context': 'https://schema.org',
           '@type': 'ItemList',
