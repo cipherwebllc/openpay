@@ -147,6 +147,19 @@ describe('CreatorStorefrontSection', () => {
     );
   });
 
+  it('layout=grid は md 以上で 2 列・見出しとリンクは lg で左寄せ / 既定 (list) は従来の縦積み', () => {
+    const { container, rerender } = renderWithIntl(
+      <CreatorStorefrontSection products={[PRODUCT, { ...PRODUCT, id: `h_${'b'.repeat(32)}` }]} accent="#2563eb" theme="clean" sellerDisclosureHref="/ja/store/seller/0x1234" />,
+    );
+    expect(container.querySelector('ul')).toHaveClass('space-y-3');
+    expect(container.querySelector('ul')).not.toHaveClass('grid');
+    rerender(
+      <CreatorStorefrontSection products={[PRODUCT, { ...PRODUCT, id: `h_${'b'.repeat(32)}` }]} accent="#2563eb" theme="clean" layout="grid" sellerDisclosureHref="/ja/store/seller/0x1234" />,
+    );
+    expect(container.querySelector('ul')).toHaveClass('grid', 'grid-cols-1', 'md:grid-cols-2');
+    expect(screen.getByRole('heading', { name: '販売中' }).parentElement).toHaveClass('text-center', 'lg:text-left');
+  });
+
   it('英語の placeholder と label を描画する', () => {
     renderWithIntl(
       <CreatorStorefrontSection
