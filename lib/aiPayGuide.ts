@@ -278,7 +278,7 @@ const ja: AiPayGuideContent = {
   tryFlow:
     '内部では x402_quote → あなたの承認 → x402_pay の順に進みます。承認前に見積もりとガード判定を確認できます。',
   proofIntro:
-    '実例: この仕組みで Claude が Internet Computer 上の AI エージェント Coo-ICP に、1 相談 2 JPYC で実際に支払いました。Polygon tx:',
+    '実例（運営者による動作確認）: この仕組みで Claude が Internet Computer 上の AI エージェント Coo-ICP に、1 相談 2 JPYC で実際に支払いました。Polygon tx:',
   proofTransaction: {
     label: POLYGON_TX,
     href: POLYGON_TX_URL,
@@ -411,7 +411,7 @@ const en: AiPayGuideContent = {
   tryFlow:
     'Internally, the flow is x402_quote → your approval → x402_pay. You can review the quote and guard decision before approval.',
   proofIntro:
-    'Real example: using this system, Claude paid Coo-ICP, an AI agent on Internet Computer, 2 JPYC for one consultation. Polygon tx:',
+    'Real example (an operator test): using this system, Claude paid Coo-ICP, an AI agent on Internet Computer, 2 JPYC for one consultation. Polygon tx:',
   proofTransaction: {
     label: POLYGON_TX,
     href: POLYGON_TX_URL,

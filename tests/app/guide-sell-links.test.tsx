@@ -31,27 +31,29 @@ describe('/guide/sell の注意書きのリンク', () => {
   });
 });
 
-// 2026-10-30 (user 裁定): 実売の事例は外部の買い手による購入。件数・金額は誇る規模ではないので載せず、全件は
-// /transparency に任せる。名前を出す Japan Web3 Directory は、Base の 0.02 USDC がこの API (一覧・検索) だけの価格で、
-// 外部の買い手の 0.02 USDC の精算が SOT にあることが根拠。Coo-ICP は手順の実例で、運営者の動作確認 (note のキットと
-// 同じ書き方) なので実売とは呼ばない。有料キットは日本語の有料記事なので ja の出品の帯の下段だけに出す。
+// 2026-10-30 (user 裁定): 実売の事例は外部の買い手による購入 (根拠は /transparency の 9 と同じ SOT)。件数・金額は
+// 誇る規模ではないので載せず、全件は /transparency に任せる。商品名はオンチェーンの金額からは確定できないので書かない
+// (Codex #926)。Coo-ICP は手順の実例で、運営者の動作確認 (note のキットと同じ書き方) なので実売とは呼ばない。
+// 有料キットは日本語の有料記事なので ja の出品の帯の下段だけに出す。
 describe('/guide/sell の実売の事例・手順の実例・有料キット', () => {
   it.each(['ja', 'en'] as const)('%s: 実売は外部の買い手による購入として先に出し、件数は出さずに運用透明性へリンクする', async (locale) => {
     render(await GuideSellPage({ params: Promise.resolve({ locale }) }));
     const c = sellGuideContentFor(locale);
     const card = screen.getByRole('heading', { name: c.proofExternalTitle }).closest('div')!;
-    expect(card.textContent).toContain('Japan Web3 Directory');
-    // 件数は出さない (「1 件ずつ確かめられます」は件数ではない)。
+    expect(card.textContent).toContain('x402 API');
+    // 件数・金額・商品名は出さない (「1 件ずつ確かめられます」は件数ではない)。
     expect(card.textContent).not.toMatch(/\d+ ?件(?!ずつ)|\d+ (purchases|buyers)/);
+    expect(card.textContent).not.toMatch(/\d+(\.\d+)? ?USDC/);
+    expect(card.textContent).not.toMatch(/Japan Web3 Directory|Stablecoin|JPYC (Activity|Service)/);
     expect(within(card).getByRole('link', { name: c.proofExternalLink.label })).toHaveAttribute('href', `/${locale}/transparency`);
     // 実売 (外部の購入) を先に、手順の実例 (Coo-ICP) を後に出す。
     const example = screen.getByRole('heading', { name: c.proofExampleLabel });
     expect(card.compareDocumentPosition(example) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it('根拠: 外部の買い手の 0.02 USDC (Japan Web3 Directory の価格) の精算が SOT にある', () => {
+  it('根拠: 自社・関係者でない買い手の精算が SOT (/transparency の 9) にある', () => {
     const firstParty = new Set(FIRST_PARTY_WALLETS);
-    expect(EXTERNAL_PURCHASES.some((r) => r.amount === '0.02' && !firstParty.has(r.payer.toLowerCase()))).toBe(true);
+    expect(EXTERNAL_PURCHASES.some((r) => !firstParty.has(r.payer.toLowerCase()))).toBe(true);
   });
 
   it.each(['ja', 'en'] as const)('%s: Coo-ICP の購入は運営者の動作確認と書き、実売とは呼ばない', async (locale) => {

@@ -168,11 +168,11 @@ const ja: SellGuideContent = {
 
   proofTitle: '実売の事例',
   proofExternalTitle: '外部の買い手による購入',
-  // 実売の根拠 (2026-10-30 確認): Base の 0.02 USDC は Japan Web3 Directory (一覧・検索) だけの価格で、外部の買い手
-  // (lib/externalPurchases.ts・0xc9c7…1670 ほか) の 0.02 USDC の精算がある。0.01 USDC はデータ API 3 本の共通価格なので
-  // 名前は出さない。件数・金額は誇る規模ではないので載せず、全件は /transparency に任せる (user 裁定)。
+  // 実売の根拠は /transparency の 9 (lib/externalPurchases.ts) と同じ: 第三者のウォレットから当社の x402 API への精算。
+  // 商品名はオンチェーンの金額からは確定できない (受取先が共通・価格は変わりうる・確定には KV の精算台帳が要る) ので書かない。
+  // 件数・金額は誇る規模ではないので載せず、全件は /transparency に任せる (2026-10-30 user 裁定)。
   proofExternal:
-    '外部の買い手が、Base の USDC で OpenPay のデータ API（Japan Web3 Directory など）を購入しています。どれもオンチェーンで精算が確定した取引で、運用透明性のページで 1 件ずつ確かめられます。',
+    '外部の買い手が、Base の USDC で OpenPay の x402 API を購入しています。どれもオンチェーンで精算が確定した取引で、運用透明性のページで 1 件ずつ確かめられます。',
   proofExternalLink: { label: '取引ごとの記録（運用透明性）', href: '/transparency' },
   proofExampleLabel: '手順の実例: Coo-ICP（運営者による動作確認）',
   proofIntro:
@@ -330,7 +330,7 @@ const en: SellGuideContent = {
   proofTitle: 'Real sales',
   proofExternalTitle: 'Purchases by outside buyers',
   proofExternal:
-    "Outside buyers are buying OpenPay's data APIs (such as Japan Web3 Directory) with USDC on Base. Each is a settled on-chain payment you can check one by one on the Transparency page.",
+    "Outside buyers are buying OpenPay's x402 APIs with USDC on Base. Each is a settled on-chain payment you can check one by one on the Transparency page.",
   proofExternalLink: { label: 'Per-transaction record (Transparency)', href: '/transparency' },
   proofExampleLabel: 'Walkthrough example: Coo-ICP (an operator test)',
   proofIntro:
