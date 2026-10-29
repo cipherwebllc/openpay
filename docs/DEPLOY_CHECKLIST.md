@@ -561,7 +561,7 @@ GitHub 上の alert は本節を根拠に dismiss してよい。
   の SDK も同じ版)。stdio transport 運用で HTTP 系 (express / hono) は実行経路に乗らないため
   旧版でも実害経路は薄いが、公開物のため更新を優先した。**openpay-x402-mcp 0.20.0 として 2026-10-19 に publish 済み** (公開 tarball と main の pack が一致)。
 
-### 7.12 MODERATE: `decode-uri-component` (GHSA-vcc3-ghjq-m6fr)
+### 7.12 MODERATE / HIGH: `decode-uri-component` (GHSA-vcc3-ghjq-m6fr・GHSA-qr28-fpjm-wq7f)
 
 **Root advisory**: [GHSA-vcc3-ghjq-m6fr](https://github.com/advisories/GHSA-vcc3-ghjq-m6fr)
 — "decode-uri-component: Denial of service via exponential decoding of malformed
@@ -592,6 +592,17 @@ wagmi → @wagmi/connectors → @walletconnect/ethereum-provider@2.21.1 (exact p
   → npm update で解消し allowlist 削除
 - server 側コードに WalletConnect URI / query-string 解析を追加 (**導入 PR で即再評価**)
 - 本 advisory にタブのフリーズを超える exploit 経路 (RCE 等) の報告
+
+**追加 (2026-10-30): HIGH [GHSA-qr28-fpjm-wq7f](https://github.com/advisories/GHSA-qr28-fpjm-wq7f)**
+— "decode-uri-component vulnerable to denial of service via quadratic replacement of
+percent-encoded runs" (decode-uri-component <=0.5.0・修正版 0.5.1・2026-10-29 公開)。
+- 同じパッケージ・同じ伝播経路 (上の chain の decode-uri-component@0.2.2) で、攻撃の型も同じ
+  (細工された percent-encoding で CPU を枯渇させる DoS)。到達性も上と同じでクライアントのみ
+- 修正版 0.5.1 (2026-10-23) も ESM 専用で、CJS の query-string@7 を壊すため override 不可
+- wagmi 2 系の最新 @wagmi/connectors@6.2.0 も @walletconnect/ethereum-provider@2.21.1 固定
+  (2026-10-30 確認・connectors の最新 8.x は wagmi 3 系)。解消は wagmi/connectors の bump か
+  wagmi 3 系への移行 → accepted risk (user 裁定 2026-10-30)。Reassess triggers は上と同じ
+  (wagmi 3 系への移行も解消の契機に含める)
 
 ### 7.13 MODERATE: `stream-json` (GHSA-528h-pc64-c93x)
 
@@ -691,6 +702,7 @@ allowlist 追加 / 削除は本 §7 の update と必ず同期させること (=
 | GHSA-fxqj-rqcc-2cmp | postcss | MODERATE | §7.9 |
 | GHSA-r28c-9q8g-f849 | postcss | HIGH | §7.10 |
 | GHSA-vcc3-ghjq-m6fr | decode-uri-component | MODERATE | §7.12 |
+| GHSA-qr28-fpjm-wq7f | decode-uri-component | HIGH | §7.12 |
 | GHSA-528h-pc64-c93x | stream-json | MODERATE | §7.13 |
 | GHSA-hqr4-qq8f-hg3x | stream-json | MODERATE | §7.13 |
 | GHSA-mjw6-4jj6-33hc | stream-json | MODERATE | §7.13 |
