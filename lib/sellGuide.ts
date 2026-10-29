@@ -23,6 +23,8 @@ const POLYGON_TX =
   '0xa9e6c6a9ce10fd26ec2fab0d367de31d7fb0918c79d5e932b8566816ecda3249';
 const POLYGON_TX_URL = `https://polygonscan.com/tx/${POLYGON_TX}`;
 const NOTE_URL = 'https://note.com/masia02/n/nf891b56872b4';
+// 運営者が note で売る有料の手順書 (2026-10-30 公開・日本語のみ)。
+const STARTER_KIT_URL = 'https://note.com/masia02/n/n22f55307a0b7';
 const GATEWAY_URL = 'https://github.com/cipherwebllc/x402-jpyc-gateway';
 const SDK_NPM_URL = 'https://www.npmjs.com/package/openpay-x402-sdk';
 
@@ -88,6 +90,10 @@ export type SellGuideContent = {
   readonly backHome: string;
 
   readonly proofTitle: string;
+  readonly proofExternalTitle: string;
+  readonly proofExternal: string;
+  readonly proofExternalLink: SellGuideLink;
+  readonly proofExampleLabel: string;
   readonly proofIntro: string;
   readonly proofFlow: string;
   readonly proofTransaction: SellGuideLink;
@@ -160,9 +166,17 @@ const ja: SellGuideContent = {
     '402 ゲートを 1 つ立てて AI ストアに掲載すると、Claude などの AI エージェントが JPYC で都度購入できます。掲載は無料、売上は満額があなたへ直接届きます（ノンカストディ）。利用料は決済額の 1%（最低 1 JPYC）・支払う側の上乗せです。',
   backHome: '← トップにもどる',
 
-  proofTitle: '実売の証拠',
+  proofTitle: '実売の事例',
+  proofExternalTitle: '外部の買い手による購入',
+  // 実売の根拠 (2026-10-30 確認): Base の 0.02 USDC は Japan Web3 Directory (一覧・検索) だけの価格で、外部の買い手
+  // (lib/externalPurchases.ts・0xc9c7…1670 ほか) の 0.02 USDC の精算がある。0.01 USDC はデータ API 3 本の共通価格なので
+  // 名前は出さない。件数・金額は誇る規模ではないので載せず、全件は /transparency に任せる (user 裁定)。
+  proofExternal:
+    '外部の買い手が、Base の USDC で OpenPay のデータ API（Japan Web3 Directory など）を購入しています。どれもオンチェーンで精算が確定した取引で、運用透明性のページで 1 件ずつ確かめられます。',
+  proofExternalLink: { label: '取引ごとの記録（運用透明性）', href: '/transparency' },
+  proofExampleLabel: '手順の実例: Coo-ICP（運営者による動作確認）',
   proofIntro:
-    '2026 年 7 月、Internet Computer 上の AI エージェント Coo-ICP を本ガイドの手順で出品し、Claude（買い手 MCP）が 1 相談 2 JPYC（本体 1 JPYC + 利用料 1 JPYC）で実購入しました。',
+    '2026 年 7 月、Internet Computer 上の AI エージェント Coo-ICP を本ガイドの手順で出品し、Claude（買い手 MCP）が 1 相談 2 JPYC（本体 1 JPYC + 利用料 1 JPYC）で購入しました。出品と購入は、運営者による動作確認です。',
   proofFlow:
     '402 → JPYC 決済 → 解錠の一周はオンチェーンで検証できます。Polygon tx:',
   proofTransaction: {
@@ -171,7 +185,7 @@ const ja: SellGuideContent = {
   },
   proofOutcome:
     'Coo-ICP 本体は 1 行も変更せず、前段の 402 ゲートウェイだけで商品化しました。',
-  proofArticleLead: '実装から初回販売までの詳しい読み物:',
+  proofArticleLead: '実装から最初の購入までの詳しい読み物:',
   proofArticle: {
     label: 'note のケーススタディを読む',
     href: NOTE_URL,
@@ -313,9 +327,14 @@ const en: SellGuideContent = {
     "Put up one 402 gate and list it in the AI Store, and AI agents such as Claude can buy it per request with JPYC. Listing is free, and the full listed price reaches you directly (non-custodial). The fee is 1% of the payment (minimum 1 JPYC), added on the payer's side.",
   backHome: '← Back to home',
 
-  proofTitle: 'Proof of a real sale',
+  proofTitle: 'Real sales',
+  proofExternalTitle: 'Purchases by outside buyers',
+  proofExternal:
+    "Outside buyers are buying OpenPay's data APIs (such as Japan Web3 Directory) with USDC on Base. Each is a settled on-chain payment you can check one by one on the Transparency page.",
+  proofExternalLink: { label: 'Per-transaction record (Transparency)', href: '/transparency' },
+  proofExampleLabel: 'Walkthrough example: Coo-ICP (an operator test)',
   proofIntro:
-    'In July 2026, Coo-ICP, an AI agent on Internet Computer, was listed by following this guide. Claude (through the buyer MCP) made a real purchase at 2 JPYC per consultation (1 JPYC price + 1 JPYC usage fee).',
+    'In July 2026, Coo-ICP, an AI agent on Internet Computer, was listed by following this guide, and Claude (through the buyer MCP) bought one consultation for 2 JPYC (1 JPYC price + 1 JPYC usage fee). Both the listing and the purchase were made by the operator as a test.',
   proofFlow:
     'The complete 402 → JPYC payment → unlock cycle can be verified on-chain. Polygon tx:',
   proofTransaction: {
@@ -324,7 +343,7 @@ const en: SellGuideContent = {
   },
   proofOutcome:
     'Not one line of Coo-ICP itself changed. Only the 402 gateway in front of it was needed to turn it into a product.',
-  proofArticleLead: 'Read the full story from implementation to first sale:',
+  proofArticleLead: 'Read the full story from implementation to the first purchase:',
   proofArticle: {
     label: 'Read the case study on note',
     href: NOTE_URL,
@@ -458,6 +477,15 @@ const en: SellGuideContent = {
 };
 
 export const SELL_GUIDE: Record<SellGuideLocale, SellGuideContent> = { ja, en };
+
+/**
+ * 出品の帯 (GuideCta) の下段に小さく出す有料キットの案内。記事が日本語のみの有料記事なので ja だけに出す
+ * (en と llms.txt には載せない)。手順の途中に置かないのは、無料のガイドだけでは出品できないと読ませないため。
+ */
+export const SELL_GUIDE_STARTER_KIT_JA = {
+  lead: 'このガイドだけで出品できます。作業順の手順書・動作を確かめた雛形・質問対応（30日）がほしい方には、運営者が書いた有料のキットもあります。',
+  link: { label: 'x402 スターターキット（note・9,800円）', href: STARTER_KIT_URL },
+} as const;
 
 /** locale 文字列を SellGuideLocale へ正規化 (未知は ja)。 */
 export function sellGuideContentFor(locale: string): SellGuideContent {
