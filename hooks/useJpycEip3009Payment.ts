@@ -74,6 +74,9 @@ type RetainedRelayPayload = {
   ambiguous: boolean;
   // A restored order belongs only to the checkout context that started its read-only recovery.
   isCurrent?: () => boolean;
+  // 初回の POST の前に通常の復旧 slot (saveRelayIntent) へ保存した payload (束縛した注文は付けない)。
+  // IP 制限で slot から外したあとの retry は、POST の前に同じ規則で保存し直す。
+  savesRelayIntent?: true;
 };
 
 type PaymentIntentStorage = typeof import('@/lib/paymentIntentStorage');
@@ -550,6 +553,10 @@ export function useJpycEip3009Payment(
           // A retry whose signature never broadcast still needs its original opening persisted first.
           throw new Error('order_binding_storage_unavailable');
         }
+        // 何の波及を断つか: IP 制限で intent を外したままの retry が broadcast し、応答が不明・pending の
+        // まま reload すると memory の latch が消えて新しい署名 (新 nonce) で二重払いになる。初回の POST と
+        // 同じく、POST の前に公開 metadata だけを保存し直す (IP 制限・確定応答でまた消える)。
+        if (retained.savesRelayIntent) storageRef.current?.saveRelayIntent(retained.intent);
         try {
           const result = await postRelayPayload(retained.payload);
           finishOrderPayment(retained.intent, result);
@@ -812,7 +819,7 @@ export function useJpycEip3009Payment(
           retainedPayloadRef.current = retained;
           return resolveAmbiguousPayload(retained);
         } else if (isRelayIpRateLimitedError(error)) {
-          retainedPayloadRef.current = { payload, intent, ambiguous: false };
+          retainedPayloadRef.current = { payload, intent, ambiguous: false, ...(bind ? {} : { savesRelayIntent: true as const }) };
           parkUnbroadcastOrder(intent);
           // IP limiter は relay 処理前の確定的拒否。署名 payload は同一 mount の retry 用に
           // memory へ残すが、未 broadcast intent が reload 後の支払いを塞ぐ波及は断つ。

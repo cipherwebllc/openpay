@@ -790,6 +790,111 @@ describe('useJpycEip3009Payment — relay POST 応答分類 (D1)', () => {
     expect(fetchSpy).toHaveBeenCalledOnce();
   });
 
+  // この PR が保証するのは「形の崩れた txHash を結果にせず、曖昧 latch で再署名を止める」まで。本当に revert した
+  // tx は authorization が未使用のまま relay の hash が残るので、status は 'indeterminate' を返し続ける
+  // (app/api/relay/jpyc/status/route.ts)。その場合は revert に確定せず、deadline で exhausted になる (既存の限界)。
+  it('200 {reverted:true} の崩れた txHash で status が indeterminate のまま → deadline で exhausted・再署名しない・intent を残す', async () => {
+    vi.useFakeTimers();
+    await import('@/lib/relay/relayIntentRecovery');
+    fetchSpy
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ ok: false, reverted: true, txHash: `0x${'g'.repeat(64)}` }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+      )
+      .mockImplementation(async () =>
+        new Response(JSON.stringify({ ok: true, state: 'indeterminate' })),
+      );
+    const result = await submit();
+
+    await advanceUntil(0, () =>
+      expect(result.current.recoveryState === 'auto' || result.current.data !== undefined).toBe(true),
+    );
+    expect(result.current.data).toBeUndefined();
+    await act(async () => vi.advanceTimersByTimeAsync(90_001));
+
+    expect(result.current.recoveryState).toBe('exhausted');
+    expect(isRelayResponseUnknownError(result.current.error)).toBe(true);
+    expect(result.current.data).toBeUndefined();
+    expect(signTypedData).toHaveBeenCalledOnce();
+    expect(fetchSpy.mock.calls.length).toBeGreaterThan(1);
+    expect(
+      fetchSpy.mock.calls.slice(1).every(([url]) => url === '/api/relay/jpyc/status'),
+    ).toBe(true);
+    expect(waitForTransactionReceipt).not.toHaveBeenCalled();
+    expect(window.sessionStorage.getItem(RELAY_INTENT_STORAGE_KEY)).not.toBeNull();
+    vi.useRealTimers();
+  });
+
+  // 429 (IP 制限) は broadcast 前の拒否なので intent を復旧 slot から外す。その後の retry は broadcast しうるので、
+  // POST の前に intent を保存し直す。保存し直さないと、retry の応答が不明 (崩れた txHash を含む) のまま reload した
+  // ときに memory の latch が消え、新しい署名 (新 nonce) で二重払いになる。
+  it('429 のあとの retry が崩れた txHash を返しても intent を保存し直し、reload 後は再署名せず status を照会する', async () => {
+    fetchSpy
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: false, error: 'ip_rate_limited' }), {
+          status: 429,
+          headers: { 'content-type': 'application/json', 'retry-after': '1' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: true, txHash: `0x${'g'.repeat(64)}` }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      );
+    mount();
+    const first = renderHook(() => useJpycEip3009Payment(jpycDep), {
+      wrapper: makeWrapper(),
+    });
+    await flushStorageLoad();
+    first.result.current.mutate({ merchant: MERCHANT, value: 300n * 10n ** 18n });
+    await waitFor(() =>
+      expect(isRelayIpRateLimitedError(first.result.current.error)).toBe(true),
+    );
+    expect(window.sessionStorage.getItem(RELAY_INTENT_STORAGE_KEY)).toBeNull();
+
+    await act(async () => {
+      first.result.current.retryRelay();
+    });
+    await waitFor(() =>
+      expect(isRelayResponseUnknownError(first.result.current.error)).toBe(true),
+    );
+    expect(first.result.current.data).toBeUndefined();
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    const relayNonce = JSON.parse(
+      (fetchSpy.mock.calls[1][1] as RequestInit).body as string,
+    ).nonce;
+    const saved = window.sessionStorage.getItem(RELAY_INTENT_STORAGE_KEY);
+    expect(saved).not.toBeNull();
+    expect(JSON.parse(saved!).nonce).toBe(relayNonce);
+    first.unmount();
+
+    // reload 相当: memory の latch を失った新しい mount。
+    vi.useFakeTimers();
+    fetchSpy.mockImplementation(async () =>
+      new Response(JSON.stringify({ ok: true, state: 'indeterminate' })),
+    );
+    const second = renderHook(() => useJpycEip3009Payment(jpycDep), {
+      wrapper: makeWrapper(),
+    });
+    await advanceUntil(0, () => expect(second.result.current.recoveryState).toBe('auto'));
+    expect(second.result.current.hasStoredIntent).toBe(true);
+    await advanceUntil(3_000, () => expect(fetchSpy.mock.calls.length).toBeGreaterThanOrEqual(3));
+    act(() => {
+      second.result.current.mutate({ merchant: MERCHANT, value: 300n * 10n ** 18n });
+    });
+    await act(async () => vi.advanceTimersByTimeAsync(0));
+
+    expect(signTypedData).toHaveBeenCalledOnce();
+    const afterReload = fetchSpy.mock.calls.slice(2);
+    expect(afterReload.every(([url]) => url === '/api/relay/jpyc/status')).toBe(true);
+    expect(JSON.parse((afterReload[0][1] as RequestInit).body as string).nonce).toBe(relayNonce);
+    expect(window.sessionStorage.getItem(RELAY_INTENT_STORAGE_KEY)).not.toBeNull();
+    vi.useRealTimers();
+  });
+
   // B-R5: server の free 経路も broadcast 前 read の RPC 障害を recover 経路と同じ
   // JSON 503 preflight_unavailable で返す。client は経路を問わず同一の fallback-safe error に分類し、
   // 曖昧 latch / 自動 status 照会 / intent 保存を残さない (= standard 決済へ切替可能)。

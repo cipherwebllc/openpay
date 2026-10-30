@@ -133,7 +133,12 @@ async function postUsageFeeRelay(
     return { txHash: b.txHash, success: false, pending: false };
   }
   // 202: broadcast 済・未確定。再送/settle せず pending を返す (二重支払い防止)。
-  if (res.status === 202 && b.pending === true) {
+  // txHash は無し・null・0x + 64 桁の hex のどれか (useJpycEip3009Payment と同じ条件)。それ以外は末尾の応答不明へ。
+  if (
+    res.status === 202 &&
+    b.pending === true &&
+    (b.txHash === undefined || b.txHash === null || isTxHash(b.txHash))
+  ) {
     return { txHash: b.txHash ?? null, success: false, pending: true };
   }
   // 早期 IP limiter は冪等チェックより前に返る。同じ authorization の応答喪失後再送も
