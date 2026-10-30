@@ -171,17 +171,24 @@ describe('probeForReverifyDetailed の verdict', () => {
   // 逃げて有料の掲載のまま残っていた。支払いなしで 200 が返った以上は ungated 違反 (cf-mitigated の challenge だけ除く)。
   const overCap = () => 'x'.repeat(64 * 1024 + 1);
   const nonUtf8 = () => new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0xff, 0xfe, 0x80, 0xc3]); // zip の先頭 + 不正な UTF-8
-  const brokenStream = () =>
-    new ReadableStream<Uint8Array>({
-      start(controller) {
-        controller.enqueue(new TextEncoder().encode('partial'));
-        controller.error(new Error('ECONNRESET'));
+  // 先頭を 1 回渡してから切れる stream (start で enqueue → error すると queue ごと捨てられて先頭も届かない)。
+  const streamThenError = (head: string) => () => {
+    let sent = false;
+    return new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (sent) {
+          controller.error(new Error('ECONNRESET'));
+          return;
+        }
+        sent = true;
+        controller.enqueue(new TextEncoder().encode(head));
       },
     });
+  };
   const unreadableBodies: Array<[string, () => BodyInit]> = [
     ['64KiB 超', overCap],
     ['非 UTF-8', nonUtf8],
-    ['途中で切れる stream', brokenStream],
+    ['途中で切れる stream', streamThenError('partial')],
   ];
 
   it.each(unreadableBodies)('本文が %s の 200 も violation_200_ungated (authClass clear)', async (_label, body) => {
@@ -201,6 +208,32 @@ describe('probeForReverifyDetailed の verdict', () => {
         lookup: lookupPublic,
       }),
     ).toEqual({ verdict: 'transient', authClass: 'neutral' });
+  });
+
+  // 本文全体を捨てると、先頭に印のある大きい challenge (cf-mitigated なし) が 3 回で正当な gate を隠す。先頭 64KiB で印を探す。
+  const challengeHead = '<title>Just a moment...</title>';
+  const challengeBodies: Array<[string, () => BodyInit]> = [
+    ['64KiB 超', () => challengeHead + 'x'.repeat(64 * 1024)],
+    ['途中で切れる stream', streamThenError(challengeHead)],
+  ];
+
+  it.each(challengeBodies)('先頭に challenge の印がある 200 は本文が %s でも transient のまま', async (_label, body) => {
+    expect(
+      await probeForReverifyDetailed('https://x.test/paid', {
+        fetchImpl: (async () => new Response(body(), { status: 200 })) as typeof fetch,
+        lookup: lookupPublic,
+      }),
+    ).toEqual({ verdict: 'transient', authClass: 'neutral' });
+  });
+
+  it('challenge の印が 64KiB より後ろにしか無い 200 は違反 (先頭だけを見る)', async () => {
+    expect(
+      await probeForReverifyDetailed('https://x.test/paid', {
+        fetchImpl: (async () =>
+          new Response('x'.repeat(64 * 1024) + challengeHead, { status: 200 })) as typeof fetch,
+        lookup: lookupPublic,
+      }),
+    ).toEqual({ verdict: 'violation_200_ungated', authClass: 'clear' });
   });
 
   it('非 UTF-8 の本文でも challenge の印 (ASCII) があれば transient のまま', async () => {

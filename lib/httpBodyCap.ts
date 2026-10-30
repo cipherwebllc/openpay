@@ -60,6 +60,46 @@ export async function readBodyCapped(
   return result.ok ? result.bytes : null;
 }
 
+// body の先頭 cap バイトだけを返す (全体は要らず、先頭に印があるかだけを見る判定用)。cap に達したら残りは読まずに
+// cancel し、stream が途中で切れたらそこまでに読めた分を返す。body が無ければ空。
+export async function readBodyPrefix(
+  source: BodySource,
+  cap: number,
+): Promise<Uint8Array> {
+  const reader = source.body?.getReader();
+  if (!reader) return new Uint8Array(0);
+
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (total < cap) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      const kept = value.byteLength > cap - total ? value.subarray(0, cap - total) : value;
+      chunks.push(kept);
+      total += kept.byteLength;
+    }
+    if (total >= cap) {
+      try {
+        await reader.cancel();
+      } catch {
+        // 先頭は読み終えている。cancel の失敗を呼び元へ波及させて判定を変えない。
+      }
+    }
+  } catch {
+    // stream の途中の失敗は「そこまでの先頭」を返す (呼び元は先頭だけで判定する)。
+  }
+
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return bytes;
+}
+
 // Request/Response 共通の capped JSON reader。UTF-8 と JSON のどちらかを解釈できなければ
 // invalid_json、stream の累積が cap を超えた場合だけ too_large として呼び元が 413 を返せる。
 export async function readJsonBodyCapped(

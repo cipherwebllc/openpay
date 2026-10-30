@@ -6,6 +6,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   readBodyCapped,
+  readBodyPrefix,
   readJsonBodyCapped,
   type CappedJsonResult,
 } from '@/lib/httpBodyCap';
@@ -121,5 +122,49 @@ describe('readBodyCapped', () => {
   it('上限超過と body 欠落はどちらも null (呼び元は取得失敗として扱う)', async () => {
     expect(await readBodyCapped(textSource('hello'), 2)).toBeNull();
     expect(await readBodyCapped({ body: null }, 1024)).toBeNull();
+  });
+});
+
+describe('readBodyPrefix', () => {
+  const text = (bytes: Uint8Array) => new TextDecoder().decode(bytes);
+
+  it('上限内は全体、上限超過は先頭 cap バイトだけを返す (チャンクの途中で切る)', async () => {
+    expect(text(await readBodyPrefix(textSource('hello'), 1024))).toBe('hello');
+    expect(text(await readBodyPrefix(streamOf([enc.encode('abc'), enc.encode('defgh')]), 5))).toBe('abcde');
+  });
+
+  it('上限に達したら残りを読まずに上流へ cancel を伝える', async () => {
+    const cancel = vi.fn();
+    const source = {
+      body: new ReadableStream<Uint8Array>({
+        pull(controller) {
+          controller.enqueue(enc.encode('aaaa'));
+        },
+        cancel() {
+          cancel();
+        },
+      }),
+    };
+    expect(text(await readBodyPrefix(source, 6))).toBe('aaaaaa');
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+
+  it('stream が途中で切れたらそこまでの先頭を返し、body が無ければ空 (throw しない)', async () => {
+    // start で enqueue → error すると queue ごと捨てられるので、1 回目の pull で渡し 2 回目で切る。
+    let sent = false;
+    const source = {
+      body: new ReadableStream<Uint8Array>({
+        pull(controller) {
+          if (sent) {
+            controller.error(new Error('boom'));
+            return;
+          }
+          sent = true;
+          controller.enqueue(enc.encode('head'));
+        },
+      }),
+    };
+    expect(text(await readBodyPrefix(source, 1024))).toBe('head');
+    expect((await readBodyPrefix({ body: null }, 1024)).byteLength).toBe(0);
   });
 });

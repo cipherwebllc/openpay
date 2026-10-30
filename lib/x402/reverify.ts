@@ -1,7 +1,7 @@
 import 'server-only';
 import { resourceUrlClaimKey, URL_CLAIM_GUARD } from './resourceUrlClaim.mjs';
 
-import { readBodyCapped, readJsonBodyCapped } from '@/lib/httpBodyCap';
+import { readBodyPrefix, readJsonBodyCapped } from '@/lib/httpBodyCap';
 import { kvEval, kvGet, kvLrange, kvSet } from '@/lib/kv';
 import {
   acceptsLookLikeOpenPay,
@@ -254,7 +254,7 @@ export async function probeForReverifyDetailed(
   if (res.status === 200) {
     return verdictFor200(
       res.headers.get('cf-mitigated'),
-      await readBodyCapped(res, GATE_BODY_MAX_BYTES),
+      await readBodyPrefix(res, GATE_BODY_MAX_BYTES),
     );
   }
   // rate limit・server error は到達性/契約を確定できない。
@@ -280,12 +280,13 @@ async function verdictFor402(res: Response): Promise<ReverifyVerdict> {
     : 'violation_foreign_402';
 }
 
-// 支払いなしで 200 が返った時点で gate は無い。本文は bot の challenge を見分けるためだけに読む。
-// 読めない本文 (null = 64KiB 超・stream の失敗・br 等で止めた) と非 UTF-8 (zip/PDF 等) も 200 は 200 なので違反に
+// 支払いなしで 200 が返った時点で gate は無い。本文は bot の challenge を見分けるためだけに、先頭 64KiB を読む。
+// 64KiB 超・stream の途中の失敗・非 UTF-8 (zip/PDF 等)・br 等で止めた (prefix は null) 200 も、200 は 200 なので違反に
 // 数える — transient にすると、本文を大きくするだけで無料の URL が有料の掲載のまま残り続ける (E-1)。
+// ただし challenge の印が先頭にあれば、64KiB 超でも transient (本文全体を捨てると大きい challenge で正当な gate を隠す)。
 // challenge の印は header と ASCII の文字列なので、非 UTF-8 も置換文字つきで decode して同じく探す。
-function verdictFor200(cfMitigated: string | null, body: Uint8Array | null): ReverifyProbe {
-  const text = body ? new TextDecoder('utf-8').decode(body) : '';
+function verdictFor200(cfMitigated: string | null, prefix: Uint8Array | null): ReverifyProbe {
+  const text = prefix ? new TextDecoder('utf-8').decode(prefix) : '';
   // challenge の 200 は「素の 200 に到達した」証拠にならないので clear にしない (bot 選別の一種)。
   return isCloudflareChallenge(cfMitigated, text)
     ? { verdict: 'transient', authClass: 'neutral' }
