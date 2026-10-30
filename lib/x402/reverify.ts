@@ -234,12 +234,23 @@ type ReverifyProbeOptions = SsrfSafeFetchOptions & { probeAtMs?: number };
 // 定期再検証専用 probe。登録時 moderation と同じ SSRF-safe fetch を使う一方、確定的契約違反と
 // 一時障害を分ける。body を完全に解釈できない 402 は hidden へ進めず transient に留める (200 は verdictFor200)。
 // verdict (契約) とは別に authClass (締め出され判定・B8) を返す。
+//
+// observePayTo (観測だけの照合・E-3 の残り・2026-10-30 user 裁定 (b) の「観測」の段): 渡すと、ok_402_openpay の回だけ、
+// 公開待ちと同じ照合 (lib/x402/registrationGateMatch.ts・掲載の payTo を期待値にする) の結果を observedMismatch に添える
+// (null = 一致)。verdict・authClass は渡さないときと同じ値のまま変えない = 照合の結果で公開・非公開を決めない。追加の HTTP は
+// しない (この probe が読んだ 402 の accepts をそのまま使う)。渡さないとき (first-party・既存の呼び元) の戻り値は従来どおり。
 export async function probeForReverifyDetailed(
   url: string,
   opts: ReverifyProbeOptions = {},
-): Promise<ReverifyProbe> {
-  const { verdict, authClass } = await probeWithAccepts(url, opts);
-  return { verdict, authClass };
+  observePayTo?: string,
+): Promise<ReverifyProbe & { observedMismatch?: GateAcceptMismatch | null }> {
+  const { verdict, authClass, accepts } = await probeWithAccepts(url, opts);
+  if (observePayTo === undefined || verdict !== 'ok_402_openpay') return { verdict, authClass };
+  return {
+    verdict,
+    authClass,
+    observedMismatch: gateAcceptMismatch(accepts, registrationAcceptExpectation(observePayTo)),
+  };
 }
 
 // 最初の再検証を待つ新規掲載 (pendingFirstVerification) の probe (E-3)。OpenPay 方式の 402 (ok_402_openpay) を、登録と
