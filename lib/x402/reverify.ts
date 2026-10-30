@@ -59,6 +59,9 @@ export type ReverifyCursor = {
   directoryDate?: string;
   // 同一 offset で storage エラーが連続した回数 (B12・cursor 凍結の解除判定)。
   storageErrorStreak?: number;
+  // storage エラーの無かった最後の batch の開始時刻 (ISO・cursor の保存が反映されたもの)。起動元 (Vercel Cron /
+  // GitHub Actions) を問わず再検証が動いているかを、本番設定の検証が /api/cron/reverify-status で読む。
+  lastOkAt?: string;
 };
 
 export type ReverifyTarget =

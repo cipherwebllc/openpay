@@ -5,28 +5,34 @@ import {
   assessNodeRuntime,
   assessPimlicoRun,
   assessReceiptSigner,
+  assessReverifyFreshness,
   assessReverifyRun,
   checkNodeRuntime,
+  checkReverifyFreshness,
   latestCompletedRun,
   NODE_RUNTIME_MINIMUM,
+  REVERIFY_CLOCK_SKEW_MS,
+  REVERIFY_GITHUB_RUN_MAX_AGE_MS,
   REVERIFY_MAX_AGE_MS,
+  REVERIFY_STATUS_READY_RETRY_MS,
   summarizeChecks,
 } from '../../scripts/verify-production-config-helpers.mjs';
 import { PIMLICO_BALANCE_HEADER } from '../../scripts/lib/pimlico-balance-output.mjs';
 
 const NOW = Date.parse('2026-07-25T12:00:00.000Z');
 
-describe('assessReverifyRun', () => {
+describe('assessReverifyRun (予備の GitHub トリガー)', () => {
   it('鮮度の基準は GitHub の schedule の実測 (2〜7 時間おき) に合わせた 8 時間', () => {
     // 3 時間では実測間隔の 76% で fail し、本当の停止・secret 不一致と区別できなかった (2026-09-28)。
-    expect(REVERIFY_MAX_AGE_MS).toBe(8 * 60 * 60 * 1000);
+    // 毎時かどうかは本番の最後の成功 (assessReverifyFreshness) で見るので、こちらは締めない。
+    expect(REVERIFY_GITHUB_RUN_MAX_AGE_MS).toBe(8 * 60 * 60 * 1000);
   });
 
   it('基準の時間内・success・実 HTTP 200 出力だけを healthy とする', () => {
     const run = {
       databaseId: 123,
       conclusion: 'success',
-      createdAt: new Date(NOW - REVERIFY_MAX_AGE_MS + 1).toISOString(),
+      createdAt: new Date(NOW - REVERIFY_GITHUB_RUN_MAX_AGE_MS + 1).toISOString(),
     };
     expect(assessReverifyRun(run, 'Trigger endpoint\nHTTP 200\n', NOW)).toEqual({
       ok: true,
@@ -50,12 +56,152 @@ describe('assessReverifyRun', () => {
       {
         databaseId: 3,
         conclusion: 'success',
-        createdAt: new Date(NOW - REVERIFY_MAX_AGE_MS - 1).toISOString(),
+        createdAt: new Date(NOW - REVERIFY_GITHUB_RUN_MAX_AGE_MS - 1).toISOString(),
       },
       'HTTP 200',
     ],
   ])('%s は unhealthy', (_name, run, log) => {
     expect(assessReverifyRun(run, log, NOW).ok).toBe(false);
+  });
+});
+
+describe('assessReverifyFreshness (本番の最後の正常な batch)', () => {
+  const at = (ms: number) => new Date(ms).toISOString();
+
+  it('基準は毎時の run が 2 回続けて失敗するまで待つ 3 時間', () => {
+    // 主トリガーが Vercel Cron (毎時 0 分・分単位で正確) になったので、GitHub の実測の遅れに合わせた 8 時間は要らない。
+    expect(REVERIFY_MAX_AGE_MS).toBe(3 * 60 * 60 * 1000);
+  });
+
+  it('基準の時間内なら ok で、何分前かを出す', () => {
+    expect(assessReverifyFreshness(200, { lastOkAt: at(NOW - REVERIFY_MAX_AGE_MS) }, NOW)).toEqual({
+      ok: true,
+      detail: expect.stringContaining('180 分前'),
+    });
+    expect(assessReverifyFreshness(200, { lastOkAt: at(NOW - 60 * 60 * 1000) }, NOW).ok).toBe(true);
+  });
+
+  it('基準を 1 ms でも超えたら error (warn にしない)', () => {
+    const result = assessReverifyFreshness(200, { lastOkAt: at(NOW - REVERIFY_MAX_AGE_MS - 1) }, NOW);
+    expect(result.ok).toBe(false);
+    expect(result.severity).toBeUndefined();
+    expect(result.detail).toContain('基準の 180 分を超えた');
+  });
+
+  it('記録がまだ無い (deploy 直後) のは warn', () => {
+    expect(assessReverifyFreshness(200, { lastOkAt: null }, NOW)).toEqual({
+      ok: false,
+      severity: 'warn',
+      detail: expect.stringContaining('記録がまだ無い'),
+    });
+  });
+
+  it('時計のずれの幅までの未来は ok・それを超える未来や読めない日時は error', () => {
+    expect(assessReverifyFreshness(200, { lastOkAt: at(NOW + REVERIFY_CLOCK_SKEW_MS) }, NOW).ok).toBe(true);
+    for (const lastOkAt of [at(NOW + REVERIFY_CLOCK_SKEW_MS + 1), 'not-a-date', 123, undefined]) {
+      const result = assessReverifyFreshness(200, { lastOkAt }, NOW);
+      expect(result.ok).toBe(false);
+      expect(result.severity).toBeUndefined();
+      expect(result.detail).toContain('日時が不正');
+    }
+  });
+
+  it('200 でない (401 = secret 不一致・503 = KV 障害・404 = route が無い) のは error', () => {
+    for (const status of [401, 404, 503]) {
+      const result = assessReverifyFreshness(status, { lastOkAt: at(NOW) }, NOW);
+      expect(result).toEqual({ ok: false, detail: `HTTP ${status} (/api/cron/reverify-status が読めない)` });
+    }
+  });
+});
+
+describe('checkReverifyFreshness', () => {
+  const SECRET = 'cron-secret-value';
+
+  it('CRON_SECRET が無ければ通信せずに NG', async () => {
+    const fetchImpl = vi.fn();
+    expect(await checkReverifyFreshness('https://open-pay.jp', undefined, { fetchImpl })).toEqual({
+      ok: false,
+      detail: 'CRON_SECRET 未設定 — 確認できない',
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('Bearer で /api/cron/reverify-status を読み、鮮度を判定する', async () => {
+    const fetchImpl = vi.fn(async () => Response.json({ lastOkAt: new Date(NOW - 30 * 60 * 1000).toISOString() }));
+    expect(await checkReverifyFreshness('https://open-pay.jp', SECRET, { fetchImpl, nowMs: NOW })).toEqual({
+      ok: true,
+      detail: expect.stringContaining('30 分前'),
+    });
+    expect(fetchImpl).toHaveBeenCalledWith('https://open-pay.jp/api/cron/reverify-status', expect.objectContaining({
+      headers: { authorization: `Bearer ${SECRET}` },
+      signal: expect.any(AbortSignal),
+    }));
+  });
+
+  it('通信の例外は固定の文言にし、例外の中身 (秘密) を出さない', async () => {
+    const fetchImpl = vi.fn(async () => {
+      throw new Error(`connect failed Bearer ${SECRET}`);
+    });
+    expect(await checkReverifyFreshness('https://open-pay.jp', SECRET, { fetchImpl, nowMs: NOW })).toEqual({
+      ok: false,
+      detail: '/api/cron/reverify-status に接続できない',
+    });
+  });
+
+  it('JSON でない応答は日時不正の NG', async () => {
+    const fetchImpl = vi.fn(async () => new Response('<html>', { status: 200 }));
+    const result = await checkReverifyFreshness('https://open-pay.jp', SECRET, { fetchImpl, nowMs: NOW });
+    expect(result.ok).toBe(false);
+    expect(result.detail).toContain('日時が不正');
+  });
+
+  // main への push の 5 分後の検証では、新しい route を含む版の配信がまだのことがある (旧版が 404 を返す)。
+  // 404 だけは間隔を広げて数回読み直し、ずっと 404 なら route の無い版として error のまま。
+  describe('404 (配信待ち) の読み直し', () => {
+    const fresh = () => Response.json({ lastOkAt: new Date(NOW - 10 * 60 * 1000).toISOString() });
+    const notFound = () => new Response('Not Found', { status: 404 });
+
+    it('読み直しの待ちは 20 秒・40 秒・60 秒 (合計 2 分で post-deploy-verify の job の 10 分に収まる)', () => {
+      expect(REVERIFY_STATUS_READY_RETRY_MS).toEqual([20_000, 40_000, 60_000]);
+    });
+
+    it('404 の後に 200 が返れば、その応答で判定して ok', async () => {
+      const fetchImpl = vi.fn().mockResolvedValueOnce(notFound()).mockResolvedValueOnce(notFound()).mockResolvedValue(fresh());
+      const sleep = vi.fn(async () => {});
+      expect(await checkReverifyFreshness('https://open-pay.jp', SECRET, { fetchImpl, sleep, nowMs: NOW })).toEqual({
+        ok: true,
+        detail: expect.stringContaining('10 分前'),
+      });
+      expect(fetchImpl).toHaveBeenCalledTimes(3);
+      expect(sleep.mock.calls).toEqual([[20_000], [40_000]]);
+    });
+
+    it('待っても 404 のままなら error (warn に下げない)', async () => {
+      const fetchImpl = vi.fn(async () => notFound());
+      const sleep = vi.fn(async () => {});
+      expect(await checkReverifyFreshness('https://open-pay.jp', SECRET, { fetchImpl, sleep, nowMs: NOW })).toEqual({
+        ok: false,
+        detail: 'HTTP 404 (/api/cron/reverify-status が読めない)',
+      });
+      expect(fetchImpl).toHaveBeenCalledTimes(1 + REVERIFY_STATUS_READY_RETRY_MS.length);
+      expect(sleep.mock.calls).toEqual(REVERIFY_STATUS_READY_RETRY_MS.map((ms) => [ms]));
+    });
+
+    it('404 以外の失敗 (503・401・通信の例外) は読み直さない', async () => {
+      for (const make of [
+        () => Response.json({ error: 'storage_unavailable' }, { status: 503 }),
+        () => Response.json({ error: 'unauthorized' }, { status: 401 }),
+        () => {
+          throw new Error('connect failed');
+        },
+      ]) {
+        const fetchImpl = vi.fn(async () => make());
+        const sleep = vi.fn(async () => {});
+        expect((await checkReverifyFreshness('https://open-pay.jp', SECRET, { fetchImpl, sleep, nowMs: NOW })).ok).toBe(false);
+        expect(fetchImpl).toHaveBeenCalledTimes(1);
+        expect(sleep).not.toHaveBeenCalled();
+      }
+    });
   });
 });
 

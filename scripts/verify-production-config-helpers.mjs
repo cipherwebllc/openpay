@@ -1,10 +1,20 @@
 import { PIMLICO_BALANCE_HEADER } from './lib/pimlico-balance-output.mjs';
 
-// reverify-cron.yml は毎時 (cron '5 * * * *') の指定だが、GitHub Actions の schedule は混雑で遅れ・間引きされ、
-// 実測では 2.1〜6.6 時間おき (中央値 4.1 時間・2026-09-14〜09-28 の 80 回・すべて success)。3 時間の基準では
-// 間隔の 76% で fail し、止まった・secret 不一致といった本当の異常と区別できなかった。実測の最大に余裕を持たせて 8 時間。
-// 止まったら半日以内に気づける (日次の Vercel cron がフォールバック)。
-export const REVERIFY_MAX_AGE_MS = 8 * 60 * 60 * 1000;
+// 掲載の再検証 (/api/cron/reverify) の鮮度。毎時の主トリガーは Vercel Cron (vercel.json・毎時 0 分) で、
+// GitHub Actions (reverify-cron.yml) は予備。どちらから起動されても、storage エラーの無かった batch の開始時刻
+// (cursor の lastOkAt) が KV に残り、/api/cron/reverify-status で読める。3 時間 = 毎時の run が 2 回続けて
+// storage エラーになる (KV の一時障害等) までは赤にせず、両方が止まったら次の検証 (毎日 + main への push ごと) で
+// 気づける幅。
+export const REVERIFY_MAX_AGE_MS = 3 * 60 * 60 * 1000;
+// 本番と runner の時計のずれで、直前の run を「未来の日時」と誤判定しないための幅。
+export const REVERIFY_CLOCK_SKEW_MS = 5 * 60 * 1000;
+
+// 予備のトリガー reverify-cron.yml の run 履歴の基準。毎時 (cron '5 * * * *') の指定だが、GitHub Actions の
+// schedule は混雑で遅れ・間引きされ、実測では 2.1〜6.6 時間おき (中央値 4.1 時間・2026-09-14〜09-28 の 80 回)・
+// 0.4〜7.4 時間おき (平均 4.4 時間・2026-10-24〜30 の 30 回)。3 時間の基準では間隔の 76% で fail し、止まった・
+// secret 不一致といった本当の異常と区別できなかった。実測の最大に余裕を持たせて 8 時間。毎時動いているかは
+// 上の REVERIFY_MAX_AGE_MS で見るので、こちらは予備が secret の不一致 (401) 等で止まったことを見つけるため。
+export const REVERIFY_GITHUB_RUN_MAX_AGE_MS = 8 * 60 * 60 * 1000;
 
 /**
  * `gh run list` の結果 (新しい順) から、完了した最新の run を選ぶ。実行中の run はログがまだ無いので、
@@ -42,7 +52,7 @@ export function assessReverifyRun(run, log, nowMs = Date.now()) {
   if (
     !Number.isFinite(createdAtMs) ||
     nowMs - createdAtMs < 0 ||
-    nowMs - createdAtMs > REVERIFY_MAX_AGE_MS
+    nowMs - createdAtMs > REVERIFY_GITHUB_RUN_MAX_AGE_MS
   ) {
     return {
       ok: false,
@@ -59,6 +69,40 @@ export function assessReverifyRun(run, log, nowMs = Date.now()) {
     ok: true,
     detail: `run #${run.databaseId} HTTP 200 (${run.createdAt})`,
   };
+}
+
+/**
+ * /api/cron/reverify-status の応答から、再検証が storage エラーなしで最後に動いた batch (lastOkAt) が
+ * REVERIFY_MAX_AGE_MS 以内かを判定する。lastOkAt は「200 を返した run」と厳密には一致しない (cursor の SET が
+ * 反映されたのに ack だけ失敗した run も進める・route の注記) が、見たいのは batch が動いたかなのでこれで足りる。
+ * 記録が無い (null) のは、新しい版の最初の正常な batch の前 (deploy 直後・最長 1 時間) なので warn にとどめる
+ * (毎回 storage エラーで記録が入らないままなら、予備の GitHub の run が 200 でなくなり、そちらの検査が赤になる)。
+ */
+export function assessReverifyFreshness(status, body, nowMs = Date.now()) {
+  if (status !== 200) {
+    return { ok: false, detail: `HTTP ${status} (/api/cron/reverify-status が読めない)` };
+  }
+  const lastOkAt = body && typeof body === 'object' ? body.lastOkAt : undefined;
+  if (lastOkAt === null) {
+    return {
+      ok: false,
+      severity: 'warn',
+      detail: '最後の正常な batch の記録がまだ無い (deploy 直後なら次の毎時 0 分の run で入る)',
+    };
+  }
+  const lastOkMs = typeof lastOkAt === 'string' ? Date.parse(lastOkAt) : Number.NaN;
+  const ageMs = nowMs - lastOkMs;
+  if (!Number.isFinite(lastOkMs) || ageMs < -REVERIFY_CLOCK_SKEW_MS) {
+    return { ok: false, detail: `最後の正常な batch の日時が不正 (lastOkAt=${String(lastOkAt)})` };
+  }
+  const ageMinutes = Math.max(0, Math.round(ageMs / 60_000));
+  if (ageMs > REVERIFY_MAX_AGE_MS) {
+    return {
+      ok: false,
+      detail: `最後の正常な batch が ${ageMinutes} 分前 (${lastOkAt}) — 基準の ${REVERIFY_MAX_AGE_MS / 60_000} 分を超えた (Vercel Cron と GitHub の両方が止まったか、run が storage エラーを返し続けている)`,
+    };
+  }
+  return { ok: true, detail: `最後の正常な batch は ${ageMinutes} 分前 (${lastOkAt})` };
 }
 
 /**
@@ -110,14 +154,14 @@ export function assessNodeRuntime(status, body) {
 export const NODE_RUNTIME_TIMEOUT_MS = 10_000;
 
 /**
- * /api/cron/runtime を CRON_SECRET で読み、assessNodeRuntime で判定する。
- * 通信の失敗で script ごと落ちる・応答が止まって job の 10 分を使い切ると、warn の check が全体を赤にするので、
- * ここで止めて固定の文言を返す (例外の中身は公開ログに出さない)。期限は本文の読み取りまで効く。
+ * CRON_SECRET で守った内部の確認口 (/api/cron/runtime・/api/cron/reverify-status) を読む。
+ * 通信の失敗で script ごと落ちる・応答が止まって job の 10 分を使い切ると、warn の check でも全体が赤になり、
+ * ほかの check の結果も出なくなるので、ここで止めて null を返す (呼び出し側が固定の文言にし、例外の中身は
+ * 公開ログに出さない)。期限は本文の読み取りまで効く。
  */
-export async function checkNodeRuntime(base, secret, { fetchImpl = fetch, timeoutMs = NODE_RUNTIME_TIMEOUT_MS } = {}) {
-  if (!secret) return { ok: false, detail: 'CRON_SECRET 未設定 — 確認できない' };
+async function readCronProbe(base, path, secret, fetchImpl, timeoutMs) {
   try {
-    const r = await fetchImpl(`${base}/api/cron/runtime`, {
+    const r = await fetchImpl(`${base}${path}`, {
       headers: { authorization: `Bearer ${secret}` },
       signal: AbortSignal.timeout(timeoutMs),
     });
@@ -127,10 +171,52 @@ export async function checkNodeRuntime(base, secret, { fetchImpl = fetch, timeou
     } catch {
       body = null;
     }
-    return assessNodeRuntime(r.status, body);
+    return { status: r.status, body };
   } catch {
-    return { ok: false, detail: '/api/cron/runtime に接続できない' };
+    return null;
   }
+}
+
+/** /api/cron/runtime を CRON_SECRET で読み、assessNodeRuntime で判定する。 */
+export async function checkNodeRuntime(base, secret, { fetchImpl = fetch, timeoutMs = NODE_RUNTIME_TIMEOUT_MS } = {}) {
+  if (!secret) return { ok: false, detail: 'CRON_SECRET 未設定 — 確認できない' };
+  const res = await readCronProbe(base, '/api/cron/runtime', secret, fetchImpl, timeoutMs);
+  return res ? assessNodeRuntime(res.status, res.body) : { ok: false, detail: '/api/cron/runtime に接続できない' };
+}
+
+// /api/cron/reverify-status が 404 のときに読み直すまでの待ち (合計 2 分)。main への push の 5 分後の検証では、
+// 新しい route を含む版の配信がまだ終わっていないことがある (build が 5 分を超える・旧版が応答する)。
+// 待っても 404 のままなら route の無い版が出ているので error のまま (warn に下げない)。合計は post-deploy-verify の
+// job の 10 分 (push のときは 5 分の待ちを含む) に収まる長さにする。
+export const REVERIFY_STATUS_READY_RETRY_MS = [20_000, 40_000, 60_000];
+
+const sleepMs = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * /api/cron/reverify-status を CRON_SECRET で読み、assessReverifyFreshness で判定する。
+ * 404 (配信待ち) だけは REVERIFY_STATUS_READY_RETRY_MS の間隔で読み直す。ほかの応答・通信の失敗は読み直さない。
+ */
+export async function checkReverifyFreshness(
+  base,
+  secret,
+  {
+    fetchImpl = fetch,
+    timeoutMs = NODE_RUNTIME_TIMEOUT_MS,
+    nowMs,
+    retryDelaysMs = REVERIFY_STATUS_READY_RETRY_MS,
+    sleep = sleepMs,
+  } = {},
+) {
+  if (!secret) return { ok: false, detail: 'CRON_SECRET 未設定 — 確認できない' };
+  let res = await readCronProbe(base, '/api/cron/reverify-status', secret, fetchImpl, timeoutMs);
+  for (const delayMs of retryDelaysMs) {
+    if (res?.status !== 404) break;
+    await sleep(delayMs);
+    res = await readCronProbe(base, '/api/cron/reverify-status', secret, fetchImpl, timeoutMs);
+  }
+  return res
+    ? assessReverifyFreshness(res.status, res.body, nowMs ?? Date.now())
+    : { ok: false, detail: '/api/cron/reverify-status に接続できない' };
 }
 
 /**

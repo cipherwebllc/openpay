@@ -332,10 +332,19 @@ export async function GET(req: Request): Promise<NextResponse> {
         streak: storageErrorStreak,
       });
     }
+    // lastOkAt = storage エラーの無かった batch の開始時刻 (鮮度の心拍)。storage エラーの run は進めず直前の値を
+    // 引き継ぐ。「200 を返した run」とは一致しない: cursor の SET が反映されたのに応答 (ack) だけ失敗した run は
+    // 503 を返しても進み、cursor の保存より後の処理 (alert・lock の解放) の失敗も反映しない。鮮度の検査が見たいのは
+    // 「batch が storage エラーなしで動いたか」なので、これで足りる。
+    const lastOkPart = !storageError
+      ? { lastOkAt: checkedAt }
+      : cursor.lastOkAt
+        ? { lastOkAt: cursor.lastOkAt }
+        : {};
     const nextCursor =
       storageError && !quarantined
-        ? { offset: cursor.offset, ...directoryPart, storageErrorStreak }
-        : { offset: selected.nextOffset, ...directoryPart };
+        ? { offset: cursor.offset, ...directoryPart, storageErrorStreak, ...lastOkPart }
+        : { offset: selected.nextOffset, ...directoryPart, ...lastOkPart };
     const cursorSaved = await writeReverifyCursor(nextCursor);
     const summary = summarize(runId, outcomes, directoryResult.summary);
     // 接続先の診断 (ホスト名と採用 env 名のみ)。env を切り替えたつもりで旧プロキシに残っていた
