@@ -71,6 +71,7 @@ type OwnedFixture = typeof OWNED & {
   docsUrl?: string;
   license?: string;
   hidden?: boolean;
+  pendingFirstVerification?: boolean;
   paywallSnippet?: string;
   verification?: { authFailures?: number };
 };
@@ -542,11 +543,11 @@ describe('X402DiscoveryView', () => {
     expect(docs).toHaveAttribute('href', compared.docsUrl);
     expect(docs).toHaveAttribute('target', '_blank');
     expect(docs).toHaveAttribute('rel', 'noreferrer noopener');
-    expect(screen.queryByText('検証: 2日前')).not.toBeInTheDocument();
+    expect(screen.queryByText('自動確認: 2日前')).not.toBeInTheDocument();
     expect(screen.queryByText('更新: 2026-07-13')).not.toBeInTheDocument();
     expect(screen.queryByText('利用条件: Commercial use with attribution.')).not.toBeInTheDocument();
     openDetails(card);
-    expect(screen.getByText('検証: 2日前')).toHaveAttribute('datetime', compared.verifiedAt);
+    expect(screen.getByText('自動確認: 2日前')).toHaveAttribute('datetime', compared.verifiedAt);
     expect(screen.getByText('更新: 2026-07-13')).toHaveAttribute('datetime', compared.updatedAt);
     expect(screen.getByText('利用条件: Commercial use with attribution.')).toBeInTheDocument();
   });
@@ -638,6 +639,43 @@ describe('X402DiscoveryView', () => {
     const hidden = screen.getByText('隠れた掲載 1').closest('li')!;
     expect(within(hidden).getByText('非表示')).toBeInTheDocument();
     expect(within(hidden).queryByText('公開中')).not.toBeInTheDocument();
+  });
+
+  // PR #954: 登録の probe が判定不能だった新規掲載は hidden + pendingFirstVerification。違反ではないので
+  // 「非表示 (要対応)」ではなく「公開待ち」と出し、件数も非表示と分ける。直し方 (要対応の黄色の枠) は出さない。
+  it('owner: 最初の自動の確認を待つ掲載は「公開待ち」と案内を出し、非表示とは数えない', async () => {
+    renderAsOwner([
+      OWNED,
+      { ...OWNED, id: 'res-2', url: 'https://api.example.jp/paid/h1', description: '隠れた掲載', hidden: true, paywallSnippet: 'snip' },
+      {
+        ...OWNED, id: 'res-3', url: 'https://api.example.jp/paid/p1', description: '公開待ちの掲載',
+        hidden: true, pendingFirstVerification: true, paywallSnippet: 'snip',
+      },
+    ]);
+    const heading = await screen.findByRole('heading', { name: 'あなたの登録' });
+    const header = heading.parentElement!;
+    expect(within(header).getByText('公開中 1')).toBeInTheDocument();
+    expect(within(header).getByText('非表示 1')).toBeInTheDocument();
+    expect(within(header).getByText('公開待ち 1')).toBeInTheDocument();
+    const pending = screen.getByText('公開待ちの掲載').closest('li')!;
+    expect(within(pending).getByText('公開待ち')).toBeInTheDocument();
+    expect(within(pending).queryByText('非表示')).not.toBeInTheDocument();
+    expect(within(pending).getByText(
+      '最初の自動の確認を待っています。ゲートを置くと、1 時間ごとの自動の確認が OpenPay の 402 を確かめたあと、カタログに載ります。',
+    )).toBeInTheDocument();
+    expect(within(pending).queryByText(/ゲートを確認できず/)).not.toBeInTheDocument();
+    expect(within(pending).queryByText('直し方')).not.toBeInTheDocument();
+    // 印のない hidden (モデレーション) は従来どおり。
+    const hidden = screen.getByText('隠れた掲載').closest('li')!;
+    expect(within(hidden).getByText('非表示')).toBeInTheDocument();
+    expect(within(hidden).getByText(/OpenPay の JPYC ゲートを確認できず、一時的に非表示です。/)).toBeInTheDocument();
+  });
+
+  it('owner: 公開待ちが無いときは「公開待ち N」の件数を出さない', async () => {
+    renderAsOwner([OWNED, { ...OWNED, id: 'res-2', url: 'https://api.example.jp/paid/h1', description: '隠れた掲載', hidden: true }]);
+    const heading = await screen.findByRole('heading', { name: 'あなたの登録' });
+    expect(within(heading.parentElement!).getByText('非表示 1')).toBeInTheDocument();
+    expect(within(heading.parentElement!).queryByText(/^公開待ち/)).not.toBeInTheDocument();
   });
 
   it('owner: 非表示が無いときは「非表示 N」の件数を出さない', async () => {
@@ -1000,6 +1038,56 @@ describe('X402DiscoveryView', () => {
       );
       expect(posts).toHaveLength(2);
     });
+  });
+
+  // PR #954: OpenPay 方式の 402 だが JPYC の受取先などが登録と違う URL は 422 gate_accept_mismatch (mismatch に項目名)。
+  it('gate_accept_mismatch 422 → 専用の文言に不一致の項目名を出す', async () => {
+    state.connected = true;
+    state.address = '0x2222222222222222222222222222222222222222';
+    state.signedIn = true;
+    global.fetch = vi.fn(async (url: string, init?: RequestInit) => {
+      const u = String(url);
+      const method = init?.method ?? 'GET';
+      if (u === '/api/facilitator/resources' && method === 'POST') {
+        return { ok: false, status: 422, json: async () => ({ error: 'gate_accept_mismatch', mismatch: 'payTo' }) };
+      }
+      if (u === '/api/facilitator/resources') return { ok: true, json: async () => ({ resources: [] }) };
+      return { ok: true, json: async () => ({ items: [] }) };
+    }) as unknown as typeof fetch;
+    renderView();
+    fireEvent.click(await screen.findByRole('checkbox'));
+    fireEvent.click(screen.getByRole('button', { name: '登録する' }));
+    expect(
+      await screen.findByText(
+        'この URL の 402 が示す JPYC の受取先・チェーン・トークン・forwarder が登録内容と一致しません (payTo)。ゲートの設定を確かめてから、もう一度登録してください。',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/操作に失敗しました/)).not.toBeInTheDocument();
+  });
+
+  // PR #954: 登録の probe が判定不能なら 201 で hidden + pendingFirstVerification。「載った」と読ませない完了文言にする。
+  it.each([
+    [true, '登録しました。ゲートを置くと、自動の確認が OpenPay の 402 を確かめたあとカタログに載ります。'],
+    [false, '登録しました。'],
+  ])('登録の完了文言: pendingFirstVerification=%s', async (pendingFirstVerification, expected) => {
+    state.connected = true;
+    state.address = '0x2222222222222222222222222222222222222222';
+    state.signedIn = true;
+    global.fetch = vi.fn(async (url: string, init?: RequestInit) => {
+      const u = String(url);
+      const method = init?.method ?? 'GET';
+      if (u === '/api/facilitator/resources' && method === 'POST') {
+        const body = JSON.parse(String(init?.body ?? '{}'));
+        const resource = pendingFirstVerification ? { ...body, hidden: true, pendingFirstVerification: true } : body;
+        return { ok: true, status: 201, json: async () => ({ resource, paywallSnippet: 'snippet' }) };
+      }
+      if (u === '/api/facilitator/resources') return { ok: true, json: async () => ({ resources: [] }) };
+      return { ok: true, json: async () => ({ items: [] }) };
+    }) as unknown as typeof fetch;
+    renderView();
+    fireEvent.click(await screen.findByRole('checkbox'));
+    fireEvent.click(screen.getByRole('button', { name: '登録する' }));
+    expect(await screen.findByText(expected)).toBeInTheDocument();
   });
 
   it.each(['missing', 'rejected', 'pending'] as const)('D2: clipboard %s never reports copied', async (mode) => {

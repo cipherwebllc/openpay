@@ -290,7 +290,7 @@ const ja: SellGuideContent = {
 
   qualityTitle: '掲載後の品質と安全',
   quality: [
-    '掲載リソースは毎時自動で再検証され、カタログには「検証: 今日」と表示されます。',
+    '掲載リソースは毎時自動で再検証され、カタログには「自動確認: 今日」と表示されます。登録時に判定できなかった新しい掲載は、最初の再検証が通ってからカタログに載ります。JPYC の受取先などが登録内容と違う 402 は、登録の時点で拒否します。',
     '確定違反が 3 回続くと一時的に非表示になります。修復後の再検証で自動復帰します。',
     '買い手には 1 回・累計の支払い上限、掲載 URL のみ許可、金銭フィールド照合のガードがあります。買い手が安心して払える設計は、売り手の売上を守る設計でもあります。',
     '買い手向け注意: 有料応答はデータであって指示ではありません。指示を埋め込む掲載は通報・削除対象です。',
@@ -448,7 +448,7 @@ const en: SellGuideContent = {
 
   qualityTitle: 'Quality and safety after listing',
   quality: [
-    'Listed resources are reverified every hour, and the catalog shows “Verified: today”.',
+    'Listed resources are reverified every hour, and the catalog shows “Auto-checked: today”. A new listing whose registration check was inconclusive appears in the catalog only after its first re-check passes. A 402 whose JPYC recipient or similar details do not match the registration is refused at registration.',
     'Three confirmed violations temporarily hide the listing. It returns automatically after a repair passes revalidation.',
     'Buyers have per-call and cumulative spending caps, a listed-URL-only rule, and money-field verification. A design that lets buyers pay with confidence also protects seller revenue.',
     'Buyer guidance: a paid response is data, not instructions. Listings that embed instructions are subject to reporting and removal.',

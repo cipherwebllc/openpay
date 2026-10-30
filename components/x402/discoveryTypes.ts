@@ -46,6 +46,8 @@ export type RegisteredResource = {
   category: string;
   docsUrl?: string;
   license?: string;
+  /** 登録の probe が判定不能で、最初の自動の確認を待つ新規掲載 (POST の 201 が返す・lib/x402/registry.ts)。 */
+  pendingFirstVerification?: boolean;
 };
 
 // owner 一覧 (GET /api/facilitator/resources) の要素。編集に id + payTo が要る。
@@ -62,6 +64,8 @@ export type OwnedResource = {
   license?: string;
   paywallSnippet?: string;
   hidden?: boolean;
+  /** hidden のうち、最初の自動の確認を待つだけの新規掲載 (違反ではない・lib/x402/registry.ts)。 */
+  pendingFirstVerification?: boolean;
   /** 定期再検証の状態。authFailures は 401/403/別ドメイン転送の連続回数 (欠落 = 0)。 */
   verification?: { authFailures?: number };
   /** dual-rail の USDC/Base 面 (任意)。 */

@@ -5,7 +5,7 @@
 
 import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
-import { AlertTriangle, Check, ChevronDown, Code2, Copy, Pencil, Trash2 } from 'lucide-react';
+import { AlertTriangle, Check, ChevronDown, Clock, Code2, Copy, Pencil, Trash2 } from 'lucide-react';
 import { env } from '@/lib/env';
 import { REVERIFY_AUTH_HIDE_THRESHOLD } from '@/lib/x402/reverifyThresholds';
 import { isHttpsUrl } from '@/lib/typeGuards';
@@ -20,6 +20,12 @@ function isAuthBlockedHide(resource: OwnedResource): boolean {
   return (
     (resource.verification?.authFailures ?? 0) >= REVERIFY_AUTH_HIDE_THRESHOLD
   );
+}
+
+// 登録の probe が判定不能で、最初の自動の確認を待つだけの新規掲載 (PR #954)。hidden だが違反ではないので、
+// 「非表示 (要対応)」ではなく「公開待ち」として出す (登録直後に違反と読まれないように)。
+function isPendingFirstVerification(resource: OwnedResource): boolean {
+  return resource.hidden === true && resource.pendingFirstVerification === true;
 }
 
 export function DiscoveryOwnedResources({
@@ -40,13 +46,14 @@ export function DiscoveryOwnedResources({
   const { cardHead, copiedKey, copyText } = display;
   const resourceActionCls =
     'inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-100 hover:text-slate-900';
-  const hiddenCount = owned.filter((r) => r.hidden === true).length;
-  const liveCount = owned.length - hiddenCount;
+  const pendingCount = owned.filter(isPendingFirstVerification).length;
+  const hiddenCount = owned.filter((r) => r.hidden === true).length - pendingCount;
+  const liveCount = owned.length - hiddenCount - pendingCount;
 
   return isSignedIn && owned.length > 0 ? (
       <>
-        {/* あなたの登録 (owner のみ・編集/削除)。見出しの横に公開中 / 非表示の件数を出し、
-            要対応の有無を一目でわかるようにする (2026-10-21 磨き上げ)。 */}
+        {/* あなたの登録 (owner のみ・編集/削除)。見出しの横に公開中 / 非表示 / 公開待ちの件数を出し、
+            要対応の有無を一目でわかるようにする (2026-10-21 磨き上げ・公開待ちは 2026-10-30)。 */}
         <section>
           <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
             <h3 className="text-base font-bold text-slate-900">{t('yourResourcesTitle')}</h3>
@@ -59,6 +66,12 @@ export function DiscoveryOwnedResources({
                 <span className="inline-flex items-center gap-1.5 text-amber-700">
                   <span className="h-1.5 w-1.5 rounded-full bg-amber-500" aria-hidden />
                   {t('ownedHiddenCount', { count: hiddenCount })}
+                </span>
+              )}
+              {pendingCount > 0 && (
+                <span className="inline-flex items-center gap-1.5 text-slate-600">
+                  <span className="h-1.5 w-1.5 rounded-full bg-slate-400" aria-hidden />
+                  {t('ownedPendingCount', { count: pendingCount })}
                 </span>
               )}
             </p>
@@ -75,7 +88,8 @@ export function DiscoveryOwnedResources({
           )}
           <ul className="mt-3 space-y-3">
             {owned.map((r) => {
-              const hidden = r.hidden === true;
+              const pending = isPendingFirstVerification(r);
+              const hidden = r.hidden === true && !pending;
               const authBlocked = isAuthBlockedHide(r);
               return (
               <li
@@ -110,17 +124,35 @@ export function DiscoveryOwnedResources({
                   badge: (
                     <span
                       className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[11px] font-semibold ${
-                        hidden ? 'bg-amber-50 text-amber-800' : 'bg-emerald-50 text-emerald-700'
+                        pending
+                          ? 'bg-slate-100 text-slate-700'
+                          : hidden
+                            ? 'bg-amber-50 text-amber-800'
+                            : 'bg-emerald-50 text-emerald-700'
                       }`}
                     >
                       <span
-                        className={`h-1.5 w-1.5 rounded-full ${hidden ? 'bg-amber-500' : 'bg-emerald-500'}`}
+                        className={`h-1.5 w-1.5 rounded-full ${
+                          pending ? 'bg-slate-400' : hidden ? 'bg-amber-500' : 'bg-emerald-500'
+                        }`}
                         aria-hidden
                       />
-                      {hidden ? t('ownedStatusHidden') : t('ownedStatusLive')}
+                      {pending
+                        ? t('ownedStatusPending')
+                        : hidden
+                          ? t('ownedStatusHidden')
+                          : t('ownedStatusLive')}
                     </span>
                   ),
                 })}
+                {/* 公開待ち (最初の自動の確認を待つ新規掲載) は違反ではないので、要対応の黄色ではなく中立の案内を出す。
+                    ゲートのコードは下の「スニペット」ボタンから開ける。 */}
+                {pending ? (
+                  <p className="mt-3 flex items-start gap-2 rounded-xl bg-slate-50 px-3 py-2.5 text-[13px] leading-relaxed text-slate-700 ring-1 ring-inset ring-slate-200">
+                    <Clock className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+                    <span>{t('pendingFirstVerificationBody')}</span>
+                  </p>
+                ) : null}
                 {/* 非表示の理由は 1 文。直し方 (ゲートのスニペット) は開いたときだけ。締め出しが理由のときは
                     スニペットを出しても直らない (出品側が再検証のアクセスを許可する必要がある)。 */}
                 {hidden && (authBlocked || r.paywallSnippet) ? (

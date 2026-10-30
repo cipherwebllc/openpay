@@ -96,35 +96,37 @@ const PROFILES: Profile[] = [
 // さらに provider をイベントごとに固定したので、USDC 版の x-agent-usage の「改名で変わる」を直して再採取 (差分はその 1 文だけ)。
 // USDC 版の 1 件 (/api/paid/usdc/japan-web3-directory/{slug}・2026-10-21) の operation を足したので、directory を含む構成を再採取。
 // 同日、Directory のチェーン語彙に arc を足した (chain クエリの enum に arc が増えただけ) ので、directory を含む構成を再採取。
+// 2026-10-30: DiscoveryItem.verifiedAt の説明を「最後に通った自動の再検証 (人の審査ではない)」に直したので、facilitator を含む構成
+// (late-mutation を含む 11 個) を再採取。説明だけを main の文に戻すと全 17 件が旧 hash のまま通ることを確かめてから採り直した。
 const EXPECTED_SHA256: Record<string, string> = {
   'all-on':
-    '7dc8223b6754c843351338f1228a7202ad78b7ba203e77633fc86edf1a04b21b',
+    '2dd15e51cb383b3434cccbf2780eab074742598d7baa0a9034500cdfb1a82ee0',
   'all-on+arc':
-    'c498169c84db18fb0ad80a9d6030e830590c1f64a2817f8bdcb75cf592a693cc',
+    'ff179a0b7963e46699ea44dbe08bd4b04e25aabfa028fc99892da887f285ff69',
   'all-on+mainnet':
-    '4e08b283274af68dba7bd893f3e47babe593ce78f66a529607c7dab55135e395',
+    '96387750c7991b9fbff85f905262d7dd2b64f78253a001f554dc1a9b9f3f5a3e',
   'all-on+mainnet+avalanche+ethereum':
-    'b0bcf7b1b83dee202e4059111aff6ee3269027dbbe5ca27fa86d892c806fe405',
+    'e560aa9af50efe4a50710adc514d2c3846795303371263b83deeac1d437f02e0',
   'all-on+fee':
-    'adfab6163ade8c4a0c5a9e913e7b5a3c72170f9a014e63825cfff831ff2411f7',
+    'e307ce65426afe0cf380f6eb284746954cbc02daf459022926a9c550325c9828',
   'all-on+default-hello-price':
-    '46c3f6ce901a5afa5944a07bc14aa4fa3eb6fb2f87c98b9f90307e32503f3ede',
+    'b790559d7e5a36c1b45d31e050f5ef150eae14ff5be8ea238f567eec531b4f78',
   'all-on+invalid-hello-price-unlisted':
-    '98ba151eb548b0bb8c38d5565523268c5ddae80e08ede3b530dddf835cf8096d',
+    'c82e7cec7034e6129c4e0c23793c96765618b73e152faa20b192dd2192b4ca8e',
   'directory-only':
     '78c8c691430a4121bc4984230e768d6be1532e0485eb0b88eb3a2966b559f3b9',
   'facilitator-only':
-    '64073386c5203617849b7ff190501a211a49c7ab15961bf8245b483486e27e29',
+    '750832d0576964c77761012147d21de24a0f54909f1b175c1b1ae58094b9c980',
   'facilitator+shops':
-    '2ccfe094e2eb4a43854fc12f6c921fd0cf8d6772ea8d9a473485528ff308b1e9',
+    '351afb712a3c671da3420beb8b090c9d87e5d5b3ee6672edc3b8b2abe4090e31',
   'directory+facilitator':
-    'af78d1ad9d4e03dedd7a18a31c0da4cd7fef46d6d33326be46a03c2092cf34c8',
+    '861c6cfd98f9113dc0d18ba0ff43d679f84ef2001dafddd5114de8e9255926c8',
   'license-only':
     'bdf3b0b4b901d5174663e0a74ebd070fb202326f20cee6bf9c193779fa2ac250',
   'directory+license-child-only':
     '78c8c691430a4121bc4984230e768d6be1532e0485eb0b88eb3a2966b559f3b9',
   'late-mutation':
-    'f9af911e72db796994a0a32c9c545fa0b5059b185658ad7e213444f10c8d0355',
+    '7cf3fc518029d54abd9387cba7e0153e3410f267cc0820dfaeec7ada318f757e',
   'late-facilitator':
     '0e63c739ae51684c60d97eb6e4c558e6531c52ae726b7c8591edac3c910148d5',
 };

@@ -10,6 +10,8 @@ import {
   guideSellMetadata,
   sellGuideContentFor,
 } from '@/lib/sellGuide';
+import jaMessages from '@/messages/ja.json';
+import enMessages from '@/messages/en.json';
 
 const LOCALES = ['ja', 'en'] as const;
 
@@ -172,5 +174,17 @@ describe('SELL_GUIDE: SDK コードと x402 開示', () => {
     expect(SELL_GUIDE.en.subtitle).toContain('1%');
     expect(SELL_GUIDE.en.subtitle).toContain('minimum 1 JPYC');
     expect(SELL_GUIDE.en.subtitle).toContain("payer's side");
+  });
+});
+
+// 2026-10-30: 「掲載後の品質と安全」はカタログのカードの表示 (Facilitator.verifiedTodayMeta) を引用している。
+// カードの文言を変えたときにガイドの引用だけが古いまま残らないよう、実際の文言と照合する。
+describe('SELL_GUIDE: カタログの表示の引用', () => {
+  it('ja: カタログの「自動確認」の表示をそのまま引用する', () => {
+    expect(SELL_GUIDE.ja.quality[0]).toContain(`「${jaMessages.Facilitator.verifiedTodayMeta}」`);
+  });
+
+  it('en: カタログの表示をそのまま引用する', () => {
+    expect(SELL_GUIDE.en.quality[0]).toContain(`“${enMessages.Facilitator.verifiedTodayMeta}”`);
   });
 });

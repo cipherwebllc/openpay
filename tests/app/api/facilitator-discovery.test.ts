@@ -1453,9 +1453,12 @@ describe('registration probe outcomes', () => {
     for (const key of ['hidden', 'pendingFirstVerification', 'verification', 'merchant']) {
       expect(item).not.toHaveProperty(key);
     }
-    // owner の一覧には出る (hidden として)。
+    // owner の一覧には出る (hidden として)。印も返す: 出品者の画面はこれで「非表示」でなく「公開待ち」と出す
+    // (components/x402/DiscoveryOwnedResources.tsx)。
     const owned = (await (await resources.GET()).json()) as { resources: Array<{ id: string; hidden?: boolean }> };
-    expect(owned.resources).toEqual([expect.objectContaining({ id: resource.id, hidden: true })]);
+    expect(owned.resources).toEqual([
+      expect.objectContaining({ id: resource.id, hidden: true, pendingFirstVerification: true }),
+    ]);
   });
 
   it('openpay の 402 で受取先・チェーン・JPYC・forwarder が一致すれば従来どおりすぐ公開 (印なし)', async () => {

@@ -41,6 +41,8 @@ export function useDiscoveryOwner(address: string | undefined, isSignedIn: boole
   const [usdcReminder, setUsdcReminder] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [errorSnippet, setErrorSnippet] = useState('');
+  // gate_accept_mismatch のときにサーバーが返す不一致の項目名 (payTo / network / asset / forwarder)。
+  const [errorMismatch, setErrorMismatch] = useState('');
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   // 登録時 1 回きりだったスニペット表示を owner 一覧から再表示するためのトグル。
   const [snippetOpenId, setSnippetOpenId] = useState<string | null>(null);
@@ -123,7 +125,7 @@ export function useDiscoveryOwner(address: string | undefined, isSignedIn: boole
   const submitMutation = useMutation({
     mutationFn: async (): Promise<
       | { ok: true; wasEdit: boolean; usdcEnabled: boolean; resource: RegisteredResource; paywallSnippet: string }
-      | { ok: false; error: string; paywallSnippet: string }
+      | { ok: false; error: string; paywallSnippet: string; mismatch: string }
     > => {
       const payload = {
         url: form.url,
@@ -169,12 +171,14 @@ export function useDiscoveryOwner(address: string | undefined, isSignedIn: boole
           resource?: RegisteredResource;
           paywallSnippet?: string;
           error?: string;
+          mismatch?: string;
         };
         if (!res.ok || !body.resource) {
           return {
             ok: false,
             error: body.error ?? 'error',
             paywallSnippet: body.paywallSnippet ?? '',
+            mismatch: body.mismatch ?? '',
           };
         }
         return {
@@ -185,12 +189,13 @@ export function useDiscoveryOwner(address: string | undefined, isSignedIn: boole
           paywallSnippet: body.paywallSnippet ?? '',
         };
       } catch {
-        return { ok: false, error: 'error', paywallSnippet: '' };
+        return { ok: false, error: 'error', paywallSnippet: '', mismatch: '' };
       }
     },
     onMutate: () => {
       setError(null);
       setErrorSnippet('');
+      setErrorMismatch('');
       setNotice(null);
       setUsdcReminder(false);
       return { wallet: walletScope.current };
@@ -205,6 +210,7 @@ export function useDiscoveryOwner(address: string | undefined, isSignedIn: boole
       if (!result.ok) {
         setError(result.error);
         setErrorSnippet(result.paywallSnippet);
+        setErrorMismatch(result.mismatch);
         return;
       }
       // onSuccess の options は再描画で更新されるため、payload と同じ form から取得した値を使う。
@@ -265,7 +271,7 @@ export function useDiscoveryOwner(address: string | undefined, isSignedIn: boole
 
   return {
     form, setForm, formOpen, setFormOpen, registrationRef, editId, created, notice, setNotice,
-    usdcReminder, error, errorSnippet, confirmDeleteId, setConfirmDeleteId, snippetOpenId,
+    usdcReminder, error, errorSnippet, errorMismatch, confirmDeleteId, setConfirmDeleteId, snippetOpenId,
     setSnippetOpenId, attested, setAttested, ownedQuery, owned, onEdit, onCancelEdit,
     submitMutation, deleteMutation,
   };

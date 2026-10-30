@@ -130,7 +130,8 @@ export const DISCOVERY_OPENAPI_SCHEMAS = {
       verifiedAt: {
         type: ['string', 'null'],
         format: 'date-time',
-        description: 'Last successful OpenPay gate verification, or null when not yet verified.',
+        description:
+          "The last time OpenPay's automated re-check passed (not a human review), or null when no re-check has passed yet.",
       },
     },
   },
