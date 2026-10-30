@@ -61,7 +61,9 @@
     "pay": "Pay",
     "sell": "Sell",
     "store": "Store",
-    "me": "My Page"
+    "me": "My Page",
+    "primaryNavLabel": "Main menu",
+    "bottomNavLabel": "Bottom menu"
   },
   "Landing": {
     "tagline": "Payment QR · Register · Mobile ordering",
@@ -1654,8 +1656,7 @@
     "copyAria": "Copy {label}"
   },
   "InfoTooltip": {
-    "openLabel": "Show details",
-    "closeLabel": "Close details"
+    "detailsLabel": "{label} details"
   },
   "SuccessOverlay": {
     "title": "Payment complete",
@@ -1832,9 +1833,11 @@
     "badge": "Beta",
     "body": "This service is in beta. If you use it for real transactions, you must start with small test amounts. Blockchain transactions are, in principle, irreversible.",
     "bodyShort": "Beta — blockchain transfers are, in principle, irreversible.",
-    "moreLink": "Details"
+    "moreLink": "Details",
+    "dismiss": "Dismiss"
   },
   "Footer": {
+    "navLabel": "Legal and info",
     "copyright": "© {year} {company}",
     "links": {
       "guides": "Guides",

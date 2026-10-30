@@ -149,7 +149,7 @@ test.describe('landing / (LP)', () => {
       'BottomNav は md 未満専用',
     );
     await page.goto('/ja');
-    const bottomNav = page.getByRole('navigation', { name: 'bottom navigation' });
+    const bottomNav = page.getByRole('navigation', { name: '画面下のメニュー' });
     await expect(bottomNav).toBeVisible();
     // ホームへの戻りは AppHeader 左上のロゴクリックに集約。Nav 1 slot 目は「決済」。
     // Store 項目は NEXT_PUBLIC_ENABLE_CREATOR_STORE 連動のため CI (flag OFF・掟 2) では

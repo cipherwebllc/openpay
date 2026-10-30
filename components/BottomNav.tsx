@@ -16,8 +16,9 @@ export function BottomNav() {
   const rest = pathRestForLocale(pathname, locale);
 
   return (
+    // ランドマーク名は messages から読む (以前は英語の直書きで /ja でも英語が読まれていた・全レビュー第 8 回 D-4)。
     <nav
-      aria-label="bottom navigation"
+      aria-label={t('bottomNavLabel')}
       className="fixed bottom-0 left-0 right-0 z-20 border-t border-slate-200/70 bg-white/85 backdrop-blur-md supports-[backdrop-filter]:bg-white/75 md:hidden print:hidden"
       style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
     >

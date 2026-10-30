@@ -55,8 +55,9 @@ export function SiteFooter() {
     // pb は mobile で AppShell の fixed BottomNav (~52px) と被らないよう余裕を取る。
     // md 以上は BottomNav が消えるため通常 pb-10 で OK。
     <footer className="mx-auto mt-12 w-full max-w-5xl px-4 pb-24 text-center text-xs text-slate-500 md:pb-10 print:hidden">
+      {/* ランドマーク名は messages から読む (以前は英語の直書きで /ja でも英語が読まれていた・全レビュー第 8 回 D-4)。 */}
       <nav
-        aria-label="Legal"
+        aria-label={t('navLabel')}
         className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2"
       >
         {/* 取引履歴は AppShell のメインメニューにあるため Footer からは外す。 */}

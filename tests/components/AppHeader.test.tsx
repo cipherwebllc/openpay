@@ -89,17 +89,17 @@ describe('AppHeader: ブランド / ナビ / 右側コントロール', () => {
     ).toBeInTheDocument();
   });
 
-  it('TopNav (primary navigation) と Bottom nav と分かれた role を持つ', () => {
+  it('TopNav (メインメニュー) と Bottom nav と分かれた role を持つ', () => {
     renderWithIntl(<AppHeader />);
-    // TopNav の aria-label
+    // TopNav の aria-label は messages の Nav.primaryNavLabel (全レビュー第 8 回 D-4 で英語直書きから移した)
     expect(
-      screen.getByRole('navigation', { name: 'primary navigation' }),
+      screen.getByRole('navigation', { name: 'メインメニュー' }),
     ).toBeInTheDocument();
   });
 
   it('TopNav: 4 区分 (決済 / 販売 / Store / マイページ) — P4 fence', () => {
     renderWithIntl(<AppHeader />);
-    const nav = screen.getByRole('navigation', { name: 'primary navigation' });
+    const nav = screen.getByRole('navigation', { name: 'メインメニュー' });
     // 各 link href が /ja prefix で正しい (Store は navItems の flag mock=ON 前提。
     // x402 flag とは独立 — AIストア単独項目は廃止し Store の AI カテゴリー経由)
     const hrefs = Array.from(nav.querySelectorAll('a')).map((a) =>

@@ -18,8 +18,9 @@ export function TopNav() {
   const items = DESKTOP_NAV_ITEMS;
 
   return (
+    // ランドマーク名は messages から読む (以前は英語の直書きで /ja でも英語が読まれていた・全レビュー第 8 回 D-4)。
     <nav
-      aria-label="primary navigation"
+      aria-label={t('primaryNavLabel')}
       className="hidden items-center gap-1 text-sm font-medium md:flex"
     >
       {items.map((item) => {

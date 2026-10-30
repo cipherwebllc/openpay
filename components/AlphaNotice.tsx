@@ -11,7 +11,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useLocale, useTranslations } from 'next-intl';
+import { useTranslations } from 'next-intl';
 import { useEffect, useState } from 'react';
 import { TriangleAlert, X } from 'lucide-react';
 import { isHandlePagePath } from '@/lib/handlePath';
@@ -20,7 +20,6 @@ const DISMISS_KEY = 'openpay:alphaNoticeDismissed:v1';
 
 export function AlphaNotice() {
   const t = useTranslations('AlphaNotice');
-  const locale = useLocale();
   // @handle (クリエイターの link-in-bio / 店舗) は本人が主役の入口ページ。共通の amber バナーは
   // 世界観を削ぐので出さず、取消不可の開示はページ側フッターに簡潔に再掲する (開示自体は不変)。
   // pathname=null (router provider 無し=テスト等) は通常ページ扱いで従来どおり表示。
@@ -77,7 +76,8 @@ export function AlphaNotice() {
             }
             setDismissed(true);
           }}
-          aria-label={locale === 'ja' ? '閉じる' : 'Dismiss'}
+          // 閉じるボタンの名前も messages から (以前は locale の自前分岐の直書き・全レビュー第 8 回 D-4)。
+          aria-label={t('dismiss')}
           className="-mr-1 mt-px flex-shrink-0 rounded p-0.5 text-amber-500 transition-colors hover:bg-amber-100 hover:text-amber-700"
         >
           <X className="h-3.5 w-3.5" aria-hidden />

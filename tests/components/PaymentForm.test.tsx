@@ -2913,6 +2913,10 @@ it.each(['notify-pending', 'terminal', 'prepared'] as const)('A2c %s order from 
 // コードで捕捉し、ja/en × 負担者 × gas 提供者 × split の section outerHTML を固定する。
 // InfoTooltip は閉じた状態では本文を DOM に出さないため、全て開いた状態も併せて固定する
 // (popover の id は乱数なので正規化)。
+// 2026-10-30 再採取 (全レビュー第 8 回 D-2): InfoTooltip のボタンの aria-label を「{行のラベル} の詳細」/
+// 「{label} details」の固定に、class に押せる範囲 (relative・after:absolute・after:-inset-[5px]) を足したので撮り直した。
+// 旧 snapshot と新 snapshot をこの 2 属性だけ正規化して比べると全件一致し (他の DOM は不変)、各ボタンの名前は
+// 直前の dt のラベル + 接尾辞と一致することを確かめた。
 describe('PaymentForm — R14 内訳行 fixture (ja/en)', () => {
   const B = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
   const C = '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';

@@ -61,7 +61,9 @@
     "pay": "決済",
     "sell": "販売",
     "store": "Store",
-    "me": "マイページ"
+    "me": "マイページ",
+    "primaryNavLabel": "メインメニュー",
+    "bottomNavLabel": "画面下のメニュー"
   },
   "Landing": {
     "tagline": "決済QR・レジ・モバイルオーダー",
@@ -1654,8 +1656,7 @@
     "copyAria": "{label} をコピー"
   },
   "InfoTooltip": {
-    "openLabel": "詳細を表示",
-    "closeLabel": "詳細を閉じる"
+    "detailsLabel": "{label} の詳細"
   },
   "SuccessOverlay": {
     "title": "決済完了",
@@ -1832,9 +1833,11 @@
     "badge": "Beta",
     "body": "本サービスはベータ版です。実取引で利用する場合は、必ず少額からテスト送信してください。ブロックチェーン上の送金は原則として取消できません。",
     "bodyShort": "ベータ版 — ブロックチェーン送金は原則取消不可。",
-    "moreLink": "詳細"
+    "moreLink": "詳細",
+    "dismiss": "閉じる"
   },
   "Footer": {
+    "navLabel": "規約と案内",
     "copyright": "© {year} {company}",
     "links": {
       "guides": "ガイド",

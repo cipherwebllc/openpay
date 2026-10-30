@@ -22,7 +22,9 @@ export function breakdownRow(row: BreakdownRowModel, key?: Key) {
       key={key}
       label={row.label}
       labelExtra={
-        row.tooltip === undefined ? undefined : <InfoTooltip text={row.tooltip} />
+        row.tooltip === undefined ? undefined : (
+          <InfoTooltip text={row.tooltip} label={row.label} />
+        )
       }
       value={row.value}
       strong={row.strong}
