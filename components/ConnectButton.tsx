@@ -7,11 +7,7 @@ import { shortAddress } from '@/lib/format';
 import { walletIconSrc } from '@/lib/walletIcons';
 import { useVisibleConnectors } from '@/hooks/useVisibleConnectors';
 import { isMobilePlatform, metamaskDappLink } from '@/lib/walletDeepLink';
-
-function isUserRejection(err: Error): boolean {
-  const msg = err.message.toLowerCase();
-  return msg.includes('user rejected') || msg.includes('connection request reset');
-}
+import { isConnectRejection } from '@/lib/walletErrors';
 
 export function ConnectButton({
   variant = 'primary',
@@ -163,7 +159,7 @@ export function ConnectButton({
         </div>
       )}
 
-      {error && !isUserRejection(error) && (
+      {error && !isConnectRejection(error) && (
         <p className="text-sm text-red-600">
           {t('connectError', { message: error.message })}
         </p>

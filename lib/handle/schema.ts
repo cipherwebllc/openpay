@@ -135,13 +135,3 @@ export interface HandleRecord {
   createdAt: number;
   updatedAt: number;
 }
-
-export function isHttpsUrl(value: string): boolean {
-  let u: URL;
-  try {
-    u = new URL(value);
-  } catch {
-    return false;
-  }
-  return u.protocol === 'https:';
-}

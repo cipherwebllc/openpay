@@ -19,6 +19,7 @@ import {
 } from '@/lib/handle';
 import { COLOR_PATTERN, DECIMAL_PATTERN, TIP_PRESET_MAX, resolveTipCapability } from '@/lib/url';
 import { crossChainAllowed } from '@/lib/url/shared';
+import { isHttpsUrl } from '@/lib/typeGuards';
 
 export interface HandlePublishPayload {
   config: HandleTipConfigUpdate;
@@ -30,16 +31,6 @@ export interface BuildPublishPayloadOptions {
   receiver: string | null;
   enableJpycAvalanche: boolean;
   arcTip?: boolean;
-}
-
-function isHttpsUrl(value: string): boolean {
-  let url: URL;
-  try {
-    url = new URL(value);
-  } catch {
-    return false;
-  }
-  return url.protocol === 'https:';
 }
 
 export function buildPublishProfile(draft: HandleProfileDraft): HandleProfile {

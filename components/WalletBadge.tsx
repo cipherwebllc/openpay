@@ -14,11 +14,7 @@ import { walletIconSrc } from '@/lib/walletIcons';
 import { env } from '@/lib/env';
 import { useVisibleConnectors } from '@/hooks/useVisibleConnectors';
 import { useSiweSession } from '@/hooks/useSiweSession';
-
-function isUserRejection(err: Error): boolean {
-  const msg = err.message.toLowerCase();
-  return msg.includes('user rejected') || msg.includes('connection request reset');
-}
+import { isConnectRejection } from '@/lib/walletErrors';
 
 export function WalletBadge() {
   const { address, isConnected, chain } = useAccount();
@@ -204,7 +200,7 @@ export function WalletBadge() {
               </button>
             ))
           )}
-          {error && !isUserRejection(error) && (
+          {error && !isConnectRejection(error) && (
             <p className="px-3 pb-2 pt-1 text-xs text-red-600">
               {tConnect('connectError', { message: error.message })}
             </p>

@@ -12,7 +12,8 @@ import { tokyoDateKey } from '@/lib/shopTime';
 import { FIRST_PARTY_SUMMARY_JA } from '@/lib/x402/catalogSummaryJa';
 import { X402_DEMO_PATH } from '@/lib/x402/demoPath';
 import { AGENTIC_MARKET_URL, type UsdcCatalogItem } from '@/lib/x402/usdcCatalog';
-import { isHttpsUrl, type DiscoveryDisplay } from './discoveryDisplay';
+import { isHttpsUrl } from '@/lib/typeGuards';
+import type { DiscoveryDisplay } from './discoveryDisplay';
 import type { CatalogCurrency, CatalogEntry, DiscoveryItem } from './discoveryTypes';
 
 const EMPTY_DISCOVERY_ITEMS: DiscoveryItem[] = [];
