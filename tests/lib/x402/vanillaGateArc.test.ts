@@ -49,12 +49,20 @@ vi.mock('@/lib/x402/config', () => ({
 }));
 
 // resource 束縛 claim の KV は in-memory (vanillaGateFacilitator.test と同じ最小実装)。
-const kvHold = vi.hoisted(() => ({ store: new Map<string, string>(), claimed: 0, lastTtlSec: null as number | null }));
+const kvHold = vi.hoisted(() => ({
+  store: new Map<string, string>(),
+  claimed: 0,
+  lastTtlSec: null as number | null,
+  expires: [] as Array<{ key: string; ttlSec: number }>,
+  expireOk: true,
+  claimDown: false,
+}));
 vi.mock('@/lib/kv', async () => {
   const actual = await vi.importActual<typeof import('@/lib/kv')>('@/lib/kv');
   return {
     ...actual,
     kvSetNxGet: async (key: string, value: string, ttlSec: number) => {
+      if (kvHold.claimDown) return { ok: false, reason: 'network' };
       const existing = kvHold.store.get(key);
       if (existing !== undefined) return { ok: true, value: existing };
       kvHold.store.set(key, value);
@@ -65,6 +73,10 @@ vi.mock('@/lib/kv', async () => {
     kvEval: async (_script: string, keys: string[]) => {
       const had = kvHold.store.delete(keys[0]);
       return { ok: true, value: had ? 1 : 0 };
+    },
+    kvExpire: async (key: string, ttlSec: number) => {
+      kvHold.expires.push({ key, ttlSec });
+      return kvHold.expireOk ? { ok: true, value: 1 } : { ok: false, reason: 'network' };
     },
   };
 });
@@ -142,6 +154,9 @@ beforeEach(() => {
   kvHold.store.clear();
   kvHold.claimed = 0;
   kvHold.lastTtlSec = null;
+  kvHold.expires = [];
+  kvHold.expireOk = true;
+  kvHold.claimDown = false;
   configHold.arcEnabled = true;
   vi.stubGlobal('fetch', fetchMock);
   gatewayOk();
@@ -235,6 +250,33 @@ describe('vanillaGate Arc rail: 同じ署名の再送で content を動かさな
     const content = vi.fn<Content>(() => NextResponse.json({ ok: true }));
     expect((await payWith(ARC_ACCEPT, '0x33', content)).status).toBe(402);
     expect((await payWith(ARC_ACCEPT, '0x33', content)).status).toBe(200);
+    expect(content).toHaveBeenCalledTimes(2);
+  });
+
+  it('content が例外を投げたら束縛を戻す → 同じ署名の再挑戦は content が動く (支払いは起きていない)', async () => {
+    let calls = 0;
+    const content = vi.fn<Content>(() => {
+      if (++calls === 1) throw new Error('upstream exploded');
+      return NextResponse.json({ ok: true });
+    });
+    await expect(payWith(ARC_ACCEPT, '0x36', content)).rejects.toThrow('upstream exploded');
+    expect(kvHold.store.size).toBe(0);
+    expect((await payWith(ARC_ACCEPT, '0x36', content)).status).toBe(200);
+    expect(content).toHaveBeenCalledTimes(2);
+  });
+
+  it('束縛を延ばせなくても settle へ進む (付帯の KV 障害で検証済みの支払いを止めない)', async () => {
+    kvHold.expireOk = false;
+    const content = vi.fn<Content>(() => NextResponse.json({ ok: true }));
+    expect((await payWith(ARC_ACCEPT, '0x37', content)).status).toBe(200);
+    expect(fetchMock.mock.calls.at(-1)![0]).toMatch(/\/settle$/);
+  });
+
+  it('claim の KV が使えないときは従来どおり content と settle へ進む (再送の抑止は KV が動いているあいだだけ)', async () => {
+    kvHold.claimDown = true;
+    const content = vi.fn<Content>(() => NextResponse.json({ ok: true }));
+    const [a, b] = await Promise.all([payWith(ARC_ACCEPT, '0x38', content), payWith(ARC_ACCEPT, '0x38', content)]);
+    expect([a.status, b.status]).toEqual([200, 200]);
     expect(content).toHaveBeenCalledTimes(2);
   });
 
@@ -416,9 +458,10 @@ describe('vanillaGate Arc rail (Circle Gateway)', () => {
     expect(kvHold.claimed).toBe(0);
   });
 
-  it('Arc の claim TTL は署名の有効期間 (604900s)・Base は従来の 30 分', async () => {
+  it('Arc の claim は張った時点 15 分・settle に進む直前に署名の有効期間 (604900s) へ延ばす・Base は従来の 30 分', async () => {
     await pay(ARC_ACCEPT, '0x11');
-    expect(kvHold.lastTtlSec).toBe(604_900);
+    expect(kvHold.lastTtlSec).toBe(900);
+    expect(kvHold.expires).toEqual([{ key: [...kvHold.store.keys()][0], ttlSec: 604_900 }]);
     fetchMock.mockResolvedValue({
       ok: true,
       status: 200,
