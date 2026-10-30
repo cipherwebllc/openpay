@@ -24,6 +24,7 @@ import {
   readExternalReverifyTarget,
   readFirstPartyVerification,
   readReverifyCursor,
+  probeForPendingFirstVerification,
   probeForReverifyDetailed,
   releaseReverifyLock,
   REVERIFY_CONCURRENCY,
@@ -108,7 +109,21 @@ async function processTarget(
       };
     }
     const probedUrl = read.resource.url;
-    const { verdict, authClass } = await probeForReverifyDetailed(probedUrl);
+    // 最初の再検証を待つ新規掲載 (pendingFirstVerification) は、登録と同じ照合 (受取先・チェーン・JPYC・forwarder) を
+    // 通った 402 だけで公開に進める (E-3)。照合に使った受取先を CAS に渡し、probe の間にそれが編集されていたら結果を
+    // 捨てる。公開中・モデレーションの hidden の掲載は照合しない (verdict は従来どおり)。
+    const matchedPayTo = read.resource.pendingFirstVerification === true ? read.resource.payTo : undefined;
+    const probe = matchedPayTo !== undefined
+      ? await probeForPendingFirstVerification(probedUrl, matchedPayTo)
+      : await probeForReverifyDetailed(probedUrl);
+    const { verdict, authClass } = probe;
+    if ('mismatch' in probe && probe.mismatch) {
+      logger.warn('x402.reverify.pending_gate_mismatch', {
+        runId,
+        target: targetLabel(target),
+        mismatch: probe.mismatch,
+      });
+    }
     const apply = await applyExternalReverify(
       target.id,
       probedUrl,
@@ -116,6 +131,7 @@ async function processTarget(
       checkedAt,
       runId,
       authClass,
+      matchedPayTo,
     );
     const storageError = apply.applied
       ? apply.restoreBlocked === 'storage'

@@ -63,6 +63,9 @@ const EXPECTED = [
   // registry.ts CAS_DEACTIVATE_WITH_LEDGER (印つきの削除は台帳を書かない)
   "if o.url~=ARGV[5] then return -4 end; if o.hidden==true and o.pendingFirstVerification~=true then " +
     "redis.call('SET',KEYS[3],ARGV[3],'EX',ARGV[4]) end; ",
+  // reverify.ts REVERIFY_MATCHED_PAY_TO_GUARD (E-3: 照合に使った受取先が probe の間に編集されたら結果を捨てる)。
+  // 落ちると、payTo だけの PATCH の前に始まった probe の ok が、確かめていない新しい受取先のまま掲載を公開する。
+  "if ARGV[9]~='' and o.payTo~=ARGV[9] then return -5 end; ",
 ];
 // 閾値がソースと一致することは、畳み込まれた形か String(<n>) の形のどちらかで確認する。
 const THRESHOLD_FORMS = [
@@ -90,6 +93,12 @@ const COMPOSED = [
       "if (not hidden) or (ARGV[4]=='violation' and failures>=" + hide +
       ") or (ARGV[5]=='block' and authFailures>=" + authHide +
       ') then o.pendingFirstVerification=nil end; ',
+  },
+  {
+    // reverify.ts CAS_EXTERNAL_REVERIFY: 受取先の検査は URL の検査の直後・カウンタの遷移と保存の前 (E-3)。
+    name: '再検証の CAS が URL の直後に照合した受取先を確かめる',
+    after: 'if o.active~=true then return 0 end; if o.url~=ARGV[1] then return -3 end; ',
+    expected: "if ARGV[9]~='' and o.payTo~=ARGV[9] then return -5 end; ",
   },
 ];
 // 文が連結された壊れ方 (数字の直後に空白なしで if/local/return が続く)。
