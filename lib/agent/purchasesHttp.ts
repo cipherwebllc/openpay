@@ -1,7 +1,7 @@
 import 'server-only';
 
 import { NextResponse } from 'next/server';
-import { readSession } from '@/app/api/auth/siwe/_session';
+import { readSession } from '@/lib/siweSession';
 import { normalizeAgentAddress } from './purchaseAddress';
 import { agentPurchasesEnabled } from './purchasesEnv';
 import { agentPurchasesRateLimit, type PurchasesRoute } from './purchasesRateLimit';

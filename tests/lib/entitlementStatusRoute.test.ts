@@ -16,7 +16,7 @@ const hold = vi.hoisted(() => ({
   session: { ok: true, address: '0x' } as SessionResult,
 }));
 
-vi.mock('@/app/api/auth/siwe/_session', () => ({
+vi.mock('@/lib/siweSession', () => ({
   requireSession: async () => {
     hold.order.push('requireSession');
     return hold.session;

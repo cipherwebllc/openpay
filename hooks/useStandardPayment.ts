@@ -16,16 +16,12 @@ import {
 } from 'wagmi';
 import { classifyTransferReceipt } from '@/lib/replacedTransferReceipt';
 import type {
-  StandardPaymentIntentParams,
   StandardIntentStage,
+  StandardPaymentParams,
 } from '@/lib/paymentIntentStorage';
 
-export type StandardPaymentParams = StandardPaymentIntentParams & {
-  customer?: Address;
-  tip?: true;
-  chainSlug?: import('@/lib/chains').ChainSlug;
-  mode?: 'standard';
-};
+// 型の実体は lib/paymentIntentStorage.ts (lib/standardPaymentLog も使うため・F-4)。既存の import 先を保つため再エクスポートする。
+export type { StandardPaymentParams };
 
 type StandardPaymentResult = {
   merchantTxHash: Hex;

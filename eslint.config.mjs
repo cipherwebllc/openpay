@@ -61,19 +61,67 @@ const inLibRules = (facades) =>
     { regex: inLib, message },
   ]);
 
+// 層の向き (F-4): lib/ は app/・hooks/・components/ を import しない (型だけの import と型の中の import('…').X も)。
+// lib から route 固有の module や client hook を引くと、app 側を動かしただけで lib が連鎖して壊れる。
+// 共有する実体・型は lib/ へ移す (SIWE session → lib/siweSession.ts・下書きの型 → lib/handleProfileDraft.ts 等)。
+const LIB_LAYER_RULE = {
+  regex: '^(?:@/|(?:\\.\\./)+)(?:app|hooks|components)(?:/|$)',
+  message:
+    'lib/ から app/・hooks/・components/ を import しない (層の逆向き)。共有する実体・型は lib/ へ移す。',
+};
+
+// SIWE session (F-4): 実体は lib/siweSession.ts、app/ 側の入口は app/api/auth/siwe/_session.ts
+// (再エクスポートだけの facade)。lib/ は app/ を import できないので実体を直接 import する。
+// そのため上の FACADES と向きが逆で、facade を vi.mock しても実体を import する lib/* には届かず、
+// 本物の cookies()/kvGet に当たる。mock の対象は実体 1 つ、app/ の import 先は facade 1 つに固定する。
+const SIWE_SESSION_IMPL = '^(?:@/|(?:\\.\\.?/)+)lib/siweSession(?:\\.ts)?$';
+const SIWE_SESSION_FACADE = '^(?:@/|(?:\\.\\.?/)+)app/api/auth/siwe/_session(?:\\.ts)?$';
+const SIWE_SESSION_FACADE_FILE = 'app/api/auth/siwe/_session.ts';
+// app/ の route は facade から import する (facade 自身は除く)。
+const SIWE_IMPL_FROM_APP_RULE = {
+  regex: SIWE_SESSION_IMPL,
+  message:
+    "app/ は SIWE session を '@/app/api/auth/siwe/_session' (facade) から import する。'@/lib/siweSession' を直接 import するのは lib/ と tests だけ。",
+};
+// tests は facade を import も vi.mock もしない。mock するのは実体の '@/lib/siweSession'。
+const SIWE_FACADE_FROM_TESTS_RULE = {
+  regex: SIWE_SESSION_FACADE,
+  message:
+    "tests は SIWE session を '@/lib/siweSession' (実体) で vi.mock / import する。facade の mock は実体を直接 import する lib/* に届かない。",
+  viMock: true,
+};
+// vi.mock の第 1 引数 (文字列) を検査する vitest API。`vi` と別名の `vitest` の両方・
+// `vi.mock` と `vi['mock']` の両方の書き方を止める。
+const VI_OBJECTS = '^(?:vi|vitest)$';
+const VI_MODULE_APIS = '^(?:mock|doMock|unmock|doUnmock|importActual|importMock)$';
+
+// esquery の正規表現リテラルは `/` を含められないので \x2F で表す。
+const esqueryRegex = (regex) => `/${regex.replaceAll('/', '\\x2F')}/`;
+
 // flat config は同じ rule を後の block が丸ごと上書きするため、1 file に効く facade の規則は
 // 1 つの block にまとめて渡す。
 function restrictFacadeDeepImports(entries) {
+  const viApi = esqueryRegex(VI_MODULE_APIS);
   return {
     'no-restricted-imports': ['error', {
       patterns: entries.map(({ regex, message }) => ({ regex, message })),
     }],
-    // no-restricted-imports は動的 import() を検査しないため、文字列リテラルの import() も止める。
-    // esquery の正規表現リテラルは `/` を含められないので \x2F で表す。
-    'no-restricted-syntax': ['error', ...entries.map(({ regex, message }) => ({
-      selector: `ImportExpression[source.value=/${regex.replaceAll('/', '\\x2F')}/]`,
-      message,
-    }))],
+    // no-restricted-imports は動的 import() と型の中の import('…').X (TSImportType) を検査しないため、
+    // 文字列リテラルのこの 2 つも止める。
+    // viMock の entry は vi.mock('…') 等の第 1 引数も止める (import しなくても mock の対象になるため)。
+    'no-restricted-syntax': ['error', ...entries.flatMap(({ regex, message, viMock }) => [
+      { selector: `ImportExpression[source.value=${esqueryRegex(regex)}]`, message },
+      { selector: `TSImportType[argument.literal.value=${esqueryRegex(regex)}]`, message },
+      ...(viMock
+        ? [{
+          selector:
+            `CallExpression[callee.type='MemberExpression'][callee.object.name=${esqueryRegex(VI_OBJECTS)}]`
+            + `:matches([callee.computed=false][callee.property.name=${viApi}], [callee.computed=true][callee.property.value=${viApi}])`
+            + `[arguments.0.value=${esqueryRegex(regex)}]`,
+          message,
+        }]
+        : []),
+    ])],
   };
 }
 
@@ -100,15 +148,28 @@ const eslintConfig = [
     ignores: ['lib/**'],
     rules: restrictFacadeDeepImports(outsideLibRules(FACADES)),
   },
+  // app/ と tests/ は上の block を丸ごと上書きするので、facade の規則も同じ block に入れ直す。
+  {
+    files: LINTED_SOURCES.map((glob) => `app/${glob}`),
+    ignores: [SIWE_SESSION_FACADE_FILE],
+    rules: restrictFacadeDeepImports([...outsideLibRules(FACADES), SIWE_IMPL_FROM_APP_RULE]),
+  },
+  {
+    files: LINTED_SOURCES.map((glob) => `tests/${glob}`),
+    rules: restrictFacadeDeepImports([...outsideLibRules(FACADES), SIWE_FACADE_FROM_TESTS_RULE]),
+  },
   {
     files: LINTED_SOURCES.map((glob) => `lib/${glob}`),
     ignores: FACADES.flatMap((facade) => facade.family),
-    rules: restrictFacadeDeepImports(inLibRules(FACADES)),
+    rules: restrictFacadeDeepImports([...inLibRules(FACADES), LIB_LAYER_RULE]),
   },
   // 各 facade の family (facade file + 内部 module) は自分同士は自由・他 facade の内部へは facade 経由。
   ...FACADES.map((facade) => ({
     files: facade.family,
-    rules: restrictFacadeDeepImports(inLibRules(FACADES.filter((other) => other !== facade))),
+    rules: restrictFacadeDeepImports([
+      ...inLibRules(FACADES.filter((other) => other !== facade)),
+      LIB_LAYER_RULE,
+    ]),
   })),
 ];
 

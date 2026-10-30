@@ -95,7 +95,7 @@ vi.mock('@/lib/env', async (importOriginal) => {
 });
 
 // feed の認可 = SIWE セッション (受取アドレス本人)。外部認可ゆえ mock・受注ロジックは実コード。
-vi.mock('@/app/api/auth/siwe/_session', () => ({
+vi.mock('@/lib/siweSession', () => ({
   requireSession: async () => ({ ok: true, address: MERCHANT }),
 }));
 

@@ -22,7 +22,7 @@ vi.mock('@/lib/env', async (importOriginal) => {
     enableTipMessage: true,
   } };
 });
-vi.mock('@/app/api/auth/siwe/_session', () => ({ requireSession: h.session }));
+vi.mock('@/lib/siweSession', () => ({ requireSession: h.session }));
 vi.mock('@/lib/push/server', () => ({ sendPushToWallet: h.send }));
 vi.mock('@/lib/push/store', () => ({
   listPushSubscriptions: h.listSubscriptions,

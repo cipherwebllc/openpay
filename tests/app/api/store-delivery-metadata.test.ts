@@ -12,7 +12,7 @@ vi.mock('@/lib/kv', () => ({
   kvSet: async (key: string, value: string) => { h.store!.strings.set(key, value); return { ok: true, value: 'OK' }; },
   kvEval: h.eval,
 }));
-vi.mock('@/app/api/auth/siwe/_session', () => ({ requireSession: async () => ({ ok: true, address: '0x1111111111111111111111111111111111111111' }) }));
+vi.mock('@/lib/siweSession', () => ({ requireSession: async () => ({ ok: true, address: '0x1111111111111111111111111111111111111111' }) }));
 vi.mock('@/lib/net/ipHash', () => ({ clientIp: () => '192.0.2.1', hashIpBucket: () => 'hash' }));
 vi.mock('@/lib/relay/relayGuards', () => ({ checkIpRateLimit: async () => true, checkReadRateLimit: async () => true }));
 vi.mock('@/lib/handleStore', () => ({ listHandlesForOwner: async () => ['seller'] }));

@@ -36,7 +36,7 @@ vi.mock('@/lib/env', async (importOriginal) => {
   };
 });
 vi.mock('@/lib/kv', () => ({ isKvConfigured: () => h.kvConfigured }));
-vi.mock('@/app/api/auth/siwe/_session', () => ({
+vi.mock('@/lib/siweSession', () => ({
   requireSession: async () =>
     h.authed
       ? { ok: true, address: OWNER }
