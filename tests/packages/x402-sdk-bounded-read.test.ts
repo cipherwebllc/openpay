@@ -4,6 +4,7 @@
 // - 支払い後に超えたら例外ではなく、settlement・txHash・authorization nonce を持った構造化の結果を返す
 //   (払ったのに一般的な失敗に見えて、もう一度払う事故を防ぐ)。
 import { EventEmitter } from 'node:events';
+import { createRequire, syncBuiltinESMExports } from 'node:module';
 import { Readable } from 'node:stream';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -349,6 +350,52 @@ describe('openpay-x402-sdk bounded response reads (C-2)', () => {
     expect(node.destroyed).toBe(true);
     expect(node.readableEnded).toBe(false);
     expect(pushed).toBeLessThan(total);
+  });
+
+  it('the default transport (no fetchImpl) wraps the Node response so a late chunk after cancel cannot throw', async () => {
+    const sdk = await loadSdk();
+    const total = 4 * MiB;
+    let pushed = 0;
+    const node = Object.assign(
+      new Readable({
+        read() {
+          if (pushed >= total) {
+            this.push(null);
+            return;
+          }
+          pushed += 16 * KiB;
+          this.push(Buffer.alloc(16 * KiB, 0x78));
+        },
+      }),
+      { rawHeaders: [] as string[], statusCode: 402, statusMessage: 'Payment Required' },
+    );
+    // 既定 transport (network.mjs の nodeFetchWithSafeLookup) は呼ぶたびに import('node:https') の
+    // request を使う。builtin の ESM 側へ反映して差し替え、socket を開かずに response を渡す。
+    const https = createRequire(import.meta.url)('node:https') as { request: unknown };
+    const original = https.request;
+    const requested: string[] = [];
+    https.request = (url: unknown, _options: unknown, onResponse: (res: unknown) => void) => {
+      requested.push(String(url));
+      const request = Object.assign(new EventEmitter(), {
+        end: () => setImmediate(() => onResponse(node)),
+      });
+      return request;
+    };
+    syncBuiltinESMExports();
+    try {
+      const client = sdk.createOpenPayClient({ catalogTrust: false, lookup });
+      await expect(client.quote(RESOURCE)).rejects.toThrow('payment_target_response_too_large');
+    } finally {
+      https.request = original;
+      syncBuiltinESMExports();
+    }
+
+    expect(requested).toEqual([RESOURCE]);
+    expect(node.destroyed).toBe(true);
+    expect(pushed).toBeLessThan(total);
+    // cancel の後に response が持っていた chunk が届いた場合。Node 22 の Readable.toWeb はこれを閉じた
+    // controller へ enqueue して TypeError を投げた (buyer の process では uncaughtException)。
+    expect(() => node.emit('data', Buffer.from('late'))).not.toThrow();
   });
 
   it('the default transport body drops a chunk, end, error or close that arrives after cancel', async () => {
