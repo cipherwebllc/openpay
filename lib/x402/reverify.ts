@@ -244,10 +244,15 @@ export async function probeForReverifyDetailed(
 
 // 最初の再検証を待つ新規掲載 (pendingFirstVerification) の probe (E-3)。OpenPay 方式の 402 (ok_402_openpay) を、登録と
 // 同じ照合 (lib/x402/registrationGateMatch.ts・掲載の payTo を期待値にする) を通ったときだけ ok にする。合わなければ
-// pending_gate_mismatch (verdictClass は transient) = 印つきの hidden のまま、カウンタも動かさない。
+// pending_gate_mismatch (verdictClass は transient) = 印つきの hidden のまま、確定違反のカウンタ (failures) は動かさず、
+// lastOkAt も付けない。
 // 確定違反に数えない理由: 違反 3 連続で印が外れると (REVERIFY_PENDING_FIRST_VERIFICATION)、掲載は通常のモデレーションの
 // hidden になる。その復帰 (ok で hidden を解く) は照合しない (公開中・モデレーションの掲載の verdict はこの PR で変えない)
 // ので、同じ合わない 402 が 4 回目の再検証で ok になり、確かめていない受取先のまま公開される = 3 時間遅らせるだけになる。
+// 締め出しのカウンタ (authFailures) は、ほかの 402 と同じく authClass 'clear' で 0 に戻す (変えない): (1) B8 の軸は
+// verdict と独立で、素の 402 に届いた回は OpenPay・foreign・読めない 402 のどれでも clear (応答の中身で締め出しの判定を
+// 変えない)。(2) 残すと、403 と合わない 402 が交互に来るだけで締め出しが 6 回に積み上がり、閾値で印が外れて上の照合しない
+// 復帰に落ちる。0 に戻せば、印を外すには 6 回連続の締め出しが要る (公開中の掲載と同じ条件)。
 // 照合の前の verdict (transient・ほかの違反) はそのまま。公開中の掲載はこの関数を使わない (probeForReverifyDetailed のまま)。
 export async function probeForPendingFirstVerification(
   url: string,

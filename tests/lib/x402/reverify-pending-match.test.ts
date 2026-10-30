@@ -133,7 +133,7 @@ describe('probeForPendingFirstVerification', () => {
 describe('pending_gate_mismatch の分類', () => {
   // 違反に数えない: 違反 3 連続で印が外れると、通常のモデレーションの hidden の復帰 (照合しない) で同じ 402 が公開に
   // 進むため (lib/x402/reverify.ts probeForPendingFirstVerification の注釈)。
-  it('確定違反ではない (カウンタを動かさない transient として CAS に渡る)', async () => {
+  it('確定違反ではない (確定違反のカウンタ failures を動かさない transient として CAS に渡る)', async () => {
     const m = await load();
     expect(m.isViolationVerdict('pending_gate_mismatch')).toBe(false);
     const next = m.transitionVerification(

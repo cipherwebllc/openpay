@@ -129,7 +129,7 @@ describe('最初の再検証を待つ新規掲載 (pending) の照合', () => {
     expect(holder.warn).not.toHaveBeenCalledWith('x402.reverify.pending_gate_mismatch', expect.anything());
   });
 
-  it('他人の受取先の 402 では hidden と印のまま・カウンタも URL 台帳も動かさず、照合の不一致を warn に残す', async () => {
+  it('他人の受取先の 402 では hidden と印のまま・確定違反のカウンタ (failures) も URL 台帳も動かさず、照合の不一致を warn に残す', async () => {
     seed(PENDING);
     holder.fetch = async () => gate402(OTHER);
     expect(await runAt('2026-10-30T10:00:00.000Z')).toMatchObject({ checked: 1, ok: 0, violations: 0, transient: 1, restored: 0 });
@@ -166,6 +166,31 @@ describe('最初の再検証を待つ新規掲載 (pending) の照合', () => {
     holder.fetch = async () => gate402(OTHER);
     await runAt('2026-10-30T11:00:00.000Z');
     expect(stored()).toMatchObject({ ...PENDING, verification: { failures: 1 } });
+  });
+
+  // 締め出しのカウンタ (authFailures) は、ほかの 402 と同じく素の 402 に届いた回 (clear) で 0 に戻す。確定違反の
+  // カウンタ (failures) は動かさない (lib/x402/reverify.ts probeForPendingFirstVerification の注釈)。
+  it('合わない 402 は failures を残し、authFailures を 0 に戻す (0 は書かない)', async () => {
+    seed({ ...PENDING, verification: { failures: 2, authFailures: 5, lastCheckedAt: 'old', lastRunId: 'old', probedUrl: URL } });
+    holder.fetch = async () => gate402(OTHER);
+    await runAt('2026-10-30T10:00:00.000Z');
+    expect(stored()).toMatchObject({ ...PENDING, verification: { failures: 2, lastRunId: '2026103010' } });
+    expect(stored().verification).not.toHaveProperty('authFailures');
+    expect(ledgerKeys()).toEqual([]);
+  });
+
+  // 残すと 403 と合わない 402 が交互に来るだけで 6 回に積み上がり、閾値で印が外れて照合しない復帰に落ちる。
+  it('403 が 5 回続いた後の合わない 402 で締め出しの列は切れ、次の 403 は 1 回目から数え直す (印は外れない)', async () => {
+    seed(PENDING);
+    holder.fetch = async () => ({ res: new Response('', { status: 403 }) });
+    for (let hour = 10; hour <= 14; hour += 1) await runAt(`2026-10-30T${hour}:00:00.000Z`);
+    expect(stored()).toMatchObject({ ...PENDING, verification: { authFailures: 5 } });
+    holder.fetch = async () => gate402(OTHER);
+    await runAt('2026-10-30T15:00:00.000Z');
+    holder.fetch = async () => ({ res: new Response('', { status: 403 }) });
+    await runAt('2026-10-30T16:00:00.000Z');
+    expect(stored()).toMatchObject({ ...PENDING, verification: { failures: 0, authFailures: 1 } });
+    expect(ledgerKeys()).toEqual([]);
   });
 });
 
