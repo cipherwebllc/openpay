@@ -20,6 +20,9 @@ const hold = vi.hoisted(() => {
   const state = {
     preorderTime: true,
     mobileOrder: true,
+    // 本番は shop live (受付一時停止) が ON。既定を本番に揃え、既存のテストも live を読む経路を通す。
+    shopLive: true,
+    readShopLive: vi.fn(),
     rateLimitAllowed: true,
     lastRateLimitKey: '',
     limiterFails: false,
@@ -44,6 +47,9 @@ vi.mock('@/lib/env', async (importOriginal) => {
       },
       get enableMobileOrder() {
         return hold.mobileOrder;
+      },
+      get enableShopLive() {
+        return hold.shopLive;
       },
     },
   };
@@ -75,6 +81,9 @@ vi.mock('@/lib/kv', () => ({
 // vi.fn で包む: 「KV を読まずに 400/404/429 で返す」テストを非空虚にする (呼ばれていない
 // ことを実際に検証できるようにする)。
 vi.mock('@/lib/handleStore', () => ({ resolveHandle: hold.resolveHandle }));
+
+// vi.fn で包む: 「flag OFF では live を読まない」を呼ばれていないことで検証する。
+vi.mock('@/lib/shopLiveStore', () => ({ readShopLive: hold.readShopLive }));
 
 import { POST } from '@/app/api/order/admission/route';
 
@@ -128,6 +137,9 @@ beforeEach(() => {
   vi.setSystemTime(TOKYO_NOON);
   hold.preorderTime = true;
   hold.mobileOrder = true;
+  hold.shopLive = true;
+  hold.readShopLive.mockReset();
+  hold.readShopLive.mockResolvedValue({ soldOut: [], paused: false, updatedAt: 0 });
   hold.rateLimitAllowed = true;
   hold.limiterFails = false;
   hold.counters.clear();
@@ -344,6 +356,67 @@ describe('POST /api/order/admission', () => {
     expect((await POST(request({ handle: '!' }))).status).toBe(400);
     expect((await POST(request({ merchant: '0xnope' }))).status).toBe(400);
     expect((await POST(request({ pickupAt: 0 }))).status).toBe(400);
+  });
+});
+
+// 受付一時停止 (shop live の paused・第 8 回レビュー C-3)。@handle のページは SSR の時点の live 状態しか持たないので、
+// 先に開いた checkout は店主が後から止めても署名へ進めてしまう。署名前の admission で最新の状態を見る。
+describe('POST /api/order/admission — 受付一時停止 (shop live)', () => {
+  const paused = { soldOut: [], paused: true, updatedAt: 1 };
+
+  it('flag ON で店主が止めていれば、静的な受付停止と同じ 409 store_not_accepting (時間 flag と独立)', async () => {
+    hold.readShopLive.mockResolvedValue(paused);
+    for (const preorderTime of [true, false]) {
+      hold.preorderTime = preorderTime;
+      const response = await POST(request({ pickupAt: Date.UTC(2026, 6, 10, 3, 30) }));
+      expect(response.status).toBe(409);
+      expect(await response.json()).toEqual({ ok: false, error: 'store_not_accepting' });
+      expect(response.headers.get('cache-control')).toBe('no-store');
+    }
+    expect(hold.readShopLive).toHaveBeenCalledWith('coffee_shop');
+  });
+
+  it('flag ON で止めていなければ従来どおり通す', async () => {
+    const response = await POST(request({ pickupAt: Date.UTC(2026, 6, 10, 3, 30) }));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true });
+    expect(hold.readShopLive).toHaveBeenCalledTimes(1);
+    expect(hold.readShopLive).toHaveBeenCalledWith('coffee_shop');
+  });
+
+  it('live の読み取りが投げても admission を 500 にせず従来どおり通す (fail-open・観測できるよう warn)', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      hold.readShopLive.mockRejectedValue(new Error('boom'));
+      const response = await POST(request({ pickupAt: Date.UTC(2026, 6, 10, 3, 30) }));
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ ok: true });
+      expect(hold.readShopLive).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls.some(([line]) => String(line).includes('order.admission.shop_live_read_unexpected'))).toBe(true);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('flag OFF では live を読まない (止めていても従来どおり通す)', async () => {
+    hold.shopLive = false;
+    hold.readShopLive.mockResolvedValue(paused);
+    const response = await POST(request({ pickupAt: Date.UTC(2026, 6, 10, 3, 30) }));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true });
+    expect(hold.readShopLive).not.toHaveBeenCalled();
+  });
+
+  it('静的な受付停止・最新 storefront との食い違いは live を読む前に返す (応答は従来どおり)', async () => {
+    hold.readShopLive.mockResolvedValue(paused);
+    hold.resolved = { ok: true, record: record(preorder({ acceptingOrders: false })) };
+    expect(await (await POST(request())).json()).toEqual({ ok: false, error: 'store_not_accepting' });
+    hold.resolved = { ok: true, record: record(preorder()) };
+    expect(await (await POST(request({ mode: 'storefront' }))).json()).toEqual({
+      ok: false,
+      error: 'storefront_changed',
+    });
+    expect(hold.readShopLive).not.toHaveBeenCalled();
   });
 });
 
