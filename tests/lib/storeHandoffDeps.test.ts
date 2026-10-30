@@ -50,6 +50,17 @@ describe('kvHandoffStore (Upstash への写像)', () => {
     kv.setNxGet.mockReset();
   });
 
+  // 第 8 回レビュー C-1: nonce の結び付けは SET NX GET 1 回。2 回目の別 id には先に結び付けた id を返す。
+  it('bindNonce: 空きなら自分の id・先にあればその id・KV 障害は null', async () => {
+    kv.setNxGet.mockResolvedValueOnce({ ok: true, value: null });
+    expect(await kvHandoffStore.bindNonce('k', ID, 120)).toBe(ID);
+    expect(kv.setNxGet).toHaveBeenLastCalledWith('k', ID, 120);
+    kv.setNxGet.mockResolvedValueOnce({ ok: true, value: 'OTHER' });
+    expect(await kvHandoffStore.bindNonce('k', ID, 120)).toBe('OTHER');
+    kv.setNxGet.mockResolvedValueOnce({ ok: false });
+    expect(await kvHandoffStore.bindNonce('k', ID, 120)).toBeNull();
+  });
+
   it('セッションは NX + TTL で置き、既存なら false・KV 障害は null', async () => {
     kv.set.mockResolvedValueOnce({ ok: true, value: 'OK' });
     expect(await kvHandoffStore.putSession(ID, session, 600)).toBe(true);

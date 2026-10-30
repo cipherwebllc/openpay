@@ -331,6 +331,8 @@ describe('useStoreDevicePayment', () => {
     ['通信断のあと 404 (最初の送信が預けられた可能性)', [() => Promise.reject(new TypeError('net')), () => json({ ok: false, error: 'not_found' }, 404)]],
     ['通信断のあと 409 枠埋まり (自分の署名で埋まった可能性)', [() => Promise.reject(new TypeError('net')), () => json({ ok: false, error: 'slot_taken' }, 409)]],
     ['使用済み (authorization_used)', [() => json({ ok: false, error: 'authorization_used' }, 409)]],
+    // 第 8 回レビュー C-1: 別の受け渡しに預けられた署名は、そちらの端末が送るかもしれないので結論はチェーンで出す。
+    ['別の受け渡しに結び付いた署名 (authorization_bound_elsewhere)', [() => json({ ok: false, error: 'authorization_bound_elsewhere' }, 409)]],
   ])('%s → 失敗と言わず確認へ (未解決を残す)', async (_, responses) => {
     authResponses = [...responses] as (() => Promise<Response>)[];
     const { result } = renderHook(() => useStoreDevicePayment(deployment, HS));

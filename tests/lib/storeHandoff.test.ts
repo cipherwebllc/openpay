@@ -16,6 +16,7 @@ import {
 import {
   closeHandoff,
   createHandoffSession,
+  handoffNonceKey,
   handoffTokenFor,
   isGenuineHandoffId,
   newHandoffId,
@@ -41,11 +42,13 @@ const ID = newHandoffId({ mac, randomBytes: fixedBytes })!;
 const TOKEN = handoffTokenFor(ID, mac)!;
 const AMOUNT = 1000n * 10n ** 18n;
 
-function memoryStore(): HandoffStore & { failRead: boolean; data: Map<string, string> } {
+type NonceBind = { key: string; id: string; ttlSec: number };
+function memoryStore(): HandoffStore & { failRead: boolean; data: Map<string, string>; nonceBinds: NonceBind[] } {
   const data = new Map<string, string>();
   const s = {
     data,
     failRead: false,
+    nonceBinds: [] as NonceBind[],
     async putSession(id: string, session: HandoffSession) {
       if (data.has(`s:${id}`)) return false;
       data.set(`s:${id}`, JSON.stringify(session));
@@ -87,6 +90,13 @@ function memoryStore(): HandoffStore & { failRead: boolean; data: Map<string, st
       if (existing) return existing as Hex;
       data.set(`t:${id}`, txHash);
       return txHash;
+    },
+    async bindNonce(key: string, id: string, ttlSec: number) {
+      s.nonceBinds.push({ key, id, ttlSec });
+      const existing = data.get(`n:${key}`);
+      if (existing) return existing;
+      data.set(`n:${key}`, id);
+      return id;
     },
   };
   return s;
@@ -150,6 +160,46 @@ beforeEach(() => {
   store = memoryStore();
   balance = 10_000n * 10n ** 18n;
   used = false;
+});
+
+// 第 8 回レビュー C-1: 署名の枠は受け渡しごとなので、同じ署名を同額の別の受け渡しにも預けられた (両方の端末が
+// 送り、revert した側も解決で「受け取り済み」= 1 回の支払いで 2 会計分)。nonce を 1 つの受け渡しにだけ結び付ける。
+describe('1 つの署名は 1 つの受け渡しにだけ預かる', () => {
+  const otherBytes = (n: number) => Buffer.alloc(n, 9);
+  const ID2 = newHandoffId({ mac, randomBytes: otherBytes })!;
+  async function openSecond() {
+    const r = await createHandoffSession({ chainId: CHAIN, merchant: SHOP, amount: AMOUNT.toString() }, deps({ randomBytes: otherBytes }));
+    if (!r.ok) throw new Error(`setup ${r.error}`);
+    return r;
+  }
+
+  it('同じ署名を同額の別の受け渡しに預けても、2 つ目は 409 authorization_bound_elsewhere で預からない', async () => {
+    await openSession();
+    await openSecond();
+    expect(ID2).not.toBe(ID);
+    const body = await signedBody();
+    expect(await submitHandoffAuth(ID, body, deps())).toMatchObject({ ok: true, idempotent: false });
+    expect(await submitHandoffAuth(ID2, body, deps())).toMatchObject({ ok: false, status: 409, error: 'authorization_bound_elsewhere' });
+    expect(store.data.has(`a:${ID2}`)).toBe(false);
+    // 預けた受け渡しへの再送 (応答を受け取れなかった等) は従来どおり冪等に通る。
+    expect(await submitHandoffAuth(ID, body, deps())).toMatchObject({ ok: true, idempotent: true });
+  });
+
+  it('結び付けのキーは (チェーン・トークン・支払う人・nonce)、期限は署名の期限まで', async () => {
+    await openSession();
+    const body = await signedBody({ validBefore: BigInt(NOW + 120) });
+    const r = await submitHandoffAuth(ID, body, deps());
+    if (!r.ok) throw new Error(`submit ${r.error}`);
+    expect(store.nonceBinds).toEqual([{ key: handoffNonceKey(CHAIN, JPYC, customer.address, r.nonce), id: ID, ttlSec: 120 }]);
+  });
+
+  it('結び付けを KV に置けなければ預からない (503・枠も取らない)', async () => {
+    await openSession();
+    const body = await signedBody();
+    const r = await submitHandoffAuth(ID, body, deps({ store: { ...store, bindNonce: async () => null } }));
+    expect(r).toMatchObject({ ok: false, status: 503, error: 'handoff_unavailable' });
+    expect(store.data.has(`a:${ID}`)).toBe(false);
+  });
 });
 
 describe('受け渡しセッションを作る', () => {

@@ -93,6 +93,11 @@ export type HandoffStore = {
   ): Promise<{ closed: true } | { closed: false; existing: HandoffAuth } | null>;
   /** 端末が送った tx を記録し、記録されている hash (先に別の hash があればそれ) を返す。KV 障害は null。 */
   putTx(id: string, txHash: Hex, ttlSec: number): Promise<Hex | null>;
+  /**
+   * 署名 (nonce) を 1 つの受け渡しにだけ結び付ける。空いていれば id を置いてその id を、既に結び付いていれば
+   * その受け渡しの id を返す (同じ id なら再送)。KV 障害は null。
+   */
+  bindNonce(key: string, id: string, ttlSec: number): Promise<string | null>;
 };
 
 // 署名の検証 (verifyForwarderSettle) に効く手数料 (1 wei) と有効窓の上限 (180 秒) は lib/storeDevicePayment.ts の定数だけ
@@ -125,6 +130,7 @@ export type HandoffError =
   | 'amount_mismatch'
   | 'slot_taken'
   | 'authorization_used'
+  | 'authorization_bound_elsewhere'
   | 'bad_token'
   | 'invalid_tx'
   | 'handoff_unavailable'
@@ -136,6 +142,10 @@ const KEY_PREFIX = 'storehandoff:v1:';
 export const handoffSessionKey = (id: string) => `${KEY_PREFIX}${id}`;
 export const handoffAuthKey = (id: string) => `${KEY_PREFIX}${id}:auth`;
 export const handoffTxKey = (id: string) => `${KEY_PREFIX}${id}:tx`;
+// 署名 (EIP-3009 の nonce) の結び付け先。オンチェーンで nonce が一意なのは (token, from, nonce) なので、それにチェーンを足す。
+// id は base64url で ':' を含まないので、受け渡しのキーと衝突しない。
+export const handoffNonceKey = (chainId: number, token: Address, from: Address, nonce: Hex) =>
+  `${KEY_PREFIX}nonce:${chainId}:${token.toLowerCase()}:${from.toLowerCase()}:${nonce.toLowerCase()}`;
 
 function fail(status: number, error: HandoffError): HandoffFailure {
   return { ok: false, status, error };
@@ -364,6 +374,18 @@ export async function submitHandoffAuth(
   // 検証 (RPC) の間にセッションが切れていたら預からない (孤立した署名を置いて成功を返さない)。
   const ttl = session.expiresAt - deps.nowSec();
   if (ttl <= 0) return fail(410, 'expired');
+  // 1 つの署名 (nonce) を 1 つの受け渡しにだけ結び付ける (第 8 回レビュー C-1)。署名の枠 (claimAuth) は受け渡しごと
+  // なので、同じ署名を同額の別の受け渡しにも預けると両方の端末が送り、revert した側も解決で「受け取り済み」に
+  // なる (1 回の支払いで 2 会計分の商品が出る)。結び付けの期限は署名の期限まで (それを過ぎた署名はもう送れない)。
+  // 枠を取れなかったとき (締め切り・別の署名) に結び付けだけが残っても署名の期限と同時に消え、正直な端末は会計
+  // ごとに intentSalt を作り直すので、同じ nonce を別の受け渡しへ出し直すことはない。
+  const bound = await deps.store.bindNonce(
+    handoffNonceKey(session.chainId, verified.jpyc, params.from, verified.nonce),
+    id,
+    Math.max(1, Number(validBefore) - deps.nowSec()),
+  );
+  if (bound === null) return fail(503, 'handoff_unavailable');
+  if (bound !== id) return fail(409, 'authorization_bound_elsewhere');
   const claimed = await deps.store.claimAuth(id, auth, ttl);
   if (claimed === null) return fail(503, 'handoff_unavailable');
   // 検証 (RPC) の間にお店の端末が締め切った → 預かっていない。

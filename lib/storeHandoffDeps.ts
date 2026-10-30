@@ -102,6 +102,12 @@ export const kvHandoffStore: HandoffStore = {
     if (r.value === null) return txHash;
     return /^0x[0-9a-fA-F]{64}$/.test(r.value) ? (r.value as Hex) : null;
   },
+  async bindNonce(key: string, id: string, ttlSec: number) {
+    const r = await kvSetNxGet(key, id, ttlSec);
+    if (!r.ok) return null;
+    // 生の null だけが「新しく結び付けた」。既にあればその受け渡しの id (同じ id なら再送)。
+    return r.value === null ? id : r.value;
+  },
 };
 
 // IP_HASH_SECRET を用途 (store-handoff) で分けた HMAC。新しい秘密値 (env) を増やさない。秘密値が無い・短い
