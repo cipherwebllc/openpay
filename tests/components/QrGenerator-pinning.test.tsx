@@ -943,6 +943,81 @@ describe('QrGenerator pre-split pinning (F-8 PR-21)', () => {
     `);
   });
 
+  // 回収 (JPYC・forwarder あり) の利用料の下限 (2 JPYC) ちょうどと、それより小さい会計。着金の見張りに渡す期待額
+  // (店舗の純受取額) は 0 で止まる (負の額にしない)。上の行列とは別の snapshot にして、行列の採取値 (保存時刻を含む) を
+  // 動かさない。期待値は分割前の component で採取したもの。
+  it('pins the recover outputs at and below the 2 JPYC floor (the expected amount for the payment watch stops at 0)', async () => {
+    const cases: Record<string, Case> = {
+      recoverAtFloor: { provider: 'eip3009-relay', forwarder: true, amount: '2' },
+      recoverBelowFloor: { provider: 'eip3009-relay', forwarder: true, amount: '1' },
+    };
+    const outputs: Record<string, Record<string, unknown>> = {};
+    for (const [name, c] of Object.entries(cases)) outputs[name] = await generated(c);
+    for (const out of Object.values(outputs)) {
+      expect(BigInt((out.watch as Watch).expectedAmountWei as string)).toBeGreaterThanOrEqual(0n);
+    }
+    expect(outputs).toMatchInlineSnapshot(`
+      {
+        "recoverAtFloor": {
+          "copies": [
+            "=qr",
+          ],
+          "downloads": [
+            "openpay-jpyc-polygon-2.svg <- blob:pinned",
+            "openpay-jpyc-polygon-2.png <- data:image/png",
+          ],
+          "eip681": null,
+          "lastQr": {
+            "amountLabel": "2 JPYC",
+            "payUrl": "=qr",
+            "tokenChainLabel": "JPYC · Polygon Amoy",
+            "ts": 1790208000060,
+          },
+          "modal": "192543fda2d7de3f9dd50454021b219ed5c6c5de86c6c9870b02b3de10fc9f53",
+          "printed": 1,
+          "qr": "https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&gas=merchant&amount=2",
+          "shownEip681": null,
+          "shownUrl": "=qr",
+          "watch": {
+            "chainId": 80002,
+            "enabled": true,
+            "expectedAmountWei": "0",
+            "receiver": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+            "tokenAddress": "0x0000000000000000000000000000000000000aBc",
+          },
+        },
+        "recoverBelowFloor": {
+          "copies": [
+            "=qr",
+          ],
+          "downloads": [
+            "openpay-jpyc-polygon-1.svg <- blob:pinned",
+            "openpay-jpyc-polygon-1.png <- data:image/png",
+          ],
+          "eip681": null,
+          "lastQr": {
+            "amountLabel": "1 JPYC",
+            "payUrl": "=qr",
+            "tokenChainLabel": "JPYC · Polygon Amoy",
+            "ts": 1790208000140,
+          },
+          "modal": "d27f0f7dc06c047ea33dc5e488548992a8180f8ed3216ee035d3db1ce076a97d",
+          "printed": 1,
+          "qr": "https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&gas=merchant&amount=1",
+          "shownEip681": null,
+          "shownUrl": "=qr",
+          "watch": {
+            "chainId": 80002,
+            "enabled": true,
+            "expectedAmountWei": "0",
+            "receiver": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+            "tokenAddress": "0x0000000000000000000000000000000000000aBc",
+          },
+        },
+      }
+    `);
+  });
+
   it('pins every generated USDC output (chains・cross-chain・split・standard / EIP-681・truncation・smallest unit・Arc・FX・discount)', async () => {
     const cases: Record<string, Case> = {
       baseGasless: { settings: { token: 'usdc', chain: 'base' }, amount: '12.5' },
