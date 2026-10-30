@@ -701,6 +701,38 @@ describe('marks are bound to the verified payment (G-1, real Lua)', () => {
     });
   });
 
+  it.each([
+    ['a new price', { priceUsd: '0.01' }],
+    ['a new payee', { payTo: SELLER }],
+  ])('keeps the verified mark when only the listing accept changed (%s) before the settle', async (_, usdcOver) => {
+    const { arc } = await requirements();
+    const header = signatureHeader(arc!.v2Accept);
+    replies(
+      [200, { isValid: true }],
+      [200, { success: false, errorReason: 'invalid_amount' }],
+      [200, { isValid: true }],
+    );
+    await relay('verify', header);
+    const pending = markValue();
+
+    // Same listing id and the same signed payload; only the server-generated accept differs.
+    state.resource = record({ arc: true, ...usdcOver });
+    const changed = await requirements();
+    expect(changed.arc!.v2Accept).not.toEqual(arc!.v2Accept);
+    const settleHeader = signatureHeader(changed.arc!.v2Accept);
+    expect(decodeHeader(settleHeader).payload).toEqual(decodeHeader(header).payload);
+    const res = await relay('settle', settleHeader);
+
+    expect(await res.json()).toEqual({ success: false, errorReason: 'authorization_in_use' });
+    expect(urlsCalled()).toEqual(['https://gateway.example/v1/x402/verify']);
+    expect(markValue()).toEqual(pending);
+    state.resource = record();
+    expect(await (await relay('verify', header)).json()).toEqual({
+      isValid: false,
+      invalidReason: 'authorization_in_use',
+    });
+  });
+
   it('writes the binding into the pending and settling marks', async () => {
     const { arc } = await requirements();
     const header = signatureHeader(arc!.v2Accept);
