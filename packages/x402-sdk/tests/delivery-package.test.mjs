@@ -31,7 +31,7 @@ test('actual npm tarball includes types/examples and verifies through installed 
     // pack も tarball を書かなくなる (展開で落ちる)。子の npm には dry-run の設定を渡さない。
     const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => key.toLowerCase() !== 'npm_config_dry_run'));
     const dry = manifestOf(execFileSync('npm', [...npm, '--dry-run'], { cwd: packageDir, encoding: 'utf8', env }));
-    assert.equal(dry.version, '0.10.4');
+    assert.equal(dry.version, '0.10.5');
     const paths = dry.files.map((file) => file.path);
     for (const path of ['src/delivery.mjs', 'delivery.d.ts', 'src/index.mjs', 'index.d.ts', 'README.md', 'CHANGELOG.md',
       'examples/node-delivery-gate.mjs', 'examples/cloudflare-r2-delivery-gate/worker.mjs',

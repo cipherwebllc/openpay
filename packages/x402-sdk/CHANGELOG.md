@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.10.5 — unreleased
+## 0.10.5 — 2026-10-30
 
 - Read seller responses with a byte cap counted from the stream (not from
   `Content-Length`). Previously `quote()` and `pay()` read the whole response
