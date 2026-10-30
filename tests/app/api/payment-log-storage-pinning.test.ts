@@ -186,7 +186,7 @@ describe('R6a POST limiter with the real checkReadRateLimit', () => {
     expect(res.status).toBe(200);
     expect(await res.text()).toBe('{"ok":true}');
     expect(kvIncr).toHaveBeenCalledTimes(1);
-    expect(kvIncr).toHaveBeenCalledWith(LIMIT_KEY);
+    expect(kvIncr).toHaveBeenCalledWith(LIMIT_KEY, { initialTtlSec: 120 });
     expect(kvExpire).not.toHaveBeenCalled();
     expect(hold.tasks).toHaveLength(1);
   });
@@ -199,20 +199,15 @@ describe('R6a POST limiter with the real checkReadRateLimit', () => {
     expect(hold.tasks).toHaveLength(1);
   });
 
-  it.each([
-    { count: 1, status: 200, expire: true },
-    { count: 60, status: 200, expire: false },
-  ])('allows count $count (first hit sets the window TTL: $expire)', async ({ count, status, expire }) => {
+  // The 120 s window TTL travels with the INCR (kvIncr initialTtlSec = one pipeline with EXPIRE NX), never as a separate kvExpire.
+  it.each([1, 60])('allows count %i (the window TTL rides on the INCR itself)', async (count) => {
     vi.mocked(kvIncr).mockResolvedValueOnce({ ok: true, value: count });
     const res = await postLog();
-    expect(res.status).toBe(status);
+    expect(res.status).toBe(200);
     expect(await res.text()).toBe('{"ok":true}');
-    if (expire) {
-      expect(kvExpire).toHaveBeenCalledTimes(1);
-      expect(kvExpire).toHaveBeenCalledWith(LIMIT_KEY, 120);
-    } else {
-      expect(kvExpire).not.toHaveBeenCalled();
-    }
+    expect(kvIncr).toHaveBeenCalledTimes(1);
+    expect(kvIncr).toHaveBeenCalledWith(LIMIT_KEY, { initialTtlSec: 120 });
+    expect(kvExpire).not.toHaveBeenCalled();
     expect(hold.tasks).toHaveLength(1);
   });
 

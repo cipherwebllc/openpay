@@ -10,6 +10,8 @@ import { checkReadRateLimit } from '@/lib/relay/relayGuards';
 
 const NOW = new Date('2026-09-24T12:34:56.000Z');
 const KEY = `rl:read:logpay:unknown:${Math.floor(NOW.getTime() / 60_000)}`;
+// 第 8 回レビュー E-5: 窓 2 つ分の期限は INCR と同じ pipeline の 1 往復で EXPIRE NX として送る (別の往復は無い)。
+const PIPELINE_BODY = JSON.stringify([['INCR', KEY], ['EXPIRE', KEY, '120', 'NX']]);
 const fetchMock = vi.fn();
 
 beforeEach(() => {
@@ -31,6 +33,14 @@ afterEach(() => {
 
 function bodies(): string[] {
   return fetchMock.mock.calls.map(([, init]) => String((init as RequestInit).body));
+}
+
+function urls(): string[] {
+  return fetchMock.mock.calls.map(([url]) => String(url));
+}
+
+function pipelineReply(incr: unknown, expire: unknown = { result: 1 }): Response {
+  return new Response(JSON.stringify([incr, expire]));
 }
 
 function erroredBody(): Response {
@@ -63,31 +73,40 @@ describe('R6a checkReadRateLimit is no-throw over the real KV transport', () => 
     ['200 empty object', () => Promise.resolve(new Response('{}'))],
     ['200 Upstash error', () => Promise.resolve(new Response('{"error":"ERR"}'))],
     ['200 body stream error', () => Promise.resolve(erroredBody())],
+    // pipeline の応答の形の崩れ (要素ごとの配列でない・INCR の要素が欠ける / エラー)。
+    ['200 empty array', () => Promise.resolve(new Response('[]'))],
+    ['200 array of null', () => Promise.resolve(new Response('[null,null]'))],
+    ['200 INCR element error', () => Promise.resolve(pipelineReply({ error: 'ERR' }))],
   ] as const)('fails open when %s', async (_name, reply) => {
     fetchMock.mockImplementation(reply);
     await expect(checkReadRateLimit('logpay:unknown', 60, 60)).resolves.toBe(true);
-    expect(bodies()).toEqual([JSON.stringify(['INCR', KEY])]);
+    expect(urls()).toEqual(['https://r6a-kv.test/pipeline']);
+    expect(bodies()).toEqual([PIPELINE_BODY]);
   });
 
-  it.each<{ result: unknown; allowed: boolean; expire: boolean }>([
-    { result: 1, allowed: true, expire: true },
-    { result: 60, allowed: true, expire: false },
-    { result: 61, allowed: false, expire: false },
+  it.each<{ incr: unknown; expire?: unknown; allowed: boolean }>([
+    { incr: { result: 1 }, allowed: true },
+    { incr: { result: 60 }, allowed: true },
+    { incr: { result: 61 }, allowed: false },
+    // 期限 (EXPIRE NX) の要素だけが失敗しても、取れた INCR の数で判定する (超過の判定を捨てない)。
+    // 期限は同じ窓の次の判定の EXPIRE NX が付ける。
+    { incr: { result: 1 }, expire: { error: 'ERR' }, allowed: true },
+    { incr: { result: 61 }, expire: { error: 'ERR' }, allowed: false },
+    { incr: { result: 61 }, expire: null, allowed: false },
     // 数値でない INCR 結果は本番では起きない。lib/kv が parse_error にするので、KV 障害と同じ fail-open になる
     // (以前は null を 0 として通し、{} は大小比較が false で拒否していた・第 7 回レビュー PR27 の Codex 指摘)。
-    { result: null, allowed: true, expire: false },
-    { result: {}, allowed: true, expire: false },
-    { result: { toString: null, valueOf: null }, allowed: true, expire: false },
-    // 整数の文字列は従来どおり受け入れる (number に揃える)。
-    { result: '61', allowed: false, expire: false },
-    { result: '1', allowed: true, expire: true },
-  ])('resolves $allowed for INCR result $result', async ({ result, allowed, expire }) => {
-    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ result })));
-    fetchMock.mockRejectedValue(new TypeError('EXPIRE unreachable'));
+    { incr: { result: null }, allowed: true },
+    { incr: { result: {} }, allowed: true },
+    { incr: { result: { toString: null, valueOf: null } }, allowed: true },
+    // 整数の文字列も pipeline の経路 (checkIpRateLimit と同じ) では parse_error = fail-open。Upstash は INCR の結果を
+    // JSON の数で返すので本番では起きない (単発の INCR だった頃は '61' を 61 として拒否していた)。
+    { incr: { result: '61' }, allowed: true },
+    { incr: { result: '1' }, allowed: true },
+  ])('resolves $allowed for pipeline reply $incr / $expire', async ({ incr, expire, allowed }) => {
+    fetchMock.mockResolvedValueOnce(pipelineReply(incr, expire));
+    fetchMock.mockRejectedValue(new TypeError('no second round trip expected'));
     await expect(checkReadRateLimit('logpay:unknown', 60, 60)).resolves.toBe(allowed);
-    expect(bodies()).toEqual([
-      JSON.stringify(['INCR', KEY]),
-      ...(expire ? [JSON.stringify(['EXPIRE', KEY, '120'])] : []),
-    ]);
+    expect(urls()).toEqual(['https://r6a-kv.test/pipeline']);
+    expect(bodies()).toEqual([PIPELINE_BODY]);
   });
 });

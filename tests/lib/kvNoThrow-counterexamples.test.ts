@@ -95,6 +95,19 @@ describe('Codex 1: INCR 成功・EXPIRE NX 失敗の警告出力 (logger) が投
     await expect(checkIpRateLimit('relay-admission', HASHED_IP, 120, 60)).resolves.toBe(false);
   });
 
+  // 第 8 回レビュー E-5: checkReadRateLimit も期限を INCR と同じ pipeline の EXPIRE NX で付ける (try で包まない no-throw 契約)。
+  it.each([
+    [1, true],
+    [61, false],
+  ])('checkReadRateLimit (注文状況の poll 等) も投げず、INCR の数 %i で判定する (%s)', async (count, allowed) => {
+    h.warnThrows = true;
+    kvReplies(expireFailed(count));
+    const { checkReadRateLimit } = await import('@/lib/relay/relayGuards');
+    await expect(checkReadRateLimit('logpay:unknown', 60, 60)).resolves.toBe(allowed);
+    const { logger } = await import('@/lib/logger');
+    expect(logger.warn).toHaveBeenCalledWith('kv.incr_expire_failed', { detail: 'ERR injected' });
+  });
+
   it('Agent Activity の共有 API 予算は閲覧を止めない', async () => {
     h.warnThrows = true;
     kvReplies(expireFailed(1));
@@ -125,6 +138,9 @@ describe('Codex 3: challenge の乱数生成 (randomBytes) が投げる', () => 
 // --- Codex 2 回目: 型検証の掛け漏れ (数値・SET の 'OK'・EVAL の応答) ---
 const reply = (body: string) => () => Promise.resolve(new Response(body));
 
+// checkReadRateLimit は第 8 回レビュー E-5 から pipeline (INCR + EXPIRE NX) で送るので、ここの単発の形の応答は
+// 「pipeline の応答が配列でない」側の反例になる。pipeline の形で INCR の結果が数値でない場合は
+// tests/lib/readRateLimit-nothrow-pinning.test.ts で固定する。
 describe('Codex 2-1: 単発 INCR の応答が数値でない', () => {
   it('{"result":{}} で read limiter は KV 障害と同じく通す (拒否に化けない)', async () => {
     kvReplies(reply('{"result":{}}'));

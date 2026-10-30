@@ -8,7 +8,8 @@
 //   ip-bucket: 鍵 `iprl:v1:<scope>:<HMAC(IPv4 /32・IPv6 /64)>`・INCR の初回 TTL = 窓 (初回起点の固定窓)・
 //              IP 不明や IP_HASH_SECRET 欠落は KV に触れず通す。
 //   ip-prefix: 鍵 `rl:read:<key(匿名化 prefix: IPv4 /24・IPv6 /64)>:<floor(now/窓)>`・時計に揃えた固定窓・
-//              初回だけ EXPIRE 窓×2・IP 不明は共有の 'unknown' bucket・secret は使わない。
+//              期限 窓×2 は INCR と同じ往復の EXPIRE NX (kvIncr の initialTtlSec・別の EXPIRE は送らない)・
+//              IP 不明は共有の 'unknown' bucket・secret は使わない。
 import { createHmac } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -274,27 +275,28 @@ describe.each(bucketRoutes)('ip-bucket: $name', (route) => {
 
 describe.each(prefixRoutes)('ip-prefix: $name', (route) => {
   const bucket = Math.floor(NOW / (route.windowSec * 1000));
+  const ttl = { initialTtlSec: route.windowSec * 2 };
 
   it.each([
     ['IPv4 (/24)', '203.0.113.9', '203.0.113.0/24'],
     ['IPv4-mapped IPv6 (/24)', '::ffff:203.0.113.9', '203.0.113.0/24'],
     ['IPv6 (/64)', '2001:db8:1234:5678::1', '2001:db8:1234:5678::/64'],
-  ])('上限超過: %s の鍵と 429 応答 (EXPIRE は初回だけ)', async (_label, ip, prefix) => {
+  ])('上限超過: %s の鍵と 429 応答 (期限は INCR と同じ往復・別の EXPIRE なし)', async (_label, ip, prefix) => {
     h.limiterResult = { ok: true, value: route.max + 1 };
     const res = await route.call(trusted(ip));
-    expect(limiterIncrCalls()).toEqual([[`rl:read:${route.key(prefix)}:${bucket}`]]);
-    expect(limiterExpireCalls()).toEqual(route.max + 1 === 1 ? [[`rl:read:${route.key(prefix)}:${bucket}`, route.windowSec * 2]] : []);
+    expect(limiterIncrCalls()).toEqual([[`rl:read:${route.key(prefix)}:${bucket}`, ttl]]);
+    expect(limiterExpireCalls()).toEqual([]);
     expect(res.status).toBe(429);
     expect(await res.text()).toBe(route.deniedBody);
     expect(res.headers.get('retry-after')).toBeNull();
   });
 
-  it('初回 (カウント 1) は窓 2 つ分の EXPIRE を付けて通す', async () => {
+  it('初回 (カウント 1) も窓 2 つ分の期限を INCR と同じ往復で付けて通す (別の EXPIRE は送らない)', async () => {
     h.limiterResult = { ok: true, value: 1 };
     const res = await route.call(trusted('203.0.113.9'));
     const key = `rl:read:${route.key('203.0.113.0/24')}:${bucket}`;
-    expect(limiterIncrCalls()).toEqual([[key]]);
-    expect(limiterExpireCalls()).toEqual([[key, route.windowSec * 2]]);
+    expect(limiterIncrCalls()).toEqual([[key, { initialTtlSec: route.windowSec * 2 }]]);
+    expect(limiterExpireCalls()).toEqual([]);
     expect(res.status).not.toBe(429);
   });
 
@@ -307,25 +309,25 @@ describe.each(prefixRoutes)('ip-prefix: $name', (route) => {
   it('窓は時計に揃う (次の分で bucket が変わる)', async () => {
     vi.setSystemTime(Math.ceil(NOW / 60_000) * 60_000);
     await route.call(trusted('203.0.113.9'));
-    expect(limiterIncrCalls()).toEqual([[`rl:read:${route.key('203.0.113.0/24')}:${bucket + 1}`]]);
+    expect(limiterIncrCalls()).toEqual([[`rl:read:${route.key('203.0.113.0/24')}:${bucket + 1}`, ttl]]);
   });
 
   it('IP 不明は共有の unknown bucket に数える', async () => {
     h.limiterResult = { ok: true, value: route.max + 1 };
     const res = await route.call({});
-    expect(limiterIncrCalls()).toEqual([[`rl:read:${route.key('unknown')}:${bucket}`]]);
+    expect(limiterIncrCalls()).toEqual([[`rl:read:${route.key('unknown')}:${bucket}`, ttl]]);
     expect(res.status).toBe(429);
   });
 
   it('信頼できない cf-connecting-ip は無視し、接続元 (XFF) の prefix を使う', async () => {
     await route.call({ 'x-forwarded-for': '198.51.100.7', 'cf-connecting-ip': '203.0.113.9' });
-    expect(limiterIncrCalls()).toEqual([[`rl:read:${route.key('198.51.100.0/24')}:${bucket}`]]);
+    expect(limiterIncrCalls()).toEqual([[`rl:read:${route.key('198.51.100.0/24')}:${bucket}`, ttl]]);
   });
 
   it('IP_HASH_SECRET は使わない (欠落でも同じ鍵で数える)', async () => {
     vi.stubEnv('IP_HASH_SECRET', '');
     await route.call(trusted('203.0.113.9'));
-    expect(limiterIncrCalls()).toEqual([[`rl:read:${route.key('203.0.113.0/24')}:${bucket}`]]);
+    expect(limiterIncrCalls()).toEqual([[`rl:read:${route.key('203.0.113.0/24')}:${bucket}`, ttl]]);
   });
 
   it('KV 未設定なら KV に触れず通す', async () => {

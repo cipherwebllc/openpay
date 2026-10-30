@@ -194,17 +194,21 @@ describe('relayGuards rate-limit (共有キー relay:rl:)', () => {
 });
 
 describe('relayGuards checkReadRateLimit (固定窓・read poll 用)', () => {
-  it('窓内 max 回までは許可・超過で deny。初回のみ TTL=窓×2・キーは rl:read: 名前空間', async () => {
+  it('窓内 max 回までは許可・超過で deny。TTL=窓×2 は毎回 INCR と同じ原子操作で渡す・キーは rl:read: 名前空間', async () => {
     const KEY = 'orderstatus:1.2.3';
     for (let i = 0; i < 5; i++) {
       expect(await checkReadRateLimit(KEY, 5, 60)).toBe(true);
     }
     // 6 回目 (count=6 > max=5) で deny。
     expect(await checkReadRateLimit(KEY, 5, 60)).toBe(false);
-    // 初回 (count=1) のみ TTL を窓 2 つ分 (=120s) で設定。
+    // 第 8 回レビュー E-5: 期限 (窓 2 つ分 = 120s) は kvIncr の initialTtlSec で INCR と同じ往復に載せる
+    // (INCR の後に別の kvExpire を送ると、その往復が落ちるか関数が凍結したとき期限の無い鍵が残る)。
+    const incrs = store.incrCalls.filter((c) => c.key.startsWith('rl:read:orderstatus:1.2.3:'));
+    expect(incrs).toHaveLength(6);
+    expect(incrs.map((c) => c.opts)).toEqual(Array(6).fill({ initialTtlSec: 120 }));
+    // 期限は鍵の作成時の 1 回だけ (mock は opts 付きの初回 INCR を期限として記録する)。別の kvExpire は無い。
     const ttlCalls = store.expireCalls.filter((c) => c.key.startsWith('rl:read:orderstatus:1.2.3'));
-    expect(ttlCalls).toHaveLength(1);
-    expect(ttlCalls[0].ttlSec).toBe(120);
+    expect(ttlCalls).toEqual([{ key: incrs[0].key, ttlSec: 120 }]);
     // キーは rl:read: prefix (relay:rl: の sliding-window とは別系統)。
     const k = [...store.counters.keys()].find((key) => key.includes('orderstatus:1.2.3'));
     expect(k?.startsWith('rl:read:')).toBe(true);
@@ -216,9 +220,13 @@ describe('relayGuards checkReadRateLimit (固定窓・read poll 用)', () => {
     expect([...store.counters.keys()].some((key) => key.includes('9.9.9'))).toBe(false);
   });
 
-  it('kvIncr 障害 → fail-open (許可・1 件の KV blip で read を止めない)', async () => {
+  it('kvIncr (TTL 付き) の障害 → fail-open (許可・1 件の KV blip で read を止めない・期限を別に送らない)', async () => {
     store.flags.incrOk = false;
     expect(await checkReadRateLimit('orderstatus:8.8.8', 1, 60)).toBe(true);
+    expect(store.incrCalls).toEqual([
+      { key: expect.stringMatching(/^rl:read:orderstatus:8\.8\.8:\d+$/), opts: { initialTtlSec: 120 } },
+    ]);
+    expect(store.expireCalls).toEqual([]);
   });
 });
 
