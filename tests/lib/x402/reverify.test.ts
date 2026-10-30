@@ -167,6 +167,53 @@ describe('probeForReverifyDetailed の verdict', () => {
     ).toBe('transient');
   });
 
+  // E-1 (第 8 回レビュー): 本文を 64KiB 超・非 UTF-8 にするか stream を途中で切るだけで、無料の 200 が transient に
+  // 逃げて有料の掲載のまま残っていた。支払いなしで 200 が返った以上は ungated 違反 (cf-mitigated の challenge だけ除く)。
+  const overCap = () => 'x'.repeat(64 * 1024 + 1);
+  const nonUtf8 = () => new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0xff, 0xfe, 0x80, 0xc3]); // zip の先頭 + 不正な UTF-8
+  const brokenStream = () =>
+    new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('partial'));
+        controller.error(new Error('ECONNRESET'));
+      },
+    });
+  const unreadableBodies: Array<[string, () => BodyInit]> = [
+    ['64KiB 超', overCap],
+    ['非 UTF-8', nonUtf8],
+    ['途中で切れる stream', brokenStream],
+  ];
+
+  it.each(unreadableBodies)('本文が %s の 200 も violation_200_ungated (authClass clear)', async (_label, body) => {
+    expect(
+      await probeForReverifyDetailed('https://x.test/paid', {
+        fetchImpl: (async () => new Response(body(), { status: 200 })) as typeof fetch,
+        lookup: lookupPublic,
+      }),
+    ).toEqual({ verdict: 'violation_200_ungated', authClass: 'clear' });
+  });
+
+  it.each(unreadableBodies)('cf-mitigated: challenge の 200 は本文が %s でも transient のまま', async (_label, body) => {
+    expect(
+      await probeForReverifyDetailed('https://x.test/paid', {
+        fetchImpl: (async () =>
+          new Response(body(), { status: 200, headers: { 'cf-mitigated': 'Challenge' } })) as typeof fetch,
+        lookup: lookupPublic,
+      }),
+    ).toEqual({ verdict: 'transient', authClass: 'neutral' });
+  });
+
+  it('非 UTF-8 の本文でも challenge の印 (ASCII) があれば transient のまま', async () => {
+    const marker = new TextEncoder().encode('<title>Just a moment...</title>');
+    const body = new Uint8Array([0xff, 0xfe, ...marker, 0x80]);
+    expect(
+      await probeForReverifyDetailed('https://x.test/paid', {
+        fetchImpl: (async () => new Response(body, { status: 200 })) as typeof fetch,
+        lookup: lookupPublic,
+      }),
+    ).toEqual({ verdict: 'transient', authClass: 'neutral' });
+  });
+
   it('Cloudflare challenge の 200 は ungated 違反にせず transient', async () => {
     const challenge = (async () =>
       new Response('<title>Just a moment...</title><script src="/cdn-cgi/challenge-platform"></script>', {

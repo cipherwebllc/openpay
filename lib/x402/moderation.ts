@@ -75,11 +75,32 @@ export function hasOnlySafeContentEncoding(rawHeaders: ReadonlyArray<Buffer | st
   return true;
 }
 
+function rawHeaderValue(rawHeaders: ReadonlyArray<Buffer | string>, name: string): string | null {
+  for (let i = 0; i + 1 < rawHeaders.length; i += 2) {
+    if (latin1(rawHeaders[i]).toLowerCase() === name) return latin1(rawHeaders[i + 1]).trim();
+  }
+  return null;
+}
+
+// 圧縮方式で止めた応答の status と cf-mitigated だけを持つ (本文は読んでいない)。定期再検証 (lib/x402/reverify.ts) が
+// 「br で返る無料の 200」を DNS/接続の失敗と分けて違反に数えるため。refuseBrotliResponses を外すときは一緒に外す。
+export class ContentEncodingRefusedError extends Error {
+  readonly statusCode: number;
+  readonly cfMitigated: string | null;
+
+  constructor(statusCode: number, cfMitigated: string | null) {
+    super('content_encoding_refused');
+    this.statusCode = statusCode;
+    this.cfMitigated = cfMitigated;
+  }
+}
+
 // CVE-2026-111497 (Node 同梱の Brotli の展開で範囲外書き込み → 任意コード実行) の波及を断つ: 出品者や利用者が
 // 選べる URL の応答を、Node の Brotli 展開器に渡さない。undici の fetch は Accept-Encoding に関係なく
 // `Content-Encoding: br` を展開するので、gzip / deflate 以外の圧縮の応答は、fetch が展開器を作る onHeaders の
 // 手前で止める (redirect の manual / error でも展開器は先に作られる・throw は undici の
-// Request が abort に変え、fetch は reject する = fetchSsrfSafe の null・呼び元の既存の「判定不能」の扱い)。
+// Request が abort に変え、fetch は reject する = fetchSsrfSafe の null・呼び元の既存の「判定不能」の扱い。
+// 定期再検証だけは fetchSsrfSafeDetailed の refused で status 200 を違反に数える)。
 // 本番の Node が修正版 (scripts/verify-production-config-helpers.mjs の NODE_RUNTIME_MINIMUM) 以上になったら外してよい。
 export const refuseBrotliResponses: Dispatcher.DispatcherComposeInterceptor = (dispatch) => (opts, handler) =>
   dispatch(opts, {
@@ -88,7 +109,9 @@ export const refuseBrotliResponses: Dispatcher.DispatcherComposeInterceptor = (d
     onUpgrade: (statusCode, headers, socket) => handler.onUpgrade?.(statusCode, headers, socket),
     onResponseStarted: () => handler.onResponseStarted?.(),
     onHeaders: (statusCode, headers, resume, statusText) => {
-      if (!hasOnlySafeContentEncoding(headers)) throw new Error('content_encoding_refused');
+      if (!hasOnlySafeContentEncoding(headers)) {
+        throw new ContentEncodingRefusedError(statusCode, rawHeaderValue(headers, 'cf-mitigated'));
+      }
       return handler.onHeaders?.(statusCode, headers, resume, statusText) ?? true;
     },
     onData: (chunk) => handler.onData?.(chunk) ?? true,
@@ -149,6 +172,20 @@ export async function fetchSsrfSafe(
   url: string,
   opts: SsrfSafeFetchOptions = {},
 ): Promise<Response | null> {
+  return (await fetchSsrfSafeDetailed(url, opts)).res;
+}
+
+// fetchSsrfSafe と同じ取得で、res が null のうち「圧縮方式で止めた応答」だけは refused に status を添える
+// (定期再検証が br の無料 200 を数えるため・本文は読んでいない)。
+export type SsrfSafeFetchOutcome = {
+  res: Response | null;
+  refused?: ContentEncodingRefusedError;
+};
+
+export async function fetchSsrfSafeDetailed(
+  url: string,
+  opts: SsrfSafeFetchOptions = {},
+): Promise<SsrfSafeFetchOutcome> {
   const fetchImpl = opts.fetchImpl ?? (defaultFetch as unknown as typeof fetch);
   const lookup = opts.lookup ?? defaultLookup;
 
@@ -156,17 +193,17 @@ export async function fetchSsrfSafe(
   try {
     hostname = normalizeHost(new URL(url).hostname);
   } catch {
-    return null;
+    return { res: null };
   }
   try {
     const addrs = await lookup(hostname);
-    if (addrs.length === 0 || addrs.some((a) => isPrivateHost(a.address))) return null;
+    if (addrs.length === 0 || addrs.some((a) => isPrivateHost(a.address))) return { res: null };
   } catch {
-    return null;
+    return { res: null };
   }
 
   try {
-    return await fetchImpl(url, {
+    const res = await fetchImpl(url, {
       method: 'GET',
       redirect: opts.redirect ?? 'manual',
       signal: AbortSignal.timeout(opts.timeoutMs ?? PROBE_TIMEOUT_MS),
@@ -177,8 +214,11 @@ export async function fetchSsrfSafe(
         ...(opts.extraHeaders ?? {}),
       },
     });
-  } catch {
-    return null;
+    return { res };
+  } catch (err) {
+    // undici の fetch は interceptor の throw を TypeError('fetch failed') の cause に入れて reject する。
+    const cause = (err as { cause?: unknown } | null)?.cause;
+    return cause instanceof ContentEncodingRefusedError ? { res: null, refused: cause } : { res: null };
   }
 }
 
