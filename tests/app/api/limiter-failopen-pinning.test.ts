@@ -60,22 +60,22 @@ const routes: Route[] = [
   {
     name: 'push/test', method: 'POST',
     call: async (req) => (await import('@/app/api/push/test/route')).POST(req),
-    result: { ok: true, ...SUMMARY }, effect: h.send, command: 'INCR',
+    result: { ok: true, ...SUMMARY }, effect: h.send, command: 'PIPELINE:INCR+EXPIRE',
   },
   {
     name: 'push/subscribe', method: 'GET',
     call: async (req) => (await import('@/app/api/push/subscribe/route')).GET(req),
-    result: { subscribed: true, includeAmount: true }, effect: h.listSubscriptions, command: 'INCR',
+    result: { subscribed: true, includeAmount: true }, effect: h.listSubscriptions, command: 'PIPELINE:INCR+EXPIRE',
   },
   {
     name: 'push/subscribe', method: 'POST', body: { subscription: SUBSCRIPTION, locale: 'ja' },
     call: async (req) => (await import('@/app/api/push/subscribe/route')).POST(req),
-    result: { ok: true, count: 1 }, effect: h.upsert, command: 'INCR',
+    result: { ok: true, count: 1 }, effect: h.upsert, command: 'PIPELINE:INCR+EXPIRE',
   },
   {
     name: 'push/subscribe', method: 'DELETE', body: { endpoint: SUBSCRIPTION.endpoint },
     call: async (req) => (await import('@/app/api/push/subscribe/route')).DELETE(req),
-    result: { ok: true, count: 0 }, effect: h.remove, command: 'INCR',
+    result: { ok: true, count: 0 }, effect: h.remove, command: 'PIPELINE:INCR+EXPIRE',
   },
   {
     name: 'tip-messages', method: 'GET',
@@ -99,7 +99,7 @@ function request(route: Pick<Route, 'name' | 'method' | 'body'>): Request {
     ...(route.body === undefined ? {} : { body: JSON.stringify(route.body) }),
   });
 }
-// kvIncr(key, { initialTtlSec }) (checkIpRateLimit 等) は INCR + EXPIRE NX を pipeline の 1 往復で送る (lib/kv.ts)。
+// kvIncr(key, { initialTtlSec }) (checkIpRateLimit・checkReadRateLimit 等) は INCR + EXPIRE NX を pipeline の 1 往復で送る (lib/kv.ts)。
 // pipeline は 'PIPELINE:INCR+EXPIRE' の 1 行に畳み、2 列目以降に各要素の鍵を並べる。
 function commands(): unknown[][] {
   return fetchMock.mock.calls.map(([url, init]) => {
@@ -146,15 +146,14 @@ describe.each(routes)('B-R6e $method /api/$name', (route) => {
     expect(commands().map(([command]) => command)).toEqual([route.command]);
   });
 
-  if (route.command === 'INCR') {
-    it.each(failures)('初回 TTL の transport $name でも本体を止めない', async ({ fail }) => {
-      fetchMock.mockImplementation(fail).mockResolvedValueOnce(new Response('{"result":1}'));
-      const response = await route.call(request(route));
-      expect(response.status).toBe(200);
-      expect(await response.json()).toEqual(route.result);
-      expect(commands().map(([command]) => command)).toEqual(['INCR', 'EXPIRE']);
-    });
-  }
+  // 期限は INCR と同じ pipeline の EXPIRE NX で付くので、期限だけの失敗は pipeline の 2 要素目のエラーとして届く。
+  it('期限 (EXPIRE NX) だけの失敗でも本体を止めない', async () => {
+    fetchMock.mockResolvedValueOnce(new Response('[{"result":1},{"error":"ERR injected"}]'));
+    const response = await route.call(request(route));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual(route.result);
+    expect(commands().map(([command]) => command)).toEqual(['PIPELINE:INCR+EXPIRE']);
+  });
 });
 
 describe('B-R6e store seller address limiter', () => {
@@ -163,19 +162,19 @@ describe('B-R6e store seller address limiter', () => {
     const { requireStoreSeller } = await import('@/app/api/store/_shared');
     await expect(requireStoreSeller(request({ name: 'store/products', method: 'GET' }), 'products-read'))
       .resolves.toEqual({ ok: true, address: OWNER });
-    expect(commands().map(([command]) => command)).toEqual(['PIPELINE:INCR+EXPIRE', 'INCR']);
+    expect(commands().map(([command]) => command)).toEqual(['PIPELINE:INCR+EXPIRE', 'PIPELINE:INCR+EXPIRE']);
     expect(commands()[1][1]).toMatch(new RegExp(`^rl:read:creator-store:products-read:${OWNER.toLowerCase()}:\\d+$`));
     expect(h.session).toHaveBeenCalledOnce();
   });
 
-  it.each(failures)('address TTL transport $name でも SIWE owner を返す', async ({ fail }) => {
-    fetchMock.mockImplementation(fail)
+  it('address の期限 (EXPIRE NX) だけの失敗でも SIWE owner を返す', async () => {
+    fetchMock
       .mockResolvedValueOnce(new Response('[{"result":1},{"result":1}]'))
-      .mockResolvedValueOnce(new Response('{"result":1}'));
+      .mockResolvedValueOnce(new Response('[{"result":1},{"error":"ERR injected"}]'));
     const { requireStoreSeller } = await import('@/app/api/store/_shared');
     await expect(requireStoreSeller(request({ name: 'store/products', method: 'GET' }), 'products-read'))
       .resolves.toEqual({ ok: true, address: OWNER });
-    expect(commands().map(([command]) => command)).toEqual(['PIPELINE:INCR+EXPIRE', 'INCR', 'EXPIRE']);
+    expect(commands().map(([command]) => command)).toEqual(['PIPELINE:INCR+EXPIRE', 'PIPELINE:INCR+EXPIRE']);
   });
 
   it.each([401, 503])('limiter 障害でも session の %i を許可へ変えない', async (status) => {

@@ -29,7 +29,8 @@ const ACTIVITY_ADDRESS = `0x${'1'.repeat(40)}`;
 
 // --- Upstash REST の偽物 (この test で使うコマンドだけ) ---
 type Entry = { value: number; expiresAt: number | null };
-type Fault = 'reject' | 'http500' | undefined;
+/** reject / http500 = 往復ごと落ちる・expireError = 往復は届くが EXPIRE の要素だけエラーを返す。 */
+type Fault = 'reject' | 'http500' | 'expireError' | undefined;
 const db = new Map<string, Entry>();
 /** KV への往復ごとに、送ったコマンド名の列 (単発は 1 要素・pipeline は要素数ぶん)。 */
 const trips: string[][] = [];
@@ -92,7 +93,8 @@ const fetchMock = vi.fn(async (input: string | URL, init?: RequestInit) => {
   const fault = inject(commands);
   if (fault === 'reject') throw new TypeError('fetch failed');
   if (fault === 'http500') return new Response('{"error":"ERR injected"}', { status: 500 });
-  const results = commands.map(exec);
+  const results = commands.map((command) =>
+    fault === 'expireError' && command[0] === 'EXPIRE' ? { error: 'ERR injected' } : exec(command));
   return Response.json(pipeline ? results : results[0]);
 });
 
@@ -152,25 +154,43 @@ describe('checkReadRateLimit (時計に揃えた固定窓・鍵 rl:read:<key>:<f
     expect(trips).toEqual([]);
   });
 
-  it('1 回の判定のコマンド数 (現状): 窓の初回は INCR と EXPIRE の 2 往復 = 2・以降は INCR の 1 往復 = 1', async () => {
+  // 第 8 回レビュー E-5: 以前は窓の初回だけ INCR の後に別の往復で EXPIRE を送っていた (初回 2・以降 1)。
+  it('1 回の判定のコマンド数: 毎回 pipeline の 1 往復で INCR + EXPIRE NX = 2', async () => {
     await checkReadRateLimit('char', 3, 60);
-    expect(trips).toEqual([['INCR'], ['EXPIRE']]);
-    expect(commandCount()).toBe(2);
-    trips.length = 0;
     await checkReadRateLimit('char', 3, 60);
-    expect(trips).toEqual([['INCR']]);
-    expect(commandCount()).toBe(1);
+    expect(trips).toEqual([['INCR', 'EXPIRE'], ['INCR', 'EXPIRE']]);
+    expect(commandCount()).toBe(4);
   });
 
-  it('EXPIRE の往復だけが落ちると期限の無い鍵が残る (C11 の現状・鍵に時刻が入るので判定には効かない)', async () => {
-    inject = (commands) => (commands.length === 1 && commands[0][0] === 'EXPIRE' ? 'reject' : undefined);
+  it('INCR が届いた往復で期限も付く (後続の往復が落ちても・関数が凍結しても期限の無い鍵が残らない)', async () => {
+    // 1 往復目だけが KV に届き、それ以降の往復はすべて落ちる (= INCR の直後に関数が凍結したのと同じ)。
+    inject = () => (trips.length > 1 ? 'reject' : undefined);
+    await expect(checkReadRateLimit('char', 3, 60)).resolves.toBe(true);
+    expect(db.get(key(bucket))?.value).toBe(1);
+    expect(ttl(key(bucket))).toBe(120);
+  });
+
+  it('期限 (EXPIRE NX) だけが失敗しても、同じ窓の次の判定で期限が付く (途中で期限を延ばさない)', async () => {
+    let expireFaults = 1;
+    inject = (commands) => {
+      if (expireFaults > 0 && commands.some(([name]) => name === 'EXPIRE')) {
+        expireFaults -= 1;
+        return 'expireError';
+      }
+      return undefined;
+    };
     await expect(checkReadRateLimit('char', 3, 60)).resolves.toBe(true);
     expect(ttl(key(bucket))).toBe(-1);
-    // 次の窓は別の鍵なので、残った鍵は判定に影響しない。
-    inject = () => undefined;
-    vi.setSystemTime((bucket + 1) * 60_000);
+
+    vi.setSystemTime(T0 + 10_000);
     await expect(checkReadRateLimit('char', 3, 60)).resolves.toBe(true);
-    expect(ttl(key(bucket + 1))).toBe(120);
+    expect(db.get(key(bucket))?.value).toBe(2);
+    expect(ttl(key(bucket))).toBe(120);
+
+    // 期限の在る鍵は EXPIRE NX で延ばさない (窓 2 つ分で確実に消える)。
+    vi.setSystemTime(T0 + 20_000);
+    await expect(checkReadRateLimit('char', 3, 60)).resolves.toBe(true);
+    expect(ttl(key(bucket))).toBe(110);
   });
 });
 

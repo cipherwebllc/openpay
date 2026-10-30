@@ -117,6 +117,10 @@ export async function checkRateLimit(keys: string[]): Promise<boolean> {
 // list 読み)。read poll 向けに INCR ベースの固定窓で近似する。allowed = 窓内カウント ≤ max。
 // fail-open: KV 未設定/障害は許可 (可用性優先・checkRateLimit と同方針)。
 // no-throw: 例外を投げない契約。呼び出し側は try で包まない (tests/lib/readRateLimit-nothrow-pinning)。
+// 期限 (窓 2 つ分) は INCR と同じ pipeline の EXPIRE NX で付ける (kvIncr の initialTtlSec)。以前は INCR の後に
+// 初回だけ別の往復で EXPIRE を送っていたため、その往復が落ちるか関数が凍結すると期限の無い鍵が残り、任意の
+// 注文 token ごとに KV へ積もった (第 8 回レビュー E-5)。EXPIRE NX は期限の無い鍵にだけ付くので、取りこぼしも
+// 同じ窓の次の判定で付き直す。コマンド数は毎回 2 (以前は窓の初回 2・以降 1)。
 export async function checkReadRateLimit(
   key: string,
   max: number,
@@ -125,9 +129,8 @@ export async function checkReadRateLimit(
   if (!isKvConfigured()) return true;
   const bucket = Math.floor(Date.now() / (windowSec * 1000));
   const k = `rl:read:${key}:${bucket}`;
-  const r = await kvIncr(k);
+  const r = await kvIncr(k, { initialTtlSec: windowSec * 2 });
   if (!r.ok) return true; // KV 障害は通す (fail-open)
-  if (r.value === 1) await kvExpire(k, windowSec * 2); // 初回のみ TTL (窓 2 つ分で確実に失効)
   return r.value <= max;
 }
 
