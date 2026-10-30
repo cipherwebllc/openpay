@@ -59,8 +59,9 @@ import {
   type VanillaResourceClaimIdentity,
 } from './vanillaResourceClaim';
 
-// Arc の束縛を張った時点の期限 (第 8 回レビュー B-1・Codex #929)。content は関数の実行時間 (最長 300 秒) の中で終わる
-// ので 15 分あれば足りる。settle に進む直前に ARC_GATEWAY_MAX_TIMEOUT_SECONDS へ延ばす。
+// Arc の束縛を張った時点の期限 (第 8 回レビュー B-1・Codex #929)。この gate を使う route (app/api/paid/usdc/**・hello) は
+// maxDuration を指定しておらず、Vercel の関数の既定の上限 (300 秒) で止まる。content はその中で終わるので 15 分あれば
+// 足りる。settle に進む直前に ARC_GATEWAY_MAX_TIMEOUT_SECONDS へ延ばす。route に maxDuration を足すときはこの値も見直す。
 const ARC_PENDING_CLAIM_TTL_SEC = 15 * 60;
 
 const FACILITATOR_TIMEOUT_MS = 20_000;
@@ -738,7 +739,10 @@ async function handleVanillaPaidGetInner(
     // 延ばせなくても settle へ進む: 付帯の束縛の KV 障害が、検証済みの支払いを止める波及を断つ (延ばせなかった束縛は
     // 短い期限で切れ、その後の再送は第 8 回より前と同じく content が動きうる)。
     const extended = await kvExpire(ownedClaim.key, ARC_GATEWAY_MAX_TIMEOUT_SECONDS);
-    if (!extended.ok) logger.warn('x402.vanilla.claim_extend_failed', { rail, resource: resource.resourceUrl });
+    // value 0 = キーがもう無い (期限切れ)。蘇らせはしないが、束縛なしで settle に進むことを観測できるようにする。
+    if (!extended.ok || extended.value === 0) {
+      logger.warn('x402.vanilla.claim_extend_failed', { rail, resource: resource.resourceUrl });
+    }
   }
 
   let settle: { status: number; body: Record<string, unknown> };

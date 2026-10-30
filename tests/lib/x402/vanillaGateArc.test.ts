@@ -265,6 +265,31 @@ describe('vanillaGate Arc rail: 同じ署名の再送で content を動かさな
     expect(content).toHaveBeenCalledTimes(2);
   });
 
+  it('途中で放置された束縛は 15 分で切れ、切れた後は同じ署名で content が動く', async () => {
+    // 1 本目は content の途中で止まったまま (関数が落ちた想定・束縛は戻されない)。
+    void payWith(ARC_ACCEPT, '0x39', () => new Promise(() => {}));
+    await vi.waitFor(() => expect(kvHold.store.size).toBe(1));
+    expect(kvHold.lastTtlSec).toBe(900);
+    const content = vi.fn<Content>(() => NextResponse.json({ ok: true }));
+    expect((await payWith(ARC_ACCEPT, '0x39', content)).status).toBe(402);
+    // 15 分 (900 秒) の期限切れ = キーが消えた状態。
+    kvHold.store.clear();
+    expect((await payWith(ARC_ACCEPT, '0x39', content)).status).toBe(200);
+    expect(content).toHaveBeenCalledTimes(1);
+  });
+
+  it('settle の結果が不明 (throw) のときも、延ばした長い期限の束縛が残る', async () => {
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url.endsWith('/verify')) return { ok: true, status: 200, json: async () => ({ isValid: true, payer: PAYER }) };
+      return { ok: false, status: 503, json: async () => ({ error: 'unavailable' }) };
+    });
+    const content = vi.fn<Content>(() => NextResponse.json({ ok: true }));
+    expect((await payWith(ARC_ACCEPT, '0x3a', content)).status).toBe(503);
+    const key = [...kvHold.store.keys()][0];
+    expect(kvHold.expires).toEqual([{ key, ttlSec: 604_900 }]);
+    expect(kvHold.store.has(key)).toBe(true);
+  });
+
   it('束縛を延ばせなくても settle へ進む (付帯の KV 障害で検証済みの支払いを止めない)', async () => {
     kvHold.expireOk = false;
     const content = vi.fn<Content>(() => NextResponse.json({ ok: true }));
