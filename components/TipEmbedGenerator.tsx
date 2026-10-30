@@ -1,31 +1,13 @@
 'use client';
 
+// チップの受け取りリンク / 埋め込みコードを作るタブ。設定 (useTipSettings)・受取先の解決・UI の状態 (シートの開閉・
+// 公開の 2 択・埋め込みの形式・QR・コピー) と、URL / 埋め込みコード / プレビューの params はここが持ち、
+// 各節 (components/tip-embed-generator/*) は props で受け取って描画と操作の中継だけを行う。
+
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import dynamic from 'next/dynamic';
-import { useLocale, useTranslations } from 'next-intl';
-import { formatUnits, type Address } from 'viem';
-import { useAccount } from 'wagmi';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import {
-  ChevronDown,
-  Code2,
-  ExternalLink,
-  Inbox,
-  QrCode,
-  Eye,
-  Share2,
-  SlidersHorizontal,
-  Sparkles,
-  Wallet,
-} from 'lucide-react';
-import { LinkQrModal } from './LinkQrModal';
-import { ReceiverBlock } from './ReceiverBlock';
-import { Field } from './Field';
-import { OptionalGroup } from './OptionalGroup';
-import { SectionCard } from './SectionCard';
-import { ShopSettingsSection, ShopSettingsSheet } from './ShopSettingsSheet';
+import { useTranslations } from 'next-intl';
+import { type Address } from 'viem';
 import { useResolveAddress } from '@/hooks/useResolveAddress';
-import { HandleThemePicker } from './HandleThemePicker';
 import { useTipSettings } from '@/hooks/useTipSettings';
 import {
   useReceiverAutofill,
@@ -33,8 +15,6 @@ import {
 } from '@/hooks/useReceiverAutofill';
 import { useOrigin } from '@/hooks/useOrigin';
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard';
-import { useSiweSession } from '@/hooks/useSiweSession';
-import { SignInGate } from '@/components/SignInGate';
 import { env } from '@/lib/env';
 import { crossChainAllowed } from '@/lib/url/shared';
 import {
@@ -43,206 +23,40 @@ import {
 
   type TokenSymbol,
 } from '@/lib/tokens';
-import {
-  chainForSlug,
-  JPYC_CHAINS,
-  USDC_CHAINS,
-  type ChainSlug,
-} from '@/lib/chains';
+import { type ChainSlug } from '@/lib/chains';
 import { isLikelyName } from '@/lib/nameDetection';
-import { pickEffectiveAddress, shortAddress } from '@/lib/format';
-import { normalizeAmountList, truncateAmount } from '@/lib/amount';
+import { pickEffectiveAddress } from '@/lib/format';
+import { normalizeAmountList } from '@/lib/amount';
 import {
   buildTipUrl,
   COLOR_PATTERN,
   DEFAULT_TIP_PRESETS,
   formatTipPreset,
   parseTipPreset,
-  QR_MAX_URL_LEN,
-  sanitizeTipPresetLabel,
-  TIP_PRESET_MAX,
   resolveTipCapability,
   type TipParams,
 } from '@/lib/url';
+import { CustomizeSection } from './tip-embed-generator/CustomizeSection';
+import { PreviewSection } from './tip-embed-generator/PreviewSection';
+import { PublishSection } from './tip-embed-generator/PublishSection';
+import { ReceiveSection } from './tip-embed-generator/ReceiveSection';
+import {
+  DEFAULT_PREVIEW_COLOR,
+  type EmbedFormat,
+  type PublishMode,
+} from './tip-embed-generator/shared';
+import {
+  buttonSnippetFor,
+  iframeSnippetFor,
+  xShareUrlFor,
+} from './tip-embed-generator/snippets';
+import { TipMessageInbox } from './tip-embed-generator/TipMessageInbox';
 
-const TipFormPreview = dynamic(
-  () => import('./TipForm').then((mod) => mod.TipForm),
-  { ssr: false },
-);
-
-const IFRAME_WIDTH = 380;
-const IFRAME_HEIGHT = 640;
-// QR を描く tipUrl の上限長。これを超えると qrcode.react が「Data too long」で throw し
-// share タブが落ちる (長い thanksUrl/preset で URL が肥大した場合)。容量に余裕を
-// 持たせた閾値で、超過時は QR を省略する (リンク/X シェアは長い URL でも機能する)。
-// color 入力が不正 (COLOR_PATTERN 不一致) のときのプレビュー/プレースホルダ既定色。
-const DEFAULT_PREVIEW_COLOR = '#2563eb';
 const PREVIEW_RECEIVER =
   '0x0000000000000000000000000000000000000001' as Address;
 
-// URL と同じ資格判定。Arc は両 flag 有効時だけ standard チップとして選択可能。
-const receivableUsdcChains = () => USDC_CHAINS.filter((slug) =>
-  resolveTipCapability('usdc', slug).ok,
-);
-const RECEIVABLE_JPYC_CHAINS = JPYC_CHAINS.filter((slug) =>
-  resolveTipCapability('jpyc', slug).ok,
-);
-
-type PublishMode = 'share' | 'embed';
-type EmbedFormat = 'iframe' | 'button';
-
-type TipMessageItem = {
-  from: string;
-  amountWei: string;
-  chainId: number;
-  txHash: string;
-  message: string;
-  ts: number;
-};
-
-async function fetchTipMessages(): Promise<TipMessageItem[]> {
-  const res = await fetch('/api/tip-messages', { cache: 'no-store' });
-  if (!res.ok) throw new Error(`tip_messages_http_${res.status}`);
-  const json = (await res.json()) as { items?: unknown };
-  if (!Array.isArray(json.items)) throw new Error('tip_messages_invalid_response');
-  return json.items as TipMessageItem[];
-}
-
-async function deleteTipMessages(): Promise<void> {
-  const res = await fetch('/api/tip-messages', {
-    method: 'DELETE',
-    cache: 'no-store',
-  });
-  if (!res.ok) throw new Error(`tip_messages_delete_http_${res.status}`);
-}
-
 function sameList(a: readonly string[], b: readonly string[]): boolean {
   return a.length === b.length && a.every((v, i) => v === b[i]);
-}
-
-function TipMessageInbox() {
-  const t = useTranslations('TipEmbedGenerator');
-  const tNav = useTranslations('Nav');
-  const locale = useLocale();
-  const { address } = useAccount();
-  const { isSignedIn } = useSiweSession();
-  const queryClient = useQueryClient();
-  const queryKey = ['tip-messages', address] as const;
-  const inbox = useQuery({
-    queryKey,
-    enabled: isSignedIn && address !== undefined,
-    queryFn: fetchTipMessages,
-  });
-  const clearInbox = useMutation({
-    mutationFn: deleteTipMessages,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey }),
-  });
-  const dateFormatter = useMemo(
-    () =>
-      new Intl.DateTimeFormat(locale === 'ja' ? 'ja-JP' : 'en-US', {
-        dateStyle: 'medium',
-        timeStyle: 'short',
-      }),
-    [locale],
-  );
-  const items = inbox.data ?? [];
-
-  return (
-    // 見た目は上のカード (SectionCard) に揃える。data-testid を付けるため section は自前で書く。
-    <section
-      data-testid="tip-message-inbox"
-      aria-labelledby="tip-inbox-heading"
-      className="rounded-2xl bg-white p-5 shadow-card ring-1 ring-slate-200/70"
-    >
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h2
-            id="tip-inbox-heading"
-            className="flex items-center gap-2 text-sm font-semibold text-slate-700"
-          >
-            <Inbox className="h-4 w-4 text-slate-400" aria-hidden />
-            {t('tipInboxTitle')}
-          </h2>
-          <p className="mt-1 text-xs text-slate-500">
-            {t('tipInboxDescription')}
-          </p>
-        </div>
-        {isSignedIn && items.length > 0 ? (
-          <button
-            type="button"
-            disabled={clearInbox.isPending}
-            onClick={() => clearInbox.mutate()}
-            className="shrink-0 rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-50 disabled:opacity-50"
-          >
-            {clearInbox.isPending
-              ? t('tipInboxDeleting')
-              : t('tipInboxDeleteAll')}
-          </button>
-        ) : null}
-      </div>
-
-      {!isSignedIn ? (
-        <SignInGate
-          className="mt-3"
-          statement={tNav('siweStatement')}
-          // 何のためのサインインかは上の説明 (tipInboxDescription) が言っているので、案内の文は重ねない。
-          cta={t('tipInboxSignInCta')}
-        />
-      ) : inbox.isLoading ? (
-        <p className="mt-4 text-center text-sm text-slate-500">
-          {t('tipInboxLoading')}
-        </p>
-      ) : inbox.isError ? (
-        <div className="mt-4 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          <span>{t('tipInboxError')}</span>{' '}
-          <button
-            type="button"
-            onClick={() => void inbox.refetch()}
-            className="font-semibold underline hover:text-amber-950"
-          >
-            {t('tipInboxRetry')}
-          </button>
-        </div>
-      ) : items.length === 0 ? (
-        <p className="mt-3 rounded-xl bg-slate-50 px-4 py-4 text-center text-sm text-slate-500">
-          {t('tipInboxEmpty')}
-        </p>
-      ) : (
-        <ul className="mt-4 space-y-3">
-          {items.map((item) => (
-            <li
-              key={`${item.chainId}:${item.txHash}`}
-              className="rounded-xl border border-slate-200 bg-slate-50 p-4"
-            >
-              <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs text-slate-500">
-                <span className="font-semibold text-slate-700">
-                  {t('tipInboxAmount', {
-                    amount: `${formatUnits(BigInt(item.amountWei), 18)} JPYC`,
-                  })}
-                </span>
-                <time dateTime={new Date(item.ts).toISOString()}>
-                  {dateFormatter.format(new Date(item.ts))}
-                </time>
-              </div>
-              <p className="mt-1 font-mono text-xs text-slate-500">
-                {t('tipInboxFrom', { address: shortAddress(item.from) })}
-              </p>
-              {/* 非公開本文は HTML として解釈せず、React text node のみで描画する。 */}
-              <p className="mt-3 whitespace-pre-wrap break-words text-sm leading-relaxed text-slate-800">
-                {item.message}
-              </p>
-            </li>
-          ))}
-        </ul>
-      )}
-
-      {clearInbox.isError ? (
-        <p className="mt-3 text-xs text-red-600">
-          {t('tipInboxDeleteError')}
-        </p>
-      ) : null}
-    </section>
-  );
 }
 
 export function TipEmbedGenerator() {
@@ -260,7 +74,6 @@ export function TipEmbedGenerator() {
   const [receiverInline, setReceiverInline] = useState(true);
   const [receiverChecked, setReceiverChecked] = useState(false);
   const t = useTranslations('TipEmbedGenerator');
-  const tProfile = useTranslations('HandleProfile');
 
   // 受取先が ENS 名のときは、設定シート (その中の AddressInput) を開いていなくても名前を解決しておき、この解決結果
   // だけを使う (シートの AddressInput も同じ query を見る)。シートから受け取った解決値を別に持つと、閉じた後の
@@ -312,7 +125,7 @@ export function TipEmbedGenerator() {
   const capability = resolveTipCapability(settings.token, settings.chain);
   const tipMode = capability.ok ? capability.mode : undefined;
 
-  // 現在 token のプリセットリスト (token ごと独立)。エディタ・適用ともこのリストだけ操作。
+  // 現在 token のプリセットリスト (token ごと独立)。エディタ (PresetsField)・適用ともこのリストだけ操作。
   const tokenPresets = settings.presets[settings.token];
   const tokenPresetLabels = settings.presetLabels[settings.token];
 
@@ -392,38 +205,26 @@ export function TipEmbedGenerator() {
 
   const iframeSnippet = useMemo(() => {
     if (!tipUrl) return '';
-    return `<iframe
-  src="${escapeAttr(tipUrl)}"
-  width="${IFRAME_WIDTH}"
-  height="${IFRAME_HEIGHT}"
-  style="border:0;max-width:100%"
-  title="OpenPay Tip"
-  loading="lazy"
-></iframe>`;
+    return iframeSnippetFor(tipUrl);
   }, [tipUrl]);
 
-  // SNS シェア: X (Twitter) の intent。text と url を別々に渡し、X 側で url を unfurl
-  // させる (P1 の動的 OG カードが表示される)。tipUrl 未確定なら空。
+  // SNS シェア: X (Twitter) の intent (snippets.ts)。tipUrl 未確定なら空。
   const shareText = settings.name
     ? t('shareTextNamed', { name: settings.name })
     : t('shareTextGeneric');
   const xShareUrl = useMemo(() => {
     if (!tipUrl) return '';
-    return `https://twitter.com/intent/tweet?text=${encodeURIComponent(
-      shareText,
-    )}&url=${encodeURIComponent(tipUrl)}`;
+    return xShareUrlFor(shareText, tipUrl);
   }, [tipUrl, shareText]);
 
-  // ボタン埋め込み: note / Linktree / ブログに貼れる「チップ」ボタン (styled <a>)。
-  // ラベル・URL とも HTML へ実体参照化して注入 (escapeAttr は & " < > を変換)。
+  // ボタン埋め込み: note / Linktree / ブログに貼れる「チップ」ボタン (snippets.ts)。
   const buttonLabel = settings.name
     ? t('buttonLabelNamed', { name: settings.name })
     : t('buttonLabelGeneric');
   const buttonColor = colorValid ? settings.color : DEFAULT_PREVIEW_COLOR;
   const buttonSnippet = useMemo(() => {
     if (!tipUrl) return '';
-    return `<a href="${escapeAttr(tipUrl)}" target="_blank" rel="noopener"
-  style="display:inline-block;background:${buttonColor};color:#fff;font-weight:700;padding:12px 22px;border-radius:9999px;text-decoration:none;font-family:system-ui,-apple-system,sans-serif">${escapeAttr(buttonLabel)}</a>`;
+    return buttonSnippetFor(tipUrl, buttonColor, buttonLabel);
   }, [tipUrl, buttonColor, buttonLabel]);
 
   // embed タブで実際に表示/コピーするスニペット (iframe / button の切替)。
@@ -470,576 +271,67 @@ export function TipEmbedGenerator() {
     setSettings((s) => ({ ...s, chain: slug }));
   }
 
-  // プリセット編集は現 token のサブリストだけを操作 (QR レジ金額と同型)。
-  function updatePreset(idx: number, value: string) {
-    setSettings((s) => ({
-      ...s,
-      presets: {
-        ...s.presets,
-        [s.token]: s.presets[s.token].map((p, i) =>
-          i === idx ? truncateAmount(value, deployment.decimals) : p,
-        ),
-      },
-    }));
-  }
-
-  function updatePresetLabel(idx: number, value: string) {
-    // live 入力時点から URL と同じ単一パーサを通し、制御文字・`|`・12 code point 上限を
-    // 保つ。HTML maxLength は UTF-16 単位なので絵文字を誤って短く数えるため使わない。
-    const label = sanitizeTipPresetLabel(value, { trim: false }) ?? '';
-    setSettings((s) => ({
-      ...s,
-      presetLabels: {
-        ...s.presetLabels,
-        [s.token]: s.presetLabels[s.token].map((current, i) =>
-          i === idx ? label : current,
-        ),
-      },
-    }));
-  }
-
-  function addPreset() {
-    setSettings((s) => ({
-      ...s,
-      presets: { ...s.presets, [s.token]: [...s.presets[s.token], ''] },
-      presetLabels: {
-        ...s.presetLabels,
-        [s.token]: [...s.presetLabels[s.token], ''],
-      },
-    }));
-  }
-
-  function removePreset(idx: number) {
-    setSettings((s) => {
-      const next = s.presets[s.token].filter((_, i) => i !== idx);
-      const nextLabels = s.presetLabels[s.token].filter((_, i) => i !== idx);
-      return {
-        ...s,
-        presets: { ...s.presets, [s.token]: next.length > 0 ? next : [''] },
-        presetLabels: {
-          ...s.presetLabels,
-          [s.token]: next.length > 0 ? nextLabels : [''],
-        },
-      };
-    });
-  }
-
-  const defaultPresetsList = DEFAULT_TIP_PRESETS[settings.token].join(', ');
-
   return (
     <div className="space-y-5">
     {/* 並び: スマホは「受け取り → 表示 → プレビュー → 公開する」(DOM の順 = 見た目の順 = focus の順)。
         PC は左に受け取りと表示、右にプレビューと公開する (追従)。番号付き手順は使わない (user 裁定 C)。 */}
     <div className="flex flex-col gap-5 lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(300px,360px)] lg:grid-rows-[auto_1fr] lg:items-start lg:gap-6">
       <div className="min-w-0 lg:col-start-1 lg:row-start-1">
-        <SectionCard
-          title={t('receiveHeading')}
-          headingId="tip-receive-heading"
-          icon={Wallet}
-          action={
-            receiverInline ? undefined : (
-              <button
-                type="button"
-                onClick={() => setReceiveOpen(true)}
-                className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:border-brand hover:text-brand-dark"
-              >
-                <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden />
-                {t('receiveEdit')}
-              </button>
-            )
-          }
-        >
-          {receiverInline ? (
-            <div className="space-y-4">
-              <ReceiverBlock
-                receiver={settings.receiver}
-                onReceiverChange={onReceiverInput}
-                showAddressInvalid={
-                  !!settings.receiver &&
-                  !effectiveReceiver &&
-                  !isLikelyName(settings.receiver)
-                }
-                wallet={{
-                  canUse: autofill.canUseConnected,
-                  matches: autofill.matchesConnected,
-                  onUse: onUseConnectedWallet,
-                }}
-                token={settings.token}
-                chain={settings.chain}
-                availableChains={
-                  settings.token === 'usdc'
-                    ? receivableUsdcChains()
-                    : RECEIVABLE_JPYC_CHAINS
-                }
-                onTokenChange={selectToken}
-                onChainChange={selectChain}
-                mode="editable"
-                chainGridClassName={
-                  settings.token === 'usdc'
-                    ? 'grid grid-cols-2 gap-2 sm:grid-cols-3'
-                    : 'grid grid-cols-2 gap-2'
-                }
-                labels={{
-                  receiver: t('receiverLabel'),
-                  currency: t('tokenLabel'),
-                  chain: t('chainLabel', { symbol: deployment.displaySymbol }),
-                  useConnectedWallet: t('useConnectedWallet'),
-                  receiverMatchesWallet: t('receiverMatchesWallet'),
-                  addressInvalid: t('addressInvalid'),
-                }}
-              />
-              {settings.token === 'usdc' && crossChainAllowed(settings.chain) && (
-                <Field label={t('crossChainHeading')}>
-                  <label className="flex cursor-pointer items-start gap-3">
-                    <input
-                      type="checkbox"
-                      checked={settings.crossChain}
-                      onChange={(e) =>
-                        setSettings((s) => ({
-                          ...s,
-                          crossChain: e.target.checked,
-                        }))
-                      }
-                      className="mt-0.5 h-4 w-4 rounded border-slate-300"
-                    />
-                    <span className="text-xs">
-                      <span className="font-semibold text-slate-700">
-                        {t('crossChainToggleLabel')}
-                      </span>
-                      <span className="block text-slate-500">
-                        {t(settings.chain === 'arc' ? 'crossChainToggleDescriptionArc' : 'crossChainToggleDescription')}
-                      </span>
-                    </span>
-                  </label>
-                </Field>
-              )}
-            </div>
-          ) : (
-            <>
-              <p className="flex flex-wrap items-baseline gap-x-2 text-sm">
-                <span className="font-mono text-slate-900">{effectiveReceiver ? shortAddress(effectiveReceiver) : ''}</span>
-                {autofill.matchesConnected ? (
-                  <span className="text-xs text-emerald-700">{t('receiverIsWallet')}</span>
-                ) : null}
-              </p>
-              <p className="mt-1 text-xs text-slate-500">
-                {deployment.displaySymbol} · {chainForSlug(settings.chain).name}
-              </p>
-            </>
-          )}
-        </SectionCard>
-        <ShopSettingsSheet
-          open={receiveOpen}
-          onClose={() => {
+        <ReceiveSection
+          settings={settings}
+          setSettings={setSettings}
+          displaySymbol={deployment.displaySymbol}
+          effectiveReceiver={effectiveReceiver}
+          onReceiverInput={onReceiverInput}
+          canUseConnected={autofill.canUseConnected}
+          matchesConnected={autofill.matchesConnected}
+          onUseConnectedWallet={onUseConnectedWallet}
+          onTokenChange={selectToken}
+          onChainChange={selectChain}
+          receiverInline={receiverInline}
+          receiveOpen={receiveOpen}
+          onOpenSettings={() => setReceiveOpen(true)}
+          onCloseSettings={() => {
             setReceiveOpen(false);
             // 受取先が決まっていなければ、受け取りのカードに入力欄を戻す (QR を作れない状態を要約で隠さない)。
             if (!effectiveReceiver) setReceiverInline(true);
           }}
-          title={t('receiveSettingsTitle')}
-          doneLabel={t('receiveDone')}
-        >
-          <ShopSettingsSection title={t('receiveHeading')}>
-          <ReceiverBlock
-            receiver={settings.receiver}
-            onReceiverChange={onReceiverInput}
-            showAddressInvalid={
-              !!settings.receiver &&
-              !effectiveReceiver &&
-              !isLikelyName(settings.receiver)
-            }
-            wallet={{
-              canUse: autofill.canUseConnected,
-              matches: autofill.matchesConnected,
-              onUse: onUseConnectedWallet,
-            }}
-            token={settings.token}
-            chain={settings.chain}
-            availableChains={
-              settings.token === 'usdc'
-                ? receivableUsdcChains()
-                : RECEIVABLE_JPYC_CHAINS
-            }
-            onTokenChange={selectToken}
-            onChainChange={selectChain}
-            mode="editable"
-            chainGridClassName={
-              settings.token === 'usdc'
-                ? 'grid grid-cols-2 gap-2 sm:grid-cols-3'
-                : 'grid grid-cols-2 gap-2'
-            }
-            labels={{
-              receiver: t('receiverLabel'),
-              currency: t('tokenLabel'),
-              chain: t('chainLabel', { symbol: deployment.displaySymbol }),
-              useConnectedWallet: t('useConnectedWallet'),
-              receiverMatchesWallet: t('receiverMatchesWallet'),
-              addressInvalid: t('addressInvalid'),
-            }}
-          />
-          {settings.token === 'usdc' && crossChainAllowed(settings.chain) && (
-            <Field label={t('crossChainHeading')}>
-              <label className="flex cursor-pointer items-start gap-3">
-                <input
-                  type="checkbox"
-                  checked={settings.crossChain}
-                  onChange={(e) =>
-                    setSettings((s) => ({
-                      ...s,
-                      crossChain: e.target.checked,
-                    }))
-                  }
-                  className="mt-0.5 h-4 w-4 rounded border-slate-300"
-                />
-                <span className="text-xs">
-                  <span className="font-semibold text-slate-700">
-                    {t('crossChainToggleLabel')}
-                  </span>
-                  <span className="block text-slate-500">
-                    {t(settings.chain === 'arc' ? 'crossChainToggleDescriptionArc' : 'crossChainToggleDescription')}
-                  </span>
-                </span>
-              </label>
-            </Field>
-          )}
-          </ShopSettingsSection>
-        </ShopSettingsSheet>
+        />
       </div>
 
       <div className="min-w-0 lg:col-start-1 lg:row-start-2">
-        <SectionCard title={t('step2Title')} headingId="tip-customize-heading" icon={Sparkles}>
-          <div className="space-y-4">
-            <Field label={t('nameLabel')}>
-              <input
-                type="text"
-                value={settings.name}
-                onChange={(e) =>
-                  setSettings((s) => ({ ...s, name: e.target.value }))
-                }
-                placeholder={t('namePlaceholder')}
-                maxLength={60}
-                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none"
-              />
-            </Field>
-
-            <Field label={t('messageLabel')}>
-              <textarea
-                value={settings.message}
-                onChange={(e) =>
-                  setSettings((s) => ({ ...s, message: e.target.value }))
-                }
-                placeholder={t('messagePlaceholder')}
-                maxLength={200}
-                rows={2}
-                className="w-full resize-none rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none"
-              />
-              <p className="mt-1 text-xs text-slate-500">
-                {t('messageCounter', { count: settings.message.length })}
-              </p>
-            </Field>
-
-            <HandleThemePicker
-              accent={colorValid ? settings.color : DEFAULT_PREVIEW_COLOR}
-              selected={settings.theme ?? 'clean'}
-              onSelect={(theme) =>
-                setSettings((current) => ({ ...current, theme }))
-              }
-              label={tProfile('themeLabel')}
-              hint={tProfile('themeHint')}
-            />
-
-            <Field label={t('colorLabel')}>
-              <div className="flex items-center gap-3">
-                <input
-                  type="color"
-                  value={colorValid ? settings.color : DEFAULT_PREVIEW_COLOR}
-                  onChange={(e) =>
-                    setSettings((s) => ({ ...s, color: e.target.value }))
-                  }
-                  className="h-10 w-14 cursor-pointer rounded-md border border-slate-200 bg-white p-0.5"
-                />
-                <input
-                  type="text"
-                  value={settings.color}
-                  onChange={(e) =>
-                    setSettings((s) => ({ ...s, color: e.target.value }))
-                  }
-                  placeholder={DEFAULT_PREVIEW_COLOR}
-                  className="flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm focus:border-brand focus:outline-none"
-                />
-              </div>
-              {settings.color && !colorValid && (
-                <p className="mt-1 text-xs text-red-600">{t('colorInvalid')}</p>
-              )}
-            </Field>
-
-            {/* チップ金額プリセット: token ごと独立のボタン編集 UI */}
-            <Field label={t('presetsLabelWithSymbol', { symbol: deployment.displaySymbol })}>
-              <div className="space-y-2">
-                {tokenPresets.map((p, i) => (
-                  // 1 行に「金額・ラベル・×」(2 段に分けると 3 件で縦に長い)。通貨は見出しに 1 回。
-                  <div key={i} className="grid grid-cols-[minmax(0,6.5rem)_minmax(0,1fr)_auto] items-center gap-2">
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      value={p}
-                      onChange={(e) => updatePreset(i, e.target.value)}
-                      placeholder={t('presetAmountPlaceholder')}
-                      aria-label={t('presetAmountItem', { n: i + 1, symbol: deployment.displaySymbol })}
-                      className="min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-right text-sm tabular-nums focus:border-brand focus:outline-none"
-                    />
-                    <input
-                      type="text"
-                      value={tokenPresetLabels[i] ?? ''}
-                      onChange={(e) => updatePresetLabel(i, e.target.value)}
-                      placeholder={t('presetLabelPlaceholder')}
-                      aria-label={t('presetLabelItem', { n: i + 1 })}
-                      className="min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => removePreset(i)}
-                      aria-label={t('presetRemoveLabel', { n: i + 1 })}
-                      className="h-10 rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-500 hover:border-red-300 hover:text-red-600"
-                    >
-                      ×
-                    </button>
-                  </div>
-                ))}
-              </div>
-              {tokenPresets.length < TIP_PRESET_MAX && (
-                <button
-                  type="button"
-                  onClick={addPreset}
-                  className="mt-2 rounded-md border border-dashed border-slate-300 px-3 py-1.5 text-xs text-slate-600 hover:border-brand hover:text-brand-dark"
-                >
-                  {t('presetAddButton')}
-                </button>
-              )}
-              <p className="mt-1.5 text-xs text-slate-500">
-                {t('presetsHint', { defaults: defaultPresetsList })}
-              </p>
-            </Field>
-            {/* 開発者向け (成功画面の文・リンク) は任意なので閉じた折りたたみ。 */}
-            <OptionalGroup
-              icon={Code2}
-              title={t('devSettingsToggle')}
-              filled={[settings.thanks, settings.thanksUrl].filter((v) => v.trim()).length}
-              filledLabel={(count) => t('optionalFilled', { count })}
-            >
-              <Field label={t('thanksLabel')}>
-                <textarea
-                  value={settings.thanks}
-                  onChange={(e) =>
-                    setSettings((s) => ({ ...s, thanks: e.target.value }))
-                  }
-                  placeholder={t('thanksPlaceholder')}
-                  maxLength={200}
-                  rows={2}
-                  className="w-full resize-none rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none"
-                />
-                <p className="mt-1 text-xs text-slate-500">
-                  {t('messageCounter', { count: settings.thanks.length })}
-                </p>
-              </Field>
-
-              <Field label={t('thanksUrlLabel')}>
-                <input
-                  type="text"
-                  value={settings.thanksUrl}
-                  onChange={(e) =>
-                    setSettings((s) => ({ ...s, thanksUrl: e.target.value }))
-                  }
-                  placeholder={t('thanksUrlPlaceholder')}
-                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-xs focus:border-brand focus:outline-none"
-                />
-                <p className="mt-1 text-xs text-slate-500">{t('thanksUrlHint')}</p>
-              </Field>
-            </OptionalGroup>
-          </div>
-        </SectionCard>
+        <CustomizeSection
+          settings={settings}
+          setSettings={setSettings}
+          colorValid={colorValid}
+          deployment={deployment}
+        />
       </div>
 
       {/* 右 (PC は追従): 実 TipForm をスマホ枠で描くプレビュー + 公開する。 */}
       <div className="min-w-0 space-y-5 lg:sticky lg:top-4 lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:max-h-[calc(100vh-2rem)] lg:self-start lg:overflow-y-auto">
-        <SectionCard title={t('previewTitle')} headingId="tip-preview-heading" icon={Eye}>
-          <div
-            data-testid="tip-preview-frame"
-            className="mx-auto max-w-[360px] overflow-hidden rounded-[2rem] border-[6px] border-slate-900 bg-white shadow-xl ring-1 ring-black/5"
-          >
-            {/* 高さは控えめにして (max-h-[46vh]・プロフ/モバイル注文と同じ契約)、
-                サイド列自身のスクロールバーと内側バーが隣り合って二重に見えるのを避ける
-                (2026-07-29 実機報告: 56vh では右カラムが視界を超え二重スクロール化)。 */}
-            <div
-              data-testid="tip-preview-scroll"
-              className="max-h-[46vh] overflow-y-auto bg-slate-50 p-3"
-            >
-              {previewParams && <TipFormPreview
-                key={`${settings.token}:${settings.chain}:${activePresets.join(',')}`}
-                params={previewParams}
-                preview
-              />}
-            </div>
-          </div>
-        </SectionCard>
+        <PreviewSection
+          params={previewParams}
+          token={settings.token}
+          chain={settings.chain}
+          activePresets={activePresets}
+        />
 
         {/* 公開する: リンク共有 / サイト埋め込み の 2 択 */}
-        <SectionCard title={t('step3Title')} headingId="tip-publish-heading" icon={Share2}>
-
-          {/* 2 択の切替は aria-pressed のボタン (値引きの金額/率と同じ)。tab を名乗ると tabpanel・矢印キー操作が
-              要るのに無かった (D7)。まとまりの名前は節の見出し「公開する」。 */}
-          <div
-            className="mb-3 inline-flex rounded-lg border border-slate-200 bg-slate-100 p-1"
-            role="group"
-            aria-labelledby="tip-publish-heading"
-          >
-            {(
-              [
-                ['share', t('publishShareTab')],
-                ['embed', t('publishEmbedTab')],
-              ] as const
-            ).map(([mode, label]) => (
-              <button
-                key={mode}
-                type="button"
-                aria-pressed={publishMode === mode}
-                onClick={() => setPublishMode(mode)}
-                className={`rounded-md px-3 py-1 text-xs font-semibold transition ${
-                  publishMode === mode
-                    ? 'bg-white text-brand-dark shadow-sm'
-                    : 'text-slate-500 hover:text-slate-800'
-                }`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-
-          {publishMode === 'share' ? (
-            <div>
-              <h4 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                {t('tipUrlTitle')}
-              </h4>
-              <div className="break-all rounded-lg bg-slate-50 px-3 py-2 font-mono text-xs text-slate-600">
-                {tipUrl || (
-                  <span className="text-slate-400">{t('urlPlaceholder')}</span>
-                )}
-              </div>
-              <button
-                type="button"
-                onClick={() => urlCopy.copy(tipUrl)}
-                disabled={!tipUrl}
-                data-testid="tip-copy-primary"
-                className="mt-3 w-full rounded-xl bg-brand px-4 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-brand-dark active:translate-y-px disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                {urlCopy.copied ? t('copied') : t('copyLinkButton')}
-              </button>
-              {tipUrl && (
-                <div
-                  data-testid="tip-share-secondary"
-                  className="mt-3 flex flex-wrap gap-2"
-                >
-                  {/* リンクの QR: URL が容量を超えると qrcode.react が throw するため、
-                      共有の上限定数以下だけ提示する。 */}
-                  {tipUrl.length <= QR_MAX_URL_LEN && (
-                    <>
-                      <button
-                        type="button"
-                        onClick={() => setQrOpen(true)}
-                        className="inline-flex min-w-[6.5rem] flex-1 items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-xs font-semibold text-slate-700 transition hover:border-slate-400 active:translate-y-px"
-                      >
-                        <QrCode className="h-3.5 w-3.5" aria-hidden />
-                        {t('qrButton')}
-                      </button>
-                      <LinkQrModal
-                        open={qrOpen}
-                        value={tipUrl}
-                        title={t('qrTitle')}
-                        closeLabel={t('qrClose')}
-                        onClose={() => setQrOpen(false)}
-                      />
-                    </>
-                  )}
-                  {/* X (Twitter) シェア: 貼ると動的 OG カードが unfurl される。 */}
-                  <a
-                    href={xShareUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex min-w-[6.5rem] flex-1 items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-xs font-semibold text-slate-700 transition hover:border-slate-400 active:translate-y-px"
-                  >
-                    <Share2 className="h-3.5 w-3.5" aria-hidden />
-                    {t('shareXButton')}
-                  </a>
-                  <a
-                    href={tipUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex min-w-[6.5rem] flex-1 items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-xs font-semibold text-slate-700 transition hover:border-slate-400 active:translate-y-px"
-                  >
-                    <ExternalLink className="h-3.5 w-3.5" aria-hidden />
-                    {t('openInNewTab')}
-                  </a>
-                </div>
-              )}
-            </div>
-          ) : (
-            <div>
-              {/* 形式切替: iframe (全画面ウィジェット) / button (リンク貼付)。default iframe。 */}
-              <div className="mb-2 inline-flex rounded-lg border border-slate-200 bg-slate-100 p-1">
-                {(
-                  [
-                    ['iframe', t('embedIframeTab')],
-                    ['button', t('embedButtonTab')],
-                  ] as const
-                ).map(([fmt, label]) => (
-                  <button
-                    key={fmt}
-                    type="button"
-                    aria-pressed={embedFormat === fmt}
-                    onClick={() => setEmbedFormat(fmt)}
-                    className={`rounded-md px-3 py-1 text-xs font-semibold transition ${
-                      embedFormat === fmt
-                        ? 'bg-white text-brand-dark shadow-sm'
-                        : 'text-slate-500 hover:text-slate-800'
-                    }`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-              <div className="mb-1.5 flex items-center justify-between">
-                <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  {embedFormat === 'iframe'
-                    ? t('iframeTitle')
-                    : t('buttonSnippetTitle')}
-                </h4>
-                <button
-                  type="button"
-                  onClick={() => iframeCopy.copy(activeSnippet)}
-                  disabled={!activeSnippet}
-                  className="rounded-md bg-slate-900 px-2.5 py-1 text-xs font-semibold text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  {iframeCopy.copied ? t('copied') : t('copy')}
-                </button>
-              </div>
-              <pre className="overflow-x-auto rounded-lg bg-slate-900 px-3 py-2 font-mono text-xs leading-relaxed text-slate-100">
-                <code>
-                  {activeSnippet || (
-                    <span className="text-slate-500">
-                      {t('snippetPlaceholder')}
-                    </span>
-                  )}
-                </code>
-              </pre>
-              <p className="mt-2 text-xs text-slate-500">
-                {embedFormat === 'iframe'
-                  ? t('embedHint')
-                  : t('buttonSnippetHint')}
-              </p>
-            </div>
-          )}
-
-          <p className="mt-3 text-xs text-slate-500">{t('feeNote')}</p>
-        </SectionCard>
+        <PublishSection
+          publishMode={publishMode}
+          onPublishModeChange={setPublishMode}
+          tipUrl={tipUrl}
+          xShareUrl={xShareUrl}
+          urlCopy={urlCopy}
+          qrOpen={qrOpen}
+          onOpenQr={() => setQrOpen(true)}
+          onCloseQr={() => setQrOpen(false)}
+          embedFormat={embedFormat}
+          onEmbedFormatChange={setEmbedFormat}
+          activeSnippet={activeSnippet}
+          iframeCopy={iframeCopy}
+        />
       </div>
     </div>
 
@@ -1051,14 +343,4 @@ export function TipEmbedGenerator() {
       {env.enableTipMessage ? <TipMessageInbox /> : null}
     </div>
   );
-}
-
-function escapeAttr(value: string): string {
-  // iframe src 属性に埋め込むため、ダブルクォートと < > & を実体参照化。
-  // URLSearchParams の出力は既に URL エンコード済みなので、追加の HTML エスケープのみ必要。
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/"/g, '&quot;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
 }
