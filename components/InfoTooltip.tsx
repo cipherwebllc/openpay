@@ -5,8 +5,11 @@ import { useTranslations } from 'next-intl';
 
 // (?) アイコン → hover (desktop) / tap (mobile) で popover。外部依存なし。
 // ESC で閉じる、外側クリックで閉じる、aria-describedby でリンク。
-
-export function InfoTooltip({ text, label }: { text: string; label?: string }) {
+//
+// a11y 名は「{label} の詳細」で固定し、開閉は aria-expanded だけで伝える (全レビュー第 8 回 D-2)。
+// label は行の可視ラベル (内訳の dt の文字) をそのまま渡す = 名前は可視テキストから導く (掟 8)。
+// 全行が同じ名前だと、どの額の説明かがスクリーンリーダーで分からなかった。
+export function InfoTooltip({ text, label }: { text: string; label: string }) {
   const t = useTranslations('InfoTooltip');
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLSpanElement>(null);
@@ -40,13 +43,15 @@ export function InfoTooltip({ text, label }: { text: string; label?: string }) {
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        aria-label={open ? t('closeLabel') : t('openLabel')}
+        aria-label={t('detailsLabel', { label })}
         aria-describedby={open ? popoverId : undefined}
         aria-expanded={open}
-        className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-slate-300 bg-white text-[10px] font-bold text-slate-500 hover:border-slate-400 hover:text-slate-700"
+        // 見た目は 16px の丸のまま、押せる範囲だけ ::after で広げて 24px にする (WCAG 2.2 の最小ターゲット)。
+        // absolute の基準は border 1px の内側 (14px) なので四方 5px で 24px (4px だと 22px になるのを実測で確認)。
+        // ボタンの箱は変えないので内訳の行の高さと位置は動かない。
+        className="relative inline-flex h-4 w-4 items-center justify-center rounded-full border border-slate-300 bg-white text-[10px] font-bold text-slate-500 after:absolute after:-inset-[5px] hover:border-slate-400 hover:text-slate-700"
       >
         ?
-        {label !== undefined && <span className="sr-only">{label}</span>}
       </button>
       {open && (
         <span

@@ -1827,7 +1827,8 @@ describe('TipForm — USDC Circle Paymaster', () => {
   it('circleQuote 未解決 (permitAmount 未算定) は送信不可 (見積取得中)', () => {
     setCircleQuote('idle');
     render(<TipForm params={USDC_PARAMS} />);
-    expect(screen.getByRole('button', { name: /見積/ })).toBeDisabled();
+    // 内訳の (?) ボタンも「ネットワーク手数料見積 の詳細」の名前を持つ (全レビュー第 8 回 D-2) ので、送信ボタンの文言で引く。
+    expect(screen.getByRole('button', { name: /見積取得中/ })).toBeDisabled();
   });
 
   it('flag OFF (pimlico) では circlePermitAmount を渡さない (従来 erc20 経路)', async () => {
@@ -2329,6 +2330,10 @@ it.each(['notify-pending', 'terminal', 'prepared'] as const)('A2c %s order from 
 // R14 (Phase 6): 内訳行の描画 fixture。行の抽出前に移動前のコードで捕捉し、ja/en × gas 提供者 ×
 // Arc standard × テーマの section outerHTML を固定する (PaymentForm.test と同型・開いた
 // InfoTooltip の id は乱数なので正規化)。
+// 2026-10-30 再採取 (全レビュー第 8 回 D-2): InfoTooltip のボタンの aria-label を「{行のラベル} の詳細」/
+// 「{label} details」の固定に、class に押せる範囲 (relative・after:absolute・after:-inset-[5px]) を足したので撮り直した。
+// 旧 snapshot と新 snapshot をこの 2 属性だけ正規化して比べると全件一致し (他の DOM は不変)、各ボタンの名前は
+// 直前の dt のラベル + 接尾辞と一致することを確かめた。
 describe('TipForm — R14 内訳行 fixture (ja/en)', () => {
   function usdcReady() {
     setAccount({ connected: true, chainId: baseSepolia.id });
