@@ -368,7 +368,9 @@ async function handleFree(
     auth,
     raw.signature as Hex,
     [auth.from],
-    { idemPrefix: 'relay:idem:' },
+    // A-01: relay の tx が revert した後の固定読み取りは、店 (受取人) へ払う決済だけ。利用料 (to=FEE_RECEIVER) は
+    // 前走りで得をする者がおらず、利用料の client は hash なし pending を解決できないので従来どおり reverted。
+    { idemPrefix: 'relay:idem:', ...(isFeePayment ? {} : { recheckRevertedAuthorization: true }) },
   );
   // OpenPay 利用料メーター (S1): 中継成功した gasless 決済の店主別出来高をサーバ権威で記録する
   // (将来の月次利用料 a1 の課金根拠)。merchant=auth.to / value=auth.value。点灯前から貯める

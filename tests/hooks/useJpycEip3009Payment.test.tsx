@@ -1308,6 +1308,81 @@ describe('useJpycEip3009Payment — recover 分岐 (feeValue=recoverFeeValue(val
     ).not.toContain(body.signature as string);
   });
 
+  // 第 8 回レビュー A-01 (recover / forwarder 経路): relay の tx が revert し、authorization が別の tx で使用済み
+  // (または revert のブロックに固定して読めない) とき、server は 202 pending (txHash なし) を返す。forwarder nonce の
+  // intent を保って再署名を封じ、再読み込み後の status で別の tx の settled に進むことを固定する。
+  it('A-01: 202 pending (txHash なし) → forwarder nonce の intent を保ち再署名を封鎖 → 再読み込み後の status で settled', async () => {
+    const OTHER_TX = `0x${'6'.repeat(64)}` as Hex;
+    fetchSpy.mockResolvedValueOnce(
+      new Response(JSON.stringify({ ok: false, pending: true, txHash: null }), {
+        status: 202,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    mount();
+    const first = renderHook(() => useJpycEip3009Payment(jpycDep), {
+      wrapper: makeWrapper(),
+    });
+    await flushStorageLoad();
+    const value = 1_000n * 10n ** 18n;
+    first.result.current.mutate({ merchant: MERCHANT, value, gasMode: 'merchant' });
+    await waitFor(() => expect(first.result.current.data?.pending).toBe(true));
+
+    expect(first.result.current.data).toEqual({ txHash: null, success: false, pending: true });
+    expect(first.result.current.error).toBeNull();
+    const body = lastPostBody();
+    const expectedNonce = buildForwarderNonce(
+      {
+        from: CUSTOMER,
+        merchant: MERCHANT,
+        merchantValue: BigInt(body.merchantValue as string),
+        feeReceiver: env.feeReceiver as Address,
+        feeValue: BigInt(body.feeValue as string),
+        validAfter: 0n,
+        validBefore: BigInt(body.validBefore as string),
+        intentSalt: body.intentSalt as Hex,
+      },
+      jpycDep.chainId,
+      FORWARDER,
+    );
+    const stored = JSON.parse(
+      window.sessionStorage.getItem(RELAY_INTENT_STORAGE_KEY) as string,
+    ) as RelayIntentMetadata | null;
+    expect(stored?.nonce).toBe(expectedNonce);
+    expect(stored?.routeKind).toBe('recover');
+
+    // 同じ画面での再送は新しい署名も POST もしない。
+    act(() => {
+      first.result.current.mutate({ merchant: MERCHANT, value, gasMode: 'merchant' });
+    });
+    await act(async () => Promise.resolve());
+    expect(signTypedData).toHaveBeenCalledOnce();
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    first.unmount();
+
+    vi.useFakeTimers();
+    fetchSpy.mockResolvedValueOnce(
+      new Response(JSON.stringify({ ok: true, state: 'settled', txHash: OTHER_TX })),
+    );
+    const second = renderHook(() => useJpycEip3009Payment(jpycDep), {
+      wrapper: makeWrapper(),
+    });
+    await advanceUntil(1_000, () =>
+      expect(second.result.current.data).toEqual({ txHash: OTHER_TX, success: true }),
+    );
+    expect(fetchSpy.mock.calls[1][0]).toBe('/api/relay/jpyc/status');
+    expect(JSON.parse((fetchSpy.mock.calls[1][1] as RequestInit).body as string)).toEqual({
+      lookup: 'nonce',
+      chainId: jpycDep.chainId,
+      from: CUSTOMER,
+      nonce: expectedNonce,
+      validBefore: body.validBefore,
+    });
+    expect(signTypedData).toHaveBeenCalledOnce();
+    expect(window.sessionStorage.getItem(RELAY_INTENT_STORAGE_KEY)).toBeNull();
+    vi.useRealTimers();
+  });
+
   it('gasMode=customer (チップ): feeValue=フロア (1% 非適用)・merchantValue=value・payload に gasMode=customer', async () => {
     setTipMessageFlag(true);
     mount();

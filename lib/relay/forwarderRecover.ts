@@ -81,13 +81,22 @@ export type ForwarderRecoverDeps = {
   // 正当決済が daily_budget_exceeded で 503 になるのを防ぐ。check が返した token でのみ呼ぶ。
   // jpycRelay (free 経路) の refundGasBudget 契約とセマンティクス完全一致 (fail-quiet・自分でログ)。
   refundGasBudget?: (refundToken: GasBudgetRefundToken) => Promise<void>;
-  // (任意) authorizationState。送信前の既使用チェックと、broadcast 後に relay の tx が revert したときの
-  // 再確認 (true なら reverted でなく pending) に使う。
   checkAuthorizationUsed?: (
     chainId: number,
     token: Address,
     from: Address,
     nonce: Hex,
+  ) => Promise<boolean>;
+  // (任意) relay の tx が revert した後の再確認 (第 8 回レビュー A-01・lib/relay/revertRecheck.ts)。revert の receipt
+  // のブロックに固定した commitment nonce の authorizationState で、使用済みなら true・未使用なら false・固定して
+  // 読めないときは throw。渡したときは「固定して未使用」のときだけ reverted、それ以外は pending。未提供は従来どおり。
+  // forwarder の受取人は店 (merchant ≠ feeReceiver を verifyForwarderSettle が強制) なので settleViaForwarder が渡す。
+  readAuthorizationUsedAtRevert?: (
+    chainId: number,
+    token: Address,
+    from: Address,
+    nonce: Hex,
+    revertTxHash: Hex,
   ) => Promise<boolean>;
   // (任意) 冪等性: 同一 (chainId,from,nonce) を 1 回だけ claim。'duplicate' なら再 broadcast せず
   // pending (記録済 txHash を同梱)。KV 設定済で応答不確定→duplicate(fail-safe)・未設定のみ first。
@@ -282,12 +291,12 @@ export async function recoverViaForwarder(
     submit: (data) => deps.submit(chainId, forwarder, data),
   }, deps, deps);
 
-  // relay の tx が revert したときだけ、同じ authorization (commitment nonce) が別の tx で使われていないかを
-  // 読み直す (使用済みなら pending・未使用/読み取り失敗は従来どおり reverted。lib/relay/revertRecheck.ts)。
-  // x402 facilitator の settle もこの経路を通るので、この 1 条件では 202 errorReason:'pending' になる。
+  // relay の tx が revert したときだけ、同じ authorization (commitment nonce) が別の tx で使われていないかを revert の
+  // ブロックに固定して読み直す (固定して未使用なら reverted・それ以外は pending。lib/relay/revertRecheck.ts)。
+  // x402 facilitator の settle もこの経路を通るので、pending の条件では 202 errorReason:'pending' になる。
   return recheckRevertedAuthorization(
     result,
     { chainId, token: jpyc, from: params.from, nonce, logPrefix: 'relay.forwarder' },
-    deps.checkAuthorizationUsed,
+    deps.readAuthorizationUsedAtRevert,
   );
 }

@@ -259,12 +259,16 @@ function setRelay(
     >;
     isRestoring?: boolean;
     hasActiveIntent?: boolean;
+    // broadcast-pending を txHash なし (authorization 使用済み・A-01 の revert 後の pending) にする。
+    hashless?: boolean;
   },
 ) {
   relayMutate = vi.fn();
   relayRetryRelay = vi.fn();
   relayRetrySamePayload = vi.fn();
-  const txHash = opts?.txHash ?? (`0x${'e'.repeat(64)}` as `0x${string}`);
+  const txHash = opts?.hashless
+    ? null
+    : (opts?.txHash ?? (`0x${'e'.repeat(64)}` as `0x${string}`));
   const data =
     state === 'success'
       ? { txHash, success: true }
@@ -2512,6 +2516,38 @@ describe('PaymentForm — relay 失敗時の通常決済フォールバック (B
     render(<PaymentForm />);
 
     expect(screen.getAllByText(txHash).length).toBeGreaterThan(0);
+    await waitFor(() => expect(loadHistory()).toHaveLength(0));
+    expect(loadPayerReceipts()).toHaveLength(0);
+  });
+
+  // 第 8 回レビュー A-01: relay の tx が revert し、authorization が別の tx で使用済み (または revert のブロックに
+  // 固定して読めない) とき、server は 202 pending (txHash なし) を返す。画面は「失敗」(errorReverted) でなく確認待ちを
+  // 出し、revert した tx への Explorer リンクも出さない。hash なしの pending は履歴と控えを作らない (どの tx か分からない
+  // ものを記録しない・現状の仕様)。再読み込み後に status で解決した成功も上のテストのとおり履歴と控えを作らない
+  // (誤帰属を避ける) = この経路の支払いは履歴・控えに残らないのが現状の限界 (PR #938 に記載)。
+  it('A-01: hash なしの relay pending は確認待ちを出し (失敗表示なし)、履歴と控えを作らない', async () => {
+    window.localStorage.clear();
+    vi.mocked(resolveJpycGaslessProvider).mockReturnValue('eip3009-relay');
+    vi.mocked(jpycForwarderFor).mockReturnValue(null);
+    setURL(`to=${MERCHANT}&token=jpyc&amount=300`);
+    setAccount({ connected: true, chainId: polygonAmoy.id });
+    setBalance(10_000n * 10n ** 18n);
+    const variables = { merchant: MERCHANT, value: 300n * 10n ** 18n, gasMode: 'customer' as const };
+    const user = userEvent.setup();
+    const rendered = render(<PaymentForm />);
+
+    await user.click(screen.getByRole('button', { name: /300 JPYC を支払う/ }));
+    expect(relayMutate).toHaveBeenCalledOnce();
+    // server の 202 {pending:true, txHash:null} を hook が {txHash:null, success:false, pending:true} にした状態。
+    setRelay('broadcast-pending', { hashless: true, hasActiveIntent: true, variables });
+    rendered.rerender(<PaymentForm />);
+
+    expect((await screen.findAllByText(/送信済み・確認待ち/)).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/送金がネットワーク上で失敗しました/)).toBeNull();
+    expect(screen.queryByText('Explorer で確認')).toBeNull();
+    // 再送 (新しい署名) はできない。
+    expect(screen.getByRole('button', { name: /300 JPYC を支払う/ })).toBeDisabled();
+    rendered.rerender(<PaymentForm />);
     await waitFor(() => expect(loadHistory()).toHaveLength(0));
     expect(loadPayerReceipts()).toHaveLength(0);
   });

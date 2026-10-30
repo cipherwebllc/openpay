@@ -24,6 +24,7 @@ import {
   jpycAddressFor,
   getBalance,
   readAuthorizationUsed,
+  readAuthorizationUsedAtRevert,
   selfHostIoFor,
 } from './relayProvider';
 import { submitSelfHost, pollSelfHost } from './selfHostRelayer';
@@ -147,6 +148,9 @@ export async function settleViaForwarder(
     checkGasBudget,
     refundGasBudget,
     checkAuthorizationUsed: readAuthorizationUsed,
+    // A-01: relay の tx が revert した後の固定読み取り。forwarder の受取人は店 (merchant ≠ feeReceiver を
+    // verifyForwarderSettle が強制) なので recover relay と x402 facilitator の両方で渡す。
+    readAuthorizationUsedAtRevert,
     claimIdempotency,
     recordRelayHash,
     releaseIdempotency,

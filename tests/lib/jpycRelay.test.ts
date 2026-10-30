@@ -539,46 +539,44 @@ describe('relayJpycAuthorization', () => {
 });
 
 // 第 8 回レビュー A-01: relay の tx が revert しても、同じ authorization を別の tx (mempool の前走り等) が先に
-// 実行していれば支払いは成立している。reverted のまま返すと client が intent を捨てて再署名を許し二重払いになる
-// ので、revert のときだけ authorizationState を読み直し、使用済みなら pending (txHash なし) にする。
-// 未使用・読み取り失敗は従来どおり reverted。
+// 実行していれば支払いは成立している。reverted は client に「新しい署名で払い直してよい」と伝える応答なので、
+// 店宛ての経路 (readAuthorizationUsedAtRevert を渡す) では、revert のブロックに固定して「未使用」と読めたときだけ
+// reverted を返し、使用済み・読めない・hash が無いときは pending (txHash なし) にする。渡さない経路 (受取人が
+// OpenPay 自身の利用料・CSV パス) は従来どおり reverted。
 describe('relayJpycAuthorization — revert 後の authorization 再確認 (A-01)', () => {
   const RELAY_TX = `0x${'ef'.repeat(32)}` as Hex;
+  type ReadAtRevert = NonNullable<RelayDeps['readAuthorizationUsedAtRevert']>;
 
-  // 1 回目 (送信前の既使用チェック) は未使用、2 回目 (revert 後の再確認) は second の結果。
-  function revertedDeps(second: () => Promise<boolean>) {
-    const checkAuthorizationUsed = vi
-      .fn<(c: number, token: Address, from: Address, nonce: Hex) => Promise<boolean>>()
-      .mockResolvedValueOnce(false)
-      .mockImplementationOnce(second);
+  // txHash: null = revert の hash が分からない (Gelato の ExecReverted 等)。
+  function revertedDeps(
+    readAuthorizationUsedAtRevert: ReadAtRevert | undefined,
+    txHash: Hex | null = RELAY_TX,
+  ) {
+    const checkAuthorizationUsed = vi.fn(async () => false);
     const deps = makeDeps({
       checkAuthorizationUsed,
+      ...(readAuthorizationUsedAtRevert ? { readAuthorizationUsedAtRevert } : {}),
       claimIdempotency: vi.fn(async () => ({ status: 'first' as const })),
       releaseIdempotency: vi.fn(async () => {}),
       recordRelayHash: vi.fn(async () => {}),
       checkGasBudget: vi.fn(async () => gasBudget(true, true)),
       refundGasBudget: vi.fn(async () => {}),
-      pollTask: vi.fn(async () => ({ state: 'reverted' as const, txHash: RELAY_TX })),
+      pollTask: vi.fn(async () => ({ state: 'reverted' as const, txHash: txHash ?? undefined })),
     });
     return { deps, checkAuthorizationUsed };
   }
 
-  it('revert + 別の tx で使用済み → pending (txHash なし)・claim と予算はそのまま', async () => {
+  it('revert + 固定して使用済み → pending (txHash なし)・claim と予算はそのまま', async () => {
     const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
-    const { deps, checkAuthorizationUsed } = revertedDeps(async () => true);
+    const readAtRevert = vi.fn<ReadAtRevert>(async () => true);
+    const { deps } = revertedDeps(readAtRevert);
     const input = await makeInput();
     const res = await relayJpycAuthorization(input, deps);
 
     expect(res).toEqual({ kind: 'pending' });
-    expect(checkAuthorizationUsed).toHaveBeenCalledTimes(2);
-    // 再確認は poll (revert の確定) の後に、送信前と同じ (chain, token, from, nonce) で読む。
-    expect(checkAuthorizationUsed.mock.calls[1]).toEqual([
-      CHAIN,
-      JPYC,
-      input.auth.from,
-      input.auth.nonce,
-    ]);
-    expect(checkAuthorizationUsed.mock.invocationCallOrder[1]).toBeGreaterThan(
+    // 再確認は poll (revert の確定) の後に、revert した tx の hash を渡して読む (receipt のブロックに固定するため)。
+    expect(readAtRevert).toHaveBeenCalledExactlyOnceWith(CHAIN, JPYC, input.auth.from, input.auth.nonce, RELAY_TX);
+    expect(readAtRevert.mock.invocationCallOrder[0]).toBeGreaterThan(
       vi.mocked(deps.pollTask).mock.invocationCallOrder[0],
     );
     expect(deps.submitSponsoredCall).toHaveBeenCalledOnce();
@@ -594,26 +592,26 @@ describe('relayJpycAuthorization — revert 後の authorization 再確認 (A-01
     warn.mockRestore();
   });
 
-  it('revert + 未使用 → 従来どおり reverted (txHash つき)', async () => {
-    const { deps, checkAuthorizationUsed } = revertedDeps(async () => false);
+  it('revert + 固定して未使用 → 従来どおり reverted (txHash つき)', async () => {
+    const readAtRevert = vi.fn<ReadAtRevert>(async () => false);
+    const { deps } = revertedDeps(readAtRevert);
     const res = await relayJpycAuthorization(await makeInput(), deps);
 
     expect(res).toEqual({ kind: 'reverted', txHash: RELAY_TX });
-    expect(checkAuthorizationUsed).toHaveBeenCalledTimes(2);
+    expect(readAtRevert).toHaveBeenCalledOnce();
     expect(deps.releaseIdempotency).not.toHaveBeenCalled();
     expect(deps.refundGasBudget).not.toHaveBeenCalled();
   });
 
-  it('revert + 再確認の読み取り失敗 → 従来どおり reverted・障害は warn に残す', async () => {
+  it('revert + 固定して読めない (読み取り失敗) → pending (分からないは払い直してよいではない)・warn に残す', async () => {
     const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
-    const rpcError = new Error('rpc down');
-    const { deps, checkAuthorizationUsed } = revertedDeps(async () => {
+    const rpcError = new Error('header not found');
+    const { deps } = revertedDeps(vi.fn<ReadAtRevert>(async () => {
       throw rpcError;
-    });
+    }));
     const res = await relayJpycAuthorization(await makeInput(), deps);
 
-    expect(res).toEqual({ kind: 'reverted', txHash: RELAY_TX });
-    expect(checkAuthorizationUsed).toHaveBeenCalledTimes(2);
+    expect(res).toEqual({ kind: 'pending' });
     expect(deps.releaseIdempotency).not.toHaveBeenCalled();
     expect(deps.refundGasBudget).not.toHaveBeenCalled();
     expect(warn).toHaveBeenCalledWith('relay.jpyc.revert_recheck_unavailable', {
@@ -624,14 +622,40 @@ describe('relayJpycAuthorization — revert 後の authorization 再確認 (A-01
     warn.mockRestore();
   });
 
+  it('revert の hash が無い (固定できない) → 読まずに pending・warn に残す', async () => {
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+    const readAtRevert = vi.fn<ReadAtRevert>(async () => false);
+    const { deps } = revertedDeps(readAtRevert, null);
+    const res = await relayJpycAuthorization(await makeInput(), deps);
+
+    expect(res).toEqual({ kind: 'pending' });
+    expect(readAtRevert).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith('relay.jpyc.revert_recheck_unavailable', {
+      chainId: CHAIN,
+      reason: 'no_tx_hash',
+    });
+    warn.mockRestore();
+  });
+
+  it('readAuthorizationUsedAtRevert を渡さない経路 (受取人が OpenPay 自身) は従来どおり reverted・読み直さない', async () => {
+    for (const txHash of [RELAY_TX, null]) {
+      const { deps, checkAuthorizationUsed } = revertedDeps(undefined, txHash);
+      const res = await relayJpycAuthorization(await makeInput(), deps);
+      expect(res).toEqual({ kind: 'reverted', txHash: txHash ?? undefined });
+      // 送信前の既使用チェックの 1 回だけ (revert 後に読み直さない)。
+      expect(checkAuthorizationUsed).toHaveBeenCalledOnce();
+    }
+  });
+
   it.each([
     ['success', { state: 'success' as const, txHash: RELAY_TX }],
     ['pending', { state: 'pending' as const, txHash: RELAY_TX }],
     ['error', { state: 'error' as const, detail: 'Cancelled' }],
-  ])('poll が %s のときは再確認しない (送信前の 1 回だけ)', async (_label, outcome) => {
-    const checkAuthorizationUsed = vi.fn(async () => false);
-    const deps = makeDeps({ checkAuthorizationUsed, pollTask: vi.fn(async () => outcome) });
-    await relayJpycAuthorization(await makeInput(), deps);
-    expect(checkAuthorizationUsed).toHaveBeenCalledOnce();
+  ])('poll が %s のときは再確認しない', async (_label, outcome) => {
+    const readAtRevert = vi.fn<ReadAtRevert>(async () => true);
+    const deps = makeDeps({ readAuthorizationUsedAtRevert: readAtRevert, pollTask: vi.fn(async () => outcome) });
+    const res = await relayJpycAuthorization(await makeInput(), deps);
+    expect(res.kind).toBe(outcome.state === 'error' ? 'relay_error' : outcome.state);
+    expect(readAtRevert).not.toHaveBeenCalled();
   });
 });

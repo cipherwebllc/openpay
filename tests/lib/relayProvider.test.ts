@@ -58,6 +58,46 @@ describe('relayFreeAuthorization: checkAuthorizationUsed の provider 配線 (P1
   });
 });
 
+// 第 8 回レビュー A-01: relay の tx が revert した後の固定読み取りは、店 (受取人) へ払う決済の route が
+// recheckRevertedAuthorization: true を渡したときだけ deps に載る。既定 (未指定 = 利用料・CSV パス) は載せない
+// = 従来どおり reverted を返す。
+describe('relayFreeAuthorization: revert 後の再確認は opt-in (A-01)', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.resetModules();
+    relaySpy.mockClear();
+  });
+
+  it.each([
+    ['self-host', `0x${'11'.repeat(32)}`],
+    ['gelato/null', ''],
+  ])('%s: 既定 (idemPrefix だけ) では readAuthorizationUsedAtRevert を渡さない', async (_label, key) => {
+    vi.resetModules();
+    vi.stubEnv('RELAYER_PRIVATE_KEY', key);
+    const mod = await import('@/lib/relay/relayProvider');
+    await mod.relayFreeAuthorization(POLYGON, AUTH, SIG, [], { idemPrefix: 't:' });
+    const deps = relaySpy.mock.calls[0][1] as { readAuthorizationUsedAtRevert?: unknown };
+    expect(relaySpy).toHaveBeenCalledOnce();
+    expect(deps.readAuthorizationUsedAtRevert).toBeUndefined();
+  });
+
+  it.each([
+    ['self-host', `0x${'11'.repeat(32)}`],
+    ['gelato/null', ''],
+  ])('%s: recheckRevertedAuthorization: true なら固定読み取りを渡す', async (_label, key) => {
+    vi.resetModules();
+    vi.stubEnv('RELAYER_PRIVATE_KEY', key);
+    const mod = await import('@/lib/relay/relayProvider');
+    await mod.relayFreeAuthorization(POLYGON, AUTH, SIG, [], {
+      idemPrefix: 't:',
+      recheckRevertedAuthorization: true,
+    });
+    const deps = relaySpy.mock.calls[0][1] as { readAuthorizationUsedAtRevert?: unknown };
+    expect(relaySpy).toHaveBeenCalledOnce();
+    expect(deps.readAuthorizationUsedAtRevert).toBe(mod.readAuthorizationUsedAtRevert);
+  });
+});
+
 // relayer の低残高の事前警告 (relay.relayer.balance_low) の閾値。旧既定の一律 0.1 native は Polygon の
 // forwarder.settle の数回分しかなく、客に degraded (5 native) が見えた後に鳴っていた。
 describe('relayLowBalanceAlertWei: chain 別の既定と env の上書き', () => {

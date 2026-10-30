@@ -62,12 +62,22 @@ export type RelayDeps = {
   // (任意) authorization が既にチェーン上で使用済か (JPYC authorizationState)。true なら
   // submit せず pending を返す: guaranteed-revert を避けつつ、既に処理済かもしれない決済を
   // standard mode に fallback させない (二重支払い防止)。未提供ならスキップ。
-  // broadcast 後に relay の tx が revert したときの再確認にも使う (true なら reverted でなく pending)。
   checkAuthorizationUsed?: (
     chainId: number,
     token: Address,
     from: Address,
     nonce: Hex,
+  ) => Promise<boolean>;
+  // (任意) relay の tx が revert した後の再確認 (第 8 回レビュー A-01・lib/relay/revertRecheck.ts)。店 (受取人) へ
+  // 払う経路だけが渡す。revert の receipt のブロックに固定した authorizationState で、使用済みなら true・未使用なら
+  // false・固定して読めないときは throw。渡したときは「固定して未使用」のときだけ reverted、それ以外は pending。
+  // 未提供 (受取人が OpenPay 自身の利用料・CSV パス) は従来どおり reverted。
+  readAuthorizationUsedAtRevert?: (
+    chainId: number,
+    token: Address,
+    from: Address,
+    nonce: Hex,
+    revertTxHash: Hex,
   ) => Promise<boolean>;
   // (任意) 冪等性: 同一 (chainId,from,nonce) を 1 回だけ claim。重複 POST (network retry /
   // double-click) で二重 broadcast しないための保護。'duplicate' なら submit せず pending を返す
@@ -197,11 +207,12 @@ export async function relayJpycAuthorization(
     submit: (data) => deps.submitSponsoredCall(chainId, jpyc, data),
   }, deps);
 
-  // 6. relay の tx が revert したときだけ、同じ authorization が別の tx で使われていないかを読み直す
-  // (使用済みなら pending・未使用/読み取り失敗は従来どおり reverted。lib/relay/revertRecheck.ts)。
+  // 6. relay の tx が revert したときだけ、同じ authorization が別の tx で使われていないかを revert のブロックに
+  // 固定して読み直す (固定して未使用なら reverted・それ以外は pending。readAuthorizationUsedAtRevert を渡した
+  // 店宛ての経路だけ。lib/relay/revertRecheck.ts)。
   return recheckRevertedAuthorization(
     result,
     { chainId, token: jpyc, from: auth.from, nonce: auth.nonce, logPrefix: 'relay.jpyc' },
-    deps.checkAuthorizationUsed,
+    deps.readAuthorizationUsedAtRevert,
   );
 }
