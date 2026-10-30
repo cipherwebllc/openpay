@@ -16,7 +16,7 @@
 
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { hasComposition } from './lib/luaBundleComposition.mjs';
+import { checkComposition } from './lib/luaBundleComposition.mjs';
 
 const root = process.cwd();
 const thresholdsSrc = readFileSync(join(root, 'lib/x402/reverifyThresholds.ts'), 'utf8');
@@ -116,7 +116,8 @@ try {
 
 const found = EXPECTED.map(() => null);
 const thresholdFound = THRESHOLD_FORMS.map(() => null);
-const composedFound = COMPOSED.map(() => null);
+// 連結はバンドル全体で数える: `after` の出現が 1 つ以上あり、どのファイルのどの出現にも断片が続くこと。
+const composedStats = COMPOSED.map(() => ({ total: 0, okFiles: [], failingFiles: [] }));
 const broken = [];
 for (const file of files) {
   const src = readFileSync(file, 'utf8');
@@ -127,7 +128,10 @@ for (const file of files) {
     if (thresholdFound[i] === null && forms.some((f) => src.includes(f))) thresholdFound[i] = file;
   });
   COMPOSED.forEach(({ after, expected }, i) => {
-    if (composedFound[i] === null && hasComposition(src, after, expected, file)) composedFound[i] = file;
+    const { total, failing } = checkComposition(src, after, expected, file);
+    if (total === 0) return;
+    composedStats[i].total += total;
+    (failing > 0 ? composedStats[i].failingFiles : composedStats[i].okFiles).push(file.replace(root + '/', ''));
   });
   const m = BROKEN.exec(src);
   if (m) broken.push({ file, sample: src.slice(Math.max(0, m.index - 60), m.index + 40) });
@@ -152,11 +156,15 @@ THRESHOLD_FORMS.forEach((forms, i) => {
   }
 });
 COMPOSED.forEach(({ name }, i) => {
-  if (composedFound[i]) {
-    console.log(`[OK] 連結 ${i + 1} (${name}) が ${composedFound[i].replace(root + '/', '')} に存在`);
+  const { total, okFiles, failingFiles } = composedStats[i];
+  if (total > 0 && failingFiles.length === 0) {
+    console.log(`[OK] 連結 ${i + 1} (${name}) が ${total} か所すべてで続く: ${okFiles.join(', ')}`);
+  } else if (total === 0) {
+    failed = true;
+    console.error(`[NG] 連結 ${i + 1} (${name}) の直前の断片がバンドルに見つかりません`);
   } else {
     failed = true;
-    console.error(`[NG] 連結 ${i + 1} (${name}) がバンドルに見つかりません (断片が落ちたか、変数の値が違う)`);
+    console.error(`[NG] 連結 ${i + 1} (${name}) が続かない箇所があります (断片が落ちたか、変数の値が違う): ${failingFiles.join(', ')}`);
   }
 });
 for (const b of broken) {

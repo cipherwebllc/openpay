@@ -54,11 +54,45 @@ describe('hasComposition (check-lua-bundle の連結検査)', () => {
     ['ブロックの P が外の P を隠す (中が正しい)', `let P="";{let P=${FRAGMENT_EXPR};x=${q(AFTER)}+P}`, true],
     ['ブロックの P が外の P を隠す (中が空)', `let P=${FRAGMENT_EXPR};{let P="";x=${q(AFTER)}+P}`, false],
     ['引数の P は値をたどらない', `let P=${FRAGMENT_EXPR};function cas(P){return ${q(AFTER)}+P}`, false],
-    ['同じ関数の var は使う場所より前の最も近い宣言', `function cas(){var P="";var J=${q(AFTER)}+P;var P=${FRAGMENT_EXPR}}`, false],
-    ['var の前の宣言が正しい', `function cas(){var P="";var P=${FRAGMENT_EXPR};var J=${q(AFTER)}+P}`, true],
+    ['var の宣言が使う場所より後', `function cas(){var J=${q(AFTER)}+P;var P=${FRAGMENT_EXPR}}`, false],
+    ['関数の本文の直下に var が 1 つだけなら値をたどる', `function cas(){var P=${FRAGMENT_EXPR};var J=${q(AFTER)}+P}`, true],
+    // 重複した var は、どの初期化式が実行されたかを追わずに不合格 (使う場所より前の最も近い宣言も使わない)。
+    ['同じ関数に var が 2 つ (後ろが正しくても)', `function cas(){var P="";var P=${FRAGMENT_EXPR};var J=${q(AFTER)}+P}`, false],
     ['局所の String は値を求めない', `const String=()=>"9";let I=${FRAGMENT_EXPR};x=${q(AFTER)}+I`, false],
   ])('%s', (_name, source, expected) => {
     expect(check(source)).toBe(expected);
+  });
+
+  // Codex 3 回目 (1): 宣言の後の書き換え。値は初期化式だけで決めるので、書き換えがあれば値を求めない。
+  it.each([
+    ['代入', 'P=""'],
+    ['複合代入', 'P+=""'],
+    ['分割代入 (配列)', '[P]=[""]'],
+    ['分割代入 (object)', '({P}={P:""})'],
+    ['++', 'P++'],
+    ['入れ子の関数の中の代入', '(()=>{P=""})()'],
+  ])('書き換え (%s) のある変数は値を求めない', (_name, write) => {
+    expect(check(`function cas(){let P=${FRAGMENT_EXPR};${write};return ${q(AFTER)}+P+${q(SAVE)}}`)).toBe(false);
+  });
+
+  it('同じ名前でも別の宣言 (内側の P) への書き込みは数えない', () => {
+    expect(check(`function cas(){let P=${FRAGMENT_EXPR};function g(){let P=1;P=2}return ${q(AFTER)}+P}`)).toBe(true);
+  });
+
+  // Codex 3 回目 (2): 正しい連結が 1 か所あっても、別の場所の壊れた連結を隠さない。
+  it('after を含む連結はすべて断片が続くこと (1 か所でも欠ければ不合格)', () => {
+    expect(check(`let I=${FRAGMENT_EXPR};x=${q(AFTER)}+I+${q(SAVE)};y=${q(AFTER)}+""+${q(SAVE)}`)).toBe(false);
+    expect(check(`let I=${FRAGMENT_EXPR};x=${q(AFTER)}+I+${q(SAVE)};y=${q(AFTER)}+I`)).toBe(true);
+  });
+
+  // Codex 3 回目 (3): 条件の中の var。どの初期化式が実行されたかは追わない。
+  it.each([
+    ['if の中の 2 つ目の var', `function cas(){var P="";if(false){var P=${FRAGMENT_EXPR}}return ${q(AFTER)}+P}`],
+    ['if の中の 1 つだけの var', `function cas(){if(true){var P=${FRAGMENT_EXPR}}return ${q(AFTER)}+P}`],
+    ['try の中の var', `function cas(){try{var P=${FRAGMENT_EXPR}}catch(e){}return ${q(AFTER)}+P}`],
+    ['ラベルの中の var', `function cas(){a:{var P=${FRAGMENT_EXPR}}return ${q(AFTER)}+P}`],
+  ])('%s は値を求めない', (_name, source) => {
+    expect(check(source)).toBe(false);
   });
 
   it('after が無い・連結されていない (別の文の文字列) なら不合格', () => {
