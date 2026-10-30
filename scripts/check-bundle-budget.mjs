@@ -96,6 +96,43 @@ const BUDGETS_KB = {
   '/[locale]/discovery/arc-payout': 382,
   // 実験ページ (本番導線なし)。UNBUDGETED_MAX_KB を超えるので表に載せる。実測 357 + 5。
   '/[locale]/experimental/cross-chain-demo': 362,
+  // 2026-10-30 第 8 回レビュー F-11: 予算表の外にあった /[locale] のページを全部載せる。表に無い route は
+  // UNBUDGETED_MAX_KB (300 kB) を超えるまで落ちないので、たとえば /store/library が 257→290 kB に増えても CI を通っていた。
+  // 実測 = main b90757b9 の CI (ci.yml の本番 flag build) の Route 表 (各行の注記) に各 +5。手元 (macOS) の build は
+  // 同じ commit で 0〜2 kB 大きい。
+  '/[locale]/admin/billing': 264, // 実測 259
+  '/[locale]/directory': 241, // 実測 236
+  '/[locale]/disclaimer': 219, // 実測 214
+  '/[locale]/explore': 248, // 実測 243
+  '/[locale]/guide': 241, // 実測 236
+  '/[locale]/guide/agent': 243, // 実測 238
+  '/[locale]/guide/ai-pay': 244, // 実測 239
+  '/[locale]/guide/image-url': 242, // 実測 237
+  '/[locale]/guide/mobile-order': 242, // 実測 237
+  '/[locale]/guide/pay': 244, // 実測 239
+  '/[locale]/guide/pos': 242, // 実測 237
+  '/[locale]/guide/qr': 244, // 実測 239
+  '/[locale]/guide/sell': 243, // 実測 238
+  '/[locale]/guide/shop': 244, // 実測 239
+  '/[locale]/guide/start': 242, // 実測 237
+  '/[locale]/guide/store': 244, // 実測 239
+  '/[locale]/guide/wallet': 242, // 実測 237
+  '/[locale]/kit': 241, // 実測 236
+  '/[locale]/license-terms/directory-v1': 241, // 実測 236
+  '/[locale]/license-terms/standard-v1': 241, // 実測 236
+  '/[locale]/me': 242, // 実測 237
+  '/[locale]/news': 259, // 実測 254
+  '/[locale]/order/status': 206, // 実測 201
+  '/[locale]/orders/hall': 265, // 実測 260
+  '/[locale]/orders/kitchen': 265, // 実測 260
+  '/[locale]/orders/pickup': 228, // 実測 223
+  '/[locale]/pricing': 243, // 実測 238
+  '/[locale]/privacy': 220, // 実測 215
+  '/[locale]/store/library': 262, // 実測 257
+  '/[locale]/store/seller/[address]': 241, // 実測 236
+  '/[locale]/terms': 220, // 実測 215
+  '/[locale]/tokutei': 220, // 実測 215
+  '/[locale]/transparency': 241, // 実測 236
   // 2026-10-10 F2: 実測 194 + 5。
   '/manifest.webmanifest': 199,
   // shared chunks の総和。表の行 "First Load JS shared by all"
@@ -106,6 +143,13 @@ const BUDGETS_KB = {
 // 予算表に無い route でも First Load JS がこれを超えたら fail させる (E22: 予算の外で重いページが増えていた)。
 // 対処は BUDGETS_KB に「実測 + 小さな余裕」で追加するか、code-split で下げる。
 const UNBUDGETED_MAX_KB = 300;
+
+// 2026-10-30 F-11: 予算表に無いページ (/[locale] 配下) は UNBUDGETED_MAX_KB 以下でも [NO BUDGET] として出す。
+// fail にはしない (上の 300 kB の上限は E22 の設計どおり) が、新しいページが表に載らないまま増えたことを見えるようにする。
+// API・metadata の route (/api・/.well-known・/sitemap.xml 等) は client JS を持たないので出さない。
+function isPageRoute(route) {
+  return route === '/[locale]' || route.startsWith('/[locale]/');
+}
 
 async function readStdin() {
   let buf = '';
@@ -208,7 +252,15 @@ for (const [route, budget] of Object.entries(BUDGETS_KB)) {
 }
 
 for (const [route, actual] of Object.entries(observed)) {
-  if (route in BUDGETS_KB || actual <= UNBUDGETED_MAX_KB * 1000) continue;
+  if (route in BUDGETS_KB) continue;
+  if (actual <= UNBUDGETED_MAX_KB * 1000) {
+    if (isPageRoute(route)) {
+      console.log(
+        `  [NO BUDGET] ${route}: ${Math.round(actual) / 1000} kB。予算表に無いページです (${UNBUDGETED_MAX_KB} kB までは fail しない)。BUDGETS_KB に「実測 + 5 kB」で追加してください。`,
+      );
+    }
+    continue;
+  }
   failed = true;
   console.log(
     `  [UNBUDGETED] ${route}: ${Math.round(actual) / 1000} kB > ${UNBUDGETED_MAX_KB} kB。予算表に無い重い route です。BUDGETS_KB に「実測 + 小さな余裕」で追加するか code-split で下げてください。`,
