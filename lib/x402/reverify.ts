@@ -21,6 +21,11 @@ import {
   HIDDEN_URL_LEDGER_VALUE,
 } from '@/lib/x402/hiddenUrlLedger';
 import {
+  gateAcceptMismatch,
+  registrationAcceptExpectation,
+  type GateAcceptMismatch,
+} from '@/lib/x402/registrationGateMatch';
+import {
   REVERIFY_AUTH_HIDE_THRESHOLD,
   REVERIFY_HIDE_THRESHOLD,
 } from '@/lib/x402/reverifyThresholds';
@@ -30,6 +35,10 @@ export type ReverifyVerdict =
   | 'violation_200_ungated'
   | 'violation_gone'
   | 'violation_foreign_402'
+  // 最初の再検証を待つ新規掲載 (pendingFirstVerification) だけに付く: OpenPay 方式の 402 だが、その JPYC accept が
+  // 掲載の受取先・チェーン・JPYC・forwarder と合わない (probeForPendingFirstVerification)。違反には数えない
+  // (verdictClass は transient・理由は probeForPendingFirstVerification)。
+  | 'pending_gate_mismatch'
   | 'transient';
 
 // 契約判定 (verdict) とは独立した「こちらが締め出されているか」の軸 (B8)。
@@ -85,6 +94,8 @@ export type ReverifyApplyResult =
         | 'malformed'
         | 'inactive'
         | 'url_changed'
+        // probe の照合に使った受取先 (payTo) が、probe の間に編集されていた (url_changed と同じく結果を捨てる)。
+        | 'pay_to_changed'
         | 'duplicate'
         | 'storage';
       /** storage 失敗の要約 (KV の reason/status/エラー文言)。運用ログ・cron 応答用。 */
@@ -218,13 +229,49 @@ function redirectAuthClass(res: Response, url: string): ReverifyAuthClass {
   return 'block';
 }
 
+type ReverifyProbeOptions = SsrfSafeFetchOptions & { probeAtMs?: number };
+
 // 定期再検証専用 probe。登録時 moderation と同じ SSRF-safe fetch を使う一方、確定的契約違反と
 // 一時障害を分ける。body を完全に解釈できない 402 は hidden へ進めず transient に留める (200 は verdictFor200)。
 // verdict (契約) とは別に authClass (締め出され判定・B8) を返す。
 export async function probeForReverifyDetailed(
   url: string,
-  opts: SsrfSafeFetchOptions & { probeAtMs?: number } = {},
+  opts: ReverifyProbeOptions = {},
 ): Promise<ReverifyProbe> {
+  const { verdict, authClass } = await probeWithAccepts(url, opts);
+  return { verdict, authClass };
+}
+
+// 最初の再検証を待つ新規掲載 (pendingFirstVerification) の probe (E-3)。OpenPay 方式の 402 (ok_402_openpay) を、登録と
+// 同じ照合 (lib/x402/registrationGateMatch.ts・掲載の payTo を期待値にする) を通ったときだけ ok にする。合わなければ
+// pending_gate_mismatch (verdictClass は transient) = 印つきの hidden のまま、確定違反のカウンタ (failures) は動かさず、
+// lastOkAt も付けない。
+// 確定違反に数えない理由: 違反 3 連続で印が外れると (REVERIFY_PENDING_FIRST_VERIFICATION)、掲載は通常のモデレーションの
+// hidden になる。その復帰 (ok で hidden を解く) は照合しない (公開中・モデレーションの掲載の verdict はこの PR で変えない)
+// ので、同じ合わない 402 が 4 回目の再検証で ok になり、確かめていない受取先のまま公開される = 3 時間遅らせるだけになる。
+// 締め出しのカウンタ (authFailures) は、ほかの 402 と同じく authClass 'clear' で 0 に戻す (変えない): (1) B8 の軸は
+// verdict と独立で、素の 402 に届いた回は OpenPay・foreign・読めない 402 のどれでも clear (応答の中身で締め出しの判定を
+// 変えない)。(2) 残すと、403 と合わない 402 が交互に来るだけで締め出しが 6 回に積み上がり、閾値で印が外れて上の照合しない
+// 復帰に落ちる。0 に戻せば、印を外すには 6 回連続の締め出しが要る (公開中の掲載と同じ条件)。
+// 照合の前の verdict (transient・ほかの違反) はそのまま。公開中の掲載はこの関数を使わない (probeForReverifyDetailed のまま)。
+export async function probeForPendingFirstVerification(
+  url: string,
+  payTo: string,
+  opts: ReverifyProbeOptions = {},
+): Promise<ReverifyProbe & { mismatch?: GateAcceptMismatch }> {
+  const { verdict, authClass, accepts } = await probeWithAccepts(url, opts);
+  if (verdict !== 'ok_402_openpay') return { verdict, authClass };
+  const mismatch = gateAcceptMismatch(accepts, registrationAcceptExpectation(payTo));
+  return mismatch
+    ? { verdict: 'pending_gate_mismatch', authClass, mismatch }
+    : { verdict, authClass };
+}
+
+// probe の本体。ok_402_openpay のときだけ、OpenPay と判定した面 (v2 ヘッダか v1 body) の accepts を添える (それ以外は空)。
+async function probeWithAccepts(
+  url: string,
+  opts: ReverifyProbeOptions,
+): Promise<ReverifyProbe & { accepts: unknown[] }> {
   const userAgent = opts.userAgent ?? reverifyUserAgent(opts.probeAtMs);
   const { res, refused } = await fetchSsrfSafeDetailed(url, {
     ...opts,
@@ -237,50 +284,60 @@ export async function probeForReverifyDetailed(
   });
   if (!res) {
     // br 等の圧縮で止めた応答も、status が 200 なら支払いなしで 200 が返ったことは確か (本文は読んでいない)。
-    return refused?.statusCode === 200
-      ? verdictFor200(refused.cfMitigated, null)
-      : { verdict: 'transient', authClass: 'neutral' };
+    return {
+      ...(refused?.statusCode === 200
+        ? verdictFor200(refused.cfMitigated, null)
+        : { verdict: 'transient', authClass: 'neutral' }),
+      accepts: [],
+    };
   }
 
   if (res.status === 404 || res.status === 410) {
-    return { verdict: 'violation_gone', authClass: 'neutral' };
+    return { verdict: 'violation_gone', authClass: 'neutral', accepts: [] };
   }
   if (res.status === 401 || res.status === 403) {
-    return { verdict: 'transient', authClass: 'block' };
+    return { verdict: 'transient', authClass: 'block', accepts: [] };
   }
   if (res.status >= 300 && res.status < 400) {
-    return { verdict: 'transient', authClass: redirectAuthClass(res, url) };
+    return { verdict: 'transient', authClass: redirectAuthClass(res, url), accepts: [] };
   }
   if (res.status === 402) {
-    return { verdict: await verdictFor402(res), authClass: 'clear' };
+    return { ...(await verdictFor402(res)), authClass: 'clear' };
   }
   if (res.status === 200) {
-    return verdictFor200(
-      res.headers.get('cf-mitigated'),
-      await readBodyPrefix(res, GATE_BODY_MAX_BYTES),
-    );
+    return {
+      ...verdictFor200(
+        res.headers.get('cf-mitigated'),
+        await readBodyPrefix(res, GATE_BODY_MAX_BYTES),
+      ),
+      accepts: [],
+    };
   }
   // rate limit・server error は到達性/契約を確定できない。
-  return { verdict: 'transient', authClass: 'neutral' };
+  return { verdict: 'transient', authClass: 'neutral', accepts: [] };
 }
 
-async function verdictFor402(res: Response): Promise<ReverifyVerdict> {
+async function verdictFor402(res: Response): Promise<{ verdict: ReverifyVerdict; accepts: unknown[] }> {
   // v2 (PAYMENT-REQUIRED ヘッダ) → v1 (JSON body) の順に見て、**どちらかが** OpenPay 方式なら
   // 成功とする — 登録時 probeGate と同じフォールバック。dual-rail 出品の 402 は v2 面が
   // USDC のみ (extra.openpay を持たない) で正常なため、v2 だけで foreign 判定すると
   // dual-rail 化した瞬間に 3 巡で hidden → カタログ喪失 → 出品者ゲート 500 のデッドロックに
   // 陥る (2026-08-24 Aegis / gateway.open-pay.jp で実害)。
+  // accepts は OpenPay と判定した面のもの (登録時 probeGateDetailed と同じ順・v2 が OpenPay なら body は読まない)。
   const v2Accepts = parsedV2Accepts(res);
-  if (v2Accepts && acceptsLookLikeOpenPay(v2Accepts)) return 'ok_402_openpay';
+  if (v2Accepts && acceptsLookLikeOpenPay(v2Accepts)) {
+    return { verdict: 'ok_402_openpay', accepts: v2Accepts };
+  }
   const body = await readJsonBodyCapped(res, GATE_BODY_MAX_BYTES);
   if (!body.ok || typeof body.value !== 'object' || body.value === null) {
     // v1 body を解釈できない 402 は hidden へ進めず transient に留める (v2 ヘッダが
     // foreign に見えても、確定違反の根拠としては不十分)。
-    return 'transient';
+    return { verdict: 'transient', accepts: [] };
   }
-  return acceptsLookLikeOpenPay((body.value as { accepts?: unknown }).accepts)
-    ? 'ok_402_openpay'
-    : 'violation_foreign_402';
+  const accepts = (body.value as { accepts?: unknown }).accepts;
+  return acceptsLookLikeOpenPay(accepts)
+    ? { verdict: 'ok_402_openpay', accepts: accepts as unknown[] }
+    : { verdict: 'violation_foreign_402', accepts: [] };
 }
 
 // 支払いなしで 200 が返った時点で gate は無い。本文は bot の challenge を見分けるためだけに、先頭 64KiB を読む。
@@ -534,10 +591,21 @@ export const REVERIFY_PENDING_FIRST_VERIFICATION =
   String(REVERIFY_AUTH_HIDE_THRESHOLD) +
   ') then o.pendingFirstVerification=nil end; ';
 
+// probe の照合に使った受取先 (ARGV[9]・掲載の payTo の読取時の値) が、CAS の時点の掲載と違えば結果を捨てる (-5)。
+// probe の間の payTo だけの編集 (PATCH) で、古い受取先に対して照合した ok が、確かめていない新しい受取先のまま
+// 掲載を公開する経路を断つ (URL の変更を -3 で捨てるのと同じ扱い)。照合しなかった probe (公開中の掲載・
+// first-party) は ARGV[9]='' で、この検査を素通りする = 従来どおり。比べるのは record にある文字列そのもの
+// (数値の時刻を使わない: Upstash の Lua 5.1 と検査用の Lua 5.4 で数値の文字列化が違う)。network は編集できず
+// (CAS_UPDATE が保持)、asset / forwarder は record に無い (設定から作る) ので、照合で record から読むのは payTo だけ。
+// ⚠️ テンプレートリテラルを使わない (REVERIFY_COUNTER_TRANSITION の注意を参照)。
+export const REVERIFY_MATCHED_PAY_TO_GUARD =
+  "if ARGV[9]~='' and o.payTo~=ARGV[9] then return -5 end; ";
+
 export const CAS_EXTERNAL_REVERIFY =
   "local c=redis.call('GET',KEYS[1]); if not c then return -1 end; " +
   'local ok,o=pcall(cjson.decode,c); if not ok or type(o)~=\'table\' then return -2 end; ' +
   'if o.active~=true then return 0 end; if o.url~=ARGV[1] then return -3 end; ' +
+  REVERIFY_MATCHED_PAY_TO_GUARD +
   'if type(o.verification)==\'table\' and o.verification.lastRunId==ARGV[3] then return -4 end; ' +
   REVERIFY_COUNTER_TRANSITION +
   // claim は実際の hidden 解除だけに適用する。競合・壊れた claim・WRONGTYPE が
@@ -581,7 +649,9 @@ function parseApplyResult(value: unknown): ReverifyApplyResult {
               ? 'url_changed'
               : value === -4
                 ? 'duplicate'
-                : 'storage';
+                : value === -5
+                  ? 'pay_to_changed'
+                  : 'storage';
     return reason === 'storage'
       ? { applied: false, reason, detail: `unexpected code ${value}` }
       : { applied: false, reason };
@@ -628,6 +698,8 @@ function parseApplyResult(value: unknown): ReverifyApplyResult {
   };
 }
 
+// matchedPayTo = probe の照合に使った受取先 (probeForPendingFirstVerification に渡した掲載の payTo)。照合しなかった
+// probe は省略する (CAS は payTo を確かめない = 従来どおり)。
 export async function applyExternalReverify(
   id: string,
   probedUrl: string,
@@ -635,6 +707,7 @@ export async function applyExternalReverify(
   checkedAt: string,
   runId: string,
   authClass: ReverifyAuthClass = 'neutral',
+  matchedPayTo?: string,
 ): Promise<ReverifyApplyResult> {
   let claimKey: string;
   try {
@@ -656,6 +729,7 @@ export async function applyExternalReverify(
       HIDDEN_URL_LEDGER_VALUE,
       String(HIDDEN_URL_LEDGER_TTL_SEC),
       id,
+      matchedPayTo ?? '',
     ],
   );
   return applied.ok
