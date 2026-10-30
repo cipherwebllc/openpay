@@ -79,6 +79,13 @@ import {
   handleDualRailRelay,
   handleDualRailRequirements,
 } from '@/lib/x402/dualRailRelay';
+import {
+  arcMarkIdentity,
+  beginArcSettle,
+  releaseArcSettling,
+  type ArcMarkIdentity,
+} from '@/lib/x402/relayArcMarks';
+import type { PaymentRequirementsV2 } from '@/lib/x402/v2';
 
 const SELLER = getAddress('0x1111111111111111111111111111111111111111');
 const SELLER_USDC = getAddress('0x2222222222222222222222222222222222222222');
@@ -581,6 +588,230 @@ describe('used-signature marks (Arc only, real Lua)', () => {
     const r = await requirements();
     replies([200, { isValid: true }]);
     await verify(signatureHeader(r.v2Accept));
+    expect(markKeys()).toHaveLength(0);
+  });
+});
+
+// 全レビュー第 8 回 G-1: 印は verify を通った支払いそのもの (payload・出品・accept) に結び付く。
+// 署名・from・nonce は同じで中身だけ変えた settle が、正規の印を進めたり消したりできないこと。
+describe('marks are bound to the verified payment (G-1, real Lua)', () => {
+  function relay(path: 'verify' | 'settle', header: string, resourceId = 'res-1') {
+    return handleDualRailRelay(post(path, { resourceId, paymentSignatureHeader: header }), path);
+  }
+
+  function markValue(): Record<string, unknown> {
+    const keys = markKeys();
+    expect(keys).toHaveLength(1);
+    return JSON.parse(store.strings.get(keys[0])!) as Record<string, unknown>;
+  }
+
+  /** 正規のヘッダーと同じ key・同じ credential になる支払いの id (旧形式の印を直接置くため)。 */
+  function idFor(header: string, accept: Record<string, unknown>): ArcMarkIdentity {
+    const id = arcMarkIdentity('eip155:5042', decodeHeader(header).payload, {
+      resourceId: 'res-1',
+      accept: accept as PaymentRequirementsV2,
+    });
+    expect(id).not.toBeNull();
+    return id!;
+  }
+
+  // 同じ署名の compact 形 (EIP-2098): 署名の fingerprint (credential) は正規の署名と同じになる。
+  const COMPACT_SIGNATURE = `0x${'cd'.repeat(32)}${'22'.repeat(32)}`;
+
+  it.each([
+    ['a raised value', { value: '5001' }, SIGNATURE],
+    ['another payee', { to: SELLER }, SIGNATURE],
+    ['a stretched validBefore', { validBefore: '99999999999' }, SIGNATURE],
+    ['the same nonce in upper case', { nonce: NONCE.replace(/ab/g, 'AB') }, SIGNATURE],
+    ['an extra authorization field', { memo: 'x' }, SIGNATURE],
+    ['the compact form of the same signature', {}, COMPACT_SIGNATURE],
+  ])('keeps the verified mark when a settle with %s is sent (no advance, no release)', async (_, altered, signature) => {
+    const { arc } = await requirements();
+    const header = signatureHeader(arc!.v2Accept);
+    const tampered = signatureHeader(arc!.v2Accept, altered, signature);
+    // The same key and credential as the verified payment: only the binding tells them apart.
+    expect(idFor(tampered, arc!.v2Accept).key).toBe(idFor(header, arc!.v2Accept).key);
+    expect(idFor(tampered, arc!.v2Accept).credential).toBe(idFor(header, arc!.v2Accept).credential);
+    // If the tampered settle reached Gateway, Gateway would decline it (and the mark would be released).
+    replies(
+      [200, { isValid: true }],
+      [200, { success: false, errorReason: 'invalid_signature' }],
+      [200, { isValid: true }],
+    );
+    await relay('verify', header);
+    const pending = markValue();
+
+    const res = await relay('settle', tampered);
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ success: false, errorReason: 'authorization_in_use' });
+    expect(urlsCalled()).toEqual(['https://gateway.example/v1/x402/verify']);
+    expect(markValue()).toEqual(pending);
+    // The original header cannot run the seller's upstream again.
+    expect(await (await relay('verify', header)).json()).toEqual({
+      isValid: false,
+      invalidReason: 'authorization_in_use',
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('still settles the verified payment after a tampered settle was refused', async () => {
+    const { arc } = await requirements();
+    const header = signatureHeader(arc!.v2Accept);
+    replies([200, { isValid: true }], [200, { success: true, transaction: 'gw-uuid-5' }]);
+    await relay('verify', header);
+    await relay('settle', signatureHeader(arc!.v2Accept, { value: '5001' }));
+
+    const res = await relay('settle', header);
+
+    expect(await res.json()).toEqual({ success: true, transaction: 'gw-uuid-5', network: 'eip155:5042' });
+    expect(urlsCalled()).toEqual([
+      'https://gateway.example/v1/x402/verify',
+      'https://gateway.example/v1/x402/settle',
+    ]);
+    expect(markValue()).toEqual({ s: 'settled' });
+  });
+
+  it.each([
+    ['another listing with another price', { priceUsd: '0.01' }],
+    ['another listing with the same terms', {}],
+  ])('keeps the verified mark when the same signature is settled through %s', async (_, usdcOver) => {
+    const { arc } = await requirements();
+    const header = signatureHeader(arc!.v2Accept);
+    replies(
+      [200, { isValid: true }],
+      [200, { success: false, errorReason: 'invalid_amount' }],
+      [200, { isValid: true }],
+    );
+    await relay('verify', header);
+    const pending = markValue();
+
+    // The buyer names the other listing's Arc accept in the (unsigned) envelope and settles there.
+    state.resource = { ...record({ arc: true, ...usdcOver }), id: 'res-2' };
+    const other = await requirements();
+    const res = await relay('settle', signatureHeader(other.arc!.v2Accept), 'res-2');
+
+    expect(await res.json()).toEqual({ success: false, errorReason: 'authorization_in_use' });
+    expect(urlsCalled()).toEqual(['https://gateway.example/v1/x402/verify']);
+    expect(markValue()).toEqual(pending);
+    state.resource = record();
+    expect(await (await relay('verify', header)).json()).toEqual({
+      isValid: false,
+      invalidReason: 'authorization_in_use',
+    });
+  });
+
+  it.each([
+    ['a new price', { priceUsd: '0.01' }],
+    ['a new payee', { payTo: SELLER }],
+  ])('keeps the verified mark when only the listing accept changed (%s) before the settle', async (_, usdcOver) => {
+    const { arc } = await requirements();
+    const header = signatureHeader(arc!.v2Accept);
+    replies(
+      [200, { isValid: true }],
+      [200, { success: false, errorReason: 'invalid_amount' }],
+      [200, { isValid: true }],
+    );
+    await relay('verify', header);
+    const pending = markValue();
+
+    // Same listing id and the same signed payload; only the server-generated accept differs.
+    state.resource = record({ arc: true, ...usdcOver });
+    const changed = await requirements();
+    expect(changed.arc!.v2Accept).not.toEqual(arc!.v2Accept);
+    const settleHeader = signatureHeader(changed.arc!.v2Accept);
+    expect(decodeHeader(settleHeader).payload).toEqual(decodeHeader(header).payload);
+    const res = await relay('settle', settleHeader);
+
+    expect(await res.json()).toEqual({ success: false, errorReason: 'authorization_in_use' });
+    expect(urlsCalled()).toEqual(['https://gateway.example/v1/x402/verify']);
+    expect(markValue()).toEqual(pending);
+    state.resource = record();
+    expect(await (await relay('verify', header)).json()).toEqual({
+      isValid: false,
+      invalidReason: 'authorization_in_use',
+    });
+  });
+
+  it('writes the binding into the pending and settling marks', async () => {
+    const { arc } = await requirements();
+    const header = signatureHeader(arc!.v2Accept);
+    const id = idFor(header, arc!.v2Accept);
+    expect(id.binding).toMatch(/^[0-9a-f]{64}$/);
+    replies([200, { isValid: true }]);
+    await relay('verify', header);
+    expect(markValue()).toEqual({ s: 'pending', c: id.credential, a: id.binding });
+
+    expect(await beginArcSettle(id)).toBe('started');
+    expect(markValue()).toEqual({ s: 'settling', c: id.credential, a: id.binding });
+  });
+
+  describe('marks written before the binding existed (no `a`)', () => {
+    it('advances a legacy pending mark with the verified signature, as before', async () => {
+      const { arc } = await requirements();
+      const header = signatureHeader(arc!.v2Accept);
+      const id = idFor(header, arc!.v2Accept);
+      store.strings.set(id.key, JSON.stringify({ s: 'pending', c: id.credential }));
+      store.setTtl(id.key, 600);
+      replies([200, { success: true, transaction: 'gw-uuid-6' }]);
+
+      const res = await relay('settle', header);
+
+      expect(await res.json()).toEqual({ success: true, transaction: 'gw-uuid-6', network: 'eip155:5042' });
+      expect(urlsCalled()).toEqual(['https://gateway.example/v1/x402/settle']);
+      expect(markValue()).toEqual({ s: 'settled' });
+    });
+
+    it('releases a legacy pending mark after an explicit decline, as before', async () => {
+      const { arc } = await requirements();
+      const header = signatureHeader(arc!.v2Accept);
+      const id = idFor(header, arc!.v2Accept);
+      store.strings.set(id.key, JSON.stringify({ s: 'pending', c: id.credential }));
+      store.setTtl(id.key, 600);
+      replies([200, { success: false, errorReason: 'insufficient_balance' }]);
+
+      await relay('settle', header);
+
+      expect(markKeys()).toHaveLength(0);
+    });
+
+    it('releases a legacy settling mark with the same signature, as before', async () => {
+      const { arc } = await requirements();
+      const id = idFor(signatureHeader(arc!.v2Accept), arc!.v2Accept);
+      store.strings.set(id.key, JSON.stringify({ s: 'settling', c: id.credential }));
+      store.setTtl(id.key, 600);
+
+      await releaseArcSettling(id);
+
+      expect(markKeys()).toHaveLength(0);
+    });
+  });
+
+  it('does not advance a bound pending mark for another binding', async () => {
+    const { arc } = await requirements();
+    const id = idFor(signatureHeader(arc!.v2Accept), arc!.v2Accept);
+    const mark = JSON.stringify({ s: 'pending', c: id.credential, a: id.binding });
+    store.strings.set(id.key, mark);
+    store.setTtl(id.key, 600);
+
+    expect(await beginArcSettle({ ...id, binding: 'f'.repeat(64) })).toBe('in_use');
+
+    expect(store.strings.get(id.key)).toBe(mark);
+    expect(await beginArcSettle(id)).toBe('started');
+  });
+
+  it('does not release a bound settling mark for another binding', async () => {
+    const { arc } = await requirements();
+    const id = idFor(signatureHeader(arc!.v2Accept), arc!.v2Accept);
+    const mark = JSON.stringify({ s: 'settling', c: id.credential, a: id.binding });
+    store.strings.set(id.key, mark);
+    store.setTtl(id.key, 600);
+
+    // e.g. a tampered settle that skipped the start check while KV was failing (fail-open).
+    await releaseArcSettling({ ...id, binding: 'f'.repeat(64) });
+
+    expect(store.strings.get(id.key)).toBe(mark);
+    await releaseArcSettling(id);
     expect(markKeys()).toHaveLength(0);
   });
 });

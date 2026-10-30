@@ -226,7 +226,12 @@ async function relayArc(
 ): Promise<NextResponse> {
   const { resource, accepts } = target;
   const arcAccept = accepts.arc!;
-  const id = arcMarkIdentity(arcAccept.network, body.paymentPayload.payload);
+  // 印は verify を通った支払いそのもの (payload と、この出品・Gateway へ送る accept) に結び付ける
+  // (relayArcMarks.ts の binding)。改変した settle で印を進めたり消したりさせない。
+  const id = arcMarkIdentity(arcAccept.network, body.paymentPayload.payload, {
+    resourceId: resource.id,
+    accept: toV2Accept(arcAccept),
+  });
   if (!id) return jsonError(400, 'invalid_payment_payload');
 
   if (action === 'verify') {
