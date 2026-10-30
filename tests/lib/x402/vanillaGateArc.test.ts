@@ -49,12 +49,20 @@ vi.mock('@/lib/x402/config', () => ({
 }));
 
 // resource 束縛 claim の KV は in-memory (vanillaGateFacilitator.test と同じ最小実装)。
-const kvHold = vi.hoisted(() => ({ store: new Map<string, string>(), claimed: 0, lastTtlSec: null as number | null }));
+const kvHold = vi.hoisted(() => ({
+  store: new Map<string, string>(),
+  claimed: 0,
+  lastTtlSec: null as number | null,
+  expires: [] as Array<{ key: string; ttlSec: number }>,
+  expireOk: true,
+  claimDown: false,
+}));
 vi.mock('@/lib/kv', async () => {
   const actual = await vi.importActual<typeof import('@/lib/kv')>('@/lib/kv');
   return {
     ...actual,
     kvSetNxGet: async (key: string, value: string, ttlSec: number) => {
+      if (kvHold.claimDown) return { ok: false, reason: 'network' };
       const existing = kvHold.store.get(key);
       if (existing !== undefined) return { ok: true, value: existing };
       kvHold.store.set(key, value);
@@ -66,10 +74,16 @@ vi.mock('@/lib/kv', async () => {
       const had = kvHold.store.delete(keys[0]);
       return { ok: true, value: had ? 1 : 0 };
     },
+    kvExpire: async (key: string, ttlSec: number) => {
+      kvHold.expires.push({ key, ttlSec });
+      return kvHold.expireOk ? { ok: true, value: 1 } : { ok: false, reason: 'network' };
+    },
   };
 });
 
 import { handleVanillaPaidGet } from '@/lib/x402/vanillaGate';
+
+type Content = Parameters<typeof handleVanillaPaidGet>[2];
 
 const RESOURCE = {
   resourceUrl: 'https://open-pay.jp/api/paid/hello',
@@ -140,6 +154,9 @@ beforeEach(() => {
   kvHold.store.clear();
   kvHold.claimed = 0;
   kvHold.lastTtlSec = null;
+  kvHold.expires = [];
+  kvHold.expireOk = true;
+  kvHold.claimDown = false;
   configHold.arcEnabled = true;
   vi.stubGlobal('fetch', fetchMock);
   gatewayOk();
@@ -163,6 +180,146 @@ async function pay(accepted: unknown, nonce?: string): Promise<Response> {
     () => NextResponse.json({ ok: true }),
   );
 }
+
+// 第 8 回レビュー B-1: Gateway の verify は使用済み nonce を落とさない (7 日署名) ので、同じ署名の再送 ('match') が
+// 毎回 content (RPC 読み・attestation 署名) を動かしていた。Arc では束縛を張った request だけが content に進む。
+describe('vanillaGate Arc rail: 同じ署名の再送で content を動かさない', () => {
+  function payWith(accepted: unknown, nonce: string, content: Content): Promise<Response> {
+    return handleVanillaPaidGet(
+      new Request(RESOURCE.resourceUrl, { headers: { 'PAYMENT-SIGNATURE': v2Header(accepted, nonce) } }),
+      RESOURCE,
+      content,
+    );
+  }
+
+  it('Arc の購入が成立したあとの再送 → content も settle も呼ばずに 402 authorization_already_submitted', async () => {
+    const content = vi.fn<Content>(() => NextResponse.json({ ok: true }));
+    expect((await payWith(ARC_ACCEPT, '0x31', content)).status).toBe(200);
+    const calls = fetchMock.mock.calls.length;
+    const res = await payWith(ARC_ACCEPT, '0x31', content);
+    expect(res.status).toBe(402);
+    expect((await res.json()).error).toBe('authorization_already_submitted');
+    // verify は通る (Gateway は使用済み nonce を落とさない) が、settle にも content にも進まない。
+    expect(fetchMock.mock.calls.length).toBe(calls + 1);
+    expect(fetchMock.mock.calls.at(-1)![0]).toMatch(/\/verify$/);
+    expect(content).toHaveBeenCalledTimes(1);
+  });
+
+  it('同時に届いた同じ署名は、束縛を張った 1 本だけが content に進む', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const content = vi.fn<Content>(async () => {
+      await gate;
+      return NextResponse.json({ ok: true });
+    });
+    const first = payWith(ARC_ACCEPT, '0x35', content);
+    const second = payWith(ARC_ACCEPT, '0x35', content);
+    // 2 本目は 1 本目の content が終わる前に答える (content に入らない)。
+    expect((await second).status).toBe(402);
+    release();
+    expect((await first).status).toBe(200);
+    expect(content).toHaveBeenCalledTimes(1);
+  });
+
+  it('settle の結果が不明 (throw) のあとの再送でも content を動かさない', async () => {
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url.endsWith('/verify')) return { ok: true, status: 200, json: async () => ({ isValid: true, payer: PAYER }) };
+      return { ok: false, status: 503, json: async () => ({ error: 'unavailable' }) };
+    });
+    const content = vi.fn<Content>(() => NextResponse.json({ ok: true }));
+    expect((await payWith(ARC_ACCEPT, '0x32', content)).status).toBe(503);
+    const res = await payWith(ARC_ACCEPT, '0x32', content);
+    expect(res.status).toBe(402);
+    expect(content).toHaveBeenCalledTimes(1);
+  });
+
+  it('Gateway の settle success:false (broadcast 前) は claim を戻す → 同じ支払いの再挑戦は content が動く', async () => {
+    let settleCalls = 0;
+    fetchMock.mockImplementation(async (url: string) => ({
+      ok: true,
+      status: 200,
+      json: async () =>
+        url.endsWith('/verify')
+          ? { isValid: true, payer: '0xabc' }
+          : ++settleCalls === 1
+            ? { success: false, errorReason: 'insufficient_balance', transaction: '', network: 'eip155:5042002' }
+            : { success: true, transaction: 'uuid-2', network: 'eip155:5042002', payer: '0xabc' },
+    }));
+    const content = vi.fn<Content>(() => NextResponse.json({ ok: true }));
+    expect((await payWith(ARC_ACCEPT, '0x33', content)).status).toBe(402);
+    expect((await payWith(ARC_ACCEPT, '0x33', content)).status).toBe(200);
+    expect(content).toHaveBeenCalledTimes(2);
+  });
+
+  it('content が例外を投げたら束縛を戻す → 同じ署名の再挑戦は content が動く (支払いは起きていない)', async () => {
+    let calls = 0;
+    const content = vi.fn<Content>(() => {
+      if (++calls === 1) throw new Error('upstream exploded');
+      return NextResponse.json({ ok: true });
+    });
+    await expect(payWith(ARC_ACCEPT, '0x36', content)).rejects.toThrow('upstream exploded');
+    expect(kvHold.store.size).toBe(0);
+    expect((await payWith(ARC_ACCEPT, '0x36', content)).status).toBe(200);
+    expect(content).toHaveBeenCalledTimes(2);
+  });
+
+  it('途中で放置された束縛は 15 分で切れ、切れた後は同じ署名で content が動く', async () => {
+    // 1 本目は content の途中で止まったまま (関数が落ちた想定・束縛は戻されない)。
+    void payWith(ARC_ACCEPT, '0x39', () => new Promise(() => {}));
+    await vi.waitFor(() => expect(kvHold.store.size).toBe(1));
+    expect(kvHold.lastTtlSec).toBe(900);
+    const content = vi.fn<Content>(() => NextResponse.json({ ok: true }));
+    expect((await payWith(ARC_ACCEPT, '0x39', content)).status).toBe(402);
+    // 15 分 (900 秒) の期限切れ = キーが消えた状態。
+    kvHold.store.clear();
+    expect((await payWith(ARC_ACCEPT, '0x39', content)).status).toBe(200);
+    expect(content).toHaveBeenCalledTimes(1);
+  });
+
+  it('settle の結果が不明 (throw) のときも、延ばした長い期限の束縛が残る', async () => {
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url.endsWith('/verify')) return { ok: true, status: 200, json: async () => ({ isValid: true, payer: PAYER }) };
+      return { ok: false, status: 503, json: async () => ({ error: 'unavailable' }) };
+    });
+    const content = vi.fn<Content>(() => NextResponse.json({ ok: true }));
+    expect((await payWith(ARC_ACCEPT, '0x3a', content)).status).toBe(503);
+    const key = [...kvHold.store.keys()][0];
+    expect(kvHold.expires).toEqual([{ key, ttlSec: 604_900 }]);
+    expect(kvHold.store.has(key)).toBe(true);
+  });
+
+  it('束縛を延ばせなくても settle へ進む (付帯の KV 障害で検証済みの支払いを止めない)', async () => {
+    kvHold.expireOk = false;
+    const content = vi.fn<Content>(() => NextResponse.json({ ok: true }));
+    expect((await payWith(ARC_ACCEPT, '0x37', content)).status).toBe(200);
+    expect(fetchMock.mock.calls.at(-1)![0]).toMatch(/\/settle$/);
+  });
+
+  it('claim の KV が使えないときは従来どおり content と settle へ進む (再送の抑止は KV が動いているあいだだけ)', async () => {
+    kvHold.claimDown = true;
+    const content = vi.fn<Content>(() => NextResponse.json({ ok: true }));
+    const [a, b] = await Promise.all([payWith(ARC_ACCEPT, '0x38', content), payWith(ARC_ACCEPT, '0x38', content)]);
+    expect([a.status, b.status]).toEqual([200, 200]);
+    expect(content).toHaveBeenCalledTimes(2);
+  });
+
+  it('Base の同じ束縛の再送は従来どおり content へ進む', async () => {
+    fetchMock.mockImplementation(async (url: string) => ({
+      ok: true,
+      status: 200,
+      json: async () =>
+        url.endsWith('/verify')
+          ? { isValid: true, payer: PAYER }
+          : { success: true, transaction: `0x${'ab'.repeat(32)}`, network: 'base-sepolia', payer: PAYER },
+    }));
+    const content = vi.fn<Content>(() => NextResponse.json({ ok: true }));
+    await payWith(BASE_ACCEPT, '0x34', content);
+    await payWith(BASE_ACCEPT, '0x34', content);
+    expect(content).toHaveBeenCalledTimes(2);
+  });
+});
 
 describe('vanillaGate Arc rail (Circle Gateway)', () => {
   it('flag ON: v2 accepts は [Base, Arc]・v1 body は Base 1 件のまま', async () => {
@@ -326,9 +483,10 @@ describe('vanillaGate Arc rail (Circle Gateway)', () => {
     expect(kvHold.claimed).toBe(0);
   });
 
-  it('Arc の claim TTL は署名の有効期間 (604900s)・Base は従来の 30 分', async () => {
+  it('Arc の claim は張った時点 15 分・settle に進む直前に署名の有効期間 (604900s) へ延ばす・Base は従来の 30 分', async () => {
     await pay(ARC_ACCEPT, '0x11');
-    expect(kvHold.lastTtlSec).toBe(604_900);
+    expect(kvHold.lastTtlSec).toBe(900);
+    expect(kvHold.expires).toEqual([{ key: [...kvHold.store.keys()][0], ttlSec: 604_900 }]);
     fetchMock.mockResolvedValue({
       ok: true,
       status: 200,
@@ -385,7 +543,7 @@ describe('vanillaGate Arc rail (Circle Gateway)', () => {
 
   it('Gateway verify 4xx + {isValid:true, success:false} (混在) も判定にしない → 503・content/settle は走らない', async () => {
     fetchMock.mockResolvedValue({ ok: false, status: 400, json: async () => ({ isValid: true, success: false, payer: PAYER }) });
-    const content = vi.fn(() => NextResponse.json({ ok: true }));
+    const content = vi.fn<Content>(() => NextResponse.json({ ok: true }));
     const res = await handleVanillaPaidGet(
       new Request(RESOURCE.resourceUrl, { headers: { 'PAYMENT-SIGNATURE': v2Header(ARC_ACCEPT, '0x1c') } }),
       RESOURCE,

@@ -35,6 +35,7 @@ import { logger } from '@/lib/logger';
 import { atomicToHuman, recordSettleLedgerAfterResponse } from '@/lib/x402/settleLedger';
 import { generateCdpJwt } from './cdpJwt';
 import { ARC_GATEWAY_MAX_TIMEOUT_SECONDS, x402Config } from './config';
+import { kvExpire } from '@/lib/kv';
 import { recordFunnelAfterResponse } from './funnel';
 import { isFacilitatorPreBroadcastRejection } from './paymentRedelivery';
 import {
@@ -57,6 +58,11 @@ import {
   vanillaResourceBinding,
   type VanillaResourceClaimIdentity,
 } from './vanillaResourceClaim';
+
+// Arc の束縛を張った時点の期限 (第 8 回レビュー B-1・Codex #929)。この gate を使う route (app/api/paid/usdc/**・hello) は
+// maxDuration を指定しておらず、Vercel の関数の既定の上限 (300 秒) で止まる。content はその中で終わるので 15 分あれば
+// 足りる。settle に進む直前に ARC_GATEWAY_MAX_TIMEOUT_SECONDS へ延ばす。route に maxDuration を足すときはこの値も見直す。
+const ARC_PENDING_CLAIM_TTL_SEC = 15 * 60;
 
 const FACILITATOR_TIMEOUT_MS = 20_000;
 
@@ -676,12 +682,24 @@ async function handleVanillaPaidGetInner(
     const claim = await claimVanillaResource({
       identity: claimIdentity,
       binding: claimBinding,
-      // Arc は署名の有効期間 (7 日+) いっぱい束縛する (claimVanillaResource の ttlSec 注記)。
-      ...(rail === 'arc-gateway' ? { ttlSec: ARC_GATEWAY_MAX_TIMEOUT_SECONDS } : {}),
+      // Arc は settle に進む直前に署名の有効期間 (7 日+) いっぱいへ延ばす (下の kvExpire)。張った時点は短くし、
+      // content の途中で落ちた束縛 (支払いは起きていない) が同じ署名の再挑戦を 7 日ふさがないようにする
+      // (第 8 回レビュー B-1・Codex #929)。
+      ...(rail === 'arc-gateway' ? { ttlSec: ARC_PENDING_CLAIM_TTL_SEC } : {}),
     });
     if (claim.kind === 'conflict') {
       recordFunnelAfterResponse('conflict', rail, url);
       return authorizationConflict();
+    }
+    // 第 8 回レビュー B-1: Arc は Gateway の verify が使用済み nonce を落とさない (7 日署名) ので、同じ束縛の再送
+    // ('match') を content へ進めると、使用済みの署名で 7 日のあいだ毎回 content (RPC 読み・attestation 署名) が動く。
+    // Arc では束縛を張った request (claimed) だけが content と settle に進み、再送は content を呼ばずに 402 にする。
+    // 勝者は SET NX の 1 回で決まるので、同時の再送も content に入れない。Gateway の success:false (broadcast 前) と
+    // content の 4xx は従来どおり claim を戻すので、同じ署名の正直な再挑戦は通る。settle が成功した Arc の署名の
+    // 'match' は、これまでも settle で落ちて 402 だった (再配信は成り立っていなかった)。Base は従来どおり。
+    if (claim.kind === 'match' && rail === 'arc-gateway') {
+      recordFunnelAfterResponse('settle_failed', rail, url);
+      return paymentChallenge(resource, accepts, 'authorization_already_submitted');
     }
     // 'match' (同一束縛の再送) は従来どおり content/settle へ進む。claim を張ったのが
     // 自分の request のときだけ、settle 前に落ちた場合の解放権を持つ。
@@ -696,7 +714,15 @@ async function handleVanillaPaidGetInner(
     ownedClaim = null;
   };
 
-  const res = await content({ payer });
+  let res: Awaited<ReturnType<typeof content>>;
+  try {
+    res = await content({ payer });
+  } catch (error) {
+    // Arc は同じ束縛の再送を 402 にするので、settle 前の例外 (支払いは起きていない) で束縛を残すと、同じ署名の
+    // 正直な再挑戦が束縛の期限までふさがる。束縛を戻してから投げ直す (第 8 回レビュー B-1・Codex #929)。
+    if (rail === 'arc-gateway') await releaseClaim();
+    throw error;
+  }
   if (res.status >= 400) {
     // settle しない = 課金しない。署名も未使用なので claim を戻す (引数不足 400 の後に
     // 引数を足して同じ支払いで叩き直す正直な再送を、別 query = 別束縛で塞がないため)。
@@ -706,6 +732,17 @@ async function handleVanillaPaidGetInner(
     await releaseClaim();
     recordFunnelAfterResponse('content_error', rail, url);
     return res;
+  }
+
+  if (rail === 'arc-gateway' && ownedClaim) {
+    // settle に進む束縛だけを、署名の有効期間いっぱいへ延ばす (settle 後の再送と別 resource への流用を 7 日止める)。
+    // 延ばせなくても settle へ進む: 付帯の束縛の KV 障害が、検証済みの支払いを止める波及を断つ (延ばせなかった束縛は
+    // 短い期限で切れ、その後の再送は第 8 回より前と同じく content が動きうる)。
+    const extended = await kvExpire(ownedClaim.key, ARC_GATEWAY_MAX_TIMEOUT_SECONDS);
+    // value 0 = キーがもう無い (期限切れ)。蘇らせはしないが、束縛なしで settle に進むことを観測できるようにする。
+    if (!extended.ok || extended.value === 0) {
+      logger.warn('x402.vanilla.claim_extend_failed', { rail, resource: resource.resourceUrl });
+    }
   }
 
   let settle: { status: number; body: Record<string, unknown> };
