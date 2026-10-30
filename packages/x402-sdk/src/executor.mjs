@@ -65,7 +65,7 @@ async function readTextCapped(response, maxBytes) {
     if (done) break;
     total += value.byteLength;
     if (total > maxBytes) {
-      // With the default transport, cancel destroys the Node response behind Readable.toWeb and
+      // With the default transport, cancel destroys the Node response behind nodeResponseBody and
       // with it the unfinished connection, so nothing past the cap is buffered. Not awaited, and
       // any outcome ignored: after X-PAYMENT a custom transport whose cancel throws, returns a
       // non-promise, rejects or never settles must not turn the paid_body_too_large result

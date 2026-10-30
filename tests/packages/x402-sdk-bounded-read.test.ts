@@ -3,6 +3,7 @@
 // - 上限は stream から数えた byte で判定する (Content-Length は無いか嘘でありうる)。超えたら cancel して以後読まない。
 // - 支払い後に超えたら例外ではなく、settlement・txHash・authorization nonce を持った構造化の結果を返す
 //   (払ったのに一般的な失敗に見えて、もう一度払う事故を防ぐ)。
+import { EventEmitter } from 'node:events';
 import { Readable } from 'node:stream';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -31,6 +32,7 @@ type SdkModule = {
 };
 
 const SDK_ENTRY = resolve(process.cwd(), 'packages/x402-sdk/src/index.mjs');
+const NODE_BODY_ENTRY = resolve(process.cwd(), 'packages/x402-sdk/src/nodeBody.mjs');
 const JPYC = 10n ** 18n;
 const KiB = 1024;
 const MiB = 1024 * KiB;
@@ -50,6 +52,25 @@ const lookup = async () => [{ address: '93.184.216.34', family: 4 }];
 
 async function loadSdk(): Promise<SdkModule> {
   return (await import(pathToFileURL(SDK_ENTRY).href)) as SdkModule;
+}
+
+type NodeResponseBody = (response: unknown) => ReadableStream<Uint8Array>;
+
+// 既定 transport が IncomingMessage を WHATWG body にする関数 (index.mjs からは出さない内部 module)。
+async function loadNodeResponseBody(): Promise<NodeResponseBody> {
+  const mod = (await import(pathToFileURL(NODE_BODY_ENTRY).href)) as {
+    nodeResponseBody: NodeResponseBody;
+  };
+  return mod.nodeResponseBody;
+}
+
+// IncomingMessage の代わり。event を test から好きな順で出せる。
+function fakeResponse() {
+  return Object.assign(new EventEmitter(), {
+    pause: vi.fn(),
+    resume: vi.fn(),
+    destroy: vi.fn(),
+  });
 }
 
 function accept() {
@@ -297,11 +318,14 @@ describe('openpay-x402-sdk bounded response reads (C-2)', () => {
     expect(client.session.spentAtomic).toBe(0n);
   });
 
-  it('the cancel reaches the Node stream behind Readable.toWeb (the default transport)', async () => {
+  it('the cancel reaches the Node stream behind the default transport body', async () => {
     const sdk = await loadSdk();
+    const nodeResponseBody = await loadNodeResponseBody();
     const total = 4 * MiB;
     let pushed = 0;
-    // network.mjs の既定 transport と同じ形: new Response(Readable.toWeb(IncomingMessage))。
+    // network.mjs の既定 transport と同じ形: new Response(nodeResponseBody(IncomingMessage))。
+    // Node 22 ではこの形を Readable.toWeb にすると、cancel の後に残っていた chunk の enqueue が
+    // 「Controller is already closed」の未処理例外になった (CI の Node 22 で再現)。
     const node = new Readable({
       read() {
         if (pushed >= total) {
@@ -314,7 +338,7 @@ describe('openpay-x402-sdk bounded response reads (C-2)', () => {
     });
     const fetchImpl = vi.fn(
       async () =>
-        new Response(Readable.toWeb(node) as unknown as ReadableStream<Uint8Array>, {
+        new Response(nodeResponseBody(node), {
           status: 402,
         }),
     );
@@ -325,6 +349,63 @@ describe('openpay-x402-sdk bounded response reads (C-2)', () => {
     expect(node.destroyed).toBe(true);
     expect(node.readableEnded).toBe(false);
     expect(pushed).toBeLessThan(total);
+  });
+
+  it('the default transport body drops a chunk, end, error or close that arrives after cancel', async () => {
+    const nodeResponseBody = await loadNodeResponseBody();
+    const response = fakeResponse();
+    const reader = nodeResponseBody(response).getReader();
+
+    response.emit('data', Buffer.from('ab'));
+    expect(await reader.read()).toEqual({ done: false, value: new Uint8Array([0x61, 0x62]) });
+    await reader.cancel();
+    expect(response.destroy).toHaveBeenCalledTimes(1);
+
+    // 閉じた controller への enqueue は TypeError。listener の外へ抜けると buyer の process の
+    // uncaughtException になる。error は listener が無いと EventEmitter が throw する。
+    expect(() => response.emit('data', Buffer.from('late'))).not.toThrow();
+    expect(() => response.emit('end')).not.toThrow();
+    expect(() => response.emit('error', new Error('socket reset'))).not.toThrow();
+    expect(() => response.emit('close')).not.toThrow();
+  });
+
+  it('the default transport body ends on end, fails on error or on close before end', async () => {
+    const nodeResponseBody = await loadNodeResponseBody();
+
+    const ended = fakeResponse();
+    const endedReader = nodeResponseBody(ended).getReader();
+    ended.emit('data', Buffer.from('x'));
+    ended.emit('end');
+    ended.emit('close');
+    expect(await endedReader.read()).toEqual({ done: false, value: new Uint8Array([0x78]) });
+    expect(await endedReader.read()).toEqual({ done: true, value: undefined });
+
+    const errored = fakeResponse();
+    const erroredReader = nodeResponseBody(errored).getReader();
+    errored.emit('error', new Error('socket reset'));
+    errored.emit('close');
+    await expect(erroredReader.read()).rejects.toThrow('socket reset');
+
+    const closed = fakeResponse();
+    const closedReader = nodeResponseBody(closed).getReader();
+    closed.emit('close');
+    await expect(closedReader.read()).rejects.toThrow('closed before the body ended');
+  });
+
+  it('the default transport body pauses the response when its queue is full and resumes on pull', async () => {
+    const nodeResponseBody = await loadNodeResponseBody();
+    const response = fakeResponse();
+    const reader = nodeResponseBody(response).getReader();
+
+    response.emit('data', Buffer.from('a'));
+    expect(response.pause).toHaveBeenCalledTimes(1);
+    response.resume.mockClear();
+    expect(await reader.read()).toEqual({ done: false, value: new Uint8Array([0x61]) });
+    const next = reader.read();
+    await Promise.resolve();
+    expect(response.resume).toHaveBeenCalled();
+    response.emit('data', Buffer.from('b'));
+    expect(await next).toEqual({ done: false, value: new Uint8Array([0x62]) });
   });
 
   it('a paid body over the default cap returns a structured paid_body_too_large result with the txHash', async () => {

@@ -69,6 +69,7 @@ describe('openpay-x402-sdk tarball consumer', () => {
         'src/guards.mjs',
         'src/index.mjs',
         'src/network.mjs',
+        'src/nodeBody.mjs',
         'src/payment.mjs',
         'src/receipt.mjs',
         'src/signer.mjs',

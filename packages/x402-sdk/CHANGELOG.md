@@ -18,6 +18,9 @@
   usual `receipt` and `settlement`, `txHash` (verified receipts only) and
   `authorizationNonce` instead of throwing, because the payment may already have
   settled. Session and daily accounting are the same as for any other response.
+- The default transport turns the Node.js response into the body stream itself
+  instead of `Readable.toWeb`. On Node.js 22, cancelling an over-cap body through
+  `Readable.toWeb` could raise an uncaught `Controller is already closed` error.
 - Responses within the caps are returned exactly as before. No dependency changes.
 
 ## 0.10.4 — 2026-10-22
