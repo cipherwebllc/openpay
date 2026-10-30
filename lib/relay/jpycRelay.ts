@@ -8,6 +8,7 @@
 import { getAddress, type Address, type Hex } from 'viem';
 import { logger } from '@/lib/logger';
 import { relayBroadcast } from './relayBroadcast';
+import { recheckRevertedAuthorization } from './revertRecheck';
 import type { RelayResult, RelayTaskOutcome } from './relayTypes';
 import {
   encodeTransferWithAuthorizationCalldata,
@@ -61,6 +62,7 @@ export type RelayDeps = {
   // (任意) authorization が既にチェーン上で使用済か (JPYC authorizationState)。true なら
   // submit せず pending を返す: guaranteed-revert を避けつつ、既に処理済かもしれない決済を
   // standard mode に fallback させない (二重支払い防止)。未提供ならスキップ。
+  // broadcast 後に relay の tx が revert したときの再確認にも使う (true なら reverted でなく pending)。
   checkAuthorizationUsed?: (
     chainId: number,
     token: Address,
@@ -186,7 +188,7 @@ export async function relayJpycAuthorization(
     if (used) return { kind: 'pending' };
   }
 
-  return relayBroadcast({
+  const result = await relayBroadcast({
     chainId,
     from: auth.from,
     nonce: auth.nonce,
@@ -194,4 +196,12 @@ export async function relayJpycAuthorization(
     encodeCalldata: () => encodeTransferWithAuthorizationCalldata(auth, signature),
     submit: (data) => deps.submitSponsoredCall(chainId, jpyc, data),
   }, deps);
+
+  // 6. relay の tx が revert したときだけ、同じ authorization が別の tx で使われていないかを読み直す
+  // (使用済みなら pending・未使用/読み取り失敗は従来どおり reverted。lib/relay/revertRecheck.ts)。
+  return recheckRevertedAuthorization(
+    result,
+    { chainId, token: jpyc, from: auth.from, nonce: auth.nonce, logPrefix: 'relay.jpyc' },
+    deps.checkAuthorizationUsed,
+  );
 }

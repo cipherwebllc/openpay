@@ -179,13 +179,19 @@ describe.each<Rail>(['free', 'recover'])('%s broadcast contract', (rail) => {
     expect(h.trace.events).toEqual([...h.beforeEncode, 'encode', 'submit', 'poll', ...h.refunds.slice(0, h.refunds.indexOf(step) + 1)]);
   });
 
+  // reverted のときだけ、最後に authorizationState をもう一度読む (第 8 回レビュー A-01・lib/relay/revertRecheck.ts)。
+  // harness の used は false なので応答は reverted のまま・claim と予算もそのまま。
   it.each(['pending', 'reverted'] as const)('%s retains claim and budgets, with or without a hash', async (state) => {
     for (const txHash of [undefined, FINAL_HASH]) {
       const h = await harness(rail);
       h.control.taskId = 'gelato-task';
       h.control.outcome = { state, txHash };
       expect(await h.run()).toEqual({ kind: state, txHash });
-      expect(h.trace.events).toEqual([...h.beforeEncode, 'encode', 'submit', 'poll', ...(txHash ? ['record-outcome'] : [])]);
+      expect(h.trace.events).toEqual([
+        ...h.beforeEncode, 'encode', 'submit', 'poll',
+        ...(txHash ? ['record-outcome'] : []),
+        ...(state === 'reverted' ? ['used'] : []),
+      ]);
     }
   });
 

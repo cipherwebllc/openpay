@@ -814,6 +814,57 @@ describe('x402 facilitator /settle', () => {
     });
   });
 
+  // 第 8 回レビュー A-01 (x402 wire の応答が変わる唯一の条件): relay の tx は revert したが、同じ authorization
+  // (commitment nonce) は別の tx が使用済み (mempool から写した settle の前走り等で支払いは成立)。200 reverted で
+  // 返すと買い手が別の署名で払い直しうるので、この条件だけ 202 errorReason:'pending' (transaction なし) にする。
+  it('settle が reverted でも authorization が別の tx で使用済み → 202 errorReason:pending・transaction:null', async () => {
+    const { settle } = await loadFacilitator();
+    const relayer = await import('@/lib/relay/selfHostRelayer');
+    (relayer.pollSelfHost as unknown as Mock).mockImplementationOnce(async () => {
+      // relay の tx が revert した時点で、同じ authorization は別の tx が実行済み。
+      authorizationState.used = true;
+      return { state: 'reverted', txHash: TX_HASH };
+    });
+    const params = goodParams();
+    const sig = await signReceive(params);
+    const res = await settle(reqOf('http://x/settle', facilitatorBody(params, sig)));
+    expect(res.status).toBe(202);
+    expect(await res.json()).toEqual({
+      success: false,
+      errorReason: 'pending',
+      transaction: null,
+      network: 'eip155:80002',
+      payer: CUSTOMER,
+    });
+    expect(ledger.record).not.toHaveBeenCalled();
+  });
+
+  it('settle が reverted で再確認の読み取りが失敗 → 従来どおり 200 errorReason:reverted (障害は warn)', async () => {
+    const { settle } = await loadFacilitator();
+    const relayer = await import('@/lib/relay/selfHostRelayer');
+    const { logger } = await import('@/lib/logger');
+    (relayer.pollSelfHost as unknown as Mock).mockImplementationOnce(async () => {
+      authorizationState.unavailable = true;
+      return { state: 'reverted', txHash: TX_HASH };
+    });
+    const params = goodParams();
+    const sig = await signReceive(params);
+    const res = await settle(reqOf('http://x/settle', facilitatorBody(params, sig)));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      success: false,
+      errorReason: 'reverted',
+      transaction: TX_HASH,
+      network: 'eip155:80002',
+      payer: CUSTOMER,
+    });
+    expect(logger.warn).toHaveBeenCalledWith('relay.forwarder.revert_recheck_unavailable', {
+      chainId: AMOY,
+      txHash: TX_HASH,
+      error: expect.any(Error),
+    });
+  });
+
   // broadcast 済だが未確定 → 202 (client は再送してはならない = 二重支払い防止)。
   it('settle が pending → 202 success:false errorReason:pending', async () => {
     const { settle } = await loadFacilitator();

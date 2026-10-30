@@ -24,6 +24,7 @@ import {
 } from '@/lib/relay/forwarderSettle';
 import { logger } from '@/lib/logger';
 import { relayBroadcast } from './relayBroadcast';
+import { recheckRevertedAuthorization } from './revertRecheck';
 import type { RelayResult, RelayTaskOutcome } from './relayTypes';
 import type {
   BudgetCheckResult,
@@ -80,6 +81,8 @@ export type ForwarderRecoverDeps = {
   // 正当決済が daily_budget_exceeded で 503 になるのを防ぐ。check が返した token でのみ呼ぶ。
   // jpycRelay (free 経路) の refundGasBudget 契約とセマンティクス完全一致 (fail-quiet・自分でログ)。
   refundGasBudget?: (refundToken: GasBudgetRefundToken) => Promise<void>;
+  // (任意) authorizationState。送信前の既使用チェックと、broadcast 後に relay の tx が revert したときの
+  // 再確認 (true なら reverted でなく pending) に使う。
   checkAuthorizationUsed?: (
     chainId: number,
     token: Address,
@@ -270,7 +273,7 @@ export async function recoverViaForwarder(
       return rejected(503, 'preflight_unavailable');
     }
   }
-  return relayBroadcast({
+  const result = await relayBroadcast({
     chainId,
     from: params.from,
     nonce,
@@ -278,4 +281,13 @@ export async function recoverViaForwarder(
     encodeCalldata: () => encodeSettleCalldata(params, signature),
     submit: (data) => deps.submit(chainId, forwarder, data),
   }, deps, deps);
+
+  // relay の tx が revert したときだけ、同じ authorization (commitment nonce) が別の tx で使われていないかを
+  // 読み直す (使用済みなら pending・未使用/読み取り失敗は従来どおり reverted。lib/relay/revertRecheck.ts)。
+  // x402 facilitator の settle もこの経路を通るので、この 1 条件では 202 errorReason:'pending' になる。
+  return recheckRevertedAuthorization(
+    result,
+    { chainId, token: jpyc, from: params.from, nonce, logPrefix: 'relay.forwarder' },
+    deps.checkAuthorizationUsed,
+  );
 }

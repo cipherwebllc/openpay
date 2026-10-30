@@ -17,7 +17,8 @@ export type RelayResult =
   | { kind: 'success'; txHash: Hex }
   | { kind: 'reverted'; txHash?: Hex }
   // broadcast 済だが未確定 (確認待ち)。client は standard へ fallback してはならない
-  // (二重支払い防止)。txHash があれば追跡可能、authorizationState 既使用時は無し。
+  // (二重支払い防止)。txHash があれば追跡可能、authorizationState 既使用時 (送信前のチェックと、
+  // relay の tx が revert した後の再確認) は無し。
   | { kind: 'pending'; txHash?: Hex }
   // pre-submit に弾いた (検証/残高/rate-limit)。httpStatus + 理由コード。
   | { kind: 'rejected'; httpStatus: number; reason: string }

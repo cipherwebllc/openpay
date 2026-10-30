@@ -3,6 +3,7 @@ import { getAddress, type Address, type Hex } from 'viem';
 import { logger } from '@/lib/logger';
 import { privateKeyToAccount } from 'viem/accounts';
 import {
+  buildForwarderNonce,
   buildReceiveWithAuthorizationTypedData,
   type ForwarderSettleParams,
 } from '@/lib/relay/forwarderIntent';
@@ -710,5 +711,99 @@ describe('recoverViaForwarder — 日次予算 refund 配線 (L3)', () => {
     const res = await recoverViaForwarder(await makeInput(), deps);
     expect(res.kind).toBe('relay_error');
     expect(refundGasBudget).toHaveBeenCalledTimes(1);
+  });
+});
+
+// 第 8 回レビュー A-01: forwarder.settle は誰でも呼べるので、relay の tx を mempool から写した別の tx が先に
+// settle すると relay の tx は revert するが支払いは成立している。revert のときだけ commitment nonce の
+// authorizationState を読み直し、使用済みなら pending (txHash なし) にする。未使用・読み取り失敗は従来どおり reverted。
+// x402 facilitator の settle もこの経路を通る (route の応答は tests/app/api/facilitator.test.ts)。
+describe('recoverViaForwarder — revert 後の authorization 再確認 (A-01)', () => {
+  const RELAY_TX = `0x${'ef'.repeat(32)}` as Hex;
+
+  // 1 回目 (送信前の既使用チェック) は未使用、2 回目 (revert 後の再確認) は second の結果。
+  function revertedDeps(second: () => Promise<boolean>) {
+    const checkAuthorizationUsed = vi
+      .fn<(c: number, token: Address, from: Address, nonce: Hex) => Promise<boolean>>()
+      .mockResolvedValueOnce(false)
+      .mockImplementationOnce(second);
+    const deps = makeDeps({
+      checkAuthorizationUsed,
+      claimIdempotency: vi.fn(async () => ({ status: 'first' as const })),
+      releaseIdempotency: vi.fn(async () => {}),
+      recordRelayHash: vi.fn(async () => {}),
+      checkGasBudget: vi.fn(async () => gasBudget(true, true)),
+      refundGasBudget: vi.fn(async () => {}),
+      pollTask: vi.fn(async () => ({ state: 'reverted' as const, txHash: RELAY_TX })),
+    });
+    return { deps, checkAuthorizationUsed };
+  }
+
+  it('revert + 別の tx で使用済み → pending (txHash なし)・claim と予算はそのまま', async () => {
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+    const { deps, checkAuthorizationUsed } = revertedDeps(async () => true);
+    const input = await makeInput();
+    const nonce = buildForwarderNonce(input.params, CHAIN, FORWARDER);
+    const res = await recoverViaForwarder(input, deps);
+
+    expect(res).toEqual({ kind: 'pending' });
+    expect(checkAuthorizationUsed).toHaveBeenCalledTimes(2);
+    // 再確認は poll (revert の確定) の後に、送信前と同じ (chain, token, from, commitment nonce) で読む。
+    expect(checkAuthorizationUsed.mock.calls[1]).toEqual([CHAIN, JPYC, input.params.from, nonce]);
+    expect(checkAuthorizationUsed.mock.invocationCallOrder[1]).toBeGreaterThan(
+      vi.mocked(deps.pollTask).mock.invocationCallOrder[0],
+    );
+    expect(deps.submit).toHaveBeenCalledOnce();
+    // broadcast 済みの結果なので claim の解放・予算の返却はしない (従来の reverted と同じ)。
+    expect(deps.releaseIdempotency).not.toHaveBeenCalled();
+    expect(deps.refundGasBudget).not.toHaveBeenCalled();
+    expect(deps.recordRelayHash).toHaveBeenCalledWith(CHAIN, input.params.from, nonce, RELAY_TX);
+    // 運営が追えるよう revert した relay の tx を warn に残す (応答には付けない)。
+    expect(warn).toHaveBeenCalledWith('relay.forwarder.reverted_authorization_used', {
+      chainId: CHAIN,
+      txHash: RELAY_TX,
+    });
+    warn.mockRestore();
+  });
+
+  it('revert + 未使用 → 従来どおり reverted (txHash つき)', async () => {
+    const { deps, checkAuthorizationUsed } = revertedDeps(async () => false);
+    const res = await recoverViaForwarder(await makeInput(), deps);
+
+    expect(res).toEqual({ kind: 'reverted', txHash: RELAY_TX });
+    expect(checkAuthorizationUsed).toHaveBeenCalledTimes(2);
+    expect(deps.releaseIdempotency).not.toHaveBeenCalled();
+    expect(deps.refundGasBudget).not.toHaveBeenCalled();
+  });
+
+  it('revert + 再確認の読み取り失敗 → 従来どおり reverted・障害は warn に残す', async () => {
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+    const rpcError = new Error('rpc down');
+    const { deps, checkAuthorizationUsed } = revertedDeps(async () => {
+      throw rpcError;
+    });
+    const res = await recoverViaForwarder(await makeInput(), deps);
+
+    expect(res).toEqual({ kind: 'reverted', txHash: RELAY_TX });
+    expect(checkAuthorizationUsed).toHaveBeenCalledTimes(2);
+    expect(deps.releaseIdempotency).not.toHaveBeenCalled();
+    expect(deps.refundGasBudget).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith('relay.forwarder.revert_recheck_unavailable', {
+      chainId: CHAIN,
+      txHash: RELAY_TX,
+      error: rpcError,
+    });
+    warn.mockRestore();
+  });
+
+  it.each([
+    ['success', { state: 'success' as const, txHash: RELAY_TX }],
+    ['pending', { state: 'pending' as const, txHash: RELAY_TX }],
+    ['error', { state: 'error' as const, detail: 'rpc_unavailable' }],
+  ])('poll が %s のときは再確認しない (送信前の 1 回だけ)', async (_label, outcome) => {
+    const checkAuthorizationUsed = vi.fn(async () => false);
+    const deps = makeDeps({ checkAuthorizationUsed, pollTask: vi.fn(async () => outcome) });
+    await recoverViaForwarder(await makeInput(), deps);
+    expect(checkAuthorizationUsed).toHaveBeenCalledOnce();
   });
 });
