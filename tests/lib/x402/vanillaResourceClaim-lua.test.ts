@@ -6,6 +6,7 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vites
 import { closeRedisLuaEngine, createFakeRedisStore, fakeUpstashFetch, type FakeRedisStore } from '@/tests/_helpers/redisLua';
 import {
   claimVanillaResource,
+  markVanillaResourceSpent,
   releaseVanillaResource,
   vanillaPaymentIdentity,
   VANILLA_CLAIM_TTL_SEC,
@@ -79,5 +80,35 @@ describe('RELEASE_VANILLA_CLAIM (real Lua)', () => {
       expect(await releaseVanillaResource({ identity: id, binding: A })).toEqual({ kind: 'not-owner' });
       expect(store.strings.get(id.key)).toBe(raw);
     }
+  });
+});
+
+// 第 8 回レビュー B-1: settle に進む前の印 (MARK_VANILLA_CLAIM_SPENT) を本物の Lua で。自分の束縛にだけ spent を足し、
+// TTL は変えない。印の付いた束縛への再送は claim が match + spent を返す (vanillaGate が content を動かさない根拠)。
+describe('markVanillaResourceSpent (本物の Lua)', () => {
+  it('自分の束縛に spent を足し、TTL はそのまま・再送の claim は match + spent', async () => {
+    const id = identity();
+    expect(await claimVanillaResource({ identity: id, binding: A, ttlSec: 604_900 })).toEqual({ kind: 'claimed' });
+    const ttlBefore = store.getPttl(id.key);
+    expect(await markVanillaResourceSpent({ identity: id, binding: A })).toEqual({ kind: 'marked' });
+    expect(store.getPttl(id.key)).toBe(ttlBefore);
+    expect(await claimVanillaResource({ identity: id, binding: A, ttlSec: 604_900 })).toEqual({ kind: 'match', spent: true });
+  });
+
+  it('印の無い同じ束縛の再送は従来どおり match (spent なし)', async () => {
+    const id = identity();
+    await claimVanillaResource({ identity: id, binding: A });
+    expect(await claimVanillaResource({ identity: id, binding: A })).toEqual({ kind: 'match' });
+  });
+
+  it('別の束縛・別の署名の record には印を付けない (not-owner)・record が無ければ missing', async () => {
+    const id = identity();
+    await claimVanillaResource({ identity: id, binding: A });
+    expect(await markVanillaResourceSpent({ identity: id, binding: B })).toEqual({ kind: 'not-owner' });
+    // 同じ (from, nonce) のキーに別の署名で印を付けようとしても付かない。
+    expect(await markVanillaResourceSpent({ identity: identity('33'), binding: A })).toEqual({ kind: 'not-owner' });
+    expect(await claimVanillaResource({ identity: id, binding: A })).toEqual({ kind: 'match' });
+    await releaseVanillaResource({ identity: id, binding: A });
+    expect(await markVanillaResourceSpent({ identity: id, binding: A })).toEqual({ kind: 'missing' });
   });
 });

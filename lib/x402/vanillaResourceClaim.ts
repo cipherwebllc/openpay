@@ -58,8 +58,15 @@ export type VanillaResourceClaimIdentity = {
 
 export type VanillaResourceClaimResult =
   | { kind: 'claimed' }
-  | { kind: 'match' }
+  /** spent = この束縛で settle に進んだ印 (markVanillaResourceSpent・Arc だけが付ける)。 */
+  | { kind: 'match'; spent?: true }
   | { kind: 'conflict' }
+  | { kind: 'unavailable' };
+
+export type VanillaResourceMarkResult =
+  | { kind: 'marked' }
+  | { kind: 'missing' }
+  | { kind: 'not-owner' }
   | { kind: 'unavailable' };
 
 export type VanillaResourceReleaseResult =
@@ -85,6 +92,26 @@ if decoded.version ~= 1 or decoded.bindingHash ~= ARGV[1] or
   return -1
 end
 redis.call('DEL', KEYS[1])
+return 1
+`;
+
+// 自分の束縛 (version + bindingHash + credential が完全一致) の record にだけ spent を足す。TTL は変えない。
+const MARK_VANILLA_CLAIM_SPENT = `
+local current = redis.call('GET', KEYS[1])
+if not current then
+  return 0
+end
+
+local decodedOk, decoded = pcall(cjson.decode, current)
+if not decodedOk or type(decoded) ~= 'table' then
+  return -1
+end
+if decoded.version ~= 1 or decoded.bindingHash ~= ARGV[1] or
+    decoded.credential ~= ARGV[2] then
+  return -1
+end
+decoded.spent = true
+redis.call('SET', KEYS[1], cjson.encode(decoded), 'KEEPTTL')
 return 1
 `;
 
@@ -173,24 +200,25 @@ function serialize(bindingDigest: string, credential: string): string {
   });
 }
 
-function storedMatches(
+// 同じ束縛の record なら中身 (spent の有無を読むため)、違えば null。
+function storedMatch(
   raw: string,
   bindingDigest: string,
   credential: string,
-): boolean {
-  if (Buffer.byteLength(raw, 'utf8') > MAX_RECORD_BYTES) return false;
+): Record<string, unknown> | null {
+  if (Buffer.byteLength(raw, 'utf8') > MAX_RECORD_BYTES) return null;
   let value: unknown;
   try {
     value = JSON.parse(raw) as unknown;
   } catch {
-    return false;
+    return null;
   }
-  return (
-    isRecord(value) &&
+  return isRecord(value) &&
     value.version === RECORD_VERSION &&
     value.bindingHash === bindingDigest &&
     value.credential === credential
-  );
+    ? value
+    : null;
 }
 
 /**
@@ -226,12 +254,47 @@ export async function claimVanillaResource(input: {
       return { kind: 'unavailable' };
     }
     if (result.value === null) return { kind: 'claimed' };
-    return storedMatches(result.value, digest, input.identity.credential)
-      ? { kind: 'match' }
-      : { kind: 'conflict' };
+    const stored = storedMatch(result.value, digest, input.identity.credential);
+    if (!stored) return { kind: 'conflict' };
+    return stored.spent === true ? { kind: 'match', spent: true } : { kind: 'match' };
   } catch (error) {
     // 付帯 claim の KV 障害が、検証済み payment の従来経路を止める波及を断つ (fail-open)。
     logger.warn('x402.vanilla.claim_failed', { error });
+    return { kind: 'unavailable' };
+  }
+}
+
+/**
+ * この束縛で settle に進む印を付ける (第 8 回レビュー B-1・Arc だけが呼ぶ)。Gateway の verify は使用済み nonce を
+ * 落とさないので、印が無いと同じ署名の再送 ('match') が 7 日のあいだ毎回 content (RPC 読み・attestation 署名) を
+ * 動かす。印の付いた束縛への再送は content を呼ばずに 402 にする (lib/x402/vanillaGate.ts)。
+ * 付帯の記録なので失敗しても投げない — 印の KV 障害が、検証済みの支払いの settle を止める波及を断つ。
+ */
+export async function markVanillaResourceSpent(input: {
+  identity: VanillaResourceClaimIdentity;
+  binding: string;
+}): Promise<VanillaResourceMarkResult> {
+  try {
+    const result = await kvEval<unknown>(
+      MARK_VANILLA_CLAIM_SPENT,
+      [input.identity.key],
+      [bindingHash(input.binding), input.identity.credential],
+    );
+    if (!result.ok) {
+      if (result.reason === 'unconfigured') {
+        warnUnconfiguredOnce();
+      } else {
+        logger.warn('x402.vanilla.claim_mark_failed', { reason: result.reason });
+      }
+      return { kind: 'unavailable' };
+    }
+    if (result.value === 1) return { kind: 'marked' };
+    if (result.value === 0) return { kind: 'missing' };
+    if (result.value === -1) return { kind: 'not-owner' };
+    logger.warn('x402.vanilla.claim_mark_result_invalid');
+    return { kind: 'unavailable' };
+  } catch (error) {
+    logger.warn('x402.vanilla.claim_mark_failed', { error });
     return { kind: 'unavailable' };
   }
 }
