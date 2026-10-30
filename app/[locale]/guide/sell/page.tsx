@@ -6,6 +6,7 @@
 // 掟 3: このファイルは default / generateMetadata 以外を export しない。
 
 import type { Metadata } from 'next';
+import Link from 'next/link';
 import { setRequestLocale } from 'next-intl/server';
 import { AppShell } from '@/components/AppShell';
 import { GuideFrame } from '@/components/guide/GuideFrame';
@@ -17,9 +18,9 @@ import { GuideCallout } from '@/components/guide/GuideCallout';
 import { GuideToc } from '@/components/guide/GuideToc';
 import { BulletList, Section, StepList } from '@/components/guide/PosGuidePieces';
 import { CodeBlock } from '@/components/guide/AgentGuidePieces';
-import { guideSellMetadata, sellGuideContentFor } from '@/lib/sellGuide';
+import { SELL_GUIDE_STARTER_KIT_JA, guideSellMetadata, sellGuideContentFor } from '@/lib/sellGuide';
 import { splitTextLinks } from '@/lib/textLinks';
-import { GuideMoreLink, GuideTxLink } from '@/components/guide/GuideLink';
+import { GUIDE_INLINE_LINK, GuideMoreLink, GuideTxLink } from '@/components/guide/GuideLink';
 
 export async function generateMetadata({
   params,
@@ -222,10 +223,25 @@ export default async function GuideSellPage({
           <GuideCallout kind="info" className="mt-3">{c.pricingGuard}</GuideCallout>
         </Section>
 
-        {/* 実売の証拠は手順の後 (手順を知りたい人が先に読む)。 */}
+        {/* 実売の事例は手順の後 (手順を知りたい人が先に読む)。先に外部の買い手による購入 (全件は /transparency)、
+            次に手順の実例 (Coo-ICP・運営者の動作確認) — Coo-ICP そのものは実売ではないので分けて書く。 */}
         <Section title={c.proofTitle}>
           <div className="mt-4 rounded-2xl bg-white p-5 shadow-card ring-1 ring-emerald-200/70">
-            <p className="text-sm leading-relaxed text-slate-700">
+            <h3 className="text-sm font-bold text-slate-900">{c.proofExternalTitle}</h3>
+            <p className="mt-2 text-sm leading-relaxed text-slate-700">{c.proofExternal}</p>
+            <p className="mt-3 text-sm leading-relaxed text-slate-700">
+              <Link
+                href={`/${locale}${c.proofExternalLink.href}`}
+                prefetch={false}
+                className="font-medium text-emerald-700 underline decoration-emerald-300 underline-offset-2 hover:text-emerald-900"
+              >
+                {c.proofExternalLink.label}
+              </Link>
+            </p>
+          </div>
+          <div className="mt-4 rounded-2xl bg-white p-5 shadow-card ring-1 ring-emerald-200/70">
+            <h3 className="text-sm font-bold text-slate-900">{c.proofExampleLabel}</h3>
+            <p className="mt-2 text-sm leading-relaxed text-slate-700">
               {c.proofIntro}
             </p>
             <p className="mt-3 text-sm leading-relaxed text-slate-700">
@@ -251,6 +267,21 @@ export default async function GuideSellPage({
         <GuideCta
           title={c.ctaTitle}
           action={{ href: `/${locale}${c.ctaButtonHref}`, label: c.ctaButton }}
+          footer={
+            locale === 'ja' ? (
+              <p>
+                {SELL_GUIDE_STARTER_KIT_JA.lead}{' '}
+                <a
+                  href={SELL_GUIDE_STARTER_KIT_JA.link.href}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                  className={GUIDE_INLINE_LINK}
+                >
+                  {SELL_GUIDE_STARTER_KIT_JA.link.label}
+                </a>
+              </p>
+            ) : undefined
+          }
         >
           <p>{c.ctaBody}</p>
         </GuideCta>
