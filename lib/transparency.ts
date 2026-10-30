@@ -221,7 +221,7 @@ const ja: TransparencyContent = {
 
   listingsTitle: '7. 掲載の審査・通報・隔離（AI ストア）',
   listings: [
-    '登録時に掲載 URL を検査し、未払いのリクエストへ実在する HTTP 402 支払いゲートが返ることを確認します。誰にでも 200 を返す URL と、OpenPay JPYC 方式でない支払い条件は掲載を拒否します。',
+    '新しい掲載は、未払いのリクエストに OpenPay 方式の HTTP 402 が返ることを自動の検査で確かめてからカタログに載ります。確かめるのは登録時です。登録時に判定できなかったとき（404・タイムアウト・5xx など）は、毎時の自動の確認が最初に確かめたときに載ります。誰にでも 200 を返す URL、OpenPay JPYC 方式でない支払い条件、JPYC の受取先・チェーンなどが登録内容と違う 402 は登録を拒否します。この検査は、出品者がその URL を管理していることを証明するものではありません。',
     ...jaSellGuide.quality,
   ],
 
@@ -326,7 +326,7 @@ const en: TransparencyContent = {
 
   listingsTitle: '7. Listing review, reports, and quarantine (AI Store)',
   listings: [
-    'At registration, OpenPay probes the listed URL and confirms that an unpaid request receives a real HTTP 402 payment gate. URLs that return 200 to anyone and payment requirements that do not use the OpenPay JPYC method are rejected.',
+    'A new listing appears in the catalog only after an automatic check has seen an unpaid request receive an OpenPay-method HTTP 402: at registration, or, when the registration check is inconclusive (404, timeout, 5xx and similar), at the first hourly re-check that sees it. Registration is refused for URLs that return 200 to anyone, for payment requirements that do not use the OpenPay JPYC method, and for a 402 whose JPYC recipient, network or similar details do not match the registration. These checks do not prove that the seller controls the URL.',
     ...enSellGuide.quality,
   ],
 

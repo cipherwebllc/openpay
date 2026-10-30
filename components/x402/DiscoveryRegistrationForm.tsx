@@ -36,7 +36,7 @@ export function DiscoveryRegistrationForm({
   const locale = useLocale();
   const {
     form, setForm, editId, created, notice, usdcReminder,
-    error, errorSnippet, attested, setAttested, ownedQuery, owned, onCancelEdit, submitMutation,
+    error, errorSnippet, errorMismatch, attested, setAttested, ownedQuery, owned, onCancelEdit, submitMutation,
   } = owner;
   const { copiedKey, copyText } = display;
   const atResourceLimit = owned.length >= maxResourcesPerMerchant;
@@ -46,13 +46,16 @@ export function DiscoveryRegistrationForm({
     'w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/15';
 
   // エラー key → 親切な文言。resource_not_gated は 402 自体が返らない URL、gate_not_openpay は
-  // 402 は返るが OpenPay JPYC 方式でない URL、と原因と直し方を分ける。
+  // 402 は返るが OpenPay JPYC 方式でない URL、gate_accept_mismatch は OpenPay 方式の 402 だが JPYC の
+  // 受取先などが登録と違う URL、と原因と直し方を分ける。
   const errorMsg =
     error === 'resource_not_gated'
       ? t('errorNotGated')
       : error === 'gate_not_openpay' && errorSnippet
         ? t('errorGateNotOpenPay')
-        : error === 'attestation_required'
+        : error === 'gate_accept_mismatch'
+          ? t('errorGateAcceptMismatch', { field: errorMismatch })
+          : error === 'attestation_required'
           ? t('errorAttestationRequired')
           : error === 'too_many_resources'
             ? t('errorTooManyResources', { limit: maxResourcesPerMerchant })
@@ -424,7 +427,7 @@ export function DiscoveryRegistrationForm({
         <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
           <p className="flex items-center gap-1.5 text-sm font-semibold text-emerald-800">
             <CheckCircle2 className="h-4 w-4" aria-hidden />
-            {t('created')}
+            {created.resource.pendingFirstVerification === true ? t('createdPending') : t('created')}
           </p>
           {usdcReminder && (
             <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-900">
