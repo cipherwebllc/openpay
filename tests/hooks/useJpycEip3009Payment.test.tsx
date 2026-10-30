@@ -713,6 +713,188 @@ describe('useJpycEip3009Payment — relay POST 応答分類 (D1)', () => {
     },
   );
 
+  // full-review 2026-10-30 F-6 (PR-07): txHash は 0x + 64 桁の hex のときだけ成功・revert・pending の
+  // 結果にする。形の崩れた txHash は応答不明 (曖昧 latch) に落ち、nonce の status 照会で確定した hash だけを返す。
+  // (どれも空でない文字列なので、旧 isTxHash は通していた。)
+  const MALFORMED_TX_HASHES = [
+    ['非 hex', `0x${'g'.repeat(64)}`],
+    ['63 桁', `0x${'a'.repeat(63)}`],
+    ['0x なし', 'a'.repeat(64)],
+  ] as const;
+  const RELAY_ENVELOPES = [
+    ['200 {ok:true}', 200, (txHash: string) => ({ ok: true, txHash })],
+    ['200 {reverted:true}', 200, (txHash: string) => ({ ok: false, reverted: true, txHash })],
+    ['202 {pending:true}', 202, (txHash: string) => ({ ok: false, pending: true, txHash })],
+  ] as const;
+
+  it.each(
+    RELAY_ENVELOPES.flatMap(([envelope, status, body]) =>
+      MALFORMED_TX_HASHES.map(([label, badHash]) => [envelope, label, status, body, badHash] as const),
+    ),
+  )(
+    '%s の txHash が %s → 結果にせず曖昧 latch → status 照会で確定した hash だけを返す',
+    async (_envelope, _label, status, body, badHash) => {
+      vi.useFakeTimers();
+      await import('@/lib/relay/relayIntentRecovery');
+      const settledHash = `0x${'d'.repeat(64)}` as Hex;
+      fetchSpy
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify(body(badHash)), {
+            status,
+            headers: { 'content-type': 'application/json' },
+          }),
+        )
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ ok: true, state: 'settled', txHash: settledHash })),
+        );
+      const result = await submit();
+
+      // 待つ条件は「曖昧 latch に入った」か「結果が出た」のどちらか。形の崩れた hash を結果にしてしまう
+      // 実装でも待ちは抜け、下の assertion で落ちる (待ちの timeout で act を残して後続の test を巻き込まない)。
+      await advanceUntil(0, () =>
+        expect(result.current.recoveryState === 'auto' || result.current.data !== undefined).toBe(true),
+      );
+      expect(result.current.data).toBeUndefined();
+      expect(result.current.recoveryState).toBe('auto');
+      expect(window.sessionStorage.getItem(RELAY_INTENT_STORAGE_KEY)).not.toBeNull();
+
+      await advanceUntil(3_000, () =>
+        expect(result.current.data).toEqual({ txHash: settledHash, success: true }),
+      );
+      expect(fetchSpy.mock.calls[1][0]).toBe('/api/relay/jpyc/status');
+      expect(waitForTransactionReceipt).toHaveBeenCalledWith(
+        expect.objectContaining({ hash: settledHash }),
+      );
+      expect(waitForTransactionReceipt).not.toHaveBeenCalledWith(
+        expect.objectContaining({ hash: badHash }),
+      );
+      expect(signTypedData).toHaveBeenCalledOnce();
+      expect(window.sessionStorage.getItem(RELAY_INTENT_STORAGE_KEY)).toBeNull();
+      vi.useRealTimers();
+    },
+  );
+
+  it('大文字を含む 0x + 64 桁の hex は従来どおり成功 (status 照会なし)', async () => {
+    const mixedCase = `0x${'aB'.repeat(32)}`;
+    fetchSpy.mockResolvedValueOnce(
+      new Response(JSON.stringify({ ok: true, txHash: mixedCase }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    const result = await submit();
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.data).toEqual({ txHash: mixedCase, success: true });
+    expect(result.current.recoveryState).toBeNull();
+    expect(fetchSpy).toHaveBeenCalledOnce();
+  });
+
+  // この PR が保証するのは「形の崩れた txHash を結果にせず、曖昧 latch で再署名を止める」まで。本当に revert した
+  // tx は authorization が未使用のまま relay の hash が残るので、status は 'indeterminate' を返し続ける
+  // (app/api/relay/jpyc/status/route.ts)。その場合は revert に確定せず、deadline で exhausted になる (既存の限界)。
+  it('200 {reverted:true} の崩れた txHash で status が indeterminate のまま → deadline で exhausted・再署名しない・intent を残す', async () => {
+    vi.useFakeTimers();
+    await import('@/lib/relay/relayIntentRecovery');
+    fetchSpy
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ ok: false, reverted: true, txHash: `0x${'g'.repeat(64)}` }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+      )
+      .mockImplementation(async () =>
+        new Response(JSON.stringify({ ok: true, state: 'indeterminate' })),
+      );
+    const result = await submit();
+
+    await advanceUntil(0, () =>
+      expect(result.current.recoveryState === 'auto' || result.current.data !== undefined).toBe(true),
+    );
+    expect(result.current.data).toBeUndefined();
+    await act(async () => vi.advanceTimersByTimeAsync(90_001));
+
+    expect(result.current.recoveryState).toBe('exhausted');
+    expect(isRelayResponseUnknownError(result.current.error)).toBe(true);
+    expect(result.current.data).toBeUndefined();
+    expect(signTypedData).toHaveBeenCalledOnce();
+    expect(fetchSpy.mock.calls.length).toBeGreaterThan(1);
+    expect(
+      fetchSpy.mock.calls.slice(1).every(([url]) => url === '/api/relay/jpyc/status'),
+    ).toBe(true);
+    expect(waitForTransactionReceipt).not.toHaveBeenCalled();
+    expect(window.sessionStorage.getItem(RELAY_INTENT_STORAGE_KEY)).not.toBeNull();
+    vi.useRealTimers();
+  });
+
+  // 429 (IP 制限) は broadcast 前の拒否なので intent を復旧 slot から外す。その後の retry は broadcast しうるので、
+  // POST の前に intent を保存し直す。保存し直さないと、retry の応答が不明 (崩れた txHash を含む) のまま reload した
+  // ときに memory の latch が消え、新しい署名 (新 nonce) で二重払いになる。
+  it('429 のあとの retry が崩れた txHash を返しても intent を保存し直し、reload 後は再署名せず status を照会する', async () => {
+    fetchSpy
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: false, error: 'ip_rate_limited' }), {
+          status: 429,
+          headers: { 'content-type': 'application/json', 'retry-after': '1' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: true, txHash: `0x${'g'.repeat(64)}` }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      );
+    mount();
+    const first = renderHook(() => useJpycEip3009Payment(jpycDep), {
+      wrapper: makeWrapper(),
+    });
+    await flushStorageLoad();
+    first.result.current.mutate({ merchant: MERCHANT, value: 300n * 10n ** 18n });
+    await waitFor(() =>
+      expect(isRelayIpRateLimitedError(first.result.current.error)).toBe(true),
+    );
+    expect(window.sessionStorage.getItem(RELAY_INTENT_STORAGE_KEY)).toBeNull();
+
+    await act(async () => {
+      first.result.current.retryRelay();
+    });
+    await waitFor(() =>
+      expect(isRelayResponseUnknownError(first.result.current.error)).toBe(true),
+    );
+    expect(first.result.current.data).toBeUndefined();
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    const relayNonce = JSON.parse(
+      (fetchSpy.mock.calls[1][1] as RequestInit).body as string,
+    ).nonce;
+    const saved = window.sessionStorage.getItem(RELAY_INTENT_STORAGE_KEY);
+    expect(saved).not.toBeNull();
+    expect(JSON.parse(saved!).nonce).toBe(relayNonce);
+    first.unmount();
+
+    // reload 相当: memory の latch を失った新しい mount。
+    vi.useFakeTimers();
+    fetchSpy.mockImplementation(async () =>
+      new Response(JSON.stringify({ ok: true, state: 'indeterminate' })),
+    );
+    const second = renderHook(() => useJpycEip3009Payment(jpycDep), {
+      wrapper: makeWrapper(),
+    });
+    await advanceUntil(0, () => expect(second.result.current.recoveryState).toBe('auto'));
+    expect(second.result.current.hasStoredIntent).toBe(true);
+    await advanceUntil(3_000, () => expect(fetchSpy.mock.calls.length).toBeGreaterThanOrEqual(3));
+    act(() => {
+      second.result.current.mutate({ merchant: MERCHANT, value: 300n * 10n ** 18n });
+    });
+    await act(async () => vi.advanceTimersByTimeAsync(0));
+
+    expect(signTypedData).toHaveBeenCalledOnce();
+    const afterReload = fetchSpy.mock.calls.slice(2);
+    expect(afterReload.every(([url]) => url === '/api/relay/jpyc/status')).toBe(true);
+    expect(JSON.parse((afterReload[0][1] as RequestInit).body as string).nonce).toBe(relayNonce);
+    expect(window.sessionStorage.getItem(RELAY_INTENT_STORAGE_KEY)).not.toBeNull();
+    vi.useRealTimers();
+  });
+
   // B-R5: server の free 経路も broadcast 前 read の RPC 障害を recover 経路と同じ
   // JSON 503 preflight_unavailable で返す。client は経路を問わず同一の fallback-safe error に分類し、
   // 曖昧 latch / 自動 status 照会 / intent 保存を残さない (= standard 決済へ切替可能)。

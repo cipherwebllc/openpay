@@ -32,6 +32,25 @@ import { resolveDeployment } from '@/lib/tokens';
 
 const deployment = resolveDeployment('jpyc', 80002)!; // 実 Amoy JPYC deployment
 const FEE = 100n * 10n ** 18n;
+// relay の txHash は 0x + 64 桁の hex。hook はこの形のときだけ成功・revert として受ける。
+const TX_OK = `0x${'a'.repeat(64)}`;
+const TX_REV = `0x${'e'.repeat(64)}`;
+const TX_PEND = `0x${'c'.repeat(64)}`;
+// 形の崩れた txHash (どれも空でない文字列なので、旧 isTxHash は通していた)。
+const MALFORMED_TX_HASHES = [
+  ['非 hex', `0x${'g'.repeat(64)}`],
+  ['63 桁', `0x${'a'.repeat(63)}`],
+  ['0x なし', 'a'.repeat(64)],
+] as const;
+// 202 pending の txHash として受けない値 (旧実装の 202 分岐は txHash の形を見ずに返していた)。
+const INVALID_PENDING_TX_HASHES: ReadonlyArray<readonly [string, unknown]> = [
+  ...MALFORMED_TX_HASHES,
+  ['空文字', ''],
+  ['数値', 123],
+  ['object', { hash: TX_PEND }],
+  ['真偽値', true],
+];
+const USAGE_FEE_INTENT_KEY = 'openpay:usage-fee-intent:v1';
 
 function wrapper({ children }: { children: ReactNode }) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -56,10 +75,10 @@ beforeEach(() => {
 
 describe('useUsageFeePayment (実コード)', () => {
   it('成功: FEE_RECEIVER 宛 transferWithAuthorization を署名し relay → {success, txHash}', async () => {
-    const fetchSpy = mockFetch({ body: { ok: true, txHash: '0xdeadbeef' } });
+    const fetchSpy = mockFetch({ body: { ok: true, txHash: TX_OK } });
     const { result } = renderHook(() => useUsageFeePayment(deployment), { wrapper });
     const r = await result.current.mutateAsync({ value: FEE });
-    expect(r).toEqual({ txHash: '0xdeadbeef', success: true, pending: false });
+    expect(r).toEqual({ txHash: TX_OK, success: true, pending: false });
     expect(h.signTypedData).toHaveBeenCalledTimes(1);
     // relay へ送る payload を検査: to=FEE_RECEIVER・value・signature が乗る。
     const [url, init] = fetchSpy.mock.calls[0];
@@ -73,10 +92,10 @@ describe('useUsageFeePayment (実コード)', () => {
   });
 
   it('202 pending → {pending:true, success:false} (再送禁止)', async () => {
-    mockFetch({ status: 202, body: { pending: true, txHash: '0xpend' } });
+    mockFetch({ status: 202, body: { pending: true, txHash: TX_PEND } });
     const { result } = renderHook(() => useUsageFeePayment(deployment), { wrapper });
     const r = await result.current.mutateAsync({ value: FEE });
-    expect(r).toEqual({ txHash: '0xpend', success: false, pending: true });
+    expect(r).toEqual({ txHash: TX_PEND, success: false, pending: true });
   });
 
   it('relay エラー (402 fee_required) → throw (error code を伝播)', async () => {
@@ -113,7 +132,7 @@ describe('useUsageFeePayment (実コード)', () => {
         .spyOn(globalThis, 'fetch')
         .mockRejectedValueOnce(new Error('Failed to fetch'))
         .mockResolvedValueOnce(
-          new Response(JSON.stringify({ ok: true, txHash: '0xdead' }), { status: 200 }),
+          new Response(JSON.stringify({ ok: true, txHash: TX_OK }), { status: 200 }),
         );
       const { result } = renderHook(() => useUsageFeePayment(deployment), { wrapper });
       await expect(result.current.mutateAsync({ value: FEE })).rejects.toMatchObject({
@@ -122,7 +141,7 @@ describe('useUsageFeePayment (実コード)', () => {
       expect(h.signTypedData).toHaveBeenCalledTimes(1);
 
       const r = await result.current.mutateAsync({ value: FEE });
-      expect(r).toEqual({ txHash: '0xdead', success: true, pending: false });
+      expect(r).toEqual({ txHash: TX_OK, success: true, pending: false });
       // 再署名していない = 新しい nonce を作っていない (server 冪等キーが変わらない)。
       expect(h.signTypedData).toHaveBeenCalledTimes(1);
       expect(fetchSpy).toHaveBeenCalledTimes(2);
@@ -140,7 +159,7 @@ describe('useUsageFeePayment (実コード)', () => {
           }),
         )
         .mockResolvedValueOnce(
-          new Response(JSON.stringify({ ok: true, txHash: '0xok' }), { status: 200 }),
+          new Response(JSON.stringify({ ok: true, txHash: TX_OK }), { status: 200 }),
         );
       const { result } = renderHook(() => useUsageFeePayment(deployment), { wrapper });
       await expect(result.current.mutateAsync({ value: FEE })).rejects.toThrow('fee_required');
@@ -176,7 +195,7 @@ describe('useUsageFeePayment (実コード)', () => {
           }),
         )
         .mockResolvedValueOnce(
-          new Response(JSON.stringify({ ok: true, txHash: '0xok' }), { status: 200 }),
+          new Response(JSON.stringify({ ok: true, txHash: TX_OK }), { status: 200 }),
         );
       const { result } = renderHook(() => useUsageFeePayment(deployment), { wrapper });
       await expect(result.current.mutateAsync({ value: FEE })).rejects.toMatchObject({
@@ -198,16 +217,16 @@ describe('useUsageFeePayment (実コード)', () => {
       vi.spyOn(globalThis, 'fetch')
         .mockResolvedValueOnce(
           new Response(
-            JSON.stringify({ ok: false, reverted: true, txHash: '0xrev' }),
+            JSON.stringify({ ok: false, reverted: true, txHash: TX_REV }),
             { status: 200 },
           ),
         )
         .mockResolvedValueOnce(
-          new Response(JSON.stringify({ ok: true, txHash: '0xok' }), { status: 200 }),
+          new Response(JSON.stringify({ ok: true, txHash: TX_OK }), { status: 200 }),
         );
       const { result } = renderHook(() => useUsageFeePayment(deployment), { wrapper });
       const reverted = await result.current.mutateAsync({ value: FEE });
-      expect(reverted).toEqual({ txHash: '0xrev', success: false, pending: false });
+      expect(reverted).toEqual({ txHash: TX_REV, success: false, pending: false });
       // revert = on-chain 終端 (送金未成立) なので latch を残さない。
       expect(window.sessionStorage.getItem('openpay:usage-fee-intent:v1')).toBeNull();
 
@@ -294,7 +313,7 @@ describe('useUsageFeePayment (実コード)', () => {
         .spyOn(globalThis, 'fetch')
         .mockRejectedValueOnce(new Error('Failed to fetch'))
         .mockResolvedValueOnce(
-          new Response(JSON.stringify({ ok: true, txHash: '0xok' }), { status: 200 }),
+          new Response(JSON.stringify({ ok: true, txHash: TX_OK }), { status: 200 }),
         );
       const first = renderHook(() => useUsageFeePayment(deployment), { wrapper });
       await expect(first.result.current.mutateAsync({ value: FEE })).rejects.toMatchObject(
@@ -319,6 +338,146 @@ describe('useUsageFeePayment (実コード)', () => {
       expect(JSON.parse(bodies[1]).signature).toBe(JSON.parse(bodies[0]).signature);
       // 確定応答で保存も破棄する。
       expect(window.sessionStorage.getItem('openpay:usage-fee-intent:v1')).toBeNull();
+    });
+  });
+
+  // full-review 2026-10-30 F-6 (PR-07): txHash は 0x + 64 桁の hex のときだけ確定応答として受ける。
+  // 形の崩れた txHash は成功にも revert (latch 解除・再署名の許可) にもせず、応答不明 (曖昧 latch) に落とす。
+  describe('txHash の形 (0x + 64 桁の hex だけを確定応答にする)', () => {
+    it.each(MALFORMED_TX_HASHES)(
+      '200 {ok:true} の txHash が %s → 成功にせず応答不明・latch を残して同一 nonce を再 POST',
+      async (_label, badHash) => {
+        const fetchSpy = vi
+          .spyOn(globalThis, 'fetch')
+          .mockResolvedValueOnce(
+            new Response(JSON.stringify({ ok: true, txHash: badHash }), { status: 200 }),
+          )
+          .mockResolvedValueOnce(
+            new Response(JSON.stringify({ ok: true, txHash: TX_OK }), { status: 200 }),
+          );
+        const { result } = renderHook(() => useUsageFeePayment(deployment), { wrapper });
+        await expect(result.current.mutateAsync({ value: FEE })).rejects.toMatchObject({
+          name: 'RelayResponseUnknownError',
+        });
+        expect(window.sessionStorage.getItem('openpay:usage-fee-intent:v1')).not.toBeNull();
+
+        const r = await result.current.mutateAsync({ value: FEE });
+        expect(r).toEqual({ txHash: TX_OK, success: true, pending: false });
+        expect(h.signTypedData).toHaveBeenCalledTimes(1);
+        const bodies = fetchSpy.mock.calls.map((c) => (c[1] as RequestInit).body as string);
+        expect(bodies[1]).toBe(bodies[0]);
+      },
+    );
+
+    it.each(MALFORMED_TX_HASHES)(
+      '200 {ok:false,reverted:true} の txHash が %s → 確定失敗にせず応答不明・再署名を許さない',
+      async (_label, badHash) => {
+        const fetchSpy = vi
+          .spyOn(globalThis, 'fetch')
+          .mockResolvedValueOnce(
+            new Response(
+              JSON.stringify({ ok: false, reverted: true, txHash: badHash }),
+              { status: 200 },
+            ),
+          )
+          .mockResolvedValueOnce(
+            new Response(JSON.stringify({ ok: true, txHash: TX_OK }), { status: 200 }),
+          );
+        const { result } = renderHook(() => useUsageFeePayment(deployment), { wrapper });
+        await expect(result.current.mutateAsync({ value: FEE })).rejects.toMatchObject({
+          name: 'RelayResponseUnknownError',
+        });
+        expect(window.sessionStorage.getItem('openpay:usage-fee-intent:v1')).not.toBeNull();
+
+        const r = await result.current.mutateAsync({ value: FEE });
+        expect(r).toEqual({ txHash: TX_OK, success: true, pending: false });
+        expect(h.signTypedData).toHaveBeenCalledTimes(1);
+        const bodies = fetchSpy.mock.calls.map((c) => (c[1] as RequestInit).body as string);
+        expect(bodies[1]).toBe(bodies[0]);
+      },
+    );
+
+    it('大文字を含む 0x + 64 桁の hex は従来どおり成功', async () => {
+      const mixedCase = `0x${'aB'.repeat(32)}`;
+      mockFetch({ body: { ok: true, txHash: mixedCase } });
+      const { result } = renderHook(() => useUsageFeePayment(deployment), { wrapper });
+      const r = await result.current.mutateAsync({ value: FEE });
+      expect(r).toEqual({ txHash: mixedCase, success: true, pending: false });
+      expect(window.sessionStorage.getItem('openpay:usage-fee-intent:v1')).toBeNull();
+    });
+
+    // 202 pending も useJpycEip3009Payment と同じく txHash が無し・null・64 桁 hex のときだけ pending の結果にする。
+    it.each([
+      ['txHash: null', { ok: false, pending: true, txHash: null }],
+      ['txHash なし', { ok: false, pending: true }],
+    ])('202 pending の %s → 従来どおり pending (txHash は null)・latch を残す', async (_label, body) => {
+      mockFetch({ status: 202, body });
+      const { result } = renderHook(() => useUsageFeePayment(deployment), { wrapper });
+      const r = await result.current.mutateAsync({ value: FEE });
+      expect(r).toEqual({ txHash: null, success: false, pending: true });
+      expect(window.sessionStorage.getItem(USAGE_FEE_INTENT_KEY)).not.toBeNull();
+    });
+
+    it.each(INVALID_PENDING_TX_HASHES)(
+      '202 pending の txHash が %s → pending の結果にせず応答不明・同一 nonce を再 POST',
+      async (_label, badHash) => {
+        const fetchSpy = vi
+          .spyOn(globalThis, 'fetch')
+          .mockResolvedValueOnce(
+            new Response(
+              JSON.stringify({ ok: false, pending: true, txHash: badHash }),
+              { status: 202 },
+            ),
+          )
+          .mockResolvedValueOnce(
+            new Response(JSON.stringify({ ok: false, pending: true, txHash: TX_PEND }), {
+              status: 202,
+            }),
+          );
+        const { result } = renderHook(() => useUsageFeePayment(deployment), { wrapper });
+        await expect(result.current.mutateAsync({ value: FEE })).rejects.toMatchObject({
+          name: 'RelayResponseUnknownError',
+        });
+        expect(window.sessionStorage.getItem(USAGE_FEE_INTENT_KEY)).not.toBeNull();
+
+        const r = await result.current.mutateAsync({ value: FEE });
+        expect(r).toEqual({ txHash: TX_PEND, success: false, pending: true });
+        expect(h.signTypedData).toHaveBeenCalledTimes(1);
+        const bodies = fetchSpy.mock.calls.map((c) => (c[1] as RequestInit).body as string);
+        expect(bodies[1]).toBe(bodies[0]);
+      },
+    );
+
+    // この PR が保証するのは「形の崩れた txHash で latch を外さない・再署名しない」まで。broadcast 済みの
+    // 利用料の再 POST は、server が authorization 使用済みを見て hash なしの 202 pending を返す
+    // (lib/relay/jpycRelay.ts の 5.5)。この hook には status / receipt の照会が無いので pending のまま残る (既存の限界)。
+    it('200 {ok:true} の崩れた txHash → 応答不明 → 再 POST は hash なしの 202 pending → pending のまま再署名しない', async () => {
+      const fetchSpy = vi
+        .spyOn(globalThis, 'fetch')
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ ok: true, txHash: MALFORMED_TX_HASHES[0][1] }), {
+            status: 200,
+          }),
+        )
+        .mockImplementation(async () =>
+          new Response(JSON.stringify({ ok: false, pending: true, txHash: null }), {
+            status: 202,
+          }),
+        );
+      const { result } = renderHook(() => useUsageFeePayment(deployment), { wrapper });
+      await expect(result.current.mutateAsync({ value: FEE })).rejects.toMatchObject({
+        name: 'RelayResponseUnknownError',
+      });
+
+      const second = await result.current.mutateAsync({ value: FEE });
+      expect(second).toEqual({ txHash: null, success: false, pending: true });
+      const third = await result.current.mutateAsync({ value: FEE });
+      expect(third).toEqual({ txHash: null, success: false, pending: true });
+      expect(window.sessionStorage.getItem(USAGE_FEE_INTENT_KEY)).not.toBeNull();
+      expect(h.signTypedData).toHaveBeenCalledTimes(1);
+      const bodies = fetchSpy.mock.calls.map((c) => (c[1] as RequestInit).body as string);
+      expect(bodies).toHaveLength(3);
+      expect(new Set(bodies).size).toBe(1);
     });
   });
 
