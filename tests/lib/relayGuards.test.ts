@@ -194,7 +194,7 @@ describe('relayGuards rate-limit (共有キー relay:rl:)', () => {
 });
 
 describe('relayGuards checkReadRateLimit (固定窓・read poll 用)', () => {
-  it('窓内 max 回までは許可・超過で deny。TTL=窓×2 は毎回 INCR と同じ原子操作で渡す・キーは rl:read: 名前空間', async () => {
+  it('窓内 max 回までは許可・超過で deny。TTL=窓×2 は毎回 INCR と同じ pipeline (1 往復) で渡す・キーは rl:read: 名前空間', async () => {
     const KEY = 'orderstatus:1.2.3';
     for (let i = 0; i < 5; i++) {
       expect(await checkReadRateLimit(KEY, 5, 60)).toBe(true);
