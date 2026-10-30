@@ -118,6 +118,29 @@ function countingStream(
   return { stream, stats };
 }
 
+// custom transport の body の再現: getReader() と cancel() を持つが WHATWG stream ではなく、
+// cancel() が promise を返さない (undefined)。`.catch` を直接つなぐと TypeError になる形。
+function duckBody(totalBytes: number, chunkBytes: number) {
+  const chunk = new Uint8Array(chunkBytes).fill(0x78);
+  const stats = { pulled: 0, cancelled: false };
+  const cancel = () => {
+    stats.cancelled = true;
+    return undefined;
+  };
+  const body = {
+    getReader: () => ({
+      read: async () => {
+        if (stats.pulled >= totalBytes) return { done: true, value: undefined };
+        stats.pulled += chunkBytes;
+        return { done: false, value: chunk };
+      },
+      cancel,
+    }),
+    cancel,
+  };
+  return { body, stats };
+}
+
 // pay() / quote() が戻らないとき (cancel を await して止まる) に test を落とす。
 function withinMs<T>(promise: Promise<T>, ms: number): Promise<T> {
   return Promise.race([
@@ -594,6 +617,76 @@ describe('openpay-x402-sdk bounded response reads (C-2)', () => {
         reasons: ['expected_402_with_accepts'],
       });
     }
+  });
+
+  it('a paid-body cancel that returns a non-promise still returns the structured result with the receipt', async () => {
+    const sdk = await loadSdk();
+    const duck = duckBody(64 * KiB, 4 * KiB);
+    const seen = { nonce: null as Hex | null, receipt: null as unknown };
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === SUPPORTED_URL) {
+        return jsonResponse({ receiptSigner: receiptAccount.address }, 200);
+      }
+      if (!hasPayment(init)) return jsonResponse({ accepts: [accept()] }, 402);
+      const nonce = paymentNonce(sdk, init);
+      seen.nonce = nonce;
+      seen.receipt = await signedPaymentResponse(nonce);
+      return {
+        ok: true,
+        status: 200,
+        headers: new Headers({
+          'x-payment-response': Buffer.from(JSON.stringify(seen.receipt)).toString('base64'),
+        }),
+        body: duck.body,
+      };
+    });
+    const client = sdk.createOpenPayClient({
+      privateKey: PRIVATE_KEY,
+      catalogTrust: false,
+      fetchImpl,
+      lookup,
+      nowSec: () => 1_000_000_000,
+      maxPaidBodyBytes: 8 * KiB,
+    });
+
+    const result = await client.pay(RESOURCE, { maxTotalJpyc: '7' });
+
+    expect(result).toMatchObject({
+      status: 200,
+      body: null,
+      receipt: seen.receipt,
+      settlement: 'verified',
+      error: 'paid_body_too_large',
+      txHash: RECEIPT_TX,
+      authorizationNonce: seen.nonce,
+    });
+    expect(duck.stats.cancelled).toBe(true);
+    expect(duck.stats.pulled).toBeLessThan(64 * KiB);
+    expect(client.session.spentJpyc).toBe('7');
+  });
+
+  it('quote on a non-402 whose body cancel returns a non-promise still returns expected_402_with_accepts', async () => {
+    const sdk = await loadSdk();
+    const duck = duckBody(4 * MiB, 16 * KiB);
+    const client = sdk.createOpenPayClient({
+      catalogTrust: false,
+      fetchImpl: vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        body: duck.body,
+      })),
+      lookup,
+    });
+
+    await expect(client.quote(RESOURCE)).resolves.toEqual({
+      url: RESOURCE,
+      status: 200,
+      ok: false,
+      reasons: ['expected_402_with_accepts'],
+    });
+    expect(duck.stats.cancelled).toBe(true);
+    expect(duck.stats.pulled).toBe(0);
   });
 
   it('rejects a maxPaidBodyBytes that is not a positive integer', async () => {

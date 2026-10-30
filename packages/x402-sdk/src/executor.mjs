@@ -66,10 +66,11 @@ async function readTextCapped(response, maxBytes) {
     total += value.byteLength;
     if (total > maxBytes) {
       // With the default transport, cancel destroys the Node response behind Readable.toWeb and
-      // with it the unfinished connection, so nothing past the cap is buffered. Not awaited and
-      // its failure ignored: after X-PAYMENT a transport whose cancel rejects or never settles
-      // must not turn the paid_body_too_large result (receipt, nonce) into a throw or a hang.
-      reader.cancel().catch(() => {});
+      // with it the unfinished connection, so nothing past the cap is buffered. Not awaited, and
+      // any outcome ignored: after X-PAYMENT a custom transport whose cancel throws, returns a
+      // non-promise, rejects or never settles must not turn the paid_body_too_large result
+      // (receipt, nonce) into a throw or a hang.
+      Promise.resolve().then(() => reader.cancel()).catch(() => {});
       return BODY_TOO_LARGE;
     }
     text += decoder.decode(value, { stream: true });
@@ -78,12 +79,13 @@ async function readTextCapped(response, maxBytes) {
 }
 
 // Only a 402 body is ever used. Any other status already yields expected_402_with_accepts, so its
-// body is dropped unread: its size must not change that result. Not awaited and its failure
-// ignored, so a transport whose cancel rejects or never settles cannot replace or delay the result.
+// body is dropped unread: its size must not change that result. Not awaited, and any outcome
+// ignored, so a custom transport whose cancel throws, returns a non-promise, rejects or never
+// settles cannot replace or delay the result.
 function discardBody(response) {
   const stream = response.body;
   if (typeof stream?.cancel === 'function') {
-    stream.cancel().catch(() => {});
+    Promise.resolve().then(() => stream.cancel()).catch(() => {});
   }
 }
 
