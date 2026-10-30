@@ -93,6 +93,11 @@ export type HandoffStore = {
   ): Promise<{ closed: true } | { closed: false; existing: HandoffAuth } | null>;
   /** 端末が送った tx を記録し、記録されている hash (先に別の hash があればそれ) を返す。KV 障害は null。 */
   putTx(id: string, txHash: Hex, ttlSec: number): Promise<Hex | null>;
+  /**
+   * 署名 (nonce) を 1 つの受け渡しにだけ結び付ける。空いていれば id を置いてその id を、既に結び付いていれば
+   * その受け渡しの id を返す (同じ id なら再送)。KV 障害は null。
+   */
+  bindNonce(key: string, id: string, ttlSec: number): Promise<string | null>;
 };
 
 // 署名の検証 (verifyForwarderSettle) に効く手数料 (1 wei) と有効窓の上限 (180 秒) は lib/storeDevicePayment.ts の定数だけ
@@ -125,6 +130,7 @@ export type HandoffError =
   | 'amount_mismatch'
   | 'slot_taken'
   | 'authorization_used'
+  | 'authorization_bound_elsewhere'
   | 'bad_token'
   | 'invalid_tx'
   | 'handoff_unavailable'
@@ -136,6 +142,10 @@ const KEY_PREFIX = 'storehandoff:v1:';
 export const handoffSessionKey = (id: string) => `${KEY_PREFIX}${id}`;
 export const handoffAuthKey = (id: string) => `${KEY_PREFIX}${id}:auth`;
 export const handoffTxKey = (id: string) => `${KEY_PREFIX}${id}:tx`;
+// 署名 (EIP-3009 の nonce) の結び付け先。オンチェーンで nonce が一意なのは (token, from, nonce) なので、それにチェーンを足す。
+// id は base64url で ':' を含まないので、受け渡しのキーと衝突しない。
+export const handoffNonceKey = (chainId: number, token: Address, from: Address, nonce: Hex) =>
+  `${KEY_PREFIX}nonce:${chainId}:${token.toLowerCase()}:${from.toLowerCase()}:${nonce.toLowerCase()}`;
 
 function fail(status: number, error: HandoffError): HandoffFailure {
   return { ok: false, status, error };
@@ -364,6 +374,18 @@ export async function submitHandoffAuth(
   // 検証 (RPC) の間にセッションが切れていたら預からない (孤立した署名を置いて成功を返さない)。
   const ttl = session.expiresAt - deps.nowSec();
   if (ttl <= 0) return fail(410, 'expired');
+  // 1 つの署名 (nonce) を 1 つの受け渡しにだけ結び付ける (第 8 回レビュー C-1)。署名の枠 (claimAuth) は受け渡しごと
+  // なので、同じ署名を同額の別の受け渡しにも預けると両方の端末が送り、revert した側も解決で「受け取り済み」に
+  // なる (1 回の支払いで 2 会計分の商品が出る)。結び付けの期限は署名の期限まで (それを過ぎた署名はもう送れない)。
+  // 枠を取れなかったとき (締め切り・別の署名) に結び付けだけが残っても署名の期限と同時に消え、正直な端末は会計
+  // ごとに intentSalt を作り直すので、同じ nonce を別の受け渡しへ出し直すことはない。
+  const bound = await deps.store.bindNonce(
+    handoffNonceKey(session.chainId, verified.jpyc, params.from, verified.nonce),
+    id,
+    Math.max(1, Number(validBefore) - deps.nowSec()),
+  );
+  if (bound === null) return fail(503, 'handoff_unavailable');
+  if (bound !== id) return fail(409, 'authorization_bound_elsewhere');
   const claimed = await deps.store.claimAuth(id, auth, ttl);
   if (claimed === null) return fail(503, 'handoff_unavailable');
   // 検証 (RPC) の間にお店の端末が締め切った → 預かっていない。
@@ -395,10 +417,31 @@ export type HandoffDeviceView = HandoffPublicView & {
   auth: Omit<HandoffAuth, 'v' | 'at'> | null;
 };
 
+// 第 8 回レビュー C-1 (Codex #928): 端末に署名を渡す前にも結び付けを確かめる。submit で結び付けた署名はそのまま
+// 通る。結び付けが無い署名 (修正前に預かった・切り替え中の古い版が預かった) はここで結び付け、別の受け渡しに結び
+// 付いていれば渡さない — どちらの端末が先に読んでも、同じ署名を送れるのは 1 台だけになる。
+type AuthOwnership = 'owned' | 'elsewhere' | 'unavailable';
+async function authOwnership(
+  id: string,
+  session: HandoffSession,
+  auth: HandoffAuth,
+  deps: Pick<HandoffDeps, 'store' | 'nowSec' | 'jpycAddressFor'>,
+): Promise<AuthOwnership> {
+  const token = deps.jpycAddressFor(session.chainId);
+  if (!token) return 'unavailable';
+  const bound = await deps.store.bindNonce(
+    handoffNonceKey(session.chainId, token, auth.from, auth.nonce),
+    id,
+    Math.max(1, Number(auth.validBefore) - deps.nowSec()),
+  );
+  if (bound === null) return 'unavailable';
+  return bound === id ? 'owned' : 'elsewhere';
+}
+
 export async function readHandoff(
   id: string,
   token: string | null,
-  deps: Pick<HandoffDeps, 'store' | 'nowSec' | 'mac'>,
+  deps: Pick<HandoffDeps, 'store' | 'nowSec' | 'mac' | 'jpycAddressFor'>,
 ): Promise<HandoffPublicView | HandoffDeviceView | HandoffFailure> {
   if (!isGenuineHandoffId(id, deps.mac)) return fail(404, 'not_found');
   // トークン付きの読み取りは KV に触れる前に照合する。
@@ -414,6 +457,15 @@ export async function readHandoff(
     txHash: snap.txHash,
   };
   if (token === null) return view;
+  if (snap.auth) {
+    const owner = await authOwnership(id, session, snap.auth, deps);
+    // 確かめられないときは渡さない (端末は待機のまま読み直す)。送ってよいか分からない署名を渡すより安全側に倒す。
+    if (owner === 'unavailable') return fail(503, 'handoff_unavailable');
+    // 別の受け渡しの署名: この端末には渡さず、締め切られた受け渡しとして見せる (送らない)。
+    if (owner === 'elsewhere') {
+      return { ...view, state: 'closed', chainId: session.chainId, merchant: session.merchant, amount: session.amount, auth: null };
+    }
+  }
   return {
     ...view,
     chainId: session.chainId,
@@ -475,7 +527,7 @@ export type ClosedHandoff =
 export async function closeHandoff(
   id: string,
   token: string | null,
-  deps: Pick<HandoffDeps, 'store' | 'nowSec' | 'mac'>,
+  deps: Pick<HandoffDeps, 'store' | 'nowSec' | 'mac' | 'jpycAddressFor'>,
 ): Promise<ClosedHandoff | HandoffFailure> {
   if (!isGenuineHandoffId(id, deps.mac)) return fail(404, 'not_found');
   if (!tokenMatches(token, id, deps.mac)) return fail(403, 'bad_token');
@@ -483,12 +535,17 @@ export async function closeHandoff(
   if (snap === null) return fail(503, 'handoff_unavailable');
   const session = snap.session;
   if (!session) return fail(404, 'not_found');
-  if (snap.auth) return { ok: true, closed: false, auth: deviceAuth(snap.auth), txHash: snap.txHash };
+  const handOver = async (auth: HandoffAuth): Promise<ClosedHandoff | HandoffFailure> => {
+    // 読み取りと同じ確かめ (authOwnership)。別の受け渡しの署名は渡さず、締め切ったと返す (この端末は送らない)。
+    const owner = await authOwnership(id, session, auth, deps);
+    if (owner === 'unavailable') return fail(503, 'handoff_unavailable');
+    if (owner === 'elsewhere') return { ok: true, closed: true };
+    return { ok: true, closed: false, auth: deviceAuth(auth), txHash: snap.txHash };
+  };
+  if (snap.auth) return handOver(snap.auth);
   if (snap.closed) return { ok: true, closed: true };
   const ttl = Math.max(1, session.expiresAt - deps.nowSec());
   const r = await deps.store.closeSlot(id, { v: 1, closed: true, at: deps.nowSec() }, ttl);
   if (r === null) return fail(503, 'handoff_unavailable');
-  return r.closed
-    ? { ok: true, closed: true }
-    : { ok: true, closed: false, auth: deviceAuth(r.existing), txHash: snap.txHash };
+  return r.closed ? { ok: true, closed: true } : handOver(r.existing);
 }

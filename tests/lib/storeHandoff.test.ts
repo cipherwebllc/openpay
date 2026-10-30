@@ -16,6 +16,7 @@ import {
 import {
   closeHandoff,
   createHandoffSession,
+  handoffNonceKey,
   handoffTokenFor,
   isGenuineHandoffId,
   newHandoffId,
@@ -41,11 +42,13 @@ const ID = newHandoffId({ mac, randomBytes: fixedBytes })!;
 const TOKEN = handoffTokenFor(ID, mac)!;
 const AMOUNT = 1000n * 10n ** 18n;
 
-function memoryStore(): HandoffStore & { failRead: boolean; data: Map<string, string> } {
+type NonceBind = { key: string; id: string; ttlSec: number };
+function memoryStore(): HandoffStore & { failRead: boolean; data: Map<string, string>; nonceBinds: NonceBind[] } {
   const data = new Map<string, string>();
   const s = {
     data,
     failRead: false,
+    nonceBinds: [] as NonceBind[],
     async putSession(id: string, session: HandoffSession) {
       if (data.has(`s:${id}`)) return false;
       data.set(`s:${id}`, JSON.stringify(session));
@@ -87,6 +90,13 @@ function memoryStore(): HandoffStore & { failRead: boolean; data: Map<string, st
       if (existing) return existing as Hex;
       data.set(`t:${id}`, txHash);
       return txHash;
+    },
+    async bindNonce(key: string, id: string, ttlSec: number) {
+      s.nonceBinds.push({ key, id, ttlSec });
+      const existing = data.get(`n:${key}`);
+      if (existing) return existing;
+      data.set(`n:${key}`, id);
+      return id;
     },
   };
   return s;
@@ -150,6 +160,101 @@ beforeEach(() => {
   store = memoryStore();
   balance = 10_000n * 10n ** 18n;
   used = false;
+});
+
+// 第 8 回レビュー C-1: 署名の枠は受け渡しごとなので、同じ署名を同額の別の受け渡しにも預けられた (両方の端末が
+// 送り、revert した側も解決で「受け取り済み」= 1 回の支払いで 2 会計分)。nonce を 1 つの受け渡しにだけ結び付ける。
+describe('1 つの署名は 1 つの受け渡しにだけ預かる', () => {
+  const otherBytes = (n: number) => Buffer.alloc(n, 9);
+  const ID2 = newHandoffId({ mac, randomBytes: otherBytes })!;
+  async function openSecond() {
+    const r = await createHandoffSession({ chainId: CHAIN, merchant: SHOP, amount: AMOUNT.toString() }, deps({ randomBytes: otherBytes }));
+    if (!r.ok) throw new Error(`setup ${r.error}`);
+    return r;
+  }
+
+  it('同じ署名を同額の別の受け渡しに預けても、2 つ目は 409 authorization_bound_elsewhere で預からない', async () => {
+    await openSession();
+    await openSecond();
+    expect(ID2).not.toBe(ID);
+    const body = await signedBody();
+    expect(await submitHandoffAuth(ID, body, deps())).toMatchObject({ ok: true, idempotent: false });
+    expect(await submitHandoffAuth(ID2, body, deps())).toMatchObject({ ok: false, status: 409, error: 'authorization_bound_elsewhere' });
+    expect(store.data.has(`a:${ID2}`)).toBe(false);
+    // 預けた受け渡しへの再送 (応答を受け取れなかった等) は従来どおり冪等に通る。
+    expect(await submitHandoffAuth(ID, body, deps())).toMatchObject({ ok: true, idempotent: true });
+  });
+
+  it('結び付けのキーは (チェーン・トークン・支払う人・nonce)、期限は署名の期限まで', async () => {
+    await openSession();
+    const body = await signedBody({ validBefore: BigInt(NOW + 120) });
+    const r = await submitHandoffAuth(ID, body, deps());
+    if (!r.ok) throw new Error(`submit ${r.error}`);
+    expect(store.nonceBinds).toEqual([{ key: handoffNonceKey(CHAIN, JPYC, customer.address, r.nonce), id: ID, ttlSec: 120 }]);
+  });
+
+  it('結び付けを KV に置けなければ預からない (503・枠も取らない)', async () => {
+    await openSession();
+    const body = await signedBody();
+    const r = await submitHandoffAuth(ID, body, deps({ store: { ...store, bindNonce: async () => null } }));
+    expect(r).toMatchObject({ ok: false, status: 503, error: 'handoff_unavailable' });
+    expect(store.data.has(`a:${ID}`)).toBe(false);
+  });
+
+  it('キーは小文字に正規化した (チェーン・トークン・支払う人・nonce)', async () => {
+    await openSession();
+    const r = await submitHandoffAuth(ID, await signedBody(), deps());
+    if (!r.ok) throw new Error(`submit ${r.error}`);
+    expect(store.nonceBinds[0].key).toBe(
+      `storehandoff:v1:nonce:${CHAIN}:${JPYC.toLowerCase()}:${customer.address.toLowerCase()}:${r.nonce.toLowerCase()}`,
+    );
+  });
+
+  it('2 つの受け渡しへ同時に送っても、預かるのは片方だけ', async () => {
+    await openSession();
+    await openSecond();
+    const body = await signedBody();
+    const results = await Promise.all([submitHandoffAuth(ID, body, deps()), submitHandoffAuth(ID2, body, deps())]);
+    expect(results.filter((r) => r.ok)).toHaveLength(1);
+    expect(results.filter((r) => !r.ok)).toEqual([expect.objectContaining({ status: 409, error: 'authorization_bound_elsewhere' })]);
+  });
+
+  // Codex #928: 修正前 (または切り替え中の古い版) に結び付け無しで預かった署名が A にあるとき、同じ署名で B を新しく
+  // 受け付けても、端末に渡す時点で結び付けを確かめるので、送れるのは 1 台だけ。
+  describe('結び付けの無い (修正前に預かった) 署名', () => {
+    const TOKEN2 = handoffTokenFor(ID2, mac)!;
+    async function legacyInA() {
+      await openSession();
+      await openSecond();
+      const body = await signedBody();
+      // 結び付けを書かない store で A に預ける (修正前の挙動の再現)。
+      const legacy = { ...store, bindNonce: async (_key: string, id: string) => id };
+      expect(await submitHandoffAuth(ID, body, deps({ store: legacy }))).toMatchObject({ ok: true });
+      expect(store.nonceBinds).toHaveLength(0);
+      return body;
+    }
+
+    it('B が先に結び付けると、端末 A には渡さず締め切り扱い・端末 B だけが受け取る', async () => {
+      const body = await legacyInA();
+      expect(await submitHandoffAuth(ID2, body, deps())).toMatchObject({ ok: true });
+      expect(await readHandoff(ID, TOKEN, deps())).toMatchObject({ ok: true, state: 'closed', auth: null });
+      expect(await readHandoff(ID2, TOKEN2, deps())).toMatchObject({ ok: true, auth: expect.objectContaining({ from: customer.address }) });
+      expect(await closeHandoff(ID, TOKEN, deps())).toEqual({ ok: true, closed: true });
+    });
+
+    it('端末 A が先に読めば A に結び付き、B への同じ署名は 409', async () => {
+      const body = await legacyInA();
+      expect(await readHandoff(ID, TOKEN, deps())).toMatchObject({ ok: true, auth: expect.objectContaining({ from: customer.address }) });
+      expect(await submitHandoffAuth(ID2, body, deps())).toMatchObject({ ok: false, status: 409, error: 'authorization_bound_elsewhere' });
+    });
+
+    it('結び付けを確かめられない (KV 障害) ときは端末に渡さない (503)', async () => {
+      await legacyInA();
+      const down = { ...store, bindNonce: async () => null };
+      expect(await readHandoff(ID, TOKEN, deps({ store: down }))).toMatchObject({ ok: false, status: 503, error: 'handoff_unavailable' });
+      expect(await closeHandoff(ID, TOKEN, deps({ store: down }))).toMatchObject({ ok: false, status: 503, error: 'handoff_unavailable' });
+    });
+  });
 });
 
 describe('受け渡しセッションを作る', () => {
