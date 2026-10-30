@@ -92,7 +92,12 @@ function jsonResponse(body: unknown, status: number) {
 
 // Content-Length の無い有限の stream。pull ごとに出した byte を数え、cancel を記録する。
 // 有限にしてあるので、上限を外した版 (mutation) でも test は止まらずに「全部読んだ」で落ちる。
-function countingStream(totalBytes: number, chunkBytes: number) {
+// onCancel で、cancel が reject する / いつまでも終わらない transport を再現できる。
+function countingStream(
+  totalBytes: number,
+  chunkBytes: number,
+  onCancel?: () => void | Promise<void>,
+) {
   const chunk = new Uint8Array(chunkBytes).fill(0x78); // 'x'
   const stats = { pulled: 0, cancelled: false };
   const stream = new ReadableStream<Uint8Array>({
@@ -107,9 +112,20 @@ function countingStream(totalBytes: number, chunkBytes: number) {
     },
     cancel() {
       stats.cancelled = true;
+      return onCancel?.();
     },
   });
   return { stream, stats };
+}
+
+// pay() / quote() が戻らないとき (cancel を await して止まる) に test を落とす。
+function withinMs<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) => {
+      setTimeout(() => reject(new Error(`did not settle within ${ms}ms`)), ms);
+    }),
+  ]);
 }
 
 function hasPayment(init?: RequestInit) {
@@ -461,6 +477,123 @@ describe('openpay-x402-sdk bounded response reads (C-2)', () => {
     const client = sdk.createOpenPayClient({ catalogTrust: false, fetchImpl, lookup });
 
     await expect(client.quote(RESOURCE)).rejects.toThrow('payment_target_response_too_large');
+  });
+
+  it('a paid-body cancel that rejects still returns the structured result with the receipt', async () => {
+    const sdk = await loadSdk();
+    const { fetchImpl, seen } = paidFlow(sdk, async (nonce) => ({
+      body: countingStream(64 * KiB, 4 * KiB, () => {
+        throw new Error('cancel_failed');
+      }).stream,
+      receipt: await signedPaymentResponse(nonce),
+    }));
+    const client = sdk.createOpenPayClient({
+      privateKey: PRIVATE_KEY,
+      catalogTrust: false,
+      fetchImpl,
+      lookup,
+      nowSec: () => 1_000_000_000,
+      maxPaidBodyBytes: 8 * KiB,
+    });
+
+    const result = await client.pay(RESOURCE, { maxTotalJpyc: '7' });
+
+    expect(result).toMatchObject({
+      status: 200,
+      body: null,
+      receipt: seen.receipt,
+      settlement: 'verified',
+      error: 'paid_body_too_large',
+      txHash: RECEIPT_TX,
+      authorizationNonce: seen.nonce,
+    });
+    expect(client.session.spentJpyc).toBe('7');
+  });
+
+  it('a paid-body cancel that never settles does not hang pay()', async () => {
+    const sdk = await loadSdk();
+    const { fetchImpl, seen } = paidFlow(sdk, async (nonce) => ({
+      body: countingStream(64 * KiB, 4 * KiB, () => new Promise<void>(() => {})).stream,
+      receipt: await signedPaymentResponse(nonce),
+    }));
+    const client = sdk.createOpenPayClient({
+      privateKey: PRIVATE_KEY,
+      catalogTrust: false,
+      fetchImpl,
+      lookup,
+      nowSec: () => 1_000_000_000,
+      maxPaidBodyBytes: 8 * KiB,
+    });
+
+    const result = await withinMs(client.pay(RESOURCE, { maxTotalJpyc: '7' }), 2_000);
+
+    expect(result).toMatchObject({
+      error: 'paid_body_too_large',
+      settlement: 'verified',
+      txHash: RECEIPT_TX,
+      authorizationNonce: seen.nonce,
+    });
+    expect(client.session.spentJpyc).toBe('7');
+  });
+
+  it('a non-402 body over 256 KiB keeps the previous expected_402_with_accepts result and is dropped unread', async () => {
+    const sdk = await loadSdk();
+    const total = 4 * MiB;
+    // 例: 有料でない大きな HTML ページを x402_quote した場合。
+    const quoted = countingStream(total, 16 * KiB);
+    const quoteClient = sdk.createOpenPayClient({
+      catalogTrust: false,
+      fetchImpl: vi.fn(async () => new Response(quoted.stream, { status: 200 })),
+      lookup,
+    });
+    await expect(quoteClient.quote(RESOURCE)).resolves.toEqual({
+      url: RESOURCE,
+      status: 200,
+      ok: false,
+      reasons: ['expected_402_with_accepts'],
+    });
+    expect(quoted.stats.cancelled).toBe(true);
+    expect(quoted.stats.pulled).toBeLessThan(total);
+
+    const paid = countingStream(total, 16 * KiB);
+    const signTypedData = vi.fn((typedData: Parameters<typeof account.signTypedData>[0]) =>
+      account.signTypedData(typedData),
+    );
+    const payClient = sdk.createOpenPayClient({
+      signer: { address: account.address, signTypedData },
+      catalogTrust: false,
+      fetchImpl: vi.fn(async () => new Response(paid.stream, { status: 200 })),
+      lookup,
+    });
+    await expect(payClient.pay(RESOURCE, { maxTotalJpyc: '7' })).resolves.toEqual({
+      url: RESOURCE,
+      status: 200,
+      ok: false,
+      reasons: ['expected_402_with_accepts'],
+    });
+    expect(paid.stats.cancelled).toBe(true);
+    expect(signTypedData).not.toHaveBeenCalled();
+  });
+
+  it('dropping a non-402 body does not wait on a cancel that rejects or never settles', async () => {
+    const sdk = await loadSdk();
+    for (const onCancel of [
+      () => {
+        throw new Error('cancel_failed');
+      },
+      () => new Promise<void>(() => {}),
+    ]) {
+      const { stream } = countingStream(4 * MiB, 16 * KiB, onCancel);
+      const client = sdk.createOpenPayClient({
+        catalogTrust: false,
+        fetchImpl: vi.fn(async () => new Response(stream, { status: 200 })),
+        lookup,
+      });
+      await expect(withinMs(client.quote(RESOURCE), 2_000)).resolves.toMatchObject({
+        status: 200,
+        reasons: ['expected_402_with_accepts'],
+      });
+    }
   });
 
   it('rejects a maxPaidBodyBytes that is not a positive integer', async () => {

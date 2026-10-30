@@ -643,7 +643,9 @@ returned or the facilitator signer could not be resolved. Treat `unverified` and
 Seller responses are read with a byte cap counted from the stream itself, not
 from `Content-Length`. The 402 challenge, read before anything is signed, may be
 at most 256 KiB (`MAX_CHALLENGE_BODY_BYTES`); a larger one is cancelled and
-`quote()` / `pay()` throw `payment_target_response_too_large`. The response to
+`quote()` / `pay()` throw `payment_target_response_too_large`. A response with
+any other status is not read and returns `expected_402_with_accepts` as before,
+whatever its size. The response to
 the paid `X-PAYMENT` request may be at most 16 MiB by default
 (`DEFAULT_MAX_PAID_BODY_BYTES`); set `maxPaidBodyBytes` to change it. Over that
 cap the stream is cancelled and `pay()` does not throw, because the payment may

@@ -8,7 +8,9 @@
   as much as the 15-second timeout let through.
 - The 402 challenge may be at most 256 KiB (`MAX_CHALLENGE_BODY_BYTES`). A larger
   one is cancelled and `quote()` / `pay()` throw
-  `payment_target_response_too_large` before anything is signed.
+  `payment_target_response_too_large` before anything is signed. A response with
+  any other status is no longer read (its body is cancelled) and still returns
+  `expected_402_with_accepts`, whatever its size.
 - The response to the paid `X-PAYMENT` request may be at most 16 MiB by default
   (`DEFAULT_MAX_PAID_BODY_BYTES`, new option `maxPaidBodyBytes` on
   `createOpenPayClient` and `createPaymentExecutor`). Over that cap the stream is

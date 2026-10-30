@@ -82,6 +82,21 @@ test('quote cancels a 402 body past the cap and throws before reading it all', a
   assert.ok(stats.pulled < total, `pulled ${stats.pulled}`);
 });
 
+test('a non-402 response of any size still returns expected_402_with_accepts unread', async () => {
+  const total = 4 * 1024 * 1024;
+  const { stream, stats } = countingStream(total, 16 * 1024);
+  const client = createOpenPayClient({
+    catalogTrust: false,
+    lookup,
+    fetchImpl: async () => new Response(stream, { status: 200 }),
+  });
+  const result = await client.quote(RESOURCE);
+  assert.deepEqual(result.reasons, ['expected_402_with_accepts']);
+  assert.equal(result.status, 200);
+  assert.equal(stats.cancelled, true);
+  assert.ok(stats.pulled < total, `pulled ${stats.pulled}`);
+});
+
 test('pay returns paid_body_too_large with the authorization nonce instead of throwing', async () => {
   const total = 64 * 1024;
   const { stream, stats } = countingStream(total, 1024);
