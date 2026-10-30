@@ -22,6 +22,7 @@ import { resolveDeployment } from '@/lib/tokens';
 import { clientIp } from '@/lib/net/ipHash';
 import { checkReadRateLimit } from '@/lib/relay/relayGuards';
 import { anonymizeIp } from '@/lib/relay/relayRoute';
+import { readShopLive } from '@/lib/shopLiveStore';
 import { isBeforeOpen, isPastLastOrder, pickupSlots } from '@/lib/shopTime';
 
 export const runtime = 'nodejs';
@@ -159,6 +160,14 @@ export async function POST(req: Request): Promise<NextResponse> {
     return json({ ok: false, error: 'storefront_changed' }, 409);
   }
   if (storefront.acceptingOrders === false) {
+    return json({ ok: false, error: 'store_not_accepting' }, 409);
+  }
+  // 受付一時停止 (shop live の paused・第 8 回レビュー C-3)。@handle のページは SSR の時点の live 状態しか持たず、
+  // 先に開いた checkout は店主が後から止めても知らないまま署名へ進む。不可逆な署名の前にここで最新の状態を見て、
+  // 止まっている店は静的な受付停止と同じ 409 store_not_accepting にする (agent-order/pay と同じ code・client は
+  // どの拒否でも既存の「ただいま注文を受け付けていません」を出す)。flag OFF の間は読まない (KV の読み取りを足さない)。
+  // KV 障害は readShopLive 自身が paused=false に倒す (fail-open・既存仕様・兄弟の経路と同じ) ので投げない。
+  if (env.enableShopLive && (await readShopLive(handle)).paused) {
     return json({ ok: false, error: 'store_not_accepting' }, 409);
   }
   // 店舗の値引きのドリフト検出 (plans/discount-common.md)。URL の値引きが、明細の小計に公開設定の値引きを当てた額と
