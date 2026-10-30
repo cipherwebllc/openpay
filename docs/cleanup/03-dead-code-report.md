@@ -1,5 +1,7 @@
 # Dead Code Audit (Task 3/8)
 
+Historical snapshot (2026-05-24): file references, counts and recommendations below describe the code at the time of this audit. This is not current guidance — re-check each finding against the current code before acting on it.
+
 ## Summary
 - knip ran: yes — v6.14.2, JSON reporter, no `knip.config` present (defaults)
 - ts-prune ran: yes — fallback corroboration

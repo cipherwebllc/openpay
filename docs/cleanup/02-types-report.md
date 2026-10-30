@@ -1,5 +1,7 @@
 # Type Consolidation Audit (Task 2/8)
 
+Historical snapshot (2026-05-24): file references, counts and recommendations below describe the code at the time of this audit. This is not current guidance — re-check each finding against the current code before acting on it.
+
 ## Summary
 
 Audit covered ~724 TS/TSX files in `lib/`, `hooks/`, `components/`, `app/`, `tests/`. Six high-confidence duplicate/redundant type declarations were found, all clustered around the payment/history domain (`HistoryAsset`/`TokenSymbol`, `HistoryStatus`/`PaymentResult`, `HistoryFlow`/`PaymentFlow`, `HistoryPayMode`/`PayMode`, `HistoryGasMode`/`GasMode`, `IncompatibleSmartAccountError.i18nKey` double-declaration). One medium-confidence finding around scattered string literal unions in api/log/payment validation. Three candidates were rejected after field-by-field comparison (settings shapes, parsed-result discriminated unions, the `LegacyXxx` rollback fixture).

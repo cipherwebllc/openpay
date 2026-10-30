@@ -1624,6 +1624,21 @@ on-chain 検証経路 (実 `getTransactionReceipt` → 実 JPYC `Transfer` log �
   freee (`isEntitled(_,'pro')`) と CSV 由来データのみ。
 - 料金性質 (前払式該当性・決済額非連動の定額) の**弁護士確認は実績後に後ろ倒し** (合意済)。
 
+### §12.7 flag OFF の課金・会計機能 (a1・Pro・CSV パス・freee) を点灯する前に見直すこと (第 8 回レビュー E-6・E-7・2026-10-30)
+
+どれも flag OFF の間は route の入口で 404 / 503 を返すので、今は露出していない (受容)。点灯の PR を作るときに、点灯する機能の行を確かめる。
+
+- **E-6 入口に IP 単位の rate limit が無い** (2026-10-30 時点)。点灯する機能の route に足すか、受容するかを決める。足すときは既存の `app/api/csv-pass/relay/route.ts` と同じ `checkIpRateLimit` + `hashIpBucket` (全アドレスの `hashIp` を key にすると `tests/lib/ipLimiterHashFence.test.ts` が止める)。
+
+  | 機能 (flag) | IP の rate limit が無い route |
+  |---|---|
+  | a1 利用料 (`NEXT_PUBLIC_ENABLE_USAGE_FEE`) | `/api/billing/invoice`・`/api/billing/settle` |
+  | Pro (`NEXT_PUBLIC_ENABLE_PRO`) | `/api/pro/status`・`/api/pro/subscribe` |
+  | CSV 24 時間パス (`NEXT_PUBLIC_ENABLE_CSV_PASS`) | `/api/csv-pass/status`・`/api/csv-pass/subscribe` (`/api/csv-pass/relay` はあり) |
+  | freee 連携 (`NEXT_PUBLIC_ENABLE_FREEE_SYNC`) | `/api/freee/authorize`・`/api/freee/callback`・`/api/freee/mapping`・`/api/freee/status`・`/api/freee/sync` |
+
+- **E-7 freee の認可開始 (`app/api/freee/authorize/route.ts`) の CSRF 検査が same-site を通す**。`Sec-Fetch-Site: cross-site` だけを拒否するので、サブドメイン (same-site) からの遷移では state の予約と freee への 302 が動く。freee を再開するときは、保護配布の発行 GET (§16.9) と同じ `isSameOriginGet` (`lib/net/crossOriginWrite.ts`・same-origin と none だけを通す) に揃える。`/api/freee/callback` は freee から戻ってくる cross-site の GET なので対象外 (state の照合で守る)。
+
 ## §13 モバイル注文 / レジ システム利用料 go-live SOP
 
 > **2026-10-07: レジの通常決済 (standard) の利用料は廃止しました (#713)。** その後 flag
@@ -2000,6 +2015,12 @@ PAYMENT-RESPONSE `{success:true, transaction:'904f72e8-f03d-4bd6-9df4-865e7b24d5
 ### §14.8b 第三者向け Arc (dual-rail relay) — go-live
 
 第三者の出品 (`usdc.arc === true`) に Arc (Circle Gateway・v2 のみ) 面を出す go-live 手順。点灯は user。
+
+> **前提 (第 8 回レビュー・2026-10-30)**: Arc の使い回し防止の修正 2 本が merge されるまで、`ENABLE_X402_DUAL_RAIL_ARC` の点灯 (止めた後の再点灯を含む) と、出品の Arc オプトイン (`usdc.arc`) を増やすことをしない。
+> - **G-1** (`lib/x402/relayArcMarks.ts`): relay の Arc の検証済みマークを、verify を通った authorization の全項目に結び付ける。今は authorization を書き換えた settle でマークが外れ、出品者の上流処理を何度も動かせる。
+> - **B-1** (`lib/x402/vanillaGate.ts`): 一次側の Arc gate で、settle 済みの署名の再送に content を動かさない (今は同じ PAYMENT-SIGNATURE の再送で content が動き、settle は使用済みで 402 になる)。
+>
+> 計画は `plans/full-review-2026-10-30.md` の PR-02 (G-1)・PR-03 (B-1)。merge したら PR 番号をここに書き、この前提を外す。点灯中の環境で merge までの間に止めるかは user が決める。
 
 1. `ENABLE_X402_ARC_GATEWAY` が ON であること (§14.8・first-party の Arc flag。relay の Arc 面もこれに従う)。
 2. `ENABLE_X402_DUAL_RAIL_ARC` (server-only) と `NEXT_PUBLIC_ENABLE_X402_DUAL_RAIL_ARC` (出品フォームの Arc 欄) を **同時に** ON。

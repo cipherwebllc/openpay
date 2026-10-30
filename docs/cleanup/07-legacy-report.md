@@ -1,5 +1,7 @@
 # Legacy / Deprecated Code Audit (Task 7/8)
 
+Historical snapshot (2026-05-24): file references, counts and recommendations below describe the code at the time of this audit. This is not current guidance — re-check each finding against the current code before acting on it.
+
 ## Summary
 - TODO/FIXME/HACK comments in source: **0** (zero)
 - `@deprecated` JSDoc tags: **0**

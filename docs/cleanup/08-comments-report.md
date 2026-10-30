@@ -1,5 +1,7 @@
 # Comments / AI Slop Audit (Task 8/8)
 
+Historical snapshot (2026-05-24): file references, counts and recommendations below describe the code at the time of this audit. This is not current guidance — re-check each finding against the current code before acting on it.
+
 ## Summary
 - TS/TSX files scanned: 108 (app, lib, hooks, components)
 - Single-line `//` comments: 1,716
