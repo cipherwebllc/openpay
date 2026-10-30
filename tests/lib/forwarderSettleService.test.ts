@@ -16,6 +16,7 @@ const hold = vi.hoisted(() => ({
     txHash: `0x${'ab'.repeat(32)}` as Hex,
   })),
   checkSubfloorPayerRateLimit: vi.fn(async () => true),
+  readAuthorizationUsedAtRevert: vi.fn(async () => false),
   checkSubfloorBudget: vi.fn(),
   refundSubfloorBudget: vi.fn(),
   // hoisted に置いて「どちらのファクトリがどの prefix で呼ばれたか」を検証可能にする。
@@ -52,6 +53,7 @@ vi.mock('@/lib/relay/relayProvider', () => ({
   jpycAddressFor: () => hold.jpyc,
   getBalance: vi.fn(async () => 10n ** 30n),
   readAuthorizationUsed: vi.fn(async () => false),
+  readAuthorizationUsedAtRevert: hold.readAuthorizationUsedAtRevert,
   selfHostIoFor: () => null,
 }));
 vi.mock('@/lib/relay/selfHostRelayer', () => ({
@@ -123,6 +125,15 @@ describe('settleViaForwarder の冪等ファクトリ', () => {
 
     expect(hold.makeRecoverIdempotency).toHaveBeenCalledWith('test:idem:');
     expect(hold.makeIdempotency).not.toHaveBeenCalled();
+  });
+});
+
+// 第 8 回レビュー A-01: forwarder の受取人は店 (merchant ≠ feeReceiver を verifyForwarderSettle が強制) なので、
+// recover relay と x402 facilitator の両方で revert 後の固定読み取りを渡す (渡さないと従来どおり reverted)。
+describe('settleViaForwarder の revert 後の再確認 (A-01)', () => {
+  it('recoverViaForwarder の deps に relayProvider の readAuthorizationUsedAtRevert を渡す', async () => {
+    const deps = await settle(JPY, JPY);
+    expect(deps.readAuthorizationUsedAtRevert).toBe(hold.readAuthorizationUsedAtRevert);
   });
 });
 

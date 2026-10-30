@@ -170,6 +170,22 @@ describe('relay route handleFree — a1 配線 (実コード)', () => {
     expect(store.lists.get(key) ?? []).toHaveLength(0);
   });
 
+  // 第 8 回レビュー A-01: revert 後の固定読み取り (reverted → pending になりうる) は店 (受取人) へ払う決済だけ。
+  // 利用料 (to=FEE_RECEIVER) は前走りで得をする者がおらず、利用料の client (useUsageFeePayment) は hash なしの
+  // pending を解決できないので渡さない = 従来どおり reverted。
+  it('A-01: 店への決済は revert 後の固定読み取りを relay に渡し、利用料 (to=FEE_RECEIVER) には渡さない', async () => {
+    const depsOf = (i: number) =>
+      (relayFn.mock.calls[i] as unknown[])[1] as { readAuthorizationUsedAtRevert?: unknown };
+    const { readAuthorizationUsedAtRevert } = await import('@/lib/relay/relayProvider');
+
+    await POST(payload());
+    expect(depsOf(0).readAuthorizationUsedAtRevert).toBe(readAuthorizationUsedAtRevert);
+
+    await POST(payload({ from: MERCHANT, to: FEE_RECEIVER, nonce: '0x' + 'c'.repeat(64) }));
+    expect(relayFn).toHaveBeenCalledTimes(2);
+    expect(depsOf(1).readAuthorizationUsedAtRevert).toBeUndefined();
+  });
+
   it('relay が reverted → メーター記録しない (成功時のみ計上)', async () => {
     relayFn.mockResolvedValue({ kind: 'reverted', txHash: '0xrev' });
     const res = await POST(payload());

@@ -23,7 +23,15 @@ const TX_HASH = `0x${'ab'.repeat(32)}` as Hex;
 const BIG_BALANCE = 1_000_000n * JPYC;
 const RESERVATION_TOKEN = `x402r1_${'cd'.repeat(32)}`;
 
-const authorizationState = vi.hoisted(() => ({ used: false, unavailable: false }));
+// pinnedUnavailable: revert のブロックに固定した読み取りだけが失敗する (そのブロックを持たない RPC ノード等・A-01)。
+// pinnedReads: blockHash に固定した authorizationState の読み取りの引数 (A-01 の固定読み取りの確認用)。
+const authorizationState = vi.hoisted(() => ({
+  used: false,
+  unavailable: false,
+  pinnedUnavailable: false,
+  pinnedReads: [] as Array<{ blockHash?: string; requireCanonical?: boolean }>,
+}));
+const REVERT_BLOCK_HASH = `0x${'5e'.repeat(32)}` as Hex;
 const reservationState = vi.hoisted(() => ({
   reserved: false,
   consumed: false,
@@ -50,15 +58,26 @@ vi.mock('viem', async (importOriginal) => {
     ...actual,
     createPublicClient: () => ({
       getBytecode: async () => '0x60' as `0x${string}`,
-      readContract: async (args: { functionName?: string }) => {
+      readContract: async (args: { functionName?: string; blockHash?: string; requireCanonical?: boolean }) => {
         if (args.functionName === 'token') return JPYC_AMOY;
         if (args.functionName === 'feeReceiver') return FEE_RECEIVER;
         if (args.functionName === 'authorizationState') {
+          if (args.blockHash !== undefined) {
+            authorizationState.pinnedReads.push({ blockHash: args.blockHash, requireCanonical: args.requireCanonical });
+            if (authorizationState.pinnedUnavailable) throw new Error('header not found');
+          }
           if (authorizationState.unavailable) throw new Error('rpc unavailable');
           return authorizationState.used;
         }
         return BIG_BALANCE; // balanceOf → 残高十分 (success/verify を通す)
       },
+      // A-01: relay の tx が revert した後の固定読み取りが使う (revert の receipt のブロックと canonical の確認)。
+      getTransactionReceipt: async () => ({
+        status: 'reverted',
+        blockNumber: 77n,
+        blockHash: REVERT_BLOCK_HASH,
+      }),
+      getBlock: async () => ({ hash: REVERT_BLOCK_HASH }),
       getBalance: async () => 10n ** 18n,
       estimateGas: async () => 21000n,
       getTransactionCount: async () => 0,
@@ -121,6 +140,8 @@ async function loadFacilitator(opts?: {
 }): Promise<Handlers> {
   authorizationState.used = false;
   authorizationState.unavailable = false;
+  authorizationState.pinnedUnavailable = false;
+  authorizationState.pinnedReads = [];
   reservationState.reserved = false;
   reservationState.consumed = false;
   reservationState.reserve.mockReset();
@@ -811,6 +832,62 @@ describe('x402 facilitator /settle', () => {
       transaction: TX_HASH,
       network: 'eip155:80002',
       payer: CUSTOMER,
+    });
+    // A-01: 200 reverted を返すのは、revert のブロックに固定して「未使用」と読めたときだけ。
+    expect(authorizationState.pinnedReads).toEqual([{ blockHash: REVERT_BLOCK_HASH, requireCanonical: true }]);
+  });
+
+  // 第 8 回レビュー A-01 (x402 wire の応答が変わる条件): relay の tx が revert したとき、200 reverted は買い手に
+  // 「別の署名で払い直してよい」と伝える。revert のブロックに固定して「未使用」と読めたときだけ 200 reverted (従来)、
+  // 使用済み (mempool から写した settle の前走り等で支払いは成立)・固定して読めないときは 202 errorReason:'pending'
+  // (transaction なし) にする。
+  it('settle が reverted でも authorization が別の tx で使用済み → 202 errorReason:pending・transaction:null', async () => {
+    const { settle } = await loadFacilitator();
+    const relayer = await import('@/lib/relay/selfHostRelayer');
+    (relayer.pollSelfHost as unknown as Mock).mockImplementationOnce(async () => {
+      // relay の tx が revert した時点で、同じ authorization は別の tx が実行済み。
+      authorizationState.used = true;
+      return { state: 'reverted', txHash: TX_HASH };
+    });
+    const params = goodParams();
+    const sig = await signReceive(params);
+    const res = await settle(reqOf('http://x/settle', facilitatorBody(params, sig)));
+    expect(res.status).toBe(202);
+    expect(await res.json()).toEqual({
+      success: false,
+      errorReason: 'pending',
+      transaction: null,
+      network: 'eip155:80002',
+      payer: CUSTOMER,
+    });
+    expect(ledger.record).not.toHaveBeenCalled();
+    // revert のブロックに固定して読んでいる (latest の読み取りではない)。
+    expect(authorizationState.pinnedReads).toEqual([{ blockHash: REVERT_BLOCK_HASH, requireCanonical: true }]);
+  });
+
+  it('settle が reverted で固定した再確認の読み取りが失敗 → 202 errorReason:pending (分からないは払い直してよいではない)', async () => {
+    const { settle } = await loadFacilitator();
+    const relayer = await import('@/lib/relay/selfHostRelayer');
+    const { logger } = await import('@/lib/logger');
+    (relayer.pollSelfHost as unknown as Mock).mockImplementationOnce(async () => {
+      authorizationState.pinnedUnavailable = true;
+      return { state: 'reverted', txHash: TX_HASH };
+    });
+    const params = goodParams();
+    const sig = await signReceive(params);
+    const res = await settle(reqOf('http://x/settle', facilitatorBody(params, sig)));
+    expect(res.status).toBe(202);
+    expect(await res.json()).toEqual({
+      success: false,
+      errorReason: 'pending',
+      transaction: null,
+      network: 'eip155:80002',
+      payer: CUSTOMER,
+    });
+    expect(logger.warn).toHaveBeenCalledWith('relay.forwarder.revert_recheck_unavailable', {
+      chainId: AMOY,
+      txHash: TX_HASH,
+      error: expect.any(Error),
     });
   });
 

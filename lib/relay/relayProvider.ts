@@ -48,6 +48,7 @@ import {
   type AuthorizationExpiryObservation,
 } from '@/lib/x402/authorizationExpiry';
 import type { Eip3009Authorization } from '@/lib/jpycEip3009';
+import { authorizationUsedAtRevert } from './revertRecheck';
 import {
   relayJpycAuthorization,
   type RelayDeps,
@@ -238,6 +239,27 @@ export async function readAuthorizationUsed(
 }
 
 /**
+ * relay の tx が revert した後の authorizationState (第 8 回レビュー A-01)。revert の receipt が載ったブロックの hash に
+ * 固定して読む (EIP-1898 blockHash + requireCanonical・readAuthorizationExpiry と同じ型・lib/relay/revertRecheck.ts)。
+ * 固定して読めないときは throw (呼び元は pending に倒す)。店 (受取人) へ払う経路の deps にだけ渡す。
+ */
+export async function readAuthorizationUsedAtRevert(
+  chainId: number,
+  token: Address,
+  from: Address,
+  nonce: Hex,
+  revertTxHash: Hex,
+): Promise<boolean> {
+  return authorizationUsedAtRevert({
+    client: publicClientFor(chainId) as unknown as Parameters<typeof authorizationUsedAtRevert>[0]['client'],
+    token,
+    from,
+    nonce,
+    revertTxHash,
+  });
+}
+
+/**
  * 署名の「期限切れ未使用」をチェーンで観測する (relay status 用・第 7 回レビュー A6)。finalized ブロックの時刻と、
  * その hash に固定した authorizationState (EIP-1898)・canonical hash で判定する (lib/x402/authorizationExpiry.ts)。
  */
@@ -414,12 +436,16 @@ export function relayFreeAuthorization(
   auth: Eip3009Authorization,
   signature: Hex,
   rateLimitKeys: string[],
-  opts: { idemPrefix: string },
+  // recheckRevertedAuthorization: relay の tx が revert した後に authorization を固定して読み直すか (A-01)。
+  // 店 (受取人) へ払う決済の route だけが true を渡す。既定 (未指定) は従来どおり reverted を返す
+  // (受取人が OpenPay 自身の利用料・CSV パスは前走りで得をする者がおらず、client も hash なし pending を解決できない)。
+  opts: { idemPrefix: string; recheckRevertedAuthorization?: boolean },
 ): Promise<RelayResult> {
   const supported = chainId in SUPPORTED_CHAINS;
   const { claimIdempotency, recordRelayHash, releaseIdempotency } =
     makeIdempotency(opts.idemPrefix);
   const common = {
+    ...(opts.recheckRevertedAuthorization ? { readAuthorizationUsedAtRevert } : {}),
     nowSec: () => Math.floor(Date.now() / 1000),
     maxValue: MAX_VALUE,
     jpycAddressFor,

@@ -528,6 +528,36 @@ describe('relay status の成功 on-chain 証拠 (A1)', () => {
     },
   );
 
+  // 第 8 回レビュー A-01: relay は自分の tx が revert し authorization が別の tx で使用済みのとき pending を返し、
+  // client は intent を保ってこの照会で解決する。KV の hash は revert した relay の tx を指すので、それを成功に
+  // せず、実際に authorization を使った tx (AuthorizationUsed log) の receipt を照合して settled にする。
+  it.each(['signed', 'nonce'] as const)(
+    'KV hash が revert した relay の tx でも、別の tx が nonce を使っていれば %s lookup で settled',
+    async (lookup) => {
+      h.logHash = LOG_HASH;
+      h.receipts.set(HASH, { status: 'reverted', logs: [] });
+      const res = await POST(req(lookup === 'nonce' ? nonceIntent() : intent));
+      expect(await res.json()).toEqual({ ok: true, state: 'settled', txHash: LOG_HASH });
+      expect(h.getReceipt).toHaveBeenCalledWith({ hash: HASH });
+      expect(h.getReceipt).toHaveBeenCalledWith({ hash: LOG_HASH });
+      expect(findAuthorizationUsedTransactionHash).toHaveBeenCalledOnce();
+    },
+  );
+
+  it.each(['signed', 'nonce'] as const)(
+    'forwarder: KV hash が revert した relay の settle でも、別の tx の Settled があれば %s lookup で settled',
+    async (lookup) => {
+      h.forwarder = FORWARDER;
+      h.logHash = LOG_HASH;
+      h.receipts.set(HASH, { status: 'reverted', logs: [] });
+      h.receipt.logs = [settledEvent()];
+      const res = await POST(req(lookup === 'nonce' ? nonceIntent(FORWARDER_NONCE) : forwarderIntent));
+      expect(await res.json()).toEqual({ ok: true, state: 'settled', txHash: LOG_HASH });
+      expect(h.getReceipt).toHaveBeenCalledWith({ hash: HASH });
+      expect(h.getReceipt).toHaveBeenCalledWith({ hash: LOG_HASH });
+    },
+  );
+
   it('KV hash があっても authorizationState の RPC 障害は indeterminate', async () => {
     h.rpcThrows = true;
     const res = await POST(req());

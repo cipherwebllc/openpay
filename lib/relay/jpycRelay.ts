@@ -8,6 +8,7 @@
 import { getAddress, type Address, type Hex } from 'viem';
 import { logger } from '@/lib/logger';
 import { relayBroadcast } from './relayBroadcast';
+import { recheckRevertedAuthorization } from './revertRecheck';
 import type { RelayResult, RelayTaskOutcome } from './relayTypes';
 import {
   encodeTransferWithAuthorizationCalldata,
@@ -66,6 +67,17 @@ export type RelayDeps = {
     token: Address,
     from: Address,
     nonce: Hex,
+  ) => Promise<boolean>;
+  // (任意) relay の tx が revert した後の再確認 (第 8 回レビュー A-01・lib/relay/revertRecheck.ts)。店 (受取人) へ
+  // 払う経路だけが渡す。revert の receipt のブロックに固定した authorizationState で、使用済みなら true・未使用なら
+  // false・固定して読めないときは throw。渡したときは「固定して未使用」のときだけ reverted、それ以外は pending。
+  // 未提供 (受取人が OpenPay 自身の利用料・CSV パス) は従来どおり reverted。
+  readAuthorizationUsedAtRevert?: (
+    chainId: number,
+    token: Address,
+    from: Address,
+    nonce: Hex,
+    revertTxHash: Hex,
   ) => Promise<boolean>;
   // (任意) 冪等性: 同一 (chainId,from,nonce) を 1 回だけ claim。重複 POST (network retry /
   // double-click) で二重 broadcast しないための保護。'duplicate' なら submit せず pending を返す
@@ -186,7 +198,7 @@ export async function relayJpycAuthorization(
     if (used) return { kind: 'pending' };
   }
 
-  return relayBroadcast({
+  const result = await relayBroadcast({
     chainId,
     from: auth.from,
     nonce: auth.nonce,
@@ -194,4 +206,13 @@ export async function relayJpycAuthorization(
     encodeCalldata: () => encodeTransferWithAuthorizationCalldata(auth, signature),
     submit: (data) => deps.submitSponsoredCall(chainId, jpyc, data),
   }, deps);
+
+  // 6. relay の tx が revert したときだけ、同じ authorization が別の tx で使われていないかを revert のブロックに
+  // 固定して読み直す (固定して未使用なら reverted・それ以外は pending。readAuthorizationUsedAtRevert を渡した
+  // 店宛ての経路だけ。lib/relay/revertRecheck.ts)。
+  return recheckRevertedAuthorization(
+    result,
+    { chainId, token: jpyc, from: auth.from, nonce: auth.nonce, logPrefix: 'relay.jpyc' },
+    deps.readAuthorizationUsedAtRevert,
+  );
 }

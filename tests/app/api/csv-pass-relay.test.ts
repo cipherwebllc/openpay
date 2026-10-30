@@ -275,6 +275,15 @@ describe('POST /api/csv-pass/relay — relay 結果の応答整形 + guards 配�
     expect(rateLimitKeys.map((k: string) => k.toLowerCase())).toEqual([WALLET]);
   });
 
+  // 第 8 回レビュー A-01: CSV パスの受取人は OpenPay 自身 (to=FEE_RECEIVER) で前走りで得をする者がおらず、
+  // client (useJpycEntitlementPay) は hash なしの pending を同じ署名の再 POST でしか解けないので、revert 後の
+  // 固定読み取りを頼まない = 従来どおり reverted。
+  it('A-01: revert 後の再確認を頼まない (opts は idemPrefix だけ)', async () => {
+    await POST(req(validBody()));
+    const [, , , , opts] = relayFreeAuthorization.mock.calls[0];
+    expect(opts).toEqual({ idemPrefix: 'csvpassrelay:idem:' });
+  });
+
   it('reverted → 200 {reverted,txHash} passthrough', async () => {
     relayFreeAuthorization.mockResolvedValue({ kind: 'reverted', txHash: '0xrev' });
     const res = await POST(req(validBody()));

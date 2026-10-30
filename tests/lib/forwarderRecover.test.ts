@@ -3,6 +3,7 @@ import { getAddress, type Address, type Hex } from 'viem';
 import { logger } from '@/lib/logger';
 import { privateKeyToAccount } from 'viem/accounts';
 import {
+  buildForwarderNonce,
   buildReceiveWithAuthorizationTypedData,
   type ForwarderSettleParams,
 } from '@/lib/relay/forwarderIntent';
@@ -710,5 +711,127 @@ describe('recoverViaForwarder — 日次予算 refund 配線 (L3)', () => {
     const res = await recoverViaForwarder(await makeInput(), deps);
     expect(res.kind).toBe('relay_error');
     expect(refundGasBudget).toHaveBeenCalledTimes(1);
+  });
+});
+
+// 第 8 回レビュー A-01: forwarder.settle は誰でも呼べるので、relay の tx を mempool から写した別の tx が先に
+// settle すると relay の tx は revert するが支払いは成立している。revert のときだけ commitment nonce の
+// authorizationState を revert のブロックに固定して読み直し、「固定して未使用」のときだけ reverted、使用済み・
+// 読めない・hash が無いときは pending (txHash なし) にする。readAuthorizationUsedAtRevert を渡さなければ従来どおり。
+// x402 facilitator の settle もこの経路を通る (route の応答は tests/app/api/facilitator.test.ts)。
+describe('recoverViaForwarder — revert 後の authorization 再確認 (A-01)', () => {
+  const RELAY_TX = `0x${'ef'.repeat(32)}` as Hex;
+  type ReadAtRevert = NonNullable<ForwarderRecoverDeps['readAuthorizationUsedAtRevert']>;
+
+  // txHash: null = revert の hash が分からない。
+  function revertedDeps(
+    readAuthorizationUsedAtRevert: ReadAtRevert | undefined,
+    txHash: Hex | null = RELAY_TX,
+  ) {
+    const checkAuthorizationUsed = vi.fn(async () => false);
+    const deps = makeDeps({
+      checkAuthorizationUsed,
+      ...(readAuthorizationUsedAtRevert ? { readAuthorizationUsedAtRevert } : {}),
+      claimIdempotency: vi.fn(async () => ({ status: 'first' as const })),
+      releaseIdempotency: vi.fn(async () => {}),
+      recordRelayHash: vi.fn(async () => {}),
+      checkGasBudget: vi.fn(async () => gasBudget(true, true)),
+      refundGasBudget: vi.fn(async () => {}),
+      pollTask: vi.fn(async () => ({ state: 'reverted' as const, txHash: txHash ?? undefined })),
+    });
+    return { deps, checkAuthorizationUsed };
+  }
+
+  it('revert + 固定して使用済み → pending (txHash なし)・claim と予算はそのまま', async () => {
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+    const readAtRevert = vi.fn<ReadAtRevert>(async () => true);
+    const { deps } = revertedDeps(readAtRevert);
+    const input = await makeInput();
+    const nonce = buildForwarderNonce(input.params, CHAIN, FORWARDER);
+    const res = await recoverViaForwarder(input, deps);
+
+    expect(res).toEqual({ kind: 'pending' });
+    // 再確認は poll (revert の確定) の後に、commitment nonce と revert した tx の hash で読む。
+    expect(readAtRevert).toHaveBeenCalledExactlyOnceWith(CHAIN, JPYC, input.params.from, nonce, RELAY_TX);
+    expect(readAtRevert.mock.invocationCallOrder[0]).toBeGreaterThan(
+      vi.mocked(deps.pollTask).mock.invocationCallOrder[0],
+    );
+    expect(deps.submit).toHaveBeenCalledOnce();
+    // broadcast 済みの結果なので claim の解放・予算の返却はしない (従来の reverted と同じ)。
+    expect(deps.releaseIdempotency).not.toHaveBeenCalled();
+    expect(deps.refundGasBudget).not.toHaveBeenCalled();
+    expect(deps.recordRelayHash).toHaveBeenCalledWith(CHAIN, input.params.from, nonce, RELAY_TX);
+    // 運営が追えるよう revert した relay の tx を warn に残す (応答には付けない)。
+    expect(warn).toHaveBeenCalledWith('relay.forwarder.reverted_authorization_used', {
+      chainId: CHAIN,
+      txHash: RELAY_TX,
+    });
+    warn.mockRestore();
+  });
+
+  it('revert + 固定して未使用 → 従来どおり reverted (txHash つき)', async () => {
+    const readAtRevert = vi.fn<ReadAtRevert>(async () => false);
+    const { deps } = revertedDeps(readAtRevert);
+    const res = await recoverViaForwarder(await makeInput(), deps);
+
+    expect(res).toEqual({ kind: 'reverted', txHash: RELAY_TX });
+    expect(readAtRevert).toHaveBeenCalledOnce();
+    expect(deps.releaseIdempotency).not.toHaveBeenCalled();
+    expect(deps.refundGasBudget).not.toHaveBeenCalled();
+  });
+
+  it('revert + 固定して読めない (読み取り失敗) → pending (分からないは払い直してよいではない)・warn に残す', async () => {
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+    const rpcError = new Error('header not found');
+    const { deps } = revertedDeps(vi.fn<ReadAtRevert>(async () => {
+      throw rpcError;
+    }));
+    const res = await recoverViaForwarder(await makeInput(), deps);
+
+    expect(res).toEqual({ kind: 'pending' });
+    expect(deps.releaseIdempotency).not.toHaveBeenCalled();
+    expect(deps.refundGasBudget).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith('relay.forwarder.revert_recheck_unavailable', {
+      chainId: CHAIN,
+      txHash: RELAY_TX,
+      error: rpcError,
+    });
+    warn.mockRestore();
+  });
+
+  it('revert の hash が無い (固定できない) → 読まずに pending・warn に残す', async () => {
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+    const readAtRevert = vi.fn<ReadAtRevert>(async () => false);
+    const { deps } = revertedDeps(readAtRevert, null);
+    const res = await recoverViaForwarder(await makeInput(), deps);
+
+    expect(res).toEqual({ kind: 'pending' });
+    expect(readAtRevert).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith('relay.forwarder.revert_recheck_unavailable', {
+      chainId: CHAIN,
+      reason: 'no_tx_hash',
+    });
+    warn.mockRestore();
+  });
+
+  it('readAuthorizationUsedAtRevert を渡さなければ従来どおり reverted・読み直さない', async () => {
+    for (const txHash of [RELAY_TX, null]) {
+      const { deps, checkAuthorizationUsed } = revertedDeps(undefined, txHash);
+      const res = await recoverViaForwarder(await makeInput(), deps);
+      expect(res).toEqual({ kind: 'reverted', txHash: txHash ?? undefined });
+      expect(checkAuthorizationUsed).toHaveBeenCalledOnce();
+    }
+  });
+
+  it.each([
+    ['success', { state: 'success' as const, txHash: RELAY_TX }],
+    ['pending', { state: 'pending' as const, txHash: RELAY_TX }],
+    ['error', { state: 'error' as const, detail: 'rpc_unavailable' }],
+  ])('poll が %s のときは再確認しない', async (_label, outcome) => {
+    const readAtRevert = vi.fn<ReadAtRevert>(async () => true);
+    const deps = makeDeps({ readAuthorizationUsedAtRevert: readAtRevert, pollTask: vi.fn(async () => outcome) });
+    const res = await recoverViaForwarder(await makeInput(), deps);
+    expect(res.kind).toBe(outcome.state === 'error' ? 'relay_error' : outcome.state);
+    expect(readAtRevert).not.toHaveBeenCalled();
   });
 });
