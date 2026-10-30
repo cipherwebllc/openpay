@@ -16,6 +16,7 @@
 
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { hasComposition } from './lib/luaBundleComposition.mjs';
 
 const root = process.cwd();
 const thresholdsSrc = readFileSync(join(root, 'lib/x402/reverifyThresholds.ts'), 'utf8');
@@ -77,30 +78,20 @@ const THRESHOLD_FORMS = [
   ],
 ];
 // 断片が残っているだけでなく、CAS の決まった位置に連結されていることの検査。minifier は単発の定数を
-// その場に畳み込むか、変数のまま `"+X+"` で連結するので、両方の形を受ける (変数なら同じファイルの定義を確かめる)。
+// その場に畳み込むか、変数のまま `"+X+"` で連結するので、`+` の連結を AST でたどり、変数は使われた場所から
+// 見えている宣言の値を求めて、断片の全体と一致するかを見る (scripts/lib/luaBundleComposition.mjs・限界もそこ)。
+// expected は Lua の断片の全体 (閾値はソースの reverifyThresholds.ts から)。
 const COMPOSED = [
   {
     // reverify.ts CAS_EXTERNAL_REVERIFY: 印の解除は restore の判定の直後・保存の前。
     name: '再検証の CAS が restore の判定の後で印を外す',
     after: "if checked and claim==-5 then restoreBlocked='url_taken' end; end; end; ",
-    start: "if (not hidden) or (ARGV[4]=='violation' and failures>=",
+    expected:
+      "if (not hidden) or (ARGV[4]=='violation' and failures>=" + hide +
+      ") or (ARGV[5]=='block' and authFailures>=" + authHide +
+      ') then o.pendingFirstVerification=nil end; ',
   },
 ];
-
-function escapeRegExp(text) {
-  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-// `after` の直後に `start` で始まる断片が (畳み込まれて) 続くか、`"+X+` の X が `start` で始まる文字列の定数か。
-function composedIn(src, after, start) {
-  for (let i = src.indexOf(after); i >= 0; i = src.indexOf(after, i + 1)) {
-    const rest = src.slice(i + after.length, i + after.length + 200);
-    if (rest.startsWith(start)) return true;
-    const ref = /^["']\+([A-Za-z_$][\w$]*)\+/.exec(rest);
-    if (ref && new RegExp(`(?:^|[^\\w$])${escapeRegExp(ref[1])}=["']${escapeRegExp(start)}`).test(src)) return true;
-  }
-  return false;
-}
 // 文が連結された壊れ方 (数字の直後に空白なしで if/local/return が続く)。
 const BROKEN = /(?:(?:>=|==)\d+|stock\.supply|stock\.sold\+1)(?:if|local|return|elseif)\b/;
 
@@ -135,8 +126,8 @@ for (const file of files) {
   THRESHOLD_FORMS.forEach((forms, i) => {
     if (thresholdFound[i] === null && forms.some((f) => src.includes(f))) thresholdFound[i] = file;
   });
-  COMPOSED.forEach(({ after, start }, i) => {
-    if (composedFound[i] === null && composedIn(src, after, start)) composedFound[i] = file;
+  COMPOSED.forEach(({ after, expected }, i) => {
+    if (composedFound[i] === null && hasComposition(src, after, expected, file)) composedFound[i] = file;
   });
   const m = BROKEN.exec(src);
   if (m) broken.push({ file, sample: src.slice(Math.max(0, m.index - 60), m.index + 40) });
@@ -160,12 +151,12 @@ THRESHOLD_FORMS.forEach((forms, i) => {
     console.error(`[NG] 閾値 ${i + 1} がバンドルに見つかりません: ${forms.join(' / ')}`);
   }
 });
-COMPOSED.forEach(({ name, after, start }, i) => {
+COMPOSED.forEach(({ name }, i) => {
   if (composedFound[i]) {
     console.log(`[OK] 連結 ${i + 1} (${name}) が ${composedFound[i].replace(root + '/', '')} に存在`);
   } else {
     failed = true;
-    console.error(`[NG] 連結 ${i + 1} (${name}) がバンドルに見つかりません: ${after.slice(-40)} → ${start.slice(0, 40)}...`);
+    console.error(`[NG] 連結 ${i + 1} (${name}) がバンドルに見つかりません (断片が落ちたか、変数の値が違う)`);
   }
 });
 for (const b of broken) {
