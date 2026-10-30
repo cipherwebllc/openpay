@@ -89,6 +89,10 @@ export async function readBodyPrefix(
     }
   } catch {
     // stream の途中の失敗は「そこまでの先頭」を返す (呼び元は先頭だけで判定する)。
+  } finally {
+    // 読み終えた body の lock を外す。read と cancel はすべて await 済みで保留中の read が無いので、releaseLock は投げない
+    // (守りは置かない)。
+    reader.releaseLock();
   }
 
   const bytes = new Uint8Array(total);

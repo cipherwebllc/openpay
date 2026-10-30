@@ -167,4 +167,30 @@ describe('readBodyPrefix', () => {
     expect(text(await readBodyPrefix(source, 1024))).toBe('head');
     expect((await readBodyPrefix({ body: null }, 1024)).byteLength).toBe(0);
   });
+
+  it('読み終えたら body の lock を外す (末尾まで読んだ場合・cap で cancel した場合・途中で切れた場合)', async () => {
+    const eof = textSource('hello');
+    await readBodyPrefix(eof, 1024);
+    expect(eof.body.locked).toBe(false);
+
+    const endless = {
+      body: new ReadableStream<Uint8Array>({
+        pull(controller) {
+          controller.enqueue(enc.encode('aaaa'));
+        },
+      }),
+    };
+    await readBodyPrefix(endless, 6);
+    expect(endless.body.locked).toBe(false);
+
+    const broken = {
+      body: new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.error(new Error('boom'));
+        },
+      }),
+    };
+    await readBodyPrefix(broken, 1024);
+    expect(broken.body.locked).toBe(false);
+  });
 });
