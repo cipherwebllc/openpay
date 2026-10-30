@@ -13,7 +13,7 @@ vi.mock('@/lib/env', async (original) => {
   const actual = await original<typeof import('@/lib/env')>();
   return { ...actual, env: { ...actual.env, get enableCreatorStore() { return h.parent; }, get enableStoreDeliveryTicket() { return h.enabled; }, get enableLicenseNft() { return h.license; } } };
 });
-vi.mock('@/app/api/auth/siwe/_session', () => ({ requireSession: h.session }));
+vi.mock('@/lib/siweSession', () => ({ requireSession: h.session }));
 vi.mock('@/lib/net/ipHash', () => ({ clientIp: () => '192.0.2.1', hashIpBucket: () => 'ip-hash' }));
 vi.mock('@/lib/relay/relayGuards', () => ({ checkIpRateLimit: h.ip, checkReadRateLimit: h.readLimit }));
 vi.mock('@/lib/kv', () => ({ kvIncr: h.incr, kvEval: h.eval }));

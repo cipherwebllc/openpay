@@ -40,7 +40,7 @@ const { kvMod, store } = vi.hoisted(() => {
 vi.mock('@/lib/kv', () => kvMod);
 
 const session = vi.hoisted(() => ({ address: '0x000000000000000000000000000000000000ad11' }));
-vi.mock('@/app/api/auth/siwe/_session', () => ({
+vi.mock('@/lib/siweSession', () => ({
   requireSession: vi.fn(async () => ({ ok: true as const, address: session.address })),
 }));
 vi.mock('@/lib/logger', () => ({
@@ -51,7 +51,7 @@ import { GET } from '@/app/api/admin/billing/revenue/route';
 import { recordRelayedVolume } from '@/lib/billingMeter';
 import { recordFeeRevenue } from '@/lib/feeRevenue';
 import { logger } from '@/lib/logger';
-import { requireSession } from '@/app/api/auth/siwe/_session';
+import { requireSession } from '@/lib/siweSession';
 import { hashIp } from '@/lib/net/ipHash';
 
 const JPYC = 10n ** 18n;

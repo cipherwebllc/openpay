@@ -116,7 +116,7 @@ vi.mock('@/lib/mobileOrderFee', () => ({
 }));
 vi.mock('@/lib/push/notify', () => ({ notifyPaymentReceived: vi.fn() }));
 
-vi.mock('../../../app/api/auth/siwe/_session', () => ({
+vi.mock('@/lib/siweSession', () => ({
   requireSession: () => {
     hold.requireSession();
     return Promise.resolve({ ok: true, address: hold.sessionAddress });

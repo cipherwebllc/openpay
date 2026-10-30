@@ -55,7 +55,7 @@ vi.mock('@/lib/env', async (importOriginal) => {
 vi.mock('@/lib/logger', () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
-vi.mock('@/app/api/auth/siwe/_session', () => ({
+vi.mock('@/lib/siweSession', () => ({
   requireSession: async () => ({ ok: true, address: '0x52d4901142e2B5680027da5EB47C86CB02a3cA81' }),
   readSession: async () => ({ status: 'missing' }),
 }));

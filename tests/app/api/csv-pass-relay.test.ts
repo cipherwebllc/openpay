@@ -62,7 +62,7 @@ vi.mock('@/lib/kv', () => ({
 
 // requireSession をモック (デフォルト: WALLET でサインイン済)。
 const sessionHold = vi.hoisted(() => ({ signedIn: true }));
-vi.mock('../../../app/api/auth/siwe/_session', () => ({
+vi.mock('@/lib/siweSession', () => ({
   requireSession: vi.fn(async () => {
     if (!sessionHold.signedIn) {
       const { NextResponse } = await import('next/server');

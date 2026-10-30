@@ -6,7 +6,7 @@ import {
   logPaymentEvent,
   type PaymentLogContext,
 } from '@/lib/paymentLog';
-import type { StandardPaymentParams } from '@/hooks/useStandardPayment';
+import type { StandardPaymentParams } from '@/lib/paymentIntentStorage';
 
 const ERROR_SENTINEL = '0xerror' as const;
 

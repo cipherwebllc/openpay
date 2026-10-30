@@ -1,4 +1,5 @@
 import { isIP } from 'node:net';
+import { nodeResponseBody } from './nodeBody.mjs';
 
 export const DEFAULT_PAYMENT_FETCH_TIMEOUT_MS = 15_000;
 
@@ -221,7 +222,6 @@ async function nodeFetchWithSafeLookup(parsed, init, lookup) {
     parsed.protocol === 'https:'
       ? await import('node:https')
       : await import('node:http');
-  const { Readable } = await import('node:stream');
   return new Promise((resolve, reject) => {
     const request = transport.request(
       parsed,
@@ -250,7 +250,7 @@ async function nodeFetchWithSafeLookup(parsed, init, lookup) {
           const body =
             status === 204 || status === 205 || status === 304
               ? null
-              : Readable.toWeb(response);
+              : nodeResponseBody(response);
           resolve(
             new Response(body, {
               status,

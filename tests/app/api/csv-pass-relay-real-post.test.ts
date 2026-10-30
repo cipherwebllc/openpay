@@ -133,7 +133,7 @@ vi.mock('@/lib/kv', () => ({
 }));
 
 const session = vi.hoisted(() => ({ address: '', calls: 0 }));
-vi.mock('../../../app/api/auth/siwe/_session', () => ({
+vi.mock('@/lib/siweSession', () => ({
   requireSession: async () => {
     session.calls += 1;
     return { ok: true, address: session.address };

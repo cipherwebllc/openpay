@@ -8,7 +8,7 @@ vi.mock('@/lib/env', () => ({ env: {
   licenseNftAmoy: '0x3333333333333333333333333333333333333333',
   feeReceiver: '0x9999999999999999999999999999999999999999',
 } }));
-vi.mock('@/app/api/auth/siwe/_session', () => ({ requireSession: async () => ({ ok: true, address: '0x1111111111111111111111111111111111111111' }) }));
+vi.mock('@/lib/siweSession', () => ({ requireSession: async () => ({ ok: true, address: '0x1111111111111111111111111111111111111111' }) }));
 vi.mock('@/lib/net/ipHash', () => ({ clientIp: () => 'trusted', hashIpBucket: () => 'hash' }));
 vi.mock('@/lib/relay/relayGuards', () => ({ checkIpRateLimit: async () => true, checkReadRateLimit: async () => true }));
 vi.mock('@/lib/handle', () => ({ isValidHandleFormat: () => true, normalizeHandle: (s: string) => s.toLowerCase() }));

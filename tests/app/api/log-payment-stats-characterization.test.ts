@@ -563,17 +563,71 @@ describe('stats characterization: 集計の細部', () => {
   });
 });
 
-describe('stats characterization: 現行の不具合 (直さずに固定・別 PR で扱う)', () => {
-  // JSON の null 行は parse に成功して entries に入り、filter / isAggregable が null の property を
-  // 読んで TypeError になる (route は 500)。POST /api/log/payment は shape を検証してから書くので
-  // 通常の経路では入らない。直すときはこの 2 本を書き換える。
-  it('null の行があると GET が TypeError で落ちる', async () => {
-    mockKv([line({ result: 'success', chainId: 137, tokenAddress: JPYC }), 'null']);
-    await expect(GET(req())).rejects.toThrow(TypeError);
+describe('stats characterization: JSON の null 行 (object でない行)', () => {
+  // 以前は JSON の null 行が parse に成功して entries に入り、filter / isAggregable が null の property を
+  // 読んで TypeError になっていた (route は 500・窓全体の集計が取れない)。POST /api/log/payment は shape を
+  // 検証してから書くので通常の経路では入らない。今は null も 42・"x"・[] と同じく、絞り込みがあれば外れ、
+  // 無ければ invalidEntries に数えて集計から外す。集計の中身は壊れた行が無いときと 1 byte も変わらない。
+  const SINCE = '2026-05-23T00:00:00.000Z';
+  const good = [
+    line({ flow: 'batch', result: 'success', chainId: 137, tokenAddress: JPYC, merchantAmount: '100', feeAmount: '1', feeBreakdownVersion: 1, serverTs: SINCE }),
+    line({ flow: 'batch', result: 'reverted', chainId: 8453, tokenAddress: USDC_BASE, merchantAmount: '5', provider: 'circle', feeBreakdownVersion: 1, serverTs: SINCE }),
+    line({ flow: 'direct', result: 'success', chainId: 8453, tokenAddress: USDC_BASE, merchantAmount: '7', saleAmount: '7', bridge: 'cctp-v2', txHash: '0xAB', provider: 'circle', circlePaymasterNetUsdc: '3', feeBreakdownVersion: 1, serverTs: SINCE }),
+  ];
+  // object でない行 (JSON としては読める): null・数値・文字列・配列
+  const bad = ['null', '42', line('x'), '[]'];
+  const mixed = ['null', good[0], '42', good[1], line('x'), good[2], '[]', 'null'];
+  // 壊れた行の有無で変わってよいのは件数 (fetched・filteredCount・invalidEntries と total) だけ。
+  const COUNT_KEYS = ['fetched', 'filteredCount', 'invalidEntries', 'total'];
+  const aggregateOf = (body: Record<string, unknown>) =>
+    Object.fromEntries(Object.entries(body).filter(([k]) => !COUNT_KEYS.includes(k)));
+
+  it('絞り込み無し → 200・null と他の object でない行を invalidEntries に数え、集計は壊れた行が無いときと同じ', async () => {
+    mockKv(good);
+    const clean = await (await GET(req())).json();
+    mockKv(mixed);
+    const res = await GET(req());
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(aggregateOf(body)).toEqual(aggregateOf(clean));
+    expect(body).toMatchObject({
+      fetched: mixed.length,
+      parseErrors: 0,
+      filteredCount: mixed.length,
+      aggregatedCount: 3,
+      invalidEntries: bad.length + 1,
+    });
   });
 
-  it('chainId で絞っていても null の行で落ちる', async () => {
+  it.each([
+    ['chainId', { chainId: '8453' }],
+    ['since', { since: SINCE }],
+    ['chainId と since', { chainId: '137', since: SINCE }],
+  ])('%s で絞る → 200・null を含む object でない行は絞り込みで外れ、応答は壊れた行が無いときと同じ', async (_name, query) => {
+    mockKv(good, 10);
+    const clean = await (await GET(req(query))).json();
+    mockKv(mixed, 10);
+    const res = await GET(req(query));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect({ ...body, fetched: clean.fetched }).toEqual(clean);
+    expect(body.fetched).toBe(mixed.length);
+    expect(body.invalidEntries).toBe(0);
+  });
+
+  it('null だけの窓 → 200・byChain は空で invalidEntries 1', async () => {
     mockKv(['null']);
-    await expect(GET(req({ chainId: '137' }))).rejects.toThrow(TypeError);
+    const res = await GET(req());
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      fetched: 1,
+      parseErrors: 0,
+      filteredCount: 1,
+      aggregatedCount: 0,
+      invalidEntries: 1,
+      byChain: [],
+      byBridge: [],
+      byProvider: [],
+    });
   });
 });

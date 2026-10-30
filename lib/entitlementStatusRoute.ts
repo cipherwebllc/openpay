@@ -3,7 +3,7 @@
 
 import { NextResponse } from 'next/server';
 import type { Address } from 'viem';
-import { requireSession } from '@/app/api/auth/siwe/_session';
+import { requireSession } from '@/lib/siweSession';
 
 type EntitlementStatusRouteConfig<TStatus> = {
   enabled: () => boolean;

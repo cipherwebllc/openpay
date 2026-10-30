@@ -3,7 +3,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const h = vi.hoisted(() => ({ readSession: vi.fn() }));
-vi.mock('@/app/api/auth/siwe/_session', () => ({ readSession: h.readSession }));
+vi.mock('@/lib/siweSession', () => ({ readSession: h.readSession }));
 
 import { purchasesSession } from '@/lib/agent/purchasesHttp';
 
