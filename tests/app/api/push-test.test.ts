@@ -21,7 +21,7 @@ vi.mock('@/lib/env', () => ({
   },
 }));
 
-vi.mock('@/app/api/auth/siwe/_session', () => ({
+vi.mock('@/lib/siweSession', () => ({
   requireSession: () =>
     Promise.resolve(
       hold.sessionOk

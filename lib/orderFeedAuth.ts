@@ -2,7 +2,7 @@ import 'server-only';
 
 import { NextResponse } from 'next/server';
 import { getAddress, isAddress, type Address } from 'viem';
-import { requireSession } from '@/app/api/auth/siwe/_session';
+import { requireSession } from '@/lib/siweSession';
 import { env } from '@/lib/env';
 import { kvGet } from '@/lib/kv';
 import { logger } from '@/lib/logger';

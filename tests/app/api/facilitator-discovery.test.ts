@@ -120,7 +120,7 @@ vi.mock('@/lib/kv', () => ({
 const { mockRequireSession } = vi.hoisted(() => ({
   mockRequireSession: vi.fn(),
 }));
-vi.mock('@/app/api/auth/siwe/_session', () => ({
+vi.mock('@/lib/siweSession', () => ({
   requireSession: mockRequireSession,
 }));
 

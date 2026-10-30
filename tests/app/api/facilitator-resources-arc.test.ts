@@ -19,7 +19,7 @@ vi.mock('@/lib/env', async (importOriginal) => {
 vi.mock('@/lib/net/crossOriginWrite', () => ({ rejectCrossOriginWrite: () => null }));
 vi.mock('@/lib/relay/relayGuards', () => ({ checkIpRateLimit: async () => true }));
 vi.mock('@/lib/net/ipHash', () => ({ clientIp: () => '1.1.1.1', hashIpBucket: () => 'bucket' }));
-vi.mock('@/app/api/auth/siwe/_session', () => ({
+vi.mock('@/lib/siweSession', () => ({
   requireSession: async () => ({ ok: true, address: WALLET }),
 }));
 vi.mock('@/lib/x402/resourceRequestGuards', () => ({

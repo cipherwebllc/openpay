@@ -59,7 +59,7 @@ import { POST as noncePOST } from '@/app/api/auth/siwe/nonce/route';
 import { POST as verifyPOST } from '@/app/api/auth/siwe/verify/route';
 import { GET as meGET } from '@/app/api/auth/siwe/me/route';
 import { POST as logoutPOST } from '@/app/api/auth/siwe/logout/route';
-import { requireSession } from '@/app/api/auth/siwe/_session';
+import { requireSession } from '@/lib/siweSession';
 import { newSessionToken, sessionKey } from '@/lib/siwe';
 
 const SESSION_TOKEN = '0123456789abcdef'.repeat(4);

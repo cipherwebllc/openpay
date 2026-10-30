@@ -12,7 +12,7 @@ const h = vi.hoisted(() => ({
   limit: vi.fn(),
   audit: vi.fn(),
 }));
-vi.mock('@/app/api/auth/siwe/_session', () => ({ requireSession: h.session }));
+vi.mock('@/lib/siweSession', () => ({ requireSession: h.session }));
 vi.mock('@/lib/relay/relayGuards', () => ({ checkIpRateLimit: h.limit }));
 vi.mock('@/lib/net/ipHash', () => ({ clientIp: () => '192.0.2.1', hashIpBucket: () => 'ip-bucket' }));
 // Exercise the real logger at the production default, including its Sentry event tag.

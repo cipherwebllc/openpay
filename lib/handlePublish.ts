@@ -3,7 +3,7 @@
 // trim/filter の別実装を作らない。React / fetch / localStorage には依存しない。
 
 import { getAddress, isAddress } from 'viem';
-import type { HandleProfileDraft } from '@/hooks/useHandleProfileDraft';
+import type { HandleProfileDraft } from '@/lib/handleProfileDraft';
 import {
   isHandleEmbedUrl,
   isHandleFont,

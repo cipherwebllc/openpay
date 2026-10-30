@@ -46,7 +46,7 @@ vi.mock('@/lib/env', async (importOriginal) => {
     },
   };
 });
-vi.mock('@/app/api/auth/siwe/_session', () => ({ requireSession: h.session }));
+vi.mock('@/lib/siweSession', () => ({ requireSession: h.session }));
 vi.mock('viem', async (importOriginal) => ({
   ...await importOriginal<typeof import('viem')>(),
   createPublicClient: () => ({

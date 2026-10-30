@@ -44,7 +44,7 @@ vi.mock('@/lib/logger', () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 
-vi.mock('@/app/api/auth/siwe/_session', () => ({
+vi.mock('@/lib/siweSession', () => ({
   requireSession: async () => hold.session,
 }));
 

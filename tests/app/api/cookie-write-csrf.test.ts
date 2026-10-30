@@ -14,7 +14,7 @@ import { NextResponse } from 'next/server';
 
 const h = vi.hoisted(() => ({ sessionReads: 0 }));
 
-vi.mock('@/app/api/auth/siwe/_session', () => ({
+vi.mock('@/lib/siweSession', () => ({
   readSession: async () => {
     h.sessionReads += 1;
     return { status: 'missing' };

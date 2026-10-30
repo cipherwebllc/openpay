@@ -18,7 +18,7 @@ vi.mock('@/lib/env', async (importOriginal) => {
     enableHandles: true, enableShopLive: true, enableOrderToken: true,
   } };
 });
-vi.mock('@/app/api/auth/siwe/_session', () => ({
+vi.mock('@/lib/siweSession', () => ({
   requireSession: async () => ({ ok: true, address: '0x1111111111111111111111111111111111111111' }),
 }));
 vi.mock('@/lib/license/config', () => ({ licenseNftEnabled: () => true }));

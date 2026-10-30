@@ -43,7 +43,7 @@ vi.mock('@/lib/env', async (importOriginal) => {
     },
   } };
 });
-vi.mock('@/app/api/auth/siwe/_session', () => ({
+vi.mock('@/lib/siweSession', () => ({
   requireSession,
 }));
 vi.mock('@/lib/net/ipHash', () => ({

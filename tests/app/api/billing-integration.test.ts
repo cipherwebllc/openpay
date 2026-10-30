@@ -77,7 +77,7 @@ vi.mock('@/lib/kv', () => kvMod);
 const FEE_RECEIVER = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 const MERCHANT_ADDR = '0x52d4901142e2B5680027da5EB47C86CB02a3cA81';
 // 注: vi.mock ファクトリは hoist されるため、トップレベル定数を参照せずリテラルを直接書く。
-vi.mock('@/app/api/auth/siwe/_session', () => ({
+vi.mock('@/lib/siweSession', () => ({
   requireSession: async () => ({
     ok: true as const,
     address: '0x52d4901142e2B5680027da5EB47C86CB02a3cA81',

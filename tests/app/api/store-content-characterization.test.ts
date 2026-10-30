@@ -29,7 +29,7 @@ vi.mock('@/lib/env', () => ({
   },
 }));
 // _shared と license/config は実物を使い、private headers と可視性も固定する。
-vi.mock('@/app/api/auth/siwe/_session', () => ({ requireSession: h.session }));
+vi.mock('@/lib/siweSession', () => ({ requireSession: h.session }));
 vi.mock('@/lib/net/ipHash', () => ({
   clientIp: () => '192.0.2.1',
   hashIpBucket: () => 'hashed-ip',

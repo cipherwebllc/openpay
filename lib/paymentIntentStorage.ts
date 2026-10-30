@@ -31,6 +31,15 @@ export type StandardPaymentIntentParams = {
   contextKey?: Hex;
 };
 
+// hooks/useStandardPayment の mutate 引数 (型だけ)。lib/standardPaymentLog も使うため lib に置く
+// (lib/ は hooks/ を import できない・F-4)。hook は既存の import 先を保つため再エクスポートする。
+export type StandardPaymentParams = StandardPaymentIntentParams & {
+  customer?: Address;
+  tip?: true;
+  chainSlug?: import('@/lib/chains').ChainSlug;
+  mode?: 'standard';
+};
+
 export type StandardIntentMetadata = {
   version: 1;
   chainId: number;

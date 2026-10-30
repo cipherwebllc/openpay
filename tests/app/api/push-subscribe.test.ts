@@ -28,7 +28,7 @@ vi.mock('@/lib/env', () => ({
 }));
 
 const requireSessionSpy = vi.hoisted(() => vi.fn());
-vi.mock('@/app/api/auth/siwe/_session', () => ({
+vi.mock('@/lib/siweSession', () => ({
   requireSession: () => {
     requireSessionSpy();
     return Promise.resolve(
