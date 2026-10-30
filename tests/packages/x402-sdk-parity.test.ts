@@ -242,7 +242,7 @@ describe('env to options characterization', () => {
   });
 
   // B14: DISCOVERY_URL は catalog trust の権威 (載っている URL は ALLOWED_HOSTS 無しで
-  // 支払える) なので、平文 http で差し替えられると攻撃者のカタログが「審査済み」に化ける。
+  // 支払える) なので、平文 http で差し替えられると攻撃者のカタログが「OpenPay の掲載」に化ける。
   // http はローカル開発 (localhost / 127.0.0.1) だけに限る。
   it.each([
     ['https://catalog.example/api/discovery', true],

@@ -17,10 +17,13 @@ export const DEFAULT_MAX_TIMEOUT_SECONDS = 600;
 // 許可すると、売り手が facilitator を迂回して後日直接 settle できる波及を残す。
 export const MAX_SUPPORTED_TIMEOUT_SECONDS = MAX_AUTHORIZATION_TIMEOUT_SECONDS;
 export const DEFAULT_ALLOWED_HOSTS = 'open-pay.jp';
-// カタログ信頼 (既定 ON): OpenPay の審査済みカタログ (/api/discovery) に載っている URL への
-// 支払いを、ALLOWED_HOSTS への手動追加なしで許可する。掲載は 402 ゲート実在 + OpenPay 方式
-// (forwarder-split) の検証を通過したものだけで、金額の防御 (per-call/session/maxTotalJpyc) は
-// 本設定と無関係に常に効く。CATALOG_TRUST=false で無効化できる。
+// カタログ信頼 (既定 ON): OpenPay のカタログ (/api/discovery) に載っている URL への支払いを、
+// ALLOWED_HOSTS への手動追加なしで許可する。掲載は OpenPay の自動の probe (登録時と定期の
+// 再検証) を通ったもの。probe は応答の形 (誰でも 200 で読めないか・402 が OpenPay 方式
+// (forwarder-split) か) を見るだけで、URL の持ち主が出品者かは確かめないので、偽の掲載も
+// 再検証で隠されるまでは載りうる。支払いを守るのは掲載ではなく、署名前にライブ accept を掲載
+// accept と照合する catalogAcceptConsistent (catalog_accept_mismatch) と、本設定と無関係に
+// 常に効く金額の防御 (per-call/session/maxTotalJpyc)。CATALOG_TRUST=false で無効化できる。
 export const DEFAULT_CATALOG_TRUST = true;
 export const DEFAULT_DISCOVERY_URL = 'https://open-pay.jp/api/discovery';
 
@@ -75,7 +78,7 @@ export const SUPPORTED_JPYC_ASSETS = Object.freeze({
 export const SUPPORTED_NETWORKS = new Set(Object.keys(SUPPORTED_JPYC_ASSETS));
 
 // OpenPay が deploy 済みとして公開している Eip3009Forwarder。未掲載 chain の
-// forwarder は審査済み catalog accept との完全一致が取れた場合だけ許可する。
+// forwarder は catalog の掲載 accept (OpenPay サーバーが生成) との完全一致が取れた場合だけ許可する。
 // ホスト allowlist だけで署名の `to` を攻撃者 EOA へ差し替え、表示した分配を
 // 迂回して総額を直接受領する波及を断つ。
 export const SUPPORTED_JPYC_FORWARDERS = Object.freeze({
@@ -169,7 +172,7 @@ function parseHttpUrl(raw, label) {
 }
 
 // DISCOVERY_URL は catalog trust の権威 (ここに載る URL は ALLOWED_HOSTS への手動追加なしで
-// 支払える)。平文 http はネットワーク上で差し替え可能なので、攻撃者のカタログが「審査済み」に
+// 支払える)。平文 http はネットワーク上で差し替え可能なので、攻撃者のカタログが「OpenPay の掲載」に
 // 化けて支払い先を乗っ取る波及を断つため https に限る。例外はローカル開発 (localhost /
 // 127.0.0.1) のみ — 自機の facilitator/カタログを立てて配線を確かめる用途。
 function requireDiscoveryUrl(raw, label) {
@@ -481,7 +484,7 @@ export function evaluatePaymentGuards({
   } else {
     const hostAllowed = config.allowedHosts.includes(parsedUrl.hostname.toLowerCase());
     // catalog admission は完全一致だけ。query-free 掲載を任意 query へ広げると、
-    // GET 副作用を持つ未審査 URL へ buyer を到達させる波及が残る。
+    // GET 副作用を持つ未掲載の URL へ buyer を到達させる波及が残る。
     let listedAccept;
     if (config.catalogTrust && catalogListings instanceof Map) {
       listedAccept = catalogListings.get(parsedUrl.toString());
