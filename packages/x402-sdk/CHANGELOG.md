@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.10.5 — unreleased
+
+- Read seller responses with a byte cap counted from the stream (not from
+  `Content-Length`). Previously `quote()` and `pay()` read the whole response
+  with `response.text()`, so a listed seller could make the buyer's process hold
+  as much as the 15-second timeout let through.
+- The 402 challenge may be at most 256 KiB (`MAX_CHALLENGE_BODY_BYTES`). A larger
+  one is cancelled and `quote()` / `pay()` throw
+  `payment_target_response_too_large` before anything is signed. A response with
+  any other status is no longer read (its body is cancelled) and still returns
+  `expected_402_with_accepts`, whatever its size.
+- The response to the paid `X-PAYMENT` request may be at most 16 MiB by default
+  (`DEFAULT_MAX_PAID_BODY_BYTES`, new option `maxPaidBodyBytes` on
+  `createOpenPayClient` and `createPaymentExecutor`). Over that cap the stream is
+  cancelled and `pay()` returns `error: 'paid_body_too_large'`, `body: null`, the
+  usual `receipt` and `settlement`, `txHash` (verified receipts only) and
+  `authorizationNonce` instead of throwing, because the payment may already have
+  settled. Session and daily accounting are the same as for any other response.
+- The default transport turns the Node.js response into the body stream itself
+  instead of `Readable.toWeb`. On Node.js 22, cancelling an over-cap body through
+  `Readable.toWeb` could raise an uncaught `Controller is already closed` error.
+- Responses within the caps are returned exactly as before. No dependency changes.
+
 ## 0.10.4 — 2026-10-22
 
 - Raise `engines.node` from `>=20` to `>=22`. Node.js 20 reached end-of-life and

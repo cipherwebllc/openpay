@@ -640,6 +640,21 @@ malformed, forged, or mismatched; `receipt_unavailable` means no header was
 returned or the facilitator signer could not be resolved. Treat `unverified` and
 `receipt_unavailable` as not proven paid.
 
+Seller responses are read with a byte cap counted from the stream itself, not
+from `Content-Length`. The 402 challenge, read before anything is signed, may be
+at most 256 KiB (`MAX_CHALLENGE_BODY_BYTES`); a larger one is cancelled and
+`quote()` / `pay()` throw `payment_target_response_too_large`. A response with
+any other status is not read and returns `expected_402_with_accepts` as before,
+whatever its size. The response to
+the paid `X-PAYMENT` request may be at most 16 MiB by default
+(`DEFAULT_MAX_PAID_BODY_BYTES`); set `maxPaidBodyBytes` to change it. Over that
+cap the stream is cancelled and `pay()` does not throw, because the payment may
+already have settled: it returns `error: 'paid_body_too_large'` and
+`body: null` together with the usual `receipt` and `settlement`, `txHash` (from a
+`verified` receipt, otherwise `null`) and the `authorizationNonce`. Check those
+before paying again. A custom `fetchImpl` whose response body is not a WHATWG
+`ReadableStream` is read in full and then held to the same caps.
+
 ## Signers
 
 The environment adapter accepts `SIGNER_MODE=env-key` (default), `steward`, or

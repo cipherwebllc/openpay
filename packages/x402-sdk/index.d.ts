@@ -129,6 +129,12 @@ interface ClientCommonOptions {
   fetchImpl?: typeof globalThis.fetch;
   lookup?: PaymentLookup;
   requestTimeoutMs?: number;
+  /**
+   * Byte cap for the seller's response to the paid (X-PAYMENT) request. Default
+   * `DEFAULT_MAX_PAID_BODY_BYTES` (16 MiB). Over the cap the stream is cancelled and
+   * `pay()` returns a `PaidBodyTooLargeResult` instead of the body.
+   */
+  maxPaidBodyBytes?: number;
   nowSec?: () => number;
   now?: () => Date | number;
 }
@@ -292,6 +298,23 @@ export interface PaymentResult {
   settlement?: SettlementStatus;
 }
 
+/**
+ * Returned by `pay()` when the X-PAYMENT request was sent but the seller's response exceeded
+ * `maxPaidBodyBytes`. The body was cancelled unread; the payment may still have settled, so
+ * check `settlement`, `txHash` or `authorizationNonce` on chain before paying again.
+ */
+export interface PaidBodyTooLargeResult extends PaymentResult {
+  body: null;
+  settlement: SettlementStatus;
+  error: 'paid_body_too_large';
+  maxPaidBodyBytes: number;
+  /** The settled transaction from a `verified` receipt; `null` for any other settlement. */
+  txHash: Hex | null;
+  /** The EIP-3009 authorization nonce of this payment (on-chain `authorizationState`). */
+  authorizationNonce: Hex;
+  note: string;
+}
+
 export interface OpenPayClient {
   discover(options?: {
     query?: string;
@@ -305,7 +328,7 @@ export interface OpenPayClient {
   pay(
     url: string,
     options: { maxTotalJpyc: JpycAmount },
-  ): Promise<QuoteResult | PaymentResult>;
+  ): Promise<QuoteResult | PaymentResult | PaidBodyTooLargeResult>;
   readonly session: OpenPaySession;
 }
 
@@ -738,6 +761,10 @@ export const SUPPORTED_JPYC_FORWARDERS: Readonly<
 export const SUPPORTED_NETWORKS: Set<string>;
 
 export const DEFAULT_PAYMENT_FETCH_TIMEOUT_MS: 15000;
+/** Byte cap for responses read before signing (the 402 challenge). Over it, quote()/pay() throw. */
+export const MAX_CHALLENGE_BODY_BYTES: 262144;
+/** Default byte cap for the response to the paid (X-PAYMENT) request (16 MiB). */
+export const DEFAULT_MAX_PAID_BODY_BYTES: 16777216;
 export function isPrivatePaymentHost(hostname: string): boolean;
 export function parseSafePaymentUrl(raw: unknown): URL | null;
 export function fetchPaymentTarget(
@@ -892,7 +919,7 @@ export interface PaymentExecutor {
   pay(
     url: string,
     options: { maxTotalJpyc: JpycAmount },
-  ): Promise<QuoteResult | PaymentResult>;
+  ): Promise<QuoteResult | PaymentResult | PaidBodyTooLargeResult>;
 }
 export function createPaymentExecutor(options: {
   config: RuntimeConfig;
@@ -907,4 +934,6 @@ export function createPaymentExecutor(options: {
   now?: () => Date | number;
   resolveCatalogListings?: () => Promise<Map<string, unknown> | null>;
   resolveReceiptSigner?: ReceiptSignerResolver;
+  /** Default `DEFAULT_MAX_PAID_BODY_BYTES`; must be a positive integer. */
+  maxPaidBodyBytes?: number;
 }): PaymentExecutor;

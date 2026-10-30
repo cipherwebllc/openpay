@@ -94,6 +94,7 @@ export function createOpenPayClient(options = {}) {
     now: options.now,
     resolveCatalogListings,
     resolveReceiptSigner,
+    maxPaidBodyBytes: options.maxPaidBodyBytes,
   });
 
   async function withSafeErrors(operation) {

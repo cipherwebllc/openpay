@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.20.2 — unreleased
+
+- With `openpay-x402-sdk` 0.10.5, seller responses are read with a byte cap. `x402_quote` / `x402_pay` refuse a 402 challenge over 256 KiB before signing, and when the seller's response to a paid call exceeds 16 MiB, `x402_pay` returns `error: 'paid_body_too_large'` and `body: null` together with the usual `receipt`, `settlement` and `settlementNote`, `txHash` (verified receipts only) and `authorizationNonce`, instead of holding the whole body in memory. The tools and their inputs are unchanged; the `openpay-x402-sdk` range stays `^0.10.1`, so a fresh install resolves the latest 0.10.x SDK.
+
 ## 0.20.1 — 2026-10-22
 
 - Raise `engines.node` from `>=20` to `>=22`. Node.js 20 reached end-of-life and does not receive security releases (for example the October 2026 release that fixes the Brotli decoder used when `fetch` decodes a `br` response). The tools and their inputs are unchanged.
