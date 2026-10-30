@@ -49,7 +49,7 @@ vi.mock('@/lib/x402/config', () => ({
 }));
 
 // resource 束縛 claim の KV は in-memory (vanillaGateFacilitator.test と同じ最小実装)。
-const kvHold = vi.hoisted(() => ({ store: new Map<string, string>(), claimed: 0, marked: 0, lastTtlSec: null as number | null }));
+const kvHold = vi.hoisted(() => ({ store: new Map<string, string>(), claimed: 0, lastTtlSec: null as number | null }));
 vi.mock('@/lib/kv', async () => {
   const actual = await vi.importActual<typeof import('@/lib/kv')>('@/lib/kv');
   return {
@@ -62,16 +62,7 @@ vi.mock('@/lib/kv', async () => {
       kvHold.lastTtlSec = ttlSec;
       return { ok: true, value: null };
     },
-    kvEval: async (script: string, keys: string[]) => {
-      // settle 前の印 (MARK_VANILLA_CLAIM_SPENT) は record に spent を足す。それ以外 (解放) は DEL。
-      // 本物の Lua の所有者照合は tests/lib/x402/vanillaResourceClaim-lua.test.ts が確かめる。
-      if (script.includes('decoded.spent = true')) {
-        const current = kvHold.store.get(keys[0]);
-        if (current === undefined) return { ok: true, value: 0 };
-        kvHold.store.set(keys[0], JSON.stringify({ ...JSON.parse(current), spent: true }));
-        kvHold.marked += 1;
-        return { ok: true, value: 1 };
-      }
+    kvEval: async (_script: string, keys: string[]) => {
       const had = kvHold.store.delete(keys[0]);
       return { ok: true, value: had ? 1 : 0 };
     },
@@ -150,7 +141,6 @@ beforeEach(() => {
   funnel.record.mockReset();
   kvHold.store.clear();
   kvHold.claimed = 0;
-  kvHold.marked = 0;
   kvHold.lastTtlSec = null;
   configHold.arcEnabled = true;
   vi.stubGlobal('fetch', fetchMock);
@@ -176,9 +166,9 @@ async function pay(accepted: unknown, nonce?: string): Promise<Response> {
   );
 }
 
-// 第 8 回レビュー B-1: Gateway の verify は使用済み nonce を落とさない (7 日署名) ので、同じ署名の再送が毎回 content
-// (RPC 読み・attestation 署名) を動かしていた。settle に進んだ束縛には印を付け、再送は content を呼ばずに 402 にする。
-describe('vanillaGate Arc rail: settle に進んだ署名の再送で content を動かさない', () => {
+// 第 8 回レビュー B-1: Gateway の verify は使用済み nonce を落とさない (7 日署名) ので、同じ署名の再送 ('match') が
+// 毎回 content (RPC 読み・attestation 署名) を動かしていた。Arc では束縛を張った request だけが content に進む。
+describe('vanillaGate Arc rail: 同じ署名の再送で content を動かさない', () => {
   function payWith(accepted: unknown, nonce: string, content: Content): Promise<Response> {
     return handleVanillaPaidGet(
       new Request(RESOURCE.resourceUrl, { headers: { 'PAYMENT-SIGNATURE': v2Header(accepted, nonce) } }),
@@ -187,17 +177,34 @@ describe('vanillaGate Arc rail: settle に進んだ署名の再送で content �
     );
   }
 
-  it('Arc の購入が成立したあとの再送 → content も Gateway も呼ばずに 402 authorization_already_submitted', async () => {
+  it('Arc の購入が成立したあとの再送 → content も settle も呼ばずに 402 authorization_already_submitted', async () => {
     const content = vi.fn<Content>(() => NextResponse.json({ ok: true }));
     expect((await payWith(ARC_ACCEPT, '0x31', content)).status).toBe(200);
-    expect(kvHold.marked).toBe(1);
-    const verifyCalls = fetchMock.mock.calls.length;
+    const calls = fetchMock.mock.calls.length;
     const res = await payWith(ARC_ACCEPT, '0x31', content);
     expect(res.status).toBe(402);
     expect((await res.json()).error).toBe('authorization_already_submitted');
     // verify は通る (Gateway は使用済み nonce を落とさない) が、settle にも content にも進まない。
-    expect(fetchMock.mock.calls.length).toBe(verifyCalls + 1);
+    expect(fetchMock.mock.calls.length).toBe(calls + 1);
     expect(fetchMock.mock.calls.at(-1)![0]).toMatch(/\/verify$/);
+    expect(content).toHaveBeenCalledTimes(1);
+  });
+
+  it('同時に届いた同じ署名は、束縛を張った 1 本だけが content に進む', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const content = vi.fn<Content>(async () => {
+      await gate;
+      return NextResponse.json({ ok: true });
+    });
+    const first = payWith(ARC_ACCEPT, '0x35', content);
+    const second = payWith(ARC_ACCEPT, '0x35', content);
+    // 2 本目は 1 本目の content が終わる前に答える (content に入らない)。
+    expect((await second).status).toBe(402);
+    release();
+    expect((await first).status).toBe(200);
     expect(content).toHaveBeenCalledTimes(1);
   });
 
@@ -213,7 +220,7 @@ describe('vanillaGate Arc rail: settle に進んだ署名の再送で content �
     expect(content).toHaveBeenCalledTimes(1);
   });
 
-  it('Gateway の settle success:false (broadcast 前) は claim ごと印も戻る → 同じ支払いの再挑戦は content が動く', async () => {
+  it('Gateway の settle success:false (broadcast 前) は claim を戻す → 同じ支払いの再挑戦は content が動く', async () => {
     let settleCalls = 0;
     fetchMock.mockImplementation(async (url: string) => ({
       ok: true,
@@ -231,7 +238,7 @@ describe('vanillaGate Arc rail: settle に進んだ署名の再送で content �
     expect(content).toHaveBeenCalledTimes(2);
   });
 
-  it('Base の同じ束縛の再送は従来どおり content へ進む (印は付けない)', async () => {
+  it('Base の同じ束縛の再送は従来どおり content へ進む', async () => {
     fetchMock.mockImplementation(async (url: string) => ({
       ok: true,
       status: 200,
@@ -244,7 +251,6 @@ describe('vanillaGate Arc rail: settle に進んだ署名の再送で content �
     await payWith(BASE_ACCEPT, '0x34', content);
     await payWith(BASE_ACCEPT, '0x34', content);
     expect(content).toHaveBeenCalledTimes(2);
-    expect(kvHold.marked).toBe(0);
   });
 });
 

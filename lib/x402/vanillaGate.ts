@@ -52,7 +52,6 @@ import {
 } from './v2';
 import {
   claimVanillaResource,
-  markVanillaResourceSpent,
   releaseVanillaResource,
   vanillaPaymentIdentity,
   vanillaResourceBinding,
@@ -668,8 +667,6 @@ async function handleVanillaPaidGetInner(
   const claimIdentity = vanillaPaymentIdentity(facilitatorBody.paymentPayload);
   const claimBinding = vanillaResourceBinding(resource.resourceUrl, req.url);
   let ownedClaim: VanillaResourceClaimIdentity | null = null;
-  // この request が束縛を持っているか (自分で張った claim か、同じ束縛の再送)。Arc の settle 前の印に使う。
-  let claimHeld = false;
   if (!claimIdentity && rail === 'arc-gateway') {
     // Arc の payload 形は Circle の scheme 由来。形が変わって identity を導けなくなると束縛が
     // 無言で消えるので観測可能にする (挙動は従来どおり facilitator の判定に委ねる)。
@@ -686,13 +683,16 @@ async function handleVanillaPaidGetInner(
       recordFunnelAfterResponse('conflict', rail, url);
       return authorizationConflict();
     }
-    // 第 8 回レビュー B-1: Arc は Gateway の verify が使用済み nonce を落とさないので、settle に進んだ束縛への再送は
-    // content を呼ばずに 402 にする (これまでも settle が落ちて 402 だった・content を毎回動かさないだけ)。Base は従来どおり。
-    if (claim.kind === 'match' && claim.spent && rail === 'arc-gateway') {
+    // 第 8 回レビュー B-1: Arc は Gateway の verify が使用済み nonce を落とさない (7 日署名) ので、同じ束縛の再送
+    // ('match') を content へ進めると、使用済みの署名で 7 日のあいだ毎回 content (RPC 読み・attestation 署名) が動く。
+    // Arc では束縛を張った request (claimed) だけが content と settle に進み、再送は content を呼ばずに 402 にする。
+    // 勝者は SET NX の 1 回で決まるので、同時の再送も content に入れない。Gateway の success:false (broadcast 前) と
+    // content の 4xx は従来どおり claim を戻すので、同じ署名の正直な再挑戦は通る。settle が成功した Arc の署名の
+    // 'match' は、これまでも settle で落ちて 402 だった (再配信は成り立っていなかった)。Base は従来どおり。
+    if (claim.kind === 'match' && rail === 'arc-gateway') {
       recordFunnelAfterResponse('settle_failed', rail, url);
       return paymentChallenge(resource, accepts, 'authorization_already_submitted');
     }
-    claimHeld = claim.kind === 'claimed' || claim.kind === 'match';
     // 'match' (同一束縛の再送) は従来どおり content/settle へ進む。claim を張ったのが
     // 自分の request のときだけ、settle 前に落ちた場合の解放権を持つ。
     if (claim.kind === 'claimed') ownedClaim = claimIdentity;
@@ -716,13 +716,6 @@ async function handleVanillaPaidGetInner(
     await releaseClaim();
     recordFunnelAfterResponse('content_error', rail, url);
     return res;
-  }
-
-  if (rail === 'arc-gateway' && claimHeld && claimIdentity) {
-    // 第 8 回レビュー B-1: settle に進む前に印を付ける (結果が不明でも再送で content を動かさない)。Gateway の
-    // success:false は broadcast 前なので、従来どおり claim を戻せば印も一緒に消え、正直な再挑戦は通る。
-    // 印の失敗は従来どおり settle へ進む (markVanillaResourceSpent は投げない)。
-    await markVanillaResourceSpent({ identity: claimIdentity, binding: claimBinding });
   }
 
   let settle: { status: number; body: Record<string, unknown> };
