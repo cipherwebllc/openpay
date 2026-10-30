@@ -13,7 +13,7 @@ OpenPay で AI エージェントに支払い能力を持たせるときの安�
 | セッション累計上限 | 100 JPYC | 同上 |
 | 日次上限 | 任意設定 (超過は `daily_limit_exceeded` で拒否・**予算は署名前に予約**) | SDK spendStore (原子化) |
 | 接続先 allowlist | `open-pay.jp` のみ (追加は env で明示) | `ALLOWED_HOSTS` |
-| 購入対象の制限 | **審査済みカタログ掲載 URL のみ** (完全一致・失敗 fail-close) | `CATALOG_TRUST` (既定 ON) |
+| 購入対象の制限 | **カタログ掲載 URL のみ** (完全一致・失敗 fail-close)。掲載 = OpenPay の自動の probe (登録時と定期の再検証) を通った URL で、URL の持ち主が出品者かは確かめない。支払い条件は §3 の照合で守る | `CATALOG_TRUST` (既定 ON) |
 
 ## 2. 隔離 — 鍵と判断の分離
 

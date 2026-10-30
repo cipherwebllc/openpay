@@ -327,7 +327,7 @@ function summarizeDiscoveryItem(item) {
     resource: item.resource,
     ...optionalString(item, 'title'),
     description: item.description,
-    // いつ使うか (出品者が書いた 1 行)・ドキュメント・利用条件・更新日 (ISO)・最後に動作を確かめた日 (ISO)。
+    // いつ使うか (出品者が書いた 1 行)・ドキュメント・利用条件・更新日 (ISO)・自動の再検証を最後に通った日 (ISO)。
     // どれも /api/discovery にある値をそのまま渡す (無ければ出さない)。official は OpenPay 自身の出品だけ true。
     ...optionalString(item, 'trigger'),
     category: item.category,
