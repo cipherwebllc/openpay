@@ -8,7 +8,9 @@ import {
   readBodyCapped,
   readBodyPrefix,
   readJsonBodyCapped,
+  readTextBodyCapped,
   type CappedJsonResult,
+  type CappedTextResult,
 } from '@/lib/httpBodyCap';
 
 const enc = new TextEncoder();
@@ -109,6 +111,90 @@ describe('readJsonBodyCapped', () => {
     };
     const r = await readJsonBodyCapped(source, 1024);
     expect(r).toEqual<CappedJsonResult>({ ok: false, reason: 'invalid_json' });
+  });
+});
+
+describe('readTextBodyCapped', () => {
+  const BOM = [0xef, 0xbb, 0xbf];
+  const CAP = 64;
+
+  // 置き換え前の読み口 (`req.text()` → `Buffer.byteLength(text) > cap` で 413) をこの runtime でそのまま動かした結果。
+  async function viaReqText(bytes: Uint8Array<ArrayBuffer>, cap: number): Promise<CappedTextResult> {
+    const text = await new Request('http://localhost/x', { method: 'POST', body: bytes }).text();
+    return Buffer.byteLength(text, 'utf8') > cap ? { ok: false, reason: 'too_large' } : { ok: true, text };
+  }
+
+  // BOM の数 0〜3・不正な UTF-8 (0xFF / 途中で切れた 3 byte 文字 E3 81 / surrogate の ED A0 80)・生 byte が cap の前後 (+6/+7 を含む)。
+  const inputs: Array<{ name: string; bytes: Uint8Array<ArrayBuffer> }> = [];
+  for (const boms of [0, 1, 2, 3]) {
+    for (const [badName, bad] of [['なし', []], ['FF', [0xff]], ['E3 81', [0xe3, 0x81]], ['ED A0 80', [0xed, 0xa0, 0x80]]] as const) {
+      for (const size of [CAP - 2, CAP, CAP + 1, CAP + 3, CAP + 5, CAP + 6, CAP + 7, CAP + 9]) {
+        const head = [...new Array<number[]>(boms).fill(BOM).flat(), ...enc.encode('{"a":"'), ...bad];
+        const tail = [...enc.encode('"}')];
+        const fill = size - head.length - tail.length;
+        if (fill < 0) continue;
+        inputs.push({
+          name: `BOM ${boms} つ・不正 ${badName}・生 ${size} byte`,
+          bytes: Uint8Array.from([...head, ...enc.encode('x'.repeat(fill)), ...tail]),
+        });
+      }
+    }
+  }
+
+  it.each(inputs)('$name は req.text() と同じ結果', async ({ bytes }) => {
+    expect(await readTextBodyCapped(streamOf([bytes]), CAP)).toEqual(await viaReqText(bytes, CAP));
+    // 1 byte ずつの chunk でも同じ (多 byte 文字と BOM が chunk 境界で割れても復号は全体で行う)。
+    const oneByOne = streamOf([...bytes].map((b) => Uint8Array.of(b)));
+    expect(await readTextBodyCapped(oneByOne, CAP)).toEqual(await viaReqText(bytes, CAP));
+  });
+
+  it('入力の表は ok と too_large の両方を含み、不正な UTF-8 が上限以下の生 byte でも too_large になる例がある', async () => {
+    const results = await Promise.all(inputs.map(async ({ bytes }) => ({ bytes, r: await viaReqText(bytes, CAP) })));
+    expect(results.some(({ r }) => r.ok)).toBe(true);
+    expect(results.some(({ r }) => !r.ok)).toBe(true);
+    expect(results.some(({ bytes, r }) => !r.ok && bytes.byteLength <= CAP)).toBe(true);
+  });
+
+  it('body が無ければ空文字列 (req.text() と同じ)', async () => {
+    expect(await readTextBodyCapped({ body: null }, CAP)).toEqual<CappedTextResult>({ ok: true, text: '' });
+    expect(await readTextBodyCapped(new Request('http://localhost/x', { method: 'POST' }), CAP)).toEqual<CappedTextResult>(
+      { ok: true, text: '' },
+    );
+  });
+
+  it('生 byte が cap + 6 を超えた chunk で読むのをやめて上流へ cancel を伝える', async () => {
+    const cancel = vi.fn();
+    let pulls = 0;
+    // 閉じない stream。cap + 6 を超えた時点で止まらないと読み続ける。
+    const source = {
+      body: new ReadableStream<Uint8Array>(
+        {
+          pull(controller) {
+            pulls += 1;
+            controller.enqueue(enc.encode('aaaa'));
+          },
+          cancel() {
+            cancel();
+          },
+        },
+        { highWaterMark: 0 },
+      ),
+    };
+    expect(await readTextBodyCapped(source, 10)).toEqual<CappedTextResult>({ ok: false, reason: 'too_large' });
+    expect(cancel).toHaveBeenCalledOnce();
+    // 4 byte ずつ: 16 byte (cap + 6) までは読み、20 byte になった chunk で止める。
+    expect(pulls).toBe(5);
+  });
+
+  it('読み取り中の stream エラーは unreadable (呼び元へ throw しない)', async () => {
+    const source = {
+      body: new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.error(new Error('boom'));
+        },
+      }),
+    };
+    expect(await readTextBodyCapped(source, CAP)).toEqual<CappedTextResult>({ ok: false, reason: 'unreadable' });
   });
 });
 

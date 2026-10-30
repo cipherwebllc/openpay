@@ -5,12 +5,21 @@ type BodySource = {
 };
 
 type BodyReadResult =
-  | { ok: true; bytes: Uint8Array }
+  | { ok: true; bytes: Uint8Array<ArrayBuffer> }
   | { ok: false; reason: 'too_large' | 'unreadable' };
 
 export type CappedJsonResult =
   | { ok: true; value: unknown }
   | { ok: false; reason: 'too_large' | 'invalid_json' };
+
+export type CappedTextResult =
+  | { ok: true; text: string }
+  | { ok: false; reason: 'too_large' | 'unreadable' };
+
+// req.text() が外す先頭の BOM (EF BB BF) は最大 2 つ = 6 byte (Node 26 の undici で確認: BOM を 1 つ外したうえで、BOM を
+// 外す既定の TextDecoder に渡す)。readTextBodyCapped が生 byte で余分に読む量。1 つしか外さない runtime でも、余分に読む
+// だけで結果は変わらない。
+const MAX_STRIPPED_BOM_BYTES = 6;
 
 async function consumeBodyCapped(
   source: BodySource,
@@ -58,6 +67,28 @@ export async function readBodyCapped(
 ): Promise<Uint8Array | null> {
   const result = await consumeBodyCapped(source, cap);
   return result.ok ? result.bytes : null;
+}
+
+// `const text = await req.text(); if (Buffer.byteLength(text, 'utf8') > cap) → 413` と同じ結果を、上限を大きく超える body を
+// 最後まで読まずに返す (req.text() で読んでいた relay/facilitator 等の入口の、応答を変えずに読み口だけ差し替えるため)。
+// - text は req.text() と同じ文字列 (先頭の BOM を外し、不正な UTF-8 は U+FFFD に置き換える)。BOM の外し方を runtime の
+//   req.text() と食い違わせないよう、復号は同じ実装 (Response#text) に任せる。
+// - too_large は従来どおり「復号した文字列を UTF-8 に戻した長さ > cap」。不正な UTF-8 は置換文字 (3 byte) に伸びるので、
+//   生 byte が cap 以下でも too_large になりうる (fatal に復号する readJsonBodyCapped とはここが違う)。
+// - 生 byte が cap + 6 を超えたらその chunk で読むのをやめて cancel する。復号で縮むのは外れる BOM (最大 6 byte) だけで
+//   置換は長さを縮めないので、cap + 6 を超えた body は全体を読んでも必ず too_large になる (結果は変わらない)。違いが出るのは
+//   cap + 6 を超えたあとで stream が切れる body だけで、req.text() なら投げていた (unreadable) ところを too_large で返す。
+// - body が無ければ空文字列 (req.text() と同じ)。読み取り中の stream の失敗は unreadable (req.text() が投げるのと同じ扱い)。
+export async function readTextBodyCapped(
+  source: BodySource,
+  cap: number,
+): Promise<CappedTextResult> {
+  if (!source.body) return { ok: true, text: '' };
+  const result = await consumeBodyCapped(source, cap + MAX_STRIPPED_BOM_BYTES);
+  if (!result.ok) return result;
+  const text = await new Response(result.bytes).text();
+  if (Buffer.byteLength(text, 'utf8') > cap) return { ok: false, reason: 'too_large' };
+  return { ok: true, text };
 }
 
 // body の先頭 cap バイトだけを返す (全体は要らず、先頭に印があるかだけを見る判定用)。cap に達したら残りは読まずに

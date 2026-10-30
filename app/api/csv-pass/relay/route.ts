@@ -24,6 +24,7 @@ import { requireSession } from '../../auth/siwe/_session';
 import { env } from '@/lib/env';
 import { logger } from '@/lib/logger';
 import { csvPassPriceWei } from '@/lib/csvPass';
+import { readTextBodyCapped } from '@/lib/httpBodyCap';
 import {
   PROVIDER,
   MAINNET_CHAINS,
@@ -92,18 +93,17 @@ export async function POST(req: Request): Promise<NextResponse> {
   const session = await requireSession();
   if (!session.ok) return session.response;
 
-  let bodyText: string;
-  try {
-    bodyText = await req.text();
-  } catch {
+  // 上限を大きく超える body は最後まで読まずに 413 (応答は req.text() で読んでいたときと同じ)。
+  const bodyRead = await readTextBodyCapped(req, MAX_BODY_BYTES);
+  if (!bodyRead.ok && bodyRead.reason === 'unreadable') {
     return NextResponse.json({ ok: false, error: 'invalid_json' }, { status: 400 });
   }
-  if (Buffer.byteLength(bodyText, 'utf8') > MAX_BODY_BYTES) {
+  if (!bodyRead.ok) {
     return NextResponse.json({ ok: false, error: 'payload_too_large' }, { status: 413 });
   }
   let raw: Record<string, unknown>;
   try {
-    raw = JSON.parse(bodyText);
+    raw = JSON.parse(bodyRead.text);
   } catch {
     return NextResponse.json({ ok: false, error: 'invalid_json' }, { status: 400 });
   }

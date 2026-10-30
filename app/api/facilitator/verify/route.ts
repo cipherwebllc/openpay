@@ -15,6 +15,7 @@ import { verifyForwarderSettle } from '@/lib/relay/forwarderRecover';
 import { clientIp } from '@/lib/net/ipHash';
 import { checkReadRateLimit } from '@/lib/relay/relayGuards';
 import { MAX_BODY_BYTES, anonymizeIp } from '@/lib/relay/relayRoute';
+import { readTextBodyCapped } from '@/lib/httpBodyCap';
 import { reserveFacilitatorPayment } from '@/lib/x402/facilitatorReservation';
 
 export const runtime = 'nodejs';
@@ -34,16 +35,15 @@ export async function POST(req: Request): Promise<NextResponse> {
     );
   }
 
-  let bodyText: string;
-  try {
-    bodyText = await req.text();
-  } catch {
+  // 認証なしの入口なので、上限を大きく超える body は最後まで読まずに 413 (応答は req.text() で読んでいたときと同じ)。
+  const bodyRead = await readTextBodyCapped(req, MAX_BODY_BYTES);
+  if (!bodyRead.ok && bodyRead.reason === 'unreadable') {
     return NextResponse.json(
       { isValid: false, invalidReason: 'invalid_json' },
       { status: 400 },
     );
   }
-  if (Buffer.byteLength(bodyText, 'utf8') > MAX_BODY_BYTES) {
+  if (!bodyRead.ok) {
     return NextResponse.json(
       { isValid: false, invalidReason: 'payload_too_large' },
       { status: 413 },
@@ -51,7 +51,7 @@ export async function POST(req: Request): Promise<NextResponse> {
   }
   let raw: unknown;
   try {
-    raw = JSON.parse(bodyText);
+    raw = JSON.parse(bodyRead.text);
   } catch {
     return NextResponse.json(
       { isValid: false, invalidReason: 'invalid_json' },
