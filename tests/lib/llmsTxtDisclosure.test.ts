@@ -162,7 +162,12 @@ describe('public/llms.txt 開示同期 (掟 14③)', () => {
     expect(llms).toContain(`${DISCLOSED_DUAL_RAIL_USDC.arcChainName}（\`eip155:${DISCLOSED_DUAL_RAIL_USDC.arcChainId}\`）の USDC も提示する`);
     expect(llms).toContain('売上は出品者の受取アドレスの Gateway 残高に入り、出品者が https://open-pay.jp/ja/discovery/arc-payout で受取アドレスのウォレットから全額を Arc の USDC として引き出す');
     // 引き出しの費用 (Circle の手数料・受け取りの取引のネットワーク手数料は出品者) と受取先の制限 (2026-10-21)。
-    expect(llms).toContain('Circle の手数料は現在 1 回 0.0035 USDC・受け取りの取引のネットワーク手数料は出品者のウォレットの Arc の USDC・受取先は EOA に限る');
+    // 2026-10-30 (D-3): Circle の手数料は Circle が決めて変わりうるので固定額を書かず、引き出し画面の見積もりへ案内する
+    // (固定額を書くと、Circle が変えたときに AI 検索・エージェントが古い額を引用し続け、CI も気づかない)。
+    expect(llms).toContain('Circle の手数料は引き出すたびに Gateway 残高から引かれる〔引き出し画面に見積もり額を表示〕・受け取りの取引のネットワーク手数料は出品者のウォレットの Arc の USDC・受取先は EOA に限る');
+    const payoutTerms = llms.match(/Arc の USDC として引き出す（[^）]*）/)?.[0];
+    expect(payoutTerms).toBeDefined();
+    expect(payoutTerms).not.toMatch(/\d[\d.,]*\s*USDC/);
     expect(llms).not.toContain('第三者出品の USDC 面は Base のみ');
     expect(llms).toContain('コードを書かずに使えるゲートウェイ x402-jpyc-gateway で動かしている出品は（SDK 版のゲートは Arc を提示しない）');
     // 「Arc は通常決済のみ」「店舗のウォレットへ直接着金」にも x402 の Circle Gateway 経由の例外。

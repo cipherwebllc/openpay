@@ -3193,7 +3193,7 @@
     "formUsdcServiceName": "例: Weather Forecast API",
     "arcPayoutCta": "Arc の売上を受け取る (Gateway 残高の引き出し) →",
     "formUsdcArcEnable": "Arc (Circle Gateway) でも販売する",
-    "formUsdcArcHint": "買い手は Circle Gateway Wallet への事前入金と、EOA（通常のウォレット）での署名が必要です。売上は受取アドレスの Gateway 残高に入ります。受け取るには「Arc の売上を受け取る」ページで受取アドレスのウォレットをつなぎ、全額を Arc の USDC として引き出します（署名 1 回と、受け取りの取引 1 回）。引き出すたびに Circle の手数料（現在 0.0035 USDC）が残高から引かれ、受け取りの取引のネットワーク手数料（Arc の USDC・1 回 0.003〜0.005 USDC 程度・ウォレットの送り方で変わります）はあなたのウォレットから払います — 先に Arc の USDC を少し用意してください。受取先は EOA（通常のウォレット）に限ります（コントラクトウォレットでは Arc を有効にできません）。SDK (openpay-x402-sdk) で動かしている出品は Arc を提示しません（x402-jpyc-gateway 版が必要）。Bazaar への掲載は Base 側です。有効にすると、Arc での支払いのたびに、支払いの内容（受取アドレスを含みます）が Circle Gateway（Circle Technology Services, LLC・米国）に送られます。",
+    "formUsdcArcHint": "買い手は Circle Gateway Wallet への事前入金と、EOA（通常のウォレット）での署名が必要です。売上は受取アドレスの Gateway 残高に入ります。受け取るには「Arc の売上を受け取る」ページで受取アドレスのウォレットをつなぎ、全額を Arc の USDC として引き出します（署名 1 回と、受け取りの取引 1 回）。引き出すたびに Circle の手数料（引き出し画面に見積もり額を表示）が残高から引かれ、受け取りの取引のネットワーク手数料（Arc の USDC・1 回 0.003〜0.005 USDC 程度・ウォレットの送り方で変わります）はあなたのウォレットから払います — 先に Arc の USDC を少し用意してください。受取先は EOA（通常のウォレット）に限ります（コントラクトウォレットでは Arc を有効にできません）。SDK (openpay-x402-sdk) で動かしている出品は Arc を提示しません（x402-jpyc-gateway 版が必要）。Bazaar への掲載は Base 側です。有効にすると、Arc での支払いのたびに、支払いの内容（受取アドレスを含みます）が Circle Gateway（Circle Technology Services, LLC・米国）に送られます。",
     "errorUsdcPrice": "USDC 価格の形式が正しくありません。$ なしの数字（例: 0.005）で入力してください。",
     "errorUsdcPayTo": "USDC 受取アドレスの形式が正しくありません。",
     "errorUsdcArcContract": "USDC の受取アドレスがコントラクトウォレット（Safe など）のため、Arc (Circle Gateway) では販売できません。Arc の売上は受取アドレスの署名で引き出すため、通常のウォレット（EOA）の受取アドレスにするか、Arc のチェックを外してください。",
