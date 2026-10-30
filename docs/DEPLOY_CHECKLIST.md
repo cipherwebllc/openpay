@@ -1811,6 +1811,12 @@ flag ON + forwarder/JPYC 設定済の Amoy (80002) で 1 周する。route テ�
   カタログ増でも 1 リクエスト当たりの KV ファンアウトは有界。
 
 ### §14.6 既知の前提 / 制約 (accepted)
+- 掲載の再検証: Vercel Cron (`vercel.json`) が毎時 0 分に `/api/cron/reverify` を呼ぶ (既存 `CRON_SECRET`)。2026-10-30 に日次から毎時へ
+  (GitHub の schedule は毎時の指定でも実測 0.4〜7.4 時間おき・平均 4.4 時間で、死んだ掲載を隠すのが半日近く遅れえた)。
+  `.github/workflows/reverify-cron.yml` (毎時 5 分の指定) は予備として残す。route は runId (UTC 時) + KV lock + 対象ごとの
+  `lastRunId` で、同じ UTC 時の 2 回目は probe せず重複として飛ばす (片方が止まっても毎時を保つ)。鮮度は post-deploy verify が
+  `/api/cron/reverify-status` (CRON_SECRET・cursor の `lastOkAt` を GET 1 回で読むだけ) を 3 時間で、予備の run 履歴を 8 時間で見る。
+  deploy 直後で `lastOkAt` がまだ無い間は warn (次の毎時 0 分の run で入る)。
 - JPYC Activity: Vercel Cron (`vercel.json`) が毎時 20 分に `/api/cron/jpyc-activity` を呼ぶ (既存 `CRON_SECRET`)。
   2026-10-05 に GitHub Actions の schedule から移した (GitHub は実測で平均 5.4 時間おきにしか動かず、有料の窓が期間の 4 割前後 503 だった)。
   `.github/workflows/jpyc-activity-cron.yml` は手動復旧用 (`workflow_dispatch` のみ)。
@@ -1883,9 +1889,10 @@ flag ON + forwarder/JPYC 設定済の Amoy (80002) で 1 周する。route テ�
 - **実測 (stats の日ごとの値・UTC 日)**: 9/25 38,659 → 9/26 22,798 (#664/#665) → **9/27 9,019・9/28 10,404** → 9/29 #685。月 $0.5 = 1 日 約 8,065 が上限なので、402 の計測を 50 件に 1 件へ (見込み 約 1,250 減/日・推定)。
 - 主な消費と対策 (2026-09-26 → 09-29): license-mint の cron を 5 分 → 15 分、index 修復 (Lua 3 本で 1 回約 27) は各 UTC 時の最初の run (0〜14 分) だけ (修復は 50 件ずつ巡るので毎時より減らさない)。KV バックアップを 1 日 2 回 → 1 回
   (`lib/license/minter.ts`・通常の購入/登録は due へ直接入るので発行は遅れない)。`/api/discovery` の CDN キャッシュを 10 秒 → 60 秒。
-  402 challenge の計測を 1/10 抽出。reverify は UA 交代 (1 時間単位) と連動するため毎時のまま。
+  402 challenge の計測を 1/10 抽出。reverify は UA 交代 (1 時間単位) と連動するため毎時のまま (2026-10-30 から主は Vercel Cron の毎時)。
 - 1 回あたりの目安: レート制限の判定 3〜4 (多くの API は分・日の 2 窓で 6〜8)・funnel 3〜4・`/api/discovery` の miss は
-  index 1 + 掲載数ぶんの GET + 2・license-mint (修復なし) 約 4・同 (修復あり) 約 28。2026-10-12 から license-mint は
+  index 1 + 掲載数ぶんの GET + 2・license-mint (修復なし) 約 4・同 (修復あり) 約 28・reverify は 1 run 約 7 + 4×対象数
+  (対象 11 で約 51・同じ UTC 時の 2 回目は約 7 + 対象数)。2026-10-12 から license-mint は
   押さえの掃除と滞留の監視 (`lib/license/holdSweep.ts`) に 1 run 3 (押さえ・決済待ちが空のとき・EVAL 1 + ZCARD 2) を足す
   (96 run/日で約 290/日)。押さえが 1 件でもある run は ZRANGEBYSCORE と ZCOUNT の 2 (照合の窓を過ぎた古い押さえが
   あれば見本の 1) と、範囲に入った押さえ (最大 20) の GET が増える。期限切れの押さえを照合した run だけ、照合

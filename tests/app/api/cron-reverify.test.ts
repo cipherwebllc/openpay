@@ -191,3 +191,58 @@ describe('GET /api/cron/reverify cursor quarantine', () => {
     expect(logs.warn.map(([event]) => event)).toEqual(['x402.reverify.storage_error']);
   });
 });
+
+// 本番設定の検証は /api/cron/reverify-status で cursor の lastOkAt を読み、起動元 (Vercel Cron / GitHub) を
+// 問わず再検証が毎時 200 で終えているかを見る。200 の run だけが進め、503 の run は直前の値を引き継ぐ。
+describe('GET /api/cron/reverify lastOkAt (最後に 200 で終えた run の時刻)', () => {
+  const PREVIOUS = '2026-10-30T00:00:00.000Z';
+
+  beforeEach(() => {
+    io.externalIds = ['r0'];
+    io.writes = [];
+    io.writeOk = true;
+    logs.warn = [];
+    vi.stubEnv('CRON_SECRET', 'secret');
+    vi.stubEnv('ALERT_WEBHOOK_URL', '');
+  });
+
+  it('200 の run は lastOkAt をその run の時刻に進める', async () => {
+    io.cursor = { offset: 0, lastOkAt: PREVIOUS };
+    io.targetStorageError = false;
+    const route = await load();
+
+    const before = Date.now();
+    const response = await route.GET(request('secret'));
+    const after = Date.now();
+
+    expect(response.status).toBe(200);
+    const lastOkAt = Date.parse((io.writes.at(-1) as ReverifyCursor).lastOkAt ?? '');
+    expect(lastOkAt).toBeGreaterThanOrEqual(before);
+    expect(lastOkAt).toBeLessThanOrEqual(after);
+  });
+
+  it('storage エラーの run (503) は進めず、直前の値を引き継ぐ (quarantine で cursor を進める回も)', async () => {
+    io.targetStorageError = true;
+    io.externalIds = Array.from({ length: 40 }, (_, i) => `r${i}`);
+    io.cursor = { offset: 0, storageErrorStreak: 0, lastOkAt: PREVIOUS };
+    let route = await load();
+    expect((await route.GET(request('secret'))).status).toBe(503);
+    expect(io.writes.at(-1)).toMatchObject({ offset: 0, storageErrorStreak: 1, lastOkAt: PREVIOUS });
+
+    vi.resetModules();
+    io.cursor = { offset: 0, storageErrorStreak: 2, lastOkAt: PREVIOUS };
+    route = await load();
+    expect((await route.GET(request('secret'))).status).toBe(503);
+    const quarantined = io.writes.at(-1) as ReverifyCursor;
+    expect(quarantined).toMatchObject({ offset: 25, lastOkAt: PREVIOUS });
+    expect(quarantined.storageErrorStreak).toBeUndefined();
+  });
+
+  it('まだ 1 度も 200 で終えていなければ、storage エラーの run は lastOkAt を作らない', async () => {
+    io.targetStorageError = true;
+    io.cursor = { offset: 0 };
+    const route = await load();
+    expect((await route.GET(request('secret'))).status).toBe(503);
+    expect(io.writes.at(-1)).not.toHaveProperty('lastOkAt');
+  });
+});

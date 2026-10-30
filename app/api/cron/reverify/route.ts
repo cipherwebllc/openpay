@@ -332,10 +332,17 @@ export async function GET(req: Request): Promise<NextResponse> {
         streak: storageErrorStreak,
       });
     }
+    // lastOkAt は 200 で終える run だけが進める (storage エラーの run は 503 なので直前の値を引き継ぐ)。
+    // cursor の書き込みに失敗した run は何も残らないので、残った値は常に「200 を返した run」の時刻になる。
+    const lastOkPart = !storageError
+      ? { lastOkAt: checkedAt }
+      : cursor.lastOkAt
+        ? { lastOkAt: cursor.lastOkAt }
+        : {};
     const nextCursor =
       storageError && !quarantined
-        ? { offset: cursor.offset, ...directoryPart, storageErrorStreak }
-        : { offset: selected.nextOffset, ...directoryPart };
+        ? { offset: cursor.offset, ...directoryPart, storageErrorStreak, ...lastOkPart }
+        : { offset: selected.nextOffset, ...directoryPart, ...lastOkPart };
     const cursorSaved = await writeReverifyCursor(nextCursor);
     const summary = summarize(runId, outcomes, directoryResult.summary);
     // 接続先の診断 (ホスト名と採用 env 名のみ)。env を切り替えたつもりで旧プロキシに残っていた

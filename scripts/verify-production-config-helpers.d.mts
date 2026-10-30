@@ -1,4 +1,8 @@
+/** 本番の最後の成功 (/api/cron/reverify-status の lastOkAt) の鮮度の基準 (毎時 + 2 回の失敗まで)。 */
 export const REVERIFY_MAX_AGE_MS: number;
+export const REVERIFY_CLOCK_SKEW_MS: number;
+/** 予備のトリガー reverify-cron.yml の run 履歴の鮮度の基準 (GitHub の schedule の実測の遅れに合わせる)。 */
+export const REVERIFY_GITHUB_RUN_MAX_AGE_MS: number;
 
 export type ReverifyRun = {
   databaseId: number;
@@ -16,6 +20,20 @@ export function assessReverifyRun(
   log: string,
   nowMs?: number,
 ): ReverifyRunAssessment;
+
+/** /api/cron/reverify-status の応答から、再検証の最後の成功が基準の時間内かを判定する (記録なしは warn)。 */
+export function assessReverifyFreshness(
+  status: number,
+  body: unknown,
+  nowMs?: number,
+): { ok: boolean; detail: string; severity?: 'warn' };
+
+/** /api/cron/reverify-status を CRON_SECRET で読んで判定する (通信の失敗・停止は固定の文言で NG)。 */
+export function checkReverifyFreshness(
+  base: string,
+  secret: string | undefined,
+  options?: { fetchImpl?: typeof fetch; timeoutMs?: number; nowMs?: number },
+): Promise<{ ok: boolean; detail: string; severity?: 'warn' }>;
 
 /** `gh run list` の結果 (新しい順) から、完了した最新の run を選ぶ (実行中の run はログがまだ無い)。 */
 export function latestCompletedRun<T extends { status?: string | null }>(runs: unknown): T | undefined;

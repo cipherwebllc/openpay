@@ -65,6 +65,21 @@ describe('GitHub Actions reverify-cron', () => {
   });
 });
 
+describe('掲載の再検証 (reverify) の定期実行', () => {
+  // GitHub の schedule は毎時の指定でも実測 0.4〜7.4 時間おき (2026-10-24〜30) で、死んだ掲載を隠すのが
+  // 半日近く遅れうる。主を Vercel Cron の毎時に移し、GitHub は予備として残す (2026-10-30・Q8)。
+  it('Vercel Cron が毎時 0 分に /api/cron/reverify を呼ぶ (日次のフォールバックではない)', () => {
+    expect((vercelConfig.crons ?? []).filter((c) => c.path === '/api/cron/reverify')).toEqual([
+      { path: '/api/cron/reverify', schedule: '0 * * * *' },
+    ]);
+  });
+
+  it('GitHub Actions 側の毎時 (予備) も残す — 片方が止まっても毎時を保つ (route は同じ UTC 時の 2 回目を重複として飛ばす)', () => {
+    const workflow = readFileSync(resolve(root, '.github/workflows/reverify-cron.yml'), 'utf8');
+    expect(workflow).toMatch(/^\s*-\s*cron:\s*'5 \* \* \* \*'/m);
+  });
+});
+
 describe('JPYC Activity の定期実行', () => {
   // 有料の窓は最新バケットから 4 時間で 503 data_stale になる。GitHub の schedule は実測で平均 5.4 時間おき
   // にしか動かなかったため Vercel Cron で毎時回す (2026-10-05)。

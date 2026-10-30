@@ -2,7 +2,7 @@
   "crons": [
     {
       "path": "/api/cron/reverify",
-      "schedule": "0 20 * * *"
+      "schedule": "0 * * * *"
     },
     {
       "path": "/api/cron/store-reconcile",
