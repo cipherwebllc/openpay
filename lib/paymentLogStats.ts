@@ -176,6 +176,12 @@ export function filterPaymentLogEntries(
   filter: { chainId?: number; sinceMs?: number },
 ): PaymentLogStatsEntry[] {
   return entries.filter((e) => {
+    // 壊れた KV 行が JSON の `null` だと下の e.chainId / e.serverTs が TypeError を投げ、窓全体の GET が
+    // 500 になる (POST は shape を検証するので通常の経路では入らない)。行 1 本の破損が集計全体に
+    // 波及しないよう、null は chainId も serverTs も無い entry と同じ結果にする: 絞り込みがあれば外し、
+    // 無ければ残して aggregatePaymentLog の invalidEntries に数える。42・"x"・[] など他の object で
+    // ない値は property を読んでも投げず、もともとこの結果になる。
+    if (e === null) return filter.chainId === undefined && filter.sinceMs === undefined;
     if (filter.chainId !== undefined && e.chainId !== filter.chainId) {
       return false;
     }
@@ -197,6 +203,10 @@ export function isAggregable(
   tokenAddress: string;
   result: 'success' | 'reverted' | 'error';
 } {
+  // 壊れた KV 行が JSON の `null` だと e.chainId が TypeError を投げ、集計全体 (GET) が 500 になる。
+  // その波及を断つため、null は 42・"x"・[] など他の object でない値と同じく集計できない entry に
+  // する (それらは property を読んでも投げず、下の chainId の検査で false になる)。
+  if (e === null) return false;
   if (typeof e.chainId !== 'number' || !Number.isInteger(e.chainId)) return false;
   if (typeof e.tokenAddress !== 'string') return false;
   if (e.result !== 'success' && e.result !== 'reverted' && e.result !== 'error') {
