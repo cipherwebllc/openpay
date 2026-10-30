@@ -13,8 +13,9 @@ import { clientIp, hashIpBucket } from '@/lib/net/ipHash';
 import { checkIpRateLimit } from '@/lib/relay/relayGuards';
 import { redactUrlForTelemetry } from '@/lib/telemetryRedaction';
 import { arcPayToRejection } from '@/lib/x402/arcPayToReachability';
-import { isFreelyAccessible, probeGate } from '@/lib/x402/moderation';
+import { isFreelyAccessible, probeGateDetailed } from '@/lib/x402/moderation';
 import { buildPaywallSnippet } from '@/lib/x402/paywallSnippet';
+import { gateAcceptMismatch, registrationAcceptExpectation } from '@/lib/x402/registrationGateMatch';
 import {
   checkResourceWalletRateLimit,
   RESOURCE_BODY_MAX_BYTES,
@@ -130,9 +131,10 @@ export async function POST(req: Request): Promise<NextResponse> {
 
   // ゲート方式の検証: 402 は返すが accepts が OpenPay (forwarder-split/JPYC) でない URL は、
   // 「JPYC で払える」というカタログの約束を守れないため掲載しない (他 facilitator ゲートの
-  // ミスマッチ掲載を防ぐ・実加盟店の USDC ゲート登録で発覚)。判定不能 'unknown' は従来どおり
-  // fail-open。未登録では pin する ID がないため、起動不能なスニペットを加盟店へ渡さない。
-  if ((await probeGate(parsed.input.url)) === 'foreign') {
+  // ミスマッチ掲載を防ぐ・実加盟店の USDC ゲート登録で発覚)。未登録では pin する ID がないため、
+  // 起動不能なスニペットを加盟店へ渡さない。
+  const gate = await probeGateDetailed(parsed.input.url);
+  if (gate.result === 'foreign') {
     return NextResponse.json(
       {
         error: 'gate_not_openpay',
@@ -141,11 +143,34 @@ export async function POST(req: Request): Promise<NextResponse> {
     );
   }
 
+  // OpenPay 方式の 402 でも、その JPYC accept の受取先 (extra.openpay.merchant)・チェーン・JPYC・forwarder が
+  // 登録と違う URL は掲載しない (E-2: 他人の 402 をそのまま使った偽の掲載・別の受取先や testnet を向いた
+  // ゲートの設定ミス)。わざと登録の受取先を返す偽のゲートは止められない (照合の範囲は registrationGateMatch.ts)。
+  if (gate.result === 'openpay') {
+    const mismatch = gateAcceptMismatch(gate.accepts, registrationAcceptExpectation(parsed.input.payTo));
+    if (mismatch) {
+      const redacted = await redactUrlForTelemetry(parsed.input.url);
+      logger.warn('x402.facilitator.gate_accept_mismatch', {
+        merchant: session.address,
+        mismatch,
+        resourceOrigin: redacted.origin,
+        resourceHash: redacted.hash,
+      });
+      return NextResponse.json({ error: 'gate_accept_mismatch', mismatch }, { status: 422 });
+    }
+  }
+
   const arcRejection = await arcCheck;
   if (arcRejection) return NextResponse.json({ error: arcRejection.error }, { status: arcRejection.status });
 
+  // 判定不能 'unknown' (404・3xx・timeout・5xx 等) は登録を受けるが、最初の再検証が OpenPay の 402 を確かめるまで
+  // 公開の一覧に出さない (hidden + pendingFirstVerification・plans/full-review-2026-10-30.md Q5)。拒否はしない:
+  // SDK / スニペットのゲートは出品 ID が無いと 402 を返せないので、「登録して ID を得る → ゲートを置く」の順に
+  // なる (ゲートの README の「仮の値で 500 のまま登録 → 実際の値で再デプロイ」もこの順)。
   const id = crypto.randomUUID();
-  const created = await createResource(parsed.input, id, Date.now());
+  const created = await createResource(parsed.input, id, Date.now(), {
+    pendingFirstVerification: gate.result === 'unknown',
+  });
   if (!created.ok) {
     if (created.reason === 'url_taken') {
       return NextResponse.json({ error: 'url_taken' }, { status: 409 });

@@ -16,6 +16,7 @@
 
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { checkComposition } from './lib/luaBundleComposition.mjs';
 
 const root = process.cwd();
 const thresholdsSrc = readFileSync(join(root, 'lib/x402/reverifyThresholds.ts'), 'utf8');
@@ -45,11 +46,51 @@ const EXPECTED = [
     "if ARGV[5]=='block' and authFailures>=",
   ' then hidden=true end; local v={lastCheckedAt=ARGV[2],failures=failures,lastRunId=ARGV[3],probedUrl=ARGV[1]}; ',
   'return cjson.encode({failures=failures,authFailures=authFailures,before=before,after=hidden})',
+
+  // 最初の再検証を待つ新規掲載の印 (pendingFirstVerification・PR-09b)。落ちると、閾値で隠れた掲載が ID の照会で
+  // 引けたまま台帳も書かれない / 台帳を継承した掲載が印を持ったままになる。
+  // reverify.ts REVERIFY_PENDING_FIRST_VERIFICATION (条件と nil 代入。閾値は下の THRESHOLD_FORMS)
+  "if (not hidden) or (ARGV[4]=='violation' and failures>=",
+  ") or (ARGV[5]=='block' and authFailures>=",
+  ') then o.pendingFirstVerification=nil end; ',
+  // reverify.ts REVERIFY_HIDDEN_URL_LEDGER (印つきの hidden には台帳を書かない)
+  "if hidden and o.pendingFirstVerification~=true then redis.call('SET',KEYS[2],ARGV[6],'EX',ARGV[7]) end; ",
+  // registry.ts CAS_CREATE (台帳がある URL は hidden の doc = ARGV[4] で作る。印を付けないのは JS 側の
+  // createResource が ARGV[4] を印なしで組むため = Lua の連結ではないので tests/lib/x402/registry-moderation-lua.test.ts が検査)
+  "redis.call('EXISTS',KEYS[6])==1 then doc=ARGV[4]; code=3 end; redis.call('SET',KEYS[1],doc); ",
+  // registry.ts CAS_UPDATE (台帳済 URL への PATCH で印を外す)
+  "redis.call('EXISTS',KEYS[5])==1 then o.hidden=true; o.pendingFirstVerification=nil end; end; o.url=ARGV[2]; ",
+  // registry.ts CAS_DEACTIVATE_WITH_LEDGER (印つきの削除は台帳を書かない)
+  "if o.url~=ARGV[5] then return -4 end; if o.hidden==true and o.pendingFirstVerification~=true then " +
+    "redis.call('SET',KEYS[3],ARGV[3],'EX',ARGV[4]) end; ",
 ];
 // 閾値がソースと一致することは、畳み込まれた形か String(<n>) の形のどちらかで確認する。
 const THRESHOLD_FORMS = [
   [`failures>=${hide} then`, `failures>="+String(${hide})+" then`],
   [`authFailures>=${authHide} then`, `authFailures>="+String(${authHide})+" then`],
+  // REVERIFY_PENDING_FIRST_VERIFICATION の 2 つの閾値 (カウンタ遷移の `>=n then` とは後ろの形で区別する)。
+  // ⚠️ ここに Lua の印 (ARGV[ / KEYS[ / redis.call) を入れない: テンプレートの中にあると
+  // tests/lib/luaTemplateFence.test.ts がこの配列を Lua の定義とみなして違反にする。
+  [`failures>=${hide}) or (`, `failures>="+String(${hide})+") or (`],
+  [
+    `authFailures>=${authHide}) then o.pendingFirstVerification=nil`,
+    `authFailures>="+String(${authHide})+") then o.pendingFirstVerification=nil`,
+  ],
+];
+// 断片が残っているだけでなく、CAS の決まった位置に連結されていることの検査。minifier は単発の定数を
+// その場に畳み込むか、変数のまま `"+X+"` で連結するので、`+` の連結を AST でたどり、変数は使われた場所から
+// 見えている宣言の値を求めて、断片の全体と一致するかを見る (scripts/lib/luaBundleComposition.mjs・限界もそこ)。
+// expected は Lua の断片の全体 (閾値はソースの reverifyThresholds.ts から)。
+const COMPOSED = [
+  {
+    // reverify.ts CAS_EXTERNAL_REVERIFY: 印の解除は restore の判定の直後・保存の前。
+    name: '再検証の CAS が restore の判定の後で印を外す',
+    after: "if checked and claim==-5 then restoreBlocked='url_taken' end; end; end; ",
+    expected:
+      "if (not hidden) or (ARGV[4]=='violation' and failures>=" + hide +
+      ") or (ARGV[5]=='block' and authFailures>=" + authHide +
+      ') then o.pendingFirstVerification=nil end; ',
+  },
 ];
 // 文が連結された壊れ方 (数字の直後に空白なしで if/local/return が続く)。
 const BROKEN = /(?:(?:>=|==)\d+|stock\.supply|stock\.sold\+1)(?:if|local|return|elseif)\b/;
@@ -75,6 +116,8 @@ try {
 
 const found = EXPECTED.map(() => null);
 const thresholdFound = THRESHOLD_FORMS.map(() => null);
+// 連結はバンドル全体で数える: `after` の出現が 1 つ以上あり、どのファイルのどの出現にも断片が続くこと。
+const composedStats = COMPOSED.map(() => ({ total: 0, okFiles: [], failingFiles: [] }));
 const broken = [];
 for (const file of files) {
   const src = readFileSync(file, 'utf8');
@@ -83,6 +126,12 @@ for (const file of files) {
   });
   THRESHOLD_FORMS.forEach((forms, i) => {
     if (thresholdFound[i] === null && forms.some((f) => src.includes(f))) thresholdFound[i] = file;
+  });
+  COMPOSED.forEach(({ after, expected }, i) => {
+    const { total, failing } = checkComposition(src, after, expected, file);
+    if (total === 0) return;
+    composedStats[i].total += total;
+    (failing > 0 ? composedStats[i].failingFiles : composedStats[i].okFiles).push(file.replace(root + '/', ''));
   });
   const m = BROKEN.exec(src);
   if (m) broken.push({ file, sample: src.slice(Math.max(0, m.index - 60), m.index + 40) });
@@ -104,6 +153,18 @@ THRESHOLD_FORMS.forEach((forms, i) => {
   } else {
     failed = true;
     console.error(`[NG] 閾値 ${i + 1} がバンドルに見つかりません: ${forms.join(' / ')}`);
+  }
+});
+COMPOSED.forEach(({ name }, i) => {
+  const { total, okFiles, failingFiles } = composedStats[i];
+  if (total > 0 && failingFiles.length === 0) {
+    console.log(`[OK] 連結 ${i + 1} (${name}) が ${total} か所すべてで続く: ${okFiles.join(', ')}`);
+  } else if (total === 0) {
+    failed = true;
+    console.error(`[NG] 連結 ${i + 1} (${name}) の直前の断片がバンドルに見つかりません`);
+  } else {
+    failed = true;
+    console.error(`[NG] 連結 ${i + 1} (${name}) が続かない箇所があります (断片が落ちたか、変数の値が違う): ${failingFiles.join(', ')}`);
   }
 });
 for (const b of broken) {

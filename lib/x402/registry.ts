@@ -80,6 +80,14 @@ export type X402Resource = {
   updatedAt?: number;
   verification?: X402Verification;
   hidden?: boolean;
+  // 新規登録の probe が判定不能 (unknown: 404・3xx・timeout・5xx 等) だった掲載の印。必ず hidden: true と一緒に
+  // 付け、最初の再検証が OpenPay の 402 を確かめて hidden を解くときに一緒に消える (lib/x402/reverify.ts)。
+  // 通常のモデレーションの hidden になったとき (台帳の継承・台帳済 URL への PATCH・再検証の違反の閾値) にも消え、
+  // 以後は印のない hidden として従来どおり扱う = 印は「一度も検証されていないから隠しているだけ」の状態にだけ残る。
+  // 既存の record には無い = 従来どおり (移行なし)。hidden を使う公開面はそのまま隠し、exact-ID の照会
+  // (getPublicResource) だけはこの印の hidden を返す — 出品者のゲート (SDK / スニペット) は自分の掲載を
+  // ID で引いて 402 を作るので、そこで 404 にすると 402 を返せず、再検証の ok に永久に届かない。
+  pendingFirstVerification?: true;
   usdc?: X402ResourceUsdc;
 };
 
@@ -344,15 +352,18 @@ export type CreateResourceResult =
 // cap 判定・保存・両 index 登録を CAS_CREATE で原子化する (cap race / orphan を防ぐ)。nowMs を引数化
 // して testable に。parseResourceInput を経由しない内部呼び出しでも OpenPay origin の偽装 record を
 // 永続化させない。戻り: invalid_url=予約 origin / too_many=登録上限 / storage=KV エラー / ok=作成。
+// opts.pendingFirstVerification = 登録の probe が判定不能だった (hidden + 印で作り、最初の再検証の ok まで
+// 公開の一覧に出さない)。台帳で hidden を継承するときは印を付けない (従来どおりの hidden・下の hiddenResource)。
 export async function createResource(
   input: X402ResourceInput,
   id: string,
   nowMs: number,
+  opts: { pendingFirstVerification?: boolean } = {},
 ): Promise<CreateResourceResult> {
   if (isOpenPayCanonicalOriginUrl(input.url)) {
     return { ok: false, reason: 'invalid_url' };
   }
-  const resource: X402Resource = {
+  const base: X402Resource = {
     id,
     merchant: input.merchant,
     url: input.url,
@@ -370,7 +381,12 @@ export async function createResource(
     createdAt: nowMs,
     updatedAt: nowMs,
   };
-  const hiddenResource: X402Resource = { ...resource, hidden: true };
+  const resource: X402Resource = opts.pendingFirstVerification
+    ? { ...base, hidden: true, pendingFirstVerification: true }
+    : base;
+  // 台帳 (モデレーションで隠された URL) を継承する作成は印を付けない: 継承した hidden は本物のモデレーション状態で、
+  // 印の例外 (ID の照会で返す・台帳を立てない) を与えると、削除 → 再登録でその状態を洗い流せる。
+  const hiddenResource: X402Resource = { ...base, hidden: true };
   const cas = await kvEval<number>(
     CAS_CREATE,
     [
@@ -415,7 +431,7 @@ const RESOLVE_CONCURRENCY = 25;
 // と owner 一覧 (listResourcesForMerchant) で共有する。
 async function resolveActiveByIds(
   ids: string[],
-  opts: { includeHidden: boolean },
+  opts: { includeHidden: boolean; includePendingFirstVerification?: boolean },
 ): Promise<X402Resource[] | null> {
   const out: X402Resource[] = [];
   for (let i = 0; i < ids.length; i += RESOLVE_CONCURRENCY) {
@@ -425,7 +441,11 @@ async function resolveActiveByIds(
     for (const got of batch) {
       if (!got.ok) return null; // 取得失敗を「空」と誤認しない
       const res = safeParse<X402Resource>(got.value);
-      if (res && res.active && (opts.includeHidden || res.hidden !== true)) {
+      if (
+        res && res.active &&
+        (opts.includeHidden || res.hidden !== true ||
+          (opts.includePendingFirstVerification === true && res.pendingFirstVerification === true))
+      ) {
         out.push(res);
       }
     }
@@ -434,10 +454,15 @@ async function resolveActiveByIds(
 }
 
 // Exact-ID public reads bypass the bounded discovery index while preserving its visibility rules.
+// 例外は最初の再検証を待つ新規掲載 (pendingFirstVerification) だけ: 出品者のゲートはこの照会で自分の accepts を
+// 作るので、ここで隠すと 402 を返せず、再検証が ok を観測できない (一覧には出ない・ID を知る者しか引けない)。
 export async function getPublicResource(id: string): Promise<
   { ok: true; resource: X402Resource | null } | { ok: false }
 > {
-  const resources = await resolveActiveByIds([id], { includeHidden: false });
+  const resources = await resolveActiveByIds([id], {
+    includeHidden: false,
+    includePendingFirstVerification: true,
+  });
   if (resources === null) return { ok: false };
   const resource = resources[0];
   return {
@@ -501,8 +526,10 @@ export const CAS_UPDATE =
   'if KEYS[2]~=KEYS[3] then local claim=claimAvailable(KEYS[2],ARGV[14]); if claim~=1 then return claim end; end; ' +
   // clean な掲載から台帳済 URL に PATCH するだけで hidden を洗い流し、公開に戻す経路を断つ。
   // URL 変更時だけ継承し、同じ URL の価格/説明編集で再検証済の掲載を hidden に戻さない。
+  // 継承した hidden はモデレーション状態なので、最初の再検証を待つ印 (pendingFirstVerification) は外す
+  // (印の例外 = ID の照会で返す・台帳を立てない、をモデレーション済みの URL に持ち込まない)。
   'if o.url~=ARGV[2] then o.verification=nil; ' +
-  "if redis.call('EXISTS',KEYS[4])==1 or redis.call('EXISTS',KEYS[5])==1 then o.hidden=true end; end; " +
+  "if redis.call('EXISTS',KEYS[4])==1 or redis.call('EXISTS',KEYS[5])==1 then o.hidden=true; o.pendingFirstVerification=nil end; end; " +
   'o.url=ARGV[2]; o.description=ARGV[3]; o.priceJpyc=ARGV[4]; o.category=ARGV[5]; o.payTo=ARGV[6]; ' +
   "if ARGV[7]=='' then o.docsUrl=nil else o.docsUrl=ARGV[7] end; " +
   "if ARGV[8]=='' then o.license=nil else o.license=ARGV[8] end; " +
@@ -530,10 +557,15 @@ export const CAS_DEACTIVATE_BODY =
 // N-5: hidden 済の掲載を削除するときだけ URL 台帳 (KEYS[3]) に印を残す。owner が
 // 「DELETE → 同一 URL で再登録」で hidden を消せないようにする (createResource が継承する)。
 // hidden の判定は権威レコード (o.hidden) 側で行うので、呼び元の読取と競合しても誤って印を残さない。
+// 台帳の規則: hidden かつ印 (pendingFirstVerification) なしのときだけ書く。印は「一度も検証されていないから隠して
+// いるだけ」の状態にしか残らない — 台帳を継承した作成は印を付けず (createResource)、台帳済 URL への PATCH
+// (CAS_UPDATE) と再検証の確定違反・締め出しの閾値 (reverify.ts) で印を外す。だから印つきの hidden には洗い流す
+// モデレーション状態が無く、台帳を書くと新しい掲載を違反扱いにしてしまう (作り直した掲載が印のない hidden になり、
+// ID の照会が 404 → 出品者のゲートが 402 を返せず、再検証の ok に届かない)。再登録はどのみち登録時の probe を通る。
 export const CAS_DEACTIVATE_WITH_LEDGER =
   CAS_OWNER_GUARD +
   'if o.url~=ARGV[5] then return -4 end; ' +
-  "if o.hidden==true then redis.call('SET',KEYS[3],ARGV[3],'EX',ARGV[4]) end; " +
+  "if o.hidden==true and o.pendingFirstVerification~=true then redis.call('SET',KEYS[3],ARGV[3],'EX',ARGV[4]) end; " +
   CAS_DEACTIVATE_BODY;
 
 export type UpdateResourceResult =
@@ -643,8 +675,8 @@ export async function deactivateResource(
   return { ok: true }; // 1 (無効化) / 2 (既に無効・冪等)
 }
 
-// 公開カタログ (discovery)。active かつ hidden でないもののみ・新しい順。hidden record は index に
-// 残して cron の成功 probe で自動復帰できるようにする。**KV エラーは null**
+// 公開カタログ (discovery)。active かつ hidden でないもののみ・新しい順 (最初の再検証を待つ新規掲載も hidden なので
+// 出ない)。hidden record は index に残して cron の成功 probe で自動復帰できるようにする。**KV エラーは null**
 // (呼び元 discovery は 503 を返し、空カタログと誤認・キャッシュさせない)。
 export async function listActiveResources(): Promise<X402Resource[] | null> {
   const r = await kvLrange(RESOURCES_INDEX, 0, LIST_FETCH_CAP - 1);

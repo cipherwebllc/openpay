@@ -10,6 +10,7 @@ import {
   MAX_RESOURCES_PER_MERCHANT,
   RESOURCES_INDEX,
 } from '@/lib/x402/registry';
+import { hiddenUrlLedgerKey } from '@/lib/x402/hiddenUrlLedger';
 
 const OWNER = getAddress('0x1111111111111111111111111111111111111111');
 const STRANGER = getAddress('0x9999999999999999999999999999999999999999');
@@ -86,7 +87,10 @@ vi.mock('@/lib/kv', () => ({
       if (o.active === false) return { ok: true as const, value: -3 }; // 削除済は編集不可
       if (o.url !== args[1]) {
         delete o.verification;
-        if (store.kv.has(keys[3]) || store.kv.has(keys[4])) o.hidden = true;
+        if (store.kv.has(keys[3]) || store.kv.has(keys[4])) {
+          o.hidden = true;
+          delete o.pendingFirstVerification;
+        }
       }
       o.url = args[1];
       o.description = args[2];
@@ -106,8 +110,11 @@ vi.mock('@/lib/kv', () => ({
       store.kv.set(keys[0], enc);
       return { ok: true as const, value: enc };
     }
-    // N-5: hidden 済の削除だけ URL 台帳 (KEYS[3]) に印を残す。
-    if (script.includes("if o.hidden==true then redis.call('SET',KEYS[3]") && o.hidden === true) {
+    // N-5: hidden 済の削除だけ URL 台帳 (KEYS[3]) に印を残す (最初の再検証を待つ新規掲載は残さない)。
+    if (
+      script.includes("if o.hidden==true and o.pendingFirstVerification~=true then redis.call('SET',KEYS[3]") &&
+      o.hidden === true && o.pendingFirstVerification !== true
+    ) {
       store.kv.set(keys[2], args[2]);
     }
     if (o.active === false) return { ok: true as const, value: 2 };
@@ -158,17 +165,43 @@ vi.mock('@/lib/logger', () => ({
 
 // モデレーション probe をモック (実 fetch を避ける)。既定 false = ゲート済扱いで通す。
 // isPrivateHost は parseResourceInput が使うため false (テスト URL は public 扱い) を返す。
-const { mockFreelyAccessible, mockProbeGate } = vi.hoisted(() => ({
+// 新規登録 (POST) は probeGateDetailed、編集 (PATCH) は probeGate を使う。
+type ProbeDetail = { result: 'openpay' | 'foreign' | 'unknown'; accepts: unknown[] };
+const { mockFreelyAccessible, mockProbeGate, mockProbeGateDetailed } = vi.hoisted(() => ({
   mockFreelyAccessible: vi.fn(async () => false),
   mockProbeGate: vi.fn(
     async (): Promise<'openpay' | 'foreign' | 'unknown'> => 'unknown',
+  ),
+  mockProbeGateDetailed: vi.fn(
+    async (): Promise<ProbeDetail> => ({ result: 'unknown', accepts: [] }),
   ),
 }));
 vi.mock('@/lib/x402/moderation', () => ({
   isFreelyAccessible: mockFreelyAccessible,
   probeGate: mockProbeGate,
+  probeGateDetailed: mockProbeGateDetailed,
   isPrivateHost: () => false,
 }));
+
+// 登録の受取先 (payTo) で SDK のゲートが返す 402 の JPYC accept (load() の testnet 設定のカタログと同じ値)。
+function openpayAccept(merchant: string = OWNER, overrides: Record<string, unknown> = {}) {
+  return {
+    scheme: 'exact',
+    network: 'eip155:80002',
+    maxAmountRequired: '1002000000000000000000',
+    resource: 'https://api.example.jp/paid/translate',
+    payTo: FORWARDER,
+    asset: JPYC_AMOY,
+    extra: {
+      name: 'JPY Coin', version: '1', decimals: 18, assetTransferMethod: 'eip3009',
+      openpay: { mode: 'forwarder-split', forwarder: FORWARDER, merchant, feeReceiver: FEE_RECEIVER },
+    },
+    ...overrides,
+  };
+}
+function openpayProbe(merchant: string = OWNER): ProbeDetail {
+  return { result: 'openpay', accepts: [openpayAccept(merchant)] };
+}
 
 type ResourcesMod = {
   GET: () => Promise<Response>;
@@ -266,6 +299,9 @@ beforeEach(() => {
   mockFreelyAccessible.mockResolvedValue(false); // 既定: ゲート済 (通す)
   mockProbeGate.mockReset();
   mockProbeGate.mockResolvedValue('unknown'); // 既定: 判定不能 = fail-open (通す)
+  mockProbeGateDetailed.mockReset();
+  // 新規登録の既定: 受取先が OWNER の OpenPay の 402 (すぐ公開)。判定不能 (unknown) の扱いは専用の describe で見る。
+  mockProbeGateDetailed.mockResolvedValue(openpayProbe());
 });
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -370,7 +406,7 @@ describe('x402 facilitator /resources', () => {
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({ error: 'invalid_url' });
     expect(mockFreelyAccessible).not.toHaveBeenCalled();
-    expect(mockProbeGate).not.toHaveBeenCalled();
+    expect(mockProbeGateDetailed).not.toHaveBeenCalled();
     expect(store.kv.size).toBe(0);
   });
 
@@ -410,7 +446,7 @@ describe('x402 facilitator /resources', () => {
       60,
     );
     expect(mockFreelyAccessible).not.toHaveBeenCalled();
-    expect(mockProbeGate).not.toHaveBeenCalled();
+    expect(mockProbeGateDetailed).not.toHaveBeenCalled();
   });
 
   it('正当性表明なし (attested 欠如) → 400 attestation_required', async () => {
@@ -875,7 +911,7 @@ describe('x402 /discovery', () => {
   it('foreign ゲートの新規登録は 422 を返し、ID のないスニペットを同梱しない', async () => {
     const { resources } = await load();
     mockRequireSession.mockResolvedValue({ ok: true, address: OWNER });
-    mockProbeGate.mockResolvedValueOnce('foreign');
+    mockProbeGateDetailed.mockResolvedValueOnce({ result: 'foreign', accepts: [] });
     const res = await resources.POST(postReq(validBody));
     expect(res.status).toBe(422);
     const body = (await res.json()) as { error: string; paywallSnippet?: string };
@@ -1365,6 +1401,7 @@ describe('public exact-ID discovery', () => {
   it('embeds owner-configured IDs and separate recipients in POST and owner GET snippets', async () => {
     const { resources } = await load();
     mockRequireSession.mockResolvedValue({ ok: true, address: OWNER });
+    mockProbeGateDetailed.mockResolvedValueOnce(openpayProbe(STRANGER));
     const res = await resources.POST(postReq({ ...validBody, payTo: STRANGER,
       usdc: { priceUsd: '0.01', payTo: FIRST_PARTY_SELLER } }));
     const { resource, paywallSnippet } = await res.json();
@@ -1373,5 +1410,152 @@ describe('public exact-ID discovery', () => {
       expect(snippet).toContain(`EXPECTED_RECIPIENT = "${STRANGER}"`);
       expect(snippet).toContain(`EXPECTED_USDC_RECIPIENT = "${FIRST_PARTY_SELLER}"`);
     }
+  });
+});
+
+// PR-09b (E-2 / Q5): 新規登録の probe の結果ごとの扱い。
+//   unknown (404・3xx・timeout・5xx)  → 登録は受ける・最初の再検証の ok まで公開の一覧に出さない (ID の照会だけは返す)
+//   openpay + 受取先などが一致       → 従来どおりすぐ公開
+//   openpay + 受取先などが不一致     → 422 gate_accept_mismatch (保存しない)
+describe('registration probe outcomes', () => {
+  async function readById(id: string) {
+    const route = await import('@/app/api/discovery/[id]/route');
+    return route.GET(new Request(`https://open-pay.jp/api/discovery/${id}`), ctx(id));
+  }
+  async function listedIds(discovery: () => Promise<Response>): Promise<string[]> {
+    const body = (await (await discovery()).json()) as { items: Array<{ id?: string }> };
+    return body.items.flatMap((item) => (item.id ? [item.id] : []));
+  }
+
+  it('unknown は 201 で受け、hidden + 印で保存し、一覧には出さず ID の照会だけ返す', async () => {
+    const { resources, discovery } = await load();
+    mockRequireSession.mockResolvedValue({ ok: true, address: OWNER });
+    mockProbeGateDetailed.mockResolvedValueOnce({ result: 'unknown', accepts: [] });
+
+    const res = await resources.POST(postReq(validBody));
+    expect(res.status).toBe(201);
+    const { resource } = (await res.json()) as { resource: { id: string } };
+    expect(resource).toMatchObject({ hidden: true, pendingFirstVerification: true });
+    expect(JSON.parse(store.kv.get(resourceKey(resource.id))!)).toMatchObject({
+      hidden: true, pendingFirstVerification: true,
+    });
+
+    expect(await listedIds(discovery)).not.toContain(resource.id);
+    // 出品者のゲート (SDK / スニペット / x402-jpyc-gateway) は ID で自分の accepts を引く。ここが 404 だと 402 を返せない。
+    const byId = await readById(resource.id);
+    expect(byId.status).toBe(200);
+    const item = (await byId.json()) as Record<string, unknown> & {
+      accepts: Array<{ extra: { openpay: { merchant: string } } }>;
+    };
+    expect(item.id).toBe(resource.id);
+    expect(getAddress(item.accepts[0].extra.openpay.merchant)).toBe(OWNER);
+    expect(item.verifiedAt).toBeNull();
+    for (const key of ['hidden', 'pendingFirstVerification', 'verification', 'merchant']) {
+      expect(item).not.toHaveProperty(key);
+    }
+    // owner の一覧には出る (hidden として)。
+    const owned = (await (await resources.GET()).json()) as { resources: Array<{ id: string; hidden?: boolean }> };
+    expect(owned.resources).toEqual([expect.objectContaining({ id: resource.id, hidden: true })]);
+  });
+
+  it('openpay の 402 で受取先・チェーン・JPYC・forwarder が一致すれば従来どおりすぐ公開 (印なし)', async () => {
+    const { resources, discovery } = await load();
+    mockRequireSession.mockResolvedValue({ ok: true, address: OWNER });
+    const res = await resources.POST(postReq(validBody));
+    expect(res.status).toBe(201);
+    const { resource } = (await res.json()) as { resource: { id: string } };
+    expect(resource).not.toHaveProperty('hidden');
+    expect(resource).not.toHaveProperty('pendingFirstVerification');
+    expect(await listedIds(discovery)).toContain(resource.id);
+    expect((await readById(resource.id)).status).toBe(200);
+  });
+
+  it('dual-rail のゲート: USDC (Base) の accept の受取先は JPYC と違っても照合しない', async () => {
+    const { resources } = await load();
+    mockRequireSession.mockResolvedValue({ ok: true, address: OWNER });
+    mockProbeGateDetailed.mockResolvedValueOnce({
+      result: 'openpay',
+      accepts: [
+        openpayAccept(OWNER),
+        { scheme: 'exact', network: 'base', payTo: FIRST_PARTY_SELLER, asset: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913' },
+      ],
+    });
+    const res = await resources.POST(postReq({ ...validBody, usdc: { priceUsd: '0.01', payTo: FIRST_PARTY_SELLER } }));
+    expect(res.status).toBe(201);
+  });
+
+  it.each([
+    ['payTo', openpayAccept(STRANGER)],
+    ['network', openpayAccept(OWNER, { network: 'eip155:137' })],
+    ['asset', openpayAccept(OWNER, { asset: STRANGER })],
+    ['forwarder', openpayAccept(OWNER, { payTo: STRANGER })],
+  ] as const)('openpay の 402 が登録と違う (%s) → 422 gate_accept_mismatch・保存しない', async (mismatch, accept) => {
+    const { resources, discovery } = await load();
+    mockRequireSession.mockResolvedValue({ ok: true, address: OWNER });
+    mockProbeGateDetailed.mockResolvedValueOnce({ result: 'openpay', accepts: [accept] });
+    const secret = 'token-should-not-leak';
+    const res = await resources.POST(postReq({ ...validBody, url: `https://victim.example/api?x=${secret}` }));
+    expect(res.status).toBe(422);
+    expect(await res.json()).toEqual({ error: 'gate_accept_mismatch', mismatch });
+    expect(store.kv.size).toBe(0);
+    expect(await listedIds(discovery)).toEqual([]);
+    const [, fields] = mockLoggerWarn.mock.calls.find(
+      ([event]) => event === 'x402.facilitator.gate_accept_mismatch',
+    )!;
+    expect(fields).toMatchObject({ mismatch, resourceOrigin: 'https://victim.example' });
+    expect(JSON.stringify(fields)).not.toContain(secret);
+  });
+
+  it('移行なし: 印のない既存の掲載は今までどおり一覧と ID の照会に出る (hidden の既存掲載は ID でも 404 のまま)', async () => {
+    const { discovery } = await load();
+    const legacy = {
+      merchant: OWNER, description: 'legacy', priceJpyc: '5', category: 'api', payTo: OWNER,
+      network: 'eip155:80002', active: true, createdAt: 1,
+    };
+    store.kv.set(resourceKey('legacy-visible'), JSON.stringify({
+      ...legacy, id: 'legacy-visible', url: 'https://legacy.example/visible',
+    }));
+    store.kv.set(resourceKey('legacy-unverified'), JSON.stringify({
+      ...legacy, id: 'legacy-unverified', url: 'https://legacy.example/unverified',
+      verification: { failures: 2, lastCheckedAt: 'x', lastRunId: 'r', probedUrl: 'https://legacy.example/unverified' },
+    }));
+    store.kv.set(resourceKey('legacy-hidden'), JSON.stringify({
+      ...legacy, id: 'legacy-hidden', url: 'https://legacy.example/hidden', hidden: true,
+    }));
+    store.lists.set(RESOURCES_INDEX, ['legacy-visible', 'legacy-unverified', 'legacy-hidden']);
+
+    expect(await listedIds(discovery)).toEqual(['legacy-visible', 'legacy-unverified']);
+    expect((await readById('legacy-visible')).status).toBe(200);
+    expect((await readById('legacy-unverified')).status).toBe(200);
+    expect((await readById('legacy-hidden')).status).toBe(404);
+  });
+
+  it('モデレーションの URL 台帳がある URL は unknown でも印なしの hidden (ID の照会も 404)', async () => {
+    const { resources, discovery } = await load();
+    mockRequireSession.mockResolvedValue({ ok: true, address: OWNER });
+    store.kv.set(hiddenUrlLedgerKey(validBody.url), '1');
+    mockProbeGateDetailed.mockResolvedValueOnce({ result: 'unknown', accepts: [] });
+    const res = await resources.POST(postReq(validBody));
+    expect(res.status).toBe(201);
+    const { resource } = (await res.json()) as { resource: { id: string } };
+    expect(resource).toMatchObject({ hidden: true });
+    expect(resource).not.toHaveProperty('pendingFirstVerification');
+    expect(await listedIds(discovery)).not.toContain(resource.id);
+    expect((await readById(resource.id)).status).toBe(404);
+  });
+
+  it('最初の再検証を待つ掲載を削除しても URL 台帳を立てず、作り直しは登録時の probe どおりになる', async () => {
+    const { resources, idRoute, discovery } = await load();
+    mockRequireSession.mockResolvedValue({ ok: true, address: OWNER });
+    mockProbeGateDetailed.mockResolvedValueOnce({ result: 'unknown', accepts: [] });
+    const first = (await (await resources.POST(postReq(validBody))).json()) as { resource: { id: string } };
+    expect((await idRoute.DELETE(new Request('http://x'), ctx(first.resource.id))).status).toBe(200);
+    expect([...store.kv.keys()].filter((key) => key.startsWith('x402:hidden-url:'))).toEqual([]);
+
+    const again = await resources.POST(postReq(validBody));
+    expect(again.status).toBe(201);
+    const { resource } = (await again.json()) as { resource: { id: string } };
+    expect(resource).not.toHaveProperty('hidden');
+    expect(await listedIds(discovery)).toContain(resource.id);
   });
 });

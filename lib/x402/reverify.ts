@@ -510,8 +510,29 @@ export const REVERIFY_TRANSITION_RESULT =
 // hidden を洗い流す経路を塞ぐ (createResource が台帳を見て hidden を継承する)。hidden の観測ごとに
 // TTL を延ばすので、隠されたままの掲載は台帳も生き続ける。first-party (path) は再登録できないので
 // この節は external 側にだけ足す。
+// 台帳の規則: hidden かつ印 (pendingFirstVerification) なしのときだけ書く。印は「一度も検証されていないから
+// 隠しているだけ」の状態にしか残らない (下の REVERIFY_PENDING_FIRST_VERIFICATION が、公開に戻ったときと
+// モデレーションの閾値に達したときに外す・台帳の継承と台帳済 URL への PATCH は registry が印を付けない/外す)。
+// 印つきの hidden に台帳を書くと、洗い流す状態の無い新しい掲載を違反扱いにしてしまう。
 export const REVERIFY_HIDDEN_URL_LEDGER =
-  "if hidden then redis.call('SET',KEYS[2],ARGV[6],'EX',ARGV[7]) end; ";
+  "if hidden and o.pendingFirstVerification~=true then redis.call('SET',KEYS[2],ARGV[6],'EX',ARGV[7]) end; ";
+
+// 最初の再検証を待つ新規掲載の印 (pendingFirstVerification) を外す 2 つの場合:
+//   (1) hidden が解けたとき (ok かつ URL claim を確かめた後)。claim の競合・障害で解除が保留された回は残す
+//       (ID の照会で出品者のゲートが動き続け、次の ok で戻れる)。
+//   (2) 公開中の掲載なら hidden になる閾値 (確定違反 3 連続・締め出し 6 連続) に達したとき = 通常の
+//       モデレーションで隠された状態に移す。以後は印のない hidden (ID の照会も 404・台帳あり) として扱う。
+//       閾値の前に外さないのは、デプロイ前の 404 が数回続いただけで出品者のゲートが自分の掲載を引けなくなり、
+//       再検証の ok に永久に届かなくなるのを避けるため (公開中の掲載も閾値まではカタログに残る)。
+// ⚠️ テンプレートリテラルを使わない (REVERIFY_COUNTER_TRANSITION の注意を参照)。閾値は HIDE_THRESHOLD_LUA /
+// AUTH_HIDE_THRESHOLD_LUA を使い回さず String() をここで書く: 2 か所から参照すると minifier がそれを変数のまま
+// 残し (`failures>="+F+" then`)、scripts/check-lua-bundle.mjs が閾値の形をバンドルで確かめられなくなる。
+export const REVERIFY_PENDING_FIRST_VERIFICATION =
+  "if (not hidden) or (ARGV[4]=='violation' and failures>=" +
+  String(REVERIFY_HIDE_THRESHOLD) +
+  ") or (ARGV[5]=='block' and authFailures>=" +
+  String(REVERIFY_AUTH_HIDE_THRESHOLD) +
+  ') then o.pendingFirstVerification=nil end; ';
 
 export const CAS_EXTERNAL_REVERIFY =
   "local c=redis.call('GET',KEYS[1]); if not c then return -1 end; " +
@@ -527,6 +548,7 @@ export const CAS_EXTERNAL_REVERIFY =
   'local checked,claim=pcall(claimAvailable,KEYS[3],ARGV[8]); ' +
   "if not checked or claim~=1 then hidden=true; o.hidden=true; restoreBlocked='storage'; " +
   "if checked and claim==-5 then restoreBlocked='url_taken' end; end; end; " +
+  REVERIFY_PENDING_FIRST_VERIFICATION +
   REVERIFY_SAVE +
   "if before and not hidden then redis.call('SET',KEYS[3],ARGV[8]) end; " +
   REVERIFY_HIDDEN_URL_LEDGER +
