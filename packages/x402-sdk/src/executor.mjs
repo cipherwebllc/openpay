@@ -20,18 +20,67 @@ import { verifyBoundPaymentResponse } from './receipt.mjs';
 
 const sessionReservations = new WeakMap();
 
+// Seller responses are read with a byte cap so a listed seller cannot fill the buyer's process
+// memory: the 15-second request timeout alone still lets a fast link deliver hundreds of MB.
+// Responses read before anything is signed (the 402 challenge) are small JSON documents.
+export const MAX_CHALLENGE_BODY_BYTES = 256 * 1024;
+// The response to the X-PAYMENT request is the purchased content, so its cap is larger and
+// callers can change it with `maxPaidBodyBytes`.
+export const DEFAULT_MAX_PAID_BODY_BYTES = 16 * 1024 * 1024;
+
+const BODY_TOO_LARGE = Symbol('body_too_large');
+
 function isObject(value) {
   return typeof value === 'object' && value !== null;
 }
 
-async function readJson(response) {
-  const text = await response.text();
+function parseJsonText(text) {
   if (text.length === 0) return null;
   try {
     return JSON.parse(text);
   } catch {
     return text;
   }
+}
+
+// Returns the decoded text, or BODY_TOO_LARGE after cancelling the stream at the first chunk that
+// crosses maxBytes. Bytes are counted from the stream itself; Content-Length may be absent or wrong.
+async function readTextCapped(response, maxBytes) {
+  const stream = response.body;
+  if (typeof stream?.getReader !== 'function') {
+    // A custom fetchImpl may hand back a body that is not a WHATWG stream (node-fetch's Node
+    // stream, or an object with only text()). That transport is the caller's trusted boundary
+    // (README), so it is read as before and only the size verdict is applied to it.
+    const text = await response.text();
+    return Buffer.byteLength(text, 'utf8') > maxBytes ? BODY_TOO_LARGE : text;
+  }
+  const reader = stream.getReader();
+  // Same decoding as Response.text(): UTF-8, leading BOM removed, invalid bytes replaced.
+  const decoder = new TextDecoder();
+  let total = 0;
+  let text = '';
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      // With the default transport, cancel destroys the Node response behind Readable.toWeb and
+      // with it the unfinished connection, so nothing past the cap is buffered.
+      await reader.cancel();
+      return BODY_TOO_LARGE;
+    }
+    text += decoder.decode(value, { stream: true });
+  }
+  return text + decoder.decode();
+}
+
+async function readChallengeJson(response) {
+  const text = await readTextCapped(response, MAX_CHALLENGE_BODY_BYTES);
+  // Nothing has been signed when the challenge is read, so refusing it costs the buyer nothing.
+  if (text === BODY_TOO_LARGE) {
+    throw new Error('payment_target_response_too_large');
+  }
+  return parseJsonText(text);
 }
 
 function firstAccept(body) {
@@ -190,7 +239,11 @@ export function createPaymentExecutor({
   now = () => new Date(),
   resolveCatalogListings = async () => null,
   resolveReceiptSigner = async () => null,
+  maxPaidBodyBytes = DEFAULT_MAX_PAID_BODY_BYTES,
 }) {
+  if (!Number.isSafeInteger(maxPaidBodyBytes) || maxPaidBodyBytes <= 0) {
+    throw new Error('maxPaidBodyBytes must be a positive integer');
+  }
   const dailyLimitEnabled =
     config.maxDailyAtomic !== null && config.maxDailyAtomic !== undefined;
   if (dailyLimitEnabled && spendStore === null) {
@@ -380,7 +433,7 @@ export function createPaymentExecutor({
     const response = await fetchTarget(url, {
       accept: 'application/json',
     });
-    const body = await readJson(response);
+    const body = await readChallengeJson(response);
     const accept = firstAccept(body);
     if (response.status !== 402 || accept === null) {
       return {
@@ -425,7 +478,7 @@ export function createPaymentExecutor({
     const response = await fetchTarget(url, {
       accept: 'application/json',
     });
-    const body = await readJson(response);
+    const body = await readChallengeJson(response);
     const accept = firstAccept(body);
     if (response.status !== 402 || accept === null) {
       return {
@@ -539,7 +592,9 @@ export function createPaymentExecutor({
       accept: 'application/json',
       'X-PAYMENT': encodePaymentPayload(paymentPayload),
     });
-    const unlockedBody = await readJson(unlocked);
+    const unlockedText = await readTextCapped(unlocked, maxPaidBodyBytes);
+    const unlockedBody =
+      unlockedText === BODY_TOO_LARGE ? null : parseJsonText(unlockedText);
     if (unlocked.status >= 200 && unlocked.status < 300) {
       confirmSessionReservation(
         session,
@@ -556,6 +611,21 @@ export function createPaymentExecutor({
       normalizedAccept,
       resolveReceiptSigner,
     );
+    if (unlockedText === BODY_TOO_LARGE) {
+      // The authorization has already left this process, so an oversized body must not read as a
+      // failed purchase: keep the settlement and the identifiers the buyer needs before paying again.
+      return {
+        status: unlocked.status,
+        body: null,
+        receipt,
+        settlement,
+        error: 'paid_body_too_large',
+        maxPaidBodyBytes,
+        txHash: settlement === SETTLEMENT.verified ? receipt.transaction : null,
+        authorizationNonce: reservation.id,
+        note: `The payment authorization was sent, but the seller's response exceeded maxPaidBodyBytes (${maxPaidBodyBytes}) and was discarded. Check settlement, txHash or the authorization nonce on chain before paying again.`,
+      };
+    }
     return {
       status: unlocked.status,
       body: unlockedBody,

@@ -123,12 +123,14 @@ if (typeof createFileSpendStore !== 'function') process.exit(4);
   DEFAULT_ALLOWED_HOSTS,
   DEFAULT_CATALOG_TRUST,
   DEFAULT_DISCOVERY_URL,
+  DEFAULT_MAX_PAID_BODY_BYTES,
   DEFAULT_MAX_PER_CALL_JPYC,
   DEFAULT_MAX_SESSION_JPYC,
   DEFAULT_MAX_TIMEOUT_SECONDS,
   DEFAULT_PAYMENT_FETCH_TIMEOUT_MS,
   JPYC_DECIMALS,
   MAX_AUTHORIZATION_TIMEOUT_SECONDS,
+  MAX_CHALLENGE_BODY_BYTES,
   MAX_SUPPORTED_TIMEOUT_SECONDS,
   REASONS,
   RECEIVE_WITH_AUTHORIZATION_TYPES,
@@ -182,6 +184,7 @@ if (typeof createFileSpendStore !== 'function') process.exit(4);
   type JpycGateOptions,
   type JpycGatePaymentResponse,
   type OpenPayClient,
+  type PaidBodyTooLargeResult,
   type PaymentLookup,
   type PaymentResult,
   type QuoteResult,
@@ -220,6 +223,19 @@ const lockedReservationResult: SpendReservationResult = {
 const settlementStatus: SettlementStatus = SETTLEMENT.unavailable;
 // settlement is optional so a result built before the field existed still typechecks.
 const legacyPaymentResult: PaymentResult = { status: 200, body: null, receipt: null };
+// pay() returns this instead of throwing when the paid body exceeds maxPaidBodyBytes.
+const paidBodyTooLarge: PaidBodyTooLargeResult = {
+  status: 200,
+  body: null,
+  receipt: null,
+  settlement: SETTLEMENT.unavailable,
+  error: 'paid_body_too_large',
+  maxPaidBodyBytes: DEFAULT_MAX_PAID_BODY_BYTES,
+  txHash: null,
+  authorizationNonce: '0x${'0'.repeat(64)}',
+  note: 'discarded',
+};
+const challengeCap: 262144 = MAX_CHALLENGE_BODY_BYTES;
 const receiptSignerResolver: ReceiptSignerResolver = createReceiptSignerResolver({
   discoveryUrl: 'https://open-pay.jp/api/discovery',
 });
@@ -227,6 +243,7 @@ createOpenPayClient({
   privateKey: '${`0x${'1'.repeat(64)}`}',
   maxDailyJpyc: '25',
   maxTimeoutSeconds: 600,
+  maxPaidBodyBytes: 32 * 1024 * 1024,
   spendStore,
   catalogTrust: false,
 });
@@ -260,6 +277,8 @@ void spendReservationResult;
 void lockedReservationResult;
 void settlementStatus;
 void legacyPaymentResult;
+void paidBodyTooLarge;
+void challengeCap;
 void receiptSignerResolver;
 void [
   SETTLEMENT, SPEND_LOCK_STALE_MS,
