@@ -1,11 +1,11 @@
 import 'server-only';
 import { resourceUrlClaimKey, URL_CLAIM_GUARD } from './resourceUrlClaim.mjs';
 
-import { readBodyCapped, readJsonBodyCapped } from '@/lib/httpBodyCap';
+import { readBodyPrefix, readJsonBodyCapped } from '@/lib/httpBodyCap';
 import { kvEval, kvGet, kvLrange, kvSet } from '@/lib/kv';
 import {
   acceptsLookLikeOpenPay,
-  fetchSsrfSafe,
+  fetchSsrfSafeDetailed,
   GATE_BODY_MAX_BYTES,
   type SsrfSafeFetchOptions,
 } from '@/lib/x402/moderation';
@@ -161,8 +161,8 @@ const CLOUDFLARE_CHALLENGE_MARKERS = [
   'attention required! | cloudflare',
 ];
 
-function isCloudflareChallenge(res: Response, body: string): boolean {
-  if (res.headers.get('cf-mitigated')?.toLowerCase() === 'challenge') return true;
+function isCloudflareChallenge(cfMitigated: string | null, body: string): boolean {
+  if (cfMitigated?.toLowerCase() === 'challenge') return true;
   const normalized = body.toLowerCase();
   return CLOUDFLARE_CHALLENGE_MARKERS.some((marker) =>
     normalized.includes(marker),
@@ -216,14 +216,14 @@ function redirectAuthClass(res: Response, url: string): ReverifyAuthClass {
 }
 
 // 定期再検証専用 probe。登録時 moderation と同じ SSRF-safe fetch を使う一方、確定的契約違反と
-// 一時障害を分ける。body を完全に解釈できない 402/200 は hidden へ進めず transient に留める。
+// 一時障害を分ける。body を完全に解釈できない 402 は hidden へ進めず transient に留める (200 は verdictFor200)。
 // verdict (契約) とは別に authClass (締め出され判定・B8) を返す。
 export async function probeForReverifyDetailed(
   url: string,
   opts: SsrfSafeFetchOptions & { probeAtMs?: number } = {},
 ): Promise<ReverifyProbe> {
   const userAgent = opts.userAgent ?? reverifyUserAgent(opts.probeAtMs);
-  const res = await fetchSsrfSafe(url, {
+  const { res, refused } = await fetchSsrfSafeDetailed(url, {
     ...opts,
     timeoutMs: opts.timeoutMs ?? REVERIFY_TIMEOUT_MS,
     userAgent,
@@ -232,7 +232,12 @@ export async function probeForReverifyDetailed(
       ...(opts.extraHeaders ?? {}),
     },
   });
-  if (!res) return { verdict: 'transient', authClass: 'neutral' };
+  if (!res) {
+    // br 等の圧縮で止めた応答も、status が 200 なら支払いなしで 200 が返ったことは確か (本文は読んでいない)。
+    return refused?.statusCode === 200
+      ? verdictFor200(refused.cfMitigated, null)
+      : { verdict: 'transient', authClass: 'neutral' };
+  }
 
   if (res.status === 404 || res.status === 410) {
     return { verdict: 'violation_gone', authClass: 'neutral' };
@@ -247,7 +252,10 @@ export async function probeForReverifyDetailed(
     return { verdict: await verdictFor402(res), authClass: 'clear' };
   }
   if (res.status === 200) {
-    return verdictFor200(res, await readBodyCapped(res, GATE_BODY_MAX_BYTES));
+    return verdictFor200(
+      res.headers.get('cf-mitigated'),
+      await readBodyPrefix(res, GATE_BODY_MAX_BYTES),
+    );
   }
   // rate limit・server error は到達性/契約を確定できない。
   return { verdict: 'transient', authClass: 'neutral' };
@@ -272,16 +280,15 @@ async function verdictFor402(res: Response): Promise<ReverifyVerdict> {
     : 'violation_foreign_402';
 }
 
-function verdictFor200(res: Response, body: Uint8Array | null): ReverifyProbe {
-  if (!body) return { verdict: 'transient', authClass: 'neutral' };
-  let text: string;
-  try {
-    text = new TextDecoder('utf-8', { fatal: true }).decode(body);
-  } catch {
-    return { verdict: 'transient', authClass: 'neutral' };
-  }
+// 支払いなしで 200 が返った時点で gate は無い。本文は bot の challenge を見分けるためだけに、先頭 64KiB を読む。
+// 64KiB 超・stream の途中の失敗・非 UTF-8 (zip/PDF 等)・br 等で止めた (prefix は null) 200 も、200 は 200 なので違反に
+// 数える — transient にすると、本文を大きくするだけで無料の URL が有料の掲載のまま残り続ける (E-1)。
+// ただし challenge の印が先頭にあれば、64KiB 超でも transient (本文全体を捨てると大きい challenge で正当な gate を隠す)。
+// challenge の印は header と ASCII の文字列なので、非 UTF-8 も置換文字つきで decode して同じく探す。
+function verdictFor200(cfMitigated: string | null, prefix: Uint8Array | null): ReverifyProbe {
+  const text = prefix ? new TextDecoder('utf-8').decode(prefix) : '';
   // challenge の 200 は「素の 200 に到達した」証拠にならないので clear にしない (bot 選別の一種)。
-  return isCloudflareChallenge(res, text)
+  return isCloudflareChallenge(cfMitigated, text)
     ? { verdict: 'transient', authClass: 'neutral' }
     : { verdict: 'violation_200_ungated', authClass: 'clear' };
 }

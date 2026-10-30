@@ -7,7 +7,13 @@ import type { AddressInfo } from 'node:net';
 import zlib from 'node:zlib';
 import { Agent, fetch as undiciFetch } from 'undici';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { fetchSsrfSafe, hasOnlySafeContentEncoding, refuseBrotliResponses } from '@/lib/x402/moderation';
+import {
+  ContentEncodingRefusedError,
+  fetchSsrfSafe,
+  fetchSsrfSafeDetailed,
+  hasOnlySafeContentEncoding,
+  refuseBrotliResponses,
+} from '@/lib/x402/moderation';
 
 const BODY = JSON.stringify({ ok: true });
 
@@ -15,6 +21,10 @@ const BODY = JSON.stringify({ ok: true });
 // Node は header の文字列を latin1 で書くので、' ' は 0xA0 の 1 バイトで届く。
 const ROUTES: Record<string, { status?: number; headers: Record<string, string>; body: Buffer | string }> = {
   '/br': { headers: { 'content-encoding': 'br' }, body: zlib.brotliCompressSync(BODY) },
+  '/br-challenge': {
+    headers: { 'content-encoding': 'br', 'cf-mitigated': 'challenge' },
+    body: zlib.brotliCompressSync(BODY),
+  },
   '/nbsp-br': { headers: { 'content-encoding': ' br' }, body: zlib.brotliCompressSync(BODY) },
   '/br-nbsp': { headers: { 'content-encoding': 'br ' }, body: zlib.brotliCompressSync(BODY) },
   '/gzip-tab-br': { headers: { 'content-encoding': 'gzip,\tBR' }, body: zlib.brotliCompressSync(zlib.gzipSync(BODY)) },
@@ -82,7 +92,11 @@ describe('lib/x402/moderation refuseBrotliResponses (本物の undici fetch)', (
           (err: unknown) => err,
         );
         expect(error).toBeInstanceOf(TypeError);
-        expect(((error as TypeError).cause as Error).message).toBe('content_encoding_refused');
+        const cause = (error as TypeError).cause;
+        expect((cause as Error).message).toBe('content_encoding_refused');
+        // 定期再検証が status で数えられるよう、止めた応答の status を持たせる (本文は読まない)。
+        expect(cause).toBeInstanceOf(ContentEncodingRefusedError);
+        expect((cause as ContentEncodingRefusedError).statusCode).toBe(ROUTES[path].status ?? 200);
         expect(spy).not.toHaveBeenCalled();
       } finally {
         spy.mockRestore();
@@ -90,6 +104,34 @@ describe('lib/x402/moderation refuseBrotliResponses (本物の undici fetch)', (
       }
     },
   );
+
+  it('fetchSsrfSafeDetailed は止めた応答の status と cf-mitigated を refused に添え、fetchSsrfSafe は今までどおり null', async () => {
+    const spy = vi.spyOn(zlib, 'createBrotliDecompress');
+    const dispatcher = new Agent().compose(refuseBrotliResponses);
+    // 本物の接続は private IP を拒むので、undici の fetch に refuseBrotliResponses だけを組んだ dispatcher を渡す。
+    const fetchImpl = ((url: string, init: RequestInit) =>
+      undiciFetch(url, { ...(init as object), dispatcher })) as unknown as typeof fetch;
+    const opts = { fetchImpl, lookup: async () => [{ address: '93.184.216.34' }] };
+    try {
+      const refused = await fetchSsrfSafeDetailed(`${origin}/br-challenge`, opts);
+      expect(refused.res).toBeNull();
+      expect(refused.refused).toBeInstanceOf(ContentEncodingRefusedError);
+      expect(refused.refused).toMatchObject({ statusCode: 200, cfMitigated: 'challenge' });
+      expect((await fetchSsrfSafeDetailed(`${origin}/br`, opts)).refused).toMatchObject({
+        statusCode: 200,
+        cfMitigated: null,
+      });
+      expect(await fetchSsrfSafe(`${origin}/br`, opts)).toBeNull();
+
+      const plain = await fetchSsrfSafeDetailed(`${origin}/plain`, opts);
+      expect(plain.res?.status).toBe(200);
+      expect(plain.refused).toBeUndefined();
+      expect(spy).not.toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+      await dispatcher.close();
+    }
+  });
 
   it.each(['/gzip', '/identity', '/plain'])('%s: 今までどおり読める', async (path) => {
     const dispatcher = new Agent().compose(refuseBrotliResponses);
