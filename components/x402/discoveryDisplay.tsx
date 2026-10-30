@@ -21,6 +21,7 @@ import {
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard';
 import { splitDisplayTitle } from '@/lib/x402/displayTitle';
 import type { MonitorFreshness } from '@/lib/directory/monitorFreshness';
+import { isHttpsUrl } from '@/lib/typeGuards';
 
 // カテゴリー文字列 → 視覚アイコン (api / data / mcp / content)。未知は汎用 (Code2)。
 function categoryIcon(category: string) {
@@ -45,14 +46,6 @@ function shortUrl(value: string): string {
     return `${url.host}/…/${segments[segments.length - 1]}`;
   } catch {
     return value;
-  }
-}
-
-export function isHttpsUrl(value: string): boolean {
-  try {
-    return new URL(value).protocol === 'https:';
-  } catch {
-    return false;
   }
 }
 

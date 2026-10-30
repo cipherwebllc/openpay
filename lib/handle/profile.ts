@@ -1,11 +1,12 @@
 // link-in-bio プロフィールの厳格な書き込み検証。保存済み record の tolerant な読み出しは record.ts。
 import { isHandleTheme } from '@/lib/handleThemeKey';
+import { isHttpsUrl } from '@/lib/typeGuards';
 import { extractHandleEmbed } from './embeds';
 import {
   HANDLE_FONTS, HANDLE_LINK_LAYOUTS,
   MAX_BIO_LEN, MAX_AVATAR_URL_LEN, MAX_COVER_URL_LEN, MAX_SOCIAL_LINKS,
   MAX_LINK_URL_LEN, MAX_PROFILE_LINKS, MAX_LINK_LABEL_LEN, MAX_LINK_IMAGE_URL_LEN,
-  MAX_PROFILE_EMBEDS, isHandleFont, isHandleLinkLayout, isHttpsUrl, sanitizeEmoji,
+  MAX_PROFILE_EMBEDS, isHandleFont, isHandleLinkLayout, sanitizeEmoji,
   type HandleProfile, type HandleLink, type HandleHeading, type HandleRegularLink,
 } from './schema';
 

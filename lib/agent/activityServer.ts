@@ -9,16 +9,13 @@ import { isKvConfigured, kvIncr } from '@/lib/kv';
 import { logger } from '@/lib/logger';
 import { jpycForwarderFor } from '@/lib/relay/forwarderConfig';
 import { defaultDeploymentForSymbol } from '@/lib/tokens';
+import { isRecord } from '@/lib/typeGuards';
 
 const inFlight = new Map<string, Promise<AgentActivityResponse>>();
 
 function matches(value: unknown, pattern: RegExp): value is string {
   // $ は末尾改行の直前にも一致する。改行付き入力による正規形・行検証の迂回を断つ。
   return typeof value === 'string' && pattern.exec(value)?.[0] === value;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function upstream(
