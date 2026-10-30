@@ -65,7 +65,7 @@ export {
   serializeHandleRecord,
 } from './handle/record';
 
-// sanitizeEmoji / isHttpsUrl は lib/handle/* 内部の helper なので facade からは出さない。
+// sanitizeEmoji は lib/handle/* 内部の helper なので facade からは出さない (isHttpsUrl は lib/typeGuards.ts)。
 export {
   MAX_PROFILE_LINKS,
   MAX_BIO_LEN,

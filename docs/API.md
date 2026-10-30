@@ -74,7 +74,7 @@ The public catalog is edge-cached and its KV reads are bounded-concurrency, so i
 
 Plan: `plans/x402-jpyc-facilitator.md`; go-live runbook: `docs/DEPLOY_CHECKLIST.md` §14.
 
-The catalog's “verified” signal is backed by an hourly maintenance loop, not a static label: it re-probes first-party and registered x402 URLs with the same SSRF protections, records the last successful check, and temporarily hides a listing after three confirmed contract violations.
+The catalog's `verifiedAt` is the last time OpenPay's automated re-check passed, not a static label or a human review: an hourly maintenance loop re-probes first-party and registered x402 URLs with the same SSRF protections, records the last successful check, and temporarily hides a listing after three confirmed contract violations. Neither the registration probe nor these re-checks prove that the seller controls the URL. For a third-party URL, `openpay-x402-sdk` (and `openpay-x402-mcp`, which uses it) requires the live 402 to match the listing field by field before signing (`catalog_accept_mismatch`); that check protects the buyer's payment, not the listing itself.
 
 Transient network, rate-limit, authentication, Cloudflare-challenge, and server failures do not count toward hiding; a later valid OpenPay 402 restores the listing automatically.
 Listing rules (what may be listed, reverification, prohibited listings) are in [LISTING_POLICY.md](./LISTING_POLICY.md).

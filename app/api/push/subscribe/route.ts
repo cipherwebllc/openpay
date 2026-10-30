@@ -5,6 +5,7 @@ import { env } from '@/lib/env';
 import { isAllowedPushEndpoint } from '@/lib/push/endpoints';
 import { checkClientIpPrefixRateLimit } from '@/lib/net/clientRateLimit';
 import { MAX_BODY_BYTES } from '@/lib/relay/relayRoute';
+import { readTextBodyCapped } from '@/lib/httpBodyCap';
 import {
   listPushSubscriptions,
   removePushSubscription,
@@ -140,16 +141,15 @@ async function rateLimited(
 async function readJsonBody(
   req: Request,
 ): Promise<{ ok: true; value: unknown } | { ok: false; response: NextResponse }> {
-  let text: string;
-  try {
-    text = await req.text();
-  } catch {
+  // 上限を大きく超える body は最後まで読まずに 413 (応答は req.text() で読んでいたときと同じ)。
+  const bodyRead = await readTextBodyCapped(req, MAX_BODY_BYTES);
+  if (!bodyRead.ok && bodyRead.reason === 'unreadable') {
     return {
       ok: false,
       response: NextResponse.json({ ok: false, error: 'invalid_json' }, { status: 400 }),
     };
   }
-  if (Buffer.byteLength(text, 'utf8') > MAX_BODY_BYTES) {
+  if (!bodyRead.ok) {
     return {
       ok: false,
       response: NextResponse.json(
@@ -159,7 +159,7 @@ async function readJsonBody(
     };
   }
   try {
-    return { ok: true, value: JSON.parse(text) };
+    return { ok: true, value: JSON.parse(bodyRead.text) };
   } catch {
     return {
       ok: false,

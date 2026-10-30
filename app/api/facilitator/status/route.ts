@@ -5,6 +5,7 @@
 import { NextResponse } from 'next/server';
 import { env } from '@/lib/env';
 import { MAX_BODY_BYTES } from '@/lib/relay/relayRoute';
+import { readTextBodyCapped } from '@/lib/httpBodyCap';
 import { resolveFacilitatorPaymentStatus } from '@/lib/x402/facilitatorStatus';
 import { checkFacilitatorStatusRateLimit } from '@/lib/x402/facilitatorStatusRateLimit';
 
@@ -23,16 +24,15 @@ export async function POST(req: Request): Promise<NextResponse> {
     );
   }
 
-  let bodyText: string;
-  try {
-    bodyText = await req.text();
-  } catch {
+  // 認証なしの入口なので、上限を大きく超える body は最後まで読まずに 413 (応答は req.text() で読んでいたときと同じ)。
+  const bodyRead = await readTextBodyCapped(req, MAX_BODY_BYTES);
+  if (!bodyRead.ok && bodyRead.reason === 'unreadable') {
     return NextResponse.json(
       { ok: false, error: 'invalid_payload' },
       { status: 400 },
     );
   }
-  if (Buffer.byteLength(bodyText, 'utf8') > MAX_BODY_BYTES) {
+  if (!bodyRead.ok) {
     return NextResponse.json(
       { ok: false, error: 'payload_too_large' },
       { status: 413 },
@@ -41,7 +41,7 @@ export async function POST(req: Request): Promise<NextResponse> {
 
   let raw: unknown;
   try {
-    raw = JSON.parse(bodyText);
+    raw = JSON.parse(bodyRead.text);
   } catch {
     return NextResponse.json(
       { ok: false, error: 'invalid_payload' },

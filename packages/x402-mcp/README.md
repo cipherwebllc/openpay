@@ -240,7 +240,14 @@ Ordering flow (autonomous): `find_shops` → `order_menu` → pick items → `or
 | `OPENPAY_ORIGIN` | `https://open-pay.jp` | `wallet_prove` challenge origin, bind-link origin and signed audience. Independent of `DISCOVERY_URL`. Unset or blank uses the default; surrounding whitespace is trimmed. Must be an HTTPS origin with no credentials, path, query or fragment (a trailing slash is accepted). Only override for a trusted deployment that verifies this same audience. |
 
 Catalog admission is exact URL only, including the query string. A query
-variant needs its own reviewed listing or an explicitly allowlisted host.
+variant needs its own listing or an explicitly allowlisted host.
+
+A listing means the URL passed OpenPay's automated probe at registration and
+its periodic re-checks. The probe looks at the response (not readable for free,
+a 402 in the OpenPay `forwarder-split` format); it does not prove that the
+seller controls the URL, so a false listing can stay until a re-check hides it.
+The field-by-field check described under `CATALOG_TRUST` and the money caps
+protect the payment, not the listing itself.
 
 **The limits are local settings, not a wall against shell access.** They stop an
 agent from overspending through this MCP's tools: no tool argument can raise them,

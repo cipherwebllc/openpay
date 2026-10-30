@@ -1,5 +1,10 @@
 'use client';
 
+// 決済QR タブ (店頭で金額ありの支払い QR を出す)。設定 (useQrSettings)・為替換算・受取先の解決と自動補完・値引き・
+// UI の状態 (金額・モード・QR の画面とお店の設定シートの開閉・管理番号・お店負担の QR の写し) と、支払い URL・
+// 互換 QR (EIP-681)・お店負担の /checkout・着金の見張りに渡す値・保存名の生成、QR を出す / 閉じる処理はここが持ち、
+// 各節 (components/qr/*・components/qr-generator/*) は props で受け取って描画と操作の中継だけを行う。
+
 import { crossChainAllowed } from '@/lib/url/shared';
 
 import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
@@ -7,24 +12,16 @@ import { useTranslations } from 'next-intl';
 import dynamic from 'next/dynamic';
 import type { Address } from 'viem';
 import { formatUnits, getAddress, parseUnits } from 'viem';
-import { AccountingSection } from './AccountingSection';
-import { QrPreviewModal } from './QrPreviewModal';
-import { RecoverFeeNotice } from './RecoverFeeNotice';
 import { PwaInstallHint } from './PwaInstallHint';
 import { OfflineLastQr } from './OfflineLastQr';
 import { QrAmountSection, type Mode } from './qr/QrAmountSection';
-import {
-  QrReceiptPosterFields,
-  QrReceiverFields,
-  QrStoreNameField,
-} from './qr/QrReceiverSection';
-import { QrSettingsSection } from './qr/QrSettingsSection';
 import { QrMobileBar, QrPreviewSection, qrNotReadyKey } from './qr/QrPreviewSection';
-import { ShopSettingsSection, ShopSettingsSheet } from './ShopSettingsSheet';
-import { ShopSummaryRow } from './ShopSummaryRow';
-import { TokenChooser } from './TokenChooser';
-import { ChainChooser } from './ChainChooser';
-import { downloadPng, downloadSvg, fileSafe } from './qr/qrDownload';
+import { fileSafe } from './qr/qrDownload';
+import { ManualAccountingSection } from './qr-generator/ManualAccountingSection';
+import { PaymentQrModal } from './qr-generator/PaymentQrModal';
+import { ReceiverInlineSection } from './qr-generator/ReceiverInlineSection';
+import { ShopSettings } from './qr-generator/ShopSettings';
+import { ShopSummaryHeader } from './qr-generator/ShopSummaryHeader';
 import { rememberTokenPrefs, useQrSettings } from '@/hooks/useQrSettings';
 import { useResolveAddress } from '@/hooks/useResolveAddress';
 import { isLikelyName } from '@/lib/nameDetection';
@@ -63,21 +60,18 @@ import { useMarketRates } from '@/hooks/useMarketRates';
 import {
   buyerUsdcChainNames,
   chainForSlug,
-  JPYC_CHAINS,
-  USDC_CHAINS,
   type ChainSlug,
 } from '@/lib/chains';
 import type { GasMode, PayMode } from '@/lib/fee';
 import { jpycForwarderFor } from '@/lib/relay/forwarderConfig';
 import { recoverFeeValue } from '@/lib/relay/recoverFee';
 import { resolveJpycGaslessProvider } from '@/lib/jpycGaslessProvider';
-import { pickEffectiveAddress, shortAddress, formatTokenAmount } from '@/lib/format';
+import { pickEffectiveAddress } from '@/lib/format';
 import { useIncomingPaymentWatch } from '@/hooks/useIncomingPaymentWatch';
 import { useStoreDeviceMode } from '@/components/StoreDeviceProvider';
 import { env } from '@/lib/env';
 import {
   STORE_DEVICE_MIN_AMOUNT_WEI,
-  formatStoreDeviceAmount,
   storeDeviceChainConfig,
   storeDeviceChainNames,
 } from '@/lib/storeDevicePayment';
@@ -85,13 +79,9 @@ import { storePaysActive, storePaysRequested } from '@/lib/storePaysMode';
 import { groupAmountDigits, truncateAmount } from '@/lib/amount';
 
 // 「お店がガス代を肩代わりして送る」(flag 裏) の部品は選んだときだけ読み込む (ガス用ウォレットの鍵の扱い = viem の
-// アカウント部品を、使わない店の初回の読み込みに載せない)。
+// アカウント部品を、使わない店の初回の読み込みに載せない)。QR の画面の中の状態表示は qr-generator/PaymentQrModal。
 const StoreGasWalletPanel = dynamic(
   () => import('./StoreGasWalletPanel').then((m) => m.StoreGasWalletPanel),
-  { ssr: false },
-);
-const StoreDeviceRegisterStatus = dynamic(
-  () => import('./StoreDeviceRegisterStatus').then((m) => m.StoreDeviceRegisterStatus),
   { ssr: false },
 );
 
@@ -842,27 +832,16 @@ export function QrGenerator() {
             一度決めたら変えない設定は「お店の設定」シートに畳む (2026-10 磨き上げ P2)。 */}
         <QrAmountSection
           header={
-            <ShopSummaryRow
+            <ShopSummaryHeader
               storeName={settings.storeName}
               receiver={effectiveReceiver}
               token={settings.token}
               tokenLabel={deployment.displaySymbol}
               chainSlug={settings.chain}
               chainName={chain.name}
-              payLabel={
-                storeRequested
-                  ? t('storeDevice.posterBadge')
-                  : payMode === 'gasless'
-                    ? t('posterPayModeGasless')
-                    : t('shopSummary.payStandard')
-              }
-              payTone={storeRequested || payMode === 'gasless' ? 'gasless' : 'standard'}
+              storeRequested={storeRequested}
+              payMode={payMode}
               onOpenSettings={() => setSettingsOpen(true)}
-              labels={{
-                settings: t('shopSettings.open'),
-                noStoreName: t('shopSummary.noStoreName'),
-                noReceiver: t('shopSummary.noReceiver'),
-              }}
             />
           }
           settings={settings}
@@ -895,54 +874,23 @@ export function QrGenerator() {
 
         {/* 受取先が未設定のときだけ、会計画面に受取先の欄を出す (QR を出す唯一の前提・設定済みならシートの中)。 */}
         {receiverInline && (
-          <section
-            aria-labelledby="qr-receiver-inline-heading"
-            className="rounded-2xl bg-white p-5 shadow-card ring-1 ring-slate-200/70"
-          >
-            <h2 id="qr-receiver-inline-heading" className="text-sm font-semibold text-slate-800">
-              {t('receiverInline.title')}
-            </h2>
-            <p className="mb-3 mt-0.5 text-xs text-slate-500">{t('receiverInline.hint')}</p>
-            <QrReceiverFields
-              settings={settings}
-              deployment={deployment}
-              chain={chain}
-              effectiveReceiver={effectiveReceiver}
-              receiverValid={receiverValid}
-              autofill={autofill}
-              handleResolved={handleResolved}
-              bare
-            />
-          </section>
+          <ReceiverInlineSection
+            settings={settings}
+            deployment={deployment}
+            chain={chain}
+            effectiveReceiver={effectiveReceiver}
+            receiverValid={receiverValid}
+            autofill={autofill}
+            handleResolved={handleResolved}
+          />
         )}
 
-        {/* ▸ 明細 (任意): 商品名・メモ・税・管理番号。会計ごとに変わるので設定には畳まず、金額の下の 1 行に。
-            QR は manual variant (未入力なら URL 不変)。 */}
-        <AccountingSection
-          variant="manual"
-          productName={settings.productName}
-          onProductNameChange={(v) =>
-            setSettings((s) => ({ ...s, productName: v }))
-          }
-          memo={settings.memo}
-          onMemoChange={(v) => setSettings((s) => ({ ...s, memo: v }))}
-          taxRate={settings.taxRate}
-          taxCategory={settings.taxCategory}
-          onTaxChange={(next) => setSettings((s) => ({ ...s, ...next }))}
+        {/* ▸ 明細 (任意): 商品名・メモ・税・管理番号。会計ごとに変わるので設定には畳まず、金額の下の 1 行に。 */}
+        <ManualAccountingSection
+          settings={settings}
+          setSettings={setSettings}
           receiptNo={receiptNo}
           onReceiptNoChange={setReceiptNo}
-          labels={{
-            title: t('accountingFieldsTitle'),
-            hint: t('accountingFieldsHint'),
-            productName: t('productNameLabel'),
-            productNamePlaceholder: t('productNamePlaceholder'),
-            memo: t('memoLabel'),
-            memoPlaceholder: t('memoPlaceholder'),
-            tax: t('taxLabel'),
-            taxCustom: t('taxCustomLabel'),
-            receiptNo: t('receiptNoLabel'),
-            receiptNoPlaceholder: t('receiptNoPlaceholder'),
-          }}
         />
 
         {/* お店がガス代を肩代わりして送る: この端末のガス用ウォレット (作る・残高・戻す)。 */}
@@ -993,174 +941,63 @@ export function QrGenerator() {
       />
 
       {/* お店の設定 (受取先・通貨とチェーン・支払い方法・控えとポスター)。値の変え方は今までの handler のまま。 */}
-      <ShopSettingsSheet
+      <ShopSettings
         open={settingsOpen}
         onClose={() => {
           setSettingsOpen(false);
           // シートで受取先を決めたら、会計画面の受取先の欄は役目を終える (同じ欄を 2 か所に出さない)。
           if (receiverValid) setReceiverInline(false);
         }}
-        title={t('shopSettings.title')}
-        doneLabel={t('shopSettings.done')}
-      >
-        <ShopSettingsSection title={t('shopSettings.sections.receive')}>
-          <QrReceiverFields
-            settings={settings}
-            deployment={deployment}
-            chain={chain}
-            effectiveReceiver={effectiveReceiver}
-            receiverValid={receiverValid}
-            autofill={autofill}
-            handleResolved={handleResolved}
-          />
-          <QrStoreNameField settings={settings} setSettings={setSettings} />
-        </ShopSettingsSection>
-        <ShopSettingsSection title={t('shopSettings.sections.currency')}>
-          <TokenChooser selected={settings.token} onSelect={selectToken} />
-          <ChainChooser
-            slugs={settings.token === 'usdc' ? USDC_CHAINS : JPYC_CHAINS}
-            selected={settings.chain}
-            onSelect={selectChain}
-            gridClassName="grid grid-cols-2 gap-2"
-            showId={false}
-          />
-        </ShopSettingsSection>
-        <ShopSettingsSection title={t('shopSettings.sections.payment')}>
-          <QrSettingsSection
-            settings={settings}
-            setSettings={setSettings}
-            deployment={deployment}
-            hideGasMode={hideGasMode}
-            isJpycRecover={isJpycRecover}
-            isStandard={isStandard}
-            splitParsed={splitParsed}
-            splitsForUrl={splitsForUrl}
-          />
-        </ShopSettingsSection>
-        <ShopSettingsSection title={t('shopSettings.sections.receipt')}>
-          <QrReceiptPosterFields settings={settings} setSettings={setSettings} />
-        </ShopSettingsSection>
-      </ShopSettingsSheet>
+        settings={settings}
+        setSettings={setSettings}
+        deployment={deployment}
+        chain={chain}
+        effectiveReceiver={effectiveReceiver}
+        receiverValid={receiverValid}
+        autofill={autofill}
+        handleResolved={handleResolved}
+        onSelectToken={selectToken}
+        onSelectChain={selectChain}
+        hideGasMode={hideGasMode}
+        isJpycRecover={isJpycRecover}
+        isStandard={isStandard}
+        splitParsed={splitParsed}
+        splitsForUrl={splitsForUrl}
+      />
 
       {/* 全画面プレビュー (ポスター調 + 印刷/コピー/SVG/PNG + × 閉じる)。決済QR/レジ共通。 */}
       {/* お店負担を選んでいる間は、お店負担の QR (受け渡し済み) か、店員が選んだ通常の QR だけを出す (qrShowable)。 */}
       {qrShowable && (
-        <QrPreviewModal
+        <PaymentQrModal
           open={qrModalOpen}
-          convertExpired={convertExpired || storeQrDimmed}
+          dimmed={convertExpired || storeQrDimmed}
           onClose={closeQrModal}
-          labels={{
-            title: t('qrModalTitle'),
-            close: t('qrModalClose'),
-            convertExpired: convert ? t('qrModalConvertExpired') : undefined,
-            eyebrow: t('posterEyebrow'),
-            print: t('printPoster'),
-            copy: t('qrCopy'),
-            copied: t('qrCopied'),
-            downloadSvg: t('downloadSvg'),
-            downloadPng: t('downloadPng'),
-            // お店負担の QR は端末が通信して送るので「圏外でも提示できます」は出さない。
-            localGenNote: storeQrShown ? undefined : t('localGenNote'),
-            payTo: t('qrPayTo'),
-            showUrl: t('qrShowUrl'),
-            step1: t('posterStepScan'),
-            step2: t('posterStepConfirm'),
-            step3: t('posterStepDone'),
-          }}
-          qrValue={storeQrShown ? storeQr.url : payUrl}
+          converted={!!convert}
+          storeQr={storeQrShown ? storeQr : null}
+          payUrl={payUrl}
+          amountLabelText={amountLabelText}
+          tokenChainLabelText={tokenChainLabelText}
           qrRef={qrRef}
-          storeName={settings.storeName.trim() || t('posterDefaultStoreName')}
-          amountText={storeQrShown ? storeQr.amountText : amountLabelText}
-          payModeBadge={storeQrShown ? { text: t('storeDevice.posterBadge'), tone: 'gasless' } : {
-            text:
-              payMode === 'gasless'
-                ? t('posterPayModeGasless')
-                : settings.chain === 'arc' ? t('posterPayModeArc') : t('posterPayModeStandard', {
-                    nativeToken: chain.nativeCurrency.symbol,
-                  }),
-            tone: payMode === 'gasless' ? 'gasless' : 'standard',
-          }}
-          // お店負担の QR は画面に表示している間だけ使える (印刷・保存・URL のコピー・互換 QR は出さない)。
-          {...(storeQrShown
-            ? { hideUrl: true, actionsNote: t('storeDevice.actionsNote') }
-            : {
-                copied,
-                onCopy: () => copy(payUrl),
-                onPrint: () => window.print(),
-                onDownloadSvg: () => downloadSvg(`${qrFilename}.svg`, qrRef),
-                onDownloadPng: () => downloadPng(`${qrFilename}.png`, qrRef),
-              })}
-          deviceStatus={
-            (env.enableStoreGasWallet && sdState.phase !== 'idle') || normalQrFeeShown ? (
-              <>
-                {env.enableStoreGasWallet && sdState.phase !== 'idle' && (
-                  <StoreDeviceRegisterStatus
-                    state={sdState}
-                    formatAmount={formatStoreDeviceAmount}
-                    onCheckNow={() => void device.checkNow()}
-                    onRetry={device.retry}
-                    onReissue={() => void reissueStoreQr()}
-                    onShowNormal={() => void showNormalQr()}
-                    {...(normalQrHasFee ? { normalQrFeeNote: t('storeDevice.normalQrFeeNote') } : {})}
-                    onDismiss={device.dismiss}
-                  />
-                )}
-                {/* お店負担から通常の QR に切り替えたとき、その QR の利用料 (店舗負担) を QR の画面の中で開示する
-                    (会計の画面の開示は全画面の QR の裏に隠れるため・第 7 回レビュー D4)。 */}
-                {normalQrFeeShown && (
-                  <RecoverFeeNotice
-                    billAmount={recoverBillAmount}
-                    chainId={deployment.chainId}
-                    gasMode={recoverGasMode}
-                    tone="neutral"
-                    groupDigits
-                  />
-                )}
-              </>
-            ) : undefined
-          }
-          note={settings.posterNote.trim() || t('posterDefaultNote')}
-          chainText={tokenChainLabelText}
-          receiverShort={
-            effectiveReceiver ? shortAddress(effectiveReceiver) : ''
-          }
-          // ポスターを「読まずに分かる」形にする token/chain 情報 (labels-as-props)。
-          // chainSlug は public/chains/{slug}.svg と一致 (settings.chain = ChainSlug)。
-          asset={{
-            tokenSymbol: settings.token,
-            chainSlug: settings.chain,
-            chainLabel: chain.name,
-          }}
-          eip681={
-            eip681Uri && !storeQrShown
-              ? {
-                  uri: eip681Uri,
-                  copied: eip681Copied,
-                  onCopy: () => eip681Copy(eip681Uri),
-                  title: t('eip681Title'),
-                  badge: t('eip681SummaryBadge'),
-                  description: t('eip681Description'),
-                  copy: t('eip681Copy'),
-                  copiedLabel: t('eip681Copied'),
-                }
-              : undefined
-          }
-          // 着金検知ヒント (advisory)。watching=監視中 / received=おおよその着金検知。
-          // idle (未監視・固定額でない等) は prop を渡さず非表示。received は受信額を
-          // 表示通貨でフォーマットして添える (正本は Explorer・ここはあくまでヒント)。
-          paymentStatus={
-            incomingStatus === 'received'
-              ? {
-                  state: 'received' as const,
-                  text: t('paymentReceived', {
-                    amount: formatTokenAmount(receivedWei, deployment),
-                  }),
-                  note: t('paymentReceivedNote'),
-                }
-              : incomingStatus === 'watching'
-                ? { state: 'watching' as const, text: t('paymentWatching'), note: t('paymentWatchingNote') }
-                : undefined
-          }
+          qrFilename={qrFilename}
+          copied={copied}
+          copy={copy}
+          eip681Uri={eip681Uri}
+          eip681Copied={eip681Copied}
+          eip681Copy={eip681Copy}
+          settings={settings}
+          payMode={payMode}
+          chain={chain}
+          deployment={deployment}
+          effectiveReceiver={effectiveReceiver}
+          device={device}
+          onReissueStoreQr={reissueStoreQr}
+          onShowNormalQr={showNormalQr}
+          normalQrHasFee={normalQrHasFee}
+          normalQrFeeShown={normalQrFeeShown}
+          recoverBillAmount={recoverBillAmount}
+          recoverGasMode={recoverGasMode}
+          incomingStatus={incomingStatus}
+          receivedWei={receivedWei}
         />
       )}
 

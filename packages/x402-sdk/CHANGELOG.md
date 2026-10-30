@@ -22,6 +22,11 @@
   instead of `Readable.toWeb`. On Node.js 22, cancelling an over-cap body through
   `Readable.toWeb` could raise an uncaught `Controller is already closed` error.
 - Responses within the caps are returned exactly as before. No dependency changes.
+- Docs and comments only: catalog listings are no longer called reviewed or
+  verified. A listing means the URL passed OpenPay's automated probe at
+  registration and its periodic re-checks; it does not prove that the seller
+  controls the URL. What protects the payment is the `catalog_accept_mismatch`
+  check and the money caps. No behavior change.
 
 ## 0.10.4 — 2026-10-22
 

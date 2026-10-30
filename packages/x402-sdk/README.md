@@ -571,7 +571,16 @@ not a presigned URL that may be broken by query reserialization.
 | `discoveryUrl` | `https://open-pay.jp/api/discovery` | Catalog and OpenPay origin used by the client. |
 
 Catalog admission is exact URL only, including the query string. A query
-variant must have its own reviewed listing or an explicitly allowlisted host.
+variant must have its own listing or an explicitly allowlisted host.
+
+A listing means the URL passed OpenPay's automated probe at registration and
+its periodic re-checks. The probe looks at the response: the resource must not
+be readable for free, and its 402 must use the OpenPay `forwarder-split`
+format. It does not prove that the seller controls the URL, so a false listing
+can stay in the catalog until a re-check hides it. For a catalog URL whose host
+is not in `allowedHosts`, the live 402 must match the listing field by field
+before anything is signed (`catalog_accept_mismatch`). That check and the money
+caps above protect the payment, not the listing itself.
 
 `pay(url, { maxTotalJpyc })` always requires `maxTotalJpyc`. It is the maximum
 total—including the resource price and x402 fee—that this individual call is
@@ -605,8 +614,9 @@ that uses the same store before removing a lock by hand.
 
 The client also rejects non-JPYC metadata, unsupported networks or schemes,
 non-canonical JPYC contracts or EIP-712 domains, seller timeouts above
-`maxTimeoutSeconds`, unreviewed forwarder destinations, non-OpenPay forwarder
-splits, amount inconsistencies,
+`maxTimeoutSeconds`, forwarder destinations that are neither an OpenPay
+deployed forwarder nor an exact match of the catalog listing, non-OpenPay
+forwarder splits, amount inconsistencies,
 resource URL mismatches, and catalog bait-and-switches before requesting a
 signature. `MAX_TIMEOUT_SECONDS` is the equivalent setting for the exported
 environment config readers. Target host/catalog admission and private-address

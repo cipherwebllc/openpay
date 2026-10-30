@@ -28,6 +28,7 @@ import {
 } from '@/lib/relay/relayProvider';
 import { checkIpRateLimit, readIdempotency } from '@/lib/relay/relayGuards';
 import { MAX_BODY_BYTES, anonymizeIp, isDec } from '@/lib/relay/relayRoute';
+import { readTextBodyCapped } from '@/lib/httpBodyCap';
 import { jpycForwarderFor } from '@/lib/relay/forwarderConfig';
 import { feeReceiverFor } from '@/lib/relay/forwarderSettleService';
 import { AUTHORIZATION_LOOKUP_WINDOW_SEC } from '@/lib/relay/validityWindow';
@@ -261,15 +262,11 @@ async function receiptMatchesIntent(parsed: ParsedIntent, token: Address, txHash
 }
 
 async function readBody(req: Request): Promise<Record<string, unknown> | null> {
-  let text: string;
+  // 認証なしの入口なので、上限を大きく超える body は最後まで読まない。失敗の理由は従来どおり区別しない (400 invalid_payload)。
+  const bodyRead = await readTextBodyCapped(req, MAX_BODY_BYTES);
+  if (!bodyRead.ok) return null;
   try {
-    text = await req.text();
-  } catch {
-    return null;
-  }
-  if (Buffer.byteLength(text, 'utf8') > MAX_BODY_BYTES) return null;
-  try {
-    const value: unknown = JSON.parse(text);
+    const value: unknown = JSON.parse(bodyRead.text);
     return typeof value === 'object' && value !== null && !Array.isArray(value)
       ? (value as Record<string, unknown>)
       : null;

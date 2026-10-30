@@ -3,28 +3,38 @@
 // 置換の前提 (「観測できる挙動が同一」) を確かめるための characterization で、現行の挙動を
 // そのまま期待値にしている (直すべき挙動かどうかは B-R6 で判断する)。
 //
+// 2026-10-30 (第 8 回 E-4): req.text() で全体を読んでから大きさを比べていた入口 8 本 (relay/jpyc・relay/jpyc/status・
+// facilitator の settle/verify/verify-receipt/status・csv-pass/relay・push/subscribe (POST と DELETE)) を lib/httpBodyCap の
+// readTextBodyCapped に替えた。readTextBodyCapped は req.text() と同じ復号と同じ上限の測り方 (復号後の再エンコード長) を
+// 保ったまま、生 byte が上限 + 6 (req.text() が外しうる BOM 2 つ分) を超えた chunk で読むのをやめる。下の CASES の
+// text 列は置き換え前の req.text() の結果で、8 本の route (9 個の handler) がいまも同じ応答を返すこと (= 応答を変えずに読み口だけ
+// 替えたこと) をここで確かめる。text 列がこの runtime の req.text() の結果と合っていることも別に確かめる。
+//
 // 対象:
-//   - push/subscribe の readJsonBody (req.text() → 復号後の再エンコード長で cap → JSON.parse)
-//   - relay/jpyc/status の readBody (同じ手順・失敗はすべて invalid_payload)
+//   - 上の 8 本の route の 9 個の handler (置き換え前は req.text() → 復号後の再エンコード長で cap → JSON.parse。relay/jpyc/status は
+//     失敗をすべて invalid_payload にする)
 //   - lib/agent/purchasesHttp の purchasesBody (逐次読みの cap・Buffer の寛容な復号・content-type 必須)
 // 参照: readJsonBodyCapped (逐次読みの cap は生 byte・fatal な UTF-8 復号・content-type を見ない)。
 //
-// 判明した差 (いずれも置換すると応答が変わる):
+// 判明した差 (readJsonBodyCapped に置換すると応答が変わる。readTextBodyCapped は 4 以外で req.text() と同じ):
 //   1. BOM: req.text() は BOM を除いた文字列の長さで cap を測るので、生 byte が cap+3 でも通る。
 //      readJsonBodyCapped は生 byte で測るので too_large。purchasesBody は BOM を残して JSON.parse が失敗する。
 //   2. 不正な UTF-8: req.text() と Buffer は U+FFFD に置き換えて受理する。readJsonBodyCapped は invalid_json。
 //   3. 不正な UTF-8 が cap 付近: 置換文字 (3 byte) で再エンコード長が伸び、生 byte が cap 以下でも 413。
 //      readJsonBodyCapped は invalid_json (400)。purchasesBody は生 byte で測るので受理する。
-//   4. 早期 cancel: req.text() は cap を超えても最後まで読む。readJsonBodyCapped は超過時点で cancel する。
+//   4. 早期 cancel: req.text() は cap を超えても最後まで読む。readJsonBodyCapped は超過時点、readTextBodyCapped は
+//      生 byte が cap + 6 を超えた時点で cancel する。応答が変わるのは「cap + 6 を超えて読んだあとで stream が切れる」
+//      body だけ (置き換え前は req.text() が投げて 400、いまは切れる前に読むのをやめて 413)。これは受容した差。
 //   5. content-type: purchasesBody だけが application/json を要求する (readJsonBodyCapped は見ない)。
-//      push/subscribe の reader 自体は見ないが、route は共通の CSRF 検査 (lib/net/crossOriginWrite) で
-//      application/json 以外を reader より前に 415 で返す (relay/jpyc/status は cookie を使わないので検査なし)。
+//      push/subscribe と csv-pass/relay の reader 自体は見ないが、route は共通の CSRF 検査 (lib/net/crossOriginWrite) で
+//      application/json 以外を reader より前に 415 で返す (cookie を使わない他の 6 本は検査なし)。
 // 同一だった点: 上限ちょうど/+1 (素の ASCII)・空 body・body なし・読み取り中の stream エラー・
 // chunk 境界で分かれた多 byte 文字。
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const h = vi.hoisted(() => ({
   upsert: vi.fn(),
+  remove: vi.fn(),
 }));
 
 vi.mock('@/lib/env', async (importOriginal) => {
@@ -36,6 +46,9 @@ vi.mock('@/lib/env', async (importOriginal) => {
       enablePushNotify: true,
       pushVapidPublicKey: 'test-public-key',
       enableJpycEip3009: true,
+      enableX402Facilitator: true,
+      enableCsvPass: true,
+      feeReceiverConfigured: true,
     },
   };
 });
@@ -53,7 +66,7 @@ vi.mock('@/lib/relay/relayGuards', () => ({
 }));
 vi.mock('@/lib/push/store', () => ({
   listPushSubscriptions: vi.fn(),
-  removePushSubscription: vi.fn(),
+  removePushSubscription: h.remove,
   upsertPushSubscription: h.upsert,
 }));
 vi.mock('@/lib/relay/relayProvider', () => ({
@@ -63,14 +76,27 @@ vi.mock('@/lib/relay/relayProvider', () => ({
   readAuthorizationUsed: vi.fn(async () => false),
   findAuthorizationUsedTransactionHash: vi.fn(async () => null),
 }));
-vi.mock('@/lib/relay/forwarderConfig', () => ({
+// relay/jpyc の route が読み込む lib/tokens は読み込み時に forwarderConfig の他の関数も使うので、実物を残して一部だけ固定する。
+vi.mock('@/lib/relay/forwarderConfig', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/relay/forwarderConfig')>()),
   jpycForwarderFor: () => null,
 }));
 vi.mock('@/lib/relay/forwarderSettleService', () => ({
   feeReceiverFor: () => '0x3333333333333333333333333333333333333333',
 }));
+// facilitator/status は reader を通った body を照合へ渡す。照合の失敗 (invalid_payload) は reader の失敗と同じ応答なので、
+// reader を通ったことが応答で分かるよう照合を固定する。
+vi.mock('@/lib/x402/facilitatorStatus', () => ({
+  resolveFacilitatorPaymentStatus: vi.fn(async () => ({ ok: true, state: 'unused' })),
+}));
 
-import { POST as pushSubscribePost } from '@/app/api/push/subscribe/route';
+import { POST as csvPassRelayPost } from '@/app/api/csv-pass/relay/route';
+import { POST as facilitatorSettlePost } from '@/app/api/facilitator/settle/route';
+import { POST as facilitatorStatusPost } from '@/app/api/facilitator/status/route';
+import { POST as facilitatorVerifyPost } from '@/app/api/facilitator/verify/route';
+import { POST as facilitatorVerifyReceiptPost } from '@/app/api/facilitator/verify-receipt/route';
+import { DELETE as pushSubscribeDelete, POST as pushSubscribePost } from '@/app/api/push/subscribe/route';
+import { POST as relayJpycPost } from '@/app/api/relay/jpyc/route';
 import { POST as relayStatusPost } from '@/app/api/relay/jpyc/status/route';
 import { purchasesBody } from '@/lib/agent/purchasesHttp';
 import { readJsonBodyCapped } from '@/lib/httpBodyCap';
@@ -81,6 +107,7 @@ const BOM = [0xef, 0xbb, 0xbf];
 const PURCHASES_CAP = 2048;
 
 type Outcome = 'accepted' | 'too_large' | 'invalid';
+type HttpMethod = 'POST' | 'DELETE';
 
 type BodySpec = {
   chunks: Uint8Array[];
@@ -91,10 +118,15 @@ type BodySpec = {
 
 // base の JSON に "pad" 欄を足して、生 byte 長をちょうど size にする。bad 個の 0xFF (不正な
 // UTF-8) を pad 文字列の中に置く (JSON としては文字列内なので、寛容な復号なら U+FFFD になる)。
-function padded(base: Record<string, unknown>, size: number, opts: { bom?: boolean; bad?: number } = {}): Uint8Array {
+// boms は先頭に重ねる BOM の数 (bom: true は 1 つ)。
+function padded(
+  base: Record<string, unknown>,
+  size: number,
+  opts: { bom?: boolean; boms?: number; bad?: number } = {},
+): Uint8Array {
   const head = enc.encode(`${JSON.stringify(base).slice(0, -1)},"pad":"`);
   const tail = enc.encode('"}');
-  const bom = opts.bom ? BOM : [];
+  const bom = new Array<number[]>(opts.boms ?? (opts.bom ? 1 : 0)).fill(BOM).flat();
   const bad = opts.bad ?? 0;
   const fill = size - bom.length - head.length - tail.length - bad;
   if (fill < 0) throw new Error('size too small for base');
@@ -133,14 +165,14 @@ function streamOf(chunks: Uint8Array[], streamError = false): ReadableStream<Uin
   });
 }
 
-function requestFor(url: string, spec: BodySpec): Request {
+function requestFor(url: string, spec: BodySpec, method: HttpMethod = 'POST'): Request {
   const headers = new Headers();
   const contentType = spec.contentType === undefined ? 'application/json' : spec.contentType;
   if (contentType !== null) headers.set('content-type', contentType);
   headers.set('x-forwarded-for', '203.0.113.55');
-  if (spec.noBody) return new Request(url, { method: 'POST', headers });
+  if (spec.noBody) return new Request(url, { method, headers });
   return new Request(url, {
-    method: 'POST',
+    method,
     headers,
     body: streamOf(spec.chunks, spec.streamError),
     duplex: 'half',
@@ -157,6 +189,7 @@ const SUBSCRIPTION = {
   keys: { p256dh: 'A'.repeat(87), auth: 'B'.repeat(22) },
 };
 const PUSH_BASE = { subscription: SUBSCRIPTION, locale: 'ja' };
+const PUSH_DELETE_BASE = { endpoint: SUBSCRIPTION.endpoint };
 const STATUS_BASE = {
   lookup: 'nonce',
   chainId: 80002,
@@ -164,27 +197,69 @@ const STATUS_BASE = {
   nonce: `0x${'1'.repeat(64)}`,
 };
 const PURCHASES_BASE = { address: '0x1111111111111111111111111111111111111111' };
+// relay/jpyc・csv-pass/relay・facilitator の 4 本 (計 6 本) 用。JSON としては読めるが、reader の次の検査で決まった応答になる body。
+const PROBE_BASE = { probe: 'body-reader' };
 
 type RouteReader = {
   name: string;
+  url: string;
+  /** 省略時は POST。 */
+  method?: HttpMethod;
+  handler: (req: Request) => Promise<Response>;
   cap: number;
   base: Record<string, unknown>;
-  run: (spec: BodySpec) => Promise<{ status: number; body: string }>;
   responses: Record<Outcome, { status: number; body: string }>;
   /** route が reader より前に application/json 以外を 415 で返すか (SIWE cookie の書き込み route の CSRF 検査)。 */
   requiresJsonContentType: boolean;
 };
 
 const asResult = async (res: Response) => ({ status: res.status, body: await res.text() });
+const runSpec = async (reader: RouteReader, spec: BodySpec) =>
+  asResult(await reader.handler(requestFor(reader.url, spec, reader.method)));
+
+// 置き換え前の読み口 (req.text() → 復号後の再エンコード長で cap → JSON.parse) を、この runtime でそのまま動かした結果。
+// BOM をいくつ外すかは runtime (undici) の実装しだいなので、BOM を重ねた入力の期待値はこれで出す。
+async function textReaderOutcome(spec: BodySpec, cap: number): Promise<Outcome> {
+  let text: string;
+  try {
+    text = await requestFor('http://localhost/oracle', spec).text();
+  } catch {
+    return 'invalid';
+  }
+  if (Buffer.byteLength(text, 'utf8') > cap) return 'too_large';
+  try {
+    JSON.parse(text);
+    return 'accepted';
+  } catch {
+    return 'invalid';
+  }
+}
 
 const routeReaders: RouteReader[] = [
   {
     name: 'push/subscribe POST',
     cap: MAX_BODY_BYTES,
     base: PUSH_BASE,
-    run: async (spec) => asResult(await pushSubscribePost(requestFor('http://localhost/api/push/subscribe', spec))),
+    url: 'http://localhost/api/push/subscribe',
+    handler: pushSubscribePost,
     responses: {
       accepted: { status: 200, body: '{"ok":true,"count":1}' },
+      too_large: { status: 413, body: '{"ok":false,"error":"payload_too_large"}' },
+      invalid: { status: 400, body: '{"ok":false,"error":"invalid_json"}' },
+    },
+    requiresJsonContentType: true,
+  },
+  {
+    // POST と同じ readJsonBody を通る (DELETE だけを元の読み口に戻しても落ちるよう別に数える)。
+    name: 'push/subscribe DELETE',
+    cap: MAX_BODY_BYTES,
+    base: PUSH_DELETE_BASE,
+    url: 'http://localhost/api/push/subscribe',
+    method: 'DELETE',
+    handler: pushSubscribeDelete,
+    responses: {
+      // removePushSubscription は残り 0 件を返す (beforeEach)。
+      accepted: { status: 200, body: '{"ok":true,"count":0}' },
       too_large: { status: 413, body: '{"ok":false,"error":"payload_too_large"}' },
       invalid: { status: 400, body: '{"ok":false,"error":"invalid_json"}' },
     },
@@ -194,11 +269,95 @@ const routeReaders: RouteReader[] = [
     name: 'relay/jpyc/status POST',
     cap: MAX_BODY_BYTES,
     base: STATUS_BASE,
-    run: async (spec) => asResult(await relayStatusPost(requestFor('http://localhost/api/relay/jpyc/status', spec))),
+    url: 'http://localhost/api/relay/jpyc/status',
+    handler: relayStatusPost,
     responses: {
       accepted: { status: 200, body: '{"ok":true,"state":"unused"}' },
       // readBody は失敗理由を区別せず null → 400 invalid_payload。
       too_large: { status: 400, body: '{"ok":false,"error":"invalid_payload"}' },
+      invalid: { status: 400, body: '{"ok":false,"error":"invalid_payload"}' },
+    },
+    requiresJsonContentType: false,
+  },
+  {
+    name: 'relay/jpyc POST',
+    cap: MAX_BODY_BYTES,
+    base: PROBE_BASE,
+    url: 'http://localhost/api/relay/jpyc',
+    handler: relayJpycPost,
+    responses: {
+      // reader の次の検査 (chainId が整数でない) で 400 invalid_payload。
+      accepted: { status: 400, body: '{"ok":false,"error":"invalid_payload"}' },
+      too_large: { status: 413, body: '{"ok":false,"error":"payload_too_large"}' },
+      invalid: { status: 400, body: '{"ok":false,"error":"invalid_json"}' },
+    },
+    requiresJsonContentType: false,
+  },
+  {
+    name: 'csv-pass/relay POST',
+    cap: MAX_BODY_BYTES,
+    base: PROBE_BASE,
+    url: 'http://localhost/api/csv-pass/relay',
+    handler: csvPassRelayPost,
+    responses: {
+      accepted: { status: 400, body: '{"ok":false,"error":"invalid_payload"}' },
+      too_large: { status: 413, body: '{"ok":false,"error":"payload_too_large"}' },
+      invalid: { status: 400, body: '{"ok":false,"error":"invalid_json"}' },
+    },
+    requiresJsonContentType: true,
+  },
+  {
+    name: 'facilitator/settle POST',
+    cap: MAX_BODY_BYTES,
+    base: PROBE_BASE,
+    url: 'http://localhost/api/facilitator/settle',
+    handler: facilitatorSettlePost,
+    responses: {
+      // reader の次の検査 (parseFacilitatorRequest) で 400 invalid_body。
+      accepted: { status: 400, body: '{"success":false,"errorReason":"invalid_body"}' },
+      too_large: { status: 413, body: '{"success":false,"errorReason":"payload_too_large"}' },
+      invalid: { status: 400, body: '{"success":false,"errorReason":"invalid_json"}' },
+    },
+    requiresJsonContentType: false,
+  },
+  {
+    name: 'facilitator/verify POST',
+    cap: MAX_BODY_BYTES,
+    base: PROBE_BASE,
+    url: 'http://localhost/api/facilitator/verify',
+    handler: facilitatorVerifyPost,
+    responses: {
+      // 構造不正は 200 で isValid:false。
+      accepted: { status: 200, body: '{"isValid":false,"invalidReason":"invalid_body"}' },
+      too_large: { status: 413, body: '{"isValid":false,"invalidReason":"payload_too_large"}' },
+      invalid: { status: 400, body: '{"isValid":false,"invalidReason":"invalid_json"}' },
+    },
+    requiresJsonContentType: false,
+  },
+  {
+    name: 'facilitator/verify-receipt POST',
+    cap: MAX_BODY_BYTES,
+    base: PROBE_BASE,
+    url: 'http://localhost/api/facilitator/verify-receipt',
+    handler: facilitatorVerifyReceiptPost,
+    responses: {
+      // receipt が無い object は 200 で valid:false。
+      accepted: { status: 200, body: '{"valid":false,"signer":null}' },
+      too_large: { status: 413, body: '{"valid":false,"error":"payload_too_large"}' },
+      invalid: { status: 400, body: '{"valid":false,"error":"invalid_json"}' },
+    },
+    requiresJsonContentType: false,
+  },
+  {
+    name: 'facilitator/status POST',
+    cap: MAX_BODY_BYTES,
+    base: PROBE_BASE,
+    url: 'http://localhost/api/facilitator/status',
+    handler: facilitatorStatusPost,
+    responses: {
+      // 照合は固定 (上の vi.mock) なので、reader を通れば 200 unused。
+      accepted: { status: 200, body: '{"ok":true,"state":"unused"}' },
+      too_large: { status: 413, body: '{"ok":false,"error":"payload_too_large"}' },
       invalid: { status: 400, body: '{"ok":false,"error":"invalid_payload"}' },
     },
     requiresJsonContentType: false,
@@ -289,6 +448,12 @@ const CASES: CaseDef[] = [
     text: 'invalid', purchases: 'null', capped: 'invalid',
   },
   {
+    name: '生 byte で上限 +6 を読んだ後に stream エラー',
+    spec: (base, cap) => ({ chunks: [padded(base, cap + 6)], streamError: true }),
+    // readTextBodyCapped はまだ読み続ける量 (上限 + 6 以下) なので、req.text() と同じく stream エラーで invalid。
+    text: 'invalid', purchases: 'null', capped: 'too_large',
+  },
+  {
     name: 'content-type が text/plain の有効な JSON',
     spec: (base) => ({ chunks: [enc.encode(JSON.stringify(base))], contentType: 'text/plain' }),
     // 差 5: purchasesBody だけが content-type を要求する。
@@ -303,16 +468,53 @@ const CASES: CaseDef[] = [
 
 beforeEach(() => {
   h.upsert.mockReset().mockResolvedValue({ ok: true, value: [{ endpoint: SUBSCRIPTION.endpoint }] });
+  h.remove.mockReset().mockResolvedValue({ ok: true, value: [] });
 });
+
+// BOM を重ねた入力。req.text() が外す BOM の数は runtime の実装しだい (Node 26 の undici は 2 つ) なので、期待値は
+// textReaderOutcome でこの runtime の req.text() から出す。readTextBodyCapped が生 byte で余分に読む 6 byte の境目を含む。
+const STACKED_BOM_CASES: Array<{ name: string; spec: (base: Record<string, unknown>, cap: number) => BodySpec }> = [
+  { name: 'BOM 2 つで生 byte が上限 +6', spec: (base, cap) => ({ chunks: [padded(base, cap + 6, { boms: 2 })] }) },
+  { name: 'BOM 2 つで生 byte が上限 +7', spec: (base, cap) => ({ chunks: [padded(base, cap + 7, { boms: 2 })] }) },
+  {
+    name: 'BOM 2 つで生 byte が上限 +6 を 1 byte ずつの chunk で送る',
+    spec: (base, cap) => ({ chunks: [...padded(base, cap + 6, { boms: 2 })].map((b) => Uint8Array.of(b)) }),
+  },
+  { name: 'BOM 3 つで生 byte が上限 +6', spec: (base, cap) => ({ chunks: [padded(base, cap + 6, { boms: 3 })] }) },
+  { name: 'BOM 3 つの小さい JSON', spec: (base) => ({ chunks: [padded(base, 600, { boms: 3 })] }) },
+  {
+    name: 'BOM 2 つと不正な UTF-8 で生 byte が上限 +6',
+    spec: (base, cap) => ({ chunks: [padded(base, cap + 6, { boms: 2, bad: 1 })] }),
+  },
+];
 
 describe.each(routeReaders)('$name の body reader', (reader) => {
   it.each(CASES)('$name', async (c) => {
     const spec = c.spec(reader.base, reader.cap);
-    const result = await reader.run(spec);
+    const result = await runSpec(reader, spec);
     const jsonType = spec.contentType === undefined || spec.contentType === 'application/json';
     expect(result).toEqual(
       reader.requiresJsonContentType && !jsonType ? UNSUPPORTED_MEDIA_TYPE : reader.responses[c.text],
     );
+  });
+
+  it.each(STACKED_BOM_CASES)('$name は置き換え前 (req.text()) と同じ応答', async (c) => {
+    const expected = await textReaderOutcome(c.spec(reader.base, reader.cap), reader.cap);
+    expect(await runSpec(reader, c.spec(reader.base, reader.cap))).toEqual(reader.responses[expected]);
+  });
+
+  // 受容した差 (差 4): 上限 + 6 を超えて読んだ時点で読むのをやめるので、そのあとで stream が切れても too_large の応答になる。
+  // 置き換え前は req.text() が投げて invalid の応答だった (relay/jpyc/status はどちらも 400 invalid_payload で同じ)。
+  it('生 byte で上限 +7 を読んだ後に stream エラー → too_large の応答 (置き換え前は invalid の応答)', async () => {
+    const spec = (): BodySpec => ({ chunks: [padded(reader.base, reader.cap + 7)], streamError: true });
+    expect(await textReaderOutcome(spec(), reader.cap)).toBe('invalid');
+    expect(await runSpec(reader, spec())).toEqual(reader.responses.too_large);
+  });
+});
+
+describe('CASES の text 列', () => {
+  it.each(CASES)('$name はこの runtime の req.text() の結果と一致する', async (c) => {
+    expect(await textReaderOutcome(c.spec(PUSH_BASE, MAX_BODY_BYTES), MAX_BODY_BYTES)).toBe(c.text);
   });
 });
 
@@ -381,10 +583,10 @@ describe('上限超過時の読み取り量', () => {
     return { state, body };
   }
 
-  function countingRequest(url: string) {
+  function countingRequest(url: string, method: HttpMethod = 'POST') {
     const { state, body } = countingStream();
     const req = new Request(url, {
-      method: 'POST',
+      method,
       headers: { 'content-type': 'application/json', 'x-forwarded-for': '203.0.113.55' },
       body,
       duplex: 'half',
@@ -392,15 +594,24 @@ describe('上限超過時の読み取り量', () => {
     return { state, req };
   }
 
-  it.each([
-    ['push/subscribe POST', (req: Request) => pushSubscribePost(req), 413],
-    ['relay/jpyc/status POST', (req: Request) => relayStatusPost(req), 400],
-  ] as const)('%s は req.text() で最後まで読み、cancel しない', async (_name, run, status) => {
+  it('置き換え前の読み口 (req.text()) は最後まで読み、cancel しない', async () => {
     const { state, req } = countingRequest('http://localhost/x');
-    expect((await run(req)).status).toBe(status);
+    expect(Buffer.byteLength(await req.text(), 'utf8')).toBe(CHUNK * TOTAL_CHUNKS);
     expect(state.pulls).toBe(TOTAL_CHUNKS);
     expect(state.cancelled).toBe(0);
   });
+
+  // 8 本の route (9 個の handler) は生 byte が上限 + 6 を超えた chunk で読むのをやめる (32 KiB を送っても 5 KiB しか読まない)。
+  it.each(routeReaders.map((reader) => [reader.name, reader] as const))(
+    '%s は上限 + 6 byte を超えた chunk で cancel する',
+    async (_name, reader) => {
+      const { state, req } = countingRequest(reader.url, reader.method);
+      expect(await asResult(await reader.handler(req))).toEqual(reader.responses.too_large);
+      expect(state.cancelled).toBe(1);
+      expect(state.pulls).toBe(Math.floor((MAX_BODY_BYTES + 6) / CHUNK) + 1);
+      expect(state.pulls).toBeLessThan(TOTAL_CHUNKS);
+    },
+  );
 
   it('purchasesBody は上限超過の chunk で cancel する', async () => {
     const { state, req } = countingRequest('http://localhost/x');
