@@ -61,7 +61,7 @@ const inLibRules = (facades) =>
     { regex: inLib, message },
   ]);
 
-// 層の向き (F-4): lib/ は app/・hooks/・components/ を import しない (型だけの import も)。
+// 層の向き (F-4): lib/ は app/・hooks/・components/ を import しない (型だけの import と型の中の import('…').X も)。
 // lib から route 固有の module や client hook を引くと、app 側を動かしただけで lib が連鎖して壊れる。
 // 共有する実体・型は lib/ へ移す (SIWE session → lib/siweSession.ts・下書きの型 → lib/handleProfileDraft.ts 等)。
 const LIB_LAYER_RULE = {
@@ -90,7 +90,9 @@ const SIWE_FACADE_FROM_TESTS_RULE = {
     "tests は SIWE session を '@/lib/siweSession' (実体) で vi.mock / import する。facade の mock は実体を直接 import する lib/* に届かない。",
   viMock: true,
 };
-// vi.mock の第 1 引数 (文字列) を検査する vitest API。
+// vi.mock の第 1 引数 (文字列) を検査する vitest API。`vi` と別名の `vitest` の両方・
+// `vi.mock` と `vi['mock']` の両方の書き方を止める。
+const VI_OBJECTS = '^(?:vi|vitest)$';
 const VI_MODULE_APIS = '^(?:mock|doMock|unmock|doUnmock|importActual|importMock)$';
 
 // esquery の正規表現リテラルは `/` を含められないので \x2F で表す。
@@ -99,17 +101,23 @@ const esqueryRegex = (regex) => `/${regex.replaceAll('/', '\\x2F')}/`;
 // flat config は同じ rule を後の block が丸ごと上書きするため、1 file に効く facade の規則は
 // 1 つの block にまとめて渡す。
 function restrictFacadeDeepImports(entries) {
+  const viApi = esqueryRegex(VI_MODULE_APIS);
   return {
     'no-restricted-imports': ['error', {
       patterns: entries.map(({ regex, message }) => ({ regex, message })),
     }],
-    // no-restricted-imports は動的 import() を検査しないため、文字列リテラルの import() も止める。
+    // no-restricted-imports は動的 import() と型の中の import('…').X (TSImportType) を検査しないため、
+    // 文字列リテラルのこの 2 つも止める。
     // viMock の entry は vi.mock('…') 等の第 1 引数も止める (import しなくても mock の対象になるため)。
     'no-restricted-syntax': ['error', ...entries.flatMap(({ regex, message, viMock }) => [
       { selector: `ImportExpression[source.value=${esqueryRegex(regex)}]`, message },
+      { selector: `TSImportType[argument.literal.value=${esqueryRegex(regex)}]`, message },
       ...(viMock
         ? [{
-          selector: `CallExpression[callee.object.name='vi'][callee.property.name=${esqueryRegex(VI_MODULE_APIS)}][arguments.0.value=${esqueryRegex(regex)}]`,
+          selector:
+            `CallExpression[callee.type='MemberExpression'][callee.object.name=${esqueryRegex(VI_OBJECTS)}]`
+            + `:matches([callee.computed=false][callee.property.name=${viApi}], [callee.computed=true][callee.property.value=${viApi}])`
+            + `[arguments.0.value=${esqueryRegex(regex)}]`,
           message,
         }]
         : []),
