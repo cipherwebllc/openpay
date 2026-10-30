@@ -79,6 +79,9 @@ export async function readBodyCapped(
 //   置換は長さを縮めないので、cap + 6 を超えた body は全体を読んでも必ず too_large になる (結果は変わらない)。違いが出るのは
 //   cap + 6 を超えたあとで stream が切れる body だけで、req.text() なら投げていた (unreadable) ところを too_large で返す。
 // - body が無ければ空文字列 (req.text() と同じ)。読み取り中の stream の失敗は unreadable (req.text() が投げるのと同じ扱い)。
+// 前提: body はまだ誰も読んでいない (lock も消費もされていない)。lock 済みなら getReader() が投げて呼び元へ伝わり、一部を
+// 読まれた後なら残りだけを受理しうる (req.text() はどちらも投げる)。使っている 8 本の route は body に先に触らないので、
+// 守りは置かない。
 export async function readTextBodyCapped(
   source: BodySource,
   cap: number,
