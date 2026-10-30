@@ -150,19 +150,20 @@ for (const [name, path] of [
   }
 }
 
-// --- (6a) 掲載の再検証が直近 3 時間内に 200 で終えたか (主 = Vercel Cron の毎時・予備 = GitHub Actions) ---
-// 起動元を問わない本番の最後の成功を、CRON_SECRET で守った /api/cron/reverify-status で読む (再検証は起動しない)。
-// 記録なし (deploy 直後) だけは warn (assessReverifyFreshness)。
+// --- (6a) 掲載の再検証が直近 3 時間内に storage エラーなしで動いたか (主 = Vercel Cron の毎時・予備 = GitHub Actions) ---
+// 起動元を問わない本番の最後の正常な batch を、CRON_SECRET で守った /api/cron/reverify-status で読む (再検証は起動しない)。
+// 記録なし (deploy 直後) だけは warn (assessReverifyFreshness)。404 (新しい版の配信待ち) は最大 2 分読み直し、
+// それでも 404 なら error。
 {
   const assessment = await checkReverifyFreshness(BASE, process.env.CRON_SECRET);
-  record('Reverify freshness (本番の最後の成功)', assessment.ok, assessment.detail, {
+  record('Reverify freshness (本番の最後の正常な batch)', assessment.ok, assessment.detail, {
     severity: assessment.severity ?? 'error',
   });
 }
 
 // --- (6b) 予備の reverify-cron.yml が直近 8 時間内に HTTP 200 で完走したか (GitHub の schedule は毎時指定でも実測 2〜7 時間おき) ---
-// secret 欠落・ローテーション不一致・schedule 停止で予備が黙って止まり、主 (Vercel Cron) が止まったときに
-// 毎時を保てなくなる前に、read-only の Actions 履歴と実 HTTP 出力から operator 設定不全を検出する。
+// secret 欠落・ローテーション不一致・schedule 停止で予備が黙って止まり、主 (Vercel Cron) が止まったときの受け皿
+// (実測 2〜7 時間おきで追いつく) が無くなる前に、read-only の Actions 履歴と実 HTTP 出力から operator 設定不全を検出する。
 {
   const r = spawnSync(
     'gh',

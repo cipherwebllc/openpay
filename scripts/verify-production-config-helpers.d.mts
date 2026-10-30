@@ -1,4 +1,4 @@
-/** 本番の最後の成功 (/api/cron/reverify-status の lastOkAt) の鮮度の基準 (毎時 + 2 回の失敗まで)。 */
+/** 本番の最後の正常な batch (/api/cron/reverify-status の lastOkAt) の鮮度の基準 (毎時 + 2 回の失敗まで)。 */
 export const REVERIFY_MAX_AGE_MS: number;
 export const REVERIFY_CLOCK_SKEW_MS: number;
 /** 予備のトリガー reverify-cron.yml の run 履歴の鮮度の基準 (GitHub の schedule の実測の遅れに合わせる)。 */
@@ -28,11 +28,20 @@ export function assessReverifyFreshness(
   nowMs?: number,
 ): { ok: boolean; detail: string; severity?: 'warn' };
 
-/** /api/cron/reverify-status を CRON_SECRET で読んで判定する (通信の失敗・停止は固定の文言で NG)。 */
+/** /api/cron/reverify-status が 404 (新しい版の配信待ち) のときに読み直すまでの待ち (ms)。 */
+export const REVERIFY_STATUS_READY_RETRY_MS: readonly number[];
+
+/** /api/cron/reverify-status を CRON_SECRET で読んで判定する (404 だけ読み直す・通信の失敗・停止は固定の文言で NG)。 */
 export function checkReverifyFreshness(
   base: string,
   secret: string | undefined,
-  options?: { fetchImpl?: typeof fetch; timeoutMs?: number; nowMs?: number },
+  options?: {
+    fetchImpl?: typeof fetch;
+    timeoutMs?: number;
+    nowMs?: number;
+    retryDelaysMs?: readonly number[];
+    sleep?: (ms: number) => Promise<void>;
+  },
 ): Promise<{ ok: boolean; detail: string; severity?: 'warn' }>;
 
 /** `gh run list` の結果 (新しい順) から、完了した最新の run を選ぶ (実行中の run はログがまだ無い)。 */

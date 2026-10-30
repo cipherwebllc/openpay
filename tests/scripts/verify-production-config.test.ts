@@ -14,6 +14,7 @@ import {
   REVERIFY_CLOCK_SKEW_MS,
   REVERIFY_GITHUB_RUN_MAX_AGE_MS,
   REVERIFY_MAX_AGE_MS,
+  REVERIFY_STATUS_READY_RETRY_MS,
   summarizeChecks,
 } from '../../scripts/verify-production-config-helpers.mjs';
 import { PIMLICO_BALANCE_HEADER } from '../../scripts/lib/pimlico-balance-output.mjs';
@@ -64,7 +65,7 @@ describe('assessReverifyRun (予備の GitHub トリガー)', () => {
   });
 });
 
-describe('assessReverifyFreshness (本番の最後の成功)', () => {
+describe('assessReverifyFreshness (本番の最後の正常な batch)', () => {
   const at = (ms: number) => new Date(ms).toISOString();
 
   it('基準は毎時の run が 2 回続けて失敗するまで待つ 3 時間', () => {
@@ -152,6 +153,55 @@ describe('checkReverifyFreshness', () => {
     const result = await checkReverifyFreshness('https://open-pay.jp', SECRET, { fetchImpl, nowMs: NOW });
     expect(result.ok).toBe(false);
     expect(result.detail).toContain('日時が不正');
+  });
+
+  // main への push の 5 分後の検証では、新しい route を含む版の配信がまだのことがある (旧版が 404 を返す)。
+  // 404 だけは間隔を広げて数回読み直し、ずっと 404 なら route の無い版として error のまま。
+  describe('404 (配信待ち) の読み直し', () => {
+    const fresh = () => Response.json({ lastOkAt: new Date(NOW - 10 * 60 * 1000).toISOString() });
+    const notFound = () => new Response('Not Found', { status: 404 });
+
+    it('読み直しの待ちは 20 秒・40 秒・60 秒 (合計 2 分で post-deploy-verify の job の 10 分に収まる)', () => {
+      expect(REVERIFY_STATUS_READY_RETRY_MS).toEqual([20_000, 40_000, 60_000]);
+    });
+
+    it('404 の後に 200 が返れば、その応答で判定して ok', async () => {
+      const fetchImpl = vi.fn().mockResolvedValueOnce(notFound()).mockResolvedValueOnce(notFound()).mockResolvedValue(fresh());
+      const sleep = vi.fn(async () => {});
+      expect(await checkReverifyFreshness('https://open-pay.jp', SECRET, { fetchImpl, sleep, nowMs: NOW })).toEqual({
+        ok: true,
+        detail: expect.stringContaining('10 分前'),
+      });
+      expect(fetchImpl).toHaveBeenCalledTimes(3);
+      expect(sleep.mock.calls).toEqual([[20_000], [40_000]]);
+    });
+
+    it('待っても 404 のままなら error (warn に下げない)', async () => {
+      const fetchImpl = vi.fn(async () => notFound());
+      const sleep = vi.fn(async () => {});
+      expect(await checkReverifyFreshness('https://open-pay.jp', SECRET, { fetchImpl, sleep, nowMs: NOW })).toEqual({
+        ok: false,
+        detail: 'HTTP 404 (/api/cron/reverify-status が読めない)',
+      });
+      expect(fetchImpl).toHaveBeenCalledTimes(1 + REVERIFY_STATUS_READY_RETRY_MS.length);
+      expect(sleep.mock.calls).toEqual(REVERIFY_STATUS_READY_RETRY_MS.map((ms) => [ms]));
+    });
+
+    it('404 以外の失敗 (503・401・通信の例外) は読み直さない', async () => {
+      for (const make of [
+        () => Response.json({ error: 'storage_unavailable' }, { status: 503 }),
+        () => Response.json({ error: 'unauthorized' }, { status: 401 }),
+        () => {
+          throw new Error('connect failed');
+        },
+      ]) {
+        const fetchImpl = vi.fn(async () => make());
+        const sleep = vi.fn(async () => {});
+        expect((await checkReverifyFreshness('https://open-pay.jp', SECRET, { fetchImpl, sleep, nowMs: NOW })).ok).toBe(false);
+        expect(fetchImpl).toHaveBeenCalledTimes(1);
+        expect(sleep).not.toHaveBeenCalled();
+      }
+    });
   });
 });
 

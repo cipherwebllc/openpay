@@ -1814,9 +1814,11 @@ flag ON + forwarder/JPYC 設定済の Amoy (80002) で 1 周する。route テ�
 - 掲載の再検証: Vercel Cron (`vercel.json`) が毎時 0 分に `/api/cron/reverify` を呼ぶ (既存 `CRON_SECRET`)。2026-10-30 に日次から毎時へ
   (GitHub の schedule は毎時の指定でも実測 0.4〜7.4 時間おき・平均 4.4 時間で、死んだ掲載を隠すのが半日近く遅れえた)。
   `.github/workflows/reverify-cron.yml` (毎時 5 分の指定) は予備として残す。route は runId (UTC 時) + KV lock + 対象ごとの
-  `lastRunId` で、同じ UTC 時の 2 回目は probe せず重複として飛ばす (片方が止まっても毎時を保つ)。鮮度は post-deploy verify が
-  `/api/cron/reverify-status` (CRON_SECRET・cursor の `lastOkAt` を GET 1 回で読むだけ) を 3 時間で、予備の run 履歴を 8 時間で見る。
-  deploy 直後で `lastOkAt` がまだ無い間は warn (次の毎時 0 分の run で入る)。
+  `lastRunId` で、同じ UTC 時の 2 回目は probe せず重複として飛ばす。Vercel Cron が止まっても予備で再検証は途切れないが、
+  毎時は保てない (実測 2〜7 時間おきで追いつく)。鮮度は post-deploy verify が
+  `/api/cron/reverify-status` (CRON_SECRET・cursor の `lastOkAt` = storage エラーの無かった最後の batch の開始時刻を GET 1 回で
+  読むだけ) を 3 時間で、予備の run 履歴を 8 時間で見る。deploy 直後で `lastOkAt` がまだ無い間は warn (次の毎時 0 分の run で入る)。
+  確認口が 404 (新しい版の配信待ち) なら最大 2 分読み直し、それでも 404 なら error。
 - JPYC Activity: Vercel Cron (`vercel.json`) が毎時 20 分に `/api/cron/jpyc-activity` を呼ぶ (既存 `CRON_SECRET`)。
   2026-10-05 に GitHub Actions の schedule から移した (GitHub は実測で平均 5.4 時間おきにしか動かず、有料の窓が期間の 4 割前後 503 だった)。
   `.github/workflows/jpyc-activity-cron.yml` は手動復旧用 (`workflow_dispatch` のみ)。

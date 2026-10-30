@@ -41,7 +41,7 @@ describe('GET /api/cron/reverify-status', () => {
     expect(await res.json()).toEqual({ lastOkAt: '2026-10-30T02:00:00.000Z' });
   });
 
-  it('まだ 1 度も 200 で終えていなければ null', async () => {
+  it('まだ 1 度も正常な batch が無ければ null', async () => {
     const res = await GET(request('Bearer cron-test'));
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ lastOkAt: null });

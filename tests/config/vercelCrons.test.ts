@@ -74,7 +74,7 @@ describe('掲載の再検証 (reverify) の定期実行', () => {
     ]);
   });
 
-  it('GitHub Actions 側の毎時 (予備) も残す — 片方が止まっても毎時を保つ (route は同じ UTC 時の 2 回目を重複として飛ばす)', () => {
+  it('GitHub Actions 側の毎時の指定 (予備) も残す — Vercel Cron が止まっても再検証は途切れない (毎時ではなく実測 2〜7 時間おき・route は同じ UTC 時の 2 回目を重複として飛ばす)', () => {
     const workflow = readFileSync(resolve(root, '.github/workflows/reverify-cron.yml'), 'utf8');
     expect(workflow).toMatch(/^\s*-\s*cron:\s*'5 \* \* \* \*'/m);
   });

@@ -1,9 +1,10 @@
 import { PIMLICO_BALANCE_HEADER } from './lib/pimlico-balance-output.mjs';
 
 // 掲載の再検証 (/api/cron/reverify) の鮮度。毎時の主トリガーは Vercel Cron (vercel.json・毎時 0 分) で、
-// GitHub Actions (reverify-cron.yml) は予備。どちらから起動されても、200 で終えた run の時刻が KV の cursor に残り、
-// /api/cron/reverify-status で読める。3 時間 = 毎時の run が 2 回続けて失敗 (KV の一時障害で 503 等) するまでは
-// 赤にせず、両方が止まったら次の検証 (毎日 + main への push ごと) で気づける幅。
+// GitHub Actions (reverify-cron.yml) は予備。どちらから起動されても、storage エラーの無かった batch の開始時刻
+// (cursor の lastOkAt) が KV に残り、/api/cron/reverify-status で読める。3 時間 = 毎時の run が 2 回続けて
+// storage エラーになる (KV の一時障害等) までは赤にせず、両方が止まったら次の検証 (毎日 + main への push ごと) で
+// 気づける幅。
 export const REVERIFY_MAX_AGE_MS = 3 * 60 * 60 * 1000;
 // 本番と runner の時計のずれで、直前の run を「未来の日時」と誤判定しないための幅。
 export const REVERIFY_CLOCK_SKEW_MS = 5 * 60 * 1000;
@@ -71,9 +72,11 @@ export function assessReverifyRun(run, log, nowMs = Date.now()) {
 }
 
 /**
- * /api/cron/reverify-status の応答から、再検証が最後に 200 で終えた run が REVERIFY_MAX_AGE_MS 以内かを判定する。
- * 記録が無い (null) のは、新しい版の最初の 200 の run の前 (deploy 直後・最長 1 時間) なので warn にとどめる
- * (毎回 503 で記録が入らないままなら、予備の GitHub の run が 200 でなくなり、そちらの検査が赤になる)。
+ * /api/cron/reverify-status の応答から、再検証が storage エラーなしで最後に動いた batch (lastOkAt) が
+ * REVERIFY_MAX_AGE_MS 以内かを判定する。lastOkAt は「200 を返した run」と厳密には一致しない (cursor の SET が
+ * 反映されたのに ack だけ失敗した run も進める・route の注記) が、見たいのは batch が動いたかなのでこれで足りる。
+ * 記録が無い (null) のは、新しい版の最初の正常な batch の前 (deploy 直後・最長 1 時間) なので warn にとどめる
+ * (毎回 storage エラーで記録が入らないままなら、予備の GitHub の run が 200 でなくなり、そちらの検査が赤になる)。
  */
 export function assessReverifyFreshness(status, body, nowMs = Date.now()) {
   if (status !== 200) {
@@ -84,22 +87,22 @@ export function assessReverifyFreshness(status, body, nowMs = Date.now()) {
     return {
       ok: false,
       severity: 'warn',
-      detail: '最後に 200 で終えた run の記録がまだ無い (deploy 直後なら次の毎時 0 分の run で入る)',
+      detail: '最後の正常な batch の記録がまだ無い (deploy 直後なら次の毎時 0 分の run で入る)',
     };
   }
   const lastOkMs = typeof lastOkAt === 'string' ? Date.parse(lastOkAt) : Number.NaN;
   const ageMs = nowMs - lastOkMs;
   if (!Number.isFinite(lastOkMs) || ageMs < -REVERIFY_CLOCK_SKEW_MS) {
-    return { ok: false, detail: `最後に 200 で終えた run の日時が不正 (lastOkAt=${String(lastOkAt)})` };
+    return { ok: false, detail: `最後の正常な batch の日時が不正 (lastOkAt=${String(lastOkAt)})` };
   }
   const ageMinutes = Math.max(0, Math.round(ageMs / 60_000));
   if (ageMs > REVERIFY_MAX_AGE_MS) {
     return {
       ok: false,
-      detail: `最後に 200 で終えた run が ${ageMinutes} 分前 (${lastOkAt}) — 基準の ${REVERIFY_MAX_AGE_MS / 60_000} 分を超えた (Vercel Cron と GitHub の両方が止まったか、run が 503 を返し続けている)`,
+      detail: `最後の正常な batch が ${ageMinutes} 分前 (${lastOkAt}) — 基準の ${REVERIFY_MAX_AGE_MS / 60_000} 分を超えた (Vercel Cron と GitHub の両方が止まったか、run が storage エラーを返し続けている)`,
     };
   }
-  return { ok: true, detail: `最後に 200 で終えた run は ${ageMinutes} 分前 (${lastOkAt})` };
+  return { ok: true, detail: `最後の正常な batch は ${ageMinutes} 分前 (${lastOkAt})` };
 }
 
 /**
@@ -181,14 +184,36 @@ export async function checkNodeRuntime(base, secret, { fetchImpl = fetch, timeou
   return res ? assessNodeRuntime(res.status, res.body) : { ok: false, detail: '/api/cron/runtime に接続できない' };
 }
 
-/** /api/cron/reverify-status を CRON_SECRET で読み、assessReverifyFreshness で判定する。 */
+// /api/cron/reverify-status が 404 のときに読み直すまでの待ち (合計 2 分)。main への push の 5 分後の検証では、
+// 新しい route を含む版の配信がまだ終わっていないことがある (build が 5 分を超える・旧版が応答する)。
+// 待っても 404 のままなら route の無い版が出ているので error のまま (warn に下げない)。合計は post-deploy-verify の
+// job の 10 分 (push のときは 5 分の待ちを含む) に収まる長さにする。
+export const REVERIFY_STATUS_READY_RETRY_MS = [20_000, 40_000, 60_000];
+
+const sleepMs = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * /api/cron/reverify-status を CRON_SECRET で読み、assessReverifyFreshness で判定する。
+ * 404 (配信待ち) だけは REVERIFY_STATUS_READY_RETRY_MS の間隔で読み直す。ほかの応答・通信の失敗は読み直さない。
+ */
 export async function checkReverifyFreshness(
   base,
   secret,
-  { fetchImpl = fetch, timeoutMs = NODE_RUNTIME_TIMEOUT_MS, nowMs } = {},
+  {
+    fetchImpl = fetch,
+    timeoutMs = NODE_RUNTIME_TIMEOUT_MS,
+    nowMs,
+    retryDelaysMs = REVERIFY_STATUS_READY_RETRY_MS,
+    sleep = sleepMs,
+  } = {},
 ) {
   if (!secret) return { ok: false, detail: 'CRON_SECRET 未設定 — 確認できない' };
-  const res = await readCronProbe(base, '/api/cron/reverify-status', secret, fetchImpl, timeoutMs);
+  let res = await readCronProbe(base, '/api/cron/reverify-status', secret, fetchImpl, timeoutMs);
+  for (const delayMs of retryDelaysMs) {
+    if (res?.status !== 404) break;
+    await sleep(delayMs);
+    res = await readCronProbe(base, '/api/cron/reverify-status', secret, fetchImpl, timeoutMs);
+  }
   return res
     ? assessReverifyFreshness(res.status, res.body, nowMs ?? Date.now())
     : { ok: false, detail: '/api/cron/reverify-status に接続できない' };

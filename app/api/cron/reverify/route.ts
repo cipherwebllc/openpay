@@ -332,8 +332,10 @@ export async function GET(req: Request): Promise<NextResponse> {
         streak: storageErrorStreak,
       });
     }
-    // lastOkAt は 200 で終える run だけが進める (storage エラーの run は 503 なので直前の値を引き継ぐ)。
-    // cursor の書き込みに失敗した run は何も残らないので、残った値は常に「200 を返した run」の時刻になる。
+    // lastOkAt = storage エラーの無かった batch の開始時刻 (鮮度の心拍)。storage エラーの run は進めず直前の値を
+    // 引き継ぐ。「200 を返した run」とは一致しない: cursor の SET が反映されたのに応答 (ack) だけ失敗した run は
+    // 503 を返しても進み、cursor の保存より後の処理 (alert・lock の解放) の失敗も反映しない。鮮度の検査が見たいのは
+    // 「batch が storage エラーなしで動いたか」なので、これで足りる。
     const lastOkPart = !storageError
       ? { lastOkAt: checkedAt }
       : cursor.lastOkAt

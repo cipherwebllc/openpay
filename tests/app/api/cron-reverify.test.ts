@@ -9,6 +9,7 @@ const io = vi.hoisted(() => ({
   writes: [] as ReverifyCursor[],
   writeOk: true,
   targetStorageError: true,
+  directoryWriteOk: true,
 }));
 
 const logs = vi.hoisted(() => ({ warn: [] as Array<[string, unknown]> }));
@@ -28,7 +29,7 @@ vi.mock('@/lib/x402/firstParty', async (importOriginal) => ({
 
 vi.mock('@/lib/directory/verification', () => ({
   probeDirectorySource: async () => true,
-  writeDirectoryVerificationSnapshot: async () => true,
+  writeDirectoryVerificationSnapshot: async () => io.directoryWriteOk,
 }));
 
 vi.mock('@/lib/x402/reverify', async (importOriginal) => {
@@ -193,20 +194,22 @@ describe('GET /api/cron/reverify cursor quarantine', () => {
 });
 
 // 本番設定の検証は /api/cron/reverify-status で cursor の lastOkAt を読み、起動元 (Vercel Cron / GitHub) を
-// 問わず再検証が毎時 200 で終えているかを見る。200 の run だけが進め、503 の run は直前の値を引き継ぐ。
-describe('GET /api/cron/reverify lastOkAt (最後に 200 で終えた run の時刻)', () => {
+// 問わず再検証が storage エラーなしで動いているかを見る。lastOkAt = storage エラーの無かった batch の開始時刻
+// (cursor の保存が反映されたもの)。storage エラーの run は直前の値を引き継ぐ。
+describe('GET /api/cron/reverify lastOkAt (storage エラーの無かった最後の batch の時刻)', () => {
   const PREVIOUS = '2026-10-30T00:00:00.000Z';
 
   beforeEach(() => {
     io.externalIds = ['r0'];
     io.writes = [];
     io.writeOk = true;
+    io.directoryWriteOk = true;
     logs.warn = [];
     vi.stubEnv('CRON_SECRET', 'secret');
     vi.stubEnv('ALERT_WEBHOOK_URL', '');
   });
 
-  it('200 の run は lastOkAt をその run の時刻に進める', async () => {
+  it('storage エラーの無い run (200) は lastOkAt をその run の時刻に進める', async () => {
     io.cursor = { offset: 0, lastOkAt: PREVIOUS };
     io.targetStorageError = false;
     const route = await load();
@@ -238,11 +241,52 @@ describe('GET /api/cron/reverify lastOkAt (最後に 200 で終えた run の時
     expect(quarantined.storageErrorStreak).toBeUndefined();
   });
 
-  it('まだ 1 度も 200 で終えていなければ、storage エラーの run は lastOkAt を作らない', async () => {
+  it('まだ 1 度も正常な batch が無ければ、storage エラーの run は lastOkAt を作らない', async () => {
     io.targetStorageError = true;
     io.cursor = { offset: 0 };
     const route = await load();
     expect((await route.GET(request('secret'))).status).toBe(503);
     expect(io.writes.at(-1)).not.toHaveProperty('lastOkAt');
+  });
+
+  // cursor の SET が Redis に反映されたのに応答 (ack) だけ失敗した run は 503 を返すが、反映された cursor には
+  // この run の lastOkAt が入っている。lastOkAt は「200 を返した run」ではなく「batch が storage エラーなしで
+  // 動いた」心拍なので、これは仕様 (鮮度の検査が見たいのは batch が動いたか)。
+  it('cursor の書き込みの ack だけ失敗した run は 503 だが、反映された cursor の lastOkAt はこの run の時刻', async () => {
+    io.targetStorageError = false;
+    io.writeOk = false; // 書き込みは io.writes に残る (= Redis に反映された) が、ack は失敗として返る。
+    io.cursor = { offset: 0, lastOkAt: PREVIOUS };
+    const route = await load();
+
+    const before = Date.now();
+    const response = await route.GET(request('secret'));
+    const after = Date.now();
+
+    expect(response.status).toBe(503);
+    const body = (await response.json()) as { storageFailures: unknown };
+    expect(body.storageFailures).toEqual([{ target: 'cursor', stage: 'write', detail: null }]);
+    const committed = Date.parse((io.writes.at(-1) as ReverifyCursor).lastOkAt ?? '');
+    expect(committed).toBeGreaterThanOrEqual(before);
+    expect(committed).toBeLessThanOrEqual(after);
+  });
+
+  it('directory の snapshot の保存に失敗した run は 503・cursor を進めず、lastOkAt と directoryDate を引き継ぐ', async () => {
+    io.targetStorageError = false;
+    io.directoryWriteOk = false;
+    io.externalIds = Array.from({ length: 40 }, (_, i) => `r${i}`);
+    io.cursor = { offset: 0, directoryDate: '2000-01-01', lastOkAt: PREVIOUS };
+    const route = await load();
+
+    const response = await route.GET(request('secret'));
+
+    expect(response.status).toBe(503);
+    const body = (await response.json()) as { storageFailures: unknown };
+    expect(body.storageFailures).toEqual([{ target: 'directory-snapshot', stage: 'write', detail: null }]);
+    expect(io.writes.at(-1)).toEqual({
+      offset: 0,
+      directoryDate: '2000-01-01',
+      storageErrorStreak: 1,
+      lastOkAt: PREVIOUS,
+    });
   });
 });
