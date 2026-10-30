@@ -75,8 +75,10 @@ type RetainedUsageFeePayload = {
   ambiguous: boolean;
 };
 
+// tx hash は 0x + 64 桁の hex だけ (useJpycEip3009Payment と同じ)。形の崩れた txHash の応答は
+// 成功・revert にせず、末尾の RelayResponseUnknownError (曖昧 latch・同一 payload の再 POST) に落とす。
 function isTxHash(value: unknown): value is Hex {
-  return typeof value === 'string' && value.length > 0;
+  return typeof value === 'string' && /^0x[0-9a-fA-F]{64}$/.test(value);
 }
 
 function retryAfterSeconds(res: Response, body: RelayBody): number | null {

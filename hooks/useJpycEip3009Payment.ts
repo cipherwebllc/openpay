@@ -91,8 +91,10 @@ function isRelayResponse(value: unknown): value is RelayResponse {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+// tx hash は 0x + 64 桁の hex だけ。形の崩れた txHash の応答は成功・revert・pending の
+// どれにもせず、末尾の RelayResponseUnknownError (曖昧 latch → nonce の status 照会) に落とす。
 function isTxHash(value: unknown): value is Hex {
-  return typeof value === 'string' && value.length > 0;
+  return typeof value === 'string' && /^0x[0-9a-fA-F]{64}$/.test(value);
 }
 
 function retryAfterSeconds(res: Response, body: RelayResponse): number | null {

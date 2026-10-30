@@ -713,6 +713,83 @@ describe('useJpycEip3009Payment — relay POST 応答分類 (D1)', () => {
     },
   );
 
+  // full-review 2026-10-30 F-6 (PR-07): txHash は 0x + 64 桁の hex のときだけ成功・revert・pending の
+  // 結果にする。形の崩れた txHash は応答不明 (曖昧 latch) に落ち、nonce の status 照会で確定した hash だけを返す。
+  // (どれも空でない文字列なので、旧 isTxHash は通していた。)
+  const MALFORMED_TX_HASHES = [
+    ['非 hex', `0x${'g'.repeat(64)}`],
+    ['63 桁', `0x${'a'.repeat(63)}`],
+    ['0x なし', 'a'.repeat(64)],
+  ] as const;
+  const RELAY_ENVELOPES = [
+    ['200 {ok:true}', 200, (txHash: string) => ({ ok: true, txHash })],
+    ['200 {reverted:true}', 200, (txHash: string) => ({ ok: false, reverted: true, txHash })],
+    ['202 {pending:true}', 202, (txHash: string) => ({ ok: false, pending: true, txHash })],
+  ] as const;
+
+  it.each(
+    RELAY_ENVELOPES.flatMap(([envelope, status, body]) =>
+      MALFORMED_TX_HASHES.map(([label, badHash]) => [envelope, label, status, body, badHash] as const),
+    ),
+  )(
+    '%s の txHash が %s → 結果にせず曖昧 latch → status 照会で確定した hash だけを返す',
+    async (_envelope, _label, status, body, badHash) => {
+      vi.useFakeTimers();
+      await import('@/lib/relay/relayIntentRecovery');
+      const settledHash = `0x${'d'.repeat(64)}` as Hex;
+      fetchSpy
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify(body(badHash)), {
+            status,
+            headers: { 'content-type': 'application/json' },
+          }),
+        )
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ ok: true, state: 'settled', txHash: settledHash })),
+        );
+      const result = await submit();
+
+      // 待つ条件は「曖昧 latch に入った」か「結果が出た」のどちらか。形の崩れた hash を結果にしてしまう
+      // 実装でも待ちは抜け、下の assertion で落ちる (待ちの timeout で act を残して後続の test を巻き込まない)。
+      await advanceUntil(0, () =>
+        expect(result.current.recoveryState === 'auto' || result.current.data !== undefined).toBe(true),
+      );
+      expect(result.current.data).toBeUndefined();
+      expect(result.current.recoveryState).toBe('auto');
+      expect(window.sessionStorage.getItem(RELAY_INTENT_STORAGE_KEY)).not.toBeNull();
+
+      await advanceUntil(3_000, () =>
+        expect(result.current.data).toEqual({ txHash: settledHash, success: true }),
+      );
+      expect(fetchSpy.mock.calls[1][0]).toBe('/api/relay/jpyc/status');
+      expect(waitForTransactionReceipt).toHaveBeenCalledWith(
+        expect.objectContaining({ hash: settledHash }),
+      );
+      expect(waitForTransactionReceipt).not.toHaveBeenCalledWith(
+        expect.objectContaining({ hash: badHash }),
+      );
+      expect(signTypedData).toHaveBeenCalledOnce();
+      expect(window.sessionStorage.getItem(RELAY_INTENT_STORAGE_KEY)).toBeNull();
+      vi.useRealTimers();
+    },
+  );
+
+  it('大文字を含む 0x + 64 桁の hex は従来どおり成功 (status 照会なし)', async () => {
+    const mixedCase = `0x${'aB'.repeat(32)}`;
+    fetchSpy.mockResolvedValueOnce(
+      new Response(JSON.stringify({ ok: true, txHash: mixedCase }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    const result = await submit();
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.data).toEqual({ txHash: mixedCase, success: true });
+    expect(result.current.recoveryState).toBeNull();
+    expect(fetchSpy).toHaveBeenCalledOnce();
+  });
+
   // B-R5: server の free 経路も broadcast 前 read の RPC 障害を recover 経路と同じ
   // JSON 503 preflight_unavailable で返す。client は経路を問わず同一の fallback-safe error に分類し、
   // 曖昧 latch / 自動 status 照会 / intent 保存を残さない (= standard 決済へ切替可能)。
