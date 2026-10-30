@@ -38,6 +38,7 @@ import {
   type ReverifyTarget,
   type ReverifyVerdict,
 } from '@/lib/x402/reverify';
+import type { GateAcceptMismatch } from '@/lib/x402/registrationGateMatch';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -51,6 +52,11 @@ type ProbeOutcome = {
   storageError?: boolean;
   /** storageError の要約 (KV の reason/status/文言)。cron 応答と warn ログに載せる。 */
   storageDetail?: string;
+  /**
+   * 観測だけの照合の結果 (印のない外部の掲載の ok の 402・null = 一致)。照合しなかった回 (公開待ち・first-party・ok 以外)
+   * には無い。verdict・CAS・集計のほかの数には使わない (集計の observe* だけが数える)。
+   */
+  observedMismatch?: GateAcceptMismatch | null;
 };
 
 // storage 失敗の内訳 (503 応答・x402.reverify.storage_error warn)。操作者だけが読む
@@ -84,6 +90,10 @@ type ReverifySummary = {
     unknown: number;
     ran: boolean;
   };
+  // 観測だけの照合 (印のない外部の掲載の ok の 402 を、公開待ちと同じ照合に通した回数と、そのうち合わなかった回数)。
+  // alert の条件 (shouldAlert) と alert の文面には入れない = 観測は通知も verdict も変えない。
+  observeChecked: number;
+  observeMismatch: number;
 };
 
 const firstPartyByPath = new Map<string, FirstPartyResource>(
@@ -113,9 +123,12 @@ async function processTarget(
     // 通った 402 だけで公開に進める (E-3)。照合に使った受取先を CAS に渡し、probe の間にそれが編集されていたら結果を
     // 捨てる。公開中・モデレーションの hidden の掲載は照合しない (verdict は従来どおり)。
     const matchedPayTo = read.resource.pendingFirstVerification === true ? read.resource.payTo : undefined;
+    // 印のない掲載 (公開中・モデレーションの hidden) は、同じ照合を「観測だけ」する (2026-10-30 user 裁定 (b) の観測の段)。
+    // 結果は warn と集計に残すだけで、verdict・CAS の引数 (matchedPayTo は渡さない)・復帰は変えない。1 週間の観測で
+    // 不一致が 0 なら、次の PR で照合を強制する (docs/DEPLOY_CHECKLIST.md §14.5)。
     const probe = matchedPayTo !== undefined
       ? await probeForPendingFirstVerification(probedUrl, matchedPayTo)
-      : await probeForReverifyDetailed(probedUrl);
+      : await probeForReverifyDetailed(probedUrl, {}, read.resource.payTo);
     const { verdict, authClass } = probe;
     if ('mismatch' in probe && probe.mismatch) {
       logger.warn('x402.reverify.pending_gate_mismatch', {
@@ -124,6 +137,7 @@ async function processTarget(
         mismatch: probe.mismatch,
       });
     }
+    const observedMismatch = 'observedMismatch' in probe ? probe.observedMismatch : undefined;
     const apply = await applyExternalReverify(
       target.id,
       probedUrl,
@@ -139,6 +153,20 @@ async function processTarget(
     if (apply.applied && apply.restoreBlocked === 'url_taken') {
       logger.warn('x402.reverify.url_taken', { runId, target: targetLabel(target) });
     }
+    if (observedMismatch) {
+      // CAS の後に出すのは、モデレーションの hidden が合わない 402 のまま実際に復帰したか (restored) を一緒に残すため
+      // (照合を強制する前に塞ぐ穴そのもの)。warn は「その時の 402 が掲載と合わなかった」記録で、CAS が結果を捨てた回
+      // (url_changed・duplicate 等) にも出る。host は observedMismatch がある = SSRF-safe fetch がこの URL を
+      // new URL で読めて 402 を受け取った回なので、ここで読み直しても throw しない。
+      logger.warn('x402.reverify.observe_gate_mismatch', {
+        runId,
+        target: targetLabel(target),
+        host: new URL(probedUrl).host,
+        mismatch: observedMismatch,
+        visibility: read.resource.hidden === true ? 'hidden' : 'visible',
+        restored: apply.applied && apply.hiddenBefore && !apply.hiddenAfter,
+      });
+    }
     return {
       target,
       checked: true,
@@ -146,6 +174,7 @@ async function processTarget(
       apply,
       storageError,
       ...(storageError ? { storageDetail: apply.applied ? 'url claim unavailable' : apply.detail } : {}),
+      ...(observedMismatch !== undefined ? { observedMismatch } : {}),
     };
   }
 
@@ -199,6 +228,8 @@ function summarize(
     skippedDuplicate: 0,
     urlTaken: 0,
     directory,
+    observeChecked: 0,
+    observeMismatch: 0,
   };
   for (const outcome of outcomes) {
     if (!outcome.checked) {
@@ -208,6 +239,10 @@ function summarize(
       continue;
     }
     summary.checked += 1;
+    if (outcome.observedMismatch !== undefined) {
+      summary.observeChecked += 1;
+      if (outcome.observedMismatch !== null) summary.observeMismatch += 1;
+    }
     if (outcome.verdict === 'ok_402_openpay') summary.ok += 1;
     else if (outcome.verdict && isViolationVerdict(outcome.verdict)) {
       summary.violations += 1;
