@@ -1,5 +1,7 @@
 # Circular Dependencies Audit (Task 4/8)
 
+Historical snapshot (2026-05-24): file references, counts and recommendations below describe the code at the time of this audit. This is not current guidance — re-check each finding against the current code before acting on it.
+
 ## Summary
 - madge ran: **yes**, version via `npx --yes madge` (latest, with `--ts-config tsconfig.json` for `@/*` alias resolution)
 - dpdm ran (cross-check): **yes**, via `npx --yes dpdm --circular`

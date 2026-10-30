@@ -10,6 +10,10 @@
 // 安全装置 (本スクリプトは DEL を含み、誤って本番 KV を指すと計上済みメーターを消すため):
 //   - 既定は **dry-run**。実行する KV コマンドを表示するだけで一切書き込まない。
 //   - 書き込みには `--apply` と env `SEED_TESTNET_OK=1` の **両方**が必要。
+//   - DEL の前に meter:{前月}:{merchant} を LRANGE で読み、testnet (chainId 80002) 以外の行や読めない行が
+//     1 つでもあれば **何も消さずに exit 1** (dry-run でも同じ判定を出す)。SEED_TESTNET_OK=1 は運用者の
+//     自己申告でしかなく、本番の relay が書いたメーターは本番の chainId を持つため (第 8 回レビュー F-3)。
+//     判定は scripts/lib/seedBillingGuard.mjs (tests/scripts/seed-billing-testnet.test.ts)。
 //   - 店主の自動検出は KEYS ではなく SCAN (MATCH + COUNT 100) で行う (本番 KV を止めないため)。
 //
 // 何をするか (--apply 時):
@@ -17,6 +21,12 @@
 //   - billing:merchants:{前月} に店主を追加 (admin 照合用の索引)
 //   - LLEN / LRANGE で結果を表示
 // 店主 merchant は **小文字**に正規化して投入する (コードは小文字キーで引くため)。
+
+import {
+  SEED_TESTNET_CHAIN_ID,
+  checkSeedMeterReplaceable,
+  describeBlockingRows,
+} from './lib/seedBillingGuard.mjs';
 
 const KV_URL = process.env.KV_REST_API_URL;
 const KV_TOKEN = process.env.KV_REST_API_TOKEN;
@@ -114,9 +124,23 @@ const run = async () => {
 
   const meterKey = `meter:${prevPeriod}:${merchant}`;
   const indexKey = `billing:merchants:${prevPeriod}`;
-  const event = JSON.stringify({ v: VOLUME_WEI, c: 80002, t: tsMid });
+  const event = JSON.stringify({ v: VOLUME_WEI, c: SEED_TESTNET_CHAIN_ID, t: tsMid });
 
-  await mutate('DEL', meterKey); // 既存の壊れた seed を掃除して冪等に
+  // DEL の前に中身を確かめる (LRANGE は読み取りだけなので dry-run でも行う)。前月のキーなので、本番を指して
+  // いてもこの間に relay が書き足すことは無い (relay は当月のキーに書く)。
+  const existing = await cmd('LRANGE', meterKey, 0, -1);
+  const guard = checkSeedMeterReplaceable(existing);
+  if (!guard.ok) {
+    console.error(
+      `${meterKey} に testnet (chainId ${SEED_TESTNET_CHAIN_ID}) の seed と確かめられない行があります ` +
+        `(${guard.blocking.length}/${guard.total} 行: ${describeBlockingRows(guard.blocking) || 'LRANGE の応答が一覧でない'})。\n` +
+        '本番の relay が書いたメーターの可能性があるので、何も消さずに止めます。接続先の KV (KV_REST_API_URL) を確かめてください。\n' +
+        '(testnet の KV に残った壊れた行を消したいときは、接続先が testnet だと確かめてから手で DEL してください。)',
+    );
+    process.exit(1);
+  }
+
+  await mutate('DEL', meterKey); // 前回の seed (chainId 80002 の行だけ) を掃除して冪等に
   await mutate('LPUSH', meterKey, event);
   await mutate('LPUSH', indexKey, merchant);
 
