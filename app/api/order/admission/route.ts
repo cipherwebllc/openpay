@@ -11,7 +11,6 @@ import { env } from '@/lib/env';
 import { isValidHandleFormat, normalizeHandle } from '@/lib/handle';
 import { resolveHandle } from '@/lib/handleStore';
 import { readJsonBodyCapped } from '@/lib/httpBodyCap';
-import { logger } from '@/lib/logger';
 import type { FeePayer, MobileOrderMode } from '@/lib/mobileOrder';
 import { storefrontDiscountWei } from '@/lib/mobileOrderDiscount';
 import {
@@ -86,23 +85,6 @@ function parseBody(value: unknown): AdmissionBody | null {
     ...(raw.items !== undefined ? { items: raw.items } : {}),
     ...(raw.discount !== undefined ? { discount: raw.discount } : {}),
   };
-}
-
-/**
- * 店主が「受付一時停止」(shop live の paused) にしているか。KV の障害は readShopLive 自身が paused=false に倒す
- * (fail-open・既存仕様・兄弟の経路と同じ)。それ以外の予期しない例外もここで受け付ける側に倒す: この確認は後から
- * 足したもので、live 状態は店主の付帯状態 (静的な受付停止と最新 storefront の確認は先に済んでいる)。読み取りの
- * 例外が admission を 500 にし、今日は通っている注文まで署名前に全部止める波及を断つ (掟 12 追加のみ・掟 13)。
- */
-async function shopLivePaused(handle: string): Promise<boolean> {
-  try {
-    return (await readShopLive(handle)).paused;
-  } catch (e) {
-    logger.warn('order.admission.shop_live_read_unexpected', {
-      reason: e instanceof Error ? e.message : String(e),
-    });
-    return false;
-  }
 }
 
 export async function POST(req: Request): Promise<NextResponse> {
@@ -184,7 +166,8 @@ export async function POST(req: Request): Promise<NextResponse> {
   // 先に開いた checkout は店主が後から止めても知らないまま署名へ進む。不可逆な署名の前にここで最新の状態を見て、
   // 止まっている店は静的な受付停止と同じ 409 store_not_accepting にする (agent-order/pay と同じ code・client は
   // どの拒否でも既存の「ただいま注文を受け付けていません」を出す)。flag OFF の間は読まない (KV の読み取りを足さない)。
-  if (env.enableShopLive && (await shopLivePaused(handle))) {
+  // KV 障害は readShopLive 自身が paused=false に倒す (fail-open・既存仕様・兄弟の経路と同じ) ので投げない。
+  if (env.enableShopLive && (await readShopLive(handle)).paused) {
     return json({ ok: false, error: 'store_not_accepting' }, 409);
   }
   // 店舗の値引きのドリフト検出 (plans/discount-common.md)。URL の値引きが、明細の小計に公開設定の値引きを当てた額と

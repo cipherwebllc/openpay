@@ -384,20 +384,6 @@ describe('POST /api/order/admission — 受付一時停止 (shop live)', () => {
     expect(hold.readShopLive).toHaveBeenCalledWith('coffee_shop');
   });
 
-  it('live の読み取りが投げても admission を 500 にせず従来どおり通す (fail-open・観測できるよう warn)', async () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    try {
-      hold.readShopLive.mockRejectedValue(new Error('boom'));
-      const response = await POST(request({ pickupAt: Date.UTC(2026, 6, 10, 3, 30) }));
-      expect(response.status).toBe(200);
-      expect(await response.json()).toEqual({ ok: true });
-      expect(hold.readShopLive).toHaveBeenCalledTimes(1);
-      expect(warn.mock.calls.some(([line]) => String(line).includes('order.admission.shop_live_read_unexpected'))).toBe(true);
-    } finally {
-      warn.mockRestore();
-    }
-  });
-
   it('flag OFF では live を読まない (止めていても従来どおり通す)', async () => {
     hold.shopLive = false;
     hold.readShopLive.mockResolvedValue(paused);
