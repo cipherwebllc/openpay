@@ -75,7 +75,10 @@ vi.mock('@/lib/kv', () => ({
       // B6: URL 変更でリセットするのは verification だけ (hidden は moderation 状態なので残す)。
       if (o.url !== args[1]) {
         delete o.verification;
-        if (store.alive(keys[3]) || store.alive(keys[4])) o.hidden = true;
+        if (store.alive(keys[3]) || store.alive(keys[4])) {
+          o.hidden = true;
+          delete o.pendingFirstVerification;
+        }
       }
       o.url = args[1];
       o.description = args[2];
@@ -102,8 +105,11 @@ vi.mock('@/lib/kv', () => ({
       const idx = store.lists.get(keys[1]) ?? [];
       store.lists.set(keys[1], idx.filter((x) => x !== id));
     };
-    // N-5: hidden 済の削除だけ URL 台帳 (KEYS[3]) に TTL つきで印を残す。
-    if (script.includes("if o.hidden==true then redis.call('SET',KEYS[3]") && o.hidden === true) {
+    // N-5: hidden 済の削除だけ URL 台帳 (KEYS[3]) に TTL つきで印を残す (最初の再検証を待つ新規掲載は残さない)。
+    if (
+      script.includes("if o.hidden==true and o.pendingFirstVerification~=true then redis.call('SET',KEYS[3]") &&
+      o.hidden === true && o.pendingFirstVerification !== true
+    ) {
       store.kv.set(keys[2], args[2]);
       store.expiry.set(keys[2], store.clockMs + Number(args[3]) * 1000);
     }

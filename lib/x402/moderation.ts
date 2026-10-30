@@ -236,8 +236,9 @@ export async function isFreelyAccessible(
 //   'openpay' = 402 の accepts に extra.openpay.mode === 'forwarder-split' がある (掲載可)
 //   'foreign' = 402 は返すが accepts が他 facilitator (USDC/Base 等)・または解釈不能 (掲載拒否 —
 //               「JPYC で払える」というカタログの約束を守れないため)
-//   'unknown' = 200/402 以外・ネットワーク失敗・private 解決など判定不能 (fail-open で掲載可 —
-//               サーバー到達性は保証しない従来意味論を維持)
+//   'unknown' = 200/402 以外・ネットワーク失敗・private 解決など判定不能 (登録は受ける — 新規登録は
+//               最初の再検証で OpenPay の 402 を確かめるまで公開の一覧に出さない (registry の
+//               pendingFirstVerification)・編集 (PATCH) は従来どおり通す)
 // v1 (JSON body) と v2 (PAYMENT-REQUIRED ヘッダ) の両輸送を見る。
 export type GateProbeResult = 'openpay' | 'foreign' | 'unknown';
 
@@ -256,14 +257,20 @@ export function acceptsLookLikeOpenPay(accepts: unknown): boolean {
   });
 }
 
-export async function probeGate(
+// probeGate の判定に、'openpay' と判定した面 (v2 ヘッダか v1 body) の accepts を添える。新規登録 (POST) が
+// その accepts を登録内容と照合する (lib/x402/registrationGateMatch.ts)。取得と判定の順は probeGate と同じ
+// (v2 ヘッダが openpay なら body は読まない)。'openpay' 以外の accepts は常に空。
+export type GateProbeDetail = { result: GateProbeResult; accepts: unknown[] };
+
+export async function probeGateDetailed(
   url: string,
   opts: { fetchImpl?: typeof fetch; lookup?: LookupFn } = {},
-): Promise<GateProbeResult> {
+): Promise<GateProbeDetail> {
+  const unknown: GateProbeDetail = { result: 'unknown', accepts: [] };
   try {
     const res = await fetchSsrfSafe(url, opts);
-    if (!res) return 'unknown';
-    if (res.status !== 402) return 'unknown';
+    if (!res) return unknown;
+    if (res.status !== 402) return unknown;
     // v2: PAYMENT-REQUIRED ヘッダ (base64 JSON)
     const v2Header = res.headers?.get?.('payment-required');
     if (v2Header) {
@@ -271,7 +278,9 @@ export async function probeGate(
         const decoded = JSON.parse(Buffer.from(v2Header, 'base64').toString('utf8')) as {
           accepts?: unknown;
         };
-        if (acceptsLookLikeOpenPay(decoded.accepts)) return 'openpay';
+        if (acceptsLookLikeOpenPay(decoded.accepts)) {
+          return { result: 'openpay', accepts: decoded.accepts as unknown[] };
+        }
       } catch {
         /* v2 ヘッダが読めなければ body 判定へ */
       }
@@ -279,16 +288,21 @@ export async function probeGate(
     // v1: JSON body。巨大・stream failure・非 UTF-8・非 JSON は「JPYC で払える」と解釈できないため
     // unknown へ fail-open せず foreign として掲載を拒否する。
     const body = await readJsonBodyCapped(res, GATE_BODY_MAX_BYTES);
-    if (
-      body.ok &&
-      typeof body.value === 'object' &&
-      body.value !== null &&
-      acceptsLookLikeOpenPay((body.value as { accepts?: unknown }).accepts)
-    ) {
-      return 'openpay';
+    if (body.ok && typeof body.value === 'object' && body.value !== null) {
+      const accepts = (body.value as { accepts?: unknown }).accepts;
+      if (acceptsLookLikeOpenPay(accepts)) {
+        return { result: 'openpay', accepts: accepts as unknown[] };
+      }
     }
-    return 'foreign';
+    return { result: 'foreign', accepts: [] };
   } catch {
-    return 'unknown';
+    return unknown;
   }
+}
+
+export async function probeGate(
+  url: string,
+  opts: { fetchImpl?: typeof fetch; lookup?: LookupFn } = {},
+): Promise<GateProbeResult> {
+  return (await probeGateDetailed(url, opts)).result;
 }

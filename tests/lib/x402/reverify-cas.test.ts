@@ -57,6 +57,7 @@ import {
 } from '@/lib/x402/reverify';
 import { resourceKey } from '@/lib/x402/registry';
 import { hiddenUrlLedgerKey } from '@/lib/x402/hiddenUrlLedger';
+import { resourceUrlClaimKey } from '@/lib/x402/resourceUrlClaim.mjs';
 
 const URL = 'https://api.example.jp/paid';
 
@@ -446,6 +447,82 @@ describe('external reverify CAS', () => {
       'neutral',
     );
     expect(neutral).toMatchObject({ authFailures: 1, hiddenAfter: false });
+  });
+});
+
+// PR-09b: 登録の probe が判定不能だった新規掲載 (hidden + pendingFirstVerification)。既存の hidden の遷移に乗り、
+// 最初の ok で hidden と一緒に印が消える。一度も公開されていないので URL 台帳は立てない。
+describe('external reverify CAS: first verification pending', () => {
+  const ledgerKeys = () => store.keys().filter((key) => key.startsWith('x402:hidden-url:'));
+  const record = () => JSON.parse(store.strings.get(resourceKey('r1'))!) as Record<string, unknown>;
+  function seedPending() {
+    seed({ hidden: true, pendingFirstVerification: true });
+    store.strings.set(resourceUrlClaimKey(URL), 'r1');
+  }
+
+  it('transient と閾値前の確定違反では hidden と印のまま・URL 台帳を立てない', async () => {
+    seedPending();
+    expect(await applyExternalReverify('r1', URL, 'transient', 't0', '2026103000'))
+      .toMatchObject({ applied: true, hiddenBefore: true, hiddenAfter: true });
+    for (let run = 1; run <= 2; run += 1) {
+      expect(await applyExternalReverify('r1', URL, 'violation_gone', `t${run}`, `202610300${run}`))
+        .toMatchObject({ applied: true, failures: run, hiddenBefore: true, hiddenAfter: true });
+    }
+    expect(record()).toMatchObject({ hidden: true, pendingFirstVerification: true });
+    expect(ledgerKeys()).toEqual([]);
+  });
+
+  // 公開中の掲載なら hidden になる閾値に達したら、通常のモデレーションの hidden に移す (印を外し台帳を立てる)。
+  // 以後は ID の照会も 404 (印の例外が外れる)・削除 → 再登録は台帳を継承する。
+  it('確定違反が閾値 (3 連続) に達すると印が外れ、URL 台帳が立つ', async () => {
+    seedPending();
+    for (let run = 1; run <= 3; run += 1) {
+      await applyExternalReverify('r1', URL, 'violation_200_ungated', `t${run}`, `202610300${run}`, 'clear');
+    }
+    expect(record()).toMatchObject({ hidden: true, verification: { failures: 3 } });
+    expect(record()).not.toHaveProperty('pendingFirstVerification');
+    expect(ledgerKeys()).toEqual([hiddenUrlLedgerKey(URL)]);
+  });
+
+  it('締め出しが閾値 (6 連続) に達しても同じく印が外れ、URL 台帳が立つ', async () => {
+    seedPending();
+    for (let run = 1; run <= 5; run += 1) {
+      await applyExternalReverify('r1', URL, 'transient', `t${run}`, `202610300${run}`, 'block');
+    }
+    expect(record()).toMatchObject({ pendingFirstVerification: true });
+    expect(ledgerKeys()).toEqual([]);
+    await applyExternalReverify('r1', URL, 'transient', 't6', '2026103006', 'block');
+    expect(record()).toMatchObject({ hidden: true, verification: { authFailures: 6 } });
+    expect(record()).not.toHaveProperty('pendingFirstVerification');
+    expect(ledgerKeys()).toEqual([hiddenUrlLedgerKey(URL)]);
+  });
+
+  it('最初の ok で hidden が解け、印が消え、URL claim は自分のまま', async () => {
+    seedPending();
+    expect(await applyExternalReverify('r1', URL, 'ok_402_openpay', 't1', '2026103001', 'clear'))
+      .toEqual({ applied: true, failures: 0, authFailures: 0, hiddenBefore: true, hiddenAfter: false });
+    expect(record().hidden).toBe(false);
+    expect(record()).not.toHaveProperty('pendingFirstVerification');
+    expect(record()).toMatchObject({ verification: { lastOkAt: 't1' } });
+    expect(store.strings.get(resourceUrlClaimKey(URL))).toBe('r1');
+    expect(ledgerKeys()).toEqual([]);
+
+    // 公開された後の違反は従来どおり (印のない hidden・URL 台帳あり)。
+    for (let run = 2; run <= 4; run += 1) {
+      await applyExternalReverify('r1', URL, 'violation_gone', `t${run}`, `202610300${run}`);
+    }
+    expect(record()).toMatchObject({ hidden: true });
+    expect(record()).not.toHaveProperty('pendingFirstVerification');
+    expect(ledgerKeys()).toEqual([hiddenUrlLedgerKey(URL)]);
+  });
+
+  it('ok でも claim の競合で解除が保留された回は印を残す (次の ok で戻れる)', async () => {
+    seedPending();
+    store.strings.set(resourceUrlClaimKey(URL), 'r2');
+    store.strings.set(resourceKey('r2'), JSON.stringify({ id: 'r2', url: URL, active: true }));
+    expect(await applyExternalReverify('r1', URL, 'ok_402_openpay', 't1', '2026103001', 'clear'))
+      .toMatchObject({ applied: true, hiddenAfter: true, restoreBlocked: 'url_taken' });
+    expect(record()).toMatchObject({ hidden: true, pendingFirstVerification: true });
   });
 });
 

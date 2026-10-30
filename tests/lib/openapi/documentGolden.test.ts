@@ -98,33 +98,33 @@ const PROFILES: Profile[] = [
 // 同日、Directory のチェーン語彙に arc を足した (chain クエリの enum に arc が増えただけ) ので、directory を含む構成を再採取。
 const EXPECTED_SHA256: Record<string, string> = {
   'all-on':
-    'caa530bf66bab505495f6c617449796626c43e84c99fa63d2d6ca1b7e460fb81',
+    '7dc8223b6754c843351338f1228a7202ad78b7ba203e77633fc86edf1a04b21b',
   'all-on+arc':
-    'bf3b52f4159f30c4df6e6bb9ff52d743c37e3c4f3d075ec374032f6be7667e18',
+    'c498169c84db18fb0ad80a9d6030e830590c1f64a2817f8bdcb75cf592a693cc',
   'all-on+mainnet':
-    '3888ad5d5a78a413457b810bdaf0b7ec9f13ee9515bce5bfdb20c3b2d25dedfe',
+    '4e08b283274af68dba7bd893f3e47babe593ce78f66a529607c7dab55135e395',
   'all-on+mainnet+avalanche+ethereum':
-    '4ab354798dec4420104269e7bc45869ae5b972c48b15fb8db0fdf8d8f066be73',
+    'b0bcf7b1b83dee202e4059111aff6ee3269027dbbe5ca27fa86d892c806fe405',
   'all-on+fee':
-    '7e8e6b60a3df961e2d586610658eb6f7a7256e5713a250e9239c981f16f3fc3f',
+    'adfab6163ade8c4a0c5a9e913e7b5a3c72170f9a014e63825cfff831ff2411f7',
   'all-on+default-hello-price':
-    '803c5856a7383ba50d4f1bd605e40053ab86921d6b7c9486755f6ad735821dd8',
+    '46c3f6ce901a5afa5944a07bc14aa4fa3eb6fb2f87c98b9f90307e32503f3ede',
   'all-on+invalid-hello-price-unlisted':
-    'f4b92f343dc099a3823abe6636673b18da105850d4da9c2f501b3ad5c97a19f7',
+    '98ba151eb548b0bb8c38d5565523268c5ddae80e08ede3b530dddf835cf8096d',
   'directory-only':
     '78c8c691430a4121bc4984230e768d6be1532e0485eb0b88eb3a2966b559f3b9',
   'facilitator-only':
-    '21ac634fe16c274ca3f1d66ef903d77839c67a4c92963b11b168d71418a191e0',
+    '64073386c5203617849b7ff190501a211a49c7ab15961bf8245b483486e27e29',
   'facilitator+shops':
-    '935bca12f86224bafc76c3761bd32e5faaeda7398fde7ba557ab68b5618ee3b7',
+    '2ccfe094e2eb4a43854fc12f6c921fd0cf8d6772ea8d9a473485528ff308b1e9',
   'directory+facilitator':
-    'fd077da617410a98adc83d2089aae1227c0ec425bb8ce4f655183192524b3471',
+    'af78d1ad9d4e03dedd7a18a31c0da4cd7fef46d6d33326be46a03c2092cf34c8',
   'license-only':
     'bdf3b0b4b901d5174663e0a74ebd070fb202326f20cee6bf9c193779fa2ac250',
   'directory+license-child-only':
     '78c8c691430a4121bc4984230e768d6be1532e0485eb0b88eb3a2966b559f3b9',
   'late-mutation':
-    '2e63ea53cf8c0c69e29f523b0c99f2d75f39456995e9d9a22c282f3918bb7dee',
+    'f9af911e72db796994a0a32c9c545fa0b5059b185658ad7e213444f10c8d0355',
   'late-facilitator':
     '0e63c739ae51684c60d97eb6e4c558e6531c52ae726b7c8591edac3c910148d5',
 };

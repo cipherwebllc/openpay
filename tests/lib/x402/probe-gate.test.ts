@@ -2,7 +2,7 @@
 // foreign = 「JPYC で払える」というカタログの約束を守れないゲート (USDC/Base 等) の検出。
 
 import { describe, expect, it } from 'vitest';
-import { probeGate } from '@/lib/x402/moderation';
+import { probeGate, probeGateDetailed } from '@/lib/x402/moderation';
 
 const lookupPublic = async () => [{ address: '93.184.216.34', family: 4 }];
 
@@ -84,5 +84,45 @@ describe('lib/x402/moderation probeGate', () => {
     expect(await probeGate('https://x.test/paid', { fetchImpl: boom, lookup: lookupPublic })).toBe('unknown');
     const lookupPrivate = async () => [{ address: '10.0.0.5', family: 4 }];
     expect(await probeGate('https://x.test/paid', { fetchImpl: ok200, lookup: lookupPrivate })).toBe('unknown');
+  });
+});
+
+// 新規登録の照合 (lib/x402/registrationGateMatch.ts) に渡す accepts。判定と取得の順は probeGate と同じ。
+describe('lib/x402/moderation probeGateDetailed', () => {
+  it('v1 body が openpay → その body の accepts を返す', async () => {
+    expect(
+      await probeGateDetailed('https://x.test/paid', { fetchImpl: res402(openpayBody) as never, lookup: lookupPublic }),
+    ).toEqual({ result: 'openpay', accepts: openpayBody.accepts });
+  });
+
+  it('v2 ヘッダが openpay → ヘッダの accepts を返し、body は読まない', async () => {
+    const headerAccepts = [{ ...openpayBody.accepts[0], network: 'eip155:137' }];
+    const header = Buffer.from(JSON.stringify({ x402Version: 2, accepts: headerAccepts })).toString('base64');
+    const response = new Response(JSON.stringify(usdcBody), { status: 402, headers: { 'payment-required': header } });
+    const detail = await probeGateDetailed('https://x.test/paid', {
+      fetchImpl: (async () => response) as never, lookup: lookupPublic,
+    });
+    expect(detail).toEqual({ result: 'openpay', accepts: headerAccepts });
+    expect(response.bodyUsed).toBe(false);
+  });
+
+  it('v2 ヘッダが USDC だけでも、v1 body の openpay accepts を返す (dual-rail の 402)', async () => {
+    const header = Buffer.from(JSON.stringify({ x402Version: 2, accepts: usdcBody.accepts })).toString('base64');
+    const body = { x402Version: 1, accepts: [...openpayBody.accepts, ...usdcBody.accepts] };
+    expect(
+      await probeGateDetailed('https://x.test/paid', {
+        fetchImpl: res402(body, { 'payment-required': header }) as never, lookup: lookupPublic,
+      }),
+    ).toEqual({ result: 'openpay', accepts: body.accepts });
+  });
+
+  it('foreign / unknown は accepts を返さない', async () => {
+    expect(
+      await probeGateDetailed('https://x.test/paid', { fetchImpl: res402(usdcBody) as never, lookup: lookupPublic }),
+    ).toEqual({ result: 'foreign', accepts: [] });
+    const status500 = (async () => new Response('{}', { status: 500 })) as never;
+    expect(
+      await probeGateDetailed('https://x.test/paid', { fetchImpl: status500, lookup: lookupPublic }),
+    ).toEqual({ result: 'unknown', accepts: [] });
   });
 });
