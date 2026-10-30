@@ -13,6 +13,8 @@ import { renderWithIntl } from '../_helpers/i18n';
 //     表示のカード (開発者向け設定を開いた状態)・長い URL (QR を省く)・応援メッセージの受信箱 5 状態)
 //   - 子 component に分けても入力欄・折りたたみを作り直さないこと (node の同一性と focus) と、プレビューを
 //     作り直す条件 (通貨・チェーン・金額が変わったときだけ) が変わらないこと
+//   - 表示中に受取先・金額・通貨を変えた後のコピーと QR が、変えた後の URL / コードを使うこと (古い値を握った
+//     callback を検出する。この 1 本の期待値も分割前の component (cca67e89~1 の TipEmbedGenerator.tsx) で採取)
 // 振る舞いの細部 (URL の各 param・永続化・ENS・a11y 等) は TipEmbedGenerator.test.tsx が固定している。
 
 const VALID = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
@@ -816,6 +818,73 @@ describe('TipEmbedGenerator pre-split pinning (F-8 PR-20)', () => {
           5,
         ],
       ]
+    `);
+  });
+
+  // 公開のカードを出したまま受取先・金額・通貨を変えたら、コピー・QR・新しいタブ・X シェアは変えた後の URL /
+  // コードを使う (mount 時や前の受取先の値を握った callback・ref を検出する)。共有のパネルは URL が出た時点で、
+  // 埋め込みのパネルは切り替えた時点で mount されるので、それぞれ mount の後に変えてから操作する。
+  it('表示中に受取先・金額・通貨を変えた後のコピーと QR は、変えた後の URL / コードを使う', async () => {
+    const view = renderWithIntl(<TipEmbedGenerator />);
+    await ready();
+    fireEvent.change(screen.getByPlaceholderText(/0x\.\.\./), { target: { value: VALID } });
+    await readyWithUrl();
+    const before = tipUrlText()!;
+    expect(before).toContain(`/tip/${VALID}`);
+    expect(screen.getByRole('button', { name: /^QR$/ })).toBeInTheDocument();
+
+    // 共有のパネル (と QR の modal) が mount された後に、受取先と金額を変える。
+    fireEvent.change(screen.getByPlaceholderText(/0x\.\.\./), { target: { value: OTHER } });
+    fireEvent.change(screen.getAllByPlaceholderText('例: 1000')[0], { target: { value: '700' } });
+    await waitFor(() => expect(tipUrlText()).toContain('preset=700'));
+    const shared = tipUrlText()!;
+    expect(shared).toContain(`/tip/${OTHER}`);
+    expect(screen.getByRole('link', { name: '新しいタブ' })).toHaveAttribute('href', shared);
+    const x = screen.getByRole('link', { name: 'X シェア' }).getAttribute('href');
+    fireEvent.click(screen.getByTestId('tip-copy-primary'));
+    await screen.findByRole('button', { name: 'コピー済み' });
+    fireEvent.click(screen.getByRole('button', { name: /^QR$/ }));
+    const dialog = screen.getByRole('dialog', { name: 'リンクの QR コード' });
+    const qr = dialog.querySelector('p.text-xs')!.textContent;
+    fireEvent.click(within(dialog).getByRole('button', { name: '閉じる' }));
+
+    // 埋め込みのパネルが mount された後に、通貨を変える (受取先は OTHER のまま)。
+    fireEvent.click(screen.getByRole('button', { name: 'サイトに埋め込む' }));
+    expect(snippetText(view.container)).toContain('preset=700');
+    fireEvent.click(screen.getByRole('button', { name: /USDC/ }));
+    await waitFor(() => expect(snippetText(view.container)).toContain('token=usdc'));
+    const iframe = snippetText(view.container);
+    fireEvent.click(screen.getByRole('button', { name: 'コピー' }));
+    await screen.findByRole('button', { name: 'コピー済み' });
+    fireEvent.click(screen.getByRole('button', { name: 'ボタン' }));
+    const button = snippetText(view.container);
+    fireEvent.click(screen.getByRole('button', { name: /^コピー(済み)?$/ }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(3));
+
+    const clipboard = writeText.mock.calls.map(([value]) => value);
+    // コピーと QR は、その時に画面に出ている URL / コードと同じで、前の受取先・金額・通貨の値ではない。
+    expect(clipboard).toEqual([shared, iframe, button]);
+    expect(qr).toBe(shared);
+    for (const value of [...clipboard, qr!, x!]) expect(value).not.toContain(VALID);
+    expect({ before, clipboard, qr, x }).toMatchInlineSnapshot(`
+      {
+        "before": "https://test.local/tip/0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913?token=jpyc&color=%232563eb",
+        "clipboard": [
+          "https://test.local/tip/0x000000000000000000000000000000000000dEaD?token=jpyc&color=%232563eb&preset=700%2C1000%2C3000",
+          "<iframe
+        src="https://test.local/tip/0x000000000000000000000000000000000000dEaD?token=usdc&amp;color=%232563eb"
+        width="380"
+        height="640"
+        style="border:0;max-width:100%"
+        title="OpenPay Tip"
+        loading="lazy"
+      ></iframe>",
+          "<a href="https://test.local/tip/0x000000000000000000000000000000000000dEaD?token=usdc&amp;color=%232563eb" target="_blank" rel="noopener"
+        style="display:inline-block;background:#2563eb;color:#fff;font-weight:700;padding:12px 22px;border-radius:9999px;text-decoration:none;font-family:system-ui,-apple-system,sans-serif">チップを送る</a>",
+        ],
+        "qr": "https://test.local/tip/0x000000000000000000000000000000000000dEaD?token=jpyc&color=%232563eb&preset=700%2C1000%2C3000",
+        "x": "https://twitter.com/intent/tweet?text=OpenPay%20%E3%81%A7%20JPYC%20%2F%20USDC%20%E3%81%AE%E3%83%81%E3%83%83%E3%83%97%E3%82%92%E9%80%81%E3%82%8C%E3%81%BE%E3%81%99&url=https%3A%2F%2Ftest.local%2Ftip%2F0x000000000000000000000000000000000000dEaD%3Ftoken%3Djpyc%26color%3D%25232563eb%26preset%3D700%252C1000%252C3000",
+      }
     `);
   });
 });
