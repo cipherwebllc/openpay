@@ -101,6 +101,11 @@ describe('isAggregable', () => {
   ])('%s → false', (_name, over) => {
     expect(isAggregable(entry(over as Partial<PaymentLogStatsEntry>))).toBe(false);
   });
+
+  // 型の上では entry でも、KV の JSON 行からは object でない値が来る (実行時の値をそのまま渡す)。
+  it.each([null, 42, 'x', [], true])('object でない値 %j → 投げずに false', (v) => {
+    expect(isAggregable(v as unknown as PaymentLogStatsEntry)).toBe(false);
+  });
 });
 
 describe('statsChainName', () => {
@@ -153,6 +158,15 @@ describe('filterPaymentLogEntries', () => {
       { sinceMs },
     );
     expect(out.map((e) => e.serverTs)).toEqual(['2026-05-23T00:00:00.000Z', '2026-05-24']);
+  });
+
+  it('JSON の null 行は投げず、42・"x"・[] と同じく絞り込みがあれば外し、無ければ残す', () => {
+    const odd = [null, 42, 'x', []] as unknown as PaymentLogStatsEntry[];
+    const ok = at('2026-05-23T00:00:00.000Z');
+    const input = [odd[0], ok, ...odd.slice(1)];
+    expect(filterPaymentLogEntries(input, {})).toEqual(input);
+    expect(filterPaymentLogEntries(input, { chainId: 137 })).toEqual([ok]);
+    expect(filterPaymentLogEntries(input, { sinceMs: 0 })).toEqual([ok]);
   });
 });
 
@@ -244,6 +258,13 @@ describe('aggregatePaymentLog', () => {
     const agg = aggregatePaymentLog([entry({ result: 'pending' }), entry({ chainId: undefined }), entry()]);
     expect(agg.invalidEntries).toBe(2);
     expect(agg.aggregatedCount).toBe(1);
+  });
+
+  it('JSON の null 行も投げずに invalidEntries に数え、残りの集計は null が無いときと同じ', () => {
+    const odd = [null, 42, 'x', []] as unknown as PaymentLogStatsEntry[];
+    const good = [entry(), entry({ chainId: 8453, result: 'reverted' })];
+    const agg = aggregatePaymentLog([odd[0], good[0], odd[1], odd[2], good[1], odd[3], odd[0]]);
+    expect(agg).toEqual({ ...aggregatePaymentLog(good), invalidEntries: 5 });
   });
 
   it('chain は success 降順・同数は chainId 昇順、bridge と provider は固定順', () => {

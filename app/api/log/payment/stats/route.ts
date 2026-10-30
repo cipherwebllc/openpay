@@ -156,9 +156,10 @@ export async function GET(req: Request): Promise<NextResponse> {
     // gateway / cctp-v2 = 各 bridge 経由の集計。新規 cross-chain UX が
     // どれくらい使われているかを直接観測できる metric。
     byBridge: serializeBridges(byBridge),
-    // provider 別集計 (Phase1 Circle Paymaster 並行対応)。pimlico / circle / unknown。
-    // circle は gas 徴収 net を verified (on-chain) と reported (client 申告) に分けて出す
-    // (C2/C3: 監査では両者を混同しない)。dataSource 注記の通り reported は未検証値。
+    // provider 別集計 (Phase1 Circle Paymaster 並行対応)。pimlico / circle / unknown の固定順で
+    // success / reverted / error の件数と circleNetUsdcReported (circle の success の gas 徴収 net の
+    // client 申告額・circle 以外は '0') を出す。サーバ検証 (on-chain) の値を書く writer は無いので
+    // verified の field は出さない (C8)。dataSource 注記の通り reported は未検証値。
     byProvider: serializeProviders(byProvider),
   });
 }
