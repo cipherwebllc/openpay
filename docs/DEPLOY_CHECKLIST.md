@@ -678,6 +678,33 @@ porto@0.2.35 → zod 4 (範囲 ^4.1.5) は 4.3.6 → 4.6.7 へ lockfile 更新�
 [GHSA-4qv8-2p9j-2685](https://github.com/advisories/GHSA-4qv8-2p9j-2685) (EventSource のメモリ)。出品者の URL を取りに行く `fetchSsrfSafe` (lib/x402/moderation.ts) は npm の undici を使うので、この更新で直る。
 Node 本体の fetch (同梱の undici) は Node の更新を待つ (§ 本番の Node の確認は post-deploy-verify)。
 
+### 7.16 MODERATE: `glob` (GHSA-3g3m-2fjr-6pw4)・`minimatch` (GHSA-g3hv-75wg-m249)・同時に follow-redirects を更新 (2026-10-31)
+
+**Root advisory**:
+- [GHSA-3g3m-2fjr-6pw4](https://github.com/advisories/GHSA-3g3m-2fjr-6pw4): AbortSignal で止めたあとも glob がファイルをたどり続ける (glob >=9.0.0 <=14.0.1・修正は 14.0.2)
+- [GHSA-g3hv-75wg-m249](https://github.com/advisories/GHSA-g3hv-75wg-m249): 細工したパターンで minimatch の処理が膨らむ DoS (minimatch <11.0.1・修正は 11.0.1)
+
+**Propagation chain**:
+```
+@sentry/nextjs → @sentry/bundler-plugins → glob@13.0.6 → minimatch@10.2.6
+eslint・eslint-plugin-*・@eslint/* → minimatch@3.1.5
+@typescript-eslint/typescript-estree → minimatch@10.2.5
+```
+
+**Reachability for OpenPay**: 開発とビルド時のみ —
+- app/api・lib・hooks・components・packages・scripts に glob / minimatch の import はゼロ (2026-10-31 grep)
+- 動くのは eslint と、next build の Sentry bundler plugin の中だけで、パターンとファイルは OpenPay 自身のもの。外部入力は届かない
+- 修正版はどちらも各依存の範囲の外で、override すると eslint と bundler plugin を壊すおそれがある
+  → 依存側の更新を待つ accepted risk (2026-10-31・PR の merge で user が承認)
+
+**Reassess triggers**:
+- 依存側が glob>=14.0.2・minimatch>=11.0.1 へ移った版を出す → 更新して allowlist を見直す
+- サーバーの処理で glob / minimatch を使う変更 (**その PR で即再評価**)
+
+**同時に解消 (allowlist 追加なし)**: follow-redirects を 1.16.1 → 1.16.2 に更新。
+[GHSA-mrwp-f3q8-3g9p](https://github.com/advisories/GHSA-mrwp-f3q8-3g9p) (HIGH: 別 realm の sensitiveHeaders 配列が捨てられ、独自の認証ヘッダがリダイレクト先へ送られる)。
+経路は x402-next → @coinbase/cdp-sdk → axios → follow-redirects。lockfile の 1 件だけの更新。
+
 ### 7.7 CI gate: allowlist 方式 (`scripts/audit-gate.mjs`)
 
 `.github/workflows/ci.yml` の audit step は `node scripts/audit-gate.mjs` を呼ぶ。
@@ -706,6 +733,8 @@ allowlist 追加 / 削除は本 §7 の update と必ず同期させること (=
 | GHSA-528h-pc64-c93x | stream-json | MODERATE | §7.13 |
 | GHSA-hqr4-qq8f-hg3x | stream-json | MODERATE | §7.13 |
 | GHSA-mjw6-4jj6-33hc | stream-json | MODERATE | §7.13 |
+| GHSA-3g3m-2fjr-6pw4 | glob | MODERATE | §7.16 |
+| GHSA-g3hv-75wg-m249 | minimatch | MODERATE | §7.16 |
 
 (§7.1 js-cookie / §7.4 ws〔GHSA-58qx〕/ §7.5 ws〔GHSA-96hv〕/ §7.6 otel core〔GHSA-8988〕/
 §7.8 sharp〔GHSA-f88m〕は upstream fix 済で allowlist から削除済 = 上表は現行の実体。)
