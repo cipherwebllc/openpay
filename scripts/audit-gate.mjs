@@ -129,6 +129,31 @@ const ALLOWED_ADVISORIES = {
       'GHSA-qr28-fpjm-wq7f にタブのフリーズを超える exploit 経路 (RCE 等) の報告',
     ],
   },
+  'GHSA-3g3m-2fjr-6pw4': {
+    pkg: 'glob',
+    summary: 'glob: AbortSignal cancellation bypass allows post-timeout filesystem traversal (>=9.0.0 <=14.0.1)',
+    chain: '@sentry/nextjs → @sentry/bundler-plugins → glob@13.0.6',
+    reason:
+      '到達性はビルド時のみ: app/api・lib・hooks・components・packages・scripts に glob の import はゼロで、動くのは Sentry の bundler plugin が next build でソースマップを集めるときだけ。入力は OpenPay 自身のビルド成果物で、外部入力は届かない。修正版 14.0.2 は @sentry/bundler-plugins の依存範囲の外で、@sentry/nextjs の更新を待つ。',
+    docRef: 'docs/DEPLOY_CHECKLIST.md §7.16',
+    reviewTriggers: [
+      '@sentry/bundler-plugins が glob>=14.0.2 へ移った版を出す → 更新して allowlist 削除',
+      'サーバーの処理で glob を使う変更 (その PR で即再評価)',
+    ],
+  },
+  'GHSA-g3hv-75wg-m249': {
+    pkg: 'minimatch',
+    summary: 'minimatch: potential denial of service via globparts amplification (<11.0.1)',
+    chain:
+      'eslint・eslint-plugin-*・@eslint/* → minimatch@3.1.5 / @typescript-eslint/typescript-estree → minimatch@10.2.5 / @sentry/bundler-plugins → glob → minimatch@10.2.6',
+    reason:
+      '到達性は開発とビルド時のみ: app/api・lib・hooks・components・packages・scripts に minimatch の import はゼロ。動くのは eslint と Sentry の bundler plugin の中で、パターンは OpenPay 自身の設定だけ。攻撃者のパターンが届く経路が無い。修正版 11.0.1 は各依存の範囲の外で、override すると eslint 周りの API が変わる。',
+    docRef: 'docs/DEPLOY_CHECKLIST.md §7.16',
+    reviewTriggers: [
+      'eslint・@typescript-eslint・@sentry/bundler-plugins が minimatch>=11.0.1 へ移った版を出す → 更新して allowlist 削除',
+      'サーバーの処理で外部入力のパターンを minimatch に渡す変更 (その PR で即再評価)',
+    ],
+  },
   'GHSA-528h-pc64-c93x': {
     pkg: 'stream-json',
     summary:
