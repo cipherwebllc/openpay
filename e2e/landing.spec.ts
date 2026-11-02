@@ -20,7 +20,7 @@ test.describe('landing / (LP)', () => {
       page.getByRole('heading', { name: '売上を待たない。' }),
     ).toBeVisible();
     await expect(
-      page.getByRole('heading', { name: '人だけじゃない。AIも JPYC を使う時代へ。' }),
+      page.getByRole('heading', { name: '上限を決めて、AI に JPYC を払わせる。' }),
     ).toBeVisible();
     const agentCta = page.getByRole('link', { name: 'OpenPay Agent を試す', exact: true });
     await expect(agentCta).toBeVisible();
@@ -122,7 +122,7 @@ test.describe('landing / (LP)', () => {
       page.getByRole('heading', { name: 'Never wait for your sales.' }),
     ).toBeVisible();
     await expect(
-      page.getByRole('heading', { name: 'Not just people. AI uses JPYC now, too.' }),
+      page.getByRole('heading', { name: 'Set a limit, then let AI pay in JPYC.' }),
     ).toBeVisible();
     await expect(page.getByRole('link', { name: 'Try OpenPay Agent', exact: true })).toHaveAttribute('href', '/en/agent');
     await expect(

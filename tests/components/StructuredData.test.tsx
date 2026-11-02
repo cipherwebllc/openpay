@@ -9,12 +9,19 @@ vi.mock('next-intl/server', async () => {
   return {
     getLocale: async () => current.locale,
     getTranslations: async (namespace: string) =>
-      createTranslator({ locale: current.locale, messages: current.locale === 'ja' ? jaMessages : enMessages, namespace: namespace as 'Landing' }),
+      // 翻訳エラーのフォールバック文字列は表示と構造化データで同じになり、一致の検査をすり抜ける。
+      createTranslator({
+        locale: current.locale,
+        messages: current.locale === 'ja' ? jaMessages : enMessages,
+        namespace: namespace as 'Landing',
+        onError: (error) => { throw error; },
+      }),
   };
 });
 
 import { LandingFaq } from '@/components/LandingFaq';
 import { StructuredData } from '@/components/StructuredData';
+import { LANDING_PAYMENT_FEE_VALUES } from '@/lib/legal';
 
 type FaqPage = { '@type': string; mainEntity: { name: string; acceptedAnswer: { text: string } }[] };
 
@@ -33,10 +40,20 @@ describe('StructuredData (FAQPage)', () => {
     expect(faqPage).toBeDefined();
     const structured = faqPage!.mainEntity.map((e) => ({ q: e.name, a: e.acceptedAnswer.text }));
     expect(structured).toEqual(visible);
-    expect(structured).toHaveLength(7);
+    expect(structured).toHaveLength(8);
+    // 差し込み値が回答まで届いている (faqA2 の Circle の転送手数料の上限)。
+    expect(structured.map((item) => item.a).join(' ')).toContain(`${LANDING_PAYMENT_FEE_VALUES.cctpMaxPercent}%`);
     for (const { q, a } of structured) {
       // 穴あきの料率 ({recoverPercent} など) や生のタグ (<jpycEx> など) を検索エンジン・AI に渡さない。
       expect(`${q} ${a}`).not.toMatch(/[{}<>]/);
     }
+  });
+
+  it.each(['ja', 'en'] as const)('%s: 短くした回答から、料金ページと割引のガイドへ移動できる', async (locale) => {
+    current.locale = locale;
+    const { container } = render(await LandingFaq());
+    const hrefs = [...container.querySelectorAll('a')].map((a) => a.getAttribute('href'));
+    expect(hrefs).toContain(`/${locale}/pricing`);
+    expect(hrefs).toContain(`/${locale}/guide/qr#jpyc-discount`);
   });
 });

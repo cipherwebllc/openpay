@@ -925,6 +925,9 @@ describe('i18n: Nav / Landing 名前空間 (AppShell + LP, ja/en parity)', () =>
     // faqQ7/A7 = 「JPYC・USDC とは何ですか?」(LandingFaq で faqQ2 の前に表示)
     'faqQ7',
     'faqA7',
+    // faqQ9/A9 = 「JPYC で払うお客様だけ割引できますか?」(ガイドの jpyc-discount へ送る)
+    'faqQ9',
+    'faqA9',
     // Trust section
     'trustTitle',
     'trustBody',

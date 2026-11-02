@@ -68,9 +68,38 @@ describe('standard-payment fee scope (review 6 regression)', () => {
     // faqA1 の料率は messages に手書き。構造化データ (FAQPage) に残る唯一の料率なので、検索エンジン・AI に
     // 古い料率が渡らないよう DISCLOSED と照合する (表示されない faqA6 を廃止した後の drift フェンス)。
     it(`${locale}: faqA1 (構造化データに出る料率) は DISCLOSED の料率と最低額に一致する`, () => {
-      const text = t('faqA1', values);
+      const text = t.markup('faqA1', { ...values, pricing: (chunks) => chunks });
       expect(text).toContain(`${recoverPct}%`);
       expect(text).toContain(`${floorJpyc} JPYC`);
+      // USDC のガスレスはガス代が消えるのではなく USDC で払う。「はい」の回答がガス代ゼロに読めないようにする。
+      expect(text).toContain(locale === 'ja' ? 'ガス代を USDC で払う' : 'the gas is paid in USDC');
+      expect(text).toContain(locale === 'ja' ? 'お店の負担かはお店が選べます' : 'the shop chooses');
+    });
+    // 2026-11-02: JPYC の説明は発行体の言い方と払い戻しの事実にそろえる (ペッグを保証する書き方にしない・規約の免責と同じ)。
+    it(`${locale}: faqA7 は発行体の法的な位置づけと、OpenPay が行わないことを書く`, () => {
+      const text = t('faqA7');
+      if (locale === 'ja') {
+        expect(text).toContain('資金移動業者の JPYC 株式会社が発行する電子決済手段');
+        expect(text).toContain('JPYC EX で 1 JPYC＝1 円として払い戻せます');
+        expect(text).toContain('発行・償還・売買・交換・管理も行わず');
+        expect(text).not.toContain('目指す');
+      } else {
+        expect(text).toContain('electronic payment instrument issued by JPYC Inc., a funds transfer service provider');
+        expect(text).toContain('redeemed at JPYC EX at 1 JPYC = 1 JPY');
+        expect(text).toContain('does not issue, redeem, buy, sell, exchange or manage');
+      }
+    });
+    // 2026-11-02: 上限はシェルを使える AI には壁でない (#902)。トップでは「強制」と言い切らず、その理由と少額で使う前提を書く。
+    it(`${locale}: AI の節は上限を強制と言い切らず、書き換えられることと少額で使う前提を書く`, () => {
+      const text = `${t('aiEraTitle')} ${t('aiEraBody')} ${t('aiEraAgentNote')}`;
+      expect(text).not.toMatch(locale === 'ja' ? /強制/ : /enforc/i);
+      expect(text).toContain(locale === 'ja' ? 'シェルを使える AI は上限を書き換えられる' : 'An AI with shell access can change its limits');
+      expect(text).toContain(locale === 'ja' ? '失ってもよい少額' : 'small amount you can afford to lose');
+    });
+    // 2026-11-02: 割引の可否は加盟店規約による。OpenPay は個々の規約を判断しない (ガイドの必須文と同じ考え方)。
+    it(`${locale}: 割引の FAQ は加盟店規約によることを同じ回答に書く`, () => {
+      const text = t.markup('faqA9', { guide: (chunks) => chunks });
+      expect(text).toContain(locale === 'ja' ? '加盟店規約' : 'merchant agreements');
     });
     // ヒーローの「0円」(2026-10-25): 条件 (お客様がガス代を払う通常決済) と、無料から除くモバイル注文を同じ文に書く。
     it(`${locale}: heroBody の 0 円は通常決済の条件とモバイル注文の除外を同じ文に持つ`, () => {
