@@ -15,11 +15,14 @@ export function AddressInput({
   onChange,
   onResolved,
   placeholder,
+  id,
 }: {
   value: string;
   onChange: (v: string) => void;
   onResolved?: (address: Address | null) => void;
   placeholder?: string;
+  /** 見出しの <label htmlFor> と結び付けるときの id。 */
+  id?: string;
 }) {
   const t = useTranslations('AddressInput');
   const trimmed = value.trim();
@@ -37,6 +40,7 @@ export function AddressInput({
   return (
     <div>
       <input
+        id={id}
         type="text"
         value={value}
         onChange={(e) => onChange(e.target.value.trim())}

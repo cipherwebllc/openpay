@@ -103,6 +103,7 @@ export const ROUTE_CLIENT_NAMESPACES = {
     'Nav',
     'News',
     'NonCustodialNotice',
+    'OrderLinkBuilder',
     'OfflineLastQr',
     'OrderBinding',
     'OrderCall',

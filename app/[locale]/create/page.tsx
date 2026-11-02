@@ -57,6 +57,10 @@ const OrderFeedPanel = dynamic(
   () => import('@/components/OrderFeedPanel').then((m) => m.OrderFeedPanel),
   { ssr: false, loading: TabPanelFallback },
 );
+const OrderLinkBuilder = dynamic(
+  () => import('@/components/OrderLinkBuilder').then((m) => m.OrderLinkBuilder),
+  { ssr: false, loading: TabPanelFallback },
+);
 const StoreDevicePageStatus = dynamic(
   () => import('@/components/StoreDevicePageStatus').then((m) => m.StoreDevicePageStatus),
   { ssr: false },
@@ -165,6 +169,7 @@ function CreatePageBody() {
             ...(env.enableOrderRelay || env.enableShopLive
               ? ([['orders', t('tabs.orders')]] as const)
               : []),
+            ['orderLink', t('tabs.orderLink')],
             ['tip', t('tabs.tip')],
             // 「プロフ」(@handle link-in-bio) は flag ON のときだけ露出。
             ...(env.enableHandles
@@ -210,6 +215,7 @@ function CreatePageBody() {
         </div>
       )}
       {/* 見出しはタブ名に任せる (決済QR・レジ・モバイル注文・プロフと同じ・2026-10 磨き上げ P4)。 */}
+      {tab === 'orderLink' && <OrderLinkBuilder />}
       {tab === 'tip' && <TipEmbedGenerator />}
       {tab === 'profile' && env.enableHandles && (
         env.enableCreatorStoreUi ? (
@@ -233,8 +239,8 @@ function CreatePageBody() {
         <OrderFeedPanel {...(env.enableMobileOrder ? { onOpenMobileOrder: () => changeTab('mobileOrder') } : {})} />
       )}
 
-      {/* 受注・プロフタブでは下部の参照系 (最近の取引 / 換金) を隠す。 */}
-      {tab !== 'orders' && tab !== 'profile' && <MiniHistoryRecent />}
+      {/* 受注・プロフタブでは下部の参照系 (最近の取引 / 換金) を隠す。注文リンクの支払いは履歴に残らないので、最近の取引も出さない。 */}
+      {tab !== 'orders' && tab !== 'profile' && tab !== 'orderLink' && <MiniHistoryRecent />}
 
       {/* 換金は受け取った後の話で会計の最中には使わないので、1 行に畳む (中身・文言はそのまま)。 */}
       {tab !== 'orders' && tab !== 'profile' && (
