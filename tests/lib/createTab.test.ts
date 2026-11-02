@@ -8,8 +8,8 @@ const ALL_ON: CreateTabFlags = { mobileOrder: true, ordersFeed: true, handles: t
 const ALL_OFF: CreateTabFlags = { mobileOrder: false, ordersFeed: false, handles: false };
 
 describe('resolveCreateTab', () => {
-  it('常設タブ (qr/register/tip) は flag に関係なくそのまま採用', () => {
-    for (const tab of ['qr', 'register', 'tip'] as const) {
+  it('常設タブ (qr/register/tip/orderLink) は flag に関係なくそのまま採用', () => {
+    for (const tab of ['qr', 'register', 'tip', 'orderLink'] as const) {
       expect(resolveCreateTab(tab, ALL_OFF)).toBe(tab);
       expect(resolveCreateTab(tab, ALL_ON)).toBe(tab);
     }

@@ -9,7 +9,8 @@ export type CreateTab =
   | 'tip'
   | 'profile'
   | 'mobileOrder'
-  | 'orders';
+  | 'orders'
+  | 'orderLink';
 
 // flag 付きタブの可視条件 (page.tsx のタブバー構築と同一の真偽)。
 export type CreateTabFlags = {
@@ -19,7 +20,7 @@ export type CreateTabFlags = {
 };
 
 // flag に依存せず常設のタブ。
-const ALWAYS_VISIBLE: ReadonlySet<string> = new Set(['qr', 'register', 'tip']);
+const ALWAYS_VISIBLE: ReadonlySet<string> = new Set(['qr', 'register', 'tip', 'orderLink']);
 
 /**
  * `?tab=` の生値を初期タブへ解決。常設タブは無条件採用、flag 付きタブは対応 flag ON のときだけ
