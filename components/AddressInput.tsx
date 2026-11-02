@@ -16,6 +16,7 @@ export function AddressInput({
   onResolved,
   placeholder,
   id,
+  inputClassName,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -23,6 +24,8 @@ export function AddressInput({
   placeholder?: string;
   /** 見出しの <label htmlFor> と結び付けるときの id。 */
   id?: string;
+  /** 周りの欄と大きさをそろえるときに、既定の見た目を置き換える。 */
+  inputClassName?: string;
 }) {
   const t = useTranslations('AddressInput');
   const trimmed = value.trim();
@@ -48,7 +51,10 @@ export function AddressInput({
         spellCheck={false}
         autoCapitalize="off"
         autoCorrect="off"
-        className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm focus:border-brand focus:outline-none"
+        className={
+          inputClassName ??
+          'w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm focus:border-brand focus:outline-none'
+        }
       />
       {looksLikeName && query.isFetching && (
         <p className="mt-1 text-xs text-slate-500">{t('resolving')}</p>

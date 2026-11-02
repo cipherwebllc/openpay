@@ -243,7 +243,7 @@ function CreatePageBody() {
       {tab !== 'orders' && tab !== 'profile' && tab !== 'orderLink' && <MiniHistoryRecent />}
 
       {/* 換金は受け取った後の話で会計の最中には使わないので、1 行に畳む (中身・文言はそのまま)。 */}
-      {tab !== 'orders' && tab !== 'profile' && (
+      {tab !== 'orders' && tab !== 'profile' && tab !== 'orderLink' && (
       <details className="group/offramp mt-6 rounded-2xl bg-white shadow-card ring-1 ring-slate-200/70 print:hidden">
         <summary className="flex cursor-pointer list-none items-center gap-3 px-5 py-4 [&::-webkit-details-marker]:hidden">
           <ArrowRightLeft className="h-4 w-4 flex-none text-slate-400" aria-hidden />

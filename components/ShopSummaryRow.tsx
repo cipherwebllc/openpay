@@ -22,11 +22,13 @@ export function ShopSummaryRow({
   payTone,
   onOpenSettings,
   labels,
+  settingsClassName,
 }: {
   storeName: string;
   receiver: Address | null;
-  token: TokenSymbol;
-  tokenLabel: string;
+  /** 通貨が 1 つに決まっている画面では省く。 */
+  token?: TokenSymbol;
+  tokenLabel?: string;
   chainSlug: ChainSlug;
   chainName: string;
   /** 支払い方法の短い名前 (例「ガス代不要」)。 */
@@ -35,6 +37,8 @@ export function ShopSummaryRow({
   payTone: 'gasless' | 'standard';
   onOpenSettings: () => void;
   labels: { settings: string; noStoreName: string; noReceiver: string };
+  /** 「設定」ボタンに足す class。 */
+  settingsClassName?: string;
 }) {
   const name = storeName.trim();
   return (
@@ -54,9 +58,13 @@ export function ShopSummaryRow({
         {/* 通貨・チェーンは 1 まとまり、支払い方法は小さなピル (折り返しても区切りの点が行末に残らない)。 */}
         <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500">
           <span className="inline-flex items-center gap-1.5">
-            <TokenLogo symbol={token} size={14} className="h-3.5 w-3.5" />
-            <span>{tokenLabel}</span>
-            <span aria-hidden className="text-slate-300">·</span>
+            {token && (
+              <>
+                <TokenLogo symbol={token} size={14} className="h-3.5 w-3.5" />
+                <span>{tokenLabel}</span>
+                <span aria-hidden className="text-slate-300">·</span>
+              </>
+            )}
             <ChainLogo slug={chainSlug} size={14} className="h-3.5 w-3.5" />
             <span>{chainName}</span>
           </span>
@@ -74,7 +82,7 @@ export function ShopSummaryRow({
       <button
         type="button"
         onClick={onOpenSettings}
-        className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:border-brand hover:text-brand-dark"
+        className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:border-brand hover:text-brand-dark${settingsClassName ? ` ${settingsClassName}` : ''}`}
       >
         <Settings2 className="h-3.5 w-3.5" aria-hidden />
         {labels.settings}

@@ -29,7 +29,16 @@ vi.mock('@/lib/env', async (importOriginal) => {
 });
 
 import { JPYC_CHAINS } from '@/lib/chains';
-import { buildOrderLink, orderLinkChains, type OrderLinkInput } from '@/lib/orderLink';
+import {
+  buildOrderLink,
+  nextOrderLinkId,
+  orderLinkChains,
+  orderLinkLineIssues,
+  orderLinkFitsStandard,
+  orderLinkLineAmount,
+  orderLinkPreviewLines,
+  type OrderLinkInput,
+} from '@/lib/orderLink';
 import { deploymentForSlug, isGaslessSupported } from '@/lib/tokens';
 import { parseCheckoutParams } from '@/lib/url/checkout';
 
@@ -124,9 +133,9 @@ describe('buildOrderLink', () => {
     const at = (price: string, mode: 'gasless' | 'standard') =>
       buildOrderLink(input({ mode, lines: [{ name: '機材', qty: '1', price }], shipping: '' }));
     expect(at('50000', 'gasless').ok).toBe(true);
-    expect(at('50001', 'gasless')).toEqual({ ok: false, error: 'tooLarge', maximum: '50000' });
+    expect(at('50001', 'gasless')).toEqual({ ok: false, error: 'tooLarge', maximum: '50000', total: '50001' });
     expect(at('1000000', 'standard').ok).toBe(true);
-    expect(at('1000001', 'standard')).toEqual({ ok: false, error: 'tooLarge', maximum: '1000000' });
+    expect(at('1000001', 'standard')).toEqual({ ok: false, error: 'tooLarge', maximum: '1000000', total: '1000001' });
   });
 
   it('説明が読み直しで変わるならリンクを作らない', () => {
@@ -159,7 +168,6 @@ describe('buildOrderLink', () => {
     expect(buildOrderLink(input({ shipping: 'abc' }))).toEqual({ ok: false, error: 'shipping' });
     for (const line of [
       { name: '', qty: '1', price: '500' },
-      { name: 'Tシャツ', qty: '1', price: '' },
       { name: 'Tシャツ', qty: '0', price: '500' },
       { name: 'Tシャツ', qty: '1000', price: '500' },
       { name: 'Tシャツ', qty: '1.5', price: '500' },
@@ -179,7 +187,51 @@ describe('buildOrderLink', () => {
 
   it('合計が利用料以下ならリンクを作らない (/checkout が止める額を渡さない)', () => {
     const result = buildOrderLink(input({ lines: [{ name: 'ステッカー', qty: '1', price: '2' }], shipping: '' }));
-    expect(result).toEqual({ ok: false, error: 'tooSmall', minimum: '2' });
+    expect(result).toEqual({ ok: false, error: 'tooSmall', minimum: '2', total: '2' });
+  });
+});
+
+describe('打っている途中の扱い', () => {
+  it('商品名だけ・単価だけの途中は誤りにしない (単価が入って商品名が無いときだけ欄を示す)', () => {
+    expect(buildOrderLink(input({ lines: [{ name: 'Tシャツ', qty: '1', price: '' }] }))).toEqual({ ok: false, error: 'noItems' });
+    expect(orderLinkLineIssues({ name: 'Tシャツ', qty: '1', price: '' })).toEqual([]);
+    expect(orderLinkLineIssues({ name: '', qty: '1', price: '500' })).toEqual(['name']);
+    expect(orderLinkLineIssues({ name: '', qty: '1', price: '' })).toEqual([]);
+  });
+
+  it('直す欄を示す', () => {
+    expect(orderLinkLineIssues({ name: 'Tシャツ', qty: '0', price: '500' })).toEqual(['qty']);
+    expect(orderLinkLineIssues({ name: 'Tシャツ', qty: '1', price: '0' })).toEqual(['price']);
+  });
+});
+
+describe('nextOrderLinkId', () => {
+  it('末尾の数字に 1 を足し、桁数を保つ', () => {
+    expect(nextOrderLinkId('A-001')).toBe('A-002');
+    expect(nextOrderLinkId('A-009')).toBe('A-010');
+    expect(nextOrderLinkId('A-999')).toBe('A-1000');
+    expect(nextOrderLinkId('ORD-105')).toBe('ORD-106');
+    expect(nextOrderLinkId('7')).toBe('8');
+  });
+
+  it('続きを決められない番号は空にする', () => {
+    expect(nextOrderLinkId('秋のイベント')).toBe('');
+    expect(nextOrderLinkId('')).toBe('');
+    expect(nextOrderLinkId(`${'x'.repeat(63)}9`)).toBe('');
+  });
+});
+
+describe('orderLinkPreviewLines', () => {
+  it('行の金額を数量つきで出し、送料を末尾に足す', () => {
+    expect(orderLinkPreviewLines([{ name: 'Tシャツ', qty: '2', price: '3000' }], '500', '送料')).toEqual([
+      { name: 'Tシャツ', qty: 2, amount: '6000' },
+      { name: '送料', qty: 1, amount: '500' },
+    ]);
+  });
+
+  it('読めない行と、商品が無いときの送料は出さない', () => {
+    expect(orderLinkPreviewLines([{ name: 'Tシャツ', qty: '1', price: '' }], '500', '送料')).toEqual([]);
+    expect(orderLinkPreviewLines([{ name: 'Tシャツ', qty: '0', price: '500' }], '500', '送料')).toEqual([]);
   });
 });
 
@@ -188,5 +240,25 @@ describe('orderLinkChains', () => {
     const chains = orderLinkChains(JPYC_CHAINS);
     expect(chains).toContain('polygon');
     expect(chains.every((slug) => isGaslessSupported(deploymentForSlug('jpyc', slug)))).toBe(true);
+  });
+});
+
+describe('orderLinkLineAmount', () => {
+  it('数量 × 単価を返す', () => {
+    expect(orderLinkLineAmount({ name: 'A', qty: '3', price: '1.5' })).toBe('4.5');
+  });
+
+  it('単価が無い行・読めない行は null', () => {
+    expect(orderLinkLineAmount({ name: 'A', qty: '2', price: '' })).toBeNull();
+    expect(orderLinkLineAmount({ name: '', qty: '2', price: '100' })).toBeNull();
+    expect(orderLinkLineAmount({ name: 'A', qty: '0', price: '100' })).toBeNull();
+    expect(orderLinkLineAmount({ name: 'A', qty: '2', price: 'abc' })).toBeNull();
+  });
+});
+
+describe('orderLinkFitsStandard', () => {
+  it('通常決済の上限まで true', () => {
+    expect(orderLinkFitsStandard('1000000')).toBe(true);
+    expect(orderLinkFitsStandard('1000000.01')).toBe(false);
   });
 });

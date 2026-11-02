@@ -4,7 +4,7 @@
 // 利用料は /checkout の実際の計算と同じ関数で出し、作った URL は parse で読み直す
 // (お客様の画面で開けないリンクや、入力と違う内容のリンクを渡さないため)。
 
-import { formatUnits, type Address } from 'viem';
+import { formatUnits, parseUnits, type Address } from 'viem';
 import type { ChainSlug } from './chains';
 import type { PayMode } from './fee';
 import { resolveUsdcGaslessProvider } from './circlePaymaster';
@@ -24,6 +24,7 @@ import {
 import { DECIMAL_PATTERN } from './url/shared';
 
 export const ORDER_LINK_ID_MAX = 64;
+export const ORDER_LINK_FIRST_ID = 'A-001';
 export const ORDER_LINK_NAME_MAX = 80;
 export const ORDER_LINK_DESCRIPTION_MAX = 200;
 // ガスレスの 1 回の上限。サーバーの RELAY_MAX_JPYC の既定値と同じ (tests/lib/orderLink.test.ts が照合する)。
@@ -31,6 +32,18 @@ export const ORDER_LINK_DESCRIPTION_MAX = 200;
 export const ORDER_LINK_GASLESS_MAX_JPYC = 50_000n;
 // 通常決済の上限。手入力の桁の間違いを止めるための値で、Store の出品上限に揃えた。
 export const ORDER_LINK_STANDARD_MAX_JPYC = 1_000_000n;
+
+/**
+ * 次の注文番号。末尾の数字に 1 を足し、桁数は保つ (A-001→A-002・ORD-105→ORD-106・A-999→A-1000)。
+ * 末尾が数字でない独自の番号は続きを決められないので空にする (使う人が入れる)。
+ */
+export function nextOrderLinkId(last: string): string {
+  const match = /^(.*?)(\d+)$/.exec(last.trim());
+  if (match === null) return '';
+  const [, prefix, digits] = match;
+  const next = `${prefix}${(BigInt(digits) + 1n).toString().padStart(digits.length, '0')}`;
+  return next.length > ORDER_LINK_ID_MAX ? '' : next;
+}
 
 /** 入力の 1 行。数量と単価は打っている途中の文字列のまま持つ。 */
 export type OrderLinkLine = {
@@ -54,6 +67,7 @@ export type OrderLinkInput = {
 
 export type OrderLinkError =
   | 'receiver'
+  | 'receiverResolving'
   | 'orderId'
   | 'noItems'
   | 'item'
@@ -65,7 +79,7 @@ export type OrderLinkError =
 
 export type OrderLinkResult =
   | { ok: true; url: string; total: string; fee: string; receive: string }
-  | { ok: false; error: OrderLinkError; minimum?: string; maximum?: string };
+  | { ok: false; error: OrderLinkError; minimum?: string; maximum?: string; total?: string };
 
 function isBlankLine(line: OrderLinkLine): boolean {
   return line.name.trim() === '' && line.price.trim() === '';
@@ -75,14 +89,26 @@ function isPositiveDecimal(value: string): boolean {
   return DECIMAL_PATTERN.test(value) && !/^0*(\.0+)?$/.test(value);
 }
 
-function toCheckoutItem(line: OrderLinkLine): CheckoutItem | null {
-  const name = line.name.trim();
-  const qtyText = line.qty.trim();
+export type OrderLinkLineIssue = 'name' | 'qty' | 'price';
+
+/**
+ * 直してほしい欄。打っている途中で赤くしないよう、まだ空の単価は問題にしない。
+ * 単価が入っているのに商品名が無いときは商品名を示す。
+ */
+export function orderLinkLineIssues(line: OrderLinkLine): OrderLinkLineIssue[] {
+  if (isBlankLine(line)) return [];
+  const issues: OrderLinkLineIssue[] = [];
   const price = line.price.trim();
-  if (!name || !/^\d+$/.test(qtyText) || !isPositiveDecimal(price)) return null;
+  const qtyText = line.qty.trim();
+  if (!line.name.trim() && price) issues.push('name');
   const qty = Number(qtyText);
-  if (qty < 1 || qty > CHECKOUT_QTY_MAX) return null;
-  return { name, qty, price };
+  if (!/^\d+$/.test(qtyText) || qty < 1 || qty > CHECKOUT_QTY_MAX) issues.push('qty');
+  if (price && !isPositiveDecimal(price)) issues.push('price');
+  return issues;
+}
+
+function toCheckoutItem(line: OrderLinkLine): CheckoutItem {
+  return { name: line.name.trim(), qty: Number(line.qty.trim()), price: line.price.trim() };
 }
 
 /**
@@ -107,6 +133,44 @@ export function orderLinkChains(chains: readonly ChainSlug[]): ChainSlug[] {
   return chains.filter((slug) => isGaslessSupported(deploymentForSlug('jpyc', slug)));
 }
 
+/** 1 行の小計 (数量 × 単価)。読めない行と、まだ単価がない行は null。 */
+export function orderLinkLineAmount(line: OrderLinkLine): string | null {
+  const price = line.price.trim();
+  if (!price || orderLinkLineIssues(line).length > 0) return null;
+  return formatUnits(parseUnits(price, 18) * BigInt(line.qty.trim()), 18);
+}
+
+/** ガス代不要の上限を超えた注文を、通常決済に切り替えれば作れるか。 */
+export function orderLinkFitsStandard(total: string): boolean {
+  return parseUnits(total, 18) <= ORDER_LINK_STANDARD_MAX_JPYC * 10n ** 18n;
+}
+
+/** 見本の 1 行。 */
+export type OrderLinkPreviewLine = { name: string; qty: number; amount: string };
+
+/**
+ * お客様の画面の見本に出す行。打っている途中でも分かる範囲で見せる (読めない行は飛ばす)。
+ * 金額は表示用の 10 進の文字列。
+ */
+export function orderLinkPreviewLines(
+  lines: readonly OrderLinkLine[],
+  shipping: string,
+  shippingLabel: string,
+): OrderLinkPreviewLine[] {
+  const preview: OrderLinkPreviewLine[] = [];
+  for (const line of lines) {
+    const name = line.name.trim();
+    const amount = orderLinkLineAmount(line);
+    if (!name || amount === null) continue;
+    preview.push({ name, qty: Number(line.qty.trim()), amount });
+  }
+  const fee = shipping.trim();
+  if (preview.length > 0 && isPositiveDecimal(fee)) {
+    preview.push({ name: shippingLabel, qty: 1, amount: fee });
+  }
+  return preview;
+}
+
 export function buildOrderLink(input: OrderLinkInput): OrderLinkResult {
   if (input.to === null) return { ok: false, error: 'receiver' };
   const orderId = input.orderId.trim();
@@ -114,12 +178,10 @@ export function buildOrderLink(input: OrderLinkInput): OrderLinkResult {
 
   const filled = input.lines.filter((line) => !isBlankLine(line));
   if (filled.length === 0) return { ok: false, error: 'noItems' };
-  const items: CheckoutItem[] = [];
-  for (const line of filled) {
-    const item = toCheckoutItem(line);
-    if (item === null) return { ok: false, error: 'item' };
-    items.push(item);
-  }
+  if (filled.some((line) => orderLinkLineIssues(line).length > 0)) return { ok: false, error: 'item' };
+  // 打っている途中 (商品名か単価のどちらかがまだ空) は誤りとして扱わない。
+  if (filled.some((line) => !line.name.trim() || !line.price.trim())) return { ok: false, error: 'noItems' };
+  const items = filled.map(toCheckoutItem);
 
   const shipping = input.shipping.trim();
   if (shipping !== '' && !DECIMAL_PATTERN.test(shipping)) return { ok: false, error: 'shipping' };
@@ -157,12 +219,12 @@ export function buildOrderLink(input: OrderLinkInput): OrderLinkResult {
   const totalWei = calcCheckoutTotal(parsed.params.items, decimals);
   const maximum = input.mode === 'standard' ? ORDER_LINK_STANDARD_MAX_JPYC : ORDER_LINK_GASLESS_MAX_JPYC;
   if (totalWei > maximum * 10n ** BigInt(decimals)) {
-    return { ok: false, error: 'tooLarge', maximum: maximum.toString() };
+    return { ok: false, error: 'tooLarge', maximum: maximum.toString(), total: formatUnits(totalWei, decimals) };
   }
   const feeWei = orderLinkFeeWei(totalWei, input.chain, input.mode);
   // 利用料以下の支払いは /checkout が止める (お店の受取が 0 になる) ので、リンクを渡す前に知らせる。
   if (feeWei > 0n && totalWei <= feeWei) {
-    return { ok: false, error: 'tooSmall', minimum: formatUnits(feeWei, decimals) };
+    return { ok: false, error: 'tooSmall', minimum: formatUnits(feeWei, decimals), total: formatUnits(totalWei, decimals) };
   }
   return {
     ok: true,
