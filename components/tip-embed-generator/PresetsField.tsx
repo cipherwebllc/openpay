@@ -12,7 +12,7 @@ import {
   sanitizeTipPresetLabel,
   TIP_PRESET_MAX,
 } from '@/lib/url';
-import type { SetTipSettings, TipSettings } from './shared';
+import { TIP_INPUT_CLASS, type SetTipSettings, type TipSettings } from './shared';
 
 export function PresetsField({
   settings,
@@ -98,7 +98,7 @@ export function PresetsField({
               onChange={(e) => updatePreset(i, e.target.value)}
               placeholder={t('presetAmountPlaceholder')}
               aria-label={t('presetAmountItem', { n: i + 1, symbol: deployment.displaySymbol })}
-              className="min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-right text-sm tabular-nums focus:border-brand focus:outline-none"
+              className={`${TIP_INPUT_CLASS} min-w-0 text-right tabular-nums`}
             />
             <input
               type="text"
@@ -106,13 +106,13 @@ export function PresetsField({
               onChange={(e) => updatePresetLabel(i, e.target.value)}
               placeholder={t('presetLabelPlaceholder')}
               aria-label={t('presetLabelItem', { n: i + 1 })}
-              className="min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none"
+              className={`${TIP_INPUT_CLASS} min-w-0`}
             />
             <button
               type="button"
               onClick={() => removePreset(i)}
               aria-label={t('presetRemoveLabel', { n: i + 1 })}
-              className="h-10 rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-500 hover:border-red-300 hover:text-red-600"
+              className="inline-flex h-11 w-11 items-center justify-center rounded-md border border-slate-200 bg-white text-sm text-slate-500 hover:border-red-300 hover:text-red-600"
             >
               ×
             </button>
@@ -120,10 +120,11 @@ export function PresetsField({
         ))}
       </div>
       {tokenPresets.length < TIP_PRESET_MAX && (
+        // 見た目は小さいまま、押せる範囲だけを 44px 以上に広げる (after の透明な面・「設定」と同じ)。
         <button
           type="button"
           onClick={addPreset}
-          className="mt-2 rounded-md border border-dashed border-slate-300 px-3 py-1.5 text-xs text-slate-600 hover:border-brand hover:text-brand-dark"
+          className="relative mt-2 rounded-md border border-dashed border-slate-300 px-3 py-1.5 text-xs text-slate-600 hover:border-brand hover:text-brand-dark after:absolute after:-inset-x-1 after:-inset-y-2 after:content-['']"
         >
           {t('presetAddButton')}
         </button>

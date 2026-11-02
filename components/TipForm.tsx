@@ -814,7 +814,7 @@ export function TipForm({
                   ? t('amountCustomPlaceholderJpyc')
                   : t('amountCustomPlaceholderUsdc')
               }
-              className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-lg font-semibold focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+              className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-lg font-semibold placeholder:text-slate-500 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
               style={{ borderColor: customSelected ? themeColor : undefined }}
             />
           </label>
@@ -841,7 +841,8 @@ export function TipForm({
               maxLength={300}
               rows={3}
               disabled={flowPending || !canAttachPrivateTipMessage}
-              className="mt-2 w-full resize-y rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none disabled:cursor-not-allowed disabled:bg-slate-50 disabled:opacity-70"
+              // スマホは 16px (16px 未満だと iOS が入力時に画面を拡大する)・placeholder は白地で AA。
+              className="mt-2 w-full resize-y rounded-lg border border-slate-300 bg-white px-3 py-2 text-base placeholder:text-slate-500 focus:border-brand focus:outline-none disabled:cursor-not-allowed disabled:bg-slate-50 disabled:opacity-70 sm:text-sm"
             />
           </label>
           {!canAttachPrivateTipMessage && (
