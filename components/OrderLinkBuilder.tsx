@@ -283,8 +283,6 @@ export function OrderLinkBuilder() {
               payLabel={t(`modes.${payMode}`)}
               payTone={payMode}
               onOpenSettings={() => setSettingsOpen(true)}
-              // 行の高さを増やさず、押せる範囲だけを 44px 以上に広げる。
-              settingsClassName="relative after:absolute after:-inset-x-1 after:-inset-y-2 after:content-['']"
               labels={{
                 settings: t('settingsOpen'),
                 noStoreName: t('receiverLabel'),

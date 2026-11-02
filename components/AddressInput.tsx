@@ -53,7 +53,8 @@ export function AddressInput({
         autoCorrect="off"
         className={
           inputClassName ??
-          'w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm focus:border-brand focus:outline-none'
+          // 高さ 44px (押しやすさ)・スマホは 16px (iOS は 16px 未満の欄で入力時に画面を拡大する)・placeholder は AA。
+          'h-11 w-full rounded-lg border border-slate-300 bg-white px-3 font-mono text-base placeholder:text-slate-500 focus:border-brand focus:outline-none sm:text-sm'
         }
       />
       {looksLikeName && query.isFetching && (
