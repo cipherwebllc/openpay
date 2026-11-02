@@ -3,18 +3,23 @@
 import { JPYC_CHAINS, type ChainSlug } from '@/lib/chains';
 import type { PayMode } from '@/lib/fee';
 import { isSettledReceiverInput } from '@/lib/format';
-import { orderLinkChains } from '@/lib/orderLink';
+import { ORDER_LINK_ID_MAX, orderLinkChains } from '@/lib/orderLink';
+import { DECIMAL_PATTERN } from '@/lib/url/shared';
 import { useLocalStorageSettings, type SettingsSyncRules } from './useLocalStorageSettings';
 import { normalizeChainForToken } from './useQrSettings';
 
-// 注文リンクの端末の設定。受取先・チェーン・支払い方法だけを残す
-// (商品名・金額・注文番号は注文ごとの値なので保存しない)。
+// 注文リンクの端末の設定。1 度決めたら変わらないものと、連番のために最後に使った番号だけを残す
+// (商品名・単価・説明は注文ごとの値なので保存しない)。
 type OrderLinkSettings = {
   receiver: string;
   // 受取先の由来。'auto' = 接続ウォレットからの自動補完 (切替に追従)、'manual' = 手入力。
   receiverSource: 'auto' | 'manual';
   chain: ChainSlug;
   payMode: PayMode;
+  // 送料はお店ごとにほぼ同じなので覚える。
+  shipping: string;
+  // 最後にコピーや共有をした注文の番号。次の番号はここから決める (端末ごと)。
+  lastOrderId: string;
 };
 
 const STORAGE_KEY = 'openpay:order-link-settings:v1';
@@ -24,6 +29,8 @@ const DEFAULT_SETTINGS: OrderLinkSettings = {
   receiverSource: 'manual',
   chain: 'polygon',
   payMode: 'gasless',
+  shipping: '',
+  lastOrderId: '',
 };
 
 function sanitize(loaded: Partial<OrderLinkSettings>): OrderLinkSettings {
@@ -34,6 +41,9 @@ function sanitize(loaded: Partial<OrderLinkSettings>): OrderLinkSettings {
     receiverSource: loaded.receiverSource === 'auto' ? 'auto' : 'manual',
     chain: orderLinkChains(JPYC_CHAINS).includes(chain) ? chain : DEFAULT_SETTINGS.chain,
     payMode: loaded.payMode === 'standard' ? 'standard' : 'gasless',
+    shipping: typeof loaded.shipping === 'string' && DECIMAL_PATTERN.test(loaded.shipping) ? loaded.shipping : '',
+    lastOrderId:
+      typeof loaded.lastOrderId === 'string' ? loaded.lastOrderId.slice(0, ORDER_LINK_ID_MAX) : '',
   };
 }
 
