@@ -253,9 +253,10 @@ export function QrAmountSection({
                   setAmount(edit.amount);
                   resetConvert();
                 }}
-                placeholder={settings.token === 'jpyc' ? '1,000' : '10.00'}
+                // 空のときに淡い例の額 (1,000) は出さない (2026-11-03 user 裁定)。淡い色では読めず (白地で 1.48:1)、
+                // 濃くすると額がもう入っているように見える。額はすぐ下の「よく使う金額」から 1 タップでも入る。
                 aria-label={amountLabel}
-                className="min-h-11 min-w-0 flex-1 bg-transparent text-right text-4xl font-bold tabular-nums tracking-tight text-slate-900 placeholder:text-slate-300 focus:outline-none sm:text-5xl"
+                className="min-h-11 min-w-0 flex-1 bg-transparent text-right text-4xl font-bold tabular-nums tracking-tight text-slate-900 focus:outline-none sm:text-5xl"
               />
               <span className="shrink-0 text-lg font-semibold text-slate-500">
                 {deployment.displaySymbol}

@@ -400,8 +400,8 @@ test.describe('create /create (QR generator + Tip widget tab)', () => {
       receiverInput(page),
       '0x52d4901142e2B5680027da5EB47C86CB02a3cA81',
     );
-    // 金額入力 (main amount)。よく使う金額の編集欄の placeholder「例: 1000」と区別するため exact。
-    await page.getByPlaceholder('1,000', { exact: true }).fill('500');
+    // 金額入力 (main amount)。欄の名前は見出しと同じ「請求金額 (JPYC)」。
+    await page.getByRole('textbox', { name: '請求金額 (JPYC)', exact: true }).fill('500');
     // desktop は右の会計パネル、mobile は下部固定バーのボタン (どちらも同じ label)。
     // getByRole は display:none の要素を拾わないので、画面幅に合った方 (表示中の 1 つ) が先頭になる。
     await page
@@ -429,8 +429,8 @@ test.describe('create /create (QR generator + Tip widget tab)', () => {
       receiverInput(page),
       '0x52d4901142e2B5680027da5EB47C86CB02a3cA81',
     );
-    // amount 入力 (JPYC plain で 750)。quick-amount 編集欄「例: 1000」と区別するため exact。
-    await page.getByPlaceholder('1,000', { exact: true }).fill('750');
+    // amount 入力 (JPYC plain で 750)。欄の名前は見出しと同じ「請求金額 (JPYC)」。
+    await page.getByRole('textbox', { name: '請求金額 (JPYC)', exact: true }).fill('750');
     // QR / 印刷ボタンは「QRコードを表示する」→ 全画面 QrPreviewModal に集約済み。先にモーダルを開く。
     await page
       .getByRole('button', { name: 'QRコードを表示する' })

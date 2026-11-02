@@ -66,6 +66,7 @@ vi.mock('@/lib/jpycGaslessProvider', async (importOriginal) => {
 import { QrGenerator } from '@/components/QrGenerator';
 import { resolveJpycGaslessProvider } from '@/lib/jpycGaslessProvider';
 import { shortAddress } from '@/lib/format';
+import { findQrAmountInput, qrAmountInput } from '../_helpers/qrAmount';
 
 const VALID = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 
@@ -186,7 +187,7 @@ describe('QrGenerator', () => {
       ).not.toBeInTheDocument();
       // storage に gasMode=merchant が残っていても URL は gas=customer 固定 (merchant 出ない)
       await user.click(screen.getByRole('button', { name: '完了' }));
-      await user.type(screen.getByPlaceholderText('1,000'), '5');
+      await user.type(qrAmountInput(), '5');
       await openQrModal(user);
       await waitFor(() => {
         expect(screen.queryByText((t) => t.includes('gas=merchant'))).toBeNull();
@@ -224,7 +225,7 @@ describe('QrGenerator', () => {
       expect(screen.queryByText(/売上の自動分配/)).toBeNull();
       expect(screen.queryByDisplayValue('0x2222222222222222222222222222222222222222')).toBeNull();
       await user.click(screen.getByRole('button', { name: '完了' }));
-      await user.type(screen.getByPlaceholderText('1,000'), '5');
+      await user.type(qrAmountInput(), '5');
       await openQrModal(user);
       await waitFor(() => {
         expect(screen.getByText((t) => t.startsWith('https://test.local/pay?'))).toBeInTheDocument();
@@ -255,7 +256,7 @@ describe('QrGenerator', () => {
       );
       const user = userEvent.setup();
       render(<QrGenerator />);
-      await user.type(await screen.findByPlaceholderText('10.00'), '10');
+      await user.type(await findQrAmountInput('USDC'), '10');
 
       // USDC: 分配の欄が出て、URL に split が入る。
       await openShopSettings(user);
@@ -301,7 +302,7 @@ describe('QrGenerator', () => {
       );
       const user = userEvent.setup();
       render(<QrGenerator />);
-      await user.type(await screen.findByPlaceholderText('1,000'), '1000');
+      await user.type(await findQrAmountInput(), '1000');
       await openShopSettings(user);
       expect(screen.queryByText(/売上の自動分配/)).toBeNull();
       expect(screen.queryByRole('button', { name: /\+ 受取人を追加/ })).toBeNull();
@@ -454,7 +455,7 @@ describe('QrGenerator', () => {
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
 
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
-      await user.type(screen.getByPlaceholderText('1,000'), '12.5');
+      await user.type(qrAmountInput(), '12.5');
 
       // QR / URL は「QRコードを表示する」→ モーダル内。
       await openQrModal(user);
@@ -490,7 +491,7 @@ describe('QrGenerator', () => {
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
       expect((await screen.findAllByText('金額を入れてください')).length).toBeGreaterThan(0);
       // 受取先 + 金額 → payUrl 有効 → 2 か所とも押せる。
-      await user.type(screen.getByPlaceholderText('1,000'), '500');
+      await user.type(qrAmountInput(), '500');
       await waitFor(() =>
         screen
           .getAllByRole('button', { name: /QRコードを表示する/ })
@@ -505,7 +506,7 @@ describe('QrGenerator', () => {
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
 
-      const input = screen.getByPlaceholderText('1,000');
+      const input = qrAmountInput();
       expect(input).toBeVisible();
       await user.click(screen.getByRole('button', { name: /据え置き/ }));
 
@@ -520,8 +521,8 @@ describe('QrGenerator', () => {
     it('数値以外は除去される (10ab.5 → 10.5)', async () => {
       const user = userEvent.setup();
       render(<QrGenerator />);
-      await waitFor(() => screen.getByPlaceholderText('1,000'));
-      const input = screen.getByPlaceholderText('1,000') as HTMLInputElement;
+      await waitFor(() => qrAmountInput());
+      const input = qrAmountInput();
       await user.type(input, '10ab.5');
       expect(input.value).toBe('10.5');
     });
@@ -529,8 +530,8 @@ describe('QrGenerator', () => {
     it('金額は桁区切りつきで見せ、途中を直しても caret が末尾へ飛ばない (値は区切りなしのまま)', async () => {
       const user = userEvent.setup();
       render(<QrGenerator />);
-      await waitFor(() => screen.getByPlaceholderText('1,000'));
-      const input = screen.getByPlaceholderText('1,000') as HTMLInputElement;
+      await waitFor(() => qrAmountInput());
+      const input = qrAmountInput();
       await user.type(input, '1234');
       expect(input.value).toBe('1,234');
       // 先頭の 1 の後ろに 9 を足す → 19,234。caret は足した 9 の直後 (区切りの位置がずれても末尾へ飛ばない)。
@@ -554,12 +555,12 @@ describe('QrGenerator', () => {
     it('クイック金額ボタンでレジ入力を即時反映する', async () => {
       const user = userEvent.setup();
       render(<QrGenerator />);
-      await waitFor(() => screen.getByPlaceholderText('1,000'));
+      await waitFor(() => qrAmountInput());
 
       // チップの表示は桁区切り・通貨記号は読み上げ用 (sr-only) に付く。
       await user.click(screen.getByRole('button', { name: '1,500 JPYC' }));
 
-      const input = screen.getByPlaceholderText('1,000') as HTMLInputElement;
+      const input = qrAmountInput();
       // 表示は桁区切りつき (よく使う金額のボタンと同じ表記)。
       expect(input.value).toBe('1,500');
     });
@@ -569,7 +570,7 @@ describe('QrGenerator', () => {
       render(<QrGenerator />);
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
-      await user.type(screen.getByPlaceholderText('1,000'), '750');
+      await user.type(qrAmountInput(), '750');
 
       // 店舗名とポスターの補足文は「お店の設定」シートの中。
       await openShopSettings(user);
@@ -629,7 +630,7 @@ describe('QrGenerator', () => {
       );
       const user = userEvent.setup();
       render(<QrGenerator />);
-      await waitFor(() => screen.getByPlaceholderText('10.00'));
+      await waitFor(() => qrAmountInput('USDC'));
 
       // 高精度 2 件はどちらも 0.123456 (USDC 6 dec) に潰れて 1 ボタンに dedup
       const truncated = screen.getAllByRole('button', {
@@ -648,7 +649,7 @@ describe('QrGenerator', () => {
 
       // ボタン押下で truncate 後の値そのまま input に反映される (元の高精度値ではない)
       await user.click(truncated[0]);
-      const input = screen.getByPlaceholderText('10.00') as HTMLInputElement;
+      const input = qrAmountInput('USDC');
       expect(input.value).toBe('0.123456');
     });
 
@@ -673,7 +674,7 @@ describe('QrGenerator', () => {
       );
       const user = userEvent.setup();
       render(<QrGenerator />);
-      await waitFor(() => screen.getByPlaceholderText('1,000'));
+      await waitFor(() => qrAmountInput());
 
       // JPYC では JPYC リスト
       expect(
@@ -685,7 +686,7 @@ describe('QrGenerator', () => {
 
       // USDC へ切替 → USDC リスト。JPYC の値は出ない (= 連動しない)。
       await pickInSettings(user, /^USDC$/);
-      await waitFor(() => screen.getByPlaceholderText('10.00'));
+      await waitFor(() => qrAmountInput('USDC'));
 
       expect(
         screen.getByRole('button', { name: /^7 USDC/ }),
@@ -705,7 +706,7 @@ describe('QrGenerator', () => {
     it('クイック金額の × 削除: 中間 index を削除しても他要素が詰まらない (off-by-one なし)', async () => {
       const user = userEvent.setup();
       render(<QrGenerator />);
-      await waitFor(() => screen.getByPlaceholderText('1,000'));
+      await waitFor(() => qrAmountInput());
       // よく使う金額の「編集」で編集欄を開く (2026-10 磨き上げ P2)。
       await user.click(screen.getByRole('button', { name: '編集' }));
 
@@ -733,7 +734,7 @@ describe('QrGenerator', () => {
     it('クイック金額: 4 件全部削除しても空 input が 1 行残る (UI 不変条件)', async () => {
       const user = userEvent.setup();
       render(<QrGenerator />);
-      await waitFor(() => screen.getByPlaceholderText('1,000'));
+      await waitFor(() => qrAmountInput());
       // よく使う金額の「編集」で編集欄を開く (2026-10 磨き上げ P2)。
       await user.click(screen.getByRole('button', { name: '編集' }));
 
@@ -760,7 +761,7 @@ describe('QrGenerator', () => {
       // 既定 4 件 + 4 回押下 → 8 件
       const user = userEvent.setup();
       render(<QrGenerator />);
-      await waitFor(() => screen.getByPlaceholderText('1,000'));
+      await waitFor(() => qrAmountInput());
       // よく使う金額の「編集」で編集欄を開く (2026-10 磨き上げ P2)。
       await user.click(screen.getByRole('button', { name: '編集' }));
 
@@ -829,7 +830,7 @@ describe('QrGenerator', () => {
         }),
       );
       render(<QrGenerator />);
-      await waitFor(() => screen.getByPlaceholderText('10.00'));
+      await waitFor(() => qrAmountInput('USDC'));
 
       // 0.0000001 は truncate→'0.000000' (=0) になり除外、500 のみ残る
       expect(
@@ -870,7 +871,7 @@ describe('QrGenerator', () => {
       render(<QrGenerator />);
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
-      await user.type(screen.getByPlaceholderText('1,000'), '750');
+      await user.type(qrAmountInput(), '750');
 
       screen
         .getAllByRole('button', { name: /QRコードを表示する/ })
@@ -887,7 +888,7 @@ describe('QrGenerator', () => {
       render(<QrGenerator />);
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
-      await user.type(screen.getByPlaceholderText('1,000'), '5');
+      await user.type(qrAmountInput(), '5');
 
       // 既定は customer → URL に gas= は付かない
       await openQrModal(user);
@@ -956,10 +957,10 @@ describe('QrGenerator', () => {
     it('JPYC タブへ切替で chainId 表記が変わる', async () => {
       const user = userEvent.setup();
       render(<QrGenerator />);
-      await waitFor(() => screen.getByPlaceholderText('1,000'));
+      await waitFor(() => qrAmountInput());
       await pickInSettings(user, /^JPYC$/);
       // JPYC 用プレースホルダ '1,000' に切替
-      expect(screen.getByPlaceholderText('1,000')).toBeInTheDocument();
+      expect(qrAmountInput()).toBeInTheDocument();
     });
   });
 
@@ -1050,7 +1051,7 @@ describe('QrGenerator', () => {
       render(<QrGenerator />);
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
-      await user.type(screen.getByPlaceholderText('1,000'), '5');
+      await user.type(qrAmountInput(), '5');
       await openAdvanced(user);
 
       // mode radio (gasless / 通常決済) のうち standard 側を click
@@ -1147,7 +1148,7 @@ describe('QrGenerator', () => {
       );
       const user = userEvent.setup();
       render(<QrGenerator />);
-      await user.type(screen.getByPlaceholderText('1,000'), '100');
+      await user.type(qrAmountInput(), '100');
       // payMode バッジはポスター調プレビュー (モーダル内)。
       await openQrModal(user);
       // 会計画面の要約にも同じ語が出るので、QR の画面の中に限定して照合する。
@@ -1173,8 +1174,8 @@ describe('QrGenerator', () => {
       );
       const user = userEvent.setup();
       render(<QrGenerator />);
-      // USDC placeholder は '10.00' (decimals=6 想定の例値)
-      await user.type(screen.getByPlaceholderText('10.00'), '5');
+      // USDC の金額欄 (名前が「請求金額 (USDC)」)
+      await user.type(qrAmountInput('USDC'), '5');
       // payMode バッジはポスター調プレビュー (モーダル内)。
       await openQrModal(user);
       await waitFor(() => {
@@ -1202,7 +1203,7 @@ describe('QrGenerator', () => {
       );
       const user = userEvent.setup();
       render(<QrGenerator />);
-      await user.type(screen.getByPlaceholderText('10.00'), '5');
+      await user.type(qrAmountInput('USDC'), '5');
       // payMode バッジはポスター調プレビュー (モーダル内)。
       await openQrModal(user);
       await waitFor(() => {
@@ -1220,7 +1221,7 @@ describe('QrGenerator', () => {
       render(<QrGenerator />);
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
-      await user.type(screen.getByPlaceholderText('1,000'), '5');
+      await user.type(qrAmountInput(), '5');
 
       expect(screen.queryByText(/互換 QR \(EIP-681\)/)).toBeNull();
       expect(screen.queryByText(/^ethereum:/)).toBeNull();
@@ -1231,7 +1232,7 @@ describe('QrGenerator', () => {
       const { container } = render(<QrGenerator />);
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
-      await user.type(screen.getByPlaceholderText('1,000'), '1000');
+      await user.type(qrAmountInput(), '1000');
       await openAdvanced(user);
       await user.click(screen.getByRole('button', { name: /通常決済（ガス代は顧客負担）/ }));
       // QR / EIP-681 fallback はモーダル内。
@@ -1272,7 +1273,7 @@ describe('QrGenerator', () => {
       render(<QrGenerator />);
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
-      await user.type(screen.getByPlaceholderText('1,000'), '1000');
+      await user.type(qrAmountInput(), '1000');
       await openAdvanced(user);
       await user.click(screen.getByRole('button', { name: /通常決済（ガス代は顧客負担）/ }));
       await openQrModal(user);
@@ -1293,7 +1294,7 @@ describe('QrGenerator', () => {
       render(<QrGenerator />);
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
-      await user.type(screen.getByPlaceholderText('1,000'), '1000');
+      await user.type(qrAmountInput(), '1000');
       await openAdvanced(user);
       await user.click(screen.getByRole('button', { name: /通常決済（ガス代は顧客負担）/ }));
       await openQrModal(user);
@@ -1308,7 +1309,7 @@ describe('QrGenerator', () => {
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
       // gasless モード (default) では EIP-681 が出ない → 警告も出ない
-      await user.type(screen.getByPlaceholderText('1,000'), '1000');
+      await user.type(qrAmountInput(), '1000');
       expect(
         screen.queryByText(/この QR では OpenPay 利用手数料.*徴収されません/),
       ).toBeNull();
@@ -1337,7 +1338,7 @@ describe('QrGenerator', () => {
       render(<QrGenerator />);
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
-      await user.type(screen.getByPlaceholderText('1,000'), '500');
+      await user.type(qrAmountInput(), '500');
       await openAdvanced(user);
       await user.click(screen.getByRole('button', { name: /通常決済（ガス代は顧客負担）/ }));
       await openQrModal(user);
@@ -1370,9 +1371,7 @@ describe('QrGenerator', () => {
       await openAdvanced(user);
       await user.click(screen.getByRole('button', { name: /通常決済（ガス代は顧客負担）/ }));
 
-      const amountInput = screen.getByPlaceholderText(
-        '10.00',
-      ) as HTMLInputElement;
+      const amountInput = qrAmountInput('USDC');
       await user.type(amountInput, '1.123456');
       // EIP-681 URI はモーダル内 (amount 確定後に開く)。
       await openQrModal(user);
@@ -1398,9 +1397,7 @@ describe('QrGenerator', () => {
       await openAdvanced(user);
       await user.click(screen.getByRole('button', { name: /通常決済（ガス代は顧客負担）/ }));
 
-      const amountInput = screen.getByPlaceholderText(
-        '10.00',
-      ) as HTMLInputElement;
+      const amountInput = qrAmountInput('USDC');
       // paste は userEvent.paste で発火 (selection は input にフォーカス済の前提)
       amountInput.focus();
       await user.paste('1.1234567890');
@@ -1419,17 +1416,13 @@ describe('QrGenerator', () => {
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
       // JPYC decimals=18 で長い小数を入力
-      const jpycInput = screen.getByPlaceholderText(
-        '1,000',
-      ) as HTMLInputElement;
+      const jpycInput = qrAmountInput();
       await user.type(jpycInput, '1.1234567890');
       expect(jpycInput.value).toBe('1.1234567890');
 
       // USDC へ切替 → amount が 6 桁に truncate されているはず
       await pickInSettings(user, /^USDC$/);
-      const usdcInput = screen.getByPlaceholderText(
-        '10.00',
-      ) as HTMLInputElement;
+      const usdcInput = qrAmountInput('USDC');
       expect(usdcInput.value).toBe('1.123456');
     });
 
@@ -1438,7 +1431,7 @@ describe('QrGenerator', () => {
       render(<QrGenerator />);
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
-      await user.type(screen.getByPlaceholderText('1,000'), '100');
+      await user.type(qrAmountInput(), '100');
       await openAdvanced(user);
 
       await user.click(
@@ -1468,7 +1461,7 @@ describe('QrGenerator', () => {
       render(<QrGenerator />);
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
-      await user.type(screen.getByPlaceholderText('10.00'), '100');
+      await user.type(qrAmountInput('USDC'), '100');
       await openAdvanced(user);
       await user.click(screen.getByRole('button', { name: /\+ 受取人を追加/ }));
       const splitInputs = screen.getAllByPlaceholderText('0x...');
@@ -1491,7 +1484,7 @@ describe('QrGenerator', () => {
       render(<QrGenerator />);
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
-      await user.type(screen.getByPlaceholderText('10.00'), '100');
+      await user.type(qrAmountInput('USDC'), '100');
       await openAdvanced(user);
       // direct OFF のまま split 追加
       await user.click(screen.getByRole('button', { name: /\+ 受取人を追加/ }));
@@ -1511,7 +1504,7 @@ describe('QrGenerator', () => {
       render(<QrGenerator />);
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
-      const amountInput = screen.getByPlaceholderText('1,000');
+      const amountInput = qrAmountInput();
       await user.type(amountInput, '100');
       await openAdvanced(user);
       await user.click(screen.getByRole('button', { name: /通常決済（ガス代は顧客負担）/ }));
@@ -1531,7 +1524,7 @@ describe('QrGenerator', () => {
       render(<QrGenerator />);
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
-      await user.type(screen.getByPlaceholderText('1,000'), '1');
+      await user.type(qrAmountInput(), '1');
       await openAdvanced(user);
       await user.click(screen.getByRole('button', { name: /通常決済（ガス代は顧客負担）/ }));
       await openQrModal(user);
@@ -1558,7 +1551,7 @@ describe('QrGenerator', () => {
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
       await pickInSettings(user, /^USDC$/);
-      await user.type(screen.getByPlaceholderText('10.00'), '1');
+      await user.type(qrAmountInput('USDC'), '1');
       await openAdvanced(user);
       await user.click(screen.getByRole('button', { name: /通常決済（ガス代は顧客負担）/ }));
       await openQrModal(user);
@@ -1593,7 +1586,7 @@ describe('QrGenerator', () => {
       render(<QrGenerator />);
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
-      await user.type(screen.getByPlaceholderText('1,000'), '5');
+      await user.type(qrAmountInput(), '5');
 
       // URLをコピー ボタンはモーダル内。
       await openQrModal(user);
@@ -1635,7 +1628,7 @@ describe('QrGenerator', () => {
       render(<QrGenerator />);
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
-      await user.type(screen.getByPlaceholderText('1,000'), '5');
+      await user.type(qrAmountInput(), '5');
 
       // 保存 / 印刷ボタンはモーダル内。
       await openQrModal(user);
@@ -1670,7 +1663,7 @@ describe('QrGenerator', () => {
       render(<QrGenerator />);
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
-      await user.type(screen.getByPlaceholderText('1,000'), '750');
+      await user.type(qrAmountInput(), '750');
       // 店舗名は「お店の設定」シートの中 (2026-10 磨き上げ P2)。
       await openShopSettings(user);
       await user.type(
@@ -1734,7 +1727,7 @@ describe('QrGenerator', () => {
       render(<QrGenerator />);
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
-      await user.type(screen.getByPlaceholderText('1,000'), '750');
+      await user.type(qrAmountInput(), '750');
 
       await openQrModal(user);
       await user.click(await screen.findByRole('button', { name: /PNG保存/ }));
@@ -1778,7 +1771,7 @@ describe('QrGenerator', () => {
       render(<QrGenerator />);
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
-      await user.type(screen.getByPlaceholderText('1,000'), '5');
+      await user.type(qrAmountInput(), '5');
       // 店舗名は「お店の設定」シートの中 (2026-10 磨き上げ P2)。
       await openShopSettings(user);
       await user.type(
@@ -1823,8 +1816,8 @@ describe('QrGenerator', () => {
       );
 
       render(<QrGenerator />);
-      await waitFor(() => screen.getByPlaceholderText('1,000'));
-      await user.type(screen.getByPlaceholderText('1,000'), '500');
+      await waitFor(() => qrAmountInput());
+      await user.type(qrAmountInput(), '500');
 
       await openQrModal(user);
       await user.click(await screen.findByRole('button', { name: /SVG保存/ }));
@@ -1858,8 +1851,8 @@ describe('QrGenerator', () => {
       );
 
       render(<QrGenerator />);
-      await waitFor(() => screen.getByPlaceholderText('1,000'));
-      await user.type(screen.getByPlaceholderText('1,000'), '500');
+      await waitFor(() => qrAmountInput());
+      await user.type(qrAmountInput(), '500');
 
       await openQrModal(user);
       await user.click(await screen.findByRole('button', { name: /SVG保存/ }));
@@ -1933,7 +1926,7 @@ describe('QrGenerator', () => {
       expect((await screen.findAllByText('受取先を設定してください')).length).toBeGreaterThan(0);
       expect(screen.queryByText('金額を入れてください')).toBeNull();
       // 金額を入れても、受取先が無い間は受取先の理由のまま。
-      await user.type(screen.getByPlaceholderText('1,000'), '500');
+      await user.type(qrAmountInput(), '500');
       expect(screen.getAllByText('受取先を設定してください').length).toBeGreaterThan(0);
     });
 
@@ -1958,7 +1951,7 @@ describe('QrGenerator', () => {
       expect(within(bar()).queryByText('請求金額')).toBeNull();
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
       await waitFor(() => expect(within(bar()).getByText('金額が未入力')).toBeInTheDocument());
-      await user.type(screen.getByPlaceholderText('1,000'), '500');
+      await user.type(qrAmountInput(), '500');
       await waitFor(() => expect(within(bar()).getByText('請求金額')).toBeInTheDocument());
     });
 
@@ -1967,7 +1960,7 @@ describe('QrGenerator', () => {
       render(<QrGenerator />);
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
-      await user.type(screen.getByPlaceholderText('1,000'), '500');
+      await user.type(qrAmountInput(), '500');
       await openQrModal(user);
       const dialog = await screen.findByRole('dialog', { name: '決済用 QR コード' });
       // 見出しは通常の書体・アドレスだけ等幅。
@@ -1990,7 +1983,7 @@ describe('QrGenerator', () => {
       await user.click(sampleBtn);
 
       // 金額が 1000 で埋まり、未入力の理由は消える (QR 生成可能状態へ)
-      expect(screen.getByPlaceholderText('1,000')).toHaveValue('1,000');
+      expect(qrAmountInput()).toHaveValue('1,000');
       await waitFor(() =>
         expect(screen.queryByText('金額を入れてください')).toBeNull(),
       );
@@ -2045,7 +2038,7 @@ describe('QrGenerator', () => {
       render(<QrGenerator />);
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
-      await user.type(screen.getByPlaceholderText('1,000'), '500');
+      await user.type(qrAmountInput(), '500');
 
       // 印刷ボタンはモーダル内。
       await openQrModal(user);
@@ -2166,7 +2159,7 @@ describe('QrGenerator', () => {
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
       await pickInSettings(user, /^USDC$/);
       await pickInSettings(user, /^Arbitrum/);
-      await user.type(screen.getByPlaceholderText('10.00'), '1');
+      await user.type(qrAmountInput('USDC'), '1');
       // poster はモーダル内。
       await openQrModal(user);
       // asset prop 導入後: poster の chain 表示は「選択中の受取 chain」を単一
@@ -2195,7 +2188,7 @@ describe('QrGenerator', () => {
       });
       await user.click(toggle);
       await user.click(screen.getByRole('button', { name: '完了' }));
-      await user.type(screen.getByPlaceholderText('10.00'), '1');
+      await user.type(qrAmountInput('USDC'), '1');
       // poster はモーダル内。
       await openQrModal(user);
       // crossChain OFF → 単一 chain バッジ (Arbitrum 系) のみ・他 chain 名は出ない
@@ -2213,7 +2206,7 @@ describe('QrGenerator', () => {
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
       // JPYC は default、polygon chain も default
-      await user.type(screen.getByPlaceholderText('1,000'), '500');
+      await user.type(qrAmountInput(), '500');
       // poster はモーダル内。
       await openQrModal(user);
       // JPYC は単一 chain バッジ (Polygon)・token 名 JPYC が伝播
@@ -2234,7 +2227,7 @@ describe('QrGenerator', () => {
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
       // JPYC は default なので Kaia chain button を直接 click
       await pickInSettings(user, /^Kai/);
-      await user.type(screen.getByPlaceholderText('1,000'), '500');
+      await user.type(qrAmountInput(), '500');
       // payUrl 表示 box / poster はモーダル内 (font-mono.text-xs.bg-slate-50)
       await openQrModal(user);
       await waitFor(() => {
@@ -2261,7 +2254,7 @@ describe('QrGenerator', () => {
       const { container } = render(<QrGenerator />);
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
-      await user.type(screen.getByPlaceholderText('1,000'), '100');
+      await user.type(qrAmountInput(), '100');
       // URL box はモーダル内。開いたまま chain を切替 (背後の chooser は操作可)。
       await openQrModal(user);
       // 既定は polygon
@@ -2319,8 +2312,8 @@ describe('QrGenerator', () => {
       );
       const user = userEvent.setup();
       const { container } = render(<QrGenerator />);
-      await screen.findByPlaceholderText('1,000');
-      await user.type(screen.getByPlaceholderText('1,000'), '500');
+      await findQrAmountInput();
+      await user.type(qrAmountInput(), '500');
       // QR / URL はモーダル内 (size=260)。
       await openQrModal(user);
       await waitFor(() => {
@@ -2342,8 +2335,8 @@ describe('QrGenerator', () => {
       );
       const user = userEvent.setup();
       render(<QrGenerator />);
-      await screen.findByPlaceholderText('1,000');
-      await user.type(screen.getByPlaceholderText('1,000'), '100');
+      await findQrAmountInput();
+      await user.type(qrAmountInput(), '100');
       // poster preview はモーダル内。開いたまま token を切替 (背後の chooser は操作可)。
       await openQrModal(user);
       await waitFor(() => {
@@ -2434,42 +2427,42 @@ describe('QrGenerator: 他トークン建てで受け取る (FX 換算・UI 期�
   it('D7: FX conversion does not persist token, chain or payMode across remount', async () => {
     const user = userEvent.setup();
     const view = render(<QrGenerator />);
-    await user.type(await screen.findByPlaceholderText('1,000'), '1000');
+    await user.type(await findQrAmountInput(), '1000');
     const anchor = JSON.parse(localStorage.getItem('openpay:qr-settings:v2')!);
     await user.click(screen.getByRole('button', { name: /USDC 建てで受取る/ }));
-    expect(await screen.findByPlaceholderText('10.00')).toHaveValue('6.666667');
+    expect(await findQrAmountInput('USDC')).toHaveValue('6.666667');
     expect(JSON.parse(localStorage.getItem('openpay:qr-settings:v2')!)).toMatchObject({
       token: anchor.token, chain: anchor.chain, payMode: anchor.payMode,
     });
     view.unmount();
     render(<QrGenerator />);
-    expect(await screen.findByPlaceholderText('1,000')).toHaveValue('');
+    expect(await findQrAmountInput()).toHaveValue('');
     expect(screen.queryByRole('button', { name: /元の JPYC 建てに戻す/ })).toBeNull();
   });
 
   it('D7: editing a converted amount keeps the temporary token without saving it', async () => {
     const user = userEvent.setup();
     const view = render(<QrGenerator />);
-    await user.type(await screen.findByPlaceholderText('1,000'), '1000');
+    await user.type(await findQrAmountInput(), '1000');
     await user.click(screen.getByRole('button', { name: /USDC 建てで受取る/ }));
-    const input = await screen.findByPlaceholderText('10.00');
+    const input = await findQrAmountInput('USDC');
     await user.clear(input);
     await user.type(input, '5');
-    expect(screen.getByPlaceholderText('10.00')).toHaveValue('5');
+    expect(qrAmountInput('USDC')).toHaveValue('5');
     expect(JSON.parse(localStorage.getItem('openpay:qr-settings:v2')!).token).toBe('jpyc');
     view.unmount();
     render(<QrGenerator />);
-    expect(await screen.findByPlaceholderText('1,000')).toHaveValue('');
+    expect(await findQrAmountInput()).toHaveValue('');
   });
 
   it('JPYC + 金額入力で convert ボタンが出る (金額未入力では出ない)', async () => {
     const user = userEvent.setup();
     render(<QrGenerator />);
-    await waitFor(() => screen.getByPlaceholderText('1,000'));
+    await waitFor(() => qrAmountInput());
     expect(
       screen.queryByRole('button', { name: /USDC 建てで受取る/ }),
     ).toBeNull();
-    await user.type(screen.getByPlaceholderText('1,000'), '1000');
+    await user.type(qrAmountInput(), '1000');
     expect(
       await screen.findByRole('button', { name: /USDC 建てで受取る/ }),
     ).toBeInTheDocument();
@@ -2479,8 +2472,8 @@ describe('QrGenerator: 他トークン建てで受け取る (FX 換算・UI 期�
     window.localStorage.clear(); // receiver seed を無効化 (受取先なし状態)
     const user = userEvent.setup();
     render(<QrGenerator />);
-    await waitFor(() => screen.getByPlaceholderText('1,000'));
-    await user.type(screen.getByPlaceholderText('1,000'), '1000');
+    await waitFor(() => qrAmountInput());
+    await user.type(qrAmountInput(), '1000');
     expect(
       screen.queryByRole('button', { name: /USDC 建てで受取る/ }),
     ).toBeNull();
@@ -2489,16 +2482,14 @@ describe('QrGenerator: 他トークン建てで受け取る (FX 換算・UI 期�
   it('クリックで USDC 建てに換算 (1000 JPYC @150 → 6.666667 USDC) + URL に exp/refAmt/fxRate', async () => {
     const user = userEvent.setup();
     render(<QrGenerator />);
-    await waitFor(() => screen.getByPlaceholderText('1,000'));
-    await user.type(screen.getByPlaceholderText('1,000'), '1000');
+    await waitFor(() => qrAmountInput());
+    await user.type(qrAmountInput(), '1000');
     await user.click(
       await screen.findByRole('button', { name: /USDC 建てで受取る/ }),
     );
 
-    // token が USDC に切替 (placeholder 10.00) + amount は ceil 換算値
-    const input = (await screen.findByPlaceholderText(
-      '10.00',
-    )) as HTMLInputElement;
+    // token が USDC に切替 (金額欄の名前が「請求金額 (USDC)」) + amount は ceil 換算値
+    const input = await findQrAmountInput('USDC');
     expect(input.value).toBe('6.666667');
     // 換算サマリ (anchor 円価格 ≈ USDC 額)
     expect(screen.getByText(/1000 JPYC ≈ 6\.666667 USDC/)).toBeInTheDocument();
@@ -2519,12 +2510,12 @@ describe('QrGenerator: 他トークン建てで受け取る (FX 換算・UI 期�
   it('換算後に金額を手動編集すると換算ロック解除 (URL から refAmt が消える)', async () => {
     const user = userEvent.setup();
     render(<QrGenerator />);
-    await waitFor(() => screen.getByPlaceholderText('1,000'));
-    await user.type(screen.getByPlaceholderText('1,000'), '1000');
+    await waitFor(() => qrAmountInput());
+    await user.type(qrAmountInput(), '1000');
     await user.click(
       await screen.findByRole('button', { name: /USDC 建てで受取る/ }),
     );
-    const input = await screen.findByPlaceholderText('10.00');
+    const input = await findQrAmountInput('USDC');
     // URL はモーダル内。開いたまま amount を編集 (背後の input は操作可)。
     await openQrModal(user);
     await waitFor(() =>
@@ -2542,8 +2533,8 @@ describe('QrGenerator: 他トークン建てで受け取る (FX 換算・UI 期�
   it('据え置きモードでは convert ボタンは出ない', async () => {
     const user = userEvent.setup();
     render(<QrGenerator />);
-    await waitFor(() => screen.getByPlaceholderText('1,000'));
-    await user.type(screen.getByPlaceholderText('1,000'), '1000');
+    await waitFor(() => qrAmountInput());
+    await user.type(qrAmountInput(), '1000');
     expect(
       await screen.findByRole('button', { name: /USDC 建てで受取る/ }),
     ).toBeInTheDocument();
@@ -2556,18 +2547,16 @@ describe('QrGenerator: 他トークン建てで受け取る (FX 換算・UI 期�
   it('「元の JPYC 建てに戻す」で anchor (JPYC 1000) に復帰', async () => {
     const user = userEvent.setup();
     render(<QrGenerator />);
-    await waitFor(() => screen.getByPlaceholderText('1,000'));
-    await user.type(screen.getByPlaceholderText('1,000'), '1000');
+    await waitFor(() => qrAmountInput());
+    await user.type(qrAmountInput(), '1000');
     await user.click(
       await screen.findByRole('button', { name: /USDC 建てで受取る/ }),
     );
-    await screen.findByPlaceholderText('10.00');
+    await findQrAmountInput('USDC');
     await user.click(
       await screen.findByRole('button', { name: /元の JPYC 建てに戻す/ }),
     );
-    const input = (await screen.findByPlaceholderText(
-      '1,000',
-    )) as HTMLInputElement;
+    const input = await findQrAmountInput();
     // 表示は桁区切りつき (持つ値は 1000 のまま・URL 側の検査は別 test)。
     expect(input.value).toBe('1,000');
     expect(screen.queryByRole('button', { name: /再計算/ })).toBeNull();
@@ -2576,8 +2565,8 @@ describe('QrGenerator: 他トークン建てで受け取る (FX 換算・UI 期�
   it('USDC 建て換算後、cross-chain 受取の注記が出る', async () => {
     const user = userEvent.setup();
     render(<QrGenerator />);
-    await waitFor(() => screen.getByPlaceholderText('1,000'));
-    await user.type(screen.getByPlaceholderText('1,000'), '1000');
+    await waitFor(() => qrAmountInput());
+    await user.type(qrAmountInput(), '1000');
     await user.click(
       await screen.findByRole('button', { name: /USDC 建てで受取る/ }),
     );
@@ -2595,8 +2584,8 @@ describe('QrGenerator: 他トークン建てで受け取る (FX 換算・UI 期�
     });
     const user = userEvent.setup();
     render(<QrGenerator />);
-    await waitFor(() => screen.getByPlaceholderText('1,000'));
-    await user.type(screen.getByPlaceholderText('1,000'), '1000');
+    await waitFor(() => qrAmountInput());
+    await user.type(qrAmountInput(), '1000');
     expect(
       screen.queryByRole('button', { name: /USDC 建てで受取る/ }),
     ).toBeNull();
@@ -2606,19 +2595,17 @@ describe('QrGenerator: 他トークン建てで受け取る (FX 換算・UI 期�
   it('再計算ボタンで換算パスが再実行される (額は同レートで維持・panel 継続)', async () => {
     const user = userEvent.setup();
     render(<QrGenerator />);
-    await waitFor(() => screen.getByPlaceholderText('1,000'));
-    await user.type(screen.getByPlaceholderText('1,000'), '1000');
+    await waitFor(() => qrAmountInput());
+    await user.type(qrAmountInput(), '1000');
     await user.click(
       await screen.findByRole('button', { name: /USDC 建てで受取る/ }),
     );
-    const input = (await screen.findByPlaceholderText(
-      '10.00',
-    )) as HTMLInputElement;
+    const input = await findQrAmountInput('USDC');
     expect(input.value).toBe('6.666667');
     // 再計算 (同レート 150) → 換算パスが走り、額は維持・convert パネルは継続
     await user.click(await screen.findByRole('button', { name: /再計算/ }));
     expect(
-      (screen.getByPlaceholderText('10.00') as HTMLInputElement).value,
+      (qrAmountInput('USDC')).value,
     ).toBe('6.666667');
     expect(
       screen.getByRole('button', { name: /元の JPYC 建てに戻す/ }),
@@ -2631,7 +2618,7 @@ describe('QrGenerator: 他トークン建てで受け取る (FX 換算・UI 期�
       vi.setSystemTime(new Date(2026, 5, 3, 12, 0, 0).getTime());
       const user = userEvent.setup();
       render(<QrGenerator />);
-      await user.type(screen.getByPlaceholderText('1,000'), '1000');
+      await user.type(qrAmountInput(), '1000');
       await user.click(
         screen.getByRole('button', { name: /USDC 建てで受取る/ }),
       );
@@ -2667,8 +2654,8 @@ describe('QrGenerator — 会計用任意項目 (記帳補助)', () => {
       }),
     );
     render(<QrGenerator />);
-    await waitFor(() => screen.getByPlaceholderText('1,000'));
-    await user.type(screen.getByPlaceholderText('1,000'), '500');
+    await waitFor(() => qrAmountInput());
+    await user.type(qrAmountInput(), '500');
     // payUrl はモーダル内。
     await openQrModal(user);
     await waitFor(() =>
@@ -2687,8 +2674,8 @@ describe('QrGenerator — 会計用任意項目 (記帳補助)', () => {
       JSON.stringify({ receiver: VALID, token: 'jpyc', chain: 'polygon' }),
     );
     render(<QrGenerator />);
-    await waitFor(() => screen.getByPlaceholderText('1,000'));
-    await user.type(screen.getByPlaceholderText('1,000'), '500');
+    await waitFor(() => qrAmountInput());
+    await user.type(qrAmountInput(), '500');
     // payUrl はモーダル内。
     await openQrModal(user);
     await waitFor(() =>
@@ -2714,7 +2701,7 @@ describe('QrGenerator: モバイル下部バー (請求金額 + QR ボタン重�
     );
     const user = userEvent.setup();
     render(<QrGenerator />);
-    await user.type(screen.getByPlaceholderText('1,000'), '12345');
+    await user.type(qrAmountInput(), '12345');
 
     // CTA は PC の会計パネル (lg だけ) と下部バー (モバイル) の 2 か所。
     const btns = screen.getAllByRole('button', { name: /QRコードを表示する/ });
@@ -2773,7 +2760,7 @@ describe('QrGenerator: 値引き (任意)', () => {
   it('使わない会計には付けない: 「＋ 値引きを追加」の 1 行だけ・URL に disc なし', async () => {
     const user = userEvent.setup();
     render(<QrGenerator />);
-    await user.type(await screen.findByPlaceholderText('1,000'), '1000');
+    await user.type(await findQrAmountInput(), '1000');
     expect(screen.getByRole('button', { name: '＋ 値引きを追加' })).toBeInTheDocument();
     await openQrModal(user);
     await waitFor(() => expect(payUrlText()).toContain('amount=1000'));
@@ -2783,7 +2770,7 @@ describe('QrGenerator: 値引き (任意)', () => {
   it('金額指定: 1,000 から 20 引き → 請求金額 980・QR は amount=980&disc=20', async () => {
     const user = userEvent.setup();
     render(<QrGenerator />);
-    await user.type(await screen.findByPlaceholderText('1,000'), '1000');
+    await user.type(await findQrAmountInput(), '1000');
     await user.click(screen.getByRole('button', { name: '＋ 値引きを追加' }));
     await user.type(screen.getByLabelText('値引きの金額'), '20');
     // 入力欄は「値引き前の金額」・値引きの下に値引き後の請求金額。
@@ -2798,7 +2785,7 @@ describe('QrGenerator: 値引き (任意)', () => {
   it('割引率: 1,234 の 2% → 24 (円未満切り捨て) → amount=1210&disc=24', async () => {
     const user = userEvent.setup();
     render(<QrGenerator />);
-    await user.type(await screen.findByPlaceholderText('1,000'), '1234');
+    await user.type(await findQrAmountInput(), '1234');
     await user.click(screen.getByRole('button', { name: '＋ 値引きを追加' }));
     await user.click(screen.getByRole('button', { name: '割引率' }));
     await user.type(screen.getByLabelText('割引率 (%)'), '2');
@@ -2810,7 +2797,7 @@ describe('QrGenerator: 値引き (任意)', () => {
   it('通常決済の互換 QR (EIP-681・ウォレットが直接読む) も値引き後の額 (980 JPYC)', async () => {
     const user = userEvent.setup();
     render(<QrGenerator />);
-    await user.type(await screen.findByPlaceholderText('1,000'), '1000');
+    await user.type(await findQrAmountInput(), '1000');
     await user.click(screen.getByRole('button', { name: '＋ 値引きを追加' }));
     await user.type(screen.getByLabelText('値引きの金額'), '20');
     await pickInSettings(user, /通常決済（ガス代は顧客負担）/);
@@ -2822,7 +2809,7 @@ describe('QrGenerator: 値引き (任意)', () => {
   it('値引き前の金額以上の値引きは QR を出さず、理由を出す', async () => {
     const user = userEvent.setup();
     render(<QrGenerator />);
-    await user.type(await screen.findByPlaceholderText('1,000'), '1000');
+    await user.type(await findQrAmountInput(), '1000');
     await user.click(screen.getByRole('button', { name: '＋ 値引きを追加' }));
     await user.type(screen.getByLabelText('値引きの金額'), '1000');
     screen.getAllByRole('button', { name: /QRコードを表示する/ }).forEach((b) => expect(b).toBeDisabled());
@@ -2834,7 +2821,7 @@ describe('QrGenerator: 値引き (任意)', () => {
   it('金額を消したら (次の会計) 値引きを外す', async () => {
     const user = userEvent.setup();
     render(<QrGenerator />);
-    const input = await screen.findByPlaceholderText('1,000');
+    const input = await findQrAmountInput();
     await user.type(input, '1000');
     await user.click(screen.getByRole('button', { name: '＋ 値引きを追加' }));
     await user.type(screen.getByLabelText('値引きの金額'), '20');
@@ -2849,7 +2836,7 @@ describe('QrGenerator: 値引き (任意)', () => {
   it('通貨を変えたら値引きを外す (20 JPYC 引きが 20 USDC 引きにならない)', async () => {
     const user = userEvent.setup();
     render(<QrGenerator />);
-    await user.type(await screen.findByPlaceholderText('1,000'), '1000');
+    await user.type(await findQrAmountInput(), '1000');
     await user.click(screen.getByRole('button', { name: '＋ 値引きを追加' }));
     await user.type(screen.getByLabelText('値引きの金額'), '20');
     await pickInSettings(user, /^USDC$/);
@@ -2860,7 +2847,7 @@ describe('QrGenerator: 値引き (任意)', () => {
   it('値引き中は為替換算を出さない・金額なし (据え置き) に切り替えると値引きを外す', async () => {
     const user = userEvent.setup();
     render(<QrGenerator />);
-    await user.type(await screen.findByPlaceholderText('1,000'), '1000');
+    await user.type(await findQrAmountInput(), '1000');
     expect(await screen.findByRole('button', { name: /USDC 建てで受取る/ })).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: '＋ 値引きを追加' }));
     await user.type(screen.getByLabelText('値引きの金額'), '20');
