@@ -22,7 +22,6 @@ export function ShopSummaryRow({
   payTone,
   onOpenSettings,
   labels,
-  settingsClassName,
 }: {
   storeName: string;
   receiver: Address | null;
@@ -37,8 +36,6 @@ export function ShopSummaryRow({
   payTone: 'gasless' | 'standard';
   onOpenSettings: () => void;
   labels: { settings: string; noStoreName: string; noReceiver: string };
-  /** 「設定」ボタンに足す class。 */
-  settingsClassName?: string;
 }) {
   const name = storeName.trim();
   return (
@@ -79,10 +76,11 @@ export function ShopSummaryRow({
           </span>
         </p>
       </div>
+      {/* 行の高さを増やさず、押せる範囲だけを 44px 以上に広げる (after の透明な面)。 */}
       <button
         type="button"
         onClick={onOpenSettings}
-        className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:border-brand hover:text-brand-dark${settingsClassName ? ` ${settingsClassName}` : ''}`}
+        className="relative inline-flex shrink-0 items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:border-brand hover:text-brand-dark after:absolute after:-inset-x-1 after:-inset-y-2 after:content-['']"
       >
         <Settings2 className="h-3.5 w-3.5" aria-hidden />
         {labels.settings}

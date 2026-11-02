@@ -195,20 +195,20 @@ describe('HandleProfileBuilder pre-split pinning (F-8 PR-19)', () => {
     expect({ ja, en: hashDom(connected.container) }).toMatchInlineSnapshot(`
       {
         "en": {
-          "all": "53671e72296e91928efb66a13e05f40e45496117398b05b8ac886a33ddf32094",
+          "all": "11f43c1b17198e9f09618adc1b0f3324f9f0351c625bc462e779247bff7146f4",
           "parts": [
             "div 0e1510444f57 Your page",
-            "section e5003c3794d2 ReceivingSetting",
+            "section 8f735515e140 ReceivingSetting",
             "section 36f50f952efb ProfileDisplay n",
             "aside 75839f06f9ec Preview@Choose a",
             "div c4770e3ba873 bar",
           ],
         },
         "ja": {
-          "all": "f4e58a0a26d64030a56b5d084e24199400125783b79ece1de2a1d7bde40ec1b0",
+          "all": "c7c1b787925263bc9eea51e9cdea7955ae39d8504b3fc9435a661a7377fcc28d",
           "parts": [
             "div 346cda5c9257 あなたのページ",
-            "section 6de4a6114b18 受け取り設定受取先 (全方法 共",
+            "section 6cf2cc37d6a5 受け取り設定受取先 (全方法 共",
             "section 3bb42c07083e プロフィール表示名ひとこと (b",
             "aside 85ad6e83cba0 プレビュー@通貨・チェーンを選ぶ",
             "div c4770e3ba873 bar",
@@ -288,11 +288,11 @@ describe('HandleProfileBuilder pre-split pinning (F-8 PR-19)', () => {
     `);
     expect(hashDom(view.container)).toMatchInlineSnapshot(`
       {
-        "all": "a885efbe09c7a101254d3d6f3fdd702acb1ef3be9cb449ac885baba9db948a30",
+        "all": "1dc524a85909d3c8e1b4ff23690b5e7a6c9549b7871e575622f992e83a1d0eda",
         "parts": [
           "div e572fc673e59 Alice@handleプレビュ",
           "div 4d961ae8963d あなたのページ",
-          "section e33c93e48f30 受け取り設定0x52d4…cA8",
+          "section fe6a46953295 受け取り設定0x52d4…cA8",
           "section 88542610f02a プロフィール表示名ひとこと (b",
           "aside 86a5eeafc144 プレビューAliceHello ",
           "div c4770e3ba873 bar",
@@ -319,11 +319,11 @@ describe('HandleProfileBuilder pre-split pinning (F-8 PR-19)', () => {
     expect({ arcOn, arcOff: hashDom(inactive.container) }).toMatchInlineSnapshot(`
       {
         "arcOff": {
-          "all": "366c7749629ecf07eabb9fc7d9c1836d4a6bc70bae11fec0ba6d174d45423e87",
+          "all": "379a2855775d50c6f06706aa3a8a34fa9a8f08ac8cbb9e861850bf46c3f0288e",
           "parts": [
             "div 9e9d4e13728d H@handleプレビューへ",
             "div 964b21187ca4 あなたのページ",
-            "section abb6c7e86add 受け取り設定0x52d4…cA8",
+            "section 20c321a66e17 受け取り設定0x52d4…cA8",
             "div 89f0dd2b1244 受け取りの設定完了受け取り受取先",
             "section 3bb42c07083e プロフィール表示名ひとこと (b",
             "aside 6b9c8d3be6c2 プレビュー@無効中（点灯待ち）通",
@@ -331,11 +331,11 @@ describe('HandleProfileBuilder pre-split pinning (F-8 PR-19)', () => {
           ],
         },
         "arcOn": {
-          "all": "1e02cc42643bdb2064a3ed928c0adf180ca1e550fde17cc15ac34afc7e12b1fa",
+          "all": "3613d06dc9d0fff206fccd08c3798ab9dc3bb41b199a099b3adadb71903683b9",
           "parts": [
             "div 9e9d4e13728d H@handleプレビューへ",
             "div bbd7c17af677 あなたのページ",
-            "section 8da7cfb22d4b 受け取り設定0x52d4…cA8",
+            "section 6189a77df581 受け取り設定0x52d4…cA8",
             "div 9d36e6033341 受け取りの設定完了受け取り受取先",
             "section 3bb42c07083e プロフィール表示名ひとこと (b",
             "aside 245f5922d1c5 プレビュー@通貨・チェーンを選ぶ",
@@ -371,55 +371,55 @@ describe('HandleProfileBuilder pre-split pinning (F-8 PR-19)', () => {
     expect({ editing, dirty, copied, qr, published, stopped }).toMatchInlineSnapshot(`
       {
         "copied": {
-          "all": "695d2f2ff2165fcca6a9ea2122b540a27b24b422ed9954a481cfbd24902229cc",
+          "all": "0a1848a9cb7a3efe61797850138549e56797060351fd99da575449b3c9f24941",
           "parts": [
             "div 8af3385c7fc6 DDraft Alice@ali",
             "div 025d4c8b1f90 あなたのページ公開中 @alic",
-            "section e69acd147450 受け取り設定0x52d4…cA8",
+            "section bf96b76a5291 受け取り設定0x52d4…cA8",
             "section 38023d5bdfe6 プロフィール表示名ひとこと (b",
             "aside 25dd4cee569a プレビューDDraft Alic",
             "div c4770e3ba873 bar",
           ],
         },
         "dirty": {
-          "all": "8dfd0d349e17f5669b54ec95cc121f06acf1995546cd31e5bfb312f0c09b2e55",
+          "all": "43f0c17cd93db7bfd1452d98ecf69c212f6f030285ed62fcd1652ef880f234c3",
           "parts": [
             "div 8af3385c7fc6 DDraft Alice@ali",
             "div 025d4c8b1f90 あなたのページ公開中 @alic",
-            "section e69acd147450 受け取り設定0x52d4…cA8",
+            "section bf96b76a5291 受け取り設定0x52d4…cA8",
             "section 38023d5bdfe6 プロフィール表示名ひとこと (b",
             "aside 0cb2e3a41b82 プレビューDDraft Alic",
             "div c4770e3ba873 bar",
           ],
         },
         "editing": {
-          "all": "6bc05e405f314b9e596e2490d16af13c607345318c9dc7827af753f4fa3c68a5",
+          "all": "c56bd63241e4ba7b89220a90e17fcf4eaadba7d8fee6a0930b744237838c5b35",
           "parts": [
             "div 3ac97aa67a71 PPublished Alice",
             "div 51ff661a267b あなたのページ公開中 @alic",
-            "section e69acd147450 受け取り設定0x52d4…cA8",
+            "section bf96b76a5291 受け取り設定0x52d4…cA8",
             "section fab4d285c5b6 プロフィール表示名ひとこと (b",
             "aside 588577c98da1 プレビューPPublished ",
             "div c4770e3ba873 bar",
           ],
         },
         "published": {
-          "all": "44a2a0225b64fb0a0bd8125cc540ac00d229b46b8cd07b2584d9ebe7159b7952",
+          "all": "fe5033ac9d5fd87c091c70292979e7600a97eacb882477be4caebea2bdef08eb",
           "parts": [
             "div 8af3385c7fc6 DDraft Alice@ali",
             "div 7c3739761c38 あなたのページ公開中 @alic",
-            "section e69acd147450 受け取り設定0x52d4…cA8",
+            "section bf96b76a5291 受け取り設定0x52d4…cA8",
             "section 38023d5bdfe6 プロフィール表示名ひとこと (b",
             "aside 4888aa6b5350 プレビューDDraft Alic",
             "div c4770e3ba873 bar",
           ],
         },
         "qr": {
-          "all": "69968482498e49a11528a3dce25a223b9e1671391bdf309810c71d4b8ef89702",
+          "all": "0f1aa536d90134f2fdfeea6636011a3811b57333ab006dc3428ea8f2a0059371",
           "parts": [
             "div 8af3385c7fc6 DDraft Alice@ali",
             "div 025d4c8b1f90 あなたのページ公開中 @alic",
-            "section e69acd147450 受け取り設定0x52d4…cA8",
+            "section bf96b76a5291 受け取り設定0x52d4…cA8",
             "section 38023d5bdfe6 プロフィール表示名ひとこと (b",
             "aside 25dd4cee569a プレビューDDraft Alic",
             "div c4770e3ba873 bar",
@@ -427,11 +427,11 @@ describe('HandleProfileBuilder pre-split pinning (F-8 PR-19)', () => {
           ],
         },
         "stopped": {
-          "all": "dcdf895ac406a814ac00e984c4cf2ed731a97645fda90c97e30188e65750473a",
+          "all": "b1572d989d84bc6e44779b69844b1cd375497dcafb22cd521c0637f88a7ddc39",
           "parts": [
             "div a51e0d185cc4 編編集前の下書き@handleプ",
             "div 346cda5c9257 あなたのページ",
-            "section 6de4a6114b18 受け取り設定受取先 (全方法 共",
+            "section 6cf2cc37d6a5 受け取り設定受取先 (全方法 共",
             "section c2d5243d01e6 プロフィール表示名ひとこと (b",
             "aside 5772758a16b8 プレビュー編編集前の下書き未公開",
             "div c4770e3ba873 bar",

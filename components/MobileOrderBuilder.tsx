@@ -299,10 +299,11 @@ export function MobileOrderBuilder({
             headingId="mobile-order-receive-heading"
             icon={Wallet}
             action={
+              // 行の高さを増やさず、押せる範囲だけを 44px 以上に広げる (after の透明な面)。
               <button
                 type="button"
                 onClick={() => setReceiveOpen(true)}
-                className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:border-brand hover:text-brand-dark"
+                className="relative inline-flex shrink-0 items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:border-brand hover:text-brand-dark after:absolute after:-inset-x-1 after:-inset-y-2 after:content-['']"
               >
                 <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden />
                 {t('receiveEdit')}
