@@ -187,10 +187,9 @@ export function OrderLinkBuilder() {
   const markSent = (url: string, via: SentLink['via']) => {
     setSettings((current) => ({ ...current, lastOrderId: orderId }));
     setCopyFailedUrl(null);
-    // 完了を待つ間に書き換えられたら、今の入力に前の注文の状態を重ねない。番号は使ったものとして残す。
-    if (currentUrl.current !== url) return;
-    setOrderIdInput(orderId);
     setSent({ url, orderId, via });
+    // 完了を待つ間に書き換えられたら、今の入力を前の注文の番号へ巻き戻さない。
+    if (currentUrl.current === url) setOrderIdInput(orderId);
   };
   const copyLink = async () => {
     if (!result.ok) return;
@@ -240,6 +239,7 @@ export function OrderLinkBuilder() {
   const advanceNumber = () => {
     setOrderIdInput(null);
     setSent(null);
+    setModeOverride(null);
     if (!autoOrderId) orderIdRef.current?.focus();
   };
 

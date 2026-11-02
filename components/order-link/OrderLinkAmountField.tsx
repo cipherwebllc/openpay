@@ -53,7 +53,7 @@ export function OrderLinkAmountField({
     // 負の数を数字だけにすると別の金額になる。そのまま残して、欄の誤りとして止める。
     if (/[-−－]/.test(event.target.value)) {
       caretLeft.current = null;
-      onChange(event.target.value.trim());
+      onChange(event.target.value.replaceAll(',', '').trim());
       return;
     }
     const native = event.nativeEvent as InputEvent;

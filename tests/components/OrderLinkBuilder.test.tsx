@@ -235,6 +235,41 @@ describe('OrderLinkBuilder', () => {
     expect(screen.queryByText(/は使用済みの番号です/)).toBeNull();
   });
 
+  it('番号を進めたら、この注文だけの通常決済も戻す', async () => {
+    saved();
+    stubClipboard();
+    render(<OrderLinkBuilder />);
+    await screen.findByRole('button', { name: '設定' });
+    fireEvent.change(screen.getByLabelText('商品名'), { target: { value: '機材' } });
+    fireEvent.change(screen.getByLabelText('単価'), { target: { value: '60000' } });
+    fireEvent.click(await screen.findByRole('button', { name: 'この注文だけ通常決済にする' }));
+    await screen.findByText('ウォレットに 60,000 JPYC 届いてから発送');
+    await copyLink();
+    fireEvent.change(screen.getByLabelText('単価'), { target: { value: '3000' } });
+    fireEvent.click(await screen.findByRole('button', { name: '番号を進める' }));
+    await waitFor(() => expect(screen.getByLabelText('注文番号')).toHaveValue('A-002'));
+    const link = (await screen.findByRole('link', { name: '開いて確かめる' })) as HTMLAnchorElement;
+    expect(new URL(link.href).searchParams.get('mode')).not.toBe('standard');
+  });
+
+  it('コピーの完了を待つ間に内容を変えても、番号が使用済みだと知らせる', async () => {
+    saved();
+    let finish: () => void = () => {};
+    stubClipboard(vi.fn(() => new Promise<void>((resolve) => { finish = resolve; })));
+    render(<OrderLinkBuilder />);
+    await screen.findByRole('button', { name: '設定' });
+    fireEvent.change(screen.getByLabelText('注文番号'), { target: { value: 'B-100' } });
+    fillItem();
+    await screen.findByText('受付番号 #B-100');
+    fireEvent.click(screen.getAllByRole('button', { name: 'リンクをコピー' })[0]);
+    fireEvent.change(screen.getByLabelText('単価'), { target: { value: '4000' } });
+    await act(async () => {
+      finish();
+    });
+    expect(await screen.findByText('B-100 は使用済みの番号です')).toBeInTheDocument();
+    expect(screen.getByLabelText('注文番号')).toHaveValue('B-100');
+  });
+
   it('番号を自分で変えたら使用済みの案内を出さない', async () => {
     saved();
     stubClipboard();
@@ -499,6 +534,17 @@ describe('OrderLinkBuilder', () => {
     expect(screen.getByLabelText('数量')).toHaveValue('2');
   });
 
+  it('全角の数字以外は別の数字に変えない', async () => {
+    saved();
+    render(<OrderLinkBuilder />);
+    await screen.findByRole('button', { name: '設定' });
+    fireEvent.change(screen.getByLabelText('商品名'), { target: { value: 'Tシャツ M' } });
+    fireEvent.change(screen.getByLabelText('単価'), { target: { value: '1000' } });
+    fireEvent.change(screen.getByLabelText('数量'), { target: { value: '1²' } });
+    expect(screen.getByLabelText('数量')).toHaveValue('1²');
+    expect(screen.queryByRole('link', { name: '開いて確かめる' })).toBeNull();
+  });
+
   it('負の単価を正の金額に変えず、欄の誤りとして止める', async () => {
     saved();
     render(<OrderLinkBuilder />);
@@ -508,6 +554,16 @@ describe('OrderLinkBuilder', () => {
     expect(screen.getByLabelText('単価')).toHaveValue('-100');
     expect(screen.getByLabelText('単価')).toHaveAttribute('aria-invalid', 'true');
     expect(screen.queryByRole('link', { name: '開いて確かめる' })).toBeNull();
+  });
+
+  it('負の金額を編集しても桁区切りが重ならない', async () => {
+    saved();
+    render(<OrderLinkBuilder />);
+    await screen.findByRole('button', { name: '設定' });
+    fireEvent.change(screen.getByLabelText('単価'), { target: { value: '-1000' } });
+    expect(screen.getByLabelText('単価')).toHaveValue('-1,000');
+    fireEvent.change(screen.getByLabelText('単価'), { target: { value: '-1,0005' } });
+    expect(screen.getByLabelText('単価')).toHaveValue('-10,005');
   });
 
   it('負の送料を正の金額に変えない', async () => {

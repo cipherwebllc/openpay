@@ -16,6 +16,10 @@ import {
 import { CHECKOUT_QTY_MAX } from '@/lib/url/checkout';
 import { OrderLinkAmountField, ORDER_LINK_INPUT_CLASS, invalidClass } from './OrderLinkAmountField';
 
+function halfWidthDigits(value: string): string {
+  return value.replace(/[０-９]/g, (digit) => String.fromCharCode(digit.charCodeAt(0) - 0xfee0));
+}
+
 export const OrderLinkLineRow = forwardRef<
   HTMLInputElement,
   {
@@ -90,7 +94,7 @@ export const OrderLinkLineRow = forwardRef<
             inputMode="numeric"
             aria-invalid={issues.includes('qty') || undefined}
             // 数字以外を消すと 1.5 が 15 になる。全角の数字だけ直し、残りは欄の誤りとして止める。
-            onChange={(event) => onChange({ qty: event.target.value.normalize('NFKC').trim() })}
+            onChange={(event) => onChange({ qty: halfWidthDigits(event.target.value).trim() })}
             className={`h-11 w-9 bg-transparent text-center text-base font-semibold tabular-nums text-slate-900 focus:outline-none focus:ring-2 focus:ring-brand/30 ${
               issues.includes('qty') ? 'text-rose-700' : ''
             }`}
