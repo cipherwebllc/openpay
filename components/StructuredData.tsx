@@ -9,6 +9,10 @@ import { LANDING_FAQ } from '@/lib/landingFaq';
 
 export const SITE_URL = 'https://open-pay.jp';
 
+// FAQ の回答のリンクのタグ (LandingFaq と同じ名前) は、構造化データでは中身の文字だけにする。
+const plainTag = (chunks: string) => chunks;
+const FAQ_PLAIN_TAGS = { jpycEx: plainTag, create: plainTag, pricing: plainTag, guide: plainTag };
+
 // <script> 内 JSON の `<` を < にエスケープ。将来 messages の文言に
 // "</script>" 相当が紛れても script 文脈脱出 (XSS) に波及させないための防御
 // (JSON.stringify は < を escape しない・Next.js 本体と同じ手当て)。
@@ -55,8 +59,8 @@ export async function StructuredData() {
       name: landing(q),
       acceptedAnswer: {
         '@type': 'Answer',
-        // 表示 (LandingFaq) と同じ値で埋める。リンクのタグ (faqA4 の <jpycEx>・<create>) は中身の文字だけにする。
-        text: landing.markup(a, { ...LANDING_PAYMENT_FEE_VALUES, jpycEx: (chunks) => chunks, create: (chunks) => chunks }),
+        // 表示 (LandingFaq) と同じ値で埋める。
+        text: landing.markup(a, { ...LANDING_PAYMENT_FEE_VALUES, ...FAQ_PLAIN_TAGS }),
       },
     })),
   };

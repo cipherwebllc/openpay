@@ -12,6 +12,8 @@ export const LANDING_FAQ = [
   // B2B 請求 (開発費/保守費) の利用例 — Mi&T の法人 JPYC 受付 (2026-07-27) を受けた
   // 訴求拡張 (user 承認 2026-07-30)。新機能の約束はせず既存の決済リンクの説明のみ。
   { q: 'faqQ8', a: 'faqA8' },
+  // JPYC 払いの割引はトップの訴求にせず、加盟店規約の注意があるガイドへ送る (2026-11-02 user 承認)。
+  { q: 'faqQ9', a: 'faqA9' },
 ] as const;
 
 export type LandingFaqAnswerKey = (typeof LANDING_FAQ)[number]['a'];

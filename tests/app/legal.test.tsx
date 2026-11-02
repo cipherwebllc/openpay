@@ -1577,7 +1577,6 @@ describe('three disclosed tip fee models', () => {
     const landing = createTranslator({ locale, messages: m, namespace: 'Landing', onError: (error) => { throw error; } });
     const surfaces = [
       ['トップのチップカード', landing('supportFeeTipBody', LANDING_PAYMENT_FEE_VALUES)],
-      ['FAQ (faqA1)', m.Landing.faqA1],
       ['規約 第 5 条 (1)', m.Terms.article5.body.split('(2)')[0]],
       ['特商法 役務の対価', m.Tokutei.rows.price.value],
       ['免責 §7', m.Disclaimer.section7.body],

@@ -1,10 +1,12 @@
 // FAQ アコーディオン。<details> ベースで JS 不要 (Server Component)。
 //
-// faqA4 は t.rich() で 2 つの inline link を埋め込む:
+// 回答は t.rich() で inline link を埋め込む:
 //   - <jpycEx>: JPYC EX (https://jpyc.co.jp/・サイト全体で統一表記)
 //   - <create>: 受け取るページ (/[locale]/create)
+//   - <pricing>: 料金ページ (/[locale]/pricing・faqA1 の詳細の行き先)
+//   - <guide>: JPYC 払いの割引のガイド (/[locale]/guide/qr#jpyc-discount)
 // 「/create」path 直接表記は一般読み手に分かりにくいため、ラベル「受け取る」で
-// 内部 Link に置き換える。
+// 内部 Link に置き換える。タグを足したら StructuredData の FAQ_PLAIN_TAGS にも足す。
 
 import { LANDING_PAYMENT_FEE_VALUES } from '@/lib/legal';
 import type { ReactNode } from 'react';
@@ -14,35 +16,39 @@ import { ChevronDown } from 'lucide-react';
 import { LandingSectionHeader } from '@/components/LandingSectionHeader';
 import { LANDING_FAQ, type LandingFaqAnswerKey } from '@/lib/landingFaq';
 
+function FaqLink({ href, children }: { href: string; children: ReactNode }) {
+  return (
+    <Link
+      href={href}
+      prefetch={false}
+      className="font-medium text-brand underline underline-offset-2 hover:text-brand-dark"
+    >
+      {children}
+    </Link>
+  );
+}
+
 export async function LandingFaq() {
   const locale = await getLocale();
   const t = await getTranslations('Landing');
 
   function renderAnswer(key: LandingFaqAnswerKey): ReactNode {
-    if (key === 'faqA4') {
-      return t.rich(key, {
-        jpycEx: (chunks) => (
-          <a
-            href="https://jpyc.co.jp/"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="font-medium text-brand underline underline-offset-2 hover:text-brand-dark"
-          >
-            {chunks}
-          </a>
-        ),
-        create: (chunks) => (
-          <Link
-            href={`/${locale}/create`}
-            prefetch={false}
-            className="font-medium text-brand underline underline-offset-2 hover:text-brand-dark"
-          >
-            {chunks}
-          </Link>
-        ),
-      });
-    }
-    return t(key, LANDING_PAYMENT_FEE_VALUES);
+    return t.rich(key, {
+      ...LANDING_PAYMENT_FEE_VALUES,
+      jpycEx: (chunks) => (
+        <a
+          href="https://jpyc.co.jp/"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="font-medium text-brand underline underline-offset-2 hover:text-brand-dark"
+        >
+          {chunks}
+        </a>
+      ),
+      create: (chunks) => <FaqLink href={`/${locale}/create`}>{chunks}</FaqLink>,
+      pricing: (chunks) => <FaqLink href={`/${locale}/pricing`}>{chunks}</FaqLink>,
+      guide: (chunks) => <FaqLink href={`/${locale}/guide/qr#jpyc-discount`}>{chunks}</FaqLink>,
+    });
   }
 
   return (

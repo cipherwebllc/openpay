@@ -33,10 +33,18 @@ describe('StructuredData (FAQPage)', () => {
     expect(faqPage).toBeDefined();
     const structured = faqPage!.mainEntity.map((e) => ({ q: e.name, a: e.acceptedAnswer.text }));
     expect(structured).toEqual(visible);
-    expect(structured).toHaveLength(7);
+    expect(structured).toHaveLength(8);
     for (const { q, a } of structured) {
       // 穴あきの料率 ({recoverPercent} など) や生のタグ (<jpycEx> など) を検索エンジン・AI に渡さない。
       expect(`${q} ${a}`).not.toMatch(/[{}<>]/);
     }
+  });
+
+  it.each(['ja', 'en'] as const)('%s: 短くした回答から、料金ページと割引のガイドへ移動できる', async (locale) => {
+    current.locale = locale;
+    const { container } = render(await LandingFaq());
+    const hrefs = [...container.querySelectorAll('a')].map((a) => a.getAttribute('href'));
+    expect(hrefs).toContain(`/${locale}/pricing`);
+    expect(hrefs).toContain(`/${locale}/guide/qr#jpyc-discount`);
   });
 });
