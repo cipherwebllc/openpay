@@ -133,7 +133,7 @@ export function LinksGroup({
                         next[i] = { ...l, emoji: e.target.value };
                         update({ links: next });
                       }}
-                      className="w-full rounded-lg border border-slate-300 bg-white px-2 py-2 text-center text-sm focus:border-brand focus:outline-none"
+                      className="h-11 w-full rounded-lg border border-slate-300 bg-white px-2 text-center text-base placeholder:text-slate-500 focus:border-brand focus:outline-none sm:text-sm"
                     />
                   </label>
                   <label className="min-w-[10rem] flex-[2]">

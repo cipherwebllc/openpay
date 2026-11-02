@@ -7,7 +7,7 @@ import { Settings2 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { OptionalGroup } from '@/components/OptionalGroup';
 import type { HandleProfileDraft } from '@/hooks/useHandleProfileDraft';
-import { Field, inputClass, type DraftUpdate } from './fields';
+import { Field, inputClass, textareaClass, type DraftUpdate } from './fields';
 
 export function AdvancedGroup({
   draft,
@@ -36,7 +36,7 @@ export function AdvancedGroup({
               placeholder={tt(`${field}Placeholder`)}
               maxLength={200}
               rows={2}
-              className={inputClass}
+              className={textareaClass}
             />
           </Field>
         ))}

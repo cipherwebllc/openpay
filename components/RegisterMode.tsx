@@ -916,6 +916,7 @@ function RegisterModeContent({
                 autofill={autofill}
                 handleResolved={ignoreResolved}
                 bare
+                labelledBy="register-receiver-inline-heading"
               />
             </section>
           )}

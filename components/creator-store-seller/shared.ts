@@ -102,7 +102,7 @@ export type ProductDetailResponse = {
 };
 
 export const inputClass =
-  'mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/15 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400';
+  'mt-1 min-h-11 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-base placeholder:text-slate-500 focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/15 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400 sm:text-sm';
 
 // 表示部品は親 (controller) が持つ mutation の状態を受け取るだけで、自前の mutation を作らない。
 export type MutationView<Variables> = {

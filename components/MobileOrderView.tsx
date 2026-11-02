@@ -893,7 +893,7 @@ export function MobileOrderView({
             maxLength={ORDER_MEMO_MAX}
             rows={3}
             placeholder={t('customerMemoPlaceholder')}
-            className="mt-2 w-full resize-y rounded-xl border border-amber-200 bg-white px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:border-amber-400 focus:outline-none"
+            className="mt-2 w-full resize-y rounded-xl border border-amber-200 bg-white px-3 py-2 text-base text-slate-800 placeholder:text-slate-500 focus:border-amber-400 focus:outline-none sm:text-sm"
           />
         </div>
       ) : null}

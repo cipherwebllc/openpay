@@ -10,7 +10,7 @@ import { SectionCard } from '@/components/SectionCard';
 import { MAX_BIO_LEN } from '@/lib/handle';
 import { DEFAULT_PROFILE_DRAFT, type HandleProfileDraft } from '@/hooks/useHandleProfileDraft';
 import { AdvancedGroup } from './AdvancedGroup';
-import { Field, inputClass, type DraftUpdate, type RowReorder } from './fields';
+import { Field, inputClass, textareaClass, type DraftUpdate, type RowReorder } from './fields';
 import { LinksGroup } from './LinksGroup';
 import { LookGroup } from './LookGroup';
 import { SocialsGroup } from './SocialsGroup';
@@ -78,7 +78,7 @@ export function ProfileSection({
             maxLength={MAX_BIO_LEN}
             rows={2}
             onChange={(e) => update({ bio: e.target.value })}
-            className={inputClass}
+            className={textareaClass}
           />
         </Field>
         <Field label={t('avatarLabel')} hint={t('avatarHint')}>

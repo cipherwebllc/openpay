@@ -245,7 +245,7 @@ export function HistoryToolbar({
           onChange={(e) => set({ search: e.target.value })}
           placeholder={t('searchPlaceholder')}
           aria-label={t('searchLabel')}
-          className="w-full rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs focus:border-brand focus:outline-none sm:w-56"
+          className="h-11 w-full rounded-lg border border-slate-300 bg-white px-3 text-base placeholder:text-slate-500 focus:border-brand focus:outline-none sm:w-56 sm:text-sm"
         />
       </div>
 
@@ -269,7 +269,7 @@ export function HistoryToolbar({
             value={datePreset}
             onChange={(e) => applyPreset(e.target.value as DatePreset)}
             aria-label={t('dateRangeLabel')}
-            className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs focus:border-brand focus:outline-none"
+            className="h-11 rounded-lg border border-slate-300 bg-white px-2 text-base focus:border-brand focus:outline-none sm:text-sm"
           >
             <option value="all">{t('datePresetAll')}</option>
             <option value="this">{t('datePresetThisMonth')}</option>
@@ -286,7 +286,7 @@ export function HistoryToolbar({
                   setFromDay(e.target.value);
                   set(dayRangeToTsBounds(e.target.value || null, toDay || null));
                 }}
-                className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs"
+                className="h-11 rounded-lg border border-slate-300 bg-white px-2 text-base sm:text-sm"
               />
               <span className="text-xs text-slate-400">–</span>
               <input
@@ -297,7 +297,7 @@ export function HistoryToolbar({
                   setToDay(e.target.value);
                   set(dayRangeToTsBounds(fromDay || null, e.target.value || null));
                 }}
-                className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs"
+                className="h-11 rounded-lg border border-slate-300 bg-white px-2 text-base sm:text-sm"
               />
             </>
           )}
@@ -323,7 +323,7 @@ export function HistoryToolbar({
             onChange={(e) => setAcctFormat(e.target.value as AccountingFormat)}
             aria-label={t('accountingFormatLabel')}
             disabled={entries.length === 0 || feeLock}
-            className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs focus:border-brand focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+            className="h-11 rounded-lg border border-slate-300 bg-white px-2 text-base focus:border-brand focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 sm:text-sm"
           >
             <option value="freee">{t('accountingFormatFreee')}</option>
             <option value="yayoi">{t('accountingFormatYayoi')}</option>

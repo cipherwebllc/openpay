@@ -305,7 +305,7 @@ export function StorefrontPublishPanel({
                     value={effectiveSelected}
                     onChange={(e) => setSelected(e.target.value)}
                     aria-label={t('publishSelectHandle')}
-                    className="min-w-0 max-w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold"
+                    className="h-11 min-w-0 max-w-full rounded-lg border border-slate-300 bg-white px-3 text-base font-semibold sm:text-sm"
                   >
                     {handles.map((h) => (
                       <option key={h.handle} value={h.handle}>

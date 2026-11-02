@@ -16,6 +16,7 @@ export function AddressInput({
   onResolved,
   placeholder,
   id,
+  labelledBy,
   inputClassName,
 }: {
   value: string;
@@ -24,6 +25,8 @@ export function AddressInput({
   placeholder?: string;
   /** 見出しの <label htmlFor> と結び付けるときの id。 */
   id?: string;
+  /** 欄の見出しが label でなく節の見出し (h2 等) のときに、その要素の id を名前として結ぶ。 */
+  labelledBy?: string;
   /** 周りの欄と大きさをそろえるときに、既定の見た目を置き換える。 */
   inputClassName?: string;
 }) {
@@ -44,6 +47,7 @@ export function AddressInput({
     <div>
       <input
         id={id}
+        aria-labelledby={labelledBy}
         type="text"
         value={value}
         onChange={(e) => onChange(e.target.value.trim())}

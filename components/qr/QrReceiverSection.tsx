@@ -1,6 +1,6 @@
 'use client';
 
-import type { Dispatch, SetStateAction } from 'react';
+import { useId, type Dispatch, type SetStateAction } from 'react';
 import { useTranslations } from 'next-intl';
 import type { Address, Chain } from 'viem';
 import { env } from '@/lib/env';
@@ -19,7 +19,7 @@ import { addressExplorerUrl } from '@/lib/chains';
 import { isLikelyName } from '@/lib/nameDetection';
 
 const INPUT_CLASS =
-  'w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none';
+  'h-11 w-full rounded-lg border border-slate-300 bg-white px-3 text-base placeholder:text-slate-500 focus:border-brand focus:outline-none sm:text-sm';
 
 // 受取先の欄 (アドレス / 接続中のウォレット / 形式の誤り / Explorer)。受取先の解決と自動補完は QrGenerator が持ち、
 // ここは描画と入力の反映だけ。「お店の設定」シートと、受取先が未設定のときの会計画面の欄の両方で使う。
@@ -32,6 +32,7 @@ export function QrReceiverFields({
   autofill,
   handleResolved,
   bare = false,
+  labelledBy,
 }: {
   settings: QrSettings;
   deployment: TokenDeployment;
@@ -42,13 +43,18 @@ export function QrReceiverFields({
   handleResolved: (addr: Address | null) => void;
   /** 欄の見出しを出さない (会計画面の「受け取るウォレット」の節は見出しが既にある)。 */
   bare?: boolean;
+  /** bare のとき、欄の名前にする節の見出しの id (読み上げで欄の名前が placeholder だけにならないように)。 */
+  labelledBy?: string;
 }) {
   const t = useTranslations('QrGenerator');
   const tFee = useTranslations('UsageFee');
+  const inputId = useId();
   // 中身は同じ要素の並びのまま、外枠だけ切り替える (描画のたびに部品を作り直さない = 入力中の focus を失わない)。
   const content = (
     <>
       <AddressInput
+        id={bare ? undefined : inputId}
+        labelledBy={bare ? labelledBy : undefined}
         value={settings.receiver}
         onChange={autofill.handleManualChange}
         onResolved={handleResolved}
@@ -90,7 +96,7 @@ export function QrReceiverFields({
       )}
     </>
   );
-  return bare ? <div>{content}</div> : <Field label={t('receiverLabel')}>{content}</Field>;
+  return bare ? <div>{content}</div> : <Field label={t('receiverLabel')} htmlFor={inputId}>{content}</Field>;
 }
 
 // 店舗名 (お店の設定シート)。
@@ -102,9 +108,11 @@ export function QrStoreNameField({
   setSettings: Dispatch<SetStateAction<QrSettings>>;
 }) {
   const t = useTranslations('QrGenerator');
+  const inputId = useId();
   return (
-    <Field label={t('storeNameLabel')}>
+    <Field label={t('storeNameLabel')} htmlFor={inputId}>
       <input
+        id={inputId}
         type="text"
         value={settings.storeName}
         onChange={(e) =>
@@ -127,6 +135,7 @@ export function QrReceiptPosterFields({
   setSettings: Dispatch<SetStateAction<QrSettings>>;
 }) {
   const t = useTranslations('QrGenerator');
+  const posterNoteId = useId();
   return (
     <>
       <Field label={t('invoiceNoLabel')} htmlFor="qr-invoice-no">
@@ -145,8 +154,9 @@ export function QrReceiptPosterFields({
         <p className="mt-1 text-xs text-slate-500">{t('invoiceNoHint')}</p>
       </Field>
 
-      <Field label={t('posterNoteLabel')}>
+      <Field label={t('posterNoteLabel')} htmlFor={posterNoteId}>
         <input
+          id={posterNoteId}
           type="text"
           value={settings.posterNote}
           onChange={(e) =>

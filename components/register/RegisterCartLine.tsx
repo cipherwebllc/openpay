@@ -20,7 +20,7 @@ export type RegisterCartLineValue = {
 };
 
 const INPUT =
-  'w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none';
+  'h-11 w-full rounded-lg border border-slate-300 bg-white px-3 text-base placeholder:text-slate-500 focus:border-brand focus:outline-none sm:text-sm';
 
 export function RegisterCartLine({
   line,
@@ -81,7 +81,7 @@ export function RegisterCartLine({
               const n = Number(e.target.value.replace(/[^\d]/g, ''));
               onQty(Number.isFinite(n) && n >= 1 ? n : 1);
             }}
-            className="h-9 w-9 rounded-lg bg-transparent text-center text-base font-semibold tabular-nums text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand"
+            className="h-11 w-9 rounded-lg bg-transparent text-center text-base font-semibold tabular-nums text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand"
           />
           <button
             type="button"

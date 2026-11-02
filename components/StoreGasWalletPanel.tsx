@@ -454,7 +454,7 @@ export function StoreGasWalletPanel({
                     setWithdrawChainId(Number(e.target.value));
                     setConfirmingWithdraw(false);
                   }}
-                  className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs"
+                  className="h-11 rounded-lg border border-slate-300 bg-white px-2 text-base sm:text-sm"
                 >
                   {shown.map((c) => (
                     <option key={c.chainId} value={c.chainId}>
@@ -478,7 +478,7 @@ export function StoreGasWalletPanel({
                 spellCheck={false}
                 aria-invalid={inputRejected}
                 aria-describedby={inputRejected ? WITHDRAW_MESSAGE_ID : undefined}
-                className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-3 py-1.5 font-mono text-xs focus:border-brand focus:outline-none"
+                className="h-11 min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-3 font-mono text-base placeholder:text-slate-500 focus:border-brand focus:outline-none sm:text-sm"
               />
               {!confirmingWithdraw && (
                 <button

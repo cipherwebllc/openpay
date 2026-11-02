@@ -38,7 +38,7 @@ export function AgentConfigGenerator({ locale, c }: { locale: string; c: AgentPa
     generated.current = true;
     trackAgentEvent('agent_config_generate', { locale, client: nextClient, mode: nextMode });
   }
-  const fieldClass = 'mt-2 block w-full min-w-0 rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900';
+  const fieldClass = 'mt-2 block h-11 w-full min-w-0 rounded-xl border border-slate-300 bg-white px-3 text-base text-slate-900 placeholder:text-slate-500 sm:text-sm';
   return (
     <details className="min-w-0 rounded-2xl bg-white p-5 shadow-card ring-1 ring-slate-200/70 sm:p-6">
       <summary className="cursor-pointer rounded-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-600">

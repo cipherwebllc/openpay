@@ -373,7 +373,7 @@ export function StoreGasWalletTopUp({
                   setLocalError(null);
                   setResult(null);
                 }}
-                className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs disabled:opacity-50"
+                className="h-11 rounded-lg border border-slate-300 bg-white px-2 text-base disabled:opacity-50 sm:text-sm"
               >
                 {chains.map((c) => (
                   <option key={c.chainId} value={c.chainId}>
@@ -400,7 +400,7 @@ export function StoreGasWalletTopUp({
               }}
               autoComplete="off"
               aria-invalid={!!inputError}
-              className="mt-1 block w-32 rounded-lg border border-slate-300 bg-white px-3 py-1.5 font-mono text-xs focus:border-brand focus:outline-none disabled:opacity-50"
+              className="mt-1 block h-11 w-32 rounded-lg border border-slate-300 bg-white px-3 font-mono text-base placeholder:text-slate-500 focus:border-brand focus:outline-none disabled:opacity-50 sm:text-sm"
             />
             <p className="mt-1 text-slate-500">{t('topUpRange', { min: range.min, max: range.max, symbol })}</p>
           </div>

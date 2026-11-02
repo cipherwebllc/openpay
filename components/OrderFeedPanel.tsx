@@ -402,7 +402,7 @@ export function OrderFeedPanel({
                     value={liveSelected.handle}
                     onChange={(e) => setLiveSel(e.target.value)}
                     aria-label={tLive('heading')}
-                    className="mb-2 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+                    className="mb-2 h-11 w-full rounded-lg border border-slate-300 bg-white px-3 text-base sm:text-sm"
                   >
                     {liveHandles.map((hh) => (
                       <option key={hh.handle} value={hh.handle}>

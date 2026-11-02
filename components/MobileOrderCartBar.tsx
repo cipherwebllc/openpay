@@ -104,7 +104,7 @@ export function MobileOrderCartBar({
                   aria-required="true"
                   aria-invalid={needsTable && tableTouched}
                   onBlur={() => setTableTouched(true)}
-                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-[var(--mo-accent-text)] focus:outline-none"
+                  className="mt-1 h-11 w-full rounded-lg border border-slate-300 px-3 text-base placeholder:text-slate-500 focus:border-[var(--mo-accent-text)] focus:outline-none sm:text-sm"
                 />
                 {needsTable && (
                   <p
@@ -128,7 +128,7 @@ export function MobileOrderCartBar({
                     id="mo-pickup"
                     value={pickup.value ?? ''}
                     onChange={(e) => pickup.onChange(e.target.value ? Number(e.target.value) : null)}
-                    className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-[var(--mo-accent-text)] focus:outline-none"
+                    className="mt-1 h-11 w-full rounded-lg border border-slate-300 bg-white px-3 text-base focus:border-[var(--mo-accent-text)] focus:outline-none sm:text-sm"
                   >
                     <option value="">{t('pickupAsap')}</option>
                     {pickup.slots.map((ms) => (

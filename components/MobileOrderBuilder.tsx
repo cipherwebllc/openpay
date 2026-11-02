@@ -71,7 +71,7 @@ import { MIN_LEAD_MAX } from '@/lib/shopTime';
 import { InvoiceNumberInput } from './InvoiceNumberInput';
 
 const inputClass =
-  'w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none';
+  'h-11 w-full rounded-lg border border-slate-300 bg-white px-3 text-base placeholder:text-slate-500 focus:border-brand focus:outline-none sm:text-sm';
 
 function Field({
   label,
@@ -746,7 +746,7 @@ export function MobileOrderBuilder({
                           placeholder={draft.discountKind === 'percent' ? '5' : '50'}
                           aria-invalid={discountInvalid}
                           aria-describedby={discountInvalid ? 'mobile-order-discount-error' : undefined}
-                          className="w-28 rounded-lg border border-slate-300 bg-white px-3 py-2 text-right text-sm tabular-nums focus:border-brand focus:outline-none"
+                          className="h-11 w-28 rounded-lg border border-slate-300 bg-white px-3 text-right text-base tabular-nums placeholder:text-slate-500 focus:border-brand focus:outline-none sm:text-sm"
                         />
                         <span className="text-sm text-slate-600">{draft.discountKind === 'percent' ? '%' : 'JPYC'}</span>
                       </div>

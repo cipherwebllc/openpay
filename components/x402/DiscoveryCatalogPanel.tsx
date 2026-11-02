@@ -216,7 +216,7 @@ export function DiscoveryCatalogPanel({
                 value={catalogSearch}
                 onChange={(event) => setCatalogSearch(event.target.value)}
                 placeholder={t('catalogSearchPlaceholder')}
-                className="w-full rounded-xl border border-slate-200 bg-white py-2.5 pl-9 pr-3 text-sm text-slate-800 shadow-card placeholder:text-slate-400 focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/15"
+                className="h-11 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-3 text-base text-slate-800 shadow-card placeholder:text-slate-500 focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/15 sm:text-sm"
               />
             </label>
             {/* 通貨の切り替え 1 行 (すべて / JPYC / USDC)。種類 (api / data) の絞り込みは件数が少なく

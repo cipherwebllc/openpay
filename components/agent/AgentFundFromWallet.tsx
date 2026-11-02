@@ -160,7 +160,7 @@ export function AgentFundFromWallet({ locale, c, agentAddress, onSent, onBusyCha
             {/* 送れる上限の目安。読めないときは出さない (不足の判定は従来どおり送金前に行う)。 */}
             {balance.data !== undefined ? <p className="text-xs text-slate-500">{c.walletBalance.replace('{amount}', formatJpyc(balance.data))}</p> : null}
           </div>
-          <input id="agent-fund-amount" type="text" inputMode="decimal" className="mt-2 block w-full min-w-0 rounded-xl border border-slate-300 px-3 py-2 text-sm" placeholder={c.amountPlaceholder} value={value} disabled={locked} aria-invalid={Boolean(amountError)} aria-describedby={amountError ? 'agent-fund-amount-error' : undefined} onChange={(event) => setValue(event.target.value)} />
+          <input id="agent-fund-amount" type="text" inputMode="decimal" className="mt-2 block h-11 w-full min-w-0 rounded-xl border border-slate-300 px-3 text-base placeholder:text-slate-500 sm:text-sm" placeholder={c.amountPlaceholder} value={value} disabled={locked} aria-invalid={Boolean(amountError)} aria-describedby={amountError ? 'agent-fund-amount-error' : undefined} onChange={(event) => setValue(event.target.value)} />
           <div className="mt-2 flex flex-wrap gap-2">
             {QUICK_AMOUNTS.map((preset) => <button key={preset} type="button" disabled={locked} aria-pressed={validAmount && amount === parseUnits(preset, deployment.decimals)} className={`min-h-9 rounded-full px-3 py-1.5 text-xs font-medium tabular-nums disabled:opacity-50 ${validAmount && amount === parseUnits(preset, deployment.decimals) ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700'}`} onClick={() => setValue(preset)}>{Number(preset).toLocaleString('en-US')} JPYC</button>)}
           </div>

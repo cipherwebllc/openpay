@@ -51,7 +51,11 @@ export function FieldGroup({
   );
 }
 
+// 入力欄の見た目 (受取欄の AddressInput と同じ基準)。高さ 44px・スマホは 16px (16px 未満だと iOS が入力時に
+// 画面を拡大する)・placeholder は白地で AA。複数行の欄は高さを固定しない textareaClass を使う。
 export const inputClass =
-  'w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none';
+  'h-11 w-full rounded-lg border border-slate-300 bg-white px-3 text-base placeholder:text-slate-500 focus:border-brand focus:outline-none sm:text-sm';
+export const textareaClass =
+  'w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-base placeholder:text-slate-500 focus:border-brand focus:outline-none sm:text-sm';
 export const linkFieldLabelClass =
   'mb-1 block text-xs font-medium text-slate-600';
