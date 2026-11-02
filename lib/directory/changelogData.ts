@@ -1448,6 +1448,7 @@ export const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
     scopes: ['jpyc-services'],
     slug: 'jpyc',
     changeType: 'updated',
+    changeCategory: 'update',
     summary:
       'On the first anniversary of JPYC issuance and JPYC EX (2026-10-27), JPYC Inc. said cumulative issuance had passed 12 billion yen and accounts opened had passed 28,000, as of October 2026.',
     summaryJa:
@@ -1460,6 +1461,7 @@ export const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
     scopes: ['jpyc-services'],
     slug: 'jpysc',
     changeType: 'updated',
+    changeCategory: 'partnership',
     summary:
       'SBI Holdings and Startale signed a basic agreement with BlackRock to study linking tokenized money market funds with JPYSC across technology and infrastructure, business and distribution, and regulation and market development.',
     summaryJa:
@@ -1472,6 +1474,7 @@ export const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
     scopes: ['jpyc-services'],
     slug: 'jpysc',
     changeType: 'updated',
+    changeCategory: 'partnership',
     summary:
       'SBI Holdings and CRB Group, the parent of Cross River Bank, signed a basic agreement on a strategic partnership and a planned joint venture in Japan; one area of collaboration is adding JPYSC to the Cross River platform as a settlement means for institutional, cross-border and tokenized-asset transactions, subject to further talks, final agreements and regulatory approvals.',
     summaryJa:
@@ -1485,6 +1488,7 @@ export const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
     scopes: ['jpyc-services'],
     slug: 'jpyc',
     changeType: 'updated',
+    changeCategory: 'update',
     assets: ['JPYC'],
     chains: ['avalanche'],
     summary:
@@ -1494,16 +1498,19 @@ export const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
     sourceUrl: 'https://prtimes.jp/main/html/rd/p/000000006.000151022.html',
   },
   {
-    // 終了したのは iOS/Android のアプリ版。ディレクトリの掲載は 9/30 開始の au PAY ミニアプリで、エントリの事実は変えない。
+    // 終了するのは iOS/Android のアプリ版。ディレクトリの掲載は 9/30 開始の au PAY ミニアプリで、エントリの事実は変えない。
+    // changeCategory を closure にしない (分類だけ見る買い手が、ミニアプリまで終わったと読むため)。
     date: '2026-10-30',
     collectedAt: '2026-11-02',
     scopes: ['jpyc-services'],
     slug: 'alpha-u-wallet',
     changeType: 'updated',
+    changeCategory: 'update',
+    diffs: [{ field: 'feature', previousValue: 'ios-android-app', currentValue: 'ios-android-app-ended' }],
     summary:
-      'The iOS/Android app version of αU wallet ended service at 12:00 on 2026-10-30, and the notice asks holders to migrate assets because NFTs and crypto assets can no longer be viewed or managed there; the notice covers the app version, while this directory lists the au PAY mini app launched on 2026-09-30.',
+      'αU wallet announced that its iOS/Android app version would end service at 12:00 on 2026-10-30 and asked holders to migrate assets, as NFTs and crypto assets can no longer be viewed or managed after that; the notice covers the app version, and this directory lists the au PAY mini app (see the 2026-09-30 event).',
     summaryJa:
-      'iOS/Android アプリ版の αU wallet が 2026-10-30 12:00 でサービスを終了。以後は保有する NFT・暗号資産の閲覧・管理ができなくなるとして、資産の移行を案内している。告知の対象はアプリ版で、このディレクトリの掲載は 2026-09-30 に始まった au PAY ミニアプリ。',
+      'αU wallet が、iOS/Android アプリ版のサービスを 2026-10-30 12:00 で終了すると告知。以後は保有する NFT・暗号資産の閲覧・管理ができなくなるとして、資産の移行を案内している。告知の対象はアプリ版で、このディレクトリの掲載は au PAY ミニアプリ (2026-09-30 のイベントを参照)。',
     sourceUrl: 'https://x.com/alphau_official/status/2115941757271609578',
   },
   {
@@ -1512,8 +1519,9 @@ export const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
     scopes: ['jpyc-services'],
     slug: 'jpysc',
     changeType: 'updated',
+    changeCategory: 'partnership',
     summary:
-      'SBI Holdings and Sumitomo Mitsui Financial Group signed a capital and business alliance to jointly study stablecoin use, starting with JPYSC, and agreed that SMBC Group will take a 5% stake in SBI Startale Marketing.',
+      'SBI Holdings and Sumitomo Mitsui Financial Group signed a capital and business alliance to jointly study stablecoin use, including JPYSC, and agreed that SMBC Group will take a 5% stake in SBI Startale Marketing.',
     summaryJa:
       'SBI ホールディングスと三井住友フィナンシャルグループが、JPYSC をはじめとするステーブルコインの活用を共同で検討する資本業務提携を締結。SMBC グループが SBI Startale Marketing へ 5% 出資することでも合意した。',
     sourceUrl: 'https://www.sbigroup.co.jp/news/2026/1030_16698.html',
@@ -1553,9 +1561,9 @@ export const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
     changeType: 'verified',
     assets: ['JPYC', 'USDC'],
     summary:
-      'Re-verified on the Osaka Prefecture page and its award list (both still dated 2026-08-26): HashPort pilot schedule (an assumed one week or more between January and March 2027) unchanged.',
+      'Re-verified on the Osaka Prefecture page (last updated 2026-08-26, unchanged) and its award list: HashPort pilot schedule (an assumed one week or more between January and March 2027) unchanged.',
     summaryJa:
-      '大阪府公式ページと交付決定事業一覧 (いずれも 2026-08-26 のまま) で再確認: HashPort の実証の予定 (2027 年 1〜3 月の間で 1 週間以上を想定) に変更なし。',
+      '大阪府公式ページ (更新日は 2026-08-26 のまま) と交付決定事業一覧で再確認: HashPort の実証の予定 (2027 年 1〜3 月の間で 1 週間以上を想定) に変更なし。',
     sourceUrl:
       'https://www.pref.osaka.lg.jp/o020060/kikaku/osaka-kokusaikinyu/senkuteki_hojokin.html',
   },
@@ -1567,9 +1575,9 @@ export const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
     changeType: 'verified',
     assets: ['JPYC', 'USDC'],
     summary:
-      'Re-verified on the Osaka Prefecture page and its award list (both still dated 2026-08-26): Mina Wallet / Sumitomo Mitsui Card pilot schedule (around October 2026 to February 2027, a few days to about a month) unchanged.',
+      'Re-verified on the Osaka Prefecture page (last updated 2026-08-26, unchanged) and its award list: Mina Wallet / Sumitomo Mitsui Card pilot schedule (around October 2026 to February 2027, a few days to about a month) unchanged.',
     summaryJa:
-      '大阪府公式ページと交付決定事業一覧 (いずれも 2026-08-26 のまま) で再確認: マイナウォレット / 三井住友カードの実証の予定 (2026 年 10 月〜2027 年 2 月頃の間で数日〜1 か月程度) に変更なし。',
+      '大阪府公式ページ (更新日は 2026-08-26 のまま) と交付決定事業一覧で再確認: マイナウォレット / 三井住友カードの実証の予定 (2026 年 10 月〜2027 年 2 月頃の間で数日〜1 か月程度) に変更なし。',
     sourceUrl:
       'https://www.pref.osaka.lg.jp/o020060/kikaku/osaka-kokusaikinyu/senkuteki_hojokin.html',
   },
@@ -1583,9 +1591,9 @@ export const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
     // 府のページと採択一覧 (PDF) にあるのは実施時期と規模だけ。手数料 1.0% の出典は Mi&T の自社リリース (8/31) なので、
     // この再確認の文には書かない (府のページで確かめたことにしない)。
     summary:
-      'Re-verified on the Osaka Prefecture page and its award list (both still dated 2026-08-26): Mi&T pilot schedule (mid-November 2026 to mid-March 2027, about five shops) unchanged.',
+      'Re-verified on the Osaka Prefecture page (last updated 2026-08-26, unchanged) and its award list: Mi&T pilot schedule (mid-November 2026 to mid-March 2027, about five shops) unchanged.',
     summaryJa:
-      '大阪府公式ページと交付決定事業一覧 (いずれも 2026-08-26 のまま) で再確認: Mi&T の実証の予定 (2026 年 11 月中旬〜2027 年 3 月中旬・5 店舗程度) に変更なし。',
+      '大阪府公式ページ (更新日は 2026-08-26 のまま) と交付決定事業一覧で再確認: Mi&T の実証の予定 (2026 年 11 月中旬〜2027 年 3 月中旬・5 店舗程度) に変更なし。',
     sourceUrl:
       'https://www.pref.osaka.lg.jp/o020060/kikaku/osaka-kokusaikinyu/senkuteki_hojokin.html',
   },
