@@ -250,7 +250,7 @@ export function NativeTipForm({ params }: { params: NativeTipParams }) {
               onFocus={selectCustom}
               onChange={(e) => changeCustomAmount(e.target.value)}
               placeholder={t('amountCustomPlaceholder')}
-              className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-lg font-semibold focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+              className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-lg font-semibold placeholder:text-slate-500 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
               style={{ borderColor: customSelected ? themeColor : undefined }}
             />
           </label>

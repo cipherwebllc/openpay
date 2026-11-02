@@ -208,26 +208,26 @@ describe('TipEmbedGenerator pre-split pinning (F-8 PR-20)', () => {
     expect({ share, embedIframe, embedButton }).toMatchInlineSnapshot(`
       {
         "embedButton": {
-          "all": "cc50267d6112cf4b5f2f078c30d51eff18fd8702a532db59ab01ad80eb5951e7",
+          "all": "2d5367a707745edc0419559e92fd26e35539c220f2e6a76ba4e08663ed91e9cc",
           "parts": [
             "div 2de27d2f2a42 受け取り受取ウォレットアドレス通",
-            "div d49064b8587d 表示をカスタマイズ表示名 (任意",
+            "div 2b5be44853a6 表示をカスタマイズ表示名 (任意",
             "div 83a04c78e880 プレビュー{"to":"0x00",
           ],
         },
         "embedIframe": {
-          "all": "160b555084845d2cac980705abce8bc82268e1e6210f402ba6d6e65ba1f9e23a",
+          "all": "6d400160aac8a18d693b4522fff06343909676bfbf0d5968fcfaefb4f751dc1d",
           "parts": [
             "div 2de27d2f2a42 受け取り受取ウォレットアドレス通",
-            "div d49064b8587d 表示をカスタマイズ表示名 (任意",
+            "div 2b5be44853a6 表示をカスタマイズ表示名 (任意",
             "div 257c7e916138 プレビュー{"to":"0x00",
           ],
         },
         "share": {
-          "all": "54ee1e6c41b16d529622f5c4b46ec5c15c611d9444b2c86477f368a18a64cbf5",
+          "all": "bca8d64fcb63c4ef9b0814fc288dc0f14d192af90d22edff31c6bcf70fa6208c",
           "parts": [
             "div 2de27d2f2a42 受け取り受取ウォレットアドレス通",
-            "div d49064b8587d 表示をカスタマイズ表示名 (任意",
+            "div 2b5be44853a6 表示をカスタマイズ表示名 (任意",
             "div ca8bfe5c21df プレビュー{"to":"0x00",
           ],
         },
@@ -305,42 +305,42 @@ describe('TipEmbedGenerator pre-split pinning (F-8 PR-20)', () => {
     expect({ share, copied, qr, embedIframe, embedButton }).toMatchInlineSnapshot(`
       {
         "copied": {
-          "all": "0c578a353de7127f8ae10d90b3337aa70b71a55ef8e00afc7f77dadaa5ab08d9",
+          "all": "0fe43d8971944644cea3bfe9cea247c9b2c9603330e453a1d940d39e5057690d",
           "parts": [
             "div 7df23f37fb09 受け取り設定0x8335…291",
-            "div d87df287843b 表示をカスタマイズ表示名 (任意",
+            "div 4c50c42b1f92 表示をカスタマイズ表示名 (任意",
             "div dd53dfec8b10 プレビュー{"to":"0x83",
           ],
         },
         "embedButton": {
-          "all": "52f97fd9a75443bd4ec962f0a51cc36347dd8687b3fc843024c3d93461b03746",
+          "all": "c804f7c07207984f22a61c6beb1d5c02eac901c932e3d85025586dcc977c465a",
           "parts": [
             "div 7df23f37fb09 受け取り設定0x8335…291",
-            "div d87df287843b 表示をカスタマイズ表示名 (任意",
+            "div 4c50c42b1f92 表示をカスタマイズ表示名 (任意",
             "div d8bec88f33cb プレビュー{"to":"0x83",
           ],
         },
         "embedIframe": {
-          "all": "719f835ad18e6a463a33222f7fff5756aa50c5fb3c997a49e02899d280e3dce5",
+          "all": "4842cd7eb3bfa1af5fb49d6fe9811f05f8b8673ce46b00838a782f88e36fe132",
           "parts": [
             "div 7df23f37fb09 受け取り設定0x8335…291",
-            "div d87df287843b 表示をカスタマイズ表示名 (任意",
+            "div 4c50c42b1f92 表示をカスタマイズ表示名 (任意",
             "div 844777db49d3 プレビュー{"to":"0x83",
           ],
         },
         "qr": {
-          "all": "00b9b34b53216ae27317184778d3cc5b35608bc9a9aaece2760c2864548d91d6",
+          "all": "4fb36746ef66f03b418fe518b65ac4f8ca98a063fc86cb3dc23ad2d05da0dbd9",
           "parts": [
             "div 7df23f37fb09 受け取り設定0x8335…291",
-            "div d87df287843b 表示をカスタマイズ表示名 (任意",
+            "div 4c50c42b1f92 表示をカスタマイズ表示名 (任意",
             "div 4e75cc536839 プレビュー{"to":"0x83",
           ],
         },
         "share": {
-          "all": "b4b3ba73ccef1b958efe7faa067f49f9ad6355e0021862766d2f5dfeb0cfd489",
+          "all": "9c326acde0c600f6e857493a369a02ee17ec89f8b5e36f7a58e61de61e22d324",
           "parts": [
             "div 7df23f37fb09 受け取り設定0x8335…291",
-            "div d87df287843b 表示をカスタマイズ表示名 (任意",
+            "div 4c50c42b1f92 表示をカスタマイズ表示名 (任意",
             "div bd1cff7dfef5 プレビュー{"to":"0x83",
           ],
         },
@@ -537,42 +537,42 @@ describe('TipEmbedGenerator pre-split pinning (F-8 PR-20)', () => {
     expect({ invalidAddress, usdcInline, summary, settingsSheet, en: hashDom(connected.container) }).toMatchInlineSnapshot(`
       {
         "en": {
-          "all": "9f7b4665c8b09716d247f02cd0f5d6b85c5e468be54a39da321b568e9f981a4f",
+          "all": "254f5044d98c3c902c11172f34d40ff0c679cb5a35fe9acc063bbca43ebce3a3",
           "parts": [
             "div 951caaf85b0a ReceivingSetting",
-            "div a5e75769c87d Customize appear",
+            "div a0c5b27af9a8 Customize appear",
             "div d223e6b0ea94 Preview{"to":"0x",
           ],
         },
         "invalidAddress": {
-          "all": "03648b80e2ce9528d278ab2d8921d66b6fbf662351dbe9d9ef16000d32881534",
+          "all": "bb12ba85f07ae40efb26a45a0b94130819cf6e83bc059c24bb26b20cef6177d8",
           "parts": [
             "div 31730aa30b5d 受け取り受取ウォレットアドレスア",
-            "div d49064b8587d 表示をカスタマイズ表示名 (任意",
+            "div 2b5be44853a6 表示をカスタマイズ表示名 (任意",
             "div ca8bfe5c21df プレビュー{"to":"0x00",
           ],
         },
         "settingsSheet": {
-          "all": "d8555804332f8e3862410afcd047bc536ed238ba1ba3b9a57dbe92ad8cb7a42c",
+          "all": "f028ca0a74932e2d8776c6ed90d50ce28adb0c54798c117376fec8c5d6eb01f5",
           "parts": [
             "div 435305ac2155 受け取り設定0x8335…291",
-            "div 61cdf0c0ed6f 表示をカスタマイズ表示名 (任意",
+            "div 1b42086fb076 表示をカスタマイズ表示名 (任意",
             "div 556814a4cd21 プレビュー{"to":"0x83",
           ],
         },
         "summary": {
-          "all": "d5e5b04144126c30a06d1a30c5c51631a7c6184650c5c1f645c4bd518386a965",
+          "all": "8babd48b280b11a5d50d3d1afd8a1da6f3c997051f8b67fd9267eceb36c82372",
           "parts": [
             "div 79ef2ce2df0c 受け取り設定0x8335…291",
-            "div 61cdf0c0ed6f 表示をカスタマイズ表示名 (任意",
+            "div 1b42086fb076 表示をカスタマイズ表示名 (任意",
             "div 556814a4cd21 プレビュー{"to":"0x83",
           ],
         },
         "usdcInline": {
-          "all": "c87d61f5454e184ace535e4f2ec7716baee457d2f8ec88a5e563c78abcaa4dab",
+          "all": "59ad623e80481c1713c78ce4ae16a4e22d8f580d15dfd4592fc3fe4510ce1420",
           "parts": [
             "div 61e3a78ddb59 受け取り受取ウォレットアドレスア",
-            "div 61cdf0c0ed6f 表示をカスタマイズ表示名 (任意",
+            "div 1b42086fb076 表示をカスタマイズ表示名 (任意",
             "div d7a53bc7786e プレビュー{"to":"0x00",
           ],
         },
@@ -603,18 +603,18 @@ describe('TipEmbedGenerator pre-split pinning (F-8 PR-20)', () => {
     expect({ customize, longUrl: hashDom(long.container) }).toMatchInlineSnapshot(`
       {
         "customize": {
-          "all": "6c3a3ccb57ee26de9c2910510ab5984533b5e783b3de8ad2b005b0fc33319496",
+          "all": "c9781341c1b1af29670b30182ed76c84cdd39c5e81ba3e1fc49026e0a1a058c7",
           "parts": [
             "div 2de27d2f2a42 受け取り受取ウォレットアドレス通",
-            "div a62856787fe2 表示をカスタマイズ表示名 (任意",
+            "div 0b6b873794a7 表示をカスタマイズ表示名 (任意",
             "div 50576f4ed7ab プレビュー{"to":"0x00",
           ],
         },
         "longUrl": {
-          "all": "9cce4dbdb70d1e21d0b3902692fcb72b1bf4e822f38fd427ff8287ff03504656",
+          "all": "e2acae4e535f610078ef7041011a3fa038e0bc894b185bda6edf26eb69b764df",
           "parts": [
             "div 5c047b8e2873 受け取り設定0x8335…291",
-            "div b852a2c6224e 表示をカスタマイズ表示名 (任意",
+            "div c4bd56c3596a 表示をカスタマイズ表示名 (任意",
             "div de177d5b3582 プレビュー{"to":"0x83",
           ],
         },
@@ -688,46 +688,46 @@ describe('TipEmbedGenerator pre-split pinning (F-8 PR-20)', () => {
     expect({ signedOut, withItems, deleteError, loadError, empty: hashDom(view.container) }).toMatchInlineSnapshot(`
       {
         "deleteError": {
-          "all": "bb00212ba6b9e480142009e67715355c46f48a69b8f764cb59e7893c2a54babf",
+          "all": "b35d12542cde57cfe29e36f5ef425078aa008b3735b4582ed3e91c460c0cd140",
           "parts": [
             "div 84bf67973ce7 受け取り設定0x8335…291",
-            "div d49064b8587d 表示をカスタマイズ表示名 (任意",
+            "div 2b5be44853a6 表示をカスタマイズ表示名 (任意",
             "div fdc1091bbc54 プレビュー{"to":"0x83",
             "section 13f0ce7108d7 受け取った応援メッセージ非公開で",
           ],
         },
         "empty": {
-          "all": "57c6666f7d7e90622455ed7dd9bd34516fbc23afec39ee039b56b6c1182bfa87",
+          "all": "e22e6bbcdc7da7750a98110d0c7b7c168e64912560d619fa31a3ddf655e98268",
           "parts": [
             "div 84bf67973ce7 受け取り設定0x8335…291",
-            "div d49064b8587d 表示をカスタマイズ表示名 (任意",
+            "div 2b5be44853a6 表示をカスタマイズ表示名 (任意",
             "div fdc1091bbc54 プレビュー{"to":"0x83",
             "section 04ce4b993671 受け取った応援メッセージ非公開で",
           ],
         },
         "loadError": {
-          "all": "d44a84feac473140f2c594b0e087749a98cdd57afad6484f18b5ed30c458185d",
+          "all": "7d0e4970607638e5c1e43e9575782446d72840c85ada0adab88c1b0960618ce2",
           "parts": [
             "div 84bf67973ce7 受け取り設定0x8335…291",
-            "div d49064b8587d 表示をカスタマイズ表示名 (任意",
+            "div 2b5be44853a6 表示をカスタマイズ表示名 (任意",
             "div fdc1091bbc54 プレビュー{"to":"0x83",
             "section 934c373aa49d 受け取った応援メッセージ非公開で",
           ],
         },
         "signedOut": {
-          "all": "c09c8f39ef2db13ebaf8e59460146c648725b5cedc3457dbdc4726e36a667bba",
+          "all": "225fe4f486d38b504d0b49de2ceb752d04c35b2ccc4c7c394cdc6f4780f74b0c",
           "parts": [
             "div 84bf67973ce7 受け取り設定0x8335…291",
-            "div d49064b8587d 表示をカスタマイズ表示名 (任意",
+            "div 2b5be44853a6 表示をカスタマイズ表示名 (任意",
             "div fdc1091bbc54 プレビュー{"to":"0x83",
             "section 19dbeffd530a 受け取った応援メッセージ非公開で",
           ],
         },
         "withItems": {
-          "all": "53760e32b4f4d62e13d053563dd1e7e8d6d17edd5e9df3f32b49972d4f5e4138",
+          "all": "b49183a1ac28a4c28387b9768896bafcd3528427a01aee2d84394f5189c9879e",
           "parts": [
             "div 84bf67973ce7 受け取り設定0x8335…291",
-            "div d49064b8587d 表示をカスタマイズ表示名 (任意",
+            "div 2b5be44853a6 表示をカスタマイズ表示名 (任意",
             "div fdc1091bbc54 プレビュー{"to":"0x83",
             "section 376ac60a4f68 受け取った応援メッセージ非公開で",
           ],

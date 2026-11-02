@@ -11,7 +11,13 @@ import { SectionCard } from '@/components/SectionCard';
 import type { TokenDeployment } from '@/lib/tokens';
 import { DevSettingsGroup } from './DevSettingsGroup';
 import { PresetsField } from './PresetsField';
-import { DEFAULT_PREVIEW_COLOR, type SetTipSettings, type TipSettings } from './shared';
+import {
+  DEFAULT_PREVIEW_COLOR,
+  TIP_INPUT_CLASS,
+  TIP_TEXTAREA_CLASS,
+  type SetTipSettings,
+  type TipSettings,
+} from './shared';
 
 export function CustomizeSection({
   settings,
@@ -29,8 +35,9 @@ export function CustomizeSection({
   return (
     <SectionCard title={t('step2Title')} headingId="tip-customize-heading" icon={Sparkles}>
       <div className="space-y-4">
-        <Field label={t('nameLabel')}>
+        <Field label={t('nameLabel')} htmlFor="tip-name">
           <input
+            id="tip-name"
             type="text"
             value={settings.name}
             onChange={(e) =>
@@ -38,12 +45,13 @@ export function CustomizeSection({
             }
             placeholder={t('namePlaceholder')}
             maxLength={60}
-            className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none"
+            className={TIP_INPUT_CLASS}
           />
         </Field>
 
-        <Field label={t('messageLabel')}>
+        <Field label={t('messageLabel')} htmlFor="tip-message">
           <textarea
+            id="tip-message"
             value={settings.message}
             onChange={(e) =>
               setSettings((s) => ({ ...s, message: e.target.value }))
@@ -51,7 +59,7 @@ export function CustomizeSection({
             placeholder={t('messagePlaceholder')}
             maxLength={200}
             rows={2}
-            className="w-full resize-none rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none"
+            className={TIP_TEXTAREA_CLASS}
           />
           <p className="mt-1 text-xs text-slate-500">
             {t('messageCounter', { count: settings.message.length })}
@@ -68,7 +76,7 @@ export function CustomizeSection({
           hint={tProfile('themeHint')}
         />
 
-        <Field label={t('colorLabel')}>
+        <Field label={t('colorLabel')} htmlFor="tip-color">
           <div className="flex items-center gap-3">
             <input
               type="color"
@@ -76,16 +84,17 @@ export function CustomizeSection({
               onChange={(e) =>
                 setSettings((s) => ({ ...s, color: e.target.value }))
               }
-              className="h-10 w-14 cursor-pointer rounded-md border border-slate-200 bg-white p-0.5"
+              className="h-11 w-14 shrink-0 cursor-pointer rounded-md border border-slate-200 bg-white p-0.5"
             />
             <input
+              id="tip-color"
               type="text"
               value={settings.color}
               onChange={(e) =>
                 setSettings((s) => ({ ...s, color: e.target.value }))
               }
               placeholder={DEFAULT_PREVIEW_COLOR}
-              className="flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm focus:border-brand focus:outline-none"
+              className={`${TIP_INPUT_CLASS} min-w-0 flex-1 font-mono`}
             />
           </div>
           {settings.color && !colorValid && (
