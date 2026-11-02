@@ -218,7 +218,8 @@ describe('RegisterMode', () => {
     // 同じ画面の商品管理 (「商品を編集」のシート) で URL を直すと新しい node になり、旧 node の display:none は残らない
     // (R7a までは node を使い回し、直した URL も隠れたままだった)。
     fireEvent.click(screen.getByRole('button', { name: '商品を編集' }));
-    fireEvent.change(screen.getByLabelText('画像URL(任意)'), { target: { value: 'https://images.example/b.png' } });
+    // 追加フォームの画像 URL も同じ見出しで名前が付くので、登録済みの商品の欄は値で選ぶ。
+    fireEvent.change(screen.getByDisplayValue('https://images.example/a.png'), { target: { value: 'https://images.example/b.png' } });
     const corrected = button.querySelector('img')!;
     expect(corrected).not.toBe(image);
     expect(corrected).toHaveAttribute('src', 'https://images.example/b.png');

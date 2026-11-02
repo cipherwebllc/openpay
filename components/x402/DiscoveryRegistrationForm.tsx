@@ -43,7 +43,7 @@ export function DiscoveryRegistrationForm({
   const submitting = submitMutation.isPending;
 
   const inputCls =
-    'w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/15';
+    'h-11 w-full rounded-lg border border-slate-300 bg-white px-3 text-base placeholder:text-slate-500 focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/15 sm:text-sm';
 
   // エラー key → 親切な文言。resource_not_gated は 402 自体が返らない URL、gate_not_openpay は
   // 402 は返るが OpenPay JPYC 方式でない URL、gate_accept_mismatch は OpenPay 方式の 402 だが JPYC の

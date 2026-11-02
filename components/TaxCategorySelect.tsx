@@ -41,7 +41,7 @@ export function TaxCategorySelect({
             taxRate: cat === 'custom' ? (taxRate ?? 0) : defaultRateForCategory(cat),
           });
         }}
-        className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none"
+        className="h-11 rounded-lg border border-slate-300 bg-white px-3 text-base focus:border-brand focus:outline-none sm:text-sm"
       >
         <option value="">{tTax('none')}</option>
         {TAX_OPTIONS.map((o) => (
@@ -65,7 +65,7 @@ export function TaxCategorySelect({
                 taxRate: e.target.value === '' ? null : Number(e.target.value),
               })
             }
-            className="w-20 rounded-lg border border-slate-300 px-2 py-2 text-right text-sm focus:border-brand focus:outline-none"
+            className="h-11 w-20 rounded-lg border border-slate-300 px-2 text-right text-base placeholder:text-slate-500 focus:border-brand focus:outline-none sm:text-sm"
           />
           <span className="text-xs text-slate-500">%</span>
         </span>

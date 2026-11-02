@@ -29,7 +29,7 @@ export function QuickAmountEditor({
             onChange={(e) => onUpdate(i, e.target.value)}
             placeholder={t('quickAmountPlaceholder')}
             aria-label={t('quickAmountItem', { n: i + 1 })}
-            className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm tabular-nums focus:border-brand focus:outline-none"
+            className="h-11 min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-3 text-base tabular-nums placeholder:text-slate-500 focus:border-brand focus:outline-none sm:text-sm"
           />
           <button
             type="button"

@@ -46,6 +46,7 @@ export function ReceiverInlineSection({
         autofill={autofill}
         handleResolved={handleResolved}
         bare
+        labelledBy="qr-receiver-inline-heading"
       />
     </section>
   );

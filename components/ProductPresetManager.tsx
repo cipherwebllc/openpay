@@ -4,7 +4,7 @@
 // useProductPresets を props で受け取り、単一 store インスタンスを共有する
 // (同一タブ内で 2 つ hook を持つと storage event が飛ばず state が乖離するため)。
 
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import Link from 'next/link';
 import { ChevronDown, ChevronUp, Trash2 } from 'lucide-react';
@@ -76,6 +76,8 @@ export function ProductPresetManager({
   const locale = useLocale();
   const tTax = useTranslations('Tax');
   const [draft, setDraft] = useState(EMPTY_DRAFT);
+  // 追加フォームの欄を見出しと結ぶ id (読み上げで欄の名前が placeholder だけにならないように)。
+  const formId = useId();
 
   const canAdd = draft.name.trim().length > 0 && /^\d+(\.\d+)?$/.test(draft.unitPrice);
 
@@ -112,7 +114,8 @@ export function ProductPresetManager({
                 value={p.name}
                 aria-label={t('nameLabel')}
                 onChange={(e) => updatePreset(p.id, { name: e.target.value })}
-                className="min-w-0 flex-[3] rounded-md border border-slate-200 px-2 py-1 text-sm focus:border-brand focus:outline-none"
+                // 商品名は 1 行に取る (編集シートは PC でも幅が狭く、価格・税区分と並べると商品名が数文字まで潰れるため)。
+                className="h-11 w-full min-w-0 flex-none rounded-md border border-slate-200 px-2 text-base placeholder:text-slate-500 focus:border-brand focus:outline-none sm:text-sm"
                 maxLength={80}
               />
               <input
@@ -125,7 +128,7 @@ export function ProductPresetManager({
                     unitPrice: e.target.value.replace(/[^\d.]/g, ''),
                   })
                 }
-                className="w-20 rounded-md border border-slate-200 px-2 py-1 text-right font-mono text-sm focus:border-brand focus:outline-none"
+                className="h-11 w-20 rounded-md border border-slate-200 px-2 text-right font-mono text-base placeholder:text-slate-500 focus:border-brand focus:outline-none sm:text-sm"
               />
               <span className="text-xs text-slate-500">
                 {defaultDeploymentForSymbol(p.token).displaySymbol}
@@ -141,7 +144,7 @@ export function ProductPresetManager({
                     taxRate: cat ? defaultRateForCategory(cat) : null,
                   });
                 }}
-                className="rounded-md border border-slate-200 px-1 py-1 text-xs focus:border-brand focus:outline-none"
+                className="h-11 rounded-md border border-slate-200 px-1 text-base focus:border-brand focus:outline-none sm:text-sm"
               >
                 <option value="">{tTax('none')}</option>
                 {TAX_OPTIONS.map((o) => (
@@ -185,7 +188,8 @@ export function ProductPresetManager({
               {/* 専用の全幅行へ (商品名欄を潰さない)。画像 URL は短めにし、その横へ 表示/おすすめ
                   チェックボックスを移動 (主行は商品名を広く取る)。カテゴリーは別グループに分離。 */}
               <div className="flex w-full flex-wrap items-center gap-x-3 gap-y-2">
-                <div className="flex min-w-0 flex-1 items-center gap-2">
+                {/* 画像 URL は幅が足りないとき縮み切らずに次の行へ回す (表示/おすすめ/カテゴリーに押されて幅 0 にならないように)。 */}
+                <div className="flex min-w-[10rem] flex-1 items-center gap-2">
                   {p.image && <PresetThumbnail url={p.image} />}
                   <input
                     type="url"
@@ -195,7 +199,7 @@ export function ProductPresetManager({
                     onChange={(e) =>
                       updatePreset(p.id, { image: e.target.value.trim() || undefined })
                     }
-                    className="min-w-0 flex-1 rounded-md border border-slate-200 px-2 py-1 text-xs focus:border-brand focus:outline-none"
+                    className="h-11 min-w-0 flex-1 rounded-md border border-slate-200 px-2 text-base placeholder:text-slate-500 focus:border-brand focus:outline-none sm:text-sm"
                   />
                 </div>
                 {/* 表示 (有効) + おすすめ (主行から移動・商品名を広く取るため)。 */}
@@ -238,7 +242,7 @@ export function ProductPresetManager({
                     placeholder={t('categoryPlaceholder')}
                     maxLength={24}
                     onChange={(e) => updatePreset(p.id, { category: e.target.value || undefined })}
-                    className="w-28 rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-700 focus:border-brand focus:outline-none"
+                    className="h-11 w-28 rounded-md border border-slate-200 px-2 text-base text-slate-700 placeholder:text-slate-500 focus:border-brand focus:outline-none sm:text-sm"
                   />
                 </label>
               </div>
@@ -266,18 +270,20 @@ export function ProductPresetManager({
       <div className="rounded-lg border border-dashed border-slate-300 p-3">
         <p className="mb-2 text-xs font-semibold text-slate-600">{t('addTitle')}</p>
         <div className="flex flex-wrap items-end gap-2">
-          <Field label={t('nameLabel')}>
+          <Field label={t('nameLabel')} htmlFor={`${formId}-name`}>
             <input
+              id={`${formId}-name`}
               type="text"
               value={draft.name}
               onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))}
               placeholder={t('namePlaceholder')}
-              className="w-36 rounded-md border border-slate-300 px-2 py-1.5 text-sm focus:border-brand focus:outline-none"
+              className="h-11 w-36 rounded-md border border-slate-300 px-2 text-base placeholder:text-slate-500 focus:border-brand focus:outline-none sm:text-sm"
               maxLength={80}
             />
           </Field>
-          <Field label={t('priceLabel')}>
+          <Field label={t('priceLabel')} htmlFor={`${formId}-price`}>
             <input
+              id={`${formId}-price`}
               type="text"
               inputMode="decimal"
               value={draft.unitPrice}
@@ -288,16 +294,17 @@ export function ProductPresetManager({
                 }))
               }
               placeholder={t('pricePlaceholder')}
-              className="w-24 rounded-md border border-slate-300 px-2 py-1.5 text-right font-mono text-sm focus:border-brand focus:outline-none"
+              className="h-11 w-24 rounded-md border border-slate-300 px-2 text-right font-mono text-base placeholder:text-slate-500 focus:border-brand focus:outline-none sm:text-sm"
             />
           </Field>
-          <Field label={t('tokenLabel')}>
+          <Field label={t('tokenLabel')} htmlFor={`${formId}-token`}>
             <select
+              id={`${formId}-token`}
               value={draft.token}
               onChange={(e) =>
                 setDraft((d) => ({ ...d, token: e.target.value as TokenSymbol }))
               }
-              className="rounded-md border border-slate-300 px-2 py-1.5 text-sm focus:border-brand focus:outline-none"
+              className="h-11 rounded-md border border-slate-300 px-2 text-base focus:border-brand focus:outline-none sm:text-sm"
             >
               {TOKEN_SYMBOLS.map((sym) => (
                 <option key={sym} value={sym}>
@@ -306,13 +313,14 @@ export function ProductPresetManager({
               ))}
             </select>
           </Field>
-          <Field label={t('taxLabel')}>
+          <Field label={t('taxLabel')} htmlFor={`${formId}-tax`}>
             <select
+              id={`${formId}-tax`}
               value={draft.taxCategory}
               onChange={(e) =>
                 setDraft((d) => ({ ...d, taxCategory: e.target.value as TaxCategory }))
               }
-              className="rounded-md border border-slate-300 px-2 py-1.5 text-sm focus:border-brand focus:outline-none"
+              className="h-11 rounded-md border border-slate-300 px-2 text-base focus:border-brand focus:outline-none sm:text-sm"
             >
               {TAX_OPTIONS.map((o) => (
                 <option key={o.category} value={o.category}>
@@ -321,30 +329,32 @@ export function ProductPresetManager({
               ))}
             </select>
           </Field>
-          <Field label={t('categoryLabel')}>
+          <Field label={t('categoryLabel')} htmlFor={`${formId}-category`}>
             <input
+              id={`${formId}-category`}
               type="text"
               value={draft.category}
               onChange={(e) => setDraft((d) => ({ ...d, category: e.target.value }))}
               placeholder={t('categoryPlaceholder')}
               maxLength={24}
-              className="w-28 rounded-md border border-slate-300 px-2 py-1.5 text-sm focus:border-brand focus:outline-none"
+              className="h-11 w-28 rounded-md border border-slate-300 px-2 text-base placeholder:text-slate-500 focus:border-brand focus:outline-none sm:text-sm"
             />
           </Field>
-          <Field label={t('imageLabel')}>
+          <Field label={t('imageLabel')} htmlFor={`${formId}-image`}>
             <input
+              id={`${formId}-image`}
               type="url"
               value={draft.image}
               onChange={(e) => setDraft((d) => ({ ...d, image: e.target.value }))}
               placeholder={t('imagePlaceholder')}
-              className="w-40 rounded-md border border-slate-300 px-2 py-1.5 text-sm focus:border-brand focus:outline-none"
+              className="h-11 w-40 rounded-md border border-slate-300 px-2 text-base placeholder:text-slate-500 focus:border-brand focus:outline-none sm:text-sm"
             />
           </Field>
           <button
             type="button"
             onClick={handleAdd}
             disabled={!canAdd}
-            className="rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-50"
+            className="h-11 rounded-lg bg-brand px-4 text-sm font-semibold text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-50"
           >
             {t('addButton')}
           </button>

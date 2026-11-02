@@ -115,7 +115,7 @@ function OrderCardInner({
                   value={tableDraft}
                   onChange={(e) => onTableDraftChange(e.target.value.slice(0, 64))}
                   aria-label={t('tableLabel')}
-                  className="w-24 rounded border border-slate-300 px-2 py-0.5 text-sm focus:border-brand focus:outline-none"
+                  className="h-11 w-24 rounded border border-slate-300 px-2 text-base focus:border-brand focus:outline-none sm:text-sm"
                 />
                 <button
                   type="button"

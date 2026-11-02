@@ -43,7 +43,7 @@ export function SplitEditor({
                 onUpdate(i, { address: e.target.value.trim() })
               }
               placeholder="0x..."
-              className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-xs focus:border-brand focus:outline-none"
+              className="h-11 min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-3 font-mono text-base placeholder:text-slate-500 focus:border-brand focus:outline-none sm:text-sm"
               spellCheck={false}
               autoCapitalize="off"
               autoCorrect="off"
@@ -58,7 +58,7 @@ export function SplitEditor({
                 })
               }
               placeholder="%"
-              className="w-16 rounded-lg border border-slate-300 bg-white px-2 py-2 text-center text-sm focus:border-brand focus:outline-none"
+              className="h-11 w-16 rounded-lg border border-slate-300 bg-white px-2 text-center text-base placeholder:text-slate-500 focus:border-brand focus:outline-none sm:text-sm"
               maxLength={2}
               aria-label={t('splitPercentLabel')}
             />

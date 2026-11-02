@@ -255,7 +255,7 @@ export function QrAmountSection({
                 }}
                 placeholder={settings.token === 'jpyc' ? '1,000' : '10.00'}
                 aria-label={amountLabel}
-                className="min-w-0 flex-1 bg-transparent text-right text-4xl font-bold tabular-nums tracking-tight text-slate-900 placeholder:text-slate-300 focus:outline-none sm:text-5xl"
+                className="min-h-11 min-w-0 flex-1 bg-transparent text-right text-4xl font-bold tabular-nums tracking-tight text-slate-900 placeholder:text-slate-300 focus:outline-none sm:text-5xl"
               />
               <span className="shrink-0 text-lg font-semibold text-slate-500">
                 {deployment.displaySymbol}

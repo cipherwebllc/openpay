@@ -164,7 +164,7 @@ function AdoptHashForm({
         value={value}
         onChange={(e) => setValue(e.target.value)}
         placeholder="0x…"
-        className="w-full rounded-lg border border-amber-300 bg-white px-2 py-1.5 font-mono text-xs text-slate-800"
+        className="h-11 w-full rounded-lg border border-amber-300 bg-white px-2 font-mono text-base text-slate-800 placeholder:text-slate-500 sm:text-sm"
       />
       <button
         type="submit"

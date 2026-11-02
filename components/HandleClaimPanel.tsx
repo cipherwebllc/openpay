@@ -571,7 +571,7 @@ export function HandleClaimPanel({
                   }}
                   placeholder={t('handlePlaceholder')}
                   maxLength={30}
-                  className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none"
+                  className="h-11 min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-3 text-base placeholder:text-slate-500 focus:border-brand focus:outline-none sm:text-sm"
                 />
               </div>
               <p className="mt-1 text-xs text-slate-500">{t('formatHint')}</p>

@@ -11,13 +11,14 @@
 // props は variant の discriminated union: cart は manual 専用のデータ/ラベルを *渡せない*
 // (型エラー)。これにより呼出側がダミーの空文字ラベルを渡す必要が無くなる。
 
+import { useId } from 'react';
 import { ChevronRight, Hash } from 'lucide-react';
 import { Field } from './Field';
 import { TaxCategorySelect } from './TaxCategorySelect';
 import type { TaxCategory } from '@/lib/tax';
 
 const INPUT_CLASS =
-  'w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none';
+  'h-11 w-full rounded-lg border border-slate-300 bg-white px-3 text-base placeholder:text-slate-500 focus:border-brand focus:outline-none sm:text-sm';
 
 type CommonLabels = {
   title: string;
@@ -68,6 +69,8 @@ export type AccountingSectionProps = ManualProps | CartProps;
 
 export function AccountingSection(props: AccountingSectionProps) {
   const { labels, receiptNo, onReceiptNoChange, onGenerateReceiptNo, bare = false } = props;
+  // 欄を見出しと結ぶ id (QR とレジで同時に描かれても重ならないように useId)。
+  const id = useId();
   return (
     <details className={bare ? 'group' : 'group rounded-2xl border border-slate-200 bg-white p-4'}>
       <summary
@@ -85,8 +88,9 @@ export function AccountingSection(props: AccountingSectionProps) {
       <div className="mt-3 space-y-4">
         {props.variant === 'manual' && (
           <>
-            <Field label={props.labels.productName}>
+            <Field label={props.labels.productName} htmlFor={`${id}-product`}>
               <input
+                id={`${id}-product`}
                 type="text"
                 value={props.productName}
                 onChange={(e) => props.onProductNameChange(e.target.value)}
@@ -95,8 +99,9 @@ export function AccountingSection(props: AccountingSectionProps) {
                 maxLength={80}
               />
             </Field>
-            <Field label={props.labels.memo}>
+            <Field label={props.labels.memo} htmlFor={`${id}-memo`}>
               <input
+                id={`${id}-memo`}
                 type="text"
                 value={props.memo}
                 onChange={(e) => props.onMemoChange(e.target.value)}
@@ -119,14 +124,15 @@ export function AccountingSection(props: AccountingSectionProps) {
         {props.variant === 'cart' && props.labels.cartAutoNote && (
           <p className="text-xs text-slate-500">{props.labels.cartAutoNote}</p>
         )}
-        <Field label={labels.receiptNo}>
+        <Field label={labels.receiptNo} htmlFor={`${id}-receipt`}>
           <div className="flex items-center gap-2">
             <input
+              id={`${id}-receipt`}
               type="text"
               value={receiptNo}
               onChange={(e) => onReceiptNoChange(e.target.value)}
               placeholder={labels.receiptNoPlaceholder}
-              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-xs focus:border-brand focus:outline-none"
+              className="h-11 w-full rounded-lg border border-slate-300 bg-white px-3 font-mono text-base placeholder:text-slate-500 focus:border-brand focus:outline-none sm:text-sm"
               maxLength={64}
             />
             {onGenerateReceiptNo && labels.generate && (

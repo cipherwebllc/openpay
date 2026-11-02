@@ -240,7 +240,7 @@ export function AgentWalletCard({ c, activity, purchases }: { c: AgentPageConten
           <p className="mt-2 text-sm text-slate-700">{c.lead}</p>
           <label htmlFor="agent-wallet-address" className="mt-3 block text-sm font-medium">{c.inputLabel}</label>
           <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center">
-            <input ref={inputRef} id="agent-wallet-address" className={`block w-full min-w-0 rounded-xl border border-slate-300 px-3 py-2 font-mono text-sm ${focus}`} placeholder={c.inputPlaceholder} value={input} spellCheck={false} autoCapitalize="none" aria-invalid={Boolean(value && !address)} aria-describedby={value && !address ? 'agent-wallet-error' : undefined} onChange={(e) => {
+            <input ref={inputRef} id="agent-wallet-address" className={`block h-11 w-full min-w-0 rounded-xl border border-slate-300 px-3 font-mono text-base placeholder:text-slate-500 sm:text-sm ${focus}`} placeholder={c.inputPlaceholder} value={input} spellCheck={false} autoCapitalize="none" aria-invalid={Boolean(value && !address)} aria-describedby={value && !address ? 'agent-wallet-error' : undefined} onChange={(e) => {
               const next = e.target.value;
               const valid = isAddress(next.trim());
               setInput(next);
@@ -277,7 +277,7 @@ export function AgentWalletCard({ c, activity, purchases }: { c: AgentPageConten
           {address ? <div className="mt-5 border-t border-slate-200 pt-4"><fieldset className="min-w-0">
             <legend className="text-sm font-medium">{c.lookTitle}</legend>
             <label htmlFor="agent-wallet-label" className="mt-2 block text-xs text-slate-600">{c.nameLabel}</label>
-            <input id="agent-wallet-label" className={`mt-1 block w-full min-w-0 rounded-xl border border-slate-300 px-3 py-2 text-sm sm:max-w-xs ${focus}`} placeholder={c.labelPlaceholder} maxLength={LABEL_MAX} value={currentLabel} onChange={(e) => updateCurrent({ label: e.target.value.slice(0, LABEL_MAX) })} />
+            <input id="agent-wallet-label" className={`mt-1 block h-11 w-full min-w-0 rounded-xl border border-slate-300 px-3 text-base placeholder:text-slate-500 sm:max-w-xs sm:text-sm ${focus}`} placeholder={c.labelPlaceholder} maxLength={LABEL_MAX} value={currentLabel} onChange={(e) => updateCurrent({ label: e.target.value.slice(0, LABEL_MAX) })} />
             {/* 色・アイコンは名前つきの選択肢 (見本だけのボタンに名前を後付けしない・掟 8)。選んだ瞬間に上の残高の面へ反映される。 */}
             <fieldset className="mt-3 min-w-0">
               <legend className="text-xs text-slate-600">{c.colorLabel}</legend>

@@ -177,7 +177,7 @@ function MappingEditor({
         <select
           value={resolvedAccount}
           onChange={(e) => setAccountItemId(Number(e.target.value))}
-          className="mt-0.5 block w-full rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs"
+          className="mt-0.5 block h-11 w-full rounded-lg border border-slate-300 bg-white px-2 text-base sm:text-sm"
         >
           <option value="">—</option>
           {data.accountItems.map((a) => (
@@ -192,7 +192,7 @@ function MappingEditor({
         <select
           value={resolvedTax}
           onChange={(e) => setTaxCode(Number(e.target.value))}
-          className="mt-0.5 block w-full rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs"
+          className="mt-0.5 block h-11 w-full rounded-lg border border-slate-300 bg-white px-2 text-base sm:text-sm"
         >
           <option value="">—</option>
           {data.taxCodes.map((tax) => (

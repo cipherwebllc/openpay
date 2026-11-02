@@ -28,7 +28,7 @@ export function CreatorStoreLicenseFields({ fields, readOnly, onChange }: {
   onChange: (patch: Partial<LicenseFormFields>) => void;
 }) {
   const t = useTranslations('CreatorStoreSeller');
-  const inputClass = 'mt-1 min-h-11 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm read-only:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-brand';
+  const inputClass = 'mt-1 min-h-11 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-base placeholder:text-slate-500 read-only:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-brand sm:text-sm';
   return (
     <div className="grid grid-cols-1 gap-4 rounded-xl border border-indigo-200 bg-indigo-50/50 p-4 sm:col-span-2 sm:grid-cols-2">
       <div className="sm:col-span-2">

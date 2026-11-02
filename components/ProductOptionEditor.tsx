@@ -75,13 +75,13 @@ export function ProductOptionEditor({
               placeholder={t('groupNamePlaceholder')}
               aria-label={t('groupNameLabel')}
               onChange={(e) => patchGroup(g.id, { name: e.target.value })}
-              className="min-w-0 flex-1 rounded-md border border-slate-200 px-2 py-1 text-sm focus:border-brand focus:outline-none"
+              className="h-11 min-w-0 flex-1 rounded-md border border-slate-200 px-2 text-base placeholder:text-slate-500 focus:border-brand focus:outline-none sm:text-sm"
             />
             <select
               value={g.type}
               aria-label={t('typeLabel')}
               onChange={(e) => patchGroup(g.id, { type: e.target.value === 'multi' ? 'multi' : 'single' })}
-              className="rounded-md border border-slate-200 px-1 py-1 text-xs focus:border-brand focus:outline-none"
+              className="h-11 rounded-md border border-slate-200 px-1 text-base focus:border-brand focus:outline-none sm:text-sm"
             >
               <option value="single">{t('typeSingle')}</option>
               <option value="multi">{t('typeMulti')}</option>
@@ -113,7 +113,7 @@ export function ProductOptionEditor({
                   placeholder={t('choiceLabelPlaceholder')}
                   aria-label={t('choiceLabelLabel')}
                   onChange={(e) => patchChoice(g.id, c.id, { label: e.target.value })}
-                  className="min-w-0 flex-1 rounded-md border border-slate-200 px-2 py-1 text-sm focus:border-brand focus:outline-none"
+                  className="h-11 min-w-0 flex-1 rounded-md border border-slate-200 px-2 text-base placeholder:text-slate-500 focus:border-brand focus:outline-none sm:text-sm"
                 />
                 <span className="text-xs text-slate-500">+</span>
                 <input
@@ -125,7 +125,7 @@ export function ProductOptionEditor({
                   onChange={(e) =>
                     patchChoice(g.id, c.id, { priceDelta: e.target.value.replace(/[^\d.]/g, '') })
                   }
-                  className="w-20 rounded-md border border-slate-200 px-2 py-1 text-right font-mono text-sm focus:border-brand focus:outline-none"
+                  className="h-11 w-20 rounded-md border border-slate-200 px-2 text-right font-mono text-base placeholder:text-slate-500 focus:border-brand focus:outline-none sm:text-sm"
                 />
                 <button
                   type="button"

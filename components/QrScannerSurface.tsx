@@ -152,7 +152,7 @@ export function QrScannerSurface({ onScanned }: QrScannerSurfaceProps) {
             autoCapitalize="off"
             autoCorrect="off"
             spellCheck={false}
-            className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-xs focus:border-brand focus:outline-none"
+            className="h-11 w-full rounded-lg border border-slate-300 bg-white px-3 font-mono text-base placeholder:text-slate-500 focus:border-brand focus:outline-none sm:text-sm"
           />
           <div className="flex flex-wrap gap-2">
             <button

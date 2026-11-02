@@ -60,7 +60,7 @@ export function StoreBrowser({
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           placeholder={t('searchPlaceholder')}
-          className={`${env.enableLicenseNftUi ? 'min-h-11 ' : ''}w-full rounded-xl border border-slate-300 bg-white py-2.5 pl-9 pr-3 text-sm focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/15`}
+          className="h-11 w-full rounded-xl border border-slate-300 bg-white pl-9 pr-3 text-base placeholder:text-slate-500 focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/15 sm:text-sm"
         />
       </label>
       <div
