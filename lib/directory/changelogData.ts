@@ -1442,6 +1442,166 @@ export const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
       'ネットスターズ公式ニュース一覧で再確認: 2026-09-11 の Kaia MOU 以降、ステーブルコインの発表なし (その後の 9/30 の Stripe と 10/06 の teppay はコード決済の話)。Stablecoin Pay の稼働日・手数料・対応チェーンの変更は未公表のまま。',
     sourceUrl: 'https://www.netstars.co.jp/news/',
   },
+  {
+    date: '2026-10-27',
+    collectedAt: '2026-11-02',
+    scopes: ['jpyc-services'],
+    slug: 'jpyc',
+    changeType: 'updated',
+    summary:
+      'On the first anniversary of JPYC issuance and JPYC EX (2026-10-27), JPYC Inc. said cumulative issuance had passed 12 billion yen and accounts opened had passed 28,000, as of October 2026.',
+    summaryJa:
+      'JPYC の発行開始と JPYC EX の提供開始から 1 年 (2026-10-27) にあわせ、JPYC 株式会社が 2026 年 10 月現在で累計発行額 120 億円・口座開設数 2.8 万件を突破したと公表。',
+    sourceUrl: 'https://x.com/jpyc_official/status/2114930458345803886',
+  },
+  {
+    date: '2026-10-27',
+    collectedAt: '2026-11-02',
+    scopes: ['jpyc-services'],
+    slug: 'jpysc',
+    changeType: 'updated',
+    summary:
+      'SBI Holdings and Startale signed a basic agreement with BlackRock to study linking tokenized money market funds with JPYSC across technology and infrastructure, business and distribution, and regulation and market development.',
+    summaryJa:
+      'SBI ホールディングスと Startale が BlackRock と基本合意。トークン化 MMF と JPYSC の連携の可能性を、技術・インフラ、事業・販売、規制・市場整備の 3 領域で検討する。',
+    sourceUrl: 'https://www.sbigroup.co.jp/news/2026/1027_16682.html',
+  },
+  {
+    date: '2026-10-28',
+    collectedAt: '2026-11-02',
+    scopes: ['jpyc-services'],
+    slug: 'jpysc',
+    changeType: 'updated',
+    summary:
+      'SBI Holdings and CRB Group, the parent of Cross River Bank, signed a basic agreement on a strategic partnership and a planned joint venture in Japan; one area of collaboration is adding JPYSC to the Cross River platform as a settlement means for institutional, cross-border and tokenized-asset transactions, subject to further talks, final agreements and regulatory approvals.',
+    summaryJa:
+      'SBI ホールディングスが Cross River Bank の親会社 CRB Group と、戦略的業務提携と日本での合弁会社設立に向けて基本合意。協業の 1 つに、JPYSC を機関投資家向け取引・クロスボーダー取引・トークン化資産の取引の決済手段として Cross River のプラットフォームへ導入することがある。今後の協議・最終契約・日米の許認可等が前提。',
+    sourceUrl: 'https://www.sbigroup.co.jp/news/2026/1028_16686.html',
+  },
+  {
+    // 還付の受け取りで店舗の決済ではないので決済スコープに入れない。開始は発表の予定どおりと書き、稼働は断定しない。
+    date: '2026-10-29',
+    collectedAt: '2026-11-02',
+    scopes: ['jpyc-services'],
+    slug: 'jpyc',
+    changeType: 'updated',
+    assets: ['JPYC'],
+    chains: ['avalanche'],
+    summary:
+      'Japan Tax Free announced that its JapanRefund service will let visitors choose JPYC to receive tax refunds on tax-free purchases made on or after 2026-11-01, when the refund system starts, using UPBOND wallet infrastructure and Avalanche C-Chain; JPYC arrives after the customs check at departure and refund processing.',
+    summaryJa:
+      '日本免税が、免税還付サービス JapanRefund で訪日客が還付金の受取方法に JPYC を選べるようにすると発表。対象はリファンド方式が始まる 2026-11-01 以降の免税購入で、UPBOND のウォレット基盤と Avalanche の C-Chain を使う。JPYC が届くのは出国時の税関確認と還付処理の完了後。',
+    sourceUrl: 'https://prtimes.jp/main/html/rd/p/000000006.000151022.html',
+  },
+  {
+    // 終了したのは iOS/Android のアプリ版。ディレクトリの掲載は 9/30 開始の au PAY ミニアプリで、エントリの事実は変えない。
+    date: '2026-10-30',
+    collectedAt: '2026-11-02',
+    scopes: ['jpyc-services'],
+    slug: 'alpha-u-wallet',
+    changeType: 'updated',
+    summary:
+      'The iOS/Android app version of αU wallet ended service at 12:00 on 2026-10-30, and the notice asks holders to migrate assets because NFTs and crypto assets can no longer be viewed or managed there; the notice covers the app version, while this directory lists the au PAY mini app launched on 2026-09-30.',
+    summaryJa:
+      'iOS/Android アプリ版の αU wallet が 2026-10-30 12:00 でサービスを終了。以後は保有する NFT・暗号資産の閲覧・管理ができなくなるとして、資産の移行を案内している。告知の対象はアプリ版で、このディレクトリの掲載は 2026-09-30 に始まった au PAY ミニアプリ。',
+    sourceUrl: 'https://x.com/alphau_official/status/2115941757271609578',
+  },
+  {
+    date: '2026-10-30',
+    collectedAt: '2026-11-02',
+    scopes: ['jpyc-services'],
+    slug: 'jpysc',
+    changeType: 'updated',
+    summary:
+      'SBI Holdings and Sumitomo Mitsui Financial Group signed a capital and business alliance to jointly study stablecoin use, starting with JPYSC, and agreed that SMBC Group will take a 5% stake in SBI Startale Marketing.',
+    summaryJa:
+      'SBI ホールディングスと三井住友フィナンシャルグループが、JPYSC をはじめとするステーブルコインの活用を共同で検討する資本業務提携を締結。SMBC グループが SBI Startale Marketing へ 5% 出資することでも合意した。',
+    sourceUrl: 'https://www.sbigroup.co.jp/news/2026/1030_16698.html',
+  },
+  {
+    // 銘柄名は発表にない → assets を書かない。TIS の改称後の社名で別の行にする (過去の provider は書き換えない)。
+    date: '2026-10-30',
+    collectedAt: '2026-11-02',
+    scopes: ['stablecoin-payments'],
+    provider: 'TISI / CARDNET',
+    changeType: 'added',
+    changeCategory: 'pilot',
+    summary:
+      'TISI and CARDNET reported a stablecoin payment pilot at a staffed register in a staff cafeteria in Takadanobaba (2026-09-01 to 2026-09-08): 62 participants completed 137 payments in yen- and US dollar-denominated stablecoins (token names not published), with merchant settlement, reconciliation and accounting also tested; TISI aims to commercialize its stablecoin payment support service within fiscal 2027.',
+    summaryJa:
+      'TISI と日本カードネットワーク (CARDNET) が、高田馬場の社員食堂の有人レジで行ったステーブルコイン決済の実証の結果を発表 (2026-09-01〜09-08)。62 名が日本円建てと米ドル建ての決済を計 137 件完了 (銘柄名は非公表)。加盟店精算・取引突合・経理まで検証し、TISI は「ステーブルコイン決済支援サービス」の 2027 年度中の事業化を目指す。',
+    sourceUrl: 'https://prtimes.jp/main/html/rd/p/000001991.000011650.html',
+  },
+  {
+    date: '2026-11-02',
+    collectedAt: '2026-11-02',
+    scopes: ['jpyc-services'],
+    slug: 'coincheck',
+    changeType: 'verified',
+    assets: ['USDC'],
+    summary:
+      'Re-verified against the FSA registry of Electronic Payment Instruments Exchange Service Providers (still as of 2026-08-27): two registrants, SBI VC Trade (No. 00001) and Coincheck (No. 00002, USDC); no new registration.',
+    summaryJa:
+      '金融庁の電子決済手段等取引業者登録一覧 (令和 8 年 8 月 27 日現在のまま) で再確認: 登録は SBI VC トレード (第00001号) とコインチェック (第00002号・USDC) の 2 社で、新規登録なし。',
+    sourceUrl: 'https://www.fsa.go.jp/menkyo/menkyoj/denshikessaisyudan.pdf',
+  },
+  {
+    date: '2026-11-02',
+    collectedAt: '2026-11-02',
+    scopes: ['stablecoin-payments'],
+    provider: 'HashPort (Osaka Pref. subsidy)',
+    changeType: 'verified',
+    assets: ['JPYC', 'USDC'],
+    summary:
+      'Re-verified on the Osaka Prefecture page and its award list (both still dated 2026-08-26): HashPort pilot schedule (an assumed one week or more between January and March 2027) unchanged.',
+    summaryJa:
+      '大阪府公式ページと交付決定事業一覧 (いずれも 2026-08-26 のまま) で再確認: HashPort の実証の予定 (2027 年 1〜3 月の間で 1 週間以上を想定) に変更なし。',
+    sourceUrl:
+      'https://www.pref.osaka.lg.jp/o020060/kikaku/osaka-kokusaikinyu/senkuteki_hojokin.html',
+  },
+  {
+    date: '2026-11-02',
+    collectedAt: '2026-11-02',
+    scopes: ['stablecoin-payments'],
+    provider: 'Mina Wallet / Sumitomo Mitsui Card (Osaka Pref. subsidy)',
+    changeType: 'verified',
+    assets: ['JPYC', 'USDC'],
+    summary:
+      'Re-verified on the Osaka Prefecture page and its award list (both still dated 2026-08-26): Mina Wallet / Sumitomo Mitsui Card pilot schedule (around October 2026 to February 2027, a few days to about a month) unchanged.',
+    summaryJa:
+      '大阪府公式ページと交付決定事業一覧 (いずれも 2026-08-26 のまま) で再確認: マイナウォレット / 三井住友カードの実証の予定 (2026 年 10 月〜2027 年 2 月頃の間で数日〜1 か月程度) に変更なし。',
+    sourceUrl:
+      'https://www.pref.osaka.lg.jp/o020060/kikaku/osaka-kokusaikinyu/senkuteki_hojokin.html',
+  },
+  {
+    date: '2026-11-02',
+    collectedAt: '2026-11-02',
+    scopes: ['stablecoin-payments'],
+    provider: 'Mi&T (Osaka Pref. subsidy)',
+    changeType: 'verified',
+    assets: ['JPYC'],
+    // 府のページと採択一覧 (PDF) にあるのは実施時期と規模だけ。手数料 1.0% の出典は Mi&T の自社リリース (8/31) なので、
+    // この再確認の文には書かない (府のページで確かめたことにしない)。
+    summary:
+      'Re-verified on the Osaka Prefecture page and its award list (both still dated 2026-08-26): Mi&T pilot schedule (mid-November 2026 to mid-March 2027, about five shops) unchanged.',
+    summaryJa:
+      '大阪府公式ページと交付決定事業一覧 (いずれも 2026-08-26 のまま) で再確認: Mi&T の実証の予定 (2026 年 11 月中旬〜2027 年 3 月中旬・5 店舗程度) に変更なし。',
+    sourceUrl:
+      'https://www.pref.osaka.lg.jp/o020060/kikaku/osaka-kokusaikinyu/senkuteki_hojokin.html',
+  },
+  {
+    date: '2026-11-02',
+    collectedAt: '2026-11-02',
+    scopes: ['stablecoin-payments'],
+    provider: 'NetStars Stablecoin Pay',
+    changeType: 'verified',
+    assets: ['JPYC', 'USDT'],
+    summary:
+      'Re-verified on the NetStars news list: no stablecoin announcement after the 2026-09-11 Kaia MOU (the later items, Stripe on 2026-09-30 and teppay on 2026-10-06, are about code payments); no launch date, fee or chain change published for Stablecoin Pay.',
+    summaryJa:
+      'ネットスターズ公式ニュース一覧で再確認: 2026-09-11 の Kaia MOU 以降、ステーブルコインの発表なし (その後の 9/30 の Stripe と 10/06 の teppay はコード決済の話)。Stablecoin Pay の稼働日・手数料・対応チェーンの変更は未公表のまま。',
+    sourceUrl: 'https://www.netstars.co.jp/news/',
+  },
 ];
 
 // ディレクトリ初期公開日。baseline の 'added' はこの固定日に立てる — entry.updatedAt 由来に

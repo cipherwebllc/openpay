@@ -117,7 +117,7 @@ export const DIRECTORY_ENTRIES = [
     // 2026-08-27: 電子決済手段等取引業者に登録 (金融庁登録一覧・第00002号・取扱 USDC)。
     // 取扱開始時期は未発表のため tokens は空のまま (sourced-facts-only)。
     ...provenance('https://coincheck.com/', 'コインチェック株式会社', 'official', {
-      verifiedAt: '2026-10-27',
+      verifiedAt: '2026-11-02',
       updatedAt: '2026-09-04',
     }),
     facts: {
@@ -231,11 +231,12 @@ export const DIRECTORY_ENTRIES = [
     // 2026-10-08 (第 7 回): αU wallet の Ponta→JPYC 交換・RatioFX との MOU は changelog のみ (エントリの事実は不変)
     // 2026-10-13 (第 8 回): 公取委への情報提供 (10/09) と、補充 2 件 (5/26 ダイナースのポイント交換・7/22 AZ-COM 丸和) も changelog のみ
     // 2026-10-27 (第 11 回): SBJ 銀行・LINE NEXT との覚書 (10/21 発表) は changelog のみ (エントリの事実は不変)
+    // 2026-11-02 (第 12 回): 1 周年の公表値 (10/27)・日本免税の還付 (10/29) も changelog のみ
     ...provenance(
       'https://corporate.jpyc.co.jp/news/posts/jpyc-ex-launch',
       'JPYC株式会社',
       'official',
-      { verifiedAt: '2026-10-27', updatedAt: '2026-08-27' },
+      { verifiedAt: '2026-11-02', updatedAt: '2026-08-27' },
     ),
     facts: {
       description: '日本円と連動するよう設計された電子決済手段のステーブルコイン。',
@@ -589,8 +590,9 @@ export const DIRECTORY_ENTRIES = [
     name: 'αU wallet',
     nameJa: 'αU wallet',
     status: 'published',
+    // 2026-11-02 (第 12 回): アプリ版の終了 (10/30) は changelog のみ。掲載はミニアプリなのでエントリの事実は不変
     ...provenance('https://newsroom.kddi.com/news/detail/kddi_nr-1182_4741.html', 'au Coincheck Digital Assets株式会社', 'official', {
-      verifiedAt: '2026-10-21',
+      verifiedAt: '2026-11-02',
       updatedAt: '2026-10-21',
     }),
     facts: {
@@ -841,8 +843,9 @@ export const DIRECTORY_ENTRIES = [
     name: 'JPYSC',
     nameJa: 'JPYSC',
     status: 'published',
+    // 2026-11-02 (第 12 回): BlackRock・CRB Group・SMBC グループとの提携 (10/27〜10/30) は changelog のみ
     ...provenance('https://www.sbivc.co.jp/jpysc', 'SBI新生信託銀行株式会社', 'official', {
-      verifiedAt: '2026-10-21',
+      verifiedAt: '2026-11-02',
       updatedAt: '2026-10-21',
     }),
     facts: {

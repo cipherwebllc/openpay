@@ -139,7 +139,7 @@ export const PAYMENT_PROVIDERS: readonly PaymentProviderRecord[] = [
     startedAt: null,
     plannedPeriod: '2027-01..2027-03',
     sourceUrl: OSAKA_SUBSIDY_URL,
-    verifiedAt: '2026-10-27',
+    verifiedAt: '2026-11-02',
   },
   {
     provider: 'Mina Wallet / Sumitomo Mitsui Card (Osaka Pref. subsidy)',
@@ -156,7 +156,7 @@ export const PAYMENT_PROVIDERS: readonly PaymentProviderRecord[] = [
     startedAt: null,
     plannedPeriod: '2026-10..2027-02',
     sourceUrl: OSAKA_SUBSIDY_URL,
-    verifiedAt: '2026-10-27',
+    verifiedAt: '2026-11-02',
   },
   {
     provider: 'Mi&T (Osaka Pref. subsidy)',
@@ -174,7 +174,7 @@ export const PAYMENT_PROVIDERS: readonly PaymentProviderRecord[] = [
     startedAt: null,
     plannedPeriod: '2026-11..2027-03',
     sourceUrl: 'https://prtimes.jp/main/html/rd/p/000000003.000187870.html',
-    verifiedAt: '2026-10-27',
+    verifiedAt: '2026-11-02',
   },
   {
     // 2026-09-04 の第 2 回週次更新で追跡開始 (発表は 2026-07-13・backfill)。
@@ -192,7 +192,7 @@ export const PAYMENT_PROVIDERS: readonly PaymentProviderRecord[] = [
     startedAt: '2026-07-13',
     plannedPeriod: null,
     sourceUrl: 'https://prtimes.jp/main/html/rd/p/000000185.000019526.html',
-    verifiedAt: '2026-10-27',
+    verifiedAt: '2026-11-02',
   },
   {
     // 2026-09-29 の第 6 回週次更新で追跡開始 (発表は 2026-01-28 の PR TIMES・backfill)。
@@ -270,5 +270,24 @@ export const PAYMENT_PROVIDERS: readonly PaymentProviderRecord[] = [
     plannedPeriod: null,
     sourceUrl: 'https://newsroom.kddi.com/news/detail/kddi_nr-1182_4741.html',
     verifiedAt: '2026-10-08',
+  },
+  {
+    // 2026-11-02 の第 12 回週次更新で追跡開始。発表 2026-10-30・実証 2026-09-01〜09-08 (実施済み)。
+    // 銘柄・チェーン・精算通貨・手数料は発表に記載なし → [] / null。POS は連動せず専用端末を単独で操作 (発表の前提条件)。
+    provider: 'TISI / CARDNET',
+    eventKeys: ['TISI / CARDNET'],
+    stage: 'pilot',
+    assets: [],
+    chains: [],
+    settlementCurrency: null,
+    merchantFee: null,
+    integrations: ['in-store'],
+    posIntegration: false,
+    region: 'Japan',
+    announcedAt: '2026-10-30',
+    startedAt: '2026-09-01',
+    plannedPeriod: null,
+    sourceUrl: 'https://prtimes.jp/main/html/rd/p/000001991.000011650.html',
+    verifiedAt: '2026-11-02',
   },
 ];
