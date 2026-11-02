@@ -102,7 +102,7 @@
     "aiEraTitle": "上限を決めて、AI に JPYC を払わせる。",
     "aiEraBody": "「JPYC でこれ買って」を、いつもの AI に。Claude Code や Codex に OpenPay Agent をつなぐと、お店や API を探して、注文や支払いを準備します。",
     "aiEraCtaAgent": "OpenPay Agent を試す",
-    "aiEraAgentNote": "支払いは 1 回ごとの署名で、トークンの事前承認は使いません。鍵も OpenPay に預けません。入れるのは失ってもよい少額だけに。AI に財布を渡さず、最後だけ自分で承認する使い方もできます。",
+    "aiEraAgentNote": "支払いは 1 回ごとの署名で、トークンの事前承認は使いません。鍵も OpenPay に預けません。シェルを使える AI は上限を書き換えられるので、入れるのは失ってもよい少額だけに。AI に財布を渡さず、最後だけ自分で承認する使い方もできます。",
     "aiEraCtaStore": "AIストアを見る",
     "aiEraCtaPay": "AIが支払うガイド",
     "aiEraCtaSell": "APIを売るガイド",

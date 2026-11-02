@@ -102,7 +102,7 @@
     "aiEraTitle": "Set a limit, then let AI pay in JPYC.",
     "aiEraBody": "Ask your usual AI to “buy this with JPYC.” Connect OpenPay Agent to Claude Code or Codex, and it finds shops and APIs and prepares the order and payment.",
     "aiEraCtaAgent": "Try OpenPay Agent",
-    "aiEraAgentNote": "Each payment is a single signature, with no token pre-approval. OpenPay never holds your keys. Fund it only with a small amount you can afford to lose. You can also keep your wallet to yourself and approve only the final payment.",
+    "aiEraAgentNote": "Each payment is a single signature, with no token pre-approval. OpenPay never holds your keys. An AI with shell access can change its limits, so fund it only with a small amount you can afford to lose. You can also keep your wallet to yourself and approve only the final payment.",
     "aiEraCtaStore": "See the AI store",
     "aiEraCtaPay": "AI payment guide",
     "aiEraCtaSell": "Sell your API",

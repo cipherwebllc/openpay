@@ -1573,10 +1573,10 @@ it('Arc の USDC 決済 (通常決済のみ・顧客が USDC でネットワー�
 describe('three disclosed tip fee models', () => {
   it.each(['ja', 'en'] as const)('%s: every surface distinguishes JPYC, Base and Arc', async (locale) => {
     const m = locale === 'ja' ? (await import('@/messages/ja.json')).default : (await import('@/messages/en.json')).default;
-    // トップのチップカードは数字を ICU で差し込むので、描画と同じ値で整形してから見る。
+    // ストアのガイドのチップの欄は数字を ICU で差し込むので、描画と同じ値で整形してから見る。
     const landing = createTranslator({ locale, messages: m, namespace: 'Landing', onError: (error) => { throw error; } });
     const surfaces = [
-      ['トップのチップカード', landing('supportFeeTipBody', LANDING_PAYMENT_FEE_VALUES)],
+      ['ストアのガイドのチップの欄', landing('supportFeeTipBody', LANDING_PAYMENT_FEE_VALUES)],
       ['規約 第 5 条 (1)', m.Terms.article5.body.split('(2)')[0]],
       ['特商法 役務の対価', m.Tokutei.rows.price.value],
       ['免責 §7', m.Disclaimer.section7.body],

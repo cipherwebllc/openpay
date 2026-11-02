@@ -89,10 +89,11 @@ describe('standard-payment fee scope (review 6 regression)', () => {
         expect(text).toContain('does not issue, redeem, buy, sell, exchange or manage');
       }
     });
-    // 2026-11-02: 上限はシェルを使える AI には壁でない (#902)。トップでは「強制」と言い切らず、少額で使う前提を書く。
-    it(`${locale}: AI の節は上限を強制と言い切らず、失ってもよい少額で使う前提を書く`, () => {
+    // 2026-11-02: 上限はシェルを使える AI には壁でない (#902)。トップでは「強制」と言い切らず、その理由と少額で使う前提を書く。
+    it(`${locale}: AI の節は上限を強制と言い切らず、書き換えられることと少額で使う前提を書く`, () => {
       const text = `${t('aiEraTitle')} ${t('aiEraBody')} ${t('aiEraAgentNote')}`;
       expect(text).not.toMatch(locale === 'ja' ? /強制/ : /enforc/i);
+      expect(text).toContain(locale === 'ja' ? 'シェルを使える AI は上限を書き換えられる' : 'An AI with shell access can change its limits');
       expect(text).toContain(locale === 'ja' ? '失ってもよい少額' : 'small amount you can afford to lose');
     });
     // 2026-11-02: 割引の可否は加盟店規約による。OpenPay は個々の規約を判断しない (ガイドの必須文と同じ考え方)。
