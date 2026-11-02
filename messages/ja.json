@@ -3510,13 +3510,12 @@
     "copy": "リンクをコピー",
     "copied": "コピーしました",
     "share": "送る",
-    "shareText": "ご注文 {id} のお支払いはこちらです。お支払い後、完了画面の「トランザクション」をお知らせください。",
+    "shareText": "ご注文 {id} のお支払いはこちらです。お支払い後、完了画面の Tx Hash をお知らせください。",
     "open": "開いて確かめる",
     "nextOrder": "次の注文へ",
     "linkLabel": "お客様に送るリンク",
     "cautionTitle": "ウォレットに {amount} JPYC 届いてから発送",
     "checksTitle": "詳しい注意",
-    "checkTxHash": "同じ額の注文は、完了画面の「トランザクション」を返信してもらうと見分けられます。",
     "checkExpiry": "リンクに期限はありません。支払い期限はお客様に伝えてください。",
     "checkPrivacy": "リンクを作るだけでは、注文の内容は OpenPay に送られません。",
     "sellerDuty": "住所などのお客様の情報、特定商取引法の表示、発送と返金はお店の責任です。OpenPay は売買の当事者ではありません。",
@@ -3535,7 +3534,7 @@
       "itemName": "商品名を入れてください。",
       "itemQty": "数量は 1〜{qtyMax} で入れてください。",
       "itemPrice": "単価は数字で入れてください。",
-      "tooLargeGasless": "ガス代不要の上限は {maximum} JPYC です。通常決済なら {standardMaximum} JPYC まで作れます。"
+      "tooLargeGasless": "ガス代不要の上限は {maximum} JPYC です。通常決済なら {standardMaximum} JPYC まで作れますが、お客様にガス代が必要です。"
     },
     "errorsShort": {
       "receiver": "受取ウォレットを入力",
@@ -3561,8 +3560,12 @@
     "storeOnly": "お店だけに表示",
     "shared": "送りました",
     "copyFailed": "コピーできませんでした",
-    "switchToStandard": "通常決済に切り替える",
+    "switchToStandard": "この注文だけ通常決済にする",
     "lineSubtotal": "単価 {price} × {qty} = {amount} JPYC",
-    "chainHint": "お客様の JPYC があるチェーンを選びます。迷ったら Polygon。"
+    "chainHint": "お客様の JPYC があるチェーンを選びます。迷ったら Polygon。",
+    "numberUsed": "{id} は使用済みの番号です",
+    "advanceNumber": "番号を進める",
+    "cautionStandard": "この注文は通常決済です。お客様にガス代が必要です",
+    "cautionTxHash": "同じ額の注文は、お客様の Tx Hash で見分けます"
   }
 }

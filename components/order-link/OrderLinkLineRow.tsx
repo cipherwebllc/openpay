@@ -31,7 +31,7 @@ export const OrderLinkLineRow = forwardRef<
   const qty = Number(line.qty);
   const amount = orderLinkLineAmount(line);
   const stepTo = (next: number) => {
-    if (next >= 1 && next <= CHECKOUT_QTY_MAX) onChange({ qty: String(next) });
+    if (Number.isInteger(next) && next >= 1 && next <= CHECKOUT_QTY_MAX) onChange({ qty: String(next) });
   };
   return (
     <li
@@ -89,7 +89,8 @@ export const OrderLinkLineRow = forwardRef<
             value={line.qty}
             inputMode="numeric"
             aria-invalid={issues.includes('qty') || undefined}
-            onChange={(event) => onChange({ qty: event.target.value.replace(/[^\d]/g, '') })}
+            // 数字以外を消すと 1.5 が 15 になる。全角の数字だけ直し、残りは欄の誤りとして止める。
+            onChange={(event) => onChange({ qty: event.target.value.normalize('NFKC').trim() })}
             className={`h-11 w-9 bg-transparent text-center text-base font-semibold tabular-nums text-slate-900 focus:outline-none focus:ring-2 focus:ring-brand/30 ${
               issues.includes('qty') ? 'text-rose-700' : ''
             }`}

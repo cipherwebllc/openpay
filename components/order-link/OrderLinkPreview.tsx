@@ -22,12 +22,13 @@ export function OrderLinkPreview({
   message,
   messageIsError,
   sentLabel,
-  hasSent,
+  standardPayment,
   canCopy,
   showUrl,
   canShare,
   onCopy,
   onShare,
+  onManualCopy,
   onNextOrder,
   onSwitchToStandard,
 }: {
@@ -41,14 +42,16 @@ export function OrderLinkPreview({
   messageIsError: boolean;
   /** 表示中のリンクをコピーか共有した直後の状態の文字。書き換えると消える。 */
   sentLabel: string | null;
-  /** この注文のリンクを 1 度でも渡した。 */
-  hasSent: boolean;
+  /** この注文を通常決済で作っている (お客様にガス代が要る)。 */
+  standardPayment: boolean;
   canCopy: boolean;
   /** コピーできない環境やコピーに失敗したときは、リンクを文字で見せる。 */
   showUrl: boolean;
   canShare: boolean;
   onCopy: () => void;
   onShare: () => void;
+  /** リンクの欄から手でコピーした。 */
+  onManualCopy: () => void;
   onNextOrder: () => void;
   /** 通常決済に切り替えれば作れるときだけ渡す。 */
   onSwitchToStandard: (() => void) | null;
@@ -105,7 +108,7 @@ export function OrderLinkPreview({
         )}
 
         {lines.length > 0 && !result.ok && message && (
-          <p role="status" className={`mt-3 text-sm ${messageIsError ? 'text-rose-700' : 'text-slate-600'}`}>
+          <p className={`mt-3 text-sm ${messageIsError ? 'text-rose-700' : 'text-slate-600'}`}>
             {message}
           </p>
         )}
@@ -143,6 +146,7 @@ export function OrderLinkPreview({
                 readOnly
                 value={result.url}
                 onFocus={(event) => event.target.select()}
+                onCopy={onManualCopy}
                 className="h-11 w-full scroll-mb-44 rounded-xl bg-white px-3 font-mono text-xs text-slate-700 ring-1 ring-slate-200"
               />
             </div>
@@ -173,16 +177,6 @@ export function OrderLinkPreview({
               {t('open')}
             </a>
           </div>
-          {/* 送った後に書き換えたとき。スマホは固定バーに同じボタンがある。 */}
-          {hasSent && !justSent && (
-            <button
-              type="button"
-              onClick={onNextOrder}
-              className="hidden h-11 w-full rounded-xl bg-white text-sm font-semibold text-slate-700 ring-1 ring-slate-200 hover:bg-slate-100 lg:block"
-            >
-              {t('nextOrder')}
-            </button>
-          )}
           <div className="flex gap-2">
             <AlertTriangle className="mt-0.5 h-4 w-4 flex-none text-amber-600" aria-hidden />
             <div className="min-w-0">
@@ -195,8 +189,10 @@ export function OrderLinkPreview({
                     {t('cautionFee', { fee: groupAmountDigits(result.fee), total: groupAmountDigits(result.total) })}
                   </li>
                 )}
+                {standardPayment && <li>{t('cautionStandard')}</li>}
                 <li>{t('cautionEditable')}</li>
                 <li>{t('cautionHistory')}</li>
+                <li>{t('cautionTxHash')}</li>
               </ul>
             </div>
           </div>
@@ -209,7 +205,6 @@ export function OrderLinkPreview({
               />
             </summary>
             <ul className="list-disc space-y-1.5 pb-1 pl-4 text-xs leading-relaxed text-slate-600">
-              <li>{t('checkTxHash')}</li>
               <li>{t('checkNumber')}</li>
               <li>{t('checkExpiry')}</li>
               <li>{t('checkPrivacy')}</li>

@@ -55,7 +55,7 @@ const GUIDANCE: ReadonlySet<OrderLinkError> = new Set(['receiver', 'receiverReso
 const ISSUE_MESSAGE = { name: 'itemName', qty: 'itemQty', price: 'itemPrice' } as const;
 
 type LineState = OrderLinkLine & { id: number };
-type SentLink = { url: string; via: 'copy' | 'share' };
+type SentLink = { url: string; orderId: string; via: 'copy' | 'share' };
 
 export function OrderLinkBuilder() {
   const t = useTranslations('OrderLinkBuilder');
@@ -76,9 +76,13 @@ export function OrderLinkBuilder() {
   const [receiverChecked, setReceiverChecked] = useState(false);
   const [sent, setSent] = useState<SentLink | null>(null);
   const [focusFirstLine, setFocusFirstLine] = useState(false);
-  const [copyFailed, setCopyFailed] = useState(false);
+  const [copyFailedUrl, setCopyFailedUrl] = useState<string | null>(null);
+  const [urlFieldOpen, setUrlFieldOpen] = useState(false);
+  // この注文だけの支払い方法。上限を超えた 1 件のために保存すると、以後の注文までお客様にガス代が要ることになる。
+  const [modeOverride, setModeOverride] = useState<PayMode | null>(null);
   const firstNameRef = useRef<HTMLInputElement>(null);
   const orderIdRef = useRef<HTMLInputElement>(null);
+  const currentUrl = useRef<string | null>(null);
 
   const typedItems = lines.some((line) => line.name !== '' || line.price !== '');
   // 取り込みの保留は使う人が打った内容だけで決める。自動の番号や覚えた送料で保留すると、別のタブの設定が永久に入らない。
@@ -87,6 +91,7 @@ export function OrderLinkBuilder() {
   });
   const autoOrderId = settings.lastOrderId ? nextOrderLinkId(settings.lastOrderId) : ORDER_LINK_FIRST_ID;
   const orderId = orderIdInput ?? (hydrated ? autoOrderId : '');
+  const payMode = modeOverride ?? settings.payMode;
 
   const receiverName = settings.receiver.trim();
   const ens = useResolveAddress(isLikelyName(receiverName) ? receiverName : '');
@@ -138,14 +143,14 @@ export function OrderLinkBuilder() {
         origin: origin || 'https://open-pay.jp',
         to: linkReceiver,
         chain: settings.chain,
-        mode: settings.payMode,
+        mode: payMode,
         orderId,
         description,
         lines,
         shipping: settings.shipping,
         shippingLabel,
       }),
-    [origin, linkReceiver, settings.chain, settings.payMode, settings.shipping, orderId, description, lines, shippingLabel],
+    [origin, linkReceiver, settings.chain, payMode, settings.shipping, orderId, description, lines, shippingLabel],
   );
   const previewLines = useMemo(
     () => orderLinkPreviewLines(lines, settings.shipping, shippingLabel),
@@ -157,7 +162,7 @@ export function OrderLinkBuilder() {
   const canSwitchToStandard =
     !result.ok &&
     reason === 'tooLarge' &&
-    settings.payMode === 'gasless' &&
+    payMode === 'gasless' &&
     result.total !== undefined &&
     orderLinkFitsStandard(result.total);
   const messageKey =
@@ -173,25 +178,36 @@ export function OrderLinkBuilder() {
   const shortText = messageKey === null ? null : t(`errorsShort.${messageKey}`, messageValues);
   const blocked = reason !== null && !GUIDANCE.has(reason);
 
-  const sentVia = result.ok && sent?.url === result.url ? sent.via : null;
+  const copyFailed = result.ok && copyFailedUrl === result.url;
+  const sentVia = !copyFailed && result.ok && sent?.url === result.url ? sent.via : null;
   const sentLabel = sentVia === null ? null : t(sentVia === 'share' ? 'shared' : 'copied');
+  // 送った番号のまま別の内容に書き換えた。別の注文なら番号を進められるように知らせる。
+  const reusingNumber = sent !== null && sent.orderId === orderId && (!result.ok || sent.url !== result.url);
   // 番号はリンクを渡すときに確定する (開いただけでは進めない)。固定してから進めるので、表示中の注文の番号は変わらない。
   const markSent = (url: string, via: SentLink['via']) => {
-    setOrderIdInput(orderId);
-    setSent({ url, via });
     setSettings((current) => ({ ...current, lastOrderId: orderId }));
+    setCopyFailedUrl(null);
+    // 完了を待つ間に書き換えられたら、今の入力に前の注文の状態を重ねない。番号は使ったものとして残す。
+    if (currentUrl.current !== url) return;
+    setOrderIdInput(orderId);
+    setSent({ url, orderId, via });
   };
   const copyLink = async () => {
     if (!result.ok) return;
-    const copied = await copier.copy(result.url);
-    setCopyFailed(!copied);
-    if (copied) markSent(result.url, 'copy');
+    const { url } = result;
+    if (await copier.copy(url)) {
+      markSent(url, 'copy');
+    } else {
+      setCopyFailedUrl(url);
+      setUrlFieldOpen(true);
+    }
   };
   const shareLink = async () => {
     if (!result.ok) return;
+    const { url } = result;
     try {
-      await navigator.share({ text: t('shareText', { id: orderId }), url: result.url });
-      markSent(result.url, 'share');
+      await navigator.share({ text: t('shareText', { id: orderId }), url });
+      markSent(url, 'share');
     } catch {
       // 取り消しや許可の拒否は正常系。共有できなくてもコピーが残る (掟 13)。
     }
@@ -199,7 +215,9 @@ export function OrderLinkBuilder() {
   const startNextOrder = () => {
     setOrderIdInput(null);
     setSent(null);
-    setCopyFailed(false);
+    setCopyFailedUrl(null);
+    setUrlFieldOpen(false);
+    setModeOverride(null);
     setDescription('');
     setDescriptionOpen(false);
     setLines([newLine()]);
@@ -212,9 +230,18 @@ export function OrderLinkBuilder() {
     (autoOrderId ? firstNameRef.current : orderIdRef.current)?.focus();
   }, [focusFirstLine, autoOrderId]);
   useEffect(() => {
+    currentUrl.current = result.ok ? result.url : null;
+  }, [result]);
+  useEffect(() => {
     // コピーできない環境では、手で選べるようリンクの欄へ案内する (欄は focus で全選択になる)。
     if (copyFailed) document.getElementById('order-link-url')?.focus();
   }, [copyFailed]);
+
+  const advanceNumber = () => {
+    setOrderIdInput(null);
+    setSent(null);
+    if (!autoOrderId) orderIdRef.current?.focus();
+  };
 
   const updateLine = (id: number, patch: Partial<OrderLinkLine>) =>
     setLines((current) => current.map((line) => (line.id === id ? { ...line, ...patch } : line)));
@@ -234,7 +261,8 @@ export function OrderLinkBuilder() {
         <div
           className="border-b border-slate-100 px-5 py-4"
           onBlur={() => {
-            if (receiverInline && receiverChecked && linkReceiver) setReceiverInline(false);
+            // 「接続中のウォレットを使う」が出ている間は畳まない (押す前に消さない)。
+            if (receiverInline && receiverChecked && linkReceiver && !autofill.canUseConnected) setReceiverInline(false);
           }}
         >
           {receiverInline ? (
@@ -252,8 +280,8 @@ export function OrderLinkBuilder() {
               receiver={effectiveReceiver}
               chainSlug={settings.chain}
               chainName={chainForSlug(settings.chain).name}
-              payLabel={t(`modes.${settings.payMode}`)}
-              payTone={settings.payMode}
+              payLabel={t(`modes.${payMode}`)}
+              payTone={payMode}
               onOpenSettings={() => setSettingsOpen(true)}
               // 行の高さを増やさず、押せる範囲だけを 44px 以上に広げる。
               settingsClassName="relative after:absolute after:-inset-x-1 after:-inset-y-2 after:content-['']"
@@ -336,19 +364,33 @@ export function OrderLinkBuilder() {
                 />
               </div>
             </div>
-            <div className="flex items-center justify-between gap-3 pt-2.5">
-              <label htmlFor="order-link-id" className="text-sm font-medium text-slate-700">
-                {t('orderIdLabel')}
-              </label>
-              <input
-                ref={orderIdRef}
-                id="order-link-id"
-                value={orderId}
-                maxLength={ORDER_LINK_ID_MAX}
-                aria-invalid={orderIdInvalid || undefined}
-                onChange={(event) => setOrderIdInput(event.target.value)}
-                className={`${ORDER_LINK_INPUT_CLASS} !w-[9.5rem] text-right tabular-nums ${invalidClass(orderIdInvalid)}`}
-              />
+            <div>
+              <div className="flex items-center justify-between gap-3 pt-2.5">
+                <label htmlFor="order-link-id" className="text-sm font-medium text-slate-700">
+                  {t('orderIdLabel')}
+                </label>
+                <input
+                  ref={orderIdRef}
+                  id="order-link-id"
+                  value={orderId}
+                  maxLength={ORDER_LINK_ID_MAX}
+                  aria-invalid={orderIdInvalid || undefined}
+                  onChange={(event) => setOrderIdInput(event.target.value)}
+                  className={`${ORDER_LINK_INPUT_CLASS} !w-[9.5rem] text-right tabular-nums ${invalidClass(orderIdInvalid)}`}
+                />
+              </div>
+              {reusingNumber && (
+                <div className="flex items-center justify-between gap-3 pt-1">
+                  <p className="text-xs text-amber-800">{t('numberUsed', { id: orderId })}</p>
+                  <button
+                    type="button"
+                    onClick={advanceNumber}
+                    className="h-11 shrink-0 text-sm font-medium text-brand hover:text-brand-dark"
+                  >
+                    {t('advanceNumber')}
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -364,43 +406,35 @@ export function OrderLinkBuilder() {
           message={errorText}
           messageIsError={blocked}
           sentLabel={sentLabel}
-          hasSent={sent !== null}
+          standardPayment={payMode === 'standard'}
           canCopy={canCopy}
-          showUrl={!canCopy || copyFailed}
+          showUrl={!canCopy || urlFieldOpen}
           canShare={canShare}
           onCopy={() => void copyLink()}
           onShare={() => void shareLink()}
+          onManualCopy={() => {
+            if (result.ok) markSent(result.url, 'copy');
+          }}
           onNextOrder={startNextOrder}
-          onSwitchToStandard={
-            canSwitchToStandard ? () => setSettings((current) => ({ ...current, payMode: 'standard' })) : null
-          }
+          onSwitchToStandard={canSwitchToStandard ? () => setModeOverride('standard') : null}
         />
       </aside>
 
       <span role="status" className="sr-only">
-        {sentLabel ?? ''}
+        {sentLabel ?? (copyFailed ? t('copyFailed') : blocked ? errorText : '')}
       </span>
 
       {/* 下部の固定バー (レジと同じ型)。押せないときは短い理由だけを出す。 */}
-      {(canCopy || canShare) && (
+      {(canCopy || canShare || sent !== null) && (
         <div className="sticky bottom-14 z-20 -mx-4 flex items-center gap-3 border-t border-slate-200/70 bg-white/85 px-4 py-2.5 backdrop-blur-md md:bottom-0 lg:hidden">
           <div className="min-w-0 flex-1">
-            {sentLabel ? (
+            {copyFailed ? (
+              <p className="text-sm font-medium text-rose-700">{t('copyFailed')}</p>
+            ) : sentLabel ? (
               <p className="inline-flex items-center gap-1.5 text-sm font-semibold text-emerald-700">
                 <Check className="h-4 w-4 flex-none" aria-hidden />
                 {sentLabel}
               </p>
-            ) : sent ? (
-              // 送った後に書き換えたら、同じ番号のまま別の注文に使わないよう次の注文への出口を残す。
-              <button
-                type="button"
-                onClick={startNextOrder}
-                className="h-12 text-sm font-semibold text-brand hover:text-brand-dark"
-              >
-                {t('nextOrder')}
-              </button>
-            ) : copyFailed && result.ok ? (
-              <p className="text-sm font-medium text-rose-700">{t('copyFailed')}</p>
             ) : result.ok ? (
               <>
                 <div className="text-[11px] text-slate-500">{t('total')}</div>
@@ -468,10 +502,13 @@ export function OrderLinkBuilder() {
               <button
                 key={mode}
                 type="button"
-                aria-pressed={settings.payMode === mode}
-                onClick={() => setSettings((current) => ({ ...current, payMode: mode }))}
+                aria-pressed={payMode === mode}
+                onClick={() => {
+                  setModeOverride(null);
+                  setSettings((current) => ({ ...current, payMode: mode }));
+                }}
                 className={`block w-full rounded-xl px-4 py-3 text-left ring-1 transition-colors ${
-                  settings.payMode === mode ? 'bg-brand/5 ring-2 ring-brand' : 'bg-white ring-slate-200 hover:ring-slate-300'
+                  payMode === mode ? 'bg-brand/5 ring-2 ring-brand' : 'bg-white ring-slate-200 hover:ring-slate-300'
                 }`}
               >
                 <span className="block text-sm font-semibold text-slate-900">{t(`modes.${mode}`)}</span>

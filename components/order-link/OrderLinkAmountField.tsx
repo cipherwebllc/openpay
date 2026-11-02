@@ -50,6 +50,12 @@ export function OrderLinkAmountField({
   });
 
   const handleChange = (event: ChangeEvent<HTMLInputElement>) => {
+    // 負の数を数字だけにすると別の金額になる。そのまま残して、欄の誤りとして止める。
+    if (/[-−－]/.test(event.target.value)) {
+      caretLeft.current = null;
+      onChange(event.target.value.trim());
+      return;
+    }
     const native = event.nativeEvent as InputEvent;
     const { amount, caretLeft: left } = editGroupedAmount({
       value: event.target.value.replace(/[^\d.,]/g, ''),
@@ -77,7 +83,7 @@ export function OrderLinkAmountField({
         placeholder={placeholder}
         aria-invalid={invalid || undefined}
         onChange={handleChange}
-        className={`${ORDER_LINK_INPUT_CLASS} pr-14 text-right font-medium tabular-nums ${invalidClass(invalid)}`}
+        className={`${ORDER_LINK_INPUT_CLASS} pr-12 text-right font-medium tabular-nums ${invalidClass(invalid)}`}
       />
       <span aria-hidden className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-xs font-medium text-slate-500">
         JPYC
