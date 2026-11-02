@@ -1506,7 +1506,7 @@ export const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
     slug: 'alpha-u-wallet',
     changeType: 'updated',
     changeCategory: 'update',
-    diffs: [{ field: 'feature', previousValue: 'ios-android-app', currentValue: 'ios-android-app-ended' }],
+    diffs: [{ field: 'feature', previousValue: 'ios-android-app', currentValue: 'ios-android-app-end-announced' }],
     summary:
       'αU wallet announced that its iOS/Android app version would end service at 12:00 on 2026-10-30 and asked holders to migrate assets, as NFTs and crypto assets can no longer be viewed or managed after that; the notice covers the app version, and this directory lists the au PAY mini app (see the 2026-09-30 event).',
     summaryJa:
