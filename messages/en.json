@@ -3509,7 +3509,8 @@
     "copied": "Copied",
     "open": "Open and check",
     "checksTitle": "Before you ship",
-    "checkAmount": "Customers can edit the amount in the link. Ship only after confirming that {receive} JPYC has arrived.",
+    "checkAmount": "Customers can edit the amount in the link. Ship only after confirming that {total} JPYC has arrived.",
+    "checkAmountGasless": "Customers can edit the amount in the link. Ship only after confirming what arrived: {receive} JPYC with gasless, or {total} JPYC if the customer switches to a standard payment.",
     "checkTxHash": "The order number is not on the blockchain. Ask the customer to send you the transaction hash from the completion screen so you can identify the payment.",
     "checkRecord": "This payment does not appear in the shop’s OpenPay history. Confirm it in your wallet and keep your own order records.",
     "checkExpiry": "The link has no expiry. Tell the customer your payment deadline.",
@@ -3517,12 +3518,14 @@
     "pricingLink": "See pricing",
     "errors": {
       "receiver": "Enter the receiving wallet.",
+      "receiverResolving": "Checking the receiving wallet name.",
       "orderId": "Enter the order number.",
       "noItems": "Enter an item name and price to create the link.",
       "item": "Check the item name, quantity and unit price.",
       "shipping": "Enter shipping as a number.",
       "tooManyLines": "Up to {max} lines including shipping.",
       "tooSmall": "The total is too small. Make it more than {minimum} JPYC.",
+      "tooLarge": "The limit for one payment is {maximum} JPYC. Split the order.",
       "invalid": "The link could not be created. Check what you entered."
     }
   }

@@ -44,11 +44,17 @@ export function OrderLinkBuilder() {
   const locale = useLocale();
   const origin = useOrigin();
   const copier = useCopyToClipboard();
-  const { settings, setSettings, hydrated } = useOrderLinkSettings();
   const [orderId, setOrderId] = useState('');
   const [description, setDescription] = useState('');
   const [lines, setLines] = useState<OrderLinkLine[]>([EMPTY_LINE]);
   const [shipping, setShipping] = useState('');
+  const { settings, setSettings, hydrated } = useOrderLinkSettings({
+    holdImport:
+      orderId !== '' ||
+      description !== '' ||
+      shipping !== '' ||
+      lines.some((line) => line.name !== '' || line.price !== ''),
+  });
 
   const receiverName = settings.receiver.trim();
   const ens = useResolveAddress(isLikelyName(receiverName) ? receiverName : '');
@@ -57,6 +63,9 @@ export function OrderLinkBuilder() {
     () => pickEffectiveAddress(settings.receiver, ens.error ? null : ens.data?.address ?? null),
     [settings.receiver, ens.data, ens.error],
   );
+  // 名前の再解決の間は前回の結果が残るので、リンクには使わない (期限切れのアドレスをコピーさせない)。
+  const resolving = isLikelyName(receiverName) && ens.isFetching;
+  const linkReceiver = resolving ? null : effectiveReceiver;
   const setReceiver = useCallback(
     (value: string, source: ReceiverSource) =>
       setSettings((current) => ({ ...current, receiver: value, receiverSource: source })),
@@ -75,7 +84,7 @@ export function OrderLinkBuilder() {
     () =>
       buildOrderLink({
         origin: origin || 'https://open-pay.jp',
-        to: effectiveReceiver,
+        to: linkReceiver,
         chain: settings.chain,
         mode: settings.payMode,
         orderId,
@@ -84,7 +93,7 @@ export function OrderLinkBuilder() {
         shipping,
         shippingLabel: t('shippingLineName'),
       }),
-    [origin, effectiveReceiver, settings.chain, settings.payMode, orderId, description, lines, shipping, t],
+    [origin, linkReceiver, settings.chain, settings.payMode, orderId, description, lines, shipping, t],
   );
 
   const updateLine = (index: number, patch: Partial<OrderLinkLine>) =>
@@ -94,11 +103,15 @@ export function OrderLinkBuilder() {
 
   const errorText = result.ok
     ? null
-    : result.error === 'tooSmall'
-      ? t('errors.tooSmall', { minimum: result.minimum ?? '' })
-      : result.error === 'tooManyLines'
-        ? t('errors.tooManyLines', { max: CHECKOUT_MAX_ITEMS })
-        : t(`errors.${result.error}`);
+    : resolving
+      ? t('errors.receiverResolving')
+      : result.error === 'tooSmall'
+        ? t('errors.tooSmall', { minimum: result.minimum ?? '' })
+        : result.error === 'tooLarge'
+          ? t('errors.tooLarge', { maximum: result.maximum ?? '' })
+          : result.error === 'tooManyLines'
+            ? t('errors.tooManyLines', { max: CHECKOUT_MAX_ITEMS })
+            : t(`errors.${result.error}`);
 
   return (
     <div className="space-y-5">
@@ -106,8 +119,12 @@ export function OrderLinkBuilder() {
 
       <SectionCard title={t('receiveTitle')} headingId="order-link-receive" icon={Wallet}>
         <div className="space-y-4">
-          <Field label={t('receiverLabel')}>
-            <AddressInput value={settings.receiver} onChange={autofill.handleManualChange} />
+          <Field label={t('receiverLabel')} htmlFor="order-link-receiver">
+            <AddressInput
+              id="order-link-receiver"
+              value={settings.receiver}
+              onChange={autofill.handleManualChange}
+            />
             <ReceiverWalletChip
               canUse={autofill.canUseConnected}
               matches={autofill.matchesConnected}
@@ -295,7 +312,11 @@ export function OrderLinkBuilder() {
             <div className="rounded-xl bg-amber-50 p-3 ring-1 ring-amber-200/70">
               <p className="text-sm font-semibold text-amber-900">{t('checksTitle')}</p>
               <ul className="mt-1.5 list-disc space-y-1 pl-4 text-xs leading-relaxed text-amber-900">
-                <li>{t('checkAmount', { receive: result.receive })}</li>
+                <li>
+                  {result.fee === '0'
+                    ? t('checkAmount', { total: result.total })
+                    : t('checkAmountGasless', { receive: result.receive, total: result.total })}
+                </li>
                 <li>{t('checkTxHash')}</li>
                 <li>{t('checkRecord')}</li>
                 <li>{t('checkExpiry')}</li>

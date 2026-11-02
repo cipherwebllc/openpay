@@ -1,8 +1,9 @@
 'use client';
 
-import type { ChainSlug } from '@/lib/chains';
+import { JPYC_CHAINS, type ChainSlug } from '@/lib/chains';
 import type { PayMode } from '@/lib/fee';
 import { isSettledReceiverInput } from '@/lib/format';
+import { orderLinkChains } from '@/lib/orderLink';
 import { useLocalStorageSettings, type SettingsSyncRules } from './useLocalStorageSettings';
 import { normalizeChainForToken } from './useQrSettings';
 
@@ -26,19 +27,32 @@ const DEFAULT_SETTINGS: OrderLinkSettings = {
 };
 
 function sanitize(loaded: Partial<OrderLinkSettings>): OrderLinkSettings {
+  // 画面の選択肢に無いチェーンを残さない (保存のあとでガスレスが使えなくなったチェーン)。
+  const chain = normalizeChainForToken('jpyc', loaded.chain);
   return {
     receiver: typeof loaded.receiver === 'string' ? loaded.receiver : '',
     receiverSource: loaded.receiverSource === 'auto' ? 'auto' : 'manual',
-    chain: normalizeChainForToken('jpyc', loaded.chain),
+    chain: orderLinkChains(JPYC_CHAINS).includes(chain) ? chain : DEFAULT_SETTINGS.chain,
     payMode: loaded.payMode === 'standard' ? 'standard' : 'gasless',
   };
 }
 
 const SYNC_RULES: SettingsSyncRules<OrderLinkSettings> = {
-  groups: [['receiver', 'receiverSource']],
+  groups: [
+    ['receiver', 'receiverSource'],
+    ['chain', 'payMode'],
+  ],
   importable: { receiver: isSettledReceiverInput },
 };
 
-export function useOrderLinkSettings() {
-  return useLocalStorageSettings<OrderLinkSettings>(STORAGE_KEY, DEFAULT_SETTINGS, sanitize, SYNC_RULES);
+// holdImport: 注文を入力している間は別のタブの設定を取り込まない。取り込むと、注文の内容はそのままで
+// リンクの受取先だけが変わる。
+export function useOrderLinkSettings(options: { holdImport?: boolean } = {}) {
+  return useLocalStorageSettings<OrderLinkSettings>(
+    STORAGE_KEY,
+    DEFAULT_SETTINGS,
+    sanitize,
+    SYNC_RULES,
+    options.holdImport ?? false,
+  );
 }

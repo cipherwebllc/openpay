@@ -1,11 +1,26 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithIntl as render } from '../_helpers/i18n';
 
-vi.mock('@/hooks/useResolveAddress', () => ({
-  useResolveAddress: vi.fn(() => ({ data: null, isFetching: false, error: null })),
+const resolved = vi.hoisted(() => ({
+  value: { data: null as { address: string } | null, isFetching: false, error: null as Error | null },
 }));
+vi.mock('@/hooks/useResolveAddress', () => ({
+  useResolveAddress: vi.fn(() => resolved.value),
+}));
+vi.mock('@/lib/relay/forwarderConfig', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/relay/forwarderConfig')>();
+  return {
+    ...actual,
+    jpycForwarderFor: () => '0x0F4560a777415580F0680F8B56a79B0022C6B848',
+    relayGasFeeValue: () => 2n * 10n ** 18n,
+  };
+});
+vi.mock('@/lib/env', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/env')>();
+  return { ...actual, env: { ...actual.env, recoverFeeBps: 100, enableJpycEip3009: true } };
+});
 vi.mock('wagmi', () => ({
   useAccount: vi.fn(() => ({ address: undefined, isConnected: false })),
 }));
@@ -14,15 +29,18 @@ const fetchSpy = vi.hoisted(() => vi.fn());
 import { OrderLinkBuilder } from '@/components/OrderLinkBuilder';
 
 const TO = '0x52d4901142e2B5680027da5EB47C86CB02a3cA81';
+const OTHER = '0x8F16000000000000000000000000000000000001';
+const STORAGE_KEY = 'openpay:order-link-settings:v1';
 
 beforeEach(() => {
   localStorage.clear();
+  resolved.value = { data: null, isFetching: false, error: null };
   fetchSpy.mockReset();
   vi.stubGlobal('fetch', fetchSpy);
 });
 
 async function fillOrder() {
-  await userEvent.type(screen.getByPlaceholderText(/0x/), TO);
+  await userEvent.type(screen.getByLabelText('受取ウォレット'), TO);
   fireEvent.change(screen.getByLabelText('注文番号'), { target: { value: 'A-001' } });
   fireEvent.change(screen.getByLabelText('商品名'), { target: { value: 'Tシャツ M' } });
   fireEvent.change(screen.getByLabelText('数量'), { target: { value: '2' } });
@@ -47,6 +65,8 @@ describe('OrderLinkBuilder', () => {
     expect(url.searchParams.get('to')).toBe(TO);
     expect(screen.getByText('お客様の支払額').nextElementSibling).toHaveTextContent('6500 JPYC');
     expect(screen.getByText('発送の前に')).toBeInTheDocument();
+    // ガスレスは利用料が引かれ、お客様が通常決済に切り替えると満額が届く。どちらの額も案内する。
+    expect(screen.getByText(/ガスレスなら 6435 JPYC、お客様が通常決済に切り替えたときは 6500 JPYC/)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: '開いて確かめる' })).toHaveAttribute('href', link.value);
   });
 
@@ -72,6 +92,53 @@ describe('OrderLinkBuilder', () => {
     const saved = localStorage.getItem('openpay:order-link-settings:v1') ?? '';
     expect(saved).not.toContain('A-001');
     expect(saved).not.toContain('Tシャツ');
+  });
+
+  it('通常決済は満額が届く案内にする', async () => {
+    render(<OrderLinkBuilder />);
+    await fillOrder();
+    fireEvent.click(screen.getByRole('button', { name: /通常決済/ }));
+    await screen.findByText(/6500 JPYC が届いたことを確かめてから/);
+    expect(screen.getByText('OpenPay 利用料（お店の負担）').nextElementSibling).toHaveTextContent('0 JPYC');
+  });
+
+  it('入力中は別のタブの受取先を取り込まない (注文の内容はそのままで宛先だけ変わるのを防ぐ)', async () => {
+    render(<OrderLinkBuilder />);
+    await fillOrder();
+    const link = (await screen.findByLabelText('お客様に送るリンク')) as HTMLTextAreaElement;
+    await waitFor(() => expect(localStorage.getItem(STORAGE_KEY)).toContain(TO));
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ receiver: OTHER, receiverSource: 'manual', chain: 'polygon', payMode: 'gasless' }),
+    );
+    act(() => {
+      window.dispatchEvent(new Event('focus'));
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    await waitFor(() => expect(new URL(link.value).searchParams.get('to')).toBe(TO));
+    expect(link.value).not.toContain(OTHER);
+  });
+
+  it('名前の再解決の間はリンクを出さない (期限切れのアドレスをコピーさせない)', async () => {
+    resolved.value = { data: { address: TO }, isFetching: true, error: null };
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ receiver: 'shop.eth', receiverSource: 'manual', chain: 'polygon', payMode: 'gasless' }),
+    );
+    render(<OrderLinkBuilder />);
+    fireEvent.change(screen.getByLabelText('注文番号'), { target: { value: 'A-001' } });
+    fireEvent.change(screen.getByLabelText('商品名'), { target: { value: 'Tシャツ M' } });
+    fireEvent.change(screen.getByLabelText('単価 (JPYC)'), { target: { value: '3000' } });
+    await screen.findByText('受取ウォレットの名前を確かめています。');
+    expect(screen.queryByLabelText('お客様に送るリンク')).toBeNull();
+  });
+
+  it('上限を超えると理由を出す', async () => {
+    render(<OrderLinkBuilder />);
+    await fillOrder();
+    fireEvent.change(screen.getByLabelText('単価 (JPYC)'), { target: { value: '60000' } });
+    await screen.findByText(/1 回の支払いの上限は 50000 JPYC です/);
+    expect(screen.queryByLabelText('お客様に送るリンク')).toBeNull();
   });
 
   it('商品の行を足して消せる', () => {

@@ -1,21 +1,31 @@
 // 注文リンク (lib/orderLink.ts): 公開の文書にあるパラメーターだけで /checkout のリンクを作り、
 // 表示する利用料が /checkout の実計算と同じであることを固定する。
 
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Address } from 'viem';
 
 const JPYC_FLOOR = 2n * 10n ** 18n;
+const flags = vi.hoisted(() => ({ relay: true, forwarder: true }));
 vi.mock('@/lib/relay/forwarderConfig', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/relay/forwarderConfig')>();
   return {
     ...actual,
-    jpycForwarderFor: () => '0x0F4560a777415580F0680F8B56a79B0022C6B848',
+    jpycForwarderFor: () => (flags.forwarder ? '0x0F4560a777415580F0680F8B56a79B0022C6B848' : null),
     relayGasFeeValue: () => JPYC_FLOOR,
   };
 });
 vi.mock('@/lib/env', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/env')>();
-  return { ...actual, env: { ...actual.env, recoverFeeBps: 100 } };
+  return {
+    ...actual,
+    env: {
+      ...actual.env,
+      recoverFeeBps: 100,
+      get enableJpycEip3009() {
+        return flags.relay;
+      },
+    },
+  };
 });
 
 import { JPYC_CHAINS } from '@/lib/chains';
@@ -44,6 +54,11 @@ function okUrl(result: ReturnType<typeof buildOrderLink>): URL {
   if (!result.ok) throw new Error(`expected ok: ${result.error}`);
   return new URL(result.url);
 }
+
+beforeEach(() => {
+  flags.relay = true;
+  flags.forwarder = true;
+});
 
 describe('buildOrderLink', () => {
   it('商品と送料の明細・注文番号をお客様の画面で読めるリンクにする', () => {
@@ -87,6 +102,35 @@ describe('buildOrderLink', () => {
   it('通常決済は利用料 0', () => {
     const result = buildOrderLink(input({ mode: 'standard' }));
     expect(result).toMatchObject({ ok: true, total: '6500', fee: '0', receive: '6500' });
+  });
+
+  it('利用料は /checkout の経路の判定に従う: relay が無効なら 0', () => {
+    flags.relay = false;
+    expect(buildOrderLink(input())).toMatchObject({ ok: true, fee: '0', receive: '6500' });
+  });
+
+  it('利用料は /checkout の経路の判定に従う: forwarder が無ければ 0', () => {
+    flags.forwarder = false;
+    expect(buildOrderLink(input())).toMatchObject({ ok: true, fee: '0', receive: '6500' });
+  });
+
+  it('利用料が 0 の経路では、少額を止めない', () => {
+    flags.relay = false;
+    const result = buildOrderLink(input({ lines: [{ name: 'ステッカー', qty: '1', price: '1' }], shipping: '' }));
+    expect(result).toMatchObject({ ok: true, total: '1', receive: '1' });
+  });
+
+  it('上限を超えるリンクを作らない', () => {
+    const at = (price: string, mode: 'gasless' | 'standard') =>
+      buildOrderLink(input({ mode, lines: [{ name: '機材', qty: '1', price }], shipping: '' }));
+    expect(at('50000', 'gasless').ok).toBe(true);
+    expect(at('50001', 'gasless')).toEqual({ ok: false, error: 'tooLarge', maximum: '50000' });
+    expect(at('1000000', 'standard').ok).toBe(true);
+    expect(at('1000001', 'standard')).toEqual({ ok: false, error: 'tooLarge', maximum: '1000000' });
+  });
+
+  it('説明が読み直しで変わるならリンクを作らない', () => {
+    expect(buildOrderLink(input({ description: 'a\u0007b' }))).toEqual({ ok: false, error: 'invalid' });
   });
 
   it('商品名の記号はリンクを壊さない', () => {
