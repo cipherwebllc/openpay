@@ -5,6 +5,7 @@ import { hasLocale } from 'next-intl';
 import { notFound } from 'next/navigation';
 import { LOCALES } from '@/i18n';
 import { CheckoutForm } from '@/components/CheckoutForm';
+import { CheckoutChainPicker } from '@/components/checkout/CheckoutChainPicker';
 import { StoreDeviceCheckoutForm } from '@/components/StoreDeviceCheckoutForm';
 import { LocaleSwitcher } from '@/components/LocaleSwitcher';
 import { env } from '@/lib/env';
@@ -67,8 +68,12 @@ export default async function CheckoutPage({
         // (parse が条件を fail-closed で確かめ済み・plans/store-gas-wallet.md §11)。
         parsed.params.submit === 'store' ? (
           <StoreDeviceCheckoutForm params={parsed.params} />
+        ) : parsed.params.pickChain ? (
+          // 受け付けるチェーンが複数で、まだ選んでいない: 払う前にチェーンを選ぶ (plans/order-link-multichain.md)。
+          <CheckoutChainPicker params={parsed.params} />
         ) : (
-          <CheckoutForm params={parsed.params} />
+          // チェーンごとに作り直す (別のチェーンへ戻ったとき、前のチェーンの支払いの状態を持ち越さない)。
+          <CheckoutForm key={parsed.params.chain} params={parsed.params} />
         )
       ) : (
         <div className="rounded-2xl border border-red-200 bg-red-50 p-5 text-sm text-red-700">

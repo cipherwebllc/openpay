@@ -27,9 +27,10 @@ import { useCopyToClipboard, useHydrationSafeAvailable } from '@/hooks/useCopyTo
 import { useOrderLinkSettings } from '@/hooks/useOrderLinkSettings';
 import { useOrigin } from '@/hooks/useOrigin';
 import { useReceiverAutofill, type ReceiverSource } from '@/hooks/useReceiverAutofill';
+import { useReceiverChainCheck } from '@/hooks/useReceiverChainCheck';
 import { useResolveAddress } from '@/hooks/useResolveAddress';
 import { groupAmountDigits } from '@/lib/amount';
-import { chainForSlug, JPYC_CHAINS } from '@/lib/chains';
+import { chainForSlug, JPYC_CHAINS, type ChainSlug } from '@/lib/chains';
 import type { PayMode } from '@/lib/fee';
 import { pickEffectiveAddress } from '@/lib/format';
 import { isLikelyName } from '@/lib/nameDetection';
@@ -47,6 +48,7 @@ import {
   ORDER_LINK_STORE_NAME_MAX,
   type OrderLinkError,
   type OrderLinkLine,
+  type OrderLinkResult,
 } from '@/lib/orderLink';
 import { SHOP_CONTACT_MAIL_MAX, shopContactFromInput } from '@/lib/shopContact';
 import { CHECKOUT_MAX_ITEMS, CHECKOUT_QTY_MAX } from '@/lib/url/checkout';
@@ -63,7 +65,14 @@ const pillClass = (active: boolean) =>
 const MAX_LINES = CHECKOUT_MAX_ITEMS - 1;
 
 // まだ入力の途中なだけの理由。これ以外は入力を直さないと進めないので、エラーの色で出す。
-const GUIDANCE: ReadonlySet<OrderLinkError> = new Set(['receiver', 'receiverResolving', 'orderId', 'noItems']);
+const GUIDANCE: ReadonlySet<OrderLinkError> = new Set([
+  'receiver',
+  'receiverResolving',
+  'orderId',
+  'noItems',
+  'chainChecking',
+]);
+const chainNames = (chains: readonly ChainSlug[]) => chains.map((chain) => chainForSlug(chain).name).join(' / ');
 const ISSUE_MESSAGE = { name: 'itemName', qty: 'itemQty', price: 'itemPrice' } as const;
 
 type LineState = OrderLinkLine & { id: number };
@@ -152,12 +161,12 @@ export function OrderLinkBuilder() {
 
   const chains = useMemo(() => orderLinkChains(JPYC_CHAINS), []);
   const shippingLabel = t('shippingLineName');
-  const result = useMemo(
+  const built = useMemo(
     () =>
       buildOrderLink({
         origin: origin || 'https://open-pay.jp',
         to: linkReceiver,
-        chain: settings.chain,
+        chains: settings.chains,
         mode: payMode,
         reusable,
         orderId,
@@ -171,7 +180,7 @@ export function OrderLinkBuilder() {
     [
       origin,
       linkReceiver,
-      settings.chain,
+      settings.chains,
       payMode,
       settings.shipping,
       settings.storeName,
@@ -182,6 +191,21 @@ export function OrderLinkBuilder() {
       lines,
       shippingLabel,
     ],
+  );
+  // 受取チェーンが 2 つ以上なら、受取ウォレットがどれかのチェーンでコントラクトのウォレットでないかを確かめてから
+  // リンクを出す (チェーンごとに持ち主が違うことがある・plans/order-link-multichain.md)。
+  const chainCheck = useReceiverChainCheck(linkReceiver, settings.chains);
+  const chainBlock: OrderLinkError | null =
+    chainCheck.status === 'checking'
+      ? 'chainChecking'
+      : chainCheck.status === 'contract'
+        ? 'chainContract'
+        : chainCheck.status === 'error'
+          ? 'chainCheckFailed'
+          : null;
+  const result: OrderLinkResult = useMemo(
+    () => (built.ok && chainBlock ? { ok: false, error: chainBlock, total: built.total } : built),
+    [built, chainBlock],
   );
   const previewLines = useMemo(
     () => orderLinkPreviewLines(lines, settings.shipping, shippingLabel),
@@ -204,6 +228,7 @@ export function OrderLinkBuilder() {
     standardMaximum: groupAmountDigits(ORDER_LINK_STANDARD_MAX_JPYC.toString()),
     max: CHECKOUT_MAX_ITEMS,
     qtyMax: CHECKOUT_QTY_MAX,
+    chains: chainCheck.status === 'contract' || chainCheck.status === 'error' ? chainNames(chainCheck.chains) : '',
   };
   const errorText = messageKey === null ? null : t(`errors.${messageKey}`, messageValues);
   const shortText = messageKey === null ? null : t(`errorsShort.${messageKey}`, messageValues);
@@ -313,8 +338,8 @@ export function OrderLinkBuilder() {
             <ShopSummaryRow
               storeName={settings.storeName}
               receiver={effectiveReceiver}
-              chainSlug={settings.chain}
-              chainName={chainForSlug(settings.chain).name}
+              chainSlug={settings.chains[0]}
+              chainName={chainNames(settings.chains)}
               payLabel={t(`modes.${payMode}`)}
               payTone={payMode}
               onOpenSettings={() => setSettingsOpen(true)}
@@ -464,6 +489,7 @@ export function OrderLinkBuilder() {
           result={result}
           orderId={orderId}
           reusable={reusable}
+          chainNames={settings.chains.length > 1 ? chainNames(settings.chains) : null}
           storeName={settings.storeName}
           description={description}
           lines={previewLines}
@@ -485,7 +511,7 @@ export function OrderLinkBuilder() {
       </aside>
 
       {/* 入金を確かめる (お客様から届いた Tx Hash で、受取ウォレットに届いた額を読む)。前の注文も確かめるのでいつも出す。 */}
-      <OrderLinkVerify chain={settings.chain} receiver={linkReceiver} />
+      <OrderLinkVerify chains={settings.chains} receiver={linkReceiver} />
 
       <span role="status" className="sr-only">
         {sentLabel ?? (copyFailed ? t('copyFailed') : blocked ? errorText : '')}
@@ -619,14 +645,23 @@ export function OrderLinkBuilder() {
           />
         </ShopSettingsSection>
         <ShopSettingsSection title={t('chainLabel')}>
+          {/* 複数を選べる (押すと付け外し・最低 1 つ)。先頭が主のチェーン。 */}
           <ChainChooser
             slugs={chains}
-            selected={settings.chain}
-            onSelect={(chain) => setSettings((current) => ({ ...current, chain }))}
+            selected={settings.chains[0]}
+            selectedSlugs={settings.chains}
+            onSelect={(chain) =>
+              setSettings((current) => {
+                if (!current.chains.includes(chain)) return { ...current, chains: [...current.chains, chain] };
+                if (current.chains.length === 1) return current;
+                return { ...current, chains: current.chains.filter((other) => other !== chain) };
+              })
+            }
             showId={false}
             gridClassName="grid grid-cols-2 gap-2"
           />
           <p className="text-xs text-slate-600">{t('chainHint')}</p>
+          {settings.chains.length > 1 && <p className="text-xs text-slate-600">{t('chainMultiNote')}</p>}
         </ShopSettingsSection>
         <ShopSettingsSection title={t('modeLabel')}>
           <div className="space-y-2">

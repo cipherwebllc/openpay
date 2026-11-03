@@ -12,7 +12,7 @@ import { groupAmountDigits } from '@/lib/amount';
 import { chainForSlug, txExplorerUrl, type ChainSlug } from '@/lib/chains';
 import { shortAddress } from '@/lib/format';
 import {
-  checkOrderLinkPayment,
+  checkOrderLinkPaymentOnChains,
   extractTxHash,
   rememberCheckedPayment,
   type OrderLinkPaymentCheck,
@@ -22,13 +22,25 @@ import { ORDER_LINK_INPUT_CLASS } from './OrderLinkAmountField';
 type Done = {
   result: OrderLinkPaymentCheck;
   hash: string | null;
+  /** 取引が見つかったチェーン (見つからなければ受け付けるチェーンの先頭)。 */
   chain: ChainSlug;
+  /** 受け付けるチェーン (複数なら全部を探した)。 */
+  chains: readonly ChainSlug[];
+  /** 問い合わせできなかったチェーン。 */
+  unreachable: ChainSlug[];
   receiver: Address;
   /** 同じ支払いを前に確かめた時刻 (ms・この端末)。2 つの注文に使い回されていないかを知らせる。 */
   checkedBefore: number | null;
 };
 
-export function OrderLinkVerify({ chain, receiver }: { chain: ChainSlug; receiver: Address | null }) {
+export function OrderLinkVerify({
+  chains,
+  receiver,
+}: {
+  /** 受け付けるチェーン (先頭が主)。全部を探し、見つかったチェーンで判定する。 */
+  chains: readonly ChainSlug[];
+  receiver: Address | null;
+}) {
   const t = useTranslations('OrderLinkBuilder');
   const locale = useLocale();
   const inputId = useId();
@@ -39,11 +51,13 @@ export function OrderLinkVerify({ chain, receiver }: { chain: ChainSlug; receive
   const check = async () => {
     if (!receiver || checking) return;
     setChecking(true);
-    const result = await checkOrderLinkPayment({ chain, receiver, text });
+    const found = await checkOrderLinkPaymentOnChains({ chains, receiver, text });
+    const chain = found.chain ?? chains[0];
+    const { result } = found;
     const hash = extractTxHash(text);
     const checkedBefore =
       result.status === 'paid' && hash ? rememberCheckedPayment({ chain, receiver, hash, now: Date.now() }) : null;
-    setDone({ result, hash, chain, receiver, checkedBefore });
+    setDone({ result, hash, chain, chains, unreachable: found.unreachable, receiver, checkedBefore });
     setChecking(false);
   };
 
@@ -126,6 +140,9 @@ function VerifyResult({ done, locale }: { done: Done; locale: string }) {
         <CheckCircle2 className="mt-0.5 h-4 w-4 flex-none text-emerald-600" aria-hidden />
         <div className="min-w-0 text-sm">
           <p className="font-semibold">{t('verifyPaid', { amount: groupAmountDigits(result.received) })}</p>
+          {done.chains.length > 1 && (
+            <p className="mt-0.5 text-xs font-semibold">{t('verifyPaidChain', { chain: chainForSlug(done.chain).name })}</p>
+          )}
           <p className="mt-0.5 text-xs">{t('verifyPaidMeta', { time, block: result.blockNumber.toString() })}</p>
           <p className="mt-1 text-xs leading-relaxed">{t('verifyPaidNote')}</p>
           {/* 確認の署名: 文を送った人が、この支払いをしたウォレットの持ち主か (Tx Hash は誰でも見られる)。 */}
@@ -152,12 +169,15 @@ function VerifyResult({ done, locale }: { done: Done; locale: string }) {
       </div>
     );
   }
+  const names = (chains: readonly ChainSlug[]) => chains.map((chain) => chainForSlug(chain).name).join(' / ');
   const message =
     result.status === 'notToReceiver'
       ? t('verifyNotToReceiver', { receiver: shortAddress(done.receiver) })
       : result.status === 'notFound'
-        ? t('verifyNotFound', { chain: chainForSlug(done.chain).name })
-        : t(`verify.${result.status}`);
+        ? t('verifyNotFound', { chain: names(done.chains) })
+        : result.status === 'error' && done.chains.length > 1 && done.unreachable.length > 0
+          ? t('verifyUnreachable', { chains: names(done.unreachable) })
+          : t(`verify.${result.status}`);
   return (
     <div className="flex gap-2 rounded-xl bg-amber-50 px-3 py-2.5 text-amber-900 ring-1 ring-amber-200">
       <AlertTriangle className="mt-0.5 h-4 w-4 flex-none text-amber-600" aria-hidden />

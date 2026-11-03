@@ -379,4 +379,21 @@ it('Arc を含む受取リストは 7 buttons、Arc Testnet id と logo を表�
   expect(screen.getAllByRole('button')).toHaveLength(7);
   expect(screen.getByRole('button', { name: /Arc Testnet/ })).toBeInTheDocument();
   expect(screen.getByText('id: 5042002')).toBeInTheDocument();
+
+});
+
+describe('ChainChooser (複数を選ぶ)', () => {
+  it('selectedSlugs を渡したときだけ、複数を選んだ印と aria-pressed を付ける (渡さなければ今までの DOM)', () => {
+    const { unmount } = render(
+      <ChainChooser slugs={JPYC_CHAINS} selected={JPYC_CHAINS[0]} selectedSlugs={[...JPYC_CHAINS]} onSelect={vi.fn()} />,
+    );
+    for (const slug of JPYC_CHAINS) {
+      const button = screen.getByRole('button', { name: new RegExp(chainForSlug(slug).name) });
+      expect(button).toHaveAttribute('aria-pressed', 'true');
+      expect(button.className).toContain('border-brand');
+    }
+    unmount();
+    render(<ChainChooser slugs={JPYC_CHAINS} selected={JPYC_CHAINS[0]} onSelect={vi.fn()} />);
+    for (const button of screen.getAllByRole('button')) expect(button).not.toHaveAttribute('aria-pressed');
+  });
 });

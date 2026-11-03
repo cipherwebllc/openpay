@@ -245,3 +245,39 @@ export async function checkOrderLinkPayment(input: {
     return { status: 'error' };
   }
 }
+
+/** 受け付けるチェーンを全部探した結果。chain = 取引が見つかったチェーン (見つからなければ null)。 */
+export type OrderLinkMultiChainCheck = {
+  chain: ChainSlug | null;
+  result: OrderLinkPaymentCheck;
+  /** 問い合わせできなかったチェーン (見つからなかった・確かめられなかったを分けて伝える)。 */
+  unreachable: ChainSlug[];
+};
+
+/**
+ * 受け付けるチェーンを並べて読み、取引が見つかったチェーンで判定する (plans/order-link-multichain.md)。
+ * どこでも見つからず、読めなかったチェーンがあれば「見つからない」ではなく「確かめられない」にする
+ * (払われていないように見せない)。確認の署名の文は、見つかったチェーンで組み立てる。
+ */
+export async function checkOrderLinkPaymentOnChains(input: {
+  chains: readonly ChainSlug[];
+  receiver: Address;
+  text: string;
+  /** テスト用。省略時はそのチェーンの RPC。 */
+  clientFor?: (chain: ChainSlug) => ReadClient | undefined;
+}): Promise<OrderLinkMultiChainCheck> {
+  if (!extractTxHash(input.text)) return { chain: null, result: { status: 'invalid' }, unreachable: [] };
+  const results = await Promise.all(
+    input.chains.map((chain) =>
+      checkOrderLinkPayment({ chain, receiver: input.receiver, text: input.text, client: input.clientFor?.(chain) }),
+    ),
+  );
+  const found = results.findIndex((result) => result.status !== 'notFound' && result.status !== 'error');
+  if (found !== -1) return { chain: input.chains[found], result: results[found], unreachable: [] };
+  const unreachable = input.chains.filter((_, index) => results[index].status === 'error');
+  return {
+    chain: null,
+    result: { status: unreachable.length > 0 ? 'error' : 'notFound' },
+    unreachable,
+  };
+}

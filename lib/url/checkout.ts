@@ -22,6 +22,7 @@
 //   store           (任意, 店名 48 文字まで — お客様の画面の頭と控え)
 //   ship            (任意, "ask" — 支払いの後にお名前とお届け先を聞く。注文リンクの何度でも使えるリンク)
 //   contact         (任意, "line:@id" | "mail:addr" — 完了画面から注文の文を送る先。lib/shopContact.ts)
+//   chains          (任意, "polygon,kaia" — 受け付けるチェーン。2 つ以上あり chain が無ければ、お客様が先に選ぶ)
 //
 // items の encoding: name は encodeURIComponent で URI-encode してから ":" qty
 // ":" price で結合し、複数 items は "," で連結。decode 側は "," → ":" の順に
@@ -33,7 +34,7 @@
 // 受注 notify の payload は type 識別子 "openpay.checkout.success" (受け手は /api/order/notify のみ)。
 import { formatUnits, getAddress, isAddress, parseUnits } from 'viem';
 import type { Address } from 'viem';
-import type { ChainSlug } from '../chains';
+import { isValidChainSlug, type ChainSlug } from '../chains';
 import type { GasMode, PayMode } from '../fee';
 import {
   isMobileOrderFeeKind,
@@ -48,6 +49,7 @@ import {
   type TaxCategory,
 } from '../tax';
 import { parseDiscountAmount } from '../discount';
+import { resolveJpycGaslessProvider } from '../jpycGaslessProvider';
 import { formatShopContact, parseShopContact, type ShopContact } from '../shopContact';
 import {
   DEFAULT_CHAIN_FOR_SYMBOL,
@@ -61,6 +63,7 @@ import { env } from '../env';
 import { isStoreDeviceChain, isStoreHandoffId } from '../storeDevicePayment';
 import {
   appendTaxReceiptParams,
+  crossChainAllowed,
   DECIMAL_PATTERN,
   gaslessSupportError,
   parseGasParam,
@@ -118,6 +121,11 @@ export type CheckoutParams = {
   ship?: 'ask';
   // お店の連絡先 (LINE 公式アカウントかメール)。完了画面が文を入れた状態で開く (lib/shopContact.ts)。
   contact?: ShopContact;
+  // 受け付けるチェーン (2 つ以上・注文リンク・plans/order-link-multichain.md)。お客様が選び、選んだ chain で今と
+  // 同じ計算で払う (受取先・金額・利用料はその時の chain だけで決まる)。表示と選択肢にだけ効く。
+  chains?: ChainSlug[];
+  // parse だけが付ける: chains があり URL に chain が無い = 払う前にチェーンを選ぶ画面を出す。
+  pickChain?: true;
   // --- モバイル注文システム利用料 (任意・MobileOrderView のみが設定)。 ---
   // feeKind が present のとき CheckoutForm が経路非依存 (relay/standard 両方) に 1%(店頭)/3%(事前)
   // を分割する (実際の発火は flag env.enableMobileOrderFee と AND)。不在 = 従来動作 (手数料ゼロ・
@@ -245,11 +253,38 @@ function parseItemsParam(raw: string, decimals: number): CheckoutItem[] | null {
   return items;
 }
 
+/**
+ * URL の chains を読む。JPYC だけ (画面がそう案内する)・そのチェーンに JPYC があり、その支払い方法が使えるチェーンだけ・
+ * 重複なし。ガス代不要は OpenPay の relay のチェーンだけにする: relay と通常決済の「送信中・結果不明」の記録は
+ * チェーンをまたいで残り、別のチェーンを選んでも払えないように止める。Pimlico の経路の記録はチェーンごとなので、
+ * 別のチェーンを選ぶと止まらない (Codex P1・本番の JPYC は全チェーン relay)。
+ */
+function parseOfferedChains(raw: string | null, token: TokenSymbol, mode: PayMode): ChainSlug[] {
+  if (raw === null || token !== 'jpyc') return [];
+  const offered: ChainSlug[] = [];
+  for (const part of raw.split(',')) {
+    const slug = part.trim();
+    if (!slug || !isValidChainSlug(slug) || offered.includes(slug)) continue;
+    if (!symbolHasDeployment(token, slug) || !crossChainAllowed(slug)) continue;
+    if (gaslessSupportError(token, slug, mode)) continue;
+    if (mode !== 'standard') {
+      const deployment = deploymentForSlug(token, slug);
+      if (resolveJpycGaslessProvider(deployment, deployment.chainId) !== 'eip3009-relay') continue;
+    }
+    offered.push(slug);
+  }
+  return offered;
+}
+
 export function buildCheckoutPath(params: CheckoutParams): string {
   const sp = new URLSearchParams();
   sp.set('to', params.to);
   sp.set('token', params.token);
-  if (params.chain && params.chain !== DEFAULT_CHAIN_FOR_SYMBOL[params.token]) {
+  // 受け付けるチェーンが 2 つ以上なら chain を書かない (お客様が先に選ぶ)。
+  const offersChains = params.chains !== undefined && params.chains.length >= 2;
+  if (offersChains) {
+    sp.set('chains', params.chains!.join(','));
+  } else if (params.chain && params.chain !== DEFAULT_CHAIN_FOR_SYMBOL[params.token]) {
     sp.set('chain', params.chain);
   }
   sp.set('items', encodeItems(params.items));
@@ -354,6 +389,7 @@ export function parseCheckoutParams(
   // 'ask' 以外の ship と、形の合わない contact は無いものとして扱う (表示だけの値なので会計は止めない)。
   const shipAsk = searchParams.get('ship') === 'ask';
   const contact = parseShopContact(searchParams.get('contact'));
+  const chainsRaw = searchParams.get('chains');
   const pickupAtRaw = searchParams.get('pickup_at');
   const submitRaw = searchParams.get('submit');
   const handoffRaw = searchParams.get('hs');
@@ -447,12 +483,23 @@ export function parseCheckoutParams(
   const { taxRate, taxCategory, receiptNo, invoiceNo } =
     parseTaxReceiptParams(searchParams);
 
+  // 受け付けるチェーン (表示と選択肢だけ)。使えないチェーンは黙って外す (押した先がエラーの画面にならない)。
+  // 店頭のモバイル注文・お店の端末で送る会計には出さない。URL に chain があり、それが一覧に無ければ一覧を捨てる
+  // (1 つのチェーンのリンクとして扱う)。chain が無く 2 つ以上なら、払う前にお客様が選ぶ (pickChain)。
+  const offeredChains =
+    feeKindRaw === null && storeHandle === null && submitRaw === null
+      ? parseOfferedChains(chainsRaw, token, mode)
+      : [];
+  const chainGiven = chainRaw !== null && chainRaw.length > 0;
+  const multiChain = offeredChains.length >= 2 && (!chainGiven || offeredChains.includes(chainSlug));
+  const pickChain = multiChain && !chainGiven;
+
   return {
     ok: true,
     params: {
       to: getAddress(to),
       token,
-      chain: chainSlug,
+      chain: pickChain ? offeredChains[0] : chainSlug,
       gas,
       mode,
       items,
@@ -495,6 +542,8 @@ export function parseCheckoutParams(
       ...(discount !== undefined ? { discount } : {}),
       ...(shipAsk ? { ship: 'ask' as const } : {}),
       ...(contact ? { contact } : {}),
+      ...(multiChain ? { chains: offeredChains } : {}),
+      ...(pickChain ? { pickChain: true as const } : {}),
     },
   };
 }

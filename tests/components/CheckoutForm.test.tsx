@@ -139,6 +139,7 @@ import { resolvePaymasterMode } from '@/lib/pimlico';
 import { resolveJpycGaslessProvider } from '@/lib/jpycGaslessProvider';
 import { jpycForwarderFor } from '@/lib/relay/forwarderConfig';
 import { useRelayHealth } from '@/hooks/useRelayHealth';
+import { useRouter } from 'next/navigation';
 import { CheckoutForm } from '@/components/CheckoutForm';
 import { MobileOrderCallButton } from '@/components/MobileOrderCallButton';
 import type { CheckoutParams } from '@/lib/url';
@@ -613,11 +614,32 @@ describe('CheckoutForm — レンダリング', () => {
     const { unmount } = render(<CheckoutForm params={params} />);
     expect(await screen.findByText('このタブでのお支払いは済んでいます')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '注文を送る' })).toBeInTheDocument();
+    // 払うボタンを止めた理由を出す。何度でも使えるリンクは「新しい注文として払う」で別の注文として払える
+    expect(screen.getByText('このタブでお支払い済みです。上の「注文を送る」から送ってください。')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '新しい注文として払う' }));
+    expect(screen.queryByText('このタブでお支払い済みです。上の「注文を送る」から送ってください。')).toBeNull();
     unmount();
     // 明細の違う会計 (別の注文) では出さない
     render(<CheckoutForm params={{ ...params, items: [{ name: 'チケット', qty: 2, price: '3000' }] }} />);
     await waitFor(() => expect(screen.queryByText('このタブでのお支払いは済んでいます')).toBeNull());
     window.sessionStorage.clear();
+  });
+
+  it('受け付けるチェーンが複数のリンクは、払う前なら「別のチェーンで払う」でチェーンを選ぶ画面へ戻れる', () => {
+    setAccount({ connected: false });
+    const replace = vi.fn();
+    vi.mocked(useRouter).mockReturnValue({ push: vi.fn(), replace } as unknown as ReturnType<typeof useRouter>);
+    window.history.replaceState({}, '', '/ja/checkout?to=0x1&token=jpyc&chains=polygon%2Ckaia&chain=kaia');
+    const { unmount } = render(<CheckoutForm params={{ ...JPYC_PARAMS, chains: ['polygon', 'kaia'], ship: 'ask' }} />);
+    fireEvent.click(screen.getByRole('button', { name: '別のチェーンで払う' }));
+    const search = new URLSearchParams(String(replace.mock.calls[0][0]).replace(/^\?/, ''));
+    expect(search.has('chain')).toBe(false);
+    expect(search.get('chains')).toBe('polygon,kaia');
+    unmount();
+    // 1 つのチェーンのリンクには出さない
+    render(<CheckoutForm params={JPYC_PARAMS} />);
+    expect(screen.queryByRole('button', { name: '別のチェーンで払う' })).toBeNull();
+    window.history.replaceState({}, '', '/');
   });
 
   it('order_id 未指定時は generic タイトル', () => {

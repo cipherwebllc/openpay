@@ -17,7 +17,9 @@ type OrderLinkSettings = {
   receiver: string;
   // 受取先の由来。'auto' = 接続ウォレットからの自動補完 (切替に追従)、'manual' = 手入力。
   receiverSource: 'auto' | 'manual';
-  chain: ChainSlug;
+  // 受け付けるチェーン (1 つ以上・先頭が主)。2 つ以上ならお客様が払う前に選ぶ (plans/order-link-multichain.md)。
+  // 旧版の chain (1 つ) は読むときに配列へ直す。
+  chains: ChainSlug[];
   payMode: PayMode;
   // 送料はお店ごとにほぼ同じなので覚える。
   shipping: string;
@@ -36,7 +38,7 @@ const DEFAULT_SETTINGS: OrderLinkSettings = {
   storeName: '',
   receiver: '',
   receiverSource: 'manual',
-  chain: 'polygon',
+  chains: ['polygon'],
   payMode: 'gasless',
   shipping: '',
   lastOrderId: '',
@@ -45,14 +47,22 @@ const DEFAULT_SETTINGS: OrderLinkSettings = {
   contactValue: '',
 };
 
-function sanitize(loaded: Partial<OrderLinkSettings>): OrderLinkSettings {
-  // 画面の選択肢に無いチェーンを残さない (保存のあとでガスレスが使えなくなったチェーン)。
-  const chain = normalizeChainForToken('jpyc', loaded.chain);
+function sanitize(loaded: Partial<OrderLinkSettings> & { chain?: unknown }): OrderLinkSettings {
+  // 画面の選択肢に無いチェーンを残さない (保存のあとでガスレスが使えなくなったチェーン)。重複も除く。
+  const available = orderLinkChains(JPYC_CHAINS);
+  const raw: unknown[] = Array.isArray(loaded.chains) ? loaded.chains : [loaded.chain];
+  const chains: ChainSlug[] = [];
+  for (const value of raw) {
+    // 知らない値を Polygon に倒さない (勝手に Polygon を足さない)。
+    if (typeof value !== 'string' || normalizeChainForToken('jpyc', value) !== value) continue;
+    const chain = value as ChainSlug;
+    if (available.includes(chain) && !chains.includes(chain)) chains.push(chain);
+  }
   return {
     storeName: typeof loaded.storeName === 'string' ? loaded.storeName.slice(0, ORDER_LINK_STORE_NAME_MAX) : '',
     receiver: typeof loaded.receiver === 'string' ? loaded.receiver : '',
     receiverSource: loaded.receiverSource === 'auto' ? 'auto' : 'manual',
-    chain: orderLinkChains(JPYC_CHAINS).includes(chain) ? chain : DEFAULT_SETTINGS.chain,
+    chains: chains.length > 0 ? chains : [...DEFAULT_SETTINGS.chains],
     payMode: loaded.payMode === 'standard' ? 'standard' : 'gasless',
     shipping: typeof loaded.shipping === 'string' && DECIMAL_PATTERN.test(loaded.shipping) ? loaded.shipping : '',
     lastOrderId:
@@ -67,7 +77,7 @@ function sanitize(loaded: Partial<OrderLinkSettings>): OrderLinkSettings {
 const SYNC_RULES: SettingsSyncRules<OrderLinkSettings> = {
   groups: [
     ['receiver', 'receiverSource'],
-    ['chain', 'payMode'],
+    ['chains', 'payMode'],
     ['contactKind', 'contactValue'],
   ],
   importable: { receiver: isSettledReceiverInput },

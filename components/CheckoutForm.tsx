@@ -22,11 +22,8 @@ import { SmartAccountFallbackBanner } from './SmartAccountFallbackBanner';
 import { RelayFallbackBanner } from './RelayFallbackBanner';
 import { isRemoteOrderCheckout, NotifyShopButton, type NotifyShopData } from './NotifyShopButton';
 import { shopContactLabel } from '@/lib/shopContact';
-import {
-  rememberedOrderPayment,
-  rememberOrderPayment,
-  type RememberedOrderPayment,
-} from '@/lib/orderConfirmation';
+import { rememberOrderPayment, type RememberedOrderPayment } from '@/lib/orderConfirmation';
+import { findRememberedOrderPayment } from '@/lib/orderPaidLookup';
 import {
   PaymentSuccessOverlay,
   type PaymentSuccessOverlayPayload,
@@ -74,7 +71,7 @@ import {
   networkFeeEquivalentValue,
   minimumAmountWei as deriveMinimumAmountWei,
 } from '@/lib/paymentMoney';
-import { blockExplorerUrl, chainForSlug } from '@/lib/chains';
+import { blockExplorerUrl, chainForSlug, type ChainSlug } from '@/lib/chains';
 import { env } from '@/lib/env';
 import { primeChimeAudio } from '@/lib/successChime';
 import { isGasCongestedError } from '@/lib/gasCeiling';
@@ -566,6 +563,20 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   } | null>(null);
   // 遠隔の注文の確認の署名をしてもらうウォレット (支払いを送った時点の接続先)。
   const submittedPayerRef = useRef<Address | undefined>(undefined);
+  // このタブで払った記録は、リンクが受け付ける全部のチェーンで探す (別のチェーンを選んで二重に払わせない)。
+  // 記録があれば払うボタンを止める。何度でも使えるリンクは「新しい注文として払う」で別の注文として払える
+  // (番号つきの注文は同じ注文なので払わせない・Codex P1)。
+  const remoteOrder = isRemoteOrderCheckout(params);
+  const [rememberedPayment, setRememberedPayment] = useState<{
+    chain: ChainSlug;
+    payment: RememberedOrderPayment;
+  } | null>(null);
+  const [newPurchase, setNewPurchase] = useState(false);
+  useEffect(() => {
+    if (!remoteOrder) return;
+    setRememberedPayment(findRememberedOrderPayment(params, Date.now()));
+  }, [remoteOrder, params]);
+  const paidInThisTab = remoteOrder && rememberedPayment !== null && !newPurchase;
 
   // relay 成功/失敗/pending を既存の gasless 履歴経路に流す合成 snapshot。
   const relayHistoryGasless = useRelayGaslessSnapshot(
@@ -1284,7 +1295,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   }
 
   async function onSubmit() {
-    if (!canSubmit) return;
+    if (!canSubmit || paidInThisTab) return;
     if (params.storeHandle && orderAdmissionMode) {
       // 同一 gesture の二重 click が React の再描画前に抜け、admission 後に二重署名へ
       // 波及するのを ref で同期的に遮断する。
@@ -1466,11 +1477,23 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   // 共通で従来どおり。
   // 遠隔の注文 (注文リンクや外部の /checkout リンク) なら、払ったことをお客様自身の LINE やメールでお店に知らせるボタンを出す。
   const notifyShop = isRemoteOrderCheckout(params);
-  const [rememberedPayment, setRememberedPayment] = useState<RememberedOrderPayment | null>(null);
-  useEffect(() => {
-    if (!notifyShop) return;
-    setRememberedPayment(rememberedOrderPayment(checkoutContextKey, Date.now()));
-  }, [notifyShop, checkoutContextKey]);
+  // 受け付けるチェーンが複数のリンク: 支払いを始めるまでは「別のチェーンで払う」でチェーンを選ぶ画面に戻れる。
+  // 始めたら (送信中・完了・結果不明・前の支払いの記録あり・ウォレットのチェーンの切り替え中) 戻さない
+  // (同じ注文を別のチェーンで二重に払わせない・plans/order-link-multichain.md)。
+  const chainSwitchLocked =
+    completed ||
+    flowPending ||
+    settledNoRetry ||
+    restoredCheckoutCompletion ||
+    standard.phase !== 'idle' ||
+    isSwitching ||
+    paidInThisTab;
+  const canPayOnOtherChain = Boolean(params.chains && params.chains.length >= 2) && !chainSwitchLocked;
+  const payOnOtherChain = () => {
+    const search = new URLSearchParams(window.location.search);
+    search.delete('chain');
+    router.replace(`?${search.toString()}`, { scroll: false });
+  };
   const successOverlayPayload: PaymentSuccessOverlayPayload | null =
     restoredCheckoutCompletion
       ? null
@@ -1505,29 +1528,34 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   // 注文を送る / お店に知らせる の中身。払ったウォレットは支払いを送った時点の接続先 (通常決済は hook が記録した
   // 送り主) で、完了を見た時点の接続先ではない (途中で切り替えたウォレットに署名させない)。
   const notifyPayer = (isStandard ? standard.lastSubmittedFrom : undefined) ?? submittedPayerRef.current;
-  const notifyFor = (txHash: string, payer: Address | undefined): NotifyShopData => ({
+  const notifyFor = (txHash: string, payer: Address | undefined, chain: ChainSlug = chainSlug): NotifyShopData => {
+    const explorer = chain === chainSlug ? explorerBase : blockExplorerUrl(deploymentForSlug(params.token, chain).chainId);
+    return {
     orderNo: params.orderId,
     askShipping: params.ship === 'ask',
     storeName: params.storeName,
     items: params.items.map((item) => ({ name: item.name, qty: item.qty })),
     amountDisplay: fmt(totalCustomerOutflow),
     txHash,
-    explorerTxUrl: explorerBase ? `${explorerBase}/tx/${txHash}` : undefined,
-    chain: chainSlug,
+    explorerTxUrl: explorer ? `${explorer}/tx/${txHash}` : undefined,
+    chain,
     shop: params.to,
     ...(payer ? { payer } : {}),
     // お店が確かめられるのは JPYC だけ (注文リンクの「入金を確かめる」)。他のトークンでは署名を求めない。
     confirm: params.token === 'jpyc',
     contact: params.contact,
-  });
+    };
+  };
   const notifyData: NotifyShopData | undefined =
     notifyShop && successOverlayPayload ? notifyFor(successOverlayPayload.txHash, notifyPayer) : undefined;
   // 読み直した画面: この会計 (同じ URL の中身) をこのタブで払った記録があれば、「注文を送る」を出す
   // (lib/orderConfirmation.ts の rememberOrderPayment)。完了画面を見ている間は出さない。
   const restoredNotifyData: NotifyShopData | undefined =
     notifyShop && !notifyData && rememberedPayment
-      ? notifyFor(rememberedPayment.txHash, rememberedPayment.payer)
+      ? notifyFor(rememberedPayment.payment.txHash, rememberedPayment.payment.payer, rememberedPayment.chain)
       : undefined;
+  // 何度でも使えるリンク (番号なし・ship=ask) は、同じ商品をもう一度注文できる。
+  const canPayAgainAsNewOrder = params.ship === 'ask' && !params.orderId;
   const liveNotifyTx = notifyData?.txHash;
   const liveNotifyPayer = notifyData?.payer;
   useEffect(() => {
@@ -1631,6 +1659,15 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
           {requiredChain.name} · {deployment.displaySymbol} ·{' '}
           {isStandard ? t('modeBadgeStandard') : t('modeBadgeGasless')}
         </p>
+        {canPayOnOtherChain && (
+          <button
+            type="button"
+            onClick={payOnOtherChain}
+            className="mt-1 inline-flex min-h-11 items-center text-sm font-medium text-brand hover:text-brand-dark"
+          >
+            {t('payOnOtherChain')}
+          </button>
+        )}
       </header>
 
       {/* 読み直した画面: このタブで払った会計なら、注文を送る / お店に知らせる をここに出す (同じ注文をもう一度払わせない)。 */}
@@ -1641,6 +1678,15 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
           <div className="mt-3">
             <NotifyShopButton {...restoredNotifyData} tone="panel" />
           </div>
+          {paidInThisTab && canPayAgainAsNewOrder && (
+            <button
+              type="button"
+              onClick={() => setNewPurchase(true)}
+              className="mt-2 inline-flex min-h-11 items-center text-sm font-medium text-emerald-800 underline underline-offset-4"
+            >
+              {t('payAgainAsNewOrder')}
+            </button>
+          )}
         </section>
       )}
 
@@ -1857,6 +1903,11 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
         />
       )}
 
+      {/* このタブで払った会計: 払うボタンを止めた理由を出す (上の「注文を送る」から送る)。 */}
+      {!completed && paidInThisTab && (
+        <p className="text-center text-sm text-slate-700">{t('paidInThisTabNote')}</p>
+      )}
+
       {!completed && (
         <button
           type="button"
@@ -1872,7 +1923,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
                   })
               : onSubmit
           }
-          disabled={isConnected && !canSubmit}
+          disabled={isConnected && (!canSubmit || paidInThisTab)}
           className="w-full rounded-xl bg-brand px-4 py-3 text-base font-semibold text-white shadow-sm transition hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-50"
         >
           {flowPending
