@@ -181,10 +181,14 @@ describe('next.config.mjs headers() — baseline and enforced CSP (C17)', () => 
     }
     for (const origin of [
       'https://rpc.mainnet.arc.io', 'https://rpc.testnet.arc.io',
-      'https://rpc.hyperliquid-testnet.xyz', 'https://eth.llamarpc.com',
-      'https://ethereum-rpc.publicnode.com', 'https://ethereum-sepolia-rpc.publicnode.com',
-      'https://rpc.ankr.com',
+      'https://rpc.hyperliquid-testnet.xyz',
+      'https://ethereum-rpc.publicnode.com', 'https://eth.drpc.org',
+      'https://ethereum-sepolia-rpc.publicnode.com',
     ]) expect(csp.get('connect-src')).toContain(origin);
+    // 応答しない・広告ブロックで止まる・API キーが要る RPC は許可に残さない (lib/chains.ts の入れ替え)。
+    for (const origin of ['https://eth.llamarpc.com', 'https://rpc.ankr.com']) {
+      expect(csp.get('connect-src')).not.toContain(origin);
+    }
   });
 
   it('covers wallet connections, Pimlico and both Circle environments without broad connect wildcards', async () => {
