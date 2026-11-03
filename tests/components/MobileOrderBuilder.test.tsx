@@ -171,22 +171,29 @@ describe('MobileOrderBuilder', () => {
     expect(screen.getByText(/実際の見え方/)).toBeInTheDocument();
   });
 
-  it('受取チェーンは複数選択 (チェックボックス)・既定 Polygon・最低1件を維持', () => {
+  it('受取チェーンは注文リンクと同じロゴ付きのボタンで複数選択・既定 Polygon・最低1件を維持', () => {
     renderWithIntl(<MobileOrderBuilder />);
     // 受取先と受取チェーンは「受け取りの設定」シートの中 (一度決めたら変えない設定・2026-10 磨き上げ P3)。
     fireEvent.click(screen.getByRole('button', { name: '設定' }));
-    expect(screen.getByRole('dialog', { name: '受け取りの設定' })).toBeInTheDocument();
-    const polygon = screen.getByRole('checkbox', { name: 'JPYC (Polygon)' }) as HTMLInputElement;
-    const kaia = screen.getByRole('checkbox', { name: 'JPYC (Kaia)' }) as HTMLInputElement;
-    expect(polygon.checked).toBe(true); // 既定
-    expect(kaia.checked).toBe(false);
+    const dialog = screen.getByRole('dialog', { name: '受け取りの設定' });
+    const group = within(dialog).getByRole('group', { name: '受取チェーン' });
+    // テストは testnet の表示名 (Polygon Amoy・Kairos Testnet)。チェーンのロゴを添える。
+    const polygon = within(group).getByRole('button', { name: /Polygon/ });
+    const kaia = within(group).getByRole('button', { name: /Kairos/ });
+    expect(polygon.querySelector('img')).not.toBeNull();
+    expect(polygon).toHaveAttribute('aria-pressed', 'true'); // 既定
+    expect(kaia).toHaveAttribute('aria-pressed', 'false');
     fireEvent.click(kaia); // Kaia 追加 → 両方
-    expect(kaia.checked).toBe(true);
-    expect(polygon.checked).toBe(true);
+    expect(kaia).toHaveAttribute('aria-pressed', 'true');
+    expect(polygon).toHaveAttribute('aria-pressed', 'true');
     fireEvent.click(polygon); // Polygon 解除 (Kaia 残る)
-    expect(polygon.checked).toBe(false);
+    expect(polygon).toHaveAttribute('aria-pressed', 'false');
     fireEvent.click(kaia); // 最後の1件は外せない (最低1件維持)
-    expect(kaia.checked).toBe(true);
+    expect(kaia).toHaveAttribute('aria-pressed', 'true');
+    // 見出しを押してもチェーンは切り替わらない (ボタンを label で包まない)。
+    fireEvent.click(within(group).getByText('受取チェーン'));
+    expect(kaia).toHaveAttribute('aria-pressed', 'true');
+    expect(polygon).toHaveAttribute('aria-pressed', 'false');
   });
 
   it('受取先 + 店名を入力しても ?s= 注文 URL は前面に出さない (@handle 公開のみ)', () => {
