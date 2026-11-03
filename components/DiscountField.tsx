@@ -33,7 +33,7 @@ export function DiscountField({
         ref={discount.addRef}
         type="button"
         onClick={discount.add}
-        className="text-xs font-medium text-brand hover:underline"
+        className="relative py-0.5 text-xs font-medium text-brand after:absolute after:-inset-x-2 after:-inset-y-3 after:content-[''] hover:underline"
       >
         {t('add')}
       </button>
@@ -61,7 +61,7 @@ export function DiscountField({
               type="button"
               aria-pressed={discount.mode === mode}
               onClick={() => discount.setMode(mode)}
-              className={`rounded-md px-2.5 py-1 font-medium ${
+              className={`inline-flex min-h-11 items-center rounded-md px-3 font-medium ${
                 discount.mode === mode ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'
               }`}
             >
@@ -89,7 +89,7 @@ export function DiscountField({
         <button
           type="button"
           onClick={discount.remove}
-          className="ml-auto text-xs text-slate-500 underline underline-offset-2 hover:text-slate-700"
+          className="ml-auto inline-flex min-h-11 min-w-11 items-center justify-center text-xs text-slate-500 underline underline-offset-2 hover:text-slate-700"
         >
           {t('remove')}
         </button>

@@ -67,6 +67,7 @@ export function ProductOptionEditor({
     <div className="space-y-3">
       {groups.map((g) => (
         <div key={g.id} className="rounded-lg border border-slate-200 bg-slate-50 p-2">
+          {/* オプション名は 1 行を取る (選び方・必須・削除と並べると、スマホで名前が 2〜3 文字しか見えない)。 */}
           <div className="flex flex-wrap items-center gap-2">
             <input
               type="text"
@@ -75,7 +76,7 @@ export function ProductOptionEditor({
               placeholder={t('groupNamePlaceholder')}
               aria-label={t('groupNameLabel')}
               onChange={(e) => patchGroup(g.id, { name: e.target.value })}
-              className="h-11 min-w-0 flex-1 rounded-md border border-slate-200 px-2 text-base placeholder:text-slate-500 focus:border-brand focus:outline-none sm:text-sm"
+              className="h-11 w-full min-w-0 flex-none rounded-md border border-slate-200 px-2 text-base placeholder:text-slate-500 focus:border-brand focus:outline-none sm:text-sm"
             />
             <select
               value={g.type}
@@ -86,9 +87,10 @@ export function ProductOptionEditor({
               <option value="single">{t('typeSingle')}</option>
               <option value="multi">{t('typeMulti')}</option>
             </select>
-            <label className="flex items-center gap-1 text-xs text-slate-500">
+            <label className="flex min-h-11 items-center gap-1.5 text-xs text-slate-500">
               <input
                 type="checkbox"
+                className="h-4 w-4"
                 checked={g.required ?? false}
                 onChange={(e) => patchGroup(g.id, { required: e.target.checked || undefined })}
               />
@@ -98,7 +100,7 @@ export function ProductOptionEditor({
               type="button"
               onClick={() => removeGroup(g.id)}
               aria-label={t('removeGroup')}
-              className="ml-auto rounded p-1 text-slate-500 hover:text-red-600"
+              className="ml-auto inline-flex h-11 w-11 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 hover:text-red-600"
             >
               <Trash2 className="h-4 w-4" aria-hidden />
             </button>
@@ -131,9 +133,9 @@ export function ProductOptionEditor({
                   type="button"
                   onClick={() => removeChoice(g.id, c.id)}
                   aria-label={t('removeChoice')}
-                  className="rounded p-1 text-slate-500 hover:text-red-600"
+                  className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 hover:text-red-600"
                 >
-                  <Trash2 className="h-3.5 w-3.5" aria-hidden />
+                  <Trash2 className="h-4 w-4" aria-hidden />
                 </button>
               </li>
             ))}
@@ -142,7 +144,7 @@ export function ProductOptionEditor({
             <button
               type="button"
               onClick={() => addChoice(g.id)}
-              className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-brand hover:underline"
+              className="inline-flex min-h-11 items-center gap-1 text-xs font-medium text-brand hover:underline"
             >
               <Plus className="h-3 w-3" aria-hidden />
               {t('addChoice')}
@@ -154,7 +156,7 @@ export function ProductOptionEditor({
         <button
           type="button"
           onClick={addGroup}
-          className="inline-flex items-center gap-1 rounded-md border border-dashed border-slate-300 px-2 py-1 text-xs font-medium text-slate-600 hover:border-brand hover:text-brand-dark"
+          className="inline-flex min-h-11 items-center gap-1 rounded-md border border-dashed border-slate-300 px-3 text-xs font-medium text-slate-600 hover:border-brand hover:text-brand-dark"
         >
           <Plus className="h-3.5 w-3.5" aria-hidden />
           {t('addGroup')}

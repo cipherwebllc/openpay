@@ -167,7 +167,7 @@ export function QrPreviewModal({
           <button
             type="button"
             onClick={onClose}
-            className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 hover:border-slate-400"
+            className="inline-flex min-h-11 items-center gap-1 rounded-lg border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-700 hover:border-slate-400"
           >
             <X className="h-4 w-4" aria-hidden />
             {labels.close}
@@ -354,7 +354,7 @@ export function QrPreviewModal({
               type="button"
               onClick={onPrint}
               disabled={convertExpired}
-              className={`inline-flex items-center gap-1.5 rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white hover:bg-brand-dark${convertExpired ? ' cursor-not-allowed opacity-50' : ''}`}
+              className={`inline-flex min-h-11 items-center gap-1.5 rounded-lg bg-brand px-4 text-sm font-semibold text-white hover:bg-brand-dark${convertExpired ? ' cursor-not-allowed opacity-50' : ''}`}
             >
               <Printer className="h-4 w-4" aria-hidden />
               {labels.print}
@@ -365,7 +365,7 @@ export function QrPreviewModal({
               type="button"
               onClick={onCopy}
               disabled={convertExpired}
-              className={`rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:border-brand hover:text-brand-dark${convertExpired ? ' cursor-not-allowed opacity-50' : ''}`}
+              className={`min-h-11 rounded-lg border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-700 hover:border-brand hover:text-brand-dark${convertExpired ? ' cursor-not-allowed opacity-50' : ''}`}
             >
               {copied ? labels.copied : labels.copy}
             </button>
@@ -375,7 +375,7 @@ export function QrPreviewModal({
               type="button"
               onClick={onDownloadSvg}
               disabled={convertExpired}
-              className={`rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:border-brand hover:text-brand-dark${convertExpired ? ' cursor-not-allowed opacity-50' : ''}`}
+              className={`min-h-11 rounded-lg border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-700 hover:border-brand hover:text-brand-dark${convertExpired ? ' cursor-not-allowed opacity-50' : ''}`}
             >
               {labels.downloadSvg}
             </button>
@@ -385,7 +385,7 @@ export function QrPreviewModal({
               type="button"
               onClick={onDownloadPng}
               disabled={convertExpired}
-              className={`rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:border-brand hover:text-brand-dark${convertExpired ? ' cursor-not-allowed opacity-50' : ''}`}
+              className={`min-h-11 rounded-lg border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-700 hover:border-brand hover:text-brand-dark${convertExpired ? ' cursor-not-allowed opacity-50' : ''}`}
             >
               {labels.downloadPng}
             </button>
@@ -399,7 +399,7 @@ export function QrPreviewModal({
         {/* 決済リンク (店員向け・お客様に見せる画面に長い URL を出さない = 折りたたみ・2026-10 磨き上げ P5)。 */}
         {!hideUrl && (
           <details className="group/url mt-4 w-full print:hidden">
-            <summary className="flex cursor-pointer list-none items-center justify-center gap-1 text-xs font-medium text-slate-500 hover:text-slate-700 [&::-webkit-details-marker]:hidden">
+            <summary className="flex min-h-11 cursor-pointer list-none items-center justify-center gap-1 text-xs font-medium text-slate-500 hover:text-slate-700 [&::-webkit-details-marker]:hidden">
               {labels.showUrl ?? 'Link'}
               <ChevronDown className="h-3.5 w-3.5 transition-transform group-open/url:rotate-180" aria-hidden />
             </summary>
@@ -435,7 +435,7 @@ export function QrPreviewModal({
                 type="button"
                 onClick={eip681.onCopy}
                 disabled={convertExpired}
-                className={`rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:border-brand hover:text-brand-dark${convertExpired ? ' cursor-not-allowed opacity-50' : ''}`}
+                className={`min-h-11 rounded-lg border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 hover:border-brand hover:text-brand-dark${convertExpired ? ' cursor-not-allowed opacity-50' : ''}`}
               >
                 {eip681.copied ? eip681.copiedLabel : eip681.copy}
               </button>

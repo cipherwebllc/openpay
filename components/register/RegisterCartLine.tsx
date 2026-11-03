@@ -52,7 +52,7 @@ export function RegisterCartLine({
           onClick={onToggle}
           aria-expanded={open}
           aria-controls={detailsId}
-          className="flex min-w-0 flex-1 items-center gap-1 text-left"
+          className="flex min-h-11 min-w-0 flex-1 items-center gap-1 text-left"
         >
           <span className={`truncate text-sm font-medium ${line.name.trim() ? 'text-slate-800' : 'text-slate-500'}`}>
             {line.name.trim() || t('productNamePlaceholder')}
@@ -144,7 +144,7 @@ export function RegisterCartLine({
           <button
             type="button"
             onClick={onRemove}
-            className="inline-flex items-center gap-1.5 text-xs font-semibold text-red-600 hover:underline"
+            className="relative inline-flex items-center gap-1.5 py-0.5 text-xs font-semibold text-red-600 after:absolute after:-inset-x-2 after:-inset-y-3 after:content-[''] hover:underline"
           >
             <Trash2 className="h-3.5 w-3.5" aria-hidden />
             {t('removeLine')}

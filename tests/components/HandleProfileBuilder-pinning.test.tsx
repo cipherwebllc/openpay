@@ -319,24 +319,24 @@ describe('HandleProfileBuilder pre-split pinning (F-8 PR-19)', () => {
     expect({ arcOn, arcOff: hashDom(inactive.container) }).toMatchInlineSnapshot(`
       {
         "arcOff": {
-          "all": "76c2b2ae7d819746b89e6009ccbbf8672cf4bb52b11a31c99f3a058cff474955",
+          "all": "081b3557da301978d01eaae5dc71ce0f691524e17706a8942076eac13af377f6",
           "parts": [
             "div 9e9d4e13728d H@handleプレビューへ",
             "div 964b21187ca4 あなたのページ",
             "section 20c321a66e17 受け取り設定0x52d4…cA8",
-            "div 89f0dd2b1244 受け取りの設定完了受け取り受取先",
+            "div 4553af2b75ef 受け取りの設定完了受け取り受取先",
             "section 680dd631212b プロフィール表示名ひとこと (b",
             "aside 6b9c8d3be6c2 プレビュー@無効中（点灯待ち）通",
             "div c4770e3ba873 bar",
           ],
         },
         "arcOn": {
-          "all": "5154bcb6f05a3b9dea0d72a28efcddc7d39572f660b535aa78694b53e5738982",
+          "all": "9ba0a6a6dbef27361ed53fc1a9b1ac80f7ecfab154c7bb71f6422fbf14b3555e",
           "parts": [
             "div 9e9d4e13728d H@handleプレビューへ",
             "div bbd7c17af677 あなたのページ",
             "section 6189a77df581 受け取り設定0x52d4…cA8",
-            "div 9d36e6033341 受け取りの設定完了受け取り受取先",
+            "div dfb0caf5604d 受け取りの設定完了受け取り受取先",
             "section 680dd631212b プロフィール表示名ひとこと (b",
             "aside 245f5922d1c5 プレビュー@通貨・チェーンを選ぶ",
             "div c4770e3ba873 bar",

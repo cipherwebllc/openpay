@@ -89,7 +89,7 @@ export function QrReceiverFields({
           href={addressExplorerUrl(deployment.chainId, effectiveReceiver)}
           target="_blank"
           rel="noreferrer noopener"
-          className="mt-2 flex text-xs text-brand underline underline-offset-2 hover:opacity-80"
+          className="mt-0.5 flex min-h-11 items-center text-xs text-brand underline underline-offset-2 hover:opacity-80"
         >
           {t('merchantExplorerLink', { chainName: chain.name })}
         </a>

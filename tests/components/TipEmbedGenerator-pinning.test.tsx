@@ -553,9 +553,9 @@ describe('TipEmbedGenerator pre-split pinning (F-8 PR-20)', () => {
           ],
         },
         "settingsSheet": {
-          "all": "f028ca0a74932e2d8776c6ed90d50ce28adb0c54798c117376fec8c5d6eb01f5",
+          "all": "d74eeddf1dee32a74e9134565a2823b058efd0749c36244b5de2bbe717108328",
           "parts": [
-            "div 435305ac2155 受け取り設定0x8335…291",
+            "div 89ae73a056f6 受け取り設定0x8335…291",
             "div 1b42086fb076 表示をカスタマイズ表示名 (任意",
             "div 556814a4cd21 プレビュー{"to":"0x83",
           ],

@@ -153,13 +153,13 @@ export function ProductPresetManager({
                   </option>
                 ))}
               </select>
-              <div className="ml-auto flex items-center gap-1">
+              <div className="ml-auto flex items-center">
                 <button
                   type="button"
                   onClick={() => movePreset(p.id, 'up')}
                   disabled={i === 0}
                   aria-label={t('moveUp')}
-                  className="rounded p-1 text-slate-500 hover:text-slate-700 disabled:opacity-30"
+                  className="inline-flex h-11 w-11 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-700 disabled:opacity-30 disabled:hover:bg-transparent"
                 >
                   <ChevronUp className="h-4 w-4" aria-hidden />
                 </button>
@@ -168,7 +168,7 @@ export function ProductPresetManager({
                   onClick={() => movePreset(p.id, 'down')}
                   disabled={i === presets.length - 1}
                   aria-label={t('moveDown')}
-                  className="rounded p-1 text-slate-500 hover:text-slate-700 disabled:opacity-30"
+                  className="inline-flex h-11 w-11 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-700 disabled:opacity-30 disabled:hover:bg-transparent"
                 >
                   <ChevronDown className="h-4 w-4" aria-hidden />
                 </button>
@@ -180,7 +180,7 @@ export function ProductPresetManager({
                     }
                   }}
                   aria-label={t('remove')}
-                  className="rounded p-1 text-slate-500 hover:text-red-600"
+                  className="inline-flex h-11 w-11 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 hover:text-red-600"
                 >
                   <Trash2 className="h-4 w-4" aria-hidden />
                 </button>
@@ -203,18 +203,20 @@ export function ProductPresetManager({
                   />
                 </div>
                 {/* 表示 (有効) + おすすめ (主行から移動・商品名を広く取るため)。 */}
-                <label className="flex shrink-0 items-center gap-1 text-xs text-slate-500">
+                <label className="flex min-h-11 shrink-0 items-center gap-1.5 text-xs text-slate-500">
                   <input
                     type="checkbox"
+                    className="h-4 w-4"
                     checked={p.enabled}
                     onChange={(e) => updatePreset(p.id, { enabled: e.target.checked })}
                   />
                   {t('enabledLabel')}
                 </label>
                 {env.enableShopLive && (
-                  <label className="flex shrink-0 items-center gap-1 text-xs text-slate-500">
+                  <label className="flex min-h-11 shrink-0 items-center gap-1.5 text-xs text-slate-500">
                     <input
                       type="checkbox"
+                      className="h-4 w-4"
                       checked={p.recommended ?? false}
                       onChange={(e) =>
                         updatePreset(p.id, { recommended: e.target.checked || undefined })
@@ -224,9 +226,10 @@ export function ProductPresetManager({
                   </label>
                 )}
                 {shopLive && (
-                  <label className="flex shrink-0 items-center gap-1 text-xs text-slate-500">
+                  <label className="flex min-h-11 shrink-0 items-center gap-1.5 text-xs text-slate-500">
                     <input
                       type="checkbox"
+                      className="h-4 w-4"
                       checked={shopLive.state.soldOut.includes(p.id)}
                       disabled={shopLive.isPending}
                       onChange={(e) => shopLive.toggleSoldOut(p.id, e.target.checked)}
@@ -234,7 +237,7 @@ export function ProductPresetManager({
                     {t('soldOutToggle')}
                   </label>
                 )}
-                <label className="flex shrink-0 items-center gap-1 text-xs text-slate-500">
+                <label className="flex min-h-11 shrink-0 items-center gap-1.5 text-xs text-slate-500">
                   {t('categoryLabel')}
                   <input
                     type="text"
@@ -248,12 +251,12 @@ export function ProductPresetManager({
               </div>
               {/* オプション (サイズ/トッピング)・flag 裏。空でも折りたたみで提示。 */}
               {env.enableMenuOptions && (
-                <details className="w-full rounded-lg border border-slate-100 bg-white px-2 py-1">
-                  <summary className="cursor-pointer list-none text-xs font-medium text-slate-500">
+                <details className="w-full rounded-lg border border-slate-100 bg-white px-2">
+                  <summary className="flex min-h-11 cursor-pointer list-none items-center text-xs font-medium text-slate-500">
                     {t('optionsTitle')}
                     {p.options && p.options.length > 0 ? ` (${p.options.length})` : ''}
                   </summary>
-                  <div className="mt-2">
+                  <div className="pb-2">
                     <ProductOptionEditor
                       options={p.options}
                       onChange={(opts) => updatePreset(p.id, { options: opts })}

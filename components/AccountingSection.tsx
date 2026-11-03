@@ -73,8 +73,9 @@ export function AccountingSection(props: AccountingSectionProps) {
   const id = useId();
   return (
     <details className={bare ? 'group' : 'group rounded-2xl border border-slate-200 bg-white p-4'}>
+      {/* 押せる高さは 44px。上下の余白に 12px ずつはみ出させ、行の見た目の高さは変えない。 */}
       <summary
-        className={`flex cursor-pointer list-none items-center justify-between font-medium [&::-webkit-details-marker]:hidden ${
+        className={`-my-3 flex min-h-11 cursor-pointer list-none items-center justify-between font-medium [&::-webkit-details-marker]:hidden ${
           bare ? 'text-xs text-slate-600' : 'text-sm text-slate-700'
         }`}
       >
@@ -139,7 +140,7 @@ export function AccountingSection(props: AccountingSectionProps) {
               <button
                 type="button"
                 onClick={onGenerateReceiptNo}
-                className="flex shrink-0 items-center gap-1 rounded-lg border border-slate-300 px-3 py-2 text-xs font-medium text-slate-600 hover:border-brand"
+                className="flex h-11 shrink-0 items-center gap-1 rounded-lg border border-slate-300 px-3 text-xs font-medium text-slate-600 hover:border-brand"
               >
                 <Hash className="h-3.5 w-3.5" aria-hidden />
                 {labels.generate}
