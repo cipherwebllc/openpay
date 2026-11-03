@@ -31,6 +31,25 @@ describe('SuccessOverlay', () => {
     expect(screen.getByRole('button', { name: '閉じる' })).toBeInTheDocument();
   });
 
+  it('遠隔の注文 (notifyShop・受付番号あり) では「お店に知らせる」を出し、閉じる前の案内も変える', () => {
+    render(
+      <SuccessOverlay amountDisplay="3,500 JPYC" txHash={TX_HASH} orderNo="A-001" notifyShop onDismiss={() => undefined} />,
+    );
+    expect(screen.getByRole('button', { name: 'お店に知らせる' })).toBeInTheDocument();
+    expect(screen.getByText('お店に知らせてから閉じてください')).toBeInTheDocument();
+  });
+
+  it('notifyShop が無い (店頭の会計) か受付番号が無ければ「お店に知らせる」を出さない', () => {
+    const { unmount } = render(
+      <SuccessOverlay amountDisplay="3,500 JPYC" txHash={TX_HASH} orderNo="A-001" onDismiss={() => undefined} />,
+    );
+    expect(screen.queryByRole('button', { name: 'お店に知らせる' })).toBeNull();
+    expect(screen.getByText('店主が確認したら閉じてください')).toBeInTheDocument();
+    unmount();
+    render(<SuccessOverlay amountDisplay="3,500 JPYC" txHash={TX_HASH} notifyShop onDismiss={() => undefined} />);
+    expect(screen.queryByRole('button', { name: 'お店に知らせる' })).toBeNull();
+  });
+
   it('現在時刻が HH:MM:SS 形式で描画される (ゼロ詰め)', () => {
     render(
       <SuccessOverlay

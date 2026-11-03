@@ -20,6 +20,7 @@ import { OnrampCta } from './OnrampCta';
 import { ResultRow } from './ResultRow';
 import { SmartAccountFallbackBanner } from './SmartAccountFallbackBanner';
 import { RelayFallbackBanner } from './RelayFallbackBanner';
+import { isRemoteOrderCheckout, NotifyShopButton } from './NotifyShopButton';
 import {
   PaymentSuccessOverlay,
   type PaymentSuccessOverlayPayload,
@@ -1453,6 +1454,8 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   // blockNumber を省き (undefined)、standard は userOpHash を省く — いずれも従来の overlay 呼び出しと
   // 同じ。amountDisplay=fmt(totalCustomerOutflow)・merchantAddress=params.to・explorerBase は全経路
   // 共通で従来どおり。
+  // 遠隔の注文 (注文リンクや外部の /checkout リンク) なら、払ったことをお客様自身の LINE やメールでお店に知らせるボタンを出す。
+  const notifyShop = isRemoteOrderCheckout(params);
   const successOverlayPayload: PaymentSuccessOverlayPayload | null =
     restoredCheckoutCompletion
       ? null
@@ -2053,6 +2056,19 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
             )}
           </dl>
 
+          {/* 遠隔の注文: 大きな完了画面を閉じた後も、お店に知らせるボタンを残す。 */}
+          {notifyShop && params.orderId && successOverlayPayload && (
+            <div className="mt-4">
+              <NotifyShopButton
+                orderNo={params.orderId}
+                amountDisplay={successOverlayPayload.amountDisplay}
+                txHash={successOverlayPayload.txHash}
+                explorerTxUrl={explorerBase ? `${explorerBase}/tx/${successOverlayPayload.txHash}` : undefined}
+                tone="panel"
+              />
+            </div>
+          )}
+
           {/* お渡し準備完了通知 (flag ENABLE_ORDER_PICKUP): 顧客が注文状況を追えるリンク。
               click は user gesture ＝ ここで AudioContext を解錠 (iOS 自動再生対策)。flag OFF / 非
               mobile-order (webhook 無) では statusToken が null ゆえ非表示。 */}
@@ -2142,6 +2158,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
       <PaymentSuccessOverlay
         dismissed={overlayDismissed || orderNotifyTooOld}
         payload={successOverlayPayload}
+        notifyShop={notifyShop}
         onDismiss={() => setOverlayDismissed(true)}
       />
     </div>

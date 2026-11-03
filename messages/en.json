@@ -1676,7 +1676,15 @@
     "viewReceiptsLink": "View payment receipts ↗",
     "dismiss": "Close",
     "dismissHelp": "Close after the merchant has confirmed",
-    "soundToggle": "Completion sound"
+    "soundToggle": "Completion sound",
+    "notifyShop": "Tell the shop",
+    "notifyShopHint": "Send a message to the shop you ordered from, by LINE or email, saying you have paid.",
+    "notifyShopMessage": "I have paid for order {id}.",
+    "notifyShopCopy": "Copy the message",
+    "notifyShopCopied": "Copied. Paste it into your conversation with the shop.",
+    "notifyShopShared": "Shared",
+    "notifyShopTextLabel": "Message to send to the shop (select and copy it)",
+    "notifyShopDismissHelp": "Close this after you have told the shop"
   },
   "NonCustodialNotice": {
     "shortTitle": "Settlement lives on-chain",
