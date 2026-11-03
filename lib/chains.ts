@@ -419,15 +419,16 @@ export function customRpcUrlForChain(chainId: number): string | undefined {
 // viem の mainnet デフォルト RPC (eth.merkle.io) はブラウザから "Failed to fetch"
 // (CORS/接続拒否) になることがあるため、CORS 対応の公開 endpoint を複数並べる。
 // 他 L2 chain は公開 RPC が安定なので単一 http() のままでよい。
+// 2026-11-04 入れ替え: eth.llamarpc.com は 525 (Cloudflare の SSL エラー) で応答せず、広告ブロックの EasyPrivacy にも
+// 載っている (`||eth.llamarpc.com^`)。rpc.ankr.com は API キーが無いとエラーを返すようになった。先頭が失敗すると
+// 残高の読み取り (lib/walletBalances.ts の 3 秒) を使い切り「USDC (Ethereum) の残高を取得できませんでした」になっていた。
+// 残すのはブラウザから呼べて (CORS)、広告ブロックの一覧に無く、外部送信の公表 (プライバシーポリシー 3-3) に
+// 名前がある提供者 (PublicNode・dRPC) だけ。ほかの提供者を足すときは 3-3 も直す (tests/lib/externalTransmissionDisclosure)。
 const ETHEREUM_PUBLIC_FALLBACKS = [
-  'https://eth.llamarpc.com',
   'https://ethereum-rpc.publicnode.com',
-  'https://rpc.ankr.com/eth',
+  'https://eth.drpc.org',
 ] as const;
-const SEPOLIA_PUBLIC_FALLBACKS = [
-  'https://ethereum-sepolia-rpc.publicnode.com',
-  'https://rpc.ankr.com/eth_sepolia',
-] as const;
+const SEPOLIA_PUBLIC_FALLBACKS = ['https://ethereum-sepolia-rpc.publicnode.com'] as const;
 
 // chain に対する viem transport を組み立てる共有ヘルパ。wagmi.ts (wallet 接続)
 // と crossChain/balance.ts (残高 query) の両方から使い、mainnet/sepolia の RPC

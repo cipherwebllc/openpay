@@ -18,8 +18,8 @@ const rpcOrigins = [
   'https://rpc.soniclabs.com', 'https://rpc.blaze.soniclabs.com',
   'https://evm-rpc.sei-apis.com', 'https://evm-rpc-testnet.sei-apis.com',
   'https://rpc.hyperliquid.xyz', 'https://rpc.hyperliquid-testnet.xyz',
-  'https://eth.llamarpc.com', 'https://ethereum-rpc.publicnode.com',
-  'https://ethereum-sepolia-rpc.publicnode.com', 'https://rpc.ankr.com',
+  'https://ethereum-rpc.publicnode.com', 'https://eth.drpc.org',
+  'https://ethereum-sepolia-rpc.publicnode.com',
 ];
 
 const walletVerifyOrigins = [
