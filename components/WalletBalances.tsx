@@ -10,12 +10,13 @@
 // 各トークン内は残高降順。
 //
 // 取得失敗 (RPC timeout 等) の chain は表示から除外し (非ブロッキング)、1 件でも
-// 失敗があれば控えめな注記を出す。読み込み中はスケルトン (シマー) でアプリ的に。
+// 失敗があれば、読めなかったトークンとチェーン (「JPYC (Kaia)」) を注記に出し、「もう一度読む」を付ける
+// (2026-11-04 user: 払いたいチェーンの残高が出ない理由が分からなかった)。読み込み中はスケルトン (シマー) でアプリ的に。
 //
 // データ取得 (useWalletTokenBalances) と描画 (WalletBalancesView) を分離し、View は
 // 純粋にデータを受け取って描く (プレビュー/テストから mock データで単体描画できる)。
 
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { formatUnits } from 'viem';
 import { useWalletTokenBalances } from '@/hooks/useWalletTokenBalances';
 import { chainNameForId } from '@/lib/chains';
@@ -38,17 +39,30 @@ function formatBalance(raw: bigint, decimals: number): string {
 }
 
 export function WalletBalances() {
-  const { data, isLoading } = useWalletTokenBalances();
-  return <WalletBalancesView data={data} isLoading={isLoading} />;
+  const { data, isLoading, isFetching, refetch } = useWalletTokenBalances();
+  return (
+    <WalletBalancesView
+      data={data}
+      isLoading={isLoading}
+      retrying={isFetching}
+      onRetry={() => void refetch()}
+    />
+  );
 }
 
 // 純描画 (data を受け取るだけ)。プレビュー/テストで mock データから直接描ける。
 export function WalletBalancesView({
   data,
   isLoading,
+  retrying = false,
+  onRetry,
 }: {
   data: TokenChainBalance[] | undefined;
   isLoading: boolean;
+  /** 読み直している間 (ボタンを止めて「読んでいます…」にする)。 */
+  retrying?: boolean;
+  /** 読めなかったチェーンがあるときの「もう一度読む」。無ければボタンを出さない。 */
+  onRetry?: () => void;
 }) {
   const t = useTranslations('Scan');
 
@@ -74,17 +88,15 @@ export function WalletBalancesView({
   if (!data) return null;
 
   const nonZero = data.filter((b) => b.status === 'ok' && b.balance > 0n);
-  const hadError = data.some((b) => b.status === 'error');
+  const failed = data.filter((b) => b.status === 'error');
+  const partialError =
+    failed.length > 0 ? <PartialError failed={failed} retrying={retrying} onRetry={onRetry} /> : null;
 
   if (nonZero.length === 0) {
     return (
       <div className="mt-3 space-y-1">
         <p className="text-xs text-slate-500">{t('balancesEmpty')}</p>
-        {hadError && (
-          <p className="text-[11px] text-amber-700">
-            {t('balancesPartialError')}
-          </p>
-        )}
+        {partialError}
       </div>
     );
   }
@@ -109,8 +121,44 @@ export function WalletBalancesView({
           />
         ))}
       </ul>
-      {hadError && (
-        <p className="text-[11px] text-amber-700">{t('balancesPartialError')}</p>
+      {partialError}
+    </div>
+  );
+}
+
+// 読めなかったトークンとチェーンを名前で出す (「JPYC (Kaia)、USDC (Arc) の残高を取得できませんでした。」)。
+// 払いたいチェーンが読めなかったのか、関係のないチェーンなのかを使う人が見分けられるようにする。
+function PartialError({
+  failed,
+  retrying,
+  onRetry,
+}: {
+  failed: readonly TokenChainBalance[];
+  retrying: boolean;
+  onRetry?: () => void;
+}) {
+  const t = useTranslations('Scan');
+  const locale = useLocale();
+  const chains = new Intl.ListFormat(locale, { style: 'long', type: 'conjunction' }).format(
+    failed.map((b) =>
+      t('balancesFailedItem', {
+        token: b.deployment.displaySymbol,
+        chain: chainNameForId(b.deployment.chainId) ?? `chain ${b.deployment.chainId}`,
+      }),
+    ),
+  );
+  return (
+    <div className="flex flex-wrap items-center gap-x-3">
+      <p className="text-[11px] text-amber-700">{t('balancesPartialError', { chains })}</p>
+      {onRetry && (
+        <button
+          type="button"
+          onClick={onRetry}
+          disabled={retrying}
+          className="inline-flex h-11 items-center text-xs font-medium text-brand underline underline-offset-2 hover:text-brand-dark disabled:text-slate-500 disabled:no-underline"
+        >
+          {retrying ? t('balancesRetrying') : t('balancesRetry')}
+        </button>
       )}
     </div>
   );
