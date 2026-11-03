@@ -13,6 +13,7 @@ import { useTranslations } from 'next-intl';
 import { Check, Copy, Plus, Send } from 'lucide-react';
 import { ChainChooser } from '@/components/ChainChooser';
 import { DiscountField } from '@/components/DiscountField';
+import { InvoiceNumberInput } from '@/components/InvoiceNumberInput';
 import {
   invalidClass,
   OrderLinkAmountField,
@@ -49,9 +50,11 @@ import {
   ORDER_LINK_ID_MAX,
   ORDER_LINK_STANDARD_MAX_JPYC,
   ORDER_LINK_STORE_NAME_MAX,
+  ORDER_LINK_TAX_CATEGORIES,
   type OrderLinkError,
   type OrderLinkLine,
   type OrderLinkResult,
+  type OrderLinkTax,
 } from '@/lib/orderLink';
 import { SHOP_CONTACT_MAIL_MAX, shopContactFromInput } from '@/lib/shopContact';
 import { taxDisplayDecimals } from '@/lib/tax';
@@ -60,6 +63,9 @@ import { CHECKOUT_MAX_ITEMS, CHECKOUT_QTY_MAX } from '@/lib/url/checkout';
 const MODES: readonly PayMode[] = ['gasless', 'standard'];
 const LINK_KINDS = ['single', 'reusable'] as const;
 const CONTACT_KINDS = ['none', 'line', 'mail'] as const;
+// 消費税の設定の選択肢 (null = 指定なし = 税の情報を入れない)。
+const TAX_CHOICES: readonly (OrderLinkTax | null)[] = [null, ...ORDER_LINK_TAX_CATEGORIES];
+const TAX_LABEL_KEY = { taxable_10: 'taxable10', taxable_8: 'taxable8', tax_free: 'taxFree' } as const;
 const PILL_GROUP = 'grid gap-1 rounded-xl bg-slate-100 p-1';
 const pillClass = (active: boolean) =>
   `min-h-11 rounded-lg px-2 text-sm font-semibold transition-colors ${
@@ -84,12 +90,13 @@ type SentLink = { url: string; orderId: string; via: 'copy' | 'share' };
 
 export function OrderLinkBuilder() {
   const t = useTranslations('OrderLinkBuilder');
+  const tTax = useTranslations('Tax');
   const origin = useOrigin();
   const copier = useCopyToClipboard();
   const canCopy = useHydrationSafeAvailable(copier.available);
   const canShare = useHydrationSafeAvailable(typeof navigator !== 'undefined' && typeof navigator.share === 'function');
   const nextLineId = useRef(1);
-  const newLine = (): LineState => ({ id: nextLineId.current++, name: '', qty: '1', price: '' });
+  const newLine = (): LineState => ({ id: nextLineId.current++, name: '', qty: '1', price: '', tax: null });
 
   // null = 自動の番号を使う。使う人が打ったときと、コピーで番号を固定したときだけ値を持つ。
   const [orderIdInput, setOrderIdInput] = useState<string | null>(null);
@@ -185,6 +192,8 @@ export function OrderLinkBuilder() {
         shipping: settings.shipping,
         shippingLabel,
         discount: discount.invalid ? 'invalid' : discount.param,
+        tax: settings.taxCategory,
+        invoiceNo: settings.invoiceNo,
       }),
     [
       origin,
@@ -201,6 +210,8 @@ export function OrderLinkBuilder() {
       shippingLabel,
       discount.invalid,
       discount.param,
+      settings.taxCategory,
+      settings.invoiceNo,
     ],
   );
   // 受取チェーンが 2 つ以上なら、受取ウォレットがどれかのチェーンでコントラクトのウォレットでないかを確かめてから
@@ -401,6 +412,7 @@ export function OrderLinkBuilder() {
                 line={line}
                 issues={orderLinkLineIssues(line)}
                 removable={lines.length > 1}
+                tax={settings.taxCategory === null ? null : line.tax ?? settings.taxCategory}
                 onChange={(patch) => updateLine(line.id, patch)}
                 onRemove={() => setLines((current) => current.filter((other) => other.id !== line.id))}
               />
@@ -526,6 +538,7 @@ export function OrderLinkBuilder() {
           description={description}
           lines={previewLines}
           discount={discount.param ?? null}
+          tax={result.ok ? result.tax ?? null : null}
           message={errorText}
           messageIsError={blocked}
           sentLabel={sentLabel}
@@ -715,6 +728,48 @@ export function OrderLinkBuilder() {
                 <span className="mt-0.5 block text-xs text-slate-600">{t(`modes.${mode}Desc`)}</span>
               </button>
             ))}
+          </div>
+        </ShopSettingsSection>
+        {/* 消費税: 商品の税率の既定 (商品ごとに変えられる) とインボイス登録番号。どちらもお客様の控えに出るだけで、
+            お店の履歴には残らない (/checkout の履歴は払った人の端末に残る)。 */}
+        <ShopSettingsSection title={t('taxLabel')}>
+          <div className="space-y-2">
+            <div className={`${PILL_GROUP} grid-cols-2 sm:grid-cols-4`}>
+              {TAX_CHOICES.map((choice) => (
+                <button
+                  key={choice ?? 'none'}
+                  type="button"
+                  aria-pressed={settings.taxCategory === choice}
+                  onClick={() => setSettings((current) => ({ ...current, taxCategory: choice }))}
+                  className={pillClass(settings.taxCategory === choice)}
+                >
+                  {tTax(choice === null ? 'none' : TAX_LABEL_KEY[choice])}
+                </button>
+              ))}
+            </div>
+            <p className="text-xs leading-relaxed text-slate-500">
+              {t(settings.taxCategory === null ? 'taxNoneHint' : 'taxHint')}
+            </p>
+            {settings.taxCategory !== null && (
+              <div className="pt-1">
+                <label htmlFor="order-link-invoice-no" className="mb-1.5 block text-sm font-medium text-slate-700">
+                  {t('invoiceNoLabel')}
+                </label>
+                <InvoiceNumberInput
+                  id="order-link-invoice-no"
+                  value={settings.invoiceNo}
+                  onChange={(invoiceNo) => setSettings((current) => ({ ...current, invoiceNo }))}
+                  hasStoreName={settings.storeName.trim().length > 0}
+                  className={ORDER_LINK_INPUT_CLASS}
+                  text={{
+                    invalid: t('invoiceNoInvalid'),
+                    lookup: t('invoiceNoLookup'),
+                    needsStoreName: t('invoiceNoNeedsStoreName'),
+                  }}
+                />
+                <p className="mt-1.5 text-xs leading-relaxed text-slate-500">{t('invoiceNoHint')}</p>
+              </div>
+            )}
           </div>
         </ShopSettingsSection>
       </ShopSettingsSheet>

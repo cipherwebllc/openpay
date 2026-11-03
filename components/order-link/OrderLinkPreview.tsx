@@ -25,6 +25,7 @@ export function OrderLinkPreview({
   description,
   lines,
   discount,
+  tax,
   message,
   messageIsError,
   sentLabel,
@@ -50,6 +51,8 @@ export function OrderLinkPreview({
   lines: readonly OrderLinkPreviewLine[];
   /** 値引き (JPYC の 10 進・使える値引きがあるときだけ)。お客様の画面と同じく 小計 / 値引き / 合計 の順に出す。 */
   discount: string | null;
+  /** うち消費税 (JPYC の 10 進・消費税を入れるリンクだけ)。合計の下に出す (レジと同じ・内税の目安)。 */
+  tax: string | null;
   /** リンクができていないときの 1 文。 */
   message: string | null;
   /** 入力を直さないと進めない理由か (入力の途中なら false)。 */
@@ -140,6 +143,11 @@ export function OrderLinkPreview({
               {groupAmountDigits(result.total)} JPYC
             </span>
           </div>
+        )}
+        {tax !== null && (
+          <p className="mt-1 text-right text-xs tabular-nums text-slate-600">
+            {t('previewTax', { amount: groupAmountDigits(tax) })}
+          </p>
         )}
 
         {chainNames && lines.length > 0 && (

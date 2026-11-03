@@ -29,6 +29,8 @@ vi.mock('@/lib/env', async (importOriginal) => {
 });
 
 import { JPYC_CHAINS } from '@/lib/chains';
+import { buildCheckoutLineItems } from '@/lib/checkoutLineItems';
+import { invoiceRateGroups } from '@/lib/invoice';
 import {
   buildOrderLink,
   nextOrderLinkId,
@@ -312,6 +314,104 @@ describe('値引き (disc)', () => {
     expect(big('100')).toMatchObject({ ok: true, total: '50000' });
     const small = buildOrderLink(input({ lines: [{ name: 'ステッカー', qty: '1', price: '5' }], shipping: '', discount: '3' }));
     expect(small).toEqual({ ok: false, error: 'tooSmall', minimum: '2', total: '2' });
+  });
+});
+
+describe('消費税とインボイス登録番号', () => {
+  const INVOICE = 'T1234567890123';
+  const parsedOf = (result: ReturnType<typeof buildOrderLink>) => {
+    const parsed = parseCheckoutParams(okUrl(result).searchParams);
+    if (!parsed.ok) throw new Error(parsed.error);
+    return parsed.params;
+  };
+
+  it('消費税を入れないリンクは今までと同じ (明細に税を書かず、登録番号も入れない・うち消費税を出さない)', () => {
+    const result = buildOrderLink(input({ tax: null, invoiceNo: INVOICE }));
+    const url = okUrl(result);
+    expect(url.searchParams.get('items')).toBe(`${encodeURIComponent('Tシャツ M')}:2:3000,${encodeURIComponent('送料')}:1:500`);
+    expect(url.searchParams.has('inv')).toBe(false);
+    expect(result).not.toHaveProperty('tax');
+  });
+
+  it('税率を選ぶと商品と送料 (課税 10%) に税率が入り、/checkout で読み直せる。うち消費税は控えと同じ計算', () => {
+    const result = buildOrderLink(input({ tax: 'taxable_10' }));
+    const params = parsedOf(result);
+    expect(params.items).toEqual([
+      { name: 'Tシャツ M', qty: 2, price: '3000', taxRate: 10, taxCategory: 'taxable_10' },
+      { name: '送料', qty: 1, price: '500', taxRate: 10, taxCategory: 'taxable_10' },
+    ]);
+    // 6,500 × 10 / 110 = 590.9… → 591
+    expect(result).toMatchObject({ ok: true, total: '6500', tax: '591' });
+  });
+
+  it('商品ごとに税率を変えられ (軽減 8% と標準 10% が混ざる注文)、送料は軽減税率の商品でも課税 10%', () => {
+    const result = buildOrderLink(
+      input({
+        tax: 'taxable_10',
+        lines: [
+          { name: 'コーヒー豆', qty: '1', price: '2000', tax: 'taxable_8' },
+          { name: 'マグ', qty: '1', price: '3000' },
+        ],
+      }),
+    );
+    const params = parsedOf(result);
+    expect(params.items.map((item) => [item.name, item.taxRate, item.taxCategory])).toEqual([
+      ['コーヒー豆', 8, 'taxable_8'],
+      ['マグ', 10, 'taxable_10'],
+      ['送料', 10, 'taxable_10'],
+    ]);
+    // 8%: 2,000 × 8 / 108 = 148.1… → 148・10%: 3,500 × 10 / 110 = 318.1… → 318
+    expect(result).toMatchObject({ ok: true, tax: '466' });
+  });
+
+  it('非課税の商品は税額 0 で、送料だけ課税 10%', () => {
+    const result = buildOrderLink(input({ tax: 'tax_free' }));
+    const params = parsedOf(result);
+    expect(params.items[0]).toMatchObject({ taxRate: 0, taxCategory: 'tax_free' });
+    // 送料 500 × 10 / 110 = 45.4… → 45
+    expect(result).toMatchObject({ ok: true, tax: '45' });
+  });
+
+  it('値引きがあれば、うち消費税は値引きの後の額から出す (税率ごとに按分・控えと同じ)', () => {
+    // 6,500 − 1,000 = 5,500 × 10 / 110 = 500
+    expect(buildOrderLink(input({ tax: 'taxable_10', discount: '1000' }))).toMatchObject({ ok: true, total: '5500', tax: '500' });
+  });
+
+  it('値引きの額は商品の合計から出すが、控えの税率ごとの金額は送料も含めた金額の比で分ける (レジの一括値引きと同じ・見本と控えで一致)', () => {
+    // 食品 10,800 (8%)・送料 1,100 (10%)・商品の 10% 引き = 1,080。比で分けると 8% に 980・10% に 100
+    // → 8%: 9,820 × 8 / 108 = 727.4… → 727・10%: 1,000 × 10 / 110 = 90.9… → 91 → 818
+    const result = buildOrderLink(
+      input({ tax: 'taxable_8', lines: [{ name: 'お米', qty: '1', price: '10800' }], shipping: '1100', discount: '1080' }),
+    );
+    expect(result).toMatchObject({ ok: true, total: '10820', tax: '818' });
+  });
+
+  it('登録番号は消費税を入れるリンクにだけ、形の合う番号を入れる (全角や区切りは直す)', () => {
+    expect(parsedOf(buildOrderLink(input({ tax: 'taxable_10', invoiceNo: INVOICE }))).invoiceNo).toBe(INVOICE);
+    expect(parsedOf(buildOrderLink(input({ tax: 'taxable_10', invoiceNo: 'Ｔ1234-5678-90123' }))).invoiceNo).toBe(INVOICE);
+    expect(okUrl(buildOrderLink(input({ tax: 'taxable_10', invoiceNo: 'T123' }))).searchParams.has('inv')).toBe(false);
+  });
+
+  it('お客様の控えの明細 (支払い画面と同じ組み方) から、税率ごとの金額の合計が払う額と一致する (控えがインボイスの形になる条件)', () => {
+    const result = buildOrderLink(
+      input({
+        tax: 'taxable_10',
+        invoiceNo: INVOICE,
+        discount: '300',
+        lines: [
+          { name: 'コーヒー豆', qty: '1', price: '2000', tax: 'taxable_8' },
+          { name: 'マグ', qty: '1', price: '3000' },
+        ],
+      }),
+    );
+    const params = parsedOf(result);
+    const groups = invoiceRateGroups(
+      buildCheckoutLineItems({ items: params.items, discount: params.discount, token: 'jpyc', decimals: 18 }),
+    );
+    expect(groups).not.toBeNull();
+    const sum = (groups ?? []).reduce((acc, group) => acc + BigInt(group.total), 0n);
+    expect(sum.toString()).toBe(result.ok ? result.total : '');
+    expect((groups ?? []).reduce((acc, group) => acc + BigInt(group.tax), 0n).toString()).toBe(result.ok ? result.tax : '');
   });
 });
 

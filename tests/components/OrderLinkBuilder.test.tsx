@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, fireEvent, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithIntl as render } from '../_helpers/i18n';
 
@@ -183,6 +183,46 @@ describe('OrderLinkBuilder', () => {
     expect(await screen.findByRole('button', { name: '値引きを追加' })).toBeInTheDocument();
     expect(screen.queryByLabelText('割引率 (%)')).toBeNull();
     expect(JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}')).not.toHaveProperty('discount');
+  });
+
+  it('消費税を選ぶと商品ごとの税率の欄が出て、リンクの明細に税率が入り、見本にうち消費税を出す (端末に残す)', async () => {
+    saved({ storeName: 'OpenPay 工房' });
+    render(<OrderLinkBuilder />);
+    await screen.findByRole('button', { name: '設定' });
+    fillItem();
+    // 既定は指定なし: 税の欄もうち消費税も出さず、明細に税を書かない
+    expect(screen.queryByLabelText('税率')).toBeNull();
+    expect(screen.queryByText(/うち消費税/)).toBeNull();
+    const plain = new URL((screen.getByRole('link', { name: '開いて確かめる' }) as HTMLAnchorElement).href);
+    expect(plain.searchParams.get('items')).not.toContain('taxable');
+
+    fireEvent.click(screen.getByRole('button', { name: '設定' }));
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByRole('button', { name: '指定なし' })).toHaveAttribute('aria-pressed', 'true');
+    expect(within(dialog).queryByLabelText('インボイス登録番号 (任意)')).toBeNull();
+    fireEvent.click(within(dialog).getByRole('button', { name: '課税 10%' }));
+    fireEvent.change(within(dialog).getByLabelText('インボイス登録番号 (任意)'), { target: { value: 'T1234567890123' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: '完了' }));
+
+    expect(screen.getByLabelText('税率')).toHaveValue('taxable_10');
+    // 6,500 × 10 / 110 → 591
+    expect(await screen.findByText('うち消費税 591 JPYC')).toBeInTheDocument();
+    let url = new URL((screen.getByRole('link', { name: '開いて確かめる' }) as HTMLAnchorElement).href);
+    expect(url.searchParams.get('items')).toContain(':2:3000:10:taxable_10:');
+    expect(url.searchParams.get('inv')).toBe('T1234567890123');
+
+    // この商品だけ軽減 8% (送料は課税 10% のまま): 6,000 × 8 / 108 → 444・500 × 10 / 110 → 45
+    fireEvent.change(screen.getByLabelText('税率'), { target: { value: 'taxable_8' } });
+    expect(await screen.findByText('うち消費税 489 JPYC')).toBeInTheDocument();
+    url = new URL((screen.getByRole('link', { name: '開いて確かめる' }) as HTMLAnchorElement).href);
+    expect(url.searchParams.get('items')).toContain(':2:3000:8:taxable_8:');
+    expect(url.searchParams.get('items')).toContain(':1:500:10:taxable_10:');
+    await waitFor(() =>
+      expect(JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}')).toMatchObject({
+        taxCategory: 'taxable_10',
+        invoiceNo: 'T1234567890123',
+      }),
+    );
   });
 
   it('使えない値引き (商品の合計以上) ではリンクを作らず、値引きを直すよう伝える', async () => {
