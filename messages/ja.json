@@ -1676,7 +1676,15 @@
     "viewReceiptsLink": "電子レシート / 支払い控えを見る ↗",
     "dismiss": "閉じる",
     "dismissHelp": "店主が確認したら閉じてください",
-    "soundToggle": "完了音"
+    "soundToggle": "完了音",
+    "notifyShop": "お店に知らせる",
+    "notifyShopHint": "払ったことを、LINE やメールで注文したお店に送ります。",
+    "notifyShopMessage": "ご注文 {id} のお支払いが済みました。",
+    "notifyShopCopy": "文をコピー",
+    "notifyShopCopied": "コピーしました。お店とのやり取りに貼り付けてください。",
+    "notifyShopShared": "共有しました",
+    "notifyShopTextLabel": "お店に送る文 (選んでコピーしてください)",
+    "notifyShopDismissHelp": "お店に知らせてから閉じてください"
   },
   "NonCustodialNotice": {
     "shortTitle": "履歴はブロックチェーン上にあります",
