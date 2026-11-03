@@ -109,6 +109,7 @@ const BUDGETS_KB = {
   '/[locale]/guide/ai-pay': 244, // 実測 239
   '/[locale]/guide/image-url': 242, // 実測 237
   '/[locale]/guide/mobile-order': 242, // 実測 237
+  '/[locale]/guide/order-link': 242, // 実測 237 (2026-11-03 新設・mobile-order と同じ形。手元の build は 238 = CI より 1 kB 大きい)
   '/[locale]/guide/pay': 244, // 実測 239
   '/[locale]/guide/pos': 242, // 実測 237
   '/[locale]/guide/qr': 244, // 実測 239

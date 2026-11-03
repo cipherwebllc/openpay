@@ -397,6 +397,7 @@
       "title": "Guides by use case",
       "qr": "Start with a payment QR",
       "shop": "Start POS & mobile ordering",
+      "orderLink": "Start with order links",
       "store": "Start creator features",
       "all": "See all guides"
     }

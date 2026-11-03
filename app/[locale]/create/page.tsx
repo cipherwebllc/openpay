@@ -344,6 +344,7 @@ function CreatePageBody() {
               [
                 ['qr', '/guide/qr'],
                 ['shop', '/guide/shop'],
+                ['orderLink', '/guide/order-link'],
                 ['store', '/guide/store'],
                 ['all', '/guide'],
               ] as const

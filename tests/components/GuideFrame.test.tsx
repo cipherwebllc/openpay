@@ -8,7 +8,7 @@ import { render, screen, within } from '@testing-library/react';
 import { GuideFrame } from '@/components/guide/GuideFrame';
 import { GUIDE_SLUGS, guideNavFor } from '@/lib/guideNav';
 
-// prefetch の指定を DOM で見えるようにする (既定のままだと PC で 1 ページごとに他のガイド約 12 本の RSC を先読みする)。
+// prefetch の指定を DOM で見えるようにする (既定のままだと PC で 1 ページごとに他のガイド約 13 本の RSC を先読みする)。
 vi.mock('next/link', () => ({
   default: ({ prefetch, children, ...rest }: { prefetch?: boolean; children: React.ReactNode; href: string }) => (
     <a data-prefetch={String(prefetch)} {...rest}>
@@ -49,7 +49,7 @@ describe('GuideFrame', () => {
     }
   });
 
-  it.each(['ja', 'en'] as const)('%s: 各 nav は先頭がハブ、続いて 12 本のガイドへのリンク', (locale) => {
+  it.each(['ja', 'en'] as const)('%s: 各 nav は先頭がハブ、続いて 13 本のガイドへのリンク', (locale) => {
     const nav = guideNavFor(locale);
     renderFrame(locale, 'store');
     for (const landmark of screen.getAllByRole('navigation', { name: nav.navTitle })) {
@@ -115,16 +115,20 @@ describe('GuideFrame', () => {
       unmount();
       return result;
     };
-    // お店向け: start → qr → shop → pos
+    // お店向け: start → qr → shop → pos → order-link
     expect(pager('start')).toEqual([
       ['hub', '/ja/guide'],
       ['next', '/ja/guide/qr'],
     ]);
     expect(pager('pos')).toEqual([
       ['prev', '/ja/guide/shop'],
+      ['next', '/ja/guide/order-link'],
+    ]);
+    expect(pager('order-link')).toEqual([
+      ['prev', '/ja/guide/pos'],
       ['hub', '/ja/guide'],
     ]);
-    // お客様向けの先頭 pay の前は、お店向けの pos ではなくハブ
+    // お客様向けの先頭 pay の前は、お店向けの order-link ではなくハブ
     expect(pager('pay')).toEqual([
       ['hub', '/ja/guide'],
       ['next', '/ja/guide/wallet'],

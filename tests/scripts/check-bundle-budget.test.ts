@@ -20,6 +20,8 @@ const F11_PAGES: Array<[string, number]> = [
   ['/[locale]/guide/ai-pay', 239],
   ['/[locale]/guide/image-url', 237],
   ['/[locale]/guide/mobile-order', 237],
+  // 2026-11-03 /guide/order-link を新設 (mobile-order と同じ形・手元の build で 238 = CI の 237 + 1)。
+  ['/[locale]/guide/order-link', 237],
   ['/[locale]/guide/pay', 239],
   ['/[locale]/guide/pos', 237],
   ['/[locale]/guide/qr', 239],
@@ -102,6 +104,7 @@ Route (app)                                          Size  First Load JS
 ├ ● /[locale]/guide/ai-pay                        2.23 kB         239 kB
 ├ ● /[locale]/guide/image-url                       428 B         237 kB
 ├ ● /[locale]/guide/mobile-order                    427 B         237 kB
+├ ● /[locale]/guide/order-link                      429 B         237 kB
 ├ ● /[locale]/guide/pay                           1.85 kB         239 kB
 ├ ● /[locale]/guide/pos                             427 B         237 kB
 ├ ● /[locale]/guide/qr                            1.85 kB         239 kB
