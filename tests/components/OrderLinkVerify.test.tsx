@@ -16,7 +16,10 @@ import { OrderLinkVerify } from '@/components/order-link/OrderLinkVerify';
 const RECEIVER = '0x52d4901142e2B5680027da5EB47C86CB02a3cA81' as Address;
 const HASH = `0x${'ab'.repeat(32)}`;
 
-afterEach(() => check.mockReset());
+afterEach(() => {
+  check.mockReset();
+  localStorage.clear();
+});
 
 function paste(text: string) {
   fireEvent.change(screen.getByLabelText('お客様から届いた Tx Hash'), { target: { value: text } });
@@ -62,6 +65,16 @@ describe('OrderLinkVerify', () => {
     paste('A-001 払いました');
     expect(await screen.findByText(/Tx Hash を読み取れません/)).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Explorer で見る' })).toBeNull();
+  });
+
+  it('同じ Tx Hash を 2 回目に確かめると、使い回しへの注意を出す (この端末で前に確かめた時刻つき)', async () => {
+    check.mockResolvedValue({ status: 'paid', received: '3465', blockNumber: 123n, timestamp: 1_762_000_000 });
+    render(<OrderLinkVerify chain="polygon" receiver={RECEIVER} />);
+    paste(HASH);
+    expect(await screen.findByText('受取ウォレットに 3,465 JPYC 届いています')).toBeInTheDocument();
+    expect(screen.queryByText(/にも確かめています/)).toBeNull();
+    paste(`Tx Hash: ${HASH}`);
+    expect(await screen.findByText(/にも確かめています。同じ支払いで 2 つの注文を発送しないよう/)).toBeInTheDocument();
   });
 
   it('貼り直すと前の結果を消す (別の取引の結果を残さない)', async () => {

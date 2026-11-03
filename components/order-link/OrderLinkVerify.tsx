@@ -10,10 +10,22 @@ import type { Address } from 'viem';
 import { groupAmountDigits } from '@/lib/amount';
 import { chainForSlug, txExplorerUrl, type ChainSlug } from '@/lib/chains';
 import { shortAddress } from '@/lib/format';
-import { checkOrderLinkPayment, extractTxHash, type OrderLinkPaymentCheck } from '@/lib/orderLinkVerify';
+import {
+  checkOrderLinkPayment,
+  extractTxHash,
+  rememberCheckedPayment,
+  type OrderLinkPaymentCheck,
+} from '@/lib/orderLinkVerify';
 import { ORDER_LINK_INPUT_CLASS } from './OrderLinkAmountField';
 
-type Done = { result: OrderLinkPaymentCheck; hash: string | null; chain: ChainSlug; receiver: Address };
+type Done = {
+  result: OrderLinkPaymentCheck;
+  hash: string | null;
+  chain: ChainSlug;
+  receiver: Address;
+  /** 同じ支払いを前に確かめた時刻 (ms・この端末)。2 つの注文に使い回されていないかを知らせる。 */
+  checkedBefore: number | null;
+};
 
 export function OrderLinkVerify({ chain, receiver }: { chain: ChainSlug; receiver: Address | null }) {
   const t = useTranslations('OrderLinkBuilder');
@@ -27,7 +39,10 @@ export function OrderLinkVerify({ chain, receiver }: { chain: ChainSlug; receive
     if (!receiver || checking) return;
     setChecking(true);
     const result = await checkOrderLinkPayment({ chain, receiver, text });
-    setDone({ result, hash: extractTxHash(text), chain, receiver });
+    const hash = extractTxHash(text);
+    const checkedBefore =
+      result.status === 'paid' && hash ? rememberCheckedPayment({ chain, receiver, hash, now: Date.now() }) : null;
+    setDone({ result, hash, chain, receiver, checkedBefore });
     setChecking(false);
   };
 
@@ -97,12 +112,14 @@ function VerifyResult({ done, locale }: { done: Done; locale: string }) {
   const t = useTranslations('OrderLinkBuilder');
   const { result } = done;
   if (result.status === 'paid') {
-    const time = new Date(result.timestamp * 1000).toLocaleString(locale === 'en' ? 'en-US' : 'ja-JP', {
-      month: 'numeric',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
+    const format = (ms: number) =>
+      new Date(ms).toLocaleString(locale === 'en' ? 'en-US' : 'ja-JP', {
+        month: 'numeric',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+    const time = format(result.timestamp * 1000);
     return (
       <div className="flex gap-2 rounded-xl bg-emerald-50 px-3 py-2.5 text-emerald-900 ring-1 ring-emerald-200">
         <CheckCircle2 className="mt-0.5 h-4 w-4 flex-none text-emerald-600" aria-hidden />
@@ -110,6 +127,11 @@ function VerifyResult({ done, locale }: { done: Done; locale: string }) {
           <p className="font-semibold">{t('verifyPaid', { amount: groupAmountDigits(result.received) })}</p>
           <p className="mt-0.5 text-xs">{t('verifyPaidMeta', { time, block: result.blockNumber.toString() })}</p>
           <p className="mt-1 text-xs leading-relaxed">{t('verifyPaidNote')}</p>
+          {done.checkedBefore !== null && (
+            <p className="mt-2 rounded-lg bg-amber-100 px-2 py-1.5 text-xs font-semibold leading-relaxed text-amber-900">
+              {t('verifyCheckedBefore', { time: format(done.checkedBefore) })}
+            </p>
+          )}
         </div>
       </div>
     );

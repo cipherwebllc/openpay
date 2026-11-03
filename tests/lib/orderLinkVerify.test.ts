@@ -12,7 +12,7 @@ import {
   type Hex,
   type Log,
 } from 'viem';
-import { checkOrderLinkPayment, extractTxHash, receivedByReceiver } from '@/lib/orderLinkVerify';
+import { checkOrderLinkPayment, extractTxHash, receivedByReceiver, rememberCheckedPayment } from '@/lib/orderLinkVerify';
 import { deploymentForSlug } from '@/lib/tokens';
 
 const RECEIVER = '0x52d4901142e2B5680027da5EB47C86CB02a3cA81' as Address;
@@ -105,5 +105,50 @@ describe('checkOrderLinkPayment', () => {
     const c = client({ status: 'success', logs: [] });
     await expect(checkOrderLinkPayment({ ...base, text: 'A-001 払いました', client: c })).resolves.toEqual({ status: 'invalid' });
     expect(c.getTransactionReceipt).not.toHaveBeenCalled();
+  });
+});
+
+describe('rememberCheckedPayment', () => {
+  function memoryStorage(initial: Record<string, string> = {}) {
+    const data = { ...initial };
+    return {
+      getItem: (k: string) => (k in data ? data[k] : null),
+      setItem: (k: string, v: string) => {
+        data[k] = v;
+      },
+      data,
+    };
+  }
+  const input = { chain: 'polygon' as const, receiver: RECEIVER, hash: HASH, now: 1_000 };
+
+  it('初めての支払いは null、同じ受取先・チェーン・Tx Hash の 2 回目は 1 回目の時刻を返す (使い回しを知らせる)', () => {
+    const storage = memoryStorage();
+    expect(rememberCheckedPayment(input, storage)).toBeNull();
+    expect(rememberCheckedPayment({ ...input, now: 2_000 }, storage)).toBe(1_000);
+    // 大文字小文字の違いは同じ支払い。
+    expect(rememberCheckedPayment({ ...input, hash: HASH.toUpperCase().replace('0X', '0x') as Hex, now: 3_000 }, storage)).toBe(1_000);
+    // 受取先やチェーンが違えば別の記録。
+    expect(rememberCheckedPayment({ ...input, receiver: OTHER }, storage)).toBeNull();
+    expect(rememberCheckedPayment({ ...input, chain: 'kaia' }, storage)).toBeNull();
+  });
+
+  it('壊れた記録は作り直し、保存できない・使えない環境でも例外を出さない (確かめる機能は止めない)', () => {
+    const broken = memoryStorage({ 'openpay:order-link-checked:v1': '{not json' });
+    expect(rememberCheckedPayment(input, broken)).toBeNull();
+    expect(rememberCheckedPayment({ ...input, now: 2_000 }, broken)).toBe(1_000);
+    const full = { getItem: () => null, setItem: () => { throw new Error('quota'); } };
+    expect(rememberCheckedPayment(input, full)).toBeNull();
+    expect(rememberCheckedPayment(input, null)).toBeNull();
+  });
+
+  it('記録は新しい順に 300 件までに保つ', () => {
+    const many: Record<string, number> = {};
+    for (let i = 0; i < 300; i += 1) many[`polygon:x:${i}`] = i;
+    const storage = memoryStorage({ 'openpay:order-link-checked:v1': JSON.stringify(many) });
+    rememberCheckedPayment({ ...input, now: 10_000 }, storage);
+    const kept = JSON.parse(storage.data['openpay:order-link-checked:v1']) as Record<string, number>;
+    expect(Object.keys(kept)).toHaveLength(300);
+    expect(kept['polygon:x:0']).toBeUndefined();
+    expect(Object.values(kept)).toContain(10_000);
   });
 });

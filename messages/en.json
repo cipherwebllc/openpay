@@ -3580,6 +3580,7 @@
     "verifyNotToReceiver": "No JPYC reached your receiving wallet ({receiver}) in this transaction.",
     "verifyNotFound": "Not found on {chain}. Check the receiving chain, wait a moment and try again.",
     "verifyExplorer": "View in Explorer",
+    "verifyCheckedBefore": "You already checked this Tx Hash at {time}. Make sure you are not shipping two orders for the same payment.",
     "verify": {
       "failed": "This transaction failed. No payment arrived.",
       "invalid": "Could not read a Tx Hash (66 characters starting with 0x).",

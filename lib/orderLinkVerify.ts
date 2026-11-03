@@ -36,6 +36,53 @@ export type OrderLinkPaymentCheck =
 
 const TX_HASH = /0x[0-9a-fA-F]{64}/;
 
+// 確かめた支払いの記録 (この端末だけ)。同じ Tx Hash を 2 つの注文に使い回されて 2 回発送しないよう、2 回目に知らせる。
+const CHECKED_KEY = 'openpay:order-link-checked:v1';
+const CHECKED_MAX = 300;
+
+// localStorage は読むだけで例外になる環境がある (プライベートモード等)。使えなければ記録しない (掟 13)。
+function browserStorage(): Storage | null {
+  try {
+    return typeof window === 'undefined' ? null : window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 届いたと確かめた支払いを記録し、前に確かめていればそのときの時刻 (ms) を返す (初めてなら null)。
+ * localStorage が使えない環境では記録せず null (確かめる機能そのものは止めない・掟 13)。
+ */
+export function rememberCheckedPayment(
+  input: { chain: ChainSlug; receiver: Address; hash: Hex; now: number },
+  storage: Pick<Storage, 'getItem' | 'setItem'> | null = browserStorage(),
+): number | null {
+  if (!storage) return null;
+  const key = `${input.chain}:${input.receiver.toLowerCase()}:${input.hash.toLowerCase()}`;
+  let checked: Record<string, number> = {};
+  try {
+    const raw = storage.getItem(CHECKED_KEY);
+    const parsed: unknown = raw ? JSON.parse(raw) : {};
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) checked = parsed as Record<string, number>;
+  } catch {
+    // 壊れた記録・読めない保存領域は空として扱い、下で作り直す (確かめる機能そのものは止めない・掟 13)。
+  }
+  const previous = typeof checked[key] === 'number' ? checked[key] : null;
+  if (previous !== null) return previous;
+  checked[key] = input.now;
+  // 古いものから捨てて上限を保つ (端末の保存領域を食い続けない)。
+  const kept = Object.entries(checked)
+    .filter((entry): entry is [string, number] => typeof entry[1] === 'number')
+    .sort((x, y) => y[1] - x[1])
+    .slice(0, CHECKED_MAX);
+  try {
+    storage.setItem(CHECKED_KEY, JSON.stringify(Object.fromEntries(kept)));
+  } catch {
+    // 満杯・使えない: 記録は諦め、確かめた結果はそのまま出す (掟 13)。
+  }
+  return null;
+}
+
 /** 貼られた文から最初の Tx Hash を取り出す (「お店に知らせる」の文や Explorer の URL をそのまま貼れる)。 */
 export function extractTxHash(text: string): Hex | null {
   const match = TX_HASH.exec(text);

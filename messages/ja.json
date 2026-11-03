@@ -3580,6 +3580,7 @@
     "verifyNotToReceiver": "この取引では、受取ウォレット ({receiver}) に JPYC は届いていません。",
     "verifyNotFound": "{chain} では見つかりませんでした。受取チェーンが合っているか確かめ、少し待ってからもう一度お試しください。",
     "verifyExplorer": "Explorer で見る",
+    "verifyCheckedBefore": "この Tx Hash は {time} にも確かめています。同じ支払いで 2 つの注文を発送しないよう、注文と照らし合わせてください。",
     "verify": {
       "failed": "この取引は失敗しています。支払いは届いていません。",
       "invalid": "Tx Hash を読み取れません (0x から始まる 66 文字)。",
