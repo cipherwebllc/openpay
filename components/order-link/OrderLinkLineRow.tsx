@@ -10,11 +10,19 @@ import { groupAmountDigits } from '@/lib/amount';
 import {
   orderLinkLineAmount,
   ORDER_LINK_NAME_MAX,
+  ORDER_LINK_TAX_CATEGORIES,
   type OrderLinkLine,
   type OrderLinkLineIssue,
+  type OrderLinkTax,
 } from '@/lib/orderLink';
 import { CHECKOUT_QTY_MAX } from '@/lib/url/checkout';
 import { OrderLinkAmountField, ORDER_LINK_INPUT_CLASS, invalidClass } from './OrderLinkAmountField';
+
+const TAX_LABEL_KEY: Record<OrderLinkTax, string> = {
+  taxable_10: 'taxable10',
+  taxable_8: 'taxable8',
+  tax_free: 'taxFree',
+};
 
 function halfWidthDigits(value: string): string {
   return value.replace(/[０-９]/g, (digit) => String.fromCharCode(digit.charCodeAt(0) - 0xfee0));
@@ -27,11 +35,14 @@ export const OrderLinkLineRow = forwardRef<
     line: OrderLinkLine;
     issues: readonly OrderLinkLineIssue[];
     removable: boolean;
+    /** 消費税を入れるリンクのときだけ、この商品の税率 (行の値か設定の既定)。null = 税の欄を出さない。 */
+    tax: OrderLinkTax | null;
     onChange: (patch: Partial<OrderLinkLine>) => void;
     onRemove: () => void;
   }
->(function OrderLinkLineRow({ id, line, issues, removable, onChange, onRemove }, nameRef) {
+>(function OrderLinkLineRow({ id, line, issues, removable, tax, onChange, onRemove }, nameRef) {
   const t = useTranslations('OrderLinkBuilder');
+  const tTax = useTranslations('Tax');
   const qty = Number(line.qty);
   const amount = orderLinkLineAmount(line);
   const stepTo = (next: number) => {
@@ -120,6 +131,26 @@ export const OrderLinkLineRow = forwardRef<
           />
         </div>
       </div>
+      {/* 消費税を入れるリンクだけ。軽減税率と標準税率が混ざる注文 (食品と雑貨など) のため行ごとに選べる。 */}
+      {tax !== null && (
+        <div className="order-4 col-span-full flex items-center gap-2 sm:order-5">
+          <label htmlFor={`order-link-tax-${id}`} className="text-xs text-slate-500">
+            {t('taxLineLabel')}
+          </label>
+          <select
+            id={`order-link-tax-${id}`}
+            value={tax}
+            onChange={(event) => onChange({ tax: event.target.value as OrderLinkTax })}
+            className="h-11 rounded-lg border border-slate-300 bg-white px-3 text-base text-slate-800 focus:border-brand focus:outline-none sm:text-sm"
+          >
+            {ORDER_LINK_TAX_CATEGORIES.map((category) => (
+              <option key={category} value={category}>
+                {tTax(TAX_LABEL_KEY[category])}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
       {amount !== null && qty > 1 && (
         <p className="order-4 col-span-full text-right text-xs tabular-nums text-slate-500 sm:order-5">
           {t('lineSubtotal', { price: groupAmountDigits(line.price.trim()), qty, amount: groupAmountDigits(amount) })}

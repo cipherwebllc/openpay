@@ -2,7 +2,9 @@
 // 何もサーバーへ送らず、氏名や住所の欄も持たない (住所は販売者が自分の注文フォームで持つ・2026-11-02 user 裁定)。
 // 「何度でも使える」リンク (reusable) は番号を持たず ship=ask を付ける: お客様は払った後、完了画面から
 // お名前とお届け先を自分の LINE やメールでお店へ送る (plans/order-link-reusable.md・2026-11-03 user「進めて」)。
-// 公開の文書 (docs/CHECKOUT.md) に載せたパラメーターだけを使い、内部用のパラメーターは足さない。
+// 公開の文書 (docs/CHECKOUT.md) に載せたパラメーターだけを使う。例外は消費税 (明細の税率) とインボイス登録番号 (inv) で、
+// レジと同じ OpenPay 自身のリンクの値 (お客様の控えに出す表示だけ・金額・受取先・利用料には関わらない)。
+// 税率と登録番号が効くのはお客様の控えだけで、お店の履歴には残らない (/checkout の履歴は払った人の端末に残る)。
 // 利用料は /checkout の実際の計算と同じ関数で出し、作った URL は parse で読み直す
 // (お客様の画面で開けないリンクや、入力と違う内容のリンクを渡さないため)。
 
@@ -14,9 +16,11 @@ import { resolveJpycGaslessProvider } from './jpycGaslessProvider';
 import { isRecoverRoute, resolvePaymentRoute } from './paymentRoute';
 import { jpycForwarderFor } from './relay/forwarderConfig';
 import { recoverFeeValue } from './relay/recoverFee';
+import { buildCheckoutLineItems } from './checkoutLineItems';
 import { parseDiscountAmount } from './discount';
+import { normalizeInvoiceRegistrationNumber } from './invoice';
 import { sameShopContact, type ShopContact } from './shopContact';
-import { taxDisplayDecimals } from './tax';
+import { defaultRateForCategory, lineItemsTax, taxDisplayDecimals } from './tax';
 import { deploymentForSlug, isGaslessSupported } from './tokens';
 import {
   buildCheckoutUrl,
@@ -54,11 +58,21 @@ export function nextOrderLinkId(last: string): string {
   return next.length > ORDER_LINK_ID_MAX ? '' : next;
 }
 
+/** 注文リンクで選べる消費税の区分 (表示の順)。対象外・任意の率は通販の商品では使わないので出さない。 */
+export const ORDER_LINK_TAX_CATEGORIES = ['taxable_10', 'taxable_8', 'tax_free'] as const;
+export type OrderLinkTax = (typeof ORDER_LINK_TAX_CATEGORIES)[number];
+
+export function isOrderLinkTax(value: unknown): value is OrderLinkTax {
+  return typeof value === 'string' && (ORDER_LINK_TAX_CATEGORIES as readonly string[]).includes(value);
+}
+
 /** 入力の 1 行。数量と単価は打っている途中の文字列のまま持つ。 */
 export type OrderLinkLine = {
   name: string;
   qty: string;
   price: string;
+  /** この商品の消費税。無い・null = 設定の税率に従う。 */
+  tax?: OrderLinkTax | null;
 };
 
 export type OrderLinkInput = {
@@ -87,6 +101,13 @@ export type OrderLinkInput = {
    * 'invalid' = 打った値引きが使えない (リンクを作らせない・理由は値引きの欄が出す)。
    */
   discount?: string | 'invalid';
+  /**
+   * 消費税 (任意)。商品の税率の既定 (行の tax が無ければこれ)。null = 税の情報を入れない (今までのリンク)。
+   * 入れると送料は課税 10% (別に請求する送料は、軽減税率の商品の送料でも標準税率)。
+   */
+  tax?: OrderLinkTax | null;
+  /** インボイス登録番号 (打ったままの文字列)。消費税を入れるときだけ、形の合う番号をリンクに入れる。 */
+  invoiceNo?: string;
 };
 
 export type OrderLinkError =
@@ -111,7 +132,16 @@ export type OrderLinkError =
 export type OrderLinkChainAmount = { chain: ChainSlug; fee: string; receive: string };
 
 export type OrderLinkResult =
-  | { ok: true; url: string; total: string; fee: string; receive: string; byChain: OrderLinkChainAmount[] }
+  | {
+      ok: true;
+      url: string;
+      total: string;
+      fee: string;
+      receive: string;
+      byChain: OrderLinkChainAmount[];
+      /** うち消費税 (JPYC・税率ごとに 1 回丸めた合計・控えと同じ計算)。消費税を入れないリンクは無し。 */
+      tax?: string;
+    }
   | { ok: false; error: OrderLinkError; minimum?: string; maximum?: string; total?: string };
 
 function isBlankLine(line: OrderLinkLine): boolean {
@@ -140,8 +170,15 @@ export function orderLinkLineIssues(line: OrderLinkLine): OrderLinkLineIssue[] {
   return issues;
 }
 
-function toCheckoutItem(line: OrderLinkLine): CheckoutItem {
-  return { name: line.name.trim(), qty: Number(line.qty.trim()), price: line.price.trim() };
+function toCheckoutItem(line: OrderLinkLine, tax: OrderLinkTax | null): CheckoutItem {
+  const item: CheckoutItem = { name: line.name.trim(), qty: Number(line.qty.trim()), price: line.price.trim() };
+  const category = tax === null ? null : line.tax ?? tax;
+  return category === null ? item : { ...item, ...orderLinkTaxFields(category) };
+}
+
+/** 明細に入れる税率と区分 (lib/tax の区分の既定の率)。 */
+function orderLinkTaxFields(category: OrderLinkTax): { taxRate: number; taxCategory: OrderLinkTax } {
+  return { taxRate: defaultRateForCategory(category) ?? 0, taxCategory: category };
 }
 
 /**
@@ -227,7 +264,8 @@ export function buildOrderLink(input: OrderLinkInput): OrderLinkResult {
   if (filled.some((line) => orderLinkLineIssues(line).length > 0)) return { ok: false, error: 'item' };
   // 打っている途中 (商品名か単価のどちらかがまだ空) は誤りとして扱わない。
   if (filled.some((line) => !line.name.trim() || !line.price.trim())) return { ok: false, error: 'noItems' };
-  const items = filled.map(toCheckoutItem);
+  const tax = input.tax ?? null;
+  const items = filled.map((line) => toCheckoutItem(line, tax));
 
   // 値引きは商品の合計 (送料を除く) より小さい 1 JPYC 単位の額だけ (/checkout は送料を含めた小計と比べるので、これで必ず通る)。
   const discount = input.discount ?? '';
@@ -241,9 +279,19 @@ export function buildOrderLink(input: OrderLinkInput): OrderLinkResult {
 
   const shipping = input.shipping.trim();
   if (shipping !== '' && !DECIMAL_PATTERN.test(shipping)) return { ok: false, error: 'shipping' };
-  // 送料 0 は行を出さない (/checkout は単価 0 の行を受け付けない)。
-  if (isPositiveDecimal(shipping)) items.push({ name: input.shippingLabel, qty: 1, price: shipping });
+  // 送料 0 は行を出さない (/checkout は単価 0 の行を受け付けない)。消費税を入れるリンクの送料は課税 10%。
+  if (isPositiveDecimal(shipping)) {
+    items.push({
+      name: input.shippingLabel,
+      qty: 1,
+      price: shipping,
+      ...(tax === null ? {} : orderLinkTaxFields('taxable_10')),
+    });
+  }
   if (items.length > CHECKOUT_MAX_ITEMS) return { ok: false, error: 'tooManyLines' };
+  // 登録番号は消費税を入れるリンクだけ (税率の無い控えはインボイスにならない)。形の合わない番号は入れない
+  // (欄が注意を出す・QR と同じ)。
+  const invoiceNo = tax === null ? '' : normalizeInvoiceRegistrationNumber(input.invoiceNo ?? '') ?? '';
 
   const description = input.description.trim();
   // /checkout の parse と同じ整え方 (制御文字を除き上限で切る) をしてから入れ、読み直した値と比べる。
@@ -264,6 +312,7 @@ export function buildOrderLink(input: OrderLinkInput): OrderLinkResult {
     ...(storeName ? { storeName } : {}),
     ...(contact ? { contact } : {}),
     ...(discount ? { discount } : {}),
+    ...(invoiceNo ? { invoiceNo } : {}),
   });
 
   const parsed = parseCheckoutParams(new URL(url).searchParams);
@@ -274,9 +323,12 @@ export function buildOrderLink(input: OrderLinkInput): OrderLinkResult {
       (item, index) =>
         item.name === items[index].name &&
         item.qty === items[index].qty &&
-        item.price === items[index].price,
+        item.price === items[index].price &&
+        item.taxRate === items[index].taxRate &&
+        item.taxCategory === items[index].taxCategory,
     );
   if (!sameItems) return { ok: false, error: 'item' };
+  if ((parsed.params.invoiceNo ?? '') !== invoiceNo) return { ok: false, error: 'invalid' };
   if ((parsed.params.orderId ?? '') !== orderId) return { ok: false, error: 'orderId' };
   if ((parsed.params.ship === 'ask') !== input.reusable) return { ok: false, error: 'invalid' };
   if (!sameShopContact(parsed.params.contact, contact)) return { ok: false, error: 'invalid' };
@@ -315,5 +367,20 @@ export function buildOrderLink(input: OrderLinkInput): OrderLinkResult {
     fee: byChain[0].fee,
     receive: byChain[0].receive,
     byChain,
+    // うち消費税: お客様の控えと同じ関数 (値引きを税率ごと → 明細へ按分し、税率ごとに 1 回丸める)。
+    ...(tax === null
+      ? {}
+      : {
+          tax: lineItemsTax(
+            buildCheckoutLineItems({
+              items: parsed.params.items,
+              ...(parsed.params.discount ? { discount: parsed.params.discount } : {}),
+              token: 'jpyc',
+              decimals,
+            }),
+            decimals,
+            taxDisplayDecimals('jpyc'),
+          ).totalTax,
+        }),
   };
 }

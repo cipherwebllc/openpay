@@ -149,6 +149,10 @@ const JA: OrderLinkGuideContent = {
       a: 'できます。「値引きを追加」で金額か割引率を入れると、お客様の画面に小計・値引き・お支払いの額が出ます。割引率は商品の合計にかけ、送料にはかけません。「ウォレットに … JPYC 届いてから発送」の額も値引きの後の額で出ます。値引きは作っているリンクだけに入り、「次の注文へ」で外れます。',
     },
     {
+      q: '消費税やインボイスに対応できますか？',
+      a: 'できます。「設定」の消費税で税率を選ぶと、商品ごとに税率を変えられ、お客様の控えに税率と消費税が出ます。送料は標準税率です。インボイス登録番号と店名も入れると、課税の商品か送料がある注文では、控えに登録番号と、税率ごとの金額・消費税が出ます (法人や個人事業主のお客様向け)。値引きは、控えで税率ごとの金額の比で分けます (レジと同じ)。税率と登録番号は控えに出るだけで、お店の OpenPay の履歴には残りません。記帳はお店の記録で行ってください。',
+    },
+    {
       q: '送ったリンクの金額や内容を変えたいときは？',
       a: '新しいリンクを作って送り直してください。送ったリンクは取り消せず、期限もないので、どちらのリンクで払うかをお客様に伝えてください。',
     },
@@ -269,6 +273,10 @@ const EN: OrderLinkGuideContent = {
     {
       q: 'Can I give a discount?',
       a: 'Yes. Use “Add discount” to enter an amount or a percentage, and the customer’s screen shows the subtotal, the discount and the amount to pay. A percentage applies to the item total, not to shipping. The “Ship after … JPYC reaches your wallet” amount also uses the discounted total. The discount goes only into the link you are making and is cleared by “Next order”.',
+    },
+    {
+      q: 'Can I handle consumption tax and invoices?',
+      a: 'Yes. Pick a tax rate under Consumption tax in “Settings”. You can change the rate per item, and the customer’s receipt shows the tax rate and the consumption tax. Shipping is taxed at the standard rate. Add your invoice registration number and shop name too, and for orders with a taxed item or shipping the receipt shows the number with the amount and consumption tax per rate (for business customers). On the receipt a discount is split across tax rates in proportion to their amounts (as at the register). The tax rate and number only appear on the receipt and are not kept in your OpenPay history, so keep your own records for bookkeeping.',
     },
     {
       q: 'What if I need to change the amount or items after sending?',

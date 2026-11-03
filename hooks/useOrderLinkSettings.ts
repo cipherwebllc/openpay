@@ -3,7 +3,14 @@
 import { JPYC_CHAINS, type ChainSlug } from '@/lib/chains';
 import type { PayMode } from '@/lib/fee';
 import { isSettledReceiverInput } from '@/lib/format';
-import { ORDER_LINK_ID_MAX, ORDER_LINK_STORE_NAME_MAX, orderLinkChains } from '@/lib/orderLink';
+import { INVOICE_REGISTRATION_INPUT_MAX } from '@/lib/invoice';
+import {
+  isOrderLinkTax,
+  ORDER_LINK_ID_MAX,
+  ORDER_LINK_STORE_NAME_MAX,
+  orderLinkChains,
+  type OrderLinkTax,
+} from '@/lib/orderLink';
 import { SHOP_CONTACT_MAIL_MAX, type ShopContactKind } from '@/lib/shopContact';
 import { DECIMAL_PATTERN } from '@/lib/url/shared';
 import { useLocalStorageSettings, type SettingsSyncRules } from './useLocalStorageSettings';
@@ -30,6 +37,10 @@ type OrderLinkSettings = {
   // 注文の送り先 (お客様の完了画面が開く LINE 公式アカウントかメール)。値は打ったままの文字列で持つ。
   contactKind: 'none' | ShopContactKind;
   contactValue: string;
+  // 消費税 (商品の税率の既定・null = 税の情報を入れない) とインボイス登録番号 (打ったままの文字列)。
+  // どちらもお客様の控えに出す表示だけの値 (lib/orderLink.ts)。
+  taxCategory: OrderLinkTax | null;
+  invoiceNo: string;
 };
 
 const STORAGE_KEY = 'openpay:order-link-settings:v1';
@@ -45,6 +56,8 @@ const DEFAULT_SETTINGS: OrderLinkSettings = {
   linkKind: 'single',
   contactKind: 'none',
   contactValue: '',
+  taxCategory: null,
+  invoiceNo: '',
 };
 
 function sanitize(loaded: Partial<OrderLinkSettings> & { chain?: unknown }): OrderLinkSettings {
@@ -71,6 +84,8 @@ function sanitize(loaded: Partial<OrderLinkSettings> & { chain?: unknown }): Ord
     contactKind: loaded.contactKind === 'line' || loaded.contactKind === 'mail' ? loaded.contactKind : 'none',
     contactValue:
       typeof loaded.contactValue === 'string' ? loaded.contactValue.slice(0, SHOP_CONTACT_MAIL_MAX) : '',
+    taxCategory: isOrderLinkTax(loaded.taxCategory) ? loaded.taxCategory : null,
+    invoiceNo: typeof loaded.invoiceNo === 'string' ? loaded.invoiceNo.slice(0, INVOICE_REGISTRATION_INPUT_MAX) : '',
   };
 }
 
@@ -79,6 +94,7 @@ const SYNC_RULES: SettingsSyncRules<OrderLinkSettings> = {
     ['receiver', 'receiverSource'],
     ['chains', 'payMode'],
     ['contactKind', 'contactValue'],
+    ['taxCategory', 'invoiceNo'],
   ],
   importable: { receiver: isSettledReceiverInput },
 };
