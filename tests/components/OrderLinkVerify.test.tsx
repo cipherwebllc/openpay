@@ -22,14 +22,14 @@ afterEach(() => {
 });
 
 function paste(text: string) {
-  fireEvent.change(screen.getByLabelText('お客様から届いた Tx Hash'), { target: { value: text } });
+  fireEvent.change(screen.getByLabelText('お客様から届いた文か Tx Hash'), { target: { value: text } });
   fireEvent.click(screen.getByRole('button', { name: '確かめる' }));
 }
 
 describe('OrderLinkVerify', () => {
   it('受取ウォレットが無いか、何も貼っていなければ押せない', () => {
     const { unmount } = render(<OrderLinkVerify chain="polygon" receiver={null} />);
-    fireEvent.change(screen.getByLabelText('お客様から届いた Tx Hash'), { target: { value: HASH } });
+    fireEvent.change(screen.getByLabelText('お客様から届いた文か Tx Hash'), { target: { value: HASH } });
     expect(screen.getByRole('button', { name: '確かめる' })).toBeDisabled();
     unmount();
     render(<OrderLinkVerify chain="polygon" receiver={RECEIVER} />);
@@ -37,10 +37,19 @@ describe('OrderLinkVerify', () => {
   });
 
   it('届いていれば額・ブロック・照らし合わせの注意と Explorer のリンクを出す', async () => {
-    check.mockResolvedValue({ status: 'paid', received: '3465', blockNumber: 123n, timestamp: 1_762_000_000 });
+    check.mockResolvedValue({
+      status: 'paid',
+      received: '3465',
+      blockNumber: 123n,
+      timestamp: 1_762_000_000,
+      payer: null,
+      confirmation: 'unsigned',
+    });
     render(<OrderLinkVerify chain="polygon" receiver={RECEIVER} />);
     paste(`ご注文 A-001 のお支払いが済みました。\nTx Hash: ${HASH}`);
     expect(await screen.findByText('受取ウォレットに 3,465 JPYC 届いています')).toBeInTheDocument();
+    // 署名の無い文は、払った本人からか分からないと伝える
+    expect(screen.getByText(/確認の署名がありません/)).toBeInTheDocument();
     expect(screen.getByText(/ブロック #123/)).toBeInTheDocument();
     expect(screen.getByText(/額と時刻で注文と照らし合わせてから発送してください/)).toBeInTheDocument();
     const link = screen.getByRole('link', { name: 'Explorer で見る' });
@@ -49,6 +58,22 @@ describe('OrderLinkVerify', () => {
     expect(check).toHaveBeenCalledWith(
       expect.objectContaining({ chain: 'polygon', receiver: RECEIVER, text: expect.stringContaining(HASH) }),
     );
+  });
+
+  it('払ったウォレットの署名なら払った人の短いアドレスを、他人の署名なら発送を止める案内を出す', async () => {
+    const payer = '0x4444444444444444444444444444444444444444' as Address;
+    const paid = { status: 'paid', received: '3465', blockNumber: 123n, timestamp: 1_762_000_000, payer };
+    const { unmount } = render(<OrderLinkVerify chain="polygon" receiver={RECEIVER} />);
+    check.mockResolvedValueOnce({ ...paid, confirmation: 'verified' });
+    paste(HASH);
+    expect(await screen.findByText('払ったウォレット (0x4444…4444) の確認の署名があります')).toBeInTheDocument();
+    unmount();
+    localStorage.clear();
+    render(<OrderLinkVerify chain="polygon" receiver={RECEIVER} />);
+    check.mockResolvedValueOnce({ ...paid, confirmation: 'mismatch' });
+    paste(HASH);
+    expect(await screen.findByText(/この支払いをしたウォレットの署名ではありません/)).toBeInTheDocument();
+    expect(screen.queryByText(/の確認の署名があります/)).toBeNull();
   });
 
   it('届いていない・見つからない・読み取れないときは、それぞれの理由を出す', async () => {
@@ -68,7 +93,14 @@ describe('OrderLinkVerify', () => {
   });
 
   it('同じ Tx Hash を 2 回目に確かめると、使い回しへの注意を出す (この端末で前に確かめた時刻つき)', async () => {
-    check.mockResolvedValue({ status: 'paid', received: '3465', blockNumber: 123n, timestamp: 1_762_000_000 });
+    check.mockResolvedValue({
+      status: 'paid',
+      received: '3465',
+      blockNumber: 123n,
+      timestamp: 1_762_000_000,
+      payer: null,
+      confirmation: 'unsigned',
+    });
     render(<OrderLinkVerify chain="polygon" receiver={RECEIVER} />);
     paste(HASH);
     expect(await screen.findByText('受取ウォレットに 3,465 JPYC 届いています')).toBeInTheDocument();
@@ -82,7 +114,7 @@ describe('OrderLinkVerify', () => {
     render(<OrderLinkVerify chain="polygon" receiver={RECEIVER} />);
     paste(HASH);
     expect(await screen.findByText(/この取引は失敗しています/)).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText('お客様から届いた Tx Hash'), { target: { value: '' } });
+    fireEvent.change(screen.getByLabelText('お客様から届いた文か Tx Hash'), { target: { value: '' } });
     await waitFor(() => expect(screen.queryByText(/この取引は失敗しています/)).toBeNull());
   });
 });

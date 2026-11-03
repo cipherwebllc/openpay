@@ -12,7 +12,7 @@ import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
-import { formatUnits } from 'viem';
+import { formatUnits, type Address } from 'viem';
 import { useAccount, useSwitchChain } from 'wagmi';
 import { ConnectButton } from './ConnectButton';
 import { breakdownRow } from './PaymentBreakdownRows';
@@ -20,7 +20,13 @@ import { OnrampCta } from './OnrampCta';
 import { ResultRow } from './ResultRow';
 import { SmartAccountFallbackBanner } from './SmartAccountFallbackBanner';
 import { RelayFallbackBanner } from './RelayFallbackBanner';
-import { isRemoteOrderCheckout, NotifyShopButton } from './NotifyShopButton';
+import { isRemoteOrderCheckout, NotifyShopButton, type NotifyShopData } from './NotifyShopButton';
+import { shopContactLabel } from '@/lib/shopContact';
+import {
+  rememberedOrderPayment,
+  rememberOrderPayment,
+  type RememberedOrderPayment,
+} from '@/lib/orderConfirmation';
 import {
   PaymentSuccessOverlay,
   type PaymentSuccessOverlayPayload,
@@ -558,6 +564,8 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
     feeAmount: bigint;
     customerPays: bigint;
   } | null>(null);
+  // 遠隔の注文の確認の署名をしてもらうウォレット (支払いを送った時点の接続先)。
+  const submittedPayerRef = useRef<Address | undefined>(undefined);
 
   // relay 成功/失敗/pending を既存の gasless 履歴経路に流す合成 snapshot。
   const relayHistoryGasless = useRelayGaslessSnapshot(
@@ -1377,6 +1385,8 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
       feeAmount: breakdown.feeAmount,
       customerPays: breakdown.customerPays,
     };
+    // 遠隔の注文の確認の署名は、この支払いを送ったウォレットでしてもらう (完了までに切り替えても変わらない)。
+    submittedPayerRef.current = address;
     // 完了画面のチャイムを iOS でも鳴らせるよう、この gesture 内で AudioContext を解錠。
     if (!orderAdmissionMode) primeChimeAudio();
     if (isStandard) {
@@ -1456,6 +1466,11 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   // 共通で従来どおり。
   // 遠隔の注文 (注文リンクや外部の /checkout リンク) なら、払ったことをお客様自身の LINE やメールでお店に知らせるボタンを出す。
   const notifyShop = isRemoteOrderCheckout(params);
+  const [rememberedPayment, setRememberedPayment] = useState<RememberedOrderPayment | null>(null);
+  useEffect(() => {
+    if (!notifyShop) return;
+    setRememberedPayment(rememberedOrderPayment(checkoutContextKey, Date.now()));
+  }, [notifyShop, checkoutContextKey]);
   const successOverlayPayload: PaymentSuccessOverlayPayload | null =
     restoredCheckoutCompletion
       ? null
@@ -1487,6 +1502,42 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
               orderNo: params.orderId,
             }
           : null;
+  // 注文を送る / お店に知らせる の中身。払ったウォレットは支払いを送った時点の接続先 (通常決済は hook が記録した
+  // 送り主) で、完了を見た時点の接続先ではない (途中で切り替えたウォレットに署名させない)。
+  const notifyPayer = (isStandard ? standard.lastSubmittedFrom : undefined) ?? submittedPayerRef.current;
+  const notifyFor = (txHash: string, payer: Address | undefined): NotifyShopData => ({
+    orderNo: params.orderId,
+    askShipping: params.ship === 'ask',
+    storeName: params.storeName,
+    items: params.items.map((item) => ({ name: item.name, qty: item.qty })),
+    amountDisplay: fmt(totalCustomerOutflow),
+    txHash,
+    explorerTxUrl: explorerBase ? `${explorerBase}/tx/${txHash}` : undefined,
+    chain: chainSlug,
+    shop: params.to,
+    ...(payer ? { payer } : {}),
+    // お店が確かめられるのは JPYC だけ (注文リンクの「入金を確かめる」)。他のトークンでは署名を求めない。
+    confirm: params.token === 'jpyc',
+    contact: params.contact,
+  });
+  const notifyData: NotifyShopData | undefined =
+    notifyShop && successOverlayPayload ? notifyFor(successOverlayPayload.txHash, notifyPayer) : undefined;
+  // 読み直した画面: この会計 (同じ URL の中身) をこのタブで払った記録があれば、「注文を送る」を出す
+  // (lib/orderConfirmation.ts の rememberOrderPayment)。完了画面を見ている間は出さない。
+  const restoredNotifyData: NotifyShopData | undefined =
+    notifyShop && !notifyData && rememberedPayment
+      ? notifyFor(rememberedPayment.txHash, rememberedPayment.payer)
+      : undefined;
+  const liveNotifyTx = notifyData?.txHash;
+  const liveNotifyPayer = notifyData?.payer;
+  useEffect(() => {
+    if (!liveNotifyTx) return;
+    rememberOrderPayment(checkoutContextKey, {
+      txHash: liveNotifyTx.toLowerCase(),
+      ...(liveNotifyPayer ? { payer: liveNotifyPayer } : {}),
+      paidAt: Date.now(),
+    });
+  }, [checkoutContextKey, liveNotifyTx, liveNotifyPayer]);
 
   // 「署名安心 UX」(plans/sign-reassurance-ux.md・P2)。経路別に kind を出し分ける (計画 §3.3)。
   //   (a) relay free (forwarder 未設定): jpyc-relay-free フルパネル。preview は relay.mutate に
@@ -1566,12 +1617,32 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
             {params.description}
           </p>
         )}
+        {/* 何度でも使える注文リンク (ship=ask): 払う前に、この後にすることを伝える (お名前とお届け先は自分の LINE や
+            メールで送り、OpenPay には入力しない)。送り先は完了画面にも出す。 */}
+        {notifyShop && params.ship === 'ask' && (
+          <p className="mt-2 rounded-lg bg-sky-50 px-3 py-2 text-sm text-sky-900">
+            {params.contact
+              ? t('shipAskNoteWithContact', { dest: shopContactLabel(params.contact) })
+              : t('shipAskNote')}
+          </p>
+        )}
         <p className="mt-3 text-xs text-slate-500">
           {t('payToLabel', { addr: shortAddress(params.to) })} ·{' '}
           {requiredChain.name} · {deployment.displaySymbol} ·{' '}
           {isStandard ? t('modeBadgeStandard') : t('modeBadgeGasless')}
         </p>
       </header>
+
+      {/* 読み直した画面: このタブで払った会計なら、注文を送る / お店に知らせる をここに出す (同じ注文をもう一度払わせない)。 */}
+      {restoredNotifyData && (
+        <section className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-emerald-900">
+          <p className="text-sm font-semibold">{t('notifyRestoredTitle')}</p>
+          <p className="mt-1 break-all text-xs">{t('notifyRestoredBody', { tx: shortAddress(restoredNotifyData.txHash) })}</p>
+          <div className="mt-3">
+            <NotifyShopButton {...restoredNotifyData} tone="panel" />
+          </div>
+        </section>
+      )}
 
       <section className="rounded-2xl border border-slate-200 bg-white p-4 text-sm">
         <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -2056,16 +2127,10 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
             )}
           </dl>
 
-          {/* 遠隔の注文: 大きな完了画面を閉じた後も、お店に知らせるボタンを残す。 */}
-          {notifyShop && params.orderId && successOverlayPayload && (
+          {/* 遠隔の注文: 大きな完了画面を閉じた後も、注文を送る / お店に知らせるボタンを残す。 */}
+          {notifyData && (
             <div className="mt-4">
-              <NotifyShopButton
-                orderNo={params.orderId}
-                amountDisplay={successOverlayPayload.amountDisplay}
-                txHash={successOverlayPayload.txHash}
-                explorerTxUrl={explorerBase ? `${explorerBase}/tx/${successOverlayPayload.txHash}` : undefined}
-                tone="panel"
-              />
+              <NotifyShopButton {...notifyData} tone="panel" />
             </div>
           )}
 
@@ -2158,7 +2223,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
       <PaymentSuccessOverlay
         dismissed={overlayDismissed || orderNotifyTooOld}
         payload={successOverlayPayload}
-        notifyShop={notifyShop}
+        notify={notifyData}
         onDismiss={() => setOverlayDismissed(true)}
       />
     </div>

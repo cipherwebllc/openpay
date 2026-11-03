@@ -50,7 +50,9 @@ function input(patch: Partial<OrderLinkInput> = {}): OrderLinkInput {
     to: TO,
     chain: 'polygon',
     mode: 'gasless',
+    reusable: false,
     orderId: 'A-001',
+    contact: null,
     description: '',
     storeName: '',
     lines: [{ name: 'Tシャツ M', qty: '2', price: '3000' }],
@@ -153,6 +155,32 @@ describe('buildOrderLink', () => {
     expect(cleaned.searchParams.get('store')).toBe('OpenPay');
     const long = okUrl(buildOrderLink(input({ storeName: 'あ'.repeat(60) })));
     expect(long.searchParams.get('store')).toBe('あ'.repeat(48));
+  });
+
+  it('何度でも使えるリンクは番号を持たず ship=ask を付ける (番号の欄が空でも作れる)', () => {
+    const url = okUrl(buildOrderLink(input({ reusable: true, orderId: '' })));
+    expect(url.searchParams.has('order_id')).toBe(false);
+    expect(url.searchParams.get('ship')).toBe('ask');
+    const parsed = parseCheckoutParams(url.searchParams);
+    if (!parsed.ok) throw new Error(parsed.error);
+    expect(parsed.params.orderId).toBeUndefined();
+    expect(parsed.params.ship).toBe('ask');
+    // 番号が残っていても何度でも使えるリンクには入れない
+    expect(okUrl(buildOrderLink(input({ reusable: true, orderId: 'A-009' }))).searchParams.has('order_id')).toBe(false);
+    // 番号つきのリンクには ship を付けない
+    expect(okUrl(buildOrderLink(input())).searchParams.has('ship')).toBe(false);
+  });
+
+  it('注文の送り先は contact に入り、読み直せる。形の合わない送り先ではリンクを作らない', () => {
+    const line = okUrl(buildOrderLink(input({ contact: { kind: 'line', id: '@openpay' } })));
+    expect(line.searchParams.get('contact')).toBe('line:@openpay');
+    const parsed = parseCheckoutParams(line.searchParams);
+    if (!parsed.ok) throw new Error(parsed.error);
+    expect(parsed.params.contact).toEqual({ kind: 'line', id: '@openpay' });
+    const mail = okUrl(buildOrderLink(input({ contact: { kind: 'mail', address: 'shop@example.com' } })));
+    expect(mail.searchParams.get('contact')).toBe('mail:shop@example.com');
+    expect(okUrl(buildOrderLink(input())).searchParams.has('contact')).toBe(false);
+    expect(buildOrderLink(input({ contact: 'invalid' }))).toEqual({ ok: false, error: 'contact' });
   });
 
   it('説明が読み直しで変わるならリンクを作らない', () => {

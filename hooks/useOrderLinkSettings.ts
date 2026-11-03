@@ -4,6 +4,7 @@ import { JPYC_CHAINS, type ChainSlug } from '@/lib/chains';
 import type { PayMode } from '@/lib/fee';
 import { isSettledReceiverInput } from '@/lib/format';
 import { ORDER_LINK_ID_MAX, ORDER_LINK_STORE_NAME_MAX, orderLinkChains } from '@/lib/orderLink';
+import { SHOP_CONTACT_MAIL_MAX, type ShopContactKind } from '@/lib/shopContact';
 import { DECIMAL_PATTERN } from '@/lib/url/shared';
 import { useLocalStorageSettings, type SettingsSyncRules } from './useLocalStorageSettings';
 import { normalizeChainForToken } from './useQrSettings';
@@ -22,6 +23,11 @@ type OrderLinkSettings = {
   shipping: string;
   // 最後にコピーや共有をした注文の番号。次の番号はここから決める (端末ごと)。
   lastOrderId: string;
+  // リンクの種類。'reusable' = 番号なしで何度でも使える (ship=ask)。お店の使い方は大体どちらかに決まるので覚える。
+  linkKind: 'single' | 'reusable';
+  // 注文の送り先 (お客様の完了画面が開く LINE 公式アカウントかメール)。値は打ったままの文字列で持つ。
+  contactKind: 'none' | ShopContactKind;
+  contactValue: string;
 };
 
 const STORAGE_KEY = 'openpay:order-link-settings:v1';
@@ -34,6 +40,9 @@ const DEFAULT_SETTINGS: OrderLinkSettings = {
   payMode: 'gasless',
   shipping: '',
   lastOrderId: '',
+  linkKind: 'single',
+  contactKind: 'none',
+  contactValue: '',
 };
 
 function sanitize(loaded: Partial<OrderLinkSettings>): OrderLinkSettings {
@@ -48,6 +57,10 @@ function sanitize(loaded: Partial<OrderLinkSettings>): OrderLinkSettings {
     shipping: typeof loaded.shipping === 'string' && DECIMAL_PATTERN.test(loaded.shipping) ? loaded.shipping : '',
     lastOrderId:
       typeof loaded.lastOrderId === 'string' ? loaded.lastOrderId.slice(0, ORDER_LINK_ID_MAX) : '',
+    linkKind: loaded.linkKind === 'reusable' ? 'reusable' : 'single',
+    contactKind: loaded.contactKind === 'line' || loaded.contactKind === 'mail' ? loaded.contactKind : 'none',
+    contactValue:
+      typeof loaded.contactValue === 'string' ? loaded.contactValue.slice(0, SHOP_CONTACT_MAIL_MAX) : '',
   };
 }
 
@@ -55,6 +68,7 @@ const SYNC_RULES: SettingsSyncRules<OrderLinkSettings> = {
   groups: [
     ['receiver', 'receiverSource'],
     ['chain', 'payMode'],
+    ['contactKind', 'contactValue'],
   ],
   importable: { receiver: isSettledReceiverInput },
 };

@@ -17,6 +17,7 @@ const PRIMARY_ACTION =
 export function OrderLinkPreview({
   result,
   orderId,
+  reusable,
   storeName,
   description,
   lines,
@@ -35,6 +36,8 @@ export function OrderLinkPreview({
 }: {
   result: OrderLinkResult;
   orderId: string;
+  /** 番号なしで何度でも使えるリンク (お客様は払った後に注文を送る)。 */
+  reusable: boolean;
   /** お客様の画面の頭に出る店名 (空なら出さない・/checkout と同じ)。 */
   storeName: string;
   description: string;
@@ -82,7 +85,11 @@ export function OrderLinkPreview({
 
       <div className="px-5 py-4">
         {storeName.trim() && <p className="break-words text-base font-bold text-slate-900">{storeName.trim()}</p>}
-        {orderId && <p className="text-xs tabular-nums text-slate-500">{t('previewOrder', { id: orderId })}</p>}
+        {reusable ? (
+          <p className="text-xs text-slate-500">{t('previewReusable')}</p>
+        ) : (
+          orderId && <p className="text-xs tabular-nums text-slate-500">{t('previewOrder', { id: orderId })}</p>
+        )}
         {description.trim() && <p className="mt-1 break-words text-sm text-slate-600">{description.trim()}</p>}
 
         {lines.length > 0 ? (
@@ -109,6 +116,10 @@ export function OrderLinkPreview({
               {groupAmountDigits(result.total)} JPYC
             </span>
           </div>
+        )}
+
+        {reusable && lines.length > 0 && (
+          <p className="mt-3 rounded-lg bg-sky-50 px-3 py-2 text-xs leading-relaxed text-sky-900">{t('previewAfterPay')}</p>
         )}
 
         {lines.length > 0 && !result.ok && message && (
@@ -197,6 +208,7 @@ export function OrderLinkPreview({
                 <li>{t('cautionEditable')}</li>
                 <li>{t('cautionHistory')}</li>
                 <li>{t('cautionTxHash')}</li>
+                <li>{t('cautionSignature')}</li>
               </ul>
             </div>
           </div>
@@ -209,7 +221,7 @@ export function OrderLinkPreview({
               />
             </summary>
             <ul className="list-disc space-y-1.5 pb-1 pl-4 text-xs leading-relaxed text-slate-600">
-              <li>{t('checkNumber')}</li>
+              {!reusable && <li>{t('checkNumber')}</li>}
               <li>{t('checkExpiry')}</li>
               <li>{t('checkPrivacy')}</li>
               <li>{t('sellerDuty')}</li>

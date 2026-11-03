@@ -26,6 +26,8 @@ vi.mock('wagmi', () => ({
     error: null,
   })),
   useDisconnect: vi.fn(() => ({ disconnect: vi.fn() })),
+  // 遠隔の注文の完了画面の「お店に知らせる / 注文を送る」が、払ったウォレットで確認の署名をする。
+  useSignMessage: vi.fn(() => ({ signMessageAsync: vi.fn(), isPending: false })),
 }));
 vi.mock('@/hooks/useSmartAccount', () => ({ useSmartAccount: vi.fn() }));
 vi.mock('@/hooks/useBatchPayment', () => ({ useBatchPayment: vi.fn() }));
@@ -582,6 +584,40 @@ describe('CheckoutForm — レンダリング', () => {
     unmount();
     render(<CheckoutForm params={JPYC_PARAMS} />);
     expect(screen.queryByText('OpenPay 工房')).toBeNull();
+  });
+
+  it('何度でも使える注文リンク (ship=ask) は、払う前にこの後お名前とお届け先を送ることと送り先を伝える', () => {
+    setAccount({ connected: false });
+    const { unmount } = render(
+      <CheckoutForm params={{ ...JPYC_PARAMS, ship: 'ask', contact: { kind: 'line', id: '@openpay' } }} />,
+    );
+    expect(screen.getByText(/「注文を送る」から、お名前とお届け先をお店 \(LINE @openpay\) へ送ります/)).toBeInTheDocument();
+    unmount();
+    // 店頭のモバイル注文 (@handle) には出さない
+    render(<CheckoutForm params={{ ...JPYC_PARAMS, ship: 'ask', storeHandle: 'cafe' }} />);
+    expect(screen.queryByText(/「注文を送る」から/)).toBeNull();
+  });
+
+  it('読み直した画面では、この会計をこのタブで払った記録があれば「注文を送る」を出す (別の会計の記録は使わない)', async () => {
+    setAccount({ connected: false });
+    const params: CheckoutParams = { ...JPYC_PARAMS, ship: 'ask' };
+    const deployment = deploymentForSlug('jpyc', 'polygon');
+    const key = checkoutIntentContextFingerprint({
+      params,
+      chainId: deployment.chainId,
+      tokenAddress: deployment.address,
+      totalAtomic: (3000n * 10n ** BigInt(deployment.decimals)).toString(),
+    });
+    const tx = `0x${'ab'.repeat(32)}`;
+    window.sessionStorage.setItem(`openpay:order-paid:v1:${key}`, JSON.stringify({ txHash: tx, paidAt: Date.now() }));
+    const { unmount } = render(<CheckoutForm params={params} />);
+    expect(await screen.findByText('このタブでのお支払いは済んでいます')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '注文を送る' })).toBeInTheDocument();
+    unmount();
+    // 明細の違う会計 (別の注文) では出さない
+    render(<CheckoutForm params={{ ...params, items: [{ name: 'チケット', qty: 2, price: '3000' }] }} />);
+    await waitFor(() => expect(screen.queryByText('このタブでのお支払いは済んでいます')).toBeNull());
+    window.sessionStorage.clear();
   });
 
   it('order_id 未指定時は generic タイトル', () => {

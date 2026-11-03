@@ -1652,7 +1652,11 @@
         "success": "Your previous payment ({store} · {amount}) is complete. You can now pay for this checkout.",
         "expired": "Your previous payment ({store} · {amount}) was not made. You can now pay for this checkout."
       }
-    }
+    },
+    "shipAskNote": "After paying, use “Send your order” on this screen to send your name and delivery address to the shop (nothing is sent to OpenPay).",
+    "shipAskNoteWithContact": "After paying, use “Send your order” on this screen to send your name and delivery address to the shop ({dest}) (nothing is sent to OpenPay).",
+    "notifyRestoredTitle": "You already paid in this tab",
+    "notifyRestoredBody": "Tx Hash {tx}. You do not need to pay for the same order again. If you have not sent it yet, send it below."
   },
   "CopyableField": {
     "copy": "Copy",
@@ -1684,7 +1688,28 @@
     "notifyShopCopied": "Copied. Paste it into your conversation with the shop.",
     "notifyShopShared": "Shared",
     "notifyShopTextLabel": "Message to send to the shop (select and copy it)",
-    "notifyShopDismissHelp": "Close this after you have told the shop"
+    "notifyShopDismissHelp": "Close this after you have told the shop",
+    "sendOrder": "Send your order",
+    "signHint": "Your wallet asks you to sign a confirmation (no money moves). It lets the shop confirm that you are the one who paid.",
+    "signing": "Waiting for your wallet…",
+    "signFailed": "Could not sign. Check that your wallet is connected and try again, or send without signing.",
+    "sendWithoutSign": "Send without signing",
+    "signedReady": "Signed. Now send it to the shop.",
+    "unsignedReady": "Sending without a signature. The shop may take longer to confirm.",
+    "sendTo": "Send to: {dest}",
+    "sendByLine": "Send on LINE",
+    "sendByMail": "Send by email",
+    "send": "Send",
+    "sendOther": "Send another way",
+    "sendOrderHint": "Add your name and delivery address before sending. Nothing is sent to OpenPay.",
+    "sendOrderDismissHelp": "Close this after you have sent your order",
+    "orderMessageIntro": "I would like to order from {store}.",
+    "orderMessageIntroNoStore": "I would like to place an order.",
+    "orderFieldName": "Name:",
+    "orderFieldAddress": "Delivery address (Japan Post digital address or full address):",
+    "orderItemsLabel": "Items",
+    "signatureLabel": "Confirmation signature",
+    "signSwitchWallet": "Switch to the wallet you paid with ({payer}) to sign, or send without signing."
   },
   "NonCustodialNotice": {
     "shortTitle": "Settlement lives on-chain",
@@ -3547,7 +3572,8 @@
       "itemName": "Enter the item name.",
       "itemQty": "Enter a quantity from 1 to {qtyMax}.",
       "itemPrice": "Enter the unit price as a number.",
-      "tooLargeGasless": "The no-gas-fee limit is {maximum} JPYC. Standard payment allows up to {standardMaximum} JPYC, but the customer needs gas."
+      "tooLargeGasless": "The no-gas-fee limit is {maximum} JPYC. Standard payment allows up to {standardMaximum} JPYC, but the customer needs gas.",
+      "contact": "Check the format of where orders are sent."
     },
     "errorsShort": {
       "receiver": "Enter receiving wallet",
@@ -3563,7 +3589,8 @@
       "itemName": "Enter item name",
       "itemQty": "Check quantity",
       "itemPrice": "Check unit price",
-      "tooLargeGasless": "Over the {maximum} JPYC limit"
+      "tooLargeGasless": "Over the {maximum} JPYC limit",
+      "contact": "Check destination"
     },
     "receiverConnectHint": "Connect a wallet to fill this in automatically.",
     "cautionFee": "{fee} JPYC fee deducted. {total} JPYC if paid as standard",
@@ -3581,8 +3608,8 @@
     "cautionStandard": "This order uses standard payment. The customer needs gas",
     "cautionTxHash": "Tell same-amount orders apart by the customer's Tx Hash",
     "verifyTitle": "Check a payment",
-    "verifyLead": "Paste the Tx Hash the customer sent you and we read from the chain how much reached your receiving wallet. You can paste their whole message.",
-    "verifyLabel": "Tx Hash from the customer",
+    "verifyLead": "Paste the message the customer sent and we check, from the chain, how much reached your receiving wallet and whether it is signed by the paying wallet. A Tx Hash alone also works.",
+    "verifyLabel": "Message or Tx Hash from the customer",
     "verifyPlaceholder": "0x…",
     "verifyButton": "Check",
     "verifyChecking": "Checking…",
@@ -3597,6 +3624,33 @@
       "failed": "This transaction failed. No payment arrived.",
       "invalid": "Could not read a Tx Hash (66 characters starting with 0x).",
       "error": "Could not reach the chain. Wait a moment and try again."
-    }
+    },
+    "kindLabel": "Link type",
+    "kinds": {
+      "single": "One order",
+      "singleDesc": "Make a numbered link for each order",
+      "reusable": "Reusable",
+      "reusableDesc": "No number. Post it on social media; customers send their order after paying"
+    },
+    "shareTextReusable": "You can pay with JPYC from this link. After paying, use “Send your order” on the screen to send us your name and delivery address.",
+    "previewReusable": "Reusable link",
+    "previewAfterPay": "After paying, the customer sends their name and delivery address with “Send your order”",
+    "contactLabel": "Where orders are sent",
+    "contactKinds": {
+      "none": "None",
+      "line": "LINE",
+      "mail": "Email"
+    },
+    "contactValueLabel": "Destination",
+    "contactLinePlaceholder": "@yourshop",
+    "contactMailPlaceholder": "shop@example.com",
+    "contactHint": "The customer’s completion screen opens this destination with the order message filled in. It goes into the link, so use a contact you already publish for your shop.",
+    "contactLineHint": "LINE Official Accounts only (personal LINE accounts cannot be opened). Customers who are not friends yet see “Add friend” first.",
+    "cautionSignature": "A Tx Hash alone does not prove who paid. Paste the whole message into “Check a payment” to check the signature too",
+    "verifyConfirmed": "Signed by the paying wallet ({payer})",
+    "verifyUnsigned": "No confirmation signature, so you cannot tell whether this came from the person who paid. Check with the customer before shipping.",
+    "verifyMismatch": "This is not signed by the wallet that made this payment. It may be someone else’s Tx Hash. Stop and check before shipping.",
+    "contactNoneHint": "Customers send it from the completion screen by sharing or copying. Set a LINE Official Account or email and it opens with the message filled in.",
+    "verifyUnverifiable": "This transaction contains more than one payment, so the payer cannot be pinned to one wallet and the signature cannot be checked. Stop and check before shipping."
   }
 }

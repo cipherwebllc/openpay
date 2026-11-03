@@ -15,7 +15,7 @@ import { useModalFocus } from '@/hooks/useModalFocus';
 import { useSuccessSoundPref } from '@/hooks/useSuccessSoundPref';
 import { CopyableField } from './CopyableField';
 import { NonCustodialNotice } from './NonCustodialNotice';
-import { NotifyShopButton } from './NotifyShopButton';
+import { NotifyShopButton, type NotifyShopData } from './NotifyShopButton';
 
 function formatTimeHMS(d: Date): string {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
@@ -29,7 +29,7 @@ export function SuccessOverlay({
   explorerBase,
   merchantAddress,
   orderNo,
-  notifyShop = false,
+  notify,
   onDismiss,
 }: {
   amountDisplay: string;
@@ -45,8 +45,8 @@ export function SuccessOverlay({
   merchantAddress?: string;
   /** 受付番号 (受け渡し照合用)。checkout で order_id があるときのみ・無ければ表示しない。 */
   orderNo?: string;
-  /** 遠隔の注文 (注文リンクなど) で、お客様が自分の LINE やメールでお店に知らせるボタンを出す。受付番号があるときだけ効く。 */
-  notifyShop?: boolean;
+  /** 遠隔の注文 (注文リンクなど) で、お客様が自分の LINE やメールで注文やお支払いをお店に送るボタンを出す。 */
+  notify?: NotifyShopData;
   onDismiss: () => void;
 }) {
   const t = useTranslations('SuccessOverlay');
@@ -150,16 +150,8 @@ export function SuccessOverlay({
         </div>
       )}
 
-      {/* 遠隔の注文: 払ったことをお客様自身の LINE やメールでお店に知らせる (文はこのブラウザの中で作る)。 */}
-      {notifyShop && orderNo && (
-        <NotifyShopButton
-          orderNo={orderNo}
-          amountDisplay={amountDisplay}
-          txHash={txHash}
-          explorerTxUrl={explorerTxUrl}
-          tone="overlay"
-        />
-      )}
+      {/* 遠隔の注文: 注文やお支払いをお客様自身の LINE やメールでお店に送る (文はこのブラウザの中で作る)。 */}
+      {notify && <NotifyShopButton {...notify} tone="overlay" />}
 
       {/* 完了時刻 (HH:MM:SS、毎秒更新) */}
       <div className="text-center">
@@ -258,7 +250,7 @@ export function SuccessOverlay({
         >
           {t('dismiss')}
         </button>
-        <p className="text-[10px] opacity-70">{t(notifyShop && orderNo ? 'notifyShopDismissHelp' : 'dismissHelp')}</p>
+        <p className="text-[10px] opacity-70">{t(notify ? (notify.askShipping ? 'sendOrderDismissHelp' : 'notifyShopDismissHelp') : 'dismissHelp')}</p>
       </div>
     </div>
   );

@@ -1,11 +1,12 @@
 'use client';
 
-// 入金を確かめる: お客様から届いた Tx Hash (届いた文ごと貼ってよい) で、受取ウォレットに届いた額をチェーンから読む。
+// 入金を確かめる: お客様から届いた文 (Tx Hash だけでもよい) で、受取ウォレットに届いた額と、払ったウォレットの
+// 確認の署名をチェーンから確かめる。
 // 注文の画面を閉じた後の注文も確かめられるよう、いつも出す。OpenPay のサーバーには送らない (lib/orderLinkVerify.ts)。
 
 import { useId, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
-import { AlertTriangle, CheckCircle2, ExternalLink } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, ExternalLink, ShieldCheck } from 'lucide-react';
 import type { Address } from 'viem';
 import { groupAmountDigits } from '@/lib/amount';
 import { chainForSlug, txExplorerUrl, type ChainSlug } from '@/lib/chains';
@@ -127,6 +128,21 @@ function VerifyResult({ done, locale }: { done: Done; locale: string }) {
           <p className="font-semibold">{t('verifyPaid', { amount: groupAmountDigits(result.received) })}</p>
           <p className="mt-0.5 text-xs">{t('verifyPaidMeta', { time, block: result.blockNumber.toString() })}</p>
           <p className="mt-1 text-xs leading-relaxed">{t('verifyPaidNote')}</p>
+          {/* 確認の署名: 文を送った人が、この支払いをしたウォレットの持ち主か (Tx Hash は誰でも見られる)。 */}
+          {result.confirmation === 'verified' ? (
+            <p className="mt-2 inline-flex items-start gap-1 text-xs font-semibold leading-relaxed">
+              <ShieldCheck className="mt-px h-3.5 w-3.5 flex-none text-emerald-600" aria-hidden />
+              {t('verifyConfirmed', { payer: result.payer ? shortAddress(result.payer) : '' })}
+            </p>
+          ) : result.confirmation === 'mismatch' || result.confirmation === 'unverifiable' ? (
+            <p className="mt-2 rounded-lg bg-rose-100 px-2 py-1.5 text-xs font-semibold leading-relaxed text-rose-900">
+              {t(result.confirmation === 'mismatch' ? 'verifyMismatch' : 'verifyUnverifiable')}
+            </p>
+          ) : (
+            <p className="mt-2 rounded-lg bg-amber-100 px-2 py-1.5 text-xs font-semibold leading-relaxed text-amber-900">
+              {t('verifyUnsigned')}
+            </p>
+          )}
           {done.checkedBefore !== null && (
             <p className="mt-2 rounded-lg bg-amber-100 px-2 py-1.5 text-xs font-semibold leading-relaxed text-amber-900">
               {t('verifyCheckedBefore', { time: format(done.checkedBefore) })}
