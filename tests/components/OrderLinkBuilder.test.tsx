@@ -115,7 +115,18 @@ describe('OrderLinkBuilder', () => {
     await userEvent.type(receiver, TO);
     expect(screen.getByLabelText('受取ウォレット')).toBeInTheDocument();
     fireEvent.blur(receiver);
-    await screen.findByRole('button', { name: '設定' });
+    // 畳むと受取ウォレットの欄が消え、要約の行 (店名未設定) になる。
+    await waitFor(() => expect(screen.queryByLabelText('受取ウォレット')).toBeNull());
+    expect(screen.getByText('店名未設定')).toBeInTheDocument();
+  });
+
+  it('受取ウォレットの欄が出ている間も「設定」から店名を入れられる (初めての人が店名に辿り着ける)', async () => {
+    render(<OrderLinkBuilder />);
+    expect(screen.getByLabelText('受取ウォレット')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '設定' }));
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('店名'), { target: { value: 'OpenPay 工房' } });
+    await waitFor(() => expect(JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}').storeName).toBe('OpenPay 工房'));
   });
 
   it('お客様の画面の見本に内訳を出し、届いた額を確かめる案内を常に出す', async () => {

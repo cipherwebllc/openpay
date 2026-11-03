@@ -287,6 +287,7 @@ export function OrderLinkBuilder() {
               canUseConnected={autofill.canUseConnected}
               matchesConnected={autofill.matchesConnected}
               onUseConnected={onUseConnected}
+              onOpenSettings={() => setSettingsOpen(true)}
             />
           ) : (
             <ShopSummaryRow
@@ -512,6 +513,7 @@ export function OrderLinkBuilder() {
         <ShopSettingsSection title={t('receiverLabel')}>
           <OrderLinkReceiverFields
             hideLabel
+            inputId="order-link-receiver-sheet"
             value={settings.receiver}
             onChange={onReceiverInput}
             canUseConnected={autofill.canUseConnected}
