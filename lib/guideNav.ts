@@ -17,6 +17,7 @@ export const GUIDE_SLUGS = [
   'qr',
   'shop',
   'pos',
+  'order-link',
   'pay',
   'wallet',
   'mobile-order',
@@ -33,7 +34,7 @@ type GuideGroupId = 'shops' | 'customers' | 'creators' | 'ai' | 'more';
 
 // グループと並びは ja/en 共通 (文言だけをロケールごとに持つ)。
 const GUIDE_GROUPS: readonly { id: GuideGroupId; slugs: readonly GuideSlug[] }[] = [
-  { id: 'shops', slugs: ['start', 'qr', 'shop', 'pos'] },
+  { id: 'shops', slugs: ['start', 'qr', 'shop', 'pos', 'order-link'] },
   { id: 'customers', slugs: ['pay', 'wallet', 'mobile-order', 'agent'] },
   { id: 'creators', slugs: ['store'] },
   { id: 'ai', slugs: ['ai-pay', 'sell'] },
@@ -110,6 +111,10 @@ const JA: GuideNavCopy = {
     pos: {
       label: '今お使いの POS レジと併用',
       summary: 'システム連携なしで、今お使いのレジに「OpenPay」決済を足す 2 台持ちの運用。',
+    },
+    'order-link': {
+      label: '注文リンク (通販)',
+      summary: '通販の注文ごとに支払いリンクを作って、DM やメールで送る。住所は預かりません。',
     },
     pay: {
       label: 'JPYC で支払う',
@@ -189,6 +194,10 @@ const EN: GuideNavCopy = {
     pos: {
       label: 'Use with your current POS',
       summary: 'Add OpenPay as a payment method on the register you already use — two devices, no integration.',
+    },
+    'order-link': {
+      label: 'Order links (online sales)',
+      summary: 'Make a payment link for each online order and send it by DM or email. No addresses are stored.',
     },
     pay: {
       label: 'Pay with JPYC',

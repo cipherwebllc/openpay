@@ -36,13 +36,19 @@ afterEach(() => {
 describe('CreatePage 用途別ガイド', () => {
   // 最後の行は全ガイドのハブ。slug から組むと `/ja/guide/` と末尾に / が付くので、href を固定して縛る。
   it.each([
-    ['ja', ['決済QRを始める', 'レジ・モバイルオーダーを始める', 'クリエイター機能を始める', 'すべてのガイドを見る']],
-    ['en', ['Start with a payment QR', 'Start POS & mobile ordering', 'Start creator features', 'See all guides']],
-  ] as const)('%s: 3 ガイドと全ガイドのハブへのリンク (末尾に / を付けない)', (locale, labels) => {
+    ['ja', ['決済QRを始める', 'レジ・モバイルオーダーを始める', '注文リンクを始める', 'クリエイター機能を始める', 'すべてのガイドを見る']],
+    ['en', ['Start with a payment QR', 'Start POS & mobile ordering', 'Start with order links', 'Start creator features', 'See all guides']],
+  ] as const)('%s: 4 ガイドと全ガイドのハブへのリンク (末尾に / を付けない)', (locale, labels) => {
     window.history.replaceState(null, '', `/${locale}/create`);
     renderWithIntl(<CreatePage />, { locale });
     const hrefs = labels.map((label) => screen.getByRole('link', { name: `${label} →` }).getAttribute('href'));
-    expect(hrefs).toEqual([`/${locale}/guide/qr`, `/${locale}/guide/shop`, `/${locale}/guide/store`, `/${locale}/guide`]);
+    expect(hrefs).toEqual([
+      `/${locale}/guide/qr`,
+      `/${locale}/guide/shop`,
+      `/${locale}/guide/order-link`,
+      `/${locale}/guide/store`,
+      `/${locale}/guide`,
+    ]);
   });
 });
 

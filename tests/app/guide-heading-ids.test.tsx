@@ -1,4 +1,4 @@
-// 12 本のガイドの本文の見出し (h2) の id を実描画で検査する: 「このページの内容」に載る見出しは server で id を持ち
+// 13 本のガイドの本文の見出し (h2) の id を実描画で検査する: 「このページの内容」に載る見出しは server で id を持ち
 // (#id の深いリンクが JS なしで効く・plans/guide-ux-polish-2.md P4)、ページの中で重ならず、空白を含まない。
 
 import { describe, expect, it, vi } from 'vitest';
