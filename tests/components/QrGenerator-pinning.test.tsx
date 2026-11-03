@@ -191,8 +191,11 @@ function flushFrames() {
   for (const callback of pending) callback(0);
 }
 
+// 金額欄は名前 (aria-label =見出しと同じ「請求金額 (JPYC)」・値引きを開くと「値引き前の金額」) で探す (淡い例の額の placeholder は 2026-11-03 にやめた)。
 function amountInput() {
-  return container.querySelector<HTMLInputElement>('input[placeholder="1,000"], input[placeholder="10.00"]')!;
+  return container.querySelector<HTMLInputElement>(
+    'input[aria-label^="請求金額"], input[aria-label^="値引き前の金額"], input[aria-label^="Amount"]',
+  )!;
 }
 function setAmount(value: string) {
   fireEvent.change(amountInput(), { target: { value } });
@@ -1555,209 +1558,209 @@ describe('QrGenerator pre-split pinning (F-8 PR-21)', () => {
     expect(states).toMatchInlineSnapshot(`
       {
         "accountingFilled": {
-          "all": "00b6da6971e4b32e9ea758e2e23b1cfdbc909ab8fde56bc71abbe33923073564",
+          "all": "93a5928dfbaba160c5ad022922a3a93cf22ed7055ed08c8e3af59025e9ed7e38",
           "parts": [
             "div 77d610789dd9 ",
-            "div f47986746303 Cafe0x8335…2913J",
+            "div 2388ee2f5a9e Cafe0x8335…2913J",
             "aside 3651b5379f53 請求金額880 JPYCQRコー",
             "div c2aed2ae5974 請求金額880 JPYCQRコー",
           ],
         },
         "arcModal": {
-          "all": "bef1d0b4ad244e6b429253771773e18733e8c4e2af8c0c7a6fb621113c8efbf4",
+          "all": "f020d950303a624606f441127088e470637f4ec46054e9fa647f452fa7c5f7d5",
           "parts": [
             "div 77d610789dd9 ",
-            "div c7336de06508 店名未設定0x8335…2913",
+            "div 9bb586683f6c 店名未設定0x8335…2913",
             "aside 2d22fb287f20 請求金額3 USDC≈ ¥450",
             "div ebf5c9d81025 決済用 QR コード閉じるOpe",
             "div 250c78e3d30a 請求金額3 USDC≈ ¥450",
           ],
         },
         "closedWithPwaHint": {
-          "all": "d7a9dcfe2da0c46d29cac796f09edd286aed513bec8689750198e2e2350bac71",
+          "all": "925df44b49d4d40e1c2913ece6a883fc857d3f407921cb187598fd9c14456c7e",
           "parts": [
             "div 77d610789dd9 ",
-            "div 93f5b966e3fe 店名未設定0x8335…2913",
+            "div b294c13aee6e 店名未設定0x8335…2913",
             "aside 21a611c68df2 請求金額750 JPYCQRコー",
             "div 7ec07a0f813b 請求金額750 JPYCQRコー",
           ],
         },
         "discountAmount": {
-          "all": "09ca03c67068fa5d8a9e2047fcbf608b958aed8a62a2cb71ada6a225e01f8718",
+          "all": "5ec4ef2ce54f21b4a06c22d7dd22a1768adc5d8e7c2025e6e2b19df0c09b4049",
           "parts": [
             "div 77d610789dd9 ",
-            "div daf762e08f29 Cafe0x8335…2913J",
+            "div e79c1ecf7e74 Cafe0x8335…2913J",
             "aside 3651b5379f53 請求金額880 JPYCQRコー",
             "div c2aed2ae5974 請求金額880 JPYCQRコー",
           ],
         },
         "discountModal": {
-          "all": "03be0c1e4937c5a324c47e2e9af9207f6439fae7545d9ecf71147f1aafa5266c",
+          "all": "68fa887f82257f1a66010b7871ef7f1947d5853294bcdb28122e8f362cf38564",
           "parts": [
             "div 77d610789dd9 ",
-            "div 801e2dbc3bd8 Cafe0x8335…2913J",
+            "div dcdedbb4253b Cafe0x8335…2913J",
             "aside 3651b5379f53 請求金額880 JPYCQRコー",
             "div 5b49d80aec67 決済用 QR コード閉じるOpe",
             "div c2aed2ae5974 請求金額880 JPYCQRコー",
           ],
         },
         "enFresh": {
-          "all": "2bc77a8e5c99fdc9fc36dd0adaac95a4ffe1e1cdad0eafd0d063484d8c4ef329",
+          "all": "4dfdb7dbf39ded95e5201dd5218a84e85d7f88b64dd3fbf911ac060127185320",
           "parts": [
             "div 77d610789dd9 ",
-            "div b68377172649 No shop nameNo r",
+            "div a5763421d616 No shop nameNo r",
             "aside e432f1338d73 Amount—Show QR c",
             "div 4b481618cc35 No receiver setS",
           ],
         },
         "enModal": {
-          "all": "d4b33ecf4f2853cdfe09ed0d3a2140c9b654101cc01edc03f7bf9288617c77ce",
+          "all": "3180b7f591f336cb3d39ecdf26971b56911349b17206c7bb1265e914a4a70a99",
           "parts": [
             "div 77d610789dd9 ",
-            "div 8c30a50578c0 No shop name0x83",
+            "div 08869d9ce4d0 No shop name0x83",
             "aside db456af43b57 Amount12 JPYCSho",
             "div 59588c94a5f1 Payment QR codeC",
             "div 43cacceebc91 Amount12 JPYCSho",
           ],
         },
         "freshAmount": {
-          "all": "59271e8ade56e72d4e2102934a261562e92c6b20c840bd708ea7bbfae85d4729",
+          "all": "dad261bf9afdf95c96580e022c62b4592520451dcb262ac2bf8c8a2a3c141488",
           "parts": [
             "div 77d610789dd9 ",
-            "div eae2d1dde4e2 店名未設定0x8335…2913",
+            "div 9a628b3bbdc9 店名未設定0x8335…2913",
             "aside 99b871383cb3 請求金額1,000 JPYCQR",
             "div 6bdf93b197f0 請求金額1,000 JPYCQR",
           ],
         },
         "freshEmpty": {
-          "all": "8d34caf56aa66508a6c276ff2d450a8b5d5a9610ca2c5198bc6ec4e8dc299069",
+          "all": "bc8fbb63f34729937240150939d5416af28dbdaf48df5df745763a7a178d9415",
           "parts": [
             "div 77d610789dd9 ",
-            "div 494e12845d4b 店名未設定受取先が未設定JPYC",
+            "div 71cac5567d84 店名未設定受取先が未設定JPYC",
             "aside 1a4e0aab7a49 請求金額—QRコードを表示する受",
             "div 9491363e27ea 受取先が未設定QRコードを表示す",
           ],
         },
         "freshReceiverTyped": {
-          "all": "bde2727474ba573fb580ea74bbfed2df6a20b2f91252610c0a3186a947a70235",
+          "all": "f5e19756bc7d9e6c6dcca1fe9c4d6269e1f1257198d54b836b453d2bfbdda7da",
           "parts": [
             "div 77d610789dd9 ",
-            "div d0c5eff82e22 店名未設定0x8335…2913",
+            "div 29cc3490a538 店名未設定0x8335…2913",
             "aside 3fcd31b86f55 請求金額—QRコードを表示する金",
             "div 739ef6dfdbb0 金額が未入力QRコードを表示する",
           ],
         },
         "freshSettingsSheet": {
-          "all": "b23715085f3b9f44171ac57f5e77e4b15a256de8e4dfc4716c1c6b4a538a1b3d",
+          "all": "c5e52ac14edad3c9c3c6428321b5cccc8e27e14091c1756181f20d5091656758",
           "parts": [
             "div 77d610789dd9 ",
-            "div eae2d1dde4e2 店名未設定0x8335…2913",
+            "div 9a628b3bbdc9 店名未設定0x8335…2913",
             "aside 99b871383cb3 請求金額1,000 JPYCQR",
             "div 7253e9fd2806 お店の設定完了受け取り受取先ウォ",
             "div 6bdf93b197f0 請求金額1,000 JPYCQR",
           ],
         },
         "freshStatic": {
-          "all": "c0985504317d747d3e0e36265d1156e2d514d20d64bdff648b85e9d442585ef4",
+          "all": "2f0868df727f23be0670801367a1039f98dedf02026410133b45c4682c86f0d7",
           "parts": [
             "div 77d610789dd9 ",
-            "div 1a469205d9b3 店名未設定0x8335…2913",
+            "div 22184a338ae6 店名未設定0x8335…2913",
             "aside a3758a9929a3 請求金額JPYC で金額を入力Q",
             "div ed7e724d0a8d 請求金額JPYC で金額を入力Q",
           ],
         },
         "freshStaticModal": {
-          "all": "839e85de0aedeb680d6c3c79bee2daecdc4d5242400470543bd04cd514c11380",
+          "all": "eda5f83fe7f59d5b2ba592409339261c5934fbdf8b848890e468cd428ba6e588",
           "parts": [
             "div 77d610789dd9 ",
-            "div a084923432d2 店名未設定0x8335…2913",
+            "div 9ea9f05cc5a0 店名未設定0x8335…2913",
             "aside a3758a9929a3 請求金額JPYC で金額を入力Q",
             "div 16db5b8c6f51 決済用 QR コード閉じるOpe",
             "div ed7e724d0a8d 請求金額JPYC で金額を入力Q",
           ],
         },
         "recoverAmount": {
-          "all": "2ade59f1f8f1f9b1149fb0d141b5aba8fb93d13cac00ac5e4be9cf8179b80a4d",
+          "all": "083a08b235bb8b51d74ca16904ba408b828cc109df5d9d9a721e1f4ca9e95b98",
           "parts": [
             "div 77d610789dd9 ",
-            "div c65580bb5099 店名未設定0x8335…2913",
+            "div 12ac9fb6b5ed 店名未設定0x8335…2913",
             "aside 2cc76e1c1637 請求金額500 JPYCQRコー",
             "div 26fa70486c48 請求金額500 JPYCQRコー",
           ],
         },
         "recoverModal": {
-          "all": "45fba2ea55b0d755389891d17b74f86d8d69aac0a06b1a4c7054723325d9d44f",
+          "all": "a070862c042b80770c220ad2a7d439705d3e86288f4419d3bb8873f2921c5009",
           "parts": [
             "div 77d610789dd9 ",
-            "div 0849bc932aea 店名未設定0x8335…2913",
+            "div e886afc89543 店名未設定0x8335…2913",
             "aside 2cc76e1c1637 請求金額500 JPYCQRコー",
             "div 40e2b5cc51cc 決済用 QR コード閉じるOpe",
             "div 26fa70486c48 請求金額500 JPYCQRコー",
           ],
         },
         "standardModalEip681Copied": {
-          "all": "e121f1cf712292fe7c452eb412d9b54efe2b52baa9d007903b0170d11b1869a5",
+          "all": "c1e3b56f9d4c4a7bae5a7e5f7e25f6dc431ed271709444638990a42343bfaa49",
           "parts": [
             "div 77d610789dd9 ",
-            "div 212c2a70c5b8 神田珈琲0x8335…2913U",
+            "div e469e9f99d7c 神田珈琲0x8335…2913U",
             "aside 4b4a106c5654 請求金額5 USDC≈ ¥750",
             "div fbdec6144618 決済用 QR コード閉じるOpe",
             "div 75d49299c4ea 請求金額5 USDC≈ ¥750",
           ],
         },
         "usdcAmount": {
-          "all": "2c018e7ec236eb4fb3c66a966724a5d0fda6a84b4c7074aecc22bf64b52fd6b5",
+          "all": "c8f69499d05356205465e5b2b6858a45301db15117f8421741aaf77cea189cd6",
           "parts": [
             "div 77d610789dd9 ",
-            "div b67cb308671f 店名未設定0x8335…2913",
+            "div 45fb0cd30662 店名未設定0x8335…2913",
             "aside 934ceead99e8 請求金額12.5 USDC≈ ¥",
             "div 7309dd8672ad 請求金額12.5 USDC≈ ¥",
           ],
         },
         "usdcFxApplied": {
-          "all": "82d892b0b868020a6d6400b2bcad5e23c41f02ec9e7d99cfa191b086a7f3577f",
+          "all": "ca865df3e4c82cc7ee041ebf64331edfe5fb13a08fc900d37c72c2810afb0310",
           "parts": [
             "div 77d610789dd9 ",
-            "div 71fcd7470094 店名未設定0x8335…2913",
+            "div a92124ca29af 店名未設定0x8335…2913",
             "aside 1f554979d6b2 請求金額1,875 JPYCQR",
             "div 9297eecd7c80 請求金額1,875 JPYCQR",
           ],
         },
         "usdcFxModal": {
-          "all": "a90717e4aea3334a943c3eccdb49892a8f49be8f5f04c867577ea3b7990ee7da",
+          "all": "a2b5bb5d6f3810c089a248932f129232ed253f53fefcbda1d5277a423ae60a04",
           "parts": [
             "div 77d610789dd9 ",
-            "div 5cc8c6cbd97c 店名未設定0x8335…2913",
+            "div ac1f40a4d4ac 店名未設定0x8335…2913",
             "aside 1f554979d6b2 請求金額1,875 JPYCQR",
             "div af16635f9fa8 決済用 QR コード閉じるOpe",
             "div 9297eecd7c80 請求金額1,875 JPYCQR",
           ],
         },
         "usdcSettingsSheet": {
-          "all": "74ea435ff746d81b3641bb37cacab85cb01d891e2761fed1066b7394140d0b4b",
+          "all": "025258207596b1e34497102a1ea75a30e612879ca5e5afdfcf1d74bb193c74d6",
           "parts": [
             "div 77d610789dd9 ",
-            "div b67cb308671f 店名未設定0x8335…2913",
+            "div 45fb0cd30662 店名未設定0x8335…2913",
             "aside 934ceead99e8 請求金額12.5 USDC≈ ¥",
             "div 05f4ab8f8155 お店の設定完了受け取り受取先ウォ",
             "div 7309dd8672ad 請求金額12.5 USDC≈ ¥",
           ],
         },
         "watchReceived": {
-          "all": "2b26cd49a014a52766b48a790f3f7029bac5a9d1b96d577f8ec886ba95458874",
+          "all": "0895844cb927349994b6e30a5d8b32988e49eb2607c978852cb5409ce012ece8",
           "parts": [
             "div 77d610789dd9 ",
-            "div 93f5b966e3fe 店名未設定0x8335…2913",
+            "div b294c13aee6e 店名未設定0x8335…2913",
             "aside 21a611c68df2 請求金額750 JPYCQRコー",
             "div caddd3f18a64 決済用 QR コード閉じるOpe",
             "div 7ec07a0f813b 請求金額750 JPYCQRコー",
           ],
         },
         "watchWatching": {
-          "all": "493e790ccde742d998d5b84f3477969e44144500d40ad8c727443221fc9165d6",
+          "all": "0468a1eed5d41e19a7aee4b36462583c76a9f1046cdd2fe427502af376005ce5",
           "parts": [
             "div 77d610789dd9 ",
-            "div 93f5b966e3fe 店名未設定0x8335…2913",
+            "div b294c13aee6e 店名未設定0x8335…2913",
             "aside 21a611c68df2 請求金額750 JPYCQRコー",
             "div 29ab7c6cc505 決済用 QR コード閉じるOpe",
             "div 7ec07a0f813b 請求金額750 JPYCQRコー",
@@ -2010,77 +2013,77 @@ describe('QrGenerator pre-split pinning (F-8 PR-21)', () => {
     expect(states).toMatchInlineSnapshot(`
       {
         "storeBlockedMinAmount": {
-          "all": "0a6904191bf4bf06913e32bfa1ecc874c06de99b6c8e275a028a33795432193d",
+          "all": "594bea116d6f3ce4e48ac8744c84f0ae9992451775720a6f57bea4fbbb22f6d3",
           "parts": [
             "div 77d610789dd9 ",
-            "div 46915d40e12e 店名未設定0x8335…2913",
+            "div 6bd61f15cf5d 店名未設定0x8335…2913",
             "aside 8ce733544927 1 JPYC 未満の会計では使え",
             "div 1437279c8f7c 請求金額0.5 JPYCQRコー",
           ],
         },
         "storeBlockedStatic": {
-          "all": "577363735b7491557b2bc58c2914322c535596e1841a13a4b6a6a926dd0820f3",
+          "all": "57e2292a2c62ca307255e84e839c7dbb29e3d4d5edb25187c1616669e3719660",
           "parts": [
             "div 77d610789dd9 ",
-            "div bd4f97d288a9 店名未設定0x8335…2913",
+            "div a0f63a955f7c 店名未設定0x8335…2913",
             "aside 5228778ee43b 金額ありの QR だけで使えます",
             "div 3c304438833c 請求金額JPYC で金額を入力Q",
           ],
         },
         "storeCreateFailed": {
-          "all": "5c4b907756c599080b127b7c5daabf943a61245a9bd1ab9d663524aa6d40f9f3",
+          "all": "6294f7d29378f0c53bcea11679ce484072301d4e3e03d5349466641dd6a3c123",
           "parts": [
             "div 77d610789dd9 ",
-            "div 5e2197752709 店名未設定0x8335…2913",
+            "div ebe6f546c050 店名未設定0x8335…2913",
             "aside 16d1e218b2b8 通常の QR を出す通常の QR",
             "div 3cf4eb536ffb 請求金額800 JPYCQRコー",
           ],
         },
         "storeModal": {
-          "all": "4083fa6b79c21080cf7245683af914c776bb4df8826bd072754ffbb701c7f7bf",
+          "all": "736fa2dbc40e507674d690df76ba9363495e328af771af3209c3cac7b91952a0",
           "parts": [
             "div 77d610789dd9 ",
-            "div 2df30be03d63 店名未設定0x8335…2913",
+            "div 51bc01f3195b 店名未設定0x8335…2913",
             "aside 2cc76e1c1637 請求金額500 JPYCQRコー",
             "div 4aa03250226d 決済用 QR コード閉じるOpe",
             "div 26fa70486c48 請求金額500 JPYCQRコー",
           ],
         },
         "storeModalDimmed": {
-          "all": "e1238c54b05b3e752d96bd0946cda560188f472d2840b274c84098ad832876ef",
+          "all": "3756c67d8b621d10f8a9d2b33033c132f106ce76ba47afdd363287870b9e8e1e",
           "parts": [
             "div 77d610789dd9 ",
-            "div 32e4f77249a8 店名未設定0x8335…2913",
+            "div bfdc401e18bb 店名未設定0x8335…2913",
             "aside 54b57acbe676 請求金額1.5 JPYCQRコー",
             "div d3c93509cca1 決済用 QR コード閉じるOpe",
             "div c958c2006ed4 請求金額1.5 JPYCQRコー",
           ],
         },
         "storeModalWaiting": {
-          "all": "e12d717adad3f76c143c48f6cb48c1b7178c556e478bfcd0e75c8c19656681b6",
+          "all": "71a79c4c16a999d3df745e1f9c90ff896b273cc66847c0b90a2f5c392bdf94f4",
           "parts": [
             "div 77d610789dd9 ",
-            "div 32e4f77249a8 店名未設定0x8335…2913",
+            "div bfdc401e18bb 店名未設定0x8335…2913",
             "aside 54b57acbe676 請求金額1.5 JPYCQRコー",
             "div 5226d84de487 決済用 QR コード閉じるOpe",
             "div c958c2006ed4 請求金額1.5 JPYCQRコー",
           ],
         },
         "storeNormalQr": {
-          "all": "b9015ad3d024dfd30a8956f9b2ded316044815cf16444e26cf687164732db422",
+          "all": "d1be5a0b69fb491d67d1a6971a109386b99335fd4c11892b38e6f342a58f8692",
           "parts": [
             "div 77d610789dd9 ",
-            "div bca9bfe7e8a6 店名未設定0x8335…2913",
+            "div ffdcfc21b6d3 店名未設定0x8335…2913",
             "aside 16d1e218b2b8 通常の QR を出す通常の QR",
             "div c8e3f682b181 決済用 QR コード閉じるOpe",
             "div 3cf4eb536ffb 請求金額800 JPYCQRコー",
           ],
         },
         "storeReady": {
-          "all": "dcc47c8084885806987dd46fb654f9102da9ff9dc6a352e84bbe84c7295ef7f2",
+          "all": "59afba6f2986d4bf10c4cae154c5616c8d7d2033de93e4c38bed64a35d55b341",
           "parts": [
             "div 77d610789dd9 ",
-            "div 6200864af163 店名未設定0x8335…2913",
+            "div 05b91c452832 店名未設定0x8335…2913",
             "aside 2cc76e1c1637 請求金額500 JPYCQRコー",
             "div 26fa70486c48 請求金額500 JPYCQRコー",
           ],

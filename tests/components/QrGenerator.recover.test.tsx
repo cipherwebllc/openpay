@@ -62,12 +62,13 @@ vi.mock('@/lib/relay/recoverFee', async () => {
 import { QrGenerator } from '@/components/QrGenerator';
 import { jpycForwarderFor } from '@/lib/relay/forwarderConfig';
 import { recoverFeeValue, recoverFeeBps } from '@/lib/relay/recoverFee';
+import { qrAmountInput } from '../_helpers/qrAmount';
 
 const MOCK_FORWARDER = '0x1234567890123456789012345678901234567890' as `0x${string}`;
 const VALID_RECEIVER = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 
 async function fillAmount(user: ReturnType<typeof userEvent.setup>, amount: string) {
-  const input = screen.getByPlaceholderText('1,000');
+  const input = qrAmountInput();
   await user.clear(input);
   await user.type(input, amount);
 }
@@ -244,8 +245,8 @@ describe('QrGenerator gas-bearer toggle (確定モデル: JPYC recover は merch
     await openStep2(user);
     const receiverInput = screen.getByPlaceholderText(/0x/i);
     await user.type(receiverInput, VALID_RECEIVER);
-    // USDC は placeholder '10.00'。
-    const amountInput = screen.getByPlaceholderText('10.00');
+    // USDC の金額欄 (名前が「請求金額 (USDC)」)。
+    const amountInput = qrAmountInput('USDC');
     await user.clear(amountInput);
     await user.type(amountInput, '10');
     await openAdvanced(user);
