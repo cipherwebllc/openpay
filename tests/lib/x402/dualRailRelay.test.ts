@@ -227,6 +227,7 @@ describe('dualRailRequirements', () => {
   it('登録値から USDC 要件一式を返す (payTo=出品者・Base USDC・atomic 変換)', async () => {
     const res = await handleDualRailRequirements(reqGet('res-1'));
     expect(res.status).toBe(200);
+    // edge に置かない: 409 の後の取り直しが古い要件を受け取ると、価格を変えた後の USDC 決済が止まり続ける
     expect(res.headers.get('cache-control')).toBe('no-store');
     const body = await res.json();
     expect(body.resourceId).toBe('res-1');

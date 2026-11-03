@@ -98,35 +98,37 @@ const PROFILES: Profile[] = [
 // 同日、Directory のチェーン語彙に arc を足した (chain クエリの enum に arc が増えただけ) ので、directory を含む構成を再採取。
 // 2026-10-30: DiscoveryItem.verifiedAt の説明を「最後に通った自動の再検証 (人の審査ではない)」に直したので、facilitator を含む構成
 // (late-mutation を含む 11 個) を再採取。説明だけを main の文に戻すと全 17 件が旧 hash のまま通ることを確かめてから採り直した。
+// 2026-11-03: /api/discovery/{id} の説明に「成功応答は edge に最大 5 分キャッシュ・エラーはキャッシュしない」の 1 文を
+// 足したので、facilitator を含む構成 (late-mutation を含む 11 個) を再採取 (差分はその 1 文だけ)。
 const EXPECTED_SHA256: Record<string, string> = {
   'all-on':
-    '2dd15e51cb383b3434cccbf2780eab074742598d7baa0a9034500cdfb1a82ee0',
+    '065cd4cf12235c6c40a95ce84bbf2919e01d0384fd81a0583955ece04c8fae2a',
   'all-on+arc':
-    'ff179a0b7963e46699ea44dbe08bd4b04e25aabfa028fc99892da887f285ff69',
+    'b44ad5ac99f5e22e1fe0de47a792eea742b2a1e3fb624d92ef1e784a3e74458b',
   'all-on+mainnet':
-    '96387750c7991b9fbff85f905262d7dd2b64f78253a001f554dc1a9b9f3f5a3e',
+    'b2b9bf87f5f2c9d8bee041153b465ef01534e45f2352e7957d691f63d31b367d',
   'all-on+mainnet+avalanche+ethereum':
-    'e560aa9af50efe4a50710adc514d2c3846795303371263b83deeac1d437f02e0',
+    '89ce7c6787b988a3ec7412464c2e07024fb60094b58790b30ca48295880437a4',
   'all-on+fee':
-    'e307ce65426afe0cf380f6eb284746954cbc02daf459022926a9c550325c9828',
+    'fc5c0947c9cf06f94e8960ac3b91c2e234099265fc3f87da3bc0a9b4fe3817ec',
   'all-on+default-hello-price':
-    'b790559d7e5a36c1b45d31e050f5ef150eae14ff5be8ea238f567eec531b4f78',
+    'b641255e9d4c385bdd6aa7d24fafe4bcc255542a8ae0820a475e3e5263618313',
   'all-on+invalid-hello-price-unlisted':
-    'c82e7cec7034e6129c4e0c23793c96765618b73e152faa20b192dd2192b4ca8e',
+    'e8fe1561ba85fe4021505235757f28be32a20cb0a19d5d4b2df78fc679d0a4b4',
   'directory-only':
     '78c8c691430a4121bc4984230e768d6be1532e0485eb0b88eb3a2966b559f3b9',
   'facilitator-only':
-    '750832d0576964c77761012147d21de24a0f54909f1b175c1b1ae58094b9c980',
+    'fa49a690e76dc5870f969b115f27315cef2771549a472c106eab2c20c959506c',
   'facilitator+shops':
-    '351afb712a3c671da3420beb8b090c9d87e5d5b3ee6672edc3b8b2abe4090e31',
+    'cb483ff2e62f53241f720a857836fb8c27a1b9c40eb4868db03126d730b57cba',
   'directory+facilitator':
-    '861c6cfd98f9113dc0d18ba0ff43d679f84ef2001dafddd5114de8e9255926c8',
+    'cdec2a24f88a772d91b3cc2cdaa8044675608cde224567e5080ea4fd25e6fca0',
   'license-only':
     'bdf3b0b4b901d5174663e0a74ebd070fb202326f20cee6bf9c193779fa2ac250',
   'directory+license-child-only':
     '78c8c691430a4121bc4984230e768d6be1532e0485eb0b88eb3a2966b559f3b9',
   'late-mutation':
-    '7cf3fc518029d54abd9387cba7e0153e3410f267cc0820dfaeec7ada318f757e',
+    '0270ee642ee035af6dc09e9ddc6d7853391683389fcf9f2aa0ba26e53ef8b8cd',
   'late-facilitator':
     '0e63c739ae51684c60d97eb6e4c558e6531c52ae726b7c8591edac3c910148d5',
 };

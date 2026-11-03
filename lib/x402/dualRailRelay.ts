@@ -142,6 +142,9 @@ async function resolveTarget(
  *   - paymentRequiredHeader: そのまま `PAYMENT-REQUIRED` ヘッダに載せられる encoded 値
  * 出品者側で組み立てさせず完成形を配ることで、リレー側の検証 (accepts 照合) と
  * 402 表面がずれて支払いが通らなくなるドリフトを防ぐ。
+ * edge (CDN) には置かない: verify/settle の 409 (価格の不一致) を受けた gate はキャッシュを捨てて
+ * ここを取り直す (SDK dualGate・スニペット)。edge が古い要件を返すと、価格を変えた後の USDC 決済が
+ * edge の期限まで 409 を繰り返して止まる。/api/discovery/[id] (JPYC) は取り直しの経路が無いので 5 分置く。
  */
 export async function handleDualRailRequirements(req: Request): Promise<NextResponse> {
   const gated = gate();
