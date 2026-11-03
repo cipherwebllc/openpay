@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen } from '@testing-library/react';
+import { fireEvent, screen } from '@testing-library/react';
 import { renderWithIntl } from '../_helpers/i18n';
 import type { TokenChainBalance } from '@/lib/walletBalances';
 
@@ -106,18 +106,49 @@ describe('WalletBalances', () => {
     ).toBeInTheDocument();
   });
 
-  it('取得失敗 chain があれば partial-error 注記を出す', () => {
+  it('取得失敗 chain があれば、読めなかったトークンとチェーンを名前で出し、もう一度読める', () => {
+    const refetch = vi.fn();
     useWalletTokenBalances.mockReturnValue({
       isLoading: false,
+      isFetching: false,
+      refetch,
       data: [
         bal('usdc', BASE_SEPOLIA, 5_000_000n),
         bal('usdc', OP_SEPOLIA, 0n, 'error'),
+        bal('jpyc', POLYGON_AMOY, 0n, 'error'),
       ],
     });
     renderWithIntl(<WalletBalances />);
     expect(screen.getByText('5.00')).toBeInTheDocument();
     expect(
-      screen.getByText('一部のチェーンは残高を取得できませんでした。'),
+      screen.getByText('USDC (OP Sepolia)、JPYC (Polygon Amoy) の残高を取得できませんでした。'),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'もう一度読む' }));
+    expect(refetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('残高が 0 のときも読めなかったチェーンを出し、読み直している間はボタンを止める', () => {
+    useWalletTokenBalances.mockReturnValue({
+      isLoading: false,
+      isFetching: true,
+      refetch: vi.fn(),
+      data: [bal('jpyc', POLYGON_AMOY, 0n, 'error')],
+    });
+    renderWithIntl(<WalletBalances />);
+    expect(screen.getByText('JPYC (Polygon Amoy) の残高を取得できませんでした。')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '読んでいます…' })).toBeDisabled();
+  });
+
+  it('英語は「JPYC on Polygon Amoy」の形で並べる', () => {
+    useWalletTokenBalances.mockReturnValue({
+      isLoading: false,
+      isFetching: false,
+      refetch: vi.fn(),
+      data: [bal('jpyc', POLYGON_AMOY, 0n, 'error'), bal('usdc', OP_SEPOLIA, 0n, 'error')],
+    });
+    renderWithIntl(<WalletBalances />, { locale: 'en' });
+    expect(
+      screen.getByText('Could not load the balance of JPYC on Polygon Amoy and USDC on OP Sepolia.'),
     ).toBeInTheDocument();
   });
 
