@@ -52,7 +52,9 @@ import { useQrSettings } from '@/hooks/useQrSettings';
 import { useResolveAddress } from '@/hooks/useResolveAddress';
 import { isLikelyName } from '@/lib/nameDetection';
 import { useDragReorderList } from '@/hooks/useDragReorderList';
-import { type JpycChainSlug } from '@/lib/chains';
+import { isJpycChainSlug, type ChainSlug } from '@/lib/chains';
+import { ChainLogo } from '@/components/AssetLogo';
+import { ChainChooser } from '@/components/ChainChooser';
 import {
   safeHttpUrl,
   JPYC_CHAIN_LABEL,
@@ -214,8 +216,9 @@ export function MobileOrderBuilder({
     [setSettings, replaceAll],
   );
 
-  // 受取チェーンの複数選択トグル。最低 1 件は維持 (空選択は不可)。
-  const toggleChain = (slug: JpycChainSlug) => {
+  // 受取チェーンの複数選択トグル。最低 1 件は維持 (空選択は不可)。選択肢は MOBILE_ORDER_CHAINS (JPYC のチェーン) だけ。
+  const toggleChain = (slug: ChainSlug) => {
+    if (!isJpycChainSlug(slug)) return;
     const has = draft.chains.includes(slug);
     const next = has ? draft.chains.filter((c) => c !== slug) : [...draft.chains, slug];
     if (next.length > 0) update({ chains: next });
@@ -320,8 +323,14 @@ export function MobileOrderBuilder({
             ) : (
               <p className="text-sm text-slate-500">{t('receiverUnsetHandle')}</p>
             )}
-            <p className="mt-1 text-xs text-slate-500">
-              {draft.chains.map((c) => `JPYC · ${JPYC_CHAIN_LABEL[c]}`).join(' / ')}
+            {/* 受取チェーンは注文リンクの要約と同じくロゴを添える。 */}
+            <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
+              {draft.chains.map((c) => (
+                <span key={c} className="inline-flex items-center gap-1">
+                  <ChainLogo slug={c} size={14} className="h-3.5 w-3.5 shrink-0" />
+                  {`JPYC · ${JPYC_CHAIN_LABEL[c]}`}
+                </span>
+              ))}
             </p>
           </SectionCard>
           <ShopSettingsSheet
@@ -358,32 +367,25 @@ export function MobileOrderBuilder({
                       )}
                     </div>
                   </Field>
-                  {/* 受取チェーンは複数選択可 (顧客が注文ページで選ぶ)。最低 1 件。受取先は全チェーン共通。 */}
-                  <Field label={t('chainLabel')} hint={t('chainHint')}>
-                    <div className="flex flex-wrap gap-2">
-                      {MOBILE_ORDER_CHAINS.map((slug) => {
-                        const checked = draft.chains.includes(slug);
-                        return (
-                          <label
-                            key={slug}
-                            className={`flex cursor-pointer items-center gap-1.5 rounded-lg border px-3 py-2 text-sm transition ${
-                              checked
-                                ? 'border-brand bg-brand/5 font-medium text-brand-dark'
-                                : 'border-slate-300 text-slate-600 hover:border-slate-400'
-                            }`}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={checked}
-                              onChange={() => toggleChain(slug)}
-                              aria-label={`JPYC (${JPYC_CHAIN_LABEL[slug]})`}
-                            />
-                            JPYC ({JPYC_CHAIN_LABEL[slug]})
-                          </label>
-                        );
-                      })}
+                  {/* 受取チェーンは複数選択可 (顧客が注文ページで選ぶ)。最低 1 件。受取先は全チェーン共通。
+                      注文リンクの設定と同じロゴ付きのボタン (押すと付け外し・aria-pressed)。ボタンを <label> で包むと
+                      見出しを押したときに先頭のチェーンが切り替わるので、Field ではなく group にする。 */}
+                  <div role="group" aria-labelledby="mobile-order-chain-label">
+                    <span id="mobile-order-chain-label" className="text-sm font-medium text-slate-700">
+                      {t('chainLabel')}
+                    </span>
+                    <div className="mt-1">
+                      <ChainChooser
+                        slugs={MOBILE_ORDER_CHAINS}
+                        selected={draft.chains[0]}
+                        selectedSlugs={draft.chains}
+                        onSelect={toggleChain}
+                        showId={false}
+                        gridClassName="grid grid-cols-2 gap-2"
+                      />
                     </div>
-                  </Field>
+                    <p className="mt-1 text-xs text-slate-500">{t('chainHint')}</p>
+                  </div>
               {/* 受取先は @handle 共通 (config.to)。公開の更新でここの受取先に揃う (変わるときは状態カードに黄色の注意)。 */}
               {env.enableHandles && (
                 <p className="text-xs leading-snug text-slate-500">{t('publishReceiverShared')}</p>
