@@ -87,12 +87,26 @@ describe('OrderLinkBuilder', () => {
     render(<OrderLinkBuilder />);
     await screen.findByRole('button', { name: '設定' });
     expect(screen.queryByLabelText('受取ウォレット')).toBeNull();
-    expect(screen.getByText('受取ウォレット')).toBeInTheDocument();
+    // 要約の行の名前は店名 (未設定ならそう出して、設定を促す)。
+    expect(screen.getByText('店名未設定')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '設定' }));
     expect(screen.getByRole('dialog')).toBeInTheDocument();
     expect(screen.getByLabelText('受取ウォレット')).toHaveValue(TO);
     expect(screen.getByRole('button', { name: /利用料はかかりません/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /利用料はお店の受取から引かれます/ })).toBeInTheDocument();
+  });
+
+  it('店名を設定するとお客様の画面の見本とリンク (store) に出て、端末に残る', async () => {
+    saved();
+    render(<OrderLinkBuilder />);
+    fireEvent.click(await screen.findByRole('button', { name: '設定' }));
+    fireEvent.change(screen.getByLabelText('店名'), { target: { value: 'OpenPay 工房' } });
+    fireEvent.click(screen.getByRole('button', { name: '完了' }));
+    expect(screen.getAllByText('OpenPay 工房').length).toBeGreaterThanOrEqual(2); // 要約の行と見本
+    fillItem();
+    const link = (await screen.findByRole('link', { name: '開いて確かめる' })) as HTMLAnchorElement;
+    expect(new URL(link.href).searchParams.get('store')).toBe('OpenPay 工房');
+    await waitFor(() => expect(JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}').storeName).toBe('OpenPay 工房'));
   });
 
   it('入力を終えて欄を離れると要約に畳む (打っている途中では畳まない)', async () => {

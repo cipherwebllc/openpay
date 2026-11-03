@@ -52,6 +52,7 @@ function input(patch: Partial<OrderLinkInput> = {}): OrderLinkInput {
     mode: 'gasless',
     orderId: 'A-001',
     description: '',
+    storeName: '',
     lines: [{ name: 'Tシャツ M', qty: '2', price: '3000' }],
     shipping: '500',
     shippingLabel: '送料',
@@ -136,6 +137,22 @@ describe('buildOrderLink', () => {
     expect(at('50001', 'gasless')).toEqual({ ok: false, error: 'tooLarge', maximum: '50000', total: '50001' });
     expect(at('1000000', 'standard').ok).toBe(true);
     expect(at('1000001', 'standard')).toEqual({ ok: false, error: 'tooLarge', maximum: '1000000', total: '1000001' });
+  });
+
+  it('店名は公開の store に入り、お客様の画面で読み直せる (空なら付けない)', () => {
+    const url = okUrl(buildOrderLink(input({ storeName: '  OpenPay 工房  ' })));
+    expect(url.searchParams.get('store')).toBe('OpenPay 工房');
+    const parsed = parseCheckoutParams(url.searchParams);
+    if (!parsed.ok) throw new Error(parsed.error);
+    expect(parsed.params.storeName).toBe('OpenPay 工房');
+    expect(okUrl(buildOrderLink(input({ storeName: '   ' }))).searchParams.has('store')).toBe(false);
+  });
+
+  it('店名は /checkout と同じく制御文字を除き 48 文字で切ってから入れる (読み直しと食い違わない)', () => {
+    const cleaned = okUrl(buildOrderLink(input({ storeName: 'Open\u0007Pay' })));
+    expect(cleaned.searchParams.get('store')).toBe('OpenPay');
+    const long = okUrl(buildOrderLink(input({ storeName: 'あ'.repeat(60) })));
+    expect(long.searchParams.get('store')).toBe('あ'.repeat(48));
   });
 
   it('説明が読み直しで変わるならリンクを作らない', () => {

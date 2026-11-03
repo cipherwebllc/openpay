@@ -574,6 +574,16 @@ describe('CheckoutForm — レンダリング', () => {
     expect(screen.getAllByText(/55 USDC/).length).toBeGreaterThan(0);
   });
 
+  it('店名 (store) があれば頭に出し、受取先のアドレスも残す。無ければ出さない', () => {
+    setAccount({ connected: false });
+    const { unmount } = render(<CheckoutForm params={{ ...JPYC_PARAMS, storeName: 'OpenPay 工房' }} />);
+    expect(screen.getByText('OpenPay 工房')).toBeInTheDocument();
+    expect(screen.getByText(/支払先 0x/)).toBeInTheDocument();
+    unmount();
+    render(<CheckoutForm params={JPYC_PARAMS} />);
+    expect(screen.queryByText('OpenPay 工房')).toBeNull();
+  });
+
   it('order_id 未指定時は generic タイトル', () => {
     const { container } = render(
       <CheckoutForm

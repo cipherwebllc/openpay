@@ -3473,6 +3473,10 @@
   },
   "OrderLinkBuilder": {
     "noReceiver": "未設定",
+    "storeNameLabel": "店名",
+    "storeNamePlaceholder": "例: OpenPay 工房",
+    "storeNameHint": "お客様の支払い画面と控えに出ます。DM で届いたリンクが、どのお店のものか分かります。",
+    "noStoreName": "店名未設定",
     "settingsTitle": "注文リンクの設定",
     "settingsOpen": "設定",
     "settingsDone": "完了",

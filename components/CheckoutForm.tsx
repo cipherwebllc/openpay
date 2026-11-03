@@ -1550,6 +1550,11 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
         <p className="text-xs uppercase tracking-wider text-slate-500">
           {t('header')}
         </p>
+        {/* 店名 (URL の store・お店が付けた名前)。DM で届いたリンクがどのお店のものかを示す。表示だけで、
+            受取先・金額・利用料には関与しない (受取先は下の「支払先」のアドレスが正)。 */}
+        {params.storeName && (
+          <p className="mt-1 break-words text-lg font-bold text-slate-900">{params.storeName}</p>
+        )}
         <p className="mt-1 text-base font-semibold text-slate-800">
           {params.orderId ? t('orderHeading', { id: params.orderId }) : t('checkoutTitle')}
         </p>

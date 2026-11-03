@@ -41,6 +41,7 @@ import {
   ORDER_LINK_FIRST_ID,
   ORDER_LINK_ID_MAX,
   ORDER_LINK_STANDARD_MAX_JPYC,
+  ORDER_LINK_STORE_NAME_MAX,
   type OrderLinkError,
   type OrderLinkLine,
 } from '@/lib/orderLink';
@@ -146,11 +147,23 @@ export function OrderLinkBuilder() {
         mode: payMode,
         orderId,
         description,
+        storeName: settings.storeName,
         lines,
         shipping: settings.shipping,
         shippingLabel,
       }),
-    [origin, linkReceiver, settings.chain, payMode, settings.shipping, orderId, description, lines, shippingLabel],
+    [
+      origin,
+      linkReceiver,
+      settings.chain,
+      payMode,
+      settings.shipping,
+      settings.storeName,
+      orderId,
+      description,
+      lines,
+      shippingLabel,
+    ],
   );
   const previewLines = useMemo(
     () => orderLinkPreviewLines(lines, settings.shipping, shippingLabel),
@@ -276,7 +289,7 @@ export function OrderLinkBuilder() {
             />
           ) : (
             <ShopSummaryRow
-              storeName={t('receiverLabel')}
+              storeName={settings.storeName}
               receiver={effectiveReceiver}
               chainSlug={settings.chain}
               chainName={chainForSlug(settings.chain).name}
@@ -285,7 +298,7 @@ export function OrderLinkBuilder() {
               onOpenSettings={() => setSettingsOpen(true)}
               labels={{
                 settings: t('settingsOpen'),
-                noStoreName: t('receiverLabel'),
+                noStoreName: t('noStoreName'),
                 noReceiver: t('noReceiver'),
               }}
             />
@@ -399,6 +412,7 @@ export function OrderLinkBuilder() {
         <OrderLinkPreview
           result={result}
           orderId={orderId}
+          storeName={settings.storeName}
           description={description}
           lines={previewLines}
           message={errorText}
@@ -473,6 +487,24 @@ export function OrderLinkBuilder() {
         title={t('settingsTitle')}
         doneLabel={t('settingsDone')}
       >
+        {/* 店名はお客様の画面の頭と控えに出る (DM で届いたリンクが、どのお店のものか分かるように)。 */}
+        <ShopSettingsSection title={t('storeNameLabel')}>
+          <div>
+            <label htmlFor="order-link-store-name" className="sr-only">
+              {t('storeNameLabel')}
+            </label>
+            <input
+              id="order-link-store-name"
+              type="text"
+              value={settings.storeName}
+              maxLength={ORDER_LINK_STORE_NAME_MAX}
+              placeholder={t('storeNamePlaceholder')}
+              onChange={(event) => setSettings((current) => ({ ...current, storeName: event.target.value }))}
+              className={ORDER_LINK_INPUT_CLASS}
+            />
+            <p className="mt-1.5 text-xs leading-relaxed text-slate-500">{t('storeNameHint')}</p>
+          </div>
+        </ShopSettingsSection>
         <ShopSettingsSection title={t('receiverLabel')}>
           <OrderLinkReceiverFields
             hideLabel

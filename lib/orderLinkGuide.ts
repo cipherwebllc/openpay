@@ -83,7 +83,7 @@ const JA: OrderLinkGuideContent = {
 
   stepsTitle: '使い方 (お店)',
   steps: [
-    '「販売」の「注文リンク」タブを開き、「設定」で受取ウォレット・受取チェーン・支払い方法を決める (チェーンはお客様の JPYC があるもの。迷ったら Polygon)',
+    '「販売」の「注文リンク」タブを開き、「設定」で店名・受取ウォレット・受取チェーン・支払い方法を決める (店名はお客様の支払い画面に出ます。チェーンはお客様の JPYC があるもの。迷ったら Polygon)',
     '商品名・数量・単価を入れる。送料と説明は要るときだけ',
     '「お客様の画面」で明細と合計を確かめ、「リンクをコピー」か「送る」でお客様に送る。注文番号はこのときに決まります',
     '受取ウォレットに届いた額を確かめてから発送する',
@@ -138,6 +138,10 @@ const JA: OrderLinkGuideContent = {
       a: 'ブロックチェーン上の送金は取り消せないので、返金はお店が自分のウォレットからお客様のウォレットへ送ります。OpenPay は売買の当事者ではなく、代わりに返金することはできません。',
     },
     {
+      q: '住所はどう受け取りますか？',
+      a: 'お名前とお届け先は、今お使いの注文フォームやメッセージで受け取ります (OpenPay には送られません)。郵便局アプリで送り状を作るなら、住所の代わりに日本郵便のデジタルアドレス (英数字 7 文字) を受け付けると、お客様の入力が短くなります。デジタルアドレスに名前は入らないので、お名前は別に聞いてください。発送したあとは、デジタルアドレスを残さないでください (お客様が引っ越した後の住所も引けるためです)。',
+    },
+    {
       q: 'お客様にアプリは要りますか？',
       a: 'OpenPay のアプリは要りません。お客様はリンクをブラウザで開き、自分のウォレットで払います。ウォレットを持っていないお客様には、「ウォレットを選ぶ」のガイドを案内してください。',
     },
@@ -184,7 +188,7 @@ const EN: OrderLinkGuideContent = {
 
   stepsTitle: 'How to use it (shop)',
   steps: [
-    'Open the “Order link” tab under “Sell”, and in “Settings” choose the receiving wallet, the receiving chain and the payment method (pick the chain your customers hold JPYC on; Polygon if unsure)',
+    'Open the “Order link” tab under “Sell”, and in “Settings” set your shop name, receiving wallet, receiving chain and payment method (the shop name appears on the customer’s payment screen; pick the chain your customers hold JPYC on, Polygon if unsure)',
     'Enter the item names, quantities and unit prices. Add shipping and a description only when needed',
     'Check the items and total in “What the customer sees”, then send it with “Copy link” or “Send”. The order number is fixed at this point',
     'Ship only after you see the amount arrive in your receiving wallet',
@@ -237,6 +241,10 @@ const EN: OrderLinkGuideContent = {
     {
       q: 'How do refunds work?',
       a: 'Blockchain transfers cannot be reversed, so the shop sends the refund from its own wallet to the customer’s wallet. OpenPay is not a party to the sale and cannot refund on your behalf.',
+    },
+    {
+      q: 'How do I get the shipping address?',
+      a: 'Collect the name and shipping address with the order form or messages you already use (nothing is sent to OpenPay). If you make shipping labels in the Japan Post app, you can accept a Japan Post digital address (a 7-character code) instead of a full address, so customers type less. A digital address does not include a name, so ask for the name separately. Once you have shipped, do not keep the digital address (it keeps pointing to the customer’s address even after they move).',
     },
     {
       q: 'Do customers need an app?',

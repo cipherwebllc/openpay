@@ -18,15 +18,18 @@ import {
   calcCheckoutTotal,
   CHECKOUT_MAX_ITEMS,
   CHECKOUT_QTY_MAX,
+  CHECKOUT_STORE_NAME_MAX,
   parseCheckoutParams,
   type CheckoutItem,
 } from './url/checkout';
-import { DECIMAL_PATTERN } from './url/shared';
+import { DECIMAL_PATTERN, sanitizeText } from './url/shared';
 
 export const ORDER_LINK_ID_MAX = 64;
 export const ORDER_LINK_FIRST_ID = 'A-001';
 export const ORDER_LINK_NAME_MAX = 80;
 export const ORDER_LINK_DESCRIPTION_MAX = 200;
+// 店名は /checkout の store (お客様の画面の頭と控えに出る) と同じ上限。
+export const ORDER_LINK_STORE_NAME_MAX = CHECKOUT_STORE_NAME_MAX;
 // ガスレスの 1 回の上限。サーバーの RELAY_MAX_JPYC の既定値と同じ (tests/lib/orderLink.test.ts が照合する)。
 // 超えるリンクは /checkout で開けても relay が断る。
 export const ORDER_LINK_GASLESS_MAX_JPYC = 50_000n;
@@ -59,6 +62,8 @@ export type OrderLinkInput = {
   mode: PayMode;
   orderId: string;
   description: string;
+  /** お客様の画面の頭と控えに出す店名 (空なら付けない)。 */
+  storeName: string;
   lines: readonly OrderLinkLine[];
   shipping: string;
   /** 送料の行の名前 (表示言語の文字列)。 */
@@ -190,6 +195,8 @@ export function buildOrderLink(input: OrderLinkInput): OrderLinkResult {
   if (items.length > CHECKOUT_MAX_ITEMS) return { ok: false, error: 'tooManyLines' };
 
   const description = input.description.trim();
+  // /checkout の parse と同じ整え方 (制御文字を除き上限で切る) をしてから入れ、読み直した値と比べる。
+  const storeName = sanitizeText(input.storeName.trim(), ORDER_LINK_STORE_NAME_MAX) ?? '';
   const url = buildCheckoutUrl(input.origin, {
     to: input.to,
     token: 'jpyc',
@@ -199,6 +206,7 @@ export function buildOrderLink(input: OrderLinkInput): OrderLinkResult {
     items,
     orderId,
     ...(description ? { description } : {}),
+    ...(storeName ? { storeName } : {}),
   });
 
   const parsed = parseCheckoutParams(new URL(url).searchParams);
@@ -214,6 +222,7 @@ export function buildOrderLink(input: OrderLinkInput): OrderLinkResult {
   if (!sameItems) return { ok: false, error: 'item' };
   if (parsed.params.orderId !== orderId) return { ok: false, error: 'orderId' };
   if ((parsed.params.description ?? '') !== description) return { ok: false, error: 'invalid' };
+  if ((parsed.params.storeName ?? '') !== storeName) return { ok: false, error: 'invalid' };
 
   const { decimals } = deploymentForSlug('jpyc', input.chain);
   const totalWei = calcCheckoutTotal(parsed.params.items, decimals);
