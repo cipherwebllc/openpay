@@ -72,6 +72,7 @@ describe('注文リンクのガイド (content)', () => {
       o.open,
       o.previewTitle,
       o.settingsOpen,
+      o.verifyTitle,
       // 「ウォレットに {amount} JPYC 届いてから発送」は額を … にして引く。
       o.cautionTitle.replace('{amount}', '…'),
       m.Create.tabs.orderLink,

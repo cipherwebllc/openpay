@@ -3567,6 +3567,23 @@
     "numberUsed": "{id} は使用済みの番号です",
     "advanceNumber": "番号を進める",
     "cautionStandard": "この注文は通常決済です。お客様にガス代が必要です",
-    "cautionTxHash": "同じ額の注文は、お客様の Tx Hash で見分けます"
+    "cautionTxHash": "同じ額の注文は、お客様の Tx Hash で見分けます",
+    "verifyTitle": "入金を確かめる",
+    "verifyLead": "お客様から届いた Tx Hash を貼ると、受取ウォレットに届いた額をチェーンから読みます。届いた文をそのまま貼っても読み取ります。",
+    "verifyLabel": "お客様から届いた Tx Hash",
+    "verifyPlaceholder": "0x…",
+    "verifyButton": "確かめる",
+    "verifyChecking": "確かめています…",
+    "verifyPaid": "受取ウォレットに {amount} JPYC 届いています",
+    "verifyPaidMeta": "{time}・ブロック #{block}",
+    "verifyPaidNote": "受付番号はチェーンに残らないので、額と時刻で注文と照らし合わせてから発送してください。",
+    "verifyNotToReceiver": "この取引では、受取ウォレット ({receiver}) に JPYC は届いていません。",
+    "verifyNotFound": "{chain} では見つかりませんでした。受取チェーンが合っているか確かめ、少し待ってからもう一度お試しください。",
+    "verifyExplorer": "Explorer で見る",
+    "verify": {
+      "failed": "この取引は失敗しています。支払いは届いていません。",
+      "invalid": "Tx Hash を読み取れません (0x から始まる 66 文字)。",
+      "error": "チェーンに問い合わせできませんでした。少し待ってからもう一度お試しください。"
+    }
   }
 }

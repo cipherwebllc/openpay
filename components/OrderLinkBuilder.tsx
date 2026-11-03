@@ -18,6 +18,7 @@ import {
 import { OrderLinkLineRow } from '@/components/order-link/OrderLinkLineRow';
 import { OrderLinkPreview } from '@/components/order-link/OrderLinkPreview';
 import { OrderLinkReceiverFields } from '@/components/order-link/OrderLinkReceiverFields';
+import { OrderLinkVerify } from '@/components/order-link/OrderLinkVerify';
 import { ShopSettingsSection, ShopSettingsSheet } from '@/components/ShopSettingsSheet';
 import { ShopSummaryRow } from '@/components/ShopSummaryRow';
 import { useCopyToClipboard, useHydrationSafeAvailable } from '@/hooks/useCopyToClipboard';
@@ -417,6 +418,9 @@ export function OrderLinkBuilder() {
           onSwitchToStandard={canSwitchToStandard ? () => setModeOverride('standard') : null}
         />
       </aside>
+
+      {/* 入金を確かめる (お客様から届いた Tx Hash で、受取ウォレットに届いた額を読む)。前の注文も確かめるのでいつも出す。 */}
+      <OrderLinkVerify chain={settings.chain} receiver={linkReceiver} />
 
       <span role="status" className="sr-only">
         {sentLabel ?? (copyFailed ? t('copyFailed') : blocked ? errorText : '')}

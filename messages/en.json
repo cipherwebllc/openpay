@@ -3567,6 +3567,23 @@
     "numberUsed": "{id} has already been used",
     "advanceNumber": "Use next number",
     "cautionStandard": "This order uses standard payment. The customer needs gas",
-    "cautionTxHash": "Tell same-amount orders apart by the customer's Tx Hash"
+    "cautionTxHash": "Tell same-amount orders apart by the customer's Tx Hash",
+    "verifyTitle": "Check a payment",
+    "verifyLead": "Paste the Tx Hash the customer sent you and we read from the chain how much reached your receiving wallet. You can paste their whole message.",
+    "verifyLabel": "Tx Hash from the customer",
+    "verifyPlaceholder": "0x…",
+    "verifyButton": "Check",
+    "verifyChecking": "Checking…",
+    "verifyPaid": "{amount} JPYC reached your receiving wallet",
+    "verifyPaidMeta": "{time} · block #{block}",
+    "verifyPaidNote": "Order numbers are not recorded on the chain, so match the amount and time to the order before you ship.",
+    "verifyNotToReceiver": "No JPYC reached your receiving wallet ({receiver}) in this transaction.",
+    "verifyNotFound": "Not found on {chain}. Check the receiving chain, wait a moment and try again.",
+    "verifyExplorer": "View in Explorer",
+    "verify": {
+      "failed": "This transaction failed. No payment arrived.",
+      "invalid": "Could not read a Tx Hash (66 characters starting with 0x).",
+      "error": "Could not reach the chain. Wait a moment and try again."
+    }
   }
 }
