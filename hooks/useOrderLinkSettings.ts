@@ -3,7 +3,7 @@
 import { JPYC_CHAINS, type ChainSlug } from '@/lib/chains';
 import type { PayMode } from '@/lib/fee';
 import { isSettledReceiverInput } from '@/lib/format';
-import { ORDER_LINK_ID_MAX, orderLinkChains } from '@/lib/orderLink';
+import { ORDER_LINK_ID_MAX, ORDER_LINK_STORE_NAME_MAX, orderLinkChains } from '@/lib/orderLink';
 import { DECIMAL_PATTERN } from '@/lib/url/shared';
 import { useLocalStorageSettings, type SettingsSyncRules } from './useLocalStorageSettings';
 import { normalizeChainForToken } from './useQrSettings';
@@ -11,6 +11,8 @@ import { normalizeChainForToken } from './useQrSettings';
 // 注文リンクの端末の設定。1 度決めたら変わらないものと、連番のために最後に使った番号だけを残す
 // (商品名・単価・説明は注文ごとの値なので保存しない)。
 type OrderLinkSettings = {
+  // お客様の画面の頭と控えに出す店名 (空なら出さない)。
+  storeName: string;
   receiver: string;
   // 受取先の由来。'auto' = 接続ウォレットからの自動補完 (切替に追従)、'manual' = 手入力。
   receiverSource: 'auto' | 'manual';
@@ -25,6 +27,7 @@ type OrderLinkSettings = {
 const STORAGE_KEY = 'openpay:order-link-settings:v1';
 
 const DEFAULT_SETTINGS: OrderLinkSettings = {
+  storeName: '',
   receiver: '',
   receiverSource: 'manual',
   chain: 'polygon',
@@ -37,6 +40,7 @@ function sanitize(loaded: Partial<OrderLinkSettings>): OrderLinkSettings {
   // 画面の選択肢に無いチェーンを残さない (保存のあとでガスレスが使えなくなったチェーン)。
   const chain = normalizeChainForToken('jpyc', loaded.chain);
   return {
+    storeName: typeof loaded.storeName === 'string' ? loaded.storeName.slice(0, ORDER_LINK_STORE_NAME_MAX) : '',
     receiver: typeof loaded.receiver === 'string' ? loaded.receiver : '',
     receiverSource: loaded.receiverSource === 'auto' ? 'auto' : 'manual',
     chain: orderLinkChains(JPYC_CHAINS).includes(chain) ? chain : DEFAULT_SETTINGS.chain,

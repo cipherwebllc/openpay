@@ -17,6 +17,7 @@ const PRIMARY_ACTION =
 export function OrderLinkPreview({
   result,
   orderId,
+  storeName,
   description,
   lines,
   message,
@@ -34,6 +35,8 @@ export function OrderLinkPreview({
 }: {
   result: OrderLinkResult;
   orderId: string;
+  /** お客様の画面の頭に出る店名 (空なら出さない・/checkout と同じ)。 */
+  storeName: string;
   description: string;
   lines: readonly OrderLinkPreviewLine[];
   /** リンクができていないときの 1 文。 */
@@ -78,6 +81,7 @@ export function OrderLinkPreview({
       </div>
 
       <div className="px-5 py-4">
+        {storeName.trim() && <p className="break-words text-base font-bold text-slate-900">{storeName.trim()}</p>}
         {orderId && <p className="text-xs tabular-nums text-slate-500">{t('previewOrder', { id: orderId })}</p>}
         {description.trim() && <p className="mt-1 break-words text-sm text-slate-600">{description.trim()}</p>}
 

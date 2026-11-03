@@ -3473,6 +3473,10 @@
   },
   "OrderLinkBuilder": {
     "noReceiver": "Not set",
+    "storeNameLabel": "Shop name",
+    "storeNamePlaceholder": "e.g. OpenPay Studio",
+    "storeNameHint": "Shown on the customer’s payment screen and receipt, so they can tell which shop a link sent by DM is from.",
+    "noStoreName": "No shop name",
     "settingsTitle": "Order link settings",
     "settingsOpen": "Settings",
     "settingsDone": "Done",
