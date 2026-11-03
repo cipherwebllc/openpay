@@ -10,7 +10,7 @@ export const DISCOVERY_OPENAPI_PATHS = {
     get: {
       tags: ['x402 Catalog'],
       summary: 'Get one public seller listing by exact ID',
-      description: 'Independent of catalog pagination. Hidden, inactive and reserved-origin listings are excluded, except a new listing that is waiting for its first automatic check: it is returned here so that its seller gate can start, and it stays out of /api/discovery until that check sees a valid OpenPay 402. Seller gates must pin the ID and recipient from their own configuration.',
+      description: 'Independent of catalog pagination. Hidden, inactive and reserved-origin listings are excluded, except a new listing that is waiting for its first automatic check: it is returned here so that its seller gate can start, and it stays out of /api/discovery until that check sees a valid OpenPay 402. Seller gates must pin the ID and recipient from their own configuration. Successful responses may be served from the edge cache for up to 5 minutes; errors are never cached.',
       security: [],
       parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', minLength: 1, maxLength: 100 } }],
       responses: {

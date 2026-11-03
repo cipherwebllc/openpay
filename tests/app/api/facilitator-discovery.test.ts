@@ -1327,7 +1327,8 @@ describe('public exact-ID discovery', () => {
     store.lists.set(RESOURCES_INDEX, [...attackers, id]);
     const res = await read(id);
     expect(res.status).toBe(200);
-    expect(res.headers.get('cache-control')).toBe('no-store');
+    // 公開の掲載だけ edge に 5 分置く (巡回の 402 ごとに gate が取り直す KV の消費を断つ)
+    expect(res.headers.get('cache-control')).toBe('public, s-maxage=300');
     const item = await res.json();
     expect(item).toEqual(published);
     expect(item.accepts[0].extra.openpay.merchant.toLowerCase()).toBe(saved.payTo.toLowerCase());
@@ -1350,19 +1351,27 @@ describe('public exact-ID discovery', () => {
     store.kv.set(resourceKey(id), JSON.stringify({ ...JSON.parse(store.kv.get(resourceKey(id))!), ...overrides }));
     const res = await read(id);
     expect(res.status).toBe(404);
+    // 404 は edge に焼き付けない (公開に戻った掲載・新しい掲載を「無い」と出し続けない)
+    expect(res.headers.get('cache-control')).toBe('no-store');
     expect(await res.json()).toEqual({ error: 'not_found' });
   });
 
   it('distinguishes missing listings, flag off, malformed IDs and storage failures without caching', async () => {
     await load();
-    expect((await read('missing')).status).toBe(404);
-    expect((await read('x'.repeat(101))).status).toBe(400);
+    const missing = await read('missing');
+    expect(missing.status).toBe(404);
+    expect(missing.headers.get('cache-control')).toBe('no-store');
+    const malformed = await read('x'.repeat(101));
+    expect(malformed.status).toBe(400);
+    expect(malformed.headers.get('cache-control')).toBe('no-store');
     store.failGet = true;
     const failed = await read('seller-id');
     expect(failed.status).toBe(503);
     expect(failed.headers.get('cache-control')).toBe('no-store');
     await load('');
-    expect((await read('seller-id')).status).toBe(404);
+    const flagOff = await read('seller-id');
+    expect(flagOff.status).toBe(404);
+    expect(flagOff.headers.get('cache-control')).toBe('no-store');
   });
 
   it('rate-limits public exact-ID reads before listing storage and keeps flag-off inert', async () => {
