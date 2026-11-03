@@ -147,6 +147,65 @@ describe('OrderLinkBuilder', () => {
     expect(screen.getByRole('link', { name: '開いて確かめる' }).getAttribute('href')).toContain('order_id=A-001');
   });
 
+  it('「何度でも使える」は番号の欄を出さず ship=ask のリンクにし、渡しても番号を進めない (種類は端末に残す)', async () => {
+    saved();
+    stubClipboard();
+    render(<OrderLinkBuilder />);
+    await screen.findByRole('button', { name: '設定' });
+    expect(screen.getByRole('button', { name: 'この注文だけ' })).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(screen.getByRole('button', { name: '何度でも使える' }));
+    expect(screen.queryByLabelText('注文番号')).toBeNull();
+    fillItem();
+    expect(await screen.findByText('何度でも使えるリンク')).toBeInTheDocument();
+    expect(screen.queryByText(/受付番号 #/)).toBeNull();
+    expect(screen.getByText('支払いの後、お客様は「注文を送る」でお名前とお届け先を送ります')).toBeInTheDocument();
+    const href = screen.getByRole('link', { name: '開いて確かめる' }).getAttribute('href') ?? '';
+    expect(new URL(href).searchParams.get('ship')).toBe('ask');
+    expect(new URL(href).searchParams.has('order_id')).toBe(false);
+    await copyLink();
+    // 番号の注意 (使用済み) は出さず、番号も進めない
+    expect(screen.queryByText(/使用済み/)).toBeNull();
+    const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}');
+    expect(stored.linkKind).toBe('reusable');
+    expect(stored.lastOrderId).toBe('');
+  });
+
+  it('何度でも使えるリンクを共有するときは、SNS に置く向けの文にする', async () => {
+    saved({ linkKind: 'reusable' });
+    stubClipboard();
+    const share = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'share', { value: share, configurable: true });
+    render(<OrderLinkBuilder />);
+    await screen.findByRole('button', { name: '設定' });
+    fillItem();
+    await screen.findByText('何度でも使えるリンク');
+    fireEvent.click(screen.getAllByRole('button', { name: '送る' })[0]);
+    await waitFor(() => expect(share).toHaveBeenCalled());
+    expect(share.mock.calls[0][0].text).toContain('「注文を送る」からお名前とお届け先を送ってください');
+    expect(share.mock.calls[0][0].text).not.toContain('ご注文');
+    Reflect.deleteProperty(navigator, 'share');
+  });
+
+  it('注文の送り先を設定すると contact に入り、形の合わない値ではリンクを作らない', async () => {
+    saved();
+    render(<OrderLinkBuilder />);
+    fireEvent.click(await screen.findByRole('button', { name: '設定' }));
+    fireEvent.click(screen.getByRole('button', { name: 'LINE' }));
+    fireEvent.change(screen.getByLabelText('送り先'), { target: { value: 'OpenPay' } });
+    fireEvent.click(screen.getByRole('button', { name: '完了' }));
+    fillItem();
+    const link = (await screen.findByRole('link', { name: '開いて確かめる' })) as HTMLAnchorElement;
+    expect(new URL(link.href).searchParams.get('contact')).toBe('line:@openpay');
+    fireEvent.click(screen.getByRole('button', { name: '設定' }));
+    fireEvent.click(screen.getByRole('button', { name: 'メール' }));
+    fireEvent.change(screen.getByLabelText('送り先'), { target: { value: 'shop@' } });
+    expect(screen.getByLabelText('送り先')).toHaveAttribute('aria-invalid', 'true');
+    expect(screen.getAllByText('注文の送り先の形を確かめてください。').length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole('button', { name: '完了' }));
+    expect(screen.queryByRole('link', { name: '開いて確かめる' })).toBeNull();
+    await waitFor(() => expect(JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}').contactKind).toBe('mail'));
+  });
+
   it('URL の文字列はコピーできる間は見せず、コピーできないときだけ見せる', async () => {
     saved();
     stubClipboard(vi.fn().mockRejectedValue(new Error('denied')));

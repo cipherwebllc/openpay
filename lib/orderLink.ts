@@ -1,5 +1,7 @@
 // /create の「注文リンク」: 通販の注文ごとに、お客様へ送る /checkout のリンクを作る純ロジック。
 // 何もサーバーへ送らず、氏名や住所の欄も持たない (住所は販売者が自分の注文フォームで持つ・2026-11-02 user 裁定)。
+// 「何度でも使える」リンク (reusable) は番号を持たず ship=ask を付ける: お客様は払った後、完了画面から
+// お名前とお届け先を自分の LINE やメールでお店へ送る (plans/order-link-reusable.md・2026-11-03 user「進めて」)。
 // 公開の文書 (docs/CHECKOUT.md) に載せたパラメーターだけを使い、内部用のパラメーターは足さない。
 // 利用料は /checkout の実際の計算と同じ関数で出し、作った URL は parse で読み直す
 // (お客様の画面で開けないリンクや、入力と違う内容のリンクを渡さないため)。
@@ -12,6 +14,7 @@ import { resolveJpycGaslessProvider } from './jpycGaslessProvider';
 import { isRecoverRoute, resolvePaymentRoute } from './paymentRoute';
 import { jpycForwarderFor } from './relay/forwarderConfig';
 import { recoverFeeValue } from './relay/recoverFee';
+import { sameShopContact, type ShopContact } from './shopContact';
 import { deploymentForSlug, isGaslessSupported } from './tokens';
 import {
   buildCheckoutUrl,
@@ -60,7 +63,11 @@ export type OrderLinkInput = {
   to: Address | null;
   chain: ChainSlug;
   mode: PayMode;
+  /** 番号なしで何度でも使えるリンク (ship=ask)。true なら orderId は使わない。 */
+  reusable: boolean;
   orderId: string;
+  /** 注文の送り先。'invalid' = 打った値の形が合わない (リンクを作らせない)。 */
+  contact: ShopContact | null | 'invalid';
   description: string;
   /** お客様の画面の頭と控えに出す店名 (空なら付けない)。 */
   storeName: string;
@@ -74,6 +81,7 @@ export type OrderLinkError =
   | 'receiver'
   | 'receiverResolving'
   | 'orderId'
+  | 'contact'
   | 'noItems'
   | 'item'
   | 'shipping'
@@ -178,8 +186,10 @@ export function orderLinkPreviewLines(
 
 export function buildOrderLink(input: OrderLinkInput): OrderLinkResult {
   if (input.to === null) return { ok: false, error: 'receiver' };
-  const orderId = input.orderId.trim();
-  if (!orderId || orderId.length > ORDER_LINK_ID_MAX) return { ok: false, error: 'orderId' };
+  if (input.contact === 'invalid') return { ok: false, error: 'contact' };
+  const contact = input.contact;
+  const orderId = input.reusable ? '' : input.orderId.trim();
+  if (!input.reusable && (!orderId || orderId.length > ORDER_LINK_ID_MAX)) return { ok: false, error: 'orderId' };
 
   const filled = input.lines.filter((line) => !isBlankLine(line));
   if (filled.length === 0) return { ok: false, error: 'noItems' };
@@ -204,9 +214,10 @@ export function buildOrderLink(input: OrderLinkInput): OrderLinkResult {
     gas: 'customer',
     mode: input.mode,
     items,
-    orderId,
+    ...(input.reusable ? { ship: 'ask' as const } : { orderId }),
     ...(description ? { description } : {}),
     ...(storeName ? { storeName } : {}),
+    ...(contact ? { contact } : {}),
   });
 
   const parsed = parseCheckoutParams(new URL(url).searchParams);
@@ -220,7 +231,9 @@ export function buildOrderLink(input: OrderLinkInput): OrderLinkResult {
         item.price === items[index].price,
     );
   if (!sameItems) return { ok: false, error: 'item' };
-  if (parsed.params.orderId !== orderId) return { ok: false, error: 'orderId' };
+  if ((parsed.params.orderId ?? '') !== orderId) return { ok: false, error: 'orderId' };
+  if ((parsed.params.ship === 'ask') !== input.reusable) return { ok: false, error: 'invalid' };
+  if (!sameShopContact(parsed.params.contact, contact)) return { ok: false, error: 'invalid' };
   if ((parsed.params.description ?? '') !== description) return { ok: false, error: 'invalid' };
   if ((parsed.params.storeName ?? '') !== storeName) return { ok: false, error: 'invalid' };
 

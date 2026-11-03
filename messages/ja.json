@@ -1652,7 +1652,11 @@
         "success": "前のお支払い（{store}・{amount}）は完了しています。この会計は、これからお支払いいただけます。",
         "expired": "前のお支払い（{store}・{amount}）は行われていませんでした。この会計は、これからお支払いいただけます。"
       }
-    }
+    },
+    "shipAskNote": "お支払いの後、この画面の「注文を送る」から、お名前とお届け先をお店へ送ります (OpenPay には届きません)。",
+    "shipAskNoteWithContact": "お支払いの後、この画面の「注文を送る」から、お名前とお届け先をお店 ({dest}) へ送ります (OpenPay には届きません)。",
+    "notifyRestoredTitle": "このタブでのお支払いは済んでいます",
+    "notifyRestoredBody": "Tx Hash {tx}。同じ注文をもう一度払う必要はありません。まだ送っていなければ、下から送ってください。"
   },
   "CopyableField": {
     "copy": "コピー",
@@ -1684,7 +1688,28 @@
     "notifyShopCopied": "コピーしました。お店とのやり取りに貼り付けてください。",
     "notifyShopShared": "共有しました",
     "notifyShopTextLabel": "お店に送る文 (選んでコピーしてください)",
-    "notifyShopDismissHelp": "お店に知らせてから閉じてください"
+    "notifyShopDismissHelp": "お店に知らせてから閉じてください",
+    "sendOrder": "注文を送る",
+    "signHint": "ウォレットで確認の署名をします (お金は動きません)。この支払いをしたのがあなただと、お店が確かめられます。",
+    "signing": "ウォレットで署名しています…",
+    "signFailed": "署名できませんでした。ウォレットがつながっているか確かめてもう一度押すか、署名せずに送ってください。",
+    "sendWithoutSign": "署名せずに送る",
+    "signedReady": "確認の署名ができました。お店に送ってください。",
+    "unsignedReady": "署名なしで送ります。お店の確認に時間がかかることがあります。",
+    "sendTo": "送り先: {dest}",
+    "sendByLine": "LINE で送る",
+    "sendByMail": "メールで送る",
+    "send": "送る",
+    "sendOther": "ほかの方法で送る",
+    "sendOrderHint": "お名前とお届け先を書き足してから送ってください。OpenPay には届きません。",
+    "sendOrderDismissHelp": "注文を送ってから閉じてください",
+    "orderMessageIntro": "{store} に注文します。",
+    "orderMessageIntroNoStore": "注文します。",
+    "orderFieldName": "お名前：",
+    "orderFieldAddress": "お届け先（デジタルアドレスか住所）：",
+    "orderItemsLabel": "商品",
+    "signatureLabel": "確認の署名",
+    "signSwitchWallet": "支払いに使ったウォレット ({payer}) に切り替えると署名できます。署名せずに送ることもできます。"
   },
   "NonCustodialNotice": {
     "shortTitle": "履歴はブロックチェーン上にあります",
@@ -3547,7 +3572,8 @@
       "itemName": "商品名を入れてください。",
       "itemQty": "数量は 1〜{qtyMax} で入れてください。",
       "itemPrice": "単価は数字で入れてください。",
-      "tooLargeGasless": "ガス代不要の上限は {maximum} JPYC です。通常決済なら {standardMaximum} JPYC まで作れますが、お客様にガス代が必要です。"
+      "tooLargeGasless": "ガス代不要の上限は {maximum} JPYC です。通常決済なら {standardMaximum} JPYC まで作れますが、お客様にガス代が必要です。",
+      "contact": "注文の送り先の形を確かめてください。"
     },
     "errorsShort": {
       "receiver": "受取ウォレットを入力",
@@ -3563,7 +3589,8 @@
       "itemName": "商品名を入力",
       "itemQty": "数量を確認",
       "itemPrice": "単価を確認",
-      "tooLargeGasless": "上限 {maximum} JPYC 超え"
+      "tooLargeGasless": "上限 {maximum} JPYC 超え",
+      "contact": "送り先を確認"
     },
     "receiverConnectHint": "ウォレットを接続すると自動で入ります。",
     "cautionFee": "利用料 {fee} JPYC を引いた額。通常決済で払われたら {total} JPYC",
@@ -3581,8 +3608,8 @@
     "cautionStandard": "この注文は通常決済です。お客様にガス代が必要です",
     "cautionTxHash": "同じ額の注文は、お客様の Tx Hash で見分けます",
     "verifyTitle": "入金を確かめる",
-    "verifyLead": "お客様から届いた Tx Hash を貼ると、受取ウォレットに届いた額をチェーンから読みます。届いた文をそのまま貼っても読み取ります。",
-    "verifyLabel": "お客様から届いた Tx Hash",
+    "verifyLead": "お客様から届いた文を貼ると、受取ウォレットに届いた額と、払ったウォレットの確認の署名をチェーンから確かめます。Tx Hash だけでも読み取ります。",
+    "verifyLabel": "お客様から届いた文か Tx Hash",
     "verifyPlaceholder": "0x…",
     "verifyButton": "確かめる",
     "verifyChecking": "確かめています…",
@@ -3597,6 +3624,33 @@
       "failed": "この取引は失敗しています。支払いは届いていません。",
       "invalid": "Tx Hash を読み取れません (0x から始まる 66 文字)。",
       "error": "チェーンに問い合わせできませんでした。少し待ってからもう一度お試しください。"
-    }
+    },
+    "kindLabel": "リンクの種類",
+    "kinds": {
+      "single": "この注文だけ",
+      "singleDesc": "注文ごとに番号つきで作ります",
+      "reusable": "何度でも使える",
+      "reusableDesc": "番号なし。SNS などに置き、お客様は払った後に注文を送ります"
+    },
+    "shareTextReusable": "こちらのリンクから JPYC で払えます。お支払いの後、画面の「注文を送る」からお名前とお届け先を送ってください。",
+    "previewReusable": "何度でも使えるリンク",
+    "previewAfterPay": "支払いの後、お客様は「注文を送る」でお名前とお届け先を送ります",
+    "contactLabel": "注文の送り先",
+    "contactKinds": {
+      "none": "なし",
+      "line": "LINE",
+      "mail": "メール"
+    },
+    "contactValueLabel": "送り先",
+    "contactLinePlaceholder": "@openpay",
+    "contactMailPlaceholder": "shop@example.com",
+    "contactHint": "お客様の完了画面から、注文の文が入った状態でこの送り先を開きます。リンクに入るので、お店として公開している連絡先にしてください。",
+    "contactLineHint": "LINE 公式アカウントだけです (個人の LINE は開けません)。友だちでないお客様には、先に友だち追加が出ます。",
+    "cautionSignature": "Tx Hash だけでは払った人の証明になりません。届いた文ごと「入金を確かめる」に貼り、署名も確かめます",
+    "verifyConfirmed": "払ったウォレット ({payer}) の確認の署名があります",
+    "verifyUnsigned": "確認の署名がありません。払った本人からの文か分からないので、お客様に確かめてから発送してください。",
+    "verifyMismatch": "この支払いをしたウォレットの署名ではありません。他人の Tx Hash の可能性があります。発送を止めて確かめてください。",
+    "contactNoneHint": "お客様は完了画面から、共有かコピーで送ります。LINE 公式アカウントかメールを決めておくと、文が入った状態で開きます。",
+    "verifyUnverifiable": "この取引には複数の支払いが入っていて、払った人を 1 人に決められません。署名では確かめられないので、発送を止めて確かめてください。"
   }
 }

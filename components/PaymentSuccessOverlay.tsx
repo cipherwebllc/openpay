@@ -18,6 +18,7 @@
 // chunk に残る = First Load JS は不変)。
 
 import dynamic from 'next/dynamic';
+import type { NotifyShopData } from './NotifyShopButton';
 
 const SuccessOverlay = dynamic(
   () => import('./SuccessOverlay').then((m) => m.SuccessOverlay),
@@ -44,15 +45,15 @@ export type PaymentSuccessOverlayPayload = {
 export function PaymentSuccessOverlay({
   dismissed,
   payload,
-  notifyShop = false,
+  notify,
   onDismiss,
 }: {
   /** ユーザが 1 度閉じたか (閉じたら以降は inline panel のみ)。 */
   dismissed: boolean;
   /** 成功時の正規化 payload。未成功 (txHash 未確定等) のときは null で何も描画しない。 */
   payload: PaymentSuccessOverlayPayload | null;
-  /** 遠隔の注文で「お店に知らせる」を出す (checkout の注文リンクなど・SuccessOverlay へ素通し)。 */
-  notifyShop?: boolean;
+  /** 遠隔の注文で「注文を送る / お店に知らせる」を出す (checkout の注文リンクなど・SuccessOverlay へ素通し)。 */
+  notify?: NotifyShopData;
   onDismiss: () => void;
 }) {
   if (dismissed || !payload) return null;
@@ -65,7 +66,7 @@ export function PaymentSuccessOverlay({
       explorerBase={payload.explorerBase}
       merchantAddress={payload.merchantAddress}
       orderNo={payload.orderNo}
-      notifyShop={notifyShop}
+      notify={notify}
       onDismiss={onDismiss}
     />
   );

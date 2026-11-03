@@ -1,8 +1,18 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import type { Address } from 'viem';
+
+// 「注文を送る / お店に知らせる」は払ったウォレットで確認の署名をする (wagmi)。ここでは出るかどうかだけを見る。
+vi.mock('wagmi', () => ({
+  useSignMessage: () => ({ signMessageAsync: vi.fn(), isPending: false }),
+  useAccount: () => ({ address: undefined }),
+  usePublicClient: () => undefined,
+}));
+
 import { renderWithIntl as render } from '../_helpers/i18n';
 import { SuccessOverlay } from '@/components/SuccessOverlay';
+import type { NotifyShopData } from '@/components/NotifyShopButton';
 
 const TX_HASH = `0x${'a'.repeat(64)}`;
 const USER_OP_HASH = `0x${'b'.repeat(64)}`;
@@ -31,23 +41,43 @@ describe('SuccessOverlay', () => {
     expect(screen.getByRole('button', { name: '閉じる' })).toBeInTheDocument();
   });
 
-  it('遠隔の注文 (notifyShop・受付番号あり) では「お店に知らせる」を出し、閉じる前の案内も変える', () => {
+  const notify = (patch: Partial<NotifyShopData> = {}): NotifyShopData => ({
+    orderNo: 'A-001',
+    askShipping: false,
+    items: [{ name: 'マグカップ', qty: 1 }],
+    amountDisplay: '3,500 JPYC',
+    txHash: TX_HASH,
+    chain: 'polygon',
+    shop: MERCHANT_ADDR as Address,
+    confirm: true,
+    ...patch,
+  });
+
+  it('遠隔の注文 (番号つき) では「お店に知らせる」を出し、閉じる前の案内も変える', () => {
     render(
-      <SuccessOverlay amountDisplay="3,500 JPYC" txHash={TX_HASH} orderNo="A-001" notifyShop onDismiss={() => undefined} />,
+      <SuccessOverlay amountDisplay="3,500 JPYC" txHash={TX_HASH} orderNo="A-001" notify={notify()} onDismiss={() => undefined} />,
     );
     expect(screen.getByRole('button', { name: 'お店に知らせる' })).toBeInTheDocument();
     expect(screen.getByText('お店に知らせてから閉じてください')).toBeInTheDocument();
   });
 
-  it('notifyShop が無い (店頭の会計) か受付番号が無ければ「お店に知らせる」を出さない', () => {
-    const { unmount } = render(
-      <SuccessOverlay amountDisplay="3,500 JPYC" txHash={TX_HASH} orderNo="A-001" onDismiss={() => undefined} />,
+  it('何度でも使えるリンク (お届け先を聞く) では「注文を送る」を出し、閉じる前の案内も変える', () => {
+    render(
+      <SuccessOverlay
+        amountDisplay="3,500 JPYC"
+        txHash={TX_HASH}
+        notify={notify({ orderNo: undefined, askShipping: true })}
+        onDismiss={() => undefined}
+      />,
     );
+    expect(screen.getByRole('button', { name: '注文を送る' })).toBeInTheDocument();
+    expect(screen.getByText('注文を送ってから閉じてください')).toBeInTheDocument();
+  });
+
+  it('notify が無い (店頭の会計) ときは「お店に知らせる」を出さない', () => {
+    render(<SuccessOverlay amountDisplay="3,500 JPYC" txHash={TX_HASH} orderNo="A-001" onDismiss={() => undefined} />);
     expect(screen.queryByRole('button', { name: 'お店に知らせる' })).toBeNull();
     expect(screen.getByText('店主が確認したら閉じてください')).toBeInTheDocument();
-    unmount();
-    render(<SuccessOverlay amountDisplay="3,500 JPYC" txHash={TX_HASH} notifyShop onDismiss={() => undefined} />);
-    expect(screen.queryByRole('button', { name: 'お店に知らせる' })).toBeNull();
   });
 
   it('現在時刻が HH:MM:SS 形式で描画される (ゼロ詰め)', () => {

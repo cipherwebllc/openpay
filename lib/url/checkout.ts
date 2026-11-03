@@ -19,6 +19,9 @@
 //                   だけに成功時 POST する。MobileOrderView が付ける。第三者 URL は退役 (2026-10 user
 //                   裁定 R1): CheckoutForm は送らず無視する。旧リンクを壊さないため parse は従来どおり)
 //   store_handle    (任意, @ 無し handle — モバイル注文の署名前 admission 再検証用)
+//   store           (任意, 店名 48 文字まで — お客様の画面の頭と控え)
+//   ship            (任意, "ask" — 支払いの後にお名前とお届け先を聞く。注文リンクの何度でも使えるリンク)
+//   contact         (任意, "line:@id" | "mail:addr" — 完了画面から注文の文を送る先。lib/shopContact.ts)
 //
 // items の encoding: name は encodeURIComponent で URI-encode してから ":" qty
 // ":" price で結合し、複数 items は "," で連結。decode 側は "," → ":" の順に
@@ -45,6 +48,7 @@ import {
   type TaxCategory,
 } from '../tax';
 import { parseDiscountAmount } from '../discount';
+import { formatShopContact, parseShopContact, type ShopContact } from '../shopContact';
 import {
   DEFAULT_CHAIN_FOR_SYMBOL,
   defaultDeploymentForSymbol,
@@ -108,6 +112,12 @@ export type CheckoutParams = {
   // 控えでは「店舗が設定した値」として扱う (/pay の store と同じ性質)。
   storeName?: string;
   invoiceNo?: string;
+  // --- 注文リンク (plans/order-link-reusable.md)。表示と完了画面の文・送り先にだけ効き、金額・受取先・利用料・
+  // 注文の束縛には関与しない (URL は誰でも作れる)。 ---
+  // 'ask' = 支払いの後にお名前とお届け先を聞く (完了画面の文に空欄を入れる・番号なしで何度でも使えるリンク)。
+  ship?: 'ask';
+  // お店の連絡先 (LINE 公式アカウントかメール)。完了画面が文を入れた状態で開く (lib/shopContact.ts)。
+  contact?: ShopContact;
   // --- モバイル注文システム利用料 (任意・MobileOrderView のみが設定)。 ---
   // feeKind が present のとき CheckoutForm が経路非依存 (relay/standard 両方) に 1%(店頭)/3%(事前)
   // を分割する (実際の発火は flag env.enableMobileOrderFee と AND)。不在 = 従来動作 (手数料ゼロ・
@@ -293,6 +303,8 @@ export function buildCheckoutPath(params: CheckoutParams): string {
     const v = sanitizeText(params.storeName, CHECKOUT_STORE_NAME_MAX);
     if (v) sp.set('store', v);
   }
+  if (params.ship === 'ask') sp.set('ship', 'ask');
+  if (params.contact) sp.set('contact', formatShopContact(params.contact));
   // お店の端末で送る: hs が不正・欠落でも submit=store は残す (通常の経路の URL を作らず、parse で必ず止める)。
   if (params.submit === 'store') {
     sp.set('submit', 'store');
@@ -339,6 +351,9 @@ export function parseCheckoutParams(
   const storeHandle = searchParams.get('store_handle');
   const storeHandleParam = storeHandle ? sanitizeText(storeHandle, CHECKOUT_STORE_HANDLE_MAX) : undefined;
   const storeNameRaw = searchParams.get('store');
+  // 'ask' 以外の ship と、形の合わない contact は無いものとして扱う (表示だけの値なので会計は止めない)。
+  const shipAsk = searchParams.get('ship') === 'ask';
+  const contact = parseShopContact(searchParams.get('contact'));
   const pickupAtRaw = searchParams.get('pickup_at');
   const submitRaw = searchParams.get('submit');
   const handoffRaw = searchParams.get('hs');
@@ -478,6 +493,8 @@ export function parseCheckoutParams(
           : undefined,
       ...(storeSubmit ? { submit: 'store' as const, handoffId: handoffRaw as string } : {}),
       ...(discount !== undefined ? { discount } : {}),
+      ...(shipAsk ? { ship: 'ask' as const } : {}),
+      ...(contact ? { contact } : {}),
     },
   };
 }

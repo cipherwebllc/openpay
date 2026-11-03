@@ -5,6 +5,8 @@
 // 骨格はレジと同じ: PC は左に入力・右に sticky の見本、スマホは下部の固定バーに合計と主ボタン。
 // 1 度決めたら変わらない受取先・チェーン・支払い方法は要約の行と設定シートに畳み、画面には毎回変わる物だけを残す。
 // 金額はお客様が URL で書き換えられるので、いくら届いたら発送するかをリンクの下に常に出す。
+// 「何度でも使える」リンクは番号を持たず、お客様が払った後に完了画面から注文 (お名前とお届け先) を送る
+// (plans/order-link-reusable.md)。番号は進めない。
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
@@ -46,9 +48,17 @@ import {
   type OrderLinkError,
   type OrderLinkLine,
 } from '@/lib/orderLink';
+import { SHOP_CONTACT_MAIL_MAX, shopContactFromInput } from '@/lib/shopContact';
 import { CHECKOUT_MAX_ITEMS, CHECKOUT_QTY_MAX } from '@/lib/url/checkout';
 
 const MODES: readonly PayMode[] = ['gasless', 'standard'];
+const LINK_KINDS = ['single', 'reusable'] as const;
+const CONTACT_KINDS = ['none', 'line', 'mail'] as const;
+const PILL_GROUP = 'grid gap-1 rounded-xl bg-slate-100 p-1';
+const pillClass = (active: boolean) =>
+  `min-h-11 rounded-lg px-2 text-sm font-semibold transition-colors ${
+    active ? 'bg-white text-slate-900 shadow-sm ring-1 ring-slate-200' : 'text-slate-600 hover:text-slate-900'
+  }`;
 // 送料の行の分を残す (/checkout の明細は送料を含めて CHECKOUT_MAX_ITEMS 行まで)。
 const MAX_LINES = CHECKOUT_MAX_ITEMS - 1;
 
@@ -92,8 +102,11 @@ export function OrderLinkBuilder() {
     holdImport: typedItems || description !== '' || orderIdInput !== null,
   });
   const autoOrderId = settings.lastOrderId ? nextOrderLinkId(settings.lastOrderId) : ORDER_LINK_FIRST_ID;
-  const orderId = orderIdInput ?? (hydrated ? autoOrderId : '');
+  const reusable = settings.linkKind === 'reusable';
+  const orderId = reusable ? '' : orderIdInput ?? (hydrated ? autoOrderId : '');
   const payMode = modeOverride ?? settings.payMode;
+  const contact =
+    settings.contactKind === 'none' ? null : shopContactFromInput(settings.contactKind, settings.contactValue);
 
   const receiverName = settings.receiver.trim();
   const ens = useResolveAddress(isLikelyName(receiverName) ? receiverName : '');
@@ -146,7 +159,9 @@ export function OrderLinkBuilder() {
         to: linkReceiver,
         chain: settings.chain,
         mode: payMode,
+        reusable,
         orderId,
+        contact,
         description,
         storeName: settings.storeName,
         lines,
@@ -160,6 +175,8 @@ export function OrderLinkBuilder() {
       payMode,
       settings.shipping,
       settings.storeName,
+      reusable,
+      contact,
       orderId,
       description,
       lines,
@@ -195,15 +212,17 @@ export function OrderLinkBuilder() {
   const copyFailed = result.ok && copyFailedUrl === result.url;
   const sentVia = !copyFailed && result.ok && sent?.url === result.url ? sent.via : null;
   const sentLabel = sentVia === null ? null : t(sentVia === 'share' ? 'shared' : 'copied');
-  // 送った番号のまま別の内容に書き換えた。別の注文なら番号を進められるように知らせる。
-  const reusingNumber = sent !== null && sent.orderId === orderId && (!result.ok || sent.url !== result.url);
+  // 送った番号のまま別の内容に書き換えた。別の注文なら番号を進められるように知らせる (何度でも使えるリンクは番号なし)。
+  const reusingNumber =
+    !reusable && sent !== null && sent.orderId === orderId && (!result.ok || sent.url !== result.url);
   // 番号はリンクを渡すときに確定する (開いただけでは進めない)。固定してから進めるので、表示中の注文の番号は変わらない。
+  // 何度でも使えるリンクは番号を持たないので進めない。
   const markSent = (url: string, via: SentLink['via']) => {
-    setSettings((current) => ({ ...current, lastOrderId: orderId }));
+    if (orderId) setSettings((current) => ({ ...current, lastOrderId: orderId }));
     setCopyFailedUrl(null);
     setSent({ url, orderId, via });
     // 完了を待つ間に書き換えられたら、今の入力を前の注文の番号へ巻き戻さない。
-    if (currentUrl.current === url) setOrderIdInput(orderId);
+    if (orderId && currentUrl.current === url) setOrderIdInput(orderId);
   };
   const copyLink = async () => {
     if (!result.ok) return;
@@ -219,7 +238,7 @@ export function OrderLinkBuilder() {
     if (!result.ok) return;
     const { url } = result;
     try {
-      await navigator.share({ text: t('shareText', { id: orderId }), url });
+      await navigator.share({ text: reusable ? t('shareTextReusable') : t('shareText', { id: orderId }), url });
       markSent(url, 'share');
     } catch {
       // 取り消しや許可の拒否は正常系。共有できなくてもコピーが残る (掟 13)。
@@ -262,6 +281,7 @@ export function OrderLinkBuilder() {
 
   const shippingInvalid = !result.ok && result.error === 'shipping';
   const orderIdInvalid = !result.ok && result.error === 'orderId' && orderId !== '';
+  const contactInvalid = contact === 'invalid';
 
   return (
     <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(320px,380px)] lg:items-start lg:gap-6">
@@ -308,6 +328,33 @@ export function OrderLinkBuilder() {
         </div>
 
         <div className="space-y-3 px-5 py-4">
+          {/* リンクの種類。注文ごとの番号つきか、番号なしで何度でも使えるか (SNS に置いて、払った後に注文を送ってもらう)。 */}
+          <fieldset>
+            <legend className="sr-only">{t('kindLabel')}</legend>
+            <div className={`${PILL_GROUP} grid-cols-2`}>
+              {LINK_KINDS.map((kind) => (
+                <button
+                  key={kind}
+                  type="button"
+                  aria-pressed={settings.linkKind === kind}
+                  onClick={() => {
+                    if (settings.linkKind === kind) return;
+                    // 種類を替えたら番号と「送った」状態を戻す: 番号つきで渡した番号を、切り替えて戻った後に
+                    // 使用済みの案内なしで別の注文に使い回させない (次の番号から始める)。
+                    setOrderIdInput(null);
+                    setSent(null);
+                    setCopyFailedUrl(null);
+                    setSettings((current) => ({ ...current, linkKind: kind }));
+                  }}
+                  className={pillClass(settings.linkKind === kind)}
+                >
+                  {t(`kinds.${kind}`)}
+                </button>
+              ))}
+            </div>
+            <p className="mt-1.5 text-xs text-slate-500">{t(`kinds.${settings.linkKind}Desc`)}</p>
+          </fieldset>
+
           <ul className="space-y-3">
             {lines.map((line, index) => (
               <OrderLinkLineRow
@@ -377,6 +424,7 @@ export function OrderLinkBuilder() {
                 />
               </div>
             </div>
+            {!reusable && (
             <div>
               <div className="flex items-center justify-between gap-3 pt-2.5">
                 <label htmlFor="order-link-id" className="text-sm font-medium text-slate-700">
@@ -405,6 +453,7 @@ export function OrderLinkBuilder() {
                 </div>
               )}
             </div>
+            )}
           </div>
         </div>
       </section>
@@ -414,6 +463,7 @@ export function OrderLinkBuilder() {
         <OrderLinkPreview
           result={result}
           orderId={orderId}
+          reusable={reusable}
           storeName={settings.storeName}
           description={description}
           lines={previewLines}
@@ -508,6 +558,52 @@ export function OrderLinkBuilder() {
               className={ORDER_LINK_INPUT_CLASS}
             />
             <p className="mt-1.5 text-xs leading-relaxed text-slate-500">{t('storeNameHint')}</p>
+          </div>
+        </ShopSettingsSection>
+        {/* 注文の送り先: お客様の完了画面が、注文の文を入れた状態で開く LINE 公式アカウントかメール。 */}
+        <ShopSettingsSection title={t('contactLabel')}>
+          <div className="space-y-2">
+            <div className={`${PILL_GROUP} grid-cols-3`}>
+              {CONTACT_KINDS.map((kind) => (
+                <button
+                  key={kind}
+                  type="button"
+                  aria-pressed={settings.contactKind === kind}
+                  onClick={() => setSettings((current) => ({ ...current, contactKind: kind }))}
+                  className={pillClass(settings.contactKind === kind)}
+                >
+                  {t(`contactKinds.${kind}`)}
+                </button>
+              ))}
+            </div>
+            {settings.contactKind !== 'none' && (
+              <div>
+                <label htmlFor="order-link-contact" className="sr-only">
+                  {t('contactValueLabel')}
+                </label>
+                <input
+                  id="order-link-contact"
+                  type={settings.contactKind === 'mail' ? 'email' : 'text'}
+                  inputMode={settings.contactKind === 'mail' ? 'email' : 'text'}
+                  autoComplete="off"
+                  autoCapitalize="none"
+                  spellCheck={false}
+                  value={settings.contactValue}
+                  maxLength={SHOP_CONTACT_MAIL_MAX}
+                  placeholder={t(settings.contactKind === 'line' ? 'contactLinePlaceholder' : 'contactMailPlaceholder')}
+                  aria-invalid={contactInvalid || undefined}
+                  onChange={(event) => setSettings((current) => ({ ...current, contactValue: event.target.value }))}
+                  className={`${ORDER_LINK_INPUT_CLASS} ${invalidClass(contactInvalid)}`}
+                />
+                {contactInvalid && <p className="mt-1.5 text-xs text-rose-700">{t('errors.contact')}</p>}
+              </div>
+            )}
+            <p className="text-xs leading-relaxed text-slate-500">
+              {t(settings.contactKind === 'none' ? 'contactNoneHint' : 'contactHint')}
+            </p>
+            {settings.contactKind === 'line' && (
+              <p className="text-xs leading-relaxed text-slate-500">{t('contactLineHint')}</p>
+            )}
           </div>
         </ShopSettingsSection>
         <ShopSettingsSection title={t('receiverLabel')}>
