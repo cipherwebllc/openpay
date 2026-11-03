@@ -29,6 +29,7 @@ import { orderConfirmationMessage } from '@/lib/orderConfirmation';
 import {
   checkOrderConfirmation,
   checkOrderLinkPayment,
+  checkOrderLinkPaymentOnChains,
   extractTxHash,
   paymentPayer,
   receivedByReceiver,
@@ -321,6 +322,59 @@ describe('checkOrderLinkPayment', () => {
     const c = client({ status: 'success', logs: [] });
     await expect(checkOrderLinkPayment({ ...base, text: 'A-001 払いました', client: c })).resolves.toEqual({ status: 'invalid' });
     expect(c.getTransactionReceipt).not.toHaveBeenCalled();
+  });
+});
+
+describe('checkOrderLinkPaymentOnChains', () => {
+  const text = `Tx Hash: ${HASH}`;
+  const paidLogs = [transfer(JPYC, FORWARDER, RECEIVER, '3465')];
+  // kaia の JPYC は polygon と別のアドレス。そのチェーンの JPYC の Transfer で数える。
+  const kaiaJpyc = deploymentForSlug('jpyc', 'kaia').address;
+
+  it('取引が見つかったチェーンで判定する (他のチェーンでは見つからない)', async () => {
+    const notFound = client(new TransactionReceiptNotFoundError({ hash: HASH }));
+    const onKaia = client({ status: 'success', logs: [transfer(kaiaJpyc, FORWARDER, RECEIVER, '3465')] });
+    const found = await checkOrderLinkPaymentOnChains({
+      chains: ['polygon', 'kaia'],
+      receiver: RECEIVER,
+      text,
+      clientFor: (chain) => (chain === 'kaia' ? onKaia : notFound),
+    });
+    expect(found.chain).toBe('kaia');
+    expect(found.result).toMatchObject({ status: 'paid', received: '3465' });
+  });
+
+  it('どこでも見つからなければ notFound・読めなかったチェーンがあれば error と読めなかったチェーン', async () => {
+    const notFound = client(new TransactionReceiptNotFoundError({ hash: HASH }));
+    const broken = client(new Error('rpc down'));
+    await expect(
+      checkOrderLinkPaymentOnChains({ chains: ['polygon', 'kaia'], receiver: RECEIVER, text, clientFor: () => notFound }),
+    ).resolves.toEqual({ chain: null, result: { status: 'notFound' }, unreachable: [] });
+    await expect(
+      checkOrderLinkPaymentOnChains({
+        chains: ['polygon', 'kaia'],
+        receiver: RECEIVER,
+        text,
+        clientFor: (chain) => (chain === 'kaia' ? broken : notFound),
+      }),
+    ).resolves.toEqual({ chain: null, result: { status: 'error' }, unreachable: ['kaia'] });
+  });
+
+  it('1 つでも見つかれば、他のチェーンの失敗は出さない・Tx Hash が無ければ問い合わせない', async () => {
+    const broken = client(new Error('rpc down'));
+    const onPolygon = client({ status: 'success', logs: paidLogs });
+    const found = await checkOrderLinkPaymentOnChains({
+      chains: ['polygon', 'kaia'],
+      receiver: RECEIVER,
+      text,
+      clientFor: (chain) => (chain === 'polygon' ? onPolygon : broken),
+    });
+    expect(found).toMatchObject({ chain: 'polygon', result: { status: 'paid' }, unreachable: [] });
+    const unused = client({ status: 'success', logs: [] });
+    await expect(
+      checkOrderLinkPaymentOnChains({ chains: ['polygon'], receiver: RECEIVER, text: 'なし', clientFor: () => unused }),
+    ).resolves.toEqual({ chain: null, result: { status: 'invalid' }, unreachable: [] });
+    expect(unused.getTransactionReceipt).not.toHaveBeenCalled();
   });
 });
 

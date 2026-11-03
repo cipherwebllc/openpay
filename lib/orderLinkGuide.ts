@@ -85,7 +85,7 @@ const JA: OrderLinkGuideContent = {
 
   stepsTitle: '使い方 (お店)',
   steps: [
-    '「販売」の「注文リンク」タブを開き、「設定」で店名・受取ウォレット・受取チェーン・支払い方法・注文の送り先 (LINE 公式アカウントかメール) を決める (店名はお客様の支払い画面に出ます。チェーンはお客様の JPYC があるもの。迷ったら Polygon)',
+    '「販売」の「注文リンク」タブを開き、「設定」で店名・受取ウォレット・受取チェーン・支払い方法・注文の送り先 (LINE 公式アカウントかメール) を決める (店名はお客様の支払い画面に出ます。チェーンはお客様の JPYC があるものを 1 つ以上。2 つ以上選ぶと、お客様が払うときに選べます。迷ったら Polygon)',
     '注文ごとに送るなら「この注文だけ」、SNS などに置いておくなら「何度でも使える」を選び、商品名・数量・単価を入れる。送料と説明は要るときだけ',
     '「お客様の画面」で明細と合計を確かめ、「リンクをコピー」か「送る」でお客様に送るか、SNS などに置く。「この注文だけ」の注文番号はこのときに決まります',
     'お客様から届いた文を「入金を確かめる」に貼り、受取ウォレットに届いた額と確認の署名を確かめてから発送する',
@@ -93,7 +93,7 @@ const JA: OrderLinkGuideContent = {
   ],
   payStepsTitle: '支払いの流れ (お客様)',
   paySteps: [
-    'お店のリンクを開き、注文の内容と合計を確かめる',
+    'お店のリンクを開き、注文の内容と合計を確かめる (チェーンを選ぶ画面が出たら、お手持ちの JPYC があるチェーンを選ぶ)',
     '自分のウォレットをつないで、JPYC で払う',
     '完了画面の「注文を送る」(番号つきの注文では「お店に知らせる」) を押し、ウォレットで確認の署名をして (お金は動きません)、お店の LINE やメールへ送る。「何度でも使える」リンクでは、お名前とお届け先を書き足して送る',
   ],
@@ -139,6 +139,10 @@ const JA: OrderLinkGuideContent = {
     {
       q: '確認の署名とは何ですか？',
       a: 'お客様が、払ったウォレットで決まった文 (お店と Tx Hash) に付ける署名です。お金は動きません。Tx Hash は誰でも見られるので、他人の支払いの Tx Hash を貼った注文が届くことがあります。「入金を確かめる」は、署名したのがその支払いをしたウォレットの持ち主かを確かめます。署名が示すのはそれだけで、文は転送できるので、送ってきた人やお届け先が正しいかは示しません。書き換えたリンクを広められないよう、お店のリンクは公式の SNS やサイトに置いてください。',
+    },
+    {
+      q: '受取チェーンを複数にできますか？',
+      a: 'できます。設定の受取チェーンで 2 つ以上選ぶと、お客様は払う前にチェーンを選び、どのチェーンで払ってもお店の同じウォレットに届きます。「入金を確かめる」は選んだチェーンを全部探し、どのチェーンで払われたかを出します。Safe などのコントラクトのウォレットはチェーンごとに持ち主が違うことがあるので、受取チェーンは 1 つにしてください。2 つ以上を選ぶと画面がチェーン上で確かめて止めますが、まだ一度も使っていないウォレットは見分けられません。',
     },
     {
       q: '送ったリンクの金額や内容を変えたいときは？',
@@ -199,7 +203,7 @@ const EN: OrderLinkGuideContent = {
 
   stepsTitle: 'How to use it (shop)',
   steps: [
-    'Open the “Order link” tab under “Sell”, and in “Settings” set your shop name, receiving wallet, receiving chain, payment method and where orders are sent (a LINE Official Account or email) (the shop name appears on the customer’s payment screen; pick the chain your customers hold JPYC on, Polygon if unsure)',
+    'Open the “Order link” tab under “Sell”, and in “Settings” set your shop name, receiving wallet, receiving chain, payment method and where orders are sent (a LINE Official Account or email) (the shop name appears on the customer’s payment screen; pick one or more chains your customers hold JPYC on. With two or more, customers choose one when paying. Polygon if unsure)',
     'Choose “One order” to send a link per order or “Reusable” to post one on social media, then enter the item names, quantities and unit prices. Add shipping and a description only when needed',
     'Check the items and total in “What the customer sees”, then send it with “Copy link” or “Send”, or post it. For “One order” links, the order number is fixed at this point',
     'Paste the message the customer sent into “Check a payment” and ship only after the amount has reached your receiving wallet and the confirmation signature checks out',
@@ -207,7 +211,7 @@ const EN: OrderLinkGuideContent = {
   ],
   payStepsTitle: 'How paying works (customer)',
   paySteps: [
-    'Open the shop’s link and check the order and total',
+    'Open the shop’s link and check the order and total (if asked to choose a chain, pick the one where they hold JPYC)',
     'Connect their own wallet and pay in JPYC',
     'Tap “Send your order” on the completion screen (“Tell the shop” for numbered orders), sign the confirmation in their wallet (no money moves) and send it to the shop’s LINE or email. For “Reusable” links, add their name and delivery address before sending',
   ],
@@ -253,6 +257,10 @@ const EN: OrderLinkGuideContent = {
     {
       q: 'What is the confirmation signature?',
       a: 'A signature the customer makes with the wallet they paid from, over a fixed text (your shop and the Tx Hash). No money moves. Anyone can see a Tx Hash, so you may get an order that pastes someone else’s payment. “Check a payment” confirms that the signature comes from the owner of the wallet that made the payment. That is all it shows: a message can be forwarded, so it does not prove who sent it or that the delivery address is right. Post your links on your official social media or site so that altered links are harder to spread.',
+    },
+    {
+      q: 'Can I accept more than one receiving chain?',
+      a: 'Yes. Pick two or more receiving chains in Settings and customers choose a chain before paying; whichever they choose, the payment reaches the same shop wallet. “Check a payment” searches every chain you picked and shows which one was used. Contract wallets such as Safe can have different owners on each chain, so pick only one receiving chain for them. With two or more, the screen checks on-chain and stops, but it cannot spot a wallet that has never been used yet.',
     },
     {
       q: 'What if I need to change the amount or items after sending?',

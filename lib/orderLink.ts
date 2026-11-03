@@ -61,7 +61,11 @@ export type OrderLinkLine = {
 export type OrderLinkInput = {
   origin: string;
   to: Address | null;
-  chain: ChainSlug;
+  /**
+   * 受け付けるチェーン (1 つ以上・先頭が主)。2 つ以上ならリンクに chains を入れ、お客様が払う前に選ぶ
+   * (plans/order-link-multichain.md)。受取先は全チェーンで同じアドレス。
+   */
+  chains: readonly ChainSlug[];
   mode: PayMode;
   /** 番号なしで何度でも使えるリンク (ship=ask)。true なら orderId は使わない。 */
   reusable: boolean;
@@ -82,6 +86,10 @@ export type OrderLinkError =
   | 'receiverResolving'
   | 'orderId'
   | 'contact'
+  // 受取チェーンが 2 つ以上のときの受取ウォレットの確認 (画面が足す・buildOrderLink は返さない)。
+  | 'chainChecking'
+  | 'chainContract'
+  | 'chainCheckFailed'
   | 'noItems'
   | 'item'
   | 'shipping'
@@ -90,8 +98,11 @@ export type OrderLinkError =
   | 'tooLarge'
   | 'invalid';
 
+/** チェーンごとの利用料と届く額 (最低額がチェーンで違うことがある)。 */
+export type OrderLinkChainAmount = { chain: ChainSlug; fee: string; receive: string };
+
 export type OrderLinkResult =
-  | { ok: true; url: string; total: string; fee: string; receive: string }
+  | { ok: true; url: string; total: string; fee: string; receive: string; byChain: OrderLinkChainAmount[] }
   | { ok: false; error: OrderLinkError; minimum?: string; maximum?: string; total?: string };
 
 function isBlankLine(line: OrderLinkLine): boolean {
@@ -207,10 +218,14 @@ export function buildOrderLink(input: OrderLinkInput): OrderLinkResult {
   const description = input.description.trim();
   // /checkout の parse と同じ整え方 (制御文字を除き上限で切る) をしてから入れ、読み直した値と比べる。
   const storeName = sanitizeText(input.storeName.trim(), ORDER_LINK_STORE_NAME_MAX) ?? '';
+  const chains = input.chains.filter((chain, index) => input.chains.indexOf(chain) === index);
+  if (chains.length === 0) return { ok: false, error: 'invalid' };
+  const primary = chains[0];
   const url = buildCheckoutUrl(input.origin, {
     to: input.to,
     token: 'jpyc',
-    chain: input.chain,
+    chain: primary,
+    ...(chains.length >= 2 ? { chains: [...chains] } : {}),
     gas: 'customer',
     mode: input.mode,
     items,
@@ -236,23 +251,36 @@ export function buildOrderLink(input: OrderLinkInput): OrderLinkResult {
   if (!sameShopContact(parsed.params.contact, contact)) return { ok: false, error: 'invalid' };
   if ((parsed.params.description ?? '') !== description) return { ok: false, error: 'invalid' };
   if ((parsed.params.storeName ?? '') !== storeName) return { ok: false, error: 'invalid' };
+  // 受け付けるチェーンを読み直しで確かめる (使えないチェーンは /checkout が黙って外すので、ここで食い違いを止める)。
+  const parsedChains = parsed.params.chains ?? [parsed.params.chain];
+  if (parsedChains.length !== chains.length || parsedChains.some((chain, index) => chain !== chains[index])) {
+    return { ok: false, error: 'invalid' };
+  }
 
-  const { decimals } = deploymentForSlug('jpyc', input.chain);
+  const { decimals } = deploymentForSlug('jpyc', primary);
   const totalWei = calcCheckoutTotal(parsed.params.items, decimals);
   const maximum = input.mode === 'standard' ? ORDER_LINK_STANDARD_MAX_JPYC : ORDER_LINK_GASLESS_MAX_JPYC;
   if (totalWei > maximum * 10n ** BigInt(decimals)) {
     return { ok: false, error: 'tooLarge', maximum: maximum.toString(), total: formatUnits(totalWei, decimals) };
   }
-  const feeWei = orderLinkFeeWei(totalWei, input.chain, input.mode);
-  // 利用料以下の支払いは /checkout が止める (お店の受取が 0 になる) ので、リンクを渡す前に知らせる。
-  if (feeWei > 0n && totalWei <= feeWei) {
-    return { ok: false, error: 'tooSmall', minimum: formatUnits(feeWei, decimals), total: formatUnits(totalWei, decimals) };
+  // 利用料はチェーンごと (最低額がチェーンで違うことがある)。どれかのチェーンで利用料以下なら /checkout がそのチェーンで
+  // 止める (お店の受取が 0 になる) ので、リンクを渡す前に知らせる (いちばん高い最低額を出す)。
+  const fees = chains.map((chain) => ({ chain, feeWei: orderLinkFeeWei(totalWei, chain, input.mode) }));
+  const highest = fees.reduce((max, entry) => (entry.feeWei > max ? entry.feeWei : max), 0n);
+  if (highest > 0n && totalWei <= highest) {
+    return { ok: false, error: 'tooSmall', minimum: formatUnits(highest, decimals), total: formatUnits(totalWei, decimals) };
   }
+  const byChain = fees.map(({ chain, feeWei }) => ({
+    chain,
+    fee: formatUnits(feeWei, decimals),
+    receive: formatUnits(totalWei - feeWei, decimals),
+  }));
   return {
     ok: true,
     url,
     total: formatUnits(totalWei, decimals),
-    fee: formatUnits(feeWei, decimals),
-    receive: formatUnits(totalWei - feeWei, decimals),
+    fee: byChain[0].fee,
+    receive: byChain[0].receive,
+    byChain,
   };
 }

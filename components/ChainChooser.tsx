@@ -9,6 +9,11 @@ interface ChainChooserProps {
   gridClassName?: string;
   /** chain id の行を出すか (既定 true)。店の会計画面 (お店の設定) では出さない (開発者向けの値・2026-10 磨き上げ P2)。 */
   showId?: boolean;
+  /**
+   * 複数を選ぶとき (注文リンクの受取チェーン)。渡したときだけ選んだ印をこの集合で決め、aria-pressed を付ける
+   * (selected は使わない)。渡さなければ今までと同じ DOM (QR・チップの pinning を動かさない)。
+   */
+  selectedSlugs?: readonly ChainSlug[];
 }
 
 /**
@@ -22,16 +27,18 @@ export function ChainChooser({
   onSelect,
   gridClassName = 'grid grid-cols-2 gap-2 sm:grid-cols-3',
   showId = true,
+  selectedSlugs,
 }: ChainChooserProps) {
   return (
     <div className={gridClassName}>
       {slugs.map((slug) => {
         const c = chainForSlug(slug);
-        const active = selected === slug;
+        const active = selectedSlugs ? selectedSlugs.includes(slug) : selected === slug;
         return (
           <button
             key={slug}
             type="button"
+            {...(selectedSlugs ? { 'aria-pressed': active } : {})}
             onClick={() => onSelect(slug)}
             className={`flex items-center gap-2 rounded-xl border px-3 py-2.5 text-left text-sm transition-all duration-200 ${
               active

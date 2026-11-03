@@ -1656,7 +1656,14 @@
     "shipAskNote": "After paying, use “Send your order” on this screen to send your name and delivery address to the shop (nothing is sent to OpenPay).",
     "shipAskNoteWithContact": "After paying, use “Send your order” on this screen to send your name and delivery address to the shop ({dest}) (nothing is sent to OpenPay).",
     "notifyRestoredTitle": "You already paid in this tab",
-    "notifyRestoredBody": "Tx Hash {tx}. You do not need to pay for the same order again. If you have not sent it yet, send it below."
+    "notifyRestoredBody": "Tx Hash {tx}. You do not need to pay for the same order again. If you have not sent it yet, send it below.",
+    "chainPickTitle": "Choose a chain to pay on",
+    "chainPickHint": "Pick the chain where you hold JPYC. Whichever you choose, the payment goes to the same shop wallet.",
+    "chainPickOption": "JPYC ({chain})",
+    "chainPickOpening": "Opening…",
+    "payOnOtherChain": "Pay on another chain",
+    "payAgainAsNewOrder": "Pay for a new order",
+    "paidInThisTabNote": "You already paid in this tab. Send it with “Send your order” above."
   },
   "CopyableField": {
     "copy": "Copy",
@@ -3573,7 +3580,10 @@
       "itemQty": "Enter a quantity from 1 to {qtyMax}.",
       "itemPrice": "Enter the unit price as a number.",
       "tooLargeGasless": "The no-gas-fee limit is {maximum} JPYC. Standard payment allows up to {standardMaximum} JPYC, but the customer needs gas.",
-      "contact": "Check the format of where orders are sent."
+      "contact": "Check the format of where orders are sent.",
+      "chainChecking": "Checking your receiving wallet.",
+      "chainContract": "Your receiving wallet is a contract wallet on {chains}. Contract wallets can have different owners on each chain, so pick only one receiving chain.",
+      "chainCheckFailed": "Could not check your receiving wallet on {chains}. Wait a moment, or pick only one receiving chain."
     },
     "errorsShort": {
       "receiver": "Enter receiving wallet",
@@ -3590,7 +3600,10 @@
       "itemQty": "Check quantity",
       "itemPrice": "Check unit price",
       "tooLargeGasless": "Over the {maximum} JPYC limit",
-      "contact": "Check destination"
+      "contact": "Check destination",
+      "chainChecking": "Checking",
+      "chainContract": "Pick one chain",
+      "chainCheckFailed": "Could not check"
     },
     "receiverConnectHint": "Connect a wallet to fill this in automatically.",
     "cautionFee": "{fee} JPYC fee deducted. {total} JPYC if paid as standard",
@@ -3602,7 +3615,7 @@
     "copyFailed": "Couldn't copy",
     "switchToStandard": "Use standard payment for this order",
     "lineSubtotal": "{price} each × {qty} = {amount} JPYC",
-    "chainHint": "Choose the chain where your customer holds JPYC. If unsure, use Polygon.",
+    "chainHint": "Pick the chains your customers hold JPYC on. If you pick two or more, customers choose one when paying. Polygon if unsure.",
     "numberUsed": "{id} has already been used",
     "advanceNumber": "Use next number",
     "cautionStandard": "This order uses standard payment. The customer needs gas",
@@ -3651,6 +3664,12 @@
     "verifyUnsigned": "No confirmation signature, so you cannot tell whether this came from the person who paid. Check with the customer before shipping.",
     "verifyMismatch": "This is not signed by the wallet that made this payment. It may be someone else’s Tx Hash. Stop and check before shipping.",
     "contactNoneHint": "Customers send it from the completion screen by sharing or copying. Set a LINE Official Account or email and it opens with the message filled in.",
-    "verifyUnverifiable": "This transaction contains more than one payment, so the payer cannot be pinned to one wallet and the signature cannot be checked. Stop and check before shipping."
+    "verifyUnverifiable": "This transaction contains more than one payment, so the payer cannot be pinned to one wallet and the signature cannot be checked. Stop and check before shipping.",
+    "chainMultiNote": "Your receiving wallet uses the same address on every chain. If it is a contract wallet such as Safe, pick only one receiving chain.",
+    "previewChains": "Chains customers can choose: {chains}",
+    "cautionTitleVaries": "Ship after it reaches your wallet (the amount differs by chain)",
+    "cautionChainAmount": "{chain}: {amount} JPYC",
+    "verifyPaidChain": "Paid on {chain}",
+    "verifyUnreachable": "Could not reach {chains}. Wait a moment and try again."
   }
 }

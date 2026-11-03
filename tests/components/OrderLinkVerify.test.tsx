@@ -8,12 +8,18 @@ import { renderWithIntl as render } from '../_helpers/i18n';
 const check = vi.hoisted(() => vi.fn());
 vi.mock('@/lib/orderLinkVerify', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/orderLinkVerify')>();
-  return { ...actual, checkOrderLinkPayment: check };
+  return { ...actual, checkOrderLinkPaymentOnChains: check };
 });
 
 import { OrderLinkVerify } from '@/components/order-link/OrderLinkVerify';
 
 const RECEIVER = '0x52d4901142e2B5680027da5EB47C86CB02a3cA81' as Address;
+// 受け付けるチェーンを全部探した結果 (lib/orderLinkVerify の checkOrderLinkPaymentOnChains) の形にする。
+const found = (result: Record<string, unknown>, chain: string | null = 'polygon', unreachable: string[] = []) => ({
+  chain: result.status === 'notFound' || result.status === 'error' || result.status === 'invalid' ? null : chain,
+  result,
+  unreachable,
+});
 const HASH = `0x${'ab'.repeat(32)}`;
 
 afterEach(() => {
@@ -28,24 +34,24 @@ function paste(text: string) {
 
 describe('OrderLinkVerify', () => {
   it('受取ウォレットが無いか、何も貼っていなければ押せない', () => {
-    const { unmount } = render(<OrderLinkVerify chain="polygon" receiver={null} />);
+    const { unmount } = render(<OrderLinkVerify chains={["polygon"]} receiver={null} />);
     fireEvent.change(screen.getByLabelText('お客様から届いた文か Tx Hash'), { target: { value: HASH } });
     expect(screen.getByRole('button', { name: '確かめる' })).toBeDisabled();
     unmount();
-    render(<OrderLinkVerify chain="polygon" receiver={RECEIVER} />);
+    render(<OrderLinkVerify chains={["polygon"]} receiver={RECEIVER} />);
     expect(screen.getByRole('button', { name: '確かめる' })).toBeDisabled();
   });
 
   it('届いていれば額・ブロック・照らし合わせの注意と Explorer のリンクを出す', async () => {
-    check.mockResolvedValue({
+    check.mockResolvedValue(found({
       status: 'paid',
       received: '3465',
       blockNumber: 123n,
       timestamp: 1_762_000_000,
       payer: null,
       confirmation: 'unsigned',
-    });
-    render(<OrderLinkVerify chain="polygon" receiver={RECEIVER} />);
+    }));
+    render(<OrderLinkVerify chains={["polygon"]} receiver={RECEIVER} />);
     paste(`ご注文 A-001 のお支払いが済みました。\nTx Hash: ${HASH}`);
     expect(await screen.findByText('受取ウォレットに 3,465 JPYC 届いています')).toBeInTheDocument();
     // 署名の無い文は、払った本人からか分からないと伝える
@@ -56,52 +62,52 @@ describe('OrderLinkVerify', () => {
     expect(link.getAttribute('href')).toContain(`/tx/${HASH}`);
     // 1 行の欄に貼った文は改行が落ちる。Tx Hash はその中から読み取る (lib/orderLinkVerify の extractTxHash)。
     expect(check).toHaveBeenCalledWith(
-      expect.objectContaining({ chain: 'polygon', receiver: RECEIVER, text: expect.stringContaining(HASH) }),
+      expect.objectContaining({ chains: ['polygon'], receiver: RECEIVER, text: expect.stringContaining(HASH) }),
     );
   });
 
   it('払ったウォレットの署名なら払った人の短いアドレスを、他人の署名なら発送を止める案内を出す', async () => {
     const payer = '0x4444444444444444444444444444444444444444' as Address;
     const paid = { status: 'paid', received: '3465', blockNumber: 123n, timestamp: 1_762_000_000, payer };
-    const { unmount } = render(<OrderLinkVerify chain="polygon" receiver={RECEIVER} />);
-    check.mockResolvedValueOnce({ ...paid, confirmation: 'verified' });
+    const { unmount } = render(<OrderLinkVerify chains={["polygon"]} receiver={RECEIVER} />);
+    check.mockResolvedValueOnce(found({ ...paid, confirmation: 'verified' }));
     paste(HASH);
     expect(await screen.findByText('払ったウォレット (0x4444…4444) の確認の署名があります')).toBeInTheDocument();
     unmount();
     localStorage.clear();
-    render(<OrderLinkVerify chain="polygon" receiver={RECEIVER} />);
-    check.mockResolvedValueOnce({ ...paid, confirmation: 'mismatch' });
+    render(<OrderLinkVerify chains={["polygon"]} receiver={RECEIVER} />);
+    check.mockResolvedValueOnce(found({ ...paid, confirmation: 'mismatch' }));
     paste(HASH);
     expect(await screen.findByText(/この支払いをしたウォレットの署名ではありません/)).toBeInTheDocument();
     expect(screen.queryByText(/の確認の署名があります/)).toBeNull();
   });
 
   it('届いていない・見つからない・読み取れないときは、それぞれの理由を出す', async () => {
-    render(<OrderLinkVerify chain="polygon" receiver={RECEIVER} />);
-    check.mockResolvedValueOnce({ status: 'notToReceiver' });
+    render(<OrderLinkVerify chains={["polygon"]} receiver={RECEIVER} />);
+    check.mockResolvedValueOnce(found({ status: 'notToReceiver' }));
     paste(HASH);
     expect(await screen.findByText(/受取ウォレット \(0x52d4…cA81\) に JPYC は届いていません/)).toBeInTheDocument();
 
-    check.mockResolvedValueOnce({ status: 'notFound' });
+    check.mockResolvedValueOnce(found({ status: 'notFound' }));
     paste(`${HASH} `);
     expect(await screen.findByText(/では見つかりませんでした/)).toBeInTheDocument();
 
-    check.mockResolvedValueOnce({ status: 'invalid' });
+    check.mockResolvedValueOnce(found({ status: 'invalid' }));
     paste('A-001 払いました');
     expect(await screen.findByText(/Tx Hash を読み取れません/)).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Explorer で見る' })).toBeNull();
   });
 
   it('同じ Tx Hash を 2 回目に確かめると、使い回しへの注意を出す (この端末で前に確かめた時刻つき)', async () => {
-    check.mockResolvedValue({
+    check.mockResolvedValue(found({
       status: 'paid',
       received: '3465',
       blockNumber: 123n,
       timestamp: 1_762_000_000,
       payer: null,
       confirmation: 'unsigned',
-    });
-    render(<OrderLinkVerify chain="polygon" receiver={RECEIVER} />);
+    }));
+    render(<OrderLinkVerify chains={["polygon"]} receiver={RECEIVER} />);
     paste(HASH);
     expect(await screen.findByText('受取ウォレットに 3,465 JPYC 届いています')).toBeInTheDocument();
     expect(screen.queryByText(/にも確かめています/)).toBeNull();
@@ -109,9 +115,28 @@ describe('OrderLinkVerify', () => {
     expect(await screen.findByText(/にも確かめています。同じ支払いで 2 つの注文を発送しないよう/)).toBeInTheDocument();
   });
 
+  it('受取チェーンが複数なら、見つかったチェーンを出し、問い合わせできなかったチェーンは「確かめられない」と伝える', async () => {
+    const { unmount } = render(<OrderLinkVerify chains={['polygon', 'kaia']} receiver={RECEIVER} />);
+    check.mockResolvedValueOnce(
+      found(
+        { status: 'paid', received: '3465', blockNumber: 123n, timestamp: 1_762_000_000, payer: null, confirmation: 'unsigned' },
+        'kaia',
+      ),
+    );
+    paste(HASH);
+    expect(await screen.findByText(/で払われています/)).toBeInTheDocument();
+    expect(check).toHaveBeenCalledWith(expect.objectContaining({ chains: ['polygon', 'kaia'] }));
+    unmount();
+    localStorage.clear();
+    render(<OrderLinkVerify chains={['polygon', 'kaia']} receiver={RECEIVER} />);
+    check.mockResolvedValueOnce(found({ status: 'error' }, null, ['kaia']));
+    paste(HASH);
+    expect(await screen.findByText(/に問い合わせできませんでした/)).toBeInTheDocument();
+  });
+
   it('貼り直すと前の結果を消す (別の取引の結果を残さない)', async () => {
-    check.mockResolvedValue({ status: 'failed' });
-    render(<OrderLinkVerify chain="polygon" receiver={RECEIVER} />);
+    check.mockResolvedValue(found({ status: 'failed' }));
+    render(<OrderLinkVerify chains={["polygon"]} receiver={RECEIVER} />);
     paste(HASH);
     expect(await screen.findByText(/この取引は失敗しています/)).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('お客様から届いた文か Tx Hash'), { target: { value: '' } });

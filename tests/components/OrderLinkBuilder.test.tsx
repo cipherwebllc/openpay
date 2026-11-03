@@ -24,10 +24,14 @@ vi.mock('@/lib/env', async (importOriginal) => {
 vi.mock('wagmi', () => ({
   useAccount: vi.fn(() => ({ address: undefined, isConnected: false })),
 }));
+// 受取チェーンが 2 つ以上のときの受取ウォレットの確認 (チェーンを読む部分は tests/hooks で見る)。
+const chainCheck = vi.hoisted(() => ({ value: { status: 'idle' } as { status: string; chains?: string[] } }));
+vi.mock('@/hooks/useReceiverChainCheck', () => ({ useReceiverChainCheck: () => chainCheck.value }));
 const fetchSpy = vi.hoisted(() => vi.fn());
 
 import { useAccount } from 'wagmi';
 import { OrderLinkBuilder } from '@/components/OrderLinkBuilder';
+import { chainForSlug } from '@/lib/chains';
 
 const TO = '0x52d4901142e2B5680027da5EB47C86CB02a3cA81';
 const OTHER = '0x8F16000000000000000000000000000000000001';
@@ -62,6 +66,7 @@ async function copyLink() {
 }
 
 beforeEach(() => {
+  chainCheck.value = { status: 'idle' };
   localStorage.clear();
   resolved.value = { data: null, isFetching: false, error: null };
   vi.mocked(useAccount).mockReturnValue({
@@ -204,6 +209,49 @@ describe('OrderLinkBuilder', () => {
     fireEvent.click(screen.getByRole('button', { name: '完了' }));
     expect(screen.queryByRole('link', { name: '開いて確かめる' })).toBeNull();
     await waitFor(() => expect(JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}').contactKind).toBe('mail'));
+  });
+
+  it('受取チェーンを 2 つ選ぶと chains のリンクになり (chain は書かない)、見本に選べるチェーンを出す', async () => {
+    saved();
+    render(<OrderLinkBuilder />);
+    fireEvent.click(await screen.findByRole('button', { name: '設定' }));
+    const kaia = screen.getByRole('button', { name: new RegExp(chainForSlug('kaia').name) });
+    fireEvent.click(kaia);
+    expect(kaia).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByText(/Safe などコントラクトのウォレットのときは、受取チェーンを 1 つに/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '完了' }));
+    chainCheck.value = { status: 'ok' };
+    fillItem();
+    const link = (await screen.findByRole('link', { name: '開いて確かめる' })) as HTMLAnchorElement;
+    const url = new URL(link.href);
+    expect(url.searchParams.get('chains')).toBe('polygon,kaia');
+    expect(url.searchParams.has('chain')).toBe(false);
+    expect(screen.getByText(/お客様が選べるチェーン:/)).toBeInTheDocument();
+    await waitFor(() => expect(JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}').chains).toEqual(['polygon', 'kaia']));
+    // 最後の 1 つは外せない
+    fireEvent.click(screen.getByRole('button', { name: '設定' }));
+    fireEvent.click(screen.getByRole('button', { name: new RegExp(chainForSlug('kaia').name) }));
+    fireEvent.click(screen.getByRole('button', { name: new RegExp(chainForSlug('polygon').name) }));
+    expect(screen.getByRole('button', { name: new RegExp(chainForSlug('polygon').name) })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('受取ウォレットがどれかのチェーンでコントラクトのウォレットなら、受取チェーンを 1 つにするよう伝えてリンクを作らない', async () => {
+    saved({ chains: ['polygon', 'kaia'] });
+    chainCheck.value = { status: 'contract', chains: ['kaia'] };
+    render(<OrderLinkBuilder />);
+    await screen.findByRole('button', { name: '設定' });
+    fillItem();
+    expect((await screen.findAllByText(/コントラクトのウォレットです。チェーンごとに持ち主が違うことがあるので/)).length).toBeGreaterThan(0);
+    expect(screen.queryByRole('link', { name: '開いて確かめる' })).toBeNull();
+  });
+
+  it('前の版の設定 (受取チェーン 1 つの chain) を読み、そのチェーンのリンクを作る', async () => {
+    saved({ chain: 'kaia' });
+    render(<OrderLinkBuilder />);
+    await screen.findByRole('button', { name: '設定' });
+    fillItem();
+    const link = (await screen.findByRole('link', { name: '開いて確かめる' })) as HTMLAnchorElement;
+    expect(new URL(link.href).searchParams.get('chain')).toBe('kaia');
   });
 
   it('URL の文字列はコピーできる間は見せず、コピーできないときだけ見せる', async () => {

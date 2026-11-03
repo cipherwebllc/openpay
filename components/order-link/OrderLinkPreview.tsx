@@ -8,6 +8,7 @@ import Link from 'next/link';
 import { AlertTriangle, Check, ChevronDown, Copy, ExternalLink, Send } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
 import { groupAmountDigits } from '@/lib/amount';
+import { chainForSlug } from '@/lib/chains';
 import type { OrderLinkPreviewLine, OrderLinkResult } from '@/lib/orderLink';
 
 const TEXT_ACTION = 'h-11 items-center gap-1.5 text-sm font-medium text-brand hover:text-brand-dark';
@@ -18,6 +19,7 @@ export function OrderLinkPreview({
   result,
   orderId,
   reusable,
+  chainNames,
   storeName,
   description,
   lines,
@@ -38,6 +40,8 @@ export function OrderLinkPreview({
   orderId: string;
   /** 番号なしで何度でも使えるリンク (お客様は払った後に注文を送る)。 */
   reusable: boolean;
+  /** お客様が選べるチェーンの名前 (2 つ以上のときだけ・「Polygon / Kaia」)。 */
+  chainNames: string | null;
   /** お客様の画面の頭に出る店名 (空なら出さない・/checkout と同じ)。 */
   storeName: string;
   description: string;
@@ -118,6 +122,10 @@ export function OrderLinkPreview({
           </div>
         )}
 
+        {chainNames && lines.length > 0 && (
+          <p className="mt-3 text-xs text-slate-600">{t('previewChains', { chains: chainNames })}</p>
+        )}
+
         {reusable && lines.length > 0 && (
           <p className="mt-3 rounded-lg bg-sky-50 px-3 py-2 text-xs leading-relaxed text-sky-900">{t('previewAfterPay')}</p>
         )}
@@ -195,11 +203,28 @@ export function OrderLinkPreview({
           <div className="flex gap-2">
             <AlertTriangle className="mt-0.5 h-4 w-4 flex-none text-amber-600" aria-hidden />
             <div className="min-w-0">
-              <p className="text-sm font-semibold text-slate-800">
-                {t('cautionTitle', { amount: groupAmountDigits(result.receive) })}
-              </p>
+              {/* 届く額はチェーンで違うことがある (利用料の最低額)。違えばチェーンごとに出す。 */}
+              {result.byChain.every((entry) => entry.receive === result.receive) ? (
+                <p className="text-sm font-semibold text-slate-800">
+                  {t('cautionTitle', { amount: groupAmountDigits(result.receive) })}
+                </p>
+              ) : (
+                <>
+                  <p className="text-sm font-semibold text-slate-800">{t('cautionTitleVaries')}</p>
+                  <ul className="mt-0.5 text-sm font-semibold text-slate-800">
+                    {result.byChain.map((entry) => (
+                      <li key={entry.chain}>
+                        {t('cautionChainAmount', {
+                          chain: chainForSlug(entry.chain).name,
+                          amount: groupAmountDigits(entry.receive),
+                        })}
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
               <ul className="mt-1 list-disc space-y-0.5 pl-4 text-xs leading-relaxed text-slate-600">
-                {result.fee !== '0' && (
+                {result.fee !== '0' && result.byChain.every((entry) => entry.fee === result.fee) && (
                   <li>
                     {t('cautionFee', { fee: groupAmountDigits(result.fee), total: groupAmountDigits(result.total) })}
                   </li>

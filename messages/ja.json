@@ -1656,7 +1656,14 @@
     "shipAskNote": "お支払いの後、この画面の「注文を送る」から、お名前とお届け先をお店へ送ります (OpenPay には届きません)。",
     "shipAskNoteWithContact": "お支払いの後、この画面の「注文を送る」から、お名前とお届け先をお店 ({dest}) へ送ります (OpenPay には届きません)。",
     "notifyRestoredTitle": "このタブでのお支払いは済んでいます",
-    "notifyRestoredBody": "Tx Hash {tx}。同じ注文をもう一度払う必要はありません。まだ送っていなければ、下から送ってください。"
+    "notifyRestoredBody": "Tx Hash {tx}。同じ注文をもう一度払う必要はありません。まだ送っていなければ、下から送ってください。",
+    "chainPickTitle": "お支払いのチェーンを選んでください",
+    "chainPickHint": "お手持ちの JPYC があるチェーンを選びます。どのチェーンで払っても、お店の同じウォレットに届きます。",
+    "chainPickOption": "JPYC ({chain})",
+    "chainPickOpening": "開いています…",
+    "payOnOtherChain": "別のチェーンで払う",
+    "payAgainAsNewOrder": "新しい注文として払う",
+    "paidInThisTabNote": "このタブでお支払い済みです。上の「注文を送る」から送ってください。"
   },
   "CopyableField": {
     "copy": "コピー",
@@ -3573,7 +3580,10 @@
       "itemQty": "数量は 1〜{qtyMax} で入れてください。",
       "itemPrice": "単価は数字で入れてください。",
       "tooLargeGasless": "ガス代不要の上限は {maximum} JPYC です。通常決済なら {standardMaximum} JPYC まで作れますが、お客様にガス代が必要です。",
-      "contact": "注文の送り先の形を確かめてください。"
+      "contact": "注文の送り先の形を確かめてください。",
+      "chainChecking": "受取ウォレットを確かめています。",
+      "chainContract": "受取ウォレットは {chains} ではコントラクトのウォレットです。チェーンごとに持ち主が違うことがあるので、受取チェーンを 1 つにしてください。",
+      "chainCheckFailed": "{chains} で受取ウォレットを確かめられませんでした。少し待つか、受取チェーンを 1 つにしてください。"
     },
     "errorsShort": {
       "receiver": "受取ウォレットを入力",
@@ -3590,7 +3600,10 @@
       "itemQty": "数量を確認",
       "itemPrice": "単価を確認",
       "tooLargeGasless": "上限 {maximum} JPYC 超え",
-      "contact": "送り先を確認"
+      "contact": "送り先を確認",
+      "chainChecking": "確認中",
+      "chainContract": "受取チェーンを 1 つに",
+      "chainCheckFailed": "確かめられません"
     },
     "receiverConnectHint": "ウォレットを接続すると自動で入ります。",
     "cautionFee": "利用料 {fee} JPYC を引いた額。通常決済で払われたら {total} JPYC",
@@ -3602,7 +3615,7 @@
     "copyFailed": "コピーできませんでした",
     "switchToStandard": "この注文だけ通常決済にする",
     "lineSubtotal": "単価 {price} × {qty} = {amount} JPYC",
-    "chainHint": "お客様の JPYC があるチェーンを選びます。迷ったら Polygon。",
+    "chainHint": "お客様の JPYC があるチェーンを選びます。2 つ以上選ぶと、お客様が払うときに選べます。迷ったら Polygon。",
     "numberUsed": "{id} は使用済みの番号です",
     "advanceNumber": "番号を進める",
     "cautionStandard": "この注文は通常決済です。お客様にガス代が必要です",
@@ -3651,6 +3664,12 @@
     "verifyUnsigned": "確認の署名がありません。払った本人からの文か分からないので、お客様に確かめてから発送してください。",
     "verifyMismatch": "この支払いをしたウォレットの署名ではありません。他人の Tx Hash の可能性があります。発送を止めて確かめてください。",
     "contactNoneHint": "お客様は完了画面から、共有かコピーで送ります。LINE 公式アカウントかメールを決めておくと、文が入った状態で開きます。",
-    "verifyUnverifiable": "この取引には複数の支払いが入っていて、払った人を 1 人に決められません。署名では確かめられないので、発送を止めて確かめてください。"
+    "verifyUnverifiable": "この取引には複数の支払いが入っていて、払った人を 1 人に決められません。署名では確かめられないので、発送を止めて確かめてください。",
+    "chainMultiNote": "受取ウォレットは全部のチェーンで同じアドレスです。Safe などコントラクトのウォレットのときは、受取チェーンを 1 つにしてください。",
+    "previewChains": "お客様が選べるチェーン: {chains}",
+    "cautionTitleVaries": "ウォレットに届いてから発送 (チェーンで額が違います)",
+    "cautionChainAmount": "{chain}: {amount} JPYC",
+    "verifyPaidChain": "{chain} で払われています",
+    "verifyUnreachable": "{chains} に問い合わせできませんでした。少し待ってからもう一度押してください。"
   }
 }

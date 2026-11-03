@@ -5,13 +5,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Address } from 'viem';
 
 const JPYC_FLOOR = 2n * 10n ** 18n;
-const flags = vi.hoisted(() => ({ relay: true, forwarder: true }));
+const flags = vi.hoisted(() => ({ relay: true, forwarder: true, floors: {} as Record<number, bigint> }));
 vi.mock('@/lib/relay/forwarderConfig', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/relay/forwarderConfig')>();
   return {
     ...actual,
     jpycForwarderFor: () => (flags.forwarder ? '0x0F4560a777415580F0680F8B56a79B0022C6B848' : null),
-    relayGasFeeValue: () => JPYC_FLOOR,
+    relayGasFeeValue: (chainId: number) => flags.floors[chainId] ?? JPYC_FLOOR,
   };
 });
 vi.mock('@/lib/env', async (importOriginal) => {
@@ -48,7 +48,7 @@ function input(patch: Partial<OrderLinkInput> = {}): OrderLinkInput {
   return {
     origin: 'https://open-pay.jp',
     to: TO,
-    chain: 'polygon',
+    chains: ['polygon'],
     mode: 'gasless',
     reusable: false,
     orderId: 'A-001',
@@ -70,6 +70,7 @@ function okUrl(result: ReturnType<typeof buildOrderLink>): URL {
 beforeEach(() => {
   flags.relay = true;
   flags.forwarder = true;
+  flags.floors = {};
 });
 
 describe('buildOrderLink', () => {
@@ -89,11 +90,44 @@ describe('buildOrderLink', () => {
 
   it('公開の文書にあるパラメーターだけを使う (内部用を足さない)', () => {
     const url = okUrl(
-      buildOrderLink(input({ chain: 'kaia', mode: 'standard', description: '秋のイベント物販' })),
+      buildOrderLink(input({ chains: ['kaia'], mode: 'standard', description: '秋のイベント物販' })),
     );
     expect([...url.searchParams.keys()].sort()).toEqual(
       ['chain', 'description', 'items', 'mode', 'order_id', 'to', 'token'].sort(),
     );
+  });
+
+  it('受取チェーンが 2 つ以上なら chains を入れ chain を書かない (お客様が払う前に選ぶ)', () => {
+    const url = okUrl(buildOrderLink(input({ chains: ['polygon', 'kaia', 'kaia'] })));
+    expect(url.searchParams.get('chains')).toBe('polygon,kaia');
+    expect(url.searchParams.has('chain')).toBe(false);
+    const parsed = parseCheckoutParams(url.searchParams);
+    if (!parsed.ok) throw new Error(parsed.error);
+    expect(parsed.params.chains).toEqual(['polygon', 'kaia']);
+    expect(parsed.params.pickChain).toBe(true);
+    expect(parsed.params.chain).toBe('polygon');
+    // 1 つなら今までどおり
+    expect(okUrl(buildOrderLink(input({ chains: ['kaia'] }))).searchParams.get('chain')).toBe('kaia');
+    expect(okUrl(buildOrderLink(input({ chains: ['kaia'] }))).searchParams.has('chains')).toBe(false);
+    expect(buildOrderLink(input({ chains: [] }))).toEqual({ ok: false, error: 'invalid' });
+  });
+
+  it('利用料はチェーンごとに出し、どれかのチェーンで利用料以下なら作らない (いちばん高い最低額を出す)', () => {
+    const kaia = deploymentForSlug('jpyc', 'kaia').chainId;
+    flags.floors = { [kaia]: 5n * 10n ** 18n };
+    const ok = buildOrderLink(input({ chains: ['polygon', 'kaia'], lines: [{ name: 'ステッカー', qty: '1', price: '100' }], shipping: '' }));
+    expect(ok).toMatchObject({
+      ok: true,
+      fee: '2',
+      receive: '98',
+      byChain: [
+        { chain: 'polygon', fee: '2', receive: '98' },
+        { chain: 'kaia', fee: '5', receive: '95' },
+      ],
+    });
+    expect(
+      buildOrderLink(input({ chains: ['polygon', 'kaia'], lines: [{ name: 'ステッカー', qty: '1', price: '4' }], shipping: '' })),
+    ).toEqual({ ok: false, error: 'tooSmall', minimum: '5', total: '4' });
   });
 
   it('既定のチェーンとガスレスは URL を増やさない', () => {
