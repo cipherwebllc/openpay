@@ -86,7 +86,7 @@ const JA: OrderLinkGuideContent = {
     '「販売」の「注文リンク」タブを開き、「設定」で店名・受取ウォレット・受取チェーン・支払い方法を決める (店名はお客様の支払い画面に出ます。チェーンはお客様の JPYC があるもの。迷ったら Polygon)',
     '商品名・数量・単価を入れる。送料と説明は要るときだけ',
     '「お客様の画面」で明細と合計を確かめ、「リンクをコピー」か「送る」でお客様に送る。注文番号はこのときに決まります',
-    '受取ウォレットに届いた額を確かめてから発送する',
+    'お客様から届いた Tx Hash を「入金を確かめる」に貼り、受取ウォレットに届いた額を確かめてから発送する',
     '次の注文は「次の注文へ」から作る',
   ],
   payStepsTitle: '支払いの流れ (お客様)',
@@ -114,7 +114,7 @@ const JA: OrderLinkGuideContent = {
   checks: [
     '画面に出る「ウォレットに … JPYC 届いてから発送」の額が受取ウォレットに届いたのを確かめてから、発送してください。ガス代不要の注文は、利用料を引いた額が届きます。',
     'リンクの金額は、お客様が書き換えられます。届いた額が注文の額と合っているかを確かめてください。',
-    'リンクからの入金は OpenPay の履歴に出ません。受取ウォレットか、チェーンのエクスプローラーで確かめます。',
+    'リンクからの入金は OpenPay の履歴に出ません。注文リンクのタブの「入金を確かめる」に Tx Hash を貼るか、受取ウォレットで確かめます。',
     '同じ額の注文が重なったときは、お客様に知らせてもらう Tx Hash で見分けます。',
     'リンクに期限はありません。支払い期限はお客様に伝えてください。',
     '氏名・住所はリンクに入れないでください (URL に入ります)。',
@@ -127,7 +127,7 @@ const JA: OrderLinkGuideContent = {
   faq: [
     {
       q: '支払われたかどうかは、どこで分かりますか？',
-      a: '受取ウォレットか、チェーンのエクスプローラーで入金を確かめます。リンクからの入金は OpenPay の履歴には出ません。お客様に Tx Hash を送ってもらうと、どの注文の支払いかを見分けられます。',
+      a: 'お客様に Tx Hash を送ってもらい、注文リンクのタブの「入金を確かめる」に貼ると、受取ウォレットに届いた額と時刻が分かります。受付番号はチェーンに残らないので、額と時刻で注文と照らし合わせてください。リンクからの入金は OpenPay の履歴には出ません。',
     },
     {
       q: '送ったリンクの金額や内容を変えたいときは？',
@@ -191,7 +191,7 @@ const EN: OrderLinkGuideContent = {
     'Open the “Order link” tab under “Sell”, and in “Settings” set your shop name, receiving wallet, receiving chain and payment method (the shop name appears on the customer’s payment screen; pick the chain your customers hold JPYC on, Polygon if unsure)',
     'Enter the item names, quantities and unit prices. Add shipping and a description only when needed',
     'Check the items and total in “What the customer sees”, then send it with “Copy link” or “Send”. The order number is fixed at this point',
-    'Ship only after you see the amount arrive in your receiving wallet',
+    'Paste the Tx Hash the customer sent into “Check a payment” and ship only after the amount has reached your receiving wallet',
     'Start the next order with “Next order”',
   ],
   payStepsTitle: 'How paying works (customer)',
@@ -219,7 +219,7 @@ const EN: OrderLinkGuideContent = {
   checks: [
     'Ship only after the amount shown in “Ship after … JPYC reaches your wallet” has reached your receiving wallet. For no-gas-fee orders, the amount after the fee arrives.',
     'Customers can edit the amount in the link. Check that the amount you received matches the order.',
-    'Payments from these links do not appear in your OpenPay history. Check your receiving wallet or the chain’s explorer.',
+    'Payments from these links do not appear in your OpenPay history. Paste the Tx Hash into “Check a payment” in the Order link tab, or check your receiving wallet.',
     'If two orders have the same amount, tell them apart by the Tx Hash the customer sends you.',
     'Links do not expire. Tell customers the payment deadline yourself.',
     'Do not put names or addresses in the link (they would end up in the URL).',
@@ -232,7 +232,7 @@ const EN: OrderLinkGuideContent = {
   faq: [
     {
       q: 'How do I know the customer has paid?',
-      a: 'Check for the incoming payment in your receiving wallet or on the chain’s explorer. Payments from these links do not appear in your OpenPay history. Ask the customer to send the Tx Hash so you can tell which order it is for.',
+      a: 'Ask the customer to send you the Tx Hash and paste it into “Check a payment” in the Order link tab to see how much reached your receiving wallet and when. Order numbers are not recorded on the chain, so match the amount and time to the order. Payments from these links do not appear in your OpenPay history.',
     },
     {
       q: 'What if I need to change the amount or items after sending?',
