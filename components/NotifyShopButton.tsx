@@ -22,6 +22,7 @@ import { chainForSlug, type ChainSlug } from '@/lib/chains';
 import { shortAddress } from '@/lib/format';
 import {
   orderConfirmationMessage,
+  recoverableSignature,
   storeConfirmationSignature,
   storedConfirmationSignature,
   subscribeConfirmationSignatures,
@@ -175,7 +176,9 @@ export function NotifyShopButton({
       // ecrecover で合わなければ、払ったウォレットをコントラクトのウォレット (ERC-1271) として確かめる (持ち主の署名を
       // 返すウォレットがある)。確かめられない (RPC が無い・失敗) ときは残す: お店の側でもう一度確かめる。
       if (payer) {
-        const signer = await recoverMessageAddress({ message, signature: result }).catch(() => null);
+        const signer = await recoverMessageAddress({ message, signature: recoverableSignature(result) }).catch(
+          () => null,
+        );
         if (!signer || !isAddressEqual(signer, payer)) {
           const valid = await client?.verifyMessage({ address: payer, message, signature: result }).catch(() => null);
           if (valid === false) {

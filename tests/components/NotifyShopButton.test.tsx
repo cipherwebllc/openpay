@@ -201,6 +201,20 @@ describe('NotifyShopButton (番号つきの注文)', () => {
     expect(publicClient.value.verifyMessage).toHaveBeenCalledWith(expect.objectContaining({ address: contractWallet }));
   });
 
+  it('ウォレットが短縮形 (EIP-2098) の署名を返しても、払ったウォレットの署名として残す', async () => {
+    const { parseSignature, serializeCompactSignature, signatureToCompactSignature } = await import('viem');
+    const payer = privateKeyToAccount(generatePrivateKey());
+    const d = data({ payer: payer.address });
+    account.address = payer.address;
+    publicClient.value = { verifyMessage: vi.fn(async () => false) };
+    signMessageAsync.mockImplementation(async ({ message }: { message: string }) =>
+      serializeCompactSignature(signatureToCompactSignature(parseSignature(await payer.signMessage({ message })))),
+    );
+    render(<NotifyShopButton {...d} tone="panel" />);
+    fireEvent.click(screen.getByRole('button', { name: 'お店に知らせる' }));
+    expect(await screen.findByText('確認の署名ができました。お店に送ってください。')).toBeInTheDocument();
+  });
+
   it('お店が確かめられない支払い (JPYC 以外) では署名を求めず、そのまま送れる', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     stubClipboard(writeText);
