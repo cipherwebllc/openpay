@@ -14,10 +14,13 @@ import { resolveJpycGaslessProvider } from './jpycGaslessProvider';
 import { isRecoverRoute, resolvePaymentRoute } from './paymentRoute';
 import { jpycForwarderFor } from './relay/forwarderConfig';
 import { recoverFeeValue } from './relay/recoverFee';
+import { parseDiscountAmount } from './discount';
 import { sameShopContact, type ShopContact } from './shopContact';
+import { taxDisplayDecimals } from './tax';
 import { deploymentForSlug, isGaslessSupported } from './tokens';
 import {
   buildCheckoutUrl,
+  calcCheckoutPayable,
   calcCheckoutTotal,
   CHECKOUT_MAX_ITEMS,
   CHECKOUT_QTY_MAX,
@@ -79,6 +82,11 @@ export type OrderLinkInput = {
   shipping: string;
   /** 送料の行の名前 (表示言語の文字列)。 */
   shippingLabel: string;
+  /**
+   * 値引き (任意・JPYC の 10 進・リンクの disc)。商品の合計 (送料を除く) より小さい 1 JPYC 単位の額。
+   * 'invalid' = 打った値引きが使えない (リンクを作らせない・理由は値引きの欄が出す)。
+   */
+  discount?: string | 'invalid';
 };
 
 export type OrderLinkError =
@@ -93,6 +101,7 @@ export type OrderLinkError =
   | 'noItems'
   | 'item'
   | 'shipping'
+  | 'discount'
   | 'tooManyLines'
   | 'tooSmall'
   | 'tooLarge'
@@ -164,6 +173,17 @@ export function orderLinkLineAmount(line: OrderLinkLine): string | null {
   return formatUnits(parseUnits(price, 18) * BigInt(line.qty.trim()), 18);
 }
 
+/**
+ * 値引きをかける額 = 商品の合計 (wei・送料を除く)。読める行だけを足す (打っている途中でも割引率の額を見せる)。
+ * 送料を除くのは、通販の「◯% 引き」は商品にかけるのが普通で、送料まで割り引くと店が思ったより多く引くため。
+ */
+export function orderLinkGoodsWei(lines: readonly OrderLinkLine[]): bigint {
+  return lines.reduce((sum, line) => {
+    const amount = orderLinkLineAmount(line);
+    return amount === null ? sum : sum + parseUnits(amount, 18);
+  }, 0n);
+}
+
 /** ガス代不要の上限を超えた注文を、通常決済に切り替えれば作れるか。 */
 export function orderLinkFitsStandard(total: string): boolean {
   return parseUnits(total, 18) <= ORDER_LINK_STANDARD_MAX_JPYC * 10n ** 18n;
@@ -209,6 +229,16 @@ export function buildOrderLink(input: OrderLinkInput): OrderLinkResult {
   if (filled.some((line) => !line.name.trim() || !line.price.trim())) return { ok: false, error: 'noItems' };
   const items = filled.map(toCheckoutItem);
 
+  // 値引きは商品の合計 (送料を除く) より小さい 1 JPYC 単位の額だけ (/checkout は送料を含めた小計と比べるので、これで必ず通る)。
+  const discount = input.discount ?? '';
+  if (
+    discount === 'invalid' ||
+    (discount !== '' &&
+      parseDiscountAmount(discount, calcCheckoutTotal(items, 18), 18, taxDisplayDecimals('jpyc')) === null)
+  ) {
+    return { ok: false, error: 'discount' };
+  }
+
   const shipping = input.shipping.trim();
   if (shipping !== '' && !DECIMAL_PATTERN.test(shipping)) return { ok: false, error: 'shipping' };
   // 送料 0 は行を出さない (/checkout は単価 0 の行を受け付けない)。
@@ -233,6 +263,7 @@ export function buildOrderLink(input: OrderLinkInput): OrderLinkResult {
     ...(description ? { description } : {}),
     ...(storeName ? { storeName } : {}),
     ...(contact ? { contact } : {}),
+    ...(discount ? { discount } : {}),
   });
 
   const parsed = parseCheckoutParams(new URL(url).searchParams);
@@ -251,6 +282,7 @@ export function buildOrderLink(input: OrderLinkInput): OrderLinkResult {
   if (!sameShopContact(parsed.params.contact, contact)) return { ok: false, error: 'invalid' };
   if ((parsed.params.description ?? '') !== description) return { ok: false, error: 'invalid' };
   if ((parsed.params.storeName ?? '') !== storeName) return { ok: false, error: 'invalid' };
+  if ((parsed.params.discount ?? '') !== discount) return { ok: false, error: 'discount' };
   // 受け付けるチェーンを読み直しで確かめる (使えないチェーンは /checkout が黙って外すので、ここで食い違いを止める)。
   const parsedChains = parsed.params.chains ?? [parsed.params.chain];
   if (parsedChains.length !== chains.length || parsedChains.some((chain, index) => chain !== chains[index])) {
@@ -258,7 +290,8 @@ export function buildOrderLink(input: OrderLinkInput): OrderLinkResult {
   }
 
   const { decimals } = deploymentForSlug('jpyc', primary);
-  const totalWei = calcCheckoutTotal(parsed.params.items, decimals);
+  // お客様が払う額 = 小計 − 値引き (/checkout と同じ関数)。上限・利用料・届く額はこの額で出す。
+  const totalWei = calcCheckoutPayable(parsed.params, decimals);
   const maximum = input.mode === 'standard' ? ORDER_LINK_STANDARD_MAX_JPYC : ORDER_LINK_GASLESS_MAX_JPYC;
   if (totalWei > maximum * 10n ** BigInt(decimals)) {
     return { ok: false, error: 'tooLarge', maximum: maximum.toString(), total: formatUnits(totalWei, decimals) };

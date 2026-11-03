@@ -1558,10 +1558,10 @@ describe('QrGenerator pre-split pinning (F-8 PR-21)', () => {
     expect(states).toMatchInlineSnapshot(`
       {
         "accountingFilled": {
-          "all": "b761c4cfd3dd9560fdc6e6cd38f7772f84be462a826787791a96ac1b03ccd039",
+          "all": "52da0c1cab872358b0ef9c0c0700986e91574f5ffe472e7830811eb0c1e2912e",
           "parts": [
             "div 77d610789dd9 ",
-            "div 90d950b5fd03 Cafe0x8335…2913J",
+            "div 01981ba9106b Cafe0x8335…2913J",
             "aside 3651b5379f53 請求金額880 JPYCQRコー",
             "div c2aed2ae5974 請求金額880 JPYCQRコー",
           ],
@@ -1586,19 +1586,19 @@ describe('QrGenerator pre-split pinning (F-8 PR-21)', () => {
           ],
         },
         "discountAmount": {
-          "all": "098464d014c15173b070aea05859109fbd0384ce7d064008065c9d22fd6eee10",
+          "all": "3b25eb14d983dc0ee13b56a326c9be49037b5136c22fec03ae05d3aacc902184",
           "parts": [
             "div 77d610789dd9 ",
-            "div 91d0f4ce6065 Cafe0x8335…2913J",
+            "div dd66a93740c4 Cafe0x8335…2913J",
             "aside 3651b5379f53 請求金額880 JPYCQRコー",
             "div c2aed2ae5974 請求金額880 JPYCQRコー",
           ],
         },
         "discountModal": {
-          "all": "7d86e8a85591034a3ef11aefdfb7ca1042df8bd454c2b4f561bd645dde5bc845",
+          "all": "e5d0efd6996656ed1cbad4411a0c97a3d6ee2f7b5a7ef85f51cefffd946e2842",
           "parts": [
             "div 77d610789dd9 ",
-            "div 57bcd04c576e Cafe0x8335…2913J",
+            "div 4e32a97b772b Cafe0x8335…2913J",
             "aside 3651b5379f53 請求金額880 JPYCQRコー",
             "div 0c68b4bd9fa2 決済用 QR コード閉じるOpe",
             "div c2aed2ae5974 請求金額880 JPYCQRコー",

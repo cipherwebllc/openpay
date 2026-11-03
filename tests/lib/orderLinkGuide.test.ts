@@ -75,6 +75,7 @@ describe('注文リンクのガイド (content)', () => {
       o.verifyTitle,
       o.kinds.single,
       o.kinds.reusable,
+      o.addDiscount,
       m.SuccessOverlay.sendOrder,
       m.SuccessOverlay.notifyShop,
       // 「ウォレットに {amount} JPYC 届いてから発送」は額を … にして引く。

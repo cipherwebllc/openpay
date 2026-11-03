@@ -145,6 +145,10 @@ const JA: OrderLinkGuideContent = {
       a: 'できます。設定の受取チェーンで 2 つ以上選ぶと、お客様は払う前にチェーンを選び、どのチェーンで払ってもお店の同じウォレットに届きます。「入金を確かめる」は選んだチェーンを全部探し、どのチェーンで払われたかを出します。Safe などのコントラクトのウォレットはチェーンごとに持ち主が違うことがあるので、受取チェーンは 1 つにしてください。2 つ以上を選ぶと画面がチェーン上で確かめて止めますが、まだ一度も使っていないウォレットは見分けられません。',
     },
     {
+      q: '値引きはできますか？',
+      a: 'できます。「値引きを追加」で金額か割引率を入れると、お客様の画面に小計・値引き・お支払いの額が出ます。割引率は商品の合計にかけ、送料にはかけません。「ウォレットに … JPYC 届いてから発送」の額も値引きの後の額で出ます。値引きは作っているリンクだけに入り、「次の注文へ」で外れます。',
+    },
+    {
       q: '送ったリンクの金額や内容を変えたいときは？',
       a: '新しいリンクを作って送り直してください。送ったリンクは取り消せず、期限もないので、どちらのリンクで払うかをお客様に伝えてください。',
     },
@@ -261,6 +265,10 @@ const EN: OrderLinkGuideContent = {
     {
       q: 'Can I accept more than one receiving chain?',
       a: 'Yes. Pick two or more receiving chains in Settings and customers choose a chain before paying; whichever they choose, the payment reaches the same shop wallet. “Check a payment” searches every chain you picked and shows which one was used. Contract wallets such as Safe can have different owners on each chain, so pick only one receiving chain for them. With two or more, the screen checks on-chain and stops, but it cannot spot a wallet that has never been used yet.',
+    },
+    {
+      q: 'Can I give a discount?',
+      a: 'Yes. Use “Add discount” to enter an amount or a percentage, and the customer’s screen shows the subtotal, the discount and the amount to pay. A percentage applies to the item total, not to shipping. The “Ship after … JPYC reaches your wallet” amount also uses the discounted total. The discount goes only into the link you are making and is cleared by “Next order”.',
     },
     {
       q: 'What if I need to change the amount or items after sending?',

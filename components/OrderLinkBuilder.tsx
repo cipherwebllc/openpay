@@ -12,6 +12,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Check, Copy, Plus, Send } from 'lucide-react';
 import { ChainChooser } from '@/components/ChainChooser';
+import { DiscountField } from '@/components/DiscountField';
 import {
   invalidClass,
   OrderLinkAmountField,
@@ -24,6 +25,7 @@ import { OrderLinkVerify } from '@/components/order-link/OrderLinkVerify';
 import { ShopSettingsSection, ShopSettingsSheet } from '@/components/ShopSettingsSheet';
 import { ShopSummaryRow } from '@/components/ShopSummaryRow';
 import { useCopyToClipboard, useHydrationSafeAvailable } from '@/hooks/useCopyToClipboard';
+import { useDiscountInput } from '@/hooks/useDiscountInput';
 import { useOrderLinkSettings } from '@/hooks/useOrderLinkSettings';
 import { useOrigin } from '@/hooks/useOrigin';
 import { useReceiverAutofill, type ReceiverSource } from '@/hooks/useReceiverAutofill';
@@ -39,6 +41,7 @@ import {
   nextOrderLinkId,
   orderLinkChains,
   orderLinkFitsStandard,
+  orderLinkGoodsWei,
   orderLinkLineIssues,
   orderLinkPreviewLines,
   ORDER_LINK_DESCRIPTION_MAX,
@@ -51,6 +54,7 @@ import {
   type OrderLinkResult,
 } from '@/lib/orderLink';
 import { SHOP_CONTACT_MAIL_MAX, shopContactFromInput } from '@/lib/shopContact';
+import { taxDisplayDecimals } from '@/lib/tax';
 import { CHECKOUT_MAX_ITEMS, CHECKOUT_QTY_MAX } from '@/lib/url/checkout';
 
 const MODES: readonly PayMode[] = ['gasless', 'standard'];
@@ -106,9 +110,13 @@ export function OrderLinkBuilder() {
   const currentUrl = useRef<string | null>(null);
 
   const typedItems = lines.some((line) => line.name !== '' || line.price !== '');
+  // 値引き (任意・この注文だけ・保存しない)。レジ・決済QR と同じ欄と計算で、商品の合計 (送料を除く) から引く。
+  const goodsWei = useMemo(() => orderLinkGoodsWei(lines), [lines]);
+  const discount = useDiscountInput(goodsWei, 18, taxDisplayDecimals('jpyc'));
+  const { reset: resetDiscount } = discount;
   // 取り込みの保留は使う人が打った内容だけで決める。自動の番号や覚えた送料で保留すると、別のタブの設定が永久に入らない。
   const { settings, setSettings, hydrated } = useOrderLinkSettings({
-    holdImport: typedItems || description !== '' || orderIdInput !== null,
+    holdImport: typedItems || description !== '' || orderIdInput !== null || discount.raw !== '',
   });
   const autoOrderId = settings.lastOrderId ? nextOrderLinkId(settings.lastOrderId) : ORDER_LINK_FIRST_ID;
   const reusable = settings.linkKind === 'reusable';
@@ -176,6 +184,7 @@ export function OrderLinkBuilder() {
         lines,
         shipping: settings.shipping,
         shippingLabel,
+        discount: discount.invalid ? 'invalid' : discount.param,
       }),
     [
       origin,
@@ -190,6 +199,8 @@ export function OrderLinkBuilder() {
       description,
       lines,
       shippingLabel,
+      discount.invalid,
+      discount.param,
     ],
   );
   // 受取チェーンが 2 つ以上なら、受取ウォレットがどれかのチェーンでコントラクトのウォレットでないかを確かめてから
@@ -277,6 +288,7 @@ export function OrderLinkBuilder() {
     setModeOverride(null);
     setDescription('');
     setDescriptionOpen(false);
+    resetDiscount();
     setLines([newLine()]);
     setFocusFirstLine(true);
   };
@@ -416,6 +428,19 @@ export function OrderLinkBuilder() {
                 {t('addDescription')}
               </button>
             )}
+            {/* 開いた後の欄はレジと同じ DiscountField。閉じているときのボタンだけ、この画面の「＋ 追加」に揃える
+                (「外す」で focus を戻す先として addRef を付ける)。 */}
+            {!discount.open && (
+              <button
+                ref={discount.addRef}
+                type="button"
+                onClick={discount.add}
+                className="inline-flex h-11 items-center gap-1.5 text-sm font-medium text-brand hover:text-brand-dark"
+              >
+                <Plus className="h-4 w-4" aria-hidden />
+                {t('addDiscount')}
+              </button>
+            )}
           </div>
 
           {descriptionOpen && (
@@ -432,6 +457,13 @@ export function OrderLinkBuilder() {
                 className={ORDER_LINK_INPUT_CLASS}
               />
               <p className="mt-1.5 text-xs text-slate-500">{t('noPersonalData')}</p>
+            </div>
+          )}
+
+          {discount.open && (
+            <div className="text-sm">
+              <DiscountField discount={discount} idPrefix="order-link" symbol="JPYC" decimals={18} />
+              <p className="mt-1.5 text-xs text-slate-500">{t('discountHint')}</p>
             </div>
           )}
 
@@ -493,6 +525,7 @@ export function OrderLinkBuilder() {
           storeName={settings.storeName}
           description={description}
           lines={previewLines}
+          discount={discount.param ?? null}
           message={errorText}
           messageIsError={blocked}
           sentLabel={sentLabel}
