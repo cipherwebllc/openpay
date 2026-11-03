@@ -126,10 +126,11 @@ export function OptionSelectModal({
                   return (
                     <label
                       key={c.id}
-                      className="flex cursor-pointer items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 has-[:checked]:border-brand has-[:checked]:bg-brand/5"
+                      className="flex min-h-11 cursor-pointer items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 has-[:checked]:border-brand has-[:checked]:bg-brand/5"
                     >
                       <input
                         type={g.type === 'single' ? 'radio' : 'checkbox'}
+                        className="h-4 w-4"
                         name={`opt-${g.id}`}
                         checked={checked}
                         onChange={() =>
@@ -153,14 +154,14 @@ export function OptionSelectModal({
             <button
               type="button"
               onClick={onClose}
-              className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
+              className="min-h-11 rounded-lg border border-slate-300 px-4 text-sm font-medium text-slate-600 hover:bg-slate-50"
             >
               {t('cancel')}
             </button>
             <button
               type="button"
               onClick={confirm}
-              className="rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white hover:bg-brand-dark"
+              className="min-h-11 rounded-lg bg-brand px-4 text-sm font-semibold text-white hover:bg-brand-dark"
             >
               {t('addToCart')}
             </button>

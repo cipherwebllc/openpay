@@ -56,16 +56,17 @@ export function MobileOrderBridge({
         <button
           type="button"
           onClick={onStart}
-          className="mt-0.5 inline-flex items-center gap-1 text-xs font-semibold text-brand hover:underline"
+          className="relative mt-0.5 inline-flex items-center gap-1 py-0.5 text-xs font-semibold text-brand after:absolute after:-inset-x-2 after:-inset-y-3 after:content-[''] hover:underline"
         >
           {t('cta')}
           <ArrowRight className="h-3.5 w-3.5" aria-hidden />
         </button>
       </div>
+      {/* × は押せる範囲 44px。-m-1.5 で 1 枚の高さは変えない。 */}
       <button
         type="button"
         onClick={onDismiss}
-        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-slate-500 hover:bg-white hover:text-slate-700"
+        className="-m-1.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-slate-500 hover:bg-white hover:text-slate-700"
       >
         <X className="h-4 w-4" aria-hidden />
         <span className="sr-only">{t('dismiss')}</span>

@@ -748,10 +748,11 @@ function RegisterModeContent({
                 <h2 id="register-products-heading" className="text-sm font-semibold text-slate-700">
                   {t('presetsLabel')}
                 </h2>
+                {/* 文字だけのボタンは after: で押せる範囲を上下に広げ (高さ 44px)、見た目は変えない。 */}
                 <button
                   type="button"
                   onClick={() => setProductsOpen(true)}
-                  className="inline-flex items-center gap-1 text-xs font-semibold text-brand hover:underline"
+                  className="relative inline-flex items-center gap-1 py-0.5 text-xs font-semibold text-brand after:absolute after:-inset-x-2 after:-inset-y-3 after:content-[''] hover:underline"
                 >
                   <Pencil className="h-3.5 w-3.5" aria-hidden />
                   {t('presetManagerTitle')}
@@ -764,7 +765,7 @@ function RegisterModeContent({
                     type="button"
                     onClick={() => setCatFilter(null)}
                     aria-pressed={effectiveCatFilter === null}
-                    className={`rounded-full border px-2.5 py-0.5 text-xs font-medium transition ${
+                    className={`inline-flex min-h-11 items-center rounded-full border px-3.5 text-sm font-medium transition ${
                       effectiveCatFilter === null
                         ? 'border-brand bg-brand text-white'
                         : 'border-slate-300 text-slate-600 hover:border-brand'
@@ -780,7 +781,7 @@ function RegisterModeContent({
                         type="button"
                         onClick={() => setCatFilter(c)}
                         aria-pressed={effectiveCatFilter === c}
-                        className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium transition ${
+                        className={`inline-flex min-h-11 items-center gap-1.5 rounded-full border px-3.5 text-sm font-medium transition ${
                           effectiveCatFilter === c
                             ? 'border-brand bg-brand text-white'
                             : 'border-slate-300 text-slate-600 hover:border-brand'
@@ -1152,9 +1153,10 @@ function RegisterModeContent({
           <p className="px-1 text-xs leading-relaxed text-slate-600">{t('mobileOrderBridge.sheetNote')}</p>
         )}
         {env.enableShopLive && (
-          <label className="flex items-center gap-2 px-1 text-xs text-slate-600">
+          <label className="flex min-h-11 items-center gap-2 px-1 text-xs text-slate-600">
             <input
               type="checkbox"
+              className="h-4 w-4"
               checked={showImages}
               onChange={(e) =>
                 setSettings((s) => ({ ...s, showPresetImages: e.target.checked }))

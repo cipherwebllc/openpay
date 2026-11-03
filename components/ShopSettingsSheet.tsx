@@ -52,14 +52,14 @@ export function ShopSettingsSheet({
         onClick={(e) => e.stopPropagation()}
         className="relative flex h-full w-full max-w-md flex-col bg-slate-50 shadow-2xl outline-none sm:rounded-l-2xl"
       >
-        <div className="flex items-center justify-between gap-3 border-b border-slate-200 bg-white px-5 py-4 sm:rounded-tl-2xl">
+        <div className="flex items-center justify-between gap-3 border-b border-slate-200 bg-white px-5 py-3 sm:rounded-tl-2xl">
           <h2 id="shop-settings-title" className="text-base font-semibold text-slate-900">
             {title}
           </h2>
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white hover:bg-brand-dark"
+            className="h-11 rounded-lg bg-brand px-5 text-sm font-semibold text-white hover:bg-brand-dark"
           >
             {doneLabel}
           </button>
