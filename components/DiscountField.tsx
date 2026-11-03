@@ -53,7 +53,8 @@ export function DiscountField({
           {discount.wei !== null ? `−${groupAmountDigits(formatUnits(discount.wei, decimals))} ${symbol}` : '—'}
         </span>
       </div>
-      <div className="mt-2 flex items-center gap-2">
+      {/* 狭い画面 (320〜360px) では入力欄を縮めず「外す」を次の行へ送る (縮めると 20px 台になり打った額が見えない)。 */}
+      <div className="mt-2 flex flex-wrap items-center gap-2">
         <div className="inline-flex shrink-0 rounded-lg bg-slate-100 p-0.5 text-xs">
           {(['amount', 'percent'] as const).map((mode) => (
             <button
@@ -83,7 +84,7 @@ export function DiscountField({
           placeholder={discount.mode === 'amount' ? '20' : '2'}
           aria-invalid={discount.invalid}
           aria-describedby={discount.invalid ? errorId : undefined}
-          className="h-11 w-20 min-w-0 rounded-lg border border-slate-300 bg-white px-2.5 text-right text-base tabular-nums placeholder:text-slate-500 focus:border-brand focus:outline-none sm:text-sm"
+          className="h-11 w-20 shrink-0 rounded-lg border border-slate-300 bg-white px-2.5 text-right text-base tabular-nums placeholder:text-slate-500 focus:border-brand focus:outline-none sm:text-sm"
         />
         <span className="text-sm text-slate-600">{discount.mode === 'amount' ? symbol : '%'}</span>
         <button

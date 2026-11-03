@@ -7,6 +7,7 @@
 import Link from 'next/link';
 import { AlertTriangle, Check, ChevronDown, Copy, ExternalLink, Send } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
+import { formatUnits, parseUnits } from 'viem';
 import { groupAmountDigits } from '@/lib/amount';
 import { chainForSlug } from '@/lib/chains';
 import type { OrderLinkPreviewLine, OrderLinkResult } from '@/lib/orderLink';
@@ -23,6 +24,7 @@ export function OrderLinkPreview({
   storeName,
   description,
   lines,
+  discount,
   message,
   messageIsError,
   sentLabel,
@@ -46,6 +48,8 @@ export function OrderLinkPreview({
   storeName: string;
   description: string;
   lines: readonly OrderLinkPreviewLine[];
+  /** 値引き (JPYC の 10 進・使える値引きがあるときだけ)。お客様の画面と同じく 小計 / 値引き / 合計 の順に出す。 */
+  discount: string | null;
   /** リンクができていないときの 1 文。 */
   message: string | null;
   /** 入力を直さないと進めない理由か (入力の途中なら false)。 */
@@ -110,6 +114,22 @@ export function OrderLinkPreview({
           </ul>
         ) : (
           <p className="mt-3 text-sm text-slate-500">{message}</p>
+        )}
+
+        {/* 値引きがあれば、合計 (= お客様が払う額・値引き後) の上に小計と値引きを出す (/checkout の明細と同じ並び)。 */}
+        {result.total !== undefined && discount !== null && (
+          <dl className="mt-3 space-y-1 border-t border-slate-100 pt-3 text-sm">
+            <div className="flex items-baseline justify-between gap-3">
+              <dt className="text-slate-500">{t('previewSubtotal')}</dt>
+              <dd className="tabular-nums text-slate-900">
+                {groupAmountDigits(formatUnits(parseUnits(result.total, 18) + parseUnits(discount, 18), 18))} JPYC
+              </dd>
+            </div>
+            <div className="flex items-baseline justify-between gap-3">
+              <dt className="text-slate-500">{t('previewDiscount')}</dt>
+              <dd className="tabular-nums text-rose-700">−{groupAmountDigits(discount)} JPYC</dd>
+            </div>
+          </dl>
         )}
 
         {/* 止まっている間も合計は見せる (いくら超えたかが分かるように)。 */}

@@ -65,9 +65,11 @@ describe('値引き (disc) の URL', () => {
   it.each([
     ['fee_kind=storefront', 'fee_kind=storefront'],
     ['fee_kind=preorder', 'fee_kind=preorder'],
-    ['order_id', 'order_id=abc'],
     ['store_handle', 'store_handle=shop'],
     ['order_id + fee_kind (store_handle なし)', 'order_id=abc&fee_kind=storefront'],
+    ['order_id + 廃止前の fee_kind=register', 'order_id=abc&fee_kind=register'],
+    ['order_id + 受注 notify の webhook', `order_id=abc&webhook=${encodeURIComponent('https://open-pay.jp/api/order/notify?h=shop')}`],
+    ['order_id + 空の store_handle', 'order_id=abc&store_handle='],
     ['空の store_handle + fee_kind (admission を飛ばさせない)', 'store_handle=&fee_kind=storefront'],
   ])('店舗の値引きと照合できないモバイル注文の URL (%s) とは併用できない', (_label, extra) => {
     const r = parse(`${queryOf(pathOf())}&disc=20&${extra}`);
@@ -80,6 +82,18 @@ describe('値引き (disc) の URL', () => {
     ['store_handle + fee_kind=storefront', 'store_handle=shop&fee_kind=storefront'],
     ['store_handle + fee_kind=preorder + order_id', 'store_handle=shop&fee_kind=preorder&order_id=abc'],
   ])('@handle のモバイル注文 (%s) は店舗の値引きを載せられる (署名前に公開設定と照合)', (_label, extra) => {
+    const r = parse(`${queryOf(pathOf())}&disc=20&${extra}`);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.params.discount).toBe('20');
+    expect(calcCheckoutPayable(r.params, 18)).toBe(J('980'));
+  });
+
+  it.each([
+    ['order_id (注文リンクの受付番号)', 'order_id=A-001'],
+    ['order_id + ship=ask + contact', 'order_id=A-001&ship=ask&contact=line%3A%40openpay'],
+    ['ship=ask (何度でも使えるリンク・番号なし)', 'ship=ask'],
+  ])('注文リンク・開発者の URL (%s) はお店が入れた値引きを載せられる (受注 notify も店舗設定もない)', (_label, extra) => {
     const r = parse(`${queryOf(pathOf())}&disc=20&${extra}`);
     expect(r.ok).toBe(true);
     if (!r.ok) return;

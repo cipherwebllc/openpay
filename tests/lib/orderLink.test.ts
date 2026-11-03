@@ -35,12 +35,13 @@ import {
   orderLinkChains,
   orderLinkLineIssues,
   orderLinkFitsStandard,
+  orderLinkGoodsWei,
   orderLinkLineAmount,
   orderLinkPreviewLines,
   type OrderLinkInput,
 } from '@/lib/orderLink';
 import { deploymentForSlug, isGaslessSupported } from '@/lib/tokens';
-import { parseCheckoutParams } from '@/lib/url/checkout';
+import { calcCheckoutPayable, parseCheckoutParams } from '@/lib/url/checkout';
 
 const TO = '0x52d4901142e2B5680027da5EB47C86CB02a3cA81' as Address;
 
@@ -267,6 +268,65 @@ describe('buildOrderLink', () => {
   it('合計が利用料以下ならリンクを作らない (/checkout が止める額を渡さない)', () => {
     const result = buildOrderLink(input({ lines: [{ name: 'ステッカー', qty: '1', price: '2' }], shipping: '' }));
     expect(result).toEqual({ ok: false, error: 'tooSmall', minimum: '2', total: '2' });
+  });
+});
+
+describe('値引き (disc)', () => {
+  it('値引きはリンクの disc に入り、/checkout で読み直すと払う額 = 小計 − 値引き。利用料と届く額は値引きの後の額で出す', () => {
+    // 商品 6000 + 送料 500 = 6500 から 1000 引き → 5500・利用料 1% = 55 → 届く 5445
+    const result = buildOrderLink(input({ discount: '1000' }));
+    expect(result).toMatchObject({ ok: true, total: '5500', fee: '55', receive: '5445' });
+    const url = okUrl(result);
+    expect(url.searchParams.get('disc')).toBe('1000');
+    // 受付番号 (order_id) つきのリンクでも /checkout が受け付ける
+    expect(url.searchParams.get('order_id')).toBe('A-001');
+    const parsed = parseCheckoutParams(url.searchParams);
+    if (!parsed.ok) throw new Error(parsed.error);
+    expect(parsed.params.discount).toBe('1000');
+    expect(calcCheckoutPayable(parsed.params, 18)).toBe(5500n * 10n ** 18n);
+  });
+
+  it('値引きなしのリンクは今までと同じ (disc を出さない)', () => {
+    expect(okUrl(buildOrderLink(input())).searchParams.has('disc')).toBe(false);
+    expect(okUrl(buildOrderLink(input({ discount: '' }))).searchParams.has('disc')).toBe(false);
+  });
+
+  it('何度でも使えるリンクにも入る', () => {
+    const url = okUrl(buildOrderLink(input({ reusable: true, orderId: '', discount: '500' })));
+    expect(url.searchParams.get('disc')).toBe('500');
+    expect(parseCheckoutParams(url.searchParams).ok).toBe(true);
+  });
+
+  it('使えない値引き (欄の誤り・商品の合計以上・1 円単位でない) ではリンクを作らない', () => {
+    expect(buildOrderLink(input({ discount: 'invalid' }))).toEqual({ ok: false, error: 'discount' });
+    // 商品の合計は 6000 (送料を除く)。送料を含めた 6500 未満でも、商品の合計以上は止める
+    expect(buildOrderLink(input({ discount: '6000' }))).toEqual({ ok: false, error: 'discount' });
+    expect(buildOrderLink(input({ discount: '0.5' }))).toEqual({ ok: false, error: 'discount' });
+    expect(buildOrderLink(input({ discount: '5999' })).ok).toBe(true);
+  });
+
+  it('上限と少額の判定は値引きの後の額で行う', () => {
+    const big = (discount?: string) =>
+      buildOrderLink(input({ lines: [{ name: '機材', qty: '1', price: '50100' }], shipping: '', discount }));
+    expect(big()).toMatchObject({ ok: false, error: 'tooLarge', total: '50100' });
+    expect(big('100')).toMatchObject({ ok: true, total: '50000' });
+    const small = buildOrderLink(input({ lines: [{ name: 'ステッカー', qty: '1', price: '5' }], shipping: '', discount: '3' }));
+    expect(small).toEqual({ ok: false, error: 'tooSmall', minimum: '2', total: '2' });
+  });
+});
+
+describe('orderLinkGoodsWei', () => {
+  it('リンクに入る行 (商品名と単価が読める行) の金額だけを足し、送料は入れない', () => {
+    expect(
+      orderLinkGoodsWei([
+        { name: 'Tシャツ', qty: '2', price: '3000' },
+        { name: 'マグ', qty: '1', price: '200' },
+        { name: 'ステッカー', qty: '1', price: '' },
+        { name: '', qty: '1', price: '200' },
+        { name: 'バッジ', qty: '0', price: '100' },
+      ]),
+    ).toBe(6200n * 10n ** 18n);
+    expect(orderLinkGoodsWei([])).toBe(0n);
   });
 });
 

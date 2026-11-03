@@ -454,6 +454,9 @@ export function parseCheckoutParams(
   // (黙って値引きなしに倒すと、お店が決めた額より多く払わせる)。モバイル注文の URL で許すのは、店舗の値引きの
   // 正本 (公開した storefront) と署名前に照合できる @handle の注文 (store_handle と fee_kind storefront/preorder が
   // そろう = CheckoutForm が admission を呼ぶ条件・plans/discount-common.md) だけ。それ以外の組合せは従来どおり止める。
+  // 注文リンク (/create・lib/orderLink.ts) と開発者の /checkout は order_id を受付番号の表示と success_url への受け渡しに
+  // だけ使い、fee_kind・store_handle・webhook (受注 notify と注文の結びつけ) を持たない。その URL の値引きはお店がリンクを
+  // 作るときに入れた額なので許す (照合する店舗設定が無く、受注 notify も走らない・2026-11-03 user「進めて」)。
   let discount: string | undefined;
   if (discountRaw !== null) {
     const discountWei = parseDiscountAmount(
@@ -462,7 +465,9 @@ export function parseCheckoutParams(
       decimals,
       taxDisplayDecimals(token),
     );
-    const mobileOrderUrl = isMobileOrderFeeKind(feeKindRaw) || orderId !== null || storeHandle !== null;
+    const plainOrderUrl = orderId !== null && feeKindRaw === null && storeHandle === null && webhook === null;
+    const mobileOrderUrl =
+      isMobileOrderFeeKind(feeKindRaw) || (orderId !== null && !plainOrderUrl) || storeHandle !== null;
     // 「@handle の注文」は parse 後の store_handle が空でないこと (CheckoutForm が admission を呼ぶのと同じ値で判定・
     // store_handle= の空値で照合を飛ばさせない)。
     const handleOrder = Boolean(storeHandleParam) && isMobileOrderFeeKind(feeKindRaw);

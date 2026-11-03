@@ -152,6 +152,56 @@ describe('OrderLinkBuilder', () => {
     expect(screen.getByRole('link', { name: '開いて確かめる' }).getAttribute('href')).toContain('order_id=A-001');
   });
 
+  it('値引きを追加すると、見本に小計と値引きを出し、合計・届く額・リンク (disc) を値引きの後の額にする', async () => {
+    saved();
+    stubClipboard();
+    render(<OrderLinkBuilder />);
+    await screen.findByRole('button', { name: '設定' });
+    fillItem();
+    fireEvent.click(screen.getByRole('button', { name: '値引きを追加' }));
+    // 開くと入力欄に移り、閉じたときのボタンは消える
+    const amount = screen.getByLabelText('値引きの金額');
+    expect(amount).toHaveFocus();
+    expect(screen.queryByRole('button', { name: '値引きを追加' })).toBeNull();
+    fireEvent.change(amount, { target: { value: '1000' } });
+    // 商品 6,000 + 送料 500 = 小計 6,500 から 1,000 引き → 5,500・利用料 55 → 届く 5,445
+    expect(await screen.findByText('小計')).toBeInTheDocument();
+    expect(screen.getAllByText('−1,000 JPYC').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('5,500 JPYC').length).toBeGreaterThan(0);
+    expect(screen.getByText('ウォレットに 5,445 JPYC 届いてから発送')).toBeInTheDocument();
+    const link = screen.getByRole('link', { name: '開いて確かめる' }) as HTMLAnchorElement;
+    expect(new URL(link.href).searchParams.get('disc')).toBe('1000');
+    expect(new URL(link.href).searchParams.get('order_id')).toBe('A-001');
+    // 割引率は商品の合計 (送料を除く 6,000) にかける: 10% → 600 引き
+    fireEvent.click(screen.getByRole('button', { name: '割引率' }));
+    fireEvent.change(screen.getByLabelText('割引率 (%)'), { target: { value: '10' } });
+    expect(await screen.findByText('ウォレットに 5,841 JPYC 届いてから発送')).toBeInTheDocument();
+    expect(new URL((screen.getByRole('link', { name: '開いて確かめる' }) as HTMLAnchorElement).href).searchParams.get('disc')).toBe('600');
+    // 次の注文へで外れる (保存しない)
+    await copyLink();
+    fireEvent.click(screen.getAllByRole('button', { name: '次の注文へ' })[0]);
+    expect(await screen.findByRole('button', { name: '値引きを追加' })).toBeInTheDocument();
+    expect(screen.queryByLabelText('割引率 (%)')).toBeNull();
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}')).not.toHaveProperty('discount');
+  });
+
+  it('使えない値引き (商品の合計以上) ではリンクを作らず、値引きを直すよう伝える', async () => {
+    saved();
+    render(<OrderLinkBuilder />);
+    await screen.findByRole('button', { name: '設定' });
+    fillItem();
+    fireEvent.click(screen.getByRole('button', { name: '値引きを追加' }));
+    // 送料を含めた 6,500 未満でも、商品の合計 6,000 以上は使えない
+    fireEvent.change(screen.getByLabelText('値引きの金額'), { target: { value: '6000' } });
+    expect(await screen.findByText('値引き前の金額より小さい金額を、1 JPYC 単位で入れてください')).toBeInTheDocument();
+    expect(screen.getAllByText('値引きを直してください。').length).toBeGreaterThan(0);
+    expect(screen.queryByRole('link', { name: '開いて確かめる' })).toBeNull();
+    // 外すと元に戻り、「値引きを追加」に focus が戻る
+    fireEvent.click(screen.getByRole('button', { name: '外す' }));
+    expect(screen.getByRole('button', { name: '値引きを追加' })).toHaveFocus();
+    expect(new URL((screen.getByRole('link', { name: '開いて確かめる' }) as HTMLAnchorElement).href).searchParams.has('disc')).toBe(false);
+  });
+
   it('「何度でも使える」は番号の欄を出さず ship=ask のリンクにし、渡しても番号を進めない (種類は端末に残す)', async () => {
     saved();
     stubClipboard();
