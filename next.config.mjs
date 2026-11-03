@@ -125,6 +125,13 @@ function enforcedCsp(frameAncestors) {
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  // Vercel の build では型の検査と ESLint を回さない。2026-11-03 #976 の Production デプロイで、compile の後の
+  // 「Linting and checking validity of types」の途中に build コンテナのメモリを使い切って SIGKILL になった
+  // (それまでは同じ構成で通っていた・手元の測定でこの段がいちばん重い)。型と lint は CI が merge 前に必ず通す:
+  // npm run typecheck (tsconfig.json = 全ファイル)・npm run lint・CI の next build (VERCEL が無いので型の検査を含む)。
+  // build の型の検査はアプリが読むコード (tsconfig.build.json) だけにし、tests・e2e・scripts を重ねない。
+  typescript: { tsconfigPath: 'tsconfig.build.json', ignoreBuildErrors: process.env.VERCEL === '1' },
+  eslint: { ignoreDuringBuilds: true },
   // Next は node_modules の構文を既定のターゲット (Safari 12 / Chrome 64 等) へ下げない。intl-messageformat
   // (next-intl → use-intl 経由) はクラスの static 初期化ブロック (ES2022) をそのまま出荷しており、[locale] の
   // layout が読む chunk に入るため、static ブロックを読めない Safari / iOS 16.4 未満・Chrome 94 未満・Firefox 93 未満
