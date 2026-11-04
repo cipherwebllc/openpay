@@ -7,6 +7,7 @@
 import type { ReactNode } from 'react';
 import { ArrowDown, ArrowRight } from 'lucide-react';
 import { keepNumbersTogether } from '@/lib/guideText';
+import { withUiNames } from '@/components/guide/GuideUiNames';
 import type { GuideImage, GuideStep } from '@/lib/posGuide';
 
 // public/guide/<file> の SVG 図版の intrinsic 寸法 (CLS 防止の width/height 用)。
@@ -95,13 +96,21 @@ export const STEP_BADGE =
 export const STEP_BADGE_CUSTOMER =
   'flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-blue-600 text-sm font-bold text-white';
 
-/** `badgeClassName` にお客様の手順は STEP_BADGE_CUSTOMER を渡す (既定はお店の STEP_BADGE)。 */
+/**
+ * `badgeClassName` にお客様の手順は STEP_BADGE_CUSTOMER を渡す (既定はお店の STEP_BADGE)。
+ * `extras` は手順の番号ごとに本文の下へ足すもの (その手順の「くわしく」や図・使う場所に置く)。
+ * `uiNames` は本文の「…」(画面の名前) を太くする (GuideUiNames)。
+ */
 export function StepList({
   steps,
   badgeClassName = STEP_BADGE,
+  extras,
+  uiNames = false,
 }: {
   steps: readonly GuideStep[];
   badgeClassName?: string;
+  extras?: Readonly<Partial<Record<number, ReactNode>>>;
+  uiNames?: boolean;
 }) {
   return (
     <ol className="mt-4 space-y-4">
@@ -110,11 +119,12 @@ export function StepList({
           <span className={badgeClassName}>
             {step.n}
           </span>
-          <div>
+          <div className="min-w-0 flex-1">
             <p className="text-sm font-semibold text-slate-900">{step.title}</p>
             <p className="mt-1 text-sm leading-relaxed text-slate-700">
-              {step.body}
+              {uiNames ? withUiNames(step.body) : step.body}
             </p>
+            {extras?.[step.n]}
           </div>
         </li>
       ))}

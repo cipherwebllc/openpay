@@ -5,6 +5,9 @@
 // - お店の責任の文は画面 (OrderLinkBuilder.sellerDuty) と同じ
 
 import { describe, expect, it } from 'vitest';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
+import sharp from 'sharp';
 import ja from '../../messages/ja.json';
 import en from '../../messages/en.json';
 import { guideNavFor } from '@/lib/guideNav';
@@ -21,8 +24,13 @@ function allText(c: OrderLinkGuideContent): string[] {
     c.ctaCreate,
     ...c.forWhoChips,
     ...c.features.flatMap((f) => [f.title, f.body]),
-    ...c.steps,
-    ...c.paySteps,
+    ...c.steps.flatMap((s) => [s.title, s.body]),
+    c.previewShot.alt,
+    c.previewShot.caption,
+    c.settingsLabel,
+    ...c.settings.flatMap((s) => [s.label, s.body]),
+    ...c.paySteps.flatMap((s) => [s.title, s.body]),
+    c.payNoWallet,
     c.feeGasless.focal,
     c.feeGasless.title,
     c.feeGasless.body,
@@ -30,7 +38,9 @@ function allText(c: OrderLinkGuideContent): string[] {
     c.feeStandard.title,
     c.feeStandard.body,
     c.feeLimit,
-    ...c.checks,
+    c.checksLead,
+    ...c.checks.flatMap((x) => [x.title, x.body]),
+    ...c.checksNotes,
     c.sellerDuty,
     ...c.faq.flatMap((f) => [f.q, f.a]),
     c.ctaTitle,
@@ -47,7 +57,9 @@ describe('注文リンクのガイド (content)', () => {
     expect(a.features).toHaveLength(b.features.length);
     expect(a.steps).toHaveLength(b.steps.length);
     expect(a.paySteps).toHaveLength(b.paySteps.length);
+    expect(a.settings).toHaveLength(b.settings.length);
     expect(a.checks).toHaveLength(b.checks.length);
+    expect(a.checksNotes).toHaveLength(b.checksNotes.length);
     expect(a.faq).toHaveLength(b.faq.length);
   });
 
@@ -73,6 +85,9 @@ describe('注文リンクのガイド (content)', () => {
       o.previewTitle,
       o.settingsOpen,
       o.verifyTitle,
+      o.verifyButton,
+      // 「受取ウォレットに {amount} JPYC 届いています」(入金を確かめるの結果) も額を … にして引く。
+      o.verifyPaid.replace('{amount}', '…'),
       o.kinds.single,
       o.kinds.reusable,
       o.addDiscount,
@@ -88,6 +103,14 @@ describe('注文リンクのガイド (content)', () => {
     const quoted = allText(orderLinkGuideContentFor(locale)).flatMap((text) => [...text.matchAll(quote)].map((x) => x[1]));
     expect(quoted.length).toBeGreaterThan(5);
     for (const q of quoted) expect(known.has(q), `${locale}: 画面に無い名前「${q}」`).toBe(true);
+  });
+
+  it.each(['ja', 'en'] as const)('%s: 手順の横の図は実在し、幅と高さが画像と一致する', async (locale) => {
+    const shot = orderLinkGuideContentFor(locale).previewShot;
+    const file = join('public', 'guide', 'order-link', shot.file);
+    expect(existsSync(file)).toBe(true);
+    const meta = await sharp(file).metadata();
+    expect([meta.width, meta.height]).toEqual([shot.width, shot.height]);
   });
 
   it.each(['ja', 'en'] as const)('%s: お店の責任の文は画面と同じ', (locale) => {

@@ -6,6 +6,7 @@ import type { ReactNode } from 'react';
 import Link from 'next/link';
 import { Check } from 'lucide-react';
 import { keepNumbersTogether } from '@/lib/guideText';
+import { withUiNames } from '@/components/guide/GuideUiNames';
 
 /** 文字の子は数字と単位を離さない (keepNumbersTogether)。要素の子はそのまま。 */
 function keepNumbers(children: ReactNode): ReactNode {
@@ -118,18 +119,30 @@ function isLongText(text: string): boolean {
  * (PC は 2 列)。スマホで 1 機能 = 1 枚のカードが縦に続き、同じ形の箱で疲れていたのを軽くする
  * (plans/guide-ux-polish-2.md P3)。見出しは h3 (節の h2 の下)。
  */
-export function GuideFeatureList({ items }: { items: readonly { readonly title: string; readonly body: string }[] }) {
+export function GuideFeatureList({
+  items,
+  columns = 2,
+  uiNames = false,
+}: {
+  items: readonly { readonly title: string; readonly body: string }[];
+  /** 1 = PC でも 1 列 (発送の前の確認など、上から順に読ませる短い一覧)。 */
+  columns?: 1 | 2;
+  /** 本文の「…」(画面の名前) を太くする (GuideUiNames)。 */
+  uiNames?: boolean;
+}) {
   return (
-    <ul className="mt-4 grid grid-cols-1 gap-x-8 gap-y-5 rounded-2xl bg-white p-5 shadow-card ring-1 ring-slate-200/70 sm:grid-cols-2 sm:p-6">
+    <ul
+      className={`mt-4 grid grid-cols-1 gap-x-8 gap-y-5 rounded-2xl bg-white p-5 shadow-card ring-1 ring-slate-200/70 sm:p-6 ${columns === 2 ? 'sm:grid-cols-2' : ''}`}
+    >
       {items.map((f) => (
         // 説明の長い項目 (条件つきの機能など) は 2 列の片側に細長く積まず、横いっぱいにする (P5)。
-        <li key={f.title} className={`flex items-start gap-3 ${isLongText(f.body) ? 'sm:col-span-2' : ''}`}>
+        <li key={f.title} className={`flex items-start gap-3 ${columns === 2 && isLongText(f.body) ? 'sm:col-span-2' : ''}`}>
           <span className="mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full bg-emerald-50 ring-1 ring-inset ring-emerald-200/70">
             <Check className="h-3 w-3 text-emerald-700" aria-hidden strokeWidth={3} />
           </span>
           <div className="min-w-0">
             <h3 className="text-sm font-bold text-slate-900">{f.title}</h3>
-            <p className="mt-1 text-sm leading-relaxed text-slate-600">{f.body}</p>
+            <p className="mt-1 text-sm leading-relaxed text-slate-600">{uiNames ? withUiNames(f.body) : f.body}</p>
           </div>
         </li>
       ))}
