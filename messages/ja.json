@@ -346,7 +346,10 @@
     "categoryNotice": "お知らせ",
     "bellAria": "お知らせを開く",
     "unreadAria": "お知らせ ({count} 件の未読)",
-    "empty": "現在お知らせはありません。"
+    "empty": "現在お知らせはありません。",
+    "olderTitle": "過去のお知らせ",
+    "copyLink": "リンクをコピー",
+    "linkCopied": "コピーしました"
   },
   "StoreKit": {
     "pageTitle": "店頭告知キット",
