@@ -1,4 +1,4 @@
-// 使い方動画が 4 つのガイドページに正しく入っていることを実描画で検査する。
+// 使い方動画がガイドページに正しく入っていることを実描画で検査する。
 // - ja: 決めた動画だけ (/guide/shop はレジ → モバイルオーダー → 受注の 3 本・ほかは 1 本。ボタンの名前に動画のタイトル・
 //   YouTube リンクの ID が一致・押す前は iframe なし)
 // - en: 動画の節そのものを出さない (動画は日本語のため)
@@ -9,6 +9,7 @@ import GuideShopPage from '@/app/[locale]/guide/shop/page';
 import GuideAiPayPage from '@/app/[locale]/guide/ai-pay/page';
 import GuideStorePage from '@/app/[locale]/guide/store/page';
 import GuidePayPage from '@/app/[locale]/guide/pay/page';
+import GuideOrderLinkPage from '@/app/[locale]/guide/order-link/page';
 import { HOWTO_VIDEOS, HOWTO_VIDEO_UI, howtoVideoShortTitle, type HowtoVideoKey } from '@/lib/howtoVideos';
 
 vi.mock('next-intl/server', () => ({ setRequestLocale: vi.fn(), getTranslations: async () => (key: string) => key }));
@@ -21,6 +22,7 @@ const PAGES: Array<[string, Page, readonly HowtoVideoKey[]]> = [
   ['/guide/ai-pay', GuideAiPayPage as Page, ['agent']],
   ['/guide/store', GuideStorePage as Page, ['creator']],
   ['/guide/pay', GuidePayPage as Page, ['pay']],
+  ['/guide/order-link', GuideOrderLinkPage as Page, ['orderLink']],
 ];
 
 describe('ガイドページの使い方動画', () => {

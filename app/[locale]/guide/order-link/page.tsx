@@ -22,8 +22,10 @@ import {
   GuideTitle,
 } from '@/components/guide/GuideHeader';
 import { GuideToc } from '@/components/guide/GuideToc';
+import { GuideVideo } from '@/components/guide/GuideVideo';
 import { BulletList, STEP_BADGE_CUSTOMER, Section, StepLines } from '@/components/guide/PosGuidePieces';
 import { guideNavFor } from '@/lib/guideNav';
+import { HOWTO_VIDEO_UI, howtoVideoFor } from '@/lib/howtoVideos';
 import { LANDING_PAYMENT_FEE_VALUES } from '@/lib/legal';
 import { orderLinkGuideContentFor, orderLinkGuideMetadata } from '@/lib/orderLinkGuide';
 
@@ -53,6 +55,7 @@ export default async function GuideOrderLinkPage({
   setRequestLocale(locale);
   const c = orderLinkGuideContentFor(locale);
   const nav = guideNavFor(locale);
+  const video = howtoVideoFor(locale, 'orderLink');
   const tLanding = await getTranslations({ locale, namespace: 'Landing' });
   const createHref = `/${locale}/create?tab=orderLink`;
 
@@ -73,6 +76,12 @@ export default async function GuideOrderLinkPage({
           <Section title={c.featuresTitle}>
             <GuideFeatureList items={c.features} />
           </Section>
+
+          {video && (
+            <Section title={HOWTO_VIDEO_UI.sectionTitle} toc={false}>
+              <GuideVideo video={video} />
+            </Section>
+          )}
 
           <Section title={c.stepsTitle}>
             <StepLines steps={c.steps} />
