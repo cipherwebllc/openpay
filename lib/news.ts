@@ -34,6 +34,48 @@ export type NewsItem = {
 // 表示順を強制しないが、可読性のため宣言時点でも新しい順に並べる。
 export const NEWS_ITEMS: readonly NewsItem[] = [
   {
+    id: 'order-link-2026-11-04',
+    date: '2026-11-04',
+    category: 'feature',
+    title: {
+      ja: '「注文リンク」で、DM や SNS で受けた注文を JPYC で受け取れます',
+      en: 'Take JPYC for orders you get by DM or on social media with “Order link”',
+    },
+    body: {
+      ja: '「注文リンク」タブで、商品と合計の入った支払いリンクを作れます。LINE や DM、メールで送るか、SNS やサイトに置きます。お客様は自分のウォレットから JPYC で払い、売上は受取ウォレットへ直接届きます。氏名や住所は OpenPay に送られません。\n注文ごとに送る「この注文だけ」のリンクと、SNS に置ける「何度でも使える」リンクがあります。値引き、消費税とインボイス登録番号、2 つ以上の受取チェーンにも対応しています。お客様は払った後、完了画面から確認の署名つきでお店に知らせます (お金は動きません)。お店は「入金を確かめる」で確かめてから発送します。\n利用料は、ガス代不要の支払いで決済額の 1%・最低 2 JPYC です (お店の受取から引かれ、お客様が払う額は合計のまま)。通常決済には OpenPay の利用料はかかりません。',
+      en: 'The “Order link” tab makes a payment link with the items and total. Send it by LINE, DM or email, or post it on social media or your site. Customers pay in JPYC from their own wallet, and sales go straight to your receiving wallet. Names and addresses are not sent to OpenPay.\nUse a “One order” link for each order, or a “Reusable” link you can post on social media. Discounts, consumption tax with an invoice registration number, and two or more receiving chains are supported. After paying, customers tell the shop from the completion screen with a confirmation signature (no money moves). The shop checks the payment in “Check a payment” before shipping.\nThe usage fee for no-gas-fee payments is 1% of the payment, at least 2 JPYC, taken from what the shop receives (the customer pays the total as shown). Standard payments carry no OpenPay fee.',
+    },
+    link: { href: '/guide/order-link', labelJa: '使い方と動画を見る', labelEn: 'See the guide and video' },
+  },
+  {
+    id: 'store-product-page-2026-10-28',
+    date: '2026-10-28',
+    category: 'feature',
+    title: {
+      ja: 'Store の商品ごとのページができました',
+      en: 'Each Store product now has its own page',
+    },
+    body: {
+      ja: '商品のシェアリンクを開くと、その商品が先頭に大きく出て、画像・説明・仕様・利用条件をその場で読めます。スマホでは、購入ボタンが画面の外にある間、画面の下に購入ボタンが出ます。\nStore 一覧は PC で広く並ぶようになり、JPYC をお持ちでない方への「JPYC を手に入れる」「ウォレットを選ぶ」を置きました。価格には払えるチェーンのロゴ (JPYC は Polygon、USDC は Base) を添えます。商品が 2 つ以上あるプロフィールは、PC で左にプロフィールと応援、右に商品の 2 列になります。',
+      en: 'Opening a product’s share link now shows that product first and large, with its images, description, specs and terms of use on the page. On phones, a purchase button appears at the bottom of the screen while the one on the page is out of view.\nThe Store list now spreads wider on PCs, with “Get JPYC” and “Choose a wallet” for people who don’t have JPYC yet. Prices carry the logo of the chain you can pay on (Polygon for JPYC, Base for USDC). Profiles with two or more products show two columns on PCs: the profile and support on the left, products on the right.',
+    },
+    link: { href: '/store', labelJa: 'Store を見る', labelEn: 'Open the Store' },
+  },
+  {
+    id: 'agent-skill-2026-10-24',
+    date: '2026-10-24',
+    category: 'feature',
+    title: {
+      ja: 'Agent の接続手順を Agent Skill としても配っています',
+      en: 'The agent setup instructions are also available as an Agent Skill',
+    },
+    body: {
+      ja: 'AI エージェントを OpenPay につなぐ手順 (Agent ページの setup.md と同じ本文) を、Agent Skills の形でも入れられるようにしました。`npx skills add cipherwebllc/openpay` で入ります。中身は手順の文だけで、実行するコードは入っていません。',
+      en: 'The instructions for connecting an AI agent to OpenPay (the same text as setup.md on the Agent page) can now also be installed as an Agent Skill with `npx skills add cipherwebllc/openpay`. It contains only the instructions, no code to run.',
+    },
+    link: { href: '/agent', labelJa: 'Agent ページを開く', labelEn: 'Open the Agent page' },
+  },
+  {
     id: 'arc-payout-2026-10-21',
     date: '2026-10-21',
     category: 'feature',
@@ -335,8 +377,8 @@ export const NEWS_ITEMS: readonly NewsItem[] = [
       en: '@handle profiles now support media embeds and link images',
     },
     body: {
-      ja: 'クリエイターページ (open-pay.jp/@あなた) のリンクに、YouTube・Spotify・Audius・ニコニコ動画・Vimeo・Apple Music・TikTok・Suno・SoundCloud の 9 サービスの埋め込み表示 (リンクごとに ON/OFF・最大 3 件) と、絵文字の代わりの画像表示を追加しました。プロフがそのままメディアハブになります。\nあわせて、デジタル商品の商品ごとのシェアリンク (X などに貼ると商品カードが表示され、開くと購入画面が自動で開きます) と、無料サービスを活用した販売手順ガイドも公開しました。',
-      en: 'Links on creator pages (open-pay.jp/@you) can now render embedded players for nine services — YouTube, Spotify, Audius, Niconico, Vimeo, Apple Music, TikTok, Suno, and SoundCloud (opt-in per link, up to 3) — and show an image instead of an emoji.\nWe also added per-product share links for digital goods (pasting one on X shows a product card and opens the purchase dialog directly) and a step-by-step selling guide using free hosting services.',
+      ja: 'クリエイターページ (open-pay.jp/@あなた) のリンクに、YouTube・Spotify・Audius・ニコニコ動画・Vimeo・Apple Music・TikTok・Suno・SoundCloud の 9 サービスの埋め込み表示 (リンクごとに ON/OFF・最大 3 件) と、絵文字の代わりの画像表示を追加しました。プロフがそのままメディアハブになります。\nあわせて、デジタル商品の商品ごとのシェアリンク (X などに貼ると商品カードが表示され、開くと購入画面が自動で開きます) と、無料サービスを活用した販売手順ガイドも公開しました。\n※ 2026-10-28 の更新により、商品ごとのシェアリンクは購入画面を自動で開かず、その商品のページを開くようになりました。',
+      en: 'Links on creator pages (open-pay.jp/@you) can now render embedded players for nine services — YouTube, Spotify, Audius, Niconico, Vimeo, Apple Music, TikTok, Suno, and SoundCloud (opt-in per link, up to 3) — and show an image instead of an emoji.\nWe also added per-product share links for digital goods (pasting one on X shows a product card and opens the purchase dialog directly) and a step-by-step selling guide using free hosting services.\nNote: since the 2026-10-28 update, a per-product share link opens that product’s page instead of opening the purchase dialog directly.',
     },
     link: { href: '/guide/store', labelJa: '販売ガイドを見る', labelEn: 'Read the selling guide' },
   },
