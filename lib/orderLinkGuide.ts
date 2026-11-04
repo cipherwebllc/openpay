@@ -83,7 +83,7 @@ const JA: OrderLinkGuideContent = {
   ctaCreate: '注文リンクを作る',
 
   forWhoTitle: 'こんなお店に向いています',
-  forWhoChips: ['個人の通販', 'ハンドメイド作家', 'SNS で注文を受けるお店', 'イベントの予約販売'],
+  forWhoChips: ['LINE 公式アカウントで注文を受けるお店', '個人の通販', 'ハンドメイド作家', 'SNS で注文を受けるお店', 'イベントの予約販売'],
 
   featuresTitle: 'できること',
   features: [
@@ -140,7 +140,10 @@ const JA: OrderLinkGuideContent = {
       body: 'お客様の JPYC があるチェーン (迷ったら Polygon)。2 つ以上選ぶと、お客様が払うときに選べます。Safe などコントラクトのウォレットは 1 つにしてください。',
     },
     { label: '支払い方法', body: 'ガス代不要 (お客様は JPYC だけで払える) か、通常決済 (利用料なし)。' },
-    { label: '注文の送り先', body: 'LINE 公式アカウントかメール。お客様の完了画面から、注文の文が入った状態で開きます。' },
+    {
+      label: '注文の送り先',
+      body: 'LINE 公式アカウントかメール。LINE にすると、払った後の注文の文が入った状態でトークが開き、お客様が送るとお店に届きます。',
+    },
     { label: '消費税', body: '税率と、インボイス登録番号 (任意)。お客様の控えに出ます。' },
   ],
   payStepsTitle: '支払いの流れ (お客様)',
@@ -238,7 +241,7 @@ const EN: OrderLinkGuideContent = {
   ctaCreate: 'Make an order link',
 
   forWhoTitle: 'Who this is for',
-  forWhoChips: ['Small online shops', 'Makers and crafters', 'Shops taking orders on social media', 'Event pre-orders'],
+  forWhoChips: ['Shops taking orders on a LINE Official Account', 'Small online shops', 'Makers and crafters', 'Shops taking orders on social media', 'Event pre-orders'],
 
   featuresTitle: 'What you can do',
   features: [
@@ -295,7 +298,10 @@ const EN: OrderLinkGuideContent = {
       body: 'A chain your customers hold JPYC on (Polygon if unsure). With two or more, customers choose one when paying. Pick only one for contract wallets such as Safe.',
     },
     { label: 'Payment method', body: 'No gas fee (customers pay with JPYC alone) or standard payment (no fee).' },
-    { label: 'Where orders go', body: 'A LINE Official Account or email. It opens from the customer’s completion screen with the order message filled in.' },
+    {
+      label: 'Where orders go',
+      body: 'A LINE Official Account or email. With LINE, the chat opens with the order message filled in after payment, and it reaches you when the customer sends it.',
+    },
     { label: 'Consumption tax', body: 'The tax rate and your invoice registration number (optional). Shown on the customer’s receipt.' },
   ],
   payStepsTitle: 'How paying works (customer)',
