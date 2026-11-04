@@ -65,6 +65,7 @@ node scripts/ci-wait.mjs <PR> # PR の CI settle 待ち+conclusion 判定 (--onc
 - コミット trailer: `Co-Authored-By` と `Claude-Session`（エージェント作業時）。
 - UI 変更は実機スクショで検証（`scripts/dev-shot.mjs`）。印刷面（ポスター/kit）は `emulateMedia('print')` で A4 フィット（scrollHeight ≤ viewport）まで確認。
 - **page ファイルを含む変更の検証には `npm run build` を含める**（掟 3 の検出はこれのみ）。
+- **利用者に見える機能（feat）を merge したら、報告で「お知らせ：要／不要」を決める**。要なら `lib/news.ts` と `lib/newsIndex.ts` に文案を足す PR を続けて出す（本文 3 文以内・公開文言なので merge は承認後）。磨き・a11y・内部の修正は不要（2026-11-05・お知らせが 2 週間止まった反省）。
 
 ## エージェント委譲（Codex/Opus 等）に渡す規約前文
 

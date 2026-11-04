@@ -13,6 +13,10 @@
 // 決済は店舗負担固定でお客様は表示額のみ／チップはガス相当額をお客様(チッパー)負担で 1% 非適用・
 // モバイル注文を除く通常決済 (2026-10-07 からレジを含む)/受け取り自体/USDC 経路は無料) と矛盾させない。確定でないことを断定で書かない。
 // 過去のお知らせは黙って書き換えず「置き換え済み」注記で更新する。
+//
+// 書き方 (2026-11-05 user 確定): 本文は 3 文以内にし、細かいことは link 先 (ガイド等) に任せる。
+// 2026-11-06 以降の日付の item は tests/lib/news.test.ts が ja の文の数を検査する (それより前は書き換えない)。
+// 利用者に見える機能を merge したら「お知らせ：要／不要」を決め、要ならここと lib/newsIndex.ts に文案を足す (CLAUDE.md)。
 
 export type NewsCategory = 'feature' | 'pricing' | 'notice'; // 新機能 / 料金 / お知らせ
 
@@ -24,7 +28,7 @@ export type NewsItem = {
   category: NewsCategory;
   /** 見出し (locale で出し分け)。 */
   title: { ja: string; en: string };
-  /** 本文 1-3 文 (プレーンテキスト・改行は \n)。 */
+  /** 本文 3 文以内 (プレーンテキスト・改行は \n)。2026-11-06 以降の item はテストで検査する。 */
   body: { ja: string; en: string };
   /** 任意: 詳細への内部/外部リンク。href が '/' 始まりなら内部 (locale prefix 補完)。 */
   link?: { href: string; labelJa: string; labelEn: string };
