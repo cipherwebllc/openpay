@@ -1,5 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { renderWithIntl } from '../_helpers/i18n';
 
 // markAllSeen の呼出を spy する (mount で 1 回呼ばれる契約)。
@@ -13,7 +14,7 @@ vi.mock('@/hooks/useNewsRead', () => ({
   }),
 }));
 
-import { NewsList } from '@/components/NewsList';
+import { NEWS_LATEST_COUNT, NewsList } from '@/components/NewsList';
 import { sortedNews } from '@/lib/news';
 
 beforeEach(() => markAllSeen.mockReset());
@@ -85,5 +86,79 @@ describe('NewsList: 一覧描画 / 既読化', () => {
       (_, el) => el?.tagName.toLowerCase() === 'time',
     );
     expect(time).toHaveAttribute('datetime', sortedNews()[0].date);
+  });
+});
+
+describe('NewsList: 最新はカード・古いものはたたむ / 1 件ずつのリンク', () => {
+  afterEach(() => {
+    window.history.replaceState(null, '', '/');
+  });
+
+  it(`最新 ${NEWS_LATEST_COUNT} 件はカード (article)、残りは閉じた行 (details) で「過去のお知らせ」の下に並ぶ`, () => {
+    renderWithIntl(<NewsList />);
+    const items = sortedNews();
+    const articles = [...document.querySelectorAll('article')];
+    expect(articles.map((a) => a.id)).toEqual(items.slice(0, NEWS_LATEST_COUNT).map((n) => n.id));
+    const rows = [...document.querySelectorAll('details')];
+    expect(rows.map((d) => d.id)).toEqual(items.slice(NEWS_LATEST_COUNT).map((n) => n.id));
+    expect(rows.every((d) => !d.open)).toBe(true);
+    expect(screen.getByRole('heading', { name: '過去のお知らせ' })).toBeInTheDocument();
+  });
+
+  it('たたんだ行の見出しと日付は閉じたままでも見える (summary の中)', () => {
+    renderWithIntl(<NewsList />);
+    const older = sortedNews()[NEWS_LATEST_COUNT];
+    const summary = document.getElementById(older.id)!.querySelector('summary')!;
+    expect(summary.textContent).toContain(older.title.ja);
+    expect(summary.querySelector('time')).toHaveAttribute('datetime', older.date);
+  });
+
+  it('/news#<たたんだ行の id> で開くと、その行を開いて表示する', () => {
+    const older = sortedNews()[NEWS_LATEST_COUNT + 1];
+    window.history.replaceState(null, '', `/ja/news#${older.id}`);
+    const scrollIntoView = vi.fn();
+    const original = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = scrollIntoView;
+    try {
+      renderWithIntl(<NewsList />);
+      const row = document.getElementById(older.id) as HTMLDetailsElement;
+      expect(row.open).toBe(true);
+      expect(scrollIntoView).toHaveBeenCalledTimes(1);
+      // ほかの行は閉じたまま
+      const others = [...document.querySelectorAll('details')].filter((d) => d.id !== older.id);
+      expect(others.every((d) => !d.open)).toBe(true);
+    } finally {
+      Element.prototype.scrollIntoView = original;
+    }
+  });
+
+  it('お知らせの id の形でない # (ほかの見出しや壊れた値) では何もしない', () => {
+    window.history.replaceState(null, '', '/ja/news#%E0%A4%A');
+    const scrollIntoView = vi.fn();
+    const original = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = scrollIntoView;
+    try {
+      renderWithIntl(<NewsList />);
+      expect(scrollIntoView).not.toHaveBeenCalled();
+      expect([...document.querySelectorAll('details')].every((d) => !d.open)).toBe(true);
+    } finally {
+      Element.prototype.scrollIntoView = original;
+    }
+  });
+
+  it('「リンクをコピー」でそのお知らせの URL (/{locale}/news#<id>) を写す', async () => {
+    const user = userEvent.setup();
+    const writeText = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue(undefined);
+    try {
+      window.history.replaceState(null, '', '/ja/news');
+      renderWithIntl(<NewsList />);
+      const first = sortedNews()[0];
+      const card = document.getElementById(first.id)!;
+      await user.click(within(card).getByRole('button', { name: 'リンクをコピー' }));
+      expect(writeText).toHaveBeenCalledWith(`${window.location.origin}/ja/news#${first.id}`);
+      expect(within(card).getByRole('button', { name: '✓ コピーしました' })).toBeInTheDocument();
+    } finally {
+      writeText.mockRestore();
+    }
   });
 });
