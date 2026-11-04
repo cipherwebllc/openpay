@@ -55,6 +55,23 @@ describe('lib/news: コンテンツ規約 (SOT 不変条件)', () => {
       expect(n.link.labelEn.trim().length).toBeGreaterThan(0);
     }
   });
+
+  // 2026-11-05 user 確定: これから足すお知らせは本文 3 文以内 (細かいことは link 先に任せる)。
+  // それより前の item は書き換えない (news.ts の方針) ので、日付で対象を分ける。
+  const SHORT_BODY_FROM = '2026-11-06';
+  const sentencesJa = (text: string) => text.split(/[。！？]/).filter((s) => s.trim().length > 0).length;
+
+  it(`${SHORT_BODY_FROM} 以降のお知らせは、本文 (ja) が 3 文以内`, () => {
+    for (const n of NEWS_ITEMS.filter((item) => item.date >= SHORT_BODY_FROM)) {
+      expect(sentencesJa(n.body.ja), n.id).toBeLessThanOrEqual(3);
+    }
+  });
+
+  it('文の数え方: 「。」「！」「？」で区切り、括弧の中の句点や改行に左右されない', () => {
+    expect(sentencesJa('リンクを作れます。お客様は JPYC で払います (お金は動きません)。')).toBe(2);
+    expect(sentencesJa('一つ目。\n二つ目！三つ目？')).toBe(3);
+    expect(sentencesJa('句点のない一文')).toBe(1);
+  });
 });
 
 describe('lib/news: sortedNews / latestNewsId', () => {
