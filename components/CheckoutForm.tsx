@@ -22,6 +22,9 @@ import { SmartAccountFallbackBanner } from './SmartAccountFallbackBanner';
 import { RelayFallbackBanner } from './RelayFallbackBanner';
 import { isRemoteOrderCheckout, NotifyShopButton, type NotifyShopData } from './NotifyShopButton';
 import { notifyShopData } from './checkout/notifyShopData';
+import { RelayStatusBanners } from './checkout/RelayStatusBanners';
+// 送信後の pending / unknown の枠 (First Load JS から外す lazy wrapper・RelayStatusBanners と 1 つを共有する)。
+import { PaymentStatusPanel } from './checkout/paymentStatusPanelLazy';
 import { shopContactLabel } from '@/lib/shopContact';
 import { rememberOrderPayment, type RememberedOrderPayment } from '@/lib/orderConfirmation';
 import { findRememberedOrderPayment } from '@/lib/orderPaidLookup';
@@ -103,13 +106,6 @@ import { matchesOrderDeliveryContext } from '@/lib/orderDeliveryContext';
 import { checkoutIntentContextFingerprint, orderLinkContextFingerprint } from '@/lib/checkoutIntentContext';
 import { RecoverFeeNotice } from './RecoverFeeNotice';
 
-// 送信後の pending / unknown と同一 payload の復旧時だけ必要な UI を First Load JS
-// から外す。状態判定・再送封鎖・retry handler の選択は親に残す。
-const PaymentStatusPanel = dynamic(
-  () =>
-    import('./PaymentStatusPanel').then((m) => m.PaymentStatusPanel),
-  { ssr: false },
-);
 const SignReassurance = dynamic(
   () => import('./SignReassurance').then((m) => m.SignReassurance),
 );
@@ -2122,58 +2118,16 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
           )
         ))}
 
-      {/* B1 Layer B (preflight): relayer degraded は additive banner で出す (Layer A と違い汎用
-          error box を抑止しない・pre-submit 検証エラー[店主受取0 等]を隠さない・Codex P1)。完了後は出さない。 */}
-      {!completed && relayPreflightActive && (
-        <RelayFallbackBanner
-          message={t('relayDegradedPreflight')}
+      {/* relay の状態の案内 (B1 Layer B の先回り・送信結果の確認中・IP の混雑)。表示だけの部品で、出す条件と
+          ボタンで呼ぶ処理はここで決めて渡す (第 9 回レビュー F-04)。完了後は出さない。 */}
+      {!completed && (
+        <RelayStatusBanners
+          relayPreflightActive={relayPreflightActive}
           nativeToken={nativeToken}
           onSwitchToStandard={switchToStandard}
-        />
-      )}
-
-      {/* ambiguity latch 中は同一 payload の再確認だけを許可し、standard fallback / 新署名を封鎖。 */}
-      {!completed && relayAmbiguous && (
-        <PaymentStatusPanel
-          title={t('responseUnknownTitle')}
-          body={
-            relay.recoveryState === 'auto'
-              ? t('responseUnknownAutoBody')
-              : t('responseUnknownBody')
-          }
-          titleWithIcon
-          showSpinner={relay.recoveryState === 'auto'}
-          actionLabel={
-            relay.recoveryState === 'auto'
-              ? undefined
-              : t('responseUnknownRetryButton')
-          }
-          actionDisabled={
-            relay.recoveryState === 'auto' ? undefined : relay.isPending
-          }
-          onAction={
-            relay.recoveryState === 'auto'
-              ? undefined
-              : relay.retrySamePayload
-          }
-        />
-      )}
-
-      {/* relay IP rate limit: idem 確認前の 429 なので main Pay / standard fallback / 再署名を
-          封鎖し、保持済みの同一署名 payload の再 POST だけを許可する。 */}
-      {!completed && relayIpRateLimited && !relayAmbiguous && (
-        <PaymentStatusPanel
-          title={t('ipRateLimitedTitle')}
-          body={
-            relayIpRateLimited.retryAfterSeconds === null
-              ? t('ipRateLimitedBody')
-              : t('ipRateLimitedBodyWithRetryAfter', {
-                  seconds: relayIpRateLimited.retryAfterSeconds,
-                })
-          }
-          actionLabel={t('ipRateLimitedRetryButton')}
-          actionDisabled={relay.isPending}
-          onAction={relay.retryRelay}
+          relayAmbiguous={relayAmbiguous}
+          relayIpRateLimited={relayIpRateLimited}
+          relay={relay}
         />
       )}
 
