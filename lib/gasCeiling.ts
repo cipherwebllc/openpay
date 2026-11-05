@@ -134,6 +134,32 @@ export function assertGasCeiling(
   }
 }
 
+/**
+ * Pimlico の standard tier の fee を取り、上限をかけてから返す (第 9 回レビュー A-5)。
+ *
+ * Pimlico の 3 つの builder (lib/smartAccount の simpleAccount / metamask / mav2) の fee の
+ * 見積もりはここを通す。呼出元 (useBatchPayment) は送信前に自分で取った fast を検査するが、
+ * UserOp に入る値は sendUserOperation の中で取り直す standard なので、その間にガスが上がると
+ * 検査していない値で署名・送信される (TOCTOU)。実際に UserOp に入れる値そのものを検査して
+ * この隙間を塞ぐ。呼出元の fast の検査は残す (送信を始める前に止める早い案内)。
+ *
+ * throw は viem (estimateFeesPerGas) / aa-sdk (feeEstimator の middleware) の中で起きるが、
+ * どちらも包まずに sendUserOperation の reject として返すので、フォームは従来どおり
+ * isGasCongestedError で案内できる (tests/lib/smartAccount/* が実物の pipeline を通して固定)。
+ */
+export async function ceilingCheckedStandardFee<
+  Fee extends { maxFeePerGas: bigint },
+>(
+  pimlicoClient: {
+    getUserOperationGasPrice: () => Promise<{ standard: Fee }>;
+  },
+  chainId: number,
+): Promise<Fee> {
+  const { standard } = await pimlicoClient.getUserOperationGasPrice();
+  assertGasCeiling(chainId, standard.maxFeePerGas);
+  return standard;
+}
+
 export function isGasCongestedError(err: unknown): err is GasCongestedError {
   // instanceof は HMR / 別バンドルで信頼できないことがあるため name でも判定
   return (

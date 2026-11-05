@@ -166,6 +166,7 @@ let mutate: ReturnType<typeof vi.fn>;
 let batchRetryReceipt: ReturnType<typeof vi.fn>;
 function setBatchPayment(
   state: 'idle' | 'pending' | 'success' | 'error' | 'unknown',
+  errorOverride?: Error,
 ) {
   mutate = vi.fn();
   batchRetryReceipt = vi.fn();
@@ -189,7 +190,7 @@ function setBatchPayment(
         : undefined,
     error:
       state === 'error'
-        ? new Error('AA21 fail')
+        ? (errorOverride ?? new Error('AA21 fail'))
         : state === 'unknown'
           ? new Error('receipt RPC unavailable')
           : null,
@@ -754,6 +755,17 @@ describe('TipForm — 送信', () => {
     render(<TipForm params={USDC_PARAMS} />);
     expect(screen.getByText(/エラー/)).toBeInTheDocument();
     expect(screen.getByText(/AA21 fail/)).toBeInTheDocument();
+  });
+
+  it('GasCongestedError → 生メッセージではなく混雑の案内 (第 9 回レビュー A-5: 送信の中の fee の見積もりが止めた場合も同じ error が届く)', async () => {
+    const { GasCongestedError } = await import('@/lib/gasCeiling');
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(20_000_000n);
+    setSmartAccount(true);
+    setBatchPayment('error', new GasCongestedError(baseSepolia.id, 1n, 5n));
+    render(<TipForm params={USDC_PARAMS} />);
+    expect(screen.getByText(/ネットワークが混雑しています/)).toBeInTheDocument();
+    expect(screen.queryByText(/gas_congested/)).toBeNull();
   });
 
   it('Pimlico response-unknown → 再送封鎖・通常エラー抑止・同じ UserOp の receipt だけ再照会', async () => {

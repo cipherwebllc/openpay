@@ -36,6 +36,7 @@ import {
 } from '@aa-sdk/core';
 import { createModularAccountV2 } from '@account-kit/smart-contracts';
 import { kaia, kairos } from 'viem/chains';
+import { ceilingCheckedStandardFee } from '@/lib/gasCeiling';
 import {
   assertGaslessSupported,
   createPimlico,
@@ -159,13 +160,15 @@ export async function buildMav2SmartAccountClient(args: {
 
   // fee: Pimlico の standard tier を使う (gas quote 側と同 tier に揃え、見積と
   // 実費を一致させる)。fast は priority fee が過剰で小額決済の UX 悪化要因。
-  // assertGasCeiling は呼び出し元 (useBatchPayment) で別途行う。
+  // 実際に UserOp に入れるこの standard に上限をかける (第 9 回レビュー A-5: 呼び出し元
+  // useBatchPayment の fast の検査の後にガスが上がっても、検査していない値で署名させない)。
+  // aa-sdk の middleware はこの throw を包まずに sendUserOperation の reject にする。
   const feeEstimator: ClientMiddlewareFn = async (struct) => {
-    const gasPrice = await pimlicoClient.getUserOperationGasPrice();
+    const standard = await ceilingCheckedStandardFee(pimlicoClient, chainId);
     return {
       ...struct,
-      maxFeePerGas: gasPrice.standard.maxFeePerGas,
-      maxPriorityFeePerGas: gasPrice.standard.maxPriorityFeePerGas,
+      maxFeePerGas: standard.maxFeePerGas,
+      maxPriorityFeePerGas: standard.maxPriorityFeePerGas,
     };
   };
 
