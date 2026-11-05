@@ -31,6 +31,8 @@ const chainState = vi.hoisted(() => ({
 const kv = vi.hoisted(() => ({
   configured: true,
   store: new Map<string, { value: string; expiresAt: number | null }>(),
+  /** 次の SET を書かずに失敗させる (応答の喪失・保存の障害)。 */
+  failNextSet: false,
 }));
 
 const EVENTS = parseAbi([
@@ -110,7 +112,7 @@ vi.mock('@/lib/jpycEip3009', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/jpycEip3009')>()),
   recoverTransferAuthorizationSigner: async () => FROM,
 }));
-// KV はメモリ (SET NX EX・INCR + 初回の期限)。期限は Date.now (偽の時計) で切れる。
+// KV はメモリ (SET NX EX・INCR + 初回の期限・「自分の値のときだけ消す」EVAL)。期限は Date.now (偽の時計) で切れる。
 vi.mock('@/lib/kv', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/kv')>();
   const live = (key: string) => {
@@ -125,6 +127,10 @@ vi.mock('@/lib/kv', async (importOriginal) => {
     ...actual,
     isKvConfigured: () => kv.configured,
     kvSet: async (key: string, value: string, opts: { nx?: boolean; ttlSec?: number } = {}) => {
+      if (kv.failNextSet) {
+        kv.failNextSet = false;
+        return { ok: false, reason: 'http_error' };
+      }
       if (opts.nx && live(key)) return { ok: true, value: null };
       kv.store.set(key, { value, expiresAt: opts.ttlSec ? Date.now() + opts.ttlSec * 1000 : null });
       return { ok: true, value: 'OK' };
@@ -138,14 +144,23 @@ vi.mock('@/lib/kv', async (importOriginal) => {
       });
       return { ok: true, value: next };
     },
+    // 予算で断ったときの解放に使う script (RELEASE_PAYMENT_CLAIM_IF_OWNED) だけを受け付ける
+    kvEval: async (script: string, keys: string[], args: string[]) => {
+      if (script !== RELEASE_PAYMENT_CLAIM_IF_OWNED) throw new Error(`unexpected script: ${script}`);
+      if (live(keys[0])?.value !== args[0]) return { ok: true, value: 0 };
+      kv.store.delete(keys[0]);
+      return { ok: true, value: 1 };
+    },
   };
 });
 
 import { POST } from '@/app/api/relay/jpyc/status/route';
+import { RELEASE_PAYMENT_CLAIM_IF_OWNED } from '@/lib/paymentClaim';
 import { jpycAddressFor } from '@/lib/relay/relayProvider';
 import {
   NONCE_LOOKUP_NARROW_SEARCH_PER_MINUTE,
   narrowSearchBudgetKey,
+  narrowSearchOnceKey,
 } from '@/lib/relay/statusLookupBudget';
 
 // 署名の期限: 対象のログのブロックの時刻 + 照会の窓 (1230 秒)。ログは窓の下限ちょうどにある。
@@ -185,6 +200,7 @@ beforeEach(() => {
   chainState.calls = { getLogs: 0, getBlock: 0 };
   kv.configured = true;
   kv.store.clear();
+  kv.failNextSet = false;
 });
 
 afterEach(() => {
@@ -230,6 +246,27 @@ describe('relay status: 署名なしの照会の小分けの探索 (本物の he
     vi.setSystemTime(new Date('2026-11-05T00:01:05Z'));
     const next = await POST(nonceLookup());
     expect(await next.json()).toEqual({ ok: true, state: 'settled', txHash: TX });
+  });
+
+  it('(c) 予算で断った照会は重複の鍵を残さない (次の 1 分に入れば 30 秒を待たずに探せる)', async () => {
+    vi.setSystemTime(new Date('2026-11-05T00:00:55Z'));
+    for (let i = 0; i < NONCE_LOOKUP_NARROW_SEARCH_PER_MINUTE; i++) await POST(nonceLookup(otherNonce(i)));
+    expect(await (await POST(nonceLookup())).json()).toEqual({ ok: true, state: 'indeterminate' });
+    expect(kv.store.has(narrowSearchOnceKey(80002, FROM, NONCE))).toBe(false);
+
+    // 断ってから 7 秒 (重複の抑止 30 秒の内側) でも、次の 1 分の予算で探す
+    vi.setSystemTime(new Date('2026-11-05T00:01:02Z'));
+    expect(await (await POST(nonceLookup())).json()).toEqual({ ok: true, state: 'settled', txHash: TX });
+  });
+
+  it('(c) 予算で断っても、並行する別の要求が置いた重複の鍵は消さない', async () => {
+    for (let i = 0; i < NONCE_LOOKUP_NARROW_SEARCH_PER_MINUTE; i++) await POST(nonceLookup(otherNonce(i)));
+    // 別の要求が探索中 (鍵を置いた) で、この要求の SET は応答を失った (失敗) とする
+    const onceKey = narrowSearchOnceKey(80002, FROM, NONCE);
+    kv.store.set(onceKey, { value: 'another-request', expiresAt: Date.now() + 30_000 });
+    kv.failNextSet = true;
+    expect(await (await POST(nonceLookup())).json()).toEqual({ ok: true, state: 'indeterminate' });
+    expect(kv.store.get(onceKey)?.value).toBe('another-request');
   });
 
   it('(c) 予算を使い切っても署名付き照会は従来どおり小分けに探す (関門は署名なしの照会だけ)', async () => {
