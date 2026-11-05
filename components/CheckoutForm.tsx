@@ -1789,16 +1789,16 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
             `a && breakdownRow(…)` は `a ? … : null` に)。 */}
         <CheckoutAmountBreakdown
           // レジの値引き: 小計 (値引き前) → 値引き の 2 行。以降の手数料・お支払い額は値引き後の額。
-          subtotalRows={
+          subtotal={
             params.discount
               ? (() => {
                 const subtotalWei = calcCheckoutTotal(params.items, deployment.decimals);
-                return [
-                  { label: t('subtotalRow'), value: fmt(subtotalWei) },
-                  { label: t('discountRow'), value: `−${fmt(subtotalWei - totalWei)}` },
-                ];
+                return {
+                  row: { label: t('subtotalRow'), value: fmt(subtotalWei) },
+                  discountRow: { label: t('discountRow'), value: `−${fmt(subtotalWei - totalWei)}` },
+                };
               })()
-              : [{ label: t('subtotalRow'), value: fmt(totalWei) }]
+              : { row: { label: t('subtotalRow'), value: fmt(totalWei) }, discountRow: null }
           }
           // fee=0 のとき手数料行は非表示 (Phase 1 alpha)。負担者でラベルを出し分ける:
           // 店舗が受取から吸収した (merchantReceives < 請求額) なら「(店舗負担)」を補足、

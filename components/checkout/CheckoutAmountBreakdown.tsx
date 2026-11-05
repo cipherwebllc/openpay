@@ -4,15 +4,15 @@
 // お支払い額) と、その下の説明・承認の確認のリンク。CheckoutForm から切り出した表示だけの部品 (第 9 回レビュー F-04・Q11)。
 // 額の計算 (breakdown・利用料・ガス相当額・お支払い額) と表記 (fmt)、どの行・文言を出すかの経路の判定 (isStandard・isMobileFee・
 // useRecover・useRelay・isJpyc・isMerchantGas・isCircle・isErc20Paymaster) は CheckoutForm に残し、行のモデル (BreakdownRowModel) と
-// 説明の文字列にして渡す (掟 12・15)。この部品は受け取った行を並びどおりに描くだけ。
+// 説明の文字列にして渡す (掟 12・15)。この部品は受け取った行を並びどおりに描くだけ (要素の形と key は切り出し前の JSX と同じ)。
 // 描画は tests/components/CheckoutAmountBreakdown.test.tsx が経路と状態ごとに固定する。
 
 import { useTranslations } from 'next-intl';
 import { breakdownRow, type BreakdownRowModel } from '../PaymentBreakdownRows';
 
 type Props = {
-  /** 表の先頭の行: 小計 (値引きがあれば 小計 → 値引き の 2 行)。並びどおりに出す。 */
-  subtotalRows: ReadonlyArray<BreakdownRowModel>;
+  /** 表の先頭の行: 小計の行と、値引きの行 (null なら値引きなし = 小計の行だけ)。 */
+  subtotal: { row: BreakdownRowModel; discountRow: BreakdownRowModel | null };
   /** OpenPay 利用手数料の行。null なら出さない。 */
   feeRow: BreakdownRowModel | null;
   /** ネットワーク手数料の行。null なら出さない。 */
@@ -26,7 +26,7 @@ type Props = {
 };
 
 export function CheckoutAmountBreakdown({
-  subtotalRows,
+  subtotal,
   feeRow,
   gasRow,
   totalRow,
@@ -39,7 +39,17 @@ export function CheckoutAmountBreakdown({
     <>
       <div className="mt-3 border-t border-slate-200 pt-3">
         <dl className="space-y-1.5">
-          {subtotalRows.map((row, i) => breakdownRow(row, i))}
+          {/* 値引きがあれば 小計 → 値引き の 2 行を 1 つの Fragment で、無ければ小計の行だけを出す。切り出し前と同じ要素の形と
+              key ('subtotal'・'discount') にして、値引きの有無が変わって描き直すときの振る舞い (小計の行を作り直す) も同じにする
+              (#1023 の Codex レビュー)。 */}
+          {subtotal.discountRow ? (
+            <>
+              {breakdownRow(subtotal.row, 'subtotal')}
+              {breakdownRow(subtotal.discountRow, 'discount')}
+            </>
+          ) : (
+            breakdownRow(subtotal.row)
+          )}
           {feeRow && breakdownRow(feeRow)}
           {gasRow && breakdownRow(gasRow)}
           <div className="my-1 border-t border-slate-200" />
