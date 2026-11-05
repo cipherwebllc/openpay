@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Address } from 'viem';
-import { checkoutIntentContextFingerprint } from '@/lib/checkoutIntentContext';
+import { checkoutIntentContextFingerprint, orderLinkContextFingerprint } from '@/lib/checkoutIntentContext';
 import type { CheckoutParams } from '@/lib/url';
 
 const MERCHANT =
@@ -96,5 +96,29 @@ describe('checkoutIntentContextFingerprint', () => {
         customerEmail: 'other@example.com',
       }),
     ).toBe(fingerprint());
+  });
+});
+
+describe('orderLinkContextFingerprint (第 9 回レビュー G-1)', () => {
+  const ORDINARY: CheckoutParams = { to: MERCHANT, token: 'jpyc', chain: 'polygon', gas: 'customer', items: BASE.items };
+
+  it('会計の指紋は ship を含まないので、普通の /checkout と「何度でも使える」リンクが同じ値になる (区別が要る理由)', () => {
+    expect(fingerprint({ ...ORDINARY, ship: 'ask' })).toBe(fingerprint(ORDINARY));
+  });
+
+  it('ship で別の値になり、会計の指紋そのものとも違う・同じ入力なら同じ値 (大文字小文字によらない)', () => {
+    const contextKey = fingerprint(ORDINARY);
+    const plain = orderLinkContextFingerprint(contextKey, {});
+    const shipAsk = orderLinkContextFingerprint(contextKey, { ship: 'ask' });
+    expect(shipAsk).not.toBe(plain);
+    expect(plain).not.toBe(contextKey);
+    expect(shipAsk).toMatch(/^0x[0-9a-f]{64}$/);
+    expect(orderLinkContextFingerprint(contextKey.toUpperCase().replace('0X', '0x') as typeof contextKey, { ship: 'ask' })).toBe(shipAsk);
+  });
+
+  it('会計の指紋が違えば別の値になる', () => {
+    expect(orderLinkContextFingerprint(fingerprint(BASE), {})).not.toBe(
+      orderLinkContextFingerprint(fingerprint(ORDINARY), {}),
+    );
   });
 });

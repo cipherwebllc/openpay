@@ -1018,8 +1018,8 @@ describe('useJpycEip3009Payment — reload intent 復元', () => {
     });
   });
 
-  it('注文リンクの会計の指紋 (contextKey) は復旧 intent にだけ残し、relay POST には載せない (第 9 回レビュー G-1)', async () => {
-    const contextKey = `0x${'c4'.repeat(32)}` as Hex;
+  it('注文リンクの支払いの指紋 (orderLinkKey) は復旧 intent にだけ残し、relay POST には載せない (第 9 回レビュー G-1)', async () => {
+    const orderLinkKey = `0x${'c4'.repeat(32)}` as Hex;
     fetchSpy.mockResolvedValueOnce(
       new Response(JSON.stringify({ ok: false, pending: true, txHash: `0x${'8'.repeat(64)}` }), {
         status: 202,
@@ -1031,21 +1031,21 @@ describe('useJpycEip3009Payment — reload intent 復元', () => {
       wrapper: makeWrapper(),
     });
 
-    result.current.mutate({ merchant: MERCHANT, value: 300n * 10n ** 18n, contextKey });
+    result.current.mutate({ merchant: MERCHANT, value: 300n * 10n ** 18n, orderLinkKey });
     await waitFor(() => expect(result.current.data?.pending).toBe(true));
 
     const rawBody = (fetchSpy.mock.calls[0][1] as RequestInit).body as string;
-    expect(rawBody).not.toContain(contextKey);
-    expect(JSON.parse(rawBody).contextKey).toBeUndefined();
+    expect(rawBody).not.toContain(orderLinkKey);
+    expect(JSON.parse(rawBody).orderLinkKey).toBeUndefined();
     const saved = JSON.parse(window.sessionStorage.getItem(RELAY_INTENT_STORAGE_KEY)!);
-    expect(saved.contextKey).toBe(contextKey);
+    expect(saved.orderLinkKey).toBe(orderLinkKey);
   });
 
-  it('reload 後の復元 intent に会計の指紋 (contextKey) を戻す', async () => {
+  it('reload 後の復元 intent に注文リンクの支払いの指紋 (orderLinkKey) を戻す', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-07-25T00:00:00Z'));
-    const contextKey = `0x${'c4'.repeat(32)}` as Hex;
-    storeRelayIntent(restoredRelayIntent({ contextKey }));
+    const orderLinkKey = `0x${'c4'.repeat(32)}` as Hex;
+    storeRelayIntent(restoredRelayIntent({ orderLinkKey }));
     const txHash = `0x${'9'.repeat(64)}` as Hex;
     fetchSpy.mockResolvedValueOnce(
       new Response(JSON.stringify({ ok: true, state: 'settled', txHash })),
@@ -1058,7 +1058,7 @@ describe('useJpycEip3009Payment — reload intent 復元', () => {
     await advanceUntil(100, () =>
       expect(result.current.data).toEqual({ txHash, success: true }),
     );
-    expect(result.current.restoredIntent?.contextKey).toBe(contextKey);
+    expect(result.current.restoredIntent?.orderLinkKey).toBe(orderLinkKey);
     expect(signTypedData).not.toHaveBeenCalled();
     vi.useRealTimers();
   });

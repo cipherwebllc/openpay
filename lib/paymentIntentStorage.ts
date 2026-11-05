@@ -16,10 +16,10 @@ export type RelayIntentMetadata = {
   validBefore: string;
   routeKind: 'free' | 'recover';
   issuedAt: number;
-  // 注文リンクの会計の指紋 (lib/checkoutIntentContext の digest・公開の注文文脈だけから作る)。CheckoutForm が
-  // 注文リンクの支払いにだけ付け、読み直した後の完了を同じ会計にだけ結び付ける (第 9 回レビュー G-1)。
-  // 署名・relay POST には載せない。standard の contextKey と同じ値。
-  contextKey?: Hex;
+  // 注文リンクの支払いの指紋 (lib/checkoutIntentContext の orderLinkContextFingerprint・公開の注文文脈だけから作る
+  // digest)。CheckoutForm が注文リンクの支払いにだけ付け、読み直した後の完了を「この注文リンク」の支払いにだけ結び付ける
+  // (第 9 回レビュー G-1)。署名・relay POST には載せない。
+  orderLinkKey?: Hex;
 };
 
 export type StandardIntentStage = 'merchant' | 'fee' | 'fee-awaiting';
@@ -33,6 +33,8 @@ export type StandardPaymentIntentParams = {
   chainId: number;
   saleAmount?: bigint;
   contextKey?: Hex;
+  // 注文リンクの支払いの指紋 (RelayIntentMetadata.orderLinkKey と同じ)。注文リンクの支払いにだけ付く。
+  orderLinkKey?: Hex;
 };
 
 // hooks/useStandardPayment の mutate 引数 (型だけ)。lib/standardPaymentLog も使うため lib に置く
@@ -59,6 +61,7 @@ export type StandardIntentMetadata = {
   feeTxHash?: Hex;
   merchantBlockNumber?: string;
   contextKey?: Hex;
+  orderLinkKey?: Hex;
   issuedAt: number;
 };
 
@@ -115,9 +118,9 @@ function parseRelayIntent(value: unknown): RelayIntentMetadata | null {
     validBefore: o.validBefore,
     routeKind: o.routeKind,
     issuedAt: o.issuedAt,
-    // 形の崩れた指紋は落とすだけで intent は残す (指紋は「注文を送る」の表示にしか使わない。intent ごと捨てて
+    // 形の崩れた指紋は落とすだけで intent は残す (指紋は「注文を送る」と払った記録にしか使わない。intent ごと捨てて
     // 未解決の支払いの復旧 latch を外し、再署名 = 二重払いへ波及させない)。
-    ...(isHex32(o.contextKey) ? { contextKey: o.contextKey } : {}),
+    ...(isHex32(o.orderLinkKey) ? { orderLinkKey: o.orderLinkKey } : {}),
   };
 }
 
@@ -171,6 +174,9 @@ function parseStandardIntent(value: unknown): StandardIntentMetadata | null {
       ? { merchantBlockNumber: o.merchantBlockNumber }
       : {}),
     ...(o.contextKey ? { contextKey: o.contextKey } : {}),
+    // 注文リンクの指紋は contextKey と違い、崩れていても intent ごとは捨てない (relay と同じ理由・receipt 照会の
+    // latch を外して二重送金へ波及させない)。指紋だけ落とす。
+    ...(isHex32(o.orderLinkKey) ? { orderLinkKey: o.orderLinkKey } : {}),
     issuedAt: o.issuedAt,
   };
 }
@@ -224,7 +230,7 @@ export function saveRelayIntent(intent: RelayIntentMetadata): void {
     validBefore: intent.validBefore,
     routeKind: intent.routeKind,
     issuedAt: intent.issuedAt,
-    ...(isHex32(intent.contextKey) ? { contextKey: intent.contextKey } : {}),
+    ...(isHex32(intent.orderLinkKey) ? { orderLinkKey: intent.orderLinkKey } : {}),
   });
 }
 
@@ -250,6 +256,7 @@ export function standardParamsFromIntent(
       ? { saleAmount: BigInt(intent.saleValue) }
       : {}),
     ...(intent.contextKey ? { contextKey: intent.contextKey } : {}),
+    ...(intent.orderLinkKey ? { orderLinkKey: intent.orderLinkKey } : {}),
   };
 }
 
@@ -280,6 +287,7 @@ export function saveStandardPaymentIntent(
       ? { merchantBlockNumber: values.merchantBlockNumber.toString() }
       : {}),
     ...(params.contextKey ? { contextKey: params.contextKey } : {}),
+    ...(params.orderLinkKey ? { orderLinkKey: params.orderLinkKey } : {}),
     issuedAt,
   });
 }
@@ -305,6 +313,7 @@ export function saveStandardIntent(intent: StandardIntentMetadata): void {
       ? { merchantBlockNumber: intent.merchantBlockNumber }
       : {}),
     ...(intent.contextKey ? { contextKey: intent.contextKey } : {}),
+    ...(isHex32(intent.orderLinkKey) ? { orderLinkKey: intent.orderLinkKey } : {}),
     issuedAt: intent.issuedAt,
   });
 }

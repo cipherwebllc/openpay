@@ -147,7 +147,7 @@ import { deploymentForSlug } from '@/lib/tokens';
 import { env } from '@/lib/env';
 import { loadHistory } from '@/lib/history';
 import { loadPayerReceipts } from '@/lib/payerReceipt';
-import { checkoutIntentContextFingerprint } from '@/lib/checkoutIntentContext';
+import { checkoutIntentContextFingerprint, orderLinkContextFingerprint } from '@/lib/checkoutIntentContext';
 import { rememberedOrderPayment } from '@/lib/orderConfirmation';
 import {
   RelayIpRateLimitedError,
@@ -4241,11 +4241,15 @@ describe('CheckoutForm — R14 admission の二重送信と await 後の再確�
 });
 
 // 第 9 回レビュー G-1: 読み直した画面で復元した支払いが完了したとき (大きな完了画面と受注通知は出さない既存の流れのまま)、
-// この会計の支払いなら「注文を送る / お店に知らせる」を出し、払った記録 (lib/orderConfirmation・実物・sessionStorage) を残す。
-// 記録が無いと、もう一度読み直したときに同じ注文をまた払えてしまう。hook の戻り値は hook の型そのもので組み、
+// この注文リンクの支払いなら「注文を送る / お店に知らせる」を出し、払った記録 (lib/orderConfirmation・実物・sessionStorage)
+// を残す。記録が無いと、もう一度読み直したときに同じ注文をまた払えてしまう。hook の戻り値は hook の型そのもので組み、
 // lastSubmittedFrom / restoredFromStorage / restoredIntent の名前や型が hook 側で変わったら typecheck で落とす。
 describe('CheckoutForm — 復元した決済の完了で「注文を送る」と支払い済みの記録 (第 9 回レビュー G-1)', () => {
   const TOTAL = 3000n * 10n ** 18n;
+  // test env の recover の利用料 (relayGasFeeValue の mock = 2 JPYC・bps=0 なのでフロアのまま)。
+  const RECOVER_FEE = 2n * 10n ** 18n;
+  const FORWARDER: Address = '0x1111111111111111111111111111111111111111';
+  const OTHER_MERCHANT: Address = '0x3333333333333333333333333333333333333333';
   const TX: Hex = `0x${'5a'.repeat(32)}`;
   const deployment = deploymentForSlug('jpyc', 'polygon');
   // 番号つきの注文リンク (通常決済) と、何度でも使える注文リンク (ガスレス = relay)。
@@ -4262,15 +4266,18 @@ describe('CheckoutForm — 復元した決済の完了で「注文を送る」�
       totalAtomic: TOTAL.toString(),
     });
   }
+  function orderLinkKeyOf(params: CheckoutParams): Hex {
+    return orderLinkContextFingerprint(contextKeyOf(params), params);
+  }
 
-  function ready() {
-    setAccount({ connected: true, chainId: polygonAmoy.id });
+  function ready(chainId: number = polygonAmoy.id) {
+    setAccount({ connected: true, chainId });
     setBalance(10_000n * 10n ** 18n);
     setSmartAccount(false);
   }
 
   // 読み直した画面で、保存された通常決済の receipt が成功した状態 (hook は restoredFromStorage のまま success)。
-  function setRestoredStandardSuccess(contextKey: Hex) {
+  function setRestoredStandardSuccess(keys: { contextKey: Hex; orderLinkKey?: Hex }) {
     const restored: ReturnType<typeof useStandardPayment> = {
       mutate: vi.fn(),
       retryFee: vi.fn(),
@@ -4297,7 +4304,8 @@ describe('CheckoutForm — 復元した決済の完了で「注文を送る」�
         feeAmount: 0n,
         chainId: deployment.chainId,
         saleAmount: TOTAL,
-        contextKey,
+        contextKey: keys.contextKey,
+        orderLinkKey: keys.orderLinkKey,
       },
       lastSubmittedFrom: CUSTOMER,
       isRestoring: false,
@@ -4309,26 +4317,34 @@ describe('CheckoutForm — 復元した決済の完了で「注文を送る」�
   }
 
   type RelayHook = ReturnType<typeof useJpycEip3009Payment>;
-  // 読み直した画面で、保存された relay の nonce が settled と分かった状態 (hook は restoredIntent を持ったまま成功)。
-  // recover (forwarder あり・本番の Polygon と同じ) は利用料 (test では 2 JPYC のフロア) をお店の受取から差し引く。
-  function setRestoredRelaySuccess(contextKey: Hex | undefined, routeKind: 'free' | 'recover' = 'free') {
-    vi.mocked(resolveJpycGaslessProvider).mockReturnValue('eip3009-relay');
-    const fee = routeKind === 'recover' ? 2n * 10n ** 18n : 0n;
-    if (routeKind === 'recover') {
-      vi.mocked(jpycForwarderFor).mockReturnValue('0x1111111111111111111111111111111111111111');
-    }
-    const restoredIntent: NonNullable<RelayHook['restoredIntent']> = {
+  type RestoredRelayIntent = NonNullable<RelayHook['restoredIntent']>;
+  // RELAY_ORDER を free で払った intent。overrides で 1 項目ずつ変える。
+  function relayIntent(overrides: Partial<RestoredRelayIntent> = {}): RestoredRelayIntent {
+    return {
       chainId: deployment.chainId,
       from: CUSTOMER,
       merchant: MERCHANT,
-      merchantValue: (TOTAL - fee).toString(),
-      feeValue: fee.toString(),
+      merchantValue: TOTAL.toString(),
+      feeValue: '0',
       nonce: `0x${'6b'.repeat(32)}`,
       validBefore: '9999999999',
-      routeKind,
+      routeKind: 'free',
       issuedAt: 1_700_000_000_000,
-      contextKey,
+      orderLinkKey: orderLinkKeyOf(RELAY_ORDER),
+      ...overrides,
     };
+  }
+  // recover (forwarder あり・本番の Polygon と同じ): 利用料をお店の受取から差し引く。
+  const RECOVER: Partial<RestoredRelayIntent> = {
+    routeKind: 'recover',
+    merchantValue: (TOTAL - RECOVER_FEE).toString(),
+    feeValue: RECOVER_FEE.toString(),
+  };
+
+  // 読み直した画面で、保存された relay の nonce が settled と分かった状態 (hook は restoredIntent を持ったまま成功)。
+  function setRestoredRelaySuccess(intent: RestoredRelayIntent) {
+    vi.mocked(resolveJpycGaslessProvider).mockReturnValue('eip3009-relay');
+    if (intent.routeKind === 'recover') vi.mocked(jpycForwarderFor).mockReturnValue(FORWARDER);
     const restored: Pick<
       RelayHook,
       | 'mutate'
@@ -4346,11 +4362,11 @@ describe('CheckoutForm — 復元した決済の完了で「注文を送る」�
       data: { txHash: TX, success: true },
       error: null,
       isPending: false,
-      variables: { merchant: MERCHANT, value: TOTAL },
+      variables: { merchant: MERCHANT, value: BigInt(intent.merchantValue) },
       recoveryState: null,
       retryRelay: vi.fn(),
       retrySamePayload: vi.fn(),
-      restoredIntent,
+      restoredIntent: intent,
       orderDelivery: null,
     };
     mockHook(useJpycEip3009Payment, restored);
@@ -4359,7 +4375,7 @@ describe('CheckoutForm — 復元した決済の完了で「注文を送る」�
   it('通常決済: 復元した receipt の成功で「お店に知らせる」を出し、払った記録を残す → 読み直すと同じ注文を払えない', async () => {
     ready();
     const key = contextKeyOf(STANDARD_ORDER);
-    setRestoredStandardSuccess(key);
+    setRestoredStandardSuccess({ contextKey: key, orderLinkKey: orderLinkKeyOf(STANDARD_ORDER) });
     const first = render(<CheckoutForm params={STANDARD_ORDER} />);
 
     // 既存の復元の流れのまま、完了欄に Tx Hash を出す
@@ -4384,7 +4400,7 @@ describe('CheckoutForm — 復元した決済の完了で「注文を送る」�
   it('通常決済: 別の会計 (番号の違う注文) の復元は「お店に知らせる」を出さず、記録も残さない', async () => {
     ready();
     const other: CheckoutParams = { ...STANDARD_ORDER, orderId: 'ord-other' };
-    setRestoredStandardSuccess(contextKeyOf(other));
+    setRestoredStandardSuccess({ contextKey: contextKeyOf(other), orderLinkKey: orderLinkKeyOf(other) });
     const first = render(<CheckoutForm params={STANDARD_ORDER} />);
 
     // 既存の復元の流れ (完了欄の Tx Hash) はそのまま
@@ -4402,10 +4418,57 @@ describe('CheckoutForm — 復元した決済の完了で「注文を送る」�
     expect(screen.queryByText(PAID_NOTE)).toBeNull();
   });
 
-  it('ガスレス (relay): 復元した支払いの成功で「注文を送る」を出し、払った記録を残す → 読み直すと同じ注文を払えない', async () => {
+  it('通常決済: 普通の /checkout (注文リンクでない) の復元は、同じお店・明細・金額の「何度でも使える」リンクに結び付けない', async () => {
+    ready();
+    const ordinary: CheckoutParams = { ...JPYC_PARAMS, mode: 'standard' };
+    const shipAsk: CheckoutParams = { ...ordinary, ship: 'ask' };
+    // 会計の指紋は ship を含まないので同じ値 (既存の照合 restoredStandardOrderAttempt はここで一致する)
+    expect(contextKeyOf(shipAsk)).toBe(contextKeyOf(ordinary));
+    // 普通の /checkout は注文リンクの指紋を残さない
+    setRestoredStandardSuccess({ contextKey: contextKeyOf(ordinary) });
+    const first = render(<CheckoutForm params={shipAsk} />);
+
+    expect(screen.getAllByText(TX).length).toBeGreaterThan(0);
+    expect(screen.queryByText(RESTORED_TITLE)).toBeNull();
+    expect(screen.queryByRole('button', { name: '注文を送る' })).toBeNull();
+    first.unmount();
+    expect(rememberedOrderPayment(contextKeyOf(shipAsk), Date.now())).toBeNull();
+
+    setStandardPaymentDefault();
+    render(<CheckoutForm params={shipAsk} />);
+    expect(screen.getByRole('button', { name: /3000 JPYC を支払う/ })).toBeEnabled();
+    expect(screen.queryByText(PAID_NOTE)).toBeNull();
+  });
+
+  it('通常決済: 注文リンクの支払いだけ orderLinkKey を standard.mutate に渡す (contextKey は従来どおり全部に渡す)', async () => {
+    const user = userEvent.setup();
+    ready();
+    const first = render(<CheckoutForm params={STANDARD_ORDER} />);
+    await user.click(screen.getByRole('button', { name: /3000 JPYC を支払う/ }));
+    expect(standardMutate).toHaveBeenCalledOnce();
+    expect(standardMutate.mock.calls[0][0]).toMatchObject({
+      contextKey: contextKeyOf(STANDARD_ORDER),
+      orderLinkKey: orderLinkKeyOf(STANDARD_ORDER),
+    });
+    first.unmount();
+
+    // 注文リンクでない会計 (番号も ship=ask も無い)
+    const ordinary: CheckoutParams = { ...JPYC_PARAMS, mode: 'standard' };
+    setStandardPaymentDefault();
+    render(<CheckoutForm params={ordinary} />);
+    await user.click(screen.getByRole('button', { name: /3000 JPYC を支払う/ }));
+    expect(standardMutate).toHaveBeenCalledOnce();
+    expect(standardMutate.mock.calls[0][0].contextKey).toBe(contextKeyOf(ordinary));
+    expect(standardMutate.mock.calls[0][0].orderLinkKey).toBeUndefined();
+  });
+
+  it.each<[string, Partial<RestoredRelayIntent>]>([
+    ['free', {}],
+    ['recover', RECOVER],
+  ])('ガスレス (relay %s): 復元した支払いの成功で「注文を送る」を出し、払った記録を残す → 読み直すと同じ注文を払えない', async (_route, overrides) => {
     ready();
     const key = contextKeyOf(RELAY_ORDER);
-    setRestoredRelaySuccess(key);
+    setRestoredRelaySuccess(relayIntent(overrides));
     const first = render(<CheckoutForm params={RELAY_ORDER} />);
 
     expect(screen.getAllByText(TX).length).toBeGreaterThan(0);
@@ -4426,30 +4489,63 @@ describe('CheckoutForm — 復元した決済の完了で「注文を送る」�
     expect(screen.getByRole('button', { name: '注文を送る' })).toBeInTheDocument();
   });
 
-  it('ガスレス (relay recover・利用料をお店が負担): 復元した支払いの成功でも同じ会計と分かり、「注文を送る」と記録を出す', async () => {
-    ready();
+  it.each<[string, Partial<RestoredRelayIntent>]>([
+    ['free', {}],
+    ['recover', RECOVER],
+  ])('ガスレス (relay %s): ウォレットが別のチェーンのまま読み直しても、払った支払いを記録して「注文を送る」を出す', async (_route, overrides) => {
+    setRestoredRelaySuccess(relayIntent(overrides));
+    // 経路は接続中のチェーンで決まる: Polygon (test では Amoy) 以外では relay・recover にならない
+    vi.mocked(resolveJpycGaslessProvider).mockImplementation((_dep, chainId) =>
+      chainId === polygonAmoy.id ? 'eip3009-relay' : 'pimlico-7702',
+    );
+    vi.mocked(jpycForwarderFor).mockImplementation((chainId) =>
+      overrides.routeKind === 'recover' && chainId === polygonAmoy.id ? FORWARDER : null,
+    );
+    ready(baseSepolia.id);
     const key = contextKeyOf(RELAY_ORDER);
-    setRestoredRelaySuccess(key, 'recover');
-    render(<CheckoutForm params={RELAY_ORDER} />);
+    const first = render(<CheckoutForm params={RELAY_ORDER} />);
 
     expect(await screen.findByText(RESTORED_TITLE)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '注文を送る' })).toBeInTheDocument();
     await waitFor(() =>
       expect(rememberedOrderPayment(key, Date.now())).toMatchObject({ txHash: TX, payer: CUSTOMER }),
     );
+    first.unmount();
+
+    // Polygon に戻して読み直す: hook は成功で保存を消しているので何も復元しない → 記録から払うボタンを止める
+    setRelayPayment('idle');
+    ready();
+    render(<CheckoutForm params={RELAY_ORDER} />);
+    expect(await screen.findByText(PAID_NOTE)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /3000 JPYC を支払う/ })).toBeDisabled();
   });
 
-  it.each<[string, Hex | undefined]>([
+  // 注文リンクの指紋を一致させたまま 1 項目ずつ変える (照合の各条件を個別に確かめる)。
+  it.each<[string, Partial<RestoredRelayIntent>]>([
     [
       '別の注文 (同じお店・同じ金額・明細違い) の指紋',
-      contextKeyOf({ ...RELAY_ORDER, items: [{ name: 'チケット', qty: 2, price: '1500' }] }),
+      { orderLinkKey: orderLinkKeyOf({ ...RELAY_ORDER, items: [{ name: 'チケット', qty: 2, price: '1500' }] }) },
     ],
-    ['指紋の無い復元 (/pay・/tip の支払い・以前の保存)', undefined],
-  ])('ガスレス (relay): %s は「注文を送る」を出さず、記録も残さない', async (_label, contextKey) => {
+    [
+      '会計の指紋は同じで ship の無い支払い (普通の /checkout と同じ中身) の指紋',
+      { orderLinkKey: orderLinkContextFingerprint(contextKeyOf(RELAY_ORDER), {}) },
+    ],
+    ['指紋の無い復元 (/pay・/tip・普通の /checkout の支払い・以前の保存)', { orderLinkKey: undefined }],
+    ['チェーンが違う', { chainId: baseSepolia.id }],
+    ['お店が違う', { merchant: OTHER_MERCHANT }],
+    ['お店の受取 (merchantValue) が違う', { merchantValue: (TOTAL - 1n).toString() }],
+    ['利用料 (feeValue) が違う', { feeValue: '1' }],
+    [
+      'recover の利用料が違う (合計は同じ)',
+      { ...RECOVER, merchantValue: (TOTAL - 3n * 10n ** 18n).toString(), feeValue: (3n * 10n ** 18n).toString() },
+    ],
+    ['recover なのに利用料が 0 (経路と金額が合わない)', { routeKind: 'recover' }],
+  ])('ガスレス (relay): %s の復元は「注文を送る」を出さず、記録も残さない', async (_label, overrides) => {
     ready();
-    setRestoredRelaySuccess(contextKey);
+    setRestoredRelaySuccess(relayIntent(overrides));
     const first = render(<CheckoutForm params={RELAY_ORDER} />);
 
+    // 既存の復元の流れ (完了欄の Tx Hash) はそのまま
     expect(screen.getAllByText(TX).length).toBeGreaterThan(0);
     expect(screen.queryByText(RESTORED_TITLE)).toBeNull();
     expect(screen.queryByRole('button', { name: '注文を送る' })).toBeNull();
@@ -4463,14 +4559,15 @@ describe('CheckoutForm — 復元した決済の完了で「注文を送る」�
     expect(screen.queryByText(PAID_NOTE)).toBeNull();
   });
 
-  it('ガスレス (relay): 注文リンクの支払いだけ会計の指紋を relay.mutate に渡す (注文リンクでない会計・束縛した注文には渡さない)', async () => {
+  it('ガスレス (relay): 注文リンクの支払いだけ orderLinkKey を relay.mutate に渡す (注文リンクでない会計・束縛した注文には渡さない)', async () => {
     const user = userEvent.setup();
     ready();
     vi.mocked(resolveJpycGaslessProvider).mockReturnValue('eip3009-relay');
     const first = render(<CheckoutForm params={RELAY_ORDER} />);
     await user.click(screen.getByRole('button', { name: /3000 JPYC を支払う/ }));
     expect(relayMutate).toHaveBeenCalledOnce();
-    expect(relayMutate.mock.calls[0][0].contextKey).toBe(contextKeyOf(RELAY_ORDER));
+    expect(relayMutate.mock.calls[0][0].orderLinkKey).toBe(orderLinkKeyOf(RELAY_ORDER));
+    expect(relayMutate.mock.calls[0][0].contextKey).toBeUndefined();
     first.unmount();
 
     // 注文リンクでない会計 (番号も ship=ask も無い)
@@ -4478,7 +4575,7 @@ describe('CheckoutForm — 復元した決済の完了で「注文を送る」�
     const second = render(<CheckoutForm params={JPYC_PARAMS} />);
     await user.click(screen.getByRole('button', { name: /3000 JPYC を支払う/ }));
     expect(relayMutate).toHaveBeenCalledOnce();
-    expect(relayMutate.mock.calls[0][0].contextKey).toBeUndefined();
+    expect(relayMutate.mock.calls[0][0].orderLinkKey).toBeUndefined();
     second.unmount();
 
     // 束縛した注文 (同一オリジンの受注通知・番号つき): 自分の slot と注文の中身で復旧するので渡さない
@@ -4491,6 +4588,6 @@ describe('CheckoutForm — 復元した決済の完了で「注文を送る」�
     await user.click(screen.getByRole('button', { name: /3000 JPYC を支払う/ }));
     await waitFor(() => expect(relayMutate).toHaveBeenCalledOnce());
     expect(relayMutate.mock.calls[0][0].order).toBeDefined();
-    expect(relayMutate.mock.calls[0][0].contextKey).toBeUndefined();
+    expect(relayMutate.mock.calls[0][0].orderLinkKey).toBeUndefined();
   });
 });
