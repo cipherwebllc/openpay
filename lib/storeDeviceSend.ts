@@ -22,6 +22,7 @@ import {
   isAddress,
   isHex,
   keccak256,
+  maxUint256,
   parseAbi,
   zeroAddress,
   type Address,
@@ -84,8 +85,12 @@ export type DeviceVerifyReject =
   | 'nonce_mismatch'
   | 'signature_mismatch';
 
+// 78 桁の数字は uint256 を超えうる。範囲外は nonce の計算 (uint256 の ABI encode) で例外になり、拒否の理由
+// ('malformed') が失われるので、ここで形の違う値として弾く (lib/storeHandoff.ts の parseWei と同じ・第 9 回レビュー F-05)。
 function parseWei(value: unknown): bigint | null {
-  return typeof value === 'string' && /^\d{1,78}$/.test(value) ? BigInt(value) : null;
+  if (typeof value !== 'string' || !/^\d{1,78}$/.test(value)) return null;
+  const n = BigInt(value);
+  return n <= maxUint256 ? n : null;
 }
 
 function isBytes32(value: unknown): value is Hex {
@@ -218,7 +223,11 @@ export function sentMarkWrittenThisTab(nonce: string): DeviceSentMark | null {
   return writtenThisTab.get(nonce.toLowerCase()) ?? null;
 }
 
-/** 印の一覧。読み取りの失敗は ok: false (「印なし」と区別する: 失敗を印なしと読むと二度送りうる)。 */
+/**
+ * 印の一覧。読み取りの失敗は ok: false (「印なし」と区別する: 失敗を印なしと読むと二度送りうる)。
+ * 壊れた値 (JSON でない・配列でない = 手で書き換えた・拡張機能など) も読めない扱い: 印なしと読むと、その上に印を
+ * 書いて別タブ・再読み込み前の未解決の印を消し、同じ会計をもう一度送りうる (送信も印の保存も止める・第 9 回レビュー E-8)。
+ */
 export function readSentMarks(): { ok: true; marks: DeviceSentMark[] } | { ok: false } {
   let raw: string | null;
   try {
@@ -227,15 +236,20 @@ export function readSentMarks(): { ok: true; marks: DeviceSentMark[] } | { ok: f
     return { ok: false };
   }
   if (!raw) return { ok: true, marks: [] };
+  let v: unknown;
   try {
-    const v = JSON.parse(raw) as unknown;
-    return { ok: true, marks: Array.isArray(v) ? v.filter(isMark) : [] };
+    v = JSON.parse(raw) as unknown;
   } catch {
-    return { ok: true, marks: [] };
+    return { ok: false };
   }
+  if (!Array.isArray(v)) return { ok: false };
+  return { ok: true, marks: v.filter(isMark) };
 }
 
-/** 印を足して読み戻しで確かめる。保存できなければ false (呼び出し側は送らない)。 */
+/**
+ * 印を足して読み戻しで確かめる。保存できなければ false (呼び出し側は送らない)。
+ * 一覧が読めない (壊れた値を含む) ときは、その上に書かない (書き戻すと読めない値の中の印を消してしまう)。
+ */
 export function addSentMark(mark: DeviceSentMark, nowMs: number): boolean {
   const read = readSentMarks();
   if (!read.ok) return false;
