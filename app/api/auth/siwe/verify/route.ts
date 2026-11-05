@@ -78,7 +78,8 @@ export async function POST(req: Request): Promise<NextResponse> {
         const client = createPublicClient({
           chain,
           transport: transportForChain(chainId),
-          // CCIP-Read (EIP-3668) は追わない。SIWE の 1271/6492/8010 の検証に offchain lookup は要らない。
+          // CCIP-Read (EIP-3668) は追わない。サポートするのはオンチェーンで完結する署名検証 (EOA / ERC-1271 /
+          // 6492 / 8010) で、CCIP-Read に依存する 1271 実装の wallet は対象外とする。
           // 有効のままだと、7702 委任済み EOA + ERC-8010 形の署名で委任先が OffchainLookup を返したとき、
           // viem が revert data に書かれた任意の URL へサーバーから fetch する (正しい署名なしで届く SSRF・
           // 第 9 回レビュー C-1)。false なら revert はただの検証失敗 = 401 invalid_signature になる。

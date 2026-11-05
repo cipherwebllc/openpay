@@ -1,5 +1,21 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest';
-import { encodeErrorResult, parseAbi, serializeErc8010Signature, type Hex } from 'viem';
+import {
+  decodeAbiParameters,
+  decodeFunctionData,
+  encodeAbiParameters,
+  encodeErrorResult,
+  erc6492SignatureValidatorByteCode,
+  getAddress,
+  isAddressEqual,
+  isErc6492Signature,
+  parseAbi,
+  parseErc6492Signature,
+  recoverAddress,
+  serializeErc6492Signature,
+  serializeErc8010Signature,
+  type Address,
+  type Hex,
+} from 'viem';
 import { createSiweMessage } from 'viem/siwe';
 import { privateKeyToAccount } from 'viem/accounts';
 import { supportedChains } from '@/lib/chains';
@@ -292,26 +308,32 @@ describe('SIWE routes', () => {
       fetchSpy.mockRestore();
     });
 
-    // 正しい署名を持たない攻撃者の形: 自分の EOA を 7702 で委任し、中身の署名は 65 byte の 0。
-    async function attackerLogin() {
+    // address の SIWE message を作り、sign(message) の署名で verify を呼ぶ。nonce は発行済みとして答える。
+    async function siweLogin(address: Address, sign: (message: string) => Promise<Hex>) {
       h.kvConfigured = true;
       h.kvGet.mockResolvedValue({ ok: true, value: '1' }); // 発行済みの nonce (nonce だけで deps.verify まで届く)
       h.kvDel.mockResolvedValue({ ok: true, value: 1 });
       h.kvSet.mockResolvedValue({ ok: true, value: 'OK' });
-      const chainId = supportedChains[0].id;
-      const authorization = await attacker.signAuthorization({ address: DELEGATE, chainId, nonce: 0 });
-      const signature = serializeErc8010Signature({ authorization, signature: `0x${'00'.repeat(65)}` });
       const issuedAt = new Date();
       const message = createSiweMessage({
-        domain: 'localhost', uri: 'http://localhost', address: attacker.address,
-        version: '1', chainId, nonce: 'ccipread1234', issuedAt,
+        domain: 'localhost', uri: 'http://localhost', address,
+        version: '1', chainId: supportedChains[0].id, nonce: 'ccipread1234', issuedAt,
         expirationTime: new Date(issuedAt.getTime() + 600_000),
       });
+      const signature = await sign(message);
       return verifyPOST(new Request('http://localhost/api/auth/siwe/verify', {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' },
         body: JSON.stringify({ message, signature }),
       }));
+    }
+
+    // 正しい署名を持たない攻撃者の形: 自分の EOA を 7702 で委任し、中身の署名は 65 byte の 0。
+    function attackerLogin() {
+      return siweLogin(attacker.address, async () => {
+        const authorization = await attacker.signAuthorization({ address: DELEGATE, chainId: supportedChains[0].id, nonce: 0 });
+        return serializeErc8010Signature({ authorization, signature: `0x${'00'.repeat(65)}` });
+      });
     }
 
     it('委任先が OffchainLookup で revert しても外へ fetch せず 401 invalid_signature (nonce も cookie もそのまま)', async () => {
@@ -362,6 +384,125 @@ describe('SIWE routes', () => {
       expect(res.headers.has('set-cookie')).toBe(false);
       expect(h.kvDel).not.toHaveBeenCalled();
       expect(h.kvSet).not.toHaveBeenCalled();
+    });
+
+    // 回帰: ccipRead:false のまま、オンチェーンで完結するスマートウォレットの署名 (ERC-1271 / 6492 / 8010) は通る。
+    // RPC の応答だけを模擬し、viem の verifySiweMessage → verifyHash の実際の経路を通す。模擬する wallet の
+    // isValidSignature(hash, sig) は「ecrecover(hash, sig) が owner のときだけ magic value」(よくある owner 型)。
+    describe('スマートウォレットの正常系 (ccipRead:false のまま通る)', () => {
+      // Fixed, test-only owner key; signs locally only, no RPC or real wallet.
+      const owner = privateKeyToAccount(`0x${'33'.repeat(32)}`);
+      const DEPLOYED_WALLET = '0x5afe5afe5afe5afe5afe5afe5afe5afe5afe5afe';
+      const COUNTERFACTUAL_WALLET = '0x6492649264926492649264926492649264926492';
+      const FACTORY = '0xfac7fac7fac7fac7fac7fac7fac7fac7fac7fac7';
+      const VALIDATOR_BYTECODE = erc6492SignatureValidatorByteCode.toLowerCase();
+      const VALIDATOR_ARGS = [{ type: 'address' }, { type: 'bytes32' }, { type: 'bytes' }] as const;
+      const IS_VALID_SIGNATURE_ABI = parseAbi(['function isValidSignature(bytes32 hash, bytes signature) view returns (bytes4)']);
+      const ERC1271_MAGIC = '0x1626ba7e';
+      type Tx = { to?: string; data?: Hex };
+      let calls: Array<{ method: string; tx?: Tx }>;
+
+      // code: eth_getCode の答え (小文字 address → code)。owners: 模擬 wallet の owner。
+      function fakeChain(code: Record<string, Hex>, owners: Record<string, Address>) {
+        calls = [];
+        const isValid = async (wallet: string, hash: Hex, signature: Hex) => {
+          const expected = owners[wallet.toLowerCase()];
+          if (!expected) return false;
+          try {
+            return isAddressEqual(await recoverAddress({ hash, signature }), expected);
+          } catch {
+            return false;
+          }
+        };
+        h.rpc = async ({ method, params }) => {
+          const first = Array.isArray(params) ? params[0] : undefined;
+          if (method === 'eth_getCode') {
+            calls.push({ method });
+            return code[String(first).toLowerCase()] ?? '0x';
+          }
+          const tx = first as Tx | undefined;
+          calls.push({ method, tx });
+          if (method === 'eth_call' && tx?.data) {
+            // ERC-1271 / 6492: viem は ERC-6492 の universal validator を deployless (to なし) で 1 回 eth_call する。
+            // validator と同じく、6492 の wrap なら factory で作ったことにして外し、signer の isValidSignature を呼ぶ。
+            if (!tx.to && tx.data.toLowerCase().startsWith(VALIDATOR_BYTECODE)) {
+              const [signer, hash, sig] = decodeAbiParameters(VALIDATOR_ARGS, `0x${tx.data.slice(VALIDATOR_BYTECODE.length)}`);
+              const unwrapped = isErc6492Signature(sig) ? parseErc6492Signature(sig) : null;
+              if (unwrapped && (!unwrapped.address || !unwrapped.data)) throw new Error('6492 wrap without factory');
+              const ok = await isValid(signer, hash, unwrapped ? unwrapped.signature : sig);
+              return encodeAbiParameters([{ type: 'bool' }], [ok]);
+            }
+            // ERC-8010 (7702 委任済み): viem は EOA 自身へ isValidSignature を直接 eth_call する。
+            if (tx.to && tx.data.startsWith(ERC1271_MAGIC)) {
+              const { args } = decodeFunctionData({ abi: IS_VALID_SIGNATURE_ABI, data: tx.data });
+              const ok = await isValid(tx.to, args[0], args[1]);
+              return encodeAbiParameters([{ type: 'bytes4' }], [ok ? ERC1271_MAGIC : '0xffffffff']);
+            }
+          }
+          throw new Error('unexpected rpc in test: ' + method);
+        };
+      }
+
+      async function expectSessionCreated(res: Response, address: Address) {
+        expect(fetchSpy).not.toHaveBeenCalled();
+        expect(res.status).toBe(200);
+        expect(await res.json()).toEqual({ ok: true, address: getAddress(address) });
+        expect(res.headers.get('set-cookie')).toContain('op_sess=');
+        expect(h.kvDel).toHaveBeenCalledWith('siwe:nonce:ccipread1234');
+        expect(h.kvSet).toHaveBeenCalledOnce();
+      }
+
+      const validatorCalls = () => calls.filter((c) => c.method === 'eth_call' && !c.tx?.to && c.tx?.data?.toLowerCase().startsWith(VALIDATOR_BYTECODE));
+
+      it('ERC-1271 (デプロイ済みの contract wallet・isValidSignature が magic value を返す)', async () => {
+        fakeChain({ [DEPLOYED_WALLET]: '0x6080604052' }, { [DEPLOYED_WALLET]: owner.address });
+
+        const res = await siweLogin(getAddress(DEPLOYED_WALLET), (message) => owner.signMessage({ message }));
+
+        await expectSessionCreated(res, DEPLOYED_WALLET);
+        expect(validatorCalls()).toHaveLength(1);
+      });
+
+      it('ERC-6492 (未デプロイの wallet・factory で wrap した署名)', async () => {
+        fakeChain({}, { [COUNTERFACTUAL_WALLET]: owner.address });
+
+        const res = await siweLogin(getAddress(COUNTERFACTUAL_WALLET), async (message) => serializeErc6492Signature({
+          address: FACTORY,
+          data: '0xdeadbeef',
+          signature: await owner.signMessage({ message }),
+        }));
+
+        await expectSessionCreated(res, COUNTERFACTUAL_WALLET);
+        expect(validatorCalls()).toHaveLength(1);
+      });
+
+      it('ERC-8010 (7702 委任済み EOA・委任先の isValidSignature が magic value を返す)', async () => {
+        // 7702 の委任先は「自分自身 (EOA) の鍵の署名なら有効」とするのが典型。owner = EOA 自身。
+        const eoa = privateKeyToAccount(`0x${'44'.repeat(32)}`);
+        fakeChain({ [eoa.address.toLowerCase()]: `0xef0100${DELEGATE.slice(2)}` }, { [eoa.address.toLowerCase()]: eoa.address });
+
+        const res = await siweLogin(eoa.address, async (message) => serializeErc8010Signature({
+          authorization: await eoa.signAuthorization({ address: DELEGATE, chainId: supportedChains[0].id, nonce: 0 }),
+          signature: await eoa.signMessage({ message }),
+        }));
+
+        await expectSessionCreated(res, eoa.address);
+        const isValidSignatureCalls = calls.filter((c) => c.method === 'eth_call' && c.tx?.to?.toLowerCase() === eoa.address.toLowerCase() && c.tx?.data?.startsWith(ERC1271_MAGIC));
+        expect(isValidSignatureCalls).toHaveLength(1);
+      });
+
+      it('同じ模擬 wallet でも owner 以外の鍵の署名は 401 invalid_signature (模擬が何でも通すわけではない)', async () => {
+        fakeChain({ [DEPLOYED_WALLET]: '0x6080604052' }, { [DEPLOYED_WALLET]: owner.address });
+        const stranger = privateKeyToAccount(`0x${'55'.repeat(32)}`);
+
+        const res = await siweLogin(getAddress(DEPLOYED_WALLET), (message) => stranger.signMessage({ message }));
+
+        expect(fetchSpy).not.toHaveBeenCalled();
+        expect(res.status).toBe(401);
+        expect(await res.json()).toEqual({ ok: false, error: 'invalid_signature' });
+        expect(h.kvSet).not.toHaveBeenCalled();
+        expect(validatorCalls()).toHaveLength(1);
+      });
     });
   });
 
