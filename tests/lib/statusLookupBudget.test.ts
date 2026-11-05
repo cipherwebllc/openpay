@@ -23,6 +23,7 @@ import {
   NONCE_LOOKUP_NARROW_SEARCH_CLAIM_TIMEOUT_MS,
   NONCE_LOOKUP_NARROW_SEARCH_DEDUP_SEC,
   NONCE_LOOKUP_NARROW_SEARCH_PER_MINUTE,
+  NONCE_LOOKUP_NARROW_SEARCH_RELEASE_TIMEOUT_MS,
   claimNonceLookupNarrowSearch,
   narrowSearchBudgetKey,
   narrowSearchOnceKey,
@@ -146,15 +147,87 @@ describe('claimNonceLookupNarrowSearch', () => {
     expect(await pending).toBe(true);
   });
 
-  it('時間切れで許したあとに予算超過が届いても、探索中の重複の鍵は消さない', async () => {
+});
+
+// 予算の超過が分かった時点で「断る」を確定し、自分の重複の鍵の解放は決定の打ち切り (race) の外で行う
+// (Codex・自動のセキュリティレビュー: 解放を race の中で待つと、遅い解放で「断る」が「許す」に変わり、送信済みの
+// 解放があとから許した探索の鍵を消した)。KV はメモリで、SET NX と「自分の値のときだけ消す」EVAL を再現する。
+describe('予算で断ったときの解放と、判定の打ち切りの競合', () => {
+  let store: Map<string, string>;
+  const later = <T>(value: T, ms: number) => new Promise<T>((resolve) => setTimeout(() => resolve(value), ms));
+  const memoryKv = ({ incrMs = 0, evalMs = 0 }: { incrMs?: number; evalMs?: number } = {}) => {
+    store = new Map();
+    h.kvSet.mockImplementation(async (key: string, value: string, opts?: { nx?: boolean }) => {
+      if (opts?.nx && store.has(key)) return { ok: true, value: null };
+      store.set(key, value);
+      return { ok: true, value: 'OK' };
+    });
+    h.kvIncr.mockImplementation(() => later(OVER, incrMs));
+    h.kvEval.mockImplementation(async (script: string, keys: string[], args: string[]) => {
+      expect(script).toBe(RELEASE_PAYMENT_CLAIM_IF_OWNED);
+      await later(null, evalMs);
+      if (store.get(keys[0]) !== args[0]) return { ok: true, value: 0 };
+      store.delete(keys[0]);
+      return { ok: true, value: 1 };
+    });
+  };
+  const track = (p: Promise<boolean>) => {
+    const t: { value?: boolean } = {};
+    void p.then((v) => {
+      t.value = v;
+    });
+    return t;
+  };
+
+  beforeEach(() => {
     vi.useFakeTimers();
-    h.kvIncr.mockImplementationOnce(
-      () => new Promise((resolve) => setTimeout(() => resolve(OVER), NONCE_LOOKUP_NARROW_SEARCH_CLAIM_TIMEOUT_MS + 500)),
-    );
-    const pending = claimNonceLookupNarrowSearch(137, FROM, NONCE);
+  });
+
+  it('解放の応答が遅くても (判定の上限を超えても) 結果は false のまま。解放は上限まで待って返す', async () => {
+    expect(NONCE_LOOKUP_NARROW_SEARCH_RELEASE_TIMEOUT_MS).toBeLessThan(NONCE_LOOKUP_NARROW_SEARCH_CLAIM_TIMEOUT_MS);
+    memoryKv({ evalMs: 5_000 });
+    const result = track(claimNonceLookupNarrowSearch(137, FROM, NONCE));
+    await vi.advanceTimersByTimeAsync(NONCE_LOOKUP_NARROW_SEARCH_RELEASE_TIMEOUT_MS - 1);
+    expect(result.value).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(result.value).toBe(false);
+    // 判定の上限を過ぎても「許す」に変わらない
     await vi.advanceTimersByTimeAsync(NONCE_LOOKUP_NARROW_SEARCH_CLAIM_TIMEOUT_MS);
-    expect(await pending).toBe(true);
-    await vi.advanceTimersByTimeAsync(1_000);
+    expect(result.value).toBe(false);
+    // 遅れて届いた解放が消すのは、探索しない自分の鍵だけ
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(store.has(ONCE_KEY)).toBe(false);
+  });
+
+  it('解放は投げっぱなしにせず、届くまで (上限の内側なら) 待ってから false を返す', async () => {
+    memoryKv({ evalMs: 100 });
+    const result = track(claimNonceLookupNarrowSearch(137, FROM, NONCE));
+    await vi.advanceTimersByTimeAsync(99);
+    expect(result.value).toBeUndefined();
+    expect(store.has(ONCE_KEY)).toBe(true);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(result.value).toBe(false);
+    expect(store.has(ONCE_KEY)).toBe(false);
+  });
+
+  it('解放が投げても false のまま (no-throw・鍵は期限まで残るだけ)', async () => {
+    memoryKv();
+    h.kvEval.mockRejectedValueOnce(new Error('boom'));
+    const result = track(claimNonceLookupNarrowSearch(137, FROM, NONCE));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(result.value).toBe(false);
+    expect(store.has(ONCE_KEY)).toBe(true);
+  });
+
+  it('時間切れで許したあとに予算の超過が届いても、解放を送らず、探索中の重複の鍵は残る', async () => {
+    memoryKv({ incrMs: NONCE_LOOKUP_NARROW_SEARCH_CLAIM_TIMEOUT_MS + 500 });
+    const result = track(claimNonceLookupNarrowSearch(137, FROM, NONCE));
+    await vi.advanceTimersByTimeAsync(NONCE_LOOKUP_NARROW_SEARCH_CLAIM_TIMEOUT_MS);
+    expect(result.value).toBe(true);
+    const token = store.get(ONCE_KEY);
+    expect(token).toBeDefined();
+    await vi.advanceTimersByTimeAsync(10_000);
     expect(h.kvEval).not.toHaveBeenCalled();
+    expect(store.get(ONCE_KEY)).toBe(token);
   });
 });
