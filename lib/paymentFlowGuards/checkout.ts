@@ -1,3 +1,4 @@
+import { ORDER_DUST_FLOOR_WEI } from '@/lib/orderRelay';
 import {
   isRelayIpRateLimitedError,
   isRelayResponseUnknownError,
@@ -15,6 +16,8 @@ import type {
 //   stale な署名を止めるため、自分の受付中フラグで自分を止めない。
 // - 同一店舗の未解決の支払い (relay.orderPaymentHold・A2c) は paymentReady ごと閉じる。
 // - cross-chain / Arc の回復 scan は持たない (Checkout は対象外)。
+// - 受注を OpenPay 自身の notify へ送る会計 (sendsOrderNotify) は、店の受取が受注の下限
+//   (ORDER_DUST_FLOOR_WEI = 1 JPYC) 未満なら paymentReady ごと閉じる (第 9 回レビュー A-2)。
 
 export type CheckoutGuardInput = SubmitReadinessInput & {
   isStandard: boolean;
@@ -31,6 +34,8 @@ export type CheckoutGuardInput = SubmitReadinessInput & {
   gasless: GaslessGuardState;
   orderAdmissionPending: boolean;
   merchantUnderflow: boolean;
+  // この会計が受注を OpenPay 自身の notify (`/api/order/notify?h=`・JPYC) へ送るか (CheckoutForm が決める)。
+  sendsOrderNotify: boolean;
 };
 
 export function deriveCheckoutGuards({
@@ -47,6 +52,7 @@ export function deriveCheckoutGuards({
   breakdown,
   insufficientBalance,
   merchantUnderflow,
+  sendsOrderNotify,
 }: CheckoutGuardInput) {
   // relay 送信中に preflight の切替操作と競合して route が standard へ変わっていても、
   // response-unknown / IP 制限の再送封鎖を外さないため current route とは独立に判定する。
@@ -93,6 +99,13 @@ export function deriveCheckoutGuards({
     standard.hasActiveIntent ||
     (isStandard && (!!standard.data || standard.isFeeError || standard.isUnknown));
 
+  // 0 < 受取 < 1 JPYC の注文だけを拾う (受取 0 は従来どおり下の `> 0n` と merchantUnderflow が拾う)。
+  // 受注を送らない会計 (通常の /checkout・注文リンク等) は notify の下限と無関係なので止めない。
+  const orderBelowDustFloor =
+    sendsOrderNotify &&
+    breakdown.merchantReceives > 0n &&
+    breakdown.merchantReceives < ORDER_DUST_FLOOR_WEI;
+
   const paymentReady =
     isConnected &&
     !wrongChain &&
@@ -100,6 +113,9 @@ export function deriveCheckoutGuards({
     // PaymentForm と揃える明示ガード。現状は totalWei>0 (有効 items) 不変で merchantUnderflow
     // が拾うが、空 batch (merchant 受取 0) 送信を構造的にも塞ぐ defense-in-depth。
     breakdown.merchantReceives > 0n &&
+    // 受注 (notify) は店の着金が ORDER_DUST_FLOOR_WEI 未満の tx を 422 で断り、受注の一覧に残さない
+    // (server の権威はそのまま)。受注を送る会計に限り、払ったのに注文が残らない波及を署名の前で断つ。
+    !orderBelowDustFloor &&
     breakdown.customerPays > 0n &&
     !insufficientBalance &&
     !paymentFlowPending &&
@@ -120,5 +136,6 @@ export function deriveCheckoutGuards({
     settledNoRetry,
     paymentReady,
     canSubmit,
+    orderBelowDustFloor,
   };
 }

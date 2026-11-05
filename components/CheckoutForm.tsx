@@ -434,6 +434,11 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
     isMerchantGas,
     effectiveGasAmount,
   });
+  // この会計が受注を OpenPay 自身の notify (`/api/order/notify?h=`・モバイル注文) へ送るか。完了時の受注通知と
+  // relay の注文の束縛 (onSubmit) と同じ条件 (isOwnOrderNotifyUrl)。notify は JPYC だけを受け付け、受注の下限
+  // (ORDER_DUST_FLOOR_WEI) も JPYC の単位なので JPYC に限る。origin 未確定 (hydrate 前) は false。
+  const sendsOrderNotify =
+    isJpyc && !!origin && !!params.webhook && isOwnOrderNotifyUrl(params.webhook, origin);
 
   // 再送封鎖・flow pending・送信可否は /checkout 専用の policy (注文受付と同一店舗 hold を含む) に置く
   // (R14・式は移動のみ)。admission の await 後は canSubmit でなく paymentReady を読み直す (onSubmit)。
@@ -447,6 +452,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
     settledNoRetry,
     paymentReady,
     canSubmit,
+    orderBelowDustFloor,
   } = deriveCheckoutGuards({
     isStandard,
     useRelay,
@@ -461,6 +467,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
     breakdown,
     insufficientBalance,
     merchantUnderflow,
+    sendsOrderNotify,
   });
   const standardUnknownTxHash = standard.isFeeUnknown
     ? standard.feeTxHash
@@ -512,6 +519,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
         (merchantUnderflow
           ? t('errorMerchantUnderflow', { min: fmt(minimumAmountWei) })
           : null) ??
+        (orderBelowDustFloor ? t('errorOrderMerchantBelowFloor') : null) ??
         (revertedNoFeedback ? t('errorReverted') : null));
 
   // B1 graceful degradation: relay が API レベルで失敗 (rate_limited 等の error code) したとき、
