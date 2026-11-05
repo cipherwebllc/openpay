@@ -15,7 +15,6 @@ import { useLocale, useTranslations } from 'next-intl';
 import { formatUnits, type Address } from 'viem';
 import { useAccount } from 'wagmi';
 import { ConnectButton } from './ConnectButton';
-import { breakdownRow } from './PaymentBreakdownRows';
 import { ResultRow } from './ResultRow';
 import { SmartAccountFallbackBanner } from './SmartAccountFallbackBanner';
 import { RelayFallbackBanner } from './RelayFallbackBanner';
@@ -27,6 +26,7 @@ import { PaymentStatusPanel } from './checkout/paymentStatusPanelLazy';
 import { WrongChainSwitch } from './checkout/WrongChainSwitch';
 import { WalletBalance } from './checkout/WalletBalance';
 import { CheckoutItemList } from './checkout/CheckoutItemList';
+import { CheckoutAmountBreakdown } from './checkout/CheckoutAmountBreakdown';
 import { shopContactLabel } from '@/lib/shopContact';
 import { rememberOrderPayment, type RememberedOrderPayment } from '@/lib/orderConfirmation';
 import { findRememberedOrderPayment } from '@/lib/orderPaidLookup';
@@ -1783,39 +1783,46 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
             return { name: it.name, qty: it.qty, amountText: fmt(lineTotalWei) };
           })}
         />
-        <div className="mt-3 border-t border-slate-200 pt-3">
-          <dl className="space-y-1.5">
-            {/* レジの値引き: 小計 (値引き前) → 値引き の 2 行。以降の手数料・お支払い額は値引き後の額。 */}
-            {params.discount
+        {/* 合計の内訳 (小計・値引き・手数料・ネットワーク手数料・お支払い額の表と、その下の説明・承認の確認のリンク)。
+            表示だけの部品で、額の計算と表記・どの行と文言を出すかの経路の判定はここで決めて、行のモデルと説明の文字列で渡す
+            (第 9 回レビュー F-04)。条件と分岐は切り出し前の JSX から 1 つも変えずに写した (breakdownRow(…) の中身を行のモデルに・
+            `a && breakdownRow(…)` は `a ? … : null` に)。 */}
+        <CheckoutAmountBreakdown
+          // レジの値引き: 小計 (値引き前) → 値引き の 2 行。以降の手数料・お支払い額は値引き後の額。
+          subtotal={
+            params.discount
               ? (() => {
                 const subtotalWei = calcCheckoutTotal(params.items, deployment.decimals);
-                return (
-                  <>
-                    {breakdownRow({ label: t('subtotalRow'), value: fmt(subtotalWei) }, 'subtotal')}
-                    {breakdownRow({ label: t('discountRow'), value: `−${fmt(subtotalWei - totalWei)}` }, 'discount')}
-                  </>
-                );
+                return {
+                  row: { label: t('subtotalRow'), value: fmt(subtotalWei) },
+                  discountRow: { label: t('discountRow'), value: `−${fmt(subtotalWei - totalWei)}` },
+                };
               })()
-              : breakdownRow({ label: t('subtotalRow'), value: fmt(totalWei) })}
-            {/* fee=0 のとき手数料行は非表示 (Phase 1 alpha)。負担者でラベルを出し分ける:
-                店舗が受取から吸収した (merchantReceives < 請求額) なら「(店舗負担)」を補足、
-                顧客上乗せ (事前モバイルオーダーの顧客負担) なら補足なし。 */}
-            {breakdown.feeAmount > 0n &&
-              breakdownRow({
+              : { row: { label: t('subtotalRow'), value: fmt(totalWei) }, discountRow: null }
+          }
+          // fee=0 のとき手数料行は非表示 (Phase 1 alpha)。負担者でラベルを出し分ける:
+          // 店舗が受取から吸収した (merchantReceives < 請求額) なら「(店舗負担)」を補足、
+          // 顧客上乗せ (事前モバイルオーダーの顧客負担) なら補足なし。
+          feeRow={
+            breakdown.feeAmount > 0n
+              ? {
                 label:
                   breakdown.merchantReceives < totalWei
                     ? t('feeRowMerchant')
                     : t('feeRow'),
                 value: fmt(breakdown.feeAmount),
-              })}
-            {isStandard
-              ? breakdownRow({ label: t('gasRowStandard'), value: t('gasRowStandardValue') })
+              }
+              : null
+          }
+          gasRow={
+            isStandard
+              ? { label: t('gasRowStandard'), value: t('gasRowStandardValue') }
               : isMobileFee
                 /* モバイル注文 (gasless): ネットワーク手数料は利用料 (feeRow) に含むため別行を出さない
                    (relayGasEquiv=0 で「0 JPYC」表示になり紛らわしい)。standard 経路は上の分岐で
                    顧客がウォレットで gas を払うので従来どおり gas 行を表示する (ここには来ない)。 */
                 ? null
-                : breakdownRow(
+                : (
                   useRecover
                     ? {
                       label: isMerchantGas ? t('gasRowMerchant') : t('gasRow'),
@@ -1840,47 +1847,35 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
                           gasAmount !== undefined
                             ? t('gasRowValue', { amount: fmt(gasAmount) })
                             : t('gasRowPending'),
-                      },
-                )}
-            <div className="my-1 border-t border-slate-200" />
-            {breakdownRow({
-              label: isStandard
-                ? t('totalRowStandard', { nativeToken })
-                : isMerchantGas
-                  ? t('totalRowMerchantGas')
-                  : t('totalRow'),
-              value: fmt(totalCustomerOutflow),
-              strong: true,
-            })}
-          </dl>
-        </div>
-        <p className="mt-3 text-[11px] leading-relaxed text-slate-500">
-          {isStandard
-            ? params.chain === 'arc'
-              ? t('standardArcHint')
-              : t('standardHint', { nativeToken })
-            : isMobileFee
-              ? t('gaslessHintMobile')
-              : useRecover
-                ? t('gaslessHintJpycRecover')
-                : useRelay || isJpyc
-                  ? t('gaslessHintJpycRelay')
-                  : isErc20Paymaster
-                    ? t('gaslessHintUsdc')
-                    : t('gaslessHintJpyc')}
-        </p>
-        {approvalCheckUrl && (
-          <p className="mt-2 text-[11px]">
-            <a
-              href={approvalCheckUrl}
-              target="_blank"
-              rel="noreferrer noopener"
-              className="text-slate-500 underline hover:text-slate-700"
-            >
-              {t('approvalCheckLink')} ↗
-            </a>
-          </p>
-        )}
+                      }
+                )
+          }
+          totalRow={{
+            label: isStandard
+              ? t('totalRowStandard', { nativeToken })
+              : isMerchantGas
+                ? t('totalRowMerchantGas')
+                : t('totalRow'),
+            value: fmt(totalCustomerOutflow),
+            strong: true,
+          }}
+          hint={
+            isStandard
+              ? params.chain === 'arc'
+                ? t('standardArcHint')
+                : t('standardHint', { nativeToken })
+              : isMobileFee
+                ? t('gaslessHintMobile')
+                : useRecover
+                  ? t('gaslessHintJpycRecover')
+                  : useRelay || isJpyc
+                    ? t('gaslessHintJpycRelay')
+                    : isErc20Paymaster
+                      ? t('gaslessHintUsdc')
+                      : t('gaslessHintJpyc')
+          }
+          approvalCheckUrl={approvalCheckUrl}
+        />
       </section>
 
       {/* F7: off-origin コールバック開示 (支払い前・payer 向け)。success_url/cancel_url が
