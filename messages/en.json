@@ -66,7 +66,7 @@
     "bottomNavLabel": "Bottom menu"
   },
   "Landing": {
-    "tagline": "Payment QR · Register · Mobile ordering",
+    "tagline": "Payment QR · Register · Mobile ordering · Order links",
     "heroLeadline": "JPYC payments for your shop, from ¥0 in fees.",
     "heroBody": "Standard payments, where the customer pays gas, cost you nothing (mobile orders excepted). Sales land in your wallet the moment you are paid.",
     "heroCta": "Create a payment QR (free)",
@@ -88,6 +88,9 @@
     "mobileOrderBannerAlt": "Place-and-go mobile order — the JPYC order and payment flow you can start with OpenPay.",
     "mobileOrderBannerCta": "Create your mobile order",
     "mobileOrderBannerLearnMore": "See how it works",
+    "orderLinkStripTitle": "For orders you get on LINE or by DM: “Order link”",
+    "orderLinkStripBody": "Just send a payment link with the items and total. Customers pay in JPYC from their own wallet.",
+    "orderLinkStripLink": "See how order links work",
     "eyebrowWhy": "New here",
     "eyebrowShops": "For shops",
     "eyebrowSell": "For creators",

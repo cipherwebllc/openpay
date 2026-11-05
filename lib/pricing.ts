@@ -278,7 +278,7 @@ function buildJa(): PricingContent {
         focalSub: `最低 ${RECOVER_FLOOR} JPYC`,
         feeName: 'OpenPay 利用料',
         payer: shop(),
-        detail: 'お客様のガス代を OpenPay が肩代わりする決済（決済QR・レジ）',
+        detail: 'お客様のガス代を OpenPay が肩代わりする決済（決済QR・レジ・注文リンク）',
       },
       {
         id: 'mobile',
@@ -323,7 +323,7 @@ function buildJa(): PricingContent {
       modes: [
         {
           id: 'gasless',
-          name: 'ガスレス決済（決済QR・レジ）',
+          name: 'ガスレス決済（決済QR・レジ・注文リンク）',
           payer: shop(),
           labels: ['お客様の支払い', 'OpenPay 利用料', 'お店の受け取り'],
           note: null,
@@ -377,7 +377,7 @@ function buildJa(): PricingContent {
     rows: [
       {
         id: 'pay',
-        name: '決済QR・レジ（POS）',
+        name: '決済QR・レジ（POS）・注文リンク',
         scope: null,
         standard: [{ rail: null, value: 'なし' }],
         gasless: [
@@ -389,6 +389,7 @@ function buildJa(): PricingContent {
           '利用料はお店の受け取りから差し引かれ、お客様は表示した金額だけを払います。',
           'USDC のガスレス決済で Paymaster に払うガス代は、お客様の上乗せにするかお店が負担するかを、お店が選べます。',
           'レジの機能そのものに料金はかかりません。',
+          '注文リンクは JPYC だけで払えます (USDC はありません)。',
         ],
       },
       {
@@ -499,7 +500,7 @@ function buildEn(): PricingContent {
         focalSub: `minimum ${RECOVER_FLOOR} JPYC`,
         feeName: 'OpenPay usage fee',
         payer: shop(),
-        detail: 'OpenPay covers the customer’s gas (payment QR and register)',
+        detail: 'OpenPay covers the customer’s gas (payment QR, register and order links)',
       },
       {
         id: 'mobile',
@@ -544,7 +545,7 @@ function buildEn(): PricingContent {
       modes: [
         {
           id: 'gasless',
-          name: 'Gasless payment (payment QR and register)',
+          name: 'Gasless payment (payment QR, register and order links)',
           payer: shop(),
           labels: ['Customer pays', 'OpenPay usage fee', 'Shop receives'],
           note: null,
@@ -598,7 +599,7 @@ function buildEn(): PricingContent {
     rows: [
       {
         id: 'pay',
-        name: 'Payment QR and register (POS)',
+        name: 'Payment QR, register (POS) and order links',
         scope: null,
         standard: [{ rail: null, value: 'None' }],
         gasless: [
@@ -610,6 +611,7 @@ function buildEn(): PricingContent {
           'The fee is deducted from what the shop receives; the customer pays only the amount shown.',
           'For gasless USDC payments, the shop chooses whether the gas paid to the Paymaster is added for the customer or absorbed by the shop.',
           'The register itself is free.',
+          'Order links take JPYC only (no USDC).',
         ],
       },
       {

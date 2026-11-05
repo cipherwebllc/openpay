@@ -16,6 +16,7 @@ import { LandingSellables } from '@/components/LandingSellables';
 import { LandingUseCases } from '@/components/LandingUseCases';
 import { LandingHowItWorks } from '@/components/LandingHowItWorks';
 import { LandingMobileOrder } from '@/components/LandingMobileOrder';
+import { LandingOrderLink } from '@/components/LandingOrderLink';
 import { LandingFaq } from '@/components/LandingFaq';
 import { LandingSupport } from '@/components/LandingSupport';
 import { LandingTrust } from '@/components/LandingTrust';
@@ -44,6 +45,8 @@ export default async function HomePage({
         {/* 決済 QR はコモディティ化 (競合も 0% JPYC QR)。差別化はその先の店舗オペレーション =
             モバイル注文を Hero 直下へ昇格し「決済だけでない深さ」を最初に見せる (定番/インフラ positioning)。 */}
         <LandingMobileOrder />
+        {/* 注文リンク (LINE・DM の通販の注文) の入口を 1 枚だけ。モバイルオーダーの章の隣に置き、主役は割らない (2026-11-05)。 */}
+        <LandingOrderLink />
         {/* モバイル注文の直後に「売上を待たない。」を見出しにした導入メリット (旧: 1 行だけの独立節を統合・
             plans/lp-polish-2026-09.md P1)。即時着金の価値と、店舗・顧客の実利を 1 か所で見せる。 */}
         {/* 章「店舗の実利」を白の帯でまとめる (地色と交互にしてリズムを作る・plans/lp-polish-2026-09.md P2)。 */}
