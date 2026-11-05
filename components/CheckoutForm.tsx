@@ -655,22 +655,27 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
     standard.lastSubmittedParams?.orderLinkKey === orderLinkKey
       ? restoredStandardOrderAttempt
       : null;
-  // 読み直した画面で復元した relay の支払いが、この注文リンクのものか。注文リンクの指紋と、署名したチェーン・お店・
-  // 金額がすべて一致するときだけ。金額は復元した intent 自身の経路 (free / recover) で今の注文から組み直して比べ、
-  // 今のウォレットのチェーンで決まる経路 (route・breakdown) には依存させない (別のチェーンのまま読み直しても、払った
-  // 記録を残す)。注文リンクにモバイル注文の利用料は無いので、recover の利用料は常にお店の負担 (effectiveGasMode)。
+  // 読み直した画面で復元した relay の支払いが、この注文リンクのものか。注文の同一性は注文リンクの指紋 (明細・番号・
+  // ship)・署名したチェーン・お店で確かめ、金額は保存した intent の実際の値を注文の合計と照らす。利用料は今の設定で
+  // 計算し直さない (払った後に率やフロアが変わっても記録を失わない)。今のウォレットのチェーンで決まる経路 (route・
+  // breakdown) にも依存させない (別のチェーンのまま読み直しても記録を残す)。経路は intent の routeKind で分ける:
+  //   free: お店の受取 = 合計・利用料 0 (hook が '0' を入れる)。
+  //   recover: お店の受取 + 利用料 = 合計・利用料 > 0。注文リンクにモバイル注文の利用料は無く recover は常にお店の負担
+  //   (effectiveGasMode) なので、利用料は合計から引かれる形になる。forwarder は利用料 0 を revert し、フロアは 0 を
+  //   採らないので、成立した recover の利用料は必ず 1 以上。お客様の上乗せの形 (受取 = 合計) は合計を超えて一致しない。
   const restoredRelayOrderIntent = useMemo(() => {
     const intent = relay.restoredIntent;
     if (!intent || orderLinkKey === null || intent.orderLinkKey !== orderLinkKey) return null;
-    const fee =
+    const merchantValue = BigInt(intent.merchantValue);
+    const feeValue = BigInt(intent.feeValue);
+    const amountMatches =
       intent.routeKind === 'recover'
-        ? recoverFeeValue(totalWei, 'merchant', intent.chainId)
-        : 0n;
+        ? feeValue > 0n && merchantValue + feeValue === totalWei
+        : feeValue === 0n && merchantValue === totalWei;
     if (
       intent.chainId !== deployment.chainId ||
       intent.merchant.toLowerCase() !== params.to.toLowerCase() ||
-      BigInt(intent.merchantValue) !== totalWei - fee ||
-      BigInt(intent.feeValue) !== fee
+      !amountMatches
     ) {
       return null;
     }

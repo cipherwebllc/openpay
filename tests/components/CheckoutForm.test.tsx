@@ -137,7 +137,7 @@ import { useGasQuoteCircle } from '@/hooks/useGasQuoteCircle';
 import { resolveUsdcGaslessProvider } from '@/lib/circlePaymaster';
 import { resolvePaymasterMode } from '@/lib/pimlico';
 import { resolveJpycGaslessProvider } from '@/lib/jpycGaslessProvider';
-import { jpycForwarderFor } from '@/lib/relay/forwarderConfig';
+import { jpycForwarderFor, relayGasFeeValue } from '@/lib/relay/forwarderConfig';
 import { useRelayHealth } from '@/hooks/useRelayHealth';
 import { useRouter } from 'next/navigation';
 import { CheckoutForm } from '@/components/CheckoutForm';
@@ -4276,6 +4276,12 @@ describe('CheckoutForm — 復元した決済の完了で「注文を送る」�
     setSmartAccount(false);
   }
 
+  // recover の率・フロアを変えるテストの後片付け (clearAllMocks は実装を戻さないので、file 既定の 2 JPYC・bps=0 へ戻す)。
+  afterEach(() => {
+    vi.mocked(relayGasFeeValue).mockImplementation(() => 2n * 10n ** 18n);
+    (env as { recoverFeeBps: number }).recoverFeeBps = 0;
+  });
+
   // 読み直した画面で、保存された通常決済の receipt が成功した状態 (hook は restoredFromStorage のまま success)。
   function setRestoredStandardSuccess(keys: { contextKey: Hex; orderLinkKey?: Hex }) {
     const restored: ReturnType<typeof useStandardPayment> = {
@@ -4440,6 +4446,27 @@ describe('CheckoutForm — 復元した決済の完了で「注文を送る」�
     expect(screen.queryByText(PAID_NOTE)).toBeNull();
   });
 
+  it('通常決済: 会計の指紋は同じで注文リンクの指紋だけ違う (同じ番号・明細で ship だけ違うリンク) の復元は結び付けない', async () => {
+    ready();
+    const shipVariant: CheckoutParams = { ...STANDARD_ORDER, ship: 'ask' };
+    // 会計の指紋は一致し (既存の照合は通る)、注文リンクの指紋は有るが違う
+    expect(contextKeyOf(shipVariant)).toBe(contextKeyOf(STANDARD_ORDER));
+    expect(orderLinkKeyOf(shipVariant)).not.toBe(orderLinkKeyOf(STANDARD_ORDER));
+    setRestoredStandardSuccess({ contextKey: contextKeyOf(shipVariant), orderLinkKey: orderLinkKeyOf(shipVariant) });
+    const first = render(<CheckoutForm params={STANDARD_ORDER} />);
+
+    expect(screen.getAllByText(TX).length).toBeGreaterThan(0);
+    expect(screen.queryByText(RESTORED_TITLE)).toBeNull();
+    expect(screen.queryByRole('button', { name: 'お店に知らせる' })).toBeNull();
+    first.unmount();
+    expect(rememberedOrderPayment(contextKeyOf(STANDARD_ORDER), Date.now())).toBeNull();
+
+    setStandardPaymentDefault();
+    render(<CheckoutForm params={STANDARD_ORDER} />);
+    expect(screen.getByRole('button', { name: /3000 JPYC を支払う/ })).toBeEnabled();
+    expect(screen.queryByText(PAID_NOTE)).toBeNull();
+  });
+
   it('通常決済: 注文リンクの支払いだけ orderLinkKey を standard.mutate に渡す (contextKey は従来どおり全部に渡す)', async () => {
     const user = userEvent.setup();
     ready();
@@ -4520,6 +4547,49 @@ describe('CheckoutForm — 復元した決済の完了で「注文を送る」�
     expect(screen.getByRole('button', { name: /3000 JPYC を支払う/ })).toBeDisabled();
   });
 
+  // recover の金額は保存した intent の実際の値で照らす (利用料を今の設定で計算し直さない)。読み直したときの設定を
+  // 変えて確かめる: 率の課金がフロアを超える・チェーンごとに違うフロア・保存の後の設定の変更。
+  it.each<[string, bigint, () => void]>([
+    [
+      '率の課金がフロアを超える (1%: 3,000 JPYC → 30 JPYC)',
+      30n * 10n ** 18n,
+      () => {
+        (env as { recoverFeeBps: number }).recoverFeeBps = 100;
+      },
+    ],
+    [
+      'チェーンごとに違うフロア (Polygon だけ 0.5 JPYC)',
+      5n * 10n ** 17n,
+      () => {
+        vi.mocked(relayGasFeeValue).mockImplementation((chainId) =>
+          chainId === polygonAmoy.id ? 5n * 10n ** 17n : 2n * 10n ** 18n,
+        );
+      },
+    ],
+    [
+      '保存の後に設定が変わった (保存時はフロア 2 JPYC・今は bps=100 とフロア 5 JPYC)',
+      RECOVER_FEE,
+      () => {
+        (env as { recoverFeeBps: number }).recoverFeeBps = 100;
+        vi.mocked(relayGasFeeValue).mockImplementation(() => 5n * 10n ** 18n);
+      },
+    ],
+  ])('ガスレス (relay recover): %s でも、保存した金額で同じ注文と分かり「注文を送る」と記録を出す', async (_label, fee, settingsAtRestore) => {
+    ready();
+    settingsAtRestore();
+    const key = contextKeyOf(RELAY_ORDER);
+    setRestoredRelaySuccess(
+      relayIntent({ routeKind: 'recover', merchantValue: (TOTAL - fee).toString(), feeValue: fee.toString() }),
+    );
+    render(<CheckoutForm params={RELAY_ORDER} />);
+
+    expect(await screen.findByText(RESTORED_TITLE)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '注文を送る' })).toBeInTheDocument();
+    await waitFor(() =>
+      expect(rememberedOrderPayment(key, Date.now())).toMatchObject({ txHash: TX, payer: CUSTOMER }),
+    );
+  });
+
   // 注文リンクの指紋を一致させたまま 1 項目ずつ変える (照合の各条件を個別に確かめる)。
   it.each<[string, Partial<RestoredRelayIntent>]>([
     [
@@ -4534,12 +4604,16 @@ describe('CheckoutForm — 復元した決済の完了で「注文を送る」�
     ['チェーンが違う', { chainId: baseSepolia.id }],
     ['お店が違う', { merchant: OTHER_MERCHANT }],
     ['お店の受取 (merchantValue) が違う', { merchantValue: (TOTAL - 1n).toString() }],
-    ['利用料 (feeValue) が違う', { feeValue: '1' }],
-    [
-      'recover の利用料が違う (合計は同じ)',
-      { ...RECOVER, merchantValue: (TOTAL - 3n * 10n ** 18n).toString(), feeValue: (3n * 10n ** 18n).toString() },
-    ],
+    ['free なのに利用料 (feeValue) がある', { feeValue: '1' }],
     ['recover なのに利用料が 0 (経路と金額が合わない)', { routeKind: 'recover' }],
+    [
+      'recover でお客様の上乗せの形 (お店の受取 = 合計・合計を超える)',
+      { ...RECOVER, merchantValue: TOTAL.toString(), feeValue: RECOVER_FEE.toString() },
+    ],
+    [
+      'recover のお店の受取と利用料の合計が注文の合計に足りない',
+      { ...RECOVER, merchantValue: (TOTAL - RECOVER_FEE - 1n).toString() },
+    ],
   ])('ガスレス (relay): %s の復元は「注文を送る」を出さず、記録も残さない', async (_label, overrides) => {
     ready();
     setRestoredRelaySuccess(relayIntent(overrides));
