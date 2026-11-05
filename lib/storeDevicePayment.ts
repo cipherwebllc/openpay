@@ -146,15 +146,6 @@ export function storeDeviceMaxGasCostWei(chainId: number): bigint | null {
 export const STORE_DEVICE_CLOCK_SKEW_SEC = 30;
 
 /**
- * 送った印を読めない (別タブ・再読み込み前の送信を確かめられない) と分かってから、次の決済を止めておく時間 (秒・
- * 第 9 回レビュー E-8)。サーバは期限の残りが MAX_VALIDITY 以下の署名しか預からず (lib/storeHandoff.ts)、端末は
- * チェーンの時刻で残りが MAX_VALIDITY + CLOCK_SKEW 以下の署名しか送らない (lib/storeDeviceSend.ts)。分かった時点より
- * 前に預かった・送った署名は、それに端末の時計とチェーンの時刻のずれの余裕 (CLOCK_SKEW) を足した時間が過ぎれば期限を
- * 過ぎ、もう成立しない (入金の記録に無いことを、未払いと判断してよくなる)。
- */
-export const STORE_DEVICE_MARKS_UNREADABLE_WAIT_SEC = STORE_DEVICE_MAX_VALIDITY_SEC + 2 * STORE_DEVICE_CLOCK_SKEW_SEC;
-
-/**
  * QR を見せてよいセッションの残り (秒)。お客様の署名窓 (150 秒) と、サーバが預かる最低残り (60 秒) が
  * 収まらないセッションの QR は読ませない (読んでも「期限が切れています」になる)。
  */

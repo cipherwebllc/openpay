@@ -2,8 +2,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act, renderHook } from '@testing-library/react';
 import { getAddress, type Hex } from 'viem';
 
-// 第 9 回レビュー E-8 (Codex MUST 3): 印の部品 (lib/storeDeviceSend の動的 import) そのものを読み込めないと、送った印を
-// 確かめられない。「送っていない」と言わず (例外時)・「確かめている間」を外すだけにせず (起動時)、次の決済を止める。
+// 第 9 回レビュー E-8 (Codex MUST 3): 印の部品 (lib/storeDeviceSend の動的 import) そのものを読み込めないと、保存の中の
+// 送った印 (未解決の送信がありうる) を確かめられない。「送っていない」と言わず (例外時)・「確かめている間」を外すだけに
+// せず (起動時)、店員が入金の記録を確かめて閉じるまで次の決済を止める (一時的な失敗なので、閉じれば外れる)。
 // 動的 import を失敗させるため、この file では module の mock 自体が throw する (全ての import が失敗する)。
 vi.mock('@/lib/storeDeviceSend', () => {
   throw new Error('Failed to fetch dynamically imported module');
@@ -21,9 +22,7 @@ vi.mock('@/lib/relay/forwarderConfig', async (importOriginal) => ({
 }));
 
 import { useStoreDeviceRegister, type StoreDeviceRegisterInput } from '@/hooks/useStoreDeviceRegister';
-import { STORE_DEVICE_MARKS_UNREADABLE_WAIT_SEC } from '@/lib/storeDevicePayment';
 
-const WAIT_MS = STORE_DEVICE_MARKS_UNREADABLE_WAIT_SEC * 1000;
 const SHOP = getAddress('0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913');
 const input: StoreDeviceRegisterInput = {
   enabled: true,
@@ -69,17 +68,23 @@ async function advance(ms: number) {
 }
 
 describe('印の部品を読み込めないとき (第 9 回レビュー E-8)', () => {
-  it('起動時: 前回の送信を確かめられないので、時間が過ぎるまで次の QR も通常の QR も止める', async () => {
-    const t0 = Date.now();
+  it('起動時: 前回の送信を確かめられないので、店員が閉じるまで次の QR も通常の QR も止める (閉じれば外れる)', async () => {
     const { result } = renderHook(() => useStoreDeviceRegister(input));
     await advance(0);
-    expect(result.current.state).toEqual({ phase: 'marks_unreadable', until: t0 + WAIT_MS });
+    expect(result.current.state).toEqual({ phase: 'marks_unreadable' });
     expect(result.current.busy).toBe(true);
     let normal!: boolean;
     await act(async () => {
       normal = await result.current.releaseForNormal();
     });
     expect(normal).toBe(false);
+    act(() => result.current.dismiss());
+    expect(result.current.state).toEqual({ phase: 'idle' });
+    expect(result.current.busy).toBe(false);
+    await act(async () => {
+      normal = await result.current.releaseForNormal();
+    });
+    expect(normal).toBe(true);
   });
 
   it('例外時: 送信の部品も印の部品も読み込めないときは「送っていない」と言わず、次の決済を止める', async () => {
@@ -92,7 +97,7 @@ describe('印の部品を読み込めないとき (第 9 回レビュー E-8)', 
     expect(session).toMatchObject({ id: ID });
     readRes = () => json({ ok: true, state: 'signed', merchant: SHOP, amount: AMOUNT.toString(), auth: AUTH });
     await advance(3_000);
-    expect(result.current.state).toMatchObject({ phase: 'marks_unreadable' });
+    expect(result.current.state).toEqual({ phase: 'marks_unreadable' });
     expect(result.current.busy).toBe(true);
     let normal!: boolean;
     await act(async () => {

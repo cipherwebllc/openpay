@@ -4,52 +4,12 @@
 // 品物を渡す合図は「入金を確認しました」(送った tx の receipt にこの支払いの Settled がある) だけ。
 // 送らなかった・取り消されたときは「お支払いは行われていません」と、お客様の画面を待ってから次に進む案内を出す。
 
-import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { txExplorerUrl } from '@/lib/chains';
-import { STORE_DEVICE_MARKS_UNREADABLE_WAIT_SEC } from '@/lib/storeDevicePayment';
 import type { StoreDeviceRegisterState } from '@/hooks/useStoreDeviceRegister';
 
 const BTN =
   'rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:border-brand hover:text-brand-dark';
-
-/**
- * 送った記録を読めない (第 9 回レビュー E-8): 前の送信を確かめられないので「お支払いは行われていません」とは言わない。
- * 前の送信が期限を過ぎる時刻 (until) までは残り時間だけを出し、閉じさせない (入金の記録に無くても、これから届きうる)。
- * 過ぎたら入金の記録を確かめて閉じてもらう。
- */
-function MarksUnreadableNotice({ until, onDismiss }: { until: number; onDismiss?: () => void }) {
-  const t = useTranslations('RegisterMode.storeDevice');
-  const [now, setNow] = useState(() => Date.now());
-  const leftSec = Math.max(0, Math.ceil((until - now) / 1000));
-  const waiting = leftSec > 0;
-  useEffect(() => {
-    if (!waiting) return;
-    const id = setInterval(() => setNow(Date.now()), 1_000);
-    return () => clearInterval(id);
-  }, [waiting]);
-  const time = `${Math.floor(leftSec / 60)}:${String(leftSec % 60).padStart(2, '0')}`;
-  return (
-    <div className="space-y-2 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900">
-      {/* 残り時間は毎秒変わるので、読み上げの対象 (alert) は案内の文だけにする。 */}
-      <p role="alert">{t('marksUnreadable', { minutes: Math.ceil(STORE_DEVICE_MARKS_UNREADABLE_WAIT_SEC / 60) })}</p>
-      {waiting ? (
-        <p className="text-xs font-semibold tabular-nums">{t('marksUnreadableRemaining', { time })}</p>
-      ) : (
-        <>
-          <p className="text-xs">{t('marksUnreadableReady')}</p>
-          {onDismiss && (
-            <div className="flex flex-wrap gap-2">
-              <button type="button" className={BTN} onClick={onDismiss}>
-                {t('marksUnreadableAck')}
-              </button>
-            </div>
-          )}
-        </>
-      )}
-    </div>
-  );
-}
 
 export function StoreDeviceRegisterStatus({
   state,
@@ -255,7 +215,20 @@ export function StoreDeviceRegisterStatus({
         </div>
       );
     case 'marks_unreadable':
-      return <MarksUnreadableNotice until={state.until} onDismiss={onDismiss} />;
+      // 第 9 回レビュー E-8: 送った記録を読めない = 前の送信を確かめられない。「お支払いは行われていません」とは言わず
+      // (入金の記録に無くても、これから届きうる)、入金の記録を確かめてから閉じてもらう (閉じるまで次の QR は出せない)。
+      return (
+        <div role="alert" className="space-y-2 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <p>{t('marksUnreadable')}</p>
+          {onDismiss && (
+            <div className="flex flex-wrap gap-2">
+              <button type="button" className={BTN} onClick={onDismiss}>
+                {t('marksUnreadableAck')}
+              </button>
+            </div>
+          )}
+        </div>
+      );
     case 'failed':
       return (
         <div role="alert" className="space-y-2 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900">

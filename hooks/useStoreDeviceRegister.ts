@@ -16,7 +16,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Address, Hex } from 'viem';
 import {
-  STORE_DEVICE_MARKS_UNREADABLE_WAIT_SEC,
   STORE_DEVICE_QR_MIN_REMAINING_SEC,
   STORE_HANDOFF_TOKEN_HEADER,
   STORE_HANDOFF_TTL_SEC,
@@ -91,10 +90,9 @@ export type StoreDeviceRegisterState =
   | { phase: 'unknown'; mark: DeviceSentMark; previous: boolean; storeTxReverted?: true; txHash?: Hex }
   // 送った印 (lib/storeDeviceSend) を確かめられない (値が壊れている・保存領域を読めない・印の部品を読み込めない) ので、
   // 別タブ・再読み込み前の送信が後から成立しうる (第 9 回レビュー E-8)。「お支払いは行われていません」とは言わず、次の決済
-  // (通常の QR を含む) を止める。出口は時間: until (ms) = 分かった時点より前に預かった・送った署名が期限を過ぎ、もう成立
-  // しない時刻 (STORE_DEVICE_MARKS_UNREADABLE_WAIT_SEC)。それまでは閉じられず、過ぎたら店員が入金の記録を確かめて閉じる
-  // (入金の記録に無いだけでは、時間が過ぎるまで未払いと判断できない)。印は自動で消さない (未解決の送信の手がかりを失う)。
-  | { phase: 'marks_unreadable'; until: number };
+  // (通常の QR を含む) を止める。出口は店員が入金の記録を確かめて閉じる操作だけ (止めは表示と別に持つ・hook の
+  // marksHeldRef)。印は自動で消さない (未解決の送信の手がかりを失う)。
+  | { phase: 'marks_unreadable' };
 
 type FinalizeResult = 'closed' | 'processing' | 'unknown';
 
@@ -346,34 +344,22 @@ export function useStoreDeviceRegister(input: StoreDeviceRegisterInput) {
     };
   }, []);
   // 送った印を確かめられない (第 9 回レビュー E-8) と分かったときに、次の決済 (次の QR・通常の QR・タブの移動) を止めて
-  // おく期限 (ms)。表示 (state) と別に持つ: 確かめられないと分かった後に署名の処理の結果 (入金の確認・送らなかった等) を
-  // 出しても、その表示で止めを外さない (結果を閉じると「記録を読めない」の残り時間に戻る)。期限 = 分かった時点より前に
-  // 預かった・送った署名が期限を過ぎ、もう成立しない時刻 (STORE_DEVICE_MARKS_UNREADABLE_WAIT_SEC)。
-  const marksHoldUntilRef = useRef(0);
-  const [marksHoldUntil, setMarksHoldUntil] = useState(0);
-  /** 送った印を確かめられないと分かった: いまから最大の有効期限 + 余裕の間、次の決済を止める (止める期限を返す)。 */
-  const holdForUnreadableMarks = useCallback((): number => {
-    const until = Math.max(marksHoldUntilRef.current, Date.now() + STORE_DEVICE_MARKS_UNREADABLE_WAIT_SEC * 1000);
-    marksHoldUntilRef.current = until;
-    if (mountedRef.current) setMarksHoldUntil(until);
-    return until;
+  // おく印。表示 (state) と別に持つ: 確かめられないと分かった後に署名の処理の結果 (入金の確認・送らなかった等) を出しても、
+  // その表示で止めを外さない (結果を閉じると「記録を読めない」に戻る)。外すのは店員が「記録を読めない」の表示で入金の記録を
+  // 確かめて閉じる操作だけ (dismiss)。
+  const marksHeldRef = useRef(false);
+  const [marksHeldShown, setMarksHeldShown] = useState(false);
+  /** 送った印を確かめられないと分かった: 店員が確かめて閉じるまで、次の決済を止める。 */
+  const holdForUnreadableMarks = useCallback(() => {
+    marksHeldRef.current = true;
+    if (mountedRef.current) setMarksHeldShown(true);
   }, []);
-  const marksHeld = useCallback(() => Date.now() < marksHoldUntilRef.current, []);
-  /** 結果を閉じた後などの「何もしていない」表示。止めている間は「記録を読めない」(残り時間) にする。 */
+  const marksHeld = useCallback(() => marksHeldRef.current, []);
+  /** 結果を閉じた後などの「何もしていない」表示。止めている間は「記録を読めない」にする。 */
   const idleOrHeld = useCallback(
-    (): StoreDeviceRegisterState =>
-      marksHeld() ? { phase: 'marks_unreadable', until: marksHoldUntilRef.current } : { phase: 'idle' },
+    (): StoreDeviceRegisterState => (marksHeld() ? { phase: 'marks_unreadable' } : { phase: 'idle' }),
     [marksHeld],
   );
-  // 期限が過ぎたら busy から外す (描画のため。判定は marksHeld が描画を待たずに見る)。
-  useEffect(() => {
-    if (marksHoldUntil === 0) return;
-    const id = setTimeout(
-      () => setMarksHoldUntil((u) => (u === marksHoldUntil ? 0 : u)),
-      Math.max(0, marksHoldUntil - Date.now()),
-    );
-    return () => clearTimeout(id);
-  }, [marksHoldUntil]);
   useEffect(() => {
     enabledRef.current = enabled;
     if (!enabled) {
@@ -659,7 +645,8 @@ export function useStoreDeviceRegister(input: StoreDeviceRegisterInput) {
             }
             if (found.kind === 'unreadable') {
               retryRef.current = null;
-              set({ phase: 'marks_unreadable', until: holdForUnreadableMarks() });
+              holdForUnreadableMarks();
+              set({ phase: 'marks_unreadable' });
               return;
             }
           }
@@ -706,7 +693,8 @@ export function useStoreDeviceRegister(input: StoreDeviceRegisterInput) {
         const mark = found.kind === 'mark' ? found.mark : null;
         if (found.kind === 'unreadable') {
           retryRef.current = null;
-          set({ phase: 'marks_unreadable', until: holdForUnreadableMarks() });
+          holdForUnreadableMarks();
+          set({ phase: 'marks_unreadable' });
         } else if (mark) {
           const cur = stateRef.current;
           // 結果 (入金の確認など) を出した後の例外なら、その表示のまま。
@@ -781,23 +769,28 @@ export function useStoreDeviceRegister(input: StoreDeviceRegisterInput) {
     setRecovering(true);
     void (async () => {
       try {
-        let marks: { ok: true; marks: DeviceSentMark[] } | { ok: false };
+        let marks: { ok: true; marks: DeviceSentMark[] } | { ok: false; corrupt?: true };
+        // 印の部品 (動的 import) を読み込めなかった。
+        let moduleFailed = false;
         try {
           const { readSentMarks } = await import('@/lib/storeDeviceSend');
           marks = readSentMarks();
         } catch {
-          // 印の部品を読み込めない = 前回の送信を確かめられない (下で一覧を読めないのと同じに扱う)。
+          moduleFailed = true;
           marks = { ok: false };
         }
-        // 第 9 回レビュー E-8: 一覧を読めない (値が壊れている・保存領域を読めない・印の部品を読み込めない) → 前回の送信の
-        // 行方を確かめられない (「いま読めない」は「前に送っていない」の証明にならない: 印を書いて送った後に読めなくなり、
-        // 再読み込みしたのかもしれない)。「確かめている間」を下ろす前に、次の決済 (通常の QR を含む) を止める。前のタブの
-        // セッションの署名を処理している最中でも止め (その結果の表示はそのまま・閉じると「記録を読めない」に戻る)、表示は
-        // 何もしていないときだけ変える。止まるのは最大の有効期限 + 余裕の間だけ (保存を拒む端末でも、読み込みのたびに
-        // 永久には止まらない)。
-        if (!cancelled && !marks.ok) {
-          const until = holdForUnreadableMarks();
-          if (!activeRef.current && stateRef.current.phase === 'idle') set({ phase: 'marks_unreadable', until });
+        // 第 9 回レビュー E-8: 前回の送信の行方を確かめられないときは、「確かめている間」を下ろす前に、店員が入金の記録を
+        // 確かめて閉じるまで次の決済 (通常の QR を含む) を止める。前のタブのセッションの署名を処理している最中でも止め
+        // (その結果の表示はそのまま・閉じると「記録を読めない」に戻る)、表示は何もしていないときだけ変える。止めるのは:
+        //   - 保存は読めるのに値が壊れている (corrupt): 印があった証拠で、その中に未解決の送信がありうる。
+        //   - 印の部品を読み込めない: 保存の中の印 (未解決の送信がありうる) を見られない。一時的な失敗 (通信・配信の
+        //     入れ替え) で、読み込みのたびに起きる端末の性質ではない (閉じれば外れる)。
+        // 保存そのものを読めない (getItem の例外 = サイトデータの拒否など) ときは止めない (従来どおり・user 裁定): 止めると、
+        // この機能を使えない端末で読み込みのたびに通常の QR まで止めてしまう。送った後に保存を拒否して再読み込みした
+        // 場合を取りこぼすのは受け入れた残り。
+        if (!cancelled && !marks.ok && (marks.corrupt || moduleFailed)) {
+          holdForUnreadableMarks();
+          if (!activeRef.current && stateRef.current.phase === 'idle') set({ phase: 'marks_unreadable' });
           return;
         }
         // 前のタブのセッションの署名を送っている (この会計) なら、前回の結果で上書きしない。
@@ -1094,14 +1087,18 @@ export function useStoreDeviceRegister(input: StoreDeviceRegisterInput) {
     if (phase === 'unknown' && cur.storeTxReverted) return;
     finalityStopRef.current?.();
     retryRef.current = null;
-    // 送った印を確かめられない間は、閉じても「記録を読めない」(残り時間) のまま・戻る (第 9 回レビュー E-8: 前の送信が期限を
-    // 過ぎる時刻までは、店員が入金の記録に無いと確かめても、その後に成立しうる)。
+    // 第 9 回レビュー E-8: 止めを外すのは「記録を読めない」の表示を店員が閉じる (入金の記録を確かめた) ときだけ。ほかの結果
+    // (送らなかった・入金の確認など) を閉じても、止めている間は「記録を読めない」に戻る。
+    if (phase === 'marks_unreadable') {
+      marksHeldRef.current = false;
+      setMarksHeldShown(false);
+    }
     set(idleOrHeld());
   }, [set, idleOrHeld]);
 
   // 新しい QR を出せない間 (受け取った署名を確かめて送っている・送った tx の結果を待っている・起動時に最近の送信を
   // 確かめ始めるまで・次の QR / 通常の QR / タブの移動の判断の最中・送った印を確かめられない間)。
-  const busy = isBusy(state) || transitioning || recovering || marksHoldUntil > 0;
+  const busy = isBusy(state) || transitioning || recovering || marksHeldShown;
 
   return { state, busy, start, stop, releaseForNormal, hasPendingSale, leave, checkNow, retry, dismiss };
 }

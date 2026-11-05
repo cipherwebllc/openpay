@@ -2662,9 +2662,7 @@
       "unknownAck": "I checked the transaction (close)",
       "unknownAfterRevert": "The store device's transaction failed, but the customer's payment may have gone through (or may still go through) with the same signature. You can't show the next QR until the result is confirmed.",
       "failed": "The transaction didn't go through. No payment was made.",
-      "marksUnreadable": "This device's send records can't be read, so it's paused to prevent a double send. A payment for the previous checkout may still arrive even if it isn't in your deposit records yet. You can't show the next QR until the time it could arrive (up to {minutes} min) has passed.",
-      "marksUnreadableRemaining": "{time} left",
-      "marksUnreadableReady": "The time has passed. Check your deposit records for the previous checkout, then close this.",
+      "marksUnreadable": "This device's send records can't be read, so it's paused to prevent a double send. A payment for the previous checkout may still arrive even if it isn't in your deposit records yet. Wait a little, check your deposit records, then close this.",
       "marksUnreadableAck": "I checked the deposits (close)",
       "checkNow": "Check now",
       "notSent": {
