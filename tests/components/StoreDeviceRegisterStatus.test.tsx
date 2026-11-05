@@ -44,6 +44,18 @@ describe('StoreDeviceRegisterStatus (店員向けの表示)', () => {
     expect(h.onRetry).toHaveBeenCalled();
   });
 
+  // 第 9 回レビュー E-8: 送った記録を読めないときは前の送信を確かめられない → 「お支払いは行われていません」と言わない。
+  it('送った記録を読めない: 入金の記録で確かめるよう案内し、「お支払いは行われていません」も「もう一度送る」も出さない', () => {
+    const h = show({ phase: 'marks_unreadable' });
+    const alert = screen.getByRole('alert');
+    expect(alert).toHaveTextContent('この端末に残っている送信の記録を読み取れないため');
+    expect(alert).toHaveTextContent('お店の入金の記録で確かめてください');
+    expect(alert).not.toHaveTextContent(/お支払いは行われていません/);
+    expect(screen.queryByRole('button', { name: 'もう一度送る' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '入金の記録を確かめた（閉じる）' }));
+    expect(h.onDismiss).toHaveBeenCalled();
+  });
+
   it('入金の確認の「取引を見る」は、判定が見つけた実際の tx (第三者が同じ署名を先に送ったときは端末の tx と違う・第 7 回レビュー A11)', () => {
     const SETTLED = `0x${'ef'.repeat(32)}` as const;
     show({ phase: 'received', mark: MARK, finalized: true, previous: false, txHash: SETTLED });

@@ -214,6 +214,21 @@ export function StoreDeviceRegisterStatus({
           </div>
         </div>
       );
+    case 'marks_unreadable':
+      // 第 9 回レビュー E-8: 送った記録を読めない = 前の送信を確かめられない。「お支払いは行われていません」とは言わず、
+      // 店の入金の記録で確かめてから閉じてもらう (閉じるまで次の QR は出せない)。
+      return (
+        <div role="alert" className="space-y-2 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <p>{t('marksUnreadable')}</p>
+          {onDismiss && (
+            <div className="flex flex-wrap gap-2">
+              <button type="button" className={BTN} onClick={onDismiss}>
+                {t('marksUnreadableAck')}
+              </button>
+            </div>
+          )}
+        </div>
+      );
     case 'failed':
       return (
         <div role="alert" className="space-y-2 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900">

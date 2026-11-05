@@ -225,24 +225,28 @@ export function sentMarkWrittenThisTab(nonce: string): DeviceSentMark | null {
 
 /**
  * 印の一覧。読み取りの失敗は ok: false (「印なし」と区別する: 失敗を印なしと読むと二度送りうる)。
- * 壊れた値 (JSON でない・配列でない = 手で書き換えた・拡張機能など) も読めない扱い: 印なしと読むと、その上に印を
- * 書いて別タブ・再読み込み前の未解決の印を消し、同じ会計をもう一度送りうる (送信も印の保存も止める・第 9 回レビュー E-8)。
+ * 壊れた値 (空文字・JSON でない・配列でない・形の違う印を含む = 手で書き換えた・拡張機能など) も読めない扱い
+ * (corrupt: 値はあるのに読めない)。印なしと読む・形の違う印だけを捨てると、その上に印を書いて別タブ・再読み込み前の
+ * 未解決の印を消し、同じ会計をもう一度送りうる (送信も印の保存も止める・第 9 回レビュー E-8)。
  */
-export function readSentMarks(): { ok: true; marks: DeviceSentMark[] } | { ok: false } {
+export function readSentMarks(): { ok: true; marks: DeviceSentMark[] } | { ok: false; corrupt?: true } {
   let raw: string | null;
   try {
     raw = window.localStorage.getItem(STORE_DEVICE_SENT_KEY);
   } catch {
     return { ok: false };
   }
-  if (!raw) return { ok: true, marks: [] };
+  // 保存していない (null) だけが「印なし」。空文字はこのモジュールが書かない値 (書くのはいつも配列の JSON)。
+  if (raw === null) return { ok: true, marks: [] };
   let v: unknown;
   try {
     v = JSON.parse(raw) as unknown;
   } catch {
-    return { ok: false };
+    return { ok: false, corrupt: true };
   }
-  if (!Array.isArray(v)) return { ok: false };
+  // このモジュールが書く印はいつも isMark を通る。通らない印が 1 つでもあれば一覧全体を読めない扱いにする
+  // (nonce・hash が正しく時刻だけ壊れた印を捨てて書き戻すと、その未解決の送信を消してしまう)。
+  if (!Array.isArray(v) || !v.every(isMark)) return { ok: false, corrupt: true };
   return { ok: true, marks: v.filter(isMark) };
 }
 

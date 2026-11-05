@@ -2662,6 +2662,8 @@
       "unknownAck": "I checked the transaction (close)",
       "unknownAfterRevert": "The store device's transaction failed, but the customer's payment may have gone through (or may still go through) with the same signature. You can't show the next QR until the result is confirmed.",
       "failed": "The transaction didn't go through. No payment was made.",
+      "marksUnreadable": "This device's send records can't be read, so sending is paused to prevent a double send. Check your shop's deposit records to see whether the previous checkout was received. You can't show the next QR until you've checked.",
+      "marksUnreadableAck": "I checked the deposits (close)",
       "checkNow": "Check now",
       "notSent": {
         "expiring": "Not sent because the signature is about to expire.",
