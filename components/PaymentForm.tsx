@@ -5,7 +5,8 @@ import dynamic from 'next/dynamic';
 import { useSearchParams } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
 import { formatUnits, parseUnits } from 'viem';
-import { useAccount, useSwitchChain } from 'wagmi';
+import { useAccount } from 'wagmi';
+import { useSwitchChainWithFeedback } from '@/hooks/useSwitchChainWithFeedback';
 import { ConnectButton } from './ConnectButton';
 import { PayStepStrip } from './PayStepStrip';
 import { PayEmptyLanding } from './PayEmptyLanding';
@@ -167,7 +168,8 @@ function PaymentDetails({ params }: { params: PayParams }) {
   const paymasterMode = resolvePaymasterMode(deployment);
 
   const { address, isConnected, chainId } = useAccount();
-  const { switchChain, isPending: isSwitching } = useSwitchChain();
+  // 切り替えの失敗を画面に知らせ、記録に残す (hooks/useSwitchChainWithFeedback.ts)。
+  const { switchChain, isPending: isSwitching, failed: switchFailed } = useSwitchChainWithFeedback('payment');
   // sessionStorage に broadcast 済み standard intent が残る場合、元 URL が gasless でも
   // standard の receipt 復元を本線に固定する。storage 読込中は下の readiness で全経路を止める。
   const standard = useStandardPayment();
@@ -1350,6 +1352,11 @@ function PaymentDetails({ params }: { params: PayParams }) {
               ? t('switchingChain')
               : t('switchChain', { chainName: requiredChain.name })}
           </button>
+        )}
+        {isConnected && wrongChain && switchFailed && (
+          <p role="alert" className="text-xs leading-relaxed text-red-700">
+            {t('switchChainFailed', { chainName: requiredChain.name })}
+          </p>
         )}
 
         {isConnected && !wrongChain && balance !== undefined && (
