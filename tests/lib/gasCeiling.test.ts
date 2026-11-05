@@ -10,6 +10,7 @@ import {
 } from 'viem/chains';
 import {
   assertGasCeiling,
+  ceilingCheckedStandardFee,
   GasCongestedError,
   gasCeilingGweiForChain,
   isGasCongestedError,
@@ -97,6 +98,92 @@ describe('assertGasCeiling', () => {
     expect(() =>
       assertGasCeiling(base.id, 10n * GWEI + GWEI / 2n),
     ).toThrow(GasCongestedError);
+  });
+});
+
+// 第 9 回レビュー A-5: Pimlico の 3 つの builder の fee の見積もりが通る関数。
+// 呼出元が検査した fast ではなく、UserOp に実際に入れる standard そのものに上限をかける。
+describe('ceilingCheckedStandardFee', () => {
+  type Tier = { maxFeePerGas: bigint; maxPriorityFeePerGas: bigint };
+  const tier = (maxFeePerGas: bigint): Tier => ({
+    maxFeePerGas,
+    maxPriorityFeePerGas: GWEI / 10n,
+  });
+  function fakePimlico(prices: { standard: Tier; fast: Tier }) {
+    return {
+      getUserOperationGasPrice: vi.fn(async () => ({
+        slow: tier(prices.standard.maxFeePerGas / 2n),
+        ...prices,
+      })),
+    };
+  }
+
+  it('Base (上限 10 gwei): standard が 10.1 gwei なら GasCongestedError (isGasCongestedError で判定できる)', async () => {
+    // 先に呼出元が検査した fast は 9.9 gwei で通っていた、という A-5 の失敗シナリオの後半。
+    const pimlico = fakePimlico({
+      standard: tier(10n * GWEI + GWEI / 10n),
+      fast: tier(9n * GWEI + (GWEI * 9n) / 10n),
+    });
+    let captured: unknown;
+    await ceilingCheckedStandardFee(pimlico, base.id).catch((e: unknown) => {
+      captured = e;
+    });
+    expect(captured).toBeInstanceOf(GasCongestedError);
+    expect(isGasCongestedError(captured)).toBe(true);
+    const err = captured as GasCongestedError;
+    expect(err.chainId).toBe(base.id);
+    expect(err.ceilingGwei).toBe(10n);
+    expect(err.observedGwei).toBe(10n); // 10.1 gwei の整数 gwei 表示
+  });
+
+  it('上限以下: standard をそのまま返す (UserOp に入る値は従来どおり)', async () => {
+    const standard = tier(9n * GWEI);
+    const pimlico = fakePimlico({ standard, fast: tier(9n * GWEI) });
+    await expect(ceilingCheckedStandardFee(pimlico, base.id)).resolves.toBe(
+      standard,
+    );
+  });
+
+  it('境界 (== 上限) は通す', async () => {
+    const standard = tier(10n * GWEI);
+    const pimlico = fakePimlico({ standard, fast: tier(10n * GWEI) });
+    await expect(ceilingCheckedStandardFee(pimlico, base.id)).resolves.toBe(
+      standard,
+    );
+  });
+
+  it('検査するのは返す standard そのもの: fast が上限超でも standard が上限以下なら返す', async () => {
+    // fast の検査は呼出元 (useBatchPayment) の役目。ここは UserOp に入る値だけを見る。
+    const standard = tier(5n * GWEI);
+    const pimlico = fakePimlico({ standard, fast: tier(50n * GWEI) });
+    await expect(ceilingCheckedStandardFee(pimlico, base.id)).resolves.toBe(
+      standard,
+    );
+  });
+
+  it('取得は 1 回だけ (検査した値と返す値の間に取り直しが無い)', async () => {
+    const pimlico = fakePimlico({
+      standard: tier(9n * GWEI),
+      fast: tier(9n * GWEI),
+    });
+    await ceilingCheckedStandardFee(pimlico, base.id);
+    expect(pimlico.getUserOperationGasPrice).toHaveBeenCalledTimes(1);
+  });
+
+  it('Polygon (上限 1000 gwei): 1001 gwei は GasCongestedError', async () => {
+    const pimlico = fakePimlico({
+      standard: tier(1001n * GWEI),
+      fast: tier(1001n * GWEI),
+    });
+    await expect(
+      ceilingCheckedStandardFee(pimlico, polygon.id),
+    ).rejects.toBeInstanceOf(GasCongestedError);
+  });
+
+  it('上限が未登録のチェーンは pass-through (assertGasCeiling と同じ)', async () => {
+    const standard = tier(10_000n * GWEI);
+    const pimlico = fakePimlico({ standard, fast: standard });
+    await expect(ceilingCheckedStandardFee(pimlico, 1)).resolves.toBe(standard);
   });
 });
 

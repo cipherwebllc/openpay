@@ -15,6 +15,7 @@ import { createSmartAccountClient, type SmartAccountClient } from 'permissionles
 import { to7702SimpleSmartAccount } from 'permissionless/accounts';
 import { prepareUserOperationForErc20Paymaster } from 'permissionless/experimental/pimlico';
 import type { GetWalletClientReturnType } from '@wagmi/core';
+import { ceilingCheckedStandardFee } from '@/lib/gasCeiling';
 import {
   assertGaslessSupported,
   createPimlico,
@@ -74,9 +75,11 @@ export async function buildSimpleSmartAccountClient(args: {
     userOperation: {
       // standard tier で submit (gas quote 側 useGasQuote* も同 tier、見積と
       // 実費を揃える)。fast は priority fee 過剰で小額決済の UX 悪化要因。
-      // assertGasCeiling は呼出元 (useBatchPayment) が fast tier で別途行う。
+      // 実際に UserOp に入れるこの standard に上限をかける (第 9 回レビュー A-5: 呼出元
+      // useBatchPayment の fast の検査の後にガスが上がっても、検査していない値で署名させない)。
+      // 呼出元の fast tier の検査はそのまま残る。
       estimateFeesPerGas: async () =>
-        (await pimlicoClient.getUserOperationGasPrice()).standard,
+        ceilingCheckedStandardFee(pimlicoClient, chainId),
       prepareUserOperation:
         paymasterMode === 'erc20'
           ? prepareUserOperationForErc20Paymaster(pimlicoClient)
