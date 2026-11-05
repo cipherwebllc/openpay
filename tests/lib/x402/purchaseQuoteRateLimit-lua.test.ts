@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { toHex } from 'viem';
+import { getAddress, toHex, type Address } from 'viem';
 import {
   closeRedisLuaEngine,
   createFakeRedisStore,
@@ -36,7 +36,9 @@ import {
 const RESOURCE = 'h_' + 'a'.repeat(32);
 const IP = 'a'.repeat(64);
 const ipKey = (ip = IP) => 'store:quote:rl:ip:' + ip;
-const walletKey = (payer: string) => 'store:quote:rl:wallet:' + payer.toLowerCase();
+// E-2: wallet の枠は payer と IP の組 (IP が取れない要求は 'none' の 1 つの枠を共有する)。
+const walletKey = (payer: string, ipHash: string | null = IP) =>
+  'store:quote:rl:wallet:' + payer.toLowerCase() + ':' + (ipHash ?? 'none');
 const resourceKey = 'store:quote:rl:resource:' + RESOURCE;
 const payer = (n: number) => toHex(n, { size: 20 });
 const quote = (n = 1, ipHash: string | null = IP) =>
@@ -50,10 +52,10 @@ afterAll(closeRedisLuaEngine);
 
 describe('hosted quote limiter: production Lua and KEYS/ARGV', () => {
   it.each([null, IP])('allows 12 wallet requests and denies the 13th (ipHash=%s)', async (ipHash) => {
-    h.store!.strings.set(walletKey(payer(1)), String(PURCHASE_QUOTE_WALLET_MAX - 1));
+    h.store!.strings.set(walletKey(payer(1), ipHash), String(PURCHASE_QUOTE_WALLET_MAX - 1));
     expect(await quote(1, ipHash)).toBe(true);
     expect(await quote(1, ipHash)).toBe(false);
-    expect(h.store!.strings.get(walletKey(payer(1)))).toBe('13');
+    expect(h.store!.strings.get(walletKey(payer(1), ipHash))).toBe('13');
   });
 
   it('denies the 61st IP request even when the payer changes', async () => {
@@ -133,7 +135,7 @@ describe('hosted quote limiter: production Lua and KEYS/ARGV', () => {
       'local limit = function() ' + call.script + ' end\n' +
       'local results = {}\n' +
       'for n = 1, 130 do\n' +
-      '  KEYS[' + walletIndex + '] = "store:quote:rl:wallet:0x" .. string.format("%040x", n)\n' +
+      '  KEYS[' + walletIndex + '] = "store:quote:rl:wallet:0x" .. string.format("%040x", n) .. ":' + IP + '"\n' +
       '  results[n] = limit()\n' +
       'end\nreturn results',
       call.keys, call.args, h.store,
@@ -157,7 +159,7 @@ describe('hosted quote limiter: production Lua and KEYS/ARGV', () => {
       '  KEYS[' + ipIndex + '] = "store:quote:rl:ip:burst-" .. ip\n' +
       '  for n = 1, 60 do\n' +
       '    local request = (ip - 1) * 60 + n\n' +
-      '    KEYS[' + walletIndex + '] = "store:quote:rl:wallet:0x" .. string.format("%040x", request)\n' +
+      '    KEYS[' + walletIndex + '] = "store:quote:rl:wallet:0x" .. string.format("%040x", request) .. ":burst-" .. ip\n' +
       '    results[request] = limit()\n' +
       '  end\n' +
       'end\nreturn results',
@@ -168,5 +170,67 @@ describe('hosted quote limiter: production Lua and KEYS/ARGV', () => {
     expect(h.store.strings.get(ipKey('burst-2'))).toBe('60');
     expect(h.store.strings.get(resourceKey)).toBe('120');
     expect(await quote(121, 'third-ip')).toBe(true);
+  });
+});
+
+// 第 9 回レビュー E-2: payer は ?payer= で誰でも名乗れる。wallet の枠が payer だけだと、
+// 1 IP から他人の payer を 1 分に 13 回送るだけで、その人の見積もりがどの商品でも 429 になった。
+describe('E-2: the wallet bucket is keyed by payer and IP', () => {
+  const VICTIM = 7;
+  const IP_A = IP;
+  const IP_B = 'b'.repeat(64);
+  const OTHER_RESOURCE = 'h_' + 'b'.repeat(32);
+  const quoteFor = (resourceId: string, ipHash: string | null) =>
+    checkPurchaseQuoteRateLimit({ payer: payer(VICTIM), resourceId, ipHash });
+
+  it('pins the wallet key as payer + IP hash, and payer + none without an IP hash', async () => {
+    await quote(VICTIM, IP_A);
+    await quote(VICTIM, null);
+    const victim = payer(VICTIM).toLowerCase();
+    expect(h.calls.map((call) => call.keys)).toEqual([
+      ['store:quote:rl:wallet:' + victim + ':' + IP_A, resourceKey, ipKey(IP_A)],
+      ['store:quote:rl:wallet:' + victim + ':none', resourceKey],
+    ]);
+  });
+
+  it('an IP that used up a victim payer does not block the victim from another IP', async () => {
+    // characterization: 同じ IP からは従来どおり 12 回まで通り、13 回目で止まる。
+    for (let n = 0; n < PURCHASE_QUOTE_WALLET_MAX; n++) expect(await quote(VICTIM, IP_A)).toBe(true);
+    expect(await quote(VICTIM, IP_A)).toBe(false);
+    // wallet の枠は商品をまたぐので、同じ IP からは別の商品でも止まったまま。
+    expect(await quoteFor(OTHER_RESOURCE, IP_A)).toBe(false);
+
+    // 被害者 (別の IP) は、どの商品でも自分の枠で見積もれる。
+    expect(await quote(VICTIM, IP_B)).toBe(true);
+    expect(await quoteFor(OTHER_RESOURCE, IP_B)).toBe(true);
+    expect(h.store!.strings.get(walletKey(payer(VICTIM), IP_A))).toBe(String(PURCHASE_QUOTE_WALLET_MAX + 2));
+    expect(h.store!.strings.get(walletKey(payer(VICTIM), IP_B))).toBe('2');
+    // 被害者の IP の枠も従来どおり 12 回で止まる (IP ごとに 12 回のまま)。
+    for (let n = 2; n < PURCHASE_QUOTE_WALLET_MAX; n++) expect(await quote(VICTIM, IP_B)).toBe(true);
+    expect(await quote(VICTIM, IP_B)).toBe(false);
+  });
+
+  it("requests without an IP hash share one 'none' bucket per payer, apart from IP-keyed buckets", async () => {
+    for (let n = 0; n < PURCHASE_QUOTE_WALLET_MAX; n++) expect(await quote(VICTIM, null)).toBe(true);
+    expect(await quote(VICTIM, null)).toBe(false);
+    expect(await quoteFor(OTHER_RESOURCE, null)).toBe(false);
+    expect(await quote(VICTIM, IP_B)).toBe(true);
+    expect(h.store!.strings.get(walletKey(payer(VICTIM), null))).toBe(String(PURCHASE_QUOTE_WALLET_MAX + 2));
+  });
+
+  it('counts the checksum and lowercase forms of one payer in the same wallet bucket', async () => {
+    // 他の fixture は数字だけのアドレスなので、英字を含むアドレスで大小文字の正規化を固定する。
+    // (?payer= の表記を変えるだけで同じ payer の枠を増やせないこと)
+    const lower = ('0x' + 'ab'.repeat(20)) as Address;
+    const checksum = getAddress(lower);
+    expect(checksum).not.toBe(lower);
+    const quoteAs = (address: Address) =>
+      checkPurchaseQuoteRateLimit({ payer: address, resourceId: RESOURCE, ipHash: IP_A });
+    for (let n = 0; n < PURCHASE_QUOTE_WALLET_MAX; n++) {
+      expect(await quoteAs(n % 2 === 0 ? checksum : lower)).toBe(true);
+    }
+    expect(await quoteAs(checksum)).toBe(false);
+    expect(await quoteAs(lower)).toBe(false);
+    expect(h.store!.strings.get(walletKey(lower, IP_A))).toBe(String(PURCHASE_QUOTE_WALLET_MAX + 2));
   });
 });

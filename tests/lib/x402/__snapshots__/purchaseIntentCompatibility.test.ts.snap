@@ -280,7 +280,7 @@ exports[`Lua call sites: script, KEYS and ARGV order > quote creation (SET NX) a
         "-1",
       ],
       "keys": [
-        "store:quote:rl:wallet:0x1111111111111111111111111111111111111111",
+        "store:quote:rl:wallet:0x1111111111111111111111111111111111111111:ip-hash",
         "store:quote:rl:resource:creator-item",
         "store:quote:rl:ip:ip-hash",
       ],
@@ -300,7 +300,7 @@ exports[`Lua call sites: script, KEYS and ARGV order > quote creation (SET NX) a
         "-1",
       ],
       "keys": [
-        "store:quote:rl:wallet:0x1111111111111111111111111111111111111111",
+        "store:quote:rl:wallet:0x1111111111111111111111111111111111111111:none",
         "store:quote:rl:resource:creator-item",
       ],
       "name": "QUOTE_RATE_LIMIT",
