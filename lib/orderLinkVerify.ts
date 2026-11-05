@@ -103,6 +103,11 @@ function browserStorage(): Storage | null {
   }
 }
 
+/** 記録の時刻として読める値 (Date.now() の ms)。 */
+function isCheckedTime(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0;
+}
+
 /**
  * この端末の記録で見た、同じ支払いの使い回し。number = 前に確かめた時刻 (ms)・null = この端末では初めて・
  * 'unavailable' = 記録を読めない・残せない (この端末では使い回しを確かめられない)。
@@ -127,12 +132,20 @@ export function rememberCheckedPayment(
     // 読めない保存領域: 前に確かめたかが分からない。書き込みもしない (読めない記録を上書きで消さない)。
     return 'unavailable';
   }
-  let checked: Record<string, number> = {};
+  // 記録が無い (null) のは初めて。空文字・JSON でない・オブジェクトでない・時刻でない値 (文字列の "1000" 等) は
+  // 壊れた記録: 壊れた値は捨てて作り直し、その回は「初めて」と言わない (Codex SHOULD)。
+  const checked: Record<string, number> = {};
   let intact = true;
   try {
-    const parsed: unknown = raw ? JSON.parse(raw) : {};
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) checked = parsed as Record<string, number>;
-    else intact = false;
+    const parsed: unknown = raw === null ? {} : JSON.parse(raw);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      for (const [entryKey, value] of Object.entries(parsed)) {
+        if (isCheckedTime(value)) checked[entryKey] = value;
+        else intact = false;
+      }
+    } else {
+      intact = false;
+    }
   } catch {
     intact = false;
   }
@@ -141,7 +154,6 @@ export function rememberCheckedPayment(
   checked[key] = input.now;
   // 古いものから捨てて上限を保つ (端末の保存領域を食い続けない)。
   const kept = Object.entries(checked)
-    .filter((entry): entry is [string, number] => typeof entry[1] === 'number')
     .sort((x, y) => y[1] - x[1])
     .slice(0, CHECKED_MAX);
   try {
@@ -308,6 +320,23 @@ function defaultClient(chain: ChainSlug): ReadClient | null {
   return orderLinkReadClient(chainObject, transportForChain(chainObject.id));
 }
 
+/** 2 つのブロックの hash が同じか。どちらかが読めなければ null (同じとも違うとも言わない)。 */
+function sameBlockHash(a: unknown, b: unknown): boolean | null {
+  if (typeof a !== 'string' || typeof b !== 'string') return null;
+  return a.toLowerCase() === b.toLowerCase();
+}
+
+/**
+ * 届いた支払いの状態。「届いています」(paid) は、確定していて (lib/jpyc/finality)、かつ receipt のブロックが同じ高さの
+ * 今の正規のブロックと同じときだけ。receipt が組み替えで外れたブロック (別のフォーク) のものなら、確定の高さに届いて
+ * いても確定ではない (Codex MUST)。どちらかが「まだ・違う」なら pending、どちらかを確かめられなければ finalityUnchecked。
+ */
+function receivedStatus(finalized: boolean | null, canonical: boolean | null): 'paid' | 'pending' | 'finalityUnchecked' {
+  if (finalized === false || canonical === false) return 'pending';
+  if (finalized === null || canonical === null) return 'finalityUnchecked';
+  return 'paid';
+}
+
 export async function checkOrderLinkPayment(input: {
   chain: ChainSlug;
   receiver: Address;
@@ -325,15 +354,14 @@ export async function checkOrderLinkPayment(input: {
     if (receipt.status !== 'success') return { status: 'failed' };
     const received = receivedByReceiver(receipt.logs, token, input.receiver);
     if (received === 0n) return { status: 'notToReceiver' };
-    const [block, finality] = await Promise.all([
-      client.getBlock({ blockNumber: receipt.blockNumber }),
-      // 確定する前の取引はチェーンの組み替えで消えることがある (第 9 回レビュー D-3)。
-      readJpycFinality({
-        slug: input.chain,
-        blockNumber: receipt.blockNumber,
-        readFinalizedBlock: () => client.getBlock({ blockTag: 'finalized' }),
-      }),
-    ]);
+    // 確定する前の取引はチェーンの組み替えで消えることがある (第 9 回レビュー D-3)。確定の高さを先に読み、その後で
+    // 同じ高さの今の正規のブロックを読む (確定した後も receipt のブロックが正規なら、その取引はもう消えない)。
+    const finality = await readJpycFinality({
+      slug: input.chain,
+      blockNumber: receipt.blockNumber,
+      readFinalizedBlock: () => client.getBlock({ blockTag: 'finalized' }),
+    });
+    const block = await client.getBlock({ blockNumber: receipt.blockNumber });
     const payer = paymentPayer(receipt.logs, token, input.receiver, jpycForwarderFor(chainForSlug(input.chain).id));
     const signature = extractConfirmationSignature(input.text);
     const confirmation: OrderConfirmationCheck = !signature
@@ -353,10 +381,7 @@ export async function checkOrderLinkPayment(input: {
       payer,
       confirmation,
     };
-    // 「届いています」(paid) は確定した取引だけ。確定を確かめられないときも paid にしない。
-    if (finality.finalized === true) return { status: 'paid', ...payment };
-    if (finality.finalized === false) return { status: 'pending', ...payment };
-    return { status: 'finalityUnchecked', ...payment };
+    return { status: receivedStatus(finality.finalized, sameBlockHash(block.hash, receipt.blockHash)), ...payment };
   } catch (error) {
     // まだ確定していない・別のチェーンの取引は「見つからない」と伝える (届いたとは言わない)。
     if (error instanceof TransactionReceiptNotFoundError) return { status: 'notFound' };
@@ -373,29 +398,59 @@ export type OrderLinkMultiChainCheck = {
 };
 
 /**
+ * 全部のチェーンを探す時間の予算 (ms)。既定の RPC は時間切れと再試行で 1 つのチェーンに数十秒かかることがあるので、
+ * 止まっている (関係のない) チェーンを待ち続けない (Codex SHOULD)。
+ */
+export const ORDER_LINK_SEARCH_BUDGET_MS = 8_000;
+
+/**
  * 受け付けるチェーンを並べて読み、取引が見つかったチェーンで判定する (plans/order-link-multichain.md)。
- * どこでも見つからず、読めなかったチェーンがあれば「見つからない」ではなく「確かめられない」にする
+ * 見つかったら、ほかのチェーンの答えを待たずにその結果を出す。どこでも見つからず、読めなかったチェーン・予算の間に
+ * 答えなかったチェーンがあれば「見つからない」ではなく「確かめられない」にし、そのチェーンを unreachable で伝える
  * (払われていないように見せない)。確認の署名の文は、見つかったチェーンで組み立てる。
  */
-export async function checkOrderLinkPaymentOnChains(input: {
+export function checkOrderLinkPaymentOnChains(input: {
   chains: readonly ChainSlug[];
   receiver: Address;
   text: string;
   /** テスト用。省略時はそのチェーンの RPC。 */
   clientFor?: (chain: ChainSlug) => ReadClient | undefined;
+  /** テスト用。省略時は ORDER_LINK_SEARCH_BUDGET_MS。 */
+  budgetMs?: number;
 }): Promise<OrderLinkMultiChainCheck> {
-  if (!extractTxHash(input.text)) return { chain: null, result: { status: 'invalid' }, unreachable: [] };
-  const results = await Promise.all(
-    input.chains.map((chain) =>
-      checkOrderLinkPayment({ chain, receiver: input.receiver, text: input.text, client: input.clientFor?.(chain) }),
-    ),
-  );
-  const found = results.findIndex((result) => result.status !== 'notFound' && result.status !== 'error');
-  if (found !== -1) return { chain: input.chains[found], result: results[found], unreachable: [] };
-  const unreachable = input.chains.filter((_, index) => results[index].status === 'error');
-  return {
-    chain: null,
-    result: { status: unreachable.length > 0 ? 'error' : 'notFound' },
-    unreachable,
+  if (!extractTxHash(input.text)) return Promise.resolve({ chain: null, result: { status: 'invalid' }, unreachable: [] });
+  const { chains } = input;
+  // 答えたチェーンの結果 (まだ答えていなければ undefined)。
+  const results: Array<OrderLinkPaymentCheck | undefined> = chains.map(() => undefined);
+  const notFound = (): OrderLinkMultiChainCheck => {
+    const unreachable = chains.filter((_, index) => results[index] === undefined || results[index].status === 'error');
+    return { chain: null, result: { status: unreachable.length > 0 ? 'error' : 'notFound' }, unreachable };
   };
+  return new Promise((resolve) => {
+    let open = chains.length;
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const finish = (value: OrderLinkMultiChainCheck) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(value);
+    };
+    timer = setTimeout(() => finish(notFound()), input.budgetMs ?? ORDER_LINK_SEARCH_BUDGET_MS);
+    if (open === 0) finish(notFound());
+    chains.forEach((chain, index) => {
+      checkOrderLinkPayment({ chain, receiver: input.receiver, text: input.text, client: input.clientFor?.(chain) })
+        // 1 つのチェーンの思わぬ例外で、ほかのチェーンの答えを止めない (そのチェーンは「問い合わせできなかった」)。
+        .catch((): OrderLinkPaymentCheck => ({ status: 'error' }))
+        .then((result) => {
+          results[index] = result;
+          if (result.status !== 'notFound' && result.status !== 'error') {
+            finish({ chain, result, unreachable: [] });
+            return;
+          }
+          open -= 1;
+          if (open === 0) finish(notFound());
+        });
+    });
+  });
 }

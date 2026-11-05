@@ -379,6 +379,21 @@ describe('OrderLinkVerify: 確定していない支払い', () => {
     expect(c.className).toContain('bg-rose-50');
     expect(screen.getByText(/この支払いをしたウォレットの署名ではありません/)).toBeInTheDocument();
   });
+
+  // Codex NIT: 確定していない支払いに「… で払われています」と出さず、見つかったチェーンとだけ言う。
+  it('複数のチェーンを探したとき、確定していなければ「見つかったチェーン」とだけ出し、確定したら「で払われています」', async () => {
+    check.mockResolvedValueOnce(found(received('pending', 'verified'), 'kaia'));
+    const { unmount } = render(<OrderLinkVerify chains={['polygon', 'kaia']} receiver={RECEIVER} />);
+    paste(HASH);
+    expect(await screen.findByText(/^見つかったチェーン: /)).toBeInTheDocument();
+    expect(screen.queryByText(/で払われています/)).toBeNull();
+    unmount();
+    check.mockResolvedValueOnce(found(paidResult('3465', 'verified'), 'kaia'));
+    render(<OrderLinkVerify chains={['polygon', 'kaia']} receiver={RECEIVER} />);
+    paste(HASH);
+    expect(await screen.findByText(/で払われています/)).toBeInTheDocument();
+    expect(screen.queryByText(/見つかったチェーン/)).toBeNull();
+  });
 });
 
 // 第 9 回レビュー E-7: 確認の署名を確かめる問い合わせが RPC に届かなかったときは、他人の Tx Hash とは言わず、
@@ -420,11 +435,11 @@ describe('OrderLinkVerify: この端末の記録', () => {
     check.mockResolvedValue(found(paidResult('3465', 'verified')));
     render(<OrderLinkVerify chains={['polygon']} receiver={RECEIVER} />);
     paste(HASH);
-    expect(await screen.findByText(/この端末では記録を残せないため、使い回しを確かめられません/)).toBeInTheDocument();
+    expect(await screen.findByText(/この端末の記録では、以前にも確かめた支払いかを確かめられません/)).toBeInTheDocument();
     expect(screen.queryByText(/この端末で確かめた記録だけで見ています/)).toBeNull();
     // 2 回目も前に確かめたかは分からないので、同じ注意を出す
     paste(`Tx Hash: ${HASH}`);
     await waitFor(() => expect(check).toHaveBeenCalledTimes(2));
-    expect(await screen.findByText(/この端末では記録を残せないため/)).toBeInTheDocument();
+    expect(await screen.findByText(/以前にも確かめた支払いかを確かめられません/)).toBeInTheDocument();
   });
 });

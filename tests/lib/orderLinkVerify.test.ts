@@ -12,12 +12,15 @@ import {
   decodeAbiParameters,
   decodeFunctionData,
   encodeAbiParameters,
+  encodeErrorResult,
   encodeEventTopics,
+  encodeFunctionResult,
   erc20Abi,
   erc6492SignatureValidatorByteCode,
   HttpRequestError,
   isAddressEqual,
   isErc6492Signature,
+  multicall3Abi,
   numberToHex,
   parseAbi,
   parseErc6492Signature,
@@ -93,22 +96,24 @@ function authorizationUsed(token: Address, authorizer: Address): Log {
   } as unknown as Log;
 }
 
-// 取引はブロック 123 に入っている。finalized = `finalized` タグのブロック (既定は確定済みの 200・Error ならタグを読めない)。
+// 取引はブロック 123 (hash = RECEIPT_BLOCK) に入っている。finalized = `finalized` タグのブロック (既定は確定済みの 200・
+// Error ならタグを読めない)。canonicalHash = 同じ高さの今の正規のブロックの hash (既定は receipt と同じ・null は読めない)。
+const RECEIPT_BLOCK = `0x${'a1'.repeat(32)}` as Hex;
 function client(
   receipt: { status: 'success' | 'reverted'; logs: Log[] } | Error,
-  { finalized = 200n }: { finalized?: bigint | Error } = {},
+  { finalized = 200n, canonicalHash = RECEIPT_BLOCK }: { finalized?: bigint | Error; canonicalHash?: Hex | null } = {},
 ) {
   return {
     getTransactionReceipt: vi.fn(async () => {
       if (receipt instanceof Error) throw receipt;
-      return { ...receipt, blockNumber: 123n } as never;
+      return { ...receipt, blockNumber: 123n, blockHash: RECEIPT_BLOCK } as never;
     }),
     getBlock: vi.fn(async (args?: { blockTag?: string; blockNumber?: bigint }) => {
       if (args?.blockTag === 'finalized') {
         if (finalized instanceof Error) throw finalized;
         return { number: finalized } as never;
       }
-      return { timestamp: 1_762_000_000n } as never;
+      return { timestamp: 1_762_000_000n, hash: canonicalHash } as never;
     }),
     verifyMessage: vi.fn(async () => false),
   };
@@ -405,6 +410,30 @@ describe('checkOrderLinkPayment: 確定', () => {
     expect(c.getBlock).not.toHaveBeenCalledWith({ blockTag: 'finalized' });
   });
 
+  // Codex MUST: receipt のブロックが組み替えで外れた (同じ高さの今の正規のブロックの hash が違う) なら、確定の高さに
+  // 届いていても paid にしない。
+  it('receipt のブロックの hash が、同じ高さの今の正規のブロックと違えば (別のフォーク) 確定の高さに届いていても pending', async () => {
+    const c = client({ status: 'success', logs }, { finalized: 200n, canonicalHash: `0x${'b2'.repeat(32)}` as Hex });
+    await expect(checkOrderLinkPayment({ ...base, client: c })).resolves.toEqual({ status: 'pending', ...facts });
+    // 確定の高さを先に読み、その後で同じ高さの正規のブロックを読む (確定した後も正規なら、その取引はもう消えない)
+    const order = c.getBlock.mock.calls.map(([args]) => (args?.blockTag === 'finalized' ? 'finalized' : 'byNumber'));
+    expect(order).toEqual(['finalized', 'byNumber']);
+  });
+
+  it('Kaia (即時に確定するチェーン) でも、receipt のブロックが今の正規のブロックと違えば paid にしない', async () => {
+    const kaiaJpyc = deploymentForSlug('jpyc', 'kaia').address;
+    const c = client(
+      { status: 'success', logs: [transfer(kaiaJpyc, FORWARDER, RECEIVER, '3465')] },
+      { canonicalHash: `0x${'b2'.repeat(32)}` as Hex },
+    );
+    await expect(checkOrderLinkPayment({ ...base, chain: 'kaia', client: c })).resolves.toEqual({ status: 'pending', ...facts });
+  });
+
+  it('同じ高さの正規のブロックの hash を読めなければ finalityUnchecked (確定とも言わない)', async () => {
+    const c = client({ status: 'success', logs }, { finalized: 200n, canonicalHash: null });
+    await expect(checkOrderLinkPayment({ ...base, client: c })).resolves.toEqual({ status: 'finalityUnchecked', ...facts });
+  });
+
   it('全部のチェーンを探したときも、確定していない取引は見つかったチェーンの pending にする', async () => {
     const notFound = client(new TransactionReceiptNotFoundError({ hash: HASH }));
     const onPolygon = client({ status: 'success', logs }, { finalized: 100n });
@@ -452,6 +481,39 @@ describe('checkOrderLinkPaymentOnChains', () => {
         clientFor: (chain) => (chain === 'kaia' ? broken : notFound),
       }),
     ).resolves.toEqual({ chain: null, result: { status: 'error' }, unreachable: ['kaia'] });
+  });
+
+  // Codex SHOULD: 既定の RPC は時間切れと再試行で 1 つのチェーンに数十秒かかることがある。止まっているチェーンを待たない。
+  const hanging = () => ({
+    getTransactionReceipt: vi.fn(() => new Promise<never>(() => {})),
+    getBlock: vi.fn(() => new Promise<never>(() => {})),
+    verifyMessage: vi.fn(async () => false),
+  });
+  const within = <T,>(promise: Promise<T>, ms: number) =>
+    Promise.race([promise, new Promise<'still waiting'>((done) => setTimeout(() => done('still waiting'), ms))]);
+
+  it('見つかったら、止まっているチェーンの答えを待たずに出す', async () => {
+    const onPolygon = client({ status: 'success', logs: paidLogs });
+    const search = checkOrderLinkPaymentOnChains({
+      chains: ['kaia', 'polygon'],
+      receiver: RECEIVER,
+      text,
+      clientFor: (chain) => (chain === 'polygon' ? onPolygon : hanging()),
+      budgetMs: 60_000,
+    });
+    await expect(within(search, 500)).resolves.toMatchObject({ chain: 'polygon', result: { status: 'paid' }, unreachable: [] });
+  });
+
+  it('時間の予算の間に答えないチェーンは「問い合わせできなかった」(unreachable) にして、待ち続けない', async () => {
+    const notFound = client(new TransactionReceiptNotFoundError({ hash: HASH }));
+    const search = checkOrderLinkPaymentOnChains({
+      chains: ['polygon', 'kaia'],
+      receiver: RECEIVER,
+      text,
+      clientFor: (chain) => (chain === 'kaia' ? hanging() : notFound),
+      budgetMs: 50,
+    });
+    await expect(within(search, 1_000)).resolves.toEqual({ chain: null, result: { status: 'error' }, unreachable: ['kaia'] });
   });
 
   it('1 つでも見つかれば、他のチェーンの失敗は出さない・Tx Hash が無ければ問い合わせない', async () => {
@@ -519,6 +581,26 @@ describe('rememberCheckedPayment', () => {
     expect(rememberCheckedPayment({ ...input, now: 2_000 }, notObject)).toBe(1_000);
   });
 
+  // Codex SHOULD: オブジェクトでも、時刻でない値 (文字列の "1000" 等) や空文字の保存値は壊れた記録 (初めてと言わない)。
+  it('時刻でない値・空文字の保存値も壊れた記録として unavailable にし、壊れた値は捨てて作り直す', () => {
+    const key = `polygon:${RECEIVER.toLowerCase()}:${HASH}`;
+    const stringTime = memoryStorage({ 'openpay:order-link-checked:v1': JSON.stringify({ [key]: '1000' }) });
+    expect(rememberCheckedPayment(input, stringTime)).toBe('unavailable');
+    expect(JSON.parse(stringTime.data['openpay:order-link-checked:v1'])).toEqual({ [key]: 1_000 });
+    expect(rememberCheckedPayment({ ...input, now: 2_000 }, stringTime)).toBe(1_000);
+    const otherBroken = memoryStorage({ 'openpay:order-link-checked:v1': JSON.stringify({ 'polygon:x:y': -1, 'kaia:x:y': null }) });
+    expect(rememberCheckedPayment(input, otherBroken)).toBe('unavailable');
+    const empty = memoryStorage({ 'openpay:order-link-checked:v1': '' });
+    expect(rememberCheckedPayment(input, empty)).toBe('unavailable');
+    expect(rememberCheckedPayment({ ...input, now: 2_000 }, empty)).toBe(1_000);
+  });
+
+  it('ほかの記録が壊れていても、この支払いの記録が読めれば前に確かめた時刻を返す (使い回しの注意を消さない)', () => {
+    const key = `polygon:${RECEIVER.toLowerCase()}:${HASH}`;
+    const mixed = memoryStorage({ 'openpay:order-link-checked:v1': JSON.stringify({ [key]: 1_000, 'kaia:x:y': 'oops' }) });
+    expect(rememberCheckedPayment({ ...input, now: 2_000 }, mixed)).toBe(1_000);
+  });
+
   it('記録は新しい順に 300 件までに保つ', () => {
     const many: Record<string, number> = {};
     for (let i = 0; i < 300; i += 1) many[`polygon:x:${i}`] = i;
@@ -551,11 +633,17 @@ describe('確認の署名をコントラクトのウォレットとして viem �
   const DELEGATE = '0x000000000000000000000000000000000000c0de' as Address;
   const ERC1271_MAGIC = '0x1626ba7e';
   const IS_VALID_SIGNATURE_ABI = parseAbi(['function isValidSignature(bytes32 hash, bytes signature) view returns (bytes4)']);
+  // まだ委任していない EOA (ERC-8010 の署名に委任の承認を入れて送る)。viem は承認 (authorizationList) を付けた
+  // multicall3 の aggregate3 で、委任した後の isValidSignature を eth_call で読む。
+  const undelegated = privateKeyToAccount(`0x${'66'.repeat(32)}`);
+  const MULTICALL3 = (polygon.contracts.multicall3.address as Address).toLowerCase();
   const owners: Record<string, Address> = {
     [DEPLOYED_WALLET.toLowerCase()]: owner.address,
     [COUNTERFACTUAL_WALLET.toLowerCase()]: owner.address,
     [delegated.address.toLowerCase()]: delegated.address,
+    [undelegated.address.toLowerCase()]: undelegated.address,
   };
+  const OFFCHAIN_LOOKUP = parseAbi(['error OffchainLookup(address sender, string[] urls, bytes callData, bytes4 callbackFunction, bytes extraData)']);
 
   async function isValid(wallet: string, hash: Hex, signature: Hex) {
     const expected = owners[wallet.toLowerCase()];
@@ -569,19 +657,34 @@ describe('確認の署名をコントラクトのウォレットとして viem �
   // 模擬のチェーン。ERC-6492 の validator は deployless (to なし) の eth_call で来るので、validator と同じく 6492 の
   // 包みを外し、wallet の isValidSignature を「owner の ecrecover なら有効」(よくある owner 型) として答える。
   // ERC-8010 (7702 委任済みの EOA) は、viem が EOA 自身へ isValidSignature を直接 eth_call する。
-  // verifier: down = 確かめる eth_call が RPC に届かない (HTTP 503)・revert = 取り消した (署名を受け付けない)。
-  function fakeChain(options: { verifier?: 'answer' | 'down' | 'revert'; logs?: Log[]; finalized?: bigint } = {}) {
+  // verifier: down = 確かめる eth_call が RPC に届かない (HTTP 503)・revert = 取り消した (署名を受け付けない)・
+  // innerRevert = aggregate3 の中の isValidSignature だけが取り消した (aggregate3 そのものは成功)・
+  // offchain = 呼んだ先が OffchainLookup (CCIP-Read) で外の URL を指して取り消した。
+  // canonicalHash = 同じ高さの今の正規のブロックの hash (既定は receipt のブロックと同じ)。
+  function fakeChain(
+    options: {
+      verifier?: 'answer' | 'down' | 'revert' | 'innerRevert' | 'offchain';
+      logs?: Log[];
+      finalized?: bigint;
+      canonicalHash?: Hex;
+    } = {},
+  ) {
     const methods: string[] = [];
-    const answer = async (valid: () => Promise<Hex>) => {
+    const authorizationLists: unknown[] = [];
+    const answer = async (valid: () => Promise<Hex>, to?: string) => {
       if (options.verifier === 'down') {
         throw new HttpRequestError({ url: 'https://rpc.invalid', status: 503, details: 'Service Unavailable' });
       }
-      if (options.verifier === 'revert') {
-        throw new RpcRequestError({
-          body: {},
-          error: { code: 3, message: 'execution reverted', data: '0x' },
-          url: 'https://rpc.invalid',
-        });
+      if (options.verifier === 'revert' || (options.verifier === 'offchain' && to)) {
+        const data =
+          options.verifier === 'offchain' && to
+            ? encodeErrorResult({
+                abi: OFFCHAIN_LOOKUP,
+                errorName: 'OffchainLookup',
+                args: [to as Address, ['https://ccip.invalid/{sender}/{data}.json'], '0x', '0x12345678', '0x'],
+              })
+            : '0x';
+        throw new RpcRequestError({ body: {}, error: { code: 3, message: 'execution reverted', data }, url: 'https://rpc.invalid' });
       }
       return valid();
     };
@@ -595,13 +698,13 @@ describe('確認の署名をコントラクトのウォレットとして viem �
             return { transactionHash: HASH, blockHash: BLOCK_HASH, blockNumber: '0x7b', status: '0x1', logs: options.logs ?? [] };
           }
           if (method === 'eth_getBlockByNumber') {
-            const number = first === 'finalized' ? numberToHex(options.finalized ?? 200n) : (first as Hex);
-            return { number, hash: BLOCK_HASH, timestamp: numberToHex(1_762_000_000) };
+            if (first === 'finalized') return { number: numberToHex(options.finalized ?? 200n), hash: BLOCK_HASH, timestamp: '0x1' };
+            return { number: first as Hex, hash: options.canonicalHash ?? BLOCK_HASH, timestamp: numberToHex(1_762_000_000) };
           }
           if (method === 'eth_getCode') {
             return String(first).toLowerCase() === delegated.address.toLowerCase() ? `0xef0100${DELEGATE.slice(2)}` : '0x';
           }
-          const tx = first as { to?: string; data?: Hex } | undefined;
+          const tx = first as { to?: string; data?: Hex; authorizationList?: unknown[] } | undefined;
           if (method === 'eth_call' && !tx?.to && tx?.data?.toLowerCase().startsWith(VALIDATOR_BYTECODE)) {
             const data = tx.data;
             return answer(async () => {
@@ -616,6 +719,29 @@ describe('確認の署名をコントラクトのウォレットとして viem �
               const { args } = decodeFunctionData({ abi: IS_VALID_SIGNATURE_ABI, data });
               const ok = await isValid(to, args[0], args[1]);
               return encodeAbiParameters([{ type: 'bytes4' }], [ok ? ERC1271_MAGIC : '0xffffffff']);
+            }, to);
+          }
+          // 未委任の 8010: 承認 (authorizationList) を付けた aggregate3。承認が付いていれば委任した後として答える。
+          if (method === 'eth_call' && tx?.to?.toLowerCase() === MULTICALL3 && tx.data) {
+            const { data, authorizationList } = { data: tx.data, authorizationList: tx.authorizationList };
+            authorizationLists.push(authorizationList);
+            return answer(async () => {
+              const decoded = decodeFunctionData({ abi: multicall3Abi, data });
+              if (decoded.functionName !== 'aggregate3') throw new Error('unexpected multicall in test');
+              const calls = decoded.args[0];
+              const results = await Promise.all(
+                calls.map(async ({ target, callData }) => {
+                  if (options.verifier === 'innerRevert') return { success: false, returnData: '0x' as Hex };
+                  const { args: inner } = decodeFunctionData({ abi: IS_VALID_SIGNATURE_ABI, data: callData });
+                  const delegatedNow = Array.isArray(authorizationList) && authorizationList.length === 1;
+                  const ok = delegatedNow && (await isValid(target, inner[0], inner[1]));
+                  return {
+                    success: true,
+                    returnData: encodeAbiParameters([{ type: 'bytes4' }], [ok ? ERC1271_MAGIC : '0xffffffff']),
+                  };
+                }),
+              );
+              return encodeFunctionResult({ abi: multicall3Abi, functionName: 'aggregate3', result: results });
             });
           }
           throw new Error(`unexpected rpc in test: ${method}`);
@@ -623,8 +749,14 @@ describe('確認の署名をコントラクトのウォレットとして viem �
       },
       { retryCount: 0 },
     );
-    return { client: orderLinkReadClient(polygon, transport), methods };
+    return { client: orderLinkReadClient(polygon, transport), methods, authorizationLists };
   }
+
+  const signedByUndelegated8010 = async () =>
+    serializeErc8010Signature({
+      authorization: await undelegated.signAuthorization({ address: DELEGATE, chainId: polygon.id, nonce: 0 }),
+      signature: await undelegated.signMessage({ message }),
+    });
 
   const signedBy8010 = async () =>
     serializeErc8010Signature({
@@ -672,6 +804,47 @@ describe('確認の署名をコントラクトのウォレットとして viem �
     await expect(checkOrderConfirmation({ client: down.client, payer: delegated.address, message, signature })).resolves.toBe('unchecked');
     const reverted = fakeChain({ verifier: 'revert' });
     await expect(checkOrderConfirmation({ client: reverted.client, payer: delegated.address, message, signature })).resolves.toBe('mismatch');
+  });
+
+  // Codex SHOULD: 未委任の 8010 は承認を付けた aggregate3 の経路 (readContract) を通る。中の取り消しと RPC の失敗を分ける。
+  it('ERC-8010 (まだ委任していない EOA) は承認を付けた aggregate3 で確かめ、中の取り消しは mismatch・RPC に届かなければ unchecked', async () => {
+    const signature = await signedByUndelegated8010();
+    const ok = fakeChain();
+    await expect(checkOrderConfirmation({ client: ok.client, payer: undelegated.address, message, signature })).resolves.toBe('verified');
+    // 委任の承認を 1 つ付けた aggregate3 の eth_call を通った (委任済みの経路ではない)
+    expect(ok.authorizationLists).toHaveLength(1);
+    expect(ok.authorizationLists[0]).toHaveLength(1);
+    const innerRevert = fakeChain({ verifier: 'innerRevert' });
+    await expect(
+      checkOrderConfirmation({ client: innerRevert.client, payer: undelegated.address, message, signature }),
+    ).resolves.toBe('mismatch');
+    const down = fakeChain({ verifier: 'down' });
+    await expect(checkOrderConfirmation({ client: down.client, payer: undelegated.address, message, signature })).resolves.toBe('unchecked');
+  });
+
+  // C-1 と同じ: お客様が決めたウォレットが OffchainLookup で外の URL を指しても、お店のブラウザから取りに行かない。
+  it('呼んだ先が OffchainLookup (CCIP-Read) を返しても外の URL へ取りに行かず、取り消しとして mismatch', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('network blocked in test'));
+    try {
+      const signature = await signedBy8010();
+      const offchain = fakeChain({ verifier: 'offchain' });
+      await expect(
+        checkOrderConfirmation({ client: offchain.client, payer: delegated.address, message, signature }),
+      ).resolves.toBe('mismatch');
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it('入金の確認を通して: receipt のブロックが今の正規のブロックと違えば (別のフォーク)、確定の高さに届いていても pending', async () => {
+    const logs = [transfer(JPYC, COUNTERFACTUAL_WALLET, RECEIVER, '3465')];
+    const text = `Tx Hash: ${HASH}\n確認の署名: ${await signedBy6492(owner)}`;
+    const forked = fakeChain({ logs, finalized: 200n, canonicalHash: `0x${'cc'.repeat(32)}` as Hex });
+    await expect(checkOrderLinkPayment({ chain: 'polygon', receiver: RECEIVER, text, client: forked.client })).resolves.toMatchObject({
+      status: 'pending',
+      confirmation: 'verified',
+    });
   });
 
   it('入金の確認を通して: 6492 の wallet が払った確定済みの支払いは paid + verified・確定前は pending', async () => {

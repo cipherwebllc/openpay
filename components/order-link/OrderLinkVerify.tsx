@@ -229,8 +229,11 @@ function VerifyResult({ done, locale }: { done: Done; locale: string }) {
                 ? t('verifyPending', { amount })
                 : t('verifyFinalityUnchecked', { amount })}
           </p>
+          {/* 確定していない支払いは「払われています」と言わず、見つかったチェーンとだけ言う。 */}
           {done.chains.length > 1 && (
-            <p className="mt-0.5 text-xs font-semibold">{t('verifyPaidChain', { chain: chainForSlug(done.chain).name })}</p>
+            <p className="mt-0.5 text-xs font-semibold">
+              {t(result.status === 'paid' ? 'verifyPaidChain' : 'verifyFoundChain', { chain: chainForSlug(done.chain).name })}
+            </p>
           )}
           <p className="mt-0.5 text-xs">{t('verifyPaidMeta', { time, block: result.blockNumber.toString() })}</p>
           {result.status !== 'paid' && (

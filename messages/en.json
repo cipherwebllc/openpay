@@ -3709,6 +3709,7 @@
     "verifyFinalityUncheckedNote": "Could not ask the chain whether it is final. Wait a moment, check again, and ship once it is final.",
     "verifyConfirmationUnchecked": "Could not check the confirmation signature. Please try again.",
     "verifyCheckedLocal": "Reuse of the same Tx Hash is checked only against checks made on this device.",
-    "verifyCheckedUnavailable": "This device cannot keep a record, so reuse cannot be checked here. Make sure you are not shipping two orders for the same payment."
+    "verifyCheckedUnavailable": "This device’s records cannot tell whether this payment was checked before. Make sure you are not shipping two orders for the same payment.",
+    "verifyFoundChain": "Found on {chain}"
   }
 }
