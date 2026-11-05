@@ -1675,8 +1675,7 @@
     "chainPickOpening": "開いています…",
     "payOnOtherChain": "別のチェーンで払う",
     "payAgainAsNewOrder": "新しい注文として払う",
-    "paidInThisTabNoteSendOrder": "このタブでお支払い済みです。上の「注文を送る」から送ってください。",
-    "paidInThisTabNoteNotifyShop": "このタブでお支払い済みです。上の「お店に知らせる」から送ってください。"
+    "paidInThisTabNote": "このタブでお支払い済みです。上の欄からお店に知らせてください。"
   },
   "CopyableField": {
     "copy": "コピー",

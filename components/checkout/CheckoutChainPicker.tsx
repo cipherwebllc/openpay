@@ -70,7 +70,7 @@ export function CheckoutChainPicker({ params }: { params: CheckoutParams }) {
         {params.storeName && (
           <>
             <p className="mt-1 break-words text-lg font-bold text-slate-900">{params.storeName}</p>
-            <p className="mt-0.5 text-xs text-slate-600">{t('storeNameUnverified')}</p>
+            <p className="mt-0.5 text-xs text-slate-600 [word-break:auto-phrase]">{t('storeNameUnverified')}</p>
           </>
         )}
         <p className="mt-1 text-base font-semibold text-slate-800">

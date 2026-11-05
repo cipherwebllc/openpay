@@ -38,8 +38,11 @@ const PRIMARY: Record<Tone, string> = {
   panel:
     'inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-brand px-5 text-base font-bold text-white hover:bg-brand-dark disabled:opacity-70',
 };
+// 完了画面 (SuccessOverlay の bg-emerald-500) の上の白文字は 2.54:1 で AA に届かないので、濃い緑の地に白文字にする
+// (白 / emerald-800 = 7.68:1・地と背景の境目 3.03:1)。
 const SECONDARY: Record<Tone, string> = {
-  overlay: 'inline-flex min-h-11 items-center gap-1.5 text-sm font-medium text-white underline underline-offset-4',
+  overlay:
+    'inline-flex min-h-11 items-center gap-1.5 rounded-full bg-emerald-800 px-4 text-sm font-medium text-white hover:bg-emerald-900',
   panel: 'inline-flex min-h-11 items-center gap-1.5 text-sm font-medium text-brand hover:text-brand-dark',
 };
 const NOTE: Record<Tone, string> = {
@@ -52,7 +55,7 @@ const NOTE: Record<Tone, string> = {
  * ウォレットに届かないと resolve も reject もしないため (主ボタンは署名の間押せない)。要求は取り消さない:
  * 後から署名が返れば、そのまま署名の入った文になる。
  */
-export const SIGN_SLOW_MS = 20_000;
+const SIGN_SLOW_MS = 20_000;
 
 /**
  * 遠隔の注文の会計か (注文を送る / お店に知らせるボタンを出すか)。受付番号があるか「何度でも使える」リンク

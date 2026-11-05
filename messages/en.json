@@ -1675,8 +1675,7 @@
     "chainPickOpening": "Opening…",
     "payOnOtherChain": "Pay on another chain",
     "payAgainAsNewOrder": "Pay for a new order",
-    "paidInThisTabNoteSendOrder": "You already paid in this tab. Send it with “Send your order” above.",
-    "paidInThisTabNoteNotifyShop": "You already paid in this tab. Send it with “Tell the shop” above."
+    "paidInThisTabNote": "You already paid in this tab. Let the shop know using the section above."
   },
   "CopyableField": {
     "copy": "Copy",

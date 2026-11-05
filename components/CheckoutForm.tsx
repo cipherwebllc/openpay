@@ -1734,7 +1734,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
         {params.storeName && (
           <>
             <p className="mt-1 break-words text-lg font-bold text-slate-900">{params.storeName}</p>
-            <p className="mt-0.5 text-xs text-slate-600">{t('storeNameUnverified')}</p>
+            <p className="mt-0.5 text-xs text-slate-600 [word-break:auto-phrase]">{t('storeNameUnverified')}</p>
           </>
         )}
         <p className="mt-1 text-base font-semibold text-slate-800">
@@ -2008,12 +2008,11 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
         />
       )}
 
-      {/* このタブで払った会計: 払うボタンを止めた理由を出す。上の欄のボタンと同じ名前を指す (NotifyShopButton は
-          ship=ask なら「注文を送る」・それ以外は「お店に知らせる」・第 9 回レビュー D-2)。 */}
+      {/* このタブで払った会計: 払うボタンを止めた理由を出し、上の欄 (NotifyShopButton) を指す。ボタンの名前は書かない:
+          名前は状態で変わる (署名の前は「注文を送る」/「お店に知らせる」・署名の後や JPYC 以外は「LINE で送る」「送る」
+          「文をコピー」等) ので、名前を書くと見つからない場合がある (第 9 回レビュー D-2)。 */}
       {!completed && paidInThisTab && (
-        <p className="text-center text-sm text-slate-700">
-          {t(params.ship === 'ask' ? 'paidInThisTabNoteSendOrder' : 'paidInThisTabNoteNotifyShop')}
-        </p>
+        <p className="text-center text-sm text-slate-700">{t('paidInThisTabNote')}</p>
       )}
 
       {!completed && (
