@@ -45,11 +45,12 @@ import {
 import { estimateGatewayMaxFee } from '@/lib/crossChain/gateway';
 import { selectPath, type PathDecision } from '@/lib/crossChain/router';
 import {
+  computeCctpFastFee,
   enumeratePathOptions,
   type PathOption,
 } from '@/lib/crossChain/pathEnumerator';
 import { domainForChainId } from '@/lib/crossChain/config';
-import type { CircleDomain } from '@/lib/crossChain/types';
+import type { CircleDomain, CrossChainTarget } from '@/lib/crossChain/types';
 import { computeCrossChainFeeSplit } from '@/lib/crossChain/feeSplit';
 import {
   clearResumeState,
@@ -160,6 +161,16 @@ export interface BurnUnresolvedInfo {
   sourceChainId: number;
   depositor: Address;
   burnTxHash?: Hex;
+}
+
+// A-1: D9 (reload 後の committed 復元) と同じ判定。burn hash / burn-intent marker /
+// attestation のどれかが保存されている = 不可逆境界を越えた (または一歩手前の) 記録がある。
+function hasCommittedEvidence(s: ResumeState | undefined): boolean {
+  return !!s && (
+    ('burnTxHash' in s && !!s.burnTxHash) ||
+    ('burnIntent' in s && !!s.burnIntent) ||
+    ('merchantAttestation' in s && !!s.merchantAttestation)
+  );
 }
 
 export function useCrossChainPayment(
@@ -285,6 +296,24 @@ export function useCrossChainPayment(
     [account, args.requiredAtomic, args.targetChainId, args.recipient],
   );
 
+  // A-1: CCTP (Arc 以外の宛先) の再開を残高から切り離す。enumeratePathOptions は残高が請求額を
+  // 割った source を落とすので、burn 後に mint が終わらないまま (宛先のガス不足・タブを閉じた・
+  // RPC 障害) 残高が減ると、再読込で選択肢ごと消え、D9 の committed 復元も再開ボタンも hash 貼付け
+  // パネルも届かなくなる (= 親フォームの直接払いのロックが外れて二重払いできる)。Gateway の
+  // recoveryOnly と同じく、保存された記録そのものを起点に全 buyer source を走査する。
+  const [cctpRecoveryTargets, setCctpRecoveryTargets] = useState<readonly CrossChainTarget[]>([]);
+  const scanCctpRecovery = useCallback(() => {
+    const found = forwardOnly ? [] : BUYER_SOURCE_TARGETS.filter((target) => {
+      if (target.chainId === args.targetChainId) return false;
+      const key = sessionKeyFor('cctp-v2', target.chainId);
+      return !!key && hasCommittedEvidence(loadResumeState<ResumeState>(key));
+    });
+    // 同じ集合なら参照を保つ (pathOptions と Chooser の選択を作り直さない)。
+    setCctpRecoveryTargets((current) =>
+      current.length === found.length && current.every((t, i) => t === found[i]) ? current : found);
+  }, [forwardOnly, sessionKeyFor, args.targetChainId]);
+  useEffect(() => { scanCctpRecovery(); }, [scanCctpRecovery]);
+
   const pathOptions = useMemo<PathOption[]>(() => {
     if (args.requiredAtomic <= 0n) return [];
     const options = balancesQuery.data ? enumeratePathOptions({
@@ -301,9 +330,19 @@ export function useCrossChainPayment(
       sourceBalanceAtomic: 0n, serviceFeeAtomic: estimateGatewayMaxFee(args.requiredAtomic),
       estimatedGasUnits: 150_000n, gasOnChainId: args.targetChainId, etaSeconds: 5,
     })).filter((o) => o.sourceDomain !== undefined);
-    return [...recoveryOptions, ...options.filter((o) => !recoveryOptions.some((r) => r.key === o.key))];
+    // A-1: 保存済み CCTP 記録の source は残高に関係なく回復専用で出す。残高が足りて enumerator が
+    // 同じ source を出しているときは既存の選択肢をそのまま使い、何も足さない (既存経路は不変)。
+    const cctpRecoveryOptions: PathOption[] = cctpRecoveryTargets
+      .filter((target) => !options.some((o) => o.key === `cctp-v2-${target.chainId}`))
+      .map<PathOption>((target) => ({
+        key: `cctp-v2-${target.chainId}`, kind: 'cctp-v2', recoveryOnly: true,
+        sourceChainId: target.chainId, sourceDomain: target.domain,
+        sourceBalanceAtomic: 0n, serviceFeeAtomic: computeCctpFastFee(args.requiredAtomic),
+        estimatedGasUnits: 200_000n, gasOnChainId: target.chainId, etaSeconds: 30,
+      }));
+    return [...recoveryOptions, ...cctpRecoveryOptions, ...options.filter((o) => !recoveryOptions.some((r) => r.key === o.key))];
   }, [balancesQuery.data, args.requiredAtomic, args.targetChainId, forwardQuotes,
-    forwardOnly, account, result, gatewayEntries]);
+    forwardOnly, account, result, gatewayEntries, cctpRecoveryTargets]);
 
   const scanGateway = useCallback(() => {
     if (gatewayCheckedScope.current !== recoveryScope) {
@@ -696,6 +735,14 @@ export function useCrossChainPayment(
         if (saved?.kind === 'unreadable') throw saved.error;
         assertGatewayTransferEnabled(saved?.kind === 'present' ? saved.state : undefined);
       }
+      if (option.kind === 'cctp-v2' && option.recoveryOnly) {
+        // A-1: 回復専用の選択肢は残高検査を経ていない。merchant の burn hash か marker が無いと
+        // executor は決定表の「初回 burn」に進むので、保存が消えていたら (別タブで完了・削除等)
+        // state reset より前に止め、新しい burn に化けさせない (Gateway の recoveryOnly と同じ扱い)。
+        const key = sessionKeyFor('cctp-v2', option.sourceChainId);
+        const saved = key ? loadResumeState<CctpResumeState>(key) : undefined;
+        if (!saved?.burnTxHash && !saved?.burnIntent) throw new Error('CCTP recovery state unavailable');
+      }
       setError(undefined);
       setResult(undefined);
       setProgress(undefined);
@@ -783,9 +830,12 @@ export function useCrossChainPayment(
       } finally {
         executionRef.current = false;
         if (forwardOnly) scanRecovery();
+        // A-1: 同じ mount で burn 後に失敗し、その後の残高再取得で選択肢が消えても再開へ届くよう、
+        // 実行のたびに保存済み CCTP 記録を読み直す (読むだけで実行・ロックには触れない)。
+        if (!forwardOnly) scanCctpRecovery();
       }
     },
-    [executeOption, captureBurnUnresolved, forwardOnly, scanRecovery, sessionKeyFor],
+    [executeOption, captureBurnUnresolved, forwardOnly, scanRecovery, scanCctpRecovery, sessionKeyFor],
   );
 
   // D4: 買い手が explorer で見つけた burn の tx hash を貼って続きから再開する。

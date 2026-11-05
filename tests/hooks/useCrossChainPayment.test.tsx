@@ -768,3 +768,118 @@ it('Gateway scope changes preserve the existing CCTP completion and commitment',
   expect(h.result.current.result).toEqual(completed);
   expect(h.result.current.isCommitted).toBe(true);
 });
+
+describe('A-1: CCTP recovery survives a source balance below the invoice', () => {
+  // 請求額の 1.5 倍を Base に持つ買い手が Arc 以外へ払い、burn 後に mint が終わらないまま
+  // 再読込した状態。Base の残高は 0.5 倍になり、enumerator は選択肢を落とす。
+  const legacyArgs = { ...args, targetChainId: 80002 };
+  const legacyKey: ResumeSessionKey = { ...key, destChainId: 80002 };
+  const burnHash = `0x${'bc'.repeat(32)}` as Hex;
+  const mintHash = `0x${'cd'.repeat(32)}` as Hex;
+  const balancesOf = (balance: bigint) => vi.mocked(readAllCrossChainBalances).mockResolvedValue({
+    wallet: [{ target: { chainId: 84532, domain: 6, isTestnet: true, role: 'merchant-and-buyer' }, balance, status: 'ok' }],
+    gateway: { status: 'ok', perDomain: new Map(), total: 0n }, gatewayReadyDomains: new Set(),
+  } as never);
+  const cctpOptions = <T extends { kind: string }>(options: T[]) => options.filter((o) => o.kind === 'cctp-v2');
+
+  beforeEach(async () => {
+    connection.chainId = 80002;
+    const actual = await vi.importActual<typeof import('@/lib/crossChain/execute')>('@/lib/crossChain/execute');
+    vi.mocked(executeCctpTransfer).mockImplementation(actual.executeCctpTransfer);
+    vi.mocked(pollIrisAttestation).mockResolvedValue({ status: 'complete', message: '0x1234', attestation: '0x5678' });
+    saveResumeStateStrict(legacyKey, { approveTxHash: hash, burnTxHash: burnHash });
+  });
+
+  it.each(['insufficient', 'failed', 'loading'])('restores the lock and a recovery-only option when balances are %s', async (status) => {
+    if (status === 'loading') vi.mocked(readAllCrossChainBalances).mockImplementation(() => new Promise(() => {}));
+    else if (status === 'failed') vi.mocked(readAllCrossChainBalances).mockRejectedValue(new Error('offline'));
+    else balancesOf(500_000n);
+    const { result } = renderHook(() => useCrossChainPayment(legacyArgs), { wrapper });
+    if (status === 'insufficient') {
+      await waitFor(() => expect(result.current.decision?.path).toBe('onramp'));
+    }
+
+    await waitFor(() => expect(result.current.isCommitted).toBe(true));
+    expect(cctpOptions(result.current.pathOptions)).toEqual([expect.objectContaining({
+      key: 'cctp-v2-84532', kind: 'cctp-v2', sourceChainId: 84532, sourceDomain: 6, recoveryOnly: true,
+    })]);
+    expect(result.current.isOptionResumable(result.current.pathOptions[0])).toBe(true);
+    expect(executeCctpTransfer).not.toHaveBeenCalled();
+    expect(wallet.writeContract).not.toHaveBeenCalled();
+    expect(wallet.sendTransaction).not.toHaveBeenCalled();
+  });
+
+  it('keeps the existing option untouched while the balance still covers the invoice', async () => {
+    balancesOf(3_000_000n);
+    const { result } = renderHook(() => useCrossChainPayment(legacyArgs), { wrapper });
+    await waitFor(() => expect(result.current.isFetchingBalances).toBe(false));
+    await waitFor(() => expect(result.current.isCommitted).toBe(true));
+    const options = cctpOptions(result.current.pathOptions);
+    expect(options).toHaveLength(1);
+    expect(options[0].recoveryOnly).toBeUndefined();
+    expect(options[0].sourceBalanceAtomic).toBe(3_000_000n);
+  });
+
+  it('resumes the saved burn from the recovery-only option without approving or burning again', async () => {
+    balancesOf(500_000n);
+    wallet.sendTransaction.mockResolvedValue(mintHash);
+    const source = publicClientFor(84532);
+    const { result } = renderHook(() => useCrossChainPayment(legacyArgs), { wrapper });
+    await waitFor(() => expect(result.current.pathOptions.some((o) => o.kind === 'cctp-v2' && o.recoveryOnly)).toBe(true));
+    const option = result.current.pathOptions.find((o) => o.kind === 'cctp-v2')!;
+
+    await act(async () => { await result.current.executeOption(option); });
+
+    expect(source.getTransactionReceipt).toHaveBeenCalledWith({ hash: burnHash });
+    expect(wallet.writeContract).not.toHaveBeenCalled();
+    expect(wallet.sendTransaction.mock.calls).toEqual([[expect.objectContaining({ chain: expect.objectContaining({ id: 80002 }) })]]);
+    expect(result.current.result).toMatchObject({ path: 'cctp-v2', burnTxHash: burnHash, mintTxHash: mintHash });
+    expect(loadResumeState(legacyKey)).toBeUndefined();
+  });
+
+  it('refuses to start a new burn from a recovery-only option whose saved burn disappeared', async () => {
+    balancesOf(500_000n);
+    wallet.writeContract.mockResolvedValue(hash);
+    wallet.sendTransaction.mockResolvedValue(burnHash);
+    const { result } = renderHook(() => useCrossChainPayment(legacyArgs), { wrapper });
+    await waitFor(() => expect(result.current.isCommitted).toBe(true));
+    const option = result.current.pathOptions.find((o) => o.kind === 'cctp-v2' && o.recoveryOnly)!;
+    localStorage.clear();
+
+    await act(async () => {
+      await expect(result.current.executeOption(option)).rejects.toThrow('CCTP recovery state unavailable');
+    });
+
+    expect(executeCctpTransfer).not.toHaveBeenCalled();
+    expect(switchChainAsync).not.toHaveBeenCalled();
+    expect(wallet.writeContract).not.toHaveBeenCalled();
+    expect(wallet.sendTransaction).not.toHaveBeenCalled();
+    // 拒否したクリックは親のロックを外さない。保存が無いので選択肢は読み直しで消える。
+    expect(result.current.isCommitted).toBe(true);
+    await waitFor(() => expect(cctpOptions(result.current.pathOptions)).toEqual([]));
+  });
+
+  it('keeps the resume reachable in the same mount when a failed mint is followed by a lower balance', async () => {
+    localStorage.clear();
+    balancesOf(3_000_000n);
+    wallet.writeContract.mockResolvedValue(hash);
+    wallet.sendTransaction.mockResolvedValue(burnHash);
+    vi.mocked(pollIrisAttestation).mockRejectedValue(new Error('Iris timeout'));
+    const { result } = renderHook(() => useCrossChainPayment(legacyArgs), { wrapper });
+    await waitFor(() => expect(cctpOptions(result.current.pathOptions)).toHaveLength(1));
+    const option = result.current.pathOptions.find((o) => o.kind === 'cctp-v2')!;
+    expect(option.recoveryOnly).toBeUndefined();
+
+    await act(async () => { await expect(result.current.executeOption(option)).rejects.toThrow('Iris timeout'); });
+    expect(loadResumeState(legacyKey)).toMatchObject({ burnTxHash: burnHash });
+    expect(result.current.isCommitted).toBe(true);
+
+    balancesOf(500_000n);
+    await act(async () => { await result.current.refetchBalances(); });
+
+    await waitFor(() => expect(cctpOptions(result.current.pathOptions)).toEqual([expect.objectContaining({
+      key: 'cctp-v2-84532', sourceChainId: 84532, recoveryOnly: true,
+    })]));
+    expect(result.current.isCommitted).toBe(true);
+  });
+});
