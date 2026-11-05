@@ -1018,6 +1018,51 @@ describe('useJpycEip3009Payment — reload intent 復元', () => {
     });
   });
 
+  it('注文リンクの会計の指紋 (contextKey) は復旧 intent にだけ残し、relay POST には載せない (第 9 回レビュー G-1)', async () => {
+    const contextKey = `0x${'c4'.repeat(32)}` as Hex;
+    fetchSpy.mockResolvedValueOnce(
+      new Response(JSON.stringify({ ok: false, pending: true, txHash: `0x${'8'.repeat(64)}` }), {
+        status: 202,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    mount();
+    const { result } = renderHook(() => useJpycEip3009Payment(jpycDep), {
+      wrapper: makeWrapper(),
+    });
+
+    result.current.mutate({ merchant: MERCHANT, value: 300n * 10n ** 18n, contextKey });
+    await waitFor(() => expect(result.current.data?.pending).toBe(true));
+
+    const rawBody = (fetchSpy.mock.calls[0][1] as RequestInit).body as string;
+    expect(rawBody).not.toContain(contextKey);
+    expect(JSON.parse(rawBody).contextKey).toBeUndefined();
+    const saved = JSON.parse(window.sessionStorage.getItem(RELAY_INTENT_STORAGE_KEY)!);
+    expect(saved.contextKey).toBe(contextKey);
+  });
+
+  it('reload 後の復元 intent に会計の指紋 (contextKey) を戻す', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-25T00:00:00Z'));
+    const contextKey = `0x${'c4'.repeat(32)}` as Hex;
+    storeRelayIntent(restoredRelayIntent({ contextKey }));
+    const txHash = `0x${'9'.repeat(64)}` as Hex;
+    fetchSpy.mockResolvedValueOnce(
+      new Response(JSON.stringify({ ok: true, state: 'settled', txHash })),
+    );
+    mount();
+    const { result } = renderHook(() => useJpycEip3009Payment(jpycDep), {
+      wrapper: makeWrapper(),
+    });
+
+    await advanceUntil(100, () =>
+      expect(result.current.data).toEqual({ txHash, success: true }),
+    );
+    expect(result.current.restoredIntent?.contextKey).toBe(contextKey);
+    expect(signTypedData).not.toHaveBeenCalled();
+    vi.useRealTimers();
+  });
+
   it('reload 後に nonce status が settled なら再署名せず成功状態を復元する', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-07-25T00:00:00Z'));

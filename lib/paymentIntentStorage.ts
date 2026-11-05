@@ -16,6 +16,10 @@ export type RelayIntentMetadata = {
   validBefore: string;
   routeKind: 'free' | 'recover';
   issuedAt: number;
+  // 注文リンクの会計の指紋 (lib/checkoutIntentContext の digest・公開の注文文脈だけから作る)。CheckoutForm が
+  // 注文リンクの支払いにだけ付け、読み直した後の完了を同じ会計にだけ結び付ける (第 9 回レビュー G-1)。
+  // 署名・relay POST には載せない。standard の contextKey と同じ値。
+  contextKey?: Hex;
 };
 
 export type StandardIntentStage = 'merchant' | 'fee' | 'fee-awaiting';
@@ -111,6 +115,9 @@ function parseRelayIntent(value: unknown): RelayIntentMetadata | null {
     validBefore: o.validBefore,
     routeKind: o.routeKind,
     issuedAt: o.issuedAt,
+    // 形の崩れた指紋は落とすだけで intent は残す (指紋は「注文を送る」の表示にしか使わない。intent ごと捨てて
+    // 未解決の支払いの復旧 latch を外し、再署名 = 二重払いへ波及させない)。
+    ...(isHex32(o.contextKey) ? { contextKey: o.contextKey } : {}),
   };
 }
 
@@ -217,6 +224,7 @@ export function saveRelayIntent(intent: RelayIntentMetadata): void {
     validBefore: intent.validBefore,
     routeKind: intent.routeKind,
     issuedAt: intent.issuedAt,
+    ...(isHex32(intent.contextKey) ? { contextKey: intent.contextKey } : {}),
   });
 }
 

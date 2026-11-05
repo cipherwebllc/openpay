@@ -640,6 +640,31 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
     standard.restoredFromStorage,
     totalWei,
   ]);
+  // 読み直した画面で復元した relay の支払いが、この会計のものか (第 9 回レビュー G-1)。会計の指紋 (contextKey・
+  // トークン・明細・番号を含む) と、署名したチェーン・お店・金額がすべて一致するときだけ。指紋の無い復元
+  // (/pay・/tip の支払い・以前の保存) は、別の注文の Tx Hash を今の注文に結び付けないよう一致としない。
+  const restoredRelayOrderIntent = useMemo(() => {
+    const intent = relay.restoredIntent;
+    if (
+      !intent ||
+      intent.contextKey !== checkoutContextKey ||
+      intent.chainId !== deployment.chainId ||
+      intent.merchant.toLowerCase() !== params.to.toLowerCase() ||
+      BigInt(intent.merchantValue) !== breakdown.merchantReceives ||
+      BigInt(intent.merchantValue) + BigInt(intent.feeValue) !==
+        breakdown.customerPays
+    ) {
+      return null;
+    }
+    return intent;
+  }, [
+    breakdown.customerPays,
+    breakdown.merchantReceives,
+    checkoutContextKey,
+    deployment.chainId,
+    params.to,
+    relay.restoredIntent,
+  ]);
   const restoredCheckoutCompletion =
     (isStandard && standard.restoredFromStorage) ||
     (useRelay && relay.restoredIntent != null);
@@ -1427,6 +1452,9 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
         // モバイル注文 (storefront/preorder) のときだけ feeKind を載せる (server が定数表から % を
         // 再計算・on-chain 強制)。
         ...(mobileFeeKind ? { feeKind: mobileFeeKind } : {}),
+        // 注文リンクの会計の指紋を復旧 intent にだけ残す (読み直した後の完了を同じ会計に結び付ける・第 9 回
+        // レビュー G-1)。束縛した注文 (order) は自分の slot で復旧するので付けない。relay POST には載らない。
+        ...(remoteOrder && !order ? { contextKey: checkoutContextKey } : {}),
       });
     } else {
       gasless.mutate({
@@ -1550,12 +1578,25 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   };
   const notifyData: NotifyShopData | undefined =
     notifyShop && successOverlayPayload ? notifyFor(successOverlayPayload.txHash, notifyPayer) : undefined;
+  // 読み直した画面で復元した支払いが完了した (receipt / relay の結果が届いた): 大きな完了画面と受注通知は出さないまま
+  // (上の successOverlayPayload)、この会計の支払いと確かめられたときだけ「注文を送る」を出し、払った記録を残す
+  // (第 9 回レビュー G-1: 記録が無いと、もう一度読み直したときに同じ注文をまた払えてしまう)。別の会計の復元は出さない・
+  // 残さない。払ったウォレットは復元した支払いの送り主 (通常決済は hook が記録した送り主・relay は署名した人)。
+  const restoredCompletionNotify: NotifyShopData | undefined =
+    !notifyShop || !restoredCheckoutCompletion
+      ? undefined
+      : isStandard && standard.data && restoredStandardOrderAttempt
+        ? notifyFor(standard.data.merchantTxHash, restoredStandardOrderAttempt.from)
+        : useRelay && relay.data?.success && relay.data.txHash && restoredRelayOrderIntent
+          ? notifyFor(relay.data.txHash, restoredRelayOrderIntent.from)
+          : undefined;
   // 読み直した画面: この会計 (同じ URL の中身) をこのタブで払った記録があれば、「注文を送る」を出す
   // (lib/orderConfirmation.ts の rememberOrderPayment)。完了画面を見ている間は出さない。
   const restoredNotifyData: NotifyShopData | undefined =
-    notifyShop && !notifyData && rememberedPayment
+    restoredCompletionNotify ??
+    (notifyShop && !notifyData && rememberedPayment
       ? notifyFor(rememberedPayment.payment.txHash, rememberedPayment.payment.payer, rememberedPayment.chain)
-      : undefined;
+      : undefined);
   // 何度でも使えるリンク (番号なし・ship=ask) は、同じ商品をもう一度注文できる。
   const canPayAgainAsNewOrder = params.ship === 'ask' && !params.orderId;
   const liveNotifyTx = notifyData?.txHash;
@@ -1568,6 +1609,17 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
       paidAt: Date.now(),
     });
   }, [checkoutContextKey, liveNotifyTx, liveNotifyPayer]);
+  // 復元した支払いの完了も同じ記録に残す (次に読み直したときに払うボタンを止め、「注文を送る」を出すため)。
+  const restoredCompletionTx = restoredCompletionNotify?.txHash;
+  const restoredCompletionPayer = restoredCompletionNotify?.payer;
+  useEffect(() => {
+    if (!restoredCompletionTx) return;
+    rememberOrderPayment(checkoutContextKey, {
+      txHash: restoredCompletionTx.toLowerCase(),
+      ...(restoredCompletionPayer ? { payer: restoredCompletionPayer } : {}),
+      paidAt: Date.now(),
+    });
+  }, [checkoutContextKey, restoredCompletionTx, restoredCompletionPayer]);
 
   // 「署名安心 UX」(plans/sign-reassurance-ux.md・P2)。経路別に kind を出し分ける (計画 §3.3)。
   //   (a) relay free (forwarder 未設定): jpyc-relay-free フルパネル。preview は relay.mutate に

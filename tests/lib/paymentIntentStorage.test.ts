@@ -69,13 +69,11 @@ describe('relay payment intent sessionStorage', () => {
       ...relayIntent(),
       signature: SIGNATURE,
       payload: { signature: SIGNATURE },
-      contextKey: `0x${'9'.repeat(64)}`,
       gasMode: 'merchant',
       feeKind: 'storefront',
     } as RelayIntentMetadata & {
       signature: Hex;
       payload: { signature: Hex };
-      contextKey: string;
       gasMode: string;
       feeKind: string;
     };
@@ -112,12 +110,43 @@ describe('relay payment intent sessionStorage', () => {
       RELAY_INTENT_STORAGE_KEY,
       JSON.stringify({
         ...relayIntent(),
-        contextKey: `0x${'9'.repeat(64)}`,
+        gasMode: 'merchant',
         signature: SIGNATURE,
       }),
     );
 
     expect(loadRelayIntent()).toEqual(relayIntent());
+  });
+
+  it('注文リンクの会計の指紋 (contextKey) は digest だけを保存・復元する (第 9 回レビュー G-1)', () => {
+    saveRelayIntent({ ...relayIntent(), contextKey: CONTEXT_KEY });
+
+    const raw = window.sessionStorage.getItem(RELAY_INTENT_STORAGE_KEY);
+    expect(JSON.parse(raw!)).toEqual({ ...relayIntent(), contextKey: CONTEXT_KEY });
+    expect(loadRelayIntent()).toEqual({ ...relayIntent(), contextKey: CONTEXT_KEY });
+  });
+
+  it('形の崩れた contextKey は落とし、未解決の支払いの intent (復旧 latch) は残す', () => {
+    saveRelayIntent({
+      ...relayIntent(),
+      contextKey: 'checkout:raw-order-context' as Hex,
+    });
+    expect(
+      window.sessionStorage.getItem(RELAY_INTENT_STORAGE_KEY),
+    ).not.toContain('raw-order-context');
+
+    window.sessionStorage.setItem(
+      RELAY_INTENT_STORAGE_KEY,
+      JSON.stringify({
+        ...relayIntent(),
+        contextKey: 'checkout:raw-order-context',
+      }),
+    );
+
+    expect(loadRelayIntent()).toEqual(relayIntent());
+    expect(
+      window.sessionStorage.getItem(RELAY_INTENT_STORAGE_KEY),
+    ).not.toBeNull();
   });
 
   it('sessionStorage 障害を save/load/clear から決済本体へ throw しない', () => {
