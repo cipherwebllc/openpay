@@ -40,8 +40,10 @@ export const ORDER_LINK_NAME_MAX = 80;
 export const ORDER_LINK_DESCRIPTION_MAX = 200;
 // 店名は /checkout の store (お客様の画面の頭と控えに出る) と同じ上限。
 export const ORDER_LINK_STORE_NAME_MAX = CHECKOUT_STORE_NAME_MAX;
-// ガスレスの 1 回の上限。サーバーの RELAY_MAX_JPYC の既定値と同じ (tests/lib/orderLink.test.ts が照合する)。
-// 超えるリンクは /checkout で開けても relay が断る。
+// ガスレスの 1 回の上限。サーバーの relay の上限 (lib/relay/relayProvider.ts の MAX_VALUE = env RELAY_MAX_JPYC・
+// 空なら 5 万) の既定値の固定コピーで、既定値どうしの一致は tests/lib/orderLinkRelayLimit.test.ts が照合する。
+// RELAY_MAX_JPYC はサーバーだけの値でこの画面は読まないので、env で上限を下げてもこの値は追随しない
+// (下げる運用は想定しない・下げるならこの値も同時に直す・docs/ENV.md)。超えるリンクは /checkout で開けても relay が断る。
 export const ORDER_LINK_GASLESS_MAX_JPYC = 50_000n;
 // 通常決済の上限。手入力の桁の間違いを止めるための値で、Store の出品上限に揃えた。
 export const ORDER_LINK_STANDARD_MAX_JPYC = 1_000_000n;
