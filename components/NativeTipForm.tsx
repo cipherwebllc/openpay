@@ -17,9 +17,9 @@ import {
   useAccount,
   useBalance,
   useSendTransaction,
-  useSwitchChain,
   useWaitForTransactionReceipt,
 } from 'wagmi';
+import { useSwitchChainWithFeedback } from '@/hooks/useSwitchChainWithFeedback';
 import { ConnectButton } from './ConnectButton';
 import { ResultRow } from './ResultRow';
 import { blockExplorerUrl, chainForSlug } from '@/lib/chains';
@@ -81,7 +81,8 @@ export function NativeTipForm({ params }: { params: NativeTipParams }) {
   const creatorMessage = params.message ?? '';
 
   const { address, isConnected, chainId } = useAccount();
-  const { switchChain, isPending: isSwitching } = useSwitchChain();
+  // 切り替えの失敗を画面に知らせ、記録に残す (hooks/useSwitchChainWithFeedback.ts)。
+  const { switchChain, isPending: isSwitching, failed: switchFailed } = useSwitchChainWithFeedback('native-tip');
   const { data: balance } = useBalance({
     address,
     chainId: requiredChain.id,
@@ -279,6 +280,11 @@ export function NativeTipForm({ params }: { params: NativeTipParams }) {
               ? t('switchingChain')
               : t('switchChain', { chainName: requiredChain.name })}
           </button>
+        )}
+        {isConnected && wrongChain && switchFailed && (
+          <p role="alert" className="text-xs leading-relaxed text-red-700">
+            {t('switchChainFailed', { chainName: requiredChain.name })}
+          </p>
         )}
 
         {isConnected && !wrongChain && balance !== undefined && (

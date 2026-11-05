@@ -6,7 +6,8 @@ import { useLocale, useTranslations } from 'next-intl';
 import type { StandardPaymentParams } from '@/hooks/useStandardPayment';
 import type { TipStandardApi, TipStandardState } from './TipStandardEngine';
 import { formatUnits } from 'viem';
-import { useAccount, useSwitchChain } from 'wagmi';
+import { useAccount } from 'wagmi';
+import { useSwitchChainWithFeedback } from '@/hooks/useSwitchChainWithFeedback';
 import { ConnectButton } from './ConnectButton';
 import { SmartAccountFallbackBanner } from './SmartAccountFallbackBanner';
 import { breakdownRow } from './PaymentBreakdownRows';
@@ -144,7 +145,8 @@ export function TipForm({
   const creatorMessage = params.message ?? '';
 
   const { address, isConnected } = useAccount();
-  const { switchChain, isPending: isSwitching } = useSwitchChain();
+  // 切り替えの失敗を画面に知らせ、記録に残す (hooks/useSwitchChainWithFeedback.ts)。
+  const { switchChain, isPending: isSwitching, failed: switchFailed } = useSwitchChainWithFeedback('tip');
 
   // F7: thanksUrl が現在の origin と host が異なる第三者ホストなら、送信成功後に開くリンク先に
   // なり得るため、送信前に payer (ファン) へ明示開示する (block はしない — Discord/Patreon 等の
@@ -973,6 +975,11 @@ export function TipForm({
               ? t('switchingChain')
               : t('switchChain', { chainName: requiredChain.name })}
           </button>
+        )}
+        {isConnected && wrongChain && switchFailed && (
+          <p role="alert" className="text-xs leading-relaxed text-red-700">
+            {t('switchChainFailed', { chainName: requiredChain.name })}
+          </p>
         )}
 
         {isConnected && !wrongChain && balance !== undefined && (
