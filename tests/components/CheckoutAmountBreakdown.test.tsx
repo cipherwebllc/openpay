@@ -672,6 +672,32 @@ const CASES: Case[] = [
     },
   },
   {
+    // 見積の有無は `gasAmount !== undefined` で見る (0 は「取得中」ではない)。0n を truthy で見る書き換えを落とすためのケース
+    // (#1023 の Codex レビュー SHOULD)。
+    name: 'USDC・erc20・見積が 0 (取得中ではなく「最大 0 USDC」)',
+    setup: () => setUsdc({ paymaster: 'erc20', quote: 0n }),
+    params: usdcParams(),
+    want: {
+      subtotal: '55 USDC',
+      gas: gasQuote('gasRow', 'gasInfoUsdc', 'ETH', '0 USDC'),
+      total: totalRow('55 USDC'),
+      hint: k('gaslessHintUsdc'),
+      approval: APPROVAL_URL,
+    },
+  },
+  {
+    name: 'USDC・Circle・Circle の見積が 0 (取得中ではなく「最大 0 USDC」・Pimlico の見積 0.1 は使わない)',
+    setup: () => setUsdc({ paymaster: 'erc20', circle: true, quote: 100_000n, circleQuote: 0n }),
+    params: usdcParams(),
+    want: {
+      subtotal: '55 USDC',
+      gas: gasQuote('gasRow', 'gasInfoUsdcCircle', 'ETH', '0 USDC'),
+      total: totalRow('55 USDC'),
+      hint: k('gaslessHintUsdc'),
+      approval: APPROVAL_URL,
+    },
+  },
+  {
     name: 'USDC・Pimlico の sponsorship (erc20 でない)・見積 0.3 USDC (承認の確認のリンクは出ない)',
     setup: () => setUsdc({ paymaster: 'sponsorship', quote: 300_000n }),
     params: usdcParams(),
@@ -907,6 +933,112 @@ describe('CheckoutForm — お支払い額の欄の後半 = 合計の内訳 (Che
       expect(popover!.id).toMatch(TIP_ID);
       expect(button!.getAttribute('aria-describedby')).toBe(popover!.id);
       expect(breakdownArea()).toEqual(expectedArea(catalog, want, true));
+    });
+  });
+
+  // (?) を開いたまま、見積や値引きが変わって描き直されたとき (#1023 の Codex レビュー SHOULD)。開閉の状態は InfoTooltip の
+  // state なので、ネットワーク手数料の行が同じ部品のまま描き直されれば開いたままで、吹き出しの id (乱数・初回の描画で決まる) も
+  // 変わらない。行の div とボタンの DOM も同じものが使われ続けることと、値引きの有無が変わったときに小計の行が作り直される
+  // こと (切り出し前の要素の形と key のまま) を見る。どれも変更前のコードで同じことを確かめた。
+  describe('(?) を開いたまま描き直す', () => {
+    /** ネットワーク手数料の行の (?) の今の状態と、行・ボタンの DOM。 */
+    function gasTooltipState() {
+      const section = amountSection();
+      const button = section.querySelector(':scope > div > dl button');
+      expect(button).not.toBeNull();
+      const popover = section.querySelector('[role="tooltip"]');
+      return {
+        expanded: button!.getAttribute('aria-expanded'),
+        describedBy: button!.getAttribute('aria-describedby'),
+        popoverId: popover?.id ?? null,
+        button: button!,
+        row: button!.closest('dl > div'),
+      };
+    }
+    /** 表の行の div (dl の子の div・区切り線を含む) を並びどおりに。 */
+    const dlRows = () => Array.from(amountSection().querySelectorAll(':scope > div > dl > div'));
+
+    it('見積の取得中 → 見積あり (USDC の erc20): 開いたまま・吹き出しの id も行とボタンの DOM も同じ', () => {
+      setUsdc({ paymaster: 'erc20', quote: undefined });
+      const params = usdcParams();
+      const { rerender } = renderIn('ja', <CheckoutForm params={params} />);
+      fireEvent.click(gasTooltipState().button);
+      const before = gasTooltipState();
+      expect(before.expanded).toBe('true');
+      expect(before.popoverId).toMatch(TIP_ID);
+      expect(breakdownArea()).toEqual(
+        expectedArea(
+          'ja',
+          {
+            subtotal: '55 USDC',
+            gas: gasQuote('gasRow', 'gasInfoUsdc', 'ETH'),
+            total: totalRow('55 USDC'),
+            hint: k('gaslessHintUsdc'),
+            approval: APPROVAL_URL,
+          },
+          true,
+        ),
+      );
+
+      setQuote(useGasQuoteUsdc, 100_000n);
+      rerender(<CheckoutForm params={params} />);
+
+      expect(breakdownArea()).toEqual(
+        expectedArea(
+          'ja',
+          {
+            subtotal: '55 USDC',
+            gas: gasQuote('gasRow', 'gasInfoUsdc', 'ETH', '0.1 USDC'),
+            total: totalRow('55.1 USDC'),
+            hint: k('gaslessHintUsdc'),
+            approval: APPROVAL_URL,
+          },
+          true,
+        ),
+      );
+      const after = gasTooltipState();
+      expect(after.expanded).toBe('true');
+      expect(after.popoverId).toBe(before.popoverId);
+      expect(after.describedBy).toBe(before.popoverId);
+      expect(after.button).toBe(before.button);
+      expect(after.row).toBe(before.row);
+    });
+
+    it.each([
+      ['値引きなし → 値引き 500', undefined, '500'],
+      ['値引き 500 → 値引きなし', '500', undefined],
+    ] as const)('%s (JPYC の relay の無料): 開いたまま・吹き出しの id もネットワーク手数料の行の DOM も同じ', (_label, from, to) => {
+      const paramsFor = (discount: string | undefined) =>
+        jpycParams({ items: DISCOUNT_ITEMS, ...(discount === undefined ? {} : { discount }) });
+      const wantFor = (discount: string | undefined): Want =>
+        discount === undefined
+          ? { subtotal: '5500 JPYC', gas: GAS_FREE, total: totalRow('5500 JPYC'), hint: k('gaslessHintJpycRelay') }
+          : {
+            subtotal: '5500 JPYC',
+            discount: '−500 JPYC',
+            gas: GAS_FREE,
+            total: totalRow('5000 JPYC'),
+            hint: k('gaslessHintJpycRelay'),
+          };
+      const { rerender } = renderIn('ja', <CheckoutForm params={paramsFor(from)} />);
+      fireEvent.click(gasTooltipState().button);
+      const before = gasTooltipState();
+      const subtotalBefore = dlRows()[0];
+      expect(breakdownArea()).toEqual(expectedArea('ja', wantFor(from), true));
+
+      rerender(<CheckoutForm params={paramsFor(to)} />);
+
+      expect(breakdownArea()).toEqual(expectedArea('ja', wantFor(to), true));
+      const after = gasTooltipState();
+      expect(after.expanded).toBe('true');
+      expect(after.popoverId).toBe(before.popoverId);
+      expect(after.describedBy).toBe(before.popoverId);
+      expect(after.button).toBe(before.button);
+      expect(after.row).toBe(before.row);
+      // 小計の行は作り直される: 切り出し前は値引きの有無で dl の先頭の子が「小計の行だけ」と「小計・値引きの Fragment
+      // (key 'subtotal'・'discount')」で入れ替わる。要素の形や key を変える (例: index の key の配列にする) と、小計の行が
+      // 同じ DOM のまま使い回されて振る舞いが変わるので、ここで落ちる (#1023 の Codex レビュー)。
+      expect(dlRows()[0]).not.toBe(subtotalBefore);
     });
   });
 });
