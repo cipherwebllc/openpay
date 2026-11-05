@@ -26,6 +26,7 @@ import { RelayStatusBanners } from './checkout/RelayStatusBanners';
 import { PaymentStatusPanel } from './checkout/paymentStatusPanelLazy';
 import { WrongChainSwitch } from './checkout/WrongChainSwitch';
 import { WalletBalance } from './checkout/WalletBalance';
+import { CheckoutItemList } from './checkout/CheckoutItemList';
 import { shopContactLabel } from '@/lib/shopContact';
 import { rememberOrderPayment, type RememberedOrderPayment } from '@/lib/orderConfirmation';
 import { findRememberedOrderPayment } from '@/lib/orderPaidLookup';
@@ -1774,27 +1775,14 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
       )}
 
       <section className="rounded-2xl border border-slate-200 bg-white p-4 text-sm">
-        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-          {t('itemsTitle')}
-        </p>
-        <ul className="mt-3 divide-y divide-slate-100">
-          {params.items.map((it, i) => {
+        {/* 商品の明細 (見出しと品目の行)。表示だけの部品で、行の額 (品目ごとの小計) の計算と表記はここで決めて渡す
+            (第 9 回レビュー F-04)。 */}
+        <CheckoutItemList
+          lines={params.items.map((it) => {
             const lineTotalWei = calcCheckoutTotal([it], deployment.decimals);
-            return (
-              <li key={i} className="flex items-baseline justify-between gap-3 py-2">
-                <span className="min-w-0 flex-1 break-words font-medium text-slate-700">
-                  {it.name}
-                </span>
-                <span className="shrink-0 font-mono text-xs text-slate-500">
-                  ×{it.qty}
-                </span>
-                <span className="shrink-0 font-mono text-sm text-slate-800">
-                  {fmt(lineTotalWei)}
-                </span>
-              </li>
-            );
+            return { name: it.name, qty: it.qty, amountText: fmt(lineTotalWei) };
           })}
-        </ul>
+        />
         <div className="mt-3 border-t border-slate-200 pt-3">
           <dl className="space-y-1.5">
             {/* レジの値引き: 小計 (値引き前) → 値引き の 2 行。以降の手数料・お支払い額は値引き後の額。 */}
