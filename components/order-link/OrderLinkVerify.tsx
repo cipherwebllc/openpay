@@ -4,9 +4,16 @@
 // 確認の署名をチェーンから確かめる。
 // 注文の画面を閉じた後の注文も確かめられるよう、いつも出す。OpenPay のサーバーには送らない (lib/orderLinkVerify.ts)。
 
-import { useId, useState } from 'react';
+import { useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
-import { AlertTriangle, CheckCircle2, ExternalLink, ShieldCheck } from 'lucide-react';
+import {
+  AlertTriangle,
+  CheckCircle2,
+  ExternalLink,
+  ShieldAlert,
+  ShieldCheck,
+  type LucideIcon,
+} from 'lucide-react';
 import type { Address } from 'viem';
 import { groupAmountDigits } from '@/lib/amount';
 import { chainForSlug, txExplorerUrl, type ChainSlug } from '@/lib/chains';
@@ -15,6 +22,7 @@ import {
   checkOrderLinkPaymentOnChains,
   extractTxHash,
   rememberCheckedPayment,
+  type OrderConfirmationCheck,
   type OrderLinkPaymentCheck,
 } from '@/lib/orderLinkVerify';
 import { ORDER_LINK_INPUT_CLASS } from './OrderLinkAmountField';
@@ -48,10 +56,32 @@ export function OrderLinkVerify({
   const [checking, setChecking] = useState(false);
   const [done, setDone] = useState<Done | null>(null);
 
+  // 確かめている間に欄・受取ウォレット・チェーンが変わったら、遅れて届いた応答は今の入力の結果ではない。それを出すと、
+  // 別のお客様の (払っていない) Tx Hash に書き換えた欄の下に前の「届いています」が出て、払っていない注文を発送させてしまう
+  // (第 9 回レビュー G-2)。確かめるたびと、入力が変わるたび・この欄が消えるたびに通し番号を進め、応答は自分の番号が
+  // 今の番号のときだけ出す。
+  const chainsKey = chains.join(',');
+  const requestSeq = useRef(0);
+  // 入力が変わったとき・この欄が消えたとき (注文リンクのタブを離れる等) の片付けで番号を進める。描画の確定と同時に
+  // (layout effect) 進めるので、変わった後の画面に前の結果が出ず、この後に届く前の応答は番号で捨てる。
+  // 確かめている途中の応答も捨てるので、すぐに新しい入力を確かめられるよう「確かめています」も戻す。
+  // チェーンは中身で見る (同じ内容の配列で描き直されても結果を消さない)。
+  useLayoutEffect(() => {
+    setDone(null);
+    setChecking(false);
+    return () => {
+      requestSeq.current += 1;
+    };
+  }, [text, receiver, chainsKey]);
+
   const check = async () => {
     if (!receiver || checking) return;
+    requestSeq.current += 1;
+    const requestId = requestSeq.current;
     setChecking(true);
     const found = await checkOrderLinkPaymentOnChains({ chains, receiver, text });
+    // 捨てた応答は、この端末の記録 (rememberCheckedPayment) にも残さない (見せていない結果を「前にも確かめた」にしない)。
+    if (requestId !== requestSeq.current) return;
     const chain = found.chain ?? chains[0];
     const { result } = found;
     const hash = extractTxHash(text);
@@ -86,10 +116,7 @@ export function OrderLinkVerify({
           id={inputId}
           type="text"
           value={text}
-          onChange={(event) => {
-            setText(event.target.value);
-            setDone(null);
-          }}
+          onChange={(event) => setText(event.target.value)}
           placeholder={t('verifyPlaceholder')}
           autoComplete="off"
           spellCheck={false}
@@ -123,6 +150,40 @@ export function OrderLinkVerify({
   );
 }
 
+// 結果のカードの配色とアイコン。緑とチェックは「発送してよい」と読まれるので、払ったウォレットの確認の署名が確かめられた
+// 支払いだけに使う (第 9 回レビュー E-5: 他人の Tx Hash を署名なしで貼られても、大きな緑のチェックの下の小さな注意を
+// 見落とさないように)。黄 = お客様に確かめてから発送・赤系 = 発送を止めて確かめる (カードの中の注意の段落と同じ意味)。
+type VerifyTone = 'ok' | 'caution' | 'danger';
+
+const TONE_STYLE: Record<VerifyTone, { card: string; Icon: LucideIcon; icon: string }> = {
+  ok: { card: 'bg-emerald-50 text-emerald-900 ring-emerald-200', Icon: CheckCircle2, icon: 'text-emerald-600' },
+  caution: { card: 'bg-amber-50 text-amber-900 ring-amber-200', Icon: AlertTriangle, icon: 'text-amber-600' },
+  danger: { card: 'bg-rose-50 text-rose-900 ring-rose-200', Icon: ShieldAlert, icon: 'text-rose-600' },
+};
+
+/** 届いた支払いのカードの色。確認の署名の照合 (lib/orderLinkVerify) で決める。 */
+function paidTone(confirmation: OrderConfirmationCheck): VerifyTone {
+  switch (confirmation) {
+    case 'verified':
+      return 'ok';
+    case 'unsigned':
+      return 'caution';
+    case 'mismatch':
+    case 'unverifiable':
+      return 'danger';
+  }
+}
+
+function ResultCard({ tone, children }: { tone: VerifyTone; children: ReactNode }) {
+  const { card, Icon, icon } = TONE_STYLE[tone];
+  return (
+    <div className={`flex gap-2 rounded-xl px-3 py-2.5 ring-1 ${card}`}>
+      <Icon className={`mt-0.5 h-4 w-4 flex-none ${icon}`} aria-hidden />
+      {children}
+    </div>
+  );
+}
+
 function VerifyResult({ done, locale }: { done: Done; locale: string }) {
   const t = useTranslations('OrderLinkBuilder');
   const { result } = done;
@@ -136,8 +197,7 @@ function VerifyResult({ done, locale }: { done: Done; locale: string }) {
       });
     const time = format(result.timestamp * 1000);
     return (
-      <div className="flex gap-2 rounded-xl bg-emerald-50 px-3 py-2.5 text-emerald-900 ring-1 ring-emerald-200">
-        <CheckCircle2 className="mt-0.5 h-4 w-4 flex-none text-emerald-600" aria-hidden />
+      <ResultCard tone={paidTone(result.confirmation)}>
         <div className="min-w-0 text-sm">
           <p className="font-semibold">{t('verifyPaid', { amount: groupAmountDigits(result.received) })}</p>
           {done.chains.length > 1 && (
@@ -166,7 +226,7 @@ function VerifyResult({ done, locale }: { done: Done; locale: string }) {
             </p>
           )}
         </div>
-      </div>
+      </ResultCard>
     );
   }
   const names = (chains: readonly ChainSlug[]) => chains.map((chain) => chainForSlug(chain).name).join(' / ');
@@ -179,9 +239,8 @@ function VerifyResult({ done, locale }: { done: Done; locale: string }) {
           ? t('verifyUnreachable', { chains: names(done.unreachable) })
           : t(`verify.${result.status}`);
   return (
-    <div className="flex gap-2 rounded-xl bg-amber-50 px-3 py-2.5 text-amber-900 ring-1 ring-amber-200">
-      <AlertTriangle className="mt-0.5 h-4 w-4 flex-none text-amber-600" aria-hidden />
+    <ResultCard tone="caution">
       <p className="min-w-0 text-sm">{message}</p>
-    </div>
+    </ResultCard>
   );
 }
