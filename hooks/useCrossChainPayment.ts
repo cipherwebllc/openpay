@@ -14,6 +14,7 @@ import { readAllCrossChainBalances } from '@/lib/crossChain/balance';
 import {
   CrossChainBurnUnresolvedError,
   CrossChainQuoteExpiredError,
+  CrossChainRecoveryBurnBlockedError,
   assertForwardQuoteBinding,
   assertGatewayTransferEnabled,
   executeCctpTransfer,
@@ -25,6 +26,7 @@ import {
   type ExecuteGatewayTransferArgs,
   type ExecuteGatewayTransferResult,
   type GatewayResumeState,
+  type NewTransferBlockReason,
   type OnMerchantMint,
 } from '@/lib/crossChain/execute';
 import { BUYER_SOURCE_TARGETS, CROSS_CHAIN_DISABLED, isForwardOnlyDestination, CROSS_CHAIN_BURN_AUTORESUME } from '@/lib/crossChain/config';
@@ -129,6 +131,8 @@ export interface UseCrossChainPaymentReturn {
   cctpRecoverySources: readonly number[];
   /** A-1: CCTP の記録が読めない送金元 (この送金元からは新しい送金をしない)。 */
   cctpUnreadableSources: readonly number[];
+  /** A-1: CCTP の記録を読み直す (storage の取得拒否が直った後に、再読み込みせず確かめ直すため)。 */
+  recheckCctpRecords: () => void;
   result: ExecuteResult | undefined;
   error: Error | undefined;
   refetchBalances: () => Promise<unknown>;
@@ -345,6 +349,47 @@ export function useCrossChainPayment(
   }, [forwardOnly, sessionKeyFor, args.targetChainId, recoveryScope]);
   useEffect(() => { scanCctpRecovery(); }, [scanCctpRecovery]);
   const cctpRecoverySources = useMemo(() => cctpRecoveryTargets.map((t) => t.chainId), [cctpRecoveryTargets]);
+  const cctpBlocksNewTransfer = cctpRecoverySources.length > 0 || cctpUnreadableSources.length > 0;
+
+  // A-1: 新しく価値を送る操作の関所 (1 か所)。CCTP の決定表が burn を返した後の approve / burn と、Gateway の
+  // 新しい認可 / 置き換えの署名は、どちらも executor が wallet に触れる直前にここを呼ぶ (表は PR 本文)。
+  // 何の波及を断つ防御か: 別の送金元・別の経路に「送ったかもしれない」記録が残ったまま新しい送金を始めると、
+  // その記録の送金が届いていた場合に二重払いになる。今回の操作の対象の確認 (例: B の未送金) では、別の記録
+  // (例: 読めない A) から送っていないことは証明できない。保存は同期で読めるので、呼ばれた時点の状態で決める。
+  // 既存の burn の続き (adopt / mint) と、決定表が burn と判定したその送金元自身の記録は通す。
+  const assertNoUnresolvedRecovery = useCallback((attempt: {
+    kind: 'cctp-v2' | 'gateway'; sourceChainId: number; recoveryOnly?: boolean; slot: BurnSlot; row?: number;
+  }) => {
+    const block = (reason: NewTransferBlockReason): never => {
+      throw new CrossChainRecoveryBurnBlockedError({ slot: attempt.slot, row: attempt.row, sourceChainId: attempt.sourceChainId, reason });
+    };
+    // 回復専用の選択肢は残高検査を経ていないので、新しい burn は始めない。
+    if (attempt.recoveryOnly) block('recovery-only');
+    for (const target of BUYER_SOURCE_TARGETS) {
+      if (target.chainId === args.targetChainId) continue;
+      const key = sessionKeyFor('cctp-v2', target.chainId);
+      if (!key) continue;
+      const entry = readResumeStateForScan(key);
+      if (entry.kind === 'unreadable') block('cctp-unreadable');
+      const self = attempt.kind === 'cctp-v2' && target.chainId === attempt.sourceChainId;
+      if (!self && entry.kind === 'present' && hasCommittedEvidence(entry.state)) block('cctp-record');
+    }
+    if (attempt.kind === 'cctp-v2') {
+      // Gateway の記録は safeExecuteOption と同じ条件 (この mount で確かめて解除できる) を満たさなければ止める。
+      // Gateway の新しい認可どうしの判断は既存の executor (fresh / replacement / recheckOnly) に任せる。
+      const scope = sessionKeyFor('gateway', 0);
+      const scan = scope && !forwardOnly ? scanGatewayResumeStates(scope) : undefined;
+      if (scan?.kind === 'unreadable') block('gateway-unresolved');
+      const entries = scan?.kind === 'ok' ? scan.entries : [];
+      const releasable = entries.every((e) => {
+        const checked = gatewayChecked.current.get(e.key.sourceChainId);
+        return checked && gatewayCanRelease(checked) && gatewayCanRelease(e.state) &&
+          activeGatewayAttempt(checked.merchant)?.transferSpecHash === activeGatewayAttempt(e.state.merchant)?.transferSpecHash &&
+          activeGatewayAttempt(checked.fee)?.transferSpecHash === activeGatewayAttempt(e.state.fee)?.transferSpecHash;
+      });
+      if (!releasable) block('gateway-unresolved');
+    }
+  }, [args.targetChainId, sessionKeyFor, forwardOnly]);
 
   const pathOptions = useMemo<PathOption[]>(() => {
     if (args.requiredAtomic <= 0n) return [];
@@ -690,6 +735,9 @@ export function useCrossChainPayment(
           onStep,
           onProgress: reportProgress,
           onMerchantMint,
+          // A-1: 新しい認可・置き換えの署名の直前の関所 (CCTP の未解決の記録を見る)。
+          assertNewAuthorizationAllowed: (phase) => assertNoUnresolvedRecovery({
+            kind: 'gateway', sourceChainId: core.sourceChainId, slot: phase }),
         };
         const result = await executeGatewayTransfer(gatewayArgs);
         // Completed identities live only in the receipt store; never resume them for a new invoice.
@@ -729,7 +777,9 @@ export function useCrossChainPayment(
         commitBurnIntent,
         allowManualReburn,
         allowAutoReburn: CROSS_CHAIN_BURN_AUTORESUME,
-        ...(core.recoveryOnly ? { recoveryOnly: true } : {}),
+        // A-1: 新しい burn の直前の関所 (Arc の forward は executor の入口で別の経路へ分かれ、ここは通らない)。
+        assertNewBurnAllowed: (info) => assertNoUnresolvedRecovery({
+          kind: 'cctp-v2', sourceChainId: core.sourceChainId, recoveryOnly: core.recoveryOnly, ...info }),
       };
       const result = await executeCctpTransfer(cctpArgs);
       if (!forwardOnly || (latestState as CctpResumeState).forward?.state === 'verified') clearResumeState(sessionKey);
@@ -741,6 +791,7 @@ export function useCrossChainPayment(
       gatewayEntries,
       scanGateway,
       scanRecovery,
+      assertNoUnresolvedRecovery,
       account,
       args.recipient,
       args.requiredAtomic,
@@ -1009,10 +1060,12 @@ export function useCrossChainPayment(
   return {
     gatewayRecovery: !forwardOnly && account && args.requiredAtomic > 0n && gatewayScannedScope !== recoveryScope
       ? { kind: 'scanning' } : gatewayRecovery ? { ...gatewayRecovery,
-        replacementAllowed: gatewayEntries.every((e) => e.key.sourceChainId === gatewayRecovery.key?.sourceChainId ||
+        // A-1: CCTP の記録 (burn の証拠・読めない記録) が残る間は、置き換え (新しい認可) を案内しない
+        // (押しても関所 assertNoUnresolvedRecovery が止める)。
+        replacementAllowed: !cctpBlocksNewTransfer && gatewayEntries.every((e) => e.key.sourceChainId === gatewayRecovery.key?.sourceChainId ||
           (gatewayChecked.current.has(e.key.sourceChainId) && gatewayCanRelease(gatewayChecked.current.get(e.key.sourceChainId)!))),
         entries: gatewayEntries.length > 1 ? gatewayEntries.map(({ key, state }) => ({ kind: 'pending', key, state,
-          replacementAllowed: gatewayEntries.every((other) => other.key.sourceChainId === key.sourceChainId ||
+          replacementAllowed: !cctpBlocksNewTransfer && gatewayEntries.every((other) => other.key.sourceChainId === key.sourceChainId ||
             (gatewayChecked.current.has(other.key.sourceChainId) && gatewayCanRelease(gatewayChecked.current.get(other.key.sourceChainId)!))) })) : undefined,
       } : undefined,
     recheckGateway,
@@ -1029,6 +1082,7 @@ export function useCrossChainPayment(
     cctpRecoveryUnreadable: cctpUnreadableSources.length > 0,
     cctpRecoverySources,
     cctpUnreadableSources,
+    recheckCctpRecords: scanCctpRecovery,
     result,
     error,
     refetchBalances: balancesQuery.refetch,

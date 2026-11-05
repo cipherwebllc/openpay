@@ -48,23 +48,29 @@ export class CrossChainBurnUnresolvedError extends Error {
   }
 }
 
-/** A-1: 回復専用の選択肢 (残高が請求額を割った送金元) の再開で、決定表が burn (前回の burn が
- *  動いていない・二段確認済み等) を返した。ここでは送金せず止める — 残高検査を経ていない選択肢から
- *  approve / burn に進ませないため。保存記録はそのまま残すので、親の直接払いのロックも外れない。 */
+/** A-1: 新しく価値を送る操作 (CCTP の approve / burn・Gateway の新しい認可 / 置き換え) の直前の関所が、
+ *  未解決の記録 (別の送金元の burn の証拠・読めない記録・Gateway の未解決の記録)、または残高検査を経て
+ *  いない回復専用の選択肢を理由に止めた。wallet に触れる前に止め、保存記録は残す (親のロックも外れない)。
+ *  reason: recovery-only = 回復専用の選択肢で決定表が burn を返した / cctp-record = 別の送金元に burn の
+ *  証拠がある / cctp-unreadable = CCTP の記録が読めない / gateway-unresolved = Gateway の記録が未解決。 */
+export type NewTransferBlockReason = 'recovery-only' | 'cctp-record' | 'cctp-unreadable' | 'gateway-unresolved';
 export class CrossChainRecoveryBurnBlockedError extends Error {
   readonly slot: BurnSlot;
-  readonly row: number;
+  /** CCTP の決定表の行 (Gateway の認可では無い)。 */
+  readonly row?: number;
   readonly sourceChainId: number;
+  readonly reason: NewTransferBlockReason;
 
-  constructor(args: { slot: BurnSlot; row: number; sourceChainId: number }) {
+  constructor(args: { slot: BurnSlot; row?: number; sourceChainId: number; reason: NewTransferBlockReason }) {
     super(
-      `cross-chain execute: 回復専用の選択肢では ${args.slot} burn を送りません ` +
-        `(row ${args.row}, source ${args.sourceChainId})`,
+      `cross-chain execute: 未解決の記録があるため新しい送金をしません ` +
+        `(${args.reason}, ${args.slot}, source ${args.sourceChainId}${args.row === undefined ? '' : `, row ${args.row}`})`,
     );
     this.name = 'CrossChainRecoveryBurnBlockedError';
     this.slot = args.slot;
     this.row = args.row;
     this.sourceChainId = args.sourceChainId;
+    this.reason = args.reason;
   }
 }
 

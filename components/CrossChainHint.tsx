@@ -225,7 +225,18 @@ export function CrossChainHint(props: CrossChainHintProps) {
   // A-1: CCTP の記録があるのに読めない間は、hook が親の直接払いのロックを保つ。何も出さずに止まった画面に
   // しないよう、enabled / 残高 / option の gate より先に理由を出す (回復の選択肢があれば chooser の上に出す)。
   const cctpUnreadableNotice = hook.cctpRecoveryUnreadable && !result ? (
-    <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">{t('cctpRecordUnreadable')}</p>
+    <div className="space-y-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+      <p>{t('cctpRecordUnreadable')}</p>
+      {/* 記録は自動では読み直さない (storage の取得拒否が直っても走査し直すまでロックが残る) ので、
+          再読み込みせずに確かめ直す導線を置く。読めた記録は通常どおり再開・解除の判断に使われる。 */}
+      <button
+        type="button"
+        onClick={() => hook.recheckCctpRecords?.()}
+        className="min-h-11 w-full rounded-lg border border-amber-400 bg-white px-3 py-2 text-xs font-semibold text-amber-900"
+      >
+        {t('cctpRecordRecheck')}
+      </button>
+    </div>
   ) : null;
   if (cctpUnreadableNotice && !isExecuting && !hasCctpRecovery) return cctpUnreadableNotice;
 

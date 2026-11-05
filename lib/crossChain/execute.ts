@@ -43,6 +43,7 @@ export {
   CrossChainForwardPendingError,
   CrossChainQuoteExpiredError,
   CrossChainRecoveryBurnBlockedError,
+  type NewTransferBlockReason,
 } from './executeErrors';
 export { ensureWalletChain } from './executeShared';
 export {

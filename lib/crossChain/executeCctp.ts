@@ -25,7 +25,6 @@ import type {
   ExecuteCctpTransferResult,
 } from './executeTypes';
 import { assertBurnResolved, resolveBurnSlot, settleBurn } from './burnRecovery';
-import { CrossChainRecoveryBurnBlockedError } from './executeErrors';
 import {
   ensureWalletChain,
   fireMerchantMint,
@@ -144,18 +143,17 @@ export async function executeCctpTransfer(
     onProgress({ kind: 'fee_source_tx_pending', hash: feeDecision.hash });
   }
 
-  // A-1: 回復専用の選択肢 (残高検査を経ていない) からは approve / burn に進ませない。決定表は変えず、
-  // その結論が burn (自動再 burn の flag・二段確認を含む) になったら、wallet に触れる前にここで止める。
-  // 保存記録は消さない (= 親の直接払いのロックも残る)。
-  // 既知の制約: merchant が proceed / adopt でも、利用料の leg だけが burn だと全体をここで止めるので、
+  // A-1: 新しく価値を送る操作の関所 (hook の assertNoUnresolvedRecovery)。決定表は変えず、その結論が
+  // burn (初回・自動再 burn の flag・二段確認を含む) になったら、wallet に触れる前にここで通す。関所が
+  // throw したら送金しない (CrossChainRecoveryBurnBlockedError)。保存記録は消さない (= 親のロックも残る)。
+  // 既知の制約: merchant が proceed / adopt でも、利用料の leg だけが burn だと関所で全体を止めるので、
   // merchant の mint も巻き添えで進まない。利用料は現在 0 (FEE_BPS_STANDARD = 0n) でこの leg は動かない。
   // 利用料を 0 より大きくする前に、利用料の leg だけを止めて merchant の mint は進める形に直すこと
   // (tests/lib/crossChain/recoveryOnlyFeeLegGuard.test.ts が利用料 > 0 で落ちて知らせる)。
-  if (args.recoveryOnly && (needMerchantBurn || needFeeBurn)) {
-    throw new CrossChainRecoveryBurnBlockedError({
+  if (needMerchantBurn || needFeeBurn) {
+    args.assertNewBurnAllowed?.({
       slot: needMerchantBurn ? 'merchant' : 'fee',
       row: needMerchantBurn ? merchantDecision.row : feeDecision!.row,
-      sourceChainId: args.sourceChainId,
     });
   }
 
