@@ -25,6 +25,7 @@ import { notifyShopData } from './checkout/notifyShopData';
 import { RelayStatusBanners } from './checkout/RelayStatusBanners';
 // 送信後の pending / unknown の枠 (First Load JS から外す lazy wrapper・RelayStatusBanners と 1 つを共有する)。
 import { PaymentStatusPanel } from './checkout/paymentStatusPanelLazy';
+import { WrongChainSwitch } from './checkout/WrongChainSwitch';
 import { shopContactLabel } from '@/lib/shopContact';
 import { rememberOrderPayment, type RememberedOrderPayment } from '@/lib/orderConfirmation';
 import { findRememberedOrderPayment } from '@/lib/orderPaidLookup';
@@ -1926,22 +1927,15 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
           </p>
           <ConnectButton />
 
+          {/* チェーンの切り替えのボタンと切り替え失敗の知らせ。表示だけの部品で、出す条件と切り替え先はここで決めて
+              渡す (第 9 回レビュー F-04)。 */}
           {isConnected && wrongChain && (
-            <button
-              type="button"
-              onClick={() => switchChain({ chainId: requiredChain.id })}
-              disabled={isSwitching}
-              className="w-full rounded-lg bg-amber-500 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-600 disabled:opacity-50"
-            >
-              {isSwitching
-                ? t('switchingChain')
-                : t('switchChain', { chainName: requiredChain.name })}
-            </button>
-          )}
-          {isConnected && wrongChain && switchFailed && (
-            <p role="alert" className="text-xs leading-relaxed text-red-700">
-              {t('switchChainFailed', { chainName: requiredChain.name })}
-            </p>
+            <WrongChainSwitch
+              isSwitching={isSwitching}
+              switchFailed={switchFailed}
+              chainName={requiredChain.name}
+              onSwitch={() => switchChain({ chainId: requiredChain.id })}
+            />
           )}
 
           {isConnected && !wrongChain && balance !== undefined && (
