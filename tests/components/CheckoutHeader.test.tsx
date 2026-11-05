@@ -489,6 +489,23 @@ const CASES: Case[] = [
     params: jpycParams({ storeName: LONG_STORE_NAME, description: LONG_DESCRIPTION }),
     want: { storeName: LONG_STORE_NAME, title: TITLE, description: LONG_DESCRIPTION, ...JPYC_POLYGON, mode: GASLESS },
   },
+  // 空文字 (URL からは来ない: lib/url の sanitizeText が空を undefined にする)。条件は値の有無 (truthy) で見るので、空の
+  // 要素も空のテキストノードも出さない。
+  {
+    name: '(URL からは来ない) 店名が空文字: 店名と注記を出さない',
+    params: jpycParams({ storeName: '' }),
+    want: { title: TITLE, ...JPYC_POLYGON, mode: GASLESS },
+  },
+  {
+    name: '(URL からは来ない) 受付番号が空文字: 見出しは「OpenPay Checkout」',
+    params: jpycParams({ orderId: '' }),
+    want: { title: TITLE, ...JPYC_POLYGON, mode: GASLESS },
+  },
+  {
+    name: '(URL からは来ない) 説明が空文字: 出さない',
+    params: jpycParams({ description: '' }),
+    want: { title: TITLE, ...JPYC_POLYGON, mode: GASLESS },
+  },
   // --- 何度でも使える注文リンク (ship=ask) の案内 ---
   {
     name: 'ship=ask・送り先なし: 案内 (送り先なし)',
