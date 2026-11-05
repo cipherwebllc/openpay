@@ -113,6 +113,13 @@ type CheckoutRoute = 'relay' | 'standard' | 'gasless';
 
 type Variant = 'plain' | 'discount' | 'tax' | 'small';
 
+// 固定の期待値 (JPYC・共有関数から導かない手計算)。両側が同じ共有関数 (recoverFeeValue・relayGasFeeValue 等) を使うので、
+// 一致だけでは共有関数そのものの変更 (料率を無視してフロアだけ返す等) が見えない。その変更もここで落ちる。
+// お客様が払う額: 通常 = Tシャツ 3,000 × 2 + 送料 500・値引き = 通常 − 500・消費税 = 通常 (税込の内税)・小さい額 = 150。
+const TOTALS: Record<Variant, bigint> = { plain: 6500n, discount: 6000n, tax: 6500n, small: 150n };
+// 本番の回収の利用料 = max(フロア 2, 1%): 6,500 → 65・6,000 → 60・150 → 1.5 なのでフロアの 2。
+const PRODUCTION_RECOVER_FEES: Partial<Record<Variant, bigint>> = { plain: 65n, discount: 60n, tax: 65n, small: 2n };
+
 type Profile = {
   name: string;
   env: Record<string, string>;
@@ -120,8 +127,11 @@ type Profile = {
   chains: ChainSlug[];
   /** ガスレスのリンクで /checkout が通る経路。 */
   gaslessRoute: CheckoutRoute;
-  /** 利用料が付くチェーン (relay + forwarder = 回収の経路)。 */
-  recoverChains: ChainSlug[];
+  /**
+   * 利用料が付くチェーン (relay + forwarder = 回収の経路) と、ガスレスの各ケースの利用料の固定の期待値 (JPYC)。
+   * ここに無いチェーンと通常決済は 0。回収のチェーンでケースの値が無ければテストが止まる (表の書き漏れを通さない)。
+   */
+  recoverFees: Partial<Record<ChainSlug, Partial<Record<Variant, bigint>>>>;
   gaslessVariants: Variant[];
   standardVariants: Variant[];
 };
@@ -132,7 +142,7 @@ const PROFILES: Profile[] = [
     env: PRODUCTION_ENV,
     chains: ['polygon', 'kaia', 'avalanche'],
     gaslessRoute: 'relay',
-    recoverChains: ['polygon', 'kaia', 'avalanche'],
+    recoverFees: { polygon: PRODUCTION_RECOVER_FEES, kaia: PRODUCTION_RECOVER_FEES, avalanche: PRODUCTION_RECOVER_FEES },
     // 値引きあり・消費税あり・フロアが効く小さい額を 1 つずつ。
     gaslessVariants: ['plain', 'discount', 'tax', 'small'],
     standardVariants: ['plain', 'discount'],
@@ -147,7 +157,8 @@ const PROFILES: Profile[] = [
     },
     chains: ['polygon', 'kaia', 'avalanche'],
     gaslessRoute: 'relay',
-    recoverChains: ['polygon', 'avalanche'],
+    // Avalanche の小さい額は 1% (1.5) がフロア 20 を下回るので 20。6,500 は 1% の 65 がフロアを超える。
+    recoverFees: { polygon: { plain: 65n, small: 2n }, avalanche: { plain: 65n, small: 20n } },
     gaslessVariants: ['plain', 'small'],
     standardVariants: ['plain'],
   },
@@ -162,7 +173,7 @@ const PROFILES: Profile[] = [
     },
     chains: ['polygon', 'kaia'],
     gaslessRoute: 'relay',
-    recoverChains: [],
+    recoverFees: {},
     gaslessVariants: ['plain', 'small'],
     standardVariants: ['plain'],
   },
@@ -172,7 +183,7 @@ const PROFILES: Profile[] = [
     env: { ...PRODUCTION_ENV, NEXT_PUBLIC_ENABLE_JPYC_EIP3009: '' },
     chains: ['polygon', 'kaia', 'avalanche'],
     gaslessRoute: 'gasless',
-    recoverChains: [],
+    recoverFees: {},
     gaslessVariants: ['plain'],
     standardVariants: ['plain'],
   },
@@ -182,7 +193,7 @@ const PROFILES: Profile[] = [
     env: { ...PRODUCTION_ENV, NEXT_PUBLIC_ENABLE_USAGE_FEE: '1' },
     chains: ['polygon', 'kaia'],
     gaslessRoute: 'relay',
-    recoverChains: [],
+    recoverFees: {},
     gaslessVariants: ['plain'],
     standardVariants: [],
   },
@@ -347,7 +358,10 @@ describe.each(PROFILES)('注文リンクの利用料と /checkout の差し引�
   it.each(cases)('$chain / $mode / $variant', async ({ chain, mode, variant }) => {
     const user = userEvent.setup();
     const deployment = m.tokens.deploymentForSlug('jpyc', chain);
-    const recover = mode === 'gasless' && profile.recoverChains.includes(chain);
+    const recoverFees = mode === 'gasless' ? profile.recoverFees[chain] : undefined;
+    const recover = recoverFees !== undefined;
+    const fixedFee = recover ? recoverFees[variant] : 0n;
+    if (fixedFee === undefined) throw new Error(`no fixed fee for ${chain} / ${variant}`);
     const route: CheckoutRoute = mode === 'standard' ? 'standard' : profile.gaslessRoute;
 
     // --- 注文リンク: このチェーンだけのリンクと、全チェーンを受け付けるリンク (チェーンごとの額は byChain) ---
@@ -387,10 +401,18 @@ describe.each(PROFILES)('注文リンクの利用料と /checkout の差し引�
     setPaymentHooks(deployment.chainId);
     const view = m.i18n.renderWithIntl(<m.checkoutForm.CheckoutForm params={parsed.params} />);
 
-    // 1. 内訳 (受注の通知・控え・履歴に使う値)。
-    const ctx = h.usePaymentHistory.mock.lastCall?.[0] as { saleAmount: bigint; merchantAmount: bigint };
+    // 1. 内訳 (受注の通知・控え・履歴に使う値)。注文リンクの利用料は回収の額 (ネットワーク手数料相当額として記録) で、
+    // OpenPay の利用手数料 (feeAmount) は 0。通常決済はネットワーク手数料相当額を記録しない (null)。
+    const ctx = h.usePaymentHistory.mock.lastCall?.[0] as {
+      saleAmount: bigint;
+      merchantAmount: bigint;
+      feeAmount: bigint;
+      networkFeeEquivalent: bigint | null;
+    };
     expect(ctx.saleAmount).toBe(totalWei);
     expect(ctx.merchantAmount).toBe(receiveWei);
+    expect(ctx.feeAmount).toBe(0n);
+    expect(ctx.networkFeeEquivalent).toBe(route === 'standard' ? null : feeWei);
 
     // 2. 画面: お客様が払う額 (通常決済の行は「お支払い額 (+ ウォレット側 … gas)」) と、回収の経路のネットワーク手数料の行
     // (店主負担)。
@@ -411,6 +433,7 @@ describe.each(PROFILES)('注文リンクの利用料と /checkout の差し引�
       value?: bigint;
       gasMode?: GasMode;
       merchantAmount?: bigint;
+      feeAmount?: bigint;
       saleAmount?: bigint;
       gasReimbursement?: bigint;
     };
@@ -423,13 +446,19 @@ describe.each(PROFILES)('注文リンクの利用料と /checkout の差し引�
     } else {
       expect(args.saleAmount).toBe(totalWei);
       expect(args.merchantAmount).toBe(receiveWei);
+      // 通常決済と Pimlico の経路の feeAmount は、店への送金とは別に手数料の受取先へ送る額 (useStandardPayment の 2 本目・
+      // hooks/useBatchPayment.ts の feeReceiverTotal)。この経路の注文リンクの利用料は 0 なので 0 で、お客様が送る合計は
+      // 注文リンクの合計と同じ。
+      expect(args.feeAmount).toBe(0n);
       // JPYC の Pimlico の肩代わりはお客様にもお店にもガス代を請求しない。
       if (route === 'gasless') expect(args.gasReimbursement).toBe(0n);
+      expect(args.merchantAmount! + args.feeAmount! + (args.gasReimbursement ?? 0n)).toBe(totalWei);
     }
 
-    // 回収の経路だけが利用料を取る (この組み合わせが想定の経路を通っていて、比べた額が空でないことの確認)。
-    if (recover) expect(feeWei).toBeGreaterThan(0n);
-    else expect(feeWei).toBe(0n);
+    // 固定の期待値 (共有関数から導かない・上の TOTALS と recoverFees)。回収の経路だけが利用料を取る。
+    expect(totalWei).toBe(TOTALS[variant] * JPYC);
+    expect(feeWei).toBe(fixedFee * JPYC);
+    expect(receiveWei).toBe((TOTALS[variant] - fixedFee) * JPYC);
 
     view.unmount();
   });
