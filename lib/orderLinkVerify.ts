@@ -437,9 +437,10 @@ function bestFoundIndex(results: ReadonlyArray<OrderLinkPaymentCheck | undefined
 
 /**
  * 受け付けるチェーンを並べて読み、取引が見つかったチェーンで判定する (plans/order-link-multichain.md)。
- * 採る結果は bestFoundIndex の決まった規則で選ぶ (同じ Tx Hash が 2 つのチェーンで見つかっても、応答の速さでは
- * 決めない)。確定した支払い (paid) は一番上なので、設定の順でそれより前のチェーンが答え終われば残りを待たずに出す。
- * それ以外は全部のチェーンが答えるか、時間の予算が尽きるまで待って選ぶ。どこでも見つからず、読めなかったチェーン・
+ * 確定した支払い (paid) が出たら、ほかのチェーンを待たずにすぐ出す: Tx Hash は chainId を含めて署名した取引
+ * (EIP-155) の hash なので、同じ Tx Hash が 2 つのチェーンでどちらも paid になることは事実上なく、待っても結果は
+ * 変わらない。それ以外は全部のチェーンが答えるか、時間の予算が尽きるまで待ち、bestFoundIndex の決まった規則で選ぶ
+ * (先に答えた別フォークの pending が、後から答える paid を隠さないように)。どこでも見つからず、読めなかったチェーン・
  * 予算の間に答えなかったチェーンがあれば「見つからない」ではなく「確かめられない」にし、そのチェーンを unreachable で
  * 伝える (払われていないように見せない)。確認の署名の文は、見つかったチェーンで組み立てる。
  */
@@ -463,12 +464,9 @@ export function checkOrderLinkPaymentOnChains(input: {
     const unreachable = chains.filter((_, index) => results[index] === undefined || results[index].status === 'error');
     return { chain: null, result: { status: unreachable.length > 0 ? 'error' : 'notFound' }, unreachable };
   };
-  // もう答えが変わらないか: 全部のチェーンが答えた・または paid があり、設定の順でそれより前のチェーンが答え終えた。
-  const decided = () => {
-    if (results.every((result) => result !== undefined)) return true;
-    const best = bestFoundIndex(results);
-    return best !== -1 && results[best]?.status === 'paid' && results.slice(0, best).every((result) => result !== undefined);
-  };
+  // もう答えが変わらないか: 全部のチェーンが答えた・または paid が出た (paid は一番上で、2 つのチェーンでは出ない)。
+  const decided = () =>
+    results.every((result) => result !== undefined) || results.some((result) => result?.status === 'paid');
   return new Promise((resolve) => {
     let settled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;

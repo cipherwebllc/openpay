@@ -528,16 +528,26 @@ describe('checkOrderLinkPaymentOnChains', () => {
   const within = <T,>(promise: Promise<T>, ms: number) =>
     Promise.race([promise, new Promise<'still waiting'>((done) => setTimeout(() => done('still waiting'), ms))]);
 
-  it('確定した支払いが見つかったら、設定の順で後ろの止まっているチェーンの答えを待たずに出す', async () => {
+  // Tx Hash は chainId を含めて署名した取引 (EIP-155) の hash なので、同じ Tx Hash が 2 つのチェーンでどちらも paid に
+  // なることは事実上ない。paid が出たら、設定の順で前のチェーンが止まっていても待たずに出す (待っても結果は変わらない)。
+  it('確定した支払いが見つかったら、止まっているチェーンが設定の順で後ろでも前でも、その答えを待たずに出す', async () => {
     const onPolygon = client({ status: 'success', logs: paidLogs });
-    const search = checkOrderLinkPaymentOnChains({
+    const hungAfter = checkOrderLinkPaymentOnChains({
       chains: ['polygon', 'kaia'],
       receiver: RECEIVER,
       text,
       clientFor: (chain) => (chain === 'polygon' ? onPolygon : hanging()),
       budgetMs: 60_000,
     });
-    await expect(within(search, 500)).resolves.toMatchObject({ chain: 'polygon', result: { status: 'paid' }, unreachable: [] });
+    await expect(within(hungAfter, 500)).resolves.toMatchObject({ chain: 'polygon', result: { status: 'paid' }, unreachable: [] });
+    const hungBefore = checkOrderLinkPaymentOnChains({
+      chains: ['kaia', 'polygon'],
+      receiver: RECEIVER,
+      text,
+      clientFor: (chain) => (chain === 'polygon' ? onPolygon : hanging()),
+      budgetMs: 60_000,
+    });
+    await expect(within(hungBefore, 500)).resolves.toMatchObject({ chain: 'polygon', result: { status: 'paid' }, unreachable: [] });
   });
 
   // Codex SHOULD: 採る結果は応答の速さで決めない。優先順 (paid > pending・finalityUnchecked > failed・notToReceiver
@@ -586,7 +596,7 @@ describe('checkOrderLinkPaymentOnChains', () => {
     ).resolves.toMatchObject({ chain: 'kaia', result: { status: 'pending' } });
   });
 
-  it('同じ順位の結果が 2 つのチェーンにあれば、速く答えたほうでなく設定の順で前のチェーンを採る', async () => {
+  it('paid 以外の同じ順位の結果が 2 つのチェーンにあれば、速く答えたほうでなく設定の順で前のチェーンを採る', async () => {
     // pending どうし: kaia が先に答えても、設定の順で前の polygon
     const pendingOnPolygon = later(client({ status: 'success', logs: paidLogs }, { finalized: 100n }), 40);
     await expect(
@@ -597,33 +607,9 @@ describe('checkOrderLinkPaymentOnChains', () => {
         clientFor: (chain) => (chain === 'polygon' ? pendingOnPolygon : forkedOnKaia()),
       }),
     ).resolves.toMatchObject({ chain: 'polygon', result: { status: 'pending' } });
-    // paid どうし: kaia の paid が先に答えても、前の polygon が答えるまで待って polygon
-    const paidOnPolygon = later(client({ status: 'success', logs: paidLogs }), 40);
-    const paidOnKaia = client({ status: 'success', logs: kaiaLogs() });
-    await expect(
-      checkOrderLinkPaymentOnChains({
-        chains: ['polygon', 'kaia'],
-        receiver: RECEIVER,
-        text,
-        clientFor: (chain) => (chain === 'polygon' ? paidOnPolygon : paidOnKaia),
-      }),
-    ).resolves.toMatchObject({ chain: 'polygon', result: { status: 'paid' } });
   });
 
-  it('予算が尽きたら、それまでに見つかった結果を採る (前のチェーンが止まっていても paid・ほかが止まっていても pending)', async () => {
-    const paidOnPolygon = client({ status: 'success', logs: paidLogs });
-    await expect(
-      within(
-        checkOrderLinkPaymentOnChains({
-          chains: ['kaia', 'polygon'],
-          receiver: RECEIVER,
-          text,
-          clientFor: (chain) => (chain === 'polygon' ? paidOnPolygon : hanging()),
-          budgetMs: 50,
-        }),
-        1_000,
-      ),
-    ).resolves.toMatchObject({ chain: 'polygon', result: { status: 'paid' }, unreachable: [] });
+  it('予算が尽きたら、それまでに見つかった結果を採る (ほかのチェーンが止まっていても pending を出す)', async () => {
     const pendingOnPolygon = client({ status: 'success', logs: paidLogs }, { finalized: 100n });
     await expect(
       within(
