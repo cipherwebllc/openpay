@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { NextResponse } from 'next/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getAddress, serializeSignature, type Hex } from 'viem';
+import { createLicenseDefinition } from '@/lib/license/definition';
 import { paymentSignatureFingerprint } from '@/lib/x402/paymentRedelivery';
 import { forwardingCases, paidRouteWire, unforwardedHeaders, v2PaymentHeader } from '../../helpers/paidRouteWire';
 
@@ -48,6 +49,16 @@ const routeMocks = vi.hoisted(() => ({
   warn: vi.fn(),
   info: vi.fn(),
   rights: vi.fn(),
+  // 第 9 回レビュー B-02: 権利照合 RPC の同時実行枠 (lib/license/rightsBudget)。再送は再送用の鍵 (resend) を使い、
+  // 認証済み経路 (content / library / holders) の鍵 (auth) には触れない。あわせて実物の resolver が使う RPC client。
+  resendAcquire: vi.fn<() => Promise<string | null>>(),
+  resendRelease: vi.fn<(token: string) => Promise<void>>(),
+  authAcquire: vi.fn<() => Promise<string | null>>(),
+  authRelease: vi.fn<(token: string) => Promise<void>>(),
+  proof: vi.fn(),
+  licenseRpc: vi.fn(),
+  rpcGetBlock: vi.fn(),
+  rpcReadContract: vi.fn(),
 }));
 
 vi.mock('@/lib/x402/purchaseStats', () => ({ recordHostedPurchase: routeMocks.recordPurchase }));
@@ -120,6 +131,15 @@ vi.mock('@/lib/logger', () => ({
   logger: { debug: vi.fn(), info: routeMocks.info, warn: routeMocks.warn, error: vi.fn() },
 }));
 vi.mock('@/lib/license/rights', () => ({ resolveLicenseRights: routeMocks.rights }));
+vi.mock('@/lib/license/rightsBudget', () => ({
+  acquireLicenseResendRightsBudget: routeMocks.resendAcquire,
+  releaseLicenseResendRightsBudget: routeMocks.resendRelease,
+  acquireLicenseRightsBudget: routeMocks.authAcquire,
+  releaseLicenseRightsBudget: routeMocks.authRelease,
+}));
+// 実物の resolveLicenseRights を使うテスト (B-02) 向け: 証明の KV と RPC client だけ差し替える。
+vi.mock('@/lib/license/jobs', () => ({ readLicenseProof: routeMocks.proof }));
+vi.mock('@/lib/license/rpc', () => ({ licenseRpc: routeMocks.licenseRpc }));
 
 vi.mock('@/lib/x402/storeRailSelection', () => ({
   associateStoreRailIntent: routeMocks.associateRail,
@@ -401,6 +421,10 @@ beforeEach(() => {
   }
 
   routeMocks.getHostedProduct.mockResolvedValue(productFixture());
+  routeMocks.resendAcquire.mockReset().mockResolvedValue('lease');
+  routeMocks.resendRelease.mockReset().mockResolvedValue(undefined);
+  routeMocks.authAcquire.mockReset().mockResolvedValue('auth-lease');
+  routeMocks.authRelease.mockReset().mockResolvedValue(undefined);
   routeMocks.after.mockReset(); routeMocks.recipient.mockReset(); routeMocks.worker.mockReset();
   routeMocks.recipient.mockResolvedValue('supported'); routeMocks.worker.mockResolvedValue({ ok: true });
   routeMocks.getHostedContent.mockResolvedValue({
@@ -1414,9 +1438,188 @@ describe('確定済みの購入への署名ヘッダー再送では本文を返�
       expect(body).not.toHaveProperty('value');
       expect(routeMocks.getHostedContent).not.toHaveBeenCalled();
       expect(routeMocks.rights).toHaveBeenCalledTimes(1);
+      // 再送 (settlement なし) は権利照合の同時実行枠を渡す。鍵は再送用で、認証済み経路の枠ではない (第 9 回レビュー B-02)。
       expect(routeMocks.rights).toHaveBeenCalledWith({
         address: PAYER, productId: RESOURCE_ID, definition, ownership,
+        admission: { acquire: routeMocks.resendAcquire, release: routeMocks.resendRelease },
       });
+    });
+  });
+
+  // 第 9 回レビュー B-02: 決済済みの譲渡可能な license の署名ヘッダー (オンチェーンの calldata から組み立てられる) の
+  // 再送が、権利照合の RPC (finalized block・balanceOf) を同時実行の枠の外で走らせない。枠は再送用の鍵で、認証済みの
+  // content / library / holders の枠 (auth) には触れない (鍵の独立は tests/lib/license/rightsBudget.test.ts が本物の
+  // Lua で確かめる)。resolver は実物を使い、RPC client (lib/license/rpc) と証明の KV (lib/license/jobs) だけ差し替えて、
+  // RPC の発行そのものを数える。
+  describe('譲渡可能な license の再送は、権利の RPC を同時実行の枠に通す (第 9 回レビュー B-02)', () => {
+    const definition = createLicenseDefinition(RESOURCE_ID, {
+      transferable: true,
+      supply: 10,
+      termsUrl: 'https://seller.example/terms',
+      termsVersion: '1',
+    }, 80002, getAddress(`0x${'44'.repeat(20)}`));
+    const grant = {
+      intentSalt: INTENT_SALT,
+      contentRevision: 7,
+      contentRef: `x402:hosted:${RESOURCE_ID}:content:7`,
+      metadata: { owner: SELLER, payTo: SELLER, title: 'Durable hosted note', priceJpyc: '5', contentKind: 'text', productKind: 'license', license: definition },
+      chainId: 80002,
+      nonce: NONCE,
+      purchasedAt: SETTLED_AT,
+      txHash: TX_HASH,
+    };
+    const ownership = {
+      version: 1,
+      policy: 'all-purchased-revisions',
+      payer: PAYER,
+      resourceId: RESOURCE_ID,
+      firstPurchasedAt: SETTLED_AT,
+      updatedAt: SETTLED_AT,
+      grants: [grant],
+      latestGrant: grant,
+    };
+    const ZERO = '0x0000000000000000000000000000000000000000';
+    const balanceOfCalls = () => routeMocks.rpcReadContract.mock.calls
+      .filter(([call]) => (call as { functionName: string }).functionName === 'balanceOf').length;
+    /** 譲渡可能な license の RPC: balance は現在の保有数、paymentKeyOf は購入 grant の mint 先。 */
+    function useChain(balance: bigint, consumedTo: string = PAYER) {
+      routeMocks.rpcReadContract.mockImplementation(async ({ functionName }: { functionName: string }) =>
+        functionName === 'balanceOf' ? balance : { id: consumedTo === ZERO ? 0n : BigInt(definition.tokenId), to: consumedTo });
+    }
+    function licenseIntent(state: IntentState) {
+      const base = intentFixture(state);
+      return { ...base, metadata: { ...base.metadata, owner: SELLER, productKind: 'license', license: definition } };
+    }
+
+    beforeEach(async () => {
+      routeMocks.env.enableLicenseNft = true;
+      clock.mockReturnValue(SETTLED_AT + 1_000);
+      const intent = { ...licenseIntent('settled'), settledAt: SETTLED_AT };
+      routeMocks.getIntent.mockResolvedValue(intent);
+      routeMocks.readSettledAccess.mockResolvedValue({ ok: true, intent, ownership, purchase: {}, grant });
+      routeMocks.proof.mockReset().mockResolvedValue({ status: 'minted' });
+      routeMocks.rpcGetBlock.mockReset().mockResolvedValue({ number: 100n });
+      routeMocks.rpcReadContract.mockReset();
+      routeMocks.licenseRpc.mockReset().mockReturnValue({ getBlock: routeMocks.rpcGetBlock, readContract: routeMocks.rpcReadContract });
+      useChain(1n);
+      const actual = await vi.importActual<typeof import('@/lib/license/rights')>('@/lib/license/rights');
+      routeMocks.rights.mockReset().mockImplementation(actual.resolveLicenseRights);
+    });
+
+    afterEach(() => {
+      // 公開の再送は、どの場合も認証済み経路の枠を取らない・返さない。
+      expect(routeMocks.authAcquire).not.toHaveBeenCalled();
+      expect(routeMocks.authRelease).not.toHaveBeenCalled();
+      routeMocks.rights.mockReset();
+      vi.unstubAllEnvs();
+    });
+
+    it('枠を使い切っているときは、block・balanceOf の RPC を始めずに既存の 503 license_rights_unknown を返す', async () => {
+      routeMocks.resendAcquire.mockResolvedValue(null);
+      const response = await resend();
+      expect(response.status).toBe(503);
+      expect(await response.json()).toEqual({ ok: false, error: 'license_rights_unknown' });
+      expect(routeMocks.resendAcquire).toHaveBeenCalledTimes(1);
+      expect(routeMocks.resendRelease).not.toHaveBeenCalled();
+      expect(routeMocks.licenseRpc).not.toHaveBeenCalled();
+      expect(routeMocks.rpcGetBlock).not.toHaveBeenCalled();
+      expect(routeMocks.rpcReadContract).not.toHaveBeenCalled();
+      expect(routeMocks.getHostedContent).not.toHaveBeenCalled();
+      expect(routeMocks.verify).not.toHaveBeenCalled();
+      expect(routeMocks.settle).not.toHaveBeenCalled();
+    });
+
+    it('枠があり、今も保有していれば従来どおり 409 (本文なし)・RPC は 1 回ずつ・枠は返す', async () => {
+      const response = await resend();
+      await expectAlreadySettled(response);
+      expect(routeMocks.resendAcquire).toHaveBeenCalledTimes(1);
+      expect(routeMocks.rpcGetBlock).toHaveBeenCalledTimes(1);
+      expect(balanceOfCalls()).toBe(1);
+      expect(routeMocks.resendRelease).toHaveBeenCalledTimes(1);
+      expect(routeMocks.resendRelease).toHaveBeenCalledWith('lease');
+      expect(routeMocks.getHostedContent).not.toHaveBeenCalled();
+    });
+
+    it('枠があり、譲渡して保有していなければ従来どおり 404・枠は返す', async () => {
+      useChain(0n, PAYER);
+      const response = await resend();
+      expect(response.status).toBe(404);
+      expect(await response.json()).toEqual({ ok: false, error: 'not_found' });
+      expect(routeMocks.rpcGetBlock).toHaveBeenCalledTimes(1);
+      expect(balanceOfCalls()).toBe(1);
+      expect(routeMocks.resendRelease).toHaveBeenCalledWith('lease');
+      expect(routeMocks.getHostedContent).not.toHaveBeenCalled();
+    });
+
+    it('譲渡不可の license の再送は枠にも RPC にも触れず、枠を使い切っていても従来どおり 409', async () => {
+      const nontransferable = { ...definition, transferable: false };
+      const base = { ...licenseIntent('settled'), settledAt: SETTLED_AT };
+      const intent = { ...base, metadata: { ...base.metadata, license: nontransferable } };
+      const owned = { ...ownership, grants: [{ ...grant, metadata: { ...grant.metadata, license: nontransferable } }] };
+      routeMocks.getIntent.mockResolvedValue(intent);
+      routeMocks.readSettledAccess.mockResolvedValue({ ok: true, intent, ownership: owned, purchase: {}, grant });
+      routeMocks.resendAcquire.mockResolvedValue(null);
+      await expectAlreadySettled(await resend());
+      expect(routeMocks.resendAcquire).not.toHaveBeenCalled();
+      expect(routeMocks.licenseRpc).not.toHaveBeenCalled();
+      expect(routeMocks.rpcGetBlock).not.toHaveBeenCalled();
+      expect(routeMocks.rpcReadContract).not.toHaveBeenCalled();
+    });
+
+    it('並列の再送でも、RPC を同時に始めるのは枠の数まで (残りは既存の 503)', async () => {
+      // 実物の枠 (8 枠・lib/license/rightsBudget) の代わりに 2 枠の枠を置き、block の RPC を止めて同時実行を作る。
+      const capacity = 2;
+      const held = new Set<string>();
+      let issued = 0;
+      routeMocks.resendAcquire.mockImplementation(async () => {
+        if (held.size >= capacity) return null;
+        const token = `lease-${issued++}`;
+        held.add(token);
+        return token;
+      });
+      routeMocks.resendRelease.mockImplementation(async (token: string) => { held.delete(token); });
+      let unblock!: () => void;
+      const blocked = new Promise<void>((resolve) => { unblock = resolve; });
+      routeMocks.rpcGetBlock.mockImplementation(async () => { await blocked; return { number: 100n }; });
+
+      const route = await loadRoute();
+      const parallel = 6;
+      const pending: Promise<Response>[] = [];
+      for (let sent = 1; sent <= parallel; sent += 1) {
+        pending.push(callHosted(route, path, { 'X-PAYMENT': paymentHeader() }));
+        // テストの都合 (vitest 5.0.3): 同じ mock module を並列で dynamic import すると、2 本目以降が mock でなく実物
+        // (KV に触れる) に解決される。各 request が枠を取りに来た (= route の遅延 import を終えた) のを待ってから次を
+        // 送る。先に枠を取った request は block の RPC で止まったままなので、RPC の段では同時に走っている。
+        await vi.waitFor(() => expect(routeMocks.resendAcquire).toHaveBeenCalledTimes(sent));
+      }
+      expect(routeMocks.rpcGetBlock).toHaveBeenCalledTimes(capacity);
+      unblock();
+      const responses = await Promise.all(pending);
+      expect(responses.map((r) => r.status).sort()).toEqual([409, 409, 503, 503, 503, 503]);
+      expect(routeMocks.rpcGetBlock).toHaveBeenCalledTimes(capacity);
+      expect(balanceOfCalls()).toBe(capacity);
+      expect(held.size).toBe(0);
+      expect(routeMocks.getHostedContent).not.toHaveBeenCalled();
+    });
+
+    it('初回の購入 (この request 自身が settle した応答) は枠に通さず、枠を使い切っていても従来どおり本文を返す', async () => {
+      vi.stubEnv('LICENSE_NFT_SELLER_ALLOWLIST', SELLER);
+      routeMocks.resendAcquire.mockResolvedValue(null);
+      routeMocks.getHostedProduct.mockResolvedValue({ ...productFixture(), productKind: 'license', license: definition, registration: { status: 'registered' } });
+      routeMocks.getIntent.mockImplementation(async () => licenseIntent('quoted'));
+      routeMocks.finalize.mockResolvedValue({ ok: true, kind: 'finalized', intent: { ...licenseIntent('settled'), settledAt: SETTLED_AT } });
+      // mint 前の購入: 保有はまだ 0、paymentKeyOf は未消費 (to = 0)。
+      useChain(0n, ZERO);
+      const response = await resend();
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({ ok: true, value: 'paid content', txHash: TX_HASH, productKind: 'license' });
+      expect(response.headers.has('PAYMENT-RESPONSE')).toBe(true);
+      expect(routeMocks.settle).toHaveBeenCalledTimes(1);
+      expect(routeMocks.rights).toHaveBeenCalledTimes(1);
+      expect(routeMocks.rights.mock.calls[0]![0]).not.toHaveProperty('admission');
+      expect(routeMocks.resendAcquire).not.toHaveBeenCalled();
+      expect(routeMocks.rpcGetBlock).toHaveBeenCalledTimes(1);
+      expect(balanceOfCalls()).toBe(1);
     });
   });
 });

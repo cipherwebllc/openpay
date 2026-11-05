@@ -22,3 +22,21 @@ export async function releaseLicenseRightsBudget(token: string): Promise<void> {
   // 返せなかったとき (枠に無い・KV 障害・想定外の応答) は warn だけ残す。投げない (verifyBudget の warnUnlessBudgetReleased)。
   warnUnlessBudgetReleased('license.rights_budget_release_failed', await kvEval<number>(RELEASE, [LICENSE_RIGHTS_BUDGET_KEY], [token]));
 }
+
+// 公開の有料 route (app/api/paid/hosted/[id]) の、確定済みの購入への署名ヘッダーの再送で読む権利照合 RPC の枠
+// (第 9 回レビュー B-02)。再送のヘッダーはオンチェーンの calldata から組み立てられ、匿名で何度でも送れる。
+// 上の認証済み経路の鍵とも verify (公開 API) の鍵とも分け、匿名の再送が枠を埋めても content / library / holders と
+// verify の権利照合を 503 にしない (RPC の濫用を枠の枯渇による DoS に置き換えない)。Lua (8 枠・60 秒 lease) は同じ。
+export const LICENSE_RESEND_RIGHTS_BUDGET_KEY = 'store:license:rights:resend:rpc';
+
+export async function acquireLicenseResendRightsBudget(): Promise<string | null> {
+  const token = randomUUID();
+  const result = await kvEval<number>(LICENSE_VERIFY_BUDGET, [LICENSE_RESEND_RIGHTS_BUDGET_KEY], [String(Date.now()), token]);
+  // 集計枠の障害時に無制限 RPC を開始しない。呼出側は権利 unknown として返す (denied にしない)。
+  return result.ok && result.value === 1 ? token : null;
+}
+
+export async function releaseLicenseResendRightsBudget(token: string): Promise<void> {
+  // 返せなかったときは warn だけ残す。投げない (再送の応答に波及させない・枠は 60 秒 lease で回収される)。
+  warnUnlessBudgetReleased('license.resend_rights_budget_release_failed', await kvEval<number>(RELEASE, [LICENSE_RESEND_RIGHTS_BUDGET_KEY], [token]));
+}
