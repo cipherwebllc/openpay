@@ -1496,11 +1496,14 @@ describe('purchase Lua contracts: production callers, positional arguments and a
   });
 
   it('QUOTE_RATE_LIMIT propagates corrupt counter errors to the caller’s fail-open boundary', async () => {
-    const call = await purchaseCall('QUOTE_RATE_LIMIT');
     // No IP key here: the corrupt wallet counter is the first INCR, so there
     // must be no partial counter writes before Redis rejects it.
+    // E-2: the wallet key carries the IP hash, so corrupt the key of a call without one (…:none).
+    await checkPurchaseQuoteRateLimit({ payer: PAYER, resourceId: RESOURCE_ID, ipHash: null });
+    const noIpWalletKey = h.calls.at(-1)!.keys[0];
+    expect(noIpWalletKey).toMatch(/^store:quote:rl:wallet:0x[0-9a-f]{40}:none$/);
     h.store = createFakeRedisStore(BASE_NOW);
-    h.store.strings.set(call.keys[0], 'not-an-integer');
+    h.store.strings.set(noIpWalletKey, 'not-an-integer');
     const before = redisState(h.store);
     expect(await checkPurchaseQuoteRateLimit({ payer: PAYER, resourceId: RESOURCE_ID, ipHash: null })).toBe(true);
     const failedCall = h.calls.at(-1)!;

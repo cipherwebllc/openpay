@@ -171,8 +171,14 @@ export async function checkPurchaseQuoteRateLimit(input: {
   resourceId: string;
   ipHash: string | null;
 }): Promise<boolean> {
+  // payer は ?payer= で誰でも名乗れる (署名なし)。wallet の枠を payer だけで数えると、1 IP から
+  // 他人の payer を 1 分に 13 回送るだけで、その人の見積もりがどの商品でも 429 になる
+  // (第 9 回レビュー E-2)。IP と組にして、別の IP からの試行が本人の枠を使わないようにする。
+  // ipHash が取れない要求 (IP_HASH_SECRET 欠落など) は 'none' の 1 つの枠を共有する
+  // = 従来の payer だけの鍵と同じ広さ。HMAC の 64 桁 hex なので 'none' と衝突しない。
+  // Lua (QUOTE_RATE_LIMIT) は鍵の名前を解釈しない (位置だけを使う) ので変えない。
   const keys = [
-    `store:quote:rl:wallet:${input.payer.toLowerCase()}`,
+    `store:quote:rl:wallet:${input.payer.toLowerCase()}:${input.ipHash ?? 'none'}`,
     `store:quote:rl:resource:${input.resourceId}`,
   ];
   const limits = [
