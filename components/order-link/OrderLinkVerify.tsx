@@ -207,6 +207,11 @@ const NOTE_DANGER = 'mt-2 rounded-lg bg-rose-100 px-2 py-1.5 text-xs font-semibo
 function VerifyResult({ done, locale }: { done: Done; locale: string }) {
   const t = useTranslations('OrderLinkBuilder');
   const { result } = done;
+  const names = (chains: readonly ChainSlug[]) => chains.map((chain) => chainForSlug(chain).name).join(' / ');
+  // paid 以外の結果を採ったときに、答えなかった・問い合わせできなかったチェーン (そこにもっと上の結果があったかも
+  // しれない)。採った結果と併記する (lib/orderLinkVerify の unreachable)。
+  const unreachableNote =
+    done.unreachable.length > 0 ? <p className={NOTE_CAUTION}>{t('verifyUnreachable', { chains: names(done.unreachable) })}</p> : null;
   if (isReceivedPayment(result)) {
     const format = (ms: number) =>
       new Date(ms).toLocaleString(locale === 'en' ? 'en-US' : 'ja-JP', {
@@ -246,6 +251,7 @@ function VerifyResult({ done, locale }: { done: Done; locale: string }) {
               {t(result.status === 'pending' ? 'verifyPendingNote' : 'verifyFinalityUncheckedNote')}
             </p>
           )}
+          {unreachableNote}
           <p className="mt-1 text-xs leading-relaxed">{t('verifyPaidNote')}</p>
           {/* 確認の署名: 文を送った人が、この支払いをしたウォレットの持ち主か (Tx Hash は誰でも見られる)。 */}
           {result.confirmation === 'verified' ? (
@@ -279,7 +285,6 @@ function VerifyResult({ done, locale }: { done: Done; locale: string }) {
       </ResultCard>
     );
   }
-  const names = (chains: readonly ChainSlug[]) => chains.map((chain) => chainForSlug(chain).name).join(' / ');
   const message =
     result.status === 'notToReceiver'
       ? t('verifyNotToReceiver', { receiver: shortAddress(done.receiver) })
@@ -288,9 +293,18 @@ function VerifyResult({ done, locale }: { done: Done; locale: string }) {
         : result.status === 'error' && done.chains.length > 1 && done.unreachable.length > 0
           ? t('verifyUnreachable', { chains: names(done.unreachable) })
           : t(`verify.${result.status}`);
+  // 取引は見つかったが届いていない (失敗・別の宛先): どのチェーンの取引かと、確かめられなかったチェーンを添える
+  // (「届いていません」だけを出して、答えなかったチェーンの支払いを隠さない)。
+  const negative = result.status === 'failed' || result.status === 'notToReceiver';
   return (
     <ResultCard tone="caution">
-      <p className="min-w-0 text-sm">{message}</p>
+      <div className="min-w-0 text-sm">
+        <p>{message}</p>
+        {negative && done.chains.length > 1 && (
+          <p className="mt-0.5 text-xs font-semibold">{t('verifyFoundChain', { chain: chainForSlug(done.chain).name })}</p>
+        )}
+        {negative && unreachableNote}
+      </div>
     </ResultCard>
   );
 }

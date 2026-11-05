@@ -452,3 +452,42 @@ describe('OrderLinkVerify: この端末の記録', () => {
     expect(await screen.findByText(/以前にも確かめた支払いかを確かめられません/)).toBeInTheDocument();
   });
 });
+
+// Codex SHOULD: paid 以外の結果を採ったとき、答えなかった・問い合わせできなかったチェーンを隠さない
+// (「Polygon で失敗・Kaia は未応答」を「支払いは届いていません」だけにしない)。
+describe('OrderLinkVerify: 答えなかったチェーン', () => {
+  it('失敗した取引の結果に、どのチェーンの取引かと、問い合わせできなかったチェーンを添える', async () => {
+    check.mockResolvedValue({ chain: 'polygon', result: { status: 'failed' }, unreachable: ['kaia'] });
+    render(<OrderLinkVerify chains={['polygon', 'kaia']} receiver={RECEIVER} />);
+    paste(HASH);
+    expect(await screen.findByText(/この取引は失敗しています/)).toBeInTheDocument();
+    expect(screen.getByText(/^見つかったチェーン: /)).toBeInTheDocument();
+    expect(screen.getByText(/に問い合わせできませんでした。少し待ってからもう一度押してください。/)).toBeInTheDocument();
+  });
+
+  it('別の宛先の取引・確定していない支払いにも、問い合わせできなかったチェーンを添える', async () => {
+    check.mockResolvedValueOnce({ chain: 'polygon', result: { status: 'notToReceiver' }, unreachable: ['kaia'] });
+    const { unmount } = render(<OrderLinkVerify chains={['polygon', 'kaia']} receiver={RECEIVER} />);
+    paste(HASH);
+    expect(await screen.findByText(/に JPYC は届いていません/)).toBeInTheDocument();
+    expect(screen.getByText(/に問い合わせできませんでした/)).toBeInTheDocument();
+    unmount();
+    check.mockResolvedValueOnce({
+      chain: 'polygon',
+      result: { ...paidResult('3465', 'verified'), status: 'pending' },
+      unreachable: ['kaia'],
+    });
+    render(<OrderLinkVerify chains={['polygon', 'kaia']} receiver={RECEIVER} />);
+    paste(HASH);
+    expect(await screen.findByText(/まだ確定していません/)).toBeInTheDocument();
+    expect(screen.getByText(/に問い合わせできませんでした/)).toBeInTheDocument();
+  });
+
+  it('問い合わせできなかったチェーンが無ければ添えない', async () => {
+    check.mockResolvedValue({ chain: 'polygon', result: { status: 'failed' }, unreachable: [] });
+    render(<OrderLinkVerify chains={['polygon', 'kaia']} receiver={RECEIVER} />);
+    paste(HASH);
+    expect(await screen.findByText(/この取引は失敗しています/)).toBeInTheDocument();
+    expect(screen.queryByText(/に問い合わせできませんでした/)).toBeNull();
+  });
+});
