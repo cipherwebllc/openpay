@@ -745,6 +745,78 @@ describe('checkOrderLinkPaymentOnChains', () => {
     await expect(within(search(50), 1_000)).resolves.toMatchObject({ chain: 'polygon', result: { status: 'paid' }, unreachable: [] });
   });
 
+  // Codex の最終確認: 署名の chainId を読む getTransaction は、支払いの判定と途中の結果を止めない
+  // (getTransaction が止まっても、receipt で見えた支払いを予算の終わりに失わない)。
+  const stuckTx = <C extends ReturnType<typeof client>>(c: C): C => ({
+    ...c,
+    getTransaction: vi.fn(() => new Promise<never>(() => {})),
+  });
+
+  it('getTransaction が答えなくても、全部のチェーンの支払いの判定が終われば結果を返す', async () => {
+    const paidOnPolygon = stuckTx(client({ status: 'success', logs: paidLogs }));
+    const notFound = client(new TransactionReceiptNotFoundError({ hash: HASH }));
+    const search = checkOrderLinkPaymentOnChains({
+      chains: ['polygon', 'kaia'],
+      receiver: RECEIVER,
+      text,
+      clientFor: (chain) => (chain === 'polygon' ? paidOnPolygon : notFound),
+      budgetMs: 60_000,
+    });
+    await expect(within(search, 500)).resolves.toMatchObject({ chain: 'polygon', result: { status: 'paid' }, unreachable: [] });
+  });
+
+  it('getTransaction と getBlock が答えなくても、予算の終わりに receipt で分かった支払いを finalityUnchecked で返す', async () => {
+    const stuckAfterReceipt = {
+      ...stuckTx(client({ status: 'success', logs: paidLogs })),
+      getBlock: vi.fn(() => new Promise<never>(() => {})),
+    };
+    const notFound = client(new TransactionReceiptNotFoundError({ hash: HASH }));
+    await expect(
+      within(
+        checkOrderLinkPaymentOnChains({
+          chains: ['polygon', 'kaia'],
+          receiver: RECEIVER,
+          text,
+          clientFor: (chain) => (chain === 'polygon' ? stuckAfterReceipt : notFound),
+          budgetMs: 50,
+        }),
+        1_000,
+      ),
+    ).resolves.toEqual({
+      chain: 'polygon',
+      result: {
+        status: 'finalityUnchecked',
+        received: '3465',
+        blockNumber: 123n,
+        timestamp: null,
+        payer: null,
+        confirmation: 'unsigned',
+      },
+      unreachable: [],
+    });
+  });
+
+  it('ほかのチェーンが答えないときは、遅れて返る chainId の一致を確かめるまで paid を早く返さない', async () => {
+    let releaseTx!: (tx: SignedTx) => void;
+    const txRead = new Promise<SignedTx>((done) => {
+      releaseTx = done;
+    });
+    const paidOnPolygon = {
+      ...client({ status: 'success', logs: paidLogs }),
+      getTransaction: vi.fn(() => txRead as Promise<never>),
+    };
+    const search = checkOrderLinkPaymentOnChains({
+      chains: ['polygon', 'kaia'],
+      receiver: RECEIVER,
+      text,
+      clientFor: (chain) => (chain === 'polygon' ? paidOnPolygon : hanging()),
+      budgetMs: 60_000,
+    });
+    await expect(within(search, 100)).resolves.toBe('still waiting');
+    releaseTx({ type: 'eip1559', chainId: chainForSlug('polygon').id });
+    await expect(within(search, 500)).resolves.toMatchObject({ chain: 'polygon', result: { status: 'paid' }, unreachable: [] });
+  });
+
   it('EIP-155 の legacy (v = chainId × 2 + 35) でそのチェーンの chainId なら、待たずに出す', async () => {
     const v = BigInt(chainForSlug('polygon').id) * 2n + 35n;
     const paidOnPolygon = client({ status: 'success', logs: paidLogs }, { tx: { type: 'legacy', v } });
