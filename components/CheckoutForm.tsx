@@ -21,6 +21,7 @@ import { ResultRow } from './ResultRow';
 import { SmartAccountFallbackBanner } from './SmartAccountFallbackBanner';
 import { RelayFallbackBanner } from './RelayFallbackBanner';
 import { isRemoteOrderCheckout, NotifyShopButton, type NotifyShopData } from './NotifyShopButton';
+import { notifyShopData } from './checkout/notifyShopData';
 import { shopContactLabel } from '@/lib/shopContact';
 import { rememberOrderPayment, type RememberedOrderPayment } from '@/lib/orderConfirmation';
 import { findRememberedOrderPayment } from '@/lib/orderPaidLookup';
@@ -1597,24 +1598,9 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   // 送り主・relay は hook が署名に使った from) で、完了を見た時点の接続先ではない (途中で切り替えたウォレットに署名させない)。
   // 履歴と控えの支払者と同じ値 (上の paidFrom・第 9 回レビュー A-4)。
   const notifyPayer = paidFrom;
-  const notifyFor = (txHash: string, payer: Address | undefined, chain: ChainSlug = chainSlug): NotifyShopData => {
-    const explorer = chain === chainSlug ? explorerBase : blockExplorerUrl(deploymentForSlug(params.token, chain).chainId);
-    return {
-    orderNo: params.orderId,
-    askShipping: params.ship === 'ask',
-    storeName: params.storeName,
-    items: params.items.map((item) => ({ name: item.name, qty: item.qty })),
-    amountDisplay: fmt(totalCustomerOutflow),
-    txHash,
-    explorerTxUrl: explorer ? `${explorer}/tx/${txHash}` : undefined,
-    chain,
-    shop: params.to,
-    ...(payer ? { payer } : {}),
-    // お店が確かめられるのは JPYC だけ (注文リンクの「入金を確かめる」)。他のトークンでは署名を求めない。
-    confirm: params.token === 'jpyc',
-    contact: params.contact,
-    };
-  };
+  // 中身はチェーンを選ぶ画面と同じ関数で作る (第 9 回レビュー D-9)。金額はお客様が払う額 (breakdown.customerPays)。
+  const notifyFor = (txHash: string, payer: Address | undefined, chain: ChainSlug = chainSlug): NotifyShopData =>
+    notifyShopData({ params, customerPays: totalCustomerOutflow, deployment, txHash, payer, chain });
   const notifyData: NotifyShopData | undefined =
     notifyShop && successOverlayPayload ? notifyFor(successOverlayPayload.txHash, notifyPayer) : undefined;
   // 読み直した画面で復元した支払いが完了した (receipt / relay の結果が届いた): 大きな完了画面と受注通知は出さないまま
