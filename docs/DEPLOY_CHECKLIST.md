@@ -1853,35 +1853,40 @@ flag ON + forwarder/JPYC 設定済の Amoy (80002) で 1 周する。route テ�
 - 負荷: `/api/discovery` は §11.6 load-test mix に含む (`x402-discovery` シナリオ)。discovery は edge キャッシュ
   (`Cache-Control: s-maxage=10, stale-while-revalidate=30`) + `resolveIds` 有界並列 (同時 25) のため、
   カタログ増でも 1 リクエスト当たりの KV ファンアウトは有界。
-- **再検証の照合の観測 (observe・2026-10-30 から・E-3 の残り・user 裁定 (b) の「観測」の段)**。印のない外部の掲載
-  (公開中・モデレーションの hidden) の再検証が OpenPay の 402 (`ok`) を受け取った回だけ、公開待ちと同じ照合
-  (`lib/x402/registrationGateMatch.ts`・掲載の `payTo` が期待値) を、その 402 の accepts で計算する (追加の HTTP なし)。
-  合わなければ warn `x402.reverify.observe_gate_mismatch` を出す。verdict・カウンタ・CAS・復帰・alert は変えない
-  (公開待ちの掲載は #957 の `x402.reverify.pending_gate_mismatch` だけ・first-party は照合しない)。
-  - warn の項目: `runId` / `target` (`external:<id>`) / `host` (掲載の URL のホスト) / `mismatch`
-    (`payTo` / `network` / `asset` / `forwarder`) / `visibility` (再検証の前の状態 `visible` / `hidden`) / `restored`
-    (この回にモデレーションの hidden が合わない 402 のまま復帰したか = 強制の前に塞ぐ穴そのもの)。
-  - 1 run の集計 `observeChecked` (照合した回数) / `observeMismatch` (うち合わなかった回数) は info
-    `x402.reverify.completed` と cron の応答に載る。ただし info は `NEXT_PUBLIC_LOG_LEVEL` が `info` 以下のときだけ出る
-    (既定 `warn` では出ない)。cron の応答は GitHub Actions が捨て (`-o /dev/null`)、Vercel Cron も残さない。
-    つまり、今の運用で確実に読めるのは warn だけ。
-  - 量: 合わない掲載 1 件につき最大 24 件/日 (毎時の再検証)。止める flag は無い (観測は verdict に影響しないので、
-    止めるなら revert しても再検証の挙動は同じ)。
-- **観測の読み方 (deploy から約 1 週間後)**:
-  1. Sentry → Issues で `event:x402.reverify.observe_gate_mismatch` を期間 7d で検索する (logger の warn は
-     `tags.event` 付きの captureMessage)。0 件なら不一致なし。あれば extra の `target` / `host` / `mismatch` /
-     `visibility` / `restored` を見る。
-  2. Vercel → Logs (production) で `x402.reverify.observe_gate_mismatch` を全文検索する (console.warn の JSON 1 行)。
-     Sentry の取りこぼし (quota 等) の確認用。
-  3. 観測が実際に走ったこと (分母) を確かめる: `GET /api/discovery` の外部の掲載の `verifiedAt` (= 最後の `ok` の
-     時刻 = 照合した回) が期間中も毎時進んでいること、`/api/cron/reverify-status` の `lastOkAt` が新しいこと。
-     モデレーションの hidden の掲載は一覧に出ないが、`ok` を受け取れば復帰して一覧に出る (保留なら warn の
-     `restored: false` で分かる)。
-  - **強制に進む条件**: deploy 後の連続 7 日間、公開中・hidden のすべての外部の掲載で
-    `x402.reverify.observe_gate_mismatch` が 0 件 (上の 1・2) で、かつ 3 で観測が走っていたこと。満たせば次の PR で
-    全掲載に照合を強制する (route で全掲載に `matchedPayTo` を渡し、公開中の不一致を違反に数え、モデレーションの
-    hidden の復帰にも照合を求める = #957 の「残る穴」1〜3 をまとめて閉じる)。不一致が出たら、その掲載の
-    ゲートを直してもらうか (出品者に連絡)、強制の扱いを user が判断する。
+- **再検証の照合 (強制・E-3 の残り・2026-10-30 user 裁定 (b) の「強制」の段・#958 の観測の後)**。外部の掲載の再検証は、
+  どの状態でも、OpenPay の 402 (`ok`) を登録と同じ照合 (`lib/x402/registrationGateMatch.ts`・受取先
+  `extra.openpay.merchant` / チェーン / JPYC / forwarder・掲載の `payTo` が期待値) に通し、合ったときだけ `ok` にする
+  (追加の HTTP なし・USDC / Arc の accept は照合しない)。照合に使った `payTo` を CAS に渡し、probe の間に `payTo` が
+  編集されていたら結果を捨てる (`pay_to_changed`)。first-party は照合しない。
+
+  | 掲載の状態 | 合わない 402 の verdict | どうなるか | warn |
+  |---|---|---|---|
+  | 公開中 | `violation_gate_mismatch` (確定違反) | 違反のカウンタ `failures` を数える (alert の `violations` にも入る)。3 回連続で hidden (URL 台帳も立つ) | `x402.reverify.gate_mismatch` |
+  | モデレーションの hidden (印なし) | `violation_gate_mismatch` (確定違反) | 戻らない (hidden のまま・台帳を延ばす)。照合が合う 402 を受け取ったときだけ戻る | `x402.reverify.gate_mismatch` |
+  | 公開待ち (`pendingFirstVerification`) | `pending_gate_mismatch` (transient・#957 のまま) | 印つきの hidden のまま・`failures` は動かさない (違反に数えると閾値で印が外れ、ID の照会が 404・台帳ありになって、ゲートの設定がまだ合わないだけの新しい掲載をモデレーションの hidden にしてしまう) | `x402.reverify.pending_gate_mismatch` |
+
+  - #957 の「残る穴」1〜3 (閾値で印が外れる・台帳のある URL への PATCH・台帳を継承した新規登録) はこれで閉じる。どれも
+    hidden のまま印のない hidden に移るだけで (公開される時間は無い)、その復帰が照合を求めるため。
+  - warn `x402.reverify.gate_mismatch` の項目: `runId` / `target` (`external:<id>`) / `host` (掲載の URL のホスト) /
+    `mismatch` (`payTo` / `network` / `asset` / `forwarder`) / `visibility` (再検証の前の状態 `visible` / `hidden`) /
+    `outcome` と次のどちらか:
+    - `counted` (違反に数えた・公開のまま) / `hidden` (この回に閾値で hidden になった) / `kept_hidden` (hidden のまま) と、
+      `failures` (この回の後の連続の回数)。
+    - `not_applied` (CAS が結果を捨てた) と `reason` (`pay_to_changed` / `url_changed` / `duplicate` / `storage` 等)。
+  - 読み方: Sentry → Issues で `event:x402.reverify.gate_mismatch` (公開待ちは `event:x402.reverify.pending_gate_mismatch`)
+    を検索する。Vercel → Logs (production) で `gate_mismatch` を全文検索すると両方が出る (Sentry の取りこぼしの確認用)。
+  - 出たときの対応: 多いのは出品者のゲートの設定ミス (別の掲載 ID を引いている・古い受取先の固定値・testnet を向いている)
+    か、他人の 402 の転用。`counted` が続けば 3 時間で hidden になる。出品者に連絡してゲートを直してもらえば、次の確認で
+    自動で戻る (手で戻す経路は無い・正規の復帰は照合が合う 402 だけ)。受取先を変える PATCH の直後は、ゲートのキャッシュ
+    (掲載の照会の edge 5 分 + ゲートの 5 分) の間だけ古い受取先の 402 が返りうるが、毎時の確認で 3 回連続にはならない。
+  - 公開中の掲載が PATCH で URL を他人の 402 の URL に変えた場合など、公開中の不一致は閾値までの最大 3 回 (約 3 時間)
+    公開のまま残る (404 等のほかの確定違反と同じ)。その間も SDK / MCP の買い手は `catalog_accept_mismatch` で支払わない。
+  - 量: 合わない掲載 1 件につき最大 24 件/日 (毎時の再検証)。alert (`ALERT_WEBHOOK_URL`) は従来どおり `violations > 0` で鳴る
+    (文面に不一致の内訳は無いので warn を見る)。止める flag は無い (やめるなら revert = #958 の観測に戻る)。
+  - #958 の観測の結果 (強制に進んだ根拠): deploy (2026-10-30 09:06 UTC) から 2026-11-05 00:30 UTC まで、本番の Vercel
+    ログで `x402.reverify.observe_gate_mismatch` も `gate_mismatch` も 0 件。毎時の再検証は動いていた (公開の 11 件・
+    うち外部 4 件の `verifiedAt` が直近の毎時の run)。merge の前に、deploy から 7 日 (2026-11-06 09:06 UTC) までを見直す。
+    観測の集計 (`observeChecked` / `observeMismatch`) は cron の応答と info から外した。
 
 ### §14.6 既知の前提 / 制約 (accepted)
 - 掲載の再検証: Vercel Cron (`vercel.json`) が毎時 0 分に `/api/cron/reverify` を呼ぶ (既存 `CRON_SECRET`)。2026-10-30 に日次から毎時へ

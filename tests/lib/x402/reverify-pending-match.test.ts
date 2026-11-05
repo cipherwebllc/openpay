@@ -1,7 +1,8 @@
 // @vitest-environment node
 // E-3: 最初の再検証を待つ新規掲載 (pendingFirstVerification) の probe (probeForPendingFirstVerification)。OpenPay 方式の
 // 402 を、登録と同じ照合 (lib/x402/registrationGateMatch.ts) に掲載の payTo で通し、合うときだけ ok にする。
-// 公開中の掲載の probe (probeForReverifyDetailed) は同じ 402 でも従来どおりの verdict を返すことも並べて確かめる。
+// 照合しない probe (probeForReverifyDetailed に payTo を渡さない = first-party) は同じ 402 でも ok を返すことも並べて確かめる
+// (公開中・モデレーションの hidden の照合は tests/lib/x402/reverify-listing-gate.test.ts)。
 // 402 の accepts は本物のカタログの accepts (publicDiscoveryItem) を使う = SDK / スニペット / x402-jpyc-gateway の
 // ゲートが返す形 (tests/lib/x402/registration-gate-match.test.ts がゲートを動かして確かめている)。
 
@@ -67,7 +68,7 @@ describe('probeForPendingFirstVerification', () => {
       .toEqual({ verdict: 'ok_402_openpay', authClass: 'clear' });
   });
 
-  it('他人の受取先の 402 は pending_gate_mismatch (payTo)・公開中の掲載の probe では ok のまま', async () => {
+  it('他人の受取先の 402 は pending_gate_mismatch (payTo)・照合しない probe では ok のまま', async () => {
     const m = await load();
     const body = JSON.stringify({ x402Version: 1, accepts: m.catalogAccepts(OTHER) });
     expect(await m.probeForPendingFirstVerification(URL, SELLER, opts(serve(402, body))))
@@ -110,7 +111,7 @@ describe('probeForPendingFirstVerification', () => {
     }
   });
 
-  it('ok 以外の verdict は照合せずにそのまま (公開中の掲載の probe と同じ)', async () => {
+  it('ok 以外の verdict は照合せずにそのまま (照合しない probe と同じ)', async () => {
     const m = await load();
     const cases: Array<[number, string]> = [
       [404, ''],
@@ -123,16 +124,16 @@ describe('probeForPendingFirstVerification', () => {
     ];
     for (const [status, body] of cases) {
       const pending = await m.probeForPendingFirstVerification(URL, SELLER, opts(serve(status, body)));
-      const visible = await m.probeForReverifyDetailed(URL, opts(serve(status, body)));
-      expect([status, body, pending]).toEqual([status, body, visible]);
+      const unmatched = await m.probeForReverifyDetailed(URL, opts(serve(status, body)));
+      expect([status, body, pending]).toEqual([status, body, unmatched]);
       expect(pending.verdict).not.toBe('ok_402_openpay');
     }
   });
 });
 
 describe('pending_gate_mismatch の分類', () => {
-  // 違反に数えない: 違反 3 連続で印が外れると、通常のモデレーションの hidden の復帰 (照合しない) で同じ 402 が公開に
-  // 進むため (lib/x402/reverify.ts probeForPendingFirstVerification の注釈)。
+  // 違反に数えない: 違反 3 連続で印が外れると、新しい掲載が通常のモデレーションの hidden (ID の照会が 404・URL 台帳あり)
+  // になるため (lib/x402/reverify.ts probeForPendingFirstVerification の注釈)。
   it('確定違反ではない (確定違反のカウンタ failures を動かさない transient として CAS に渡る)', async () => {
     const m = await load();
     expect(m.isViolationVerdict('pending_gate_mismatch')).toBe(false);

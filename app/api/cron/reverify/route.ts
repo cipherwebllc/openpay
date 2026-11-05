@@ -38,7 +38,6 @@ import {
   type ReverifyTarget,
   type ReverifyVerdict,
 } from '@/lib/x402/reverify';
-import type { GateAcceptMismatch } from '@/lib/x402/registrationGateMatch';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -52,11 +51,6 @@ type ProbeOutcome = {
   storageError?: boolean;
   /** storageError の要約 (KV の reason/status/文言)。cron 応答と warn ログに載せる。 */
   storageDetail?: string;
-  /**
-   * 観測だけの照合の結果 (印のない外部の掲載の ok の 402・null = 一致)。照合しなかった回 (公開待ち・first-party・ok 以外)
-   * には無い。verdict・CAS・集計のほかの数には使わない (集計の observe* だけが数える)。
-   */
-  observedMismatch?: GateAcceptMismatch | null;
 };
 
 // storage 失敗の内訳 (503 応答・x402.reverify.storage_error warn)。操作者だけが読む
@@ -90,15 +84,24 @@ type ReverifySummary = {
     unknown: number;
     ran: boolean;
   };
-  // 観測だけの照合 (印のない外部の掲載の ok の 402 を、公開待ちと同じ照合に通した回数と、そのうち合わなかった回数)。
-  // alert の条件 (shouldAlert) と alert の文面には入れない = 観測は通知も verdict も変えない。
-  observeChecked: number;
-  observeMismatch: number;
 };
 
 const firstPartyByPath = new Map<string, FirstPartyResource>(
   FIRST_PARTY_RESOURCES.map((resource) => [resource.path, resource]),
 );
+
+// 照合が合わない 402 を受け取った公開中・モデレーションの hidden の掲載が、この回にどうなったか (warn 用)。
+//   counted     = 確定違反に数えた (公開のまま・あと何回で hidden かは failures)
+//   hidden      = この回で確定違反が閾値に達して hidden になった
+//   kept_hidden = モデレーションの hidden のまま (照合が合わないので復帰しない)
+//   not_applied = CAS が結果を捨てた (reason: probe の間の payTo / URL の編集・重複・storage 等)
+function gateMismatchOutcome(
+  apply: ReverifyApplyResult,
+): { outcome: 'counted' | 'hidden' | 'kept_hidden'; failures: number } | { outcome: 'not_applied'; reason: string } {
+  if (!apply.applied) return { outcome: 'not_applied', reason: apply.reason };
+  const outcome = apply.hiddenBefore ? 'kept_hidden' : apply.hiddenAfter ? 'hidden' : 'counted';
+  return { outcome, failures: apply.failures };
+}
 
 async function processTarget(
   target: ReverifyTarget,
@@ -119,25 +122,24 @@ async function processTarget(
       };
     }
     const probedUrl = read.resource.url;
-    // 最初の再検証を待つ新規掲載 (pendingFirstVerification) は、登録と同じ照合 (受取先・チェーン・JPYC・forwarder) を
-    // 通った 402 だけで公開に進める (E-3)。照合に使った受取先を CAS に渡し、probe の間にそれが編集されていたら結果を
-    // 捨てる。公開中・モデレーションの hidden の掲載は照合しない (verdict は従来どおり)。
-    const matchedPayTo = read.resource.pendingFirstVerification === true ? read.resource.payTo : undefined;
-    // 印のない掲載 (公開中・モデレーションの hidden) は、同じ照合を「観測だけ」する (2026-10-30 user 裁定 (b) の観測の段)。
-    // 結果は warn と集計に残すだけで、verdict・CAS の引数 (matchedPayTo は渡さない)・復帰は変えない。1 週間の観測で
-    // 不一致が 0 なら、次の PR で照合を強制する (docs/DEPLOY_CHECKLIST.md §14.5)。
-    const probe = matchedPayTo !== undefined
-      ? await probeForPendingFirstVerification(probedUrl, matchedPayTo)
-      : await probeForReverifyDetailed(probedUrl, {}, read.resource.payTo);
+    const { payTo } = read.resource;
+    // 外部の掲載は、どの状態でも登録と同じ照合 (受取先・チェーン・JPYC・forwarder・掲載の payTo が期待値) を通った 402 だけを
+    // ok にする (E-3・2026-10-30 user 裁定 (b) の「強制」の段・docs/DEPLOY_CHECKLIST.md §14.5)。照合に使った受取先を CAS に
+    // 渡し、probe の間にそれが編集されていたら結果を捨てる。
+    //   公開待ち (pendingFirstVerification) = 合わなければ pending_gate_mismatch (違反に数えない・#957 のまま)
+    //   公開中・モデレーションの hidden    = 合わなければ violation_gate_mismatch (確定違反・閾値で hidden・hidden は戻らない)
+    const pending = read.resource.pendingFirstVerification === true;
+    const probe = pending
+      ? await probeForPendingFirstVerification(probedUrl, payTo)
+      : await probeForReverifyDetailed(probedUrl, {}, payTo);
     const { verdict, authClass } = probe;
-    if ('mismatch' in probe && probe.mismatch) {
+    if (pending && probe.mismatch) {
       logger.warn('x402.reverify.pending_gate_mismatch', {
         runId,
         target: targetLabel(target),
         mismatch: probe.mismatch,
       });
     }
-    const observedMismatch = 'observedMismatch' in probe ? probe.observedMismatch : undefined;
     const apply = await applyExternalReverify(
       target.id,
       probedUrl,
@@ -145,7 +147,7 @@ async function processTarget(
       checkedAt,
       runId,
       authClass,
-      matchedPayTo,
+      payTo,
     );
     const storageError = apply.applied
       ? apply.restoreBlocked === 'storage'
@@ -153,18 +155,17 @@ async function processTarget(
     if (apply.applied && apply.restoreBlocked === 'url_taken') {
       logger.warn('x402.reverify.url_taken', { runId, target: targetLabel(target) });
     }
-    if (observedMismatch) {
-      // CAS の後に出すのは、モデレーションの hidden が合わない 402 のまま実際に復帰したか (restored) を一緒に残すため
-      // (照合を強制する前に塞ぐ穴そのもの)。warn は「その時の 402 が掲載と合わなかった」記録で、CAS が結果を捨てた回
-      // (url_changed・duplicate 等) にも出る。host は observedMismatch がある = SSRF-safe fetch がこの URL を
-      // new URL で読めて 402 を受け取った回なので、ここで読み直しても throw しない。
-      logger.warn('x402.reverify.observe_gate_mismatch', {
+    if (!pending && probe.mismatch) {
+      // CAS の後に出すのは、この回に掲載がどうなったか (数えた・hidden になった・hidden のまま・捨てた) を一緒に残すため。
+      // host は mismatch がある = SSRF-safe fetch がこの URL を new URL で読めて 402 を受け取った回なので、ここで読み直しても
+      // throw しない。
+      logger.warn('x402.reverify.gate_mismatch', {
         runId,
         target: targetLabel(target),
         host: new URL(probedUrl).host,
-        mismatch: observedMismatch,
+        mismatch: probe.mismatch,
         visibility: read.resource.hidden === true ? 'hidden' : 'visible',
-        restored: apply.applied && apply.hiddenBefore && !apply.hiddenAfter,
+        ...gateMismatchOutcome(apply),
       });
     }
     return {
@@ -174,7 +175,6 @@ async function processTarget(
       apply,
       storageError,
       ...(storageError ? { storageDetail: apply.applied ? 'url claim unavailable' : apply.detail } : {}),
-      ...(observedMismatch !== undefined ? { observedMismatch } : {}),
     };
   }
 
@@ -228,8 +228,6 @@ function summarize(
     skippedDuplicate: 0,
     urlTaken: 0,
     directory,
-    observeChecked: 0,
-    observeMismatch: 0,
   };
   for (const outcome of outcomes) {
     if (!outcome.checked) {
@@ -239,10 +237,6 @@ function summarize(
       continue;
     }
     summary.checked += 1;
-    if (outcome.observedMismatch !== undefined) {
-      summary.observeChecked += 1;
-      if (outcome.observedMismatch !== null) summary.observeMismatch += 1;
-    }
     if (outcome.verdict === 'ok_402_openpay') summary.ok += 1;
     else if (outcome.verdict && isViolationVerdict(outcome.verdict)) {
       summary.violations += 1;

@@ -2,8 +2,9 @@
 // E-3: 最初の再検証を待つ新規掲載 (pendingFirstVerification) が公開に進むのは、402 が登録と同じ照合を通ったときだけ。
 // 本物の route・本物の probe の解釈・本物の照合・本物の Lua (CAS_EXTERNAL_REVERIFY / CAS_UPDATE) で確かめる。差し替える
 // のは KV の土台 (wasmoon のエミュレータ)・SSRF-safe fetch (402 を返す相手)・lock と cursor だけ。
-// あわせて、公開中・モデレーションの hidden (印なし) の掲載は同じ 402 で従来どおりの verdict になること (範囲の固定) と、
-// probe の間の payTo だけの編集で、照合した結果を捨てること (CAS の受取先の検査) を見る。
+// あわせて、probe の間の payTo だけの編集で、照合した結果を捨てること (CAS の受取先の検査) と、公開中・モデレーションの
+// hidden (印なし) の掲載は同じ 402 を確定違反に数えること (照合の強制・違反に数えないのは公開待ちだけ) を見る。強制の
+// 詳細 (閾値・復帰・#957 の「残る穴」) は tests/app/api/cron-reverify-enforce-gate-lua.test.ts。
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { closeRedisLuaEngine, createFakeRedisStore, runRedisLua, type FakeRedisStore } from '../../_helpers/redisLua';
 import type { ReverifyCursor } from '@/lib/x402/reverify';
@@ -241,33 +242,39 @@ describe('probe の間の payTo の編集 (CAS の受取先の検査)', () => {
   });
 });
 
-// 範囲の固定: 公開中の掲載・モデレーションの hidden (印なし) の verdict は変えない (照合しない・CAS も payTo を見ない)。
-describe('印のない掲載は従来どおり', () => {
-  it('公開中の掲載は、他人の受取先の 402 でも ok (カウンタが戻り、公開のまま・warn なし)', async () => {
-    seed({ hidden: false, verification: { failures: 2, lastCheckedAt: 'old', lastRunId: 'old', probedUrl: URL } });
+// 印のない掲載 (公開中・モデレーションの hidden) も照合する (2026-10-30 user 裁定 (b) の「強制」の段)。違反に数えないのは
+// 公開待ちだけ。CAS の受取先の検査も、印のない掲載に効く。
+describe('印のない掲載も照合する (確定違反に数える)', () => {
+  it('公開中の掲載は、他人の受取先の 402 を確定違反に数える (公開のまま 1 回目・公開待ちの warn は出さない)', async () => {
+    seed({ hidden: false, verification: { failures: 1, lastCheckedAt: 'old', lastRunId: 'old', probedUrl: URL } });
     holder.fetch = async () => gate402(OTHER);
-    expect(await runAt('2026-10-30T10:00:00.000Z')).toMatchObject({ checked: 1, ok: 1, violations: 0, transient: 0 });
-    expect(stored()).toMatchObject({ hidden: false, verification: { failures: 0, lastOkAt: '2026-10-30T10:00:00.000Z' } });
+    expect(await runAt('2026-10-30T10:00:00.000Z')).toMatchObject({ checked: 1, ok: 0, violations: 1, transient: 0 });
+    expect(stored()).toMatchObject({ hidden: false, verification: { failures: 2 } });
+    expect(stored().verification).not.toHaveProperty('lastOkAt');
     expect(await publicIds()).toEqual(['a']);
     expect(holder.warn).not.toHaveBeenCalledWith('x402.reverify.pending_gate_mismatch', expect.anything());
+    expect(holder.warn).toHaveBeenCalledWith('x402.reverify.gate_mismatch', expect.objectContaining({
+      target: 'external:a', mismatch: 'payTo', visibility: 'visible', outcome: 'counted', failures: 2,
+    }));
   });
 
-  it('公開中の掲載は、probe の間に payTo を PATCH しても結果を捨てない', async () => {
+  it('公開中の掲載も、probe の間に payTo を PATCH したら結果を捨てる (カウンタを戻さない)', async () => {
     seed({ hidden: false, verification: { failures: 2, lastCheckedAt: 'old', lastRunId: 'old', probedUrl: URL } });
     holder.fetch = async () => {
       await patch({ payTo: OTHER });
       return gate402(SELLER);
     };
     await runAt('2026-10-30T10:00:00.000Z');
-    expect(stored()).toMatchObject({ hidden: false, payTo: OTHER, verification: { failures: 0, lastRunId: '2026103010' } });
+    expect(stored()).toMatchObject({ hidden: false, payTo: OTHER, verification: { failures: 2, lastRunId: 'old' } });
   });
 
-  it('モデレーションの hidden (印なし) は、他人の受取先の 402 でも従来どおり ok で戻る', async () => {
+  it('モデレーションの hidden (印なし) は、他人の受取先の 402 では戻らない (確定違反に数え、hidden のまま)', async () => {
     seed({ hidden: true, verification: { failures: 3, lastCheckedAt: 'old', lastRunId: 'old', probedUrl: URL } });
     holder.fetch = async () => gate402(OTHER);
-    expect(await runAt('2026-10-30T10:00:00.000Z')).toMatchObject({ ok: 1, restored: 1 });
-    expect(stored()).toMatchObject({ hidden: false });
-    expect(await publicIds()).toEqual(['a']);
-    expect(ledgerKeys()).toEqual([]);
+    expect(await runAt('2026-10-30T10:00:00.000Z')).toMatchObject({ ok: 0, violations: 1, restored: 0 });
+    expect(stored()).toMatchObject({ hidden: true, verification: { failures: 4 } });
+    expect(await publicIds()).toEqual([]);
+    // 印のない hidden なので URL 台帳を立てる (従来の hidden と同じ)。
+    expect(ledgerKeys()).toHaveLength(1);
   });
 });
