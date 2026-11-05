@@ -3572,6 +3572,157 @@ describe('CheckoutForm — モバイル注文 / レジ システム利用料 (fl
 
 });
 
+// 第 9 回レビュー A-2: 受注 (/api/order/notify) は店の着金が 1 JPYC (ORDER_DUST_FLOOR_WEI) 未満の tx を 422 で断り、
+// 受注の一覧に残さない。受注を送る会計 (同一 origin の notify を持つモバイル注文) に限り、署名の前に支払いを止めて
+// 理由を出す。受注を送らない会計 (通常の /checkout・第三者の callback) は 0 < 受取 < 1 JPYC でも従来どおり払える。
+describe('CheckoutForm — 注文でお店に届く額が 1 JPYC 未満なら署名の前に止める (A-2)', () => {
+  const REASON = 'この注文はお店に届く額が 1 JPYC 未満のため、お支払いできません';
+  const RECOVER_FORWARDER: Address = '0x1111111111111111111111111111111111111111';
+  const ownNotify = () => `${window.location.origin}/api/order/notify?h=alice`;
+  // MobileOrderView が組む注文の会計と同じ形 (@handle・利用料の種類・受付番号・同一 origin の notify)。
+  const orderParams = (price: string, extra: Partial<CheckoutParams> = {}): CheckoutParams => ({
+    ...JPYC_PARAMS,
+    items: [{ name: 'あめ', qty: 1, price }],
+    storeHandle: 'alice',
+    feeKind: 'storefront',
+    orderId: 'ord-dust',
+    webhook: ownNotify(),
+    ...extra,
+  });
+  function setupJpyc(route: 'relay-recover' | 'relay-free' | 'standard') {
+    if (route !== 'standard') {
+      vi.mocked(resolveJpycGaslessProvider).mockReturnValue('eip3009-relay');
+      vi.mocked(jpycForwarderFor).mockReturnValue(route === 'relay-recover' ? RECOVER_FORWARDER : null);
+    }
+    setAccount({ connected: true, chainId: polygonAmoy.id });
+    setBalance(10_000n * 10n ** 18n);
+    setSmartAccount(false);
+  }
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it.each(['relay-recover', 'standard'] as const)(
+    '1 JPYC の商品 (利用料 ON・店負担 = お店に 0.99 JPYC) は払うボタンを止めて理由を出す (%s)',
+    async (route) => {
+      const user = userEvent.setup();
+      const fetchSpy = vi.fn().mockResolvedValue(Response.json({ ok: true }));
+      vi.stubGlobal('fetch', fetchSpy);
+      feeFlags.enableMobileOrderFee = true;
+      setupJpyc(route);
+      render(<CheckoutForm params={orderParams('1', route === 'standard' ? { mode: 'standard' } : {})} />);
+
+      expect(await screen.findByText(REASON)).toBeInTheDocument();
+      const button = screen.getByRole('button', { name: /1 JPYC を支払う/ });
+      expect(button).toBeDisabled();
+      await user.click(button);
+      // 署名にも、その前の注文の受付 (admission) にも進まない。
+      expect(relayMutate).not.toHaveBeenCalled();
+      expect(standardMutate).not.toHaveBeenCalled();
+      expect(fetchSpy.mock.calls.map(([url]) => String(url))).not.toContain('/api/order/admission');
+    },
+  );
+
+  it('recover の 2.5 JPYC の注文 (利用料 2 JPYC を引いてお店に 0.5 JPYC) は払うボタンを止めて理由を出す', async () => {
+    const user = userEvent.setup();
+    const fetchSpy = vi.fn().mockResolvedValue(Response.json({ ok: true }));
+    vi.stubGlobal('fetch', fetchSpy);
+    setupJpyc('relay-recover');
+    render(<CheckoutForm params={orderParams('2.5')} />);
+
+    expect(await screen.findByText(REASON)).toBeInTheDocument();
+    const button = screen.getByRole('button', { name: /2\.5 JPYC を支払う/ });
+    expect(button).toBeDisabled();
+    await user.click(button);
+    expect(relayMutate).not.toHaveBeenCalled();
+    expect(fetchSpy.mock.calls.map(([url]) => String(url))).not.toContain('/api/order/admission');
+  });
+
+  it.each([
+    { name: 'ガス無料の relay・利用料なし', route: 'relay-free' as const, fee: false, extra: {} },
+    { name: '事前注文・お客様が利用料を上乗せ', route: 'relay-recover' as const, fee: true, extra: { feeKind: 'preorder' as const, feePayer: 'customer' as const } },
+  ])('お店にちょうど 1 JPYC 届く注文は止めずに署名へ進む ($name)', async ({ route, fee, extra }) => {
+    const user = userEvent.setup();
+    const fetchSpy = vi.fn().mockResolvedValue(Response.json({ ok: true }));
+    vi.stubGlobal('fetch', fetchSpy);
+    feeFlags.enableMobileOrderFee = fee;
+    setupJpyc(route);
+    render(<CheckoutForm params={orderParams('1', extra)} />);
+
+    const button = await screen.findByRole('button', { name: /JPYC を支払う/ });
+    await waitFor(() => expect(button).toBeEnabled());
+    expect(screen.queryByText(REASON)).toBeNull();
+    await user.click(button);
+    // 注文の受付 (admission) を通ってから、注文を束ねて署名へ進む (束縛の chunk を非同期で読むので待つ)。
+    await waitFor(() => expect(relayMutate).toHaveBeenCalledOnce());
+    expect(fetchSpy.mock.calls.map(([url]) => String(url))).toContain('/api/order/admission');
+    expect(relayMutate.mock.calls[0][0]).toMatchObject({ merchant: MERCHANT, value: 10n ** 18n });
+    expect(relayMutate.mock.calls[0][0].order).toMatchObject({ handle: 'alice', orderId: 'ord-dust' });
+  });
+
+  it.each([
+    { name: '注文でない通常の /checkout', webhook: undefined },
+    { name: '第三者の callback (受注を送らない)', webhook: 'https://shop.example.com/api/order/notify?h=alice' },
+  ])('$name は 0 < 受取 < 1 JPYC (recover の 2.5 JPYC) でも従来どおり止めない', async ({ webhook }) => {
+    const user = userEvent.setup();
+    setupJpyc('relay-recover');
+    render(
+      <CheckoutForm
+        params={{
+          ...JPYC_PARAMS,
+          items: [{ name: 'あめ', qty: 1, price: '2.5' }],
+          ...(webhook ? { webhook } : {}),
+        }}
+      />,
+    );
+
+    const button = screen.getByRole('button', { name: /2\.5 JPYC を支払う/ });
+    expect(button).toBeEnabled();
+    expect(screen.queryByText(REASON)).toBeNull();
+    await user.click(button);
+    expect(relayMutate).toHaveBeenCalledOnce();
+    expect(relayMutate.mock.calls[0][0]).toMatchObject({ merchant: MERCHANT, value: 25n * 10n ** 17n, gasMode: 'merchant' });
+  });
+
+  // 対象を決めるのは同一 origin の notify の有無で、@handle (storeHandle) の有無ではない (Codex SHOULD)。
+  // 上の注文はどれも storeHandle と notify を両方持つので、この 2 本で片方ずつにした会計を直接確かめる。
+  it('同一 origin の notify があれば storeHandle が無くても 0 < 受取 < 1 JPYC (recover の 2.5 JPYC) は止める', async () => {
+    const user = userEvent.setup();
+    const fetchSpy = vi.fn().mockResolvedValue(Response.json({ ok: true }));
+    vi.stubGlobal('fetch', fetchSpy);
+    setupJpyc('relay-recover');
+    render(
+      <CheckoutForm
+        params={{ ...JPYC_PARAMS, items: [{ name: 'あめ', qty: 1, price: '2.5' }], orderId: 'ord-dust', webhook: ownNotify() }}
+      />,
+    );
+
+    expect(await screen.findByText(REASON)).toBeInTheDocument();
+    const button = screen.getByRole('button', { name: /2\.5 JPYC を支払う/ });
+    expect(button).toBeDisabled();
+    await user.click(button);
+    expect(relayMutate).not.toHaveBeenCalled();
+  });
+
+  it('storeHandle だけで同一 origin の notify が無い会計 (受注を送らない) は 0 < 受取 < 1 JPYC でも払える', async () => {
+    const user = userEvent.setup();
+    const fetchSpy = vi.fn().mockResolvedValue(Response.json({ ok: true }));
+    vi.stubGlobal('fetch', fetchSpy);
+    setupJpyc('relay-recover');
+    render(<CheckoutForm params={orderParams('2.5', { webhook: undefined })} />);
+
+    const button = screen.getByRole('button', { name: /2\.5 JPYC を支払う/ });
+    expect(button).toBeEnabled();
+    expect(screen.queryByText(REASON)).toBeNull();
+    await user.click(button);
+    // @handle の会計なので注文の受付 (admission) を通ってから署名へ進む。
+    await waitFor(() => expect(relayMutate).toHaveBeenCalledOnce());
+    expect(fetchSpy.mock.calls.map(([url]) => String(url))).toContain('/api/order/admission');
+    expect(relayMutate.mock.calls[0][0]).toMatchObject({ merchant: MERCHANT, value: 25n * 10n ** 17n, gasMode: 'merchant' });
+    expect(relayMutate.mock.calls[0][0].order).toBeUndefined();
+  });
+});
+
 describe('CheckoutForm — F7 off-origin callback 開示', () => {
   it('第三者 host の success_url → 開示ノートに host を表示 (退役した webhook の host は出さない)', () => {
     setAccount({ connected: true, chainId: baseSepolia.id });

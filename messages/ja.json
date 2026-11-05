@@ -1595,6 +1595,7 @@
     "errorGasCongested": "ネットワークが混雑しています。ガス代が高騰しているため、しばらく経ってから再度お試しください。",
     "errorGasQuote": "ガス代見積の取得に失敗しました。ネットワーク接続を確認してから再度お試しください。",
     "errorMerchantUnderflow": "この金額では gas を引くと店主受取が 0 になります。最低 {min} 必要です。",
+    "errorOrderMerchantBelowFloor": "この注文はお店に届く額が 1 JPYC 未満のため、お支払いできません",
     "errorIncompatibleSmartAccount": "お使いのウォレットは OpenPay 未対応の Smart Account 実装に委任されています (delegate: {address})。MetaMask の場合は「アカウント詳細 → Smart account」をオフにすると元の EOA に戻せます。または別のウォレット (Rabby / Frame 等) でお試しください。",
     "errorMav2Disabled": "現在 HashPort 等の一部ウォレット (Alchemy Modular Account v2) での決済は段階公開中です。少々お待ちください。",
     "errorMav2KaiaPolygon": "Kaia チェーン上では Alchemy Modular Account v2 に委任されたウォレットでチェックアウトできません。お手数ですが Polygon / Base / Arbitrum / Optimism 等の他チェーン版のチェックアウト URL をご利用いただくか、別のウォレットでお試しください。",
