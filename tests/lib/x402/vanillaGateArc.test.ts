@@ -253,6 +253,83 @@ describe('vanillaGate Arc rail: 同じ署名の再送で content を動かさな
     expect(content).toHaveBeenCalledTimes(2);
   });
 
+  // 第 9 回レビュー B-01: Gateway の verify は使用済み nonce を落とさないので、Gateway へ直接 settle して 1 回だけ払った
+  // 署名を商品 API へ何度も送ると、nonce_already_used で claim が戻るたびに content (RPC 読み・attestation 署名) が
+  // 署名の期限まで動いていた。nonce_already_used は使用済みの明言なので claim を残し、再送は content の前で止める。
+  function settleNonceAlreadyUsed(settleStatus: number): void {
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url.endsWith('/verify')) return { ok: true, status: 200, json: async () => ({ isValid: true, payer: PAYER }) };
+      return {
+        ok: settleStatus < 400,
+        status: settleStatus,
+        json: async () => ({ success: false, errorReason: 'nonce_already_used', transaction: '' }),
+      };
+    });
+  }
+  const settleCalls = (): number => fetchMock.mock.calls.filter((c) => String(c[0]).endsWith('/settle')).length;
+
+  it.each([
+    ['200 の判定', 200],
+    ['4xx の素直な否定判定', 400],
+  ])('Gateway の settle が nonce_already_used (%s) → claim を残す → 同じ署名の再送は content も settle も呼ばずに 402', async (_label, settleStatus) => {
+    settleNonceAlreadyUsed(settleStatus);
+    const content = vi.fn<Content>(() => NextResponse.json({ ok: true }));
+    const first = await payWith(ARC_ACCEPT, '0x3b', content);
+    // この request への応答は従来どおり 402 (reason も Gateway の nonce_already_used のまま)。
+    expect(first.status).toBe(402);
+    expect((await first.json()).error).toBe('nonce_already_used');
+    const replays: Response[] = [];
+    for (let i = 0; i < 3; i += 1) replays.push(await payWith(ARC_ACCEPT, '0x3b', content));
+    // content も settle も 1 回目の 1 回だけ (再送は verify の後の 'match' で止まる)。
+    expect(content).toHaveBeenCalledTimes(1);
+    expect(settleCalls()).toBe(1);
+    for (const res of replays) {
+      expect(res.status).toBe(402);
+      expect((await res.json()).error).toBe('authorization_already_submitted');
+    }
+    // 束縛は戻されず、settle の直前に延ばした署名の有効期間の期限で残る。
+    expect(kvHold.store.size).toBe(1);
+    const key = [...kvHold.store.keys()][0];
+    expect(kvHold.expires).toEqual([{ key, ttlSec: 604_900 }]);
+    expect(ledger.record).not.toHaveBeenCalled();
+    expect(funnel.record.mock.calls.map((c) => c[0])).toEqual(Array(4).fill('settle_failed'));
+  });
+
+  it('nonce_already_used の署名を別 resource へ回しても 409 で止まり content は動かない', async () => {
+    settleNonceAlreadyUsed(200);
+    const content = vi.fn<Content>(() => NextResponse.json({ ok: true }));
+    expect((await payWith(ARC_ACCEPT, '0x3c', content)).status).toBe(402);
+    const other = { ...RESOURCE, resourceUrl: 'https://open-pay.jp/api/paid/usdc/stores' };
+    const res = await handleVanillaPaidGet(
+      new Request(other.resourceUrl, { headers: { 'PAYMENT-SIGNATURE': v2Header(ARC_ACCEPT, '0x3c') } }),
+      other,
+      content,
+    );
+    expect(content).toHaveBeenCalledTimes(1);
+    expect(settleCalls()).toBe(1);
+    expect(res.status).toBe(409);
+  });
+
+  // characterization: nonce_already_used 以外の Arc の settle 失敗は、reason を問わず従来どおり claim を戻す。
+  it.each([
+    ['insufficient_balance', { errorReason: 'insufficient_balance' }],
+    ['未知の reason', { errorReason: 'some_future_reason' }],
+    ['reason なし', {}],
+  ])('Gateway の settle success:false (%s) は従来どおり claim を戻す → 同じ署名の再挑戦は content が動く', async (_label, extra) => {
+    fetchMock.mockImplementation(async (url: string) => ({
+      ok: true,
+      status: 200,
+      json: async () => (url.endsWith('/verify') ? { isValid: true, payer: PAYER } : { success: false, transaction: '', ...extra }),
+    }));
+    const content = vi.fn<Content>(() => NextResponse.json({ ok: true }));
+    expect((await payWith(ARC_ACCEPT, '0x3d', content)).status).toBe(402);
+    expect(kvHold.claimed).toBe(1);
+    expect(kvHold.store.size).toBe(0);
+    expect((await payWith(ARC_ACCEPT, '0x3d', content)).status).toBe(402);
+    expect(content).toHaveBeenCalledTimes(2);
+    expect(settleCalls()).toBe(2);
+  });
+
   it('content が例外を投げたら束縛を戻す → 同じ署名の再挑戦は content が動く (支払いは起きていない)', async () => {
     let calls = 0;
     const content = vi.fn<Content>(() => {

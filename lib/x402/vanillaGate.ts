@@ -695,7 +695,8 @@ async function handleVanillaPaidGetInner(
     // ('match') を content へ進めると、使用済みの署名で 7 日のあいだ毎回 content (RPC 読み・attestation 署名) が動く。
     // Arc では束縛を張った request (claimed) だけが content と settle に進み、再送は content を呼ばずに 402 にする。
     // 勝者は SET NX の 1 回で決まるので、同時の再送も content に入れない。Gateway の success:false (broadcast 前) と
-    // content の 4xx は従来どおり claim を戻すので、同じ署名の正直な再挑戦は通る。settle が成功した Arc の署名の
+    // content の 4xx は従来どおり claim を戻すので、同じ署名の正直な再挑戦は通る (使用済みを明言する
+    // nonce_already_used だけは claim を残す・第 9 回レビュー B-01・下の settle 失敗の分岐)。settle が成功した Arc の署名の
     // 'match' は、これまでも settle で落ちて 402 だった (再配信は成り立っていなかった)。Base は従来どおり。
     if (claim.kind === 'match' && rail === 'arc-gateway') {
       recordFunnelAfterResponse('settle_failed', rail, url);
@@ -774,12 +775,25 @@ async function handleVanillaPaidGetInner(
       typeof settle.body.errorReason === 'string'
         ? settle.body.errorReason
         : 'settlement_failed';
+    // 第 9 回レビュー B-01: Arc の nonce_already_used は Gateway が「この authorization は使用済み」と明言した確定
+    // シグナル。Gateway の verify は使用済み nonce を落とさない (2026-09-17 実測) ので、ここで claim を戻すと、
+    // 買い手が Gateway へ直接 settle して 1 回だけ払った署名を何度でも送り、verify 通過 → content (RPC 読み・
+    // attestation 署名) → nonce_already_used → claim 解放… を署名の期限まで回せる (中身は 402 で漏れないが上流が
+    // 毎回動く)。claim は戻さずに残し、以後の同じ束縛の再送は上の 'match' → 402、別 resource は 'conflict' → 409 で
+    // content の前に止める (dual-rail relay の markArcSettled と同じ扱い・lib/x402/dualRailRelay.ts)。
+    // この request への応答は分岐が無いときと同じ 402 (reason も同じ)。延ばせなかった束縛 (上の kvExpire 失敗) は
+    // 15 分で切れ、その後の再送は 15 分に 1 回まで content が動きうる (受容)。
+    if (rail === 'arc-gateway' && settle.body.errorReason === 'nonce_already_used') {
+      recordFunnelAfterResponse('settle_failed', rail, url);
+      return paymentChallenge(resource, accepts, reason);
+    }
     // 「broadcast 前の拒否と契約上保証される」reason (insufficient_balance 等) のときだけ
     // claim を戻す。pending/reverted/未知 reason は broadcast 済みかもしれないので保持し、
     // 使用済みかもしれない authorization が別 resource へ回るのを防ぐ。判定式は
     // first-party 経路と同一 (lib/x402/paymentRedelivery.ts)。
     // Arc (Gateway) の settle は「検証・残高ロック・バッチ待ち行列」で broadcast を伴わないため、
-    // success:false は常に broadcast 前 = claim を戻してよい (使用済み nonce は次の verify が落とす)。
+    // success:false は broadcast 前 = claim を戻してよい。ただし Gateway の verify は使用済み nonce を落とさない
+    // (2026-09-17 実測) ので、使用済みを明言する nonce_already_used だけは上の分岐で claim を残す。
     if (rail === 'arc-gateway' || isFacilitatorPreBroadcastRejection(settle.status, settle.body)) {
       await releaseClaim();
     }
