@@ -29,8 +29,9 @@ export async function GET(req: Request): Promise<NextResponse> {
 
   if (denied) return errorRedirect(req, 'denied');
   if (!code || !state) return errorRedirect(req, 'missing_params');
-  // authorize uses newSessionToken for state. Reject junk before GETDEL so
-  // anonymous callbacks cannot drain the KV budget shared with payments.
+  // authorize は state を newSessionToken (小文字 64 hex) で作るので、それ以外の形の state は GETDEL の前に断る
+  // (発行し得ない値で KV を使わない)。形の合うランダムな値は 1 回ずつ GETDEL するので、匿名の連打が決済と共有の
+  // KV の予算を使うこと自体はここでは止めない。
   if (!isSessionToken(state)) return errorRedirect(req, 'invalid_state');
 
   const stateValue = await consumeState(state);
