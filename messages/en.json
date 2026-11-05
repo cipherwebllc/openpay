@@ -3710,6 +3710,7 @@
     "verifyConfirmationUnchecked": "Could not check the confirmation signature. Please try again.",
     "verifyCheckedLocal": "Reuse of the same Tx Hash is checked only against checks made on this device.",
     "verifyCheckedUnavailable": "This device’s records cannot tell whether this payment was checked before. Make sure you are not shipping two orders for the same payment.",
-    "verifyFoundChain": "Found on {chain}"
+    "verifyFoundChain": "Found on {chain}",
+    "verifyPaidBlock": "Block #{block}"
   }
 }

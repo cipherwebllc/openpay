@@ -101,7 +101,11 @@ function authorizationUsed(token: Address, authorizer: Address): Log {
 const RECEIPT_BLOCK = `0x${'a1'.repeat(32)}` as Hex;
 function client(
   receipt: { status: 'success' | 'reverted'; logs: Log[] } | Error,
-  { finalized = 200n, canonicalHash = RECEIPT_BLOCK }: { finalized?: bigint | Error; canonicalHash?: Hex | null } = {},
+  {
+    finalized = 200n,
+    canonicalHash = RECEIPT_BLOCK,
+    blockError,
+  }: { finalized?: bigint | Error; canonicalHash?: Hex | null; blockError?: Error } = {},
 ) {
   return {
     getTransactionReceipt: vi.fn(async () => {
@@ -113,6 +117,7 @@ function client(
         if (finalized instanceof Error) throw finalized;
         return { number: finalized } as never;
       }
+      if (blockError) throw blockError;
       return { timestamp: 1_762_000_000n, hash: canonicalHash } as never;
     }),
     verifyMessage: vi.fn(async () => false),
@@ -434,6 +439,37 @@ describe('checkOrderLinkPayment: 確定', () => {
     await expect(checkOrderLinkPayment({ ...base, client: c })).resolves.toEqual({ status: 'finalityUnchecked', ...facts });
   });
 
+  // Codex SHOULD: ブロックを読めない (ノードの追従の遅れ等) ときも、見つかった支払いの情報は捨てない。
+  it('同じ高さのブロックを読めなければ (getBlock が throw)、支払いの情報は保って finalityUnchecked (時刻は null)', async () => {
+    const c = client({ status: 'success', logs }, { finalized: 200n, blockError: new Error('block not found') });
+    await expect(checkOrderLinkPayment({ ...base, client: c })).resolves.toEqual({
+      status: 'finalityUnchecked',
+      ...facts,
+      timestamp: null,
+    });
+  });
+
+  // Codex SHOULD: 確定の高さを読み終える前に、同じ高さのブロックを取りに行かない (読む順番を呼び出しの順でなく完了で固定)。
+  it('確定の高さを読み終えるまで、同じ高さのブロックを取りに行かない', async () => {
+    let releaseFinalized!: (block: { number: bigint }) => void;
+    const finalizedRead = new Promise<{ number: bigint }>((done) => {
+      releaseFinalized = done;
+    });
+    const byNumber = vi.fn(async () => ({ timestamp: 1_762_000_000n, hash: RECEIPT_BLOCK }));
+    const c = {
+      getTransactionReceipt: vi.fn(async () => ({ status: 'success', logs, blockNumber: 123n, blockHash: RECEIPT_BLOCK }) as never),
+      getBlock: vi.fn((args?: { blockTag?: string }) => (args?.blockTag === 'finalized' ? finalizedRead : byNumber()) as never),
+      verifyMessage: vi.fn(async () => false),
+    };
+    const checking = checkOrderLinkPayment({ ...base, client: c });
+    await new Promise((done) => setTimeout(done, 20));
+    expect(c.getBlock).toHaveBeenCalledWith({ blockTag: 'finalized' });
+    expect(byNumber).not.toHaveBeenCalled();
+    releaseFinalized({ number: 200n });
+    await expect(checking).resolves.toEqual({ status: 'paid', ...facts });
+    expect(byNumber).toHaveBeenCalledTimes(1);
+  });
+
   it('全部のチェーンを探したときも、確定していない取引は見つかったチェーンの pending にする', async () => {
     const notFound = client(new TransactionReceiptNotFoundError({ hash: HASH }));
     const onPolygon = client({ status: 'success', logs }, { finalized: 100n });
@@ -492,16 +528,115 @@ describe('checkOrderLinkPaymentOnChains', () => {
   const within = <T,>(promise: Promise<T>, ms: number) =>
     Promise.race([promise, new Promise<'still waiting'>((done) => setTimeout(() => done('still waiting'), ms))]);
 
-  it('見つかったら、止まっているチェーンの答えを待たずに出す', async () => {
+  it('確定した支払いが見つかったら、設定の順で後ろの止まっているチェーンの答えを待たずに出す', async () => {
     const onPolygon = client({ status: 'success', logs: paidLogs });
     const search = checkOrderLinkPaymentOnChains({
-      chains: ['kaia', 'polygon'],
+      chains: ['polygon', 'kaia'],
       receiver: RECEIVER,
       text,
       clientFor: (chain) => (chain === 'polygon' ? onPolygon : hanging()),
       budgetMs: 60_000,
     });
     await expect(within(search, 500)).resolves.toMatchObject({ chain: 'polygon', result: { status: 'paid' }, unreachable: [] });
+  });
+
+  // Codex SHOULD: 採る結果は応答の速さで決めない。優先順 (paid > pending・finalityUnchecked > failed・notToReceiver
+  // > notFound > error)、同じ順位なら設定の順 (chains の順) で前のチェーン。
+  const later = <C extends ReturnType<typeof client>>(c: C, ms: number): C => ({
+    ...c,
+    getTransactionReceipt: vi.fn(async (args: { hash: Hex }) => {
+      await new Promise((done) => setTimeout(done, ms));
+      return (c.getTransactionReceipt as (a: { hash: Hex }) => Promise<never>)(args);
+    }),
+  });
+  const kaiaLogs = () => [transfer(kaiaJpyc, FORWARDER, RECEIVER, '3465')];
+  const forkedOnKaia = () => client({ status: 'success', logs: kaiaLogs() }, { canonicalHash: `0x${'b2'.repeat(32)}` as Hex });
+
+  it('先に答えたチェーンの pending (別フォーク) が、後から答えたチェーンの paid を隠さない', async () => {
+    const paidOnPolygon = later(client({ status: 'success', logs: paidLogs }), 40);
+    await expect(
+      checkOrderLinkPaymentOnChains({
+        chains: ['kaia', 'polygon'],
+        receiver: RECEIVER,
+        text,
+        clientFor: (chain) => (chain === 'polygon' ? paidOnPolygon : forkedOnKaia()),
+      }),
+    ).resolves.toMatchObject({ chain: 'polygon', result: { status: 'paid' }, unreachable: [] });
+  });
+
+  it('先に答えた「届いていない」(notToReceiver・failed) より、後から答えた pending を採る', async () => {
+    const notToReceiver = client({ status: 'success', logs: [transfer(JPYC, FORWARDER, OTHER, '3465')] });
+    const pendingOnKaia = later(forkedOnKaia(), 40);
+    await expect(
+      checkOrderLinkPaymentOnChains({
+        chains: ['polygon', 'kaia'],
+        receiver: RECEIVER,
+        text,
+        clientFor: (chain) => (chain === 'kaia' ? pendingOnKaia : notToReceiver),
+      }),
+    ).resolves.toMatchObject({ chain: 'kaia', result: { status: 'pending' } });
+    const failed = client({ status: 'reverted', logs: [] });
+    await expect(
+      checkOrderLinkPaymentOnChains({
+        chains: ['polygon', 'kaia'],
+        receiver: RECEIVER,
+        text,
+        clientFor: (chain) => (chain === 'kaia' ? later(forkedOnKaia(), 40) : failed),
+      }),
+    ).resolves.toMatchObject({ chain: 'kaia', result: { status: 'pending' } });
+  });
+
+  it('同じ順位の結果が 2 つのチェーンにあれば、速く答えたほうでなく設定の順で前のチェーンを採る', async () => {
+    // pending どうし: kaia が先に答えても、設定の順で前の polygon
+    const pendingOnPolygon = later(client({ status: 'success', logs: paidLogs }, { finalized: 100n }), 40);
+    await expect(
+      checkOrderLinkPaymentOnChains({
+        chains: ['polygon', 'kaia'],
+        receiver: RECEIVER,
+        text,
+        clientFor: (chain) => (chain === 'polygon' ? pendingOnPolygon : forkedOnKaia()),
+      }),
+    ).resolves.toMatchObject({ chain: 'polygon', result: { status: 'pending' } });
+    // paid どうし: kaia の paid が先に答えても、前の polygon が答えるまで待って polygon
+    const paidOnPolygon = later(client({ status: 'success', logs: paidLogs }), 40);
+    const paidOnKaia = client({ status: 'success', logs: kaiaLogs() });
+    await expect(
+      checkOrderLinkPaymentOnChains({
+        chains: ['polygon', 'kaia'],
+        receiver: RECEIVER,
+        text,
+        clientFor: (chain) => (chain === 'polygon' ? paidOnPolygon : paidOnKaia),
+      }),
+    ).resolves.toMatchObject({ chain: 'polygon', result: { status: 'paid' } });
+  });
+
+  it('予算が尽きたら、それまでに見つかった結果を採る (前のチェーンが止まっていても paid・ほかが止まっていても pending)', async () => {
+    const paidOnPolygon = client({ status: 'success', logs: paidLogs });
+    await expect(
+      within(
+        checkOrderLinkPaymentOnChains({
+          chains: ['kaia', 'polygon'],
+          receiver: RECEIVER,
+          text,
+          clientFor: (chain) => (chain === 'polygon' ? paidOnPolygon : hanging()),
+          budgetMs: 50,
+        }),
+        1_000,
+      ),
+    ).resolves.toMatchObject({ chain: 'polygon', result: { status: 'paid' }, unreachable: [] });
+    const pendingOnPolygon = client({ status: 'success', logs: paidLogs }, { finalized: 100n });
+    await expect(
+      within(
+        checkOrderLinkPaymentOnChains({
+          chains: ['polygon', 'kaia'],
+          receiver: RECEIVER,
+          text,
+          clientFor: (chain) => (chain === 'polygon' ? pendingOnPolygon : hanging()),
+          budgetMs: 50,
+        }),
+        1_000,
+      ),
+    ).resolves.toMatchObject({ chain: 'polygon', result: { status: 'pending' }, unreachable: [] });
   });
 
   it('時間の予算の間に答えないチェーンは「問い合わせできなかった」(unreachable) にして、待ち続けない', async () => {
@@ -593,6 +728,22 @@ describe('rememberCheckedPayment', () => {
     const empty = memoryStorage({ 'openpay:order-link-checked:v1': '' });
     expect(rememberCheckedPayment(input, empty)).toBe('unavailable');
     expect(rememberCheckedPayment({ ...input, now: 2_000 }, empty)).toBe(1_000);
+  });
+
+  it('負の数だけの記録・この支払いの時刻が負の数なら壊れた記録 (負の時刻を「前に確かめた」にしない)', () => {
+    const key = `polygon:${RECEIVER.toLowerCase()}:${HASH}`;
+    const negativeOnly = memoryStorage({ 'openpay:order-link-checked:v1': JSON.stringify({ 'polygon:x:y': -1 }) });
+    expect(rememberCheckedPayment(input, negativeOnly)).toBe('unavailable');
+    const negativeOwn = memoryStorage({ 'openpay:order-link-checked:v1': JSON.stringify({ [key]: -5 }) });
+    expect(rememberCheckedPayment(input, negativeOwn)).toBe('unavailable');
+    expect(rememberCheckedPayment({ ...input, now: 2_000 }, negativeOwn)).toBe(1_000);
+  });
+
+  it('JSON の 1e309 (Infinity に読める) も壊れた記録 (Infinity を「前に確かめた」にしない)', () => {
+    const key = `polygon:${RECEIVER.toLowerCase()}:${HASH}`;
+    const infinite = memoryStorage({ 'openpay:order-link-checked:v1': `{"${key}":1e309}` });
+    expect(rememberCheckedPayment(input, infinite)).toBe('unavailable');
+    expect(rememberCheckedPayment({ ...input, now: 2_000 }, infinite)).toBe(1_000);
   });
 
   it('ほかの記録が壊れていても、この支払いの記録が読めれば前に確かめた時刻を返す (使い回しの注意を消さない)', () => {

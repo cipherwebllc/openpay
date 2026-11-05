@@ -53,11 +53,14 @@ import { deploymentForSlug } from './tokens';
  */
 export type OrderConfirmationCheck = 'verified' | 'unsigned' | 'mismatch' | 'unverifiable' | 'unchecked';
 
-/** 受取ウォレットに届いた支払い (received は表示用の 10 進)。payer は払ったウォレット (分からなければ null)。 */
+/**
+ * 受取ウォレットに届いた支払い (received は表示用の 10 進)。payer は払ったウォレット (分からなければ null)。
+ * timestamp はブロックの時刻 (秒)。ブロックを読めなかったときは null。
+ */
 export type ReceivedPayment = {
   received: string;
   blockNumber: bigint;
-  timestamp: number;
+  timestamp: number | null;
   payer: Address | null;
   confirmation: OrderConfirmationCheck;
 };
@@ -361,7 +364,9 @@ export async function checkOrderLinkPayment(input: {
       blockNumber: receipt.blockNumber,
       readFinalizedBlock: () => client.getBlock({ blockTag: 'finalized' }),
     });
-    const block = await client.getBlock({ blockNumber: receipt.blockNumber });
+    // ノードの追従の遅れ等で同じ高さのブロックを読めなくても、見つかった支払い (額・払った人・署名) は隠さない。
+    // そのときは正規のブロックか確かめられないので確定とも言わない (finalityUnchecked・Codex SHOULD)。
+    const block = await client.getBlock({ blockNumber: receipt.blockNumber }).catch(() => null);
     const payer = paymentPayer(receipt.logs, token, input.receiver, jpycForwarderFor(chainForSlug(input.chain).id));
     const signature = extractConfirmationSignature(input.text);
     const confirmation: OrderConfirmationCheck = !signature
@@ -377,11 +382,11 @@ export async function checkOrderLinkPayment(input: {
     const payment: ReceivedPayment = {
       received: formatUnits(received, decimals),
       blockNumber: receipt.blockNumber,
-      timestamp: Number(block.timestamp),
+      timestamp: block ? Number(block.timestamp) : null,
       payer,
       confirmation,
     };
-    return { status: receivedStatus(finality.finalized, sameBlockHash(block.hash, receipt.blockHash)), ...payment };
+    return { status: receivedStatus(finality.finalized, sameBlockHash(block?.hash, receipt.blockHash)), ...payment };
   } catch (error) {
     // まだ確定していない・別のチェーンの取引は「見つからない」と伝える (届いたとは言わない)。
     if (error instanceof TransactionReceiptNotFoundError) return { status: 'notFound' };
@@ -404,10 +409,39 @@ export type OrderLinkMultiChainCheck = {
 export const ORDER_LINK_SEARCH_BUDGET_MS = 8_000;
 
 /**
+ * 見つかった結果の優先順 (小さいほど優先): 確定した支払い > 確定していない・確定を確かめられない支払い > 届いていない
+ * (失敗・別の宛先)。notFound と error は見つかった結果ではない。
+ */
+const FOUND_RANK: Partial<Record<OrderLinkPaymentCheck['status'], number>> = {
+  paid: 0,
+  pending: 1,
+  finalityUnchecked: 1,
+  failed: 2,
+  notToReceiver: 2,
+};
+
+/**
+ * 答えたチェーンの中で採る結果の位置 (無ければ -1)。優先順が上の結果、同じなら chains の順 (設定の順) で前のチェーン。
+ * 応答の速さでは決めない (先に答えた別フォークの pending が、後から答えた paid を隠さないように・Codex SHOULD)。
+ */
+function bestFoundIndex(results: ReadonlyArray<OrderLinkPaymentCheck | undefined>): number {
+  let best = -1;
+  results.forEach((result, index) => {
+    const rank = result ? FOUND_RANK[result.status] : undefined;
+    if (rank === undefined) return;
+    const bestRank = best === -1 ? undefined : FOUND_RANK[results[best]?.status ?? 'error'];
+    if (bestRank === undefined || rank < bestRank) best = index;
+  });
+  return best;
+}
+
+/**
  * 受け付けるチェーンを並べて読み、取引が見つかったチェーンで判定する (plans/order-link-multichain.md)。
- * 見つかったら、ほかのチェーンの答えを待たずにその結果を出す。どこでも見つからず、読めなかったチェーン・予算の間に
- * 答えなかったチェーンがあれば「見つからない」ではなく「確かめられない」にし、そのチェーンを unreachable で伝える
- * (払われていないように見せない)。確認の署名の文は、見つかったチェーンで組み立てる。
+ * 採る結果は bestFoundIndex の決まった規則で選ぶ (同じ Tx Hash が 2 つのチェーンで見つかっても、応答の速さでは
+ * 決めない)。確定した支払い (paid) は一番上なので、設定の順でそれより前のチェーンが答え終われば残りを待たずに出す。
+ * それ以外は全部のチェーンが答えるか、時間の予算が尽きるまで待って選ぶ。どこでも見つからず、読めなかったチェーン・
+ * 予算の間に答えなかったチェーンがあれば「見つからない」ではなく「確かめられない」にし、そのチェーンを unreachable で
+ * 伝える (払われていないように見せない)。確認の署名の文は、見つかったチェーンで組み立てる。
  */
 export function checkOrderLinkPaymentOnChains(input: {
   chains: readonly ChainSlug[];
@@ -422,12 +456,20 @@ export function checkOrderLinkPaymentOnChains(input: {
   const { chains } = input;
   // 答えたチェーンの結果 (まだ答えていなければ undefined)。
   const results: Array<OrderLinkPaymentCheck | undefined> = chains.map(() => undefined);
-  const notFound = (): OrderLinkMultiChainCheck => {
+  const decide = (): OrderLinkMultiChainCheck => {
+    const best = bestFoundIndex(results);
+    const found = best === -1 ? undefined : results[best];
+    if (found) return { chain: chains[best], result: found, unreachable: [] };
     const unreachable = chains.filter((_, index) => results[index] === undefined || results[index].status === 'error');
     return { chain: null, result: { status: unreachable.length > 0 ? 'error' : 'notFound' }, unreachable };
   };
+  // もう答えが変わらないか: 全部のチェーンが答えた・または paid があり、設定の順でそれより前のチェーンが答え終えた。
+  const decided = () => {
+    if (results.every((result) => result !== undefined)) return true;
+    const best = bestFoundIndex(results);
+    return best !== -1 && results[best]?.status === 'paid' && results.slice(0, best).every((result) => result !== undefined);
+  };
   return new Promise((resolve) => {
-    let open = chains.length;
     let settled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const finish = (value: OrderLinkMultiChainCheck) => {
@@ -436,20 +478,15 @@ export function checkOrderLinkPaymentOnChains(input: {
       clearTimeout(timer);
       resolve(value);
     };
-    timer = setTimeout(() => finish(notFound()), input.budgetMs ?? ORDER_LINK_SEARCH_BUDGET_MS);
-    if (open === 0) finish(notFound());
+    timer = setTimeout(() => finish(decide()), input.budgetMs ?? ORDER_LINK_SEARCH_BUDGET_MS);
+    if (decided()) finish(decide());
     chains.forEach((chain, index) => {
       checkOrderLinkPayment({ chain, receiver: input.receiver, text: input.text, client: input.clientFor?.(chain) })
         // 1 つのチェーンの思わぬ例外で、ほかのチェーンの答えを止めない (そのチェーンは「問い合わせできなかった」)。
         .catch((): OrderLinkPaymentCheck => ({ status: 'error' }))
         .then((result) => {
           results[index] = result;
-          if (result.status !== 'notFound' && result.status !== 'error') {
-            finish({ chain, result, unreachable: [] });
-            return;
-          }
-          open -= 1;
-          if (open === 0) finish(notFound());
+          if (decided()) finish(decide());
         });
     });
   });

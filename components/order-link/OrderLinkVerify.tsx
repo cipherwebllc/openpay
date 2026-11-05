@@ -215,7 +215,8 @@ function VerifyResult({ done, locale }: { done: Done; locale: string }) {
         hour: '2-digit',
         minute: '2-digit',
       });
-    const time = format(result.timestamp * 1000);
+    // ブロックを読めなかったときは時刻が無い (ブロックの番号だけを出す)。
+    const time = result.timestamp === null ? null : format(result.timestamp * 1000);
     const amount = groupAmountDigits(result.received);
     const tone = receivedTone(result);
     return (
@@ -235,7 +236,11 @@ function VerifyResult({ done, locale }: { done: Done; locale: string }) {
               {t(result.status === 'paid' ? 'verifyPaidChain' : 'verifyFoundChain', { chain: chainForSlug(done.chain).name })}
             </p>
           )}
-          <p className="mt-0.5 text-xs">{t('verifyPaidMeta', { time, block: result.blockNumber.toString() })}</p>
+          <p className="mt-0.5 text-xs">
+            {time === null
+              ? t('verifyPaidBlock', { block: result.blockNumber.toString() })
+              : t('verifyPaidMeta', { time, block: result.blockNumber.toString() })}
+          </p>
           {result.status !== 'paid' && (
             <p className={NOTE_CAUTION}>
               {t(result.status === 'pending' ? 'verifyPendingNote' : 'verifyFinalityUncheckedNote')}

@@ -380,6 +380,15 @@ describe('OrderLinkVerify: 確定していない支払い', () => {
     expect(screen.getByText(/この支払いをしたウォレットの署名ではありません/)).toBeInTheDocument();
   });
 
+  // Codex SHOULD: ブロックを読めなかった (時刻が無い) 支払いも、額とブロックの番号は出す (時刻を作らない)。
+  it('ブロックの時刻が無ければ、時刻を出さずブロックの番号だけを出す', async () => {
+    check.mockResolvedValue(found({ ...received('finalityUnchecked', 'unsigned'), timestamp: null }));
+    render(<OrderLinkVerify chains={['polygon']} receiver={RECEIVER} />);
+    paste(HASH);
+    expect(await screen.findByText('ブロック #123')).toBeInTheDocument();
+    expect(screen.getByText(/3,465 JPYC の支払いが見つかりましたが、確定は確かめられませんでした/)).toBeInTheDocument();
+  });
+
   // Codex NIT: 確定していない支払いに「… で払われています」と出さず、見つかったチェーンとだけ言う。
   it('複数のチェーンを探したとき、確定していなければ「見つかったチェーン」とだけ出し、確定したら「で払われています」', async () => {
     check.mockResolvedValueOnce(found(received('pending', 'verified'), 'kaia'));

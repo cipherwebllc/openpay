@@ -3710,6 +3710,7 @@
     "verifyConfirmationUnchecked": "確認の署名を確かめられませんでした。もう一度お試しください。",
     "verifyCheckedLocal": "同じ Tx Hash の使い回しは、この端末で確かめた記録だけで見ています。",
     "verifyCheckedUnavailable": "この端末の記録では、以前にも確かめた支払いかを確かめられません。同じ支払いで 2 つの注文を発送しないよう、注文と照らし合わせてください。",
-    "verifyFoundChain": "見つかったチェーン: {chain}"
+    "verifyFoundChain": "見つかったチェーン: {chain}",
+    "verifyPaidBlock": "ブロック #{block}"
   }
 }
