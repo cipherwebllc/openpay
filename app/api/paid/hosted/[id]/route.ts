@@ -12,6 +12,7 @@ import { env } from '@/lib/env';
 import { hostedResourceUrl } from '@/lib/x402/storeWire';
 import { licenseVisible, licenseSellerAllowed } from '@/lib/license/config';
 import { sellerRoleFor } from '@/lib/license/sellerRole';
+import type { LicenseRightsAdmission } from '@/lib/license/rightsAdmission';
 import type { SellerRole } from '@/lib/licenseUi';
 import { clientIp, hashIpBucket } from '@/lib/net/ipHash';
 import { cloneForwardHeaders } from '@/lib/net/forwardHeaders';
@@ -220,7 +221,19 @@ async function settledContentResponse(input: {
   }
   if (access.intent.metadata.license) {
     const { resolveLicenseRights } = await import('@/lib/license/rights');
-    const rights = await resolveLicenseRights({ address: access.intent.claim.payer, productId: access.intent.resourceId, definition: access.intent.metadata.license, ownership: access.ownership });
+    // 第 9 回レビュー B-02: settlement の無い呼出 (確定済みの購入への署名ヘッダーの完全一致の再送) は、ヘッダーを
+    // オンチェーンの calldata から組み立てられる誰でも何度でも送れる。譲渡可能な license の RPC (finalized block・
+    // balanceOf) を同時実行枠 (lib/license/rightsBudget の再送用の鍵) に通し、上限の外で RPC を走らせない。
+    // 鍵は認証済みの content / library / holders とも verify とも別にし、匿名の再送が枠を埋めても正規の利用者の
+    // 権利照合を 503 にしない。枠は resolver が RPC の直前にだけ取り (譲渡不可・flag OFF は枠に触れない)、取れなければ
+    // RPC 不明と同じ unknown = 既存の 503 license_rights_unknown。初回の購入 (settlement あり) は実際の決済 1 件に
+    // つき 1 回しか来ないので枠に通さず、応答を変えない (掟 12)。
+    let admission: LicenseRightsAdmission | undefined;
+    if (input.settlement === undefined) {
+      const { acquireLicenseResendRightsBudget, releaseLicenseResendRightsBudget } = await import('@/lib/license/rightsBudget');
+      admission = { acquire: acquireLicenseResendRightsBudget, release: releaseLicenseResendRightsBudget };
+    }
+    const rights = await resolveLicenseRights({ address: access.intent.claim.payer, productId: access.intent.resourceId, definition: access.intent.metadata.license, ownership: access.ownership, ...(admission ? { admission } : {}) });
     if (rights.entitled === null) return errorResponse('license_rights_unknown', 503);
     if (!rights.entitled) return errorResponse('not_found', 404);
   }
