@@ -9,11 +9,26 @@
 // お店の QR (OpenPay の支払いの URL) は、ウォレットのアプリの QR 読み取りでは開けないことがある (2026-10-13 user が実機で確認:
 // MetaMask は外部リンクとして開ける・マイナウォレットは動かない・HashPort Wallet は「支払い」で読むと「このQRコードでは
 // 支払えません。支払い用QRをご確認ください。」と出る) → スマホのカメラか「スキャンして支払う」で読む。
-// ⚠️ 料率・チェーン名・「無料」/free は書かない (tests/lib/walletGuide.test.ts が検査する)。
+// UPBOND Wallet (ブラウザで使うウォレット・2026-11-06 user):
+//   - お店の受け取り用の節を足す (/create の受取先の欄が空のとき「ウォレットをお持ちでない方へ」からこの節 (#store-wallet) へ来る)。
+//     2026-10-01 本番 Polygon で UPBOND のアドレスへの受け取りを確認 (支払い 10 JPYC → 8 JPYC・利用料 2 JPYC)・送るときは
+//     POL (ガス代) が要る (user 実機)・鍵の書き出しや UPBOND が止まったときの戻し方は未確認 → 売上は普段のウォレットへ移すよう書く・
+//     Polygon 以外のチェーンを UPBOND の画面で見られ・送れるかは未確認 → 受け取りは Polygon を選ぶよう書く。
+//   - お客様の支払い用の一覧 (wallets) にも、使い方の補足 (howTo) をつけてマイナウォレット・HashPort Wallet の後ろに足す
+//     (user 最終裁定)。2026-11-06 user 実機: Polygon のガス代不要の支払い (EIP-3009・UPBOND のアドレスが authorizer) が通った
+//     (100 JPYC → お店 98・利用料 2)。通常決済と USDC は未対応。つなぎ方は WalletConnect の QR の下の「Copy link」を UPBOND Wallet
+//     の接続コードの欄に貼る。スマホでは払うときに別のウォレットのアプリが開くことがあり、UPBOND のタブに戻ると承認の画面が出ていた。
+//     WalletConnect の 4 手順は変えず、UPBOND の使い方はカードの中にだけ書く。
+// ⚠️ 料率・チェーン名・「無料」/free は書かない (tests/lib/walletGuide.test.ts が検査する)。例外は UPBOND Wallet のカードの本文の
+// 「Polygon」「USDC」と storeNote の「Polygon」だけ (UPBOND で確かめた事実で、OpenPay の対応チェーン・通貨の一覧ではない・
+// 同じ test が範囲を縛る)。
 
 import type { Metadata } from 'next';
 import { guidePageMetadata } from '@/lib/guideMetadata';
 import { PAY_GUIDE_JPYC_NOTE } from '@/lib/payGuide';
+
+/** UPBOND Wallet (ブラウザで使うウォレット)。リンクはお店の受け取り用の節にだけ置く (一覧のカードには外のリンクを置かない)。 */
+const UPBOND_WALLET_URL = 'https://wallet.upbond.io/';
 
 export type WalletGuideStep = {
   readonly n: number;
@@ -42,7 +57,13 @@ export type WalletGuideContent = {
   readonly walletsTitle: string;
   readonly walletLead: string;
   /** id は描画側のアイコンの対応にだけ使う (MetaMask は同梱の公式 SVG・ほかは一般のアイコン。公式ロゴの素材は未入手)。 */
-  readonly wallets: readonly { readonly id: 'metamask' | 'myna' | 'hashport'; readonly name: string; readonly body: string }[];
+  readonly wallets: readonly {
+    readonly id: 'metamask' | 'myna' | 'hashport' | 'upbond';
+    readonly name: string;
+    readonly body: string;
+    /** 使い方の補足 (つなぎ方・払うときの癖)。本文が長くなるので段落を分けて出す (今は UPBOND Wallet だけ)。 */
+    readonly howTo?: string;
+  }[];
   readonly walletNote: string;
   /** 運営者の note 記事 (ウォレット準備〜換金・運用)。「JPYC で支払う」の jpycNoteLink と同じ記事・同じ名前 (test で照合)。 */
   readonly noteLink: { readonly href: string; readonly label: string };
@@ -57,6 +78,12 @@ export type WalletGuideContent = {
   /** パソコンで支払い画面を開いたときの WalletConnect の QR (お店の QR とは別)。 */
   readonly wcTip: string;
 
+  /** お店の受け取り用 (UPBOND Wallet)。節の id は store-wallet (/create の受取先の欄から飛んでくる)。 */
+  readonly storeTitle: string;
+  readonly storeBody: string;
+  /** 受け取るチェーン・売上の移し方の注意 (リンクの前に読んでもらう)。 */
+  readonly storeNote: string;
+  readonly storeLink: { readonly href: string; readonly label: string };
 };
 
 const JA: WalletGuideContent = {
@@ -89,6 +116,13 @@ const JA: WalletGuideContent = {
       id: 'hashport',
       name: 'HashPort Wallet',
       body: 'アプリの中で JPYC の発行・償還ができます。OpenPay には WalletConnect でつなぎます。',
+    },
+    {
+      id: 'upbond',
+      name: 'UPBOND Wallet',
+      body: 'アプリを入れずにブラウザで使えるウォレットです。LINE・Google のアカウントやパスキーでログインできます。OpenPay では JPYC のガス代不要の支払いに使えます (通常決済と USDC には使えません・Polygon で確かめています)。',
+      howTo:
+        'つなぐときは、WalletConnect の QR の下の「Copy link」を押し、UPBOND Wallet の WalletConnect の接続コードの欄に貼ってください。払うときに別のウォレットアプリが開いたら、UPBOND Wallet のタブに戻ると承認の画面が出ています。',
     },
   ],
   walletNote:
@@ -137,6 +171,12 @@ const JA: WalletGuideContent = {
   ],
   wcTip: 'パソコンで支払い画面を開いたときは、そこに出る接続用の QR を、スマホのウォレットのアプリで読み取ってつなぎます (お店の QR とは別のものです)。',
 
+  storeTitle: 'お店の受け取り用',
+  storeBody:
+    '受け取るだけなら、アプリを入れずにブラウザで使える UPBOND Wallet も使えます。LINE・Google のアカウントやパスキーでログインでき、JPYC EX とつないで JPYC の発行・償還もできます。',
+  storeNote:
+    '受け取るチェーンは Polygon を選んでください。売上がたまったら、マイナウォレットなど普段のウォレットへ移してください (UPBOND Wallet から送るときは、ガス代の POL が要ります)。',
+  storeLink: { href: UPBOND_WALLET_URL, label: 'UPBOND Wallet を開く' },
 };
 
 const EN: WalletGuideContent = {
@@ -169,6 +209,13 @@ const EN: WalletGuideContent = {
       id: 'hashport',
       name: 'HashPort Wallet',
       body: 'Issue and redeem JPYC inside the app. Connect it to OpenPay with WalletConnect.',
+    },
+    {
+      id: 'upbond',
+      name: 'UPBOND Wallet',
+      body: 'A wallet that runs in your browser with no app to install. You can sign in with a LINE or Google account or a passkey. On OpenPay it works for JPYC payments with no gas fee (not for standard payments or USDC; confirmed on Polygon).',
+      howTo:
+        'To connect, tap “Copy link” under the WalletConnect QR and paste it into the WalletConnect connection code field in UPBOND Wallet. If another wallet app opens when you pay, go back to the UPBOND Wallet tab and you will find the approval screen there.',
     },
   ],
   walletNote:
@@ -217,6 +264,12 @@ const EN: WalletGuideContent = {
   ],
   wcTip: 'If you opened the payment screen on a computer, scan the connection QR shown there with the wallet app on your phone (this is not the shop’s QR).',
 
+  storeTitle: 'For receiving payments at your shop',
+  storeBody:
+    'If you only need to receive payments, you can also use UPBOND Wallet, which runs in your browser with no app to install. You can sign in with a LINE or Google account or a passkey, and connect it to JPYC EX to issue and redeem JPYC.',
+  storeNote:
+    'Choose Polygon as the receiving chain. Once sales build up, move them to the wallet you use day to day, such as MynaWallet (sending from UPBOND Wallet requires POL for gas).',
+  storeLink: { href: UPBOND_WALLET_URL, label: 'Open UPBOND Wallet' },
 };
 
 export function walletGuideContentFor(locale: string): WalletGuideContent {

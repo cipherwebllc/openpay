@@ -421,6 +421,7 @@
     "useConnectedWallet": "Use connected wallet",
     "receiverMatchesWallet": "Connected wallet = receiver",
     "addressInvalid": "Invalid address format",
+    "noWalletGuideLink": "Don't have a wallet yet?",
     "storeNameLabel": "Store name (for print)",
     "invoiceNoLabel": "Invoice registration number (optional)",
     "invoiceNoHint": "If set, customer receipts show the number and the amount and consumption tax for each tax rate (JPYC only). Choose the item's tax rate too.",

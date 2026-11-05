@@ -1,6 +1,6 @@
-// /guide/wallet「ウォレットを選ぶ」を実描画で検証する: h1 (目次の名前)・節の見出しの順・ウォレット 3 つ・
+// /guide/wallet「ウォレットを選ぶ」を実描画で検証する: h1 (目次の名前)・節の見出しの順・ウォレット 4 つ・
 // QR の読み取り方 2 つと注意 (ウォレットのアプリでは開かないものがある)・WalletConnect の 4 手順 (お客様の番号 = blue)・
-// リンク先 (/scan・関連ガイド)・目次の現在地・aria-label を使わないこと (掟 8)。
+// リンク先 (/scan・関連ガイド)・目次の現在地・aria-label を使わないこと (掟 8)・お店の受け取り用の節 (#store-wallet)。
 
 import { describe, expect, it, vi } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
@@ -29,6 +29,7 @@ describe('/guide/wallet', () => {
 
     expect(within(article).getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual([
       c.walletsTitle,
+      c.storeTitle,
       c.scanTitle,
       c.wcTitle,
       payGuideContentFor(locale).ctaTitle,
@@ -38,6 +39,8 @@ describe('/guide/wallet', () => {
     for (const w of c.wallets) {
       expect(within(wallets).getByText(w.name)).toBeInTheDocument();
       expect(within(wallets).getByText(w.body)).toBeInTheDocument();
+      // 使い方の補足 (UPBOND Wallet) は本文の下の別の段落。
+      if (w.howTo) expect(within(wallets).getByText(w.howTo).tagName).toBe('P');
     }
     // カードの左のマーク: MetaMask は同梱の公式 SVG・ほかは一般のアイコン (飾りなので読み上げない)。
     const walletCards = within(wallets).getAllByRole('listitem');
@@ -53,6 +56,24 @@ describe('/guide/wallet', () => {
     expect(note).toHaveAttribute('href', 'https://note.com/masia02/n/ned04a4cdb00a');
     expect(note).toHaveAttribute('target', '_blank');
     expect(note.getAttribute('rel')).toContain('noopener');
+
+    // お店の受け取り用: /create の受取先の欄 (空のとき) から #store-wallet で飛んでくる。本文 → 注意 → 外のリンク (別タブ) の順
+    // (注意を読んでから UPBOND Wallet を開く)。
+    const storeHeading = screen.getByRole('heading', { level: 2, name: c.storeTitle });
+    expect(storeHeading).toHaveAttribute('id', 'store-wallet');
+    const store = storeHeading.closest('section')!;
+    const storeBody = within(store).getByText(c.storeBody);
+    const storeNote = within(store).getByText(c.storeNote);
+    const upbond = within(store).getByRole('link', { name: c.storeLink.label });
+    expect(upbond).toHaveAttribute('href', 'https://wallet.upbond.io/');
+    expect(upbond).toHaveAttribute('target', '_blank');
+    expect(upbond.getAttribute('rel')).toContain('noopener');
+    expect(storeBody.compareDocumentPosition(storeNote) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(storeNote.compareDocumentPosition(upbond) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // 支払い用の一覧では UPBOND Wallet は最後のカード (マークは一般のアイコン)。外のサイトへのリンクは一覧に置かず、
+    // 受け取り用の節にだけ置く (一覧の節のリンクは note 記事だけ)。
+    expect(within(walletCards[walletCards.length - 1]).getByText('UPBOND Wallet')).toBeInTheDocument();
+    expect(within(wallets).getAllByRole('link').map((a) => a.getAttribute('href'))).toEqual([c.noteLink.href]);
 
     const scan = screen.getByRole('heading', { level: 2, name: c.scanTitle }).closest('section')!;
     for (const way of c.scanWays) expect(within(scan).getByText(way.body)).toBeInTheDocument();
