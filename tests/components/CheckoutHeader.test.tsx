@@ -172,8 +172,14 @@ function setSwitching(isPending: boolean) {
   } as Partial<ReturnType<typeof useSwitchChain>>);
 }
 
-/** relay (JPYC のガスレス) の状態。isPending = 送信中・data = 結果。 */
-function setRelay(state: { isPending?: boolean; data?: ReturnType<typeof useJpycEip3009Payment>['data'] } = {}) {
+/** relay (JPYC のガスレス) の状態。isPending = 送信中・data = 結果・restoredIntent = 読み直した画面で復元した支払い。 */
+function setRelay(
+  state: {
+    isPending?: boolean;
+    data?: ReturnType<typeof useJpycEip3009Payment>['data'];
+    restoredIntent?: ReturnType<typeof useJpycEip3009Payment>['restoredIntent'];
+  } = {},
+) {
   mockHook(useJpycEip3009Payment, {
     mutate: vi.fn(),
     isPending: state.isPending ?? false,
@@ -182,7 +188,7 @@ function setRelay(state: { isPending?: boolean; data?: ReturnType<typeof useJpyc
     retryRelay: vi.fn(),
     retrySamePayload: vi.fn(),
     recoveryState: null,
-    restoredIntent: null,
+    restoredIntent: state.restoredIntent ?? null,
     orderDelivery: null,
     previousPaymentPending: false,
     previousPaymentSameMerchant: false,
@@ -645,6 +651,43 @@ const CASES: Case[] = [
   {
     name: 'チェーン 2 つ・relay の送信中: 出さない',
     setup: () => setRelay({ isPending: true }),
+    params: jpycParams(MULTI),
+    want: { title: TITLE, ...JPYC_POLYGON, mode: GASLESS },
+  },
+  // 「別のチェーンで払う」を止める条件 (CheckoutForm の chainSwitchLocked) は重なって立つことが多い。relay の完了では
+  // completed と settledNoRetry (relay.data.success) が同時に立つので、片方を外しても上の状態では落ちない (#1024 の Codex
+  // レビュー)。下の 2 つは 1 つの条件だけが立つ状態で、settledNoRetry と restoredCheckoutCompletion をそれぞれ単独で固定する。
+  {
+    name: 'チェーン 2 つ・relay の結果が保留 (pending・送信は終わった・未完了): 出さない (settledNoRetry だけが立つ)',
+    // relay が broadcast 済みで結果が保留: 送信中でも完了でもない (isPending false・success false) が、再送を止める
+    // settledNoRetry (relay.data.pending) だけが立つ。
+    setup: () => setRelay({ data: { txHash: TX_HASH, success: false, pending: true } }),
+    params: jpycParams(MULTI),
+    want: { title: TITLE, ...JPYC_POLYGON, mode: GASLESS },
+  },
+  {
+    name: 'チェーン 2 つ・読み直した画面で復元した relay の支払いが revert で確定: 出さない (restoredCheckoutCompletion だけが立つ)',
+    // 実際の hook (useJpycEip3009Payment) で起きる組み合わせ: 保存した intent を復元して状態を確かめ、on-chain で revert
+    // (success false) と確定すると、保持していた payload を捨てる (hasActiveIntent false・recoveryState null) が restoredIntent は
+    // 残り、data は復元の結果 { txHash, success: false } になる。completed・settledNoRetry・flowPending はどれも立たず、
+    // restoredCheckoutCompletion (useRelay && relay.restoredIntent) だけが立つ。もう半分の通常決済の復元
+    // (isStandard && standard.restoredFromStorage) は、useStandardPayment が復元のときに phase を merchant-unknown /
+    // fee-unknown / fee-error にして idle に戻さないので、実際の hook では standard.phase !== 'idle' と必ず重なり単独にならない。
+    setup: () =>
+      setRelay({
+        data: { txHash: TX_HASH, success: false },
+        restoredIntent: {
+          chainId: polygonAmoy.id,
+          from: CUSTOMER,
+          merchant: MERCHANT,
+          merchantValue: JPYC(3000n).toString(),
+          feeValue: '0',
+          nonce: `0x${'12'.repeat(32)}`,
+          validBefore: '9999999999',
+          routeKind: 'free',
+          issuedAt: 1_700_000_000_000,
+        },
+      }),
     params: jpycParams(MULTI),
     want: { title: TITLE, ...JPYC_POLYGON, mode: GASLESS },
   },
