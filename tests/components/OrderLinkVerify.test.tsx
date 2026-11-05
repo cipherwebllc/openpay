@@ -275,6 +275,21 @@ describe('OrderLinkVerify: 確かめている間に入力が変わったとき',
     expect(screen.getByText(PAID_3465)).toBeInTheDocument();
   });
 
+  it('確かめている間に欄が消えたら (別のタブへ移る等)、後から届いた応答をこの端末の記録に残さない', async () => {
+    const first = deferred<Found>();
+    check.mockReturnValueOnce(first.promise).mockResolvedValueOnce(found(paidResult('3465', 'verified')));
+    const { unmount } = render(<OrderLinkVerify chains={['polygon']} receiver={RECEIVER} />);
+    paste(HASH);
+    unmount();
+    await resolveWith(first, found(paidResult('3465', 'verified')));
+    expect(localStorage.getItem(CHECKED_KEY)).toBeNull();
+    // 戻って同じ取引を確かめても、見せていない結果を「前にも確かめた」にしない
+    render(<OrderLinkVerify chains={['polygon']} receiver={RECEIVER} />);
+    paste(HASH);
+    expect(await screen.findByText(PAID_3465)).toBeInTheDocument();
+    expect(screen.queryByText(/にも確かめています/)).toBeNull();
+  });
+
   it('出ている結果は、受取ウォレットかチェーンが変わったら消す', async () => {
     check.mockResolvedValue(found(paidResult('3465', 'verified')));
     const { rerender } = render(<OrderLinkVerify chains={['polygon']} receiver={RECEIVER} />);

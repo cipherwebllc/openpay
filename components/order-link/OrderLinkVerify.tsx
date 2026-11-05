@@ -58,38 +58,30 @@ export function OrderLinkVerify({
 
   // 確かめている間に欄・受取ウォレット・チェーンが変わったら、遅れて届いた応答は今の入力の結果ではない。それを出すと、
   // 別のお客様の (払っていない) Tx Hash に書き換えた欄の下に前の「届いています」が出て、払っていない注文を発送させてしまう
-  // (第 9 回レビュー G-2)。確かめるたびと入力が変わるたびに通し番号を進め、応答は自分の番号が今の番号で、確かめた入力が
-  // 今の入力のままのときだけ出す。
+  // (第 9 回レビュー G-2)。確かめるたびと、入力が変わるたび・この欄が消えるたびに通し番号を進め、応答は自分の番号が
+  // 今の番号のときだけ出す。
   const chainsKey = chains.join(',');
   const requestSeq = useRef(0);
-  const latestInput = useRef({ text, receiver, chainsKey });
-  // 描画の確定と同時に (layout effect) 進めるので、変わった後の画面に前の結果が出ず、この後に届く前の応答は番号で捨てる。
+  // 入力が変わったとき・この欄が消えたとき (注文リンクのタブを離れる等) の片付けで番号を進める。描画の確定と同時に
+  // (layout effect) 進めるので、変わった後の画面に前の結果が出ず、この後に届く前の応答は番号で捨てる。
   // 確かめている途中の応答も捨てるので、すぐに新しい入力を確かめられるよう「確かめています」も戻す。
   // チェーンは中身で見る (同じ内容の配列で描き直されても結果を消さない)。
   useLayoutEffect(() => {
-    latestInput.current = { text, receiver, chainsKey };
-    requestSeq.current += 1;
     setDone(null);
     setChecking(false);
+    return () => {
+      requestSeq.current += 1;
+    };
   }, [text, receiver, chainsKey]);
 
   const check = async () => {
     if (!receiver || checking) return;
     requestSeq.current += 1;
-    const request = { id: requestSeq.current, text, receiver, chainsKey };
+    const requestId = requestSeq.current;
     setChecking(true);
     const found = await checkOrderLinkPaymentOnChains({ chains, receiver, text });
-    // 番号に加えて入力も比べる: 発送を決める表示なので、番号を進める所が今後の変更で漏れても、確かめた入力と違う欄の下に
-    // 結果を出さない二重の止めにする。捨てた応答はこの端末の記録 (rememberCheckedPayment) にも残さない。
-    const latest = latestInput.current;
-    if (
-      request.id !== requestSeq.current ||
-      request.text !== latest.text ||
-      request.receiver !== latest.receiver ||
-      request.chainsKey !== latest.chainsKey
-    ) {
-      return;
-    }
+    // 捨てた応答は、この端末の記録 (rememberCheckedPayment) にも残さない (見せていない結果を「前にも確かめた」にしない)。
+    if (requestId !== requestSeq.current) return;
     const chain = found.chain ?? chains[0];
     const { result } = found;
     const hash = extractTxHash(text);
