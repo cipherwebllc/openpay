@@ -53,6 +53,9 @@ export type JpycEip3009Params = {
   // mobileOrderFeeValue(value, feeKind) で算出する)。CheckoutForm が flag ON + モバイル注文の
   // ときだけ渡す。不在 = 従来の gas-recovery 料金 (/pay・/checkout・チップ)。
   feeKind?: MobileOrderFeeKind;
+  // 注文リンクの支払いの指紋 (lib/checkoutIntentContext の orderLinkContextFingerprint)。束縛しない支払いの
+  // 復旧 intent にだけ残し、署名・relay POST には載せない (第 9 回レビュー G-1)。
+  orderLinkKey?: Hex;
 };
 // success=false は「relay は成立したが tx が on-chain で revert」(B2 と同じ表示方針)。
 // pending=true は「broadcast 済だが未確定」(receipt timeout / authorizationState 既使用)。
@@ -531,6 +534,7 @@ export function useJpycEip3009Payment(
       feeKind,
       tipMessage,
       order,
+      orderLinkKey,
     }) => {
       // A new orderId must not bypass a still-live payment to the same merchant.
       if (!retainedPayloadRef.current && isOrderPaymentHeld(merchant)) throw new Error('order_payment_pending');
@@ -800,6 +804,9 @@ export function useJpycEip3009Payment(
 
       // Keep the existing post-signing timestamp for ordinary /pay and /tip intents.
       if (!bind) intent.issuedAt = Date.now();
+      // 読み直した後の完了を同じ注文リンクにだけ結び付ける指紋 (公開 metadata・payload は組み終えているので POST には載らない)。
+      // 束縛した注文は自分の slot と注文の中身で照合するので付けない。
+      if (!bind && orderLinkKey) intent.orderLinkKey = orderLinkKey;
 
       // 署名そのものは保存せず、POST 応答喪失後も read-only status を引ける公開メタデータだけを残す。
       // Bound payments recover from their own authorization slot, never the global /pay intent.

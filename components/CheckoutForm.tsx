@@ -99,7 +99,7 @@ import {
 } from '@/lib/signPreview';
 import type { CanonicalOrder } from '@/lib/orderBind';
 import { matchesOrderDeliveryContext } from '@/lib/orderDeliveryContext';
-import { checkoutIntentContextFingerprint } from '@/lib/checkoutIntentContext';
+import { checkoutIntentContextFingerprint, orderLinkContextFingerprint } from '@/lib/checkoutIntentContext';
 import { RecoverFeeNotice } from './RecoverFeeNotice';
 
 // 送信後の pending / unknown と同一 payload の復旧時だけ必要な UI を First Load JS
@@ -640,6 +640,47 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
     standard.restoredFromStorage,
     totalWei,
   ]);
+  // 注文リンクの支払いの指紋 (第 9 回レビュー G-1)。注文リンクの支払いにだけ復旧 intent へ残し、読み直した後の完了を
+  // 「この注文リンク」の支払いにだけ結び付ける。会計の指紋 (checkoutContextKey) は ship を含まず、普通の /checkout と
+  // 同じ明細の「何度でも使える」リンクで同じ値になるため、既存の照合の意味は変えずに別の指紋で区別する。
+  const orderLinkKey = useMemo(
+    () => (remoteOrder ? orderLinkContextFingerprint(checkoutContextKey, params) : null),
+    [checkoutContextKey, params, remoteOrder],
+  );
+  // 読み直した画面で復元した通常決済の支払いが、この注文リンクのものか: 既存の照合 (restoredStandardOrderAttempt) に
+  // 加え、注文リンクの指紋が一致するときだけ (指紋の無い復元 = 普通の /checkout や以前の保存は一致としない)。
+  const restoredStandardOrderLinkAttempt =
+    restoredStandardOrderAttempt !== null &&
+    orderLinkKey !== null &&
+    standard.lastSubmittedParams?.orderLinkKey === orderLinkKey
+      ? restoredStandardOrderAttempt
+      : null;
+  // 読み直した画面で復元した relay の支払いが、この注文リンクのものか。注文の同一性は注文リンクの指紋 (明細・番号・
+  // ship)・署名したチェーン・お店で確かめ、金額は保存した intent の実際の値を注文の合計と照らす。利用料は今の設定で
+  // 計算し直さない (払った後に率やフロアが変わっても記録を失わない)。今のウォレットのチェーンで決まる経路 (route・
+  // breakdown) にも依存させない (別のチェーンのまま読み直しても記録を残す)。経路は intent の routeKind で分ける:
+  //   free: お店の受取 = 合計・利用料 0 (hook が '0' を入れる)。
+  //   recover: お店の受取 + 利用料 = 合計・利用料 > 0。注文リンクにモバイル注文の利用料は無く recover は常にお店の負担
+  //   (effectiveGasMode) なので、利用料は合計から引かれる形になる。forwarder は利用料 0 を revert し、フロアは 0 を
+  //   採らないので、成立した recover の利用料は必ず 1 以上。お客様の上乗せの形 (受取 = 合計) は合計を超えて一致しない。
+  const restoredRelayOrderIntent = useMemo(() => {
+    const intent = relay.restoredIntent;
+    if (!intent || orderLinkKey === null || intent.orderLinkKey !== orderLinkKey) return null;
+    const merchantValue = BigInt(intent.merchantValue);
+    const feeValue = BigInt(intent.feeValue);
+    const amountMatches =
+      intent.routeKind === 'recover'
+        ? feeValue > 0n && merchantValue + feeValue === totalWei
+        : feeValue === 0n && merchantValue === totalWei;
+    if (
+      intent.chainId !== deployment.chainId ||
+      intent.merchant.toLowerCase() !== params.to.toLowerCase() ||
+      !amountMatches
+    ) {
+      return null;
+    }
+    return intent;
+  }, [deployment.chainId, orderLinkKey, params.to, relay.restoredIntent, totalWei]);
   const restoredCheckoutCompletion =
     (isStandard && standard.restoredFromStorage) ||
     (useRelay && relay.restoredIntent != null);
@@ -1414,6 +1455,9 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
         // 履歴 snapshot に正しい gross を運ぶ (非モバイルは fee=0 で merchantAmount に一致)。
         saleAmount: totalWei,
         contextKey: checkoutContextKey,
+        // 注文リンクの支払いの指紋を保存する intent にだけ残す (読み直した後の完了を同じ注文リンクに結び付ける・
+        // 第 9 回レビュー G-1)。送金の中身には関わらない。
+        ...(orderLinkKey ? { orderLinkKey } : {}),
       });
     } else if (useRelay) {
       // JPYC EIP-3009 relay: 顧客が transferWithAuthorization に署名 → 自前 relayer が gas 負担で
@@ -1427,6 +1471,9 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
         // モバイル注文 (storefront/preorder) のときだけ feeKind を載せる (server が定数表から % を
         // 再計算・on-chain 強制)。
         ...(mobileFeeKind ? { feeKind: mobileFeeKind } : {}),
+        // 注文リンクの支払いの指紋を復旧 intent にだけ残す (読み直した後の完了を同じ注文リンクに結び付ける・第 9 回
+        // レビュー G-1)。束縛した注文 (order) は自分の slot で復旧するので付けない。relay POST には載らない。
+        ...(orderLinkKey && !order ? { orderLinkKey } : {}),
       });
     } else {
       gasless.mutate({
@@ -1550,12 +1597,28 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   };
   const notifyData: NotifyShopData | undefined =
     notifyShop && successOverlayPayload ? notifyFor(successOverlayPayload.txHash, notifyPayer) : undefined;
+  // 読み直した画面で復元した支払いが完了した (receipt / relay の結果が届いた): 大きな完了画面と受注通知は出さないまま
+  // (上の successOverlayPayload)、この注文リンクの支払いと確かめられたときだけ「注文を送る」を出し、払った記録を残す
+  // (第 9 回レビュー G-1: 記録が無いと、もう一度読み直したときに同じ注文をまた払えてしまう)。別の会計の復元は出さない・
+  // 残さない。払ったウォレットは復元した支払いの送り主 (通常決済は hook が記録した送り主・relay は署名した人)。
+  // relay は今の経路 (useRelay) を見ない: 経路は接続中のチェーンで決まり、別のチェーンのまま読み直しても hook は保存した
+  // intent を復旧して成功で保存を消すため、ここで経路を要求すると記録が残らない。このマウントの完了 (notifyData) が
+  // あるときは出さない。
+  const restoredCompletionNotify: NotifyShopData | undefined =
+    !notifyShop || notifyData
+      ? undefined
+      : isStandard && standard.data && restoredStandardOrderLinkAttempt
+        ? notifyFor(standard.data.merchantTxHash, restoredStandardOrderLinkAttempt.from)
+        : relay.data?.success && relay.data.txHash && restoredRelayOrderIntent
+          ? notifyFor(relay.data.txHash, restoredRelayOrderIntent.from)
+          : undefined;
   // 読み直した画面: この会計 (同じ URL の中身) をこのタブで払った記録があれば、「注文を送る」を出す
   // (lib/orderConfirmation.ts の rememberOrderPayment)。完了画面を見ている間は出さない。
   const restoredNotifyData: NotifyShopData | undefined =
-    notifyShop && !notifyData && rememberedPayment
+    restoredCompletionNotify ??
+    (notifyShop && !notifyData && rememberedPayment
       ? notifyFor(rememberedPayment.payment.txHash, rememberedPayment.payment.payer, rememberedPayment.chain)
-      : undefined;
+      : undefined);
   // 何度でも使えるリンク (番号なし・ship=ask) は、同じ商品をもう一度注文できる。
   const canPayAgainAsNewOrder = params.ship === 'ask' && !params.orderId;
   const liveNotifyTx = notifyData?.txHash;
@@ -1568,6 +1631,17 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
       paidAt: Date.now(),
     });
   }, [checkoutContextKey, liveNotifyTx, liveNotifyPayer]);
+  // 復元した支払いの完了も同じ記録に残す (次に読み直したときに払うボタンを止め、「注文を送る」を出すため)。
+  const restoredCompletionTx = restoredCompletionNotify?.txHash;
+  const restoredCompletionPayer = restoredCompletionNotify?.payer;
+  useEffect(() => {
+    if (!restoredCompletionTx) return;
+    rememberOrderPayment(checkoutContextKey, {
+      txHash: restoredCompletionTx.toLowerCase(),
+      ...(restoredCompletionPayer ? { payer: restoredCompletionPayer } : {}),
+      paidAt: Date.now(),
+    });
+  }, [checkoutContextKey, restoredCompletionTx, restoredCompletionPayer]);
 
   // 「署名安心 UX」(plans/sign-reassurance-ux.md・P2)。経路別に kind を出し分ける (計画 §3.3)。
   //   (a) relay free (forwarder 未設定): jpyc-relay-free フルパネル。preview は relay.mutate に
