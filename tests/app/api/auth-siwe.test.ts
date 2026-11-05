@@ -1,4 +1,5 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest';
+import { encodeErrorResult, parseAbi, serializeErc8010Signature, type Hex } from 'viem';
 import { createSiweMessage } from 'viem/siwe';
 import { privateKeyToAccount } from 'viem/accounts';
 import { supportedChains } from '@/lib/chains';
@@ -19,6 +20,8 @@ const h = vi.hoisted(() => {
       async (_scope: string, hashedIp: string | null) =>
         hashedIp === null || ipRate.allowed,
     ),
+    // null = 従来の offline provider (どの RPC も失敗)。C-1 のテストだけ RPC の応答を差し替える。
+    rpc: null as ((args: { method: string; params?: unknown }) => Promise<unknown>) | null,
   };
 });
 
@@ -37,7 +40,12 @@ vi.mock('@/lib/chains', async (importOriginal) => {
   return {
     ...actual,
     // Exercise viem's local EOA verification without any network requests.
-    transportForChain: () => custom({ request: async () => { throw new Error('offline test provider'); } }, { retryCount: 0 }),
+    transportForChain: () => custom({
+      request: async (args: { method: string; params?: unknown }) => {
+        if (h.rpc) return h.rpc(args);
+        throw new Error('offline test provider');
+      },
+    }, { retryCount: 0 }),
   };
 });
 
@@ -96,6 +104,7 @@ describe('SIWE routes', () => {
     h.kvSet.mockResolvedValue({ ok: false, reason: 'unconfigured' });
     h.ipRate.allowed = true;
     h.checkIpRateLimit.mockClear();
+    h.rpc = null;
     vi.mocked(Sentry.captureMessage).mockClear();
     vi.mocked(Sentry.captureException).mockClear();
   });
@@ -257,6 +266,103 @@ describe('SIWE routes', () => {
     expect(h.kvGet).toHaveBeenCalledWith('siwe:nonce:csrf1234');
     expect(h.kvDel).toHaveBeenCalledWith('siwe:nonce:csrf1234');
     expect(h.kvSet).toHaveBeenCalledOnce();
+  });
+
+  // 第 9 回レビュー C-1: 署名検証の public client が CCIP-Read (EIP-3668) を追うと、7702 委任済み EOA +
+  // ERC-8010 形の署名 → viem verifyErc1271 → EOA 自身への eth_call → 委任先の OffchainLookup revert で、
+  // revert data の任意の URL へサーバーが fetch する (正しい署名なしで届く SSRF)。verifySiweMessage は
+  // mock せず viem の実際の経路を通し、RPC だけを custom transport で差し替える。
+  describe('verify: CCIP-Read を追わない (C-1)', () => {
+    const OFFCHAIN_LOOKUP_ABI = parseAbi([
+      'error OffchainLookup(address sender, string[] urls, bytes callData, bytes4 callbackFunction, bytes extraData)',
+    ]);
+    const ATTACKER_URLS = ['http://169.254.169.254/latest/meta-data/{data}', 'https://ssrf.attacker.invalid/{sender}/{data}.json'];
+    // 委任先 (攻撃者の contract のつもり)。実際の RPC と同じく eth_getCode は小文字の hex で返す。
+    const DELEGATE = '0x000000000000000000000000000000000000c0de';
+    // Fixed, test-only account; signs only a local 7702 authorization, no RPC or real wallet.
+    const attacker = privateKeyToAccount(`0x${'22'.repeat(32)}`);
+    let fetchSpy: MockInstance<typeof fetch>;
+
+    beforeEach(() => {
+      // 外へは出さない (変異で ccipRead を戻したときも本物の通信をしない)。呼ばれた回数だけを見る。
+      fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('blocked in test', { status: 500 }));
+    });
+
+    afterEach(() => {
+      fetchSpy.mockRestore();
+    });
+
+    // 正しい署名を持たない攻撃者の形: 自分の EOA を 7702 で委任し、中身の署名は 65 byte の 0。
+    async function attackerLogin() {
+      h.kvConfigured = true;
+      h.kvGet.mockResolvedValue({ ok: true, value: '1' }); // 発行済みの nonce (nonce だけで deps.verify まで届く)
+      h.kvDel.mockResolvedValue({ ok: true, value: 1 });
+      h.kvSet.mockResolvedValue({ ok: true, value: 'OK' });
+      const chainId = supportedChains[0].id;
+      const authorization = await attacker.signAuthorization({ address: DELEGATE, chainId, nonce: 0 });
+      const signature = serializeErc8010Signature({ authorization, signature: `0x${'00'.repeat(65)}` });
+      const issuedAt = new Date();
+      const message = createSiweMessage({
+        domain: 'localhost', uri: 'http://localhost', address: attacker.address,
+        version: '1', chainId, nonce: 'ccipread1234', issuedAt,
+        expirationTime: new Date(issuedAt.getTime() + 600_000),
+      });
+      return verifyPOST(new Request('http://localhost/api/auth/siwe/verify', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' },
+        body: JSON.stringify({ message, signature }),
+      }));
+    }
+
+    it('委任先が OffchainLookup で revert しても外へ fetch せず 401 invalid_signature (nonce も cookie もそのまま)', async () => {
+      // sender = 呼び先 (EOA 自身) なので、ccipRead が有効なら viem は urls へ fetch する形。
+      const lookupRevert: Hex = encodeErrorResult({
+        abi: OFFCHAIN_LOOKUP_ABI,
+        errorName: 'OffchainLookup',
+        args: [attacker.address, ATTACKER_URLS, '0x', '0x12345678', '0x'],
+      });
+      expect(lookupRevert.slice(0, 10)).toBe('0x556f1830'); // viem utils/ccip.ts の offchainLookupSignature
+      const calls: Array<{ method: string; params?: unknown }> = [];
+      h.rpc = async (args) => {
+        calls.push(args);
+        // 委任済み (0xef0100 ‖ 委任先) と答え、viem を verifyErc8010 → verifyErc1271 の経路に進ませる。
+        if (args.method === 'eth_getCode') return `0xef0100${DELEGATE.slice(2)}`;
+        // JSON-RPC の revert 応答 (code 3 + data) と同じ形。
+        if (args.method === 'eth_call') throw Object.assign(new Error('execution reverted'), { code: 3, data: lookupRevert });
+        throw new Error('unexpected rpc in test: ' + args.method);
+      };
+
+      const res = await attackerLogin();
+
+      expect(fetchSpy).not.toHaveBeenCalled();
+      // fetch 0 回が空振りでないこと: EOA 自身への isValidSignature (0x1626ba7e) の eth_call まで実際に届いた。
+      const erc1271Calls = calls.filter((c) => {
+        if (c.method !== 'eth_call' || !Array.isArray(c.params)) return false;
+        const tx = c.params[0] as { to?: string; data?: string };
+        return tx.to?.toLowerCase() === attacker.address.toLowerCase() && tx.data?.startsWith('0x1626ba7e');
+      });
+      expect(erc1271Calls).toHaveLength(1);
+      expect(res.status).toBe(401);
+      expect(await res.json()).toEqual({ ok: false, error: 'invalid_signature' });
+      expect(res.headers.has('set-cookie')).toBe(false);
+      expect(h.kvDel).not.toHaveBeenCalled();
+      expect(h.kvSet).not.toHaveBeenCalled();
+    });
+
+    it('同じ経路で RPC が落ちて検証が throw しても route の catch で 503 verify_failed (500 にしない)', async () => {
+      h.rpc = async () => {
+        throw new Error('rpc down in test');
+      };
+
+      const res = await attackerLogin();
+
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(res.status).toBe(503);
+      expect(await res.json()).toEqual({ ok: false, error: 'verify_failed' });
+      expect(res.headers.has('set-cookie')).toBe(false);
+      expect(h.kvDel).not.toHaveBeenCalled();
+      expect(h.kvSet).not.toHaveBeenCalled();
+    });
   });
 
   it('verify: 本文が JSON の null → 400 invalid_json (verify_failed の 503 + Sentry にしない・B-R6f)', async () => {
