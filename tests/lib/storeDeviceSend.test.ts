@@ -327,7 +327,7 @@ describe('sendStoreDeviceSettle (二重に送らない・鍵は送る直前に)'
 
 // 第 9 回レビュー E-8: 壊れた印 (空文字・JSON でない・配列でない・形の違う印を含む) を「印なし」と読む・形の違う印だけを
 // 捨てて上書きすると、別タブ・再読み込み前の未解決の印を消し、同じ会計をもう一度送りうる → 読めない扱い
-// (ok: false・corrupt) にし、その上に書かない。
+// (ok: false) にし、その上に書かない。
 describe('壊れた送信済みの印 (読めない扱いにし、上書きしない)', () => {
   const mark: DeviceSentMark = {
     handoffId: 'x', chainId: CHAIN, nonce: `0x${'0d'.repeat(32)}`, hash: `0x${'0e'.repeat(32)}`, from: customer.address,
@@ -345,24 +345,15 @@ describe('壊れた送信済みの印 (読めない扱いにし、上書きし�
     ['配列でない (文字列)', JSON.stringify('x')],
     ['形の違う要素を含む', JSON.stringify([{ junk: true }, mark])],
     ['nonce・hash は正しく時刻だけ壊れた印', JSON.stringify([{ ...mark, at: 'x' }])],
-  ])('%s → readSentMarks は ok: false (corrupt)・addSentMark / removeSentMark は書き戻さない', (_, raw) => {
+  ])('%s → readSentMarks は ok: false・addSentMark / removeSentMark は書き戻さない', (_, raw) => {
     window.localStorage.setItem(STORE_DEVICE_SENT_KEY, raw);
-    expect(readSentMarks()).toEqual({ ok: false, corrupt: true });
+    expect(readSentMarks()).toEqual({ ok: false });
     const other = { ...mark, nonce: `0x${'2d'.repeat(32)}` as Hex, hash: `0x${'2e'.repeat(32)}` as Hex };
     expect(addSentMark(other, 1)).toBe(false);
     expect(window.localStorage.getItem(STORE_DEVICE_SENT_KEY)).toBe(raw);
     expect(sentMarkWrittenThisTab(other.nonce)).toBeNull();
     expect(removeSentMark(mark.hash)).toBe(false);
     expect(window.localStorage.getItem(STORE_DEVICE_SENT_KEY)).toBe(raw);
-  });
-
-  it('保存領域ごと読めないときは ok: false だけ (値が壊れているのと区別する)', () => {
-    const getItem = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new Error('denied'); });
-    try {
-      expect(readSentMarks()).toEqual({ ok: false });
-    } finally {
-      getItem.mockRestore();
-    }
   });
 
   it('壊れた印の端末では送らない (署名・送信をせず、印の値もそのまま)', async () => {

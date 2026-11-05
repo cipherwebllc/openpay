@@ -44,6 +44,10 @@ import {
   useStoreDeviceRegister,
   type StoreDeviceRegisterInput,
 } from '@/hooks/useStoreDeviceRegister';
+import { STORE_DEVICE_MARKS_UNREADABLE_WAIT_SEC } from '@/lib/storeDevicePayment';
+
+// 送った印を確かめられないときに次の決済を止める時間 (最大の有効期限 180 秒 + 時計のずれの余裕 30 秒 × 2)。
+const WAIT_MS = STORE_DEVICE_MARKS_UNREADABLE_WAIT_SEC * 1000;
 
 const SHOP = getAddress('0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913');
 const input: StoreDeviceRegisterInput = {
@@ -369,15 +373,18 @@ describe('useStoreDeviceRegister (レジ端末: 受け渡し → 確かめて送
     expect(result.current.state).toMatchObject({ phase: 'received', previous: true });
   });
 
-  // 第 9 回レビュー E-8 (Codex): 前回の送信の後に印の値が壊れ、保存のセッションも無いと、起動時は「何もしていない」の
-  // まま通常の QR に切り替えられ、前回の入金を確かめずに別の支払いを始められた。
-  it('E-8: 起動時に印の値が壊れていたら、店員が確かめて閉じるまで次の QR も通常の QR もタブの移動も止める', async () => {
-    send.readSentMarks.mockReturnValue({ ok: false, corrupt: true });
+  // 第 9 回レビュー E-8 (Codex): 前回の送信の後に印を読めなくなり (値が壊れた・保存領域を読めない)、保存のセッションも
+  // 無いと、起動時は「何もしていない」のまま通常の QR に切り替えられ、前回の入金を確かめずに別の支払いを始められた。
+  // 「いま読めない」は「前に送っていない」の証明にならないので止め、前の送信が期限を過ぎる時間が過ぎるまで閉じさせない
+  // (店員が入金の記録に無いと確かめても、その後に成立しうる)。
+  it('E-8: 起動時に印を読めなければ、最大の有効期限 + 余裕が過ぎるまで次の QR も通常の QR もタブの移動も止め、閉じさせない', async () => {
+    send.readSentMarks.mockReturnValue({ ok: false });
+    const t0 = Date.now();
     const { result, rerender } = renderHook((p: StoreDeviceRegisterInput) => useStoreDeviceRegister(p), {
       initialProps: input,
     });
     await advance(0);
-    expect(result.current.state).toEqual({ phase: 'marks_unreadable' });
+    expect(result.current.state).toEqual({ phase: 'marks_unreadable', until: t0 + WAIT_MS });
     expect(result.current.busy).toBe(true);
     let next!: unknown;
     let normal!: boolean;
@@ -393,9 +400,17 @@ describe('useStoreDeviceRegister (レジ端末: 受け渡し → 確かめて送
     expect(calls).toHaveLength(0);
     // 送る設定を OFF にしても止めたまま (前の送信の行方は送る設定と関係ない)
     rerender({ ...input, enabled: false, monitor: true });
-    expect(result.current.state).toEqual({ phase: 'marks_unreadable' });
+    expect(result.current.state).toMatchObject({ phase: 'marks_unreadable' });
     expect(result.current.busy).toBe(true);
-    // 店員が入金の記録で確かめて閉じたら、通常の QR を出せる
+    // 時間が過ぎる前は閉じられない (直後も、1 秒前も)
+    act(() => result.current.dismiss());
+    expect(result.current.state).toMatchObject({ phase: 'marks_unreadable' });
+    await advance(WAIT_MS - 1_000);
+    act(() => result.current.dismiss());
+    expect(result.current.state).toMatchObject({ phase: 'marks_unreadable' });
+    expect(result.current.busy).toBe(true);
+    // 過ぎたら、店員が入金の記録を確かめて閉じられ、通常の QR を出せる
+    await advance(1_000);
     act(() => result.current.dismiss());
     expect(result.current.state).toEqual({ phase: 'idle' });
     await act(async () => {
@@ -404,10 +419,45 @@ describe('useStoreDeviceRegister (レジ端末: 受け渡し → 確かめて送
     expect(normal).toBe(true);
   });
 
-  it('E-8: 起動時に保存領域ごと読めない (値が壊れているのではない) ときは止めない (従来どおり)', async () => {
+  // 止めは表示と別に持つ: 確かめられない間に前のタブの署名を処理し、送らずに終わった (rejected = 止めない表示) としても、
+  // 時間が過ぎるまでは次の QR も通常の QR も出さない (閉じると「記録を読めない」の残り時間に戻る)。
+  it('E-8: 印を読めない間に前のタブの署名の処理が送らずに終わっても、時間が過ぎるまで止めを外さない', async () => {
     send.readSentMarks.mockReturnValue({ ok: false });
+    send.verifyDeviceAuth.mockResolvedValue({ ok: false, reason: 'merchant_mismatch' });
+    window.sessionStorage.setItem(STORE_DEVICE_SESSION_KEY, JSON.stringify({ id: ID, token: TOKEN, expiresAt: nowSec() + 300, merchant: SHOP, amount: AMOUNT.toString(), chainId: 80002 }));
+    // 起動時の確認が印を読み終えてから締め切りの応答を返す (「再読み込み後」のテストと同じ理由)
+    let releaseClose!: () => void;
+    const closeHeld = new Promise<void>((resolve) => { releaseClose = resolve; });
+    closeRes = () => closeHeld.then(() => json({ ok: true, closed: false, auth: AUTH, txHash: null }));
+    const t0 = Date.now();
     const { result } = renderHook(() => useStoreDeviceRegister(input));
+    await act(async () => {
+      await vi.waitFor(() => expect(send.readSentMarks).toHaveBeenCalledTimes(1), { timeout: 2000 });
+    });
+    // vi.waitFor は待つ間に fake の時計を進める (分かった時刻は t0 から少し後)
+    expect(result.current.state).toMatchObject({ phase: 'marks_unreadable' });
+    const until = (result.current.state as { until: number }).until;
+    expect(until - t0).toBeGreaterThanOrEqual(WAIT_MS);
+    expect(until - t0).toBeLessThan(WAIT_MS + 2_000);
+    await act(async () => {
+      releaseClose();
+      await vi.waitFor(() => expect(send.verifyDeviceAuth).toHaveBeenCalledTimes(1), { timeout: 2000 });
+    });
     await advance(0);
+    expect(result.current.state).toEqual({ phase: 'rejected', reason: 'merchant_mismatch' });
+    expect(result.current.busy).toBe(true);
+    let next!: unknown;
+    let normal!: boolean;
+    await act(async () => {
+      next = await result.current.start(SHOP, AMOUNT, 80002);
+      normal = await result.current.releaseForNormal();
+    });
+    expect(next).toBeNull();
+    expect(normal).toBe(false);
+    act(() => result.current.dismiss());
+    expect(result.current.state).toEqual({ phase: 'marks_unreadable', until });
+    await advance(until - Date.now());
+    act(() => result.current.dismiss());
     expect(result.current.state).toEqual({ phase: 'idle' });
     expect(result.current.busy).toBe(false);
   });
@@ -1557,7 +1607,8 @@ describe('useStoreDeviceRegister: 店の tx の revert・判定が返す tx・�
   // 「お支払いは行われていません」を出して次の QR を許し、同じ会計を二重に払わせうる。このタブで書いた印の写しを見る。
   it('#762: 送信の中の例外の後に印を読めなくても、このタブで書いた印があれば「送っていない」と言わない (unknown)', async () => {
     send.sendStoreDeviceSettle.mockRejectedValueOnce(new Error('boom'));
-    send.readSentMarks.mockReturnValue({ ok: false });
+    // 起動時の確認では読めた (印なし)・例外の後は読めない
+    send.readSentMarks.mockReturnValueOnce({ ok: true, marks: [] }).mockReturnValue({ ok: false });
     send.sentMarkWrittenThisTab.mockImplementation((nonce: string) => (nonce.toLowerCase() === MARK.nonce.toLowerCase() ? MARK : null));
     readRes = signed;
     const { result } = renderHook(() => useStoreDeviceRegister(input));
@@ -1571,12 +1622,12 @@ describe('useStoreDeviceRegister: 店の tx の revert・判定が返す tx・�
   // (同じ受け渡しを開いた別のタブが送った印を読めていない) → 「送っていない」と言わず、確かめられるまで止める。
   it('E-8: 印を読めず、このタブで書いた印も無いときは「送っていない」と言わず、確かめられるまで次の決済を止める', async () => {
     send.sendStoreDeviceSettle.mockRejectedValueOnce(new Error('boom'));
-    send.readSentMarks.mockReturnValue({ ok: false });
+    send.readSentMarks.mockReturnValueOnce({ ok: true, marks: [] }).mockReturnValue({ ok: false });
     readRes = signed;
     const { result } = renderHook(() => useStoreDeviceRegister(input));
     await started(result);
     await advance(3_000);
-    expect(result.current.state).toEqual({ phase: 'marks_unreadable' });
+    expect(result.current.state).toEqual({ phase: 'marks_unreadable', until: Date.now() + WAIT_MS });
     expect(result.current.busy).toBe(true);
     let normal!: boolean;
     await act(async () => {
@@ -1588,16 +1639,34 @@ describe('useStoreDeviceRegister: 店の tx の revert・判定が返す tx・�
     expect(send.sendStoreDeviceSettle).toHaveBeenCalledTimes(1);
   });
 
-  it('E-8: 印の値が壊れていて送らなかった (storage) ときは「お支払いは行われていません」ではなく、確かめられるまで止める', async () => {
-    // 起動時の確認では読めた (印なし)・送る時点では壊れている
-    send.readSentMarks.mockReturnValueOnce({ ok: true, marks: [] }).mockReturnValue({ ok: false, corrupt: true });
+  it('E-8: 印を読めずに送らなかった (storage) ときは「お支払いは行われていません」ではなく、確かめられるまで止める', async () => {
+    // 起動時の確認では読めた (印なし)・送る時点では読めない
+    send.readSentMarks.mockReturnValueOnce({ ok: true, marks: [] }).mockReturnValue({ ok: false });
     send.sendStoreDeviceSettle.mockResolvedValueOnce({ kind: 'not_sent', reason: 'storage' });
     readRes = signed;
     const { result } = renderHook(() => useStoreDeviceRegister(input));
     await started(result);
     await advance(3_000);
-    expect(result.current.state).toEqual({ phase: 'marks_unreadable' });
+    expect(result.current.state).toEqual({ phase: 'marks_unreadable', until: Date.now() + WAIT_MS });
     expect(result.current.busy).toBe(true);
+  });
+
+  // 第 9 回レビュー E-8 (Codex MUST 2): storage の後に読み直して別のタブの同じ署名の印が見えたのに、「送っていない」・
+  // 「もう一度送る」を出して通常の QR を許していた。印があれば送ったかもしれない = 結果を確かめる。
+  it('E-8: storage の後の読み直しでこの署名の印 (別のタブが送った) が見えたら、結果が分からない (unknown) として判定を待つ', async () => {
+    send.readSentMarks.mockReturnValueOnce({ ok: true, marks: [] }).mockReturnValue({ ok: true, marks: [MARK] });
+    send.sendStoreDeviceSettle.mockResolvedValueOnce({ kind: 'not_sent', reason: 'storage' });
+    readRes = signed;
+    const { result } = renderHook(() => useStoreDeviceRegister(input));
+    await started(result);
+    await advance(3_000);
+    expect(result.current.state).toEqual({ phase: 'unknown', mark: MARK, previous: false });
+    expect(result.current.busy).toBe(true);
+    act(() => result.current.retry());
+    expect(send.sendStoreDeviceSettle).toHaveBeenCalledTimes(1);
+    resolveRes = () => json({ ok: true, state: 'settled', txHash: HASH });
+    await advance(10_000);
+    expect(result.current.state).toMatchObject({ phase: 'received', finalized: true, mark: { hash: HASH } });
   });
 
   it('E-8: 印は読めて保存だけできなかった (storage) ときは従来どおり送っていない (もう一度送れる)', async () => {
