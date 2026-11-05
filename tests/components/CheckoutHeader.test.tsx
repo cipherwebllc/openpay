@@ -657,6 +657,9 @@ const CASES: Case[] = [
   // 「別のチェーンで払う」を止める条件 (CheckoutForm の chainSwitchLocked) は重なって立つことが多い。relay の完了では
   // completed と settledNoRetry (relay.data.success) が同時に立つので、片方を外しても上の状態では落ちない (#1024 の Codex
   // レビュー)。下の 2 つは 1 つの条件だけが立つ状態で、settledNoRetry と restoredCheckoutCompletion をそれぞれ単独で固定する。
+  // completed は単独では立たない: 経路ごとの完了 (通常決済の data・relay の data.success・gasless の data.success) は、どれも
+  // lib/paymentFlowGuards/checkout.ts の settledNoRetry の項にそのまま入っているので、completed が立てば settledNoRetry も立つ
+  // (chainSwitchLocked から completed だけを外しても振る舞いは変わらず、落とせる状態が無い)。
   {
     name: 'チェーン 2 つ・relay の結果が保留 (pending・送信は終わった・未完了): 出さない (settledNoRetry だけが立つ)',
     // relay が broadcast 済みで結果が保留: 送信中でも完了でもない (isPending false・success false) が、再送を止める
