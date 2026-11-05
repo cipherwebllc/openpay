@@ -336,3 +336,158 @@ describe('OrderLinkVerify: 届いた支払いのカードの色', () => {
     expect(icon).toContain(iconClass(CheckCircle2));
   });
 });
+
+// 第 9 回レビュー D-3: 確定する前の取引・確定を確かめられない取引は「届いています」と緑のカードにしない。
+// 発送を決めるのは確定した支払いなので、この端末の記録 (使い回しの検知) にも確定したものだけを残す。
+describe('OrderLinkVerify: 確定していない支払い', () => {
+  const received = (status: string, confirmation: string) => ({ ...paidResult('3465', confirmation), status });
+
+  async function card(status: string, confirmation: string) {
+    check.mockResolvedValue(found(received(status, confirmation)));
+    const { container } = render(<OrderLinkVerify chains={['polygon']} receiver={RECEIVER} />);
+    paste(HASH);
+    const headline = await screen.findByText(/3,465 JPYC の支払いが見つかりましたが/);
+    const region = container.querySelector('[aria-live="polite"]') as HTMLElement;
+    return { card: headline.closest('.rounded-xl') as HTMLElement, region };
+  }
+
+  it('確定していなければ「まだ確定していません」と、確定してから発送する案内を黄のカードで出す (署名が確かめられても緑にしない)', async () => {
+    const { card: c, region } = await card('pending', 'verified');
+    expect(screen.getByText('受取ウォレットへの 3,465 JPYC の支払いが見つかりましたが、まだ確定していません')).toBeInTheDocument();
+    expect(screen.getByText(/確定する前の取引は、チェーンから消えることがあります/)).toBeInTheDocument();
+    expect(screen.queryByText(/JPYC 届いています/)).toBeNull();
+    expect(c.className).toContain('bg-amber-50');
+    expect(region.innerHTML).not.toMatch(/emerald/);
+    expect(region.querySelector(`svg.${iconClass(CheckCircle2)}`)).toBeNull();
+    // 確定していない支払いはこの端末の記録に残さない (確定した後に確かめ直したとき「前にも確かめた」にしない)
+    expect(localStorage.getItem(CHECKED_KEY)).toBeNull();
+    expect(screen.queryByText(/この端末で確かめた記録だけで見ています/)).toBeNull();
+  });
+
+  it('確定を確かめられなければ「確定は確かめられませんでした」を黄のカードで出す', async () => {
+    const { card: c } = await card('finalityUnchecked', 'verified');
+    expect(
+      screen.getByText('受取ウォレットへの 3,465 JPYC の支払いが見つかりましたが、確定は確かめられませんでした'),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/チェーンに確定を問い合わせできませんでした/)).toBeInTheDocument();
+    expect(c.className).toContain('bg-amber-50');
+    expect(localStorage.getItem(CHECKED_KEY)).toBeNull();
+  });
+
+  it('確定していなくても、払った人の署名でなければ赤系のカードのまま', async () => {
+    const { card: c } = await card('pending', 'mismatch');
+    expect(c.className).toContain('bg-rose-50');
+    expect(screen.getByText(/この支払いをしたウォレットの署名ではありません/)).toBeInTheDocument();
+  });
+
+  // Codex SHOULD: ブロックを読めなかった (時刻が無い) 支払いも、額とブロックの番号は出す (時刻を作らない)。
+  it('ブロックの時刻が無ければ、時刻を出さずブロックの番号だけを出す', async () => {
+    check.mockResolvedValue(found({ ...received('finalityUnchecked', 'unsigned'), timestamp: null }));
+    render(<OrderLinkVerify chains={['polygon']} receiver={RECEIVER} />);
+    paste(HASH);
+    expect(await screen.findByText('ブロック #123')).toBeInTheDocument();
+    expect(screen.getByText(/3,465 JPYC の支払いが見つかりましたが、確定は確かめられませんでした/)).toBeInTheDocument();
+  });
+
+  // Codex NIT: 確定していない支払いに「… で払われています」と出さず、見つかったチェーンとだけ言う。
+  it('複数のチェーンを探したとき、確定していなければ「見つかったチェーン」とだけ出し、確定したら「で払われています」', async () => {
+    check.mockResolvedValueOnce(found(received('pending', 'verified'), 'kaia'));
+    const { unmount } = render(<OrderLinkVerify chains={['polygon', 'kaia']} receiver={RECEIVER} />);
+    paste(HASH);
+    expect(await screen.findByText(/^見つかったチェーン: /)).toBeInTheDocument();
+    expect(screen.queryByText(/で払われています/)).toBeNull();
+    unmount();
+    check.mockResolvedValueOnce(found(paidResult('3465', 'verified'), 'kaia'));
+    render(<OrderLinkVerify chains={['polygon', 'kaia']} receiver={RECEIVER} />);
+    paste(HASH);
+    expect(await screen.findByText(/で払われています/)).toBeInTheDocument();
+    expect(screen.queryByText(/見つかったチェーン/)).toBeNull();
+  });
+});
+
+// 第 9 回レビュー E-7: 確認の署名を確かめる問い合わせが RPC に届かなかったときは、他人の Tx Hash とは言わず、
+// 確かめられなかったと伝える (黄のカード)。
+describe('OrderLinkVerify: 確認の署名を確かめられないとき', () => {
+  it('「確認の署名を確かめられませんでした。もう一度お試しください。」を黄のカードで出し、他人の Tx Hash とは言わない', async () => {
+    check.mockResolvedValue(found(paidResult('3465', 'unchecked')));
+    const { container } = render(<OrderLinkVerify chains={['polygon']} receiver={RECEIVER} />);
+    paste(HASH);
+    const headline = await screen.findByText('受取ウォレットに 3,465 JPYC 届いています');
+    expect(screen.getByText('確認の署名を確かめられませんでした。もう一度お試しください。')).toBeInTheDocument();
+    expect(screen.queryByText(/他人の Tx Hash/)).toBeNull();
+    expect((headline.closest('.rounded-xl') as HTMLElement).className).toContain('bg-amber-50');
+    const region = container.querySelector('[aria-live="polite"]') as HTMLElement;
+    expect(region.querySelector(`svg.${iconClass(AlertTriangle)}`)).not.toBeNull();
+  });
+});
+
+// 第 9 回レビュー E-6: 使い回しの検知はこの端末の記録だけ。そのことを伝え、記録できないときは「初めて」に見せない。
+describe('OrderLinkVerify: この端末の記録', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('確定した支払いには、使い回しをこの端末の記録で見ていることを添える (前に確かめたときも)', async () => {
+    check.mockResolvedValue(found(paidResult('3465', 'verified')));
+    render(<OrderLinkVerify chains={['polygon']} receiver={RECEIVER} />);
+    paste(HASH);
+    expect(await screen.findByText('同じ Tx Hash の使い回しは、この端末で確かめた記録だけで見ています。')).toBeInTheDocument();
+    paste(`Tx Hash: ${HASH}`);
+    expect(await screen.findByText(/にも確かめています/)).toBeInTheDocument();
+    expect(screen.getByText(/この端末で確かめた記録だけで見ています/)).toBeInTheDocument();
+  });
+
+  it('この端末に記録を残せなければ (setItem が throw)、使い回しを確かめられないと伝える', async () => {
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new Error('quota');
+    });
+    check.mockResolvedValue(found(paidResult('3465', 'verified')));
+    render(<OrderLinkVerify chains={['polygon']} receiver={RECEIVER} />);
+    paste(HASH);
+    expect(await screen.findByText(/この端末の記録では、以前にも確かめた支払いかを確かめられません/)).toBeInTheDocument();
+    expect(screen.queryByText(/この端末で確かめた記録だけで見ています/)).toBeNull();
+    // 2 回目も前に確かめたかは分からないので、同じ注意を出す
+    paste(`Tx Hash: ${HASH}`);
+    await waitFor(() => expect(check).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText(/以前にも確かめた支払いかを確かめられません/)).toBeInTheDocument();
+  });
+});
+
+// Codex SHOULD: paid 以外の結果を採ったとき、答えなかった・問い合わせできなかったチェーンを隠さない
+// (「Polygon で失敗・Kaia は未応答」を「支払いは届いていません」だけにしない)。
+describe('OrderLinkVerify: 答えなかったチェーン', () => {
+  it('失敗した取引の結果に、どのチェーンの取引かと、問い合わせできなかったチェーンを添える', async () => {
+    check.mockResolvedValue({ chain: 'polygon', result: { status: 'failed' }, unreachable: ['kaia'] });
+    render(<OrderLinkVerify chains={['polygon', 'kaia']} receiver={RECEIVER} />);
+    paste(HASH);
+    expect(await screen.findByText(/この取引は失敗しています/)).toBeInTheDocument();
+    expect(screen.getByText(/^見つかったチェーン: /)).toBeInTheDocument();
+    expect(screen.getByText(/に問い合わせできませんでした。少し待ってからもう一度押してください。/)).toBeInTheDocument();
+  });
+
+  it('別の宛先の取引・確定していない支払いにも、問い合わせできなかったチェーンを添える', async () => {
+    check.mockResolvedValueOnce({ chain: 'polygon', result: { status: 'notToReceiver' }, unreachable: ['kaia'] });
+    const { unmount } = render(<OrderLinkVerify chains={['polygon', 'kaia']} receiver={RECEIVER} />);
+    paste(HASH);
+    expect(await screen.findByText(/に JPYC は届いていません/)).toBeInTheDocument();
+    expect(screen.getByText(/に問い合わせできませんでした/)).toBeInTheDocument();
+    unmount();
+    check.mockResolvedValueOnce({
+      chain: 'polygon',
+      result: { ...paidResult('3465', 'verified'), status: 'pending' },
+      unreachable: ['kaia'],
+    });
+    render(<OrderLinkVerify chains={['polygon', 'kaia']} receiver={RECEIVER} />);
+    paste(HASH);
+    expect(await screen.findByText(/まだ確定していません/)).toBeInTheDocument();
+    expect(screen.getByText(/に問い合わせできませんでした/)).toBeInTheDocument();
+  });
+
+  it('問い合わせできなかったチェーンが無ければ添えない', async () => {
+    check.mockResolvedValue({ chain: 'polygon', result: { status: 'failed' }, unreachable: [] });
+    render(<OrderLinkVerify chains={['polygon', 'kaia']} receiver={RECEIVER} />);
+    paste(HASH);
+    expect(await screen.findByText(/この取引は失敗しています/)).toBeInTheDocument();
+    expect(screen.queryByText(/に問い合わせできませんでした/)).toBeNull();
+  });
+});

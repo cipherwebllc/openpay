@@ -21,31 +21,40 @@ import { shortAddress } from '@/lib/format';
 import {
   checkOrderLinkPaymentOnChains,
   extractTxHash,
+  isReceivedPayment,
   rememberCheckedPayment,
+  type CheckedBefore,
   type OrderConfirmationCheck,
   type OrderLinkPaymentCheck,
+  type ReceivedPayment,
 } from '@/lib/orderLinkVerify';
 import { ORDER_LINK_INPUT_CLASS } from './OrderLinkAmountField';
 
 type Done = {
   result: OrderLinkPaymentCheck;
   hash: string | null;
-  /** 取引が見つかったチェーン (見つからなければ受け付けるチェーンの先頭)。 */
+  /** 取引が見つかったチェーン (見つからなければ探したチェーンの先頭)。 */
   chain: ChainSlug;
-  /** 受け付けるチェーン (複数なら全部を探した)。 */
+  /** 探したチェーン (複数なら全部を探した)。 */
   chains: readonly ChainSlug[];
   /** 問い合わせできなかったチェーン。 */
   unreachable: ChainSlug[];
   receiver: Address;
-  /** 同じ支払いを前に確かめた時刻 (ms・この端末)。2 つの注文に使い回されていないかを知らせる。 */
-  checkedBefore: number | null;
+  /**
+   * 同じ支払いを前に確かめた時刻 (ms・この端末の記録)。2 つの注文に使い回されていないかを知らせる。
+   * 'unavailable' = この端末では記録を読めない・残せない。届いていて確定した支払い (paid) のときだけ見る。
+   */
+  checkedBefore: CheckedBefore;
 };
 
 export function OrderLinkVerify({
   chains,
   receiver,
 }: {
-  /** 受け付けるチェーン (先頭が主)。全部を探し、見つかったチェーンで判定する。 */
+  /**
+   * 探すチェーン。全部を探し、見つかったチェーンで判定する。今の設定の受取チェーンだけでなく、注文リンクで受け付けうる
+   * JPYC のチェーンを全部渡す (受取チェーンを変えた後に、前のチェーンで払われた注文を確かめられるように・第 9 回レビュー D-4)。
+   */
   chains: readonly ChainSlug[];
   receiver: Address | null;
 }) {
@@ -150,9 +159,10 @@ export function OrderLinkVerify({
   );
 }
 
-// 結果のカードの配色とアイコン。緑とチェックは「発送してよい」と読まれるので、払ったウォレットの確認の署名が確かめられた
-// 支払いだけに使う (第 9 回レビュー E-5: 他人の Tx Hash を署名なしで貼られても、大きな緑のチェックの下の小さな注意を
-// 見落とさないように)。黄 = お客様に確かめてから発送・赤系 = 発送を止めて確かめる (カードの中の注意の段落と同じ意味)。
+// 結果のカードの配色とアイコン。緑とチェックは「発送してよい」と読まれるので、確定した支払いで、払ったウォレットの確認の
+// 署名が確かめられたときだけに使う (第 9 回レビュー E-5: 他人の Tx Hash を署名なしで貼られても、大きな緑のチェックの下の
+// 小さな注意を見落とさないように・D-3: 確定する前の取引は消えることがある)。黄 = 確かめてから発送・赤系 = 発送を止めて
+// 確かめる (カードの中の注意の段落と同じ意味)。
 type VerifyTone = 'ok' | 'caution' | 'danger';
 
 const TONE_STYLE: Record<VerifyTone, { card: string; Icon: LucideIcon; icon: string }> = {
@@ -161,17 +171,24 @@ const TONE_STYLE: Record<VerifyTone, { card: string; Icon: LucideIcon; icon: str
   danger: { card: 'bg-rose-50 text-rose-900 ring-rose-200', Icon: ShieldAlert, icon: 'text-rose-600' },
 };
 
-/** 届いた支払いのカードの色。確認の署名の照合 (lib/orderLinkVerify) で決める。 */
-function paidTone(confirmation: OrderConfirmationCheck): VerifyTone {
+/** 確認の署名の照合 (lib/orderLinkVerify) の色。確かめられなかった (unchecked) は他人の署名と言わず黄にする。 */
+function confirmationTone(confirmation: OrderConfirmationCheck): VerifyTone {
   switch (confirmation) {
     case 'verified':
       return 'ok';
     case 'unsigned':
+    case 'unchecked':
       return 'caution';
     case 'mismatch':
     case 'unverifiable':
       return 'danger';
   }
+}
+
+/** 届いた支払いのカードの色。確定していない・確定を確かめられないときは、署名が確かめられても緑にしない。 */
+function receivedTone(result: Extract<OrderLinkPaymentCheck, ReceivedPayment>): VerifyTone {
+  const tone = confirmationTone(result.confirmation);
+  return result.status === 'paid' || tone === 'danger' ? tone : 'caution';
 }
 
 function ResultCard({ tone, children }: { tone: VerifyTone; children: ReactNode }) {
@@ -184,10 +201,18 @@ function ResultCard({ tone, children }: { tone: VerifyTone; children: ReactNode 
   );
 }
 
+const NOTE_CAUTION = 'mt-2 rounded-lg bg-amber-100 px-2 py-1.5 text-xs font-semibold leading-relaxed text-amber-900';
+const NOTE_DANGER = 'mt-2 rounded-lg bg-rose-100 px-2 py-1.5 text-xs font-semibold leading-relaxed text-rose-900';
+
 function VerifyResult({ done, locale }: { done: Done; locale: string }) {
   const t = useTranslations('OrderLinkBuilder');
   const { result } = done;
-  if (result.status === 'paid') {
+  const names = (chains: readonly ChainSlug[]) => chains.map((chain) => chainForSlug(chain).name).join(' / ');
+  // paid 以外の結果を採ったときに、答えなかった・問い合わせできなかったチェーン (そこにもっと上の結果があったかも
+  // しれない)。採った結果と併記する (lib/orderLinkVerify の unreachable)。
+  const unreachableNote =
+    done.unreachable.length > 0 ? <p className={NOTE_CAUTION}>{t('verifyUnreachable', { chains: names(done.unreachable) })}</p> : null;
+  if (isReceivedPayment(result)) {
     const format = (ms: number) =>
       new Date(ms).toLocaleString(locale === 'en' ? 'en-US' : 'ja-JP', {
         month: 'numeric',
@@ -195,41 +220,71 @@ function VerifyResult({ done, locale }: { done: Done; locale: string }) {
         hour: '2-digit',
         minute: '2-digit',
       });
-    const time = format(result.timestamp * 1000);
+    // ブロックを読めなかったときは時刻が無い (ブロックの番号だけを出す)。
+    const time = result.timestamp === null ? null : format(result.timestamp * 1000);
+    const amount = groupAmountDigits(result.received);
+    const tone = receivedTone(result);
     return (
-      <ResultCard tone={paidTone(result.confirmation)}>
+      <ResultCard tone={tone}>
         <div className="min-w-0 text-sm">
-          <p className="font-semibold">{t('verifyPaid', { amount: groupAmountDigits(result.received) })}</p>
+          {/* 「届いています」は確定した取引だけ (lib/jpyc/finality)。確定する前・確定を確かめられないときはそう言う。 */}
+          <p className="font-semibold">
+            {result.status === 'paid'
+              ? t('verifyPaid', { amount })
+              : result.status === 'pending'
+                ? t('verifyPending', { amount })
+                : t('verifyFinalityUnchecked', { amount })}
+          </p>
+          {/* 確定していない支払いは「払われています」と言わず、見つかったチェーンとだけ言う。 */}
           {done.chains.length > 1 && (
-            <p className="mt-0.5 text-xs font-semibold">{t('verifyPaidChain', { chain: chainForSlug(done.chain).name })}</p>
+            <p className="mt-0.5 text-xs font-semibold">
+              {t(result.status === 'paid' ? 'verifyPaidChain' : 'verifyFoundChain', { chain: chainForSlug(done.chain).name })}
+            </p>
           )}
-          <p className="mt-0.5 text-xs">{t('verifyPaidMeta', { time, block: result.blockNumber.toString() })}</p>
+          <p className="mt-0.5 text-xs">
+            {time === null
+              ? t('verifyPaidBlock', { block: result.blockNumber.toString() })
+              : t('verifyPaidMeta', { time, block: result.blockNumber.toString() })}
+          </p>
+          {result.status !== 'paid' && (
+            <p className={NOTE_CAUTION}>
+              {t(result.status === 'pending' ? 'verifyPendingNote' : 'verifyFinalityUncheckedNote')}
+            </p>
+          )}
+          {unreachableNote}
           <p className="mt-1 text-xs leading-relaxed">{t('verifyPaidNote')}</p>
           {/* 確認の署名: 文を送った人が、この支払いをしたウォレットの持ち主か (Tx Hash は誰でも見られる)。 */}
           {result.confirmation === 'verified' ? (
             <p className="mt-2 inline-flex items-start gap-1 text-xs font-semibold leading-relaxed">
-              <ShieldCheck className="mt-px h-3.5 w-3.5 flex-none text-emerald-600" aria-hidden />
+              {/* 確定していないカードでは緑を使わない (署名が確かめられても、まだ発送してよいとは読ませない)。 */}
+              <ShieldCheck className={`mt-px h-3.5 w-3.5 flex-none ${tone === 'ok' ? 'text-emerald-600' : ''}`} aria-hidden />
               {t('verifyConfirmed', { payer: result.payer ? shortAddress(result.payer) : '' })}
             </p>
           ) : result.confirmation === 'mismatch' || result.confirmation === 'unverifiable' ? (
-            <p className="mt-2 rounded-lg bg-rose-100 px-2 py-1.5 text-xs font-semibold leading-relaxed text-rose-900">
+            <p className={NOTE_DANGER}>
               {t(result.confirmation === 'mismatch' ? 'verifyMismatch' : 'verifyUnverifiable')}
             </p>
           ) : (
-            <p className="mt-2 rounded-lg bg-amber-100 px-2 py-1.5 text-xs font-semibold leading-relaxed text-amber-900">
-              {t('verifyUnsigned')}
+            <p className={NOTE_CAUTION}>
+              {t(result.confirmation === 'unchecked' ? 'verifyConfirmationUnchecked' : 'verifyUnsigned')}
             </p>
           )}
-          {done.checkedBefore !== null && (
-            <p className="mt-2 rounded-lg bg-amber-100 px-2 py-1.5 text-xs font-semibold leading-relaxed text-amber-900">
-              {t('verifyCheckedBefore', { time: format(done.checkedBefore) })}
-            </p>
-          )}
+          {/* 使い回しはこの端末の記録だけで見ている (第 9 回レビュー E-6)。記録したのは確定した支払いだけ。 */}
+          {result.status === 'paid' &&
+            (done.checkedBefore === 'unavailable' ? (
+              <p className={NOTE_CAUTION}>{t('verifyCheckedUnavailable')}</p>
+            ) : (
+              <>
+                {done.checkedBefore !== null && (
+                  <p className={NOTE_CAUTION}>{t('verifyCheckedBefore', { time: format(done.checkedBefore) })}</p>
+                )}
+                <p className="mt-1 text-xs leading-relaxed">{t('verifyCheckedLocal')}</p>
+              </>
+            ))}
         </div>
       </ResultCard>
     );
   }
-  const names = (chains: readonly ChainSlug[]) => chains.map((chain) => chainForSlug(chain).name).join(' / ');
   const message =
     result.status === 'notToReceiver'
       ? t('verifyNotToReceiver', { receiver: shortAddress(done.receiver) })
@@ -238,9 +293,18 @@ function VerifyResult({ done, locale }: { done: Done; locale: string }) {
         : result.status === 'error' && done.chains.length > 1 && done.unreachable.length > 0
           ? t('verifyUnreachable', { chains: names(done.unreachable) })
           : t(`verify.${result.status}`);
+  // 取引は見つかったが届いていない (失敗・別の宛先): どのチェーンの取引かと、確かめられなかったチェーンを添える
+  // (「届いていません」だけを出して、答えなかったチェーンの支払いを隠さない)。
+  const negative = result.status === 'failed' || result.status === 'notToReceiver';
   return (
     <ResultCard tone="caution">
-      <p className="min-w-0 text-sm">{message}</p>
+      <div className="min-w-0 text-sm">
+        <p>{message}</p>
+        {negative && done.chains.length > 1 && (
+          <p className="mt-0.5 text-xs font-semibold">{t('verifyFoundChain', { chain: chainForSlug(done.chain).name })}</p>
+        )}
+        {negative && unreachableNote}
+      </div>
     </ResultCard>
   );
 }
