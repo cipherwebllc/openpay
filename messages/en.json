@@ -1510,6 +1510,7 @@
     "checkoutTitle": "OpenPay Checkout",
     "orderHeading": "Order #{id}",
     "payToLabel": "To {addr}",
+    "storeNameUnverified": "The shop name was entered by whoever made this link and has not been verified.",
     "modeBadgeGasless": "No gas fee",
     "modeBadgeStandard": "Standard (you pay gas)",
     "itemsTitle": "Items",
@@ -1674,7 +1675,7 @@
     "chainPickOpening": "Opening…",
     "payOnOtherChain": "Pay on another chain",
     "payAgainAsNewOrder": "Pay for a new order",
-    "paidInThisTabNote": "You already paid in this tab. Send it with “Send your order” above."
+    "paidInThisTabNote": "You already paid in this tab. Let the shop know using the section above."
   },
   "CopyableField": {
     "copy": "Copy",
@@ -3592,7 +3593,7 @@
     "copy": "Copy link",
     "copied": "Copied",
     "share": "Send",
-    "shareText": "Here is the payment link for order {id}. After paying, please send us the Tx Hash from the completion screen.",
+    "shareText": "Here is the payment link for order {id}. After paying, please let us know with “Tell the shop” on the completion screen.",
     "open": "Open and check",
     "nextOrder": "Next order",
     "linkLabel": "Link to send to the customer",

@@ -1729,9 +1729,13 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
           {t('header')}
         </p>
         {/* 店名 (URL の store・お店が付けた名前)。DM で届いたリンクがどのお店のものかを示す。表示だけで、
-            受取先・金額・利用料には関与しない (受取先は下の「支払先」のアドレスが正)。 */}
+            受取先・金額・利用料には関与しない (受取先は下の「支払先」のアドレスが正)。誰でも好きな名前でリンクを
+            作れるので、確かめていない名前であることを下に添える (第 9 回レビュー D-1)。 */}
         {params.storeName && (
-          <p className="mt-1 break-words text-lg font-bold text-slate-900">{params.storeName}</p>
+          <>
+            <p className="mt-1 break-words text-lg font-bold text-slate-900">{params.storeName}</p>
+            <p className="mt-0.5 text-xs text-slate-600 [word-break:auto-phrase]">{t('storeNameUnverified')}</p>
+          </>
         )}
         <p className="mt-1 text-base font-semibold text-slate-800">
           {params.orderId ? t('orderHeading', { id: params.orderId }) : t('checkoutTitle')}
@@ -2004,7 +2008,9 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
         />
       )}
 
-      {/* このタブで払った会計: 払うボタンを止めた理由を出す (上の「注文を送る」から送る)。 */}
+      {/* このタブで払った会計: 払うボタンを止めた理由を出し、上の欄 (NotifyShopButton) を指す。ボタンの名前は書かない:
+          名前は状態で変わる (署名の前は「注文を送る」/「お店に知らせる」・署名の後や JPYC 以外は「LINE で送る」「送る」
+          「文をコピー」等) ので、名前を書くと見つからない場合がある (第 9 回レビュー D-2)。 */}
       {!completed && paidInThisTab && (
         <p className="text-center text-sm text-slate-700">{t('paidInThisTabNote')}</p>
       )}

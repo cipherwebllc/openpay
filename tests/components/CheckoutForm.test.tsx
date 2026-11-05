@@ -148,7 +148,9 @@ import { env } from '@/lib/env';
 import { loadHistory } from '@/lib/history';
 import { loadPayerReceipts } from '@/lib/payerReceipt';
 import { checkoutIntentContextFingerprint, orderLinkContextFingerprint } from '@/lib/checkoutIntentContext';
-import { rememberedOrderPayment } from '@/lib/orderConfirmation';
+import { rememberedOrderPayment, rememberOrderPayment, storeConfirmationSignature } from '@/lib/orderConfirmation';
+import { orderPaymentContextKey } from '@/lib/orderPaidLookup';
+import type { ChainSlug } from '@/lib/chains';
 import {
   RelayIpRateLimitedError,
   RelayResponseUnknownError,
@@ -591,6 +593,19 @@ describe('CheckoutForm — レンダリング', () => {
     expect(screen.queryByText('OpenPay 工房')).toBeNull();
   });
 
+  // 第 9 回レビュー D-1: 店名は誰でも好きに付けられる URL の値なので、確かめていない名前だと店名のすぐ下に添える。
+  it('店名があるときだけ、その下に「確かめられていません」の注記を出す', () => {
+    setAccount({ connected: false });
+    const NOTE = '店名はリンクを作った人が入力したもので、確かめられていません。';
+    const { unmount } = render(<CheckoutForm params={{ ...JPYC_PARAMS, storeName: 'OpenPay 工房' }} />);
+    const note = screen.getByText(NOTE);
+    // 店名の直後に置く (離れた場所に出しても店名の注記と読めない)
+    expect(screen.getByText('OpenPay 工房').nextElementSibling).toBe(note);
+    unmount();
+    render(<CheckoutForm params={JPYC_PARAMS} />);
+    expect(screen.queryByText(NOTE)).toBeNull();
+  });
+
   it('何度でも使える注文リンク (ship=ask) は、払う前にこの後お名前とお届け先を送ることと送り先を伝える', () => {
     setAccount({ connected: false });
     const { unmount } = render(
@@ -619,14 +634,44 @@ describe('CheckoutForm — レンダリング', () => {
     expect(await screen.findByText('このタブでのお支払いは済んでいます')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '注文を送る' })).toBeInTheDocument();
     // 払うボタンを止めた理由を出す。何度でも使えるリンクは「新しい注文として払う」で別の注文として払える
-    expect(screen.getByText('このタブでお支払い済みです。上の「注文を送る」から送ってください。')).toBeInTheDocument();
+    expect(screen.getByText('このタブでお支払い済みです。上の欄からお店に知らせてください。')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '新しい注文として払う' }));
-    expect(screen.queryByText('このタブでお支払い済みです。上の「注文を送る」から送ってください。')).toBeNull();
+    expect(screen.queryByText('このタブでお支払い済みです。上の欄からお店に知らせてください。')).toBeNull();
     unmount();
     // 明細の違う会計 (別の注文) では出さない
     render(<CheckoutForm params={{ ...params, items: [{ name: 'チケット', qty: 2, price: '3000' }] }} />);
     await waitFor(() => expect(screen.queryByText('このタブでのお支払いは済んでいます')).toBeNull());
     window.sessionStorage.clear();
+  });
+
+  // 第 9 回レビュー D-2: 払うボタンを止めた理由は上の欄を指すだけで、ボタンの名前を書かない。上の欄のボタンの名前は
+  // 状態で変わる (署名の前は「お店に知らせる」/「注文を送る」・署名の後・署名せずに進んだ後・JPYC 以外は「文をコピー」等)。
+  // どの状態でも同じ文が出ることを、その状態で実際に出ているボタンと一緒に確かめる。
+  it.each<[string, CheckoutParams, ChainSlug, 'signed' | 'otherWallet' | null, string]>([
+    ['番号つきの注文 (JPYC・署名の前)', { ...JPYC_PARAMS, orderId: 'ORD-77' }, 'polygon', null, 'お店に知らせる'],
+    ['何度でも使えるリンク (JPYC・署名の前)', { ...JPYC_PARAMS, ship: 'ask' }, 'polygon', null, '注文を送る'],
+    ['JPYC 以外 (署名を求めない)', USDC_PARAMS, 'base', null, '文をコピー'],
+    ['署名を済ませた後の読み直し', { ...JPYC_PARAMS, orderId: 'ORD-78' }, 'polygon', 'signed', '文をコピー'],
+    ['署名せずに進んだ後', { ...JPYC_PARAMS, orderId: 'ORD-79' }, 'polygon', 'otherWallet', '文をコピー'],
+  ])('このタブで払った記録があれば、%s でも払うボタンを止めた理由は同じ文 (ボタンの名前を書かない)', async (_label, params, chain, state, button) => {
+    const tx: Hex = `0x${'cd'.repeat(31)}${(params.orderId ?? 'ff').slice(-2).padStart(2, '0')}`;
+    const otherPayer: Address = '0x7777777777777777777777777777777777777777';
+    if (state === 'otherWallet') {
+      // 払ったウォレット (otherPayer) と今つないでいるウォレット (CUSTOMER) が違う: 署名させずに「署名せずに送る」を出す
+      setAccount({ connected: true, chainId: polygonAmoy.id });
+      setBalance(10_000n * 10n ** 18n);
+    }
+    rememberOrderPayment(orderPaymentContextKey(params, chain), {
+      txHash: tx,
+      ...(state === 'otherWallet' ? { payer: otherPayer } : {}),
+      paidAt: Date.now(),
+    });
+    if (state === 'signed') storeConfirmationSignature({ chain, shop: params.to, txHash: tx }, `0x${'12'.repeat(65)}`);
+    render(<CheckoutForm params={params} />);
+    expect(await screen.findByText('このタブでのお支払いは済んでいます')).toBeInTheDocument();
+    if (state === 'otherWallet') fireEvent.click(screen.getByRole('button', { name: '署名せずに送る' }));
+    expect(screen.getByRole('button', { name: button })).toBeInTheDocument();
+    expect(screen.getByText('このタブでお支払い済みです。上の欄からお店に知らせてください。')).toBeInTheDocument();
   });
 
   it('受け付けるチェーンが複数のリンクは、払う前なら「別のチェーンで払う」でチェーンを選ぶ画面へ戻れる', () => {
@@ -4410,7 +4455,7 @@ describe('CheckoutForm — 復元した決済の完了で「注文を送る」�
   const STANDARD_ORDER: CheckoutParams = { ...JPYC_PARAMS, orderId: 'ord-g1', mode: 'standard' };
   const RELAY_ORDER: CheckoutParams = { ...JPYC_PARAMS, ship: 'ask' };
   const RESTORED_TITLE = 'このタブでのお支払いは済んでいます';
-  const PAID_NOTE = 'このタブでお支払い済みです。上の「注文を送る」から送ってください。';
+  const PAID_NOTE = 'このタブでお支払い済みです。上の欄からお店に知らせてください。';
 
   function contextKeyOf(params: CheckoutParams): Hex {
     return checkoutIntentContextFingerprint({
