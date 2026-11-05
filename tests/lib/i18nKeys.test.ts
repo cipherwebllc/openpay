@@ -1,6 +1,8 @@
 // onramp / offramp 関連 i18n キーの存在と ja/en parity を fence するテスト。
 // 片方のロケールだけにキーを足して silent regression するのを防ぐ。
 import { describe, it, expect } from 'vitest';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import ja from '@/messages/ja.json';
 import en from '@/messages/en.json';
 import { FEE_BPS_GASLESS, FEE_BPS_STANDARD } from '@/lib/fee';
@@ -1183,7 +1185,6 @@ describe('i18n: History フィルタ/集計/会計CSV keys (ja/en parity)', () =
     'accountingNoRows',
     'accountingTooManyRows',
     'summaryTitle',
-    'summaryCountsLine',
     'summaryGmv',
     'gmvApproxChip',
     'gmvRateUnavailable',
@@ -1211,9 +1212,6 @@ describe('i18n: History フィルタ/集計/会計CSV keys (ja/en parity)', () =
   it('parameterized History keys が placeholder を含む (ja/en)', () => {
     for (const m of [ja, en]) {
       const h = m.History as Record<string, string>;
-      for (const ph of ['{total}', '{success}', '{reverted}', '{error}', '{pending}']) {
-        expect(h.summaryCountsLine).toContain(ph);
-      }
       expect(h.summaryGmv).toContain('{amount}');
       expect(h.accountingTooManyRows).toContain('{max}');
     }
@@ -1231,7 +1229,6 @@ describe('i18n: FreeeSync keys (ja/en parity)', () => {
     'accountItemLabel',
     'taxCodeLabel',
     'saveMapping',
-    'mappingSaved',
     'editMapping',
     'syncCta',
     'syncing',
@@ -1410,13 +1407,10 @@ describe('i18n: Billing 名前空間 (利用料 paywall・ja/en parity)', () => 
       for (const k of [
         'title',
         'intro',
-        'priceMonthly',
-        'priceAnnual',
         'payCta',
         'verifying',
         'granted',
         'verifyError',
-        'softGateNote',
       ]) {
         expect(typeof b[k]).toBe('string');
       }
@@ -1607,14 +1601,6 @@ describe('i18n: CsvPass 名前空間 (CSV 24時間パス paywall・ja/en parity)
       expect(p.payError).toContain('{reason}');
     }
   });
-
-  it('History.csvPassLockedNote が ja/en に存在 (パスゲートの cause-aware 文言)', () => {
-    for (const m of [ja, en]) {
-      const v = (m.History as Record<string, unknown>).csvPassLockedNote;
-      expect(typeof v).toBe('string');
-      expect(v).not.toBe('');
-    }
-  });
 });
 
 describe('i18n: @handle 名前空間 (ja/en parity)', () => {
@@ -1756,5 +1742,156 @@ describe('i18n: license UI の正確な namespace と key path', () => {
     expect(messages.CreatorStoreLicense.remaining).toContain('{supply}');
     expect(messages.CreatorStoreLicense.sellerThirdParty).toContain('{name}');
     expect(messages.CreatorStoreSeller.licenseRegistrationLabel).toContain('{state}');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 使われていないキーのフェンス (第 9 回レビュー F-06)。
+//
+// next-intl はキーを実行時に引くので、使われているキーを消しても typecheck と vitest は緑のまま、本番の画面に
+// キー名が出る。だから「未使用」の判定は保守的にする (未使用を見逃すのは可・使っているキーを未使用と言うのは不可):
+//   - 本番のソースのどこかに leaf 名 (パスの最後の段) が文字列の一部として 1 回でも出てくれば使用中とみなす。
+//     namespace + leaf の完全一致は求めない。t(key) の変数経由・別ファイルへ渡した t・Record で名前を引くキー
+//     (STATUS_I18N_KEY 等) も、leaf 名がどこかに書かれていれば使用中になる。
+//   - 本番のソース = repo 直下から歩いた .ts/.tsx/.js/.jsx/.mjs/.cjs。messages/ は判定の対象そのもの、
+//     tests/・e2e/・demo-e2e/ はテストだけが名前を書くキー (このファイルのキー一覧など) を本番で使っているとは
+//     言えないので除く。node_modules・ビルド出力・ドットで始まるディレクトリ (.next・.git・.claude の worktree 等) も除く。
+//   - leaf 名がソースに文字列として現れない動的なキーは DYNAMIC_KEY_PATTERNS に明示する。
+//
+// 落ちたとき:
+//   - 本当に使っていない → ja.json と en.json の同じ namespace から両方消す (掟 5・同名キーが別 namespace にある)。
+//     消す前に leaf 名と旧文言を components/ lib/ app/ messages/ tests/ e2e/ で grep する (掟 4)。
+//   - テンプレートリテラル等で組み立てて使っている → 消さずに DYNAMIC_KEY_PATTERNS に使う場所つきで足す。
+//   - LP (Landing.*)・法務・llms.txt に関わる公開文言 → 消すかは user が決める。決まるまで
+//     UNUSED_PUBLIC_COPY_PENDING に置く。
+
+/** messages の leaf のパス (配列は 1 つの leaf として扱う・既存の deepKeys と同じ)。 */
+function messageLeafPaths(value: unknown, prefix: readonly string[] = []): string[] {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return [prefix.join('.')];
+  }
+  return Object.entries(value as Record<string, unknown>).flatMap(([key, nested]) =>
+    messageLeafPaths(nested, [...prefix, key]),
+  );
+}
+
+/**
+ * leaf 名がソースに文字列として現れないので、名前の検索では「使用中」にならない動的なキー。
+ * パターンは使う場所のテンプレートの形 (固定の部分) に合わせて広めに書く — 形に当たる leaf はすべて使用中とみなす
+ * (見逃しは可・誤って消させるのは不可)。
+ */
+const DYNAMIC_KEY_PATTERNS: readonly { pattern: RegExp; site: string }[] = [
+  // --- leaf 名そのものを「接頭辞 + 値 + 接尾辞」で組み立てる。leaf 名はソースのどこにも書かれない。
+  { pattern: /^Landing\.benefits[^.]+(?:Focal|Title|Body)$/, site: 'components/LandingBenefits.tsx `benefits${id}Title`' },
+  { pattern: /^Landing\.cashCell[^.]+(?:Cash|Card|OpenPay)$/, site: 'components/LandingCashComparison.tsx `cashCell${id}Cash`' },
+  { pattern: /^Landing\.useCase[^.]+(?:Title|Body)$/, site: 'components/LandingUseCases.tsx `useCase${useCase.id}Title`' },
+  { pattern: /^Landing\.whyItem[^.]+(?:Title|Body)$/, site: 'components/LandingWhyStablecoin.tsx `whyItem${key}Title`' },
+  { pattern: /^Landing\.supportFee[^.]+(?:Focal|Title|Body)$/, site: 'app/[locale]/guide/start/page.tsx `supportFee${k}Title`' },
+  { pattern: /^ArcPayout\.step_[^.]+$/, site: 'components/arcPayout/ArcPayoutPanel.tsx `step_${flow.phase}`' },
+  { pattern: /^TipEmbedGenerator\.[^.]+(?:Label|Placeholder)$/, site: 'components/handle-profile-builder/AdvancedGroup.tsx `${field}Label`' },
+  // --- leaf が実行時の値で決まる (`prefix.${value}`)。今は値がソースに文字列で書かれているので名前の検索でも
+  //     使用中になるが、値の出どころ (union 型・API の応答・計算) が変わると書かれなくなりうるので、その部分木ごと除く。
+  { pattern: /^Create\.guideLinks\./, site: 'app/[locale]/create/page.tsx `guideLinks.${key}`' },
+  { pattern: /^StoreCatalog\.(?:categories|types)\./, site: 'components/StoreBrowser.tsx ほか `categories.${value}`・`types.${...}`' },
+  { pattern: /^MePage\.cards\./, site: 'app/[locale]/me/page.tsx `cards.${key}.title`' },
+  { pattern: /^Terms\.[^.]+\.(?:title|body)$/, site: 'app/[locale]/terms/page.tsx `${k}.title`' },
+  { pattern: /^Tokutei\.rows\./, site: 'app/[locale]/tokutei/page.tsx `rows.${key}.label`' },
+  { pattern: /^AgentConfigGenerator\.modeOptions\./, site: 'components/agent/AgentConfigGenerator.tsx `modeOptions.${value}`' },
+  { pattern: /^CreatorStoreSeller\.(?:contentKinds|labels|deliveryFormats)\./, site: 'components/creator-store-seller/ProductEditorSection.tsx・ProductListSection.tsx' },
+  { pattern: /^CreatorStorefront\.labels\./, site: 'components/CreatorStorefrontSection.tsx `labels.${...}`' },
+  { pattern: /^CreatorStoreLibrary\.labels\./, site: 'components/CreatorStoreLibrary.tsx `labels.${item.label}`' },
+  { pattern: /^CreatorStoreLicense\.states\./, site: 'components/CreatorStoreLicenseNftState.tsx `states.${state}`' },
+  { pattern: /^CreatorStorePurchase\.(?:licenseErrors|paymentStates|accessStates)\./, site: 'components/CreatorStorePurchaseFlow.tsx・CreatorStorePurchaseState.tsx' },
+  { pattern: /^Discount\.mode\./, site: 'components/DiscountField.tsx `mode.${mode}`' },
+  { pattern: /^Explore\.badge\./, site: 'components/ExploreEntry.tsx `badge.${b}`' },
+  { pattern: /^HandleProfile\.(?:linkLayouts|fonts)\./, site: 'components/handle-profile-builder/LinksGroup.tsx・LookGroup.tsx' },
+  { pattern: /^MobileOrder\.discountKind\./, site: 'components/MobileOrderBuilder.tsx `discountKind.${kind}`' },
+  // modes.${mode}Desc・kinds.${settings.linkKind}Desc (leaf 名を組み立てる形) もこの部分木に入る。
+  { pattern: /^OrderLinkBuilder\.(?:verify|contactKinds|errors|errorsShort|kinds|modes)\./, site: 'components/OrderLinkBuilder.tsx・order-link/OrderLinkVerify.tsx' },
+  { pattern: /^QrGenerator\.(?:notReady|notReadyShort|splitError)\./, site: 'components/QrGenerator.tsx・qr/QrPreviewSection.tsx・qr/SplitEditor.tsx' },
+  { pattern: /^QrGenerator\.storeDevice\.blocked\./, site: 'components/QrGenerator.tsx `storeDevice.blocked.${storeBlocked}`' },
+  { pattern: /^RegisterMode\.(?:notReady|notReadyShort)\./, site: 'components/RegisterMode.tsx `notReady.${notReadyKey}`' },
+  { pattern: /^RegisterMode\.storeDevice\.(?:saleBlocked|createFailed|notSent)\./, site: 'components/RegisterMode.tsx・StoreDeviceRegisterStatus.tsx' },
+  { pattern: /^RegisterMode\.storeGasWallet\.(?:withdrawError|topUpError|topUpResult)\./, site: 'components/StoreGasWalletPanel.tsx・StoreGasWalletTopUp.tsx' },
+  { pattern: /^CheckoutForm\.storeDevice\.(?:error|previous)\./, site: 'components/StoreDeviceCheckoutForm.tsx `storeDevice.error.${status.reason}`' },
+];
+
+/**
+ * 未使用だが公開文言 (LP) なので、消すかを user が決めるまで残すキー (第 9 回レビュー F-06 で見つけた分)。
+ * 使うようになったら、または消したら、ここからも外す (下の検査が残りを知らせる)。
+ */
+const UNUSED_PUBLIC_COPY_PENDING: readonly string[] = [
+  'Landing.wipNote',
+  'Landing.howItWorksVisualAlt',
+];
+
+const MESSAGE_SOURCE_FILE = /\.(?:ts|tsx|js|jsx|mjs|cjs)$/;
+/** repo 直下でだけ除くディレクトリ (判定の対象そのもの・テストだけのコード)。 */
+const MESSAGE_SOURCE_ROOT_EXCLUDED = new Set(['messages', 'tests', 'e2e', 'demo-e2e']);
+/** どの深さでも除くディレクトリ (依存・ビルド出力・レポート)。ドットで始まるものも除く。 */
+const MESSAGE_SOURCE_EXCLUDED = new Set([
+  'node_modules',
+  'dist',
+  'build',
+  'out',
+  'coverage',
+  'playwright-report',
+  'playwright-prodflags-report',
+  'test-results',
+  'demo-artifacts',
+]);
+
+function readProductionSource(dir: string, isRoot: boolean): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    if (entry.name.startsWith('.') || MESSAGE_SOURCE_EXCLUDED.has(entry.name)) return [];
+    if (isRoot && MESSAGE_SOURCE_ROOT_EXCLUDED.has(entry.name)) return [];
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) return readProductionSource(full, false);
+    return entry.isFile() && MESSAGE_SOURCE_FILE.test(entry.name) ? [readFileSync(full, 'utf8')] : [];
+  });
+}
+
+describe('i18n: 使われていないキーが無い (第 9 回レビュー F-06)', () => {
+  const jaLeaves = messageLeafPaths(ja);
+  const enLeaves = messageLeafPaths(en);
+  const allLeaves = [...new Set([...jaLeaves, ...enLeaves])].sort();
+  const corpus = readProductionSource(process.cwd(), true).join('\n');
+  // 語の集合で先に引き、無ければ部分文字列で探す (部分一致も使用中とみなす = 保守側)。
+  const tokens = new Set(corpus.match(/[\w$]+/g) ?? []);
+  const appearsInSource = (leafName: string) => tokens.has(leafName) || corpus.includes(leafName);
+  const leafNameOf = (leafPath: string) => leafPath.slice(leafPath.lastIndexOf('.') + 1);
+  const isDynamic = (leafPath: string) => DYNAMIC_KEY_PATTERNS.some(({ pattern }) => pattern.test(leafPath));
+
+  it('ja と en の leaf の集合が完全に一致する (消すときは両方から・掟 5)', () => {
+    expect(jaLeaves.slice().sort()).toEqual(enLeaves.slice().sort());
+  });
+
+  it('本番のソースを読めている (歩き方が壊れて空になると全キーが未使用に見える)', () => {
+    expect(corpus).toContain('useTranslations');
+    expect(corpus).toContain('getTranslations');
+  });
+
+  it('messages の全 leaf が、本番のソースに leaf 名として出るか、動的なキーか、user 判断待ちの公開文言', () => {
+    const unused = allLeaves.filter(
+      (leafPath) =>
+        !appearsInSource(leafNameOf(leafPath)) &&
+        !isDynamic(leafPath) &&
+        !UNUSED_PUBLIC_COPY_PENDING.includes(leafPath),
+    );
+    expect(
+      unused,
+      '使われていないキー: 本当に未使用なら ja/en の同じ namespace から両方消す。' +
+        'テンプレートリテラルで組み立てて使っているなら DYNAMIC_KEY_PATTERNS に足す。',
+    ).toEqual([]);
+  });
+
+  it.each(DYNAMIC_KEY_PATTERNS)('DYNAMIC_KEY_PATTERNS の $pattern は今ある leaf に当たる ($site)', ({ pattern }) => {
+    expect(allLeaves.some((leafPath) => pattern.test(leafPath))).toBe(true);
+  });
+
+  it.each(UNUSED_PUBLIC_COPY_PENDING)('%s は ja/en にあり、まだ本番のソースに名前が出ない (使う・消すなら一覧から外す)', (leafPath) => {
+    expect(jaLeaves).toContain(leafPath);
+    expect(enLeaves).toContain(leafPath);
+    expect(appearsInSource(leafNameOf(leafPath))).toBe(false);
   });
 });
