@@ -19,23 +19,27 @@ const w = vi.hoisted(() => ({
   account: { address: undefined as string | undefined, isConnected: false, chainId: undefined as number | undefined },
   balance: undefined as { value: bigint } | undefined,
   sendAsync: vi.fn(),
-  switchChain: vi.fn(),
+  // switchChain の呼び出しと、押したときの失敗 (tests/_helpers/switchChainStub.ts)。
+  switch: { switchChain: vi.fn(), error: null as Error | null, hold: false, release: () => {} },
   receipt: { data: undefined, isError: false } as Receipt,
   receiptArgs: [] as ReceiptArgs[],
   rawReceipt: vi.fn(),
   rawTx: vi.fn(),
 }));
-vi.mock('wagmi', () => ({
-  useAccount: () => w.account,
-  useBalance: () => ({ data: w.balance }),
-  useSwitchChain: () => ({ switchChain: w.switchChain, isPending: false }),
-  useSendTransaction: () => ({ sendTransactionAsync: w.sendAsync }),
-  useWaitForTransactionReceipt: (args: ReceiptArgs) => {
-    w.receiptArgs.push(args);
-    return args.hash ? w.receipt : { data: undefined, isError: false };
-  },
-  usePublicClient: () => ({ getTransactionReceipt: w.rawReceipt, getTransaction: w.rawTx }),
-}));
+vi.mock('wagmi', async () => {
+  const { useSwitchChainStub } = await import('../_helpers/switchChainStub');
+  return {
+    useAccount: () => w.account,
+    useBalance: () => ({ data: w.balance }),
+    useSwitchChain: () => useSwitchChainStub(w.switch),
+    useSendTransaction: () => ({ sendTransactionAsync: w.sendAsync }),
+    useWaitForTransactionReceipt: (args: ReceiptArgs) => {
+      w.receiptArgs.push(args);
+      return args.hash ? w.receipt : { data: undefined, isError: false };
+    },
+    usePublicClient: () => ({ getTransactionReceipt: w.rawReceipt, getTransaction: w.rawTx }),
+  };
+});
 
 // jsdom に Web Locks は無い。本番の端末と同じく「ある」前提で動かし、無い端末のテストだけ外す (G11)。
 function stubLocks() {
@@ -50,6 +54,7 @@ function removeLocks() {
 
 import { StoreGasWalletTopUp } from '@/components/StoreGasWalletTopUp';
 import { createStoreGasWallet, loadStoreGasWallet } from '@/lib/storeGasWallet';
+import { logger } from '@/lib/logger';
 import {
   TOPUP_HEARTBEAT_MS,
   attachStoreGasTopUpHash,
@@ -94,7 +99,10 @@ describe('StoreGasWalletTopUp', () => {
     w.account = { address: SHOP, isConnected: true, chainId: 80002 };
     w.balance = { value: 10n ** 19n };
     w.sendAsync.mockReset().mockResolvedValue(TX);
-    w.switchChain.mockReset();
+    w.switch.switchChain.mockReset();
+    w.switch.error = null;
+    w.switch.hold = false;
+    w.switch.release = () => {};
     w.receipt = { data: undefined, isError: false };
     w.receiptArgs = [];
     w.rawReceipt.mockReset().mockRejectedValue(new Error('not found'));
@@ -520,7 +528,125 @@ describe('StoreGasWalletTopUp', () => {
     show();
     expect(screen.queryByRole('button', { name: /を送る/ })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'ウォレットを Polygon Amoy に切り替える' }));
-    expect(w.switchChain).toHaveBeenCalledWith({ chainId: 80002 });
+    expect(w.switch.switchChain).toHaveBeenCalledWith({ chainId: 80002 });
+  });
+
+  // 第 9 回レビュー F-03: 切り替えが失敗したら (ウォレットでの取り消しを除く)、ボタンの下に知らせ、記録
+  // (logger.warn wallet.switch_chain_failed) に残す (#992 の支払い画面と同じ)。
+  it('切り替えが失敗したら、ボタンの下に知らせを出し、どの画面か・目的のチェーンを記録する', () => {
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    try {
+      const error = new Error('Unrecognized chain ID "0x13882".');
+      w.switch.error = error;
+      w.account = { address: SHOP, isConnected: true, chainId: 1 };
+      const { rerender } = show();
+      expect(screen.queryByRole('alert')).toBeNull();
+      fireEvent.click(screen.getByRole('button', { name: 'ウォレットを Polygon Amoy に切り替える' }));
+      expect(screen.getByRole('alert')).toHaveTextContent(
+        'Polygon Amoy に切り替えられませんでした。ウォレットのアプリで Polygon Amoy を選んでから、もう一度お試しください。',
+      );
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn).toHaveBeenCalledWith(
+        'wallet.switch_chain_failed',
+        expect.objectContaining({ surface: 'gas-wallet-topup', chainId: 80002, error }),
+      );
+      // ウォレットのアプリで切り替えてチェーンが合ったら、知らせは消える (失敗の error が残っていても)。
+      w.account = { address: SHOP, isConnected: true, chainId: 80002 };
+      rerender();
+      expect(screen.getByRole('button', { name: '1 POL を送る' })).toBeEnabled();
+      expect(screen.queryByRole('alert')).toBeNull();
+      expect(warn).toHaveBeenCalledTimes(1);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('en でも同じ知らせを出す (RegisterMode.storeGasWallet にキーがある)', () => {
+    w.switch.error = new Error('Unrecognized chain ID "0x13882".');
+    w.account = { address: SHOP, isConnected: true, chainId: 1 };
+    render(<StoreGasWalletTopUp chains={[AMOY]} gasAddress={gas} onDone={vi.fn()} />, { locale: 'en' });
+    fireEvent.click(screen.getByRole('button', { name: 'Switch the wallet to Polygon Amoy' }));
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Couldn’t switch to Polygon Amoy. Select Polygon Amoy in your wallet app, then try again.',
+    );
+  });
+
+  it('ウォレットで取り消した (user rejected) なら、知らせず記録もしない', () => {
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    try {
+      w.switch.error = new Error('User rejected the request.');
+      w.account = { address: SHOP, isConnected: true, chainId: 1 };
+      show();
+      fireEvent.click(screen.getByRole('button', { name: 'ウォレットを Polygon Amoy に切り替える' }));
+      expect(w.switch.switchChain).toHaveBeenCalledTimes(1);
+      expect(screen.queryByRole('alert')).toBeNull();
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('切り替えの待ちの間はボタンを押せない・失敗の後に押し直したら、前の知らせを消す', () => {
+    const button = () => screen.getByRole('button', { name: 'ウォレットを Polygon Amoy に切り替える' });
+    w.switch.error = new Error('Unrecognized chain ID "0x13882".');
+    w.account = { address: SHOP, isConnected: true, chainId: 1 };
+    show();
+    fireEvent.click(button());
+    expect(screen.getByRole('alert')).toHaveTextContent('Polygon Amoy に切り替えられませんでした。');
+    // 押し直す: ウォレットの応答を待つ間 (pending) は押せず、前の失敗の知らせは出さない。
+    w.switch.hold = true;
+    w.switch.error = null;
+    fireEvent.click(button());
+    expect(button()).toBeDisabled();
+    expect(screen.queryByRole('alert')).toBeNull();
+    // 今度は失敗しなかった → 押せるように戻り、知らせも出ない。
+    act(() => w.switch.release());
+    expect(button()).toBeEnabled();
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('失敗の後に接続を切ったら、知らせを消す', () => {
+    w.switch.error = new Error('Unrecognized chain ID "0x13882".');
+    w.account = { address: SHOP, isConnected: true, chainId: 1 };
+    const { rerender } = show();
+    fireEvent.click(screen.getByRole('button', { name: 'ウォレットを Polygon Amoy に切り替える' }));
+    expect(screen.getByRole('alert')).toHaveTextContent('Polygon Amoy に切り替えられませんでした。');
+    w.account = { address: undefined, isConnected: false, chainId: undefined };
+    rerender();
+    expect(screen.getByText(/右上の「接続」でお店のウォレットをつなぐと/)).toBeTruthy();
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  // 第 9 回レビュー F-03 (Codex SHOULD 1): 補充先は選び直せる。別の補充先への前の失敗を、今の補充先への切り替えを
+  // 押す前から「… に切り替えられませんでした」と出さない。
+  it('失敗の後に補充先を選び直したら知らせを消し、元の補充先に戻したら出す', () => {
+    const select = () => screen.getByRole('combobox', { name: '補充するチェーン' });
+    w.switch.error = new Error('Unrecognized chain ID "0x13882".');
+    w.account = { address: SHOP, isConnected: true, chainId: 1 };
+    show([AMOY, FUJI]);
+    fireEvent.click(screen.getByRole('button', { name: 'ウォレットを Polygon Amoy に切り替える' }));
+    expect(screen.getByRole('alert')).toHaveTextContent('Polygon Amoy に切り替えられませんでした。');
+    fireEvent.change(select(), { target: { value: '43113' } });
+    expect(screen.getByRole('button', { name: 'ウォレットを Avalanche Fuji に切り替える' })).toBeEnabled();
+    expect(screen.queryByRole('alert')).toBeNull();
+    fireEvent.change(select(), { target: { value: '80002' } });
+    expect(screen.getByRole('alert')).toHaveTextContent('Polygon Amoy に切り替えられませんでした。');
+  });
+
+  it('切り替えの待ちの間に補充先を選び直し、その後に前の切り替えが失敗しても、今の補充先には知らせない', () => {
+    const select = () => screen.getByRole('combobox', { name: '補充するチェーン' });
+    w.switch.hold = true;
+    w.switch.error = new Error('Unrecognized chain ID "0x13882".');
+    w.account = { address: SHOP, isConnected: true, chainId: 1 };
+    show([AMOY, FUJI]);
+    fireEvent.click(screen.getByRole('button', { name: 'ウォレットを Polygon Amoy に切り替える' }));
+    fireEvent.change(select(), { target: { value: '43113' } });
+    // Amoy への切り替えが (Fuji を選んだ後に) 失敗した。
+    act(() => w.switch.release());
+    expect(screen.getByRole('button', { name: 'ウォレットを Avalanche Fuji に切り替える' })).toBeEnabled();
+    expect(screen.queryByRole('alert')).toBeNull();
+    fireEvent.change(select(), { target: { value: '80002' } });
+    expect(screen.getByRole('alert')).toHaveTextContent('Polygon Amoy に切り替えられませんでした。');
   });
 
   it('チェーンを選ぶと、そのチェーンの目安と通貨で送る', async () => {

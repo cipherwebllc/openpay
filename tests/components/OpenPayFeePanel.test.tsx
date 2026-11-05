@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { act, fireEvent, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { renderWithIntl } from '../_helpers/i18n';
 
@@ -27,7 +27,8 @@ const h = vi.hoisted(() => ({
     isError: false,
     error: null as Error | null,
   },
-  switchChain: vi.fn(),
+  // switchChain の呼び出しと、押したときの失敗 (tests/_helpers/switchChainStub.ts)。
+  switch: { switchChain: vi.fn(), error: null as Error | null, hold: false, release: () => {} },
 }));
 
 vi.mock('@/lib/env', async (importOriginal) => {
@@ -49,10 +50,13 @@ vi.mock('@/lib/env', async (importOriginal) => {
     },
   };
 });
-vi.mock('wagmi', () => ({
-  useAccount: () => h.account,
-  useSwitchChain: () => ({ switchChain: h.switchChain, isPending: false }),
-}));
+vi.mock('wagmi', async () => {
+  const { useSwitchChainStub } = await import('../_helpers/switchChainStub');
+  return {
+    useAccount: () => h.account,
+    useSwitchChain: () => useSwitchChainStub(h.switch),
+  };
+});
 vi.mock('@/hooks/useSiweSession', () => ({ useSiweSession: () => h.siwe }));
 vi.mock('@/hooks/useBillingInvoice', () => ({
   useBillingInvoice: () => h.invoice,
@@ -62,15 +66,19 @@ vi.mock('@/hooks/useUsageFeePayment', () => ({
 }));
 
 import { OpenPayFeePanel } from '@/components/OpenPayFeePanel';
+import { logger } from '@/lib/logger';
+import { defaultDeploymentForSymbol } from '@/lib/tokens';
 
 function renderPanel(locale: 'ja' | 'en' = 'ja') {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return renderWithIntl(
+  const ui = () => (
     <QueryClientProvider client={qc}>
       <OpenPayFeePanel />
-    </QueryClientProvider>,
-    { locale },
+    </QueryClientProvider>
   );
+  const r = renderWithIntl(ui(), { locale });
+  // 同じ QueryClient のまま描き直す (パネルの状態を保ったまま、接続などの変化を見る)。
+  return { ...r, rerender: () => r.rerender(ui()) };
 }
 
 const invoiceData = (over?: Partial<Record<string, unknown>>) => ({
@@ -121,6 +129,10 @@ beforeEach(() => {
   };
   h.invoice = { data: invoiceData(), isLoading: false, isError: false };
   h.pay = { mutateAsync: vi.fn(), isPending: false, isError: false, error: null };
+  h.switch.switchChain.mockReset();
+  h.switch.error = null;
+  h.switch.hold = false;
+  h.switch.release = () => {};
 });
 
 describe('OpenPayFeePanel', () => {
@@ -359,5 +371,104 @@ describe('OpenPayFeePanel', () => {
     expect(h.pay.mutateAsync).toHaveBeenCalledTimes(1); // 送金は増えない
     expect(fetchSpy.mock.calls.filter((c) => c[0] === '/api/billing/settle').length).toBe(2);
     fetchSpy.mockRestore();
+  });
+});
+
+// 第 9 回レビュー F-03: 「… に切り替える」が失敗したら (ウォレットでの取り消しを除く)、ボタンの下に知らせ、
+// 記録 (logger.warn wallet.switch_chain_failed) に残す (#992 の支払い画面と同じ)。
+describe('OpenPayFeePanel チェーンの切り替えの失敗', () => {
+  const jpyc = defaultDeploymentForSymbol('jpyc');
+  const notice = `${jpyc.name} に切り替えられませんでした。ウォレットのアプリで ${jpyc.name} を選んでから、もう一度お試しください。`;
+  let warn: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => {
+    warn = vi.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    h.account = { isConnected: true, chainId: 1 }; // Ethereum mainnet (JPYC 非対応)
+  });
+  afterEach(() => {
+    warn.mockRestore();
+  });
+
+  it('切り替えが失敗したら、ボタンの下に知らせを出し、どの画面か・目的のチェーンを記録する', async () => {
+    const error = new Error('Unrecognized chain ID "0x13882".');
+    h.switch.error = error;
+    renderPanel();
+    expect(screen.queryByRole('alert')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /切り替え/ }));
+    expect(h.switch.switchChain).toHaveBeenCalledWith({ chainId: jpyc.chainId });
+    expect(await screen.findByRole('alert')).toHaveTextContent(notice);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      'wallet.switch_chain_failed',
+      expect.objectContaining({ surface: 'fee-panel', chainId: jpyc.chainId, error }),
+    );
+  });
+
+  it('en でも同じ知らせを出す (UsageFee にキーがある)', async () => {
+    h.switch.error = new Error('Unrecognized chain ID "0x13882".');
+    renderPanel('en');
+    fireEvent.click(screen.getByRole('button', { name: /Switch to/ }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      `Couldn’t switch to ${jpyc.name}. Select ${jpyc.name} in your wallet app, then try again.`,
+    );
+  });
+
+  it('ウォレットで取り消した (user rejected) なら、知らせず記録もしない', async () => {
+    h.switch.error = new Error('User rejected the request.');
+    renderPanel();
+    fireEvent.click(screen.getByRole('button', { name: /切り替え/ }));
+    // fireEvent は act の中で走る = 失敗の描画と記録の effect はここまでに済んでいる。
+    expect(h.switch.switchChain).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('owed が複数で「… に切り替える」が期間ごとに並んでも、知らせは 1 つだけ', async () => {
+    h.invoice = {
+      data: invoiceData({
+        feeCurrent: false,
+        owed: [owedLine('2026-07', 100n), owedLine('2026-05', 50n)],
+      }),
+      isLoading: false,
+      isError: false,
+    };
+    h.switch.error = new Error('Unrecognized chain ID "0x13882".');
+    renderPanel();
+    const buttons = screen.getAllByRole('button', { name: /切り替え/ });
+    expect(buttons).toHaveLength(2);
+    fireEvent.click(buttons[1]);
+    expect(await screen.findByRole('alert')).toHaveTextContent(notice);
+    expect(screen.getAllByRole('alert')).toHaveLength(1);
+  });
+
+  it('切り替えの待ちの間はボタンを押せない・失敗の後に押し直したら、前の知らせを消す', () => {
+    const button = () => screen.getByRole('button', { name: /切り替え/ });
+    h.switch.error = new Error('Unrecognized chain ID "0x13882".');
+    renderPanel();
+    fireEvent.click(button());
+    expect(screen.getByRole('alert')).toHaveTextContent(notice);
+    // 押し直す: ウォレットの応答を待つ間 (pending) は押せず、前の失敗の知らせは出さない。
+    h.switch.hold = true;
+    h.switch.error = null;
+    fireEvent.click(button());
+    expect(button()).toBeDisabled();
+    expect(screen.queryByRole('alert')).toBeNull();
+    // 今度は失敗しなかった → 押せるように戻り、知らせも出ない。記録は最初の失敗の 1 回だけ。
+    act(() => h.switch.release());
+    expect(button()).toBeEnabled();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+
+  it('失敗の後に接続を切ったら、知らせを消す', () => {
+    h.switch.error = new Error('Unrecognized chain ID "0x13882".');
+    const { rerender } = renderPanel();
+    fireEvent.click(screen.getByRole('button', { name: /切り替え/ }));
+    expect(screen.getByRole('alert')).toHaveTextContent(notice);
+    h.account = { isConnected: false, chainId: undefined };
+    rerender();
+    expect(screen.getByText('ウォレットを接続してください。')).toBeInTheDocument();
+    // 切断中も「… に切り替える」は残る (チェーンが分からない) が、失敗の知らせは出さない。
+    expect(screen.getByRole('button', { name: /切り替え/ })).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).toBeNull();
   });
 });
