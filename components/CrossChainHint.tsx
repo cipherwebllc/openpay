@@ -11,7 +11,7 @@
 // chooser に含めるが、既存の direct 経路 (useBatchPayment / useStandardPayment)
 // に委譲するため execute は no-op (= 既存 Pay button が処理する)。
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { formatUnits, type Address } from 'viem';
 import { useTranslations } from 'next-intl';
@@ -94,7 +94,7 @@ export function CrossChainHint(props: CrossChainHintProps) {
   });
   const {
     decision,
-    pathOptions,
+    pathOptions: hookPathOptions,
     progress,
     isExecuting,
     isCommitted,
@@ -110,6 +110,23 @@ export function CrossChainHint(props: CrossChainHintProps) {
   // A-1: 保存済みの CCTP の burn の証拠がある送金元 / 記録が読めない送金元 (hook の走査結果)。
   const cctpRecoverySources = hook.cctpRecoverySources ?? NO_SOURCES;
   const cctpUnreadableSources = hook.cctpUnreadableSources ?? NO_SOURCES;
+  // A-1: CCTP の再開 (残高が請求額を割った source は hook が recoveryOnly で足す) を、残高の取得中や
+  // 経路判定が onramp (どの chain も残高不足) のとき・別の送金元の記録が読めないときに隠さない。
+  // decision は残高だけで決まるため、pathOptions だけでは下の onramp 判定を越えられない。再開できるかは
+  // recoveryOnly の印ではなく、保存済みの burn の証拠がある送金元かで決める (残高が足りれば通常の選択肢)。
+  const hasCctpRecovery = hookPathOptions.some((o) => o.kind === 'cctp-v2' &&
+    (o.recoveryOnly || cctpRecoverySources.includes(o.sourceChainId)));
+  // A-1: Gateway の記録を確かめて解除できると分かっても (置き換えを待つ等で) 記録が残る間は Gateway のパネルが
+  // 出続ける。CCTP の記録もあるとパネルが CCTP の回復 (再開・記録の確かめ直し) を覆って操作が無くなるので、
+  // そのときはパネルを残したまま、その下に CCTP の回復を出す (Gateway の状態と再確認も見えたままにするため。
+  // 新しい送金はどちらも関所 assertNoUnresolvedRecovery を通る)。Gateway の回復はパネルが受け持つので、
+  // 下の chooser からは Gateway の回復専用の選択肢を外す。enabled 等で CCTP の UI が出ない請求は従来どおり。
+  const showCctpBelowGateway = !!hook.gatewayRecovery && hook.gatewayRecovery.kind !== 'scanning' &&
+    !!hook.gatewayReleasable && (hasCctpRecovery || !!hook.cctpRecoveryUnreadable) &&
+    !CROSS_CHAIN_DISABLED && props.token === 'usdc' && props.enabled && props.requiredAtomic > 0n;
+  const pathOptions = useMemo(() => showCctpBelowGateway
+    ? hookPathOptions.filter((o) => !(o.kind === 'gateway' && o.recoveryOnly)) : hookPathOptions,
+  [showCctpBelowGateway, hookPathOptions]);
   useEffect(() => {
     if (pathOptions.length === 0) {
       setSelectedKey(null);
@@ -124,12 +141,6 @@ export function CrossChainHint(props: CrossChainHintProps) {
   const selectedOption =
     pathOptions.find((o) => o.key === selectedKey) ?? null;
   const hasGatewayRecovery = pathOptions.some((o) => o.kind === 'gateway' && o.recoveryOnly);
-  // A-1: CCTP の再開 (残高が請求額を割った source は hook が recoveryOnly で足す) を、残高の取得中や
-  // 経路判定が onramp (どの chain も残高不足) のとき・別の送金元の記録が読めないときに隠さない。
-  // decision は残高だけで決まるため、pathOptions だけでは下の onramp 判定を越えられない。再開できるかは
-  // recoveryOnly の印ではなく、保存済みの burn の証拠がある送金元かで決める (残高が足りれば通常の選択肢)。
-  const hasCctpRecovery = pathOptions.some((o) => o.kind === 'cctp-v2' &&
-    (o.recoveryOnly || cctpRecoverySources.includes(o.sourceChainId)));
 
   // Sentry observability。useEffect は早期 return 前に呼ぶ必要があるため
   // (React rules of hooks)、内部 if guard で空 trigger を抑止する。
@@ -196,7 +207,7 @@ export function CrossChainHint(props: CrossChainHintProps) {
     }}
   />;
   // Persisted Gateway recovery remains reachable after flags, balances or routing change.
-  if (gatewayPanel && !result && !isExecuting) return gatewayPanel;
+  if (gatewayPanel && !result && !isExecuting && !showCctpBelowGateway) return gatewayPanel;
 
   // 回復は enabled/残高/option の gate より先。kill switch 後も資金の確認を閉じない。
   // 実行中 (execute / recheck) は onStep の strict 保存で pendingRecovery が立つが、その間は
@@ -238,7 +249,11 @@ export function CrossChainHint(props: CrossChainHintProps) {
       </button>
     </div>
   ) : null;
-  if (cctpUnreadableNotice && !isExecuting && !hasCctpRecovery) return cctpUnreadableNotice;
+  if (cctpUnreadableNotice && !isExecuting && !hasCctpRecovery) {
+    return showCctpBelowGateway
+      ? <div className="space-y-3">{gatewayPanel}{cctpUnreadableNotice}</div>
+      : cctpUnreadableNotice;
+  }
 
   // 成功 panel は path 完了時のみ。
   if (result) {
@@ -348,6 +363,7 @@ export function CrossChainHint(props: CrossChainHintProps) {
 
   return (
     <div className="space-y-3">
+      {showCctpBelowGateway && gatewayPanel}
       {cctpUnreadableNotice}
       <CrossChainSourceChooser
         options={pathOptions}

@@ -133,6 +133,8 @@ export interface UseCrossChainPaymentReturn {
   cctpUnreadableSources: readonly number[];
   /** A-1: CCTP の記録を読み直す (storage の取得拒否が直った後に、再読み込みせず確かめ直すため)。 */
   recheckCctpRecords: () => void;
+  /** A-1: Gateway の記録があり、すべてこの mount で確かめて解除できると分かっている。 */
+  gatewayReleasable: boolean;
   result: ExecuteResult | undefined;
   error: Error | undefined;
   refetchBalances: () => Promise<unknown>;
@@ -186,6 +188,20 @@ function hasCommittedEvidence(s: ResumeState | undefined): boolean {
     ('burnIntent' in s && !!s.burnIntent) ||
     ('merchantAttestation' in s && !!s.merchantAttestation)
   );
+}
+
+// A-1: Gateway の記録が、この mount で確かめて解除できると分かっているか (safeExecuteOption の
+// allReleasable と同じ条件・あちらは変えずに、関所と UI の判断だけがこれを使う)。
+function gatewayEntriesReleasable(
+  entries: readonly { key: ResumeSessionKey; state: GatewayResumeState }[],
+  checked: ReadonlyMap<number, GatewayResumeState>,
+): boolean {
+  return entries.every((e) => {
+    const c = checked.get(e.key.sourceChainId);
+    return !!c && gatewayCanRelease(c) && gatewayCanRelease(e.state) &&
+      activeGatewayAttempt(c.merchant)?.transferSpecHash === activeGatewayAttempt(e.state.merchant)?.transferSpecHash &&
+      activeGatewayAttempt(c.fee)?.transferSpecHash === activeGatewayAttempt(e.state.fee)?.transferSpecHash;
+  });
 }
 
 export function useCrossChainPayment(
@@ -381,13 +397,7 @@ export function useCrossChainPayment(
       const scan = scope && !forwardOnly ? scanGatewayResumeStates(scope) : undefined;
       if (scan?.kind === 'unreadable') block('gateway-unresolved');
       const entries = scan?.kind === 'ok' ? scan.entries : [];
-      const releasable = entries.every((e) => {
-        const checked = gatewayChecked.current.get(e.key.sourceChainId);
-        return checked && gatewayCanRelease(checked) && gatewayCanRelease(e.state) &&
-          activeGatewayAttempt(checked.merchant)?.transferSpecHash === activeGatewayAttempt(e.state.merchant)?.transferSpecHash &&
-          activeGatewayAttempt(checked.fee)?.transferSpecHash === activeGatewayAttempt(e.state.fee)?.transferSpecHash;
-      });
-      if (!releasable) block('gateway-unresolved');
+      if (!gatewayEntriesReleasable(entries, gatewayChecked.current)) block('gateway-unresolved');
     }
   }, [args.targetChainId, sessionKeyFor, forwardOnly]);
 
@@ -1083,6 +1093,7 @@ export function useCrossChainPayment(
     cctpRecoverySources,
     cctpUnreadableSources,
     recheckCctpRecords: scanCctpRecovery,
+    gatewayReleasable: gatewayEntries.length > 0 && gatewayEntriesReleasable(gatewayEntries, gatewayChecked.current),
     result,
     error,
     refetchBalances: balancesQuery.refetch,

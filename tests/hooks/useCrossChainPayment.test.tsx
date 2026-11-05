@@ -1186,6 +1186,55 @@ describe('A-1: Gateway and CCTP lock reasons are independent', () => {
     expect(seen.slice(seen.indexOf(true))).not.toContain(false);
   });
 
+  describe('a releasable Gateway panel does not cover the CCTP recovery', () => {
+    const burnHash = `0x${'bc'.repeat(32)}` as Hex;
+    const mintHash = `0x${'cd'.repeat(32)}` as Hex;
+    beforeEach(async () => {
+      const actual = await vi.importActual<typeof import('@/lib/crossChain/execute')>('@/lib/crossChain/execute');
+      vi.mocked(executeCctpTransfer).mockImplementation(actual.executeCctpTransfer);
+      vi.mocked(pollIrisAttestation).mockResolvedValue({ status: 'complete', message: '0x1234', attestation: '0x5678' });
+      wallet.sendTransaction.mockResolvedValue(mintHash);
+    });
+    const renderHint = () => renderWithIntl(wrapper({ children: <CrossChainHint {...legacyArgs} token="usdc" enabled
+      tokenAddress={account} displayDecimals={6} directIsGasless={false} /> }));
+
+    it('offers “続きから支払う” under the Gateway panel after the Gateway recheck and resumes the burn to mint', async () => {
+      saveResumeStateStrict(cctpKey, { approveTxHash: hash, burnTxHash: burnHash });
+      const user = (await import('@testing-library/user-event')).default.setup();
+      renderHint();
+      // 確かめる前は Gateway のパネルだけ (Gateway の記録は未確認)。
+      await user.click(await screen.findByRole('button', { name: '送金状態を再確認' }));
+      // Gateway は解除できると分かったが記録は残る → パネルを残したまま、その下に CCTP の再開が出る。
+      const resume = await screen.findByRole('button', { name: '続きから支払う' });
+      expect(screen.getByRole('button', { name: '送金状態を再確認' })).toBeInTheDocument();
+      await waitFor(() => expect(resume).toBeEnabled());
+      await user.click(resume);
+      expect(await screen.findByText(/経由で着金しました/)).toBeInTheDocument();
+      expect(wallet.signTypedData).not.toHaveBeenCalled();
+      expect(wallet.writeContract).not.toHaveBeenCalled();
+      expect(wallet.sendTransaction.mock.calls).toEqual([[expect.objectContaining({ chain: expect.objectContaining({ id: 80002 }) })]]);
+    });
+
+    it('offers “記録をもう一度確かめる” under the Gateway panel after the Gateway recheck and rescans the record', async () => {
+      saveResumeStateStrict(cctpKey, { approveTxHash: hash, burnTxHash: burnHash });
+      const name = Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i)!)
+        .find((k) => k.startsWith('openpay.xchain.resume.cctp-v2:'))!;
+      const valid = localStorage.getItem(name)!;
+      localStorage.setItem(name, '{broken');
+      const user = (await import('@testing-library/user-event')).default.setup();
+      renderHint();
+      await user.click(await screen.findByRole('button', { name: '送金状態を再確認' }));
+      const recheck = await screen.findByRole('button', { name: '記録をもう一度確かめる' });
+      expect(screen.getByRole('button', { name: '送金状態を再確認' })).toBeInTheDocument();
+      // 記録が読めるようになってから確かめ直すと、正常な burn の記録として再開できる。
+      localStorage.setItem(name, valid);
+      await user.click(recheck);
+      expect(await screen.findByRole('button', { name: '続きから支払う' })).toBeInTheDocument();
+      expect(screen.queryByText(/前回の支払いの記録を確かめられないため/)).not.toBeInTheDocument();
+      expect(wallet.signTypedData).not.toHaveBeenCalled();
+    });
+  });
+
   it.each([false, true])('refuses a Gateway re-authorization while a CCTP record remains (CCTP record=%s)', async (withCctp) => {
     vi.spyOn(env, 'enableGatewayCrossChain', 'get').mockReturnValue(true);
     if (withCctp) saveResumeStateStrict(cctpKey, { burnTxHash: hash });
@@ -1211,5 +1260,49 @@ describe('A-1: Gateway and CCTP lock reasons are independent', () => {
       // CCTP の記録が無ければ、既存の置き換えはそのまま署名まで進む (関所が止めていたことの対照)。
       expect(wallet.signTypedData).toHaveBeenCalled();
     }
+  });
+});
+
+describe('A-1: a fresh Gateway authorization also passes the checkpoint', () => {
+  // review B1/S1 と同じ「新しい Gateway の支払い」(fresh)。置き換えだけでなく fresh の署名も関所を通る。
+  const gatewayArgs = { ...args, targetChainId: 80002, enabled: false };
+  const option = { key: 'gateway-6', kind: 'gateway' as const, sourceChainId: 84532, sourceDomain: 6 as const,
+    sourceBalanceAtomic: 3_000_000n, serviceFeeAtomic: 1000n, estimatedGasUnits: 150000n, gasOnChainId: 80002, etaSeconds: 5 };
+  const cctpKey: ResumeSessionKey = { ...key, destChainId: 80002, sourceChainId: 421614 };
+  beforeEach(async () => {
+    vi.spyOn(env, 'enableGatewayCrossChain', 'get').mockReturnValue(true);
+    const actual = await vi.importActual<typeof import('@/lib/crossChain/execute')>('@/lib/crossChain/execute');
+    vi.mocked(executeGatewayTransfer).mockImplementation(actual.executeGatewayTransfer);
+    wallet.signTypedData.mockResolvedValue(hash); wallet.sendTransaction.mockResolvedValue(hash);
+    vi.mocked(requestAttestation).mockImplementation(async ({ burnIntent }) => gatewayAttestation(burnIntent.spec, 1000n));
+  });
+
+  it.each(['none', 'burn record', 'unreadable record'] as const)('signs a fresh Gateway payment only without a CCTP record (CCTP %s)', async (record) => {
+    if (record !== 'none') {
+      saveResumeStateStrict(cctpKey, { burnTxHash: hash });
+      if (record === 'unreadable record') {
+        const name = Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i)!)
+          .find((k) => k.startsWith('openpay.xchain.resume.cctp-v2:'))!;
+        localStorage.setItem(name, '{broken');
+      }
+    }
+    const h = renderHook(() => useCrossChainPayment(gatewayArgs), { wrapper });
+    await waitFor(() => expect(h.result.current.cctpRecoveryScanning).toBe(false));
+
+    if (record === 'none') {
+      // 対照: CCTP の記録が無ければ fresh の署名・送信まで進む。
+      await act(async () => { await h.result.current.executeOption(option); });
+      expect(wallet.signTypedData).toHaveBeenCalledOnce();
+      expect(h.result.current.result?.path).toBe('gateway');
+      return;
+    }
+    await act(async () => {
+      await expect(h.result.current.executeOption(option)).rejects.toMatchObject({
+        name: 'CrossChainRecoveryBurnBlockedError', reason: record === 'burn record' ? 'cctp-record' : 'cctp-unreadable' });
+    });
+    expect(wallet.signTypedData).not.toHaveBeenCalled();
+    expect(wallet.sendTransaction).not.toHaveBeenCalled();
+    expect(requestAttestation).not.toHaveBeenCalled();
+    expect(switchChainAsync).not.toHaveBeenCalled();
   });
 });
