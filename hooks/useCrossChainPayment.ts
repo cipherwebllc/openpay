@@ -118,12 +118,17 @@ export interface UseCrossChainPaymentReturn {
   pathOptions: PathOption[];
   progress: CrossChainProgress | undefined;
   isExecuting: boolean;
-  /** merchant 送金が不可逆境界を越えたか。同一 mount 中の親 UI 排他用。 */
+  /** merchant 送金が不可逆境界を越えたか。同一 mount 中の親 UI 排他用。
+   *  A-1: 既存の理由 (この mount の実行・Gateway・D9) と、保存済みの CCTP の証拠・読めない CCTP の記録の OR。 */
   isCommitted: boolean;
   /** A-1: 保存済み CCTP 記録の走査がこの請求でまだ終わっていない (親の直接払いを閉じたままにする)。 */
   cctpRecoveryScanning: boolean;
   /** A-1: この請求の CCTP 記録はあるのに読めない (送金済みかを判定できない・ロックは保つ)。 */
   cctpRecoveryUnreadable: boolean;
+  /** A-1: 保存済みの CCTP の burn の証拠がある送金元 (再開できる)。 */
+  cctpRecoverySources: readonly number[];
+  /** A-1: CCTP の記録が読めない送金元 (この送金元からは新しい送金をしない)。 */
+  cctpUnreadableSources: readonly number[];
   result: ExecuteResult | undefined;
   error: Error | undefined;
   refetchBalances: () => Promise<unknown>;
@@ -310,32 +315,36 @@ export function useCrossChainPayment(
   const [cctpRecoveryTargets, setCctpRecoveryTargets] = useState<readonly CrossChainTarget[]>([]);
   // 走査が終わった scope。終わるまでは cctpRecoveryScanning として親のロックを保つ (Gateway の scanning と同じ)。
   const [cctpScannedScope, setCctpScannedScope] = useState('');
-  // 記録はあるのに読めない (getItem の例外・JSON の破損) source がある。送金済みかを判定できない。
-  const [cctpRecoveryUnreadable, setCctpRecoveryUnreadable] = useState(false);
+  // 記録はあるのに読めない (getItem の例外・JSON の破損・ブラウザでの storage の取得拒否) source。
+  // 送金済みかを判定できない。
+  const [cctpUnreadableSources, setCctpUnreadableSources] = useState<readonly number[]>([]);
+  // ロックの理由は独立に持つ (第 9 回レビュー A-1)。既存の isCommitted (Gateway の走査・再確認と、この
+  // mount の実行が立て外しする) とは別に、「保存済みの CCTP の burn の証拠がある」(cctpRecoveryTargets) と
+  // 「CCTP の記録が読めない」(cctpUnreadableSources) を走査の結果としてだけ持ち、外に出す committed は
+  // その OR にする。Gateway の解除 (setIsCommitted(false)) は CCTP の理由に触れず、CCTP の走査も
+  // isCommitted には触れない。どちらも走査完了と同じ描画で立つので、親への通知は false を挟まない。
   const scanCctpRecovery = useCallback(() => {
     const found: CrossChainTarget[] = [];
-    let unreadable = false;
+    const unreadable: number[] = [];
     if (!forwardOnly) {
       for (const target of BUYER_SOURCE_TARGETS) {
         if (target.chainId === args.targetChainId) continue;
         const key = sessionKeyFor('cctp-v2', target.chainId);
         if (!key) continue;
         const entry = readResumeStateForScan(key);
-        if (entry.kind === 'unreadable') unreadable = true;
+        if (entry.kind === 'unreadable') unreadable.push(target.chainId);
         else if (entry.kind === 'present' && hasCommittedEvidence(entry.state)) found.push(target);
       }
     }
     // 同じ集合なら参照を保つ (pathOptions と Chooser の選択を作り直さない)。
     setCctpRecoveryTargets((current) =>
       current.length === found.length && current.every((t, i) => t === found[i]) ? current : found);
-    // committed は走査完了と同じ描画で立てる。D9 (pathOptions 経由) を待つと、走査完了 → 未 committed の
-    // 描画を 1 回挟み、親への通知が true → false → true になって直接払いの窓が開く。読めない記録も、
-    // 送金済みかを判定できないので同じくロックを立てる (二重払いを起こさない側)。立てるだけで外さない。
-    if (found.length || unreadable) setIsCommitted(true);
-    setCctpRecoveryUnreadable(unreadable);
+    setCctpUnreadableSources((current) =>
+      current.length === unreadable.length && current.every((c, i) => c === unreadable[i]) ? current : unreadable);
     setCctpScannedScope(recoveryScope);
   }, [forwardOnly, sessionKeyFor, args.targetChainId, recoveryScope]);
   useEffect(() => { scanCctpRecovery(); }, [scanCctpRecovery]);
+  const cctpRecoverySources = useMemo(() => cctpRecoveryTargets.map((t) => t.chainId), [cctpRecoveryTargets]);
 
   const pathOptions = useMemo<PathOption[]>(() => {
     if (args.requiredAtomic <= 0n) return [];
@@ -1014,9 +1023,12 @@ export function useCrossChainPayment(
     pathOptions,
     progress,
     isExecuting,
-    isCommitted,
+    // A-1: ロックの理由の OR (それぞれ独立に立て外しされる・上の scanCctpRecovery の説明)。
+    isCommitted: isCommitted || cctpRecoverySources.length > 0 || cctpUnreadableSources.length > 0,
     cctpRecoveryScanning: !forwardOnly && !!account && args.requiredAtomic > 0n && cctpScannedScope !== recoveryScope,
-    cctpRecoveryUnreadable,
+    cctpRecoveryUnreadable: cctpUnreadableSources.length > 0,
+    cctpRecoverySources,
+    cctpUnreadableSources,
     result,
     error,
     refetchBalances: balancesQuery.refetch,

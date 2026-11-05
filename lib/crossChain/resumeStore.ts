@@ -164,10 +164,17 @@ export type ScannedResumeState =
 /** A-1: Arc 以外の CCTP の走査用。既存の loadResumeState (読めない記録を「なし」にして決済開始を
  *  止めない) は変えずに、「鍵はあるのに値が読めない・壊れている」を区別する。何の波及を断つ防御か:
  *  読めない記録を「なし」と扱うと、burn 済みかもしれない請求で親の直接払いのロックが外れ、二重払いに
- *  なる。storage 自体が使えない環境 (SSR・拒否) は記録も書けないので、従来どおり「なし」とする。 */
+ *  なる。SSR (window が無い) は描画だけで決済が起きないので「なし」。ブラウザでの storage の取得拒否は、
+ *  今書けないことが過去に保存していない証明にならないので「読めない」にする (Gateway の走査と同じ扱い)。 */
 export function readResumeStateForScan(k: ResumeSessionKey): ScannedResumeState {
-  const s = storage();
-  if (!s) return { kind: 'absent' };
+  if (typeof window === 'undefined') return { kind: 'absent' };
+  let s: Storage | null;
+  try {
+    s = window.localStorage;
+  } catch {
+    return { kind: 'unreadable' };
+  }
+  if (!s) return { kind: 'unreadable' };
   const name = keyString(k);
   let raw: string | null;
   try {

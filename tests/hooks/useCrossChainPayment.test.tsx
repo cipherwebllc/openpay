@@ -918,7 +918,7 @@ describe('A-1: CCTP recovery survives a source balance below the invoice', () =>
     renderWithIntl(wrapper({ children: <CrossChainHint {...legacyArgs} token="usdc" enabled tokenAddress={account}
       displayDecimals={6} directIsGasless={false} onExecutingChange={onExecutingChange} /> }));
 
-    expect(await screen.findByText(/前回の支払いの記録を読み取れない/)).toBeInTheDocument();
+    expect(await screen.findByText(/前回の支払いの記録を確かめられないため/)).toBeInTheDocument();
     await act(async () => {});
     expect(onExecutingChange).toHaveBeenCalled();
     expect(onExecutingChange.mock.calls.map(([locked]) => locked)).not.toContain(false);
@@ -948,6 +948,45 @@ describe('A-1: CCTP recovery survives a source balance below the invoice', () =>
     expect(wallet.writeContract).not.toHaveBeenCalled();
     expect(wallet.sendTransaction).not.toHaveBeenCalled();
     expect(result.current.isCommitted).toBe(true);
+  });
+
+  it('shows the resume control next to the unreadable notice when only another source’s record is broken', async () => {
+    // 送金元 A (Arbitrum Sepolia) の記録は壊れ、B (Base Sepolia) には正常な burn の記録がある。どちらも残高は
+    // 請求額以上なので、B は recoveryOnly ではなく通常の選択肢になる。
+    vi.mocked(readAllCrossChainBalances).mockResolvedValue({
+      wallet: [
+        { target: { chainId: 84532, domain: 6, isTestnet: true, role: 'merchant-and-buyer' }, balance: 3_000_000n, status: 'ok' },
+        { target: { chainId: 421614, domain: 3, isTestnet: true, role: 'merchant-and-buyer' }, balance: 5_000_000n, status: 'ok' },
+      ],
+      gateway: { status: 'ok', perDomain: new Map(), total: 0n }, gatewayReadyDomains: new Set(),
+    } as never);
+    wallet.sendTransaction.mockResolvedValue(mintHash);
+    saveResumeStateStrict({ ...legacyKey, sourceChainId: 421614 }, { burnTxHash: hash });
+    const brokenName = Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i)!)
+      .find((k) => k.includes('cctp-v2:421614:80002:'))!;
+    localStorage.setItem(brokenName, '{broken');
+    const onExecutingChange = vi.fn();
+    const user = (await import('@testing-library/user-event')).default.setup();
+    renderWithIntl(wrapper({ children: <CrossChainHint {...legacyArgs} token="usdc" enabled tokenAddress={account}
+      displayDecimals={6} directIsGasless={false} onExecutingChange={onExecutingChange} /> }));
+
+    expect(await screen.findByText(/前回の支払いの記録を確かめられないため/)).toBeInTheDocument();
+    // 残高が読めて両方とも通常の選択肢になった後も、chooser と B の再開が出る。
+    const optionA = await screen.findByRole('button', { name: /Arbitrum/ });
+    const optionB = screen.getByRole('button', { name: /Base/ });
+    // 壊れた記録の A を選んでも「続きから」にはならず、押せない。
+    await user.click(optionA);
+    expect(screen.queryByRole('button', { name: '続きから支払う' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '選択したチェーンで支払う' })).toBeDisabled();
+    await user.click(optionB);
+    const resume = screen.getByRole('button', { name: '続きから支払う' });
+    expect(resume).toBeEnabled();
+    expect(onExecutingChange.mock.calls.map(([locked]) => locked)).not.toContain(false);
+
+    await user.click(resume);
+    expect(await screen.findByText(/経由で着金しました/)).toBeInTheDocument();
+    expect(wallet.writeContract).not.toHaveBeenCalled();
+    expect(wallet.sendTransaction.mock.calls).toEqual([[expect.objectContaining({ chain: expect.objectContaining({ id: 80002 }) })]]);
   });
 
   it('does not offer the destination chain itself as a CCTP recovery source', async () => {
@@ -1005,5 +1044,64 @@ describe('A-1: CCTP recovery survives a source balance below the invoice', () =>
     expect(wallet.writeContract).not.toHaveBeenCalled();
     expect(wallet.sendTransaction).not.toHaveBeenCalled();
     expect(onExecutingChange).toHaveBeenLastCalledWith(true);
+  });
+});
+
+describe('A-1: Gateway and CCTP lock reasons are independent', () => {
+  // X12 と同じ「期限切れ・残高あり」の Gateway の記録。再確認すると Gateway は自分のロックを外す。
+  const legacyArgs = { ...args, targetChainId: 80002 };
+  const gatewayKey: ResumeSessionKey = { ...key, kind: 'gateway', destChainId: 80002 };
+  const cctpKey: ResumeSessionKey = { ...key, destChainId: 80002 };
+  const att = gatewayAttestation({ ...gatewaySpec, sourceDepositor: pad(account), sourceSigner: pad(account), destinationRecipient: pad(recipient) });
+  beforeEach(async () => {
+    const actual = await vi.importActual<typeof import('@/lib/crossChain/execute')>('@/lib/crossChain/execute');
+    vi.mocked(executeGatewayTransfer).mockImplementation(actual.executeGatewayTransfer);
+    vi.mocked(readAllCrossChainBalances).mockRejectedValue(new Error('discovery offline'));
+    saveResumeStateStrict(gatewayKey, { merchantAttestation: att });
+    publicClientFor(80002).request.mockImplementation(async (a: { method: string }) =>
+      a.method === 'eth_call' ? pad('0x00') : { hash, number: '0x65', l1BlockNumber: '0x65' });
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ balances: [{ domain: 6, balance: '2' }] }))));
+  });
+
+  it.each([false, true])('a Gateway recheck releases only its own lock (broken CCTP record=%s)', async (broken) => {
+    if (broken) {
+      saveResumeStateStrict(cctpKey, { burnTxHash: hash });
+      const name = Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i)!)
+        .find((k) => k.startsWith('openpay.xchain.resume.cctp-v2:'))!;
+      localStorage.setItem(name, '{broken');
+    }
+    const h = renderHook(() => useCrossChainPayment(legacyArgs), { wrapper });
+    await waitFor(() => expect(h.result.current.cctpRecoveryScanning).toBe(false));
+    await waitFor(() => expect(h.result.current.isCommitted).toBe(true));
+    expect(h.result.current.cctpRecoveryUnreadable).toBe(broken);
+
+    await act(async () => { await h.result.current.recheckGateway(); });
+
+    // 壊れた CCTP の記録が無ければ Gateway の再確認で開く (Gateway が自分のロックを外した証拠)。
+    // あれば CCTP の理由が残り、開かない。
+    expect(h.result.current.isCommitted).toBe(broken);
+    expect(wallet.signTypedData).not.toHaveBeenCalled();
+    expect(wallet.sendTransaction).not.toHaveBeenCalled();
+  });
+
+  it('keeps the lock after browser storage denial recovers and a Gateway recheck releases its own lock', async () => {
+    // CCTP の正常な記録はあるが、mount 時はブラウザが storage の取得を拒否している (今書けない ≠ 記録が無い)。
+    saveResumeStateStrict(cctpKey, { burnTxHash: hash });
+    const original = Object.getOwnPropertyDescriptor(window, 'localStorage');
+    Object.defineProperty(window, 'localStorage', { configurable: true, get: () => { throw new Error('SecurityError'); } });
+    let h!: ReturnType<typeof renderHook<ReturnType<typeof useCrossChainPayment>, unknown>>;
+    try {
+      h = renderHook(() => useCrossChainPayment(legacyArgs), { wrapper });
+      await waitFor(() => expect(h.result.current.cctpRecoveryScanning).toBe(false));
+      expect(h.result.current.cctpRecoveryUnreadable).toBe(true);
+      expect(h.result.current.isCommitted).toBe(true);
+    } finally {
+      if (original) Object.defineProperty(window, 'localStorage', original);
+    }
+    // storage が戻った後の Gateway の再確認は、Gateway の理由だけを外す。
+    await act(async () => { await h.result.current.recheckGateway(); });
+    expect(h.result.current.isCommitted).toBe(true);
+    expect(wallet.signTypedData).not.toHaveBeenCalled();
+    expect(wallet.sendTransaction).not.toHaveBeenCalled();
   });
 });

@@ -73,6 +73,9 @@ export interface CrossChainHintProps {
   onAttemptStart?: (amount: bigint) => void;
 }
 
+// 走査結果を持たない hook (test の stub 等) でも参照が毎描画で変わらないようにする。
+const NO_SOURCES: readonly number[] = [];
+
 export function CrossChainHint(props: CrossChainHintProps) {
   const t = useTranslations('CrossChainHint');
   const { onSuccess, onExecutingChange } = props;
@@ -104,6 +107,9 @@ export function CrossChainHint(props: CrossChainHintProps) {
   // gateway → cctp-v2 / balance 降順で sort 済)。options 変化に追従するため
   // useEffect で再同期。
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  // A-1: 保存済みの CCTP の burn の証拠がある送金元 / 記録が読めない送金元 (hook の走査結果)。
+  const cctpRecoverySources = hook.cctpRecoverySources ?? NO_SOURCES;
+  const cctpUnreadableSources = hook.cctpUnreadableSources ?? NO_SOURCES;
   useEffect(() => {
     if (pathOptions.length === 0) {
       setSelectedKey(null);
@@ -118,10 +124,12 @@ export function CrossChainHint(props: CrossChainHintProps) {
   const selectedOption =
     pathOptions.find((o) => o.key === selectedKey) ?? null;
   const hasGatewayRecovery = pathOptions.some((o) => o.kind === 'gateway' && o.recoveryOnly);
-  // A-1: 残高が請求額を割った source の CCTP 再開 (hook が recoveryOnly で足す) も、残高の取得中や
-  // 経路判定が onramp (どの chain も残高不足) のときに隠さない。decision は残高だけで決まるため、
-  // pathOptions だけでは下の onramp 判定を越えられない。
-  const hasCctpRecovery = pathOptions.some((o) => o.kind === 'cctp-v2' && o.recoveryOnly);
+  // A-1: CCTP の再開 (残高が請求額を割った source は hook が recoveryOnly で足す) を、残高の取得中や
+  // 経路判定が onramp (どの chain も残高不足) のとき・別の送金元の記録が読めないときに隠さない。
+  // decision は残高だけで決まるため、pathOptions だけでは下の onramp 判定を越えられない。再開できるかは
+  // recoveryOnly の印ではなく、保存済みの burn の証拠がある送金元かで決める (残高が足りれば通常の選択肢)。
+  const hasCctpRecovery = pathOptions.some((o) => o.kind === 'cctp-v2' &&
+    (o.recoveryOnly || cctpRecoverySources.includes(o.sourceChainId)));
 
   // Sentry observability。useEffect は早期 return 前に呼ぶ必要があるため
   // (React rules of hooks)、内部 if guard で空 trigger を抑止する。
@@ -310,7 +318,9 @@ export function CrossChainHint(props: CrossChainHintProps) {
   const resumable =
     !isDirectSelected &&
     selectedOption !== null &&
-    hook.isOptionResumable(selectedOption);
+    hook.isOptionResumable(selectedOption) &&
+    // A-1: 記録が読めない送金元は「続きから」にしない (実行しても hook が止める・押せない状態で見せる)。
+    !(selectedOption.kind === 'cctp-v2' && cctpUnreadableSources.includes(selectedOption.sourceChainId));
   const burnUnresolved = hook.burnUnresolved;
   const payButtonDisabled =
     isExecuting ||

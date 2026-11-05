@@ -335,4 +335,21 @@ describe('readResumeStateForScan', () => {
       spy.mockRestore();
     }
   });
+
+  // ブラウザでの取得拒否は「今書けない」だけで、過去に保存していない証明にならない (SSR は別ファイル)。
+  it.each<[string, PropertyDescriptor]>([
+    ['the getter throws', { configurable: true, get: (): Storage => { throw new Error('SecurityError'); } }],
+    ['storage is null', { configurable: true, get: (): Storage | null => null }],
+  ])('treats browser storage denial as unreadable (%s)', async (_name, descriptor) => {
+    const { readResumeStateForScan } = await import('@/lib/crossChain/resumeStore');
+    const original = Object.getOwnPropertyDescriptor(window, 'localStorage');
+    Object.defineProperty(window, 'localStorage', descriptor);
+    try {
+      expect(readResumeStateForScan(baseKey)).toEqual({ kind: 'unreadable' });
+      // 既存の loader は従来どおり「なし」(変えていない)。
+      expect(loadResumeState(baseKey)).toBeUndefined();
+    } finally {
+      if (original) Object.defineProperty(window, 'localStorage', original);
+    }
+  });
 });
