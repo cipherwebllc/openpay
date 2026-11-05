@@ -1202,8 +1202,12 @@ describe('A-1: Gateway and CCTP lock reasons are independent', () => {
       saveResumeStateStrict(cctpKey, { approveTxHash: hash, burnTxHash: burnHash });
       const user = (await import('@testing-library/user-event')).default.setup();
       renderHint();
-      // 確かめる前は Gateway のパネルだけ (Gateway の記録は未確認)。
-      await user.click(await screen.findByRole('button', { name: '送金状態を再確認' }));
+      // 確かめる前は Gateway のパネルだけ (Gateway の記録は未確認・解除できるとはまだ分からない)。
+      const gatewayRecheck = await screen.findByRole('button', { name: '送金状態を再確認' });
+      await act(async () => {});
+      expect(screen.queryByRole('button', { name: '続きから支払う' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: '記録をもう一度確かめる' })).not.toBeInTheDocument();
+      await user.click(gatewayRecheck);
       // Gateway は解除できると分かったが記録は残る → パネルを残したまま、その下に CCTP の再開が出る。
       const resume = await screen.findByRole('button', { name: '続きから支払う' });
       expect(screen.getByRole('button', { name: '送金状態を再確認' })).toBeInTheDocument();
@@ -1223,7 +1227,12 @@ describe('A-1: Gateway and CCTP lock reasons are independent', () => {
       localStorage.setItem(name, '{broken');
       const user = (await import('@testing-library/user-event')).default.setup();
       renderHint();
-      await user.click(await screen.findByRole('button', { name: '送金状態を再確認' }));
+      // 確かめる前は Gateway のパネルだけ。
+      const gatewayRecheck = await screen.findByRole('button', { name: '送金状態を再確認' });
+      await act(async () => {});
+      expect(screen.queryByRole('button', { name: '記録をもう一度確かめる' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: '続きから支払う' })).not.toBeInTheDocument();
+      await user.click(gatewayRecheck);
       const recheck = await screen.findByRole('button', { name: '記録をもう一度確かめる' });
       expect(screen.getByRole('button', { name: '送金状態を再確認' })).toBeInTheDocument();
       // 記録が読めるようになってから確かめ直すと、正常な burn の記録として再開できる。
