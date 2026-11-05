@@ -1227,6 +1227,13 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
     standard.restoredFromStorage,
   ]);
 
+  // 履歴と控えの支払者は、支払いを送った時点の接続先 (第 9 回レビュー A-4)。確定を待つ間に拡張機能で別のウォレットへ
+  // 切り替えても、切り替えた先を支払者として保存しない (控えは pending → confirmed の昇格しか受けないので、後から
+  // 直らない)。規則は下の notifyPayer (注文の確認の署名をするウォレット) と同じ: 通常決済は hook が記録した送り主、
+  // それ以外は onSubmit で固定した submittedPayerRef。この画面でまだ送っていない間は、今の接続先のまま (従来どおり)。
+  const historyCustomer =
+    (isStandard ? standard.lastSubmittedFrom : undefined) ?? submittedPayerRef.current ?? address;
+
   // ローカル履歴 (Phase 2) — gasless / standard 全 5 transition を hook で集約。
   // note には description (なければ orderId) を入れ、CSV/UI で会計補助情報に使う。
   // v5: itemized checkout の items を売上明細 (lineItems) として保存し、税/管理番号も記録。
@@ -1241,7 +1248,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
       gasMode: isStandard ? null : effectiveGas,
       merchant: params.to,
       merchantAmount: breakdown.merchantReceives,
-      customer: address,
+      customer: historyCustomer,
       feeReceiver: env.feeReceiver,
       feeAmount: breakdown.feeAmount,
       saleAmount: totalWei,
@@ -1292,7 +1299,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
       breakdown.feeAmount,
       totalWei,
       networkFeeEquivalent,
-      address,
+      historyCustomer,
       locale,
     ],
   );

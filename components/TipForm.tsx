@@ -5,7 +5,7 @@ import dynamic from 'next/dynamic';
 import { useLocale, useTranslations } from 'next-intl';
 import type { StandardPaymentParams } from '@/hooks/useStandardPayment';
 import type { TipStandardApi, TipStandardState } from './TipStandardEngine';
-import { formatUnits } from 'viem';
+import { formatUnits, type Address } from 'viem';
 import { useAccount } from 'wagmi';
 import { useSwitchChainWithFeedback } from '@/hooks/useSwitchChainWithFeedback';
 import { ConnectButton } from './ConnectButton';
@@ -456,7 +456,10 @@ export function TipForm({
   const notifiedUserOpHashRef = useRef<string | null>(null);
   // 送信時点の確定スナップショット。控えが live state (amountStr) を読むと、送信後にユーザが
   // 額を変えたとき、実際に送ったチップと異なる額を記録してしまう。onSubmit でここに固定する。
-  const submittedRef = useRef<{ amount: string } | null>(null);
+  // payer も同じ (第 9 回レビュー A-4): 確定を待つ間に拡張機能で別のウォレットへ切り替えても、送った時点の接続先を
+  // 控えの支払者にする (控えは pending → confirmed の昇格しか受けないので、後から直らない)。通常決済は従来どおり
+  // submittedByThisFormRef の customer を使う。
+  const submittedRef = useRef<{ amount: string; payer: Address | undefined } | null>(null);
   // 成功 overlay の表示額は送信時点を固定 (送信後に金額編集しても overlay が live 値で
   // ぶれないように・Codex P2)。onSubmit で fmt(totalCustomerOutflow) を保存。
   const submittedAmountDisplayRef = useRef<string | null>(null);
@@ -467,6 +470,7 @@ export function TipForm({
       // USDC 額を固定し、後続の preset 変更から切り離す。
       submittedRef.current = {
         amount: formatUnits(attemptAmount, deployment.decimals),
+        payer: address,
       };
       submittedAmountDisplayRef.current = formatTokenAmount(
         attemptAmount,
@@ -474,7 +478,7 @@ export function TipForm({
       );
       setCrossChainLocked(true);
     },
-    [deployment],
+    [deployment, address],
   );
   const onCrossChainExecutingChange = useCallback((executing: boolean) => {
     setCrossChainLocked(executing);
@@ -487,10 +491,10 @@ export function TipForm({
       appendPayerReceipt(buildPayerReceipt({ gatewayTransferSpecHash: result.transferSpecHash,
         chainId: result.destChainId, asset: params.token, tokenAddress: deployment.address,
         amount: submittedRef.current.amount, merchantAddress: params.to, merchantName: params.name,
-        payerAddress: address, paymentMode: 'cross-chain', gasMode: 'customer', memo: params.message,
+        payerAddress: submittedRef.current.payer, paymentMode: 'cross-chain', gasMode: 'customer', memo: params.message,
         sourceRoute: '/tip', locale }));
     }
-  }, [params.token, params.to, params.name, params.message, deployment.address, address, locale]);
+  }, [params.token, params.to, params.name, params.message, deployment.address, locale]);
 
   useEffect(() => {
     // mode 中立: relay (txHash のみ) / gasless (userOpHash + blockNumber) 双方を flow* で扱う。
@@ -503,7 +507,7 @@ export function TipForm({
     if (notifiedUserOpHashRef.current === dedupKey) return;
     notifiedUserOpHashRef.current = dedupKey;
     // 送信時スナップショット優先 (live state drift を排除)。万一未設定なら live に fallback。
-    const sent = submittedRef.current ?? { amount: amountStr };
+    const sent = submittedRef.current ?? { amount: amountStr, payer: address };
     logger.info('tip.success', {
       mode: crossChainResult ? 'cross-chain' : isStandard ? 'standard' : useRelay ? 'relay' : 'gasless',
       userOpHash: flowUserOpHash,
@@ -525,7 +529,7 @@ export function TipForm({
         amount: sent.amount,
         merchantAddress: params.to,
         merchantName: params.name ?? null,
-        payerAddress: isStandard && !crossChainResult ? submittedByThisFormRef.current?.customer : address,
+        payerAddress: isStandard && !crossChainResult ? submittedByThisFormRef.current?.customer : sent.payer,
         paymentMode: crossChainResult ? 'cross-chain' : isStandard ? 'standard' : 'gasless',
         gasMode: 'customer',
         memo: params.message ?? null,
@@ -557,7 +561,7 @@ export function TipForm({
     // 完了画面のチャイムを iOS でも鳴らせるよう、この gesture 内で AudioContext を解錠。
     primeChimeAudio();
     // 送信時点の値を固定 (控えはこのスナップショットを使い、後続の編集による drift を排除する)。
-    submittedRef.current = { amount: amountStr };
+    submittedRef.current = { amount: amountStr, payer: address };
     submittedAmountDisplayRef.current = fmt(totalCustomerOutflow);
     if (isStandard) {
       const snapshot: StandardPaymentParams = {

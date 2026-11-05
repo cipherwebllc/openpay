@@ -852,7 +852,9 @@ function PaymentDetails({ params }: { params: PayParams }) {
           amount: snapshot.amountHuman,
           merchantAddress: params.to,
           merchantName: params.storeName ?? null,
-          payerAddress: address,
+          // 支払者は試みた時点で固定した ctx の接続先 (第 9 回レビュー A-4)。完了までに別のウォレットへ切り替えても、
+          // 切り替えた先を控えの支払者にしない (Gateway の hash の無い控えも同じ。控えは後から支払者を直さない)。
+          payerAddress: ctx.customer,
           paymentMode: 'cross-chain',
           gasMode: 'customer',
           ...sale,
@@ -870,7 +872,6 @@ function PaymentDetails({ params }: { params: PayParams }) {
       );
     },
     [
-      address,
       deployment.address,
       locale,
       params.memo,
