@@ -9,8 +9,8 @@
 // 見る範囲: お支払い額の欄 (section) の最初の子から、小計・値引き・手数料・お支払い額の表 (dl) を包む div の手前までの、子の
 // ノードすべて (要素だけでなくテキストノードも nextSibling でたどる)。後ろの目印の div は欄の後半 (次の PR で切り出す) で、ここに
 // 値引きの行も入る。値引きの行は明細の行の並び (ul) の外なので、この範囲には入らない。section 自身の属性も見る。要素は子まで
-// 木のまま比べる (品名・数量・行の額は li の子の span)。隣り合うテキストノードはつないで 1 つの文字列にする (描画が同じなら
-// 分かれ方は問わない)。
+// 木のまま比べる (品名・数量・行の額は li の子の span)。テキストノードはつながずに 1 つずつ比べる (「×」と数量は別のテキスト
+// ノードで、その境界も固定する・#1021 の Codex レビュー)。
 //
 // 明細の行には条件の分岐がない (品目を並びどおりに 1 行ずつ出すだけ)。だから値引き・消費税・送料・モバイル注文の利用料・経路・
 // 接続の有無・完了は、どれも行を変えないことを 1 つずつ単独で効かせて固定する (効いていることは欄の後半の表で確かめる)。
@@ -235,7 +235,7 @@ beforeEach(() => {
   setDefaults();
 });
 
-/** 要素を子まで木にしたもの。属性はすべて (class・role 等)、テキストは隣り合う text node をつないだ文字列で持つ。 */
+/** 要素を子まで木にしたもの。属性はすべて (class・role 等)、テキストは text node 1 つを 1 つの文字列で持つ (つながない)。 */
 type Dom = { tag: string; attrs: Record<string, string>; children: DomNode[] };
 type DomNode = string | Dom;
 
@@ -252,10 +252,8 @@ function nodes(first: ChildNode | null, end: ChildNode | null): DomNode[] {
     // end に届かずに兄弟が尽きたら、目印が同じ親にいない (範囲が壊れている)。
     if (n === null) throw new Error('end marker is not a following sibling');
     if (n.nodeType === Node.TEXT_NODE) {
-      const text = n.textContent ?? '';
-      const last = out[out.length - 1];
-      if (typeof last === 'string') out[out.length - 1] = last + text;
-      else out.push(text);
+      // 隣り合うテキストノードもつながない (境界が変われば落ちる)。
+      out.push(n.textContent ?? '');
     } else if (n.nodeType === Node.ELEMENT_NODE) {
       const el = n as Element;
       out.push({ tag: el.tagName.toLowerCase(), attrs: attrsOf(el), children: nodes(el.firstChild, null) });
@@ -295,13 +293,13 @@ const msgs = (locale: 'ja' | 'en') => (locale === 'ja' ? messages : enMessages).
 
 const SECTION_ATTRS = { class: 'rounded-2xl border border-slate-200 bg-white p-4 text-sm' };
 
-/** 品目の行 1 つ (品名・「×数量」・行の額 (単価 × 数量))。 */
+/** 品目の行 1 つ (品名・「×数量」・行の額 (単価 × 数量))。「×」と数量は別のテキストノード。 */
 const row = (name: string, qty: number, amount: string): Dom => ({
   tag: 'li',
   attrs: { class: 'flex items-baseline justify-between gap-3 py-2' },
   children: [
     { tag: 'span', attrs: { class: 'min-w-0 flex-1 break-words font-medium text-slate-700' }, children: [name] },
-    { tag: 'span', attrs: { class: 'shrink-0 font-mono text-xs text-slate-500' }, children: [`×${qty}`] },
+    { tag: 'span', attrs: { class: 'shrink-0 font-mono text-xs text-slate-500' }, children: ['×', String(qty)] },
     { tag: 'span', attrs: { class: 'shrink-0 font-mono text-sm text-slate-800' }, children: [amount] },
   ],
 });
