@@ -2,6 +2,7 @@
 // flag OFF=404 / handle 束縛 / txHash 冪等 / on-chain 検証 (pass/fail/rpc) / KV 必須 (mainnet) /
 // レート制限。chains/tokens は実値 (chainId=137)・verifyJpycTransferToOnChain と KV は mock。
 
+import { createHmac } from 'node:crypto';
 import type { FeeReceiptLog } from '@/lib/feeVerify';
 import { bindingFixture, BIND_FORWARDER, BIND_PAYER, bindTransfer } from '../../_helpers/orderBinding';
 import { resolveDeployment } from '@/lib/tokens';
@@ -16,6 +17,8 @@ const TXHASH = `0x${'a'.repeat(64)}`;
 const SECOND_TXHASH = `0x${'b'.repeat(64)}`;
 const FEE_TXHASH = `0x${'f'.repeat(64)}`;
 const STATUS_TOKEN = 'p'.repeat(43); // 顧客生成の status トークン (43 文字 base64url = 有効形式)
+// E-1: txHash の枠の IP bucket (hashIpBucket) を有効にする secret (32 byte 以上)。本番は設定済み。
+const E1_IP_SECRET = 'e1-notify-tx-ip-bucket-secret-0123456789';
 
 // 注意: vi.hoisted は top-level const より先に走るため、ここで MERCHANT/JPYC を参照すると TDZ。
 // 初期値は安全なリテラル/null にし、実値は beforeEach で設定する。
@@ -565,7 +568,10 @@ describe('POST /api/order/notify', () => {
     expect(verifySpy).toHaveBeenCalledTimes(16);
   });
 
-  it('同じ決済の大文字小文字や IP を替えても 6 回目は 429・別決済は通る', async () => {
+  // E-1 以降は枠が txHash と IP の組 (別の IP は下の E-1 の describe)。ここは同じ IP からの
+  // 従来の挙動 (txHash の大文字小文字で枠が分かれない・6 回目は 429) を本番と同じ secret ありで固定する。
+  it('同じ決済は大文字小文字を替えても同じ IP からの 6 回目は 429・別決済は通る', async () => {
+    vi.stubEnv('IP_HASH_SECRET', E1_IP_SECRET);
     hold.realRateLimits = true;
     hold.claimValue = null;
     for (let i = 0; i < 5; i++) {
@@ -574,9 +580,10 @@ describe('POST /api/order/notify', () => {
       expect(await res.json()).toMatchObject({ duplicate: true });
     }
     const upper = `0x${'A'.repeat(64)}`;
-    expect((await POST(req(goodBody({ txHash: upper }), '?h=alice', '203.0.113.9'))).status).toBe(429);
+    expect((await POST(req(goodBody({ txHash: upper })))).status).toBe(429);
     expect((await POST(req(goodBody({ txHash: SECOND_TXHASH })))).status).toBe(200);
     expect(verifySpy).not.toHaveBeenCalled();
+    vi.unstubAllEnvs();
   });
 
   it('txHash を替える flood は同一 /24 の 121 回目に 429・検証へ進まない', async () => {
@@ -1510,5 +1517,142 @@ describe('POST /api/order/notify — 店舗の値引き', () => {
     hold.verify = { ok: true, value: 1000n * JPYC };
     await POST(req(goodBody()));
     expect('discount' in latestStoredOrder()).toBe(false);
+  });
+});
+
+// 第 9 回レビュー E-1: txHash はオンチェーンで公開される。txHash だけの枠だと、受取ウォレット宛ての
+// 着金を見た第三者が同じ txHash を先に送って枠を使い切り、お客様の正規の通知が 429 で受注ボードに
+// 出なかった (ORDER_BIND_ENFORCE の点灯後に効く)。枠は txHash と IP bucket (hashIpBucket) の組。
+describe('E-1: the per-tx limiter is keyed by txHash and IP bucket', () => {
+  const IP_A = '198.51.100.7'; // 攻撃者 (req() の既定の IP)
+  const IP_B = '203.0.113.9'; // お客様
+  // hashIpBucket の IPv4 (/32) と同じ HMAC を独立に計算し、鍵の形を固定する。
+  const ipBucket = (ip: string) =>
+    createHmac('sha256', E1_IP_SECRET).update(`ip:${ip}`).digest('hex');
+  const txLimiterKey = (bucket: string, txHash = TXHASH) =>
+    `relay:rl:order:tx:${txHash.toLowerCase()}:${bucket}`;
+  const txLimiterKeys = () =>
+    [...hold.rateLists.keys()].filter((key) => key.startsWith('relay:rl:order:tx:'));
+  const noIpRequest = () =>
+    new Request('http://localhost/api/order/notify?h=alice', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(goodBody()),
+    });
+
+  beforeEach(() => {
+    hold.realRateLimits = true;
+    vi.stubEnv('IP_HASH_SECRET', E1_IP_SECRET);
+  });
+  afterEach(() => vi.unstubAllEnvs());
+
+  it('鍵は小文字の txHash + IP bucket (IPv4 /32 の HMAC)', async () => {
+    hold.claimValue = null; // 既に登録済みの決済 (duplicate) = RPC に進まない
+    await POST(req(goodBody({ txHash: `0x${'A'.repeat(64)}` }), '?h=alice', IP_A));
+    await POST(req(goodBody(), '?h=alice', IP_B));
+    expect(txLimiterKeys()).toEqual([
+      txLimiterKey(ipBucket(IP_A)),
+      txLimiterKey(ipBucket(IP_B)),
+    ]);
+  });
+
+  it('IP A の同じ txHash の 6 回の拒否の後でも、IP B の正規の通知は 429 にならず登録される', async () => {
+    // 攻撃者: 公開の着金を見て、同じ txHash で束縛の壊れた通知を IP A から送る (検証で 422)。
+    for (let i = 0; i < 5; i++) {
+      const res = await POST(req(goodBody({ bind: { v: 2 } }), '?h=alice', IP_A));
+      expect(res.status).toBe(422);
+    }
+    // characterization: 同じ IP からは従来どおり 6 回目から 429 (検証へ進まない)。
+    expect((await POST(req(goodBody({ bind: { v: 2 } }), '?h=alice', IP_A))).status).toBe(429);
+    expect((await POST(req(goodBody(), '?h=alice', IP_A))).status).toBe(429);
+    expect(verifySpy).toHaveBeenCalledTimes(5);
+    expect(hold.listValues).toEqual([]);
+
+    // お客様 (IP B) の正規の通知は自分の枠で通り、受注ボードに載る。
+    const res = await POST(req(goodBody(), '?h=alice', IP_B));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ ok: true, orderId: 'oid-1' });
+    expect(hold.listValues).toHaveLength(1);
+    expect(latestStoredOrder()).toMatchObject({ txHash: TXHASH, orderId: 'oid-1' });
+    expect(verifySpy).toHaveBeenCalledTimes(6);
+  });
+
+  it('同じ NAT (同じ IP bucket) の別決済は互いの枠を使わない (鍵が txHash を含むまま)', async () => {
+    for (let i = 1; i <= 16; i++) {
+      const txHash = `0x${i.toString(16).padStart(64, '0')}`;
+      expect((await POST(req(goodBody({ txHash }), '?h=alice', IP_A))).status).toBe(200);
+    }
+    expect(hold.listValues).toHaveLength(16);
+    expect(verifySpy).toHaveBeenCalledTimes(16);
+  });
+
+  it("IP bucket が取れない要求 (secret 欠落・IP ヘッダ無し) は 'none' の 1 つの枠を共有する", async () => {
+    hold.claimValue = null;
+    vi.stubEnv('IP_HASH_SECRET', '');
+    for (let i = 0; i < 4; i++) {
+      expect((await POST(req(goodBody(), '?h=alice', i % 2 === 0 ? IP_A : IP_B))).status).toBe(200);
+    }
+    vi.stubEnv('IP_HASH_SECRET', E1_IP_SECRET);
+    expect((await POST(noIpRequest())).status).toBe(200);
+    // 'none' の枠は従来の txHash だけの鍵と同じ広さ: 6 回目は IP を替えても 429。
+    vi.stubEnv('IP_HASH_SECRET', '');
+    expect((await POST(req(goodBody(), '?h=alice', IP_B))).status).toBe(429);
+    expect(txLimiterKeys()).toEqual([txLimiterKey('none')]);
+    expect(verifySpy).not.toHaveBeenCalled();
+  });
+
+  it('IPv6 は /64 で 1 つの枠: 同じ /64 の別ホストは 6 回目で 429・別の /64 は通る', async () => {
+    // hashIpBucket (/64) でなく hashIp (/128) にすると、ホスト部を替えるだけで同じ txHash を
+    // 無制限に送れる。/64 を 1 つの利用者として数えることを固定する。
+    hold.claimValue = null;
+    for (let i = 1; i <= 5; i++) {
+      expect((await POST(req(goodBody(), '?h=alice', `2001:db8:1:2::${i}`))).status).toBe(200);
+    }
+    expect((await POST(req(goodBody(), '?h=alice', '2001:db8:1:2:ffff::6'))).status).toBe(429);
+    expect((await POST(req(goodBody(), '?h=alice', '2001:db8:1:3::1'))).status).toBe(200);
+    expect(txLimiterKeys()).toEqual([
+      txLimiterKey(ipBucket('2001:db8:1:2::')),
+      txLimiterKey(ipBucket('2001:db8:1:3::')),
+    ]);
+  });
+
+  it('tx の枠で拒否された要求は subnet の backstop を数えない (2 つの limiter の順)', async () => {
+    hold.claimValue = null;
+    const subnetCounters = () =>
+      [...hold.rateCounters.entries()].filter(([key]) => key.startsWith('rl:read:order:'));
+    for (let i = 0; i < 5; i++) {
+      expect((await POST(req(goodBody(), '?h=alice', IP_A))).status).toBe(200);
+    }
+    expect(subnetCounters()).toEqual([[expect.stringMatching(/^rl:read:order:198\.51\.100\.0\/24:\d+$/), 5]]);
+    // tx の枠 (先) で 429 になった要求は、subnet の枠 (後) に届かない。
+    expect((await POST(req(goodBody(), '?h=alice', IP_A))).status).toBe(429);
+    expect((await POST(req(goodBody(), '?h=alice', IP_A))).status).toBe(429);
+    expect(subnetCounters()).toEqual([[expect.stringMatching(/^rl:read:order:198\.51\.100\.0\/24:\d+$/), 5]]);
+  });
+
+  it('ORDER_BIND_ENFORCE=ON: IP A からの不正な通知 5 回の後でも、IP B の正当な binding で登録できる', async () => {
+    vi.stubEnv('ENABLE_ORDER_BIND_ENFORCE', 'true');
+    hold.forwarder = BIND_FORWARDER;
+    const f = bindingFixture('free', {
+      ...goodBody({ statusToken: STATUS_TOKEN }),
+      handle: 'alice',
+      tokenAddress: resolveDeployment('jpyc', 80002)!.address,
+    });
+    hold.verify = { ok: true, value: 5000n * JPYC, receiptLogs: f.logs };
+    // 攻撃者は secret を知らない: 束縛なし (ENFORCE で 422) と、secret を替えた束縛 (422) を交互に送る。
+    const { bind: _bind, ...unbound } = f.body;
+    const forged = { ...f.body, bind: { ...f.bind, secret: `0x${'00'.repeat(32)}` } };
+    for (let i = 0; i < 5; i++) {
+      const res = await POST(req(i % 2 === 0 ? unbound : forged, '?h=alice', IP_A));
+      expect(res.status).toBe(422);
+    }
+    expect((await POST(req(f.body, '?h=alice', IP_A))).status).toBe(429);
+    expect(hold.listValues).toEqual([]);
+
+    const res = await POST(req(f.body, '?h=alice', IP_B));
+    expect(res.status).toBe(200);
+    expect(latestStoredOrder()).toMatchObject({ orderId: f.order.orderId, txHash: f.body.txHash });
+    expect(latestStoredOrder().bindingDigest).toMatch(/^0x[0-9a-f]{64}$/);
+    expect(latestStoredOrder()).not.toHaveProperty('bindingMissing');
   });
 });
