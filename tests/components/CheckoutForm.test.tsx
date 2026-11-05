@@ -3683,6 +3683,44 @@ describe('CheckoutForm — 注文でお店に届く額が 1 JPYC 未満なら署
     expect(relayMutate).toHaveBeenCalledOnce();
     expect(relayMutate.mock.calls[0][0]).toMatchObject({ merchant: MERCHANT, value: 25n * 10n ** 17n, gasMode: 'merchant' });
   });
+
+  // 対象を決めるのは同一 origin の notify の有無で、@handle (storeHandle) の有無ではない (Codex SHOULD)。
+  // 上の注文はどれも storeHandle と notify を両方持つので、この 2 本で片方ずつにした会計を直接確かめる。
+  it('同一 origin の notify があれば storeHandle が無くても 0 < 受取 < 1 JPYC (recover の 2.5 JPYC) は止める', async () => {
+    const user = userEvent.setup();
+    const fetchSpy = vi.fn().mockResolvedValue(Response.json({ ok: true }));
+    vi.stubGlobal('fetch', fetchSpy);
+    setupJpyc('relay-recover');
+    render(
+      <CheckoutForm
+        params={{ ...JPYC_PARAMS, items: [{ name: 'あめ', qty: 1, price: '2.5' }], orderId: 'ord-dust', webhook: ownNotify() }}
+      />,
+    );
+
+    expect(await screen.findByText(REASON)).toBeInTheDocument();
+    const button = screen.getByRole('button', { name: /2\.5 JPYC を支払う/ });
+    expect(button).toBeDisabled();
+    await user.click(button);
+    expect(relayMutate).not.toHaveBeenCalled();
+  });
+
+  it('storeHandle だけで同一 origin の notify が無い会計 (受注を送らない) は 0 < 受取 < 1 JPYC でも払える', async () => {
+    const user = userEvent.setup();
+    const fetchSpy = vi.fn().mockResolvedValue(Response.json({ ok: true }));
+    vi.stubGlobal('fetch', fetchSpy);
+    setupJpyc('relay-recover');
+    render(<CheckoutForm params={orderParams('2.5', { webhook: undefined })} />);
+
+    const button = screen.getByRole('button', { name: /2\.5 JPYC を支払う/ });
+    expect(button).toBeEnabled();
+    expect(screen.queryByText(REASON)).toBeNull();
+    await user.click(button);
+    // @handle の会計なので注文の受付 (admission) を通ってから署名へ進む。
+    await waitFor(() => expect(relayMutate).toHaveBeenCalledOnce());
+    expect(fetchSpy.mock.calls.map(([url]) => String(url))).toContain('/api/order/admission');
+    expect(relayMutate.mock.calls[0][0]).toMatchObject({ merchant: MERCHANT, value: 25n * 10n ** 17n, gasMode: 'merchant' });
+    expect(relayMutate.mock.calls[0][0].order).toBeUndefined();
+  });
 });
 
 describe('CheckoutForm — F7 off-origin callback 開示', () => {
