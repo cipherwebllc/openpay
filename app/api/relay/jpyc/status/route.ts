@@ -53,7 +53,8 @@ type ParsedIntent = {
   forwarder?: Address;
   settlement?: ForwarderSettleParams;
   transfer?: Pick<Eip3009Authorization, 'to' | 'value'>;
-  // 署名の有効期限 (tx 探しを、署名が使われうる時刻のブロックに絞るため)。再読み込み後の照会 (nonce だけ) には無い。
+  // 署名の有効期限 (tx 探しを、署名が使われうる時刻のブロックに絞るため)。再読み込み後の照会 (nonce だけ) は
+  // validBefore を送ったときだけ持つ (validAfter は知らないので、validBefore − 照会の窓で下限を作る)。
   validity?: { validAfter: bigint; validBefore: bigint };
   // nonce lookup が任意で送る署名の期限。unused のとき「期限切れ未使用の証明」(expiry) をチェーンで取るためだけに使う。
   expiryValidBefore?: bigint;
@@ -290,12 +291,26 @@ function parseIntent(raw: Record<string, unknown>): ParsedIntent | null {
       return null;
     }
     const from = getAddress(raw.from as string);
+    const expiryValidBefore = raw.validBefore === undefined ? undefined : BigInt(raw.validBefore as string);
+    // 第 9 回レビュー A-3: validBefore があれば tx 探しにも窓を渡す (無いと直近 10,000 ブロックの 1 回の検索が RPC の
+    // 範囲制限で拒まれたとき throw → 期限まで indeterminate のままで、決済済みが完了にならない)。validAfter は照会に
+    // 無いので、署名が使われうる最も早い時刻 (validBefore − 照会の窓) を下限にする。validBefore は署名なしの値だが、
+    // 窓は検索の範囲を決めるだけで、見つけた tx は receiptMatchesIntent で照合する (外れた値は見つからない・
+    // 探しきれない = indeterminate に倒れ、settled にはならない)。
+    const lookupWindowSec = BigInt(AUTHORIZATION_LOOKUP_WINDOW_SEC);
+    const validity = expiryValidBefore === undefined
+      ? undefined
+      : {
+        validAfter: expiryValidBefore > lookupWindowSec ? expiryValidBefore - lookupWindowSec : 0n,
+        validBefore: expiryValidBefore,
+      };
     return {
       chainId: raw.chainId,
       from,
       nonce: raw.nonce as Hex,
       forwarder: jpycForwarderFor(raw.chainId) ?? undefined,
-      expiryValidBefore: raw.validBefore === undefined ? undefined : BigInt(raw.validBefore as string),
+      expiryValidBefore,
+      validity,
       // nonce は 32-byte random/forwarder commitment で列挙不能、route は rate-limit 済みかつ
       // read-only。リロード後に署名を再保存せず結果照会できるよう signer は from に固定する。
       verifySignature: async () => from,
