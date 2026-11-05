@@ -32,5 +32,8 @@ export function useSwitchChainWithFeedback(surface: string) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [error, surface]);
 
-  return { switchChain, isPending, failed };
+  // failedChainId = 失敗した切り替えの目的のチェーン (失敗していなければ undefined)。目的のチェーンを画面で
+  // 選び直せるとき (ガス代の補充)、今選んでいるチェーンへの失敗だけを知らせるのに使う (別のチェーンへの前の
+  // 失敗を、押す前から「… に切り替えられませんでした」と出さない)。
+  return { switchChain, isPending, failed, failedChainId: failed ? targetChainId : undefined };
 }

@@ -20,7 +20,7 @@ const w = vi.hoisted(() => ({
   balance: undefined as { value: bigint } | undefined,
   sendAsync: vi.fn(),
   // switchChain の呼び出しと、押したときの失敗 (tests/_helpers/switchChainStub.ts)。
-  switch: { switchChain: vi.fn(), error: null as Error | null },
+  switch: { switchChain: vi.fn(), error: null as Error | null, hold: false, release: () => {} },
   receipt: { data: undefined, isError: false } as Receipt,
   receiptArgs: [] as ReceiptArgs[],
   rawReceipt: vi.fn(),
@@ -101,6 +101,8 @@ describe('StoreGasWalletTopUp', () => {
     w.sendAsync.mockReset().mockResolvedValue(TX);
     w.switch.switchChain.mockReset();
     w.switch.error = null;
+    w.switch.hold = false;
+    w.switch.release = () => {};
     w.receipt = { data: undefined, isError: false };
     w.receiptArgs = [];
     w.rawReceipt.mockReset().mockRejectedValue(new Error('not found'));
@@ -582,6 +584,69 @@ describe('StoreGasWalletTopUp', () => {
     } finally {
       warn.mockRestore();
     }
+  });
+
+  it('切り替えの待ちの間はボタンを押せない・失敗の後に押し直したら、前の知らせを消す', () => {
+    const button = () => screen.getByRole('button', { name: 'ウォレットを Polygon Amoy に切り替える' });
+    w.switch.error = new Error('Unrecognized chain ID "0x13882".');
+    w.account = { address: SHOP, isConnected: true, chainId: 1 };
+    show();
+    fireEvent.click(button());
+    expect(screen.getByRole('alert')).toHaveTextContent('Polygon Amoy に切り替えられませんでした。');
+    // 押し直す: ウォレットの応答を待つ間 (pending) は押せず、前の失敗の知らせは出さない。
+    w.switch.hold = true;
+    w.switch.error = null;
+    fireEvent.click(button());
+    expect(button()).toBeDisabled();
+    expect(screen.queryByRole('alert')).toBeNull();
+    // 今度は失敗しなかった → 押せるように戻り、知らせも出ない。
+    act(() => w.switch.release());
+    expect(button()).toBeEnabled();
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('失敗の後に接続を切ったら、知らせを消す', () => {
+    w.switch.error = new Error('Unrecognized chain ID "0x13882".');
+    w.account = { address: SHOP, isConnected: true, chainId: 1 };
+    const { rerender } = show();
+    fireEvent.click(screen.getByRole('button', { name: 'ウォレットを Polygon Amoy に切り替える' }));
+    expect(screen.getByRole('alert')).toHaveTextContent('Polygon Amoy に切り替えられませんでした。');
+    w.account = { address: undefined, isConnected: false, chainId: undefined };
+    rerender();
+    expect(screen.getByText(/右上の「接続」でお店のウォレットをつなぐと/)).toBeTruthy();
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  // 第 9 回レビュー F-03 (Codex SHOULD 1): 補充先は選び直せる。別の補充先への前の失敗を、今の補充先への切り替えを
+  // 押す前から「… に切り替えられませんでした」と出さない。
+  it('失敗の後に補充先を選び直したら知らせを消し、元の補充先に戻したら出す', () => {
+    const select = () => screen.getByRole('combobox', { name: '補充するチェーン' });
+    w.switch.error = new Error('Unrecognized chain ID "0x13882".');
+    w.account = { address: SHOP, isConnected: true, chainId: 1 };
+    show([AMOY, FUJI]);
+    fireEvent.click(screen.getByRole('button', { name: 'ウォレットを Polygon Amoy に切り替える' }));
+    expect(screen.getByRole('alert')).toHaveTextContent('Polygon Amoy に切り替えられませんでした。');
+    fireEvent.change(select(), { target: { value: '43113' } });
+    expect(screen.getByRole('button', { name: 'ウォレットを Avalanche Fuji に切り替える' })).toBeEnabled();
+    expect(screen.queryByRole('alert')).toBeNull();
+    fireEvent.change(select(), { target: { value: '80002' } });
+    expect(screen.getByRole('alert')).toHaveTextContent('Polygon Amoy に切り替えられませんでした。');
+  });
+
+  it('切り替えの待ちの間に補充先を選び直し、その後に前の切り替えが失敗しても、今の補充先には知らせない', () => {
+    const select = () => screen.getByRole('combobox', { name: '補充するチェーン' });
+    w.switch.hold = true;
+    w.switch.error = new Error('Unrecognized chain ID "0x13882".');
+    w.account = { address: SHOP, isConnected: true, chainId: 1 };
+    show([AMOY, FUJI]);
+    fireEvent.click(screen.getByRole('button', { name: 'ウォレットを Polygon Amoy に切り替える' }));
+    fireEvent.change(select(), { target: { value: '43113' } });
+    // Amoy への切り替えが (Fuji を選んだ後に) 失敗した。
+    act(() => w.switch.release());
+    expect(screen.getByRole('button', { name: 'ウォレットを Avalanche Fuji に切り替える' })).toBeEnabled();
+    expect(screen.queryByRole('alert')).toBeNull();
+    fireEvent.change(select(), { target: { value: '80002' } });
+    expect(screen.getByRole('alert')).toHaveTextContent('Polygon Amoy に切り替えられませんでした。');
   });
 
   it('チェーンを選ぶと、そのチェーンの目安と通貨で送る', async () => {

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { renderWithIntl } from '../_helpers/i18n';
 
@@ -28,7 +28,7 @@ const h = vi.hoisted(() => ({
     error: null as Error | null,
   },
   // switchChain の呼び出しと、押したときの失敗 (tests/_helpers/switchChainStub.ts)。
-  switch: { switchChain: vi.fn(), error: null as Error | null },
+  switch: { switchChain: vi.fn(), error: null as Error | null, hold: false, release: () => {} },
 }));
 
 vi.mock('@/lib/env', async (importOriginal) => {
@@ -71,12 +71,14 @@ import { defaultDeploymentForSymbol } from '@/lib/tokens';
 
 function renderPanel(locale: 'ja' | 'en' = 'ja') {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return renderWithIntl(
+  const ui = () => (
     <QueryClientProvider client={qc}>
       <OpenPayFeePanel />
-    </QueryClientProvider>,
-    { locale },
+    </QueryClientProvider>
   );
+  const r = renderWithIntl(ui(), { locale });
+  // 同じ QueryClient のまま描き直す (パネルの状態を保ったまま、接続などの変化を見る)。
+  return { ...r, rerender: () => r.rerender(ui()) };
 }
 
 const invoiceData = (over?: Partial<Record<string, unknown>>) => ({
@@ -129,6 +131,8 @@ beforeEach(() => {
   h.pay = { mutateAsync: vi.fn(), isPending: false, isError: false, error: null };
   h.switch.switchChain.mockReset();
   h.switch.error = null;
+  h.switch.hold = false;
+  h.switch.release = () => {};
 });
 
 describe('OpenPayFeePanel', () => {
@@ -434,5 +438,37 @@ describe('OpenPayFeePanel チェーンの切り替えの失敗', () => {
     fireEvent.click(buttons[1]);
     expect(await screen.findByRole('alert')).toHaveTextContent(notice);
     expect(screen.getAllByRole('alert')).toHaveLength(1);
+  });
+
+  it('切り替えの待ちの間はボタンを押せない・失敗の後に押し直したら、前の知らせを消す', () => {
+    const button = () => screen.getByRole('button', { name: /切り替え/ });
+    h.switch.error = new Error('Unrecognized chain ID "0x13882".');
+    renderPanel();
+    fireEvent.click(button());
+    expect(screen.getByRole('alert')).toHaveTextContent(notice);
+    // 押し直す: ウォレットの応答を待つ間 (pending) は押せず、前の失敗の知らせは出さない。
+    h.switch.hold = true;
+    h.switch.error = null;
+    fireEvent.click(button());
+    expect(button()).toBeDisabled();
+    expect(screen.queryByRole('alert')).toBeNull();
+    // 今度は失敗しなかった → 押せるように戻り、知らせも出ない。記録は最初の失敗の 1 回だけ。
+    act(() => h.switch.release());
+    expect(button()).toBeEnabled();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+
+  it('失敗の後に接続を切ったら、知らせを消す', () => {
+    h.switch.error = new Error('Unrecognized chain ID "0x13882".');
+    const { rerender } = renderPanel();
+    fireEvent.click(screen.getByRole('button', { name: /切り替え/ }));
+    expect(screen.getByRole('alert')).toHaveTextContent(notice);
+    h.account = { isConnected: false, chainId: undefined };
+    rerender();
+    expect(screen.getByText('ウォレットを接続してください。')).toBeInTheDocument();
+    // 切断中も「… に切り替える」は残る (チェーンが分からない) が、失敗の知らせは出さない。
+    expect(screen.getByRole('button', { name: /切り替え/ })).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).toBeNull();
   });
 });

@@ -24,6 +24,7 @@ describe('useSwitchChainWithFeedback', () => {
   it('失敗していなければ failed=false で記録しない', () => {
     const { result } = renderHook(() => useSwitchChainWithFeedback('checkout'));
     expect(result.current.failed).toBe(false);
+    expect(result.current.failedChainId).toBeUndefined();
     expect(result.current.switchChain).toBe(switchChain);
     expect(warn).not.toHaveBeenCalled();
   });
@@ -32,6 +33,7 @@ describe('useSwitchChainWithFeedback', () => {
     switchState = { error: new Error('User rejected the request.'), variables: { chainId: 8217 } };
     const { result } = renderHook(() => useSwitchChainWithFeedback('checkout'));
     expect(result.current.failed).toBe(false);
+    expect(result.current.failedChainId).toBeUndefined();
     expect(warn).not.toHaveBeenCalled();
   });
 
@@ -40,6 +42,8 @@ describe('useSwitchChainWithFeedback', () => {
     switchState = { error, variables: { chainId: 8217 } };
     const { result, rerender } = renderHook(() => useSwitchChainWithFeedback('checkout'));
     expect(result.current.failed).toBe(true);
+    // どのチェーンへの切り替えが失敗したか (補充先を選び直せる画面で、今の選択への失敗だけを知らせる)。
+    expect(result.current.failedChainId).toBe(8217);
     rerender();
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn).toHaveBeenCalledWith('wallet.switch_chain_failed', {
