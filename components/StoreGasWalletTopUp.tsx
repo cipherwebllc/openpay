@@ -27,9 +27,9 @@ import {
   useBalance,
   usePublicClient,
   useSendTransaction,
-  useSwitchChain,
   useWaitForTransactionReceipt,
 } from 'wagmi';
+import { useSwitchChainWithFeedback } from '@/hooks/useSwitchChainWithFeedback';
 import { nativeSymbolForChainId, txExplorerUrl } from '@/lib/chains';
 import {
   hasStoreGasWalletLock,
@@ -148,7 +148,8 @@ export function StoreGasWalletTopUp({
   }, [op, reload]);
 
   const { address: wallet, isConnected, chainId: walletChainId } = useAccount();
-  const { switchChain, isPending: isSwitching } = useSwitchChain();
+  // 切り替えの失敗を画面に知らせ、記録に残す (hooks/useSwitchChainWithFeedback.ts)。
+  const { switchChain, isPending: isSwitching, failed: switchFailed } = useSwitchChainWithFeedback('gas-wallet-topup');
   const { data: balance } = useBalance({ address: wallet, chainId: target?.chainId });
   const { sendTransactionAsync } = useSendTransaction();
   // 別のタブとの排他が使えるか (描画後に読む = server と初回 client の描画を揃える)。null = まだ読んでいない。
@@ -417,6 +418,11 @@ export function StoreGasWalletTopUp({
             <button type="button" className={BTN} disabled={!canSend} onClick={() => void onSend()}>
               {t('topUpSend', { amount: check.ok ? amount.trim() : '—', symbol })}
             </button>
+          )}
+          {wrongChain && !pending && switchFailed && (
+            <p role="alert" className="text-xs leading-relaxed text-red-700">
+              {t('switchChainFailed', { chainName: target.chain.name })}
+            </p>
           )}
           {error && (
             <p role="alert" className="text-red-600">
