@@ -48,6 +48,26 @@ export class CrossChainBurnUnresolvedError extends Error {
   }
 }
 
+/** A-1: 回復専用の選択肢 (残高が請求額を割った送金元) の再開で、決定表が burn (前回の burn が
+ *  動いていない・二段確認済み等) を返した。ここでは送金せず止める — 残高検査を経ていない選択肢から
+ *  approve / burn に進ませないため。保存記録はそのまま残すので、親の直接払いのロックも外れない。 */
+export class CrossChainRecoveryBurnBlockedError extends Error {
+  readonly slot: BurnSlot;
+  readonly row: number;
+  readonly sourceChainId: number;
+
+  constructor(args: { slot: BurnSlot; row: number; sourceChainId: number }) {
+    super(
+      `cross-chain execute: 回復専用の選択肢では ${args.slot} burn を送りません ` +
+        `(row ${args.row}, source ${args.sourceChainId})`,
+    );
+    this.name = 'CrossChainRecoveryBurnBlockedError';
+    this.slot = args.slot;
+    this.row = args.row;
+    this.sourceChainId = args.sourceChainId;
+  }
+}
+
 export class CrossChainQuoteExpiredError extends Error {
   constructor(readonly replacementQuote?: AcceptedQuote) {
     super('Forwarding quote expired or exceeded; review and accept a new quote');

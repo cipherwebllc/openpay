@@ -11,7 +11,7 @@ import { renderWithIntl } from '../_helpers/i18n';
 import { env } from '@/lib/env';
 import * as chains from '@/lib/chains';
 import { readAllCrossChainBalances } from '@/lib/crossChain/balance';
-import { executeCctpTransfer, executeGatewayTransfer, CrossChainBurnUnresolvedError, CrossChainQuoteExpiredError, type CctpResumeState } from '@/lib/crossChain/execute';
+import { executeCctpTransfer, executeGatewayTransfer, CrossChainBurnUnresolvedError, CrossChainQuoteExpiredError, CrossChainRecoveryBurnBlockedError, type CctpResumeState } from '@/lib/crossChain/execute';
 import { acceptForwardQuote, fetchCctpBurnFees, pollIrisAttestation } from '@/lib/crossChain/cctp';
 import { requestAttestation } from '@/lib/crossChain/gateway';
 import { BUYER_SOURCE_TARGETS } from '@/lib/crossChain/config';
@@ -881,5 +881,78 @@ describe('A-1: CCTP recovery survives a source balance below the invoice', () =>
       key: 'cctp-v2-84532', sourceChainId: 84532, recoveryOnly: true,
     })]));
     expect(result.current.isCommitted).toBe(true);
+  });
+
+  it.each(['insufficient', 'failed', 'loading'])('shows a usable resume button and never releases the parent lock while balances are %s', async (status) => {
+    if (status === 'loading') vi.mocked(readAllCrossChainBalances).mockImplementation(() => new Promise(() => {}));
+    else if (status === 'failed') vi.mocked(readAllCrossChainBalances).mockRejectedValue(new Error('offline'));
+    else balancesOf(500_000n);
+    const onExecutingChange = vi.fn();
+    renderWithIntl(wrapper({ children: <CrossChainHint {...legacyArgs} token="usdc" enabled tokenAddress={account}
+      displayDecimals={6} directIsGasless={false} onExecutingChange={onExecutingChange} /> }));
+
+    const button = await screen.findByRole('button', { name: '続きから支払う' });
+    await waitFor(() => expect(button).toBeEnabled());
+    await act(async () => {});
+    expect(onExecutingChange).toHaveBeenCalled();
+    // 初回の通知から最後まで、一度も false (= 親の直接払いの解錠) を挟まない。
+    expect(onExecutingChange.mock.calls.map(([locked]) => locked)).not.toContain(false);
+  });
+
+  it('does not offer the destination chain itself as a CCTP recovery source', async () => {
+    expect(BUYER_SOURCE_TARGETS.some((t) => t.chainId === 80002)).toBe(true);
+    localStorage.clear();
+    saveResumeStateStrict({ ...legacyKey, sourceChainId: 80002 }, { approveTxHash: hash, burnTxHash: burnHash });
+    balancesOf(500_000n);
+    const { result } = renderHook(() => useCrossChainPayment(legacyArgs), { wrapper });
+    await waitFor(() => expect(result.current.cctpRecoveryScanning).toBe(false));
+    await waitFor(() => expect(result.current.isFetchingBalances).toBe(false));
+    expect(cctpOptions(result.current.pathOptions)).toEqual([]);
+    expect(result.current.isCommitted).toBe(false);
+  });
+
+  it('stops a manually confirmed re-burn on a recovery-only option before switching chains or approving', async () => {
+    balancesOf(500_000n);
+    // 旧 state (marker なし) の burn が revert・mempool 空 → 決定表 row 3 (manual・二段確認で再 burn 可)。
+    publicClientFor(84532).getTransactionReceipt.mockResolvedValue({ status: 'reverted', logs: [] });
+    const { result } = renderHook(() => useCrossChainPayment(legacyArgs), { wrapper });
+    await waitFor(() => expect(result.current.isCommitted).toBe(true));
+    const option = result.current.pathOptions.find((o) => o.kind === 'cctp-v2' && o.recoveryOnly)!;
+    await act(async () => {
+      await expect(result.current.executeOption(option)).rejects.toBeInstanceOf(CrossChainBurnUnresolvedError);
+    });
+    expect(result.current.burnUnresolved).toMatchObject({ kind: 'manual', row: 3, reburnable: true });
+
+    act(() => result.current.armManualReburn());
+    await act(async () => {
+      await expect(result.current.executeOption(option)).rejects.toBeInstanceOf(CrossChainRecoveryBurnBlockedError);
+    });
+
+    expect(switchChainAsync).not.toHaveBeenCalled();
+    expect(wallet.writeContract).not.toHaveBeenCalled();
+    expect(wallet.sendTransaction).not.toHaveBeenCalled();
+    expect(result.current.error).toBeInstanceOf(CrossChainRecoveryBurnBlockedError);
+    expect(result.current.isCommitted).toBe(true);
+    expect(loadResumeState(legacyKey)).toEqual({ approveTxHash: hash, burnTxHash: burnHash });
+  });
+
+  it('explains the blocked re-burn in the panel instead of sending', async () => {
+    balancesOf(500_000n);
+    publicClientFor(84532).getTransactionReceipt.mockResolvedValue({ status: 'reverted', logs: [] });
+    const user = (await import('@testing-library/user-event')).default.setup();
+    const onExecutingChange = vi.fn();
+    renderWithIntl(wrapper({ children: <CrossChainHint {...legacyArgs} token="usdc" enabled tokenAddress={account}
+      displayDecimals={6} directIsGasless={false} onExecutingChange={onExecutingChange} /> }));
+
+    await user.click(await screen.findByRole('button', { name: '続きから支払う' }));
+    await user.click(await screen.findByRole('checkbox', { name: /USDC が減っていないことを確認しました/ }));
+    await user.click(screen.getByRole('button', { name: /確認したので、もう一度送金する/ }));
+    await user.click(screen.getByRole('button', { name: '続きから支払う' }));
+
+    expect(await screen.findByText(/前回の送金は行われていないため、送り直しが必要です/)).toBeInTheDocument();
+    expect(switchChainAsync).not.toHaveBeenCalled();
+    expect(wallet.writeContract).not.toHaveBeenCalled();
+    expect(wallet.sendTransaction).not.toHaveBeenCalled();
+    expect(onExecutingChange).toHaveBeenLastCalledWith(true);
   });
 });

@@ -116,6 +116,7 @@ import {
 } from '@/lib/signPreview';
 import { appendPayerReceipt, buildPayerReceipt, payerReceiptSale } from '@/lib/payerReceipt';
 import { buildCheckoutLineItems } from '@/lib/checkoutLineItems';
+import { hasSavedCctpResume } from '@/lib/crossChain/cctpResumePresence';
 import { RecoverFeeNotice } from './RecoverFeeNotice';
 
 type PaymentAttemptSnapshot = {
@@ -275,6 +276,14 @@ function PaymentDetails({ params }: { params: PayParams }) {
   const [crossChainLocked, setCrossChainLocked] = useState(false);
   const arcRecoveryScope = `${address}:${params.chain}:${params.to}:${amountStr}`;
   const [arcScannedScope, setArcScannedScope] = useState('');
+  // A-1: この請求の宛先・受取人に CCTP の中断記録があるか (同期で読む・遅延ロードの子より先に決まる)。
+  // あれば子の走査報告まで直接送金を閉じる (pay.ts の cctpRecoveryScanning)。hydration 中は address が
+  // 未確定なので読まない (server と同じ false)。
+  const cctpResumeSaved = useMemo(
+    () => params.token === 'usdc' && !!address &&
+      hasSavedCctpResume({ account: address, destChainId: requiredChain.id, recipient: params.to }),
+    [params.token, address, requiredChain.id, params.to],
+  );
   const [crossChainResult, setCrossChainResult] = useState<ExecuteResult>();
   const directAttemptSnapshotRef = useRef<PaymentAttemptSnapshot | null>(null);
   const crossChainAttemptSnapshotRef =
@@ -491,6 +500,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
     address,
     arcScannedScope,
     arcRecoveryScope,
+    cctpResumeSaved,
     activeQuote,
     isConnected,
     wrongChain,

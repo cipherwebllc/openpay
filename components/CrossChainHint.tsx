@@ -17,7 +17,7 @@ import { formatUnits, type Address } from 'viem';
 import { useTranslations } from 'next-intl';
 import { useCrossChainPayment } from '@/hooks/useCrossChainPayment';
 import type { ExecuteResult } from '@/hooks/useCrossChainPayment';
-import type { CrossChainProgress } from '@/lib/crossChain/execute';
+import { CrossChainRecoveryBurnBlockedError, type CrossChainProgress } from '@/lib/crossChain/execute';
 import type { PathOption } from '@/lib/crossChain/pathEnumerator';
 import { isForwardOnlyDestination, CROSS_CHAIN_DISABLED } from '@/lib/crossChain/config';
 import { ResumeStoreWriteError } from '@/lib/crossChain/resumeStore';
@@ -147,8 +147,9 @@ export function CrossChainHint(props: CrossChainHintProps) {
   useEffect(() => {
     // 成功は onSuccess 側の settled lock に引き継ぐ。失敗時は不可逆境界前だけ false に
     // 戻し、burn / attestation 後は親の通常 Pay を同一 mount 中ずっと封鎖する。
-    onExecutingChange?.(result ? false : isExecuting || isCommitted || !!hook.pendingRecovery || hook.gatewayRecovery?.kind === 'scanning');
-  }, [isCommitted, isExecuting, result, onExecutingChange, hook.pendingRecovery, hook.gatewayRecovery]);
+    // A-1: CCTP の保存記録の走査中も塞ぐ (走査完了と committed は同じ描画で立つので、外れる瞬間を作らない)。
+    onExecutingChange?.(result ? false : isExecuting || isCommitted || !!hook.pendingRecovery || hook.gatewayRecovery?.kind === 'scanning' || !!hook.cctpRecoveryScanning);
+  }, [isCommitted, isExecuting, result, onExecutingChange, hook.pendingRecovery, hook.gatewayRecovery, hook.cctpRecoveryScanning]);
 
   useEffect(() => {
     if (error) {
@@ -371,7 +372,10 @@ export function CrossChainHint(props: CrossChainHintProps) {
             ? // marker を書けない = 二重 burn を防げないので送金しなかった、という
               // 「安全側に倒した」旨を専用文言で伝える (生の例外文は買い手に無意味)。
               t('errorStorageBlocked')
-            : error.message}
+            : error instanceof CrossChainRecoveryBurnBlockedError
+              ? // A-1: 回復専用の選択肢で送り直しが必要と判定された。送金せず、記録とロックは残す。
+                t('errorRecoveryBurnBlocked')
+              : error.message}
         </p>
       )}
     </div>

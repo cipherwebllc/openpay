@@ -136,6 +136,7 @@ import { PaymentForm } from '@/components/PaymentForm';
 import { logger } from '@/lib/logger';
 import { loadHistory } from '@/lib/history';
 import { loadPayerReceipts } from '@/lib/payerReceipt';
+import { saveResumeState } from '@/lib/crossChain/resumeStore';
 import {
   RelayIpRateLimitedError,
   RelayResponseUnknownError,
@@ -615,6 +616,37 @@ describe('PaymentForm — 接続状態によるボタン', () => {
       name: /10 USDC を支払う/,
     });
     expect(btn).not.toBeDisabled();
+  });
+
+  it('A-1: CCTP の中断記録があれば、子 (CrossChainHint) の走査報告まで初回の描画から直接払いを閉じる', async () => {
+    window.localStorage.clear();
+    // 同じ宛先 (Base Sepolia)・受取人・account への CCTP 記録 (送金元・金額は問わない)。
+    saveResumeState({ account: CUSTOMER, kind: 'cctp-v2', sourceChainId: polygonAmoy.id, destChainId: baseSepolia.id,
+      recipient: MERCHANT, valueAtomic: 10_000_000n, feeAtomic: 0n }, { burnTxHash: `0x${'bc'.repeat(32)}` });
+    try {
+      setURL(`to=${MERCHANT}&token=usdc&amount=10`);
+      setAccount({ connected: true, chainId: baseSepolia.id });
+      setBalance(20_000_000n);
+      setSmartAccount(true);
+      setGasQuote('ready', 0n);
+      crossChainHintSpy.mockClear();
+      render(<PaymentForm />);
+      // 初回の描画: 子は遅延ロード中でまだ何も報告していない。直接払いは閉じている (Arc の走査待ちと同じ表示)。
+      expect(screen.getByRole('button', { name: /送信中/ })).toBeDisabled();
+      expect(screen.queryByRole('button', { name: /10 USDC を支払う/ })).not.toBeInTheDocument();
+      // 子がロードされても、報告するまでは閉じたまま (stub は報告しない)。
+      await waitFor(() => expect(crossChainHintSpy).toHaveBeenCalled());
+      expect(screen.getByRole('button', { name: /送信中/ })).toBeDisabled();
+      const { onExecutingChange } = crossChainHintSpy.mock.calls.at(-1)![0] as { onExecutingChange: (v: boolean) => void };
+      // 子が committed を報告 → ロックはそのまま (外れない)。
+      act(() => onExecutingChange(true));
+      expect(screen.getByRole('button', { name: /送信中/ })).toBeDisabled();
+      // 走査の結果この請求の記録ではなかった (別の金額等) と子が報告したら開く。
+      act(() => onExecutingChange(false));
+      expect(screen.getByRole('button', { name: /10 USDC を支払う/ })).not.toBeDisabled();
+    } finally {
+      window.localStorage.clear();
+    }
   });
 
   it('残高不足 → 警告表示 + 送信ボタン disabled', () => {

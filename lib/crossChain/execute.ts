@@ -42,6 +42,7 @@ export {
   CrossChainBurnUnresolvedError,
   CrossChainForwardPendingError,
   CrossChainQuoteExpiredError,
+  CrossChainRecoveryBurnBlockedError,
 } from './executeErrors';
 export { ensureWalletChain } from './executeShared';
 export {

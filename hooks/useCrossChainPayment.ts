@@ -118,6 +118,8 @@ export interface UseCrossChainPaymentReturn {
   isExecuting: boolean;
   /** merchant 送金が不可逆境界を越えたか。同一 mount 中の親 UI 排他用。 */
   isCommitted: boolean;
+  /** A-1: 保存済み CCTP 記録の走査がこの請求でまだ終わっていない (親の直接払いを閉じたままにする)。 */
+  cctpRecoveryScanning: boolean;
   result: ExecuteResult | undefined;
   error: Error | undefined;
   refetchBalances: () => Promise<unknown>;
@@ -302,6 +304,8 @@ export function useCrossChainPayment(
   // パネルも届かなくなる (= 親フォームの直接払いのロックが外れて二重払いできる)。Gateway の
   // recoveryOnly と同じく、保存された記録そのものを起点に全 buyer source を走査する。
   const [cctpRecoveryTargets, setCctpRecoveryTargets] = useState<readonly CrossChainTarget[]>([]);
+  // 走査が終わった scope。終わるまでは cctpRecoveryScanning として親のロックを保つ (Gateway の scanning と同じ)。
+  const [cctpScannedScope, setCctpScannedScope] = useState('');
   const scanCctpRecovery = useCallback(() => {
     const found = forwardOnly ? [] : BUYER_SOURCE_TARGETS.filter((target) => {
       if (target.chainId === args.targetChainId) return false;
@@ -311,7 +315,11 @@ export function useCrossChainPayment(
     // 同じ集合なら参照を保つ (pathOptions と Chooser の選択を作り直さない)。
     setCctpRecoveryTargets((current) =>
       current.length === found.length && current.every((t, i) => t === found[i]) ? current : found);
-  }, [forwardOnly, sessionKeyFor, args.targetChainId]);
+    // committed は走査完了と同じ描画で立てる。D9 (pathOptions 経由) を待つと、走査完了 → 未 committed の
+    // 描画を 1 回挟み、親への通知が true → false → true になって直接払いの窓が開く。立てるだけで外さない。
+    if (found.length) setIsCommitted(true);
+    setCctpScannedScope(recoveryScope);
+  }, [forwardOnly, sessionKeyFor, args.targetChainId, recoveryScope]);
   useEffect(() => { scanCctpRecovery(); }, [scanCctpRecovery]);
 
   const pathOptions = useMemo<PathOption[]>(() => {
@@ -458,6 +466,8 @@ export function useCrossChainPayment(
     | {
         kind: 'cctp-v2';
         forward?: ExecuteCctpTransferArgs['forward'];
+        /** A-1: 回復専用の選択肢からの実行。executor は判定が burn なら approve の前で止める。 */
+        recoveryOnly?: boolean;
         sourceChainId: number;
         sourceDomain: CircleDomain;
         destDomain: CircleDomain;
@@ -695,6 +705,7 @@ export function useCrossChainPayment(
         commitBurnIntent,
         allowManualReburn,
         allowAutoReburn: CROSS_CHAIN_BURN_AUTORESUME,
+        ...(core.recoveryOnly ? { recoveryOnly: true } : {}),
       };
       const result = await executeCctpTransfer(cctpArgs);
       if (!forwardOnly || (latestState as CctpResumeState).forward?.state === 'verified') clearResumeState(sessionKey);
@@ -771,6 +782,7 @@ export function useCrossChainPayment(
         kind: option.kind,
         ...(option.kind === 'gateway' ? { newPayment: true } : {}),
         ...(forwardOnly ? { forward: { acceptedQuote: option.acceptedQuote! } } : {}),
+        ...(option.kind === 'cctp-v2' && option.recoveryOnly ? { recoveryOnly: true } : {}),
         sourceChainId: option.sourceChainId,
         sourceDomain: option.sourceDomain,
         destDomain: destDomainResolved,
@@ -981,6 +993,7 @@ export function useCrossChainPayment(
     progress,
     isExecuting,
     isCommitted,
+    cctpRecoveryScanning: !forwardOnly && !!account && args.requiredAtomic > 0n && cctpScannedScope !== recoveryScope,
     result,
     error,
     refetchBalances: balancesQuery.refetch,

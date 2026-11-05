@@ -37,6 +37,8 @@ export type TipGuardInput = SubmitReadinessInput & {
   preview: boolean;
   arcScannedScope: string;
   arcRecoveryScope: string;
+  // この請求の宛先・受取人に CCTP の中断記録がこのブラウザにある (lib/crossChain/cctpResumePresence)。
+  cctpResumeSaved: boolean;
   standardReady: boolean;
 };
 
@@ -54,6 +56,7 @@ export function deriveTipGuards({
   preview,
   arcScannedScope,
   arcRecoveryScope,
+  cctpResumeSaved,
   activeQuote,
   isConnected,
   wrongChain,
@@ -85,7 +88,10 @@ export function deriveTipGuards({
         ? relay.isPending
         : gasless.isPending || gaslessAmbiguous;
   const arcRecoveryScanning = params.token === 'usdc' && params.chain === 'arc' && !!address && !preview && arcScannedScope !== arcRecoveryScope;
-  const flowPending = directFlowPending || crossChainLocked || arcRecoveryScanning;
+  // A-1: Arc 以外でも、CCTP の中断記録があれば子 (CrossChainHint) が走査して報告するまで直接送金を閉じる
+  // (Pay と同じ・報告は子が committed を立ててから届くので、ロックは外れずに crossChainLocked へ移る)。
+  const cctpRecoveryScanning = params.token === 'usdc' && params.chain !== 'arc' && !!address && !preview && cctpResumeSaved && arcScannedScope !== arcRecoveryScope;
+  const flowPending = directFlowPending || crossChainLocked || arcRecoveryScanning || cctpRecoveryScanning;
 
   // relay は gas quote / smart account 不要なので readiness 即満たす。circle は permitAmount を含む
   // activeQuote(circleQuote) 確定まで待つ (未算定で送信すると useBatchPayment が throw)。

@@ -86,6 +86,7 @@ import {
 } from '@/lib/url';
 import { useOrigin } from '@/hooks/useOrigin';
 import type { ExecuteResult } from '@/hooks/useCrossChainPayment';
+import { hasSavedCctpResume } from '@/lib/crossChain/cctpResumePresence';
 import { formatTokenAmount } from '@/lib/format';
 import { appendPayerReceipt, buildPayerReceipt } from '@/lib/payerReceipt';
 import {
@@ -261,6 +262,12 @@ export function TipForm({
   // PaymentForm と同型: Arc の回復 scan (CrossChainHint の mount 時) が終わるまで直接送信を待たせる。
   const arcRecoveryScope = `${address}:${params.chain}:${params.to}:${amountWei}`;
   const [arcScannedScope, setArcScannedScope] = useState('');
+  // A-1: この宛先・受取人に CCTP の中断記録があれば、子の走査報告まで直接送信を待たせる (PaymentForm と同型)。
+  const cctpResumeSaved = useMemo(
+    () => params.token === 'usdc' && !!address &&
+      hasSavedCctpResume({ account: address, destChainId: requiredChain.id, recipient: params.to }),
+    [params.token, address, requiredChain.id, params.to],
+  );
   const [crossChainResult, setCrossChainResult] = useState<ExecuteResult>();
 
   // recover 時に回収する利用料 (= 実 settle で feeReceiver へ分割される額)。CDX-3: 実スケジュール
@@ -349,6 +356,7 @@ export function TipForm({
     preview,
     arcScannedScope,
     arcRecoveryScope,
+    cctpResumeSaved,
     activeQuote,
     isConnected,
     wrongChain,

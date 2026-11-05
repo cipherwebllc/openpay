@@ -50,6 +50,9 @@ type State = {
   crossChainResult?: object;
   orderAdmissionPending?: boolean;
   arcScannedScope?: string;
+  // A-1: 既定は Arc・CCTP の中断記録なし (既存の表の値を変えない)。
+  chain?: string;
+  cctpResumeSaved?: boolean;
   ready?: Partial<Readiness>;
 };
 type Guards = { flowPending: boolean; settledNoRetry: boolean; gaslessStoreUnavailable: boolean };
@@ -162,11 +165,12 @@ function buildInput(route: Route, state: State = {}) {
     crossChainLocked: state.crossChainLocked ?? false,
     crossChainResult: state.crossChainResult,
     orderAdmissionPending: state.orderAdmissionPending ?? false,
-    params: { token: 'usdc', chain: 'arc', expiresAt: ready.expiresAt },
+    params: { token: 'usdc', chain: state.chain ?? 'arc', expiresAt: ready.expiresAt },
     address: '0x1111111111111111111111111111111111111111',
     preview: ready.preview,
     arcScannedScope: state.arcScannedScope ?? 'scanned',
     arcRecoveryScope: 'scanned',
+    cctpResumeSaved: state.cctpResumeSaved ?? false,
     isConnected: ready.isConnected,
     wrongChain: ready.wrongChain,
     saData: ready.saData,
@@ -351,5 +355,30 @@ describe.each(['pay', 'checkout', 'tip'] as const)('%s UI outputs', (policy) => 
       }
     }
     expect(table).toMatchSnapshot();
+  });
+});
+
+// A-1: Arc 以外の USDC でも、CCTP の中断記録がこのブラウザにあれば、子 (CrossChainHint) が走査して
+// 報告するまで直接送金を閉じる。記録が無い・子が報告済みなら従来どおり (Arc の待ちは上の表で固定)。
+// Checkout は CrossChainHint を持たないので対象外。
+describe.each(['pay', 'tip'] as const)('%s waits for the CCTP recovery scan when a resume record is saved', (policy) => {
+  const derive = readDerivePaymentFlowGuards(policy);
+  const submit = readDeriveSubmit(policy);
+  const cases: { name: string; state: State; blocked: boolean }[] = [
+    { name: 'saved record, child not reported yet', state: { chain: 'polygon', cctpResumeSaved: true, arcScannedScope: 'unscanned' }, blocked: true },
+    { name: 'saved record, child reported for this scope', state: { chain: 'polygon', cctpResumeSaved: true }, blocked: false },
+    { name: 'no saved record, child not reported yet', state: { chain: 'polygon', arcScannedScope: 'unscanned' }, blocked: false },
+    { name: 'saved record in Tip preview', state: { chain: 'polygon', cctpResumeSaved: true, arcScannedScope: 'unscanned', ready: { preview: true } }, blocked: policy === 'pay' },
+  ];
+  describe.each(['standard', 'relay-free', 'pimlico'] as const)('%s', (route) => {
+    it.each(cases)('$name', ({ state, blocked }) => {
+      if (policy === 'tip' && state.ready?.preview) {
+        // preview は送信しない (canSubmit=false は既存の行)。待ちの条件からも外れることだけを見る。
+        expect(derive(route, state).flowPending).toBe(false);
+        return;
+      }
+      expect(derive(route, state).flowPending).toBe(blocked);
+      expect(submit(route, state).canSubmit).toBe(!blocked);
+    });
   });
 });

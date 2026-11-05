@@ -1391,6 +1391,23 @@ describe('CrossChainHint: marker を保存できない環境 (fail-closed)', () 
 });
 
 
+it('A-1: the CCTP recovery scan alone holds the parent lock until it finishes', () => {
+  const hook = { gatewayRecovery: undefined, pathOptions: [], isExecuting: false, isCommitted: false,
+    isFetchingBalances: false, cctpRecoveryScanning: true };
+  const spy = vi.spyOn(crossChainHook, 'useCrossChainPayment').mockImplementation(() => hook as never);
+  const onExecutingChange = vi.fn();
+  const props = { token: 'usdc' as const, enabled: true, targetChainId: 80002, requiredAtomic: 1_000_000n,
+    recipient: '0x1111111111111111111111111111111111111111' as const, feeReceiver: '0x2222222222222222222222222222222222222222' as const,
+    tokenAddress: '0x3333333333333333333333333333333333333333' as const, displayDecimals: 6, directIsGasless: false, onExecutingChange };
+  const h = renderWithIntl(<CrossChainHint {...props} />);
+  expect(onExecutingChange).toHaveBeenLastCalledWith(true);
+  // 走査完了と committed は同じ描画で届く (hook 側)。ここでは完了後に committed が無ければ外れることだけを見る。
+  hook.cctpRecoveryScanning = false;
+  h.rerender(<CrossChainHint {...props} requiredAtomic={1_000_000n} />);
+  expect(onExecutingChange).toHaveBeenLastCalledWith(false);
+  spy.mockRestore();
+});
+
 it.each([false, true])('storage scans hold the parent lock without a warning on mount or amount change (enabled=%s)', (enabled) => {
   vi.spyOn(crossChainHook, 'useCrossChainPayment').mockReturnValue({
     gatewayRecovery: { kind: 'scanning' }, pathOptions: [], isExecuting: false, isCommitted: false,

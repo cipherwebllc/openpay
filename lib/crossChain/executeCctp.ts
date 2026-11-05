@@ -25,6 +25,7 @@ import type {
   ExecuteCctpTransferResult,
 } from './executeTypes';
 import { assertBurnResolved, resolveBurnSlot, settleBurn } from './burnRecovery';
+import { CrossChainRecoveryBurnBlockedError } from './executeErrors';
 import {
   ensureWalletChain,
   fireMerchantMint,
@@ -141,6 +142,18 @@ export async function executeCctpTransfer(
   if (feeDecision?.action === 'adopt') {
     persist({ feeBurnTxHash: feeDecision.hash });
     onProgress({ kind: 'fee_source_tx_pending', hash: feeDecision.hash });
+  }
+
+  // A-1: 回復専用の選択肢 (残高検査を経ていない) からは approve / burn に進ませない。決定表は変えず、
+  // その結論が burn (自動再 burn の flag・二段確認を含む) になったら、wallet に触れる前にここで止める。
+  // 保存記録は消さない (= 親の直接払いのロックも残る)。利用料の leg は現在 0 で動かないが、復活したら
+  // merchant の mint をこの停止に巻き込まないかを見直す。
+  if (args.recoveryOnly && (needMerchantBurn || needFeeBurn)) {
+    throw new CrossChainRecoveryBurnBlockedError({
+      slot: needMerchantBurn ? 'merchant' : 'fee',
+      row: needMerchantBurn ? merchantDecision.row : feeDecision!.row,
+      sourceChainId: args.sourceChainId,
+    });
   }
 
   // 1. source chain 上で approve + burn (まだ burn していない分だけ)。
