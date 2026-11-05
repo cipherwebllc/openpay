@@ -3337,3 +3337,116 @@ describe('PaymentForm — 決済QR の値引き (disc)', () => {
     expect(screen.queryByRole('button', { name: /USDC を支払う/ })).toBeNull();
   });
 });
+
+// 第 9 回レビュー A-4: 履歴と控えの支払者は、確定時に接続しているアドレスでなく送信した時点のアドレス。確定を待つ間に
+// 拡張機能で別のウォレット (B) へ切り替えても、履歴と控えに B を残さない (控えは pending → confirmed の昇格しか受けず、
+// A に戻しても保存済みの支払者は直らない)。同一チェーンの送金は送信時に固定した directAttemptSnapshotRef の ctx、
+// cross-chain は試みた時点で固定した ctx の customer を使う。どちらかを今の address に戻すと該当の it が落ちる。
+describe('PaymentForm — 履歴と控えの支払者は送信した時点のアドレス (第 9 回レビュー A-4)', () => {
+  const OTHER: Address = '0x8888888888888888888888888888888888888888';
+  type HintProps = {
+    onAttemptStart: (amount: bigint) => void;
+    onSuccess: (result: import('@/hooks/useCrossChainPayment').ExecuteResult) => void;
+  };
+  const latestHintProps = () => crossChainHintSpy.mock.lastCall![0] as HintProps;
+  function switchToOther(chainId: number) {
+    mockHook(useAccount, {
+      address: OTHER,
+      isConnected: true,
+      chainId,
+      chain: chainId === baseSepolia.id ? baseSepolia : polygonAmoy,
+    });
+  }
+
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  it('relay: 送信 → B に切り替え → 成功が届く でも、履歴と控えの支払者は送った A', async () => {
+    const user = userEvent.setup();
+    vi.mocked(resolveJpycGaslessProvider).mockReturnValue('eip3009-relay');
+    setURL(`to=${MERCHANT}&token=jpyc&amount=300`);
+    setAccount({ connected: true, chainId: polygonAmoy.id });
+    setBalance(10_000n * 10n ** 18n);
+    const { rerender } = render(<PaymentForm />);
+    await user.click(screen.getByRole('button', { name: /300 JPYC を支払う/ }));
+    expect(relayMutate).toHaveBeenCalledOnce();
+    switchToOther(polygonAmoy.id);
+    rerender(<PaymentForm />);
+    const txHash = `0x${'e'.repeat(64)}` as const;
+    setRelay('success', { txHash, variables: { merchant: MERCHANT, value: 300n * 10n ** 18n, gasMode: 'merchant' } });
+    rerender(<PaymentForm />);
+    expect(loadHistory().find((x) => x.txHash === txHash)?.customer).toBe(CUSTOMER);
+    expect(loadPayerReceipts().find((r) => r.receiptId === txHash)?.payerAddress).toBe(CUSTOMER);
+  });
+
+  it('gasless: 送信 → B に切り替え → 成功が届く でも、履歴と控えの支払者は送った A', async () => {
+    const user = userEvent.setup();
+    setURL(`to=${MERCHANT}&token=usdc&amount=100`);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready', 0n);
+    const { rerender } = render(<PaymentForm />);
+    await user.click(screen.getByRole('button', { name: /100 USDC を支払う/ }));
+    expect(mutate).toHaveBeenCalledOnce();
+    switchToOther(baseSepolia.id);
+    rerender(<PaymentForm />);
+    setPayment('success');
+    rerender(<PaymentForm />);
+    const txHash = `0x${'b'.repeat(64)}`;
+    expect(loadHistory().find((x) => x.txHash === txHash)?.customer).toBe(CUSTOMER);
+    expect(loadPayerReceipts().find((r) => r.receiptId === txHash)?.payerAddress).toBe(CUSTOMER);
+  });
+
+  it('cross-chain (CCTP): 試みる → B に切り替え → 成功が届く でも、控えの支払者は試みた A', async () => {
+    setURL(`to=${MERCHANT}&token=usdc&amount=10`);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(20_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready', 0n);
+    const { rerender } = render(<PaymentForm />);
+    await waitFor(() => expect(crossChainHintSpy).toHaveBeenCalled());
+    act(() => latestHintProps().onAttemptStart(10_000_000n));
+    switchToOther(baseSepolia.id);
+    rerender(<PaymentForm />);
+    const mintTxHash = `0x${'f'.repeat(64)}` as const;
+    act(() => latestHintProps().onSuccess({
+      path: 'cctp-v2',
+      burnTxHash: `0x${'a'.repeat(64)}`,
+      mintTxHash,
+      destChainId: baseSepolia.id,
+    }));
+    await waitFor(() => expect(loadPayerReceipts()).toHaveLength(1));
+    expect(loadPayerReceipts()[0]).toMatchObject({ receiptId: mintTxHash, paymentMode: 'cross-chain', payerAddress: CUSTOMER });
+  });
+
+  it('cross-chain (Gateway の hash の無い控え): 試みる → B に切り替え → 成功が届く でも、控えの支払者は試みた A', async () => {
+    setURL(`to=${MERCHANT}&token=usdc&amount=10`);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(20_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready', 0n);
+    const { rerender } = render(<PaymentForm />);
+    await waitFor(() => expect(crossChainHintSpy).toHaveBeenCalled());
+    const transferSpecHash = keccak256(encodedSpec());
+    act(() => latestHintProps().onAttemptStart(10_000_000n));
+    switchToOther(baseSepolia.id);
+    rerender(<PaymentForm />);
+    act(() => latestHintProps().onSuccess({
+      path: 'gateway',
+      settlement: 'hashless',
+      transferSpecHash,
+      attestation: gatewayAttestation().attestation,
+      attestationSignature: gatewayAttestation().signature,
+      destChainId: baseSepolia.id,
+    }));
+    await waitFor(() => expect(loadPayerReceipts()).toHaveLength(1));
+    expect(loadPayerReceipts()[0]).toMatchObject({
+      receiptId: `gateway:${baseSepolia.id}:${transferSpecHash}`,
+      paymentMode: 'cross-chain',
+      payerAddress: CUSTOMER,
+    });
+    expect(loadPayerReceipts()[0].txHash).toBeUndefined();
+  });
+});

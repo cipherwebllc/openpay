@@ -237,6 +237,8 @@ function setRelayPayment(
     restoredIntent?: ReturnType<
       typeof useJpycEip3009Payment
     >['restoredIntent'];
+    // hook が署名に使った from (第 9 回レビュー A-4)。省略時は undefined (送信時の接続先へ倒れる)。
+    lastSignedFrom?: Address;
   },
 ) {
   relayMutate = vi.fn();
@@ -269,6 +271,7 @@ function setRelayPayment(
       opts?.recoveryState ??
       (state === 'response-unknown' ? 'exhausted' : null),
     variables: opts?.variables,
+    lastSignedFrom: opts?.lastSignedFrom,
     restoredIntent: opts?.restoredIntent ?? null,
     orderDelivery: opts?.orderDelivery ?? null,
   } as Partial<ReturnType<typeof useJpycEip3009Payment>>);
@@ -4814,5 +4817,147 @@ describe('CheckoutForm — 復元した決済の完了で「注文を送る」�
     await waitFor(() => expect(relayMutate).toHaveBeenCalledOnce());
     expect(relayMutate.mock.calls[0][0].order).toBeDefined();
     expect(relayMutate.mock.calls[0][0].orderLinkKey).toBeUndefined();
+  });
+});
+
+// 第 9 回レビュー A-4: 履歴と控えの支払者は、確定時に接続しているアドレスでなく送信した時点のアドレス。確定を待つ間に
+// 拡張機能で別のウォレット (B) へ切り替えても、履歴と控えに B を残さない (控えは pending → confirmed の昇格しか受けず、
+// A に戻しても保存済みの支払者は直らない)。usePaymentHistory / 履歴 / 控えは実物。historyCtx.customer を今の address に
+// 戻すと各 it が落ちる。
+describe('CheckoutForm — 履歴と控えの支払者は送信した時点のアドレス (第 9 回レビュー A-4)', () => {
+  const OTHER: Address = '0x8888888888888888888888888888888888888888';
+  function switchToOther(chainId: number) {
+    mockHook(useAccount, { address: OTHER, isConnected: true, chainId });
+  }
+
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  it('relay: 送信 → B に切り替え → 成功が届く でも、履歴と控えの支払者は送った A', async () => {
+    const user = userEvent.setup();
+    vi.mocked(resolveJpycGaslessProvider).mockReturnValue('eip3009-relay');
+    setAccount({ connected: true, chainId: polygonAmoy.id });
+    setBalance(10_000n * 10n ** 18n);
+    const makeUi = () => <CheckoutForm params={JPYC_PARAMS} />;
+    const { rerender } = render(makeUi());
+    await user.click(screen.getByRole('button', { name: /3000 JPYC を支払う/ }));
+    expect(relayMutate).toHaveBeenCalledOnce();
+    switchToOther(polygonAmoy.id);
+    rerender(makeUi());
+    const txHash = `0x${'e'.repeat(64)}` as const;
+    setRelayPayment('success', {
+      txHash,
+      variables: { merchant: MERCHANT, value: 3000n * 10n ** 18n, gasMode: 'customer' },
+    });
+    rerender(makeUi());
+    const entry = loadHistory().find((x) => x.txHash === txHash);
+    expect(entry?.customer).toBe(CUSTOMER);
+    expect(loadPayerReceipts().find((r) => r.receiptId === txHash)?.payerAddress).toBe(CUSTOMER);
+  });
+
+  it('gasless: 送信 → B に切り替え → 成功が届く でも、履歴と控えの支払者は送った A', async () => {
+    const user = userEvent.setup();
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready', 100_000n);
+    const makeUi = () => <CheckoutForm params={USDC_PARAMS} />;
+    const { rerender } = render(makeUi());
+    await user.click(screen.getByRole('button', { name: /を支払う/ }));
+    expect(mutate).toHaveBeenCalledOnce();
+    switchToOther(baseSepolia.id);
+    rerender(makeUi());
+    setBatchPayment('success');
+    rerender(makeUi());
+    const txHash = `0x${'b'.repeat(64)}`;
+    const entry = loadHistory().find((x) => x.txHash === txHash);
+    expect(entry?.customer).toBe(CUSTOMER);
+    expect(loadPayerReceipts().find((r) => r.receiptId === txHash)?.payerAddress).toBe(CUSTOMER);
+  });
+
+  it('通常決済: 送信 → B に切り替え → 成功が届く でも、履歴と控えの支払者は hook が記録した送り主 A', async () => {
+    const user = userEvent.setup();
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    const makeUi = () => <CheckoutForm params={STANDARD_USDC_PARAMS} />;
+    const { rerender } = render(makeUi());
+    await user.click(screen.getByRole('button', { name: /55 USDC を支払う/ }));
+    expect(standardMutate).toHaveBeenCalledOnce();
+    switchToOther(baseSepolia.id);
+    rerender(makeUi());
+    // 実物の useStandardPayment は mutate の時点の接続先を lastSubmittedFrom に残す。
+    setStandardPayment('success', { lastSubmittedFrom: CUSTOMER });
+    rerender(makeUi());
+    const txHash = `0x${'c'.repeat(64)}`;
+    const entries = loadHistory().filter((x) => x.txHash === txHash || x.txHash === `0x${'d'.repeat(64)}`);
+    expect(entries.length).toBeGreaterThan(0);
+    for (const entry of entries) expect(entry.customer).toBe(CUSTOMER);
+    expect(loadPayerReceipts().find((r) => r.receiptId === txHash)?.payerAddress).toBe(CUSTOMER);
+  });
+
+  // ここから下は、クリックしたときの接続先 (submittedPayerRef = CUSTOMER) と hook が実際に使った送り主 (SIGNER) を
+  // 別の値にし、履歴・控え・注文の確認の署名をするウォレット (払った記録の payer) が hook の値を優先することを固定する。
+  // (admission や注文の束縛の読み込みの await の間にウォレットを切り替えると、hook は切り替えた先で送る。)
+  const SIGNER: Address = '0x7777777777777777777777777777777777777777';
+  function rememberedKey(params: CheckoutParams, token: 'jpyc' | 'usdc', chain: 'polygon' | 'base', total: bigint): Hex {
+    const dep = deploymentForSlug(token, chain);
+    return checkoutIntentContextFingerprint({
+      params,
+      chainId: dep.chainId,
+      tokenAddress: dep.address,
+      totalAtomic: total.toString(),
+    });
+  }
+
+  it('relay: 履歴・控え・確認の署名のウォレットは、クリックしたときの接続先でなく hook が署名に使った from', async () => {
+    const user = userEvent.setup();
+    vi.mocked(resolveJpycGaslessProvider).mockReturnValue('eip3009-relay');
+    setAccount({ connected: true, chainId: polygonAmoy.id });
+    setBalance(10_000n * 10n ** 18n);
+    const params: CheckoutParams = { ...JPYC_PARAMS, orderId: 'ord-a4' };
+    const total = 3000n * 10n ** 18n;
+    const makeUi = () => <CheckoutForm params={params} />;
+    const { rerender } = render(makeUi());
+    await user.click(screen.getByRole('button', { name: /3000 JPYC を支払う/ }));
+    expect(relayMutate).toHaveBeenCalledOnce();
+    const txHash = `0x${'e'.repeat(64)}` as const;
+    setRelayPayment('success', {
+      txHash,
+      variables: { merchant: MERCHANT, value: total, gasMode: 'customer' },
+      lastSignedFrom: SIGNER,
+    });
+    rerender(makeUi());
+    expect(loadHistory().find((x) => x.txHash === txHash)?.customer).toBe(SIGNER);
+    expect(loadPayerReceipts().find((r) => r.receiptId === txHash)?.payerAddress).toBe(SIGNER);
+    await waitFor(() =>
+      expect(rememberedOrderPayment(rememberedKey(params, 'jpyc', 'polygon', total), Date.now())).toMatchObject({
+        txHash,
+        payer: SIGNER,
+      }),
+    );
+  });
+
+  it('通常決済: 履歴・控え・確認の署名のウォレットは、クリックしたときの接続先でなく hook が記録した送り主 (lastSubmittedFrom)', async () => {
+    const user = userEvent.setup();
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    const makeUi = () => <CheckoutForm params={STANDARD_USDC_PARAMS} />;
+    const { rerender } = render(makeUi());
+    await user.click(screen.getByRole('button', { name: /55 USDC を支払う/ }));
+    expect(standardMutate).toHaveBeenCalledOnce();
+    setStandardPayment('success', { lastSubmittedFrom: SIGNER });
+    rerender(makeUi());
+    const txHash = `0x${'c'.repeat(64)}`;
+    const entries = loadHistory().filter((x) => x.txHash === txHash || x.txHash === `0x${'d'.repeat(64)}`);
+    expect(entries.length).toBeGreaterThan(0);
+    for (const entry of entries) expect(entry.customer).toBe(SIGNER);
+    expect(loadPayerReceipts().find((r) => r.receiptId === txHash)?.payerAddress).toBe(SIGNER);
+    await waitFor(() =>
+      expect(rememberedOrderPayment(rememberedKey(STANDARD_USDC_PARAMS, 'usdc', 'base', 55_000_000n), Date.now())).toMatchObject({
+        txHash,
+        payer: SIGNER,
+      }),
+    );
   });
 });
