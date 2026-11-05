@@ -10,9 +10,10 @@
 // 支払いの署名はチェーンに載って誰でも写せるので、この証明には使えない (支払いの後の 2 つ目の署名が要る)。
 // 2 段に分けるのは、共有・コピー・別のアプリを開く操作が「押した直後」でないと拒まれるため (署名の待ちを挟めない)。
 // 払えたウォレットは署名もできる。断った・読み直しで接続が切れたときだけ「署名せずに送る」を出す
-// (お店の画面に「署名なし」と出る・注文を送れずに困らせない)。
+// (お店の画面に「署名なし」と出る・注文を送れずに困らせない)。署名の要求が返らない (WalletConnect の要求が
+// ウォレットに届かない等) まま SIGN_SLOW_MS 待ったときも出す (第 9 回レビュー D-6)。
 
-import { useId, useState, useSyncExternalStore } from 'react';
+import { useEffect, useId, useState, useSyncExternalStore } from 'react';
 import { useTranslations } from 'next-intl';
 import { useAccount, usePublicClient, useSignMessage } from 'wagmi';
 import { isAddressEqual, recoverMessageAddress, type Address } from 'viem';
@@ -45,6 +46,13 @@ const NOTE: Record<Tone, string> = {
   overlay: 'text-center text-xs text-white/90',
   panel: 'text-center text-xs text-slate-600',
 };
+
+/**
+ * 署名の要求がこの時間返らなければ、「署名せずに送る」も出す。signMessageAsync には時間切れが無く、要求が
+ * ウォレットに届かないと resolve も reject もしないため (主ボタンは署名の間押せない)。要求は取り消さない:
+ * 後から署名が返れば、そのまま署名の入った文になる。
+ */
+export const SIGN_SLOW_MS = 20_000;
 
 /**
  * 遠隔の注文の会計か (注文を送る / お店に知らせるボタンを出すか)。受付番号があるか「何度でも使える」リンク
@@ -147,6 +155,13 @@ export function NotifyShopButton({
   const otherWallet = confirm && Boolean(payer && address && !isAddressEqual(payer, address));
   const [skipped, setSkipped] = useState(false);
   const [signFailed, setSignFailed] = useState(false);
+  // 署名の要求が SIGN_SLOW_MS 返っていない (この回の署名の間だけ数える・押し直すと数え直す)。
+  const [signSlow, setSignSlow] = useState(false);
+  useEffect(() => {
+    if (!signing) return;
+    const timer = window.setTimeout(() => setSignSlow(true), SIGN_SLOW_MS);
+    return () => window.clearTimeout(timer);
+  }, [signing]);
   const [status, setStatus] = useState<'idle' | 'shared' | 'copied' | 'failed'>('idle');
   const ready = !confirm || signature !== null || skipped;
 
@@ -169,6 +184,7 @@ export function NotifyShopButton({
 
   const sign = async () => {
     setSignFailed(false);
+    setSignSlow(false);
     const message = orderConfirmationMessage(signed);
     try {
       const result = await signMessageAsync({ message, ...(payer ? { account: payer } : {}) });
@@ -230,6 +246,13 @@ export function NotifyShopButton({
                 {t('sendWithoutSign')}
               </button>
             </>
+          )}
+          {/* 署名の要求が返らないまま待っている: 失敗ではないので「署名できませんでした」は出さず、署名せずに送る道だけ
+              足す (主ボタンは「署名しています…」のまま・要求は取り消さない)。 */}
+          {signing && signSlow && !signFailed && !otherWallet && (
+            <button type="button" onClick={() => setSkipped(true)} className={SECONDARY[tone]}>
+              {t('sendWithoutSign')}
+            </button>
           )}
         </>
       ) : (

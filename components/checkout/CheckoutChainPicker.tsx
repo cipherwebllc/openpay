@@ -66,7 +66,13 @@ export function CheckoutChainPicker({ params }: { params: CheckoutParams }) {
     <div className="space-y-4">
       <header className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
         <p className="text-xs uppercase tracking-wider text-slate-500">{t('header')}</p>
-        {params.storeName && <p className="mt-1 break-words text-lg font-bold text-slate-900">{params.storeName}</p>}
+        {/* 店名は確かめていない名前 (支払いの画面と同じ注記・第 9 回レビュー D-1)。 */}
+        {params.storeName && (
+          <>
+            <p className="mt-1 break-words text-lg font-bold text-slate-900">{params.storeName}</p>
+            <p className="mt-0.5 text-xs text-slate-600">{t('storeNameUnverified')}</p>
+          </>
+        )}
         <p className="mt-1 text-base font-semibold text-slate-800">
           {params.orderId ? t('orderHeading', { id: params.orderId }) : t('checkoutTitle')}
         </p>

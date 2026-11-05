@@ -3,21 +3,31 @@
 // お店が「文を送った人が払った人か」を確かめられるようにする。署名できなかったときだけ署名せずに送れる。
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor } from '@testing-library/react';
 import type { Address } from 'viem';
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
 
 const signMessageAsync = vi.hoisted(() => vi.fn());
+// wagmi の署名中 (isPending)。署名の要求が返らないときのテスト (D-6) だけ true にする。
+const signState = vi.hoisted(() => ({ pending: false }));
 const account = vi.hoisted(() => ({ address: undefined as string | undefined }));
 const publicClient = vi.hoisted(() => ({ value: undefined as { verifyMessage: ReturnType<typeof vi.fn> } | undefined }));
 vi.mock('wagmi', () => ({
-  useSignMessage: () => ({ signMessageAsync, isPending: false }),
+  useSignMessage: () => ({ signMessageAsync, isPending: signState.pending }),
   useAccount: () => ({ address: account.address }),
   usePublicClient: () => publicClient.value,
 }));
 
 import { renderWithIntl as render } from '../_helpers/i18n';
-import { isRemoteOrderCheckout, notifyShopMessage, NotifyShopButton, type NotifyShopData } from '@/components/NotifyShopButton';
+import {
+  isRemoteOrderCheckout,
+  notifyShopMessage,
+  NotifyShopButton,
+  SIGN_SLOW_MS,
+  type NotifyShopData,
+} from '@/components/NotifyShopButton';
+import en from '@/messages/en.json';
+import ja from '@/messages/ja.json';
 import { orderConfirmationMessage } from '@/lib/orderConfirmation';
 import { lineMessageUrl } from '@/lib/shopContact';
 
@@ -41,8 +51,10 @@ beforeEach(() => {
   signMessageAsync.mockResolvedValue(SIG);
   account.address = undefined;
   publicClient.value = undefined;
+  signState.pending = false;
 });
 afterEach(() => {
+  vi.useRealTimers();
   stubShare(undefined);
   stubClipboard(undefined);
   window.sessionStorage.clear();
@@ -276,5 +288,86 @@ describe('NotifyShopButton (何度でも使えるリンク・お届け先を聞�
     const href = link.getAttribute('href') ?? '';
     expect(href.startsWith(`mailto:shop@example.com?subject=${encodeURIComponent('注文します。')}&body=`)).toBe(true);
     expect(decodeURIComponent(href.split('&body=')[1])).toContain('お名前：\r\nお届け先（デジタルアドレスか住所）：');
+  });
+});
+
+// 第 9 回レビュー D-6: signMessageAsync には時間切れが無い。署名の要求がウォレットに届かない (WalletConnect 等) と
+// resolve も reject もせず「署名しています…」のまま主ボタンが押せない。SIGN_SLOW_MS 待ったら署名せずに送る道も出す。
+describe('NotifyShopButton (署名の要求が返らない)', () => {
+  it('署名の要求が SIGN_SLOW_MS 返らなければ、「署名しています…」のまま「署名せずに送る」も出す', () => {
+    vi.useFakeTimers();
+    signState.pending = true;
+    render(<NotifyShopButton {...data()} tone="panel" />);
+    expect(screen.getByRole('button', { name: 'ウォレットで署名しています…' })).toBeDisabled();
+    act(() => {
+      vi.advanceTimersByTime(SIGN_SLOW_MS - 1);
+    });
+    expect(screen.queryByRole('button', { name: '署名せずに送る' })).toBeNull();
+    act(() => {
+      vi.advanceTimersByTime(1);
+    });
+    expect(screen.getByRole('button', { name: '署名せずに送る' })).toBeInTheDocument();
+    // 失敗ではないので「署名できませんでした」は出さず、主ボタンは署名中のまま
+    expect(screen.queryByText(/署名できませんでした/)).toBeNull();
+    expect(screen.getByRole('button', { name: 'ウォレットで署名しています…' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: '署名せずに送る' }));
+    expect(screen.getByText('署名なしで送ります。お店の確認に時間がかかることがあります。')).toBeInTheDocument();
+  });
+
+  it('署名の要求は取り消さない: 署名せずに進んだ後に署名が返れば、署名の入った文になる', async () => {
+    vi.useFakeTimers();
+    let resolveSign: (signature: string) => void = () => {};
+    signMessageAsync.mockImplementation(
+      () =>
+        new Promise<string>((resolve) => {
+          resolveSign = resolve;
+        }),
+    );
+    const d = data();
+    const view = render(<NotifyShopButton {...d} tone="panel" />);
+    fireEvent.click(screen.getByRole('button', { name: 'お店に知らせる' }));
+    expect(signMessageAsync).toHaveBeenCalledTimes(1);
+    // wagmi は要求を出すと isPending を true にして描き直す
+    signState.pending = true;
+    view.rerender(<NotifyShopButton {...d} tone="panel" />);
+    act(() => {
+      vi.advanceTimersByTime(SIGN_SLOW_MS);
+    });
+    fireEvent.click(screen.getByRole('button', { name: '署名せずに送る' }));
+    expect(screen.getByText('署名なしで送ります。お店の確認に時間がかかることがあります。')).toBeInTheDocument();
+    // 時間切れで要求を出し直さない
+    expect(signMessageAsync).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      resolveSign(SIG);
+    });
+    signState.pending = false;
+    view.rerender(<NotifyShopButton {...d} tone="panel" />);
+    expect(screen.getByText('確認の署名ができました。お店に送ってください。')).toBeInTheDocument();
+  });
+
+  it('署名の要求が返った (断った) ときは今までどおり「署名できませんでした」と一緒に 1 つだけ出す', async () => {
+    signMessageAsync.mockRejectedValueOnce(new Error('User rejected the request.'));
+    render(<NotifyShopButton {...data()} tone="panel" />);
+    fireEvent.click(screen.getByRole('button', { name: 'お店に知らせる' }));
+    expect(await screen.findByRole('status')).toHaveTextContent('署名できませんでした');
+    expect(screen.getAllByRole('button', { name: '署名せずに送る' })).toHaveLength(1);
+  });
+});
+
+// 第 9 回レビュー D-2・D-5: お客様への案内の文は、完了画面のボタン (このコンポーネントの文言) と同じ名前を指す。
+// 番号つきの注文 (ship=ask なし) は「お店に知らせる」・何度でも使える注文リンク (ship=ask) は「注文を送る」。
+describe('ボタンの名前を指す案内', () => {
+  it.each([
+    ['ja', ja, (label: string) => `「${label}」`],
+    ['en', en, (label: string) => `“${label}”`],
+  ] as const)('%s: 払い済みの案内と注文リンクの共有文が、ボタンと同じ名前を指す', (_locale, messages, quote) => {
+    const notifyShop = quote(messages.SuccessOverlay.notifyShop);
+    const sendOrder = quote(messages.SuccessOverlay.sendOrder);
+    expect(messages.CheckoutForm.paidInThisTabNoteNotifyShop).toContain(notifyShop);
+    expect(messages.OrderLinkBuilder.shareText).toContain(notifyShop);
+    expect(messages.CheckoutForm.paidInThisTabNoteSendOrder).toContain(sendOrder);
+    expect(messages.OrderLinkBuilder.shareTextReusable).toContain(sendOrder);
+    expect(messages.CheckoutForm.shipAskNote).toContain(sendOrder);
+    expect(messages.CheckoutForm.shipAskNoteWithContact).toContain(sendOrder);
   });
 });

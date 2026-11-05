@@ -609,7 +609,9 @@ describe('OrderLinkBuilder', () => {
     expect(screen.queryByText('コピーしました')).toBeNull();
   });
 
-  it('共有できる端末では主ボタンが「送る」で、送り先の文面に番号と確かめ方が入る', async () => {
+  // 第 9 回レビュー D-5: 番号つきのリンクの文は、完了画面の「お店に知らせる」(確認の署名つきの文を作る) へ誘導する。
+  // Tx Hash だけを手で送らせると、お店の「入金を確かめる」で「確認の署名がありません」になる。
+  it('共有できる端末では主ボタンが「送る」で、送り先の文面に番号と完了画面の「お店に知らせる」が入る', async () => {
     saved();
     stubClipboard();
     const share = vi.fn().mockResolvedValue(undefined);
@@ -622,7 +624,8 @@ describe('OrderLinkBuilder', () => {
     await screen.findAllByRole('button', { name: '次の注文へ' });
     expect(screen.getAllByText('送りました').length).toBeGreaterThan(0);
     expect(share.mock.calls[0][0].text).toContain('ご注文 A-001');
-    expect(share.mock.calls[0][0].text).toContain('Tx Hash');
+    expect(share.mock.calls[0][0].text).toContain('完了画面の「お店に知らせる」で送ってください');
+    expect(share.mock.calls[0][0].text).not.toContain('Tx Hash');
     Reflect.deleteProperty(navigator, 'share');
   });
 

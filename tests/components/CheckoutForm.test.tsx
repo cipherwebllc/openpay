@@ -591,6 +591,19 @@ describe('CheckoutForm — レンダリング', () => {
     expect(screen.queryByText('OpenPay 工房')).toBeNull();
   });
 
+  // 第 9 回レビュー D-1: 店名は誰でも好きに付けられる URL の値なので、確かめていない名前だと店名のすぐ下に添える。
+  it('店名があるときだけ、その下に「確かめられていません」の注記を出す', () => {
+    setAccount({ connected: false });
+    const NOTE = '店名はリンクを作った人が入力したもので、確かめられていません。';
+    const { unmount } = render(<CheckoutForm params={{ ...JPYC_PARAMS, storeName: 'OpenPay 工房' }} />);
+    const note = screen.getByText(NOTE);
+    // 店名の直後に置く (離れた場所に出しても店名の注記と読めない)
+    expect(screen.getByText('OpenPay 工房').nextElementSibling).toBe(note);
+    unmount();
+    render(<CheckoutForm params={JPYC_PARAMS} />);
+    expect(screen.queryByText(NOTE)).toBeNull();
+  });
+
   it('何度でも使える注文リンク (ship=ask) は、払う前にこの後お名前とお届け先を送ることと送り先を伝える', () => {
     setAccount({ connected: false });
     const { unmount } = render(
@@ -618,14 +631,39 @@ describe('CheckoutForm — レンダリング', () => {
     const { unmount } = render(<CheckoutForm params={params} />);
     expect(await screen.findByText('このタブでのお支払いは済んでいます')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '注文を送る' })).toBeInTheDocument();
-    // 払うボタンを止めた理由を出す。何度でも使えるリンクは「新しい注文として払う」で別の注文として払える
+    // 払うボタンを止めた理由を出す (上のボタンと同じ「注文を送る」を指す)。何度でも使えるリンクは「新しい注文として払う」で
+    // 別の注文として払える
     expect(screen.getByText('このタブでお支払い済みです。上の「注文を送る」から送ってください。')).toBeInTheDocument();
+    expect(screen.queryByText(/上の「お店に知らせる」/)).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: '新しい注文として払う' }));
-    expect(screen.queryByText('このタブでお支払い済みです。上の「注文を送る」から送ってください。')).toBeNull();
+    expect(screen.queryByText(/このタブでお支払い済みです/)).toBeNull();
     unmount();
     // 明細の違う会計 (別の注文) では出さない
     render(<CheckoutForm params={{ ...params, items: [{ name: 'チケット', qty: 2, price: '3000' }] }} />);
     await waitFor(() => expect(screen.queryByText('このタブでのお支払いは済んでいます')).toBeNull());
+    window.sessionStorage.clear();
+  });
+
+  // 第 9 回レビュー D-2: 番号つきの注文 (ship=ask の無い order_id) の上のボタンは「お店に知らせる」。払うボタンを止めた
+  // 理由も同じ名前を指す (無いボタン「注文を送る」を指さない)。
+  it('番号つきの注文をこのタブで払った記録があれば、払うボタンを止めた理由は上の「お店に知らせる」を指す', async () => {
+    setAccount({ connected: false });
+    const params: CheckoutParams = { ...JPYC_PARAMS, orderId: 'ORD-77' };
+    const deployment = deploymentForSlug('jpyc', 'polygon');
+    const key = checkoutIntentContextFingerprint({
+      params,
+      chainId: deployment.chainId,
+      tokenAddress: deployment.address,
+      totalAtomic: (3000n * 10n ** BigInt(deployment.decimals)).toString(),
+    });
+    const tx = `0x${'cd'.repeat(32)}`;
+    window.sessionStorage.setItem(`openpay:order-paid:v1:${key}`, JSON.stringify({ txHash: tx, paidAt: Date.now() }));
+    render(<CheckoutForm params={params} />);
+    expect(await screen.findByText('このタブでのお支払いは済んでいます')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'お店に知らせる' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '注文を送る' })).toBeNull();
+    expect(screen.getByText('このタブでお支払い済みです。上の「お店に知らせる」から送ってください。')).toBeInTheDocument();
+    expect(screen.queryByText(/上の「注文を送る」/)).toBeNull();
     window.sessionStorage.clear();
   });
 
@@ -4410,7 +4448,11 @@ describe('CheckoutForm — 復元した決済の完了で「注文を送る」�
   const STANDARD_ORDER: CheckoutParams = { ...JPYC_PARAMS, orderId: 'ord-g1', mode: 'standard' };
   const RELAY_ORDER: CheckoutParams = { ...JPYC_PARAMS, ship: 'ask' };
   const RESTORED_TITLE = 'このタブでのお支払いは済んでいます';
-  const PAID_NOTE = 'このタブでお支払い済みです。上の「注文を送る」から送ってください。';
+  // 払うボタンを止めた理由は、上の欄のボタンと同じ名前を指す (番号つき =「お店に知らせる」・ship=ask =「注文を送る」・
+  // 第 9 回レビュー D-2)。出ないことは、どちらの文でもないことで確かめる。
+  const PAID_NOTE_NOTIFY_SHOP = 'このタブでお支払い済みです。上の「お店に知らせる」から送ってください。';
+  const PAID_NOTE_SEND_ORDER = 'このタブでお支払い済みです。上の「注文を送る」から送ってください。';
+  const PAID_NOTE_ANY = /このタブでお支払い済みです/;
 
   function contextKeyOf(params: CheckoutParams): Hex {
     return checkoutIntentContextFingerprint({
@@ -4552,7 +4594,8 @@ describe('CheckoutForm — 復元した決済の完了で「注文を送る」�
     // (c) もう一度読み直す: 保存された intent はもう無い (hook は何も復元しない)。記録から払うボタンを止める
     setStandardPaymentDefault();
     render(<CheckoutForm params={STANDARD_ORDER} />);
-    expect(await screen.findByText(PAID_NOTE)).toBeInTheDocument();
+    expect(await screen.findByText(PAID_NOTE_NOTIFY_SHOP)).toBeInTheDocument();
+    expect(screen.queryByText(PAID_NOTE_SEND_ORDER)).toBeNull();
     expect(screen.getByRole('button', { name: /3000 JPYC を支払う/ })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'お店に知らせる' })).toBeInTheDocument();
   });
@@ -4575,7 +4618,7 @@ describe('CheckoutForm — 復元した決済の完了で「注文を送る」�
     setStandardPaymentDefault();
     render(<CheckoutForm params={STANDARD_ORDER} />);
     expect(screen.getByRole('button', { name: /3000 JPYC を支払う/ })).toBeEnabled();
-    expect(screen.queryByText(PAID_NOTE)).toBeNull();
+    expect(screen.queryByText(PAID_NOTE_ANY)).toBeNull();
   });
 
   it('通常決済: 普通の /checkout (注文リンクでない) の復元は、同じお店・明細・金額の「何度でも使える」リンクに結び付けない', async () => {
@@ -4597,7 +4640,7 @@ describe('CheckoutForm — 復元した決済の完了で「注文を送る」�
     setStandardPaymentDefault();
     render(<CheckoutForm params={shipAsk} />);
     expect(screen.getByRole('button', { name: /3000 JPYC を支払う/ })).toBeEnabled();
-    expect(screen.queryByText(PAID_NOTE)).toBeNull();
+    expect(screen.queryByText(PAID_NOTE_ANY)).toBeNull();
   });
 
   it('通常決済: 会計の指紋は同じで注文リンクの指紋だけ違う (同じ番号・明細で ship だけ違うリンク) の復元は結び付けない', async () => {
@@ -4618,7 +4661,7 @@ describe('CheckoutForm — 復元した決済の完了で「注文を送る」�
     setStandardPaymentDefault();
     render(<CheckoutForm params={STANDARD_ORDER} />);
     expect(screen.getByRole('button', { name: /3000 JPYC を支払う/ })).toBeEnabled();
-    expect(screen.queryByText(PAID_NOTE)).toBeNull();
+    expect(screen.queryByText(PAID_NOTE_ANY)).toBeNull();
   });
 
   it('通常決済: 注文リンクの支払いだけ orderLinkKey を standard.mutate に渡す (contextKey は従来どおり全部に渡す)', async () => {
@@ -4665,7 +4708,7 @@ describe('CheckoutForm — 復元した決済の完了で「注文を送る」�
     // (c) もう一度読み直す: settled で保存は消えている (hook は何も復元しない)
     setRelayPayment('idle');
     render(<CheckoutForm params={RELAY_ORDER} />);
-    expect(await screen.findByText(PAID_NOTE)).toBeInTheDocument();
+    expect(await screen.findByText(PAID_NOTE_SEND_ORDER)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /3000 JPYC を支払う/ })).toBeDisabled();
     expect(screen.getByRole('button', { name: '注文を送る' })).toBeInTheDocument();
   });
@@ -4697,7 +4740,7 @@ describe('CheckoutForm — 復元した決済の完了で「注文を送る」�
     setRelayPayment('idle');
     ready();
     render(<CheckoutForm params={RELAY_ORDER} />);
-    expect(await screen.findByText(PAID_NOTE)).toBeInTheDocument();
+    expect(await screen.findByText(PAID_NOTE_SEND_ORDER)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /3000 JPYC を支払う/ })).toBeDisabled();
   });
 
@@ -4784,7 +4827,7 @@ describe('CheckoutForm — 復元した決済の完了で「注文を送る」�
     setRelayPayment('idle');
     render(<CheckoutForm params={RELAY_ORDER} />);
     expect(screen.getByRole('button', { name: /3000 JPYC を支払う/ })).toBeEnabled();
-    expect(screen.queryByText(PAID_NOTE)).toBeNull();
+    expect(screen.queryByText(PAID_NOTE_ANY)).toBeNull();
   });
 
   it('ガスレス (relay): 注文リンクの支払いだけ orderLinkKey を relay.mutate に渡す (注文リンクでない会計・束縛した注文には渡さない)', async () => {
