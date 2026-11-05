@@ -405,6 +405,8 @@ describe('R12 pin: facade exports and error identity', () => {
       'CrossChainBurnUnresolvedError',
       'CrossChainForwardPendingError',
       'CrossChainQuoteExpiredError',
+      // 第 9 回レビュー A-1: 回復専用の選択肢で burn の判定が出たときに approve の前で止める。
+      'CrossChainRecoveryBurnBlockedError',
       'GatewayRecoveryError',
       'assertForwardQuoteBinding',
       'assertGatewayTransferEnabled',

@@ -131,6 +131,9 @@ export interface ExecuteCctpTransferArgs {
   /** 決定表 row 9/12/18 の自動再 burn を許すか。既定は env flag
    *  (NEXT_PUBLIC_CROSS_CHAIN_BURN_AUTORESUME, 既定 OFF)。test 用に上書きできる。 */
   allowAutoReburn?: boolean;
+  /** A-1: 新しく価値を送る操作の関所。決定表は変えず、その結論が burn (初回・再 burn とも) のとき、
+   *  chain 切替・approve より前に呼ぶ。throw したら送金しない (hook の assertNoUnresolvedRecovery)。 */
+  assertNewBurnAllowed?: (info: { slot: BurnSlot; row: number }) => void;
   /** test 用 (default Date.now)。marker の gap 判定に使う。 */
   now?: () => number;
 }

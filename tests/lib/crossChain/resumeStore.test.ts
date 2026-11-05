@@ -302,3 +302,54 @@ it.each(['abandoned-unsigned', 'abandoned-unsent', 'rejected-request'] as const)
   saveGatewayResumeStateStrict(key, { merchant: { attempts: [{ ...attempt, status: 'unknown', intent: { ...attempt.intent, signature: gatewayAttestation().signature } }] } });
   expect(loadResumeState<GatewayResumeState>(key)?.merchant?.attempts[0].status).toBe(status);
 });
+
+// A-1: CCTP の走査用の読取。既存の loadResumeState (読めない記録は「なし」) は変えずに、
+// 「鍵はあるのに読めない」を区別する。
+describe('readResumeStateForScan', () => {
+  it('distinguishes absent, present and corrupt records without changing loadResumeState', async () => {
+    const { readResumeStateForScan } = await import('@/lib/crossChain/resumeStore');
+    expect(readResumeStateForScan(baseKey)).toEqual({ kind: 'absent' });
+    saveResumeState(baseKey, { burnTxHash: '0xburn' });
+    expect(readResumeStateForScan(baseKey)).toEqual({ kind: 'present', state: { burnTxHash: '0xburn' } });
+    for (const broken of ['null', '[]', '"text"', '{broken']) {
+      localStorage.setItem(localStorage.key(0)!, broken);
+      expect(readResumeStateForScan(baseKey)).toEqual({ kind: 'unreadable' });
+    }
+    // 既存の loader は従来どおり、壊れた JSON を「なし」にする (変えていない)。
+    expect(loadResumeState(baseKey)).toBeUndefined();
+  });
+
+  it('treats a throwing getItem as unreadable only when the key exists', async () => {
+    const { readResumeStateForScan } = await import('@/lib/crossChain/resumeStore');
+    const spy = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new Error('denied'); });
+    try {
+      expect(readResumeStateForScan(baseKey)).toEqual({ kind: 'absent' });
+      localStorage.setItem('unrelated', '1');
+      expect(readResumeStateForScan(baseKey)).toEqual({ kind: 'absent' });
+      saveResumeState(baseKey, { burnTxHash: '0xburn' });
+      expect(readResumeStateForScan(baseKey)).toEqual({ kind: 'unreadable' });
+      const key = vi.spyOn(Storage.prototype, 'key').mockImplementation(() => { throw new Error('denied'); });
+      expect(readResumeStateForScan({ ...baseKey, sourceChainId: 1 })).toEqual({ kind: 'unreadable' });
+      key.mockRestore();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  // ブラウザでの取得拒否は「今書けない」だけで、過去に保存していない証明にならない (SSR は別ファイル)。
+  it.each<[string, PropertyDescriptor]>([
+    ['the getter throws', { configurable: true, get: (): Storage => { throw new Error('SecurityError'); } }],
+    ['storage is null', { configurable: true, get: (): Storage | null => null }],
+  ])('treats browser storage denial as unreadable (%s)', async (_name, descriptor) => {
+    const { readResumeStateForScan } = await import('@/lib/crossChain/resumeStore');
+    const original = Object.getOwnPropertyDescriptor(window, 'localStorage');
+    Object.defineProperty(window, 'localStorage', descriptor);
+    try {
+      expect(readResumeStateForScan(baseKey)).toEqual({ kind: 'unreadable' });
+      // 既存の loader は従来どおり「なし」(変えていない)。
+      expect(loadResumeState(baseKey)).toBeUndefined();
+    } finally {
+      if (original) Object.defineProperty(window, 'localStorage', original);
+    }
+  });
+});

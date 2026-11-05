@@ -87,6 +87,9 @@ export interface ExecuteGatewayTransferArgs {
   recheckOnly?: boolean;
   /** A new Pay click may retry an authorization that was definitively never submitted. */
   newPayment?: boolean;
+  /** A-1: 新しく価値を送る操作の関所 (hook の assertNoUnresolvedRecovery)。新しい認可・置き換えの署名を
+   *  作る直前 (chain 切替・wallet より前) に呼ぶ。throw したら署名も送金もしない。 */
+  assertNewAuthorizationAllowed?: (phase: 'merchant' | 'fee') => void;
   /** step 完了ごとに最新の resume state を report (永続化用)。 */
   onStep?: (state: GatewayResumeState, beforeSigning?: GatewayResumeState, beforeRequest?: GatewayRequestGuard) => void;
   overrides?: BuildBurnIntentOverrides;
@@ -232,6 +235,8 @@ export async function executeGatewayTransfer(args: ExecuteGatewayTransferArgs): 
 
   const signAndAttest = async (phase: 'merchant' | 'fee') => {
     if (args.recheckOnly || !env.enableGatewayCrossChain || CROSS_CHAIN_DISABLED) throw new GatewayRecoveryError(state);
+    // A-1: 新しい認可 (初回・置き換え・利用料の認可) は、すべてここを通る。CCTP の未解決の記録があれば止める。
+    args.assertNewAuthorizationAllowed?.(phase);
     onProgress({ kind: 'switch_chain', targetChainId: args.sourceChainId });
     await ensureWalletChain(args.walletClient, args.switchChainAsync, args.sourceChainId);
     await assertContractDeployed(args.sourcePublicClient, GATEWAY_WALLET_ADDRESS, args.sourceChainId);

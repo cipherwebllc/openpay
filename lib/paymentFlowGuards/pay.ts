@@ -35,6 +35,8 @@ export type PayGuardInput = SubmitReadinessInput & {
   address: string | undefined;
   arcScannedScope: string;
   arcRecoveryScope: string;
+  // この請求の宛先・受取人に CCTP の中断記録がこのブラウザにある (lib/crossChain/cctpResumePresence)。
+  cctpResumeSaved: boolean;
   merchantUnderflow: boolean;
   expired: boolean;
   timeMeasured: boolean;
@@ -54,6 +56,7 @@ export function derivePayGuards({
   address,
   arcScannedScope,
   arcRecoveryScope,
+  cctpResumeSaved,
   activeQuote,
   isConnected,
   wrongChain,
@@ -91,7 +94,11 @@ export function derivePayGuards({
         : gasless.isPending;
   // Arc の mount scan 完了前に直接送金が開始される波及を断つ (dynamic child の読込中も)。
   const arcRecoveryScanning = params.token === 'usdc' && params.chain === 'arc' && !!address && arcScannedScope !== arcRecoveryScope;
-  const flowPending = directFlowPending || crossChainLocked || arcRecoveryScanning;
+  // A-1: Arc 以外でも、CCTP の中断記録があれば子 (CrossChainHint) が走査して報告するまで直接送金を閉じる。
+  // 報告は子が committed を立ててから届く (走査中も true) ので、ロックは外れずに crossChainLocked へ移る。
+  // arcScannedScope は Arc に限らず子の報告ごとに更新される (PaymentForm の onCrossChainExecutingChange)。
+  const cctpRecoveryScanning = params.token === 'usdc' && params.chain !== 'arc' && !!address && cctpResumeSaved && arcScannedScope !== arcRecoveryScope;
+  const flowPending = directFlowPending || crossChainLocked || arcRecoveryScanning || cctpRecoveryScanning;
   // relay は gas quote も smart account も不要なので readiness は常に満たす。
   const gasQuoteReady = isStandard || useRelay || activeQuote.data !== undefined;
   // 送金が確定 (または broadcast 済で確定しうる) 後の再送信を禁止。再送すると同一

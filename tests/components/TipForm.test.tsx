@@ -53,6 +53,8 @@ vi.mock('@/lib/circlePaymaster', async () => {
 // component で stub する (Hint 自体の動作は CrossChainHint.test.tsx で検証)。
 // TipForm から Hint へ渡される props は crossChainHintSpy で capture して検証。
 const crossChainHintSpy = vi.fn();
+// A-1 のテストだけが false にし、「子がまだ報告していない」状態 (遅延ロード中・走査中) を固定する。
+const crossChainHintReports = { onMount: true };
 vi.mock('@/components/CrossChainHint', async () => {
   const React = await import('react');
   return {
@@ -63,7 +65,7 @@ vi.mock('@/components/CrossChainHint', async () => {
       // 実物の effect は onExecutingChange の identity (= 親の scan scope: 金額変更で変わる) に追随する。
       const cb = props.onExecutingChange;
       React.useEffect(() => {
-        if (typeof cb === 'function') (cb as (executing: boolean) => void)(false);
+        if (crossChainHintReports.onMount && typeof cb === 'function') (cb as (executing: boolean) => void)(false);
       }, [cb]);
       return null;
     },
@@ -123,6 +125,7 @@ import { TipForm } from '@/components/TipForm';
 import { ReceiveMethodPicker } from '@/components/ReceiveMethodPicker';
 import type { HandleTipConfig } from '@/lib/handle';
 import { loadPayerReceipts } from '@/lib/payerReceipt';
+import { saveResumeState } from '@/lib/crossChain/resumeStore';
 import type { TipParams } from '@/lib/url';
 import {
   RelayIpRateLimitedError,
@@ -558,6 +561,36 @@ describe('TipForm — 接続状態', () => {
     expect(
       screen.getByRole('button', { name: /1 USDC を送る/ }),
     ).not.toBeDisabled();
+  });
+
+  it('A-1: CCTP の中断記録があれば、子 (CrossChainHint) の走査報告まで初回の描画から直接送信を閉じる', async () => {
+    window.localStorage.clear();
+    // 同じ宛先 (Base Sepolia)・受取人・account への CCTP 記録 (送金元・金額は問わない)。
+    saveResumeState({ account: FAN, kind: 'cctp-v2', sourceChainId: polygonAmoy.id, destChainId: baseSepolia.id,
+      recipient: CREATOR, valueAtomic: 1_000_000n, feeAtomic: 0n }, { burnTxHash: `0x${'bc'.repeat(32)}` });
+    crossChainHintReports.onMount = false;
+    try {
+      setAccount({ connected: true, chainId: baseSepolia.id });
+      setBalance(20_000_000n);
+      setSmartAccount(true);
+      setGasQuote('ready', 0n);
+      crossChainHintSpy.mockClear();
+      render(<TipForm params={USDC_PARAMS} />);
+      // 初回の描画から、子が報告するまで直接送信は閉じている (子のロード前も後も)。
+      expect(screen.queryByRole('button', { name: /1 USDC を送る/ })).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /送信中/ })).toBeDisabled();
+      await waitFor(() => expect(crossChainHintSpy).toHaveBeenCalled());
+      expect(screen.getByRole('button', { name: /送信中/ })).toBeDisabled();
+      const { onExecutingChange } = crossChainHintSpy.mock.calls.at(-1)![0] as { onExecutingChange: (v: boolean) => void };
+      // 子が committed を報告 → 閉じたまま。この請求の記録ではなかったと報告 (false) → 開く。
+      act(() => onExecutingChange(true));
+      expect(screen.getByRole('button', { name: /送信中/ })).toBeDisabled();
+      act(() => onExecutingChange(false));
+      expect(screen.getByRole('button', { name: /1 USDC を送る/ })).not.toBeDisabled();
+    } finally {
+      crossChainHintReports.onMount = true;
+      window.localStorage.clear();
+    }
   });
 
   it('relay intent の sessionStorage 読込中は非 relay 表示でも新規送信を封鎖する', () => {

@@ -79,6 +79,7 @@ describe('R12: execute.ts split structure', () => {
       'executeErrors:CrossChainBurnUnresolvedError',
       'executeErrors:CrossChainForwardPendingError',
       'executeErrors:CrossChainQuoteExpiredError',
+      'executeErrors:CrossChainRecoveryBurnBlockedError',
     ]);
   });
 
