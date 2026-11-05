@@ -107,7 +107,8 @@ function isBusy(s: StoreDeviceRegisterState): boolean {
     // 「結果が分からない」は結論だけ)。
     s.phase === 'sent' ||
     s.phase === 'unknown' ||
-    // 送った印を確かめられない間も (前の送信が後から成立すれば二重払いになる)。出口は時間が過ぎた後に閉じること。
+    // 送った印を確かめられない間も (前の送信が後から成立すれば二重払いになる)。出口は店員が入金の記録を確かめて
+    // 「入金の記録を確かめた（閉じる）」を押すことだけ (待ち時間の条件は無い・止めの印は marksHeldRef)。
     s.phase === 'marks_unreadable'
   );
 }

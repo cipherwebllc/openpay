@@ -446,17 +446,103 @@ describe('useStoreDeviceRegister (レジ端末: 受け渡し → 確かめて送
     expect(result.current.busy).toBe(true);
     let next!: unknown;
     let normal!: boolean;
+    let left!: boolean;
     await act(async () => {
       next = await result.current.start(SHOP, AMOUNT, 80002);
       normal = await result.current.releaseForNormal();
+      // タブの移動 (移った先では通常の QR を出せる) も止める
+      left = await result.current.leave();
     });
     expect(next).toBeNull();
     expect(normal).toBe(false);
+    expect(left).toBe(false);
     // 結果 (rejected) を閉じても外れず、「記録を読めない」に戻る
     act(() => result.current.dismiss());
     expect(result.current.state).toEqual({ phase: 'marks_unreadable' });
     expect(result.current.busy).toBe(true);
     // 「記録を読めない」を閉じたら外れる
+    act(() => result.current.dismiss());
+    expect(result.current.state).toEqual({ phase: 'idle' });
+    expect(result.current.busy).toBe(false);
+  });
+
+  // 逆の順序: 前のタブの署名の処理が始まった後に、起動時の確認が値の破損を見つける。処理の表示はそのままにして、止めは
+  // 登録する (処理が送らずに終わっても、次の決済に進ませない)。
+  it('E-8: 前のタブの署名の処理が始まった後に値の破損を見つけても、止めを登録する (表示は処理のまま)', async () => {
+    send.readSentMarks.mockReturnValue({ ok: false, corrupt: true });
+    let releaseVerify!: () => void;
+    send.verifyDeviceAuth.mockReturnValue(
+      new Promise((resolve) => {
+        releaseVerify = () => resolve({ ok: false, reason: 'merchant_mismatch' });
+      }),
+    );
+    window.sessionStorage.setItem(STORE_DEVICE_SESSION_KEY, JSON.stringify({ id: ID, token: TOKEN, expiresAt: nowSec() + 300, merchant: SHOP, amount: AMOUNT.toString(), chainId: 80002 }));
+    closeRes = () => json({ ok: true, closed: false, auth: AUTH, txHash: null });
+    // 起動時の確認 (monitor) を後から始める = 前のタブの署名を確かめている最中に、値の破損を見つける
+    const { result, rerender } = renderHook((p: StoreDeviceRegisterInput) => useStoreDeviceRegister(p), {
+      initialProps: { ...input, monitor: false },
+    });
+    // 送信の部品の読み込みを終えてから起動時の確認を始める (mock した module の動的 import を重ねない・「再読み込み後」と同じ理由)
+    await act(async () => {
+      await vi.waitFor(() => expect(send.verifyDeviceAuth).toHaveBeenCalledTimes(1), { timeout: 2000 });
+    });
+    expect(result.current.state).toEqual({ phase: 'processing' });
+    expect(send.readSentMarks).not.toHaveBeenCalled();
+    rerender({ ...input, monitor: true });
+    await act(async () => {
+      await vi.waitFor(() => expect(send.readSentMarks).toHaveBeenCalledTimes(1), { timeout: 2000 });
+    });
+    // 処理の表示は変えない
+    expect(result.current.state).toEqual({ phase: 'processing' });
+    await act(async () => {
+      releaseVerify();
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(result.current.state).toEqual({ phase: 'rejected', reason: 'merchant_mismatch' });
+    // 送らずに終わっても止めたまま
+    expect(result.current.busy).toBe(true);
+    let next!: unknown;
+    let normal!: boolean;
+    let left!: boolean;
+    await act(async () => {
+      next = await result.current.start(SHOP, AMOUNT, 80002);
+      normal = await result.current.releaseForNormal();
+      left = await result.current.leave();
+    });
+    expect(next).toBeNull();
+    expect(normal).toBe(false);
+    expect(left).toBe(false);
+    act(() => result.current.dismiss());
+    expect(result.current.state).toEqual({ phase: 'marks_unreadable' });
+    act(() => result.current.dismiss());
+    expect(result.current.state).toEqual({ phase: 'idle' });
+    expect(result.current.busy).toBe(false);
+  });
+
+  // 止めている間に送る設定を OFF にしても、表示 (rejected) を「何もしていない」に戻さず「記録を読めない」(警告と確認ボタン)
+  // にする (OFF で警告が消えて、止めているのに理由が見えない状態にしない)。
+  it('E-8: 止めている間に処理の結果 (rejected) から送る設定を OFF にしても、「記録を読めない」を出す', async () => {
+    send.readSentMarks.mockReturnValue({ ok: false, corrupt: true });
+    send.verifyDeviceAuth.mockResolvedValue({ ok: false, reason: 'merchant_mismatch' });
+    window.sessionStorage.setItem(STORE_DEVICE_SESSION_KEY, JSON.stringify({ id: ID, token: TOKEN, expiresAt: nowSec() + 300, merchant: SHOP, amount: AMOUNT.toString(), chainId: 80002 }));
+    let releaseClose!: () => void;
+    const closeHeld = new Promise<void>((resolve) => { releaseClose = resolve; });
+    closeRes = () => closeHeld.then(() => json({ ok: true, closed: false, auth: AUTH, txHash: null }));
+    const { result, rerender } = renderHook((p: StoreDeviceRegisterInput) => useStoreDeviceRegister(p), {
+      initialProps: input,
+    });
+    await act(async () => {
+      await vi.waitFor(() => expect(send.readSentMarks).toHaveBeenCalledTimes(1), { timeout: 2000 });
+    });
+    await act(async () => {
+      releaseClose();
+      await vi.waitFor(() => expect(send.verifyDeviceAuth).toHaveBeenCalledTimes(1), { timeout: 2000 });
+    });
+    await advance(0);
+    expect(result.current.state).toEqual({ phase: 'rejected', reason: 'merchant_mismatch' });
+    rerender({ ...input, enabled: false, monitor: true });
+    expect(result.current.state).toEqual({ phase: 'marks_unreadable' });
+    expect(result.current.busy).toBe(true);
     act(() => result.current.dismiss());
     expect(result.current.state).toEqual({ phase: 'idle' });
     expect(result.current.busy).toBe(false);
