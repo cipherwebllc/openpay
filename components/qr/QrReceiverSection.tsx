@@ -1,7 +1,8 @@
 'use client';
 
 import { useId, type Dispatch, type SetStateAction } from 'react';
-import { useTranslations } from 'next-intl';
+import Link from 'next/link';
+import { useLocale, useTranslations } from 'next-intl';
 import type { Address, Chain } from 'viem';
 import { env } from '@/lib/env';
 import { AddressInput } from '../AddressInput';
@@ -22,7 +23,10 @@ const INPUT_CLASS =
   'h-11 w-full rounded-lg border border-slate-300 bg-white px-3 text-base placeholder:text-slate-500 focus:border-brand focus:outline-none sm:text-sm';
 
 // 受取先の欄 (アドレス / 接続中のウォレット / 形式の誤り / Explorer)。受取先の解決と自動補完は QrGenerator が持ち、
-// ここは描画と入力の反映だけ。「お店の設定」シートと、受取先が未設定のときの会計画面の欄の両方で使う。
+// ここは描画と入力の反映だけ。「お店の設定」シートと、受取先が未設定のときの会計画面の欄の両方で使う
+// (決済QR とレジの両方)。欄が空の間だけ「ウォレットをお持ちでない方へ」を出し、ガイド「ウォレットを選ぶ」の
+// お店の受け取り用の節 (/guide/wallet#store-wallet) へ送る (2026-11-06 user)。外のウォレットのサイトへ直接は飛ばさない
+// (受け取るチェーンや売上の移し方の注意を読んでから選んでもらうため)。
 export function QrReceiverFields({
   settings,
   deployment,
@@ -48,6 +52,7 @@ export function QrReceiverFields({
 }) {
   const t = useTranslations('QrGenerator');
   const tFee = useTranslations('UsageFee');
+  const locale = useLocale();
   const inputId = useId();
   // 中身は同じ要素の並びのまま、外枠だけ切り替える (描画のたびに部品を作り直さない = 入力中の focus を失わない)。
   const content = (
@@ -66,6 +71,18 @@ export function QrReceiverFields({
         useLabel={t('useConnectedWallet')}
         matchLabel={t('receiverMatchesWallet')}
       />
+      {/* 入力したら消える (空白だけは空とみなす)。リンクの名前は可視の文字だけ (掟 8)。 */}
+      {!settings.receiver.trim() && (
+        <p className="mt-0.5">
+          <Link
+            href={`/${locale}/guide/wallet#store-wallet`}
+            prefetch={false}
+            className="inline-flex min-h-11 items-center text-xs font-medium text-emerald-700 underline underline-offset-2 hover:text-emerald-900"
+          >
+            {t('noWalletGuideLink')}
+          </Link>
+        </p>
+      )}
       {settings.receiver &&
         !receiverValid &&
         !isLikelyName(settings.receiver) && (

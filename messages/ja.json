@@ -421,6 +421,7 @@
     "useConnectedWallet": "接続中のウォレットを使う",
     "receiverMatchesWallet": "接続ウォレット＝受取先",
     "addressInvalid": "アドレス形式が正しくありません",
+    "noWalletGuideLink": "ウォレットをお持ちでない方へ",
     "storeNameLabel": "店舗名 (印刷用)",
     "invoiceNoLabel": "インボイス登録番号 (任意)",
     "invoiceNoHint": "入れると、お客様の控えに登録番号と、税率ごとの金額・消費税が出ます (JPYC のみ)。商品の税率も選んでください。",

@@ -1045,6 +1045,43 @@ describe('QrGenerator', () => {
     });
   });
 
+  // 2026-11-06 user: ウォレットを持っていないお店を、ガイド「ウォレットを選ぶ」のお店の受け取り用の節へ送る
+  // (外のウォレットのサイトへ直接は飛ばさない)。欄が空の間だけ出し、入力したら消す。
+  describe('受取先の欄の「ウォレットをお持ちでない方へ」', () => {
+    it('欄が空なら /ja/guide/wallet#store-wallet へのリンクを出し、入力したら消す', async () => {
+      const user = userEvent.setup();
+      render(<QrGenerator />);
+      const input = await screen.findByPlaceholderText(/0x\.\.\./);
+      const link = screen.getByRole('link', { name: 'ウォレットをお持ちでない方へ' });
+      expect(link).toHaveAttribute('href', '/ja/guide/wallet#store-wallet');
+      // 同じタブで開く (サイト内のガイド)・名前は可視の文字だけ (掟 8)。
+      expect(link).not.toHaveAttribute('target');
+      expect(link).not.toHaveAttribute('aria-label');
+      await user.type(input, VALID);
+      expect(screen.queryByRole('link', { name: 'ウォレットをお持ちでない方へ' })).toBeNull();
+      await user.clear(input);
+      expect(screen.getByRole('link', { name: 'ウォレットをお持ちでない方へ' })).toBeInTheDocument();
+    });
+
+    it('受取先が保存済みなら、お店の設定シートの欄にも出さない', async () => {
+      window.localStorage.setItem(
+        'openpay:qr-settings:v2',
+        JSON.stringify({ receiver: VALID, token: 'jpyc', directTransfer: false }),
+      );
+      render(<QrGenerator />);
+      const user = userEvent.setup();
+      await openShopSettings(user);
+      expect(screen.getByRole('dialog', { name: 'お店の設定' })).toBeInTheDocument();
+      expect(screen.queryByRole('link', { name: 'ウォレットをお持ちでない方へ' })).toBeNull();
+    });
+
+    it('en: 文言と行き先は /en', async () => {
+      render(<QrGenerator />, { locale: 'en' });
+      const link = await screen.findByRole('link', { name: "Don't have a wallet yet?" });
+      expect(link).toHaveAttribute('href', '/en/guide/wallet#store-wallet');
+    });
+  });
+
   describe('決済モード切替 (gasless / 通常決済（ガス代は顧客負担）)', () => {
     it('「通常決済（ガス代は顧客負担）」を選択すると URL に mode=standard が出る + 説明バッジが表示される', async () => {
       const user = userEvent.setup();

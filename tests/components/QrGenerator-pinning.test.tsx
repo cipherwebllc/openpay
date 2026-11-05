@@ -1605,10 +1605,10 @@ describe('QrGenerator pre-split pinning (F-8 PR-21)', () => {
           ],
         },
         "enFresh": {
-          "all": "25a28edd6edd5a60077b5b172be8dbf6eed4cbb6844968fa54806bc227eb5d07",
+          "all": "396adf8fa5cb663fdf4b6719931cfb2f9ad8865bf9f9e2837695016ca3f06e54",
           "parts": [
             "div 77d610789dd9 ",
-            "div 1037b32e62e9 No shop nameNo r",
+            "div 1777224bddbb No shop nameNo r",
             "aside e432f1338d73 Amount—Show QR c",
             "div 4b481618cc35 No receiver setS",
           ],
@@ -1633,10 +1633,10 @@ describe('QrGenerator pre-split pinning (F-8 PR-21)', () => {
           ],
         },
         "freshEmpty": {
-          "all": "fe841878a8115f99eee92b08e36a00ac2874cf22226fcd4dc36a6a555ed58c07",
+          "all": "d9b60e77f603653ca25af74ce2ee04cb642aa838a30b7a52335cef3e923c9d39",
           "parts": [
             "div 77d610789dd9 ",
-            "div f8ef62818e48 店名未設定受取先が未設定JPYC",
+            "div 3deff6abcb15 店名未設定受取先が未設定JPYC",
             "aside 1a4e0aab7a49 請求金額—QRコードを表示する受",
             "div 9491363e27ea 受取先が未設定QRコードを表示す",
           ],
