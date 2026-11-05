@@ -123,7 +123,8 @@ function setRelay(state: RelayState = {}) {
     error: state.error ?? null,
     retryRelay: relayRetryRelay,
     retrySamePayload: relayRetrySamePayload,
-    recoveryState: state.recoveryState ?? null,
+    // 明示した undefined はそのまま渡す (?? で null に変えると、undefined の分岐を確かめられない)。
+    recoveryState: 'recoveryState' in state ? state.recoveryState : null,
     restoredIntent: null,
     orderDelivery: null,
     // 見る範囲の後ろの目印 (前のお支払いの確認中の案内・別のお店の文言)。CheckoutForm では表示にしか使わない。
@@ -223,6 +224,8 @@ type ElementDom = {
   tag: string;
   role: string | null;
   text: string[];
+  /** 題 (最初の p) の class。結果不明の枠は題にアイコンを並べる形 (flex) になる。 */
+  titleClass: string | null;
   spinner: boolean;
   buttons: { name: string; disabled: boolean }[];
   links: { name: string; href: string | null }[];
@@ -233,6 +236,7 @@ function elementDom(el: HTMLElement): ElementDom {
     tag: el.tagName.toLowerCase(),
     role: el.getAttribute('role'),
     text: Array.from(el.querySelectorAll('p')).map((p) => p.textContent ?? ''),
+    titleClass: el.querySelector('p')?.getAttribute('class') ?? null,
     // 結果の確認中の回転アイコン (装飾なので aria-hidden)。
     spinner: el.querySelector('svg[aria-hidden="true"]') !== null,
     buttons: within(el).queryAllByRole('button').map((b) => ({
@@ -259,6 +263,7 @@ const fallbackBanner = (message: string): ElementDom => ({
   tag: 'div',
   role: null,
   text: [RF.title, message, RF.gasHint.replace('{nativeToken}', NATIVE_TOKEN)],
+  titleClass: 'font-semibold',
   spinner: false,
   buttons: [{ name: RF.switchButton, disabled: false }],
   links: [],
@@ -268,6 +273,8 @@ const responseUnknownPanel = (opts: { auto: boolean; disabled?: boolean }): Elem
   tag: 'div',
   role: null,
   text: [CF.responseUnknownTitle, opts.auto ? CF.responseUnknownAutoBody : CF.responseUnknownBody],
+  // 題にアイコンを並べる形 (titleWithIcon)。回転アイコンの有無にかかわらず同じ。
+  titleClass: 'flex items-center gap-1.5 font-semibold',
   spinner: opts.auto,
   buttons: opts.auto ? [] : [{ name: CF.responseUnknownRetryButton, disabled: opts.disabled ?? false }],
   links: [],
@@ -282,6 +289,7 @@ const ipRateLimitedPanel = (opts: { retryAfterSeconds: number | null; disabled?:
       ? CF.ipRateLimitedBody
       : CF.ipRateLimitedBodyWithRetryAfter.replace('{seconds}', String(opts.retryAfterSeconds)),
   ],
+  titleClass: 'font-semibold',
   spinner: false,
   buttons: [{ name: CF.ipRateLimitedRetryButton, disabled: opts.disabled ?? false }],
   links: [],
@@ -324,6 +332,13 @@ describe('CheckoutForm — relay の状態の案内の欄 (RelayStatusBanners �
       expect(relayStatusArea()).toEqual([]);
     });
 
+    it('結果不明 (exhausted・送信中でない・error も data もない) なら先回りは出さず結果不明だけ', () => {
+      // 先回りを止めるのは !relayAmbiguous だけの状態 (isPending・relay.error・relay.data のどれも立てない)。
+      setRelay({ recoveryState: 'exhausted' });
+      render(<CheckoutForm params={PARAMS} />);
+      expect(relayStatusArea()).toEqual([responseUnknownPanel({ auto: false })]);
+    });
+
     it('relay の API 失敗があれば Layer A の banner 1 つだけ (先回りの文言は出さない)', () => {
       setRelay({ error: new Error('rate_limited') });
       render(<CheckoutForm params={PARAMS} />);
@@ -335,7 +350,7 @@ describe('CheckoutForm — relay の状態の案内の欄 (RelayStatusBanners �
       render(<CheckoutForm params={{ ...PARAMS, gas: 'merchant', items: [{ name: 'x', qty: 1, price: '1' }] }} />);
       const area = relayStatusArea();
       expect(area).toHaveLength(2);
-      expect(area[0]).toMatchObject({ tag: 'div', role: null, spinner: false, buttons: [], links: [] });
+      expect(area[0]).toMatchObject({ tag: 'div', role: null, titleClass: 'font-semibold', spinner: false, buttons: [], links: [] });
       expect(area[0].text[0]).toBe(CF.errorTitle);
       expect(area[0].text[1]).toContain(CF.errorMerchantUnderflow.slice(0, CF.errorMerchantUnderflow.indexOf('{')));
       expect(area[1]).toEqual(fallbackBanner(CF.relayDegradedPreflight));
@@ -369,6 +384,22 @@ describe('CheckoutForm — relay の状態の案内の欄 (RelayStatusBanners �
       setRelay({ error: new RelayResponseUnknownError(), recoveryState: null });
       render(<CheckoutForm params={PARAMS} />);
       expect(relayStatusArea()).toEqual([responseUnknownPanel({ auto: false })]);
+    });
+
+    it('recoveryState が undefined でも応答不明の error なら手動の再確認 (ボタンあり・retrySamePayload)', async () => {
+      const user = userEvent.setup();
+      setRelay({ error: new RelayResponseUnknownError(), recoveryState: undefined });
+      render(<CheckoutForm params={PARAMS} />);
+      expect(relayStatusArea()).toEqual([responseUnknownPanel({ auto: false })]);
+      await user.click(screen.getByRole('button', { name: CF.responseUnknownRetryButton }));
+      expect(relayRetrySamePayload).toHaveBeenCalledOnce();
+      expect(relayRetryRelay).not.toHaveBeenCalled();
+    });
+
+    it('recoveryState が undefined + 送信中: ボタンは disabled', () => {
+      setRelay({ error: new RelayResponseUnknownError(), recoveryState: undefined, isPending: true });
+      render(<CheckoutForm params={PARAMS} />);
+      expect(relayStatusArea()).toEqual([responseUnknownPanel({ auto: false, disabled: true })]);
     });
 
     it('今の経路が relay でなくても (Pimlico の経路) relay の結果不明は出す', () => {
@@ -415,19 +446,35 @@ describe('CheckoutForm — relay の状態の案内の欄 (RelayStatusBanners �
     });
   });
 
-  it('支払いが完了したら (relay.data.success) 3 つとも出さない', () => {
-    vi.mocked(useRelayHealth).mockReturnValue({ degraded: true });
-    setRelay({
-      data: { txHash: TX_HASH, success: true },
-      error: new RelayIpRateLimitedError(45),
-      recoveryState: 'exhausted',
+  // 支払いが完了したら (relay.data.success) 出さない。完了後は「注文を中止して戻る」も出ないので、見る範囲の目印ではなく
+  // 題で確かめる。3 つの完了の条件を別々に確かめる (ほかの抑止が同時に効く状態にしない)。
+  describe('支払いが完了したら (relay.data.success) 出さない', () => {
+    const PAID = { txHash: TX_HASH, success: true } as const;
+
+    it('IP の混雑: 結果不明ではない (recoveryState=null) 状態で、完了だけが止める', () => {
+      setRelay({ data: PAID, error: new RelayIpRateLimitedError(45), recoveryState: null });
+      render(<CheckoutForm params={PARAMS} />);
+      expect(screen.queryByRole('link', { name: CF.cancelLink })).toBeNull();
+      expect(screen.queryByText(CF.ipRateLimitedTitle)).toBeNull();
+      expect(screen.queryByText(CF.responseUnknownTitle)).toBeNull();
     });
-    render(<CheckoutForm params={PARAMS} />);
-    // 完了後は「注文を中止して戻る」も出ないので、見る範囲の目印ではなく題で確かめる。
-    expect(screen.queryByRole('link', { name: CF.cancelLink })).toBeNull();
-    expect(screen.queryByText(RF.title)).toBeNull();
-    expect(screen.queryByText(CF.relayDegradedPreflight)).toBeNull();
-    expect(screen.queryByText(CF.responseUnknownTitle)).toBeNull();
-    expect(screen.queryByText(CF.ipRateLimitedTitle)).toBeNull();
+
+    it('結果不明: exhausted で error なしの状態で、完了だけが止める', () => {
+      setRelay({ data: PAID, recoveryState: 'exhausted' });
+      render(<CheckoutForm params={PARAMS} />);
+      expect(screen.queryByRole('link', { name: CF.cancelLink })).toBeNull();
+      expect(screen.queryByText(CF.responseUnknownTitle)).toBeNull();
+    });
+
+    it('先回り (Layer B): degraded でも出さない', () => {
+      // Layer B の完了の条件は単独では効かせられない: relay の経路の完了は relay.data.success なので、完了していれば
+      // relay.data があり、先回りの条件 (relayPreflightActive の !relay.data) が先に止める。ここでは結果だけを固定する。
+      vi.mocked(useRelayHealth).mockReturnValue({ degraded: true });
+      setRelay({ data: PAID });
+      render(<CheckoutForm params={PARAMS} />);
+      expect(screen.queryByRole('link', { name: CF.cancelLink })).toBeNull();
+      expect(screen.queryByText(RF.title)).toBeNull();
+      expect(screen.queryByText(CF.relayDegradedPreflight)).toBeNull();
+    });
   });
 });
