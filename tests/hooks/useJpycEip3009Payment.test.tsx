@@ -2177,3 +2177,77 @@ describe('A2c background signed-order recovery', () => {
     expect(signTypedData).not.toHaveBeenCalled(); vi.useRealTimers();
   });
 });
+
+// 第 9 回レビュー A-4: lastSignedFrom は記録用 (履歴・控え・確認の署名のウォレット) に、この mount の最後の試みで
+// 署名を求めた authorization の from を返す。呼び出し側が await を挟んで mutate する間にウォレットを切り替えても、
+// 実際の送金元 (payload の from) と一致する。署名・POST の中身は変えない。
+describe('useJpycEip3009Payment — 記録用の送金元 lastSignedFrom (第 9 回レビュー A-4)', () => {
+  const OTHER: Address = getAddress('0x8888888888888888888888888888888888888888');
+  const VALUE = 300n * 10n ** 18n;
+
+  it('mutate の前に B へ切り替えると、署名・POST の from と lastSignedFrom はどれも B。後で A に戻しても B のまま', async () => {
+    mount();
+    const { result, rerender } = renderHook(() => useJpycEip3009Payment(jpycDep), { wrapper: makeWrapper() });
+    await flushStorageLoad();
+    await waitFor(() => expect(result.current.isRestoring).toBe(false));
+    expect(result.current.lastSignedFrom).toBeUndefined();
+    // 呼び出し側の await (admission・注文の束縛の読み込み) の間に B へ切り替えた
+    mockHook(useAccount, { address: OTHER, chainId: jpycDep.chainId });
+    rerender();
+    act(() => result.current.mutate({ merchant: MERCHANT, value: VALUE }));
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    const body = JSON.parse((fetchSpy.mock.calls[0][1] as RequestInit).body as string);
+    expect(body.from).toBe(OTHER);
+    expect(signTypedData.mock.calls[0][0].account).toBe(OTHER);
+    expect(result.current.lastSignedFrom).toBe(OTHER);
+    mockHook(useAccount, { address: CUSTOMER, chainId: jpycDep.chainId });
+    rerender();
+    expect(result.current.lastSignedFrom).toBe(OTHER);
+  });
+
+  it('署名の前に止まった次の試み (未接続) には、前の試みの from を持ち越さない', async () => {
+    mount();
+    fetchSpy.mockResolvedValueOnce(
+      new Response(JSON.stringify({ ok: false, error: 'invalid_payload' }), {
+        status: 400,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    const { result, rerender } = renderHook(() => useJpycEip3009Payment(jpycDep), { wrapper: makeWrapper() });
+    await flushStorageLoad();
+    await waitFor(() => expect(result.current.isRestoring).toBe(false));
+    act(() => result.current.mutate({ merchant: MERCHANT, value: VALUE }));
+    await waitFor(() => expect(result.current.error?.message).toBe('invalid_payload'));
+    expect(result.current.lastSignedFrom).toBe(CUSTOMER);
+    mockHook(useAccount, { address: undefined, chainId: undefined });
+    rerender();
+    act(() => result.current.mutate({ merchant: MERCHANT, value: VALUE }));
+    await waitFor(() => expect(result.current.error?.message).toBe('wallet_not_connected'));
+    expect(result.current.lastSignedFrom).toBeUndefined();
+    expect(signTypedData).toHaveBeenCalledOnce();
+  });
+
+  it('同じ payload の再送 (IP 制限の後の retryRelay) では、再送の時の接続先でなく、その payload の from', async () => {
+    mount();
+    fetchSpy.mockResolvedValueOnce(
+      new Response(JSON.stringify({ ok: false, error: 'ip_rate_limited' }), {
+        status: 429,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    const { result, rerender } = renderHook(() => useJpycEip3009Payment(jpycDep), { wrapper: makeWrapper() });
+    await flushStorageLoad();
+    await waitFor(() => expect(result.current.isRestoring).toBe(false));
+    act(() => result.current.mutate({ merchant: MERCHANT, value: VALUE }));
+    await waitFor(() => expect(isRelayIpRateLimitedError(result.current.error)).toBe(true));
+    mockHook(useAccount, { address: OTHER, chainId: jpycDep.chainId });
+    rerender();
+    await act(async () => {
+      result.current.retryRelay();
+    });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(signTypedData).toHaveBeenCalledOnce();
+    expect(JSON.parse((fetchSpy.mock.calls[1][1] as RequestInit).body as string).from).toBe(CUSTOMER);
+    expect(result.current.lastSignedFrom).toBe(CUSTOMER);
+  });
+});

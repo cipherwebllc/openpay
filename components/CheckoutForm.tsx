@@ -1227,12 +1227,16 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
     standard.restoredFromStorage,
   ]);
 
-  // 履歴と控えの支払者は、支払いを送った時点の接続先 (第 9 回レビュー A-4)。確定を待つ間に拡張機能で別のウォレットへ
-  // 切り替えても、切り替えた先を支払者として保存しない (控えは pending → confirmed の昇格しか受けないので、後から
-  // 直らない)。規則は下の notifyPayer (注文の確認の署名をするウォレット) と同じ: 通常決済は hook が記録した送り主、
-  // それ以外は onSubmit で固定した submittedPayerRef。この画面でまだ送っていない間は、今の接続先のまま (従来どおり)。
-  const historyCustomer =
-    (isStandard ? standard.lastSubmittedFrom : undefined) ?? submittedPayerRef.current ?? address;
+  // 支払いを送ったウォレット (第 9 回レビュー A-4)。履歴と控えの支払者・注文の確認の署名をするウォレット (notifyPayer)
+  // の両方に使う。確定を待つ間に拡張機能で別のウォレットへ切り替えても、切り替えた先にしない (控えは pending →
+  // confirmed の昇格しか受けないので、後から直らない)。通常決済は hook が記録した送り主、relay は hook が署名に使った
+  // from (admission・注文の束縛の読み込みの await の間に切り替えると、クリックしたときの接続先と実際の送金元がずれる
+  // ため、実際の送金元を優先する)、それ以外は onSubmit で固定した submittedPayerRef。
+  const paidFrom =
+    (isStandard ? standard.lastSubmittedFrom : useRelay ? relay.lastSignedFrom : undefined) ??
+    submittedPayerRef.current;
+  // この画面でまだ送っていない間は、今の接続先のまま (従来どおり)。
+  const historyCustomer = paidFrom ?? address;
 
   // ローカル履歴 (Phase 2) — gasless / standard 全 5 transition を hook で集約。
   // note には description (なければ orderId) を入れ、CSV/UI で会計補助情報に使う。
@@ -1590,8 +1594,9 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
             }
           : null;
   // 注文を送る / お店に知らせる の中身。払ったウォレットは支払いを送った時点の接続先 (通常決済は hook が記録した
-  // 送り主) で、完了を見た時点の接続先ではない (途中で切り替えたウォレットに署名させない)。
-  const notifyPayer = (isStandard ? standard.lastSubmittedFrom : undefined) ?? submittedPayerRef.current;
+  // 送り主・relay は hook が署名に使った from) で、完了を見た時点の接続先ではない (途中で切り替えたウォレットに署名させない)。
+  // 履歴と控えの支払者と同じ値 (上の paidFrom・第 9 回レビュー A-4)。
+  const notifyPayer = paidFrom;
   const notifyFor = (txHash: string, payer: Address | undefined, chain: ChainSlug = chainSlug): NotifyShopData => {
     const explorer = chain === chainSlug ? explorerBase : blockExplorerUrl(deploymentForSlug(params.token, chain).chainId);
     return {

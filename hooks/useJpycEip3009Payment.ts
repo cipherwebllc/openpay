@@ -187,6 +187,12 @@ export function useJpycEip3009Payment(
   // 単一 ref で保持する。一度 ambiguous になった payload は on-chain success/revert が証明されるまで
   // 破棄せず、通常 mutate の再呼出でも同じ payload だけを POST して新署名を構造的に封鎖する。
   const retainedPayloadRef = useRef<RetainedRelayPayload | null>(null);
+  // この mount の最後の試みで署名を求めた (同じ payload の再送なら、その payload の) authorization の from
+  // (第 9 回レビュー A-4)。記録のために読ませるだけで、署名・POST・保存・エラー処理には使わない。呼び出し側は
+  // await を挟んで mutate することがあり (CheckoutForm の admission と注文の束縛の読み込み)、その間にウォレットを
+  // 切り替えると、クリックしたときの接続先と実際の送金元がずれる。履歴・控え・確認の署名のウォレットを実際の
+  // 送金元にそろえるために出す。署名の前に止まった試み (未接続・保留中の注文) では undefined。
+  const lastSignedFromRef = useRef<Address | undefined>(undefined);
   const storageRef = useRef<PaymentIntentStorage | null>(null);
   const deliveryStorageRef = useRef<typeof import('@/lib/orderDelivery') | null>(null);
   const orderDeliveryRef = useRef<OrderDelivery | null>(null);
@@ -536,6 +542,8 @@ export function useJpycEip3009Payment(
       order,
       orderLinkKey,
     }) => {
+      // 記録用の送金元は試みごとに決め直す (前の試みの from を、署名の前に止まった次の試みの記録へ持ち越さない)。
+      lastSignedFromRef.current = undefined;
       // A new orderId must not bypass a still-live payment to the same merchant.
       if (!retainedPayloadRef.current && isOrderPaymentHeld(merchant)) throw new Error('order_payment_pending');
       // 署名待ち中に UI 入力が変わっても wire 値を drift させないため、mutation 開始時の
@@ -548,6 +556,7 @@ export function useJpycEip3009Payment(
       // ある間は必ず同一 payload を再 POST して再署名を構造的に封鎖する。
       const retained = retainedPayloadRef.current;
       if (retained) {
+        lastSignedFromRef.current = retained.intent.from;
         if (retained.ambiguous || !retained.payload) {
           return resolveAmbiguousPayload(retained);
         }
@@ -603,6 +612,7 @@ export function useJpycEip3009Payment(
         throw new Error('wallet_not_connected');
       }
       const from = address as Address;
+      lastSignedFromRef.current = from;
       const nowSec = Math.floor(Date.now() / 1000);
       const validBefore = BigInt(nowSec + AUTHORIZATION_VALIDITY_WINDOW_SEC);
       const forwarder = jpycForwarderFor(chainId);
@@ -944,6 +954,8 @@ export function useJpycEip3009Payment(
     data,
     error,
     variables: mutationVariables,
+    // 記録用 (履歴・控え・確認の署名のウォレット)。署名・送信の判断には使わない (lastSignedFromRef の注記)。
+    lastSignedFrom: lastSignedFromRef.current,
     isPending,
     isSuccess,
     isError,
