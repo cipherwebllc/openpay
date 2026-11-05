@@ -20,7 +20,7 @@ import type { ExecuteResult } from '@/hooks/useCrossChainPayment';
 import { CrossChainRecoveryBurnBlockedError, type CrossChainProgress } from '@/lib/crossChain/execute';
 import type { PathOption } from '@/lib/crossChain/pathEnumerator';
 import { isForwardOnlyDestination, CROSS_CHAIN_DISABLED } from '@/lib/crossChain/config';
-import { ResumeStoreWriteError } from '@/lib/crossChain/resumeStore';
+import { ResumeStoreReadError, ResumeStoreWriteError } from '@/lib/crossChain/resumeStore';
 import { blockExplorerUrl } from '@/lib/chains';
 import { CrossChainSourceChooser } from './CrossChainSourceChooser';
 import { shortAddress } from '@/lib/format';
@@ -214,6 +214,13 @@ export function CrossChainHint(props: CrossChainHintProps) {
     />}
   </div>;
 
+  // A-1: CCTP の記録があるのに読めない間は、hook が親の直接払いのロックを保つ。何も出さずに止まった画面に
+  // しないよう、enabled / 残高 / option の gate より先に理由を出す (回復の選択肢があれば chooser の上に出す)。
+  const cctpUnreadableNotice = hook.cctpRecoveryUnreadable && !result ? (
+    <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">{t('cctpRecordUnreadable')}</p>
+  ) : null;
+  if (cctpUnreadableNotice && !isExecuting && !hasCctpRecovery) return cctpUnreadableNotice;
+
   // 成功 panel は path 完了時のみ。
   if (result) {
     const explorer = blockExplorerUrl(result.destChainId);
@@ -320,6 +327,7 @@ export function CrossChainHint(props: CrossChainHintProps) {
 
   return (
     <div className="space-y-3">
+      {cctpUnreadableNotice}
       <CrossChainSourceChooser
         options={pathOptions}
         selectedKey={selectedKey}
@@ -365,7 +373,8 @@ export function CrossChainHint(props: CrossChainHintProps) {
               : t('payWithSelected')}
         </button>
       )}
-      {error && !burnUnresolved && (
+      {/* A-1: 読めない記録での実行拒否は上の cctpUnreadableNotice が理由を出す (実行後の再走査で立つ)。 */}
+      {error && !burnUnresolved && !(error instanceof ResumeStoreReadError) && (
         <p className="text-xs text-red-700">
           {t('errorPrefix')}:{' '}
           {error instanceof ResumeStoreWriteError
@@ -373,7 +382,8 @@ export function CrossChainHint(props: CrossChainHintProps) {
               // 「安全側に倒した」旨を専用文言で伝える (生の例外文は買い手に無意味)。
               t('errorStorageBlocked')
             : error instanceof CrossChainRecoveryBurnBlockedError
-              ? // A-1: 回復専用の選択肢で送り直しが必要と判定された。送金せず、記録とロックは残す。
+              ? // A-1: 回復専用の選択肢で決定表が burn を返した (確かめられた事実ではない場合を含む)。
+                // 送金せず、記録とロックは残す。文言は「ここでは送金していない・前回の取引と残高を確かめる」だけ。
                 t('errorRecoveryBurnBlocked')
               : error.message}
         </p>

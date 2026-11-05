@@ -149,6 +149,48 @@ export function hasResumeState(k: ResumeSessionKey): boolean {
   }
 }
 
+/** A-1: 記録はあるのに読めない (getItem の例外・JSON の破損) ので、送金済みかを判定できない状態。 */
+export class ResumeStoreReadError extends Error {
+  constructor() {
+    super('cross-chain resume state を読み取れません');
+    this.name = 'ResumeStoreReadError';
+  }
+}
+
+export type ScannedResumeState =
+  | { kind: 'absent' }
+  | { kind: 'present'; state: ResumeState }
+  | { kind: 'unreadable' };
+/** A-1: Arc 以外の CCTP の走査用。既存の loadResumeState (読めない記録を「なし」にして決済開始を
+ *  止めない) は変えずに、「鍵はあるのに値が読めない・壊れている」を区別する。何の波及を断つ防御か:
+ *  読めない記録を「なし」と扱うと、burn 済みかもしれない請求で親の直接払いのロックが外れ、二重払いに
+ *  なる。storage 自体が使えない環境 (SSR・拒否) は記録も書けないので、従来どおり「なし」とする。 */
+export function readResumeStateForScan(k: ResumeSessionKey): ScannedResumeState {
+  const s = storage();
+  if (!s) return { kind: 'absent' };
+  const name = keyString(k);
+  let raw: string | null;
+  try {
+    raw = s.getItem(name);
+  } catch {
+    // 値が読めない。鍵が列挙に出る (= 記録がある) か、列挙もできなければ判定できないので読めない側に倒す。
+    try {
+      for (let i = 0; i < s.length; i++) if (s.key(i) === name) return { kind: 'unreadable' };
+      return { kind: 'absent' };
+    } catch {
+      return { kind: 'unreadable' };
+    }
+  }
+  if (raw === null) return { kind: 'absent' };
+  try {
+    const state = JSON.parse(raw) as ResumeState;
+    if (!state || typeof state !== 'object' || Array.isArray(state)) return { kind: 'unreadable' };
+    return { kind: 'present', state };
+  } catch {
+    return { kind: 'unreadable' };
+  }
+}
+
 export type DiscriminatedResumeState =
   | { kind: 'absent' }
   | { kind: 'present'; state: CctpResumeState }

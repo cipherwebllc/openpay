@@ -64,6 +64,8 @@ import {
   hasResumeState,
   loadResumeStateDiscriminated,
   loadResumeState,
+  readResumeStateForScan,
+  ResumeStoreReadError,
   saveResumeState,
   saveResumeStateStrict,
   type ResumeSessionKey,
@@ -120,6 +122,8 @@ export interface UseCrossChainPaymentReturn {
   isCommitted: boolean;
   /** A-1: 保存済み CCTP 記録の走査がこの請求でまだ終わっていない (親の直接払いを閉じたままにする)。 */
   cctpRecoveryScanning: boolean;
+  /** A-1: この請求の CCTP 記録はあるのに読めない (送金済みかを判定できない・ロックは保つ)。 */
+  cctpRecoveryUnreadable: boolean;
   result: ExecuteResult | undefined;
   error: Error | undefined;
   refetchBalances: () => Promise<unknown>;
@@ -306,18 +310,29 @@ export function useCrossChainPayment(
   const [cctpRecoveryTargets, setCctpRecoveryTargets] = useState<readonly CrossChainTarget[]>([]);
   // 走査が終わった scope。終わるまでは cctpRecoveryScanning として親のロックを保つ (Gateway の scanning と同じ)。
   const [cctpScannedScope, setCctpScannedScope] = useState('');
+  // 記録はあるのに読めない (getItem の例外・JSON の破損) source がある。送金済みかを判定できない。
+  const [cctpRecoveryUnreadable, setCctpRecoveryUnreadable] = useState(false);
   const scanCctpRecovery = useCallback(() => {
-    const found = forwardOnly ? [] : BUYER_SOURCE_TARGETS.filter((target) => {
-      if (target.chainId === args.targetChainId) return false;
-      const key = sessionKeyFor('cctp-v2', target.chainId);
-      return !!key && hasCommittedEvidence(loadResumeState<ResumeState>(key));
-    });
+    const found: CrossChainTarget[] = [];
+    let unreadable = false;
+    if (!forwardOnly) {
+      for (const target of BUYER_SOURCE_TARGETS) {
+        if (target.chainId === args.targetChainId) continue;
+        const key = sessionKeyFor('cctp-v2', target.chainId);
+        if (!key) continue;
+        const entry = readResumeStateForScan(key);
+        if (entry.kind === 'unreadable') unreadable = true;
+        else if (entry.kind === 'present' && hasCommittedEvidence(entry.state)) found.push(target);
+      }
+    }
     // 同じ集合なら参照を保つ (pathOptions と Chooser の選択を作り直さない)。
     setCctpRecoveryTargets((current) =>
       current.length === found.length && current.every((t, i) => t === found[i]) ? current : found);
     // committed は走査完了と同じ描画で立てる。D9 (pathOptions 経由) を待つと、走査完了 → 未 committed の
-    // 描画を 1 回挟み、親への通知が true → false → true になって直接払いの窓が開く。立てるだけで外さない。
-    if (found.length) setIsCommitted(true);
+    // 描画を 1 回挟み、親への通知が true → false → true になって直接払いの窓が開く。読めない記録も、
+    // 送金済みかを判定できないので同じくロックを立てる (二重払いを起こさない側)。立てるだけで外さない。
+    if (found.length || unreadable) setIsCommitted(true);
+    setCctpRecoveryUnreadable(unreadable);
     setCctpScannedScope(recoveryScope);
   }, [forwardOnly, sessionKeyFor, args.targetChainId, recoveryScope]);
   useEffect(() => { scanCctpRecovery(); }, [scanCctpRecovery]);
@@ -746,6 +761,13 @@ export function useCrossChainPayment(
         if (saved?.kind === 'unreadable') throw saved.error;
         assertGatewayTransferEnabled(saved?.kind === 'present' ? saved.state : undefined);
       }
+      if (option.kind === 'cctp-v2' && !forwardOnly) {
+        // A-1: この source の記録があるのに読めない (getItem の例外・JSON の破損) ときは、既存の
+        // loadResumeState がそれを「なし」にして初回 burn へ進むのを、state reset より前に止める
+        // (親の直接払いのロックと同じく、送金済みかを判定できない請求で新しい送金をさせない)。
+        const key = sessionKeyFor('cctp-v2', option.sourceChainId);
+        if (key && readResumeStateForScan(key).kind === 'unreadable') throw new ResumeStoreReadError();
+      }
       if (option.kind === 'cctp-v2' && option.recoveryOnly) {
         // A-1: 回復専用の選択肢は残高検査を経ていない。merchant の burn hash か marker が無いと
         // executor は決定表の「初回 burn」に進むので、保存が消えていたら (別タブで完了・削除等)
@@ -994,6 +1016,7 @@ export function useCrossChainPayment(
     isExecuting,
     isCommitted,
     cctpRecoveryScanning: !forwardOnly && !!account && args.requiredAtomic > 0n && cctpScannedScope !== recoveryScope,
+    cctpRecoveryUnreadable,
     result,
     error,
     refetchBalances: balancesQuery.refetch,

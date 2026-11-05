@@ -16,7 +16,7 @@ import { acceptForwardQuote, fetchCctpBurnFees, pollIrisAttestation } from '@/li
 import { requestAttestation } from '@/lib/crossChain/gateway';
 import { BUYER_SOURCE_TARGETS } from '@/lib/crossChain/config';
 import { __resetContractDeployedCacheForTest } from '@/lib/crossChain/deploycheck';
-import { saveResumeStateStrict, loadResumeState, loadGatewayReceipts, type ResumeSessionKey } from '@/lib/crossChain/resumeStore';
+import { saveResumeStateStrict, loadResumeState, loadGatewayReceipts, ResumeStoreReadError, type ResumeSessionKey } from '@/lib/crossChain/resumeStore';
 import { logPaymentEvent } from '@/lib/paymentLog';
 import fees from '../fixtures/cctp/arc-forwarding/fees-6-to-26-sandbox.json';
 
@@ -899,6 +899,57 @@ describe('A-1: CCTP recovery survives a source balance below the invoice', () =>
     expect(onExecutingChange.mock.calls.map(([locked]) => locked)).not.toContain(false);
   });
 
+  // 鍵の列挙はできて値の読取だけが失敗する (getItem の例外・JSON の破損)。既存の loadResumeState は
+  // それを「なし」にするが、送金済みかを判定できないので、親のロックは一度も外さずに理由を出す。
+  const breakSavedRecord = (mode: string) => {
+    if (mode === 'corrupt JSON') {
+      const name = Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i)!)
+        .find((k) => k.startsWith('openpay.xchain.resume.cctp-v2:'))!;
+      localStorage.setItem(name, '{broken');
+    } else {
+      vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new Error('denied'); });
+    }
+  };
+
+  it.each(['getItem throws', 'corrupt JSON'])('keeps the parent lock and explains why when the saved record is unreadable (%s)', async (mode) => {
+    balancesOf(500_000n);
+    breakSavedRecord(mode);
+    const onExecutingChange = vi.fn();
+    renderWithIntl(wrapper({ children: <CrossChainHint {...legacyArgs} token="usdc" enabled tokenAddress={account}
+      displayDecimals={6} directIsGasless={false} onExecutingChange={onExecutingChange} /> }));
+
+    expect(await screen.findByText(/前回の支払いの記録を読み取れない/)).toBeInTheDocument();
+    await act(async () => {});
+    expect(onExecutingChange).toHaveBeenCalled();
+    expect(onExecutingChange.mock.calls.map(([locked]) => locked)).not.toContain(false);
+    expect(executeCctpTransfer).not.toHaveBeenCalled();
+    expect(wallet.writeContract).not.toHaveBeenCalled();
+    expect(wallet.sendTransaction).not.toHaveBeenCalled();
+  });
+
+  it.each(['getItem throws', 'corrupt JSON'])('refuses a new burn from the normal option while its saved record is unreadable (%s)', async (mode) => {
+    balancesOf(3_000_000n);
+    wallet.writeContract.mockResolvedValue(hash);
+    wallet.sendTransaction.mockResolvedValue(burnHash);
+    breakSavedRecord(mode);
+    const { result } = renderHook(() => useCrossChainPayment(legacyArgs), { wrapper });
+    await waitFor(() => expect(result.current.cctpRecoveryUnreadable).toBe(true));
+    await waitFor(() => expect(cctpOptions(result.current.pathOptions)).toHaveLength(1));
+    expect(result.current.isCommitted).toBe(true);
+    const option = result.current.pathOptions.find((o) => o.kind === 'cctp-v2')!;
+    expect(option.recoveryOnly).toBeUndefined();
+
+    await act(async () => {
+      await expect(result.current.executeOption(option)).rejects.toBeInstanceOf(ResumeStoreReadError);
+    });
+
+    expect(executeCctpTransfer).not.toHaveBeenCalled();
+    expect(switchChainAsync).not.toHaveBeenCalled();
+    expect(wallet.writeContract).not.toHaveBeenCalled();
+    expect(wallet.sendTransaction).not.toHaveBeenCalled();
+    expect(result.current.isCommitted).toBe(true);
+  });
+
   it('does not offer the destination chain itself as a CCTP recovery source', async () => {
     expect(BUYER_SOURCE_TARGETS.some((t) => t.chainId === 80002)).toBe(true);
     localStorage.clear();
@@ -949,7 +1000,7 @@ describe('A-1: CCTP recovery survives a source balance below the invoice', () =>
     await user.click(screen.getByRole('button', { name: /確認したので、もう一度送金する/ }));
     await user.click(screen.getByRole('button', { name: '続きから支払う' }));
 
-    expect(await screen.findByText(/前回の送金は行われていないため、送り直しが必要です/)).toBeInTheDocument();
+    expect(await screen.findByText(/この画面からは新しい送金をしていません/)).toBeInTheDocument();
     expect(switchChainAsync).not.toHaveBeenCalled();
     expect(wallet.writeContract).not.toHaveBeenCalled();
     expect(wallet.sendTransaction).not.toHaveBeenCalled();
