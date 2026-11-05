@@ -37,5 +37,11 @@ export function licenseRpc(chainId: number, deadline = Infinity) {
   return createPublicClient({
     chain,
     transport: licenseTransport(chainId, deadline),
+    // CCIP-Read (EIP-3668) は追わない。license の確認・発行で読むのは自前の license contract (minter / licenseOf /
+    // paymentKeyOf / balanceOf) と JPYC の authorizationState だけで、offchain lookup は要らない。有効のままだと、
+    // mintFor の simulate で ERC-1155 の受け取り確認が payer (7702 委任済み EOA 等) の revert をそのまま返すため、
+    // payer が sender=license contract の OffchainLookup を返すと viem が任意の URL へサーバーから fetch する
+    // (購入署名の前・認証なしで届く SSRF・第 9 回レビュー C-1)。false なら revert はただの simulate 失敗になる。
+    ccipRead: false,
   });
 }
