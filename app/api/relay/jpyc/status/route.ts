@@ -32,6 +32,7 @@ import { readTextBodyCapped } from '@/lib/httpBodyCap';
 import { jpycForwarderFor } from '@/lib/relay/forwarderConfig';
 import { feeReceiverFor } from '@/lib/relay/forwarderSettleService';
 import { AUTHORIZATION_LOOKUP_WINDOW_SEC } from '@/lib/relay/validityWindow';
+import { claimNonceLookupNarrowSearch } from '@/lib/relay/statusLookupBudget';
 import {
   buildForwarderNonce,
   type ForwarderSettleParams,
@@ -55,7 +56,8 @@ type ParsedIntent = {
   transfer?: Pick<Eip3009Authorization, 'to' | 'value'>;
   // 署名の有効期限 (tx 探しを、署名が使われうる時刻のブロックに絞るため)。再読み込み後の照会 (nonce だけ) は
   // validBefore を送ったときだけ持つ (validAfter は知らないので、validBefore − 照会の窓で下限を作る)。
-  validity?: { validAfter: bigint; validBefore: bigint };
+  // allowNarrowSearch: 小分けの探索を始める前の関門 (署名なしの照会だけ・チェーン単位の予算)。
+  validity?: { validAfter: bigint; validBefore: bigint; allowNarrowSearch?: () => Promise<boolean> };
   // nonce lookup が任意で送る署名の期限。unused のとき「期限切れ未使用の証明」(expiry) をチェーンで取るためだけに使う。
   expiryValidBefore?: bigint;
   verifySignature: () => Promise<Address>;
@@ -290,24 +292,29 @@ function parseIntent(raw: Record<string, unknown>): ParsedIntent | null {
     ) {
       return null;
     }
+    const chainId = raw.chainId;
     const from = getAddress(raw.from as string);
+    const nonce = raw.nonce as Hex;
     const expiryValidBefore = raw.validBefore === undefined ? undefined : BigInt(raw.validBefore as string);
     // 第 9 回レビュー A-3: validBefore があれば tx 探しにも窓を渡す (無いと直近 10,000 ブロックの 1 回の検索が RPC の
     // 範囲制限で拒まれたとき throw → 期限まで indeterminate のままで、決済済みが完了にならない)。validAfter は照会に
-    // 無いので、署名が使われうる最も早い時刻 (validBefore − 照会の窓) を下限にする。validBefore は署名なしの値だが、
-    // 窓は検索の範囲を決めるだけで、見つけた tx は receiptMatchesIntent で照合する (外れた値は見つからない・
-    // 探しきれない = indeterminate に倒れ、settled にはならない)。
-    const lookupWindowSec = BigInt(AUTHORIZATION_LOOKUP_WINDOW_SEC);
+    // 無いので、署名が使われうる最も早い時刻 (validBefore − 照会の窓) を下限にする。探索は validAfter + 1 から探すので、
+    // 1 を引いて validBefore − 照会の窓 のブロックも含める (広がりすぎは maxWindowSec が止める)。validBefore は署名なしの
+    // 値で、期限は探索のヒントであり、成功の証拠ではない (最初の広い検索は validity を使わない・見つけた tx は
+    // receiptMatchesIntent で照合する)。小分けの探索は誰でも起こせるので、始める前にチェーン単位の予算を通す
+    // (lib/relay/statusLookupBudget.ts・鍵に validBefore は入れない)。
+    const lookupFloorSec = BigInt(AUTHORIZATION_LOOKUP_WINDOW_SEC) + 1n;
     const validity = expiryValidBefore === undefined
       ? undefined
       : {
-        validAfter: expiryValidBefore > lookupWindowSec ? expiryValidBefore - lookupWindowSec : 0n,
+        validAfter: expiryValidBefore > lookupFloorSec ? expiryValidBefore - lookupFloorSec : 0n,
         validBefore: expiryValidBefore,
+        allowNarrowSearch: () => claimNonceLookupNarrowSearch(chainId, from, nonce),
       };
     return {
-      chainId: raw.chainId,
+      chainId,
       from,
-      nonce: raw.nonce as Hex,
+      nonce,
       forwarder: jpycForwarderFor(raw.chainId) ?? undefined,
       expiryValidBefore,
       validity,

@@ -439,28 +439,30 @@ describe('POST /api/relay/jpyc/status', () => {
     const LOOKUP_WINDOW_SEC = 1230;
     const withValidBefore = (validBefore: string = VALID_BEFORE, nonce: Hex = NONCE) =>
       req({ ...nonceIntent(nonce), validBefore });
+    // 探索は validAfter + 1 から探すので、validAfter = validBefore − 1230 − 1 にして validBefore − 1230 のブロックから探す。
+    // allowNarrowSearch は署名なしの照会の小分けの探索を始める前の関門 (チェーン単位の予算・lib/relay/statusLookupBudget.ts)。
+    const nonceWindow = (validAfter: bigint, validBefore: bigint) => ({
+      validAfter,
+      validBefore,
+      maxWindowSec: LOOKUP_WINDOW_SEC,
+      allowNarrowSearch: expect.any(Function),
+    });
 
-    it('validBefore があれば窓 (validBefore − 1230 秒 〜 validBefore・上限 1230 秒) つきで tx を探す', async () => {
+    it('validBefore があれば窓 (validBefore − 1230 秒 〜 validBefore・上限 1230 秒) と予算の関門つきで tx を探す', async () => {
       h.used = true;
       h.logHash = LOG_HASH;
       const res = await POST(withValidBefore());
       expect(await res.json()).toEqual({ ok: true, state: 'settled', txHash: LOG_HASH });
-      expect(findAuthorizationUsedTransactionHash).toHaveBeenCalledWith(80002, TOKEN, FROM, NONCE, {
-        validAfter: 1800000000n - BigInt(LOOKUP_WINDOW_SEC),
-        validBefore: 1800000000n,
-        maxWindowSec: LOOKUP_WINDOW_SEC,
-      });
+      expect(findAuthorizationUsedTransactionHash).toHaveBeenCalledWith(
+        80002, TOKEN, FROM, NONCE, nonceWindow(1800000000n - BigInt(LOOKUP_WINDOW_SEC) - 1n, 1800000000n),
+      );
     });
 
     it('validBefore が窓より小さければ下限は 0 (負にしない)', async () => {
       h.used = true;
       h.logHash = LOG_HASH;
       await POST(withValidBefore('1000'));
-      expect(findAuthorizationUsedTransactionHash).toHaveBeenCalledWith(80002, TOKEN, FROM, NONCE, {
-        validAfter: 0n,
-        validBefore: 1000n,
-        maxWindowSec: LOOKUP_WINDOW_SEC,
-      });
+      expect(findAuthorizationUsedTransactionHash).toHaveBeenCalledWith(80002, TOKEN, FROM, NONCE, nonceWindow(0n, 1000n));
     });
 
     it('10,000 ブロックの検索が範囲制限で拒まれても、窓で見つけた tx の receipt を照合して settled', async () => {
@@ -481,11 +483,9 @@ describe('POST /api/relay/jpyc/status', () => {
       h.receipt.logs = [settledEvent()];
       const res = await POST(withValidBefore(VALID_BEFORE, FORWARDER_NONCE));
       expect(await res.json()).toEqual({ ok: true, state: 'settled', txHash: LOG_HASH });
-      expect(findAuthorizationUsedTransactionHash).toHaveBeenCalledWith(80002, TOKEN, FROM, FORWARDER_NONCE, {
-        validAfter: 1800000000n - BigInt(LOOKUP_WINDOW_SEC),
-        validBefore: 1800000000n,
-        maxWindowSec: LOOKUP_WINDOW_SEC,
-      });
+      expect(findAuthorizationUsedTransactionHash).toHaveBeenCalledWith(
+        80002, TOKEN, FROM, FORWARDER_NONCE, nonceWindow(1800000000n - BigInt(LOOKUP_WINDOW_SEC) - 1n, 1800000000n),
+      );
     });
 
     it('窓で見つけた tx でも receipt が対象の支払いと合わなければ settled にしない (照合は従来どおり)', async () => {
