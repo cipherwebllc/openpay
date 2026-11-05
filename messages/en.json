@@ -3662,7 +3662,7 @@
     "verifyPaidMeta": "{time} · block #{block}",
     "verifyPaidNote": "Order numbers are not recorded on the chain, so match the amount and time to the order before you ship.",
     "verifyNotToReceiver": "No JPYC reached your receiving wallet ({receiver}) in this transaction.",
-    "verifyNotFound": "Not found on {chain}. Check the receiving chain, wait a moment and try again.",
+    "verifyNotFound": "Not found on {chain}. Check the Tx Hash, wait a moment and try again.",
     "verifyExplorer": "View in Explorer",
     "verifyCheckedBefore": "You already checked this Tx Hash at {time}. Make sure you are not shipping two orders for the same payment.",
     "verify": {
@@ -3702,6 +3702,13 @@
     "cautionTitleVaries": "Ship after it reaches your wallet (the amount differs by chain)",
     "cautionChainAmount": "{chain}: {amount} JPYC",
     "verifyPaidChain": "Paid on {chain}",
-    "verifyUnreachable": "Could not reach {chains}. Wait a moment and try again."
+    "verifyUnreachable": "Could not reach {chains}. Wait a moment and try again.",
+    "verifyPending": "A payment of {amount} JPYC to your receiving wallet was found, but it is not final yet",
+    "verifyPendingNote": "A transaction that is not final can still disappear from the chain. Wait a moment, check again, and ship once it is final.",
+    "verifyFinalityUnchecked": "A payment of {amount} JPYC to your receiving wallet was found, but we could not check whether it is final",
+    "verifyFinalityUncheckedNote": "Could not ask the chain whether it is final. Wait a moment, check again, and ship once it is final.",
+    "verifyConfirmationUnchecked": "Could not check the confirmation signature. Please try again.",
+    "verifyCheckedLocal": "Reuse of the same Tx Hash is checked only against checks made on this device.",
+    "verifyCheckedUnavailable": "This device cannot keep a record, so reuse cannot be checked here. Make sure you are not shipping two orders for the same payment."
   }
 }

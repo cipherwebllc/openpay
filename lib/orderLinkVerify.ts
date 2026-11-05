@@ -13,10 +13,17 @@
 // 誰でも settle を呼べるので、他人の支払いと自分の支払いを 1 つの取引にまとめて自分の署名を通す手口がある
 // (2026-11-03 Codex P1) — 払った人が 1 人に決まらない取引は「確かめられない」にする。
 // 取引の送り主 (tx.from) は使わない: ガス代不要の支払いでは OpenPay の relayer で、払った人ではない。
+//
+// 確かめられたことだけを言う (第 9 回レビュー D-3・E-6・E-7): 「届いています」は取引が確定したときだけ (確定の読み方は
+// lib/jpyc/finality.ts)・使い回しはこの端末の記録で見ていて、記録できないときはそう伝える・署名の確認で RPC に
+// 問い合わせできなかったときは「他人の署名」ではなく「確かめられなかった」にする。
 
 import {
+  BaseError,
+  createClient,
   createPublicClient,
   erc20Abi,
+  ExecutionRevertedError,
   formatUnits,
   isAddressEqual,
   parseAbi,
@@ -25,41 +32,60 @@ import {
   TransactionReceiptNotFoundError,
   zeroAddress,
   type Address,
+  type Chain,
   type Hex,
   type Log,
+  type PublicActions,
   type PublicClient,
+  type Transport,
 } from 'viem';
+import { call, readContract, verifyMessage } from 'viem/actions';
 import { chainForSlug, chainObjectForId, transportForChain, type ChainSlug } from './chains';
+import { readJpycFinality } from './jpyc/finality';
 import { extractConfirmationSignature, orderConfirmationMessage, recoverableSignature } from './orderConfirmation';
 import { jpycForwarderFor } from './relay/forwarderConfig';
 import { deploymentForSlug } from './tokens';
 
 /**
  * 確認の署名の照合。verified = 払ったウォレットの署名・unsigned = 署名なし・mismatch = 払った人の署名ではない・
- * unverifiable = 署名はあるが、取引に複数の支払いが入っていて払った人を 1 人に決められない。
+ * unverifiable = 署名はあるが、取引に複数の支払いが入っていて払った人を 1 人に決められない・
+ * unchecked = コントラクトのウォレットとして確かめる問い合わせが RPC に届かなかった (合うとも合わないとも言わない)。
  */
-export type OrderConfirmationCheck = 'verified' | 'unsigned' | 'mismatch' | 'unverifiable';
+export type OrderConfirmationCheck = 'verified' | 'unsigned' | 'mismatch' | 'unverifiable' | 'unchecked';
+
+/** 受取ウォレットに届いた支払い (received は表示用の 10 進)。payer は払ったウォレット (分からなければ null)。 */
+export type ReceivedPayment = {
+  received: string;
+  blockNumber: bigint;
+  timestamp: number;
+  payer: Address | null;
+  confirmation: OrderConfirmationCheck;
+};
 
 export type OrderLinkPaymentCheck =
-  /** 受取ウォレットに届いた (received は表示用の 10 進)。payer は払ったウォレット (分からなければ null)。 */
-  | {
-      status: 'paid';
-      received: string;
-      blockNumber: bigint;
-      timestamp: number;
-      payer: Address | null;
-      confirmation: OrderConfirmationCheck;
-    }
+  /** 受取ウォレットに届き、取引が確定している (確定の読み方は lib/jpyc/finality.ts)。 */
+  | ({ status: 'paid' } & ReceivedPayment)
+  /** 受取ウォレットに届いているが、取引がまだ確定していない (チェーンの組み替えで消えることがある)。 */
+  | ({ status: 'pending' } & ReceivedPayment)
+  /** 受取ウォレットに届いているが、確定したかを確かめられなかった (`finalized` タグを読めない)。 */
+  | ({ status: 'finalityUnchecked' } & ReceivedPayment)
   /** 取引は成功しているが、受取ウォレット宛ての JPYC が無い (別の宛先・別のトークン)。 */
   | { status: 'notToReceiver' }
   /** 取引が失敗している (支払いは届いていない)。 */
   | { status: 'failed' }
-  /** この受取チェーンに無い (チェーン違い・まだ確定していない)。 */
+  /** この受取チェーンに無い (チェーン違い・まだブロックに入っていない)。 */
   | { status: 'notFound' }
   /** Tx Hash が読み取れない。 */
   | { status: 'invalid' }
   /** RPC に問い合わせできなかった。 */
   | { status: 'error' };
+
+/** 受取ウォレットに届いた支払いか (確定しているかは status で分かれる)。 */
+export function isReceivedPayment(
+  result: OrderLinkPaymentCheck,
+): result is Extract<OrderLinkPaymentCheck, ReceivedPayment> {
+  return result.status === 'paid' || result.status === 'pending' || result.status === 'finalityUnchecked';
+}
 
 // ちょうど 32 バイト。前後が 16 進の続き (確認の署名の頭 64 桁など) は Tx Hash として取らない。
 const TX_HASH = /(?<![0-9a-fA-Fx])0x[0-9a-fA-F]{64}(?![0-9a-fA-F])/;
@@ -78,22 +104,37 @@ function browserStorage(): Storage | null {
 }
 
 /**
+ * この端末の記録で見た、同じ支払いの使い回し。number = 前に確かめた時刻 (ms)・null = この端末では初めて・
+ * 'unavailable' = 記録を読めない・残せない (この端末では使い回しを確かめられない)。
+ */
+export type CheckedBefore = number | null | 'unavailable';
+
+/**
  * 届いたと確かめた支払いを記録し、前に確かめていればそのときの時刻 (ms) を返す (初めてなら null)。
- * localStorage が使えない環境では記録せず null (確かめる機能そのものは止めない・掟 13)。
+ * 記録を読めない・残せない環境では 'unavailable' を返し、「初めて」とは言わない (第 9 回レビュー E-6)。
+ * どちらでも例外は出さず、確かめた結果そのものは出す (記録の失敗を入金の確認に波及させない・掟 13)。
  */
 export function rememberCheckedPayment(
   input: { chain: ChainSlug; receiver: Address; hash: Hex; now: number },
   storage: Pick<Storage, 'getItem' | 'setItem'> | null = browserStorage(),
-): number | null {
-  if (!storage) return null;
+): CheckedBefore {
+  if (!storage) return 'unavailable';
   const key = `${input.chain}:${input.receiver.toLowerCase()}:${input.hash.toLowerCase()}`;
-  let checked: Record<string, number> = {};
+  let raw: string | null;
   try {
-    const raw = storage.getItem(CHECKED_KEY);
+    raw = storage.getItem(CHECKED_KEY);
+  } catch {
+    // 読めない保存領域: 前に確かめたかが分からない。書き込みもしない (読めない記録を上書きで消さない)。
+    return 'unavailable';
+  }
+  let checked: Record<string, number> = {};
+  let intact = true;
+  try {
     const parsed: unknown = raw ? JSON.parse(raw) : {};
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) checked = parsed as Record<string, number>;
+    else intact = false;
   } catch {
-    // 壊れた記録・読めない保存領域は空として扱い、下で作り直す (確かめる機能そのものは止めない・掟 13)。
+    intact = false;
   }
   const previous = typeof checked[key] === 'number' ? checked[key] : null;
   if (previous !== null) return previous;
@@ -106,9 +147,11 @@ export function rememberCheckedPayment(
   try {
     storage.setItem(CHECKED_KEY, JSON.stringify(Object.fromEntries(kept)));
   } catch {
-    // 満杯・使えない: 記録は諦め、確かめた結果はそのまま出す (掟 13)。
+    // 満杯・使えない: 次に同じ Tx Hash を貼られても気づけないので、それを画面で伝える。
+    return 'unavailable';
   }
-  return null;
+  // 壊れていた記録は作り直した (次からは見られる) が、今回は前に確かめたかが分からない。
+  return intact ? null : 'unavailable';
 }
 
 /** 貼られた文から最初の Tx Hash を取り出す (「お店に知らせる」の文や Explorer の URL をそのまま貼れる)。 */
@@ -172,13 +215,15 @@ type ReadClient = Pick<PublicClient, 'getTransactionReceipt' | 'getBlock' | 'ver
  * 確認の署名が候補のどれかのものか。先に ecrecover (EOA・7702 化した EOA もここで通る)、合わなければ
  * コントラクトのウォレット (ERC-1271/6492) として RPC で確かめる。viem の検証はコードのあるアドレスを 1271 に
  * 回すので、7702 の EOA を先に ecrecover で拾う (reference_viem_7702_erc7739_incompat)。
+ * 問い合わせが例外になったら (RPC に届かない・断られた) 'unchecked': 確かめられなかった署名を、一致とも
+ * 「他人の署名」とも言わない (第 9 回レビュー E-7)。
  */
 export async function checkOrderConfirmation(input: {
   client: Pick<PublicClient, 'verifyMessage'>;
   payer: Address;
   message: string;
   signature: Hex;
-}): Promise<'verified' | 'mismatch'> {
+}): Promise<'verified' | 'mismatch' | 'unchecked'> {
   try {
     const signer = await recoverMessageAddress({ message: input.message, signature: recoverableSignature(input.signature) });
     if (isAddressEqual(input.payer, signer)) return 'verified';
@@ -186,19 +231,81 @@ export async function checkOrderConfirmation(input: {
     // 65 バイトでない (コントラクトのウォレットの) 署名は ecrecover できない: 下の 1271 で確かめる。
   }
   try {
-    if (await input.client.verifyMessage({ address: input.payer, message: input.message, signature: input.signature })) {
-      return 'verified';
-    }
+    const valid = await input.client.verifyMessage({
+      address: input.payer,
+      message: input.message,
+      signature: input.signature,
+    });
+    return valid ? 'verified' : 'mismatch';
   } catch {
-    // RPC の失敗やコードの無いアドレスは「一致しない」に倒す (確かめられない署名を一致と言わない)。
+    return 'unchecked';
   }
-  return 'mismatch';
+}
+
+/** 確認の署名を確かめる問い合わせ (eth_call) が、取り消し以外で失敗した (RPC に届かない・断られた)。 */
+class ConfirmationCallError extends Error {}
+
+/** 問い合わせが取り消された (= 確かめるコントラクトが署名を受け付けなかった) か。 */
+function isExecutionReverted(error: unknown): boolean {
+  return error instanceof BaseError && error.walk((cause) => cause instanceof ExecutionRevertedError) !== null;
+}
+
+/** viem が包み直した失敗の中の ConfirmationCallError。 */
+function confirmationCallErrorIn(error: unknown): ConfirmationCallError | null {
+  if (error instanceof ConfirmationCallError) return error;
+  if (!(error instanceof BaseError)) return null;
+  const found = error.walk((cause) => cause instanceof ConfirmationCallError);
+  return found instanceof ConfirmationCallError ? found : null;
+}
+
+/**
+ * 確認の署名をコントラクトのウォレット (ERC-1271/6492/8010) として確かめる関数。確かめ方 (ERC-6492 の validator・
+ * ecrecover の予備) は viem の verifyMessage のまま。ただし viem は、確かめる問い合わせ (eth_call) の失敗を、
+ * 取り消し (署名を受け付けない) も RPC に届かない・断られたのもまとめて false にする。そのままだと RPC の失敗が
+ * 「他人の署名」(mismatch) に見えるので、取り消し以外の失敗は例外のまま verifyMessage の外へ出す (第 9 回レビュー E-7)。
+ * お客様が決めたコントラクトのウォレットが、お店のブラウザを外の URL へ取りに行かせないよう CCIP-Read は使わない
+ * (第 9 回レビュー C-1 と同じ)。
+ */
+function confirmationVerifier(chain: Chain, transport: Transport): ReadClient['verifyMessage'] {
+  const client = createClient({ chain, transport, ccipRead: false })
+    .extend((base) => ({
+      call: async (args: Parameters<typeof call>[1]) => {
+        try {
+          return await call(base, args);
+        } catch (error) {
+          if (isExecutionReverted(error)) throw error;
+          throw new ConfirmationCallError('order confirmation call failed', { cause: error });
+        }
+      },
+    }))
+    .extend((withCall) => {
+      // ERC-8010 の経路は readContract が呼び出しの失敗を包み直すので、包みを外して verifyMessage の外へ出す。
+      const strictReadContract: PublicActions<Transport, Chain>['readContract'] = async (args) => {
+        try {
+          return await readContract(withCall, args);
+        } catch (error) {
+          throw confirmationCallErrorIn(error) ?? error;
+        }
+      };
+      return { readContract: strictReadContract };
+    });
+  return (args) => verifyMessage(client, args);
+}
+
+/** 入金を確かめるときに読む RPC (受取の取引・ブロック・確認の署名)。transport はテストで差し替える。 */
+export function orderLinkReadClient(chain: Chain, transport: Transport): ReadClient {
+  const client = createPublicClient({ chain, transport });
+  return {
+    getTransactionReceipt: client.getTransactionReceipt,
+    getBlock: client.getBlock,
+    verifyMessage: confirmationVerifier(chain, transport),
+  };
 }
 
 function defaultClient(chain: ChainSlug): ReadClient | null {
   const chainObject = chainObjectForId(chainForSlug(chain).id);
   if (!chainObject) return null;
-  return createPublicClient({ chain: chainObject, transport: transportForChain(chainObject.id) });
+  return orderLinkReadClient(chainObject, transportForChain(chainObject.id));
 }
 
 export async function checkOrderLinkPayment(input: {
@@ -218,7 +325,15 @@ export async function checkOrderLinkPayment(input: {
     if (receipt.status !== 'success') return { status: 'failed' };
     const received = receivedByReceiver(receipt.logs, token, input.receiver);
     if (received === 0n) return { status: 'notToReceiver' };
-    const block = await client.getBlock({ blockNumber: receipt.blockNumber });
+    const [block, finality] = await Promise.all([
+      client.getBlock({ blockNumber: receipt.blockNumber }),
+      // 確定する前の取引はチェーンの組み替えで消えることがある (第 9 回レビュー D-3)。
+      readJpycFinality({
+        slug: input.chain,
+        blockNumber: receipt.blockNumber,
+        readFinalizedBlock: () => client.getBlock({ blockTag: 'finalized' }),
+      }),
+    ]);
     const payer = paymentPayer(receipt.logs, token, input.receiver, jpycForwarderFor(chainForSlug(input.chain).id));
     const signature = extractConfirmationSignature(input.text);
     const confirmation: OrderConfirmationCheck = !signature
@@ -231,14 +346,17 @@ export async function checkOrderLinkPayment(input: {
             message: orderConfirmationMessage({ chain: input.chain, shop: input.receiver, txHash: hash }),
             signature,
           });
-    return {
-      status: 'paid',
+    const payment: ReceivedPayment = {
       received: formatUnits(received, decimals),
       blockNumber: receipt.blockNumber,
       timestamp: Number(block.timestamp),
       payer,
       confirmation,
     };
+    // 「届いています」(paid) は確定した取引だけ。確定を確かめられないときも paid にしない。
+    if (finality.finalized === true) return { status: 'paid', ...payment };
+    if (finality.finalized === false) return { status: 'pending', ...payment };
+    return { status: 'finalityUnchecked', ...payment };
   } catch (error) {
     // まだ確定していない・別のチェーンの取引は「見つからない」と伝える (届いたとは言わない)。
     if (error instanceof TransactionReceiptNotFoundError) return { status: 'notFound' };

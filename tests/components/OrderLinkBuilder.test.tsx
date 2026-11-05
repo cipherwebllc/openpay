@@ -27,6 +27,12 @@ vi.mock('wagmi', () => ({
 // 受取チェーンが 2 つ以上のときの受取ウォレットの確認 (チェーンを読む部分は tests/hooks で見る)。
 const chainCheck = vi.hoisted(() => ({ value: { status: 'idle' } as { status: string; chains?: string[] } }));
 vi.mock('@/hooks/useReceiverChainCheck', () => ({ useReceiverChainCheck: () => chainCheck.value }));
+// 入金を確かめる欄がどのチェーンを探すか (チェーンを読む部分は tests/lib/orderLinkVerify で見る)。
+const verifyCheck = vi.hoisted(() => vi.fn());
+vi.mock('@/lib/orderLinkVerify', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/orderLinkVerify')>();
+  return { ...actual, checkOrderLinkPaymentOnChains: verifyCheck };
+});
 const fetchSpy = vi.hoisted(() => vi.fn());
 
 import { useAccount } from 'wagmi';
@@ -67,6 +73,7 @@ async function copyLink() {
 
 beforeEach(() => {
   chainCheck.value = { status: 'idle' };
+  verifyCheck.mockReset();
   localStorage.clear();
   resolved.value = { data: null, isFetching: false, error: null };
   vi.mocked(useAccount).mockReturnValue({
@@ -333,6 +340,37 @@ describe('OrderLinkBuilder', () => {
     fillItem();
     expect((await screen.findAllByText(/コントラクトのウォレットです。チェーンごとに持ち主が違うことがあるので/)).length).toBeGreaterThan(0);
     expect(screen.queryByRole('link', { name: '開いて確かめる' })).toBeNull();
+  });
+
+  // 第 9 回レビュー D-4: 受取チェーンを変えた後でも、前のチェーンで払われた注文を「見つかりませんでした」にしない。
+  it('受取チェーンを Kaia だけにしていても、入金を確かめる欄は注文リンクの全チェーンを探し、Polygon の支払いを見つける', async () => {
+    saved({ chains: ['kaia'] });
+    // Polygon にだけある取引として答える (探すチェーンに Polygon が無ければ見つからない)。
+    verifyCheck.mockImplementation(async ({ chains }: { chains: readonly string[] }) =>
+      chains.includes('polygon')
+        ? {
+            chain: 'polygon',
+            result: {
+              status: 'paid',
+              received: '3465',
+              blockNumber: 123n,
+              timestamp: 1_762_000_000,
+              payer: null,
+              confirmation: 'unsigned',
+            },
+            unreachable: [],
+          }
+        : { chain: null, result: { status: 'notFound' }, unreachable: [] },
+    );
+    render(<OrderLinkBuilder />);
+    await screen.findByRole('button', { name: '設定' });
+    fireEvent.change(screen.getByLabelText('お客様から届いた文か Tx Hash'), { target: { value: `0x${'ab'.repeat(32)}` } });
+    fireEvent.click(screen.getByRole('button', { name: '確かめる' }));
+    expect(await screen.findByText('受取ウォレットに 3,465 JPYC 届いています')).toBeInTheDocument();
+    expect(screen.getByText(`${chainForSlug('polygon').name} で払われています`)).toBeInTheDocument();
+    expect(verifyCheck).toHaveBeenCalledWith(
+      expect.objectContaining({ chains: expect.arrayContaining(['polygon', 'kaia']), receiver: TO }),
+    );
   });
 
   it('前の版の設定 (受取チェーン 1 つの chain) を読み、そのチェーンのリンクを作る', async () => {
