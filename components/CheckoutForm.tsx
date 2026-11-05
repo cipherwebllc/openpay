@@ -16,7 +16,6 @@ import { formatUnits, type Address } from 'viem';
 import { useAccount } from 'wagmi';
 import { ConnectButton } from './ConnectButton';
 import { breakdownRow } from './PaymentBreakdownRows';
-import { OnrampCta } from './OnrampCta';
 import { ResultRow } from './ResultRow';
 import { SmartAccountFallbackBanner } from './SmartAccountFallbackBanner';
 import { RelayFallbackBanner } from './RelayFallbackBanner';
@@ -26,6 +25,7 @@ import { RelayStatusBanners } from './checkout/RelayStatusBanners';
 // 送信後の pending / unknown の枠 (First Load JS から外す lazy wrapper・RelayStatusBanners と 1 つを共有する)。
 import { PaymentStatusPanel } from './checkout/paymentStatusPanelLazy';
 import { WrongChainSwitch } from './checkout/WrongChainSwitch';
+import { WalletBalance } from './checkout/WalletBalance';
 import { shopContactLabel } from '@/lib/shopContact';
 import { rememberOrderPayment, type RememberedOrderPayment } from '@/lib/orderConfirmation';
 import { findRememberedOrderPayment } from '@/lib/orderPaidLookup';
@@ -1938,23 +1938,13 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
             />
           )}
 
-          {isConnected && !wrongChain && balance !== undefined && (
-            <p className="text-xs text-slate-500">
-              {t('balanceLabel')}{' '}
-              <span className="font-mono">{fmt(balance)}</span>
-            </p>
-          )}
-
-          {insufficientBalance && (
-            <div className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">
-              <p>
-                {t('insufficientBalance', {
-                  amount: fmt(totalCustomerOutflow),
-                })}
-              </p>
-              <OnrampCta token={params.token} namespace="CheckoutForm" />
-            </div>
-          )}
+          {/* 残高の行と残高不足の案内。表示だけの部品で、出す条件と額の表記はここで決めて渡す (null なら出さない・
+              第 9 回レビュー F-04)。 */}
+          <WalletBalance
+            balanceText={isConnected && !wrongChain && balance !== undefined ? fmt(balance) : null}
+            requiredAmountText={insufficientBalance ? fmt(totalCustomerOutflow) : null}
+            token={params.token}
+          />
 
           {params.customerEmail && (
             <p className="text-[11px] text-slate-500">
