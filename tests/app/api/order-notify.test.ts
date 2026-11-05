@@ -1600,4 +1600,59 @@ describe('E-1: the per-tx limiter is keyed by txHash and IP bucket', () => {
     expect(txLimiterKeys()).toEqual([txLimiterKey('none')]);
     expect(verifySpy).not.toHaveBeenCalled();
   });
+
+  it('IPv6 は /64 で 1 つの枠: 同じ /64 の別ホストは 6 回目で 429・別の /64 は通る', async () => {
+    // hashIpBucket (/64) でなく hashIp (/128) にすると、ホスト部を替えるだけで同じ txHash を
+    // 無制限に送れる。/64 を 1 つの利用者として数えることを固定する。
+    hold.claimValue = null;
+    for (let i = 1; i <= 5; i++) {
+      expect((await POST(req(goodBody(), '?h=alice', `2001:db8:1:2::${i}`))).status).toBe(200);
+    }
+    expect((await POST(req(goodBody(), '?h=alice', '2001:db8:1:2:ffff::6'))).status).toBe(429);
+    expect((await POST(req(goodBody(), '?h=alice', '2001:db8:1:3::1'))).status).toBe(200);
+    expect(txLimiterKeys()).toEqual([
+      txLimiterKey(ipBucket('2001:db8:1:2::')),
+      txLimiterKey(ipBucket('2001:db8:1:3::')),
+    ]);
+  });
+
+  it('tx の枠で拒否された要求は subnet の backstop を数えない (2 つの limiter の順)', async () => {
+    hold.claimValue = null;
+    const subnetCounters = () =>
+      [...hold.rateCounters.entries()].filter(([key]) => key.startsWith('rl:read:order:'));
+    for (let i = 0; i < 5; i++) {
+      expect((await POST(req(goodBody(), '?h=alice', IP_A))).status).toBe(200);
+    }
+    expect(subnetCounters()).toEqual([[expect.stringMatching(/^rl:read:order:198\.51\.100\.0\/24:\d+$/), 5]]);
+    // tx の枠 (先) で 429 になった要求は、subnet の枠 (後) に届かない。
+    expect((await POST(req(goodBody(), '?h=alice', IP_A))).status).toBe(429);
+    expect((await POST(req(goodBody(), '?h=alice', IP_A))).status).toBe(429);
+    expect(subnetCounters()).toEqual([[expect.stringMatching(/^rl:read:order:198\.51\.100\.0\/24:\d+$/), 5]]);
+  });
+
+  it('ORDER_BIND_ENFORCE=ON: IP A からの不正な通知 5 回の後でも、IP B の正当な binding で登録できる', async () => {
+    vi.stubEnv('ENABLE_ORDER_BIND_ENFORCE', 'true');
+    hold.forwarder = BIND_FORWARDER;
+    const f = bindingFixture('free', {
+      ...goodBody({ statusToken: STATUS_TOKEN }),
+      handle: 'alice',
+      tokenAddress: resolveDeployment('jpyc', 80002)!.address,
+    });
+    hold.verify = { ok: true, value: 5000n * JPYC, receiptLogs: f.logs };
+    // 攻撃者は secret を知らない: 束縛なし (ENFORCE で 422) と、secret を替えた束縛 (422) を交互に送る。
+    const { bind: _bind, ...unbound } = f.body;
+    const forged = { ...f.body, bind: { ...f.bind, secret: `0x${'00'.repeat(32)}` } };
+    for (let i = 0; i < 5; i++) {
+      const res = await POST(req(i % 2 === 0 ? unbound : forged, '?h=alice', IP_A));
+      expect(res.status).toBe(422);
+    }
+    expect((await POST(req(f.body, '?h=alice', IP_A))).status).toBe(429);
+    expect(hold.listValues).toEqual([]);
+
+    const res = await POST(req(f.body, '?h=alice', IP_B));
+    expect(res.status).toBe(200);
+    expect(latestStoredOrder()).toMatchObject({ orderId: f.order.orderId, txHash: f.body.txHash });
+    expect(latestStoredOrder().bindingDigest).toMatch(/^0x[0-9a-f]{64}$/);
+    expect(latestStoredOrder()).not.toHaveProperty('bindingMissing');
+  });
 });
