@@ -1610,6 +1610,91 @@ export const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
       'ネットスターズ公式ニュース一覧で再確認: 2026-09-11 の Kaia MOU 以降、ステーブルコインの発表なし (その後の 9/30 の Stripe と 10/06 の teppay はコード決済の話)。Stablecoin Pay の稼働日・手数料・対応チェーンの変更は未公表のまま。',
     sourceUrl: 'https://www.netstars.co.jp/news/',
   },
+  {
+    // 年率と期間 (3 つのコース) は書かない: 出典のとおり募集状況やマーケット環境等で変わる場合があり、利回りの案内にも読まれるため。
+    // 残高の公表値だけを事実として残す。
+    date: '2026-11-02',
+    collectedAt: '2026-11-05',
+    scopes: ['jpyc-services'],
+    slug: 'jpysc',
+    changeType: 'updated',
+    changeCategory: 'update',
+    summary:
+      'SBI VC Trade said that, as of 2026-11-02, the balance of its JPYSC Lending service (customers lend their JPYSC to SBI VC Trade for a fee) had passed 10 billion yen and its total JPYSC balance (on-chain plus lending) had passed 30 billion yen; JPYSC is handled only in its VCTRADE service, not BITPOINT.',
+    summaryJa:
+      'SBI VC トレードが、2026-11-02 時点で「JPYSC レンディング (貸コイン)」(保有する JPYSC を同社に貸し出し、賃借料を受け取るサービス) の残高が 100 億円、JPYSC の取扱残高 (オンチェーンの残高とレンディングの残高の合計) が 300 億円を超えたと発表。取扱いは VCTRADE サービスだけで、BITPOINT サービスは対象外。',
+    sourceUrl: 'https://www.sbigroup.co.jp/news/2026/1102_16704.html',
+  },
+  {
+    date: '2026-11-05',
+    collectedAt: '2026-11-05',
+    scopes: ['jpyc-services'],
+    slug: 'coincheck',
+    changeType: 'verified',
+    assets: ['USDC'],
+    summary:
+      'Re-verified against the FSA registry of Electronic Payment Instruments Exchange Service Providers (still as of 2026-08-27): two registrants, SBI VC Trade (No. 00001) and Coincheck (No. 00002, USDC); no new registration.',
+    summaryJa:
+      '金融庁の電子決済手段等取引業者登録一覧 (令和 8 年 8 月 27 日現在のまま) で再確認: 登録は SBI VC トレード (第00001号) とコインチェック (第00002号・USDC) の 2 社で、新規登録なし。',
+    sourceUrl: 'https://www.fsa.go.jp/menkyo/menkyoj/denshikessaisyudan.pdf',
+  },
+  {
+    date: '2026-11-05',
+    collectedAt: '2026-11-05',
+    scopes: ['stablecoin-payments'],
+    provider: 'HashPort (Osaka Pref. subsidy)',
+    changeType: 'verified',
+    assets: ['JPYC', 'USDC'],
+    summary:
+      'Re-verified on the Osaka Prefecture page (last updated 2026-08-26, unchanged) and its award list: HashPort pilot schedule (an assumed one week or more between January and March 2027) unchanged.',
+    summaryJa:
+      '大阪府公式ページ (更新日は 2026-08-26 のまま) と交付決定事業一覧で再確認: HashPort の実証の予定 (2027 年 1〜3 月の間で 1 週間以上を想定) に変更なし。',
+    sourceUrl:
+      'https://www.pref.osaka.lg.jp/o020060/kikaku/osaka-kokusaikinyu/senkuteki_hojokin.html',
+  },
+  {
+    date: '2026-11-05',
+    collectedAt: '2026-11-05',
+    scopes: ['stablecoin-payments'],
+    provider: 'Mina Wallet / Sumitomo Mitsui Card (Osaka Pref. subsidy)',
+    changeType: 'verified',
+    assets: ['JPYC', 'USDC'],
+    summary:
+      'Re-verified on the Osaka Prefecture page (last updated 2026-08-26, unchanged) and its award list: Mina Wallet / Sumitomo Mitsui Card pilot schedule (around October 2026 to February 2027, a few days to about a month) unchanged.',
+    summaryJa:
+      '大阪府公式ページ (更新日は 2026-08-26 のまま) と交付決定事業一覧で再確認: マイナウォレット / 三井住友カードの実証の予定 (2026 年 10 月〜2027 年 2 月頃の間で数日〜1 か月程度) に変更なし。',
+    sourceUrl:
+      'https://www.pref.osaka.lg.jp/o020060/kikaku/osaka-kokusaikinyu/senkuteki_hojokin.html',
+  },
+  {
+    date: '2026-11-05',
+    collectedAt: '2026-11-05',
+    scopes: ['stablecoin-payments'],
+    provider: 'Mi&T (Osaka Pref. subsidy)',
+    changeType: 'verified',
+    assets: ['JPYC'],
+    // 府のページと採択一覧 (PDF) にあるのは実施時期と規模だけ。手数料 1.0% の出典は Mi&T の自社リリース (8/31) なので、
+    // この再確認の文には書かない (府のページで確かめたことにしない)。
+    summary:
+      'Re-verified on the Osaka Prefecture page (last updated 2026-08-26, unchanged) and its award list: Mi&T pilot schedule (mid-November 2026 to mid-March 2027, about five shops) unchanged.',
+    summaryJa:
+      '大阪府公式ページ (更新日は 2026-08-26 のまま) と交付決定事業一覧で再確認: Mi&T の実証の予定 (2026 年 11 月中旬〜2027 年 3 月中旬・5 店舗程度) に変更なし。',
+    sourceUrl:
+      'https://www.pref.osaka.lg.jp/o020060/kikaku/osaka-kokusaikinyu/senkuteki_hojokin.html',
+  },
+  {
+    date: '2026-11-05',
+    collectedAt: '2026-11-05',
+    scopes: ['stablecoin-payments'],
+    provider: 'NetStars Stablecoin Pay',
+    changeType: 'verified',
+    assets: ['JPYC', 'USDT'],
+    summary:
+      'Re-verified on the NetStars news list: no stablecoin announcement after the 2026-09-11 Kaia MOU (the later items, Stripe on 2026-09-30 and teppay on 2026-10-06, are about code payments, and the 2026-11-02 item is a self-order system for a university cafeteria); no launch date, fee or chain change published for Stablecoin Pay.',
+    summaryJa:
+      'ネットスターズ公式ニュース一覧で再確認: 2026-09-11 の Kaia MOU 以降、ステーブルコインの発表なし (その後の 9/30 の Stripe と 10/06 の teppay はコード決済、11/02 は大学の学生食堂へのセルフオーダーの導入の話)。Stablecoin Pay の稼働日・手数料・対応チェーンの変更は未公表のまま。',
+    sourceUrl: 'https://www.netstars.co.jp/news/',
+  },
 ];
 
 // ディレクトリ初期公開日。baseline の 'added' はこの固定日に立てる — entry.updatedAt 由来に

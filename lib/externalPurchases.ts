@@ -24,7 +24,7 @@ export type ExternalPurchase = {
 export const FIRST_PARTY_WALLETS: readonly string[] = firstPartyWallets.map(({ address }) => address);
 
 /** 集計時点 (週次更新で進める)。 */
-export const EXTERNAL_PURCHASES_AS_OF = '2026-11-01';
+export const EXTERNAL_PURCHASES_AS_OF = '2026-11-04';
 
 export const EXTERNAL_PURCHASES: readonly ExternalPurchase[] = [
   { chain: 'base', date: '2026-07-19', amount: '0.01', asset: 'USDC', payer: '0x7e571e959cc7c75ccdd2eac24f8775ea2eaa2f09', tx: '0xdea66bfcd77d7c439774b344b64b5750b111b71a3fb23eaee6c24a6947eeed53' },
@@ -99,6 +99,10 @@ export const EXTERNAL_PURCHASES: readonly ExternalPurchase[] = [
   { chain: 'base', date: '2026-10-27', amount: '0.01', asset: 'USDC', payer: '0x6031551fc1fe26710fe4b20316d5dc91d9d6c2d1', tx: '0x18957f73b9a6870c11f48e339e777896858f78ce583ca75df1f20e9295c6604a' },
   { chain: 'base', date: '2026-10-29', amount: '0.001', asset: 'USDC', payer: '0xa1d1c0cf717402ff3651aa4873ccf96410b01978', tx: '0xeaa59f103396f5446ab6d31e0de4ec7bd6ae56d01a87702cd16027001cba2357' },
   { chain: 'base', date: '2026-11-01', amount: '0.01', asset: 'USDC', payer: '0x5a5329b7806de49cf584f499561767ee51baf357', tx: '0x5e93b256c963e2e7884b592a4b2a6e24da359def6831cb04f6f5c2b5164a635b' },
+  { chain: 'base', date: '2026-11-02', amount: '0.001', asset: 'USDC', payer: '0x9d42eba8868cfd38a50ba615ee0cf903f1bbece9', tx: '0xf0f96b9c2fec3869d64875debb51555965cd79b434a63e8f4321dfd32acc169c' },
+  { chain: 'base', date: '2026-11-02', amount: '0.002', asset: 'USDC', payer: '0x9a1066feec0822996875a28a3d4e058175af6c92', tx: '0xd58b4e3bd908760569e6ae762d55c5e5bb839a8a18db054771445dbf8f30ca6f' },
+  { chain: 'base', date: '2026-11-02', amount: '0.006', asset: 'USDC', payer: '0x9a1066feec0822996875a28a3d4e058175af6c92', tx: '0xefccc98cdb9d06e6fcfd5d5897602e2d50bbb7af94b44fe73c284f8e677de7e6' },
+  { chain: 'base', date: '2026-11-03', amount: '0.01', asset: 'USDC', payer: '0x3ed93a7b87832f04a91137cacb273d39295e430e', tx: '0x6dca5b76d0a8f4dd397a880bb3299126533ad5f3f6a0286007ea2c42521cfa38' },
 ];
 
 export function externalPurchaseSummary(rows: readonly ExternalPurchase[] = EXTERNAL_PURCHASES): {
