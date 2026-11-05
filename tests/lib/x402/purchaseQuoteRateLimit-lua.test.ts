@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { toHex } from 'viem';
+import { getAddress, toHex, type Address } from 'viem';
 import {
   closeRedisLuaEngine,
   createFakeRedisStore,
@@ -216,5 +216,21 @@ describe('E-2: the wallet bucket is keyed by payer and IP', () => {
     expect(await quoteFor(OTHER_RESOURCE, null)).toBe(false);
     expect(await quote(VICTIM, IP_B)).toBe(true);
     expect(h.store!.strings.get(walletKey(payer(VICTIM), null))).toBe(String(PURCHASE_QUOTE_WALLET_MAX + 2));
+  });
+
+  it('counts the checksum and lowercase forms of one payer in the same wallet bucket', async () => {
+    // 他の fixture は数字だけのアドレスなので、英字を含むアドレスで大小文字の正規化を固定する。
+    // (?payer= の表記を変えるだけで同じ payer の枠を増やせないこと)
+    const lower = ('0x' + 'ab'.repeat(20)) as Address;
+    const checksum = getAddress(lower);
+    expect(checksum).not.toBe(lower);
+    const quoteAs = (address: Address) =>
+      checkPurchaseQuoteRateLimit({ payer: address, resourceId: RESOURCE, ipHash: IP_A });
+    for (let n = 0; n < PURCHASE_QUOTE_WALLET_MAX; n++) {
+      expect(await quoteAs(n % 2 === 0 ? checksum : lower)).toBe(true);
+    }
+    expect(await quoteAs(checksum)).toBe(false);
+    expect(await quoteAs(lower)).toBe(false);
+    expect(h.store!.strings.get(walletKey(lower, IP_A))).toBe(String(PURCHASE_QUOTE_WALLET_MAX + 2));
   });
 });
