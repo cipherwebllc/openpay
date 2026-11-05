@@ -38,6 +38,20 @@ export type NewsItem = {
 // 表示順を強制しないが、可読性のため宣言時点でも新しい順に並べる。
 export const NEWS_ITEMS: readonly NewsItem[] = [
   {
+    id: 'upbond-wallet-2026-11-06',
+    date: '2026-11-06',
+    category: 'feature',
+    title: {
+      ja: '「ウォレットを選ぶ」に UPBOND Wallet を加えました',
+      en: 'UPBOND Wallet added to “Choosing a wallet”',
+    },
+    body: {
+      ja: 'アプリを入れずにブラウザで使える UPBOND Wallet を、ガイドの「ウォレットを選ぶ」に加えました。お店の受け取り用に手軽で、JPYC のガス代不要の支払いにも使えます。決済QR とレジの受取欄が空のときは、「ウォレットをお持ちでない方へ」から案内を開けます。',
+      en: 'We added UPBOND Wallet, which runs in your browser with no app to install, to “Choosing a wallet” in the guide. It is an easy option for receiving payments at your shop, and it also works for JPYC payments with no gas fee. When the receiving wallet field in Payment QR or Register is empty, “Don\'t have a wallet yet?” opens the guide.',
+    },
+    link: { href: '/guide/wallet#store-wallet', labelJa: 'ウォレットの選び方を見る', labelEn: 'See how to choose a wallet' },
+  },
+  {
     id: 'order-link-2026-11-04',
     date: '2026-11-04',
     category: 'feature',

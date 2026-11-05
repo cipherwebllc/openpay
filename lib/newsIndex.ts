@@ -9,6 +9,7 @@
 export type NewsIndexEntry = { id: string; date: string };
 
 export const NEWS_INDEX: readonly NewsIndexEntry[] = [
+  { id: 'upbond-wallet-2026-11-06', date: '2026-11-06' },
   { id: 'order-link-2026-11-04', date: '2026-11-04' },
   { id: 'store-product-page-2026-10-28', date: '2026-10-28' },
   { id: 'agent-skill-2026-10-24', date: '2026-10-24' },
