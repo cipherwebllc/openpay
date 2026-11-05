@@ -173,7 +173,7 @@ const JA: WalletGuideContent = {
 
   storeTitle: 'お店の受け取り用',
   storeBody:
-    '受け取るだけなら、アプリを入れずにブラウザで使える UPBOND Wallet も使えます。LINE・Google のアカウントやパスキーでログインでき、JPYC EX とつないで JPYC の発行・償還もできます。',
+    'お店の受け取り用には、アプリを入れずにブラウザで使える UPBOND Wallet が手軽です。LINE・Google のアカウントやパスキーでログインでき、JPYC EX とつないで JPYC の発行・償還もできます。',
   storeNote:
     '受け取るチェーンは Polygon を選んでください。売上がたまったら、マイナウォレットなど普段のウォレットへ移してください (UPBOND Wallet から送るときは、ガス代の POL が要ります)。',
   storeLink: { href: UPBOND_WALLET_URL, label: 'UPBOND Wallet を開く' },
@@ -266,7 +266,7 @@ const EN: WalletGuideContent = {
 
   storeTitle: 'For receiving payments at your shop',
   storeBody:
-    'If you only need to receive payments, you can also use UPBOND Wallet, which runs in your browser with no app to install. You can sign in with a LINE or Google account or a passkey, and connect it to JPYC EX to issue and redeem JPYC.',
+    'For receiving payments at your shop, UPBOND Wallet is an easy option: it runs in your browser with no app to install. You can sign in with a LINE or Google account or a passkey, and connect it to JPYC EX to issue and redeem JPYC.',
   storeNote:
     'Choose Polygon as the receiving chain. Once sales build up, move them to the wallet you use day to day, such as MynaWallet (sending from UPBOND Wallet requires POL for gas).',
   storeLink: { href: UPBOND_WALLET_URL, label: 'Open UPBOND Wallet' },
