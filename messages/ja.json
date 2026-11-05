@@ -66,7 +66,7 @@
     "bottomNavLabel": "画面下のメニュー"
   },
   "Landing": {
-    "tagline": "決済QR・レジ・モバイルオーダー",
+    "tagline": "決済QR・レジ・モバイルオーダー・注文リンク",
     "heroLeadline": "お店のJPYC決済を、利用料0円から。",
     "heroBody": "お客様がガス代を払う通常決済なら、利用料は0円（モバイル注文を除く）。売上はその場で、あなたのウォレットへ届きます。",
     "heroCta": "決済QRを作る（無料）",
@@ -88,6 +88,9 @@
     "mobileOrderBannerAlt": "スマホひとつで置くだけモバイルオーダー。OpenPay で始める JPYC 注文・決済の流れ。",
     "mobileOrderBannerCta": "モバイルオーダーを作る",
     "mobileOrderBannerLearnMore": "詳しい使い方を見る",
+    "orderLinkStripTitle": "LINE や DM で受けた注文には「注文リンク」",
+    "orderLinkStripBody": "商品と合計の入った支払いリンクを送るだけ。お客様は自分のウォレットから JPYC で払います。",
+    "orderLinkStripLink": "注文リンクの使い方を見る",
     "eyebrowWhy": "はじめての方へ",
     "eyebrowShops": "お店向け",
     "eyebrowSell": "クリエイター向け",
