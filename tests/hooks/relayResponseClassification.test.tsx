@@ -1,16 +1,17 @@
-// 第 9 回レビュー F-02 (PR-19・テストだけ・user 裁定 Q10): relay の応答の分類は 3 つの hook にコピーされている。
+// 第 9 回レビュー F-02 (PR-19・テストだけ・user 裁定 Q10): relay の応答の分類は 4 つの hook にコピーされている。
 //   - hooks/useJpycEip3009Payment.ts の postRelayPayload (お客様の決済・/api/relay/jpyc)
 //   - hooks/useUsageFeePayment.ts の postUsageFeeRelay (店主の利用料・/api/relay/jpyc)
 //   - hooks/useJpycEntitlementPay.ts の postGaslessRelay (CSV パス・/api/csv-pass/relay・useCsvPassSubscribe 経由)
-// 1 つのモジュールにはまとめず (money-path の制御フローを付け替えない・掟 12)、同じ (status, body) の表を 3 つの hook に
+//   - hooks/useSalesMove.ts の postSalesMove (売上をほかのウォレットへ移す・/api/relay/jpyc/move・plans/store-sales-move.md P2a)
+// 1 つのモジュールにはまとめず (money-path の制御フローを付け替えない・掟 12)、同じ (status, body) の表を 4 つの hook に
 // 通して、それぞれの分類をこの 1 つの表で固定する。表は 4 つの通し方で通す: 初回の POST / IP 制限で保持した payload の
 // 再試行 / 応答不明 (ネットワーク失敗) の後の再試行 / txHash の無い pending の後の再試行。
 // 何の波及を断つか: server が broadcast 後に返す構造化の non-2xx を足し、1 つの hook だけが対応すると、他の hook はそれを
-// fallback 安全と読んで再署名 / ガス払いへ進み、二重払いになる。行を足すときは 3 つの hook の期待値を必ず書く。末尾の
+// fallback 安全と読んで再署名 / ガス払いへ進み、二重払いになる。行を足すときは 4 つの hook の期待値を必ず書く。末尾の
 // 「表の網羅」が、server の拒否コード (TypeScript の構文木から取る) と hook が名指しで分岐するコードを表と突き合わせる。
 //
-// hook ごとの意図的な違い (実装を読んで確かめた・表の行から (1)〜(4) で参照する):
-// (1) ambiguous の解き方。決済 hook は署名を保存しない (公開 metadata だけ) ので、nonce の status 照会
+// hook ごとの意図的な違い (実装を読んで確かめた・表の行から (1)〜(4)・(9) で参照する):
+// (1) ambiguous の解き方。決済 hook と売上の移動 hook は署名を保存しない (公開 metadata だけ) ので、nonce の status 照会
 //     (/api/relay/jpyc/status・読み取りだけ・#201) で解き、同じ payload も再 POST しない。そのため応答不明・pending の後の
 //     通し方では行の応答が届かず、どの行も ambiguous → status 照会になる。利用料と CSV パスは署名済みの payload を保存し、
 //     同じ payload を再 POST する (server の冪等キー chainId+from+nonce と on-chain の authorizationState で 2 回目の送金には
@@ -36,8 +37,12 @@
 //     なる。初回の送金が成立して応答だけ失われた後でも、再試行は構造化の拒否を返しうる (残高の確認が authorization の使用済み
 //     の確認より前なので、送金の後は insufficient_balance になりうる・lib/relay/jpycRelay.ts)。決済は status 照会を続け、
 //     利用料は曖昧の保持を続ける。B-R5c (b) と同じ穴。
-// (8) CSV パスは ok・pending・reverted を真偽で読む (true でなくても truthy なら通す)。決済と利用料は `=== true` だけを
-//     認め、それ以外は ambiguous にする。server の makeRespond は真偽値しか返さない。
+// (8) CSV パスは ok・pending・reverted を真偽で読む (true でなくても truthy なら通す)。決済と利用料と売上の移動は
+//     `=== true` だけを認め、それ以外は ambiguous にする。server の makeRespond は真偽値しか返さない。
+// (9) 売上の移動 hook は決済 hook と同じ分類 (どの行・どの通し方でも決済 hook の期待値と同じ)。違うのは POST 先
+//     (/api/relay/jpyc/move)・recover (forwarder) の形だけで組むこと・署名の前にウォレットの JPYC を読み直すこと・復旧の枠の
+//     キー (openpay:move-intent:v1) だけ。構造化の拒否の後に standard (ガス払い) へ進む道は無い (表の 'fallback' は
+//     「保持を外し、次は新しい署名」の意味で読む)。
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { act, renderHook, waitFor } from '@testing-library/react';
@@ -58,15 +63,19 @@ const h = vi.hoisted(() => {
     // chainId は既定の JPYC deployment に beforeEach で合わせる (relay を使える chain・test は testnet)。
     account: { address: '0x9999999999999999999999999999999999999999', chainId: 0 },
     writeContract: vi.fn(),
-    // 決済 hook の ambiguous 解決 (nonce の status 照会)。backoff を待たずに 1 回で「まだ分からない」を返す。
+    // 決済 hook・売上の移動 hook の ambiguous 解決 (nonce の status 照会)。backoff を待たずに 1 回で「まだ分からない」を返す。
     resolveRelayIntent: vi.fn(),
+    // 売上の移動 hook だけに渡す (mountDriver が hook ごとに入れ替える)。ほかの 3 つの hook は従来どおり publicClient なし・
+    // forwarder なし (free モード) で通す。publicClient は署名の前のウォレットの JPYC の読み直しに使う。
+    publicClient: undefined as { readContract: () => Promise<bigint> } | undefined,
+    forwarder: null as Address | null,
   };
 });
 
 vi.mock('wagmi', () => ({
   useAccount: () => h.account,
   useWalletClient: () => h.walletClient,
-  usePublicClient: () => undefined,
+  usePublicClient: () => h.publicClient,
   useWriteContract: () => ({
     data: undefined,
     isPending: false,
@@ -90,14 +99,16 @@ vi.mock('@/lib/env', async (importOriginal) => {
       enableJpycEip3009: true,
       enableTipMessage: false,
       feeReceiverConfigured: true,
-      feeReceiver: '0x4284e651C3D8c9A439FedE00d2600032d5DB0Be7',
+      // checksum の正しい形 (売上の移動 hook は forwarder の nonce を abi.encode するので、checksum の崩れたアドレスで落ちる)。
+      feeReceiver: '0x4284E651c3D8C9a439fEDE00d2600032d5db0BE7',
     },
   };
 });
 // 決済 hook は free モード (forwarder なし) で通す。応答の分類は free / recover で同じ postRelayPayload を通る。
+// 売上の移動 hook は recover の形だけなので、そのときだけ forwarder を返す (h.forwarder・mountDriver が入れ替える)。
 vi.mock('@/lib/relay/forwarderConfig', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/relay/forwarderConfig')>();
-  return { ...actual, jpycForwarderFor: () => null };
+  return { ...actual, jpycForwarderFor: () => h.forwarder };
 });
 vi.mock('@/lib/relay/relayIntentRecovery', () => ({
   resolveRelayIntent: h.resolveRelayIntent,
@@ -109,6 +120,7 @@ vi.mock('@/lib/logger', () => ({
 import { useJpycEip3009Payment } from '@/hooks/useJpycEip3009Payment';
 import { useUsageFeePayment } from '@/hooks/useUsageFeePayment';
 import { useCsvPassSubscribe } from '@/hooks/useCsvPassSubscribe';
+import { useSalesMove } from '@/hooks/useSalesMove';
 import {
   isFallbackSafeRelayError,
   isRelayIpRateLimitedError,
@@ -127,7 +139,10 @@ const RELAY_URL = {
   eip3009: '/api/relay/jpyc',
   usageFee: '/api/relay/jpyc',
   entitlement: '/api/csv-pass/relay',
+  salesMove: '/api/relay/jpyc/move',
 } as const;
+const MOVE_AMOUNT = 5n * 10n ** 18n;
+const FORWARDER: Address = '0x5555555555555555555555555555555555555555';
 const SUBSCRIBE_URL = '/api/csv-pass/subscribe';
 
 // ---- 分類の語彙 (どれも観測できる振る舞いで決める・label() が組み立てる) ----
@@ -196,6 +211,7 @@ const REJECT: Record<HookName, Expectation> = {
   eip3009: eip('fallback'),
   usageFee: fee('fallback', 'reject-held'),
   entitlement: csv('fail'),
+  salesMove: eip('fallback'),
 };
 // 503 (relay を使えない): CSV パスは初回はガス払いを案内し、再試行では保持を続ける ((3)(4))。
 const REJECT_503: Record<HookName, Expectation> = {
@@ -207,6 +223,7 @@ const AMBIGUOUS: Record<HookName, Expectation> = {
   eip3009: eip('ambiguous-status'),
   usageFee: fee('ambiguous-repost'),
   entitlement: csv('ambiguous-repost'),
+  salesMove: eip('ambiguous-status'),
 };
 // 非構造化の 5xx: CSV パスの初回だけ保持を外す ((5)・既知の食い違い)。
 const UNSTRUCTURED_5XX: Record<HookName, Expectation> = {
@@ -244,6 +261,12 @@ const PRE_BROADCAST_4XX: ReadonlyArray<readonly [number, string]> = [
   [400, 'merchant_is_forwarder'],
   [400, 'zero_salt'],
   [400, 'value_exceeds_max'],
+  // 売上の移動の route (app/api/relay/jpyc/move/route.ts) だけの拒否 (署名の検証や KV・RPC より前の純チェック)。
+  [404, 'not_found'],
+  [400, 'amount_below_minimum'],
+  [400, 'merchant_is_sender'],
+  [400, 'merchant_is_relayer'],
+  [400, 'merchant_is_token'],
   [400, 'not_yet_valid'],
   [400, 'expired'],
   [400, 'validity_too_far'],
@@ -274,13 +297,23 @@ const ROWS: Row[] = [
   {
     name: '200 ok + txHash',
     reply: json(200, { ok: true, txHash: TX }),
-    expect: { eip3009: eip('success'), usageFee: fee('success'), entitlement: csv('subscribe') },
+    expect: {
+      eip3009: eip('success'),
+      usageFee: fee('success'),
+      entitlement: csv('subscribe'),
+      salesMove: eip('success'),
+    },
   },
   {
     name: '200 reverted + txHash',
     reply: json(200, { ok: false, reverted: true, txHash: TX }),
     // (3) CSV パスは revert を別に知らせず、保持を外して pay-error にする。
-    expect: { eip3009: eip('reverted'), usageFee: fee('reverted'), entitlement: csv('fail') },
+    expect: {
+      eip3009: eip('reverted'),
+      usageFee: fee('reverted'),
+      entitlement: csv('fail'),
+      salesMove: eip('reverted'),
+    },
   },
   {
     name: '202 pending + txHash',
@@ -290,6 +323,7 @@ const ROWS: Row[] = [
       eip3009: eip('pending-status'),
       usageFee: fee('pending-repost'),
       entitlement: csv('subscribe'),
+      salesMove: eip('pending-status'),
     },
   },
   {
@@ -300,13 +334,19 @@ const ROWS: Row[] = [
       eip3009: eip('pending-status'),
       usageFee: fee('pending-repost'),
       entitlement: csv('ambiguous-repost'),
+      salesMove: eip('pending-status'),
     },
   },
   // ---- 再試行可 (早期の IP limiter は冪等チェックより前に返る) ----
   {
     name: '429 ip_rate_limited + Retry-After',
     reply: IP_LIMITED,
-    expect: { eip3009: eip('retry'), usageFee: fee('retry'), entitlement: csv('retry') },
+    expect: {
+      eip3009: eip('retry'),
+      usageFee: fee('retry'),
+      entitlement: csv('retry'),
+      salesMove: eip('retry'),
+    },
   },
   // ---- 構造化 non-2xx (broadcast 前の確定拒否・実物のコード) ----
   ...PRE_BROADCAST_4XX.map(([status, error]) => ({
@@ -420,7 +460,7 @@ function txHashOf(body: string): unknown {
 
 const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit): Promise<Response> => {
   const url = String(input);
-  if (url === RELAY_URL.eip3009 || url === RELAY_URL.entitlement) {
+  if (url === RELAY_URL.eip3009 || url === RELAY_URL.entitlement || url === RELAY_URL.salesMove) {
     const reply = queued.shift() ?? OK_REPLY;
     if ('network' in reply) {
       lastRelayTx = undefined;
@@ -535,6 +575,10 @@ async function pressEntitlement(result: EntitlementView): Promise<Outcome> {
 async function mountDriver(hook: HookName): Promise<Driver> {
   window.sessionStorage.clear();
   window.localStorage.clear();
+  // 売上の移動 hook だけが recover の形 (forwarder) とウォレットの JPYC の読み直し (publicClient) を使う。ほかの 3 つの hook
+  // には従来と同じ環境 (forwarder なし・publicClient なし) を渡す。
+  h.forwarder = hook === 'salesMove' ? FORWARDER : null;
+  h.publicClient = hook === 'salesMove' ? { readContract: async () => 10n ** 30n } : undefined;
   const wrapper = makeWrapper();
   if (hook === 'eip3009') {
     const view = renderHook(() => useJpycEip3009Payment(DEPLOYMENT), { wrapper });
@@ -543,6 +587,19 @@ async function mountDriver(hook: HookName): Promise<Driver> {
       relayUrl: RELAY_URL.eip3009,
       unmount: view.unmount,
       press: () => pressMutation(() => view.result.current.mutateAsync({ merchant: MERCHANT, value: BILL })),
+    };
+  }
+  if (hook === 'salesMove') {
+    const view = renderHook(
+      () => useSalesMove(DEPLOYMENT, { delivered: 'delivered', fee: 'fee', locale: 'ja' }),
+      { wrapper },
+    );
+    await waitFor(() => expect(view.result.current.isRestoring).toBe(false), { interval: 5 });
+    return {
+      relayUrl: RELAY_URL.salesMove,
+      unmount: view.unmount,
+      press: () =>
+        pressMutation(() => view.result.current.mutateAsync({ destination: MERCHANT, amount: MOVE_AMOUNT })),
     };
   }
   if (hook === 'usageFee') {
@@ -644,6 +701,7 @@ function expected(row: Row, context: Context): Record<HookName, Classification> 
     eip3009: pick(row.expect.eip3009),
     usageFee: pick(row.expect.usageFee),
     entitlement: pick(row.expect.entitlement),
+    salesMove: pick(row.expect.salesMove),
   };
 }
 
@@ -656,12 +714,13 @@ beforeEach(() => {
   vi.stubGlobal('fetch', fetchMock);
 });
 
-describe.each(CONTEXTS)('relay 応答の分類を 3 つの hook で固定する (%s)', (_label, context) => {
+describe.each(CONTEXTS)('relay 応答の分類を 4 つの hook で固定する (%s)', (_label, context) => {
   it.each(ROWS.map((row) => [row.name, row] as const))('%s', async (_name, row) => {
     const actual = {
       eip3009: await classify('eip3009', row.reply, context),
       usageFee: await classify('usageFee', row.reply, context),
       entitlement: await classify('entitlement', row.reply, context),
+      salesMove: await classify('salesMove', row.reply, context),
     };
     expect(actual).toEqual(expected(row, context));
   });
@@ -669,11 +728,14 @@ describe.each(CONTEXTS)('relay 応答の分類を 3 つの hook で固定する 
 
 
 // ---- 表の網羅 ----
-// server が新しい拒否コードを返すようになったら、表に行が無い限りここで落ちる。行を足すときに 3 つの hook の扱いを
+// server が新しい拒否コードを返すようになったら、表に行が無い限りここで落ちる。行を足すときに 4 つの hook の扱いを
 // 決めることになる (どれかの hook だけが新しいコードを特別扱いする食い違いを、表の外で起こさない)。
 // TypeScript の構文木で読み、**候補を見つけたのに最後まで解決できないものは、すべて unresolved にして落とす (fail-closed)**。
 // - 候補 (a): NextResponse / Response の生成 (new と .json の両方)。それ以外の使い方 (別名・instanceof 等) も unresolved。
-//   本文は object literal (.json) か JSON.stringify(object literal) (new) でなければ unresolved。
+//   本文は object literal (.json) か JSON.stringify(object literal) (new) でなければ unresolved。例外は本文を引数のまま
+//   NextResponse.json へ素通しする module 直下の名前つき helper (売上の移動の route の
+//   `const json = (body, status) => NextResponse.json(body, { status })`) だけで、その呼び出しを追い、各呼び出しの本文の
+//   引数が object literal でなければ unresolved。
 // - 候補 (b): error / reason / kind / httpStatus を名前に持つプロパティ (計算されたキー・文字列キーを含む) か、名前の決まらない
 //   計算されたキーを持つ object literal。logger の引数 (ログの欄・応答に入らない) だけを除き、RelayResult の拒否
 //   ({ kind: 'rejected' }) か応答の本文として解決できなければ unresolved。
@@ -685,6 +747,7 @@ describe.each(CONTEXTS)('relay 応答の分類を 3 つの hook で固定する 
 //   unresolved (走査対象の外の helper への移譲を通さない)。RelayResult の拒否を走査対象の外で作る object も unresolved。
 const SERVER_SOURCES = [
   'app/api/relay/jpyc/route.ts',
+  'app/api/relay/jpyc/move/route.ts',
   'app/api/csv-pass/relay/route.ts',
   ...readdirSync(join(process.cwd(), 'lib/relay'))
     .filter((name) => name.endsWith('.ts') && !name.endsWith('.d.ts'))
@@ -693,11 +756,16 @@ const SERVER_SOURCES = [
   'lib/net/crossOriginWrite.ts',
 ];
 const SCANNED = new Set(SERVER_SOURCES);
-const ROUTE_SOURCES = ['app/api/relay/jpyc/route.ts', 'app/api/csv-pass/relay/route.ts'];
+const ROUTE_SOURCES = [
+  'app/api/relay/jpyc/route.ts',
+  'app/api/relay/jpyc/move/route.ts',
+  'app/api/csv-pass/relay/route.ts',
+];
 const HOOK_SOURCES = [
   'hooks/useJpycEip3009Payment.ts',
   'hooks/useUsageFeePayment.ts',
   'hooks/useJpycEntitlementPay.ts',
+  'hooks/useSalesMove.ts',
 ];
 const RESPONSE_NAMES = new Set(['NextResponse', 'Response']);
 const CODE_KEYS = new Set(['error', 'reason', 'kind', 'httpStatus']);
@@ -1162,6 +1230,69 @@ function isResponseProducer(e: ts.Expression): boolean {
   );
 }
 
+// 本文を引数のまま NextResponse.json へ素通しする module 直下の名前つき helper (`const json = (body, status) =>
+// NextResponse.json(body, { status })`)。本文がその関数の引数でなければ false (呼出側が unresolved にする)。引数なら
+// helper の呼び出しを (helperCalls と同じ規則で) 集め、各呼び出しの本文の引数を応答の本文として読む。読めない形はすべて
+// unresolved (本文の引数が object literal でない・spread・status が定数に決まらない等)。
+function handlePassThroughBody(
+  out: Scan,
+  file: string,
+  producer: ts.CallExpression,
+  bodyId: ts.Identifier,
+  initArg: ts.Expression | undefined,
+  handled: Set<ts.Node>,
+): boolean {
+  const fn = enclosingFunction(producer);
+  if (!fn) return false;
+  const params = fn.parameters.map((p) => (ts.isIdentifier(p.name) ? p.name.text : ''));
+  const bodyIndex = params.indexOf(bodyId.text);
+  if (bodyIndex < 0) return false;
+  let statusExpr: ts.Expression | number = 200;
+  if (initArg) {
+    const init = unwrap(initArg);
+    if (!ts.isObjectLiteralExpression(init)) {
+      out.unresolved.push(`${where(producer)} 応答の init が object literal でない (${snippet(producer)})`);
+      return true;
+    }
+    handled.add(init);
+    const initRead = readObject(init);
+    if (initRead.problems.length > 0) {
+      out.unresolved.push(`${where(init)} 応答の init を読めない: ${initRead.problems.join(', ')}`);
+      return true;
+    }
+    statusExpr = initRead.values.get('status') ?? 200;
+  }
+  const traced = helperCalls(fn, file);
+  out.unresolved.push(...traced.problems);
+  if (traced.calls.length === 0 && traced.problems.length === 0) {
+    out.unresolved.push(`${where(producer)} 本文を素通しする関数の呼び出しが無い`);
+  }
+  for (const call of traced.calls) {
+    const env = new Map(params.flatMap((p, i) => (call.arguments[i] ? [[p, call.arguments[i]] as const] : [])));
+    const arg = call.arguments[bodyIndex] && unwrap(call.arguments[bodyIndex]);
+    if (!arg || !ts.isObjectLiteralExpression(arg)) {
+      out.unresolved.push(`${where(call)} 素通しする本文が object literal でない (${snippet(call)})`);
+      continue;
+    }
+    handled.add(arg);
+    const read = readObject(arg);
+    if (read.problems.length > 0) {
+      out.unresolved.push(`${where(arg)} 応答の本文を読めない: ${read.problems.join(', ')}`);
+      continue;
+    }
+    for (const key of ['reason', 'kind', 'httpStatus']) {
+      if (read.values.has(key)) out.unresolved.push(`${where(arg)} 応答の本文に ${key} がある (${snippet(arg)})`);
+    }
+    const error = read.values.get('error');
+    if (!error) continue; // error の無い応答は表の固定の行が受け持つ
+    const code = literal(error, env);
+    const status = typeof statusExpr === 'number' ? statusExpr : literal(statusExpr, env);
+    if (typeof code === 'string' && typeof status === 'number') out.found.set(`${status} ${code}`, where(call));
+    else out.unresolved.push(`${where(call)} 呼び出しの引数が定数でない (${snippet(call)})`);
+  }
+  return true;
+}
+
 function handleResponse(out: Scan, file: string, producer: ts.NewExpression | ts.CallExpression, handled: Set<ts.Node>): void {
   const [bodyArg, initArg] = producer.arguments ?? [];
   let body: ts.ObjectLiteralExpression | undefined;
@@ -1179,6 +1310,7 @@ function handleResponse(out: Scan, file: string, producer: ts.NewExpression | ts
     }
   } else {
     const obj = bodyArg && unwrap(bodyArg);
+    if (obj && ts.isIdentifier(obj) && handlePassThroughBody(out, file, producer, obj, initArg, handled)) return;
     if (!obj || !ts.isObjectLiteralExpression(obj)) {
       out.unresolved.push(`${where(producer)} 応答の本文が object literal でない (${snippet(producer)})`);
       return;
@@ -1275,8 +1407,20 @@ function scanFile(out: Scan, file: string): void {
 // route の handler が返す値の出どころ: 応答の生成・同じファイルの関数・走査対象のファイルから import した関数の結果だけを通す。
 function checkRouteReturns(out: Scan, file: string): void {
   const sf = parse(file);
-  const moduleFunction = (name: string) =>
-    sf.statements.find((s): s is ts.FunctionDeclaration => ts.isFunctionDeclaration(s) && s.name?.text === name);
+  // 同じファイルの関数: function 宣言か、module 直下の const = 関数 (売上の移動の route の `const json = (...) => ...`)。
+  const moduleFunction = (name: string): FunctionNode | undefined => {
+    for (const s of sf.statements) {
+      if (ts.isFunctionDeclaration(s) && s.name?.text === name) return s;
+      if (!ts.isVariableStatement(s) || !(s.declarationList.flags & ts.NodeFlags.Const)) continue;
+      for (const d of s.declarationList.declarations) {
+        const init = d.initializer && unwrap(d.initializer);
+        if (ts.isIdentifier(d.name) && d.name.text === name && init && (ts.isArrowFunction(init) || ts.isFunctionExpression(init))) {
+          return init;
+        }
+      }
+    }
+    return undefined;
+  };
   const moduleConstFromScanned = (name: string) =>
     sf.statements.some(
       (s) =>
@@ -1314,6 +1458,11 @@ function checkRouteReturns(out: Scan, file: string): void {
   const checkFunction = (fn: FunctionNode): void => {
     if (visited.has(fn)) return;
     visited.add(fn);
+    // 式の本文の arrow (`(...) => NextResponse.json(...)`) は、その式が返す値。
+    if (ts.isArrowFunction(fn) && !ts.isBlock(fn.body)) {
+      checkReturned(fn, fn.body);
+      return;
+    }
     walkOwnBody(fn, (n) => {
       if (ts.isReturnStatement(n) && n.expression) checkReturned(fn, n.expression);
     });

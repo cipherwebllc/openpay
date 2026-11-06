@@ -2,15 +2,20 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Address, Hex } from 'viem';
 import {
   RELAY_INTENT_STORAGE_KEY,
+  SALES_MOVE_INTENT_STORAGE_KEY,
   STANDARD_INTENT_STORAGE_KEY,
   clearRelayIntent,
+  clearSalesMoveIntent,
   loadRelayIntent,
+  loadSalesMoveIntent,
   loadStandardIntent,
   saveRelayIntent,
+  saveSalesMoveIntent,
   saveStandardIntent,
   saveStandardPaymentIntent,
   standardParamsFromIntent,
   type RelayIntentMetadata,
+  type SalesMoveIntentMetadata,
   type StandardIntentMetadata,
 } from '@/lib/paymentIntentStorage';
 
@@ -260,5 +265,120 @@ describe('standard payment intent sessionStorage', () => {
     expect(
       window.sessionStorage.getItem(STANDARD_INTENT_STORAGE_KEY),
     ).toBeNull();
+  });
+});
+
+// 売上をほかのウォレットへ移す (plans/store-sales-move.md §2.2): 決済の枠とは別のキー・別の parse。
+function salesMoveIntent(): SalesMoveIntentMetadata {
+  return {
+    version: 1,
+    chainId: 80002,
+    from: FROM,
+    merchant: MERCHANT,
+    merchantValue: '5000000000000000000',
+    feeValue: '2000000000000000000',
+    nonce: NONCE,
+    validBefore: '9999999999',
+    issuedAt: 1_700_000_000_000,
+  };
+}
+
+describe('sales move intent sessionStorage', () => {
+  it('決済の枠 (openpay:relay-intent:v1) とは別のキーに、公開 metadata だけを保存する', () => {
+    expect(SALES_MOVE_INTENT_STORAGE_KEY).toBe('openpay:move-intent:v1');
+    expect(SALES_MOVE_INTENT_STORAGE_KEY).not.toBe(RELAY_INTENT_STORAGE_KEY);
+    saveSalesMoveIntent({
+      ...salesMoveIntent(),
+      signature: SIGNATURE,
+      payload: { signature: SIGNATURE },
+      routeKind: 'recover',
+      gasMode: 'customer',
+    } as SalesMoveIntentMetadata & { signature: Hex; payload: { signature: Hex }; routeKind: string; gasMode: string });
+
+    const raw = window.sessionStorage.getItem(SALES_MOVE_INTENT_STORAGE_KEY);
+    expect(raw).not.toBeNull();
+    expect(raw).not.toContain(SIGNATURE);
+    expect(raw).not.toContain('routeKind');
+    expect(raw).not.toContain('gasMode');
+    expect(JSON.parse(raw!)).toEqual(salesMoveIntent());
+    expect(loadSalesMoveIntent()).toEqual(salesMoveIntent());
+    // 決済の枠には書かない (決済の画面が移動を自分の支払いとして読み直さない)。
+    expect(window.sessionStorage.getItem(RELAY_INTENT_STORAGE_KEY)).toBeNull();
+    expect(loadRelayIntent()).toBeNull();
+
+    clearSalesMoveIntent();
+    expect(window.sessionStorage.getItem(SALES_MOVE_INTENT_STORAGE_KEY)).toBeNull();
+  });
+
+  it('決済の枠を消しても移動の枠は残り、移動の枠を消しても決済の枠は残る', () => {
+    saveRelayIntent(relayIntent());
+    saveSalesMoveIntent(salesMoveIntent());
+    clearRelayIntent();
+    expect(loadSalesMoveIntent()).toEqual(salesMoveIntent());
+    saveRelayIntent(relayIntent());
+    clearSalesMoveIntent();
+    expect(loadRelayIntent()).toEqual(relayIntent());
+  });
+
+  it.each([
+    ['version が無い', { version: undefined }],
+    ['version が 2', { version: 2 }],
+    ['chainId が文字列', { chainId: '80002' }],
+    ['chainId が小数', { chainId: 80002.5 }],
+    ['from が崩れている', { from: '0x1234' }],
+    ['merchant が崩れている', { merchant: 'shop.eth' }],
+    ['merchantValue が 10 進でない', { merchantValue: '1e18' }],
+    ['feeValue が負', { feeValue: '-2' }],
+    ['nonce が 32 byte でない', { nonce: '0x1234' }],
+    ['validBefore が数', { validBefore: 9999999999 }],
+    ['issuedAt が 0', { issuedAt: 0 }],
+  ] as const)('壊れた値 (%s) は捨てて、枠を空にする', (_name, patch) => {
+    window.sessionStorage.setItem(
+      SALES_MOVE_INTENT_STORAGE_KEY,
+      JSON.stringify({ ...salesMoveIntent(), ...patch }),
+    );
+    expect(loadSalesMoveIntent()).toBeNull();
+    expect(window.sessionStorage.getItem(SALES_MOVE_INTENT_STORAGE_KEY)).toBeNull();
+  });
+
+  it.each([
+    ['JSON でない', '{not json'],
+    ['配列', '[]'],
+    ['null', 'null'],
+  ])('壊れた JSON (%s) は null を返し、throw しない', (_name, raw) => {
+    window.sessionStorage.setItem(SALES_MOVE_INTENT_STORAGE_KEY, raw);
+    expect(loadSalesMoveIntent()).toBeNull();
+  });
+
+  it('決済の枠の形 (version の無い relay intent) は移動の枠として読まない', () => {
+    window.sessionStorage.setItem(SALES_MOVE_INTENT_STORAGE_KEY, JSON.stringify(relayIntent()));
+    expect(loadSalesMoveIntent()).toBeNull();
+  });
+
+  it('旧/将来の追加 field は復元値へ持ち込まない', () => {
+    window.sessionStorage.setItem(
+      SALES_MOVE_INTENT_STORAGE_KEY,
+      JSON.stringify({ ...salesMoveIntent(), signature: SIGNATURE, routeKind: 'recover' }),
+    );
+    expect(loadSalesMoveIntent()).toEqual(salesMoveIntent());
+  });
+
+  it('sessionStorage 障害を save/load/clear から throw しない', () => {
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new Error('SecurityError');
+    });
+    expect(() => saveSalesMoveIntent(salesMoveIntent())).not.toThrow();
+    vi.restoreAllMocks();
+
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new Error('SecurityError');
+    });
+    expect(loadSalesMoveIntent()).toBeNull();
+    vi.restoreAllMocks();
+
+    vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(() => {
+      throw new Error('SecurityError');
+    });
+    expect(() => clearSalesMoveIntent()).not.toThrow();
   });
 });

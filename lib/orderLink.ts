@@ -44,6 +44,7 @@ export const ORDER_LINK_STORE_NAME_MAX = CHECKOUT_STORE_NAME_MAX;
 // 空なら 5 万) の既定値の固定コピーで、既定値どうしの一致は tests/lib/orderLinkRelayLimit.test.ts が照合する。
 // RELAY_MAX_JPYC はサーバーだけの値でこの画面は読まないので、env で上限を下げてもこの値は追随しない
 // (下げる運用は想定しない・下げるならこの値も同時に直す・docs/ENV.md)。超えるリンクは /checkout で開けても relay が断る。
+// 「売上をほかのウォレットへ移す」の画面 (lib/salesMoveForm.ts) も、1 回の上限 (移す額 + 利用料) にこの定数を使う。
 export const ORDER_LINK_GASLESS_MAX_JPYC = 50_000n;
 // 通常決済の上限。手入力の桁の間違いを止めるための値で、Store の出品上限に揃えた。
 export const ORDER_LINK_STANDARD_MAX_JPYC = 1_000_000n;
