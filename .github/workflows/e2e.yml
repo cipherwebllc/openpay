@@ -51,34 +51,44 @@ jobs:
       # azure.archive.ubuntu.com からの .deb の取得が約 65 kB/s に落ち、下の install が job の上限まで止まって cancel
       # された回が 7 回あった (この job 5・e2e-prodflags 2)。パッケージの一覧 (apt-get update) は同じミラーから速いまま
       # (12.8 MB を 1 秒) で、遅いのは .deb の取得だけ。遅さは 30 分続いたので、同じ job でやり直しても速くならない。
-      # key は Playwright の版 (入れるパッケージが決まる) と ISO 週。週が変わると前の週の cache から戻し、Ubuntu 側で
-      # 更新されたパッケージだけをミラーから取る。cache に入れるのは .deb だけ (partial/ と lock は apt のもの)。
+      # cache の key は「Playwright の版・job 名・.deb の一覧の hash」。戻すときは一覧が前もって分からないので、
+      # 版と job 名の prefix で一番新しい cache を戻す。入れ終えたら、今の版で取れなくなった古い .deb を
+      # apt-get autoclean で消し、残った一覧が戻した cache と違えば (Ubuntu の更新を取った等) 新しい key で保存する。
+      # cache に入れるのは .deb だけ (partial/ と lock は apt のもの)。
       - name: Point apt at a cacheable package directory
         id: apt-cache
         run: |
           mkdir -p "$HOME/apt-archives/partial"
           printf 'Dir::Cache::Archives "%s";\nAPT::Keep-Downloaded-Packages "true";\n' "$HOME/apt-archives" | sudo tee /etc/apt/apt.conf.d/99-openpay-apt-archives
-          echo "prefix=apt-ubuntu-24.04-playwright-$(./node_modules/.bin/playwright --version | awk '{print $2}')-chromium-webkit-" >> "$GITHUB_OUTPUT"
-          echo "week=$(date -u +%G-%V)" >> "$GITHUB_OUTPUT"
+          echo "prefix=apt-ubuntu-24.04-playwright-$(./node_modules/.bin/playwright --version | awk '{print $2}')-job-playwright-" >> "$GITHUB_OUTPUT"
 
       - name: Restore apt packages
         id: apt-restore
         uses: actions/cache/restore@v4
         with:
           path: ~/apt-archives/*.deb
-          key: ${{ steps.apt-cache.outputs.prefix }}${{ steps.apt-cache.outputs.week }}
+          # この key では保存しない (完全一致はさせず、下の restore-keys の prefix で一番新しいものを戻す)。
+          key: ${{ steps.apt-cache.outputs.prefix }}restore
           restore-keys: ${{ steps.apt-cache.outputs.prefix }}
 
       - name: Install Playwright browsers
         run: ./node_modules/.bin/playwright install --with-deps chromium webkit
 
+      - name: Key the apt packages by their file list
+        id: apt-list
+        env:
+          APT_CACHE_PREFIX: ${{ steps.apt-cache.outputs.prefix }}
+        run: |
+          sudo apt-get autoclean
+          echo "key=${APT_CACHE_PREFIX}$(find "$HOME/apt-archives" -maxdepth 1 -name '*.deb' -printf '%f\n' | sort | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+
       # 入れ終えた時点で保存する (後の e2e が落ちても、取り終えた .deb は次の run で使える)。
       - name: Save apt packages
-        if: steps.apt-restore.outputs.cache-hit != 'true'
+        if: steps.apt-list.outputs.key != steps.apt-restore.outputs.cache-matched-key
         uses: actions/cache/save@v4
         with:
           path: ~/apt-archives/*.deb
-          key: ${{ steps.apt-cache.outputs.prefix }}${{ steps.apt-cache.outputs.week }}
+          key: ${{ steps.apt-list.outputs.key }}
 
       - name: Build
         run: npm run build
@@ -119,32 +129,39 @@ jobs:
       - name: Check installed packages for install-time scripts and rebuild the allowlisted ones
         run: node scripts/installed-scripts-gate.mjs --rebuild node_modules
 
-      # playwright job と同じ理由で、Ubuntu のパッケージ (.deb) を cache から戻す (key の作り方も同じ・入れるのは chromium だけ)。
+      # playwright job と同じ理由・同じ作り方で、Ubuntu のパッケージ (.deb) を cache から戻す (key の job 名で分ける)。
       - name: Point apt at a cacheable package directory
         id: apt-cache
         run: |
           mkdir -p "$HOME/apt-archives/partial"
           printf 'Dir::Cache::Archives "%s";\nAPT::Keep-Downloaded-Packages "true";\n' "$HOME/apt-archives" | sudo tee /etc/apt/apt.conf.d/99-openpay-apt-archives
-          echo "prefix=apt-ubuntu-24.04-playwright-$(./node_modules/.bin/playwright --version | awk '{print $2}')-chromium-" >> "$GITHUB_OUTPUT"
-          echo "week=$(date -u +%G-%V)" >> "$GITHUB_OUTPUT"
+          echo "prefix=apt-ubuntu-24.04-playwright-$(./node_modules/.bin/playwright --version | awk '{print $2}')-job-e2e-prodflags-" >> "$GITHUB_OUTPUT"
 
       - name: Restore apt packages
         id: apt-restore
         uses: actions/cache/restore@v4
         with:
           path: ~/apt-archives/*.deb
-          key: ${{ steps.apt-cache.outputs.prefix }}${{ steps.apt-cache.outputs.week }}
+          key: ${{ steps.apt-cache.outputs.prefix }}restore
           restore-keys: ${{ steps.apt-cache.outputs.prefix }}
 
       - name: Install Chromium
         run: ./node_modules/.bin/playwright install --with-deps chromium
 
+      - name: Key the apt packages by their file list
+        id: apt-list
+        env:
+          APT_CACHE_PREFIX: ${{ steps.apt-cache.outputs.prefix }}
+        run: |
+          sudo apt-get autoclean
+          echo "key=${APT_CACHE_PREFIX}$(find "$HOME/apt-archives" -maxdepth 1 -name '*.deb' -printf '%f\n' | sort | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+
       - name: Save apt packages
-        if: steps.apt-restore.outputs.cache-hit != 'true'
+        if: steps.apt-list.outputs.key != steps.apt-restore.outputs.cache-matched-key
         uses: actions/cache/save@v4
         with:
           path: ~/apt-archives/*.deb
-          key: ${{ steps.apt-cache.outputs.prefix }}${{ steps.apt-cache.outputs.week }}
+          key: ${{ steps.apt-list.outputs.key }}
 
       - name: Load public production flags (testnet fixtures)
         # One vector supplies BOTH the build and the server/test process.
