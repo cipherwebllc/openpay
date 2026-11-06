@@ -82,6 +82,37 @@ describe('SuccessOverlay', () => {
     expect(screen.getByText('店主が確認したら閉じてください')).toBeInTheDocument();
   });
 
+  // 中身が画面より高いとき (小さな画面の注文)、justify-center だと上にもはみ出し、scroll で「✓ 決済完了」へ戻れなかった
+  // (実機の 375×667 で 107px・2026-11-07)。jsdom は layout しないので、はみ出しは実機で測り、ここでは作りを固定する:
+  // 縦の中央寄せは root の justify-center でなく、流れに乗る最初の要素の mt-auto と最後の要素の mb-auto で行う。
+  it('中身が高くても上から scroll で届く: 中央寄せは justify-center でなく最初と最後の要素の auto の余白', () => {
+    render(
+      <SuccessOverlay
+        amountDisplay="3,500 JPYC"
+        txHash={TX_HASH}
+        userOpHash={USER_OP_HASH}
+        blockNumber={12345n}
+        explorerBase="https://amoy.polygonscan.com"
+        merchantAddress={MERCHANT_ADDR}
+        orderNo="A-001"
+        notify={notify()}
+        onDismiss={() => undefined}
+      />,
+    );
+    const dialog = screen.getByRole('dialog');
+    const classes = (el: Element) => el.className.split(/\s+/);
+    expect(classes(dialog)).not.toContain('justify-center');
+    expect(classes(dialog)).toEqual(expect.arrayContaining(['flex', 'flex-col', 'overflow-y-auto']));
+    // absolute の完了音のボタンは流れに乗らないので外す。
+    const flow = [...dialog.children].filter((el) => !classes(el).includes('absolute'));
+    expect(classes(flow[0])).toContain('mt-auto');
+    expect(flow[0]).toContainElement(screen.getByRole('heading', { name: '決済完了' }));
+    expect(classes(flow[flow.length - 1])).toContain('mb-auto');
+    expect(flow[flow.length - 1]).toContainElement(screen.getByRole('button', { name: '閉じる' }));
+    // 途中の要素に auto の余白があると、余った高さがそこに入って中身が割れる。
+    for (const el of flow.slice(1, -1)) expect(classes(el).some((c) => /^m[ytb]?-auto$/.test(c)), el.outerHTML.slice(0, 80)).toBe(false);
+  });
+
   it('現在時刻が HH:MM:SS 形式で描画される (ゼロ詰め)', () => {
     render(
       <SuccessOverlay

@@ -92,6 +92,9 @@ export function SuccessOverlay({
   // 地は emerald-700 で、白の文字は 5.48:1 (WCAG 2.2 AA の 4.5:1 に届く)。emerald-500 の地では白が 2.54:1 で届かなかった。
   // 文字は opacity や text-white/90 で薄くしない (emerald-700 の上で白の 80% は 4.11:1)。bg-white/10 の欄の上の白は
   // 4.53:1 で余裕が小さいので、欄をこれより明るくしない (tests/components/SuccessOverlay.test.tsx が計算して確かめる)。
+  // 縦の中央寄せは justify-center ではなく、最初の要素の mt-auto と最後の要素の mb-auto で行う。justify-center だと、
+  // 中身が画面より高いときに上にもはみ出し、scroll で「✓ 決済完了」へ戻れなかった (375×667 の注文で 107px)。auto の
+  // 余白は余った高さだけを分けるので、高いときは 0 になり、中身は上の端から始まる。
   return (
     <div
       ref={dialogRef}
@@ -99,7 +102,7 @@ export function SuccessOverlay({
       aria-modal="true"
       aria-labelledby={titleId}
       tabIndex={-1}
-      className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-6 overflow-y-auto bg-emerald-700 px-4 py-8 text-white"
+      className="fixed inset-0 z-50 flex flex-col items-center gap-6 overflow-y-auto bg-emerald-700 px-4 py-8 text-white"
     >
       {/* 完了音 ON/OFF トグル (右上)。PayPay 風チャイムのミュート切替・localStorage 永続。
           名前は固定 (「完了音」) し、状態は aria-pressed とアイコンだけで伝える。名前まで「オフにする / オンにする」と
@@ -119,8 +122,8 @@ export function SuccessOverlay({
         )}
       </button>
 
-      {/* 大きい ✓ + タイトル */}
-      <div className="flex items-center gap-3">
+      {/* 大きい ✓ + タイトル (mt-auto で中央に寄せる・上の root のコメント) */}
+      <div className="mt-auto flex items-center gap-3">
         <span
           aria-hidden="true"
           className="flex h-12 w-12 items-center justify-center rounded-full bg-white text-3xl font-black text-emerald-600 sm:h-16 sm:w-16 sm:text-4xl"
@@ -247,8 +250,8 @@ export function SuccessOverlay({
         className="w-full max-w-md text-white"
       />
 
-      {/* 明示的 dismiss (店主の視認後、客が押す) */}
-      <div className="flex flex-col items-center gap-2">
+      {/* 明示的 dismiss (店主の視認後、客が押す・mb-auto で中央に寄せる) */}
+      <div className="mb-auto flex flex-col items-center gap-2">
         <button
           type="button"
           onClick={onDismiss}
