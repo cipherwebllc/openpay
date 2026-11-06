@@ -9,7 +9,8 @@ import { createGzip, createGunzip } from 'node:zlib';
 
 export const PREFIXES = Object.freeze(['x402:hosted:', 'store:', 'payment:claimed:', 'billing:settled:', 'x402:settle:ledger:',
   'x402:settle:payer:', 'agent:bound:', 'agent:owner:']);
-export const DENYLIST = Object.freeze(['store:quote:rl', 'store:license:verify:rpc', 'store:delivery:rpc', 'store:license:worker:lock']);
+export const DENYLIST = Object.freeze(['store:quote:rl', 'store:license:verify:rpc', 'store:delivery:rpc', 'store:license:worker:lock',
+  'store:license:rights:rpc', 'store:license:rights:resend:rpc']);
 export const LIMITS = Object.freeze({
   fullCollectionMax: 1000, fullCollectionBytes: 1024 * 1024, chunk: 1000, minChunk: 50,
   reqBytes: 4 * 1024 * 1024, stringMax: 4 * 1024 * 1024,

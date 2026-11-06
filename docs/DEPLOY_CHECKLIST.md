@@ -2115,7 +2115,11 @@ flag ON + forwarder/JPYC 設定済の Amoy (80002) で 1 周する。route テ�
   支払いは §14 の facilitator (forwarder-split・買い手上乗せ 1%) を使う (`/api/agent-order/{menu,pay}`)。
   settle 前に authorization と不変の注文 snapshot を 24 時間予約し、内部 finalizer が forwarder の
   `Settled` イベントの全フィールド一致を検証して注文と authorization ごとの完了記録を原子的に保存する。
-  `/api/order/notify` を使うのは予約導入前の記録だけ。計画: `plans/a2b-agent-order-reservation.md`。
+  `/api/order/notify` を使う旧経路に入るのは、支払いの再送で予約が見つからない (`missing`) ときだけ
+  (`app/api/agent-order/pay/route.ts` の `allowLegacy`・§13.7 の 2-4)。新しい支払いは settle の前に必ず予約するので例外の経路で、
+  予約の導入 (#586・2026-09-24) より前の再配信の記録は 30 分で消えている。この経路で登録に失敗すると、応答は `200`・
+  `orderRegistered:false` で、`paymentSettled` と `repair` は付かない (`route.ts:282-285` は予約があるか `allowLegacy` が
+  false のときだけ付ける)。計画: `plans/a2b-agent-order-reservation.md`。
 - **フラグ (server-only・AND ゲート)**: `ENABLE_AGENT_ORDER` (NEXT_PUBLIC を付けない) + `NEXT_PUBLIC_ENABLE_X402_FACILITATOR`
   + `NEXT_PUBLIC_ENABLE_ORDER_RELAY` の 3 つが全 ON でなければ全 route 404。**既定 OFF = 完全 inert がロールバック先**。
   点灯順序は先に facilitator (§14) + 受注リレー (§15.x) を go-live 済みにしてから最後に `ENABLE_AGENT_ORDER=1`。
@@ -2560,7 +2564,8 @@ ledger/payer は best-effort ヒント・決済の真実ではない。payer 索
 既存 v2 archive（旧 5 prefix）も検証・復元可。ただし未収録の Agent キーは復元されない。
 **復元後は Agent の紐づけを再確認する**。RPO（約 24h）内の unbind/rebind が巻き戻り、解除済みの紐づけが復活しうる。
 R2 archive は 180 日 lifecycle のため、payer/ledger の行は稼働 KV の 400 日 TTL を過ぎてもバックアップ内に残りうる（復元時の期限切れスキップは archive 内の削除ではない）。
-denylist (完全一致または `<key>:` 家族): `store:quote:rl`・`store:license:verify:rpc`・`store:delivery:rpc`・`store:license:worker:lock`。
+denylist (完全一致または `<key>:` 家族): `store:quote:rl`・`store:license:verify:rpc`・`store:delivery:rpc`・`store:license:worker:lock`・
+`store:license:rights:rpc`・`store:license:rights:resend:rpc` (レート制限・RPC の同時実行枠・ロックの一時的な鍵で、復元しても使わない)。
 **全 app の DR ではない** (handle・受注・チップ・push・SIWE・external registry は対象外。受注/チップ/push は保存期間を開示済みのため複製しない)。
 `x402fac:reservation:v1:` (入場 lease) は対象外で、復元時は捨てる。
 

@@ -47,6 +47,21 @@ describe('scope and lossless byte records', () => {
     }
     for (const other of ['store', 'x402fac:reservation:v1:a', 'session:a', 'payment:claim:a']) expect(isAllowedKey(other)).toBe(false);
   });
+  // RPC の同時実行枠 (8 枠・60 秒 lease の ZSET) は、復元しても期限の切れた lease しか戻らない。新しい枠の鍵を足したときに
+  // denylist へ入れ忘れないよう、lib/ と app/ の `store:…:rpc` の鍵を全部拾って確かめる (第 9 回レビューの後追い・2026-11-07)。
+  it('denies every store:*:rpc concurrency-budget key defined in lib/ and app/', async () => {
+    const found = new Set<string>();
+    for (const root of ['lib', 'app']) {
+      for (const entry of await readdir(root, { recursive: true, withFileTypes: true })) {
+        if (!entry.isFile() || !/\.(ts|tsx|mjs|js)$/.test(entry.name)) continue;
+        const source = await readFile(join(entry.parentPath, entry.name), 'utf8');
+        for (const match of source.matchAll(/'(store:[a-z0-9:_-]+:rpc)'/g)) found.add(match[1]);
+      }
+    }
+    expect([...found].sort()).toEqual(['store:delivery:rpc', 'store:license:rights:resend:rpc', 'store:license:rights:rpc',
+      'store:license:verify:rpc']);
+    for (const budgetKey of found) expect(DENYLIST, budgetKey).toContain(budgetKey);
+  });
   it('includes durable agent families without including ephemeral agent credentials', async () => {
     const docs = await readFile('docs/DEPLOY_CHECKLIST.md', 'utf8');
     for (const prefix of ['x402:settle:payer:', 'agent:bound:', 'agent:owner:']) {
