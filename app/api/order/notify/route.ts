@@ -4,7 +4,7 @@
 // (3) on-chain 検証 (from 非依存・to=merchant への実着金)、(4) txHash 冪等 (1 決済 1 注文) で守る。
 // 受注は **advisory**: 実着金額を権威保存・商品/テーブルは顧客申告。flag OFF は 404 (本番 inert)。
 // 設計: plans/swift-puzzling-sky.md。
-import { receiptHasRelayEvidence, verifyOrderBinding } from '@/lib/order/orderBindingVerify';
+import { orderBindEnforced, receiptHasRelayEvidence, verifyOrderBinding } from '@/lib/order/orderBindingVerify';
 import { recordMetricAfterResponse } from '@/lib/metrics';
 import { NextResponse, after } from 'next/server';
 import { createPublicClient, getAddress, isAddress, parseUnits, type Address, type Hex } from 'viem';
@@ -121,6 +121,30 @@ const STORE_ORDER_WITH_INLINE_FEE_CLAIM =
 
 function fail(error: string, status: number) {
   return NextResponse.json({ ok: false, error }, { status });
+}
+
+// 429 の warn `order.notify.rate_limited` (ENABLE_ORDER_BIND_ENFORCE の点灯判断・docs/DEPLOY_CHECKLIST.md §13.7)。
+// logger.warn は 1 回ごとに Sentry へも送る (lib/logger.ts) ので、拒否のたびに書くと、無認証のこの endpoint では
+// 攻撃者が Sentry のイベント量を決められ、Sentry の枠を使い切ってほかの警告が届かなくなる波及になる。それを断つため
+// lib/agent/activityRateLimit.ts と同じく、プロセス内で 1 分に 1 回だけ書く。枠ごとに数え (subnet の枠の flood が
+// txHash の枠の拒否を隠さない)、書かなかった数は次の warn の suppressed に載せる。応答と制御の流れは変えない (掟 12)。
+const RATE_LIMITED_WARN_INTERVAL_MS = 60_000;
+const rateLimitedWarn = {
+  tx: { lastAtMs: 0, suppressed: 0 },
+  subnet: { lastAtMs: 0, suppressed: 0 },
+};
+
+function warnRateLimited(limiter: 'tx' | 'subnet', ipPrefix: string): void {
+  const state = rateLimitedWarn[limiter];
+  const now = Date.now();
+  if (now - state.lastAtMs < RATE_LIMITED_WARN_INTERVAL_MS) {
+    state.suppressed += 1;
+    return;
+  }
+  // ログには生 IP を残さない (subnet の枠の鍵と同じ匿名化済みの prefix だけ)。
+  logger.warn('order.notify.rate_limited', { limiter, ipPrefix, suppressed: state.suppressed });
+  state.lastAtMs = now;
+  state.suppressed = 0;
 }
 
 async function reconcileCollectedStandardFee(args: {
@@ -353,8 +377,12 @@ export async function POST(req: Request): Promise<NextResponse> {
   // 1 つの枠を共有する = 従来の txHash だけの鍵と同じ広さ。HMAC の 64 桁 hex なので 'none' と衝突しない。
   const txIpBucket = hashIpBucket(clientIp(req)) ?? 'none';
   const allowed = await checkRateLimit([`order:tx:${txHash.toLowerCase()}:${txIpBucket}`]);
-  if (!allowed) return fail('rate_limited', 429);
+  if (!allowed) {
+    warnRateLimited('tx', ipPrefix);
+    return fail('rate_limited', 429);
+  }
   if (!(await checkReadRateLimit(`order:${ipPrefix}`, 120, 60))) {
+    warnRateLimited('subnet', ipPrefix);
     return fail('rate_limited', 429);
   }
 
@@ -514,6 +542,17 @@ export async function POST(req: Request): Promise<NextResponse> {
     });
     if (!binding.ok) {
       await releaseClaim();
+      // 追加のみ (掟 12): 断った理由を server のログにだけ残す (応答は従来どおり order_binding_mismatch の 1 つ)。
+      // ENABLE_ORDER_BIND_ENFORCE の点灯判断で、bind が無いことで断った数 (bind_required) をほかの理由と分けて数える
+      // (docs/DEPLOY_CHECKLIST.md §13.7)。txHash はオンチェーンで公開の値。bind の中身・IP・署名は載せない。
+      logger.warn('order.notify.binding_rejected', {
+        reason: binding.reason,
+        enforce: orderBindEnforced(),
+        bindPresent: Object.hasOwn(o, 'bind'),
+        chainId,
+        merchant,
+        txHash,
+      });
       return fail('order_binding_mismatch', 422);
     }
     if (existingMarker) {
@@ -656,6 +695,18 @@ export async function POST(req: Request): Promise<NextResponse> {
         }
       }
       orderStored = true; // 受注は KV に確定。以降 pending クレームは消さない (下記 catch 参照)。
+      // 追加のみ (掟 12): 束縛なしの relay 注文を保存したことを warn で残す (保存 1 回につき 1 回 = txHash の冪等で
+      // ふつうは 1 支払いにつき 1 回)。info の order.notify.stored は既定の log level では出ないので、ENABLE_ORDER_BIND_ENFORCE
+      // の点灯判断で本番 KV を読まずに数えられるようにする (docs/DEPLOY_CHECKLIST.md §13.7)。orderId はお客様の入力なので
+      // 丸ごとは載せず、旧 agent 経路の手がかり (agent- で始まるか) だけを載せる。
+      if (order.bindingMissing) {
+        logger.warn('order.notify.binding_missing_stored', {
+          chainId,
+          merchant,
+          txHash,
+          orderIdAgentPrefix: orderId.startsWith('agent-'),
+        });
+      }
       // 月次メトリクス (運営ヒント・no-throw)。応答後に after() で完了させる (投げっぱなしは凍結で途切れる・第 7 回レビュー F9)。
       recordMetricAfterResponse('order');
       // ステージ2 = pending → done 昇格 (TTL を ORDER_DONE_TTL_SEC = 7 日へ上書き)。**保存確定の後**に昇格するのが肝:

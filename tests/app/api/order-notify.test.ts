@@ -1656,3 +1656,287 @@ describe('E-1: the per-tx limiter is keyed by txHash and IP bucket', () => {
     expect(latestStoredOrder()).not.toHaveProperty('bindingMissing');
   });
 });
+
+// ENABLE_ORDER_BIND_ENFORCE の点灯判断に使う 3 つの warn (docs/DEPLOY_CHECKLIST.md §13.7)。どれも追加のみ (掟 12):
+// 応答の status と body は足す前と同じ (この describe の応答の検証は、warn を足す前のコードでも通る)。
+describe('ENABLE_ORDER_BIND_ENFORCE の観測の warn (binding_rejected / rate_limited / binding_missing_stored)', () => {
+  const NEW_WARNS = [
+    'order.notify.binding_rejected',
+    'order.notify.rate_limited',
+    'order.notify.binding_missing_stored',
+  ];
+  const warnsOf = (name: string) =>
+    warnSpy.mock.calls.filter(([event]) => event === name).map(([, fields]) => fields as Record<string, unknown>);
+  const expectNoNewWarns = () => {
+    for (const name of NEW_WARNS) expect(warnsOf(name), name).toEqual([]);
+  };
+  const IP_PREFIX = '198.51.100.0/24'; // req() の既定の IP (198.51.100.7) の /24
+  const subnetCounterKey = () => `rl:read:order:${IP_PREFIX}:${Math.floor(Date.now() / 60_000)}`;
+  function relay(mode: 'free' | 'recover' = 'free') {
+    hold.forwarder = BIND_FORWARDER;
+    const f = bindingFixture(mode, {
+      ...goodBody({ statusToken: STATUS_TOKEN }),
+      handle: 'alice',
+      tokenAddress: resolveDeployment('jpyc', 80002)!.address,
+    });
+    hold.verify = { ok: true, value: 5000n * JPYC, receiptLogs: f.logs };
+    const { bind: _bind, ...unbound } = f.body;
+    return { ...f, unbound };
+  }
+
+  describe('order.notify.binding_rejected (422 order_binding_mismatch)', () => {
+    it('ON で bind の無い relay 通知: 応答は従来の 422 のまま、bind_required の warn を 1 回', async () => {
+      vi.stubEnv('ENABLE_ORDER_BIND_ENFORCE', 'true');
+      const f = relay();
+      const res = await POST(req(f.unbound));
+      expect(res.status).toBe(422);
+      expect(await res.json()).toEqual({ ok: false, error: 'order_binding_mismatch' });
+      expect(lpushSpy).not.toHaveBeenCalled();
+      expect(delSpy).toHaveBeenCalledWith(`order:used:80002:${f.body.txHash}`);
+      expect(warnsOf('order.notify.binding_rejected')).toEqual([{
+        reason: 'bind_required',
+        enforce: true,
+        bindPresent: false,
+        chainId: 80002,
+        merchant: MERCHANT,
+        txHash: f.body.txHash,
+      }]);
+      expect(warnsOf('order.notify.binding_missing_stored')).toEqual([]);
+    });
+
+    it.each([
+      ['壊れた bind (OFF)', false, 'bind_malformed'],
+      ['壊れた bind (ON)', true, 'bind_malformed'],
+      ['合わない bind (free の品物の差し替え)', false, 'free_unmatched'],
+      ['合わない bind (recover の品物の差し替え)', false, 'settlement_unmatched'],
+      ['標準の送金に付いた bind', false, 'bind_on_standard'],
+    ] as const)('%s: 応答は従来の 422 のまま、理由と enforce を載せた warn を 1 回 (bind の中身・IP は載せない)', async (name, enforce, reason) => {
+      vi.stubEnv('ENABLE_ORDER_BIND_ENFORCE', enforce ? 'true' : 'false');
+      const f = relay(name.includes('recover') ? 'recover' : 'free');
+      let body: Record<string, unknown> = { ...f.body, items: [{ name: 'stolen', qty: 1, price: '1000' }] };
+      if (reason === 'bind_malformed') body = { ...f.body, bind: { v: 2, secret: f.bind.secret } };
+      if (reason === 'bind_on_standard') {
+        // relay の証拠が無い receipt (ふつうの ERC-20 送金) に bind を付けた通知。
+        hold.forwarder = null;
+        hold.verify = { ok: true, value: 1000n * JPYC, receiptLogs: [bindTransfer(f.order.tokenAddress, CUSTOMER, f.order.merchant, 1000n * JPYC)] };
+        body = f.body;
+      }
+      const res = await POST(req(body));
+      expect(res.status).toBe(422);
+      expect(await res.json()).toEqual({ ok: false, error: 'order_binding_mismatch' });
+      expect(lpushSpy).not.toHaveBeenCalled();
+      expect(evalSpy).not.toHaveBeenCalled();
+      expect(warnsOf('order.notify.binding_rejected')).toEqual([{
+        reason, enforce, bindPresent: true, chainId: 80002, merchant: MERCHANT, txHash: f.body.txHash,
+      }]);
+      const logged = JSON.stringify(warnSpy.mock.calls);
+      expect(logged).not.toContain(f.bind.secret.slice(2));
+      expect(logged).not.toContain('198.51.100');
+      expect(logged).not.toContain('stolen');
+    });
+
+    it('同じ支払いの登録済みの後に、差し替えた bind で送り直しても 422 のまま warn を出す (既存の印は消さない)', async () => {
+      const f = relay();
+      hold.claimValue = null;
+      hold.usedMarker = 'done';
+      const res = await POST(req({ ...f.body, statusToken: 'q'.repeat(43) }));
+      expect(res.status).toBe(422);
+      expect(await res.json()).toEqual({ ok: false, error: 'order_binding_mismatch' });
+      expect(delSpy).not.toHaveBeenCalled();
+      expect(warnsOf('order.notify.binding_rejected')).toEqual([expect.objectContaining({ reason: 'free_unmatched', bindPresent: true })]);
+    });
+  });
+
+  describe('order.notify.rate_limited (429)', () => {
+    // 429 の warn の間引きは route の module の状態 (プロセス内・枠ごと)。前の test の 429 の状態 (lastAtMs と、
+    // 書かなかった数の suppressed) を持ち越さないよう、test ごとに route を読み直す (本番に test 用の reset は足さない)。
+    // vitest 5.0.3 は同じ mock の module を並列に dynamic import すると 2 本目以降が実物に解決される
+    // (tests/app/api/paid-hosted.test.ts のコメント) ので、1 本ずつ await して読む。
+    let freshPOST: typeof POST;
+    beforeEach(async () => {
+      vi.resetModules();
+      freshPOST = (await import('@/app/api/order/notify/route')).POST;
+    });
+
+    it('txHash の枠の 429: 応答は従来どおり、limiter: tx の warn を 1 回 (生 IP は載せない)', async () => {
+      // 読み直す前の route (この file の static import) で 429 を重ねても、新しい route の数には入らない。
+      hold.rateAllowed = false;
+      for (let i = 0; i < 3; i++) expect((await POST(req(goodBody()))).status).toBe(429);
+      warnSpy.mockClear();
+      const res = await freshPOST(req(goodBody()));
+      expect(res.status).toBe(429);
+      expect(await res.json()).toEqual({ ok: false, error: 'rate_limited' });
+      expect(verifySpy).not.toHaveBeenCalled();
+      expect(setSpy).not.toHaveBeenCalled();
+      expect(warnsOf('order.notify.rate_limited')).toEqual([{ limiter: 'tx', ipPrefix: IP_PREFIX, suppressed: 0 }]);
+      expect(JSON.stringify(warnSpy.mock.calls)).not.toContain('198.51.100.7');
+    });
+
+    it('subnet の枠の 429: 応答は従来どおり、limiter: subnet の warn を 1 回', async () => {
+      hold.realRateLimits = true;
+      hold.rateCounters.set(subnetCounterKey(), 120); // この /24 は今の 1 分で 120 回を使い切った
+      const res = await freshPOST(req(goodBody()));
+      expect(res.status).toBe(429);
+      expect(await res.json()).toEqual({ ok: false, error: 'rate_limited' });
+      expect(verifySpy).not.toHaveBeenCalled();
+      expect(setSpy).not.toHaveBeenCalled();
+      expect(warnsOf('order.notify.rate_limited')).toEqual([{ limiter: 'subnet', ipPrefix: IP_PREFIX, suppressed: 0 }]);
+    });
+
+    it('429 の warn はプロセス内で枠ごとに 1 分に 1 回・書かなかった数は次の warn の suppressed に載る', async () => {
+      const start = Date.now();
+      hold.rateAllowed = false;
+      for (let i = 0; i < 3; i++) expect((await freshPOST(req(goodBody()))).status).toBe(429);
+      expect(warnsOf('order.notify.rate_limited')).toEqual([{ limiter: 'tx', ipPrefix: IP_PREFIX, suppressed: 0 }]);
+      // 同じ 1 分の中でも、別の枠の最初の拒否は書く (txHash の枠の拒否が subnet の枠の拒否を隠さない)。
+      hold.rateAllowed = true;
+      hold.realRateLimits = true;
+      hold.rateCounters.set(subnetCounterKey(), 120);
+      expect((await freshPOST(req(goodBody()))).status).toBe(429);
+      expect(warnsOf('order.notify.rate_limited')[1]).toEqual({ limiter: 'subnet', ipPrefix: IP_PREFIX, suppressed: 0 });
+      // 59 秒後はまだ書かない。60 秒たつと次の拒否で書き、間に書かなかった 3 回を suppressed に載せる。
+      hold.realRateLimits = false;
+      hold.rateAllowed = false;
+      vi.setSystemTime(start + 59_000);
+      expect((await freshPOST(req(goodBody()))).status).toBe(429);
+      expect(warnsOf('order.notify.rate_limited')).toHaveLength(2);
+      vi.setSystemTime(start + 60_000);
+      expect((await freshPOST(req(goodBody()))).status).toBe(429);
+      expect(warnsOf('order.notify.rate_limited')).toEqual([
+        { limiter: 'tx', ipPrefix: IP_PREFIX, suppressed: 0 },
+        { limiter: 'subnet', ipPrefix: IP_PREFIX, suppressed: 0 },
+        { limiter: 'tx', ipPrefix: IP_PREFIX, suppressed: 3 },
+      ]);
+    });
+  });
+
+  describe('order.notify.binding_missing_stored (束縛なしの relay 注文の保存)', () => {
+    it('OFF で bind の無い relay 通知を保存: 応答は従来どおり、warn を 1 回・同じ支払いの再送では重ねない', async () => {
+      const f = relay();
+      const res = await POST(req(f.unbound));
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ ok: true, orderId: f.order.orderId });
+      expect(latestStoredOrder().bindingMissing).toBe(true);
+      expect(warnsOf('order.notify.binding_missing_stored')).toEqual([{
+        chainId: 80002,
+        merchant: MERCHANT,
+        txHash: f.body.txHash,
+        orderIdAgentPrefix: false,
+      }]);
+      expect(warnsOf('order.notify.binding_rejected')).toEqual([]);
+      // 同じ支払いの再送は束縛を見る前に duplicate を返す (1 支払いにつき 1 回)。
+      hold.claimValue = null;
+      hold.usedMarker = 'done';
+      expect(await (await POST(req(f.unbound))).json()).toEqual({ ok: true, duplicate: true });
+      expect(warnsOf('order.notify.binding_missing_stored')).toHaveLength(1);
+    });
+
+    it('旧 agent 経路の手がかり: orderId が agent- で始まると orderIdAgentPrefix: true (orderId 自体は載せない)', async () => {
+      const f = relay();
+      const orderId = `agent-${f.body.txHash.slice(0, 18)}`;
+      const res = await POST(req({ ...f.unbound, orderId }));
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ ok: true, orderId });
+      expect(warnsOf('order.notify.binding_missing_stored')).toEqual([{
+        chainId: 80002,
+        merchant: MERCHANT,
+        txHash: f.body.txHash,
+        orderIdAgentPrefix: true,
+      }]);
+      expect(JSON.stringify(warnSpy.mock.calls)).not.toContain(orderId);
+    });
+
+    it('recover (inline の利用料つき) の束縛なしの保存でも 1 回', async () => {
+      const f = relay('recover');
+      const res = await POST(req(f.unbound));
+      expect(res.status).toBe(200);
+      expect(latestStoredOrder().bindingMissing).toBe(true);
+      expect(warnsOf('order.notify.binding_missing_stored')).toEqual([
+        expect.objectContaining({ txHash: f.body.txHash, orderIdAgentPrefix: false }),
+      ]);
+    });
+
+    it('KV に保存しない要求 (KV 未設定の testnet) では出さない (保存できたときだけ)', async () => {
+      hold.kvConfigured = false;
+      const f = relay();
+      const res = await POST(req(f.unbound));
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ ok: true, orderId: f.order.orderId });
+      expect(lpushSpy).not.toHaveBeenCalled();
+      expectNoNewWarns();
+    });
+
+    it('保存できなかった要求 (inline 保存の Lua が想定外の値) では出さない', async () => {
+      hold.forwarder = BIND_FORWARDER;
+      // 店舗 970 + 利用料 30 (3%) を同じ receipt で払う recover = inline 保存 (kvEval) の経路。
+      const f = bindingFixture('recover', {
+        ...goodBody(),
+        handle: 'alice',
+        tokenAddress: resolveDeployment('jpyc', 80002)!.address,
+      }, 970n * JPYC, 30n * JPYC);
+      hold.verify = { ok: true, value: 970n * JPYC, receiptLogs: f.logs };
+      const { bind: _bind, ...unbound } = f.body;
+      hold.evalResults = [{ value: 2 }]; // 保存済みと読まず 503 にする既存の分岐
+      const res = await POST(req(unbound));
+      expect(res.status).toBe(503);
+      expect(await res.json()).toEqual({ ok: false, error: 'kv_error' });
+      expect(evalSpy).toHaveBeenCalledTimes(1);
+      expectNoNewWarns();
+    });
+  });
+
+  describe('新しい warn を出さない場合', () => {
+    it('標準の送金の注文の保存 (成功)', async () => {
+      const res = await POST(req(goodBody()));
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ ok: true, orderId: 'oid-1' });
+      expectNoNewWarns();
+    });
+
+    it('ON でも、relay の証拠が無い bind なしの通知は従来どおり保存 (unboundPayment)', async () => {
+      vi.stubEnv('ENABLE_ORDER_BIND_ENFORCE', 'true');
+      const res = await POST(req(goodBody()));
+      expect(res.status).toBe(200);
+      expect(latestStoredOrder().unboundPayment).toBe(true);
+      expectNoNewWarns();
+    });
+
+    it.each(['free', 'recover'] as const)('束縛つきの relay 注文の保存 (%s)', async (mode) => {
+      const f = relay(mode);
+      const res = await POST(req(f.body));
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ ok: true, orderId: f.order.orderId });
+      expect(latestStoredOrder().bindingDigest).toMatch(/^0x[0-9a-f]{64}$/);
+      expectNoNewWarns();
+    });
+
+    it.each(['done', 'pending'] as const)('ON でも bind なしの再送 (%s) は束縛を見る前に返す', async (marker) => {
+      vi.stubEnv('ENABLE_ORDER_BIND_ENFORCE', 'true');
+      const f = relay();
+      hold.claimValue = null;
+      hold.usedMarker = marker;
+      const res = await POST(req(f.unbound));
+      expect(res.status).toBe(marker === 'done' ? 200 : 409);
+      expectNoNewWarns();
+    });
+
+    it('別の 422 (送金の検証の失敗): verify_failed だけ', async () => {
+      hold.verify = { ok: false, reason: 'amount_too_low' };
+      const res = await POST(req(goodBody()));
+      expect(res.status).toBe(422);
+      expect(await res.json()).toEqual({ ok: false, error: 'amount_too_low' });
+      expect(warnSpy).toHaveBeenCalledWith('order.notify.verify_failed', { reason: 'amount_too_low', chainId: 80002, merchant: MERCHANT });
+      expectNoNewWarns();
+    });
+
+    it('別の 422 (tx_too_old): verify_failed だけ', async () => {
+      const f = relay();
+      getBlockSpy.mockResolvedValue({ timestamp: BigInt(Date.now() / 1000 - 31 * 60) });
+      const res = await POST(req(f.unbound));
+      expect(res.status).toBe(422);
+      expect(await res.json()).toEqual({ ok: false, error: 'tx_too_old' });
+      expect(warnSpy).toHaveBeenCalledWith('order.notify.verify_failed', expect.objectContaining({ reason: 'tx_too_old' }));
+      expectNoNewWarns();
+    });
+  });
+});
