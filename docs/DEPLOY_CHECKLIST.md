@@ -1831,8 +1831,9 @@ body の `mode` は見ない。
 **2-4. 旧 agent-order/pay の `allowLegacy` 経路を使う相手がいないこと (N8)。**
 - agent-order/pay は、支払いを回復するときに予約が見つからない (`missing`) と `allowLegacy` を立てる
   (`app/api/agent-order/pay/route.ts:313-317`)。
-- この経路は、束縛なしの通知を内部で `/api/order/notify` に送る (`:234-261`)。x402 の settle は forwarder を通るので relay の
-  証拠があり、ON ではこの通知が 422 `order_binding_mismatch` になる。
+- この経路は、束縛なしの通知を内部で `/api/order/notify` に送る (`:234-261`)。agent 注文は forwarder のあるチェーンだけで
+  受け (`:9`)、x402 の settle は forwarder を通るので relay の証拠がある。ON ではこの通知が 422 `order_binding_mismatch` になる。
+- この 422 は関数の中の呼び出しなので、`/api/order/notify` の要求としてはログに出ない (外側は `/api/agent-order/pay` の 200)。
 - そのときの応答は、支払いは済んだまま `200`・`ok:true`・`orderRegistered:false`。`paymentSettled` と `repair`
   (`do_not_pay_again`) は付かない (`:282-285` は、予約があるか `allowLegacy` が false のときだけ付ける)。注文は受注ボードに
   出ない。
@@ -1850,7 +1851,8 @@ body の `mode` は見ない。
 2. 基準を取る。Vercel → Logs (production) で、点灯前の数日の `/api/order/notify` の 422 と 429 の数を見ておく。
 3. Vercel → Settings → Environment Variables の Production に `ENABLE_ORDER_BIND_ENFORCE=true` を足す。
 4. 再 deploy する。この flag は要求ごとに `process.env` を読むが、Vercel は env の変更を新しい deploy にしか入れない
-   (server だけの env でも同じ)。
+   (Vercel の仕様で、コードでは確かめられない。ほかの server だけの flag も再 deploy で点灯・停止している: §14.8b の
+   `ENABLE_X402_DUAL_RAIL_ARC`・§16.4 の `ENABLE_LICENSE_NFT_PUBLIC`)。
 5. 点灯後に見るもの:
    - `/api/order/notify` の 422。束縛の拒否は、route がログを書かない (`app/api/order/notify/route.ts:515-518`)。ほかの
      422 (送金の検証の失敗・`tx_too_old`) は、同じ要求に warn `order.notify.verify_failed` が出る (`:459-464`・`:495-501`)。
