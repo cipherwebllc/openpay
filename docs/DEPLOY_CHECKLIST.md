@@ -1742,6 +1742,148 @@ forwarderRecover を mock しているため、**実 on-chain 分割の実証は
 - 料金性質の弁護士確認は不要 (memory:project_fsa_clearance: % 連動でも資金決済法上の登録不要)・
   税務は別 (税理士)。特商法 / 景表法の開示は条件付き本文 (施行日 2026-06-17) でマージ済。
 
+### §13.7 受注通知の束縛の強制 (`ENABLE_ORDER_BIND_ENFORCE`) を点灯する前の確認 (第 9 回レビュー PR-17・2026-11-06)
+
+`ENABLE_ORDER_BIND_ENFORCE` は server だけの flag (既定 OFF)。`true` か `1` で ON、それ以外は OFF
+(`lib/order/orderBindingVerify.ts:10-12`)。ON にすると、モバイル注文の受注通知 (`POST /api/order/notify`) で、relay の
+支払いに注文の束縛 (`bind`) を必須にする。設計は A2c (#607・`plans/archive/a2c-human-checkout-binding.md` §2.4)。
+今は OFF のまま観測している。**点灯は user が決めて user が行う** (掟 15)。この節は、点灯の前に確かめることと、点灯後に
+見るものをまとめる (第 9 回レビュー PR-11 = #1004 の「点灯前の項目」をここへ移した・計画の Q3)。
+
+**1. 点灯で変わること**
+
+支払いの種類は receipt で決める (`receiptHasRelayEvidence`・`lib/order/orderBindingVerify.ts:18-25`)。JPYC の
+`AuthorizationUsed`・forwarder の `Settled`・forwarder を通る Transfer のどれかがあれば relay、どれも無ければ標準として扱う。
+body の `mode` は見ない。
+
+| 受注通知 | OFF (今) | ON |
+|---|---|---|
+| relay の支払い・正しい `bind` つき | 受け付ける (`bindingDigest` を保存) | 同じ |
+| relay の支払い・`bind` が壊れている / 合わない | 422 `order_binding_mismatch` | 同じ |
+| relay の支払い・`bind` なし | 受け付けて `bindingMissing` を付ける (受注ボードに赤い注意) | **422 `order_binding_mismatch`** |
+| relay の証拠が無い支払い (標準の ERC-20 送金・relay を使わない ERC-4337/7702)・`bind` なし | 受け付けて `unboundPayment` を付ける (受注ボードに黄色の注記) | 同じ (束縛されないまま・A2c で受容した残り) |
+| `bind` なし・同じ tx の注文が登録済み / 処理中 | 200 `duplicate` / 409 `processing` (束縛を見る前に返す) | 同じ |
+
+- 根拠: `lib/order/orderBindingVerify.ts:44-53`・`app/api/order/notify/route.ts:425-431`・`:511-518`・`:571-575`。
+- ON で 422 にするときは、注文を作らず、txHash の処理中の印も戻す (`releaseClaim`)。route はこの 422 をログに書かない。
+- 今の画面 (`components/CheckoutForm.tsx`) は、自サイトの notify に送る relay の会計では必ず `bind` を付ける (`:1416-1436`)。
+  なので、今の画面で払うお客様には、ON で変わることが無い。
+- ON で新しく 422 になるのは、束縛なしの relay 通知を出す次の 3 つだけ。
+  - 旧 agent-order/pay の経路 (下の 2-4・N8)。
+  - #607 (2026-09-25) より前の画面を開いたままのタブ。
+  - 画面を通さない直接の POST (横取りを狙う第三者を含む)。
+- 束縛つきの通知が 422 になったとき (OFF でも同じ)、お客様の画面は「支払いは確認できましたが、注文を自動登録できません
+  でした。…」(`CheckoutForm.orderNotifyTooOld`) を出して終わる (`components/CheckoutForm.tsx:1027-1036`)。429・5xx・
+  422 `tx_not_found`・通信エラーのときは、同じ文と「注文登録を再試行」のボタンを出す。自動で送り直すのは 409 `processing`
+  だけ (`:117-119`・`:135-153`・`:165-168`)。
+
+**2. 点灯の前提 (4 つ)**
+
+**2-1. #1004 (第 9 回レビュー E-1) が本番に出ていること。**
+- txHash ごとの枠 (5 回/分・`checkRateLimit`) は検証の前に数え、拒否した試行も数える (`lib/relay/relayGuards.ts:94-113`)。
+- txHash はオンチェーンで公開される。鍵が txHash だけだと、第三者が同じ txHash を先に 5 回送るだけで、お客様の正規の通知が
+  429 になる。
+- OFF の間は、第三者は束縛なしの通知で先に登録できる (`bindingMissing` になる)。ON にするとその道が閉じ、残るのがこの枠の
+  使い切り。
+- #1004 は枠の鍵を `order:tx:<txHash>:<hashIpBucket(clientIp(req)) ?? 'none'>` にした
+  (`app/api/order/notify/route.ts:354-355`)。別の IP からの試行は、お客様の枠を使わない。
+- 確かめ方: merge commit `3c190b87` が本番の deploy に含まれていること。
+
+  ```bash
+  # 本番の最新の deploy の commit (Vercel が deploy ごとに GitHub へ記録する)
+  gh api 'repos/{owner}/{repo}/deployments?environment=Production&per_page=1' --jq '.[0].sha'
+  git fetch origin main && git merge-base --is-ancestor 3c190b87 <上の sha> && echo ok
+  ```
+
+  Vercel で前の deploy に戻した (§4b) 後は、Vercel → Deployments の Current の commit で同じことを確かめる。
+- 2026-11-06 時点: 本番の最新の deploy (`e033ad4d`・success) は `3c190b87` を含む。
+
+**2-2. 本番に `IP_HASH_SECRET` (32 byte 以上) があること。**
+- 秘密値が無いか 32 byte 未満だと、`hashIpBucket` は null を返す (`lib/net/ipHash.ts:73-91`)。
+- そのとき txHash の枠は、すべての要求で `'none'` の 1 つを共有する。鍵は #1004 の前と同じ広さになり、2-1 の手当てが
+  効かない。
+- 値は読まずに、次のどちらかで確かめる。
+  - レジの「お店の端末で送る」で QR が出ること。受け渡しの id とトークンは同じ秘密値の HMAC で作り、32 byte 未満では
+    作らない (`lib/storeHandoffDeps.ts:113-120`)。作れないと 503 `handoff_unavailable` になる
+    (`lib/storeHandoff.ts:250-253`)。ただし 503 `handoff_unavailable` は KV の障害でも出るので、QR が出ないことだけでは
+    秘密値が無いとは言えない。
+  - Vercel → Logs (production) で warn `ratelimit.ip_hash_disabled` が無いこと。秘密値が無い (`reason: secret_missing`) か
+    短い (`secret_too_short`) と、IP の枠を使う要求が来たときに、インスタンスごとに 1 回出る (`lib/net/ipHash.ts:78-87`)。
+    要求が無い間は出ないので、通知や支払いのある期間で見る。
+
+**2-3. 束縛なしの relay 注文 (`bindingMissing`) を観測すること。**
+- 数える場所は、本番 KV の受注一覧 `order:list:<受取アドレスの小文字>` (`lib/orderRelay.ts:136-138`)。各要素は注文の JSON で、
+  束縛なしの relay 注文は `"bindingMissing":true` を持つ。
+- KV を読むのは user の操作 (読むだけ)。SCAN と LRANGE の回数だけ Upstash のコマンドを使う (§14.9c)。KV バックアップ
+  (§16.6.1) の対象に `order:` は入っていない。
+- 一覧は店ごとに新しい 200 件まで (`ORDER_LIST_MAX`)。最後の注文から 72 時間で消える (`ORDER_LIST_TTL_SEC`・注文を保存する
+  たびに張り直す・`app/api/order/notify/route.ts:671-672`)。期間を通して数えるなら、72 時間より短い間隔で読む。
+- 受注ボード (`/create` の「受注」タブ・`/orders/kitchen`・`/orders/hall`) では、その注文のカードに赤い注意
+  「支払いと注文の結びつき未確認 — 受け渡し前に手動確認が必要」が出る (`components/OrderBindingNotice.tsx`)。
+  ボードは店ごとなので、全店の数は KV でしか数えられない。
+- ログでは数えられない。保存の info `order.notify.stored` は `bindingMissing` を持たない
+  (`app/api/order/notify/route.ts:709`)。info は既定の `NEXT_PUBLIC_LOG_LEVEL=warn` では出ない (`lib/logger.ts:15-19`)。
+- 出どころの手がかり: `orderId` が `agent-` で始まり、同じ txHash の warn `order.agent.legacy_unreserved` があるものは、
+  旧 agent 経路 (2-4)。それ以外は、古い画面か直接の POST。注文だけでは、お客様の正規の注文か横取りかは区別できない。
+- 何件なら点灯してよいかは user が決める。A2c の計画では「deploy 後 1〜2 週で bindingMissing の発生を見てから ON
+  (user 判断)」としていた。
+
+**2-4. 旧 agent-order/pay の `allowLegacy` 経路を使う相手がいないこと (N8)。**
+- agent-order/pay は、支払いを回復するときに予約が見つからない (`missing`) と `allowLegacy` を立てる
+  (`app/api/agent-order/pay/route.ts:313-317`)。
+- この経路は、束縛なしの通知を内部で `/api/order/notify` に送る (`:234-261`)。x402 の settle は forwarder を通るので relay の
+  証拠があり、ON ではこの通知が 422 `order_binding_mismatch` になる。
+- そのときの応答は、支払いは済んだまま `200`・`ok:true`・`orderRegistered:false`。`paymentSettled` と `repair`
+  (`do_not_pay_again`) は付かない (`:282-285` は、予約があるか `allowLegacy` が false のときだけ付ける)。注文は受注ボードに
+  出ない。
+- 同じ tx の注文がもう登録済みなら、ON でも notify は束縛を見る前に 200 `duplicate` を返し、`orderRegistered:true` になる
+  (`app/api/order/notify/route.ts:425-431`)。
+- 今のコードでは、新しい支払いは settle の前に必ず予約する。予約できなければ settle しない
+  (`app/api/agent-order/pay/route.ts:796-815`)。
+- この経路に入るのは、再配信の記録 (30 分・`PAYMENT_REDELIVERY_TTL_SEC`) が残っているのに、予約 (24 時間・
+  `AGENT_RESERVATION_TTL_SEC`) が無いときだけ。予約の導入 (#586・2026-09-24) より前の記録は、30 分で消えている。
+- 確かめ方: Vercel → Logs (production) で、warn `order.agent.legacy_unreserved` が観測の期間に 0 件であること。この経路に
+  入るたびに 1 回出る (`app/api/agent-order/pay/route.ts:237`)。
+
+**3. 点灯の手順 (user)**
+1. 2-1〜2-4 を確かめる。
+2. 基準を取る。Vercel → Logs (production) で、点灯前の数日の `/api/order/notify` の 422 と 429 の数を見ておく。
+3. Vercel → Settings → Environment Variables の Production に `ENABLE_ORDER_BIND_ENFORCE=true` を足す。
+4. 再 deploy する。この flag は要求ごとに `process.env` を読むが、Vercel は env の変更を新しい deploy にしか入れない
+   (server だけの env でも同じ)。
+5. 点灯後に見るもの:
+   - `/api/order/notify` の 422。束縛の拒否は、route がログを書かない (`app/api/order/notify/route.ts:515-518`)。ほかの
+     422 (送金の検証の失敗・`tx_too_old`) は、同じ要求に warn `order.notify.verify_failed` が出る (`:459-464`・`:495-501`)。
+     なので、その warn の無い 422 が束縛の拒否。基準より増えた分が、ON で拒否した束縛なしの通知。
+   - 増えたら、束縛なしの relay 通知を出す相手 (1 の 3 つ) が残っている。お客様から「払ったのに注文が出ない」と申し出が
+     あれば、お店がその支払いの Tx を見て手で受ける。
+   - warn `order.agent.legacy_unreserved` が出たら、その agent 注文は登録されていないかもしれない (2-4)。txHash で受注一覧を
+     確かめる。
+   - 429。E-1 の手当ての後も、同じ IP (IPv4 /32・IPv6 /64) からの 6 回目以降は 429 になる (#1004 で受け入れた残り)。
+     基準より大きく増えたら、同じ IP からの使い切りを疑う。429 も route はログを書かない。
+   - お客様のブラウザの warn `checkout.webhook.non_ok` (Sentry) も目安になる。`status` だけを持ち、422 の理由は持たない。
+
+**4. 戻し方**
+- `ENABLE_ORDER_BIND_ENFORCE` を消すか `false` にして、再 deploy する。束縛なしの relay 通知は、また `bindingMissing` を
+  付けて受け付ける。
+- ON の間に 422 で落ちた通知は、注文も処理中の印も残していない。OFF に戻した後に同じ通知が届けば、受け付ける。
+- ただし受け付けるのは、支払いの block から 30 分以内だけ。過ぎると 422 `tx_too_old` (`app/api/order/notify/route.ts:495-501`)。
+- 落ちた通知を自動で送り直す仕組みは無い。旧 agent 経路は、同じ署名ヘッダが再送されたとき (再配信の記録が残る 30 分の間)
+  だけ通知を出し直す。30 分を過ぎた注文は、お店がお客様の Tx を見て手で受ける。
+
+**5. 公開文言・法務文書・llms.txt**
+- 触れる必要は無い。料率・対応チェーン・課金条件は変わらないので、掟 14 の開示 3 点セットの対象外。
+- 束縛に触れている画面の文言は、受注ボードの 2 つ (`OrderBinding.unverified`・`OrderBinding.unboundPayment`) だけ。ON でも
+  そのまま使う。点灯の前に保存した `bindingMissing` の注文は、一覧から消えるまで赤い注意を出し続ける。
+- お客様の画面の文言 (`CheckoutForm.orderNotifyTooOld`・`CheckoutForm.retryOrderNotify`) も変わらない。
+- `public/llms.txt`・`lib/legal.ts`・`docs/CHECKOUT.md` に束縛の記述は無い (2026-11-06 に grep で確認)。`docs/ENV.md` の
+  行は今のコードと合っていて、直す必要は無い。
+
+**ON でも残るもの (受容済み)**
+- 標準の ERC-20 送金と、relay を使わない ERC-4337/7702 の支払いは束縛されない (受注ボードの黄色の注記 `unboundPayment`・
+  A2c §4)。
+- お客様と同じ IP (同じ NAT・店内 Wi-Fi・CGNAT) の第三者は、txHash の枠を使い切れる (#1004 で受け入れた残り)。
+
 ## §14 x402 facilitator (JPYC 都度課金) go-live SOP
 
 AI エージェント向け x402 (HTTP 402) ファシリテーター + 公開カタログ (discovery)。買い手上乗せ手数料
