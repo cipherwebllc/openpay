@@ -449,6 +449,13 @@ export const env = {
     'NEXT_PUBLIC_ENABLE_TIP_MESSAGE',
     process.env.NEXT_PUBLIC_ENABLE_TIP_MESSAGE,
   ),
+  // 「売上をほかのウォレットへ移す」(plans/store-sales-move.md)。ガス代 (POL) の無いお店が、Polygon の JPYC を
+  // 利用料 2 JPYC の上乗せで自分の別のウォレットへ移す専用の route (/api/relay/jpyc/move)。**既定 OFF で完全
+  // inert** = route は 404。点灯は画面と開示 3 点セット (P2) がそろった同一リリースで。'1' / 'true' で ON。
+  enableSalesMove: parseBoolFlag(
+    'NEXT_PUBLIC_ENABLE_SALES_MOVE',
+    process.env.NEXT_PUBLIC_ENABLE_SALES_MOVE,
+  ),
   // JPYC を Avalanche (本番) / Avalanche Fuji (testnet) でも提供するかのフラグ。**既定 OFF**。
   // OFF の間は JPYC_CHAINS=['polygon','kaia'] のままで挙動完全不変。ON にすると JPYC_CHAINS に
   // 'avalanche' が加わり、NETWORK_ENV=testnet では Fuji・mainnet では Avalanche が JPYC チェーンに

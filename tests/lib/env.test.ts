@@ -137,6 +137,23 @@ describe('lib/env (module-load validation)', () => {
     expect(mod.env.enableTipMessage).toBe(true);
   });
 
+  it('売上の移動 (sales move) flag は既定 OFF で literal の 1/true だけを受理する', async () => {
+    vi.resetModules();
+    delete process.env.NEXT_PUBLIC_ENABLE_SALES_MOVE;
+    let mod = await import('@/lib/env');
+    expect(mod.env.enableSalesMove).toBe(false);
+
+    vi.resetModules();
+    process.env.NEXT_PUBLIC_ENABLE_SALES_MOVE = '0';
+    mod = await import('@/lib/env');
+    expect(mod.env.enableSalesMove).toBe(false);
+
+    vi.resetModules();
+    process.env.NEXT_PUBLIC_ENABLE_SALES_MOVE = 'true';
+    mod = await import('@/lib/env');
+    expect(mod.env.enableSalesMove).toBe(true);
+  });
+
   it('注文メモは自身の flag と ORDER_RELAY の両方が ON のときだけ有効', async () => {
     vi.resetModules();
     process.env.NEXT_PUBLIC_ENABLE_ORDER_MEMO = '1';

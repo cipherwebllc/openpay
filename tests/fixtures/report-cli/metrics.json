@@ -12,14 +12,16 @@
           "metrics:2026-09:relay_jpyc",
           "metrics:2026-09:x402_settle",
           "metrics:2026-09:order",
-          "metrics:2026-09:store_purchase"
+          "metrics:2026-09:store_purchase",
+          "metrics:2026-09:sales_move"
         ],
         "body": {
           "result": [
             "12",
             "003",
             null,
-            "broken"
+            "broken",
+            "4"
           ]
         }
       },
@@ -54,7 +56,7 @@
         }
       }
     ],
-    "stdout": "\n== 2026-09 (UTC 月・server 観測範囲) ==\n      12  JPYC 決済 (relay/gasless: QR・レジ・注文・チップ)\n       3  x402 settle (AI ストア/有料 API)\n       0  モバイル注文 (受注保存)\n       0  デジタル商品 購入確定\n      15  合計 (観測イベント)\n\n== 現在値 ==\n       3  Store 掲載商品数 (index)\n       7  累計 商品購入数 (掲載中商品・2026-08-08 計測開始)\n\n",
+    "stdout": "\n== 2026-09 (UTC 月・server 観測範囲) ==\n      12  JPYC 決済 (relay/gasless: QR・レジ・注文・チップ)\n       3  x402 settle (AI ストア/有料 API)\n       0  モバイル注文 (受注保存)\n       0  デジタル商品 購入確定\n       4  売上の移動 (relay/gasless: お店の別のウォレットへ・決済ではない)\n      19  合計 (観測イベント)\n\n== 現在値 ==\n       3  Store 掲載商品数 (index)\n       7  累計 商品購入数 (掲載中商品・2026-08-08 計測開始)\n\n",
     "stderr": "",
     "status": 0
   },
@@ -69,7 +71,8 @@
           "metrics:2026-09:relay_jpyc",
           "metrics:2026-09:x402_settle",
           "metrics:2026-09:order",
-          "metrics:2026-09:store_purchase"
+          "metrics:2026-09:store_purchase",
+          "metrics:2026-09:sales_move"
         ],
         "body": {
           "result": null
@@ -81,7 +84,8 @@
           "metrics:2026-08:relay_jpyc",
           "metrics:2026-08:x402_settle",
           "metrics:2026-08:order",
-          "metrics:2026-08:store_purchase"
+          "metrics:2026-08:store_purchase",
+          "metrics:2026-08:sales_move"
         ],
         "body": {
           "result": []
@@ -99,7 +103,7 @@
         }
       }
     ],
-    "stdout": "\n== 2026-09 (UTC 月・server 観測範囲) ==\n       0  JPYC 決済 (relay/gasless: QR・レジ・注文・チップ)\n       0  x402 settle (AI ストア/有料 API)\n       0  モバイル注文 (受注保存)\n       0  デジタル商品 購入確定\n       0  合計 (観測イベント)\n\n== 2026-08 (UTC 月・server 観測範囲) ==\n       0  JPYC 決済 (relay/gasless: QR・レジ・注文・チップ)\n       0  x402 settle (AI ストア/有料 API)\n       0  モバイル注文 (受注保存)\n       0  デジタル商品 購入確定\n       0  合計 (観測イベント)\n\n== 現在値 ==\n       0  Store 掲載商品数 (index)\n\n",
+    "stdout": "\n== 2026-09 (UTC 月・server 観測範囲) ==\n       0  JPYC 決済 (relay/gasless: QR・レジ・注文・チップ)\n       0  x402 settle (AI ストア/有料 API)\n       0  モバイル注文 (受注保存)\n       0  デジタル商品 購入確定\n       0  売上の移動 (relay/gasless: お店の別のウォレットへ・決済ではない)\n       0  合計 (観測イベント)\n\n== 2026-08 (UTC 月・server 観測範囲) ==\n       0  JPYC 決済 (relay/gasless: QR・レジ・注文・チップ)\n       0  x402 settle (AI ストア/有料 API)\n       0  モバイル注文 (受注保存)\n       0  デジタル商品 購入確定\n       0  売上の移動 (relay/gasless: お店の別のウォレットへ・決済ではない)\n       0  合計 (観測イベント)\n\n== 現在値 ==\n       0  Store 掲載商品数 (index)\n\n",
     "stderr": "",
     "status": 0
   },
@@ -116,7 +120,8 @@
           "metrics:2026-09:relay_jpyc",
           "metrics:2026-09:x402_settle",
           "metrics:2026-09:order",
-          "metrics:2026-09:store_purchase"
+          "metrics:2026-09:store_purchase",
+          "metrics:2026-09:sales_move"
         ],
         "body": {
           "result": [
@@ -161,7 +166,7 @@
         }
       }
     ],
-    "stdout": "\n== 2026-09 (UTC 月・server 観測範囲) ==\n      12  JPYC 決済 (relay/gasless: QR・レジ・注文・チップ)\n       2  x402 settle (AI ストア/有料 API)\n       0  モバイル注文 (受注保存)\n       3  デジタル商品 購入確定\n      17  合計 (観測イベント)\n\n== 現在値 ==\n       1  Store 掲載商品数 (index)\n       6  累計 商品購入数 (掲載中商品・2026-08-08 計測開始)\n\n",
+    "stdout": "\n== 2026-09 (UTC 月・server 観測範囲) ==\n      12  JPYC 決済 (relay/gasless: QR・レジ・注文・チップ)\n       2  x402 settle (AI ストア/有料 API)\n       0  モバイル注文 (受注保存)\n       3  デジタル商品 購入確定\n       0  売上の移動 (relay/gasless: お店の別のウォレットへ・決済ではない)\n      17  合計 (観測イベント)\n\n== 現在値 ==\n       1  Store 掲載商品数 (index)\n       6  累計 商品購入数 (掲載中商品・2026-08-08 計測開始)\n\n",
     "stderr": "",
     "status": 0
   },
@@ -178,7 +183,8 @@
           "metrics:2026-09:relay_jpyc",
           "metrics:2026-09:x402_settle",
           "metrics:2026-09:order",
-          "metrics:2026-09:store_purchase"
+          "metrics:2026-09:store_purchase",
+          "metrics:2026-09:sales_move"
         ],
         "body": {
           "error": "NOPERM fixture"
@@ -194,7 +200,7 @@
         "body": {}
       }
     ],
-    "stdout": "\n== 2026-09 (UTC 月・server 観測範囲) ==\n       0  JPYC 決済 (relay/gasless: QR・レジ・注文・チップ)\n       0  x402 settle (AI ストア/有料 API)\n       0  モバイル注文 (受注保存)\n       0  デジタル商品 購入確定\n       0  合計 (観測イベント)\n\n== 現在値 ==\n       0  Store 掲載商品数 (index)\n\n",
+    "stdout": "\n== 2026-09 (UTC 月・server 観測範囲) ==\n       0  JPYC 決済 (relay/gasless: QR・レジ・注文・チップ)\n       0  x402 settle (AI ストア/有料 API)\n       0  モバイル注文 (受注保存)\n       0  デジタル商品 購入確定\n       0  売上の移動 (relay/gasless: お店の別のウォレットへ・決済ではない)\n       0  合計 (観測イベント)\n\n== 現在値 ==\n       0  Store 掲載商品数 (index)\n\n",
     "stderr": "",
     "status": 0
   },
@@ -211,7 +217,8 @@
           "metrics:2026-09:relay_jpyc",
           "metrics:2026-09:x402_settle",
           "metrics:2026-09:order",
-          "metrics:2026-09:store_purchase"
+          "metrics:2026-09:store_purchase",
+          "metrics:2026-09:sales_move"
         ],
         "body": {
           "result": "1234"
@@ -229,7 +236,7 @@
         }
       }
     ],
-    "stdout": "\n== 2026-09 (UTC 月・server 観測範囲) ==\n       1  JPYC 決済 (relay/gasless: QR・レジ・注文・チップ)\n       2  x402 settle (AI ストア/有料 API)\n       3  モバイル注文 (受注保存)\n       4  デジタル商品 購入確定\n      10  合計 (観測イベント)\n\n== 現在値 ==\n       3  Store 掲載商品数 (index)\n\n",
+    "stdout": "\n== 2026-09 (UTC 月・server 観測範囲) ==\n       1  JPYC 決済 (relay/gasless: QR・レジ・注文・チップ)\n       2  x402 settle (AI ストア/有料 API)\n       3  モバイル注文 (受注保存)\n       4  デジタル商品 購入確定\n       0  売上の移動 (relay/gasless: お店の別のウォレットへ・決済ではない)\n      10  合計 (観測イベント)\n\n== 現在値 ==\n       3  Store 掲載商品数 (index)\n\n",
     "stderr": "",
     "status": 0
   },
@@ -247,7 +254,8 @@
           "metrics:--json:relay_jpyc",
           "metrics:--json:x402_settle",
           "metrics:--json:order",
-          "metrics:--json:store_purchase"
+          "metrics:--json:store_purchase",
+          "metrics:--json:sales_move"
         ],
         "body": {
           "result": [
@@ -270,7 +278,7 @@
         }
       }
     ],
-    "stdout": "\n== --json (UTC 月・server 観測範囲) ==\n       1  JPYC 決済 (relay/gasless: QR・レジ・注文・チップ)\n      -2  x402 settle (AI ストア/有料 API)\n       0  モバイル注文 (受注保存)\n       0  デジタル商品 購入確定\n      -1  合計 (観測イベント)\n\n== 現在値 ==\n       0  Store 掲載商品数 (index)\n\n",
+    "stdout": "\n== --json (UTC 月・server 観測範囲) ==\n       1  JPYC 決済 (relay/gasless: QR・レジ・注文・チップ)\n      -2  x402 settle (AI ストア/有料 API)\n       0  モバイル注文 (受注保存)\n       0  デジタル商品 購入確定\n       0  売上の移動 (relay/gasless: お店の別のウォレットへ・決済ではない)\n      -1  合計 (観測イベント)\n\n== 現在値 ==\n       0  Store 掲載商品数 (index)\n\n",
     "stderr": "",
     "status": 0
   },
@@ -287,7 +295,8 @@
           "metrics:2026-99:relay_jpyc",
           "metrics:2026-99:x402_settle",
           "metrics:2026-99:order",
-          "metrics:2026-99:store_purchase"
+          "metrics:2026-99:store_purchase",
+          "metrics:2026-99:sales_move"
         ],
         "body": {
           "result": []
@@ -308,7 +317,7 @@
     "env": {
       "KV_REST_API_URL": "http://report.example.test/custom/path?fixture=1#tail"
     },
-    "stdout": "\n== 2026-99 (UTC 月・server 観測範囲) ==\n       0  JPYC 決済 (relay/gasless: QR・レジ・注文・チップ)\n       0  x402 settle (AI ストア/有料 API)\n       0  モバイル注文 (受注保存)\n       0  デジタル商品 購入確定\n       0  合計 (観測イベント)\n\n== 現在値 ==\n       0  Store 掲載商品数 (index)\n\n",
+    "stdout": "\n== 2026-99 (UTC 月・server 観測範囲) ==\n       0  JPYC 決済 (relay/gasless: QR・レジ・注文・チップ)\n       0  x402 settle (AI ストア/有料 API)\n       0  モバイル注文 (受注保存)\n       0  デジタル商品 購入確定\n       0  売上の移動 (relay/gasless: お店の別のウォレットへ・決済ではない)\n       0  合計 (観測イベント)\n\n== 現在値 ==\n       0  Store 掲載商品数 (index)\n\n",
     "stderr": "",
     "status": 0
   },
@@ -325,7 +334,8 @@
           "metrics:garbage:relay_jpyc",
           "metrics:garbage:x402_settle",
           "metrics:garbage:order",
-          "metrics:garbage:store_purchase"
+          "metrics:garbage:store_purchase",
+          "metrics:garbage:sales_move"
         ],
         "body": {
           "result": []
@@ -346,7 +356,7 @@
     "env": {
       "KV_REST_API_URL": "not a URL"
     },
-    "stdout": "\n== garbage (UTC 月・server 観測範囲) ==\n       0  JPYC 決済 (relay/gasless: QR・レジ・注文・チップ)\n       0  x402 settle (AI ストア/有料 API)\n       0  モバイル注文 (受注保存)\n       0  デジタル商品 購入確定\n       0  合計 (観測イベント)\n\n== 現在値 ==\n       0  Store 掲載商品数 (index)\n\n",
+    "stdout": "\n== garbage (UTC 月・server 観測範囲) ==\n       0  JPYC 決済 (relay/gasless: QR・レジ・注文・チップ)\n       0  x402 settle (AI ストア/有料 API)\n       0  モバイル注文 (受注保存)\n       0  デジタル商品 購入確定\n       0  売上の移動 (relay/gasless: お店の別のウォレットへ・決済ではない)\n       0  合計 (観測イベント)\n\n== 現在値 ==\n       0  Store 掲載商品数 (index)\n\n",
     "stderr": "",
     "status": 0
   },
@@ -363,7 +373,8 @@
           "metrics:2026-09:relay_jpyc",
           "metrics:2026-09:x402_settle",
           "metrics:2026-09:order",
-          "metrics:2026-09:store_purchase"
+          "metrics:2026-09:store_purchase",
+          "metrics:2026-09:sales_move"
         ],
         "body": {
           "result": []
@@ -392,7 +403,7 @@
         }
       }
     ],
-    "stdout": "\n== 2026-09 (UTC 月・server 観測範囲) ==\n       0  JPYC 決済 (relay/gasless: QR・レジ・注文・チップ)\n       0  x402 settle (AI ストア/有料 API)\n       0  モバイル注文 (受注保存)\n       0  デジタル商品 購入確定\n       0  合計 (観測イベント)\n\n== 現在値 ==\n       1  Store 掲載商品数 (index)\n",
+    "stdout": "\n== 2026-09 (UTC 月・server 観測範囲) ==\n       0  JPYC 決済 (relay/gasless: QR・レジ・注文・チップ)\n       0  x402 settle (AI ストア/有料 API)\n       0  モバイル注文 (受注保存)\n       0  デジタル商品 購入確定\n       0  売上の移動 (relay/gasless: お店の別のウォレットへ・決済ではない)\n       0  合計 (観測イベント)\n\n== 現在値 ==\n       1  Store 掲載商品数 (index)\n",
     "stderr": "TypeError: (counts ?? []).reduce is not a function\n",
     "status": 1
   }

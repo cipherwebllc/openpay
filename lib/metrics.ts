@@ -22,6 +22,8 @@ export const METRIC_KINDS = [
   'order',
   // hosted デジタル商品の購入確定 (finalize 初回のみ)
   'store_purchase',
+  // 「売上をほかのウォレットへ移す」の中継成功 (/api/relay/jpyc/move)。決済ではないので relay_jpyc には数えない
+  'sales_move',
 ] as const;
 
 export type MetricKind = (typeof METRIC_KINDS)[number];

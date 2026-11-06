@@ -25,6 +25,7 @@ describe('metrics', () => {
       'x402_settle',
       'order',
       'store_purchase',
+      'sales_move',
     ]);
   });
 
