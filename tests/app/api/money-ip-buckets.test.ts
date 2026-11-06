@@ -15,6 +15,7 @@ vi.mock('@/lib/env', async (original) => {
     env: {
       ...actual.env,
       enableJpycEip3009: true,
+      enableSalesMove: true,
       enableCsvPass: true,
       feeReceiverConfigured: true,
       enableX402Facilitator: true,
@@ -61,6 +62,7 @@ vi.mock('@/lib/x402/hostedStore', () => ({
 }));
 
 import { POST as relayPost } from '@/app/api/relay/jpyc/route';
+import { POST as salesMovePost } from '@/app/api/relay/jpyc/move/route';
 import { POST as relayStatusPost } from '@/app/api/relay/jpyc/status/route';
 import { POST as csvPassPost } from '@/app/api/csv-pass/relay/route';
 import { POST as settlePost } from '@/app/api/facilitator/settle/route';
@@ -110,6 +112,8 @@ afterEach(() => {
 
 const admissionRoutes = [
   { name: 'relay/jpyc', run: relayPost, scope: 'relay-admission', max: 120 },
+  // 売上の移動は既存 relay と同じ枠を共有する (plans/store-sales-move.md §2.1)。
+  { name: 'relay/jpyc/move', run: salesMovePost, scope: 'relay-admission', max: 120 },
   { name: 'relay-status', run: relayStatusPost, scope: 'relay-status', max: 30 },
   { name: 'csv-pass/relay', run: csvPassPost, scope: 'relay-admission', max: 120 },
   { name: 'facilitator/settle', run: settlePost, scope: 'relay-admission', max: 120 },

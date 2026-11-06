@@ -85,7 +85,7 @@ describe('report credentials and existing failure policy (B-R8 remains separate)
   for (const script of ['metrics-report.mjs', 'settle-ledger-report.mjs', 'x402-funnel-report.mjs', 'agent-north-star-report.mjs']) {
     const args = script === 'x402-funnel-report.mjs' ? ['1'] : ['2026-09'];
     const command = script === 'metrics-report.mjs'
-      ? ['MGET', 'metrics:2026-09:relay_jpyc', 'metrics:2026-09:x402_settle', 'metrics:2026-09:order', 'metrics:2026-09:store_purchase']
+      ? ['MGET', 'metrics:2026-09:relay_jpyc', 'metrics:2026-09:x402_settle', 'metrics:2026-09:order', 'metrics:2026-09:store_purchase', 'metrics:2026-09:sales_move']
       : script === 'settle-ledger-report.mjs' || script === 'agent-north-star-report.mjs'
         ? ['LRANGE', 'x402:settle:ledger:2026-09', '0', '-1']
         : ['HGETALL', 'x402:funnel:2026-09-30'];

@@ -83,6 +83,9 @@ export const PROVIDER: 'self-host' | 'gelato' | null = RELAYER_PRIVATE_KEY
 const RELAYER_ACCOUNT: Account | null = RELAYER_PRIVATE_KEY
   ? privateKeyToAccount(RELAYER_PRIVATE_KEY)
   : null;
+// self-host relayer の EOA アドレス (公開情報・鍵ではない)。売上の移動 (/api/relay/jpyc/move) が送り先に relayer を
+// 指定されたのを拒むためだけに読む (relayer は OpenPay のガス用の EOA で、お店のウォレットではない)。
+export const RELAYER_ADDRESS: Address | null = RELAYER_ACCOUNT?.address ?? null;
 
 // relay 単発の上限 (濫用ガード + 立替を少額に限定して資金移動的に見えにくくする)。
 // RELAY_MAX_JPYC は human JPYC (アルファ既定 5 万)。旧 GELATO_RELAY_MAX_JPYC からリネーム

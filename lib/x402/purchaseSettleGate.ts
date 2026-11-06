@@ -24,7 +24,7 @@ import { parseLicenseDefinition } from '@/lib/license/definition';
 // と突き合わせて固定する。
 //
 // ⚠️ settleViaForwarder を呼ぶ入口を新設したら、この gate も必ず配線すること
-// (現在の入口: app/api/facilitator/settle・app/api/relay/jpyc)。
+// (現在の入口: app/api/facilitator/settle・app/api/relay/jpyc・app/api/relay/jpyc/move)。
 
 import { isKvConfigured, kvGet } from '@/lib/kv';
 import { logger } from '@/lib/logger';

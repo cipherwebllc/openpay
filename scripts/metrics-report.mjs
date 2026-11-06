@@ -10,7 +10,7 @@
 //   node scripts/metrics-report.mjs 2026-08    # 指定月
 //
 // ⚠️ 表示されるのは「server が観測できた範囲」: relay/gasless 決済・x402 settle・
-// 受注保存・商品購入確定。standard 決済 (お客様 gas 負担の直接送金) は含まれない。
+// 受注保存・商品購入確定・売上の移動 (決済ではない)。standard 決済 (お客様 gas 負担の直接送金) は含まれない。
 
 import { monthOf } from './lib/month-of.mjs';
 import { createReportKv } from './lib/report-kv.mjs';
@@ -20,6 +20,7 @@ const KINDS = [
   ['x402_settle', 'x402 settle (AI ストア/有料 API)'],
   ['order', 'モバイル注文 (受注保存)'],
   ['store_purchase', 'デジタル商品 購入確定'],
+  ['sales_move', '売上の移動 (relay/gasless: お店の別のウォレットへ・決済ではない)'],
 ];
 const STORE_INDEX_KEY = 'x402:hosted:store:index';
 
