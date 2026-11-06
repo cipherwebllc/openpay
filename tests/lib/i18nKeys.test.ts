@@ -892,7 +892,6 @@ describe('i18n: Nav / Landing 名前空間 (AppShell + LP, ja/en parity)', () =>
     'heroCta',
     'heroAudienceLead',
     'heroVisualAlt',
-    'wipNote',
     // Features section (3 cards)
     'featuresTitle',
     'featuresSubtitle',
@@ -910,7 +909,6 @@ describe('i18n: Nav / Landing 名前空間 (AppShell + LP, ja/en parity)', () =>
     'mobileOrderBannerAlt',
     'mobileOrderBannerCta',
     'mobileOrderBannerLearnMore',
-    'howItWorksVisualAlt',
     'howItWorksMerchantTitle',
     'howItWorksMerchantStep1',
     'howItWorksMerchantStep2',
@@ -1366,61 +1364,6 @@ describe('i18n: PayerReceipt keys (顧客向け電子レシート, ja/en parity)
   });
 });
 
-describe('i18n: Billing 名前空間 (利用料 paywall・ja/en parity)', () => {
-  // 深いキー集合を再帰収集 (tier.basic.name 等のネストを含む)。
-  function deepKeys(o: Record<string, unknown>, prefix = ''): string[] {
-    return Object.entries(o)
-      .flatMap(([k, v]) =>
-        v && typeof v === 'object'
-          ? deepKeys(v as Record<string, unknown>, `${prefix}${k}.`)
-          : [`${prefix}${k}`],
-      )
-      .sort();
-  }
-
-  it('ja と en でキー集合が完全一致', () => {
-    expect(deepKeys(ja.Billing as Record<string, unknown>)).toEqual(
-      deepKeys(en.Billing as Record<string, unknown>),
-    );
-  });
-
-  it('全 leaf が非空文字列 (空文字 silent regression 防止)', () => {
-    for (const m of [ja, en]) {
-      const flat = JSON.stringify(m.Billing);
-      const leaves = Object.values(
-        m.Billing as Record<string, unknown>,
-      ).flatMap((v) =>
-        v && typeof v === 'object' ? Object.values(v as object) : [v],
-      );
-      for (const leaf of leaves) {
-        // ネスト (tier) は object なので展開済。string のみ検査。
-        if (typeof leaf === 'string') {
-          expect(leaf.trim().length, flat).toBeGreaterThan(0);
-        }
-      }
-    }
-  });
-
-  it('必須キー (tier/価格/支払い/検証/付与) が存在', () => {
-    for (const m of [ja, en]) {
-      const b = m.Billing as Record<string, unknown>;
-      for (const k of [
-        'title',
-        'intro',
-        'payCta',
-        'verifying',
-        'granted',
-        'verifyError',
-      ]) {
-        expect(typeof b[k]).toBe('string');
-      }
-      const tier = b.tier as Record<string, { name?: unknown }>;
-      expect(typeof tier.basic.name).toBe('string');
-      expect(typeof tier.pro.name).toBe('string');
-    }
-  });
-});
-
 describe('i18n: UsageFee owed 一覧 keys (古い未収の期間別清算・ja/en parity)', () => {
   // REM-3 で追加。owed 複数月の一覧見出し ({count}) と各月の支払い金額 ({fee})。
   const OWED_KEYS = ['owedListTitle', 'owedPeriodAmount'] as const;
@@ -1817,13 +1760,11 @@ const DYNAMIC_KEY_PATTERNS: readonly { pattern: RegExp; site: string }[] = [
 ];
 
 /**
- * 未使用だが公開文言 (LP) なので、消すかを user が決めるまで残すキー (第 9 回レビュー F-06 で見つけた分)。
+ * 未使用だが公開文言 (LP) なので、消すかを user が決めるまで残すキー。
  * 使うようになったら、または消したら、ここからも外す (下の検査が残りを知らせる)。
+ * 第 9 回レビュー F-06 で見つけた Landing.wipNote・Landing.howItWorksVisualAlt は user 判断で消した (2026-11-06)。
  */
-const UNUSED_PUBLIC_COPY_PENDING: readonly string[] = [
-  'Landing.wipNote',
-  'Landing.howItWorksVisualAlt',
-];
+const UNUSED_PUBLIC_COPY_PENDING: readonly string[] = [];
 
 const MESSAGE_SOURCE_FILE = /\.(?:ts|tsx|js|jsx|mjs|cjs)$/;
 /** repo 直下でだけ除くディレクトリ (判定の対象そのもの・テストだけのコード)。 */
@@ -1889,9 +1830,23 @@ describe('i18n: 使われていないキーが無い (第 9 回レビュー F-06
     expect(allLeaves.some((leafPath) => pattern.test(leafPath))).toBe(true);
   });
 
-  it.each(UNUSED_PUBLIC_COPY_PENDING)('%s は ja/en にあり、まだ本番のソースに名前が出ない (使う・消すなら一覧から外す)', (leafPath) => {
-    expect(jaLeaves).toContain(leafPath);
-    expect(enLeaves).toContain(leafPath);
-    expect(appearsInSource(leafNameOf(leafPath))).toBe(false);
+  // 一覧が空でも走るように it.each ではなく 1 つの it で回す。
+  it('UNUSED_PUBLIC_COPY_PENDING の各キーは ja/en にあり、まだ本番のソースに名前が出ない (使う・消すなら一覧から外す)', () => {
+    for (const leafPath of UNUSED_PUBLIC_COPY_PENDING) {
+      expect(jaLeaves, leafPath).toContain(leafPath);
+      expect(enLeaves, leafPath).toContain(leafPath);
+      expect(appearsInSource(leafNameOf(leafPath)), leafPath).toBe(false);
+    }
+  });
+
+  // leaf 名の判定は保守的なので、title・intro のようなよくある名前だけの namespace は、丸ごと未使用でも見逃す
+  // (年額の利用権の Billing 名前空間の 22 文言がこれで残っていた・2026-11-06 に削除)。namespace の名前そのものが
+  // 本番のソースに出るか (useTranslations('X')・getTranslations・'X.key' の一部) を別に確かめる。
+  it('messages の最上位の namespace の名前が、本番のソースに出る', () => {
+    const namespaces = [...new Set([...Object.keys(ja), ...Object.keys(en)])].sort();
+    expect(
+      namespaces.filter((ns) => !appearsInSource(ns)),
+      '使われていない namespace: 本当に未使用なら ja/en の両方から丸ごと消す。',
+    ).toEqual([]);
   });
 });
