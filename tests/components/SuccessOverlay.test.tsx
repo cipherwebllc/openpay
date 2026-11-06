@@ -499,6 +499,10 @@ describe('SuccessOverlay: 完了音トグル (PayPay 風チャイム)', () => {
 // (tests/_helpers/tailwindContrast.ts・色は Tailwind のパレット)、何もしていないとき・各ボタンの hover と focus・コピーした後を計算する。
 describe('SuccessOverlay: 文字のコントラスト (WCAG 2.2 AA)', () => {
   const m = ja.SuccessOverlay;
+  // opacity-0 を許すのは、CopyableField が描くコピーの案内 (.group のボタンの直下の aria-hidden の「コピー」) だけ。
+  // helper は、この要素がボタンの hover と focus のときに測られたことも確かめる。
+  const isCopyHint = (el: Element) =>
+    el.matches('button.group > span[aria-hidden="true"]') && el.textContent === ja.CopyableField.copy;
 
   // 注文の会計で出るもの (受付番号・お店に知らせる・文をコピー・UserOp/ブロックの行・Explorer の 2 リンク) を全部出す。
   async function renderFull() {
@@ -532,7 +536,7 @@ describe('SuccessOverlay: 文字のコントラスト (WCAG 2.2 AA)', () => {
 
   it('地・文字・アイコン・ボタンの形を、何もしていないときと各ボタンの hover / focus で計算して基準以上', async () => {
     const { dialog } = await renderFull();
-    const { failures, checked, boundaries } = auditAllStates(dialog);
+    const { failures, checked, boundaries } = auditAllStates(dialog, { revealed: isCopyHint });
     expect(failures).toEqual([]);
 
     // 名前の付いた要素を、黙って飛ばさずに計算した (何もしていないとき)。
@@ -566,7 +570,7 @@ describe('SuccessOverlay: 文字のコントラスト (WCAG 2.2 AA)', () => {
     const copyButton = screen.getByRole('button', { name: /Tx Hash をコピー/ });
     await user.click(copyButton);
     const copied = await screen.findByText(`✓ ${ja.CopyableField.copied}`);
-    const { failures, checked } = auditAllStates(dialog);
+    const { failures, checked } = auditAllStates(dialog, { revealed: isCopyHint });
     expect(failures).toEqual([]);
     const states = checked.filter((c) => c.text === copied.textContent).map((c) => c.state.split(':')[0]);
     expect(states).toEqual(expect.arrayContaining(['base', 'hover', 'focus']));
