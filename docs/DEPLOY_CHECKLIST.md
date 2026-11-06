@@ -2569,8 +2569,9 @@ R2 archive は 180 日 lifecycle のため、payer/ledger の行は稼働 KV の
 denylist (完全一致または `<key>:` 家族): `store:quote:rl`・`store:license:verify:rpc`・`store:delivery:rpc`・`store:license:worker:lock`。
 **denylist は広げない**: archive の記録の検査は今の allowlist / denylist で見るので、足した鍵を含む古い archive は `out_of_scope_key`
 で検証に落ち、復元が止まる (`scripts/lib/kv-backup-core.mjs` の `validateRecord`)。広げるなら、先に新しい backup の走査と古い archive の
-読み飛ばしを分ける。後から増えた RPC の同時実行枠 `store:license:rights:rpc`・`store:license:rights:resend:rpc` (lease・害は無い) は、
-このため backup に含めたままにしている (2026-11-07)。
+読み飛ばしを分ける。後から増えた RPC の同時実行枠 `store:license:rights:rpc`・`store:license:rights:resend:rpc` (lease・それぞれ
+#788・#1002 で追加) は、このため backup に含めたままにしている (2026-11-07)。期限の切れた鍵は復元で飛ばす。期限内の lease は、
+元の lease の期限 (60 秒) まで枠を一時的に使う (今までと同じ挙動)。
 **全 app の DR ではない** (handle・受注・チップ・push・SIWE・external registry は対象外。受注/チップ/push は保存期間を開示済みのため複製しない)。
 `x402fac:reservation:v1:` (入場 lease) は対象外で、復元時は捨てる。
 
