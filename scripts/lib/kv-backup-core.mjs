@@ -9,8 +9,12 @@ import { createGzip, createGunzip } from 'node:zlib';
 
 export const PREFIXES = Object.freeze(['x402:hosted:', 'store:', 'payment:claimed:', 'billing:settled:', 'x402:settle:ledger:',
   'x402:settle:payer:', 'agent:bound:', 'agent:owner:']);
-export const DENYLIST = Object.freeze(['store:quote:rl', 'store:license:verify:rpc', 'store:delivery:rpc', 'store:license:worker:lock',
-  'store:license:rights:rpc', 'store:license:rights:resend:rpc']);
+// DENYLIST は広げない (古い archive を復元できなくしないため)。archive の記録の検査 (validateRecord) は、作った時の
+// manifest ではなく今の isAllowedKey で見るので、denylist に足した鍵が古い archive に 1 つでもあると、その archive は
+// out_of_scope_key で検証に落ち、kv-restore は全体を止める。広げるなら、先に「新しい backup で走査しない鍵」と
+// 「古い archive で読み飛ばす鍵」を分ける。store:license:rights:rpc・store:license:rights:resend:rpc (RPC の同時実行枠の
+// lease・#1002 の後に増えた) は、このため backup に含めたままにしている (害は無い・2026-11-07)。
+export const DENYLIST = Object.freeze(['store:quote:rl', 'store:license:verify:rpc', 'store:delivery:rpc', 'store:license:worker:lock']);
 export const LIMITS = Object.freeze({
   fullCollectionMax: 1000, fullCollectionBytes: 1024 * 1024, chunk: 1000, minChunk: 50,
   reqBytes: 4 * 1024 * 1024, stringMax: 4 * 1024 * 1024,

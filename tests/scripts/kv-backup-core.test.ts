@@ -47,20 +47,16 @@ describe('scope and lossless byte records', () => {
     }
     for (const other of ['store', 'x402fac:reservation:v1:a', 'session:a', 'payment:claim:a']) expect(isAllowedKey(other)).toBe(false);
   });
-  // RPC の同時実行枠 (8 枠・60 秒 lease の ZSET) は、復元しても期限の切れた lease しか戻らない。新しい枠の鍵を足したときに
-  // denylist へ入れ忘れないよう、lib/ と app/ の `store:…:rpc` の鍵を全部拾って確かめる (第 9 回レビューの後追い・2026-11-07)。
-  it('denies every store:*:rpc concurrency-budget key defined in lib/ and app/', async () => {
-    const found = new Set<string>();
-    for (const root of ['lib', 'app']) {
-      for (const entry of await readdir(root, { recursive: true, withFileTypes: true })) {
-        if (!entry.isFile() || !/\.(ts|tsx|mjs|js)$/.test(entry.name)) continue;
-        const source = await readFile(join(entry.parentPath, entry.name), 'utf8');
-        for (const match of source.matchAll(/'(store:[a-z0-9:_-]+:rpc)'/g)) found.add(match[1]);
-      }
-    }
-    expect([...found].sort()).toEqual(['store:delivery:rpc', 'store:license:rights:resend:rpc', 'store:license:rights:rpc',
-      'store:license:verify:rpc']);
-    for (const budgetKey of found) expect(DENYLIST, budgetKey).toContain(budgetKey);
+  // denylist を広げると、足した鍵を含む古い archive が out_of_scope_key で検証に落ちる (記録の検査は今の policy で見る)。
+  // 後から増えた RPC の同時実行枠は、このため backup に含めたままにする (kv-backup-core.mjs の DENYLIST のコメント・2026-11-07)。
+  it('keeps the denylist as created so older archives stay verifiable', async () => {
+    expect(DENYLIST).toEqual(['store:quote:rl', 'store:license:verify:rpc', 'store:delivery:rpc', 'store:license:worker:lock']);
+    for (const lease of ['store:license:rights:rpc', 'store:license:rights:resend:rpc']) expect(isAllowedKey(lease), lease).toBe(true);
+    const lease = createRecord({ key: 'store:license:rights:rpc', type: 'zset', capturedAt: 10, pttl: 70_000,
+      value: [Buffer.from('lease-token'), Buffer.from('1793990000000')] });
+    const summary = await verifyJsonl([await jsonl([record, lease])]);
+    expect(summary.footer.keys).toBe(2);
+    expect(summary.prefixes['store:']).toBe(2);
   });
   it('includes durable agent families without including ephemeral agent credentials', async () => {
     const docs = await readFile('docs/DEPLOY_CHECKLIST.md', 'utf8');

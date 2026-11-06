@@ -97,7 +97,7 @@ After settlement, an internal finalizer verifies the exact forwarder `Settled` e
 
 Public `/api/order/notify` rejects a reserved authorization with `409 reserved_order`.
 
-The legacy notify path runs only when a payment header is redelivered and no reservation is found for it (`missing`). New payments always reserve before settlement, so this is a compatibility exception; redelivery records from before reservations were introduced (2026-09-24) expired after 30 minutes. If registration fails on this path, the response is still `200` with `orderRegistered: false`, but it carries neither `paymentSettled` nor `repair`. The payment is settled all the same: **do not call `x402_pay` again**; keep the `txHash` for manual follow-up with the shop.
+The legacy notify path runs only when a payment header is redelivered and no reservation is found for it (`missing`). New payments always reserve before settlement, so this is a compatibility exception; redelivery records have a 30-minute TTL (set when created and again when promoted), so records from before reservations were introduced (merged 2026-09-24) are gone. If registration fails on this path, the response is still `200` with `orderRegistered: false`, but it carries neither `paymentSettled` nor `repair`. The payment is settled all the same: **do not call `x402_pay` again**; keep the `txHash` for manual follow-up with the shop.
 
 If registration fails on the new path, payment remains successful (`200`, `paymentSettled: true`, `orderRegistered: false`, `txHash`), with `repair: {action: "do_not_pay_again", retryWithSameHeader, txHash}`. **Do not call `x402_pay` again:** it signs a new payment.
 
