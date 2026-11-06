@@ -392,7 +392,7 @@
       "japaneseUserHint": "日本居住者は日本語版で SBI VC トレードをご利用ください。",
       "gasHint": {
         "title": "ガス代 (POL / ETH) が無くて取引所に送れないとき",
-        "body": "受け取った JPYC / USDC を取引所に送るには、各 chain のネットワーク手数料 (Polygon は POL、Base / Arbitrum / Optimism は ETH) が少額必要です。HashPort Wallet では、連携する Kana Labs のスワップで、Polygon の JPYC を POL に替えられます。このスワップは、スワップの手数料もネットワーク手数料もかかりませんでした (2026年11月に確認)。MetaMask のスワップは、MetaMask の説明では、Polygon / Base / Arbitrum などでネイティブトークン (POL / ETH) を持っていなくても、スワップするトークンからガス代を払えます (アカウントはスマートアカウントに自動で切り替わります)。MetaMask の手数料 (2026年11月の時点で 0.875%) がかかり、スワップの額がガス代より小さいときは使えません。Optimism など対象外のチェーンでは、スワップを始めるのに少額の ETH が別途必要です。Arc ではガスも USDC で支払うため、別トークンは不要です。",
+        "body": "受け取った JPYC / USDC を取引所に送るには、各 chain のネットワーク手数料 (Polygon は POL、Base / Arbitrum / Optimism は ETH) が少額必要です。HashPort Wallet では、連携する Kana Labs のスワップで、Polygon の JPYC を POL に替えられます。このスワップは、スワップの手数料もネットワーク手数料もかかりませんでした (2026年11月に確認)。MetaMask の説明では、同社のスワップは、Polygon / Base / Arbitrum などでネイティブトークン (POL / ETH) を持っていなくても、スワップするトークンからガス代を払えます (Polygon / Base / Arbitrum では、アカウントがスマートアカウントに自動で切り替わります)。MetaMask の手数料 (2026年11月の時点で 0.875%) がかかり、スワップの額がガス代より小さいときは使えません。Optimism はこの機能の対象外で、スワップを始めるのに少額の ETH が別途必要です。Arc ではガスも USDC で支払うため、別トークンは不要です。",
         "linkLabel": "MetaMask Swap を開く",
         "disclaimer": "※ HashPort Wallet・Kana Labs・MetaMask の機能の動作・手数料・対応チェーンは各社が提供するもので、OpenPay は関与しません。内容は変わることがあります。混雑やトークンの経路によっては、スワップが成立しないことがあります。"
       }
