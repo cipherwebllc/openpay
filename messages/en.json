@@ -392,9 +392,9 @@
       "japaneseUserHint": "Japan residents: switch to Japanese for SBI VC Trade.",
       "gasHint": {
         "title": "When you have no gas (POL / ETH) to send tokens to an exchange",
-        "body": "Sending received JPYC / USDC to an exchange requires a small amount of native gas on each chain (POL on Polygon, ETH on Base / Arbitrum / Optimism). With MetaMask's Swap (Gas Station) feature, you can swap on Polygon / Base / Arbitrum without holding any POL or ETH — the gas fee is paid out of your JPYC or USDC. On chains where Gas Station is not available (e.g. Optimism), a small amount of ETH is required separately to initiate the swap. On Arc, gas is also paid in USDC, so no separate token is needed.",
+        "body": "Sending received JPYC / USDC to an exchange requires a small amount of native gas on each chain (POL on Polygon, ETH on Base / Arbitrum / Optimism). In HashPort Wallet, the connected Kana Labs swap can turn JPYC on Polygon into POL; when we checked in November 2026, it charged neither a swap fee nor a network fee. MetaMask says its Swap can pay the gas out of the token you swap, so you need no POL or ETH on Polygon / Base / Arbitrum and some other chains (your account is upgraded to a smart account automatically). A MetaMask fee applies (0.875% as of November 2026), and it cannot be used when the swap is worth less than the gas. On chains it does not cover (e.g. Optimism), a small amount of ETH is required separately to start the swap. On Arc, gas is also paid in USDC, so no separate token is needed.",
         "linkLabel": "Open MetaMask Swap",
-        "disclaimer": "Note: Availability, supported chains, and success of MetaMask features depend on MetaMask itself; OpenPay is not involved. Network congestion or unsupported token routes on any chain may cause the swap to fail."
+        "disclaimer": "Note: How HashPort Wallet, Kana Labs and MetaMask features work, their fees and supported chains are up to each provider; OpenPay is not involved, and they may change. Network congestion or unsupported token routes may cause a swap to fail."
       }
     },
     "guideLinks": {
