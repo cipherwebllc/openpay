@@ -47,6 +47,17 @@ describe('scope and lossless byte records', () => {
     }
     for (const other of ['store', 'x402fac:reservation:v1:a', 'session:a', 'payment:claim:a']) expect(isAllowedKey(other)).toBe(false);
   });
+  // denylist を広げると、足した鍵を含む古い archive が out_of_scope_key で検証に落ちる (記録の検査は今の policy で見る)。
+  // 後から増えた RPC の同時実行枠は、このため backup に含めたままにする (kv-backup-core.mjs の DENYLIST のコメント・2026-11-07)。
+  it('keeps the denylist as created so older archives stay verifiable', async () => {
+    expect(DENYLIST).toEqual(['store:quote:rl', 'store:license:verify:rpc', 'store:delivery:rpc', 'store:license:worker:lock']);
+    for (const lease of ['store:license:rights:rpc', 'store:license:rights:resend:rpc']) expect(isAllowedKey(lease), lease).toBe(true);
+    const lease = createRecord({ key: 'store:license:rights:rpc', type: 'zset', capturedAt: 10, pttl: 70_000,
+      value: [Buffer.from('lease-token'), Buffer.from('1793990000000')] });
+    const summary = await verifyJsonl([await jsonl([record, lease])]);
+    expect(summary.footer.keys).toBe(2);
+    expect(summary.prefixes['store:']).toBe(2);
+  });
   it('includes durable agent families without including ephemeral agent credentials', async () => {
     const docs = await readFile('docs/DEPLOY_CHECKLIST.md', 'utf8');
     for (const prefix of ['x402:settle:payer:', 'agent:bound:', 'agent:owner:']) {
