@@ -16,12 +16,14 @@
 //     Polygon 以外のチェーンを UPBOND の画面で見られ・送れるかは未確認 → 受け取りは Polygon を選ぶよう書く。
 //   - お客様の支払い用の一覧 (wallets) にも、使い方の補足 (howTo) をつけてマイナウォレット・HashPort Wallet の後ろに足す
 //     (user 最終裁定)。2026-11-06 user 実機: Polygon のガス代不要の支払い (EIP-3009・UPBOND のアドレスが authorizer) が通った
-//     (100 JPYC → お店 98・利用料 2)。通常決済と USDC は未対応。つなぎ方は WalletConnect の QR の下の「Copy link」を UPBOND Wallet
+//     (100 JPYC → お店 98・利用料 2)。つなぎ方は WalletConnect の QR の下の「Copy link」を UPBOND Wallet
 //     の接続コードの欄に貼る。スマホでは払うときに別のウォレットのアプリが開くことがあり、UPBOND のタブに戻ると承認の画面が出ていた。
 //     WalletConnect の 4 手順は変えず、UPBOND の使い方はカードの中にだけ書く。
-// ⚠️ 料率・チェーン名・「無料」/free は書かない (tests/lib/walletGuide.test.ts が検査する)。例外は UPBOND Wallet のカードの本文の
-// 「Polygon」「USDC」と storeNote の「Polygon」だけ (UPBOND で確かめた事実で、OpenPay の対応チェーン・通貨の一覧ではない・
-// 同じ test が範囲を縛る)。
+//   - 通常決済と USDC は試していないので、使えるとも使えないとも書かない (2026-11-06 user「確実じゃなければわざわざ言わなくて
+//     よくない？」)。@upbond/sdk の README は data 付きの tx (ERC-20 の送金) を未対応とするが、それは SDK をサイトに埋め込む場合の
+//     話で、WalletConnect でつないだ UPBOND Wallet が受けるかは確かめていない。
+// ⚠️ 料率・チェーン名・「無料」/free は書かない (tests/lib/walletGuide.test.ts が検査する)。例外は UPBOND Wallet のカードの本文と
+// storeNote の「Polygon」だけ (UPBOND で確かめた事実で、OpenPay の対応チェーンの一覧ではない・同じ test が範囲を縛る)。
 
 import type { Metadata } from 'next';
 import { guidePageMetadata } from '@/lib/guideMetadata';
@@ -120,7 +122,7 @@ const JA: WalletGuideContent = {
     {
       id: 'upbond',
       name: 'UPBOND Wallet',
-      body: 'アプリを入れずにブラウザで使えるウォレットです。LINE・Google のアカウントやパスキーでログインできます。OpenPay では JPYC のガス代不要の支払いに使えます (通常決済と USDC には使えません・Polygon で確かめています)。',
+      body: 'アプリを入れずにブラウザで使えるウォレットです。LINE・Google のアカウントやパスキーでログインできます。OpenPay では、Polygon の JPYC のガス代不要の支払いで使えることを確かめています。',
       howTo:
         'つなぐときは、WalletConnect の QR の下の「Copy link」を押し、UPBOND Wallet の WalletConnect の接続コードの欄に貼ってください。払うときに別のウォレットアプリが開いたら、UPBOND Wallet のタブに戻ると承認の画面が出ています。',
     },
@@ -213,7 +215,7 @@ const EN: WalletGuideContent = {
     {
       id: 'upbond',
       name: 'UPBOND Wallet',
-      body: 'A wallet that runs in your browser with no app to install. You can sign in with a LINE or Google account or a passkey. On OpenPay it works for JPYC payments with no gas fee (not for standard payments or USDC; confirmed on Polygon).',
+      body: 'A wallet that runs in your browser with no app to install. You can sign in with a LINE or Google account or a passkey. On OpenPay, we have confirmed that it works for JPYC payments with no gas fee on Polygon.',
       howTo:
         'To connect, tap “Copy link” under the WalletConnect QR and paste it into the WalletConnect connection code field in UPBOND Wallet. If another wallet app opens when you pay, go back to the UPBOND Wallet tab and you will find the approval screen there.',
     },
