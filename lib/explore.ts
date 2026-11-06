@@ -222,8 +222,8 @@ export const EXPLORE_ENTRIES: readonly ExploreEntry[] = [
     url: 'https://portfolio.metamask.io/',
     category: 'dapp',
     description: {
-      ja: 'MetaMask 公式のポートフォリオ閲覧 + Swap (Gas Station 機能で gas を JPYC/USDC 等から自動徴収)。',
-      en: 'MetaMask official portfolio + Swap (Gas Station can pay gas in JPYC/USDC and other tokens).',
+      ja: 'MetaMask 公式のポートフォリオ閲覧 + Swap (MetaMask の説明では、ガス代用の残高が足りないとき、対応チェーン・対応トークンのスワップでは交換元のトークンからガス代を払える・MetaMask の手数料あり)。',
+      en: 'MetaMask official portfolio + Swap (MetaMask says eligible swaps on supported chains can pay gas from the input token when your native-token balance is insufficient; a MetaMask fee applies).',
     },
     badges: ['global'],
     tokens: ['jpyc', 'usdc'],
