@@ -32,7 +32,8 @@ export function NonCustodialNotice({
         <span aria-hidden className="select-none">ⓘ</span>
         <span>
           <strong className="font-semibold">{title}</strong>
-          <span className="ml-1 opacity-90">{body}</span>
+          {/* 本文を薄くしない: short は完了画面 (SuccessOverlay) の bg-white/10 の欄の上の白で 4.53:1 しかない (AA は 4.5:1)。 */}
+          <span className="ml-1">{body}</span>
         </span>
       </p>
     );

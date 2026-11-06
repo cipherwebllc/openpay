@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { Address } from 'viem';
+import tailwindColors from 'tailwindcss/colors';
 
 // 「注文を送る / お店に知らせる」は払ったウォレットで確認の署名をする (wagmi)。ここでは出るかどうかだけを見る。
 vi.mock('wagmi', () => ({
@@ -490,5 +491,118 @@ describe('SuccessOverlay: 完了音トグル (PayPay 風チャイム)', () => {
     expect(
       screen.getByRole('button', { name: 'Completion sound' }),
     ).toHaveAttribute('aria-pressed', 'true');
+  });
+});
+
+// 払った人が必ず見る画面なのに、Lighthouse の CI はこの画面を描かない。地の色と文字の薄さを、ここで計算して確かめる。
+describe('SuccessOverlay: 文字のコントラスト (WCAG 2.2 AA)', () => {
+  const palette = tailwindColors as unknown as Record<string, Record<string, string>>;
+  const WHITE = [255, 255, 255];
+  const rgb = (family: string, shade: string) => {
+    const value = palette[family]?.[shade];
+    if (!value) throw new Error(`Tailwind のパレットに無い色: ${family}-${shade}`);
+    return [1, 3, 5].map((i) => parseInt(value.slice(i, i + 2), 16));
+  };
+  const luminance = (c: number[]) => {
+    const [r, g, b] = c.map((v) => {
+      const s = v / 255;
+      return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+    });
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  };
+  const contrast = (a: number[], b: number[]) => {
+    const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+    return (hi + 0.05) / (lo + 0.05);
+  };
+  const classTokens = (el: Element) => (el.getAttribute('class') ?? '').split(/\s+/).filter(Boolean);
+
+  // 注文の会計で出るもの (受付番号・お店に知らせる・文をコピー・UserOp/ブロックの行・Explorer の 2 リンク) を全部出す。
+  async function renderFull() {
+    const user = userEvent.setup(); // clipboard を入れる (ハッシュがボタンになり、「文をコピー」も出る)
+    render(
+      <SuccessOverlay
+        amountDisplay="3,500 JPYC"
+        txHash={TX_HASH}
+        userOpHash={USER_OP_HASH}
+        blockNumber={12345n}
+        explorerBase="https://amoy.polygonscan.com"
+        merchantAddress={MERCHANT_ADDR}
+        orderNo="A-001"
+        notify={{
+          orderNo: 'A-001',
+          askShipping: false,
+          items: [{ name: 'マグカップ', qty: 1 }],
+          amountDisplay: '3,500 JPYC',
+          txHash: TX_HASH,
+          chain: 'polygon',
+          shop: MERCHANT_ADDR as Address,
+          confirm: false,
+          contact: { kind: 'line', id: '@openpay' },
+        }}
+        onDismiss={() => undefined}
+      />,
+    );
+    await screen.findByRole('button', { name: '文をコピー' });
+    return { user, dialog: screen.getByRole('dialog') };
+  }
+
+  it('地の上の白の文字と、bg-white/NN の欄の上の白の文字が 4.5:1 以上 (色は Tailwind のパレットから計算)', async () => {
+    const { dialog } = await renderFull();
+    const bg = classTokens(dialog)
+      .map((token) => token.match(/^bg-([a-z]+)-(\d{2,3})$/))
+      .find(Boolean);
+    expect(bg, '地の色 (bg-<色>-<濃さ>) が見つからない').toBeTruthy();
+    const ground = rgb(bg![1], bg![2]);
+    expect(classTokens(dialog)).toContain('text-white');
+    expect(contrast(WHITE, ground)).toBeGreaterThanOrEqual(4.5);
+
+    // 文字を載せた半透明の白の欄 (Tx Hash の欄・ノンカストディの欄)。アイコンだけのボタン (完了音) は文字が無いので除く。
+    const panels = [...dialog.querySelectorAll('*')].filter(
+      (el) => classTokens(el).some((token) => /^bg-white\/\d+$/.test(token)) && el.textContent?.trim(),
+    );
+    expect(panels.length).toBeGreaterThanOrEqual(2);
+    for (const el of panels) {
+      const alpha = Number(classTokens(el).find((token) => /^bg-white\/\d+$/.test(token))!.split('/')[1]) / 100;
+      const panel = ground.map((v) => 255 * alpha + v * (1 - alpha));
+      expect(contrast(WHITE, panel), el.textContent ?? '').toBeGreaterThanOrEqual(4.5);
+    }
+
+    // 地の色を塗ったボタンは、地との境目が 3:1 以上 (非テキスト・1.4.11)。地を変えたときに、上に載るボタンを見落とさない
+    // (emerald-800 のボタンは emerald-500 の地で 3.03:1 だったが、emerald-700 の地では 1.40:1)。
+    const buttons = [...dialog.querySelectorAll('button, a')];
+    let painted = 0;
+    for (const el of buttons) {
+      const token = classTokens(el).find((t) => t === 'bg-white' || /^bg-[a-z]+-\d{2,3}$/.test(t));
+      if (!token) continue;
+      painted += 1;
+      const surface = token === 'bg-white' ? WHITE : rgb(...(token.slice(3).split('-') as [string, string]));
+      expect(contrast(surface, ground), `${token} (${el.textContent?.trim()})`).toBeGreaterThanOrEqual(3);
+    }
+    expect(painted).toBeGreaterThanOrEqual(2); // LINE で送る・閉じる
+  });
+
+  it('文字を透明度で薄くしない (opacity-NN・text-<色>/NN)。押せない間の disabled: は 1.4.3 の対象外なので除く', async () => {
+    const { user, dialog } = await renderFull();
+    // コピーした後の「✓ コピー済み」も見る (緑の地で読めない色にしない)。
+    await user.click(screen.getByRole('button', { name: /Tx Hash をコピー/ }));
+    await screen.findByText(/✓ コピー済み/);
+
+    const faded: string[] = [];
+    for (const el of [dialog, ...dialog.querySelectorAll('*')]) {
+      for (const token of classTokens(el)) {
+        const parts = token.split(':');
+        const utility = parts.at(-1)!;
+        if (parts.slice(0, -1).includes('disabled')) continue;
+        const opacity = utility.match(/^opacity-(\d+)$/);
+        if ((opacity && opacity[1] !== '0' && opacity[1] !== '100') || /^text-[^[]+\/.+$/.test(utility)) {
+          faded.push(`${token} (${el.textContent?.trim().slice(0, 20) ?? ''})`);
+        }
+      }
+    }
+    expect(faded).toEqual([]);
+    // コピーの案内は白 (slate-500 / emerald-600 は緑の地の上で 2:1 前後)。
+    for (const hint of [screen.getByText(/✓ コピー済み/), screen.getByText('コピー')]) {
+      expect(classTokens(hint)).toContain('text-white');
+    }
   });
 });

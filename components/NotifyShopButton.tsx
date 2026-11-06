@@ -38,15 +38,16 @@ const PRIMARY: Record<Tone, string> = {
   panel:
     'inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-brand px-5 text-base font-bold text-white hover:bg-brand-dark disabled:opacity-70',
 };
-// 完了画面 (SuccessOverlay の bg-emerald-500) の上の白文字は 2.54:1 で AA に届かないので、濃い緑の地に白文字にする
-// (白 / emerald-800 = 7.68:1・地と背景の境目 3.03:1)。
+// 完了画面 (SuccessOverlay の bg-emerald-700) の上では、白の枠線の丸ボタンにする (白の文字と枠線 / emerald-700 = 5.48:1・
+// hover の地 emerald-800 の上の白 = 7.68:1)。emerald-800 の地のボタンは emerald-700 との境目が 1.40:1 で、3:1 に届かない。
 const SECONDARY: Record<Tone, string> = {
   overlay:
-    'inline-flex min-h-11 items-center gap-1.5 rounded-full bg-emerald-800 px-4 text-sm font-medium text-white hover:bg-emerald-900',
+    'inline-flex min-h-11 items-center gap-1.5 rounded-full px-4 text-sm font-medium text-white ring-1 ring-white hover:bg-emerald-800',
   panel: 'inline-flex min-h-11 items-center gap-1.5 text-sm font-medium text-brand hover:text-brand-dark',
 };
+// 完了画面の注記は薄くしない白 (5.48:1)。完了画面の文字は透明度で薄くしない決まり (SuccessOverlay のテストが確かめる)。
 const NOTE: Record<Tone, string> = {
-  overlay: 'text-center text-xs text-white/90',
+  overlay: 'text-center text-xs text-white',
   panel: 'text-center text-xs text-slate-600',
 };
 
