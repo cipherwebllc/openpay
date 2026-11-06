@@ -597,6 +597,8 @@ export function useBatchPayment(
 
       // gas ceiling は両 mode で適用。sponsorship では運営赤字回避、erc20 では
       // 顧客の USDC 出費上限の保護として機能する (どちらも UX 上の安全弁)。
+      // ここは送信を始める前の fast の検査。UserOp に実際に入る standard は、sendUserOperation の
+      // 中の fee の見積もり (lib/smartAccount の各 builder) が ceilingCheckedStandardFee で検査する (A-5)。
       if (chainId !== undefined) {
         const gasPrice = await pimlicoClient.getUserOperationGasPrice();
         assertGasCeiling(chainId, gasPrice.fast.maxFeePerGas);

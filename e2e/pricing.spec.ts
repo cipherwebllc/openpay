@@ -8,7 +8,7 @@ import { test, expect } from '@playwright/test';
 // 行の見出しは h4 (払う人のまとまり = h3 の下に並ぶ・2026-10-25)。並びはお店の 3 行 → チップ → デジタル商品。
 const GROUPS_JA = ['お店', 'チップを送る方', 'デジタル商品・AI の買い手'];
 const FEATURES_JA = [
-  '決済QR・レジ（POS）',
+  '決済QR・レジ（POS）・注文リンク',
   'モバイル注文',
   'お店がガス代を肩代わりして送る',
   'チップ',

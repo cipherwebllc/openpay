@@ -8,6 +8,8 @@ import {
   loadStandardIntent,
   saveRelayIntent,
   saveStandardIntent,
+  saveStandardPaymentIntent,
+  standardParamsFromIntent,
   type RelayIntentMetadata,
   type StandardIntentMetadata,
 } from '@/lib/paymentIntentStorage';
@@ -23,6 +25,7 @@ const FEE_RECEIVER =
 const MERCHANT_TX = `0x${'5'.repeat(64)}` as Hex;
 const FEE_TX = `0x${'6'.repeat(64)}` as Hex;
 const CONTEXT_KEY = `0x${'9'.repeat(64)}` as Hex;
+const ORDER_LINK_KEY = `0x${'a7'.repeat(32)}` as Hex;
 
 function relayIntent(): RelayIntentMetadata {
   return {
@@ -138,6 +141,31 @@ describe('relay payment intent sessionStorage', () => {
     });
     expect(() => clearRelayIntent()).not.toThrow();
   });
+
+  it('注文リンクの支払いの指紋 (orderLinkKey) は digest だけを保存・復元する (第 9 回レビュー G-1)', () => {
+    saveRelayIntent({ ...relayIntent(), orderLinkKey: ORDER_LINK_KEY });
+
+    const raw = window.sessionStorage.getItem(RELAY_INTENT_STORAGE_KEY);
+    expect(JSON.parse(raw!)).toEqual({ ...relayIntent(), orderLinkKey: ORDER_LINK_KEY });
+    expect(loadRelayIntent()).toEqual({ ...relayIntent(), orderLinkKey: ORDER_LINK_KEY });
+  });
+
+  it('形の崩れた orderLinkKey は落とし、未解決の支払いの intent (復旧 latch) は残す', () => {
+    saveRelayIntent({ ...relayIntent(), orderLinkKey: 'order-link:raw' as Hex });
+    expect(
+      window.sessionStorage.getItem(RELAY_INTENT_STORAGE_KEY),
+    ).not.toContain('order-link:raw');
+
+    window.sessionStorage.setItem(
+      RELAY_INTENT_STORAGE_KEY,
+      JSON.stringify({ ...relayIntent(), orderLinkKey: 'order-link:raw' }),
+    );
+
+    expect(loadRelayIntent()).toEqual(relayIntent());
+    expect(
+      window.sessionStorage.getItem(RELAY_INTENT_STORAGE_KEY),
+    ).not.toBeNull();
+  });
 });
 
 describe('standard payment intent sessionStorage', () => {
@@ -187,6 +215,34 @@ describe('standard payment intent sessionStorage', () => {
       expect(loaded).toEqual(standardIntent());
       expect(loaded && 'registerFee' in loaded).toBe(false);
     }
+  });
+
+  it('注文リンクの支払いの指紋 (orderLinkKey) は params から保存し、復元で params に戻す (第 9 回レビュー G-1)', () => {
+    saveStandardPaymentIntent(
+      'merchant',
+      { ...standardParamsFromIntent(standardIntent()), orderLinkKey: ORDER_LINK_KEY },
+      FROM,
+      MERCHANT_TX,
+      {},
+      1_700_000_000_000,
+    );
+
+    expect(loadStandardIntent()?.orderLinkKey).toBe(ORDER_LINK_KEY);
+    expect(standardParamsFromIntent(loadStandardIntent()!).orderLinkKey).toBe(ORDER_LINK_KEY);
+  });
+
+  it('形の崩れた orderLinkKey は落とし、receipt 照会の intent (復旧 latch) は残す', () => {
+    saveStandardIntent({ ...standardIntent(), orderLinkKey: 'order-link:raw' as Hex });
+    expect(
+      window.sessionStorage.getItem(STANDARD_INTENT_STORAGE_KEY),
+    ).not.toContain('order-link:raw');
+
+    window.sessionStorage.setItem(
+      STANDARD_INTENT_STORAGE_KEY,
+      JSON.stringify({ ...standardIntent(), orderLinkKey: 'order-link:raw' }),
+    );
+
+    expect(loadStandardIntent()).toEqual(standardIntent());
   });
 
   it('fee 復旧に必要な hash/block が欠けた record は破棄する', () => {

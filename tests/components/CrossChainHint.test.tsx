@@ -1285,6 +1285,86 @@ describe('CrossChainHint: A1 burn tx hash の貼り付け採用 (D4)', () => {
   });
 });
 
+// ---- A-1: burn 後に送金元の残高が請求額を割っても再開に届く ------------------------
+
+describe('CrossChainHint: A-1 残高が請求額を割った後の CCTP 再開', () => {
+  // polygon に請求額 (5 USDC) の半分だけ = enumerator は選択肢を落とし、経路判定は onramp。
+  function setupLowBalance(publicClientOver: Record<string, unknown> = {}) {
+    setReadContractByChain({
+      [baseSepoliaId]: 0n,
+      [polygonAmoyId]: 2_500_000n,
+      [arbitrumSepoliaId]: 0n,
+      [optimismSepoliaId]: 0n,
+    });
+    const { walletClient } = setupConnected({
+      publicClient: { ...makePublicClient(), ...publicClientOver } as never,
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (String(url).includes('/v2/messages')) {
+          return new Response(
+            JSON.stringify({
+              messages: [
+                { status: 'complete', message: '0xmsg', attestation: '0xatt' },
+              ],
+            }),
+            { status: 200 },
+          );
+        }
+        return new Response(JSON.stringify({ balances: [] }), { status: 200 });
+      }),
+    );
+    return { walletClient };
+  }
+
+  it('burn hash が保存されていれば「続きから支払う」を出し、親のロックを復元する', async () => {
+    setupLowBalance();
+    saveResumeState(A1_SESSION_KEY, {
+      approveTxHash: '0xapprove',
+      burnTxHash: `0x${'bc'.repeat(32)}`,
+    });
+    const onExecutingChange = vi.fn();
+    renderWithIntl(
+      withQueryClient(
+        <CrossChainHint {...baseProps} onExecutingChange={onExecutingChange} />,
+      ),
+    );
+
+    const button = await screen.findByRole('button', { name: /続きから支払う/ });
+    await waitFor(() => expect(button).not.toBeDisabled());
+    expect(screen.getByText(/前回の決済が途中で止まっています/)).toBeInTheDocument();
+    // 回復専用の選択肢には残高の行を出さない (Gateway の recoveryOnly と同じ表示)
+    expect(screen.queryByText(/残高:/)).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(onExecutingChange).toHaveBeenLastCalledWith(true);
+    });
+  });
+
+  it('marker だけでも再開ボタンから hash 貼り付けパネルに届き、再 burn せずに mint まで進む', async () => {
+    const user = userEvent.setup();
+    const { walletClient } = setupLowBalance(makeAdoptClient());
+    saveResumeState(A1_SESSION_KEY, {
+      approveTxHash: '0xapprove',
+      burnIntent: A1_MARKER,
+    });
+    renderWithIntl(withQueryClient(<CrossChainHint {...baseProps} />));
+
+    await user.click(
+      await screen.findByRole('button', { name: /続きから支払う/ }),
+    );
+    await screen.findByText(/前回の送金を自動で確認できませんでした/);
+    await user.type(screen.getByLabelText(/送金済みの取引 ID/), ADOPTED_HASH);
+    await user.click(
+      screen.getByRole('button', { name: /この取引で続きから支払う/ }),
+    );
+
+    expect(await screen.findByText(/経由で着金しました/)).toBeInTheDocument();
+    expect(walletClient.writeContract).not.toHaveBeenCalled();
+    expect(walletClient.sendTransaction).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('CrossChainHint: marker を保存できない環境 (fail-closed)', () => {
   it('localStorage への保存が失敗したら送金せず専用文言を出す', async () => {
     const user = userEvent.setup();
@@ -1310,6 +1390,23 @@ describe('CrossChainHint: marker を保存できない環境 (fail-closed)', () 
   });
 });
 
+
+it('A-1: the CCTP recovery scan alone holds the parent lock until it finishes', () => {
+  const hook = { gatewayRecovery: undefined, pathOptions: [], isExecuting: false, isCommitted: false,
+    isFetchingBalances: false, cctpRecoveryScanning: true };
+  const spy = vi.spyOn(crossChainHook, 'useCrossChainPayment').mockImplementation(() => hook as never);
+  const onExecutingChange = vi.fn();
+  const props = { token: 'usdc' as const, enabled: true, targetChainId: 80002, requiredAtomic: 1_000_000n,
+    recipient: '0x1111111111111111111111111111111111111111' as const, feeReceiver: '0x2222222222222222222222222222222222222222' as const,
+    tokenAddress: '0x3333333333333333333333333333333333333333' as const, displayDecimals: 6, directIsGasless: false, onExecutingChange };
+  const h = renderWithIntl(<CrossChainHint {...props} />);
+  expect(onExecutingChange).toHaveBeenLastCalledWith(true);
+  // 走査完了と committed は同じ描画で届く (hook 側)。ここでは完了後に committed が無ければ外れることだけを見る。
+  hook.cctpRecoveryScanning = false;
+  h.rerender(<CrossChainHint {...props} requiredAtomic={1_000_000n} />);
+  expect(onExecutingChange).toHaveBeenLastCalledWith(false);
+  spy.mockRestore();
+});
 
 it.each([false, true])('storage scans hold the parent lock without a warning on mount or amount change (enabled=%s)', (enabled) => {
   vi.spyOn(crossChainHook, 'useCrossChainPayment').mockReturnValue({

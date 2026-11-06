@@ -14,9 +14,10 @@
 import { useMemo, useRef, useState, type ReactElement } from 'react';
 import { useTranslations } from 'next-intl';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { useAccount, useSwitchChain } from 'wagmi';
+import { useAccount } from 'wagmi';
 import { formatUnits, type Hex } from 'viem';
 import { useSiweSession } from '@/hooks/useSiweSession';
+import { useSwitchChainWithFeedback } from '@/hooks/useSwitchChainWithFeedback';
 import { useBillingInvoice } from '@/hooks/useBillingInvoice';
 import { useUsageFeePayment } from '@/hooks/useUsageFeePayment';
 import { env } from '@/lib/env';
@@ -39,7 +40,12 @@ export function OpenPayFeePanel() {
   const t = useTranslations('UsageFee');
   const qc = useQueryClient();
   const { isConnected, chainId } = useAccount();
-  const { switchChain, isPending: isSwitching } = useSwitchChain();
+  // 切り替えの失敗を画面に知らせ、記録に残す (hooks/useSwitchChainWithFeedback.ts)。
+  const {
+    switchChain,
+    isPending: isSwitching,
+    failed: switchFailed,
+  } = useSwitchChainWithFeedback('fee-panel');
   const { isSignedIn, signIn, isSigningIn, mismatch, signInError } =
     useSiweSession();
 
@@ -126,6 +132,15 @@ export function OpenPayFeePanel() {
   // 未払い請求の一覧 (lookback 内・新しい順)。複数あれば期間別清算 UI を出す。
   const owed = data?.owed ?? [];
   const multiOwed = owed.length > 1;
+
+  // 切り替えの失敗の知らせ (#992 の支払い画面と同じ形)。「… に切り替える」は owed が複数だと期間ごとに
+  // 並ぶので、知らせはボタンの並びの下に 1 つだけ出す (同じ alert を期間の数だけ重ねない)。
+  const switchFailedNotice =
+    isConnected && !payDeployment && switchFailed ? (
+      <p role="alert" className="text-xs leading-relaxed text-red-700">
+        {t('switchChainFailed', { chainName: defaultJpyc.name })}
+      </p>
+    ) : null;
 
   // 期間 line の支払いボタン群 (送金→settle・pending・再試行)。単一 due と期間別 owed で共有する。
   // 状態 (pending/error/success) は period 別に判定し、複数期間で取り違えないようにする。
@@ -319,6 +334,7 @@ export function OpenPayFeePanel() {
                           </li>
                         ))}
                       </ul>
+                      {!mismatch && switchFailedNotice}
                     </div>
                   ) : (
                     <>
@@ -342,7 +358,10 @@ export function OpenPayFeePanel() {
 
                       {/* 支払い: 残額あり・未払い・ウォレット一致のときのみ。mismatch は上で警告済。 */}
                       {due && !due.free && !data.feeCurrent && !mismatch && (
-                        <div className="space-y-2">{renderPayControls(due)}</div>
+                        <div className="space-y-2">
+                          {renderPayControls(due)}
+                          {switchFailedNotice}
+                        </div>
                       )}
                     </>
                   )}

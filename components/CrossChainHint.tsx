@@ -11,16 +11,16 @@
 // chooser に含めるが、既存の direct 経路 (useBatchPayment / useStandardPayment)
 // に委譲するため execute は no-op (= 既存 Pay button が処理する)。
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { formatUnits, type Address } from 'viem';
 import { useTranslations } from 'next-intl';
 import { useCrossChainPayment } from '@/hooks/useCrossChainPayment';
 import type { ExecuteResult } from '@/hooks/useCrossChainPayment';
-import type { CrossChainProgress } from '@/lib/crossChain/execute';
+import { CrossChainRecoveryBurnBlockedError, type CrossChainProgress } from '@/lib/crossChain/execute';
 import type { PathOption } from '@/lib/crossChain/pathEnumerator';
 import { isForwardOnlyDestination, CROSS_CHAIN_DISABLED } from '@/lib/crossChain/config';
-import { ResumeStoreWriteError } from '@/lib/crossChain/resumeStore';
+import { ResumeStoreReadError, ResumeStoreWriteError } from '@/lib/crossChain/resumeStore';
 import { blockExplorerUrl } from '@/lib/chains';
 import { CrossChainSourceChooser } from './CrossChainSourceChooser';
 import { shortAddress } from '@/lib/format';
@@ -73,6 +73,9 @@ export interface CrossChainHintProps {
   onAttemptStart?: (amount: bigint) => void;
 }
 
+// 走査結果を持たない hook (test の stub 等) でも参照が毎描画で変わらないようにする。
+const NO_SOURCES: readonly number[] = [];
+
 export function CrossChainHint(props: CrossChainHintProps) {
   const t = useTranslations('CrossChainHint');
   const { onSuccess, onExecutingChange } = props;
@@ -91,7 +94,7 @@ export function CrossChainHint(props: CrossChainHintProps) {
   });
   const {
     decision,
-    pathOptions,
+    pathOptions: hookPathOptions,
     progress,
     isExecuting,
     isCommitted,
@@ -104,6 +107,26 @@ export function CrossChainHint(props: CrossChainHintProps) {
   // gateway → cctp-v2 / balance 降順で sort 済)。options 変化に追従するため
   // useEffect で再同期。
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  // A-1: 保存済みの CCTP の burn の証拠がある送金元 / 記録が読めない送金元 (hook の走査結果)。
+  const cctpRecoverySources = hook.cctpRecoverySources ?? NO_SOURCES;
+  const cctpUnreadableSources = hook.cctpUnreadableSources ?? NO_SOURCES;
+  // A-1: CCTP の再開 (残高が請求額を割った source は hook が recoveryOnly で足す) を、残高の取得中や
+  // 経路判定が onramp (どの chain も残高不足) のとき・別の送金元の記録が読めないときに隠さない。
+  // decision は残高だけで決まるため、pathOptions だけでは下の onramp 判定を越えられない。再開できるかは
+  // recoveryOnly の印ではなく、保存済みの burn の証拠がある送金元かで決める (残高が足りれば通常の選択肢)。
+  const hasCctpRecovery = hookPathOptions.some((o) => o.kind === 'cctp-v2' &&
+    (o.recoveryOnly || cctpRecoverySources.includes(o.sourceChainId)));
+  // A-1: Gateway の記録を確かめて解除できると分かっても (置き換えを待つ等で) 記録が残る間は Gateway のパネルが
+  // 出続ける。CCTP の記録もあるとパネルが CCTP の回復 (再開・記録の確かめ直し) を覆って操作が無くなるので、
+  // そのときはパネルを残したまま、その下に CCTP の回復を出す (Gateway の状態と再確認も見えたままにするため。
+  // 新しい送金はどちらも関所 assertNoUnresolvedRecovery を通る)。Gateway の回復はパネルが受け持つので、
+  // 下の chooser からは Gateway の回復専用の選択肢を外す。enabled 等で CCTP の UI が出ない請求は従来どおり。
+  const showCctpBelowGateway = !!hook.gatewayRecovery && hook.gatewayRecovery.kind !== 'scanning' &&
+    !!hook.gatewayReleasable && (hasCctpRecovery || !!hook.cctpRecoveryUnreadable) &&
+    !CROSS_CHAIN_DISABLED && props.token === 'usdc' && props.enabled && props.requiredAtomic > 0n;
+  const pathOptions = useMemo(() => showCctpBelowGateway
+    ? hookPathOptions.filter((o) => !(o.kind === 'gateway' && o.recoveryOnly)) : hookPathOptions,
+  [showCctpBelowGateway, hookPathOptions]);
   useEffect(() => {
     if (pathOptions.length === 0) {
       setSelectedKey(null);
@@ -143,8 +166,9 @@ export function CrossChainHint(props: CrossChainHintProps) {
   useEffect(() => {
     // 成功は onSuccess 側の settled lock に引き継ぐ。失敗時は不可逆境界前だけ false に
     // 戻し、burn / attestation 後は親の通常 Pay を同一 mount 中ずっと封鎖する。
-    onExecutingChange?.(result ? false : isExecuting || isCommitted || !!hook.pendingRecovery || hook.gatewayRecovery?.kind === 'scanning');
-  }, [isCommitted, isExecuting, result, onExecutingChange, hook.pendingRecovery, hook.gatewayRecovery]);
+    // A-1: CCTP の保存記録の走査中も塞ぐ (走査完了と committed は同じ描画で立つので、外れる瞬間を作らない)。
+    onExecutingChange?.(result ? false : isExecuting || isCommitted || !!hook.pendingRecovery || hook.gatewayRecovery?.kind === 'scanning' || !!hook.cctpRecoveryScanning);
+  }, [isCommitted, isExecuting, result, onExecutingChange, hook.pendingRecovery, hook.gatewayRecovery, hook.cctpRecoveryScanning]);
 
   useEffect(() => {
     if (error) {
@@ -183,7 +207,7 @@ export function CrossChainHint(props: CrossChainHintProps) {
     }}
   />;
   // Persisted Gateway recovery remains reachable after flags, balances or routing change.
-  if (gatewayPanel && !result && !isExecuting) return gatewayPanel;
+  if (gatewayPanel && !result && !isExecuting && !showCctpBelowGateway) return gatewayPanel;
 
   // 回復は enabled/残高/option の gate より先。kill switch 後も資金の確認を閉じない。
   // 実行中 (execute / recheck) は onStep の strict 保存で pendingRecovery が立つが、その間は
@@ -208,6 +232,28 @@ export function CrossChainHint(props: CrossChainHintProps) {
       }}
     />}
   </div>;
+
+  // A-1: CCTP の記録があるのに読めない間は、hook が親の直接払いのロックを保つ。何も出さずに止まった画面に
+  // しないよう、enabled / 残高 / option の gate より先に理由を出す (回復の選択肢があれば chooser の上に出す)。
+  const cctpUnreadableNotice = hook.cctpRecoveryUnreadable && !result ? (
+    <div className="space-y-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+      <p>{t('cctpRecordUnreadable')}</p>
+      {/* 記録は自動では読み直さない (storage の取得拒否が直っても走査し直すまでロックが残る) ので、
+          再読み込みせずに確かめ直す導線を置く。読めた記録は通常どおり再開・解除の判断に使われる。 */}
+      <button
+        type="button"
+        onClick={() => hook.recheckCctpRecords?.()}
+        className="min-h-11 w-full rounded-lg border border-amber-400 bg-white px-3 py-2 text-xs font-semibold text-amber-900"
+      >
+        {t('cctpRecordRecheck')}
+      </button>
+    </div>
+  ) : null;
+  if (cctpUnreadableNotice && !isExecuting && !hasCctpRecovery) {
+    return showCctpBelowGateway
+      ? <div className="space-y-3">{gatewayPanel}{cctpUnreadableNotice}</div>
+      : cctpUnreadableNotice;
+  }
 
   // 成功 panel は path 完了時のみ。
   if (result) {
@@ -240,7 +286,7 @@ export function CrossChainHint(props: CrossChainHintProps) {
   }
 
   // balance fetch 中 (decision 未確定 = options も未) は loading hint。
-  if (!decision && hook.isFetchingBalances && !hasGatewayRecovery) {
+  if (!decision && hook.isFetchingBalances && !hasGatewayRecovery && !hasCctpRecovery) {
     return (
       <p className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-2 text-xs text-slate-500">
         {t('balancesLoading')}
@@ -251,7 +297,7 @@ export function CrossChainHint(props: CrossChainHintProps) {
   // options なし or decision が onramp のみ (= どの chain にも balance なし)
   // は何も出さず OnrampCta (PaymentForm 側) に委譲。
   if (pathOptions.length === 0) return null;
-  if (decision?.path === 'onramp' && !isForwardOnlyDestination(props.targetChainId) && !hasGatewayRecovery) return null;
+  if (decision?.path === 'onramp' && !isForwardOnlyDestination(props.targetChainId) && !hasGatewayRecovery && !hasCctpRecovery) return null;
 
   // direct のみで cross-chain option なし → 既存 Pay button に完全委譲、本 panel 非表示。
   // (chooser 表示しても direct 1 件しか出ず情報価値ゼロ、UI スペース節約)
@@ -298,7 +344,9 @@ export function CrossChainHint(props: CrossChainHintProps) {
   const resumable =
     !isDirectSelected &&
     selectedOption !== null &&
-    hook.isOptionResumable(selectedOption);
+    hook.isOptionResumable(selectedOption) &&
+    // A-1: 記録が読めない送金元は「続きから」にしない (実行しても hook が止める・押せない状態で見せる)。
+    !(selectedOption.kind === 'cctp-v2' && cctpUnreadableSources.includes(selectedOption.sourceChainId));
   const burnUnresolved = hook.burnUnresolved;
   const payButtonDisabled =
     isExecuting ||
@@ -315,6 +363,8 @@ export function CrossChainHint(props: CrossChainHintProps) {
 
   return (
     <div className="space-y-3">
+      {showCctpBelowGateway && gatewayPanel}
+      {cctpUnreadableNotice}
       <CrossChainSourceChooser
         options={pathOptions}
         selectedKey={selectedKey}
@@ -360,14 +410,19 @@ export function CrossChainHint(props: CrossChainHintProps) {
               : t('payWithSelected')}
         </button>
       )}
-      {error && !burnUnresolved && (
+      {/* A-1: 読めない記録での実行拒否は上の cctpUnreadableNotice が理由を出す (実行後の再走査で立つ)。 */}
+      {error && !burnUnresolved && !(error instanceof ResumeStoreReadError) && (
         <p className="text-xs text-red-700">
           {t('errorPrefix')}:{' '}
           {error instanceof ResumeStoreWriteError
             ? // marker を書けない = 二重 burn を防げないので送金しなかった、という
               // 「安全側に倒した」旨を専用文言で伝える (生の例外文は買い手に無意味)。
               t('errorStorageBlocked')
-            : error.message}
+            : error instanceof CrossChainRecoveryBurnBlockedError
+              ? // A-1: 回復専用の選択肢で決定表が burn を返した (確かめられた事実ではない場合を含む)。
+                // 送金せず、記録とロックは残す。文言は「ここでは送金していない・前回の取引と残高を確かめる」だけ。
+                t('errorRecoveryBurnBlocked')
+              : error.message}
         </p>
       )}
     </div>

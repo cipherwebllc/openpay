@@ -178,8 +178,9 @@ describe('startGuide content', () => {
     }
   });
 
-  // 2026-10-13 user: UPBOND Wallet はウェブウォレットで癖がある (送るとき POL が要る・お客様の支払いには使えない) ので、
-  // §1 では名指しで勧めず「ウォレットを選ぶ」(/guide/wallet) へ案内する。
+  // 2026-10-13 user: UPBOND Wallet はウェブウォレットで癖がある (送るとき POL が要る) ので、§1 では名指しで勧めず
+  // 「ウォレットを選ぶ」(/guide/wallet) へ案内する。2026-11-06 に JPYC のガス代不要の支払いが通り (Polygon)、使い方の補足つきで
+  // 「ウォレットを選ぶ」の一覧に載った (lib/walletGuide.ts)。§1 は引き続き名指ししない。
   it('§1 JPYC を準備する は「ウォレットを選ぶ」へリンクし、UPBOND Wallet を勧めない', () => {
     for (const locale of ['ja', 'en'] as const) {
       const s1 = startGuideContentFor(locale).sections[0];

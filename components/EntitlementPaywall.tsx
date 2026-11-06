@@ -15,8 +15,9 @@
 
 import { useEffect, useState, type ReactNode } from 'react';
 import { useTranslations } from 'next-intl';
-import { useAccount, useSwitchChain } from 'wagmi';
+import { useAccount } from 'wagmi';
 import { useSiweSession } from '@/hooks/useSiweSession';
+import { useSwitchChainWithFeedback } from '@/hooks/useSwitchChainWithFeedback';
 import { env } from '@/lib/env';
 import { defaultDeploymentForSymbol, resolveDeployment } from '@/lib/tokens';
 
@@ -86,7 +87,12 @@ export function EntitlementPaywall({
 }) {
   const t = useTranslations(config.namespace);
   const { isConnected, chainId } = useAccount();
-  const { switchChain, isPending: isSwitching } = useSwitchChain();
+  // 切り替えの失敗を画面に知らせ、記録に残す (hooks/useSwitchChainWithFeedback.ts)。
+  const {
+    switchChain,
+    isPending: isSwitching,
+    failed: switchFailed,
+  } = useSwitchChainWithFeedback('entitlement-paywall');
   const { isSignedIn, signIn, isSigningIn, mismatch, signInError } =
     useSiweSession();
   // 支払い前の最終確認を経たか (価格/期間/返金不可 等を提示してから署名させる)。
@@ -177,14 +183,21 @@ export function EntitlementPaywall({
           </ul>
 
           {!payDeployment ? (
-            <button
-              type="button"
-              disabled={isSwitching}
-              onClick={() => switchChain({ chainId: defaultJpyc.chainId })}
-              className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:border-slate-400 disabled:opacity-50"
-            >
-              {t('switchChain', { chain: defaultJpyc.name })}
-            </button>
+            <div className="space-y-2">
+              <button
+                type="button"
+                disabled={isSwitching}
+                onClick={() => switchChain({ chainId: defaultJpyc.chainId })}
+                className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:border-slate-400 disabled:opacity-50"
+              >
+                {t('switchChain', { chain: defaultJpyc.name })}
+              </button>
+              {isConnected && switchFailed && (
+                <p role="alert" className="text-xs leading-relaxed text-red-700">
+                  {t('switchChainFailed', { chainName: defaultJpyc.name })}
+                </p>
+              )}
+            </div>
           ) : sub.isSuccess ? (
             <p className="text-sm font-semibold text-emerald-700">
               {sub.expiresAt

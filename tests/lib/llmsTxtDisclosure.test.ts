@@ -93,9 +93,10 @@ describe('public/llms.txt 開示同期 (掟 14③)', () => {
   });
 
   // 2026-10-07: レジの通常決済の利用料を廃止。ガスレスは決済QR・レジ共通で % と最低額、通常決済の無料はレジを含む。
-  it('gasless JPYC (payment QR and register) is percent + floor; standard payments are free including the register', () => {
+  // 2026-11-05: 注文リンク (/create の「注文リンク」タブ・JPYC だけ) のガスレス決済も同じ利用料なので、場面に足した。
+  it('gasless JPYC (payment QR, register and order links) is percent + floor; standard payments are free including the register', () => {
     const fees = lines.find((line) => line.startsWith('- OpenPay 利用料:'))!;
-    expect(fees).toContain(`JPYC ガスレス決済（決済QR・レジ（POS））は決済額の ${pct(DISCLOSED_RECOVER_FEE.percentFromJulyBps)}%・最低 ${DISCLOSED_RECOVER_FEE.floorJpyc} JPYC（店舗負担）`);
+    expect(fees).toContain(`JPYC ガスレス決済（決済QR・レジ（POS）・注文リンク）は決済額の ${pct(DISCLOSED_RECOVER_FEE.percentFromJulyBps)}%・最低 ${DISCLOSED_RECOVER_FEE.floorJpyc} JPYC（店舗負担）`);
     expect(fees).toContain('モバイル注文を除く通常決済（レジ（POS）を含む）・USDC 決済は OpenPay 利用料無料');
     expect(fees).toContain('レジの通常決済の利用料は 2026 年 10 月 7 日に廃止しました');
     expect(fees).not.toContain('レジ（POS）の JPYC 決済は通常決済（ガスあり）も');

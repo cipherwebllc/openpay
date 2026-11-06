@@ -17,8 +17,9 @@ export async function POST(req: Request): Promise<NextResponse> {
   const cookieName = sessionCookieName();
   const token = store.get(cookieName)?.value;
   let revoked = true;
-  // Malformed cookies cannot name an issued session. Skip DEL so anonymous
-  // logout requests cannot drain the KV budget shared with payments.
+  // 発行済みのセッションは小文字 64 hex だけなので、それ以外の形の cookie では DEL しない (発行し得ない値で KV を
+  // 使わない)。形の合うランダムな値は 1 回ずつ DEL するので、匿名の連打が決済と共有の KV の予算を使うこと自体は
+  // ここでは止めない。
   if (token && isSessionToken(token)) {
     const del = await kvDel(sessionKey(token));
     // value=0 は既に削除済み/未設定の正常系。KV コマンドの成否は ok で判定する。

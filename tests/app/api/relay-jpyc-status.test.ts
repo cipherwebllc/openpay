@@ -24,6 +24,9 @@ const h = vi.hoisted(() => ({
   used: false,
   logHash: null as Hex | null,
   rpcThrows: false,
+  // 本物の findAuthorizationUsedTransactionHash の契約: 直近 10,000 ブロックの 1 回の検索が RPC の範囲制限で拒まれたとき、
+  // 窓 (window) が無ければ throw、あれば狭い範囲で探す。true でこの拒否を再現する。
+  rangeLimited: false,
   expiry: 'unknown' as 'expired' | 'live' | 'unknown',
   expiryDelayMs: 0,
   expiryThrows: false,
@@ -67,7 +70,12 @@ vi.mock('@/lib/relay/relayProvider', () => ({
     if (h.rpcThrows) throw new Error('rpc down');
     return h.used;
   }),
-  findAuthorizationUsedTransactionHash: vi.fn(async () => h.logHash),
+  findAuthorizationUsedTransactionHash: vi.fn(
+    async (_chainId: number, _token: Address, _from: Address, _nonce: Hex, window?: unknown) => {
+      if (h.rangeLimited && !window) throw new Error('eth_getLogs: block range too large');
+      return h.logHash;
+    },
+  ),
   readAuthorizationExpiry: vi.fn(async () => {
     if (h.expiryThrows) throw new Error('finality unavailable');
     if (h.expiryDelayMs > 0) await new Promise((r) => setTimeout(r, h.expiryDelayMs));
@@ -252,6 +260,7 @@ beforeEach(() => {
   h.used = false;
   h.logHash = null;
   h.rpcThrows = false;
+  h.rangeLimited = false;
   h.receipt = { status: 'success', logs: [authorizationEvent(), transfer()] };
   h.receipts.clear();
   h.getReceipt.mockReset().mockImplementation(async ({ hash }: { hash: Hex }) => {
@@ -419,6 +428,99 @@ describe('POST /api/relay/jpyc/status', () => {
       undefined,
     );
     expect(recoverTransferAuthorizationSigner).not.toHaveBeenCalled();
+  });
+
+  // 第 9 回レビュー A-3: 再読み込み後の照会 (nonce だけ) も client は署名の validBefore を送る
+  // (lib/relay/relayIntentRecovery.ts)。それがあれば tx 探しにも窓を渡し、RPC が直近 10,000 ブロックの 1 回の検索を
+  // 範囲制限で拒んでも、署名が使われうる時刻のブロックに絞って探す (決済済みが期限まで indeterminate にならない)。
+  describe('nonce lookup の validBefore から tx 探しの窓を作る (A-3)', () => {
+    const VALID_BEFORE = '1800000000';
+    // 照会の窓 = 中継の有効窓の上限 20 分 + 時計のずれの余裕 30 秒 (lib/relay/validityWindow.ts)
+    const LOOKUP_WINDOW_SEC = 1230;
+    const withValidBefore = (validBefore: string = VALID_BEFORE, nonce: Hex = NONCE) =>
+      req({ ...nonceIntent(nonce), validBefore });
+    // 探索は validAfter + 1 から探すので、validAfter = validBefore − 1230 − 1 にして validBefore − 1230 のブロックから探す。
+    // allowNarrowSearch は署名なしの照会の小分けの探索を始める前の関門 (チェーン単位の予算・lib/relay/statusLookupBudget.ts)。
+    const nonceWindow = (validAfter: bigint, validBefore: bigint) => ({
+      validAfter,
+      validBefore,
+      maxWindowSec: LOOKUP_WINDOW_SEC,
+      allowNarrowSearch: expect.any(Function),
+    });
+
+    it('validBefore があれば窓 (validBefore − 1230 秒 〜 validBefore・上限 1230 秒) と予算の関門つきで tx を探す', async () => {
+      h.used = true;
+      h.logHash = LOG_HASH;
+      const res = await POST(withValidBefore());
+      expect(await res.json()).toEqual({ ok: true, state: 'settled', txHash: LOG_HASH });
+      expect(findAuthorizationUsedTransactionHash).toHaveBeenCalledWith(
+        80002, TOKEN, FROM, NONCE, nonceWindow(1800000000n - BigInt(LOOKUP_WINDOW_SEC) - 1n, 1800000000n),
+      );
+    });
+
+    it('validBefore が窓より小さければ下限は 0 (負にしない)', async () => {
+      h.used = true;
+      h.logHash = LOG_HASH;
+      await POST(withValidBefore('1000'));
+      expect(findAuthorizationUsedTransactionHash).toHaveBeenCalledWith(80002, TOKEN, FROM, NONCE, nonceWindow(0n, 1000n));
+    });
+
+    it('10,000 ブロックの検索が範囲制限で拒まれても、窓で見つけた tx の receipt を照合して settled', async () => {
+      h.used = true;
+      h.logHash = LOG_HASH;
+      h.rangeLimited = true;
+      const res = await POST(withValidBefore());
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ ok: true, state: 'settled', txHash: LOG_HASH });
+      expect(h.getReceipt).toHaveBeenCalledWith({ hash: LOG_HASH });
+    });
+
+    it('forwarder の nonce lookup も validBefore から窓を作る', async () => {
+      h.forwarder = FORWARDER;
+      h.used = true;
+      h.logHash = LOG_HASH;
+      h.rangeLimited = true;
+      h.receipt.logs = [settledEvent()];
+      const res = await POST(withValidBefore(VALID_BEFORE, FORWARDER_NONCE));
+      expect(await res.json()).toEqual({ ok: true, state: 'settled', txHash: LOG_HASH });
+      expect(findAuthorizationUsedTransactionHash).toHaveBeenCalledWith(
+        80002, TOKEN, FROM, FORWARDER_NONCE, nonceWindow(1800000000n - BigInt(LOOKUP_WINDOW_SEC) - 1n, 1800000000n),
+      );
+    });
+
+    it('窓で見つけた tx でも receipt が対象の支払いと合わなければ settled にしない (照合は従来どおり)', async () => {
+      h.used = true;
+      h.logHash = LOG_HASH;
+      h.rangeLimited = true;
+      h.receipt.logs = [authorizationEvent({ nonce: OTHER_NONCE }), transfer()];
+      const res = await POST(withValidBefore());
+      expect(await res.json()).toEqual({ ok: true, state: 'indeterminate' });
+    });
+
+    it('validBefore の無い nonce lookup は従来どおり窓なしで探し、範囲制限で拒まれれば indeterminate', async () => {
+      h.used = true;
+      h.logHash = LOG_HASH;
+      h.rangeLimited = true;
+      const res = await POST(req(nonceIntent()));
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ ok: true, state: 'indeterminate' });
+      expect(findAuthorizationUsedTransactionHash).toHaveBeenCalledWith(80002, TOKEN, FROM, NONCE, undefined);
+    });
+
+    it('unused の期限切れ証明は従来どおり validBefore そのものを使い、tx 探しは呼ばない', async () => {
+      h.expiry = 'expired';
+      const res = await POST(withValidBefore());
+      expect(await res.json()).toEqual({ ok: true, state: 'unused', expiry: 'expired' });
+      expect(readAuthorizationExpiry).toHaveBeenCalledWith(80002, TOKEN, FROM, NONCE, 1800000000n);
+      expect(findAuthorizationUsedTransactionHash).not.toHaveBeenCalled();
+    });
+
+    it('期限切れ証明は nonce lookup だけ (窓を持つ署名付き照会の unused は証明を読まない)', async () => {
+      h.expiry = 'expired';
+      const res = await POST(req());
+      expect(await res.json()).toEqual({ ok: true, state: 'unused' });
+      expect(readAuthorizationExpiry).not.toHaveBeenCalled();
+    });
   });
 
   it.each([

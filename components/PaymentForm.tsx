@@ -5,7 +5,8 @@ import dynamic from 'next/dynamic';
 import { useSearchParams } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
 import { formatUnits, parseUnits } from 'viem';
-import { useAccount, useSwitchChain } from 'wagmi';
+import { useAccount } from 'wagmi';
+import { useSwitchChainWithFeedback } from '@/hooks/useSwitchChainWithFeedback';
 import { ConnectButton } from './ConnectButton';
 import { PayStepStrip } from './PayStepStrip';
 import { PayEmptyLanding } from './PayEmptyLanding';
@@ -115,6 +116,7 @@ import {
 } from '@/lib/signPreview';
 import { appendPayerReceipt, buildPayerReceipt, payerReceiptSale } from '@/lib/payerReceipt';
 import { buildCheckoutLineItems } from '@/lib/checkoutLineItems';
+import { hasSavedCctpResume } from '@/lib/crossChain/cctpResumePresence';
 import { RecoverFeeNotice } from './RecoverFeeNotice';
 
 type PaymentAttemptSnapshot = {
@@ -167,7 +169,8 @@ function PaymentDetails({ params }: { params: PayParams }) {
   const paymasterMode = resolvePaymasterMode(deployment);
 
   const { address, isConnected, chainId } = useAccount();
-  const { switchChain, isPending: isSwitching } = useSwitchChain();
+  // 切り替えの失敗を画面に知らせ、記録に残す (hooks/useSwitchChainWithFeedback.ts)。
+  const { switchChain, isPending: isSwitching, failed: switchFailed } = useSwitchChainWithFeedback('payment');
   // sessionStorage に broadcast 済み standard intent が残る場合、元 URL が gasless でも
   // standard の receipt 復元を本線に固定する。storage 読込中は下の readiness で全経路を止める。
   const standard = useStandardPayment();
@@ -273,6 +276,14 @@ function PaymentDetails({ params }: { params: PayParams }) {
   const [crossChainLocked, setCrossChainLocked] = useState(false);
   const arcRecoveryScope = `${address}:${params.chain}:${params.to}:${amountStr}`;
   const [arcScannedScope, setArcScannedScope] = useState('');
+  // A-1: この請求の宛先・受取人に CCTP の中断記録があるか (同期で読む・遅延ロードの子より先に決まる)。
+  // あれば子の走査報告まで直接送金を閉じる (pay.ts の cctpRecoveryScanning)。hydration 中は address が
+  // 未確定なので読まない (server と同じ false)。
+  const cctpResumeSaved = useMemo(
+    () => params.token === 'usdc' && !!address &&
+      hasSavedCctpResume({ account: address, destChainId: requiredChain.id, recipient: params.to }),
+    [params.token, address, requiredChain.id, params.to],
+  );
   const [crossChainResult, setCrossChainResult] = useState<ExecuteResult>();
   const directAttemptSnapshotRef = useRef<PaymentAttemptSnapshot | null>(null);
   const crossChainAttemptSnapshotRef =
@@ -489,6 +500,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
     address,
     arcScannedScope,
     arcRecoveryScope,
+    cctpResumeSaved,
     activeQuote,
     isConnected,
     wrongChain,
@@ -840,7 +852,9 @@ function PaymentDetails({ params }: { params: PayParams }) {
           amount: snapshot.amountHuman,
           merchantAddress: params.to,
           merchantName: params.storeName ?? null,
-          payerAddress: address,
+          // 支払者は試みた時点で固定した ctx の接続先 (第 9 回レビュー A-4)。完了までに別のウォレットへ切り替えても、
+          // 切り替えた先を控えの支払者にしない (Gateway の hash の無い控えも同じ。控えは後から支払者を直さない)。
+          payerAddress: ctx.customer,
           paymentMode: 'cross-chain',
           gasMode: 'customer',
           ...sale,
@@ -858,7 +872,6 @@ function PaymentDetails({ params }: { params: PayParams }) {
       );
     },
     [
-      address,
       deployment.address,
       locale,
       params.memo,
@@ -1350,6 +1363,11 @@ function PaymentDetails({ params }: { params: PayParams }) {
               ? t('switchingChain')
               : t('switchChain', { chainName: requiredChain.name })}
           </button>
+        )}
+        {isConnected && wrongChain && switchFailed && (
+          <p role="alert" className="text-xs leading-relaxed text-red-700">
+            {t('switchChainFailed', { chainName: requiredChain.name })}
+          </p>
         )}
 
         {isConnected && !wrongChain && balance !== undefined && (

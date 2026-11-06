@@ -50,6 +50,11 @@ type State = {
   crossChainResult?: object;
   orderAdmissionPending?: boolean;
   arcScannedScope?: string;
+  // A-1: 既定は Arc・CCTP の中断記録なし (既存の表の値を変えない)。
+  chain?: string;
+  cctpResumeSaved?: boolean;
+  // A-2: Checkout だけが読む (受注を OpenPay 自身の notify へ送る会計か)。既定は送らない (既存の表の値を変えない)。
+  sendsOrderNotify?: boolean;
   ready?: Partial<Readiness>;
 };
 type Guards = { flowPending: boolean; settledNoRetry: boolean; gaslessStoreUnavailable: boolean };
@@ -162,17 +167,19 @@ function buildInput(route: Route, state: State = {}) {
     crossChainLocked: state.crossChainLocked ?? false,
     crossChainResult: state.crossChainResult,
     orderAdmissionPending: state.orderAdmissionPending ?? false,
-    params: { token: 'usdc', chain: 'arc', expiresAt: ready.expiresAt },
+    params: { token: 'usdc', chain: state.chain ?? 'arc', expiresAt: ready.expiresAt },
     address: '0x1111111111111111111111111111111111111111',
     preview: ready.preview,
     arcScannedScope: state.arcScannedScope ?? 'scanned',
     arcRecoveryScope: 'scanned',
+    cctpResumeSaved: state.cctpResumeSaved ?? false,
     isConnected: ready.isConnected,
     wrongChain: ready.wrongChain,
     saData: ready.saData,
     breakdown: { merchantReceives: ready.merchantReceives, customerPays: ready.customerPays },
     insufficientBalance: ready.insufficientBalance,
     merchantUnderflow: ready.merchantUnderflow,
+    sendsOrderNotify: state.sendsOrderNotify ?? false,
     activeQuote: { data: ready.quoteReady ? {} : undefined },
     expired: ready.expired,
     timeMeasured: ready.timeMeasured,
@@ -351,5 +358,63 @@ describe.each(['pay', 'checkout', 'tip'] as const)('%s UI outputs', (policy) => 
       }
     }
     expect(table).toMatchSnapshot();
+  });
+});
+
+// A-1: Arc 以外の USDC でも、CCTP の中断記録がこのブラウザにあれば、子 (CrossChainHint) が走査して
+// 報告するまで直接送金を閉じる。記録が無い・子が報告済みなら従来どおり (Arc の待ちは上の表で固定)。
+// Checkout は CrossChainHint を持たないので対象外。
+describe.each(['pay', 'tip'] as const)('%s waits for the CCTP recovery scan when a resume record is saved', (policy) => {
+  const derive = readDerivePaymentFlowGuards(policy);
+  const submit = readDeriveSubmit(policy);
+  const cases: { name: string; state: State; blocked: boolean }[] = [
+    { name: 'saved record, child not reported yet', state: { chain: 'polygon', cctpResumeSaved: true, arcScannedScope: 'unscanned' }, blocked: true },
+    { name: 'saved record, child reported for this scope', state: { chain: 'polygon', cctpResumeSaved: true }, blocked: false },
+    { name: 'no saved record, child not reported yet', state: { chain: 'polygon', arcScannedScope: 'unscanned' }, blocked: false },
+    { name: 'saved record in Tip preview', state: { chain: 'polygon', cctpResumeSaved: true, arcScannedScope: 'unscanned', ready: { preview: true } }, blocked: policy === 'pay' },
+  ];
+  describe.each(['standard', 'relay-free', 'pimlico'] as const)('%s', (route) => {
+    it.each(cases)('$name', ({ state, blocked }) => {
+      if (policy === 'tip' && state.ready?.preview) {
+        // preview は送信しない (canSubmit=false は既存の行)。待ちの条件からも外れることだけを見る。
+        expect(derive(route, state).flowPending).toBe(false);
+        return;
+      }
+      expect(derive(route, state).flowPending).toBe(blocked);
+      expect(submit(route, state).canSubmit).toBe(!blocked);
+    });
+  });
+});
+
+// 第 9 回レビュー A-2: 受注を OpenPay 自身の notify へ送る会計は、店の受取が受注の下限 (1 JPYC) 未満なら送信を閉じる
+// (notify は 422 で受注に残さない)。受取 0 は既存の `> 0n` の行 (理由は merchantUnderflow) のまま。受注を送らない会計は
+// 従来どおり。境界はリテラルの 1 JPYC で固定する (下限の定数が動いたら、承認済みの文言「1 JPYC 未満」も見直すため)。
+describe('checkout closes order payments whose shop receipt is below the 1 JPYC order floor', () => {
+  // CheckoutForm が sendsOrderNotify を shorthand で渡していること (配線) は上の表の readPolicy が確かめる。
+  const ONE_JPYC = 10n ** 18n;
+  const cases = [
+    { name: 'order, shop receives 0.99 JPYC', sendsOrderNotify: true, merchantReceives: ONE_JPYC - 10n ** 16n, blocked: true },
+    { name: 'order, shop receives 1 JPYC minus 1 wei', sendsOrderNotify: true, merchantReceives: ONE_JPYC - 1n, blocked: true },
+    { name: 'order, shop receives exactly 1 JPYC', sendsOrderNotify: true, merchantReceives: ONE_JPYC, blocked: false },
+    { name: 'order, shop receives 2970 JPYC', sendsOrderNotify: true, merchantReceives: 2_970n * ONE_JPYC, blocked: false },
+    { name: 'not an order, shop receives 0.5 JPYC', sendsOrderNotify: false, merchantReceives: ONE_JPYC / 2n, blocked: false },
+    { name: 'not an order, shop receives 1 wei', sendsOrderNotify: false, merchantReceives: 1n, blocked: false },
+  ];
+  describe.each(['standard', 'relay-free', 'relay-recover', 'pimlico', 'circle'] as const)('%s', (route) => {
+    it.each(cases)('$name', ({ sendsOrderNotify, merchantReceives, blocked }) => {
+      const result = deriveCheckoutGuards(
+        buildInput(route, { sendsOrderNotify, ready: { merchantReceives } }) satisfies CheckoutGuardInput,
+      );
+      expect(result.orderBelowDustFloor).toBe(blocked);
+      expect(result.paymentReady).toBe(!blocked);
+      expect(result.canSubmit).toBe(!blocked);
+    });
+    it('order with a zero shop receipt stays on the existing zero check without the floor reason', () => {
+      const result = deriveCheckoutGuards(
+        buildInput(route, { sendsOrderNotify: true, ready: { merchantReceives: 0n } }) satisfies CheckoutGuardInput,
+      );
+      expect(result.orderBelowDustFloor).toBe(false);
+      expect(result.paymentReady).toBe(false);
+    });
   });
 });

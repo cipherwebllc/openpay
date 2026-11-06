@@ -10,17 +10,23 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
-import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
 import { formatUnits, type Address } from 'viem';
-import { useAccount, useSwitchChain } from 'wagmi';
+import { useAccount } from 'wagmi';
 import { ConnectButton } from './ConnectButton';
-import { breakdownRow } from './PaymentBreakdownRows';
-import { OnrampCta } from './OnrampCta';
-import { ResultRow } from './ResultRow';
 import { SmartAccountFallbackBanner } from './SmartAccountFallbackBanner';
 import { RelayFallbackBanner } from './RelayFallbackBanner';
 import { isRemoteOrderCheckout, NotifyShopButton, type NotifyShopData } from './NotifyShopButton';
+import { notifyShopData } from './checkout/notifyShopData';
+import { RelayStatusBanners } from './checkout/RelayStatusBanners';
+// 送信後の pending / unknown の枠 (First Load JS から外す lazy wrapper・RelayStatusBanners と 1 つを共有する)。
+import { PaymentStatusPanel } from './checkout/paymentStatusPanelLazy';
+import { WrongChainSwitch } from './checkout/WrongChainSwitch';
+import { WalletBalance } from './checkout/WalletBalance';
+import { CheckoutItemList } from './checkout/CheckoutItemList';
+import { CheckoutAmountBreakdown } from './checkout/CheckoutAmountBreakdown';
+import { CheckoutHeader } from './checkout/CheckoutHeader';
+import { CheckoutCompletion } from './checkout/CheckoutCompletion';
 import { shopContactLabel } from '@/lib/shopContact';
 import { rememberOrderPayment, type RememberedOrderPayment } from '@/lib/orderConfirmation';
 import { findRememberedOrderPayment } from '@/lib/orderPaidLookup';
@@ -29,7 +35,6 @@ import {
   type PaymentSuccessOverlayPayload,
 } from './PaymentSuccessOverlay';
 import type { SignReassuranceProps } from './SignReassurance';
-import { PayerReceiptCompletion } from './PayerReceiptCompletion';
 import { useBatchPayment } from '@/hooks/useBatchPayment';
 import { useStandardPayment } from '@/hooks/useStandardPayment';
 import { useSmartAccount } from '@/hooks/useSmartAccount';
@@ -56,6 +61,7 @@ import {
 import { relayErrorKey } from '@/lib/relay/relayErrorMessage';
 import { isFallbackSafeRelayError } from '@/lib/relay/relayResponseError';
 import { isUserRejection } from '@/lib/walletErrors';
+import { useSwitchChainWithFeedback } from '@/hooks/useSwitchChainWithFeedback';
 import { deriveCheckoutGuards } from '@/lib/paymentFlowGuards/checkout';
 import { generateStatusToken } from '@/lib/orderStatusToken';
 import { isOrderTokenLike } from '@/lib/orderToken';
@@ -98,16 +104,9 @@ import {
 } from '@/lib/signPreview';
 import type { CanonicalOrder } from '@/lib/orderBind';
 import { matchesOrderDeliveryContext } from '@/lib/orderDeliveryContext';
-import { checkoutIntentContextFingerprint } from '@/lib/checkoutIntentContext';
+import { checkoutIntentContextFingerprint, orderLinkContextFingerprint } from '@/lib/checkoutIntentContext';
 import { RecoverFeeNotice } from './RecoverFeeNotice';
 
-// 送信後の pending / unknown と同一 payload の復旧時だけ必要な UI を First Load JS
-// から外す。状態判定・再送封鎖・retry handler の選択は親に残す。
-const PaymentStatusPanel = dynamic(
-  () =>
-    import('./PaymentStatusPanel').then((m) => m.PaymentStatusPanel),
-  { ssr: false },
-);
 const SignReassurance = dynamic(
   () => import('./SignReassurance').then((m) => m.SignReassurance),
 );
@@ -209,7 +208,8 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   const isJpyc = deployment.symbol === 'jpyc';
 
   const { address, isConnected, chainId } = useAccount();
-  const { switchChain, isPending: isSwitching } = useSwitchChain();
+  // 切り替えの失敗を画面に知らせ、記録に残す (hooks/useSwitchChainWithFeedback.ts)。
+  const { switchChain, isPending: isSwitching, failed: switchFailed } = useSwitchChainWithFeedback('checkout');
   // sessionStorage に broadcast 済み standard intent が残る場合、元 URL が gasless でも
   // standard の receipt 復元を本線に固定する。storage 読込中は下の readiness で全経路を止める。
   const standard = useStandardPayment();
@@ -432,6 +432,11 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
     isMerchantGas,
     effectiveGasAmount,
   });
+  // この会計が受注を OpenPay 自身の notify (`/api/order/notify?h=`・モバイル注文) へ送るか。完了時の受注通知と
+  // relay の注文の束縛 (onSubmit) と同じ条件 (isOwnOrderNotifyUrl)。notify は JPYC だけを受け付け、受注の下限
+  // (ORDER_DUST_FLOOR_WEI) も JPYC の単位なので JPYC に限る。origin 未確定 (hydrate 前) は false。
+  const sendsOrderNotify =
+    isJpyc && !!origin && !!params.webhook && isOwnOrderNotifyUrl(params.webhook, origin);
 
   // 再送封鎖・flow pending・送信可否は /checkout 専用の policy (注文受付と同一店舗 hold を含む) に置く
   // (R14・式は移動のみ)。admission の await 後は canSubmit でなく paymentReady を読み直す (onSubmit)。
@@ -445,6 +450,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
     settledNoRetry,
     paymentReady,
     canSubmit,
+    orderBelowDustFloor,
   } = deriveCheckoutGuards({
     isStandard,
     useRelay,
@@ -459,6 +465,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
     breakdown,
     insufficientBalance,
     merchantUnderflow,
+    sendsOrderNotify,
   });
   const standardUnknownTxHash = standard.isFeeUnknown
     ? standard.feeTxHash
@@ -510,6 +517,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
         (merchantUnderflow
           ? t('errorMerchantUnderflow', { min: fmt(minimumAmountWei) })
           : null) ??
+        (orderBelowDustFloor ? t('errorOrderMerchantBelowFloor') : null) ??
         (revertedNoFeedback ? t('errorReverted') : null));
 
   // B1 graceful degradation: relay が API レベルで失敗 (rate_limited 等の error code) したとき、
@@ -638,6 +646,47 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
     standard.restoredFromStorage,
     totalWei,
   ]);
+  // 注文リンクの支払いの指紋 (第 9 回レビュー G-1)。注文リンクの支払いにだけ復旧 intent へ残し、読み直した後の完了を
+  // 「この注文リンク」の支払いにだけ結び付ける。会計の指紋 (checkoutContextKey) は ship を含まず、普通の /checkout と
+  // 同じ明細の「何度でも使える」リンクで同じ値になるため、既存の照合の意味は変えずに別の指紋で区別する。
+  const orderLinkKey = useMemo(
+    () => (remoteOrder ? orderLinkContextFingerprint(checkoutContextKey, params) : null),
+    [checkoutContextKey, params, remoteOrder],
+  );
+  // 読み直した画面で復元した通常決済の支払いが、この注文リンクのものか: 既存の照合 (restoredStandardOrderAttempt) に
+  // 加え、注文リンクの指紋が一致するときだけ (指紋の無い復元 = 普通の /checkout や以前の保存は一致としない)。
+  const restoredStandardOrderLinkAttempt =
+    restoredStandardOrderAttempt !== null &&
+    orderLinkKey !== null &&
+    standard.lastSubmittedParams?.orderLinkKey === orderLinkKey
+      ? restoredStandardOrderAttempt
+      : null;
+  // 読み直した画面で復元した relay の支払いが、この注文リンクのものか。注文の同一性は注文リンクの指紋 (明細・番号・
+  // ship)・署名したチェーン・お店で確かめ、金額は保存した intent の実際の値を注文の合計と照らす。利用料は今の設定で
+  // 計算し直さない (払った後に率やフロアが変わっても記録を失わない)。今のウォレットのチェーンで決まる経路 (route・
+  // breakdown) にも依存させない (別のチェーンのまま読み直しても記録を残す)。経路は intent の routeKind で分ける:
+  //   free: お店の受取 = 合計・利用料 0 (hook が '0' を入れる)。
+  //   recover: お店の受取 + 利用料 = 合計・利用料 > 0。注文リンクにモバイル注文の利用料は無く recover は常にお店の負担
+  //   (effectiveGasMode) なので、利用料は合計から引かれる形になる。forwarder は利用料 0 を revert し、フロアは 0 を
+  //   採らないので、成立した recover の利用料は必ず 1 以上。お客様の上乗せの形 (受取 = 合計) は合計を超えて一致しない。
+  const restoredRelayOrderIntent = useMemo(() => {
+    const intent = relay.restoredIntent;
+    if (!intent || orderLinkKey === null || intent.orderLinkKey !== orderLinkKey) return null;
+    const merchantValue = BigInt(intent.merchantValue);
+    const feeValue = BigInt(intent.feeValue);
+    const amountMatches =
+      intent.routeKind === 'recover'
+        ? feeValue > 0n && merchantValue + feeValue === totalWei
+        : feeValue === 0n && merchantValue === totalWei;
+    if (
+      intent.chainId !== deployment.chainId ||
+      intent.merchant.toLowerCase() !== params.to.toLowerCase() ||
+      !amountMatches
+    ) {
+      return null;
+    }
+    return intent;
+  }, [deployment.chainId, orderLinkKey, params.to, relay.restoredIntent, totalWei]);
   const restoredCheckoutCompletion =
     (isStandard && standard.restoredFromStorage) ||
     (useRelay && relay.restoredIntent != null);
@@ -1176,6 +1225,17 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
     standard.restoredFromStorage,
   ]);
 
+  // 支払いを送ったウォレット (第 9 回レビュー A-4)。履歴と控えの支払者・注文の確認の署名をするウォレット (notifyPayer)
+  // の両方に使う。確定を待つ間に拡張機能で別のウォレットへ切り替えても、切り替えた先にしない (控えは pending →
+  // confirmed の昇格しか受けないので、後から直らない)。通常決済は hook が記録した送り主、relay は hook が署名に使った
+  // from (admission・注文の束縛の読み込みの await の間に切り替えると、クリックしたときの接続先と実際の送金元がずれる
+  // ため、実際の送金元を優先する)、それ以外は onSubmit で固定した submittedPayerRef。
+  const paidFrom =
+    (isStandard ? standard.lastSubmittedFrom : useRelay ? relay.lastSignedFrom : undefined) ??
+    submittedPayerRef.current;
+  // この画面でまだ送っていない間は、今の接続先のまま (従来どおり)。
+  const historyCustomer = paidFrom ?? address;
+
   // ローカル履歴 (Phase 2) — gasless / standard 全 5 transition を hook で集約。
   // note には description (なければ orderId) を入れ、CSV/UI で会計補助情報に使う。
   // v5: itemized checkout の items を売上明細 (lineItems) として保存し、税/管理番号も記録。
@@ -1190,7 +1250,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
       gasMode: isStandard ? null : effectiveGas,
       merchant: params.to,
       merchantAmount: breakdown.merchantReceives,
-      customer: address,
+      customer: historyCustomer,
       feeReceiver: env.feeReceiver,
       feeAmount: breakdown.feeAmount,
       saleAmount: totalWei,
@@ -1241,7 +1301,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
       breakdown.feeAmount,
       totalWei,
       networkFeeEquivalent,
-      address,
+      historyCustomer,
       locale,
     ],
   );
@@ -1412,6 +1472,9 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
         // 履歴 snapshot に正しい gross を運ぶ (非モバイルは fee=0 で merchantAmount に一致)。
         saleAmount: totalWei,
         contextKey: checkoutContextKey,
+        // 注文リンクの支払いの指紋を保存する intent にだけ残す (読み直した後の完了を同じ注文リンクに結び付ける・
+        // 第 9 回レビュー G-1)。送金の中身には関わらない。
+        ...(orderLinkKey ? { orderLinkKey } : {}),
       });
     } else if (useRelay) {
       // JPYC EIP-3009 relay: 顧客が transferWithAuthorization に署名 → 自前 relayer が gas 負担で
@@ -1425,6 +1488,9 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
         // モバイル注文 (storefront/preorder) のときだけ feeKind を載せる (server が定数表から % を
         // 再計算・on-chain 強制)。
         ...(mobileFeeKind ? { feeKind: mobileFeeKind } : {}),
+        // 注文リンクの支払いの指紋を復旧 intent にだけ残す (読み直した後の完了を同じ注文リンクに結び付ける・第 9 回
+        // レビュー G-1)。束縛した注文 (order) は自分の slot で復旧するので付けない。relay POST には載らない。
+        ...(orderLinkKey && !order ? { orderLinkKey } : {}),
       });
     } else {
       gasless.mutate({
@@ -1526,34 +1592,36 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
             }
           : null;
   // 注文を送る / お店に知らせる の中身。払ったウォレットは支払いを送った時点の接続先 (通常決済は hook が記録した
-  // 送り主) で、完了を見た時点の接続先ではない (途中で切り替えたウォレットに署名させない)。
-  const notifyPayer = (isStandard ? standard.lastSubmittedFrom : undefined) ?? submittedPayerRef.current;
-  const notifyFor = (txHash: string, payer: Address | undefined, chain: ChainSlug = chainSlug): NotifyShopData => {
-    const explorer = chain === chainSlug ? explorerBase : blockExplorerUrl(deploymentForSlug(params.token, chain).chainId);
-    return {
-    orderNo: params.orderId,
-    askShipping: params.ship === 'ask',
-    storeName: params.storeName,
-    items: params.items.map((item) => ({ name: item.name, qty: item.qty })),
-    amountDisplay: fmt(totalCustomerOutflow),
-    txHash,
-    explorerTxUrl: explorer ? `${explorer}/tx/${txHash}` : undefined,
-    chain,
-    shop: params.to,
-    ...(payer ? { payer } : {}),
-    // お店が確かめられるのは JPYC だけ (注文リンクの「入金を確かめる」)。他のトークンでは署名を求めない。
-    confirm: params.token === 'jpyc',
-    contact: params.contact,
-    };
-  };
+  // 送り主・relay は hook が署名に使った from) で、完了を見た時点の接続先ではない (途中で切り替えたウォレットに署名させない)。
+  // 履歴と控えの支払者と同じ値 (上の paidFrom・第 9 回レビュー A-4)。
+  const notifyPayer = paidFrom;
+  // 中身はチェーンを選ぶ画面と同じ関数で作る (第 9 回レビュー D-9)。金額はお客様が払う額 (breakdown.customerPays)。
+  const notifyFor = (txHash: string, payer: Address | undefined, chain: ChainSlug = chainSlug): NotifyShopData =>
+    notifyShopData({ params, customerPays: totalCustomerOutflow, deployment, txHash, payer, chain });
   const notifyData: NotifyShopData | undefined =
     notifyShop && successOverlayPayload ? notifyFor(successOverlayPayload.txHash, notifyPayer) : undefined;
+  // 読み直した画面で復元した支払いが完了した (receipt / relay の結果が届いた): 大きな完了画面と受注通知は出さないまま
+  // (上の successOverlayPayload)、この注文リンクの支払いと確かめられたときだけ「注文を送る」を出し、払った記録を残す
+  // (第 9 回レビュー G-1: 記録が無いと、もう一度読み直したときに同じ注文をまた払えてしまう)。別の会計の復元は出さない・
+  // 残さない。払ったウォレットは復元した支払いの送り主 (通常決済は hook が記録した送り主・relay は署名した人)。
+  // relay は今の経路 (useRelay) を見ない: 経路は接続中のチェーンで決まり、別のチェーンのまま読み直しても hook は保存した
+  // intent を復旧して成功で保存を消すため、ここで経路を要求すると記録が残らない。このマウントの完了 (notifyData) が
+  // あるときは出さない。
+  const restoredCompletionNotify: NotifyShopData | undefined =
+    !notifyShop || notifyData
+      ? undefined
+      : isStandard && standard.data && restoredStandardOrderLinkAttempt
+        ? notifyFor(standard.data.merchantTxHash, restoredStandardOrderLinkAttempt.from)
+        : relay.data?.success && relay.data.txHash && restoredRelayOrderIntent
+          ? notifyFor(relay.data.txHash, restoredRelayOrderIntent.from)
+          : undefined;
   // 読み直した画面: この会計 (同じ URL の中身) をこのタブで払った記録があれば、「注文を送る」を出す
   // (lib/orderConfirmation.ts の rememberOrderPayment)。完了画面を見ている間は出さない。
   const restoredNotifyData: NotifyShopData | undefined =
-    notifyShop && !notifyData && rememberedPayment
+    restoredCompletionNotify ??
+    (notifyShop && !notifyData && rememberedPayment
       ? notifyFor(rememberedPayment.payment.txHash, rememberedPayment.payment.payer, rememberedPayment.chain)
-      : undefined;
+      : undefined);
   // 何度でも使えるリンク (番号なし・ship=ask) は、同じ商品をもう一度注文できる。
   const canPayAgainAsNewOrder = params.ship === 'ask' && !params.orderId;
   const liveNotifyTx = notifyData?.txHash;
@@ -1566,6 +1634,17 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
       paidAt: Date.now(),
     });
   }, [checkoutContextKey, liveNotifyTx, liveNotifyPayer]);
+  // 復元した支払いの完了も同じ記録に残す (次に読み直したときに払うボタンを止め、「注文を送る」を出すため)。
+  const restoredCompletionTx = restoredCompletionNotify?.txHash;
+  const restoredCompletionPayer = restoredCompletionNotify?.payer;
+  useEffect(() => {
+    if (!restoredCompletionTx) return;
+    rememberOrderPayment(checkoutContextKey, {
+      txHash: restoredCompletionTx.toLowerCase(),
+      ...(restoredCompletionPayer ? { payer: restoredCompletionPayer } : {}),
+      paidAt: Date.now(),
+    });
+  }, [checkoutContextKey, restoredCompletionTx, restoredCompletionPayer]);
 
   // 「署名安心 UX」(plans/sign-reassurance-ux.md・P2)。経路別に kind を出し分ける (計画 §3.3)。
   //   (a) relay free (forwarder 未設定): jpyc-relay-free フルパネル。preview は relay.mutate に
@@ -1628,47 +1707,30 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
 
   return (
     <div className="space-y-4">
-      <header className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-        <p className="text-xs uppercase tracking-wider text-slate-500">
-          {t('header')}
-        </p>
-        {/* 店名 (URL の store・お店が付けた名前)。DM で届いたリンクがどのお店のものかを示す。表示だけで、
-            受取先・金額・利用料には関与しない (受取先は下の「支払先」のアドレスが正)。 */}
-        {params.storeName && (
-          <p className="mt-1 break-words text-lg font-bold text-slate-900">{params.storeName}</p>
-        )}
-        <p className="mt-1 text-base font-semibold text-slate-800">
-          {params.orderId ? t('orderHeading', { id: params.orderId }) : t('checkoutTitle')}
-        </p>
-        {params.description && (
-          <p className="mt-2 whitespace-pre-wrap text-sm text-slate-600">
-            {params.description}
-          </p>
-        )}
-        {/* 何度でも使える注文リンク (ship=ask): 払う前に、この後にすることを伝える (お名前とお届け先は自分の LINE や
-            メールで送り、OpenPay には入力しない)。送り先は完了画面にも出す。 */}
-        {notifyShop && params.ship === 'ask' && (
-          <p className="mt-2 rounded-lg bg-sky-50 px-3 py-2 text-sm text-sky-900">
-            {params.contact
+      {/* 会計の頭の部分 (見出し・店名と注記・受付番号・説明・ship=ask の案内・支払先の行・「別のチェーンで払う」)。表示だけの
+          部品で、アドレスの短縮表示・チェーン名・通貨・どの文言を出すかの判定と、「別のチェーンで払う」を出すか・押したときの処理は
+          ここで決めて渡す (第 9 回レビュー F-04)。条件と分岐は切り出し前の JSX から 1 つも変えずに写した (ship=ask の案内の
+          `a && (…)` は `a ? … : null` に)。 */}
+      <CheckoutHeader
+        storeName={params.storeName}
+        title={params.orderId ? t('orderHeading', { id: params.orderId }) : t('checkoutTitle')}
+        description={params.description}
+        // 何度でも使える注文リンク (ship=ask) の、払う前の案内。遠隔の注文 (notifyShop) のときだけ出し、送り先があれば
+        // 送り先を入れる。
+        shipAskNote={
+          notifyShop && params.ship === 'ask'
+            ? (params.contact
               ? t('shipAskNoteWithContact', { dest: shopContactLabel(params.contact) })
-              : t('shipAskNote')}
-          </p>
-        )}
-        <p className="mt-3 text-xs text-slate-500">
-          {t('payToLabel', { addr: shortAddress(params.to) })} ·{' '}
-          {requiredChain.name} · {deployment.displaySymbol} ·{' '}
-          {isStandard ? t('modeBadgeStandard') : t('modeBadgeGasless')}
-        </p>
-        {canPayOnOtherChain && (
-          <button
-            type="button"
-            onClick={payOnOtherChain}
-            className="mt-1 inline-flex min-h-11 items-center text-sm font-medium text-brand hover:text-brand-dark"
-          >
-            {t('payOnOtherChain')}
-          </button>
-        )}
-      </header>
+              : t('shipAskNote'))
+            : null
+        }
+        payToAddress={shortAddress(params.to)}
+        chainName={requiredChain.name}
+        tokenSymbol={deployment.displaySymbol}
+        modeBadge={isStandard ? t('modeBadgeStandard') : t('modeBadgeGasless')}
+        canPayOnOtherChain={canPayOnOtherChain}
+        onPayOnOtherChain={payOnOtherChain}
+      />
 
       {/* 読み直した画面: このタブで払った会計なら、注文を送る / お店に知らせる をここに出す (同じ注文をもう一度払わせない)。 */}
       {restoredNotifyData && (
@@ -1691,60 +1753,54 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
       )}
 
       <section className="rounded-2xl border border-slate-200 bg-white p-4 text-sm">
-        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-          {t('itemsTitle')}
-        </p>
-        <ul className="mt-3 divide-y divide-slate-100">
-          {params.items.map((it, i) => {
+        {/* 商品の明細 (見出しと品目の行)。表示だけの部品で、行の額 (品目ごとの小計) の計算と表記はここで決めて渡す
+            (第 9 回レビュー F-04)。 */}
+        <CheckoutItemList
+          lines={params.items.map((it) => {
             const lineTotalWei = calcCheckoutTotal([it], deployment.decimals);
-            return (
-              <li key={i} className="flex items-baseline justify-between gap-3 py-2">
-                <span className="min-w-0 flex-1 break-words font-medium text-slate-700">
-                  {it.name}
-                </span>
-                <span className="shrink-0 font-mono text-xs text-slate-500">
-                  ×{it.qty}
-                </span>
-                <span className="shrink-0 font-mono text-sm text-slate-800">
-                  {fmt(lineTotalWei)}
-                </span>
-              </li>
-            );
+            return { name: it.name, qty: it.qty, amountText: fmt(lineTotalWei) };
           })}
-        </ul>
-        <div className="mt-3 border-t border-slate-200 pt-3">
-          <dl className="space-y-1.5">
-            {/* レジの値引き: 小計 (値引き前) → 値引き の 2 行。以降の手数料・お支払い額は値引き後の額。 */}
-            {params.discount
+        />
+        {/* 合計の内訳 (小計・値引き・手数料・ネットワーク手数料・お支払い額の表と、その下の説明・承認の確認のリンク)。
+            表示だけの部品で、額の計算と表記・どの行と文言を出すかの経路の判定はここで決めて、行のモデルと説明の文字列で渡す
+            (第 9 回レビュー F-04)。条件と分岐は切り出し前の JSX から 1 つも変えずに写した (breakdownRow(…) の中身を行のモデルに・
+            `a && breakdownRow(…)` は `a ? … : null` に)。 */}
+        <CheckoutAmountBreakdown
+          // レジの値引き: 小計 (値引き前) → 値引き の 2 行。以降の手数料・お支払い額は値引き後の額。
+          subtotal={
+            params.discount
               ? (() => {
                 const subtotalWei = calcCheckoutTotal(params.items, deployment.decimals);
-                return (
-                  <>
-                    {breakdownRow({ label: t('subtotalRow'), value: fmt(subtotalWei) }, 'subtotal')}
-                    {breakdownRow({ label: t('discountRow'), value: `−${fmt(subtotalWei - totalWei)}` }, 'discount')}
-                  </>
-                );
+                return {
+                  row: { label: t('subtotalRow'), value: fmt(subtotalWei) },
+                  discountRow: { label: t('discountRow'), value: `−${fmt(subtotalWei - totalWei)}` },
+                };
               })()
-              : breakdownRow({ label: t('subtotalRow'), value: fmt(totalWei) })}
-            {/* fee=0 のとき手数料行は非表示 (Phase 1 alpha)。負担者でラベルを出し分ける:
-                店舗が受取から吸収した (merchantReceives < 請求額) なら「(店舗負担)」を補足、
-                顧客上乗せ (事前モバイルオーダーの顧客負担) なら補足なし。 */}
-            {breakdown.feeAmount > 0n &&
-              breakdownRow({
+              : { row: { label: t('subtotalRow'), value: fmt(totalWei) }, discountRow: null }
+          }
+          // fee=0 のとき手数料行は非表示 (Phase 1 alpha)。負担者でラベルを出し分ける:
+          // 店舗が受取から吸収した (merchantReceives < 請求額) なら「(店舗負担)」を補足、
+          // 顧客上乗せ (事前モバイルオーダーの顧客負担) なら補足なし。
+          feeRow={
+            breakdown.feeAmount > 0n
+              ? {
                 label:
                   breakdown.merchantReceives < totalWei
                     ? t('feeRowMerchant')
                     : t('feeRow'),
                 value: fmt(breakdown.feeAmount),
-              })}
-            {isStandard
-              ? breakdownRow({ label: t('gasRowStandard'), value: t('gasRowStandardValue') })
+              }
+              : null
+          }
+          gasRow={
+            isStandard
+              ? { label: t('gasRowStandard'), value: t('gasRowStandardValue') }
               : isMobileFee
                 /* モバイル注文 (gasless): ネットワーク手数料は利用料 (feeRow) に含むため別行を出さない
                    (relayGasEquiv=0 で「0 JPYC」表示になり紛らわしい)。standard 経路は上の分岐で
                    顧客がウォレットで gas を払うので従来どおり gas 行を表示する (ここには来ない)。 */
                 ? null
-                : breakdownRow(
+                : (
                   useRecover
                     ? {
                       label: isMerchantGas ? t('gasRowMerchant') : t('gasRow'),
@@ -1769,47 +1825,35 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
                           gasAmount !== undefined
                             ? t('gasRowValue', { amount: fmt(gasAmount) })
                             : t('gasRowPending'),
-                      },
-                )}
-            <div className="my-1 border-t border-slate-200" />
-            {breakdownRow({
-              label: isStandard
-                ? t('totalRowStandard', { nativeToken })
-                : isMerchantGas
-                  ? t('totalRowMerchantGas')
-                  : t('totalRow'),
-              value: fmt(totalCustomerOutflow),
-              strong: true,
-            })}
-          </dl>
-        </div>
-        <p className="mt-3 text-[11px] leading-relaxed text-slate-500">
-          {isStandard
-            ? params.chain === 'arc'
-              ? t('standardArcHint')
-              : t('standardHint', { nativeToken })
-            : isMobileFee
-              ? t('gaslessHintMobile')
-              : useRecover
-                ? t('gaslessHintJpycRecover')
-                : useRelay || isJpyc
-                  ? t('gaslessHintJpycRelay')
-                  : isErc20Paymaster
-                    ? t('gaslessHintUsdc')
-                    : t('gaslessHintJpyc')}
-        </p>
-        {approvalCheckUrl && (
-          <p className="mt-2 text-[11px]">
-            <a
-              href={approvalCheckUrl}
-              target="_blank"
-              rel="noreferrer noopener"
-              className="text-slate-500 underline hover:text-slate-700"
-            >
-              {t('approvalCheckLink')} ↗
-            </a>
-          </p>
-        )}
+                      }
+                )
+          }
+          totalRow={{
+            label: isStandard
+              ? t('totalRowStandard', { nativeToken })
+              : isMerchantGas
+                ? t('totalRowMerchantGas')
+                : t('totalRow'),
+            value: fmt(totalCustomerOutflow),
+            strong: true,
+          }}
+          hint={
+            isStandard
+              ? params.chain === 'arc'
+                ? t('standardArcHint')
+                : t('standardHint', { nativeToken })
+              : isMobileFee
+                ? t('gaslessHintMobile')
+                : useRecover
+                  ? t('gaslessHintJpycRecover')
+                  : useRelay || isJpyc
+                    ? t('gaslessHintJpycRelay')
+                    : isErc20Paymaster
+                      ? t('gaslessHintUsdc')
+                      : t('gaslessHintJpyc')
+          }
+          approvalCheckUrl={approvalCheckUrl}
+        />
       </section>
 
       {/* F7: off-origin コールバック開示 (支払い前・payer 向け)。success_url/cancel_url が
@@ -1844,36 +1888,24 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
           </p>
           <ConnectButton />
 
+          {/* チェーンの切り替えのボタンと切り替え失敗の知らせ。表示だけの部品で、出す条件と切り替え先はここで決めて
+              渡す (第 9 回レビュー F-04)。 */}
           {isConnected && wrongChain && (
-            <button
-              type="button"
-              onClick={() => switchChain({ chainId: requiredChain.id })}
-              disabled={isSwitching}
-              className="w-full rounded-lg bg-amber-500 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-600 disabled:opacity-50"
-            >
-              {isSwitching
-                ? t('switchingChain')
-                : t('switchChain', { chainName: requiredChain.name })}
-            </button>
+            <WrongChainSwitch
+              isSwitching={isSwitching}
+              switchFailed={switchFailed}
+              chainName={requiredChain.name}
+              onSwitch={() => switchChain({ chainId: requiredChain.id })}
+            />
           )}
 
-          {isConnected && !wrongChain && balance !== undefined && (
-            <p className="text-xs text-slate-500">
-              {t('balanceLabel')}{' '}
-              <span className="font-mono">{fmt(balance)}</span>
-            </p>
-          )}
-
-          {insufficientBalance && (
-            <div className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">
-              <p>
-                {t('insufficientBalance', {
-                  amount: fmt(totalCustomerOutflow),
-                })}
-              </p>
-              <OnrampCta token={params.token} namespace="CheckoutForm" />
-            </div>
-          )}
+          {/* 残高の行と残高不足の案内。表示だけの部品で、出す条件と額の表記はここで決めて渡す (null なら出さない・
+              第 9 回レビュー F-04)。 */}
+          <WalletBalance
+            balanceText={isConnected && !wrongChain && balance !== undefined ? fmt(balance) : null}
+            requiredAmountText={insufficientBalance ? fmt(totalCustomerOutflow) : null}
+            token={params.token}
+          />
 
           {params.customerEmail && (
             <p className="text-[11px] text-slate-500">
@@ -1903,7 +1935,9 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
         />
       )}
 
-      {/* このタブで払った会計: 払うボタンを止めた理由を出す (上の「注文を送る」から送る)。 */}
+      {/* このタブで払った会計: 払うボタンを止めた理由を出し、上の欄 (NotifyShopButton) を指す。ボタンの名前は書かない:
+          名前は状態で変わる (署名の前は「注文を送る」/「お店に知らせる」・署名の後や JPYC 以外は「LINE で送る」「送る」
+          「文をコピー」等) ので、名前を書くと見つからない場合がある (第 9 回レビュー D-2)。 */}
       {!completed && paidInThisTab && (
         <p className="text-center text-sm text-slate-700">{t('paidInThisTabNote')}</p>
       )}
@@ -2029,58 +2063,16 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
           )
         ))}
 
-      {/* B1 Layer B (preflight): relayer degraded は additive banner で出す (Layer A と違い汎用
-          error box を抑止しない・pre-submit 検証エラー[店主受取0 等]を隠さない・Codex P1)。完了後は出さない。 */}
-      {!completed && relayPreflightActive && (
-        <RelayFallbackBanner
-          message={t('relayDegradedPreflight')}
+      {/* relay の状態の案内 (B1 Layer B の先回り・送信結果の確認中・IP の混雑)。表示だけの部品で、出す条件と
+          ボタンで呼ぶ処理はここで決めて渡す (第 9 回レビュー F-04)。完了後は出さない。 */}
+      {!completed && (
+        <RelayStatusBanners
+          relayPreflightActive={relayPreflightActive}
           nativeToken={nativeToken}
           onSwitchToStandard={switchToStandard}
-        />
-      )}
-
-      {/* ambiguity latch 中は同一 payload の再確認だけを許可し、standard fallback / 新署名を封鎖。 */}
-      {!completed && relayAmbiguous && (
-        <PaymentStatusPanel
-          title={t('responseUnknownTitle')}
-          body={
-            relay.recoveryState === 'auto'
-              ? t('responseUnknownAutoBody')
-              : t('responseUnknownBody')
-          }
-          titleWithIcon
-          showSpinner={relay.recoveryState === 'auto'}
-          actionLabel={
-            relay.recoveryState === 'auto'
-              ? undefined
-              : t('responseUnknownRetryButton')
-          }
-          actionDisabled={
-            relay.recoveryState === 'auto' ? undefined : relay.isPending
-          }
-          onAction={
-            relay.recoveryState === 'auto'
-              ? undefined
-              : relay.retrySamePayload
-          }
-        />
-      )}
-
-      {/* relay IP rate limit: idem 確認前の 429 なので main Pay / standard fallback / 再署名を
-          封鎖し、保持済みの同一署名 payload の再 POST だけを許可する。 */}
-      {!completed && relayIpRateLimited && !relayAmbiguous && (
-        <PaymentStatusPanel
-          title={t('ipRateLimitedTitle')}
-          body={
-            relayIpRateLimited.retryAfterSeconds === null
-              ? t('ipRateLimitedBody')
-              : t('ipRateLimitedBodyWithRetryAfter', {
-                  seconds: relayIpRateLimited.retryAfterSeconds,
-                })
-          }
-          actionLabel={t('ipRateLimitedRetryButton')}
-          actionDisabled={relay.isPending}
-          onAction={relay.retryRelay}
+          relayAmbiguous={relayAmbiguous}
+          relayIpRateLimited={relayIpRateLimited}
+          relay={relay}
         />
       )}
 
@@ -2122,122 +2114,66 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
         </p>
       )}
 
+      {/* 支払い完了の枠 (見出し・結果の行・受付番号・お店に知らせる・注文状況を見る・電子レシート・success_url への移動の
+          案内・ホームへ戻る)。表示だけの部品で、経路ごとにどの行を出すか・受付番号の出どころ・リンクと移動の案内を出すかと
+          文言・ホームへ戻るを出すかと、押したときの処理はここで決めて、出すなら値・出さないなら null で渡す (第 9 回レビュー
+          F-04)。条件と分岐は切り出し前の JSX から 1 つも変えずに写した (`a && (…)` は `a ? 値 : null` に)。値は枠を出すときだけ
+          (このガードの内側で) 作る。 */}
       {completed && (gasless.data || standard.data || relay.data) && (
-        <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
-          <p className="font-semibold">{t('successTitle')}</p>
-          <p className="mt-1 text-xs">{t('successBody')}</p>
-          <dl className="mt-3 space-y-1 text-xs">
-            {!isStandard && !useRelay && gasless.data && (
-              <>
-                <ResultRow
-                  label={t('successUserOp')}
-                  value={gasless.data.userOpHash}
-                  copyable
-                />
-                <ResultRow
-                  label={t('successTx')}
-                  value={gasless.data.txHash}
-                  copyable
-                />
-                <ResultRow
-                  label={t('successBlock')}
-                  value={gasless.data.blockNumber.toString()}
-                />
-              </>
-            )}
-            {/* relay は userOp/block を持たないため Tx Hash のみ表示 (Explorer は overlay 側)。 */}
-            {useRelay && relay.data?.success && relay.data.txHash && (
-              <ResultRow
-                label={t('successTx')}
-                value={relay.data.txHash}
-                copyable
-              />
-            )}
-            {isStandard && standard.data && (
-              <>
-                <ResultRow
-                  label={t('standardMerchantTxLabel')}
-                  value={standard.data.merchantTxHash}
-                  copyable
-                />
-                {standard.data.feeTxHash && (
-                  <ResultRow
-                    label={t('standardFeeTxLabel')}
-                    value={standard.data.feeTxHash}
-                    copyable
-                  />
-                )}
-                <ResultRow
-                  label={t('successBlock')}
-                  value={standard.data.blockNumber.toString()}
-                />
-              </>
-            )}
-            {((boundOrderRef.current ?? matchingDelivery?.order)?.orderId || (!restoredCheckoutCompletion && params.orderId)) && (
-              <ResultRow label={t('orderIdLabel')} value={(boundOrderRef.current ?? matchingDelivery?.order)?.orderId ?? params.orderId!} />
-            )}
-          </dl>
-
-          {/* 遠隔の注文: 大きな完了画面を閉じた後も、注文を送る / お店に知らせるボタンを残す。 */}
-          {notifyData && (
-            <div className="mt-4">
-              <NotifyShopButton {...notifyData} tone="panel" />
-            </div>
-          )}
-
-          {/* お渡し準備完了通知 (flag ENABLE_ORDER_PICKUP): 顧客が注文状況を追えるリンク。
-              click は user gesture ＝ ここで AudioContext を解錠 (iOS 自動再生対策)。flag OFF / 非
-              mobile-order (webhook 無) では statusToken が null ゆえ非表示。 */}
-          {env.enableOrderPickup && statusToken && !orderNotifyTooOld && (
-            <Link
-              href={`/${locale}/order/status?t=${statusToken}`}
-              prefetch={false}
-              onClick={() => primeChimeAudio()}
-              className="mt-4 flex items-center justify-center rounded-xl border border-brand/30 bg-brand/5 px-4 py-3 text-sm font-semibold text-brand transition hover:bg-brand/10"
-            >
-              {t('viewOrderStatus')}
-            </Link>
-          )}
-
-          {/* 顧客向け電子レシート (支払い控え) を完了画面にも埋め込む。 */}
-          <div className="mt-4">
-            <PayerReceiptCompletion
-              candidateIds={[
-                standard.data?.merchantTxHash,
-                gasless.data?.txHash,
-                gasless.data?.userOpHash,
-                relay.data?.txHash ?? undefined,
-              ]}
-            />
-          </div>
-
-          {!restoredCheckoutCompletion && params.successUrl && !orderNotifyTooOld &&
-            (!boundOrderRef.current || boundNotifyAcknowledged) && (
-            <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <p className="text-xs">
-                {redirectIn !== null && redirectIn > 0
-                  ? t('redirectingIn', { sec: redirectIn })
-                  : t('redirectingNow')}
-              </p>
-              <button
-                type="button"
-                onClick={doRedirect}
-                className="rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700"
-              >
-                {t('redirectNowButton')}
-              </button>
-            </div>
-          )}
-          {(restoredCheckoutCompletion || !params.successUrl) && (
-            <button
-              type="button"
-              onClick={() => router.push('/')}
-              className="mt-4 inline-block rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700"
-            >
-              {t('returnHomeButton')}
-            </button>
-          )}
-        </div>
+        <CheckoutCompletion
+          gasless={
+            !isStandard && !useRelay && gasless.data
+              ? {
+                userOpHash: gasless.data.userOpHash,
+                txHash: gasless.data.txHash,
+                blockNumber: gasless.data.blockNumber.toString(),
+              }
+              : null
+          }
+          // relay は userOp/block を持たないため Tx Hash のみ表示 (Explorer は overlay 側)。
+          relayTxHash={useRelay && relay.data?.success && relay.data.txHash ? relay.data.txHash : null}
+          standard={
+            isStandard && standard.data
+              ? {
+                merchantTxHash: standard.data.merchantTxHash,
+                feeTxHash: standard.data.feeTxHash ? standard.data.feeTxHash : null,
+                blockNumber: standard.data.blockNumber.toString(),
+              }
+              : null
+          }
+          orderId={
+            (boundOrderRef.current ?? matchingDelivery?.order)?.orderId || (!restoredCheckoutCompletion && params.orderId)
+              ? (boundOrderRef.current ?? matchingDelivery?.order)?.orderId ?? params.orderId!
+              : null
+          }
+          notifyData={notifyData}
+          // お渡し準備完了通知 (flag ENABLE_ORDER_PICKUP): 顧客が注文状況を追えるリンク。flag OFF / 非 mobile-order
+          // (webhook 無) では statusToken が null ゆえ非表示。click は user gesture ＝ ここで AudioContext を解錠
+          // (iOS 自動再生対策)。
+          orderStatusHref={
+            env.enableOrderPickup && statusToken && !orderNotifyTooOld
+              ? `/${locale}/order/status?t=${statusToken}`
+              : null
+          }
+          onOrderStatusClick={() => primeChimeAudio()}
+          receiptCandidateIds={[
+            standard.data?.merchantTxHash,
+            gasless.data?.txHash,
+            gasless.data?.userOpHash,
+            relay.data?.txHash ?? undefined,
+          ]}
+          redirectNotice={
+            !restoredCheckoutCompletion && params.successUrl && !orderNotifyTooOld &&
+              (!boundOrderRef.current || boundNotifyAcknowledged)
+              ? (redirectIn !== null && redirectIn > 0
+                ? t('redirectingIn', { sec: redirectIn })
+                : t('redirectingNow'))
+              : null
+          }
+          onRedirectNow={doRedirect}
+          showReturnHome={restoredCheckoutCompletion || !params.successUrl}
+          onReturnHome={() => router.push('/')}
+        />
       )}
 
       {/* relay pending: broadcast 済だが未確定。standard へ fallback させず「確認待ち」を表示

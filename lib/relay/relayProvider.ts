@@ -285,12 +285,14 @@ export async function readAuthorizationExpiry(
 // window (署名の有効期限と受け付けた有効窓の上限) を渡すと、1 回の検索が RPC の範囲制限 (無料枠: drpc 100・
 // Alchemy 10 ブロック) で拒まれたときだけ、署名が使われうる時刻のブロックに絞って小分けに探す
 // (lib/relay/authorizationUsedLookup.ts)。渡さない呼び出し・1 回で検索できる RPC は従来どおり。
+// window.allowNarrowSearch を渡すと、小分けの探索を始める前にだけ呼び、false なら窓が無いときと同じく失敗を上げる
+// (署名なしの照会の RPC 費用をチェーン単位の予算で抑える・lib/relay/statusLookupBudget.ts・第 9 回レビュー A-3)。
 export async function findAuthorizationUsedTransactionHash(
   chainId: number,
   token: Address,
   from: Address,
   nonce: Hex,
-  window?: AuthorizationWindow,
+  window?: AuthorizationWindow & { allowNarrowSearch?: () => Promise<boolean> },
 ): Promise<Hex | null> {
   const client = publicClientFor(chainId);
   const latest = await client.getBlockNumber();
@@ -309,6 +311,7 @@ export async function findAuthorizationUsedTransactionHash(
     return logs.at(-1)?.transactionHash ?? null;
   } catch (error) {
     if (!window) throw error;
+    if (window.allowNarrowSearch && !(await window.allowNarrowSearch())) throw error;
     return findAuthorizationUsedInWindow(
       {
         latestBlock: async () => {

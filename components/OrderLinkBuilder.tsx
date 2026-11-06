@@ -285,6 +285,9 @@ export function OrderLinkBuilder() {
     if (!result.ok) return;
     const { url } = result;
     try {
+      // どちらの文も、お客様の完了画面のボタンの名前を指す (番号つき =「お店に知らせる」で確認の署名つきの文を送る・
+      // 何度でも使える =「注文を送る」)。Tx Hash だけを手で送らせると、お店の「入金を確かめる」で署名が無いと出る
+      // (第 9 回レビュー D-5)。
       await navigator.share({ text: reusable ? t('shareTextReusable') : t('shareText', { id: orderId }), url });
       markSent(url, 'share');
     } catch {
@@ -556,8 +559,10 @@ export function OrderLinkBuilder() {
         />
       </aside>
 
-      {/* 入金を確かめる (お客様から届いた Tx Hash で、受取ウォレットに届いた額を読む)。前の注文も確かめるのでいつも出す。 */}
-      <OrderLinkVerify chains={settings.chains} receiver={linkReceiver} />
+      {/* 入金を確かめる (お客様から届いた Tx Hash で、受取ウォレットに届いた額を読む)。前の注文も確かめるのでいつも出す。
+          探すのは今の設定の受取チェーンだけでなく、注文リンクで選べる JPYC のチェーン全部 (受取チェーンを変える前の注文も
+          確かめられるように・第 9 回レビュー D-4)。chains は固定の配列なので、受取チェーンを変えても結果は消えない。 */}
+      <OrderLinkVerify chains={chains} receiver={linkReceiver} />
 
       <span role="status" className="sr-only">
         {sentLabel ?? (copyFailed ? t('copyFailed') : blocked ? errorText : '')}

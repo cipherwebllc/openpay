@@ -23,8 +23,9 @@ export type SessionReadResult =
 export async function readSession(): Promise<SessionReadResult> {
   const store = await cookies();
   const token = store.get(sessionCookieName())?.value;
-  // newSessionToken() issues exactly 64 lowercase hex characters. Reject malformed
-  // cookies before KV so anonymous junk cannot drain the budget shared with payments.
+  // newSessionToken() が出すのは小文字 64 hex だけなので、それ以外の形の cookie は KV を読まずに未ログインとする
+  // (発行し得ない値で KV の読み取りを使わない)。形の合う値は誰でも作れ、ランダムな 64 hex は 1 回ずつ KV を読む。
+  // ここで止まるのは形の合わない値だけで、匿名の連打が決済と共有の KV の予算を使うこと自体はこの関数では止めない。
   if (!token || !isSessionToken(token)) {
     return { status: 'missing' };
   }

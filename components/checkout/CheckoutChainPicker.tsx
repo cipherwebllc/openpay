@@ -10,13 +10,14 @@ import { useEffect, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { ChainLogo } from '@/components/AssetLogo';
-import { isRemoteOrderCheckout, NotifyShopButton, type NotifyShopData } from '@/components/NotifyShopButton';
-import { blockExplorerUrl, chainForSlug, type ChainSlug } from '@/lib/chains';
+import { isRemoteOrderCheckout, NotifyShopButton } from '@/components/NotifyShopButton';
+import { chainForSlug, type ChainSlug } from '@/lib/chains';
 import { formatTokenAmount, shortAddress } from '@/lib/format';
 import { findRememberedOrderPayment } from '@/lib/orderPaidLookup';
 import { shopContactLabel } from '@/lib/shopContact';
 import { deploymentForSlug } from '@/lib/tokens';
 import { calcCheckoutPayable, type CheckoutParams } from '@/lib/url/checkout';
+import { notifyShopData } from './notifyShopData';
 
 export function CheckoutChainPicker({ params }: { params: CheckoutParams }) {
   const t = useTranslations('CheckoutForm');
@@ -25,7 +26,10 @@ export function CheckoutChainPicker({ params }: { params: CheckoutParams }) {
   const [picked, setPicked] = useState<ChainSlug | null>(null);
   const chains = params.chains ?? [];
   const deployment = deploymentForSlug(params.token, chains[0]);
-  const amount = formatTokenAmount(calcCheckoutPayable(params, deployment.decimals), deployment);
+  // この画面は JPYC のリンクだけ (parseOfferedChains) で、JPYC はどの経路でもお客様が払う額 = URL の額。合計の表示と
+  // お店に知らせる文の金額 (お客様が実際に払った額・Q14) の両方に使う (./notifyShopData.ts の冒頭)。
+  const payable = calcCheckoutPayable(params, deployment.decimals);
+  const amount = formatTokenAmount(payable, deployment);
   const remote = isRemoteOrderCheckout(params);
   const [remembered, setRemembered] = useState<ReturnType<typeof findRememberedOrderPayment>>(null);
   const [newPurchase, setNewPurchase] = useState(false);
@@ -42,31 +46,29 @@ export function CheckoutChainPicker({ params }: { params: CheckoutParams }) {
     startTransition(() => router.replace(`?${search.toString()}`, { scroll: false }));
   };
 
-  const restored: NotifyShopData | null = remembered
-    ? (() => {
-        const explorer = blockExplorerUrl(deploymentForSlug(params.token, remembered.chain).chainId);
-        return {
-          orderNo: params.orderId,
-          askShipping: params.ship === 'ask',
-          storeName: params.storeName,
-          items: params.items.map((item) => ({ name: item.name, qty: item.qty })),
-          amountDisplay: amount,
-          txHash: remembered.payment.txHash,
-          explorerTxUrl: explorer ? `${explorer}/tx/${remembered.payment.txHash}` : undefined,
-          chain: remembered.chain,
-          shop: params.to,
-          ...(remembered.payment.payer ? { payer: remembered.payment.payer } : {}),
-          confirm: params.token === 'jpyc',
-          contact: params.contact,
-        };
-      })()
+  // 中身は支払いの画面と同じ関数で作る (第 9 回レビュー D-9)。
+  const restored = remembered
+    ? notifyShopData({
+        params,
+        customerPays: payable,
+        deployment,
+        txHash: remembered.payment.txHash,
+        payer: remembered.payment.payer,
+        chain: remembered.chain,
+      })
     : null;
 
   return (
     <div className="space-y-4">
       <header className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
         <p className="text-xs uppercase tracking-wider text-slate-500">{t('header')}</p>
-        {params.storeName && <p className="mt-1 break-words text-lg font-bold text-slate-900">{params.storeName}</p>}
+        {/* 店名は確かめていない名前 (支払いの画面と同じ注記・第 9 回レビュー D-1)。 */}
+        {params.storeName && (
+          <>
+            <p className="mt-1 break-words text-lg font-bold text-slate-900">{params.storeName}</p>
+            <p className="mt-0.5 text-xs text-slate-600 [word-break:auto-phrase]">{t('storeNameUnverified')}</p>
+          </>
+        )}
         <p className="mt-1 text-base font-semibold text-slate-800">
           {params.orderId ? t('orderHeading', { id: params.orderId }) : t('checkoutTitle')}
         </p>

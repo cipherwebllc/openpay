@@ -32,7 +32,7 @@ import {
 import { checkRateLimit, checkReadRateLimit } from '@/lib/relay/relayGuards';
 import { relayGasFeeValue } from '@/lib/relay/forwarderConfig';
 import { readJsonBodyCapped } from '@/lib/httpBodyCap';
-import { clientIp } from '@/lib/net/ipHash';
+import { clientIp, hashIpBucket } from '@/lib/net/ipHash';
 import { anonymizeIp } from '@/lib/relay/relayRoute';
 import { resolveHandle } from '@/lib/handleStore';
 import { isValidHandleFormat, normalizeHandle } from '@/lib/handle';
@@ -344,7 +344,15 @@ export async function POST(req: Request): Promise<NextResponse> {
   const ipPrefix = anonymizeIp(
     clientIp(req) ?? '',
   );
-  const allowed = await checkRateLimit([`order:tx:${txHash.toLowerCase()}`]);
+  // txHash はオンチェーンで公開される。枠を txHash だけで数えると、受取ウォレット宛ての着金を見た
+  // 第三者が同じ txHash を先に 5 回送るだけで枠を使い切り、お客様の正規の通知が 429 で受注ボードに
+  // 出なくなる (第 9 回レビュー E-1・ORDER_BIND_ENFORCE の点灯後に効く)。枠を txHash と IP bucket
+  // (hashIpBucket: IPv4 /32・IPv6 /64 の HMAC) の組にして、別の IP からの試行が正規の通知の枠を
+  // 使わないようにする。鍵は txHash を含んだままなので、同じ NAT の別決済が互いの枠を使わない上の
+  // 趣旨は変わらない。IP bucket が取れない要求 (IP_HASH_SECRET 欠落・IP ヘッダ無し) は 'none' の
+  // 1 つの枠を共有する = 従来の txHash だけの鍵と同じ広さ。HMAC の 64 桁 hex なので 'none' と衝突しない。
+  const txIpBucket = hashIpBucket(clientIp(req)) ?? 'none';
+  const allowed = await checkRateLimit([`order:tx:${txHash.toLowerCase()}:${txIpBucket}`]);
   if (!allowed) return fail('rate_limited', 429);
   if (!(await checkReadRateLimit(`order:${ipPrefix}`, 120, 60))) {
     return fail('rate_limited', 429);

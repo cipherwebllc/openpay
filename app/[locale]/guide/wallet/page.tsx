@@ -4,13 +4,14 @@
 // には短い案内とこのページへのリンクだけを置く (components/guide/WalletSummary)。
 // お店の QR は、ウォレットのアプリの QR 読み取りでは開かないものがある (MetaMask は開ける・マイナウォレットなどは開けない) ので、
 // 読み取り方の節で「スマホのカメラ」か「スキャンして支払う」を案内する。
+// おすすめのウォレットの次に「お店の受け取り用」(#store-wallet・UPBOND Wallet) を置く (選ぶ話をまとめ、使い方の節の前に)。
 // お客様の手順なので番号のバッジは blue (STEP_BADGE_CUSTOMER)。aria-label は使わない (名前は可視の文字・掟 8)。
 // SEO 価値がある集客コンテンツなので noindex は設定しない (guide/* 共通方針)。
 // 掟 3: このファイルは default / generateMetadata 以外を export しない。
 
 import type { ReactNode } from 'react';
 import type { Metadata } from 'next';
-import { Camera, IdCard, ScanLine, Wallet } from 'lucide-react';
+import { Camera, Globe, IdCard, ScanLine, Wallet } from 'lucide-react';
 import { setRequestLocale } from 'next-intl/server';
 import { AppShell } from '@/components/AppShell';
 import { GuideFrame } from '@/components/guide/GuideFrame';
@@ -35,8 +36,8 @@ export async function generateMetadata({
 }
 
 // カードの左のマーク (飾りなので読み上げない・名前は隣の可視の文字)。MetaMask は接続ボタンと同じ同梱の公式 SVG
-// (public/wallets/MetaMask.svg)。マイナウォレット・HashPort Wallet は公式ロゴの素材を入手していないので、一般のアイコン
-// (マイナンバーカード = IdCard・財布 = Wallet) で代える。公式ロゴの素材を使ってよいと確かめられたら差し替える。
+// (public/wallets/MetaMask.svg)。マイナウォレット・HashPort Wallet・UPBOND Wallet は公式ロゴの素材を入手していないので、一般のアイコン
+// (マイナンバーカード = IdCard・財布 = Wallet・ブラウザで使う = Globe) で代える。公式ロゴの素材を使ってよいと確かめられたら差し替える。
 const ICON_TILE = 'flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-50 ring-1 ring-slate-200/70';
 const ICON_CLASS = 'h-5 w-5 text-slate-600';
 const CARD_ICONS: Record<string, ReactNode> = {
@@ -46,11 +47,17 @@ const CARD_ICONS: Record<string, ReactNode> = {
   ),
   myna: <IdCard aria-hidden className={ICON_CLASS} />,
   hashport: <Wallet aria-hidden className={ICON_CLASS} />,
+  upbond: <Globe aria-hidden className={ICON_CLASS} />,
   camera: <Camera aria-hidden className={ICON_CLASS} />,
   scan: <ScanLine aria-hidden className={ICON_CLASS} />,
 };
 
-function NamedCards({ items }: { items: readonly { readonly id: string; readonly name: string; readonly body: string }[] }) {
+// howTo (使い方の補足) があるカードは、本文の下に段落を分けて出す (長い本文を 1 段落に詰めない)。
+function NamedCards({
+  items,
+}: {
+  items: readonly { readonly id: string; readonly name: string; readonly body: string; readonly howTo?: string }[];
+}) {
   return (
     <ul className="mt-4 space-y-3">
       {items.map((item) => (
@@ -59,6 +66,7 @@ function NamedCards({ items }: { items: readonly { readonly id: string; readonly
           <div className="min-w-0">
             <p className="text-sm font-semibold text-slate-900">{item.name}</p>
             <p className="mt-1 text-sm leading-relaxed text-slate-700">{item.body}</p>
+            {item.howTo ? <p className="mt-2 text-sm leading-relaxed text-slate-700">{item.howTo}</p> : null}
           </div>
         </li>
       ))}
@@ -99,6 +107,18 @@ export default async function GuideWalletPage({
           <p className="mt-4">
             <GuideMoreLink href={c.noteLink.href} external>
               {c.noteLink.label}
+            </GuideMoreLink>
+          </p>
+        </Section>
+
+        {/* お店の受け取り用 (UPBOND Wallet)。/create の受取先の欄が空のときの「ウォレットをお持ちでない方へ」から #store-wallet で
+            飛んでくる。注意 (受け取るチェーン・売上の移し方) を読んでから開けるよう、外のリンクは最後に置く。 */}
+        <Section title={c.storeTitle} id="store-wallet">
+          <p className="mt-3 text-sm leading-relaxed text-slate-700">{c.storeBody}</p>
+          <GuideCallout kind="warn">{c.storeNote}</GuideCallout>
+          <p className="mt-4">
+            <GuideMoreLink href={c.storeLink.href} external>
+              {c.storeLink.label}
             </GuideMoreLink>
           </p>
         </Section>

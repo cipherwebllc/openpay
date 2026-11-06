@@ -14,7 +14,7 @@ import {
   PIMLICO_PENDING_KEY_PREFIX,
   useBatchPayment,
 } from '@/hooks/useBatchPayment';
-import { GasCongestedError } from '@/lib/gasCeiling';
+import { GasCongestedError, isGasCongestedError } from '@/lib/gasCeiling';
 import { defaultDeploymentForSymbol, type PaymasterMode } from '@/lib/tokens';
 
 const usdcDep = defaultDeploymentForSymbol('usdc');
@@ -664,6 +664,36 @@ describe('useBatchPayment', () => {
       });
       await waitFor(() => expect(ng.current.isError).toBe(true));
       expect(ng.current.error).toBeInstanceOf(GasCongestedError);
+    });
+
+    it('A-5: 先の fast の検査を通った後、送信の中の fee の見積もりが上限で止めた GasCongestedError も、包まずにそのまま error に出す (pending を残さない)', async () => {
+      // Base (上限 10 gwei): hook が先に見た fast は 9.9 gwei で通る。sendUserOperation の中の
+      // 見積もり (lib/smartAccount の ceilingCheckedStandardFee) が standard 10.1 gwei で throw した状態。
+      // フォームは error を isGasCongestedError で判定して混雑の案内を出すので、同じ object のまま届くこと。
+      mountReady({ maxFeePerGas: 9n * GWEI + (GWEI * 9n) / 10n, chainId: base.id });
+      const congested = new GasCongestedError(base.id, 10n, 10n);
+      sendUserOperation.mockRejectedValueOnce(congested);
+      const { result } = renderHook(() => useBatchPayment(jpycDep), {
+        wrapper: makeWrapper(),
+      });
+
+      result.current.mutate({
+        tokenAddress: TOKEN,
+        merchant: MERCHANT,
+        merchantAmount: 1n,
+        feeReceiver: FEE_RECV,
+        feeAmount: 1n,
+      });
+
+      await waitFor(() => expect(result.current.isError).toBe(true));
+      expect(getUserOperationGasPrice).toHaveBeenCalledOnce();
+      expect(sendUserOperation).toHaveBeenCalledOnce();
+      expect(result.current.error).toBe(congested);
+      expect(isGasCongestedError(result.current.error)).toBe(true);
+      // hash が返っていない (送信していない) ので、結果不確定の扱いにしない。
+      expect(result.current.isUnknown).toBe(false);
+      expect(pimlicoPendingKeys()).toHaveLength(0);
+      expect(waitForUserOperationReceipt).not.toHaveBeenCalled();
     });
   });
 

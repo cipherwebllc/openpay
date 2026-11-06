@@ -6,7 +6,8 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslations, useLocale } from 'next-intl';
-import { useAccount, useSwitchChain } from 'wagmi';
+import { useAccount } from 'wagmi';
+import { useSwitchChainWithFeedback } from '@/hooks/useSwitchChainWithFeedback';
 import { formatUnits } from 'viem';
 import { ConnectButton } from './ConnectButton';
 import { PayerReceiptCompletion } from './PayerReceiptCompletion';
@@ -35,7 +36,8 @@ export function StoreDeviceCheckoutForm({ params }: { params: CheckoutParams }) 
   const deployment = deploymentForSlug(params.token, chainSlug);
   const requiredChain = chainForSlug(chainSlug);
   const { address, isConnected } = useAccount();
-  const { switchChain, isPending: isSwitching } = useSwitchChain();
+  // 切り替えの失敗を画面に知らせ、記録に残す (hooks/useSwitchChainWithFeedback.ts)。
+  const { switchChain, isPending: isSwitching, failed: switchFailed } = useSwitchChainWithFeedback('store-device-checkout');
   const handoffId = params.handoffId ?? '';
   const { status, pay, checkNow, acknowledge } = useStoreDevicePayment(deployment, handoffId);
   // 署名した時点で固定した値 (表示・履歴・控えはこれで作る・後からウォレットや URL が変わっても動かない)。
@@ -230,6 +232,11 @@ export function StoreDeviceCheckoutForm({ params }: { params: CheckoutParams }) 
             >
               {isSwitching ? t('switchingChain') : t('switchChain', { chainName: requiredChain.name })}
             </button>
+          )}
+          {isConnected && wrongChain && switchFailed && (
+            <p role="alert" className="text-xs leading-relaxed text-red-700">
+              {t('switchChainFailed', { chainName: requiredChain.name })}
+            </p>
           )}
           {isConnected && !wrongChain && balance !== undefined && (
             <p className="text-xs text-slate-500">

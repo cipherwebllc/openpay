@@ -27,6 +27,12 @@ vi.mock('wagmi', () => ({
 // 受取チェーンが 2 つ以上のときの受取ウォレットの確認 (チェーンを読む部分は tests/hooks で見る)。
 const chainCheck = vi.hoisted(() => ({ value: { status: 'idle' } as { status: string; chains?: string[] } }));
 vi.mock('@/hooks/useReceiverChainCheck', () => ({ useReceiverChainCheck: () => chainCheck.value }));
+// 入金を確かめる欄がどのチェーンを探すか (チェーンを読む部分は tests/lib/orderLinkVerify で見る)。
+const verifyCheck = vi.hoisted(() => vi.fn());
+vi.mock('@/lib/orderLinkVerify', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/orderLinkVerify')>();
+  return { ...actual, checkOrderLinkPaymentOnChains: verifyCheck };
+});
 const fetchSpy = vi.hoisted(() => vi.fn());
 
 import { useAccount } from 'wagmi';
@@ -67,6 +73,7 @@ async function copyLink() {
 
 beforeEach(() => {
   chainCheck.value = { status: 'idle' };
+  verifyCheck.mockReset();
   localStorage.clear();
   resolved.value = { data: null, isFetching: false, error: null };
   vi.mocked(useAccount).mockReturnValue({
@@ -335,6 +342,37 @@ describe('OrderLinkBuilder', () => {
     expect(screen.queryByRole('link', { name: '開いて確かめる' })).toBeNull();
   });
 
+  // 第 9 回レビュー D-4: 受取チェーンを変えた後でも、前のチェーンで払われた注文を「見つかりませんでした」にしない。
+  it('受取チェーンを Kaia だけにしていても、入金を確かめる欄は注文リンクの全チェーンを探し、Polygon の支払いを見つける', async () => {
+    saved({ chains: ['kaia'] });
+    // Polygon にだけある取引として答える (探すチェーンに Polygon が無ければ見つからない)。
+    verifyCheck.mockImplementation(async ({ chains }: { chains: readonly string[] }) =>
+      chains.includes('polygon')
+        ? {
+            chain: 'polygon',
+            result: {
+              status: 'paid',
+              received: '3465',
+              blockNumber: 123n,
+              timestamp: 1_762_000_000,
+              payer: null,
+              confirmation: 'unsigned',
+            },
+            unreachable: [],
+          }
+        : { chain: null, result: { status: 'notFound' }, unreachable: [] },
+    );
+    render(<OrderLinkBuilder />);
+    await screen.findByRole('button', { name: '設定' });
+    fireEvent.change(screen.getByLabelText('お客様から届いた文か Tx Hash'), { target: { value: `0x${'ab'.repeat(32)}` } });
+    fireEvent.click(screen.getByRole('button', { name: '確かめる' }));
+    expect(await screen.findByText('受取ウォレットに 3,465 JPYC 届いています')).toBeInTheDocument();
+    expect(screen.getByText(`${chainForSlug('polygon').name} で払われています`)).toBeInTheDocument();
+    expect(verifyCheck).toHaveBeenCalledWith(
+      expect.objectContaining({ chains: expect.arrayContaining(['polygon', 'kaia']), receiver: TO }),
+    );
+  });
+
   it('前の版の設定 (受取チェーン 1 つの chain) を読み、そのチェーンのリンクを作る', async () => {
     saved({ chain: 'kaia' });
     render(<OrderLinkBuilder />);
@@ -571,7 +609,9 @@ describe('OrderLinkBuilder', () => {
     expect(screen.queryByText('コピーしました')).toBeNull();
   });
 
-  it('共有できる端末では主ボタンが「送る」で、送り先の文面に番号と確かめ方が入る', async () => {
+  // 第 9 回レビュー D-5: 番号つきのリンクの文は、完了画面の「お店に知らせる」(確認の署名つきの文を作る) へ誘導する。
+  // Tx Hash だけを手で送らせると、お店の「入金を確かめる」で「確認の署名がありません」になる。
+  it('共有できる端末では主ボタンが「送る」で、送り先の文面に番号と完了画面の「お店に知らせる」が入る', async () => {
     saved();
     stubClipboard();
     const share = vi.fn().mockResolvedValue(undefined);
@@ -584,7 +624,8 @@ describe('OrderLinkBuilder', () => {
     await screen.findAllByRole('button', { name: '次の注文へ' });
     expect(screen.getAllByText('送りました').length).toBeGreaterThan(0);
     expect(share.mock.calls[0][0].text).toContain('ご注文 A-001');
-    expect(share.mock.calls[0][0].text).toContain('Tx Hash');
+    expect(share.mock.calls[0][0].text).toContain('完了画面の「お店に知らせる」で送ってください');
+    expect(share.mock.calls[0][0].text).not.toContain('Tx Hash');
     Reflect.deleteProperty(navigator, 'share');
   });
 

@@ -117,7 +117,7 @@ export const DIRECTORY_ENTRIES = [
     // 2026-08-27: 電子決済手段等取引業者に登録 (金融庁登録一覧・第00002号・取扱 USDC)。
     // 取扱開始時期は未発表のため tokens は空のまま (sourced-facts-only)。
     ...provenance('https://coincheck.com/', 'コインチェック株式会社', 'official', {
-      verifiedAt: '2026-11-02',
+      verifiedAt: '2026-11-05',
       updatedAt: '2026-09-04',
     }),
     facts: {
@@ -844,8 +844,9 @@ export const DIRECTORY_ENTRIES = [
     nameJa: 'JPYSC',
     status: 'published',
     // 2026-11-02 (第 12 回): BlackRock・CRB Group・SMBC グループとの提携 (10/27〜10/30) は changelog のみ
+    // 2026-11-05 (第 13 回): レンディング残高 100 億円・取扱残高 300 億円の公表 (11/02) は changelog のみ (エントリの事実は不変)
     ...provenance('https://www.sbivc.co.jp/jpysc', 'SBI新生信託銀行株式会社', 'official', {
-      verifiedAt: '2026-11-02',
+      verifiedAt: '2026-11-05',
       updatedAt: '2026-10-21',
     }),
     facts: {

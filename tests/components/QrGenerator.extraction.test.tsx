@@ -377,9 +377,11 @@ describe('R11b: generated payment URL fixtures', () => {
 // 旧 DOM との差が金額欄の placeholder 属性と placeholder の色の class だけであることを確認。
 // 2026-11-03 レジ・決済QR の押せる範囲を 44px に (値引きの追加/切替/外す・管理番号の見出しと採番・受取欄の Explorer リンク・
 // 設定シートの「完了」・全画面 QR の閉じる/コピー/リンクを表示)。旧 DOM との差が class だけであることを確認してから値を写した。
+// 2026-11-06 受取欄が空の間だけ「ウォレットをお持ちでない方へ」(/guide/wallet#store-wallet) を出す (user)。受取欄が空の節
+// (fresh-*/empty) の receiver と full だけ更新 (入力済み・設定シートの節は不変 = 入力したら消えることも確認)。
 const DOM_BASELINE: Record<string, string> = {
   'fresh-ja/empty':
-    'shape=2/3/3/0 offline=77d610789dd9 grid=bf14446808c6 left=f91415023c7f amount=ab22f9ef234c receiver=a7b60c841d9d accounting=1fec91400d91 preview=1a4e0aab7a49 bar=9491363e27ea full=c2d2f340c918',
+    'shape=2/3/3/0 offline=77d610789dd9 grid=bf14446808c6 left=f91415023c7f amount=ab22f9ef234c receiver=0997d0084f56 accounting=1fec91400d91 preview=1a4e0aab7a49 bar=9491363e27ea full=7d8726b9bee0',
   'fresh-ja/receiver-typed':
     'shape=2/3/3/0 offline=77d610789dd9 grid=bf14446808c6 left=f91415023c7f amount=820f27bded71 receiver=a6f5968c386e accounting=1fec91400d91 preview=3fcd31b86f55 bar=739ef6dfdbb0 full=7ffce13a48c2',
   'fresh-ja/amount':
@@ -391,7 +393,7 @@ const DOM_BASELINE: Record<string, string> = {
   'fresh-ja/modal':
     'shape=2/4/3/0 offline=77d610789dd9 grid=bf14446808c6 left=f91415023c7f amount=8939c2829318 accounting=1fec91400d91 left2=f0506b8ca563 preview=a3758a9929a3 modal=23d6d5faa7b0 bar=ed7e724d0a8d full=67b02de83220',
   'fresh-en/empty':
-    'shape=2/3/3/0 offline=77d610789dd9 grid=bf14446808c6 left=f91415023c7f amount=757bd55e51df receiver=43292acdcf38 accounting=616699affa1f preview=e432f1338d73 bar=4b481618cc35 full=15d81aa5dd85',
+    'shape=2/3/3/0 offline=77d610789dd9 grid=bf14446808c6 left=f91415023c7f amount=757bd55e51df receiver=87c1858e2180 accounting=616699affa1f preview=e432f1338d73 bar=4b481618cc35 full=606f221ac304',
   'fresh-en/receiver-typed':
     'shape=2/3/3/0 offline=77d610789dd9 grid=bf14446808c6 left=f91415023c7f amount=2081c93cb1fd receiver=e54d98ce5088 accounting=616699affa1f preview=ed60ab2dd260 bar=9fa734137b5c full=2f73981d0fa0',
   'fresh-en/amount':

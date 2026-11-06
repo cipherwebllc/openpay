@@ -33,6 +33,7 @@ import {
   toMetaMaskSmartAccount,
 } from '@metamask/delegation-toolkit';
 import { kaia, kairos } from 'viem/chains';
+import { ceilingCheckedStandardFee } from '@/lib/gasCeiling';
 import {
   assertGaslessSupported,
   createPimlico,
@@ -101,8 +102,9 @@ export async function buildMetaMaskSmartAccountClient(args: {
     paymasterContext: pimlicoPaymasterContext(deployment),
     userOperation: {
       // SimpleAccount と同じく standard tier。gas quote と同 tier に揃える。
+      // 実際に UserOp に入れるこの standard に上限をかける (第 9 回レビュー A-5・simpleAccount.ts と同じ)。
       estimateFeesPerGas: async () =>
-        (await pimlicoClient.getUserOperationGasPrice()).standard,
+        ceilingCheckedStandardFee(pimlicoClient, chainId),
       prepareUserOperation:
         paymasterMode === 'erc20'
           ? prepareUserOperationForErc20Paymaster(pimlicoClient)

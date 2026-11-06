@@ -2,6 +2,7 @@ import 'server-only';
 
 import { TransactionReceiptNotFoundError, formatUnits, parseEventLogs, type Hex } from 'viem';
 import type { JpycChainSlug } from '@/lib/chains';
+import { readJpycFinality } from './finality';
 import { clientFor, deploymentFor, TRANSFER_EVENT, withTimeout } from './live';
 
 export async function readJpycPaymentRecord(slug: JpycChainSlug, txHash: Hex) {
@@ -32,21 +33,12 @@ export async function readJpycPaymentRecord(slug: JpycChainSlug, txHash: Hex) {
       withTimeout(client.getBlock({ blockHash: receipt.blockHash })),
       withTimeout(client.getBlockNumber({ cacheTime: 0 })),
     ]);
-    let finality: { finalized: boolean | null; method: 'finalized-tag' | 'confirmations'; finalizedBlock?: string } = {
-      finalized: true, method: 'confirmations',
-    };
-    if (slug === 'polygon' || slug === 'ethereum') {
-      try {
-        const finalized = await withTimeout(client.getBlock({ blockTag: 'finalized' }));
-        finality = {
-          finalized: finalized.number >= receipt.blockNumber,
-          method: 'finalized-tag', finalizedBlock: finalized.number.toString(),
-        };
-      } catch {
-        // Unsupported finalized tags must not hide an otherwise readable payment record.
-        finality = { finalized: null, method: 'confirmations' };
-      }
-    }
+    // Unsupported finalized tags must not hide an otherwise readable payment record (finalized: null).
+    const finality = await readJpycFinality({
+      slug,
+      blockNumber: receipt.blockNumber,
+      readFinalizedBlock: () => withTimeout(client.getBlock({ blockTag: 'finalized' })),
+    });
     return {
       kind: 'ok',
       record: {

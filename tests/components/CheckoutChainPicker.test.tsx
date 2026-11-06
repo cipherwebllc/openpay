@@ -52,6 +52,16 @@ describe('CheckoutChainPicker', () => {
     expect(screen.getAllByRole('button', { name: /^JPYC \(/ })).toHaveLength(2);
   });
 
+  // 第 9 回レビュー D-1: 支払いの画面と同じく、店名の下に確かめていない名前だと添える (店名が無ければ出さない)。
+  it('店名があるときだけ、その下に「確かめられていません」の注記を出す', () => {
+    const NOTE = '店名はリンクを作った人が入力したもので、確かめられていません。';
+    const { unmount } = render(<CheckoutChainPicker params={params} />);
+    expect(screen.getByText('OpenPay 工房').nextElementSibling).toBe(screen.getByText(NOTE));
+    unmount();
+    render(<CheckoutChainPicker params={{ ...params, storeName: undefined }} />);
+    expect(screen.queryByText(NOTE)).toBeNull();
+  });
+
   it('選ぶと、ほかのパラメーターはそのまま URL に chain を足して開き直す', () => {
     render(<CheckoutChainPicker params={params} />);
     fireEvent.click(screen.getByRole('button', { name: `JPYC (${chainForSlug('kaia').name})` }));

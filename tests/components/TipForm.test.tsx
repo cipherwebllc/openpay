@@ -53,6 +53,8 @@ vi.mock('@/lib/circlePaymaster', async () => {
 // component で stub する (Hint 自体の動作は CrossChainHint.test.tsx で検証)。
 // TipForm から Hint へ渡される props は crossChainHintSpy で capture して検証。
 const crossChainHintSpy = vi.fn();
+// A-1 のテストだけが false にし、「子がまだ報告していない」状態 (遅延ロード中・走査中) を固定する。
+const crossChainHintReports = { onMount: true };
 vi.mock('@/components/CrossChainHint', async () => {
   const React = await import('react');
   return {
@@ -63,7 +65,7 @@ vi.mock('@/components/CrossChainHint', async () => {
       // 実物の effect は onExecutingChange の identity (= 親の scan scope: 金額変更で変わる) に追随する。
       const cb = props.onExecutingChange;
       React.useEffect(() => {
-        if (typeof cb === 'function') (cb as (executing: boolean) => void)(false);
+        if (crossChainHintReports.onMount && typeof cb === 'function') (cb as (executing: boolean) => void)(false);
       }, [cb]);
       return null;
     },
@@ -123,6 +125,7 @@ import { TipForm } from '@/components/TipForm';
 import { ReceiveMethodPicker } from '@/components/ReceiveMethodPicker';
 import type { HandleTipConfig } from '@/lib/handle';
 import { loadPayerReceipts } from '@/lib/payerReceipt';
+import { saveResumeState } from '@/lib/crossChain/resumeStore';
 import type { TipParams } from '@/lib/url';
 import {
   RelayIpRateLimitedError,
@@ -163,6 +166,7 @@ let mutate: ReturnType<typeof vi.fn>;
 let batchRetryReceipt: ReturnType<typeof vi.fn>;
 function setBatchPayment(
   state: 'idle' | 'pending' | 'success' | 'error' | 'unknown',
+  errorOverride?: Error,
 ) {
   mutate = vi.fn();
   batchRetryReceipt = vi.fn();
@@ -186,7 +190,7 @@ function setBatchPayment(
         : undefined,
     error:
       state === 'error'
-        ? new Error('AA21 fail')
+        ? (errorOverride ?? new Error('AA21 fail'))
         : state === 'unknown'
           ? new Error('receipt RPC unavailable')
           : null,
@@ -560,6 +564,36 @@ describe('TipForm — 接続状態', () => {
     ).not.toBeDisabled();
   });
 
+  it('A-1: CCTP の中断記録があれば、子 (CrossChainHint) の走査報告まで初回の描画から直接送信を閉じる', async () => {
+    window.localStorage.clear();
+    // 同じ宛先 (Base Sepolia)・受取人・account への CCTP 記録 (送金元・金額は問わない)。
+    saveResumeState({ account: FAN, kind: 'cctp-v2', sourceChainId: polygonAmoy.id, destChainId: baseSepolia.id,
+      recipient: CREATOR, valueAtomic: 1_000_000n, feeAtomic: 0n }, { burnTxHash: `0x${'bc'.repeat(32)}` });
+    crossChainHintReports.onMount = false;
+    try {
+      setAccount({ connected: true, chainId: baseSepolia.id });
+      setBalance(20_000_000n);
+      setSmartAccount(true);
+      setGasQuote('ready', 0n);
+      crossChainHintSpy.mockClear();
+      render(<TipForm params={USDC_PARAMS} />);
+      // 初回の描画から、子が報告するまで直接送信は閉じている (子のロード前も後も)。
+      expect(screen.queryByRole('button', { name: /1 USDC を送る/ })).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /送信中/ })).toBeDisabled();
+      await waitFor(() => expect(crossChainHintSpy).toHaveBeenCalled());
+      expect(screen.getByRole('button', { name: /送信中/ })).toBeDisabled();
+      const { onExecutingChange } = crossChainHintSpy.mock.calls.at(-1)![0] as { onExecutingChange: (v: boolean) => void };
+      // 子が committed を報告 → 閉じたまま。この請求の記録ではなかったと報告 (false) → 開く。
+      act(() => onExecutingChange(true));
+      expect(screen.getByRole('button', { name: /送信中/ })).toBeDisabled();
+      act(() => onExecutingChange(false));
+      expect(screen.getByRole('button', { name: /1 USDC を送る/ })).not.toBeDisabled();
+    } finally {
+      crossChainHintReports.onMount = true;
+      window.localStorage.clear();
+    }
+  });
+
   it('relay intent の sessionStorage 読込中は非 relay 表示でも新規送信を封鎖する', () => {
     setAccount({ connected: true, chainId: baseSepolia.id });
     setBalance(20_000_000n);
@@ -721,6 +755,17 @@ describe('TipForm — 送信', () => {
     render(<TipForm params={USDC_PARAMS} />);
     expect(screen.getByText(/エラー/)).toBeInTheDocument();
     expect(screen.getByText(/AA21 fail/)).toBeInTheDocument();
+  });
+
+  it('GasCongestedError → 生メッセージではなく混雑の案内 (第 9 回レビュー A-5: 送信の中の fee の見積もりが止めた場合も同じ error が届く)', async () => {
+    const { GasCongestedError } = await import('@/lib/gasCeiling');
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(20_000_000n);
+    setSmartAccount(true);
+    setBatchPayment('error', new GasCongestedError(baseSepolia.id, 1n, 5n));
+    render(<TipForm params={USDC_PARAMS} />);
+    expect(screen.getByText(/ネットワークが混雑しています/)).toBeInTheDocument();
+    expect(screen.queryByText(/gas_congested/)).toBeNull();
   });
 
   it('Pimlico response-unknown → 再送封鎖・通常エラー抑止・同じ UserOp の receipt だけ再照会', async () => {
@@ -2413,5 +2458,108 @@ describe('TipForm — R14 二重送信 (in-flight 後の再 click)', () => {
     fireEvent.click(button);
     expect(first).toHaveBeenCalledOnce();
     expect(relayMutate).not.toHaveBeenCalled();
+  });
+});
+
+// 第 9 回レビュー A-4: 控えの支払者は、確定時に接続しているアドレスでなく送信した時点のアドレス。確定を待つ間に
+// 拡張機能で別のウォレット (B) へ切り替えても、控えに B を残さない (控えは pending → confirmed の昇格しか受けず、
+// A に戻しても保存済みの支払者は直らない)。送信時のスナップショットを今の address に戻すと各 it が落ちる。
+describe('TipForm — 控えの支払者は送信した時点のアドレス (第 9 回レビュー A-4)', () => {
+  const OTHER: Address = '0x8888888888888888888888888888888888888888';
+  type HintProps = {
+    onAttemptStart: (amount: bigint) => void;
+    onSuccess: (result: import('@/hooks/useCrossChainPayment').ExecuteResult) => void;
+  };
+  const latestHintProps = () => crossChainHintSpy.mock.lastCall![0] as HintProps;
+  function switchToOther(chainId: number) {
+    mockHook(useAccount, { address: OTHER, isConnected: true, chainId });
+  }
+
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  it('relay: 送信 → B に切り替え → 成功が届く でも、控えの支払者は送った A', () => {
+    vi.mocked(resolveJpycGaslessProvider).mockReturnValue('eip3009-relay');
+    setAccount({ connected: true, chainId: polygonAmoy.id });
+    setBalance(1000n * 10n ** 18n);
+    const view = render(<TipForm params={JPYC_PARAMS} />);
+    fireEvent.click(screen.getByRole('button', { name: /100 JPYC を送る/ }));
+    expect(relayMutate).toHaveBeenCalledOnce();
+    switchToOther(polygonAmoy.id);
+    view.rerender(<TipForm params={JPYC_PARAMS} />);
+    setRelay('success', { variables: { merchant: CREATOR, value: 100n * 10n ** 18n, gasMode: 'customer' } });
+    view.rerender(<TipForm params={JPYC_PARAMS} />);
+    const receipts = loadPayerReceipts();
+    expect(receipts).toHaveLength(1);
+    expect(receipts[0]).toMatchObject({ receiptId: `0x${'c'.repeat(64)}`, payerAddress: FAN });
+  });
+
+  it('gasless: 送信 → B に切り替え → 成功が届く でも、控えの支払者は送った A', () => {
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(20_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready', 0n);
+    const view = render(<TipForm params={USDC_PARAMS} />);
+    fireEvent.click(screen.getByRole('button', { name: /1 USDC を送る/ }));
+    expect(mutate).toHaveBeenCalledOnce();
+    switchToOther(baseSepolia.id);
+    view.rerender(<TipForm params={USDC_PARAMS} />);
+    setBatchPayment('success');
+    view.rerender(<TipForm params={USDC_PARAMS} />);
+    const receipts = loadPayerReceipts();
+    expect(receipts).toHaveLength(1);
+    expect(receipts[0]).toMatchObject({ receiptId: `0x${'b'.repeat(64)}`, payerAddress: FAN });
+  });
+
+  it('cross-chain (CCTP): 試みる → B に切り替え → 成功が届く でも、控えの支払者は試みた A', async () => {
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(20_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready', 100_000n);
+    const view = render(<TipForm params={USDC_PARAMS} />);
+    await waitFor(() => expect(crossChainHintSpy).toHaveBeenCalled());
+    act(() => latestHintProps().onAttemptStart(1_000_000n));
+    switchToOther(baseSepolia.id);
+    view.rerender(<TipForm params={USDC_PARAMS} />);
+    const mintTxHash = `0x${'e'.repeat(64)}` as const;
+    act(() => latestHintProps().onSuccess({
+      path: 'cctp-v2',
+      burnTxHash: `0x${'f'.repeat(64)}`,
+      mintTxHash,
+      destChainId: baseSepolia.id,
+    }));
+    await waitFor(() => expect(loadPayerReceipts()).toHaveLength(1));
+    expect(loadPayerReceipts()[0]).toMatchObject({ receiptId: mintTxHash, paymentMode: 'cross-chain', payerAddress: FAN });
+  });
+
+  it('cross-chain (Gateway の hash の無い控え): 試みる → B に切り替え → 成功が届く でも、控えの支払者は試みた A', async () => {
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(20_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready', 100_000n);
+    const view = render(<TipForm params={USDC_PARAMS} />);
+    await waitFor(() => expect(crossChainHintSpy).toHaveBeenCalled());
+    const { gatewayAttestation, encodedSpec } = await import('../fixtures/gateway');
+    const { keccak256 } = await import('viem');
+    const att = gatewayAttestation();
+    const transferSpecHash = keccak256(encodedSpec());
+    act(() => latestHintProps().onAttemptStart(1_000_000n));
+    switchToOther(baseSepolia.id);
+    view.rerender(<TipForm params={USDC_PARAMS} />);
+    act(() => latestHintProps().onSuccess({
+      path: 'gateway',
+      settlement: 'hashless',
+      transferSpecHash,
+      attestation: att.attestation,
+      attestationSignature: att.signature,
+      destChainId: baseSepolia.id,
+    }));
+    await waitFor(() => expect(loadPayerReceipts()).toHaveLength(1));
+    expect(loadPayerReceipts()[0]).toMatchObject({
+      receiptId: `gateway:${baseSepolia.id}:${transferSpecHash}`,
+      payerAddress: FAN,
+    });
+    expect(loadPayerReceipts()[0].txHash).toBeUndefined();
   });
 });
