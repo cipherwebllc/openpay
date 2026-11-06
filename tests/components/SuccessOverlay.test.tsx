@@ -11,6 +11,8 @@ vi.mock('wagmi', () => ({
 }));
 
 import { renderWithIntl as render } from '../_helpers/i18n';
+import { auditAllStates } from '../_helpers/tailwindContrast';
+import ja from '../../messages/ja.json';
 import { SuccessOverlay } from '@/components/SuccessOverlay';
 import type { NotifyShopData } from '@/components/NotifyShopButton';
 
@@ -490,5 +492,87 @@ describe('SuccessOverlay: 完了音トグル (PayPay 風チャイム)', () => {
     expect(
       screen.getByRole('button', { name: 'Completion sound' }),
     ).toHaveAttribute('aria-pressed', 'true');
+  });
+});
+
+// 払った人が必ず見る画面なのに、Lighthouse の CI はこの画面を描かない。描いた DOM の class から前景と背景を組み立てて
+// (tests/_helpers/tailwindContrast.ts・色は Tailwind のパレット)、何もしていないとき・各ボタンの hover と focus・コピーした後を計算する。
+describe('SuccessOverlay: 文字のコントラスト (WCAG 2.2 AA)', () => {
+  const m = ja.SuccessOverlay;
+  // opacity-0 を許すのは、CopyableField が描くコピーの案内 (.group のボタンの直下の aria-hidden の「コピー」) だけ。
+  // helper は、この要素がボタンの hover と focus のときに測られたことも確かめる。
+  const isCopyHint = (el: Element) =>
+    el.matches('button.group > span[aria-hidden="true"]') && el.textContent === ja.CopyableField.copy;
+
+  // 注文の会計で出るもの (受付番号・お店に知らせる・文をコピー・UserOp/ブロックの行・Explorer の 2 リンク) を全部出す。
+  async function renderFull() {
+    const user = userEvent.setup(); // clipboard を入れる (ハッシュがボタンになり、「文をコピー」も出る)
+    render(
+      <SuccessOverlay
+        amountDisplay="3,500 JPYC"
+        txHash={TX_HASH}
+        userOpHash={USER_OP_HASH}
+        blockNumber={12345n}
+        explorerBase="https://amoy.polygonscan.com"
+        merchantAddress={MERCHANT_ADDR}
+        orderNo="A-001"
+        notify={{
+          orderNo: 'A-001',
+          askShipping: false,
+          items: [{ name: 'マグカップ', qty: 1 }],
+          amountDisplay: '3,500 JPYC',
+          txHash: TX_HASH,
+          chain: 'polygon',
+          shop: MERCHANT_ADDR as Address,
+          confirm: false,
+          contact: { kind: 'line', id: '@openpay' },
+        }}
+        onDismiss={() => undefined}
+      />,
+    );
+    await screen.findByRole('button', { name: m.notifyShopCopy });
+    return { user, dialog: screen.getByRole('dialog') };
+  }
+
+  it('地・文字・アイコン・ボタンの形を、何もしていないときと各ボタンの hover / focus で計算して基準以上', async () => {
+    const { dialog } = await renderFull();
+    const { failures, checked, boundaries } = auditAllStates(dialog, { revealed: isCopyHint });
+    expect(failures).toEqual([]);
+
+    // 名前の付いた要素を、黙って飛ばさずに計算した (何もしていないとき)。
+    const base = checked.filter((c) => c.state === 'base').map((c) => c.text);
+    for (const name of [
+      m.title, m.amountLabel, '3,500 JPYC', m.orderNoLabel, 'A-001', m.timeLabel,
+      m.txHashLabel, m.userOpHashLabel, m.blockLabel, '0xaaaaaaaa…aaaaaa', '0xbbbbbbbb…bbbbbb', '12345',
+      m.explorerLink, m.merchantAddressExplorerLink, m.viewLocalHistoryLink, m.viewReceiptsLink,
+      ja.NonCustodialNotice.shortTitle, ja.NonCustodialNotice.shortBody,
+      m.sendTo.replace('{dest}', 'LINE @openpay'), m.sendByLine, m.notifyShopHint, m.notifyShopCopy,
+      m.dismiss, m.notifyShopDismissHelp, '[icon lucide-volume2]',
+    ]) {
+      expect(base, name).toContain(name);
+    }
+    expect(base.some((text) => /^\d{2}:\d{2}:\d{2}$/.test(text))).toBe(true);
+
+    // コピーの案内は hover と focus のときだけ見え、そのときの地 (hover の地・欄) の上で計算されている。
+    const hint = checked.filter((c) => c.text === ja.CopyableField.copy).map((c) => c.state.split(':')[0]);
+    expect(hint).not.toContain('base');
+    expect(hint).toEqual(expect.arrayContaining(['hover', 'focus']));
+    // hover の地の上の文字 (ハッシュ・リンク・ボタン) も計算されている。
+    const hovered = checked.filter((c) => c.state.startsWith('hover:')).map((c) => c.text);
+    expect(hovered).toEqual(expect.arrayContaining(['0xaaaaaaaa…aaaaaa', m.explorerLink, m.sendByLine, m.notifyShopCopy, m.dismiss]));
+
+    // ボタンの形 (白の地・白の枠線) と地の境目を計算した: LINE で送る・文をコピー (枠線)・閉じる。
+    expect(boundaries.map((b) => b.text)).toEqual(expect.arrayContaining([m.sendByLine, m.notifyShopCopy, m.dismiss]));
+  });
+
+  it('コピーした後の「✓ コピー済み」も、欄の上と hover の地の上で基準以上', async () => {
+    const { user, dialog } = await renderFull();
+    const copyButton = screen.getByRole('button', { name: /Tx Hash をコピー/ });
+    await user.click(copyButton);
+    const copied = await screen.findByText(`✓ ${ja.CopyableField.copied}`);
+    const { failures, checked } = auditAllStates(dialog, { revealed: isCopyHint });
+    expect(failures).toEqual([]);
+    const states = checked.filter((c) => c.text === copied.textContent).map((c) => c.state.split(':')[0]);
+    expect(states).toEqual(expect.arrayContaining(['base', 'hover', 'focus']));
   });
 });

@@ -89,6 +89,9 @@ export function SuccessOverlay({
       ? `${explorerBase}/address/${merchantAddress}`
       : undefined;
 
+  // 地は emerald-700 で、白の文字は 5.48:1 (WCAG 2.2 AA の 4.5:1 に届く)。emerald-500 の地では白が 2.54:1 で届かなかった。
+  // 文字は opacity や text-white/90 で薄くしない (emerald-700 の上で白の 80% は 4.11:1)。bg-white/10 の欄の上の白は
+  // 4.53:1 で余裕が小さいので、欄をこれより明るくしない (tests/components/SuccessOverlay.test.tsx が計算して確かめる)。
   return (
     <div
       ref={dialogRef}
@@ -96,7 +99,7 @@ export function SuccessOverlay({
       aria-modal="true"
       aria-labelledby={titleId}
       tabIndex={-1}
-      className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-6 overflow-y-auto bg-emerald-500 px-4 py-8 text-white"
+      className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-6 overflow-y-auto bg-emerald-700 px-4 py-8 text-white"
     >
       {/* 完了音 ON/OFF トグル (右上)。PayPay 風チャイムのミュート切替・localStorage 永続。
           名前は固定 (「完了音」) し、状態は aria-pressed とアイコンだけで伝える。名前まで「オフにする / オンにする」と
@@ -129,7 +132,7 @@ export function SuccessOverlay({
 
       {/* 巨大金額 (店主が遠くから視認できるサイズ) */}
       <div className="text-center">
-        <p className="text-xs uppercase tracking-wider opacity-80">
+        <p className="text-xs uppercase tracking-wider">
           {t('amountLabel')}
         </p>
         <p className="mt-1 break-all text-5xl font-black sm:text-6xl">
@@ -141,7 +144,7 @@ export function SuccessOverlay({
           checkout で order_id があるときのみ (QR/チップ等の単発決済では出ない)。 */}
       {orderNo && (
         <div className="text-center">
-          <p className="text-xs uppercase tracking-wider opacity-80">
+          <p className="text-xs uppercase tracking-wider">
             {t('orderNoLabel')}
           </p>
           <p className="mt-1 font-mono text-4xl font-black tracking-widest sm:text-5xl">
@@ -155,7 +158,7 @@ export function SuccessOverlay({
 
       {/* 完了時刻 (HH:MM:SS、毎秒更新) */}
       <div className="text-center">
-        <p className="text-xs uppercase tracking-wider opacity-80">
+        <p className="text-xs uppercase tracking-wider">
           {t('timeLabel')}
         </p>
         <p className="mt-1 font-mono text-2xl tabular-nums sm:text-3xl">
@@ -166,44 +169,47 @@ export function SuccessOverlay({
       {/* tx 詳細 (コピー可能) */}
       <dl className="w-full max-w-md space-y-1 rounded-lg bg-white/10 px-4 py-3 text-xs">
         <div className="flex items-baseline justify-between gap-2">
-          <dt className="shrink-0 opacity-80">{t('txHashLabel')}</dt>
+          <dt className="shrink-0">{t('txHashLabel')}</dt>
           <dd className="min-w-0 flex-1 text-right">
             <CopyableField
               value={txHash}
               label={t('txHashLabel')}
               displayValue={`${txHash.slice(0, 10)}…${txHash.slice(-6)}`}
               className="text-white"
+              tone="overlay"
             />
           </dd>
         </div>
         {userOpHash && (
           <div className="flex items-baseline justify-between gap-2">
-            <dt className="shrink-0 opacity-80">{t('userOpHashLabel')}</dt>
+            <dt className="shrink-0">{t('userOpHashLabel')}</dt>
             <dd className="min-w-0 flex-1 text-right">
               <CopyableField
                 value={userOpHash}
                 label={t('userOpHashLabel')}
                 displayValue={`${userOpHash.slice(0, 10)}…${userOpHash.slice(-6)}`}
                 className="text-white"
+                tone="overlay"
               />
             </dd>
           </div>
         )}
         {blockNumber !== undefined && (
           <div className="flex items-baseline justify-between gap-2">
-            <dt className="shrink-0 opacity-80">{t('blockLabel')}</dt>
+            <dt className="shrink-0">{t('blockLabel')}</dt>
             <dd className="font-mono">{blockNumber.toString()}</dd>
           </div>
         )}
       </dl>
 
+      {/* hover は線を太くして示す (薄くすると emerald-700 の上で 4.5:1 を割る)。 */}
       <div className="flex flex-col items-center gap-1 text-sm">
         {explorerTxUrl && (
           <a
             href={explorerTxUrl}
             target="_blank"
             rel="noreferrer noopener"
-            className="underline underline-offset-4 hover:opacity-80"
+            className="underline underline-offset-4 hover:decoration-2"
           >
             {t('explorerLink')}
           </a>
@@ -213,7 +219,7 @@ export function SuccessOverlay({
             href={explorerAddressUrl}
             target="_blank"
             rel="noreferrer noopener"
-            className="underline underline-offset-4 hover:opacity-80"
+            className="underline underline-offset-4 hover:decoration-2"
           >
             {t('merchantAddressExplorerLink')}
           </a>
@@ -221,7 +227,7 @@ export function SuccessOverlay({
         <Link
           href="/history"
           prefetch={false}
-          className="underline underline-offset-4 hover:opacity-80"
+          className="underline underline-offset-4 hover:decoration-2"
         >
           {t('viewLocalHistoryLink')}
         </Link>
@@ -229,7 +235,7 @@ export function SuccessOverlay({
         <Link
           href="/scan"
           prefetch={false}
-          className="underline underline-offset-4 hover:opacity-80"
+          className="underline underline-offset-4 hover:decoration-2"
         >
           {t('viewReceiptsLink')}
         </Link>
@@ -250,7 +256,7 @@ export function SuccessOverlay({
         >
           {t('dismiss')}
         </button>
-        <p className="text-[10px] opacity-70">{t(notify ? (notify.askShipping ? 'sendOrderDismissHelp' : 'notifyShopDismissHelp') : 'dismissHelp')}</p>
+        <p className="text-[10px]">{t(notify ? (notify.askShipping ? 'sendOrderDismissHelp' : 'notifyShopDismissHelp') : 'dismissHelp')}</p>
       </div>
     </div>
   );

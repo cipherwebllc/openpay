@@ -8,16 +8,26 @@ import { useCopyToClipboard, useHydrationSafeAvailable } from '@/hooks/useCopyTo
 // 押せない span へ落とす (graceful degrade・誤クリック防止)。mount 前は server と同形の button を
 // 描く (hydration を揃えるため。まだ操作できないので偽の操作面にはならない)。
 
+// 地の色ごとの、押したときの地と案内 (コピー / コピー済み) の色 (文字の色は呼び出し側の className)。overlay は完了画面
+// (SuccessOverlay) の濃い緑の bg-white/10 の欄: slate-500 / emerald-600 の案内と slate-100 の hover の地は、緑の上や白の文字との
+// 間で 1.5〜3.2:1 しかないので、白の案内 (欄の上で 4.53:1) と emerald-800 の hover の地 (白の文字が 7.68:1) にする。
+const TONE = {
+  panel: { hover: 'hover:bg-slate-100/60', hint: 'text-slate-500', copied: 'text-emerald-600' },
+  overlay: { hover: 'hover:bg-emerald-800', hint: 'text-white', copied: 'text-white' },
+} as const;
+
 export function CopyableField({
   value,
   label,
   displayValue,
   className = '',
+  tone = 'panel',
 }: {
   value: string;
   label: string;
   displayValue?: string;
   className?: string;
+  tone?: keyof typeof TONE;
 }) {
   const t = useTranslations('CopyableField');
   const { copied, available: clipboardAvailable, copy } = useCopyToClipboard();
@@ -25,6 +35,7 @@ export function CopyableField({
   const available = useHydrationSafeAvailable(clipboardAvailable);
 
   const shown = displayValue ?? value;
+  const colors = TONE[tone];
 
   // a11y 名は可視テキスト (= 表示中のハッシュ) から導出する (掟 8)。何のフィールドか /
   // 押すと何が起きるかは sr-only テキストで補い、aria-label で上書きしない
@@ -42,7 +53,7 @@ export function CopyableField({
     <button
       type="button"
       onClick={() => copy(value)}
-      className={`group inline-flex items-center gap-1 break-all font-mono text-left transition hover:bg-slate-100/60 rounded px-1 -mx-1 ${className}`}
+      className={`group inline-flex items-center gap-1 break-all font-mono text-left transition ${colors.hover} rounded px-1 -mx-1 ${className}`}
     >
       <span className="break-all">{shown}</span>
       <span className="sr-only">{t('copyAria', { label })}</span>
@@ -50,8 +61,8 @@ export function CopyableField({
         aria-hidden="true"
         className={`shrink-0 text-xs font-sans transition ${
           copied
-            ? 'text-emerald-600'
-            : 'text-slate-500 opacity-0 group-hover:opacity-100 group-focus:opacity-100'
+            ? colors.copied
+            : `${colors.hint} opacity-0 group-hover:opacity-100 group-focus:opacity-100`
         }`}
       >
         {copied ? `✓ ${t('copied')}` : t('copy')}
