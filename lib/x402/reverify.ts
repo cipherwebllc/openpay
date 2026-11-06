@@ -35,9 +35,12 @@ export type ReverifyVerdict =
   | 'violation_200_ungated'
   | 'violation_gone'
   | 'violation_foreign_402'
-  // 最初の再検証を待つ新規掲載 (pendingFirstVerification) だけに付く: OpenPay 方式の 402 だが、その JPYC accept が
-  // 掲載の受取先・チェーン・JPYC・forwarder と合わない (probeForPendingFirstVerification)。違反には数えない
-  // (verdictClass は transient・理由は probeForPendingFirstVerification)。
+  // 外部の掲載 (公開中・モデレーションの hidden) の OpenPay 方式の 402 だが、その JPYC accept が掲載の受取先・チェーン・
+  // JPYC・forwarder と合わない (probeForReverifyDetailed に掲載の payTo を渡したとき)。確定違反に数える = 公開中は閾値で
+  // hidden になり、hidden は照合が合う 402 まで戻らない。
+  | 'violation_gate_mismatch'
+  // 最初の再検証を待つ新規掲載 (pendingFirstVerification) だけに付く: 上と同じ不一致 (probeForPendingFirstVerification)。
+  // 違反には数えない (verdictClass は transient・理由は probeForPendingFirstVerification)。
   | 'pending_gate_mismatch'
   | 'transient';
 
@@ -235,46 +238,60 @@ type ReverifyProbeOptions = SsrfSafeFetchOptions & { probeAtMs?: number };
 // 一時障害を分ける。body を完全に解釈できない 402 は hidden へ進めず transient に留める (200 は verdictFor200)。
 // verdict (契約) とは別に authClass (締め出され判定・B8) を返す。
 //
-// observePayTo (観測だけの照合・E-3 の残り・2026-10-30 user 裁定 (b) の「観測」の段): 渡すと、ok_402_openpay の回だけ、
-// 公開待ちと同じ照合 (lib/x402/registrationGateMatch.ts・掲載の payTo を期待値にする) の結果を observedMismatch に添える
-// (null = 一致)。verdict・authClass は渡さないときと同じ値のまま変えない = 照合の結果で公開・非公開を決めない。追加の HTTP は
-// しない (この probe が読んだ 402 の accepts をそのまま使う)。渡さないとき (first-party・既存の呼び元) の戻り値は従来どおり。
+// listingPayTo (外部の掲載の照合・E-3 の残り・2026-10-30 user 裁定 (b) の「強制」の段): 外部の掲載 (公開中・
+// モデレーションの hidden) は掲載の payTo を渡す。OpenPay 方式の 402 (ok_402_openpay) を、登録と同じ照合
+// (lib/x402/registrationGateMatch.ts・掲載の payTo を期待値にする) を通ったときだけ ok にし、合わなければ
+// violation_gate_mismatch (確定違反) にして不一致の項目を mismatch に添える。公開中は確定違反 3 連続で hidden になり、
+// hidden (モデレーション) は照合が合う 402 を受け取るまで戻らない = #957 の「残る穴」1〜3 (印のない hidden の照合しない
+// 復帰) を閉じる。追加の HTTP はしない (この probe が読んだ 402 の accepts をそのまま使う)。渡さないとき (first-party) は
+// 照合せず、戻り値は従来どおり。
 export async function probeForReverifyDetailed(
   url: string,
   opts: ReverifyProbeOptions = {},
-  observePayTo?: string,
-): Promise<ReverifyProbe & { observedMismatch?: GateAcceptMismatch | null }> {
-  const { verdict, authClass, accepts } = await probeWithAccepts(url, opts);
-  if (observePayTo === undefined || verdict !== 'ok_402_openpay') return { verdict, authClass };
-  return {
-    verdict,
-    authClass,
-    observedMismatch: gateAcceptMismatch(accepts, registrationAcceptExpectation(observePayTo)),
-  };
+  listingPayTo?: string,
+): Promise<ReverifyProbe & { mismatch?: GateAcceptMismatch }> {
+  if (listingPayTo === undefined) {
+    const { verdict, authClass } = await probeWithAccepts(url, opts);
+    return { verdict, authClass };
+  }
+  return probeMatchedToListing(url, listingPayTo, 'violation_gate_mismatch', opts);
 }
 
 // 最初の再検証を待つ新規掲載 (pendingFirstVerification) の probe (E-3)。OpenPay 方式の 402 (ok_402_openpay) を、登録と
 // 同じ照合 (lib/x402/registrationGateMatch.ts・掲載の payTo を期待値にする) を通ったときだけ ok にする。合わなければ
 // pending_gate_mismatch (verdictClass は transient) = 印つきの hidden のまま、確定違反のカウンタ (failures) は動かさず、
 // lastOkAt も付けない。
-// 確定違反に数えない理由: 違反 3 連続で印が外れると (REVERIFY_PENDING_FIRST_VERIFICATION)、掲載は通常のモデレーションの
-// hidden になる。その復帰 (ok で hidden を解く) は照合しない (公開中・モデレーションの掲載の verdict はこの PR で変えない)
-// ので、同じ合わない 402 が 4 回目の再検証で ok になり、確かめていない受取先のまま公開される = 3 時間遅らせるだけになる。
+// 公開中・モデレーションの hidden と違って確定違反に数えない理由: 公開にはどちらにしても照合が合う 402 が要る (印が外れた
+// 後のモデレーションの hidden の復帰も照合する) ので、数えても安全は増えない。一方で数えると、違反 3 連続で印が外れ
+// (REVERIFY_PENDING_FIRST_VERIFICATION)、通常のモデレーションの hidden になる = ID の照会が 404 になって出品者のゲートが
+// 402 を作れず、URL 台帳も立つ (削除 → 再登録でも hidden を継承する)。ゲートの設定がまだ合っていないだけの新しい掲載を、
+// 違反の掲載と同じに扱ってしまう。
 // 締め出しのカウンタ (authFailures) は、ほかの 402 と同じく authClass 'clear' で 0 に戻す (変えない): (1) B8 の軸は
 // verdict と独立で、素の 402 に届いた回は OpenPay・foreign・読めない 402 のどれでも clear (応答の中身で締め出しの判定を
-// 変えない)。(2) 残すと、403 と合わない 402 が交互に来るだけで締め出しが 6 回に積み上がり、閾値で印が外れて上の照合しない
-// 復帰に落ちる。0 に戻せば、印を外すには 6 回連続の締め出しが要る (公開中の掲載と同じ条件)。
-// 照合の前の verdict (transient・ほかの違反) はそのまま。公開中の掲載はこの関数を使わない (probeForReverifyDetailed のまま)。
+// 変えない)。(2) 残すと、403 と合わない 402 が交互に来るだけで締め出しが 6 回に積み上がり、閾値で印が外れる (上と同じく
+// 新しい掲載をモデレーションの hidden にしてしまう)。0 に戻せば、印を外すには 6 回連続の締め出しが要る (公開中の掲載と
+// 同じ条件)。
+// 照合の前の verdict (transient・ほかの違反) はそのまま。
 export async function probeForPendingFirstVerification(
   url: string,
   payTo: string,
   opts: ReverifyProbeOptions = {},
 ): Promise<ReverifyProbe & { mismatch?: GateAcceptMismatch }> {
+  return probeMatchedToListing(url, payTo, 'pending_gate_mismatch', opts);
+}
+
+// 外部の掲載の照合つき probe の本体。ok_402_openpay の回だけ照合し、合わなければ mismatchVerdict と不一致の項目を返す。
+async function probeMatchedToListing(
+  url: string,
+  payTo: string,
+  mismatchVerdict: 'violation_gate_mismatch' | 'pending_gate_mismatch',
+  opts: ReverifyProbeOptions,
+): Promise<ReverifyProbe & { mismatch?: GateAcceptMismatch }> {
   const { verdict, authClass, accepts } = await probeWithAccepts(url, opts);
   if (verdict !== 'ok_402_openpay') return { verdict, authClass };
   const mismatch = gateAcceptMismatch(accepts, registrationAcceptExpectation(payTo));
   return mismatch
-    ? { verdict: 'pending_gate_mismatch', authClass, mismatch }
+    ? { verdict: mismatchVerdict, authClass, mismatch }
     : { verdict, authClass };
 }
 
@@ -589,7 +606,8 @@ export const REVERIFY_HIDDEN_URL_LEDGER =
 //   (1) hidden が解けたとき (ok かつ URL claim を確かめた後)。claim の競合・障害で解除が保留された回は残す
 //       (ID の照会で出品者のゲートが動き続け、次の ok で戻れる)。
 //   (2) 公開中の掲載なら hidden になる閾値 (確定違反 3 連続・締め出し 6 連続) に達したとき = 通常の
-//       モデレーションで隠された状態に移す。以後は印のない hidden (ID の照会も 404・台帳あり) として扱う。
+//       モデレーションで隠された状態に移す。以後は印のない hidden (ID の照会も 404・台帳あり) として扱う (復帰は
+//       公開中の掲載と同じく、照合が合う 402 を受け取ったときだけ・probeForReverifyDetailed の listingPayTo)。
 //       閾値の前に外さないのは、デプロイ前の 404 が数回続いただけで出品者のゲートが自分の掲載を引けなくなり、
 //       再検証の ok に永久に届かなくなるのを避けるため (公開中の掲載も閾値まではカタログに残る)。
 // ⚠️ テンプレートリテラルを使わない (REVERIFY_COUNTER_TRANSITION の注意を参照)。閾値は HIDE_THRESHOLD_LUA /
@@ -604,8 +622,9 @@ export const REVERIFY_PENDING_FIRST_VERIFICATION =
 
 // probe の照合に使った受取先 (ARGV[9]・掲載の payTo の読取時の値) が、CAS の時点の掲載と違えば結果を捨てる (-5)。
 // probe の間の payTo だけの編集 (PATCH) で、古い受取先に対して照合した ok が、確かめていない新しい受取先のまま
-// 掲載を公開する経路を断つ (URL の変更を -3 で捨てるのと同じ扱い)。照合しなかった probe (公開中の掲載・
-// first-party) は ARGV[9]='' で、この検査を素通りする = 従来どおり。比べるのは record にある文字列そのもの
+// 掲載を公開する (公開中の掲載なら、確かめていない新しい受取先のまま違反のカウンタを戻す) 経路を断つ (URL の変更を
+// -3 で捨てるのと同じ扱い)。外部の掲載は公開待ち・公開中・モデレーションの hidden のどれも照合するので、route は常に
+// 掲載の payTo を渡す。ARGV[9]='' (照合しなかった probe) なら、この検査を素通りする。比べるのは record にある文字列そのもの
 // (数値の時刻を使わない: Upstash の Lua 5.1 と検査用の Lua 5.4 で数値の文字列化が違う)。network は編集できず
 // (CAS_UPDATE が保持)、asset / forwarder は record に無い (設定から作る) ので、照合で record から読むのは payTo だけ。
 // ⚠️ テンプレートリテラルを使わない (REVERIFY_COUNTER_TRANSITION の注意を参照)。
@@ -709,8 +728,8 @@ function parseApplyResult(value: unknown): ReverifyApplyResult {
   };
 }
 
-// matchedPayTo = probe の照合に使った受取先 (probeForPendingFirstVerification に渡した掲載の payTo)。照合しなかった
-// probe は省略する (CAS は payTo を確かめない = 従来どおり)。
+// matchedPayTo = probe の照合に使った受取先 (probeForPendingFirstVerification / probeForReverifyDetailed に渡した掲載の
+// payTo・cron は外部の掲載すべてで渡す)。省略すると CAS は payTo を確かめない。
 export async function applyExternalReverify(
   id: string,
   probedUrl: string,
