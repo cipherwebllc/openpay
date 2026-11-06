@@ -104,7 +104,10 @@ describe('walletGuide content', () => {
       expect(c.storeLink.href).toBe('https://wallet.upbond.io/');
     }
     expect(walletGuideContentFor('ja').storeNote).toContain('UPBOND Wallet から送るときは、ガス代 (Polygon なら POL) が要ります');
-    expect(walletGuideContentFor('ja').storeNote).toContain('マイナウォレットなど普段のウォレットへ移してください');
+    expect(walletGuideContentFor('ja').storeNote).toContain('売上がたまったら、マイナウォレットなどへ移してください');
+    // 「普段の」ウォレットとは書かない (この節はウォレットを持っていないお店向け・2026-11-06 user)。
+    expect(walletGuideContentFor('ja').storeNote).not.toContain('普段');
+    expect(walletGuideContentFor('en').storeNote).not.toContain('day to day');
     expect(walletGuideContentFor('ja').wallets[3].body).toContain('OpenPay では、Polygon の JPYC のガス代不要の支払いで使えることを確かめています。');
     expect(walletGuideContentFor('ja').wallets[3].howTo).toContain('UPBOND Wallet のタブに戻ると承認の画面が出ています');
     // 受け取り用の節の「お客様の支払い用には、上のウォレットを」は UPBOND も一覧に入ったので書かない。

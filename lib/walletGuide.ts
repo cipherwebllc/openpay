@@ -12,7 +12,7 @@
 // UPBOND Wallet (ブラウザで使うウォレット・2026-11-06 user):
 //   - お店の受け取り用の節を足す (/create の受取先の欄が空のとき「ウォレットをお持ちでない方へ」からこの節 (#store-wallet) へ来る)。
 //     2026-10-01 本番 Polygon で UPBOND のアドレスへの受け取りを確認 (支払い 10 JPYC → 8 JPYC・利用料 2 JPYC)・送るときは
-//     POL (ガス代) が要る (user 実機)・鍵の書き出しや UPBOND が止まったときの戻し方は未確認 → 売上は普段のウォレットへ移すよう書く・
+//     POL (ガス代) が要る (user 実機)・鍵の書き出しや UPBOND が止まったときの戻し方は未確認 → 売上はマイナウォレットなどへ移すよう書く (「普段の」は付けない: この節はウォレットを持っていないお店向け・2026-11-06 user)・
 //     Polygon 以外のチェーンは試していないが、受け取るチェーンは指定しない (「Polygon を選んでください」は Polygon 以外は
 //     ダメと読める・試したのが Polygon だっただけ・2026-11-06 user)。ガス代の例として「Polygon なら POL」だけ書く。
 //   - お客様の支払い用の一覧 (wallets) にも、使い方の補足 (howTo) をつけてマイナウォレット・HashPort Wallet の後ろに足す
@@ -178,7 +178,7 @@ const JA: WalletGuideContent = {
   storeBody:
     'お店の受け取り用には、アプリを入れずにブラウザで使える UPBOND Wallet が手軽です。LINE・Google のアカウントやパスキーでログインでき、JPYC EX とつないで JPYC の発行・償還もできます。',
   storeNote:
-    '売上がたまったら、マイナウォレットなど普段のウォレットへ移してください (UPBOND Wallet から送るときは、ガス代 (Polygon なら POL) が要ります)。',
+    '売上がたまったら、マイナウォレットなどへ移してください (UPBOND Wallet から送るときは、ガス代 (Polygon なら POL) が要ります)。',
   storeLink: { href: UPBOND_WALLET_URL, label: 'UPBOND Wallet を開く' },
 };
 
@@ -271,7 +271,7 @@ const EN: WalletGuideContent = {
   storeBody:
     'For receiving payments at your shop, UPBOND Wallet is an easy option: it runs in your browser with no app to install. You can sign in with a LINE or Google account or a passkey, and connect it to JPYC EX to issue and redeem JPYC.',
   storeNote:
-    'Once sales build up, move them to the wallet you use day to day, such as MynaWallet (sending from UPBOND Wallet requires gas, such as POL on Polygon).',
+    'Once sales build up, move them to a wallet such as MynaWallet (sending from UPBOND Wallet requires gas, such as POL on Polygon).',
   storeLink: { href: UPBOND_WALLET_URL, label: 'Open UPBOND Wallet' },
 };
 
