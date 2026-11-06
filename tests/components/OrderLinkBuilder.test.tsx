@@ -392,7 +392,9 @@ describe('OrderLinkBuilder', () => {
     expect(screen.queryByLabelText('お客様に送るリンク')).toBeNull();
     fireEvent.click(screen.getAllByRole('button', { name: 'リンクをコピー' })[0]);
     expect(await screen.findByLabelText('お客様に送るリンク')).toBeInTheDocument();
-    expect(screen.getByLabelText('お客様に送るリンク')).toHaveFocus();
+    // focus は欄を描いた後の effect (copyFailed) で移る。コピーの失敗は Promise の reject で act の外から来るので、
+    // effect は描画より少し遅れて走る (CI の負荷で findBy が先に返り、toHaveFocus が body を見て落ちた・2026-11-06 main)。
+    await waitFor(() => expect(screen.getByLabelText('お客様に送るリンク')).toHaveFocus());
     expect(screen.getByText('コピーできませんでした', { selector: 'p' })).toBeInTheDocument();
     // 失敗したら番号を進めない。
     expect(localStorage.getItem(STORAGE_KEY)).not.toContain('"lastOrderId":"A-001"');
