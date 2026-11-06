@@ -55,11 +55,11 @@ describe('walletGuide content', () => {
     for (const locale of LOCALES) {
       // 例外は UPBOND Wallet で確かめた事実だけ (OpenPay の対応チェーン・通貨の一覧ではない・ほかのチェーン名と金額はここでも書かない):
       //   - storeNote の「Polygon」: 受け取りを確かめたチェーン (2026-10-01 本番)
-      //   - UPBOND Wallet のカードの本文の「Polygon」「USDC」: 支払いを確かめたチェーンと、使えない通貨 (2026-11-06 本番)
+      //   - UPBOND Wallet のカードの本文の「Polygon」: 支払いを確かめたチェーン (2026-11-06 本番)
       const upbondAt = walletGuideContentFor(locale).wallets.findIndex((w) => w.id === 'upbond');
       const ALLOWED: Record<string, RegExp> = {
         [`${locale}.storeNote`]: /Polygon/g,
-        [`${locale}.wallets[${upbondAt}].body`]: /Polygon|USDC/g,
+        [`${locale}.wallets[${upbondAt}].body`]: /Polygon/g,
       };
       for (const [at, text] of copyLeaves(locale)) {
         const checked = ALLOWED[at] ? text.replace(ALLOWED[at], '') : text;
@@ -71,9 +71,11 @@ describe('walletGuide content', () => {
 
   // 2026-11-06 user: ウォレットを持っていないお店向けに、ブラウザで使える UPBOND Wallet を「お店の受け取り用」として紹介し、
   // 支払い用の一覧の最後にも使い方の補足つきで載せる (user 最終裁定)。確かめた事実: 本番 Polygon で受け取れた (2026-10-01)・
-  // 送るときは POL が要る・Polygon のガス代不要の支払い (EIP-3009) が通った (2026-11-06)・通常決済と USDC は未対応・スマホでは
+  // 送るときは POL が要る・Polygon のガス代不要の支払い (EIP-3009) が通った (2026-11-06)・スマホでは
   // 払うときに別のウォレットのアプリが開くことがあり、UPBOND のタブに戻ると承認の画面が出ていた・ほかのチェーンを UPBOND の画面で
-  // 扱えるかは未確認 (→ Polygon を選ぶ)。
+  // 扱えるかは未確認 (→ Polygon を選ぶ)。通常決済と USDC は試していないので、使えるとも使えないとも書かない (2026-11-06 user
+  // 「確実じゃなければわざわざ言わなくてよくない？」・SDK の README の「data 付き tx は未対応」は WalletConnect でつないだ場合の
+  // 事実ではない)。
   it('UPBOND Wallet: 一覧の最後 (ガス代不要の支払いだけ・Polygon・Copy link でつなぐ・タブに戻る) とお店の受け取り用 (Polygon・POL・移す)', () => {
     for (const locale of LOCALES) {
       const c = walletGuideContentFor(locale);
@@ -86,7 +88,8 @@ describe('walletGuide content', () => {
       const card = c.wallets[upbondAt];
       expect(card.name).toBe('UPBOND Wallet');
       expect(card.body).toContain('Polygon');
-      expect(card.body).toContain('USDC');
+      // 試していない通常決済・USDC について「使えない」と書かない (USDC は上の検査でも止まる)。
+      expect(card.body).not.toMatch(/通常決済|使えません|standard payment|not for/i);
       // 使い方の補足は UPBOND Wallet だけ。つなぎ方は WalletConnect の QR の下の“Copy link” (画面の表記どおり・英語のまま)。
       expect(c.wallets.filter((w) => w.howTo).map((w) => w.id)).toEqual(['upbond']);
       expect(card.howTo).toContain(locale === 'ja' ? '「Copy link」' : '“Copy link”');
@@ -100,13 +103,13 @@ describe('walletGuide content', () => {
     }
     expect(walletGuideContentFor('ja').storeNote).toContain('受け取るチェーンは Polygon を選んでください');
     expect(walletGuideContentFor('ja').storeNote).toContain('マイナウォレットなど普段のウォレットへ移してください');
-    expect(walletGuideContentFor('ja').wallets[3].body).toContain('JPYC のガス代不要の支払いに使えます (通常決済と USDC には使えません・Polygon で確かめています)');
+    expect(walletGuideContentFor('ja').wallets[3].body).toContain('OpenPay では、Polygon の JPYC のガス代不要の支払いで使えることを確かめています。');
     expect(walletGuideContentFor('ja').wallets[3].howTo).toContain('UPBOND Wallet のタブに戻ると承認の画面が出ています');
     // 受け取り用の節の「お客様の支払い用には、上のウォレットを」は UPBOND も一覧に入ったので書かない。
     expect(walletGuideContentFor('ja').storeNote).not.toContain('お客様の支払い用');
     expect(walletGuideContentFor('en').storeNote).toContain('Choose Polygon as the receiving chain');
     expect(walletGuideContentFor('en').storeNote).toContain('such as MynaWallet');
-    expect(walletGuideContentFor('en').wallets[3].body).toContain('JPYC payments with no gas fee (not for standard payments or USDC; confirmed on Polygon)');
+    expect(walletGuideContentFor('en').wallets[3].body).toContain('we have confirmed that it works for JPYC payments with no gas fee on Polygon');
     expect(walletGuideContentFor('en').wallets[3].howTo).toContain('go back to the UPBOND Wallet tab');
     expect(walletGuideContentFor('en').storeNote).not.toContain('as a customer');
     // 「Polygon を選ぶ」と書く以上、OpenPay の JPYC の受け取りに Polygon が残っていること (外したらこの節も直す)。
