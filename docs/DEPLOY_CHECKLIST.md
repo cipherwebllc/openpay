@@ -1892,8 +1892,9 @@ relay の支払いの行の「受け付ける」は、receipt の中で支払い
      - subnet の枠: txHash をまたいで、IPv4 /24・IPv6 /64 ごとに、60 秒の固定窓で 120 回まで (`:344-346`・`:357-359`・
        `lib/relay/relayGuards.ts:124-136`・`lib/net/ipPrefix.ts:9-19`)。
      - 429 が増えても、txHash の枠の使い切りだけを疑わない。subnet の枠に当たっても増える。
-   - お客様のブラウザの warn `checkout.webhook.non_ok` (Sentry) も目安になる。`status` と `statusText` (と通知先の origin・
-     hash) を持つが、応答 body の理由 (`error`) は持たない (`components/CheckoutForm.tsx:889-894`・`:1037`)。
+   - お客様のブラウザの warn `checkout.webhook.non_ok` (Sentry) も目安になる。`status` と `statusText` を持ち (束縛なしの
+     経路 `components/CheckoutForm.tsx:889-894` は通知先の origin・hash も持つ・束縛つきの経路 `:1037` は持たない)、
+     応答 body の理由 (`error`) はどちらも持たない。
 
 **4. 戻し方**
 - `ENABLE_ORDER_BIND_ENFORCE` を消すか `false` にして、再 deploy する。束縛なしの relay 通知は、また `bindingMissing` を
