@@ -2,7 +2,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { Address } from 'viem';
-import tailwindColors from 'tailwindcss/colors';
 
 // 「注文を送る / お店に知らせる」は払ったウォレットで確認の署名をする (wagmi)。ここでは出るかどうかだけを見る。
 vi.mock('wagmi', () => ({
@@ -12,6 +11,8 @@ vi.mock('wagmi', () => ({
 }));
 
 import { renderWithIntl as render } from '../_helpers/i18n';
+import { auditAllStates } from '../_helpers/tailwindContrast';
+import ja from '../../messages/ja.json';
 import { SuccessOverlay } from '@/components/SuccessOverlay';
 import type { NotifyShopData } from '@/components/NotifyShopButton';
 
@@ -494,27 +495,10 @@ describe('SuccessOverlay: 完了音トグル (PayPay 風チャイム)', () => {
   });
 });
 
-// 払った人が必ず見る画面なのに、Lighthouse の CI はこの画面を描かない。地の色と文字の薄さを、ここで計算して確かめる。
+// 払った人が必ず見る画面なのに、Lighthouse の CI はこの画面を描かない。描いた DOM の class から前景と背景を組み立てて
+// (tests/_helpers/tailwindContrast.ts・色は Tailwind のパレット)、何もしていないとき・各ボタンの hover と focus・コピーした後を計算する。
 describe('SuccessOverlay: 文字のコントラスト (WCAG 2.2 AA)', () => {
-  const palette = tailwindColors as unknown as Record<string, Record<string, string>>;
-  const WHITE = [255, 255, 255];
-  const rgb = (family: string, shade: string) => {
-    const value = palette[family]?.[shade];
-    if (!value) throw new Error(`Tailwind のパレットに無い色: ${family}-${shade}`);
-    return [1, 3, 5].map((i) => parseInt(value.slice(i, i + 2), 16));
-  };
-  const luminance = (c: number[]) => {
-    const [r, g, b] = c.map((v) => {
-      const s = v / 255;
-      return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
-    });
-    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
-  };
-  const contrast = (a: number[], b: number[]) => {
-    const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
-    return (hi + 0.05) / (lo + 0.05);
-  };
-  const classTokens = (el: Element) => (el.getAttribute('class') ?? '').split(/\s+/).filter(Boolean);
+  const m = ja.SuccessOverlay;
 
   // 注文の会計で出るもの (受付番号・お店に知らせる・文をコピー・UserOp/ブロックの行・Explorer の 2 リンク) を全部出す。
   async function renderFull() {
@@ -542,67 +526,49 @@ describe('SuccessOverlay: 文字のコントラスト (WCAG 2.2 AA)', () => {
         onDismiss={() => undefined}
       />,
     );
-    await screen.findByRole('button', { name: '文をコピー' });
+    await screen.findByRole('button', { name: m.notifyShopCopy });
     return { user, dialog: screen.getByRole('dialog') };
   }
 
-  it('地の上の白の文字と、bg-white/NN の欄の上の白の文字が 4.5:1 以上 (色は Tailwind のパレットから計算)', async () => {
+  it('地・文字・アイコン・ボタンの形を、何もしていないときと各ボタンの hover / focus で計算して基準以上', async () => {
     const { dialog } = await renderFull();
-    const bg = classTokens(dialog)
-      .map((token) => token.match(/^bg-([a-z]+)-(\d{2,3})$/))
-      .find(Boolean);
-    expect(bg, '地の色 (bg-<色>-<濃さ>) が見つからない').toBeTruthy();
-    const ground = rgb(bg![1], bg![2]);
-    expect(classTokens(dialog)).toContain('text-white');
-    expect(contrast(WHITE, ground)).toBeGreaterThanOrEqual(4.5);
+    const { failures, checked, boundaries } = auditAllStates(dialog);
+    expect(failures).toEqual([]);
 
-    // 文字を載せた半透明の白の欄 (Tx Hash の欄・ノンカストディの欄)。アイコンだけのボタン (完了音) は文字が無いので除く。
-    const panels = [...dialog.querySelectorAll('*')].filter(
-      (el) => classTokens(el).some((token) => /^bg-white\/\d+$/.test(token)) && el.textContent?.trim(),
-    );
-    expect(panels.length).toBeGreaterThanOrEqual(2);
-    for (const el of panels) {
-      const alpha = Number(classTokens(el).find((token) => /^bg-white\/\d+$/.test(token))!.split('/')[1]) / 100;
-      const panel = ground.map((v) => 255 * alpha + v * (1 - alpha));
-      expect(contrast(WHITE, panel), el.textContent ?? '').toBeGreaterThanOrEqual(4.5);
+    // 名前の付いた要素を、黙って飛ばさずに計算した (何もしていないとき)。
+    const base = checked.filter((c) => c.state === 'base').map((c) => c.text);
+    for (const name of [
+      m.title, m.amountLabel, '3,500 JPYC', m.orderNoLabel, 'A-001', m.timeLabel,
+      m.txHashLabel, m.userOpHashLabel, m.blockLabel, '0xaaaaaaaa…aaaaaa', '0xbbbbbbbb…bbbbbb', '12345',
+      m.explorerLink, m.merchantAddressExplorerLink, m.viewLocalHistoryLink, m.viewReceiptsLink,
+      ja.NonCustodialNotice.shortTitle, ja.NonCustodialNotice.shortBody,
+      m.sendTo.replace('{dest}', 'LINE @openpay'), m.sendByLine, m.notifyShopHint, m.notifyShopCopy,
+      m.dismiss, m.notifyShopDismissHelp, '[icon lucide-volume2]',
+    ]) {
+      expect(base, name).toContain(name);
     }
+    expect(base.some((text) => /^\d{2}:\d{2}:\d{2}$/.test(text))).toBe(true);
 
-    // 地の色を塗ったボタンは、地との境目が 3:1 以上 (非テキスト・1.4.11)。地を変えたときに、上に載るボタンを見落とさない
-    // (emerald-800 のボタンは emerald-500 の地で 3.03:1 だったが、emerald-700 の地では 1.40:1)。
-    const buttons = [...dialog.querySelectorAll('button, a')];
-    let painted = 0;
-    for (const el of buttons) {
-      const token = classTokens(el).find((t) => t === 'bg-white' || /^bg-[a-z]+-\d{2,3}$/.test(t));
-      if (!token) continue;
-      painted += 1;
-      const surface = token === 'bg-white' ? WHITE : rgb(...(token.slice(3).split('-') as [string, string]));
-      expect(contrast(surface, ground), `${token} (${el.textContent?.trim()})`).toBeGreaterThanOrEqual(3);
-    }
-    expect(painted).toBeGreaterThanOrEqual(2); // LINE で送る・閉じる
+    // コピーの案内は hover と focus のときだけ見え、そのときの地 (hover の地・欄) の上で計算されている。
+    const hint = checked.filter((c) => c.text === ja.CopyableField.copy).map((c) => c.state.split(':')[0]);
+    expect(hint).not.toContain('base');
+    expect(hint).toEqual(expect.arrayContaining(['hover', 'focus']));
+    // hover の地の上の文字 (ハッシュ・リンク・ボタン) も計算されている。
+    const hovered = checked.filter((c) => c.state.startsWith('hover:')).map((c) => c.text);
+    expect(hovered).toEqual(expect.arrayContaining(['0xaaaaaaaa…aaaaaa', m.explorerLink, m.sendByLine, m.notifyShopCopy, m.dismiss]));
+
+    // ボタンの形 (白の地・白の枠線) と地の境目を計算した: LINE で送る・文をコピー (枠線)・閉じる。
+    expect(boundaries.map((b) => b.text)).toEqual(expect.arrayContaining([m.sendByLine, m.notifyShopCopy, m.dismiss]));
   });
 
-  it('文字を透明度で薄くしない (opacity-NN・text-<色>/NN)。押せない間の disabled: は 1.4.3 の対象外なので除く', async () => {
+  it('コピーした後の「✓ コピー済み」も、欄の上と hover の地の上で基準以上', async () => {
     const { user, dialog } = await renderFull();
-    // コピーした後の「✓ コピー済み」も見る (緑の地で読めない色にしない)。
-    await user.click(screen.getByRole('button', { name: /Tx Hash をコピー/ }));
-    await screen.findByText(/✓ コピー済み/);
-
-    const faded: string[] = [];
-    for (const el of [dialog, ...dialog.querySelectorAll('*')]) {
-      for (const token of classTokens(el)) {
-        const parts = token.split(':');
-        const utility = parts.at(-1)!;
-        if (parts.slice(0, -1).includes('disabled')) continue;
-        const opacity = utility.match(/^opacity-(\d+)$/);
-        if ((opacity && opacity[1] !== '0' && opacity[1] !== '100') || /^text-[^[]+\/.+$/.test(utility)) {
-          faded.push(`${token} (${el.textContent?.trim().slice(0, 20) ?? ''})`);
-        }
-      }
-    }
-    expect(faded).toEqual([]);
-    // コピーの案内は白 (slate-500 / emerald-600 は緑の地の上で 2:1 前後)。
-    for (const hint of [screen.getByText(/✓ コピー済み/), screen.getByText('コピー')]) {
-      expect(classTokens(hint)).toContain('text-white');
-    }
+    const copyButton = screen.getByRole('button', { name: /Tx Hash をコピー/ });
+    await user.click(copyButton);
+    const copied = await screen.findByText(`✓ ${ja.CopyableField.copied}`);
+    const { failures, checked } = auditAllStates(dialog);
+    expect(failures).toEqual([]);
+    const states = checked.filter((c) => c.text === copied.textContent).map((c) => c.state.split(':')[0]);
+    expect(states).toEqual(expect.arrayContaining(['base', 'hover', 'focus']));
   });
 });
