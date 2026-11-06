@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it, vi } from 'vitest';
 import { encodeAbiParameters } from 'viem';
 import { closeRedisLuaEngine } from '../../_helpers/redisLua';
 import { h, SELLER, PAYER, FEE, OTHER, TX, UNIT, ABI, pay, nonce, orders, reservationKeys, request, prepareReceipt, success, settledStatus, beginPending, encodeEventTopics } from './agentOrderFixture';
@@ -45,6 +45,26 @@ describe('A2b stateful agentOrderRecovery (real Lua)', () => {
     }
     h.status.mockResolvedValue(settledStatus());
     expect(await (await pay.GET(request())).json()).toMatchObject({ orderRegistered: true }); expect(reservationKeys()).toEqual([]); expect(h.warn).toHaveBeenCalledWith('order.agent.legacy_unreserved', expect.anything());
+    // The in-process notify call (no bind) stores a bindingMissing order and emits the same warn a public POST would
+    // (ENABLE_ORDER_BIND_ENFORCE observation・DEPLOY_CHECKLIST §13.7 2-3/2-4).
+    expect(orders()).toEqual([expect.objectContaining({ txHash: TX, bindingMissing: true })]);
+    expect(h.warn).toHaveBeenCalledWith('order.notify.binding_missing_stored', { chainId: 80002, merchant: SELLER, txHash: TX, orderIdAgentPrefix: true });
+  });
+
+  it('legacy redelivery under ENABLE_ORDER_BIND_ENFORCE: the in-process notify refuses the bind-less order and logs binding_rejected', async () => {
+    vi.stubEnv('ENABLE_ORDER_BIND_ENFORCE', 'true');
+    await beginPending();
+    for (const key of h.db!.keys().filter((key) => key.startsWith('order:agent'))) h.db!.delete(key);
+    h.status.mockResolvedValue(settledStatus());
+    const res = await pay.GET(request());
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toMatchObject({ ok: true, orderRegistered: false, txHash: TX });
+    expect(body).not.toHaveProperty('paymentSettled'); expect(body).not.toHaveProperty('repair');
+    expect(orders()).toEqual([]);
+    expect(h.warn).toHaveBeenCalledWith('order.agent.legacy_unreserved', expect.anything());
+    expect(h.warn).toHaveBeenCalledWith('order.notify.binding_rejected', { reason: 'bind_required', enforce: true, bindPresent: false, chainId: 80002, merchant: SELLER, txHash: TX });
+    expect(h.warn.mock.calls.some(([event]) => event === 'order.notify.binding_missing_stored')).toBe(false);
   });
 
   it.each(['missing', 'wrong-emitter', 'wrong-value', 'wrong-fee', 'wrong-merchant', 'wrong-nonce', 'reverted'])('finalizer rejects %s settlement evidence despite facilitator success', async (mode) => {
