@@ -27,6 +27,7 @@ import { WrongChainSwitch } from './checkout/WrongChainSwitch';
 import { WalletBalance } from './checkout/WalletBalance';
 import { CheckoutItemList } from './checkout/CheckoutItemList';
 import { CheckoutAmountBreakdown } from './checkout/CheckoutAmountBreakdown';
+import { CheckoutHeader } from './checkout/CheckoutHeader';
 import { shopContactLabel } from '@/lib/shopContact';
 import { rememberOrderPayment, type RememberedOrderPayment } from '@/lib/orderConfirmation';
 import { findRememberedOrderPayment } from '@/lib/orderPaidLookup';
@@ -1708,51 +1709,30 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
 
   return (
     <div className="space-y-4">
-      <header className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-        <p className="text-xs uppercase tracking-wider text-slate-500">
-          {t('header')}
-        </p>
-        {/* 店名 (URL の store・お店が付けた名前)。DM で届いたリンクがどのお店のものかを示す。表示だけで、
-            受取先・金額・利用料には関与しない (受取先は下の「支払先」のアドレスが正)。誰でも好きな名前でリンクを
-            作れるので、確かめていない名前であることを下に添える (第 9 回レビュー D-1)。 */}
-        {params.storeName && (
-          <>
-            <p className="mt-1 break-words text-lg font-bold text-slate-900">{params.storeName}</p>
-            <p className="mt-0.5 text-xs text-slate-600 [word-break:auto-phrase]">{t('storeNameUnverified')}</p>
-          </>
-        )}
-        <p className="mt-1 text-base font-semibold text-slate-800">
-          {params.orderId ? t('orderHeading', { id: params.orderId }) : t('checkoutTitle')}
-        </p>
-        {params.description && (
-          <p className="mt-2 whitespace-pre-wrap text-sm text-slate-600">
-            {params.description}
-          </p>
-        )}
-        {/* 何度でも使える注文リンク (ship=ask): 払う前に、この後にすることを伝える (お名前とお届け先は自分の LINE や
-            メールで送り、OpenPay には入力しない)。送り先は完了画面にも出す。 */}
-        {notifyShop && params.ship === 'ask' && (
-          <p className="mt-2 rounded-lg bg-sky-50 px-3 py-2 text-sm text-sky-900">
-            {params.contact
+      {/* 会計の頭の部分 (見出し・店名と注記・受付番号・説明・ship=ask の案内・支払先の行・「別のチェーンで払う」)。表示だけの
+          部品で、アドレスの短縮表示・チェーン名・通貨・どの文言を出すかの判定と、「別のチェーンで払う」を出すか・押したときの処理は
+          ここで決めて渡す (第 9 回レビュー F-04)。条件と分岐は切り出し前の JSX から 1 つも変えずに写した (ship=ask の案内の
+          `a && (…)` は `a ? … : null` に)。 */}
+      <CheckoutHeader
+        storeName={params.storeName}
+        title={params.orderId ? t('orderHeading', { id: params.orderId }) : t('checkoutTitle')}
+        description={params.description}
+        // 何度でも使える注文リンク (ship=ask) の、払う前の案内。遠隔の注文 (notifyShop) のときだけ出し、送り先があれば
+        // 送り先を入れる。
+        shipAskNote={
+          notifyShop && params.ship === 'ask'
+            ? (params.contact
               ? t('shipAskNoteWithContact', { dest: shopContactLabel(params.contact) })
-              : t('shipAskNote')}
-          </p>
-        )}
-        <p className="mt-3 text-xs text-slate-500">
-          {t('payToLabel', { addr: shortAddress(params.to) })} ·{' '}
-          {requiredChain.name} · {deployment.displaySymbol} ·{' '}
-          {isStandard ? t('modeBadgeStandard') : t('modeBadgeGasless')}
-        </p>
-        {canPayOnOtherChain && (
-          <button
-            type="button"
-            onClick={payOnOtherChain}
-            className="mt-1 inline-flex min-h-11 items-center text-sm font-medium text-brand hover:text-brand-dark"
-          >
-            {t('payOnOtherChain')}
-          </button>
-        )}
-      </header>
+              : t('shipAskNote'))
+            : null
+        }
+        payToAddress={shortAddress(params.to)}
+        chainName={requiredChain.name}
+        tokenSymbol={deployment.displaySymbol}
+        modeBadge={isStandard ? t('modeBadgeStandard') : t('modeBadgeGasless')}
+        canPayOnOtherChain={canPayOnOtherChain}
+        onPayOnOtherChain={payOnOtherChain}
+      />
 
       {/* 読み直した画面: このタブで払った会計なら、注文を送る / お店に知らせる をここに出す (同じ注文をもう一度払わせない)。 */}
       {restoredNotifyData && (
