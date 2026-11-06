@@ -1807,7 +1807,9 @@ relay の支払いの行の「受け付ける」は、receipt の中で支払い
       `free_ambiguous`、ON では `bind_required` (OFF は `tests/lib/orderBindingVerify.test.ts:43-46`・ON は同じ file の
       `labels each remaining rejecting return …` の test)。
       後ろの理由は隠れて、`bind_required` に混ざる。
-    - 要求ごとに数える。断った要求は処理中の印を戻す (`releaseClaim`) ので、同じ支払いの送り直しも、そのたびに 1 件になる。
+    - 要求ごとに数える。断った要求は処理中の印を戻す (`releaseClaim`) ので、同じ支払いの送り直しも、この関所まで到達して
+      再び断られれば、そのたびに 1 件になる。関所より前で返る送り直しは数に入らない (rate limit の 429・`app/api/order/notify/route.ts:378-386`、
+      すでにある印への 409 / 200・`:453-459`)。
     - OFF なら受け付けていた数の目安は、点灯前の `binding_missing_stored` の件数 (保存 1 回につき 1 回) で取る (3 の 2)。
   - `bind_malformed`: `bind` の形が壊れている (`:61`)。
   - `order_malformed`: `bind` はあるが、注文の項目を正規化できない (`:72-78`)。
@@ -1835,7 +1837,9 @@ relay の支払いの行の「受け付ける」は、receipt の中で支払い
   - request log の `/api/order/notify` の 429 は、公開の HTTP の notify の 429 の数 (warn は間引くので、総数には使わない)。
   - agent-order/pay の中の notify の呼び出し (2-4) は、request log に `/api/order/notify` として出ない。中で 429 になっても、
     外側は `/api/agent-order/pay` の HTTP 200・`orderRegistered:false` (`app/api/agent-order/pay/route.ts:259-261`・
-    `:272-280`)。この 429 も warn `order.notify.rate_limited` には入る (同じ module・同じ間引きの状態)。
+    `:272-280`)。この 429 も warn `order.notify.rate_limited` と同じ処理を通る。ただし間引きの状態 (`rateLimitedWarn`・
+    `app/api/order/notify/route.ts:132`) は、実行中の module instance ごと。公開の route と内部の呼び出しで共有される保証はない
+    (2 つの route は `maxDuration` も違い、別の function として動くことがある)。
   - 枠ごとの 429 は、その `limiter` の warn の件数と `suppressed` の合計を目安にする (どちらの枠に当たっているか・おおよその
     比)。`suppressed` が期間の境目をまたぎ、最後の分が出ないので、期間の数の下限とも上限とも言えない。
 - 残る限界:
@@ -1962,7 +1966,9 @@ relay の支払いの行の「受け付ける」は、receipt の中で支払い
      ではない。OFF でも後ろの理由で断られた要求と、同じ支払いの送り直しも入る (「ログで数える 3 つの warn」の注意)。前は
      受け付けていた数は、基準の `binding_missing_stored` の件数と比べて見る。
    - ほかの `reason` (壊れた `bind`・合わない `bind`・標準の送金に付けた `bind`・receipt の中で支払いが 1 つに対応づかない) は
-     OFF の間も出るので、基準と比べる。ON では、`bind` の無い通知のこれらの理由は `bind_required` に隠れる。
+     OFF の間も出るので、基準と比べる。ON で `bind` の無い relay の通知について `bind_required` に隠れるのは、関所より後ろの
+     理由 (`settlement_unmatched`・`settlement_transfer_unmatched`・`free_ambiguous`・`free_unmatched`・`below_dust`) だけ。
+     `bind_malformed`・`bind_on_standard` は関所より前で断るので隠れない。
    - `bind_required` が出たら、`bind` の無い relay 通知を送る相手 (1 の 3 つ) がいる (その支払いが OFF で受け付けられたかは
      別)。warn の `txHash` で、どの支払いか分かる。お客様から「払ったのに注文が出ない」と申し出があれば、お店がその支払いの
      Tx を見て手で受ける。
