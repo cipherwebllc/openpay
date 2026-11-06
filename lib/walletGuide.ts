@@ -13,7 +13,8 @@
 //   - お店の受け取り用の節を足す (/create の受取先の欄が空のとき「ウォレットをお持ちでない方へ」からこの節 (#store-wallet) へ来る)。
 //     2026-10-01 本番 Polygon で UPBOND のアドレスへの受け取りを確認 (支払い 10 JPYC → 8 JPYC・利用料 2 JPYC)・送るときは
 //     POL (ガス代) が要る (user 実機)・鍵の書き出しや UPBOND が止まったときの戻し方は未確認 → 売上は普段のウォレットへ移すよう書く・
-//     Polygon 以外のチェーンを UPBOND の画面で見られ・送れるかは未確認 → 受け取りは Polygon を選ぶよう書く。
+//     Polygon 以外のチェーンは試していないが、受け取るチェーンは指定しない (「Polygon を選んでください」は Polygon 以外は
+//     ダメと読める・試したのが Polygon だっただけ・2026-11-06 user)。ガス代の例として「Polygon なら POL」だけ書く。
 //   - お客様の支払い用の一覧 (wallets) にも、使い方の補足 (howTo) をつけてマイナウォレット・HashPort Wallet の後ろに足す
 //     (user 最終裁定)。2026-11-06 user 実機: Polygon のガス代不要の支払い (EIP-3009・UPBOND のアドレスが authorizer) が通った
 //     (100 JPYC → お店 98・利用料 2)。つなぎ方は WalletConnect の QR の下の「Copy link」を UPBOND Wallet
@@ -23,7 +24,7 @@
 //     よくない？」)。@upbond/sdk の README は data 付きの tx (ERC-20 の送金) を未対応とするが、それは SDK をサイトに埋め込む場合の
 //     話で、WalletConnect でつないだ UPBOND Wallet が受けるかは確かめていない。
 // ⚠️ 料率・チェーン名・「無料」/free は書かない (tests/lib/walletGuide.test.ts が検査する)。例外は UPBOND Wallet のカードの本文と
-// storeNote の「Polygon」だけ (UPBOND で確かめた事実で、OpenPay の対応チェーンの一覧ではない・同じ test が範囲を縛る)。
+// storeNote のガス代の例の「Polygon」だけ (UPBOND で確かめた事実で、OpenPay の対応チェーンの一覧ではない・同じ test が範囲を縛る)。
 
 import type { Metadata } from 'next';
 import { guidePageMetadata } from '@/lib/guideMetadata';
@@ -177,7 +178,7 @@ const JA: WalletGuideContent = {
   storeBody:
     'お店の受け取り用には、アプリを入れずにブラウザで使える UPBOND Wallet が手軽です。LINE・Google のアカウントやパスキーでログインでき、JPYC EX とつないで JPYC の発行・償還もできます。',
   storeNote:
-    '受け取るチェーンは Polygon を選んでください。売上がたまったら、マイナウォレットなど普段のウォレットへ移してください (UPBOND Wallet から送るときは、ガス代の POL が要ります)。',
+    '売上がたまったら、マイナウォレットなど普段のウォレットへ移してください (UPBOND Wallet から送るときは、ガス代 (Polygon なら POL) が要ります)。',
   storeLink: { href: UPBOND_WALLET_URL, label: 'UPBOND Wallet を開く' },
 };
 
@@ -270,7 +271,7 @@ const EN: WalletGuideContent = {
   storeBody:
     'For receiving payments at your shop, UPBOND Wallet is an easy option: it runs in your browser with no app to install. You can sign in with a LINE or Google account or a passkey, and connect it to JPYC EX to issue and redeem JPYC.',
   storeNote:
-    'Choose Polygon as the receiving chain. Once sales build up, move them to the wallet you use day to day, such as MynaWallet (sending from UPBOND Wallet requires POL for gas).',
+    'Once sales build up, move them to the wallet you use day to day, such as MynaWallet (sending from UPBOND Wallet requires gas, such as POL on Polygon).',
   storeLink: { href: UPBOND_WALLET_URL, label: 'Open UPBOND Wallet' },
 };
 
