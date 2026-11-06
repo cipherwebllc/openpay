@@ -47,8 +47,51 @@ jobs:
       - name: Check installed packages for install-time scripts and rebuild the allowlisted ones
         run: node scripts/installed-scripts-gate.mjs --rebuild node_modules
 
+      # Ubuntu のパッケージ (.deb) を GitHub の cache から戻し、ミラーから取り直さない。2026-11-05〜06 の e2e 120 run で、
+      # azure.archive.ubuntu.com からの .deb の取得が約 65 kB/s に落ち、下の install が job の上限まで止まって cancel
+      # された回が 7 回あった (この job 5・e2e-prodflags 2)。パッケージの一覧 (apt-get update) は同じミラーから速いまま
+      # (12.8 MB を 1 秒) で、遅いのは .deb の取得だけ。遅さは 30 分続いたので、同じ job でやり直しても速くならない。
+      # cache の key は「Playwright の版・job 名・.deb の一覧の hash」。戻すときは一覧が前もって分からないので、
+      # 版と job 名の prefix で一番新しい cache を戻す。入れ終えたら、今の版で取れなくなった古い .deb を
+      # apt-get autoclean で消し、残った一覧が戻した cache と違えば (Ubuntu の更新を取った等) 新しい key で保存する。
+      # cache に入れるのは .deb だけ (partial/ と lock は apt のもの)。置き場所は /var/cache の下で、持ち主は runner の
+      # 利用者 (cache の restore/save が読み書きする)。$HOME の下だと apt の取得用の利用者 _apt が入れず、取得が root で
+      # 走っていた (W: Download is performed unsandboxed as root・2026-11-06 の CI)。
+      - name: Point apt at a cacheable package directory
+        id: apt-cache
+        run: |
+          sudo install -d -o "$(id -u)" -g "$(id -g)" /var/cache/openpay-apt-archives
+          mkdir -p /var/cache/openpay-apt-archives/partial
+          printf 'Dir::Cache::Archives "%s";\nAPT::Keep-Downloaded-Packages "true";\n' /var/cache/openpay-apt-archives | sudo tee /etc/apt/apt.conf.d/99-openpay-apt-archives
+          echo "prefix=apt-ubuntu-24.04-playwright-$(./node_modules/.bin/playwright --version | awk '{print $2}')-job-playwright-" >> "$GITHUB_OUTPUT"
+
+      - name: Restore apt packages
+        id: apt-restore
+        uses: actions/cache/restore@v4
+        with:
+          path: /var/cache/openpay-apt-archives/*.deb
+          # この key では保存しない (完全一致はさせず、下の restore-keys の prefix で一番新しいものを戻す)。
+          key: ${{ steps.apt-cache.outputs.prefix }}restore
+          restore-keys: ${{ steps.apt-cache.outputs.prefix }}
+
       - name: Install Playwright browsers
         run: ./node_modules/.bin/playwright install --with-deps chromium webkit
+
+      - name: Key the apt packages by their file list
+        id: apt-list
+        env:
+          APT_CACHE_PREFIX: ${{ steps.apt-cache.outputs.prefix }}
+        run: |
+          sudo apt-get autoclean
+          echo "key=${APT_CACHE_PREFIX}$(find /var/cache/openpay-apt-archives -maxdepth 1 -name '*.deb' -printf '%f\n' | sort | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+
+      # 入れ終えた時点で保存する (後の e2e が落ちても、取り終えた .deb は次の run で使える)。
+      - name: Save apt packages
+        if: steps.apt-list.outputs.key != steps.apt-restore.outputs.cache-matched-key
+        uses: actions/cache/save@v4
+        with:
+          path: /var/cache/openpay-apt-archives/*.deb
+          key: ${{ steps.apt-list.outputs.key }}
 
       - name: Build
         run: npm run build
@@ -89,8 +132,40 @@ jobs:
       - name: Check installed packages for install-time scripts and rebuild the allowlisted ones
         run: node scripts/installed-scripts-gate.mjs --rebuild node_modules
 
+      # playwright job と同じ理由・同じ作り方で、Ubuntu のパッケージ (.deb) を cache から戻す (key の job 名で分ける)。
+      - name: Point apt at a cacheable package directory
+        id: apt-cache
+        run: |
+          sudo install -d -o "$(id -u)" -g "$(id -g)" /var/cache/openpay-apt-archives
+          mkdir -p /var/cache/openpay-apt-archives/partial
+          printf 'Dir::Cache::Archives "%s";\nAPT::Keep-Downloaded-Packages "true";\n' /var/cache/openpay-apt-archives | sudo tee /etc/apt/apt.conf.d/99-openpay-apt-archives
+          echo "prefix=apt-ubuntu-24.04-playwright-$(./node_modules/.bin/playwright --version | awk '{print $2}')-job-e2e-prodflags-" >> "$GITHUB_OUTPUT"
+
+      - name: Restore apt packages
+        id: apt-restore
+        uses: actions/cache/restore@v4
+        with:
+          path: /var/cache/openpay-apt-archives/*.deb
+          key: ${{ steps.apt-cache.outputs.prefix }}restore
+          restore-keys: ${{ steps.apt-cache.outputs.prefix }}
+
       - name: Install Chromium
         run: ./node_modules/.bin/playwright install --with-deps chromium
+
+      - name: Key the apt packages by their file list
+        id: apt-list
+        env:
+          APT_CACHE_PREFIX: ${{ steps.apt-cache.outputs.prefix }}
+        run: |
+          sudo apt-get autoclean
+          echo "key=${APT_CACHE_PREFIX}$(find /var/cache/openpay-apt-archives -maxdepth 1 -name '*.deb' -printf '%f\n' | sort | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+
+      - name: Save apt packages
+        if: steps.apt-list.outputs.key != steps.apt-restore.outputs.cache-matched-key
+        uses: actions/cache/save@v4
+        with:
+          path: /var/cache/openpay-apt-archives/*.deb
+          key: ${{ steps.apt-list.outputs.key }}
 
       - name: Load public production flags (testnet fixtures)
         # One vector supplies BOTH the build and the server/test process.
