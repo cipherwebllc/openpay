@@ -30,6 +30,12 @@
 //   relay は relay.data.success・通常決済は standard.data)。だから今の経路の data が無い・成功でない状態では枠そのものが出ず、
 //   経路の判定が立っている行で data の側だけを外せる状態が無い (その経路の data が無いときの「枠を出さない」は下の 2 状態で固定)。
 // - 移動の案内の文言の `redirectIn !== null`: null は `> 0` でも偽になるので、外しても振る舞いは同じ (型の検査だけが止める)。
+// - 受付番号の行の値の `(束縛 ?? 控え)?.orderId ?? params.orderId` の `??` (条件の `||` との違い): 2 つが別の値になるのは、選ばれた
+//   束縛か受注の控えの orderId が空文字で、読み直しでなく、URL の orderId が空でないときだけ (`??` は空の行・`||` は URL の番号)。
+//   この組み合わせは作れない: 束縛は lib/orderBind の canonicalOrder が作り、orderId が空 (trim・正規化の後も) なら
+//   order_binding_mismatch で throw する (CheckoutForm は束縛を立てずに止める)。URL の orderId が空でなければ束縛の orderId はそれと
+//   同じ値。受注の控えは lib/orderDeliveryContext の matchesOrderDeliveryContext が、URL の orderId があるときは控えの orderId が
+//   それと同じものだけを選ぶ (空の控えは選ばれない)。だから `??` を `||` にしても、作れる状態では振る舞いは同じ。
 //
 // mock の作法は tests/components/CheckoutHeader.test.tsx に合わせる (hook は mockHook で ReturnType に型づけ)。
 
@@ -111,9 +117,15 @@ vi.mock('@/lib/successChime', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/successChime')>();
   return { ...actual, primeChimeAudio: vi.fn() };
 });
-// 電子レシートに渡す候補 (candidateIds) を見るため、実物を包んだ spy にする (描画は実物のまま)。
+// 電子レシートに渡す候補 (candidateIds) を見るため、実物を包んだ spy にする (描画は実物のまま)。期待する DOM を作るときに
+// 単独で描くのは包む前の実物 (realReceipt.Component) にして、spy の呼び出しは CheckoutForm の中の描画だけにする (期待の DOM を
+// 作った後に候補を読んでも、CheckoutForm が渡した値を読む・#1025 の Codex レビュー)。
+const realReceipt = vi.hoisted(() => ({
+  Component: null as null | typeof import('@/components/PayerReceiptCompletion').PayerReceiptCompletion,
+}));
 vi.mock('@/components/PayerReceiptCompletion', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/components/PayerReceiptCompletion')>();
+  realReceipt.Component = actual.PayerReceiptCompletion;
   return { PayerReceiptCompletion: vi.fn(actual.PayerReceiptCompletion) };
 });
 
@@ -509,11 +521,18 @@ function completionArea(container: HTMLElement, c: Catalog): Area {
   return readArea(container, c)!;
 }
 
-/** 電子レシートに最後に渡した候補 (CheckoutForm の描画の中の呼び出し)。 */
-function lastReceiptIds(): unknown {
+/**
+ * 電子レシートに最後に渡した候補 (CheckoutForm の描画の中の呼び出し・期待の DOM の単独の描画は spy を通らない)。まだ呼ばれて
+ * いなければ null (移動を呼んだ時点の記録用・throw しない)。
+ */
+function readReceiptIds(): unknown {
   const calls = vi.mocked(PayerReceiptCompletion).mock.calls;
-  expect(calls.length).toBeGreaterThan(0);
-  return calls[calls.length - 1][0].candidateIds;
+  return calls.length === 0 ? null : calls[calls.length - 1][0].candidateIds;
+}
+
+function lastReceiptIds(): unknown {
+  expect(vi.mocked(PayerReceiptCompletion).mock.calls.length).toBeGreaterThan(0);
+  return readReceiptIds();
 }
 
 // ---- 期待する DOM ------------------------------------------------------------------------------------------------
@@ -614,10 +633,12 @@ function expectedArea(c: Catalog, want: Want): Area {
   if (want.statusHref !== undefined) {
     children.push({ tag: 'a', attrs: { class: STATUS_LINK_CLASS, href: want.statusHref }, children: [tx(c, k('viewOrderStatus'))] });
   }
+  // 包む前の実物で描く (spy の呼び出しを増やさない・上の realReceipt)。
+  const RealPayerReceiptCompletion = realReceipt.Component!;
   children.push({
     tag: 'div',
     attrs: { class: 'mt-4' },
-    children: standaloneNodes(c, <PayerReceiptCompletion candidateIds={want.receiptIds} />),
+    children: standaloneNodes(c, <RealPayerReceiptCompletion candidateIds={want.receiptIds} />),
   });
   if (want.redirect !== undefined) {
     children.push({
@@ -637,10 +658,11 @@ function expectedArea(c: Catalog, want: Want): Area {
   return { prev: want.prev ?? AMOUNT_SECTION, nodes: [{ tag: 'div', attrs: { class: FRAME_CLASS }, children }], next: POWERED_BY };
 }
 
-/** 枠を描いた CheckoutForm と比べる (電子レシートの候補を先に読む: 期待の DOM を描くと spy の呼び出しが増える)。 */
+/** 枠を描いた CheckoutForm と比べる (枠の DOM と電子レシートの候補を、期待の DOM を作る前に読む)。 */
 function expectArea(container: HTMLElement, c: Catalog, want: Want) {
   const actual = completionArea(container, c);
-  expect(lastReceiptIds()).toStrictEqual(want.receiptIds);
+  const receiptIds = lastReceiptIds();
+  expect(receiptIds).toStrictEqual(want.receiptIds);
   expect(actual).toEqual(expectedArea(c, want));
 }
 
@@ -1160,9 +1182,10 @@ describe('CheckoutForm — 支払い完了の枠 (CheckoutCompletion の charact
 
     it('success_url のカウントダウン 3 → 2 → 1 → 0 (移動を呼ぶ時点) → null: 案内の行とテキストノードは同じ DOM のまま', async () => {
       vi.useFakeTimers();
-      const atAssign: Array<Area | null> = [];
+      // 移動を呼んだ時点 (redirectIn が 0 の描画) の枠の DOM と電子レシートの候補。
+      const atAssign: Array<{ area: Area | null; receiptIds: unknown }> = [];
       let container!: HTMLElement;
-      const assign = stubAssign(() => atAssign.push(readArea(container, c)));
+      const assign = stubAssign(() => atAssign.push({ area: readArea(container, c), receiptIds: readReceiptIds() }));
       const ctx = await renderCase(c, {
         params: () => jpycParams({ mode: 'standard', successUrl: SUCCESS_URL }),
         run: async (x) => submitStandardThenDone(x),
@@ -1201,10 +1224,14 @@ describe('CheckoutForm — 支払い完了の枠 (CheckoutCompletion の charact
       expect(assign).toHaveBeenCalledWith(
         `${SUCCESS_URL}?tx_hash=${STANDARD_DATA.merchantTxHash}&fee_tx_hash=${STANDARD_DATA.feeTxHash}&block=123&chain=polygon&token=jpyc&mode=standard`,
       );
+      // 移動を呼んだ後は redirectIn が null (同じ文言のまま)。枠の DOM と電子レシートの候補は、期待の DOM を作る前に読む。
+      const afterAssign = completionArea(container, c);
+      const receiptIdsAfterAssign = lastReceiptIds();
       expect(atAssign).toHaveLength(1);
-      expect(atAssign[0]).toEqual(expectedArea(c, want('now')));
-      // 移動を呼んだ後は redirectIn が null (同じ文言のまま)。
-      expectArea(container, c, want('now'));
+      expect(atAssign[0].receiptIds).toStrictEqual(want('now').receiptIds);
+      expect(receiptIdsAfterAssign).toStrictEqual(want('now').receiptIds);
+      expect(atAssign[0].area).toEqual(expectedArea(c, want('now')));
+      expect(afterAssign).toEqual(expectedArea(c, want('now')));
       expect(frameEl(container, c)).toBe(frame);
       expectSameNodes(Array.from(frame.children), children);
       expectSameNodes(Array.from(redirectBox.querySelector('p')!.childNodes), redirectTexts);
