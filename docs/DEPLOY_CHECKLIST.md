@@ -1889,9 +1889,12 @@ flag ON + forwarder/JPYC 設定済の Amoy (80002) で 1 周する。route テ�
     性質)。どちらの間も、SDK / MCP の買い手は `catalog_accept_mismatch` で支払わない。
   - 量: 合わない掲載 1 件につき最大 24 件/日 (毎時の再検証)。alert (`ALERT_WEBHOOK_URL`) は従来どおり `violations > 0` で鳴る
     (文面に不一致の内訳は無いので warn を見る)。止める flag は無い (やめるなら revert = #958 の観測に戻る)。
-  - #958 の観測の結果 (強制に進んだ根拠): deploy (2026-10-30 09:06 UTC) から 2026-11-05 00:30 UTC まで、本番の Vercel
-    ログで `x402.reverify.observe_gate_mismatch` も `gate_mismatch` も 0 件。毎時の再検証は動いていた (公開の 11 件・
-    うち外部 4 件の `verifiedAt` が直近の毎時の run)。merge の前に、deploy から 7 日 (2026-11-06 09:06 UTC) までを見直す。
+  - #958 の観測の結果 (強制に進んだ根拠): deploy (2026-10-30 09:06 UTC) から 7 日 (2026-11-06 09:06 UTC) まで、本番の
+    Vercel ログで `gate_mismatch` を含むもの (`x402.reverify.observe_gate_mismatch` を含む) は 0 件・`reverify` を含む
+    warn / error も 0 件 (同じ期間に、ほかの経路の warn 47 件・error 12 件は読めている = ログ自体は残っている)。毎時の
+    再検証は動いていた: 期間中の post-deploy verify 76 回 (push 69・schedule 7) がすべて成功 (`/api/cron/reverify-status` の
+    `lastOkAt` が 3 時間以内でなければ失敗する検査を含む)・2026-11-06 09:41 UTC 時点で公開の 11 件 (うち外部 4 件) の
+    `verifiedAt` が直近の毎時の run (09:00 UTC)。Sentry は API の権限が無く読めていない (Vercel のログで代えた)。
     観測の集計 (`observeChecked` / `observeMismatch`) は cron の応答と info から外した。
 
 ### §14.6 既知の前提 / 制約 (accepted)
