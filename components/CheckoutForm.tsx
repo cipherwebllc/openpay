@@ -10,12 +10,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
-import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
 import { formatUnits, type Address } from 'viem';
 import { useAccount } from 'wagmi';
 import { ConnectButton } from './ConnectButton';
-import { ResultRow } from './ResultRow';
 import { SmartAccountFallbackBanner } from './SmartAccountFallbackBanner';
 import { RelayFallbackBanner } from './RelayFallbackBanner';
 import { isRemoteOrderCheckout, NotifyShopButton, type NotifyShopData } from './NotifyShopButton';
@@ -28,6 +26,7 @@ import { WalletBalance } from './checkout/WalletBalance';
 import { CheckoutItemList } from './checkout/CheckoutItemList';
 import { CheckoutAmountBreakdown } from './checkout/CheckoutAmountBreakdown';
 import { CheckoutHeader } from './checkout/CheckoutHeader';
+import { CheckoutCompletion } from './checkout/CheckoutCompletion';
 import { shopContactLabel } from '@/lib/shopContact';
 import { rememberOrderPayment, type RememberedOrderPayment } from '@/lib/orderConfirmation';
 import { findRememberedOrderPayment } from '@/lib/orderPaidLookup';
@@ -36,7 +35,6 @@ import {
   type PaymentSuccessOverlayPayload,
 } from './PaymentSuccessOverlay';
 import type { SignReassuranceProps } from './SignReassurance';
-import { PayerReceiptCompletion } from './PayerReceiptCompletion';
 import { useBatchPayment } from '@/hooks/useBatchPayment';
 import { useStandardPayment } from '@/hooks/useStandardPayment';
 import { useSmartAccount } from '@/hooks/useSmartAccount';
@@ -2116,122 +2114,66 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
         </p>
       )}
 
+      {/* 支払い完了の枠 (見出し・結果の行・受付番号・お店に知らせる・注文状況を見る・電子レシート・success_url への移動の
+          案内・ホームへ戻る)。表示だけの部品で、経路ごとにどの行を出すか・受付番号の出どころ・リンクと移動の案内を出すかと
+          文言・ホームへ戻るを出すかと、押したときの処理はここで決めて、出すなら値・出さないなら null で渡す (第 9 回レビュー
+          F-04)。条件と分岐は切り出し前の JSX から 1 つも変えずに写した (`a && (…)` は `a ? 値 : null` に)。値は枠を出すときだけ
+          (このガードの内側で) 作る。 */}
       {completed && (gasless.data || standard.data || relay.data) && (
-        <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
-          <p className="font-semibold">{t('successTitle')}</p>
-          <p className="mt-1 text-xs">{t('successBody')}</p>
-          <dl className="mt-3 space-y-1 text-xs">
-            {!isStandard && !useRelay && gasless.data && (
-              <>
-                <ResultRow
-                  label={t('successUserOp')}
-                  value={gasless.data.userOpHash}
-                  copyable
-                />
-                <ResultRow
-                  label={t('successTx')}
-                  value={gasless.data.txHash}
-                  copyable
-                />
-                <ResultRow
-                  label={t('successBlock')}
-                  value={gasless.data.blockNumber.toString()}
-                />
-              </>
-            )}
-            {/* relay は userOp/block を持たないため Tx Hash のみ表示 (Explorer は overlay 側)。 */}
-            {useRelay && relay.data?.success && relay.data.txHash && (
-              <ResultRow
-                label={t('successTx')}
-                value={relay.data.txHash}
-                copyable
-              />
-            )}
-            {isStandard && standard.data && (
-              <>
-                <ResultRow
-                  label={t('standardMerchantTxLabel')}
-                  value={standard.data.merchantTxHash}
-                  copyable
-                />
-                {standard.data.feeTxHash && (
-                  <ResultRow
-                    label={t('standardFeeTxLabel')}
-                    value={standard.data.feeTxHash}
-                    copyable
-                  />
-                )}
-                <ResultRow
-                  label={t('successBlock')}
-                  value={standard.data.blockNumber.toString()}
-                />
-              </>
-            )}
-            {((boundOrderRef.current ?? matchingDelivery?.order)?.orderId || (!restoredCheckoutCompletion && params.orderId)) && (
-              <ResultRow label={t('orderIdLabel')} value={(boundOrderRef.current ?? matchingDelivery?.order)?.orderId ?? params.orderId!} />
-            )}
-          </dl>
-
-          {/* 遠隔の注文: 大きな完了画面を閉じた後も、注文を送る / お店に知らせるボタンを残す。 */}
-          {notifyData && (
-            <div className="mt-4">
-              <NotifyShopButton {...notifyData} tone="panel" />
-            </div>
-          )}
-
-          {/* お渡し準備完了通知 (flag ENABLE_ORDER_PICKUP): 顧客が注文状況を追えるリンク。
-              click は user gesture ＝ ここで AudioContext を解錠 (iOS 自動再生対策)。flag OFF / 非
-              mobile-order (webhook 無) では statusToken が null ゆえ非表示。 */}
-          {env.enableOrderPickup && statusToken && !orderNotifyTooOld && (
-            <Link
-              href={`/${locale}/order/status?t=${statusToken}`}
-              prefetch={false}
-              onClick={() => primeChimeAudio()}
-              className="mt-4 flex items-center justify-center rounded-xl border border-brand/30 bg-brand/5 px-4 py-3 text-sm font-semibold text-brand transition hover:bg-brand/10"
-            >
-              {t('viewOrderStatus')}
-            </Link>
-          )}
-
-          {/* 顧客向け電子レシート (支払い控え) を完了画面にも埋め込む。 */}
-          <div className="mt-4">
-            <PayerReceiptCompletion
-              candidateIds={[
-                standard.data?.merchantTxHash,
-                gasless.data?.txHash,
-                gasless.data?.userOpHash,
-                relay.data?.txHash ?? undefined,
-              ]}
-            />
-          </div>
-
-          {!restoredCheckoutCompletion && params.successUrl && !orderNotifyTooOld &&
-            (!boundOrderRef.current || boundNotifyAcknowledged) && (
-            <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <p className="text-xs">
-                {redirectIn !== null && redirectIn > 0
-                  ? t('redirectingIn', { sec: redirectIn })
-                  : t('redirectingNow')}
-              </p>
-              <button
-                type="button"
-                onClick={doRedirect}
-                className="rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700"
-              >
-                {t('redirectNowButton')}
-              </button>
-            </div>
-          )}
-          {(restoredCheckoutCompletion || !params.successUrl) && (
-            <button
-              type="button"
-              onClick={() => router.push('/')}
-              className="mt-4 inline-block rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700"
-            >
-              {t('returnHomeButton')}
-            </button>
-          )}
-        </div>
+        <CheckoutCompletion
+          gasless={
+            !isStandard && !useRelay && gasless.data
+              ? {
+                userOpHash: gasless.data.userOpHash,
+                txHash: gasless.data.txHash,
+                blockNumber: gasless.data.blockNumber.toString(),
+              }
+              : null
+          }
+          // relay は userOp/block を持たないため Tx Hash のみ表示 (Explorer は overlay 側)。
+          relayTxHash={useRelay && relay.data?.success && relay.data.txHash ? relay.data.txHash : null}
+          standard={
+            isStandard && standard.data
+              ? {
+                merchantTxHash: standard.data.merchantTxHash,
+                feeTxHash: standard.data.feeTxHash ? standard.data.feeTxHash : null,
+                blockNumber: standard.data.blockNumber.toString(),
+              }
+              : null
+          }
+          orderId={
+            (boundOrderRef.current ?? matchingDelivery?.order)?.orderId || (!restoredCheckoutCompletion && params.orderId)
+              ? (boundOrderRef.current ?? matchingDelivery?.order)?.orderId ?? params.orderId!
+              : null
+          }
+          notifyData={notifyData}
+          // お渡し準備完了通知 (flag ENABLE_ORDER_PICKUP): 顧客が注文状況を追えるリンク。flag OFF / 非 mobile-order
+          // (webhook 無) では statusToken が null ゆえ非表示。click は user gesture ＝ ここで AudioContext を解錠
+          // (iOS 自動再生対策)。
+          orderStatusHref={
+            env.enableOrderPickup && statusToken && !orderNotifyTooOld
+              ? `/${locale}/order/status?t=${statusToken}`
+              : null
+          }
+          onOrderStatusClick={() => primeChimeAudio()}
+          receiptCandidateIds={[
+            standard.data?.merchantTxHash,
+            gasless.data?.txHash,
+            gasless.data?.userOpHash,
+            relay.data?.txHash ?? undefined,
+          ]}
+          redirectNotice={
+            !restoredCheckoutCompletion && params.successUrl && !orderNotifyTooOld &&
+              (!boundOrderRef.current || boundNotifyAcknowledged)
+              ? (redirectIn !== null && redirectIn > 0
+                ? t('redirectingIn', { sec: redirectIn })
+                : t('redirectingNow'))
+              : null
+          }
+          onRedirectNow={doRedirect}
+          showReturnHome={restoredCheckoutCompletion || !params.successUrl}
+          onReturnHome={() => router.push('/')}
+        />
       )}
 
       {/* relay pending: broadcast 済だが未確定。standard へ fallback させず「確認待ち」を表示
