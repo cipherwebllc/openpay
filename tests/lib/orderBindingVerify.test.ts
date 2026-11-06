@@ -76,4 +76,8 @@ it('labels each remaining rejecting return without changing which inputs are rej
   expect(check(free, free.logs, absent)).toMatchObject({ ok: true, kind: 'relay', bindingMissing: true });
   vi.stubEnv('ENABLE_ORDER_BIND_ENFORCE', 'true');
   expect(check(free, free.logs, absent)).toEqual({ ok: false, reason: 'bind_required' });
+  // The bind gate runs before receipt attribution and the dust floor, so bind_required also absorbs requests that are
+  // rejected for a later reason while OFF (DEPLOY_CHECKLIST §13.7): this receipt is free_ambiguous while OFF (fence above).
+  const { bind: _recoverBind, ...recoverAbsent } = recover.body;
+  expect(check(recover, recover.logs.slice(0, -1), recoverAbsent)).toEqual({ ok: false, reason: 'bind_required' });
 });

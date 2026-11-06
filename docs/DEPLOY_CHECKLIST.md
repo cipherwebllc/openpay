@@ -1800,7 +1800,15 @@ relay の支払いの行の「受け付ける」は、receipt の中で支払い
 
 - `reason` は、`verifyOrderBinding` が断った位置ごとの名前 (`lib/order/orderBindingVerify.ts:27-41`)。応答には出さない。
   判定の順番と条件は変えていないので、1 つの条件にまとまっている理由は分けられない。
-  - `bind_required`: ON で、relay の支払いに `bind` が無い (`:68`)。**ON で新しく断った件数はこれ**。OFF では出ない。
+  - `bind_required`: ON で、relay の証拠がある支払いの通知に `bind` が無い (`:68`)。OFF では出ない。この数は「`bind` が
+    無いことの関所で断った要求の数」。新しく壊れた支払いの数でも、OFF なら受け付けていた要求の数でもない。
+    - この関所は、受取の照合と 1 JPYC 未満の確認 (`:85-107`・`:81-82`) より前にある。なので、OFF でも後ろの理由で断られる
+      要求も、ON では `bind_required` に入る。例: `bind` が無く forwarder の `Settled` も無い recover の receipt は、OFF では
+      `free_ambiguous`、ON では `bind_required` (OFF は `tests/lib/orderBindingVerify.test.ts:43-46`・ON は同じ file の
+      `labels each remaining rejecting return …` の test)。
+      後ろの理由は隠れて、`bind_required` に混ざる。
+    - 要求ごとに数える。断った要求は処理中の印を戻す (`releaseClaim`) ので、同じ支払いの送り直しも、そのたびに 1 件になる。
+    - OFF なら受け付けていた数の目安は、点灯前の `binding_missing_stored` の件数 (保存 1 回につき 1 回) で取る (3 の 2)。
   - `bind_malformed`: `bind` の形が壊れている (`:61`)。
   - `order_malformed`: `bind` はあるが、注文の項目を正規化できない (`:72-78`)。
   - `bind_on_standard`: relay の証拠が無い支払い (標準の送金) に `bind` が付いている (`:67`)。
@@ -1819,12 +1827,17 @@ relay の支払いの行の「受け付ける」は、receipt の中で支払い
 - `rate_limited` を間引くのは、warn が 1 回ごとに Sentry の event になるため (`lib/logger.ts:73-75`)。拒否のたびに書くと、
   無認証のこの endpoint では、攻撃者が Sentry の event の量を決められる (`lib/agent/activityRateLimit.ts` と同じ型)。
   - 枠ごとに数えるので、片方の枠の拒否が、もう片方の枠の拒否を隠さない。
-  - `suppressed` は、同じプロセスで前の warn の後に書かなかった、同じ枠の 429 の数。
+  - `suppressed` は、同じプロセスで前の warn を書いてから、同じ枠で書かなかった 429 の累積 (`:137-147`)。見ている期間の
+    数ではない。期間の最初の warn には、期間より前に書かなかった分が入りうる。最後の warn の後に書かなかった分は、次の
+    warn まで出ない (次の warn の前にプロセスが終われば、どこにも出ない)。
 - 数え方:
-  - `binding_rejected` と `binding_missing_stored` は、warn の件数がそのまま数になる。
-  - 429 の総数は、request log の `/api/order/notify` の 429 で数える (warn は間引くので総数にならない)。
-  - 枠ごとの 429 の内訳は、その `limiter` の warn の件数と `suppressed` の合計。これは下限。プロセスごとに、最後の warn の
-    後に間引いた 429 は、次の warn を書く前にそのプロセスが終わると数に入らない。
+  - `binding_rejected` と `binding_missing_stored` は、warn の件数がそのまま数になる (`bind_required` の数の意味は上の注意)。
+  - request log の `/api/order/notify` の 429 は、公開の HTTP の notify の 429 の数 (warn は間引くので、総数には使わない)。
+  - agent-order/pay の中の notify の呼び出し (2-4) は、request log に `/api/order/notify` として出ない。中で 429 になっても、
+    外側は `/api/agent-order/pay` の HTTP 200・`orderRegistered:false` (`app/api/agent-order/pay/route.ts:259-261`・
+    `:272-280`)。この 429 も warn `order.notify.rate_limited` には入る (同じ module・同じ間引きの状態)。
+  - 枠ごとの 429 は、その `limiter` の warn の件数と `suppressed` の合計を目安にする (どちらの枠に当たっているか・おおよその
+    比)。`suppressed` が期間の境目をまたぎ、最後の分が出ないので、期間の数の下限とも上限とも言えない。
 - 残る限界:
   - `NEXT_PUBLIC_LOG_LEVEL=error` だと、3 つとも出ない (`lib/logger.ts:15-19`・`:59-60`)。既定の `warn` か、それより低い
     設定が前提。
@@ -1931,11 +1944,11 @@ relay の支払いの行の「受け付ける」は、receipt の中で支払い
 **3. 点灯の手順 (user)**
 1. 2-1〜2-4 を確かめる。
 2. 基準を取る。点灯前の数日 (「ログで数える 3 つの warn」が本番に出た後) について、Vercel → Logs (production) で次を数えておく。
-   - warn `order.notify.binding_missing_stored` の件数。ON にすると、この通知は `reason: bind_required` の 422 に変わる
-     (旧 agent 経路の分は `orderIdAgentPrefix: true`)。
+   - warn `order.notify.binding_missing_stored` の件数。OFF で受け付けていた束縛なしの relay 注文の数で、ON にすると、この
+     通知は `reason: bind_required` の 422 に変わる (旧 agent 経路の分は `orderIdAgentPrefix: true`)。
    - warn `order.notify.binding_rejected` の件数を `reason` ごとに。OFF の間、`bind_required` は出ない。
-   - `/api/order/notify` の 429 の数 (request log) と、warn `order.notify.rate_limited` の `limiter` ごとの件数と
-     `suppressed` の合計。
+   - 公開の HTTP の `/api/order/notify` の 429 の数 (request log) と、warn `order.notify.rate_limited` の `limiter` ごとの
+     件数と `suppressed` の合計 (目安・「ログで数える 3 つの warn」の数え方)。
 3. Vercel → Settings → Environment Variables の Production に `ENABLE_ORDER_BIND_ENFORCE=true` を足す。
 4. 再 deploy する。この flag は要求ごとに `process.env` を読むが、Vercel は env の変更を新しい deploy にしか入れない
    (Vercel の仕様で、コードでは確かめられない。ほかの server だけの flag も再 deploy で点灯・停止している: §14.8b の
@@ -1945,15 +1958,19 @@ relay の支払いの行の「受け付ける」は、receipt の中で支払い
      (`app/api/order/notify/route.ts:543-557`)。ほかの 422 (送金の検証の失敗・`tx_too_old`) は、warn
      `order.notify.verify_failed` が出る (`:487-492`・`:523-529`)。どちらも warn が集まる設定が前提 (既定の
      `NEXT_PUBLIC_LOG_LEVEL=warn`・`error` だと出ない・`lib/logger.ts:15-19`・`:59-60`)。
-   - `bind` が無いことで断った件数は、`reason: bind_required` の件数 (ON でだけ出る)。ほかの `reason` (壊れた `bind`・合わない
-     `bind`・標準の送金に付けた `bind`・receipt の中で支払いが 1 つに対応づかない) は OFF の間も出るので、基準と比べる。
-   - `bind_required` が出たら、`bind` の無い relay 通知を出す相手 (1 の 3 つ) が残っている。warn の `txHash` で、どの支払いか
-     分かる。お客様から「払ったのに注文が出ない」と申し出があれば、お店がその支払いの Tx を見て手で受ける。
+   - `bind` が無いことの関所で断った要求の数は、`reason: bind_required` の件数 (ON でだけ出る)。前は受け付けていた要求の数
+     ではない。OFF でも後ろの理由で断られた要求と、同じ支払いの送り直しも入る (「ログで数える 3 つの warn」の注意)。前は
+     受け付けていた数は、基準の `binding_missing_stored` の件数と比べて見る。
+   - ほかの `reason` (壊れた `bind`・合わない `bind`・標準の送金に付けた `bind`・receipt の中で支払いが 1 つに対応づかない) は
+     OFF の間も出るので、基準と比べる。ON では、`bind` の無い通知のこれらの理由は `bind_required` に隠れる。
+   - `bind_required` が出たら、`bind` の無い relay 通知を送る相手 (1 の 3 つ) がいる (その支払いが OFF で受け付けられたかは
+     別)。warn の `txHash` で、どの支払いか分かる。お客様から「払ったのに注文が出ない」と申し出があれば、お店がその支払いの
+     Tx を見て手で受ける。
    - warn `order.agent.legacy_unreserved` が出たら、その agent 注文は登録されていないかもしれない (2-4)。txHash で受注一覧を
      確かめる。
    - 429。warn `order.notify.rate_limited` の `limiter` で、どちらの枠かを分ける (`:380-387`)。warn はプロセスごと・枠ごとに
-     1 分に 1 回だけなので、枠ごとの件数は `suppressed` を足しても下限。総数は request log の 429 で数える (「ログで数える
-     3 つの warn」)。
+     1 分に 1 回だけで、`suppressed` は前の warn からの累積なので、枠ごとの数は目安。公開の HTTP の 429 の数は request log で
+     数える。agent-order/pay の中の呼び出しの 429 は request log に出ず、warn にだけ入る (「ログで数える 3 つの warn」)。
      - txHash の枠 (`limiter: tx`): 同じ txHash と IP bucket (IPv4 /32・IPv6 /64) の組で、直近 60 秒の 6 回目以降
        (`:378-383`・`lib/relay/relayGuards.ts:94-113`)。同じ IP bucket の第三者は、E-1 の手当ての後も使い切れる (#1004 で
        受け入れた残り)。

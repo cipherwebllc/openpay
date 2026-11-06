@@ -1683,13 +1683,6 @@ describe('ENABLE_ORDER_BIND_ENFORCE の観測の warn (binding_rejected / rate_l
     const { bind: _bind, ...unbound } = f.body;
     return { ...f, unbound };
   }
-  // 429 の warn はプロセス内で枠ごとに 1 分に 1 回 (route の module の状態)。前の test の 429
-  // (2026-09-06T12:00Z) と混ざらないよう、429 を数える test は 1 つずつ 10 分先の時刻で始める。
-  let rateClock = Date.parse('2026-09-10T00:00:00Z');
-  const nextRateWindow = () => {
-    rateClock += 10 * 60_000;
-    vi.setSystemTime(rateClock);
-  };
 
   describe('order.notify.binding_rejected (422 order_binding_mismatch)', () => {
     it('ON で bind の無い relay 通知: 応答は従来の 422 のまま、bind_required の warn を 1 回', async () => {
@@ -1755,50 +1748,60 @@ describe('ENABLE_ORDER_BIND_ENFORCE の観測の warn (binding_rejected / rate_l
   });
 
   describe('order.notify.rate_limited (429)', () => {
+    // 429 の warn の間引きは route の module の状態 (プロセス内・枠ごと)。前の test の 429 の状態 (lastAtMs と、
+    // 書かなかった数の suppressed) を持ち越さないよう、test ごとに route を読み直す (本番に test 用の reset は足さない)。
+    // vitest 5.0.3 は同じ mock の module を並列に dynamic import すると 2 本目以降が実物に解決される
+    // (tests/app/api/paid-hosted.test.ts のコメント) ので、1 本ずつ await して読む。
+    let freshPOST: typeof POST;
+    beforeEach(async () => {
+      vi.resetModules();
+      freshPOST = (await import('@/app/api/order/notify/route')).POST;
+    });
+
     it('txHash の枠の 429: 応答は従来どおり、limiter: tx の warn を 1 回 (生 IP は載せない)', async () => {
-      nextRateWindow();
+      // 読み直す前の route (この file の static import) で 429 を重ねても、新しい route の数には入らない。
       hold.rateAllowed = false;
-      const res = await POST(req(goodBody()));
+      for (let i = 0; i < 3; i++) expect((await POST(req(goodBody()))).status).toBe(429);
+      warnSpy.mockClear();
+      const res = await freshPOST(req(goodBody()));
       expect(res.status).toBe(429);
       expect(await res.json()).toEqual({ ok: false, error: 'rate_limited' });
       expect(verifySpy).not.toHaveBeenCalled();
       expect(setSpy).not.toHaveBeenCalled();
-      // suppressed には、前の test の 429 (前の warn の後に書かなかった分) が入りうる。数え方は下の test で固定する。
-      expect(warnsOf('order.notify.rate_limited')).toEqual([{ limiter: 'tx', ipPrefix: IP_PREFIX, suppressed: expect.any(Number) }]);
+      expect(warnsOf('order.notify.rate_limited')).toEqual([{ limiter: 'tx', ipPrefix: IP_PREFIX, suppressed: 0 }]);
       expect(JSON.stringify(warnSpy.mock.calls)).not.toContain('198.51.100.7');
     });
 
     it('subnet の枠の 429: 応答は従来どおり、limiter: subnet の warn を 1 回', async () => {
-      nextRateWindow();
       hold.realRateLimits = true;
       hold.rateCounters.set(subnetCounterKey(), 120); // この /24 は今の 1 分で 120 回を使い切った
-      const res = await POST(req(goodBody()));
+      const res = await freshPOST(req(goodBody()));
       expect(res.status).toBe(429);
       expect(await res.json()).toEqual({ ok: false, error: 'rate_limited' });
       expect(verifySpy).not.toHaveBeenCalled();
       expect(setSpy).not.toHaveBeenCalled();
-      expect(warnsOf('order.notify.rate_limited')).toEqual([{ limiter: 'subnet', ipPrefix: IP_PREFIX, suppressed: expect.any(Number) }]);
+      expect(warnsOf('order.notify.rate_limited')).toEqual([{ limiter: 'subnet', ipPrefix: IP_PREFIX, suppressed: 0 }]);
     });
 
     it('429 の warn はプロセス内で枠ごとに 1 分に 1 回・書かなかった数は次の warn の suppressed に載る', async () => {
-      nextRateWindow();
+      const start = Date.now();
       hold.rateAllowed = false;
-      for (let i = 0; i < 3; i++) expect((await POST(req(goodBody()))).status).toBe(429);
+      for (let i = 0; i < 3; i++) expect((await freshPOST(req(goodBody()))).status).toBe(429);
       expect(warnsOf('order.notify.rate_limited')).toEqual([{ limiter: 'tx', ipPrefix: IP_PREFIX, suppressed: 0 }]);
       // 同じ 1 分の中でも、別の枠の最初の拒否は書く (txHash の枠の拒否が subnet の枠の拒否を隠さない)。
       hold.rateAllowed = true;
       hold.realRateLimits = true;
       hold.rateCounters.set(subnetCounterKey(), 120);
-      expect((await POST(req(goodBody()))).status).toBe(429);
+      expect((await freshPOST(req(goodBody()))).status).toBe(429);
       expect(warnsOf('order.notify.rate_limited')[1]).toEqual({ limiter: 'subnet', ipPrefix: IP_PREFIX, suppressed: 0 });
       // 59 秒後はまだ書かない。60 秒たつと次の拒否で書き、間に書かなかった 3 回を suppressed に載せる。
       hold.realRateLimits = false;
       hold.rateAllowed = false;
-      vi.setSystemTime(rateClock + 59_000);
-      expect((await POST(req(goodBody()))).status).toBe(429);
+      vi.setSystemTime(start + 59_000);
+      expect((await freshPOST(req(goodBody()))).status).toBe(429);
       expect(warnsOf('order.notify.rate_limited')).toHaveLength(2);
-      vi.setSystemTime(rateClock + 60_000);
-      expect((await POST(req(goodBody()))).status).toBe(429);
+      vi.setSystemTime(start + 60_000);
+      expect((await freshPOST(req(goodBody()))).status).toBe(429);
       expect(warnsOf('order.notify.rate_limited')).toEqual([
         { limiter: 'tx', ipPrefix: IP_PREFIX, suppressed: 0 },
         { limiter: 'subnet', ipPrefix: IP_PREFIX, suppressed: 0 },
