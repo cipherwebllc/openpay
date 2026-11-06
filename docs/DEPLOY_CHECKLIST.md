@@ -1756,12 +1756,20 @@ forwarderRecover を mock しているため、**実 on-chain 分割の実証は
 `AuthorizationUsed`・forwarder の `Settled`・forwarder を通る Transfer のどれかがあれば relay、どれも無ければ標準として扱う。
 body の `mode` は見ない。
 
+relay の支払いの行の「受け付ける」は、receipt の中で支払いが 1 つに対応づくことが前提。次のときは、OFF でも ON でも
+422 `order_binding_mismatch` になる (`lib/order/orderBindingVerify.ts:43`・`:66`・`:70-92`)。
+- receipt のログが読めない。
+- forwarder を通る送金なのに、合う `Settled` が 1 つでない (`Settled` が無い・合うものが複数)。
+- forwarder を通らない支払いで、`AuthorizationUsed` か Transfer が 1 つでない。
+- 対応づいた額が 1 JPYC 未満。
+
 | 受注通知 | OFF (今) | ON |
 |---|---|---|
 | relay の支払い・正しい `bind` つき | 受け付ける (`bindingDigest` を保存) | 同じ |
 | relay の支払い・`bind` が壊れている / 合わない | 422 `order_binding_mismatch` | 同じ |
 | relay の支払い・`bind` なし | 受け付けて `bindingMissing` を付ける (受注ボードに赤い注意) | **422 `order_binding_mismatch`** |
 | relay の証拠が無い支払い (標準の ERC-20 送金・relay を使わない ERC-4337/7702)・`bind` なし | 受け付けて `unboundPayment` を付ける (受注ボードに黄色の注記) | 同じ (束縛されないまま・A2c で受容した残り) |
+| relay の証拠が無い支払い・`bind` つき | 422 `order_binding_mismatch` | 同じ |
 | `bind` なし・同じ tx の注文が登録済み / 処理中 | 200 `duplicate` / 409 `processing` (束縛を見る前に返す) | 同じ |
 
 - 根拠: `lib/order/orderBindingVerify.ts:44-53`・`app/api/order/notify/route.ts:425-431`・`:511-518`・`:571-575`。
@@ -1785,39 +1793,51 @@ body の `mode` は見ない。
   429 になる。
 - OFF の間は、第三者は束縛なしの通知で先に登録できる (`bindingMissing` になる)。ON にするとその道が閉じ、残るのがこの枠の
   使い切り。
-- #1004 は枠の鍵を `order:tx:<txHash>:<hashIpBucket(clientIp(req)) ?? 'none'>` にした
-  (`app/api/order/notify/route.ts:354-355`)。別の IP からの試行は、お客様の枠を使わない。
-- 確かめ方: merge commit `3c190b87` が本番の deploy に含まれていること。
+- #1004 は `checkRateLimit` に渡す鍵を `order:tx:<小文字の txHash>:<hashIpBucket(clientIp(req)) ?? 'none'>` にした
+  (`app/api/order/notify/route.ts:354-355`)。KV の実際の鍵は、前に `relay:rl:` が付く (`lib/relay/relayGuards.ts:98`)。
+  別の IP からの試行は、お客様の枠を使わない。
+- 確かめ方: 今 open-pay.jp に出ている deploy の commit が、merge commit `3c190b87` を含むこと。
+  1. Vercel → Deployments で、Production の Current の deployment を開く。状態が Ready で、その commit の sha を控える。
+     Vercel の API で open-pay.jp の deployment を引く場合は、READY であることと `githubCommitSha` を見る。
+  2. 手元で、その sha が `3c190b87` を含むか確かめる。
 
-  ```bash
-  # 本番の最新の deploy の commit (Vercel が deploy ごとに GitHub へ記録する)
-  gh api 'repos/{owner}/{repo}/deployments?environment=Production&per_page=1' --jq '.[0].sha'
-  git fetch origin main && git merge-base --is-ancestor 3c190b87 <上の sha> && echo ok
-  ```
+     ```bash
+     git fetch origin main && git merge-base --is-ancestor 3c190b87 <控えた sha> && echo ok
+     ```
 
-  Vercel で前の deploy に戻した (§4b) 後は、Vercel → Deployments の Current の commit で同じことを確かめる。
-- 2026-11-06 時点: 本番の最新の deploy (`e033ad4d`・success) は `3c190b87` を含む。
+  GitHub の deployments の記録 (最新の 1 件) は使わない。最新の 1 件は、失敗や進行中の deploy のこともある。
+- 2026-11-06 時点: Vercel で、open-pay.jp の production の deployment は READY・`githubCommitSha` が `e033ad4d` で、
+  `3c190b87` を含む。
 
 **2-2. 本番に `IP_HASH_SECRET` (32 byte 以上) があること。**
 - 秘密値が無いか 32 byte 未満だと、`hashIpBucket` は null を返す (`lib/net/ipHash.ts:73-91`)。
 - そのとき txHash の枠は、すべての要求で `'none'` の 1 つを共有する。鍵は #1004 の前と同じ広さになり、2-1 の手当てが
   効かない。
-- 値は読まずに、次のどちらかで確かめる。
-  - レジの「お店の端末で送る」で QR が出ること。受け渡しの id とトークンは同じ秘密値の HMAC で作り、32 byte 未満では
-    作らない (`lib/storeHandoffDeps.ts:113-120`)。作れないと 503 `handoff_unavailable` になる
-    (`lib/storeHandoff.ts:250-253`)。ただし 503 `handoff_unavailable` は KV の障害でも出るので、QR が出ないことだけでは
-    秘密値が無いとは言えない。
-  - Vercel → Logs (production) で warn `ratelimit.ip_hash_disabled` が無いこと。秘密値が無い (`reason: secret_missing`) か
-    短い (`secret_too_short`) と、IP の枠を使う要求が来たときに、インスタンスごとに 1 回出る (`lib/net/ipHash.ts:78-87`)。
-    要求が無い間は出ないので、通知や支払いのある期間で見る。
+- IP が取れない要求は、秘密値を見る前に null になり、warn も出さずに `'none'` に入る (`lib/net/ipHash.ts:73-77`・`:94-95`・
+  `:101-102`・`app/api/order/notify/route.ts:354`)。これは秘密値があっても同じ。
+- 確かめ方 (値は読まない): レジの「お店の端末で送る」で QR が出ること。
+  - 受け渡しの id とトークンは同じ秘密値の HMAC で作り、32 byte 未満では作らない (`lib/storeHandoffDeps.ts:113-120`)。
+    基準は `hashIp` と同じ 32 byte。QR が出れば、秘密値は 32 byte 以上ある。
+  - 作れないと 503 `handoff_unavailable` になる (`lib/storeHandoff.ts:250-253`)。ただしこの 503 は KV の障害でも出るので、
+    QR が出ないことだけでは、秘密値が無いとは言えない。
+- 補助: Vercel → Logs (production) に warn `ratelimit.ip_hash_disabled` (`reason: secret_missing` / `secret_too_short`)
+  が出ていないか見る (`lib/net/ipHash.ts:78-87`)。出ていれば秘密値が無いか短い。ただし、出ていないことだけでは確かめたことに
+  ならない。
+  - warn はプロセスごとに 1 回だけで、見ている期間より前に出ていれば、その後は出ない。
+  - IP が取れない要求では出ない。
+  - `NEXT_PUBLIC_LOG_LEVEL=error` では warn 自体が出ない (`lib/logger.ts:15-19`・`:59-60`)。
 
 **2-3. 束縛なしの relay 注文 (`bindingMissing`) を観測すること。**
 - 数える場所は、本番 KV の受注一覧 `order:list:<受取アドレスの小文字>` (`lib/orderRelay.ts:136-138`)。各要素は注文の JSON で、
   束縛なしの relay 注文は `"bindingMissing":true` を持つ。
 - KV を読むのは user の操作 (読むだけ)。SCAN と LRANGE の回数だけ Upstash のコマンドを使う (§14.9c)。KV バックアップ
   (§16.6.1) の対象に `order:` は入っていない。
-- 一覧は店ごとに新しい 200 件まで (`ORDER_LIST_MAX`)。最後の注文から 72 時間で消える (`ORDER_LIST_TTL_SEC`・注文を保存する
-  たびに張り直す・`app/api/order/notify/route.ts:671-672`)。期間を通して数えるなら、72 時間より短い間隔で読む。
+- 一覧は店ごとに新しい 200 件まで (`ORDER_LIST_MAX`)。注文を保存するたびに、古いものから押し出す
+  (`app/api/order/notify/route.ts:671`)。一覧は最後の注文から 72 時間で消える (`ORDER_LIST_TTL_SEC`・保存のたびに張り直す・
+  `:672`)。72 時間より先に、200 件の上限で押し出されることがある。
+- 期間を通して数えるなら、店ごとの注文の流量を見て、200 件に押し出される前に読む。72 時間より短い間隔でも読む。
+- 読んだ結果は、`chainId` と `txHash` の組で重複を除く (同じ注文が前回と今回の両方に入る)。
+- 読む間隔が空いて、取りこぼしが無いと言えない期間の観測は「0 件」と扱わない (数えられなかった期間として残す)。
 - 受注ボード (`/create` の「受注」タブ・`/orders/kitchen`・`/orders/hall`) では、その注文のカードに赤い注意
   「支払いと注文の結びつき未確認 — 受け渡し前に手動確認が必要」が出る (`components/OrderBindingNotice.tsx`)。
   ボードは店ごとなので、全店の数は KV でしか数えられない。
@@ -1845,6 +1865,8 @@ body の `mode` は見ない。
   `AGENT_RESERVATION_TTL_SEC`) が無いときだけ。予約の導入 (#586・2026-09-24) より前の記録は、30 分で消えている。
 - 確かめ方: Vercel → Logs (production) で、warn `order.agent.legacy_unreserved` が観測の期間に 0 件であること。この経路に
   入るたびに 1 回出る (`app/api/agent-order/pay/route.ts:237`)。
+- この 0 件は、warn が集まる設定 (既定の `NEXT_PUBLIC_LOG_LEVEL=warn` か、それより低い) が前提。`error` にしていると warn は
+  出ないので、0 件でも使う相手がいないとは言えない (`lib/logger.ts:15-19`・`:59-60`)。
 
 **3. 点灯の手順 (user)**
 1. 2-1〜2-4 を確かめる。
@@ -1854,22 +1876,34 @@ body の `mode` は見ない。
    (Vercel の仕様で、コードでは確かめられない。ほかの server だけの flag も再 deploy で点灯・停止している: §14.8b の
    `ENABLE_X402_DUAL_RAIL_ARC`・§16.4 の `ENABLE_LICENSE_NFT_PUBLIC`)。
 5. 点灯後に見るもの:
-   - `/api/order/notify` の 422。束縛の拒否は、route がログを書かない (`app/api/order/notify/route.ts:515-518`)。ほかの
-     422 (送金の検証の失敗・`tx_too_old`) は、同じ要求に warn `order.notify.verify_failed` が出る (`:459-464`・`:495-501`)。
-     なので、その warn の無い 422 が束縛の拒否。基準より増えた分が、ON で拒否した束縛なしの通知。
-   - 増えたら、束縛なしの relay 通知を出す相手 (1 の 3 つ) が残っている。お客様から「払ったのに注文が出ない」と申し出が
-     あれば、お店がその支払いの Tx を見て手で受ける。
+   - `/api/order/notify` の 422。`order_binding_mismatch` は、route がログを書かない (`app/api/order/notify/route.ts:515-518`)。
+     ほかの 422 (送金の検証の失敗・`tx_too_old`) は、同じ要求に warn `order.notify.verify_failed` が出る (`:459-464`・
+     `:495-501`)。warn が集まる設定 (既定の `NEXT_PUBLIC_LOG_LEVEL=warn`・`error` だと出ない・`lib/logger.ts:15-19`・
+     `:59-60`) を前提に、その warn の無い 422 を、束縛の検証で断った件数として推定する。
+   - この数は、`bind` が無いことで断った件数とは区別できない。`order_binding_mismatch` は、壊れた `bind`・合わない `bind`・
+     標準の送金に付けた `bind`・receipt の中で支払いが 1 つに対応づかないときにも返り、OFF の間も出る (1 の前提と表)。
+   - 基準より増えたら、`bind` の無い relay 通知を出す相手 (1 の 3 つ) が残っているかもしれない。ただし、ほかの理由の 422 の
+     増減でも数は動く。お客様から「払ったのに注文が出ない」と申し出があれば、お店がその支払いの Tx を見て手で受ける。
    - warn `order.agent.legacy_unreserved` が出たら、その agent 注文は登録されていないかもしれない (2-4)。txHash で受注一覧を
      確かめる。
-   - 429。E-1 の手当ての後も、同じ IP (IPv4 /32・IPv6 /64) からの 6 回目以降は 429 になる (#1004 で受け入れた残り)。
-     基準より大きく増えたら、同じ IP からの使い切りを疑う。429 も route はログを書かない。
-   - お客様のブラウザの warn `checkout.webhook.non_ok` (Sentry) も目安になる。`status` だけを持ち、422 の理由は持たない。
+   - 429。route はどちらの 429 もログを書かないので、ログではどちらの枠かを分けられない (`:356-359`)。
+     - txHash の枠: 同じ txHash と IP bucket (IPv4 /32・IPv6 /64) の組で、直近 60 秒の 6 回目以降 (`:354-356`・
+       `lib/relay/relayGuards.ts:94-113`)。同じ IP bucket の第三者は、E-1 の手当ての後も使い切れる (#1004 で受け入れた残り)。
+     - subnet の枠: txHash をまたいで、IPv4 /24・IPv6 /64 ごとに、60 秒の固定窓で 120 回まで (`:344-346`・`:357-359`・
+       `lib/relay/relayGuards.ts:124-136`・`lib/net/ipPrefix.ts:9-19`)。
+     - 429 が増えても、txHash の枠の使い切りだけを疑わない。subnet の枠に当たっても増える。
+   - お客様のブラウザの warn `checkout.webhook.non_ok` (Sentry) も目安になる。`status` と `statusText` (と通知先の origin・
+     hash) を持つが、応答 body の理由 (`error`) は持たない (`components/CheckoutForm.tsx:889-894`・`:1037`)。
 
 **4. 戻し方**
 - `ENABLE_ORDER_BIND_ENFORCE` を消すか `false` にして、再 deploy する。束縛なしの relay 通知は、また `bindingMissing` を
   付けて受け付ける。
-- ON の間に 422 で落ちた通知は、注文も処理中の印も残していない。OFF に戻した後に同じ通知が届けば、受け付ける。
-- ただし受け付けるのは、支払いの block から 30 分以内だけ。過ぎると 422 `tx_too_old` (`app/api/order/notify/route.ts:495-501`)。
+- 戻して効くのは、ON の間に `bind` が無いことだけを理由に断られた新しい通知だけ。その通知は注文を作らず、自分が置いた
+  処理中の印も消している (`releaseClaim` は自分が置いた印だけを消し、ほかの要求の印は消さない・
+  `app/api/order/notify/route.ts:436`)。
+- その通知は、OFF に戻した後に同じ通知が届けば、ほかの条件を満たし、支払いの block から 30 分以内なら受け付ける。30 分を
+  過ぎると 422 `tx_too_old` (`:495-501`)。
+- 壊れた `bind`・合わない `bind` の通知は、OFF に戻しても 422 のまま (OFF でも断る)。
 - 落ちた通知を自動で送り直す仕組みは無い。旧 agent 経路は、同じ署名ヘッダが再送されたとき (再配信の記録が残る 30 分の間)
   だけ通知を出し直す。30 分を過ぎた注文は、お店がお客様の Tx を見て手で受ける。
 
