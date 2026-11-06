@@ -725,6 +725,14 @@ const CASES: Case[] = [
     want: () => ({ rows: [], receiptIds: [U, U, U, U], home: true }),
   },
   {
+    // relay の Tx の行の条件は値の有無 (truthy) で見る: 空文字なら行を出さない (null と同じ)。電子レシートの候補は
+    // `?? undefined` なので空文字のまま渡る。
+    name: '(hook からは来ない) relay の完了で txHash が空文字: 行なし・電子レシートの候補の 4 つめは空文字のまま',
+    setup: () => setRelay({ data: { txHash: '' as Hex, success: true } }),
+    params: () => jpycParams(),
+    want: () => ({ rows: [], receiptIds: [U, U, U, ''], home: true }),
+  },
+  {
     name: '通常決済の完了 (手数料の Tx あり): 店舗送金・手数料・ブロックの 3 行',
     setup: () => standardDone(),
     params: () => jpycParams({ mode: 'standard' }),
@@ -913,6 +921,26 @@ const CASES: Case[] = [
     },
     want: ({ c, got }) => ({
       rows: STANDARD_ROWS,
+      statusHref: statusHref(c, got.statusToken),
+      receiptIds: [STANDARD_DATA.merchantTxHash, U, U, U],
+      home: true,
+    }),
+  },
+  {
+    // 「お店に知らせる」と「注文状況を見る」が両方出る状態 (2 つの並びを固定する)。同じ origin の受注の通知先があって @handle の
+    // 無い、受付番号つきの会計 (遠隔の注文)。
+    name: 'お渡し準備完了 ON・受付番号つきの遠隔の注文を通常決済で払って受注を送った: 「お店に知らせる」の後に「注文状況を見る」',
+    setup: () => {
+      flags.enableOrderPickup = true;
+    },
+    params: () => jpycParams({ mode: 'standard', orderId: 'ORD-5', webhook: ownWebhook() }),
+    run: async (ctx) => {
+      submitStandardThenDone(ctx);
+      await statusTokenSent(ctx);
+    },
+    want: ({ c, got }) => ({
+      rows: [...STANDARD_ROWS, orderRow('ORD-5')],
+      notify: notifyFor(jpycParams({ mode: 'standard', orderId: 'ORD-5', webhook: ownWebhook() }), STANDARD_DATA.merchantTxHash, CUSTOMER),
       statusHref: statusHref(c, got.statusToken),
       receiptIds: [STANDARD_DATA.merchantTxHash, U, U, U],
       home: true,
