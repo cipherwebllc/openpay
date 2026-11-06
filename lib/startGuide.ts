@@ -183,7 +183,10 @@ const JA: StartGuideContent = {
         title: '参考: JPYC で返す場合',
         items: [
           '送金は OpenPay ではなく、あなたのウォレットアプリから行います (OpenPay に返金機能はありません)',
-          '送り先は、受け取った取引の送金元アドレス。ウォレットの受信履歴かブロックエクスプローラで確認できます',
+          // Eip3009Forwarder を使う経路 (JPYC の relay の回収・お店の端末で送る・x402 など) では、店舗への JPYC の Transfer の from は
+          // forwarder になる (受信履歴やエクスプローラの送金元)。forwarder には送られた JPYC を戻す関数が無い (settle だけ) ので、
+          // そこへ返金すると戻せない。送り先はお客様に確かめる (2026-11-07・以前は「受け取った取引の送金元アドレス」と案内していた)。
+          '送り先は、お客様が支払いに使ったウォレットのアドレスです。お客様に確かめてください。JPYC のガス代不要の支払いでは、ウォレットの受信履歴やブロックエクスプローラに出る送金元が OpenPay の中継のしくみのアドレスになることがあり、そこへ送った JPYC は戻せません',
           'ネットワーク手数料は送る側 (お店) の負担になります',
           '会計上は元の売上が消えるのではなく、返金が別の記録として増えます',
         ],
@@ -377,7 +380,7 @@ const EN: StartGuideContent = {
         title: 'For reference: refunding in JPYC',
         items: [
           'You send from your own wallet app, not from OpenPay (OpenPay has no refund function)',
-          'The destination is the sender address of the payment you received — check your wallet’s incoming history or a block explorer',
+          'The destination is the wallet address the customer paid from — confirm it with the customer. For gasless JPYC payments, the sender shown in your wallet’s incoming history or on a block explorer can be the address of OpenPay’s relay mechanism, and JPYC sent there cannot be recovered',
           'The network fee is paid by the sender, which is the shop',
           'In your books the original sale is not erased; the refund is added as a separate record',
         ],
