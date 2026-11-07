@@ -16,8 +16,7 @@ vi.mock('@/hooks/useNewsRead', () => ({
 
 import { NEWS_LATEST_COUNT, NewsList } from '@/components/NewsList';
 import { newsEntriesFor, sortedNews } from '@/lib/news';
-import { readFileSync } from 'node:fs';
-import path from 'node:path';
+import { runtimeClosure, runtimeSpecifiers } from '../_helpers/runtimeImports';
 
 beforeEach(() => markAllSeen.mockReset());
 
@@ -167,12 +166,25 @@ describe('NewsList: 最新はカード・古いものはたたむ / 1 件ずつ�
 
 // 2026-11-07: 一覧の部品は lib/news.ts を値として import しない (型だけ)。値で import すると全件の ja/en の本文が /news の
 // First Load JS に入り、お知らせを足すたびに bundle 予算を食う。本文は page (server) が newsEntriesFor で絞って渡す。
+// 2026-11-08: 行頭の `import type {` を正規表現で見ていたのを、TS の構文木で runtime import を辿る形にした。
+// 複数行の import・二重引用符・相対 path・import()・hook や部品を 1 段挟んだ import でも、lib/news.ts に届けば落ちる。
 describe('NewsList: 本文を JS に入れない (lib/news.ts は型だけ)', () => {
-  it('components/NewsList.tsx の lib/news の import は import type だけ', () => {
-    const src = readFileSync(path.join(process.cwd(), 'components', 'NewsList.tsx'), 'utf8');
-    const lines = src.split('\n').filter((l) => /from '@\/lib\/news'/.test(l));
-    expect(lines.length).toBeGreaterThan(0);
-    for (const l of lines) expect(l, l).toMatch(/^import type \{/);
+  it('components/NewsList.tsx から runtime import を辿っても lib/news.ts に届かない', () => {
+    const { files } = runtimeClosure(['components/NewsList.tsx']);
+    expect(files).toContain('components/NewsList.tsx');
+    expect(files).not.toContain('lib/news.ts');
+  });
+
+  it('検査は空振りしない: page からは lib/news.ts に届き、値の import は書き方を問わず辿る', () => {
+    expect(runtimeClosure(['app/[locale]/news/page.tsx']).files).toContain('lib/news.ts');
+    const src = [
+      "import type { NewsEntry } from '@/lib/news';",
+      'import {',
+      '  sortedNews,',
+      '} from "../lib/news";',
+      "const later = () => import('@/lib/news');",
+    ].join('\n');
+    expect(runtimeSpecifiers('fixture.tsx', src)).toEqual(['../lib/news', '@/lib/news']);
   });
 
   it('newsEntriesFor は新しい順・その言語の title / body / link だけ', () => {

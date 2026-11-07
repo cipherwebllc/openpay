@@ -2,7 +2,7 @@
 
 // /news の本体。お知らせ (lib/news.ts) を、page (server) が newsEntriesFor(locale) で新しい順・その言語の分だけにして
 // items で渡す (この部品は lib/news.ts を値として import しない = 全件の ja/en の本文を /news の JS に入れない・
-// tests/components/NewsList.test.tsx が import の形を検査する)。
+// tests/components/NewsList.test.tsx が runtime import を辿り、lib/news.ts に届かないことを検査する)。
 // - 最新 LATEST_COUNT 件はカードで全文を出す (日付 (locale 整形) + category バッジ + title + body + 任意 link)。
 // - それより古いものは「過去のお知らせ」に 1 件 1 行でたたむ (日付・バッジ・title は常に見え、本文は開いて読む)。
 //   全件を全文で並べるとスマホで約 16,000px になり、足すたびに伸びるため (2026-11-05)。
