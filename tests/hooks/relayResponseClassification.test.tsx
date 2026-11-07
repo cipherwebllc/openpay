@@ -599,7 +599,7 @@ async function mountDriver(hook: HookName): Promise<Driver> {
       relayUrl: RELAY_URL.salesMove,
       unmount: view.unmount,
       press: () =>
-        pressMutation(() => view.result.current.mutateAsync({ destination: MERCHANT, amount: MOVE_AMOUNT })),
+        pressMutation(() => view.result.current.moveAsync({ destination: MERCHANT, amount: MOVE_AMOUNT })),
     };
   }
   if (hook === 'usageFee') {

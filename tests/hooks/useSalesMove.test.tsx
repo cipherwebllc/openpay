@@ -2,7 +2,7 @@
 // 再署名しないこと・支払う側の控え。応答の全行の分類は tests/hooks/relayResponseClassification.test.tsx が 4 つの hook で固定する。
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { act, renderHook, waitFor } from '@testing-library/react';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider, onlineManager } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import type { Address, Hex } from 'viem';
 
@@ -98,10 +98,10 @@ async function mount() {
 type View = Awaited<ReturnType<typeof mount>>;
 
 async function press(view: View, params = { destination: DEST, amount: AMOUNT }) {
-  let outcome: { result?: Awaited<ReturnType<View['result']['current']['mutateAsync']>>; error?: unknown } = {};
+  let outcome: { result?: Awaited<ReturnType<View['result']['current']['moveAsync']>>; error?: unknown } = {};
   await act(async () => {
     try {
-      outcome = { result: await view.result.current.mutateAsync(params) };
+      outcome = { result: await view.result.current.moveAsync(params) };
     } catch (error) {
       outcome = { error };
     }
@@ -478,7 +478,7 @@ describe('useSalesMove: 署名の試みの直列化と unmount (Codex MUST・PR 
     const viewA = await mount();
     let oldOutcome: Promise<{ result?: unknown; error?: unknown }> = Promise.resolve({});
     act(() => {
-      oldOutcome = viewA.result.current.mutateAsync({ destination: DEST, amount: AMOUNT }).then(
+      oldOutcome = viewA.result.current.moveAsync({ destination: DEST, amount: AMOUNT }).then(
         (result) => ({ result }),
         (error: unknown) => ({ error }),
       );
@@ -515,7 +515,7 @@ describe('useSalesMove: 署名の試みの直列化と unmount (Codex MUST・PR 
     const view = await mount();
     let outcome: Promise<unknown> = Promise.resolve();
     act(() => {
-      outcome = view.result.current.mutateAsync({ destination: DEST, amount: AMOUNT }).catch((error: unknown) => error);
+      outcome = view.result.current.moveAsync({ destination: DEST, amount: AMOUNT }).catch((error: unknown) => error);
     });
     await waitFor(() => expect(h.readContract).toHaveBeenCalledTimes(1));
     view.unmount();
@@ -529,16 +529,19 @@ describe('useSalesMove: 署名の試みの直列化と unmount (Codex MUST・PR 
     expect(savedIntent()).toBeNull();
   });
 
-  it('試みの途中に入った 2 つ目 (並行の mutateAsync) は署名を求めずに断り、1 つ目はそのまま成立する', async () => {
+  it('試みの途中に入った 2 つ目 (並行の moveAsync) は mutation を作らずに断り、1 つ目の結果が hook の状態に残る', async () => {
     const resolveFirst = deferredSignature();
     const view = await mount();
     let first: Promise<unknown> = Promise.resolve();
     act(() => {
-      first = view.result.current.mutateAsync({ destination: DEST, amount: AMOUNT });
+      first = view.result.current.moveAsync({ destination: DEST, amount: AMOUNT });
     });
     await waitFor(() => expect(h.signTypedData).toHaveBeenCalledTimes(1));
     const second = await press(view);
     expect((second.error as Error).message).toBe('move_in_progress');
+    // 断った 2 つ目は hook の状態 (1 つ目の試み中) を変えない。
+    expect(view.result.current.isPending).toBe(true);
+    expect(view.result.current.error).toBeNull();
     await act(async () => {
       resolveFirst(SIGNATURE);
       await first;
@@ -546,6 +549,108 @@ describe('useSalesMove: 署名の試みの直列化と unmount (Codex MUST・PR 
     expect(await first).toEqual({ txHash: TX, success: true });
     expect(h.signTypedData).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(view.result.current.result).toEqual({ txHash: TX, success: true }));
+    expect(view.result.current.error).toBeNull();
+    expect(view.result.current.isPending).toBe(false);
+    expect(view.result.current.held).toBeNull();
+  });
+
+  it('並行の moveAsync で 1 つ目が送信済み (202) になっても、送信済みの印と保持が hook の状態に残る', async () => {
+    replies = [{ status: 202, body: { ok: false, pending: true, txHash: TX } }];
+    const resolveFirst = deferredSignature();
+    const view = await mount();
+    let first: Promise<unknown> = Promise.resolve();
+    act(() => {
+      first = view.result.current.moveAsync({ destination: DEST, amount: AMOUNT });
+    });
+    await waitFor(() => expect(h.signTypedData).toHaveBeenCalledTimes(1));
+    expect(((await press(view)).error as Error).message).toBe('move_in_progress');
+    await act(async () => {
+      resolveFirst(SIGNATURE);
+      await first;
+    });
+    await waitFor(() => expect(view.result.current.result).toEqual({ txHash: TX, success: false, pending: true }));
+    expect(view.result.current.error).toBeNull();
+    expect(view.result.current.held).toBe('ambiguous');
+  });
+
+  it('429 の後の再送が react-query の待ち行列にある間に unmount → 開き直して新しい署名: 古い再送は POST も枠の書き込みもしない', async () => {
+    replies = [{ status: 429, body: { error: 'ip_rate_limited' }, headers: { 'Retry-After': '30' } }];
+    const viewA = await mount();
+    await press(viewA);
+    expect(viewA.result.current.held).toBe('retry');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const saltA = posted()[0].intentSalt;
+
+    // 再送を始めた (mutation は作ったが mutationFn はまだ) 直後に、同じ tick で画面を離れる。
+    let retry: Promise<{ result?: unknown; error?: unknown }> = Promise.resolve({});
+    act(() => {
+      retry = viewA.result.current.moveAsync({ destination: DEST, amount: AMOUNT }).then(
+        (result) => ({ result }),
+        (error: unknown) => ({ error }),
+      );
+      viewA.unmount();
+    });
+    expect(((await retry).error as Error).message).toBe('move_cancelled');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(savedIntent()).toBeNull();
+
+    // 開き直した画面: 枠は空 (429 は冪等の claim より前の拒否で、その POST は何も動かしていない) → 新しい署名で移せる。
+    replies = [{ status: 202, body: { ok: false, pending: true, txHash: TX } }];
+    const viewB = await mount();
+    expect(viewB.result.current.held).toBeNull();
+    const fresh = await press(viewB, { destination: DEST, amount: AMOUNT * 2n });
+    expect(fresh.result).toEqual({ txHash: TX, success: false, pending: true });
+    expect(posted()).toHaveLength(2);
+    expect(posted()[0].intentSalt).toBe(saltA);
+    expect(posted()[1].intentSalt).not.toBe(saltA);
+    expect(savedIntent()?.nonce).toBe(h.signTypedData.mock.calls[1][0].message.nonce);
+    expect(viewB.result.current.held).toBe('ambiguous');
+    // 少し待っても、古い hook から送られるものは無い (timer・照会・待ち行列のどれも A を送らない)。
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 30));
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    viewB.unmount();
+  });
+
+  it('429 の後の再送が offline で止まっている間に unmount → 開き直した後で online に戻っても、止まっていた再送は POST も枠の上書きもしない', async () => {
+    // アプリと同じく 1 つの QueryClient を共有する (止まった mutation は QueryClient が online で再開する)。
+    const qc = new QueryClient({ defaultOptions: { mutations: { retry: false }, queries: { retry: false } } });
+    const shared = ({ children }: { children: ReactNode }) => <QueryClientProvider client={qc}>{children}</QueryClientProvider>;
+    replies = [{ status: 429, body: { error: 'ip_rate_limited' } }];
+    const viewA = renderHook(() => useSalesMove(DEPLOYMENT, LABELS), { wrapper: shared });
+    await waitFor(() => expect(viewA.result.current.isRestoring).toBe(false));
+    await press(viewA);
+    expect(viewA.result.current.held).toBe('retry');
+
+    onlineManager.setOnline(false);
+    try {
+      await act(async () => {
+        viewA.result.current.move({ destination: DEST, amount: AMOUNT });
+      });
+      // offline なので mutationFn は始まらない (POST も無い)。
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      viewA.unmount();
+      const viewB = renderHook(() => useSalesMove(DEPLOYMENT, LABELS), { wrapper: shared });
+      await waitFor(() => expect(viewB.result.current.isRestoring).toBe(false));
+      // online に戻ると、止まっていた A の再送が再開する → 番号が古いので何もしない。
+      await act(async () => {
+        onlineManager.setOnline(true);
+        await new Promise((r) => setTimeout(r, 30));
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(savedIntent()).toBeNull();
+
+      replies = [{ status: 202, body: { ok: false, pending: true, txHash: TX } }];
+      await press(viewB, { destination: DEST, amount: AMOUNT * 2n });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(posted()[1].merchantValue).toBe((AMOUNT * 2n).toString());
+      expect(savedIntent()?.nonce).toBe(h.signTypedData.mock.calls[1][0].message.nonce);
+      viewB.unmount();
+    } finally {
+      onlineManager.setOnline(true);
+    }
   });
 
   it('二度押し (同じ tick に move を 2 回) でも署名は 1 回・POST も 1 回で、結果は 1 つ目のもの', async () => {

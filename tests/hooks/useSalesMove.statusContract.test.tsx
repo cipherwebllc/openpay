@@ -6,8 +6,9 @@
 //     (送信済みの tx が後から revert しても、置換・再送と区別できないので unused を新しい署名の許可に使わない)。
 //   - revert した receipt は成立の証拠にしない (settled を返さない)。
 //   - 記録が消えた後は unused。署名の期限が分かるときだけ、期限切れ未使用の証明 expiry: 'expired' / まだ期限前 'live' を付ける。
-// hook は indeterminate の間はロック (再署名しない) のまま。解除は「連続 2 回の unused かつ最新が expiry: 'expired'」(照会の
-// 部品の規則) か、成立の証明 (settled) だけ。1 回の revert を理由に解除しない (受容した限界・hook の冒頭のコメント)。
+// hook は indeterminate の間はロック (再署名しない) のまま。解除は「連続 2 回の unused で、最新の応答が expiry: 'expired'」
+// (照会の部品 lib/relay/relayIntentRecovery.ts の規則・indeterminate と応答なしは連続の数を 0 に戻す) か、成立の証明 (settled)
+// だけ。1 回の revert を理由に解除しない (受容した限界・hook の冒頭のコメント)。
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act, renderHook, screen } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -130,7 +131,7 @@ async function pressAndWait(view: { result: { current: ReturnType<typeof useSale
   let outcome: Promise<{ result?: unknown; error?: unknown }> = Promise.resolve({});
   act(() => {
     outcome = view.result.current
-      .mutateAsync({ destination: DEST, amount: AMOUNT })
+      .moveAsync({ destination: DEST, amount: AMOUNT })
       .then((result) => ({ result }), (error: unknown) => ({ error }));
   });
   await advance(PAST_DEADLINE_MS);
