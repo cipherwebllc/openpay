@@ -558,5 +558,32 @@ export function sortedNews(): readonly NewsItem[] {
   return [...NEWS_ITEMS].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
 }
 
+/** 1 つの言語に絞ったお知らせ (/news の一覧の部品に渡す形)。 */
+export type NewsEntry = {
+  id: string;
+  date: string;
+  category: NewsCategory;
+  title: string;
+  body: string;
+  link?: { href: string; label: string };
+};
+
+/**
+ * /news の server component (app/[locale]/news/page.tsx) が、新しい順・その言語の分だけにして一覧の部品へ渡す。
+ * 何の波及を断つか: client の部品 (components/NewsList) が本ファイルを import すると、全件の ja/en の本文が /news の
+ * First Load JS に入り、お知らせを足すたびに bundle 予算 (scripts/check-bundle-budget.mjs) を食う (2026-11-07 に
+ * 258/259 kB)。server で絞って props で渡せば、本文は HTML (RSC の payload) に入るだけで JS には入らない。
+ */
+export function newsEntriesFor(locale: 'ja' | 'en'): readonly NewsEntry[] {
+  return sortedNews().map((n) => ({
+    id: n.id,
+    date: n.date,
+    category: n.category,
+    title: n.title[locale],
+    body: n.body[locale],
+    ...(n.link ? { link: { href: n.link.href, label: locale === 'ja' ? n.link.labelJa : n.link.labelEn } } : {}),
+  }));
+}
+
 // latestNewsId は lib/newsIndex.ts (本文を持たない索引) に移した。互換のため再 export。
 export { latestNewsId } from './newsIndex';
