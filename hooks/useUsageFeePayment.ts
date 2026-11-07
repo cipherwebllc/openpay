@@ -177,6 +177,18 @@ export function useUsageFeePayment(deployment: TokenDeployment) {
   // キー不一致 → 二重課金、という連鎖を断つ)。
   const retainedRef = useRef<RetainedUsageFeePayload | null>(null);
 
+  // この hook が画面に載っているか (mutationFn の確認に使う)。React の StrictMode の mount→unmount→mount は
+  // effect が同期で true に戻すので、その後に押された正当な 1 回目は止めない。番号 (useSalesMove の ticket) でなく
+  // mountedRef で足りる: unmount した instance の ref は false のまま戻らず、試みを止めたいのはこの hook が画面から
+  // 外れたときだけ (同じ mount の中の並行の試み = 同じ tick の二度押しはここでは扱わない)。
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
   // reload をまたいでも latch を失わないよう sessionStorage から復元する。復元後は
   // ambiguous 扱い = 同一 payload の再 POST だけを許可し、再署名は出さない。
   useEffect(() => {
@@ -194,6 +206,17 @@ export function useUsageFeePayment(deployment: TokenDeployment) {
 
   return useMutation<UsageFeePayResult, Error, { value: bigint }>({
     mutationFn: async ({ value }) => {
+      // 何の波及を断つか: 画面 (/billing) を離れた (unmount した) hook の試みが、離れた後に POST と復旧の枠
+      // (openpay:usage-fee-intent:v1) の保存・消去へ進むこと。react-query の mutation は (アプリで 1 つの) QueryClient の
+      // MutationCache に残るので、mutate と同じ tick に unmount した試みは unmount の後に mutationFn を始め、offline で
+      // 止まった (networkMode 'online' の paused) 試みは unmount の後でも online に戻ると再開する。開き直した画面 (新しい
+      // hook) が払った後で、古い hook が保持した payload (応答不明 / IP 制限の後) を POST すると、新しい hook が枠を復元
+      // できずに別の nonce で払っていれば (枠の保存の失敗等) 利用料の送金が 2 本になり、応答 (成立・構造化 4xx) によっては
+      // 新しい hook の枠も消す。ここで止めれば、下の再送の分岐も新しい署名の分岐も何もしない (再送の分岐はこの確認から
+      // POST の開始まで await を挟まない)。新しい署名の分岐もこの確認から署名を求めるまで await を挟まないので、署名を
+      // 求める前の確認はこれ 1 つで足りる。止めた reject は呼出側 (OpenPayFeePanel の startPay) の .catch(() => null) が
+      // 握り、unmount の後なので画面の状態は変わらない。
+      if (!mountedRef.current) throw new Error('payment_cancelled');
       const retained = retainedRef.current;
       if (retained) {
         // 別 amount / 別 chain / 別 account の要求は、latch を落とさずに封鎖する
@@ -246,6 +269,11 @@ export function useUsageFeePayment(deployment: TokenDeployment) {
         nonce: auth.nonce,
         signature,
       };
+      // 何の波及を断つか: 署名を待つ間に画面を離れた試みが、署名が返った後で枠を上書きし POST すること。離れて開き直した
+      // 画面 (新しい hook) で払い直して成立した後で、古い署名の画面でも承認すると、古い hook がその payload を POST して
+      // 利用料の送金が 2 本になる (nonce が別なので両方成立する)。枠も古い payload で上書きされる。送らない署名は期限
+      // (validBefore) で失効する。この確認から persistUsageFeeIntent・POST の開始まで await を挟まない。
+      if (!mountedRef.current) throw new Error('payment_cancelled');
       // POST の **前に** 保存する。応答喪失とページ離脱が同時に起きても、reload 後に同じ
       // nonce を再 POST できる (保存失敗は握りつぶす = 決済本体を止めない・下記 persist 参照)。
       persistUsageFeeIntent(payload);
