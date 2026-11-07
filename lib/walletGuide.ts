@@ -86,14 +86,6 @@ export type WalletGuideContent = {
   readonly storeBody: string;
   /** 受け取るチェーン・売上の移し方の注意 (リンクの前に読んでもらう)。 */
   readonly storeNote: string;
-  /**
-   * ガス代が無いときの「売上をほかのウォレットへ移す」(/create) への案内とリンク。描画側が flag (NEXT_PUBLIC_ENABLE_SALES_MOVE)
-   * の ON のときだけ出す (flag を外したら見えない機能へのリンクにしない)。UPBOND Wallet から移せることは確かめていない
-   * (plans/store-sales-move.md の P3) ので「UPBOND から移せます」とは書かず、ガス代が無いときの別の道として言い切らずに置く。
-   * 料率・金額は書かない (このページの決まり・利用料の額は /create の画面と料金ページに出る)。
-   */
-  readonly storeMoveNote: string;
-  readonly storeMoveLink: WalletGuideLink;
   readonly storeLink: { readonly href: string; readonly label: string };
 };
 
@@ -187,9 +179,6 @@ const JA: WalletGuideContent = {
     'お店の受け取り用には、アプリを入れずにブラウザで使える UPBOND Wallet が手軽です。LINE・Google のアカウントやパスキーでログインでき、JPYC EX とつないで JPYC の発行・償還もできます。',
   storeNote:
     '売上がたまったら、マイナウォレットなどへ移してください (UPBOND Wallet から送るときは、ガス代 (Polygon なら POL) が要ります)。',
-  storeMoveNote:
-    'ガス代が無いときは、「受け取る」ページの「受け取った通貨を換金」にある「売上をほかのウォレットへ移す」でも、ご自分の別のウォレットへ移せます (利用料がかかります)。',
-  storeMoveLink: { path: '/create', label: '「受け取る」ページを開く' },
   storeLink: { href: UPBOND_WALLET_URL, label: 'UPBOND Wallet を開く' },
 };
 
@@ -283,9 +272,6 @@ const EN: WalletGuideContent = {
     'For receiving payments at your shop, UPBOND Wallet is an easy option: it runs in your browser with no app to install. You can sign in with a LINE or Google account or a passkey, and connect it to JPYC EX to issue and redeem JPYC.',
   storeNote:
     'Once sales build up, move them to a wallet such as MynaWallet (sending from UPBOND Wallet requires gas, such as POL on Polygon).',
-  storeMoveNote:
-    'If you have no gas, you can also move them to another wallet of your own with “Move sales to another wallet” under “Off-ramp received tokens” on the Receive page (a fee applies).',
-  storeMoveLink: { path: '/create', label: 'Open the Receive page' },
   storeLink: { href: UPBOND_WALLET_URL, label: 'Open UPBOND Wallet' },
 };
 

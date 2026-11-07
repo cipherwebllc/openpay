@@ -165,22 +165,6 @@ describe('walletGuide content', () => {
     for (const label of [en.Scan.pageTitle, en.Nav.pay, en.Scan.startCameraButton, en.Nav.connect]) {
       expect(text('en'), label).toContain(`“${label}”`);
     }
-    // 売上の移動の案内 (flag ON のときだけ描く) は /create の折りたたみの見出しとフォームの題を引用する。
-    expect(walletGuideContentFor('ja').storeMoveNote).toContain(`「${ja.Create.offramp.heading}」にある「${ja.Create.salesMove.title}」`);
-    expect(walletGuideContentFor('en').storeMoveNote).toContain(`“${en.Create.salesMove.title}” under “${en.Create.offramp.heading}”`);
-  });
-
-  // 2026-11-07 (P2b の案): ガス代が無いときの「売上をほかのウォレットへ移す」への案内。UPBOND Wallet から移せることは
-  // まだ確かめていない (plans/store-sales-move.md の P3) ので、UPBOND の名前を出さず、移せると言い切る主語を UPBOND にしない。
-  // 料率・金額は書かない (上の検査)。リンク先は /create (描画側が /{locale} を付ける・flag OFF では描かない)。
-  it('売上の移動の案内: UPBOND の名前を出さず・利用料がかかることだけを書き・リンク先は /create', () => {
-    for (const locale of LOCALES) {
-      const c = walletGuideContentFor(locale);
-      expect(c.storeMoveNote).not.toContain('UPBOND');
-      expect(c.storeMoveNote).toContain(locale === 'ja' ? '利用料がかかります' : 'a fee applies');
-      expect(c.storeMoveLink.path).toBe('/create');
-      expect(existsSync(path.join(PAGE_DIR, 'create', 'page.tsx'))).toBe(true);
-    }
   });
 
   // 前後のガイド (JPYC で支払う・モバイルオーダー) へは「前へ / 次へ」で行く (tests/app/guide-wallet.test.tsx)。
