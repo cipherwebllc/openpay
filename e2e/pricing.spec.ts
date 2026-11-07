@@ -5,21 +5,22 @@ import { test, expect } from '@playwright/test';
 // tests/lib/pricing.test.ts・tests/lib/pricingExamples.test.ts・tests/app/pricingNoHardcode.test.tsx)。
 // mobile-safari の click の待ちで時間を使い切らないよう、click は使わない。
 
-// 行の見出しは h4 (払う人のまとまり = h3 の下に並ぶ・2026-10-25)。並びはお店の 3 行 → チップ → デジタル商品。
+// 行の見出しは h4 (払う人のまとまり = h3 の下に並ぶ・2026-10-25)。並びはお店の 4 行 → チップ → デジタル商品。
 const GROUPS_JA = ['お店', 'チップを送る方', 'デジタル商品・AI の買い手'];
 const FEATURES_JA = [
   '決済QR・レジ（POS）・注文リンク',
   'モバイル注文',
   'お店がガス代を肩代わりして送る',
+  '売上をほかのウォレットへ移す',
   'チップ',
   'デジタル商品',
 ];
 
 test.describe('料金ページ', () => {
-  test('/ja/pricing: 見出しと 5 つの機能が見え、計算機が動き、横にはみ出さない', async ({ page }) => {
+  test('/ja/pricing: 見出しと 6 つの機能が見え、計算機が動き、横にはみ出さない', async ({ page }) => {
     await page.goto('/ja/pricing');
     await expect(page.getByRole('heading', { level: 1, name: '料金' })).toBeVisible();
-    await expect(page.getByRole('heading', { level: 2, name: '料金がかかるのは、この 4 つです' })).toBeVisible();
+    await expect(page.getByRole('heading', { level: 2, name: '料金がかかるのは、この 5 つです' })).toBeVisible();
     const fees = page.locator('section[aria-labelledby="pricing-fees"]');
     for (const name of GROUPS_JA) {
       await expect(fees.getByRole('heading', { level: 3, name, exact: true })).toBeVisible();

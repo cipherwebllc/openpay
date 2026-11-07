@@ -63,9 +63,9 @@ describe('Legal pages', () => {
         : ['seller operates', 'availability', '60 seconds', 'wallet address, product, revision and timestamps', 'does not store or serve', 'responsible for delivery', '(6)', 'third parties', 'not immediately recalled', 'holder without a purchase history', '(14)', '(7)', '(11)']) expect(clause).toContain(text);
       renderWithIntl(<TermsPage />, { locale });
       expect(screen.getByText((_, element) => element?.tagName === 'P' && !!element.textContent?.includes('(18)'))).toHaveTextContent(clause);
-      expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-10-21');
+      expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-11-07');
       expect(messages.Privacy.section3.body).toContain(locale === 'ja' ? '購入歴のないライセンス保有者' : 'license holders without a purchase history');
-      expect(LEGAL_ENTITY.privacyEffectiveDate).toBe('2026-10-20');
+      expect(LEGAL_ENTITY.privacyEffectiveDate).toBe('2026-11-07');
     });
 
     it('第13条: license の政策値・売り手・権利・返金・公開情報を同じ namespace 内で固定する', async () => {
@@ -89,7 +89,7 @@ describe('Legal pages', () => {
       expect(clause(ja, 17)).toContain('公開台帳'); expect(clause(en, 17)).toContain('public ledger');
       expect(clause(ja, 17)).toContain('公開 Verify API'); expect(clause(en, 17)).toContain('public Verify API');
       expect(clause(ja, 16)).toContain('法的適合性の認定を意味しません'); expect(clause(en, 16)).toContain('not legal clearance');
-      expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-10-21');
+      expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-11-07');
     });
     it('ja: h1 と 11 条すべての title が render される', () => {
       renderWithIntl(<TermsPage />, { locale: 'ja' });
@@ -528,8 +528,9 @@ describe('Legal pages', () => {
       expect(dd.firstChild?.textContent).toBe(t('rows.price.value'));
       expect(m.Tokutei.rows.price.value).not.toMatch(/<link>|\/pricing|料金のページ|Pricing page/);
       expect(link.closest('span')!.textContent).toBe(m.Tokutei.priceSeeAlso.replace(/<\/?link>/g, ''));
-      // リンクの追加は改定ではないので、最終更新日は前回の改定日 (2026-10-21) のまま。
-      expect(LEGAL_ENTITY.tokuteiEffectiveDate).toBe('2026-10-21');
+      // リンクの追加は改定ではないので、最終更新日は前回の改定日のまま (今は 2026-11-07 の「売上をほかのウォレットへ移す」の改定案・
+      // 施行日は仮置きで点灯日に確定する)。
+      expect(LEGAL_ENTITY.tokuteiEffectiveDate).toBe('2026-11-07');
       expect(screen.getByText(new RegExp(`${updated}:\\s*${LEGAL_ENTITY.tokuteiEffectiveDate}`))).toBeInTheDocument();
     });
 
@@ -809,13 +810,17 @@ describe('Legal pages', () => {
       //   Terms/特商法/免責を同日改定 (料金は変えない)。プライバシーも同日に別の改定 (x402 の USDC の送信先の開示)。
       // 2026-10-21: Arc の売上を受け取る画面 (当社は画面だけ・署名と受け取りの取引と手数料は出品者・コントラクトは不可) を
       //   Terms 第 5 条 (10) と特商法「対価以外の費用」に足すため同日改定 (料金は変えない)。免責は据置。
-      expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-10-21');
-      expect(LEGAL_ENTITY.tokuteiEffectiveDate).toBe('2026-10-21');
-      expect(LEGAL_ENTITY.disclaimerEffectiveDate).toBe('2026-10-20');
+      // 2026-11-07 改定案: 「売上をほかのウォレットへ移す」(送金 1 回 2 JPYC・移す額に上乗せ) を Terms 第 5 条 (12)・特商法・免責に
+      //   足す (施行日は仮置き・flag の点灯日で確定する・DEPLOY_CHECKLIST §18.2)。プライバシーも同日 (下)。
+      expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-11-07');
+      expect(LEGAL_ENTITY.tokuteiEffectiveDate).toBe('2026-11-07');
+      expect(LEGAL_ENTITY.disclaimerEffectiveDate).toBe('2026-11-07');
       // 2026-09-10 改定案: 保護配布のチケット情報の第三者提供を追記。
       // 2026-10-13: 外部送信規律の公表 (3-3 外部送信について)・委託先の追加でプライバシーだけ改定。
       // 2026-10-20: x402 の USDC の検証・精算の送信先 (CDP を委託先に・Circle Gateway を別の段落で) を開示。
-      expect(LEGAL_ENTITY.privacyEffectiveDate).toBe('2026-10-20');
+      // 2026-11-07 改定案: 「売上をほかのウォレットへ移す」の濫用の集計 (1-(11)・2-(13)・4.) と、2-(9) のエラー監視のただし書き
+      //   (ウォレットアドレスを含む警告を送ることがある) を足す (施行日は仮置き・点灯日で確定する)。
+      expect(LEGAL_ENTITY.privacyEffectiveDate).toBe('2026-11-07');
     });
   });
 

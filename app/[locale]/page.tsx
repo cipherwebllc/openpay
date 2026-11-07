@@ -1,6 +1,6 @@
 // トップページ = 紹介 LP。Server Component (LCP / SEO 優先)。
 // AppShell (Client) の中に Server-rendered の各 Landing* セクションを並べる。
-// 並び: ヒーロー → モバイルオーダー → 本文 → 使い方 → 料金 (4 つの場合) → FAQ → 信頼 (応援カードを含む締め)。
+// 並び: ヒーロー → モバイルオーダー → 本文 → 使い方 → 料金 (5 つの場合) → FAQ → 信頼 (応援カードを含む締め)。
 
 import { setRequestLocale } from 'next-intl/server';
 import { RouteMessages } from '@/i18n/RouteMessages';
@@ -73,7 +73,7 @@ export default async function HomePage({
         {/* 3 ステップは「使いたくなった読者」への締め (シーンの後・料金と FAQ の前)。ガイドへの入口 4 枚 (導入前チェックリスト・
             決済QR・レジとモバイルオーダー・クリエイター) もここだけに置く (入口を 1 か所に・plans/lp-polish-2026-10.md P1-2)。 */}
         <LandingHowItWorks />
-        {/* 料金 (4 つの場合) は FAQ の前: 「はじめ方」を読んだ直後の判断材料として数字を先に見せる (2026-10-12)。
+        {/* 料金 (5 つの場合) は FAQ の前: 「はじめ方」を読んだ直後の判断材料として数字を先に見せる (2026-10-12)。
             運営の応援カードは料金の話ではないので、締め (LandingTrust) に置く。 */}
         <LandingSupport />
         <LandingFaq />

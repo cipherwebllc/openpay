@@ -320,16 +320,16 @@ test.describe('landing / (LP)', () => {
     await expect(github).toHaveAttribute('rel', 'noopener noreferrer');
   });
 
-  test('ja: 料金の節 — 料金がかかる 4 つの場合 + 料金ページへの入口・応援カードは締め (@openpay_jp へ 1 link)', async ({
+  test('ja: 料金の節 — 料金がかかる 5 つの場合 + 料金ページへの入口・応援カードは締め (@openpay_jp へ 1 link)', async ({
     page,
   }) => {
     await page.goto('/ja');
-    // 料金ページ (/pricing) の冒頭と同じ 4 つの場合のカード (2026-10-12 user 裁定: 長い説明は料金ページへ)。
+    // 料金ページ (/pricing) の冒頭と同じ 5 つの場合のカード (2026-10-12 user 裁定: 長い説明は料金ページへ・2026-11-07 に売上の移動を足した)。
     const pricingSection = page
       .locator('section')
-      .filter({ has: page.getByRole('heading', { level: 2, name: '料金がかかるのは、この 4 つです' }) });
+      .filter({ has: page.getByRole('heading', { level: 2, name: '料金がかかるのは、この 5 つです' }) });
     await expect(pricingSection).toBeVisible();
-    await expect(pricingSection.getByRole('listitem')).toHaveCount(4);
+    await expect(pricingSection.getByRole('listitem')).toHaveCount(5);
     await expect(pricingSection.getByText(/売上は預かりません/)).toBeVisible();
     // 機能ごとの料金と計算例 (/ja/pricing) への入口 (名前 = 可視テキスト)。
     const pricing = pricingSection.getByRole('link', { name: '機能ごとの料金と計算例を見る' });
@@ -372,7 +372,7 @@ test.describe('landing / (LP)', () => {
     await expect(howItWorks.getByRole('link', { name: 'すべてのガイドを見る' })).toHaveAttribute('href', '/ja/guide');
 
     // 料金の節は「使い方」の後・FAQ の前 (2026-10-12 user 裁定)。
-    const pricingTop = (await page.getByRole('heading', { level: 2, name: '料金がかかるのは、この 4 つです' }).boundingBox())?.y;
+    const pricingTop = (await page.getByRole('heading', { level: 2, name: '料金がかかるのは、この 5 つです' }).boundingBox())?.y;
     const faqTop = (await page.getByRole('heading', { level: 2, name: 'よくある質問' }).boundingBox())?.y;
     const howTop = (await howItWorks.getByRole('heading', { level: 2, name: '使い方' }).boundingBox())?.y;
     expect(howTop).toBeDefined();

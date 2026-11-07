@@ -20,6 +20,7 @@ import { env } from '@/lib/env';
 import { DISCLOSED_RECOVER_FEE } from './disclosedRecoverFee';
 import { DISCLOSED_X402_FEE } from './disclosedX402Fee';
 import { DISCLOSED_STORE_GAS_WALLET, disclosedStoreGasChains } from './disclosedStoreGasWallet';
+import { DISCLOSED_SALES_MOVE, disclosedSalesMoveChains } from './disclosedSalesMove';
 
 export const LEGAL_ENTITY = {
   serviceName: 'OpenPay',
@@ -156,7 +157,16 @@ export const LEGAL_ENTITY = {
   //   当社は画面を出すだけで、引き出しは出品者の指定ウォレットの署名と出品者が送る受け取りの取引で行い、Circle の手数料と
   //   受け取りの取引のネットワーク手数料は出品者負担・指定ウォレットがコントラクトなら Arc は有効にできない。
   //   NEXT_PUBLIC_ENABLE_ARC_PAYOUT の点灯と同じリリースで公開する (DEPLOY_CHECKLIST §14.8c)。施行日は仮置き (点灯日で確定する)。
-  termsEffectiveDate: '2026-10-21',
+  // 2026-11-07 改定案 (Terms/特商法/免責/プライバシーの 4 文書): 「売上をほかのウォレットへ移す」(売上の移動) を第 5 条 (12) に新設。店主が
+  //   自らのウォレットにある Polygon の JPYC を自ら管理する別のウォレットへ移す機能で、店主の署名した送金を当社が中継してガスを
+  //   肩代わりし、送金 1 回につき 2 JPYC の利用料を移す額に上乗せして同一取引内で申し受ける (送り先には指定額がそのまま届く・
+  //   (1) の 1% は適用しない・当社は移す額を受領・保管しない)。利用条件は「店主ご自身のウォレットの間の移動に限る」(当社は送り先を
+  //   確かめられない旨を明記し、反する利用が第 7 条各号のいずれかに該当すると当社が合理的に判断した場合は、同条に基づき利用を制限する
+  //   ことがある)。JPYC EX の償還の送り先・取引所の入金アドレスへ直接送らない注意 (届く JPYC の送り元が中継の
+  //   コントラクトになるため)・取消不可。新規・任意の機能ゆえ既存の取引に遡及しない。SOT は DISCLOSED_SALES_MOVE。
+  //   NEXT_PUBLIC_ENABLE_SALES_MOVE の点灯と同じリリースで公開する (DEPLOY_CHECKLIST §18)。施行日は点灯日の 2026-11-07 で確定 (user 承認)。
+  //   プライバシーも同日に改定 (濫用の集計の明記・下の privacyEffectiveDate の注)。
+  termsEffectiveDate: '2026-11-07',
   // 2026-07-29 改定: 非公開チップメッセージ (質問箱 Phase 1) の取得項目 (2-1(7))・
   //   利用目的 (2-2(9))・保管期間 (最長 180 日+本人削除) を追加。実質的改定のため施行日を更新。
   // 2026-09-10 改定案: 購入歴のない保有者も含む配布先へのチケット情報の提供を明示。
@@ -170,19 +180,32 @@ export const LEGAL_ENTITY = {
   //   委託先ではなく別の段落で開示 (Circle の Developer Terms の契約相手は Circle Technology Services, LLC で、同規約 §1(n) は
   //   互いに相手のデータ処理者でないと定める)。送るのは買い手が Gateway を選んだ支払いの指示に限る。出品フォームの Arc の注意にも
   //   Circle への送信を足した。施行日は仮置き (user の承認日で確定する)。
-  privacyEffectiveDate: '2026-10-20',
+  // 2026-11-07 改定案 (Terms と同日・user 承認「推奨どおり」): 「売上をほかのウォレットへ移す」の濫用の集計 (lib/relay/salesMoveAbuse.ts)
+  //   を明記 — 取得 1-(11) (送り先と送り元のアドレスの組 (チェーン・月ごと)・送り先ごとの月の送り元の数)・利用目的 2-(13)
+  //   (不正利用を見つける・保存期限 100 日 = KV の TTL・閾値に届くと送り先のアドレスを含む警告をエラー監視へ)・保管期間 4.。
+  //   「最長 100 日で削除」とは書かない: 数の key は INCR と EXPIRE NX が別の命令で、EXPIRE だけ失敗すると TTL の無い key が
+  //   残りうる (lib/kv.ts の kv.incr_expire_failed・片づけは DEPLOY_CHECKLIST §18.5)。だから「保存期限を 100 日に設定」と書く。
+  //   4. には同じ型の 1% 回避の集計 (lib/relay/recoverFeeAvoidance.ts・受取先のアドレス・月ごとの件数と差額・TTL 100 日) も足した。
+  //   2-(9) の「エラー監視で個人を特定する情報を送信しない設定」に、障害の調査・不正利用の確認のためウォレットアドレスを含む
+  //   エラーや警告を送ることがある旨のただし書き (例として売上の移動の警告と 1% 回避の警告 (件数 30 か累積の差額 1,000 JPYC の
+  //   どちらかで出る) を挙げる。ほかにもアドレスを含むエラー・警告はあるので「例」にとどめる)。施行日は点灯日の 2026-11-07 で確定。
+  privacyEffectiveDate: '2026-11-07',
   // 2026-10-07 改定: レジの通常決済の利用料の廃止 (Terms と同日)。
   // 2026-10-08 改定: 「お店がガス代を肩代わりして送る」の新設 (Terms と同日)。
   // 2026-10-11 改定: JPYC のチップのガス相当額の行き先・AI エージェントが x402 で支払うモバイル注文の利用料 (Terms と同日)。
   // 2026-10-20 改定: 冒頭の「商品代金等の本体は店舗ウォレットへ直接送金」に、x402 の Circle Gateway 経由の支払いは受取先の
   //   Gateway 残高に計上され受取先が引き出す旨を足した (Terms と同日)。
-  disclaimerEffectiveDate: '2026-10-20',
+  // 2026-11-07 改定案: 「売上をほかのウォレットへ移す」の取消不可・送り先の誤り・JPYC EX と取引所へ直接送らない注意 (§2) と
+  //   利用料 (§7) を足す (Terms と同日・施行日は点灯日の 2026-11-07)。
+  disclaimerEffectiveDate: '2026-11-07',
   // 特商法は上の 2026-10-07・10-08・10-11 の改定 (Terms と同日) に加え、2026-10-12 改定: 他のチェーンから Arc 以外の
   //   チェーン宛てに支払うときの Circle の転送手数料 (「対価以外の費用」・Terms と同日)。
   // 2026-10-20 改定: x402 の Circle Gateway 経由の Arc の支払い (支払いごとのネットワーク手数料なし・Gateway への入金と
   //   引き出しの費用は Circle の条件・当社は徴収しない) を「対価以外の費用」に明記 (Terms と同日)。
   // 2026-10-21 改定: 引き出した売上の受け取りに Arc のネットワーク手数料 (USDC) がかかる旨を「対価以外の費用」に (Terms と同日)。
-  tokuteiEffectiveDate: '2026-10-21',
+  // 2026-11-07 改定案: 「売上をほかのウォレットへ移す」を「役務の内容」「役務の対価」「対価以外の費用」「支払時期および方法」「返品・キャンセル」に足す
+  //   (Terms と同日・施行日は点灯日の 2026-11-07)。
+  tokuteiEffectiveDate: '2026-11-07',
   // モバイル注文システム利用料の施行日 (本利用料を新設した開示の公表日)。doc 全体の施行日 (上記
   // 2026-06-13) とは別管理 — 本利用料は新規・任意の付加機能 (モバイル注文) に対する個別条項で、機能の
   // 提供開始 (flag 点灯) まで実際の徴収は発生しない。本文は本定数の日付を補間して表示する。
@@ -318,6 +341,7 @@ export function mobileOrderFeeDisclosureDivergence(): string | null {
 // 本体は lib/disclosedX402Fee.ts (client の hosted 購入が法務本文を bundle しないように分離)。
 export { DISCLOSED_X402_FEE };
 export { DISCLOSED_STORE_GAS_WALLET, disclosedStoreGasChains };
+export { DISCLOSED_SALES_MOVE, disclosedSalesMoveChains };
 
 // デジタル商品ストアの USDC 決済 leg に関する開示 SOT。出品価格は JPYC 建てのまま、
 // Base native USDC へ換算し、OpenPay の x402 利用料は徴収しない。Terms 第 13 条・LP・

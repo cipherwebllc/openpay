@@ -10,9 +10,11 @@
 import {
   DISCLOSED_MOBILE_ORDER_FEE,
   DISCLOSED_RECOVER_FEE,
+  DISCLOSED_SALES_MOVE,
   DISCLOSED_TIP_FEE_MODELS,
   DISCLOSED_STORE_GAS_WALLET,
   DISCLOSED_X402_FEE,
+  disclosedSalesMoveChains,
   disclosedStoreGasChains,
 } from './legal';
 import { sellGuideContentFor } from './sellGuide';
@@ -199,6 +201,7 @@ const ja: TransparencyContent = {
     `x402 facilitator: 決済額の ${percentFromBps(DISCLOSED_X402_FEE.bps)}・最低 ${DISCLOSED_X402_FEE.floorJpyc} JPYC。買い手側への上乗せで、売り手は表示額をそのまま受け取ります。`,
     `レジ（POS）: レジの機能は無料。お客様がガス代を払う通常決済は OpenPay 利用料無料、ガスレス決済は決済額の ${percentFromBps(DISCLOSED_RECOVER_FEE.percentFromJulyBps)}・最低 ${DISCLOSED_RECOVER_FEE.floorJpyc} JPYC（店舗負担）。レジの通常決済の利用料は 2026 年 10 月 7 日に廃止しました。`,
     `お店がガス代を肩代わりして送る（店頭レジ・画面に表示した金額指定の決済QR・JPYC・${disclosedStoreGasChains('ja')}）: OpenPay 利用料は 0 円。ネットワーク手数料は店舗の端末のガス用ウォレットが払い、仕組み上、送金 1 回につき ${DISCLOSED_STORE_GAS_WALLET.feeWei} wei がお客様の支払いに上乗せされ OpenPay へ送られます。OpenPay は署名を最長 ${DISCLOSED_STORE_GAS_WALLET.handoffRetentionSec / 60} 分受け渡すだけで、ガスを払わず送信もしません。印刷・保存・URL のコピーをした QR と、金額を指定しない QR は対象外です。`,
+    `売上をほかのウォレットへ移す（JPYC・${disclosedSalesMoveChains('ja')}）: 送金 1 回につき ${DISCLOSED_SALES_MOVE.feeJpyc} JPYC の利用料を、移す額に上乗せします（送り先には指定した額がそのまま届きます。決済額の ${percentFromBps(DISCLOSED_RECOVER_FEE.percentFromJulyBps)} は適用しません）。お店が 1 回署名し、OpenPay が送金を中継してネットワーク手数料を負担します。ご自分のウォレットの間の移動に限ります。届く JPYC の送り元は OpenPay の中継のしくみのアドレスになるため、JPYC EX の償還の送り先や取引所の入金アドレスへ直接送ると、償還や入金として扱われないことがあります。`,
     `チップ: 受け取り手数料はなし。JPYC は送る側がガス相当（約 ${DISCLOSED_TIP_FEE_MODELS.jpycRelay.floorJpyc} JPYC）を上乗せし、この分は OpenPay へ送られます（決済額の ${percentFromBps(DISCLOSED_RECOVER_FEE.percentFromJulyBps)} は適用しません）。USDC のチップは、USDC (Base) では送る側が Paymaster にガスを USDC で支払い、USDC (Arc) では送る側がネットワーク手数料を USDC でウォレットから直接負担します。いずれも OpenPay の徴収はありません。`,
   ],
   feeDetailsLead: '正確な適用条件と支払時期は、',
@@ -304,6 +307,7 @@ const en: TransparencyContent = {
     `x402 facilitator: ${percentFromBps(DISCLOSED_X402_FEE.bps)} of the payment, with a ${DISCLOSED_X402_FEE.floorJpyc} JPYC minimum. It is added on the buyer’s side, and the seller receives the listed amount in full.`,
     `Register (POS): The register itself is free. Standard payments, where the customer pays the gas, have no OpenPay usage fee; gasless payments are ${percentFromBps(DISCLOSED_RECOVER_FEE.percentFromJulyBps)} of the payment, minimum ${DISCLOSED_RECOVER_FEE.floorJpyc} JPYC, merchant-paid. The register’s standard-payment fee was discontinued on October 7, 2026.`,
     `The shop pays the gas (in-store register or a fixed-amount payment QR shown on screen, JPYC on ${disclosedStoreGasChains('en')}): the OpenPay usage fee is 0. The shop device’s gas wallet pays the network fee; by design, ${DISCLOSED_STORE_GAS_WALLET.feeWei} wei is added to the customer’s payment per transfer and sent to OpenPay. OpenPay only hands over the signature for up to ${DISCLOSED_STORE_GAS_WALLET.handoffRetentionSec / 60} minutes and neither pays the gas nor sends the payment. QR codes that are printed, saved or copied as a URL, or that have no amount, are not eligible.`,
+    `Move sales to another wallet (JPYC on ${disclosedSalesMoveChains('en')}): a fee of ${DISCLOSED_SALES_MOVE.feeJpyc} JPYC per transfer is added on top of the amount moved (the destination receives the specified amount in full; the ${percentFromBps(DISCLOSED_RECOVER_FEE.percentFromJulyBps)} fee does not apply). The shop signs once, and OpenPay relays the transfer and pays the network fee. It is limited to moves between the shop’s own wallets. The JPYC that arrives shows the address of OpenPay’s relay mechanism as its sender, so if it is sent directly to a JPYC EX redemption address or an exchange deposit address, it may not be treated as a redemption or a deposit.`,
     `Tips: Receiving tips is free. For JPYC tips, the sender adds the gas equivalent (about ${DISCLOSED_TIP_FEE_MODELS.jpycRelay.floorJpyc} JPYC; the ${percentFromBps(DISCLOSED_RECOVER_FEE.percentFromJulyBps)} fee does not apply), which goes to OpenPay. For USDC tips, on USDC (Base) the sender pays gas in USDC to the Paymaster, and on USDC (Arc) the sender pays network fees in USDC directly from their wallet. OpenPay collects nothing for any of these tips.`,
   ],
   feeDetailsLead: 'For exact applicability and payment timing, see the ',

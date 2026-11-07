@@ -3098,6 +3098,85 @@ OpenPay は署名を最長 10 分受け渡すだけで、ガスを払わず送�
 - Upstash のコマンド数 (受け渡し 1 件あたり作成・読み取り・締め切りで数十件)。
 - 店主のガス用ウォレットのガス代のトークン (POL・KAIA・AVAX) は店主の負担 (OpenPay は監視しない・画面にチェーンごとの残り回数の目安を出す)。
 
+## §18 売上をほかのウォレットへ移す go-live SOP
+
+内部名「売上の移動」(計画 plans/store-sales-move.md・開示の SOT は lib/disclosedSalesMove.ts)。お店が自分のウォレットで
+`receiveWithAuthorization` (to = forwarder・nonce = 分割のコミットメント) に 1 回署名し、OpenPay の relayer が `forwarder.settle` を
+送る (ガスは OpenPay)。送り先へ移す額・OpenPay へ利用料 2 JPYC (`relayGasFeeValue(137)` = Polygon の gas floor・移す額に上乗せ)。
+route は `POST /api/relay/jpyc/move` (Polygon と Amoy だけ)。画面は /create の「受け取った通貨を換金」の中。
+
+### 18.1 flag と前提
+- `NEXT_PUBLIC_ENABLE_SALES_MOVE` (コードの既定 OFF)。build 時に埋め込まれるので、変えたら再デプロイ。OFF の間は route が 404・
+  /create のフォームと /guide/wallet の案内 (#store-wallet) は描かれない。
+- 既存の recover の経路がそろっていること (`NEXT_PUBLIC_ENABLE_JPYC_EIP3009`・`RELAYER_PRIVATE_KEY`・`NEXT_PUBLIC_JPYC_FORWARDER_POLYGON`・
+  `NEXT_PUBLIC_FEE_RECEIVER_ADDRESS`・KV・`RELAY_MAX_GAS_COST_WEI`)。mainnet でガスの上限か KV が無いと 503 (`gas_ceiling_required`・`kv_required`)。
+- 利用料は route が `relayGasFeeValue(137)` をそのまま求める (開示の定数は読まない)。解決の順は `lib/relay/forwarderConfig.ts` の
+  `NEXT_PUBLIC_RELAY_GAS_FEE_JPYC_POLYGON` → Polygon の per-chain 既定 (今は無い) → `NEXT_PUBLIC_RELAY_GAS_FEE_JPYC` → 2 JPYC
+  (`tests/lib/salesMoveDisclosure.test.ts` が順と、上書きで開示とずれることを固定する)。問題になるのは、この順で解決した
+  実効値 (`relayGasFeeValue(137)`) が開示の `DISCLOSED_SALES_MOVE.feeJpyc` と違うとき (開示より多い・少ない利用料を求める)。
+  上書きが 1 つ違うだけではずれないこともある (例: Polygon の上書きが 2 なら、global の上書きが 3 でも実効値は 2)。それでも
+  18.2 の 0. では、どちらの上書きも未設定か開示と同じであることを求める (後で Polygon の上書きを外したときに global が効き出すのを
+  先に防ぐ・実効値だけを見るより厳しい運用の決まり)。
+  ⚠️ `feeDisclosureDivergence` はこの route では動かない (既存の `/api/relay/jpyc` の module の読み込みのときに warn するだけで、
+  徴収も止めない)。だから点灯の前に下の 18.2 の 0. で確かめる。利用料を変えるなら開示の本文と施行日を同じ PR で。
+- 利用料メーター a1 (`NEXT_PUBLIC_ENABLE_USAGE_FEE`) が OFF であること (ON だと forwarder が実効 null になり 503 `relay_not_configured`)。
+- P3 の確認が済んでいること: Amoy (`NEXT_PUBLIC_JPYC_FORWARDER_AMOY` 設定済み) で 1 件通す・「署名の後に再読み込み → status の照会で
+  成立に復旧」を確かめる (2026-11-07 に user が 2 件で確認済み)。本番の少額 (UPBOND Wallet の署名) は、flag が OFF の間は route が
+  404 で試せないので、**点灯の直後**に 18.2 の 5. で行う (2026-11-07 user 承認。UPBOND は 2026-11-06 に同じ種類の署名
+  (forwarder 宛ての receiveWithAuthorization) で本番の JPYC 支払いが通っている。だめなら 18.3 で flag を外す)。
+
+### 18.2 点灯 (merge と同じ日・user 承認)
+0. 利用料の上書きの確認 (点灯の前): Vercel の Production で `NEXT_PUBLIC_RELAY_GAS_FEE_JPYC_POLYGON` と `NEXT_PUBLIC_RELAY_GAS_FEE_JPYC` が
+   未設定か、開示の `DISCLOSED_SALES_MOVE.feeJpyc` (human JPYC) と同じであることを確かめる (値はこの文書・PR・チャットに書かない。
+   Polygon の方が先に効く・0 や数字でない値は次の段へ倒れる)。違えば点灯しない (env を戻すか、開示を改定してから)。
+1. 施行日を点灯日に確定する: `DISCLOSED_SALES_MOVE.effectiveDate`・`LEGAL_ENTITY` の `termsEffectiveDate` / `tokuteiEffectiveDate` /
+   `disclaimerEffectiveDate` / `privacyEffectiveDate`・規約 第 5 条 (12) の「2026 年 11 月 7 日に新設」(ja/en)・`tests/app/legal.test.tsx` の日付の固定値。
+   ずれたら直してから merge (`tests/lib/salesMoveDisclosure.test.ts` が本文の日付と SOT の一致を見る)。
+2. user が Vercel の Production に `NEXT_PUBLIC_ENABLE_SALES_MOVE=1` を入れる (**再デプロイはしない**。NEXT_PUBLIC は build 時に
+   埋め込まれるので、入れただけでは今の本番は変わらない)。
+3. 開示 (規約 第 5 条 (12)・特商法・免責・プライバシー・LP と料金ページの 5 つの場合のカード・料金ページの行・/transparency・
+   public/llms.txt・README・/guide/wallet の案内) の PR を merge する。merge で始まるデプロイが flag ON で build されるので、
+   開示と機能が 1 回のデプロイで同時に出る。`e2e/prodFlags.env` にも flag の行を足す (別 PR でよい)。
+4. 本番の確認 (少額・自社のウォレット):
+   - /create →「受け取った通貨を換金」を開くと「売上をほかのウォレットへ移す」が出る。確認の段の「届く額」「利用料 2 JPYC」「ウォレット
+     から出る合計」が合っている。
+   - 署名 → 成立 → Polygonscan で、送り先に移す額ちょうど・受取口に 2 JPYC・送り元のウォレットから合計が出たこと、送り先への
+     Transfer の from が forwarder であることを確かめる。支払い控えに「届く額」と「利用料」が別の行で残り、お店の履歴には入らない。
+   - /guide/wallet#store-wallet に案内とリンクが出る。料金ページ・LP (5 枚のカード)・規約・特商法・免責・プライバシー・/transparency の表示を確かめる。
+5. 点灯の直後に user が UPBOND Wallet から少額を自分の別のウォレットへ移す (署名が通ること・4. と同じ 3 点を Polygonscan で確かめる)。
+   通らなければ 18.3 で flag を外す (/create のフォームと /guide/wallet の案内が消える・開示は残してよい)。
+6. お知らせ (lib/news.ts + lib/newsIndex.ts・3 文以内) は点灯の後に別 PR (文言は user 承認)。
+
+### 18.3 ロールバック
+- `NEXT_PUBLIC_ENABLE_SALES_MOVE` を外して再デプロイ。route は 404、/create のフォームと /guide/wallet の案内は出なくなる。
+  開示はそのまま残してよい (提供停止を告知する場合は規約の手続きで)。
+- 外す前に送信済みの移動はオンチェーンで進む。`/api/relay/jpyc/status` は flag で止めないので照会できる (画面は出ないので、
+  問い合わせには送り元のウォレットの履歴で確かめてもらう)。
+
+### 18.4 監視
+- Sentry: `relay.move.many_senders` (送り先 × chain × UTC 月で異なる送り元が 5 に届いた・決済の代わりに使われている疑い・月 1 回)・
+  `relay.move.sender_record_failed`・`relay.jpyc.move.*` (gas_ceiling_required / kv_required / relay_not_configured)・
+  応答の失敗は既存の `relay.jpyc.*` と同じイベント名 (route が `makeRespond('relay.jpyc')` を使う)。画面の `sales_move.sign_failed`。
+- 月次メトリクスの `sales_move` (`scripts/metrics-report.mjs`)。日次予算 (500 件/チェーン) は既存の relay と共有。
+- `relay.move.many_senders` が同じ送り先で続けて出たら、§7 の受容の再評価トリガ (利用条件「ご自分のウォレットの間の移動に限る」への違反の疑い)。
+
+### 18.5 TTL の付いていない集計の key の片づけ (user・本番の KV)
+プライバシーポリシーは、濫用の集計の記録を「保存期限を 100 日に設定して保存」と書いている。数の key (`…:senders`・
+`relay:fee-avoid:…:count` / `…:avoided_cjpyc`) は INCR と `EXPIRE … NX` が別の命令で、EXPIRE だけが失敗すると TTL の無い key が
+残りうる (そのとき `kv.incr_expire_failed` が Sentry に出る・`lib/kv.ts`)。組の key (`relay:move:…:{送り元}`) と `…:warned` は
+`SET … EX … NX` で、期限は同じ命令で付く。本番の KV の操作は user が行う (値・アドレスはこの文書・PR・チャットに書かない)。
+1. きっかけ: Sentry に `kv.incr_expire_failed` が出たとき、または月に 1 回。
+2. Upstash のコンソール (CLI) で、TTL の無い key を探す:
+   - `SCAN 0 MATCH relay:move:* COUNT 1000` と `SCAN 0 MATCH relay:fee-avoid:* COUNT 1000` を、pattern ごとに別々に回す。2 回目からは
+     前の応答で返った cursor を `SCAN <cursor> MATCH … COUNT 1000` に渡し、返る cursor が 0 になるまで続ける。
+   - 見つけた key ごとに `TTL <key>`。**`-1` (TTL の無い key) だけを次の片づけの対象にする** (`-2` は消えている・正の数は期限が付いて
+     いるので触らない)。
+3. 片づけ (`-1` の key だけ): key の中の月 (`relay:move:{YYYY-MM}:…`・`relay:fee-avoid:{YYYY-MM}:…`・UTC の月) の**翌月の 1 日
+   (UTC 0 時) が「今 − 100 日」以前**なら、その月の記録はすべて 100 日より古いので `DEL <key>`。それ以外 (月の途中の記録が 100 日に
+   満たないかもしれない) は `EXPIRE <key> 8640000 NX` (100 日・秒。`NX` で、その間に付いた期限を延ばさない) で期限を付ける。
+   例: 2026-11-07 (UTC) なら「今 − 100 日」は 2026-07-30 なので、`2026-06` (翌月 1 日 = 07-01) は DEL、`2026-07` (翌月 1 日 = 08-01) は
+   EXPIRE。
+
 ## サブドメイン運用ルール (2026-10-12)
 
 - open-pay.jp のサブドメインには、第三者が中身を書けるホスティング (docs・blog・status・フォーラムなど) を置かない。

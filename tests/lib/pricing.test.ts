@@ -111,17 +111,19 @@ describe('⑥ 言い回し', () => {
     expect(PRICING.ja.lead).toBe(
       'お客様がガス代を払う通常決済なら、OpenPay の料金はかかりません（モバイル注文を除きます）。',
     );
-    expect(PRICING.ja.summaryTitle).toBe('料金がかかるのは、この 4 つです');
+    // 2026-11-07: 売上をほかのウォレットへ移す (送金 1 回の利用料) を 5 つ目の場合に足した (user 承認「推奨どおり」)。
+    expect(PRICING.ja.summaryTitle).toBe('料金がかかるのは、この 5 つです');
+    expect(PRICING.en.summaryTitle).toBe('Charges apply in these 5 cases');
   });
 
-  it('4 つの場合に、規約での呼び名と払う人を書く', () => {
+  it('5 つの場合に、規約での呼び名と払う人を書く', () => {
     const names = {
-      ja: ['OpenPay 利用料', 'モバイル注文の利用料', 'ガス代相当', 'x402 利用料'],
-      en: ['OpenPay usage fee', 'Mobile order fee', 'Gas equivalent', 'x402 fee'],
+      ja: ['OpenPay 利用料', 'モバイル注文の利用料', 'ガス代相当', 'x402 利用料', '利用料'],
+      en: ['OpenPay usage fee', 'Mobile order fee', 'Gas equivalent', 'x402 fee', 'Fee'],
     } as const;
     const payers = {
-      ja: ['お店が払う', 'お店が払う', '送る方が払う', '買い手が払う'],
-      en: ['Shop pays', 'Shop pays', 'Sender pays', 'Buyer pays'],
+      ja: ['お店が払う', 'お店が払う', '送る方が払う', '買い手が払う', 'お店が払う'],
+      en: ['Shop pays', 'Shop pays', 'Sender pays', 'Buyer pays', 'Shop pays'],
     } as const;
     for (const locale of LOCALES) {
       PRICING[locale].summary.forEach((item, index) => {

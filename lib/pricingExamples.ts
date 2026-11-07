@@ -7,6 +7,7 @@
 //   モバイル注文                       = lib/mobileOrderFee.ts mobileOrderBreakdown (最低額なし)
 //   デジタル商品 (x402・JPYC)          = lib/x402/fee.ts x402FeeBreakdown (買い手が上乗せ)
 //   お店がガス代を肩代わり             = lib/storeDevicePayment.ts STORE_DEVICE_FEE_WEI をお客様の支払いに上乗せ
+//   売上をほかのウォレットへ移す       = app/api/relay/jpyc/move が強制する relayGasFeeValue(137) を移す額に上乗せ
 // 一致は tests/lib/pricingExamples.test.ts が本物の関数と照合して固定する (legal-check 5 の三面一致)。
 //
 // live env は読まない: CI は NEXT_PUBLIC_RECOVER_FEE_BPS が未設定 (= 0) なので、env から計算すると
@@ -17,6 +18,7 @@
 import {
   DISCLOSED_MOBILE_ORDER_FEE,
   DISCLOSED_RECOVER_FEE,
+  DISCLOSED_SALES_MOVE,
   DISCLOSED_STORE_GAS_WALLET,
   DISCLOSED_X402_FEE,
 } from '@/lib/legal';
@@ -28,6 +30,7 @@ import {
   jpycToWei,
   mobileFeeWith,
   percentLabel,
+  salesMoveWith,
   storeGasWith,
   type PricingExample,
   type PricingRates,
@@ -48,6 +51,8 @@ export const PRICING_EXAMPLE_AMOUNTS = {
   preorderSplit: 1_000,
   /** お店がガス代を肩代わりする例の額。 */
   storeGas: 1_000,
+  /** 売上をほかのウォレットへ移す例の額 (移す額)。 */
+  salesMove: 1_000,
 } as const;
 
 /** 開示した料率 (計算機へ props で渡す形)。呼ぶたびに DISCLOSED_* を読む (テストの差し替えが効くように)。 */
@@ -60,6 +65,7 @@ export function disclosedPricingRates(): PricingRates {
     x402Bps: DISCLOSED_X402_FEE.bps,
     x402FloorJpyc: DISCLOSED_X402_FEE.floorJpyc,
     storeGasFeeWei: Number(DISCLOSED_STORE_GAS_WALLET.feeWei),
+    salesMoveFeeJpyc: DISCLOSED_SALES_MOVE.feeJpyc,
   };
 }
 
@@ -110,4 +116,9 @@ export function digitalExample(amountJpyc: number): PricingExample {
 /** お店がガス代を肩代わりして送る。お客様の支払い = 額 + feeWei・お店の受け取り = 額 (ガス代はお店が別に払う)。 */
 export function storeGasExample(amountJpyc: number): PricingExample {
   return storeGasWith(disclosedPricingRates(), jpycToWei(amountJpyc));
+}
+
+/** 売上をほかのウォレットへ移す。ウォレットから出る額 = 移す額 + 利用料・送り先に届く額 = 移す額。 */
+export function salesMoveExample(amountJpyc: number): PricingExample {
+  return salesMoveWith(disclosedPricingRates(), jpycToWei(amountJpyc));
 }

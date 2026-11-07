@@ -20,7 +20,7 @@ describe.each(['ja', 'en'] as const)('%s /pricing', (locale) => {
     return render(await PricingPage({ params: Promise.resolve({ locale }) }));
   }
 
-  it('見出しの並び: h1 → 4 つの場合 (h3) → 計算機の 4 場面 (h3) → 払う人のまとまり (h3) → 機能ごとの 5 行 (h4)', async () => {
+  it('見出しの並び: h1 → 5 つの場合 (h3) → 計算機の 4 場面 (h3) → 払う人のまとまり (h3) → 機能ごとの 6 行 (h4)', async () => {
     await renderPage();
     expect(screen.getByRole('heading', { level: 1, name: content.title })).toBeInTheDocument();
     expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual([
@@ -51,7 +51,7 @@ describe.each(['ja', 'en'] as const)('%s /pricing', (locale) => {
     }
   });
 
-  it('冒頭の文・4 つの場合の料率と払う人・2 つの安心材料・最低額の説明', async () => {
+  it('冒頭の文・5 つの場合の料率と払う人・2 つの安心材料・最低額の説明', async () => {
     const { container } = await renderPage();
     for (const text of [content.lead, ...content.trust, content.calc.floorNote]) {
       expect(screen.getByText(text)).toBeInTheDocument();
@@ -67,11 +67,11 @@ describe.each(['ja', 'en'] as const)('%s /pricing', (locale) => {
     }
   });
 
-  it('機能ごとの 5 行: dl の dt・値・払う人・「くわしく」の中の文', async () => {
+  it('機能ごとの 6 行: dl の dt・値・払う人・「くわしく」の中の文', async () => {
     const { container } = await renderPage();
     const rowLists = container.querySelectorAll('li dl');
     expect(rowLists).toHaveLength(content.rows.length);
-    expect(content.rows).toHaveLength(5);
+    expect(content.rows).toHaveLength(6);
     for (const list of rowLists) {
       expect([...list.querySelectorAll('dt')].map((dt) => dt.textContent)).toEqual([
         content.dtStandard,
@@ -86,7 +86,7 @@ describe.each(['ja', 'en'] as const)('%s /pricing', (locale) => {
       for (const value of [...row.standard, ...row.gasless]) expect(text, row.id).toContain(value.value);
       for (const payer of row.payers) expect(text, row.id).toContain(payer.label);
       const details = item.querySelector('details');
-      // 見える文字は「くわしく」・読み上げは機能名つき (5 つを区別する)。
+      // 見える文字は「くわしく」・読み上げは機能名つき (6 つを区別する)。
       expect(details?.querySelector('summary')?.textContent).toBe(`${content.detailsLabel}（${row.name}）`);
       for (const detail of row.details) expect(details?.textContent, row.id).toContain(detail);
     });

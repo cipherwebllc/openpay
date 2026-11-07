@@ -73,7 +73,7 @@ describe.each(['ja', 'en'] as const)('%s: rendered public fee disclosure', (loca
 
   // チップカードは導入前チェックリスト (start guide) に出る。本文の数字は直書きせず、
   // ガス相当額 (tipFloor) と、適用しない決済額の % (recoverPercent) を差し込む。
-  // (トップの利用料は 2026-10-12 から料金ページと同じ「4 つの場合」のカード = 下の support のテスト)
+  // (トップの利用料は 2026-10-12 から料金ページと同じ「料金がかかる場合」のカード (今は 5 つ) = 下の support のテスト)
   it.each(surfaces.filter(([name]) => name === 'start guide'))('%s: tip card body interpolates the tip floor and the recover percent', async (_, surface) => {
     context.locale = locale;
     const { container } = render(await surface());
@@ -81,9 +81,9 @@ describe.each(['ja', 'en'] as const)('%s: rendered public fee disclosure', (loca
     expect(container).toHaveTextContent(locale === 'ja' ? '決済額の 1.7% は適用しません' : 'the 1.7% does not apply');
   });
 
-  // トップの利用料は料金ページ冒頭と同じ「料金がかかる 4 つの場合」(lib/pricing.ts の summary・料率は DISCLOSED_*)。
+  // トップの利用料は料金ページ冒頭と同じ「料金がかかる 5 つの場合」(lib/pricing.ts の summary・料率は DISCLOSED_*)。
   // 機能ごとの長い説明 (supportFee*Body) はトップに出さない (2026-10-12 user 裁定・料金ページとガイドに残る)。
-  it('support: 料金がかかる 4 つの場合のカード (料金ページと同じ)・リードは料金ページの承認済みの文', async () => {
+  it('support: 料金がかかる 5 つの場合のカード (料金ページと同じ)・リードは料金ページの承認済みの文', async () => {
     context.locale = locale;
     const { container } = render(await LandingSupport());
     const pricing = PRICING[locale];

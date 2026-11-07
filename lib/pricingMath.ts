@@ -22,6 +22,8 @@ export type PricingRates = {
   readonly x402FloorJpyc: number;
   /** お店がガス代を肩代わりして送るときの上乗せ (wei) */
   readonly storeGasFeeWei: number;
+  /** 売上をほかのウォレットへ移すときの利用料 (送金 1 回・JPYC・移す額に上乗せ) */
+  readonly salesMoveFeeJpyc: number;
 };
 
 export type PricingExample = {
@@ -108,6 +110,19 @@ export function digitalWith(rates: PricingRates, amountWei: bigint): PricingExam
 /** お店がガス代を肩代わりして送る。お客様の支払い = 額 + 上乗せ・お店の受け取り = 額 (ガス代はお店が別に払う)。 */
 export function storeGasWith(rates: PricingRates, amountWei: bigint): PricingExample {
   const feeWei = BigInt(rates.storeGasFeeWei);
+  return {
+    amountWei,
+    feeWei,
+    percentPartWei: feeWei,
+    payerPaysWei: amountWei + feeWei,
+    receiverGetsWei: amountWei,
+    floorApplied: false,
+  };
+}
+
+/** 売上をほかのウォレットへ移す。ウォレットから出る額 = 移す額 + 利用料・送り先に届く額 = 移す額 (最低額・料率なし)。 */
+export function salesMoveWith(rates: PricingRates, amountWei: bigint): PricingExample {
+  const feeWei = jpycToWei(rates.salesMoveFeeJpyc);
   return {
     amountWei,
     feeWei,

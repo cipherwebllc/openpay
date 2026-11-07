@@ -24,6 +24,9 @@ vi.mock('@/lib/legal', async (importOriginal) => {
     DISCLOSED_TIP_FEE_MODELS: { ...actual.DISCLOSED_TIP_FEE_MODELS, jpycRelay: { floorJpyc: 4 } },
     DISCLOSED_STORE_GAS_WALLET: { ...actual.DISCLOSED_STORE_GAS_WALLET, feeWei: 7 },
     disclosedStoreGasChains: (locale: 'ja' | 'en') => (locale === 'ja' ? 'ChainA・ChainB' : 'ChainA and ChainB'),
+    // 売上をほかのウォレットへ移す: 利用料 6 JPYC・最低 3 JPYC・チェーン名は関数ごと差し替える (disclosedStoreGasChains と同じ理由)。
+    DISCLOSED_SALES_MOVE: { ...actual.DISCLOSED_SALES_MOVE, feeJpyc: 6, minJpyc: 3, chainNames: ['MoveChain'] },
+    disclosedSalesMoveChains: () => 'MoveChain',
     DISCLOSED_STORE_USDC_PAYMENT: { ...actual.DISCLOSED_STORE_USDC_PAYMENT, chainName: 'StoreChain' },
     DISCLOSED_DUAL_RAIL_USDC: { ...actual.DISCLOSED_DUAL_RAIL_USDC, chainName: 'DualChain', arcChainName: 'DualArcChain' },
     DISCLOSED_CCTP_FEE: { ...actual.DISCLOSED_CCTP_FEE, maxFeeBps: 25, minMaxFeeAtomic: 5_000 },
@@ -36,6 +39,7 @@ vi.mock('@/lib/legal', async (importOriginal) => {
 // x402 1.5%・最低 3: 50 → 0.75 < 3 → 3 / 53。1,000 → 15 / 1,015。10,000 → 150 / 10,150。
 // 計算機は 1,000 JPYC で描かれる (差し替えた料率: ガスレス 1.7%・最低 5 / 店内 2%・事前 4% / x402 1.5%・最低 3)。
 //   ガスレス 1,000 − 17 = 983・店内 1,000 − 20 = 980・事前 1,000 − 40 = 960 (お客様の上乗せ 1,040)・デジタル 1,000 + 15 = 1,015
+// 売上の移動 (利用料 6・最低 3): 1,000 JPYC を移すとウォレットから 1,006 JPYC・送り先に 1,000 JPYC。
 const EXPECTED = {
   ja: [
     '1.7%',
@@ -58,6 +62,11 @@ const EXPECTED = {
     '1,015',
     'ガスレス決済の利用料は、1.7% が 5 JPYC に満たないときは 5 JPYC です（例: 100 JPYC の 1.7% は 1.7 JPYC）。5 JPYC 以下は、ガスレス決済を使えません。',
     '上限は金額の 0.25%。2 USDC 未満の支払いでは 0.005 USDC',
+    '1 回 6 JPYC',
+    '送金 1 回につき 6 JPYC',
+    'ウォレットから 1,006 JPYC',
+    '1 回 3 JPYC 以上',
+    'MoveChain',
   ],
   en: [
     '1.7%',
@@ -75,12 +84,16 @@ const EXPECTED = {
     '1,015',
     'The gasless fee is 5 JPYC when 1.7% comes to less than that (e.g. 1.7% of 100 JPYC is 1.7 JPYC). Gasless payments are not available for 5 JPYC or less.',
     'capped at 0.25% of the amount, or 0.005 USDC for payments under 2 USDC',
+    '6 JPYC per transfer',
+    'sends 1,006 JPYC',
+    'at least 3 JPYC',
+    'MoveChain',
   ],
 } as const;
 
 const CURRENT = {
-  ja: ['最低 2 JPYC', '最低 1 JPYC', '約 2 JPYC', '1 wei', 'Polygon', '990', '1,030', '1,010', '0.1%', '0.001 USDC', '1 USDC 未満'],
-  en: ['minimum 2 JPYC', 'minimum 1 JPYC', 'about 2 JPYC', '1 wei', 'Polygon', '990', '1,030', '1,010', '0.1%', '0.001 USDC', 'under 1 USDC'],
+  ja: ['最低 2 JPYC', '最低 1 JPYC', '約 2 JPYC', '1 wei', 'Polygon', '990', '1,030', '1,010', '0.1%', '0.001 USDC', '1 USDC 未満', '1 回 2 JPYC', '1,002', '1 回 1 JPYC 以上'],
+  en: ['minimum 2 JPYC', 'minimum 1 JPYC', 'about 2 JPYC', '1 wei', 'Polygon', '990', '1,030', '1,010', '0.1%', '0.001 USDC', 'under 1 USDC', '2 JPYC per transfer', '1,002', 'at least 1 JPYC'],
 } as const;
 
 describe.each(['ja', 'en'] as const)('%s: 正本を差し替えると料金ページの数字が全部追従する', (locale) => {

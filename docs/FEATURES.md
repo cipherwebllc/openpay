@@ -122,6 +122,8 @@ The usage fee applies to JPYC gasless (recover) payments and tips, plus mobile o
 
 “The shop pays the gas” (register or a fixed-amount payment QR shown on screen, JPYC on Polygon, Kaia or Avalanche; flag-gated) carries no OpenPay usage fee — the shop’s device pays the gas and, by design, 1 wei is added to the customer’s payment and sent to OpenPay.
 
+“Move sales to another wallet” (`/create`, JPYC on Polygon only; flag-gated) lets a shop move JPYC from its own wallet to another wallet it controls without holding POL: the shop signs once, OpenPay relays the transfer and pays the gas, and a flat **2 JPYC per transfer** is added on top of the amount moved (the destination receives the amount in full; the 1% does not apply).
+
 **Mobile-order system fee (flag-gated; live in production).**
 
 When `NEXT_PUBLIC_ENABLE_MOBILE_ORDER_FEE` is on (production sets `1`; code default off), payments made through a mobile-order storefront (`@handle` / `/order`) carry the OpenPay usage fee at a **mobile-order rate** (the **mobile-order system fee**) — consideration for the mobile-order *system* (shop page, menu, order management, order relay).

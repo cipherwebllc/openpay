@@ -8,8 +8,14 @@ import GuideWalletPage from '@/app/[locale]/guide/wallet/page';
 import { guideNavFor } from '@/lib/guideNav';
 import { payGuideContentFor } from '@/lib/payGuide';
 import { walletGuideContentFor } from '@/lib/walletGuide';
+import { env } from '@/lib/env';
 
 vi.mock('next-intl/server', () => ({ setRequestLocale: vi.fn() }));
+// 売上の移動の案内は flag (NEXT_PUBLIC_ENABLE_SALES_MOVE) で出し分ける。既定は OFF (本番の今と同じ)・テストごとに切り替える。
+vi.mock('@/lib/env', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/env')>();
+  return { ...actual, env: { ...actual.env, enableSalesMove: false } };
+});
 vi.mock('@/components/AppShell', () => ({ AppShell: ({ children }: { children: React.ReactNode }) => <main>{children}</main> }));
 
 describe('/guide/wallet', () => {
@@ -96,5 +102,36 @@ describe('/guide/wallet', () => {
     const current = container.querySelectorAll('nav a[aria-current="page"]');
     expect([...current].map((a) => a.getAttribute('href'))).toEqual([`/${locale}/guide/wallet`, `/${locale}/guide/wallet`]);
     expect(article.querySelectorAll('[aria-label]')).toHaveLength(0);
+  });
+
+  // flag を外したら、見えない機能へのリンクを残さない (案内の文もリンクも描かない)。
+  it.each(['ja', 'en'] as const)('%s: 売上の移動の案内は flag ON のときだけ (注意の囲みの中・UPBOND Wallet のリンクの前)', async (locale) => {
+    const c = walletGuideContentFor(locale);
+    const mutable = env as { enableSalesMove: boolean };
+    try {
+      mutable.enableSalesMove = false;
+      const off = render(await GuideWalletPage({ params: Promise.resolve({ locale }) }));
+      expect(within(off.container).queryByText(c.storeMoveNote)).toBeNull();
+      expect(within(off.container).queryByRole('link', { name: c.storeMoveLink.label })).toBeNull();
+      off.unmount();
+
+      mutable.enableSalesMove = true;
+      const on = render(await GuideWalletPage({ params: Promise.resolve({ locale }) }));
+      const store = within(on.container).getByRole('heading', { level: 2, name: c.storeTitle }).closest('section')!;
+      const note = within(store).getByText(c.storeMoveNote);
+      const link = within(store).getByRole('link', { name: c.storeMoveLink.label });
+      expect(link).toHaveAttribute('href', `/${locale}/create`);
+      expect(link).not.toHaveAttribute('target');
+      expect(link).not.toHaveAttribute('aria-label');
+      // ガス代の注意 (storeNote) と同じ囲みの中で、その後ろ。UPBOND Wallet を開くリンクより前。
+      const storeNote = within(store).getByText(c.storeNote);
+      expect(storeNote.parentElement).toBe(note.parentElement);
+      expect(storeNote.compareDocumentPosition(note) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      const upbond = within(store).getByRole('link', { name: c.storeLink.label });
+      expect(link.compareDocumentPosition(upbond) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      on.unmount();
+    } finally {
+      mutable.enableSalesMove = false;
+    }
   });
 });

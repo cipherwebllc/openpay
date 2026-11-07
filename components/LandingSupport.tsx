@@ -1,6 +1,6 @@
-// トップの料金の節 (料金がかかる 4 つの場合)。Server Component。「はじめ方」の後・FAQ の前に置く。
+// トップの料金の節 (料金がかかる 5 つの場合)。Server Component。「はじめ方」の後・FAQ の前に置く。
 //
-// 料金ページ (/pricing) の冒頭と同じ「料金がかかる 4 つの場合」のカード (lib/pricing.ts の summary・料率は
+// 料金ページ (/pricing) の冒頭と同じ「料金がかかる 5 つの場合」のカード (lib/pricing.ts の summary・料率は
 // lib/legal.ts の DISCLOSED_* から) と、料金ページへの入口だけを出す (2026-10-12 user 裁定)。
 // 運営の応援カードは締め (LandingTrust の LandingSupportCard) に移した。
 
@@ -20,8 +20,9 @@ export async function LandingSupport() {
     <section className="mt-16 sm:mt-28">
       <LandingSectionHeader eyebrow={t('eyebrowPricing')} title={pricing.summaryTitle} lead={pricing.lead} />
 
-      {/* 料金がかかる 4 つの場合 (料金ページ /pricing の冒頭と同じカード・料率は lib/legal.ts の DISCLOSED_* から)。
-          機能ごとの説明と計算例は料金ページに任せる (2026-10-12 user 裁定: トップは 4 つの場合 + 料金ページへの入口)。 */}
+      {/* 料金がかかる 5 つの場合 (料金ページ /pricing の冒頭と同じカード・料率は lib/legal.ts の DISCLOSED_* から)。
+          機能ごとの説明と計算例は料金ページに任せる (2026-10-12 user 裁定: トップは料金がかかる場合 + 料金ページへの入口)。
+          5 つ目の「売上をほかのウォレットへ移す」は 2026-11-07 に足した (決済ではない・お店が払う利用料)。 */}
       <ul className="mx-auto mt-8 grid max-w-4xl grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4">
         {pricing.summary.map((item) => (
           <SummaryCard key={item.id} item={item} />
