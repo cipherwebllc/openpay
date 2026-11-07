@@ -16,6 +16,16 @@
 // ambiguous の解き方は決済 hook と同じ: 署名は保存せず、公開 metadata (openpay:move-intent:v1・決済の枠とは別のキー) だけを
 // 保存して /api/relay/jpyc/status を nonce で照会する (lib/relay/relayIntentRecovery.ts)。ページを開き直したときも同じ。
 //
+// 署名の試みは 1 つずつ (入口を同期で直列化) で、試みごとに番号を持つ。unmount で番号を進めて古い試みを無効にし、読み直し・
+// 署名の await の後ごとに番号を確かめる。無効になった試みは枠を書かず POST もしない (画面を離れて戻り、新しい試みが送信済みに
+// なった後で古い署名が返ってきても、古い試みが枠を上書きして 2 本目を送らない)。POST を始めた後は今までどおり保持と照会で解く。
+//
+// 受容した限界 (決済 hook と同じ): 202 pending の後に tx が revert すると authorization は未使用に戻るが、server の冪等の記録
+// (relay:idem: の hash・lib/relay/relayGuards.ts の IDEM_TTL_SEC = 1,800 秒) が残る間は /api/relay/jpyc/status が
+// indeterminate を返す (hash があるのに unused を新しい署名の許可に使わない・status route)。その間この画面は「送信済み・確定待ち」の
+// まま再署名を止め、記録が消えて署名の期限切れ未使用がチェーンで証明されてから (expired) 入力に戻る。1 回の revert を理由に
+// 解除する道は作らない (置換や再送と区別できない)。
+//
 // 決済でもチップでもないので、お店の履歴 (lib/history・売上・CSV・集計) には入れない。支払う側の控え (lib/payerReceipt) にだけ
 // 「届く額」と「利用料」を別の項目で残す (§2.2・Q6)。署名・鍵・秘密の値はログに出さない (logger には chainId と段階だけ)。
 
@@ -237,6 +247,11 @@ export function useSalesMove(
   const labelsRef = useRef(labels);
   labelsRef.current = labels;
   const mountedRef = useRef(true);
+  // 署名の試みの番号。新しい試みと unmount で進め、await の後に自分の番号でなくなった試みは何も書かずに止める。
+  const attemptRef = useRef(0);
+  // 入口の直列化 (同期の印)。'claimed' = move が mutate を呼んだ (mutationFn はまだ) ・'running' = mutationFn の中。
+  // 二度押し・並行の mutateAsync で 2 つ目の署名を求めない。
+  const entryRef = useRef<'idle' | 'claimed' | 'running'>('idle');
   const recoveryPromiseRef = useRef<{ retained: RetainedMove; promise: Promise<SalesMoveResult> } | null>(null);
   const recoverySleepRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const recoveryWakeRef = useRef<(() => void) | null>(null);
@@ -257,6 +272,8 @@ export function useSalesMove(
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      // 署名を待っている試みを無効にする (署名が後から返っても、この hook は枠を書かず POST もしない)。
+      attemptRef.current += 1;
       if (recoverySleepRef.current !== null) clearTimeout(recoverySleepRef.current);
       recoveryWakeRef.current?.();
       recoveryWakeRef.current = null;
@@ -456,8 +473,8 @@ export function useSalesMove(
     [recordReceipt, resolveAmbiguous, setRetained],
   );
 
-  const mutation = useMutation<SalesMoveResult, Error, SalesMoveParams>({
-    mutationFn: async ({ destination, amount }) => {
+  const runMove = useCallback(
+    async ({ destination, amount }: SalesMoveParams): Promise<SalesMoveResult> => {
       // 未解決の保持がある間は、呼出側が誤って通常の mutate を呼んでも新しい署名を出さない (同じ payload の再送か照会だけ)。
       const retained = retainedRef.current;
       if (retained) {
@@ -475,6 +492,9 @@ export function useSalesMove(
       if (!forwarder) throw new Error('relay_not_configured');
       const from = address as Address;
       const fee = relayGasFeeValue(chainId);
+      const attempt = (attemptRef.current += 1);
+      // この試みがまだ有効か (unmount・新しい試みで無効になる)。await の後ごとに確かめ、無効なら枠も POST も触らずに止める。
+      const stillCurrent = () => mountedRef.current && attemptRef.current === attempt;
 
       // 署名の前にウォレットにある JPYC を読み直す (画面に出した値は古いことがある)。足りない署名は出させない。
       if (!publicClient) throw new Error('balance_unavailable');
@@ -490,6 +510,7 @@ export function useSalesMove(
         // 読めないまま署名させない (足りない署名は server の検証で落ちるだけだが、確かめずに署名を求めない)。
         throw new Error('balance_unavailable');
       }
+      if (!stillCurrent()) throw new Error('move_cancelled');
       if (amount + fee > balance) throw new Error('insufficient_balance');
 
       const validBefore = BigInt(Math.floor(Date.now() / 1000) + AUTHORIZATION_VALIDITY_WINDOW_SEC);
@@ -533,6 +554,11 @@ export function useSalesMove(
         throw err;
       }
       logger.info('sales_move.sign_completed', { chainId });
+      if (!stillCurrent()) {
+        // 署名を待つ間に画面を離れた (または新しい試みが始まった)。この署名は送らず、保存もしない (送らない署名は期限で失効する)。
+        logger.info('sales_move.sign_abandoned', { chainId });
+        throw new Error('move_cancelled');
+      }
 
       // gasMode・feeKind・tipMessage は送らない (route は利用料を relay の gas floor に固定し、送られても読まない)。
       // feeReceiver も送らない (server 権威・nonce で一致を強制する)。
@@ -549,6 +575,20 @@ export function useSalesMove(
       };
       intent.issuedAt = Date.now();
       return send(payload, intent);
+    },
+    [address, chainId, deployment.address, deployment.chainId, publicClient, resolveAmbiguous, send, walletClient],
+  );
+
+  const mutation = useMutation<SalesMoveResult, Error, SalesMoveParams>({
+    mutationFn: async (variables) => {
+      // 入口の直列化: 試みの途中で入ってきた 2 つ目 (並行の mutateAsync) は署名を求めずに断る。印は await より前に同期で立てる。
+      if (entryRef.current === 'running') throw new Error('move_in_progress');
+      entryRef.current = 'running';
+      try {
+        return await runMove(variables);
+      } finally {
+        entryRef.current = 'idle';
+      }
     },
   });
 
@@ -568,6 +608,10 @@ export function useSalesMove(
       ) {
         return;
       }
+      // 二度押し: 前の押下の mutationFn が始まる前 (claimed) も、その途中 (running) も、新しい mutation を作らない
+      // (react-query の observer は最後の mutation だけを見るので、断った 2 つ目で 1 つ目の結果を画面から消さない)。
+      if (entryRef.current !== 'idle') return;
+      entryRef.current = 'claimed';
       setRestoredResult(null);
       setRestoredError(null);
       mutationMutate(variables);

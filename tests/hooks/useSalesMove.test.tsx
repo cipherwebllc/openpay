@@ -437,13 +437,8 @@ describe('useSalesMove: 開き直したときの照会', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('照会で revert が分かれば成立しなかった結果を出し、枠を消す', async () => {
-    storeIntent();
-    h.resolveRelayIntent.mockResolvedValueOnce({ kind: 'settled', txHash: TX, success: false });
-    const view = renderHook(() => useSalesMove(DEPLOYMENT, LABELS), { wrapper: wrapper() });
-    await waitFor(() => expect(view.result.current.result).toEqual({ txHash: TX, success: false }));
-    expect(savedIntent()).toBeNull();
-  });
+  // revert した tx の照会は status route の実際の応答 (冪等の記録がある間は indeterminate) で
+  // tests/hooks/useSalesMove.statusContract.test.tsx が固定する (ここで settled + success:false を作らない・route は返さない)。
 
   it('期限切れで使われなかった枠は消し、何も出さない (次は新しい署名を許す)', async () => {
     storeIntent();
@@ -468,5 +463,119 @@ describe('useSalesMove: 開き直したときの照会', () => {
     await press(view);
     expect(h.signTypedData).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('useSalesMove: 署名の試みの直列化と unmount (Codex MUST・PR #1040)', () => {
+  function deferredSignature() {
+    let resolve: (sig: Hex) => void = () => undefined;
+    h.signTypedData.mockImplementationOnce(() => new Promise<Hex>((r) => (resolve = r)));
+    return (sig: Hex) => resolve(sig);
+  }
+
+  it('署名を待つ間に unmount → 開き直して新しい試みが送信済み → 古い署名が返っても、古い試みは POST も枠の上書きもしない', async () => {
+    const resolveOld = deferredSignature();
+    const viewA = await mount();
+    let oldOutcome: Promise<{ result?: unknown; error?: unknown }> = Promise.resolve({});
+    act(() => {
+      oldOutcome = viewA.result.current.mutateAsync({ destination: DEST, amount: AMOUNT }).then(
+        (result) => ({ result }),
+        (error: unknown) => ({ error }),
+      );
+    });
+    await waitFor(() => expect(h.signTypedData).toHaveBeenCalledTimes(1));
+    viewA.unmount();
+
+    // 開き直した画面で新しい試み (送信済み・未確定)。
+    replies = [{ status: 202, body: { ok: false, pending: true, txHash: TX } }];
+    const viewB = await mount();
+    const fresh = await press(viewB, { destination: DEST, amount: AMOUNT * 2n });
+    expect(fresh.result).toEqual({ txHash: TX, success: false, pending: true });
+    const freshNonce = h.signTypedData.mock.calls[1][0].message.nonce;
+    expect(savedIntent()?.nonce).toBe(freshNonce);
+
+    // 古い署名が後から返る。
+    await act(async () => {
+      resolveOld(`0x${'cd'.repeat(65)}`);
+      await oldOutcome;
+    });
+    const old = await oldOutcome;
+    expect((old.error as Error).message).toBe('move_cancelled');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(posted()[0].merchantValue).toBe((AMOUNT * 2n).toString());
+    expect(savedIntent()?.nonce).toBe(freshNonce);
+    expect(savedAtPost).toHaveLength(1);
+    expect(vi.mocked(logger.info).mock.calls.map(([name]) => name)).toContain('sales_move.sign_abandoned');
+    viewB.unmount();
+  });
+
+  it('ウォレットの JPYC の読み直しを待つ間に unmount したら、署名を求めず枠も書かない', async () => {
+    let resolveBalance: (v: bigint) => void = () => undefined;
+    h.readContract.mockImplementationOnce(() => new Promise<bigint>((r) => (resolveBalance = r)));
+    const view = await mount();
+    let outcome: Promise<unknown> = Promise.resolve();
+    act(() => {
+      outcome = view.result.current.mutateAsync({ destination: DEST, amount: AMOUNT }).catch((error: unknown) => error);
+    });
+    await waitFor(() => expect(h.readContract).toHaveBeenCalledTimes(1));
+    view.unmount();
+    await act(async () => {
+      resolveBalance(1_000n * 10n ** 18n);
+      await outcome;
+    });
+    expect(((await outcome) as Error).message).toBe('move_cancelled');
+    expect(h.signTypedData).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(savedIntent()).toBeNull();
+  });
+
+  it('試みの途中に入った 2 つ目 (並行の mutateAsync) は署名を求めずに断り、1 つ目はそのまま成立する', async () => {
+    const resolveFirst = deferredSignature();
+    const view = await mount();
+    let first: Promise<unknown> = Promise.resolve();
+    act(() => {
+      first = view.result.current.mutateAsync({ destination: DEST, amount: AMOUNT });
+    });
+    await waitFor(() => expect(h.signTypedData).toHaveBeenCalledTimes(1));
+    const second = await press(view);
+    expect((second.error as Error).message).toBe('move_in_progress');
+    await act(async () => {
+      resolveFirst(SIGNATURE);
+      await first;
+    });
+    expect(await first).toEqual({ txHash: TX, success: true });
+    expect(h.signTypedData).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('二度押し (同じ tick に move を 2 回) でも署名は 1 回・POST も 1 回で、結果は 1 つ目のもの', async () => {
+    const view = await mount();
+    await act(async () => {
+      view.result.current.move({ destination: DEST, amount: AMOUNT });
+      view.result.current.move({ destination: DEST, amount: AMOUNT * 3n });
+    });
+    await waitFor(() => expect(view.result.current.result).toEqual({ txHash: TX, success: true }));
+    expect(h.signTypedData).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(posted()[0].merchantValue).toBe(AMOUNT.toString());
+    expect(view.result.current.error).toBeNull();
+  });
+
+  it('署名を待つ間の move は新しい mutation を作らない (結果を画面から消さない)', async () => {
+    const resolveFirst = deferredSignature();
+    const view = await mount();
+    await act(async () => {
+      view.result.current.move({ destination: DEST, amount: AMOUNT });
+    });
+    await waitFor(() => expect(h.signTypedData).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      view.result.current.move({ destination: DEST, amount: AMOUNT });
+    });
+    await act(async () => {
+      resolveFirst(SIGNATURE);
+    });
+    await waitFor(() => expect(view.result.current.result).toEqual({ txHash: TX, success: true }));
+    expect(h.signTypedData).toHaveBeenCalledTimes(1);
+    expect(view.result.current.error).toBeNull();
   });
 });
