@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest';
 import { act, renderHook, waitFor } from '@testing-library/react';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider, onlineManager } from '@tanstack/react-query';
 import { getAddress, type Address, type Hex } from 'viem';
 import { kairos, polygon } from 'viem/chains';
-import type { ReactNode } from 'react';
+import { StrictMode, type ReactNode } from 'react';
 
 // wagmi は境界モック。signTypedData の spy で署名要求/解決/拒否/失敗を制御する。
 vi.mock('wagmi', () => ({
@@ -2249,5 +2249,258 @@ describe('useJpycEip3009Payment — 記録用の送金元 lastSignedFrom (第 9 
     expect(signTypedData).toHaveBeenCalledOnce();
     expect(JSON.parse((fetchSpy.mock.calls[1][1] as RequestInit).body as string).from).toBe(CUSTOMER);
     expect(result.current.lastSignedFrom).toBe(CUSTOMER);
+  });
+});
+
+// 画面を離れた (unmount した) hook の試みは、署名の後でも POST も復旧の枠 (openpay:relay-intent:v1) の保存もしない。
+// 離れて開き直した画面 (新しい hook) で払い直して成立した後で、古い署名の承認や止まっていた再送 (IP 制限の後) が動いても、
+// 2 本目を送らず枠も上書きしない (nonce が別なので、送れば両方成立する = 二重払い)。POST を始めた後は取り消さない。
+describe('useJpycEip3009Payment — 画面を離れた後の試みは POST も枠の保存もしない (unmount)', () => {
+  const VALUE = 300n * 10n ** 18n;
+  const PENDING_TX = `0x${'c'.repeat(64)}` as Hex;
+
+  type RelayReply = 'ok' | 'pending' | 'ip_rate_limited';
+  // relay POST の応答を順に返す (尽きたら成功)。POST の時点の枠を控える (POST の前に保存しているか・上書きしたか)。
+  let relayReplies: RelayReply[] = [];
+  let savedAtPost: (string | null)[] = [];
+
+  function relayResponse(reply: RelayReply): Response {
+    const headers = { 'content-type': 'application/json' };
+    if (reply === 'pending') {
+      return new Response(JSON.stringify({ ok: false, pending: true, txHash: PENDING_TX }), { status: 202, headers });
+    }
+    if (reply === 'ip_rate_limited') {
+      return new Response(JSON.stringify({ ok: false, error: 'ip_rate_limited' }), { status: 429, headers });
+    }
+    return new Response(JSON.stringify({ ok: true, txHash: `0x${'b'.repeat(64)}` }), { status: 200, headers });
+  }
+
+  function relayPosts(): Record<string, unknown>[] {
+    return fetchSpy.mock.calls
+      .filter(([url]) => url === '/api/relay/jpyc')
+      .map(([, init]) => JSON.parse((init as RequestInit).body as string) as Record<string, unknown>);
+  }
+
+  function savedIntent(): RelayIntentMetadata | null {
+    const raw = window.sessionStorage.getItem(RELAY_INTENT_STORAGE_KEY);
+    return raw === null ? null : (JSON.parse(raw) as RelayIntentMetadata);
+  }
+
+  async function mountHook(wrapper: (props: { children: ReactNode }) => ReactNode = makeWrapper()) {
+    const view = renderHook(() => useJpycEip3009Payment(jpycDep), { wrapper });
+    await waitFor(() => expect(view.result.current.isRestoring).toBe(false));
+    return view;
+  }
+
+  // 古い hook から遅れて送られるものが無いことを見るための待ち (timer・照会・待ち行列のどれも POST しない)。
+  async function settle(): Promise<void> {
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 30));
+    });
+  }
+
+  beforeEach(() => {
+    relayReplies = [];
+    savedAtPost = [];
+    vi.mocked(jpycForwarderFor).mockReturnValue(null);
+    mount();
+    fetchSpy.mockImplementation(async (url: string) => {
+      if (url !== '/api/relay/jpyc') {
+        return new Response(JSON.stringify({ ok: true, state: 'indeterminate' }), { status: 200 });
+      }
+      savedAtPost.push(window.sessionStorage.getItem(RELAY_INTENT_STORAGE_KEY));
+      return relayResponse(relayReplies.shift() ?? 'ok');
+    });
+  });
+
+  it('通常の支払い: 署名を待つ間に unmount → 開き直した hook で払い直して送信済み → 古い署名が返っても POST も枠の上書きもしない', async () => {
+    let resolveOld: (signature: Hex) => void = () => undefined;
+    signTypedData.mockImplementationOnce(() => new Promise<Hex>((resolve) => { resolveOld = resolve; }));
+    const viewA = await mountHook();
+    act(() => viewA.result.current.mutate({ merchant: MERCHANT, value: VALUE }));
+    await waitFor(() => expect(signTypedData).toHaveBeenCalledTimes(1));
+    viewA.unmount();
+
+    // 開き直した画面で払い直す (送信済み・未確定 = 枠が残る)。
+    relayReplies = ['pending'];
+    const viewB = await mountHook();
+    act(() => viewB.result.current.mutate({ merchant: MERCHANT, value: VALUE * 2n }));
+    await waitFor(() => expect(viewB.result.current.data?.pending).toBe(true));
+    const freshNonce = signTypedData.mock.calls[1][0].message.nonce as Hex;
+    expect(savedIntent()?.nonce).toBe(freshNonce);
+
+    // 古い署名の画面でも承認した。
+    await act(async () => {
+      resolveOld(`0x${'cd'.repeat(65)}` as Hex);
+    });
+    await settle();
+    expect(relayPosts()).toHaveLength(1);
+    expect(relayPosts()[0].value).toBe((VALUE * 2n).toString());
+    expect(savedAtPost).toHaveLength(1);
+    expect(savedIntent()?.nonce).toBe(freshNonce);
+    expect(vi.mocked(logger.info).mock.calls.map(([name]) => name)).toContain('payment.sign_abandoned');
+    expect(viewB.result.current.data?.pending).toBe(true);
+    viewB.unmount();
+  });
+
+  it('recover の部品の読み込みを待つ間に unmount したら、署名を求めず POST も枠の保存もしない', async () => {
+    vi.mocked(jpycForwarderFor).mockReturnValue('0x3333333333333333333333333333333333333333');
+    let releaseChunk: () => void = () => undefined;
+    const chunkGate = new Promise<void>((resolve) => { releaseChunk = resolve; });
+    vi.doMock('@/lib/relay/forwarderIntent', async () => {
+      await chunkGate;
+      return vi.importActual<typeof import('@/lib/relay/forwarderIntent')>('@/lib/relay/forwarderIntent');
+    });
+    try {
+      const view = await mountHook();
+      act(() => view.result.current.mutate({ merchant: MERCHANT, value: VALUE }));
+      // mutationFn は始まり、recover の部品の読み込みを待っている (まだ署名を求めていない)。
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 10));
+      });
+      expect(view.result.current.isPending).toBe(true);
+      expect(signTypedData).not.toHaveBeenCalled();
+      view.unmount();
+      await act(async () => {
+        releaseChunk();
+      });
+      await settle();
+      expect(signTypedData).not.toHaveBeenCalled();
+      expect(relayPosts()).toHaveLength(0);
+      expect(savedIntent()).toBeNull();
+    } finally {
+      vi.doUnmock('@/lib/relay/forwarderIntent');
+    }
+  });
+
+  it('IP 制限 (429) の後の再送が react-query の待ち行列にある間に unmount → 古い再送は POST も枠の保存もしない・開き直した hook は新しい署名で払える', async () => {
+    relayReplies = ['ip_rate_limited'];
+    const viewA = await mountHook();
+    act(() => viewA.result.current.mutate({ merchant: MERCHANT, value: VALUE }));
+    await waitFor(() => expect(isRelayIpRateLimitedError(viewA.result.current.error)).toBe(true));
+    expect(viewA.result.current.hasActiveIntent).toBe(true);
+    expect(savedIntent()).toBeNull();
+    const oldNonce = relayPosts()[0].nonce;
+
+    // 再送を始めた (mutation は作ったが mutationFn はまだ) 直後に、同じ tick で画面を離れる。
+    act(() => {
+      viewA.result.current.retryRelay();
+      viewA.unmount();
+    });
+    await settle();
+    expect(relayPosts()).toHaveLength(1);
+    expect(savedIntent()).toBeNull();
+
+    // 開き直した画面: 枠は空 (429 は冪等の claim より前の拒否で、その POST は何も動かしていない) → 新しい署名で払える。
+    relayReplies = ['pending'];
+    const viewB = await mountHook();
+    expect(viewB.result.current.hasActiveIntent).toBe(false);
+    act(() => viewB.result.current.mutate({ merchant: MERCHANT, value: VALUE * 2n }));
+    await waitFor(() => expect(viewB.result.current.data?.pending).toBe(true));
+    expect(signTypedData).toHaveBeenCalledTimes(2);
+    expect(relayPosts()).toHaveLength(2);
+    expect(relayPosts()[1].nonce).not.toBe(oldNonce);
+    expect(savedIntent()?.nonce).toBe(relayPosts()[1].nonce);
+    await settle();
+    expect(relayPosts()).toHaveLength(2);
+    expect(savedIntent()?.nonce).toBe(relayPosts()[1].nonce);
+    viewB.unmount();
+  });
+
+  it('IP 制限 (429) の後の再送が offline で止まっている間に unmount → 開き直した後で online に戻っても、止まっていた再送は POST も枠の保存もしない', async () => {
+    // アプリと同じく 1 つの QueryClient を共有する (止まった mutation は QueryClient が online で再開する・app/providers.tsx)。
+    const qc = new QueryClient({ defaultOptions: { mutations: { retry: false }, queries: { retry: false } } });
+    const shared = ({ children }: { children: ReactNode }) => <QueryClientProvider client={qc}>{children}</QueryClientProvider>;
+    relayReplies = ['ip_rate_limited'];
+    const viewA = await mountHook(shared);
+    act(() => viewA.result.current.mutate({ merchant: MERCHANT, value: VALUE }));
+    await waitFor(() => expect(isRelayIpRateLimitedError(viewA.result.current.error)).toBe(true));
+
+    onlineManager.setOnline(false);
+    try {
+      await act(async () => {
+        viewA.result.current.retryRelay();
+      });
+      // offline なので mutationFn は始まらない (POST も無い)。
+      expect(qc.getMutationCache().getAll().some((m) => m.state.isPaused)).toBe(true);
+      expect(relayPosts()).toHaveLength(1);
+      viewA.unmount();
+      const viewB = await mountHook(shared);
+      // online に戻ると、止まっていた A の再送が再開する → 画面を離れた hook の試みなので何もしない。
+      await act(async () => {
+        onlineManager.setOnline(true);
+        await new Promise((r) => setTimeout(r, 30));
+      });
+      expect(relayPosts()).toHaveLength(1);
+      expect(savedAtPost).toHaveLength(1);
+      expect(savedIntent()).toBeNull();
+
+      relayReplies = ['pending'];
+      act(() => viewB.result.current.mutate({ merchant: MERCHANT, value: VALUE * 2n }));
+      await waitFor(() => expect(viewB.result.current.data?.pending).toBe(true));
+      expect(relayPosts()).toHaveLength(2);
+      expect(relayPosts()[1].value).toBe((VALUE * 2n).toString());
+      expect(savedIntent()?.nonce).toBe(relayPosts()[1].nonce);
+      viewB.unmount();
+    } finally {
+      onlineManager.setOnline(true);
+    }
+  });
+
+  it.each([
+    ['応答が失われた (fetch の失敗)', 'network'],
+    ['202 pending', 'pending'],
+  ] as const)('POST を始めた後の unmount は取り消さない: %s でも枠が残り、開き直した hook は同じ nonce の照会だけで再署名しない', async (_label, outcome) => {
+    let finishPost: () => void = () => undefined;
+    fetchSpy.mockImplementation((url: string) => {
+      if (url !== '/api/relay/jpyc') {
+        return Promise.resolve(new Response(JSON.stringify({ ok: true, state: 'indeterminate' }), { status: 200 }));
+      }
+      savedAtPost.push(window.sessionStorage.getItem(RELAY_INTENT_STORAGE_KEY));
+      return new Promise<Response>((resolve, reject) => {
+        finishPost = () => (outcome === 'network' ? reject(new TypeError('Failed to fetch')) : resolve(relayResponse('pending')));
+      });
+    });
+    const viewA = await mountHook();
+    act(() => viewA.result.current.mutate({ merchant: MERCHANT, value: VALUE }));
+    await waitFor(() => expect(relayPosts()).toHaveLength(1));
+    const nonce = relayPosts()[0].nonce;
+    // POST の前に公開 metadata を保存している (送ったかもしれないものの復旧の枠)。
+    expect(savedAtPost).toHaveLength(1);
+    expect(savedIntent()?.nonce).toBe(nonce);
+    viewA.unmount();
+    // 送った後の応答の扱いは今までどおり (取り消さない・枠を消さない)。
+    await act(async () => {
+      finishPost();
+    });
+    await settle();
+    expect((fetchSpy.mock.calls[0][1] as RequestInit).signal).toBeUndefined();
+    expect(savedIntent()?.nonce).toBe(nonce);
+
+    const viewB = await mountHook();
+    expect(viewB.result.current.restoredIntent?.nonce).toBe(nonce);
+    expect(viewB.result.current.hasActiveIntent).toBe(true);
+    act(() => viewB.result.current.mutate({ merchant: MERCHANT, value: VALUE }));
+    await settle();
+    expect(signTypedData).toHaveBeenCalledTimes(1);
+    expect(relayPosts()).toHaveLength(1);
+    expect(savedIntent()?.nonce).toBe(nonce);
+    viewB.unmount();
+  });
+
+  it('StrictMode の mount→unmount→mount の後に押した正当な 1 回目は止めない (署名 1 回・POST 1 回で成立)', async () => {
+    const Base = makeWrapper();
+    const strict = ({ children }: { children: ReactNode }) => (
+      <StrictMode>
+        <Base>{children}</Base>
+      </StrictMode>
+    );
+    const view = await mountHook(strict);
+    act(() => view.result.current.mutate({ merchant: MERCHANT, value: VALUE }));
+    await waitFor(() => expect(view.result.current.data?.success).toBe(true));
+    expect(signTypedData).toHaveBeenCalledTimes(1);
+    expect(relayPosts()).toHaveLength(1);
+    expect(view.result.current.error).toBeNull();
+    view.unmount();
   });
 });

@@ -542,6 +542,16 @@ export function useJpycEip3009Payment(
       order,
       orderLinkKey,
     }) => {
+      // 何の波及を断つか: 画面を離れた (unmount した) hook の試みが、離れた後に POST と復旧の枠 (openpay:relay-intent:v1)
+      // の保存へ進むこと。react-query の mutation は (アプリで 1 つの) QueryClient の MutationCache に残るので、mutate と
+      // 同じ tick に unmount した試みは unmount の後に mutationFn を始め、offline で止まった (networkMode 'online' の paused)
+      // 試みは unmount の後でも online に戻ると再開する。開き直した画面 (新しい hook) で払い直して成立した後で、古い hook が保持した payload
+      // (IP 制限の後の再送) を POST すると二重払いになり、枠も古い intent で上書きされる。ここで止めれば、下の再送の分岐も
+      // 新しい署名の分岐も何もしない (再送の分岐はこの確認から POST の開始まで await を挟まない)。
+      // 番号 (useSalesMove の ticket) でなく mountedRef で足りる: unmount した instance の ref は false のまま戻らず、
+      // 試みを止めたいのはこの hook が画面から外れたときだけ (同じ mount の中の並行の試みはここでは扱わない)。React の
+      // StrictMode の mount→unmount→mount は effect が同期で true に戻すので、その後に押された正当な 1 回目は止めない。
+      if (!mountedRef.current) throw new Error('payment_cancelled');
       // 記録用の送金元は試みごとに決め直す (前の試みの from を、署名の前に止まった次の試みの記録へ持ち越さない)。
       lastSignedFromRef.current = undefined;
       // A new orderId must not bypass a still-live payment to the same merchant.
@@ -644,6 +654,9 @@ export function useJpycEip3009Payment(
       const signWithLogging = async (typed: Parameters<
         NonNullable<typeof walletClient>['signTypedData']
       >[0]): Promise<Hex> => {
+        // 何の波及を断つか: 注文の束縛・recover の部品の読み込み (上の await import) を待つ間に画面を離れた試みが、離れた
+        // 後でウォレットに署名を求めること (署名しても下の確認で送らないので、求めない)。
+        if (!mountedRef.current) throw new Error('payment_cancelled');
         logger.info('payment.sign_requested', {
           path: 'jpyc-relay',
           chainId,
@@ -809,7 +822,15 @@ export function useJpycEip3009Payment(
 
       // Only a resolved signature can leave a restorable order. Storage failure discards it
       // before POST, so navigation during a wallet prompt cannot block a subsequent checkout.
-      if (bind && !mountedRef.current) throw new Error('payment_cancelled');
+      // 通常の支払い (/pay・/tip・束縛しない /checkout) も同じ: 署名を待つ間に画面を離れた試みは、署名が返っても POST も
+      // 枠の保存もしない。何の波及を断つか: 離れて開き直した画面 (新しい hook) で払い直して成立した後で、古い署名の画面でも
+      // 承認すると、古い hook がその payload を POST して二重払いになる (nonce が別なので両方成立する)。枠も古い intent で
+      // 上書きされる。送らない署名は期限 (validBefore) で失効する。通常の支払いはこの確認から saveRelayIntent・
+      // postRelayPayload の開始まで await を挟まない (束縛した注文だけは従来どおり persistOrder の保存を挟む)。
+      if (!mountedRef.current) {
+        logger.info('payment.sign_abandoned', { path: 'jpyc-relay', chainId });
+        throw new Error('payment_cancelled');
+      }
       if (bind) await persistOrder(intent);
 
       // Keep the existing post-signing timestamp for ordinary /pay and /tip intents.
