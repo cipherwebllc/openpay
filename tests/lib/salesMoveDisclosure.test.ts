@@ -267,7 +267,7 @@ describe('④ 開示面', () => {
       '受領・保管・精算しません',
       '店主ご自身のウォレットの間の移動に限り',
       '当社は、送り先が店主ご自身のウォレットであるかを確かめることはできません。',
-      'この条件に反する利用が疑われる場合、当社は第 7 条に基づき、本サービスの利用を制限することがあります。',
+      'この条件に反する利用について、第 7 条各号のいずれかに該当すると当社が合理的に判断した場合、当社は同条に基づき、本サービスの利用を制限することがあります。',
       'JPYC EX の償還の送り先や取引所の入金アドレスへは直接送らないでください',
       '取り消すことができません',
       JA_DATE,
@@ -287,7 +287,7 @@ describe('④ 開示面', () => {
       'does not receive, hold or settle',
       'only to move JPYC between the Merchant’s own wallets',
       'The Company cannot verify whether a destination is the Merchant’s own wallet.',
-      'If use contrary to this condition is suspected, the Company may restrict use of the Service under Article 7.',
+      'Where the Company reasonably determines that use contrary to this condition falls under any item of Article 7, the Company may restrict use of the Service under that Article.',
       'JPYC EX redemption address or an exchange deposit address',
       'cannot be cancelled',
       EN_DATE,
@@ -297,7 +297,12 @@ describe('④ 開示面', () => {
     // 利用条件は事実の主張にしない (当社が送り先を確かめている・確認済みとは書かず、確かめられないと書く)。
     expect(ja12).not.toMatch(/確かめています|確認しています|確認済み/);
     expect(en12).not.toMatch(/Company (?:verifies|confirms|checks)\b/);
+    // 「疑われる場合」で第 7 条より低い基準に読めないようにする (第 7 条の「各号のいずれかに該当すると合理的に判断した場合」に合わせる)。
+    expect(ja12).not.toContain('疑われる場合');
+    expect(en12).not.toContain('is suspected');
     // 利用の制限の根拠は第 7 条 (禁止事項・利用の制限) にある。
+    expect(ja.Terms.article7.body).toContain('各号のいずれかに該当すると合理的に判断した場合');
+    expect(en.Terms.article7.body).toContain('reasonably determines');
     expect(ja.Terms.article7.body).toContain('本サービスの利用を制限し');
     expect(en.Terms.article7.title).toContain('Article 7');
   });
@@ -327,8 +332,10 @@ describe('④ 開示面', () => {
   });
 
   // 濫用の集計 (lib/relay/salesMoveAbuse.ts) の実装と一致する: 送り先と送り元の組・送り先ごとの月の送り元の数を TTL 100 日で KV に置き、
-  // 閾値に届くと送り先のアドレスを含む warn (logger → console と Sentry) を出す。1% 回避の集計の warn (受取先のアドレスを含む) も
-  // エラー監視のただし書きの例に挙げる。
+  // 閾値に届くと送り先のアドレスを含む warn (logger → console と Sentry) を出す。1% 回避の集計の warn (受取先のアドレスを含む・件数か
+  // 累積の差額のどちらかの閾値で出る) もエラー監視のただし書きの例に挙げる。
+  // 保存は「保存期限を 100 日に設定」と書き、「最長 100 日で削除」とは書かない (数の key は INCR と EXPIRE NX が別の命令で、
+  // EXPIRE だけ失敗すると TTL の無い key が残りうる・lib/kv.ts・片づけは DEPLOY_CHECKLIST §18.5)。
   it('プライバシー (1-(11) 取得・2-(9) エラー監視のただし書き・2-(13) 目的と保存・4. 保管期間)', async () => {
     const abuse = await import('@/lib/relay/salesMoveAbuse');
     const days = abuse.SALES_MOVE_SENDERS_TTL_SEC / (24 * 3600);
@@ -338,26 +345,56 @@ describe('④ 開示面', () => {
     expect(keys.pair).toContain(SENDER_FOR_KEYS.toLowerCase());
     expect(keys.senders.endsWith(':senders')).toBe(true);
     const avoid = await import('@/lib/relay/recoverFeeAvoidance');
-    expect(avoid.FEE_AVOIDANCE_TTL_SEC).toBe(abuse.SALES_MOVE_SENDERS_TTL_SEC);
+    const avoidDays = avoid.FEE_AVOIDANCE_TTL_SEC / (24 * 3600);
+    // 1% 回避の記録は受取先のアドレス・月ごとの件数と差額 (実装の key の形)。warn は件数か累積の差額のどちらかの閾値で出る。
+    const avoidKeys = avoid.feeAvoidanceKeys('2026-11', 137, DEST_FOR_KEYS);
+    expect(avoidKeys.count).toContain(DEST_FOR_KEYS.toLowerCase());
+    expect(avoidKeys.count.endsWith(':count')).toBe(true);
+    expect(avoidKeys.avoided.endsWith(':avoided_cjpyc')).toBe(true);
+    expect(avoid.FEE_AVOIDANCE_WARN_COUNT).toBeGreaterThan(0);
+    expect(avoid.FEE_AVOIDANCE_WARN_JPYC).toBeGreaterThan(0);
 
     const pj = ja.Privacy;
     const pe = en.Privacy;
     expect(pj.section1.body).toContain('(11) 「売上をほかのウォレットへ移す」をご利用の場合の、送り先と送り元のウォレットアドレスの組み合わせ (チェーン・月ごと) と、送り先ごと・月ごとの送り元の数。');
     expect(pe.section1.body).toContain('(11) When “Move sales to another wallet” is used, the pairs of destination and sender wallet addresses (per chain and month) and the number of senders per destination per month.');
-    expect(pj.section2.body).toContain(`(13) 「売上をほかのウォレットへ移す」の不正利用を見つけるため、送り先と送り元のアドレスの組み合わせと、月ごとの件数を、最長 ${days} 日保存します。送り先ごとの送り元の数が多いときは、送り先のアドレスを含む警告をエラー監視に送ります。`);
-    expect(pe.section2.body).toContain(`(13) To detect misuse of “Move sales to another wallet”, the Company keeps the pairs of destination and sender addresses and the monthly counts for up to ${days} days. When a destination has many senders, the Company sends a warning that includes the destination address to error monitoring.`);
-    // 2-(9) の「個人を特定する情報を送信しない設定」のただし書き (例として 2 つの警告・ほかにもあるので「例」)。
-    for (const w of ['ただし、障害の調査や不正利用の確認のため、ウォレットアドレスを含む警告をエラー監視に送ることがあります', '(例: 「売上をほかのウォレットへ移す」', '送り先のアドレス・チェーン・月・送り元の数', '受取先のアドレス・チェーン・月・件数・1% との差額']) {
+    expect(pj.section2.body).toContain(`(13) 「売上をほかのウォレットへ移す」の不正利用を見つけるため、送り先と送り元のアドレスの組み合わせと、月ごとの件数を、保存期限を ${days} 日に設定して保存します。送り先ごとの送り元の数が多いときは、送り先のアドレスを含む警告をエラー監視に送ります。`);
+    expect(pe.section2.body).toContain(`(13) To detect misuse of “Move sales to another wallet”, the Company keeps the pairs of destination and sender addresses and the monthly counts with a ${days}-day expiry set. When a destination has many senders, the Company sends a warning that includes the destination address to error monitoring.`);
+    // 2-(9) の「個人を特定する情報を送信しない設定」のただし書き (エラーと警告・例として 2 つの警告・ほかにもあるので「例」)。
+    for (const w of [
+      'ただし、障害の調査や不正利用の確認のため、ウォレットアドレスを含むエラーや警告をエラー監視に送ることがあります',
+      '(例: 「売上をほかのウォレットへ移す」',
+      '送り先のアドレス・チェーン・月・送り元の数',
+      'での受け取りの件数または累積の差額が大きいときの、受取先のアドレス・チェーン・月・件数・1% との差額を含む警告',
+    ]) {
       expect(pj.section2.body, w).toContain(w);
     }
-    for (const w of ['However, to investigate failures or check for misuse, the Company may send warnings that include wallet addresses', '(for example, a warning when a destination of “Move sales to another wallet”', 'destination address, chain, month and number of senders', 'receiving address, chain, month, count and the difference from the 1%']) {
+    for (const w of [
+      'However, to investigate failures or check for misuse, the Company may send errors or warnings that include wallet addresses',
+      '(for example, a warning when a destination of “Move sales to another wallet”',
+      'destination address, chain, month and number of senders',
+      'or the accumulated difference from the 1%, is large, containing the receiving address, chain, month, count and the difference from the 1%',
+    ]) {
       expect(pe.section2.body, w).toContain(w);
     }
+    expect(pj.section2.body).not.toContain('での受け取りが多いとき');
+    expect(pe.section2.body).not.toContain('when many payments are received');
     // ただし書きは「個人を特定する情報を送信しない設定」の文の後ろ (その文の範囲を示す)。
     expect(pj.section2.body.indexOf('ただし、障害の調査')).toBeGreaterThan(pj.section2.body.indexOf('個人を特定する情報を送信しない設定'));
     expect(pe.section2.body.indexOf('However, to investigate')).toBeGreaterThan(pe.section2.body.indexOf('not to send personally identifying information'));
-    expect(pj.section4.body).toContain(`「売上をほかのウォレットへ移す」の不正利用を見つけるための記録 (送り先と送り元のアドレスの組み合わせ・月ごとの件数) は、最長 ${days} 日で自動的に削除します。`);
-    expect(pe.section4.body).toContain(`are deleted automatically within ${days} days.`);
+    expect(pj.section4.body).toContain(`「売上をほかのウォレットへ移す」の不正利用を見つけるための記録 (送り先と送り元のアドレスの組み合わせ・月ごとの件数) は、保存期限を ${days} 日に設定して保存します。`);
+    expect(pe.section4.body).toContain(`Records kept to detect misuse of “Move sales to another wallet” (pairs of destination and sender addresses and monthly counts) are kept with a ${days}-day expiry set.`);
+    expect(pj.section4.body).toContain(`決済額の 1% を適用しない料金での受け取りを見つけるための記録 (受取先のアドレス・月ごとの件数と差額) も、保存期限を ${avoidDays} 日に設定して保存します。`);
+    expect(pe.section4.body).toContain(`Records kept to detect payments received under the fee that does not apply the 1% of the payment (the receiving address and the monthly count and difference) are also kept with a ${avoidDays}-day expiry set.`);
+    // この 2 つの記録について、削除の期限を約束しない (EXPIRE の失敗で TTL の無い key が残りうるため)。
+    for (const body of [pj.section2.body, pj.section4.body]) {
+      expect(body).not.toContain(`最長 ${days} 日保存`);
+      expect(body).not.toContain(`最長 ${days} 日で自動的に削除`);
+    }
+    for (const body of [pe.section2.body, pe.section4.body]) {
+      expect(body).not.toContain(`for up to ${days} days`);
+      expect(body).not.toContain(`within ${days} days`);
+    }
   });
 
   it('免責 (§2 取消不可・送り先・JPYC EX と取引所 / §7 利用料)', () => {

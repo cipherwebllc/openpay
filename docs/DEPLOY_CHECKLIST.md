@@ -3112,8 +3112,11 @@ route は `POST /api/relay/jpyc/move` (Polygon と Amoy だけ)。画面は /cre
   `NEXT_PUBLIC_FEE_RECEIVER_ADDRESS`・KV・`RELAY_MAX_GAS_COST_WEI`)。mainnet でガスの上限か KV が無いと 503 (`gas_ceiling_required`・`kv_required`)。
 - 利用料は route が `relayGasFeeValue(137)` をそのまま求める (開示の定数は読まない)。解決の順は `lib/relay/forwarderConfig.ts` の
   `NEXT_PUBLIC_RELAY_GAS_FEE_JPYC_POLYGON` → Polygon の per-chain 既定 (今は無い) → `NEXT_PUBLIC_RELAY_GAS_FEE_JPYC` → 2 JPYC
-  (`tests/lib/salesMoveDisclosure.test.ts` が順と、上書きで開示とずれることを固定する)。どちらかの上書きが開示の
-  `DISCLOSED_SALES_MOVE.feeJpyc` と違うと、開示より多い・少ない利用料を求めることになる。
+  (`tests/lib/salesMoveDisclosure.test.ts` が順と、上書きで開示とずれることを固定する)。問題になるのは、この順で解決した
+  実効値 (`relayGasFeeValue(137)`) が開示の `DISCLOSED_SALES_MOVE.feeJpyc` と違うとき (開示より多い・少ない利用料を求める)。
+  上書きが 1 つ違うだけではずれないこともある (例: Polygon の上書きが 2 なら、global の上書きが 3 でも実効値は 2)。それでも
+  18.2 の 0. では、どちらの上書きも未設定か開示と同じであることを求める (後で Polygon の上書きを外したときに global が効き出すのを
+  先に防ぐ・実効値だけを見るより厳しい運用の決まり)。
   ⚠️ `feeDisclosureDivergence` はこの route では動かない (既存の `/api/relay/jpyc` の module の読み込みのときに warn するだけで、
   徴収も止めない)。だから点灯の前に下の 18.2 の 0. で確かめる。利用料を変えるなら開示の本文と施行日を同じ PR で。
 - 利用料メーター a1 (`NEXT_PUBLIC_ENABLE_USAGE_FEE`) が OFF であること (ON だと forwarder が実効 null になり 503 `relay_not_configured`)。
@@ -3150,6 +3153,18 @@ route は `POST /api/relay/jpyc/move` (Polygon と Amoy だけ)。画面は /cre
   応答の失敗は既存の `relay.jpyc.*` と同じイベント名 (route が `makeRespond('relay.jpyc')` を使う)。画面の `sales_move.sign_failed`。
 - 月次メトリクスの `sales_move` (`scripts/metrics-report.mjs`)。日次予算 (500 件/チェーン) は既存の relay と共有。
 - `relay.move.many_senders` が同じ送り先で続けて出たら、§7 の受容の再評価トリガ (利用条件「ご自分のウォレットの間の移動に限る」への違反の疑い)。
+
+### 18.5 TTL の付いていない集計の key の片づけ (user・本番の KV)
+プライバシーポリシーは、濫用の集計の記録を「保存期限を 100 日に設定して保存」と書いている。数の key (`…:senders`・
+`relay:fee-avoid:…:count` / `…:avoided_cjpyc`) は INCR と `EXPIRE … NX` が別の命令で、EXPIRE だけが失敗すると TTL の無い key が
+残りうる (そのとき `kv.incr_expire_failed` が Sentry に出る・`lib/kv.ts`)。組の key (`relay:move:…:{送り元}`) と `…:warned` は
+`SET … EX … NX` で、期限は同じ命令で付く。本番の KV の操作は user が行う (値・アドレスはこの文書・PR・チャットに書かない)。
+1. きっかけ: Sentry に `kv.incr_expire_failed` が出たとき、または月に 1 回。
+2. Upstash のコンソール (CLI) で、TTL の無い key を探す:
+   - `SCAN 0 MATCH relay:move:* COUNT 1000` と `SCAN 0 MATCH relay:fee-avoid:* COUNT 1000` を、返る cursor が 0 になるまで続ける。
+   - 見つけた key ごとに `TTL <key>`。`-1` が TTL の無い key (`-2` は消えている)。
+3. 片づけ: key の中の月 (`relay:move:{YYYY-MM}:…`・`relay:fee-avoid:{YYYY-MM}:…`) が 100 日より前なら `DEL <key>`、まだ新しければ
+   `EXPIRE <key> 8640000` (100 日・秒) で期限を付け直す。
 
 ## サブドメイン運用ルール (2026-10-12)
 
