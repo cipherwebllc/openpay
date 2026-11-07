@@ -26,6 +26,9 @@ const h = vi.hoisted(() => ({
     isPending: false,
     isError: false,
     error: null as Error | null,
+    // 試み中の印 (このファイルは hook をモックするので常に試み中でない)。二度押しは OpenPayFeePanel.doublePress.test.tsx が
+    // 実物の hook で見る。
+    isAttemptInFlight: () => false,
   },
   // switchChain の呼び出しと、押したときの失敗 (tests/_helpers/switchChainStub.ts)。
   switch: { switchChain: vi.fn(), error: null as Error | null, hold: false, release: () => {} },
@@ -128,7 +131,13 @@ beforeEach(() => {
     signInError: null,
   };
   h.invoice = { data: invoiceData(), isLoading: false, isError: false };
-  h.pay = { mutateAsync: vi.fn(), isPending: false, isError: false, error: null };
+  h.pay = {
+    mutateAsync: vi.fn(),
+    isPending: false,
+    isError: false,
+    error: null,
+    isAttemptInFlight: () => false,
+  };
   h.switch.switchChain.mockReset();
   h.switch.error = null;
   h.switch.hold = false;
@@ -198,6 +207,7 @@ describe('OpenPayFeePanel', () => {
       isPending: false,
       isError: false,
       error: null,
+      isAttemptInFlight: () => false,
     };
     const fetchSpy = vi
       .spyOn(globalThis, 'fetch')
@@ -262,6 +272,7 @@ describe('OpenPayFeePanel', () => {
       isPending: false,
       isError: false,
       error: null,
+      isAttemptInFlight: () => false,
     };
     const fetchSpy = vi.spyOn(globalThis, 'fetch');
     const { default: userEvent } = await import('@testing-library/user-event');
@@ -308,6 +319,7 @@ describe('OpenPayFeePanel', () => {
       isPending: false,
       isError: false,
       error: null,
+      isAttemptInFlight: () => false,
     };
     h.invoice = {
       data: invoiceData({
@@ -350,6 +362,7 @@ describe('OpenPayFeePanel', () => {
       isPending: false,
       isError: false,
       error: null,
+      isAttemptInFlight: () => false,
     };
     const fetchSpy = vi
       .spyOn(globalThis, 'fetch')
