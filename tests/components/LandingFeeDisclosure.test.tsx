@@ -42,6 +42,8 @@ vi.mock('@/lib/legal', async (importOriginal) => ({
     cctpMaxPercent: '0.25',
     cctpSmallCapUsdc: '0.005',
     cctpSmallBelowUsdc: '2',
+    // 料金の欄の注記 (supportFeeMoveNote) の「売上をほかのウォレットへ移す」の利用料 (2026-11-07 改定案)。
+    salesMoveFee: 6,
   },
 }));
 
@@ -96,6 +98,18 @@ describe.each(['ja', 'en'] as const)('%s: rendered public fee disclosure', (loca
     }
     const m = (locale === 'ja' ? ja : en).Landing;
     expect(container).not.toHaveTextContent(m.supportFeeRegisterTitle);
+  });
+
+  // 4 つの場合のカードの下に、決済ではない料金 (「売上をほかのウォレットへ移す」) の 1 行。利用料は開示値を補間する
+  // (直書きしない)。そのあとに supportFeeNote・料金ページへの入口の順。
+  it('support: 売上の移動の利用料の 1 行 (開示値を補間・supportFeeNote の前)', async () => {
+    context.locale = locale;
+    const { container } = render(await LandingSupport());
+    const m = (locale === 'ja' ? ja : en).Landing;
+    const line = within(container).getByText(locale === 'ja' ? /売上をほかのウォレットへ移す/ : /Move sales to another wallet/);
+    expect(line).toHaveTextContent(locale === 'ja' ? '送金 1 回につき 6 JPYC' : '6 JPYC per transfer');
+    expect(line.textContent).not.toMatch(/\{salesMoveFee\}/);
+    expect(line.nextElementSibling).toHaveTextContent(m.supportFeeNote);
   });
 
   // 利用料カードの下 (supportFeeNote の下) に、機能ごとの料金と計算例 (/{locale}/pricing) への入口。

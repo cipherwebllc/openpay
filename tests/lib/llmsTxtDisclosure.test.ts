@@ -15,6 +15,7 @@ import {
   DISCLOSED_DUAL_RAIL_USDC,
   DISCLOSED_MOBILE_ORDER_FEE,
   DISCLOSED_RECOVER_FEE,
+  DISCLOSED_SALES_MOVE,
   DISCLOSED_STORE_USDC_PAYMENT,
   DISCLOSED_X402_FEE,
   DISCLOSED_LICENSE_NFT,
@@ -126,6 +127,23 @@ describe('public/llms.txt 開示同期 (掟 14③)', () => {
       [pct(DISCLOSED_RECOVER_FEE.percentFromJulyBps), String(DISCLOSED_RECOVER_FEE.floorJpyc)],
       'recover',
     );
+  });
+
+  // 2026-11-07 (改定案): 「売上をほかのウォレットへ移す」は決済ではないので「- OpenPay 利用料:」の行に混ぜず、別の行に書く。
+  // 型 = 「送金 1 回につき N JPYC」の全一致 (= DISCLOSED_SALES_MOVE.feeJpyc)。チップ・利用料の行のフェンスが数える語
+  // (「チップは」「徴収はありません」) は新しい行に入れない (下のチップのフェンスが 1 回だけと固定している)。
+  // 文の中身 (利用条件・JPYC EX と取引所・取消不可) は tests/lib/salesMoveDisclosure.test.ts が見る。
+  it('売上の移動 = DISCLOSED_SALES_MOVE (別の行・送金 1 回につき N JPYC の全一致・チェーン)', () => {
+    expectEveryMatch(/送金 1 回につき (\d+) JPYC/g, [String(DISCLOSED_SALES_MOVE.feeJpyc)], 'sales move');
+    const line = lines.find((l) => l.startsWith('- 売上の移動:'))!;
+    expect(line).toBeDefined();
+    expect(line).toContain(`${DISCLOSED_SALES_MOVE.chainNames.join('・')} の JPYC`);
+    expect(line).toContain(`利用料は送金 1 回につき ${DISCLOSED_SALES_MOVE.feeJpyc} JPYC で、移す額に上乗せ`);
+    expect(line).toContain(`移す額は 1 回 ${DISCLOSED_SALES_MOVE.minJpyc} JPYC 以上`);
+    expect(line).not.toContain('チップは');
+    expect(line).not.toContain('徴収はありません');
+    // 「- OpenPay 利用料:」の行 (決済・チップ) には混ぜない。
+    expect(lines.find((l) => l.startsWith('- OpenPay 利用料:'))).not.toContain('売上をほかのウォレットへ移す');
   });
 
   it('モバイル注文 利用料 = DISCLOSED_MOBILE_ORDER_FEE (本文・冒頭は詳細へ案内)', () => {

@@ -1,7 +1,8 @@
 // 料金ページ (/pricing) の計算例のフェンス (plans/pricing-page.md §7.1 ① ③)。
 //
 // ① 三面一致 (legal-check 5): 計算例 (lib/pricingExamples.ts) が、実際の分配の関数
-//    (recoverFeeValue + feeSplit・mobileOrderBreakdown・x402FeeBreakdown・STORE_DEVICE_FEE_WEI) と同じ値になる。
+//    (recoverFeeValue + feeSplit・mobileOrderBreakdown・x402FeeBreakdown・STORE_DEVICE_FEE_WEI・売上の移動の relayGasFeeValue(137))
+//    と同じ値になる。
 //    recoverFee と x402 の設定は module の評価時に process.env を読むので、関係する env を全部消して
 //    開示値だけを立て直し → resetModules → 動的 import で本物の module を評価する。チェーン別の最低額の
 //    env (NEXT_PUBLIC_RELAY_GAS_FEE_JPYC_<CHAIN>) が手元や CI に残っていると、そちらが勝つので必ず消す
@@ -15,6 +16,7 @@ import path from 'node:path';
 import { avalanche, kaia, polygon } from 'viem/chains';
 import {
   DISCLOSED_RECOVER_FEE,
+  DISCLOSED_SALES_MOVE,
   DISCLOSED_STORE_GAS_WALLET,
   DISCLOSED_X402_FEE,
 } from '@/lib/legal';
@@ -56,15 +58,16 @@ afterEach(() => {
 });
 
 async function loadReal() {
-  const [recoverFee, mobileOrderFee, x402Fee, x402Config, storeDevice, examples] = await Promise.all([
+  const [recoverFee, mobileOrderFee, x402Fee, x402Config, storeDevice, forwarderConfig, examples] = await Promise.all([
     import('@/lib/relay/recoverFee'),
     import('@/lib/mobileOrderFee'),
     import('@/lib/x402/fee'),
     import('@/lib/x402/facilitatorConfig'),
     import('@/lib/storeDevicePayment'),
+    import('@/lib/relay/forwarderConfig'),
     import('@/lib/pricingExamples'),
   ]);
-  return { recoverFee, mobileOrderFee, x402Fee, x402Config, storeDevice, examples };
+  return { recoverFee, mobileOrderFee, x402Fee, x402Config, storeDevice, forwarderConfig, examples };
 }
 
 describe('① 計算例 = 実際の分配の計算 (三面一致)', () => {
@@ -151,6 +154,22 @@ describe('① 計算例 = 実際の分配の計算 (三面一致)', () => {
     expect(e.amountWei >= storeDevice.STORE_DEVICE_MIN_AMOUNT_WEI).toBe(true);
   });
 
+  // route (app/api/relay/jpyc/move) は利用料に relayGasFeeValue(chainId) を渡す (tests/app/api/relay-move.test.ts・
+  // tests/lib/salesMoveDisclosure.test.ts)。forwarder は移す額を送り先へ・利用料を受取口へ分け、ウォレットからはその合計が出る。
+  it('売上をほかのウォレットへ移す: 利用料 = relayGasFeeValue (開示のチェーン)・ウォレット = 移す額 + 利用料・送り先 = 移す額', async () => {
+    const { forwarderConfig, examples } = await loadReal();
+    const e = examples.salesMoveExample(examples.PRICING_EXAMPLE_AMOUNTS.salesMove);
+    for (const chainId of DISCLOSED_SALES_MOVE.chainIds) {
+      expect(e.feeWei, String(chainId)).toBe(forwarderConfig.relayGasFeeValue(chainId));
+    }
+    expect(e.feeWei).toBe(BigInt(DISCLOSED_SALES_MOVE.feeJpyc) * 10n ** 18n);
+    expect(e.payerPaysWei).toBe(e.amountWei + e.feeWei);
+    expect(e.receiverGetsWei).toBe(e.amountWei);
+    expect(e.floorApplied).toBe(false);
+    // 例の額は移せる最低額以上。
+    expect(e.amountWei >= BigInt(DISCLOSED_SALES_MOVE.minJpyc) * 10n ** 18n).toBe(true);
+  });
+
   it('表 A・C は「最低額が効く例」(先頭) と「効かない例」(2 つ目) を持つ (正本が変わって例が意味を失ったら落ちる)', async () => {
     const { examples } = await loadReal();
     const gasless = examples.PRICING_EXAMPLE_AMOUNTS.gasless.map(examples.gaslessExample);
@@ -182,6 +201,8 @@ describe('① 計算例 = 実際の分配の計算 (三面一致)', () => {
       ['10', '1,010'],
       ['100', '10,100'],
     ]);
+    const move = examples.salesMoveExample(examples.PRICING_EXAMPLE_AMOUNTS.salesMove);
+    expect([j(move.feeWei), j(move.payerPaysWei), j(move.receiverGetsWei)]).toEqual(['2', '1,002', '1,000']);
     expect(j(1n)).toBe('0.000000000000000001');
   });
 });

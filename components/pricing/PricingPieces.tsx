@@ -18,6 +18,7 @@ import {
   QrCode,
   ShoppingBag,
   Smartphone,
+  Wallet,
   Zap,
   type LucideIcon,
 } from 'lucide-react';
@@ -31,13 +32,14 @@ import type {
   PricingValue,
 } from '@/lib/pricing';
 
-// LP の利用料カード (components/LandingSupport.tsx) と同じアイコン。お店がガス代を肩代わりは Fuel。
+// LP の利用料カード (components/LandingSupport.tsx) と同じアイコン。お店がガス代を肩代わりは Fuel・売上の移動は Wallet。
 const ROW_ICONS: Record<PricingRowId, LucideIcon> = {
   pay: QrCode,
   mobile: Smartphone,
   tip: Coins,
   store: ShoppingBag,
   storeGas: Fuel,
+  salesMove: Wallet,
 };
 
 const SUMMARY_ICONS: Record<PricingSummaryId, LucideIcon> = {

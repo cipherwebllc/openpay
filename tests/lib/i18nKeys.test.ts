@@ -952,6 +952,8 @@ describe('i18n: Nav / Landing 名前空間 (AppShell + LP, ja/en parity)', () =>
     'supportFeeStoreTitle',
     'supportFeeStoreBody',
     'supportFeeNote',
+    // トップの料金の欄の、決済ではない料金の 1 行 (「売上をほかのウォレットへ移す」・2026-11-07 改定案)
+    'supportFeeMoveNote',
     'supportTipRequest',
     'supportProfileTagline',
     'supportProfileCta',

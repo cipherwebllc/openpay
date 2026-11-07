@@ -3098,6 +3098,52 @@ OpenPay は署名を最長 10 分受け渡すだけで、ガスを払わず送�
 - Upstash のコマンド数 (受け渡し 1 件あたり作成・読み取り・締め切りで数十件)。
 - 店主のガス用ウォレットのガス代のトークン (POL・KAIA・AVAX) は店主の負担 (OpenPay は監視しない・画面にチェーンごとの残り回数の目安を出す)。
 
+## §18 売上をほかのウォレットへ移す go-live SOP
+
+内部名「売上の移動」(計画 plans/store-sales-move.md・開示の SOT は lib/disclosedSalesMove.ts)。お店が自分のウォレットで
+`receiveWithAuthorization` (to = forwarder・nonce = 分割のコミットメント) に 1 回署名し、OpenPay の relayer が `forwarder.settle` を
+送る (ガスは OpenPay)。送り先へ移す額・OpenPay へ利用料 2 JPYC (`relayGasFeeValue(137)` = Polygon の gas floor・移す額に上乗せ)。
+route は `POST /api/relay/jpyc/move` (Polygon と Amoy だけ)。画面は /create の「受け取った通貨を換金」の中。
+
+### 18.1 flag と前提
+- `NEXT_PUBLIC_ENABLE_SALES_MOVE` (コードの既定 OFF)。build 時に埋め込まれるので、変えたら再デプロイ。OFF の間は route が 404・
+  /create のフォームと /guide/wallet の案内 (#store-wallet) は描かれない。
+- 既存の recover の経路がそろっていること (`NEXT_PUBLIC_ENABLE_JPYC_EIP3009`・`RELAYER_PRIVATE_KEY`・`NEXT_PUBLIC_JPYC_FORWARDER_POLYGON`・
+  `NEXT_PUBLIC_FEE_RECEIVER_ADDRESS`・KV・`RELAY_MAX_GAS_COST_WEI`)。mainnet でガスの上限か KV が無いと 503 (`gas_ceiling_required`・`kv_required`)。
+- Polygon の gas floor (`NEXT_PUBLIC_RELAY_GAS_FEE_JPYC[_POLYGON]`) が開示の 2 JPYC (`DISCLOSED_SALES_MOVE.feeJpyc`) のままであること
+  (ずれは `feeDisclosureDivergence` が warn する。変えるなら開示の本文と施行日を同じ PR で)。
+- 利用料メーター a1 (`NEXT_PUBLIC_ENABLE_USAGE_FEE`) が OFF であること (ON だと forwarder が実効 null になり 503 `relay_not_configured`)。
+- P3 の確認が済んでいること: Amoy (`NEXT_PUBLIC_JPYC_FORWARDER_AMOY` 設定済み) で 1 件通す・「署名の後に再読み込み → status の照会で
+  成立に復旧」を確かめる・本番で user が少額 (UPBOND Wallet の署名が通ること・届いた tx の Transfer の送り元が forwarder になること)。
+
+### 18.2 点灯 (merge と同じ日・user 承認)
+1. 施行日を点灯日に確定する: `DISCLOSED_SALES_MOVE.effectiveDate`・`LEGAL_ENTITY` の `termsEffectiveDate` / `tokuteiEffectiveDate` /
+   `disclaimerEffectiveDate`・規約 第 5 条 (12) の「2026 年 11 月 7 日に新設」(ja/en)・`tests/app/legal.test.tsx` の日付の固定値。
+   ずれたら直してから merge (`tests/lib/salesMoveDisclosure.test.ts` が本文の日付と SOT の一致を見る)。
+2. 開示 (規約 第 5 条 (12)・特商法・免責・LP の料金の欄・料金ページ・/transparency・public/llms.txt・README・/guide/wallet の案内) の
+   PR を merge する。
+3. Vercel の Production に `NEXT_PUBLIC_ENABLE_SALES_MOVE=1` を入れて再デプロイ。`e2e/prodFlags.env` にも同じ行を足す (別 PR でよい)。
+4. 本番の確認 (少額・自社のウォレット):
+   - /create →「受け取った通貨を換金」を開くと「売上をほかのウォレットへ移す」が出る。確認の段の「届く額」「利用料 2 JPYC」「ウォレット
+     から出る合計」が合っている。
+   - 署名 → 成立 → Polygonscan で、送り先に移す額ちょうど・受取口に 2 JPYC・送り元のウォレットから合計が出たこと、送り先への
+     Transfer の from が forwarder であることを確かめる。支払い控えに「届く額」と「利用料」が別の行で残り、お店の履歴には入らない。
+   - /guide/wallet#store-wallet に案内とリンクが出る。料金ページ・LP・規約・特商法・免責・/transparency の表示を確かめる。
+5. お知らせ (lib/news.ts + lib/newsIndex.ts・3 文以内) は点灯の後に別 PR (文言は user 承認)。
+
+### 18.3 ロールバック
+- `NEXT_PUBLIC_ENABLE_SALES_MOVE` を外して再デプロイ。route は 404、/create のフォームと /guide/wallet の案内は出なくなる。
+  開示はそのまま残してよい (提供停止を告知する場合は規約の手続きで)。
+- 外す前に送信済みの移動はオンチェーンで進む。`/api/relay/jpyc/status` は flag で止めないので照会できる (画面は出ないので、
+  問い合わせには送り元のウォレットの履歴で確かめてもらう)。
+
+### 18.4 監視
+- Sentry: `relay.move.many_senders` (送り先 × chain × UTC 月で異なる送り元が 5 に届いた・決済の代わりに使われている疑い・月 1 回)・
+  `relay.move.sender_record_failed`・`relay.jpyc.move.*` (gas_ceiling_required / kv_required / relay_not_configured)・
+  応答の失敗は既存の `relay.jpyc.*` と同じイベント名 (route が `makeRespond('relay.jpyc')` を使う)。画面の `sales_move.sign_failed`。
+- 月次メトリクスの `sales_move` (`scripts/metrics-report.mjs`)。日次予算 (500 件/チェーン) は既存の relay と共有。
+- `relay.move.many_senders` が同じ送り先で続けて出たら、§7 の受容の再評価トリガ (利用条件「ご自分のウォレットの間の移動に限る」への違反の疑い)。
+
 ## サブドメイン運用ルール (2026-10-12)
 
 - open-pay.jp のサブドメインには、第三者が中身を書けるホスティング (docs・blog・status・フォーラムなど) を置かない。

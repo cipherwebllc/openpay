@@ -10,6 +10,7 @@ import { ArrowRight } from 'lucide-react';
 import { LandingSectionHeader } from '@/components/LandingSectionHeader';
 import { SummaryCard } from '@/components/pricing/PricingPieces';
 import { pricingContentFor } from '@/lib/pricing';
+import { LANDING_PAYMENT_FEE_VALUES } from '@/lib/legal';
 
 export async function LandingSupport() {
   const t = await getTranslations('Landing');
@@ -28,7 +29,12 @@ export async function LandingSupport() {
         ))}
       </ul>
 
+      {/* 決済ではない料金の 1 行 (「売上をほかのウォレットへ移す」・利用料は lib/legal.ts の DISCLOSED_SALES_MOVE から・掟 14)。
+          4 つの場合のカードには入れない (お店の売上の移動で、支払いではない)。料金ページでは「お店」のまとまりの行。 */}
       <p className="mx-auto mt-6 max-w-2xl text-center text-xs leading-relaxed text-slate-500">
+        {t('supportFeeMoveNote', LANDING_PAYMENT_FEE_VALUES)}
+      </p>
+      <p className="mx-auto mt-2 max-w-2xl text-center text-xs leading-relaxed text-slate-500">
         {t('supportFeeNote')}
       </p>
       {/* 機能ごとの料金と計算例 (/pricing) への入口 (plans/pricing-page.md §2.6)。

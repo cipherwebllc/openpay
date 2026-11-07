@@ -24,6 +24,7 @@ import { walletGuideContentFor, walletGuideMetadata } from '@/lib/walletGuide';
 import { payGuideContentFor } from '@/lib/payGuide';
 import { GuideCta } from '@/components/guide/GuideEnd';
 import { GuideMoreLink } from '@/components/guide/GuideLink';
+import { env } from '@/lib/env';
 
 export async function generateMetadata({
   params,
@@ -112,10 +113,22 @@ export default async function GuideWalletPage({
         </Section>
 
         {/* お店の受け取り用 (UPBOND Wallet)。/create の受取先の欄が空のときの「ウォレットをお持ちでない方へ」から #store-wallet で
-            飛んでくる。注意 (受け取るチェーン・売上の移し方) を読んでから開けるよう、外のリンクは最後に置く。 */}
+            飛んでくる。注意 (受け取るチェーン・売上の移し方) を読んでから開けるよう、外のリンクは最後に置く。
+            ガス代が無いときの「売上をほかのウォレットへ移す」(/create) への案内は flag が ON のときだけ (flag を外したら、見えない
+            機能へのリンクを残さない・NEXT_PUBLIC_ なので build 時に決まり、flag を変えたら再デプロイで追従する)。 */}
         <Section title={c.storeTitle} id="store-wallet">
           <p className="mt-3 text-sm leading-relaxed text-slate-700">{c.storeBody}</p>
-          <GuideCallout kind="warn">{c.storeNote}</GuideCallout>
+          <GuideCallout kind="warn">
+            <p>{c.storeNote}</p>
+            {env.enableSalesMove && (
+              <>
+                <p className="mt-2">{c.storeMoveNote}</p>
+                <p className="mt-1">
+                  <GuideMoreLink href={`/${locale}${c.storeMoveLink.path}`}>{c.storeMoveLink.label}</GuideMoreLink>
+                </p>
+              </>
+            )}
+          </GuideCallout>
           <p className="mt-4">
             <GuideMoreLink href={c.storeLink.href} external>
               {c.storeLink.label}
