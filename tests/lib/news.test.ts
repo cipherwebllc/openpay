@@ -4,6 +4,8 @@ import {
   DISCLOSED_RECOVER_FEE,
   DISCLOSED_MOBILE_ORDER_FEE,
   DISCLOSED_X402_FEE,
+  DISCLOSED_SALES_MOVE,
+  disclosedSalesMoveChains,
 } from '@/lib/legal';
 
 describe('lib/news: コンテンツ規約 (SOT 不変条件)', () => {
@@ -193,5 +195,21 @@ describe('lib/news: sortedNews / latestNewsId', () => {
     }
     // 旧文面が現行料金を断定しない (全額負担/徴収しません の現在形断定が残っていない)。
     expect(free!.body.ja).not.toMatch(/一切徴収しません/);
+  });
+
+  // 「売上をほかのウォレットへ移す」のお知らせ (別 SOT = DISCLOSED_SALES_MOVE)。利用料 (送金 1 回 N JPYC)・チェーン・
+  // 上乗せ・JPYC EX / 取引所へ直接送らない注意を ja/en で含むことをフェンスする (定数だけ・本文だけの片側変更で fail)。
+  it('売上の移動のお知らせが DISCLOSED_SALES_MOVE の利用料とチェーンを ja/en で含む (L4 フェンス)', () => {
+    const move = NEWS_ITEMS.find((n) => n.id === 'sales-move-2026-11-07');
+    expect(move).toBeDefined();
+    expect(move!.date >= DISCLOSED_SALES_MOVE.effectiveDate).toBe(true);
+    expect(move!.body.ja).toContain(`送金 1 回につき ${DISCLOSED_SALES_MOVE.feeJpyc} JPYC`);
+    expect(move!.body.en).toContain(`${DISCLOSED_SALES_MOVE.feeJpyc} JPYC per transfer`);
+    expect(move!.body.ja).toContain(`${disclosedSalesMoveChains('ja')} の JPYC`);
+    expect(move!.body.en).toContain(`JPYC on ${disclosedSalesMoveChains('en')}`);
+    expect(move!.body.ja).toContain('移す額に上乗せ');
+    expect(move!.body.en).toContain('added on top of the amount moved');
+    expect(move!.body.ja).toContain('JPYC EX の償還の送り先や取引所の入金アドレスへは直接送らず');
+    expect(move!.body.en).toContain('do not send it directly to a JPYC EX redemption address or an exchange deposit address');
   });
 });
