@@ -244,6 +244,12 @@ export function useJpycEip3009Payment(
   const [restoredIntent, setRestoredIntent] =
     useState<RelayIntentMetadata | null>(null);
   const queuedMutationRef = useRef<JpycEip3009Params | null>(null);
+  // 試み中の印 (同期)。包みの mutate と、storageReady の前に積んだ押下を流す効果が、react-query に渡す前に立てる (claimAttempt)。
+  // その mutation が終わった (成功・失敗・throw のどれでも) ときに useMutation の onSettled で外す。
+  // 何の波及を断つか: 同じ描画のうちの二度押し (main thread が詰まり、isPending を描いた再描画より前に 2 回押された) が 2 つ目の
+  // mutation を作り、別の署名 (別の nonce) を求めて両方 POST すること (両方成立する = 二重払い)。呼出側のボタンを止める isPending は
+  // react-query が知らせた後の再描画まで変わらないので、ref で同期に見る。
+  const attemptInFlightRef = useRef(false);
   const [recoveryState, setRecoveryState] =
     useState<JpycRelayRecoveryState>(null);
   const mountedRef = useRef(true);
@@ -870,12 +876,26 @@ export function useJpycEip3009Payment(
         throw error;
       }
     },
+    // 試み中の印を外す。mutationFn の本体を try/finally で包み直さず onSettled にしたのは、差分が小さいうえ、mutationFn が
+    // 始まらずに終わった mutation でも外れるため。react-query は成功でも失敗 (mutationFn の throw・入口の payment_cancelled を
+    // 含む) でもこれを呼ぶ (@tanstack/query-core 5.100 の Mutation.execute は、失敗の側の callback を 1 つずつ try で包んで呼ぶ)。
+    onSettled: () => {
+      attemptInFlightRef.current = false;
+    },
   });
 
   const mutationIsPending = mutation.isPending;
   const mutationData = mutation.data;
   const mutationVariables = mutation.variables ?? restoredVariables ?? undefined;
   const mutationMutate = mutation.mutate;
+
+  // 試み中なら false (新しい mutation を作らない)。そうでなければ印を立てて true。true のときは同期のまま mutationMutate を呼ぶ
+  // (印を立てて mutation を作らない筋を作らない = 印が外れないまま残らない)。
+  const claimAttempt = useCallback((): boolean => {
+    if (attemptInFlightRef.current) return false;
+    attemptInFlightRef.current = true;
+    return true;
+  }, []);
 
   const mutate = useCallback(
     (variables: JpycEip3009Params) => {
@@ -892,12 +912,15 @@ export function useJpycEip3009Payment(
       ) {
         return;
       }
+      // 二度押し: 前の押下の mutation が mutationFn を始める前も、その途中も、新しい mutation を作らない (断った押下は状態も
+      // 変えない = react-query の observer が見る 1 つ目の mutation と、その結果を画面から外さない)。
+      if (!claimAttempt()) return;
       setRestoredResult(null);
       setRestoredError(null);
       setRestoredVariables(null);
       mutationMutate(variables);
     },
-    [mutationData, mutationMutate, restoredResult, storageReady, isOrderPaymentHeld],
+    [claimAttempt, mutationData, mutationMutate, restoredResult, storageReady, isOrderPaymentHeld],
   );
 
   useEffect(() => {
@@ -914,8 +937,11 @@ export function useJpycEip3009Payment(
     queuedMutationRef.current = null;
     // Discard a queued click blocked by an earlier payment; resolving it must not auto-pay the new cart.
     if (isOrderPaymentHeld(queued.merchant)) return;
+    // 流す瞬間に重なった押下 (先に印を立てた試み) があれば、積んだ押下は流さずに捨てる。何の波及を断つか: 同じ瞬間の 2 つの
+    // 押下が 2 つの署名・2 本の POST になること。積んだまま残すと、その試みが終わった後で古い押下が自動で払う。
+    if (!claimAttempt()) return;
     mutationMutate(queued);
-  }, [mutationIsPending, mutationMutate, restoredResult, storageReady, isOrderPaymentHeld]);
+  }, [claimAttempt, mutationIsPending, mutationMutate, restoredResult, storageReady, isOrderPaymentHeld]);
 
   const retryRelay = useCallback(() => {
     if (
@@ -970,6 +996,8 @@ export function useJpycEip3009Payment(
   const isError = mutation.isError || restoredError !== null;
 
   return {
+    // raw の mutateAsync もここから出ている (呼ぶ所は無い)。試み中の印 (claimAttempt) を通らないので、支払いの入口には使わない
+    // (二度押しを止めるのは包みの mutate だけ)。
     ...mutation,
     mutate,
     data,

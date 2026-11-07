@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest';
-import { act, renderHook, waitFor } from '@testing-library/react';
+import { act, render, renderHook, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider, onlineManager } from '@tanstack/react-query';
 import { getAddress, type Address, type Hex } from 'viem';
 import { kairos, polygon } from 'viem/chains';
-import { StrictMode, type ReactNode } from 'react';
+import { Activity, useEffect, useLayoutEffect, useState, type ReactNode } from 'react';
 
 // wagmi は境界モック。signTypedData の spy で署名要求/解決/拒否/失敗を制御する。
 vi.mock('wagmi', () => ({
@@ -2489,18 +2489,226 @@ describe('useJpycEip3009Payment — 画面を離れた後の試みは POST も�
   });
 
   it('StrictMode の mount→unmount→mount の後に押した正当な 1 回目は止めない (署名 1 回・POST 1 回で成立)', async () => {
-    const Base = makeWrapper();
-    const strict = ({ children }: { children: ReactNode }) => (
-      <StrictMode>
-        <Base>{children}</Base>
-      </StrictMode>
-    );
-    const view = await mountHook(strict);
+    // wrapper の中に <StrictMode> を置いても、React 19.2 では初回の mount の effect は 1 回しか走らない (二重に mount しない)。
+    // renderHook の reactStrictMode を使う。hook を呼ぶ component の effect は全部まとめて effect→cleanup→effect になるので、
+    // 同じ component に置いた見張りの effect で、hook の mount の effect (mountedRef を true に戻す) も二重に走ったことを確かめる。
+    const effectRuns: string[] = [];
+    const view = renderHook(() => {
+      useEffect(() => {
+        effectRuns.push('mount');
+        return () => {
+          effectRuns.push('unmount');
+        };
+      }, []);
+      return useJpycEip3009Payment(jpycDep);
+    }, { wrapper: makeWrapper(), reactStrictMode: true });
+    await waitFor(() => expect(view.result.current.isRestoring).toBe(false));
+    expect(effectRuns).toEqual(['mount', 'unmount', 'mount']);
     act(() => view.result.current.mutate({ merchant: MERCHANT, value: VALUE }));
     await waitFor(() => expect(view.result.current.data?.success).toBe(true));
     expect(signTypedData).toHaveBeenCalledTimes(1);
     expect(relayPosts()).toHaveLength(1);
     expect(view.result.current.error).toBeNull();
     view.unmount();
+  });
+});
+
+// 同じ描画のうちの二度押し (main thread が詰まり、isPending を描いた再描画より前に 2 回押された) は 2 つ目の mutation を作らない
+// (署名 1 回・POST 1 本)。試み中の印は mutation が終わったとき (成功・失敗・throw のどれでも) に外れ、次の正当な押下・retryRelay・
+// retrySamePayload は通る。「2 本目が無い」は待ち時間でなく、MutationCache のどの mutation も終わった (pending でない) のを待ってから
+// 見る (作られた mutation の数も数える)。free モードで流す (mutationFn に動的 import が無いので、二度押しで import が重ならない)。
+describe('useJpycEip3009Payment — 二度押しは 2 つ目の署名・POST にしない (試み中の印)', () => {
+  const VALUE = 300n * 10n ** 18n;
+  const SIGNATURE = `0x${'a'.repeat(130)}` as Hex;
+  const REVERTED_TX = `0x${'e'.repeat(64)}` as Hex;
+  const SETTLED_TX = `0x${'f'.repeat(64)}` as Hex;
+  type Relay = ReturnType<typeof useJpycEip3009Payment>;
+  let qc: QueryClient;
+
+  function wrapper({ children }: { children: ReactNode }) {
+    return <QueryClientProvider client={qc}>{children}</QueryClientProvider>;
+  }
+
+  function jsonResponse(status: number, body: unknown): Response {
+    return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+  }
+
+  function relayPosts(): Record<string, unknown>[] {
+    return fetchSpy.mock.calls
+      .filter(([url]) => url === '/api/relay/jpyc')
+      .map(([, init]) => JSON.parse((init as RequestInit).body as string) as Record<string, unknown>);
+  }
+
+  async function mountHook() {
+    const view = renderHook(() => useJpycEip3009Payment(jpycDep), { wrapper });
+    await waitFor(() => expect(view.result.current.isRestoring).toBe(false));
+    return view;
+  }
+
+  // MutationCache のどの mutation も終わる (pending でない) まで待ち、作られた mutation の数を返す。
+  async function settledMutationCount(): Promise<number> {
+    await waitFor(() =>
+      expect(qc.getMutationCache().getAll().every((m) => m.state.status !== 'pending')).toBe(true),
+    );
+    return qc.getMutationCache().getAll().length;
+  }
+
+  beforeEach(() => {
+    qc = new QueryClient({ defaultOptions: { mutations: { retry: false }, queries: { retry: false } } });
+    vi.mocked(jpycForwarderFor).mockReturnValue(null);
+    mount();
+    // 呼ぶたびに新しい成功の応答を返す (既定の 1 つの Response は body を 1 回しか読めず、2 本目の POST が応答不明に見える)。
+    fetchSpy.mockImplementation(async () => jsonResponse(200, { ok: true, txHash: `0x${'b'.repeat(64)}` }));
+  });
+
+  it('同じ act の中で mutate を 2 回: 署名を求めるのは 1 回・POST は 1 本・mutation は 1 つで、結果は 1 つ目のもの', async () => {
+    const view = await mountHook();
+    act(() => {
+      view.result.current.mutate({ merchant: MERCHANT, value: VALUE });
+      view.result.current.mutate({ merchant: MERCHANT, value: VALUE * 3n });
+    });
+    await waitFor(() => expect(view.result.current.data?.success).toBe(true));
+    expect(await settledMutationCount()).toBe(1);
+    expect(signTypedData).toHaveBeenCalledTimes(1);
+    expect(relayPosts()).toHaveLength(1);
+    expect(relayPosts()[0].value).toBe(VALUE.toString());
+    expect(view.result.current.error).toBeNull();
+  });
+
+  it('1 回目の署名を待つ間 (mutationFn の途中) の mutate は、新しい署名を求めない', async () => {
+    let resolveFirst: (signature: Hex) => void = () => undefined;
+    signTypedData.mockImplementationOnce(() => new Promise<Hex>((resolve) => { resolveFirst = resolve; }));
+    const view = await mountHook();
+    act(() => view.result.current.mutate({ merchant: MERCHANT, value: VALUE }));
+    await waitFor(() => expect(signTypedData).toHaveBeenCalledTimes(1));
+    expect(view.result.current.isPending).toBe(true);
+    act(() => view.result.current.mutate({ merchant: MERCHANT, value: VALUE * 3n }));
+    await act(async () => {
+      resolveFirst(SIGNATURE);
+    });
+    await waitFor(() => expect(view.result.current.data?.success).toBe(true));
+    expect(await settledMutationCount()).toBe(1);
+    expect(signTypedData).toHaveBeenCalledTimes(1);
+    expect(relayPosts()).toHaveLength(1);
+    expect(relayPosts()[0].value).toBe(VALUE.toString());
+  });
+
+  it.each([
+    ['署名の拒否', 'rejected', 1],
+    ['revert (relay は成立したが tx が revert)', 'reverted', 2],
+    ['通常の失敗 (broadcast 前の構造化 error)', 'server_error', 2],
+  ] as const)('1 回目が %s で終わった後の正当な次の押下は、新しい署名で払える (印が外れる)', async (_label, outcome, postsInAll) => {
+    if (outcome === 'rejected') signTypedData.mockRejectedValueOnce(new Error('User rejected the request.'));
+    if (outcome === 'reverted') fetchSpy.mockResolvedValueOnce(jsonResponse(200, { ok: false, reverted: true, txHash: REVERTED_TX }));
+    if (outcome === 'server_error') fetchSpy.mockResolvedValueOnce(jsonResponse(400, { ok: false, error: 'invalid_signature' }));
+    const view = await mountHook();
+    act(() => view.result.current.mutate({ merchant: MERCHANT, value: VALUE }));
+    await waitFor(() => expect(view.result.current.isError || view.result.current.data?.success === false).toBe(true));
+    expect(await settledMutationCount()).toBe(1);
+    expect(view.result.current.isPending).toBe(false);
+
+    act(() => view.result.current.mutate({ merchant: MERCHANT, value: VALUE }));
+    await waitFor(() => expect(view.result.current.data?.success).toBe(true));
+    expect(await settledMutationCount()).toBe(2);
+    expect(signTypedData).toHaveBeenCalledTimes(2);
+    expect(relayPosts()).toHaveLength(postsInAll);
+  });
+
+  it('IP 制限 (429) の後の retryRelay と、その再送の応答が失われた後の retrySamePayload も通る (署名は 1 回・同じ payload)', async () => {
+    fetchSpy
+      .mockResolvedValueOnce(jsonResponse(429, { ok: false, error: 'ip_rate_limited' }))
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    const view = await mountHook();
+    act(() => view.result.current.mutate({ merchant: MERCHANT, value: VALUE }));
+    await waitFor(() => expect(isRelayIpRateLimitedError(view.result.current.error)).toBe(true));
+    expect(await settledMutationCount()).toBe(1);
+
+    act(() => view.result.current.retryRelay());
+    await waitFor(() => expect(isRelayResponseUnknownError(view.result.current.error)).toBe(true));
+    expect(view.result.current.recoveryState).toBe('exhausted');
+    expect(await settledMutationCount()).toBe(2);
+    expect(relayPosts()).toHaveLength(2);
+    expect(relayPosts()[1]).toEqual(relayPosts()[0]);
+
+    // 送ったかもしれない再送: 同じ payload の nonce を照会する (署名しない・POST しない)。照会の 1 回目は 3 秒の backoff の後。
+    vi.useFakeTimers();
+    try {
+      fetchSpy.mockImplementation(async () => jsonResponse(200, { ok: true, state: 'settled', txHash: SETTLED_TX }));
+      act(() => view.result.current.retrySamePayload());
+      await advanceUntil(1_000, () => expect(view.result.current.data).toEqual({ txHash: SETTLED_TX, success: true }));
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(await settledMutationCount()).toBe(3);
+    expect(signTypedData).toHaveBeenCalledTimes(1);
+    expect(relayPosts()).toHaveLength(2);
+    expect(fetchSpy.mock.calls.some(([url]) => url === '/api/relay/jpyc/status')).toBe(true);
+  });
+
+  it('入口の payment_cancelled (画面から外れている間に始まった試み) の後も、戻った画面の正当な押下は通る', async () => {
+    // Activity の hidden は同じ instance のまま effect を外す (mountedRef が false になる)。visible に戻すと effect が戻る。
+    let setMode: (mode: 'visible' | 'hidden') => void = () => undefined;
+    function Gate({ children }: { children: ReactNode }) {
+      const [mode, set] = useState<'visible' | 'hidden'>('visible');
+      setMode = set;
+      return (
+        <QueryClientProvider client={qc}>
+          <Activity mode={mode}>{children}</Activity>
+        </QueryClientProvider>
+      );
+    }
+    const view = renderHook(() => useJpycEip3009Payment(jpycDep), { wrapper: Gate });
+    await waitFor(() => expect(view.result.current.isRestoring).toBe(false));
+    // 押した (mutation は作ったが mutationFn はまだ) 直後に、同じ tick で画面から外れる。
+    act(() => {
+      view.result.current.mutate({ merchant: MERCHANT, value: VALUE });
+      setMode('hidden');
+    });
+    await waitFor(() => expect(qc.getMutationCache().getAll()).toHaveLength(1));
+    expect(await settledMutationCount()).toBe(1);
+    expect(qc.getMutationCache().getAll()[0].state.error?.message).toBe('payment_cancelled');
+    expect(signTypedData).not.toHaveBeenCalled();
+
+    act(() => setMode('visible'));
+    await waitFor(() => expect(view.result.current.isRestoring).toBe(false));
+    act(() => view.result.current.mutate({ merchant: MERCHANT, value: VALUE }));
+    await waitFor(() => expect(view.result.current.data?.success).toBe(true));
+    expect(await settledMutationCount()).toBe(2);
+    expect(signTypedData).toHaveBeenCalledTimes(1);
+    expect(relayPosts()).toHaveLength(1);
+  });
+
+  // 積んだ押下を流す効果 (storageReady になった commit の useEffect) と、同じ瞬間の押下が重なる。'layout' は効果より前
+  // (同じ commit の layout effect) に押す・'passive' は流した直後 (同じ commit の後の effect) に押す。どちらも 1 回だけ。
+  it.each([
+    ['流す効果より前に押した → 押した方だけ払い、積んだ押下は捨てる', 'layout', 3n],
+    ['流した直後に押した → 積んだ押下だけ払う', 'passive', 1n],
+  ] as const)('storageReady の前に押したものが流れる瞬間に重ねた押下でも 1 回だけ: %s', async (_label, when, sentMultiplier) => {
+    const seen: { relay: Relay | null; pressed: boolean } = { relay: null, pressed: false };
+    const overlap = (relay: Relay) => {
+      if (relay.isRestoring || seen.pressed) return;
+      seen.pressed = true;
+      relay.mutate({ merchant: MERCHANT, value: VALUE * 3n });
+    };
+    function Probe() {
+      const relay = useJpycEip3009Payment(jpycDep);
+      seen.relay = relay;
+      useLayoutEffect(() => {
+        if (when === 'layout') overlap(relay);
+      });
+      useEffect(() => {
+        if (when === 'passive') overlap(relay);
+      });
+      return null;
+    }
+    render(<Probe />, { wrapper });
+    expect(seen.relay?.isRestoring).toBe(true);
+    act(() => seen.relay?.mutate({ merchant: MERCHANT, value: VALUE }));
+    await waitFor(() => expect(seen.pressed).toBe(true));
+    await waitFor(() => expect(seen.relay?.data?.success).toBe(true));
+    expect(await settledMutationCount()).toBe(1);
+    expect(signTypedData).toHaveBeenCalledTimes(1);
+    expect(relayPosts()).toHaveLength(1);
+    expect(relayPosts()[0].value).toBe((VALUE * sentMultiplier).toString());
   });
 });
