@@ -38,6 +38,20 @@ export type NewsItem = {
 // 表示順を強制しないが、可読性のため宣言時点でも新しい順に並べる。
 export const NEWS_ITEMS: readonly NewsItem[] = [
   {
+    id: 'sales-move-2026-11-07',
+    date: '2026-11-07',
+    category: 'feature',
+    title: {
+      ja: '「売上をほかのウォレットへ移す」ができるようになりました',
+      en: 'You can now “Move sales to another wallet”',
+    },
+    body: {
+      ja: 'ウォレットに POL (ガス代) が無くても、Polygon の JPYC を、ご自分の別のウォレットへ移せるようになりました (「受け取る」ページの「受け取った通貨を換金」の中)。利用料は送金 1 回につき 2 JPYC で、移す額に上乗せされ、送り先には指定した額がそのまま届きます。届く JPYC の送り元は OpenPay の中継のしくみになるため、JPYC EX の償還の送り先や取引所の入金アドレスへは直接送らず、いったんご自分のウォレットへ移してください。',
+      en: 'Even with no POL (gas) in your wallet, you can now move JPYC on Polygon to another wallet of your own (under “Off-ramp received tokens” on the Receive page). The fee is 2 JPYC per transfer, added on top of the amount moved, and the destination receives the amount you specify in full. The JPYC arrives from OpenPay’s relay mechanism, so do not send it directly to a JPYC EX redemption address or an exchange deposit address; move it to your own wallet first.',
+    },
+    link: { href: '/create', labelJa: '受け取るページを開く', labelEn: 'Open the Receive page' },
+  },
+  {
     id: 'upbond-wallet-2026-11-06',
     date: '2026-11-06',
     category: 'feature',
