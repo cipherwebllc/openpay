@@ -642,8 +642,10 @@ export function useSalesMove(
   );
 
   // 結果を待てる入口 (テストと、結果を await したい呼出側)。move と同じ同期の直列化を通す: 試み中なら mutation を作らずに
-  // move_in_progress で断る (1 つ目の結果・送信済みの印を画面から消さない)。成立・送信済みの後に呼んでも、新しい署名は出ない
-  // (mutationFn の保持の分岐が同じ payload の再送か照会だけにする)。
+  // move_in_progress で断る (1 つ目の結果・送信済みの印を画面から消さない)。保持が残っている間 (送信済みかもしれない・
+  // IP 制限の再送待ち) に呼んでも、新しい署名は出ない (mutationFn の保持の分岐が同じ payload の再送か照会だけにする)。
+  // ただし move にある「成立・送信済みの結果の後は受け付けない」守り (storageReady と mutationData / restoredResult の確認) は
+  // ここには無く、成立して保持が外れた後に呼ぶと新しい試み (新しい署名) になる。画面 (SalesMoveForm) は move だけを使う。
   const moveAsync = useCallback(
     (variables: SalesMoveParams): Promise<SalesMoveResult> => {
       const ticket = claimEntry();
