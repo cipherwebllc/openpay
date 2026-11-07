@@ -3107,7 +3107,7 @@ route は `POST /api/relay/jpyc/move` (Polygon と Amoy だけ)。画面は /cre
 
 ### 18.1 flag と前提
 - `NEXT_PUBLIC_ENABLE_SALES_MOVE` (コードの既定 OFF)。build 時に埋め込まれるので、変えたら再デプロイ。OFF の間は route が 404・
-  /create のフォームと /guide/wallet の案内 (#store-wallet) は描かれない。
+  /create のフォームは描かれない (/guide/wallet の案内は 2026-11-07 に外した・下の 18.6)。
 - 既存の recover の経路がそろっていること (`NEXT_PUBLIC_ENABLE_JPYC_EIP3009`・`RELAYER_PRIVATE_KEY`・`NEXT_PUBLIC_JPYC_FORWARDER_POLYGON`・
   `NEXT_PUBLIC_FEE_RECEIVER_ADDRESS`・KV・`RELAY_MAX_GAS_COST_WEI`)。mainnet でガスの上限か KV が無いと 503 (`gas_ceiling_required`・`kv_required`)。
 - 利用料は route が `relayGasFeeValue(137)` をそのまま求める (開示の定数は読まない)。解決の順は `lib/relay/forwarderConfig.ts` の
@@ -3135,20 +3135,20 @@ route は `POST /api/relay/jpyc/move` (Polygon と Amoy だけ)。画面は /cre
 2. user が Vercel の Production に `NEXT_PUBLIC_ENABLE_SALES_MOVE=1` を入れる (**再デプロイはしない**。NEXT_PUBLIC は build 時に
    埋め込まれるので、入れただけでは今の本番は変わらない)。
 3. 開示 (規約 第 5 条 (12)・特商法・免責・プライバシー・LP と料金ページの 5 つの場合のカード・料金ページの行・/transparency・
-   public/llms.txt・README・/guide/wallet の案内) の PR を merge する。merge で始まるデプロイが flag ON で build されるので、
+   public/llms.txt・README) の PR を merge する。merge で始まるデプロイが flag ON で build されるので、
    開示と機能が 1 回のデプロイで同時に出る。`e2e/prodFlags.env` にも flag の行を足す (別 PR でよい)。
 4. 本番の確認 (少額・自社のウォレット):
    - /create →「受け取った通貨を換金」を開くと「売上をほかのウォレットへ移す」が出る。確認の段の「届く額」「利用料 2 JPYC」「ウォレット
      から出る合計」が合っている。
    - 署名 → 成立 → Polygonscan で、送り先に移す額ちょうど・受取口に 2 JPYC・送り元のウォレットから合計が出たこと、送り先への
      Transfer の from が forwarder であることを確かめる。支払い控えに「届く額」と「利用料」が別の行で残り、お店の履歴には入らない。
-   - /guide/wallet#store-wallet に案内とリンクが出る。料金ページ・LP (5 枚のカード)・規約・特商法・免責・プライバシー・/transparency の表示を確かめる。
+   - 料金ページ・LP (5 枚のカード)・規約・特商法・免責・プライバシー・/transparency の表示を確かめる。
 5. 点灯の直後に user が UPBOND Wallet から少額を自分の別のウォレットへ移す (署名が通ること・4. と同じ 3 点を Polygonscan で確かめる)。
-   通らなければ 18.3 で flag を外す (/create のフォームと /guide/wallet の案内が消える・開示は残してよい)。
+   通らなければ 18.3 で flag を外す (/create のフォームが消える・開示は残してよい)。
 6. お知らせ (lib/news.ts + lib/newsIndex.ts・3 文以内) は点灯の後に別 PR (文言は user 承認)。
 
 ### 18.3 ロールバック
-- `NEXT_PUBLIC_ENABLE_SALES_MOVE` を外して再デプロイ。route は 404、/create のフォームと /guide/wallet の案内は出なくなる。
+- `NEXT_PUBLIC_ENABLE_SALES_MOVE` を外して再デプロイ。route は 404、/create のフォームは出なくなる。
   開示はそのまま残してよい (提供停止を告知する場合は規約の手続きで)。
 - 外す前に送信済みの移動はオンチェーンで進む。`/api/relay/jpyc/status` は flag で止めないので照会できる (画面は出ないので、
   問い合わせには送り元のウォレットの履歴で確かめてもらう)。
@@ -3177,6 +3177,11 @@ route は `POST /api/relay/jpyc/move` (Polygon と Amoy だけ)。画面は /cre
    例: 2026-11-07 (UTC) なら「今 − 100 日」は 2026-07-30 なので、`2026-06` (翌月 1 日 = 07-01) は DEL、`2026-07` (翌月 1 日 = 08-01) は
    EXPIRE。
 
+
+### 18.6 2026-11-07 の点灯の結果と /guide/wallet の案内
+- 本番 (Polygon) で MetaMask から移せた (送り先にちょうどの額・受取口に 2 JPYC・送り先への Transfer の from が forwarder)。
+- **UPBOND Wallet (WalletConnect) では署名がウォレットの中で失敗した** (2 回・ウォレットが JSON-RPC の `Internal error` を返し、画面は「移せませんでした」・サーバーには届かず送金なし)。11/06 の UPBOND の JPYC 支払い (同じ forwarder 宛ての receiveWithAuthorization) は通っていた。**マイナウォレットでも失敗した** (パスキー + Account Abstraction のウォレット)。
+- そのため /guide/wallet#store-wallet (UPBOND の欄) の「ガス代が無いときは…でも移せます」の 1 文とリンクを外した (user 承認・UPBOND からも移せるように読めるため・試した範囲だけを書く)。UPBOND で通ったら戻す。
 ## サブドメイン運用ルール (2026-10-12)
 
 - open-pay.jp のサブドメインには、第三者が中身を書けるホスティング (docs・blog・status・フォーラムなど) を置かない。

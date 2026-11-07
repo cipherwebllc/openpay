@@ -55,11 +55,9 @@ describe('walletGuide content', () => {
     for (const locale of LOCALES) {
       // 例外は UPBOND Wallet で確かめた事実だけ (OpenPay の対応チェーン・通貨の一覧ではない・ほかのチェーン名と金額はここでも書かない):
       //   - storeNote の「Polygon」: ガス代の例 (Polygon なら POL・2026-10-01 本番で受け取り、送るときに POL が要った)
-      //   - UPBOND Wallet のカードの本文の「Polygon」: 支払いを確かめたチェーン (2026-11-06 本番)
-      const upbondAt = walletGuideContentFor(locale).wallets.findIndex((w) => w.id === 'upbond');
+      //   (UPBOND Wallet のカードの本文の「Polygon」は 2026-11-07 に支払いの一文ごと外した)
       const ALLOWED: Record<string, RegExp> = {
         [`${locale}.storeNote`]: /Polygon/g,
-        [`${locale}.wallets[${upbondAt}].body`]: /Polygon/g,
       };
       for (const [at, text] of copyLeaves(locale)) {
         const checked = ALLOWED[at] ? text.replace(ALLOWED[at], '') : text;
@@ -76,8 +74,9 @@ describe('walletGuide content', () => {
   // 扱えるかは試していないが、受け取るチェーンは指定しない (「Polygon を選んでください」は Polygon 以外はダメと読める・試したのが
   // Polygon だっただけ・2026-11-06 user)。通常決済と USDC は試していないので、使えるとも使えないとも書かない (2026-11-06 user
   // 「確実じゃなければわざわざ言わなくてよくない？」・SDK の README の「data 付き tx は未対応」は WalletConnect でつないだ場合の
-  // 事実ではない)。
-  it('UPBOND Wallet: 一覧の最後 (ガス代不要の支払いだけ・Polygon・Copy link でつなぐ・タブに戻る) とお店の受け取り用 (移す・ガス代の例は Polygon なら POL・チェーンを指定しない)', () => {
+  // 事実ではない)。2026-11-07: ガス代不要の支払いの署名が UPBOND の中で失敗するようになった (user 実機) ので、カードから支払いの
+  // 一文と使い方の補足を外し、受け取り用に向くことだけにした (user 承認)。
+  it('UPBOND Wallet: 一覧の最後 (受け取り用に向く・受け取り用の節を指す・支払えるとは書かない・2026-11-07) とお店の受け取り用 (移す・ガス代の例は Polygon なら POL・チェーンを指定しない)', () => {
     for (const locale of LOCALES) {
       const c = walletGuideContentFor(locale);
       // UPBOND の名前は一覧のカードと受け取り用の節 (題・本文・注意・リンク) にだけ出す。
@@ -88,13 +87,14 @@ describe('walletGuide content', () => {
       for (const [at, text] of outside) expect(text, `${at} に UPBOND`).not.toContain('UPBOND');
       const card = c.wallets[upbondAt];
       expect(card.name).toBe('UPBOND Wallet');
-      expect(card.body).toContain('Polygon');
+      // 2026-11-07: ガス代不要の支払いの署名が通らなくなった (user 実機) ので、支払えるとは書かない。受け取り用に向くことと、
+      // このページの受け取り用の節 (題をそのまま引用) を指すだけ。使い方の補足 (つなぎ方・払うときの癖) も外した。
+      expect(card.body).not.toMatch(/支払い|payments? with no gas|works for JPYC payments|Polygon/i);
+      expect(card.body).toContain(locale === 'ja' ? `「${c.storeTitle}」` : `“${c.storeTitle}”`);
+      expect(card.body).toContain(locale === 'ja' ? '受け取り用に向いています' : 'suits receiving payments at your shop');
       // 試していない通常決済・USDC について「使えない」と書かない (USDC は上の検査でも止まる)。
       expect(card.body).not.toMatch(/通常決済|使えません|standard payment|not for/i);
-      // 使い方の補足は UPBOND Wallet だけ。つなぎ方は WalletConnect の QR の下の“Copy link” (画面の表記どおり・英語のまま)。
-      expect(c.wallets.filter((w) => w.howTo).map((w) => w.id)).toEqual(['upbond']);
-      expect(card.howTo).toContain(locale === 'ja' ? '「Copy link」' : '“Copy link”');
-      expect(card.howTo).toContain('UPBOND Wallet');
+      expect(c.wallets.filter((w) => w.howTo).map((w) => w.id)).toEqual([]);
       expect(c.storeBody).toContain('UPBOND Wallet');
       expect(c.storeBody).toContain('JPYC EX');
       expect(c.storeNote).toContain('POL');
@@ -108,14 +108,14 @@ describe('walletGuide content', () => {
     // 「普段の」ウォレットとは書かない (この節はウォレットを持っていないお店向け・2026-11-06 user)。
     expect(walletGuideContentFor('ja').storeNote).not.toContain('普段');
     expect(walletGuideContentFor('en').storeNote).not.toContain('day to day');
-    expect(walletGuideContentFor('ja').wallets[3].body).toContain('OpenPay では、Polygon の JPYC のガス代不要の支払いで使えることを確かめています。');
-    expect(walletGuideContentFor('ja').wallets[3].howTo).toContain('UPBOND Wallet のタブに戻ると承認の画面が出ています');
+    expect(walletGuideContentFor('ja').wallets[3].body).toBe('アプリを入れずにブラウザで使えるウォレットです。LINE・Google のアカウントやパスキーでログインできます。お店の受け取り用に向いています (このページの「お店の受け取り用」)。');
+    expect(walletGuideContentFor('ja').wallets[3].howTo).toBeUndefined();
     // 受け取り用の節の「お客様の支払い用には、上のウォレットを」は UPBOND も一覧に入ったので書かない。
     expect(walletGuideContentFor('ja').storeNote).not.toContain('お客様の支払い用');
     expect(walletGuideContentFor('en').storeNote).toContain('sending from UPBOND Wallet requires gas, such as POL on Polygon');
     expect(walletGuideContentFor('en').storeNote).toContain('such as MynaWallet');
-    expect(walletGuideContentFor('en').wallets[3].body).toContain('we have confirmed that it works for JPYC payments with no gas fee on Polygon');
-    expect(walletGuideContentFor('en').wallets[3].howTo).toContain('go back to the UPBOND Wallet tab');
+    expect(walletGuideContentFor('en').wallets[3].body).toBe('A wallet that runs in your browser with no app to install. You can sign in with a LINE or Google account or a passkey. It suits receiving payments at your shop (see “For receiving payments at your shop” on this page).');
+    expect(walletGuideContentFor('en').wallets[3].howTo).toBeUndefined();
     expect(walletGuideContentFor('en').storeNote).not.toContain('as a customer');
     // ガス代の例に Polygon を出す以上、OpenPay の JPYC の受け取りに Polygon が残っていること (外したらこの節も直す)。
     expect(() => deploymentForSlug('jpyc', 'polygon')).not.toThrow();
@@ -164,22 +164,6 @@ describe('walletGuide content', () => {
     }
     for (const label of [en.Scan.pageTitle, en.Nav.pay, en.Scan.startCameraButton, en.Nav.connect]) {
       expect(text('en'), label).toContain(`“${label}”`);
-    }
-    // 売上の移動の案内 (flag ON のときだけ描く) は /create の折りたたみの見出しとフォームの題を引用する。
-    expect(walletGuideContentFor('ja').storeMoveNote).toContain(`「${ja.Create.offramp.heading}」にある「${ja.Create.salesMove.title}」`);
-    expect(walletGuideContentFor('en').storeMoveNote).toContain(`“${en.Create.salesMove.title}” under “${en.Create.offramp.heading}”`);
-  });
-
-  // 2026-11-07 (P2b の案): ガス代が無いときの「売上をほかのウォレットへ移す」への案内。UPBOND Wallet から移せることは
-  // まだ確かめていない (plans/store-sales-move.md の P3) ので、UPBOND の名前を出さず、移せると言い切る主語を UPBOND にしない。
-  // 料率・金額は書かない (上の検査)。リンク先は /create (描画側が /{locale} を付ける・flag OFF では描かない)。
-  it('売上の移動の案内: UPBOND の名前を出さず・利用料がかかることだけを書き・リンク先は /create', () => {
-    for (const locale of LOCALES) {
-      const c = walletGuideContentFor(locale);
-      expect(c.storeMoveNote).not.toContain('UPBOND');
-      expect(c.storeMoveNote).toContain(locale === 'ja' ? '利用料がかかります' : 'a fee applies');
-      expect(c.storeMoveLink.path).toBe('/create');
-      expect(existsSync(path.join(PAGE_DIR, 'create', 'page.tsx'))).toBe(true);
     }
   });
 
