@@ -3161,10 +3161,15 @@ route は `POST /api/relay/jpyc/move` (Polygon と Amoy だけ)。画面は /cre
 `SET … EX … NX` で、期限は同じ命令で付く。本番の KV の操作は user が行う (値・アドレスはこの文書・PR・チャットに書かない)。
 1. きっかけ: Sentry に `kv.incr_expire_failed` が出たとき、または月に 1 回。
 2. Upstash のコンソール (CLI) で、TTL の無い key を探す:
-   - `SCAN 0 MATCH relay:move:* COUNT 1000` と `SCAN 0 MATCH relay:fee-avoid:* COUNT 1000` を、返る cursor が 0 になるまで続ける。
-   - 見つけた key ごとに `TTL <key>`。`-1` が TTL の無い key (`-2` は消えている)。
-3. 片づけ: key の中の月 (`relay:move:{YYYY-MM}:…`・`relay:fee-avoid:{YYYY-MM}:…`) が 100 日より前なら `DEL <key>`、まだ新しければ
-   `EXPIRE <key> 8640000` (100 日・秒) で期限を付け直す。
+   - `SCAN 0 MATCH relay:move:* COUNT 1000` と `SCAN 0 MATCH relay:fee-avoid:* COUNT 1000` を、pattern ごとに別々に回す。2 回目からは
+     前の応答で返った cursor を `SCAN <cursor> MATCH … COUNT 1000` に渡し、返る cursor が 0 になるまで続ける。
+   - 見つけた key ごとに `TTL <key>`。**`-1` (TTL の無い key) だけを次の片づけの対象にする** (`-2` は消えている・正の数は期限が付いて
+     いるので触らない)。
+3. 片づけ (`-1` の key だけ): key の中の月 (`relay:move:{YYYY-MM}:…`・`relay:fee-avoid:{YYYY-MM}:…`・UTC の月) の**翌月の 1 日
+   (UTC 0 時) が「今 − 100 日」以前**なら、その月の記録はすべて 100 日より古いので `DEL <key>`。それ以外 (月の途中の記録が 100 日に
+   満たないかもしれない) は `EXPIRE <key> 8640000 NX` (100 日・秒。`NX` で、その間に付いた期限を延ばさない) で期限を付ける。
+   例: 2026-11-07 (UTC) なら「今 − 100 日」は 2026-07-30 なので、`2026-06` (翌月 1 日 = 07-01) は DEL、`2026-07` (翌月 1 日 = 08-01) は
+   EXPIRE。
 
 ## サブドメイン運用ルール (2026-10-12)
 

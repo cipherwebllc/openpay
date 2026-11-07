@@ -379,7 +379,10 @@ describe('④ 開示面', () => {
     }
     expect(pj.section2.body).not.toContain('での受け取りが多いとき');
     expect(pe.section2.body).not.toContain('when many payments are received');
-    // ただし書きは「個人を特定する情報を送信しない設定」の文の後ろ (その文の範囲を示す)。
+    // ただし書きは「個人を特定する情報を送信しない設定」の文の後ろ (その文の範囲を示す)。元の文が消えると indexOf が -1 になって
+    // 順の比較が素通りするので、元の文があることを先に確かめる。
+    expect(pj.section2.body).toContain('個人を特定する情報を送信しない設定');
+    expect(pe.section2.body).toContain('not to send personally identifying information');
     expect(pj.section2.body.indexOf('ただし、障害の調査')).toBeGreaterThan(pj.section2.body.indexOf('個人を特定する情報を送信しない設定'));
     expect(pe.section2.body.indexOf('However, to investigate')).toBeGreaterThan(pe.section2.body.indexOf('not to send personally identifying information'));
     expect(pj.section4.body).toContain(`「売上をほかのウォレットへ移す」の不正利用を見つけるための記録 (送り先と送り元のアドレスの組み合わせ・月ごとの件数) は、保存期限を ${days} 日に設定して保存します。`);
