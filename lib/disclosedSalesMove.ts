@@ -18,7 +18,7 @@ export const DISCLOSED_SALES_MOVE = {
   // 受け付ける mainnet のチェーン (route の SALES_MOVE_CHAIN_IDS のうち testnet の Amoy を除いたもの)。
   chainIds: [137],
   chainNames: ['Polygon'],
-  // 新設日 (= 提供開始日・規約 第 5 条 (12) の適用開始)。⚠️ 仮置き: flag (NEXT_PUBLIC_ENABLE_SALES_MOVE) の点灯日で確定し、
+  // 新設日 (= 提供開始日・規約 第 5 条 (12) の適用開始)。flag (NEXT_PUBLIC_ENABLE_SALES_MOVE) の点灯日の 2026-11-07 で確定 (user 承認)。
   // LEGAL_ENTITY の 4 文書の施行日と本文の日付も同じ日にそろえる (docs/DEPLOY_CHECKLIST.md §18.2)。
   effectiveDate: '2026-11-07',
 } as const;

@@ -3121,7 +3121,9 @@ route は `POST /api/relay/jpyc/move` (Polygon と Amoy だけ)。画面は /cre
   徴収も止めない)。だから点灯の前に下の 18.2 の 0. で確かめる。利用料を変えるなら開示の本文と施行日を同じ PR で。
 - 利用料メーター a1 (`NEXT_PUBLIC_ENABLE_USAGE_FEE`) が OFF であること (ON だと forwarder が実効 null になり 503 `relay_not_configured`)。
 - P3 の確認が済んでいること: Amoy (`NEXT_PUBLIC_JPYC_FORWARDER_AMOY` 設定済み) で 1 件通す・「署名の後に再読み込み → status の照会で
-  成立に復旧」を確かめる・本番で user が少額 (UPBOND Wallet の署名が通ること・届いた tx の Transfer の送り元が forwarder になること)。
+  成立に復旧」を確かめる (2026-11-07 に user が 2 件で確認済み)。本番の少額 (UPBOND Wallet の署名) は、flag が OFF の間は route が
+  404 で試せないので、**点灯の直後**に 18.2 の 5. で行う (2026-11-07 user 承認。UPBOND は 2026-11-06 に同じ種類の署名
+  (forwarder 宛ての receiveWithAuthorization) で本番の JPYC 支払いが通っている。だめなら 18.3 で flag を外す)。
 
 ### 18.2 点灯 (merge と同じ日・user 承認)
 0. 利用料の上書きの確認 (点灯の前): Vercel の Production で `NEXT_PUBLIC_RELAY_GAS_FEE_JPYC_POLYGON` と `NEXT_PUBLIC_RELAY_GAS_FEE_JPYC` が
@@ -3130,16 +3132,20 @@ route は `POST /api/relay/jpyc/move` (Polygon と Amoy だけ)。画面は /cre
 1. 施行日を点灯日に確定する: `DISCLOSED_SALES_MOVE.effectiveDate`・`LEGAL_ENTITY` の `termsEffectiveDate` / `tokuteiEffectiveDate` /
    `disclaimerEffectiveDate` / `privacyEffectiveDate`・規約 第 5 条 (12) の「2026 年 11 月 7 日に新設」(ja/en)・`tests/app/legal.test.tsx` の日付の固定値。
    ずれたら直してから merge (`tests/lib/salesMoveDisclosure.test.ts` が本文の日付と SOT の一致を見る)。
-2. 開示 (規約 第 5 条 (12)・特商法・免責・プライバシー・LP と料金ページの 5 つの場合のカード・料金ページの行・/transparency・
-   public/llms.txt・README・/guide/wallet の案内) の PR を merge する。
-3. Vercel の Production に `NEXT_PUBLIC_ENABLE_SALES_MOVE=1` を入れて再デプロイ。`e2e/prodFlags.env` にも同じ行を足す (別 PR でよい)。
+2. user が Vercel の Production に `NEXT_PUBLIC_ENABLE_SALES_MOVE=1` を入れる (**再デプロイはしない**。NEXT_PUBLIC は build 時に
+   埋め込まれるので、入れただけでは今の本番は変わらない)。
+3. 開示 (規約 第 5 条 (12)・特商法・免責・プライバシー・LP と料金ページの 5 つの場合のカード・料金ページの行・/transparency・
+   public/llms.txt・README・/guide/wallet の案内) の PR を merge する。merge で始まるデプロイが flag ON で build されるので、
+   開示と機能が 1 回のデプロイで同時に出る。`e2e/prodFlags.env` にも flag の行を足す (別 PR でよい)。
 4. 本番の確認 (少額・自社のウォレット):
    - /create →「受け取った通貨を換金」を開くと「売上をほかのウォレットへ移す」が出る。確認の段の「届く額」「利用料 2 JPYC」「ウォレット
      から出る合計」が合っている。
    - 署名 → 成立 → Polygonscan で、送り先に移す額ちょうど・受取口に 2 JPYC・送り元のウォレットから合計が出たこと、送り先への
      Transfer の from が forwarder であることを確かめる。支払い控えに「届く額」と「利用料」が別の行で残り、お店の履歴には入らない。
    - /guide/wallet#store-wallet に案内とリンクが出る。料金ページ・LP (5 枚のカード)・規約・特商法・免責・プライバシー・/transparency の表示を確かめる。
-5. お知らせ (lib/news.ts + lib/newsIndex.ts・3 文以内) は点灯の後に別 PR (文言は user 承認)。
+5. 点灯の直後に user が UPBOND Wallet から少額を自分の別のウォレットへ移す (署名が通ること・4. と同じ 3 点を Polygonscan で確かめる)。
+   通らなければ 18.3 で flag を外す (/create のフォームと /guide/wallet の案内が消える・開示は残してよい)。
+6. お知らせ (lib/news.ts + lib/newsIndex.ts・3 文以内) は点灯の後に別 PR (文言は user 承認)。
 
 ### 18.3 ロールバック
 - `NEXT_PUBLIC_ENABLE_SALES_MOVE` を外して再デプロイ。route は 404、/create のフォームと /guide/wallet の案内は出なくなる。
