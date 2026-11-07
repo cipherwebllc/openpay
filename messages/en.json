@@ -425,7 +425,7 @@
       "signButton": "Sign and move",
       "success": "Moved. The JPYC that arrives will show OpenPay's relay mechanism as its sender.",
       "viewTx": "View transaction",
-      "pending": "Sent. Waiting for confirmation. Don't sign again (reopening this page checks the result).",
+      "pending": "Sent. Waiting for confirmation. Don't sign again (reopening this page checks the result; it can take about 30 minutes before the result is known).",
       "reverted": "The transfer didn't go through (your JPYC didn't move). Check the JPYC in your wallet and try again.",
       "errors": {
         "invalidAddress": "That address isn't in a valid format.",
