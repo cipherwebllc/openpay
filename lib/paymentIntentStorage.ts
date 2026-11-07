@@ -397,3 +397,79 @@ export function saveUsageFeeIntent(intent: UsageFeeIntentMetadata): void {
 export function clearUsageFeeIntent(): void {
   clear(USAGE_FEE_INTENT_STORAGE_KEY);
 }
+
+// --- 売上をほかのウォレットへ移す (plans/store-sales-move.md §2.2) ---
+// お客様の決済の枠 (RELAY_INTENT_STORAGE_KEY) とは別のキー・別の parse。決済の枠は 1 スロットで、PaymentForm /
+// CheckoutForm が routeKind === 'recover' で復元するので、そこへ移動を入れると決済の画面が移動の結果を自分の支払いとして
+// 読み直してしまう (Fable 2)。中身は決済の枠と同じく公開の metadata だけ (署名は保存しない)。読み直した後は nonce で
+// /api/relay/jpyc/status を照会する (recover の形のまま・status は routeKind を見ない)。
+export const SALES_MOVE_INTENT_STORAGE_KEY = 'openpay:move-intent:v1';
+
+export type SalesMoveIntentMetadata = {
+  version: 1;
+  chainId: number;
+  from: Address;
+  /** 送り先 (relay の payload の merchant)。 */
+  merchant: Address;
+  /** 送り先に届く額 (wei の 10 進)。 */
+  merchantValue: string;
+  /** 利用料 (wei の 10 進)。 */
+  feeValue: string;
+  /** receiveWithAuthorization の nonce (forwarder のコミットメント)。 */
+  nonce: Hex;
+  validBefore: string;
+  issuedAt: number;
+};
+
+function parseSalesMoveIntent(value: unknown): SalesMoveIntentMetadata | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const o = value as Record<string, unknown>;
+  if (
+    o.version !== 1 ||
+    typeof o.chainId !== 'number' ||
+    !Number.isInteger(o.chainId) ||
+    !isAddressText(o.from) ||
+    !isAddressText(o.merchant) ||
+    !isDecimal(o.merchantValue) ||
+    !isDecimal(o.feeValue) ||
+    !isHex32(o.nonce) ||
+    !isDecimal(o.validBefore) ||
+    !isIssuedAt(o.issuedAt)
+  ) {
+    return null;
+  }
+  return {
+    version: 1,
+    chainId: o.chainId,
+    from: o.from,
+    merchant: o.merchant,
+    merchantValue: o.merchantValue,
+    feeValue: o.feeValue,
+    nonce: o.nonce,
+    validBefore: o.validBefore,
+    issuedAt: o.issuedAt,
+  };
+}
+
+export function loadSalesMoveIntent(): SalesMoveIntentMetadata | null {
+  return load(SALES_MOVE_INTENT_STORAGE_KEY, parseSalesMoveIntent);
+}
+
+export function saveSalesMoveIntent(intent: SalesMoveIntentMetadata): void {
+  // 署名や signed payload を誤って混入できないよう、保存値を公開メタデータへ再構成する。
+  save(SALES_MOVE_INTENT_STORAGE_KEY, {
+    version: 1,
+    chainId: intent.chainId,
+    from: intent.from,
+    merchant: intent.merchant,
+    merchantValue: intent.merchantValue,
+    feeValue: intent.feeValue,
+    nonce: intent.nonce,
+    validBefore: intent.validBefore,
+    issuedAt: intent.issuedAt,
+  });
+}
+
+export function clearSalesMoveIntent(): void {
+  clear(SALES_MOVE_INTENT_STORAGE_KEY);
+}

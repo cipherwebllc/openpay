@@ -65,6 +65,12 @@ const StoreDevicePageStatus = dynamic(
   () => import('@/components/StoreDevicePageStatus').then((m) => m.StoreDevicePageStatus),
   { ssr: false },
 );
+// 「売上をほかのウォレットへ移す」(plans/store-sales-move.md §2.3)。flag OFF では描かないので chunk も読まない。
+// 換金の折りたたみの中にあり、初回の描画に要らないので First Load JS から外す。
+const SalesMoveForm = dynamic(
+  () => import('@/components/SalesMoveForm').then((m) => m.SalesMoveForm),
+  { ssr: false },
+);
 const CreatorStoreSellerPanel = dynamic(() =>
   import('@/components/CreatorStoreSellerPanel').then(
     (module) => module.CreatorStoreSellerPanel,
@@ -327,6 +333,7 @@ function CreatePageBody() {
             {t('offramp.gasHint.disclaimer')}
           </p>
         </details>
+        {env.enableSalesMove && <SalesMoveForm />}
         </div>
       </details>
       )}

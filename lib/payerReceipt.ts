@@ -76,6 +76,9 @@ export type PayerReceipt = {
   discountAmount?: string;
   totalTaxAmount?: string;
   totalAmount?: string;
+  /** 合計 (totalAmount) のうち OpenPay の利用料 (token 単位)。利用料を上乗せして払う経路 (売上の移動・/create#move) だけが
+   *  付ける (届く額と利用料を別の項目で残す)。ほかの経路の控えは省略。 */
+  feeAmount?: string;
   memo?: string;
   explorerUrl?: string;
   /** 異通貨建て (FX 換算 QR) の元価格。顧客が QR で見た請求建ての金額 / 表示シンボル /
@@ -107,6 +110,8 @@ export type BuildPayerReceiptInput = {
   discountAmount?: string | null;
   totalTaxAmount?: string;
   totalAmount?: string;
+  /** 合計のうち OpenPay の利用料 (PayerReceipt.feeAmount)。利用料を上乗せして払う経路だけが渡す。 */
+  feeAmount?: string | null;
   memo?: string | null;
   receiptNo?: string | null;
   orderId?: string | null;
@@ -177,6 +182,7 @@ export function buildPayerReceipt(
     ...(input.discountAmount ? { discountAmount: input.discountAmount } : {}),
     totalTaxAmount: input.totalTaxAmount ?? '0',
     totalAmount: input.totalAmount ?? input.amount,
+    ...(input.feeAmount ? { feeAmount: input.feeAmount } : {}),
     memo: input.memo?.trim() || undefined,
     explorerUrl:
       chainId != null && txHash ? txExplorerUrl(chainId, txHash) : undefined,
@@ -395,6 +401,7 @@ function isValidReceipt(value: unknown): value is PayerReceipt {
   if (r.chainId != null && (typeof r.chainId !== 'number' || !Number.isFinite(r.chainId))) return false;
   if (r.lineItems !== undefined && !isValidLineItems(r.lineItems)) return false;
   if (r.discountAmount !== undefined && !isConsistentDiscount(r)) return false;
+  if (r.feeAmount !== undefined && typeof r.feeAmount !== 'string') return false;
   return true;
 }
 
