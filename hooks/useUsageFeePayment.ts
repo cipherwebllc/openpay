@@ -8,7 +8,7 @@
 // 応答判定と latch の語彙は useJpycEip3009Payment.postRelayPayload と **同一** にする
 // (分岐が食い違うと片方だけ二重課金経路が残るため)。
 
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { useAccount, useWalletClient } from 'wagmi';
 import type { Address, Hex } from 'viem';
@@ -40,6 +40,9 @@ export type UsageFeePayResult = {
   success: boolean;
   pending: boolean;
 };
+
+// mutation の変数 (押された利用料の額)。
+type UsageFeePayVariables = { value: bigint };
 
 type RelayBody = {
   ok?: boolean;
@@ -180,7 +183,7 @@ export function useUsageFeePayment(deployment: TokenDeployment) {
   // この hook が画面に載っているか (mutationFn の確認に使う)。React の StrictMode の mount→unmount→mount は
   // effect が同期で true に戻すので、その後に押された正当な 1 回目は止めない。番号 (useSalesMove の ticket) でなく
   // mountedRef で足りる: unmount した instance の ref は false のまま戻らず、試みを止めたいのはこの hook が画面から
-  // 外れたときだけ (同じ mount の中の並行の試み = 同じ tick の二度押しはここでは扱わない)。
+  // 外れたときだけ (同じ mount の中の並行の試み = 同じ tick の二度押しはここでは扱わない・下の attemptInFlightRef が扱う)。
   const mountedRef = useRef(true);
   useEffect(() => {
     mountedRef.current = true;
@@ -188,6 +191,14 @@ export function useUsageFeePayment(deployment: TokenDeployment) {
       mountedRef.current = false;
     };
   }, []);
+
+  // 試み中の印 (同期)。包みの mutate / mutateAsync が react-query に渡す前に立て (claimAttempt)、その mutation が終わった
+  // (成功・失敗・throw のどれでも) ときに useMutation の onSettled で外す。
+  // 何の波及を断つか: 同じ描画のうちの二度押し (/billing の支払いボタンを、pay.isPending の disabled を描いた再描画より前に
+  // 2 回押した) が 2 つ目の mutation を作り、別の署名 (別の nonce) を求めて両方 POST すること (利用料の送金が 2 本とも成立し、
+  // 2 本目が復旧の枠 openpay:usage-fee-intent:v1 を上書きする)。ボタンを止める isPending は react-query が知らせた後の
+  // 再描画まで変わらないので、ref で同期に見る (useJpycEip3009Payment の #1043 と同じ形)。
+  const attemptInFlightRef = useRef(false);
 
   // reload をまたいでも latch を失わないよう sessionStorage から復元する。復元後は
   // ambiguous 扱い = 同一 payload の再 POST だけを許可し、再署名は出さない。
@@ -204,7 +215,7 @@ export function useUsageFeePayment(deployment: TokenDeployment) {
     };
   }, []);
 
-  return useMutation<UsageFeePayResult, Error, { value: bigint }>({
+  const mutation = useMutation<UsageFeePayResult, Error, UsageFeePayVariables>({
     mutationFn: async ({ value }) => {
       // 何の波及を断つか: 画面 (/billing) を離れた (unmount した) hook の試みが、離れた後に POST と復旧の枠
       // (openpay:usage-fee-intent:v1) の保存・消去へ進むこと。react-query の mutation は (アプリで 1 つの) QueryClient の
@@ -279,7 +290,53 @@ export function useUsageFeePayment(deployment: TokenDeployment) {
       persistUsageFeeIntent(payload);
       return settleUsageFeeRelay(retainedRef, null, payload);
     },
+    // 試み中の印を外す。mutationFn の本体を try/finally で包み直さず onSettled にしたのは (#1043 と同じ)、差分が小さいうえ、
+    // mutationFn が始まらずに終わった mutation でも外れるため。react-query は成功でも失敗 (mutationFn の throw・入口の
+    // payment_cancelled を含む) でもこれを呼ぶ (@tanstack/query-core 5.100 の Mutation.execute は、失敗の側の callback を
+    // 1 つずつ try で包んで呼ぶ)。offline で止まった試み・署名の応答を待つ試みは終わるまで印が残るが、その間は isPending も
+    // true (ボタンは disabled) なので、印が今まで押せた押下を新しく止めることは無い。
+    onSettled: () => {
+      attemptInFlightRef.current = false;
+    },
   });
+
+  const mutationMutate = mutation.mutate;
+  const mutationMutateAsync = mutation.mutateAsync;
+
+  // 試み中なら false (新しい mutation を作らない)。そうでなければ印を立てて true。true のときは同期のまま mutation を作る
+  // (印を立てて mutation を作らない筋を作らない = 印が外れないまま残らない)。
+  const claimAttempt = useCallback((): boolean => {
+    if (attemptInFlightRef.current) return false;
+    attemptInFlightRef.current = true;
+    return true;
+  }, []);
+
+  // 二度押しの 2 回目は mutation を作らずに payment_in_progress で断る。新しい mutation を作らないので、react-query の
+  // observer が見る 1 つ目の mutation (その途中の状態・結果) を画面から外さない。断った押下に送金の結果は無いので、結果を
+  // 偽って resolve せず reject する。
+  const mutateAsync = useCallback(
+    (variables: UsageFeePayVariables): Promise<UsageFeePayResult> => {
+      if (!claimAttempt()) return Promise.reject(new Error('payment_in_progress'));
+      return mutationMutateAsync(variables);
+    },
+    [claimAttempt, mutationMutateAsync],
+  );
+
+  // 呼ぶ所は無いが、印を通らない入口を外に出さない (mutateAsync と同じく 2 回目は mutation を作らない)。
+  const mutate = useCallback(
+    (variables: UsageFeePayVariables): void => {
+      if (!claimAttempt()) return;
+      mutationMutate(variables);
+    },
+    [claimAttempt, mutationMutate],
+  );
+
+  // 試み中か (同じ印を同期に読む)。呼出側 (OpenPayFeePanel の startPay) が、押下を受けて画面の状態 (清算中の期間など) を
+  // 書き換える **前に** 見る (断られる押下で 1 つ目の表示を書き換えない)。描画の値でなく関数なのは、同じ描画のうちの 2 回目に
+  // 描画の時点の古い値を見せないため。
+  const isAttemptInFlight = useCallback(() => attemptInFlightRef.current, []);
+
+  return { ...mutation, mutate, mutateAsync, isAttemptInFlight };
 }
 
 // sessionStorage への保存は best-effort。何の波及を断つか: storage 障害 (Safari private /

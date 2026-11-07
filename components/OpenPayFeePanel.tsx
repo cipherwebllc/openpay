@@ -98,6 +98,13 @@ export function OpenPayFeePanel() {
   // line = 清算対象期間のインボイス行。period を settle に渡す (owed 複数で期間を取り違えない)。
   async function startPay(line: { period: string; feeWei: string }) {
     if (!payDeployment) return;
+    // 同じ描画のうちの二度押し (ボタンの disabled = pay.isPending を描いた再描画より前の 2 回目。owed が複数のときの別の期間の
+    // ボタンを含む) は、画面の状態を何も変えずに戻る。何の波及を断つか: 断られる押下が下の setActivePeriod などで 1 つ目の
+    // 試みの表示 (清算中の期間・pending・revert の印) を書き換えること。送金を断るのは hook の mutateAsync (同じ試み中の印)
+    // で、ここはその印を先に読むだけ (読んでから mutateAsync が印を立てるまで await を挟まない)。知らせを出さないのは、出すと
+    // 1 つ目の試みと共有の表示 (pay.isError・activePeriod) を書き換えるため。1 つ目の試みは続き、次の描画でボタンは
+    // disabled になる (disabled のボタンを押したのと同じ扱い)。
+    if (pay.isAttemptInFlight()) return;
     setActivePeriod(line.period);
     setPendingPeriod(null);
     setRevertedPeriod(null);

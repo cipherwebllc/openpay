@@ -5,7 +5,7 @@
 import { describe, it, expect, vi, beforeEach, type MockInstance } from 'vitest';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider, onlineManager } from '@tanstack/react-query';
-import { useEffect, type ReactNode } from 'react';
+import { Activity, useEffect, useState, type ReactNode } from 'react';
 
 const h = vi.hoisted(() => ({
   account: { address: '0x1111111111111111111111111111111111111111', chainId: 80002 } as {
@@ -754,6 +754,220 @@ describe('useUsageFeePayment — 画面を離れた後の試みは POST も枠�
     expect(h.signTypedData).toHaveBeenCalledTimes(1);
     expect(posts).toHaveLength(1);
     expect(savedNonce()).toBeNull();
+    view.unmount();
+  });
+});
+
+// 同じ描画のうちの二度押し (/billing の支払いボタンを、pay.isPending の disabled を描いた再描画より前に 2 回押した) は 2 つ目の
+// mutation を作らない (署名 1 回・POST 1 本)。2 回目は mutation を作らずに payment_in_progress で断る。試み中の印は mutation が
+// 終わったとき (成功・失敗・throw・入口の payment_cancelled のどれでも) に外れ、拒否・revert・構造化 400・429 の後の正当な次の
+// 押下は通る。「2 本目が無い」は待ち時間でなく、MutationCache のどの mutation も終わった (pending でない) のを待ってから見る
+// (作られた mutation の数も数える)。mutationFn に動的 import は無い (二度押しで同じ mock module の import が重ならない)。
+describe('useUsageFeePayment — 二度押しは 2 つ目の署名・POST にしない (試み中の印)', () => {
+  type RelayReply = 'ok' | 'reverted' | 'bad_request' | 'ip_rate_limited';
+  // relay POST の応答を順に返す (尽きたら成功)。呼ぶたびに新しい Response を作る (body は 1 回しか読めない)。
+  let relayReplies: RelayReply[] = [];
+  let fetchSpy: MockInstance<typeof fetch>;
+  // アプリと同じく 1 つの QueryClient を共有する (作られた mutation を数える)。
+  let qc: QueryClient;
+
+  function relayResponse(reply: RelayReply): Response {
+    if (reply === 'reverted') {
+      return new Response(JSON.stringify({ ok: false, reverted: true, txHash: TX_REV }), { status: 200 });
+    }
+    if (reply === 'bad_request') {
+      return new Response(JSON.stringify({ ok: false, error: 'bad_request' }), { status: 400 });
+    }
+    if (reply === 'ip_rate_limited') {
+      return new Response(JSON.stringify({ ok: false, error: 'ip_rate_limited' }), { status: 429 });
+    }
+    return new Response(JSON.stringify({ ok: true, txHash: TX_OK }), { status: 200 });
+  }
+
+  function posts(): { value: string; nonce: string }[] {
+    return fetchSpy.mock.calls.map(
+      ([, init]) => JSON.parse((init as RequestInit).body as string) as { value: string; nonce: string },
+    );
+  }
+
+  function shared({ children }: { children: ReactNode }) {
+    return <QueryClientProvider client={qc}>{children}</QueryClientProvider>;
+  }
+
+  function mountHook() {
+    return renderHook(() => useUsageFeePayment(deployment), { wrapper: shared });
+  }
+
+  type Pay = ReturnType<typeof useUsageFeePayment>;
+
+  // 押す (OpenPayFeePanel の startPay と同じく mutateAsync の reject を握る)。返す promise は終わると結果か error になる。
+  function press(pay: Pay, value: bigint = FEE): Promise<unknown> {
+    return pay.mutateAsync({ value }).catch((error: unknown) => error);
+  }
+
+  async function finished(attempt: Promise<unknown>): Promise<unknown> {
+    let outcome: unknown;
+    await act(async () => {
+      outcome = await attempt;
+    });
+    return outcome;
+  }
+
+  function messageOf(outcome: unknown): unknown {
+    return outcome instanceof Error ? outcome.message : outcome;
+  }
+
+  // MutationCache のどの mutation も終わる (pending でない) まで待ち、作られた mutation の数を返す。
+  async function settledMutationCount(): Promise<number> {
+    await waitFor(() =>
+      expect(qc.getMutationCache().getAll().every((m) => m.state.status !== 'pending')).toBe(true),
+    );
+    return qc.getMutationCache().getAll().length;
+  }
+
+  beforeEach(() => {
+    relayReplies = [];
+    qc = new QueryClient({ defaultOptions: { mutations: { retry: false }, queries: { retry: false } } });
+    fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      expect(url).toBe('/api/relay/jpyc');
+      return relayResponse(relayReplies.shift() ?? 'ok');
+    });
+  });
+
+  it('同じ act の中で mutateAsync を 2 回: 署名 1 回・POST 1 本・mutation 1 つ。2 回目は payment_in_progress で断り、結果は 1 回目のもの', async () => {
+    const view = mountHook();
+    let first: Promise<unknown> = Promise.resolve();
+    let second: Promise<unknown> = Promise.resolve();
+    act(() => {
+      first = press(view.result.current);
+      // 別の額 (owed が複数のときの別の期間の行) でも同じ。
+      second = press(view.result.current, FEE * 2n);
+    });
+    expect(messageOf(await finished(second))).toBe('payment_in_progress');
+    expect(await finished(first)).toEqual({ txHash: TX_OK, success: true, pending: false });
+    expect(await settledMutationCount()).toBe(1);
+    expect(h.signTypedData).toHaveBeenCalledTimes(1);
+    expect(posts()).toHaveLength(1);
+    expect(posts()[0].value).toBe(FEE.toString());
+    // 断った 2 回目は 1 回目の結果を画面から外さない (react-query の observer は 1 回目の mutation を見たまま)。
+    await waitFor(() => expect(view.result.current.isSuccess).toBe(true));
+    expect(view.result.current.data).toEqual({ txHash: TX_OK, success: true, pending: false });
+    expect(view.result.current.error).toBeNull();
+    view.unmount();
+  });
+
+  it('同じ act の中で mutate を 2 回: 署名 1 回・POST 1 本・mutation 1 つ', async () => {
+    const view = mountHook();
+    act(() => {
+      view.result.current.mutate({ value: FEE });
+      view.result.current.mutate({ value: FEE * 2n });
+    });
+    await waitFor(() => expect(view.result.current.isSuccess).toBe(true));
+    expect(await settledMutationCount()).toBe(1);
+    expect(h.signTypedData).toHaveBeenCalledTimes(1);
+    expect(posts()).toHaveLength(1);
+    expect(posts()[0].value).toBe(FEE.toString());
+    view.unmount();
+  });
+
+  it('1 回目の署名を待つ間 (mutationFn の途中) の 2 回目は、新しい署名を求めない (payment_in_progress で断る)', async () => {
+    let resolveFirst: (signature: string) => void = () => undefined;
+    h.signTypedData.mockImplementationOnce(() => new Promise<string>((resolve) => { resolveFirst = resolve; }));
+    const view = mountHook();
+    let first: Promise<unknown> = Promise.resolve();
+    act(() => {
+      first = press(view.result.current);
+    });
+    await waitFor(() => expect(h.signTypedData).toHaveBeenCalledTimes(1));
+    expect(view.result.current.isAttemptInFlight()).toBe(true);
+
+    let second: Promise<unknown> = Promise.resolve();
+    act(() => {
+      second = press(view.result.current);
+    });
+    expect(messageOf(await finished(second))).toBe('payment_in_progress');
+    resolveFirst('0x' + 'cd'.repeat(65));
+    expect(await finished(first)).toEqual({ txHash: TX_OK, success: true, pending: false });
+    expect(await settledMutationCount()).toBe(1);
+    expect(h.signTypedData).toHaveBeenCalledTimes(1);
+    expect(posts()).toHaveLength(1);
+    expect(view.result.current.isAttemptInFlight()).toBe(false);
+    view.unmount();
+  });
+
+  it.each([
+    ['署名の拒否', 'rejected', 'User rejected the request.', 2, 1],
+    ['revert (relay は成立したが tx が revert)', 'reverted', { txHash: TX_REV, success: false, pending: false }, 2, 2],
+    ['構造化 400 (broadcast 前の拒否)', 'bad_request', 'bad_request', 2, 2],
+    ['IP 制限 (429・同じ payload を再 POST する)', 'ip_rate_limited', 'ip_rate_limited', 1, 2],
+  ] as const)(
+    '1 回目が %s で終わった後の正当な次の押下は通る (印が外れる)',
+    async (_label, outcome, firstOutcome, signsInAll, postsInAll) => {
+      if (outcome === 'rejected') h.signTypedData.mockRejectedValueOnce(new Error('User rejected the request.'));
+      else relayReplies = [outcome];
+      const view = mountHook();
+      let first: Promise<unknown> = Promise.resolve();
+      act(() => {
+        first = press(view.result.current);
+      });
+      expect(messageOf(await finished(first))).toEqual(firstOutcome);
+      expect(await settledMutationCount()).toBe(1);
+      expect(view.result.current.isAttemptInFlight()).toBe(false);
+
+      let next: Promise<unknown> = Promise.resolve();
+      act(() => {
+        next = press(view.result.current);
+      });
+      expect(await finished(next)).toEqual({ txHash: TX_OK, success: true, pending: false });
+      expect(await settledMutationCount()).toBe(2);
+      expect(h.signTypedData).toHaveBeenCalledTimes(signsInAll);
+      expect(posts()).toHaveLength(postsInAll);
+      // 429 の後は再署名せず同じ payload (同じ nonce) を送る (保持の流れは今までどおり)。
+      if (outcome === 'ip_rate_limited') expect(posts()[1]).toEqual(posts()[0]);
+      view.unmount();
+    },
+  );
+
+  // #1042 の入口の payment_cancelled (画面から外れている間に始まった試み) で終わった試みも印を外す。'activity' は同じ hook
+  // (Activity の hidden は instance を残したまま effect を外し、visible で戻す = 印の ref も残る)、'remount' は開き直した新しい hook。
+  it.each([
+    ['画面に戻った同じ hook', 'activity'],
+    ['開き直した hook', 'remount'],
+  ] as const)('入口の payment_cancelled で終わった後も、%s の正当な押下は通る', async (_label, how) => {
+    let setMode: (mode: 'visible' | 'hidden') => void = () => undefined;
+    function Gate({ children }: { children: ReactNode }) {
+      const [mode, set] = useState<'visible' | 'hidden'>('visible');
+      setMode = set;
+      return (
+        <QueryClientProvider client={qc}>
+          <Activity mode={mode}>{children}</Activity>
+        </QueryClientProvider>
+      );
+    }
+    const viewA = renderHook(() => useUsageFeePayment(deployment), { wrapper: Gate });
+    // 押した (mutation は作ったが mutationFn はまだ) 直後に、同じ tick で画面から外れる。
+    let attempt: Promise<unknown> = Promise.resolve();
+    act(() => {
+      attempt = press(viewA.result.current);
+      if (how === 'activity') setMode('hidden');
+      else viewA.unmount();
+    });
+    expect(messageOf(await finished(attempt))).toBe('payment_cancelled');
+    expect(await settledMutationCount()).toBe(1);
+    expect(h.signTypedData).not.toHaveBeenCalled();
+    expect(posts()).toHaveLength(0);
+
+    let view = viewA;
+    if (how === 'activity') act(() => setMode('visible'));
+    else view = mountHook();
+    let next: Promise<unknown> = Promise.resolve();
+    act(() => {
+      next = press(view.result.current);
+    });
+    expect(await finished(next)).toEqual({ txHash: TX_OK, success: true, pending: false });
+    expect(await settledMutationCount()).toBe(2);
+    expect(h.signTypedData).toHaveBeenCalledTimes(1);
+    expect(posts()).toHaveLength(1);
     view.unmount();
   });
 });
