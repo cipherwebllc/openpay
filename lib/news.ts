@@ -60,8 +60,8 @@ export const NEWS_ITEMS: readonly NewsItem[] = [
       en: 'UPBOND Wallet added to “Choosing a wallet”',
     },
     body: {
-      ja: 'アプリを入れずにブラウザで使える UPBOND Wallet を、ガイドの「ウォレットを選ぶ」に加えました。お店の受け取り用に手軽で、Polygon の JPYC のガス代不要の支払いでも使えることを確かめました。決済QR とレジの受取欄が空のときは、「ウォレットをお持ちでない方へ」から案内を開けます。',
-      en: 'We added UPBOND Wallet, which runs in your browser with no app to install, to “Choosing a wallet” in the guide. It is an easy option for receiving payments at your shop, and we have also confirmed that it works for JPYC payments with no gas fee on Polygon. When the receiving wallet field in Payment QR or Register is empty, “Don\'t have a wallet yet?” opens the guide.',
+      ja: 'アプリを入れずにブラウザで使える UPBOND Wallet を、ガイドの「ウォレットを選ぶ」に加えました。お店の受け取り用に手軽で、Polygon の JPYC のガス代不要の支払いでも使えることを確かめました。決済QR とレジの受取欄が空のときは、「ウォレットをお持ちでない方へ」から案内を開けます。\n※ 2026-11-07 の確認では、UPBOND Wallet でガス代不要の支払いの署名が通らなくなっています。お店の受け取り用には、引き続き使えます。',
+      en: 'We added UPBOND Wallet, which runs in your browser with no app to install, to “Choosing a wallet” in the guide. It is an easy option for receiving payments at your shop, and we have also confirmed that it works for JPYC payments with no gas fee on Polygon. When the receiving wallet field in Payment QR or Register is empty, “Don\'t have a wallet yet?” opens the guide.\n※ As of our check on 2026-11-07, signing JPYC payments with no gas fee no longer goes through in UPBOND Wallet. You can still use it to receive payments at your shop.',
     },
     link: { href: '/guide/wallet#store-wallet', labelJa: 'ウォレットの選び方を見る', labelEn: 'See how to choose a wallet' },
   },

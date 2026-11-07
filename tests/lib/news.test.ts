@@ -61,7 +61,14 @@ describe('lib/news: コンテンツ規約 (SOT 不変条件)', () => {
   // 2026-11-05 user 確定: これから足すお知らせは本文 3 文以内 (細かいことは link 先に任せる)。
   // それより前の item は書き換えない (news.ts の方針) ので、日付で対象を分ける。
   const SHORT_BODY_FROM = '2026-11-06';
-  const sentencesJa = (text: string) => text.split(/[。！？]/).filter((s) => s.trim().length > 0).length;
+  // 「※」で始まる行は、後から足す「置き換え・訂正」の注 (news.ts の方針: 過去のお知らせは黙って書き換えず注で更新する) なので数えない。
+  const sentencesJa = (text: string) =>
+    text
+      .split('\n')
+      .filter((line) => !line.startsWith('※'))
+      .join('\n')
+      .split(/[。！？]/)
+      .filter((s) => s.trim().length > 0).length;
 
   it(`${SHORT_BODY_FROM} 以降のお知らせは、本文 (ja) が 3 文以内`, () => {
     for (const n of NEWS_ITEMS.filter((item) => item.date >= SHORT_BODY_FROM)) {
@@ -73,6 +80,8 @@ describe('lib/news: コンテンツ規約 (SOT 不変条件)', () => {
     expect(sentencesJa('リンクを作れます。お客様は JPYC で払います (お金は動きません)。')).toBe(2);
     expect(sentencesJa('一つ目。\n二つ目！三つ目？')).toBe(3);
     expect(sentencesJa('句点のない一文')).toBe(1);
+    // 後から足した「※」の注の行は数えない。
+    expect(sentencesJa('一つ目。二つ目。三つ目。\n※ 2026-11-07 の確認では変わりました。注の二文目です。')).toBe(3);
   });
 });
 
@@ -195,6 +204,15 @@ describe('lib/news: sortedNews / latestNewsId', () => {
     }
     // 旧文面が現行料金を断定しない (全額負担/徴収しません の現在形断定が残っていない)。
     expect(free!.body.ja).not.toMatch(/一切徴収しません/);
+  });
+
+  // 2026-11-07: UPBOND Wallet でガス代不要の支払いの署名が通らなくなった (user 実機)。11/06 のお知らせは書き換えず、注を足す。
+  it('UPBOND Wallet のお知らせ (11/06) に、11/07 の確認の注がある (本文は書き換えない)', () => {
+    const upbond = NEWS_ITEMS.find((n) => n.id === 'upbond-wallet-2026-11-06');
+    expect(upbond).toBeDefined();
+    expect(upbond!.body.ja).toContain('Polygon の JPYC のガス代不要の支払いでも使えることを確かめました。');
+    expect(upbond!.body.ja).toContain('\n※ 2026-11-07 の確認では、UPBOND Wallet でガス代不要の支払いの署名が通らなくなっています。お店の受け取り用には、引き続き使えます。');
+    expect(upbond!.body.en).toContain('\n※ As of our check on 2026-11-07, signing JPYC payments with no gas fee no longer goes through in UPBOND Wallet.');
   });
 
   // 「売上をほかのウォレットへ移す」のお知らせ (別 SOT = DISCLOSED_SALES_MOVE)。利用料 (送金 1 回 N JPYC)・チェーン・
