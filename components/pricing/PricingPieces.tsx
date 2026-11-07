@@ -3,7 +3,7 @@
 // (components/pricing/PricingCalculator.tsx)。
 //
 // 見た目の方針 (迷わない・疲れない):
-// - 冒頭の 4 枚のカードで「いつ・いくら・だれが」を先に答える (LP の利用料カードと同じ配色とビッグナンバー)。
+// - 冒頭の 5 枚のカードで「いつ・いくら・だれが」を先に答える (LP の利用料カードと同じ配色とビッグナンバー)。
 // - 機能ごとの料金は 1 枚の面に行を並べる。lg 以上は表のように列をそろえ (見出しの行は見た目だけ)、
 //   それより狭い幅 (スマホと iPad の縦) は各行の中で「通常決済 / ガスレス決済 / 払う人」を縦に並べる。DOM は 1 つ (dl)。
 //   md (768px) から列にすると、iPad の縦で払う人のピルが列からはみ出す (2026-10-12 実測)。
@@ -47,13 +47,17 @@ const SUMMARY_ICONS: Record<PricingSummaryId, LucideIcon> = {
   mobile: Smartphone,
   tip: Coins,
   digital: ShoppingBag,
+  salesMove: Wallet,
 };
 
-/** 冒頭の「料金がかかるのは、この 4 つだけ」のカード。 */
+/**
+ * 冒頭の「料金がかかるのは、この 5 つです」のカード。
+ * sm 以上の 2 列で数が奇数のとき、最後の 1 枚は 2 列分の幅にする (右半分が空いたまま片側に寄らないように・5 枚にした 2026-11-07)。
+ */
 export function SummaryCard({ item }: { item: PricingSummaryCase }) {
   const Icon = SUMMARY_ICONS[item.id];
   return (
-    <li className="flex flex-col rounded-2xl bg-white p-4 shadow-card ring-1 ring-slate-200/70">
+    <li className="flex flex-col rounded-2xl bg-white p-4 shadow-card ring-1 ring-slate-200/70 sm:odd:last:col-span-2">
       <div className="flex items-start justify-between gap-3">
         <h3 className="flex min-w-0 items-center gap-2 text-sm font-semibold text-slate-900 sm:text-base">
           <Icon className="h-5 w-5 shrink-0 text-brand" aria-hidden />

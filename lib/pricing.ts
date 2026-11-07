@@ -49,8 +49,12 @@ export type PricingPayer = {
   readonly note: string | null;
 };
 
-/** 冒頭の「料金がかかるのは、この 4 つだけ」のカード。 */
-export const PRICING_SUMMARY_IDS = ['gasless', 'mobile', 'tip', 'digital'] as const;
+/**
+ * 冒頭の「料金がかかるのは、この 5 つです」のカード (LP の料金の欄も同じカードを出す)。見出しは「だけ」と言わない
+ * (お店がガス代を肩代わりの 1 wei は表の行で開示する)。売上をほかのウォレットへ移す (決済ではない・お店が払う利用料) は
+ * 2026-11-07 に 5 つ目として足した (user 承認「推奨どおり」)。
+ */
+export const PRICING_SUMMARY_IDS = ['gasless', 'mobile', 'tip', 'digital', 'salesMove'] as const;
 export type PricingSummaryId = (typeof PRICING_SUMMARY_IDS)[number];
 
 export type PricingSummaryCase = {
@@ -75,7 +79,7 @@ export type PricingRowId = (typeof PRICING_ROW_IDS)[number];
 /**
  * 機能ごとの表を、料金を払う人 (読む人) ごとにまとめる (2026-10-25 外部レビュー: 料金をお店 / チップを送る方 / AI の買い手に
  * 分けて見せる)。お店がガス代を肩代わりする行は、利用料 0 円のお店の機能なのでお店のまとまりに入れる。
- * 売上をほかのウォレットへ移す行も、お店が払う利用料なのでお店のまとまりに入れる (決済ではないので冒頭の 4 つの場合には入れない)。
+ * 売上をほかのウォレットへ移す行も、お店が払う利用料なのでお店のまとまりに入れる (冒頭のカードでは 5 つ目の場合)。
  */
 export const PRICING_ROW_GROUPS = [
   { id: 'shop', rowIds: ['pay', 'mobile', 'storeGas', 'salesMove'] },
@@ -272,12 +276,12 @@ function buildJa(): PricingContent {
   return {
     metaTitle: '料金 — 機能ごとの利用料と計算例 | OpenPay',
     metaDescription:
-      'お客様がガス代を払う通常決済なら、OpenPay の料金はかかりません（モバイル注文を除く）。料金がかかる場合・料率・払う人・計算例を、決済QR・レジ・モバイル注文・チップ・デジタル商品ごとにまとめました。',
+      'お客様がガス代を払う通常決済なら、OpenPay の料金はかかりません（モバイル注文を除く）。料金がかかる場合・料率・払う人・計算例を、決済QR・レジ・モバイル注文・チップ・デジタル商品・売上の移動ごとにまとめました。',
     backHome: '← OpenPay トップへ',
     title: '料金',
     lead: 'お客様がガス代を払う通常決済なら、OpenPay の料金はかかりません（モバイル注文を除きます）。',
 
-    summaryTitle: '料金がかかるのは、この 4 つです',
+    summaryTitle: '料金がかかるのは、この 5 つです',
     summary: [
       {
         id: 'gasless',
@@ -314,6 +318,15 @@ function buildJa(): PricingContent {
         feeName: 'x402 利用料',
         payer: { tone: 'customer', label: '買い手が払う', note: null },
         detail: '買い手が価格に上乗せ。AI エージェントが x402 で払うモバイル注文も含みます',
+      },
+      {
+        id: 'salesMove',
+        name: '売上をほかのウォレットへ移す',
+        focal: `${SALES_MOVE_FEE} JPYC`,
+        focalSub: '送金 1 回',
+        feeName: '利用料',
+        payer: shop(),
+        detail: `ご自分の別のウォレットへ移すとき。移す額に上乗せします（${disclosedSalesMoveChains('ja')} の JPYC）`,
       },
     ],
     trust: [
@@ -440,7 +453,9 @@ function buildJa(): PricingContent {
           `利用料は送金 1 回につき ${SALES_MOVE_FEE} JPYC で、移す額に上乗せされます。送り先には、指定した額がそのまま届きます（決済額の ${RECOVER_PCT} はかかりません）。`,
           `例: ${jpyc(SALES_MOVE_ROW.amountWei)} JPYC を移すと、ウォレットから ${jpyc(SALES_MOVE_ROW.payerPaysWei)} JPYC が出て、送り先に ${jpyc(SALES_MOVE_ROW.receiverGetsWei)} JPYC が届きます。`,
           'お店は 1 回署名するだけで、ガス代は OpenPay が肩代わりします。',
-          `移す額は 1 回 ${SALES_MOVE_MIN} JPYC 以上です。ご自分のウォレットの間で移すための機能です。`,
+          // 上限は env (RELAY_MAX_JPYC) で決まるので数字を書かない (画面が署名の前に出す・SalesMoveForm の maxNote)。
+          `移す額は 1 回 ${SALES_MOVE_MIN} JPYC 以上です。1 回に移せる額には上限があり、署名の前に画面に表示します。`,
+          'ご自分のウォレットの間で移すための機能です。',
         ],
       },
       {
@@ -508,12 +523,12 @@ function buildEn(): PricingContent {
   return {
     metaTitle: 'Pricing — fees by feature, with worked examples | OpenPay',
     metaDescription:
-      'Standard payments, where the customer pays the gas, carry no OpenPay charge (mobile orders excepted). See when charges apply, the rates, who pays, and worked examples for payment QR, register, mobile orders, tips and digital goods.',
+      'Standard payments, where the customer pays the gas, carry no OpenPay charge (mobile orders excepted). See when charges apply, the rates, who pays, and worked examples for payment QR, register, mobile orders, tips, digital goods and moving sales to another wallet.',
     backHome: '← Back to OpenPay',
     title: 'Pricing',
     lead: 'Standard payments, where the customer pays the gas, carry no OpenPay charge (mobile orders excepted).',
 
-    summaryTitle: 'Charges apply in these 4 cases',
+    summaryTitle: 'Charges apply in these 5 cases',
     summary: [
       {
         id: 'gasless',
@@ -550,6 +565,15 @@ function buildEn(): PricingContent {
         feeName: 'x402 fee',
         payer: { tone: 'customer', label: 'Buyer pays', note: null },
         detail: 'Added to the price by the buyer, including mobile orders an AI agent pays over x402',
+      },
+      {
+        id: 'salesMove',
+        name: 'Move sales to another wallet',
+        focal: `${SALES_MOVE_FEE} JPYC`,
+        focalSub: 'per transfer',
+        feeName: 'Fee',
+        payer: shop(),
+        detail: `When moving to another wallet of your own. Added on top of the amount (JPYC on ${disclosedSalesMoveChains('en')})`,
       },
     ],
     trust: [
@@ -676,7 +700,8 @@ function buildEn(): PricingContent {
           `The fee is ${SALES_MOVE_FEE} JPYC per transfer, added on top of the amount moved. The destination receives the specified amount in full (the ${RECOVER_PCT} does not apply).`,
           `E.g. moving ${jpyc(SALES_MOVE_ROW.amountWei)} JPYC sends ${jpyc(SALES_MOVE_ROW.payerPaysWei)} JPYC from the shop’s wallet, and ${jpyc(SALES_MOVE_ROW.receiverGetsWei)} JPYC arrives at the destination.`,
           'The shop signs only once; OpenPay covers the gas.',
-          `Each move is at least ${SALES_MOVE_MIN} JPYC. It is meant for moving between the shop’s own wallets.`,
+          `Each move is at least ${SALES_MOVE_MIN} JPYC. There is a limit on how much can be moved at once, shown on screen before you sign.`,
+          'It is meant for moving between the shop’s own wallets.',
         ],
       },
       {

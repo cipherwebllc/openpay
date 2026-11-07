@@ -20,7 +20,7 @@ test.describe('料金ページ', () => {
   test('/ja/pricing: 見出しと 6 つの機能が見え、計算機が動き、横にはみ出さない', async ({ page }) => {
     await page.goto('/ja/pricing');
     await expect(page.getByRole('heading', { level: 1, name: '料金' })).toBeVisible();
-    await expect(page.getByRole('heading', { level: 2, name: '料金がかかるのは、この 4 つです' })).toBeVisible();
+    await expect(page.getByRole('heading', { level: 2, name: '料金がかかるのは、この 5 つです' })).toBeVisible();
     const fees = page.locator('section[aria-labelledby="pricing-fees"]');
     for (const name of GROUPS_JA) {
       await expect(fees.getByRole('heading', { level: 3, name, exact: true })).toBeVisible();

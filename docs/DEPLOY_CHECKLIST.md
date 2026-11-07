@@ -3110,25 +3110,32 @@ route は `POST /api/relay/jpyc/move` (Polygon と Amoy だけ)。画面は /cre
   /create のフォームと /guide/wallet の案内 (#store-wallet) は描かれない。
 - 既存の recover の経路がそろっていること (`NEXT_PUBLIC_ENABLE_JPYC_EIP3009`・`RELAYER_PRIVATE_KEY`・`NEXT_PUBLIC_JPYC_FORWARDER_POLYGON`・
   `NEXT_PUBLIC_FEE_RECEIVER_ADDRESS`・KV・`RELAY_MAX_GAS_COST_WEI`)。mainnet でガスの上限か KV が無いと 503 (`gas_ceiling_required`・`kv_required`)。
-- Polygon の gas floor (`NEXT_PUBLIC_RELAY_GAS_FEE_JPYC[_POLYGON]`) が開示の 2 JPYC (`DISCLOSED_SALES_MOVE.feeJpyc`) のままであること
-  (ずれは `feeDisclosureDivergence` が warn する。変えるなら開示の本文と施行日を同じ PR で)。
+- 利用料は route が `relayGasFeeValue(137)` をそのまま求める (開示の定数は読まない)。解決の順は `lib/relay/forwarderConfig.ts` の
+  `NEXT_PUBLIC_RELAY_GAS_FEE_JPYC_POLYGON` → Polygon の per-chain 既定 (今は無い) → `NEXT_PUBLIC_RELAY_GAS_FEE_JPYC` → 2 JPYC
+  (`tests/lib/salesMoveDisclosure.test.ts` が順と、上書きで開示とずれることを固定する)。どちらかの上書きが開示の
+  `DISCLOSED_SALES_MOVE.feeJpyc` と違うと、開示より多い・少ない利用料を求めることになる。
+  ⚠️ `feeDisclosureDivergence` はこの route では動かない (既存の `/api/relay/jpyc` の module の読み込みのときに warn するだけで、
+  徴収も止めない)。だから点灯の前に下の 18.2 の 0. で確かめる。利用料を変えるなら開示の本文と施行日を同じ PR で。
 - 利用料メーター a1 (`NEXT_PUBLIC_ENABLE_USAGE_FEE`) が OFF であること (ON だと forwarder が実効 null になり 503 `relay_not_configured`)。
 - P3 の確認が済んでいること: Amoy (`NEXT_PUBLIC_JPYC_FORWARDER_AMOY` 設定済み) で 1 件通す・「署名の後に再読み込み → status の照会で
   成立に復旧」を確かめる・本番で user が少額 (UPBOND Wallet の署名が通ること・届いた tx の Transfer の送り元が forwarder になること)。
 
 ### 18.2 点灯 (merge と同じ日・user 承認)
+0. 利用料の上書きの確認 (点灯の前): Vercel の Production で `NEXT_PUBLIC_RELAY_GAS_FEE_JPYC_POLYGON` と `NEXT_PUBLIC_RELAY_GAS_FEE_JPYC` が
+   未設定か、開示の `DISCLOSED_SALES_MOVE.feeJpyc` (human JPYC) と同じであることを確かめる (値はこの文書・PR・チャットに書かない。
+   Polygon の方が先に効く・0 や数字でない値は次の段へ倒れる)。違えば点灯しない (env を戻すか、開示を改定してから)。
 1. 施行日を点灯日に確定する: `DISCLOSED_SALES_MOVE.effectiveDate`・`LEGAL_ENTITY` の `termsEffectiveDate` / `tokuteiEffectiveDate` /
-   `disclaimerEffectiveDate`・規約 第 5 条 (12) の「2026 年 11 月 7 日に新設」(ja/en)・`tests/app/legal.test.tsx` の日付の固定値。
+   `disclaimerEffectiveDate` / `privacyEffectiveDate`・規約 第 5 条 (12) の「2026 年 11 月 7 日に新設」(ja/en)・`tests/app/legal.test.tsx` の日付の固定値。
    ずれたら直してから merge (`tests/lib/salesMoveDisclosure.test.ts` が本文の日付と SOT の一致を見る)。
-2. 開示 (規約 第 5 条 (12)・特商法・免責・LP の料金の欄・料金ページ・/transparency・public/llms.txt・README・/guide/wallet の案内) の
-   PR を merge する。
+2. 開示 (規約 第 5 条 (12)・特商法・免責・プライバシー・LP と料金ページの 5 つの場合のカード・料金ページの行・/transparency・
+   public/llms.txt・README・/guide/wallet の案内) の PR を merge する。
 3. Vercel の Production に `NEXT_PUBLIC_ENABLE_SALES_MOVE=1` を入れて再デプロイ。`e2e/prodFlags.env` にも同じ行を足す (別 PR でよい)。
 4. 本番の確認 (少額・自社のウォレット):
    - /create →「受け取った通貨を換金」を開くと「売上をほかのウォレットへ移す」が出る。確認の段の「届く額」「利用料 2 JPYC」「ウォレット
      から出る合計」が合っている。
    - 署名 → 成立 → Polygonscan で、送り先に移す額ちょうど・受取口に 2 JPYC・送り元のウォレットから合計が出たこと、送り先への
      Transfer の from が forwarder であることを確かめる。支払い控えに「届く額」と「利用料」が別の行で残り、お店の履歴には入らない。
-   - /guide/wallet#store-wallet に案内とリンクが出る。料金ページ・LP・規約・特商法・免責・/transparency の表示を確かめる。
+   - /guide/wallet#store-wallet に案内とリンクが出る。料金ページ・LP (5 枚のカード)・規約・特商法・免責・プライバシー・/transparency の表示を確かめる。
 5. お知らせ (lib/news.ts + lib/newsIndex.ts・3 文以内) は点灯の後に別 PR (文言は user 承認)。
 
 ### 18.3 ロールバック

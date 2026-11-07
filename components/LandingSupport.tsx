@@ -1,6 +1,6 @@
-// トップの料金の節 (料金がかかる 4 つの場合)。Server Component。「はじめ方」の後・FAQ の前に置く。
+// トップの料金の節 (料金がかかる 5 つの場合)。Server Component。「はじめ方」の後・FAQ の前に置く。
 //
-// 料金ページ (/pricing) の冒頭と同じ「料金がかかる 4 つの場合」のカード (lib/pricing.ts の summary・料率は
+// 料金ページ (/pricing) の冒頭と同じ「料金がかかる 5 つの場合」のカード (lib/pricing.ts の summary・料率は
 // lib/legal.ts の DISCLOSED_* から) と、料金ページへの入口だけを出す (2026-10-12 user 裁定)。
 // 運営の応援カードは締め (LandingTrust の LandingSupportCard) に移した。
 
@@ -10,7 +10,6 @@ import { ArrowRight } from 'lucide-react';
 import { LandingSectionHeader } from '@/components/LandingSectionHeader';
 import { SummaryCard } from '@/components/pricing/PricingPieces';
 import { pricingContentFor } from '@/lib/pricing';
-import { LANDING_PAYMENT_FEE_VALUES } from '@/lib/legal';
 
 export async function LandingSupport() {
   const t = await getTranslations('Landing');
@@ -21,20 +20,16 @@ export async function LandingSupport() {
     <section className="mt-16 sm:mt-28">
       <LandingSectionHeader eyebrow={t('eyebrowPricing')} title={pricing.summaryTitle} lead={pricing.lead} />
 
-      {/* 料金がかかる 4 つの場合 (料金ページ /pricing の冒頭と同じカード・料率は lib/legal.ts の DISCLOSED_* から)。
-          機能ごとの説明と計算例は料金ページに任せる (2026-10-12 user 裁定: トップは 4 つの場合 + 料金ページへの入口)。 */}
+      {/* 料金がかかる 5 つの場合 (料金ページ /pricing の冒頭と同じカード・料率は lib/legal.ts の DISCLOSED_* から)。
+          機能ごとの説明と計算例は料金ページに任せる (2026-10-12 user 裁定: トップは料金がかかる場合 + 料金ページへの入口)。
+          5 つ目の「売上をほかのウォレットへ移す」は 2026-11-07 に足した (決済ではない・お店が払う利用料)。 */}
       <ul className="mx-auto mt-8 grid max-w-4xl grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4">
         {pricing.summary.map((item) => (
           <SummaryCard key={item.id} item={item} />
         ))}
       </ul>
 
-      {/* 決済ではない料金の 1 行 (「売上をほかのウォレットへ移す」・利用料は lib/legal.ts の DISCLOSED_SALES_MOVE から・掟 14)。
-          4 つの場合のカードには入れない (お店の売上の移動で、支払いではない)。料金ページでは「お店」のまとまりの行。 */}
       <p className="mx-auto mt-6 max-w-2xl text-center text-xs leading-relaxed text-slate-500">
-        {t('supportFeeMoveNote', LANDING_PAYMENT_FEE_VALUES)}
-      </p>
-      <p className="mx-auto mt-2 max-w-2xl text-center text-xs leading-relaxed text-slate-500">
         {t('supportFeeNote')}
       </p>
       {/* 機能ごとの料金と計算例 (/pricing) への入口 (plans/pricing-page.md §2.6)。

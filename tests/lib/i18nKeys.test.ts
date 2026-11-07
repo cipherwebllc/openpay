@@ -935,7 +935,7 @@ describe('i18n: Nav / Landing 名前空間 (AppShell + LP, ja/en parity)', () =>
     'trustTitle',
     'trustBody',
     'trustGithubLabel',
-    // Support / 利用料 section: トップは料金ページと同じ 4 つの場合 (lib/pricing.ts)・supportFee* はガイドの利用料の欄が使う
+    // Support / 利用料 section: トップは料金ページと同じ 5 つの場合 (lib/pricing.ts)・supportFee* はガイドの利用料の欄が使う
     'supportFeePayFocal',
     'supportFeePayTitle',
     'supportFeePayBody',
@@ -952,8 +952,6 @@ describe('i18n: Nav / Landing 名前空間 (AppShell + LP, ja/en parity)', () =>
     'supportFeeStoreTitle',
     'supportFeeStoreBody',
     'supportFeeNote',
-    // トップの料金の欄の、決済ではない料金の 1 行 (「売上をほかのウォレットへ移す」・2026-11-07 改定案)
-    'supportFeeMoveNote',
     'supportTipRequest',
     'supportProfileTagline',
     'supportProfileCta',
