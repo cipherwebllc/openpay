@@ -3,7 +3,7 @@ import { act, render, renderHook, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider, onlineManager } from '@tanstack/react-query';
 import { getAddress, type Address, type Hex } from 'viem';
 import { kairos, polygon } from 'viem/chains';
-import { Activity, StrictMode, useEffect, useLayoutEffect, useState, type ReactNode } from 'react';
+import { Activity, useEffect, useLayoutEffect, useState, type ReactNode } from 'react';
 
 // wagmi は境界モック。signTypedData の spy で署名要求/解決/拒否/失敗を制御する。
 vi.mock('wagmi', () => ({
@@ -2489,13 +2489,21 @@ describe('useJpycEip3009Payment — 画面を離れた後の試みは POST も�
   });
 
   it('StrictMode の mount→unmount→mount の後に押した正当な 1 回目は止めない (署名 1 回・POST 1 回で成立)', async () => {
-    const Base = makeWrapper();
-    const strict = ({ children }: { children: ReactNode }) => (
-      <StrictMode>
-        <Base>{children}</Base>
-      </StrictMode>
-    );
-    const view = await mountHook(strict);
+    // wrapper の中に <StrictMode> を置いても、React 19.2 では初回の mount の effect は 1 回しか走らない (二重に mount しない)。
+    // renderHook の reactStrictMode を使う。hook を呼ぶ component の effect は全部まとめて effect→cleanup→effect になるので、
+    // 同じ component に置いた見張りの effect で、hook の mount の effect (mountedRef を true に戻す) も二重に走ったことを確かめる。
+    const effectRuns: string[] = [];
+    const view = renderHook(() => {
+      useEffect(() => {
+        effectRuns.push('mount');
+        return () => {
+          effectRuns.push('unmount');
+        };
+      }, []);
+      return useJpycEip3009Payment(jpycDep);
+    }, { wrapper: makeWrapper(), reactStrictMode: true });
+    await waitFor(() => expect(view.result.current.isRestoring).toBe(false));
+    expect(effectRuns).toEqual(['mount', 'unmount', 'mount']);
     act(() => view.result.current.mutate({ merchant: MERCHANT, value: VALUE }));
     await waitFor(() => expect(view.result.current.data?.success).toBe(true));
     expect(signTypedData).toHaveBeenCalledTimes(1);
