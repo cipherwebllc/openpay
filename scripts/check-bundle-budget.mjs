@@ -122,7 +122,7 @@ const BUDGETS_KB = {
   '/[locale]/license-terms/directory-v1': 241, // 実測 236
   '/[locale]/license-terms/standard-v1': 241, // 実測 236
   '/[locale]/me': 242, // 実測 237
-  '/[locale]/news': 259, // 実測 254
+  '/[locale]/news': 243, // 実測 238 (2026-11-07 手元の本番 flag build: 本文を server で newsEntriesFor に絞って渡し、lib/news.ts を client に入れない。前は 258/259)
   '/[locale]/order/status': 206, // 実測 201
   '/[locale]/orders/hall': 265, // 実測 260
   '/[locale]/orders/kitchen': 265, // 実測 260

@@ -34,7 +34,7 @@ const F11_PAGES: Array<[string, number]> = [
   ['/[locale]/license-terms/directory-v1', 236],
   ['/[locale]/license-terms/standard-v1', 236],
   ['/[locale]/me', 237],
-  ['/[locale]/news', 254],
+  ['/[locale]/news', 238],
   ['/[locale]/order/status', 201],
   ['/[locale]/orders/hall', 260],
   ['/[locale]/orders/kitchen', 260],
@@ -74,7 +74,8 @@ const BUDGETED = [
 
 // origin/main 9f80dfda を本番 flag (e2e/prodFlags.env) で build した Route 表 (Next 15.5) から抜粋。
 // 予算対象・子ルート・予算外の軽い route (API・metadata)・共有チャンク・Middleware の行を元の表記のまま残す。
-// F-11 で足した 33 ページの行は main b90757b9 の CI の Route 表から取った (guide/qr・orders/hall はその値に置き換えた)。
+// F-11 で足した 33 ページの行は main b90757b9 の CI の Route 表から取った (guide/qr・orders/hall はその値に置き換えた。/news は
+// 2026-11-07 に本文を client に入れなくした後の手元の実測 238 kB)。
 // /pay と /tip は予算ちょうどの値にして「上限は通る」を固定する。
 const NORMAL_BUILD_OUTPUT = `
 Route (app)                                          Size  First Load JS
@@ -118,7 +119,7 @@ Route (app)                                          Size  First Load JS
 ├ ● /[locale]/license-terms/directory-v1          2.46 kB         236 kB
 ├ ● /[locale]/license-terms/standard-v1           2.46 kB         236 kB
 ├ ● /[locale]/me                                  4.16 kB         237 kB
-├ ● /[locale]/news                                20.7 kB         254 kB
+├ ● /[locale]/news                                4.33 kB         238 kB
 ├ ● /[locale]/order                               9.47 kB         366 kB
 ├ ● /[locale]/order/status                        4.72 kB         201 kB
 ├ ● /[locale]/orders/hall                           358 B         260 kB

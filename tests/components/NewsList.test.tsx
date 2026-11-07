@@ -15,33 +15,35 @@ vi.mock('@/hooks/useNewsRead', () => ({
 }));
 
 import { NEWS_LATEST_COUNT, NewsList } from '@/components/NewsList';
-import { sortedNews } from '@/lib/news';
+import { newsEntriesFor, sortedNews } from '@/lib/news';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 
 beforeEach(() => markAllSeen.mockReset());
 
 describe('NewsList: 一覧描画 / 既読化', () => {
   it('全 item を描画する (件数一致)', () => {
-    renderWithIntl(<NewsList />);
+    renderWithIntl(<NewsList items={newsEntriesFor('ja')} />);
     const items = screen.getAllByRole('listitem');
     expect(items).toHaveLength(sortedNews().length);
   });
 
   it('新しい順 (date 降順) に並ぶ: 先頭 article が sortedNews 先頭の title (ja)', () => {
-    renderWithIntl(<NewsList />);
+    renderWithIntl(<NewsList items={newsEntriesFor('ja')} />);
     const articles = document.querySelectorAll('article');
     const expected = sortedNews()[0];
     expect(articles[0].textContent).toContain(expected.title.ja);
   });
 
   it('各 item の title / body (ja) を描画する', () => {
-    renderWithIntl(<NewsList />);
+    renderWithIntl(<NewsList items={newsEntriesFor('ja')} />);
     for (const n of sortedNews()) {
       expect(screen.getByText(n.title.ja)).toBeInTheDocument();
     }
   });
 
   it('category バッジを描画する (pricing=料金 / feature=新機能 / notice=お知らせ)', () => {
-    renderWithIntl(<NewsList />);
+    renderWithIntl(<NewsList items={newsEntriesFor('ja')} />);
     const labels = new Map([
       ['feature', '新機能'],
       ['pricing', '料金'],
@@ -54,7 +56,7 @@ describe('NewsList: 一覧描画 / 既読化', () => {
   });
 
   it('内部 link を持つ item は /{locale} prefix 付きの next/link で描画', () => {
-    renderWithIntl(<NewsList />);
+    renderWithIntl(<NewsList items={newsEntriesFor('ja')} />);
     const internal = sortedNews().find((n) => n.link?.href.startsWith('/'));
     if (!internal) return; // 内部 link 無しなら skip (規約上は存在)
     // 同一 label の内部 link が複数 item に存在しうる (例: /terms へ「利用規約を読む」が
@@ -69,18 +71,18 @@ describe('NewsList: 一覧描画 / 既読化', () => {
   });
 
   it('マウント時に markAllSeen を 1 回呼ぶ (= 開いたら既読)', () => {
-    renderWithIntl(<NewsList />);
+    renderWithIntl(<NewsList items={newsEntriesFor('ja')} />);
     expect(markAllSeen).toHaveBeenCalledTimes(1);
   });
 
   it('en locale: 先頭 article が en title で描画', () => {
-    renderWithIntl(<NewsList />, { locale: 'en' });
+    renderWithIntl(<NewsList items={newsEntriesFor('en')} />, { locale: 'en' });
     const articles = document.querySelectorAll('article');
     expect(articles[0].textContent).toContain(sortedNews()[0].title.en);
   });
 
   it('日付を time[datetime] として描画する (各 item の date)', () => {
-    renderWithIntl(<NewsList />);
+    renderWithIntl(<NewsList items={newsEntriesFor('ja')} />);
     const firstArticle = document.querySelector('article')!;
     const time = within(firstArticle as HTMLElement).getByText(
       (_, el) => el?.tagName.toLowerCase() === 'time',
@@ -95,7 +97,7 @@ describe('NewsList: 最新はカード・古いものはたたむ / 1 件ずつ�
   });
 
   it(`最新 ${NEWS_LATEST_COUNT} 件はカード (article)、残りは閉じた行 (details) で「過去のお知らせ」の下に並ぶ`, () => {
-    renderWithIntl(<NewsList />);
+    renderWithIntl(<NewsList items={newsEntriesFor('ja')} />);
     const items = sortedNews();
     const articles = [...document.querySelectorAll('article')];
     expect(articles.map((a) => a.id)).toEqual(items.slice(0, NEWS_LATEST_COUNT).map((n) => n.id));
@@ -106,7 +108,7 @@ describe('NewsList: 最新はカード・古いものはたたむ / 1 件ずつ�
   });
 
   it('たたんだ行の見出しと日付は閉じたままでも見える (summary の中)', () => {
-    renderWithIntl(<NewsList />);
+    renderWithIntl(<NewsList items={newsEntriesFor('ja')} />);
     const older = sortedNews()[NEWS_LATEST_COUNT];
     const summary = document.getElementById(older.id)!.querySelector('summary')!;
     expect(summary.textContent).toContain(older.title.ja);
@@ -120,7 +122,7 @@ describe('NewsList: 最新はカード・古いものはたたむ / 1 件ずつ�
     const original = Element.prototype.scrollIntoView;
     Element.prototype.scrollIntoView = scrollIntoView;
     try {
-      renderWithIntl(<NewsList />);
+      renderWithIntl(<NewsList items={newsEntriesFor('ja')} />);
       const row = document.getElementById(older.id) as HTMLDetailsElement;
       expect(row.open).toBe(true);
       expect(scrollIntoView).toHaveBeenCalledTimes(1);
@@ -138,7 +140,7 @@ describe('NewsList: 最新はカード・古いものはたたむ / 1 件ずつ�
     const original = Element.prototype.scrollIntoView;
     Element.prototype.scrollIntoView = scrollIntoView;
     try {
-      renderWithIntl(<NewsList />);
+      renderWithIntl(<NewsList items={newsEntriesFor('ja')} />);
       expect(scrollIntoView).not.toHaveBeenCalled();
       expect([...document.querySelectorAll('details')].every((d) => !d.open)).toBe(true);
     } finally {
@@ -151,7 +153,7 @@ describe('NewsList: 最新はカード・古いものはたたむ / 1 件ずつ�
     const writeText = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue(undefined);
     try {
       window.history.replaceState(null, '', '/ja/news');
-      renderWithIntl(<NewsList />);
+      renderWithIntl(<NewsList items={newsEntriesFor('ja')} />);
       const first = sortedNews()[0];
       const card = document.getElementById(first.id)!;
       await user.click(within(card).getByRole('button', { name: 'リンクをコピー' }));
@@ -159,6 +161,31 @@ describe('NewsList: 最新はカード・古いものはたたむ / 1 件ずつ�
       expect(within(card).getByRole('button', { name: '✓ コピーしました' })).toBeInTheDocument();
     } finally {
       writeText.mockRestore();
+    }
+  });
+});
+
+// 2026-11-07: 一覧の部品は lib/news.ts を値として import しない (型だけ)。値で import すると全件の ja/en の本文が /news の
+// First Load JS に入り、お知らせを足すたびに bundle 予算を食う。本文は page (server) が newsEntriesFor で絞って渡す。
+describe('NewsList: 本文を JS に入れない (lib/news.ts は型だけ)', () => {
+  it('components/NewsList.tsx の lib/news の import は import type だけ', () => {
+    const src = readFileSync(path.join(process.cwd(), 'components', 'NewsList.tsx'), 'utf8');
+    const lines = src.split('\n').filter((l) => /from '@\/lib\/news'/.test(l));
+    expect(lines.length).toBeGreaterThan(0);
+    for (const l of lines) expect(l, l).toMatch(/^import type \{/);
+  });
+
+  it('newsEntriesFor は新しい順・その言語の title / body / link だけ', () => {
+    for (const locale of ['ja', 'en'] as const) {
+      const entries = newsEntriesFor(locale);
+      const items = sortedNews();
+      expect(entries.map((e) => e.id)).toEqual(items.map((n) => n.id));
+      entries.forEach((e, i) => {
+        expect(e.title).toBe(items[i].title[locale]);
+        expect(e.body).toBe(items[i].body[locale]);
+        const link = items[i].link;
+        expect(e.link).toEqual(link ? { href: link.href, label: locale === 'ja' ? link.labelJa : link.labelEn } : undefined);
+      });
     }
   });
 });

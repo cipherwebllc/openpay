@@ -1,6 +1,8 @@
 'use client';
 
-// /news の本体。お知らせ (lib/news.ts) を sortedNews() で時系列 (新しい順) に並べる。
+// /news の本体。お知らせ (lib/news.ts) を、page (server) が newsEntriesFor(locale) で新しい順・その言語の分だけにして
+// items で渡す (この部品は lib/news.ts を値として import しない = 全件の ja/en の本文を /news の JS に入れない・
+// tests/components/NewsList.test.tsx が import の形を検査する)。
 // - 最新 LATEST_COUNT 件はカードで全文を出す (日付 (locale 整形) + category バッジ + title + body + 任意 link)。
 // - それより古いものは「過去のお知らせ」に 1 件 1 行でたたむ (日付・バッジ・title は常に見え、本文は開いて読む)。
 //   全件を全文で並べるとスマホで約 16,000px になり、足すたびに伸びるため (2026-11-05)。
@@ -15,7 +17,7 @@ import Link from 'next/link';
 import { ChevronDown } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
 import type { Locale } from '@/i18n';
-import { sortedNews, type NewsCategory, type NewsItem } from '@/lib/news';
+import type { NewsCategory, NewsEntry } from '@/lib/news';
 import { useNewsRead } from '@/hooks/useNewsRead';
 import { useCopyToClipboard, useHydrationSafeAvailable } from '@/hooks/useCopyToClipboard';
 
@@ -52,7 +54,7 @@ function formatNewsDate(date: string, locale: Locale): string {
 }
 
 /** カテゴリのバッジと日付の行。 */
-function NewsMeta({ item, locale }: { item: NewsItem; locale: Locale }) {
+function NewsMeta({ item, locale }: { item: NewsEntry; locale: Locale }) {
   const t = useTranslations('News');
   return (
     <div className="flex flex-wrap items-center gap-2">
@@ -90,13 +92,13 @@ function CopyNewsLink({ id }: { id: string }) {
 }
 
 /** 本文・詳細へのリンク・「リンクをコピー」。カードとたたんだ行の中身で共通。 */
-function NewsBody({ item, locale }: { item: NewsItem; locale: Locale }) {
+function NewsBody({ item, locale }: { item: NewsEntry; locale: Locale }) {
   const isInternal = item.link?.href.startsWith('/');
   const linkHref = item.link ? (isInternal ? `/${locale}${item.link.href}` : item.link.href) : null;
-  const linkLabel = item.link ? (locale === 'ja' ? item.link.labelJa : item.link.labelEn) : null;
+  const linkLabel = item.link ? item.link.label : null;
   return (
     <>
-      <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-slate-600">{item.body[locale]}</p>
+      <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-slate-600">{item.body}</p>
       <div className="mt-3 flex items-center gap-3">
         {linkHref && linkLabel ? (
           isInternal ? (
@@ -124,11 +126,10 @@ function NewsBody({ item, locale }: { item: NewsItem; locale: Locale }) {
   );
 }
 
-export function NewsList() {
+export function NewsList({ items }: { items: readonly NewsEntry[] }) {
   const locale = useLocale() as Locale;
   const t = useTranslations('News');
   const { markAllSeen } = useNewsRead();
-  const items = sortedNews();
   const latest = items.slice(0, NEWS_LATEST_COUNT);
   const older = items.slice(NEWS_LATEST_COUNT);
 
@@ -169,7 +170,7 @@ export function NewsList() {
               className="scroll-mt-16 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm target:ring-2 target:ring-brand/40"
             >
               <NewsMeta item={item} locale={locale} />
-              <h2 className="mt-2 text-base font-bold text-slate-900 sm:text-lg">{item.title[locale]}</h2>
+              <h2 className="mt-2 text-base font-bold text-slate-900 sm:text-lg">{item.title}</h2>
               <NewsBody item={item} locale={locale} />
             </article>
           </li>
@@ -187,7 +188,7 @@ export function NewsList() {
                     <div className="min-w-0 flex-1">
                       <NewsMeta item={item} locale={locale} />
                       <p className="mt-1.5 text-sm font-semibold text-slate-800 [word-break:auto-phrase]">
-                        {item.title[locale]}
+                        {item.title}
                       </p>
                     </div>
                     <ChevronDown
