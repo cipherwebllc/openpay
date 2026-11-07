@@ -3,7 +3,7 @@ import { dirname, join, relative, resolve } from 'node:path';
 import ts from 'typescript';
 
 // bundle に残る import を TS の構文木で辿る (境界のテスト用)。辿るのは `import … from`・`export … from`
-// (再 export の中継)・副作用 import・`import()`。`import type` / `export type … from` は bundle に入らないので
+// (再 export の中継)・副作用 import・`import()`・`require()`。`import type` / `export type … from` は bundle に入らないので
 // 辿らない。`import { type A } from` は 1 つずつ type でも辿る (書き方しだいで副作用 import が残るので、
 // 型だけなら `import type` に書かせる)。行頭の正規表現で見ると、複数行の import・二重引用符・相対 path・
 // 再 export を 1 段挟むだけですり抜けられた。
@@ -24,10 +24,15 @@ export function runtimeSpecifiers(file: string, source: string): string[] {
       if (!node.isTypeOnly && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)) {
         specs.push(node.moduleSpecifier.text);
       }
-    } else if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
+    } else if (
+      ts.isCallExpression(node) &&
+      (node.expression.kind === ts.SyntaxKind.ImportKeyword ||
+        (ts.isIdentifier(node.expression) && node.expression.text === 'require'))
+    ) {
+      // require() も bundle に入る (2026-11-08 時点でアプリのコードに require は無いが、書けば通ってしまうので辿る)。
       const [target] = node.arguments;
-      // 行き先を静的に決められない import() は境界を検査できない → 通さない。
-      if (!target || !ts.isStringLiteralLike(target)) throw new Error(`non-literal import() in ${file}`);
+      // 行き先を静的に決められない import() / require() は境界を検査できない → 通さない。
+      if (!target || !ts.isStringLiteralLike(target)) throw new Error(`non-literal import()/require() in ${file}`);
       specs.push(target.text);
     }
     ts.forEachChild(node, visit);

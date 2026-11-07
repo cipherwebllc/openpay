@@ -5,7 +5,7 @@ import { runtimeClosure, runtimeSpecifiers } from '../_helpers/runtimeImports';
 // R10a の境界: 公開カタログ側の leaf (誰でも見る面) は、runtime import を辿っても wagmi / SIWE /
 // 接続ボタン / 出品者専用の panel・controller に届かない。R10b で出品者 panel を遅延読み込みにする前提。
 // 辿るのは bundle に残る参照すべて: `import … from`・`export … from` (再 export の中継)・副作用 import・
-// `import()`。`import type` / `export type … from` は bundle に入らないので辿らない。判定は TS の構文木で行う
+// `import()`・`require()`。`import type` / `export type … from` は bundle に入らないので辿らない。判定は TS の構文木で行う
 // (行頭の `import … from` だけを見る正規表現だと、再 export を 1 段挟むだけですり抜けられた)。辿り方は
 // tests/_helpers/runtimeImports.ts (NewsList の境界のテストと共有)。
 
@@ -40,13 +40,15 @@ describe('R10a: public catalog leaves stay free of owner-only code', () => {
       "export * as g from 'namespace-reexport';",
       "import 'side-effect';",
       "const h = () => import('dynamic-import');",
+      "const i = require('cjs-require');",
       '// import { x } from \'commented-out\';',
     ].join('\n');
     expect(runtimeSpecifiers('fixture.ts', source)).toEqual([
       'inline-type-import', 'default-import', 'named-reexport', 'star-reexport',
-      'namespace-reexport', 'side-effect', 'dynamic-import',
+      'namespace-reexport', 'side-effect', 'dynamic-import', 'cjs-require',
     ]);
     expect(() => runtimeSpecifiers('fixture.ts', 'const m = (p: string) => import(p);')).toThrow(/non-literal/);
+    expect(() => runtimeSpecifiers('fixture.ts', 'const m = (p: string) => require(p);')).toThrow(/non-literal/);
   });
 
   it('never reaches wagmi / SIWE / connect button / owner panels at runtime', () => {
