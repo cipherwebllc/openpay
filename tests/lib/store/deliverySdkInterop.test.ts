@@ -9,7 +9,7 @@ beforeEach(() => vi.stubEnv('STORE_DELIVERY_SIGNING_KEYS', fixture.seed));
 afterEach(() => vi.unstubAllEnvs());
 
 describe('fresh server signatures interoperate with the published SDK delivery subpath', () => {
-  it.each(['purchase', 'holder'] as const)('agrees on fresh %s tickets, normalized audience and every returned field', async (basis) => {
+  it.each(['purchase', 'holder', 'seller'] as const)('agrees on fresh %s tickets, normalized audience and every returned field', async (basis) => {
     const now = Math.floor(Date.now() / 1000);
     const destination = parseDeliveryUrl('https://FILES.example:443/download');
     expect(destination.ok).toBe(true);

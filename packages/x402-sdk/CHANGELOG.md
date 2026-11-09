@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.11.0 — unreleased
+
+**Migration:** `DeliveryVerification.basis` gains a third value, `'seller'`, and
+the delivery verifier now admits seller tickets by default. If your code switches
+exhaustively on `basis` (TypeScript reports the new member), or treats a
+successful verification as "this is a buyer or holder", add a `seller` branch or
+deny when `basis === 'seller'`. Nothing else changes; this is a minor version
+because of that contract change.
+
+- `openpay-x402-sdk/delivery` accepts delivery tickets whose `basis` is `seller`.
+  OpenPay issues them only to the product's own seller, from "Test delivery" in
+  the seller dashboard, so the seller can check a protected delivery destination
+  without buying the product. The ticket is otherwise the same: 60 seconds, the
+  product and audience you configured, and the current revision (always 1 for a
+  license). `DeliveryVerification.basis` is now `'purchase' | 'holder' | 'seller'`.
+  A destination that should serve only buyers and holders can deny after
+  verification when `basis === 'seller'`. Older SDKs keep rejecting these tickets.
+- A seller test checks the current revision only. Buyers who bought an earlier
+  revision still receive that revision, so keep its object mapped.
+- No other changes and no dependency changes.
+
 ## 0.10.5 — 2026-10-30
 
 - Read seller responses with a byte cap counted from the stream (not from

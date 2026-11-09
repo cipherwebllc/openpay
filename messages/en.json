@@ -1311,6 +1311,8 @@
     "licensePayToLabel": "Sales payout wallet",
     "licensePayToHint": "Sales proceeds go directly to this wallet. It must differ from OpenPay’s fee receiver. The seller role follows the listing account and does not change with the payout wallet.",
     "deliveryUrlLabel": "Protected delivery URL",
+    "deliveryTestLink": "Test delivery",
+    "deliveryTestHint": "Check that your protected delivery destination hands out the file, without buying. Each press issues a ticket valid for 60 seconds. Destinations on an SDK older than 0.11.0 reject it.",
     "deliveryUrlHelp": "Optional. Keep files on your own server or Cloudflare R2. OpenPay redirects buyers and entitled holders to this URL with a signed ticket valid for 60 seconds.",
     "deliveryGuideLink": "See the guide for setup steps",
     "detailInvalidDeliveryUrl": "Enter an https:// URL on a public domain, up to 512 characters. OpenPay URLs, IP addresses, login credentials, #, ticket parameters and whitespace are not allowed.",

@@ -248,7 +248,7 @@ export async function verifyDeliveryTicket({ ticket, ...input }) {
   if (header.typ !== 'openpay-delivery+jwt' || decode(header.kid, 43).length !== 32 || signature.length !== 64) fail();
   if (!exactFields(claims, CLAIM_FIELDS) || claims.v !== 1 ||
     typeof claims.sub !== 'string' || !/^0x[0-9a-fA-F]{40}$/.test(claims.sub) ||
-    !Number.isSafeInteger(claims.rev) || claims.rev <= 0 || !['purchase', 'holder'].includes(claims.basis) ||
+    !Number.isSafeInteger(claims.rev) || claims.rev <= 0 || !['purchase', 'holder', 'seller'].includes(claims.basis) ||
     typeof claims.jti !== 'string' || !/^[0-9a-f]{32}$/.test(claims.jti) ||
     !Number.isSafeInteger(claims.iat) || !Number.isSafeInteger(claims.exp) || claims.exp !== claims.iat + 60) fail();
   if (claims.iss !== config.issuer) fail('wrong_issuer');

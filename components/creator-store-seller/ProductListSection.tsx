@@ -5,7 +5,7 @@
 
 import { useTranslations } from 'next-intl';
 import Link from 'next/link';
-import { PackageOpen, Pencil } from 'lucide-react';
+import { ExternalLink, PackageOpen, Pencil } from 'lucide-react';
 import { env } from '@/lib/env';
 import { storeProductPath } from '@/lib/storeProductLink';
 import { ProductShareButton } from './ProductShareButton';
@@ -25,6 +25,11 @@ type Props = {
   loadProduct: Pick<MutationView<string>, 'isPending' | 'mutate'>;
   productsQuery: { isFetching: boolean; refetch: () => Promise<unknown> };
 };
+
+// 保護配布先を保存済みで、提供中の商品だけ (server も同じ条件で 409 を返す)。
+function canTestDelivery(product: ProductSummary): boolean {
+  return env.enableStoreDeliveryTicketUi && Boolean(product.deliveryUrl) && product.contentAvailable;
+}
 
 export function ProductListSection({
   products, maxProducts, atLimit, editingId, sellerComplete, handle, origin, locale,
@@ -168,6 +173,18 @@ export function ProductListSection({
                     <Pencil className="h-3.5 w-3.5" aria-hidden />
                     {t('editProduct')}
                   </button>
+                  {canTestDelivery(product) ? (
+                    // 出品者だけの確認 (購入せずに保護配布先へ)。SIWE cookie を送る same-origin の遷移で、押したときだけ発行する。
+                    <a
+                      href={`/api/store/products/${product.id}/delivery-test`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className={`${env.enableLicenseNftUi && product.productKind === 'license' ? 'min-h-11 ' : ''}inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:border-brand hover:text-brand`}
+                    >
+                      {t('deliveryTestLink')}
+                      <ExternalLink className="h-3.5 w-3.5" aria-hidden />
+                    </a>
+                  ) : null}
                   {product.saleActive &&
                   product.contentAvailable &&
                   handle && origin ? (
@@ -179,6 +196,11 @@ export function ProductListSection({
                     />
                   ) : null}
                 </div>
+                {canTestDelivery(product) ? (
+                  <p className="mt-2 text-xs leading-relaxed text-slate-500">
+                    {t('deliveryTestHint')}
+                  </p>
+                ) : null}
                 {cannotStart && !sellerComplete ? (
                   <p className="mt-2 text-xs leading-relaxed text-amber-700">
                     {t('sellerRequiredForSale')}

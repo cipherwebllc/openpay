@@ -71,6 +71,10 @@ describe('delivery key configuration', () => {
     const two = verifyDeliveryTicket(signDeliveryTicket({ ...input, jti: undefined })!, options)!;
     expect(one.basis).toBe('holder'); expect(one.jti).toMatch(/^[0-9a-f]{32}$/); expect(two.jti).not.toBe(one.jti);
   });
+  // 出品者の「配布を試す」(/api/store/products/<id>/delivery-test) だけが使う根拠。
+  it('signs and verifies the seller basis', () => {
+    expect(verifyDeliveryTicket(signDeliveryTicket({ ...input, basis: 'seller' })!, options)?.basis).toBe('seller');
+  });
   it('isolates secrets from shared env and client code', () => {
     expect(readFileSync('lib/env.ts', 'utf8')).not.toContain('STORE_DELIVERY_SIGNING_KEYS');
     expect(readFileSync('lib/store/deliveryTicket.ts', 'utf8')).toContain("import 'server-only'");

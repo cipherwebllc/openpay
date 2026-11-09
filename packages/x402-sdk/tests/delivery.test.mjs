@@ -76,13 +76,15 @@ test('rejects flat JSON shape, invalid grammar and duplicate or escaped member n
 test('requires every claim and validates version, revision, basis, wallet, jti and exact 60s integer lifetime', async () => {
   for (const name of Object.keys(fixture.claims)) await rejects({ ...base, ticket: ticket({}, { [name]: undefined }) });
   for (const patch of [{ v: 2 }, { v: '1' }, { sub: '0x123' }, { sub: '0x' + 'g'.repeat(40) }, { sub: 123 },
-    { rev: 0 }, { rev: -1 }, { rev: 1.5 }, { rev: Number.MAX_SAFE_INTEGER + 1 }, { rev: '3' }, { basis: 'owner' },
+    { rev: 0 }, { rev: -1 }, { rev: 1.5 }, { rev: Number.MAX_SAFE_INTEGER + 1 }, { rev: '3' }, { basis: 'owner' }, { basis: 'Seller' }, { basis: null },
     { jti: 'A'.repeat(32) }, { jti: 'ab' }, { jti: 1 }, { iat: '1700000000' }, { exp: '1700000060' },
     { iat: 1700000000.5 }, { exp: 1700000061 }, { exp: null }, { iat: Infinity },
     { iat: Number.MAX_SAFE_INTEGER + 1, exp: Number.MAX_SAFE_INTEGER + 61 }, { extra: true }]) {
     await rejects({ ...base, ticket: ticket({}, patch) });
   }
   assert.equal((await verify({ ...base, ticket: ticket({}, { basis: 'holder' }) })).basis, 'holder');
+  // 0.11.0: the product's own seller checking the destination without buying.
+  assert.equal((await verify({ ...base, ticket: ticket({}, { basis: 'seller' }) })).basis, 'seller');
   // Deliberate SDK boundary: server enforces EIP-55, SDK preserves signed hex spelling.
   const address = fixture.claims.sub.toLowerCase();
   assert.equal((await verify({ ...base, ticket: ticket({}, { sub: address }) })).address, address);

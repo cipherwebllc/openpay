@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { renderWithIntl } from '../_helpers/i18n';
 import { LICENSE_STANDARD_TERMS } from '@/lib/license/standardTerms';
@@ -1105,6 +1105,32 @@ describe('protected delivery seller field', () => {
     if (enabled) expect(body.deliveryUrl).toBe('https://new.example/gate');
     else expect(body).not.toHaveProperty('deliveryUrl');
     if (kind === 'license' && editing) for (const key of ['license', 'content', 'contentKind', 'priceJpyc', 'payTo']) expect(body).not.toHaveProperty(key);
+  });
+  // 出品者の「配布を試す」: 保護配布先を保存済みの商品だけ。押したときだけ same-origin の新しいタブで発行する。
+  it.each(['digital', 'license'] as const)('%s: a saved destination shows the seller test link', async (kind) => {
+    state.deliveryEnabled = true;
+    setup(kind, true); renderPanel();
+    const link = await screen.findByRole('link', { name: '配布を試す' });
+    expect(link).toHaveAttribute('href', '/api/store/products/h_delivery/delivery-test');
+    expect(link).toHaveAttribute('target', '_blank'); expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+    expect(screen.getByText(/購入せずに、保護配布先からファイルを受け取れるかを確かめます。/)).toBeVisible();
+  });
+  it('no test link without a saved destination, for ended content, or with the flag off', async () => {
+    state.licenseEnabled = true; state.deliveryEnabled = true;
+    const base = { payTo: ADDRESS, priceJpyc: '1000', contentKind: 'text', label: 'download', saleActive: false };
+    const products = [
+      { ...base, id: 'h_nodest', title: 'No destination', contentAvailable: true },
+      { ...base, id: 'h_ended', title: 'Ended', contentAvailable: false, deliveryUrl: 'https://files.example/gate' },
+    ];
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => url === '/api/store/seller'
+      ? response({ ok: true, seller: { name: 'Seller', contact: 'seller@example.com', updatedAt: 1 } })
+      : response({ ok: true, products, max: 12 })));
+    renderPanel();
+    await screen.findByText('No destination');
+    expect(screen.queryByRole('link', { name: '配布を試す' })).not.toBeInTheDocument();
+    cleanup(); state.deliveryEnabled = false; setup('digital', true); renderPanel();
+    await screen.findByText('Delivery product');
+    expect(screen.queryByRole('link', { name: '配布を試す' })).not.toBeInTheDocument();
   });
   it.each(['digital', 'license'] as const)('%s: clearing a saved destination sends an explicit empty string', async (kind) => {
     state.deliveryEnabled = true;

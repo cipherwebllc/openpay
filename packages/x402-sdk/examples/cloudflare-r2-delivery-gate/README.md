@@ -13,7 +13,11 @@ compatibility flag. Package source/tests are not a real Workers deployment proof
    instructions or a safe landing page, not a file bypass.
 3. Configure the variables below and bind the worker's public HTTPS hostname.
    Set that stable gate URL as the OpenPay product's delivery destination.
-4. For single-use admission, uncomment both `REPLAY` and its SQLite migration in
+4. Before publishing, press **Test delivery** (配布を試す) on the product in the
+   OpenPay seller dashboard. OpenPay issues a `basis: "seller"` ticket to the
+   product's own seller only, for the current revision (always 1 for a license),
+   so you can confirm the download without buying. SDK 0.11.0 or later accepts it.
+5. For single-use admission, uncomment both `REPLAY` and its SQLite migration in
    `wrangler.toml`. Deploy through your reviewed release process. The compatibility
    date is pinned to `2026-09-09`; test that date on a real Worker before adoption.
 
