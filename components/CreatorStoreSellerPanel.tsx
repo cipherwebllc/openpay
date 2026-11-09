@@ -355,7 +355,8 @@ function SignedInSellerPanel({
             imageUrl: form.imageUrl.trim() || null,
             // Mutable delivery metadata stays outside the immutable license/content fields.
             // OFF omits it; ON preserves an empty string so editing can clear the destination.
-            ...(env.enableStoreDeliveryTicketUi ? { deliveryUrl: form.deliveryUrl } : {}),
+            // 他の URL 欄と同じく前後の空白を除く (server は空白入りを拒否する・貼り付けた末尾の空白で保存できなかった 2026-11-09)。
+            ...(env.enableStoreDeliveryTicketUi ? { deliveryUrl: form.deliveryUrl.trim() } : {}),
             galleryUrls: form.galleryUrls
               .split(/\r?\n/)
               .map((url) => url.trim())
