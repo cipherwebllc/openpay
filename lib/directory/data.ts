@@ -39,8 +39,9 @@ export const DIRECTORY_ENTRIES = [
     // 2026-10-13 (第 8 回): JPYC EX 連携 API の提供開始 (7/13) を changelog に補充 (エントリの事実は不変)
     // 2026-10-18 (第 9 回): 10/16 の Polygon 発行遅延・10/17〜18 の臨時メンテナンスは changelog のみ (エントリの事実は不変)
     // 2026-10-21 (第 10 回): 10/19〜20 の新規アカウント開設の一時停止は changelog のみ (エントリの事実は不変)
+    // 2026-11-09 (第 14 回): 11/10 の臨時メンテナンスの告知 (11/06) は changelog のみ (エントリの事実は不変)
     ...provenance('https://jpyc.co.jp/', 'JPYC株式会社', 'official', {
-      verifiedAt: '2026-10-21',
+      verifiedAt: '2026-11-09',
       updatedAt: '2026-10-06',
     }),
     facts: {
@@ -117,7 +118,7 @@ export const DIRECTORY_ENTRIES = [
     // 2026-08-27: 電子決済手段等取引業者に登録 (金融庁登録一覧・第00002号・取扱 USDC)。
     // 取扱開始時期は未発表のため tokens は空のまま (sourced-facts-only)。
     ...provenance('https://coincheck.com/', 'コインチェック株式会社', 'official', {
-      verifiedAt: '2026-11-05',
+      verifiedAt: '2026-11-09',
       updatedAt: '2026-09-04',
     }),
     facts: {

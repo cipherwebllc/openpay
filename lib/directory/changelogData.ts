@@ -1695,6 +1695,23 @@ export const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
       'ネットスターズ公式ニュース一覧で再確認: 2026-09-11 の Kaia MOU 以降、ステーブルコインの発表なし (その後の 9/30 の Stripe と 10/06 の teppay はコード決済、11/02 は大学の学生食堂へのセルフオーダーの導入の話)。Stablecoin Pay の稼働日・手数料・対応チェーンの変更は未公表のまま。',
     sourceUrl: 'https://www.netstars.co.jp/news/',
   },
+  // ── 第 14 回週次更新 (収集 2026-11-09・収集窓 2026-11-05〜11-09) ──
+  {
+    // 告知の時点の事実 (予定) だけを書く。実施・完了は書かない (第 12 回の監査: 予告を「終わった」と書かない)。
+    // 10/17 の臨時メンテ (announce-0042) と同じ扱いの運用情報。日付は記事の作成日 (2026-11-06 7:31)。
+    date: '2026-11-06',
+    collectedAt: '2026-11-09',
+    scopes: ['jpyc-services'],
+    slug: 'jpyc-ex',
+    changeType: 'updated',
+    changeCategory: 'update',
+    assets: ['JPYC'],
+    summary:
+      'JPYC EX announced unscheduled system maintenance planned for 14:00 to 17:00 JST on 2026-11-10, during which the various JPYC EX services, including issuance and redemption, will be unavailable; service resumes once the maintenance is complete. No reason was published.',
+    summaryJa:
+      'JPYC EX が 2026-11-10 (火) 14:00〜17:00 (予定) の臨時メンテナンスを告知。期間中は発行・償還を含む JPYC EX の各種サービスが利用不可で、完了しだい再開するとしている。理由は公表なし。',
+    sourceUrl: 'https://faq.jpyc.co.jp/s/article/announce-0047',
+  },
   // ── 2026-11-09 (臨時): Aegis のサービス終了。自社面の観測 (2026-11-09 にサイトと有料 API の 410 を確認) ──
   {
     date: '2026-11-08',
@@ -1708,6 +1725,77 @@ export const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
     summaryJa:
       'Aegis が 2026-11-08 にサービスを終了。サイトは終了の告知に変わり、x402 のブリーフィング API (JPYC・USDC) も 402 を返さなくなった。',
     sourceUrl: 'https://aegis-ai.xyz/',
+  },
+  // ── 第 14 回週次更新の verified (2026-11-09) ──
+  {
+    date: '2026-11-09',
+    collectedAt: '2026-11-09',
+    scopes: ['jpyc-services'],
+    slug: 'coincheck',
+    changeType: 'verified',
+    assets: ['USDC'],
+    summary:
+      'Re-verified against the FSA registry of Electronic Payment Instruments Exchange Service Providers (still as of 2026-08-27): two registrants, SBI VC Trade (No. 00001) and Coincheck (No. 00002, USDC); no new registration.',
+    summaryJa:
+      '金融庁の電子決済手段等取引業者登録一覧 (令和 8 年 8 月 27 日現在のまま) で再確認: 登録は SBI VC トレード (第00001号) とコインチェック (第00002号・USDC) の 2 社で、新規登録なし。',
+    sourceUrl: 'https://www.fsa.go.jp/menkyo/menkyoj/denshikessaisyudan.pdf',
+  },
+  {
+    date: '2026-11-09',
+    collectedAt: '2026-11-09',
+    scopes: ['stablecoin-payments'],
+    provider: 'HashPort (Osaka Pref. subsidy)',
+    changeType: 'verified',
+    assets: ['JPYC', 'USDC'],
+    summary:
+      'Re-verified on the Osaka Prefecture page (last updated 2026-08-26, unchanged) and its award list: HashPort pilot schedule (an assumed one week or more between January and March 2027) unchanged.',
+    summaryJa:
+      '大阪府公式ページ (更新日は 2026-08-26 のまま) と交付決定事業一覧で再確認: HashPort の実証の予定 (2027 年 1〜3 月の間で 1 週間以上を想定) に変更なし。',
+    sourceUrl:
+      'https://www.pref.osaka.lg.jp/o020060/kikaku/osaka-kokusaikinyu/senkuteki_hojokin.html',
+  },
+  {
+    date: '2026-11-09',
+    collectedAt: '2026-11-09',
+    scopes: ['stablecoin-payments'],
+    provider: 'Mina Wallet / Sumitomo Mitsui Card (Osaka Pref. subsidy)',
+    changeType: 'verified',
+    assets: ['JPYC', 'USDC'],
+    summary:
+      'Re-verified on the Osaka Prefecture page (last updated 2026-08-26, unchanged) and its award list: Mina Wallet / Sumitomo Mitsui Card pilot schedule (around October 2026 to February 2027, a few days to about a month) unchanged.',
+    summaryJa:
+      '大阪府公式ページ (更新日は 2026-08-26 のまま) と交付決定事業一覧で再確認: マイナウォレット / 三井住友カードの実証の予定 (2026 年 10 月〜2027 年 2 月頃の間で数日〜1 か月程度) に変更なし。',
+    sourceUrl:
+      'https://www.pref.osaka.lg.jp/o020060/kikaku/osaka-kokusaikinyu/senkuteki_hojokin.html',
+  },
+  {
+    date: '2026-11-09',
+    collectedAt: '2026-11-09',
+    scopes: ['stablecoin-payments'],
+    provider: 'Mi&T (Osaka Pref. subsidy)',
+    changeType: 'verified',
+    assets: ['JPYC'],
+    // 府のページと採択一覧 (PDF) にあるのは実施時期と規模だけ (手数料は書かない・第 10 回の記入ルール)。
+    // 11 月中旬の開始の公式発表は、Mi&T の PR TIMES (最新 2026-08-31) にもまだ無い。
+    summary:
+      'Re-verified on the Osaka Prefecture page (last updated 2026-08-26, unchanged) and its award list: Mi&T pilot schedule (mid-November 2026 to mid-March 2027, about five shops) unchanged.',
+    summaryJa:
+      '大阪府公式ページ (更新日は 2026-08-26 のまま) と交付決定事業一覧で再確認: Mi&T の実証の予定 (2026 年 11 月中旬〜2027 年 3 月中旬・5 店舗程度) に変更なし。',
+    sourceUrl:
+      'https://www.pref.osaka.lg.jp/o020060/kikaku/osaka-kokusaikinyu/senkuteki_hojokin.html',
+  },
+  {
+    date: '2026-11-09',
+    collectedAt: '2026-11-09',
+    scopes: ['stablecoin-payments'],
+    provider: 'NetStars Stablecoin Pay',
+    changeType: 'verified',
+    assets: ['JPYC', 'USDT'],
+    summary:
+      'Re-verified on the NetStars news list: no stablecoin announcement after the 2026-09-11 Kaia MOU (the two new items, a tax-free refund remittance service on 2026-11-05 and stronger online payment security for StarPay on 2026-11-06, are not about stablecoins; the StarPay item mentions stablecoins only in its standard description of StarPay); no launch date, fee or chain change published for Stablecoin Pay.',
+    summaryJa:
+      'ネットスターズ公式ニュース一覧で再確認: 2026-09-11 の Kaia MOU 以降、ステーブルコインの発表なし (新しい 2 件、11/05 の新免税制度に対応する免税送金サービスの開始と 11/06 の StarPay のオンライン決済のセキュリティ強化は、ステーブルコインの話ではない。StarPay の記事がステーブルコインに触れるのは、StarPay の定型の紹介文だけ)。Stablecoin Pay の稼働日・手数料・対応チェーンの変更は未公表のまま。',
+    sourceUrl: 'https://www.netstars.co.jp/news/',
   },
 ];
 
