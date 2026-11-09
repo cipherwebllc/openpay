@@ -2125,6 +2125,28 @@ flag ON + forwarder/JPYC 設定済の Amoy (80002) で 1 周する。route テ�
 - 負荷: `/api/discovery` は §11.6 load-test mix に含む (`x402-discovery` シナリオ)。discovery は edge キャッシュ
   (`Cache-Control: s-maxage=10, stale-while-revalidate=30`) + `resolveIds` 有界並列 (同時 25) のため、
   カタログ増でも 1 リクエスト当たりの KV ファンアウトは有界。
+- **再検証で掲載の見え方が変わった回 (warn `x402.reverify.visibility_changed`・2026-11-09)**。毎時の再検証
+  (`/api/cron/reverify`) で、掲載が公開から hidden になった回・hidden から公開に戻った回・公開待ちが最初の確認を通って公開に
+  進んだ回に、対象ごとに warn を 1 件出す (外部の掲載と first-party の両方)。本番の logger は warn 以上しか出さず、集計
+  (`x402.reverify.completed` の `hidden` / `restored`) は info なので本番のログには残らない (2026-11-08: 外部の掲載の URL が
+  410 になり `violation_gone` で hidden になったが、どの掲載がいつ hidden になったかを読めなかった)。見え方が変わらない回
+  (公開のまま・hidden のまま・公開待ちのまま) と、CAS が結果を捨てた回 (`pay_to_changed` / `url_changed` / `duplicate` /
+  `storage` 等) と、`url_taken` 等で hidden の解除が保留された回は出さない。
+  - 項目: `runId` / `target` (`external:<id>` / `first-party:<path>`) / `host` (確認した URL のホスト) / `verdict` (この回の
+    判定: `violation_gone` / `violation_200_ungated` / `violation_foreign_402` / `violation_gate_mismatch` / `ok_402_openpay` /
+    `transient`) / `change` / `failures` (この回の後の確定違反の連続の回数) / `authFailures` (この回の後の締め出しの連続の回数)。
+  - `change`: `hidden` (公開 → hidden。確定違反 3 回連続か、締め出し (401 / 403・別ホストへの redirect) 6 回連続) /
+    `restored` (hidden → 公開。OpenPay の 402 で戻った・外部の掲載は照合が合う 402) / `published` (公開待ち
+    `pendingFirstVerification` が最初の確認を通って公開に進んだ)。集計の `restored` は従来どおり `restored` と `published` の
+    両方を数える。
+  - 読み方: Vercel → Logs (production) で `visibility_changed` を全文検索する。Sentry → Issues で
+    `event:x402.reverify.visibility_changed` を検索する。`verdict` が `violation_gone` なら掲載の URL が 404 / 410 を返している
+    (出品者がサーバーを止めた・URL を変えた)、`transient` で `authFailures` が 6 なら締め出しが続いている。照合の不一致で hidden
+    になった回は、下の `x402.reverify.gate_mismatch` (`outcome: hidden`) とこれの両方が出る (gate_mismatch は不一致の記録、
+    こちらは理由を問わず見え方の変化だけを拾う)。
+  - 量: 遷移した回だけ (1 件の掲載につき、hidden になった回と戻った回に 1 件ずつ)。
+  - 警報 (`ALERT_WEBHOOK_URL`) は Vercel の env に設定したときだけ鳴る (任意)。文面は件数だけで、どの掲載かは載らない。
+    設定の有無に関わらず、見え方の変化はこの warn で見る。
 - **再検証の照合 (強制・E-3 の残り・2026-10-30 user 裁定 (b) の「強制」の段・#958 の観測の後)**。外部の掲載の再検証は、
   どの状態でも、OpenPay の 402 (`ok`) を登録と同じ照合 (`lib/x402/registrationGateMatch.ts`・受取先
   `extra.openpay.merchant` / チェーン / JPYC / forwarder・掲載の `payTo` が期待値) に通し、合ったときだけ `ok` にする
@@ -2133,7 +2155,7 @@ flag ON + forwarder/JPYC 設定済の Amoy (80002) で 1 周する。route テ�
 
   | 掲載の状態 | 合わない 402 の verdict | どうなるか | warn |
   |---|---|---|---|
-  | 公開中 | `violation_gate_mismatch` (確定違反) | 違反のカウンタ `failures` を数える (alert の `violations` にも入る)。3 回連続で hidden (URL 台帳も立つ) | `x402.reverify.gate_mismatch` |
+  | 公開中 | `violation_gate_mismatch` (確定違反) | 違反のカウンタ `failures` を数える (集計の `violations` にも入る・警報を設定していればその文面にも)。3 回連続で hidden (URL 台帳も立つ) | `x402.reverify.gate_mismatch` |
   | モデレーションの hidden (印なし) | `violation_gate_mismatch` (確定違反) | 戻らない (hidden のまま・台帳を延ばす)。照合が合う 402 を受け取ったときだけ戻る | `x402.reverify.gate_mismatch` |
   | 公開待ち (`pendingFirstVerification`) | `pending_gate_mismatch` (transient・#957 のまま) | 印つきの hidden のまま・`failures` は動かさない (違反に数えると閾値で印が外れ、ID の照会が 404・台帳ありになって、ゲートの設定がまだ合わないだけの新しい掲載をモデレーションの hidden にしてしまう) | `x402.reverify.pending_gate_mismatch` |
 
@@ -2159,8 +2181,9 @@ flag ON + forwarder/JPYC 設定済の Amoy (80002) で 1 周する。route テ�
     `REVERIFY_BATCH_LIMIT` (25 件) ずつなので、外部の掲載が増えると 3 時間より長くなる。また、閾値の前に台帳に無い別の URL へ
     PATCH し続けると、URL の変更で確認がやり直しになるため公開のままでいられる (PATCH の経路は照合しない・強制の前からある
     性質)。どちらの間も、SDK / MCP の買い手は `catalog_accept_mismatch` で支払わない。
-  - 量: 合わない掲載 1 件につき最大 24 件/日 (毎時の再検証)。alert (`ALERT_WEBHOOK_URL`) は従来どおり `violations > 0` で鳴る
-    (文面に不一致の内訳は無いので warn を見る)。止める flag は無い (やめるなら revert = #958 の観測に戻る)。
+  - 量: 合わない掲載 1 件につき最大 24 件/日 (毎時の再検証)。警報 (`ALERT_WEBHOOK_URL`) は Vercel の env に設定したときだけ
+    `violations > 0` で鳴る (任意・文面に不一致の内訳は無い)。設定の有無に関わらず、不一致はこの warn で、hidden になった・
+    戻ったは `x402.reverify.visibility_changed` で見る。止める flag は無い (やめるなら revert = #958 の観測に戻る)。
   - #958 の観測の結果 (強制に進んだ根拠): deploy (2026-10-30 09:06 UTC) から 7 日 (2026-11-06 09:06 UTC) まで、本番の
     Vercel ログで `gate_mismatch` を含むもの (`x402.reverify.observe_gate_mismatch` を含む) は 0 件・`reverify` を含む
     warn / error も 0 件 (同じ期間に、ほかの経路の warn 47 件・error 12 件は読めている = ログ自体は残っている)。毎時の

@@ -110,6 +110,8 @@ describe('reverify claim isolation (real Lua)', () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ checked: 1, ok: 1, restored: 0, urlTaken: 1 });
     expect(holder.warn).toHaveBeenCalledWith('x402.reverify.url_taken', expect.objectContaining({ target: 'external:a' }));
+    // The listing stays hidden (restore blocked), so no visibility change is logged.
+    expect(holder.warn).not.toHaveBeenCalledWith('x402.reverify.visibility_changed', expect.anything());
     expect(stored('a').verification.failures).toBe(0);
   });
 
@@ -122,6 +124,7 @@ describe('reverify claim isolation (real Lua)', () => {
     expect(await response.json()).toMatchObject({ ok: 1, urlTaken: 0, restored: 0,
       storageFailures: [{ target: 'external:a', stage: 'apply', detail: 'url claim unavailable' }] });
     expect(stored('a')).toMatchObject({ hidden: true, verification: { failures: 0 } });
+    expect(holder.warn).not.toHaveBeenCalledWith('x402.reverify.visibility_changed', expect.anything());
     expect(holder.cursor.storageErrorStreak).toBe(1);
   });
 

@@ -103,6 +103,54 @@ function gateMismatchOutcome(
   return { outcome, failures: apply.failures };
 }
 
+// 掲載の見え方 (公開か hidden か) がこの回にどう変わったか。CAS が結果を反映した回 (applied) で、hidden の前後が違うときだけ。
+//   hidden    = 公開 → hidden (確定違反 3 回連続・締め出し 6 回連続が閾値に達した)
+//   restored  = hidden → 公開 (ok_402_openpay で戻った・外部は照合が合う 402)
+//   published = 公開待ち (pendingFirstVerification・hidden と印で作られる) が最初の確認を通って公開に進んだ。CAS の結果では
+//               restored と同じ hidden → 公開に見えるので、読取時の印で分ける (集計の summary.restored は従来どおり両方を数える)。
+//               印を外すのはこの CAS と URL を変える PATCH (CAS_UPDATE) だけで、URL が変わった回はこの CAS が url_changed で
+//               捨てる (applied にならない) ので、読取時の印は CAS が見た状態と同じ。
+function visibilityChange(
+  apply: Extract<ReverifyApplyResult, { applied: true }>,
+  pendingBefore: boolean,
+): 'hidden' | 'restored' | 'published' | null {
+  if (apply.hiddenBefore === apply.hiddenAfter) return null;
+  if (apply.hiddenAfter) return 'hidden';
+  return pendingBefore ? 'published' : 'restored';
+}
+
+// 掲載の見え方が変わった回に warn を 1 件残す (外部の掲載・first-party の両方)。どの掲載が・いつ・どの判定で一覧から消えた /
+// 出たかを、本番のログ (Vercel の Logs・Sentry) で読めるようにするための warn。本番の logger は warn 以上しか出さず、集計
+// (x402.reverify.completed の hidden / restored) は info なので本番のログに残らない。警報 (ALERT_WEBHOOK_URL) は任意の env で、
+// 届いても件数だけでどの掲載かは載らない。2026-11-08 に外部の掲載の URL が 410 になり violation_gone が閾値に達して hidden に
+// なったが、どの掲載がいつ hidden になったかを後から読めなかった。遷移した回だけなので量は少ない (変わらない回・CAS が結果を
+// 捨てた回は出さない)。照合の不一致で hidden になった回は gate_mismatch (outcome: hidden) とこれの両方が出る: gate_mismatch は
+// 不一致の記録 (数えた・hidden のまま・捨てたも出す)、こちらは理由を問わず見え方の変化だけを 1 つのイベント名で拾うためのもの。
+// host の new URL は throw しない: 外部は applied = CAS の前に URL claim の key を導けた回 (normalizeResourceUrl が
+// URL.canParse を通している)、first-party は正規の origin + path。
+function warnVisibilityChanged(
+  runId: string,
+  target: ReverifyTarget,
+  probedUrl: string,
+  verdict: ReverifyVerdict,
+  apply: ReverifyApplyResult,
+  pendingBefore: boolean,
+): void {
+  if (!apply.applied) return;
+  const change = visibilityChange(apply, pendingBefore);
+  if (!change) return;
+  logger.warn('x402.reverify.visibility_changed', {
+    runId,
+    target: targetLabel(target),
+    host: new URL(probedUrl).host,
+    verdict,
+    change,
+    failures: apply.failures,
+    // 締め出し (401/403 等) の閾値で hidden になった回は verdict が transient で failures も動かないので、理由を読むのに要る。
+    authFailures: apply.authFailures,
+  });
+}
+
 async function processTarget(
   target: ReverifyTarget,
   checkedAt: string,
@@ -168,6 +216,7 @@ async function processTarget(
         ...gateMismatchOutcome(apply),
       });
     }
+    warnVisibilityChanged(runId, target, probedUrl, verdict, apply, pending);
     return {
       target,
       checked: true,
@@ -201,6 +250,8 @@ async function processTarget(
     runId,
     authClass,
   );
+  // first-party に公開待ちは無い (印は外部の掲載の登録だけが付ける)。
+  warnVisibilityChanged(runId, target, probedUrl, verdict, apply, false);
   const storageError = !apply.applied && apply.reason === 'storage';
   return {
     target,
