@@ -24,7 +24,7 @@ export type ExternalPurchase = {
 export const FIRST_PARTY_WALLETS: readonly string[] = firstPartyWallets.map(({ address }) => address);
 
 /** 集計時点 (週次更新で進める)。 */
-export const EXTERNAL_PURCHASES_AS_OF = '2026-11-04';
+export const EXTERNAL_PURCHASES_AS_OF = '2026-11-09';
 
 export const EXTERNAL_PURCHASES: readonly ExternalPurchase[] = [
   { chain: 'base', date: '2026-07-19', amount: '0.01', asset: 'USDC', payer: '0x7e571e959cc7c75ccdd2eac24f8775ea2eaa2f09', tx: '0xdea66bfcd77d7c439774b344b64b5750b111b71a3fb23eaee6c24a6947eeed53' },
@@ -103,6 +103,7 @@ export const EXTERNAL_PURCHASES: readonly ExternalPurchase[] = [
   { chain: 'base', date: '2026-11-02', amount: '0.002', asset: 'USDC', payer: '0x9a1066feec0822996875a28a3d4e058175af6c92', tx: '0xd58b4e3bd908760569e6ae762d55c5e5bb839a8a18db054771445dbf8f30ca6f' },
   { chain: 'base', date: '2026-11-02', amount: '0.006', asset: 'USDC', payer: '0x9a1066feec0822996875a28a3d4e058175af6c92', tx: '0xefccc98cdb9d06e6fcfd5d5897602e2d50bbb7af94b44fe73c284f8e677de7e6' },
   { chain: 'base', date: '2026-11-03', amount: '0.01', asset: 'USDC', payer: '0x3ed93a7b87832f04a91137cacb273d39295e430e', tx: '0x6dca5b76d0a8f4dd397a880bb3299126533ad5f3f6a0286007ea2c42521cfa38' },
+  { chain: 'base', date: '2026-11-09', amount: '0.001', asset: 'USDC', payer: '0x9d42eba8868cfd38a50ba615ee0cf903f1bbece9', tx: '0xa863cd08953899e24526b8234b70cf24a8314044547b71248fc2e00ee6342c61' },
 ];
 
 export function externalPurchaseSummary(rows: readonly ExternalPurchase[] = EXTERNAL_PURCHASES): {

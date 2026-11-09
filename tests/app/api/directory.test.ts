@@ -108,7 +108,7 @@ describe('free Japan Web3 Directory APIs', () => {
     expect(Date.parse(body.generatedAt)).not.toBeNaN();
     expect(body.dataFreshness).toEqual({
       oldest: '2026-07-13',
-      newestVerifiedAt: '2026-11-05', // 週次更新 (2026-11-05 第 13 回) で再検証したエントリ (jpysc・coincheck) の日付
+      newestVerifiedAt: '2026-11-09', // 週次更新 (2026-11-09 第 14 回) で再検証したエントリ (jpyc-ex・coincheck) の日付
       oldestSourceCheckedAt: null,
     });
     expect(body.licenseNotice).toBeTruthy();
