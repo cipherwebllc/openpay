@@ -462,11 +462,13 @@ export const DIRECTORY_ENTRIES = [
     slug: 'aegis-ai',
     name: 'Aegis',
     nameJa: 'Aegis',
-    status: 'published',
+    // 2026-11-09: 2026-11-08 にサービス終了 (サイトも有料 API も 410 で終了の告知) → archived。データは消さず、
+    // changelogData.ts に removed イベントを足す (runbook の 4)。
+    status: 'archived',
     // 2026-08-27: USDC (Base・標準 x402) 販売開始 — 実 402/実購入で確認 (dual-rail 掲載)
     ...provenance('https://aegis-ai.xyz/', 'Aegis', 'official', {
-      verifiedAt: '2026-09-04',
-      updatedAt: '2026-08-27',
+      verifiedAt: '2026-11-09',
+      updatedAt: '2026-11-08',
     }),
     facts: {
       description: 'x402対応のAIエージェント向けブリーフィングAPI。JPYCとUSDC (Base) で購入できる。',

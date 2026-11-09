@@ -74,15 +74,16 @@ describe('parseServiceMonitorQuery', () => {
 });
 
 describe('serviceChangelog', () => {
-  it('baseline: published 全エントリの added イベントが data.ts から導出される (jpyc-services スコープ)', () => {
+  it('baseline: published と archived の全エントリの added イベントが data.ts から導出される (jpyc-services スコープ)', () => {
     const changelog = serviceChangelog();
     // 決済スコープ専用の added (実証・提携等の backfill) は数えない — ディレクトリの
-    // 追加イベントは jpyc-services スコープに 1 エントリ 1 件。
+    // 追加イベントは jpyc-services スコープに 1 エントリ 1 件。archived (公開した後に外した掲載) も、外した後に
+    // added が履歴から消えないよう数える (2026-11-09・初の removed = Aegis)。
     const added = changelog.filter(
       (e) => e.changeType === 'added' && e.scopes.includes('jpyc-services'),
     );
-    const published = DIRECTORY_ENTRIES.filter((e) => e.status === 'published');
-    expect(added.length).toBe(published.length);
+    const listedOnce = DIRECTORY_ENTRIES.filter((e) => e.status === 'published' || e.status === 'archived');
+    expect(added.length).toBe(listedOnce.length);
     for (const event of added) {
       expect(event.date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
       expect(event.sourceUrl).toBeTruthy();
@@ -170,9 +171,27 @@ describe('createServiceMonitorEnvelope', () => {
     );
     expect(env.changes.length).toBeGreaterThan(0);
     expect(env.changes.every((e) => e.date >= baselineDate)).toBe(true);
-    // 変更のあった slug の現況行が付く。
-    const changedSlugs = new Set(env.changes.map((e) => e.slug));
-    expect(env.services.length).toBe(changedSlugs.size);
+    // 変更のあった slug のうち、公開中のものに現況行が付く (archived は現況行が出ず、removed イベントが真実を運ぶ)。
+    const published = new Set<string>(DIRECTORY_ENTRIES.filter((e) => e.status === 'published').map((e) => e.slug));
+    const changedPublished = new Set(env.changes.map((e) => e.slug).filter((slug) => published.has(slug as string)));
+    expect(env.services.length).toBe(changedPublished.size);
+  });
+
+  it('archived の掲載: added は残り、removed が後に来て、現況行は出ない (外しても履歴は消えない)', () => {
+    const archived = DIRECTORY_ENTRIES.filter((e) => e.status === 'archived');
+    // 2026-11-09 の Aegis が初の archived。0 件だとこの検査は空振りになるので、在ることを先に確かめる。
+    expect(archived.length).toBeGreaterThan(0);
+    const changelog = serviceChangelog();
+    const env = createServiceMonitorEnvelope({ limit: SERVICE_MONITOR_MAX_LIMIT }, {}, NOW);
+    for (const entry of archived) {
+      const events = changelog.filter((e) => e.slug === entry.slug && e.scopes.includes('jpyc-services'));
+      const added = events.find((e) => e.changeType === 'added');
+      const removed = events.find((e) => e.changeType === 'removed');
+      expect(added, entry.slug).toBeDefined();
+      expect(removed, entry.slug).toBeDefined();
+      expect(added!.date <= removed!.date).toBe(true);
+      expect(env.services.some((row) => row.slug === entry.slug)).toBe(false);
+    }
   });
 
   // E11 (2026-09-03 の日付訂正) 後: jpyc / jpyc-ex は発表日 2026-05-15 の 2 件に移った。

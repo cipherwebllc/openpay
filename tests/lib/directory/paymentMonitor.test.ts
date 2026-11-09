@@ -76,7 +76,7 @@ describe('createPaymentMonitorEnvelope', () => {
     expect(env.changes.some((c) => c.provider === 'Aegis')).toBe(false);
   });
 
-  it('スコープ分離 (逆): 決済専用イベントは JPYC Service Monitor に載らない — 8/01 以降の delta は 62 件', () => {
+  it('スコープ分離 (逆): 決済専用イベントは JPYC Service Monitor に載らない — 8/01 以降の delta は 63 件', () => {
     const jpyc = createServiceMonitorEnvelope(
       { changedSince: '2026-08-01', limit: SERVICE_MONITOR_MAX_LIMIT },
       {},
@@ -99,10 +99,12 @@ describe('createPaymentMonitorEnvelope', () => {
     //   10/21 sbi-vc-trade の Shinhan Card との基本合意・10/27 coincheck verified) = 53 件
     // + 第 12 回 (11/02 記録) の 7 件 (10/27 jpyc の 1 周年の公表値・10/27 と 10/28 と 10/30 の jpysc の提携 3 件・
     //   10/29 jpyc の免税還付・10/30 αU wallet のアプリ版の終了・11/02 coincheck verified) = 60 件
-    // + 第 13 回 (11/05 記録) の 2 件 (11/02 jpysc のレンディング残高と取扱残高・11/05 coincheck verified) = 62 件。
+    // + 第 13 回 (11/05 記録) の 2 件 (11/02 jpysc のレンディング残高と取扱残高・11/05 coincheck verified) = 62 件
+    // + 11/09 記録の 1 件 (11/08 aegis のサービス終了 = removed。aegis は archived になったが、baseline の added は 7/13 なので
+    //   8/01 以降の数には入らない) = 63 件。
     // 決済スコープ専用のイベント (8/10 DG SPS launch・大阪府採択・Mi&T・各回の verified・backfill など) が混ざれば
     // この件数より増え、slug の無いイベントも入る = スコープ分離の証明 (下の slug の検査と合わせて見る)。
-    expect(jpyc.changes).toHaveLength(62);
+    expect(jpyc.changes).toHaveLength(63);
     expect(jpyc.changes.every((c) => c.slug !== undefined)).toBe(true);
     // 応答に内部ルーティング用 scopes を漏らさない。
     expect(jpyc.changes[0]).not.toHaveProperty('scopes');
