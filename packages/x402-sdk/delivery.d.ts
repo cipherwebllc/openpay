@@ -45,7 +45,11 @@ export interface DeliveryVerification {
   address: string;
   product: string;
   revision: number;
-  basis: 'purchase' | 'holder';
+  /**
+   * `purchase` / `holder`: an entitled buyer or license holder. `seller`: the product's own
+   * seller checking the destination without buying (OpenPay issues it only to the product owner).
+   */
+  basis: 'purchase' | 'holder' | 'seller';
   /** Unix seconds. */
   exp: number;
   /** Unix seconds. */

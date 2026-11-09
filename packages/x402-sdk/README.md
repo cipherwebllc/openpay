@@ -470,6 +470,11 @@ async function authorize(request) {
 `verifyDeliveryTicket({ ticket, product, audience, issuer?, origin?, fetch?, now?,
 keys?, maxSkewSeconds?, replayStore? })` returns
 `{ address, product, revision, basis, exp, iat, jti, kid }`.
+`basis` is `purchase` (a buyer), `holder` (a license NFT holder) or `seller`
+(0.11.0+: the product's own seller pressed "Test delivery" in the seller dashboard
+to check the destination without buying; OpenPay issues it only to the product's
+owner, for the current revision). Older SDKs reject `seller` tickets. To serve
+only buyers and holders, deny when `basis === 'seller'` after verification.
 `createDeliveryGate` takes the same options except `ticket`, and exposes async
 `ready()`, `verify(ticket)`, and `verifyRequest(request)`.
 `ticketFromRequest(request)` reads exactly one `?ticket=` or

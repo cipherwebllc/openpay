@@ -1311,6 +1311,8 @@
     "licensePayToLabel": "売上の受取ウォレット",
     "licensePayToHint": "売上はこのウォレットへ直接届きます。OpenPay の手数料受取先と同じウォレットは指定できません。販売者の区分は出品アカウントで決まり、受取先を変えても変わりません。",
     "deliveryUrlLabel": "保護配布先URL",
+    "deliveryTestLink": "配布を試す",
+    "deliveryTestHint": "購入せずに、保護配布先からファイルを受け取れるかを確かめます。押すたびに60秒有効のチケットを発行します。配布先の SDK が 0.11.0 より古いと拒否されます。",
     "deliveryUrlHelp": "任意。ファイルは自分のサーバーや Cloudflare R2 に置きます。OpenPay は購入者や権利を持つ保有者を、60秒有効の署名付きチケット付きでこの URL へ転送します。",
     "deliveryGuideLink": "設定手順はガイドを参照",
     "detailInvalidDeliveryUrl": "保護配布先は https:// で始まる512文字以内の公開ドメインの URL を入力してください。OpenPay 自身の URL、IP アドレス、ログイン情報、#、ticket パラメータ、空白は使えません。",

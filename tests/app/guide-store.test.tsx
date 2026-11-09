@@ -71,7 +71,9 @@ it.each(['ja', 'en'])('%s protected delivery guide includes the complete setup a
   expect(screen.getByText(c.intro)).toBeVisible();
   expect(c.steps).toHaveLength(4); expect(c.caveats).toHaveLength(3);
   for (const text of [...c.steps, ...c.caveats]) expect(screen.getByText(text)).toBeVisible();
-  for (const setting of ['SDK 0.8.0', 'examples/cloudflare-r2-delivery-gate', 'OPENPAY_PRODUCT_ID', 'AUDIENCE', 'OBJECT_KEYS', 'FILES', 'wrangler deploy']) expect(c.steps[1]).toContain(setting);
+  for (const setting of [locale === 'ja' ? 'SDK（0.11.0 以上）' : 'SDK (0.11.0 or later)', 'examples/cloudflare-r2-delivery-gate', 'OPENPAY_PRODUCT_ID', 'AUDIENCE', 'OBJECT_KEYS', 'FILES', 'wrangler deploy']) expect(c.steps[1]).toContain(setting);
+  // 出品者は購入せずに「配布を試す」で確かめる (/api/store/products/<id>/delivery-test・SDK 0.11.0 以上が受け付ける)。
+  expect(c.steps[3]).toContain(locale === 'ja' ? '「配布を試す」' : '“Test delivery”');
   expect(screen.getByRole('link', { name: c.sdkLink })).toHaveAttribute('href', DELIVERY_SDK_README_URL);
   expect(Object.keys(deliveryStoreGuideContentFor('ja'))).toEqual(Object.keys(deliveryStoreGuideContentFor('en')));
 });

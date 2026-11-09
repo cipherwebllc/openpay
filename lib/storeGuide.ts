@@ -731,12 +731,12 @@ const DELIVERY_STORE_GUIDE_JA = {
   intro: '保護配布を使うと、ファイル本体を OpenPay に預けずに、権利のある購入者と保有者だけに配布できます。設定は出品者側で行います。',
   steps: [
     'ファイルを Cloudflare R2 などの非公開ストレージに置きます。公開 URL から直接取得できないようにします。',
-    'SDK 0.8.0 の examples/cloudflare-r2-delivery-gate を用意し、OPENPAY_PRODUCT_ID (商品 ID)、AUDIENCE (Worker の HTTPS オリジン)、OBJECT_KEYS (版とファイルの対応)、FILES (非公開 R2 の binding) を設定して、wrangler deploy でデプロイします。',
+    'SDK（0.11.0 以上）の examples/cloudflare-r2-delivery-gate を用意し、OPENPAY_PRODUCT_ID (商品 ID)、AUDIENCE (Worker の HTTPS オリジン)、OBJECT_KEYS (版とファイルの対応)、FILES (非公開 R2 の binding) を設定して、wrangler deploy でデプロイします。',
     '出品フォームの「保護配布先URL」に Worker の固定 URL を入れて保存します。期限付きのファイル URL は使いません。',
-    '権利のあるウォレットでログインし、ライブラリの「保護ダウンロードを開く」で確認します。',
+    '出品管理の「配布を試す」で、購入せずにファイルを受け取れるかを確認します。購入者には、ライブラリに「保護ダウンロードを開く」が表示されます。',
   ],
   caveats: [
-    'チケットは発行から60秒で失効します。失効や再試行の際は、ライブラリでもう一度リンクを押してください。',
+    'チケットは発行から60秒で失効します。失効や再試行の際は、ライブラリでもう一度リンクを押してください。出品者の確認では「配布を試す」をもう一度押します。',
     'チケット付き URL を転載されても、期限後はそのチケットで新たに開けません。期限内の共有や、取得済みファイルの複製は防げません。',
     '配布先の可用性は売り手の責任です。「保護配布」バッジは売り手が設定したことを示し、保護の監査や稼働・取得の保証ではありません。',
   ],
@@ -747,12 +747,12 @@ const DELIVERY_STORE_GUIDE_EN = {
   intro: 'Protected delivery lets you deliver files only to entitled buyers and holders without uploading them to OpenPay. Setup is done on the seller side.',
   steps: [
     'Put files in private storage such as Cloudflare R2. Disable direct access through public URLs.',
-    'Use examples/cloudflare-r2-delivery-gate from SDK 0.8.0. Configure OPENPAY_PRODUCT_ID (product ID), AUDIENCE (the Worker’s HTTPS origin), OBJECT_KEYS (revision-to-file mapping) and FILES (the private R2 binding), then deploy with wrangler deploy.',
+    'Use examples/cloudflare-r2-delivery-gate from the SDK (0.11.0 or later). Configure OPENPAY_PRODUCT_ID (product ID), AUDIENCE (the Worker’s HTTPS origin), OBJECT_KEYS (revision-to-file mapping) and FILES (the private R2 binding), then deploy with wrangler deploy.',
     'Enter the Worker’s stable URL in “Protected delivery URL” on the listing form and save. Do not use an expiring file URL.',
-    'Sign in with an entitled wallet and select “Open protected download” in the library to check delivery.',
+    'Select “Test delivery” in your seller dashboard to check, without buying, that the file is handed out. Buyers see “Open protected download” in their library.',
   ],
   caveats: [
-    'Tickets expire 60 seconds after issuance. If a ticket expires or you need to retry, press the library link again.',
+    'Tickets expire 60 seconds after issuance. If a ticket expires or you need to retry, press the library link again. Sellers checking a destination press “Test delivery” again.',
     'A shared ticket URL cannot start a new download after expiry. Sharing within its lifetime and copying downloaded files cannot be prevented.',
     'The seller is responsible for the destination’s availability. The “Protected delivery” badge means the seller configured it; it is not an audit of protection or a guarantee of uptime or downloads.',
   ],

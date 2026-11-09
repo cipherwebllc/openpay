@@ -16,9 +16,11 @@ const CLAIM_FIELDS = ['v', 'iss', 'aud', 'sub', 'product', 'rev', 'basis', 'iat'
 export type DeliveryPublicJwk = Readonly<{
   kty: 'OKP'; crv: 'Ed25519'; x: string; kid: string; use: 'sig'; alg: 'EdDSA';
 }>;
+/** purchase / holder = 購入者・保有者。seller = 出品者本人の確認用 (/api/store/products/<id>/delivery-test)。 */
+export type DeliveryTicketBasis = 'purchase' | 'holder' | 'seller';
 export type DeliveryTicketClaims = {
   v: 1; iss: string; aud: string; sub: string; product: string; rev: number;
-  basis: 'purchase' | 'holder'; iat: number; exp: number; jti: string;
+  basis: DeliveryTicketBasis; iat: number; exp: number; jti: string;
 };
 export type DeliveryTicketConfig = Readonly<{ kid: string; keys: readonly DeliveryPublicJwk[] }>;
 
@@ -80,7 +82,7 @@ function validClaims(c: Record<string, unknown>, audience: string, product: stri
     c.aud === audience && c.product === product && typeof c.product === 'string' && /^h_[0-9a-f]{32}$/.test(c.product) &&
     typeof c.sub === 'string' && isAddress(c.sub) && getAddress(c.sub) === c.sub &&
     typeof c.rev === 'number' && Number.isSafeInteger(c.rev) && c.rev > 0 &&
-    (c.basis === 'purchase' || c.basis === 'holder') && typeof c.jti === 'string' && /^[0-9a-f]{32}$/.test(c.jti) &&
+    (c.basis === 'purchase' || c.basis === 'holder' || c.basis === 'seller') && typeof c.jti === 'string' && /^[0-9a-f]{32}$/.test(c.jti) &&
     typeof c.iat === 'number' && Number.isSafeInteger(c.iat) &&
     typeof c.exp === 'number' && Number.isSafeInteger(c.exp) && c.exp === c.iat + DELIVERY_TICKET_TTL_SECONDS &&
     Number.isFinite(now) && c.iat <= now + 30 && c.exp > now;
@@ -89,7 +91,7 @@ function validClaims(c: Record<string, unknown>, audience: string, product: stri
 /** now は整数 Unix 秒。HTTP handler は認可/RPC の完了後、署名直前に時計を読む。 */
 export function signDeliveryTicket(input: {
   audience: string; subject: string; product: string; revision: number;
-  basis: 'purchase' | 'holder'; now: number; jti?: string;
+  basis: DeliveryTicketBasis; now: number; jti?: string;
 }): string | null {
   const config = deliveryTicketConfig();
   if (!config || !cachedSigner) return null;
