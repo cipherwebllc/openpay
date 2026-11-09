@@ -1115,6 +1115,15 @@ describe('protected delivery seller field', () => {
     await waitFor(() => expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'PATCH')).toBe(true));
     expect(JSON.parse(String(fetchMock.mock.calls.find(([, init]) => init?.method === 'PATCH')?.[1]?.body))).toHaveProperty('deliveryUrl', '');
   });
+  // 価格が作成後に固定なのはライセンスだけ。新規でも編集でも価格の欄のすぐ下で伝え、普通の商品には出さない。
+  const priceCases = (['digital', 'license'] as const).flatMap((kind) => [false, true].map((editing) => ({ kind, editing })));
+  it.each(priceCases)('$kind editing=$editing: the fixed-price note follows the product type', async ({ kind, editing }) => {
+    setup(kind, editing); renderPanel(); await openForm(kind, editing);
+    const note = screen.queryByText('利用ライセンス NFT の価格は、作成後に変更できません。');
+    if (kind === 'license') expect(note).toBeVisible();
+    else expect(note).not.toBeInTheDocument();
+    if (kind === 'license' && editing) expect(screen.getByLabelText('価格（JPYC・1,000 以上）')).toHaveAttribute('readonly');
+  });
 });
 
 
