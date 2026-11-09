@@ -1106,6 +1106,16 @@ describe('protected delivery seller field', () => {
     else expect(body).not.toHaveProperty('deliveryUrl');
     if (kind === 'license' && editing) for (const key of ['license', 'content', 'contentKind', 'priceJpyc', 'payTo']) expect(body).not.toHaveProperty(key);
   });
+  // 貼り付けで付いた前後の空白・改行は送る前に除く (server は空白入りの URL を拒否する)。
+  it.each(['digital', 'license'] as const)('%s: a pasted destination is sent without surrounding whitespace', async (kind) => {
+    state.deliveryEnabled = true;
+    const fetchMock = setup(kind, true); renderPanel(); await openForm(kind, true);
+    const field = screen.getByRole('textbox', { name: '保護配布先URL' });
+    fireEvent.change(field, { target: { value: ' https://gate.example.workers.dev \n' } });
+    fireEvent.submit(field.closest('form')!);
+    await waitFor(() => expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'PATCH')).toBe(true));
+    expect(JSON.parse(String(fetchMock.mock.calls.find(([, init]) => init?.method === 'PATCH')?.[1]?.body))).toHaveProperty('deliveryUrl', 'https://gate.example.workers.dev');
+  });
   // 出品者の「配布を試す」: 保護配布先を保存済みの商品だけ。押したときだけ same-origin の新しいタブで発行する。
   it.each(['digital', 'license'] as const)('%s: a saved destination shows the seller test link', async (kind) => {
     state.deliveryEnabled = true;
