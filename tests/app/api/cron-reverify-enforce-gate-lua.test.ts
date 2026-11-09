@@ -9,6 +9,8 @@
 // あわせて、probe の間の payTo の編集で結果を捨てること (CAS の受取先の検査が公開中・hidden にも効く) と、#957 の「残る穴」
 // 1〜3 (印のない hidden の照合しない復帰) が閉じたことを見る。差し替えるのは KV の土台 (wasmoon のエミュレータ)・
 // SSRF-safe fetch (402 を返す相手)・lock と cursor・alert の fetch だけ。
+// 末尾の describe は、掲載の見え方が変わった回 (hidden になった・戻った・公開待ちが公開に進んだ) だけに出る warn
+// (x402.reverify.visibility_changed) を、照合の有無を問わず (404/410・締め出し・first-party も) 同じ土台で見る。
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { closeRedisLuaEngine, createFakeRedisStore, runRedisLua, type FakeRedisStore } from '../../_helpers/redisLua';
 import type { ReverifyCursor } from '@/lib/x402/reverify';
@@ -55,7 +57,9 @@ vi.mock('@/lib/x402/reverify', async (importOriginal) => ({
 }));
 
 import { FIRST_PARTY_RESOURCES, firstPartyResourceUrl } from '@/lib/x402/firstParty';
-import { firstPartyVerificationKey, REVERIFY_HIDE_THRESHOLD, utcDateId } from '@/lib/x402/reverify';
+import {
+  firstPartyVerificationKey, REVERIFY_AUTH_HIDE_THRESHOLD, REVERIFY_HIDE_THRESHOLD, utcDateId,
+} from '@/lib/x402/reverify';
 import {
   createResource, listActiveResources, RESOURCES_INDEX, resourceKey, updateResource,
 } from '@/lib/x402/registry';
@@ -71,6 +75,7 @@ const FP_URL = firstPartyResourceUrl(FIRST_PARTY_RESOURCES[0]);
 const urlOf = (id: string) => `https://${id}.seller.example/api/paid`;
 const ENFORCE_EVENT = 'x402.reverify.gate_mismatch';
 const PENDING_EVENT = 'x402.reverify.pending_gate_mismatch';
+const VISIBILITY_EVENT = 'x402.reverify.visibility_changed';
 const hourIso = (hour: number) => `2026-11-06T${String(hour).padStart(2, '0')}:00:00.000Z`;
 const runIdOf = (hour: number) => `20261106${String(hour).padStart(2, '0')}`;
 
@@ -142,6 +147,7 @@ async function runAt(hour: number) {
     evals: holder.evals,
     warns,
     enforceWarns: warns.filter(([event]) => event === ENFORCE_EVENT).map(([, fields]) => fields),
+    visibilityWarns: warns.filter(([event]) => event === VISIBILITY_EVENT).map(([, fields]) => fields),
     infos: holder.info.mock.calls as Array<[string, Record<string, unknown>]>,
     alerts: webhook.mock.calls.map(([, init]) => String(init?.body ?? '')),
   };
@@ -196,11 +202,15 @@ describe('公開中の掲載', () => {
   it('合わない 402 が続くと閾値で hidden になり (台帳あり・一覧から外れる)、照合が合う 402 で戻る', async () => {
     seed([{ id: 'a', record: VISIBLE, respond: gate402(OTHER) }]);
     const outcomes: unknown[] = [];
+    const changes: unknown[] = [];
     for (let hour = 10; hour < 10 + REVERIFY_HIDE_THRESHOLD; hour += 1) {
       const run = await runAt(hour);
       outcomes.push(run.enforceWarns.map((fields) => [fields.outcome, fields.failures]));
+      changes.push(run.visibilityWarns.map((fields) => [fields.change, fields.verdict, fields.failures]));
     }
     expect(outcomes).toEqual([[['counted', 1]], [['counted', 2]], [['hidden', 3]]]);
+    // 閾値の回は照合の warn (outcome: hidden) と見え方の変化の warn の両方が出る。
+    expect(changes).toEqual([[], [], [['hidden', 'violation_gate_mismatch', 3]]]);
     expect(stored()).toMatchObject({ hidden: true, verification: { failures: REVERIFY_HIDE_THRESHOLD } });
     expect(holder.store!.strings.has(hiddenUrlLedgerKey(urlOf('a')))).toBe(true);
     expect(await publicIds()).toEqual([]);
@@ -208,6 +218,7 @@ describe('公開中の掲載', () => {
     // 合わない 402 のままなら hidden のまま。
     const kept = await runAt(13);
     expect(kept.enforceWarns).toEqual([expect.objectContaining({ visibility: 'hidden', outcome: 'kept_hidden', failures: 4 })]);
+    expect(kept.visibilityWarns).toEqual([]);
     expect(await publicIds()).toEqual([]);
 
     // ゲートを直せば (掲載の受取先の 402) 次の確認で戻る。
@@ -215,6 +226,7 @@ describe('公開中の掲載', () => {
     const restored = await runAt(14);
     expect(restored.body).toMatchObject({ ok: 2, restored: 1 });
     expect(restored.enforceWarns).toEqual([]);
+    expect(restored.visibilityWarns).toEqual([expect.objectContaining({ change: 'restored', pendingAtRead: false, verdict: 'ok_402_openpay', failures: 0 })]);
     expect(stored()).toMatchObject({ hidden: false, verification: { failures: 0, lastOkAt: hourIso(14) } });
     expect(await publicIds()).toEqual(['a']);
   });
@@ -279,11 +291,14 @@ describe('モデレーションの hidden (印なし)', () => {
     expect(await publicIds()).toEqual(['a']);
   });
 
-  it('掲載の受取先の 402 なら従来どおり戻る (warn なし)', async () => {
+  it('掲載の受取先の 402 なら従来どおり戻る (照合の warn は無く、見え方の変化の warn が restored で 1 件)', async () => {
     seed([{ id: 'a', record: MODERATED, respond: gate402(SELLER) }]);
     const run = await runAt(10);
     expect(run.body).toMatchObject({ ok: 2, restored: 1 });
-    expect(run.warns).toEqual([]);
+    expect(run.warns).toEqual([[VISIBILITY_EVENT, {
+      runId: runIdOf(10), target: 'external:a', host: 'a.seller.example', verdict: 'ok_402_openpay',
+      change: 'restored', pendingAtRead: false, failures: 0, authFailures: 0,
+    }]]);
     expect(stored()).toMatchObject({ hidden: false });
     expect(await publicIds()).toEqual(['a']);
   });
@@ -301,11 +316,14 @@ describe('公開待ちの掲載 (#957 のまま)', () => {
     ]);
   });
 
-  it('合う 402 で公開に進む (印が外れる)', async () => {
+  it('合う 402 で公開に進む (印が外れる・見え方の変化の warn は restored で pendingAtRead: true・集計も restored に数える)', async () => {
     seed([{ id: 'a', record: PENDING, respond: gate402(SELLER) }]);
     const run = await runAt(10);
     expect(run.body).toMatchObject({ restored: 1 });
-    expect(run.warns).toEqual([]);
+    expect(run.warns).toEqual([[VISIBILITY_EVENT, {
+      runId: runIdOf(10), target: 'external:a', host: 'a.seller.example', verdict: 'ok_402_openpay',
+      change: 'restored', pendingAtRead: true, failures: 0, authFailures: 0,
+    }]]);
     expect(stored()).not.toHaveProperty('pendingFirstVerification');
     expect(await publicIds()).toEqual(['a']);
   });
@@ -467,5 +485,122 @@ describe('first-party と集計', () => {
     const completed = run.infos.filter(([event]) => event === 'x402.reverify.completed');
     expect(completed).toHaveLength(1);
     expect(completed[0][1]).not.toHaveProperty('observeChecked');
+  });
+});
+
+// 掲載の見え方が変わった回だけに warn を 1 件出す (本番の logger は warn 以上しか出さず、集計の hidden / restored は info・警報は
+// 任意の env で件数だけ)。2026-11-08: 外部の掲載の URL が 410 になり violation_gone で hidden になったが、どの掲載がいつ
+// hidden になったかを読めなかった。変わらない回と CAS が結果を捨てた回は出さない。
+describe('見え方の変化の warn (x402.reverify.visibility_changed)', () => {
+  const FP_TARGET = `first-party:${FIRST_PARTY_RESOURCES[0].path}`;
+  const FP_HOST = new URL(FP_URL).host;
+
+  it('URL が 410 になった公開中の掲載は、閾値で hidden になった回にだけ 1 件出す (照合の warn は無い)', async () => {
+    seed([{ id: 'a', record: VISIBLE, respond: status(410) }]);
+    const changes: unknown[] = [];
+    for (let hour = 10; hour < 10 + REVERIFY_HIDE_THRESHOLD; hour += 1) {
+      changes.push((await runAt(hour)).warns);
+    }
+    expect(changes).toEqual([[], [], [[VISIBILITY_EVENT, {
+      runId: runIdOf(12), target: 'external:a', host: 'a.seller.example', verdict: 'violation_gone',
+      change: 'hidden', pendingAtRead: false, failures: REVERIFY_HIDE_THRESHOLD, authFailures: 0,
+    }]]]);
+    expect(await publicIds()).toEqual([]);
+
+    // hidden のまま (410 が続く) の回は出さない。
+    const kept = await runAt(13);
+    expect(kept.body).toMatchObject({ violations: 1, hidden: 0 });
+    expect(kept.warns).toEqual([]);
+  });
+
+  it('締め出し (403) の閾値で hidden になった回は verdict が transient・authFailures が閾値で出る', async () => {
+    seed([{
+      id: 'a',
+      record: { ...VISIBLE, verification: { ...VISIBLE.verification, authFailures: REVERIFY_AUTH_HIDE_THRESHOLD - 1 } },
+      respond: status(403),
+    }]);
+    const run = await runAt(10);
+    expect(run.body).toMatchObject({ transient: 1, hidden: 1 });
+    expect(run.warns).toEqual([[VISIBILITY_EVENT, {
+      runId: runIdOf(10), target: 'external:a', host: 'a.seller.example', verdict: 'transient',
+      change: 'hidden', pendingAtRead: false, failures: 0, authFailures: REVERIFY_AUTH_HIDE_THRESHOLD,
+    }]]);
+  });
+
+  it('first-party も hidden になった回と戻った回に出す', async () => {
+    seed([]);
+    holder.store!.strings.set(firstPartyVerificationKey(FIRST_PARTY_RESOURCES[0].path), JSON.stringify({
+      hidden: false,
+      verification: { failures: REVERIFY_HIDE_THRESHOLD - 1, lastCheckedAt: 'old', lastRunId: 'old', probedUrl: FP_URL },
+    }));
+    holder.respond = status(404);
+    const hidden = await runAt(10);
+    expect(hidden.body).toMatchObject({ checked: 1, violations: 1, hidden: 1 });
+    expect(hidden.warns).toEqual([[VISIBILITY_EVENT, {
+      runId: runIdOf(10), target: FP_TARGET, host: FP_HOST, verdict: 'violation_gone',
+      change: 'hidden', pendingAtRead: false, failures: REVERIFY_HIDE_THRESHOLD, authFailures: 0,
+    }]]);
+
+    holder.respond = gate402(OTHER); // first-party は照合しない
+    const restored = await runAt(11);
+    expect(restored.body).toMatchObject({ checked: 1, ok: 1, restored: 1 });
+    expect(restored.warns).toEqual([[VISIBILITY_EVENT, {
+      runId: runIdOf(11), target: FP_TARGET, host: FP_HOST, verdict: 'ok_402_openpay',
+      change: 'restored', pendingAtRead: false, failures: 0, authFailures: 0,
+    }]]);
+  });
+
+  it('見え方が変わらない回 (公開のまま・hidden のまま・公開待ちのまま) は出さない', async () => {
+    seed([
+      { id: 'ok', record: VISIBLE, respond: gate402(SELLER) },
+      { id: 'counted', record: VISIBLE, respond: status(404) },
+      { id: 'kept', record: MODERATED, respond: status(404) },
+      { id: 'pending', record: PENDING, respond: status(503) },
+    ]);
+    const run = await runAt(10);
+    expect(run.body).toMatchObject({ checked: 5, ok: 2, violations: 2, transient: 1, hidden: 0, restored: 0 });
+    expect(run.warns).toEqual([]);
+  });
+
+  it('CAS が結果を捨てた回 (applied: false) は、戻るはずの ok でも出さない', async () => {
+    seed([
+      { id: 'moderated', record: MODERATED, respond: gate402(SELLER) },
+      { id: 'pending', record: PENDING, respond: gate402(SELLER) },
+    ]);
+    respondExternal(async (url) => {
+      // probe の途中 (402 が返る前) に出品者が編集する: 受取先の変更 (pay_to_changed)・URL の変更 (url_changed)。
+      if (url === urlOf('moderated')) await patch('moderated', { payTo: OTHER });
+      else await patch('pending', { url: 'https://moved.seller.example/api/paid' });
+      return gate402(SELLER)();
+    });
+    const run = await runAt(10);
+    expect(run.body).toMatchObject({ ok: 3, restored: 0 });
+    expect(stored('moderated')).toMatchObject({ hidden: true, verification: { lastRunId: 'old' } });
+    expect(stored('pending')).toMatchObject({ hidden: true, pendingFirstVerification: true });
+    expect(run.warns).toEqual([]);
+  });
+
+  // pendingAtRead は読取時の事実で、CAS の時点の状態ではない。probe の間に公開待ちの掲載の URL を台帳済みの URL へ変えて元に
+  // 戻すと、印はその PATCH で外れて戻らない (CAS_UPDATE) が、CAS は今の URL が probe の URL と同じかしか見ないので往復を
+  // 検出できず、hidden → 公開の CAS が通る。change は CAS の結果どおり restored・pendingAtRead は読取時の true のまま。
+  it('probe の間に URL を台帳済みの URL へ変えて戻した公開待ちは、CAS が通って restored・pendingAtRead は読取時の true', async () => {
+    seed([{ id: 'a', record: PENDING, respond: gate402(SELLER) }]);
+    const ledgerUrl = 'https://moderated.seller.example/api/paid';
+    holder.store!.strings.set(hiddenUrlLedgerKey(ledgerUrl), '1');
+    respondExternal(async () => {
+      await patch('a', { url: ledgerUrl }); // 台帳を継承して印が外れる (hidden のまま)
+      expect(stored()).not.toHaveProperty('pendingFirstVerification');
+      await patch('a', { url: urlOf('a') }); // 元の URL に戻しても印は戻らない
+      return gate402(SELLER)();
+    });
+    const run = await runAt(10);
+    expect(run.body).toMatchObject({ ok: 2, restored: 1 });
+    expect(stored()).toMatchObject({ url: urlOf('a'), hidden: false, verification: { lastRunId: runIdOf(10) } });
+    expect(stored()).not.toHaveProperty('pendingFirstVerification');
+    expect(await publicIds()).toEqual(['a']);
+    expect(run.warns).toEqual([[VISIBILITY_EVENT, {
+      runId: runIdOf(10), target: 'external:a', host: 'a.seller.example', verdict: 'ok_402_openpay',
+      change: 'restored', pendingAtRead: true, failures: 0, authFailures: 0,
+    }]]);
   });
 });
