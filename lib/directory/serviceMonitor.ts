@@ -70,7 +70,12 @@ function baselineEvents(entries: readonly DirectoryEntry[]): ServiceChangeEvent[
 export function serviceChangelog(
   entries: readonly DirectoryEntry[] = DIRECTORY_ENTRIES,
 ): ServiceChangeEvent[] {
-  const all = [...baselineEvents(publishedDirectoryEntries(entries)), ...MANUAL_CHANGELOG];
+  // baseline の added は、いま公開中の掲載に加えて archived (公開した後に外した掲載) からも立てる。公開中だけから立てると、
+  // archived にした瞬間にその掲載の added が履歴から消え、removed だけが残る (2026-11-09 の Aegis が初の removed で発覚)。
+  const listedOnce = entries.filter(
+    (entry) => entry.status === 'published' || entry.status === 'archived',
+  );
+  const all = [...baselineEvents(listedOnce), ...MANUAL_CHANGELOG];
   return all.sort(
     (a, b) =>
       a.date.localeCompare(b.date) ||

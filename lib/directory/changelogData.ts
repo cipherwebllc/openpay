@@ -1695,6 +1695,20 @@ export const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
       'ネットスターズ公式ニュース一覧で再確認: 2026-09-11 の Kaia MOU 以降、ステーブルコインの発表なし (その後の 9/30 の Stripe と 10/06 の teppay はコード決済、11/02 は大学の学生食堂へのセルフオーダーの導入の話)。Stablecoin Pay の稼働日・手数料・対応チェーンの変更は未公表のまま。',
     sourceUrl: 'https://www.netstars.co.jp/news/',
   },
+  // ── 2026-11-09 (臨時): Aegis のサービス終了。自社面の観測 (2026-11-09 にサイトと有料 API の 410 を確認) ──
+  {
+    date: '2026-11-08',
+    collectedAt: '2026-11-09',
+    scopes: ['jpyc-services'],
+    slug: 'aegis-ai',
+    changeType: 'removed',
+    changeCategory: 'closure',
+    summary:
+      'Aegis ended its service on 2026-11-08. Its site now shows an end-of-service notice, and its x402 briefing API (JPYC and USDC) no longer answers with 402.',
+    summaryJa:
+      'Aegis が 2026-11-08 にサービスを終了。サイトは終了の告知に変わり、x402 のブリーフィング API (JPYC・USDC) も 402 を返さなくなった。',
+    sourceUrl: 'https://aegis-ai.xyz/',
+  },
 ];
 
 // ディレクトリ初期公開日。baseline の 'added' はこの固定日に立てる — entry.updatedAt 由来に

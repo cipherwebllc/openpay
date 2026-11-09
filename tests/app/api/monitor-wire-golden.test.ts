@@ -118,7 +118,7 @@ function provider(name: string, announcedAt: string, slug?: string): Record<stri
 
 // 小さな履歴: backfill (collectedAt > date)・同じ実効日の複数イベント・複数スコープのイベント・
 // slug だけのイベント (有料版は entry から provider/assets/chains を投影するが teaser は投影しない)・
-// archived の removed・別スコープの 'added' が baseline を消す癖、を含む。
+// archived の removed (baseline の added は残る)・別スコープの 'added' が baseline を消す癖、を含む。
 const SMALL_CHANGELOG: FixtureEvent[] = [
   { date: '2026-07-01', scopes: ['stablecoin-payments'], provider: 'Alpha Pay', changeType: 'added', changeCategory: 'partnership', assets: ['JPYC'], summary: 'Alpha added.', summaryJa: 'Alpha 追加。', sourceUrl: 'https://example.com/alpha' },
   { date: '2026-07-13', collectedAt: '2026-08-20', scopes: ['jpyc-services'], slug: 'svc-b', changeType: 'updated', changeCategory: 'chains_change', summary: 'B chains.', summaryJa: 'B チェーン。', diffs: [{ field: 'chains', previousValue: ['polygon'], currentValue: ['polygon', 'kaia'] }] },
@@ -175,6 +175,9 @@ const QUERIES = [
 // nextChangedSince の 1 行だけ)。
 // E17 の follow-up (表示名の変更で dedupe キーがずれる) で Payment Monitor の行に不変の slug を足したので、slug つきイベントを含む 8 件を再採取した
 // (raw text の差分は "slug" 行の追加だけ)。
+// 2026-11-09: archived (公開した後に外した掲載) にも baseline の added を立てるようにしたので (初の removed = Aegis で、
+// archived にした瞬間に added が履歴から消えると分かった)、archived の svc-gone を含む JPYC 版の 7 件を再採取した
+// (raw text の差分は有料版の changes に 2026-07-13 の svc-gone added が 1 件入ることと、teaser の totalEvents の +1 だけ)。
 const GOLDEN: Record<string, string> = {
   'empty /api/jpyc/services/teaser':
     'b824d113487f6e33fd43b8adfd1578d3194aaa8e44ef6e652f2cb9c3178e66ad',
@@ -217,13 +220,13 @@ const GOLDEN: Record<string, string> = {
   'empty /api/stablecoin-payments/teaser':
     'b8e66b10e1ccb728e2d7af82a0759e7d0642782613529f1b381f0b216a39fb6c',
   'long /api/jpyc/services/teaser':
-    '49c70329b7dbc3da5a35ce6d327a7cef77a8819886452262c5243def37ca01e9',
+    '3908f4c17575a88a7657d20f7ae1e0edae993ce2efd5e9641993538d570c7cc5',
   'long /api/paid/usdc/jpyc/services':
     '2c4505cda5d5e5ef9bfdb2a4eb0fa515116558cd9b33cf0e6d29f0a89a813cfe',
   'long /api/paid/usdc/jpyc/services?changedSince=2020-01-01':
-    'afafd2958656f1ed62741b30035c84601b84c269a0d800d4b95af471846f58c6',
+    'dd941bf7473d042ea55f7c6399f2175c1b003a4b1956c5d3103aac14dfa74c1e',
   'long /api/paid/usdc/jpyc/services?changedSince=2020-01-01&limit=1':
-    '1a711f5ba8e232155c8887bc211931b1baf920fde0697544776a85e951b98006',
+    'f916e27cfe20d9edb836b3c9a8148b6e78e7250800bf123d0710fdeb9ed95c9d',
   'long /api/paid/usdc/jpyc/services?changedSince=2026-08-10':
     '8566cefb8bc9dd0e33151823021c7199b450a744b95e27422f9683c6af757a92',
   'long /api/paid/usdc/jpyc/services?changedSince=2026-08-11&limit=1':
@@ -257,13 +260,13 @@ const GOLDEN: Record<string, string> = {
   'long /api/stablecoin-payments/teaser':
     '169c41a21f67fddb9d9a8e6c7f9dbfc8b3dbbc964073bd6bf821841153dbedf9',
   'small /api/jpyc/services/teaser':
-    '7ac96b885cc88c63a6d2a5b4bfb618559009d7526d5c08e94dc9a210ff0e46eb',
+    'ced39827d077a66c1f496390a73246a1ce4bfb219497a0a3b18e5939306d8a18',
   'small /api/paid/usdc/jpyc/services':
-    'ebe12c47e90a4551d146db265c9319c37e60718c6e5cb17a81981fefe7dcfad9',
+    '3f2a8e9412b982fbfe9bd26d1179c98d0fd775944a212abb7976e149e80d1f3f',
   'small /api/paid/usdc/jpyc/services?changedSince=2020-01-01':
-    '29740f3a13e65c0b67394e3cfc17c5a0db4777c079bb9e517b1b15502844758b',
+    '6478d748f59a1774de2f6690eb538a9a69b8b7580c71f59b37318213baa6bd06',
   'small /api/paid/usdc/jpyc/services?changedSince=2020-01-01&limit=1':
-    'c33cb3386eab1cfdea85355e901e1accaa2e8f4f014881f6d636f2daaf51e7c6',
+    '01414560f40ce5451db14ea8e69ec66191c1ba7a2cae9e8a3866dce06ef7a17f',
   'small /api/paid/usdc/jpyc/services?changedSince=2026-08-10':
     '001be34f726a1c2c5033f4d07b91bd72b36ebb6042e83c74a829cb5ee7401212',
   'small /api/paid/usdc/jpyc/services?changedSince=2026-08-11&limit=1':
