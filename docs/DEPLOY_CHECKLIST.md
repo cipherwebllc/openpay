@@ -2134,11 +2134,16 @@ flag ON + forwarder/JPYC 設定済の Amoy (80002) で 1 周する。route テ�
   `storage` 等) と、`url_taken` 等で hidden の解除が保留された回は出さない。
   - 項目: `runId` / `target` (`external:<id>` / `first-party:<path>`) / `host` (確認した URL のホスト) / `verdict` (この回の
     判定: `violation_gone` / `violation_200_ungated` / `violation_foreign_402` / `violation_gate_mismatch` / `ok_402_openpay` /
-    `transient`) / `change` / `failures` (この回の後の確定違反の連続の回数) / `authFailures` (この回の後の締め出しの連続の回数)。
-  - `change`: `hidden` (公開 → hidden。確定違反 3 回連続か、締め出し (401 / 403・別ホストへの redirect) 6 回連続) /
-    `restored` (hidden → 公開。OpenPay の 402 で戻った・外部の掲載は照合が合う 402) / `published` (公開待ち
-    `pendingFirstVerification` が最初の確認を通って公開に進んだ)。集計の `restored` は従来どおり `restored` と `published` の
-    両方を数える。
+    `transient`) / `change` / `pendingAtRead` / `failures` (この回の後の確定違反の連続の回数) / `authFailures` (この回の後の
+    締め出しの連続の回数)。
+  - `change` は CAS の結果 (hidden の前後) で確かに言える 2 つだけ: `hidden` (公開 → hidden。確定違反 3 回連続か、締め出し
+    (401 / 403・別ホストへの redirect) 6 回連続) / `restored` (hidden → 公開。OpenPay の 402 で戻った・外部の掲載は照合が
+    合う 402)。公開待ちが最初の確認を通って公開に進んだ回も `restored` (集計の `restored` も従来どおり両方を数える)。
+  - `pendingAtRead`: probe の前に掲載を読んだとき公開待ち (`pendingFirstVerification`) だったか (first-party は常に `false`)。
+    読取時の事実で、CAS の時点の状態ではない。`restored` + `pendingAtRead: true` は普通は「公開待ちが最初の確認を通って公開に
+    進んだ」回。ただし probe の間に出品者が URL を台帳済みの URL へ変えて元に戻した稀な場合は、その PATCH で印が外れて
+    (モデレーションの hidden に移り) 戻しても付かないが、CAS は今の URL が probe の URL と同じかしか見ないので往復を検出できず、
+    CAS が通って `restored` + `pendingAtRead: true` になる (ログの分類のためだけに CAS は変えない)。
   - 読み方: Vercel → Logs (production) で `visibility_changed` を全文検索する。Sentry → Issues で
     `event:x402.reverify.visibility_changed` を検索する。`verdict` が `violation_gone` なら掲載の URL が 404 / 410 を返している
     (出品者がサーバーを止めた・URL を変えた)、`transient` で `authFailures` が 6 なら締め出しが続いている。照合の不一致で hidden

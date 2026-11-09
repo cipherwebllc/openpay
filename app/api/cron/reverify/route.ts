@@ -104,19 +104,14 @@ function gateMismatchOutcome(
 }
 
 // 掲載の見え方 (公開か hidden か) がこの回にどう変わったか。CAS が結果を反映した回 (applied) で、hidden の前後が違うときだけ。
-//   hidden    = 公開 → hidden (確定違反 3 回連続・締め出し 6 回連続が閾値に達した)
-//   restored  = hidden → 公開 (ok_402_openpay で戻った・外部は照合が合う 402)
-//   published = 公開待ち (pendingFirstVerification・hidden と印で作られる) が最初の確認を通って公開に進んだ。CAS の結果では
-//               restored と同じ hidden → 公開に見えるので、読取時の印で分ける (集計の summary.restored は従来どおり両方を数える)。
-//               印を外すのはこの CAS と URL を変える PATCH (CAS_UPDATE) だけで、URL が変わった回はこの CAS が url_changed で
-//               捨てる (applied にならない) ので、読取時の印は CAS が見た状態と同じ。
+// CAS の結果 (hiddenBefore / hiddenAfter) で確かに言える 2 つだけにする (公開待ちだったかは warn の pendingAtRead で別に残す)。
+//   hidden   = 公開 → hidden (確定違反 3 回連続・締め出し 6 回連続が閾値に達した)
+//   restored = hidden → 公開 (ok_402_openpay で戻った・外部は照合が合う 402。公開待ちが最初の確認を通って公開に進んだ回もこれ)
 function visibilityChange(
   apply: Extract<ReverifyApplyResult, { applied: true }>,
-  pendingBefore: boolean,
-): 'hidden' | 'restored' | 'published' | null {
+): 'hidden' | 'restored' | null {
   if (apply.hiddenBefore === apply.hiddenAfter) return null;
-  if (apply.hiddenAfter) return 'hidden';
-  return pendingBefore ? 'published' : 'restored';
+  return apply.hiddenAfter ? 'hidden' : 'restored';
 }
 
 // 掲載の見え方が変わった回に warn を 1 件残す (外部の掲載・first-party の両方)。どの掲載が・いつ・どの判定で一覧から消えた /
@@ -134,10 +129,10 @@ function warnVisibilityChanged(
   probedUrl: string,
   verdict: ReverifyVerdict,
   apply: ReverifyApplyResult,
-  pendingBefore: boolean,
+  pendingAtRead: boolean,
 ): void {
   if (!apply.applied) return;
-  const change = visibilityChange(apply, pendingBefore);
+  const change = visibilityChange(apply);
   if (!change) return;
   logger.warn('x402.reverify.visibility_changed', {
     runId,
@@ -145,6 +140,11 @@ function warnVisibilityChanged(
     host: new URL(probedUrl).host,
     verdict,
     change,
+    // probe の前に掲載を読んだとき公開待ち (pendingFirstVerification) だったか。読取時の事実で、CAS の時点の状態ではない。
+    // 公開待ちが最初の確認を通って公開に進んだ回は restored + pendingAtRead: true になる。ただし probe の間に URL を台帳済みの
+    // URL へ変えて元に戻した稀な場合 (印はその PATCH で外れ、戻しても付かない・CAS は今の URL が probe の URL と同じかしか
+    // 見ないので往復を検出できない) は、CAS の時点で印が無くても true になる。ログの分類のために CAS の戻り値は変えない。
+    pendingAtRead,
     failures: apply.failures,
     // 締め出し (401/403 等) の閾値で hidden になった回は verdict が transient で failures も動かないので、理由を読むのに要る。
     authFailures: apply.authFailures,
@@ -250,7 +250,7 @@ async function processTarget(
     runId,
     authClass,
   );
-  // first-party に公開待ちは無い (印は外部の掲載の登録だけが付ける)。
+  // first-party に公開待ちは無い (印は外部の掲載の登録だけが付ける) ので pendingAtRead は常に false。
   warnVisibilityChanged(runId, target, probedUrl, verdict, apply, false);
   const storageError = !apply.applied && apply.reason === 'storage';
   return {

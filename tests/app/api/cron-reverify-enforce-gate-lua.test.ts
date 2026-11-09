@@ -226,7 +226,7 @@ describe('公開中の掲載', () => {
     const restored = await runAt(14);
     expect(restored.body).toMatchObject({ ok: 2, restored: 1 });
     expect(restored.enforceWarns).toEqual([]);
-    expect(restored.visibilityWarns).toEqual([expect.objectContaining({ change: 'restored', verdict: 'ok_402_openpay', failures: 0 })]);
+    expect(restored.visibilityWarns).toEqual([expect.objectContaining({ change: 'restored', pendingAtRead: false, verdict: 'ok_402_openpay', failures: 0 })]);
     expect(stored()).toMatchObject({ hidden: false, verification: { failures: 0, lastOkAt: hourIso(14) } });
     expect(await publicIds()).toEqual(['a']);
   });
@@ -297,7 +297,7 @@ describe('モデレーションの hidden (印なし)', () => {
     expect(run.body).toMatchObject({ ok: 2, restored: 1 });
     expect(run.warns).toEqual([[VISIBILITY_EVENT, {
       runId: runIdOf(10), target: 'external:a', host: 'a.seller.example', verdict: 'ok_402_openpay',
-      change: 'restored', failures: 0, authFailures: 0,
+      change: 'restored', pendingAtRead: false, failures: 0, authFailures: 0,
     }]]);
     expect(stored()).toMatchObject({ hidden: false });
     expect(await publicIds()).toEqual(['a']);
@@ -316,13 +316,13 @@ describe('公開待ちの掲載 (#957 のまま)', () => {
     ]);
   });
 
-  it('合う 402 で公開に進む (印が外れる・見え方の変化の warn は published・集計は従来どおり restored に数える)', async () => {
+  it('合う 402 で公開に進む (印が外れる・見え方の変化の warn は restored で pendingAtRead: true・集計も restored に数える)', async () => {
     seed([{ id: 'a', record: PENDING, respond: gate402(SELLER) }]);
     const run = await runAt(10);
     expect(run.body).toMatchObject({ restored: 1 });
     expect(run.warns).toEqual([[VISIBILITY_EVENT, {
       runId: runIdOf(10), target: 'external:a', host: 'a.seller.example', verdict: 'ok_402_openpay',
-      change: 'published', failures: 0, authFailures: 0,
+      change: 'restored', pendingAtRead: true, failures: 0, authFailures: 0,
     }]]);
     expect(stored()).not.toHaveProperty('pendingFirstVerification');
     expect(await publicIds()).toEqual(['a']);
@@ -503,7 +503,7 @@ describe('見え方の変化の warn (x402.reverify.visibility_changed)', () => 
     }
     expect(changes).toEqual([[], [], [[VISIBILITY_EVENT, {
       runId: runIdOf(12), target: 'external:a', host: 'a.seller.example', verdict: 'violation_gone',
-      change: 'hidden', failures: REVERIFY_HIDE_THRESHOLD, authFailures: 0,
+      change: 'hidden', pendingAtRead: false, failures: REVERIFY_HIDE_THRESHOLD, authFailures: 0,
     }]]]);
     expect(await publicIds()).toEqual([]);
 
@@ -523,7 +523,7 @@ describe('見え方の変化の warn (x402.reverify.visibility_changed)', () => 
     expect(run.body).toMatchObject({ transient: 1, hidden: 1 });
     expect(run.warns).toEqual([[VISIBILITY_EVENT, {
       runId: runIdOf(10), target: 'external:a', host: 'a.seller.example', verdict: 'transient',
-      change: 'hidden', failures: 0, authFailures: REVERIFY_AUTH_HIDE_THRESHOLD,
+      change: 'hidden', pendingAtRead: false, failures: 0, authFailures: REVERIFY_AUTH_HIDE_THRESHOLD,
     }]]);
   });
 
@@ -538,7 +538,7 @@ describe('見え方の変化の warn (x402.reverify.visibility_changed)', () => 
     expect(hidden.body).toMatchObject({ checked: 1, violations: 1, hidden: 1 });
     expect(hidden.warns).toEqual([[VISIBILITY_EVENT, {
       runId: runIdOf(10), target: FP_TARGET, host: FP_HOST, verdict: 'violation_gone',
-      change: 'hidden', failures: REVERIFY_HIDE_THRESHOLD, authFailures: 0,
+      change: 'hidden', pendingAtRead: false, failures: REVERIFY_HIDE_THRESHOLD, authFailures: 0,
     }]]);
 
     holder.respond = gate402(OTHER); // first-party は照合しない
@@ -546,7 +546,7 @@ describe('見え方の変化の warn (x402.reverify.visibility_changed)', () => 
     expect(restored.body).toMatchObject({ checked: 1, ok: 1, restored: 1 });
     expect(restored.warns).toEqual([[VISIBILITY_EVENT, {
       runId: runIdOf(11), target: FP_TARGET, host: FP_HOST, verdict: 'ok_402_openpay',
-      change: 'restored', failures: 0, authFailures: 0,
+      change: 'restored', pendingAtRead: false, failures: 0, authFailures: 0,
     }]]);
   });
 
@@ -578,5 +578,29 @@ describe('見え方の変化の warn (x402.reverify.visibility_changed)', () => 
     expect(stored('moderated')).toMatchObject({ hidden: true, verification: { lastRunId: 'old' } });
     expect(stored('pending')).toMatchObject({ hidden: true, pendingFirstVerification: true });
     expect(run.warns).toEqual([]);
+  });
+
+  // pendingAtRead は読取時の事実で、CAS の時点の状態ではない。probe の間に公開待ちの掲載の URL を台帳済みの URL へ変えて元に
+  // 戻すと、印はその PATCH で外れて戻らない (CAS_UPDATE) が、CAS は今の URL が probe の URL と同じかしか見ないので往復を
+  // 検出できず、hidden → 公開の CAS が通る。change は CAS の結果どおり restored・pendingAtRead は読取時の true のまま。
+  it('probe の間に URL を台帳済みの URL へ変えて戻した公開待ちは、CAS が通って restored・pendingAtRead は読取時の true', async () => {
+    seed([{ id: 'a', record: PENDING, respond: gate402(SELLER) }]);
+    const ledgerUrl = 'https://moderated.seller.example/api/paid';
+    holder.store!.strings.set(hiddenUrlLedgerKey(ledgerUrl), '1');
+    respondExternal(async () => {
+      await patch('a', { url: ledgerUrl }); // 台帳を継承して印が外れる (hidden のまま)
+      expect(stored()).not.toHaveProperty('pendingFirstVerification');
+      await patch('a', { url: urlOf('a') }); // 元の URL に戻しても印は戻らない
+      return gate402(SELLER)();
+    });
+    const run = await runAt(10);
+    expect(run.body).toMatchObject({ ok: 2, restored: 1 });
+    expect(stored()).toMatchObject({ url: urlOf('a'), hidden: false, verification: { lastRunId: runIdOf(10) } });
+    expect(stored()).not.toHaveProperty('pendingFirstVerification');
+    expect(await publicIds()).toEqual(['a']);
+    expect(run.warns).toEqual([[VISIBILITY_EVENT, {
+      runId: runIdOf(10), target: 'external:a', host: 'a.seller.example', verdict: 'ok_402_openpay',
+      change: 'restored', pendingAtRead: true, failures: 0, authFailures: 0,
+    }]]);
   });
 });
