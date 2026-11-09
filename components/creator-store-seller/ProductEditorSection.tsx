@@ -244,9 +244,13 @@ export function ProductEditorSection({
             className={`${inputClass}${isLicense ? ' min-h-11' : ''}`} 
           />
         </label>
-        {/* 税込総額での登録案内 (Terms 13 条 (4) 2026-08-05 改定と同期・label 外 = a11y 名不変)。 */}
+        {/* 税込総額での登録案内 (Terms 13 条 (4) 2026-08-05 改定と同期・label 外 = a11y 名不変)。
+            ライセンスは価格が作成後に固定 (server の license_definition_immutable) なので、欄のすぐ下でも伝える。
+            上の囲みの licenseImmutableNotice だけでは、編集で価格が変えられない理由に気づけなかった (2026-11-09 user)。
+            grid の項目を増やさないよう同じ段落に入れる。 */}
         <p className="-mt-3 text-xs text-slate-500">
           {t('priceHint')}
+          {isLicense ? <> <span className="font-medium text-slate-700">{t('licensePriceFixedHint')}</span></> : null}
         </p>
         <details open={editingId !== null} className="sm:col-span-2">
           <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-slate-500">

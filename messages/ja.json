@@ -1289,6 +1289,7 @@
     "licenseTitleLabel": "ライセンス名",
     "licenseSupplyLabel": "販売数（1〜10,000）",
     "licensePriceLabel": "価格（JPYC・1,000 以上）",
+    "licensePriceFixedHint": "利用ライセンス NFT の価格は、作成後に変更できません。",
     "licenseTransferLabel": "譲渡",
     "licenseTransferYes": "可",
     "licenseTransferNo": "不可",

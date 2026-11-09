@@ -266,13 +266,13 @@ describe('seller extraction DOM and request pins', () => {
     'ja/empty': 'b64ee591d8545c0c0e37cc51cccea4e205a9101f9d81c07b83fe51eb66afb191',
     'ja/list': '6600433bc7f01d0ff70b7b21a29f1eb16b04b0ca842845cb946dbe8211267898',
     'ja/digital-edit': '50517420622c2e65f396b96b3d558e095585d6090381e308893836d35853473e',
-    'ja/license-new': '398022f64a3af91b785570c47dea23de37891654838585d69a32314cafd5ed09',
-    'ja/license-edit': '9fff24b8c8d4ce59da7aa1f6eba3b9fd2218027b5b46f42900abf7efe913724d',
+    'ja/license-new': '0d84ef933f64b19b72fb1ecc633ba9254fc8be5386dd2c8f710e726dec7da1c7',
+    'ja/license-edit': 'bb1d58fb70ecc487c25e0bdaecf17c1919ce18a74057d7ade3e15293afa111bc',
     'en/empty': '1bbd8651e874d4604e73dd4a85896196ef4fb21107a686455f17ae1adeb872cb',
     'en/list': 'c620ee3fdabdc695f3ac473b2d675bef21e67ba2550467532b6b0c8f277429dc',
     'en/digital-edit': '75bc92608a736b57d7d43cfa7ba3e42197811762d264b68dd5bdcc0d3d3568e0',
-    'en/license-new': '11e2bbab580e48fe3453bff7abdd5763d11bd6b91db874be96376a17c9278395',
-    'en/license-edit': '91f5614e2c5029851a6577ff88595281d504bde68b5a23a586660db90e5b4dfd',
+    'en/license-new': 'bebdec687216957797fef1d6f6bada41b1bd4d755c83f104804b8c867d0d3ac3',
+    'en/license-edit': 'ad3211e37a3428b3c921c141a4b23038c8ac8baa8b34d748cf33121f774daa4d',
   };
   it.each((['ja', 'en'] as const).flatMap((locale) => ['empty', 'list', 'digital-edit', 'license-new', 'license-edit'].map((mode) => ({ locale, mode }))))('$locale $mode DOM bytes', async ({ locale, mode }) => {
     state.license = mode !== 'empty';
@@ -498,9 +498,9 @@ describe('seller extraction DOM pins for error states', () => {
   // 2026-11-02 入力欄の class (高さ 44px・スマホ 16px・placeholder AA) で 4 つとも採り直し (旧 class に戻すと旧値と一致を確認済み)。
   const domHashes: Record<string, string> = {
     'ja/errors': 'a575a0c7af2d22e21c5691462e3539e3ff5149f06b547a770f19918003289fe1',
-    'ja/license-invalid': '7659ec0d059eb805d432edbd58c871206d0225d2cc5cd10a8e63abe0c3fd8dcc',
+    'ja/license-invalid': '43ce216212132dde22012767e9cae02c1c0f33bea08f6804536c5572fd08c79e',
     'en/errors': 'e648255034df6c49431a5250116aa76f4b139b1acf894c75821e8d8f50a8f67c',
-    'en/license-invalid': '0c442a29006087066c48665660736b994d60c966041a9a40a4bfd2740bc5ee1b',
+    'en/license-invalid': '0474b9f8801d28308451374702bceaceb19f4b5afc28576543d43da35208851a',
   };
   it.each((['ja', 'en'] as const).flatMap((locale) => ['errors', 'license-invalid'].map((mode) => ({ locale, mode }))))('$locale $mode DOM bytes', async ({ locale, mode }) => {
     state.license = true;
