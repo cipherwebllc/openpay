@@ -3,7 +3,6 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { posix } from 'node:path';
 import ts from 'typescript';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { runtimeSpecifiers } from '../../_helpers/runtimeImports';
 
 // 何を守るか (全レビュー第 10 回 E-1・money-path):
 //   creator-store の hosted intent の署名 (receiveWithAuthorization・to=forwarder・nonce に server 発行の intentSalt) を
@@ -135,12 +134,9 @@ function boundNames(name: ts.BindingName): string[] {
 function parseModule(file: string, source: string, resolveSpec: (spec: string) => string | null): Mod {
   const kind = file.endsWith('.tsx') ? ts.ScriptKind.TSX : /\.m?js$/.test(file) ? ts.ScriptKind.JS : ts.ScriptKind.TS;
   const parsed = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, kind);
+  // file ごとに 1 回だけ parse する (実行時に読み込む file = deps も同じ構文木から集める。数え方は
+  // tests/_helpers/runtimeImports.ts の runtimeSpecifiers と同じ: 型だけの import / export を除く・副作用 import を含む)。
   const mod: Mod = { imports: new Map(), exports: new Map(), stars: [], deps: [], decls: new Map(), primitives: new Set() };
-  // 行き先が文字列でない import() / require() はここで throw する (runtimeSpecifiers)。
-  for (const spec of runtimeSpecifiers(file, source)) {
-    const dep = resolveSpec(spec);
-    if (dep) mod.deps.push(dep);
-  }
 
   // primitive を別名で取り込んだ名前 (`import { sendTransaction as broadcast } from 'viem/actions'` の broadcast)。
   const aliases = new Set<string>();
@@ -206,9 +202,15 @@ function parseModule(file: string, source: string, resolveSpec: (spec: string) =
         (node.expression.kind === ts.SyntaxKind.ImportKeyword ||
           (ts.isIdentifier(node.expression) && node.expression.text === 'require'))
       ) {
+        // 行き先を静的に決められない import() / require() はたどれない → 落とす。
+        const [spec] = node.arguments;
+        if (!spec || !ts.isStringLiteralLike(spec)) throw new Error(`non-literal import()/require() in ${file}`);
         // 読み込んだ module のどの export を使うかは追わず、全部を参照したとみなす。
-        const target = resolveSpec((node.arguments[0] as ts.StringLiteralLike).text);
-        if (target) push({ module: target, pos: node.getStart(), call: false });
+        const target = resolveSpec(spec.text);
+        if (target) {
+          mod.deps.push(target);
+          push({ module: target, pos: node.getStart(), call: false });
+        }
         return;
       }
       if (ts.isPropertyAccessExpression(node) && ts.isIdentifier(node.expression)) {
@@ -236,8 +238,10 @@ function parseModule(file: string, source: string, resolveSpec: (spec: string) =
   for (const st of parsed.statements) {
     if (ts.isImportDeclaration(st)) {
       const clause = st.importClause;
-      const from = clause && !clause.isTypeOnly ? resolveSpec((st.moduleSpecifier as ts.StringLiteral).text) : null;
-      if (!clause || !from) continue;
+      const from = clause?.isTypeOnly ? null : resolveSpec((st.moduleSpecifier as ts.StringLiteral).text);
+      if (!from) continue;
+      mod.deps.push(from); // 副作用 import (`import '…'`) も初期化が走る
+      if (!clause) continue;
       if (clause.name) mod.imports.set(clause.name.text, { from, name: 'default' });
       const named = clause.namedBindings;
       if (named && ts.isNamespaceImport(named)) mod.imports.set(named.name.text, { from, name: '*' });
@@ -251,6 +255,7 @@ function parseModule(file: string, source: string, resolveSpec: (spec: string) =
     if (ts.isExportDeclaration(st)) {
       if (st.isTypeOnly) continue;
       const from = st.moduleSpecifier ? resolveSpec((st.moduleSpecifier as ts.StringLiteral).text) : undefined;
+      if (from) mod.deps.push(from);
       const clause = st.exportClause;
       if (!clause) mod.stars.push(from ?? null);
       else if (ts.isNamespaceExport(clause)) mod.exports.set(clause.name.text, from ? { from, name: '*' } : null);
