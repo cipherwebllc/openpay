@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 const SCRIPT = resolve('./scripts/check-bundle-budget.mjs');
 const PAY_ROW = '├ ● /[locale]/pay                                 10.3 kB         408 kB';
 const TIP_ROW = '├ ƒ /[locale]/tip/[address]                       12.5 kB         401 kB';
+const CHECKOUT_ROW = '├ ● /[locale]/checkout                            20.2 kB         427 kB';
 const MANIFEST_ROW = '├ ○ /manifest.webmanifest                           620 B         171 kB';
 const SHARED_ROW = '+ First Load JS shared by all                      171 kB';
 
@@ -93,7 +94,7 @@ Route (app)                                          Size  First Load JS
 ├   ├ /ja/agent
 ├   └ /en/agent
 ├ ● /[locale]/billing                             12.4 kB         312 kB
-├ ● /[locale]/checkout                            20.2 kB         409 kB
+${CHECKOUT_ROW}
 ├   ├ /ja/checkout
 ├   └ /en/checkout
 ├ ● /[locale]/create                              44.3 kB         348 kB
@@ -178,9 +179,23 @@ describe('check-bundle-budget CLI', () => {
     expect(result.stdout).toContain('[OK] /manifest.webmanifest: 171 kB / 予算 176 kB');
     expect(result.stdout).toContain('[OK] /[locale]/pay: 408 kB / 予算 408 kB');
     expect(result.stdout).toContain('[OK] /[locale]/tip/[address]: 401 kB / 予算 401 kB');
+    expect(result.stdout).toContain('[OK] /[locale]/checkout: 427 kB / 予算 432 kB');
     expect(result.stdout).toContain('OK: 全ルートが予算内');
     // 予算表の外の API・metadata の route (/.well-known/x402・/api/relay/jpyc・/sitemap.xml) は出さない
     expect(result.stdout).not.toContain('[NO BUDGET]');
+  });
+
+  // 第 10 回レビュー F-10 (Codex): 見本の /checkout が CI の実測 427 kB と違う 409 kB だと、予算を誤って 410 に下げても
+  // 見本は通り、本番の build だけが落ちる。見本を実測にそろえ、予算 432 kB の境界 (432 は通る・433 は落ちる) を固定する。
+  it.each([
+    ['432 kB', 0, 'OK', '432'],
+    ['432001 B', 1, 'OVER', '432.001'],
+    ['433 kB', 1, 'OVER', '433'],
+  ])('enforces the /[locale]/checkout budget of 432 kB at %s', (size, status, label, expectedKb) => {
+    const result = runGate(NORMAL_BUILD_OUTPUT.replace(CHECKOUT_ROW, `├ ● /[locale]/checkout   20.2 kB   ${size}`));
+
+    expect(result.status).toBe(status);
+    expect(result.stdout).toContain(`[${label}] /[locale]/checkout: ${expectedKb} kB / 予算 432 kB`);
   });
 
   // 第 8 回レビュー F-11: 予算表に無い route は 300 kB を超えるまで落ちなかった (/store/library が 257→290 kB でも通る)。

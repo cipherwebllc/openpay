@@ -7,8 +7,11 @@
 //   node scripts/check-bundle-budget.mjs --build               # 内部で npm run build を実行
 //
 // 予算は「本番で点灯している公開 flag (e2e/prodFlags.env) で build した実測 + 小さな余裕」を上限とする
-// (CI の ci.yml が同じベクターを build 前に読む・第 7 回レビュー E7)。flag OFF の build は到達コードが入らず
-// 本番より小さく見えるので、手元で測るときも同じベクターを読み込んでから build する。
+// (CI の ci.yml が同じベクターを build 前に読む・第 7 回レビュー E7)。いまの公開 flag は実行時の値 (lib/env.ts の
+// parseBoolFlag) なので OFF の枝も bundle に残り、ON/OFF で First Load JS は変わらない (下の 2026-11-11 の注記)。
+// flag を build 時の定数として読む実装に変わっても本番の経路を測るよう、手元で測るときも同じベクターを読み込んでから build する。
+// 予算が見るのは Route 表の First Load JS だけで、実行時に flag の経路で読み込む遅延 chunk (例: hooks/useSmartAccount.ts と
+// hooks/useBatchPayment.ts の Circle の account の import()) は数えない。
 // 超えたら予算を上げる前に code-split (next/dynamic) を優先し、上げるときは理由を各行の注記に残す。
 
 import { stdin } from 'node:process';
