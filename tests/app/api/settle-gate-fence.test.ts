@@ -18,7 +18,10 @@ import { beforeAll, describe, expect, it } from 'vitest';
 //   - 関数の中身と class の instance の property の初期化は、その宣言の名前が参照されたときにたどる。それ以外は module の
 //     初期化 ('<init>'。import されたら名前を使わなくても走る) に数える: 宣言でない文・変数の初期化式・class の static の
 //     初期化・初期化の間に呼ぶ関数へ渡した callback と即時に呼ぶ関数 (渡した先がすぐ呼ぶかは見ずに、走るとみなす)。
-//     初期化から名前を使わずに走る先 (static block の this.run()・初期化の中で作る object の getter) はたどらず、throw で落とす。
+//     初期化から名前を使わずに走る先 (static block の this.run()・初期化の中で作る object の getter / setter) はたどらず、
+//     throw で落とす。ただし関数の呼び出しの引数の中にある getter / setter (例 Object.freeze({ get run() {…} }).run) は
+//     落とさない: 上の「渡した callback」と同じく、中身を初期化のコードとしてたどる (出口を呼んでいれば '<init>' の
+//     呼び出し点になる)。
 //   - forwarder の出口の呼び出し点は、同じ宣言の中で、出口より前にゲートを呼ぶ。ゲートと同じ名前を同じ top-level の文の
 //     中で宣言し直している (局所の関数・変数・引数。どの scope かは見ない) ときは、ゲートの呼び出しとみなさない。
 //   - それ以外の出口の呼び出し点は、理由つきの allowlist に載っている。
