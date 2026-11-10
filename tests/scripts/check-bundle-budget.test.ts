@@ -3,10 +3,11 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const SCRIPT = resolve('./scripts/check-bundle-budget.mjs');
-const PAY_ROW = '├ ● /[locale]/pay                                 10.3 kB         426 kB';
-const TIP_ROW = '├ ƒ /[locale]/tip/[address]                       12.5 kB         421 kB';
-const MANIFEST_ROW = '├ ○ /manifest.webmanifest                           620 B         194 kB';
-const SHARED_ROW = '+ First Load JS shared by all                      193 kB';
+const PAY_ROW = '├ ● /[locale]/pay                                 10.3 kB         408 kB';
+const TIP_ROW = '├ ƒ /[locale]/tip/[address]                       12.5 kB         401 kB';
+const CHECKOUT_ROW = '├ ● /[locale]/checkout                            20.2 kB         427 kB';
+const MANIFEST_ROW = '├ ○ /manifest.webmanifest                           620 B         171 kB';
+const SHARED_ROW = '+ First Load JS shared by all                      171 kB';
 
 // 2026-10-30 第 8 回レビュー F-11 で足した /[locale] のページと、その実測 (main b90757b9 の CI の Route 表・kB)。
 // 予算は実測 + 5。表に無い route は 300 kB を超えるまで落ちなかったので、/[locale] のページを全部載せた。
@@ -76,28 +77,31 @@ const BUDGETED = [
 // 予算対象・子ルート・予算外の軽い route (API・metadata)・共有チャンク・Middleware の行を元の表記のまま残す。
 // F-11 で足した 33 ページの行は main b90757b9 の CI の Route 表から取った (guide/qr・orders/hall はその値に置き換えた。/news は
 // 2026-11-07 に本文を client に入れなくした後の手元の実測 238 kB)。
+// 2026-11-11 第 10 回レビュー F-10 で予算を採り直した 17 行 (/_not-found・/[locale]・[handle]・agent・billing・checkout・create・
+// discovery・discovery/arc-payout・history・order・scan・store・pay・tip・manifest・共有 chunk) の First Load JS は、
+// main e089ba5a の CI の Route 表の値に置き換えた (Size の列と API・metadata の行は元のまま)。
 // /pay と /tip は予算ちょうどの値にして「上限は通る」を固定する。
 const NORMAL_BUILD_OUTPUT = `
 Route (app)                                          Size  First Load JS
-┌ ○ /_not-found                                   1.16 kB         195 kB
+┌ ○ /_not-found                                   1.16 kB         172 kB
 ├ ƒ /.well-known/x402                               621 B         194 kB
-├ ● /[locale]                                     9.51 kB         268 kB
+├ ● /[locale]                                     9.51 kB         250 kB
 ├   ├ /ja
 ├   └ /en
-├ ƒ /[locale]/[handle]                              25 kB         459 kB
+├ ƒ /[locale]/[handle]                              25 kB         442 kB
 ├ ● /[locale]/admin/billing                       5.68 kB         259 kB
-├ ● /[locale]/agent                               19.7 kB         322 kB
+├ ● /[locale]/agent                               19.7 kB         302 kB
 ├   ├ /ja/agent
 ├   └ /en/agent
-├ ● /[locale]/billing                             12.4 kB         331 kB
-├ ● /[locale]/checkout                            20.2 kB         431 kB
+├ ● /[locale]/billing                             12.4 kB         312 kB
+${CHECKOUT_ROW}
 ├   ├ /ja/checkout
 ├   └ /en/checkout
-├ ● /[locale]/create                              44.3 kB         364 kB
+├ ● /[locale]/create                              44.3 kB         348 kB
 ├ ● /[locale]/directory                           3.16 kB         236 kB
 ├ ● /[locale]/disclaimer                          1.83 kB         214 kB
-├ ● /[locale]/discovery                           28.3 kB         310 kB
-├ ● /[locale]/discovery/arc-payout                21.8 kB         377 kB
+├ ● /[locale]/discovery                           28.3 kB         292 kB
+├ ● /[locale]/discovery/arc-payout                21.8 kB         356 kB
 ├ ● /[locale]/experimental/cross-chain-demo       18.2 kB         357 kB
 ├ ● /[locale]/explore                             9.76 kB         243 kB
 ├ ● /[locale]/guide                               2.46 kB         236 kB
@@ -114,13 +118,13 @@ Route (app)                                          Size  First Load JS
 ├ ● /[locale]/guide/start                           427 B         237 kB
 ├ ● /[locale]/guide/store                         2.23 kB         239 kB
 ├ ● /[locale]/guide/wallet                          427 B         237 kB
-├ ● /[locale]/history                               35 kB         407 kB
+├ ● /[locale]/history                               35 kB         389 kB
 ├ ● /[locale]/kit                                 2.76 kB         236 kB
 ├ ● /[locale]/license-terms/directory-v1          2.46 kB         236 kB
 ├ ● /[locale]/license-terms/standard-v1           2.46 kB         236 kB
 ├ ● /[locale]/me                                  4.16 kB         237 kB
 ├ ● /[locale]/news                                4.33 kB         238 kB
-├ ● /[locale]/order                               9.47 kB         366 kB
+├ ● /[locale]/order                               9.47 kB         349 kB
 ├ ● /[locale]/order/status                        4.72 kB         201 kB
 ├ ● /[locale]/orders/hall                           358 B         260 kB
 ├ ● /[locale]/orders/kitchen                        357 B         260 kB
@@ -130,8 +134,8 @@ ${PAY_ROW}
 ├   └ /en/pay
 ├ ● /[locale]/pricing                             4.94 kB         238 kB
 ├ ● /[locale]/privacy                             1.93 kB         215 kB
-├ ● /[locale]/scan                                17.4 kB         388 kB
-├ ● /[locale]/store                               5.38 kB         259 kB
+├ ● /[locale]/scan                                17.4 kB         370 kB
+├ ● /[locale]/store                               5.38 kB         239 kB
 ├ ● /[locale]/store/library                       15.9 kB         257 kB
 ├ ƒ /[locale]/store/seller/[address]              2.52 kB         236 kB
 ├ ● /[locale]/terms                               1.93 kB         215 kB
@@ -172,12 +176,26 @@ describe('check-bundle-budget CLI', () => {
     expect(result.status).toBe(0);
     expect(result.stderr).toBe('');
     expect(result.stdout.match(/\[OK\]/g)).toHaveLength(BUDGETED.length);
-    expect(result.stdout).toContain('[OK] /manifest.webmanifest: 194 kB / 予算 199 kB');
-    expect(result.stdout).toContain('[OK] /[locale]/pay: 426 kB / 予算 426 kB');
-    expect(result.stdout).toContain('[OK] /[locale]/tip/[address]: 421 kB / 予算 421 kB');
+    expect(result.stdout).toContain('[OK] /manifest.webmanifest: 171 kB / 予算 176 kB');
+    expect(result.stdout).toContain('[OK] /[locale]/pay: 408 kB / 予算 408 kB');
+    expect(result.stdout).toContain('[OK] /[locale]/tip/[address]: 401 kB / 予算 401 kB');
+    expect(result.stdout).toContain('[OK] /[locale]/checkout: 427 kB / 予算 432 kB');
     expect(result.stdout).toContain('OK: 全ルートが予算内');
     // 予算表の外の API・metadata の route (/.well-known/x402・/api/relay/jpyc・/sitemap.xml) は出さない
     expect(result.stdout).not.toContain('[NO BUDGET]');
+  });
+
+  // 第 10 回レビュー F-10 (Codex): 見本の /checkout が CI の実測 427 kB と違う 409 kB だと、予算を誤って 410 に下げても
+  // 見本は通り、本番の build だけが落ちる。見本を実測にそろえ、予算 432 kB の境界 (432 は通る・433 は落ちる) を固定する。
+  it.each([
+    ['432 kB', 0, 'OK', '432'],
+    ['432001 B', 1, 'OVER', '432.001'],
+    ['433 kB', 1, 'OVER', '433'],
+  ])('enforces the /[locale]/checkout budget of 432 kB at %s', (size, status, label, expectedKb) => {
+    const result = runGate(NORMAL_BUILD_OUTPUT.replace(CHECKOUT_ROW, `├ ● /[locale]/checkout   20.2 kB   ${size}`));
+
+    expect(result.status).toBe(status);
+    expect(result.stdout).toContain(`[${label}] /[locale]/checkout: ${expectedKb} kB / 予算 432 kB`);
   });
 
   // 第 8 回レビュー F-11: 予算表に無い route は 300 kB を超えるまで落ちなかった (/store/library が 257→290 kB でも通る)。
@@ -200,14 +218,15 @@ describe('check-bundle-budget CLI', () => {
   });
 
   // 第 7 回レビュー E22/F2: 顧客の支払い導線・主要画面が予算の外にあった。表に載っていることを固定する。
+  // 予算は 2026-11-11 (第 10 回レビュー F-10) に main e089ba5a の CI の実測 + 5 へ採り直した値。
   it.each([
-    ['/[locale]/order', 371],
-    ['/[locale]/scan', 393],
-    ['/[locale]/history', 412],
-    ['/[locale]/store', 264],
-    ['/[locale]/billing', 336],
-    ['/[locale]/discovery', 315],
-    ['/[locale]/discovery/arc-payout', 382],
+    ['/[locale]/order', 354],
+    ['/[locale]/scan', 375],
+    ['/[locale]/history', 394],
+    ['/[locale]/store', 244],
+    ['/[locale]/billing', 317],
+    ['/[locale]/discovery', 297],
+    ['/[locale]/discovery/arc-payout', 361],
   ])('budgets %s at %i kB (measured + 5)', (route, budget) => {
     const result = runGate(NORMAL_BUILD_OUTPUT);
     expect(result.stdout).toContain(`[OK] ${route}: `);
@@ -249,18 +268,18 @@ describe('check-bundle-budget CLI', () => {
     const withHeader = (output: string) => output.replace('Route (app)                                          Size  First Load JS', ISR_HEADER);
 
     it('reads a budgeted ISR route within budget', () => {
-      const result = runGate(withHeader(NORMAL_BUILD_OUTPUT).replace(PAY_ROW, '├ ◐ /[locale]/pay                                 10.3 kB         426 kB          5m      1y'));
+      const result = runGate(withHeader(NORMAL_BUILD_OUTPUT).replace(PAY_ROW, '├ ◐ /[locale]/pay                                 10.3 kB         408 kB          5m      1y'));
 
       expect(result.status).toBe(0);
-      expect(result.stdout).toContain('[OK] /[locale]/pay: 426 kB / 予算 426 kB');
+      expect(result.stdout).toContain('[OK] /[locale]/pay: 408 kB / 予算 408 kB');
       expect(result.stdout).not.toContain('[MISSING]');
     });
 
     it('fails a budgeted ISR route over budget', () => {
-      const result = runGate(withHeader(NORMAL_BUILD_OUTPUT).replace(PAY_ROW, '├ ◐ /[locale]/pay                                 10.3 kB         427 kB          1h      1y'));
+      const result = runGate(withHeader(NORMAL_BUILD_OUTPUT).replace(PAY_ROW, '├ ◐ /[locale]/pay                                 10.3 kB         409 kB          1h      1y'));
 
       expect(result.status).toBe(1);
-      expect(result.stdout).toContain('[OVER] /[locale]/pay: 427 kB / 予算 426 kB');
+      expect(result.stdout).toContain('[OVER] /[locale]/pay: 409 kB / 予算 408 kB');
     });
 
     it('fails an unbudgeted ISR route above 300 kB', () => {
@@ -271,10 +290,10 @@ describe('check-bundle-budget CLI', () => {
     });
 
     it('still takes First Load JS (the second size), not the Size column, on plain rows', () => {
-      const result = runGate(NORMAL_BUILD_OUTPUT.replace(PAY_ROW, '├ ● /[locale]/pay                                 427 kB          426 kB'));
+      const result = runGate(NORMAL_BUILD_OUTPUT.replace(PAY_ROW, '├ ● /[locale]/pay                                 409 kB          408 kB'));
 
       expect(result.status).toBe(0);
-      expect(result.stdout).toContain('[OK] /[locale]/pay: 426 kB / 予算 426 kB');
+      expect(result.stdout).toContain('[OK] /[locale]/pay: 408 kB / 予算 408 kB');
     });
 
     it('does not count shared chunk file rows (one size, no route) as routes', () => {
@@ -289,18 +308,18 @@ describe('check-bundle-budget CLI', () => {
   // MIN_DURATION)。この注記を許容しないと、注記付きの予算対象は [MISSING]・予算外の重い route は素通りになる (Codex #789 2 回目 P2)。
   describe('rows with a generation-time note after the route name', () => {
     it('reads a budgeted route with a note within budget', () => {
-      const result = runGate(NORMAL_BUILD_OUTPUT.replace(PAY_ROW, '├ ● /[locale]/pay (301 ms)                        10.3 kB         426 kB'));
+      const result = runGate(NORMAL_BUILD_OUTPUT.replace(PAY_ROW, '├ ● /[locale]/pay (301 ms)                        10.3 kB         408 kB'));
 
       expect(result.status).toBe(0);
-      expect(result.stdout).toContain('[OK] /[locale]/pay: 426 kB / 予算 426 kB');
+      expect(result.stdout).toContain('[OK] /[locale]/pay: 408 kB / 予算 408 kB');
       expect(result.stdout).not.toContain('[MISSING]');
     });
 
     it('fails a budgeted route with a note over budget', () => {
-      const result = runGate(NORMAL_BUILD_OUTPUT.replace(PAY_ROW, '├ ● /[locale]/pay (1.2 s)                         10.3 kB         427 kB'));
+      const result = runGate(NORMAL_BUILD_OUTPUT.replace(PAY_ROW, '├ ● /[locale]/pay (1.2 s)                         10.3 kB         409 kB'));
 
       expect(result.status).toBe(1);
-      expect(result.stdout).toContain('[OVER] /[locale]/pay: 427 kB / 予算 426 kB');
+      expect(result.stdout).toContain('[OVER] /[locale]/pay: 409 kB / 予算 408 kB');
     });
 
     it('fails an unbudgeted route with a note above 300 kB', () => {
@@ -311,10 +330,10 @@ describe('check-bundle-budget CLI', () => {
     });
 
     it('reads a note together with ISR columns', () => {
-      const result = runGate(NORMAL_BUILD_OUTPUT.replace(PAY_ROW, '├ ◐ /[locale]/pay (2345 ms)                       10.3 kB         427 kB          5m      1y'));
+      const result = runGate(NORMAL_BUILD_OUTPUT.replace(PAY_ROW, '├ ◐ /[locale]/pay (2345 ms)                       10.3 kB         409 kB          5m      1y'));
 
       expect(result.status).toBe(1);
-      expect(result.stdout).toContain('[OVER] /[locale]/pay: 427 kB / 予算 426 kB');
+      expect(result.stdout).toContain('[OVER] /[locale]/pay: 409 kB / 予算 408 kB');
     });
 
     it('does not count a child path with a note (no sizes) as a route', () => {
@@ -342,10 +361,10 @@ ${SHARED_ROW}
     });
 
     it('fails a budgeted route over budget when it is the only row', () => {
-      const result = runGate(NORMAL_BUILD_OUTPUT.replace(PAY_ROW, '─ ● /[locale]/pay                                 10.3 kB         427 kB'));
+      const result = runGate(NORMAL_BUILD_OUTPUT.replace(PAY_ROW, '─ ● /[locale]/pay                                 10.3 kB         409 kB'));
 
       expect(result.status).toBe(1);
-      expect(result.stdout).toContain('[OVER] /[locale]/pay: 427 kB / 予算 426 kB');
+      expect(result.stdout).toContain('[OVER] /[locale]/pay: 409 kB / 予算 408 kB');
     });
   });
 
@@ -357,10 +376,10 @@ Route (pages)                                        Size  First Load JS
 ─ ○ /legacy-report                                  12 kB         100 kB
 + First Load JS shared by all                      100 kB
 `;
-    const result = runGate(NORMAL_BUILD_OUTPUT.replace(SHARED_ROW, '+ First Load JS shared by all                      199 kB') + pagesTable);
+    const result = runGate(NORMAL_BUILD_OUTPUT.replace(SHARED_ROW, '+ First Load JS shared by all                      177 kB') + pagesTable);
 
     expect(result.status).toBe(1);
-    expect(result.stdout).toContain('[OVER] __shared__: 199 kB / 予算 198 kB');
+    expect(result.stdout).toContain('[OVER] __shared__: 177 kB / 予算 176 kB');
     expect(result.stdout).not.toContain('[OK] __shared__');
   });
 
@@ -368,14 +387,14 @@ Route (pages)                                        Size  First Load JS
     const result = runGate(NORMAL_BUILD_OUTPUT.replace(MANIFEST_ROW, '├ ○ /manifest.webmanifest   0 B   0 B'));
 
     expect(result.status).toBe(0);
-    expect(result.stdout).toContain('[OK] /manifest.webmanifest: 0 kB / 予算 199 kB');
+    expect(result.stdout).toContain('[OK] /manifest.webmanifest: 0 kB / 予算 176 kB');
   });
 
   it('fails an MB-sized route with its converted size, not a missing measurement', () => {
     const result = runGate(NORMAL_BUILD_OUTPUT.replace(PAY_ROW, '├ ƒ /[locale]/pay   12 kB   1.02 MB'));
 
     expect(result.status).toBe(1);
-    expect(result.stdout).toContain('[OVER] /[locale]/pay: 1020 kB / 予算 426 kB');
+    expect(result.stdout).toContain('[OVER] /[locale]/pay: 1020 kB / 予算 408 kB');
     expect(result.stderr).toContain('FAIL:');
     expect(result.stdout).not.toContain('OK: 全ルートが予算内');
   });
@@ -383,15 +402,15 @@ Route (pages)                                        Size  First Load JS
   it.each([
     ['0 B', '0', 0],
     ['999 B', '0.999', 0],
-    ['198 kB', '198', 0],
-    ['199 kB', '199', 1],
+    ['176 kB', '176', 0],
+    ['177 kB', '177', 1],
     ['1.02 MB', '1020', 1],
     ['2.01 MB', '2010', 1],
   ])('checks shared chunks printed as %s', (size, expectedKb, status) => {
     const result = runGate(NORMAL_BUILD_OUTPUT.replace(SHARED_ROW, `+ First Load JS shared by all   ${size}`));
 
     expect(result.status).toBe(status);
-    expect(result.stdout).toContain(`[${status === 0 ? 'OK' : 'OVER'}] __shared__: ${expectedKb} kB / 予算 198 kB`);
+    expect(result.stdout).toContain(`[${status === 0 ? 'OK' : 'OVER'}] __shared__: ${expectedKb} kB / 予算 176 kB`);
   });
 
   it.each(['GB', 'TB', 'PB', 'EB', 'ZB', 'YB'])('recognizes Next.js %s output as over budget', (unit) => {
@@ -403,10 +422,10 @@ Route (pages)                                        Size  First Load JS
   });
 
   it.each([
-    [PAY_ROW, '/[locale]/pay', '426001 B', '426.001', 426],
-    [PAY_ROW, '/[locale]/pay', '427 kB', '427', 426],
-    [TIP_ROW, '/[locale]/tip/[address]', '421001 B', '421.001', 421],
-    [TIP_ROW, '/[locale]/tip/[address]', '422 kB', '422', 421],
+    [PAY_ROW, '/[locale]/pay', '408001 B', '408.001', 408],
+    [PAY_ROW, '/[locale]/pay', '409 kB', '409', 408],
+    [TIP_ROW, '/[locale]/tip/[address]', '401001 B', '401.001', 401],
+    [TIP_ROW, '/[locale]/tip/[address]', '402 kB', '402', 401],
   ])('enforces the tightened budget for %s with %s at %s', (row, route, size, expectedKb, budget) => {
     const result = runGate(NORMAL_BUILD_OUTPUT.replace(row, `├ ƒ ${route}   12 kB   ${size}`));
 
