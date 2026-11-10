@@ -1,7 +1,7 @@
 // components/SalesMoveForm (plans/store-sales-move.md §2.3・P2a): flag OFF の完全 inert・未接続・別チェーン・「全部移す」・
 // 画面での拒否・確認の段の 3 つの額・contract のチェック・成功 / 送信済み / 不成立・開き直したときの照会・文字のコントラスト。
 // hook (hooks/useSalesMove) は実物で通し、境界 (wagmi・fetch・status の照会) だけを差し替える。
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act, fireEvent, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { Address, Hex } from 'viem';
@@ -126,6 +126,8 @@ beforeEach(() => {
   w.readContract.mockImplementation(async () => w.balance.data);
   w.getCode.mockResolvedValue(undefined);
   w.switchStub.error = null;
+  // 前の test が使い残した mockResolvedValueOnce を持ち越さない (1 つの失敗が後ろの test を巻き込まないように)。
+  w.resolveRelayIntent.mockReset();
   w.resolveRelayIntent.mockResolvedValue({ kind: 'unknown' });
   vi.stubGlobal('fetch', fetchMock);
 });
@@ -316,6 +318,139 @@ describe('SalesMoveForm: 確認と結果', () => {
     expect(screen.getByRole('link', { name: `${m.viewTx} ↗` })).toHaveAttribute('href', txExplorerUrl(CHAIN, TX));
   });
 
+  // 第 10 回レビュー G-2: 202 の後、同じ画面で hook が status を照会して結果へ進める。
+  async function signOnce() {
+    renderForm();
+    await toReview();
+    await waitFor(() => expect(screen.getByRole('button', { name: m.signButton })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: m.signButton }));
+  }
+
+  it('送信済み・未確定 (202) → 照会で成立が分かれば、開き直さずに「移しました」になる', async () => {
+    replies = [{ status: 202, body: { ok: false, pending: true, txHash: TX } }];
+    let settle: (v: unknown) => void = () => undefined;
+    w.resolveRelayIntent.mockReturnValueOnce(new Promise((resolve) => (settle = resolve)));
+    await signOnce();
+    // 照会の間: 送信済みの表示だけ (署名のボタンも「もう一度確かめる」も出さない)。
+    expect(await screen.findByText(m.pending)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: m.signButton })).toBeNull();
+    expect(screen.queryByRole('button', { name: m.recheck })).toBeNull();
+    expect(screen.queryByText(m.success)).toBeNull();
+
+    await act(async () => settle({ kind: 'settled', txHash: TX, success: true }));
+    expect(await screen.findByText(m.success)).toBeInTheDocument();
+    expect(screen.queryByText(m.pending)).toBeNull();
+    expect(screen.getByRole('link', { name: `${m.viewTx} ↗` })).toHaveAttribute('href', txExplorerUrl(CHAIN, TX));
+    expect(screen.queryByRole('button', { name: m.signButton })).toBeNull();
+    expect(w.signTypedData).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('送信済み・未確定 (202) → 照会で revert が分かれば、成立しなかったと知らせ、もう一度署名できる', async () => {
+    replies = [{ status: 202, body: { ok: false, pending: true, txHash: TX } }];
+    w.resolveRelayIntent.mockResolvedValueOnce({ kind: 'settled', txHash: TX, success: false });
+    await signOnce();
+    expect(await screen.findByText(m.reverted)).toBeInTheDocument();
+    expect(screen.queryByText(m.pending)).toBeNull();
+    expect(screen.getByRole('button', { name: m.signButton })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: m.signButton }));
+    expect(await screen.findByText(m.success)).toBeInTheDocument();
+    expect(w.signTypedData).toHaveBeenCalledTimes(2);
+  });
+
+  it('送信済み・未確定 (202) → 照会を打ち切った後は「もう一度確かめる」だけを出す (署名のボタンは出さない)。押すと照会だけをする', async () => {
+    replies = [{ status: 202, body: { ok: false, pending: true, txHash: TX } }];
+    await signOnce();
+    const recheck = await screen.findByRole('button', { name: m.recheck });
+    expect(screen.getByText(m.pending)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: m.signButton })).toBeNull();
+    expect(screen.queryByRole('button', { name: m.reviewButton })).toBeNull();
+    expect(w.resolveRelayIntent).toHaveBeenCalledTimes(1);
+
+    // 押している間 (照会中) はボタンを引っ込める。分からなければまた出す。
+    let finish: (v: unknown) => void = () => undefined;
+    w.resolveRelayIntent.mockReturnValueOnce(new Promise((resolve) => (finish = resolve)));
+    fireEvent.click(recheck);
+    await waitFor(() => expect(screen.queryByRole('button', { name: m.recheck })).toBeNull());
+    expect(screen.getByText(m.pending)).toBeInTheDocument();
+    await act(async () => finish({ kind: 'unknown' }));
+    expect(await screen.findByRole('button', { name: m.recheck })).toBeInTheDocument();
+    expect(w.resolveRelayIntent).toHaveBeenCalledTimes(2);
+
+    w.resolveRelayIntent.mockResolvedValueOnce({ kind: 'settled', txHash: TX, success: true });
+    fireEvent.click(screen.getByRole('button', { name: m.recheck }));
+    expect(await screen.findByText(m.success)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: m.recheck })).toBeNull();
+    expect(w.resolveRelayIntent).toHaveBeenCalledTimes(3);
+    // 照会の間も、打ち切りの後も、署名・POST は最初の 1 回だけ。
+    expect(w.signTypedData).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('en でも「Check again」を出す', async () => {
+    replies = [{ status: 202, body: { ok: false, pending: true, txHash: TX } }];
+    renderForm('en');
+    fireEvent.change(screen.getByLabelText(en.Create.salesMove.destinationLabel), { target: { value: DEST } });
+    fireEvent.change(screen.getByLabelText(en.Create.salesMove.amountLabel), { target: { value: '5' } });
+    fireEvent.click(screen.getByRole('button', { name: en.Create.salesMove.reviewButton }));
+    await waitFor(() => expect(screen.getByRole('button', { name: en.Create.salesMove.signButton })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: en.Create.salesMove.signButton }));
+    expect(await screen.findByRole('button', { name: en.Create.salesMove.recheck })).toBeInTheDocument();
+    expect(screen.getByText(en.Create.salesMove.pending)).toBeInTheDocument();
+  });
+
+  // 第 10 回レビュー G-1: 復旧の枠を書けない端末では送らずに、専用の文言で知らせる。
+  describe('この端末に枠を書けないとき', () => {
+    let spy: ReturnType<typeof vi.spyOn> | undefined;
+    afterEach(() => {
+      spy?.mockRestore();
+      spy = undefined;
+    });
+    function breakSessionWrites(when: (key: string) => boolean) {
+      const real = Storage.prototype.setItem;
+      spy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key: string, value: string) {
+        if (this === window.sessionStorage && when(key)) {
+          throw new DOMException('The quota has been exceeded.', 'QuotaExceededError');
+        }
+        real.call(this, key, value);
+      });
+    }
+
+    it('署名を求めずに止め、「保存できないため、移せません」を出す (送信済みの表示にはしない)', async () => {
+      breakSessionWrites(() => true);
+      await signOnce();
+      expect(await screen.findByRole('alert')).toHaveTextContent(m.errors.storageUnavailable);
+      expect(screen.queryByText(m.pending)).toBeNull();
+      expect(screen.queryByText(m.errors.unavailable)).toBeNull();
+      expect(screen.queryByText(m.errors.generic)).toBeNull();
+      expect(w.signTypedData).not.toHaveBeenCalled();
+      expect(fetchMock).not.toHaveBeenCalled();
+      // 入力には戻れる (保持は無い)。
+      expect(screen.getByRole('button', { name: m.backButton })).toBeEnabled();
+    });
+
+    it('署名の後に枠を書けなかったときも、送らずに同じ文言を出す', async () => {
+      breakSessionWrites((key) => key === SALES_MOVE_INTENT_STORAGE_KEY);
+      await signOnce();
+      expect(await screen.findByRole('alert')).toHaveTextContent(m.errors.storageUnavailable);
+      expect(w.signTypedData).toHaveBeenCalledTimes(1);
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(screen.queryByText(m.pending)).toBeNull();
+      expect(screen.getByRole('button', { name: m.backButton })).toBeEnabled();
+    });
+
+    it('en の文言', async () => {
+      breakSessionWrites(() => true);
+      renderForm('en');
+      fireEvent.change(screen.getByLabelText(en.Create.salesMove.destinationLabel), { target: { value: DEST } });
+      fireEvent.change(screen.getByLabelText(en.Create.salesMove.amountLabel), { target: { value: '5' } });
+      fireEvent.click(screen.getByRole('button', { name: en.Create.salesMove.reviewButton }));
+      await waitFor(() => expect(screen.getByRole('button', { name: en.Create.salesMove.signButton })).toBeEnabled());
+      fireEvent.click(screen.getByRole('button', { name: en.Create.salesMove.signButton }));
+      expect(await screen.findByRole('alert')).toHaveTextContent(en.Create.salesMove.errors.storageUnavailable);
+    });
+  });
+
   it('応答不明: 送信済みかもしれない表示にし、もう一度署名させない', async () => {
     replies = [{ network: true }];
     renderForm();
@@ -416,9 +551,17 @@ describe('SalesMoveForm: 開き直したときの照会', () => {
     renderForm();
     expect(await screen.findByText(m.pending)).toBeInTheDocument();
     expect(screen.queryByLabelText(m.destinationLabel)).toBeNull();
+    // 照会の間は「もう一度確かめる」を出さない。
+    expect(screen.queryByRole('button', { name: m.recheck })).toBeNull();
     await act(async () => finish({ kind: 'unknown' }));
     expect(screen.getByText(m.pending)).toBeInTheDocument();
     expect(screen.queryByLabelText(m.destinationLabel)).toBeNull();
+    // 打ち切りの後は「もう一度確かめる」で、開き直さずに結果を確かめられる (第 10 回レビュー G-2・照会だけ)。
+    w.resolveRelayIntent.mockResolvedValueOnce({ kind: 'settled', txHash: TX, success: true });
+    fireEvent.click(screen.getByRole('button', { name: m.recheck }));
+    expect(await screen.findByText(m.success)).toBeInTheDocument();
+    expect(w.signTypedData).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('期限切れで使われなかった枠なら、何も出さずに入力を出す', async () => {
@@ -487,6 +630,43 @@ describe('SalesMoveForm: 文字のコントラスト (WCAG 2.2 AA)', () => {
     await screen.findByText(m.success);
     const { failures } = auditAllStates(screen.getByTestId('sales-move'));
     expect(failures).toEqual([]);
+  });
+
+  it('送信済みの表示と「もう一度確かめる」(照会を打ち切った後)', async () => {
+    replies = [{ status: 202, body: { ok: false, pending: true, txHash: TX } }];
+    renderForm();
+    await toReview();
+    await waitFor(() => expect(screen.getByRole('button', { name: m.signButton })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: m.signButton }));
+    await screen.findByRole('button', { name: m.recheck });
+    const { failures, checked, boundaries } = auditAllStates(screen.getByTestId('sales-move'));
+    expect(failures).toEqual([]);
+    expect(checked.filter((c) => c.state === 'base').map((c) => c.text)).toEqual(
+      expect.arrayContaining([m.pending, m.recheck]),
+    );
+    expect(boundaries.map((b) => b.text)).toContain(m.recheck);
+    // 押せるものは 44px (min-h-11)。
+    expect(screen.getByRole('button', { name: m.recheck }).className).toContain('min-h-11');
+  });
+
+  it('枠を書けないときの文言 (確認の段のエラー)', async () => {
+    const real = Storage.prototype.setItem;
+    const spy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key: string, value: string) {
+      if (this === window.sessionStorage) throw new DOMException('The quota has been exceeded.', 'QuotaExceededError');
+      real.call(this, key, value);
+    });
+    try {
+      renderForm();
+      await toReview();
+      await waitFor(() => expect(screen.getByRole('button', { name: m.signButton })).toBeEnabled());
+      fireEvent.click(screen.getByRole('button', { name: m.signButton }));
+      await screen.findByText(m.errors.storageUnavailable);
+      const { failures, checked } = auditAllStates(screen.getByTestId('sales-move'));
+      expect(failures).toEqual([]);
+      expect(checked.filter((c) => c.state === 'base').map((c) => c.text)).toContain(m.errors.storageUnavailable);
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it('別のチェーン (切り替えのボタン)', () => {

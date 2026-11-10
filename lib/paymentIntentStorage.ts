@@ -473,3 +473,27 @@ export function saveSalesMoveIntent(intent: SalesMoveIntentMetadata): void {
 export function clearSalesMoveIntent(): void {
   clear(SALES_MOVE_INTENT_STORAGE_KEY);
 }
+
+// 署名を求める前の確かめ (第 10 回レビュー G-1)。枠と同じ中身を別のキーに書き、読み戻して消す。
+// 何の波及を断つか: 枠を書けない端末 (サイトのデータの保存を止めている・容量が一杯) で署名させてから「移せません」と
+// 止めること (無駄な署名)。枠そのもののキーには書かない: 署名の前に枠を残すと、ウォレットの署名を取りやめて開き直した
+// 画面が、送っていない移動を「送信済みかもしれない」として署名の期限が証明されるまで塞ぐ。
+// 送ってよいかを決めるのはこの確かめではなく、署名の後に枠そのものを書いて読み戻す確かめ (hooks/useSalesMove の send)。
+// 署名を待つ間に保存できなくなる端末を、この確かめは見つけられない。
+export const SALES_MOVE_INTENT_PROBE_KEY = 'openpay:move-intent:probe';
+
+export function canStoreSalesMoveIntent(intent: SalesMoveIntentMetadata): boolean {
+  try {
+    // 枠と同じ whitelist を通した中身 (署名や将来のフィールドを書かない・枠と同じ長さ)。
+    const record = parseSalesMoveIntent(intent);
+    if (!record) return false;
+    const raw = JSON.stringify(record);
+    window.sessionStorage.setItem(SALES_MOVE_INTENT_PROBE_KEY, raw);
+    const stored = window.sessionStorage.getItem(SALES_MOVE_INTENT_PROBE_KEY);
+    window.sessionStorage.removeItem(SALES_MOVE_INTENT_PROBE_KEY);
+    return stored === raw;
+  } catch {
+    // 書けない・読めない・消せない端末。呼出側 (売上の移動) が署名の前に止めて、画面で知らせる (握りつぶさない)。
+    return false;
+  }
+}

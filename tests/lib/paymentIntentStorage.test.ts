@@ -2,8 +2,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Address, Hex } from 'viem';
 import {
   RELAY_INTENT_STORAGE_KEY,
+  SALES_MOVE_INTENT_PROBE_KEY,
   SALES_MOVE_INTENT_STORAGE_KEY,
   STANDARD_INTENT_STORAGE_KEY,
+  canStoreSalesMoveIntent,
   clearRelayIntent,
   clearSalesMoveIntent,
   loadRelayIntent,
@@ -380,5 +382,71 @@ describe('sales move intent sessionStorage', () => {
       throw new Error('SecurityError');
     });
     expect(() => clearSalesMoveIntent()).not.toThrow();
+  });
+});
+
+// 第 10 回レビュー G-1: 署名を求める前に、枠と同じ中身を書いて読み戻せるかを確かめる (売上の移動だけが使う)。
+describe('sales move intent: 署名の前の確かめ (canStoreSalesMoveIntent)', () => {
+  it('書けて読み戻せる端末では true。枠のキーには書かず、確かめのキーも残さない', () => {
+    expect(SALES_MOVE_INTENT_PROBE_KEY).not.toBe(SALES_MOVE_INTENT_STORAGE_KEY);
+    const written: [string, string][] = [];
+    const real = Storage.prototype.setItem;
+    const spy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key: string, value: string) {
+      written.push([key, value]);
+      real.call(this, key, value);
+    });
+    expect(canStoreSalesMoveIntent(salesMoveIntent())).toBe(true);
+    spy.mockRestore();
+    // 書いたのは確かめのキーに 1 回・中身は枠と同じ (同じ長さ = 枠が入る余地を確かめている)。
+    expect(written).toEqual([[SALES_MOVE_INTENT_PROBE_KEY, JSON.stringify(salesMoveIntent())]]);
+    expect(window.sessionStorage.length).toBe(0);
+    expect(loadSalesMoveIntent()).toBeNull();
+  });
+
+  it('未解決の移動の枠があっても、その枠に触れない', () => {
+    saveSalesMoveIntent(salesMoveIntent());
+    const other = { ...salesMoveIntent(), nonce: `0x${'9'.repeat(64)}` as Hex };
+    expect(canStoreSalesMoveIntent(other)).toBe(true);
+    expect(loadSalesMoveIntent()).toEqual(salesMoveIntent());
+  });
+
+  it('署名や余分な field は確かめのキーにも書かない', () => {
+    const real = Storage.prototype.setItem;
+    let raw = '';
+    const spy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key: string, value: string) {
+      raw = value;
+      real.call(this, key, value);
+    });
+    expect(
+      canStoreSalesMoveIntent({ ...salesMoveIntent(), signature: SIGNATURE } as SalesMoveIntentMetadata & { signature: Hex }),
+    ).toBe(true);
+    spy.mockRestore();
+    expect(raw).not.toContain(SIGNATURE);
+    expect(JSON.parse(raw)).toEqual(salesMoveIntent());
+  });
+
+  it('書き込みが throw する端末 (容量超過・保存の禁止) では false (throw しない)', () => {
+    const spy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new DOMException('The quota has been exceeded.', 'QuotaExceededError');
+    });
+    expect(canStoreSalesMoveIntent(salesMoveIntent())).toBe(false);
+    spy.mockRestore();
+  });
+
+  it('書いたものが読み戻せない端末 (投げずに捨てる・読むと throw) では false', () => {
+    const dropped = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => undefined);
+    expect(canStoreSalesMoveIntent(salesMoveIntent())).toBe(false);
+    dropped.mockRestore();
+
+    const unreadable = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new Error('SecurityError');
+    });
+    expect(canStoreSalesMoveIntent(salesMoveIntent())).toBe(false);
+    unreadable.mockRestore();
+  });
+
+  it('枠として読めない形 (読み戻しても復元できない) は false', () => {
+    expect(canStoreSalesMoveIntent({ ...salesMoveIntent(), nonce: '0x1234' as Hex })).toBe(false);
+    expect(window.sessionStorage.length).toBe(0);
   });
 });

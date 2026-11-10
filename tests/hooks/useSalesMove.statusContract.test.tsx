@@ -149,6 +149,7 @@ beforeEach(() => {
   h.signTypedData.mockResolvedValue(SIGNATURE);
   h.readContract.mockResolvedValue(1_000n * 10n ** 18n);
   h.publicClient.getCode.mockResolvedValue(undefined);
+  h.publicClient.waitForTransactionReceipt.mockReset();
   vi.stubGlobal('fetch', fetchMock);
 });
 
@@ -162,11 +163,16 @@ describe('useSalesMove × status route の約束', () => {
     const view = renderHook(() => useSalesMove(DEPLOYMENT, LABELS), { wrapper: wrapper() });
     const first = await pressAndWait(view);
     expect(first.result).toEqual({ txHash: TX, success: false, pending: true });
+    // 202 の後、同じ画面でも照会の部品が締め切りまで読み続けた (3・9・21・45・90 秒の 5 回・第 10 回レビュー G-2)。
+    // indeterminate のままなので、結果は送信済み (pending) のまま。
+    expect(statusBodies).toHaveLength(5);
+    expect(view.result.current.result).toEqual({ txHash: TX, success: false, pending: true });
+    expect(view.result.current.isRecovering).toBe(false);
 
     const second = await pressAndWait(view);
     expect(isRelayResponseUnknownError(second.error)).toBe(true);
-    // 照会の部品が締め切りまで読み続けた (3・9・21・45・90 秒の 5 回)。中身は nonce の照会 (recover の形の公開 metadata)。
-    expect(statusBodies).toHaveLength(5);
+    // 押した分の照会がもう 5 回 (G-2 より前は、ここが最初の照会で合計 5 回だった)。中身は nonce の照会 (recover の形の公開 metadata)。
+    expect(statusBodies).toHaveLength(10);
     expect(statusBodies[0]).toEqual({
       lookup: 'nonce',
       chainId: CHAIN,
@@ -181,6 +187,71 @@ describe('useSalesMove × status route の約束', () => {
     expect(h.signTypedData).toHaveBeenCalledTimes(1);
     expect(movePosts()).toBe(1);
     view.unmount();
+  });
+
+  it('202 pending の後、status が settled を返したら、押さず・開き直さずに成功になる (第 10 回レビュー G-2)', async () => {
+    moveReplies = [{ status: 202, body: { ok: false, pending: true, txHash: TX } }];
+    statusQueue = [INDETERMINATE, { ok: true, state: 'settled', txHash: TX }];
+    h.publicClient.waitForTransactionReceipt.mockResolvedValue({ status: 'success' });
+    const view = renderHook(() => useSalesMove(DEPLOYMENT, LABELS), { wrapper: wrapper() });
+    act(() => {
+      view.result.current.move({ destination: DEST, amount: AMOUNT });
+    });
+    await advance(0);
+    expect(view.result.current.result).toEqual({ txHash: TX, success: false, pending: true });
+    expect(view.result.current.isRecovering).toBe(true);
+    expect(statusBodies).toHaveLength(0);
+
+    // 1 回目の照会 (3 秒後) は indeterminate: 送信済みのまま。
+    await advance(3_000);
+    expect(statusBodies).toHaveLength(1);
+    expect(view.result.current.result?.pending).toBe(true);
+
+    // 2 回目の照会 (さらに 6 秒後) で成立: receipt を確かめて成功へ。
+    await advance(6_000);
+    expect(statusBodies).toHaveLength(2);
+    expect(statusBodies[1]).toEqual({
+      lookup: 'nonce',
+      chainId: CHAIN,
+      from: FROM,
+      nonce: h.signTypedData.mock.calls[0][0].message.nonce,
+      validBefore: h.signTypedData.mock.calls[0][0].message.validBefore.toString(),
+    });
+    expect(h.publicClient.waitForTransactionReceipt).toHaveBeenCalledWith(expect.objectContaining({ hash: TX }));
+    expect(view.result.current.result).toEqual({ txHash: TX, success: true });
+    expect(view.result.current.isRecovering).toBe(false);
+    expect(view.result.current.held).toBeNull();
+    expect(savedIntent()).toBeNull();
+    // 終端の後は読まない。署名・POST は最初の 1 回だけ。
+    await advance(PAST_DEADLINE_MS);
+    expect(statusBodies).toHaveLength(2);
+    expect(h.signTypedData).toHaveBeenCalledTimes(1);
+    expect(movePosts()).toBe(1);
+    view.unmount();
+  });
+
+  it('202 pending の後の照会の間に unmount したら、照会をやめる。枠は残り、開き直した画面が続きを照会する', async () => {
+    moveReplies = [{ status: 202, body: { ok: false, pending: true, txHash: TX } }];
+    const view = renderHook(() => useSalesMove(DEPLOYMENT, LABELS), { wrapper: wrapper() });
+    act(() => {
+      view.result.current.move({ destination: DEST, amount: AMOUNT });
+    });
+    await advance(3_000);
+    expect(statusBodies).toHaveLength(1);
+    view.unmount();
+    await advance(PAST_DEADLINE_MS);
+    expect(statusBodies).toHaveLength(1);
+    expect(savedIntent()).not.toBeNull();
+
+    statusDefault = { ok: true, state: 'settled', txHash: TX };
+    h.publicClient.waitForTransactionReceipt.mockResolvedValue({ status: 'success' });
+    const reopened = renderHook(() => useSalesMove(DEPLOYMENT, LABELS), { wrapper: wrapper() });
+    await advance(3_000);
+    expect(reopened.result.current.result).toEqual({ txHash: TX, success: true });
+    expect(savedIntent()).toBeNull();
+    expect(h.signTypedData).toHaveBeenCalledTimes(1);
+    expect(movePosts()).toBe(1);
+    reopened.unmount();
   });
 
   it('開き直したとき: indeterminate の間はロックのまま。記録が消えて期限切れ未使用が証明されたら入力に戻り、新しい署名を許す', async () => {
