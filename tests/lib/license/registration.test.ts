@@ -34,6 +34,13 @@ describe('registration gate', () => {
     h.rpc.readContract.mockResolvedValueOnce({ exists: true, maxSupply: 9n, transferable: false, definitionHash: d.definitionHash }); expect(await confirmLicenseRegistration(ID, HASH)).toBe('conflict');
     h.rpc.getTransactionReceipt.mockResolvedValueOnce({ status: 'success', transactionHash: HASH, blockNumber: 10n, blockHash: HASH, logs: [] }); expect(await confirmLicenseRegistration(ID, HASH)).toBe('conflict'); expect(h.kvEval).not.toHaveBeenCalled();
   });
+  // 第 10 回レビュー B3-2: CAS の 0 (読んだ後に商品の record が変わった) は不一致ではない。conflict にすると worker が
+  // 修復待ち (needs_repair) にして、登録済みの商品が登録待ちのまま固まる。保留にして次の run が読み直す。
+  it('a lost CAS (the product changed during the RPC checks) is pending, not conflict; a KV failure stays storage', async () => {
+    h.kvEval.mockResolvedValueOnce({ ok: true, value: 0 }); expect(await confirmLicenseRegistration(ID, HASH)).toBe('pending');
+    h.kvEval.mockResolvedValueOnce({ ok: false, reason: 'network_error' }); expect(await confirmLicenseRegistration(ID, HASH)).toBe('storage');
+    expect(await confirmLicenseRegistration(ID, HASH)).toBe('registered');
+  });
   it('OFF performs no storage or RPC work', async () => {
     h.enabled = false; expect(await confirmLicenseRegistration(ID, HASH)).toBe('pending'); expect(h.snapshot).not.toHaveBeenCalled(); expect(h.rpc.getBlock).not.toHaveBeenCalled();
   });

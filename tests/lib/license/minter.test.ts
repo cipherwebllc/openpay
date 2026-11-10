@@ -10,6 +10,10 @@ const h = vi.hoisted(() => ({
   rpc: { getBlock: vi.fn(), getBytecode: vi.fn(), getTransactionReceipt: vi.fn(), readContract: vi.fn(), getLogs: vi.fn(), simulateContract: vi.fn(), getTransactionCount: vi.fn(), getBalance: vi.fn(), sendRawTransaction: vi.fn(), chain: undefined as unknown },
   wallet: { prepareTransactionRequest: vi.fn(), signTransaction: vi.fn() },
   intent: vi.fn(), product: vi.fn(), confirm: vi.fn(), alert: vi.fn(), eval: vi.fn(),
+  // 本物の confirmLicenseRegistration (既定の h.confirm は固定値を返す・B3-2 の describe だけ本物に差し替える) と、
+  // その商品 snapshot の読込。afterSnapshot は読込の直後 (= 確認の RPC の間) に 1 回だけ実行する。
+  realConfirm: null as typeof import('@/lib/license/registration').confirmLicenseRegistration | null,
+  snapshot: vi.fn(), afterSnapshot: null as (() => void) | null,
   // kvEval の応答の差し替え (kvEval の契約は Redis の値の形まで・script ごとの意味は呼出側が確かめる)。
   // run() を呼べば本物の Lua を実行した結果、呼ばなければ Lua を走らせずに返した値がそのまま ok:true で届く。
   reply: null as ((script: string, run: () => Promise<unknown>) => Promise<unknown>) | null,
@@ -20,8 +24,11 @@ vi.mock('@/lib/license/config', () => ({ licenseNftEnabled: () => h.enabled }));
 vi.mock('@/lib/chains', () => ({ chainObjectForId: () => h.rpc.chain, customRpcUrlForChain: () => undefined }));
 vi.mock('viem', async (original) => ({ ...await original<typeof import('viem')>(), createPublicClient: () => h.rpc, createWalletClient: () => h.wallet }));
 vi.mock('@/lib/x402/purchaseIntent', () => ({ getPurchaseIntent: h.intent }));
-vi.mock('@/lib/x402/hostedStore', () => ({ getHostedProduct: h.product }));
-vi.mock('@/lib/license/registration', () => ({ confirmLicenseRegistration: h.confirm }));
+vi.mock('@/lib/x402/hostedStore', () => ({ getHostedProduct: h.product, getHostedProductUpdateSnapshot: h.snapshot }));
+vi.mock('@/lib/license/registration', async (original) => {
+  h.realConfirm = (await original<typeof import('@/lib/license/registration')>()).confirmLicenseRegistration;
+  return { confirmLicenseRegistration: h.confirm };
+});
 vi.mock('@/lib/x402/reverify', () => ({ sendReverifyAlert: h.alert }));
 vi.mock('@/lib/kv', () => ({
   kvExists: async (keys: string[]) => ({ ok: true, value: keys.filter((k) => h.store!.keys().includes(k)).length }),
@@ -64,10 +71,10 @@ const TX = toHex(7n, { size: 32 }); const BLOCK = toHex(8n, { size: 32 }); const
 const KEY = toHex(1n, { size: 32 });
 const definition = createLicenseDefinition(ID, { supply: 10, transferable: true, termsUrl: 'https://seller.example/terms', termsVersion: '1' }, 80002, CONTRACT);
 const paymentAbi = parseAbi(['event AuthorizationUsed(address indexed authorizer,bytes32 indexed nonce)', 'event Settled(address indexed from,bytes32 indexed nonce,address indexed merchant,uint256 merchantValue,address feeReceiver,uint256 feeValue)']);
-function fixture(): LicenseMintJob {
+function fixture(salt: Hex = SALT): LicenseMintJob {
   const claim = { payer: PAYER, token: JPYC_V3_ASSET.address, chainId: 80002, forwarder: FORWARDER, commitVersion: toHex(1n, { size: 32 }), merchant: CONTRACT, merchantValue: '1000', feeReceiver: PAYER, feeValue: '10', validAfter: '0', validBefore: '1800000600', nonce: TX, signatureFingerprint: 'a'.repeat(64), resourceId: ID, contentRevision: 1, deploymentVersion: 'v1', anchorBlock: '1' } as LicenseMintJob['payment'];
-  claim.nonce = buildForwarderNonce({ from: PAYER, merchant: CONTRACT, merchantValue: 1000n, feeReceiver: PAYER, feeValue: 10n, validAfter: 0n, validBefore: 1800000600n, intentSalt: SALT }, 80002, FORWARDER);
-  const job: LicenseMintJob = { version: 1, kind: 'mint', productId: ID, license: definition, status: 'awaiting_finality', attempts: 0, nextAttemptAt: NOW, paymentKey: computeLicensePaymentKey({ paymentChainId: 80002n, paymentToken: claim.token, payer: PAYER, authorizationNonce: claim.nonce }), payer: PAYER, intentSalt: SALT, payment: claim, txHash: TX, purchasedAt: NOW };
+  claim.nonce = buildForwarderNonce({ from: PAYER, merchant: CONTRACT, merchantValue: 1000n, feeReceiver: PAYER, feeValue: 10n, validAfter: 0n, validBefore: 1800000600n, intentSalt: salt }, 80002, FORWARDER);
+  const job: LicenseMintJob = { version: 1, kind: 'mint', productId: ID, license: definition, status: 'awaiting_finality', attempts: 0, nextAttemptAt: NOW, paymentKey: computeLicensePaymentKey({ paymentChainId: 80002n, paymentToken: claim.token, payer: PAYER, authorizationNonce: claim.nonce }), payer: PAYER, intentSalt: salt, payment: claim, txHash: TX, purchasedAt: NOW };
   h.intent.mockResolvedValue({ state: 'settled', resourceId: ID, metadata: { license: definition }, txHash: TX, claim, token: claim.token, chainId: 80002 });
   return job;
 }
@@ -82,7 +89,7 @@ function mintReceipt(hash: Hex) {
 beforeEach(() => {
   vi.clearAllMocks(); h.store = createFakeRedisStore(NOW); vi.spyOn(Date, 'now').mockImplementation(() => h.store!.now());
   vi.stubEnv('LICENSE_MINTER_PRIVATE_KEY', KEY); vi.stubEnv('RELAYER_PRIVATE_KEY', ''); vi.stubEnv('ALERT_WEBHOOK_URL', 'https://alerts.example');
-  h.enabled = true; h.lockError = false; h.failSave = ''; h.reply = null; h.failEval = null; h.rpc.chain = polygonAmoy; job = fixture(); seed();
+  h.enabled = true; h.lockError = false; h.failSave = ''; h.reply = null; h.failEval = null; h.afterSnapshot = null; h.rpc.chain = polygonAmoy; job = fixture(); seed();
   h.rpc.getBlock.mockImplementation(async ({ blockNumber }) => ({ number: blockNumber ?? 100n, hash: BLOCK, timestamp: 1800000601n }));
   h.rpc.getBytecode.mockResolvedValue('0x6000');
   h.product.mockResolvedValue({ createdAt: NOW, license: definition });
@@ -489,5 +496,153 @@ describe('license worker: viem + real Lua CAS', () => {
   it('flag OFF never acquires a lock or dispatches RPC; relay key reuse never signs', async () => {
     h.enabled = false; await run(); expect(h.store!.strings.has(LICENSE_WORKER_LOCK)).toBe(false); expect(h.rpc.getBlock).not.toHaveBeenCalled();
     h.enabled = true; vi.stubEnv('RELAYER_PRIVATE_KEY', KEY); await run(); expect(current()).toMatchObject({ status: 'needs_repair', lastError: 'minter_must_differ_from_relayer' }); expect(h.wallet.signTransaction).not.toHaveBeenCalled();
+  });
+});
+
+// 第 10 回レビュー B3-1。送信枠 (worker:active) は「結果が未確定の署名」の nonce を隔離するためのもの。修復待ち (needs_repair) の
+// ジョブが枠を持ったままだと、後続の全部の mint と登録が黙って止まる。結果が finalized で確定した回だけ枠を返し、
+// needs_repair になった回は必ず warn (license.job_needs_repair) を残す。
+describe('license worker: needs_repair の warn と送信枠 (B3-1)', () => {
+  const lane = () => h.store!.strings.get(LICENSE_ACTIVE_SUBMISSION) ?? null;
+  const repairWarns = (warn: { mock: { calls: unknown[][] } }) => warn.mock.calls.filter(([event]) => event === 'license.job_needs_repair');
+  const licenseOf = { exists: true, definitionHash: definition.definitionHash, maxSupply: 10n, transferable: true };
+  // 自分の送信 (submission.hash) と scan で見つかる hash の receipt を差し替える。支払いの receipt (TX) は元のまま。
+  function otherReceipts(make: (hash: Hex) => unknown) {
+    const original = h.rpc.getTransactionReceipt.getMockImplementation()!;
+    h.rpc.getTransactionReceipt.mockImplementation(async (args) => args.hash === TX ? original(args) : make(args.hash));
+  }
+  const paymentKeyOf = (record: { id: bigint; to: string }) =>
+    h.rpc.readContract.mockImplementation(async ({ functionName }) => functionName === 'authorizationState' ? true : functionName === 'licenseOf' ? licenseOf : record);
+
+  it('自分の送信が finalized で revert: needs_repair・枠を返す・warn は 1 回 (秘密なし)・次のジョブが送信できる', async () => {
+    const warn = vi.spyOn(logger, 'warn');
+    await run(); const first = job; const signed = current();
+    expect(lane()).toBe(first.paymentKey); expect(repairWarns(warn)).toHaveLength(0);
+    otherReceipts((hash) => ({ ...mintReceipt(hash), status: 'reverted', logs: [] }));
+    advance(60_000); await run();
+    expect(current()).toMatchObject({ status: 'needs_repair', lastError: 'transaction_reverted', submission: signed.submission });
+    expect(lane()).toBeNull();
+    expect(repairWarns(warn)).toEqual([['license.job_needs_repair', { member: first.paymentKey, kind: 'mint', lastError: 'transaction_reverted', lane: 'release' }]]);
+    const logged = JSON.stringify(repairWarns(warn));
+    expect(logged).not.toContain(signed.submission!.serializedTransaction); expect(logged).not.toContain(KEY.slice(2));
+
+    // 修復待ちのジョブ自身は二度と署名・送信しない (枠を返した後に同じ nonce を使い回す道が無い)。warn も繰り返さない。
+    advance(); await run();
+    expect(current()).toMatchObject({ status: 'needs_repair', submission: signed.submission });
+    expect(h.wallet.signTransaction).toHaveBeenCalledTimes(1); expect(h.rpc.sendRawTransaction).toHaveBeenCalledTimes(1);
+    expect(repairWarns(warn)).toHaveLength(1);
+
+    // 次の購入の発行は、止まらずに新しい nonce で送信できる。
+    advance(); job = fixture(toHex(10n, { size: 32 })); seed(); h.rpc.getTransactionCount.mockResolvedValue(8);
+    expect(job.paymentKey).not.toBe(first.paymentKey);
+    await run();
+    expect(current()).toMatchObject({ status: 'submitted', submission: { nonce: 8 } });
+    expect(lane()).toBe(job.paymentKey);
+    expect(h.wallet.signTransaction).toHaveBeenCalledTimes(2); expect(h.rpc.sendRawTransaction).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(h.store!.strings.get(licenseObligationKey(first.paymentKey))!)).toMatchObject({ status: 'needs_repair', submission: signed.submission });
+  });
+
+  it('finalized の nonce が進んだ置き換え (license なし): needs_repair・枠を返す・warn は 1 回', async () => {
+    const warn = vi.spyOn(logger, 'warn');
+    await run(); const signed = current(); advance(); h.rpc.getTransactionCount.mockResolvedValue(8); await run();
+    expect(current()).toMatchObject({ status: 'needs_repair', lastError: 'nonce_replaced_without_license', submission: signed.submission });
+    expect(lane()).toBeNull();
+    expect(repairWarns(warn)).toEqual([['license.job_needs_repair', { member: job.paymentKey, kind: 'mint', lastError: 'nonce_replaced_without_license', lane: 'release' }]]);
+    expect(h.rpc.sendRawTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  // 結果が未確定の修復理由は、今までどおり枠を保持する (署名済みの tx がまだ取り込まれうる・または RPC / 記録が矛盾している)。
+  it.each([
+    ['signed_transaction_mismatch', () => { const s = current(); seed({ ...s, submission: { ...s.submission!, nonce: s.submission!.nonce + 1 } }); }],
+    ['mint_receipt_mismatch', () => otherReceipts((hash) => ({ ...mintReceipt(hash), logs: [] }))],
+    ['receipt_reorg_or_mismatch', () => otherReceipts((hash) => ({ ...mintReceipt(hash), blockHash: TX }))],
+    ['definition_mismatch', () => h.rpc.readContract.mockImplementation(async ({ functionName }) => functionName === 'authorizationState' ? true : functionName === 'licenseOf' ? { ...licenseOf, maxSupply: 9n } : { id: 0n, to: zeroAddress })],
+    ['consumed_key_mismatch', () => paymentKeyOf({ id: BigInt(definition.tokenId), to: CONTRACT })],
+    ['payment_tuple_mismatch', () => h.rpc.getTransactionReceipt.mockResolvedValue({ transactionHash: TX, blockNumber: 50n, blockHash: BLOCK, status: 'success', logs: [] })],
+    // scan で見つけた別の hash の revert (イベントがあるのに revert = RPC の矛盾)。自分の送信の結果は分からないまま。
+    ['transaction_reverted', () => {
+      const found = toHex(55n, { size: 32 });
+      paymentKeyOf({ id: BigInt(definition.tokenId), to: PAYER }); h.rpc.getLogs.mockResolvedValue([{ transactionHash: found }]);
+      otherReceipts((hash) => { if (hash !== found) throw new Error('not found'); return { ...mintReceipt(found), status: 'reverted', logs: [] }; });
+    }],
+  ] as const)('未確定の %s: needs_repair でも枠は保持し、warn は lane keep', async (lastError, arrange) => {
+    const warn = vi.spyOn(logger, 'warn');
+    await run(); const signed = current(); arrange(); advance(); await run();
+    expect(current()).toMatchObject({ status: 'needs_repair', lastError, submission: { hash: signed.submission!.hash } });
+    expect(lane()).toBe(job.paymentKey);
+    expect(repairWarns(warn)).toEqual([['license.job_needs_repair', { member: job.paymentKey, kind: 'mint', lastError, lane: 'keep' }]]);
+    expect(h.wallet.signTransaction).toHaveBeenCalledTimes(1); expect(h.rpc.sendRawTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  it('送信していないジョブの 10 回目の失敗も warn を 1 回残す (枠には触れない)', async () => {
+    const warn = vi.spyOn(logger, 'warn');
+    h.store!.strings.set(LICENSE_ACTIVE_SUBMISSION, job.paymentKey);
+    seed({ ...job, attempts: 9 }); h.rpc.simulateContract.mockRejectedValue(new Error('receiver revert 0xdeadbeef')); await run();
+    expect(current()).toMatchObject({ status: 'needs_repair', attempts: 10, lastError: 'rpc_or_funding_failure' });
+    expect(repairWarns(warn)).toEqual([['license.job_needs_repair', { member: job.paymentKey, kind: 'mint', lastError: 'rpc_or_funding_failure', lane: 'keep' }]]);
+    expect(JSON.stringify(repairWarns(warn))).not.toContain('deadbeef');
+    // RPC・資金不足の失敗は job の中で再試行に回り、license.worker_job_failed には出ない。運営に届くのはこの warn だけ。
+    expect(warn).not.toHaveBeenCalledWith('license.worker_job_failed', expect.anything());
+    expect(lane()).toBe(job.paymentKey);
+  });
+});
+
+// 第 10 回レビュー B3-2。登録 tx は finalized で成功しているのに、確認の RPC の間に出品者が商品 (題など) を編集すると、
+// registered を書く CAS が 0 を返す。これを不一致 (conflict → needs_repair) にすると、登録済みの商品が登録待ちのまま固まる。
+// ここは本物の confirmLicenseRegistration と CONFIRM の Lua を通す (fake は RPC・商品 snapshot の読込・KV の store だけ)。
+describe('license worker: 登録の確認と出品者の編集の競合 (B3-2)', () => {
+  const member = 'registration:' + ID; const jobKey = licenseRegistrationJobKey(ID); const productKey = 'x402:hosted:' + ID;
+  const readJob = () => JSON.parse(h.store!.strings.get(jobKey)!);
+  const readProduct = () => JSON.parse(h.store!.strings.get(productKey)!);
+  const lane = () => h.store!.strings.get(LICENSE_ACTIVE_SUBMISSION) ?? null;
+  const registrationReceipt = (hash: Hex, withEvent = true) => ({ transactionHash: hash, blockNumber: 90n, blockHash: BLOCK, status: 'success', logs: withEvent ? [{ address: CONTRACT,
+    topics: encodeEventTopics({ abi: LICENSE_ABI, eventName: 'LicenseRegistered', args: { id: BigInt(definition.tokenId) } }),
+    data: encodeAbiParameters([{ type: 'uint64' }, { type: 'bool' }, { type: 'bytes32' }], [10n, true, definition.definitionHash]) }] : [] });
+  /** 登録 tx を送信済み (枠を保持) にして、その hash を返す。 */
+  async function submitRegistration(): Promise<Hex> {
+    h.confirm.mockImplementation(h.realConfirm!);
+    h.snapshot.mockImplementation(async (id: string) => {
+      const token = h.store!.strings.get('x402:hosted:' + id);
+      if (token === undefined) return null;
+      const snapshot = { product: JSON.parse(token), token };
+      const hook = h.afterSnapshot; h.afterSnapshot = null; hook?.();
+      return snapshot;
+    });
+    h.store!.strings.set(productKey, JSON.stringify({ id: ID, productKind: 'license', title: 'License', license: definition, saleActive: false, registration: { status: 'pending', attempts: 0 }, updatedAt: 1 }));
+    h.store!.strings.set(jobKey, JSON.stringify({ version: 1, kind: 'register', productId: ID, license: definition, status: 'pending', attempts: 0, nextAttemptAt: NOW }));
+    h.rpc.readContract.mockResolvedValue({ exists: false }); h.rpc.sendRawTransaction.mockResolvedValue(TX);
+    await runLicenseWorker({ member });
+    expect(readJob().status).toBe('submitted'); expect(lane()).toBe(member);
+    h.rpc.readContract.mockResolvedValue({ exists: true, definitionHash: definition.definitionHash, maxSupply: 10n, transferable: true });
+    return readJob().submission.hash;
+  }
+
+  it('確認の RPC の間に商品が書き換わった回は保留 → 次の run で registered (編集は残り、枠を返す)', async () => {
+    const warn = vi.spyOn(logger, 'warn');
+    const hash = await submitRegistration();
+    h.rpc.getTransactionReceipt.mockImplementation(async () => registrationReceipt(hash));
+    h.afterSnapshot = () => h.store!.strings.set(productKey, h.store!.strings.get(productKey)!.replace('"title":"License"', '"title":"Edited"'));
+    advance(60_000); await runLicenseWorker({ member });
+    expect(readJob()).toMatchObject({ status: 'submitted', attempts: 1, lastError: 'registration_pending' });
+    expect(readProduct()).toMatchObject({ title: 'Edited', registration: { status: 'pending', attempts: 0 } });
+    expect(lane()).toBe(member);
+    expect(warn).not.toHaveBeenCalledWith('license.job_needs_repair', expect.anything());
+
+    advance(); await runLicenseWorker({ member });
+    expect(readJob()).toMatchObject({ status: 'registered', mintTxHash: hash });
+    expect(readProduct()).toMatchObject({ title: 'Edited', saleActive: false, registration: { status: 'registered', txHash: hash, attempts: 0 } });
+    expect(lane()).toBeNull();
+    expect(h.wallet.signTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  it('本物の不一致 (receipt に LicenseRegistered が無い) は今までどおり needs_repair で、枠は保持し、商品は登録待ちのまま', async () => {
+    const warn = vi.spyOn(logger, 'warn');
+    const hash = await submitRegistration();
+    h.rpc.getTransactionReceipt.mockImplementation(async () => registrationReceipt(hash, false));
+    advance(60_000); await runLicenseWorker({ member });
+    expect(readJob()).toMatchObject({ status: 'needs_repair', lastError: 'registration_receipt_mismatch' });
+    expect(readProduct()).toMatchObject({ title: 'License', registration: { status: 'pending' } });
+    expect(lane()).toBe(member);
+    expect(warn).toHaveBeenCalledWith('license.job_needs_repair', { member, kind: 'register', lastError: 'registration_receipt_mismatch', lane: 'keep' });
   });
 });

@@ -2762,6 +2762,13 @@ obligation/registration job、各恒久 index、worker active、署名済み tx 
 - `needs_repair` または 10 回の不明送信通知を受けた運営は **24 時間以内に確認**し、
   **72 時間以内に修復方針と見込みを売り手へ通知**する運用案。発行失敗・終了時の購入者への通知期限と
   売り手負担の返金等は販売前に売り手の利用条件で定める。silent abandonment をしない。
+- **needs_repair の見方 (2026-11-11)**: job が `needs_repair` になった回に `license.job_needs_repair` を warn する
+  (Sentry rule・1 件目で通知)。`member` は発行なら paymentKey (job は `store:license:ob:<paymentKey>`)、登録なら
+  `registration:<商品 ID>` (job は `store:license:registration:<商品 ID>`)。`lane: release` は送信した tx の結果が finalized で
+  確定した回 (`transaction_reverted`・`nonce_replaced_without_license`) で、送信枠 (`store:license:worker:active`) は返してあり、
+  止まるのはその job だけ。`lane: keep` で job に `submission` があるときは枠を持ったままで、後続の発行と新しい商品の登録が
+  止まる。枠の値がその `member` かを確かめ、下の手順で直す。`ALERT_WEBHOOK_URL` への通知は設定したときだけ届く (任意)。
+  送信済みで結果が不明のまま 10 回を超えた job (status は `submitted` のまま) は、この warn の対象外で webhook の通知だけ。
 - 修復は MFA/RBAC を備えた KV 管理画面または同等の認証済み管理端末から実施する。
   公開 repair endpoint はない。flag を停止し、55 秒以上待ち、旧レコード・操作者・理由・時刻・
   決済/発行の block/hash を独立監査ログへ退避してから、旧 raw 値一致の CAS で変更する。

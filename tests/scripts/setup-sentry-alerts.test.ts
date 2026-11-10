@@ -536,6 +536,8 @@ describe('setup-sentry-alerts: RULES schema', () => {
       'creator_store.usdc_purchase_deferred_overflow',
       'creator_store.usdc_purchase_finalize_storage_failed',
       'license.reconcile_indeterminate',
+      // 修復待ち (needs_repair) は自動で再試行されない。送信枠を持ったままなら後続の発行も止まる (第 10 回レビュー B3-1)。
+      'license.job_needs_repair',
       'order.notify.unexpected',
       'order.agent.registration_failed',
       'order.agent.finalize_conflict',

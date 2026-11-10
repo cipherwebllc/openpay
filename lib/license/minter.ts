@@ -43,7 +43,11 @@ const SHORT_FINALITY_WAITS = 5;
 const MAX_SCAN_ATTEMPTS = 10;
 export const licenseBackoff = (attempts: number) => Math.min(3_600_000, 300_000 * 2 ** Math.min(10, Math.max(0, attempts - 1)));
 class Deadline extends Error {}
-class Repair extends Error {}
+// settled = 送信した tx の結果が finalized で確定している (下の 2 か所だけ)。送信者の nonce は使用済みで、
+// 送信枠 (worker:active) で隔離する理由が無いので、needs_repair を保存する回に枠を返す。既定 (false) は結果が未確定で、枠を保持する。
+class Repair extends Error {
+  constructor(message: string, readonly settled = false) { super(message); }
+}
 class LostLease extends Error {}
 
 function callData(job: LicenseJob): Hex {
@@ -78,7 +82,11 @@ async function processJob(member: string, token: string, deadline: number): Prom
     job = next; raw = JSON.stringify(next);
   };
   await save({ ...job, lease: { token, until: Date.now() + 55_000 } });
-  const reschedule = async (reason: string, repair = false) => {
+  // needs_repair は運営の修復を待つ終端で、通知の webhook は任意。保存できた回を warn (Sentry の rule) に残し、
+  // 発行が黙って止まる波及を断つ。lane = この回に送信枠を返したか ('keep' のまま枠を持つジョブは後続の送信を止める)。
+  // 載せるのは member・種別・固定の理由だけ (RPC の本文・鍵・署名は載せない)。
+  const warnRepair = (lane: 'keep' | 'release') => logger.warn('license.job_needs_repair', { member, kind: job.kind, lastError: job.lastError, lane });
+  const reschedule = async (reason: string, repair = false, lane: 'keep' | 'release' = 'keep') => {
     // 確定待ちが実障害の attempt 10 修復・通知境界へ波及しないよう、両待機理由を永続 finalityWaitAttempts で別計数する。
     // 待機中は attempts を増減せず、実障害を挟んでも待機回数を保持し、最初の 5 回だけ 60 秒、その後は既存 backoff を使う。
     const finalityWait = !repair && (reason === 'receipt_not_finalized' || reason === 'submission_unconfirmed');
@@ -90,7 +98,8 @@ async function processJob(member: string, token: string, deadline: number): Prom
     // 不明な送信は attempt 10 でも submitted のまま hash を追う。新しい nonce で再 mint しない。
     const status = job.submission && !repair ? 'submitted' : repair || attempts >= 10 ? 'needs_repair' : 'retryable';
     await save({ ...job, status, attempts, ...(finalityWait ? { finalityWaitAttempts } : {}), lastError: reason, nextAttemptAt: Date.now() + delay,
-      ...(attempts >= 10 || repair ? { alertPending: job.alertedAt === undefined } : {}) });
+      ...(attempts >= 10 || repair ? { alertPending: job.alertedAt === undefined } : {}) }, lane);
+    if (status === 'needs_repair') warnRepair(lane);
   };
   const alert = async () => {
     if (!job.alertPending) return;
@@ -107,6 +116,7 @@ async function processJob(member: string, token: string, deadline: number): Prom
       lastError: reason, nextAttemptAt: Date.now() + licenseBackoff(scanAttempts),
       ...(nextBlock !== undefined ? { scanFromBlock: nextBlock } : {}),
       ...(needsRepair ? { alertPending: job.alertedAt === undefined } : {}) });
+    if (needsRepair) warnRepair('keep');
   };
   let scanning = false;
   try {
@@ -157,7 +167,10 @@ async function processJob(member: string, token: string, deadline: number): Prom
     const complete = async (hash: Hex) => {
       const receipt = await canonicalReceipt(hash);
       if (!receipt) { await reschedule('receipt_not_finalized'); return; }
-      if (receipt.status !== 'success') throw new Repair('transaction_reverted');
+      // finalized・canonical な receipt の revert は確定した結果で、その tx の nonce は使用済み。自分の送信 (s.hash) で
+      // 来た回は枠を返す。scan で見つけた hash の revert (イベントがあるのに revert = RPC の矛盾) は下の catch が
+      // rescheduleScan へ回し、枠を返さない。
+      if (receipt.status !== 'success') throw new Repair('transaction_reverted', true);
       if (job.kind === 'register') {
         const confirmed = await step(() => confirmLicenseRegistration(job.productId, hash, rpc));
         if (confirmed === 'conflict') throw new Repair('registration_receipt_mismatch');
@@ -252,7 +265,8 @@ async function processJob(member: string, token: string, deadline: number): Prom
     if (job.submission) {
       const s = job.submission;
       const finalizedNonce = await step(() => rpc.getTransactionCount({ address: s.signer, blockNumber: head.number }));
-      if (finalizedNonce > s.nonce) throw new Repair('nonce_replaced_without_license');
+      // finalized の nonce が署名の nonce を越えた = この署名はもう取り込まれない (置き換え済み・license は finalized に無い)。確定した結果。
+      if (finalizedNonce > s.nonce) throw new Repair('nonce_replaced_without_license', true);
       await save({ ...job, status: 'submitted' }, 'take');
       await step(() => rpc.sendRawTransaction({ serializedTransaction: s.serializedTransaction }));
       await reschedule('submission_unconfirmed'); return;
@@ -285,8 +299,12 @@ async function processJob(member: string, token: string, deadline: number): Prom
     // 期限切れ/lease 喪失で stale worker が追記や送信を続ける波及を断つ。
     if (error instanceof Deadline || error instanceof LostLease || Date.now() >= deadline) return;
     // RPC の本文/鍵/署名を永続エラーや通知へ漏らさず、失敗したジョブだけ再試行する。
-    const retry = scanning ? rescheduleScan : reschedule;
-    await retry(error instanceof Repair ? error.message : 'rpc_or_funding_failure', error instanceof Repair);
+    const repair = error instanceof Repair;
+    const reason = repair ? error.message : 'rpc_or_funding_failure';
+    if (scanning) await rescheduleScan(reason, repair);
+    // 結果が確定した Repair のときだけ、needs_repair の保存と同じ CAS で送信枠を返す (Lua は枠の持ち主が自分のときだけ消す)。
+    // 返さないと、修復待ちの 1 件が枠を持ったまま、後続の全部の mint と登録を止める。未確定の Repair は従来どおり保持する。
+    else await reschedule(reason, repair, repair && error.settled ? 'release' : 'keep');
   }
   await alert();
 }
