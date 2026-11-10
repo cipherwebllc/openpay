@@ -10,9 +10,35 @@ import ts from 'typescript';
 
 const ROOT = process.cwd();
 
+// 同じ file を何度も読まない・parse しない (境界のテストは数百の file を見る。CI は coverage つきで手元の数倍遅く、
+// serverOnlyFlagsBoundary.test.ts は同じ file の parse の重複で 5 秒の timeout を超えた・#1059)。key は絶対 path。
+// test の中の偽の source のように source が変わったときだけ parse し直す。
+const sources = new Map<string, string>();
+const trees = new Map<string, { source: string; tree: ts.SourceFile }>();
+
+/** repo の file (repo 相対か絶対) の中身。 */
+export function readSource(file: string): string {
+  const path = resolve(ROOT, file);
+  let source = sources.get(path);
+  if (source === undefined) sources.set(path, (source = readFileSync(path, 'utf8')));
+  return source;
+}
+
+/** file の構文木 (拡張子で TS / TSX / JS / JSX を選ぶ)。 */
+export function parseSource(file: string, source: string): ts.SourceFile {
+  const path = resolve(ROOT, file);
+  const hit = trees.get(path);
+  if (hit?.source === source) return hit.tree;
+  const kind = file.endsWith('.tsx') ? ts.ScriptKind.TSX
+    : file.endsWith('.jsx') ? ts.ScriptKind.JSX
+      : /\.[cm]?js$/.test(file) ? ts.ScriptKind.JS : ts.ScriptKind.TS;
+  const tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, kind);
+  trees.set(path, { source, tree });
+  return tree;
+}
+
 export function runtimeSpecifiers(file: string, source: string): string[] {
-  const kind = file.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS;
-  const parsed = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, kind);
+  const parsed = parseSource(file, source);
   const specs: string[] = [];
   const visit = (node: ts.Node) => {
     if (ts.isImportDeclaration(node)) {
@@ -60,7 +86,7 @@ export function runtimeClosure(entries: string[]) {
     if (files.has(file)) return;
     files.add(file);
     if (!/\.(?:tsx?|m?js)$/.test(file)) return; // json 等は import を持たない
-    for (const spec of runtimeSpecifiers(file, readFileSync(file, 'utf8'))) {
+    for (const spec of runtimeSpecifiers(file, readSource(file))) {
       specifiers.add(spec);
       const next = resolveLocal(spec, file);
       if (next) visit(next);

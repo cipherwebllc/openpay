@@ -6,13 +6,14 @@ import {
   JPYC_SERVICES_RESOURCE,
 } from '@/lib/directory/paidResources';
 import { env } from '@/lib/env';
-import { LEGAL_ENTITY } from '@/lib/legal';
 import { shopsApiEnabled } from '@/lib/shops/flags';
 import { JPYC_SHOPS_SEARCH_RESOURCE } from '@/lib/shops/paidResources';
+import { OPENPAY_CANONICAL_ORIGIN } from '@/lib/x402/canonicalOrigin';
 import { X402_DEMO_PATH } from '@/lib/x402/demoPath';
 import { x402FacilitatorConfig } from '@/lib/x402/facilitatorConfig';
 
-export const OPENPAY_CANONICAL_ORIGIN = new URL(LEGAL_ENTITY.siteUrl).origin;
+// 定義は canonicalOrigin.ts (client の file はそちらから取る)。既存の import 元を変えないため、ここからも出す。
+export { OPENPAY_CANONICAL_ORIGIN };
 // 配布先の自己ループ防止用。www alias も port にかかわらず同じ first-party とする。
 export const OPENPAY_FIRST_PARTY_HOSTNAMES: readonly string[] = [
   new URL(OPENPAY_CANONICAL_ORIGIN).hostname,

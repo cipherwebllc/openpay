@@ -15,7 +15,8 @@ import {
 } from '@/lib/directory/usdcResource';
 import { USDC_JPYC_LIVE_RESOURCES } from '@/lib/jpyc/liveResources';
 import { USDC_STORES } from '@/lib/x402/usdcStores';
-import { OPENPAY_CANONICAL_ORIGIN } from '@/lib/x402/firstParty';
+// firstParty.ts からは取らない (client の bundle に server 専用の flag を読む FIRST_PARTY_RESOURCES を持ち込む)。
+import { OPENPAY_CANONICAL_ORIGIN } from '@/lib/x402/canonicalOrigin';
 
 export type UsdcCatalogItem = {
   /** 絶対 URL (カード表示・コピー用)。 */
