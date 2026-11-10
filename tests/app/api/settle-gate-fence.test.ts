@@ -16,7 +16,11 @@ import { runtimeSpecifiers } from '../../_helpers/runtimeImports';
 //   app/ の全 route.ts(x) から、実行時の参照を top-level の宣言の単位で推移的にたどる (import の別名・再 export・
 //   export *・namespace import・import() / require()・module の初期化コード)。出口に届いたら、出口を直接参照している宣言
 //   (= 呼び出し点。route の中でも、route が通る共有の関数でもよい) を記録する。出口の中はたどらない。
-//   - forwarder の出口の呼び出し点は、同じ宣言の中で、出口より前にゲートを呼ぶ。
+//   - 関数の中身と class の instance の property の初期化は、その宣言の名前が参照されたときにたどる。それ以外は module の
+//     初期化 ('<init>'。import されたら名前を使わなくても走る) に数える: 宣言でない文・変数の初期化式・class の static の
+//     初期化・初期化の間に呼ぶ関数へ渡した callback と即時に呼ぶ関数 (渡した先がすぐ呼ぶかは見ずに、走るとみなす)。
+//   - forwarder の出口の呼び出し点は、同じ宣言の中で、出口より前にゲートを呼ぶ。ゲートと同じ名前を同じ top-level の文の
+//     中で宣言し直している (局所の関数・変数・引数。どの scope かは見ない) ときは、ゲートの呼び出しとみなさない。
 //   - それ以外の出口の呼び出し点は、理由つきの allowlist に載っている。
 //   たどれない書き方 (行き先が文字列でない import() / require()・解決できない import と export) は throw で落とす。
 //
@@ -35,8 +39,11 @@ import { runtimeSpecifiers } from '../../_helpers/runtimeImports';
 //       lib/relay/relayBroadcast.ts relayBroadcast — 冪等・予算・submit・poll の共通の手順
 //       lib/relay/selfHostRelayer.ts submitSelfHost — 見積もり・署名・sendRawTransaction
 //       lib/relay/relayProvider.ts selfHostIoFor — 上記
-//   出口の一覧の漏れは 3 つ目のテストが見る: route から実行時に読み込まれる file のうち、viem の broadcast の関数名
-//   (BROADCAST_PRIMITIVE) が出てくる file を固定する。
+//   出口の一覧の漏れは 3 つ目のテストが見る: route から実行時に読み込まれる file の宣言 (file#宣言) のうち、broadcast の
+//   primitive が出てくるものを固定する。primitive = viem の送信の関数名 (BROADCAST_PRIMITIVE)・それを別名で import した
+//   名前・同じ名前の文字列 (`wallet['sendTransaction']`)・生の RPC の送信の method 名 (`eth_send…` / `wallet_send…`)。
+//   primitive を再 export した file は、その file の '<init>' に数える。出口 (EXITS) でない宣言には理由が要るので、承認済みの
+//   file に送信の関数を 1 つ足しても、その宣言が現れて落ちる。
 //
 // この柵が見ないもの:
 //   - ゲートの結果の扱い (denied / storage で止めるか) と、ゲートの呼び出しが必ず実行されるか。見るのは「同じ宣言の中で、
@@ -44,6 +51,11 @@ import { runtimeSpecifiers } from '../../_helpers/runtimeImports';
 //     tests/app/api/settle-hosted-gate.test.ts・relay-jpyc-hosted-gate.test.ts・relay-move.test.ts が見る。
 //   - route handler でない入口。server action ('use server') は 2026-11-11 時点で 0 個。足すときは入口に加える。
 //   - fetch で外の relayer を呼ぶ新しい出口 (関数名では見つからない)。Gelato は relayFreeAuthorization の中だけ。
+//   - 実行時に組み立てた名前での送信 (`wallet[name]()` の name を文字列の連結や入力から作る・eval)。primitive の名前が、
+//     識別子か文字列のまま route から読み込まれる code のどこかに出てくることを前提にしている。
+//   - npm の package の中の、上の名前を使わない送信 (例: viem の getContract の write・ほかの SDK の送信の関数)。
+//   - 理由つきの宣言 (NON_JPYC_PRIMITIVE_DECLS) の中に足した JPYC の送信。その宣言の中身は人が読む。
+//   - 局所の shadowing はゲートの名前だけを見る。出口と同じ名前の局所の束縛は出口とみなす (落ちる側に倒れる)。
 
 const ROOT = process.cwd();
 const GATE = 'lib/x402/purchaseSettleGate.ts#checkHostedIntentSettleAdmission';
@@ -81,28 +93,34 @@ const UNGATED_CALL_SITES: Record<string, string> = {
     'relayer の native 残高を getBalance で読むだけ。submit を呼ばない (sendRawTransaction を書くと 3 つ目のテストが落ちる)。',
 };
 
-// route から実行時に読み込まれる file のうち、viem の broadcast の関数名が出てくるもの。新しい file が現れたら、
-// JPYC を送るなら EXITS に足し、送らないなら理由とともにここへ足す。
+// broadcast の primitive (viem の wallet の送信の action の名前と、JSON-RPC の送信の method 名)。
 const BROADCAST_PRIMITIVE = /^(?:send(?:Raw)?Transaction(?:Sync)?|writeContract(?:Sync)?|deployContract|sendCalls|sendUserOperation)$/;
-const BROADCAST_PRIMITIVE_FILES: Record<string, string> = {
-  'lib/relay/relayProvider.ts': 'JPYC の出口 (selfHostIoFor が relayer の鍵で sendRawTransaction する IO を作る)',
-  'lib/relay/selfHostRelayer.ts': 'JPYC の出口 (submitSelfHost が IO の sendRawTransaction を呼ぶ)',
-  'lib/license/minter.ts':
+const RPC_SEND = /^(?:eth|wallet)_send\w*$/;
+// route から実行時に読み込まれる宣言のうち、primitive が出てくる出口 (EXITS の中)。JPYC を relayer の鍵で送るのはここだけ。
+const PRIMITIVE_EXITS = [
+  'lib/relay/relayProvider.ts#selfHostIoFor', // relayer の鍵で sendRawTransaction する IO を作る
+  'lib/relay/selfHostRelayer.ts#submitSelfHost', // IO の sendRawTransaction を呼ぶ
+];
+// primitive が出てくるが出口でない宣言と、JPYC を送らない理由。新しい宣言が現れたら、JPYC を送るなら EXITS と
+// PRIMITIVE_EXITS に足し (呼び出し点が上の 2 つの一覧で分類される)、送らないなら理由とともにここへ足す。
+const NON_JPYC_PRIMITIVE_DECLS: Record<string, string> = {
+  'lib/license/minter.ts#processJob':
     'JPYC を送らない。利用ライセンス NFT の registerLicense / mintFor だけを、relayer と別の鍵 (LICENSE_MINTER_PRIVATE_KEY・' +
     'relayer と同じ鍵は minterAccount が拒む) で license の contract へ送る。',
 };
 
 // ---- 参照のグラフ ----------------------------------------------------------------------------------------------
 
-type Ref = { pos: number; call: boolean; name?: string; member?: string; module?: string };
+// local = 同じ top-level の文の中で、この名前を宣言し直している (ゲートの呼び出しとして数えない)。
+type Ref = { pos: number; call: boolean; local: boolean; name?: string; member?: string; module?: string };
 type Binding = { from: string; name: string }; // name '*' = module 全体 (namespace)
 type Mod = {
   imports: Map<string, Binding>; // local 名 → 取り込み元 (repo の中だけ。npm の package は持たない)
   exports: Map<string, Binding | { local: string } | null>; // null = npm の package からの再 export
   stars: (string | null)[]; // export * from (null = npm の package)
   deps: string[]; // 実行時に読み込む repo の中の file
-  decls: Map<string, Ref[]>; // top-level の宣言 → 中の参照。'<init>' = 宣言でない top-level の文
-  primitive: boolean;
+  decls: Map<string, Ref[]>; // top-level の宣言 → その名前が参照されたときに走る参照。'<init>' = module の初期化で走る参照
+  primitives: Set<string>; // broadcast の primitive が出てくる decls の key
 };
 
 const SOURCE = /\.(?:tsx?|m?js)$/; // json などは参照を持たない
@@ -117,20 +135,72 @@ function boundNames(name: ts.BindingName): string[] {
 function parseModule(file: string, source: string, resolveSpec: (spec: string) => string | null): Mod {
   const kind = file.endsWith('.tsx') ? ts.ScriptKind.TSX : /\.m?js$/.test(file) ? ts.ScriptKind.JS : ts.ScriptKind.TS;
   const parsed = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, kind);
-  const mod: Mod = { imports: new Map(), exports: new Map(), stars: [], deps: [], decls: new Map(), primitive: false };
+  const mod: Mod = { imports: new Map(), exports: new Map(), stars: [], deps: [], decls: new Map(), primitives: new Set() };
   // 行き先が文字列でない import() / require() はここで throw する (runtimeSpecifiers)。
   for (const spec of runtimeSpecifiers(file, source)) {
     const dep = resolveSpec(spec);
     if (dep) mod.deps.push(dep);
   }
 
+  // primitive を別名で取り込んだ名前 (`import { sendTransaction as broadcast } from 'viem/actions'` の broadcast)。
+  const aliases = new Set<string>();
+  for (const st of parsed.statements) {
+    const named = ts.isImportDeclaration(st) ? st.importClause?.namedBindings : undefined;
+    if (!named || !ts.isNamedImports(named)) continue;
+    for (const el of named.elements) {
+      if (BROADCAST_PRIMITIVE.test((el.propertyName ?? el.name).text)) aliases.add(el.name.text);
+    }
+  }
+  const primitiveName = (text: string) => BROADCAST_PRIMITIVE.test(text) || aliases.has(text);
+  const isPrimitive = (node: ts.Node) =>
+    (ts.isIdentifier(node) && primitiveName(node.text)) ||
+    (ts.isStringLiteralLike(node) && (BROADCAST_PRIMITIVE.test(node.text) || RPC_SEND.test(node.text)));
+
+  const refsOf = (decl: string) => {
+    let refs = mod.decls.get(decl);
+    if (!refs) mod.decls.set(decl, (refs = []));
+    return refs;
+  };
   const isCallee = (node: ts.Node) => ts.isCallExpression(node.parent) && node.parent.expression === node;
-  const collect = (root: ts.Node): Ref[] => {
-    const refs: Ref[] = [];
+  // 宣言と property の名前 (`const a`・`function a`・引数の a・`x.a`・`{ a: … }`) は束縛への参照ではない。`{ a }` の a は参照。
+  const isName = (node: ts.Identifier) =>
+    !ts.isShorthandPropertyAssignment(node.parent) && (node.parent as { name?: ts.Node }).name === node;
+  const binds = (node: ts.Node) =>
+    ts.isVariableDeclaration(node) || ts.isParameter(node) || ts.isBindingElement(node) || ts.isFunctionDeclaration(node) ||
+    ts.isFunctionExpression(node) || ts.isClassDeclaration(node) || ts.isClassExpression(node);
+  const localNames = (root: ts.Node) => {
+    const names = new Set<string>();
     const visit = (node: ts.Node) => {
+      if (ts.isIdentifier(node) && isName(node) && binds(node.parent)) names.add(node.text);
+      ts.forEachChild(node, visit);
+    };
+    visit(root);
+    return names;
+  };
+  const deferredBody = (node: ts.Node) =>
+    ts.isArrowFunction(node) || ts.isFunctionExpression(node) || ts.isFunctionDeclaration(node) ||
+    ts.isMethodDeclaration(node) || ts.isConstructorDeclaration(node) || ts.isGetAccessorDeclaration(node) ||
+    ts.isSetAccessorDeclaration(node) ||
+    (ts.isPropertyDeclaration(node) && !(ts.getModifiers(node) ?? []).some((m) => m.kind === ts.SyntaxKind.StaticKeyword));
+  const startsCall = (node: ts.Node) =>
+    ts.isCallExpression(node) || ts.isNewExpression(node) || ts.isTaggedTemplateExpression(node) || ts.isDecorator(node);
+
+  // top-level の文 1 つの参照を、その文の宣言 (names) が参照されたときに走るものと、module の初期化 (INIT) で走るものに分ける。
+  const walk = (root: ts.Node, names: string[]) => {
+    const later = names.length ? names : [INIT];
+    const locals = localNames(root);
+    const visit = (node: ts.Node, deferred: boolean, inCall: boolean) => {
       // 型の位置は実行時の参照ではない (class の extends は式なのでたどる)。
       if (ts.isTypeNode(node) && !ts.isExpressionWithTypeArguments(node)) return;
-      if (ts.isIdentifier(node) && BROADCAST_PRIMITIVE.test(node.text)) mod.primitive = true;
+      const decls = deferred ? later : [INIT];
+      const push = (ref: Omit<Ref, 'local'>) => {
+        const local = ref.name !== undefined && locals.has(ref.name);
+        for (const decl of decls) refsOf(decl).push({ ...ref, local });
+      };
+      const primitive = (...nodes: ts.Node[]) => {
+        if (nodes.some(isPrimitive)) for (const decl of decls) mod.primitives.add(decl);
+      };
+      primitive(node);
       if (
         ts.isCallExpression(node) &&
         (node.expression.kind === ts.SyntaxKind.ImportKeyword ||
@@ -138,28 +208,30 @@ function parseModule(file: string, source: string, resolveSpec: (spec: string) =
       ) {
         // 読み込んだ module のどの export を使うかは追わず、全部を参照したとみなす。
         const target = resolveSpec((node.arguments[0] as ts.StringLiteralLike).text);
-        if (target) refs.push({ module: target, pos: node.getStart(), call: false });
+        if (target) push({ module: target, pos: node.getStart(), call: false });
         return;
       }
       if (ts.isPropertyAccessExpression(node) && ts.isIdentifier(node.expression)) {
-        if (BROADCAST_PRIMITIVE.test(node.name.text)) mod.primitive = true;
-        refs.push({ name: node.expression.text, member: node.name.text, pos: node.getStart(), call: isCallee(node) });
+        primitive(node.expression, node.name);
+        push({ name: node.expression.text, member: node.name.text, pos: node.getStart(), call: isCallee(node) });
         return;
       }
       if (ts.isIdentifier(node)) {
-        // `a.b` の b と `{ b: … }` の b は、同名の束縛への参照ではない。
-        const { parent } = node;
-        const propertyName =
-          (ts.isPropertyAccessExpression(parent) || ts.isPropertyAssignment(parent)) && parent.name === node;
-        if (!propertyName) refs.push({ name: node.text, pos: node.getStart(), call: isCallee(node) });
+        if (!isName(node)) push({ name: node.text, pos: node.getStart(), call: isCallee(node) });
         return;
       }
-      ts.forEachChild(node, visit);
+      if (deferredBody(node)) {
+        // 関数の中身 (instance の property は new のとき) は、名前が参照されたときに走る。初期化の間に呼ぶ関数へ渡したもの・
+        // 即時に呼ぶもの (inCall) は、初期化で走るとみなす。名前 (computed) と decorator は定義のときに走る。
+        const body = deferred || !inCall;
+        const named = (node as ts.NamedDeclaration).name;
+        ts.forEachChild(node, (child) => visit(child, child === named || ts.isDecorator(child) ? deferred : body, inCall));
+        return;
+      }
+      ts.forEachChild(node, (child) => visit(child, deferred, inCall || startsCall(node)));
     };
-    visit(root);
-    return refs;
+    visit(root, false, false);
   };
-  const declare = (name: string, refs: Ref[]) => mod.decls.set(name, [...(mod.decls.get(name) ?? []), ...refs]);
 
   for (const st of parsed.statements) {
     if (ts.isImportDeclaration(st)) {
@@ -187,6 +259,8 @@ function parseModule(file: string, source: string, resolveSpec: (spec: string) =
           if (el.isTypeOnly) continue;
           const original = (el.propertyName ?? el.name).text;
           mod.exports.set(el.name.text, from === undefined ? { local: original } : from ? { from, name: original } : null);
+          // primitive を名前を変えて中継されると、使う側の名前では見つからない。中継した file の初期化に数える。
+          if (primitiveName(original)) mod.primitives.add(INIT);
         }
       }
       continue;
@@ -195,26 +269,24 @@ function parseModule(file: string, source: string, resolveSpec: (spec: string) =
     const modifiers = ts.canHaveModifiers(st) ? ts.getModifiers(st) ?? [] : [];
     const exported = modifiers.some((m) => m.kind === ts.SyntaxKind.ExportKeyword);
     const isDefault = modifiers.some((m) => m.kind === ts.SyntaxKind.DefaultKeyword);
-    let names: string[];
-    if (ts.isFunctionDeclaration(st) || ts.isClassDeclaration(st)) names = [st.name?.text ?? DEFAULT];
-    else if (ts.isEnumDeclaration(st) || ts.isModuleDeclaration(st)) names = [st.name.text];
-    else if (ts.isVariableStatement(st)) names = st.declarationList.declarations.flatMap((d) => boundNames(d.name));
-    else if (ts.isExportAssignment(st)) names = [DEFAULT];
-    else {
-      declare(INIT, collect(st));
-      continue;
-    }
-    const refs = collect(st);
-    for (const name of names) {
-      declare(name, refs);
-      if (ts.isExportAssignment(st)) mod.exports.set('default', { local: name });
-      else if (exported) mod.exports.set(isDefault ? 'default' : name, { local: name });
-    }
+    const declare = (names: string[], root: ts.Node) => {
+      for (const name of names) {
+        refsOf(name);
+        if (ts.isExportAssignment(st)) mod.exports.set('default', { local: name });
+        else if (exported) mod.exports.set(isDefault ? 'default' : name, { local: name });
+      }
+      walk(root, names);
+    };
+    if (ts.isVariableStatement(st)) for (const d of st.declarationList.declarations) declare(boundNames(d.name), d);
+    else if (ts.isFunctionDeclaration(st) || ts.isClassDeclaration(st)) declare([st.name?.text ?? DEFAULT], st);
+    else if (ts.isEnumDeclaration(st) || ts.isModuleDeclaration(st)) declare([st.name.text], st);
+    else if (ts.isExportAssignment(st)) declare([DEFAULT], st);
+    else walk(st, []); // 宣言でない top-level の文
   }
   return mod;
 }
 
-const EMPTY: Mod = { imports: new Map(), exports: new Map(), stars: [], deps: [], decls: new Map(), primitive: false };
+const EMPTY: Mod = { imports: new Map(), exports: new Map(), stars: [], deps: [], decls: new Map(), primitives: new Set() };
 const realModules = new Map<string, Mod>();
 
 type CallSite = { site: string; kind: ExitKind; gated: boolean; routes: string[] };
@@ -331,9 +403,10 @@ function analyze(routes: string[], overlay: Record<string, string> = {}) {
             queue.push(target);
             continue;
           }
-          // 同じ宣言の中で、この参照より前にゲートを呼んでいるか (import しただけ・後ろで呼ぶ・別の関数で呼ぶ は数えない)。
+          // 同じ宣言の中で、この参照より前にゲートを呼んでいるか (import しただけ・後ろで呼ぶ・別の関数で呼ぶ・
+          // 同じ名前の局所の束縛を呼ぶ は数えない)。
           const gated = refs.some((r) => {
-            if (!r.call || r.pos >= ref.pos) return false;
+            if (!r.call || r.local || r.pos >= ref.pos) return false;
             const called = targets(file, r);
             return called.length === 1 && called[0] === GATE;
           });
@@ -351,7 +424,7 @@ function analyze(routes: string[], overlay: Record<string, string> = {}) {
     .sort((a, b) => (a.site < b.site ? -1 : 1));
   return {
     callSites,
-    primitiveFiles: [...files].filter((file) => load(file).primitive).sort(),
+    primitiveDecls: [...files].flatMap((file) => [...load(file).primitives].map((decl) => `${file}#${decl}`)).sort(),
   };
 }
 
@@ -380,8 +453,9 @@ describe('settle の入口は hosted intent のゲートを通る (構造の柵)
     expect(others).toEqual(Object.keys(UNGATED_CALL_SITES).sort());
   });
 
-  it('route から読み込まれる file で broadcast の関数名が出てくるのは、数えた file だけ', () => {
-    expect(real.primitiveFiles).toEqual(Object.keys(BROADCAST_PRIMITIVE_FILES).sort());
+  it('route から読み込まれる宣言で broadcast の primitive が出てくるのは、出口か、理由つきの宣言だけ', () => {
+    expect(real.primitiveDecls.filter((decl) => decl in EXITS)).toEqual([...PRIMITIVE_EXITS].sort());
+    expect(real.primitiveDecls.filter((decl) => !(decl in EXITS))).toEqual(Object.keys(NON_JPYC_PRIMITIVE_DECLS).sort());
   });
 });
 
@@ -517,6 +591,66 @@ describe('settle の柵のたどり方 (偽の route)', () => {
       },
       {},
     ],
+    [
+      'import した module の初期化で出口を呼ぶ (変数の初期化式・初期化で呼ぶ関数への callback・class の static)',
+      {
+        'lib/fenceFixture/initVar.ts': `import { settleViaForwarder } from '${SETTLE}';
+          export const work = settleViaForwarder({} as never);`,
+        'lib/fenceFixture/initCallback.ts': `import { settleViaForwarder } from '${SETTLE}';
+          export const later = Promise.resolve().then(() => settleViaForwarder({} as never));`,
+        'lib/fenceFixture/initStatic.ts': `import { settleViaForwarder } from '${SETTLE}';
+          class Boot { static started = settleViaForwarder({} as never); }`,
+        'lib/fenceFixture/initBlock.ts': `import { settleViaForwarder } from '${SETTLE}';
+          export class Boot { static { void settleViaForwarder({} as never); } }`,
+        [ROUTE]: `import '@/lib/fenceFixture/initVar';
+          import '@/lib/fenceFixture/initCallback';
+          import '@/lib/fenceFixture/initStatic';
+          import '@/lib/fenceFixture/initBlock';
+          export const GET = () => null;`,
+      },
+      {
+        'lib/fenceFixture/initVar.ts#<init> -> settleViaForwarder': 'ungated',
+        'lib/fenceFixture/initCallback.ts#<init> -> settleViaForwarder': 'ungated',
+        'lib/fenceFixture/initStatic.ts#<init> -> settleViaForwarder': 'ungated',
+        'lib/fenceFixture/initBlock.ts#<init> -> settleViaForwarder': 'ungated',
+      },
+    ],
+    [
+      '名前が参照されるまで走らない関数 (変数に入れた関数・class の method と instance の property) は、使わなければ数えない',
+      {
+        'lib/fenceFixture/stored.ts': `import { settleViaForwarder } from '${SETTLE}';
+          export const pay = (input: never) => settleViaForwarder(input);
+          export class Payer {
+            run = () => settleViaForwarder({} as never);
+            pay(input: never) { return settleViaForwarder(input); }
+          }`,
+        [ROUTE]: `import '@/lib/fenceFixture/stored';
+          export const GET = () => null;`,
+      },
+      {},
+    ],
+    [
+      'ゲートと同じ名前の局所の関数・引数を先に呼ぶ (ゲートとみなさない)',
+      {
+        'app/api/fence-fixture/local/route.ts': `import { settleViaForwarder } from '${SETTLE}';
+          import { checkHostedIntentSettleAdmission } from '${GATE_MODULE}';
+          export async function POST(input: never) {
+            async function checkHostedIntentSettleAdmission(_: never) { return 'allow'; }
+            if ((await checkHostedIntentSettleAdmission(input)) !== 'allow') return null;
+            return settleViaForwarder(input);
+          }`,
+        'app/api/fence-fixture/param/route.ts': `import { settleViaForwarder } from '${SETTLE}';
+          import { checkHostedIntentSettleAdmission } from '${GATE_MODULE}';
+          export async function POST(input: never, checkHostedIntentSettleAdmission = async (_: never) => 'allow') {
+            if ((await checkHostedIntentSettleAdmission(input)) !== 'allow') return null;
+            return settleViaForwarder(input);
+          }`,
+      },
+      {
+        'app/api/fence-fixture/local/route.ts#POST -> settleViaForwarder': 'ungated',
+        'app/api/fence-fixture/param/route.ts#POST -> settleViaForwarder': 'ungated',
+      },
+    ],
   ])('%s', (_title, files, expected) => {
     expect(verdicts(files)).toEqual(expected);
   });
@@ -529,11 +663,61 @@ describe('settle の柵のたどり方 (偽の route)', () => {
       .toThrow(/unresolved export settleViaForwarder2/);
   });
 
-  it('IO を取り出して sendRawTransaction を直接呼ぶ route は、broadcast の関数名で見つかる', () => {
-    const files = {
-      [ROUTE]: `import { selfHostIoFor } from '${PROVIDER}';
-        export const POST = (raw: never) => selfHostIoFor(137).sendRawTransaction(raw);`,
-    };
-    expect(analyze([ROUTE], files).primitiveFiles).toContain(ROUTE);
+  // broadcast の primitive は宣言の単位で数える。route が使わない宣言も、読み込まれる file にあれば数える。
+  it.each<[string, Record<string, string>, string[]]>([
+    [
+      'IO を取り出して sendRawTransaction を直接呼ぶ',
+      {
+        [ROUTE]: `import { selfHostIoFor } from '${PROVIDER}';
+          export const POST = (raw: never) => selfHostIoFor(137).sendRawTransaction(raw);`,
+      },
+      [`${ROUTE}#POST`],
+    ],
+    [
+      '送信の関数を足した file は、宣言を 1 つずつ数える (route が使わない宣言も)',
+      {
+        'lib/fenceFixture/sender.ts': `export const PROVIDER = 'self-host';
+          export const send = (wallet: never) => wallet.sendTransaction({});
+          export function sendLater(client: never) { return client.writeContract({}); }`,
+        [ROUTE]: `import { PROVIDER } from '@/lib/fenceFixture/sender';
+          export const GET = () => PROVIDER;`,
+      },
+      ['lib/fenceFixture/sender.ts#send', 'lib/fenceFixture/sender.ts#sendLater'],
+    ],
+    [
+      'primitive の別名 import (呼ぶ・.call で呼ぶ)',
+      {
+        [ROUTE]: `import { sendTransaction as broadcast } from 'viem/actions';
+          export const POST = (wallet: never, tx: never) => broadcast(wallet, tx);
+          export const PUT = (wallet: never, tx: never) => broadcast.call(null, wallet, tx);`,
+      },
+      [`${ROUTE}#POST`, `${ROUTE}#PUT`],
+    ],
+    [
+      '文字列の computed 呼び出し',
+      { [ROUTE]: "export const POST = (wallet: never) => wallet['sendTransaction']({});" },
+      [`${ROUTE}#POST`],
+    ],
+    [
+      '生の RPC の送信の method 名',
+      {
+        [ROUTE]: `export const POST = (client: never, raw: never) =>
+            client.request({ method: 'eth_sendRawTransaction', params: [raw] });
+          export const PUT = (client: never, op: never) => client.request({ method: 'eth_sendUserOperation', params: [op] });`,
+      },
+      [`${ROUTE}#POST`, `${ROUTE}#PUT`],
+    ],
+    [
+      'primitive を名前を変えて再 export した file (使う側の名前では見つからない)',
+      {
+        'lib/fenceFixture/actions.ts': "export { sendTransaction as broadcast } from 'viem/actions';",
+        [ROUTE]: `import { broadcast } from '@/lib/fenceFixture/actions';
+          export const POST = (wallet: never, tx: never) => broadcast(wallet, tx);`,
+      },
+      ['lib/fenceFixture/actions.ts#<init>'],
+    ],
+  ])('broadcast の primitive: %s', (_title, files, expected) => {
+    const decls = analyze(Object.keys(files).filter((file) => file.startsWith('app/')), files).primitiveDecls;
+    expect(decls.filter((decl) => decl.slice(0, decl.lastIndexOf('#')) in files)).toEqual(expected);
   });
 });
