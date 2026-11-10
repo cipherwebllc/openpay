@@ -172,8 +172,53 @@ export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {
   const feeStartedRef = useRef(false);
 
   const { address: customer } = useAccount();
-  const merchantWrite = useWriteContract();
-  const feeWrite = useWriteContract();
+  // H-D (第 10 回レビュー): ウォレットの確認が出ている間に画面を離れ (unmount)、その後で承認されると、送金は broadcast
+  // されるのに、writeContract の第 2 引数の onSuccess (呼び出しごとの callback) は呼ばれない (TanStack Query は listener の
+  // 無い observer の呼び出しごとの callback を呼ばない)。復旧の印が残らないので、開き直した画面からもう一度送れてしまう。
+  // hook の options の onSuccess は Mutation 自身が呼ぶので unmount の後も走る。そこで unmount の後のときだけ印を書く
+  // (mount 中は今までどおり呼び出しごとの onSuccess が書く = 二重に書かない・mount 中の動きは変えない)。
+  // 断つ波及: 印の無いまま開き直した画面からの 2 本目の店への送金 (merchant)・2 本目の利用料 (fee)。
+  // 送信そのものは止めない (ウォレットが署名と broadcast を一度に行うので、要求を出した後は hook から止められない)。
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+  // 今の試み (writeContract に渡した variables と、印を組むのに要る値)。variables だけでは params を組み直せない。
+  // reset の後に送り直すと新しい試みに置き換わり、捨てた古い試みの hash は保存しない (呼び出しごとの onSuccess と同じ意味)。
+  const merchantAttemptRef = useRef<{
+    vars: object;
+    params: StandardPaymentParams;
+  } | null>(null);
+  const feeAttemptRef = useRef<{
+    vars: object;
+    params: StandardPaymentParams;
+    merchantHash: Hex;
+    merchantBlockNumber: bigint;
+  } | null>(null);
+  const merchantWrite = useWriteContract({
+    mutation: {
+      onSuccess: (hash, variables) => {
+        const attempt = merchantAttemptRef.current;
+        if (mountedRef.current || !attempt || attempt.vars !== variables) return;
+        persistIntent('merchant', attempt.params, hash);
+      },
+    },
+  });
+  const feeWrite = useWriteContract({
+    mutation: {
+      onSuccess: (hash, variables) => {
+        const attempt = feeAttemptRef.current;
+        if (mountedRef.current || !attempt || attempt.vars !== variables) return;
+        persistIntent('fee', attempt.params, attempt.merchantHash, {
+          feeHash: hash,
+          merchantBlockNumber: attempt.merchantBlockNumber,
+        });
+      },
+    },
+  });
 
   // 同内容の置換 (高速化) で確認済みの実 hash を、試行 (chain・送った hash) に結び付けて保持する。
   // isSuccess に依存した一時的な算出値だと、成功後の再照会が RPC エラーになった時点で mine されて
@@ -405,13 +450,16 @@ export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {
       merchantBlockNumber: bigint,
     ) => {
       setPhase('fee-sending');
-      feeWrite.writeContract({
+      const vars = {
         chainId: params.chainId,
         address: params.tokenAddress,
         abi: erc20Abi,
         functionName: 'transfer',
         args: [params.feeReceiver, params.feeAmount],
-      }, {
+      } as const;
+      // H-D: unmount の後に承認された fee の hash を、hook の options の onSuccess が保存できるように置く。
+      feeAttemptRef.current = { vars, params, merchantHash, merchantBlockNumber };
+      feeWrite.writeContract(vars, {
         onSuccess: (hash) => {
           restoredFeeTxHashRef.current = hash;
           persistIntent('fee', params, merchantHash, {
@@ -507,14 +555,19 @@ export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {
     //    receipt を待ち続けるため reset() で明示的にクリア。
     merchantWrite.reset();
     feeWrite.reset();
+    // H-D: reset で捨てた fee の試みは、後から承認されても保存しない (呼び出しごとの onSuccess が呼ばれなくなるのと同じ意味)。
+    feeAttemptRef.current = null;
+    const vars = {
+      chainId: params.chainId,
+      address: params.tokenAddress,
+      abi: erc20Abi,
+      functionName: 'transfer',
+      args: [params.merchant, params.merchantAmount],
+    } as const;
+    // H-D: unmount の後に承認された merchant の hash を、hook の options の onSuccess が保存できるように置く。
+    merchantAttemptRef.current = { vars, params };
     merchantWrite.writeContract(
-      {
-        chainId: params.chainId,
-        address: params.tokenAddress,
-        abi: erc20Abi,
-        functionName: 'transfer',
-        args: [params.merchant, params.merchantAmount],
-      },
+      vars,
       {
         onSuccess: (hash) => {
           restoredMerchantTxHashRef.current = hash;
