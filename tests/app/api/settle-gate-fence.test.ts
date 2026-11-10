@@ -18,10 +18,12 @@ import { beforeAll, describe, expect, it } from 'vitest';
 //   - 関数の中身と class の instance の property の初期化は、その宣言の名前が参照されたときにたどる。それ以外は module の
 //     初期化 ('<init>'。import されたら名前を使わなくても走る) に数える: 宣言でない文・変数の初期化式・class の static の
 //     初期化・初期化の間に呼ぶ関数へ渡した callback と即時に呼ぶ関数 (渡した先がすぐ呼ぶかは見ずに、走るとみなす)。
+//     初期化から名前を使わずに走る先 (static block の this.run()・初期化の中で作る object の getter) はたどらず、throw で落とす。
 //   - forwarder の出口の呼び出し点は、同じ宣言の中で、出口より前にゲートを呼ぶ。ゲートと同じ名前を同じ top-level の文の
 //     中で宣言し直している (局所の関数・変数・引数。どの scope かは見ない) ときは、ゲートの呼び出しとみなさない。
 //   - それ以外の出口の呼び出し点は、理由つきの allowlist に載っている。
-//   たどれない書き方 (行き先が文字列でない import() / require()・解決できない import と export) は throw で落とす。
+//   たどれない書き方 (行き先が文字列でない import() / require()・解決できない import と export・上の初期化の 2 つ) は
+//   throw で落とす。
 //
 // 出口の一覧 (2026-11-11 に lib/ と app/ の sendRawTransaction / sendTransaction / writeContract / Gelato の fetch を読んで列挙):
 //   JPYC を relayer から broadcast できるのは次の 2 か所だけ。
@@ -40,11 +42,14 @@ import { beforeAll, describe, expect, it } from 'vitest';
 //       lib/relay/relayProvider.ts selfHostIoFor — 上記
 //   出口の一覧の漏れは 3 つ目のテストが見る: route から実行時に読み込まれる file の宣言 (file#宣言) のうち、broadcast の
 //   primitive が出てくるものを固定する。primitive = viem の送信の関数名 (BROADCAST_PRIMITIVE)・それを別名で import した
-//   名前・同じ名前の文字列 (`wallet['sendTransaction']`)・生の RPC の送信の method 名 (`eth_send…` / `wallet_send…`)。
-//   primitive を再 export した file は、その file の '<init>' に数える。出口 (EXITS) でない宣言には理由が要るので、承認済みの
-//   file に送信の関数を 1 つ足しても、その宣言が現れて落ちる。
+//   名前・同じ名前の文字列 (`wallet['sendTransaction']`)・生の RPC の送信の method 名 (`eth_send…` / `wallet_send…`)・
+//   viem の getContract の write の形 (`.write.<名前>` / `.write[…]`。import の有無では絞らない)。primitive を再 export
+//   した file は、その file の '<init>' に数える。出口 (EXITS) でない宣言には理由が要るので、承認済みの file に送信の関数を
+//   1 つ足しても、その宣言が現れて落ちる。
 //
 // この柵が見ないもの:
+//   この柵は、route が既知の出口・既知の primitive の形で JPYC を送ることを見張る。SDK の内部や、実行時に組み立てた名前までは
+//   追わない。新しい送信の形 (SDK・RPC の method・関数名) を入れるときは、BROADCAST_PRIMITIVE などの一覧に足す。
 //   - ゲートの結果の扱い (denied / storage で止めるか) と、ゲートの呼び出しが必ず実行されるか。見るのは「同じ宣言の中で、
 //     出口より前にゲートの呼び出しが書かれている」ことだけ (分岐の中にあっても通る)。応答は
 //     tests/app/api/settle-hosted-gate.test.ts・relay-jpyc-hosted-gate.test.ts・relay-move.test.ts が見る。
@@ -52,7 +57,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 //   - fetch で外の relayer を呼ぶ新しい出口 (関数名では見つからない)。Gelato は relayFreeAuthorization の中だけ。
 //   - 実行時に組み立てた名前での送信 (`wallet[name]()` の name を文字列の連結や入力から作る・eval)。primitive の名前が、
 //     識別子か文字列のまま route から読み込まれる code のどこかに出てくることを前提にしている。
-//   - npm の package の中の、上の名前を使わない送信 (例: viem の getContract の write・ほかの SDK の送信の関数)。
+//   - npm の package の中の、上の名前と形を使わない送信 (例: ほかの SDK の送信の関数・`const w = contract.write; w.settle()`)。
 //   - 理由つきの宣言 (NON_JPYC_PRIMITIVE_DECLS) の中に足した JPYC の送信。その宣言の中身は人が読む。
 //   - 局所の shadowing はゲートの名前だけを見る。出口と同じ名前の局所の束縛は出口とみなす (落ちる側に倒れる)。
 
@@ -150,7 +155,10 @@ function parseModule(file: string, source: string, resolveSpec: (spec: string) =
   const primitiveName = (text: string) => BROADCAST_PRIMITIVE.test(text) || aliases.has(text);
   const isPrimitive = (node: ts.Node) =>
     (ts.isIdentifier(node) && primitiveName(node.text)) ||
-    (ts.isStringLiteralLike(node) && (BROADCAST_PRIMITIVE.test(node.text) || RPC_SEND.test(node.text)));
+    (ts.isStringLiteralLike(node) && (BROADCAST_PRIMITIVE.test(node.text) || RPC_SEND.test(node.text))) ||
+    // viem の getContract の write (`contract.write.settle(…)`・`contract.write['settle'](…)`)。中で writeContract を呼ぶ。
+    ((ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) &&
+      ts.isPropertyAccessExpression(node.expression) && node.expression.name.text === 'write');
 
   const refsOf = (decl: string) => {
     let refs = mod.decls.get(decl);
@@ -188,6 +196,15 @@ function parseModule(file: string, source: string, resolveSpec: (spec: string) =
     const visit = (node: ts.Node, deferred: boolean, inCall: boolean) => {
       // 型の位置は実行時の参照ではない (class の extends は式なのでたどる)。
       if (ts.isTypeNode(node) && !ts.isExpressionWithTypeArguments(node)) return;
+      // module の初期化の中の this (class の static block から this.run() で static method を呼ぶ等) と、初期化の中で作る
+      // object の getter / setter (`{ get run() { … } }.run`) は、走る先を名前でたどれない → 落とす (2026-11-11 時点で 0 件)。
+      if (!deferred && node.kind === ts.SyntaxKind.ThisKeyword) throw new Error(`module の初期化の this は追えない (${file})`);
+      if (
+        !deferred && !inCall && (ts.isGetAccessorDeclaration(node) || ts.isSetAccessorDeclaration(node)) &&
+        ts.isObjectLiteralExpression(node.parent)
+      ) {
+        throw new Error(`module の初期化の object の getter / setter は追えない (${file})`);
+      }
       const decls = deferred ? later : [INIT];
       const push = (ref: Omit<Ref, 'local'>) => {
         const local = ref.name !== undefined && locals.has(ref.name);
@@ -666,6 +683,15 @@ describe('settle の柵のたどり方 (偽の route)', () => {
       .toThrow(/unresolved import/);
     expect(() => verdicts({ [ROUTE]: `import { settleViaForwarder2 } from '${SETTLE}';\nexport const POST = settleViaForwarder2;` }))
       .toThrow(/unresolved export settleViaForwarder2/);
+    // 初期化で static method を this で呼ぶ・初期化の中の object の getter を読む (どちらも走る先を名前でたどれない)。
+    const boot = (body: string) => ({
+      'lib/fenceFixture/boot.ts': `import { settleViaForwarder } from '${SETTLE}';\n${body}`,
+      [ROUTE]: "import '@/lib/fenceFixture/boot';\nexport const GET = () => null;",
+    });
+    expect(() => verdicts(boot('class Boot { static run() { return settleViaForwarder({} as never); } static { this.run(); } }')))
+      .toThrow(/module の初期化の this/);
+    expect(() => verdicts(boot('export const value = { get run() { return settleViaForwarder({} as never); } }.run;')))
+      .toThrow(/module の初期化の object の getter/);
   });
 
   // broadcast の primitive は宣言の単位で数える。route が使わない宣言も、読み込まれる file にあれば数える。
@@ -709,6 +735,15 @@ describe('settle の柵のたどり方 (偽の route)', () => {
         [ROUTE]: `export const POST = (client: never, raw: never) =>
             client.request({ method: 'eth_sendRawTransaction', params: [raw] });
           export const PUT = (client: never, op: never) => client.request({ method: 'eth_sendUserOperation', params: [op] });`,
+      },
+      [`${ROUTE}#POST`, `${ROUTE}#PUT`],
+    ],
+    [
+      'viem の getContract の write (`.write.<名前>` と `.write[…]`)',
+      {
+        [ROUTE]: `import { getContract } from 'viem';
+          export const POST = (client: never, args: never) => getContract(client).write.settle(args);
+          export const PUT = (contract: never, args: never) => contract.write['settle'](args);`,
       },
       [`${ROUTE}#POST`, `${ROUTE}#PUT`],
     ],
