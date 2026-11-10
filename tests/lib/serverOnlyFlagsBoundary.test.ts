@@ -1,9 +1,9 @@
 // @vitest-environment node
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
-import { runtimeClosure, runtimeSpecifiers } from '../_helpers/runtimeImports';
+import { parseSource as parse, readSource, runtimeClosure, runtimeSpecifiers } from '../_helpers/runtimeImports';
 
 // 守るもの: client の bundle に入るコードが、lib/env.ts の「server 専用」の値を読まないこと。
 //
@@ -15,51 +15,50 @@ import { runtimeClosure, runtimeSpecifiers } from '../_helpers/runtimeImports';
 // 手順:
 //   1. lib/env.ts を読み、env の property (最上位) を、作るときに読む環境変数の名前で 2 つに分ける。
 //      NEXT_PUBLIC_ だけ = client でも値がある / それ以外を 1 つでも読む = server 専用。
-//      たどれない書き方 (process.env[name]・spread・環境変数を読まない property など) は throw する (fail closed)。
-//      落ちたら、その書き方を分類できるように classifyEnv を直す。
+//      分類するのは、file の中の依存を全部たどれたときだけ: 名前はすべて行き先が分かる (最上位の const / function・関数の
+//      中の変数・外の package の import・KNOWN_GLOBALS)・process は `process.env.NAME` の形だけ・宣言の後で値を変える
+//      書き方 (代入・++・delete・NON_MUTATING_METHODS 以外の method の呼び出し) が無い。1 つでも外れたら throw する
+//      (fail closed)。落ちたら、その書き方を分類できるように classifyEnv を直す。
 //   2. client の bundle に入る file = 'use client' を持つ file と instrumentation-client.ts から、実行時の import で
-//      たどれる file (tests/_helpers/runtimeImports.ts)。
+//      たどれる file (tests/_helpers/runtimeImports.ts)。中を見るのは .ts / .tsx / .js / .mjs (runtimeImports が import を
+//      たどる拡張子)、.css は飛ばす。この test がたどれないもの (ほかの拡張子・Pages Router の pages/・'use server' の
+//      file・`@/*` 以外の path alias) が現れたら落とす。
 //   3. その file が server 専用の property を読んでいないこと (`env.x`・`env['x']`・分割代入・別名・名前を変えた import・
-//      `import * as`)。env を値のまま渡す・再 export するなど、読む property を決められない使い方も通さない。
+//      `import * as`)。env を値のまま渡す・再 export する・env の property でない名前 (valueOf など継承した member) を
+//      読むなど、読む property を決められない使い方も通さない。
 //
 // 粒度は file。client が import する file に server 専用の読み取りがあれば、呼んでいなくても落ちる (その関数は
 // client の bundle に入り、client から呼べば必ず OFF を返す)。server だけが呼ぶ関数なら server 専用の module へ移す。
-// 見ていないもの: 'use client' の file が SOURCE_ROOTS の外にある場合・env の中の入れ子の property 単位の区別
-// (入れ子に server 専用が 1 つでもあれば、最上位の property ごと server 専用として扱う)。
+//
+// 見ていないもの:
+//   - env を経由しない `process.env.X` の直読み。
+//   - 外の package (node_modules) の中。lib/env.ts が import した関数の中で読む環境変数や、渡した値をその中で変えること。
+//   - lib/env.ts の外から env の値を書き換えること (env は `as const` で、型の上では書けない)。
+//   - 'use client' の file が SOURCE_ROOTS の外にある場合 (instrumentation-client.ts だけは足してある)。
+//   - next.config.mjs の webpack / turbopack の alias (tsconfig の paths だけを見る)。
+//   - env の中の入れ子の property 単位の区別 (入れ子に server 専用が 1 つでもあれば、最上位の property ごと server 専用として扱う)。
 
 const ROOT = process.cwd();
 const ENV_FILE = 'lib/env.ts';
+// Next は root に app/ (と pages/) があれば src/ を見ない。pages/ は下の test で「無い」ことを確かめる。
 const SOURCE_ROOTS = ['app', 'components', 'hooks', 'lib'];
 // 'use client' は無いが、Next が browser の bundle の先頭で実行する。
 const CLIENT_ENTRIES_BY_CONVENTION = ['instrumentation-client.ts'];
+// client の bundle の file のうち、中を見るもの (runtimeImports が import をたどる拡張子) と、コードでないもの。
+const SCANNED = /\.(?:tsx?|m?js)$/;
+const NOT_CODE = /\.css$/;
 
-/**
- * client の bundle に入る file が server 専用の property を読む、今ある例外。key は `file#property`。
- * `reach` は、その読み取りの結果が client の bundle の中で届く範囲の上限: file → それを実行時に import する client の
- * file → そこが取る名前 ('*' = 名前で絞れない取り方)。実際の import がこれと 1 つでも違えば落ちる (例外を file ごと
- * 素通しにしない)。読み取りが無くなった項目もテストが落とす。
- */
-const ALLOWED: Record<string, { why: string; reach: Record<string, Record<string, string[]>> }> = {
-  'lib/shops/flags.ts#enableAgentOrder': {
-    why: 'shopsApiEnabled() は server の AND guard。client の bundle には、AI ストアのカード (DiscoveryCatalogPanel・' +
-      'DiscoveryExamples) → lib/x402/usdcCatalog.ts → lib/x402/firstParty.ts の import で入る。firstParty.ts は module の' +
-      '読み込み時に shopsApiEnabled() を呼んで FIRST_PARTY_RESOURCES を作るので、client ではその配列から JPYC Shops の' +
-      '行が必ず抜ける。今は usdcCatalog.ts が取るのが OPENPAY_CANONICAL_ORIGIN (flag に依らない定数) だけなので、画面には' +
-      '出ない。直すなら OPENPAY_CANONICAL_ORIGIN を firstParty.ts の外へ出して、この項目を消す。',
-    reach: {
-      'lib/shops/flags.ts': { 'lib/x402/firstParty.ts': ['shopsApiEnabled'] },
-      'lib/x402/firstParty.ts': { 'lib/x402/usdcCatalog.ts': ['OPENPAY_CANONICAL_ORIGIN'] },
-    },
-  },
-};
-
-const parse = (file: string, source: string) =>
-  ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, file.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
+// lib/env.ts の中で使ってよい global (今の env.ts が使うものだけ)。Object.assign・Reflect などは宣言の後で値を変えられる。
+const KNOWN_GLOBALS = new Set(['undefined', 'arguments', 'console', 'Number', 'Error']);
+// lib/env.ts の中で呼んでよい method (値を変えないもの・今の env.ts が使うものだけ)。push・set などは宣言の後で値を足せる。
+const NON_MUTATING_METHODS = new Set(['warn', 'isFinite', 'isInteger', 'test']);
 
 const lineOf = (node: ts.Node) => node.getSourceFile().getLineAndCharacterOfPosition(node.getStart()).line + 1;
 
 const isWrapper = (node: ts.Node): node is ts.ParenthesizedExpression | ts.AsExpression | ts.SatisfiesExpression | ts.NonNullExpression =>
   ts.isParenthesizedExpression(node) || ts.isAsExpression(node) || ts.isSatisfiesExpression(node) || ts.isNonNullExpression(node);
+
+const unwrap = (node: ts.Expression): ts.Expression => (isWrapper(node) ? unwrap(node.expression) : node);
 
 /** 値を読む位置の identifier か (宣言の名前・`a.b` の b・`{ b: 1 }` の b は違う)。 */
 function isReference(id: ts.Identifier): boolean {
@@ -81,6 +80,18 @@ function isBindingName(id: ts.Identifier): boolean {
   );
 }
 
+/** 代入・++ / --・delete なら、書き換える先の式。 */
+function writeTarget(node: ts.Node): ts.Expression | undefined {
+  if (ts.isBinaryExpression(node)) {
+    const kind = node.operatorToken.kind;
+    return kind >= ts.SyntaxKind.FirstAssignment && kind <= ts.SyntaxKind.LastAssignment ? node.left : undefined;
+  }
+  if (ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node)) {
+    return node.operator === ts.SyntaxKind.PlusPlusToken || node.operator === ts.SyntaxKind.MinusMinusToken ? node.operand : undefined;
+  }
+  return ts.isDeleteExpression(node) ? node.expression : undefined;
+}
+
 /** lib/env.ts の env の property を、作るときに読む環境変数で分ける。たどれない書き方は throw する。 */
 function classifyEnv(source: string) {
   const parsed = parse(ENV_FILE, source);
@@ -91,10 +102,17 @@ function classifyEnv(source: string) {
   const localImport = runtimeSpecifiers(ENV_FILE, source).find((spec) => spec.startsWith('.') || spec.startsWith('@/'));
   if (localImport) throw unclassifiable(`repo の中の module (${localImport}) を import している`, parsed);
 
-  // property の式に出てくる名前の行き先 (最上位の const と function。function は overload の数だけある)。
+  // 最上位の名前の行き先 (const と function。function は overload の数だけある) と、import した名前 (外の package)。
   const topLevel = new Map<string, ts.Node[]>();
+  const imported = new Set<string>();
   for (const stmt of parsed.statements) {
-    if (ts.isVariableStatement(stmt)) {
+    if (ts.isImportDeclaration(stmt)) {
+      const clause = stmt.importClause;
+      if (clause?.name) imported.add(clause.name.text);
+      const bindings = clause?.namedBindings;
+      if (bindings && ts.isNamespaceImport(bindings)) imported.add(bindings.name.text);
+      for (const element of bindings && ts.isNamedImports(bindings) ? bindings.elements : []) imported.add(element.name.text);
+    } else if (ts.isVariableStatement(stmt)) {
       if (!(stmt.declarationList.flags & ts.NodeFlags.Const)) throw unclassifiable('最上位の let / var (後から代入できる)', stmt);
       for (const decl of stmt.declarationList.declarations) {
         if (!ts.isIdentifier(decl.name)) throw unclassifiable('最上位の分割代入', decl);
@@ -107,17 +125,90 @@ function classifyEnv(source: string) {
     }
   }
 
+  let object = (topLevel.get('env')?.[0] as ts.VariableDeclaration | undefined)?.initializer;
+  while (object && isWrapper(object)) object = object.expression;
+  if (!object || !ts.isObjectLiteralExpression(object)) throw unclassifiable('`const env = { … }` が見つからない', parsed);
+
+  // 最上位より内側で作る名前 (関数の引数・中の const など)。scope ごとに 1 度だけ集める。入れ子の関数の名前まで多めに
+  // 集めるが、最上位の名前と同じ名前の束縛は下で throw するので、行き先を取り違えない。
+  const declared = new Map<ts.Node, Set<string>>();
+  const declaredIn = (scope: ts.Node) => {
+    let names = declared.get(scope);
+    if (!names) {
+      const found = new Set<string>();
+      const collect = (node: ts.Node) => {
+        if (ts.isIdentifier(node) && isBindingName(node)) found.add(node.text);
+        ts.forEachChild(node, collect);
+      };
+      collect(scope);
+      declared.set(scope, (names = found));
+    }
+    return names;
+  };
+  const isScope = (node: ts.Node) =>
+    ts.isFunctionLike(node) || ts.isBlock(node) || ts.isCatchClause(node) ||
+    ts.isForStatement(node) || ts.isForInStatement(node) || ts.isForOfStatement(node);
+  const isLocal = (id: ts.Identifier) => {
+    for (let node = id.parent; !ts.isSourceFile(node); node = node.parent) {
+      if (isScope(node) && declaredIn(node).has(id.text)) return true;
+    }
+    return false;
+  };
+  const isTopLevelName = (id: ts.Identifier) => {
+    const decl = id.parent;
+    if (ts.isFunctionDeclaration(decl)) return decl.parent === parsed;
+    return ts.isVariableDeclaration(decl) && ts.isVariableDeclarationList(decl.parent) &&
+      ts.isVariableStatement(decl.parent.parent) && decl.parent.parent.parent === parsed;
+  };
+
+  // file 全体で確かめる (env の式の外で書いても、宣言の後で値を変えられる・別の名前を指せる)。
+  const check = (node: ts.Node) => {
+    if (ts.isTypeNode(node) || ts.isImportDeclaration(node) || ts.isInterfaceDeclaration(node) || ts.isTypeAliasDeclaration(node)) return;
+    const target = writeTarget(node);
+    if (target) {
+      const written = unwrap(target);
+      if (!ts.isIdentifier(written) || !isLocal(written)) throw unclassifiable('宣言の後で値を書き換えている (通すのは関数の中の変数への代入だけ)', node);
+    }
+    if (ts.isCallExpression(node)) {
+      const callee = unwrap(node.expression);
+      if (ts.isPropertyAccessExpression(callee) || ts.isElementAccessExpression(callee)) {
+        const method = ts.isPropertyAccessExpression(callee) ? callee.name.text
+          : ts.isStringLiteralLike(callee.argumentExpression) ? callee.argumentExpression.text : '(名前が決まらない)';
+        if (!NON_MUTATING_METHODS.has(method)) throw unclassifiable(`method ${method} を呼んでいる (値を変えないと分かっている method だけを通す)`, node);
+      }
+    }
+    if (ts.isIdentifier(node)) {
+      if (isBindingName(node)) {
+        if (!isTopLevelName(node) && (topLevel.has(node.text) || imported.has(node.text))) {
+          throw unclassifiable(`最上位の名前 (${node.text}) と同じ名前の束縛がある (どちらを指すか取り違える・名前を変える)`, node);
+        }
+      } else if (isReference(node)) {
+        if (node.text === 'process') {
+          const envAccess = node.parent;
+          const named = ts.isPropertyAccessExpression(envAccess) && envAccess.expression === node && envAccess.name.text === 'env' && (
+            (ts.isPropertyAccessExpression(envAccess.parent) && envAccess.parent.expression === envAccess) ||
+            (ts.isElementAccessExpression(envAccess.parent) && envAccess.parent.expression === envAccess && ts.isStringLiteralLike(envAccess.parent.argumentExpression))
+          );
+          if (!named) throw unclassifiable('process.env を、名前が決まらない形で読んでいる (通すのは `process.env.NAME` だけ)', node);
+        } else if (!isLocal(node) && !topLevel.has(node.text) && !imported.has(node.text) && !KNOWN_GLOBALS.has(node.text)) {
+          throw unclassifiable(`行き先の分からない名前 (${node.text}) を使っている`, node);
+        }
+      }
+    }
+    ts.forEachChild(node, check);
+  };
+  check(parsed);
+
   /** node の式が (最上位の const と function をたどって) 読む環境変数の名前。 */
   const envVarsReadBy = (start: ts.Node) => {
     const names = new Set<string>();
     const seen = new Set<ts.Node>();
     const follow = (node: ts.Node) => {
       if (ts.isTypeNode(node)) return;
-      if (ts.isPropertyAccessExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'process' && node.name.text === 'env') {
-        const parent = node.parent;
-        if (ts.isPropertyAccessExpression(parent) && parent.expression === node) names.add(parent.name.text);
-        else if (ts.isElementAccessExpression(parent) && parent.expression === node && ts.isStringLiteralLike(parent.argumentExpression)) names.add(parent.argumentExpression.text);
-        else throw unclassifiable('process.env を、名前が決まらない形で読んでいる', node);
+      if (ts.isPropertyAccessExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'process') {
+        // 形は上の check で確かめてある (`process.env.NAME` か `process.env['NAME']`)。
+        const read = node.parent as ts.PropertyAccessExpression | ts.ElementAccessExpression;
+        names.add(ts.isPropertyAccessExpression(read) ? read.name.text : (read.argumentExpression as ts.StringLiteralLike).text);
         return;
       }
       if (ts.isIdentifier(node) && isReference(node)) {
@@ -132,10 +223,6 @@ function classifyEnv(source: string) {
     follow(start);
     return [...names];
   };
-
-  let object = (topLevel.get('env')?.[0] as ts.VariableDeclaration | undefined)?.initializer;
-  while (object && isWrapper(object)) object = object.expression;
-  if (!object || !ts.isObjectLiteralExpression(object)) throw unclassifiable('`const env = { … }` が見つからない', parsed);
 
   const serverOnly: Record<string, string[]> = {};
   const clientOk: string[] = [];
@@ -154,25 +241,10 @@ function classifyEnv(source: string) {
   return { serverOnly, clientOk };
 }
 
-/** from の中の specifier が target (repo 相対の .ts / .tsx) を指すか。 */
-function resolvesTo(spec: string, from: string, target: string): boolean {
+/** from の中の specifier が lib/env.ts を指すか。 */
+function resolvesToEnvFile(spec: string, from: string): boolean {
   const base = spec.startsWith('@/') ? join(ROOT, spec.slice(2)) : spec.startsWith('.') ? resolve(ROOT, dirname(from), spec) : null;
-  return base !== null && base.replace(/\.tsx?$/, '') === join(ROOT, target).replace(/\.tsx?$/, '');
-}
-const resolvesToEnvFile = (spec: string, from: string) => resolvesTo(spec, from, ENV_FILE);
-
-/** file が target から実行時に取る名前。'*' = 名前で絞れない取り方。import していなければ null。 */
-function namesTakenFrom(file: string, source: string, target: string): string[] | null {
-  const runtimeImports = runtimeSpecifiers(file, source).filter((spec) => resolvesTo(spec, file, target)).length;
-  if (runtimeImports === 0) return null;
-  const named = parse(file, source).statements.flatMap((stmt) => {
-    if (!ts.isImportDeclaration(stmt) || !ts.isStringLiteral(stmt.moduleSpecifier) || !resolvesTo(stmt.moduleSpecifier.text, file, target)) return [];
-    const clause = stmt.importClause;
-    if (!clause || clause.isTypeOnly || clause.name || !clause.namedBindings || !ts.isNamedImports(clause.namedBindings)) return [];
-    return [clause.namedBindings.elements.filter((element) => !element.isTypeOnly).map((element) => (element.propertyName ?? element.name).text)];
-  });
-  // 名前を並べた import 以外 (import * as・default・副作用・再 export・import()) は、何を取るか決められない。
-  return [...named.flat(), ...(named.length < runtimeImports ? ['*'] : [])];
+  return base !== null && base.replace(/\.tsx?$/, '') === join(ROOT, ENV_FILE).replace(/\.tsx?$/, '');
 }
 
 /**
@@ -274,43 +346,53 @@ function envUses(file: string, source: string) {
   return { reads, unclassified };
 }
 
-function hasUseClient(file: string, source: string): boolean {
-  // directive prologue だけを見る (コメントや関数の中の文字列は境界ではない)。
+/** file の先頭の directive ('use client' / 'use server' など)。コメントや関数の中の文字列は境界ではない。 */
+function directives(file: string, source: string): Set<string> {
+  const found = new Set<string>();
   for (const stmt of parse(file, source).statements) {
-    if (!ts.isExpressionStatement(stmt) || !ts.isStringLiteral(stmt.expression)) return false;
-    if (stmt.expression.text === 'use client') return true;
+    if (!ts.isExpressionStatement(stmt) || !ts.isStringLiteral(stmt.expression)) break;
+    found.add(stmt.expression.text);
   }
-  return false;
+  return found;
 }
 
 function sourceFiles(dir: string): string[] {
   return readdirSync(join(ROOT, dir), { withFileTypes: true }).flatMap((entry) => {
     const path = `${dir}/${entry.name}`;
     if (entry.isDirectory()) return sourceFiles(path);
-    return /\.tsx?$/.test(entry.name) && !entry.name.endsWith('.d.ts') ? [path] : [];
+    return /\.[cm]?[jt]sx?$/.test(entry.name) && !/\.d\.[cm]?ts$/.test(entry.name) ? [path] : [];
   });
 }
-
-const readSource = (file: string) => readFileSync(join(ROOT, file), 'utf8');
 
 describe('server-only env flags stay out of the client bundle', () => {
   const { serverOnly, clientOk } = classifyEnv(readSource(ENV_FILE));
   const allSources = SOURCE_ROOTS.flatMap(sourceFiles);
-  const clientEntries = [...allSources.filter((file) => hasUseClient(file, readSource(file))), ...CLIENT_ENTRIES_BY_CONVENTION];
-  const clientFiles = runtimeClosure(clientEntries).files.filter((file) => /\.tsx?$/.test(file));
+  // 重い走査はここで 1 度だけ (source と構文木は runtimeImports が file ごとに 1 度だけ作って使い回す)。
+  // directive を持てるのは、その文字を含む file だけなので、ほかは parse しない (escape で書いた 'use client' は見ない)。
+  const clientEntries = [
+    ...allSources.filter((file) => readSource(file).includes('use client') && directives(file, readSource(file)).has('use client')),
+    ...CLIENT_ENTRIES_BY_CONVENTION,
+  ];
+  const clientFiles = runtimeClosure(clientEntries).files;
+  const clientCode = clientFiles.filter((file) => SCANNED.test(file));
 
-  /** files のうち server 専用の property を読む箇所 (`file#property` → 行) と、読む property を決められない箇所。 */
-  const serverOnlyReads = (files: string[]) => {
-    const found = new Map<string, number[]>();
-    const unclassified: string[] = [];
-    for (const file of files) {
-      const uses = envUses(file, readSource(file));
-      unclassified.push(...uses.unclassified);
-      for (const { prop, line } of uses.reads) {
-        if (prop in serverOnly) found.set(`${file}#${prop}`, [...(found.get(`${file}#${prop}`) ?? []), line]);
-      }
+  const usesCache = new Map<string, ReturnType<typeof envUses>>();
+  const usesOf = (file: string) => {
+    let uses = usesCache.get(file);
+    if (!uses) usesCache.set(file, (uses = envUses(file, readSource(file))));
+    return uses;
+  };
+
+  /** file の env の使い方のうち、server 専用の property の読み取りと、読む property を決められない使い方。 */
+  const check = (file: string, uses = usesOf(file)) => {
+    const serverReads: string[] = [];
+    const unclassified = [...uses.unclassified];
+    for (const { prop, line } of uses.reads) {
+      if (Object.hasOwn(serverOnly, prop)) serverReads.push(`${file}#${prop} (line ${line})`);
+      // valueOf など継承した member は env を丸ごと返せる (その先で読む property をたどれない)。
+      else if (!clientOk.includes(prop)) unclassified.push(`${file}:${line} env の property でない名前 (${prop}) を読んでいる`);
     }
-    return { found, unclassified };
+    return { serverReads, unclassified };
   };
 
   it('splits every env property by the env vars it is built from (neither side is empty)', () => {
@@ -334,9 +416,22 @@ describe('server-only env flags stay out of the client bundle', () => {
     });
     // helper の中で読む環境変数も、その helper を使う property のものとして数える。
     expect(classify('a: secret()', 'function secret() { return process.env.SECRET; }').serverOnly).toEqual({ a: ['SECRET'] });
+    // 関数の中の変数への代入・決めた global・値を変えない method は通す。
+    expect(classify(
+      'a: count(process.env.NEXT_PUBLIC_A)',
+      "function count(raw?: string) { let n = 0; for (let i = 0; i < 3; i++) n += 1; if (!/^1$/.test(raw ?? '')) console.warn('x'); return raw === undefined ? n : Number(raw); }",
+    )).toEqual({ serverOnly: {}, clientOk: ['a'] });
 
+    // 理解できた NEXT_PUBLIC_ が 1 つあっても、ほかの依存を理解できなければ分類しない。
+    expect(() => classify("a: process['env'].SECRET ?? process.env.NEXT_PUBLIC_A")).toThrow(/名前が決まらない/);
     expect(() => classify('a: read("A")', 'const read = (name: string) => process.env[name];')).toThrow(/名前が決まらない/);
     expect(() => classify('a: source.A', 'const source = process.env;')).toThrow(/名前が決まらない/);
+    expect(() => classify('a: unknown ?? process.env.NEXT_PUBLIC_A')).toThrow(/行き先の分からない名前 \(unknown\)/);
+    // 宣言の後で値を変える書き方 (代入・method・Object.assign)。env の式の外に書いても落とす。
+    expect(() => classify('a: config.a', 'const config = { a: process.env.NEXT_PUBLIC_A };\nconfig.a = process.env.SECRET;')).toThrow(/書き換えている/);
+    expect(() => classify('a: list', 'const list = [process.env.NEXT_PUBLIC_A];\nfunction add() { list.push(process.env.SECRET); }')).toThrow(/method push/);
+    expect(() => classify('a: config', 'const config = { a: process.env.NEXT_PUBLIC_A };\nObject.assign(config, { a: process.env.SECRET });')).toThrow(/method assign/);
+    expect(() => classify('a: pub', 'const pub = process.env.NEXT_PUBLIC_A;\nconst f = (pub?: string) => pub;')).toThrow(/同じ名前の束縛/);
     expect(() => classify('...rest', 'const rest = { a: process.env.A };')).toThrow(/spread/);
     expect(() => classify('get a() { return process.env.A; }')).toThrow(/spread/);
     expect(() => classify('a: 1')).toThrow(/環境変数が見つからない/);
@@ -363,6 +458,8 @@ describe('server-only env flags stay out of the client bundle', () => {
     expect(uses("import * as shared from '@/lib/env';\nconst a = shared.env.one; const b = shared.isMainnet;")).toEqual({ reads: ['one'], unclassified: 0 });
     expect(uses("import { env } from '../lib/env';\nconst a = env.one;")).toEqual({ reads: ['one'], unclassified: 0 });
     expect(uses("import { env } from './env';\nconst a = env.one;", 'lib/fixture.ts')).toEqual({ reads: ['one'], unclassified: 0 });
+    // .mjs も同じように読む (client の bundle の .js / .mjs も中を見る)。
+    expect(uses(`${imported}export const on = () => env.one;`, 'lib/fixture.mjs')).toEqual({ reads: ['one'], unclassified: 0 });
 
     // 読まないもの: 型だけの参照・別の module の env・process.env・property の名前としての env。
     expect(uses("import type { env } from '@/lib/env';\ntype One = (typeof env)['one'];")).toEqual({ reads: [], unclassified: 0 });
@@ -388,46 +485,39 @@ describe('server-only env flags stay out of the client bundle', () => {
     }
     // env 以外の再 export は通す。
     expect(uses("export { isMainnet } from '@/lib/env';")).toEqual({ reads: [], unclassified: 0 });
+
+    // env の property でない名前 (継承した member) は、env を丸ごと持ち出せるので通さない。
+    const valueOf = `${imported}const copy = env.valueOf() as typeof env; console.log(copy.enableAgentOrder);`;
+    expect(check('components/Fixture.tsx', envUses('components/Fixture.tsx', valueOf)))
+      .toEqual({ serverReads: [], unclassified: ['components/Fixture.tsx:2 env の property でない名前 (valueOf) を読んでいる'] });
+  });
+
+  it('the client bundle holds nothing this test does not follow', () => {
+    // Pages Router の file は 'use client' が無くても client の bundle に入る (SOURCE_ROOTS の入口が足りなくなる)。
+    expect(existsSync(join(ROOT, 'pages')), 'pages/ ができた — 入口の数え方を決める').toBe(false);
+    // runtimeImports が repo の中としてたどるのは `@/` と相対 path だけ。ほかの alias は外の package に見えて、その先を見落とす。
+    const { config, error } = ts.readConfigFile(join(ROOT, 'tsconfig.json'), ts.sys.readFile);
+    expect(error).toBeUndefined();
+    expect({ baseUrl: config.compilerOptions.baseUrl, paths: config.compilerOptions.paths }).toEqual({ baseUrl: undefined, paths: { '@/*': ['./*'] } });
+    // 'use server' の file は client から import しても server で動く (client に入るのは呼び出しの stub)。中の読み取りを
+    // client のものとして数えると誤り、数えないとその先の import を見落とす。現れたら扱いを決める。
+    expect(clientCode.filter((file) => directives(file, readSource(file)).has('use server'))).toEqual([]);
+    // 中を見ない拡張子 (.jsx・.cjs・.json など)。import もたどっていないので、現れたら SCANNED か NOT_CODE を決める。
+    expect(clientFiles.filter((file) => !SCANNED.test(file) && !NOT_CODE.test(file))).toEqual([]);
   });
 
   it('no file in the client bundle reads a server-only property', () => {
     // 空振りの防止: client の bundle は lib/env.ts まで届いていて、env を読む file がある。
-    expect(clientFiles).toContain(ENV_FILE);
-    expect(clientFiles.filter((file) => file !== ENV_FILE && envUses(file, readSource(file)).reads.length > 0).length).toBeGreaterThan(0);
+    expect(clientCode).toContain(ENV_FILE);
+    expect(clientCode.filter((file) => file !== ENV_FILE && usesOf(file).reads.length > 0).length).toBeGreaterThan(0);
 
-    const { found, unclassified } = serverOnlyReads(clientFiles);
-    expect(unclassified).toEqual([]);
-    const violations = [...found].filter(([key]) => !(key in ALLOWED)).map(([key, lines]) => `${key} (line ${lines.join(', ')})`);
-    expect(violations).toEqual([]);
-    // 読み取りが無くなった例外は消す (残すと、同じ file の次の読み取りが素通りする)。
-    expect(Object.keys(ALLOWED).filter((key) => !found.has(key))).toEqual([]);
-  });
-
-  it('a recorded exception reaches no further into the client bundle than its record says', () => {
-    // 取る名前の読み方: 名前を並べた import だけが名前になり、ほかの取り方は '*'。型だけの import は数えない。
-    const taken = (source: string) => namesTakenFrom('components/Fixture.tsx', source, 'lib/x402/firstParty.ts');
-    expect(taken("import { a, type B, c as d } from '@/lib/x402/firstParty';")).toEqual(['a', 'c']);
-    expect(taken("import { a } from '../lib/x402/firstParty';\nconst later = () => import('@/lib/x402/firstParty');")).toEqual(['a', '*']);
-    expect(taken("import * as all from '@/lib/x402/firstParty';")).toEqual(['*']);
-    expect(taken("export { a } from '@/lib/x402/firstParty';")).toEqual(['*']);
-    expect(taken("import type { B } from '@/lib/x402/firstParty';\nimport { a } from '@/lib/x402/other';")).toBeNull();
-
-    for (const [key, { reach }] of Object.entries(ALLOWED)) {
-      // 記録は、読み取りのある file から始める (空の記録で file ごと素通しにしない)。
-      expect(Object.keys(reach)).toContain(key.split('#')[0]);
-      for (const [target, recorded] of Object.entries(reach)) {
-        const actual: Record<string, string[]> = {};
-        for (const file of clientFiles) {
-          const names = namesTakenFrom(file, readSource(file), target);
-          if (names) actual[file] = names;
-        }
-        expect(actual, `${key}: client の bundle の中で ${target} を import する file と、取る名前`).toEqual(recorded);
-      }
-    }
+    const results = clientCode.map((file) => check(file));
+    expect(results.flatMap((result) => result.unclassified)).toEqual([]);
+    expect(results.flatMap((result) => result.serverReads)).toEqual([]);
   });
 
   it('the scanner is not blind to the repo: it finds the server-side reads of server-only properties', () => {
     const client = new Set(clientFiles);
-    expect(serverOnlyReads(allSources.filter((file) => !client.has(file))).found.size).toBeGreaterThan(0);
+    expect(allSources.filter((file) => !client.has(file)).some((file) => check(file).serverReads.length > 0)).toBe(true);
   });
 });
