@@ -23,13 +23,24 @@ import { budgetBuildEnv, publicFeatureFlagKeys, sourceTextsUnder } from './lib/b
 // (e2e/prodFlags.env) で build した Route 表 (flag OFF の最小 env でも全 route 同値だった)。22〜34 kB 緩んでいた
 // 予算では 30 kB 近い退行が CI を素通りするため。予算対象も顧客の支払い導線・主要画面に広げ、予算表に無い
 // 300 kB 超の route は UNBUDGETED_MAX_KB で検出する (黙って重いページが増えない)。
+// 2026-11-11 第 10 回レビュー F-10: 本番で ON なのにベクターに無かった公開 flag 6 つ (ARC_PAYOUT・CIRCLE_PAYMASTER・
+// MENU_OPTIONS・ORDER_TOKEN・SHOP_LIVE・X402_DUAL_RAIL_ARC) を e2e/prodFlags.env に足した。足す前と後の build で Route 表は
+// 全行同じ (Size の列も) で、足す前の予算のままでも落ちない = flag のために上げる行は無い。lib/env.ts の flag は
+// parseBoolFlag(...) の戻り値 (実行時の値) で、client の chunk にも呼び出しのまま残る。webpack は OFF の枝を消さないので、
+// この 6 つの ON/OFF では First Load JS は変わらない (上の「flag OFF の最小 env でも全 route 同値」と同じ)。ベクターを本番に
+// 合わせておく意味は、flag を build 時の定数として読む実装に変わったときにも、本番の経路を測り続けること。
+// 同じ PR で、下の「2026-11-11」の 17 行を「main e089ba5a の CI の Route 表の実測 + 5」に採り直した。2026-10-22 の
+// @sentry/nextjs 10.76.2 (#900) で共有 chunk が 194 → 171 kB に減ったのに予算は 2026-10-10 のままで、9〜28 kB 緩んでいた
+// (その後 /checkout は main の CI で 411 → 427 kB に増えたが、古い予算 436 の内側なので何も出なかった)。
+// /[locale]/experimental/cross-chain-demo の行は F-11 (消すかどうか) の PR で扱うので、ここでは変えない。
 const BUDGETS_KB = {
-  '/_not-found': 200,
-  '/[locale]': 273,
+  '/_not-found': 177, // 2026-11-11 F-10: 実測 172 + 5 (前は 200)
+  '/[locale]': 255, // 2026-11-11 F-10: 実測 250 + 5 (前は 273)
   // 2026-09-21 /agent 磨き上げ P1: 実測 353kB (P0 時点 352kB) + 3kB。Agent activity (P2) を足す**前**の値で
   // 固定する — 機能追加後の実測に予算を追随させないため。P2 で超えるなら Activity を next/dynamic へ。
   // 2026-10-10 F2: 実測 322 + 5。
-  '/[locale]/agent': 327,
+  // 2026-11-11 F-10: 実測 302 + 5 (前は 327)。
+  '/[locale]/agent': 307,
   // /pay は慢性的に予算上限張り付き。Option B (会計データ分離・v3) で 420→423kB、
   // JPYC EIP-3009 recover モード (#131c) の forwarderConfig + recover 開示 i18n で 423→424kB。
   // 2026-06-13: 上の comment が要求した code-split pass を実施 — CrossChainHint (USDC 接続時) /
@@ -60,7 +71,8 @@ const BUDGETS_KB = {
   //   import 経路なし (tip.ts の変更は既存 env import のみ)。useStandardPayment は TipStandardEngine へ
   //   code-split 済み (tip 448→446 / [handle] 487→484 kB に低減)。
   // 2026-10-10 F2: 実測 421 + 5 (上の注記の vendor 増分を含んだ実測)。
-  '/[locale]/pay': 426,
+  // 2026-11-11 F-10: 実測 403 + 5 (前は 426)。
+  '/[locale]/pay': 408,
   // 2026-08-18 store USDC P2: /pay と同型の chunk 再分割 +1kB (tip から新規 USDC モジュール
   // への import 経路なしを grep で確認)。
   // 2026-08-17 store USDC P3: Terms 13 条追記 (messages 増) による再分割 +1kB (tip から
@@ -70,30 +82,36 @@ const BUDGETS_KB = {
   // 2026-09-09 npm audit fix のベンダー増分 (/pay のコメント参照) で 443kB → +7kB。
   // 2026-09-17 Arc USDC チップ: messages 増による再分割 +1kB (上の /pay コメント参照)。
   // 2026-10-10 F2: 実測 416 + 5。
-  '/[locale]/tip/[address]': 421,
+  // 2026-11-11 F-10: 実測 396 + 5 (前は 421)。
+  '/[locale]/tip/[address]': 401,
   // 2026-09-02 全コードベースレビュー Phase 5 (F1): 予算対象が 5 route しかなく、実際に最も重い
   //   3 route (/create・/[handle]・/checkout) が無監視だった。/pay と同じ「余裕ゼロ」慣行で
   //   実測 +4kB を上限に据える (実測: [handle] 475 / checkout 442 kB)。
   //   超えたら安易に上げず、まず code-split (next/dynamic) を検討すること。
   // 2026-09-03 Phase 6 (F2) で /create のタブを next/dynamic 化 → 546 → 387 kB。予算も追従。
   // 2026-10-10 F2: 実測 364 + 5。
-  '/[locale]/create': 369,
+  // 2026-11-11 F-10: 実測 348 + 5 (前は 369)。
+  '/[locale]/create': 353,
   // 2026-09-09 npm audit fix のベンダー増分 (/pay のコメント参照): [handle] 482 / checkout 448 kB。
   // 2026-10-10 F2: 実測 [handle] 459 / checkout 431 に各 +5。
-  '/[locale]/[handle]': 464,
-  '/[locale]/checkout': 436,
+  // 2026-11-11 F-10: 実測 [handle] 442 / checkout 427 に各 +5 (前は 464 / 436)。
+  '/[locale]/[handle]': 447,
+  '/[locale]/checkout': 432,
   // 2026-10-10 E22/F2: 予算の外にあった主要画面。顧客の支払い導線 (/order = モバイル注文・/scan = 読み取り)・
   // お店の画面 (/history・/billing)・AI ストア (/store・/discovery)。実測 order 366 / scan 388 / history 407 /
   // store 259 / billing 331 / discovery 310 に各 +5。
-  '/[locale]/order': 371,
-  '/[locale]/scan': 393,
-  '/[locale]/history': 412,
-  '/[locale]/store': 264,
-  '/[locale]/billing': 336,
-  '/[locale]/discovery': 315,
+  // 2026-11-11 F-10: 実測 order 349 / scan 370 / history 389 / store 239 / billing 312 / discovery 292 に各 +5
+  // (前は 371 / 393 / 412 / 264 / 336 / 315)。
+  '/[locale]/order': 354,
+  '/[locale]/scan': 375,
+  '/[locale]/history': 394,
+  '/[locale]/store': 244,
+  '/[locale]/billing': 317,
+  '/[locale]/discovery': 297,
   // 2026-10-20: Arc の売上を受け取るページ (wagmi・viem・Circle Gateway の部品)。flag OFF でも route の client は
   // build に入るので表に載せる。実測 377 + 5。
-  '/[locale]/discovery/arc-payout': 382,
+  // 2026-11-11 F-10: 実測 356 + 5 (前は 382)。NEXT_PUBLIC_ENABLE_ARC_PAYOUT をベクターに足しても同じ値。
+  '/[locale]/discovery/arc-payout': 361,
   // 実験ページ (本番導線なし)。UNBUDGETED_MAX_KB を超えるので表に載せる。実測 357 + 5。
   '/[locale]/experimental/cross-chain-demo': 362,
   // 2026-10-30 第 8 回レビュー F-11: 予算表の外にあった /[locale] のページを全部載せる。表に無い route は
@@ -135,10 +153,12 @@ const BUDGETS_KB = {
   '/[locale]/tokutei': 220, // 実測 215
   '/[locale]/transparency': 241, // 実測 236
   // 2026-10-10 F2: 実測 194 + 5。
-  '/manifest.webmanifest': 199,
+  // 2026-11-11 F-10: 実測 171 + 5 (前は 199)。
+  '/manifest.webmanifest': 176,
   // shared chunks の総和。表の行 "First Load JS shared by all"
   // 2026-10-10 F2: 実測 193 + 5。
-  '__shared__': 198,
+  // 2026-11-11 F-10: 実測 171 + 5 (前は 198)。
+  '__shared__': 176,
 };
 
 // 予算表に無い route でも First Load JS がこれを超えたら fail させる (E22: 予算の外で重いページが増えていた)。

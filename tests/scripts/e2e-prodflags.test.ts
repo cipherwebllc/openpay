@@ -65,6 +65,22 @@ describe('production-flag Playwright coverage (F13)', () => {
     expect(vector.NEXT_PUBLIC_JPYC_FORWARDER_AMOY).toMatch(/^0x[0-9a-f]{40}$/);
   });
 
+  it('keeps the production-ON flags that the docs do not declare as live (F-10)', () => {
+    // 10th full review F-10 (2026-11-11): these six were ON in production (read from the public JS) but missing
+    // from the vector. The docs carry no "live in production" wording for them, so the superset check above cannot
+    // see one being dropped; pin them by name. Dropping one makes the bundle budget and the e2e-prodflags job
+    // build with a flag set production does not run.
+    const vector = parseEnv(read('e2e/prodFlags.env'));
+    for (const key of [
+      'NEXT_PUBLIC_ENABLE_ARC_PAYOUT',
+      'NEXT_PUBLIC_ENABLE_CIRCLE_PAYMASTER',
+      'NEXT_PUBLIC_ENABLE_MENU_OPTIONS',
+      'NEXT_PUBLIC_ENABLE_ORDER_TOKEN',
+      'NEXT_PUBLIC_ENABLE_SHOP_LIVE',
+      'NEXT_PUBLIC_ENABLE_X402_DUAL_RAIL_ARC',
+    ]) expect(vector[key], key).toBe('1');
+  });
+
   it('keeps flags the README declares OFF in production out of the vector', () => {
     // Reverse fence: building a production-OFF flag (e.g. the register fee abolished on 2026-10-07) with '1'
     // would pin UI that production no longer renders (such as the abolished fee row) as the production shape.
