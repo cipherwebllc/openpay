@@ -146,6 +146,8 @@ export function assertGasCeiling(
  * throw は viem (estimateFeesPerGas) / aa-sdk (feeEstimator の middleware) の中で起きるが、
  * どちらも包まずに sendUserOperation の reject として返すので、フォームは従来どおり
  * isGasCongestedError で案内できる (tests/lib/smartAccount/* が実物の pipeline を通して固定)。
+ * permissionless の 2 つ (simpleAccount / metamask) は、送信を分けた後 (lib/smartAccount/pimlicoSend.ts) も
+ * client の prepareUserOperation を通るので、同じ検査が準備の段で効く (MAv2 は sendUserOperation のまま)。
  */
 export async function ceilingCheckedStandardFee<
   Fee extends { maxFeePerGas: bigint },

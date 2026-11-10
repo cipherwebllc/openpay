@@ -20,6 +20,7 @@ import {
   encodeFunctionData,
   erc20Abi,
   isAddress,
+  isAddressEqual,
   isHex,
   keccak256,
   type Address,
@@ -44,6 +45,21 @@ import {
   type CircleVerificationStatus,
 } from '@/lib/paymentLog';
 import { resolvePaymasterMode } from '@/lib/pimlico';
+import {
+  asSignedSendClient,
+  broadcastPimlicoUserOp,
+  classifyBroadcastError,
+  findUserOperationReceipt,
+  isUserOpNonceConsumed,
+  joinUserOpNonce,
+  prepareAndSignPimlicoUserOp,
+  reserveUserOpNonce,
+  splitUserOpNonce,
+  toUserOperationRejection,
+  type PimlicoSignedUserOp,
+  type PreparedPimlicoUserOp,
+  type SignedSendClient,
+} from '@/lib/smartAccount/pimlicoSend';
 import type { TokenDeployment } from '@/lib/tokens';
 
 type BatchPaymentParams = {
@@ -116,10 +132,30 @@ type StoredBatchPaymentParams = {
   extraRecipients?: Array<{ to: Address; amount: string }>;
 };
 
+// 送信の前に保存する「送信の控え」(第 10 回レビュー A-1)。任意の欄で、これが無い記録 (この欄を足す前に
+// 書かれた記録・MAv2 の facade で送った記録) は今までどおり hash の receipt の照会だけで扱う。
+type PimlicoSendLedger = {
+  entryPoint: Address;
+  sender: Address;
+  // この支払いの UserOperation の nonce (10 進)。EntryPoint は同じ (sender, key, seq) の op を最大 1 本しか
+  // 実行しないので、作り直しの op を必ずこの nonce で作るかぎり、二重には実行されない (安全の根拠)。
+  // key だけ固定して seq を読み直すのは不可 (元の op が取り込まれた後の seq+1 で通ってしまう)。
+  nonceKey: string;
+  nonceSeq: string;
+  // 署名済みの op (RPC の形)。応答を失ったときに 1 字も変えずに送り直す。この op で動くのは同じ送金 1 回だけ。
+  signedUserOp: PimlicoSignedUserOp;
+  // 同じ支払いを同じ nonce で作り直す前の op の hash。作り直した後に元の op が取り込まれたとき、
+  // その receipt を引くために残す (取り込まれるのはどれか 1 本だけ)。
+  priorUserOpHashes?: Hex[];
+};
+
 type PimlicoPendingRecord = {
   schemaVersion: typeof PIMLICO_PENDING_SCHEMA_VERSION;
   provider: 'pimlico';
-  status: 'pending' | 'unknown';
+  // pending / unknown = 結果が分からない op がある (reload の後はどちらも「応答不明」として復元する)。
+  // rejected = bundler が JSON-RPC の error で送信を断った。画面は通常の error で、応答不明にはしない。
+  //   記録は「nonce の予約」として残し、次の送信を必ず同じ nonce で作る (別の nonce の op を作る道を作らない)。
+  status: 'pending' | 'unknown' | 'rejected';
   chainId: number;
   customer: string;
   tokenAddress: Address;
@@ -128,7 +164,30 @@ type PimlicoPendingRecord = {
   params: StoredBatchPaymentParams;
   createdAt: number;
   updatedAt: number;
+  send?: PimlicoSendLedger;
 };
+
+type LedgerPimlicoPendingRecord = PimlicoPendingRecord & {
+  send: PimlicoSendLedger;
+};
+
+function hasSendLedger(
+  record: PimlicoPendingRecord,
+): record is LedgerPimlicoPendingRecord {
+  return record.send !== undefined;
+}
+
+function ledgerNonce(send: PimlicoSendLedger): bigint {
+  return joinUserOpNonce(BigInt(send.nonceKey), BigInt(send.nonceSeq));
+}
+
+// この支払い (同じ nonce) で bundler に渡したことのある op の hash。新しいものから。
+function ledgerUserOpHashes(record: LedgerPimlicoPendingRecord): Hex[] {
+  return [
+    record.userOpHash,
+    ...[...(record.send.priorUserOpHashes ?? [])].reverse(),
+  ];
+}
 
 type LatchedPimlicoPending = {
   storageKey: string;
@@ -305,6 +364,23 @@ function isStoredBatchPaymentParams(
   );
 }
 
+function isPimlicoSendLedger(value: unknown): value is PimlicoSendLedger {
+  if (value === null || typeof value !== 'object') return false;
+  const send = value as Partial<PimlicoSendLedger>;
+  return (
+    isAddress(send.entryPoint ?? '') &&
+    isAddress(send.sender ?? '') &&
+    isDecimal(send.nonceKey) &&
+    isDecimal(send.nonceSeq) &&
+    send.signedUserOp !== null &&
+    typeof send.signedUserOp === 'object' &&
+    !Array.isArray(send.signedUserOp) &&
+    (send.priorUserOpHashes === undefined ||
+      (Array.isArray(send.priorUserOpHashes) &&
+        send.priorUserOpHashes.every((hash) => isHex(hash, { strict: true }))))
+  );
+}
+
 function isPimlicoPendingRecord(
   value: unknown,
 ): value is PimlicoPendingRecord {
@@ -313,7 +389,11 @@ function isPimlicoPendingRecord(
   return (
     record.schemaVersion === PIMLICO_PENDING_SCHEMA_VERSION &&
     record.provider === 'pimlico' &&
-    (record.status === 'pending' || record.status === 'unknown') &&
+    (record.status === 'pending' ||
+      record.status === 'unknown' ||
+      // rejected は nonce の予約なので、送信の控えが無ければ成り立たない。
+      (record.status === 'rejected' && record.send !== undefined)) &&
+    (record.send === undefined || isPimlicoSendLedger(record.send)) &&
     typeof record.chainId === 'number' &&
     Number.isSafeInteger(record.chainId) &&
     typeof record.customer === 'string' &&
@@ -377,17 +457,20 @@ function readPimlicoPending(storageKey: string): PimlicoPendingRead {
   return { kind: 'record', record: parsed };
 }
 
+// 戻り値 = 書けて、読み戻しても同じだったか。送信の前の保存 (第 10 回レビュー A-1) は false なら送らない。
+// 送信の後の更新 (status の書き換え等) は今までどおり戻り値を見ない。
 function persistPimlicoPending(
   storageKey: string,
   record: PimlicoPendingRecord,
-): void {
-  if (typeof window === 'undefined') return;
+): boolean {
+  if (typeof window === 'undefined') return false;
   try {
     const serialized = JSON.stringify(record);
     window.localStorage.setItem(storageKey, serialized);
     if (window.localStorage.getItem(storageKey) !== serialized) {
       throw new Error('read-back mismatch');
     }
+    return true;
   } catch (error) {
     // storage 障害を broadcast 済み決済の通常 failure へ波及させず、呼出元 hook の
     // memory latch は維持する (同一タブでの二重送金防止を失わない)。
@@ -396,6 +479,7 @@ function persistPimlicoPending(
       userOpHash: record.userOpHash,
       error,
     });
+    return false;
   }
 }
 
@@ -455,7 +539,9 @@ export function useBatchPayment(
     pendingRef.current = latched;
     // reload 後は前回の receipt waiter が存在しないため、永続 record は pending/unknown
     // どちらでも「結果不確定」として復元する。
-    setUnknownPending(latched);
+    // rejected (bundler が断った送信の nonce の予約) は結果不確定ではないので、画面は通常のまま。
+    // memory には持ち、次の送信を同じ nonce で作らせる。
+    setUnknownPending(latched?.record.status === 'rejected' ? null : latched);
     setPendingStoreUnavailable(false);
   }, [pimlicoStorageKey]);
 
@@ -511,13 +597,51 @@ export function useBatchPayment(
       }
 
       const { smartAccountClient, pimlicoClient } = clients;
+      // 送信を「nonce を決める → 準備 → 署名 → 保存 → 送信」に分けられる client か (permissionless で作る
+      // simple 7702・MetaMask)。MAv2 は aa-sdk を包んだ facade で sendUserOperation しか無いので null になり、
+      // 下の「今までの送信」をそのまま使う (第 10 回レビュー A-1 の対象の外・lib/smartAccount/mav2.ts)。
+      const signedSend = asSignedSendClient(smartAccountClient);
+
+      type PimlicoReceipt = Awaited<
+        ReturnType<typeof pimlicoClient.waitForUserOperationReceipt>
+      >;
+
+      // receipt が取れた op で記録を閉じる。userOpHash は receipt が見つかった op の hash
+      // (同じ nonce で作り直す前の op が取り込まれたときは、記録の今の hash と違う)。
+      const settleRetained = (
+        record: PimlicoPendingRecord,
+        userOpHash: Hex,
+        receipt: PimlicoReceipt,
+      ): BatchPaymentResult => {
+        // success / reverted の receipt 判定は従来どおり。どちらも on-chain 終端なので
+        // unknown latch を解除し、次回の正規決済だけを許可する。
+        clearPimlicoPending(pimlicoStorageKey, record.userOpHash);
+        if (
+          pendingRef.current?.storageKey === pimlicoStorageKey &&
+          pendingRef.current.record.userOpHash === record.userOpHash
+        ) {
+          pendingRef.current = null;
+        }
+        setUnknownPending((current) =>
+          current?.storageKey === pimlicoStorageKey &&
+          current.record.userOpHash === record.userOpHash
+            ? null
+            : current,
+        );
+        return {
+          userOpHash,
+          txHash: receipt.receipt.transactionHash,
+          blockNumber: receipt.receipt.blockNumber,
+          success: receipt.success,
+          actualGasCost: receipt.actualGasCost,
+          provider: 'pimlico' as const,
+        };
+      };
 
       const waitForRetainedReceipt = async (
         record: PimlicoPendingRecord,
       ): Promise<BatchPaymentResult> => {
-        let receipt: Awaited<
-          ReturnType<typeof pimlicoClient.waitForUserOperationReceipt>
-        >;
+        let receipt: PimlicoReceipt;
         try {
           receipt = await pimlicoClient.waitForUserOperationReceipt({
             hash: record.userOpHash,
@@ -547,47 +671,307 @@ export function useBatchPayment(
           });
         }
 
-        // success / reverted の receipt 判定は従来どおり。どちらも on-chain 終端なので
-        // unknown latch を解除し、次回の正規決済だけを許可する。
-        clearPimlicoPending(pimlicoStorageKey, record.userOpHash);
-        if (
-          pendingRef.current?.storageKey === pimlicoStorageKey &&
-          pendingRef.current.record.userOpHash === record.userOpHash
-        ) {
-          pendingRef.current = null;
-        }
-        setUnknownPending((current) =>
-          current?.storageKey === pimlicoStorageKey &&
-          current.record.userOpHash === record.userOpHash
-            ? null
-            : current,
-        );
-        return {
-          userOpHash: record.userOpHash,
-          txHash: receipt.receipt.transactionHash,
-          blockNumber: receipt.receipt.blockNumber,
-          success: receipt.success,
-          actualGasCost: receipt.actualGasCost,
-          provider: 'pimlico' as const,
+        return settleRetained(record, record.userOpHash, receipt);
+      };
+
+      // ---- 送信の控えつきの記録の扱い (第 10 回レビュー A-1) -------------------------
+      // 不変条件: 記録があるあいだ、この (chain・customer・token) で作る op は必ず記録の nonce を使う。
+      // EntryPoint は同じ nonce の op を最大 1 本しか実行しないので、送り直しても作り直しても二重には動かない。
+
+      // memory の記録を差し替える。応答不明として画面に出ている記録なら、画面の hash も合わせる。
+      const holdRecord = (record: PimlicoPendingRecord, latched: boolean) => {
+        const held = { storageKey: pimlicoStorageKey, record };
+        pendingRef.current = held;
+        if (latched) setUnknownPending(held);
+      };
+
+      // 結果が分からないまま記録を保持し、PimlicoResponseUnknownError で終える
+      // (waitForRetainedReceipt の catch と同じ扱い。log の key は場面ごとに分ける)。
+      const holdAsUnknown: (
+        record: PimlicoPendingRecord,
+        logKey: string,
+        error: unknown,
+      ) => never = (record, logKey, error) => {
+        const unknownRecord: PimlicoPendingRecord = {
+          ...record,
+          status: 'unknown',
+          updatedAt: Date.now(),
         };
+        holdRecord(unknownRecord, true);
+        persistPimlicoPending(pimlicoStorageKey, unknownRecord);
+        const reason = error instanceof Error ? error.message : String(error);
+        logger.warn(logKey, {
+          userOpHash: record.userOpHash,
+          callFingerprint: record.callFingerprint,
+          error: reason,
+        });
+        throw new PimlicoResponseUnknownError({
+          userOpHash: record.userOpHash,
+          callFingerprint: record.callFingerprint,
+          reason,
+        });
+      };
+
+      type LedgerProbe =
+        // この支払いの op (今の op か、作り直す前の op) が取り込まれていた。
+        | { kind: 'included'; userOpHash: Hex; receipt: PimlicoReceipt }
+        // receipt はまだ引けないが、記録の nonce はもう使われた (同じ nonce の op はもう実行されない)。
+        | { kind: 'consumed' }
+        // 取り込まれておらず、nonce も使われていない。同じ nonce の op を送ってよい。
+        | { kind: 'open'; client: SignedSendClient }
+        // nonce を確かめる・同じ nonce で送る手段が今の client に無い (MAv2 の facade・EntryPoint が記録と違う)。
+        | { kind: 'unverifiable' };
+
+      // 読むだけ: hash で receipt → 無ければ EntryPoint の getNonce(sender, key)。
+      const probeLedger = async (
+        record: LedgerPimlicoPendingRecord,
+      ): Promise<LedgerProbe> => {
+        const found = await findUserOperationReceipt<PimlicoReceipt>(
+          pimlicoClient,
+          ledgerUserOpHashes(record),
+        );
+        if (found) return { kind: 'included', ...found };
+        if (
+          !signedSend ||
+          // 同じ nonce が「最大 1 本」を保証するのは同じ EntryPoint の上だけ。account の種類が変わって
+          // EntryPoint が記録と違うときは、作り直しで二重払いを断てないので送らない。
+          !isAddressEqual(
+            signedSend.account.entryPoint.address,
+            record.send.entryPoint,
+          )
+        ) {
+          return { kind: 'unverifiable' };
+        }
+        const consumed = await isUserOpNonceConsumed({
+          client: signedSend,
+          entryPoint: record.send.entryPoint,
+          sender: record.send.sender,
+          nonce: ledgerNonce(record.send),
+        });
+        return consumed
+          ? { kind: 'consumed' }
+          : { kind: 'open', client: signedSend };
+      };
+
+      // 記録にある署名済みの op を送り、結果ごとに扱う (raw の eth_sendUserOperation・再送なし)。
+      //   受理 (hash が返る)・「もう持っている」 → receipt を待つ
+      //   届いたか分からない (timeout・通信断・判別できない) → 応答不明として保持
+      //   bundler が JSON-RPC の error で断った → onRejected (場面ごとに違う)
+      const broadcastRecorded = async (args: {
+        client: SignedSendClient;
+        record: LedgerPimlicoPendingRecord;
+        latched: boolean;
+        onRejected: (error: unknown) => Promise<BatchPaymentResult>;
+      }): Promise<BatchPaymentResult> => {
+        let record = args.record;
+        let acceptedHash: Hex | undefined;
+        try {
+          acceptedHash = await broadcastPimlicoUserOp({
+            client: args.client,
+            signedUserOp: record.send.signedUserOp,
+            entryPoint: record.send.entryPoint,
+          });
+        } catch (error) {
+          const kind = classifyBroadcastError(error);
+          if (kind === 'rejected') return args.onRejected(error);
+          if (kind === 'unknown') {
+            // bundler が受理した後に応答だけ失われた可能性がある。通常の error にすると、成立した op の上に
+            // 再試行が開いて二重払いになる (A-1)。保存済みの記録を応答不明としてラッチする。
+            holdAsUnknown(record, 'pimlico.send.response-unknown', error);
+          }
+          // already-known: bundler がこの op を持っている。受理と同じく receipt を待つ。
+        }
+        if (acceptedHash !== undefined && acceptedHash !== record.userOpHash) {
+          // 計算した hash は receipt を引く手がかりで、安全の根拠ではない (根拠は nonce)。
+          // bundler の返した hash を正として記録を直す。
+          logger.warn('pimlico.send.hash-mismatch', {
+            computed: record.userOpHash,
+            returned: acceptedHash,
+          });
+          record = { ...record, userOpHash: acceptedHash, updatedAt: Date.now() };
+          holdRecord(record, args.latched);
+          persistPimlicoPending(pimlicoStorageKey, record);
+        }
+        return waitForRetainedReceipt(record);
+      };
+
+      // 準備 → 署名 → **保存** → 送信。nonce は呼び出し側が決めた値をそのまま使う。
+      const buildAndSend = async (args: {
+        client: SignedSendClient;
+        calls: ReturnType<typeof buildTransferCalls>;
+        callFingerprint: Hex;
+        nonce: bigint;
+        // 同じ nonce で作り直すときの元の記録 (新しい支払いでは無し)。
+        previous?: LedgerPimlicoPendingRecord;
+        // 元の記録が応答不明として画面に出ているか。
+        latched: boolean;
+      }): Promise<BatchPaymentResult> => {
+        const { client, calls, callFingerprint, nonce, previous, latched } = args;
+        let built: PreparedPimlicoUserOp;
+        try {
+          built = await prepareAndSignPimlicoUserOp({ client, calls, nonce });
+        } catch (error) {
+          // 応答不明の記録の作り直しで準備・署名が失敗した (ウォレットで断った等)。何も送っていないので
+          // 元の記録のまま応答不明を保つ (通常の error にすると画面が新しい支払いを開ける)。
+          if (previous && latched) {
+            holdAsUnknown(previous, 'pimlico.rebuild.prepare-failed', error);
+          }
+          throw error;
+        }
+        const now = Date.now();
+        const { key, seq } = splitUserOpNonce(nonce);
+        // 同じ支払いの作り直しなら、前の op の hash を残す (前の op が取り込まれたときに receipt を引く)。
+        const priorUserOpHashes =
+          previous && previous.callFingerprint === callFingerprint
+            ? [...(previous.send.priorUserOpHashes ?? []), previous.userOpHash]
+            : [];
+        const record: LedgerPimlicoPendingRecord = {
+          schemaVersion: PIMLICO_PENDING_SCHEMA_VERSION,
+          provider: 'pimlico',
+          status: 'pending',
+          chainId: chainId ?? deployment.chainId,
+          customer: customer?.toLowerCase() ?? 'disconnected',
+          tokenAddress: params.tokenAddress,
+          callFingerprint,
+          userOpHash: built.userOpHash,
+          params: serializeBatchPaymentParams(params),
+          createdAt: previous?.createdAt ?? now,
+          updatedAt: now,
+          send: {
+            entryPoint: built.entryPoint,
+            sender: built.sender,
+            nonceKey: key.toString(),
+            nonceSeq: seq.toString(),
+            signedUserOp: built.signedUserOp,
+            ...(priorUserOpHashes.length > 0 ? { priorUserOpHashes } : {}),
+          },
+        };
+        // 送信の前に、hash・署名済みの op・nonce を保存する。保存を確かめられなければ送らない:
+        // 保存なしで送ると、応答を失ったときに「同じ nonce」を失い、再試行が別の nonce の op になる (二重払い)。
+        // 止めるのは gasless だけ (読めないときの pendingStoreUnavailable と同じ側。通常決済は開けたまま)。
+        // 署名済みの op はここで捨てる (どこにも送っていない)。
+        if (!persistPimlicoPending(pimlicoStorageKey, record)) {
+          setPendingStoreUnavailable(true);
+          throw new PimlicoPendingStoreUnavailableError('persist-failed');
+        }
+        holdRecord(record, latched);
+        return broadcastRecorded({
+          client,
+          record,
+          latched,
+          onRejected: async (error) => {
+            if (latched) {
+              // 応答不明の記録の作り直しを bundler が断った。元の op が mempool に残っていることがある
+              // (置き換えの手数料不足など) ので、応答不明を保つ。次に確かめるとき、前の op の receipt も引く。
+              holdAsUnknown(record, 'pimlico.rebuild.rejected', error);
+            }
+            // bundler がこの op を受け付けなかった → 今までどおりの error。ただし記録は消さず、nonce の予約として
+            // 残す: 一時的な error (rate limit・internal・fee が低すぎる) では op が mempool に残りうるので、
+            // 次の送信が別の nonce の op になる道を作らない。
+            const rejected: LedgerPimlicoPendingRecord = {
+              ...record,
+              status: 'rejected',
+              updatedAt: Date.now(),
+            };
+            holdRecord(rejected, false);
+            // 書き換えに失敗しても、保存済みの pending の記録が reload の後に応答不明として復元される (安全な側)。
+            persistPimlicoPending(pimlicoStorageKey, rejected);
+            throw toUserOperationRejection(error, { signed: built.signed, calls });
+          },
+        });
+      };
+
+      // gas ceiling は両 mode で適用。sponsorship では運営赤字回避、erc20 では
+      // 顧客の USDC 出費上限の保護として機能する (どちらも UX 上の安全弁)。
+      // ここは送信を始める前の fast の検査。UserOp に実際に入る standard は、準備の中の fee の見積もり
+      // (lib/smartAccount の各 builder) が ceilingCheckedStandardFee で検査する (A-5)。
+      const assertFastGasCeiling = async () => {
+        if (chainId !== undefined) {
+          const gasPrice = await pimlicoClient.getUserOperationGasPrice();
+          assertGasCeiling(chainId, gasPrice.fast.maxFeePerGas);
+        }
       };
 
       if (retained) {
         const calls = buildTransferCalls(params);
         const callFingerprint = fingerprintTransferCalls(calls);
-        const latched = { storageKey: pimlicoStorageKey, record: retained };
+        let unresolved = retained;
+        let probed: LedgerProbe | undefined;
+        if (retained.status === 'rejected' && hasSendLedger(retained)) {
+          // bundler が断った送信の後の再試行。応答不明ではないので、別の内容の支払いも通す。
+          // ただし先に「断られたはずの op」が取り込まれていないかを確かめ (読めなければ通常の error・
+          // 状態は変えない)、作る op は必ず記録の nonce を使う。
+          probed = await probeLedger(retained);
+          if (probed.kind === 'open') {
+            await assertFastGasCeiling();
+            return buildAndSend({
+              client: probed.client,
+              calls,
+              callFingerprint,
+              nonce: ledgerNonce(retained.send),
+              previous: retained,
+              latched: false,
+            });
+          }
+          // 断られたはずの op が取り込まれていた・この nonce がもう使われた・確かめる手段が無い。
+          // どれも「新しい op を作ってよい」とは言えないので、以後は結果が分からない記録として扱う。
+          logger.warn('pimlico.rejected.unresolved', {
+            userOpHash: retained.userOpHash,
+            state: probed.kind,
+          });
+          unresolved = { ...retained, status: 'unknown', updatedAt: Date.now() };
+          persistPimlicoPending(pimlicoStorageKey, unresolved);
+        }
+        const latched = { storageKey: pimlicoStorageKey, record: unresolved };
         pendingRef.current = latched;
         setUnknownPending(latched);
-        if (callFingerprint !== retained.callFingerprint) {
+        if (callFingerprint !== unresolved.callFingerprint) {
           // 別 payment intent への再署名・broadcast を未解決 UserOp から遮断する。
           // 許可する network action は retained.userOpHash の receipt read だけ。
           throw new PimlicoResponseUnknownError({
-            userOpHash: retained.userOpHash,
-            callFingerprint: retained.callFingerprint,
+            userOpHash: unresolved.userOpHash,
+            callFingerprint: unresolved.callFingerprint,
             reason: 'call-fingerprint-mismatch',
           });
         }
-        return waitForRetainedReceipt(retained);
+        if (!hasSendLedger(unresolved)) {
+          // 送信の控えが無い記録 (この欄を足す前の記録・MAv2 の facade で送った記録) は今までどおり。
+          return waitForRetainedReceipt(unresolved);
+        }
+        // 応答不明からの唯一の入口 = 確かめる。別の nonce の op は作らない。
+        const record = unresolved;
+        let state: LedgerProbe;
+        try {
+          state = probed ?? (await probeLedger(record));
+        } catch (error) {
+          holdAsUnknown(record, 'pimlico.verify.probe-failed', error);
+        }
+        if (state.kind === 'included') {
+          return settleRetained(record, state.userOpHash, state.receipt);
+        }
+        if (state.kind !== 'open') {
+          // consumed: 取り込まれたが receipt がまだ引けない → 待つ。
+          // unverifiable: receipt を待つことしかできない (今までの扱い)。
+          return waitForRetainedReceipt(record);
+        }
+        // まだ取り込まれておらず nonce も使われていない → 保存した署名済みの op を 1 字も変えずに送り直す。
+        const { client } = state;
+        return broadcastRecorded({
+          client,
+          record,
+          latched: true,
+          // bundler がその op をもう受け付けない (paymaster の期限切れ・fee が低すぎる等) → 同じ nonce で作り直す
+          // (ウォレットの署名が 1 回要る)。元の op が先に取り込まれていれば、作り直しは AA25 で落ちる。
+          onRejected: () =>
+            buildAndSend({
+              client,
+              calls,
+              callFingerprint,
+              nonce: ledgerNonce(record.send),
+              previous: record,
+              latched: true,
+            }),
+        });
       }
 
       // JPYC ガス無料化 (2026-06-05): JPYC sponsorship のガス代立替回収を全廃したため、
@@ -595,17 +979,23 @@ export function useBatchPayment(
       // 全額負担する設計に変更)。paymaster の濫用対策は Pimlico policy 制限と relayer/
       // paymaster 低残高監視 (#148) に委ねる。gasReimbursement は呼出側で常に 0。
 
-      // gas ceiling は両 mode で適用。sponsorship では運営赤字回避、erc20 では
-      // 顧客の USDC 出費上限の保護として機能する (どちらも UX 上の安全弁)。
-      // ここは送信を始める前の fast の検査。UserOp に実際に入る standard は、sendUserOperation の
-      // 中の fee の見積もり (lib/smartAccount の各 builder) が ceilingCheckedStandardFee で検査する (A-5)。
-      if (chainId !== undefined) {
-        const gasPrice = await pimlicoClient.getUserOperationGasPrice();
-        assertGasCeiling(chainId, gasPrice.fast.maxFeePerGas);
-      }
+      await assertFastGasCeiling();
 
       const calls = buildTransferCalls(params);
 
+      if (signedSend) {
+        // nonce (key と seq) を署名の前に決め、署名済みの op と一緒に送信の前に保存する。
+        return buildAndSend({
+          client: signedSend,
+          calls,
+          callFingerprint: fingerprintTransferCalls(calls),
+          nonce: await reserveUserOpNonce(signedSend),
+          latched: false,
+        });
+      }
+
+      // MAv2 (aa-sdk の facade): 準備・署名・送信を分けられないので、今までの送信のまま。
+      // 本番でここに届くのは JPYC の relay が OFF のときだけ (lib/smartAccount/mav2.ts の冒頭)。
       const userOpHash = await smartAccountClient.sendUserOperation({ calls });
       const now = Date.now();
       const pendingRecord: PimlicoPendingRecord = {
