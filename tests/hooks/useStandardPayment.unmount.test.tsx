@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { useEffect, type ReactNode } from 'react';
 import { act, renderHook, waitFor } from '@testing-library/react';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider, onlineManager } from '@tanstack/react-query';
 import {
   encodeFunctionData,
   erc20Abi,
@@ -203,9 +203,18 @@ async function makeTab() {
   await connect(config, { connector: config.connectors[0] });
   // lib/wagmi.ts が Register で本番の config の型を登録しているので、test 用の config (chain 1 つ) は型だけ合わせる。
   const providerConfig = config as unknown as ResolvedRegister['config'];
-  const queryClient = new QueryClient({
-    defaultOptions: { mutations: { retry: false }, queries: { retry: false } },
-  });
+  const newQueryClient = () =>
+    new QueryClient({
+      defaultOptions: { mutations: { retry: false }, queries: { retry: false } },
+    });
+  let queryClient = newQueryClient();
+  // provider ごと作り直す (言語の切り替えで [locale] の layout の下の Providers が mount し直される場合)。wagmi の config は同じ。
+  // 画面をすべて unmount してから呼ぶ。返すのは前の QueryClient。
+  const replaceQueryClient = () => {
+    const previous = queryClient;
+    queryClient = newQueryClient();
+    return previous;
+  };
   function Wrapper({ children }: { children: ReactNode }) {
     return (
       <WagmiProvider config={providerConfig} reconnectOnMount={false}>
@@ -227,7 +236,7 @@ async function makeTab() {
       .getMutationCache()
       .getAll()
       .map((mutation) => mutation.state.status);
-  return { mountScreen, mutationStatuses, Wrapper };
+  return { mountScreen, mutationStatuses, replaceQueryClient, Wrapper };
 }
 
 function minedReceipt(hash: Hex, blockNumber: bigint): ReceiptState {
@@ -275,6 +284,8 @@ beforeEach(() => {
 // 登録簿は module の範囲 (この file の test で共有) なので、test の終わりにウォレットに残った要求を拒否で解決し、
 // 登録簿が空になってから次の test へ進む (残した要求で次の test の支払いが止まらないように)。
 afterEach(async () => {
+  // offline にした test が途中で落ちても、次の test へ offline を持ち越さない。
+  onlineManager.setOnline(true);
   for (const send of walletSends) {
     if (!send.settled) send.reject();
   }
@@ -821,5 +832,98 @@ describe('useStandardPayment: 離れた画面の要求が出たままの間は�
     expect(intentWrites).toEqual(['merchant']);
     expect(outstandingRequest()).toBeNull();
     expect(tab.mutationStatuses()).toEqual(['error', 'success']);
+  });
+});
+
+// Codex の 2 回目の MUST (PR #1061): 既定の networkMode ('online') では、offline のとき TanStack は mutationFn (ウォレットへの要求)
+// を呼ぶ前に paused で止まる。その間に provider ごと unmount して QueryClient が入れ替わると (言語の切り替え)、古い client は
+// online の復帰の購読を外すので二度と再開しない。登録簿から外れず、ウォレットに何も出ていないのに新しい画面が止まり続けた。
+// 直し方: 2 つの write の mutation を networkMode 'always' にして、paused を作らずすぐウォレットへ要求を出す。
+describe('useStandardPayment: offline でも、ウォレットへの要求は止めずに出す (登録簿が要求の無いまま残らない・Codex の 2 回目の MUST)', () => {
+  it('mount 中: offline で送信すると、online に戻るのを待たずにすぐウォレットへ要求が出る (直す前は paused のまま・online に戻ったときに確認が出た)', async () => {
+    const tab = await makeTab();
+    const view = await tab.mountScreen();
+    onlineManager.setOnline(false);
+    act(() => view.result.current.mutate(PARAMS_NO_FEE));
+    await waitForWalletSends(1);
+    expect(onlineManager.isOnline()).toBe(false);
+    expect(walletSends[0].tx.data).toBe(MERCHANT_CALLDATA);
+    await act(async () => {
+      walletSends[0].approve(MERCHANT_TX);
+    });
+    await waitFor(() => expect(view.result.current.phase).toBe('merchant-mining'));
+    expect(intentWrites).toEqual(['merchant']);
+    expect(outstandingRequest()).toBeNull();
+  });
+
+  it('merchant: offline で送信したまま provider ごと離れ、別の QueryClient の新しい画面で online に戻っても、新しい画面は要求の無いまま止まり続けない', async () => {
+    const tab = await makeTab();
+    const first = await tab.mountScreen();
+    onlineManager.setOnline(false);
+    act(() => first.result.current.mutate(PARAMS_NO_FEE));
+    expect(outstandingRequest()).toBe('merchant');
+    // 言語の切り替え: provider ごと unmount し、別の QueryClient で新しい画面を開いてから online に戻る。
+    first.unmount();
+    const previousClient = tab.replaceQueryClient();
+    const second = await tab.mountScreen();
+    onlineManager.setOnline(true);
+
+    // 新しい画面を止めているのは、ウォレットに出ている (承認か拒否で外せる) 要求でなければならない。
+    await waitFor(() =>
+      expect({ outstanding: outstandingRequest(), walletRequests: walletSends.length }).not.toEqual({
+        outstanding: 'merchant',
+        walletRequests: 0,
+      }),
+    );
+    expect(walletSends).toHaveLength(1);
+    expect(walletSends[0].tx.data).toBe(MERCHANT_CALLDATA);
+    expect(second.result.current.phase).toBe('merchant-sending');
+
+    // ウォレットで拒否すると外れて、新しい画面で払える。
+    walletSends[0].reject();
+    await waitFor(() => expect(second.result.current.phase).toBe('idle'));
+    expect(outstandingRequest()).toBeNull();
+    expect(previousClient.getMutationCache().getAll().map((m) => m.state.status)).toEqual(['error']);
+    act(() => second.result.current.mutate(PARAMS_NO_FEE));
+    await waitForWalletSends(2);
+  });
+
+  it('fee: 利用料の自動送信が offline で始まり、provider ごと離れて別の QueryClient の新しい画面で online に戻っても、要求の無いまま止まり続けない', async () => {
+    const tab = await makeTab();
+    const first = await tab.mountScreen();
+    act(() => first.result.current.mutate(PARAMS));
+    await waitForWalletSends(1);
+    await act(async () => {
+      walletSends[0].approve(MERCHANT_TX);
+    });
+    await waitFor(() => expect(first.result.current.phase).toBe('merchant-mining'));
+    // merchant の receipt が届く前に offline になる。receipt が届くと利用料を自動で送る (offline のまま)。
+    onlineManager.setOnline(false);
+    receiptByHash.set(MERCHANT_TX, minedReceipt(MERCHANT_TX, 100n));
+    first.rerender();
+    await waitFor(() => expect(first.result.current.phase).toBe('fee-sending'));
+    expect(outstandingRequest()).toBe('fee');
+    first.unmount();
+    tab.replaceQueryClient();
+    const second = await tab.mountScreen();
+    onlineManager.setOnline(true);
+
+    await waitFor(() =>
+      expect({ outstanding: outstandingRequest(), walletRequests: walletSends.length }).not.toEqual({
+        outstanding: 'fee',
+        walletRequests: 1,
+      }),
+    );
+    expect(walletSends).toHaveLength(2);
+    expect(walletSends[1].tx.data).toBe(FEE_CALLDATA);
+    expect(second.result.current.phase).toBe('fee-sending');
+
+    // ウォレットで拒否すると外れて、送る前の印 (fee-awaiting) から利用料を送り直せる。
+    walletSends[1].reject();
+    await waitFor(() => expect(second.result.current.phase).toBe('fee-error'));
+    expect(outstandingRequest()).toBeNull();
+    act(() => second.result.current.retryFee());
+    await waitForWalletSends(3);
+    expect(walletSends[2].tx.data).toBe(FEE_CALLDATA);
   });
 });

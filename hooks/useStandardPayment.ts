@@ -217,9 +217,15 @@ export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {
   // 登録は hook の options の onMutate (Mutation が mutationFn = ウォレットへの要求を呼ぶ前に、writeContract の中で同期に呼ぶ)。
   // 外すのは結果が出たとき: hash = 印を保存してから (mount 中の今の試みは呼び出しごとの onSuccess・それ以外は hook の options の
   // onSuccess)・拒否や失敗 = hook の options の onError。どれも Mutation 自身が呼ぶので、unmount の後も外れる。
+  // networkMode 'always' (Codex の 2 回目の MUST): 既定の 'online' だと、offline のとき TanStack は mutationFn を呼ぶ前に paused で
+  // 止まり、online に戻ると QueryClient が再開する。その間に provider ごと unmount されて QueryClient が入れ替わる ([locale] の
+  // layout の下で作るので言語の切り替えで起きうる) と、古い client は online の復帰の購読を外すので二度と再開せず、成功も失敗も
+  // 起きない = 登録簿から外れず、ウォレットに何も出ていないのに新しい画面が止まり続ける。ウォレットへの要求は端末の中の
+  // provider への呼び出しで network の復帰を待つ意味は無いので、paused を作らずすぐ要求を出す (登録 = 要求が出ている)。
   const [requestOwner] = useState<object>(() => ({}));
   const merchantWrite = useWriteContract({
     mutation: {
+      networkMode: 'always',
       onMutate: (variables) => {
         addStandardWalletRequest(variables, requestOwner, 'merchant');
       },
@@ -229,6 +235,10 @@ export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {
           persistIntent('merchant', attempt.params, hash);
         }
         // mount 中の今の試みは、この後に呼ばれる呼び出しごとの onSuccess が印を保存してから外す。
+        // 限界 (塞いでいない): この受け渡し (Mutation の execute の中の await 2 回の後の dispatch) の間に unmount すると、呼び出し
+        // ごとの onSuccess は呼ばれず (listener が無い)、送金は成功したのに印が残らず、登録簿からも外れない (読み直すまで止まる)。
+        // microtask の連なりは原子性の保証ではない (MutationCache の onSettled などの callback から unmount すれば起きる。今の
+        // app の QueryClient にその callback は無い)。
         if (mountedRef.current && attempt?.vars === variables) return;
         removeStandardWalletRequest(variables);
       },
@@ -239,6 +249,7 @@ export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {
   });
   const feeWrite = useWriteContract({
     mutation: {
+      networkMode: 'always',
       onMutate: (variables) => {
         addStandardWalletRequest(variables, requestOwner, 'fee');
       },
@@ -250,6 +261,7 @@ export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {
             merchantBlockNumber: attempt.merchantBlockNumber,
           });
         }
+        // mount 中は呼び出しごとの onSuccess が保存してから外す (受け渡しの限界は merchant と同じ)。
         if (mountedRef.current && attempt?.vars === variables) return;
         removeStandardWalletRequest(variables);
       },
