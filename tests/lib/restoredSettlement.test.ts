@@ -16,9 +16,10 @@ import {
   type RelayIntentMetadata,
   type StandardPaymentIntentParams,
 } from '@/lib/paymentIntentStorage';
-import { mobileOrderFeeValue } from '@/lib/mobileOrderFee';
+import { mobileOrderFeeValue, mobileOrderGasMode } from '@/lib/mobileOrderFee';
 import { deploymentForSlug } from '@/lib/tokens';
 import { calcCheckoutPayable, type CheckoutParams } from '@/lib/url';
+import { buildCheckoutPath, parseCheckoutParams } from '@/lib/url/checkout';
 
 // 復元した支払いの確定が、今の画面の支払いか (第 10 回レビュー H-S)。true は「この画面の支払いでない」と証明できた
 // ときだけ・比べられない欄は一致、を経路ごとに固定する。/checkout の画面の形は本物の checkoutSettlementScreen で作る。
@@ -108,21 +109,32 @@ describe('isForeignSettlement — /checkout・束縛しない relay', () => {
     }
   });
 
-  it('モバイル注文の利用料: お店の負担 (受取 + 利用料 = 合計)・お客様の上乗せ (受取 = 合計) のどちらも一致', () => {
+  it('事前注文でお客様の負担の URL: お店の負担の形 (受取 + 利用料 = 合計・flag OFF で払った)・上乗せの形 (受取 = 合計) のどちらも一致', () => {
     const fee = mobileOrderFeeValue(TOTAL, 'preorder');
     expect(fee > 0n).toBe(true);
     const absorbed = relayRecord({ routeKind: 'recover', merchantValue: (TOTAL - fee).toString(), feeValue: fee.toString() });
     const onTop = relayRecord({ routeKind: 'recover', merchantValue: TOTAL.toString(), feeValue: fee.toString() });
-    // 上乗せかお店の負担かは flag と負担者 (feePayer) で決まり、払った後に変わりうる: URL がどちらでも、どちらの形も一致。
-    for (const feePayer of ['merchant', 'customer'] as const) {
-      const screen = checkoutSettlementScreen({ ...JPYC, feeKind: 'preorder', feePayer }, false, false);
-      expect(screen.customerFeeOnTop).toBe(true);
-      expect(relay(screen, absorbed)).toBe(false);
-      expect(relay(screen, onTop)).toBe(false);
-      // 払った後に率が変わっても (利用料の額が違っても) 同じ支払いは一致のまま。
-      expect(relay(screen, { ...onTop, feeValue: (fee + 7n).toString() })).toBe(false);
-      // 受取も受取 + 利用料も合計と違えば不一致。
-      expect(relay(screen, { ...onTop, merchantValue: (TOTAL + 1n).toString() })).toBe(true);
+    const screen = checkoutSettlementScreen({ ...JPYC, feeKind: 'preorder', feePayer: 'customer' }, false, false);
+    expect(screen.customerFeeOnTop).toBe(true);
+    expect(relay(screen, absorbed)).toBe(false);
+    expect(relay(screen, onTop)).toBe(false);
+    // 払った後に率が変わっても (利用料の額が違っても) 同じ支払いは一致のまま。
+    expect(relay(screen, { ...onTop, feeValue: (fee + 7n).toString() })).toBe(false);
+    // 受取も受取 + 利用料も合計と違えば不一致。
+    expect(relay(screen, { ...onTop, merchantValue: (TOTAL + 1n).toString() })).toBe(true);
+  });
+
+  it('上乗せの形がありえない URL (店頭・事前注文でお店の負担・負担者なし): 受取 = 合計で利用料のある記録は合計を超えるので不一致', () => {
+    const onTop = (kind: 'storefront' | 'preorder') =>
+      relayRecord({ routeKind: 'recover', merchantValue: TOTAL.toString(), feeValue: mobileOrderFeeValue(TOTAL, kind).toString() });
+    for (const params of [
+      { ...JPYC, feeKind: 'storefront' },
+      { ...JPYC, feeKind: 'preorder', feePayer: 'merchant' },
+      { ...JPYC, feeKind: 'preorder' },
+    ] satisfies CheckoutParams[]) {
+      const screen = checkoutSettlementScreen(params, false, false);
+      expect(screen.customerFeeOnTop).toBe(false);
+      expect(relay(screen, onTop(params.feeKind))).toBe(true);
     }
   });
 
@@ -182,6 +194,98 @@ describe('isForeignSettlement — /checkout・束縛しない relay', () => {
 
   it('記録が無ければ比べられない = 一致', () => {
     expect(relay(plain, null)).toBe(false);
+  });
+});
+
+// Codex MUST 2: 「お店の受取 = 合計」も一致にする例外は、URL がお客様の上乗せの形 (事前注文・fee_payer=customer) の会計だけ。
+// URL は本物の buildCheckoutPath → parseCheckoutParams を通し、relay の記録は hook (useJpycEip3009Payment) と同じ式で作る。
+describe('isForeignSettlement — モバイル注文の利用料と relay の額 (URL だけで決める)', () => {
+  const E18 = 10n ** 18n;
+  // URL を作って読み直した会計 (画面が受け取る params と同じ)。
+  function viaUrl(params: CheckoutParams): CheckoutParams {
+    const parsed = parseCheckoutParams(new URL(buildCheckoutPath(params), 'https://test.local').searchParams);
+    if (!parsed.ok) throw new Error(parsed.error);
+    return parsed.params;
+  }
+  // 同じ URL の同じ支払いが取りうる relay の記録 (受取・利用料)。払ったときの利用料の flag・料率で変わる:
+  //   flag OFF (または feeKind なし): free = (合計, 0)・recover = お店の負担 (合計 − 利用料, 利用料)。利用料は今の
+  //   設定 (下限 2 JPYC・率) で変わるので 2 JPYC と 1% の両方。
+  //   flag ON + feeKind: 利用料 = mobileOrderFeeValue・負担者 = mobileOrderGasMode。お店の負担なら受取から引き、お客様の
+  //   負担なら受取は合計のまま (hook の式)。払った後に率が変わった (保存した利用料が今の率と違う) 形も入れる。
+  function sameUrlShapes(params: CheckoutParams): [string, bigint, bigint][] {
+    const total = calcCheckoutPayable(params, polygon.decimals);
+    const shapes: [string, bigint, bigint][] = [
+      ['flag OFF・free', total, 0n],
+      ['flag OFF・recover (利用料 2 JPYC)', total - 2n * E18, 2n * E18],
+      ['flag OFF・recover (利用料 1%)', total - total / 100n, total / 100n],
+    ];
+    if (params.feeKind) {
+      const gasMode = mobileOrderGasMode(params.feeKind, params.feePayer);
+      const fee = mobileOrderFeeValue(total, params.feeKind);
+      for (const [label, saved] of [['今の率', fee], ['払った後に率が変わった', fee + 7n]] as const) {
+        shapes.push([`flag ON・${label}`, gasMode === 'merchant' ? total - saved : total, saved]);
+      }
+    }
+    return shapes;
+  }
+  const record = (merchantValue: bigint, feeValue: bigint) =>
+    relayRecord({ routeKind: feeValue > 0n ? 'recover' : 'free', merchantValue: merchantValue.toString(), feeValue: feeValue.toString() });
+
+  const URLS: [string, CheckoutParams, boolean][] = [
+    ['利用料の種類なし', JPYC, false],
+    ['店頭 (常にお店の負担)', { ...JPYC, feeKind: 'storefront' }, false],
+    ['事前注文・負担者なし (既定 = お店の負担)', { ...JPYC, feeKind: 'preorder' }, false],
+    ['事前注文・お店の負担', { ...JPYC, feeKind: 'preorder', feePayer: 'merchant' }, false],
+    ['事前注文・お客様の負担', { ...JPYC, feeKind: 'preorder', feePayer: 'customer' }, true],
+  ];
+
+  it.each(URLS)('%s: 同じ URL の同じ支払いは、払ったときの flag・率がどうでも一致', (_label, params, onTop) => {
+    const screenParams = viaUrl(params);
+    const screen = checkoutSettlementScreen(screenParams, false, false);
+    expect(screen.customerFeeOnTop).toBe(onTop);
+    for (const [shape, merchantValue, feeValue] of sameUrlShapes(screenParams)) {
+      expect([shape, relay(screen, record(merchantValue, feeValue))]).toEqual([shape, false]);
+    }
+  });
+
+  it('店頭の URL に fee_payer=customer を手で足しても、上乗せの形にしない (店頭は常にお店の負担)', () => {
+    const params = parseCheckoutParams(
+      new URL(`${buildCheckoutPath({ ...JPYC, feeKind: 'storefront' })}&fee_payer=customer`, 'https://test.local').searchParams,
+    );
+    if (!params.ok) throw new Error(params.error);
+    expect(params.params.feePayer).toBe('customer');
+    expect(mobileOrderGasMode('storefront', 'customer')).toBe('merchant');
+    expect(checkoutSettlementScreen(params.params, false, false).customerFeeOnTop).toBe(false);
+  });
+
+  // Codex の再現: 注文 A = 3,000 JPYC・事前注文・お店が 3% を負担 (受取 2,910・利用料 90)。同じお店の別の注文 B = 2,910 JPYC。
+  // 直す前は URL に利用料の種類があるだけで「受取 = 合計」を一致にし、B の画面で A の確定を普通の完了とお礼で出していた。
+  const orderA = viaUrl({ ...JPYC, feeKind: 'preorder', feePayer: 'merchant', items: [{ name: 'A', qty: 1, price: '3000' }] });
+  const feeA = mobileOrderFeeValue(3000n * E18, 'preorder');
+  const recordA = record(3000n * E18 - feeA, feeA);
+
+  it('Codex の再現: A (3,000・お店が負担 = 受取 2,910・利用料 90) を、別の注文 B (2,910・お客様の上乗せでない URL) の画面で復元すると不一致', () => {
+    expect(feeA).toBe(90n * E18);
+    expect(relay(checkoutSettlementScreen(orderA, false, false), recordA)).toBe(false);
+    for (const b of [
+      { ...JPYC, feeKind: 'preorder', feePayer: 'merchant' },
+      { ...JPYC, feeKind: 'preorder' },
+      { ...JPYC, feeKind: 'storefront' },
+    ] satisfies CheckoutParams[]) {
+      const screenB = checkoutSettlementScreen(viaUrl({ ...b, items: [{ name: 'B', qty: 1, price: '2910' }] }), false, false);
+      expect(screenB.amount).toBe(2910n * E18);
+      expect(relay(screenB, recordA)).toBe(true);
+    }
+  });
+
+  it('残る限界 (PR の本文に書く): B の URL がお客様の上乗せの形で、A のお店の受取が B の合計と同じなら一致のまま', () => {
+    const screenB = checkoutSettlementScreen(
+      viaUrl({ ...JPYC, feeKind: 'preorder', feePayer: 'customer', items: [{ name: 'B', qty: 1, price: '2910' }] }),
+      false,
+      false,
+    );
+    expect(screenB.customerFeeOnTop).toBe(true);
+    expect(relay(screenB, recordA)).toBe(false);
   });
 });
 

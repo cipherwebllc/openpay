@@ -55,7 +55,9 @@ export function checkoutSettlementScreen(
     tokenAddresses: deployments.map((deployment) => deployment.address),
     merchant: params.to,
     amount: calcCheckoutPayable(params, deployments[0].decimals),
-    customerFeeOnTop: params.feeKind !== undefined,
+    // 上乗せの形 (受取 = 合計) になりうるのは事前注文でお客様の負担の URL だけ (lib/mobileOrderFee の mobileOrderGasMode・
+    // 負担者が無い・お店の負担・店頭はお店の負担で 受取 + 利用料 = 合計)。flag・料率は払った後に変わるので見ない。
+    customerFeeOnTop: params.feeKind === 'preorder' && params.feePayer === 'customer',
     contextKeys,
     orderLinkKeys: remoteOrder ? contextKeys.map((key) => orderLinkContextFingerprint(key, params)) : null,
     relayAlwaysBound,

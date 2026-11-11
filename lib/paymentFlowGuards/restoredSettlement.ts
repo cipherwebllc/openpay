@@ -30,8 +30,10 @@ export type SettlementScreen = {
    */
   amount: bigint | null;
   /**
-   * relay でお客様が利用料を上乗せして払う形 (お店の受取 = 額) がありうる会計 (/checkout でモバイル注文の利用料の種類を
-   * URL に持つ)。上乗せかお店の負担かは flag と負担者で決まり、払った後に変わりうるので、どちらの形でも一致とする。
+   * relay でお客様が利用料を上乗せして払う形 (お店の受取 = 額・受取 + 利用料 > 額) がありうる会計。URL だけで決める
+   * (/checkout で事前注文 feeKind=preorder かつ負担者 fee_payer=customer)。上乗せになるのはこの URL で利用料の flag が ON の
+   * ときだけで、flag が OFF なら同じ URL でも 受取 + 利用料 = 額 になる。flag・料率は払った後に変わりうるので使わず、この URL
+   * ではどちらの形も一致とする。
    */
   customerFeeOnTop: boolean;
   /**
@@ -93,8 +95,8 @@ export function isForeignSettlement(screen: SettlementScreen, restored: Restored
     if (restored.bound) return false;
     if (screen.relayAlwaysBound) return true;
     // 額: 「お店の受取 + 利用料」が画面の売上の額と同じなら一致 (free = 利用料 0・お店が利用料を負担 = 受取が減る)。
-    // 保存した値をそのまま足し、利用料を今の設定で計算し直さない。お客様の上乗せがありうる会計は「お店の受取」が額と
-    // 同じでも一致 (上乗せの形は 受取 + 利用料 が売上の額を超える)。
+    // 保存した値をそのまま足し、利用料を今の設定で計算し直さない。URL がお客様の上乗せの形の会計 (customerFeeOnTop) だけ
+    // 「お店の受取」が額と同じでも一致 (上乗せの形は 受取 + 利用料 が売上の額を超える)。
     const received = BigInt(merchantValue);
     return (
       !screen.chainIds.includes(chainId) ||

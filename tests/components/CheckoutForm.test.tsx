@@ -5226,6 +5226,33 @@ describe('CheckoutForm — 復元した前の支払いの確定を、この会�
     expect(paidRecords()).toHaveLength(0);
   });
 
+  // Codex MUST 2: 注文 A = 3,000 JPYC・事前注文・お店が 3% を負担 (受取 2,910・利用料 90) の確定を、同じお店の別の注文 B
+  // (2,910 JPYC・handle の無いモバイル注文 = 受注の notify なし) の画面で復元する。「受取 = 合計」を一致にするのは、URL が
+  // お客様の上乗せの形 (事前注文・fee_payer=customer) の会計だけ。flag は ON・OFF のどちらでも同じ (URL だけで決める)。
+  it.each<[string, boolean]>([
+    ['flag ON', true],
+    ['flag OFF', false],
+  ])('relay (%s): 別の注文 A (お店が利用料を負担・受取が B の合計と同じ) の確定は、B の URL が上乗せの形でなければ「この画面の支払いではありません」', async (_label, flag) => {
+    feeFlags.enableMobileOrderFee = flag;
+    ready();
+    const fee = 90n * 10n ** 18n;
+    setRestoredRelay(relayIntent({ routeKind: 'recover', merchantValue: (TOTAL - fee).toString(), feeValue: fee.toString() }));
+    const orderB = (feePayer: 'merchant' | 'customer'): CheckoutParams => ({
+      ...JPYC_PARAMS,
+      feeKind: 'preorder',
+      feePayer,
+      items: [{ name: 'B', qty: 1, price: '2910' }],
+    });
+    const first = render(<CheckoutForm params={orderB('merchant')} />);
+    expectForeignCompletion(TX);
+    await expectNoOverlay();
+    first.unmount();
+
+    // 残る限界: B の URL がお客様の上乗せの形なら、A の受取 (2,910) = B の合計で一致のまま (今までどおりの完了の欄)。
+    render(<CheckoutForm params={orderB('customer')} />);
+    expectOwnCompletion(TX);
+  });
+
   it('relay: 受注を同一 origin の notify へ送る会計では、束縛しない復元はお店・合計が同じでも「この画面の支払いではありません」(受注は送らない)', async () => {
     const fetchSpy = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
     vi.stubGlobal('fetch', fetchSpy);
