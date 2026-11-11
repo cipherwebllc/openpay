@@ -3049,4 +3049,122 @@ describe('useJpycEip3009Payment — 復旧の枠を書けない端末では束�
     expect(signTypedData).toHaveBeenCalledTimes(1);
     expect(logger.info).not.toHaveBeenCalledWith('payment.intent_storage_unavailable', expect.anything());
   });
+
+  // Codex の再現 (SHOULD): 枠を書けたが読み戻しが投げた回は POST しないが、この試みの記録 (まだ送っていない) が枠に残ると、
+  // 読めるようになった後に開き直した画面が「送信済みかもしれない」として、署名の期限が証明されるまで支払いを塞いでいた。
+  // 書き込みの後の最初の読み戻しだけを投げさせる (書く前の読みと署名の前の確かめは通る)。
+  function failSlotReadBackOnce() {
+    const realSet = Storage.prototype.setItem;
+    const realGet = Storage.prototype.getItem;
+    let wroteSlot = false;
+    spies.push(vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key: string, value: string) {
+      if (key === RELAY_INTENT_STORAGE_KEY) wroteSlot = true;
+      realSet.call(this, key, value);
+    }));
+    spies.push(vi.spyOn(Storage.prototype, 'getItem').mockImplementation(function (this: Storage, key: string) {
+      if (key === RELAY_INTENT_STORAGE_KEY && wroteSlot) {
+        wroteSlot = false;
+        throw new DOMException('Access is denied for this document.', 'SecurityError');
+      }
+      return realGet.call(this, key);
+    }));
+  }
+  async function reopenAfterStorageRecovers(view: { unmount: () => void }) {
+    for (const spy of spies.splice(0)) spy.mockRestore();
+    view.unmount();
+    const reopened = renderHook(() => useJpycEip3009Payment(jpycDep), { wrapper: makeWrapper() });
+    await waitFor(() => expect(reopened.result.current.isRestoring).toBe(false));
+    return reopened;
+  }
+
+  it('初回: 書けたが読み戻しが投げた → POST せず、この試みの記録を片づける (読めるようになって開き直しても塞がない)', async () => {
+    const view = await mountHook('free');
+    failSlotReadBackOnce();
+    act(() => view.result.current.mutate({ merchant: MERCHANT, value: VALUE }));
+    await waitFor(() => expect(view.result.current.error?.message).toBe(STORAGE_ERROR));
+    expect(signTypedData).toHaveBeenCalledTimes(1);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(logger.info).toHaveBeenCalledWith(...unavailableLog('save'));
+
+    const reopened = await reopenAfterStorageRecovers(view);
+    expect(window.sessionStorage.getItem(RELAY_INTENT_STORAGE_KEY)).toBeNull();
+    expect(reopened.result.current.hasActiveIntent).toBe(false);
+    expect(reopened.result.current.restoredIntent ?? null).toBeNull();
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('IP 制限 (429) の後の再送: 書けたが読み戻しが投げた → 再送せず、この試みの記録を片づける (開き直しても塞がない)', async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse(429, { ok: false, error: 'ip_rate_limited' }));
+    const view = await mountHook('free');
+    act(() => view.result.current.mutate({ merchant: MERCHANT, value: VALUE }));
+    await waitFor(() => expect(isRelayIpRateLimitedError(view.result.current.error)).toBe(true));
+    expect(relayPosts()).toHaveLength(1);
+
+    failSlotReadBackOnce();
+    act(() => view.result.current.retryRelay());
+    await waitFor(() => expect(view.result.current.error?.message).toBe(STORAGE_ERROR));
+    expect(relayPosts()).toHaveLength(1);
+    expect(logger.info).toHaveBeenCalledWith(...unavailableLog('retry'));
+
+    const reopened = await reopenAfterStorageRecovers(view);
+    expect(window.sessionStorage.getItem(RELAY_INTENT_STORAGE_KEY)).toBeNull();
+    expect(reopened.result.current.hasActiveIntent).toBe(false);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  // Codex の再現 (MUST): 束縛した注文は relay の枠を使わず自分の slot (lib/orderDelivery) に保存するが、saveOrderDelivery は
+  // setItem が投げなければ true を返すので、書き込みを黙って捨てる storage では slot なしで送れていた (開き直して同じ注文を
+  // もう一度押すと、署名 2 回・別の authorization で POST 2 回・保存 0 = 両方成立しうる)。送る前に slot を読み戻して止める。
+  async function boundOrder(mode: 'free' | 'recover', orderId: string) {
+    const { bindingFixture } = await import('../_helpers/orderBinding');
+    return bindingFixture(mode, { chainId: jpycDep.chainId, tokenAddress: jpycDep.address, merchant: MERCHANT, handle: 'alice', orderId, items: [{ name: 'Tea', qty: 1, price: '300' }], statusToken: 's'.repeat(43) });
+  }
+  const renderBound = () => renderHook(
+    () => useJpycEip3009Payment(jpycDep, { restoreOrderDelivery: true, orderContext: ORDER_CONTEXT }),
+    { wrapper: makeWrapper() },
+  );
+
+  it.each(['free', 'recover'] as const)('%s: 束縛した注文の slot への書き込みを黙って捨てる端末 → 送る前に止める。開き直して同じ注文をもう一度押しても送らない', async (mode) => {
+    const { ORDER_DELIVERY_KEY } = await import('@/lib/orderDelivery');
+    const { latestOrderDelivery } = await import('../_helpers/orderDeliveryView');
+    const f = await boundOrder(mode, `bound-drop-${mode}`);
+    setRoute(mode);
+    mount();
+    const first = renderBound();
+    await waitFor(() => expect(first.result.current.isRestoring).toBe(false));
+    breakSetItem((key) => key.startsWith(ORDER_DELIVERY_KEY), 'drop');
+
+    act(() => first.result.current.mutate({ merchant: MERCHANT, value: VALUE, order: f.order }));
+    await waitFor(() => expect(first.result.current.error?.message).toBe('order_binding_storage_unavailable'));
+    expect(signTypedData).toHaveBeenCalledTimes(1);
+    expect(relayPosts()).toHaveLength(0);
+    first.unmount();
+
+    const second = renderBound();
+    await waitFor(() => expect(second.result.current.isRestoring).toBe(false));
+    act(() => second.result.current.mutate({ merchant: MERCHANT, value: VALUE, order: f.order }));
+    await waitFor(() => expect(second.result.current.error?.message).toBe('order_binding_storage_unavailable'));
+    expect(signTypedData).toHaveBeenCalledTimes(2);
+    expect(relayPosts()).toHaveLength(0);
+    expect(latestOrderDelivery()).toEqual({ kind: 'empty' });
+  });
+
+  it('束縛した注文: IP 制限 (429) の後の再送の前にも slot を読み戻す。書き込みを黙って捨てるようになっていたら再送しない', async () => {
+    const { ORDER_DELIVERY_KEY } = await import('@/lib/orderDelivery');
+    const f = await boundOrder('free', 'bound-drop-retry');
+    setRoute('free');
+    mount();
+    fetchSpy.mockResolvedValueOnce(jsonResponse(429, { ok: false, error: 'ip_rate_limited' }));
+    const view = renderBound();
+    await waitFor(() => expect(view.result.current.isRestoring).toBe(false));
+    act(() => view.result.current.mutate({ merchant: MERCHANT, value: VALUE, order: f.order }));
+    await waitFor(() => expect(isRelayIpRateLimitedError(view.result.current.error)).toBe(true));
+    expect(relayPosts()).toHaveLength(1);
+
+    breakSetItem((key) => key.startsWith(ORDER_DELIVERY_KEY), 'drop');
+    act(() => view.result.current.retryRelay());
+    await waitFor(() => expect(view.result.current.error?.message).toBe('order_binding_storage_unavailable'));
+    expect(relayPosts()).toHaveLength(1);
+    expect(signTypedData).toHaveBeenCalledTimes(1);
+  });
 });

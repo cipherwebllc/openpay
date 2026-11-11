@@ -119,6 +119,22 @@ describe('relay payment intent: 署名の前の確かめ (canStoreRelayIntent)',
     expect(canStoreRelayIntent({ ...relayIntent(), nonce: '0x1234' as Hex })).toBe(false);
     expect(window.sessionStorage.length).toBe(0);
   });
+
+  // Codex の再現 (NIT): 読み戻しの getItem が投げると、今までは確かめのキーが残っていた。
+  it('読み戻しが投げた端末でも確かめのキーを残さない (枠には触れない)', () => {
+    saveRelayIntent(relayIntent());
+    const read = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(accessDenied);
+    expect(canStoreRelayIntent({ ...relayIntent(), nonce: `0x${'9'.repeat(64)}` as Hex })).toBe(false);
+    read.mockRestore();
+    expect(window.sessionStorage.getItem(RELAY_INTENT_PROBE_KEY)).toBeNull();
+    expect(loadRelayIntent()).toEqual(relayIntent());
+  });
+
+  it('読み戻しも消すのも投げる端末でも false を返すだけ (throw しない)', () => {
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(accessDenied);
+    vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(accessDenied);
+    expect(canStoreRelayIntent(relayIntent())).toBe(false);
+  });
 });
 
 // 署名の後・POST の前に、枠そのものを書いて読み戻す。
@@ -179,5 +195,70 @@ describe('relay payment intent: 書いて読み戻す (saveRelayIntentVerified)'
     expect(saveRelayIntentVerified(relayIntent())).toBe(false);
     spy.mockRestore();
     expect(loadRelayIntent()).toEqual(stale);
+  });
+
+  // Codex の再現 (SHOULD): 書けたが読み戻しが投げた (または違う形で読めた) とき、この試みの記録 (まだ送っていない) が
+  // 枠に残ると、読めるようになった後に開き直した画面が「送信済みかもしれない」として塞ぐ。消してよい根拠があるときだけ消す。
+  // 書き込みの後の最初の読み戻しだけを投げさせる (書く前の読みは通る)。
+  function failReadBackOnce(): void {
+    const realSet = Storage.prototype.setItem;
+    const realGet = Storage.prototype.getItem;
+    let wroteSlot = false;
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key: string, value: string) {
+      if (key === RELAY_INTENT_STORAGE_KEY) wroteSlot = true;
+      realSet.call(this, key, value);
+    });
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(function (this: Storage, key: string) {
+      if (key === RELAY_INTENT_STORAGE_KEY && wroteSlot) {
+        wroteSlot = false;
+        return accessDenied();
+      }
+      return realGet.call(this, key);
+    });
+  }
+
+  it('書く前の枠が空で、書けたが読み戻しが投げた → false で、この試みの記録を片づける', () => {
+    failReadBackOnce();
+    expect(saveRelayIntentVerified(relayIntent())).toBe(false);
+    vi.restoreAllMocks();
+    expect(window.sessionStorage.getItem(RELAY_INTENT_STORAGE_KEY)).toBeNull();
+  });
+
+  it('書く前の枠がこの authorization (同じ nonce・IP 制限の後の再送) で、読み戻しが投げた → 片づける', () => {
+    saveRelayIntent(relayIntent());
+    failReadBackOnce();
+    expect(saveRelayIntentVerified(relayIntent())).toBe(false);
+    vi.restoreAllMocks();
+    expect(window.sessionStorage.getItem(RELAY_INTENT_STORAGE_KEY)).toBeNull();
+  });
+
+  it('書く前に別の支払いの記録があった → 読み戻せなくても枠を消さない (別の支払いの記録を消さない・fail-closed)', () => {
+    const other = { ...relayIntent(), nonce: `0x${'9'.repeat(64)}` as Hex };
+    saveRelayIntent(other);
+    // 書き込みを黙って捨てる端末: 枠に残るのは別の支払いの記録。
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => undefined);
+    expect(saveRelayIntentVerified(relayIntent())).toBe(false);
+    vi.restoreAllMocks();
+    expect(loadRelayIntent()).toEqual(other);
+
+    // 書けたが読み戻しが投げた: 枠にあるのはこの試みの記録だが、書く前に別の記録があったので消さない
+    // (限界: 期限が証明されるまで「送信済みかもしれない」で塞ぎうる。二重払いではない)。
+    failReadBackOnce();
+    expect(saveRelayIntentVerified(relayIntent())).toBe(false);
+    vi.restoreAllMocks();
+    expect(loadRelayIntent()).toEqual(relayIntent());
+  });
+
+  it('書く前の枠を読めなかった → 根拠が無いので消さない (fail-closed)', () => {
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(accessDenied);
+    const removed = vi.spyOn(Storage.prototype, 'removeItem');
+    expect(saveRelayIntentVerified(relayIntent())).toBe(false);
+    expect(removed).not.toHaveBeenCalled();
+  });
+
+  it('片づけ (removeItem) が投げても false を返すだけ (throw しない)', () => {
+    failReadBackOnce();
+    vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(accessDenied);
+    expect(saveRelayIntentVerified(relayIntent())).toBe(false);
   });
 });
