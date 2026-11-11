@@ -87,9 +87,9 @@ export function isForeignSettlement(screen: SettlementScreen, restored: Restored
     const { chainId, merchant, merchantValue, feeValue, orderLinkKey } = restored.record;
     if (restored.bound) return false;
     if (screen.relayAlwaysBound) return true;
-    // 額: 「お店の受取 + 利用料」が画面の額と同じなら一致 (free = 利用料 0・お店が利用料を負担 = 受取が減る。式は
-    // lib/orderDeliveryContext の matchesOrderDeliveryContext と同じ)。利用料を今の設定で計算し直さない。お客様の上乗せが
-    // ありうる会計は「お店の受取」が額と同じでも一致。
+    // 額: 「お店の受取 + 利用料」が画面の売上の額と同じなら一致 (free = 利用料 0・お店が利用料を負担 = 受取が減る)。
+    // 保存した値をそのまま足し、利用料を今の設定で計算し直さない。お客様の上乗せがありうる会計は「お店の受取」が額と
+    // 同じでも一致 (上乗せの形は 受取 + 利用料 が売上の額を超える)。
     const received = BigInt(merchantValue);
     return (
       !screen.chainIds.includes(chainId) ||
