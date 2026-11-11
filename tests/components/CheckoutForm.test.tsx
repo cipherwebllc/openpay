@@ -5228,10 +5228,9 @@ describe('CheckoutForm — 復元した前の支払いの確定を、この会�
     vi.stubGlobal('fetch', fetchSpy);
     ready();
     setRestoredRelay(relayIntent());
+    // 番号なし・ship なし = 注文リンクでない会計 (注文リンクの鍵では区別されない)。違いは「必ず束縛される」ことだけ。
     render(
-      <CheckoutForm
-        params={{ ...JPYC_PARAMS, orderId: 'order-b', webhook: `${window.location.origin}/api/order/notify?h=alice` }}
-      />,
+      <CheckoutForm params={{ ...JPYC_PARAMS, webhook: `${window.location.origin}/api/order/notify?h=alice` }} />,
     );
 
     // origin は mount の後に決まる (useOrigin)。
