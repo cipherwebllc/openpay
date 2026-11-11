@@ -1936,7 +1936,7 @@ describe('期限の基準 = 最後に bundler へ渡した時刻を、送る前�
     firstHook.result.current.retryReceipt();
     await waitFor(() => expect(first.waitForUserOperationReceipt).toHaveBeenCalledTimes(1));
     expect(world.mempoolHashes()).toHaveLength(1);
-    expect(storedRecord()?.updatedAt).toBe(resentAt);
+    const savedAtResend = storedRecord()?.updatedAt;
     firstHook.unmount();
 
     vi.setSystemTime(resentAt + 2 * 60_000);
@@ -1945,6 +1945,8 @@ describe('期限の基準 = 最後に bundler へ渡した時刻を、送る前�
     expect(world.mined).toHaveLength(1);
     expect(second.getNonce).not.toHaveBeenCalled();
     expect(restored.result.current.isUnknown).toBe(true);
+    // 送り直しの時刻は、receipt 待ちの間 (送った後の更新の前) にもう保存されていた。
+    expect(savedAtResend).toBe(resentAt);
   });
 
   it('送った後の receipt 待ちが失敗しても (応答不明の記録を書いても)、期限の基準の時刻は送った時のまま', async () => {
