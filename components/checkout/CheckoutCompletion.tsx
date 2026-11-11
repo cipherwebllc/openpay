@@ -73,7 +73,8 @@ export function CheckoutCompletion({
     <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
       <p className="font-semibold">{t(foreign ? 'foreignSettlementTitle' : 'successTitle')}</p>
       <p className="mt-1 text-xs">{t(foreign ? 'foreignSettlementBody' : 'successBody')}</p>
-      {/* 読み込み直すと、確定した前の支払いの記録は片づいているので、この会計を払える (hook は確定と同時に記録を消す)。 */}
+      {/* hook は確定と同時に前の支払いの記録を片づけるので、読み込み直せばこの会計を払える。削除に失敗した端末 (失敗は
+          握る) では記録が残り、読み込み直しても同じ表示に戻る (既存の限界)。 */}
       {foreign && (
         <button
           type="button"

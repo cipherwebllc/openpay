@@ -1363,7 +1363,8 @@ describe('useStandardPayment', () => {
     expect(result.current.restoredFromStorage).toBe(false);
     expect(result.current.restoredAttempt).toBe(true);
 
-    // 利用料が確定して成功になっても、復元した試みのまま。確定と同時に保存した印は片づく (読み直せば払える)。
+    // 利用料が確定して成功になっても、復元した試みのまま。確定と同時に保存した印は片づく (削除できる端末では、読み直せば
+    // 払える)。
     const onFeeHash = useWriteContractMockB.writeContract.mock.calls[0][1]
       .onSuccess as (hash: Hex) => void;
     act(() => {
