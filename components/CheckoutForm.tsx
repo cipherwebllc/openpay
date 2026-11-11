@@ -713,6 +713,11 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   const settlementScreen = useMemo(() => checkoutSettlementScreen(params), [params]);
   const foreignSettlement =
     restoredCheckoutCompletion &&
+    // G-1 (この注文リンクの会計の鍵・chain・お店・額と一致した記録 = 「お店に知らせる」と払った記録を出す) を満たす復元は、
+    // 判定を呼ばずに一致とする。何の波及を断つか: 判定の入力 (token の表など) が env でずれても、この会計と一致した記録に
+    // 「この画面の支払いではありません」を出し、「お店に知らせる」と同時に出すこと。
+    restoredStandardOrderLinkAttempt === null &&
+    restoredRelayOrderIntent === null &&
     isForeignSettlement(
       settlementScreen,
       isStandard

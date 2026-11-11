@@ -41,15 +41,20 @@ export function findRememberedOrderPayment(
  */
 export function checkoutSettlementScreen(params: CheckoutParams): SettlementScreen {
   const chain = params.chain ?? DEFAULT_CHAIN_FOR_SYMBOL[params.token];
+  const own = deploymentsForSymbol(params.token).map((deployment) => deployment.address.toLowerCase());
   return {
     merchant: params.to,
     amount: calcCheckoutPayable(params, deploymentForSlug(params.token, chain).decimals),
     // 上乗せの形 (受取 = 合計) になりうるのは事前注文でお客様の負担の URL だけ (lib/mobileOrderFee の mobileOrderGasMode・
     // 負担者が無い・お店の負担・店頭はお店の負担で 受取 + 利用料 = 合計)。flag・料率は払った後に変わるので見ない。
     customerFeeOnTop: params.feeKind === 'preorder' && params.feePayer === 'customer',
-    // 別の symbol の deployment の address。env が変えうるのは address の上書きと chain の有無だけで、この組に入るのは
-    // どれも別の token の address (画面の token の address が入ることは無いので、env が変わっても同じ支払いは一致のまま)。
-    otherTokenAddresses: deploymentsForSymbol(counterpartSymbol(params.token)).map((deployment) => deployment.address),
+    // 別の symbol の deployment の address。address の上書き (env) は形しか確かめず、symbol の間で重ならないことを強制しない
+    // ので、この画面の symbol の今の address と重なるものは「どちらの token か決められない」= 除く (何の波及を断つか:
+    // 別の token の設定の誤りで、この token の正当な支払いを別の支払いとすること)。除いた後に残る誤りは、別の token の上書きが
+    // この token の今は表に無い昔の address と同じになる場合だけ (2 つの設定の誤りが重なる場合)。
+    otherTokenAddresses: deploymentsForSymbol(counterpartSymbol(params.token))
+      .map((deployment) => deployment.address)
+      .filter((address) => !own.includes(address.toLowerCase())),
     contextKeyed: true,
   };
 }

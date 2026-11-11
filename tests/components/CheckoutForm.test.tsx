@@ -126,6 +126,18 @@ vi.mock('@/lib/env', async (importOriginal) => {
   };
 });
 
+// 復元した支払いの確定の判定 (lib/paymentFlowGuards/restoredSettlement)。既定は実物そのまま。G-1 の構造の守り (判定が
+// 不一致を返しても、この注文リンクの会計と一致した記録は W1 にしない) を確かめるテストだけが、不一致を強制する。
+const settlementForce = vi.hoisted(() => ({ foreign: false }));
+vi.mock('@/lib/paymentFlowGuards/restoredSettlement', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/paymentFlowGuards/restoredSettlement')>();
+  return {
+    ...actual,
+    isForeignSettlement: (...args: Parameters<typeof actual.isForeignSettlement>) =>
+      settlementForce.foreign || actual.isForeignSettlement(...args),
+  };
+});
+
 import { useAccount, usePublicClient, useReadContract, useSwitchChain, useWalletClient } from 'wagmi';
 import { checkoutFormKey } from '@/lib/checkoutFormKey';
 import { useSmartAccount } from '@/hooks/useSmartAccount';
@@ -551,6 +563,7 @@ beforeEach(() => {
   // fee flag / rate は毎テスト OFF・実物起点 (fee テストが個別に立てる)。
   feeFlags.enableMobileOrderFee = false;
   feeFlags.enableOrderPickup = false;
+  settlementForce.foreign = false;
   window.sessionStorage.clear();
 });
 
@@ -4938,6 +4951,48 @@ describe('CheckoutForm — 復元した決済の完了で「注文を送る」�
     expect(await screen.findByText(PAID_NOTE)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /3000 JPYC を支払う/ })).toBeDisabled();
     expect(screen.getByRole('button', { name: '注文を送る' })).toBeInTheDocument();
+  });
+
+  // G-1 の構造の守り (第 10 回レビュー H-S・Codex 第 3 回): 判定の関数が不一致を返す入力 (env の token の表のずれなど) でも、
+  // この注文リンクの会計と一致した記録は W1 にしない (「この画面の支払いではありません」と「注文を送る」を同時に出さない)。
+  // 判定を mock で不一致に強制して確かめる (CheckoutForm が判定を呼ぶ前に G-1 で一致とすること)。
+  it.each<[string, Partial<RestoredRelayIntent>]>([
+    ['free', {}],
+    ['recover', RECOVER],
+  ])('ガスレス (relay %s): 判定が不一致を返しても、G-1 を満たす記録は今までどおりの題で「注文を送る」を出す', async (_route, overrides) => {
+    settlementForce.foreign = true;
+    ready();
+    setRestoredRelaySuccess(relayIntent(overrides));
+    render(<CheckoutForm params={RELAY_ORDER} />);
+
+    expect(await screen.findByRole('button', { name: '注文を送る' })).toBeInTheDocument();
+    expect(screen.getByText(DONE_TITLE)).toBeInTheDocument();
+    expect(screen.queryByText(FOREIGN_TITLE)).toBeNull();
+    expect(screen.queryByRole('button', { name: '読み込み直す' })).toBeNull();
+  });
+
+  it('通常決済: 判定が不一致を返しても、G-1 を満たす記録は今までどおりの題で「お店に知らせる」を出す', async () => {
+    settlementForce.foreign = true;
+    ready();
+    setRestoredStandardSuccess({ contextKey: contextKeyOf(STANDARD_ORDER), orderLinkKey: orderLinkKeyOf(STANDARD_ORDER) });
+    render(<CheckoutForm params={STANDARD_ORDER} />);
+
+    expect(await screen.findByRole('button', { name: 'お店に知らせる' })).toBeInTheDocument();
+    expect(screen.getByText(DONE_TITLE)).toBeInTheDocument();
+    expect(screen.queryByText(FOREIGN_TITLE)).toBeNull();
+  });
+
+  it('(対照) 判定を不一致に強制すると、G-1 を満たさない復元 (別の注文の指紋) は「この画面の支払いではありません」', async () => {
+    settlementForce.foreign = true;
+    ready();
+    setRestoredRelaySuccess(
+      relayIntent({ orderLinkKey: orderLinkKeyOf({ ...RELAY_ORDER, items: [{ name: 'チケット', qty: 2, price: '1500' }] }) }),
+    );
+    render(<CheckoutForm params={RELAY_ORDER} />);
+
+    expect(screen.getByText(FOREIGN_TITLE)).toBeInTheDocument();
+    expect(screen.queryByText(DONE_TITLE)).toBeNull();
+    expect(screen.queryByRole('button', { name: '注文を送る' })).toBeNull();
   });
 
   it.each<[string, Partial<RestoredRelayIntent>]>([

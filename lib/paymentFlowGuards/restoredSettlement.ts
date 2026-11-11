@@ -34,7 +34,10 @@ export type SettlementScreen = {
    * ではどちらの形も一致とする。
    */
   customerFeeOnTop: boolean;
-  /** 画面の token と別の token の address (別の symbol の deployment)。記録の token がこのどれかなら別の支払い。 */
+  /**
+   * 画面の token と別の token の address (別の symbol の deployment から、画面の token の address と重なるものを除いた組)。
+   * 記録の token がこのどれかなら別の支払い。
+   */
   otherTokenAddresses: readonly string[];
   /** この画面の通常決済は会計の鍵 (contextKey) を記録に付ける (/checkout)。鍵を付けない画面 (/pay・/tip) は false。 */
   contextKeyed: boolean;
