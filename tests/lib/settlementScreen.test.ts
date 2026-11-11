@@ -65,6 +65,32 @@ describe('unkeyedSettlementScreen — 鍵を付けない画面 (/pay・/tip) の
     expect(screen.customerFeeOnTop).toBe(false);
   });
 
+  // @handle のページのチップ: 受取先は handle の設定で決まり、払った後に変えられるので渡さない (null = 比べない)。
+  it('受取先が設定で決まる画面: 受取先は null のまま渡る。受取先だけが違う記録は一致のまま・別の token と鍵は不一致', async () => {
+    const m = await load();
+    const screen = m.screens.unkeyedSettlementScreen(null, 'jpyc', null);
+    expect(screen).toEqual({
+      merchant: null,
+      amount: null,
+      customerFeeOnTop: false,
+      otherTokenAddresses: m.tokens.deploymentsForSymbol('usdc').map((deployment) => deployment.address),
+      contextKeyed: false,
+    });
+    const jpyc = m.tokens.deploymentsForSymbol('jpyc')[0];
+    const usdc = m.tokens.deploymentsForSymbol('usdc')[0];
+    const relayRecord = { merchant: MERCHANT, merchantValue: PAID.toString(), feeValue: '0' };
+    expect(m.settlement.isForeignSettlement(screen, { kind: 'relay', bound: false, record: relayRecord })).toBe(false);
+    expect(
+      m.settlement.isForeignSettlement(screen, { kind: 'relay', bound: false, record: { ...relayRecord, orderLinkKey: `0x${'7'.repeat(64)}` } }),
+    ).toBe(true);
+    expect(
+      m.settlement.isForeignSettlement(screen, { kind: 'gasless', record: { tokenAddress: jpyc.address, merchant: MERCHANT, saleAmount: PAID } }),
+    ).toBe(false);
+    expect(
+      m.settlement.isForeignSettlement(screen, { kind: 'gasless', record: { tokenAddress: usdc.address, merchant: MERCHANT, saleAmount: PAID } }),
+    ).toBe(true);
+  });
+
   it('別の token の address の組は /checkout の画面の形と同じ作り方 (同じ値)', async () => {
     const m = await load();
     for (const token of ['jpyc', 'usdc'] as const) {

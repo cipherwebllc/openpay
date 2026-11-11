@@ -519,6 +519,37 @@ describe('isForeignSettlement — 鍵を付けない画面 (/pay・/tip の形)'
     expect(gasless(fixed, gaslessRecord({ saleAmount: 1n }))).toBe(true);
     expect(gasless(open, gaslessRecord({ merchant: OTHER_MERCHANT }))).toBe(true);
   });
+
+  // 受取先が URL でなく設定で決まる画面 (@handle のページのチップ = merchant: null)。handle の受取先は払った後に変えられるので、
+  // 記録の受取先が今の設定と違っても別の支払いの証明にしない (同じクリエイターへのチップをもう一度送らせない)。
+  describe('受取先が設定で決まる画面 (merchant = null)', () => {
+    const byConfig: SettlementScreen = { ...open, merchant: null };
+    const bare = standardRecord(JPYC, { contextKey: undefined });
+
+    it('受取先が違うだけでは不一致にしない (relay・通常決済・Pimlico)。同じ受取先ももちろん一致', () => {
+      expect(relay(byConfig, relayRecord({ merchant: OTHER_MERCHANT }))).toBe(false);
+      expect(standard(byConfig, { ...bare, merchant: OTHER_MERCHANT })).toBe(false);
+      expect(gasless(byConfig, gaslessRecord({ merchant: OTHER_MERCHANT }))).toBe(false);
+      expect(relay(byConfig, relayRecord())).toBe(false);
+      expect(gasless(byConfig, gaslessRecord())).toBe(false);
+    });
+
+    it('鍵・別の token の証明は、受取先を比べなくても今までどおり立つ', () => {
+      expect(relay(byConfig, relayRecord({ merchant: OTHER_MERCHANT, orderLinkKey: anyKey }))).toBe(true);
+      expect(relay(byConfig, relayRecord({ orderLinkKey: anyKey }))).toBe(true);
+      expect(standard(byConfig, standardRecord(JPYC))).toBe(true);
+      expect(standard(byConfig, { ...bare, orderLinkKey: anyKey })).toBe(true);
+      expect(standard(byConfig, { ...bare, merchant: OTHER_MERCHANT, tokenAddress: base.address })).toBe(true);
+      expect(gasless(byConfig, gaslessRecord({ merchant: OTHER_MERCHANT, tokenAddress: base.address }))).toBe(true);
+    });
+
+    it('受取先と額は別々の欄: 受取先を比べない画面でも、URL で決まる額があれば額は比べる', () => {
+      const fixedByConfig: SettlementScreen = { ...fixed, merchant: null };
+      expect(relay(fixedByConfig, relayRecord({ merchant: OTHER_MERCHANT }))).toBe(false);
+      expect(relay(fixedByConfig, relayRecord({ merchant: OTHER_MERCHANT, merchantValue: '5' }))).toBe(true);
+      expect(gasless(fixedByConfig, gaslessRecord({ merchant: OTHER_MERCHANT, saleAmount: 1n }))).toBe(true);
+    });
+  });
 });
 
 describe('checkoutSettlementScreen — /checkout の画面の形', () => {

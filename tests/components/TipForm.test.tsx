@@ -3042,6 +3042,77 @@ describe('TipForm — 復元した前の支払いの確定を、この画面の�
     expect(screen.queryByRole('button', { name: '読み込み直す' })).toBeNull();
   });
 
+  // ---- @handle のページのチップ ----
+  // ここまでのテストは TipForm を直接描く = /tip/[address] の形 (受取先が URL にある → 受取先を比べる)。@handle のページは
+  // 受取先が handle の設定で決まり、払った後にクリエイターが変えられる。記録の受取先が今の設定と違っても、同じクリエイターへの
+  // チップでありうるので、別の支払いの証明にしない (もう一度送らせない)。token と鍵の証明は今までどおり立つ。
+  describe('@handle のページ (受取先は handle の設定で決まる = recipientFromHandleConfig): 受取先を比べない', () => {
+    it('relay: 記録の受取先が今の設定と違っても (クリエイターが受取先を変えた後の読み直し)、今までどおりの題', async () => {
+      readyRelay();
+      setRestoredRelay(relayIntent({ merchant: OTHER_CREATOR }));
+      render(<TipForm params={tipParams} recipientFromHandleConfig />);
+
+      await expectOwnResult(RELAY_TX);
+      await expectNoOverlay();
+      expect(screen.queryByText(THANKS)).toBeNull();
+      expect(loadPayerReceipts()).toEqual([]);
+    });
+
+    it('relay: 注文リンクの鍵を持つ記録 (付けるのは /checkout だけ) は、受取先を比べなくても「この画面の支払いではありません」', async () => {
+      readyRelay();
+      setRestoredRelay(relayIntent({ merchant: OTHER_CREATOR, orderLinkKey: ANY_KEY }));
+      render(<TipForm params={tipParams} recipientFromHandleConfig />);
+      await expectForeignResult(RELAY_TX);
+    });
+
+    it('ガスレス: 記録の受取先が今の設定と違っても、今までどおりの題', async () => {
+      readyGasless();
+      setSettledOther(gaslessRecord({ merchant: OTHER_CREATOR }));
+      render(<TipForm params={usdcParams} recipientFromHandleConfig />);
+
+      await expectOwnResult(GASLESS_TX);
+      await expectNoOverlay();
+      expect(screen.queryByText(THANKS)).toBeNull();
+    });
+
+    it('ガスレス: 別の token (JPYC の address) の記録は、受取先を比べなくても「この画面の支払いではありません」', async () => {
+      readyGasless();
+      setSettledOther(gaslessRecord({ merchant: OTHER_CREATOR, tokenAddress: jpycAddress }));
+      render(<TipForm params={usdcParams} recipientFromHandleConfig />);
+      await expectForeignResult(GASLESS_TX);
+    });
+
+    // @handle のページが実際に描く形 (ReceiveMethodPicker → TipForm)。picker が印を渡していることを固定する。
+    const HANDLE_CONFIG: HandleTipConfig = {
+      to: CREATOR,
+      name: '山田太郎',
+      methods: [
+        { token: 'jpyc', chain: 'polygon' },
+        { token: 'usdc', chain: 'base', crossChain: true },
+      ],
+      presets: { jpyc: ['100', '500', '1000'], usdc: ['1', '5', '10'] },
+    };
+    // 受取方法は初めは畳んである。JPYC を開くと、その方法の TipForm が mount される。
+    function openJpycMethod() {
+      render(<ReceiveMethodPicker config={HANDLE_CONFIG} />);
+      fireEvent.click(screen.getByRole('button', { name: 'JPYC · Polygon' }));
+    }
+
+    it('ReceiveMethodPicker 経由: 受取先だけが違う relay の復元の確定は、今までどおりの題', async () => {
+      readyRelay();
+      setRestoredRelay(relayIntent({ merchant: OTHER_CREATOR }));
+      openJpycMethod();
+      await expectOwnResult(RELAY_TX);
+    });
+
+    it('ReceiveMethodPicker 経由: 注文リンクの鍵を持つ relay の記録は「この画面の支払いではありません」と「読み込み直す」', async () => {
+      readyRelay();
+      setRestoredRelay(relayIntent({ orderLinkKey: ANY_KEY }));
+      openJpycMethod();
+      await expectForeignResult(RELAY_TX);
+    });
+  });
+
   // 判定するのは復元した確定だけ。別の intent でない確定 (この mount で送った) は、hook が持つ記録が画面と違っても題を差し替えない。
   it('ガスレス: 別の intent でない成功は、variables の受取先が画面と違っても判定しない (今までどおりの題とお礼)', async () => {
     readyGasless();

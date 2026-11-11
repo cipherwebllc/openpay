@@ -25,10 +25,17 @@ export function otherTokenAddresses(token: TokenSymbol): string[] {
  * (/pay の recover をお店の負担に固定したのは 2026-06-12・relay の枠を保存し始めたのは 2026-07-26 の #273 = 上乗せの形の
  * /pay の記録は無い。固定は tests/components/PaymentForm.test.tsx の「前提の固定」)。
  *
+ * merchant は URL で決まる受取先だけを渡す (/pay の to・/tip/[address] の address)。@handle のページのチップは null (受取先は
+ * handle の設定で決まり、払った後に変えられる = 比べない・理由は SettlementScreen.merchant)。
+ *
  * amount は URL で決まる額だけを渡す (/pay の金額ありの QR)。入力で決まる額 (/pay の金額なしの QR・/tip の選んだ額) は null:
  * 読み込み直すと入力は空・既定に戻るので、今の入力と記録の額が違っても別の支払いの証明にならない (何の波及を断つか: 同じ支払いを
  * 読み直した人に「この画面の支払いではありません」と出して、もう一度払わせること)。
  */
-export function unkeyedSettlementScreen(merchant: string, token: TokenSymbol, amount: bigint | null): SettlementScreen {
+export function unkeyedSettlementScreen(
+  merchant: string | null,
+  token: TokenSymbol,
+  amount: bigint | null,
+): SettlementScreen {
   return { merchant, amount, customerFeeOnTop: false, otherTokenAddresses: otherTokenAddresses(token), contextKeyed: false };
 }
