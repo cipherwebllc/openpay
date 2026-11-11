@@ -24,6 +24,7 @@ import { getAddress, type Address, type Hex } from 'viem';
 import {
   entryPoint07Address,
   UserOperationReceiptNotFoundError,
+  WaitForUserOperationReceiptTimeoutError,
 } from 'viem/account-abstraction';
 import { baseSepolia } from 'viem/chains';
 import type { ReactNode } from 'react';
@@ -1944,6 +1945,20 @@ describe('期限の基準 = 最後に bundler へ渡した時刻を、送る前�
     expect(world.mined).toHaveLength(1);
     expect(second.getNonce).not.toHaveBeenCalled();
     expect(restored.result.current.isUnknown).toBe(true);
+  });
+
+  it('送った後の receipt 待ちが失敗しても (応答不明の記録を書いても)、期限の基準の時刻は送った時のまま', async () => {
+    const fake = mountClients();
+    // 受理された後の receipt 待ちが 3 分かかって失敗する。
+    vi.mocked(fake.waitForUserOperationReceipt).mockImplementationOnce(async ({ hash }) => {
+      vi.setSystemTime(T0 + 3 * 60_000);
+      throw new WaitForUserOperationReceiptTimeoutError({ hash });
+    });
+    const { result } = render();
+    result.current.mutate(PARAMS);
+    await waitFor(() => expect(result.current.isUnknown).toBe(true));
+
+    expect(storedRecord()).toMatchObject({ status: 'unknown', updatedAt: T0 });
   });
 
   it('送る時刻を保存できなければ送らない (開いたまま・時刻は前に送った時のまま)', async () => {
