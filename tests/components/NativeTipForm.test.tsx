@@ -1,6 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
+import { act, fireEvent, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { QueryClient, QueryClientProvider, useMutation } from '@tanstack/react-query';
 import { parseEther, getAddress } from 'viem';
 import { renderWithIntl } from '../_helpers/i18n';
 import { chainForSlug } from '@/lib/chains';
@@ -28,12 +29,14 @@ const h = vi.hoisted(() => ({
     isSuccess: false,
   },
   switchChain: vi.fn(),
+  // null でなければ、h.send の代わりにこの hook の戻り値を useSendTransaction の戻り値にする (下の H-O の describe)。
+  useSend: null as null | (() => unknown),
 }));
 
 vi.mock('wagmi', () => ({
   useAccount: () => h.account,
   useBalance: () => h.balance,
-  useSendTransaction: () => h.send,
+  useSendTransaction: () => (h.useSend ? h.useSend() : h.send),
   useWaitForTransactionReceipt: () => h.receipt,
   useSwitchChain: () => ({ switchChain: h.switchChain, isPending: false }),
 }));
@@ -65,6 +68,7 @@ beforeEach(() => {
   };
   h.receipt = { data: undefined, isLoading: false, isSuccess: false };
   h.switchChain = vi.fn();
+  h.useSend = null;
 });
 
 describe('NativeTipForm', () => {
@@ -114,11 +118,13 @@ describe('NativeTipForm', () => {
     render();
     await user.click(screen.getByRole('button', { name: /を送る/ }));
     expect(h.send.sendTransaction).toHaveBeenCalledOnce();
-    expect(h.send.sendTransaction).toHaveBeenCalledWith({
+    // 送金の中身 (第 1 引数) は今までどおり。第 2 引数は同期の印を外す onSettled だけ (H-O)。
+    expect(h.send.sendTransaction.mock.calls[0][0]).toEqual({
       to: TO,
       value: parseEther('1'), // polygon 既定プリセット先頭 = '1'
       chainId: POLYGON.id,
     });
+    expect(Object.keys(h.send.sendTransaction.mock.calls[0][1])).toEqual(['onSettled']);
   });
 
   it('送信中 (txHash 取得・未確定) → 確定待ち表示 + 再送不可', () => {
@@ -214,5 +220,177 @@ describe('NativeTipForm', () => {
     h.receipt = { data: { status: 'success' }, isLoading: false, isSuccess: true };
     render();
     expect(screen.queryByText(/通常の送金確認が表示されます/)).toBeNull();
+  });
+
+  // H-O: 送信の入口の同期の印 (sendingRef)。ボタンを閉じる isSending は再描画の後にしか変わらないので、
+  // 再描画の前に続けてクリックされるとウォレットへの依頼が 2 件出ていた。
+  describe('送金の入口の同期の印 (H-O)', () => {
+    type Hash = `0x${string}`;
+    const HASH: Hash = `0x${'b'.repeat(64)}`;
+    const SEND = { to: TO, value: parseEther('1'), chainId: POLYGON.id };
+    let walletRequest: Mock<(variables: unknown) => Promise<Hash>>;
+    let pending: { resolve: (hash: Hash) => void; reject: (err: Error) => void }[];
+
+    // wagmi 2.19.5 の useSendTransaction は useMutation の mutate をそのまま sendTransaction として返す
+    // (node_modules/wagmi/dist/esm/hooks/useSendTransaction.js)。印を外す onSettled が本物の mutation の順で
+    // 呼ばれることを確かめるために、ウォレットへの依頼 (mutationFn) だけを差し替えた本物の useMutation を使う。
+    function useRealSend() {
+      const { mutate, data, isPending, error } = useMutation<Hash, Error, unknown>({
+        mutationFn: walletRequest,
+      });
+      return { sendTransaction: mutate, data, isPending, error };
+    }
+
+    function connect() {
+      h.account = { address: TO, isConnected: true, chainId: POLYGON.id };
+      h.balance = { data: { value: parseEther('100') } };
+    }
+
+    function renderReal(reactStrictMode = false) {
+      connect();
+      h.useSend = useRealSend;
+      return renderWithIntl(
+        <QueryClientProvider client={new QueryClient()}>
+          <NativeTipForm params={{ to: TO, chain: 'polygon' }} />
+        </QueryClientProvider>,
+        { locale: 'ja', reactStrictMode },
+      );
+    }
+
+    const sendButton = () =>
+      screen.getByRole('button', { name: /を送る/ }) as HTMLButtonElement;
+
+    // 同じ tick (間に再描画をはさまない) に 2 回クリックする。1 回目の後もボタンは開いたまま = 2 回目を
+    // 断てるのは state ではなく同期の印だけ。
+    function clickTwiceInOneTick() {
+      const btn = sendButton();
+      act(() => {
+        fireEvent.click(btn);
+        expect(btn.disabled).toBe(false);
+        fireEvent.click(btn);
+      });
+    }
+
+    // 依頼を出して、送信中の表示 (state の反映) まで待つ。
+    async function clickAndWaitForSending() {
+      fireEvent.click(sendButton());
+      await waitFor(() =>
+        expect(screen.getByRole('button', { name: '送信中…' })).toBeDisabled(),
+      );
+    }
+
+    beforeEach(() => {
+      pending = [];
+      walletRequest = vi.fn(
+        () =>
+          new Promise<Hash>((resolve, reject) => {
+            pending.push({ resolve, reject });
+          }),
+      );
+    });
+
+    it.each([false, true])(
+      '同じ tick に 2 回クリック → sendTransaction は 1 回だけ (reactStrictMode: %s)',
+      (reactStrictMode) => {
+        connect();
+        renderWithIntl(<NativeTipForm params={{ to: TO, chain: 'polygon' }} />, {
+          locale: 'ja',
+          reactStrictMode,
+        });
+        clickTwiceInOneTick();
+        expect(h.send.sendTransaction).toHaveBeenCalledTimes(1);
+        expect(h.send.sendTransaction.mock.calls[0][0]).toEqual(SEND);
+      },
+    );
+
+    it.each([false, true])(
+      '同じ tick に 2 回クリック → ウォレットへの依頼は 1 件だけ (本物の mutation・reactStrictMode: %s)',
+      async (reactStrictMode) => {
+        renderReal(reactStrictMode);
+        clickTwiceInOneTick();
+        // 送信中の表示が出た = 出た依頼はすべて mutationFn まで進んでいる。
+        await waitFor(() =>
+          expect(screen.getByRole('button', { name: '送信中…' })).toBeDisabled(),
+        );
+        expect(walletRequest).toHaveBeenCalledTimes(1);
+        expect(walletRequest.mock.calls[0][0]).toEqual(SEND);
+      },
+    );
+
+    it('結果が決まるまでは、state が反映されないまま後からクリックされても 2 件目を出さない。決まったら外れる', () => {
+      // h.send は isPending が false のまま = state がいつまでも描画に反映されない最悪の場合。
+      connect();
+      render();
+      fireEvent.click(sendButton());
+      // fireEvent ごとに再描画が済んでいる (別の tick)。ボタンは開いたままでも、依頼中は出さない。
+      expect(sendButton().disabled).toBe(false);
+      fireEvent.click(sendButton());
+      expect(h.send.sendTransaction).toHaveBeenCalledTimes(1);
+
+      // 結果が決まった (wagmi が mutate ごとの onSettled を呼ぶ) → 次のクリックは通る。
+      act(() => h.send.sendTransaction.mock.calls[0][1].onSettled());
+      fireEvent.click(sendButton());
+      expect(h.send.sendTransaction).toHaveBeenCalledTimes(2);
+    });
+
+    it.each([false, true])(
+      'ウォレットで拒否 → error は出さず、もう一度押すと送れる (reactStrictMode: %s)',
+      async (reactStrictMode) => {
+        renderReal(reactStrictMode);
+        await clickAndWaitForSending();
+        expect(walletRequest).toHaveBeenCalledTimes(1);
+
+        await act(async () => pending[0].reject(new Error('User rejected the request.')));
+        await waitFor(() => expect(sendButton().disabled).toBe(false));
+        expect(screen.queryByText('エラー')).toBeNull();
+
+        await clickAndWaitForSending();
+        expect(walletRequest).toHaveBeenCalledTimes(2);
+        expect(walletRequest.mock.calls[1][0]).toEqual(SEND);
+      },
+    );
+
+    it('error (拒否以外) → error の文を出し、もう一度押すと送れる', async () => {
+      renderReal();
+      await clickAndWaitForSending();
+
+      await act(async () => pending[0].reject(new Error('insufficient funds for gas')));
+      await waitFor(() => expect(sendButton().disabled).toBe(false));
+      expect(screen.getByText('エラー')).toBeInTheDocument();
+      expect(screen.getByText('insufficient funds for gas')).toBeInTheDocument();
+
+      await clickAndWaitForSending();
+      expect(walletRequest).toHaveBeenCalledTimes(2);
+    });
+
+    it('成功 → 成功の欄を出し、ボタンは閉じたままで 2 件目を出さない (今までどおり)', async () => {
+      renderReal();
+      await clickAndWaitForSending();
+
+      h.receipt = { data: { status: 'success' }, isLoading: false, isSuccess: true };
+      await act(async () => pending[0].resolve(HASH));
+      await waitFor(() =>
+        expect(screen.getByText(/応援ありがとう/)).toBeInTheDocument(),
+      );
+      expect(screen.getByText(HASH)).toBeInTheDocument();
+      expect(sendButton().disabled).toBe(true);
+      fireEvent.click(sendButton());
+      expect(walletRequest).toHaveBeenCalledTimes(1);
+    });
+
+    it('hash が返った後に revert → 今までどおり、もう一度押すと送れる (印は外れている)', async () => {
+      renderReal();
+      await clickAndWaitForSending();
+
+      h.receipt = { data: { status: 'reverted' }, isLoading: false, isSuccess: false };
+      await act(async () => pending[0].resolve(HASH));
+      await waitFor(() =>
+        expect(screen.getByText(/ネットワーク上で失敗/)).toBeInTheDocument(),
+      );
+      expect(sendButton().disabled).toBe(false);
+
+      await clickAndWaitForSending();
+      expect(walletRequest).toHaveBeenCalledTimes(2);
+    });
   });
 });
