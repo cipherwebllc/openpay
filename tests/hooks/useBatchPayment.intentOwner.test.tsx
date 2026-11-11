@@ -338,7 +338,7 @@ describe('筋 2: 最初の送信の拒否の片付け (c2) は、同じ intent �
     { label: '画面 3 の B が応答を失って開いている', withOther: true },
     { label: 'ほかに開いている支払いが無い', withOther: false },
   ])(
-    'A の最初の送信への拒否が遅れる間に、画面 2 が同じ nonce で A を作り直して確定し、$label → 遅れて届いた拒否は B の記録を消さない (Codex の再現)',
+    'A の最初の送信への拒否が遅れる間に、画面 2 が同じ nonce で A を作り直して確定し、$label → 遅れて届いた拒否は別の intent の記録を消さない・消す記録が無ければ閉じた扱い (Codex の再現)',
     async ({ withOther }) => {
       // 画面 1: A を保存して送る。bundler は受け付けず、その答え (検証で拒否) が遅れる。
       const first = mountClients();
