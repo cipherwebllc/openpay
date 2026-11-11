@@ -92,6 +92,7 @@ export type SalesMoveErrorKey =
   | 'forbiddenDestination'
   | 'unavailable'
   | 'storageUnavailable'
+  | 'signatureRejected'
   | 'generic';
 
 /**
@@ -134,6 +135,12 @@ export function salesMoveErrorKey(error: unknown): SalesMoveErrorKey {
     // 時間をおいても直らないので、「いまは移せません」とは別の文言にする。
     case 'intent_storage_unavailable':
       return 'storageUnavailable';
+    // server が、署名から送り元のアドレスを確かめられなかった (lib/relay/forwarderRecover.ts の verifyForwarderSettle・署名を
+    // 復元できない = signature_invalid・復元したアドレスが送り元と違う = signature_mismatch)。broadcast より前の拒否で、JPYC は
+    // 動いていない。待っても変わらないので、「時間をおいて」の generic にしない (第 10 回レビュー D-4)。
+    case 'signature_invalid':
+    case 'signature_mismatch':
+      return 'signatureRejected';
     default:
       return 'generic';
   }

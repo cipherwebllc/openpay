@@ -1165,3 +1165,304 @@ describe('useSalesMove: 202 pending の後、同じ画面で照会する (第 10
     view.unmount();
   });
 });
+
+// 第 10 回レビュー D-4: 成立が確定した表示から、開き直さずに次の移動を始める (画面の「もう一度移す」)。
+describe('useSalesMove: 成立の後の resetAfterSuccess (第 10 回レビュー D-4)', () => {
+  const TX2: Hex = `0x${'b'.repeat(64)}`;
+  const SIGNATURE2: Hex = `0x${'cd'.repeat(65)}`;
+  const DEST2: Address = '0x2222222222222222222222222222222222222222';
+  const PENDING: Reply = { status: 202, body: { ok: false, pending: true, txHash: TX } };
+  const OK2: Reply = { status: 200, body: { ok: true, txHash: TX2 } };
+
+  function storeIntent() {
+    window.sessionStorage.setItem(
+      SALES_MOVE_INTENT_STORAGE_KEY,
+      JSON.stringify({
+        version: 1,
+        chainId: CHAIN,
+        from: FROM,
+        merchant: DEST,
+        merchantValue: AMOUNT.toString(),
+        feeValue: FEE.toString(),
+        nonce: `0x${'c'.repeat(64)}`,
+        validBefore: '9999999999',
+        issuedAt: 1_700_000_000_000,
+      }),
+    );
+  }
+
+  // 画面と同じ入口 (move)。成立・送信済みの後の守りを通す。
+  async function pressMove(view: View, params = { destination: DEST, amount: AMOUNT }) {
+    await act(async () => {
+      view.result.current.move(params);
+    });
+  }
+
+  async function resetAfterSuccess(view: View) {
+    await act(async () => {
+      view.result.current.resetAfterSuccess();
+    });
+  }
+
+  it('成功 → resetAfterSuccess → 入力に戻り、次の move は新しい nonce・新しい署名で 1 回だけ POST する', async () => {
+    replies = [{ status: 200, body: { ok: true, txHash: TX } }, OK2];
+    h.signTypedData.mockResolvedValueOnce(SIGNATURE).mockResolvedValueOnce(SIGNATURE2);
+    const view = await mount();
+    await pressMove(view);
+    await waitFor(() => expect(view.result.current.result).toEqual({ txHash: TX, success: true }));
+    // 成立の表示のままでは、押しても送らない (今までどおり)。
+    await pressMove(view, { destination: DEST2, amount: AMOUNT * 2n });
+    expect(h.signTypedData).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    await resetAfterSuccess(view);
+    expect(view.result.current.result).toBeUndefined();
+    expect(view.result.current.error).toBeNull();
+    expect(view.result.current.held).toBeNull();
+    expect(view.result.current.isPending).toBe(false);
+    // 開け直しただけでは、署名も POST もしない。枠は成立の時点で消えたままで、成立の控えは残る。
+    expect(h.signTypedData).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(savedIntent()).toBeNull();
+    expect(loadPayerReceipts()).toHaveLength(1);
+    expect(loadPayerReceipts()[0]).toMatchObject({ txHash: TX, status: 'confirmed' });
+
+    await pressMove(view, { destination: DEST2, amount: AMOUNT * 2n });
+    await waitFor(() => expect(view.result.current.result).toEqual({ txHash: TX2, success: true }));
+    expect(h.signTypedData).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const [first, second] = posted();
+    const nonce1 = h.signTypedData.mock.calls[0][0].message.nonce;
+    const nonce2 = h.signTypedData.mock.calls[1][0].message.nonce;
+    expect(nonce2).not.toBe(nonce1);
+    expect(second.intentSalt).not.toBe(first.intentSalt);
+    // 2 回目の POST は 2 回目の署名と入力だけ (前の署名・前の送り先・前の額を送らない)。
+    expect(first.signature).toBe(SIGNATURE);
+    expect(second).toMatchObject({ signature: SIGNATURE2, merchant: DEST2, merchantValue: (AMOUNT * 2n).toString() });
+    // POST の時点の枠は、その移動の nonce。
+    expect(JSON.parse(savedAtPost[1]!)).toMatchObject({ nonce: nonce2, merchant: DEST2 });
+    expect(savedIntent()).toBeNull();
+    expect(loadPayerReceipts().map((r) => r.txHash).sort()).toEqual([TX, TX2].sort());
+  });
+
+  // 開けるのは、返している result が success のときだけ。ほかの状態では、呼ばれても結果・エラー・保持・枠をそのまま残す。
+  type Arrange = () => Promise<{ view: View; signs: number; posts: number }>;
+  const NOT_SUCCESS: [string, Arrange][] = [
+    [
+      '202 pending (照会を打ち切った後)',
+      async () => {
+        replies = [PENDING];
+        const view = await mount();
+        await pressMove(view);
+        await waitFor(() => expect(view.result.current.result).toEqual({ txHash: TX, success: false, pending: true }));
+        await waitFor(() => expect(view.result.current.isRecovering).toBe(false));
+        expect(view.result.current.held).toBe('ambiguous');
+        return { view, signs: 1, posts: 1 };
+      },
+    ],
+    [
+      '202 pending (照会の間)',
+      async () => {
+        replies = [PENDING];
+        h.resolveRelayIntent.mockImplementationOnce(() => new Promise(() => undefined));
+        const view = await mount();
+        await pressMove(view);
+        await waitFor(() => expect(view.result.current.result?.pending).toBe(true));
+        expect(view.result.current.isRecovering).toBe(true);
+        return { view, signs: 1, posts: 1 };
+      },
+    ],
+    [
+      '応答不明 (fetch の失敗)',
+      async () => {
+        replies = [{ network: true }];
+        const view = await mount();
+        await pressMove(view);
+        await waitFor(() => expect(isRelayResponseUnknownError(view.result.current.error)).toBe(true));
+        expect(view.result.current.held).toBe('ambiguous');
+        return { view, signs: 1, posts: 1 };
+      },
+    ],
+    [
+      '開き直した枠が未解決',
+      async () => {
+        storeIntent();
+        const view = renderHook(() => useSalesMove(DEPLOYMENT, LABELS), { wrapper: wrapper() });
+        await waitFor(() => expect(isRelayResponseUnknownError(view.result.current.error)).toBe(true));
+        expect(view.result.current.held).toBe('ambiguous');
+        return { view, signs: 0, posts: 0 };
+      },
+    ],
+    [
+      'IP 制限で保持した再送待ち',
+      async () => {
+        replies = [{ status: 429, body: { error: 'ip_rate_limited' }, headers: { 'Retry-After': '20' } }];
+        const view = await mount();
+        await pressMove(view);
+        await waitFor(() => expect(isRelayIpRateLimitedError(view.result.current.error)).toBe(true));
+        expect(view.result.current.held).toBe('retry');
+        return { view, signs: 1, posts: 1 };
+      },
+    ],
+    [
+      '成立しなかった (revert)',
+      async () => {
+        replies = [{ status: 200, body: { ok: false, reverted: true, txHash: TX } }];
+        const view = await mount();
+        await pressMove(view);
+        await waitFor(() => expect(view.result.current.result).toEqual({ txHash: TX, success: false }));
+        return { view, signs: 1, posts: 1 };
+      },
+    ],
+    [
+      'server の拒否 (signature_invalid)',
+      async () => {
+        replies = [{ status: 400, body: { ok: false, error: 'signature_invalid' } }];
+        const view = await mount();
+        await pressMove(view);
+        await waitFor(() => expect(view.result.current.error?.message).toBe('signature_invalid'));
+        return { view, signs: 1, posts: 1 };
+      },
+    ],
+  ];
+
+  it.each(NOT_SUCCESS)(
+    '%s: resetAfterSuccess を呼んでも開かない (結果・エラー・保持・枠はそのまま・署名も POST もしない)',
+    async (_name, arrange) => {
+      const { view, signs, posts } = await arrange();
+      const before = {
+        result: view.result.current.result,
+        error: view.result.current.error,
+        held: view.result.current.held,
+        isRecovering: view.result.current.isRecovering,
+        slot: window.sessionStorage.getItem(SALES_MOVE_INTENT_STORAGE_KEY),
+        receipts: JSON.stringify(loadPayerReceipts()),
+        recoveries: h.resolveRelayIntent.mock.calls.length,
+      };
+      await resetAfterSuccess(view);
+      expect(view.result.current.result).toEqual(before.result);
+      expect(view.result.current.error).toBe(before.error);
+      expect(view.result.current.held).toBe(before.held);
+      expect(view.result.current.isRecovering).toBe(before.isRecovering);
+      expect(window.sessionStorage.getItem(SALES_MOVE_INTENT_STORAGE_KEY)).toBe(before.slot);
+      expect(JSON.stringify(loadPayerReceipts())).toBe(before.receipts);
+      expect(h.signTypedData).toHaveBeenCalledTimes(signs);
+      expect(fetchMock).toHaveBeenCalledTimes(posts);
+      expect(h.resolveRelayIntent).toHaveBeenCalledTimes(before.recoveries);
+    },
+  );
+
+  it.each(NOT_SUCCESS.slice(0, 4))('%s: resetAfterSuccess の後に押しても、新しい署名は出ない', async (_name, arrange) => {
+    const { view, signs, posts } = await arrange();
+    await resetAfterSuccess(view);
+    await pressMove(view, { destination: DEST2, amount: AMOUNT });
+    expect(h.signTypedData).toHaveBeenCalledTimes(signs);
+    expect(fetchMock).toHaveBeenCalledTimes(posts);
+    expect(view.result.current.held).toBe('ambiguous');
+    expect(savedIntent()).not.toBeNull();
+  });
+
+  it('202 → 照会で成立 (mutation の data は pending のまま) → resetAfterSuccess で入力に戻る (送信済みの表示に戻らない)', async () => {
+    replies = [PENDING, OK2];
+    h.resolveRelayIntent.mockResolvedValueOnce({ kind: 'settled', txHash: TX, success: true });
+    const view = await mount();
+    await pressMove(view);
+    await waitFor(() => expect(view.result.current.result).toEqual({ txHash: TX, success: true }));
+    expect(view.result.current.held).toBeNull();
+    expect(savedIntent()).toBeNull();
+
+    await resetAfterSuccess(view);
+    expect(view.result.current.result).toBeUndefined();
+    expect(view.result.current.error).toBeNull();
+    expect(view.result.current.isPending).toBe(false);
+
+    await pressMove(view, { destination: DEST2, amount: AMOUNT });
+    await waitFor(() => expect(view.result.current.result).toEqual({ txHash: TX2, success: true }));
+    expect(h.signTypedData).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(h.signTypedData.mock.calls[1][0].message.nonce).not.toBe(h.signTypedData.mock.calls[0][0].message.nonce);
+    // 照会は 1 回目の 202 の後の 1 本だけ (2 回目は 200 で確定)。
+    expect(h.resolveRelayIntent).toHaveBeenCalledTimes(1);
+  });
+
+  it('開き直したときの照会で成立 → resetAfterSuccess で入力に戻り、新しい署名で移せる (照会した枠の nonce は使わない)', async () => {
+    storeIntent();
+    h.resolveRelayIntent.mockResolvedValueOnce({ kind: 'settled', txHash: TX, success: true });
+    replies = [OK2];
+    const view = renderHook(() => useSalesMove(DEPLOYMENT, LABELS), { wrapper: wrapper() });
+    await waitFor(() => expect(view.result.current.result).toEqual({ txHash: TX, success: true }));
+    // 開け直す前は送らない。
+    await pressMove(view);
+    expect(h.signTypedData).not.toHaveBeenCalled();
+
+    await resetAfterSuccess(view);
+    expect(view.result.current.result).toBeUndefined();
+    await pressMove(view);
+    await waitFor(() => expect(view.result.current.result).toEqual({ txHash: TX2, success: true }));
+    expect(h.signTypedData).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(h.signTypedData.mock.calls[0][0].message.nonce).not.toBe(`0x${'c'.repeat(64)}`);
+    expect(h.resolveRelayIntent).toHaveBeenCalledTimes(1);
+  });
+
+  it('成立の表示の後に moveAsync で始めた試みと同じ tick に呼ばれても、その試みの結果を画面から消さない', async () => {
+    replies = [{ status: 200, body: { ok: true, txHash: TX } }, OK2];
+    const view = await mount();
+    await press(view);
+    expect(view.result.current.result).toEqual({ txHash: TX, success: true });
+    await act(async () => {
+      const second = view.result.current.moveAsync({ destination: DEST2, amount: AMOUNT });
+      // この時点では、画面はまだ 1 回目の成立を描いている (result は success)。試み中なので何もしない。
+      view.result.current.resetAfterSuccess();
+      await second;
+    });
+    await waitFor(() => expect(view.result.current.result).toEqual({ txHash: TX2, success: true }));
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('StrictMode の mount→unmount→mount でも、resetAfterSuccess と再描画で前の署名は送られない。次の移動は新しい署名だけ', async () => {
+    replies = [{ status: 200, body: { ok: true, txHash: TX } }, OK2];
+    h.signTypedData.mockResolvedValueOnce(SIGNATURE).mockResolvedValueOnce(SIGNATURE2);
+    const effectRuns: string[] = [];
+    const view = renderHook(
+      () => {
+        useEffect(() => {
+          effectRuns.push('mount');
+          return () => {
+            effectRuns.push('unmount');
+          };
+        }, []);
+        return useSalesMove(DEPLOYMENT, LABELS);
+      },
+      { wrapper: wrapper(), reactStrictMode: true },
+    );
+    await waitFor(() => expect(view.result.current.isRestoring).toBe(false));
+    expect(effectRuns).toEqual(['mount', 'unmount', 'mount']);
+
+    await pressMove(view);
+    await waitFor(() => expect(view.result.current.result).toEqual({ txHash: TX, success: true }));
+    await resetAfterSuccess(view);
+    expect(view.result.current.result).toBeUndefined();
+    // 再描画しても、時間が経っても、署名・POST・照会・枠の書き込みは起きない。
+    view.rerender();
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    expect(h.signTypedData).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(h.resolveRelayIntent).not.toHaveBeenCalled();
+    expect(savedIntent()).toBeNull();
+    expect(view.result.current.result).toBeUndefined();
+
+    await pressMove(view, { destination: DEST2, amount: AMOUNT });
+    await waitFor(() => expect(view.result.current.result).toEqual({ txHash: TX2, success: true }));
+    expect(h.signTypedData).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const [first, second] = posted();
+    expect(first.signature).toBe(SIGNATURE);
+    expect(second.signature).toBe(SIGNATURE2);
+    expect(second.intentSalt).not.toBe(first.intentSalt);
+    expect(effectRuns).toEqual(['mount', 'unmount', 'mount']);
+    view.unmount();
+  });
+});

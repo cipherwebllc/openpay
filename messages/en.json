@@ -425,6 +425,7 @@
       "signButton": "Sign and move",
       "success": "Moved. The JPYC that arrives will show OpenPay's relay mechanism as its sender.",
       "viewTx": "View transaction",
+      "moveAgain": "Move again",
       "pending": "Sent. Waiting for confirmation. Don't sign again (reopening this page checks the result; it can take about 30 minutes before the result is known).",
       "recheck": "Check again",
       "reverted": "The transfer didn't go through (your JPYC didn't move). Check the JPYC in your wallet and try again.",
@@ -439,6 +440,7 @@
         "rejected": "You cancelled the signature.",
         "unavailable": "Moving isn't available right now. Please try again later.",
         "storageUnavailable": "Can't move JPYC because this device can't save a record of the move (your JPYC didn't move). Check your browser's site data settings, or try another browser.",
+        "signatureRejected": "Couldn't move the JPYC because the signature from this wallet couldn't be verified (your JPYC didn't move).",
         "rateLimited": "Too many requests. Wait about {seconds} seconds and try again.",
         "generic": "Couldn't move the JPYC. Please try again later."
       }

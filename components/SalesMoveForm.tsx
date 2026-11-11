@@ -6,7 +6,7 @@
 //
 // 流れ: 送り先と移す額を入れる → 確認 (届く額・利用料・ウォレットから出る合計。送り先が contract ならチェックを挟む) →
 // 1 回署名 (hooks/useSalesMove) → 結果 (移した・送信済みで確定待ち・成立しなかった)。送信済みかもしれない間は入力に戻さない
-// (再署名させない)。開き直したときは hook が保存した枠を照会して結果を出す。送信済みで確定待ちの間は、同じ画面でも hook が
+// (再署名させない)。移した (成立が確定した) 表示にだけ「もう一度移す」を出し、空の入力に戻して次の移動を始められるようにする。開き直したときは hook が保存した枠を照会して結果を出す。送信済みで確定待ちの間は、同じ画面でも hook が
 // 照会して結果へ進める。照会を打ち切った後は「もう一度確かめる」(照会だけ・署名のボタンは出さない) を出す。
 //
 // 文字の色は小さい文字で slate-500 以上 (WCAG AA・tests/components/SalesMoveForm.test.tsx が tests/_helpers/tailwindContrast で
@@ -115,13 +115,14 @@ function SalesMoveBody({
     fee: t('confirmFee'),
     locale,
   });
+  const balanceEnabled = onChain && Boolean(address);
   const balance = useReadContract({
     address: deployment.address,
     abi: erc20Abi,
     functionName: 'balanceOf',
     args: address ? [address] : undefined,
     chainId: deployment.chainId,
-    query: { enabled: onChain && Boolean(address) },
+    query: { enabled: balanceEnabled },
   });
 
   const [destination, setDestination] = useState('');
@@ -177,6 +178,27 @@ function SalesMoveBody({
       <div role="status" className="mt-3 rounded-xl bg-emerald-50 p-3 text-xs leading-relaxed text-emerald-900">
         <p>{t('success')}</p>
         {url && <ExplorerLink href={url} label={t('viewTx')} />}
+        {/* 成立が確定した表示にだけ出す (送信済み・確定待ちの表示には出さない)。hook の側も、返している result が success の
+            ときだけ入力へ戻す。次の移動は、送り先と額を入れ直し、確認をやり直してから、新しい署名で送る。 */}
+        <div className="mt-2">
+          <button
+            type="button"
+            onClick={() => {
+              move.resetAfterSuccess();
+              // 前の移動の確認と入力を持ち越さない (確認を残すと、前と同じ送り先・額の「署名して移す」がそのまま出る)。送り先が
+              // contract のときのチェックは、次の確認に入るときに上の effect が外す (確認の送り先が無し → あり に変わる)。
+              setReview(null);
+              setDestination('');
+              setAmountText('');
+              // 入力に出す「ウォレットにある JPYC」は、移す前に読んだ値のまま残っている。読み直して、「全部移す」が古い額を
+              // 入れないようにする (読めなければ今までどおり balance.isError の文言が出る・署名の前の読み直しは hook が別にする)。
+              if (balanceEnabled) void balance.refetch();
+            }}
+            className={SECONDARY_BTN}
+          >
+            {t('moveAgain')}
+          </button>
+        </div>
       </div>
     );
   }
