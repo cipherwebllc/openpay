@@ -2775,7 +2775,8 @@ describe('useJpycEip3009Payment — 復旧の枠を書けない端末では束�
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(logger.info).not.toHaveBeenCalledWith('payment.sign_requested', expect.anything());
     expect(logger.info).toHaveBeenCalledWith(...unavailableLog('probe'));
-    // フォームはこの error で「通常決済に切り替える」を出す (fallback-safe) + 専用の文言の key。
+    // 送っていないので fallback-safe (保持・照会にしない) + 専用の文言の key。フォームは通常決済への切り替えを案内しない
+    // (user 裁定 Q7-1・lib/relay/relayResponseError の isIntentStorageUnavailableError・フォームのテストが固定する)。
     expect(isFallbackSafeRelayError(view.result.current.error)).toBe(true);
     expect(relayErrorKey(view.result.current.error as Error)).toBe('errorRelayStorageUnavailable');
     // 送っていないので、送信済みかもしれない扱い (保持・照会) にしない。
@@ -3000,6 +3001,52 @@ describe('useJpycEip3009Payment — 復旧の枠を書けない端末では束�
     await waitFor(() => expect(view.result.current.data?.success).toBe(true));
     expect(signTypedData).toHaveBeenCalledTimes(1);
     expect(relayPosts()).toHaveLength(1);
+    expect(logger.info).not.toHaveBeenCalledWith('payment.intent_storage_unavailable', expect.anything());
+  });
+
+  // user 裁定 Q7-2: 埋め込み (iframe) の中のチップは、呼び出し側 (TipForm) が skipIntentStorageCheck を渡す。枠を書けなくても
+  // 今までどおり送る (受容台帳)。枠への書き込みは今までどおり試みる。渡さない呼び出しが止まることは上のテストが固定する。
+  async function mountSkippingHook(mode: 'free' | 'recover') {
+    setRoute(mode);
+    mount();
+    const view = renderHook(
+      () => useJpycEip3009Payment(jpycDep, { skipIntentStorageCheck: true }),
+      { wrapper: makeWrapper() },
+    );
+    await waitFor(() => expect(view.result.current.isRestoring).toBe(false));
+    return view;
+  }
+
+  it.each(['free', 'recover'] as const)('%s: skipIntentStorageCheck を渡すと、枠も確かめのキーも書けない端末でも今までどおり署名 1 回・POST 1 回で送る', async (mode) => {
+    const view = await mountSkippingHook(mode);
+    const writes = breakSetItem(relayKeys);
+
+    act(() => view.result.current.mutate({ merchant: MERCHANT, value: VALUE }));
+    await waitFor(() => expect(view.result.current.data?.success).toBe(true));
+
+    expect(signTypedData).toHaveBeenCalledTimes(1);
+    expect(relayPosts()).toHaveLength(1);
+    expect(logger.info).not.toHaveBeenCalledWith('payment.intent_storage_unavailable', expect.anything());
+    // 署名の前の確かめのキーには触れず、枠への書き込みは今までどおり試みる (書けないまま送る)。
+    const keys = writes.mock.calls.map(([key]) => key);
+    expect(keys).not.toContain(RELAY_INTENT_PROBE_KEY);
+    expect(keys).toContain(RELAY_INTENT_STORAGE_KEY);
+  });
+
+  it('skipIntentStorageCheck を渡すと、IP 制限 (429) で保持した payload は、枠を書けなくなっていても今までどおり同じ payload で再送する', async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse(429, { ok: false, error: 'ip_rate_limited' }));
+    const view = await mountSkippingHook('free');
+    act(() => view.result.current.mutate({ merchant: MERCHANT, value: VALUE }));
+    await waitFor(() => expect(isRelayIpRateLimitedError(view.result.current.error)).toBe(true));
+    expect(relayPosts()).toHaveLength(1);
+
+    breakSetItem(slotOnly);
+    act(() => view.result.current.retryRelay());
+    await waitFor(() => expect(view.result.current.data?.success).toBe(true));
+
+    expect(relayPosts()).toHaveLength(2);
+    expect((relayPosts()[1][1] as RequestInit).body).toBe((relayPosts()[0][1] as RequestInit).body);
+    expect(signTypedData).toHaveBeenCalledTimes(1);
     expect(logger.info).not.toHaveBeenCalledWith('payment.intent_storage_unavailable', expect.anything());
   });
 });

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { renderWithIntl as render } from '../_helpers/i18n';
 import userEvent from '@testing-library/user-event';
@@ -133,7 +133,7 @@ import {
 } from '@/lib/relay/relayResponseError';
 import { mockHook } from '../_helpers/wagmiMock';
 import { waitForStoredRelayReceipt } from '@/lib/relay/relayStoredReceipt';
-import { RELAY_INTENT_STORAGE_KEY } from '@/lib/paymentIntentStorage';
+import { RELAY_INTENT_PROBE_KEY, RELAY_INTENT_STORAGE_KEY } from '@/lib/paymentIntentStorage';
 
 const CREATOR: Address = '0x2222222222222222222222222222222222222222';
 const FAN: Address = '0x9999999999999999999999999999999999999999';
@@ -1747,17 +1747,119 @@ describe('TipForm — EIP-3009 relay (JPYC)', () => {
     expect(screen.getByText(/短時間に送金が集中/)).toBeInTheDocument();
   });
 
-  // 第 10 回レビュー H-R: 復旧の枠を書けない端末で hook が送らずに止めた (intent_storage_unavailable)。チップは JPYC の
-  // 通常決済へ切り替えられない (standard は URL の mode=standard だけ) ので、切り替えを案内しない文言にする。
-  it('relay error (intent_storage_unavailable) → 専用の文言 (通常決済への切り替えは案内しない)', () => {
+  // 第 10 回レビュー H-R: 復旧の枠を書けない端末で hook が送らずに止めた (intent_storage_unavailable)。通常決済へは案内しない
+  // (user 裁定 Q7-1・チップには JPYC の通常決済へ切り替える入口も無い)。赤いエラー枠に出す。
+  it('relay error (intent_storage_unavailable) → 専用の文言を赤いエラー枠に出す (通常決済への切り替えは案内しない)', () => {
     setRelay('error', { errMsg: 'intent_storage_unavailable' });
     render(<TipForm params={JPYC_PARAMS} />);
-    const message = screen.getByText('この端末に控えを保存できないため、ガスレス送金は使えません (JPYC は動いていません)。ブラウザの設定 (サイトのデータの保存) を確かめるか、別のブラウザでお試しください。');
-    expect(message).toBeInTheDocument();
+    const message = screen.getByText('この端末では支払い記録を保存できないため、ガスレス送金は使えません (JPYC は動いていません)。ブラウザの設定 (サイトのデータの保存) を確かめるか、別のブラウザでお試しください。');
+    expect(message.closest('.bg-red-50')).not.toBeNull();
     expect(message.textContent).not.toMatch(/通常/);
     expect(screen.queryByText('intent_storage_unavailable')).toBeNull();
     expect(screen.queryByText(/完了できませんでした/)).toBeNull();
     expect(screen.queryByRole('button', { name: /通常支払い/ })).toBeNull();
+  });
+
+  // 第 10 回レビュー H-R・user 裁定 Q7-2: 確かめをしないのは埋め込み (iframe) の中のチップだけ。TipForm が開いた window で決めて
+  // hook の option で渡す (hook は window を見ない)。
+  describe('埋め込み (iframe) の中かどうかを hook に渡す (H-R・Q7-2)', () => {
+    const topDescriptor = Object.getOwnPropertyDescriptor(window, 'top');
+    afterEach(() => {
+      if (topDescriptor) Object.defineProperty(window, 'top', topDescriptor);
+    });
+    const lastOptions = () => vi.mocked(useJpycEip3009Payment).mock.lastCall?.[1];
+
+    it('直接開いたページ (window.top が自分) → 確かめる', () => {
+      render(<TipForm params={JPYC_PARAMS} />);
+      expect(lastOptions()).toEqual({ skipIntentStorageCheck: false });
+    });
+
+    it('別のページの iframe の中 (window.top が親) → 確かめをしない', () => {
+      const parentWindow = {};
+      Object.defineProperty(window, 'top', { configurable: true, get: () => parentWindow });
+      render(<TipForm params={JPYC_PARAMS} />);
+      expect(lastOptions()).toEqual({ skipIntentStorageCheck: true });
+    });
+
+    it('cross-origin の親の参照を拒むブラウザ (window.top の参照が throw) → 画面は描け、埋め込みとして確かめをしない', () => {
+      Object.defineProperty(window, 'top', {
+        configurable: true,
+        get: () => {
+          throw new DOMException('Blocked a frame from accessing a cross-origin frame.', 'SecurityError');
+        },
+      });
+      render(<TipForm params={JPYC_PARAMS} />);
+      expect(screen.getByRole('button', { name: /100 JPYC を送る/ })).toBeInTheDocument();
+      expect(lastOptions()).toEqual({ skipIntentStorageCheck: true });
+    });
+  });
+
+  // 第 10 回レビュー H-R・user 裁定 Q7-2: 実物の relay hook で、枠を保存できない端末の 2 つの開き方を通す。hook と
+  // lib/paymentIntentStorage は実物で、差し替えるのは wagmi の署名・fetch・Storage の書き込み・window.top (境界) だけ。
+  describe('実物の relay hook: 枠を保存できない端末で、直接開いたページは止め、埋め込みの中は今までどおり送る (H-R・Q7-2)', () => {
+    const realSetItem = Storage.prototype.setItem;
+    const topDescriptor = Object.getOwnPropertyDescriptor(window, 'top');
+    const restores: (() => void)[] = [];
+    let signTypedData: ReturnType<typeof vi.fn>;
+    const relayPosts = () => vi.mocked(fetch).mock.calls.filter(([url]) => url === '/api/relay/jpyc');
+
+    beforeEach(async () => {
+      const real = await vi.importActual<typeof import('@/hooks/useJpycEip3009Payment')>('@/hooks/useJpycEip3009Payment');
+      vi.mocked(useJpycEip3009Payment).mockImplementation(real.useJpycEip3009Payment);
+      signTypedData = vi.fn(async () => `0x${'a'.repeat(130)}`);
+      mockHook(useWalletClient, { data: { signTypedData } } as never);
+      mockHook(usePublicClient, { waitForTransactionReceipt: vi.fn() } as never);
+      window.sessionStorage.clear();
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
+        new Response(JSON.stringify({ ok: true, txHash: `0x${'b'.repeat(64)}` }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }));
+      // 枠のキーも、署名の前の確かめのキーも書けない端末 (サイトのデータの保存をブロック・third-party の storage を拒む iframe)。
+      const setItemSpy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key: string, value: string) {
+        if (key === RELAY_INTENT_STORAGE_KEY || key === RELAY_INTENT_PROBE_KEY) {
+          throw new DOMException('The operation is insecure.', 'SecurityError');
+        }
+        realSetItem.call(this, key, value);
+      });
+      restores.push(() => fetchSpy.mockRestore(), () => setItemSpy.mockRestore());
+    });
+    afterEach(() => {
+      for (const restore of restores.splice(0)) restore();
+      if (topDescriptor) Object.defineProperty(window, 'top', topDescriptor);
+      window.sessionStorage.clear();
+    });
+
+    async function renderAndSend() {
+      const user = userEvent.setup();
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+      const view = render(<QueryClientProvider client={client}><TipForm params={JPYC_PARAMS} /></QueryClientProvider>);
+      // 実物の hook は storage の chunk を読み込むまで「復元中」(送るボタンの名前が変わる)。
+      await waitFor(() => expect(screen.getByRole('button', { name: /100 JPYC を送る/ })).toBeEnabled());
+      await user.click(screen.getByRole('button', { name: /100 JPYC を送る/ }));
+      return view;
+    }
+
+    it('直接開いたページ → 署名を求めずに止め、専用の文言を赤いエラー枠に出す (POST 0 回)', async () => {
+      await renderAndSend();
+      const message = await screen.findByText('この端末では支払い記録を保存できないため、ガスレス送金は使えません (JPYC は動いていません)。ブラウザの設定 (サイトのデータの保存) を確かめるか、別のブラウザでお試しください。');
+      expect(message.closest('.bg-red-50')).not.toBeNull();
+      expect(signTypedData).not.toHaveBeenCalled();
+      expect(relayPosts()).toHaveLength(0);
+      expect(loggerInfo).toHaveBeenCalledWith('payment.intent_storage_unavailable', expect.objectContaining({ stage: 'probe' }));
+    });
+
+    it('埋め込み (iframe) の中 → 確かめをせず、今までどおり署名 1 回・POST 1 回で送る', async () => {
+      const parentWindow = {};
+      Object.defineProperty(window, 'top', { configurable: true, get: () => parentWindow });
+      await renderAndSend();
+      await waitFor(() => expect(relayPosts()).toHaveLength(1));
+      expect(signTypedData).toHaveBeenCalledTimes(1);
+      expect(loggerInfo).not.toHaveBeenCalledWith('payment.intent_storage_unavailable', expect.anything());
+      expect(screen.queryByText(/この端末では支払い記録を保存できないため/)).toBeNull();
+      // 枠は書けていない (今までどおり・受容台帳)。
+      expect(window.sessionStorage.getItem(RELAY_INTENT_STORAGE_KEY)).toBeNull();
+    });
   });
 
   // 2026-10-13 本番: ウォレットで署名を拒否しただけで tip.relay.failed が Sentry に上がり、画面にも
