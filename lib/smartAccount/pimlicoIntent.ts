@@ -10,7 +10,8 @@
 //   c1 候補の hash のどれかに receipt がある → 成功 / revert で確定
 //   c2 **最初の送信** を bundler が検証で拒否した (HTTP 2xx + allowlist の code・pimlicoSend.ts) → 記録を消したと確かめてから、
 //      今までどおりの error
-//   c4 保存から 7 日を過ぎ、候補のどれにも receipt が無く、EntryPoint の nonce も未使用 → 記録を消したと確かめてから
+//   c4 最後に bundler へ渡して (渡そうとして) から 7 日を過ぎ、候補のどれにも receipt が無く、EntryPoint の nonce も未使用 →
+//      記録を消したと確かめてから
 //   c5 EntryPoint の nonce は進んだが、候補のどれにも receipt が無い → 期限までは開いたまま、期限で c4 と同じく閉じる
 // それ以外 (応答不明・送り直しや作り直しの拒否 (c3)・照合できない・保存を確かめられない) は開いたまま。
 //
@@ -468,7 +469,7 @@ export async function resolveOpenIntent<Params, Result>(
     return host.settle(record, state.userOpHash, state.receipt);
   }
   if (state.kind !== 'unreadable' && host.isExpired(record)) {
-    // 保存から 7 日を過ぎ、候補のどれにも receipt が無い。記録を消したと確かめてから閉じる (今の account で送れるかに
+    // 最後に bundler へ渡して (渡そうとして) から 7 日を過ぎ、候補のどれにも receipt が無い。記録を消したと確かめてから閉じる (今の account で送れるかに
     // 依存しない: 委任を外した・変えた後も、ここで閉じられる)。
     //   c4 (open): EntryPoint の nonce も未使用。7 日前の署名済みの op を今送ると、その時点で支払いが成立しうるので
     //     送り直さない。保存の期限は署名を取り消さない (残った op を誰かが送れば後から成立しうる・PR の「限界」)。

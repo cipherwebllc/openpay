@@ -115,9 +115,11 @@ const PIMLICO_PENDING_SCHEMA_VERSION = 1 as const;
 // 「まだ mine されうる op」を先に捨てて二重送金を許す窓ができる。
 // 送信の控え (send) の無い record (この欄を足す前の記録・MAv2 の facade で送った記録) は、これを過ぎたら
 // 読み出し時に無視 + 破棄する (今までどおり・nonce を読めないので照合できない)。
-// 送信の控えのある record は黙って消さない (第 10 回レビュー A-1 の c4): 保存の期限は署名を取り消さず、
+// 送信の控えのある record は読み出し時に黙って消さない (第 10 回レビュー A-1 の c4・c5): 保存の期限は署名を取り消さず、
 // 実行されなかった証拠にもならない。期限を過ぎた記録も開いたまま復元し、次に確かめるとき、候補の receipt と
-// EntryPoint の nonce を照合して、どちらも無いときだけ閉じる (useBatchPayment の mutationFn)。
+// EntryPoint の nonce を照合する。候補に receipt があれば確定 (c1)。receipt が無ければ、nonce が未使用 (c4) でも
+// 使われていても (c5・候補はもう実行されないが、払い済みだった可能性は残る) 記録を消したと確かめてから閉じる
+// (lib/smartAccount/pimlicoIntent.ts の resolveOpenIntent)。照合に要る RPC が読めないときは閉じない。
 const PIMLICO_PENDING_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
 function isPendingExpired(record: { updatedAt: number }): boolean {

@@ -9,8 +9,9 @@
 // 別の nonce の op・別の内容の支払いを作らず、画面は通常決済も止める (isUnknown)。閉じるのは
 //   c1 候補の hash のどれかに receipt がある
 //   c2 最初の送信を bundler が検証で拒否した (HTTP 2xx + ERC-7769 の code) → 記録を消したと確かめてから
-//   c4 保存から 7 日を過ぎ、候補に receipt が無く、EntryPoint の nonce も未使用 → 記録を消したと確かめてから
-// だけ。それ以外 (応答不明・送り直し / 作り直しの拒否 (c3)・nonce が進んだのに receipt が無い (c5)) は開いたまま。
+//   c4 最後に bundler へ渡してから 7 日を過ぎ、候補に receipt が無く、EntryPoint の nonce も未使用 → 記録を消したと確かめてから
+//   c5 nonce が進んだのに候補に receipt が無い → 期限までは開いたまま、期限で c4 と同じく閉じる
+// だけ。それ以外 (応答不明・送り直し / 作り直しの拒否 (c3)・照合できない・保存を確かめられない) は開いたまま。
 //
 // mock は境界だけ: useSmartAccount が返す client・bundler の HTTP (fetch の FAKE_BUNDLER_URL だけ)・EntryPoint の
 // 読み取り・receipt の照会 (tests/_helpers/fakePimlicoBundler.ts)、wagmi、logger、localStorage の失敗を作る spy。
