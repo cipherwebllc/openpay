@@ -708,8 +708,10 @@ export function useSalesMove(
 
   // 画面に返す結果 (同じ画面での照会の終端 → mutation の data → 開き直したときの照会の順)。
   const result = followedResult ?? mutationData ?? restoredResult ?? undefined;
-  // resetAfterSuccess が見る値。画面が描いている result そのものを render ごとに写す (labelsRef と同じ形)。別の state や ref から
-  // 「成立した」を組み立て直さない (画面の表示と入口の条件が食い違う余地を作らない)。
+  // resetAfterSuccess が見る値。画面に返す result と同じ式の値を render ごとに写す (labelsRef と同じ形)。別の state や ref から
+  // 「成立した」を組み立て直さない (画面の表示と入口の条件を別々の式にしない)。写すのは render の時点なので、React が捨てた
+  // render の値が残ることはありうる (commit された DOM と一致する保証ではない)。その場合も、試み中は下の entryRef が、未解決の
+  // 保持がある間は runMove の保持の確認が、次の署名を止める。
   const resultRef = useRef(result);
   resultRef.current = result;
 
@@ -781,8 +783,9 @@ export function useSalesMove(
   // (画面がボタンを出さないことだけに頼らない)。
   // 消すのは画面の結果だけ (mutation の data・照会の結果)。復旧の枠・保持・支払う側の控えには触らない: 成立した移動の枠と保持は、
   // 成立が分かった時点で send / resolveAmbiguous が外しているので、ここで消すものは残っていない (未解決の枠を消す道を作らない)。
-  // 署名済みの payload も成立の時点でどこにも残っていない (保持は外れている・枠は署名を持たない) ので、ここから前の署名が
-  // 送られることは無く、次の移動は runMove が新しい intentSalt で新しい署名を求める。
+  // その移動の署名済みの payload も成立の時点で残っていない (保持は外れている・枠は署名を持たない) ので、ここから前の署名が
+  // 送られることは無く、次の移動は runMove が新しい intentSalt で新しい署名を求める。ここでは保持 (retainedRef) を見ない:
+  // 成立の後に moveAsync で始めた別の試みの保持が残っていても、この関数は保持に触らず、次の署名は runMove の保持の確認が止める。
   const resetAfterSuccess = useCallback(() => {
     if (resultRef.current?.success !== true) return;
     // 試み中 (claimed / running) は何もしない。何の波及を断つか: mutationReset は observer を今の mutation から外すので、
