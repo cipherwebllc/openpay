@@ -6,7 +6,8 @@
 //
 // 流れ: 送り先と移す額を入れる → 確認 (届く額・利用料・ウォレットから出る合計。送り先が contract ならチェックを挟む) →
 // 1 回署名 (hooks/useSalesMove) → 結果 (移した・送信済みで確定待ち・成立しなかった)。送信済みかもしれない間は入力に戻さない
-// (再署名させない)。開き直したときは hook が保存した枠を照会して結果を出す。
+// (再署名させない)。開き直したときは hook が保存した枠を照会して結果を出す。送信済みで確定待ちの間は、同じ画面でも hook が
+// 照会して結果へ進める。照会を打ち切った後は「もう一度確かめる」(照会だけ・署名のボタンは出さない) を出す。
 //
 // 文字の色は小さい文字で slate-500 以上 (WCAG AA・tests/components/SalesMoveForm.test.tsx が tests/_helpers/tailwindContrast で
 // 計算する)。押せるものは 44px。赤はエラーだけ。a11y の名前は見えている文字から (aria-label を単独で付けない・掟 8)。
@@ -186,6 +187,14 @@ function SalesMoveBody({
       <div role="status" className="mt-3 rounded-xl bg-amber-50 p-3 text-xs leading-relaxed text-amber-900">
         <p>{t('pending')}</p>
         {url && <ExplorerLink href={url} label={t('viewTx')} />}
+        {/* 照会を打ち切った後だけ出す。押しても status を読むだけで、署名も送信もしない (hook の recheck)。 */}
+        {held === 'ambiguous' && !move.isRecovering && (
+          <div className="mt-2">
+            <button type="button" onClick={move.recheck} className={SECONDARY_BTN}>
+              {t('recheck')}
+            </button>
+          </div>
+        )}
       </div>
     );
   }

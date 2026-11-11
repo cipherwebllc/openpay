@@ -2,13 +2,16 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Address, Hex } from 'viem';
 import {
   RELAY_INTENT_STORAGE_KEY,
+  SALES_MOVE_INTENT_PROBE_KEY,
   SALES_MOVE_INTENT_STORAGE_KEY,
   STANDARD_INTENT_STORAGE_KEY,
+  canStoreSalesMoveIntent,
   clearRelayIntent,
   clearSalesMoveIntent,
   loadRelayIntent,
   loadSalesMoveIntent,
   loadStandardIntent,
+  readSalesMoveIntentSlot,
   saveRelayIntent,
   saveSalesMoveIntent,
   saveStandardIntent,
@@ -380,5 +383,116 @@ describe('sales move intent sessionStorage', () => {
       throw new Error('SecurityError');
     });
     expect(() => clearSalesMoveIntent()).not.toThrow();
+  });
+});
+
+// 第 10 回レビュー G-1: 署名を求める前に、枠と同じ中身を書いて読み戻せるかを確かめる (売上の移動だけが使う)。
+describe('sales move intent: 署名の前の確かめ (canStoreSalesMoveIntent)', () => {
+  it('書けて読み戻せる端末では true。枠のキーには書かず、確かめのキーも残さない', () => {
+    expect(SALES_MOVE_INTENT_PROBE_KEY).not.toBe(SALES_MOVE_INTENT_STORAGE_KEY);
+    const written: [string, string][] = [];
+    const real = Storage.prototype.setItem;
+    const spy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key: string, value: string) {
+      written.push([key, value]);
+      real.call(this, key, value);
+    });
+    expect(canStoreSalesMoveIntent(salesMoveIntent())).toBe(true);
+    spy.mockRestore();
+    // 書いたのは確かめのキーに 1 回・中身は枠と同じ (同じ長さ = 枠が入る余地を確かめている)。
+    expect(written).toEqual([[SALES_MOVE_INTENT_PROBE_KEY, JSON.stringify(salesMoveIntent())]]);
+    expect(window.sessionStorage.length).toBe(0);
+    expect(loadSalesMoveIntent()).toBeNull();
+  });
+
+  it('未解決の移動の枠があっても、その枠に触れない', () => {
+    saveSalesMoveIntent(salesMoveIntent());
+    const other = { ...salesMoveIntent(), nonce: `0x${'9'.repeat(64)}` as Hex };
+    expect(canStoreSalesMoveIntent(other)).toBe(true);
+    expect(loadSalesMoveIntent()).toEqual(salesMoveIntent());
+  });
+
+  it('署名や余分な field は確かめのキーにも書かない', () => {
+    const real = Storage.prototype.setItem;
+    let raw = '';
+    const spy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key: string, value: string) {
+      raw = value;
+      real.call(this, key, value);
+    });
+    expect(
+      canStoreSalesMoveIntent({ ...salesMoveIntent(), signature: SIGNATURE } as SalesMoveIntentMetadata & { signature: Hex }),
+    ).toBe(true);
+    spy.mockRestore();
+    expect(raw).not.toContain(SIGNATURE);
+    expect(JSON.parse(raw)).toEqual(salesMoveIntent());
+  });
+
+  it('書き込みが throw する端末 (容量超過・保存の禁止) では false (throw しない)', () => {
+    const spy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new DOMException('The quota has been exceeded.', 'QuotaExceededError');
+    });
+    expect(canStoreSalesMoveIntent(salesMoveIntent())).toBe(false);
+    spy.mockRestore();
+  });
+
+  it('書いたものが読み戻せない端末 (投げずに捨てる・読むと throw) では false', () => {
+    const dropped = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => undefined);
+    expect(canStoreSalesMoveIntent(salesMoveIntent())).toBe(false);
+    dropped.mockRestore();
+
+    const unreadable = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new Error('SecurityError');
+    });
+    expect(canStoreSalesMoveIntent(salesMoveIntent())).toBe(false);
+    unreadable.mockRestore();
+  });
+
+  it('枠として読めない形 (読み戻しても復元できない) は false', () => {
+    expect(canStoreSalesMoveIntent({ ...salesMoveIntent(), nonce: '0x1234' as Hex })).toBe(false);
+    expect(window.sessionStorage.length).toBe(0);
+  });
+});
+
+// 第 10 回レビュー PR-03 Codex SHOULD: 売上の移動の枠を「読めなかった」と「空」を分けて読む (共有の load() は変えない)。
+describe('sales move intent: 枠の読み取り (readSalesMoveIntentSlot)', () => {
+  it('無ければ empty・あれば intent (中身は load と同じ)', () => {
+    expect(readSalesMoveIntentSlot()).toEqual({ kind: 'empty' });
+    saveSalesMoveIntent(salesMoveIntent());
+    expect(readSalesMoveIntentSlot()).toEqual({ kind: 'intent', intent: salesMoveIntent() });
+  });
+
+  it('読み取りが throw する端末では unreadable (空と区別する)。共有の load は今までどおり null', () => {
+    saveSalesMoveIntent(salesMoveIntent());
+    const spy = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new DOMException('The operation is insecure.', 'SecurityError');
+    });
+    expect(readSalesMoveIntentSlot()).toEqual({ kind: 'unreadable' });
+    expect(loadSalesMoveIntent()).toBeNull();
+    spy.mockRestore();
+    // 読めるようになれば、残っていた枠が読める (消していない)。
+    expect(readSalesMoveIntentSlot()).toEqual({ kind: 'intent', intent: salesMoveIntent() });
+  });
+
+  it('枠として読めない中身は empty (load と同じ: 形の崩れた記録は消す・壊れた JSON は残す)', () => {
+    window.sessionStorage.setItem(SALES_MOVE_INTENT_STORAGE_KEY, JSON.stringify({ ...salesMoveIntent(), nonce: '0x1234' }));
+    expect(readSalesMoveIntentSlot()).toEqual({ kind: 'empty' });
+    expect(window.sessionStorage.getItem(SALES_MOVE_INTENT_STORAGE_KEY)).toBeNull();
+
+    window.sessionStorage.setItem(SALES_MOVE_INTENT_STORAGE_KEY, '{not json');
+    expect(readSalesMoveIntentSlot()).toEqual({ kind: 'empty' });
+    expect(loadSalesMoveIntent()).toBeNull();
+  });
+
+  it('枠を 1 回だけ読む (2 回目の読み取りの失敗が空に化けない)', () => {
+    saveSalesMoveIntent(salesMoveIntent());
+    const real = Storage.prototype.getItem;
+    let reads = 0;
+    const spy = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(function (this: Storage, key: string) {
+      reads += 1;
+      if (reads > 1) throw new DOMException('The operation is insecure.', 'SecurityError');
+      return real.call(this, key);
+    });
+    expect(readSalesMoveIntentSlot()).toEqual({ kind: 'intent', intent: salesMoveIntent() });
+    spy.mockRestore();
+    expect(reads).toBe(1);
   });
 });
