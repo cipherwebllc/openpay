@@ -5367,7 +5367,14 @@ describe('CheckoutForm — 復元した前の支払いの確定を、この会�
     ready();
     const makeUi = () => <CheckoutForm params={STANDARD} />;
     const { rerender } = render(makeUi());
-    await submitStandardThenSucceed(user, rerender, makeUi);
+    await user.click(screen.getByRole('button', { name: /を支払う/ }));
+    expect(standardMutate).toHaveBeenCalledOnce();
+    // 判定しないことを確かめるため、判定すれば不一致になる中身 (会計の鍵なし) を持たせる。
+    setStandardPayment('success-no-fee', {
+      lastSubmittedParams: standardRecord(STANDARD, { contextKey: undefined }),
+      lastSubmittedFrom: CUSTOMER,
+    });
+    rerender(makeUi());
 
     expect(await screen.findByRole('dialog', {}, { timeout: 3000 })).toBeInTheDocument();
     expectOwnCompletion(STANDARD_TX);
@@ -5536,7 +5543,14 @@ describe('CheckoutForm — 復元した前の支払いの確定を、この会�
     readyUsdc();
     const makeUi = () => <CheckoutForm params={USDC_PARAMS} />;
     const { rerender } = render(makeUi());
-    await submitGaslessThenSucceed(user, rerender, makeUi);
+    await user.click(screen.getByRole('button', { name: /を支払う/ }));
+    expect(mutate).toHaveBeenCalledOnce();
+    // 判定しないことを確かめるため、判定すれば不一致になる params (別のお店) を持たせる。
+    setBatchPayment('success', undefined, {
+      settledOtherIntent: false,
+      variables: gaslessVariables({ merchant: OTHER_MERCHANT }),
+    });
+    rerender(makeUi());
 
     expect(await screen.findByRole('dialog', {}, { timeout: 3000 })).toBeInTheDocument();
     expectOwnCompletion(GASLESS_TX);
