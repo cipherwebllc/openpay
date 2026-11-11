@@ -1187,18 +1187,30 @@ describe('復元した記録の中の関係を確かめる (SHOULD)', () => {
     return first;
   }
 
-  async function expectReceiptOnly(second: Fake) {
+  // nonceRead: 'saved' = EntryPoint の nonce を記録の EntryPoint・sender で読む (照合は今の account に依存しない・Codex 第 2 回
+  // MUST 3)。'none' = 記録の中が食い違うので読まない (読んでも署名済みの op の照合にならない)。
+  async function expectReceiptOnly(second: Fake, nonceRead: 'saved' | 'none') {
+    const saved = storedRecord();
     const restored = render();
     await waitFor(() => expect(restored.result.current.isUnknown).toBe(true));
     restored.result.current.retryReceipt();
     await waitFor(() => expect(second.waitForUserOperationReceipt).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(restored.result.current.isPending).toBe(false));
-    // 送り直しも作り直しも nonce の読み取りもしない。開いたまま。
+    // 送り直しも作り直しもしない。開いたまま。
     expect(second.bundlerSend).not.toHaveBeenCalled();
-    expect(second.readContract).not.toHaveBeenCalled();
     expect(second.signUserOperation).not.toHaveBeenCalled();
     expect(restored.result.current.isUnknown).toBe(true);
     expect(standardPaymentOpen(restored.result.current)).toBe(false);
+    if (nonceRead === 'none') {
+      expect(second.readContract).not.toHaveBeenCalled();
+    } else {
+      expect(second.readContract).toHaveBeenCalledTimes(1);
+      expect(second.readContract.mock.calls[0][0]).toMatchObject({
+        address: saved?.send?.entryPoint,
+        functionName: 'getNonce',
+        args: [saved?.send?.sender, BigInt(saved?.send?.nonceKey ?? -1)],
+      });
+    }
   }
 
   it('記録の EntryPoint が今の account と違う → 同じ nonce が効かないので送らない (receipt を待つだけ)', async () => {
@@ -1207,12 +1219,12 @@ describe('復元した記録の中の関係を確かめる (SHOULD)', () => {
       ...record,
       send: record.send && { ...record.send, entryPoint: entryPoint07Address },
     }));
-    await expectReceiptOnly(mountClients({ customer: CUSTOMER_A }));
+    await expectReceiptOnly(mountClients({ customer: CUSTOMER_A }), 'saved');
   });
 
   it('今の client の account (sender) が記録と違う (同じ接続先のまま account の中身が変わった) → 送らない', async () => {
     await seedUnknownRecord();
-    await expectReceiptOnly(mountClients({ customer: CUSTOMER_A, sender: OTHER_SENDER }));
+    await expectReceiptOnly(mountClients({ customer: CUSTOMER_A, sender: OTHER_SENDER }), 'saved');
   });
 
   it('署名済みの op の nonce が記録の nonce と違う (記録の中が食い違う) → 送り直さない・作り直さない', async () => {
@@ -1224,7 +1236,7 @@ describe('復元した記録の中の関係を確かめる (SHOULD)', () => {
         nonceSeq: (BigInt(record.send.nonceSeq) + 1n).toString(),
       },
     }));
-    await expectReceiptOnly(mountClients({ customer: CUSTOMER_A }));
+    await expectReceiptOnly(mountClients({ customer: CUSTOMER_A }), 'none');
   });
 
   it('署名済みの op の sender が記録の sender と違う → 送り直さない・作り直さない', async () => {
@@ -1236,7 +1248,7 @@ describe('復元した記録の中の関係を確かめる (SHOULD)', () => {
         signedUserOp: { ...record.send.signedUserOp, sender: OTHER_SENDER },
       },
     }));
-    await expectReceiptOnly(mountClients({ customer: CUSTOMER_A }));
+    await expectReceiptOnly(mountClients({ customer: CUSTOMER_A }), 'none');
   });
 
   it('接続先を別の account に切り替えると、その account の支払いは別の範囲 (前の account の記録は残り、戻ると開いたまま)', async () => {
@@ -1265,14 +1277,15 @@ describe('復元した記録の中の関係を確かめる (SHOULD)', () => {
 });
 
 describe('送信を分ける部品の遅延読み込み (bundle の予算)', () => {
-  // lib/smartAccount/pimlicoSend.ts は Pimlico の経路で使うときに dynamic import する。読み込みの失敗を作る。
+  // intent の関所 lib/smartAccount/pimlicoIntent.ts (送信の部品 pimlicoSend.ts を読む) は、Pimlico の経路で使うときに
+  // hook が dynamic import する。読み込みの失敗を作る。
   function failPimlicoSendImport() {
-    vi.doMock('@/lib/smartAccount/pimlicoSend', () => {
+    vi.doMock('@/lib/smartAccount/pimlicoIntent', () => {
       throw new Error('chunk load failed');
     });
   }
   afterEach(() => {
-    vi.doUnmock('@/lib/smartAccount/pimlicoSend');
+    vi.doUnmock('@/lib/smartAccount/pimlicoIntent');
   });
 
   it('順番は nonce → 準備 → 署名 → 保存 → 送信 のまま (読み込みは nonce の前)', async () => {
@@ -1336,14 +1349,19 @@ describe('送信を分ける部品の遅延読み込み (bundle の予算)', () 
     expect(restored.result.current.isUnknown).toBe(false);
     failPimlicoSendImport();
 
-    restored.result.current.mutate(OTHER_PARAMS);
+    // 同じ内容 (記録の calls と同じ) で押す: 内容の照合を通り、部品の読み込みまで進む。
+    restored.result.current.mutate(PARAMS);
     await waitFor(() => expect(restored.result.current.isUnknown).toBe(true));
     await waitFor(() => expect(restored.result.current.isPending).toBe(false));
 
+    // 読み込みの失敗で終わった (照合も送信もしていない) が、画面には出さず開いたまま。
+    expect(restored.result.current.isError).toBe(true);
     expect(restored.result.current.error).toBeNull();
     expect(standardPaymentOpen(restored.result.current)).toBe(false);
     expect(second.getNonce).not.toHaveBeenCalled();
     expect(second.signUserOperation).not.toHaveBeenCalled();
+    expect(second.getUserOperationReceipt).not.toHaveBeenCalled();
+    expect(second.bundlerSend).not.toHaveBeenCalled();
     expect(pendingKeys()).toHaveLength(1);
   });
 });

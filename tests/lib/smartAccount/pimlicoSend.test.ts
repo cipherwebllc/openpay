@@ -474,7 +474,7 @@ describe.each(builders)('$name', ({ impl, entryPoint, build }) => {
     const bundle = await build(jpycPolygon, polygon);
     const client = splitClientOf(bundle);
     const nonce = await reserveUserOpNonce(client);
-    const args = { client, entryPoint, sender: client.account.address, nonce };
+    const args = { client: client.account.client, entryPoint, sender: client.account.address, nonce };
 
     expect(await isUserOpNonceConsumed(args)).toBe(false);
     const read = rpcCalls.filter((c) => c.method === 'eth_call').at(-1);

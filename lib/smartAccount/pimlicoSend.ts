@@ -307,16 +307,17 @@ const ENTRY_POINT_GET_NONCE_ABI = [
  * EntryPoint の getNonce(sender, key) を読み、保存した nonce がもう使われたかを返す。
  * true = その nonce の op が 1 本取り込まれた (同じ nonce の op はもう実行されない)。
  * account の getNonce ではなく EntryPoint を直接読む (account によっては key を無視する: MetaMask は常に key 0)。
+ * client は記録の chain を読める client なら何でもよい (照合は今の account に依存しない・第 10 回レビュー A-1 の MUST 3)。
  */
 export async function isUserOpNonceConsumed(args: {
-  client: SignedSendClient;
+  client: Client;
   entryPoint: Address;
   sender: Address;
   nonce: bigint;
 }): Promise<boolean> {
   const { key } = splitUserOpNonce(args.nonce);
   const current = await getAction(
-    args.client.account.client,
+    args.client,
     readContract,
     'readContract',
   )({
