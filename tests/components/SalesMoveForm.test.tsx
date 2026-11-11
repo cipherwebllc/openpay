@@ -346,9 +346,23 @@ describe('SalesMoveForm: 確認と結果', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it('送信済み・未確定 (202) → 照会で revert が分かれば、成立しなかったと知らせ、もう一度署名できる', async () => {
+  it('送信済み・未確定 (202) → 照会の部品が候補の receipt の revert を返しても、成立しなかったとは出さず「もう一度確かめる」だけを出す', async () => {
+    // 第 10 回レビュー PR-03 Codex MUST 1: receipt の revert は「移動が起きなかった」証拠ではない (別の tx が同じ authorization を
+    // 先に使っていれば JPYC は動いている)。署名のボタンは出さない。
     replies = [{ status: 202, body: { ok: false, pending: true, txHash: TX } }];
     w.resolveRelayIntent.mockResolvedValueOnce({ kind: 'settled', txHash: TX, success: false });
+    await signOnce();
+    expect(await screen.findByRole('button', { name: m.recheck })).toBeInTheDocument();
+    expect(screen.getByText(m.pending)).toBeInTheDocument();
+    expect(screen.queryByText(m.reverted)).toBeNull();
+    expect(screen.queryByRole('button', { name: m.signButton })).toBeNull();
+    expect(w.signTypedData).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('送信済み・未確定 (202) → 期限切れ未使用の証明が出たら、成立しなかったと知らせ、もう一度署名できる', async () => {
+    replies = [{ status: 202, body: { ok: false, pending: true, txHash: TX } }];
+    w.resolveRelayIntent.mockResolvedValueOnce({ kind: 'expired' });
     await signOnce();
     expect(await screen.findByText(m.reverted)).toBeInTheDocument();
     expect(screen.queryByText(m.pending)).toBeNull();
@@ -356,6 +370,7 @@ describe('SalesMoveForm: 確認と結果', () => {
     fireEvent.click(screen.getByRole('button', { name: m.signButton }));
     expect(await screen.findByText(m.success)).toBeInTheDocument();
     expect(w.signTypedData).toHaveBeenCalledTimes(2);
+    expect(w.signTypedData.mock.calls[1][0].message.nonce).not.toBe(w.signTypedData.mock.calls[0][0].message.nonce);
   });
 
   it('送信済み・未確定 (202) → 照会を打ち切った後は「もう一度確かめる」だけを出す (署名のボタンは出さない)。押すと照会だけをする', async () => {

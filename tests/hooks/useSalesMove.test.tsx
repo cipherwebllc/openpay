@@ -451,7 +451,8 @@ describe('useSalesMove: 開き直したときの照会', () => {
   });
 
   // revert した tx の照会は status route の実際の応答 (冪等の記録がある間は indeterminate) で
-  // tests/hooks/useSalesMove.statusContract.test.tsx が固定する (ここで settled + success:false を作らない・route は返さない)。
+  // tests/hooks/useSalesMove.statusContract.test.tsx が固定する。status が settled を返した tx の receipt が手元の RPC で revert の
+  // とき (照会の部品が settled + success:false を返す) もロックのままであることも、そこで照会の部品を実物で通して確かめる。
 
   it('期限切れで使われなかった枠は消し、何も出さない (次は新しい署名を許す)', async () => {
     storeIntent();
@@ -830,6 +831,82 @@ describe('useSalesMove: 復旧の枠を書けない端末では送らない (第
     expect(savedAtPost[0]).not.toBeNull();
     expect(window.sessionStorage.getItem(SALES_MOVE_INTENT_PROBE_KEY)).toBeNull();
   });
+
+  // 第 10 回レビュー PR-03 Codex SHOULD: 開き直したときに枠を読めなかった (読み取りが投げた) のを「枠が無い」と読まない。読めないまま
+  // 残っている未解決の枠を、読めるようになった後の新しい移動が上書きして署名・POST すると、二重の移動になる。
+  describe('開き直したときに枠を読めなかった端末', () => {
+    const UNRESOLVED = JSON.stringify({
+      version: 1,
+      chainId: CHAIN,
+      from: FROM,
+      merchant: DEST,
+      merchantValue: AMOUNT.toString(),
+      feeValue: FEE.toString(),
+      nonce: `0x${'c'.repeat(64)}`,
+      validBefore: '9999999999',
+      issuedAt: 1_700_000_000_000,
+    });
+    let readable = false;
+    let readSpy: ReturnType<typeof vi.spyOn> | undefined;
+
+    beforeEach(() => {
+      readable = false;
+      const real = Storage.prototype.getItem;
+      // 枠のキーの読み取りだけを、readable になるまで throw にする (サイトのデータへのアクセスを止めている等)。
+      readSpy = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(function (this: Storage, key: string) {
+        if (!readable && this === window.sessionStorage && key === SALES_MOVE_INTENT_STORAGE_KEY) {
+          throw new DOMException('The operation is insecure.', 'SecurityError');
+        }
+        return real.call(this, key);
+      });
+    });
+
+    afterEach(() => {
+      readSpy?.mockRestore();
+      readSpy = undefined;
+    });
+
+    it('読めない間は移さない (署名・POST なし・専用の文言)。読めるようになって未解決の枠があれば、上書きせずにその枠を照会する', async () => {
+      window.sessionStorage.setItem(SALES_MOVE_INTENT_STORAGE_KEY, UNRESOLVED);
+      const view = await mount();
+      // 読めなかったので、開き直したときの照会はしていない (保持も無い)。
+      expect(h.resolveRelayIntent).not.toHaveBeenCalled();
+      expect(view.result.current.held).toBeNull();
+
+      const blocked = await press(view);
+      expect((blocked.error as Error).message).toBe('intent_storage_unavailable');
+      expect(salesMoveErrorKey(blocked.error)).toBe('storageUnavailable');
+      expect(isRelayResponseUnknownError(blocked.error)).toBe(false);
+      expect(h.signTypedData).not.toHaveBeenCalled();
+      expect(fetchMock).not.toHaveBeenCalled();
+
+      readable = true;
+      const adopted = await press(view);
+      // 新しい署名ではなく、残っていた枠の nonce の照会 (既定の mock は unknown = 応答不明のまま保持)。
+      expect(isRelayResponseUnknownError(adopted.error)).toBe(true);
+      expect(h.resolveRelayIntent).toHaveBeenCalledTimes(1);
+      expect(h.resolveRelayIntent.mock.calls[0][0].intent).toMatchObject({ nonce: `0x${'c'.repeat(64)}`, routeKind: 'recover' });
+      expect(view.result.current.held).toBe('ambiguous');
+      expect(window.sessionStorage.getItem(SALES_MOVE_INTENT_STORAGE_KEY)).toBe(UNRESOLVED);
+      expect(h.signTypedData).not.toHaveBeenCalled();
+      expect(fetchMock).not.toHaveBeenCalled();
+
+      // 押し直しても署名しない (保持が残る間は照会だけ)。
+      await press(view);
+      expect(h.signTypedData).not.toHaveBeenCalled();
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('読めるようになって枠が空なら、今までどおり移せる', async () => {
+      const view = await mount();
+      readable = true;
+      const { result } = await press(view);
+      expect(result).toEqual({ txHash: TX, success: true });
+      expect(h.signTypedData).toHaveBeenCalledTimes(1);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(h.resolveRelayIntent).not.toHaveBeenCalled();
+    });
+  });
 });
 
 // 第 10 回レビュー G-2: 202 pending を返した後、同じ画面でも status を照会して終端の結果へ進める。照会の間も、打ち切った後も、
@@ -892,24 +969,27 @@ describe('useSalesMove: 202 pending の後、同じ画面で照会する (第 10
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it('202 → 照会で revert が分かれば、開き直さずに不成立になる。次は新しい署名で構わない', async () => {
+  it('202 → 照会の部品が候補の receipt の revert を返しても (settled + success:false)、不成立にしない。保持と枠を残し、署名しない', async () => {
+    // 第 10 回レビュー PR-03 Codex MUST 1: 別の tx が同じ authorization を先に使っていれば JPYC は動いている。新しい署名を許すのは
+    // 期限切れ未使用の証明だけ (照会の部品を実物で通すのは tests/hooks/useSalesMove.statusContract.test.tsx)。
     replies = [PENDING, { status: 200, body: { ok: true, txHash: TX2 } }];
     h.resolveRelayIntent.mockResolvedValueOnce({ kind: 'settled', txHash: TX, success: false });
     const view = await mount();
     await pressMove(view);
-    await waitFor(() => expect(view.result.current.result).toEqual({ txHash: TX, success: false }));
-    expect(view.result.current.held).toBeNull();
+    await waitFor(() => expect(h.resolveRelayIntent).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(view.result.current.isRecovering).toBe(false));
+    expect(view.result.current.result).toEqual({ txHash: TX, success: false, pending: true });
+    expect(view.result.current.held).toBe('ambiguous');
     expect(view.result.current.error).toBeNull();
-    expect(savedIntent()).toBeNull();
-    expect(loadPayerReceipts()[0]).toMatchObject({ txHash: TX, status: 'failed' });
-    expect(h.signTypedData).toHaveBeenCalledTimes(1);
+    expect(savedIntent()).not.toBeNull();
+    // 控えは failed にしない (成立しなかった証拠ではない)。
+    expect(loadPayerReceipts()[0]).toMatchObject({ txHash: TX, status: 'pending' });
+    expect(vi.mocked(logger.warn)).toHaveBeenCalledWith('sales_move.recovery_receipt_reverted', { chainId: CHAIN });
 
-    // 不成立の後は、mutation の data に残る pending で止めない (200 の revert・開き直して不成立が分かった後と同じ)。
     await pressMove(view);
-    await waitFor(() => expect(view.result.current.result).toEqual({ txHash: TX2, success: true }));
-    expect(h.signTypedData).toHaveBeenCalledTimes(2);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(h.signTypedData.mock.calls[1][0].message.nonce).not.toBe(h.signTypedData.mock.calls[0][0].message.nonce);
+    expect(h.signTypedData).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(view.result.current.held).toBe('ambiguous');
   });
 
   it('202 → 期限切れ未使用が証明されたら、送信済みの表示を残さず不成立にする', async () => {
@@ -1056,31 +1136,8 @@ describe('useSalesMove: 202 pending の後、同じ画面で照会する (第 10
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it('照会の間に unmount し、その後に照会が終わっても何も投げず、枠は残る (開き直した画面が照会する)', async () => {
-    replies = [PENDING];
-    const finish = deferredRecovery();
-    const view = await mount();
-    await pressMove(view);
-    await waitFor(() => expect(view.result.current.isRecovering).toBe(true));
-    const before = view.result.current;
-    view.unmount();
-    // 照会の部品は unmount で読むのをやめて unknown を返す (lib/relay/relayIntentRecovery の isMounted)。
-    await act(async () => {
-      finish({ kind: 'unknown' });
-      await new Promise((r) => setTimeout(r, 10));
-    });
-    expect(view.result.current).toBe(before);
-    expect(savedIntent()).not.toBeNull();
-    expect(h.signTypedData).toHaveBeenCalledTimes(1);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-
-    // 開き直した画面が、残った枠を照会して結果を出す。
-    h.resolveRelayIntent.mockResolvedValueOnce({ kind: 'settled', txHash: TX, success: true });
-    const reopened = renderHook(() => useSalesMove(DEPLOYMENT, LABELS), { wrapper: wrapper() });
-    await waitFor(() => expect(reopened.result.current.result).toEqual({ txHash: TX, success: true }));
-    expect(h.signTypedData).toHaveBeenCalledTimes(1);
-    reopened.unmount();
-  });
+  // unmount の後の照会は、照会の部品を実物で通して tests/hooks/useSalesMove.statusContract.test.tsx が確かめる (sleep の間の
+  // unmount で読むのをやめる・status の読み取りの途中の unmount でその fetch を取り消す・枠は残り開き直した画面が続きを読む)。
 
   it('StrictMode の mount→unmount→mount の後でも、202 の後の照会の結果が画面に届く', async () => {
     replies = [PENDING];
