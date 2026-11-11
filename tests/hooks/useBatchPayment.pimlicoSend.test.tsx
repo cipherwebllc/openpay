@@ -479,6 +479,22 @@ describe('最初の送信の失敗の分類: 閉じるのは HTTP 2xx の検証�
     },
   );
 
+  it('最初の送信の検証の拒否でも、記録を消したと確かめられなければ閉じない (残った署名済みの op が後で送られうる)', async () => {
+    const fake = mountClients();
+    replyOnce(fake, { error: { code: -32500, message: "AA21 didn't pay prefund" } });
+    const { result } = render();
+    failStorage({ failReadBacks: 0, failRemove: 'noop' });
+
+    result.current.mutate(PARAMS);
+    await waitFor(() => expect(result.current.isUnknown).toBe(true));
+    await waitFor(() => expect(result.current.isPending).toBe(false));
+
+    expect(result.current.error).toBeNull();
+    expect(standardPaymentOpen(result.current)).toBe(false);
+    expect(pendingKeys()).toHaveLength(1);
+    expect(logger.warn).toHaveBeenCalledWith('pimlico.send.rejected-unverified', expect.anything());
+  });
+
   it('HTTP 500 に JSON-RPC の error (-32603) が載っても、bundler が受理していれば: 応答不明にして通常決済も止め、元の op の確定を待つ (MUST 1・Codex の再現)', async () => {
     const fake = mountClients();
     // 上流は op を受理したが、proxy / 内部の失敗で HTTP 500 + JSON-RPC の error が返る。
@@ -770,6 +786,30 @@ describe('期限: 黙って消さず、照合してから閉じる (c4・c5・MU
     expect(world.mined).toHaveLength(1);
   });
 
+  it('期限の照合で閉じるときも、記録を消したと確かめられなければ開いたまま', async () => {
+    const first = mountClients();
+    loseRequest(first);
+    const firstHook = render();
+    firstHook.result.current.mutate(PARAMS);
+    await waitFor(() => expect(firstHook.result.current.isUnknown).toBe(true));
+    firstHook.unmount();
+    ageStoredRecord();
+
+    const second = mountClients();
+    const restored = render();
+    await waitFor(() => expect(restored.result.current.isUnknown).toBe(true));
+    failStorage({ failReadBacks: 0, failRemove: 'noop' });
+    restored.result.current.retryReceipt();
+    await waitFor(() => expect(second.readContract).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(restored.result.current.isPending).toBe(false));
+
+    expect(restored.result.current.isUnknown).toBe(true);
+    expect(standardPaymentOpen(restored.result.current)).toBe(false);
+    expect(second.bundlerSend).not.toHaveBeenCalled();
+    expect(pendingKeys()).toHaveLength(1);
+    expect(logger.warn).toHaveBeenCalledWith('pimlico.pending.expired-close-failed', expect.anything());
+  });
+
   it.each([
     { label: '期限の前', expired: false },
     { label: '期限の後', expired: true },
@@ -813,45 +853,48 @@ describe('期限: 黙って消さず、照合してから閉じる (c4・c5・MU
   );
 });
 
-describe('保存できないときは送らない・送っていない op の記録を残したまま開けない (A-1・MUST 4)', () => {
-  // localStorage の読み戻しを失敗させる spy。setItem の直後の getItem (persistPimlicoPending の読み戻し) を
-  // failReadBacks 回だけ投げる。removeItem を投げさせることもできる。
-  function failStorage(options: { failReadBacks: number; failRemove?: boolean }) {
-    const realGet = Storage.prototype.getItem;
-    const realSet = Storage.prototype.setItem;
-    const realRemove = Storage.prototype.removeItem;
-    let budget = options.failReadBacks;
-    let readBackPending = false;
-    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (
-      this: Storage,
-      key: string,
-      value: string,
-    ) {
-      realSet.call(this, key, value);
-      readBackPending = key.startsWith(PIMLICO_PENDING_KEY_PREFIX) && budget > 0;
-    });
-    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(function (
-      this: Storage,
-      key: string,
-    ) {
-      if (readBackPending) {
-        readBackPending = false;
-        budget -= 1;
-        throw new DOMException('read failed', 'UnknownError');
-      }
-      return realGet.call(this, key);
-    });
-    vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(function (
-      this: Storage,
-      key: string,
-    ) {
-      if (options.failRemove && key.startsWith(PIMLICO_PENDING_KEY_PREFIX)) {
+// localStorage の失敗を作る spy。setItem の直後の getItem (persistPimlicoPending の読み戻し) を failReadBacks 回だけ
+// 投げる。failRemove: 'throw' = 記録の removeItem が投げる・'noop' = 黙って何も消さない (消したと確かめないと分からない)。
+function failStorage(options: { failReadBacks: number; failRemove?: 'throw' | 'noop' }) {
+  const realGet = Storage.prototype.getItem;
+  const realSet = Storage.prototype.setItem;
+  const realRemove = Storage.prototype.removeItem;
+  let budget = options.failReadBacks;
+  let readBackPending = false;
+  vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (
+    this: Storage,
+    key: string,
+    value: string,
+  ) {
+    realSet.call(this, key, value);
+    readBackPending = key.startsWith(PIMLICO_PENDING_KEY_PREFIX) && budget > 0;
+  });
+  vi.spyOn(Storage.prototype, 'getItem').mockImplementation(function (
+    this: Storage,
+    key: string,
+  ) {
+    if (readBackPending) {
+      readBackPending = false;
+      budget -= 1;
+      throw new DOMException('read failed', 'UnknownError');
+    }
+    return realGet.call(this, key);
+  });
+  vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(function (
+    this: Storage,
+    key: string,
+  ) {
+    if (options.failRemove && key.startsWith(PIMLICO_PENDING_KEY_PREFIX)) {
+      if (options.failRemove === 'throw') {
         throw new DOMException('remove failed', 'UnknownError');
       }
-      realRemove.call(this, key);
-    });
-  }
+      return;
+    }
+    realRemove.call(this, key);
+  });
+}
 
+describe('保存できないときは送らない・送っていない op の記録を残したまま開けない (A-1・MUST 4)', () => {
   it('保存の書き込みが throw → 送信しない。gasless だけ止め (pendingStoreUnavailable)、応答不明にはしない', async () => {
     const fake = mountClients();
     const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
@@ -910,9 +953,12 @@ describe('保存できないときは送らない・送っていない op の記
     expect(world.mempoolHashes()).toHaveLength(0);
   });
 
-  it('書けて読み戻しが投げ、記録を消すこともできない → 送っていなくても開いたまま (応答不明・通常決済も止める)', async () => {
+  it.each([
+    { label: 'removeItem が投げる', failRemove: 'throw' as const },
+    { label: 'removeItem が黙って消さない', failRemove: 'noop' as const },
+  ])('書けて読み戻しが投げ、記録を消したと確かめられない ($label) → 送っていなくても開いたまま (応答不明・通常決済も止める)', async ({ failRemove }) => {
     const fake = mountClients();
-    failStorage({ failReadBacks: 1, failRemove: true });
+    failStorage({ failReadBacks: 1, failRemove });
     const { result } = render();
 
     result.current.mutate(PARAMS);
