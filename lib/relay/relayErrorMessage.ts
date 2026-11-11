@@ -1,13 +1,14 @@
 // JPYC relay (/api/relay/jpyc) の error code → 顧客向け i18n キー。検証系の細かな reason や
 // 技術コード (signature_*/unsupported_chain/http_* 等) は generic に丸め、顧客が取れる
 // アクションのある 3 種のみ専用キーにする。namespace 非依存に「キー文字列」を返すので、
-// PaymentForm / CheckoutForm それぞれの t() で翻訳する (両 namespace に同名キーが必要)。
+// PaymentForm / CheckoutForm / TipForm それぞれの t() で翻訳する (3 つの namespace に同名キーが必要)。
 
 export type RelayErrorKey =
   | 'errorRelayRateLimited'
   | 'errorRelayNotConfigured'
   | 'errorRelayInsufficientBalance'
   | 'errorRelayFeePaused'
+  | 'errorRelayStorageUnavailable'
   | 'errorRelayGeneric';
 
 export function relayErrorKey(err: Error): RelayErrorKey {
@@ -22,6 +23,13 @@ export function relayErrorKey(err: Error): RelayErrorKey {
     // 店主への確認 / 通常モードへ誘導する (顧客に店主の未払いは明かさない)。
     case 'fee_required':
       return 'errorRelayFeePaused';
+    // この端末に復旧の枠 (公開 metadata) を書けないので、hook が送らずに止めた (hooks/useJpycEip3009Payment・
+    // 第 10 回レビュー H-R)。server の応答ではない。時間をおいても直らないので「時間をおいて再度」の generic とは別の
+    // 文言にする。どのフォームも通常決済へは案内せず、ブラウザの設定か別のブラウザだけを案内する (通常決済にも同じ穴がある・
+    // user 裁定 Q7-1。/pay・/checkout は切り替えの banner を出さない = lib/relay/relayResponseError の
+    // isIntentStorageUnavailableError)。
+    case 'intent_storage_unavailable':
+      return 'errorRelayStorageUnavailable';
     default:
       return 'errorRelayGeneric';
   }

@@ -59,7 +59,11 @@ import {
   type MobileOrderFeeKind,
 } from '@/lib/mobileOrderFee';
 import { relayErrorKey } from '@/lib/relay/relayErrorMessage';
-import { isFallbackSafeRelayError } from '@/lib/relay/relayResponseError';
+import {
+  isFallbackSafeRelayError,
+  isIntentStorageUnavailableError,
+  isOrderBindingStorageUnavailableError,
+} from '@/lib/relay/relayResponseError';
 import { isUserRejection } from '@/lib/walletErrors';
 import { useSwitchChainWithFeedback } from '@/hooks/useSwitchChainWithFeedback';
 import { deriveCheckoutGuards } from '@/lib/paymentFlowGuards/checkout';
@@ -502,8 +506,10 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
       (standard.isMerchantError || standard.isFeeError) &&
       !standard.error);
   // relay 経路の error は code 文字列 (rate_limited 等) なので friendly i18n に差し替える。
+  // 束縛した注文の slot を保存できずに止めた error は、汎用の文 (「通常モードをご利用ください」) を出さない。下の専用の
+  // 黄色の枠 (orderBindingStorageUnavailable) だけで知らせる (user 裁定 Q8 = A・lib/relay/relayResponseError)。
   const flowErrorMessage = useRelay
-    ? isFallbackSafeRelayError(flowError)
+    ? isFallbackSafeRelayError(flowError) && !isOrderBindingStorageUnavailableError(flowError)
       ? t(relayErrorKey(flowError))
       : undefined
     : flowError?.message;
@@ -524,12 +530,16 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   // ガス代自己負担の「通常決済」へ 1 タップで切り替える導線を出す。on-chain revert
   // (relay.data.success===false) は別経路 (revertedNoFeedback)、response-unknown は再送封鎖で
   // 扱うため、ここでは fallback-safe error のみを条件にする。banner の中で friendly 文言を
-  // 1 度だけ出し、下の汎用 error ブロックでは重複表示しない。
+  // 1 度だけ出し、下の汎用 error ブロックでは重複表示しない。復旧の枠を書けない端末で止めた error は切り替えを案内せず、
+  // 汎用 error ブロックに出す (通常決済にも同じ穴がある・user 裁定 Q7-1・lib/relay/relayResponseError)。束縛した注文の slot を
+  // 保存できずに止めた error も同じ理由で切り替えを案内せず、専用の黄色の枠だけを出す (user 裁定 Q8 = A)。
   const relayFallbackActive =
     useRelay &&
     !relay.isPending &&
     !relayAmbiguous &&
-    isFallbackSafeRelayError(relayError);
+    isFallbackSafeRelayError(relayError) &&
+    !isIntentStorageUnavailableError(relayError) &&
+    !isOrderBindingStorageUnavailableError(relayError);
   // B1 Layer B (preflight): relay 経路で relayer が degraded、かつ顧客がまだ submit していない
   // (relay.error なし・relay.data なし) ときに、署名 *前* に同じ banner で「通常決済へ切替」を促す。
   // 優先順位: relay.error → Layer A (per-error 文言) / それ以外で preflight-degraded → Layer B

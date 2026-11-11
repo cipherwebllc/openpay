@@ -65,7 +65,10 @@ import {
 } from '@/lib/paymentRoute';
 import { recoverFeeValue } from '@/lib/relay/recoverFee';
 import { relayErrorKey } from '@/lib/relay/relayErrorMessage';
-import { isFallbackSafeRelayError } from '@/lib/relay/relayResponseError';
+import {
+  isFallbackSafeRelayError,
+  isIntentStorageUnavailableError,
+} from '@/lib/relay/relayResponseError';
 import { isUserRejection } from '@/lib/walletErrors';
 import { derivePayGuards } from '@/lib/paymentFlowGuards/pay';
 import { useErc20BalanceAndChain } from '@/hooks/useErc20BalanceAndChain';
@@ -579,12 +582,14 @@ function PaymentDetails({ params }: { params: PayParams }) {
   // とき、ガス代自己負担の「通常決済」へ 1 タップで切り替える導線を出す。on-chain revert
   // (relay.data.success===false) は別経路 (revertedNoFeedback)、response-unknown は再送封鎖で
   // 扱うため、ここでは fallback-safe error のみを条件にする。banner の中で friendly 文言を
-  // 1 度だけ出し、下の汎用 error ブロックでは重複表示しない。
+  // 1 度だけ出し、下の汎用 error ブロックでは重複表示しない。復旧の枠を書けない端末で止めた error は切り替えを案内せず、
+  // 汎用 error ブロックに出す (通常決済にも同じ穴がある・user 裁定 Q7-1・lib/relay/relayResponseError)。
   const relayFallbackActive =
     useRelay &&
     !relay.isPending &&
     !relayAmbiguous &&
-    isFallbackSafeRelayError(relayError);
+    isFallbackSafeRelayError(relayError) &&
+    !isIntentStorageUnavailableError(relayError);
   // B1 Layer B (preflight): relay 経路で relayer が degraded、かつ顧客がまだ submit していない
   // (relay.error なし・relay.data なし) ときに、署名 *前* に「通常決済へ切替」を先回りで促す。
   // Layer A (relay.error) とは独立に評価する (両方 true にはならない・!relayError が排他)。

@@ -69,6 +69,7 @@ import {
 } from '@/lib/relay/relayResponseError';
 import { relayErrorKey } from '@/lib/relay/relayErrorMessage';
 import {
+  RELAY_INTENT_PROBE_KEY,
   RELAY_INTENT_STORAGE_KEY,
   type RelayIntentMetadata,
 } from '@/lib/paymentIntentStorage';
@@ -2710,5 +2711,561 @@ describe('useJpycEip3009Payment — 二度押しは 2 つ目の署名・POST に
     expect(signTypedData).toHaveBeenCalledTimes(1);
     expect(relayPosts()).toHaveLength(1);
     expect(relayPosts()[0].value).toBe((VALUE * sentMultiplier).toString());
+  });
+});
+
+// 第 10 回レビュー H-R: 復旧の枠 (openpay:relay-intent:v1) を書けない端末で、束縛しない支払い (/pay・/tip・束縛しない
+// /checkout) を枠なしで送らない。枠が無いまま送ると、relay が receipt を待つ間に読み直した画面が未解決の支払いを知らず、
+// 新しい署名 (別の nonce) で二重に払える。hook と lib/paymentIntentStorage は実物で、差し替えるのは Storage の境界だけ。
+describe('useJpycEip3009Payment — 復旧の枠を書けない端末では束縛しない支払いを送らない (第 10 回レビュー H-R)', () => {
+  const VALUE = 300n * 10n ** 18n;
+  const FORWARDER = '0x3333333333333333333333333333333333333333' as Address;
+  const STORAGE_ERROR = 'intent_storage_unavailable';
+  const SIGNATURE = `0x${'a'.repeat(130)}` as Hex;
+  const realSetItem = Storage.prototype.setItem;
+  const spies: { mockRestore: () => void }[] = [];
+
+  // 当てはまるキーへの書き込みだけを失敗させる ('throw' = 容量超過・保存の禁止 / 'drop' = 投げずに捨てる)。
+  function breakSetItem(matches: (key: string) => boolean, how: 'throw' | 'drop' = 'throw') {
+    const spy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key: string, value: string) {
+      if (matches(key)) {
+        if (how === 'throw') throw new DOMException('The quota has been exceeded.', 'QuotaExceededError');
+        return;
+      }
+      realSetItem.call(this, key, value);
+    });
+    spies.push(spy);
+    return spy;
+  }
+  // 枠のキーも、署名の前の確かめのキーも書けない端末。
+  const relayKeys = (key: string) => key === RELAY_INTENT_STORAGE_KEY || key === RELAY_INTENT_PROBE_KEY;
+  // 署名の前の確かめは通るが、枠そのものが書けない (署名を待つ間に書けなくなった・枠のキーだけ壊れている)。
+  const slotOnly = (key: string) => key === RELAY_INTENT_STORAGE_KEY;
+  const relayPosts = () => fetchSpy.mock.calls.filter(([url]) => url === '/api/relay/jpyc');
+  const jsonResponse = (status: number, body: unknown) =>
+    new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+  const unavailableLog = (stage: 'probe' | 'save' | 'retry') =>
+    ['payment.intent_storage_unavailable', { path: 'jpyc-relay', chainId: jpycDep.chainId, stage }] as const;
+
+  function setRoute(mode: 'free' | 'recover') {
+    vi.mocked(jpycForwarderFor).mockReturnValue(mode === 'recover' ? FORWARDER : null);
+  }
+
+  async function mountHook(mode: 'free' | 'recover' = 'free') {
+    setRoute(mode);
+    mount();
+    const view = renderHook(() => useJpycEip3009Payment(jpycDep), { wrapper: makeWrapper() });
+    await waitFor(() => expect(view.result.current.isRestoring).toBe(false));
+    return view;
+  }
+
+  afterEach(() => {
+    for (const spy of spies.splice(0)) spy.mockRestore();
+    vi.mocked(jpycForwarderFor).mockReturnValue(null);
+  });
+
+  it.each(['free', 'recover'] as const)('%s: 枠も確かめのキーも書けない端末 → 署名を求めずに止める (POST 0 回・専用の code・送っていない = fallback-safe な error)', async (mode) => {
+    const view = await mountHook(mode);
+    breakSetItem(relayKeys);
+
+    act(() => view.result.current.mutate({ merchant: MERCHANT, value: VALUE }));
+    await waitFor(() => expect(view.result.current.error?.message).toBe(STORAGE_ERROR));
+
+    expect(signTypedData).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(logger.info).not.toHaveBeenCalledWith('payment.sign_requested', expect.anything());
+    expect(logger.info).toHaveBeenCalledWith(...unavailableLog('probe'));
+    // 送っていないので fallback-safe (保持・照会にしない) + 専用の文言の key。フォームは通常決済への切り替えを案内しない
+    // (user 裁定 Q7-1・lib/relay/relayResponseError の isIntentStorageUnavailableError・フォームのテストが固定する)。
+    expect(isFallbackSafeRelayError(view.result.current.error)).toBe(true);
+    expect(relayErrorKey(view.result.current.error as Error)).toBe('errorRelayStorageUnavailable');
+    // 送っていないので、送信済みかもしれない扱い (保持・照会) にしない。
+    expect(view.result.current.hasActiveIntent).toBe(false);
+    expect(view.result.current.recoveryState).toBeNull();
+    expect(window.sessionStorage.getItem(RELAY_INTENT_STORAGE_KEY)).toBeNull();
+  });
+
+  it('束縛しない /checkout (restoreOrderDelivery あり・order なし・注文リンクの指紋つき) も同じく署名の前に止まる', async () => {
+    setRoute('free');
+    mount();
+    const view = renderHook(
+      () => useJpycEip3009Payment(jpycDep, { restoreOrderDelivery: true, orderContext: ORDER_CONTEXT }),
+      { wrapper: makeWrapper() },
+    );
+    await waitFor(() => expect(view.result.current.isRestoring).toBe(false));
+    breakSetItem(relayKeys);
+
+    act(() => view.result.current.mutate({ merchant: MERCHANT, value: VALUE, orderLinkKey: `0x${'a7'.repeat(32)}` as Hex }));
+    await waitFor(() => expect(view.result.current.error?.message).toBe(STORAGE_ERROR));
+    expect(signTypedData).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['free', 'throw'],
+    ['recover', 'throw'],
+    ['free', 'drop'],
+  ] as const)('%s: 確かめは通るが枠そのものが書けない (%s) → 署名は 1 回・POST 0 回・署名済みの payload を保持しない', async (mode, how) => {
+    const view = await mountHook(mode);
+    const broken = breakSetItem(slotOnly, how);
+
+    act(() => view.result.current.mutate({ merchant: MERCHANT, value: VALUE }));
+    await waitFor(() => expect(view.result.current.error?.message).toBe(STORAGE_ERROR));
+
+    expect(signTypedData).toHaveBeenCalledTimes(1);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(logger.info).toHaveBeenCalledWith(...unavailableLog('save'));
+    expect(isFallbackSafeRelayError(view.result.current.error)).toBe(true);
+    expect(view.result.current.hasActiveIntent).toBe(false);
+    expect(window.sessionStorage.getItem(RELAY_INTENT_STORAGE_KEY)).toBeNull();
+    // 保持していないので、同じ payload の再送の入口は何もしない。
+    act(() => view.result.current.retryRelay());
+    act(() => view.result.current.retrySamePayload());
+    await act(async () => Promise.resolve());
+    expect(fetchSpy).not.toHaveBeenCalled();
+
+    // 書けるようになった後の次の押下は、捨てた署名の再送ではなく新しい署名から。
+    broken.mockRestore();
+    act(() => view.result.current.mutate({ merchant: MERCHANT, value: VALUE }));
+    await waitFor(() => expect(view.result.current.data?.success).toBe(true));
+    expect(signTypedData).toHaveBeenCalledTimes(2);
+    expect(relayPosts()).toHaveLength(1);
+  });
+
+  it('書けなかったときに枠に残っている別の支払いの記録 (同じ chainId・from・別の nonce) を、いま書いた枠と読み違えない', async () => {
+    const view = await mountHook('free');
+    // mount の後に置く (hook は復元していない)。書き込みが失敗すると、読み戻しで返るのはこの記録。
+    storeRelayIntent(restoredRelayIntent());
+    breakSetItem(slotOnly);
+
+    act(() => view.result.current.mutate({ merchant: MERCHANT, value: VALUE }));
+    await waitFor(() => expect(view.result.current.error?.message).toBe(STORAGE_ERROR));
+
+    expect(signTypedData).toHaveBeenCalledTimes(1);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(JSON.parse(window.sessionStorage.getItem(RELAY_INTENT_STORAGE_KEY) as string).nonce).toBe(RESTORED_NONCE);
+  });
+
+  it('sessionStorage そのものに触れない端末 (window.sessionStorage の getter が throw) → 署名を求めずに止める', async () => {
+    setRoute('free');
+    mount();
+    const getter = vi.spyOn(window, 'sessionStorage', 'get').mockImplementation(() => {
+      throw new DOMException('Access is denied for this document.', 'SecurityError');
+    });
+    spies.push(getter);
+    const view = renderHook(() => useJpycEip3009Payment(jpycDep), { wrapper: makeWrapper() });
+    await waitFor(() => expect(view.result.current.isRestoring).toBe(false));
+
+    act(() => view.result.current.mutate({ merchant: MERCHANT, value: VALUE }));
+    await waitFor(() => expect(view.result.current.error?.message).toBe(STORAGE_ERROR));
+
+    expect(signTypedData).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(view.result.current.hasActiveIntent).toBe(false);
+  });
+
+  it('storage の chunk の読み込みに失敗した画面 (storageRef が null) → 画面は止めず、束縛しない支払いは署名を求めずに止める', async () => {
+    vi.doMock('@/lib/paymentIntentStorage', () => { throw new Error('chunk unavailable'); });
+    try {
+      setRoute('free');
+      mount();
+      const view = renderHook(() => useJpycEip3009Payment(jpycDep), { wrapper: makeWrapper() });
+      // 読み込みの失敗で「復元中」のまま止まらない (今までどおり)。
+      await waitFor(() => expect(view.result.current.isRestoring).toBe(false));
+
+      act(() => view.result.current.mutate({ merchant: MERCHANT, value: VALUE }));
+      await waitFor(() => expect(view.result.current.error?.message).toBe(STORAGE_ERROR));
+
+      expect(signTypedData).not.toHaveBeenCalled();
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(logger.info).toHaveBeenCalledWith(...unavailableLog('probe'));
+    } finally {
+      vi.doUnmock('@/lib/paymentIntentStorage');
+    }
+  });
+
+  it('IP 制限 (429) で保持した payload の再送の前にも枠を確かめる: 書けなくなっていたら再送せず、保持を外す (次は新しい署名)', async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse(429, { ok: false, error: 'ip_rate_limited' }));
+    const view = await mountHook('free');
+    act(() => view.result.current.mutate({ merchant: MERCHANT, value: VALUE }));
+    await waitFor(() => expect(isRelayIpRateLimitedError(view.result.current.error)).toBe(true));
+    expect(view.result.current.hasActiveIntent).toBe(true);
+    expect(relayPosts()).toHaveLength(1);
+
+    const broken = breakSetItem(slotOnly);
+    act(() => view.result.current.retryRelay());
+    await waitFor(() => expect(view.result.current.error?.message).toBe(STORAGE_ERROR));
+
+    expect(relayPosts()).toHaveLength(1);
+    expect(signTypedData).toHaveBeenCalledTimes(1);
+    expect(logger.info).toHaveBeenCalledWith(...unavailableLog('retry'));
+    // 保持を外す: 残すと hasActiveIntent が立ったままで、次の押下も同じ payload の再送になり、ほかの払い方へも進めない。
+    expect(view.result.current.hasActiveIntent).toBe(false);
+    expect(isFallbackSafeRelayError(view.result.current.error)).toBe(true);
+    expect(window.sessionStorage.getItem(RELAY_INTENT_STORAGE_KEY)).toBeNull();
+
+    // 書けるようになった後は、捨てた payload の再送ではなく新しい署名 (別の nonce) で払う。
+    broken.mockRestore();
+    act(() => view.result.current.mutate({ merchant: MERCHANT, value: VALUE }));
+    await waitFor(() => expect(view.result.current.data?.success).toBe(true));
+    expect(signTypedData).toHaveBeenCalledTimes(2);
+    expect(relayPosts()).toHaveLength(2);
+    const nonceOf = (call: unknown[]) => (JSON.parse((call[1] as RequestInit).body as string) as { nonce: string }).nonce;
+    expect(nonceOf(relayPosts()[1])).not.toBe(nonceOf(relayPosts()[0]));
+  });
+
+  it.each(['free', 'recover'] as const)('%s: 保存できる端末では今までどおり払える。枠は署名の後・POST の前に書き、署名の前には書かない (確かめのキーも残さない)', async (mode) => {
+    const view = await mountHook(mode);
+    const seen: { atSign?: (string | null)[]; atPost?: (string | null)[] } = {};
+    const snapshot = () => [
+      window.sessionStorage.getItem(RELAY_INTENT_STORAGE_KEY),
+      window.sessionStorage.getItem(RELAY_INTENT_PROBE_KEY),
+    ];
+    signTypedData.mockImplementation(async () => {
+      seen.atSign = snapshot();
+      return SIGNATURE;
+    });
+    fetchSpy.mockImplementation(async () => {
+      seen.atPost = snapshot();
+      return jsonResponse(200, { ok: true, txHash: `0x${'b'.repeat(64)}` });
+    });
+
+    act(() => view.result.current.mutate({ merchant: MERCHANT, value: VALUE }));
+    await waitFor(() => expect(view.result.current.data?.success).toBe(true));
+
+    // 署名を待つ間は枠が無い (署名を取りやめて開き直した画面を、送っていない支払いで塞がない)。
+    expect(seen.atSign).toEqual([null, null]);
+    expect(seen.atPost?.[1]).toBeNull();
+    const stored = JSON.parse(seen.atPost?.[0] as string) as RelayIntentMetadata;
+    expect(stored).toMatchObject({ chainId: jpycDep.chainId, from: CUSTOMER, merchant: MERCHANT, routeKind: mode });
+    if (mode === 'free') {
+      const body = JSON.parse((relayPosts()[0][1] as RequestInit).body as string) as { nonce: string };
+      expect(stored.nonce).toBe(body.nonce);
+    }
+    expect(signTypedData).toHaveBeenCalledTimes(1);
+    expect(relayPosts()).toHaveLength(1);
+    expect(logger.info).not.toHaveBeenCalledWith('payment.intent_storage_unavailable', expect.anything());
+  });
+
+  // 変わらないこと: 画面を離れた試みは今までどおり payment_cancelled で止まり、離れた後に storage へ触れない
+  // (署名の前の確かめは、画面にいる試みだけが行う)。
+  it('recover の部品の読み込みを待つ間に unmount した試みは、枠を書けない端末でも確かめのキーに触れず payment_cancelled で止まる', async () => {
+    setRoute('recover');
+    mount();
+    const qc = new QueryClient({ defaultOptions: { mutations: { retry: false }, queries: { retry: false } } });
+    const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={qc}>{children}</QueryClientProvider>;
+    let releaseChunk: () => void = () => undefined;
+    const chunkGate = new Promise<void>((resolve) => { releaseChunk = resolve; });
+    vi.doMock('@/lib/relay/forwarderIntent', async () => {
+      await chunkGate;
+      return vi.importActual<typeof import('@/lib/relay/forwarderIntent')>('@/lib/relay/forwarderIntent');
+    });
+    try {
+      const view = renderHook(() => useJpycEip3009Payment(jpycDep), { wrapper });
+      await waitFor(() => expect(view.result.current.isRestoring).toBe(false));
+      const writes = breakSetItem(relayKeys);
+      act(() => view.result.current.mutate({ merchant: MERCHANT, value: VALUE }));
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 10));
+      });
+      expect(view.result.current.isPending).toBe(true);
+      view.unmount();
+      await act(async () => {
+        releaseChunk();
+      });
+      await waitFor(() => expect(qc.getMutationCache().getAll()[0]?.state.status).toBe('error'));
+      expect(qc.getMutationCache().getAll()[0].state.error?.message).toBe('payment_cancelled');
+      expect(writes.mock.calls.filter(([key]) => relayKeys(key as string))).toHaveLength(0);
+      expect(signTypedData).not.toHaveBeenCalled();
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      vi.doUnmock('@/lib/relay/forwarderIntent');
+    }
+  });
+
+  // 変わらないこと: 束縛した注文は relay の枠を使わない (自分の slot・order_binding_storage_unavailable で止まる) ので、
+  // relay の枠を書けない端末でも今までどおり送る。
+  it('束縛した注文は relay の枠が書けなくても今までどおり署名して送る (この確かめの対象外)', async () => {
+    const { bindingFixture } = await import('../_helpers/orderBinding');
+    const f = bindingFixture('free', { chainId: jpycDep.chainId, tokenAddress: jpycDep.address, merchant: MERCHANT, handle: 'alice', orderId: 'bound-hr', items: [{ name: 'Tea', qty: 1, price: '300' }], statusToken: 's'.repeat(43) });
+    setRoute('free');
+    mount();
+    const view = renderHook(
+      () => useJpycEip3009Payment(jpycDep, { restoreOrderDelivery: true, orderContext: ORDER_CONTEXT }),
+      { wrapper: makeWrapper() },
+    );
+    await waitFor(() => expect(view.result.current.isRestoring).toBe(false));
+    breakSetItem(relayKeys);
+
+    act(() => view.result.current.mutate({ merchant: MERCHANT, value: VALUE, order: f.order }));
+    await waitFor(() => expect(view.result.current.data?.success).toBe(true));
+    expect(signTypedData).toHaveBeenCalledTimes(1);
+    expect(relayPosts()).toHaveLength(1);
+    expect(logger.info).not.toHaveBeenCalledWith('payment.intent_storage_unavailable', expect.anything());
+  });
+
+  // user 裁定 Q7-2: 埋め込み (iframe) の中のチップは、呼び出し側 (TipForm) が skipIntentStorageCheck を渡す。枠を書けなくても
+  // 今までどおり送る (受容台帳)。枠への書き込みは今までどおり試みる。渡さない呼び出しが止まることは上のテストが固定する。
+  async function mountSkippingHook(mode: 'free' | 'recover') {
+    setRoute(mode);
+    mount();
+    const view = renderHook(
+      () => useJpycEip3009Payment(jpycDep, { skipIntentStorageCheck: true }),
+      { wrapper: makeWrapper() },
+    );
+    await waitFor(() => expect(view.result.current.isRestoring).toBe(false));
+    return view;
+  }
+
+  it.each(['free', 'recover'] as const)('%s: skipIntentStorageCheck を渡すと、枠も確かめのキーも書けない端末でも今までどおり署名 1 回・POST 1 回で送る', async (mode) => {
+    const view = await mountSkippingHook(mode);
+    const writes = breakSetItem(relayKeys);
+
+    act(() => view.result.current.mutate({ merchant: MERCHANT, value: VALUE }));
+    await waitFor(() => expect(view.result.current.data?.success).toBe(true));
+
+    expect(signTypedData).toHaveBeenCalledTimes(1);
+    expect(relayPosts()).toHaveLength(1);
+    expect(logger.info).not.toHaveBeenCalledWith('payment.intent_storage_unavailable', expect.anything());
+    // 署名の前の確かめのキーには触れず、枠への書き込みは今までどおり試みる (書けないまま送る)。
+    const keys = writes.mock.calls.map(([key]) => key);
+    expect(keys).not.toContain(RELAY_INTENT_PROBE_KEY);
+    expect(keys).toContain(RELAY_INTENT_STORAGE_KEY);
+  });
+
+  it('skipIntentStorageCheck を渡すと、IP 制限 (429) で保持した payload は、枠を書けなくなっていても今までどおり同じ payload で再送する', async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse(429, { ok: false, error: 'ip_rate_limited' }));
+    const view = await mountSkippingHook('free');
+    act(() => view.result.current.mutate({ merchant: MERCHANT, value: VALUE }));
+    await waitFor(() => expect(isRelayIpRateLimitedError(view.result.current.error)).toBe(true));
+    expect(relayPosts()).toHaveLength(1);
+
+    breakSetItem(slotOnly);
+    act(() => view.result.current.retryRelay());
+    await waitFor(() => expect(view.result.current.data?.success).toBe(true));
+
+    expect(relayPosts()).toHaveLength(2);
+    expect((relayPosts()[1][1] as RequestInit).body).toBe((relayPosts()[0][1] as RequestInit).body);
+    expect(signTypedData).toHaveBeenCalledTimes(1);
+    expect(logger.info).not.toHaveBeenCalledWith('payment.intent_storage_unavailable', expect.anything());
+  });
+
+  // Codex の再現 (SHOULD): 枠を書けたが読み戻しが投げた回は POST しないが、この試みの記録 (まだ送っていない) が枠に残ると、
+  // 読めるようになった後に開き直した画面が「送信済みかもしれない」として、署名の期限が証明されるまで支払いを塞いでいた。
+  // 書き込みの後の最初の読み戻しだけを投げさせる (書く前の読みと署名の前の確かめは通る)。
+  function failSlotReadBackOnce() {
+    const realSet = Storage.prototype.setItem;
+    const realGet = Storage.prototype.getItem;
+    let wroteSlot = false;
+    spies.push(vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key: string, value: string) {
+      if (key === RELAY_INTENT_STORAGE_KEY) wroteSlot = true;
+      realSet.call(this, key, value);
+    }));
+    spies.push(vi.spyOn(Storage.prototype, 'getItem').mockImplementation(function (this: Storage, key: string) {
+      if (key === RELAY_INTENT_STORAGE_KEY && wroteSlot) {
+        wroteSlot = false;
+        throw new DOMException('Access is denied for this document.', 'SecurityError');
+      }
+      return realGet.call(this, key);
+    }));
+  }
+  async function reopenAfterStorageRecovers(view: { unmount: () => void }) {
+    for (const spy of spies.splice(0)) spy.mockRestore();
+    view.unmount();
+    const reopened = renderHook(() => useJpycEip3009Payment(jpycDep), { wrapper: makeWrapper() });
+    await waitFor(() => expect(reopened.result.current.isRestoring).toBe(false));
+    return reopened;
+  }
+
+  it('初回: 書けたが読み戻しが投げた → POST せず、この試みの記録を片づける (読めるようになって開き直しても塞がない)', async () => {
+    const view = await mountHook('free');
+    failSlotReadBackOnce();
+    act(() => view.result.current.mutate({ merchant: MERCHANT, value: VALUE }));
+    await waitFor(() => expect(view.result.current.error?.message).toBe(STORAGE_ERROR));
+    expect(signTypedData).toHaveBeenCalledTimes(1);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(logger.info).toHaveBeenCalledWith(...unavailableLog('save'));
+
+    const reopened = await reopenAfterStorageRecovers(view);
+    expect(window.sessionStorage.getItem(RELAY_INTENT_STORAGE_KEY)).toBeNull();
+    expect(reopened.result.current.hasActiveIntent).toBe(false);
+    expect(reopened.result.current.restoredIntent ?? null).toBeNull();
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('IP 制限 (429) の後の再送: 書けたが読み戻しが投げた → 再送せず、この試みの記録を片づける (開き直しても塞がない)', async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse(429, { ok: false, error: 'ip_rate_limited' }));
+    const view = await mountHook('free');
+    act(() => view.result.current.mutate({ merchant: MERCHANT, value: VALUE }));
+    await waitFor(() => expect(isRelayIpRateLimitedError(view.result.current.error)).toBe(true));
+    expect(relayPosts()).toHaveLength(1);
+
+    failSlotReadBackOnce();
+    act(() => view.result.current.retryRelay());
+    await waitFor(() => expect(view.result.current.error?.message).toBe(STORAGE_ERROR));
+    expect(relayPosts()).toHaveLength(1);
+    expect(logger.info).toHaveBeenCalledWith(...unavailableLog('retry'));
+
+    const reopened = await reopenAfterStorageRecovers(view);
+    expect(window.sessionStorage.getItem(RELAY_INTENT_STORAGE_KEY)).toBeNull();
+    expect(reopened.result.current.hasActiveIntent).toBe(false);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  // Codex の再現 (MUST): 束縛した注文は relay の枠を使わず自分の slot (lib/orderDelivery) に保存するが、saveOrderDelivery は
+  // setItem が投げなければ true を返すので、書き込みを黙って捨てる storage では slot なしで送れていた (開き直して同じ注文を
+  // もう一度押すと、署名 2 回・別の authorization で POST 2 回・保存 0 = 両方成立しうる)。送る前に slot を読み戻して止める。
+  async function boundOrder(mode: 'free' | 'recover', orderId: string) {
+    const { bindingFixture } = await import('../_helpers/orderBinding');
+    return bindingFixture(mode, { chainId: jpycDep.chainId, tokenAddress: jpycDep.address, merchant: MERCHANT, handle: 'alice', orderId, items: [{ name: 'Tea', qty: 1, price: '300' }], statusToken: 's'.repeat(43) });
+  }
+  const renderBound = () => renderHook(
+    () => useJpycEip3009Payment(jpycDep, { restoreOrderDelivery: true, orderContext: ORDER_CONTEXT }),
+    { wrapper: makeWrapper() },
+  );
+
+  it.each(['free', 'recover'] as const)('%s: 束縛した注文の slot への書き込みを黙って捨てる端末 → 送る前に止める。開き直して同じ注文をもう一度押しても送らない', async (mode) => {
+    const { ORDER_DELIVERY_KEY } = await import('@/lib/orderDelivery');
+    const { latestOrderDelivery } = await import('../_helpers/orderDeliveryView');
+    const f = await boundOrder(mode, `bound-drop-${mode}`);
+    setRoute(mode);
+    mount();
+    const first = renderBound();
+    await waitFor(() => expect(first.result.current.isRestoring).toBe(false));
+    breakSetItem((key) => key.startsWith(ORDER_DELIVERY_KEY), 'drop');
+
+    act(() => first.result.current.mutate({ merchant: MERCHANT, value: VALUE, order: f.order }));
+    await waitFor(() => expect(first.result.current.error?.message).toBe('order_binding_storage_unavailable'));
+    expect(signTypedData).toHaveBeenCalledTimes(1);
+    expect(relayPosts()).toHaveLength(0);
+    first.unmount();
+
+    const second = renderBound();
+    await waitFor(() => expect(second.result.current.isRestoring).toBe(false));
+    act(() => second.result.current.mutate({ merchant: MERCHANT, value: VALUE, order: f.order }));
+    await waitFor(() => expect(second.result.current.error?.message).toBe('order_binding_storage_unavailable'));
+    expect(signTypedData).toHaveBeenCalledTimes(2);
+    expect(relayPosts()).toHaveLength(0);
+    expect(latestOrderDelivery()).toEqual({ kind: 'empty' });
+  });
+
+  it('束縛した注文: IP 制限 (429) の後の再送の前にも slot を読み戻す。書き込みを黙って捨てるようになっていたら再送しない', async () => {
+    const { ORDER_DELIVERY_KEY } = await import('@/lib/orderDelivery');
+    const f = await boundOrder('free', 'bound-drop-retry');
+    setRoute('free');
+    mount();
+    fetchSpy.mockResolvedValueOnce(jsonResponse(429, { ok: false, error: 'ip_rate_limited' }));
+    const view = renderBound();
+    await waitFor(() => expect(view.result.current.isRestoring).toBe(false));
+    act(() => view.result.current.mutate({ merchant: MERCHANT, value: VALUE, order: f.order }));
+    await waitFor(() => expect(isRelayIpRateLimitedError(view.result.current.error)).toBe(true));
+    expect(relayPosts()).toHaveLength(1);
+
+    breakSetItem((key) => key.startsWith(ORDER_DELIVERY_KEY), 'drop');
+    act(() => view.result.current.retryRelay());
+    await waitFor(() => expect(view.result.current.error?.message).toBe('order_binding_storage_unavailable'));
+    expect(relayPosts()).toHaveLength(1);
+    expect(signTypedData).toHaveBeenCalledTimes(1);
+    // 送っていない (429 だけを受けた) payload の保持は外す: 次の押下は新しい署名から。
+    expect(view.result.current.hasActiveIntent).toBe(false);
+  });
+
+  // Codex の再確認の再現 (MUST): 束縛した注文の 429 の後、同じ chain の checkout の文脈を読み直す (A → B → A) と、復元の
+  // effect が orderDelivery を null に戻し、署名済みの payload だけが残っていた。今までは再送が記録の確かめを通らずに、記録なしで
+  // POST した。その応答を待つ間に開き直して同じ注文をもう一度押すと、別の署名をもう 1 本送れた (実行できる authorization が
+  // 2 本・1 本目には復旧の記録が無い)。storage は正常。/checkout の払い方 (gasMode: merchant = 合計がそのまま value) で通す。
+  const CONTEXT_A = { ...ORDER_CONTEXT, totalValue: VALUE };
+  const CONTEXT_B = { ...CONTEXT_A, orderId: 'another-order' };
+  function renderBoundIn(context: typeof CONTEXT_A) {
+    return renderHook(
+      ({ ctx }) => useJpycEip3009Payment(jpycDep, { restoreOrderDelivery: true, orderContext: ctx }),
+      { initialProps: { ctx: context }, wrapper: makeWrapper() },
+    );
+  }
+  async function signedThen429(mode: 'free' | 'recover', orderId: string) {
+    const { latestOrderDelivery } = await import('../_helpers/orderDeliveryView');
+    const f = await boundOrder(mode, orderId);
+    setRoute(mode);
+    mount();
+    const atRelayPost: string[] = [];
+    fetchSpy.mockImplementation(async (url: string) => {
+      if (url !== '/api/relay/jpyc') return jsonResponse(200, { ok: true, state: 'indeterminate' });
+      atRelayPost.push(latestOrderDelivery().kind);
+      // 1 本目は IP 制限で拒否 (relay は body を処理していない)。再送の応答は返さない (未解決のまま開き直す)。
+      return atRelayPost.length === 1 ? jsonResponse(429, { ok: false, error: 'ip_rate_limited' }) : new Promise<Response>(() => undefined);
+    });
+    const view = renderBoundIn(CONTEXT_A);
+    await waitFor(() => expect(view.result.current.isRestoring).toBe(false));
+    act(() => view.result.current.mutate({ merchant: MERCHANT, value: VALUE, gasMode: 'merchant', order: f.order }));
+    await waitFor(() => expect(isRelayIpRateLimitedError(view.result.current.error)).toBe(true));
+    expect(view.result.current.hasActiveIntent).toBe(true);
+    // 429 は送っていない証明なので、slot は外れている (今までどおり)。
+    expect(latestOrderDelivery()).toEqual({ kind: 'empty' });
+    return { f, view, atRelayPost };
+  }
+
+  it.each(['free', 'recover'] as const)('%s: 429 の後に文脈を A → B → A と読み直しても、再送は束縛の記録を書いて読み戻してから送る。応答を待つ間に開き直して同じ注文を押しても、新しい署名を送らない', async (mode) => {
+    const { f, view, atRelayPost } = await signedThen429(mode, `bound-ctx-${mode}`);
+    // 文脈が変わると復元の effect が読み直す (読み終えるまでの押下は積まれるだけなので、読み終えるのを待つ)。
+    view.rerender({ ctx: CONTEXT_B });
+    await waitFor(() => expect(view.result.current.isRestoring).toBe(false));
+    expect(view.result.current.orderDelivery).toBeNull();
+    view.rerender({ ctx: CONTEXT_A });
+    await waitFor(() => expect(view.result.current.isRestoring).toBe(false));
+    expect(view.result.current.orderDelivery).toBeNull();
+    expect(view.result.current.hasActiveIntent).toBe(true);
+
+    act(() => view.result.current.retryRelay());
+    await waitFor(() => expect(relayPosts()).toHaveLength(2));
+    // 再送の瞬間には、この注文の記録が slot にある (読み直した画面がこの支払いを知る)。
+    expect(atRelayPost).toEqual(['ready', 'ready']);
+    expect((relayPosts()[1][1] as RequestInit).body).toBe((relayPosts()[0][1] as RequestInit).body);
+    expect(view.result.current.orderDelivery?.order).toEqual(f.order);
+    view.unmount();
+
+    // 再送の応答を待つ間に開き直し、同じ注文をもう一度押す。
+    const reopened = renderBoundIn(CONTEXT_A);
+    await waitFor(() => expect(reopened.result.current.isRestoring).toBe(false));
+    expect(reopened.result.current.hasActiveIntent).toBe(true);
+    act(() => reopened.result.current.mutate({ merchant: MERCHANT, value: VALUE, gasMode: 'merchant', order: f.order }));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 100));
+    });
+    expect(signTypedData).toHaveBeenCalledTimes(1);
+    expect(relayPosts()).toHaveLength(2);
+    reopened.unmount();
+  });
+
+  it.each(['free', 'recover'] as const)('%s: 429 の後に別の注文の文脈 (B) に変わった画面では、前の注文 (A) の payload を送らない (再送でも支払いの押下でも)。保持は外し、B は新しい署名から', async (mode) => {
+    const { view } = await signedThen429(mode, `bound-other-${mode}`);
+    const firstBody = (relayPosts()[0][1] as RequestInit).body;
+    view.rerender({ ctx: CONTEXT_B });
+    await waitFor(() => expect(view.result.current.isRestoring).toBe(false));
+    expect(view.result.current.orderDelivery).toBeNull();
+    expect(view.result.current.hasActiveIntent).toBe(true);
+
+    act(() => view.result.current.retryRelay());
+    await waitFor(() => expect(view.result.current.error?.message).toBe('order_binding_mismatch'));
+    expect(relayPosts()).toHaveLength(1);
+    expect(view.result.current.hasActiveIntent).toBe(false);
+
+    // B の注文を押すと、A の payload ではなく B の新しい署名で送る。
+    const other = await boundOrder(mode, 'another-order');
+    act(() => view.result.current.mutate({ merchant: MERCHANT, value: VALUE, gasMode: 'merchant', order: other.order }));
+    await waitFor(() => expect(relayPosts()).toHaveLength(2));
+    expect(signTypedData).toHaveBeenCalledTimes(2);
+    expect((relayPosts()[1][1] as RequestInit).body).not.toBe(firstBody);
+    view.unmount();
+  });
+
+  it('文脈が同じまま (A → A) なら、429 の後の再送は今までどおり同じ payload を送る (記録は送る前に読み戻す)', async () => {
+    const { view, atRelayPost } = await signedThen429('free', 'bound-same');
+    view.rerender({ ctx: { ...CONTEXT_A } });
+    act(() => view.result.current.retryRelay());
+    await waitFor(() => expect(relayPosts()).toHaveLength(2));
+    expect(atRelayPost).toEqual(['ready', 'ready']);
+    expect((relayPosts()[1][1] as RequestInit).body).toBe((relayPosts()[0][1] as RequestInit).body);
+    expect(signTypedData).toHaveBeenCalledTimes(1);
+    view.unmount();
   });
 });

@@ -130,6 +130,38 @@ export function saveOrderDelivery(record: OrderDelivery): boolean {
     return false;
   }
 }
+// 束縛した注文を送る前 (初回の POST・IP 制限の後の再送) の保存 (第 10 回レビュー H-R)。saveOrderDelivery は setItem が投げなければ
+// true を返すので、書き込みを黙って捨てる storage では slot が残らないまま送り、応答を待つ間に読み直した画面が未解決の注文を
+// 知らずに別の authorization で払い直せる (両方成立する = 二重払い)。書いて読み戻し、この authorization の同じ state の記録が
+// 残っているときだけ true。ほかの呼び出し (確定後の notify-pending・terminal への更新) は、ディスクの更新に失敗しても memory の
+// 開きを残す設計なので、今までどおり saveOrderDelivery を使う (その戻り値の意味も変えない)。
+export function saveOrderDeliveryVerified(record: OrderDelivery): boolean {
+  // saveOrderDelivery が true を返すのは、書く前の slot が空か、この authorization の記録だったときだけ (違う authorization が
+  // あれば書かずに false)。だから下で slot を消しても、消えるのはこの試みの記録 (まだ送っていない) だけ。
+  if (!saveOrderDelivery(record)) return false;
+  const key = orderDeliveryKey(record);
+  try {
+    const raw = window.sessionStorage.getItem(key);
+    const stored = raw === null ? null : parseRecord(JSON.parse(raw));
+    if (stored && stored.state === record.state && sameOrderAuthorization(stored, record.intent)) return true;
+  } catch {
+    // 読み戻せない端末は false (握りつぶさない: 呼出側が送らずに order_binding_storage_unavailable で止める)。
+  }
+  // 何の波及を断つか: 書けたが読み戻せなかった記録 (送っていない注文) が slot に残り、読めるようになった後に開き直した画面が
+  // 「送信済みかもしれない」として、期限が証明されるまで同じお店への支払いを塞ぐこと。消せない端末では残る (期限が証明される
+  // までの塞ぎで、二重払いではない = fail-closed)。消す処理の失敗は握り、呼出側の止めは変えない。
+  // 前提: 呼出側が「この authorization はまだ送っていない」ことを保証している。消してよいのは自分の記録だという根拠 (上) だけ
+  // では、送っていない根拠にならない。今の呼出側は hooks/useJpycEip3009Payment の 2 か所だけ: 初回の POST の前と、IP 制限
+  // (429: relay が body を処理する前の拒否・app/api/relay/jpyc/route.ts の relay-admission) の後の再送の前。再送できる payload を
+  // 保持するのは 429 の経路だけで、応答不明・pending・復元した記録は、保存し直す前に復旧 (status の照会) の分岐へ進む。
+  // 送ったかもしれない authorization でこの関数を呼ぶ経路を足すと、送った注文の記録を消しうる。
+  try {
+    window.sessionStorage.removeItem(key);
+  } catch {
+    // 上のとおり、消せない記録は期限が証明されるまで残る。
+  }
+  return false;
+}
 export function acknowledgeOrderDelivery(record: OrderDelivery): boolean {
   try {
     for (const key of [ORDER_DELIVERY_KEY, orderDeliveryKey(record)]) {

@@ -2743,6 +2743,28 @@ describe('PaymentForm — relay 失敗時の通常決済フォールバック (B
     },
   );
 
+  // 第 10 回レビュー H-R・user 裁定 Q7-1: 復旧の枠を書けない端末で hook が送らずに止めた (intent_storage_unavailable)。
+  // 通常決済も同じ保存に頼っていて同じ穴があるので、切り替えの banner / ボタンは出さず、汎用の赤いエラー枠に専用の文言を出す
+  // (時間をおいても直らないので generic の「時間をおいて再度」も出さない)。ほかの relay の error の切り替えは上の it.each が固定する。
+  it('relay error (intent_storage_unavailable): 通常決済への切り替えの banner / ボタンを出さず、専用の文言を赤いエラー枠に出す', () => {
+    setupRelayError('intent_storage_unavailable');
+    render(<PaymentForm />);
+
+    const message = screen.getByText('この端末では支払い記録を保存できないため、ガスレス決済は使えません (JPYC は動いていません)。ブラウザの設定 (サイトのデータの保存) を確かめるか、別のブラウザでお試しください。');
+    // 汎用の error の枠 (見出しの errorTitle つき) に 1 度だけ出る。
+    expect(message.closest('.bg-red-50')).not.toBeNull();
+    expect(screen.getByText('エラー')).toBeInTheDocument();
+    expect(screen.getAllByText(/この端末では支払い記録を保存できないため/)).toHaveLength(1);
+    expect(message.textContent).not.toMatch(/通常/);
+    // 切り替えの banner (題と切り替えのボタン) は出さない。
+    expect(screen.queryByText(/ガスレス決済が一時的に利用できません/)).toBeNull();
+    expect(
+      screen.queryByRole('button', { name: /通常支払い（自分でガスを払う）に切り替える/ }),
+    ).toBeNull();
+    expect(screen.queryByText('intent_storage_unavailable')).toBeNull();
+    expect(screen.queryByText(/完了できませんでした/)).toBeNull();
+  });
+
   it('response-unknown → standard fallback 非表示・再署名封鎖・中間表示', async () => {
     const user = userEvent.setup();
     setupRelayError();

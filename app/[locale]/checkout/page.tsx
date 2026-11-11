@@ -8,6 +8,7 @@ import { CheckoutForm } from '@/components/CheckoutForm';
 import { CheckoutChainPicker } from '@/components/checkout/CheckoutChainPicker';
 import { StoreDeviceCheckoutForm } from '@/components/StoreDeviceCheckoutForm';
 import { LocaleSwitcher } from '@/components/LocaleSwitcher';
+import { checkoutFormKey } from '@/lib/checkoutFormKey';
 import { env } from '@/lib/env';
 import {
   parseCheckoutParams,
@@ -72,8 +73,12 @@ export default async function CheckoutPage({
           // 受け付けるチェーンが複数で、まだ選んでいない: 払う前にチェーンを選ぶ (plans/order-link-multichain.md)。
           <CheckoutChainPicker params={parsed.params} />
         ) : (
-          // チェーンごとに作り直す (別のチェーンへ戻ったとき、前のチェーンの支払いの状態を持ち越さない)。
-          <CheckoutForm key={parsed.params.chain} params={parsed.params} />
+          // 注文 (chain を含む URL から parse した中身全体) ごとに作り直す。別のチェーン・別の注文へ移ったとき、前の支払いの
+          // memory の状態 (保持した署名・署名の途中の試み・完了の画面) を持ち越さない (lib/checkoutFormKey.ts・第 10 回レビュー H-R)。
+          // 作り直した画面は、読み直したときと同じく storage の復旧の記録を読む。タブに 1 つの記録 (束縛しない relay の枠・
+          // 通常決済の印) や、品目だけが違う注文の記録を復元して確定すると、前の支払いの完了が今の注文の完了の欄に出る
+          // 道は残る (この key の前からある・別のページから来たときも同じ・H-S として別に直す)。
+          <CheckoutForm key={checkoutFormKey(parsed.params)} params={parsed.params} />
         )
       ) : (
         <div className="rounded-2xl border border-red-200 bg-red-50 p-5 text-sm text-red-700">

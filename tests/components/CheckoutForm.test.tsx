@@ -126,7 +126,8 @@ vi.mock('@/lib/env', async (importOriginal) => {
   };
 });
 
-import { useAccount, useReadContract, useSwitchChain } from 'wagmi';
+import { useAccount, usePublicClient, useReadContract, useSwitchChain, useWalletClient } from 'wagmi';
+import { checkoutFormKey } from '@/lib/checkoutFormKey';
 import { useSmartAccount } from '@/hooks/useSmartAccount';
 import { useBatchPayment } from '@/hooks/useBatchPayment';
 import { useStandardPayment } from '@/hooks/useStandardPayment';
@@ -2488,6 +2489,67 @@ describe('CheckoutForm — JPYC EIP-3009 relay 経路', () => {
       ).toBeInTheDocument();
     },
   );
+
+  // 第 10 回レビュー H-R・user 裁定 Q7-1: 復旧の枠を書けない端末で hook が送らずに止めた (intent_storage_unavailable)。
+  // 通常決済も同じ保存に頼っていて同じ穴があるので、切り替えの banner / ボタンは出さず、汎用の赤いエラー枠に専用の文言を出す
+  // (時間をおいても直らないので generic の「時間をおいて再度」も出さない)。ほかの relay の error の切り替えは上の it.each が固定する。
+  it('relay error (intent_storage_unavailable): 通常決済への切り替えの banner / ボタンを出さず、専用の文言を赤いエラー枠に出す', () => {
+    setupRelayReady();
+    setRelayPayment('error', { errMsg: 'intent_storage_unavailable' });
+    render(<CheckoutForm params={JPYC_PARAMS} />);
+
+    const message = screen.getByText('この端末では支払い記録を保存できないため、ガスレス決済は使えません (JPYC は動いていません)。ブラウザの設定 (サイトのデータの保存) を確かめるか、別のブラウザでお試しください。');
+    // 汎用の error の枠 (見出しの errorTitle つき) に 1 度だけ出る。束縛した注文の案内 (orderBindingStorageUnavailable) は別の code。
+    expect(message.closest('.bg-red-50')).not.toBeNull();
+    expect(screen.getByText('エラー')).toBeInTheDocument();
+    expect(screen.getAllByText(/この端末では支払い記録を保存できないため/)).toHaveLength(1);
+    expect(screen.queryByText(/注文の復元情報をこのブラウザに保存できない/)).toBeNull();
+    expect(message.textContent).not.toMatch(/通常/);
+    // 切り替えの banner (題と切り替えのボタン) は出さない。
+    expect(screen.queryByText(/ガスレス決済が一時的に利用できません/)).toBeNull();
+    expect(
+      screen.queryByRole('button', { name: /通常支払い（自分でガスを払う）に切り替える/ }),
+    ).toBeNull();
+    expect(screen.queryByText('intent_storage_unavailable')).toBeNull();
+    expect(screen.queryByText(/完了できませんでした/)).toBeNull();
+  });
+
+  // 第 10 回レビュー H-R・user 裁定 Q8 = A: 束縛した注文の slot を保存できない端末で hook が送らずに止めた
+  // (order_binding_storage_unavailable)。Q7-1 と同じ理由で通常決済へ案内しない: 切り替えの banner / ボタンも、汎用の文
+  // (「通常モードをご利用ください」を含む) も出さず、専用の黄色の枠だけを出す (文言は今までのまま)。
+  it('relay error (order_binding_storage_unavailable): 通常決済への切り替えの banner / ボタンも汎用の文も出さず、黄色の枠だけを出す', () => {
+    setupRelayReady();
+    setRelayPayment('error', { errMsg: 'order_binding_storage_unavailable' });
+    render(<CheckoutForm params={JPYC_PARAMS} />);
+
+    const notice = screen.getByText('注文の復元情報をこのブラウザに保存できないため、支払いを開始できません。ブラウザの保存設定を確認してください。');
+    expect(notice.closest('.bg-amber-50')).not.toBeNull();
+    expect(screen.getAllByText(/注文の復元情報をこのブラウザに保存できない/)).toHaveLength(1);
+    // 切り替えの banner (題と切り替えのボタン) は出さない。
+    expect(screen.queryByText(/ガスレス決済が一時的に利用できません/)).toBeNull();
+    expect(
+      screen.queryByRole('button', { name: /通常支払い（自分でガスを払う）に切り替える/ }),
+    ).toBeNull();
+    // 汎用の赤い枠 (見出し「エラー」・「…通常モードをご利用ください」) も出さない。
+    expect(screen.queryByText('エラー')).toBeNull();
+    expect(screen.queryByText(/完了できませんでした/)).toBeNull();
+    expect(screen.queryByText(/通常モード/)).toBeNull();
+    expect(screen.queryByText('order_binding_storage_unavailable')).toBeNull();
+  });
+
+  // 文脈が変わって止めた error (order_binding_mismatch) は保存できない端末の話ではない (次の押下は新しい署名から払える) ので、
+  // 今までどおり切り替えの banner を出す (Q8 の対象の外)。
+  it('relay error (order_binding_mismatch): 今までどおり切り替えの banner を出す', () => {
+    setupRelayReady();
+    setRelayPayment('error', { errMsg: 'order_binding_mismatch' });
+    render(<CheckoutForm params={JPYC_PARAMS} />);
+
+    expect(screen.getByText(/ガスレス決済が一時的に利用できません/)).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /通常支払い（自分でガスを払う）に切り替える/ }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/注文の復元情報をこのブラウザに保存できない/)).toBeNull();
+  });
 
   it('response-unknown → standard fallback 非表示・Pay 封鎖・中間表示', async () => {
     const user = userEvent.setup();
@@ -5122,5 +5184,94 @@ describe('CheckoutForm — 履歴と控えの支払者は送信した時点の�
         payer: SIGNER,
       }),
     );
+  });
+});
+
+// 第 10 回レビュー H-R (Codex 第 3 回の 2 つの MUST): 同じ chain の checkout で、同じタブのまま別の注文の URL へ移ると、
+// 前の注文の支払いの状態が次の注文の画面に残っていた (page の key が chain だけ)。/checkout の page と同じ key
+// (lib/checkoutFormKey) で描き、注文が変われば作り直すことで、A の payload を B で送らない・A の成功を B に出さない。
+// 実物の relay hook で通し、差し替えるのは wagmi の署名・fetch (境界) だけ。
+describe('CheckoutForm — 同じタブで別の注文へ移ると、前の注文の支払いの状態を持ち越さない (page の key)', () => {
+  const ORDER: CheckoutParams = { ...JPYC_PARAMS, webhook: `${location.origin}/api/order/notify?h=alice` };
+  const keyed = (params: CheckoutParams, client: QueryClient) => (
+    <QueryClientProvider client={client}>
+      <CheckoutForm key={checkoutFormKey(params)} params={params} />
+    </QueryClientProvider>
+  );
+  const relayPosts = (spy: { mock: { calls: unknown[][] } }) =>
+    spy.mock.calls.filter(([url]) => String(url) === '/api/relay/jpyc');
+  async function setup(signImpl: () => Promise<Hex>) {
+    vi.mocked(resolveJpycGaslessProvider).mockReturnValue('eip3009-relay');
+    setAccount({ connected: true, chainId: polygonAmoy.id });
+    setBalance(10_000n * 10n ** 18n);
+    const { useJpycEip3009Payment: actualHook } = await vi.importActual<typeof import('@/hooks/useJpycEip3009Payment')>('@/hooks/useJpycEip3009Payment');
+    vi.mocked(useJpycEip3009Payment).mockImplementation(actualHook);
+    const signTypedData = vi.fn(signImpl);
+    mockHook(useWalletClient, { data: { signTypedData } } as never);
+    mockHook(usePublicClient, { waitForTransactionReceipt: vi.fn(async () => ({ status: 'success' })) } as never);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    return { signTypedData, client };
+  }
+  afterEach(() => { vi.restoreAllMocks(); });
+
+  it('注文番号の無い 2 つのカート (Tea → Coffee・同じお店・同じ合計): A の 429 の後に B へ移っても、A の payload を B の画面で送らない', async () => {
+    const user = userEvent.setup();
+    const { signTypedData, client } = await setup(async () => `0x${'a'.repeat(130)}` as Hex);
+    let relayCount = 0;
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      if (String(input) !== '/api/relay/jpyc') return Response.json({ ok: true });
+      relayCount += 1;
+      return relayCount === 1
+        ? Response.json({ error: 'ip_rate_limited' }, { status: 429 })
+        : Response.json({ ok: true, txHash: `0x${'b'.repeat(64)}` });
+    });
+    const A: CheckoutParams = { ...ORDER, items: [{ name: 'Tea', qty: 1, price: '3000' }] };
+    const B: CheckoutParams = { ...ORDER, items: [{ name: 'Coffee', qty: 1, price: '3000' }] };
+    const page = render(keyed(A, client));
+    await waitFor(() => expect(screen.getByRole('button', { name: /を支払う/ })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: /を支払う/ }));
+    await waitFor(() => expect(screen.getByRole('button', { name: /同じ内容で再試行/ })).toBeInTheDocument());
+    expect(relayPosts(fetchSpy)).toHaveLength(1);
+    const aBody = (relayPosts(fetchSpy)[0][1] as RequestInit).body;
+
+    page.rerender(keyed(B, client));
+    // 作り直した B の画面には、A の保持した署名の再送の入口が無い (同じ mount のままだと、ここで押すと A の payload を送る)。
+    expect(screen.queryByRole('button', { name: /同じ内容で再試行/ })).toBeNull();
+    await waitFor(() => expect(screen.getByRole('button', { name: /を支払う/ })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: /を支払う/ }));
+    await waitFor(() => expect(relayPosts(fetchSpy)).toHaveLength(2));
+    // B は B の新しい署名で送る (A の payload ではない)。
+    expect(signTypedData).toHaveBeenCalledTimes(2);
+    expect((relayPosts(fetchSpy)[1][1] as RequestInit).body).not.toBe(aBody);
+    expect(screen.getAllByText('Coffee').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Tea')).toBeNull();
+    page.unmount(); client.clear();
+  });
+
+  it('署名の途中で別の注文 (B・別のお店・別の注文番号) へ移った後に A の署名を承認しても、A を送らず、B の画面に A の成功を出さない', async () => {
+    let approve: (signature: Hex) => void = () => undefined;
+    const { signTypedData, client } = await setup(() => new Promise<Hex>((resolve) => { approve = resolve; }));
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) =>
+      String(input) === '/api/relay/jpyc'
+        ? Response.json({ ok: true, txHash: `0x${'b'.repeat(64)}` })
+        : Response.json({ ok: true }));
+    const A: CheckoutParams = { ...ORDER, orderId: 'order-a', items: [{ name: 'Tea', qty: 1, price: '3000' }] };
+    const B: CheckoutParams = { ...ORDER, orderId: 'order-b', to: '0x9999999999999999999999999999999999999999' as Address, items: [{ name: 'Coffee', qty: 1, price: '3000' }] };
+    const page = render(keyed(A, client));
+    await waitFor(() => expect(screen.getByRole('button', { name: /を支払う/ })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: /を支払う/ }));
+    await waitFor(() => expect(signTypedData).toHaveBeenCalledTimes(1));
+
+    page.rerender(keyed(B, client));
+    // B へ移った後で A の署名を承認する (同じ mount のままだと、A を保存して POST し、B の画面に成功を出す)。
+    await act(async () => { approve(`0x${'a'.repeat(130)}` as Hex); });
+    await act(async () => { await new Promise((r) => setTimeout(r, 50)); });
+
+    expect(relayPosts(fetchSpy)).toHaveLength(0);
+    expect(screen.queryByText(/お支払いが完了しました/)).toBeNull();
+    expect(latestOrderDelivery()).toEqual({ kind: 'empty' });
+    expect(screen.getByText(/受付番号 #order-b/)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('button', { name: /を支払う/ })).toBeEnabled());
+    page.unmount(); client.clear();
   });
 });
