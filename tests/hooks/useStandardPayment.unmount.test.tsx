@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { useEffect, type ReactNode } from 'react';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -22,6 +22,7 @@ import {
   STANDARD_INTENT_STORAGE_KEY,
   loadStandardIntent,
 } from '@/lib/paymentIntentStorage';
+import { standardWalletRequestElsewhere } from '@/lib/standardPaymentOutstanding';
 
 // H-D (第 10 回レビュー): ウォレットの確認が出ている間に画面を離れてから承認された送金の、復旧の印。
 //
@@ -113,10 +114,12 @@ const FEE_CALLDATA = encodeFunctionData({
   args: [FEE_RECEIVER, PARAMS.feeAmount],
 });
 
-// ウォレットに届いた送金の要求 (eth_sendTransaction)。承認 = approve(hash) を呼ぶまで止まる。
+// ウォレットに届いた送金の要求 (eth_sendTransaction)。承認 = approve(hash)・拒否 = reject() を呼ぶまで止まる。
 type WalletSend = {
   tx: { to?: string; data?: string; from?: string };
   approve: (hash: Hex) => void;
+  reject: () => void;
+  settled: boolean;
 };
 let walletSends: WalletSend[] = [];
 
@@ -129,14 +132,40 @@ function walletRequest({
 }): Promise<unknown> {
   if (method === 'eth_chainId') return Promise.resolve(numberToHex(CHAIN_ID));
   if (method === 'eth_sendTransaction') {
-    return new Promise<Hex>((resolve) => {
-      walletSends.push({
+    return new Promise<Hex>((resolve, reject) => {
+      const send: WalletSend = {
         tx: (params as WalletSend['tx'][])[0],
-        approve: resolve,
-      });
+        approve: (hash) => {
+          send.settled = true;
+          resolve(hash);
+        },
+        // EIP-1193 のユーザーの拒否 (code 4001)。
+        reject: () => {
+          send.settled = true;
+          reject(Object.assign(new Error('User rejected the request.'), { code: 4001 }));
+        },
+        settled: false,
+      };
+      walletSends.push(send);
     });
   }
   return Promise.reject(new Error(`unexpected wallet method: ${method}`));
+}
+
+// 登録簿 (lib/standardPaymentOutstanding) を、どの hook でもない持ち主から見る = 出したままの要求があるか。
+const NO_HOOK = {};
+const outstandingRequest = () => standardWalletRequestElsewhere(NO_HOOK);
+
+// 送信した時刻 (mutate の時刻) を固定する。承認・利用料の送信はこれと違う時刻に起こし、印の issuedAt が送信した時刻の
+// ままかを確かめる。
+const SUBMITTED_AT = 1_700_000_000_000;
+function atTime<T>(at: number, run: () => T): T {
+  const clock = vi.spyOn(Date, 'now').mockReturnValue(at);
+  try {
+    return run();
+  } finally {
+    clock.mockRestore();
+  }
 }
 
 const testWallet = createConnector<{ request: typeof walletRequest }>(() => ({
@@ -240,15 +269,30 @@ beforeEach(() => {
   });
 });
 
+// 登録簿は module の範囲 (この file の test で共有) なので、test の終わりにウォレットに残った要求を拒否で解決し、
+// 登録簿が空になってから次の test へ進む (残した要求で次の test の支払いが止まらないように)。
+afterEach(async () => {
+  for (const send of walletSends) {
+    if (!send.settled) send.reject();
+  }
+  await waitFor(() => expect(outstandingRequest()).toBeNull());
+});
+
 async function waitForWalletSends(count: number) {
   await waitFor(() => expect(walletSends).toHaveLength(count));
 }
 
 // merchant を送って mine まで進め、fee の確認がウォレットに出ている所まで (fee の要求は walletSends[1])。
+// submittedAt を渡すと、その時刻に送信する (mutate の間だけ Date.now を固定する)。
 async function advanceToFeePrompt(
   view: Awaited<ReturnType<Awaited<ReturnType<typeof makeTab>>['mountScreen']>>,
+  submittedAt?: number,
 ) {
-  act(() => view.result.current.mutate(PARAMS));
+  if (submittedAt === undefined) {
+    act(() => view.result.current.mutate(PARAMS));
+  } else {
+    atTime(submittedAt, () => act(() => view.result.current.mutate(PARAMS)));
+  }
   await waitForWalletSends(1);
   await act(async () => {
     walletSends[0].approve(MERCHANT_TX);
@@ -294,7 +338,7 @@ describe('useStandardPayment: ウォレットの確認中に画面を離れた�
   it('merchant: 確認中に画面を離れてから承認されても印が残り、開き直した画面は merchant-unknown で送り直さない', async () => {
     const tab = await makeTab();
     const first = await tab.mountScreen();
-    act(() => first.result.current.mutate(PARAMS));
+    atTime(SUBMITTED_AT, () => act(() => first.result.current.mutate(PARAMS)));
     await waitForWalletSends(1);
     expect(first.result.current.phase).toBe('merchant-sending');
 
@@ -302,9 +346,11 @@ describe('useStandardPayment: ウォレットの確認中に画面を離れた�
     first.unmount();
     expect(loadStandardIntent()).toBeNull();
 
-    // その後でウォレットが承認する = 送金は broadcast される。
+    // その後で (10 分遅れて) ウォレットが承認する = 送金は broadcast される。印の issuedAt は承認の時刻でなく送信した時刻。
+    const approvedLater = vi.spyOn(Date, 'now').mockReturnValue(SUBMITTED_AT + 10 * 60_000);
     walletSends[0].approve(MERCHANT_TX);
     await waitFor(() => expect(tab.mutationStatuses()).toEqual(['success']));
+    approvedLater.mockRestore();
     expect(intentWrites).toEqual(['merchant']);
     expect(loadStandardIntent()).toEqual({
       version: 1,
@@ -320,7 +366,7 @@ describe('useStandardPayment: ウォレットの確認中に画面を離れた�
       merchantTxHash: MERCHANT_TX,
       contextKey: CONTEXT_KEY,
       orderLinkKey: ORDER_LINK_KEY,
-      issuedAt: expect.any(Number),
+      issuedAt: SUBMITTED_AT,
     });
 
     // 開き直した画面 (新しい hook) は印を読み、同じ送金をもう一度ウォレットへ出さない。
@@ -430,12 +476,17 @@ describe('useStandardPayment: ウォレットの確認中に画面を離れた�
   it('fee: 確認中に画面を離れてから承認されても fee の hash が残り、開き直した画面は fee-unknown で 2 本目の利用料を送らない', async () => {
     const tab = await makeTab();
     const first = await tab.mountScreen();
-    await advanceToFeePrompt(first);
+    // 送信は SUBMITTED_AT。利用料の確認が出る (fee-awaiting を保存する) のは今の時刻 (送信より後)。
+    await advanceToFeePrompt(first, SUBMITTED_AT);
+    expect(loadStandardIntent()?.issuedAt).toBe(SUBMITTED_AT);
     intentWrites = [];
 
     first.unmount();
+    // 利用料の承認も 10 分遅れる。印の issuedAt は送信した時刻のまま。
+    const approvedLater = vi.spyOn(Date, 'now').mockReturnValue(SUBMITTED_AT + 10 * 60_000);
     walletSends[1].approve(FEE_TX);
     await waitFor(() => expect(tab.mutationStatuses()).toEqual(['success', 'success']));
+    approvedLater.mockRestore();
     expect(intentWrites).toEqual(['fee']);
     expect(loadStandardIntent()).toMatchObject({
       stage: 'fee',
@@ -447,6 +498,7 @@ describe('useStandardPayment: ウォレットの確認中に画面を離れた�
       feeValue: '50000',
       contextKey: CONTEXT_KEY,
       orderLinkKey: ORDER_LINK_KEY,
+      issuedAt: SUBMITTED_AT,
     });
 
     // 開き直した画面: fee の hash があるので fee-unknown (receipt の再照会だけ)。fee-error から 2 本目を送れない。
@@ -514,30 +566,198 @@ describe('useStandardPayment: ウォレットの確認中に画面を離れた�
     expect(loadStandardIntent()).toBeNull();
   });
 
-  it('既知の限界: 承認より前に開き直した画面は、後から書かれた印を知らない (保存には残る・読み直すと止まる)', async () => {
+});
+
+// Codex の MUST (PR #1061): 離れた画面の hook の要求 A が出たままの間に、新しい画面で支払い B を始めると、B が先に解決して B の
+// 印を保存した後、遅れて解決した A が印を A に置き換える。A の receipt の成功で印が消え、B の印は永久に失われる (開き直すと B を
+// もう一度払える)。直し方: 同じタブの中で、結果の出ていない要求を同時に 1 つだけにする (lib/standardPaymentOutstanding)。
+describe('useStandardPayment: 離れた画面の要求が出たままの間は、新しい画面で始めない (H-D・Codex の MUST)', () => {
+  it('merchant: 戻って新しい支払いを始めようとすると止まり、A が成功で解決すると A の印を読み込んで既存の復元 (merchant-unknown) になる', async () => {
+    const tab = await makeTab();
+    const first = await tab.mountScreen();
+    act(() => first.result.current.mutate(PARAMS_NO_FEE));
+    await waitForWalletSends(1);
+    expect(outstandingRequest()).toBe('merchant');
+    first.unmount();
+
+    // 承認より前に新しい画面を開く。保存はまだ空だが、A の要求はウォレットに出たまま。
+    const second = await tab.mountScreen();
+    expect(loadStandardIntent()).toBeNull();
+    // 見せるのは既存の送信中 (承認待ち) の状態。この画面の支払いとしては扱わない (通常決済を本線に固定・履歴に結び付けない)。
+    expect(second.result.current.phase).toBe('merchant-sending');
+    expect(second.result.current.isPending).toBe(true);
+    expect(second.result.current.hasAttempt).toBe(true);
+    expect(second.result.current.restoredFromStorage).toBe(true);
+    expect(second.result.current.hasActiveIntent).toBe(false);
+
+    // 新しい支払い B を始めようとしても、ウォレットへは出ない (直す前はここで 2 本目の要求が出て、B の印を A が上書きした)。
+    act(() => second.result.current.mutate(PARAMS));
+    act(() => second.result.current.retryFee());
+    expect(walletSends).toHaveLength(1);
+    expect(tab.mutationStatuses()).toEqual(['pending']);
+
+    // A が成功で解決する: 離れた画面の hook が A の印を保存してから登録簿から外す → 開いている画面が読み込む。
+    walletSends[0].approve(MERCHANT_TX);
+    await waitFor(() => expect(second.result.current.phase).toBe('merchant-unknown'));
+    expect(outstandingRequest()).toBeNull();
+    expect(intentWrites).toEqual(['merchant']);
+    expect(second.result.current.merchantTxHash).toBe(MERCHANT_TX);
+    expect(second.result.current.hasActiveIntent).toBe(true);
+    expect(second.result.current.restoredFromStorage).toBe(true);
+    expect(second.result.current.isUnknown).toBe(true);
+    act(() => second.result.current.mutate(PARAMS));
+    expect(walletSends).toHaveLength(1);
+
+    // receipt が取れると、読み直しのときと同じく先へ進む (利用料 0 = 成功・印を消す)。
+    receiptByHash.set(MERCHANT_TX, minedReceipt(MERCHANT_TX, 100n));
+    second.rerender();
+    await waitFor(() => expect(second.result.current.phase).toBe('success'));
+    expect(second.result.current.data?.merchantTxHash).toBe(MERCHANT_TX);
+    expect(loadStandardIntent()).toBeNull();
+    expect(walletSends).toHaveLength(1);
+  });
+
+  it('merchant: A が拒否で解決すると、止めを外して新しい画面で払える', async () => {
     const tab = await makeTab();
     const first = await tab.mountScreen();
     act(() => first.result.current.mutate(PARAMS));
     await waitForWalletSends(1);
     first.unmount();
-    // 承認より前に開き直す: 新しい hook は空の保存を読む。
+
     const second = await tab.mountScreen();
-    expect(second.result.current.phase).toBe('idle');
+    expect(second.result.current.phase).toBe('merchant-sending');
+    act(() => second.result.current.mutate(PARAMS_NO_FEE));
+    expect(walletSends).toHaveLength(1);
 
-    walletSends[0].approve(MERCHANT_TX);
-    await waitFor(() => expect(tab.mutationStatuses()).toEqual(['success']));
-    // 印は保存に残る (離れた画面の hook が書く) が、開いている画面の hook は読み直さない。
-    expect(loadStandardIntent()).toMatchObject({
-      stage: 'merchant',
-      merchantTxHash: MERCHANT_TX,
+    // ウォレットで拒否 = 送金は出ていない。印は増えない。
+    walletSends[0].reject();
+    await waitFor(() => expect(second.result.current.phase).toBe('idle'));
+    expect(outstandingRequest()).toBeNull();
+    expect(tab.mutationStatuses()).toEqual(['error']);
+    expect(loadStandardIntent()).toBeNull();
+    expect(second.result.current.isPending).toBe(false);
+    expect(second.result.current.hasAttempt).toBe(false);
+    expect(second.result.current.restoredFromStorage).toBe(false);
+
+    act(() => second.result.current.mutate(PARAMS_NO_FEE));
+    await waitForWalletSends(2);
+    expect(walletSends[1].tx.data).toBe(MERCHANT_CALLDATA);
+    await act(async () => {
+      walletSends[1].approve(MERCHANT_TX);
     });
-    expect(second.result.current.hasActiveIntent).toBe(false);
-    expect(second.result.current.phase).toBe('idle');
-    second.unmount();
+    await waitFor(() => expect(second.result.current.phase).toBe('merchant-mining'));
+    expect(intentWrites).toEqual(['merchant']);
+    expect(loadStandardIntent()).toMatchObject({ stage: 'merchant', merchantTxHash: MERCHANT_TX });
+    expect(outstandingRequest()).toBeNull();
+  });
 
-    // 読み直す (もう一度開き直す) と、印を読んで止まる。
-    const third = await tab.mountScreen();
-    await waitFor(() => expect(third.result.current.phase).toBe('merchant-unknown'));
-    third.unmount();
+  it('fee: A の利用料が出たままの間は、新しい画面から利用料を送り直せず (2 本目の利用料・印の上書き)、成功で解決すると fee-unknown になる', async () => {
+    const tab = await makeTab();
+    const first = await tab.mountScreen();
+    await advanceToFeePrompt(first);
+    expect(outstandingRequest()).toBe('fee');
+    intentWrites = [];
+    first.unmount();
+
+    // 新しい画面は送る前の印 (fee-awaiting) を読むが、A の利用料はウォレットに出たまま。
+    const second = await tab.mountScreen();
+    expect(second.result.current.hasActiveIntent).toBe(true);
+    expect(second.result.current.phase).toBe('fee-sending');
+    expect(second.result.current.isFeeError).toBe(false);
+    expect(second.result.current.isPending).toBe(true);
+
+    // 利用料の送り直しも新しい支払いも、ウォレットへは出ない (直す前は fee-error から 2 本目の利用料が出た)。
+    act(() => second.result.current.retryFee());
+    act(() => second.result.current.mutate(PARAMS));
+    expect(walletSends).toHaveLength(2);
+    expect(tab.mutationStatuses()).toEqual(['success', 'pending']);
+
+    walletSends[1].approve(FEE_TX);
+    await waitFor(() => expect(second.result.current.phase).toBe('fee-unknown'));
+    expect(outstandingRequest()).toBeNull();
+    expect(intentWrites).toEqual(['fee']);
+    expect(second.result.current.feeTxHash).toBe(FEE_TX);
+    expect(loadStandardIntent()).toMatchObject({
+      stage: 'fee',
+      merchantTxHash: MERCHANT_TX,
+      feeTxHash: FEE_TX,
+    });
+    act(() => second.result.current.retryFee());
+    expect(walletSends).toHaveLength(2);
+  });
+
+  it('fee: A の利用料が拒否で解決すると、新しい画面は fee-error に戻り、利用料を送り直せる', async () => {
+    const tab = await makeTab();
+    const first = await tab.mountScreen();
+    await advanceToFeePrompt(first);
+    intentWrites = [];
+    first.unmount();
+
+    const second = await tab.mountScreen();
+    expect(second.result.current.phase).toBe('fee-sending');
+    walletSends[1].reject();
+    await waitFor(() => expect(second.result.current.phase).toBe('fee-error'));
+    expect(outstandingRequest()).toBeNull();
+    expect(second.result.current.isFeeError).toBe(true);
+    expect(loadStandardIntent()).toMatchObject({ stage: 'fee-awaiting' });
+    expect(intentWrites).toEqual([]);
+
+    act(() => second.result.current.retryFee());
+    await waitForWalletSends(3);
+    expect(walletSends[2].tx.data).toBe(FEE_CALLDATA);
+    await act(async () => {
+      walletSends[2].approve(FEE_TX);
+    });
+    await waitFor(() => expect(second.result.current.phase).toBe('fee-mining'));
+    expect(loadStandardIntent()).toMatchObject({ stage: 'fee', feeTxHash: FEE_TX });
+    expect(outstandingRequest()).toBeNull();
+  });
+
+  it('StrictMode の mount→unmount→mount の後も、登録簿には要求ごとに 1 つだけ載り、拒否・成功で外れる (mount 中は印を保存してから外す)', async () => {
+    const tab = await makeTab();
+    const effectRuns: string[] = [];
+    const view = renderHook(
+      () => {
+        useEffect(() => {
+          effectRuns.push('mount');
+          return () => {
+            effectRuns.push('unmount');
+          };
+        }, []);
+        return useStandardPayment();
+      },
+      { wrapper: tab.Wrapper, reactStrictMode: true },
+    );
+    await waitFor(() => expect(view.result.current.isRestoring).toBe(false));
+    expect(effectRuns).toEqual(['mount', 'unmount', 'mount']);
+    expect(outstandingRequest()).toBeNull();
+
+    // 自分の要求では自分を止めない。拒否で外れる。
+    act(() => view.result.current.mutate(PARAMS_NO_FEE));
+    await waitForWalletSends(1);
+    expect(outstandingRequest()).toBe('merchant');
+    expect(view.result.current.phase).toBe('merchant-sending');
+    expect(view.result.current.restoredFromStorage).toBe(false);
+    await act(async () => {
+      walletSends[0].reject();
+    });
+    await waitFor(() => expect(view.result.current.phase).toBe('merchant-error'));
+    expect(outstandingRequest()).toBeNull();
+
+    // 2 本目は、別の画面が同時に mount している間に出す。mount 中の今の試みの hash は、呼び出しごとの onSuccess が印を
+    // 保存してから外すので、別の画面は外れた時点で印を読み込める。
+    act(() => view.result.current.mutate(PARAMS_NO_FEE));
+    await waitForWalletSends(2);
+    const other = await tab.mountScreen();
+    expect(other.result.current.phase).toBe('merchant-sending');
+    await act(async () => {
+      walletSends[1].approve(MERCHANT_TX);
+    });
+    await waitFor(() => expect(view.result.current.phase).toBe('merchant-mining'));
+    await waitFor(() => expect(other.result.current.phase).toBe('merchant-unknown'));
+    expect(other.result.current.merchantTxHash).toBe(MERCHANT_TX);
+    expect(intentWrites).toEqual(['merchant']);
+    expect(outstandingRequest()).toBeNull();
+    expect(tab.mutationStatuses()).toEqual(['error', 'success']);
   });
 });
