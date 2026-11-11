@@ -150,6 +150,11 @@ export function saveOrderDeliveryVerified(record: OrderDelivery): boolean {
   // 何の波及を断つか: 書けたが読み戻せなかった記録 (送っていない注文) が slot に残り、読めるようになった後に開き直した画面が
   // 「送信済みかもしれない」として、期限が証明されるまで同じお店への支払いを塞ぐこと。消せない端末では残る (期限が証明される
   // までの塞ぎで、二重払いではない = fail-closed)。消す処理の失敗は握り、呼出側の止めは変えない。
+  // 前提: 呼出側が「この authorization はまだ送っていない」ことを保証している。消してよいのは自分の記録だという根拠 (上) だけ
+  // では、送っていない根拠にならない。今の呼出側は hooks/useJpycEip3009Payment の 2 か所だけ: 初回の POST の前と、IP 制限
+  // (429: relay が body を処理する前の拒否・app/api/relay/jpyc/route.ts の relay-admission) の後の再送の前。再送できる payload を
+  // 保持するのは 429 の経路だけで、応答不明・pending・復元した記録は、保存し直す前に復旧 (status の照会) の分岐へ進む。
+  // 送ったかもしれない authorization でこの関数を呼ぶ経路を足すと、送った注文の記録を消しうる。
   try {
     window.sessionStorage.removeItem(key);
   } catch {

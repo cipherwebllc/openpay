@@ -309,6 +309,11 @@ export function saveRelayIntentVerified(intent: RelayIntentMetadata): boolean {
   // 記録があった・書く前に読めなかったときは消さない (別の支払いの未解決の記録を消すと、その支払いの払い直し = 二重払いの道を
   // 開く)。その場合は期限が証明されるまでの false pending が残りうる (fail-closed・二重払いではない)。消す処理の失敗は clear が
   // 握り、呼出側は false を見て今までどおり止める (止めた error は変わらない)。
+  // 前提: 呼出側が「この authorization はまだ送っていない」ことを保証している (自分の記録だという根拠だけでは、送っていない
+  // 根拠にならない)。今の呼出側は hooks/useJpycEip3009Payment の 2 か所だけ: 初回の POST の前と、IP 制限 (429: relay が body を
+  // 処理する前の拒否・app/api/relay/jpyc/route.ts の relay-admission) の後の再送の前。再送できる payload を保持するのは 429 の
+  // 経路だけで、応答不明・pending・復元した枠は、保存し直す前に復旧 (status の照会) の分岐へ進む。送ったかもしれない
+  // authorization でこの関数を呼ぶ経路を足すと、送った支払いの枠を消しうる。
   if (slotIsEmptyOrOwn) clearRelayIntent();
   return false;
 }

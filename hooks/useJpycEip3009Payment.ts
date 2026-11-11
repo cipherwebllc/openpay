@@ -90,7 +90,22 @@ type RetainedRelayPayload = {
   // 初回の POST の前に通常の復旧 slot (saveRelayIntent) へ保存した payload (束縛した注文は付けない)。
   // IP 制限で slot から外したあとの retry は、POST の前に同じ規則で保存し直す。
   savesRelayIntent?: true;
+  // 束縛した注文の payload の束縛 (第 10 回レビュー H-R): その注文の記録と、署名したときの checkout の文脈。IP 制限で保持した
+  // payload の再送の前に毎回、文脈が今と同じかを見て、この記録を書いて読み戻せたときだけ送る。orderDeliveryRef の今の値には
+  // 頼らない (文脈の読み直しの effect がそれを null に戻しても、保持した payload は残るため)。
+  order?: OrderDelivery;
+  orderContext?: OrderDeliveryContext;
 };
+
+// 束縛した注文の payload を保持したときの checkout の文脈と、今の文脈が同じか (再送の前・第 10 回レビュー H-R)。
+// 同じ chain の checkout は画面を作り直さずに文脈 (お店・注文番号・合計など) だけが変わりうる (app/[locale]/checkout/page.tsx の
+// key は chain だけ) ので、別の注文の画面で前の注文の payload を送らない。
+function sameOrderContext(a: OrderDeliveryContext | undefined, b: OrderDeliveryContext | undefined): boolean {
+  if (!a || !b) return a === b;
+  return a.merchant.toLowerCase() === b.merchant.toLowerCase() && a.chainId === b.chainId &&
+    a.tokenAddress.toLowerCase() === b.tokenAddress.toLowerCase() && a.webhook === b.webhook &&
+    a.orderId === b.orderId && a.totalValue === b.totalValue;
+}
 
 type PaymentIntentStorage = typeof import('@/lib/paymentIntentStorage');
 
@@ -600,13 +615,30 @@ export function useJpycEip3009Payment(
         if (retained.ambiguous || !retained.payload) {
           return resolveAmbiguousPayload(retained);
         }
-        const record = orderDeliveryRef.current;
-        const deliveryStorage = deliveryStorageRef.current;
-        if (record && deliveryStorage?.sameOrderAuthorization(record, retained.intent) && !deliveryStorage.saveOrderDeliveryVerified(record)) {
-          // A retry whose signature never broadcast still needs its original opening persisted first.
-          // 書いた slot を読み戻せなければ再送しない (第 10 回レビュー H-R・初回の persistOrder と同じ lib/orderDelivery の
-          // saveOrderDeliveryVerified)。読み戻せなかった記録はその関数が片づける。
-          throw new Error('order_binding_storage_unavailable');
+        // A retry whose signature never broadcast still needs its original opening persisted first.
+        // 束縛した注文の payload の再送 (第 10 回レビュー H-R): 保持した payload と一緒に持つ束縛 (retained.order と署名したときの
+        // 文脈) で毎回確かめ、確かめを通らない束縛した再送を 0 にする。今までは orderDeliveryRef に記録があるときだけ確かめて
+        // いたので、文脈を読み直す effect がそれを null に戻す (A → B → A) と、記録なしで送れた (応答を待つ間に開き直すと、
+        // 別の署名をもう 1 本送れる = 二重払い)。B の画面で押しても A の payload が送られた。
+        // 再送できる payload は IP 制限 (429) の経路だけが保持する (下の新しい署名の分岐)。429 は relay が署名の検証・body の
+        // 処理より前に返す拒否 (app/api/relay/jpyc/route.ts の relay-admission) なので、この payload は送られていない。だから
+        // 止めるときは保持を外す (次は新しい署名から・送らない署名は期限で失効する)。残すと hasActiveIntent が立ったままで、
+        // 次の押下も同じ payload の再送 (= また止まる) になり、別の注文の画面では払えない。
+        if (!retained.savesRelayIntent) {
+          const bound = retained.order;
+          if (!bound || !sameOrderContext(retained.orderContext, orderContext)) {
+            retainedPayloadRef.current = null;
+            throw new Error('order_binding_mismatch');
+          }
+          // 書いた slot を読み戻せなければ再送しない (初回の persistOrder と同じ saveOrderDeliveryVerified・読み戻せなかった
+          // 記録はその関数が片づける)。
+          if (!deliveryStorageRef.current?.saveOrderDeliveryVerified(bound)) {
+            retainedPayloadRef.current = null;
+            throw new Error('order_binding_storage_unavailable');
+          }
+          // 完了・失敗の処理 (finishOrderPayment・parkUnbroadcastOrder) がこの注文の記録に結び付くよう、今の値を戻す。
+          orderDeliveryRef.current = bound;
+          setOrderDelivery(bound);
         }
         // 何の波及を断つか: IP 制限で intent を外したままの retry が broadcast し、応答が不明・pending の
         // まま reload すると memory の latch が消えて新しい署名 (新 nonce) で二重払いになる。初回の POST と
@@ -678,8 +710,9 @@ export function useJpycEip3009Payment(
       const bind = canonical ? { v: 1 as const, secret: randomAuthorizationNonce(), validAfter: '0', validBefore: validBefore.toString() } : null;
       const boundSalt = bind && canonical && bindModule
         ? bindModule.orderBindSalt(bindModule.orderDigest(canonical), bind.secret) : null;
-      const persistOrder = async (intent: RelayIntentMetadata) => {
-        if (!canonical || !bind) return;
+      // 保存した記録を返す (IP 制限で payload を保持するとき、その束縛として一緒に持つ)。束縛しない支払いは null。
+      const persistOrder = async (intent: RelayIntentMetadata): Promise<OrderDelivery | null> => {
+        if (!canonical || !bind) return null;
         const storage = deliveryStorageRef.current ?? await import('@/lib/orderDelivery');
         deliveryStorageRef.current = storage;
         const record: OrderDelivery = { version: 1, order: canonical, bind, intent, forwarder,
@@ -688,6 +721,7 @@ export function useJpycEip3009Payment(
         if (!storage.saveOrderDeliveryVerified(record)) throw new Error('order_binding_storage_unavailable');
         orderDeliveryRef.current = record;
         setOrderDelivery(record);
+        return record;
       };
       // 束縛しない支払いは、復旧の枠を書けない端末では署名を求める前に止める (第 10 回レビュー H-R・無駄な署名をさせない・
       // lib/paymentIntentStorage の canStoreRelayIntent)。storageRef が null (storage の chunk を読めなかった) のときも
@@ -887,7 +921,7 @@ export function useJpycEip3009Payment(
         logger.info('payment.sign_abandoned', { path: 'jpyc-relay', chainId });
         throw new Error('payment_cancelled');
       }
-      if (bind) await persistOrder(intent);
+      const boundRecord = bind ? await persistOrder(intent) : null;
 
       // Keep the existing post-signing timestamp for ordinary /pay and /tip intents.
       if (!bind) intent.issuedAt = Date.now();
@@ -922,7 +956,9 @@ export function useJpycEip3009Payment(
           retainedPayloadRef.current = retained;
           return resolveAmbiguousPayload(retained);
         } else if (isRelayIpRateLimitedError(error)) {
-          retainedPayloadRef.current = { payload, intent, ambiguous: false, ...(bind ? {} : { savesRelayIntent: true as const }) };
+          // 束縛した注文は、保存した記録と署名したときの checkout の文脈 (この mutate の時点の orderContext) を束縛として持つ
+          // (再送の前の確かめ・第 10 回レビュー H-R)。
+          retainedPayloadRef.current = { payload, intent, ambiguous: false, ...(boundRecord ? { order: boundRecord, orderContext } : { savesRelayIntent: true as const }) };
           parkUnbroadcastOrder(intent);
           // IP limiter は relay 処理前の確定的拒否。署名 payload は同一 mount の retry 用に
           // memory へ残すが、未 broadcast intent が reload 後の支払いを塞ぐ波及は断つ。
