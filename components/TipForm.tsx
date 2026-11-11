@@ -405,7 +405,11 @@ export function TipForm({
     : crossChainResult
       ? undefined
       : gasless.data?.blockNumber;
-  const restoredRelayPayment = useRelay && relay.restoredIntent != null;
+  // reload で復元した relay の支払い・この画面から最後に送った支払いと別の Pimlico の intent (第 10 回レビュー A-1) の
+  // 確定は、今の画面のチップとして扱わない (控え・お礼・完了の overlay を出さない)。
+  const restoredPayment =
+    (useRelay && relay.restoredIntent != null) ||
+    (!isStandard && !useRelay && gasless.settledOtherIntent);
   // relay 202: broadcast 済だが未確定 (success でも error でもない)。送信ボタンに「送信中」を
   // 出してフィードバックの空白を防ぐ (再送は settledNoRetry で既に禁止)。
   const relayPending =
@@ -519,7 +523,33 @@ export function TipForm({
     if (!flowSuccess || !flowTxHash) return;
     // 元の name/message は許可済み intent metadata に保存しない。reload 復元 hash から
     // 現在 URL の控えを生成して別 tip へ誤帰属させる波及を断ち、hash 表示だけ残す。
-    if (restoredRelayPayment) return;
+    if (restoredPayment) {
+      // 別の Pimlico の intent の確定は、その intent 自体の受取先・金額 (useBatchPayment の recoveredIntent) で控えを残す。
+      // 今のチップの名前・メッセージは付けない (第 10 回レビュー A-1 の Codex 第 2 回 MUST 2・/pay /checkout と同じ規則)。
+      // recoveredIntent が無い (帰属を確かめられない) ときと relay の復元は、今までどおり控えを書かない。
+      const recovered = !isStandard && !useRelay ? gasless.recoveredIntent : null;
+      if (recovered) {
+        appendPayerReceipt(
+          buildPayerReceipt({
+            txHash: flowTxHash,
+            userOpHash: flowUserOpHash ?? null,
+            chainId: deployment.chainId,
+            asset: params.token,
+            tokenAddress: deployment.address,
+            amount: formatUnits(recovered.merchantAmount, deployment.decimals),
+            merchantAddress: recovered.merchant,
+            merchantName: null,
+            payerAddress: address,
+            paymentMode: 'gasless',
+            gasMode: 'customer',
+            memo: null,
+            sourceRoute: '/tip',
+            locale,
+          }),
+        );
+      }
+      return;
+    }
     // dedup 鍵: gasless は userOpHash、relay は txHash。
     const dedupKey = flowUserOpHash ?? flowTxHash;
     if (notifiedUserOpHashRef.current === dedupKey) return;
@@ -562,7 +592,8 @@ export function TipForm({
     flowUserOpHash,
     useRelay,
     crossChainResult,
-    restoredRelayPayment,
+    restoredPayment,
+    gasless.recoveredIntent,
     params.to,
     params.token,
     params.name,
@@ -571,6 +602,7 @@ export function TipForm({
     address,
     deployment.chainId,
     deployment.address,
+    deployment.decimals,
     locale,
   ]);
 
@@ -641,7 +673,7 @@ export function TipForm({
   // txHash/userOpHash/blockNumber は flow* (relay は userOpHash/blockNumber 無し)。tip は店舗アドレス
   // explorer link を出さないため merchantAddress は渡さない (= 従来どおり省略)。未成功は null。
   const successOverlayPayload: PaymentSuccessOverlayPayload | null =
-    !restoredRelayPayment && flowSuccess && flowTxHash
+    !restoredPayment && flowSuccess && flowTxHash
       ? {
           amountDisplay:
             submittedAmountDisplayRef.current ?? fmt(totalCustomerOutflow),
@@ -1262,8 +1294,8 @@ export function TipForm({
       {flowSuccess && (flowTxHash || crossChainResult?.path === 'gateway') && (
         <TipSuccessPanel
           title={t('successTitle')}
-          thanks={restoredRelayPayment ? undefined : params.thanks}
-          thanksUrl={restoredRelayPayment ? undefined : params.thanksUrl}
+          thanks={restoredPayment ? undefined : params.thanks}
+          thanksUrl={restoredPayment ? undefined : params.thanksUrl}
           openLinkLabel={t('openLink')}
           userOpHash={flowUserOpHash}
           txHash={flowTxHash ?? undefined}

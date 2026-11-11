@@ -167,10 +167,12 @@ let batchRetryReceipt: ReturnType<typeof vi.fn>;
 function setBatchPayment(
   state: 'idle' | 'pending' | 'success' | 'error' | 'unknown',
   errorOverride?: Error,
+  extra?: Partial<ReturnType<typeof useBatchPayment>>,
 ) {
   mutate = vi.fn();
   batchRetryReceipt = vi.fn();
   mockHook(useBatchPayment, {
+    ...extra,
     mutate,
     isPending: state === 'pending',
     isSuccess: state === 'success',
@@ -795,6 +797,77 @@ describe('TipForm — 送信', () => {
     expect(batchRetryReceipt).toHaveBeenCalledOnce();
     expect(mutate).not.toHaveBeenCalled();
   });
+});
+
+// 第 10 回レビュー A-1: 確定した Pimlico の支払いが、この画面から最後に送った支払いと別の intent (reload の後に
+// 「同じ送信内容を再確認」で確定した等・useBatchPayment の settledOtherIntent) なら、今のチップとして扱わない
+// (控え・お礼・完了の overlay を出さない)。reload で復元した relay の成功と同じ扱い。
+describe('TipForm — 別の intent の確定 (gasless)', () => {
+  // 第 10 回レビュー A-1 (Codex 第 2 回 MUST 2): 確定した intent 自体の受取先・金額 (recoveredIntent) があれば、それだけで
+  // 支払い者の控えを残す (今のチップの名前・メッセージ・お礼は付けない・/pay /checkout と同じ規則)。
+  it('確定した intent の受取先・金額 (recoveredIntent) があれば、それだけで控えを残す。名前・メッセージ・お礼・overlay は出さない', async () => {
+    window.localStorage.clear();
+    const thanks = '今のページだけのお礼';
+    const intentA = {
+      tokenAddress: '0x036CbD53842c5426634e7929541eC2318f3dCF7e' as const,
+      merchant: '0xa1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1' as const,
+      merchantAmount: 3_000_000n,
+      feeReceiver: '0xfee0fee0fee0fee0fee0fee0fee0fee0fee0fee0' as const,
+      feeAmount: 0n,
+    };
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(20_000_000n);
+    setSmartAccount(true);
+    setBatchPayment('success', undefined, {
+      settledOtherIntent: true,
+      recoveredIntent: intentA,
+      variables: intentA,
+    });
+    render(
+      <TipForm params={{ ...USDC_PARAMS, thanks, name: 'Creator B', message: 'message B' }} />,
+    );
+
+    expect(await screen.findByText('チップを送信しました')).toBeInTheDocument();
+    expect(screen.getAllByText(`0x${'b'.repeat(64)}`).length).toBeGreaterThan(0);
+    await waitFor(() => expect(loadPayerReceipts()).toHaveLength(1));
+    const [receipt] = loadPayerReceipts();
+    expect(receipt.merchantAddress).toBe(intentA.merchant);
+    expect(receipt.amount).toBe('3');
+    expect(receipt.merchantName).toBeUndefined();
+    expect((receipt.lineItems ?? []).map((item) => item.memo)).not.toContain('message B');
+    await expect(screen.findByRole('dialog', {}, { timeout: 300 })).rejects.toThrow();
+    expect(screen.queryByText(thanks)).toBeNull();
+  });
+
+  it.each([
+    { settledOtherIntent: false, attributed: true },
+    { settledOtherIntent: true, attributed: false },
+  ])(
+    '確定した intent が画面の最後の送信と別 ($settledOtherIntent) なら、控え・お礼・完了の overlay を出さない',
+    async ({ settledOtherIntent, attributed }) => {
+      window.localStorage.clear();
+      const thanks = '今のページだけのお礼';
+      setAccount({ connected: true, chainId: baseSepolia.id });
+      setBalance(20_000_000n);
+      setSmartAccount(true);
+      setBatchPayment('success', undefined, { settledOtherIntent });
+      render(<TipForm params={{ ...USDC_PARAMS, thanks }} />);
+
+      // 完了の欄 (hash) はどちらも出る。
+      expect(await screen.findByText('チップを送信しました')).toBeInTheDocument();
+      expect(screen.getAllByText(`0x${'b'.repeat(64)}`).length).toBeGreaterThan(0);
+      if (attributed) {
+        expect(await screen.findByText(thanks)).toBeInTheDocument();
+        expect(await screen.findByRole('dialog')).toBeInTheDocument();
+        expect(loadPayerReceipts()).toHaveLength(1);
+      } else {
+        // overlay は遅延ロードなので、出ない側も待ってから確かめる。
+        await expect(screen.findByRole('dialog', {}, { timeout: 300 })).rejects.toThrow();
+        expect(screen.queryByText(thanks)).toBeNull();
+        expect(loadPayerReceipts()).toEqual([]);
+      }
+    },
+  );
 });
 
 describe('TipForm — thanks / 第三者 webhook 退役 (B2 + R1)', () => {

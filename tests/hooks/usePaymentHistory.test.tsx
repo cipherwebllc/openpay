@@ -684,3 +684,129 @@ describe('usePaymentHistory: 顧客向け電子レシート (PayerReceipt) 保�
     expect(loadHistory()).toHaveLength(1);
   });
 });
+
+// 第 10 回レビュー A-1 の Codex 第 2 回 MUST 2: 別の Pimlico の intent の確定 (reload の後や別の画面で「同じ送信内容を再確認」した
+// 支払い・useBatchPayment の settledOtherIntent) を、今の画面の店・注文・明細と組み合わせて記録しない。
+describe('usePaymentHistory: 別の intent の確定 (settledOtherIntent)', () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  // 今の画面 = 店 B・注文 B (店名・明細・注文 ID・インボイス・メモ・商品名・税・FX の anchor つき)。
+  const SCREEN_B = {
+    ...CTX,
+    merchant: '0xMerchantB' as `0x${string}`,
+    merchantAmount: 2000n,
+    saleAmount: 2000n,
+    storeName: 'Shop B',
+    receiptMerchantName: 'Shop B',
+    note: 'note B',
+    productName: 'Product B',
+    memo: 'memo B',
+    taxRate: 10,
+    taxCategory: 'taxable_10' as const,
+    receiptNo: 'R-B',
+    orderId: 'order-B',
+    invoiceNo: 'T1234567890123',
+    anchorAmount: '20',
+    anchorSymbol: 'usdc' as const,
+    fxRateUsdcJpy: '150',
+    lineItems: [
+      { name: 'Item B', quantity: 1, unitPrice: '20', amount: '20', taxRate: 10, taxCategory: 'taxable_10' as const, memo: null },
+    ],
+    sourceRoute: '/checkout',
+    locale: 'ja',
+  };
+  // 実際に確定した支払い = 店 A への 10 (保存した intent の params)。
+  const INTENT_A = {
+    merchant: '0xMerchantA' as `0x${string}`,
+    merchantAmount: 1000n,
+    feeReceiver: '0xFeeA' as `0x${string}`,
+    feeAmount: 0n,
+    saleAmount: 1000n,
+    networkFeeEquivalent: 3n,
+  };
+  const SETTLED = {
+    txHash: '0xTxA' as `0x${string}`,
+    userOpHash: '0xUOA' as `0x${string}`,
+    blockNumber: 5n,
+    success: true,
+  };
+
+  it('intent 自体の受取先・金額で履歴と控えを書き、今の画面の店名・注文・明細・メモ・税・インボイス・anchor は付けない', () => {
+    renderHook(() =>
+      usePaymentHistory(
+        SCREEN_B,
+        {
+          data: SETTLED,
+          error: null,
+          variables: INTENT_A,
+          settledOtherIntent: true,
+          recoveredIntent: INTENT_A,
+        },
+        NO_STANDARD,
+      ),
+    );
+    const [entry] = loadHistory();
+    expect(entry).toMatchObject({
+      merchant: '0xMerchantA',
+      merchantAmount: '1000',
+      feeReceiver: '0xFeeA',
+      saleAmount: '1000',
+      networkFeeEquivalent: '3',
+      txHash: '0xTxA',
+      storeName: '',
+      note: '',
+      gasMode: null,
+      chainId: CTX.chainId,
+      tokenAddress: CTX.tokenAddress,
+    });
+    expect(entry.productName ?? null).toBeNull();
+    expect(entry.memo ?? null).toBeNull();
+    expect(entry.taxRate ?? null).toBeNull();
+    expect(entry.receiptNo ?? null).toBeNull();
+    expect(entry.lineItems ?? null).toBeNull();
+    expect(entry.anchorAmount ?? null).toBeNull();
+
+    const [receipt] = loadPayerReceipts();
+    expect(receipt.merchantAddress).toBe('0xMerchantA');
+    expect(receipt.orderId).toBeUndefined();
+    expect(receipt.merchantName).toBeUndefined();
+    expect(receipt.merchantInvoiceNo).toBeUndefined();
+    expect(receipt.receiptNo).toBeUndefined();
+    expect((receipt.lineItems ?? []).map((item) => item.name)).not.toContain('Item B');
+    expect(receipt.sourceRoute).toBe('/checkout');
+  });
+
+  it('帰属を確かめられない (recoveredIntent が null) → 履歴も控えも書かない', () => {
+    renderHook(() =>
+      usePaymentHistory(
+        SCREEN_B,
+        {
+          data: SETTLED,
+          error: null,
+          variables: INTENT_A,
+          settledOtherIntent: true,
+          recoveredIntent: null,
+        },
+        NO_STANDARD,
+      ),
+    );
+    expect(loadHistory()).toHaveLength(0);
+    expect(loadPayerReceipts()).toHaveLength(0);
+  });
+
+  it('画面から送った支払いの確定 (settledOtherIntent=false) は今までどおり画面の文脈で書く', () => {
+    renderHook(() =>
+      usePaymentHistory(
+        SCREEN_B,
+        { data: SETTLED, error: null, settledOtherIntent: false, recoveredIntent: null },
+        NO_STANDARD,
+      ),
+    );
+    const [entry] = loadHistory();
+    expect(entry.merchant).toBe('0xMerchantB');
+    expect(entry.storeName).toBe('Shop B');
+    expect(loadPayerReceipts()[0].orderId).toBe('order-B');
+  });
+});
