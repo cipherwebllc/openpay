@@ -81,6 +81,11 @@ import {
 } from '@/lib/smartAccount/circleSend';
 import { getCircleUserOpGasPrice } from '@/lib/smartAccount/circleAccount';
 import { mockHook } from '../_helpers/wagmiMock';
+import {
+  createFakeBundlerWorld,
+  fakePimlicoClients,
+  type FakeBundlerWorld,
+} from '../_helpers/fakePimlicoBundler';
 
 const TOKEN: Address = getAddress(
   '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
@@ -123,6 +128,23 @@ type GetUserOperationGasPrice = () => Promise<{ slow: GasPriceTier; standard: Ga
 let sendUserOperation: Mock<SendUserOperation>;
 let waitForUserOperationReceipt: Mock<WaitForUserOperationReceipt>;
 let getUserOperationGasPrice: Mock<GetUserOperationGasPrice>;
+// bundler・EntryPoint の偽物 (test ごとに作り直す)。mountReady を 2 回呼ぶ test (reload の模擬) では
+// 同じ世界のまま client だけ作り直す = ページを読み直しても bundler は送信済みの op を覚えている。
+let world: FakeBundlerWorld;
+
+// useSmartAccount の data の偽物は tests/_helpers/fakePimlicoBundler.ts の 1 つに寄せる (第 10 回レビュー A-1)。
+// 送信は「準備 → 署名 → 保存 → 送信」に分かれたので、この file の `sendUserOperation` の mock は
+// 「UserOperation を 1 本作って送った」を表す: helper が準備の段で 1 回呼び (calls を渡す・reject は
+// そのまま hook に届く)、返した hash が bundler の返す hash になる。期待値は分ける前のまま。
+function pimlicoData(paymasterMode: GaslessPaymasterMode) {
+  return fakePimlicoClients({
+    world,
+    paymasterMode,
+    legacySendUserOperation: sendUserOperation,
+    waitForUserOperationReceipt,
+    getUserOperationGasPrice,
+  }).data;
+}
 
 // useBatchPayment は gasless 経路でのみ呼ばれるため、'unavailable' は到達不能。
 // テストの paymasterMode も SmartAccountBundle と同じ narrow union を使う。
@@ -156,11 +178,7 @@ function mountReady(opts?: {
   });
 
   mockHook(useSmartAccount, {
-    data: {
-      smartAccountClient: { sendUserOperation },
-      pimlicoClient: { waitForUserOperationReceipt, getUserOperationGasPrice },
-      paymasterMode,
-    },
+    data: pimlicoData(paymasterMode),
     isLoading: false,
     error: null,
   });
@@ -171,6 +189,7 @@ describe('useBatchPayment', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     window.localStorage.clear();
+    world = createFakeBundlerWorld();
     // resolvePaymasterMode を毎テスト実装に戻す (mockReturnValue は clearAllMocks で
     // 消えず leak するため)。各テストは必要に応じ mockReturnValue で上書きする。
     const actual =
@@ -755,11 +774,7 @@ describe('useBatchPayment', () => {
         },
       });
       mockHook(useSmartAccount, {
-        data: {
-          smartAccountClient: { sendUserOperation },
-          pimlicoClient: { waitForUserOperationReceipt, getUserOperationGasPrice },
-          paymasterMode: 'sponsorship' as const,
-        },
+        data: pimlicoData('sponsorship'),
         isLoading: false,
         error: null,
       });
@@ -1026,7 +1041,10 @@ describe('useBatchPayment', () => {
       getItem.mockRestore();
     });
 
-    it('7 日を超えた record は無視して破棄する (恒久ロックアウト回避)', async () => {
+    // 送信の控え (send) の無い record = この欄を足す前の記録・MAv2 の facade で送った記録 (nonce を読めず照合できない)。
+    // 控えのある record は期限を過ぎても黙って消さず、照合してから閉じる (第 10 回レビュー A-1 の c4・
+    // tests/hooks/useBatchPayment.pimlicoSend.test.tsx)。
+    it('送信の控えの無い 7 日を超えた record は無視して破棄する (恒久ロックアウト回避)', async () => {
       mountReady();
       waitForUserOperationReceipt.mockRejectedValueOnce(
         new Error('UserOperationReceiptTimeoutError'),
@@ -1044,10 +1062,10 @@ describe('useBatchPayment', () => {
       await waitFor(() => expect(first.result.current.isUnknown).toBe(true));
       first.unmount();
 
-      // 保存済 record の updatedAt を 7 日 + 1 分前に巻き戻す。
+      // 保存済 record の updatedAt を 7 日 + 1 分前に巻き戻し、送信の控えを外す。
       const stale = Date.now() - (7 * 24 * 60 * 60 * 1000 + 60_000);
       for (const key of pimlicoPendingKeys()) {
-        const rec = JSON.parse(
+        const { send: _send, ...rec } = JSON.parse(
           window.localStorage.getItem(key) ?? '{}',
         ) as Record<string, unknown>;
         window.localStorage.setItem(

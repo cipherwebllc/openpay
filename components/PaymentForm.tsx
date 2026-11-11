@@ -781,6 +781,11 @@ function PaymentDetails({ params }: { params: PayParams }) {
   // この画面の明細 (値引きを含む) を付けない。金額の違う会計の明細を付けると、控えの 小計 / 値引き / 合計 と
   // インボイスの対価が支払額と食い違う (明細が無ければ控えは支払額の 1 行で組まれる)。
   const unattributedHistoryCtx = useMemo(() => ({ ...historyCtx, lineItems: null }), [historyCtx]);
+  // 確定したのが、この画面から最後に送った支払いとは別の Pimlico の intent (「同じ送信内容を再確認」で前の支払いを確定した等)
+  // のときは、完了の overlay に最後の送信の金額を出さない (第 10 回レビュー A-1)。履歴・控えは usePaymentHistory が intent 自体の
+  // 受取先・金額で書く (今の画面の店・明細と組み合わせない)。
+  const gaslessSettledOtherIntent =
+    !isStandard && !useRelay && gasless.settledOtherIntent;
   usePaymentHistory(
     directAttemptSnapshotRef.current?.historyCtx ?? unattributedHistoryCtx,
     gaslessForHistory,
@@ -1061,6 +1066,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
           !useRelay &&
           gasless.data &&
           gasless.data.success &&
+          !gaslessSettledOtherIntent &&
           directAttemptAmountDisplay
       ? {
           amountDisplay: directAttemptAmountDisplay,

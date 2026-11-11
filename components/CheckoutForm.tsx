@@ -689,7 +689,9 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   }, [deployment.chainId, orderLinkKey, params.to, relay.restoredIntent, totalWei]);
   const restoredCheckoutCompletion =
     (isStandard && standard.restoredFromStorage) ||
-    (useRelay && relay.restoredIntent != null);
+    (useRelay && relay.restoredIntent != null) ||
+    // 確定した Pimlico の支払いが、この画面から最後に送った支払いと別の intent (第 10 回レビュー A-1)。
+    (!isStandard && !useRelay && gasless.settledOtherIntent);
 
   // ウォレットでの取り消しは失敗として数えない (Sentry の *.failed 通知を鳴らさない)。
   useEffect(() => {
