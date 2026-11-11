@@ -5020,6 +5020,33 @@ describe('CheckoutForm — 復元した決済の完了で「注文を送る」�
     expect(screen.queryByRole('button', { name: 'お店に知らせる' })).toBeNull();
   });
 
+  // 守りを経路で絞るだけでは足りない場合: G-1 の欄の relay の分は今の経路を見ない (別のチェーンのまま読み直しても記録を
+  // 残すため・CheckoutForm の restoredCompletionNotify)。今の経路が通常決済で別の支払い A が確定し、この注文リンクと合う
+  // relay の支払いも確定したときは、G-1 の欄 (「注文を送る」) が出る。守りが同じ値を見るので、W1 は同時に出さない。
+  it('通常決済の別の支払い A と、この注文リンクと合う relay の支払いが両方確定したとき: 「注文を送る」を出し、W1 は同時に出さない', async () => {
+    ready();
+    setRestoredRelaySuccess(relayIntent());
+    setStandardPayment('success-no-fee', {
+      lastSubmittedParams: {
+        tokenAddress: deployment.address,
+        merchant: OTHER_MERCHANT,
+        merchantAmount: A_TOTAL,
+        feeReceiver: env.feeReceiver,
+        feeAmount: 0n,
+        chainId: deployment.chainId,
+        saleAmount: A_TOTAL,
+        contextKey: contextKeyOf({ ...A_PARAMS, mode: 'standard' }),
+        orderLinkKey: orderLinkKeyOf({ ...A_PARAMS, mode: 'standard' }),
+      },
+      lastSubmittedFrom: CUSTOMER,
+      restoredFromStorage: true,
+    });
+    render(<CheckoutForm params={RELAY_ORDER} />);
+
+    expect(await screen.findByRole('button', { name: '注文を送る' })).toBeInTheDocument();
+    expect(screen.queryByText(FOREIGN_TITLE)).toBeNull();
+  });
+
   // 逆の組み合わせ。この注文リンクと合う通常決済の記録は未確定 (結果なし) で、今の経路は relay。本物の hook は通常決済の
   // 記録を復元すると hasAttempt を立てて経路を通常決済にするので、この組み合わせは hook の印を mock で組んで作る
   // (Codex 第 4 回の推定: bfcache で戻った画面の古い hook の状態)。
