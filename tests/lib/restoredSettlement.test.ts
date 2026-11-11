@@ -41,7 +41,7 @@ const kaia = deploymentForSlug('jpyc', 'kaia');
 const base = deploymentForSlug('usdc', 'base');
 const TOTAL = calcCheckoutPayable(JPYC, polygon.decimals);
 
-const plain = checkoutSettlementScreen(JPYC, false, false);
+const plain = checkoutSettlementScreen(JPYC, false);
 
 function relayRecord(over: Partial<RelayIntentMetadata> = {}): RelayIntentMetadata {
   return {
@@ -114,7 +114,7 @@ describe('isForeignSettlement — /checkout・束縛しない relay', () => {
     expect(fee > 0n).toBe(true);
     const absorbed = relayRecord({ routeKind: 'recover', merchantValue: (TOTAL - fee).toString(), feeValue: fee.toString() });
     const onTop = relayRecord({ routeKind: 'recover', merchantValue: TOTAL.toString(), feeValue: fee.toString() });
-    const screen = checkoutSettlementScreen({ ...JPYC, feeKind: 'preorder', feePayer: 'customer' }, false, false);
+    const screen = checkoutSettlementScreen({ ...JPYC, feeKind: 'preorder', feePayer: 'customer' }, false);
     expect(screen.customerFeeOnTop).toBe(true);
     expect(relay(screen, absorbed)).toBe(false);
     expect(relay(screen, onTop)).toBe(false);
@@ -132,7 +132,7 @@ describe('isForeignSettlement — /checkout・束縛しない relay', () => {
       { ...JPYC, feeKind: 'preorder', feePayer: 'merchant' },
       { ...JPYC, feeKind: 'preorder' },
     ] satisfies CheckoutParams[]) {
-      const screen = checkoutSettlementScreen(params, false, false);
+      const screen = checkoutSettlementScreen(params, false);
       expect(screen.customerFeeOnTop).toBe(false);
       expect(relay(screen, onTop(params.feeKind))).toBe(true);
     }
@@ -158,7 +158,7 @@ describe('isForeignSettlement — /checkout・束縛しない relay', () => {
 
   it('受け付ける chain が複数の注文リンク: 別の chain で払った同じ注文は一致・受け付けない chain は不一致', () => {
     const params: CheckoutParams = { ...JPYC, ship: 'ask', chains: ['polygon', 'kaia'] };
-    const screen = checkoutSettlementScreen(params, true, false);
+    const screen = checkoutSettlementScreen(params, true);
     const keyOn = (chain: 'polygon' | 'kaia') =>
       orderLinkContextFingerprint(orderPaymentContextKey(params, chain), params);
     expect(relay(screen, relayRecord({ chainId: kaia.chainId, orderLinkKey: keyOn('kaia') }))).toBe(false);
@@ -168,7 +168,7 @@ describe('isForeignSettlement — /checkout・束縛しない relay', () => {
 
   it('注文リンクの画面: 注文リンクの鍵が違う記録は不一致。鍵が無い記録は比べない (2026-11-05 より前の保存でありうる)', () => {
     const params: CheckoutParams = { ...JPYC, ship: 'ask' };
-    const screen = checkoutSettlementScreen(params, true, false);
+    const screen = checkoutSettlementScreen(params, true);
     const key = orderLinkContextFingerprint(orderPaymentContextKey(params, 'polygon'), params);
     expect(relay(screen, relayRecord({ orderLinkKey: key }))).toBe(false);
     expect(relay(screen, relayRecord({ orderLinkKey: `0x${'7'.repeat(64)}` }))).toBe(true);
@@ -181,13 +181,24 @@ describe('isForeignSettlement — /checkout・束縛しない relay', () => {
     expect(relay(plain, relayRecord({ orderLinkKey: `0x${'7'.repeat(64)}` }))).toBe(false);
   });
 
-  it('受注を同一 origin の notify へ送る会計 (relay は必ず束縛): 束縛しない記録は、ほかが全部同じでも不一致', () => {
-    const screen = checkoutSettlementScreen(JPYC, false, true);
-    expect(relay(screen, relayRecord())).toBe(true);
+  it('受注を同一 origin の notify へ送る会計 (今の relay は必ず束縛): 束縛しないことでは不一致にしない (2026-09-25 より前の同じ注文の記録でありうる)', () => {
+    const order: CheckoutParams = {
+      ...JPYC,
+      feeKind: 'storefront',
+      storeHandle: 'alice',
+      orderId: 'order-1',
+      webhook: 'https://test.local/api/order/notify?h=alice',
+    };
+    const screen = checkoutSettlementScreen(order, false);
+    const fee = mobileOrderFeeValue(TOTAL, 'storefront');
+    expect(relay(screen, relayRecord({ routeKind: 'recover', merchantValue: (TOTAL - fee).toString(), feeValue: fee.toString() }))).toBe(false);
+    // ほかの欄 (お店・額) は今までどおり比べる。
+    expect(relay(screen, relayRecord({ merchant: OTHER_MERCHANT }))).toBe(true);
+    expect(relay(screen, relayRecord({ merchantValue: (TOTAL - 1n).toString() }))).toBe(true);
   });
 
   it('束縛した記録は常に一致 (受取先・額が画面と違っていても判定しない)', () => {
-    const screen = checkoutSettlementScreen(JPYC, false, true);
+    const screen = checkoutSettlementScreen(JPYC, false);
     expect(relay(screen, relayRecord(), true)).toBe(false);
     expect(relay(plain, relayRecord({ merchant: OTHER_MERCHANT, merchantValue: '1' }), true)).toBe(false);
   });
@@ -241,7 +252,7 @@ describe('isForeignSettlement — モバイル注文の利用料と relay の額
 
   it.each(URLS)('%s: 同じ URL の同じ支払いは、払ったときの flag・率がどうでも一致', (_label, params, onTop) => {
     const screenParams = viaUrl(params);
-    const screen = checkoutSettlementScreen(screenParams, false, false);
+    const screen = checkoutSettlementScreen(screenParams, false);
     expect(screen.customerFeeOnTop).toBe(onTop);
     for (const [shape, merchantValue, feeValue] of sameUrlShapes(screenParams)) {
       expect([shape, relay(screen, record(merchantValue, feeValue))]).toEqual([shape, false]);
@@ -255,7 +266,7 @@ describe('isForeignSettlement — モバイル注文の利用料と relay の額
     if (!params.ok) throw new Error(params.error);
     expect(params.params.feePayer).toBe('customer');
     expect(mobileOrderGasMode('storefront', 'customer')).toBe('merchant');
-    expect(checkoutSettlementScreen(params.params, false, false).customerFeeOnTop).toBe(false);
+    expect(checkoutSettlementScreen(params.params, false).customerFeeOnTop).toBe(false);
   });
 
   // Codex の再現: 注文 A = 3,000 JPYC・事前注文・お店が 3% を負担 (受取 2,910・利用料 90)。同じお店の別の注文 B = 2,910 JPYC。
@@ -266,13 +277,13 @@ describe('isForeignSettlement — モバイル注文の利用料と relay の額
 
   it('Codex の再現: A (3,000・お店が負担 = 受取 2,910・利用料 90) を、別の注文 B (2,910・お客様の上乗せでない URL) の画面で復元すると不一致', () => {
     expect(feeA).toBe(90n * E18);
-    expect(relay(checkoutSettlementScreen(orderA, false, false), recordA)).toBe(false);
+    expect(relay(checkoutSettlementScreen(orderA, false), recordA)).toBe(false);
     for (const b of [
       { ...JPYC, feeKind: 'preorder', feePayer: 'merchant' },
       { ...JPYC, feeKind: 'preorder' },
       { ...JPYC, feeKind: 'storefront' },
     ] satisfies CheckoutParams[]) {
-      const screenB = checkoutSettlementScreen(viaUrl({ ...b, items: [{ name: 'B', qty: 1, price: '2910' }] }), false, false);
+      const screenB = checkoutSettlementScreen(viaUrl({ ...b, items: [{ name: 'B', qty: 1, price: '2910' }] }), false);
       expect(screenB.amount).toBe(2910n * E18);
       expect(relay(screenB, recordA)).toBe(true);
     }
@@ -281,7 +292,6 @@ describe('isForeignSettlement — モバイル注文の利用料と relay の額
   it('残る限界 (PR の本文に書く): B の URL がお客様の上乗せの形で、A のお店の受取が B の合計と同じなら一致のまま', () => {
     const screenB = checkoutSettlementScreen(
       viaUrl({ ...JPYC, feeKind: 'preorder', feePayer: 'customer', items: [{ name: 'B', qty: 1, price: '2910' }] }),
-      false,
       false,
     );
     expect(screenB.customerFeeOnTop).toBe(true);
@@ -305,14 +315,14 @@ describe('isForeignSettlement — /checkout・通常決済', () => {
 
   it('受け付ける chain が複数の注文リンク: 別の chain で払った同じ注文は一致', () => {
     const params: CheckoutParams = { ...JPYC, ship: 'ask', chains: ['polygon', 'kaia'] };
-    const screen = checkoutSettlementScreen(params, true, false);
+    const screen = checkoutSettlementScreen(params, true);
     const onKaia: CheckoutParams = { ...params, chain: 'kaia' };
     const kaiaKey = orderPaymentContextKey(params, 'kaia');
     expect(
       standard(screen, standardRecord(onKaia, { orderLinkKey: orderLinkContextFingerprint(kaiaKey, params) })),
     ).toBe(false);
     // 1 つの chain だけのリンクの画面では、別の chain の記録は不一致。
-    const single = checkoutSettlementScreen({ ...JPYC, ship: 'ask' }, true, false);
+    const single = checkoutSettlementScreen({ ...JPYC, ship: 'ask' }, true);
     expect(
       standard(single, standardRecord(onKaia, { orderLinkKey: orderLinkContextFingerprint(kaiaKey, params) })),
     ).toBe(true);
@@ -320,7 +330,7 @@ describe('isForeignSettlement — /checkout・通常決済', () => {
 
   it('注文リンクの画面: 会計の鍵が同じでも、注文リンクの鍵が違う記録は不一致。鍵が無い記録 (普通の /checkout の支払い・2026-11-05 より前の保存) は比べない', () => {
     const params: CheckoutParams = { ...JPYC, ship: 'ask' };
-    const screen = checkoutSettlementScreen(params, true, false);
+    const screen = checkoutSettlementScreen(params, true);
     const key = orderLinkContextFingerprint(orderPaymentContextKey(params, 'polygon'), params);
     // 会計の鍵は ship を含まないので、普通の /checkout と同じ値になる。
     expect(orderPaymentContextKey(params, 'polygon')).toBe(orderPaymentContextKey(JPYC, 'polygon'));
@@ -342,7 +352,7 @@ describe('isForeignSettlement — /checkout・通常決済', () => {
 // 実物の parser (sessionStorage から読む) と判定で、relay free・relay recover・通常決済の 3 つを確かめる。
 describe('isForeignSettlement — 注文リンクの鍵を保存し始める前 (2026-11-05) の、同じ注文リンクの記録', () => {
   const link: CheckoutParams = { ...JPYC, ship: 'ask' };
-  const screen = checkoutSettlementScreen(link, true, false);
+  const screen = checkoutSettlementScreen(link, true);
   const RECOVER_FEE = 30n * 10n ** 18n;
   // #998 より前の relay の枠の形 (orderLinkKey なし)。
   const legacyRelay = (over: Record<string, unknown> = {}) => ({
@@ -410,7 +420,7 @@ describe('isForeignSettlement — /checkout・Pimlico (gasless.variables)', () =
   };
   const usdc = base;
   const usdcTotal = calcCheckoutPayable(usdcParams, usdc.decimals);
-  const usdcScreen = checkoutSettlementScreen(usdcParams, false, false);
+  const usdcScreen = checkoutSettlementScreen(usdcParams, false);
 
   it('受取先・token・売上の額が同じなら一致', () => {
     expect(gasless(plain, gaslessRecord())).toBe(false);
@@ -440,7 +450,7 @@ describe('isForeignSettlement — /checkout・Pimlico (gasless.variables)', () =
   });
 
   it('注文リンクの画面でも、Pimlico の記録は注文リンクの鍵を持たないので比べない', () => {
-    const screen = checkoutSettlementScreen({ ...JPYC, ship: 'ask' }, true, false);
+    const screen = checkoutSettlementScreen({ ...JPYC, ship: 'ask' }, true);
     expect(gasless(screen, gaslessRecord())).toBe(false);
   });
 });
@@ -454,7 +464,6 @@ describe('isForeignSettlement — 鍵を付けない画面 (/pay・/tip の形)'
     customerFeeOnTop: false,
     contextKeys: null,
     orderLinkKeys: null,
-    relayAlwaysBound: false,
   };
   // 額を入力で決める画面 (/pay の自由入力・/tip)。
   const open: SettlementScreen = { ...fixed, amount: null };
@@ -495,7 +504,7 @@ describe('isForeignSettlement — 鍵を付けない画面 (/pay・/tip の形)'
 describe('checkoutSettlementScreen — /checkout の画面の形', () => {
   it('1 つの chain の会計: その chain の分だけ。注文リンクでなければ注文リンクの鍵は null・額は値引き後の合計', () => {
     const params: CheckoutParams = { ...JPYC, discount: '500' };
-    const screen = checkoutSettlementScreen(params, false, false);
+    const screen = checkoutSettlementScreen(params, false);
     expect(screen).toEqual({
       chainIds: [polygon.chainId],
       tokenAddresses: [polygon.address],
@@ -504,13 +513,12 @@ describe('checkoutSettlementScreen — /checkout の画面の形', () => {
       customerFeeOnTop: false,
       contextKeys: [orderPaymentContextKey(params, 'polygon')],
       orderLinkKeys: null,
-      relayAlwaysBound: false,
     });
   });
 
   it('受け付ける chain が複数の注文リンク: chain・token・会計の鍵・注文リンクの鍵を全 chain の分だけ持つ', () => {
     const params: CheckoutParams = { ...JPYC, chain: 'kaia', ship: 'ask', chains: ['polygon', 'kaia'] };
-    const screen = checkoutSettlementScreen(params, true, true);
+    const screen = checkoutSettlementScreen(params, true);
     const keys = [orderPaymentContextKey(params, 'polygon'), orderPaymentContextKey(params, 'kaia')];
     expect(keys[0]).not.toBe(keys[1]);
     expect(screen).toEqual({
@@ -521,7 +529,6 @@ describe('checkoutSettlementScreen — /checkout の画面の形', () => {
       customerFeeOnTop: false,
       contextKeys: keys,
       orderLinkKeys: keys.map((key) => orderLinkContextFingerprint(key, params)),
-      relayAlwaysBound: true,
     });
   });
 });

@@ -3554,11 +3554,11 @@ describe('CheckoutForm — モバイル注文 / レジ システム利用料 (fl
         screen.getAllByText(`0x${'f'.repeat(64)}`).length,
       ).toBeGreaterThan(0),
     );
-    // 受注を同一 origin の notify へ送る会計の relay は必ず注文に束縛される。束縛しない記録の確定は、お店・合計が同じでも
-    // この会計の支払いでない → 題と本文を差し替える (第 10 回レビュー H-S)。
-    expect(screen.getByText(FOREIGN_TITLE)).toBeInTheDocument();
-    expect(screen.queryByText(DONE_TITLE)).toBeNull();
-    expect(screen.queryByText(DONE_THANKS)).toBeNull();
+    // 今の relay はこの会計で必ず注文に束縛されるが、束縛は 2026-09-25 からで、それより前の同じ注文の支払いは束縛しない
+    // 記録として残る。お店・合計 (受取 + 利用料) が同じ束縛しない記録は別の支払いと証明できない = 題は今までどおり
+    // (第 10 回レビュー H-S)。受注は今までどおり送らない。
+    expect(screen.getByText(DONE_TITLE)).toBeInTheDocument();
+    expect(screen.queryByText(FOREIGN_TITLE)).toBeNull();
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(loadHistory()).toHaveLength(0);
     expect(loadPayerReceipts()).toHaveLength(0);
@@ -5253,17 +5253,23 @@ describe('CheckoutForm — 復元した前の支払いの確定を、この会�
     expectOwnCompletion(TX);
   });
 
-  it('relay: 受注を同一 origin の notify へ送る会計では、束縛しない復元はお店・合計が同じでも「この画面の支払いではありません」(受注は送らない)', async () => {
+  // 受注を同一 origin の notify へ送る会計の relay は今は必ず注文に束縛されるが、束縛は 2026-09-25 (#607) からで、それより前
+  // (枠は 2026-07-26 から) の同じ注文の支払いは束縛しない記録として残り、今の parser も読む。束縛しないことは別の支払いの
+  // 証明にしない (同じ注文を払い済みの人に「この画面の支払いではありません」と出すと、もう一度払わせる)。ほかの欄で比べる。
+  it('relay: 受注を同一 origin の notify へ送る会計で、束縛しない復元は、お店・合計が同じなら今までどおりの完了の欄・お店が違えば「この画面の支払いではありません」(どちらも受注は送らない)', async () => {
     const fetchSpy = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
     vi.stubGlobal('fetch', fetchSpy);
     ready();
+    const notifyOrder: CheckoutParams = { ...JPYC_PARAMS, webhook: `${window.location.origin}/api/order/notify?h=alice` };
     setRestoredRelay(relayIntent());
-    // 番号なし・ship なし = 注文リンクでない会計 (注文リンクの鍵では区別されない)。違いは「必ず束縛される」ことだけ。
-    render(
-      <CheckoutForm params={{ ...JPYC_PARAMS, webhook: `${window.location.origin}/api/order/notify?h=alice` }} />,
-    );
+    const first = render(<CheckoutForm params={notifyOrder} />);
+    // origin は mount の後に決まる (useOrigin)。effect が落ち着くのを待ってから確かめる。
+    await expectNoOverlay();
+    expectOwnCompletion(TX);
+    first.unmount();
 
-    // origin は mount の後に決まる (useOrigin)。
+    setRestoredRelay(relayIntent({ merchant: OTHER_MERCHANT }));
+    render(<CheckoutForm params={notifyOrder} />);
     expect(await screen.findByText(FOREIGN_TITLE)).toBeInTheDocument();
     expectForeignCompletion(TX);
     await expectNoOverlay();

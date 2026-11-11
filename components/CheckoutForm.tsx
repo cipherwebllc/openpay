@@ -710,10 +710,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   // 差し替える (お礼を出さず「この画面の支払いではありません」と「読み込み直す」を出す)。completed・再送の止め・受注通知・
   // 大きな完了画面・success_url・払った記録・履歴の条件は restoredCheckoutCompletion のままで、ここでは変えない。
   // この mount で送った支払いは判定しない。比べられない欄は一致 (lib/paymentFlowGuards/restoredSettlement)。
-  const settlementScreen = useMemo(
-    () => checkoutSettlementScreen(params, remoteOrder, sendsOrderNotify),
-    [params, remoteOrder, sendsOrderNotify],
-  );
+  const settlementScreen = useMemo(() => checkoutSettlementScreen(params, remoteOrder), [params, remoteOrder]);
   const foreignSettlement =
     restoredCheckoutCompletion &&
     isForeignSettlement(

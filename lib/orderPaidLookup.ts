@@ -39,13 +39,9 @@ export function findRememberedOrderPayment(
  * この会計の形 (復元した支払いの確定がこの会計のものかの判定に渡す・lib/paymentFlowGuards/restoredSettlement・第 10 回
  * レビュー H-S)。chain・token・会計の鍵・注文リンクの鍵は、リンクが受け付ける全部のチェーンの分を入れる (別のチェーンを
  * 選んだ画面で、同じ注文の支払いを別の会計としない)。額は合計 (値引き後・同じ token は全チェーンで同じ小数の桁)。
- * remoteOrder = 注文リンクの会計 (isRemoteOrderCheckout)・relayAlwaysBound = 受注を同一 origin の notify へ送る会計。
+ * remoteOrder = 注文リンクの会計 (isRemoteOrderCheckout)。
  */
-export function checkoutSettlementScreen(
-  params: CheckoutParams,
-  remoteOrder: boolean,
-  relayAlwaysBound: boolean,
-): SettlementScreen {
+export function checkoutSettlementScreen(params: CheckoutParams, remoteOrder: boolean): SettlementScreen {
   const current = params.chain ?? DEFAULT_CHAIN_FOR_SYMBOL[params.token];
   const chains = params.chains && params.chains.length >= 2 ? params.chains : [current];
   const deployments = chains.map((chain) => deploymentForSlug(params.token, chain));
@@ -60,6 +56,5 @@ export function checkoutSettlementScreen(
     customerFeeOnTop: params.feeKind === 'preorder' && params.feePayer === 'customer',
     contextKeys,
     orderLinkKeys: remoteOrder ? contextKeys.map((key) => orderLinkContextFingerprint(key, params)) : null,
-    relayAlwaysBound,
   };
 }

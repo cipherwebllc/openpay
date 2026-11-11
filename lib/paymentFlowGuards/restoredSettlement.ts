@@ -46,8 +46,6 @@ export type SettlementScreen = {
    * 比べる (鍵の無い記録は 2026-11-05 より前の保存でありうる)。
    */
   orderLinkKeys: readonly string[] | null;
-  /** この画面の relay は必ず注文に束縛される (/checkout で受注を同一 origin の notify へ送る会計)。 */
-  relayAlwaysBound: boolean;
 };
 
 /** 復元した記録 (hook が返す値をそのまま渡す)。record が無ければ比べられない = 一致。 */
@@ -93,7 +91,9 @@ export function isForeignSettlement(screen: SettlementScreen, restored: Restored
   if (restored.kind === 'relay') {
     const { chainId, merchant, merchantValue, feeValue, orderLinkKey } = restored.record;
     if (restored.bound) return false;
-    if (screen.relayAlwaysBound) return true;
+    // 受注を同一 origin の notify へ送る会計の relay は今は必ず束縛するが、束縛しないことは別の支払いの証明にしない:
+    // 束縛は 2026-09-25 (#607) からで、それより前 (枠は 2026-07-26 から) の同じ注文の支払いは束縛しない記録として残り、
+    // 今も読める (何の波及を断つか: 払い済みの同じ注文に「この画面の支払いではありません」と出し、もう一度払わせること)。
     // 額: 「お店の受取 + 利用料」が画面の売上の額と同じなら一致 (free = 利用料 0・お店が利用料を負担 = 受取が減る)。
     // 保存した値をそのまま足し、利用料を今の設定で計算し直さない。URL がお客様の上乗せの形の会計 (customerFeeOnTop) だけ
     // 「お店の受取」が額と同じでも一致 (上乗せの形は 受取 + 利用料 が売上の額を超える)。
