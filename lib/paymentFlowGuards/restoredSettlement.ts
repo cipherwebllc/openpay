@@ -39,7 +39,10 @@ export type SettlementScreen = {
    * この鍵を記録に付ける。鍵を付けない画面 (/pay・/tip) は null。
    */
   contextKeys: readonly string[] | null;
-  /** 注文リンクの画面: 受け付ける全 chain の注文リンクの鍵 (orderLinkContextFingerprint)。それ以外は null。 */
+  /**
+   * 注文リンクの画面: 受け付ける全 chain の注文リンクの鍵 (orderLinkContextFingerprint)。それ以外は null。鍵を持つ記録だけを
+   * 比べる (鍵の無い記録は 2026-11-05 より前の保存でありうる)。
+   */
   orderLinkKeys: readonly string[] | null;
   /** この画面の relay は必ず注文に束縛される (/checkout で受注を同一 origin の notify へ送る会計)。 */
   relayAlwaysBound: boolean;
@@ -74,11 +77,13 @@ export type RestoredSettlement =
 
 const same = (left: string, right: string) => left.toLowerCase() === right.toLowerCase();
 
-// 注文リンクの鍵 (relay と通常決済の記録だけが持つ)。注文リンクの画面は必ず付けるので、無い・受け付けるどの chain の
-// 鍵とも違う記録は別の会計。鍵を付けない画面 (/pay・/tip) では、鍵を持つ記録は /checkout の支払い。
+// 注文リンクの鍵 (relay と通常決済の記録だけが持つ)。不一致の証明になるのは記録が鍵を持つときだけ: 注文リンクの画面で
+// 受け付けるどの chain の鍵とも違う・鍵を付けない画面 (/pay・/tip) で鍵を持つ (付けるのは /checkout だけ)。鍵の無い記録は
+// 比べない: 鍵は 2026-11-05 (#998) から付け始め、それより前に保存した同じ注文リンクの支払いの記録は鍵を持たずに今も読める
+// (何の波及を断つか: 払い済みの同じ注文に「この画面の支払いではありません」と出し、もう一度払わせること)。
 function orderLinkDiffers(screen: SettlementScreen, orderLinkKey: string | undefined): boolean {
-  if (screen.orderLinkKeys) return !(orderLinkKey && screen.orderLinkKeys.includes(orderLinkKey));
-  return !screen.contextKeys && !!orderLinkKey;
+  if (!orderLinkKey) return false;
+  return screen.orderLinkKeys ? !screen.orderLinkKeys.includes(orderLinkKey) : !screen.contextKeys;
 }
 
 export function isForeignSettlement(screen: SettlementScreen, restored: RestoredSettlement): boolean {
@@ -112,8 +117,9 @@ export function isForeignSettlement(screen: SettlementScreen, restored: Restored
   if (restored.kind === 'gasless') return false;
   const { chainId, contextKey, orderLinkKey } = restored.record;
   if (!screen.chainIds.includes(chainId)) return true;
-  // /checkout の通常決済は必ず会計の鍵を付ける: 鍵が無い・受け付けるどの chain の鍵とも違う記録は別の会計。
-  // 鍵を付けない画面 (/pay・/tip) では、鍵を持つ記録は /checkout の支払い。
+  // /checkout の通常決済は必ず会計の鍵を付ける: 鍵が無い・受け付けるどの chain の鍵とも違う記録は別の会計。鍵の無い
+  // /checkout の記録は無い (この枠と鍵は同じ 2026-07-26 の #273 で入り、CheckoutForm の唯一の standard.mutate が毎回付ける・
+  // 崩れた鍵は parser が記録ごと捨てる)。鍵を付けない画面 (/pay・/tip) では、鍵を持つ記録は /checkout の支払い。
   if (screen.contextKeys ? !(contextKey && screen.contextKeys.includes(contextKey)) : !!contextKey) return true;
   return orderLinkDiffers(screen, orderLinkKey);
 }

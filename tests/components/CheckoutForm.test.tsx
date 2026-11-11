@@ -4847,10 +4847,11 @@ describe('CheckoutForm — 復元した決済の完了で「注文を送る」�
     const first = render(<CheckoutForm params={shipAsk} />);
 
     expect(screen.getAllByText(TX).length).toBeGreaterThan(0);
-    // 注文リンクの画面は必ず注文リンクの鍵を残す。鍵の無い復元 (普通の /checkout の支払い) は、会計の鍵が同じでも
-    // この画面の支払いでない → 題と本文を差し替える (第 10 回レビュー H-S)
-    expect(screen.getByText(FOREIGN_TITLE)).toBeInTheDocument();
-    expect(screen.queryByText(DONE_TITLE)).toBeNull();
+    // 注文リンクの鍵の無い復元は、2026-11-05 より前に保存した同じ注文リンクの支払いでもありうるので、題では別の支払いと
+    // しない (会計の鍵・お店・額が同じ = 今までどおりの題・第 10 回レビュー H-S・Codex MUST 1)。「注文を送る」と払った記録は
+    // 今までどおり鍵の一致を要る (G-1)。
+    expect(screen.getByText(DONE_TITLE)).toBeInTheDocument();
+    expect(screen.queryByText(FOREIGN_TITLE)).toBeNull();
     expect(screen.queryByText(RESTORED_TITLE)).toBeNull();
     expect(screen.queryByRole('button', { name: '注文を送る' })).toBeNull();
     first.unmount();
@@ -5016,9 +5017,10 @@ describe('CheckoutForm — 復元した決済の完了で「注文を送る」�
   });
 
   // 注文リンクの指紋を一致させたまま 1 項目ずつ変える (照合の各条件を個別に確かめる)。
-  // 3 つめの欄 (第 10 回レビュー H-S): この会計の支払いでないと証明できるか (true = 題と本文を差し替える)。注文リンクの鍵・
-  // chain・お店・「受取 + 利用料」のどれかが違えば証明できる。「recover なのに利用料が 0」だけは、その 4 つがこの会計と同じで、
-  // 違うのは判定が比べない経路の種類 (routeKind) だけなので、題は今までどおり (「注文を送る」は今までどおり出さない)。
+  // 3 つめの欄 (第 10 回レビュー H-S): この会計の支払いでないと証明できるか (true = 題と本文を差し替える)。記録が持つ注文リンクの
+  // 鍵・chain・お店・「受取 + 利用料」のどれかが違えば証明できる。題が今までどおりなのは 2 つ: 「recover なのに利用料が 0」
+  // (違うのは判定が比べない経路の種類 routeKind だけ)・「指紋の無い復元」(鍵は 2026-11-05 から保存し始めたので、それより前の
+  // 同じ注文リンクの支払いでありうる = 鍵では比べない・Codex MUST 1)。どちらも「注文を送る」は今までどおり出さない。
   it.each<[string, Partial<RestoredRelayIntent>, boolean]>([
     [
       '別の注文 (同じお店・同じ金額・明細違い) の指紋',
@@ -5030,7 +5032,8 @@ describe('CheckoutForm — 復元した決済の完了で「注文を送る」�
       { orderLinkKey: orderLinkContextFingerprint(contextKeyOf(RELAY_ORDER), {}) },
       true,
     ],
-    ['指紋の無い復元 (/pay・/tip・普通の /checkout の支払い・以前の保存)', { orderLinkKey: undefined }, true],
+    ['指紋の無い復元 (/pay・/tip・普通の /checkout の支払い・以前の保存)', { orderLinkKey: undefined }, false],
+    ['指紋の無い recover の復元 (以前の保存・お店の受取 + 利用料 = 合計)', { ...RECOVER, orderLinkKey: undefined }, false],
     ['チェーンが違う', { chainId: baseSepolia.id }, true],
     ['お店が違う', { merchant: OTHER_MERCHANT }, true],
     ['お店の受取 (merchantValue) が違う', { merchantValue: (TOTAL - 1n).toString() }, true],

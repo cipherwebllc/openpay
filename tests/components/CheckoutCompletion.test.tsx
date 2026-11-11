@@ -937,12 +937,12 @@ const CASES: Case[] = [
     want: () => ({ rows: [relayRow(SAVED_TX), orderRow('saved-id')], receiptIds: [U, U, U, SAVED_TX], home: true }),
   },
   {
-    // 受付番号つきの会計 = 注文リンク。注文リンクの鍵を持たない復元 (/pay・/tip・普通の /checkout の支払い) は、この会計の
-    // 支払いでないと証明できる → 見出しと説明を差し替えて「読み込み直す」を出す (第 10 回レビュー H-S)。
-    name: '読み直した画面で復元した relay の支払い (控えなし) + URL の受付番号: この会計の支払いでない見出し・受付番号の行を出さない・「お店に知らせる」も出さない',
+    // 受付番号つきの会計 = 注文リンク。注文リンクの鍵を持たない復元は、2026-11-05 より前に保存した同じ注文リンクの支払いで
+    // ありうるので鍵では比べず、受取先と合計がこの会計と同じ = 今までどおりの見出し (第 10 回レビュー H-S・Codex MUST 1)。
+    name: '読み直した画面で復元した relay の支払い (控えなし) + URL の受付番号: 受付番号の行を出さない・「お店に知らせる」も出さない',
     setup: () => setRelay({ data: { txHash: RELAY_TX, success: true }, restoredIntent: RESTORED_INTENT }),
     params: () => jpycParams({ orderId: 'ORD-9' }),
-    want: () => ({ foreign: true, rows: [relayRow(RELAY_TX)], receiptIds: [U, U, U, RELAY_TX], home: true }),
+    want: () => ({ rows: [relayRow(RELAY_TX)], receiptIds: [U, U, U, RELAY_TX], home: true }),
   },
   {
     name: '読み直した画面で復元した relay の支払い (控えなし・受取先も合計もこの会計と同じ): 今までどおりの見出し',

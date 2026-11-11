@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import type { Address, Hex } from 'viem';
 import {
   isForeignSettlement,
@@ -7,7 +7,15 @@ import {
 } from '@/lib/paymentFlowGuards/restoredSettlement';
 import { checkoutSettlementScreen, orderPaymentContextKey } from '@/lib/orderPaidLookup';
 import { orderLinkContextFingerprint } from '@/lib/checkoutIntentContext';
-import type { RelayIntentMetadata, StandardPaymentIntentParams } from '@/lib/paymentIntentStorage';
+import {
+  loadRelayIntent,
+  loadStandardIntent,
+  RELAY_INTENT_STORAGE_KEY,
+  STANDARD_INTENT_STORAGE_KEY,
+  standardParamsFromIntent,
+  type RelayIntentMetadata,
+  type StandardPaymentIntentParams,
+} from '@/lib/paymentIntentStorage';
 import { mobileOrderFeeValue } from '@/lib/mobileOrderFee';
 import { deploymentForSlug } from '@/lib/tokens';
 import { calcCheckoutPayable, type CheckoutParams } from '@/lib/url';
@@ -146,13 +154,15 @@ describe('isForeignSettlement — /checkout・束縛しない relay', () => {
     expect(relay(screen, relayRecord({ chainId: base.chainId, orderLinkKey: keyOn('polygon') }))).toBe(true);
   });
 
-  it('注文リンクの画面: 注文リンクの鍵が無い記録 (普通の /checkout・/pay の支払い)・鍵が違う記録は不一致', () => {
+  it('注文リンクの画面: 注文リンクの鍵が違う記録は不一致。鍵が無い記録は比べない (2026-11-05 より前の保存でありうる)', () => {
     const params: CheckoutParams = { ...JPYC, ship: 'ask' };
     const screen = checkoutSettlementScreen(params, true, false);
     const key = orderLinkContextFingerprint(orderPaymentContextKey(params, 'polygon'), params);
     expect(relay(screen, relayRecord({ orderLinkKey: key }))).toBe(false);
-    expect(relay(screen, relayRecord())).toBe(true);
     expect(relay(screen, relayRecord({ orderLinkKey: `0x${'7'.repeat(64)}` }))).toBe(true);
+    // 鍵の無い記録: ほかの欄 (お店・chain・額) が同じなら一致、違えば (その欄で) 不一致。
+    expect(relay(screen, relayRecord())).toBe(false);
+    expect(relay(screen, relayRecord({ merchant: OTHER_MERCHANT }))).toBe(true);
   });
 
   it('注文リンクでない /checkout: 記録の注文リンクの鍵は比べない (証明できる不一致の一覧に無い)', () => {
@@ -204,19 +214,85 @@ describe('isForeignSettlement — /checkout・通常決済', () => {
     ).toBe(true);
   });
 
-  it('注文リンクの画面: 会計の鍵が同じでも、注文リンクの鍵が無い (普通の /checkout の支払い)・違う記録は不一致', () => {
+  it('注文リンクの画面: 会計の鍵が同じでも、注文リンクの鍵が違う記録は不一致。鍵が無い記録 (普通の /checkout の支払い・2026-11-05 より前の保存) は比べない', () => {
     const params: CheckoutParams = { ...JPYC, ship: 'ask' };
     const screen = checkoutSettlementScreen(params, true, false);
     const key = orderLinkContextFingerprint(orderPaymentContextKey(params, 'polygon'), params);
     // 会計の鍵は ship を含まないので、普通の /checkout と同じ値になる。
     expect(orderPaymentContextKey(params, 'polygon')).toBe(orderPaymentContextKey(JPYC, 'polygon'));
     expect(standard(screen, standardRecord(params, { orderLinkKey: key }))).toBe(false);
-    expect(standard(screen, standardRecord(params))).toBe(true);
     expect(standard(screen, standardRecord(params, { orderLinkKey: `0x${'7'.repeat(64)}` }))).toBe(true);
+    expect(standard(screen, standardRecord(params))).toBe(false);
+    // 鍵が無くても、会計の鍵が違えば (品目違い) 不一致。
+    expect(standard(screen, standardRecord({ ...params, items: [{ name: '別の品', qty: 1, price: '3000' }] }))).toBe(true);
   });
 
   it('記録が無ければ比べられない = 一致', () => {
     expect(standard(plain, null)).toBe(false);
+  });
+});
+
+// Codex MUST 1: 注文リンクの鍵 (orderLinkKey) は 2026-11-05 (#998) から保存し始めた。それより前に保存した、同じ注文リンクの
+// 正当な支払いの記録は鍵を持たず、今の parser も同じ保存の鍵から読む (期限の切り捨てなし)。鍵の無いことを別の支払いの
+// 証明にすると、払い済みの人に「この画面の支払いではありません」と出し、確定で記録が片づいた後に同じ注文をもう一度払わせる。
+// 実物の parser (sessionStorage から読む) と判定で、relay free・relay recover・通常決済の 3 つを確かめる。
+describe('isForeignSettlement — 注文リンクの鍵を保存し始める前 (2026-11-05) の、同じ注文リンクの記録', () => {
+  const link: CheckoutParams = { ...JPYC, ship: 'ask' };
+  const screen = checkoutSettlementScreen(link, true, false);
+  const RECOVER_FEE = 30n * 10n ** 18n;
+  // #998 より前の relay の枠の形 (orderLinkKey なし)。
+  const legacyRelay = (over: Record<string, unknown> = {}) => ({
+    chainId: polygon.chainId,
+    from: PAYER,
+    merchant: MERCHANT,
+    merchantValue: TOTAL.toString(),
+    feeValue: '0',
+    nonce: `0x${'1'.repeat(64)}`,
+    validBefore: '9999999999',
+    routeKind: 'free',
+    issuedAt: Date.UTC(2026, 10, 4),
+    ...over,
+  });
+
+  beforeEach(() => {
+    window.sessionStorage.clear();
+  });
+
+  it.each<[string, Record<string, unknown>]>([
+    ['relay free', {}],
+    ['relay recover', { routeKind: 'recover', merchantValue: (TOTAL - RECOVER_FEE).toString(), feeValue: RECOVER_FEE.toString() }],
+  ])('%s: 鍵の無い古い記録は、今の parser で読めて、一致 (別の支払いとしない)', (_label, over) => {
+    window.sessionStorage.setItem(RELAY_INTENT_STORAGE_KEY, JSON.stringify(legacyRelay(over)));
+    const record = loadRelayIntent();
+    expect(record).not.toBeNull();
+    expect(record!.orderLinkKey).toBeUndefined();
+    expect(relay(screen, record)).toBe(false);
+  });
+
+  it('通常決済: 会計の鍵が同じで注文リンクの鍵の無い古い記録は、今の parser で読めて、一致', () => {
+    window.sessionStorage.setItem(
+      STANDARD_INTENT_STORAGE_KEY,
+      JSON.stringify({
+        version: 1,
+        chainId: polygon.chainId,
+        from: PAYER,
+        tokenAddress: polygon.address,
+        merchant: MERCHANT,
+        merchantValue: TOTAL.toString(),
+        feeReceiver: FEE_RECEIVER,
+        feeValue: '0',
+        saleValue: TOTAL.toString(),
+        stage: 'merchant',
+        merchantTxHash: `0x${'2'.repeat(64)}`,
+        contextKey: orderPaymentContextKey(link, 'polygon'),
+        issuedAt: Date.UTC(2026, 10, 4),
+      }),
+    );
+    const intent = loadStandardIntent();
+    expect(intent).not.toBeNull();
+    const record = standardParamsFromIntent(intent!);
+    expect(record.orderLinkKey).toBeUndefined();
+    expect(standard(screen, record)).toBe(false);
   });
 });
 
