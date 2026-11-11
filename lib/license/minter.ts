@@ -200,7 +200,10 @@ async function processJob(member: string, token: string, deadline: number): Prom
         if (confirmed === 'conflict') throw new Repair('registration_receipt_mismatch', await ownNonceSettled());
         // 確認の保留 (CAS の衝突・RPC・storage) は license の検証の話で、nonce は上の receipt で確定している。確認のやり直しは
         // 続けたまま枠だけ先に返す (返さないと、出品者の編集が続く間、ほかの全部の発行と登録が止まる)。job は submitted のまま
-        // submission を持つので、この先も新しい署名の道 (下の送信) には入らず、送った hash の確認だけを続ける。
+        // submission を持つので、この先も新しい署名の道 (下の送信) には入らない。後の run で RPC が食い違い、receipt も
+        // 登録も読めず finalized の nonce も進んでいないと答えた回は、下の `job.submission` の分岐が、保存済みの同じ
+        // 署名済み tx を出し直す (枠が空なら 'take' で取り直す・ほかのジョブが枠を持っていれば CAS が負けて何もしない)。
+        // 出し直すのは同じ bytes・同じ nonce なので、新しい署名にも、枠を返した後にほかのジョブが取った nonce との衝突にもならない。
         if (confirmed !== 'registered') { await reschedule('registration_' + confirmed, false, await ownNonceSettled()); return; }
         await save({ ...job, status: 'registered', alertPending: false, mintTxHash: hash, mintBlock: { blockNumber: receipt.blockNumber.toString(), blockHash: receipt.blockHash } }, 'release');
       } else {
