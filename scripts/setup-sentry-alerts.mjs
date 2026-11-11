@@ -310,14 +310,17 @@ export const RULES = [
     interval: '1h',
   },
   {
-    name: 'OpenPay: license NFT worker のジョブ失敗 (minter の資金不足を含む)',
+    name: 'OpenPay: license NFT worker のジョブの処理が例外で終わった (license.worker_job_failed)',
+    // 旧名は「minter の資金不足を含む」と書いていたが、残高不足は job の中で再試行に回り、この warn には出ない (第 10 回レビュー)。
+    legacyNames: ['OpenPay: license NFT worker のジョブ失敗 (minter の資金不足を含む)'],
     description:
       'license minter (lib/license/minter.ts) の 1 件のジョブの処理が例外で終わった (license.worker_job_failed)。出るのは ' +
       'job の読込の失敗・破損 (job_storage / job_corrupt) と、job の保存 (CAS) の失敗 (KV 障害・worker lock の喪失・' +
       'run の期限切れ) のとき。cron (15 分ごと) の再試行が効くので 1 時間に 2 件超 (= 3 回連続の失敗) で通知。' +
       'RPC 障害と minter EOA の native 残高不足 (minter_funding_low) は job の中で再試行に回るのでここには出ない ' +
       '(job の lastError は rpc_or_funding_failure)。送信していないジョブが 10 回失敗して needs_repair になった回に ' +
-      'license.job_needs_repair (下の rule) として出る。ALERT_WEBHOOK_URL への通知は、その env を設定したときだけ届く (任意)。',
+      'license.job_needs_repair、送信済みのジョブが 10 回目に届いた回に license.job_submission_stalled (下の rule) として出る。' +
+      'ALERT_WEBHOOK_URL への通知は、その env を設定したときだけ届く (任意)。',
     eventTags: ['license.worker_job_failed'],
     threshold: 2,
     interval: '1h',
@@ -327,11 +330,24 @@ export const RULES = [
     description:
       'license minter (lib/license/minter.ts) の発行・登録のジョブが needs_repair (運営の修復待ち) になった。自動では ' +
       '再試行されないので 1 件目で通知。ログの member (発行は paymentKey・登録は registration:<商品 ID>)・kind・lastError ' +
-      'で job を確かめる。lane=release は、送信した tx の結果が finalized で確定していて (revert・nonce の置き換え) 送信枠を ' +
-      '返した回 = 止まるのはそのジョブだけ。lane=keep で job に submission があるときは、結果が未確定の署名を隔離するために ' +
-      '送信枠 (store:license:worker:active) を持ったままで、後続の発行と新しい商品の登録が止まる = 急ぎ。直し方は ' +
+      'で job を確かめる。lane=release は、そのジョブ自身が送った tx の nonce の結果が finalized で確定した (自分の送信の ' +
+      'receipt が revert・発行や登録の証拠が合わない、または finalized の nonce が進んだ) と、head の確認のうえで言えたので ' +
+      '送信枠を返した回 = 止まるのはそのジョブだけ。lane=keep で job に submission があるときは、結果が未確定の署名を隔離する ' +
+      'ために送信枠 (store:license:worker:active) を持ったままで、後続の発行と新しい商品の登録が止まる = 急ぎ。直し方は ' +
       'docs/DEPLOY_CHECKLIST.md §16.6.4。',
     eventTags: ['license.job_needs_repair'],
+    threshold: 0,
+    interval: '1h',
+  },
+  {
+    name: 'OpenPay: license NFT の送信済みのジョブが 10 回目に届いた (license.job_submission_stalled)',
+    description:
+      'license minter (lib/license/minter.ts) の発行・登録のジョブが、tx を送信済み (submitted) のまま 10 回目の失敗に届いた ' +
+      '(送信の結果を確かめられない・登録の確認が通らない)。needs_repair ではないので自動の再試行は続くが、結果が未確定の ' +
+      '署名なら送信枠 (store:license:worker:active) を持ったままで、後続の発行と新しい商品の登録が止まる。同じジョブでは ' +
+      '1 回だけ出るので 1 件目で通知。ログの member・kind・lastError・attempts で job を確かめ、枠の値がその member かを見る。' +
+      '直し方は docs/DEPLOY_CHECKLIST.md §16.6.4。',
+    eventTags: ['license.job_submission_stalled'],
     threshold: 0,
     interval: '1h',
   },

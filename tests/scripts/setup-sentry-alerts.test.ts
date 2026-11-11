@@ -538,6 +538,8 @@ describe('setup-sentry-alerts: RULES schema', () => {
       'license.reconcile_indeterminate',
       // 修復待ち (needs_repair) は自動で再試行されない。送信枠を持ったままなら後続の発行も止まる (第 10 回レビュー B3-1)。
       'license.job_needs_repair',
+      // 送信済みのまま 10 回目に届いたジョブは、結果が未確定なら枠を持ったまま後続を止める (同じジョブで 1 回だけ出る)。
+      'license.job_submission_stalled',
       'order.notify.unexpected',
       'order.agent.registration_failed',
       'order.agent.finalize_conflict',
@@ -988,6 +990,18 @@ describe('setup-sentry-alerts: planRules / formatPlan (dry-run の出力を固�
     expect(jpyc.legacyNames).toEqual(['relay failure (mainnet)']);
     const both = [{ ...jpyc, legacyNames: ['relay failure (mainnet)', 'relay misconfig (mainnet)'] }];
     expect(() => planRules(prodLikeWorkflows(), both, 'mainnet', { detectorId: DETECTOR })).toThrow(/複数/);
+  });
+
+  // 第 10 回レビュー NIT: license.worker_job_failed の rule の名前から、実態と違う「minter の資金不足を含む」を外した。旧名の
+  // workflow は legacyNames で引き当てて rename の update にする (同じ tag の 2 つ目の workflow を create しない)。
+  it('license.worker_job_failed の rule の旧名の workflow は rename だけの update になり、create に二重に出ない', () => {
+    const rule = ruleOf('license.worker_job_failed');
+    const legacyName = 'OpenPay: license NFT worker のジョブ失敗 (minter の資金不足を含む)';
+    expect(rule.legacyNames).toEqual([legacyName]);
+    const p = plan([stored({ ...rule, name: legacyName }, '30')]);
+    expect(p.update).toEqual([expect.objectContaining({ id: '30', name: rule.name, previousName: legacyName, changes: [`rename from "${legacyName}"`] })]);
+    expect(p.create.map((c) => c.name)).not.toContain(rule.name);
+    expect(p.create).toHaveLength(RULES.length - 1);
   });
 
   it('E6 以前の 14 rule が登録済みの計画: 旧 name は rename + 閾値更新、tag の追加は filters の行、発火元の無いものは retire', () => {

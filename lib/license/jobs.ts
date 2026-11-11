@@ -20,6 +20,8 @@ type JobBase = {
   submission?: LicenseSubmission;
   mintTxHash?: Hex; mintBlock?: LicenseBlockEvidence;
   scanFromBlock?: string; alertPending?: boolean; alertedAt?: number;
+  /** submitted のまま attempt 10 に届いた回の warn (license.job_submission_stalled) を出した時刻。同じジョブで繰り返さない印。 */
+  stalledWarnedAt?: number;
   scanAttempts?: number;
   scanSearch?: { createdAt: number; low: string; high: string; anchor: LicenseBlockEvidence };
 };
