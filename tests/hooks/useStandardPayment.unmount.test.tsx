@@ -87,6 +87,9 @@ const MERCHANT_TX: Hex = `0x${'a'.repeat(64)}`;
 const FEE_TX: Hex = `0x${'b'.repeat(64)}`;
 const OLD_MERCHANT_TX: Hex = `0x${'c'.repeat(64)}`;
 const OLD_FEE_TX: Hex = `0x${'d'.repeat(64)}`;
+// 新しい画面の支払い B の hash (Codex の再現で、直す前だけ出る)。
+const OTHER_MERCHANT_TX: Hex = `0x${'e'.repeat(64)}`;
+const OTHER_FEE_TX: Hex = `0x${'f'.repeat(64)}`;
 const CONTEXT_KEY: Hex = `0x${'1'.repeat(64)}`;
 const ORDER_LINK_KEY: Hex = `0x${'2'.repeat(64)}`;
 
@@ -572,6 +575,66 @@ describe('useStandardPayment: ウォレットの確認中に画面を離れた�
 // 印を保存した後、遅れて解決した A が印を A に置き換える。A の receipt の成功で印が消え、B の印は永久に失われる (開き直すと B を
 // もう一度払える)。直し方: 同じタブの中で、結果の出ていない要求を同時に 1 つだけにする (lib/standardPaymentOutstanding)。
 describe('useStandardPayment: 離れた画面の要求が出たままの間は、新しい画面で始めない (H-D・Codex の MUST)', () => {
+  // Codex の筋書きを、登録簿にも表示にも触れず、ウォレットの操作と保存だけで再現する。ウォレットに出ている要求は、新しい
+  // ものから順に承認する (新しい画面の B を先に・離れた画面の A を後で)。直す前は B の要求が出て、B の hash は読み直した
+  // 画面から辿れなくなる (= 開き直すと B をもう一度払える)。
+  async function approveNewestFirst(
+    tab: Awaited<ReturnType<typeof makeTab>>,
+    hashes: Hex[],
+  ) {
+    // 作った mutation の要求が、すべてウォレットに届くまで待つ。
+    await waitFor(() => expect(walletSends).toHaveLength(tab.mutationStatuses().length));
+    for (let i = walletSends.length - 1; i >= 0; i -= 1) {
+      if (walletSends[i].settled) continue;
+      await act(async () => {
+        walletSends[i].approve(hashes[i]);
+      });
+      await waitFor(() => expect(tab.mutationStatuses()[i]).toBe('success'));
+    }
+  }
+
+  it('Codex の再現 (merchant): A の確認中に離れ、新しい画面で B を始め、B を先に・A を後で承認しても、broadcast した送金はすべて読み直した画面から辿れる', async () => {
+    const tab = await makeTab();
+    const first = await tab.mountScreen();
+    act(() => first.result.current.mutate(PARAMS_NO_FEE));
+    await waitForWalletSends(1);
+    first.unmount();
+
+    const second = await tab.mountScreen();
+    act(() => second.result.current.mutate(PARAMS_NO_FEE));
+    // walletSends[0] = A・walletSends[1] = B (直す前だけ出る)。
+    await approveNewestFirst(tab, [MERCHANT_TX, OTHER_MERCHANT_TX]);
+    const broadcast = walletSends.map((_, i) => [MERCHANT_TX, OTHER_MERCHANT_TX][i]);
+
+    // 読み直す (開いている画面を閉じて開き直す)。broadcast した送金はすべて、保存された印から辿れなければならない。
+    second.unmount();
+    expect(broadcast).toEqual([loadStandardIntent()?.merchantTxHash]);
+    const third = await tab.mountScreen();
+    await waitFor(() => expect(third.result.current.phase).toBe('merchant-unknown'));
+    expect(third.result.current.merchantTxHash).toBe(MERCHANT_TX);
+    act(() => third.result.current.mutate(PARAMS_NO_FEE));
+    expect(walletSends).toHaveLength(1);
+  });
+
+  it('Codex の再現 (fee): A の利用料の確認中に離れ、新しい画面で利用料を送り直し、後のものを先に承認しても、利用料は 1 本だけで、その hash を読み直した画面から辿れる', async () => {
+    const tab = await makeTab();
+    const first = await tab.mountScreen();
+    await advanceToFeePrompt(first);
+    first.unmount();
+
+    const second = await tab.mountScreen();
+    act(() => second.result.current.retryFee());
+    // walletSends[0] = merchant (承認済み)・[1] = A の利用料・[2] = 新しい画面の利用料 (直す前だけ出る)。
+    await approveNewestFirst(tab, [MERCHANT_TX, FEE_TX, OTHER_FEE_TX]);
+    const feesBroadcast = walletSends.slice(1).map((_, i) => [FEE_TX, OTHER_FEE_TX][i]);
+
+    second.unmount();
+    expect(feesBroadcast).toEqual([loadStandardIntent()?.feeTxHash]);
+    const third = await tab.mountScreen();
+    await waitFor(() => expect(third.result.current.phase).toBe('fee-unknown'));
+    expect(third.result.current.feeTxHash).toBe(FEE_TX);
+  });
+
   it('merchant: 戻って新しい支払いを始めようとすると止まり、A が成功で解決すると A の印を読み込んで既存の復元 (merchant-unknown) になる', async () => {
     const tab = await makeTab();
     const first = await tab.mountScreen();
