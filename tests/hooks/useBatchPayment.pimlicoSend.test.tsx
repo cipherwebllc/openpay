@@ -810,47 +810,77 @@ describe('期限: 黙って消さず、照合してから閉じる (c4・c5・MU
     expect(logger.warn).toHaveBeenCalledWith('pimlico.pending.expired-close-failed', expect.anything());
   });
 
-  it.each([
-    { label: '期限の前', expired: false },
-    { label: '期限の後', expired: true },
-  ])(
-    'EntryPoint の nonce を別の op が使い、候補に receipt が無い ($label) → 成功とも不成立ともせず開いたまま (c5・MetaMask の key 0)',
-    async ({ expired }) => {
-      const first = mountClients();
-      acceptThenLoseResponse(first);
-      const firstHook = render();
-      firstHook.result.current.mutate(PARAMS);
-      await waitFor(() => expect(firstHook.result.current.isUnknown).toBe(true));
-      // 同じ (key, seq) を別の op が使った (この支払いの hash には receipt が付かない)。
-      world.consumeNonceByOtherOp(BigInt(sentOp(first, 0).nonce as Hex));
-      firstHook.unmount();
-      if (expired) ageStoredRecord();
+  // 応答を失った op の nonce (key, seq) を別の op が使った状態の記録を作り、unmount する
+  // (この支払いの hash には receipt が付かない = MetaMask の key 0 を別の支払いが使った等)。
+  async function seedConsumedByOtherOp() {
+    const first = mountClients();
+    acceptThenLoseResponse(first);
+    const firstHook = render();
+    firstHook.result.current.mutate(PARAMS);
+    await waitFor(() => expect(firstHook.result.current.isUnknown).toBe(true));
+    world.consumeNonceByOtherOp(BigInt(sentOp(first, 0).nonce as Hex));
+    firstHook.unmount();
+  }
 
-      const second = mountClients();
-      const restored = render();
-      await waitFor(() => expect(restored.result.current.isUnknown).toBe(true));
-      restored.result.current.retryReceipt();
-      await waitFor(() => expect(second.waitForUserOperationReceipt).toHaveBeenCalledTimes(1));
-      await waitFor(() => expect(restored.result.current.isPending).toBe(false));
+  it('EntryPoint の nonce を別の op が使い、候補に receipt が無い (期限の前) → 成功とも不成立ともせず開いたまま (c5・MetaMask の key 0)', async () => {
+    await seedConsumedByOtherOp();
 
-      // 成功と表示しない・開けて新しい支払いを許さない・送らない・署名を求めない。
-      expect(restored.result.current.data).toBeUndefined();
-      expect(restored.result.current.isUnknown).toBe(true);
-      expect(standardPaymentOpen(restored.result.current)).toBe(false);
-      expect(second.bundlerSend).not.toHaveBeenCalled();
-      expect(second.signUserOperation).not.toHaveBeenCalled();
-      expect(pendingKeys()).toHaveLength(1);
+    const second = mountClients();
+    const restored = render();
+    await waitFor(() => expect(restored.result.current.isUnknown).toBe(true));
+    restored.result.current.retryReceipt();
+    await waitFor(() => expect(second.waitForUserOperationReceipt).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(restored.result.current.isPending).toBe(false));
 
-      restored.result.current.mutate(OTHER_PARAMS);
-      await waitFor(() =>
-        expect(restored.result.current.variables?.merchantAmount).toBe(OTHER_PARAMS.merchantAmount),
-      );
-      await waitFor(() => expect(restored.result.current.isPending).toBe(false));
-      expect(second.getNonce).not.toHaveBeenCalled();
-      expect(restored.result.current.isUnknown).toBe(true);
-      expect(world.mined).toHaveLength(0);
-    },
-  );
+    // 成功と表示しない・開けて新しい支払いを許さない・送らない・署名を求めない。
+    expect(restored.result.current.data).toBeUndefined();
+    expect(restored.result.current.isUnknown).toBe(true);
+    expect(standardPaymentOpen(restored.result.current)).toBe(false);
+    expect(second.bundlerSend).not.toHaveBeenCalled();
+    expect(second.signUserOperation).not.toHaveBeenCalled();
+    expect(pendingKeys()).toHaveLength(1);
+
+    restored.result.current.mutate(OTHER_PARAMS);
+    await waitFor(() =>
+      expect(restored.result.current.variables?.merchantAmount).toBe(OTHER_PARAMS.merchantAmount),
+    );
+    await waitFor(() => expect(restored.result.current.isPending).toBe(false));
+    expect(second.getNonce).not.toHaveBeenCalled();
+    expect(restored.result.current.isUnknown).toBe(true);
+    expect(world.mined).toHaveLength(0);
+  });
+
+  it('同じ状態 (c5) で 7 日を過ぎた → 送らずに閉じる (端末に永久に残る止めを作らない)。その後の支払いは新しい nonce', async () => {
+    await seedConsumedByOtherOp();
+    ageStoredRecord();
+
+    const second = mountClients();
+    const restored = render();
+    // 期限を過ぎても、照合するまでは開いたまま。
+    await waitFor(() => expect(restored.result.current.isUnknown).toBe(true));
+    restored.result.current.retryReceipt();
+    await waitFor(() => expect(restored.result.current.isUnknown).toBe(false));
+    await waitFor(() => expect(restored.result.current.isPending).toBe(false));
+
+    // 成功とは表示しない (data なし・error も出さない)。送らない・署名を求めない。記録は消える。
+    expect(restored.result.current.data).toBeUndefined();
+    expect(restored.result.current.error).toBeNull();
+    expect(second.bundlerSend).not.toHaveBeenCalled();
+    expect(second.signUserOperation).not.toHaveBeenCalled();
+    expect(second.waitForUserOperationReceipt).not.toHaveBeenCalled();
+    expect(pendingKeys()).toHaveLength(0);
+    expect(standardPaymentOpen(restored.result.current)).toBe(true);
+    expect(logger.warn).toHaveBeenCalledWith(
+      'pimlico.pending.expired-closed',
+      expect.objectContaining({ state: 'consumed' }),
+    );
+
+    acceptAndMine(second);
+    restored.result.current.mutate(OTHER_PARAMS);
+    await waitFor(() => expect(restored.result.current.isSuccess).toBe(true));
+    expect(second.getNonce).toHaveBeenCalledTimes(1);
+    expect(world.mined).toHaveLength(1);
+  });
 });
 
 // localStorage の失敗を作る spy。setItem の直後の getItem (persistPimlicoPending の読み戻し) を failReadBacks 回だけ
@@ -1231,6 +1261,90 @@ describe('復元した記録の中の関係を確かめる (SHOULD)', () => {
     hook.rerender();
     await waitFor(() => expect(hook.result.current.isUnknown).toBe(true));
     expect(standardPaymentOpen(hook.result.current)).toBe(false);
+  });
+});
+
+describe('送信を分ける部品の遅延読み込み (bundle の予算)', () => {
+  // lib/smartAccount/pimlicoSend.ts は Pimlico の経路で使うときに dynamic import する。読み込みの失敗を作る。
+  function failPimlicoSendImport() {
+    vi.doMock('@/lib/smartAccount/pimlicoSend', () => {
+      throw new Error('chunk load failed');
+    });
+  }
+  afterEach(() => {
+    vi.doUnmock('@/lib/smartAccount/pimlicoSend');
+  });
+
+  it('順番は nonce → 準備 → 署名 → 保存 → 送信 のまま (読み込みは nonce の前)', async () => {
+    const fake = mountClients();
+    const setItem = vi.spyOn(Storage.prototype, 'setItem');
+    acceptAndMine(fake);
+    const { result } = render();
+
+    result.current.mutate(PARAMS);
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    const firstPersist = setItem.mock.calls.findIndex(([key]) =>
+      String(key).startsWith(PIMLICO_PENDING_KEY_PREFIX),
+    );
+    const order = [
+      fake.getNonce.mock.invocationCallOrder[0],
+      fake.prepareUserOperation.mock.invocationCallOrder[0],
+      fake.signUserOperation.mock.invocationCallOrder[0],
+      setItem.mock.invocationCallOrder[firstPersist],
+      fake.bundlerSend.mock.invocationCallOrder[0],
+    ];
+    expect(order.every((n) => n !== undefined)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+  });
+
+  it('新しい支払いで読み込みに失敗 → 今までどおりの error (応答不明にしない)。nonce・署名・保存・送信はどれもしない', async () => {
+    const fake = mountClients();
+    const { result } = render();
+    failPimlicoSendImport();
+
+    result.current.mutate(PARAMS);
+    await waitFor(() => expect(result.current.isError).toBe(true));
+
+    // 読み込みの error がそのまま届く (vitest は mock の factory が投げた error を「mock の読み込みに失敗した」で包む)。
+    expect(result.current.error?.message).toMatch(/error when mocking a module/);
+    expect(result.current.error?.name).not.toBe('PimlicoResponseUnknownError');
+    expect(result.current.isUnknown).toBe(false);
+    expect(result.current.pendingStoreUnavailable).toBe(false);
+    expect(standardPaymentOpen(result.current)).toBe(true);
+    expect(fake.getNonce).not.toHaveBeenCalled();
+    expect(fake.prepareUserOperation).not.toHaveBeenCalled();
+    expect(fake.signUserOperation).not.toHaveBeenCalled();
+    expect(fake.bundlerSend).not.toHaveBeenCalled();
+    expect(pendingKeys()).toHaveLength(0);
+  });
+
+  it('開いている intent があるときに読み込みに失敗 → 開いたまま (memory に無く storage から読んだ記録も先にラッチする)', async () => {
+    const first = mountClients();
+    loseRequest(first);
+    const firstHook = render();
+    firstHook.result.current.mutate(PARAMS);
+    await waitFor(() => expect(firstHook.result.current.isUnknown).toBe(true));
+    firstHook.unmount();
+
+    // mount の時の読み出しだけ失敗させる (memory に記録が無いまま、次の送信で storage から読む)。
+    const second = mountClients();
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementationOnce(() => {
+      throw new DOMException('read failed', 'UnknownError');
+    });
+    const restored = render();
+    expect(restored.result.current.isUnknown).toBe(false);
+    failPimlicoSendImport();
+
+    restored.result.current.mutate(OTHER_PARAMS);
+    await waitFor(() => expect(restored.result.current.isUnknown).toBe(true));
+    await waitFor(() => expect(restored.result.current.isPending).toBe(false));
+
+    expect(restored.result.current.error).toBeNull();
+    expect(standardPaymentOpen(restored.result.current)).toBe(false);
+    expect(second.getNonce).not.toHaveBeenCalled();
+    expect(second.signUserOperation).not.toHaveBeenCalled();
+    expect(pendingKeys()).toHaveLength(1);
   });
 });
 
