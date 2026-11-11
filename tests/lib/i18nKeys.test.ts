@@ -149,7 +149,8 @@ describe('i18n: smart account 互換性エラー (3 form 名前空間 × ja/en)'
 
 // 確認中の支払いを送り直す前に端末へ保存できないときの本文 (user 承認済みの文・2026-11-11)。3 フォームの
 // namespace だけに ja/en 同じ文で入る (同名の key が複数の namespace にあるので、入った先を namespace ごとに確かめる)。
-// 確認中は通常送信も閉じているので、この文は通常送信を案内しない。
+// /pay・/checkout は確認中のあいだ通常送信も閉じている (/tip は経路ごとの止めで、通常送信は閉じない)。どの画面でも、
+// この文は通常送信を案内しない。
 describe('i18n: pendingStoreUnavailableResendBody (3 form 名前空間 × ja/en)', () => {
   const KEY = 'pendingStoreUnavailableResendBody';
   const TEXT = {
