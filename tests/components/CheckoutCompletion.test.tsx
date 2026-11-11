@@ -9,6 +9,8 @@
 // 依存しない。
 //
 // 見る範囲: CheckoutForm の一番外の div の子のうち、最初の子が見出し「決済が完了しました」の p である要素 (= 完了の枠・ちょうど 1 つ)
+// (復元した前の支払いの確定で、この会計の支払いでないと証明できたときは、見出しが「前に確認中だった支払いが完了しました。この画面の
+// 支払いではありません。」に替わる = 第 10 回レビュー H-S。枠はどちらの見出しでも探し、どちらを出したかは期待の DOM で比べる)
 // を子まで木にしたもの。枠の前の兄弟 (ふつうはお支払い額の section・受注を登録できないときはその案内) と後ろの兄弟 (「powered by」
 // の p) の要素の種類と属性も見る (枠の前後にテキストノード等が紛れていないこと)。テキストノードはつながずに 1 つずつ比べる。
 // 枠の中の別の部品 (「お店に知らせる」の NotifyShopButton・電子レシートの PayerReceiptCompletion) の中身は、期待する props で
@@ -145,6 +147,8 @@ import { primeChimeAudio } from '@/lib/successChime';
 import { storeConfirmationSignature } from '@/lib/orderConfirmation';
 import { resolveOrderDelivery, saveOrderDelivery, type OrderDelivery } from '@/lib/orderDelivery';
 import { deploymentForSlug } from '@/lib/tokens';
+import { env } from '@/lib/env';
+import { orderPaymentContextKey } from '@/lib/orderPaidLookup';
 import { isOrderTokenLike } from '@/lib/orderToken';
 import { notifyShopData } from '@/components/checkout/notifyShopData';
 import { NotifyShopButton, type NotifyShopData } from '@/components/NotifyShopButton';
@@ -194,9 +198,13 @@ function setAccount(state: { isConnected: boolean; chainId?: number }) {
   });
 }
 
-/** ガスレス (Pimlico) の結果。 */
-function setGasless(data: typeof GASLESS_DATA | undefined) {
+/** ガスレス (Pimlico) の結果。extra は、この画面から最後に送った支払いと別の intent の確定 (settledOtherIntent) と保存した params。 */
+function setGasless(
+  data: typeof GASLESS_DATA | undefined,
+  extra: Pick<Partial<ReturnType<typeof useBatchPayment>>, 'settledOtherIntent' | 'variables'> = {},
+) {
   mockHook(useBatchPayment, {
+    ...extra,
     mutate: vi.fn(),
     retryReceipt: vi.fn(),
     isPending: false,
@@ -244,6 +252,8 @@ function setStandard(
     phase?: ReturnType<typeof useStandardPayment>['phase'];
     hasAttempt?: boolean;
     restoredFromStorage?: boolean;
+    /** 復元した支払いの中身 (hook が保存した印から戻す params)。 */
+    lastSubmittedParams?: ReturnType<typeof useStandardPayment>['lastSubmittedParams'];
   } = {},
 ) {
   standardMutate = vi.fn();
@@ -269,13 +279,18 @@ function setStandard(
     hasActiveIntent: false,
     hasAttempt: state.hasAttempt ?? false,
     restoredFromStorage: state.restoredFromStorage ?? false,
+    restoredAttempt: state.restoredFromStorage ?? false,
+    lastSubmittedParams: state.lastSubmittedParams ?? null,
   } as Partial<ReturnType<typeof useStandardPayment>>);
 }
 
 /** 通常決済の完了 (払った後の hook の状態)。 */
 const standardDone = (
   data: { merchantTxHash: Hex; feeTxHash: Hex | undefined; blockNumber: bigint } = STANDARD_DATA,
-  extra: { restoredFromStorage?: boolean } = {},
+  extra: {
+    restoredFromStorage?: boolean;
+    lastSubmittedParams?: ReturnType<typeof useStandardPayment>['lastSubmittedParams'];
+  } = {},
 ) => setStandard({ data, phase: 'success', hasAttempt: true, ...extra });
 
 /** ガスレス (Pimlico) の経路: JPYC の gasless provider を Pimlico にし、Smart Account を用意する。 */
@@ -329,6 +344,33 @@ const RESTORED_INTENT: NonNullable<ReturnType<typeof useJpycEip3009Payment>['res
   routeKind: 'free',
   issuedAt: 1_700_000_000_000,
 };
+
+const OTHER_MERCHANT: Address = '0x3333333333333333333333333333333333333333';
+/** 読み直した画面で復元した通常決済の中身: paid の会計 (JPYC・Polygon・3000 JPYC) を払ったときに hook が保存する params。 */
+function restoredStandardParams(paid: CheckoutParams): NonNullable<ReturnType<typeof useStandardPayment>['lastSubmittedParams']> {
+  const dep = deploymentForSlug('jpyc', 'polygon');
+  return {
+    tokenAddress: dep.address,
+    merchant: paid.to,
+    merchantAmount: JPYC(3000n),
+    feeReceiver: env.feeReceiver,
+    feeAmount: 0n,
+    chainId: dep.chainId,
+    saleAmount: JPYC(3000n),
+    contextKey: orderPaymentContextKey(paid, 'polygon') as Hex,
+  };
+}
+/** 保存した Pimlico の intent の params (useBatchPayment の variables)。3000 JPYC を merchant へ。 */
+function gaslessVariables(merchant: Address): NonNullable<ReturnType<typeof useBatchPayment>['variables']> {
+  return {
+    tokenAddress: deploymentForSlug('jpyc', 'polygon').address,
+    merchant,
+    merchantAmount: JPYC(3000n),
+    feeReceiver: env.feeReceiver,
+    feeAmount: 0n,
+    saleAmount: JPYC(3000n),
+  };
+}
 
 let fetchMock: ReturnType<typeof vi.fn>;
 let routerPush: ReturnType<typeof vi.fn>;
@@ -390,6 +432,13 @@ function stubAssign(onAssign?: (url: string) => void) {
   const assign = vi.fn((url: string) => onAssign?.(url));
   Object.defineProperty(window, 'location', { configurable: true, value: { ...realLocation, assign } });
   return assign;
+}
+
+/** window.location.reload (「読み込み直す」) を spy にする。 */
+function stubReload() {
+  const reload = vi.fn();
+  Object.defineProperty(window, 'location', { configurable: true, value: { ...realLocation, reload } });
+  return reload;
 }
 
 // ---- 文言のカタログ ----------------------------------------------------------------------------------------------
@@ -490,13 +539,16 @@ function sibling(n: ChildNode | null): Sibling {
   return `#node-${n.nodeType}:${n.textContent ?? ''}`;
 }
 
-/** CheckoutForm の一番外の div の子のうち、最初の子が見出し「決済が完了しました」の p である要素 (= 完了の枠)。 */
+/**
+ * CheckoutForm の一番外の div の子のうち、最初の子が見出し「決済が完了しました」の p である要素 (= 完了の枠)。この会計の支払いで
+ * ない確定のときの見出し (foreignSettlementTitle) の枠も同じ枠として拾う (どちらの見出しかは期待の DOM で比べる)。
+ */
 function completionFrames(container: HTMLElement, c: Catalog): Element[] {
   const root = container.firstElementChild;
   expect(root).not.toBeNull();
-  const title = tx(c, k('successTitle'));
+  const titles = [tx(c, k('successTitle')), tx(c, k('foreignSettlementTitle'))];
   return Array.from(root!.children).filter(
-    (el) => el.firstElementChild?.tagName === 'P' && el.firstElementChild.textContent === title,
+    (el) => el.firstElementChild?.tagName === 'P' && titles.includes(el.firstElementChild.textContent ?? ''),
   );
 }
 
@@ -542,6 +594,8 @@ const STATUS_LINK_CLASS =
   'mt-4 flex items-center justify-center rounded-xl border border-brand/30 bg-brand/5 px-4 py-3 text-sm font-semibold text-brand transition hover:bg-brand/10';
 const REDIRECT_CLASS = 'mt-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between';
 const REDIRECT_BUTTON_CLASS = 'rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700';
+const RELOAD_BUTTON_CLASS =
+  'mt-3 inline-flex min-h-11 items-center rounded-md bg-emerald-600 px-4 text-sm font-semibold text-white hover:bg-emerald-700';
 const HOME_BUTTON_CLASS =
   'mt-4 inline-block rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700';
 // 枠の前の兄弟: ふつうはお支払い額の section。受注を登録できないときはその案内。
@@ -593,6 +647,11 @@ const orderRow = (id: string): Row => ({ label: k('orderIdLabel'), value: id });
 
 /** 状態ごとに期待する完了の枠。 */
 type Want = {
+  /**
+   * 復元した前の支払いの確定で、この会計の支払いでないと証明できた (第 10 回レビュー H-S): 見出しと説明が替わり (お礼を
+   * 出さない)、「読み込み直す」が説明のすぐ下に出る。結果の行から下は同じ。
+   */
+  foreign?: boolean;
   /** 結果の行 (dl の子) の並び。 */
   rows: Row[];
   /** 「お店に知らせる / 注文を送る」に渡す中身。無ければ出さない。 */
@@ -619,8 +678,11 @@ function standaloneNodes(c: Catalog, ui: ReactElement): DomNode[] {
 
 function expectedArea(c: Catalog, want: Want): Area {
   const children: DomNode[] = [
-    p('font-semibold', [tx(c, k('successTitle'))]),
-    p('mt-1 text-xs', [tx(c, k('successBody'))]),
+    p('font-semibold', [tx(c, k(want.foreign ? 'foreignSettlementTitle' : 'successTitle'))]),
+    p('mt-1 text-xs', [tx(c, k(want.foreign ? 'foreignSettlementBody' : 'successBody'))]),
+    ...(want.foreign
+      ? [{ tag: 'button', attrs: { type: 'button', class: RELOAD_BUTTON_CLASS }, children: [tx(c, k('foreignSettlementReload'))] }]
+      : []),
     { tag: 'dl', attrs: { class: 'mt-3 space-y-1 text-xs' }, children: want.rows.map((row) => resultRow(c, row)) },
   ];
   if (want.notify) {
@@ -875,10 +937,63 @@ const CASES: Case[] = [
     want: () => ({ rows: [relayRow(SAVED_TX), orderRow('saved-id')], receiptIds: [U, U, U, SAVED_TX], home: true }),
   },
   {
+    // 受付番号つきの会計 = 注文リンク。注文リンクの鍵を持たない復元は、2026-11-05 より前に保存した同じ注文リンクの支払いで
+    // ありうるので鍵では比べず、受取先と合計がこの会計と同じ = 今までどおりの見出し (第 10 回レビュー H-S・Codex MUST 1)。
     name: '読み直した画面で復元した relay の支払い (控えなし) + URL の受付番号: 受付番号の行を出さない・「お店に知らせる」も出さない',
     setup: () => setRelay({ data: { txHash: RELAY_TX, success: true }, restoredIntent: RESTORED_INTENT }),
     params: () => jpycParams({ orderId: 'ORD-9' }),
     want: () => ({ rows: [relayRow(RELAY_TX)], receiptIds: [U, U, U, RELAY_TX], home: true }),
+  },
+  {
+    name: '読み直した画面で復元した relay の支払い (控えなし・受取先も合計もこの会計と同じ): 今までどおりの見出し',
+    setup: () => setRelay({ data: { txHash: RELAY_TX, success: true }, restoredIntent: RESTORED_INTENT }),
+    params: () => jpycParams(),
+    want: () => ({ rows: [relayRow(RELAY_TX)], receiptIds: [U, U, U, RELAY_TX], home: true }),
+  },
+  {
+    name: '読み直した画面で復元した relay の支払い (控えなし・別の店): この会計の支払いでない見出しと「読み込み直す」',
+    setup: () =>
+      setRelay({ data: { txHash: RELAY_TX, success: true }, restoredIntent: { ...RESTORED_INTENT, merchant: OTHER_MERCHANT } }),
+    params: () => jpycParams(),
+    want: () => ({ foreign: true, rows: [relayRow(RELAY_TX)], receiptIds: [U, U, U, RELAY_TX], home: true }),
+  },
+  {
+    name: '読み直した画面で復元した通常決済 (別のお店の会計): この会計の支払いでない見出しと「読み込み直す」',
+    setup: () =>
+      standardDone(STANDARD_DATA, {
+        restoredFromStorage: true,
+        lastSubmittedParams: restoredStandardParams(jpycParams({ mode: 'standard', to: OTHER_MERCHANT })),
+      }),
+    params: () => jpycParams({ mode: 'standard' }),
+    want: () => ({ foreign: true, rows: STANDARD_ROWS, receiptIds: [STANDARD_DATA.merchantTxHash, U, U, U], home: true }),
+  },
+  {
+    name: '読み直した画面で復元した通常決済 (会計の鍵がこの会計): 今までどおりの見出し',
+    setup: () =>
+      standardDone(STANDARD_DATA, {
+        restoredFromStorage: true,
+        lastSubmittedParams: restoredStandardParams(jpycParams({ mode: 'standard' })),
+      }),
+    params: () => jpycParams({ mode: 'standard' }),
+    want: () => ({ rows: STANDARD_ROWS, receiptIds: [STANDARD_DATA.merchantTxHash, U, U, U], home: true }),
+  },
+  {
+    name: 'ガスレス: 別の intent の確定 (保存した params の受取先が別の店): この会計の支払いでない見出しと「読み込み直す」',
+    setup: () => {
+      gaslessRoute();
+      setGasless(GASLESS_DATA, { settledOtherIntent: true, variables: gaslessVariables(OTHER_MERCHANT) });
+    },
+    params: () => jpycParams(),
+    want: () => ({ foreign: true, rows: GASLESS_ROWS, receiptIds: [U, GASLESS_DATA.txHash, GASLESS_DATA.userOpHash, U], home: true }),
+  },
+  {
+    name: 'ガスレス: 別の intent の確定 (保存した params の受取先・token・売上の額がこの会計と同じ): 今までどおりの見出し',
+    setup: () => {
+      gaslessRoute();
+      setGasless(GASLESS_DATA, { settledOtherIntent: true, variables: gaslessVariables(MERCHANT) });
+    },
+    params: () => jpycParams(),
+    want: () => ({ rows: GASLESS_ROWS, receiptIds: [U, GASLESS_DATA.txHash, GASLESS_DATA.userOpHash, U], home: true }),
   },
   {
     name: '読み直した画面で復元した通常決済 + URL の受付番号: 受付番号の行を出さない',
@@ -1132,6 +1247,19 @@ describe('CheckoutForm — 支払い完了の枠 (CheckoutCompletion の charact
       expect(assign).toHaveBeenCalledWith(
         `${SUCCESS_URL}?tx_hash=${STANDARD_DATA.merchantTxHash}&fee_tx_hash=${STANDARD_DATA.feeTxHash}&block=123&order_id=ORD-1&chain=polygon&token=jpyc&mode=standard`,
       );
+      expect(routerPush).not.toHaveBeenCalled();
+    });
+
+    it('「読み込み直す」(この会計の支払いでない確定): window.location.reload を呼ぶ・ほかへは移動しない', async () => {
+      const reload = stubReload();
+      setRelay({ data: { txHash: RELAY_TX, success: true }, restoredIntent: { ...RESTORED_INTENT, merchant: OTHER_MERCHANT } });
+      const ctx = await renderCase('ja', { params: () => jpycParams() });
+      const button = Array.from(frameEl(ctx.container, 'ja').querySelectorAll('button')).find(
+        (b) => b.textContent === tx('ja', k('foreignSettlementReload')),
+      );
+      expect(button).toBeDefined();
+      fireEvent.click(button!);
+      expect(reload).toHaveBeenCalledTimes(1);
       expect(routerPush).not.toHaveBeenCalled();
     });
 

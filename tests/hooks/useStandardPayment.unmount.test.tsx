@@ -661,6 +661,8 @@ describe('useStandardPayment: 離れた画面の要求が出たままの間は�
     expect(second.result.current.isPending).toBe(true);
     expect(second.result.current.hasAttempt).toBe(true);
     expect(second.result.current.restoredFromStorage).toBe(true);
+    // H-U: 別の画面の要求が出たままの間も、引き継いで復元した後も「復元した試み」。
+    expect(second.result.current.restoredAttempt).toBe(true);
     expect(second.result.current.hasActiveIntent).toBe(false);
 
     // 新しい支払い B を始めようとしても、ウォレットへは出ない (直す前はここで 2 本目の要求が出て、B の印を A が上書きした)。
@@ -677,6 +679,7 @@ describe('useStandardPayment: 離れた画面の要求が出たままの間は�
     expect(second.result.current.merchantTxHash).toBe(MERCHANT_TX);
     expect(second.result.current.hasActiveIntent).toBe(true);
     expect(second.result.current.restoredFromStorage).toBe(true);
+    expect(second.result.current.restoredAttempt).toBe(true);
     expect(second.result.current.isUnknown).toBe(true);
     act(() => second.result.current.mutate(PARAMS));
     expect(walletSends).toHaveLength(1);
@@ -711,6 +714,7 @@ describe('useStandardPayment: 離れた画面の要求が出たままの間は�
     expect(second.result.current.isPending).toBe(false);
     expect(second.result.current.hasAttempt).toBe(false);
     expect(second.result.current.restoredFromStorage).toBe(false);
+    expect(second.result.current.restoredAttempt).toBe(false);
 
     act(() => second.result.current.mutate(PARAMS_NO_FEE));
     await waitForWalletSends(2);

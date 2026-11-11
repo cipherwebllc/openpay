@@ -17,6 +17,12 @@ import { NotifyShopButton, type NotifyShopData } from '../NotifyShopButton';
 import { PayerReceiptCompletion } from '../PayerReceiptCompletion';
 
 type Props = {
+  /**
+   * 復元した前の支払いの確定で、この会計の支払いでないと証明できたとき (第 10 回レビュー H-S)。題と本文を「前に確認中だった
+   * 支払いが完了しました。この画面の支払いではありません。」と読み込み直しの案内に差し替え、「読み込み直す」を出す (お礼は
+   * 出さない)。結果の行 (Tx Hash など) から下は同じ。
+   */
+  foreign: boolean;
   /** ガスレス (Pimlico) の結果の行 (UserOp・Tx・ブロック)。ガスレスの経路で結果があるときだけ。null なら出さない。 */
   gasless: { userOpHash: string; txHash: string; blockNumber: string } | null;
   /** relay の Tx の行 (relay は UserOp・ブロックを持たない)。relay の経路で成功して Tx Hash があるときだけ。null なら出さない。 */
@@ -47,6 +53,7 @@ type Props = {
 };
 
 export function CheckoutCompletion({
+  foreign,
   gasless,
   relayTxHash,
   standard,
@@ -64,8 +71,19 @@ export function CheckoutCompletion({
 
   return (
     <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
-      <p className="font-semibold">{t('successTitle')}</p>
-      <p className="mt-1 text-xs">{t('successBody')}</p>
+      <p className="font-semibold">{t(foreign ? 'foreignSettlementTitle' : 'successTitle')}</p>
+      <p className="mt-1 text-xs">{t(foreign ? 'foreignSettlementBody' : 'successBody')}</p>
+      {/* hook は確定と同時に前の支払いの記録を片づけるので、読み込み直せばこの会計を払える。削除に失敗した端末 (失敗は
+          握る) では記録が残り、読み込み直しても同じ表示に戻る (既存の限界)。 */}
+      {foreign && (
+        <button
+          type="button"
+          onClick={() => window.location.reload()}
+          className="mt-3 inline-flex min-h-11 items-center rounded-md bg-emerald-600 px-4 text-sm font-semibold text-white hover:bg-emerald-700"
+        >
+          {t('foreignSettlementReload')}
+        </button>
+      )}
       <dl className="mt-3 space-y-1 text-xs">
         {gasless !== null && (
           <>

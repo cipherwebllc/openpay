@@ -169,6 +169,10 @@ export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {
   const storageRef = useRef<PaymentIntentStorage | null>(null);
   const issuedAtRef = useRef(0);
   const restoredFromStorageRef = useRef(false);
+  // H-U (第 10 回レビュー): 今の試みが、保存された印からの復元 (mount の読込・別の画面の要求の結果の読み直し) か。
+  // restoredFromStorageRef は retryFee が false に戻すので、復元した別の支払いの利用料を再送した後は「復元でない」になる。
+  // こちらは新しい mutate でだけ false に戻し、retryFee では戻さない (画面が完了の帰属を決めるのに使う)。
+  const restoredAttemptRef = useRef(false);
   const queuedParamsRef = useRef<StandardPaymentParams | null>(null);
   const [storageReady, setStorageReady] = useState(false);
   const [hasStoredIntent, setHasStoredIntent] = useState(false);
@@ -535,6 +539,7 @@ export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {
       const params = storage.standardParamsFromIntent(intent);
       issuedAtRef.current = intent.issuedAt;
       restoredFromStorageRef.current = true;
+      restoredAttemptRef.current = true;
       lastParamsRef.current = params;
       lastSubmittedFromRef.current = intent.from;
       setChainId(intent.chainId);
@@ -635,6 +640,7 @@ export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {
     feeReceiptLoggedKeyRef.current = null;
     feeStartedRef.current = false;
     restoredFromStorageRef.current = false;
+    restoredAttemptRef.current = false;
     issuedAtRef.current = Date.now();
     restoredMerchantTxHashRef.current = undefined;
     restoredFeeTxHashRef.current = undefined;
@@ -1092,5 +1098,9 @@ export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {
     // この画面の支払いとして扱わない (restoredFromStorage = 履歴・控え・注文の記録へ結び付けない)。
     hasAttempt: requestElsewhere !== null || lastParamsRef.current !== null,
     restoredFromStorage: requestElsewhere !== null || restoredFromStorageRef.current,
+    // H-U: 復元した試みか (別の画面の要求が出たままの間も true)。restoredFromStorage と違い、利用料の再送 (retryFee) の
+    // 後も true のまま。画面は「この画面から始めた支払いか」をこちらでも確かめる (復元した別の支払いの利用料の再送の
+    // 完了を、今の画面の完了・履歴・払った記録にしない)。restoredFromStorage の値と意味は変えていない。
+    restoredAttempt: requestElsewhere !== null || restoredAttemptRef.current,
   };
 }

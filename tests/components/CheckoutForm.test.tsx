@@ -126,6 +126,18 @@ vi.mock('@/lib/env', async (importOriginal) => {
   };
 });
 
+// 復元した支払いの確定の判定 (lib/paymentFlowGuards/restoredSettlement)。既定は実物そのまま。G-1 の構造の守り (判定が
+// 不一致を返しても、この注文リンクの会計と一致した記録は W1 にしない) を確かめるテストだけが、不一致を強制する。
+const settlementForce = vi.hoisted(() => ({ foreign: false }));
+vi.mock('@/lib/paymentFlowGuards/restoredSettlement', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/paymentFlowGuards/restoredSettlement')>();
+  return {
+    ...actual,
+    isForeignSettlement: (...args: Parameters<typeof actual.isForeignSettlement>) =>
+      settlementForce.foreign || actual.isForeignSettlement(...args),
+  };
+});
+
 import { useAccount, usePublicClient, useReadContract, useSwitchChain, useWalletClient } from 'wagmi';
 import { checkoutFormKey } from '@/lib/checkoutFormKey';
 import { useSmartAccount } from '@/hooks/useSmartAccount';
@@ -372,6 +384,9 @@ function setStandardPayment(
     >;
     lastSubmittedFrom?: Address;
     restoredFromStorage?: boolean;
+    // 復元した試みの印 (第 10 回レビュー H-U)。hook は復元で restoredFromStorage と一緒に true にし、利用料の再送
+    // (retryFee) では restoredFromStorage だけを false に戻す。省略時は restoredFromStorage と同じ値。
+    restoredAttempt?: boolean;
   } = {},
 ) {
   standardMutate = vi.fn();
@@ -446,6 +461,7 @@ function setStandardPayment(
     lastSubmittedParams: opts.lastSubmittedParams,
     lastSubmittedFrom: opts.lastSubmittedFrom,
     restoredFromStorage: opts.restoredFromStorage ?? false,
+    restoredAttempt: opts.restoredAttempt ?? opts.restoredFromStorage ?? false,
   } as Partial<ReturnType<typeof useStandardPayment>>);
 }
 
@@ -547,6 +563,7 @@ beforeEach(() => {
   // fee flag / rate は毎テスト OFF・実物起点 (fee テストが個別に立てる)。
   feeFlags.enableMobileOrderFee = false;
   feeFlags.enableOrderPickup = false;
+  settlementForce.foreign = false;
   window.sessionStorage.clear();
 });
 
@@ -570,6 +587,12 @@ const JPYC_PARAMS: CheckoutParams = {
   gas: 'customer',
   items: [{ name: 'チケット', qty: 1, price: '3000' }],
 };
+
+// 完了の欄の題と本文。FOREIGN_* は、復元した前の支払いの確定で、この会計の支払いでないと証明できたとき (第 10 回レビュー H-S)。
+const DONE_TITLE = 'お支払いが完了しました';
+const DONE_THANKS = 'ご注文ありがとうございます。決済はオンチェーンで確定しました。';
+const FOREIGN_TITLE = '前に確認中だった支払いが完了しました。この画面の支払いではありません。';
+const FOREIGN_BODY = 'この画面の支払いを続けるには、読み込み直してください。';
 
 describe('CheckoutForm — レンダリング', () => {
   it('order_id / description / items / 合計が表示される', () => {
@@ -1290,6 +1313,9 @@ describe('CheckoutForm — 成功時の挙動', () => {
 
       // 完了の欄の hash はどちらも出る。
       expect((await screen.findAllByText(`0x${'b'.repeat(64)}`)).length).toBeGreaterThan(0);
+      // 保存した params (variables) の無い確定は比べられない = 題は今までどおり (第 10 回レビュー H-S)。
+      expect(screen.getAllByText(DONE_TITLE).length).toBeGreaterThan(0);
+      expect(screen.queryByText(FOREIGN_TITLE)).toBeNull();
       const paidRecords = () =>
         Array.from({ length: window.sessionStorage.length }, (_, i) => window.sessionStorage.key(i))
           .filter((key) => key?.startsWith('openpay:order-paid:v1:'));
@@ -1351,6 +1377,12 @@ describe('CheckoutForm — 成功時の挙動', () => {
 
     // 画面には hash が出る (利用者が自分で確かめられる)。
     expect((await screen.findAllByText(`0x${'b'.repeat(64)}`)).length).toBeGreaterThan(0);
+    // 別の店への支払いの確定 = この会計の支払いでないと証明できる → 題と本文を差し替え、お礼を出さない (第 10 回レビュー H-S)。
+    expect(screen.getByText(FOREIGN_TITLE)).toBeInTheDocument();
+    expect(screen.getByText(FOREIGN_BODY)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '読み込み直す' })).toBeInTheDocument();
+    expect(screen.queryByText(DONE_TITLE)).toBeNull();
+    expect(screen.queryByText(DONE_THANKS)).toBeNull();
     await waitFor(() => expect(loadHistory()).toHaveLength(1));
     const [history] = loadHistory();
     expect(history.merchant).toBe(intentA.merchant);
@@ -3600,6 +3632,11 @@ describe('CheckoutForm — モバイル注文 / レジ システム利用料 (fl
         screen.getAllByText(`0x${'f'.repeat(64)}`).length,
       ).toBeGreaterThan(0),
     );
+    // 今の relay はこの会計で必ず注文に束縛されるが、束縛は 2026-09-25 からで、それより前の同じ注文の支払いは束縛しない
+    // 記録として残る。お店・合計 (受取 + 利用料) が同じ束縛しない記録は別の支払いと証明できない = 題は今までどおり
+    // (第 10 回レビュー H-S)。受注は今までどおり送らない。
+    expect(screen.getByText(DONE_TITLE)).toBeInTheDocument();
+    expect(screen.queryByText(FOREIGN_TITLE)).toBeNull();
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(loadHistory()).toHaveLength(0);
     expect(loadPayerReceipts()).toHaveLength(0);
@@ -4762,6 +4799,7 @@ describe('CheckoutForm — 復元した決済の完了で「注文を送る」�
       hasActiveIntent: false,
       hasAttempt: true,
       restoredFromStorage: true,
+      restoredAttempt: true,
     };
     vi.mocked(useStandardPayment).mockReturnValue(restored);
   }
@@ -4830,6 +4868,10 @@ describe('CheckoutForm — 復元した決済の完了で「注文を送る」�
 
     // 既存の復元の流れのまま、完了欄に Tx Hash を出す
     expect(screen.getAllByText(TX).length).toBeGreaterThan(0);
+    // この注文リンクの支払いと確かめられた復元は、題も今までどおり (「この画面の支払いではありません」と「お店に知らせる」を
+    // 同時に出さない・第 10 回レビュー H-S)
+    expect(screen.getByText(DONE_TITLE)).toBeInTheDocument();
+    expect(screen.queryByText(FOREIGN_TITLE)).toBeNull();
     // (a) 「お店に知らせる」(番号つきの注文の「注文を送る」) を 1 つだけ出す
     expect(await screen.findByText(RESTORED_TITLE)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'お店に知らせる' })).toBeInTheDocument();
@@ -4855,6 +4897,10 @@ describe('CheckoutForm — 復元した決済の完了で「注文を送る」�
 
     // 既存の復元の流れ (完了欄の Tx Hash) はそのまま
     expect(screen.getAllByText(TX).length).toBeGreaterThan(0);
+    // 題では会計の鍵の値を比べない (鍵の入力は払った後にずれうる・Codex 第 2 回)。同じお店・同じ合計の番号違いの注文は
+    // 見分けられず、今までどおりの題 (残る限界・第 10 回レビュー H-S)。「お店に知らせる」と払った記録は今までどおり出さない。
+    expect(screen.getByText(DONE_TITLE)).toBeInTheDocument();
+    expect(screen.queryByText(FOREIGN_TITLE)).toBeNull();
     expect(screen.queryByText(RESTORED_TITLE)).toBeNull();
     expect(screen.queryByRole('button', { name: 'お店に知らせる' })).toBeNull();
     first.unmount();
@@ -4879,6 +4925,11 @@ describe('CheckoutForm — 復元した決済の完了で「注文を送る」�
     const first = render(<CheckoutForm params={shipAsk} />);
 
     expect(screen.getAllByText(TX).length).toBeGreaterThan(0);
+    // 注文リンクの鍵の無い復元は、2026-11-05 より前に保存した同じ注文リンクの支払いでもありうるので、題では別の支払いと
+    // しない (会計の鍵・お店・額が同じ = 今までどおりの題・第 10 回レビュー H-S・Codex MUST 1)。「注文を送る」と払った記録は
+    // 今までどおり鍵の一致を要る (G-1)。
+    expect(screen.getByText(DONE_TITLE)).toBeInTheDocument();
+    expect(screen.queryByText(FOREIGN_TITLE)).toBeNull();
     expect(screen.queryByText(RESTORED_TITLE)).toBeNull();
     expect(screen.queryByRole('button', { name: '注文を送る' })).toBeNull();
     first.unmount();
@@ -4900,6 +4951,10 @@ describe('CheckoutForm — 復元した決済の完了で「注文を送る」�
     const first = render(<CheckoutForm params={STANDARD_ORDER} />);
 
     expect(screen.getAllByText(TX).length).toBeGreaterThan(0);
+    // 題では注文リンクの鍵の値を比べない (Codex 第 2 回)。お店・合計が同じ = 今までどおりの題 (第 10 回レビュー H-S)。
+    // 「お店に知らせる」と払った記録は今までどおり鍵の一致を要るので出さない (G-1)。
+    expect(screen.getByText(DONE_TITLE)).toBeInTheDocument();
+    expect(screen.queryByText(FOREIGN_TITLE)).toBeNull();
     expect(screen.queryByText(RESTORED_TITLE)).toBeNull();
     expect(screen.queryByRole('button', { name: 'お店に知らせる' })).toBeNull();
     first.unmount();
@@ -4943,6 +4998,9 @@ describe('CheckoutForm — 復元した決済の完了で「注文を送る」�
     const first = render(<CheckoutForm params={RELAY_ORDER} />);
 
     expect(screen.getAllByText(TX).length).toBeGreaterThan(0);
+    // この注文リンクの支払いと確かめられた復元は、題も今までどおり (第 10 回レビュー H-S)
+    expect(screen.getByText(DONE_TITLE)).toBeInTheDocument();
+    expect(screen.queryByText(FOREIGN_TITLE)).toBeNull();
     // (a)
     expect(await screen.findByText(RESTORED_TITLE)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '注文を送る' })).toBeInTheDocument();
@@ -4958,6 +5016,146 @@ describe('CheckoutForm — 復元した決済の完了で「注文を送る」�
     expect(await screen.findByText(PAID_NOTE)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /3000 JPYC を支払う/ })).toBeDisabled();
     expect(screen.getByRole('button', { name: '注文を送る' })).toBeInTheDocument();
+  });
+
+  // G-1 の構造の守り (第 10 回レビュー H-S・Codex 第 3 回): 判定の関数が不一致を返す入力 (env の token の表のずれなど) でも、
+  // この注文リンクの会計と一致した記録は W1 にしない (「この画面の支払いではありません」と「注文を送る」を同時に出さない)。
+  // 判定を mock で不一致に強制して確かめる (CheckoutForm が判定を呼ぶ前に G-1 で一致とすること)。
+  it.each<[string, Partial<RestoredRelayIntent>]>([
+    ['free', {}],
+    ['recover', RECOVER],
+  ])('ガスレス (relay %s): 判定が不一致を返しても、G-1 を満たす記録は今までどおりの題で「注文を送る」を出す', async (_route, overrides) => {
+    settlementForce.foreign = true;
+    ready();
+    setRestoredRelaySuccess(relayIntent(overrides));
+    render(<CheckoutForm params={RELAY_ORDER} />);
+
+    expect(await screen.findByRole('button', { name: '注文を送る' })).toBeInTheDocument();
+    expect(screen.getByText(DONE_TITLE)).toBeInTheDocument();
+    expect(screen.queryByText(FOREIGN_TITLE)).toBeNull();
+    expect(screen.queryByRole('button', { name: '読み込み直す' })).toBeNull();
+  });
+
+  it('通常決済: 判定が不一致を返しても、G-1 を満たす記録は今までどおりの題で「お店に知らせる」を出す', async () => {
+    settlementForce.foreign = true;
+    ready();
+    setRestoredStandardSuccess({ contextKey: contextKeyOf(STANDARD_ORDER), orderLinkKey: orderLinkKeyOf(STANDARD_ORDER) });
+    render(<CheckoutForm params={STANDARD_ORDER} />);
+
+    expect(await screen.findByRole('button', { name: 'お店に知らせる' })).toBeInTheDocument();
+    expect(screen.getByText(DONE_TITLE)).toBeInTheDocument();
+    expect(screen.queryByText(FOREIGN_TITLE)).toBeNull();
+  });
+
+  // Codex 第 4 回: G-1 の守りは G-1 の欄を出す確定 (restoredCompletionNotify) と同じ値を見る。この注文リンクと合う記録が
+  // あっても、その結果がまだ無い・今の経路の確定でないなら守りに入らず、確定した別の支払いは W1 になる。判定は実物のまま。
+  const A_PARAMS: CheckoutParams = {
+    ...JPYC_PARAMS,
+    to: OTHER_MERCHANT,
+    orderId: 'ord-A',
+    items: [{ name: 'A', qty: 1, price: '1000' }],
+  };
+  const A_TOTAL = 1000n * 10n ** 18n;
+
+  it('この注文リンクと合う relay の記録 (結果はまだ無い) があっても、確定した通常決済の別の支払い A (別のお店・1,000 JPYC) は「この画面の支払いではありません」', async () => {
+    ready();
+    vi.mocked(resolveJpycGaslessProvider).mockReturnValue('eip3009-relay');
+    setRelayPayment('idle', { restoredIntent: relayIntent() });
+    setStandardPayment('success-no-fee', {
+      lastSubmittedParams: {
+        tokenAddress: deployment.address,
+        merchant: OTHER_MERCHANT,
+        merchantAmount: A_TOTAL,
+        feeReceiver: env.feeReceiver,
+        feeAmount: 0n,
+        chainId: deployment.chainId,
+        saleAmount: A_TOTAL,
+        contextKey: contextKeyOf({ ...A_PARAMS, mode: 'standard' }),
+        orderLinkKey: orderLinkKeyOf({ ...A_PARAMS, mode: 'standard' }),
+      },
+      lastSubmittedFrom: CUSTOMER,
+      restoredFromStorage: true,
+    });
+    render(<CheckoutForm params={RELAY_ORDER} />);
+
+    expect(screen.getAllByText(`0x${'c'.repeat(64)}`).length).toBeGreaterThan(0);
+    expect(screen.getByText(FOREIGN_TITLE)).toBeInTheDocument();
+    expect(screen.queryByText(DONE_TITLE)).toBeNull();
+    expect(screen.queryByRole('button', { name: '注文を送る' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'お店に知らせる' })).toBeNull();
+  });
+
+  // 守りを経路で絞るだけでは足りない場合: G-1 の欄の relay の分は今の経路を見ない (別のチェーンのまま読み直しても記録を
+  // 残すため・CheckoutForm の restoredCompletionNotify)。今の経路が通常決済で別の支払い A が確定し、この注文リンクと合う
+  // relay の支払いも確定したときは、G-1 の欄 (「注文を送る」) が出る。守りが同じ値を見るので、W1 は同時に出さない。
+  it('通常決済の別の支払い A と、この注文リンクと合う relay の支払いが両方確定したとき: 「注文を送る」を出し、W1 は同時に出さない', async () => {
+    ready();
+    setRestoredRelaySuccess(relayIntent());
+    setStandardPayment('success-no-fee', {
+      lastSubmittedParams: {
+        tokenAddress: deployment.address,
+        merchant: OTHER_MERCHANT,
+        merchantAmount: A_TOTAL,
+        feeReceiver: env.feeReceiver,
+        feeAmount: 0n,
+        chainId: deployment.chainId,
+        saleAmount: A_TOTAL,
+        contextKey: contextKeyOf({ ...A_PARAMS, mode: 'standard' }),
+        orderLinkKey: orderLinkKeyOf({ ...A_PARAMS, mode: 'standard' }),
+      },
+      lastSubmittedFrom: CUSTOMER,
+      restoredFromStorage: true,
+    });
+    render(<CheckoutForm params={RELAY_ORDER} />);
+
+    expect(await screen.findByRole('button', { name: '注文を送る' })).toBeInTheDocument();
+    expect(screen.queryByText(FOREIGN_TITLE)).toBeNull();
+  });
+
+  // 逆の組み合わせ。この注文リンクと合う通常決済の記録は未確定 (結果なし) で、今の経路は relay。本物の hook は通常決済の
+  // 記録を復元すると hasAttempt を立てて経路を通常決済にする (lastSubmittedParams と hasAttempt は同じ ref から出る) ので、
+  // この組み合わせは本物の hook では作れない。hook の印を mock で組んだ、守りの形だけを確かめるテスト (守りが経路や
+  // もう一方の記録の有無でなく restoredCompletionNotify だけを見ること)。起きうる状態の再現ではない。
+  it('この注文リンクと合う通常決済の記録 (未確定) があっても、確定した relay の別の支払い A (別のお店・1,000 JPYC) は「この画面の支払いではありません」', async () => {
+    ready();
+    setStandardPayment('idle', {
+      lastSubmittedParams: {
+        tokenAddress: deployment.address,
+        merchant: MERCHANT,
+        merchantAmount: TOTAL,
+        feeReceiver: env.feeReceiver,
+        feeAmount: 0n,
+        chainId: deployment.chainId,
+        saleAmount: TOTAL,
+        contextKey: contextKeyOf(RELAY_ORDER),
+        orderLinkKey: orderLinkKeyOf(RELAY_ORDER),
+      },
+      lastSubmittedFrom: CUSTOMER,
+      restoredFromStorage: true,
+    });
+    setRestoredRelaySuccess(
+      relayIntent({ merchant: OTHER_MERCHANT, merchantValue: A_TOTAL.toString(), orderLinkKey: orderLinkKeyOf(A_PARAMS) }),
+    );
+    render(<CheckoutForm params={RELAY_ORDER} />);
+
+    expect(screen.getAllByText(TX).length).toBeGreaterThan(0);
+    expect(screen.getByText(FOREIGN_TITLE)).toBeInTheDocument();
+    expect(screen.queryByText(DONE_TITLE)).toBeNull();
+    expect(screen.queryByRole('button', { name: '注文を送る' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'お店に知らせる' })).toBeNull();
+  });
+
+  it('(対照) 判定を不一致に強制すると、G-1 を満たさない復元 (別の注文の指紋) は「この画面の支払いではありません」', async () => {
+    settlementForce.foreign = true;
+    ready();
+    setRestoredRelaySuccess(
+      relayIntent({ orderLinkKey: orderLinkKeyOf({ ...RELAY_ORDER, items: [{ name: 'チケット', qty: 2, price: '1500' }] }) }),
+    );
+    render(<CheckoutForm params={RELAY_ORDER} />);
+
+    expect(screen.getByText(FOREIGN_TITLE)).toBeInTheDocument();
+    expect(screen.queryByText(DONE_TITLE)).toBeNull();
+    expect(screen.queryByRole('button', { name: '注文を送る' })).toBeNull();
   });
 
   it.each<[string, Partial<RestoredRelayIntent>]>([
@@ -5029,42 +5227,56 @@ describe('CheckoutForm — 復元した決済の完了で「注文を送る」�
 
     expect(await screen.findByText(RESTORED_TITLE)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '注文を送る' })).toBeInTheDocument();
+    // 題も今までどおり: 利用料を今の設定で計算し直さず、保存した「受取 + 利用料」を合計と比べる (第 10 回レビュー H-S)
+    expect(screen.getByText(DONE_TITLE)).toBeInTheDocument();
+    expect(screen.queryByText(FOREIGN_TITLE)).toBeNull();
     await waitFor(() =>
       expect(rememberedOrderPayment(key, Date.now())).toMatchObject({ txHash: TX, payer: CUSTOMER }),
     );
   });
 
   // 注文リンクの指紋を一致させたまま 1 項目ずつ変える (照合の各条件を個別に確かめる)。
-  it.each<[string, Partial<RestoredRelayIntent>]>([
+  // 3 つめの欄 (第 10 回レビュー H-S): この会計の支払いでないと証明できるか (true = 題と本文を差し替える)。題で比べるのは
+  // お店と「受取 + 利用料」だけで、注文リンクの鍵・chain の値は比べない (指紋の入力と受け付ける chain の組は、払った後に
+  // parser・env が変わるとずれる・Codex 第 2 回)。鍵の無い復元も比べない (鍵は 2026-11-05 から保存・Codex MUST 1)。
+  // 題が今までどおりの行も「注文を送る」と払った記録は今までどおり出さない (G-1 は鍵・chain の一致を要る)。
+  it.each<[string, Partial<RestoredRelayIntent>, boolean]>([
     [
       '別の注文 (同じお店・同じ金額・明細違い) の指紋',
       { orderLinkKey: orderLinkKeyOf({ ...RELAY_ORDER, items: [{ name: 'チケット', qty: 2, price: '1500' }] }) },
+      false,
     ],
     [
       '会計の指紋は同じで ship の無い支払い (普通の /checkout と同じ中身) の指紋',
       { orderLinkKey: orderLinkContextFingerprint(contextKeyOf(RELAY_ORDER), {}) },
+      false,
     ],
-    ['指紋の無い復元 (/pay・/tip・普通の /checkout の支払い・以前の保存)', { orderLinkKey: undefined }],
-    ['チェーンが違う', { chainId: baseSepolia.id }],
-    ['お店が違う', { merchant: OTHER_MERCHANT }],
-    ['お店の受取 (merchantValue) が違う', { merchantValue: (TOTAL - 1n).toString() }],
-    ['free なのに利用料 (feeValue) がある', { feeValue: '1' }],
-    ['recover なのに利用料が 0 (経路と金額が合わない)', { routeKind: 'recover' }],
+    ['指紋の無い復元 (/pay・/tip・普通の /checkout の支払い・以前の保存)', { orderLinkKey: undefined }, false],
+    ['指紋の無い recover の復元 (以前の保存・お店の受取 + 利用料 = 合計)', { ...RECOVER, orderLinkKey: undefined }, false],
+    ['チェーンが違う', { chainId: baseSepolia.id }, false],
+    ['お店が違う', { merchant: OTHER_MERCHANT }, true],
+    ['お店の受取 (merchantValue) が違う', { merchantValue: (TOTAL - 1n).toString() }, true],
+    ['free なのに利用料 (feeValue) がある', { feeValue: '1' }, true],
+    ['recover なのに利用料が 0 (経路と金額が合わない)', { routeKind: 'recover' }, false],
     [
       'recover でお客様の上乗せの形 (お店の受取 = 合計・合計を超える)',
       { ...RECOVER, merchantValue: TOTAL.toString(), feeValue: RECOVER_FEE.toString() },
+      true,
     ],
     [
       'recover のお店の受取と利用料の合計が注文の合計に足りない',
       { ...RECOVER, merchantValue: (TOTAL - RECOVER_FEE - 1n).toString() },
+      true,
     ],
-  ])('ガスレス (relay): %s の復元は「注文を送る」を出さず、記録も残さない', async (_label, overrides) => {
+  ])('ガスレス (relay): %s の復元は「注文を送る」を出さず、記録も残さない', async (_label, overrides, foreign) => {
     ready();
     setRestoredRelaySuccess(relayIntent(overrides));
     const first = render(<CheckoutForm params={RELAY_ORDER} />);
 
     // 既存の復元の流れ (完了欄の Tx Hash) はそのまま
     expect(screen.getAllByText(TX).length).toBeGreaterThan(0);
+    expect(screen.queryByText(FOREIGN_TITLE) !== null).toBe(foreign);
+    expect(screen.queryByText(DONE_TITLE) !== null).toBe(!foreign);
     expect(screen.queryByText(RESTORED_TITLE)).toBeNull();
     expect(screen.queryByRole('button', { name: '注文を送る' })).toBeNull();
     first.unmount();
@@ -5107,6 +5319,505 @@ describe('CheckoutForm — 復元した決済の完了で「注文を送る」�
     await waitFor(() => expect(relayMutate).toHaveBeenCalledOnce());
     expect(relayMutate.mock.calls[0][0].order).toBeDefined();
     expect(relayMutate.mock.calls[0][0].orderLinkKey).toBeUndefined();
+  });
+});
+
+// 第 10 回レビュー H-S・H-U: ブラウザに残る未解決の支払いの記録 (束縛しない relay の枠・通常決済の印・Pimlico の記録) は、どの
+// /checkout の mount でも復元される。前の支払い A の確定を、今の会計 B の完了 (「お支払いが完了しました」「ご注文ありがとう
+// ございます」) として出さない: この会計の支払いでないと証明できたときだけ、題と本文を差し替えて「読み込み直す」を出す。
+// 比べられない欄は一致 (同じ支払いを読み直しただけの人に「この画面の支払いではありません」と出すと、二重払いを誘う)。
+// 判定 (lib/paymentFlowGuards/restoredSettlement)・会計の形 (lib/orderPaidLookup)・usePaymentHistory・履歴・払った記録は実物。
+describe('CheckoutForm — 復元した前の支払いの確定を、この会計の完了として出さない (第 10 回レビュー H-S・H-U)', () => {
+  const TOTAL = 3000n * 10n ** 18n;
+  const OTHER_MERCHANT: Address = '0x3333333333333333333333333333333333333333';
+  const OTHER_PAYER: Address = '0x7777777777777777777777777777777777777777';
+  const FORWARDER: Address = '0x1111111111111111111111111111111111111111';
+  const TX: Hex = `0x${'5c'.repeat(32)}`;
+  const deployment = deploymentForSlug('jpyc', 'polygon');
+  const realLocation = window.location;
+  let reload: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    window.localStorage.clear();
+    reload = vi.fn();
+    Object.defineProperty(window, 'location', { configurable: true, value: { ...realLocation, reload } });
+  });
+  afterEach(() => {
+    Object.defineProperty(window, 'location', { configurable: true, value: realLocation });
+    vi.unstubAllGlobals();
+  });
+
+  function ready(chainId: number = polygonAmoy.id) {
+    setAccount({ connected: true, chainId });
+    setBalance(10_000n * 10n ** 18n);
+    setSmartAccount(false);
+  }
+  const paidRecords = () =>
+    Array.from({ length: window.sessionStorage.length }, (_, i) => window.sessionStorage.key(i))
+      .filter((key) => key?.startsWith('openpay:order-paid:v1:'));
+  // 大きな完了画面 (遅延ロード) が出ないことは、待ってから確かめる。
+  const expectNoOverlay = () => expect(screen.findByRole('dialog', {}, { timeout: 300 })).rejects.toThrow();
+
+  /** 今までどおりの完了の欄 (題・お礼・hash)。「読み込み直す」は無い。 */
+  function expectOwnCompletion(txHash: string) {
+    expect(screen.getAllByText(DONE_TITLE).length).toBeGreaterThan(0);
+    expect(screen.getByText(DONE_THANKS)).toBeInTheDocument();
+    expect(screen.queryByText(FOREIGN_TITLE)).toBeNull();
+    expect(screen.queryByText(FOREIGN_BODY)).toBeNull();
+    expect(screen.queryByRole('button', { name: '読み込み直す' })).toBeNull();
+    expect(screen.getAllByText(txHash).length).toBeGreaterThan(0);
+  }
+  /** この会計の支払いでない確定: 題と本文が替わり、お礼は出ない。hash は出る。払うボタンは今までどおり出ない。押すと読み込み直す。 */
+  function expectForeignCompletion(txHash: string) {
+    expect(screen.getByText(FOREIGN_TITLE)).toBeInTheDocument();
+    expect(screen.getByText(FOREIGN_BODY)).toBeInTheDocument();
+    expect(screen.queryByText(DONE_TITLE)).toBeNull();
+    expect(screen.queryByText(DONE_THANKS)).toBeNull();
+    expect(screen.getAllByText(txHash).length).toBeGreaterThan(0);
+    expect(screen.queryByRole('button', { name: /を支払う/ })).toBeNull();
+    expect(reload).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '読み込み直す' }));
+    expect(reload).toHaveBeenCalledTimes(1);
+  }
+
+  // ---- relay (束縛しない枠) ----
+  type RelayIntent = NonNullable<ReturnType<typeof useJpycEip3009Payment>['restoredIntent']>;
+  // JPYC_PARAMS (3000 JPYC・MERCHANT・Polygon) を free で払った intent。
+  function relayIntent(overrides: Partial<RelayIntent> = {}): RelayIntent {
+    return {
+      chainId: deployment.chainId,
+      from: CUSTOMER,
+      merchant: MERCHANT,
+      merchantValue: TOTAL.toString(),
+      feeValue: '0',
+      nonce: `0x${'6d'.repeat(32)}`,
+      validBefore: '9999999999',
+      routeKind: 'free',
+      issuedAt: 1_700_000_000_000,
+      ...overrides,
+    };
+  }
+  // 読み直した画面で、保存された relay の nonce が settled と分かった状態 (hook は restoredIntent を持ったまま成功)。
+  function setRestoredRelay(intent: RelayIntent) {
+    vi.mocked(resolveJpycGaslessProvider).mockReturnValue('eip3009-relay');
+    if (intent.routeKind === 'recover') vi.mocked(jpycForwarderFor).mockReturnValue(FORWARDER);
+    setRelayPayment('success', {
+      txHash: TX,
+      restoredIntent: intent,
+      variables: { merchant: intent.merchant, value: BigInt(intent.merchantValue) + BigInt(intent.feeValue) },
+    });
+  }
+  const recoverShape = (fee: bigint): Partial<RelayIntent> => ({
+    routeKind: 'recover',
+    merchantValue: (TOTAL - fee).toString(),
+    feeValue: fee.toString(),
+  });
+
+  it.each<[string, Partial<RelayIntent>]>([
+    ['同じお店・chain・合計 (free)', {}],
+    ['支払い者 (from) が今つないでいるウォレットと違う', { from: OTHER_PAYER }],
+    ['recover (お店が利用料を負担: 受取 + 利用料 = 合計)', recoverShape(2n * 10n ** 18n)],
+    ['recover で、払った後に利用料の設定が変わった (保存した利用料 30 JPYC・今のフロアは 2 JPYC)', recoverShape(30n * 10n ** 18n)],
+    // 受け付ける chain の組は env で変わるので比べない (止めた chain で払った同じ注文を別の支払いとしない・Codex 第 2 回)。
+    ['chain が違う (お店・合計は同じ)', { chainId: baseSepolia.id }],
+  ])('relay: %s の復元の確定は、今までどおりの完了の欄 (大きな完了画面・払った記録は今までどおり出さない)', async (_label, overrides) => {
+    ready();
+    setRestoredRelay(relayIntent(overrides));
+    render(<CheckoutForm params={JPYC_PARAMS} />);
+
+    expectOwnCompletion(TX);
+    await expectNoOverlay();
+    expect(loadHistory()).toHaveLength(0);
+    expect(paidRecords()).toHaveLength(0);
+  });
+
+  it.each<[string, Partial<RelayIntent>]>([
+    ['お店が違う', { merchant: OTHER_MERCHANT }],
+    ['額が違う (受取も受取 + 利用料も合計と違う)', { merchantValue: (TOTAL - 1n).toString() }],
+    ['注文リンクでの支払いでなく、お客様の上乗せの形 (受取 = 合計・利用料あり = チップなど)', { routeKind: 'recover', feeValue: (2n * 10n ** 18n).toString() }],
+  ])('relay: %s 復元の確定は「この画面の支払いではありません」と「読み込み直す」(お礼・大きな完了画面・履歴・払った記録なし)', async (_label, overrides) => {
+    ready();
+    setRestoredRelay(relayIntent(overrides));
+    render(<CheckoutForm params={JPYC_PARAMS} />);
+
+    expectForeignCompletion(TX);
+    await expectNoOverlay();
+    expect(loadHistory()).toHaveLength(0);
+    expect(paidRecords()).toHaveLength(0);
+  });
+
+  // Codex MUST 2: 注文 A = 3,000 JPYC・事前注文・お店が 3% を負担 (受取 2,910・利用料 90) の確定を、同じお店の別の注文 B
+  // (2,910 JPYC・handle の無いモバイル注文 = 受注の notify なし) の画面で復元する。「受取 = 合計」を一致にするのは、URL が
+  // お客様の上乗せの形 (事前注文・fee_payer=customer) の会計だけ。flag は ON・OFF のどちらでも同じ (URL だけで決める)。
+  it.each<[string, boolean]>([
+    ['flag ON', true],
+    ['flag OFF', false],
+  ])('relay (%s): 別の注文 A (お店が利用料を負担・受取が B の合計と同じ) の確定は、B の URL が上乗せの形でなければ「この画面の支払いではありません」', async (_label, flag) => {
+    feeFlags.enableMobileOrderFee = flag;
+    ready();
+    const fee = 90n * 10n ** 18n;
+    setRestoredRelay(relayIntent({ routeKind: 'recover', merchantValue: (TOTAL - fee).toString(), feeValue: fee.toString() }));
+    const orderB = (feePayer: 'merchant' | 'customer'): CheckoutParams => ({
+      ...JPYC_PARAMS,
+      feeKind: 'preorder',
+      feePayer,
+      items: [{ name: 'B', qty: 1, price: '2910' }],
+    });
+    const first = render(<CheckoutForm params={orderB('merchant')} />);
+    expectForeignCompletion(TX);
+    await expectNoOverlay();
+    first.unmount();
+
+    // 残る限界: B の URL がお客様の上乗せの形なら、A の受取 (2,910) = B の合計で一致のまま (今までどおりの完了の欄)。
+    render(<CheckoutForm params={orderB('customer')} />);
+    expectOwnCompletion(TX);
+  });
+
+  // 受注を同一 origin の notify へ送る会計の relay は今は必ず注文に束縛されるが、束縛は 2026-09-25 (#607) からで、それより前
+  // (枠は 2026-07-26 から) の同じ注文の支払いは束縛しない記録として残り、今の parser も読む。束縛しないことは別の支払いの
+  // 証明にしない (同じ注文を払い済みの人に「この画面の支払いではありません」と出すと、もう一度払わせる)。ほかの欄で比べる。
+  it('relay: 受注を同一 origin の notify へ送る会計で、束縛しない復元は、お店・合計が同じなら今までどおりの完了の欄・お店が違えば「この画面の支払いではありません」(どちらも受注は送らない)', async () => {
+    const fetchSpy = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
+    vi.stubGlobal('fetch', fetchSpy);
+    ready();
+    const notifyOrder: CheckoutParams = { ...JPYC_PARAMS, webhook: `${window.location.origin}/api/order/notify?h=alice` };
+    setRestoredRelay(relayIntent());
+    const first = render(<CheckoutForm params={notifyOrder} />);
+    // origin は mount の後に決まる (useOrigin)。effect が落ち着くのを待ってから確かめる。
+    await expectNoOverlay();
+    expectOwnCompletion(TX);
+    first.unmount();
+
+    setRestoredRelay(relayIntent({ merchant: OTHER_MERCHANT }));
+    render(<CheckoutForm params={notifyOrder} />);
+    expect(await screen.findByText(FOREIGN_TITLE)).toBeInTheDocument();
+    expectForeignCompletion(TX);
+    await expectNoOverlay();
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('relay: 注文に束縛した記録の復元は、受注を同一 origin の notify へ送る会計でも今までどおりの完了の欄 (常に一致)', async () => {
+    const fetchSpy = vi.fn().mockResolvedValue(Response.json({ ok: true }));
+    vi.stubGlobal('fetch', fetchSpy);
+    ready();
+    vi.mocked(resolveJpycGaslessProvider).mockReturnValue('eip3009-relay');
+    const record = resolveOrderDelivery(
+      bindingFixture(
+        'free',
+        {
+          chainId: deployment.chainId,
+          tokenAddress: deployment.address,
+          merchant: MERCHANT,
+          handle: 'alice',
+          orderId: 'saved-id',
+          items: [{ name: 'Saved Tea', qty: 1, price: '3000' }],
+          statusToken: 's'.repeat(43),
+          description: 'Saved Table',
+          customerMemo: 'Saved memo',
+        },
+        TOTAL,
+      ).record,
+      TX,
+    );
+    saveOrderDelivery(record);
+    setRelayPayment('success', { txHash: TX, orderDelivery: record, restoredIntent: record.intent });
+    render(
+      <CheckoutForm
+        params={{ ...JPYC_PARAMS, orderId: 'saved-id', webhook: `${window.location.origin}/api/order/notify?h=alice` }}
+      />,
+    );
+
+    // 控えの受注を届け終わるまで待つ (読み直した画面でも、束縛した注文の受注は届ける)。
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
+    expectOwnCompletion(TX);
+    await expectNoOverlay();
+  });
+
+  it('relay: 受け付ける chain が複数の注文リンクで別の chain を選んだ画面でも、同じ注文リンクの支払いの確定は今までどおりの完了の欄・別のお店なら「この画面の支払いではありません」', async () => {
+    const kaia = deploymentForSlug('jpyc', 'kaia');
+    const link: CheckoutParams = { ...JPYC_PARAMS, ship: 'ask', chains: ['polygon', 'kaia'], chain: 'kaia' };
+    // Polygon を選んで払った支払い (注文リンクの鍵は Polygon の会計の鍵から作る)。
+    const paidOnPolygon = orderLinkContextFingerprint(orderPaymentContextKey(link, 'polygon') as Hex, link);
+    ready(kaia.chainId);
+    setRestoredRelay(relayIntent({ orderLinkKey: paidOnPolygon }));
+    const first = render(<CheckoutForm params={link} />);
+    expectOwnCompletion(TX);
+    first.unmount();
+
+    // 注文リンクの鍵の値は比べない (指紋の入力は払った後に変わりうる・Codex 第 2 回)。明細違いの注文リンクの鍵でも、
+    // お店・合計が同じなら今までどおり (残る限界)。お店が違えば「この画面の支払いではありません」。
+    const otherLink: CheckoutParams = { ...link, items: [{ name: '別の品', qty: 1, price: '3000' }] };
+    const otherKey = orderLinkContextFingerprint(orderPaymentContextKey(otherLink, 'polygon') as Hex, otherLink);
+    setRestoredRelay(relayIntent({ orderLinkKey: otherKey }));
+    const second = render(<CheckoutForm params={link} />);
+    expectOwnCompletion(TX);
+    second.unmount();
+
+    setRestoredRelay(relayIntent({ orderLinkKey: otherKey, merchant: OTHER_MERCHANT }));
+    render(<CheckoutForm params={link} />);
+    expectForeignCompletion(TX);
+  });
+
+  it('relay: この画面から送った支払いの確定は判定しない (完了の欄と大きな完了画面・今までどおり)', async () => {
+    const user = userEvent.setup();
+    ready();
+    vi.mocked(resolveJpycGaslessProvider).mockReturnValue('eip3009-relay');
+    const makeUi = () => <CheckoutForm params={JPYC_PARAMS} />;
+    const { rerender } = render(makeUi());
+    await submitRelayThenSucceed(user, rerender, makeUi, { txHash: TX, variables: { merchant: MERCHANT, value: TOTAL } });
+
+    expect(await screen.findByRole('dialog', {}, { timeout: 3000 })).toBeInTheDocument();
+    expectOwnCompletion(TX);
+  });
+
+  // ---- 通常決済 (保存された印) ----
+  const STANDARD: CheckoutParams = { ...JPYC_PARAMS, mode: 'standard' };
+  type StandardParams = NonNullable<ReturnType<typeof useStandardPayment>['lastSubmittedParams']>;
+  // paid の会計 (利用料なし) を通常決済で払ったときに hook が保存する params。
+  function standardRecord(paid: CheckoutParams, overrides: Partial<StandardParams> = {}): StandardParams {
+    return {
+      tokenAddress: deployment.address,
+      merchant: paid.to,
+      merchantAmount: TOTAL,
+      feeReceiver: env.feeReceiver,
+      feeAmount: 0n,
+      chainId: deployment.chainId,
+      saleAmount: TOTAL,
+      contextKey: orderPaymentContextKey(paid, 'polygon') as Hex,
+      ...overrides,
+    };
+  }
+  const STANDARD_TX = `0x${'c'.repeat(64)}`;
+
+  // 会計の鍵の値は比べない (指紋の入力は parser の変更で払った後にずれる・廃止した fee_kind=register など・Codex 第 2 回)。
+  // 品目だけ違う同じお店・同じ合計の会計は見分けられない (残る限界・今の本番と同じ表示)。
+  it.each<[string, () => StandardParams]>([
+    ['会計の鍵がこの会計 (支払い者が今のウォレットと違っても)', () => standardRecord(STANDARD)],
+    ['品目だけが違う会計 (同じお店・同じ合計) の鍵', () => standardRecord({ ...STANDARD, items: [{ name: '別の品', qty: 1, price: '3000' }] })],
+  ])('通常決済: %s の復元の確定は、今までどおりの完了の欄', async (_label, record) => {
+    ready();
+    setStandardPayment('success-no-fee', {
+      lastSubmittedParams: record(),
+      lastSubmittedFrom: OTHER_PAYER,
+      restoredFromStorage: true,
+    });
+    render(<CheckoutForm params={STANDARD} />);
+
+    expectOwnCompletion(STANDARD_TX);
+    await expectNoOverlay();
+    expect(loadHistory()).toHaveLength(0);
+  });
+
+  it.each<[string, () => StandardParams]>([
+    ['会計の鍵が無い (/pay・/tip の支払い)', () => standardRecord(STANDARD, { contextKey: undefined })],
+    ['別のお店の会計の鍵', () => standardRecord({ ...STANDARD, to: OTHER_MERCHANT })],
+  ])('通常決済: %s の復元の確定は「この画面の支払いではありません」と「読み込み直す」', async (_label, record) => {
+    ready();
+    setStandardPayment('success-no-fee', {
+      lastSubmittedParams: record(),
+      lastSubmittedFrom: CUSTOMER,
+      restoredFromStorage: true,
+    });
+    render(<CheckoutForm params={STANDARD} />);
+
+    expectForeignCompletion(STANDARD_TX);
+    await expectNoOverlay();
+    expect(loadHistory()).toHaveLength(0);
+    expect(paidRecords()).toHaveLength(0);
+  });
+
+  it('通常決済: この画面から送った支払いの確定は判定しない (完了の欄と大きな完了画面・今までどおり)', async () => {
+    const user = userEvent.setup();
+    ready();
+    const makeUi = () => <CheckoutForm params={STANDARD} />;
+    const { rerender } = render(makeUi());
+    await user.click(screen.getByRole('button', { name: /を支払う/ }));
+    expect(standardMutate).toHaveBeenCalledOnce();
+    // 判定しないことを確かめるため、判定すれば不一致になる中身 (会計の鍵なし) を持たせる。
+    setStandardPayment('success-no-fee', {
+      lastSubmittedParams: standardRecord(STANDARD, { contextKey: undefined }),
+      lastSubmittedFrom: CUSTOMER,
+    });
+    rerender(makeUi());
+
+    expect(await screen.findByRole('dialog', {}, { timeout: 3000 })).toBeInTheDocument();
+    expectOwnCompletion(STANDARD_TX);
+  });
+
+  // H-U: 別の店のモバイル注文 A (利用料あり) が fee-error で復元された画面 B で「利用料を再送」を押すと、hook は
+  // restoredFromStorage を false に戻す (tests/hooks/useStandardPayment.test.tsx が固定)。直す前は、その後の成功が B の完了
+  // (大きな完了画面・B の店と A の額の履歴・B の「このタブで払った記録」= 開き直すと B を払えない) になった。
+  // hook の「復元した試み」の印 (restoredAttempt) は再送の後も true のまま。
+  describe('H-U: 復元した別の支払いの利用料を再送した後の成功', () => {
+    const A_MERCHANT: Address = '0x3333333333333333333333333333333333333333';
+    // A = 別の店のモバイル注文 (利用料 1% = 30 JPYC・通常決済)。
+    function orderA(): { params: CheckoutParams; record: StandardParams } {
+      const params: CheckoutParams = {
+        ...JPYC_PARAMS,
+        to: A_MERCHANT,
+        mode: 'standard',
+        feeKind: 'storefront',
+        orderId: 'order-A',
+        storeHandle: 'alice',
+        webhook: `${window.location.origin}/api/order/notify?h=alice`,
+      };
+      return {
+        params,
+        record: {
+          tokenAddress: deployment.address,
+          merchant: A_MERCHANT,
+          merchantAmount: 2_970n * 10n ** 18n,
+          feeReceiver: env.feeReceiver,
+          feeAmount: 30n * 10n ** 18n,
+          chainId: deployment.chainId,
+          saleAmount: TOTAL,
+          contextKey: orderPaymentContextKey(params, 'polygon') as Hex,
+        },
+      };
+    }
+
+    it('別の注文 B の画面: 「この画面の支払いではありません」になり、大きな完了画面・履歴・B の払った記録・「お店に知らせる」を出さない → 開き直すと B を払える', async () => {
+      feeFlags.enableMobileOrderFee = true;
+      const fetchSpy = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
+      vi.stubGlobal('fetch', fetchSpy);
+      ready();
+      const { record } = orderA();
+      // B = 番号つきの注文リンク (MERCHANT・別の品目・通常決済)。
+      const paramsB: CheckoutParams = {
+        ...JPYC_PARAMS,
+        mode: 'standard',
+        orderId: 'ord-B',
+        items: [{ name: 'B-only item', qty: 1, price: '500' }],
+      };
+      const contextKeyB = orderPaymentContextKey(paramsB, 'polygon');
+
+      // (1) B を開くと、hook が A を fee-error で復元している。
+      setStandardPayment('fee-error', { lastSubmittedParams: record, lastSubmittedFrom: CUSTOMER, restoredFromStorage: true });
+      const makeUi = () => <CheckoutForm params={paramsB} />;
+      const { rerender, unmount } = render(makeUi());
+      expect(screen.getByRole('button', { name: '手数料の送信を再試行' })).toBeInTheDocument();
+      expect(screen.queryByText(DONE_TITLE)).toBeNull();
+      expect(screen.queryByText(FOREIGN_TITLE)).toBeNull();
+
+      // (2) 利用料を再送して成功: hook は restoredFromStorage を false に戻すが、復元した試みの印は true のまま。
+      fireEvent.click(screen.getByRole('button', { name: '手数料の送信を再試行' }));
+      expect(standardRetryFee).toHaveBeenCalledTimes(1);
+      setStandardPayment('success', {
+        lastSubmittedParams: record,
+        lastSubmittedFrom: CUSTOMER,
+        restoredFromStorage: false,
+        restoredAttempt: true,
+      });
+      rerender(makeUi());
+
+      expectForeignCompletion(STANDARD_TX);
+      await expectNoOverlay();
+      expect(screen.queryByRole('button', { name: 'お店に知らせる' })).toBeNull();
+      expect(loadHistory()).toHaveLength(0);
+      expect(loadPayerReceipts()).toHaveLength(0);
+      expect(rememberedOrderPayment(contextKeyB, Date.now())).toBeNull();
+      expect(paidRecords()).toHaveLength(0);
+      unmount();
+
+      // (3) B を開き直す: A の印は確定で片づいている (hook は何も復元しない)。B は払われていないので払える。
+      setStandardPaymentDefault();
+      render(<CheckoutForm params={paramsB} />);
+      expect(screen.getByRole('button', { name: /500 JPYC を支払う/ })).toBeEnabled();
+      expect(screen.queryByText('このタブでお支払い済みです。上の欄からお店に知らせてください。')).toBeNull();
+    });
+
+    it('同じ注文 A の画面を読み直して再送したとき: 題は今までどおりの完了・大きな完了画面と履歴は出さない (復元した支払いのまま)', async () => {
+      feeFlags.enableMobileOrderFee = true;
+      const fetchSpy = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
+      vi.stubGlobal('fetch', fetchSpy);
+      ready();
+      const { params, record } = orderA();
+      setStandardPayment('fee-error', { lastSubmittedParams: record, lastSubmittedFrom: CUSTOMER, restoredFromStorage: true });
+      const makeUi = () => <CheckoutForm params={params} />;
+      const { rerender } = render(makeUi());
+      fireEvent.click(screen.getByRole('button', { name: '手数料の送信を再試行' }));
+      setStandardPayment('success', {
+        lastSubmittedParams: record,
+        lastSubmittedFrom: CUSTOMER,
+        restoredFromStorage: false,
+        restoredAttempt: true,
+      });
+      rerender(makeUi());
+
+      expectOwnCompletion(STANDARD_TX);
+      await expectNoOverlay();
+      expect(loadHistory()).toHaveLength(0);
+    });
+  });
+
+  // ---- Pimlico (ガスレス・保存した intent の params = gasless.variables) ----
+  const USDC = deploymentForSlug('usdc', 'base');
+  // USDC_PARAMS の合計 (25 + 15 × 2 = 55 USDC)。
+  const USDC_TOTAL = 55_000_000n;
+  const GASLESS_TX = `0x${'b'.repeat(64)}`;
+  type GaslessVariables = NonNullable<ReturnType<typeof useBatchPayment>['variables']>;
+  function gaslessVariables(overrides: Partial<GaslessVariables> = {}): GaslessVariables {
+    return {
+      tokenAddress: USDC.address,
+      merchant: MERCHANT,
+      merchantAmount: USDC_TOTAL,
+      feeReceiver: env.feeReceiver,
+      feeAmount: 0n,
+      saleAmount: USDC_TOTAL,
+      ...overrides,
+    };
+  }
+  function readyUsdc() {
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready', 100_000n);
+  }
+
+  it.each<[string, Partial<GaslessVariables>]>([
+    ['受取先・token・売上の額がこの会計と同じ', {}],
+    ['gas の見積もりが変わってお店の受取が違う (gas=merchant・売上の額は同じ)', { merchantAmount: USDC_TOTAL - 123_456n }],
+    ['売上の額を持たない保存 (額は比べない)', { saleAmount: undefined, merchantAmount: 1n }],
+  ])('ガスレス: 別の intent の確定で、%s なら題は今までどおり (大きな完了画面・払った記録は今までどおり出さない)', async (_label, overrides) => {
+    readyUsdc();
+    setBatchPayment('success', undefined, { settledOtherIntent: true, variables: gaslessVariables(overrides) });
+    render(<CheckoutForm params={{ ...USDC_PARAMS, gas: 'merchant' }} />);
+
+    expectOwnCompletion(GASLESS_TX);
+    await expectNoOverlay();
+    expect(paidRecords()).toHaveLength(0);
+  });
+
+  it.each<[string, Partial<GaslessVariables>]>([
+    ['受取先が別のお店', { merchant: OTHER_MERCHANT }],
+    ['token がこの会計の token でない', { tokenAddress: deployment.address }],
+    ['売上の額が違う', { saleAmount: USDC_TOTAL - 1n }],
+  ])('ガスレス: 別の intent の確定で、%s なら「この画面の支払いではありません」と「読み込み直す」', async (_label, overrides) => {
+    readyUsdc();
+    setBatchPayment('success', undefined, { settledOtherIntent: true, variables: gaslessVariables(overrides) });
+    render(<CheckoutForm params={USDC_PARAMS} />);
+
+    expectForeignCompletion(GASLESS_TX);
+    await expectNoOverlay();
+    expect(paidRecords()).toHaveLength(0);
+  });
+
+  it('ガスレス: この画面から送った支払いの確定は判定しない (完了の欄と大きな完了画面・今までどおり)', async () => {
+    const user = userEvent.setup();
+    readyUsdc();
+    const makeUi = () => <CheckoutForm params={USDC_PARAMS} />;
+    const { rerender } = render(makeUi());
+    await user.click(screen.getByRole('button', { name: /を支払う/ }));
+    expect(mutate).toHaveBeenCalledOnce();
+    // 判定しないことを確かめるため、判定すれば不一致になる params (別のお店) を持たせる。
+    setBatchPayment('success', undefined, {
+      settledOtherIntent: false,
+      variables: gaslessVariables({ merchant: OTHER_MERCHANT }),
+    });
+    rerender(makeUi());
+
+    expect(await screen.findByRole('dialog', {}, { timeout: 3000 })).toBeInTheDocument();
+    expectOwnCompletion(GASLESS_TX);
   });
 });
 
