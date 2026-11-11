@@ -177,6 +177,28 @@ describe('i18n: pendingStoreUnavailableResendBody (3 form 名前空間 × ja/en)
   });
 });
 
+// errorMetaMaskKaia は Kaia で MetaMask Smart Account を断るときの文。MetaMask Smart Account のガスレスは
+// 止めている (NEXT_PUBLIC_ENABLE_METAMASK_SMART_ACCOUNT は既定 OFF・同じ namespace の
+// errorMetaMaskGaslessUnavailable が「現在ご利用いただけません」と書く) ので、ほかのチェーンで使えるとは書かない。
+// 同名の key が 3 フォームの namespace にあるので、namespace ごとに確かめる。
+describe('i18n: errorMetaMaskKaia (3 form 名前空間 × ja/en)', () => {
+  const KEY = 'errorMetaMaskKaia';
+  it.each(['ja', 'en'] as const)('%s: 3 フォームの namespace だけにあり、Kaia のほかのチェーンの名前を出さない', (locale) => {
+    const messages = { ja, en }[locale] as Record<string, unknown>;
+    const holders = Object.entries(messages)
+      .filter(([, value]) => typeof value === 'object' && value !== null && KEY in value)
+      .map(([ns]) => ns);
+    expect(holders.sort()).toEqual([...FORM_NAMESPACES].sort());
+    for (const ns of FORM_NAMESPACES) {
+      const text = (messages[ns] as Record<string, unknown>)[KEY];
+      expect(typeof text).toBe('string');
+      expect(text).toContain('Kaia');
+      expect(text).not.toMatch(/\b(Polygon|Base|Arbitrum|Optimism|Ethereum|Avalanche|Arc)\b/);
+      expect(text).not.toMatch(/gasless|ガスレス/i);
+    }
+  });
+});
+
 describe('i18n: onramp keys (3 form 名前空間 × ja/en)', () => {
   for (const ns of FORM_NAMESPACES) {
     for (const key of ONRAMP_KEYS) {

@@ -720,7 +720,7 @@
     "errorIncompatibleSmartAccount": "お使いのウォレットは OpenPay 未対応の Smart Account 実装に委任されています (delegate: {address})。MetaMask の場合は「アカウント詳細 → Smart account」をオフにすると元の EOA に戻せます。または別のウォレット (Rabby / Frame 等) でお試しください。",
     "errorMav2Disabled": "現在 HashPort 等の一部ウォレット (Alchemy Modular Account v2) での決済は段階公開中です。少々お待ちください。",
     "errorMav2KaiaPolygon": "Kaia チェーン上では Alchemy Modular Account v2 に委任されたウォレットでは決済できません。お手数ですが Polygon / Base / Arbitrum / Optimism 等の他チェーン版 QR をご利用いただくか、別のウォレットでお試しください。",
-    "errorMetaMaskKaia": "Kaia チェーン上では MetaMask Smart Account には現在対応していません (MetaMask は Kaia への delegator を未 deploy)。MetaMask の場合は「アカウント詳細 → Smart account」をオフにして元の EOA に戻すか、別のウォレットでお試しください。Polygon / Base / Arbitrum / Optimism / Ethereum チェーンでは MetaMask Smart Account で gasless 決済可能です。",
+    "errorMetaMaskKaia": "Kaia チェーン上では MetaMask Smart Account には現在対応していません (MetaMask は Kaia への delegator を未 deploy)。MetaMask の場合は「アカウント詳細 → Smart account」をオフにして元の EOA に戻すか、別のウォレットでお試しください。",
     "errorPristineNoBootstrap": "このウォレットはまだガスレス決済の準備ができていません。通常決済 (ガス代自己負担) で今すぐ支払えます。",
     "errorChainNo7702": "このチェーンでは現在 USDC ガスレス決済に対応していません (このチェーンの EIP-7702 実装が標準と異なるため)。通常決済 (ガス代自己負担) で今すぐ支払えます。",
     "errorMetaMaskGaslessUnavailable": "MetaMask Smart Account でのガスレス決済は現在ご利用いただけません (ウォレット側の互換性問題のため一時停止中)。通常決済 (ガス代自己負担) で今すぐ支払えます。",
