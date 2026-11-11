@@ -74,7 +74,10 @@ export default async function CheckoutPage({
           <CheckoutChainPicker params={parsed.params} />
         ) : (
           // 注文 (chain を含む URL から parse した中身全体) ごとに作り直す。別のチェーン・別の注文へ移ったとき、前の支払いの
-          // 状態 (保持した署名・署名の途中の試み・完了の画面) を持ち越さない (lib/checkoutFormKey.ts・第 10 回レビュー H-R)。
+          // memory の状態 (保持した署名・署名の途中の試み・完了の画面) を持ち越さない (lib/checkoutFormKey.ts・第 10 回レビュー H-R)。
+          // 作り直した画面は、読み直したときと同じく storage の復旧の記録を読む。タブに 1 つの記録 (束縛しない relay の枠・
+          // 通常決済の印) や、品目だけが違う注文の記録を復元して確定すると、前の支払いの完了が今の注文の完了の欄に出る
+          // 道は残る (この key の前からある・別のページから来たときも同じ・H-S として別に直す)。
           <CheckoutForm key={checkoutFormKey(parsed.params)} params={parsed.params} />
         )
       ) : (

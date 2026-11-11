@@ -6,6 +6,9 @@ import type { CheckoutParams } from '@/lib/url';
 // - 注文の中身が 1 つでも違えば違う key。同じ chain の checkout は、同じタブのまま別の注文の URL へ移っても mount が続いて
 //   いた (key が chain だけだった) ので、前の注文の支払いの状態 (IP 制限で保持した署名・署名の途中の試み・完了の画面) が
 //   次の注文の画面に残り、前の注文の payload を次の注文の画面で送る・前の注文の成功を次の注文の画面に出す道があった。
+// 断つのは memory の持ち越しだけ。作り直した画面は読み直しと同じく storage の復旧の記録を読むので、タブに 1 つの記録
+// (束縛しない relay の枠・通常決済の印) や品目だけが違う注文の記録から、前の支払いの確定が今の注文の完了の欄に出る道は
+// 残る (この key の前からある・H-S として別に直す)。
 // 文字列にするとき object の key を並べ替える (parse の組み立ての順に依らない)。CheckoutParams の値は文字列・数・真偽・
 // 配列・object だけで bigint を持たない (持たせると JSON.stringify が投げる)。
 export function checkoutFormKey(params: CheckoutParams): string {
