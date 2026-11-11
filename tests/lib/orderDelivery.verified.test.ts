@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { canonicalOrder, orderBindSalt, orderDigest } from '@/lib/orderBind';
 import {
   orderDeliveryKey,
+  resolveOrderDelivery,
   saveOrderDelivery,
   saveOrderDeliveryVerified,
   type OrderDelivery,
@@ -71,11 +72,13 @@ describe('saveOrderDeliveryVerified (束縛した注文を送る前の slot の�
     expect(saveOrderDeliveryVerified(record)).toBe(false);
   });
 
-  it('読み戻した記録の state が違う (書いた signed が読めない) ときは false', () => {
+  it('読み戻した記録が同じ authorization でも state が違う (書いた signed が読めない) ときは false', () => {
+    // 同じ authorization の正しい形の notify-pending (parseRecord を通る) が返る端末。state の照合だけが false にする。
+    const resolved = resolveOrderDelivery(record, `0x${'ab'.repeat(32)}`);
     const realGet = Storage.prototype.getItem;
     vi.spyOn(Storage.prototype, 'getItem').mockImplementation(function (this: Storage, k: string) {
       const raw = realGet.call(this, k);
-      return k === key && raw ? JSON.stringify({ ...record, state: 'terminal' }) : raw;
+      return k === key && raw ? JSON.stringify(resolved) : raw;
     });
     expect(saveOrderDeliveryVerified(record)).toBe(false);
   });
