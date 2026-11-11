@@ -125,6 +125,7 @@ import { TipForm } from '@/components/TipForm';
 import { ReceiveMethodPicker } from '@/components/ReceiveMethodPicker';
 import type { HandleTipConfig } from '@/lib/handle';
 import { loadPayerReceipts } from '@/lib/payerReceipt';
+import { deploymentsForSymbol } from '@/lib/tokens';
 import { saveResumeState } from '@/lib/crossChain/resumeStore';
 import type { TipParams } from '@/lib/url';
 import {
@@ -858,7 +859,7 @@ describe('TipForm — 送信', () => {
 describe('TipForm — 別の intent の確定 (gasless)', () => {
   // 第 10 回レビュー A-1 (Codex 第 2 回 MUST 2): 確定した intent 自体の受取先・金額 (recoveredIntent) があれば、それだけで
   // 支払い者の控えを残す (今のチップの名前・メッセージ・お礼は付けない・/pay /checkout と同じ規則)。
-  it('確定した intent の受取先・金額 (recoveredIntent) があれば、それだけで控えを残す。名前・メッセージ・お礼・overlay は出さない', async () => {
+  it('確定した intent の受取先・金額 (recoveredIntent) があれば、それだけで控えを残す。名前・メッセージ・お礼・overlay は出さず、題は「この画面の支払いではありません」(受取先が違う)', async () => {
     window.localStorage.clear();
     const thanks = '今のページだけのお礼';
     const intentA = {
@@ -880,7 +881,9 @@ describe('TipForm — 別の intent の確定 (gasless)', () => {
       <TipForm params={{ ...USDC_PARAMS, thanks, name: 'Creator B', message: 'message B' }} />,
     );
 
-    expect(await screen.findByText('チップを送信しました')).toBeInTheDocument();
+    // 確定した intent の受取先 (0xa1a1…) は、この画面の受取先と違う = この画面のチップでない (第 10 回レビュー H-S)。
+    expect(await screen.findByText('前に確認中だった支払いが完了しました。この画面の支払いではありません。')).toBeInTheDocument();
+    expect(screen.queryByText('チップを送信しました')).toBeNull();
     expect(screen.getAllByText(`0x${'b'.repeat(64)}`).length).toBeGreaterThan(0);
     await waitFor(() => expect(loadPayerReceipts()).toHaveLength(1));
     const [receipt] = loadPayerReceipts();
@@ -1745,7 +1748,7 @@ describe('TipForm — EIP-3009 relay (JPYC)', () => {
     expect(loadPayerReceipts().filter((r) => r.receiptId === txHash)).toHaveLength(1);
   });
 
-  it('reload 復元した relay 成功は tx hash の汎用表示だけに留め、現在ページへ帰属させない', async () => {
+  it('reload 復元した別の受取先への relay 成功は「この画面の支払いではありません」と tx hash だけに留め、現在ページへ帰属させない', async () => {
     window.localStorage.clear();
     const fetchSpy = vi.fn().mockResolvedValue({ ok: true, status: 200 });
     vi.stubGlobal('fetch', fetchSpy);
@@ -1791,7 +1794,9 @@ describe('TipForm — EIP-3009 relay (JPYC)', () => {
 
     expect(screen.getByText(`${currentName} さんへチップを送る`)).toBeInTheDocument();
     expect(screen.getByText(currentMessage)).toBeInTheDocument();
-    const successTitle = await screen.findByText('チップを送信しました');
+    // 復元した支払いの受取先 (0x3333…) は、この画面の受取先 (0x4444…) と違う = この画面のチップでない (第 10 回レビュー H-S)。
+    const successTitle = await screen.findByText('前に確認中だった支払いが完了しました。この画面の支払いではありません。');
+    expect(screen.queryByText('チップを送信しました')).toBeNull();
     const successPanel = successTitle.parentElement;
     expect(successPanel).not.toBeNull();
     expect(
@@ -1840,7 +1845,9 @@ describe('TipForm — EIP-3009 relay (JPYC)', () => {
     };
     const rendered = render(<TipForm params={initialParams} />);
 
-    expect(await screen.findByText('チップを送信しました')).toBeInTheDocument();
+    // 復元した支払いの受取先 (0x3333…) は、この画面の受取先と違う = この画面のチップでない (第 10 回レビュー H-S)。
+    expect(await screen.findByText('前に確認中だった支払いが完了しました。この画面の支払いではありません。')).toBeInTheDocument();
+    expect(screen.queryByText('チップを送信しました')).toBeNull();
     rendered.rerender(
       <TipForm
         params={{
@@ -1858,6 +1865,7 @@ describe('TipForm — EIP-3009 relay (JPYC)', () => {
       screen.getByText('変更後のクリエイター さんへチップを送る'),
     ).toBeInTheDocument();
     expect(screen.getByText('変更後の案内')).toBeInTheDocument();
+    expect(screen.getByText('前に確認中だった支払いが完了しました。この画面の支払いではありません。')).toBeInTheDocument();
     expect(screen.getAllByText(`0x${'c'.repeat(64)}`).length).toBeGreaterThan(0);
     expect(screen.queryByText('復元時ページのお礼')).toBeNull();
     expect(screen.queryByText('変更後のお礼')).toBeNull();
@@ -2802,5 +2810,257 @@ describe('TipForm — 控えの支払者は送信した時点のアドレス (�
       payerAddress: FAN,
     });
     expect(loadPayerReceipts()[0].txHash).toBeUndefined();
+  });
+});
+
+// 第 10 回レビュー H-S (チップの分・/tip/[address] と @handle は同じ TipForm): ブラウザに残る未解決の支払いの記録 (束縛しない
+// relay の枠・Pimlico の記録) は、どのチップの画面の mount でも復元される。前の支払い A の確定を、今の画面のチップの完了
+// (「チップを送信しました」) として出さない: この画面のチップでないと証明できたときだけ、完了の欄の題を差し替えて、読み込み
+// 直しの案内と「読み込み直す」を出す。比べられない欄は一致 (同じチップを読み直しただけの人に「この画面の支払いでは
+// ありません」と出すと、二重払いを誘う)。チップの額は選んだ・打った額で、読み込み直すと既定に戻るので比べない。
+// hook は境界として差し替え、判定 (lib/paymentFlowGuards/restoredSettlement)・画面の形 (settlementScreen)・控えは実物。
+// 通常決済 (Arc) は ownsStandardAttempt と「以前の送信の確認」の欄で分けてあり、対象外 (上の Arc standard tip attribution)。
+describe('TipForm — 復元した前の支払いの確定を、この画面のチップの完了として出さない (第 10 回レビュー H-S)', () => {
+  const DONE_TITLE = 'チップを送信しました';
+  const FOREIGN_TITLE = '前に確認中だった支払いが完了しました。この画面の支払いではありません。';
+  const FOREIGN_BODY = 'この画面の支払いを続けるには、読み込み直してください。';
+  const OTHER_CREATOR: Address = '0x3333333333333333333333333333333333333333';
+  const OTHER_FAN: Address = '0x8888888888888888888888888888888888888888';
+  const USDC_BASE_SEPOLIA: Address = '0x036CbD53842c5426634e7929541eC2318f3dCF7e';
+  const ANY_KEY = `0x${'7'.repeat(64)}` as const;
+  const E18 = 10n ** 18n;
+  const THANKS = 'この画面だけのお礼';
+  const realLocation = window.location;
+  const topDescriptor = Object.getOwnPropertyDescriptor(window, 'top');
+  let reload: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    window.localStorage.clear();
+    reload = vi.fn();
+    Object.defineProperty(window, 'location', { configurable: true, value: { ...realLocation, reload } });
+  });
+  afterEach(() => {
+    Object.defineProperty(window, 'location', { configurable: true, value: realLocation });
+    if (topDescriptor) Object.defineProperty(window, 'top', topDescriptor);
+  });
+
+  // 大きな完了画面 (遅延ロード) が出ないことは、待ってから確かめる。
+  const expectNoOverlay = () => expect(screen.findByRole('dialog', {}, { timeout: 300 })).rejects.toThrow();
+
+  /** 今までどおりの完了の欄 (題・hash)。読み込み直しの案内と「読み込み直す」は無い。 */
+  async function expectOwnResult(txHash: string) {
+    expect((await screen.findAllByText(DONE_TITLE)).length).toBeGreaterThan(0);
+    expect(screen.queryByText(FOREIGN_TITLE)).toBeNull();
+    expect(screen.queryByText(FOREIGN_BODY)).toBeNull();
+    expect(screen.queryByRole('button', { name: '読み込み直す' })).toBeNull();
+    expect(screen.getAllByText(txHash).length).toBeGreaterThan(0);
+  }
+  /** この画面のチップでない確定: 題が替わり、案内と「読み込み直す」が出る。hash は出る。押すと読み込み直す。 */
+  async function expectForeignResult(txHash: string) {
+    expect(await screen.findByText(FOREIGN_TITLE)).toBeInTheDocument();
+    expect(screen.getByText(FOREIGN_BODY)).toBeInTheDocument();
+    expect(screen.queryByText(DONE_TITLE)).toBeNull();
+    expect(screen.getAllByText(txHash).length).toBeGreaterThan(0);
+    expect(reload).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '読み込み直す' }));
+    expect(reload).toHaveBeenCalledTimes(1);
+  }
+
+  // ---- relay (束縛しない枠) ----
+  type RelayIntent = NonNullable<ReturnType<typeof useJpycEip3009Payment>['restoredIntent']>;
+  const RELAY_TX = `0x${'c'.repeat(64)}`;
+  // CREATOR へ 250 JPYC (プリセットに無い額) を free で送った intent。画面の既定の額は 100 JPYC。
+  function relayIntent(overrides: Partial<RelayIntent> = {}): RelayIntent {
+    return {
+      chainId: polygonAmoy.id,
+      from: FAN,
+      merchant: CREATOR,
+      merchantValue: (250n * E18).toString(),
+      feeValue: '0',
+      nonce: `0x${'4'.repeat(64)}`,
+      validBefore: '9999999999',
+      routeKind: 'free',
+      issuedAt: 1,
+      ...overrides,
+    };
+  }
+  function readyRelay() {
+    vi.mocked(resolveJpycGaslessProvider).mockReturnValue('eip3009-relay');
+    setAccount({ connected: true, chainId: polygonAmoy.id });
+    setBalance(1000n * E18);
+  }
+  // 読み直した画面で、保存された relay の nonce が settled と分かった状態 (hook は restoredIntent を持ったまま成功)。
+  function setRestoredRelay(intent: RelayIntent) {
+    setRelay('success', {
+      restoredIntent: intent,
+      variables: { merchant: intent.merchant, value: BigInt(intent.merchantValue) },
+    });
+  }
+  const tipParams: TipParams = { ...JPYC_PARAMS, thanks: THANKS, thanksUrl: 'https://current.example/thanks' };
+
+  it.each<[string, Partial<RelayIntent>]>([
+    ['同じ受取先 (額は画面の既定の 100 と違う 250)', {}],
+    ['recover (チップはお客様が利用料を上乗せ: 受取 250・利用料 2)', { routeKind: 'recover', feeValue: (2n * E18).toString() }],
+    ['支払い者 (from) が今つないでいるウォレットと違う', { from: OTHER_FAN }],
+    ['chain が違う', { chainId: baseSepolia.id }],
+  ])('relay: %s 復元の確定は、今までどおりの題 (お礼・overlay・控えは今までどおり出さない)', async (_label, overrides) => {
+    readyRelay();
+    setRestoredRelay(relayIntent(overrides));
+    render(<TipForm params={tipParams} />);
+
+    await expectOwnResult(RELAY_TX);
+    await expectNoOverlay();
+    expect(screen.queryByText(THANKS)).toBeNull();
+    expect(screen.queryByRole('link', { name: /リンクを開く/ })).toBeNull();
+    expect(loadPayerReceipts()).toEqual([]);
+  });
+
+  it.each<[string, Partial<RelayIntent>]>([
+    ['受取先が違う', { merchant: OTHER_CREATOR }],
+    ['注文リンクの鍵を持つ (付けるのは /checkout だけ・受取先は同じ)', { orderLinkKey: ANY_KEY }],
+  ])('relay: %s 復元の確定は「この画面の支払いではありません」と「読み込み直す」(お礼・overlay・控えなし)', async (_label, overrides) => {
+    readyRelay();
+    setRestoredRelay(relayIntent(overrides));
+    render(<TipForm params={tipParams} />);
+
+    await expectForeignResult(RELAY_TX);
+    await expectNoOverlay();
+    expect(screen.queryByText(THANKS)).toBeNull();
+    expect(screen.queryByRole('link', { name: /リンクを開く/ })).toBeNull();
+    expect(loadPayerReceipts()).toEqual([]);
+  });
+
+  it('relay: この mount で送ったチップの成功は、今までどおりの題・お礼・大きな完了画面 (判定しない)', async () => {
+    const user = userEvent.setup();
+    readyRelay();
+    const { rerender } = render(<TipForm params={tipParams} />);
+    await user.click(screen.getByRole('button', { name: /100 JPYC を送る/ }));
+    expect(relayMutate).toHaveBeenCalledOnce();
+    setRelay('success', { variables: { merchant: CREATOR, value: 100n * E18, gasMode: 'customer' } });
+    rerender(<TipForm params={tipParams} />);
+
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+    await expectOwnResult(RELAY_TX);
+    expect(screen.getAllByText(THANKS).length).toBeGreaterThan(0);
+  });
+
+  it('preview (/create の見本) は払う画面でないので、別の受取先への復元の確定でも題を差し替えない', async () => {
+    readyRelay();
+    setRestoredRelay(relayIntent({ merchant: OTHER_CREATOR }));
+    render(<TipForm params={tipParams} preview />);
+    await expectOwnResult(RELAY_TX);
+  });
+
+  // 埋め込み (iframe) の中でも同じ表示。読み込み直すのは枠の中の window (親のページはそのまま)。
+  it('埋め込み (iframe) の中: 別の受取先への復元の確定は同じ表示で、「読み込み直す」は枠の window を読み込み直す', async () => {
+    const parentWindow = {};
+    Object.defineProperty(window, 'top', { configurable: true, get: () => parentWindow });
+    readyRelay();
+    setRestoredRelay(relayIntent({ merchant: OTHER_CREATOR }));
+    render(<TipForm params={tipParams} />);
+
+    expect(vi.mocked(useJpycEip3009Payment).mock.lastCall?.[1]).toEqual({ skipIntentStorageCheck: true });
+    await expectForeignResult(RELAY_TX);
+  });
+
+  // ---- ガスレス (Pimlico): 確定したのが、この画面から最後に送った支払いと別の intent ----
+  type GaslessRecord = NonNullable<ReturnType<typeof useBatchPayment>['variables']>;
+  const GASLESS_TX = `0x${'b'.repeat(64)}`;
+  // CREATOR へ 3 USDC (プリセットに無い額) をガスレスで送った intent の保存した params。画面の既定の額は 1 USDC。
+  function gaslessRecord(overrides: Partial<GaslessRecord> = {}): GaslessRecord {
+    return {
+      tokenAddress: USDC_BASE_SEPOLIA,
+      merchant: CREATOR,
+      merchantAmount: 3_000_000n,
+      feeReceiver: '0xfee0fee0fee0fee0fee0fee0fee0fee0fee0fee0',
+      feeAmount: 0n,
+      saleAmount: 3_000_000n,
+      ...overrides,
+    };
+  }
+  function readyGasless() {
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(20_000_000n);
+    setSmartAccount(true);
+  }
+  const setSettledOther = (variables: GaslessRecord | undefined) =>
+    setBatchPayment('success', undefined, { settledOtherIntent: true, recoveredIntent: null, variables });
+  const usdcParams: TipParams = { ...USDC_PARAMS, thanks: THANKS };
+  const jpycAddress = deploymentsForSymbol('jpyc')[0].address;
+
+  it.each<[string, GaslessRecord | undefined]>([
+    ['同じ受取先・token (額は画面の既定の 1 と違う 3)', gaslessRecord()],
+    ['保存した params (variables) が無い = 比べられない', undefined],
+  ])('ガスレス: 別の intent の確定で、%s なら今までどおりの題', async (_label, variables) => {
+    readyGasless();
+    setSettledOther(variables);
+    render(<TipForm params={usdcParams} />);
+
+    await expectOwnResult(GASLESS_TX);
+    await expectNoOverlay();
+    expect(screen.queryByText(THANKS)).toBeNull();
+  });
+
+  it.each<[string, Partial<GaslessRecord>]>([
+    ['受取先が違う', { merchant: OTHER_CREATOR }],
+    ['別の token (JPYC の address)', { tokenAddress: jpycAddress }],
+  ])('ガスレス: 別の intent の確定で、%s なら「この画面の支払いではありません」と「読み込み直す」', async (_label, overrides) => {
+    readyGasless();
+    setSettledOther(gaslessRecord(overrides));
+    render(<TipForm params={usdcParams} />);
+
+    await expectForeignResult(GASLESS_TX);
+    await expectNoOverlay();
+    expect(screen.queryByText(THANKS)).toBeNull();
+  });
+
+  // 完了の欄の hash が、この mount で送った cross-chain の送金のものに替わったら、題も今までどおりに戻す。
+  it('別の受取先への intent が確定した後に、この mount の cross-chain の送金が成功すると、欄は cross-chain の hash と今までどおりの題', async () => {
+    readyGasless();
+    setGasQuote('ready', 100_000n);
+    setSettledOther(gaslessRecord({ merchant: OTHER_CREATOR }));
+    render(<TipForm params={usdcParams} />);
+    expect(await screen.findByText(FOREIGN_TITLE)).toBeInTheDocument();
+
+    await waitFor(() => expect(crossChainHintSpy).toHaveBeenCalled());
+    const hint = () => crossChainHintSpy.mock.lastCall![0] as {
+      onAttemptStart: (amount: bigint) => void;
+      onSuccess: (result: import('@/hooks/useCrossChainPayment').ExecuteResult) => void;
+    };
+    const mintTxHash = `0x${'f'.repeat(64)}` as const;
+    act(() => hint().onAttemptStart(1_000_000n));
+    act(() => hint().onSuccess({
+      path: 'cctp-v2',
+      burnTxHash: `0x${'a'.repeat(64)}`,
+      mintTxHash,
+      destChainId: baseSepolia.id,
+    }));
+
+    await waitFor(() => expect(screen.queryByText(FOREIGN_TITLE)).toBeNull());
+    expect(screen.getAllByText(DONE_TITLE).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(mintTxHash).length).toBeGreaterThan(0);
+    expect(screen.queryByRole('button', { name: '読み込み直す' })).toBeNull();
+  });
+
+  // 判定するのは復元した確定だけ。別の intent でない確定 (この mount で送った) は、hook が持つ記録が画面と違っても題を差し替えない。
+  it('ガスレス: 別の intent でない成功は、variables の受取先が画面と違っても判定しない (今までどおりの題とお礼)', async () => {
+    readyGasless();
+    setBatchPayment('success', undefined, { settledOtherIntent: false, variables: gaslessRecord({ merchant: OTHER_CREATOR }) });
+    render(<TipForm params={usdcParams} />);
+
+    await expectOwnResult(GASLESS_TX);
+    expect((await screen.findAllByText(THANKS)).length).toBeGreaterThan(0);
+  });
+
+  it('en: 題・案内・ボタンは承認済みの英語の文', async () => {
+    readyRelay();
+    setRestoredRelay(relayIntent({ merchant: OTHER_CREATOR }));
+    render(<TipForm params={tipParams} />, { locale: 'en' });
+
+    expect(await screen.findByText('A previous pending payment has completed. This is not the payment on this screen.')).toBeInTheDocument();
+    expect(screen.getByText('To continue with the payment on this screen, reload the page.')).toBeInTheDocument();
+    expect(screen.queryByText('Tip sent!')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Reload' }));
+    expect(reload).toHaveBeenCalledTimes(1);
   });
 });

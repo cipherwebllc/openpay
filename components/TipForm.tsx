@@ -77,6 +77,8 @@ import { relayErrorKey } from '@/lib/relay/relayErrorMessage';
 import { isFallbackSafeRelayError } from '@/lib/relay/relayResponseError';
 import { isUserRejection } from '@/lib/walletErrors';
 import { deriveTipGuards } from '@/lib/paymentFlowGuards/tip';
+import { isForeignSettlement } from '@/lib/paymentFlowGuards/restoredSettlement';
+import { unkeyedSettlementScreen } from '@/lib/paymentFlowGuards/settlementScreen';
 import { DEFAULT_CHAIN_FOR_SYMBOL, deploymentForSlug } from '@/lib/tokens';
 import {
   DEFAULT_TIP_PRESETS,
@@ -411,6 +413,27 @@ export function TipForm({
   const restoredPayment =
     (useRelay && relay.restoredIntent != null) ||
     (!isStandard && !useRelay && gasless.settledOtherIntent);
+  // 復元した前の支払いの確定が、この画面のチップでないと証明できたか (第 10 回レビュー H-S)。完了の欄の題だけを差し替え、
+  // 読み込み直しの案内と「読み込み直す」を足す (hash の行・控えは同じ)。お礼・overlay・控え・送信のボタンの止めの条件は
+  // 上の restoredPayment のままで、ここでは変えない。通常決済 (Arc) は ownsStandardAttempt と「以前の送信の確認」の欄で
+  // 既に分けてあるので対象にしない。
+  // 返す値は意図して非対称 (lib/paymentFlowGuards/restoredSettlement): 比べられない欄は一致。何の波及を断つか: 同じチップを
+  // 読み直しただけの人に「この画面の支払いではありません」と出して、もう一度送らせること (二重払い)。
+  // 額は比べない (null): チップの額は選んだ・打った額で、読み込み直すと既定に戻る。比べるのは受取先・別の token の address・
+  // 注文リンクの鍵 (付けるのは /checkout だけ) だけ。
+  // preview (/create の見本) は払う画面でないので今までどおり。cross-chain の結果があるとき、欄の hash はこの mount で送った
+  // cross-chain の送金のものなので、題を差し替えない。
+  const foreignSettlement =
+    !preview &&
+    restoredPayment &&
+    !crossChainResult &&
+    isForeignSettlement(
+      unkeyedSettlementScreen(params.to, params.token, null),
+      useRelay
+        // チップの relay は注文に束縛しない (order を渡さない)。
+        ? { kind: 'relay', bound: false, record: relay.restoredIntent }
+        : { kind: 'gasless', record: gasless.variables },
+    );
   // relay 202: broadcast 済だが未確定 (success でも error でもない)。送信ボタンに「送信中」を
   // 出してフィードバックの空白を防ぐ (再送は settledNoRetry で既に禁止)。
   const relayPending =
@@ -1296,7 +1319,12 @@ export function TipForm({
       )}
       {flowSuccess && (flowTxHash || crossChainResult?.path === 'gateway') && (
         <TipSuccessPanel
-          title={t('successTitle')}
+          title={t(foreignSettlement ? 'foreignSettlementTitle' : 'successTitle')}
+          reload={
+            foreignSettlement
+              ? { body: t('foreignSettlementBody'), label: t('foreignSettlementReload') }
+              : undefined
+          }
           thanks={restoredPayment ? undefined : params.thanks}
           thanksUrl={restoredPayment ? undefined : params.thanksUrl}
           openLinkLabel={t('openLink')}
