@@ -2514,6 +2514,43 @@ describe('CheckoutForm — JPYC EIP-3009 relay 経路', () => {
     expect(screen.queryByText(/完了できませんでした/)).toBeNull();
   });
 
+  // 第 10 回レビュー H-R・user 裁定 Q8 = A: 束縛した注文の slot を保存できない端末で hook が送らずに止めた
+  // (order_binding_storage_unavailable)。Q7-1 と同じ理由で通常決済へ案内しない: 切り替えの banner / ボタンも、汎用の文
+  // (「通常モードをご利用ください」を含む) も出さず、専用の黄色の枠だけを出す (文言は今までのまま)。
+  it('relay error (order_binding_storage_unavailable): 通常決済への切り替えの banner / ボタンも汎用の文も出さず、黄色の枠だけを出す', () => {
+    setupRelayReady();
+    setRelayPayment('error', { errMsg: 'order_binding_storage_unavailable' });
+    render(<CheckoutForm params={JPYC_PARAMS} />);
+
+    const notice = screen.getByText('注文の復元情報をこのブラウザに保存できないため、支払いを開始できません。ブラウザの保存設定を確認してください。');
+    expect(notice.closest('.bg-amber-50')).not.toBeNull();
+    expect(screen.getAllByText(/注文の復元情報をこのブラウザに保存できない/)).toHaveLength(1);
+    // 切り替えの banner (題と切り替えのボタン) は出さない。
+    expect(screen.queryByText(/ガスレス決済が一時的に利用できません/)).toBeNull();
+    expect(
+      screen.queryByRole('button', { name: /通常支払い（自分でガスを払う）に切り替える/ }),
+    ).toBeNull();
+    // 汎用の赤い枠 (見出し「エラー」・「…通常モードをご利用ください」) も出さない。
+    expect(screen.queryByText('エラー')).toBeNull();
+    expect(screen.queryByText(/完了できませんでした/)).toBeNull();
+    expect(screen.queryByText(/通常モード/)).toBeNull();
+    expect(screen.queryByText('order_binding_storage_unavailable')).toBeNull();
+  });
+
+  // 文脈が変わって止めた error (order_binding_mismatch) は保存できない端末の話ではない (次の押下は新しい署名から払える) ので、
+  // 今までどおり切り替えの banner を出す (Q8 の対象の外)。
+  it('relay error (order_binding_mismatch): 今までどおり切り替えの banner を出す', () => {
+    setupRelayReady();
+    setRelayPayment('error', { errMsg: 'order_binding_mismatch' });
+    render(<CheckoutForm params={JPYC_PARAMS} />);
+
+    expect(screen.getByText(/ガスレス決済が一時的に利用できません/)).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /通常支払い（自分でガスを払う）に切り替える/ }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/注文の復元情報をこのブラウザに保存できない/)).toBeNull();
+  });
+
   it('response-unknown → standard fallback 非表示・Pay 封鎖・中間表示', async () => {
     const user = userEvent.setup();
     setupRelayReady();

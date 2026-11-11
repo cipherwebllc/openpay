@@ -3,6 +3,7 @@ import { relayErrorKey } from '@/lib/relay/relayErrorMessage';
 import {
   isFallbackSafeRelayError,
   isIntentStorageUnavailableError,
+  isOrderBindingStorageUnavailableError,
   RelayIpRateLimitedError,
   RelayResponseUnknownError,
 } from '@/lib/relay/relayResponseError';
@@ -76,5 +77,25 @@ describe('isIntentStorageUnavailableError (通常決済への切り替えを案�
     expect(isIntentStorageUnavailableError(new RelayIpRateLimitedError(30))).toBe(false);
     expect(isIntentStorageUnavailableError('intent_storage_unavailable')).toBe(false);
     expect(isIntentStorageUnavailableError(null)).toBe(false);
+  });
+});
+
+// 第 10 回レビュー H-R・user 裁定 Q8 = A: /checkout の切り替えの banner と汎用の文から外す、束縛した注文の error の分類。
+// 送っていないので fallback-safe のまま (switchToStandard の二重払いの判定は変えない)。
+describe('isOrderBindingStorageUnavailableError (束縛した注文の slot を保存できずに止めた error)', () => {
+  it('束縛した注文の slot を書けずに止めた code だけが true で、fallback-safe のまま', () => {
+    const error = new Error('order_binding_storage_unavailable');
+    expect(isOrderBindingStorageUnavailableError(error)).toBe(true);
+    expect(isFallbackSafeRelayError(error)).toBe(true);
+  });
+
+  it('ほかの relay の error (文脈が変わって止めた order_binding_mismatch を含む) と error でない値は false', () => {
+    for (const m of ['rate_limited', 'fee_required', 'relay_not_configured', 'insufficient_balance', 'boom', 'intent_storage_unavailable', 'order_binding_mismatch', '']) {
+      expect(isOrderBindingStorageUnavailableError(new Error(m))).toBe(false);
+    }
+    expect(isOrderBindingStorageUnavailableError(new RelayResponseUnknownError())).toBe(false);
+    expect(isOrderBindingStorageUnavailableError(new RelayIpRateLimitedError(30))).toBe(false);
+    expect(isOrderBindingStorageUnavailableError('order_binding_storage_unavailable')).toBe(false);
+    expect(isOrderBindingStorageUnavailableError(null)).toBe(false);
   });
 });

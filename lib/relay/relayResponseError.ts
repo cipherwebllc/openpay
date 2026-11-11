@@ -48,3 +48,12 @@ export function isFallbackSafeRelayError(error: unknown): error is Error {
 export function isIntentStorageUnavailableError(error: unknown): boolean {
   return error instanceof Error && error.message === 'intent_storage_unavailable';
 }
+
+// 束縛した注文 (/checkout) の slot を書いて読み戻せない端末で、hook が送らずに止めた error (hooks/useJpycEip3009Payment の
+// saveOrderDeliveryVerified・第 10 回レビュー H-R)。上と同じく送っていないので fallback-safe のままだが、/checkout は通常決済への
+// 切り替えの banner も、汎用の文 (「通常モードをご利用ください」を含む) も出さず、専用の黄色の枠
+// (CheckoutForm の orderBindingStorageUnavailable) だけを出す: 保存できない端末を、同じ穴のある通常決済へ案内しない
+// (user 裁定 Q8 = A・Q7-1 と同じ理由)。
+export function isOrderBindingStorageUnavailableError(error: unknown): boolean {
+  return error instanceof Error && error.message === 'order_binding_storage_unavailable';
+}
