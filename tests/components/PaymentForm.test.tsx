@@ -201,10 +201,12 @@ function setPayment(
     | 'success'
     | 'error',
   err?: Error,
+  extra?: Partial<ReturnType<typeof useBatchPayment>>,
 ) {
   mutate = vi.fn();
   gaslessRetryReceipt = vi.fn();
   mockHook(useBatchPayment, {
+    ...extra,
     mutate,
     isPending: state === 'pending',
     isUnknown: state === 'unknown',
@@ -741,6 +743,39 @@ describe('PaymentForm — 送信フロー', () => {
       '0x036cbd53842c5426634e7929541ec2318f3dcf7e',
     );
   });
+
+  // 第 10 回レビュー A-1 (MUST 2): 「同じ送信内容を再確認」は保存した intent の params で確定するので、
+  // 確定したのが画面から最後に送った支払いと別の intent のとき (useBatchPayment の settledOtherIntent)、
+  // 完了の overlay に画面の金額 (送信時の snapshot) を出さない。inline の結果 (hash) は出す。
+  it.each([
+    { settledOtherIntent: false, overlay: true },
+    { settledOtherIntent: true, overlay: false },
+  ])(
+    'gasless の完了: 確定した intent が画面の最後の送信と別 ($settledOtherIntent) なら、overlay に画面の金額を出さない',
+    async ({ settledOtherIntent, overlay }) => {
+      const user = userEvent.setup();
+      setURL(`to=${MERCHANT}&token=usdc&amount=100`);
+      setAccount({ connected: true, chainId: baseSepolia.id });
+      setBalance(200_000_000n);
+      setSmartAccount(true);
+      setPayment('idle');
+      setGasQuote('ready', 0n);
+      const { rerender } = render(<PaymentForm />);
+      await user.click(screen.getByRole('button', { name: /100 USDC を支払う/ }));
+      expect(mutate).toHaveBeenCalledOnce();
+
+      setPayment('success', undefined, { settledOtherIntent });
+      rerender(<PaymentForm />);
+      expect((await screen.findAllByText(`0x${'b'.repeat(64)}`)).length).toBeGreaterThan(0);
+      // overlay の tx の truncate 表示 (先頭 10 + … + 末尾 6)。overlay は遅延ロードなので、出ない側も待ってから確かめる。
+      const truncated = new RegExp(`0xbbbbbbbb…${'b'.repeat(6)}`);
+      if (overlay) {
+        expect(await screen.findByText(truncated)).toBeInTheDocument();
+      } else {
+        await expect(screen.findByText(truncated, {}, { timeout: 300 })).rejects.toThrow();
+      }
+    },
+  );
 
   it('据え置き QR (amount 無し) で顧客が金額入力 → mutate に反映', async () => {
     const user = userEvent.setup();
