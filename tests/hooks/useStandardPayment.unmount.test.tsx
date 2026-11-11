@@ -568,7 +568,6 @@ describe('useStandardPayment: ウォレットの確認中に画面を離れた�
     expect(intentWrites).toEqual([]);
     expect(loadStandardIntent()).toBeNull();
   });
-
 });
 
 // Codex の MUST (PR #1061): 離れた画面の hook の要求 A が出たままの間に、新しい画面で支払い B を始めると、B が先に解決して B の
