@@ -105,7 +105,7 @@ function readPolicy(policy: Policy): (input: ReturnType<typeof buildInput>) => E
   const calls: ts.CallExpression[] = [];
   function visit(node: ts.Node) {
     if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name)
-      && ['flowPending', 'settledNoRetry', 'gaslessStoreUnavailable', 'canSubmit', 'paymentReady'].includes(node.name.text)) {
+      && ['flowPending', 'settledNoRetry', 'gaslessStoreUnavailable', 'gaslessResendBlocked', 'canSubmit', 'paymentReady'].includes(node.name.text)) {
       inline.push(node.name.text);
     }
     if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === POLICY_FN[policy]) {
@@ -264,6 +264,55 @@ describe.each(['pay', 'checkout', 'tip'] as const)('%s payment flow guard truth 
         settledNoRetry: false,
         gaslessStoreUnavailable: column === 2,
       });
+    });
+  });
+});
+
+// 確認中の支払い (gasless.isUnknown) があり、かつその支払いを送り直す前に端末へ保存できない
+// (gasless.pendingStoreUnavailable) ときだけ、gasless の route で gaslessResendBlocked が立つ。フォームは
+// 「記録を保存できません」の欄の本文をこれで選ぶ (通常送信の案内 → 「送り直せません」)。表示だけに使う値で、
+// 既存の出力 (flowPending・settledNoRetry・gaslessStoreUnavailable・canSubmit) は変えない。
+// Pay / Checkout の gaslessAmbiguous は route で絞っていない (確認中は通常決済・relay も閉じる) ので、
+// 通常決済・relay の route で立たないことを route ごとに固定する。
+function resendBlockedOf(policy: Policy, route: Route, state: State): boolean {
+  const input = buildInput(route, state);
+  if (policy === 'pay') return derivePayGuards(input satisfies PayGuardInput).gaslessResendBlocked;
+  if (policy === 'checkout') return deriveCheckoutGuards(input satisfies CheckoutGuardInput).gaslessResendBlocked;
+  return deriveTipGuards(input satisfies TipGuardInput).gaslessResendBlocked;
+}
+
+describe.each(['pay', 'checkout', 'tip'] as const)('%s gaslessResendBlocked: an unresolved gasless payment that cannot be re-sent', (policy) => {
+  const derive = readDerivePaymentFlowGuards(policy);
+  const submit = readDeriveSubmit(policy);
+  const BOTH: State = { gasless: { isUnknown: true, pendingStoreUnavailable: true } };
+  describe.each(['standard', 'relay-free', 'relay-recover', 'pimlico', 'circle'] as const)('%s', (route) => {
+    const gaslessRoute = route === 'pimlico' || route === 'circle';
+    it('is set only on the gasless route when the payment is unresolved and the store is unavailable', () => {
+      expect(resendBlockedOf(policy, route, BOTH)).toBe(gaslessRoute);
+    });
+    it('stays off with only an unresolved payment', () => {
+      expect(resendBlockedOf(policy, route, { gasless: { isUnknown: true } })).toBe(false);
+    });
+    it('stays off with only an unavailable store', () => {
+      expect(resendBlockedOf(policy, route, { gasless: { pendingStoreUnavailable: true } })).toBe(false);
+    });
+    it('stays off when idle', () => {
+      expect(resendBlockedOf(policy, route, {})).toBe(false);
+    });
+    it('leaves the existing guards as they were for the combined state', () => {
+      // Pay / Checkout は確認中を全 route で閉じる。Tip は gasless の route だけ (上の表の gasless unknown の行と同じ)。
+      const locked = policy === 'tip' ? gaslessRoute : true;
+      expect(derive(route, BOTH)).toEqual({
+        flowPending: locked,
+        settledNoRetry: locked,
+        gaslessStoreUnavailable: gaslessRoute,
+      });
+      expect(submit(route, BOTH).canSubmit).toBe(!locked);
+    });
+    it('is off for every row of the two truth tables (no row sets both flags)', () => {
+      for (const row of [...rows, ...submitRows]) {
+        expect(resendBlockedOf(policy, route, row.state), row.name).toBe(false);
+      }
     });
   });
 });

@@ -66,6 +66,14 @@ export function deriveCheckoutGuards({
   // (standard は localStorage に依存しないため、この fail-closed を波及させない)。
   const gaslessStoreUnavailable =
     !isStandard && !useRelay && gasless.pendingStoreUnavailable;
+  // 確認中の支払い (gasless.isUnknown) があり、その支払いを送り直す前に端末へ保存できない。表示だけに使う
+  // (送信可否の式には入れない): 「記録を保存できません」の欄の本文を、通常送信の案内から「送り直せません」に替える
+  // (確認中は上の gaslessAmbiguous が通常決済も閉じているので、通常送信の案内は当てはまらない)。
+  // gaslessAmbiguous は route で絞っていないので、gasless の route だけに絞った gaslessStoreUnavailable と
+  // 合わせて、gasless の route のときだけ立てる。
+  // 2 つが同時に立つ経路 (lib/smartAccount/pimlicoIntent.ts): resolveOpenIntent の送り直しの onNotStored と、
+  // buildAndSend の作り直しの onNotStored で元の記録に戻せたとき。
+  const gaslessResendBlocked = gaslessAmbiguous && gaslessStoreUnavailable;
   const relayIpRateLimited = isRelayIpRateLimitedError(relay.error)
     ? relay.error
     : null;
@@ -130,6 +138,7 @@ export function deriveCheckoutGuards({
     relayAmbiguous,
     gaslessAmbiguous,
     gaslessStoreUnavailable,
+    gaslessResendBlocked,
     relayIpRateLimited,
     flowPending,
     gasQuoteReady,

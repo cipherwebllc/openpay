@@ -74,6 +74,12 @@ export function deriveTipGuards({
   // broadcast 済みとは言い切れないので ambiguous とは別扱いにし、gasless 経路だけを塞ぐ
   // (relay は localStorage に依存しないため、この fail-closed を波及させない)。
   const gaslessStoreUnavailable = !isStandard && !useRelay && gasless.pendingStoreUnavailable;
+  // 確認中の支払い (gasless.isUnknown) があり、その支払いを送り直す前に端末へ保存できない。表示だけに使う
+  // (送信可否の式には入れない): 「記録を保存できません」の欄の本文を、通常送信の案内から「送り直せません」に替える。
+  // Tip は gaslessAmbiguous も gaslessStoreUnavailable も gasless の route に絞ってあるので、立つのは gasless の route だけ。
+  // 2 つが同時に立つ経路 (lib/smartAccount/pimlicoIntent.ts): resolveOpenIntent の送り直しの onNotStored と、
+  // buildAndSend の作り直しの onNotStored で元の記録に戻せたとき。
+  const gaslessResendBlocked = gaslessAmbiguous && gaslessStoreUnavailable;
   const relayIpRateLimited = isRelayIpRateLimitedError(relay.error)
     ? relay.error
     : null;
@@ -128,6 +134,7 @@ export function deriveTipGuards({
     relayAmbiguous,
     gaslessAmbiguous,
     gaslessStoreUnavailable,
+    gaslessResendBlocked,
     relayIpRateLimited,
     directFlowPending,
     flowPending,
