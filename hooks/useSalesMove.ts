@@ -9,12 +9,17 @@
 // postUsageFeeRelay と **同じ語彙・同じ分岐順** にする (どれか 1 つだけが新しい応答を fallback 安全と読むと、その hook だけ
 // 再署名 = 二重の送金の経路が残る・tests/hooks/relayResponseClassification.test.tsx が 4 つの hook を 1 つの表で固定する)。
 //   - 200 ok + txHash → 成功。200 reverted + txHash → 成立しなかった (JPYC は動いていない・次は新しい署名で構わない)。
-//   - 202 pending → 送信済み・未確定。throw せずに返し、保持を続ける (次は nonce の status 照会だけ)。
+//   - 202 pending → 送信済み・未確定。throw せずに返し、保持を続ける (次は nonce の status 照会だけ)。返した後、同じ画面でも
+//     その照会を始め、終端の結果が分かれば pending の結果に代えて出す (第 10 回レビュー G-2・開き直しを待たない)。
 //   - 429 ip_rate_limited → 署名済みの payload を memory に保持し、次は同じ payload の再 POST だけ。
 //   - 構造化の non-2xx → server が broadcast 前に確定させた拒否。保持を外す (次は新しい署名)。
 //   - それ以外 (fetch の失敗・非 JSON・形の崩れた応答) → 応答不明。ambiguous の latch (単調) を張り、再署名しない。
 // ambiguous の解き方は決済 hook と同じ: 署名は保存せず、公開 metadata (openpay:move-intent:v1・決済の枠とは別のキー) だけを
 // 保存して /api/relay/jpyc/status を nonce で照会する (lib/relay/relayIntentRecovery.ts)。ページを開き直したときも同じ。
+// その公開 metadata (枠) を書けない端末では送らない (第 10 回レビュー G-1): 署名の前に書けるかを確かめ、署名の後に枠そのものを
+// 書いて読み戻し、読めなければ POST しない (intent_storage_unavailable)。枠が無いまま送ると、応答を失って開き直した画面が
+// 未解決の移動を知らず、新しい署名 (別の nonce) = 二重の移動を許す。枠は sessionStorage (タブごと) なので、タブを閉じて
+// 新しいタブで開き直す経路はこの確かめでは塞がらない (受容した限界)。
 //
 // 試みは 1 つずつで、試みごとに番号 (ticket) を持つ。入口 (move / moveAsync) は react-query に渡す **前に** 同期で
 //   1. 試み中 (claimed / running) なら新しい mutation を作らずに断る (二度押し・並行の呼び出し)。
@@ -34,7 +39,10 @@
 // indeterminate を返す (hash があるのに unused を新しい署名の許可に使わない・status route)。その間この画面は「送信済み・確定待ち」の
 // まま再署名を止める。解除は照会の部品 (lib/relay/relayIntentRecovery.ts) の規則どおり、**連続 2 回の unused で、最新の応答が
 // expiry: 'expired' (チェーンで期限切れ未使用を証明)** のときだけ (indeterminate や応答なしは連続の数を 0 に戻す)。記録が消えて
-// から開き直すと、この規則で入力に戻る。1 回の revert を理由に解除する道は作らない (置換や再送と区別できない)。
+// から開き直すと、この規則で入力に戻る。1 回の revert を理由に解除する道は作らない (置換や再送と区別できない)。照会の部品が
+// 候補の tx の receipt の revert を返しても同じで、不成立にせず応答不明のまま保持する (別の tx が同じ authorization を先に
+// 使っていれば JPYC は動いている・第 10 回レビュー PR-03 Codex MUST 1)。照会で新しい署名を許すのは期限切れ未使用の証明だけ。
+// (200 の reverted は別: server が revert のブロックに固定して authorization が未使用だと読めたときだけ返す・lib/relay/revertRecheck.ts。)
 //
 // 決済でもチップでもないので、お店の履歴 (lib/history・売上・CSV・集計) には入れない。支払う側の控え (lib/payerReceipt) にだけ
 // 「届く額」と「利用料」を別の項目で残す (§2.2・Q6)。署名・鍵・秘密の値はログに出さない (logger には chainId と段階だけ)。
@@ -62,8 +70,10 @@ import {
   RelayResponseUnknownError,
 } from '@/lib/relay/relayResponseError';
 import {
+  canStoreSalesMoveIntent,
   clearSalesMoveIntent,
   loadSalesMoveIntent,
+  readSalesMoveIntentSlot,
   saveSalesMoveIntent,
   type RelayIntentMetadata,
   type SalesMoveIntentMetadata,
@@ -269,10 +279,15 @@ export function useSalesMove(
   const recoveryWakeRef = useRef<(() => void) | null>(null);
   const recoveryFetchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const recoveryAbortRef = useRef<AbortController | null>(null);
+  // 開き直したときに枠の読み取りが投げた (読めない枠を空と区別する)。立っている間は、移す前に読み直す (runMove)。
+  const slotUnreadableRef = useRef(false);
   const [storageReady, setStorageReady] = useState(false);
   const [restoredResult, setRestoredResult] = useState<SalesMoveResult | null>(null);
   const [restoredError, setRestoredError] = useState<Error | null>(null);
   const [recoveryState, setRecoveryState] = useState<'auto' | 'exhausted' | null>(null);
+  // 同じ画面での照会 (202 pending の後・「もう一度確かめる」) が着いた終端の結果。mutation の data (pending) や応答不明の error は
+  // そのまま残るので、これがあるときはこちらを出す。新しい試みを始めるとき・reset で消す。
+  const [followedResult, setFollowedResult] = useState<SalesMoveResult | null>(null);
   // 保持 (retainedRef) の写し。ref は描画を起こさないので、変えるときは必ず setRetained を通して画面にも知らせる。
   const [held, setHeld] = useState<SalesMoveHeld>(null);
   const setRetained = useCallback((next: RetainedMove | null) => {
@@ -384,6 +399,17 @@ export function useSalesMove(
           setRecoveryStateIfMounted(null);
           throw new Error('relay_unused');
         }
+        if (outcome.kind === 'settled' && !outcome.success) {
+          // 候補の tx の receipt が revert = 「移動が起きなかった」証拠ではない (第 10 回レビュー PR-03 Codex MUST 1)。forwarder は
+          // 誰でも呼べるので、同じ authorization を別の tx が先に実行していれば (reorg・mempool を見た第三者の先回り)、この tx は
+          // revert しても JPYC は動いている。照会の部品は、その authorization が別の tx で使われたかを見ずに revert を返す
+          // (status route は成功の receipt を照合できたときだけ settled を返すので、ここに来るのは route と手元の RPC の食い違い)。
+          // 不成立の確定にせず、保持と枠を残したまま応答不明に倒す (新しい署名を許さない・控えも failed にしない)。次は
+          // 「もう一度確かめる」か開き直したときの照会で、status の新しい証拠 (成立・期限切れ未使用の証明) を読む。
+          logger.warn('sales_move.recovery_receipt_reverted', { chainId: retained.intent.chainId });
+          setRecoveryStateIfMounted('exhausted');
+          throw new RelayResponseUnknownError();
+        }
         if (outcome.kind === 'settled') {
           if (retainedRef.current === retained) setRetained(null);
           clearSavedIntent(retained.intent);
@@ -408,14 +434,43 @@ export function useSalesMove(
   const resolveAmbiguousRef = useRef(resolveAmbiguous);
   resolveAmbiguousRef.current = resolveAmbiguous;
 
+  // 同じ画面での照会 (第 10 回レビュー G-2)。送信済みかもしれない保持の status を読み、終端の結果を画面に出す。読み取りだけで、
+  // 署名も POST もしない (保持と枠を外すのは今までどおり resolveAmbiguous の中の、成立の証明と期限切れ未使用の証明だけ)。
+  // 照会の部品の読み取りは最大 5 回 (3・6・12・24・45 秒の間をおく)。締め切りの目安は 90 秒だが、間を待ってから締め切りを
+  // 見るので、status の応答が遅いと 90 秒を超える (共有の部品の性質・lib/relay/relayIntentRecovery.ts)。
+  // unmount では、unmount の cleanup が照会の sleep と status の fetch を取り消し、照会の部品が読むのをやめる (枠は残るので
+  // 開き直した画面が続きを読む)。
+  const followAmbiguous = useCallback(
+    (retained: RetainedMove) => {
+      void resolveAmbiguous(retained).then(
+        (settled) => {
+          setRestoredError(null);
+          setFollowedResult(settled);
+        },
+        (error: unknown) => {
+          if (error instanceof Error && error.message === 'relay_unused') {
+            // 期限切れ未使用の証明 = この署名ではもう移らない (保持と枠は外れた)。この画面が送った移動は「成立しなかった」と
+            // 出す (出さないと 202 の pending の表示が残り続ける)。開き直して読んだ枠は、mount の照会と同じく何も出さない。
+            setRestoredError(null);
+            if (retained.payload !== null) setFollowedResult({ txHash: null, success: false });
+          }
+          // 応答不明 (照会の打ち切り): 保持と表示はそのまま。次は「もう一度確かめる」(recheck) か、開き直したときの照会。
+        },
+      );
+    },
+    [resolveAmbiguous],
+  );
+
   // 開き直したときの照会: 枠があれば、署名を持たない保持として nonce の status を照会し、結果を出す (終端で枠を消す)。
   // React の開発時の二重 mount では、1 回目に張った保持と照会にそのまま付き直す (同じ nonce を 2 本照会しない)。
   useEffect(() => {
     let active = true;
     let retained = retainedRef.current;
     if (!retained) {
-      const saved = loadSalesMoveIntent();
-      if (saved) retained = { payload: null, intent: saved, ambiguous: true };
+      const slot = readSalesMoveIntentSlot();
+      // 枠を読めなかった (読み取りが投げた) ときは、空だとは言えない。印を立て、移す前に読み直す (runMove)。
+      slotUnreadableRef.current = slot.kind === 'unreadable';
+      if (slot.kind === 'intent') retained = { payload: null, intent: slot.intent, ambiguous: true };
     }
     if (retained) setRetained(retained);
     setStorageReady(true);
@@ -449,11 +504,22 @@ export function useSalesMove(
       // 何の波及を断つか: POST が届いた後に応答を失ってページを閉じても、開き直したときに同じ nonce を照会できる
       // (照会できないと新しい署名 = 二重の移動へ進めてしまう)。署名そのものは保存しない。
       saveSalesMoveIntent(intent);
+      // saveSalesMoveIntent は書き込みの失敗を投げない (決済と共有の save・進行中の決済を止めないための隔離)。売上の移動は
+      // 枠が無いまま送らない: 読み戻して同じ nonce が読めなければ、POST の前に止める (第 10 回レビュー G-1)。まだ何も送って
+      // いないので、署名済みの payload は保持せずに捨てる (次は新しい署名から・送らない署名は期限で失効する)。
+      const stored = loadSalesMoveIntent();
+      if (!stored || !sameIntent(stored, intent)) {
+        logger.info('sales_move.intent_not_stored', { chainId: intent.chainId });
+        setRetained(null);
+        throw new Error('intent_storage_unavailable');
+      }
       try {
         const result = await postSalesMove(payload);
+        let pendingRetained: RetainedMove | null = null;
         if (result.pending) {
           // broadcast 済み・未確定。保持を ambiguous にし (次は status 照会だけ)、枠も残す。
-          setRetained({ payload, intent, ambiguous: true });
+          pendingRetained = { payload, intent, ambiguous: true };
+          setRetained(pendingRetained);
           if (result.txHash) recordReceipt(intent, result.txHash, 'pending');
         } else {
           // txHash 付きの成功 / revert は on-chain の確定結果。保持と枠を外す。
@@ -462,6 +528,8 @@ export function useSalesMove(
           if (result.txHash) recordReceipt(intent, result.txHash, result.success ? 'confirmed' : 'failed');
         }
         setRecoveryState(null);
+        // 202 pending は今までどおり throw せずに返す。そのうえで同じ画面でも status の照会を始める (開き直しを待たせない)。
+        if (pendingRetained) followAmbiguous(pendingRetained);
         return result;
       } catch (error) {
         if (isRelayResponseUnknownError(error)) {
@@ -482,7 +550,7 @@ export function useSalesMove(
         throw error;
       }
     },
-    [recordReceipt, resolveAmbiguous, setRetained],
+    [followAmbiguous, recordReceipt, resolveAmbiguous, setRetained],
   );
 
   const runMove = useCallback(
@@ -497,6 +565,22 @@ export function useSalesMove(
       if (retained) {
         if (retained.ambiguous || !retained.payload) return resolveAmbiguous(retained);
         return send(retained.payload, retained.intent);
+      }
+      // 開き直したときに枠を読めなかった端末 (第 10 回レビュー PR-03 Codex SHOULD)。読めないまま残っている未解決の枠を、新しい
+      // 移動が上書きして署名・POST しないよう、押した時点で読み直す。まだ読めなければ止める。読めて未解決の枠があれば、上書き
+      // せずにその枠の照会へ進む (開き直したときと同じ・新しい署名はしない)。空なら今までどおり進む。
+      if (slotUnreadableRef.current) {
+        const slot = readSalesMoveIntentSlot();
+        if (slot.kind === 'unreadable') {
+          logger.info('sales_move.storage_unavailable', { chainId: deployment.chainId });
+          throw new Error('intent_storage_unavailable');
+        }
+        slotUnreadableRef.current = false;
+        if (slot.kind === 'intent') {
+          const adopted: RetainedMove = { payload: null, intent: slot.intent, ambiguous: true };
+          setRetained(adopted);
+          return resolveAmbiguous(adopted);
+        }
       }
 
       if (!walletClient || !address || chainId === undefined) {
@@ -551,6 +635,13 @@ export function useSalesMove(
         issuedAt: Date.now(),
       };
 
+      // 枠を書けない端末では、署名を求める前に止める (無駄な署名をさせない・lib/paymentIntentStorage の canStoreSalesMoveIntent)。
+      // 送ってよいかを決めるのは、署名の後に枠そのものを読み戻す send の確かめ。
+      if (!canStoreSalesMoveIntent(intent)) {
+        logger.info('sales_move.storage_unavailable', { chainId });
+        throw new Error('intent_storage_unavailable');
+      }
+
       // 署名の前後と取り消しを記録する (署名の中身・エラーの本文は記録しない)。catch は分類のためで必ず投げ直す。
       logger.info('sales_move.sign_requested', { chainId });
       let signature: Hex;
@@ -590,7 +681,7 @@ export function useSalesMove(
       intent.issuedAt = Date.now();
       return send(payload, intent);
     },
-    [address, chainId, deployment.address, deployment.chainId, publicClient, resolveAmbiguous, send, walletClient],
+    [address, chainId, deployment.address, deployment.chainId, publicClient, resolveAmbiguous, send, setRetained, walletClient],
   );
 
   // mutation の変数 = 押された内容と、入口で取った試みの番号。mutation は入口 (claimEntry を通ったもの) だけが作る
@@ -623,7 +714,12 @@ export function useSalesMove(
     (variables: SalesMoveParams) => {
       // 開き直した後の照会の前に押されたもの・成立した / 送信済みの後に押されたものは送らない (二重の移動を止める)。
       if (!storageReady) return;
-      if (
+      // 同じ画面での照会が終端に着いた後は、その結果で決める: 成立なら送らない。成立しなかった (保持と枠は外れた) なら、
+      // mutation の data に残る pending では止めない (開き直して不成立が分かった後と同じく、次は新しい署名で構わない)。
+      // 照会で「成立しなかった」になるのは期限切れ未使用の証明だけ (receipt の revert は応答不明のまま・resolveAmbiguous)。
+      if (followedResult) {
+        if (followedResult.success) return;
+      } else if (
         mutationData?.success ||
         mutationData?.pending ||
         restoredResult?.success ||
@@ -636,9 +732,10 @@ export function useSalesMove(
       if (ticket === null) return;
       setRestoredResult(null);
       setRestoredError(null);
+      setFollowedResult(null);
       mutationMutate({ params: variables, ticket });
     },
-    [claimEntry, mutationData, mutationMutate, restoredResult, storageReady],
+    [claimEntry, followedResult, mutationData, mutationMutate, restoredResult, storageReady],
   );
 
   // 結果を待てる入口 (テストと、結果を await したい呼出側)。move と同じ同期の直列化を通す: 試み中なら mutation を作らずに
@@ -652,6 +749,7 @@ export function useSalesMove(
       if (ticket === null) return Promise.reject(new Error('move_in_progress'));
       setRestoredResult(null);
       setRestoredError(null);
+      setFollowedResult(null);
       return mutationMutateAsync({ params: variables, ticket });
     },
     [claimEntry, mutationMutateAsync],
@@ -663,14 +761,26 @@ export function useSalesMove(
     mutationReset();
     setRestoredResult(null);
     setRestoredError(null);
+    setFollowedResult(null);
   }, [mutationReset]);
+
+  // 「もう一度確かめる」(第 10 回レビュー G-2): 照会を打ち切った後に、同じ nonce の status をもう一度読む。読み取りだけで、
+  // 署名も POST もしない。送信済みかもしれない保持があるときだけ動く (IP 制限の再送待ち・保持なしでは何もしない)。照会が
+  // 動いている間に押されても、同じ照会に付くだけで 2 本目は始めない (resolveAmbiguous)。
+  const recheck = useCallback(() => {
+    const retained = retainedRef.current;
+    if (!retained || heldOf(retained) !== 'ambiguous') return;
+    followAmbiguous(retained);
+  }, [followAmbiguous]);
 
   return {
     moveAsync,
     move,
     reset,
-    result: mutationData ?? restoredResult ?? undefined,
-    error: mutation.error ?? restoredError,
+    recheck,
+    result: followedResult ?? mutationData ?? restoredResult ?? undefined,
+    // 同じ画面での照会が終端に着いたら、その前の応答不明の error は出さない (結果が分かった)。
+    error: followedResult ? null : mutation.error ?? restoredError,
     isPending: !storageReady || mutation.isPending || recoveryState === 'auto',
     isRestoring: !storageReady,
     /** 照会中 (送信済みかもしれない移動の status を読んでいる)。 */

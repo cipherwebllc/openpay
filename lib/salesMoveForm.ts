@@ -91,6 +91,7 @@ export type SalesMoveErrorKey =
   | 'sameAsSender'
   | 'forbiddenDestination'
   | 'unavailable'
+  | 'storageUnavailable'
   | 'generic';
 
 /**
@@ -129,6 +130,10 @@ export function salesMoveErrorKey(error: unknown): SalesMoveErrorKey {
     case 'daily_budget_exceeded':
     case 'balance_unavailable':
       return 'unavailable';
+    // この端末に復旧の枠 (公開 metadata) を書けないので、送らずに止めた (hooks/useSalesMove・第 10 回レビュー G-1)。
+    // 時間をおいても直らないので、「いまは移せません」とは別の文言にする。
+    case 'intent_storage_unavailable':
+      return 'storageUnavailable';
     default:
       return 'generic';
   }

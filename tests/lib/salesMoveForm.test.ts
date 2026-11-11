@@ -76,6 +76,8 @@ describe('salesMoveErrorKey', () => {
     ['storage_unavailable', 'unavailable'],
     ['daily_budget_exceeded', 'unavailable'],
     ['balance_unavailable', 'unavailable'],
+    // この端末に復旧の枠を書けないので送らなかった (第 10 回レビュー G-1)。「時間をおいて」の文言にしない。
+    ['intent_storage_unavailable', 'storageUnavailable'],
     ['relay_unused', 'generic'],
     ['signature_invalid', 'generic'],
   ])('%s → %s', (code, key) => {
