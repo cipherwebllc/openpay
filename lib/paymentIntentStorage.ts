@@ -238,6 +238,52 @@ export function clearRelayIntent(): void {
   clear(RELAY_INTENT_STORAGE_KEY);
 }
 
+// --- 決済の relay の枠を「書けたか」まで確かめる (第 10 回レビュー H-R) ---
+// 共有の save() と saveRelayIntent は書き込みの失敗を投げない (進行中の決済を止めないための隔離) ので、呼出側は枠が
+// 残ったかを知らない。枠が無いまま POST すると、relay が receipt を待つ間に読み直した・離れて戻った画面 (新しい hook) は
+// 未解決の支払いを知らず、新しい署名 (別の nonce) = 二重払いを許す。束縛しない支払い (hooks/useJpycEip3009Payment) だけが
+// 下の 2 つを使う。ほかの呼出側の saveRelayIntent・共有の save() / load() の振る舞いは変えない。
+
+// 署名を求める前の確かめ。枠と同じ中身を別のキーに書き、読み戻して消す。
+// 何の波及を断つか: 枠を書けない端末 (サイトのデータの保存を止めている・アプリ内ブラウザ・容量が一杯) で署名させてから
+// 「使えません」と止めること (無駄な署名)。枠そのもののキーには書かない: 署名の前に枠を残すと、ウォレットの署名を取りやめて
+// 開き直した画面が、送っていない支払いを「送信済みかもしれない」として署名の期限が証明されるまで塞ぐ。
+// 送ってよいかを決めるのはこの確かめではなく、署名の後に枠そのものを書いて読み戻す saveRelayIntentVerified。
+// 署名を待つ間に保存できなくなる端末を、この確かめは見つけられない。
+export const RELAY_INTENT_PROBE_KEY = 'openpay:relay-intent:probe';
+
+export function canStoreRelayIntent(intent: RelayIntentMetadata): boolean {
+  try {
+    // 枠と同じ whitelist を通した中身 (署名や将来のフィールドを書かない・枠と同じ長さ)。読み戻しても枠として
+    // 復元できない形は、書けても開き直した画面が読めないので false。
+    const record = parseRelayIntent(intent);
+    if (!record) return false;
+    const raw = JSON.stringify(record);
+    window.sessionStorage.setItem(RELAY_INTENT_PROBE_KEY, raw);
+    const stored = window.sessionStorage.getItem(RELAY_INTENT_PROBE_KEY);
+    window.sessionStorage.removeItem(RELAY_INTENT_PROBE_KEY);
+    return stored === raw;
+  } catch {
+    // 書けない・読めない・消せない端末。呼出側が署名の前に止めて、画面で知らせる (握りつぶさない)。
+    return false;
+  }
+}
+
+// 署名の後・POST の前の確かめ。枠そのものを書き (saveRelayIntent と同じ書き込み)、読み戻して、この authorization
+// (chainId・from・nonce) の枠が残っているときだけ true。false なら呼出側は POST しない。
+// nonce まで照合するのは、書き込みが失敗したときに枠に残っている別の支払いの記録 (同じ chainId・from) を、
+// いま書いた枠と読み違えないため。
+export function saveRelayIntentVerified(intent: RelayIntentMetadata): boolean {
+  saveRelayIntent(intent);
+  const stored = loadRelayIntent();
+  return (
+    stored !== null &&
+    stored.chainId === intent.chainId &&
+    stored.from.toLowerCase() === intent.from.toLowerCase() &&
+    stored.nonce.toLowerCase() === intent.nonce.toLowerCase()
+  );
+}
+
 export function loadStandardIntent(): StandardIntentMetadata | null {
   return load(STANDARD_INTENT_STORAGE_KEY, parseStandardIntent);
 }

@@ -8,6 +8,13 @@
 //   free (forwarder なし): transferWithAuthorization(to=merchant) に署名 → OpenPay がガス負担。
 // flag/relay 未構成時は呼び出し元が resolveJpycGaslessProvider で 7702 経路を選ぶ。詳細は
 // memory:jpyc-eip3009 / gasless-legal-jp。
+//
+// 復旧の枠 (openpay:relay-intent:v1・公開 metadata だけ) を書けない端末では、束縛しない支払い (/pay・/tip・束縛しない
+// /checkout) を送らない (第 10 回レビュー H-R): 署名の前に書けるかを確かめ、署名の後に枠そのものを書いて読み戻し、読めなければ
+// POST しない (intent_storage_unavailable・fallback-safe な error なので、フォームは通常決済への切り替えを出せる)。枠が無いまま
+// 送ると、relay が receipt を待つ間に読み直した・離れて戻った画面が未解決の支払いを知らず、新しい署名 (別の nonce) = 二重払いを
+// 許す。束縛した注文は従来どおり自分の slot の保存 (order_binding_storage_unavailable) で止まる。枠は sessionStorage (タブごと)
+// なので、タブを閉じて新しいタブで開き直す経路はこの確かめでは塞がらない (従来からの限界)。
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
@@ -520,7 +527,9 @@ export function useJpycEip3009Payment(
       })
       .catch(() => {
         if (!active) return;
-        // chunk 読込障害を通常の決済機能へ波及させない。保存不能時も現行の同一 mount latch は残る。
+        // chunk 読込障害で画面を「復元中」のまま止めない。保存不能時も現行の同一 mount latch は残る。
+        // storageRef は null のままなので、束縛しない支払いは mutationFn が署名の前に止める (枠を書けない端末と同じ扱い・
+        // intent_storage_unavailable)。束縛した注文は自分の slot (lib/orderDelivery) に保存するので、ここでは止まらない。
         setStorageReady(true);
       });
     return () => {
@@ -585,7 +594,14 @@ export function useJpycEip3009Payment(
         // 何の波及を断つか: IP 制限で intent を外したままの retry が broadcast し、応答が不明・pending の
         // まま reload すると memory の latch が消えて新しい署名 (新 nonce) で二重払いになる。初回の POST と
         // 同じく、POST の前に公開 metadata だけを保存し直す (IP 制限・確定応答でまた消える)。
-        if (retained.savesRelayIntent) storageRef.current?.saveRelayIntent(retained.intent);
+        // 保存し直した枠が読み戻せなければ再送しない (第 10 回レビュー H-R・初回の POST の前と同じ確かめ)。この payload は
+        // IP 制限 (relay の処理の前の拒否) しか受けていない = 送られていないので、保持を外す (次は新しい署名から・送らない署名は
+        // 期限で失効する)。保持を残すと hasActiveIntent が立ったままになり、フォームが通常決済へ切り替えても払えない。
+        if (retained.savesRelayIntent && !storageRef.current?.saveRelayIntentVerified(retained.intent)) {
+          logger.info('payment.intent_storage_unavailable', { path: 'jpyc-relay', chainId: retained.intent.chainId, stage: 'retry' });
+          retainedPayloadRef.current = null;
+          throw new Error('intent_storage_unavailable');
+        }
         try {
           const result = await postRelayPayload(retained.payload);
           finishOrderPayment(retained.intent, result);
@@ -652,6 +668,15 @@ export function useJpycEip3009Payment(
         if (!storage.saveOrderDelivery(record)) throw new Error('order_binding_storage_unavailable');
         orderDeliveryRef.current = record;
         setOrderDelivery(record);
+      };
+      // 束縛しない支払いは、復旧の枠を書けない端末では署名を求める前に止める (第 10 回レビュー H-R・無駄な署名をさせない・
+      // lib/paymentIntentStorage の canStoreRelayIntent)。storageRef が null (storage の chunk を読めなかった) のときも
+      // 枠を書けないので同じく止める。送ってよいかを決めるのは、署名の後に枠そのものを書いて読み戻す下の確かめ。
+      // 束縛した注文は枠を使わず、署名の後の persistOrder (自分の slot の保存) で止まるので、ここでは見ない。
+      const assertRelayIntentStorable = (candidate: RelayIntentMetadata) => {
+        if (bind || storageRef.current?.canStoreRelayIntent(candidate)) return;
+        logger.info('payment.intent_storage_unavailable', { path: 'jpyc-relay', chainId, stage: 'probe' });
+        throw new Error('intent_storage_unavailable');
       };
       // 「署名安心 UX」(plans/sign-reassurance-ux.md §5) の計測: 署名要求の前後と拒否/失敗
       // をログ化し、拒否率ファネル (Sentry) を取れるようにする。free/recover の 2 経路で
@@ -742,6 +767,7 @@ export function useJpycEip3009Payment(
           routeKind: 'recover',
           issuedAt: Date.now(),
         };
+        assertRelayIntentStorable(intent);
         const signature = await signWithLogging({
           account: address,
           domain: typed.domain,
@@ -804,6 +830,7 @@ export function useJpycEip3009Payment(
           routeKind: 'free',
           issuedAt: Date.now(),
         };
+        assertRelayIntentStorable(intent);
         const signature = await signWithLogging({
           account: address,
           domain: typed.domain,
@@ -847,7 +874,15 @@ export function useJpycEip3009Payment(
 
       // 署名そのものは保存せず、POST 応答喪失後も read-only status を引ける公開メタデータだけを残す。
       // Bound payments recover from their own authorization slot, never the global /pay intent.
-      if (!bind) storageRef.current?.saveRelayIntent(intent);
+      // 書いた枠が読み戻せなければ POST しない (第 10 回レビュー H-R)。saveRelayIntent は書き込みの失敗を投げないので、
+      // 読み戻して同じ authorization (chainId・from・nonce) の枠が残っているときだけ送る。何の波及を断つか: 枠が無いまま
+      // 送り、relay が receipt を待つ間に読み直した・離れて戻った画面が、新しい署名 (別の nonce) で二重に払うこと。
+      // まだ何も送っていないので、署名済みの payload は保持せずに捨てる (次は新しい署名から・送らない署名は期限で失効する)。
+      // storageRef が null (storage の chunk を読めなかった) のときも枠は無いので送らない。
+      if (!bind && !storageRef.current?.saveRelayIntentVerified(intent)) {
+        logger.info('payment.intent_storage_unavailable', { path: 'jpyc-relay', chainId, stage: 'save' });
+        throw new Error('intent_storage_unavailable');
+      }
       try {
         const result = await postRelayPayload(payload);
         finishOrderPayment(intent, result);
