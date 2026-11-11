@@ -71,6 +71,8 @@ import {
 } from '@/lib/relay/relayResponseError';
 import { isUserRejection } from '@/lib/walletErrors';
 import { derivePayGuards } from '@/lib/paymentFlowGuards/pay';
+import { isForeignSettlement } from '@/lib/paymentFlowGuards/restoredSettlement';
+import { unkeyedSettlementScreen } from '@/lib/paymentFlowGuards/settlementScreen';
 import { useErc20BalanceAndChain } from '@/hooks/useErc20BalanceAndChain';
 import { type GasMode } from '@/lib/fee';
 import {
@@ -770,8 +772,11 @@ function PaymentDetails({ params }: { params: PayParams }) {
   );
   const restoredRelayPayment =
     useRelay && relay.restoredIntent != null;
+  // 通常決済: hook の restoredFromStorage は利用料の再送 (retryFee) で false に戻るので、復元した試みの印 (restoredAttempt・
+  // 新しい mutate でだけ false) も見る (第 10 回レビュー H-U: 復元した別の支払いの利用料を再送した後の完了を、この画面の
+  // 店・額で履歴・控えに書かない)。
   const restoredStandardPayment =
-    isStandard && standard.restoredFromStorage;
+    isStandard && (standard.restoredFromStorage || standard.restoredAttempt);
   // 永続化を許可された on-chain metadata だけでは元の product/memo/receipt 文脈を再構成できない。
   // 復元済み hash を現在の /pay URL の履歴・控えへ誤帰属させる波及を断ち、hash の成功表示だけ残す。
   const gaslessForHistory =
@@ -792,6 +797,30 @@ function PaymentDetails({ params }: { params: PayParams }) {
   // 受取先・金額で書く (今の画面の店・明細と組み合わせない)。
   const gaslessSettledOtherIntent =
     !isStandard && !useRelay && gasless.settledOtherIntent;
+  // 復元した前の支払いの確定が、この画面の支払いでないと証明できたか (第 10 回レビュー H-S)。結果の欄の題だけを差し替え、
+  // 読み込み直しの案内と「読み込み直す」を足す (hash の行・控えは同じ)。overlay・履歴・支払いのボタンの止めの条件は上の
+  // 3 つの印のままで、ここでは変えない。この mount で送った支払いは判定しない。
+  // 返す値は意図して非対称 (lib/paymentFlowGuards/restoredSettlement): 比べられない欄は一致。何の波及を断つか: 同じ支払いを
+  // 読み直しただけの人に「この画面の支払いではありません」と出して、もう一度払わせること (二重払い)。
+  // 額は URL で決まるとき (金額ありの QR) だけ比べる。金額なしの QR は、読み込み直すと入力欄が空に戻るので、今の入力の値を
+  // 渡さない (渡すと、同じ支払いを読み直した後に別の額を打っただけで不一致になる)。額を読めない URL (amountWei = 0・
+  // この画面からは払えない) も比べない。記録の額の形は、固定額の同じ支払いなら必ず URL の額と同じ: relay は free
+  // (受取 = 額・利用料 0) かお店が利用料を負担する recover (受取 + 利用料 = 額)、通常決済とガスレスは saleAmount = 額。
+  const foreignSettlement =
+    (restoredRelayPayment || restoredStandardPayment || gaslessSettledOtherIntent) &&
+    isForeignSettlement(
+      unkeyedSettlementScreen(params.to, params.token, isFixed && amountWei > 0n ? amountWei : null),
+      isStandard
+        ? { kind: 'standard', record: standard.lastSubmittedParams }
+        : useRelay
+          // /pay の relay は注文に束縛しない (order を渡さない)。
+          ? { kind: 'relay', bound: false, record: relay.restoredIntent }
+          : { kind: 'gasless', record: gasless.variables },
+    );
+  const settledTitle = t(foreignSettlement ? 'foreignSettlementTitle' : 'successTitle');
+  const settledReload = foreignSettlement
+    ? { body: t('foreignSettlementBody'), label: t('foreignSettlementReload') }
+    : undefined;
   usePaymentHistory(
     directAttemptSnapshotRef.current?.historyCtx ?? unattributedHistoryCtx,
     gaslessForHistory,
@@ -1635,7 +1664,8 @@ function PaymentDetails({ params }: { params: PayParams }) {
       {!isStandard && !useRelay && gasless.data && gasless.data.success && (
         <>
           <PaymentResultPanel
-            title={t('successTitle')}
+            title={settledTitle}
+            reload={settledReload}
             rows={[
               { label: t('successUserOp'), value: gasless.data.userOpHash, copyable: true },
               { label: t('successTx'), value: gasless.data.txHash, copyable: true },
@@ -1652,7 +1682,8 @@ function PaymentDetails({ params }: { params: PayParams }) {
       {useRelay && relay.data && relay.data.success && relay.data.txHash && (
         <>
           <PaymentResultPanel
-            title={t('successTitle')}
+            title={settledTitle}
+            reload={settledReload}
             rows={[{ label: t('successTx'), value: relay.data.txHash, copyable: true }]}
           />
           <PayerReceiptCompletion candidateIds={[relay.data.txHash]} />
@@ -1680,7 +1711,8 @@ function PaymentDetails({ params }: { params: PayParams }) {
       {isStandard && standard.data && (
         <>
           <PaymentResultPanel
-            title={t('successTitle')}
+            title={settledTitle}
+            reload={settledReload}
             rows={[
               {
                 label: t('standardMerchantTxLabel'),

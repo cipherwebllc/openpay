@@ -1,7 +1,7 @@
 import { gatewayAttestation, encodedSpec } from '../fixtures/gateway';
 import { getAddress, keccak256 } from 'viem';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   act,
   fireEvent,
@@ -136,6 +136,7 @@ import { PaymentForm } from '@/components/PaymentForm';
 import { logger } from '@/lib/logger';
 import { loadHistory } from '@/lib/history';
 import { loadPayerReceipts } from '@/lib/payerReceipt';
+import { deploymentsForSymbol } from '@/lib/tokens';
 import { saveResumeState } from '@/lib/crossChain/resumeStore';
 import {
   RelayIpRateLimitedError,
@@ -327,8 +328,14 @@ function setStandardPayment(
     >;
     lastSubmittedFrom?: Address;
     hasAttempt?: boolean;
+    // 復元の印。省くと、lastSubmittedParams を渡した = 保存された印から復元した (restoredFromStorage) とし、復元した試みの印
+    // (restoredAttempt・第 10 回レビュー H-U) も同じ値にする (hook は復元で 2 つを一緒に true にする)。利用料の再送の後
+    // (restoredFromStorage だけ false に戻る) は、2 つを別々に渡す。
+    restoredFromStorage?: boolean;
+    restoredAttempt?: boolean;
   },
 ) {
+  const restoredFromStorage = opts?.restoredFromStorage ?? opts?.lastSubmittedParams !== undefined;
   standardMutate = vi.fn();
   standardRetryFee = vi.fn();
   standardRetryReceipt = vi.fn();
@@ -391,7 +398,8 @@ function setStandardPayment(
     hasAttempt: opts?.hasAttempt ?? state !== 'idle',
     lastSubmittedParams: opts?.lastSubmittedParams,
     lastSubmittedFrom: opts?.lastSubmittedFrom,
-    restoredFromStorage: opts?.lastSubmittedParams !== undefined,
+    restoredFromStorage,
+    restoredAttempt: opts?.restoredAttempt ?? restoredFromStorage,
   } as Partial<ReturnType<typeof useStandardPayment>>);
 }
 
@@ -3631,5 +3639,430 @@ describe('PaymentForm — 履歴と控えの支払者は送信した時点のア
       payerAddress: CUSTOMER,
     });
     expect(loadPayerReceipts()[0].txHash).toBeUndefined();
+  });
+});
+
+// 第 10 回レビュー H-S・H-U (/pay の分): ブラウザに残る未解決の支払いの記録 (束縛しない relay の枠・通常決済の印・Pimlico の
+// 記録) は、どの /pay の mount でも復元される。前の支払い A の確定を、今の画面 B の完了 (「決済が完了しました」) として出さない:
+// この画面の支払いでないと証明できたときだけ、結果の欄の題を差し替えて、読み込み直しの案内と「読み込み直す」を出す。
+// 比べられない欄は一致 (同じ支払いを読み直しただけの人に「この画面の支払いではありません」と出すと、二重払いを誘う)。
+// 額は URL で決まるとき (金額ありの QR) だけ比べる。hook は境界として差し替え、判定 (lib/paymentFlowGuards/restoredSettlement)・
+// 画面の形 (lib/paymentFlowGuards/settlementScreen)・usePaymentHistory・履歴・控えは実物。
+describe('PaymentForm — 復元した前の支払いの確定を、この画面の完了として出さない (第 10 回レビュー H-S・H-U)', () => {
+  const DONE_TITLE = '決済が完了しました';
+  const FOREIGN_TITLE = '前に確認中だった支払いが完了しました。この画面の支払いではありません。';
+  const FOREIGN_BODY = 'この画面の支払いを続けるには、読み込み直してください。';
+  const OTHER_MERCHANT: Address = '0x3333333333333333333333333333333333333333';
+  const OTHER_PAYER: Address = '0x7777777777777777777777777777777777777777';
+  const FEE_RECEIVER: Address = '0xdead000000000000000000000000000000001234';
+  const USDC_BASE_SEPOLIA: Address = '0x036CbD53842c5426634e7929541eC2318f3dCF7e';
+  const ANY_KEY = `0x${'7'.repeat(64)}` as const;
+  const E18 = 10n ** 18n;
+  const realLocation = window.location;
+  let reload: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    window.localStorage.clear();
+    reload = vi.fn();
+    Object.defineProperty(window, 'location', { configurable: true, value: { ...realLocation, reload } });
+  });
+  afterEach(() => {
+    Object.defineProperty(window, 'location', { configurable: true, value: realLocation });
+  });
+
+  // 大きな完了画面 (遅延ロード) が出ないことは、待ってから確かめる。
+  const expectNoOverlay = () => expect(screen.findByRole('dialog', {}, { timeout: 300 })).rejects.toThrow();
+
+  /** 今までどおりの結果の欄 (題・hash)。読み込み直しの案内と「読み込み直す」は無い。 */
+  async function expectOwnResult(txHash: string) {
+    expect((await screen.findAllByText(DONE_TITLE)).length).toBeGreaterThan(0);
+    expect(screen.queryByText(FOREIGN_TITLE)).toBeNull();
+    expect(screen.queryByText(FOREIGN_BODY)).toBeNull();
+    expect(screen.queryByRole('button', { name: '読み込み直す' })).toBeNull();
+    expect(screen.getAllByText(txHash).length).toBeGreaterThan(0);
+  }
+  /** この画面の支払いでない確定: 題が替わり、案内と「読み込み直す」が出る。hash は出る。押すと読み込み直す。 */
+  async function expectForeignResult(txHash: string) {
+    expect(await screen.findByText(FOREIGN_TITLE)).toBeInTheDocument();
+    expect(screen.getByText(FOREIGN_BODY)).toBeInTheDocument();
+    expect(screen.queryByText(DONE_TITLE)).toBeNull();
+    expect(screen.getAllByText(txHash).length).toBeGreaterThan(0);
+    expect(reload).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '読み込み直す' }));
+    expect(reload).toHaveBeenCalledTimes(1);
+  }
+
+  // ---- relay (束縛しない枠) ----
+  type RelayIntent = NonNullable<ReturnType<typeof useJpycEip3009Payment>['restoredIntent']>;
+  const RELAY_TX = `0x${'5c'.repeat(32)}` as const;
+  const FIXED_JPYC = `to=${MERCHANT}&token=jpyc&amount=300`;
+  const OPEN_JPYC = `to=${MERCHANT}&token=jpyc`;
+  // 300 JPYC・MERCHANT を free で払った intent。
+  function relayIntent(overrides: Partial<RelayIntent> = {}): RelayIntent {
+    return {
+      chainId: polygonAmoy.id,
+      from: CUSTOMER,
+      merchant: MERCHANT,
+      merchantValue: (300n * E18).toString(),
+      feeValue: '0',
+      nonce: `0x${'6d'.repeat(32)}`,
+      validBefore: '9999999999',
+      routeKind: 'free',
+      issuedAt: 1_700_000_000_000,
+      ...overrides,
+    };
+  }
+  function readyJpyc(url: string) {
+    vi.mocked(resolveJpycGaslessProvider).mockReturnValue('eip3009-relay');
+    setURL(url);
+    setAccount({ connected: true, chainId: polygonAmoy.id });
+    setBalance(10_000n * E18);
+  }
+  // 読み直した画面で、保存された relay の nonce が settled と分かった状態 (hook は restoredIntent を持ったまま成功)。
+  function setRestoredRelay(intent: RelayIntent) {
+    setRelay('success', {
+      txHash: RELAY_TX,
+      restoredIntent: intent,
+      variables: { merchant: intent.merchant, value: BigInt(intent.merchantValue) + BigInt(intent.feeValue) },
+    });
+  }
+
+  it.each<[string, Partial<RelayIntent>]>([
+    ['同じお店・額 (free)', {}],
+    ['支払い者 (from) が今つないでいるウォレットと違う', { from: OTHER_PAYER }],
+    ['recover (お店が利用料を負担: 受取 298 + 利用料 2 = 300)', { routeKind: 'recover', merchantValue: (298n * E18).toString(), feeValue: (2n * E18).toString() }],
+    ['recover で、払った後に利用料の設定が変わった (保存した利用料 30 JPYC)', { routeKind: 'recover', merchantValue: (270n * E18).toString(), feeValue: (30n * E18).toString() }],
+    ['chain が違う (お店・額は同じ)', { chainId: baseSepolia.id }],
+  ])('relay・金額ありの QR: %s の復元の確定は、今までどおりの題 (overlay・履歴・控えは今までどおり出さない)', async (_label, overrides) => {
+    readyJpyc(FIXED_JPYC);
+    setRestoredRelay(relayIntent(overrides));
+    render(<PaymentForm />);
+
+    await expectOwnResult(RELAY_TX);
+    await expectNoOverlay();
+    expect(loadHistory()).toHaveLength(0);
+    expect(loadPayerReceipts()).toHaveLength(0);
+  });
+
+  it.each<[string, Partial<RelayIntent>]>([
+    ['お店が違う', { merchant: OTHER_MERCHANT }],
+    ['額が違う (受取も受取 + 利用料も 300 と違う)', { merchantValue: (299n * E18).toString() }],
+    ['お客様の上乗せの形 (受取 300・利用料 2 = チップなど。/pay はこの形で送らない)', { routeKind: 'recover', feeValue: (2n * E18).toString() }],
+    ['注文リンクの鍵を持つ (付けるのは /checkout だけ・お店と額は同じ)', { orderLinkKey: ANY_KEY }],
+  ])('relay・金額ありの QR: %s 復元の確定は「この画面の支払いではありません」と「読み込み直す」(overlay・履歴・控えなし)', async (_label, overrides) => {
+    readyJpyc(FIXED_JPYC);
+    setRestoredRelay(relayIntent(overrides));
+    render(<PaymentForm />);
+
+    await expectForeignResult(RELAY_TX);
+    await expectNoOverlay();
+    expect(loadHistory()).toHaveLength(0);
+    expect(loadPayerReceipts()).toHaveLength(0);
+  });
+
+  // 金額なしの QR: 読み込み直すと入力欄は空に戻る。復元した支払いが確定する前に別の額を打っても、額では不一致にしない
+  // (入力欄の今の値を額として渡さない)。
+  it('relay・金額なしの QR: 確定の前に入力欄へ別の額 (50) を打っていても、同じお店への 300 JPYC の復元の確定は今までどおりの題', async () => {
+    const user = userEvent.setup();
+    readyJpyc(OPEN_JPYC);
+    // 復元した枠の結果がまだ分からない間 (入力欄は使える)。
+    setRelay('idle', { restoredIntent: relayIntent() });
+    const { rerender } = render(<PaymentForm />);
+    await user.type(screen.getByPlaceholderText('1000'), '50');
+    expect(screen.getByPlaceholderText('1000')).toHaveValue('50');
+
+    setRestoredRelay(relayIntent());
+    rerender(<PaymentForm />);
+    await expectOwnResult(RELAY_TX);
+    expect(loadHistory()).toHaveLength(0);
+  });
+
+  it.each<[string, Partial<RelayIntent>]>([
+    ['お店が違う', { merchant: OTHER_MERCHANT }],
+    ['注文リンクの鍵を持つ', { orderLinkKey: ANY_KEY }],
+  ])('relay・金額なしの QR: %s 復元の確定は「この画面の支払いではありません」', async (_label, overrides) => {
+    readyJpyc(OPEN_JPYC);
+    setRestoredRelay(relayIntent(overrides));
+    render(<PaymentForm />);
+    await expectForeignResult(RELAY_TX);
+  });
+
+  it('relay: この mount で送った支払いの成功は、今までどおりの題と大きな完了画面 (判定しない)', async () => {
+    const user = userEvent.setup();
+    readyJpyc(FIXED_JPYC);
+    const { rerender } = render(<PaymentForm />);
+    await user.click(screen.getByRole('button', { name: /300 JPYC を支払う/ }));
+    expect(relayMutate).toHaveBeenCalledOnce();
+    setRelay('success', { txHash: RELAY_TX, variables: { merchant: MERCHANT, value: 300n * E18, gasMode: 'customer' } });
+    rerender(<PaymentForm />);
+
+    await expectOwnResult(RELAY_TX);
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+    expect(loadHistory()).toHaveLength(1);
+  });
+
+  // 画面の形 (customerFeeOnTop: false) の前提: /pay が recover で送るのは、お店が利用料を負担する形 (gasMode=merchant =
+  // 受取 + 利用料 = 額) だけ。旧 QR が gas=customer を載せていても同じ。ここが変わると、金額ありの QR の同じ支払いが
+  // 「受取 = 額・利用料あり」の記録になり、上の「お客様の上乗せの形」と見分けられなくなる。
+  it('前提の固定: recover の /pay は、URL が gas=customer でも gasMode=merchant で送る (受取 + 利用料 = 額の形)', async () => {
+    const user = userEvent.setup();
+    readyJpyc(`${FIXED_JPYC}&gas=customer`);
+    vi.mocked(jpycForwarderFor).mockReturnValue('0x1111111111111111111111111111111111111111');
+    render(<PaymentForm />);
+    await user.click(screen.getByRole('button', { name: /300 JPYC を支払う/ }));
+    expect(relayMutate.mock.calls[0][0]).toEqual({ merchant: MERCHANT, value: 300n * E18, gasMode: 'merchant' });
+  });
+
+  // ---- 通常決済 (保存された印) ----
+  type StandardRecord = NonNullable<ReturnType<typeof useStandardPayment>['lastSubmittedParams']>;
+  const STANDARD_TX = `0x${'c'.repeat(64)}`;
+  const FIXED_USDC = `to=${MERCHANT}&token=usdc&amount=10`;
+  const OPEN_USDC = `to=${MERCHANT}&token=usdc`;
+  // 10 USDC・MERCHANT を /pay の通常決済で払った記録 (/pay は会計の鍵を付けない)。
+  function standardRecord(overrides: Partial<StandardRecord> = {}): StandardRecord {
+    return {
+      tokenAddress: USDC_BASE_SEPOLIA,
+      merchant: MERCHANT,
+      merchantAmount: 10_000_000n,
+      feeReceiver: FEE_RECEIVER,
+      feeAmount: 0n,
+      chainId: baseSepolia.id,
+      saleAmount: 10_000_000n,
+      ...overrides,
+    };
+  }
+  function readyUsdc(url: string) {
+    setURL(url);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+  }
+  const otherUsdc = deploymentsForSymbol('usdc').find((d) => d.address.toLowerCase() !== USDC_BASE_SEPOLIA.toLowerCase())!;
+  const jpycAddress = deploymentsForSymbol('jpyc')[0].address;
+
+  it.each<[string, Partial<StandardRecord>]>([
+    ['同じお店・token・売上の額', {}],
+    ['同じ token の別の chain の address', { tokenAddress: otherUsdc.address, chainId: otherUsdc.chainId }],
+    ['売上の額 (saleAmount) を持たない記録', { saleAmount: undefined }],
+    ['お店の受取が売上の額と違う (利用料あり) が、売上の額は同じ', { merchantAmount: 9_900_000n, feeAmount: 100_000n }],
+  ])('通常決済・金額ありの QR: %s の復元の確定は、今までどおりの題 (履歴・控えは今までどおり書かない)', async (_label, overrides) => {
+    readyUsdc(FIXED_USDC);
+    setStandardPayment('success-no-fee', { lastSubmittedParams: standardRecord(overrides), lastSubmittedFrom: CUSTOMER });
+    render(<PaymentForm />);
+
+    await expectOwnResult(STANDARD_TX);
+    await expectNoOverlay();
+    expect(loadHistory()).toHaveLength(0);
+    expect(loadPayerReceipts()).toHaveLength(0);
+  });
+
+  it.each<[string, Partial<StandardRecord>]>([
+    ['お店が違う', { merchant: OTHER_MERCHANT }],
+    ['売上の額が違う', { merchantAmount: 5_000_000n, saleAmount: 5_000_000n }],
+    ['別の token (JPYC の address)', { tokenAddress: jpycAddress }],
+    ['会計の鍵を持つ (付けるのは /checkout だけ)', { contextKey: ANY_KEY }],
+    ['注文リンクの鍵を持つ', { orderLinkKey: ANY_KEY }],
+  ])('通常決済・金額ありの QR: %s 復元の確定は「この画面の支払いではありません」と「読み込み直す」', async (_label, overrides) => {
+    readyUsdc(FIXED_USDC);
+    setStandardPayment('success-no-fee', { lastSubmittedParams: standardRecord(overrides), lastSubmittedFrom: CUSTOMER });
+    render(<PaymentForm />);
+
+    await expectForeignResult(STANDARD_TX);
+    await expectNoOverlay();
+    expect(loadHistory()).toHaveLength(0);
+    expect(loadPayerReceipts()).toHaveLength(0);
+  });
+
+  it('通常決済・金額なしの QR: 売上の額がいくらでも、同じお店・token の復元の確定は今までどおりの題。お店が違えば差し替える', async () => {
+    readyUsdc(OPEN_USDC);
+    setStandardPayment('success-no-fee', { lastSubmittedParams: standardRecord({ merchantAmount: 5_000_000n, saleAmount: 5_000_000n }), lastSubmittedFrom: CUSTOMER });
+    const first = render(<PaymentForm />);
+    await expectOwnResult(STANDARD_TX);
+    first.unmount();
+
+    setStandardPayment('success-no-fee', { lastSubmittedParams: standardRecord({ merchant: OTHER_MERCHANT }), lastSubmittedFrom: CUSTOMER });
+    render(<PaymentForm />);
+    await expectForeignResult(STANDARD_TX);
+  });
+
+  it('通常決済: この mount で送った支払いの成功 (復元の印なし) は、今までどおりの題', async () => {
+    readyUsdc(`${FIXED_USDC}&mode=standard`);
+    setStandardPayment('success-no-fee');
+    render(<PaymentForm />);
+    await expectOwnResult(STANDARD_TX);
+  });
+
+  // H-U: 別のお店への支払い A (利用料あり) が fee-error で復元された画面 B で「利用料を再送」を押すと、hook は
+  // restoredFromStorage を false に戻して成功にする。復元した試みの印 (restoredAttempt) は true のまま。
+  describe('H-U: 復元した別の支払いの利用料を再送した後の成功', () => {
+    // A = OTHER_MERCHANT への 5 USDC (利用料 0.05)。B = MERCHANT への 10 USDC (Shop B・Coffee)。
+    const paymentA = standardRecord({ merchant: OTHER_MERCHANT, merchantAmount: 5_000_000n, feeAmount: 50_000n, saleAmount: 5_000_000n });
+    const SCREEN_B = `${FIXED_USDC}&store=Shop%20B&pname=Coffee`;
+
+    it('題は「この画面の支払いではありません」・履歴と控えを、この画面の店・額で書かない', async () => {
+      readyUsdc(SCREEN_B);
+      setStandardPayment('success', {
+        lastSubmittedParams: paymentA,
+        lastSubmittedFrom: CUSTOMER,
+        restoredFromStorage: false,
+        restoredAttempt: true,
+      });
+      render(<PaymentForm />);
+
+      await expectForeignResult(STANDARD_TX);
+      await expectNoOverlay();
+      expect(loadHistory()).toHaveLength(0);
+      expect(loadPayerReceipts()).toHaveLength(0);
+    });
+
+    it('同じ支払い (この画面と同じお店・額) を読み直して利用料を再送した後は、今までどおりの題。履歴と控えは書かない (復元のまま)', async () => {
+      readyUsdc(SCREEN_B);
+      setStandardPayment('success', {
+        lastSubmittedParams: standardRecord({ feeAmount: 100_000n }),
+        lastSubmittedFrom: CUSTOMER,
+        restoredFromStorage: false,
+        restoredAttempt: true,
+      });
+      render(<PaymentForm />);
+
+      await expectOwnResult(STANDARD_TX);
+      await expectNoOverlay();
+      expect(loadHistory()).toHaveLength(0);
+      expect(loadPayerReceipts()).toHaveLength(0);
+    });
+
+    it('対照: 復元の印がどちらも無い成功 (この mount で送った) は、今までどおりの題で、履歴をこの画面の店で書く', async () => {
+      readyUsdc(SCREEN_B);
+      setStandardPayment('success', {
+        lastSubmittedParams: standardRecord({ feeAmount: 100_000n }),
+        lastSubmittedFrom: CUSTOMER,
+        restoredFromStorage: false,
+        restoredAttempt: false,
+      });
+      render(<PaymentForm />);
+
+      await expectOwnResult(STANDARD_TX);
+      await waitFor(() => expect(loadHistory().length).toBeGreaterThan(0));
+      expect(loadHistory().every((entry) => entry.storeName === 'Shop B')).toBe(true);
+    });
+  });
+
+  // ---- ガスレス (Pimlico): 確定したのが、この画面から最後に送った支払いと別の intent ----
+  type GaslessRecord = NonNullable<ReturnType<typeof useBatchPayment>['variables']>;
+  const GASLESS_TX = `0x${'b'.repeat(64)}`;
+  const FIXED_USDC_100 = `to=${MERCHANT}&token=usdc&amount=100`;
+  // 100 USDC・MERCHANT をガスレスで払った intent の保存した params。
+  function gaslessRecord(overrides: Partial<GaslessRecord> = {}): GaslessRecord {
+    return {
+      tokenAddress: USDC_BASE_SEPOLIA,
+      merchant: MERCHANT,
+      merchantAmount: 100_000_000n,
+      feeReceiver: FEE_RECEIVER,
+      feeAmount: 0n,
+      saleAmount: 100_000_000n,
+      ...overrides,
+    };
+  }
+  function readyGasless(url: string) {
+    readyUsdc(url);
+    setSmartAccount(true);
+    setGasQuote('ready', 0n);
+  }
+  const setSettledOther = (variables: GaslessRecord | undefined) =>
+    setPayment('success', undefined, { settledOtherIntent: true, recoveredIntent: null, variables });
+
+  it.each<[string, GaslessRecord | undefined]>([
+    ['同じお店・token・売上の額', gaslessRecord()],
+    ['保存した params (variables) が無い = 比べられない', undefined],
+    ['売上の額 (saleAmount) を持たない記録', gaslessRecord({ saleAmount: undefined })],
+    ['gas=merchant でお店の受取が売上の額より少ないが、売上の額は同じ', gaslessRecord({ merchantAmount: 99_000_000n })],
+  ])('ガスレス・金額ありの QR: 別の intent の確定で、%s なら今までどおりの題', async (_label, variables) => {
+    readyGasless(FIXED_USDC_100);
+    setSettledOther(variables);
+    render(<PaymentForm />);
+
+    await expectOwnResult(GASLESS_TX);
+    await expectNoOverlay();
+    expect(loadHistory()).toHaveLength(0);
+  });
+
+  it.each<[string, Partial<GaslessRecord>]>([
+    ['お店が違う', { merchant: OTHER_MERCHANT }],
+    ['売上の額が違う', { merchantAmount: 10_000_000n, saleAmount: 10_000_000n }],
+    ['別の token (JPYC の address)', { tokenAddress: jpycAddress }],
+  ])('ガスレス・金額ありの QR: 別の intent の確定で、%s なら「この画面の支払いではありません」と「読み込み直す」', async (_label, overrides) => {
+    readyGasless(FIXED_USDC_100);
+    setSettledOther(gaslessRecord(overrides));
+    render(<PaymentForm />);
+
+    await expectForeignResult(GASLESS_TX);
+    await expectNoOverlay();
+    expect(loadHistory()).toHaveLength(0);
+  });
+
+  // 金額なしの QR: 読み直した後に入力欄へ 50 を打って送り、その前の 10 USDC の intent (同じお店) が「同じ送信内容を再確認」で
+  // 確定した。入力欄の今の値 (50) を額として渡すと不一致になるので、渡さない。
+  it('ガスレス・金額なしの QR: 入力欄が 50 のまま、同じお店への 10 USDC の別の intent が確定しても、今までどおりの題', async () => {
+    const user = userEvent.setup();
+    readyGasless(OPEN_USDC);
+    const { rerender } = render(<PaymentForm />);
+    await user.type(screen.getByPlaceholderText('10.00'), '50');
+    await user.click(screen.getByRole('button', { name: /50 USDC を支払う/ }));
+    expect(mutate).toHaveBeenCalledOnce();
+
+    setSettledOther(gaslessRecord({ merchantAmount: 10_000_000n, saleAmount: 10_000_000n }));
+    rerender(<PaymentForm />);
+    await expectOwnResult(GASLESS_TX);
+    expect(screen.getByPlaceholderText('10.00')).toHaveValue('50');
+  });
+
+  it('ガスレス・金額なしの QR: 別のお店への intent の確定は「この画面の支払いではありません」', async () => {
+    readyGasless(OPEN_USDC);
+    setSettledOther(gaslessRecord({ merchant: OTHER_MERCHANT }));
+    render(<PaymentForm />);
+    await expectForeignResult(GASLESS_TX);
+  });
+
+  it('ガスレス: この mount で送った支払いの成功 (別の intent でない) は、今までどおりの題と大きな完了画面', async () => {
+    const user = userEvent.setup();
+    readyGasless(FIXED_USDC_100);
+    const { rerender } = render(<PaymentForm />);
+    await user.click(screen.getByRole('button', { name: /100 USDC を支払う/ }));
+    setPayment('success', undefined, { settledOtherIntent: false, variables: gaslessRecord() });
+    rerender(<PaymentForm />);
+
+    await expectOwnResult(GASLESS_TX);
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+  });
+
+  // 判定するのは復元した確定だけ。復元の印が無い確定 (この mount で送った) は、hook が持つ記録が画面と違っても題を差し替えない。
+  it('通常決済: 復元の印がどちらも無い成功は、記録の受取先が画面と違っても判定しない (今までどおりの題)', async () => {
+    readyUsdc(FIXED_USDC);
+    setStandardPayment('success-no-fee', {
+      lastSubmittedParams: standardRecord({ merchant: OTHER_MERCHANT }),
+      lastSubmittedFrom: CUSTOMER,
+      restoredFromStorage: false,
+      restoredAttempt: false,
+    });
+    render(<PaymentForm />);
+    await expectOwnResult(STANDARD_TX);
+  });
+
+  it('ガスレス: 別の intent でない成功は、variables の受取先が画面と違っても判定しない (今までどおりの題)', async () => {
+    readyGasless(FIXED_USDC_100);
+    setPayment('success', undefined, { settledOtherIntent: false, variables: gaslessRecord({ merchant: OTHER_MERCHANT }) });
+    render(<PaymentForm />);
+    await expectOwnResult(GASLESS_TX);
+  });
+
+  it('en: 題・案内・ボタンは承認済みの英語の文', async () => {
+    readyJpyc(FIXED_JPYC);
+    setRestoredRelay(relayIntent({ merchant: OTHER_MERCHANT }));
+    render(<PaymentForm />, { locale: 'en' });
+
+    expect(await screen.findByText('A previous pending payment has completed. This is not the payment on this screen.')).toBeInTheDocument();
+    expect(screen.getByText('To continue with the payment on this screen, reload the page.')).toBeInTheDocument();
+    expect(screen.queryByText('Payment complete')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Reload' }));
+    expect(reload).toHaveBeenCalledTimes(1);
   });
 });

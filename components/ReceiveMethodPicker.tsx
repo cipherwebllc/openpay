@@ -126,8 +126,10 @@ function MethodForm({
   }
   // key で token:chain ごとに remount。TipForm は preset/金額を mount 時の params から
   // 初期化するため、key 無しだと JPYC の 300 が USDC 300 として残る (金額誤り) のを防ぐ。
+  // 受取先 (config.to) は URL でなく handle の設定で決まり、後から変えられる。TipForm は復元した前の支払いの確定の判定で
+  // 受取先を比べない (recipientFromHandleConfig・第 10 回レビュー H-S)。
   return (
-    <TipForm key={`${method.token}:${method.chain}`} params={parsed.params} />
+    <TipForm key={`${method.token}:${method.chain}`} params={parsed.params} recipientFromHandleConfig />
   );
 }
 

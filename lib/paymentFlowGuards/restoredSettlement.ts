@@ -11,17 +11,24 @@ import type {
 // だけの画面に「この画面の支払いではありません」と出して、払い済みの人にもう一度払わせること (二重払い)。逆側 (別の支払いを
 // 一致とする) は、今までの表示と同じ。
 //
-// 証明に使うのは、時間がたってもずれない事実だけ: 受取先・URL で決まる額と記録の額の形・別の token と分かる address・鍵を
-// 付けない画面で鍵を持つこと・/checkout の通常決済の記録に会計の鍵が無いこと (枠と鍵は同じ 2026-07-26 の #273 で入った)。
+// 証明に使うのは、時間がたってもずれない事実だけ: URL で決まる受取先・URL で決まる額と記録の額の形・別の token と分かる
+// address・鍵を付けない画面で鍵を持つこと・/checkout の通常決済の記録に会計の鍵が無いこと (枠と鍵は同じ 2026-07-26 の #273 で
+// 入った)。受取先が URL でなく設定で決まる画面 (@handle のページのチップ) は、設定が払った後に変わりうるので受取先を比べない。
 // 今のコードと env で計算し直した値 (会計の鍵・注文リンクの鍵・受け付ける chain の組) と違うことは証明にしない: parser・
 // 指紋の入力・chain の flag が払った後に変わると、同じ URL の同じ支払いでも値がずれる (廃止した fee_kind=register・
-// 止めた chain など)。比べない欄: 支払い者 (from)・chain・入力で決まる額 (amount = null)・利用料の額・Pimlico の calls。
+// 止めた chain など)。比べない欄: 支払い者 (from)・chain・設定で決まる受取先 (merchant = null)・入力で決まる額 (amount = null)・
+// 利用料の額・Pimlico の calls。
 // 実行時の import を持たない (3 画面の First Load JS に載るため・型は import type だけ)。アドレスは小文字で比べる。
 
 /** 今の画面が URL から決める支払いの形。 */
 export type SettlementScreen = {
-  /** 受取先。 */
-  merchant: string;
+  /**
+   * URL で決まる受取先 (/checkout・/pay の to・/tip/[address] の address)。受取先が URL でなく設定で決まる画面 (@handle の
+   * ページのチップ = handle の設定の受取先) は null = 受取先を比べない。handle の受取先は払った後に変えられるので、記録の受取先と
+   * 今の設定が違っても別の支払いの証明にならない (何の波及を断つか: 同じクリエイターへのチップを読み直しただけの人に
+   * 「この画面の支払いではありません」と出して、もう一度送らせること)。
+   */
+  merchant: string | null;
   /**
    * URL で決まる売上の額 (/checkout の合計・/pay の固定額・token の最小単位)。入力で決まる画面 (/pay の自由入力・/tip) は
    * null = 額を比べない。
@@ -68,7 +75,7 @@ const same = (left: string, right: string) => left.toLowerCase() === right.toLow
 
 export function isForeignSettlement(screen: SettlementScreen, restored: RestoredSettlement): boolean {
   if (!restored.record || (restored.kind === 'relay' && restored.bound)) return false;
-  if (!same(screen.merchant, restored.record.merchant)) return true;
+  if (screen.merchant !== null && !same(screen.merchant, restored.record.merchant)) return true;
   if (restored.kind === 'relay') {
     // 額: 「お店の受取 + 利用料」が画面の売上の額と同じなら一致 (free = 利用料 0・お店が利用料を負担 = 受取が減る)。
     // 保存した値をそのまま足し、利用料を今の設定で計算し直さない。URL がお客様の上乗せの形の会計 (customerFeeOnTop) だけ

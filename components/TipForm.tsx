@@ -77,6 +77,8 @@ import { relayErrorKey } from '@/lib/relay/relayErrorMessage';
 import { isFallbackSafeRelayError } from '@/lib/relay/relayResponseError';
 import { isUserRejection } from '@/lib/walletErrors';
 import { deriveTipGuards } from '@/lib/paymentFlowGuards/tip';
+import { isForeignSettlement } from '@/lib/paymentFlowGuards/restoredSettlement';
+import { unkeyedSettlementScreen } from '@/lib/paymentFlowGuards/settlementScreen';
 import { DEFAULT_CHAIN_FOR_SYMBOL, deploymentForSlug } from '@/lib/tokens';
 import {
   DEFAULT_TIP_PRESETS,
@@ -116,9 +118,16 @@ const noopSubscribe = () => () => {};
 export function TipForm({
   params,
   preview = false,
+  recipientFromHandleConfig = false,
 }: {
   params: TipParams;
   preview?: boolean;
+  /**
+   * 受取先 (params.to) が URL でなく handle の設定から来た (@handle のページ・components/ReceiveMethodPicker だけが true を渡す)。
+   * 既定は false = 受取先は URL で決まる (/tip/[address]・/create の見本)。使うのは、復元した前の支払いの確定がこの画面の
+   * チップかの判定 (下の foreignSettlement) で受取先を比べるかどうかだけで、送る先・金額・送信の制御には使わない。
+   */
+  recipientFromHandleConfig?: boolean;
 }) {
   const t = useTranslations('TipForm');
   const locale = useLocale();
@@ -411,6 +420,30 @@ export function TipForm({
   const restoredPayment =
     (useRelay && relay.restoredIntent != null) ||
     (!isStandard && !useRelay && gasless.settledOtherIntent);
+  // 復元した前の支払いの確定が、この画面のチップでないと証明できたか (第 10 回レビュー H-S)。完了の欄の題だけを差し替え、
+  // 読み込み直しの案内と「読み込み直す」を足す (hash の行・控えは同じ)。お礼・overlay・控え・送信のボタンの止めの条件は
+  // 上の restoredPayment のままで、ここでは変えない。通常決済 (Arc) は ownsStandardAttempt と「以前の送信の確認」の欄で
+  // 既に分けてあるので対象にしない。
+  // 返す値は意図して非対称 (lib/paymentFlowGuards/restoredSettlement): 比べられない欄は一致。何の波及を断つか: 同じチップを
+  // 読み直しただけの人に「この画面の支払いではありません」と出して、もう一度送らせること (二重払い)。
+  // 額は比べない (null): チップの額は選んだ・打った額で、読み込み直すと既定に戻る。比べるのは URL で決まる受取先・別の token の
+  // address・注文リンクの鍵 (付けるのは /checkout だけ) だけ。
+  // 受取先を比べるのは /tip/[address] (受取先が URL にある) だけ。@handle のページは受取先が handle の設定で決まり、払った後に
+  // 変えられるので比べない (null)。何の波及を断つか: クリエイターが受取先を変えた後に、同じクリエイターへのチップを読み直した
+  // 人へ「この画面の支払いではありません」と出して、もう一度送らせること。
+  // preview (/create の見本) は払う画面でないので今までどおり。cross-chain の結果があるとき、欄の hash はこの mount で送った
+  // cross-chain の送金のものなので、題を差し替えない。
+  const foreignSettlement =
+    !preview &&
+    restoredPayment &&
+    !crossChainResult &&
+    isForeignSettlement(
+      unkeyedSettlementScreen(recipientFromHandleConfig ? null : params.to, params.token, null),
+      useRelay
+        // チップの relay は注文に束縛しない (order を渡さない)。
+        ? { kind: 'relay', bound: false, record: relay.restoredIntent }
+        : { kind: 'gasless', record: gasless.variables },
+    );
   // relay 202: broadcast 済だが未確定 (success でも error でもない)。送信ボタンに「送信中」を
   // 出してフィードバックの空白を防ぐ (再送は settledNoRetry で既に禁止)。
   const relayPending =
@@ -1296,7 +1329,12 @@ export function TipForm({
       )}
       {flowSuccess && (flowTxHash || crossChainResult?.path === 'gateway') && (
         <TipSuccessPanel
-          title={t('successTitle')}
+          title={t(foreignSettlement ? 'foreignSettlementTitle' : 'successTitle')}
+          reload={
+            foreignSettlement
+              ? { body: t('foreignSettlementBody'), label: t('foreignSettlementReload') }
+              : undefined
+          }
           thanks={restoredPayment ? undefined : params.thanks}
           thanksUrl={restoredPayment ? undefined : params.thanksUrl}
           openLinkLabel={t('openLink')}
