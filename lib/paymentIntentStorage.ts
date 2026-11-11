@@ -265,6 +265,30 @@ export function canStoreRelayIntent(intent: RelayIntentMetadata): boolean {
     return stored === raw;
   } catch {
     // 書けない・読めない・消せない端末。呼出側が署名の前に止めて、画面で知らせる (握りつぶさない)。
+    // 読み戻しが投げた (getItem の throw) ときも確かめのキーを残さないよう、消すのを試みる。消せなくても false のまま
+    // (clear が失敗を握る・確かめのキーは枠ではないので、残っても支払いを塞がない)。
+    clear(RELAY_INTENT_PROBE_KEY);
+    return false;
+  }
+}
+
+function sameRelayAuthorization(a: RelayIntentMetadata, b: RelayIntentMetadata): boolean {
+  return (
+    a.chainId === b.chainId &&
+    a.from.toLowerCase() === b.from.toLowerCase() &&
+    a.nonce.toLowerCase() === b.nonce.toLowerCase()
+  );
+}
+
+// 書く前の枠が、空か、この authorization (chainId・from・nonce) の記録か。読み戻せなかったときに枠を消してよいかの根拠
+// (下の saveRelayIntentVerified)。読めない・別の支払いの記録があるときは false (消してよい根拠が無い)。
+function relayIntentSlotIsEmptyOrOwn(intent: RelayIntentMetadata): boolean {
+  try {
+    const raw = window.sessionStorage.getItem(RELAY_INTENT_STORAGE_KEY);
+    if (raw === null) return true;
+    const existing = parseRelayIntent(JSON.parse(raw));
+    return existing !== null && sameRelayAuthorization(existing, intent);
+  } catch {
     return false;
   }
 }
@@ -273,15 +297,20 @@ export function canStoreRelayIntent(intent: RelayIntentMetadata): boolean {
 // (chainId・from・nonce) の枠が残っているときだけ true。false なら呼出側は POST しない。
 // nonce まで照合するのは、書き込みが失敗したときに枠に残っている別の支払いの記録 (同じ chainId・from) を、
 // いま書いた枠と読み違えないため。
+// 初回の POST の前と、IP 制限 (429) の後の再送の前の両方がこの関数を通る (hooks/useJpycEip3009Payment)。
 export function saveRelayIntentVerified(intent: RelayIntentMetadata): boolean {
+  const slotIsEmptyOrOwn = relayIntentSlotIsEmptyOrOwn(intent);
   saveRelayIntent(intent);
   const stored = loadRelayIntent();
-  return (
-    stored !== null &&
-    stored.chainId === intent.chainId &&
-    stored.from.toLowerCase() === intent.from.toLowerCase() &&
-    stored.nonce.toLowerCase() === intent.nonce.toLowerCase()
-  );
+  if (stored !== null && sameRelayAuthorization(stored, intent)) return true;
+  // 何の波及を断つか: 書けたが読み戻せなかった記録 (この試みの・まだ送っていない支払い) が枠に残り、読めるようになった後に
+  // 開き直した画面が「送信済みかもしれない」として、署名の期限が証明されるまで支払いを塞ぐこと (false pending)。
+  // 消すのは、書く前の枠が空かこの authorization だったときだけ (いま枠にあるのはこの試みの書き込みだけ)。書く前に別の支払いの
+  // 記録があった・書く前に読めなかったときは消さない (別の支払いの未解決の記録を消すと、その支払いの払い直し = 二重払いの道を
+  // 開く)。その場合は期限が証明されるまでの false pending が残りうる (fail-closed・二重払いではない)。消す処理の失敗は clear が
+  // 握り、呼出側は false を見て今までどおり止める (止めた error は変わらない)。
+  if (slotIsEmptyOrOwn) clearRelayIntent();
+  return false;
 }
 
 export function loadStandardIntent(): StandardIntentMetadata | null {

@@ -13,8 +13,9 @@
 // /checkout) を送らない (第 10 回レビュー H-R): 署名の前に書けるかを確かめ、署名の後に枠そのものを書いて読み戻し、読めなければ
 // POST しない (intent_storage_unavailable・送っていないので fallback-safe な error。ただしフォームは通常決済への切り替えを
 // 案内しない: 通常決済も同じ保存に頼っていて同じ穴があるため・user 裁定 Q7-1)。枠が無いまま送ると、relay が receipt を待つ間に
-// 読み直した・離れて戻った画面が未解決の支払いを知らず、新しい署名 (別の nonce) = 二重払いを許す。束縛した注文は従来どおり
-// 自分の slot の保存 (order_binding_storage_unavailable) で止まる。呼び出し側が skipIntentStorageCheck を渡したとき (埋め込みの
+// 読み直した・離れて戻った画面が未解決の支払いを知らず、新しい署名 (別の nonce) = 二重払いを許す。束縛した注文は自分の slot を
+// 書いて読み戻し (lib/orderDelivery の saveOrderDeliveryVerified)、読めなければ送らない (order_binding_storage_unavailable・
+// 初回の POST と IP 制限の後の再送の両方)。呼び出し側が skipIntentStorageCheck を渡したとき (埋め込みの
 // チップ・user 裁定 Q7-2) は、枠を書けなくても今までどおり送る。枠は sessionStorage (タブごと) なので、タブを閉じて新しいタブで
 // 開き直す経路はこの確かめでは塞がらない (従来からの限界)。
 
@@ -542,7 +543,8 @@ export function useJpycEip3009Payment(
         if (!active) return;
         // chunk 読込障害で画面を「復元中」のまま止めない。保存不能時も現行の同一 mount latch は残る。
         // storageRef は null のままなので、束縛しない支払いは mutationFn が署名の前に止める (枠を書けない端末と同じ扱い・
-        // intent_storage_unavailable)。束縛した注文は自分の slot (lib/orderDelivery) に保存するので、ここでは止まらない。
+        // intent_storage_unavailable)。束縛した注文は自分の slot (lib/orderDelivery) を書いて読み戻せたかで止めるので、ここでは
+        // 止まらない。
         setStorageReady(true);
       });
     return () => {
@@ -600,8 +602,10 @@ export function useJpycEip3009Payment(
         }
         const record = orderDeliveryRef.current;
         const deliveryStorage = deliveryStorageRef.current;
-        if (record && deliveryStorage?.sameOrderAuthorization(record, retained.intent) && !deliveryStorage.saveOrderDelivery(record)) {
+        if (record && deliveryStorage?.sameOrderAuthorization(record, retained.intent) && !deliveryStorage.saveOrderDeliveryVerified(record)) {
           // A retry whose signature never broadcast still needs its original opening persisted first.
+          // 書いた slot を読み戻せなければ再送しない (第 10 回レビュー H-R・初回の persistOrder と同じ lib/orderDelivery の
+          // saveOrderDeliveryVerified)。読み戻せなかった記録はその関数が片づける。
           throw new Error('order_binding_storage_unavailable');
         }
         // 何の波及を断つか: IP 制限で intent を外したままの retry が broadcast し、応答が不明・pending の
@@ -680,14 +684,16 @@ export function useJpycEip3009Payment(
         deliveryStorageRef.current = storage;
         const record: OrderDelivery = { version: 1, order: canonical, bind, intent, forwarder,
           ...(forwarder ? { feeReceiver: env.feeReceiver as Address } : {}), state: 'signed' };
-        if (!storage.saveOrderDelivery(record)) throw new Error('order_binding_storage_unavailable');
+        // 書いて読み戻せたときだけ送る (第 10 回レビュー H-R・書き込みを黙って捨てる storage でも slot なしで送らない)。
+        if (!storage.saveOrderDeliveryVerified(record)) throw new Error('order_binding_storage_unavailable');
         orderDeliveryRef.current = record;
         setOrderDelivery(record);
       };
       // 束縛しない支払いは、復旧の枠を書けない端末では署名を求める前に止める (第 10 回レビュー H-R・無駄な署名をさせない・
       // lib/paymentIntentStorage の canStoreRelayIntent)。storageRef が null (storage の chunk を読めなかった) のときも
       // 枠を書けないので同じく止める。送ってよいかを決めるのは、署名の後に枠そのものを書いて読み戻す下の確かめ。
-      // 束縛した注文は枠を使わず、署名の後の persistOrder (自分の slot の保存) で止まるので、ここでは見ない。
+      // 束縛した注文は枠を使わず、署名の後の persistOrder (自分の slot を書いて読み戻す saveOrderDeliveryVerified・読み戻せ
+      // なければ order_binding_storage_unavailable) で止まるので、ここでは見ない (署名の前の確かめは無い)。
       // 画面を離れた (unmount した) 試みは、直後の signWithLogging が payment_cancelled で止める。離れた後に storage へ
       // 触れない・止める理由を変えないよう、ここでは確かめない。skipIntentStorageCheck (埋め込みのチップ) も確かめない。
       const assertRelayIntentStorable = (candidate: RelayIntentMetadata) => {
@@ -876,7 +882,7 @@ export function useJpycEip3009Payment(
       // 枠の保存もしない。何の波及を断つか: 離れて開き直した画面 (新しい hook) で払い直して成立した後で、古い署名の画面でも
       // 承認すると、古い hook がその payload を POST して二重払いになる (nonce が別なので両方成立する)。枠も古い intent で
       // 上書きされる。送らない署名は期限 (validBefore) で失効する。通常の支払いはこの確認から saveRelayIntent・
-      // postRelayPayload の開始まで await を挟まない (束縛した注文だけは従来どおり persistOrder の保存を挟む)。
+      // postRelayPayload の開始まで await を挟まない (束縛した注文だけは従来どおり persistOrder の保存と読み戻しを挟む)。
       if (!mountedRef.current) {
         logger.info('payment.sign_abandoned', { path: 'jpyc-relay', chainId });
         throw new Error('payment_cancelled');
