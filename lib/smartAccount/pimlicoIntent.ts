@@ -70,6 +70,8 @@ export type PimlicoIntentRecord<Params> = {
   userOpHash: Hex;
   params: Params;
   createdAt: number;
+  // 期限 (7 日) の基準。送信の控えのある記録では「最後に op を bundler へ渡した (渡そうとした) 時刻」(sendRecordedOp が
+  // 送る直前に書く)。控えの無い記録 (この欄を足す前・MAv2) は今までどおり最後に書いた時刻。
   updatedAt: number;
   send?: PimlicoSendLedger;
 };
@@ -103,10 +105,10 @@ type ReceiptSource = {
   waitForUserOperationReceipt: (args: { hash: Hex }) => Promise<PimlicoReceipt>;
 };
 
-// 送れる手段: 今の account が送信を分けられる client と、送った後に receipt を待つ関数 (hook の waitForRetainedReceipt)。
-export type PimlicoIntentSender<Params, Result> = {
+// 送れる手段: 今の account が送信を分けられる client と、同じ Pimlico の bundle の client (送った後に receipt を待つ)。
+export type PimlicoIntentSender = {
   client: SignedSendClient;
-  waitForReceipt: (record: PimlicoIntentRecord<Params>) => Promise<Result>;
+  bundler: ReceiptSource;
 };
 
 export type PimlicoIntentHost<Params, Result> = {
@@ -117,7 +119,7 @@ export type PimlicoIntentHost<Params, Result> = {
   // 照合: EntryPoint の nonce を読む chain の client (wagmi の public client)。送れる client があるときはその account の client。
   publicClient: Client | undefined;
   // 送信: 無ければ送らない (照合だけ)。
-  sender: PimlicoIntentSender<Params, Result> | null;
+  sender: PimlicoIntentSender | null;
   isExpired: (record: PimlicoIntentRecord<Params>) => boolean;
   persist: (record: PimlicoIntentRecord<Params>) => PimlicoPersistResult;
   // 記録を消し、消えたことを確かめる (true = この key の記録はもう storage に無い)。
@@ -185,8 +187,11 @@ function chainReader<Params, Result>(
   return host.publicClient;
 }
 
-// 送っていない (照合だけ・送る前に止めた) まま、開いたまま終える。記録は書き換えない: 期限 (updatedAt から 7 日) は
-// 最後に op を bundler へ渡した時から数える (照合のたびに延ばすと、c4・c5 で閉じる時が来ない)。
+// 期限 (c4・c5) の基準は記録の updatedAt = 「最後に op を bundler へ渡した (渡そうとした) 時刻」1 つ。進めるのは
+// sendRecordedOp が送る直前に書くときだけで、照合 (送らない)・送った後の更新では動かさない (照合のたびに延ばすと、c4・c5 で
+// 閉じる時が来ない)。
+
+// 送っていない (照合だけ・送る前に止めた) まま、開いたまま終える。記録は書き換えない。
 function stayOpen<Params, Result>(
   host: PimlicoIntentHost<Params, Result>,
   record: PimlicoIntentRecord<Params>,
@@ -203,21 +208,18 @@ function stayOpen<Params, Result>(
   throw host.unknownError(record, reason);
 }
 
-// op を bundler へ渡した後、結果が分からないまま記録を保持し、応答不明で終える (status を unknown にして時刻を進める)。
+// op を bundler へ渡した後、結果が分からないまま記録を保持し、応答不明で終える (status を unknown にする。時刻は送る直前に
+// 書いたまま・動かさない)。
 function holdAsUnknown<Params, Result>(
   host: PimlicoIntentHost<Params, Result>,
   record: PimlicoIntentRecord<Params>,
   logKey: string,
   error: unknown,
 ): never {
-  const unknownRecord: PimlicoIntentRecord<Params> = {
-    ...record,
-    status: 'unknown',
-    updatedAt: Date.now(),
-  };
+  const unknownRecord: PimlicoIntentRecord<Params> = { ...record, status: 'unknown' };
   // 書けなくても memory のラッチは残す (同じタブで別の支払い・通常決済を開けない)。保存できたことにはしない: memory に
-  // しか無い op は、次に送る前に sendRecordedOp が保存を確かめ直し、確かめられなければ送らない (送った op の記録は、
-  // 送る前に保存を確かめてある)。
+  // しか無い op は、次に送る前に sendRecordedOp が保存を確かめ直し、確かめられなければ送らない (送った op の記録と送った
+  // 時刻は、送る前に保存を確かめてある)。
   const stored = host.persist(unknownRecord);
   if (stored !== 'stored') {
     logger.warn('pimlico.pending.hold-not-stored', {
@@ -228,37 +230,29 @@ function holdAsUnknown<Params, Result>(
   return stayOpen(host, unknownRecord, logKey, error);
 }
 
-// 送る前に、この記録が storage にあり読み戻せることを確かめる。同じ記録がもう読めれば書かない (書いて読み戻すのと同じことが
-// 確かめられている)。読めない・違うときは書いて読み戻す (失敗は persist が warn に残す)。
-function storeForSend<Params, Result>(
-  host: PimlicoIntentHost<Params, Result>,
-  record: PimlicoIntentRecord<Params>,
-): PimlicoPersistResult {
-  try {
-    if (window.localStorage.getItem(host.storageKey) === JSON.stringify(record)) return 'stored';
-  } catch {
-    // 読めないことを「保存されている」と読まない。下で書いて読み戻して確かめる。
-  }
-  return host.persist(record);
-}
-
-// bundler へ op を渡す唯一の場所 (初回・送り直し・作り直しのどれも)。何の波及を断つか: storage に無い (memory にしか無い)
-// op を送ると、応答を失った後の reload で記録が無く、別の nonce の支払いが通って二重払いになる (第 10 回レビュー A-1 の
-// Codex 第 2 回 MUST 1)。保存を確かめられなければ送らず、onNotStored (場面ごとに違う) で終える。
+// bundler へ op を渡す唯一の場所 (初回・送り直し・作り直しのどれも)。送る直前に、送る時刻 (updatedAt) を入れた記録を
+// 必ず書いて読み戻し、読み戻せたときだけ送る。何の波及を断つか:
+//   - storage に無い (memory にしか無い) op を送ると、応答を失った後の reload で記録が無く、別の nonce の支払いが通って
+//     二重払いになる (第 10 回レビュー A-1 の Codex 第 2 回 MUST 1)。
+//   - 送った時刻を送る前に保存しないと、送り直しの後の更新が書けない・reload で失われたとき、storage の時刻は前に送った
+//     時のままで、送り直して受理された op を期限 (c4) で閉じ、別の支払いを許してしまう (第 3 回 MUST)。送った後の更新には
+//     頼らない。
+// 時刻を書いた後、送る前に落ちた (タブを閉じた等) ときは、期限が先へ延びるだけ (閉じるのが遅れる側・fail-closed)。
+// 保存を確かめられなければ送らず、onNotStored (場面ごとに違う) で終える。
 async function sendRecordedOp<Params, Result>(
   host: PimlicoIntentHost<Params, Result>,
-  sender: PimlicoIntentSender<Params, Result>,
+  sender: PimlicoIntentSender,
   args: {
     record: LedgerIntentRecord<Params>;
     // 応答不明として画面に出ている intent の op か (送り直し・作り直し)。新しい支払いでは false。
     latched: boolean;
     onNotStored: (stored: Exclude<PimlicoPersistResult, 'stored'>) => never;
-    // bundler が検証で拒否した (HTTP 2xx + allowlist の code)。
-    onRejected: (error: unknown) => Promise<Result>;
+    // bundler が検証で拒否した (HTTP 2xx + allowlist の code)。sent = 送った記録 (送った時刻入り)。
+    onRejected: (error: unknown, sent: LedgerIntentRecord<Params>) => Promise<Result>;
   },
 ): Promise<Result> {
-  let record = args.record;
-  const stored = storeForSend(host, record);
+  let record: LedgerIntentRecord<Params> = { ...args.record, updatedAt: Date.now() };
+  const stored = host.persist(record);
   if (stored !== 'stored') return args.onNotStored(stored);
   host.setStoreUnavailable(false);
   host.hold(record, args.latched);
@@ -268,7 +262,7 @@ async function sendRecordedOp<Params, Result>(
     signedUserOp: record.send.signedUserOp,
     entryPoint: record.send.entryPoint,
   });
-  if (outcome.kind === 'validation-rejected') return args.onRejected(outcome.error);
+  if (outcome.kind === 'validation-rejected') return args.onRejected(outcome.error, record);
   if (outcome.kind === 'unknown') {
     // bundler が受理した後に応答だけ失われた可能性がある。通常の error にすると、成立した op の上に
     // 再試行・通常決済が開いて二重払いになる (A-1)。保存済みの記録を応答不明としてラッチする。
@@ -277,22 +271,29 @@ async function sendRecordedOp<Params, Result>(
   // already-known: bundler がこの op を持っている。受理と同じく receipt を待つ。
   if (outcome.kind === 'accepted' && outcome.userOpHash !== record.userOpHash) {
     // 計算した hash は receipt を引く手がかりで、安全の根拠ではない (根拠は nonce)。
-    // bundler の返した hash を正として記録を直す (送った後の更新は今までどおり保存の成否を見ない)。
+    // bundler の返した hash を正として記録を直す (送った後の更新は今までどおり保存の成否を見ない・時刻は動かさない)。
     logger.warn('pimlico.send.hash-mismatch', {
       computed: record.userOpHash,
       returned: outcome.userOpHash,
     });
-    record = { ...record, userOpHash: outcome.userOpHash, updatedAt: Date.now() };
+    record = { ...record, userOpHash: outcome.userOpHash };
     host.hold(record, args.latched);
     host.persist(record);
   }
-  return sender.waitForReceipt(record);
+  // 送った後の receipt 待ち。引けなければ応答不明のまま (status を unknown にする・時刻は送った時のまま)。
+  let receipt: PimlicoReceipt;
+  try {
+    receipt = await sender.bundler.waitForUserOperationReceipt({ hash: record.userOpHash });
+  } catch (error) {
+    return holdAsUnknown(host, record, 'pimlico.receipt.response-unknown', error);
+  }
+  return host.settle(record, record.userOpHash, receipt);
 }
 
 // 準備 → 署名 → (sendRecordedOp で) 保存 → 送信。nonce は呼び出し側が決めた値をそのまま使う。
 async function buildAndSend<Params, Result>(
   host: PimlicoIntentHost<Params, Result>,
-  sender: PimlicoIntentSender<Params, Result>,
+  sender: PimlicoIntentSender,
   args: {
     calls: readonly PimlicoCall[];
     callFingerprint: Hex;
@@ -330,6 +331,7 @@ async function buildAndSend<Params, Result>(
     userOpHash: built.userOpHash,
     params: base.params,
     createdAt: previous?.createdAt ?? now,
+    // 送る直前に sendRecordedOp が送る時刻で書き直す。
     updatedAt: now,
     send: {
       entryPoint: built.entryPoint,
@@ -360,20 +362,20 @@ async function buildAndSend<Params, Result>(
       host.setStoreUnavailable(true);
       throw host.storeUnavailableError();
     },
-    onRejected: async (error) => {
+    onRejected: async (error, sent) => {
       if (previous) {
         // c3: 作り直しの op を bundler が断った。前の候補が mempool に残っていることがある (Replacement
         // underpriced 等) ので、この拒否は前の候補が無いことの証拠にならない。code が allowlist のものでも開いたまま。
         // 次に確かめるとき、前の op の receipt も引く。
-        return holdAsUnknown(host, record, 'pimlico.rebuild.rejected', error);
+        return holdAsUnknown(host, sent, 'pimlico.rebuild.rejected', error);
       }
       // c2: 最初の送信を bundler が検証で拒否した = この intent の op は mempool に無い (前の候補も無い)。
       // 記録を消したと確かめられたときだけ閉じ、今までどおりの error にする (nonce の予約は残さない・金額を変えた
       // 再試行も通常決済もできる)。確かめられなければ、残った op が後で送られうるので開いたまま。
       if (!host.discard()) {
-        return holdAsUnknown(host, record, 'pimlico.send.rejected-unverified', error);
+        return holdAsUnknown(host, sent, 'pimlico.send.rejected-unverified', error);
       }
-      host.release(record);
+      host.release(sent);
       throw toUserOperationRejection(error, { signed: built.signed, calls });
     },
   });
@@ -382,7 +384,7 @@ async function buildAndSend<Params, Result>(
 /** 新しい支払い: nonce (key と seq) を署名の前に決め、署名済みの op と一緒に送信の前に保存してから送る。 */
 export async function startIntent<Params, Result>(
   host: PimlicoIntentHost<Params, Result>,
-  sender: PimlicoIntentSender<Params, Result>,
+  sender: PimlicoIntentSender,
   args: { base: IntentBase<Params>; calls: readonly PimlicoCall[]; callFingerprint: Hex },
 ): Promise<Result> {
   return buildAndSend(host, sender, {
@@ -503,14 +505,15 @@ export async function resolveOpenIntent<Params, Result>(
       return stayOpen(host, record, 'pimlico.send.not-stored', new Error(`persist-${stored}`));
     },
     // bundler がその op を検証で拒否した (paymaster の期限切れ等) → 同じ nonce で作り直す (ウォレットの署名が
-    // 1 回要る)。intent は開いたまま (c3)。元の op が先に取り込まれていれば、作り直しは AA25 で落ちる。
-    onRejected: () =>
+    // 1 回要る)。intent は開いたまま (c3)。元の op が先に取り込まれていれば、作り直しは AA25 で落ちる。作り直しの元は
+    // 送った記録 (送った時刻入り・作り直しの保存に失敗したときは、これに書き戻す)。
+    onRejected: (_error, sent) =>
       buildAndSend(host, sender, {
         calls,
         callFingerprint: record.callFingerprint,
         nonce: ledgerNonce(record.send),
-        base: record,
-        previous: record,
+        base: sent,
+        previous: sent,
       }),
   });
 }

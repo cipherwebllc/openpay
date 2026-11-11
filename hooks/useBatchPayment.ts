@@ -637,11 +637,10 @@ export function useBatchPayment(
         return settleRetained(record, record.userOpHash, receipt);
       };
 
-      // 送れる手段 (今の Pimlico の bundle の、送信を分けられる client と、送った後に receipt を待つ関数)。
+      // 送れる手段 (今の Pimlico の bundle の、送信を分けられる client と、送った後に receipt を待つ bundler の client)。
       const senderOf = (bundle: SmartAccountBundle, client: SignedSendClient) => ({
         client,
-        waitForReceipt: (record: PimlicoPendingRecord) =>
-          waitForRetainedReceipt(bundle.pimlicoClient, record),
+        bundler: bundle.pimlicoClient,
       });
 
       // intent の関所 (lib/smartAccount/pimlicoIntent.ts) へ渡す、storage・ラッチ・error の型。

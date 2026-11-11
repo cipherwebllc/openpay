@@ -292,6 +292,8 @@ export function fakePimlicoClients(args: {
   paymasterMode?: 'sponsorship' | 'erc20';
   // account の address (= 署名済みの op の sender)。既定は FAKE_SENDER。
   sender?: Address;
+  // account の EntryPoint (委任先を変えた account を作る)。既定は world の EntryPoint。
+  entryPoint?: Address;
   legacySendUserOperation?: LegacySendUserOperation;
   waitForUserOperationReceipt?: (parameters: { hash: Hex }) => Promise<unknown>;
   getUserOperationGasPrice?: () => Promise<{
@@ -371,7 +373,7 @@ export function fakePimlicoClients(args: {
         account: {
           address: sender,
           client: { readContract },
-          entryPoint: { address: world.entryPoint, version: '0.8' as const },
+          entryPoint: { address: args.entryPoint ?? world.entryPoint, version: '0.8' as const },
           getNonce,
           signUserOperation,
         },

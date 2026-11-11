@@ -68,6 +68,9 @@ const CUSTOMER_A: Address = getAddress('0x33333333333333333333333333333333333333
 const CUSTOMER_B: Address = getAddress('0x4444444444444444444444444444444444444444');
 const OTHER_SENDER: Address = getAddress('0x5555555555555555555555555555555555555555');
 const SEVEN_DAYS_AND_A_MINUTE = 7 * 24 * 60 * 60 * 1000 + 60_000;
+const SEVEN_DAYS = 7 * 24 * 60 * 60 * 1000;
+// Date だけを fake timers で動かす test の起点 (2026-11-01)。
+const T0 = Date.UTC(2026, 10, 1);
 
 // 10 USDC の支払い。
 const PARAMS = {
@@ -142,8 +145,8 @@ function makeWrapper() {
 let world: FakeBundlerWorld;
 
 // client を作り (mount のたびに作り直す = ページの読み直し)、useSmartAccount に載せる。world は test の間そのまま。
-function mountClients(options?: { sender?: Address; customer?: Address }) {
-  const fake = fakePimlicoClients({ world, sender: options?.sender });
+function mountClients(options?: { sender?: Address; customer?: Address; entryPoint?: Address }) {
+  const fake = fakePimlicoClients({ world, sender: options?.sender, entryPoint: options?.entryPoint });
   mockHook(useSmartAccount, { data: fake.data, isLoading: false, error: null });
   mockHook(useAccount, { chainId: baseSepolia.id, address: options?.customer });
   return fake;
@@ -887,11 +890,18 @@ describe('期限: 黙って消さず、照合してから閉じる (c4・c5・MU
 
 // localStorage の失敗を作る spy。setItem の直後の getItem (persistPimlicoPending の読み戻し) を failReadBacks 回だけ
 // 投げる。failRemove: 'throw' = 記録の removeItem が投げる・'noop' = 黙って何も消さない (消したと確かめないと分からない)。
-function failStorage(options: { failReadBacks: number; failRemove?: 'throw' | 'noop' }) {
+// skipWrites: 記録の書き込みのうち最初の N 回は読み戻しを失敗させない (送り直しの前の書き込みを通し、作り直しの書き込みで
+// 失敗させる等)。
+function failStorage(options: {
+  failReadBacks: number;
+  failRemove?: 'throw' | 'noop';
+  skipWrites?: number;
+}) {
   const realGet = Storage.prototype.getItem;
   const realSet = Storage.prototype.setItem;
   const realRemove = Storage.prototype.removeItem;
   let budget = options.failReadBacks;
+  let skip = options.skipWrites ?? 0;
   let readBackPending = false;
   vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (
     this: Storage,
@@ -899,7 +909,12 @@ function failStorage(options: { failReadBacks: number; failRemove?: 'throw' | 'n
     value: string,
   ) {
     realSet.call(this, key, value);
-    readBackPending = key.startsWith(PIMLICO_PENDING_KEY_PREFIX) && budget > 0;
+    const isPending = key.startsWith(PIMLICO_PENDING_KEY_PREFIX);
+    if (isPending && skip > 0) {
+      skip -= 1;
+      return;
+    }
+    readBackPending = isPending && budget > 0;
   });
   vi.spyOn(Storage.prototype, 'getItem').mockImplementation(function (
     this: Storage,
@@ -1018,11 +1033,21 @@ describe('保存できないときは送らない・送っていない op の記
     const { result } = render();
     result.current.mutate(PARAMS);
     await waitFor(() => expect(result.current.isUnknown).toBe(true));
-    const before = window.localStorage.getItem(pendingKeys()[0]);
+    const before = storedRecord();
 
     replyOnce(fake, { error: { code: -32500, message: 'AA32 paymaster expired or not due' } });
-    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
-      throw new DOMException('quota', 'QuotaExceededError');
+    // 送り直しの前の書き込み (送る時刻) は通し、その後 (作り直しの op の保存) は書けない。
+    const realSet = Storage.prototype.setItem;
+    let writes = 0;
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (
+      this: Storage,
+      key: string,
+      value: string,
+    ) {
+      if (key.startsWith(PIMLICO_PENDING_KEY_PREFIX) && ++writes > 1) {
+        throw new DOMException('quota', 'QuotaExceededError');
+      }
+      realSet.call(this, key, value);
     });
     result.current.retryReceipt();
     await waitFor(() => expect(result.current.pendingStoreUnavailable).toBe(true));
@@ -1031,7 +1056,10 @@ describe('保存できないときは送らない・送っていない op の記
     expect(fake.bundlerSend).toHaveBeenCalledTimes(2);
     expect(fake.signUserOperation).toHaveBeenCalledTimes(2);
     expect(result.current.isUnknown).toBe(true);
-    expect(window.localStorage.getItem(pendingKeys()[0])).toBe(before);
+    // storage は送り直した元の op の記録のまま (時刻だけが送り直した時刻に進む)。
+    const after = storedRecord();
+    expect({ ...after, updatedAt: 0 }).toEqual({ ...before, updatedAt: 0 });
+    expect(after?.updatedAt).toBeGreaterThanOrEqual(before?.updatedAt ?? Infinity);
   });
 
   it('応答不明の作り直しで読み戻しが投げる → 元の記録に書き戻したと確かめ、送らない (開いたまま)', async () => {
@@ -1043,7 +1071,8 @@ describe('保存できないときは送らない・送っていない op の記
     const before = storedRecord();
 
     replyOnce(fake, { error: { code: -32500, message: 'AA32 paymaster expired or not due' } });
-    failStorage({ failReadBacks: 1 });
+    // 送り直しの前の書き込み (送る時刻) は通し、作り直しの op の書き込みの読み戻しを失敗させる。
+    failStorage({ failReadBacks: 1, skipWrites: 1 });
     result.current.retryReceipt();
     await waitFor(() => expect(result.current.pendingStoreUnavailable).toBe(true));
 
@@ -1051,7 +1080,10 @@ describe('保存できないときは送らない・送っていない op の記
     expect(fake.signUserOperation).toHaveBeenCalledTimes(2);
     expect(result.current.isUnknown).toBe(true);
     vi.restoreAllMocks();
-    expect(storedRecord()).toEqual(before);
+    // 書き戻したのは送り直した元の op の記録 (送り直した時刻入り)。作り直しの op は残っていない。
+    const after = storedRecord();
+    expect({ ...after, updatedAt: 0 }).toEqual({ ...before, updatedAt: 0 });
+    expect(after?.updatedAt).toBeGreaterThanOrEqual(before?.updatedAt ?? Infinity);
   });
 });
 
@@ -1547,20 +1579,34 @@ describe('送る前に保存を確かめる: memory にだけ残った署名済�
     expect(world.mined).toHaveLength(1);
   });
 
-  it('送り直しの前に、storage に同じ記録があれば書き直さずに送る (読めるだけで確かめられる)', async () => {
-    const fake = mountClients();
-    loseRequest(fake);
-    const { result } = render();
-    result.current.mutate(PARAMS);
-    await waitFor(() => expect(result.current.isUnknown).toBe(true));
+  it('送り直しの前に、送る時刻を入れた記録を必ず書いて読み戻してから送る (同じ op の記録が storage にあっても書く)', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(T0);
+      const fake = mountClients();
+      loseRequest(fake);
+      const { result } = render();
+      result.current.mutate(PARAMS);
+      await waitFor(() => expect(result.current.isUnknown).toBe(true));
+      expect(storedRecord()?.updatedAt).toBe(T0);
 
-    const setItem = vi.spyOn(Storage.prototype, 'setItem');
-    acceptAndMine(fake);
-    result.current.retryReceipt();
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+      vi.setSystemTime(T0 + 60 * 60 * 1000);
+      let atSend: StoredRecord | null = null;
+      fake.bundlerSend.mockImplementationOnce(async ({ params }) => {
+        atSend = storedRecord();
+        const hash = world.accept(params[0]);
+        world.mine(hash);
+        return { result: hash };
+      });
+      result.current.retryReceipt();
+      await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
-    expect(fake.bundlerSend).toHaveBeenCalledTimes(2);
-    expect(setItem.mock.calls.filter(([key]) => String(key).startsWith(PIMLICO_PENDING_KEY_PREFIX))).toEqual([]);
+      const saved = atSend as StoredRecord | null;
+      expect(saved?.updatedAt).toBe(T0 + 60 * 60 * 1000);
+      expect(saved?.send?.signedUserOp).toEqual(sentOp(fake, 1));
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('memory にだけある記録でも、書けるようになっていれば書いて読み戻してから送る (reload の後も同じ op を確かめられる)', async () => {
@@ -1759,21 +1805,19 @@ describe('照合 (読むだけ) は今の account で送れるかに依存しな
     expect(pendingKeys()).toHaveLength(0);
   });
 
-  it('記録の EntryPoint が今の account と違う (委任先を変えた) → 送らないが、7 日を過ぎていれば記録の EntryPoint の nonce を読んで閉じる (Codex の再現)', async () => {
+  it('今の account の EntryPoint が記録と違う (委任先を変えた) → 送らないが、7 日を過ぎていれば記録の EntryPoint の nonce を読んで閉じる (Codex の再現)', async () => {
     await seedOpenIntent(false);
-    rewriteStoredRecord((record) => ({
-      ...record,
-      send: record.send && { ...record.send, entryPoint: entryPoint07Address },
-    }));
     ageStoredRecord();
-    const second = mountClients();
+    // 記録はそのまま。今の account の EntryPoint だけが変わった (委任先を EntryPoint 0.7 の account へ変えた)。
+    const second = mountClients({ entryPoint: entryPoint07Address });
 
     const restored = await renderRestored();
     restored.result.current.retryReceipt();
     await waitFor(() => expect(restored.result.current.isUnknown).toBe(false));
     await waitFor(() => expect(restored.result.current.isPending).toBe(false));
 
-    expect(second.readContract.mock.calls[0][0]).toMatchObject({ address: entryPoint07Address });
+    // 読むのは記録の EntryPoint (今の account の EntryPoint ではない)。
+    expect(second.readContract.mock.calls[0][0]).toMatchObject({ address: world.entryPoint });
     expect(second.bundlerSend).not.toHaveBeenCalled();
     expect(second.signUserOperation).not.toHaveBeenCalled();
     expect(second.waitForUserOperationReceipt).not.toHaveBeenCalled();
@@ -1798,5 +1842,129 @@ describe('照合 (読むだけ) は今の account で送れるかに依存しな
     await waitFor(() => expect(restored.result.current.isUnknown).toBe(false));
     expect(pendingKeys()).toHaveLength(0);
     expect(world.mempoolHashes()).toHaveLength(0);
+  });
+});
+
+describe('期限の基準 = 最後に bundler へ渡した時刻を、送る前に保存する (Codex 第 3 回 MUST)', () => {
+  // 時刻は Date だけを fake timers で動かす (setTimeout 等は実物のまま・waitFor が動く)。
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(T0);
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  // reload の後に確かめ、同じ内容でもう一度押してから、bundler に残っている op を全部 mine する。
+  // EntryPoint が実行した 10 USDC の支払いの本数を返す (直す前: 期限で閉じて新しい nonce の支払いを作り、2 本)。
+  async function reloadCheckAndCountExecuted() {
+    const second = mountClients();
+    const restored = render();
+    await waitFor(() => expect(restored.result.current.isUnknown).toBe(true));
+    restored.result.current.retryReceipt();
+    await waitFor(() => expect(second.getUserOperationReceipt).toHaveBeenCalled());
+    await waitFor(() => expect(restored.result.current.isPending).toBe(false));
+    restored.result.current.mutate(PARAMS);
+    await waitFor(() => expect(restored.result.current.variables).toBe(PARAMS));
+    await waitFor(() => expect(restored.result.current.isPending).toBe(false));
+    for (const hash of world.mempoolHashes()) world.mine(hash);
+    return { second, restored };
+  }
+
+  it('期限の 1 分前に送り直し、受理されたが応答を失い、その後の書き込みも失敗 → 2 分後に reload して確かめても期限で閉じない。EntryPoint の実行は 1 本 (再現 1)', async () => {
+    const first = mountClients();
+    loseRequest(first);
+    const firstHook = render();
+    firstHook.result.current.mutate(PARAMS);
+    await waitFor(() => expect(firstHook.result.current.isUnknown).toBe(true));
+    expect(world.mempoolHashes()).toHaveLength(0);
+
+    // 期限の 1 分前に「確かめる」: 送り直しを bundler が受理するが応答を失い、その後の記録の書き込みは失敗する。
+    const resentAt = T0 + SEVEN_DAYS - 60_000;
+    vi.setSystemTime(resentAt);
+    const realSet = Storage.prototype.setItem;
+    let failWrites = false;
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (
+      this: Storage,
+      key: string,
+      value: string,
+    ) {
+      if (failWrites && key.startsWith(PIMLICO_PENDING_KEY_PREFIX)) {
+        throw new DOMException('quota', 'QuotaExceededError');
+      }
+      realSet.call(this, key, value);
+    });
+    first.bundlerSend.mockImplementationOnce(async ({ params }) => {
+      world.accept(params[0]);
+      failWrites = true;
+      throw lostResponse();
+    });
+    firstHook.result.current.retryReceipt();
+    await waitFor(() => expect(first.bundlerSend).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(firstHook.result.current.isPending).toBe(false));
+    expect(world.mempoolHashes()).toHaveLength(1);
+    firstHook.unmount();
+    vi.restoreAllMocks();
+
+    // 送り直しの 2 分後に reload して確かめる: receipt はまだ無く、nonce も未使用。
+    vi.setSystemTime(resentAt + 2 * 60_000);
+    const { second, restored } = await reloadCheckAndCountExecuted();
+
+    expect(world.mined).toHaveLength(1);
+    expect(second.getNonce).not.toHaveBeenCalled();
+    expect(second.signUserOperation).not.toHaveBeenCalled();
+    expect(restored.result.current.isUnknown).toBe(true);
+    expect(standardPaymentOpen(restored.result.current)).toBe(false);
+    // 期限の基準は最後に bundler へ渡した時刻 (reload の後の送り直し・送る前に保存した)。
+    expect(storedRecord()?.updatedAt).toBe(resentAt + 2 * 60_000);
+  });
+
+  it('書き込みの失敗が無くても、送り直しの receipt 待ちの間に reload すると、送った時刻で数える (早く閉じない)。EntryPoint の実行は 1 本 (再現 2)', async () => {
+    const first = mountClients();
+    loseRequest(first);
+    const firstHook = render();
+    firstHook.result.current.mutate(PARAMS);
+    await waitFor(() => expect(firstHook.result.current.isUnknown).toBe(true));
+
+    // 期限の 1 分前に送り直す。bundler は受理し、receipt 待ちが返らないうちにページを読み直す。
+    const resentAt = T0 + SEVEN_DAYS - 60_000;
+    vi.setSystemTime(resentAt);
+    vi.mocked(first.waitForUserOperationReceipt).mockImplementationOnce(
+      () => new Promise<never>(() => undefined),
+    );
+    firstHook.result.current.retryReceipt();
+    await waitFor(() => expect(first.waitForUserOperationReceipt).toHaveBeenCalledTimes(1));
+    expect(world.mempoolHashes()).toHaveLength(1);
+    expect(storedRecord()?.updatedAt).toBe(resentAt);
+    firstHook.unmount();
+
+    vi.setSystemTime(resentAt + 2 * 60_000);
+    const { second, restored } = await reloadCheckAndCountExecuted();
+
+    expect(world.mined).toHaveLength(1);
+    expect(second.getNonce).not.toHaveBeenCalled();
+    expect(restored.result.current.isUnknown).toBe(true);
+  });
+
+  it('送る時刻を保存できなければ送らない (開いたまま・時刻は前に送った時のまま)', async () => {
+    const fake = mountClients();
+    loseRequest(fake);
+    const { result } = render();
+    result.current.mutate(PARAMS);
+    await waitFor(() => expect(result.current.isUnknown).toBe(true));
+
+    vi.setSystemTime(T0 + 60_000);
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new DOMException('quota', 'QuotaExceededError');
+    });
+    result.current.retryReceipt();
+    await waitFor(() => expect(result.current.pendingStoreUnavailable).toBe(true));
+    await waitFor(() => expect(result.current.isPending).toBe(false));
+
+    expect(fake.bundlerSend).toHaveBeenCalledTimes(1);
+    expect(result.current.isUnknown).toBe(true);
+    expect(standardPaymentOpen(result.current)).toBe(false);
+    vi.restoreAllMocks();
+    expect(storedRecord()?.updatedAt).toBe(T0);
   });
 });
