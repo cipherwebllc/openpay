@@ -797,6 +797,59 @@ describe('TipForm — 送信', () => {
     expect(batchRetryReceipt).toHaveBeenCalledOnce();
     expect(mutate).not.toHaveBeenCalled();
   });
+
+  // 確認中の支払いを送り直す前に端末へ保存できない (isUnknown と pendingStoreUnavailable が同時)。「保存できません」の
+  // 欄は通常送信を案内せず、「送り直せません」と伝える。題・確認中の欄・再確認はそのまま。
+  describe('確認中の支払いを送り直す前に保存できない (gaslessResendBlocked)', () => {
+    const TITLE = 'この端末では記録を保存できません';
+    const STANDARD_BODY =
+      'この端末では支払い記録を保存できないため、ガスレス送信を止めています。通常送信をご利用ください。';
+    const RESEND_BODY =
+      'この端末では支払い記録を保存できないため、確認中の支払いを送り直せません。着金通知・受注画面でご確認ください。';
+
+    function renderGasless(state: 'unknown' | 'idle', pendingStoreUnavailable: boolean) {
+      setAccount({ connected: true, chainId: baseSepolia.id });
+      setBalance(20_000_000n);
+      setSmartAccount(true);
+      setGasQuote('ready', 0n);
+      setBatchPayment(state, undefined, { pendingStoreUnavailable });
+      render(<TipForm params={USDC_PARAMS} />);
+    }
+
+    it('確認中 + 保存できない → 本文は「送り直せません」。通常送信を案内しない', async () => {
+      const user = userEvent.setup();
+      renderGasless('unknown', true);
+
+      expect(await screen.findByText(RESEND_BODY)).toBeInTheDocument();
+      expect(screen.getByText(TITLE)).toBeInTheDocument();
+      expect(screen.queryByText(STANDARD_BODY)).not.toBeInTheDocument();
+      expect(screen.queryByText(/通常送信をご利用ください/)).not.toBeInTheDocument();
+      // 確認中の欄と再確認のボタンはそのまま。
+      expect(screen.getByText(/送信済みかを判定できません/)).toBeInTheDocument();
+      expect(screen.getByText(`0x${'e'.repeat(64)}`)).toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: /同じ送信内容を再確認/ }));
+      expect(batchRetryReceipt).toHaveBeenCalledOnce();
+      expect(mutate).not.toHaveBeenCalled();
+    });
+
+    it('保存できないだけ → 今までどおり通常送信を案内する', async () => {
+      renderGasless('idle', true);
+
+      expect(await screen.findByText(STANDARD_BODY)).toBeInTheDocument();
+      expect(screen.getByText(TITLE)).toBeInTheDocument();
+      expect(screen.queryByText(RESEND_BODY)).not.toBeInTheDocument();
+      expect(screen.queryByText(/送信済みかを判定できません/)).not.toBeInTheDocument();
+    });
+
+    it('確認中だけ → 「保存できません」の欄は出ない', async () => {
+      renderGasless('unknown', false);
+
+      expect(await screen.findByText(/送信済みかを判定できません/)).toBeInTheDocument();
+      expect(screen.queryByText(TITLE)).not.toBeInTheDocument();
+      expect(screen.queryByText(RESEND_BODY)).not.toBeInTheDocument();
+      expect(screen.queryByText(STANDARD_BODY)).not.toBeInTheDocument();
+    });
+  });
 });
 
 // 第 10 回レビュー A-1: 確定した Pimlico の支払いが、この画面から最後に送った支払いと別の intent (reload の後に
