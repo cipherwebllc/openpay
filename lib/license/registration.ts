@@ -39,7 +39,10 @@ export async function confirmLicenseRegistration(productId: string, txHash: Hex,
     if ((await rpc.getBlock({ blockNumber: block.number })).hash !== block.hash) return 'pending';
     const next = { ...snapshot.product, registration: { status: 'registered', txHash, attempts: snapshot.product.registration!.attempts }, updatedAt: Date.now() };
     const saved = await kvEval<number>(CONFIRM, ['x402:hosted:' + productId], [snapshot.token, JSON.stringify(next)]);
-    return !saved.ok ? 'storage' : saved.value === 1 ? 'registered' : 'conflict';
+    // CAS の 0 は「読んだ後に商品の record が変わった」(確認の RPC の間の出品者の編集など) で、receipt・定義・イベントの
+    // 不一致 (上の conflict) ではない。conflict にすると、登録済みの商品が登録待ちのまま修復待ちで固まる。相手の更新は
+    // 上書きせず保留にし、次の run が record を読み直して同じ照合からやり直す (消えた・license でなくなった record は上で conflict)。
+    return !saved.ok ? 'storage' : saved.value === 1 ? 'registered' : 'pending';
   } catch {
     // RPC/receipt 不明が「登録済み」へ波及し、未登録商品の署名要求を開かないよう保留する。
     return 'pending';
