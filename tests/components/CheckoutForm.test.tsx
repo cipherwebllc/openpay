@@ -126,7 +126,8 @@ vi.mock('@/lib/env', async (importOriginal) => {
   };
 });
 
-import { useAccount, useReadContract, useSwitchChain } from 'wagmi';
+import { useAccount, usePublicClient, useReadContract, useSwitchChain, useWalletClient } from 'wagmi';
+import { checkoutFormKey } from '@/lib/checkoutFormKey';
 import { useSmartAccount } from '@/hooks/useSmartAccount';
 import { useBatchPayment } from '@/hooks/useBatchPayment';
 import { useStandardPayment } from '@/hooks/useStandardPayment';
@@ -5028,5 +5029,94 @@ describe('CheckoutForm — 履歴と控えの支払者は送信した時点の�
         payer: SIGNER,
       }),
     );
+  });
+});
+
+// 第 10 回レビュー H-R (Codex 第 3 回の 2 つの MUST): 同じ chain の checkout で、同じタブのまま別の注文の URL へ移ると、
+// 前の注文の支払いの状態が次の注文の画面に残っていた (page の key が chain だけ)。/checkout の page と同じ key
+// (lib/checkoutFormKey) で描き、注文が変われば作り直すことで、A の payload を B で送らない・A の成功を B に出さない。
+// 実物の relay hook で通し、差し替えるのは wagmi の署名・fetch (境界) だけ。
+describe('CheckoutForm — 同じタブで別の注文へ移ると、前の注文の支払いの状態を持ち越さない (page の key)', () => {
+  const ORDER: CheckoutParams = { ...JPYC_PARAMS, webhook: `${location.origin}/api/order/notify?h=alice` };
+  const keyed = (params: CheckoutParams, client: QueryClient) => (
+    <QueryClientProvider client={client}>
+      <CheckoutForm key={checkoutFormKey(params)} params={params} />
+    </QueryClientProvider>
+  );
+  const relayPosts = (spy: { mock: { calls: unknown[][] } }) =>
+    spy.mock.calls.filter(([url]) => String(url) === '/api/relay/jpyc');
+  async function setup(signImpl: () => Promise<Hex>) {
+    vi.mocked(resolveJpycGaslessProvider).mockReturnValue('eip3009-relay');
+    setAccount({ connected: true, chainId: polygonAmoy.id });
+    setBalance(10_000n * 10n ** 18n);
+    const { useJpycEip3009Payment: actualHook } = await vi.importActual<typeof import('@/hooks/useJpycEip3009Payment')>('@/hooks/useJpycEip3009Payment');
+    vi.mocked(useJpycEip3009Payment).mockImplementation(actualHook);
+    const signTypedData = vi.fn(signImpl);
+    mockHook(useWalletClient, { data: { signTypedData } } as never);
+    mockHook(usePublicClient, { waitForTransactionReceipt: vi.fn(async () => ({ status: 'success' })) } as never);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    return { signTypedData, client };
+  }
+  afterEach(() => { vi.restoreAllMocks(); });
+
+  it('注文番号の無い 2 つのカート (Tea → Coffee・同じお店・同じ合計): A の 429 の後に B へ移っても、A の payload を B の画面で送らない', async () => {
+    const user = userEvent.setup();
+    const { signTypedData, client } = await setup(async () => `0x${'a'.repeat(130)}` as Hex);
+    let relayCount = 0;
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      if (String(input) !== '/api/relay/jpyc') return Response.json({ ok: true });
+      relayCount += 1;
+      return relayCount === 1
+        ? Response.json({ error: 'ip_rate_limited' }, { status: 429 })
+        : Response.json({ ok: true, txHash: `0x${'b'.repeat(64)}` });
+    });
+    const A: CheckoutParams = { ...ORDER, items: [{ name: 'Tea', qty: 1, price: '3000' }] };
+    const B: CheckoutParams = { ...ORDER, items: [{ name: 'Coffee', qty: 1, price: '3000' }] };
+    const page = render(keyed(A, client));
+    await waitFor(() => expect(screen.getByRole('button', { name: /を支払う/ })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: /を支払う/ }));
+    await waitFor(() => expect(screen.getByRole('button', { name: /同じ内容で再試行/ })).toBeInTheDocument());
+    expect(relayPosts(fetchSpy)).toHaveLength(1);
+    const aBody = (relayPosts(fetchSpy)[0][1] as RequestInit).body;
+
+    page.rerender(keyed(B, client));
+    // 作り直した B の画面には、A の保持した署名の再送の入口が無い (同じ mount のままだと、ここで押すと A の payload を送る)。
+    expect(screen.queryByRole('button', { name: /同じ内容で再試行/ })).toBeNull();
+    await waitFor(() => expect(screen.getByRole('button', { name: /を支払う/ })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: /を支払う/ }));
+    await waitFor(() => expect(relayPosts(fetchSpy)).toHaveLength(2));
+    // B は B の新しい署名で送る (A の payload ではない)。
+    expect(signTypedData).toHaveBeenCalledTimes(2);
+    expect((relayPosts(fetchSpy)[1][1] as RequestInit).body).not.toBe(aBody);
+    expect(screen.getAllByText('Coffee').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Tea')).toBeNull();
+    page.unmount(); client.clear();
+  });
+
+  it('署名の途中で別の注文 (B・別のお店・別の注文番号) へ移った後に A の署名を承認しても、A を送らず、B の画面に A の成功を出さない', async () => {
+    let approve: (signature: Hex) => void = () => undefined;
+    const { signTypedData, client } = await setup(() => new Promise<Hex>((resolve) => { approve = resolve; }));
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) =>
+      String(input) === '/api/relay/jpyc'
+        ? Response.json({ ok: true, txHash: `0x${'b'.repeat(64)}` })
+        : Response.json({ ok: true }));
+    const A: CheckoutParams = { ...ORDER, orderId: 'order-a', items: [{ name: 'Tea', qty: 1, price: '3000' }] };
+    const B: CheckoutParams = { ...ORDER, orderId: 'order-b', to: '0x9999999999999999999999999999999999999999' as Address, items: [{ name: 'Coffee', qty: 1, price: '3000' }] };
+    const page = render(keyed(A, client));
+    await waitFor(() => expect(screen.getByRole('button', { name: /を支払う/ })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: /を支払う/ }));
+    await waitFor(() => expect(signTypedData).toHaveBeenCalledTimes(1));
+
+    page.rerender(keyed(B, client));
+    // B へ移った後で A の署名を承認する (同じ mount のままだと、A を保存して POST し、B の画面に成功を出す)。
+    await act(async () => { approve(`0x${'a'.repeat(130)}` as Hex); });
+    await act(async () => { await new Promise((r) => setTimeout(r, 50)); });
+
+    expect(relayPosts(fetchSpy)).toHaveLength(0);
+    expect(screen.queryByText(/お支払いが完了しました/)).toBeNull();
+    expect(latestOrderDelivery()).toEqual({ kind: 'empty' });
+    expect(screen.getByText(/受付番号 #order-b/)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('button', { name: /を支払う/ })).toBeEnabled());
+    page.unmount(); client.clear();
   });
 });

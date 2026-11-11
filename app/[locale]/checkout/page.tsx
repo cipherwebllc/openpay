@@ -8,6 +8,7 @@ import { CheckoutForm } from '@/components/CheckoutForm';
 import { CheckoutChainPicker } from '@/components/checkout/CheckoutChainPicker';
 import { StoreDeviceCheckoutForm } from '@/components/StoreDeviceCheckoutForm';
 import { LocaleSwitcher } from '@/components/LocaleSwitcher';
+import { checkoutFormKey } from '@/lib/checkoutFormKey';
 import { env } from '@/lib/env';
 import {
   parseCheckoutParams,
@@ -72,8 +73,9 @@ export default async function CheckoutPage({
           // 受け付けるチェーンが複数で、まだ選んでいない: 払う前にチェーンを選ぶ (plans/order-link-multichain.md)。
           <CheckoutChainPicker params={parsed.params} />
         ) : (
-          // チェーンごとに作り直す (別のチェーンへ戻ったとき、前のチェーンの支払いの状態を持ち越さない)。
-          <CheckoutForm key={parsed.params.chain} params={parsed.params} />
+          // 注文 (chain を含む URL から parse した中身全体) ごとに作り直す。別のチェーン・別の注文へ移ったとき、前の支払いの
+          // 状態 (保持した署名・署名の途中の試み・完了の画面) を持ち越さない (lib/checkoutFormKey.ts・第 10 回レビュー H-R)。
+          <CheckoutForm key={checkoutFormKey(parsed.params)} params={parsed.params} />
         )
       ) : (
         <div className="rounded-2xl border border-red-200 bg-red-50 p-5 text-sm text-red-700">

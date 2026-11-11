@@ -98,8 +98,10 @@ type RetainedRelayPayload = {
 };
 
 // 束縛した注文の payload を保持したときの checkout の文脈と、今の文脈が同じか (再送の前・第 10 回レビュー H-R)。
-// 同じ chain の checkout は画面を作り直さずに文脈 (お店・注文番号・合計など) だけが変わりうる (app/[locale]/checkout/page.tsx の
-// key は chain だけ) ので、別の注文の画面で前の注文の payload を送らない。
+// 別の注文へ移ったときに前の注文の状態を持ち越さないのは、主に /checkout の page の key (lib/checkoutFormKey.ts・注文が
+// 変われば CheckoutForm ごと作り直す = 保持した payload も消える)。ここはこの hook が見える文脈 (お店・chain・token・
+// webhook・注文番号・合計) が変わったときの防御で、品目などこの文脈に入らない違い (注文番号の無い 2 つのカートの中身) は
+// 見分けられない。
 function sameOrderContext(a: OrderDeliveryContext | undefined, b: OrderDeliveryContext | undefined): boolean {
   if (!a || !b) return a === b;
   return a.merchant.toLowerCase() === b.merchant.toLowerCase() && a.chainId === b.chainId &&
@@ -619,7 +621,9 @@ export function useJpycEip3009Payment(
         // 束縛した注文の payload の再送 (第 10 回レビュー H-R): 保持した payload と一緒に持つ束縛 (retained.order と署名したときの
         // 文脈) で毎回確かめ、確かめを通らない束縛した再送を 0 にする。今までは orderDeliveryRef に記録があるときだけ確かめて
         // いたので、文脈を読み直す effect がそれを null に戻す (A → B → A) と、記録なしで送れた (応答を待つ間に開き直すと、
-        // 別の署名をもう 1 本送れる = 二重払い)。B の画面で押しても A の payload が送られた。
+        // 別の署名をもう 1 本送れる = 二重払い)。B の画面で押しても A の payload が送られた。/checkout は今は注文が変わると
+        // page の key で作り直すので、保持した payload は別の注文の画面に残らない。ここの文脈の照合は、この hook が見える
+        // 文脈の違いだけを止める防御 (品目だけの違いは見分けられない・sameOrderContext)。
         // 再送できる payload は IP 制限 (429) の経路だけが保持する (下の新しい署名の分岐)。429 は relay が署名の検証・body の
         // 処理より前に返す拒否 (app/api/relay/jpyc/route.ts の relay-admission) なので、この payload は送られていない。だから
         // 止めるときは保持を外す (次は新しい署名から・送らない署名は期限で失効する)。残すと hasActiveIntent が立ったままで、
