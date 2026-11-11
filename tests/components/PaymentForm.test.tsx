@@ -211,7 +211,9 @@ function setPayment(
     isPending: state === 'pending',
     isUnknown: state === 'unknown',
     // pending record store が読めない fail-closed 状態 (isUnknown とは別 flag)。
-    pendingStoreUnavailable: state === 'store-unavailable',
+    // 確認中 (unknown) と同時に立つ場合は extra で渡す (送り直しの前に保存できない)。
+    pendingStoreUnavailable:
+      state === 'store-unavailable' || extra?.pendingStoreUnavailable === true,
     pendingUserOpHash:
       state === 'unknown' ? `0x${'c'.repeat(64)}` : undefined,
     retryReceipt: gaslessRetryReceipt,
@@ -991,6 +993,72 @@ describe('PaymentForm — 送信フロー', () => {
     ).not.toBeInTheDocument();
     await user.click(payButton);
     expect(standardMutate).toHaveBeenCalledOnce();
+  });
+
+  // 確認中の支払いを送り直す前に端末へ保存できない (isUnknown と pendingStoreUnavailable が同時)。確認中は通常送信も
+  // 閉じているので、「保存できません」の欄は通常送信を案内しない (従うと二重払いを誘う)。題・確認中の欄・再確認はそのまま。
+  describe('確認中の支払いを送り直す前に保存できない (gaslessResendBlocked)', () => {
+    const TITLE = 'この端末では記録を保存できません';
+    const STANDARD_BODY =
+      'この端末では支払い記録を保存できないため、ガスレス送信を止めています。通常送信をご利用ください。';
+    const RESEND_BODY =
+      'この端末では支払い記録を保存できないため、確認中の支払いを送り直せません。着金通知・受注画面でご確認ください。';
+
+    function renderGasless(
+      state: 'unknown' | 'idle',
+      pendingStoreUnavailable: boolean,
+      query = '',
+    ) {
+      setURL(`to=${MERCHANT}&token=usdc&amount=10${query}`);
+      setAccount({ connected: true, chainId: baseSepolia.id });
+      setBalance(20_000_000n);
+      setSmartAccount(true);
+      setPayment(state, undefined, { pendingStoreUnavailable });
+      setGasQuote('ready', 0n);
+      render(<PaymentForm />);
+    }
+
+    it('確認中 + 保存できない → 本文は「送り直せません」。通常送信を案内しない', async () => {
+      const user = userEvent.setup();
+      renderGasless('unknown', true);
+
+      expect(await screen.findByText(RESEND_BODY)).toBeInTheDocument();
+      expect(screen.getByText(TITLE)).toBeInTheDocument();
+      expect(screen.queryByText(STANDARD_BODY)).not.toBeInTheDocument();
+      expect(screen.queryByText(/通常送信をご利用ください/)).not.toBeInTheDocument();
+      // 確認中の欄と再確認のボタンはそのまま。
+      expect(screen.getByText('送信結果を確認中')).toBeInTheDocument();
+      expect(screen.getByText(`0x${'c'.repeat(64)}`)).toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: '同じ送信内容を再確認' }));
+      expect(gaslessRetryReceipt).toHaveBeenCalledOnce();
+      expect(mutate).not.toHaveBeenCalled();
+    });
+
+    it('保存できないだけ → 今までどおり通常送信を案内する', async () => {
+      renderGasless('idle', true);
+
+      expect(await screen.findByText(STANDARD_BODY)).toBeInTheDocument();
+      expect(screen.getByText(TITLE)).toBeInTheDocument();
+      expect(screen.queryByText(RESEND_BODY)).not.toBeInTheDocument();
+      expect(screen.queryByText('送信結果を確認中')).not.toBeInTheDocument();
+    });
+
+    it('確認中だけ → 「保存できません」の欄は出ない', async () => {
+      renderGasless('unknown', false);
+
+      expect(await screen.findByText('送信結果を確認中')).toBeInTheDocument();
+      expect(screen.queryByText(TITLE)).not.toBeInTheDocument();
+      expect(screen.queryByText(RESEND_BODY)).not.toBeInTheDocument();
+      expect(screen.queryByText(STANDARD_BODY)).not.toBeInTheDocument();
+    });
+
+    it('通常送信の route では、2 つが立っていても「保存できません」の欄は出ない (今までどおり)', async () => {
+      renderGasless('unknown', true, '&mode=standard');
+
+      expect(await screen.findByText('送信結果を確認中')).toBeInTheDocument();
+      expect(screen.queryByText(TITLE)).not.toBeInTheDocument();
+      expect(screen.queryByText(RESEND_BODY)).not.toBeInTheDocument();
+    });
   });
 
   it('送信成功 → tx hash と block 番号が表示される', () => {

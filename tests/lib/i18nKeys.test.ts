@@ -147,6 +147,36 @@ describe('i18n: smart account 互換性エラー (3 form 名前空間 × ja/en)'
   }
 });
 
+// 確認中の支払いを送り直す前に端末へ保存できないときの本文 (user 承認済みの文・2026-11-11)。3 フォームの
+// namespace だけに ja/en 同じ文で入る (同名の key が複数の namespace にあるので、入った先を namespace ごとに確かめる)。
+// /pay・/checkout は確認中のあいだ通常送信も閉じている (/tip は経路ごとの止めで、通常送信は閉じない)。どの画面でも、
+// この文は通常送信を案内しない。
+describe('i18n: pendingStoreUnavailableResendBody (3 form 名前空間 × ja/en)', () => {
+  const KEY = 'pendingStoreUnavailableResendBody';
+  const TEXT = {
+    ja: 'この端末では支払い記録を保存できないため、確認中の支払いを送り直せません。着金通知・受注画面でご確認ください。',
+    en: "This device can't save payment records, so the pending payment can't be re-sent. Please check the payment notification or order screen.",
+  } as const;
+  it.each(['ja', 'en'] as const)('%s: 3 フォームの namespace だけにあり、承認済みの文と一致する', (locale) => {
+    const messages = { ja, en }[locale] as Record<string, unknown>;
+    const holders = Object.entries(messages)
+      .filter(([, value]) => typeof value === 'object' && value !== null && KEY in value)
+      .map(([ns]) => ns);
+    expect(holders.sort()).toEqual([...FORM_NAMESPACES].sort());
+    for (const ns of FORM_NAMESPACES) {
+      expect((messages[ns] as Record<string, unknown>)[KEY]).toBe(TEXT[locale]);
+    }
+  });
+  it.each(['ja', 'en'] as const)('%s: 通常送信を案内しない (保存できないだけのときの本文とは別の文)', (locale) => {
+    const messages = { ja, en }[locale];
+    for (const ns of FORM_NAMESPACES) {
+      const form = messages[ns] as Record<string, string>;
+      expect(form[KEY]).not.toMatch(/通常送信|standard payment/);
+      expect(form.pendingStoreUnavailableBody).toMatch(/通常送信をご利用ください|use standard payment instead/);
+    }
+  });
+});
+
 describe('i18n: onramp keys (3 form 名前空間 × ja/en)', () => {
   for (const ns of FORM_NAMESPACES) {
     for (const key of ONRAMP_KEYS) {
