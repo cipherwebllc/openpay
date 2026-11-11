@@ -357,7 +357,7 @@ function restoredStandardParams(paid: CheckoutParams): NonNullable<ReturnType<ty
     feeAmount: 0n,
     chainId: dep.chainId,
     saleAmount: JPYC(3000n),
-    contextKey: orderPaymentContextKey(paid, 'polygon'),
+    contextKey: orderPaymentContextKey(paid, 'polygon') as Hex,
   };
 }
 /** 保存した Pimlico の intent の params (useBatchPayment の variables)。3000 JPYC を merchant へ。 */
@@ -958,11 +958,11 @@ const CASES: Case[] = [
     want: () => ({ foreign: true, rows: [relayRow(RELAY_TX)], receiptIds: [U, U, U, RELAY_TX], home: true }),
   },
   {
-    name: '読み直した画面で復元した通常決済 (会計の鍵が別の会計): この会計の支払いでない見出しと「読み込み直す」',
+    name: '読み直した画面で復元した通常決済 (別のお店の会計): この会計の支払いでない見出しと「読み込み直す」',
     setup: () =>
       standardDone(STANDARD_DATA, {
         restoredFromStorage: true,
-        lastSubmittedParams: restoredStandardParams(jpycParams({ mode: 'standard', description: '別の会計' })),
+        lastSubmittedParams: restoredStandardParams(jpycParams({ mode: 'standard', to: OTHER_MERCHANT })),
       }),
     params: () => jpycParams({ mode: 'standard' }),
     want: () => ({ foreign: true, rows: STANDARD_ROWS, receiptIds: [STANDARD_DATA.merchantTxHash, U, U, U], home: true }),

@@ -4819,10 +4819,10 @@ describe('CheckoutForm — 復元した決済の完了で「注文を送る」�
 
     // 既存の復元の流れ (完了欄の Tx Hash) はそのまま
     expect(screen.getAllByText(TX).length).toBeGreaterThan(0);
-    // 会計の鍵が別の会計 = この会計の支払いでない → 題と本文を差し替える (第 10 回レビュー H-S)
-    expect(screen.getByText(FOREIGN_TITLE)).toBeInTheDocument();
-    expect(screen.queryByText(DONE_TITLE)).toBeNull();
-    expect(screen.queryByText(DONE_THANKS)).toBeNull();
+    // 題では会計の鍵の値を比べない (鍵の入力は払った後にずれうる・Codex 第 2 回)。同じお店・同じ合計の番号違いの注文は
+    // 見分けられず、今までどおりの題 (残る限界・第 10 回レビュー H-S)。「お店に知らせる」と払った記録は今までどおり出さない。
+    expect(screen.getByText(DONE_TITLE)).toBeInTheDocument();
+    expect(screen.queryByText(FOREIGN_TITLE)).toBeNull();
     expect(screen.queryByText(RESTORED_TITLE)).toBeNull();
     expect(screen.queryByRole('button', { name: 'お店に知らせる' })).toBeNull();
     first.unmount();
@@ -4873,9 +4873,10 @@ describe('CheckoutForm — 復元した決済の完了で「注文を送る」�
     const first = render(<CheckoutForm params={STANDARD_ORDER} />);
 
     expect(screen.getAllByText(TX).length).toBeGreaterThan(0);
-    // 注文リンクの鍵が違う = この画面の支払いでない → 題と本文を差し替える (第 10 回レビュー H-S)
-    expect(screen.getByText(FOREIGN_TITLE)).toBeInTheDocument();
-    expect(screen.queryByText(DONE_TITLE)).toBeNull();
+    // 題では注文リンクの鍵の値を比べない (Codex 第 2 回)。お店・合計が同じ = 今までどおりの題 (第 10 回レビュー H-S)。
+    // 「お店に知らせる」と払った記録は今までどおり鍵の一致を要るので出さない (G-1)。
+    expect(screen.getByText(DONE_TITLE)).toBeInTheDocument();
+    expect(screen.queryByText(FOREIGN_TITLE)).toBeNull();
     expect(screen.queryByText(RESTORED_TITLE)).toBeNull();
     expect(screen.queryByRole('button', { name: 'お店に知らせる' })).toBeNull();
     first.unmount();
@@ -5017,24 +5018,24 @@ describe('CheckoutForm — 復元した決済の完了で「注文を送る」�
   });
 
   // 注文リンクの指紋を一致させたまま 1 項目ずつ変える (照合の各条件を個別に確かめる)。
-  // 3 つめの欄 (第 10 回レビュー H-S): この会計の支払いでないと証明できるか (true = 題と本文を差し替える)。記録が持つ注文リンクの
-  // 鍵・chain・お店・「受取 + 利用料」のどれかが違えば証明できる。題が今までどおりなのは 2 つ: 「recover なのに利用料が 0」
-  // (違うのは判定が比べない経路の種類 routeKind だけ)・「指紋の無い復元」(鍵は 2026-11-05 から保存し始めたので、それより前の
-  // 同じ注文リンクの支払いでありうる = 鍵では比べない・Codex MUST 1)。どちらも「注文を送る」は今までどおり出さない。
+  // 3 つめの欄 (第 10 回レビュー H-S): この会計の支払いでないと証明できるか (true = 題と本文を差し替える)。題で比べるのは
+  // お店と「受取 + 利用料」だけで、注文リンクの鍵・chain の値は比べない (指紋の入力と受け付ける chain の組は、払った後に
+  // parser・env が変わるとずれる・Codex 第 2 回)。鍵の無い復元も比べない (鍵は 2026-11-05 から保存・Codex MUST 1)。
+  // 題が今までどおりの行も「注文を送る」と払った記録は今までどおり出さない (G-1 は鍵・chain の一致を要る)。
   it.each<[string, Partial<RestoredRelayIntent>, boolean]>([
     [
       '別の注文 (同じお店・同じ金額・明細違い) の指紋',
       { orderLinkKey: orderLinkKeyOf({ ...RELAY_ORDER, items: [{ name: 'チケット', qty: 2, price: '1500' }] }) },
-      true,
+      false,
     ],
     [
       '会計の指紋は同じで ship の無い支払い (普通の /checkout と同じ中身) の指紋',
       { orderLinkKey: orderLinkContextFingerprint(contextKeyOf(RELAY_ORDER), {}) },
-      true,
+      false,
     ],
     ['指紋の無い復元 (/pay・/tip・普通の /checkout の支払い・以前の保存)', { orderLinkKey: undefined }, false],
     ['指紋の無い recover の復元 (以前の保存・お店の受取 + 利用料 = 合計)', { ...RECOVER, orderLinkKey: undefined }, false],
-    ['チェーンが違う', { chainId: baseSepolia.id }, true],
+    ['チェーンが違う', { chainId: baseSepolia.id }, false],
     ['お店が違う', { merchant: OTHER_MERCHANT }, true],
     ['お店の受取 (merchantValue) が違う', { merchantValue: (TOTAL - 1n).toString() }, true],
     ['free なのに利用料 (feeValue) がある', { feeValue: '1' }, true],
@@ -5199,6 +5200,8 @@ describe('CheckoutForm — 復元した前の支払いの確定を、この会�
     ['支払い者 (from) が今つないでいるウォレットと違う', { from: OTHER_PAYER }],
     ['recover (お店が利用料を負担: 受取 + 利用料 = 合計)', recoverShape(2n * 10n ** 18n)],
     ['recover で、払った後に利用料の設定が変わった (保存した利用料 30 JPYC・今のフロアは 2 JPYC)', recoverShape(30n * 10n ** 18n)],
+    // 受け付ける chain の組は env で変わるので比べない (止めた chain で払った同じ注文を別の支払いとしない・Codex 第 2 回)。
+    ['chain が違う (お店・合計は同じ)', { chainId: baseSepolia.id }],
   ])('relay: %s の復元の確定は、今までどおりの完了の欄 (大きな完了画面・払った記録は今までどおり出さない)', async (_label, overrides) => {
     ready();
     setRestoredRelay(relayIntent(overrides));
@@ -5212,7 +5215,6 @@ describe('CheckoutForm — 復元した前の支払いの確定を、この会�
 
   it.each<[string, Partial<RelayIntent>]>([
     ['お店が違う', { merchant: OTHER_MERCHANT }],
-    ['chain が違う', { chainId: baseSepolia.id }],
     ['額が違う (受取も受取 + 利用料も合計と違う)', { merchantValue: (TOTAL - 1n).toString() }],
     ['注文リンクでの支払いでなく、お客様の上乗せの形 (受取 = 合計・利用料あり = チップなど)', { routeKind: 'recover', feeValue: (2n * 10n ** 18n).toString() }],
   ])('relay: %s 復元の確定は「この画面の支払いではありません」と「読み込み直す」(お礼・大きな完了画面・履歴・払った記録なし)', async (_label, overrides) => {
@@ -5313,22 +5315,27 @@ describe('CheckoutForm — 復元した前の支払いの確定を、この会�
     await expectNoOverlay();
   });
 
-  it('relay: 受け付ける chain が複数の注文リンクで別の chain を選んだ画面でも、同じ注文リンクの支払いの確定は今までどおりの完了の欄', async () => {
+  it('relay: 受け付ける chain が複数の注文リンクで別の chain を選んだ画面でも、同じ注文リンクの支払いの確定は今までどおりの完了の欄・別のお店なら「この画面の支払いではありません」', async () => {
     const kaia = deploymentForSlug('jpyc', 'kaia');
     const link: CheckoutParams = { ...JPYC_PARAMS, ship: 'ask', chains: ['polygon', 'kaia'], chain: 'kaia' };
     // Polygon を選んで払った支払い (注文リンクの鍵は Polygon の会計の鍵から作る)。
-    const paidOnPolygon = orderLinkContextFingerprint(orderPaymentContextKey(link, 'polygon'), link);
+    const paidOnPolygon = orderLinkContextFingerprint(orderPaymentContextKey(link, 'polygon') as Hex, link);
     ready(kaia.chainId);
     setRestoredRelay(relayIntent({ orderLinkKey: paidOnPolygon }));
     const first = render(<CheckoutForm params={link} />);
     expectOwnCompletion(TX);
     first.unmount();
 
-    // 同じリンクでも、別の注文リンク (明細違い) の鍵なら「この画面の支払いではありません」。
+    // 注文リンクの鍵の値は比べない (指紋の入力は払った後に変わりうる・Codex 第 2 回)。明細違いの注文リンクの鍵でも、
+    // お店・合計が同じなら今までどおり (残る限界)。お店が違えば「この画面の支払いではありません」。
     const otherLink: CheckoutParams = { ...link, items: [{ name: '別の品', qty: 1, price: '3000' }] };
-    setRestoredRelay(
-      relayIntent({ orderLinkKey: orderLinkContextFingerprint(orderPaymentContextKey(otherLink, 'polygon'), otherLink) }),
-    );
+    const otherKey = orderLinkContextFingerprint(orderPaymentContextKey(otherLink, 'polygon') as Hex, otherLink);
+    setRestoredRelay(relayIntent({ orderLinkKey: otherKey }));
+    const second = render(<CheckoutForm params={link} />);
+    expectOwnCompletion(TX);
+    second.unmount();
+
+    setRestoredRelay(relayIntent({ orderLinkKey: otherKey, merchant: OTHER_MERCHANT }));
     render(<CheckoutForm params={link} />);
     expectForeignCompletion(TX);
   });
@@ -5358,16 +5365,21 @@ describe('CheckoutForm — 復元した前の支払いの確定を、この会�
       feeAmount: 0n,
       chainId: deployment.chainId,
       saleAmount: TOTAL,
-      contextKey: orderPaymentContextKey(paid, 'polygon'),
+      contextKey: orderPaymentContextKey(paid, 'polygon') as Hex,
       ...overrides,
     };
   }
   const STANDARD_TX = `0x${'c'.repeat(64)}`;
 
-  it('通常決済: 会計の鍵がこの会計の復元の確定は、今までどおりの完了の欄 (支払い者が今のウォレットと違っても)', async () => {
+  // 会計の鍵の値は比べない (指紋の入力は parser の変更で払った後にずれる・廃止した fee_kind=register など・Codex 第 2 回)。
+  // 品目だけ違う同じお店・同じ合計の会計は見分けられない (残る限界・今の本番と同じ表示)。
+  it.each<[string, () => StandardParams]>([
+    ['会計の鍵がこの会計 (支払い者が今のウォレットと違っても)', () => standardRecord(STANDARD)],
+    ['品目だけが違う会計 (同じお店・同じ合計) の鍵', () => standardRecord({ ...STANDARD, items: [{ name: '別の品', qty: 1, price: '3000' }] })],
+  ])('通常決済: %s の復元の確定は、今までどおりの完了の欄', async (_label, record) => {
     ready();
     setStandardPayment('success-no-fee', {
-      lastSubmittedParams: standardRecord(STANDARD),
+      lastSubmittedParams: record(),
       lastSubmittedFrom: OTHER_PAYER,
       restoredFromStorage: true,
     });
@@ -5379,7 +5391,6 @@ describe('CheckoutForm — 復元した前の支払いの確定を、この会�
   });
 
   it.each<[string, () => StandardParams]>([
-    ['品目だけが違う会計 (同じお店・同じ合計) の鍵', () => standardRecord({ ...STANDARD, items: [{ name: '別の品', qty: 1, price: '3000' }] })],
     ['会計の鍵が無い (/pay・/tip の支払い)', () => standardRecord(STANDARD, { contextKey: undefined })],
     ['別のお店の会計の鍵', () => standardRecord({ ...STANDARD, to: OTHER_MERCHANT })],
   ])('通常決済: %s の復元の確定は「この画面の支払いではありません」と「読み込み直す」', async (_label, record) => {
@@ -5442,7 +5453,7 @@ describe('CheckoutForm — 復元した前の支払いの確定を、この会�
           feeAmount: 30n * 10n ** 18n,
           chainId: deployment.chainId,
           saleAmount: TOTAL,
-          contextKey: orderPaymentContextKey(params, 'polygon'),
+          contextKey: orderPaymentContextKey(params, 'polygon') as Hex,
         },
       };
     }
