@@ -2764,7 +2764,7 @@ describe('useJpycEip3009Payment — 復旧の枠を書けない端末では束�
     vi.mocked(jpycForwarderFor).mockReturnValue(null);
   });
 
-  it.each(['free', 'recover'] as const)('%s: 枠も確かめのキーも書けない端末 → 署名を求めずに止める (POST 0 回・専用の code・通常決済へ切り替えられる種類の error)', async (mode) => {
+  it.each(['free', 'recover'] as const)('%s: 枠も確かめのキーも書けない端末 → 署名を求めずに止める (POST 0 回・専用の code・送っていない = fallback-safe な error)', async (mode) => {
     const view = await mountHook(mode);
     breakSetItem(relayKeys);
 
@@ -2899,7 +2899,7 @@ describe('useJpycEip3009Payment — 復旧の枠を書けない端末では束�
     expect(relayPosts()).toHaveLength(1);
     expect(signTypedData).toHaveBeenCalledTimes(1);
     expect(logger.info).toHaveBeenCalledWith(...unavailableLog('retry'));
-    // 保持を外す: 残すと hasActiveIntent が立ったままで、フォームが通常決済へ切り替えても払えない。
+    // 保持を外す: 残すと hasActiveIntent が立ったままで、次の押下も同じ payload の再送になり、ほかの払い方へも進めない。
     expect(view.result.current.hasActiveIntent).toBe(false);
     expect(isFallbackSafeRelayError(view.result.current.error)).toBe(true);
     expect(window.sessionStorage.getItem(RELAY_INTENT_STORAGE_KEY)).toBeNull();

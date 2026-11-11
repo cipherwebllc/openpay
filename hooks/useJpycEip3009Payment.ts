@@ -609,7 +609,8 @@ export function useJpycEip3009Payment(
         // 同じく、POST の前に公開 metadata だけを保存し直す (IP 制限・確定応答でまた消える)。
         // 保存し直した枠が読み戻せなければ再送しない (第 10 回レビュー H-R・初回の POST の前と同じ確かめ)。この payload は
         // IP 制限 (relay の処理の前の拒否) しか受けていない = 送られていないので、保持を外す (次は新しい署名から・送らない署名は
-        // 期限で失効する)。保持を残すと hasActiveIntent が立ったままになり、フォームが通常決済へ切り替えても払えない。
+        // 期限で失効する)。保持を残すと hasActiveIntent が立ったままになり、次の押下も同じ payload の再送 (= また止まる) に
+        // なって、ほかの払い方 (通常決済など) へも進めない。
         // skipIntentStorageCheck (埋め込みのチップ) は、書き込みは同じで、読み戻せなくても今までどおり再送する。
         if (retained.savesRelayIntent && !storageRef.current?.saveRelayIntentVerified(retained.intent) && !skipIntentStorageCheck) {
           logger.info('payment.intent_storage_unavailable', { path: 'jpyc-relay', chainId: retained.intent.chainId, stage: 'retry' });
