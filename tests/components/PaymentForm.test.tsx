@@ -2650,6 +2650,31 @@ describe('PaymentForm — relay 失敗時の通常決済フォールバック (B
     },
   );
 
+  // 第 10 回レビュー H-R: 復旧の枠を書けない端末で hook が送らずに止めた (intent_storage_unavailable)。時間をおいても
+  // 直らないので generic の「時間をおいて再度」は出さず、専用の文言と通常決済への切り替えを出す。
+  it('relay error (intent_storage_unavailable): 専用の文言 + 通常決済へ切替 banner → 押すと standard モードで払える', async () => {
+    const user = userEvent.setup();
+    setupRelayError('intent_storage_unavailable');
+    render(<PaymentForm />);
+
+    expect(screen.getByText('この端末に控えを保存できないため、ガスレス決済は使えません (JPYC は動いていません)。通常決済 (ガス代自己負担) に切り替えるか、別のブラウザでお試しください。')).toBeInTheDocument();
+    expect(screen.queryByText('intent_storage_unavailable')).toBeNull();
+    expect(screen.queryByText(/完了できませんでした/)).toBeNull();
+    // 汎用の赤いエラー枠と二重に出さない (banner の中に 1 度だけ)。
+    expect(screen.queryByText('エラー')).toBeNull();
+    expect(screen.getAllByText(/この端末に控えを保存できないため/)).toHaveLength(1);
+
+    await user.click(
+      screen.getByRole('button', { name: /通常支払い（自分でガスを払う）に切り替える/ }),
+    );
+    expect(screen.queryByText(/この端末に控えを保存できないため/)).toBeNull();
+    expect(
+      screen.getAllByText(/通常決済（ガス代は自分で負担）/).length,
+    ).toBeGreaterThanOrEqual(1);
+    // 切り替えた先で払える (案内が嘘にならない)。
+    expect(screen.getByRole('button', { name: /300 JPYC を支払う/ })).toBeEnabled();
+  });
+
   it('response-unknown → standard fallback 非表示・再署名封鎖・中間表示', async () => {
     const user = userEvent.setup();
     setupRelayError();

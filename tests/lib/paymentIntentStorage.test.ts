@@ -1,15 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Address, Hex } from 'viem';
 import {
+  RELAY_INTENT_PROBE_KEY,
   RELAY_INTENT_STORAGE_KEY,
   SALES_MOVE_INTENT_STORAGE_KEY,
   STANDARD_INTENT_STORAGE_KEY,
+  canStoreRelayIntent,
   clearRelayIntent,
   clearSalesMoveIntent,
   loadRelayIntent,
   loadSalesMoveIntent,
   loadStandardIntent,
   saveRelayIntent,
+  saveRelayIntentVerified,
   saveSalesMoveIntent,
   saveStandardIntent,
   saveStandardPaymentIntent,
@@ -170,6 +173,154 @@ describe('relay payment intent sessionStorage', () => {
     expect(
       window.sessionStorage.getItem(RELAY_INTENT_STORAGE_KEY),
     ).not.toBeNull();
+  });
+});
+
+// 第 10 回レビュー H-R: 署名を求める前に、枠と同じ中身を書いて読み戻せるかを確かめる (束縛しない支払いだけが使う)。
+describe('relay payment intent: 署名の前の確かめ (canStoreRelayIntent)', () => {
+  it('書けて読み戻せる端末では true。枠のキーには書かず、確かめのキーも残さない', () => {
+    expect(RELAY_INTENT_PROBE_KEY).not.toBe(RELAY_INTENT_STORAGE_KEY);
+    const written: [string, string][] = [];
+    const real = Storage.prototype.setItem;
+    const spy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key: string, value: string) {
+      written.push([key, value]);
+      real.call(this, key, value);
+    });
+    expect(canStoreRelayIntent({ ...relayIntent(), orderLinkKey: ORDER_LINK_KEY })).toBe(true);
+    spy.mockRestore();
+    // 書いたのは確かめのキーに 1 回・中身は枠と同じ (同じ長さ = 枠が入る余地を確かめている)。
+    saveRelayIntent({ ...relayIntent(), orderLinkKey: ORDER_LINK_KEY });
+    const slot = window.sessionStorage.getItem(RELAY_INTENT_STORAGE_KEY);
+    clearRelayIntent();
+    expect(written).toEqual([[RELAY_INTENT_PROBE_KEY, slot]]);
+    expect(window.sessionStorage.length).toBe(0);
+  });
+
+  it('未解決の支払いの枠があっても、その枠に触れない', () => {
+    saveRelayIntent(relayIntent());
+    const other = { ...relayIntent(), nonce: `0x${'9'.repeat(64)}` as Hex };
+    expect(canStoreRelayIntent(other)).toBe(true);
+    expect(loadRelayIntent()).toEqual(relayIntent());
+  });
+
+  it('署名や余分な field は確かめのキーにも書かない', () => {
+    const real = Storage.prototype.setItem;
+    let raw = '';
+    const spy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key: string, value: string) {
+      raw = value;
+      real.call(this, key, value);
+    });
+    expect(
+      canStoreRelayIntent({ ...relayIntent(), signature: SIGNATURE } as RelayIntentMetadata & { signature: Hex }),
+    ).toBe(true);
+    spy.mockRestore();
+    expect(raw).not.toContain(SIGNATURE);
+    expect(JSON.parse(raw)).toEqual(relayIntent());
+  });
+
+  it('書き込みが throw する端末 (容量超過・保存の禁止) では false (throw しない)', () => {
+    const spy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new DOMException('The quota has been exceeded.', 'QuotaExceededError');
+    });
+    expect(canStoreRelayIntent(relayIntent())).toBe(false);
+    spy.mockRestore();
+  });
+
+  it('書いたものが読み戻せない端末 (投げずに捨てる・読むと throw) では false', () => {
+    const dropped = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => undefined);
+    expect(canStoreRelayIntent(relayIntent())).toBe(false);
+    dropped.mockRestore();
+
+    const unreadable = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new Error('SecurityError');
+    });
+    expect(canStoreRelayIntent(relayIntent())).toBe(false);
+    unreadable.mockRestore();
+  });
+
+  it('sessionStorage そのものに触れない端末 (getter が throw) では false (throw しない)', () => {
+    const spy = vi.spyOn(window, 'sessionStorage', 'get').mockImplementation(() => {
+      throw new DOMException('Access is denied for this document.', 'SecurityError');
+    });
+    try {
+      expect(canStoreRelayIntent(relayIntent())).toBe(false);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('枠として読めない形 (読み戻しても復元できない) は false', () => {
+    expect(canStoreRelayIntent({ ...relayIntent(), nonce: '0x1234' as Hex })).toBe(false);
+    expect(window.sessionStorage.length).toBe(0);
+  });
+});
+
+// 第 10 回レビュー H-R: 署名の後・POST の前に、枠そのものを書いて読み戻す。saveRelayIntent は今までどおり投げない。
+describe('relay payment intent: 書いて読み戻す (saveRelayIntentVerified)', () => {
+  it('書けた枠は saveRelayIntent と同じ中身で、true を返す', () => {
+    expect(saveRelayIntentVerified({ ...relayIntent(), orderLinkKey: ORDER_LINK_KEY })).toBe(true);
+    const verified = window.sessionStorage.getItem(RELAY_INTENT_STORAGE_KEY);
+    saveRelayIntent({ ...relayIntent(), orderLinkKey: ORDER_LINK_KEY });
+    expect(verified).toBe(window.sessionStorage.getItem(RELAY_INTENT_STORAGE_KEY));
+    expect(window.sessionStorage.length).toBe(1);
+  });
+
+  it('address・nonce の大文字小文字の違いは同じ枠として読む', () => {
+    const upper = {
+      ...relayIntent(),
+      from: `0x${'aB'.repeat(20)}` as Address,
+      nonce: `0x${'Cd'.repeat(32)}` as Hex,
+    };
+    expect(saveRelayIntentVerified(upper)).toBe(true);
+  });
+
+  it('書き込みが throw する端末では false (throw しない)。saveRelayIntent は今までどおり何も返さず投げない', () => {
+    const spy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new DOMException('The quota has been exceeded.', 'QuotaExceededError');
+    });
+    expect(saveRelayIntentVerified(relayIntent())).toBe(false);
+    expect(() => saveRelayIntent(relayIntent())).not.toThrow();
+    spy.mockRestore();
+    expect(loadRelayIntent()).toBeNull();
+  });
+
+  it('書き込みを黙って捨てる端末・読むと throw する端末では false', () => {
+    const dropped = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => undefined);
+    expect(saveRelayIntentVerified(relayIntent())).toBe(false);
+    dropped.mockRestore();
+
+    const unreadable = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new Error('SecurityError');
+    });
+    expect(saveRelayIntentVerified(relayIntent())).toBe(false);
+    unreadable.mockRestore();
+  });
+
+  it('sessionStorage そのものに触れない端末 (getter が throw) では false (throw しない)', () => {
+    const spy = vi.spyOn(window, 'sessionStorage', 'get').mockImplementation(() => {
+      throw new DOMException('Access is denied for this document.', 'SecurityError');
+    });
+    try {
+      expect(saveRelayIntentVerified(relayIntent())).toBe(false);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  // 書き込みが失敗したとき、枠に残っている別の支払いの記録を「いま書いた枠」と読み違えない。
+  it.each([
+    ['nonce', { nonce: `0x${'9'.repeat(64)}` as Hex }],
+    ['from', { from: '0x5555555555555555555555555555555555555555' as Address }],
+    ['chainId', { chainId: 137 }],
+  ] as const)('書けなかったときに枠に残っている、%s が違う記録では false (その記録は消さない)', (_field, diff) => {
+    const stale = { ...relayIntent(), ...diff };
+    saveRelayIntent(stale);
+    const spy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new DOMException('The quota has been exceeded.', 'QuotaExceededError');
+    });
+    expect(saveRelayIntentVerified(relayIntent())).toBe(false);
+    spy.mockRestore();
+    expect(loadRelayIntent()).toEqual(stale);
   });
 });
 

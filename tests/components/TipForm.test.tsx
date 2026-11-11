@@ -1747,6 +1747,19 @@ describe('TipForm — EIP-3009 relay (JPYC)', () => {
     expect(screen.getByText(/短時間に送金が集中/)).toBeInTheDocument();
   });
 
+  // 第 10 回レビュー H-R: 復旧の枠を書けない端末で hook が送らずに止めた (intent_storage_unavailable)。チップは JPYC の
+  // 通常決済へ切り替えられない (standard は URL の mode=standard だけ) ので、切り替えを案内しない文言にする。
+  it('relay error (intent_storage_unavailable) → 専用の文言 (通常決済への切り替えは案内しない)', () => {
+    setRelay('error', { errMsg: 'intent_storage_unavailable' });
+    render(<TipForm params={JPYC_PARAMS} />);
+    const message = screen.getByText('この端末に控えを保存できないため、ガスレス送金は使えません (JPYC は動いていません)。ブラウザの設定 (サイトのデータの保存) を確かめるか、別のブラウザでお試しください。');
+    expect(message).toBeInTheDocument();
+    expect(message.textContent).not.toMatch(/通常/);
+    expect(screen.queryByText('intent_storage_unavailable')).toBeNull();
+    expect(screen.queryByText(/完了できませんでした/)).toBeNull();
+    expect(screen.queryByRole('button', { name: /通常支払い/ })).toBeNull();
+  });
+
   // 2026-10-13 本番: ウォレットで署名を拒否しただけで tip.relay.failed が Sentry に上がり、画面にも
   // 「ガスレス送金を完了できませんでした」が出ていた。取り消しは失敗ではない。
   it('relay で署名を拒否 → 失敗表示も Sentry 送信もせず、送信前の画面に戻る', () => {
