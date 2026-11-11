@@ -189,10 +189,12 @@ let gaslessRetryReceipt: ReturnType<typeof vi.fn>;
 function setBatchPayment(
   state: 'idle' | 'pending' | 'unknown' | 'success' | 'error',
   errMsg?: string,
+  extra?: Partial<ReturnType<typeof useBatchPayment>>,
 ) {
   mutate = vi.fn();
   gaslessRetryReceipt = vi.fn();
   mockHook(useBatchPayment, {
+    ...extra,
     mutate,
     isPending: state === 'pending',
     isUnknown: state === 'unknown',
@@ -1191,6 +1193,54 @@ describe('CheckoutForm — 成功時の挙動', () => {
     expect('statusToken' in payload).toBe(false);
     vi.unstubAllGlobals();
   });
+
+  // 第 10 回レビュー A-1: 「同じ送信内容を再確認」は保存した Pimlico の intent の params で確定するので、確定したのが
+  // この画面から最後に送った支払いと別の intent (useBatchPayment の settledOtherIntent) なら、今の注文の受注通知・
+  // 完了画面・「このタブで払った記録」(お店に知らせる) に流さない (復元した支払いと同じ扱い)。
+  it.each([
+    { settledOtherIntent: false, attributed: true },
+    { settledOtherIntent: true, attributed: false },
+  ])(
+    'gasless: 確定した intent が画面の最後の送信と別 ($settledOtherIntent) なら、今の注文の受注通知・完了・払った記録にしない',
+    async ({ settledOtherIntent, attributed }) => {
+      const user = userEvent.setup();
+      window.sessionStorage.clear();
+      const fetchSpy = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+      vi.stubGlobal('fetch', fetchSpy);
+      setAccount({ connected: true, chainId: baseSepolia.id });
+      setBalance(200_000_000n);
+      setSmartAccount(true);
+      setGasQuote('ready', 100_000n);
+      const makeUi = () => (
+        <CheckoutForm
+          params={{ ...USDC_PARAMS, webhook: `${window.location.origin}/api/order/notify?h=alice` }}
+        />
+      );
+      const { rerender } = render(makeUi());
+      await user.click(screen.getByRole('button', { name: /を支払う/ }));
+      expect(mutate).toHaveBeenCalledOnce();
+      setBatchPayment('success', undefined, { settledOtherIntent });
+      rerender(makeUi());
+
+      // 完了の欄の hash はどちらも出る。
+      expect((await screen.findAllByText(`0x${'b'.repeat(64)}`)).length).toBeGreaterThan(0);
+      const paidRecords = () =>
+        Array.from({ length: window.sessionStorage.length }, (_, i) => window.sessionStorage.key(i))
+          .filter((key) => key?.startsWith('openpay:order-paid:v1:'));
+      const truncated = new RegExp(`0xbbbbbbbb…${'b'.repeat(6)}`);
+      if (attributed) {
+        await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
+        await waitFor(() => expect(paidRecords()).toHaveLength(1));
+        expect(await screen.findByText(truncated)).toBeInTheDocument();
+      } else {
+        // overlay は遅延ロード・通知と記録は effect なので、出ない側も待ってから確かめる。
+        await expect(screen.findByText(truncated, {}, { timeout: 300 })).rejects.toThrow();
+        expect(fetchSpy).not.toHaveBeenCalled();
+        expect(paidRecords()).toHaveLength(0);
+      }
+      vi.unstubAllGlobals();
+    },
+  );
 
   it('レジの値引き: 受注 notify payload に discount を足す (items の合計 − discount = amount)', async () => {
     const user = userEvent.setup();
