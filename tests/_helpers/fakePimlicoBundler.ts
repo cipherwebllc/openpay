@@ -1,26 +1,25 @@
-// useBatchPayment の Pimlico 経路の test が使う、境界 (smart account の client・bundler・EntryPoint) の偽物。
+// useBatchPayment の Pimlico 経路の test が使う、境界 (smart account の client・bundler の HTTP・EntryPoint) の偽物。
 // hook と lib/smartAccount/pimlicoSend.ts は実物のまま通す (第 10 回レビュー A-1)。
 //
 // 「世界」(bundler の mempool・EntryPoint の nonce・receipt) と「client」を分けてある。
 // 世界はページの読み直しをまたいで残るもの、client は hook を mount するたびに作り直すものを表す。
 //
-//   - EntryPoint: 同じ (key, seq) の op は 1 本しか mine できない。使われた nonce の op は AA25 で断る。
+//   - EntryPoint: 同じ (key, seq) の op は 1 本しか mine できない。使われた nonce の op は AA25 (-32500) で断る。
 //   - bundler: 同じ op の 2 回目は「Already known」、同じ nonce の別の op は「Replacement underpriced」で断る
-//     (どちらも JSON-RPC の error)。
+//     (どちらも -32602・HTTP 200)。
 //   - mine() を呼ぶまで receipt は無い。
+//
+// eth_sendUserOperation は HTTP の層で偽物にする: hook (pimlicoSend.ts の broadcastPimlicoUserOp) は client の
+// transport の URL へ、viem の http transport で送り、HTTP の status を見て失敗を分ける。fakePimlicoClients は global の
+// fetch を「FAKE_BUNDLER_URL だけ横取りし、ほかは元の fetch へ渡す」形に差し替える。test は `bundlerSend` の
+// mockImplementationOnce で答え方 (HTTP の status・JSON-RPC の error・応答なし) を変える。
 //
 // 分ける前からある test は `sendUserOperation` の mock 1 つで「準備・署名・送信」を表していた。
 // legacySendUserOperation に渡すと、その mock を **準備の段で 1 回** 呼ぶ (calls を渡す・reject は準備の失敗として
 // そのまま hook に届く) ので、期待値 (呼ばれた回数・calls の中身・error の object) を変えずに使える。
 // mock が返した hash は「bundler が返す hash」になる (hook が計算する hash とは違うので、hook は返った hash を正とする)。
 import { vi, type Mock } from 'vitest';
-import {
-  concat,
-  RpcRequestError,
-  TimeoutError,
-  type Address,
-  type Hex,
-} from 'viem';
+import { concat, TimeoutError, type Address, type Hex } from 'viem';
 import {
   entryPoint08Address,
   formatUserOperation,
@@ -37,6 +36,7 @@ import {
 import type { SmartAccountBundle } from '@/lib/smartAccount/simpleAccount';
 
 export const FAKE_SENDER: Address = '0x9999999999999999999999999999999999999999';
+export const FAKE_BUNDLER_URL = 'https://bundler.fake/rpc';
 
 export type FakeReceipt = {
   success: boolean;
@@ -47,21 +47,35 @@ export type FakeReceipt = {
 type SignedOp = Record<string, unknown>;
 type Call = { to: Address; data: Hex; value?: bigint };
 
-/** bundler が JSON-RPC の error で答えたときに viem の http transport が投げる error。 */
-export function bundlerJsonRpcError(code: number, message: string): RpcRequestError {
-  return new RpcRequestError({
-    body: { method: 'eth_sendUserOperation' },
-    error: { code, message },
-    url: 'https://bundler.test',
-  });
+/** bundler が JSON-RPC の error で断った (world.accept が投げる)。 */
+export class FakeBundlerRejection extends Error {
+  readonly code: number;
+  constructor(code: number, message: string) {
+    super(message);
+    this.code = code;
+  }
 }
 
-/** 応答が返らなかったとき (http の timeout) に viem が投げる error。 */
+/** eth_sendUserOperation への HTTP の答え。bundlerSend が throw すると応答が返らない (通信断)。 */
+export type BundlerHttpReply =
+  // HTTP 200 + result (受理)。
+  | { result: Hex }
+  // JSON-RPC の error (status の既定は 200)。
+  | { error: { code: number; message: string }; status?: number }
+  // 本文が JSON-RPC でない HTTP の失敗。
+  | { status: number; body: string };
+
+/** 応答が返らなかったとき (http の timeout) に viem が投げる error (MAv2 の facade の test が使う)。 */
 export function bundlerTimeout(): TimeoutError {
   return new TimeoutError({
     body: { method: 'eth_sendUserOperation' },
     url: 'https://bundler.test',
   });
+}
+
+/** 届いた (かもしれない) 後に応答が失われた: fetch が投げる (viem は HttpRequestError にする = 応答不明)。 */
+export function lostResponse(): TypeError {
+  return new TypeError('Failed to fetch');
 }
 
 export function createFakeBundlerWorld(options?: { chainId?: number }) {
@@ -90,16 +104,16 @@ export function createFakeBundlerWorld(options?: { chainId?: number }) {
     });
   }
 
-  /** bundler が op を受け取る (受理なら hash を返し、断るなら JSON-RPC の error を投げる)。 */
+  /** bundler が op を受け取る (受理なら hash を返し、断るなら FakeBundlerRejection を投げる)。 */
   function accept(op: SignedOp): Hex {
     const nonce = BigInt(op.nonce as Hex);
     const { key, seq } = splitUserOpNonce(nonce);
     if (seqOf(key) > seq) {
-      throw bundlerJsonRpcError(-32500, 'AA25 invalid account nonce');
+      throw new FakeBundlerRejection(-32500, 'AA25 invalid account nonce');
     }
     const existing = mempool.get(nonce);
     if (existing) {
-      throw bundlerJsonRpcError(
+      throw new FakeBundlerRejection(
         -32602,
         JSON.stringify(existing.op) === JSON.stringify(op)
           ? 'Already known'
@@ -109,6 +123,16 @@ export function createFakeBundlerWorld(options?: { chainId?: number }) {
     const hash = legacyHashes.get(nonce) ?? hashOf(op);
     mempool.set(nonce, { op, hash });
     return hash;
+  }
+
+  /** accept の結果を HTTP の答え (HTTP 200) にする。 */
+  function respond(op: SignedOp): BundlerHttpReply {
+    try {
+      return { result: accept(op) };
+    } catch (error) {
+      if (!(error instanceof FakeBundlerRejection)) throw error;
+      return { error: { code: error.code, message: error.message } };
+    }
   }
 
   /** mempool の op を 1 本 mine する (hash 省略時は mempool に 1 本だけあること)。 */
@@ -139,11 +163,22 @@ export function createFakeBundlerWorld(options?: { chainId?: number }) {
     return minedHash;
   }
 
+  /** 同じ (key, seq) を **別の op** が使った (MetaMask の key 0 を共有する別の支払い等)。
+   * その nonce の op は mempool から消え、receipt はこの支払いの hash には付かない。 */
+  function consumeNonceByOtherOp(nonce: bigint): void {
+    const { key, seq } = splitUserOpNonce(nonce);
+    if (seqOf(key) !== seq) throw new Error('fake EntryPoint: この nonce はもう使われた');
+    mempool.delete(nonce);
+    nextSeq.set(key, seq + 1n);
+  }
+
   return {
     chainId,
     entryPoint,
     accept,
+    respond,
     mine,
+    consumeNonceByOtherOp,
     hashOf,
     mined,
     mempoolHashes: () => [...mempool.values()].map((v) => v.hash),
@@ -165,14 +200,46 @@ export type FakeBundlerWorld = ReturnType<typeof createFakeBundlerWorld>;
 
 type LegacySendUserOperation = (parameters: { calls: Call[] }) => Promise<Hex>;
 type GasPriceTier = { maxFeePerGas: bigint; maxPriorityFeePerGas: bigint };
+type BundlerSend = (request: { params: [SignedOp, Address] }) => Promise<BundlerHttpReply>;
+
+function requestUrl(input: RequestInfo | URL): string {
+  if (typeof input === 'string') return input;
+  return input instanceof URL ? input.href : input.url;
+}
+
+// global の fetch を「FAKE_BUNDLER_URL だけ bundlerSend へ、ほかは差し替える前の fetch へ」にする。
+// test が先に fetch を差し替えていても (payment log の spy 等)、それを包むので log の呼び出しはその spy に届く。
+function routeBundlerFetch(bundlerSend: Mock<BundlerSend>): void {
+  const previousFetch = globalThis.fetch;
+  vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (requestUrl(input) !== FAKE_BUNDLER_URL) return previousFetch(input, init);
+    const body = JSON.parse(String(init?.body)) as {
+      id: number;
+      method: string;
+      params: [SignedOp, Address];
+    };
+    if (body.method !== 'eth_sendUserOperation') {
+      throw new Error(`fake bundler: 想定外の method ${body.method}`);
+    }
+    const reply = await bundlerSend({ params: body.params });
+    if ('body' in reply) return new Response(reply.body, { status: reply.status });
+    const payload = 'result' in reply ? { result: reply.result } : { error: reply.error };
+    return new Response(JSON.stringify({ jsonrpc: '2.0', id: body.id, ...payload }), {
+      status: ('status' in reply ? reply.status : undefined) ?? 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  });
+}
 
 /**
  * useSmartAccount の data (Pimlico の bundle) の偽物。smartAccountClient は permissionless の
- * createSmartAccountClient と同じ「分けられる」形 (account・prepareUserOperation・request)。
+ * createSmartAccountClient と同じ「分けられる」形 (account・prepareUserOperation・bundler の http transport)。
  */
 export function fakePimlicoClients(args: {
   world: FakeBundlerWorld;
   paymasterMode?: 'sponsorship' | 'erc20';
+  // account の address (= 署名済みの op の sender)。既定は FAKE_SENDER。
+  sender?: Address;
   legacySendUserOperation?: LegacySendUserOperation;
   waitForUserOperationReceipt?: (parameters: { hash: Hex }) => Promise<unknown>;
   getUserOperationGasPrice?: () => Promise<{
@@ -182,6 +249,7 @@ export function fakePimlicoClients(args: {
   }>;
 }) {
   const { world, legacySendUserOperation } = args;
+  const sender = args.sender ?? FAKE_SENDER;
   const tier: GasPriceTier = { maxFeePerGas: 50n * 10n ** 9n, maxPriorityFeePerGas: 1n };
 
   const getNonce: Mock<() => Promise<bigint>> = vi.fn(async () => world.reserveNonce());
@@ -196,7 +264,7 @@ export function fakePimlicoClients(args: {
       world.rememberLegacyHash(nonce, await legacySendUserOperation({ calls: [...calls] }));
     }
     return {
-      sender: FAKE_SENDER,
+      sender,
       nonce,
       callData: concat(calls.map((call) => call.data)),
       callGasLimit: 100_000n,
@@ -213,14 +281,10 @@ export function fakePimlicoClients(args: {
     async () => `0x${'5a'.repeat(65)}` as Hex,
   );
 
-  // bundler への eth_sendUserOperation。既定は world.accept (受理 or JSON-RPC の error)。
-  // test は mockImplementationOnce で「受理したが応答が返らない」「届かなかった」を作る。
-  const request: Mock<
-    (
-      request: { method: string; params: [SignedOp, Address] },
-      options?: { retryCount?: number },
-    ) => Promise<Hex>
-  > = vi.fn(async ({ params }) => world.accept(params[0]));
+  // bundler の HTTP の eth_sendUserOperation。既定は world.respond (受理 or HTTP 200 の JSON-RPC の error)。
+  // test は mockImplementationOnce で「受理したが応答が返らない」「届かなかった」「HTTP 500」を作る。
+  const bundlerSend: Mock<BundlerSend> = vi.fn(async ({ params }) => world.respond(params[0]));
+  routeBundlerFetch(bundlerSend);
 
   // EntryPoint の getNonce(sender, key)。
   const readContract: Mock<
@@ -253,7 +317,7 @@ export function fakePimlicoClients(args: {
       entryPointVersion: '0.8' as const,
       smartAccountClient: {
         account: {
-          address: FAKE_SENDER,
+          address: sender,
           client: { readContract },
           entryPoint: { address: world.entryPoint, version: '0.8' as const },
           getNonce,
@@ -261,7 +325,8 @@ export function fakePimlicoClients(args: {
         },
         chain: { id: world.chainId },
         prepareUserOperation,
-        request,
+        // viem の client.transport (http transport の設定 + 値) と同じ形。
+        transport: { type: 'http', url: FAKE_BUNDLER_URL, timeout: 10_000 },
       },
       pimlicoClient: {
         waitForUserOperationReceipt,
@@ -276,7 +341,7 @@ export function fakePimlicoClients(args: {
     getNonce,
     prepareUserOperation,
     signUserOperation,
-    request,
+    bundlerSend,
     readContract,
     getUserOperationReceipt,
     waitForUserOperationReceipt,

@@ -15,7 +15,15 @@
 // 対象は permissionless の createSmartAccountClient で作った client (simple 7702・MetaMask)。
 // MAv2 (lib/smartAccount/mav2.ts) は aa-sdk を包んだ facade で sendUserOperation しか無く、ここを通らない。
 
-import type { Address, BaseError, Client, Hex } from 'viem';
+import {
+  createClient,
+  http,
+  type Address,
+  type BaseError,
+  type Client,
+  type Hex,
+  type HttpTransportConfig,
+} from 'viem';
 import {
   formatUserOperationRequest,
   getUserOperationError,
@@ -49,10 +57,13 @@ export type SignedSendClient = {
     calls: readonly PimlicoCall[];
     nonce: bigint;
   }) => Promise<UserOperation>;
-  request: (
-    args: { method: 'eth_sendUserOperation'; params: [PimlicoSignedUserOp, Address] },
-    options: { retryCount: number },
-  ) => Promise<Hex>;
+  // bundler の http transport の設定 (viem の client.transport = 設定 + 値)。送信はこの URL へ、HTTP の status が
+  // 見える形で行う (broadcastPimlicoUserOp)。
+  transport: {
+    url: string;
+    timeout?: number;
+    fetchOptions?: HttpTransportConfig['fetchOptions'];
+  };
 };
 
 /**
@@ -63,12 +74,12 @@ export function asSignedSendClient(client: unknown): SignedSendClient | null {
   if (client === null || typeof client !== 'object') return null;
   const candidate = client as {
     prepareUserOperation?: unknown;
-    request?: unknown;
+    transport?: { url?: unknown } | null;
     account?: { signUserOperation?: unknown; getNonce?: unknown } | null;
   };
   if (
     typeof candidate.prepareUserOperation !== 'function' ||
-    typeof candidate.request !== 'function' ||
+    typeof candidate.transport?.url !== 'string' ||
     typeof candidate.account?.signUserOperation !== 'function' ||
     typeof candidate.account.getNonce !== 'function'
   ) {
@@ -141,37 +152,81 @@ export type PreparedPimlicoUserOp = Awaited<
   ReturnType<typeof prepareAndSignPimlicoUserOp>
 >;
 
+export type BroadcastFailureKind =
+  // HTTP 2xx の応答で、bundler が ERC-4337 の検証の拒否 (下の allowlist の code) を返した = この op を受け付けていない。
+  | 'validation-rejected'
+  // bundler が JSON-RPC の error で「その op はもう持っている」と答えた (mempool にある)。
+  | 'already-known'
+  // それ以外 (timeout・通信断・HTTP の失敗・HTTP 5xx に載った JSON-RPC の error・allowlist に無い code・
+  // 判別できないもの)。届いたかどうか分からない。
+  | 'unknown';
+
+export type BroadcastOutcome =
+  | { kind: 'accepted'; userOpHash: Hex }
+  | { kind: BroadcastFailureKind; error: unknown };
+
 /**
  * 署名済みの op を **そのまま** 送る (raw の eth_sendUserOperation・再送なし)。準備をやり直さないので、
  * 保存した op と 1 字も違わないものが届く。同じ op の送り直しにも使う (EntryPoint の nonce で二重に実行されない)。
+ *
+ * 失敗は投げずに分類して返す。分類には HTTP の status が要るので、client の bundler の transport と同じ URL・timeout で、
+ * この 1 回の送信のためだけの http transport を作り、その応答の status を受け取る。理由: viem 2.56 の http の実装
+ * (node_modules/viem/utils/rpc/http.ts の `if (!response.ok)` の枝) は、HTTP 5xx でも本文が JSON-RPC の error なら
+ * 本文をそのまま返し、transport (node_modules/viem/clients/transports/http.ts) はそれを HTTP 200 のときと同じ
+ * RpcRequestError にする。RpcRequestError は status を持たないので、error の object からは HTTP 200 と 5xx を
+ * 見分けられない (proxy や上流の障害の 5xx に、受理済みの op の error が載ることがある)。
+ * error の包み方は client.request と同じ (buildRequest を通る) なので、断られたときの error は viem の
+ * sendUserOperation が投げる形 (toUserOperationRejection) にそのまま包める。
  */
 export async function broadcastPimlicoUserOp(args: {
   client: SignedSendClient;
   signedUserOp: PimlicoSignedUserOp;
   entryPoint: Address;
-}): Promise<Hex> {
-  return args.client.request(
-    {
-      method: 'eth_sendUserOperation',
-      params: [args.signedUserOp, args.entryPoint],
+}): Promise<BroadcastOutcome> {
+  const { url, timeout, fetchOptions } = args.client.transport;
+  let httpStatus: number | undefined;
+  const sender = createClient({
+    transport: http(url, {
+      retryCount: 0,
+      timeout,
+      fetchOptions,
+      onFetchResponse: (response) => {
+        httpStatus = response.status;
+      },
+    }),
+  });
+  const request = sender.request as unknown as (
+    parameters: {
+      method: 'eth_sendUserOperation';
+      params: [PimlicoSignedUserOp, Address];
     },
-    { retryCount: 0 },
-  );
+    options: { retryCount: number },
+  ) => Promise<Hex>;
+  try {
+    const userOpHash = await request(
+      {
+        method: 'eth_sendUserOperation',
+        params: [args.signedUserOp, args.entryPoint],
+      },
+      { retryCount: 0 },
+    );
+    return { kind: 'accepted', userOpHash };
+  } catch (error) {
+    return { kind: classifyBroadcastError(error, httpStatus), error };
+  }
 }
 
-export type BroadcastFailureKind =
-  // bundler が JSON-RPC の error で答えた (この op は受け付けなかった)。
-  | 'rejected'
-  // bundler が JSON-RPC の error で「その op はもう持っている」と答えた (mempool にある)。
-  | 'already-known'
-  // それ以外 (timeout・通信断・HTTP の失敗・判別できないもの)。届いたかどうか分からない。
-  | 'unknown';
-
-type RpcRequestErrorLike = { name: 'RpcRequestError'; details?: unknown; message?: unknown };
+type RpcRequestErrorLike = {
+  name: 'RpcRequestError';
+  code?: unknown;
+  details?: unknown;
+  message?: unknown;
+};
 
 // viem の http transport は、応答の本文に JSON-RPC の error があるときだけ RpcRequestError を投げる
 // (node_modules/viem/clients/transports/http.ts)。client はそれを code ごとの RpcError で包むので cause をたどる。
-// timeout (TimeoutError)・HTTP の失敗 (HttpRequestError)・fetch の失敗には RpcRequestError が無い。
+// timeout (TimeoutError)・本文が JSON-RPC の error でない HTTP の失敗 (HttpRequestError)・fetch の失敗には
+// RpcRequestError が無い。
 function findRpcRequestError(error: unknown): RpcRequestErrorLike | null {
   let current: unknown = error;
   while (current !== null && typeof current === 'object') {
@@ -185,16 +240,40 @@ function findRpcRequestError(error: unknown): RpcRequestErrorLike | null {
 
 const ALREADY_KNOWN_RE = /already known|already in (?:the )?mempool/i;
 
+// 「bundler がこの op を受け付けていない」と言える JSON-RPC の error の code (allowlist)。
+// 根拠: ERC-7769 (ERC-4337 の JSON-RPC の API) が eth_sendUserOperation の検証の失敗に割り当てる code で、
+// -32602 = UserOperation の形・値が不正、-32500 = EntryPoint の検証 (account の validateUserOp・作成) で拒否、
+// -32501 = paymaster の validatePaymasterUserOp で拒否、-32502 = opcode の規則に違反、-32503 = 有効期間の外、
+// -32504 = paymaster (または aggregator) が throttle / ban されている、-32505 = paymaster の stake が足りない、
+// -32506 = 対応していない aggregator、-32507 = 署名の検証に失敗。どれも mempool に入れる前の検証で返す code。
+// viem 2.56 も同じ code を bundler の error として持ち、cause の code から UserOperationRejectedByEntryPointError 等へ
+// 包む (node_modules/viem/account-abstraction/utils/errors/getBundlerError.ts の err.walk と code の比較)。
+// permissionless 0.2.57 はこの送信の error を分類しない (raw の request をそのまま返す)。
+// ここに無い code (-32603 internal・-32005 rate limit・-32601・viem が持つ -32508 / -32521 等) は、受理の後に
+// 失敗した可能性を否定できないので 'unknown' に倒す。
+const BUNDLER_VALIDATION_REJECTION_CODES: ReadonlySet<number> = new Set([
+  -32500, -32501, -32502, -32503, -32504, -32505, -32506, -32507, -32602,
+]);
+
 /**
- * 送信の失敗を分ける。「受理していない」と言えるのは bundler が JSON-RPC の error で答えたときだけで、
- * 判別できないものは必ず 'unknown' に倒す (取り違えたときの被害が非対称: unknown を rejected と読むと
- * 取り込まれうる op の上に通常の再試行が開く)。
+ * 送信の失敗を分ける。「受け付けていない」と言えるのは、HTTP が 2xx で、JSON-RPC の error の code が
+ * allowlist にあるときだけ。判別できないものは必ず 'unknown' に倒す (取り違えたときの被害が非対称:
+ * unknown を「受け付けていない」と読むと、取り込まれうる op の上に通常決済や別の支払いが開く)。
+ * httpStatus は応答が届いたときの status (届かなかったときは undefined)。
  */
-export function classifyBroadcastError(error: unknown): BroadcastFailureKind {
+export function classifyBroadcastError(
+  error: unknown,
+  httpStatus: number | undefined,
+): BroadcastFailureKind {
   const rpc = findRpcRequestError(error);
   if (!rpc) return 'unknown';
   const text = `${String(rpc.details ?? '')} ${String(rpc.message ?? '')}`;
-  return ALREADY_KNOWN_RE.test(text) ? 'already-known' : 'rejected';
+  // bundler がこの op を持っている: 受理と同じく receipt を待つ (閉じない側なので status は問わない)。
+  if (ALREADY_KNOWN_RE.test(text)) return 'already-known';
+  if (httpStatus === undefined || httpStatus < 200 || httpStatus > 299) return 'unknown';
+  return typeof rpc.code === 'number' && BUNDLER_VALIDATION_REJECTION_CODES.has(rpc.code)
+    ? 'validation-rejected'
+    : 'unknown';
 }
 
 /**

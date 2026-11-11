@@ -1,10 +1,16 @@
 // 第 10 回レビュー A-1: Pimlico の送信を「nonce → 準備 → 署名 → (保存) → 送信」に分ける primitive
-// (lib/smartAccount/pimlicoSend.ts) を、builder と SDK (viem・permissionless・delegation-toolkit) は実物のまま、
-// 通信 (fetch) だけを差し替えて確かめる。
+// (lib/smartAccount/pimlicoSend.ts) を、builder と SDK (viem・permissionless・delegation-toolkit) は実物のまま確かめる。
+// 差し替えているもの (実物でないもの) は 3 つ:
+//   - 通信: global の fetch (bundler・chain の RPC・ウォレットの署名に、下の偽物が答える)。
+//   - @/lib/pimlico の 4 つの helper: pimlicoUrl (test の URL)・createPimlico (URL だけ test の bundler にした
+//     実物の permissionless の Pimlico client)・assertGaslessSupported と pimlicoPaymasterContext (test 環境は testnet で
+//     USDC の erc20 を sponsorship に倒すので、deployment の paymasterMode をそのまま使い、本番の erc20 の経路を通す)。
+//   - 時刻: Date.now を固定 (nonce の key が Date.now から作られるので、分ける前と後で同じ key にする)。
 //
 //   (1) 分ける前 (smartAccountClient.sendUserOperation) と分けた後で、bundler に届く eth_sendUserOperation の
-//       params が同じ (simple 7702・MetaMask × sponsorship・erc20 paymaster)
-//   (2) 送信は 1 回だけ (再送なし)。失敗の分類: JSON-RPC の error だけが「断られた」、それ以外は「分からない」
+//       params が同じ (simple 7702・MetaMask × sponsorship (JPYC)・erc20 paymaster (USDC・approve の要る / 要らない))
+//   (2) 送信は 1 回だけ (再送なし)。失敗の分類: 「受け付けていない」は HTTP 2xx + ERC-7769 の検証の拒否の code だけ、
+//       それ以外 (HTTP 5xx に載った JSON-RPC の error を含む) は「分からない」
 //   (3) 計算する hash が、本番の経路 (委任済みの simple 7702・EntryPoint 0.8) の実際の UserOperation の hash と合う
 //   (4) EntryPoint の getNonce で「nonce がもう使われたか」を読む・MAv2 の facade は分けられない client として扱う
 //
@@ -13,8 +19,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   createPublicClient,
   createWalletClient,
-  decodeFunctionData,
   encodeAbiParameters,
+  encodeFunctionData,
+  erc20Abi,
   http,
   maxUint256,
   toHex,
@@ -125,10 +132,12 @@ let delegatedImpl = SIMPLE_7702_IMPL;
 let entryPointSeq = 0n;
 // ウォレットに届いた署名の要求の数。
 let walletSignatures = 0;
-// eth_sendUserOperation への答え方。
+// token の allowance(owner, paymaster)。既定は足りている (erc20 paymaster の準備が approve を足さない)。
+let tokenAllowance = maxUint256;
+// eth_sendUserOperation への答え方。rpc-error の status は HTTP の status (既定 200)。
 type SendReply =
   | { kind: 'hash'; hash: Hex }
-  | { kind: 'rpc-error'; code: number; message: string }
+  | { kind: 'rpc-error'; code: number; message: string; status?: number }
   | { kind: 'http'; status: number }
   | { kind: 'network' }
   | { kind: 'hang' };
@@ -163,8 +172,8 @@ async function chainRpcResult(method: string, params: unknown[]): Promise<unknow
       const key = BigInt(`0x${data.slice(2 + 8 + 64)}`);
       return encodeAbiParameters([{ type: 'uint256' }], [joinUserOpNonce(key, entryPointSeq)]);
     }
-    // token の allowance(owner, paymaster): 足りている (approve を足さない)。
-    return encodeAbiParameters([{ type: 'uint256' }], [maxUint256]);
+    // token の allowance(owner, paymaster)。
+    return encodeAbiParameters([{ type: 'uint256' }], [tokenAllowance]);
   }
   throw new Error(`chain rpc: 想定外の method ${method}`);
 }
@@ -206,6 +215,7 @@ beforeEach(() => {
   delegatedImpl = SIMPLE_7702_IMPL;
   entryPointSeq = 0n;
   walletSignatures = 0;
+  tokenAllowance = maxUint256;
   GAS_PRICE_TIER = NORMAL_GAS_PRICE_TIER;
   sendReply = { kind: 'hash', hash: `0x${'ab'.repeat(32)}` };
   // nonce の key は Date.now() から作られる (viem の toSmartAccount)。分ける前と後で同じ key にする。
@@ -227,7 +237,10 @@ beforeEach(() => {
       if (body.method === 'eth_sendUserOperation') {
         if (sendReply.kind === 'hash') return reply({ result: sendReply.hash });
         if (sendReply.kind === 'rpc-error') {
-          return reply({ error: { code: sendReply.code, message: sendReply.message } });
+          return reply(
+            { error: { code: sendReply.code, message: sendReply.message } },
+            sendReply.status,
+          );
         }
         if (sendReply.kind === 'http') return new Response('bad gateway', { status: sendReply.status });
         if (sendReply.kind === 'network') throw new TypeError('Failed to fetch');
@@ -290,13 +303,17 @@ const builders: BuilderCase[] = [
   },
 ];
 
-const CALLS = [
-  {
-    to: JPYC,
-    // transfer(MERCHANT, 1000)
-    data: `0xa9059cbb${MERCHANT.slice(2).padStart(64, '0')}${(1000).toString(16).padStart(64, '0')}` as Hex,
-  },
-];
+function transferCall(token: Address, amount: bigint) {
+  return {
+    to: token,
+    data: encodeFunctionData({ abi: erc20Abi, functionName: 'transfer', args: [MERCHANT, amount] }),
+  };
+}
+
+// JPYC の支払い (1000 wei) と USDC の支払い (1 USDC)。erc20 paymaster の経路は USDC の calls で通す。
+const CALLS = [transferCall(JPYC, 1000n)];
+const USDC_CALLS = [transferCall(USDC_BASE, 1_000_000n)];
+const APPROVE_SELECTOR = '095ea7b3';
 
 function sentUserOps(): Array<{ op: Record<string, unknown>; entryPoint: Address }> {
   return rpcCalls
@@ -317,10 +334,13 @@ function splitClientOf(bundle: SmartAccountBundle): SignedSendClient {
   return client;
 }
 
-async function sendSplit(bundle: SmartAccountBundle) {
+async function sendSplit(
+  bundle: SmartAccountBundle,
+  calls: ReadonlyArray<{ to: Address; data: Hex }> = CALLS,
+) {
   const client = splitClientOf(bundle);
   const nonce = await reserveUserOpNonce(client);
-  const built = await prepareAndSignPimlicoUserOp({ client, calls: CALLS, nonce });
+  const built = await prepareAndSignPimlicoUserOp({ client, calls, nonce });
   const returned = await broadcastPimlicoUserOp({
     client,
     signedUserOp: built.signedUserOp,
@@ -335,14 +355,34 @@ describe.each(builders)('$name', ({ impl, entryPoint, build }) => {
   });
 
   it.each([
-    { label: 'Polygon の JPYC (sponsorship)', deployment: jpycPolygon, chain: polygon as Chain },
-    { label: 'Base の USDC (erc20 paymaster)', deployment: usdcBase, chain: base as Chain },
+    {
+      label: 'Polygon の JPYC (sponsorship)',
+      deployment: jpycPolygon,
+      chain: polygon as Chain,
+      calls: CALLS,
+      allowance: maxUint256,
+    },
+    {
+      label: 'Base の USDC (erc20 paymaster・allowance が足りている)',
+      deployment: usdcBase,
+      chain: base as Chain,
+      calls: USDC_CALLS,
+      allowance: maxUint256,
+    },
+    {
+      label: 'Base の USDC (erc20 paymaster・approve が要る)',
+      deployment: usdcBase,
+      chain: base as Chain,
+      calls: USDC_CALLS,
+      allowance: 0n,
+    },
   ])(
     '$label: 分ける前 (sendUserOperation) と分けた後で、bundler に届く eth_sendUserOperation の params が同じ',
-    async ({ deployment, chain }) => {
+    async ({ deployment, chain, calls, allowance }) => {
+      tokenAllowance = allowance;
       // 分ける前: viem の sendUserOperation (準備・署名・送信を 1 回で行う)。
       const before = await build(deployment, chain);
-      await before.smartAccountClient.sendUserOperation({ calls: CALLS });
+      await before.smartAccountClient.sendUserOperation({ calls });
       const beforeSent = sentUserOps();
       const beforeMethods = bundlerMethods();
       expect(beforeSent).toHaveLength(1);
@@ -350,7 +390,7 @@ describe.each(builders)('$name', ({ impl, entryPoint, build }) => {
       // 分けた後: 同じ条件で account と client を作り直す (nonce の key の採番を最初からにする)。
       rpcCalls = [];
       const after = await build(deployment, chain);
-      const { built, returned, nonce } = await sendSplit(after);
+      const { built, returned, nonce } = await sendSplit(after, calls);
       const afterSent = sentUserOps();
       expect(afterSent).toHaveLength(1);
 
@@ -358,8 +398,16 @@ describe.each(builders)('$name', ({ impl, entryPoint, build }) => {
       // bundler・paymaster への問い合わせの列も同じ (erc20 paymaster の独自の prepare と fee の見積もりを通る)。
       expect(bundlerMethods()).toEqual(beforeMethods);
       expect(bundlerMethods()).toContain('pimlico_getUserOperationGasPrice');
+      const callData = String(afterSent[0].op.callData).toLowerCase();
+      // 支払いの transfer が op に入っている。
+      expect(callData).toContain(calls[0].data.slice(2).toLowerCase());
       if (deployment.paymasterMode === 'erc20') {
         expect(bundlerMethods()).toContain('pimlico_getTokenQuotes');
+        // allowance が足りないときだけ、permissionless の準備が paymaster への approve を足す (分けた後も同じ)。
+        const approvesPaymaster =
+          callData.includes(APPROVE_SELECTOR) &&
+          callData.includes(PAYMASTER.slice(2).toLowerCase());
+        expect(approvesPaymaster).toBe(allowance === 0n);
       }
 
       // 保存する op = 送った op。送り先の EntryPoint は account のもの。nonce は先に決めた値。
@@ -367,9 +415,14 @@ describe.each(builders)('$name', ({ impl, entryPoint, build }) => {
       expect(afterSent[0].entryPoint).toBe(entryPoint);
       expect(built.entryPoint).toBe(entryPoint);
       expect(BigInt(afterSent[0].op.nonce as Hex)).toBe(nonce);
-      expect(returned).toBe(`0x${'ab'.repeat(32)}`);
+      expect(returned).toEqual({ kind: 'accepted', userOpHash: `0x${'ab'.repeat(32)}` });
       // 送った op の署名は owner の鍵で実際に作られている (stub の署名ではない)。
       expect(afterSent[0].op.signature).toMatch(/^0x[0-9a-f]{130}$/);
+      // 送り先は client の bundler の transport の URL (送信のためだけの transport も同じ URL へ送る)。
+      expect(splitClientOf(after).transport.url).toBe(BUNDLER_URL);
+      expect(
+        rpcCalls.filter((c) => c.method === 'eth_sendUserOperation').map((c) => c.url),
+      ).toEqual([BUNDLER_URL]);
     },
   );
 
@@ -435,8 +488,8 @@ describe.each(builders)('$name', ({ impl, entryPoint, build }) => {
   });
 });
 
-describe('送信は 1 回だけ・失敗の分類 (実物の http transport)', () => {
-  async function broadcastAndCatch(reply: SendReply) {
+describe('送信は 1 回だけ・失敗の分類 (実物の http transport・HTTP の status を見る)', () => {
+  async function prepareSigned() {
     const bundle = await buildSimpleSmartAccountClient({
       ...clientsFor(polygon),
       chainId: polygon.id,
@@ -445,73 +498,97 @@ describe('送信は 1 回だけ・失敗の分類 (実物の http transport)', (
     const client = splitClientOf(bundle);
     const nonce = await reserveUserOpNonce(client);
     const built = await prepareAndSignPimlicoUserOp({ client, calls: CALLS, nonce });
+    return { client, built };
+  }
+
+  async function broadcastWith(reply: SendReply) {
+    const { client, built } = await prepareSigned();
     sendReply = reply;
     rpcCalls = [];
-    const error = await broadcastPimlicoUserOp({
+    const outcome = await broadcastPimlicoUserOp({
       client,
       signedUserOp: built.signedUserOp,
       entryPoint: built.entryPoint,
-    }).then(
-      () => null,
-      (e: unknown) => e,
-    );
-    return { error, built };
+    });
+    return { outcome, built };
   }
 
-  it('bundler が JSON-RPC の error で断った → rejected。error は viem の sendUserOperation と同じ形に包める', async () => {
-    const { error, built } = await broadcastAndCatch({
+  // ERC-7769 が eth_sendUserOperation の検証の失敗に割り当てる code (lib/smartAccount/pimlicoSend.ts の allowlist)。
+  it.each([
+    { code: -32602, message: 'invalid UserOperation field' },
+    { code: -32500, message: "AA21 didn't pay prefund" },
+    { code: -32501, message: 'AA33 reverted (or OOG)' },
+    { code: -32502, message: 'banned opcode' },
+    { code: -32503, message: 'AA22 expired or not due' },
+    { code: -32504, message: 'paymaster throttled' },
+    { code: -32505, message: 'paymaster stake too low' },
+    { code: -32506, message: 'unsupported aggregator' },
+    { code: -32507, message: 'AA24 signature error' },
+  ])('HTTP 200 + 検証の拒否 ($code) → validation-rejected・送信は 1 回だけ', async (reply) => {
+    const { outcome } = await broadcastWith({ kind: 'rpc-error', ...reply });
+    expect(outcome.kind).toBe('validation-rejected');
+    expect(sentUserOps()).toHaveLength(1);
+  });
+
+  it('validation-rejected の error は viem の sendUserOperation と同じ形に包める', async () => {
+    const { outcome, built } = await broadcastWith({
       kind: 'rpc-error',
       code: -32500,
       message: "AA21 didn't pay prefund",
     });
-    expect(classifyBroadcastError(error)).toBe('rejected');
-    expect(sentUserOps()).toHaveLength(1);
-
-    const wrapped = toUserOperationRejection(error, { signed: built.signed, calls: CALLS });
+    if (outcome.kind === 'accepted') throw new Error('断られるはず');
+    const wrapped = toUserOperationRejection(outcome.error, { signed: built.signed, calls: CALLS });
     expect(wrapped.name).toBe('UserOperationExecutionError');
     expect(wrapped.message).toContain('prefund');
   });
 
   it.each([
-    { code: -32005, message: 'rate limit exceeded' },
-    { code: -32603, message: 'internal error' },
-    { code: -32602, message: 'maxFeePerGas must be at least 1000 (current maxFeePerGas: 1)' },
-  ])('一時的な JSON-RPC の error ($code) も rejected (呼び出し側は記録を消さずに同じ nonce で作り直す)', async (reply) => {
-    const { error } = await broadcastAndCatch({ kind: 'rpc-error', ...reply });
-    expect(classifyBroadcastError(error)).toBe('rejected');
+    // Codex の再現 (MUST 1): bundler が受理した後に proxy / 内部で失敗し、HTTP 500 に JSON-RPC の error が載る。
+    { label: 'HTTP 500 + -32603 internal', code: -32603, status: 500 },
+    // allowlist の code でも、HTTP 5xx は「受け付けていない」と言えない。
+    { label: 'HTTP 500 + -32500', code: -32500, status: 500 },
+    { label: 'HTTP 502 + -32602', code: -32602, status: 502 },
+    { label: 'HTTP 429 + -32005 rate limit', code: -32005, status: 429 },
+    // HTTP 200 でも allowlist に無い code は分からない。
+    { label: 'HTTP 200 + -32603 internal', code: -32603, status: 200 },
+    { label: 'HTTP 200 + -32005 rate limit', code: -32005, status: 200 },
+    { label: 'HTTP 200 + -32601 method not found', code: -32601, status: 200 },
+    { label: 'HTTP 200 + -32508 (viem は持つが allowlist の外)', code: -32508, status: 200 },
+    { label: 'HTTP 200 + -32521 execution reverted', code: -32521, status: 200 },
+  ])('$label → unknown・送信は 1 回だけ', async ({ code, status }) => {
+    const { outcome } = await broadcastWith({
+      kind: 'rpc-error',
+      code,
+      message: 'failed',
+      status,
+    });
+    expect(outcome.kind).toBe('unknown');
     expect(sentUserOps()).toHaveLength(1);
   });
 
   it('「Already known」の JSON-RPC の error → already-known (bundler がその op を持っている)', async () => {
-    const { error } = await broadcastAndCatch({
+    const { outcome } = await broadcastWith({
       kind: 'rpc-error',
       code: -32602,
       message: 'Already known',
     });
-    expect(classifyBroadcastError(error)).toBe('already-known');
+    expect(outcome.kind).toBe('already-known');
   });
 
-  it('HTTP の失敗 (502) → unknown。viem の既定の再試行 (3 回) をせず、送信は 1 回だけ', async () => {
-    const { error } = await broadcastAndCatch({ kind: 'http', status: 502 });
-    expect(classifyBroadcastError(error)).toBe('unknown');
+  it('HTTP の失敗 (502・本文が JSON-RPC でない) → unknown。viem の既定の再試行 (3 回) をせず、送信は 1 回だけ', async () => {
+    const { outcome } = await broadcastWith({ kind: 'http', status: 502 });
+    expect(outcome.kind).toBe('unknown');
     expect(sentUserOps()).toHaveLength(1);
   });
 
   it('通信断 (fetch の失敗) → unknown・送信は 1 回だけ', async () => {
-    const { error } = await broadcastAndCatch({ kind: 'network' });
-    expect(classifyBroadcastError(error)).toBe('unknown');
+    const { outcome } = await broadcastWith({ kind: 'network' });
+    expect(outcome.kind).toBe('unknown');
     expect(sentUserOps()).toHaveLength(1);
   });
 
   it('応答が返らない (http の timeout) → unknown・送信は 1 回だけ (A-1 の失敗シナリオ)', async () => {
-    const bundle = await buildSimpleSmartAccountClient({
-      ...clientsFor(polygon),
-      chainId: polygon.id,
-      deployment: jpycPolygon,
-    });
-    const client = splitClientOf(bundle);
-    const nonce = await reserveUserOpNonce(client);
-    const built = await prepareAndSignPimlicoUserOp({ client, calls: CALLS, nonce });
+    const { client, built } = await prepareSigned();
     sendReply = { kind: 'hang' };
     rpcCalls = [];
 
@@ -520,24 +597,22 @@ describe('送信は 1 回だけ・失敗の分類 (実物の http transport)', (
       client,
       signedUserOp: built.signedUserOp,
       entryPoint: built.entryPoint,
-    }).then(
-      () => null,
-      (e: unknown) => e,
-    );
-    // viem の http transport の既定の timeout は 10 秒。
+    });
+    // viem の http transport の既定の timeout は 10 秒 (client の transport の timeout をそのまま使う)。
     await vi.advanceTimersByTimeAsync(10_001);
-    const error = await pending;
+    const outcome = await pending;
 
-    expect((error as Error).name).toBe('TimeoutError');
-    expect(classifyBroadcastError(error)).toBe('unknown');
+    expect(outcome.kind).toBe('unknown');
+    if (outcome.kind === 'accepted') throw new Error('timeout のはず');
+    expect((outcome.error as Error).name).toBe('TimeoutError');
     expect(sentUserOps()).toHaveLength(1);
   });
 
-  it('JSON-RPC の error を持たない error は、何であっても unknown (受理していないと読まない)', () => {
-    expect(classifyBroadcastError(new Error('AA21 prefund'))).toBe('unknown');
-    expect(classifyBroadcastError(new Error('Already known'))).toBe('unknown');
-    expect(classifyBroadcastError(undefined)).toBe('unknown');
-    expect(classifyBroadcastError('rejected')).toBe('unknown');
+  it('JSON-RPC の error を持たない error は、HTTP の status に関わらず unknown (受け付けていないと読まない)', () => {
+    expect(classifyBroadcastError(new Error('AA21 prefund'), 200)).toBe('unknown');
+    expect(classifyBroadcastError(new Error('Already known'), 200)).toBe('unknown');
+    expect(classifyBroadcastError(undefined, 200)).toBe('unknown');
+    expect(classifyBroadcastError('rejected', undefined)).toBe('unknown');
   });
 });
 
@@ -581,7 +656,7 @@ describe('計算する hash (本番の経路の実際のベクター)', () => {
       },
       chain: { id: base.id },
       prepareUserOperation,
-      request: vi.fn(),
+      transport: { url: BUNDLER_URL },
     } as unknown as SignedSendClient;
 
     const built = await prepareAndSignPimlicoUserOp({
@@ -619,6 +694,14 @@ describe('分けられない client・小さな部品', () => {
   it('MAv2 の facade (sendUserOperation だけ) は分けられない client = null', () => {
     const facade = { sendUserOperation: async () => '0x' as Hex };
     expect(asSignedSendClient(facade)).toBeNull();
+    // bundler の transport の URL が無い client も分けない (送信の HTTP の status を見られない)。
+    expect(
+      asSignedSendClient({
+        prepareUserOperation: vi.fn(),
+        transport: {},
+        account: { signUserOperation: vi.fn(), getNonce: vi.fn() },
+      }),
+    ).toBeNull();
     expect(asSignedSendClient(null)).toBeNull();
     expect(asSignedSendClient(undefined)).toBeNull();
   });
@@ -659,24 +742,5 @@ describe('分けられない client・小さな部品', () => {
     await expect(findUserOperationReceipt(bundler, ['0x01'])).rejects.toThrow(
       'HTTP request failed',
     );
-  });
-
-  it('送った calls は transfer のまま (test の入力の確認)', () => {
-    const decoded = decodeFunctionData({
-      abi: [
-        {
-          type: 'function',
-          name: 'transfer',
-          stateMutability: 'nonpayable',
-          inputs: [
-            { name: 'to', type: 'address' },
-            { name: 'amount', type: 'uint256' },
-          ],
-          outputs: [{ type: 'bool' }],
-        },
-      ],
-      data: CALLS[0].data,
-    });
-    expect(decoded.args).toEqual([MERCHANT, 1000n]);
   });
 });

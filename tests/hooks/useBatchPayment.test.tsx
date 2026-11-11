@@ -1041,7 +1041,10 @@ describe('useBatchPayment', () => {
       getItem.mockRestore();
     });
 
-    it('7 日を超えた record は無視して破棄する (恒久ロックアウト回避)', async () => {
+    // 送信の控え (send) の無い record = この欄を足す前の記録・MAv2 の facade で送った記録 (nonce を読めず照合できない)。
+    // 控えのある record は期限を過ぎても黙って消さず、照合してから閉じる (第 10 回レビュー A-1 の c4・
+    // tests/hooks/useBatchPayment.pimlicoSend.test.tsx)。
+    it('送信の控えの無い 7 日を超えた record は無視して破棄する (恒久ロックアウト回避)', async () => {
       mountReady();
       waitForUserOperationReceipt.mockRejectedValueOnce(
         new Error('UserOperationReceiptTimeoutError'),
@@ -1059,10 +1062,10 @@ describe('useBatchPayment', () => {
       await waitFor(() => expect(first.result.current.isUnknown).toBe(true));
       first.unmount();
 
-      // 保存済 record の updatedAt を 7 日 + 1 分前に巻き戻す。
+      // 保存済 record の updatedAt を 7 日 + 1 分前に巻き戻し、送信の控えを外す。
       const stale = Date.now() - (7 * 24 * 60 * 60 * 1000 + 60_000);
       for (const key of pimlicoPendingKeys()) {
-        const rec = JSON.parse(
+        const { send: _send, ...rec } = JSON.parse(
           window.localStorage.getItem(key) ?? '{}',
         ) as Record<string, unknown>;
         window.localStorage.setItem(

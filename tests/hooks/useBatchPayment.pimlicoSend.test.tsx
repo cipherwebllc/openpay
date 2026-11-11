@@ -1,15 +1,22 @@
 // 第 10 回レビュー A-1 (P1・money-path): Pimlico の送信の応答を失っても、記録とラッチが残り、
-// 再試行が別の nonce の UserOperation (= 二重払い) にならないこと。
+// 再試行・通常決済・別の内容の支払いが二重払いにならないこと。
 //
 // 失敗シナリオ (直す前): bundler は UserOperation を受理したが、応答が http の timeout (10 秒) を超える。
 // sendUserOperation が throw し、hash も記録も無いまま通常の error で終わる。1 本目は mine される。
 // お客様がもう一度押して署名すると、別の nonce key の 2 本目も成立する。
 //
-// 直した後: nonce を決める → 準備 → 署名 → **保存** (hash・署名済みの op・nonce) → 送信。
-// 安全の根拠は nonce の固定 (EntryPoint は同じ nonce の op を最大 1 本しか実行しない)。
+// 直した後の不変条件: 署名済みの op を保存した時点から、その intent は「開いている」。開いている間は、
+// 別の nonce の op・別の内容の支払いを作らず、画面は通常決済も止める (isUnknown)。閉じるのは
+//   c1 候補の hash のどれかに receipt がある
+//   c2 最初の送信を bundler が検証で拒否した (HTTP 2xx + ERC-7769 の code) → 記録を消したと確かめてから
+//   c4 保存から 7 日を過ぎ、候補に receipt が無く、EntryPoint の nonce も未使用 → 記録を消したと確かめてから
+// だけ。それ以外 (応答不明・送り直し / 作り直しの拒否 (c3)・nonce が進んだのに receipt が無い (c5)) は開いたまま。
 //
-// mock は境界だけ (useSmartAccount が返す client・bundler・EntryPoint = tests/_helpers/fakePimlicoBundler.ts、
-// wagmi、logger)。hook と lib/smartAccount/pimlicoSend.ts は実物。
+// mock は境界だけ: useSmartAccount が返す client・bundler の HTTP (fetch の FAKE_BUNDLER_URL だけ)・EntryPoint の
+// 読み取り・receipt の照会 (tests/_helpers/fakePimlicoBundler.ts)、wagmi、logger、localStorage の失敗を作る spy。
+// hook と lib/smartAccount/pimlicoSend.ts (viem の http transport を含む) は実物。
+// bundler に「届いた後に応答が失われた」は fetch の失敗で作る (timeout と同じく応答不明。実物の timeout は
+// tests/lib/smartAccount/pimlicoSend.test.ts)。
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -24,6 +31,7 @@ import {
   PIMLICO_PENDING_KEY_PREFIX,
   useBatchPayment,
 } from '@/hooks/useBatchPayment';
+import { derivePayGuards } from '@/lib/paymentFlowGuards/pay';
 import { defaultDeploymentForSymbol } from '@/lib/tokens';
 
 vi.mock('@/hooks/useSmartAccount', () => ({
@@ -42,10 +50,11 @@ import { useAccount } from 'wagmi';
 import { logger } from '@/lib/logger';
 import { mockHook } from '../_helpers/wagmiMock';
 import {
-  bundlerJsonRpcError,
   bundlerTimeout,
   createFakeBundlerWorld,
   fakePimlicoClients,
+  lostResponse,
+  type BundlerHttpReply,
   type FakeBundlerWorld,
 } from '../_helpers/fakePimlicoBundler';
 
@@ -53,7 +62,12 @@ const usdcDep = defaultDeploymentForSymbol('usdc');
 const TOKEN: Address = getAddress('0x036CbD53842c5426634e7929541eC2318f3dCF7e');
 const MERCHANT: Address = getAddress('0x1111111111111111111111111111111111111111');
 const FEE_RECV: Address = getAddress('0x2222222222222222222222222222222222222222');
+const CUSTOMER_A: Address = getAddress('0x3333333333333333333333333333333333333333');
+const CUSTOMER_B: Address = getAddress('0x4444444444444444444444444444444444444444');
+const OTHER_SENDER: Address = getAddress('0x5555555555555555555555555555555555555555');
+const SEVEN_DAYS_AND_A_MINUTE = 7 * 24 * 60 * 60 * 1000 + 60_000;
 
+// 10 USDC の支払い。
 const PARAMS = {
   tokenAddress: TOKEN,
   merchant: MERCHANT,
@@ -61,7 +75,7 @@ const PARAMS = {
   feeReceiver: FEE_RECV,
   feeAmount: 0n,
 };
-// 金額だけ違う別の支払い。
+// 金額だけ違う別の支払い (20 USDC)。
 const OTHER_PARAMS = { ...PARAMS, merchantAmount: 20_000_000n };
 
 type SignedOp = Record<string, unknown>;
@@ -69,6 +83,7 @@ type StoredRecord = {
   status: string;
   userOpHash: Hex;
   callFingerprint: Hex;
+  updatedAt: number;
   send?: {
     entryPoint: Address;
     sender: Address;
@@ -94,6 +109,20 @@ function storedRecord(): StoredRecord | null {
   return JSON.parse(window.localStorage.getItem(keys[0]) ?? 'null') as StoredRecord;
 }
 
+function rewriteStoredRecord(change: (record: StoredRecord) => StoredRecord) {
+  const key = pendingKeys()[0];
+  const record = JSON.parse(window.localStorage.getItem(key) ?? '{}') as StoredRecord;
+  window.localStorage.setItem(key, JSON.stringify(change(record)));
+}
+
+// 保存してから 7 日と 1 分たった記録にする。
+function ageStoredRecord() {
+  rewriteStoredRecord((record) => ({
+    ...record,
+    updatedAt: Date.now() - SEVEN_DAYS_AND_A_MINUTE,
+  }));
+}
+
 function recordNonce(record: StoredRecord | null): bigint {
   if (!record?.send) throw new Error('送信の控えが無い');
   return (BigInt(record.send.nonceKey) << 64n) | BigInt(record.send.nonceSeq);
@@ -111,10 +140,10 @@ function makeWrapper() {
 let world: FakeBundlerWorld;
 
 // client を作り (mount のたびに作り直す = ページの読み直し)、useSmartAccount に載せる。world は test の間そのまま。
-function mountClients() {
-  const fake = fakePimlicoClients({ world });
+function mountClients(options?: { sender?: Address; customer?: Address }) {
+  const fake = fakePimlicoClients({ world, sender: options?.sender });
   mockHook(useSmartAccount, { data: fake.data, isLoading: false, error: null });
-  mockHook(useAccount, { chainId: baseSepolia.id });
+  mockHook(useAccount, { chainId: baseSepolia.id, address: options?.customer });
   return fake;
 }
 
@@ -122,34 +151,99 @@ type Fake = ReturnType<typeof mountClients>;
 
 // bundler が op を受理した後、応答だけが失われる (A-1 の失敗シナリオ)。
 function acceptThenLoseResponse(fake: Fake) {
-  fake.request.mockImplementationOnce(async ({ params }) => {
+  fake.bundlerSend.mockImplementationOnce(async ({ params }) => {
     world.accept(params[0]);
-    throw bundlerTimeout();
+    throw lostResponse();
   });
 }
 
-// op が bundler に届かないまま timeout する。
-function loseRequest(fake: Fake) {
-  fake.request.mockImplementationOnce(async () => {
-    throw bundlerTimeout();
+// bundler が op を受理した後、HTTP の層では失敗の答えが返る (proxy・上流の内部の失敗)。
+function acceptThenReply(fake: Fake, reply: BundlerHttpReply) {
+  fake.bundlerSend.mockImplementationOnce(async ({ params }) => {
+    world.accept(params[0]);
+    return reply;
   });
+}
+
+// op が bundler に届かないまま応答が無い。
+function loseRequest(fake: Fake) {
+  fake.bundlerSend.mockImplementationOnce(async () => {
+    throw lostResponse();
+  });
+}
+
+// bundler が op を受け取らずに答える (world は触らない)。
+function replyOnce(fake: Fake, reply: BundlerHttpReply) {
+  fake.bundlerSend.mockImplementationOnce(async () => reply);
 }
 
 // bundler が受理し、すぐ mine される (receipt が取れる)。
 function acceptAndMine(fake: Fake) {
-  fake.request.mockImplementationOnce(async ({ params }) => {
+  fake.bundlerSend.mockImplementationOnce(async ({ params }) => {
     const hash = world.accept(params[0]);
     world.mine(hash);
-    return hash;
+    return { result: hash };
   });
 }
 
 function sentOp(fake: Fake, index: number): SignedOp {
-  return fake.request.mock.calls[index][0].params[0];
+  return fake.bundlerSend.mock.calls[index][0].params[0];
 }
 
 function render() {
   return renderHook(() => useBatchPayment(usdcDep), { wrapper: makeWrapper() });
+}
+
+// /pay の送信可否 (lib/paymentFlowGuards/pay.ts の実物) に、この hook の状態を渡したとき、**通常決済** を始められるか。
+// 通常決済の経路に必要なほかの条件 (接続・金額・残高) はすべて満たした状態にする。
+function standardPaymentOpen(gasless: {
+  isPending: boolean;
+  isUnknown: boolean;
+  pendingStoreUnavailable: boolean;
+  data?: { success: boolean };
+}): boolean {
+  return derivePayGuards({
+    isStandard: true,
+    useRelay: false,
+    standard: {
+      isRestoring: false,
+      isPending: false,
+      isUnknown: false,
+      isFeeError: false,
+      hasActiveIntent: false,
+      data: undefined,
+    },
+    relay: {
+      error: null,
+      recoveryState: null,
+      isRestoring: false,
+      isPending: false,
+      hasActiveIntent: false,
+    },
+    gasless: {
+      isPending: gasless.isPending,
+      isUnknown: gasless.isUnknown,
+      pendingStoreUnavailable: gasless.pendingStoreUnavailable,
+      data: gasless.data,
+    },
+    crossChainLocked: false,
+    crossChainResult: undefined,
+    params: { token: 'usdc', chain: 'base' },
+    address: undefined,
+    arcScannedScope: '',
+    arcRecoveryScope: '',
+    cctpResumeSaved: false,
+    activeQuote: { data: undefined },
+    isConnected: true,
+    wrongChain: false,
+    saData: undefined,
+    breakdown: { merchantReceives: 1n, customerPays: 1n },
+    insufficientBalance: false,
+    merchantUnderflow: false,
+    expired: false,
+    timeMeasured: true,
+    splitBlocked: false,
+  }).canSubmit;
 }
 
 beforeEach(() => {
@@ -159,17 +253,18 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe('署名 → 保存 → 送信の順 (A-1)', () => {
   it('送信の時点で、hash・署名済みの op・nonce (key と seq) が保存されている', async () => {
     const fake = mountClients();
     let atSend: StoredRecord | null = null;
-    fake.request.mockImplementationOnce(async ({ params }) => {
+    fake.bundlerSend.mockImplementationOnce(async ({ params }) => {
       atSend = storedRecord();
       const hash = world.accept(params[0]);
       world.mine(hash);
-      return hash;
+      return { result: hash };
     });
     const { result } = render();
 
@@ -188,11 +283,9 @@ describe('署名 → 保存 → 送信の順 (A-1)', () => {
     expect(recordNonce(saved)).toBe(BigInt(op.nonce as Hex));
     expect(recordNonce(saved)).toBe(await fake.getNonce.mock.results[0].value);
 
-    // 送信は raw の eth_sendUserOperation を 1 回 (再送なし)。
-    expect(fake.request).toHaveBeenCalledTimes(1);
-    expect(fake.request.mock.calls[0][0].method).toBe('eth_sendUserOperation');
-    expect(fake.request.mock.calls[0][0].params[1]).toBe(world.entryPoint);
-    expect(fake.request.mock.calls[0][1]).toEqual({ retryCount: 0 });
+    // 送信は bundler の HTTP へ eth_sendUserOperation を 1 回 (再送なし)。
+    expect(fake.bundlerSend).toHaveBeenCalledTimes(1);
+    expect(fake.bundlerSend.mock.calls[0][0].params[1]).toBe(world.entryPoint);
 
     // 成功の経路の結果は分ける前と同じ形。記録は消える。計算した hash と返った hash は同じ (warn なし)。
     expect(result.current.data).toEqual({
@@ -205,11 +298,12 @@ describe('署名 → 保存 → 送信の順 (A-1)', () => {
     });
     expect(pendingKeys()).toHaveLength(0);
     expect(result.current.isUnknown).toBe(false);
+    expect(result.current.settledOtherIntent).toBe(false);
     expect(logger.warn).not.toHaveBeenCalledWith('pimlico.send.hash-mismatch', expect.anything());
     expect(fake.signUserOperation).toHaveBeenCalledTimes(1);
   });
 
-  it('bundler が受理した後に応答だけ失われる (timeout) → 通常の error にせず応答不明にラッチし、再試行は新しい op を作らない', async () => {
+  it('bundler が受理した後に応答だけ失われる → 通常の error にせず応答不明にラッチし (通常決済も止める)、再試行は新しい op を作らない', async () => {
     const fake = mountClients();
     acceptThenLoseResponse(fake);
     const { result } = render();
@@ -218,8 +312,9 @@ describe('署名 → 保存 → 送信の順 (A-1)', () => {
     await waitFor(() => expect(result.current.isUnknown).toBe(true));
 
     const op = sentOp(fake, 0);
-    // 通常の失敗として見せない (見せると画面が再試行を開ける)。
+    // 通常の失敗として見せない (見せると画面が再試行を開ける)。通常決済も始められない。
     expect(result.current.error).toBeNull();
+    expect(standardPaymentOpen(result.current)).toBe(false);
     expect(result.current.pendingUserOpHash).toBe(world.hashOf(op));
     expect(storedRecord()).toMatchObject({
       status: 'unknown',
@@ -240,11 +335,12 @@ describe('署名 → 保存 → 送信の順 (A-1)', () => {
     expect(fake.getNonce).toHaveBeenCalledTimes(1);
     expect(fake.prepareUserOperation).toHaveBeenCalledTimes(1);
     expect(fake.signUserOperation).toHaveBeenCalledTimes(1);
-    expect(fake.request).toHaveBeenCalledTimes(1);
-    // 確定した支払いは 1 本だけ。
+    expect(fake.bundlerSend).toHaveBeenCalledTimes(1);
+    // 確定した支払いは 1 本だけ。同じ内容の確定なので、画面の支払いとして出してよい。
     expect(world.mined).toHaveLength(1);
     expect(result.current.data?.userOpHash).toBe(world.hashOf(op));
     expect(result.current.data?.success).toBe(true);
+    expect(result.current.settledOtherIntent).toBe(false);
     expect(result.current.isUnknown).toBe(false);
     expect(pendingKeys()).toHaveLength(0);
   });
@@ -265,7 +361,7 @@ describe('署名 → 保存 → 送信の順 (A-1)', () => {
     expect(result.current.isUnknown).toBe(true);
     expect(result.current.error).toBeNull();
     expect(fake.signUserOperation).toHaveBeenCalledTimes(1);
-    expect(fake.request).toHaveBeenCalledTimes(1);
+    expect(fake.bundlerSend).toHaveBeenCalledTimes(1);
     expect(world.mempoolHashes()).toHaveLength(1);
   });
 
@@ -279,11 +375,10 @@ describe('署名 → 保存 → 送信の順 (A-1)', () => {
 
     // 確かめる: receipt なし → nonce は未使用 → 同じ op を送り直す → 受理。まだ mine されていないので応答不明のまま。
     result.current.retryReceipt();
-    await waitFor(() => expect(fake.request).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(fake.bundlerSend).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(result.current.isPending).toBe(false));
     expect(result.current.isUnknown).toBe(true);
-    expect(fake.request.mock.calls[1][0]).toEqual(fake.request.mock.calls[0][0]);
-    expect(fake.request.mock.calls[1][1]).toEqual({ retryCount: 0 });
+    expect(fake.bundlerSend.mock.calls[1][0]).toEqual(fake.bundlerSend.mock.calls[0][0]);
     expect(world.mempoolHashes()).toEqual([world.hashOf(sentOp(fake, 0))]);
     // 送り直しの前に、receipt と EntryPoint の nonce を読んでいる。
     expect(fake.getUserOperationReceipt).toHaveBeenCalledWith({
@@ -323,7 +418,7 @@ describe('署名 → 保存 → 送信の順 (A-1)', () => {
 
     expect(fake.readContract).toHaveBeenCalledTimes(1);
     // 使われた nonce の op は送り直さない・作り直さない。
-    expect(fake.request).toHaveBeenCalledTimes(1);
+    expect(fake.bundlerSend).toHaveBeenCalledTimes(1);
     expect(fake.signUserOperation).toHaveBeenCalledTimes(1);
     expect(fake.waitForUserOperationReceipt).toHaveBeenCalledWith({ hash });
     expect(result.current.data?.userOpHash).toBe(hash);
@@ -344,80 +439,96 @@ describe('署名 → 保存 → 送信の順 (A-1)', () => {
 
     expect(result.current.isUnknown).toBe(true);
     expect(result.current.error).toBeNull();
-    expect(fake.request).toHaveBeenCalledTimes(1);
+    expect(fake.bundlerSend).toHaveBeenCalledTimes(1);
     expect(fake.signUserOperation).toHaveBeenCalledTimes(1);
     expect(storedRecord()?.status).toBe('unknown');
   });
 });
 
-describe('bundler が断った送信と、同じ nonce での作り直し (A-1)', () => {
-  it('bundler が JSON-RPC の error で断った → 今までどおりの error (応答不明にしない)。次の送信は同じ nonce で作り直す', async () => {
+describe('最初の送信の失敗の分類: 閉じるのは HTTP 2xx の検証の拒否だけ (c2・c3・MUST 1)', () => {
+  it.each([
+    { code: -32500, message: "AA21 didn't pay prefund" },
+    { code: -32501, message: 'AA33 reverted' },
+    { code: -32507, message: 'AA24 signature error' },
+    { code: -32602, message: 'invalid UserOperation field' },
+  ])(
+    '最初の送信を bundler が検証で拒否した (HTTP 200・$code) → 今までどおりの error で閉じる: 記録を消し、通常決済も金額を変えた支払い (新しい nonce) もできる (c2)',
+    async (rejection) => {
+      const fake = mountClients();
+      replyOnce(fake, { error: rejection });
+      const { result } = render();
+
+      result.current.mutate(PARAMS);
+      await waitFor(() => expect(result.current.isError).toBe(true));
+
+      // viem の sendUserOperation が投げるのと同じ形の error。応答不明ではない。
+      expect(result.current.error?.name).toBe('UserOperationExecutionError');
+      expect(result.current.isUnknown).toBe(false);
+      expect(result.current.pendingUserOpHash).toBeUndefined();
+      // nonce の予約は残さない。
+      expect(pendingKeys()).toHaveLength(0);
+      expect(standardPaymentOpen(result.current)).toBe(true);
+
+      acceptAndMine(fake);
+      result.current.mutate(OTHER_PARAMS);
+      await waitFor(() => expect(result.current.isSuccess).toBe(true));
+      expect(fake.getNonce).toHaveBeenCalledTimes(2);
+      expect(sentOp(fake, 1).nonce).not.toBe(sentOp(fake, 0).nonce);
+      expect(world.mined).toHaveLength(1);
+      expect(result.current.settledOtherIntent).toBe(false);
+    },
+  );
+
+  it('HTTP 500 に JSON-RPC の error (-32603) が載っても、bundler が受理していれば: 応答不明にして通常決済も止め、元の op の確定を待つ (MUST 1・Codex の再現)', async () => {
     const fake = mountClients();
-    fake.request.mockImplementationOnce(async () => {
-      throw bundlerJsonRpcError(-32603, 'internal error');
-    });
+    // 上流は op を受理したが、proxy / 内部の失敗で HTTP 500 + JSON-RPC の error が返る。
+    acceptThenReply(fake, { error: { code: -32603, message: 'internal error' }, status: 500 });
     const { result } = render();
 
     result.current.mutate(PARAMS);
-    await waitFor(() => expect(result.current.isError).toBe(true));
+    await waitFor(() => expect(result.current.isUnknown).toBe(true));
 
-    // viem の sendUserOperation が投げるのと同じ形の error。応答不明ではない。
-    expect(result.current.error?.name).toBe('UserOperationExecutionError');
-    expect(result.current.error?.message).toContain('internal error');
-    expect(result.current.isUnknown).toBe(false);
-    expect(result.current.pendingUserOpHash).toBeUndefined();
-    // 記録は消さない (nonce の予約として残す)。
-    const rejected = storedRecord();
-    expect(rejected?.status).toBe('rejected');
-    const firstOp = sentOp(fake, 0);
-    expect(recordNonce(rejected)).toBe(BigInt(firstOp.nonce as Hex));
+    // 直す前: 「断られた」と読み、画面は通常の error・通常決済は開いたまま (払い直すと元の op も成立して二重)。
+    expect(result.current.error).toBeNull();
+    expect(standardPaymentOpen(result.current)).toBe(false);
+    expect(storedRecord()?.status).toBe('unknown');
 
-    // お客様がもう一度押す → 作り直し (署名は 2 回目)。
-    acceptAndMine(fake);
-    result.current.mutate(PARAMS);
+    world.mine();
+    result.current.retryReceipt();
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
-
-    const secondOp = sentOp(fake, 1);
-    // 作り直しの op の nonce は 1 本目と同じ。nonce を採り直していない。
-    expect(secondOp.nonce).toBe(firstOp.nonce);
+    expect(result.current.data?.userOpHash).toBe(world.hashOf(sentOp(fake, 0)));
+    expect(fake.signUserOperation).toHaveBeenCalledTimes(1);
     expect(fake.getNonce).toHaveBeenCalledTimes(1);
-    expect(fake.prepareUserOperation).toHaveBeenCalledTimes(2);
-    expect(fake.prepareUserOperation.mock.calls[1][0].nonce).toBe(BigInt(firstOp.nonce as Hex));
-    expect(fake.signUserOperation).toHaveBeenCalledTimes(2);
     expect(world.mined).toHaveLength(1);
-    expect(pendingKeys()).toHaveLength(0);
   });
 
-  it('断られた後に金額を変えた支払いも、同じ nonce で作る (別の nonce の op を作る道が無い)', async () => {
+  it.each<{ label: string; reply: BundlerHttpReply }>([
+    { label: 'HTTP 200 + -32603 internal', reply: { error: { code: -32603, message: 'internal error' } } },
+    { label: 'HTTP 200 + -32005 rate limit', reply: { error: { code: -32005, message: 'rate limit exceeded' } } },
+    { label: 'HTTP 500 + -32500 (allowlist の code でも 5xx)', reply: { error: { code: -32500, message: 'AA21' }, status: 500 } },
+    { label: 'HTTP 429 + -32005', reply: { error: { code: -32005, message: 'too many requests' }, status: 429 } },
+    { label: 'HTTP 502 (本文が JSON-RPC でない)', reply: { status: 502, body: 'bad gateway' } },
+  ])('最初の送信への答えが $label → 応答不明 (開いたまま): 記録を残し、同じ内容の再試行も新しい nonce を採らない', async ({ reply }) => {
     const fake = mountClients();
-    fake.request.mockImplementationOnce(async () => {
-      throw bundlerJsonRpcError(-32005, 'rate limit exceeded');
-    });
+    replyOnce(fake, reply);
     const { result } = render();
+
     result.current.mutate(PARAMS);
-    await waitFor(() => expect(result.current.isError).toBe(true));
-    const firstRecord = storedRecord();
+    await waitFor(() => expect(result.current.isUnknown).toBe(true));
+    expect(result.current.error).toBeNull();
+    expect(standardPaymentOpen(result.current)).toBe(false);
+    expect(storedRecord()?.status).toBe('unknown');
 
-    let atSecondSend: StoredRecord | null = null;
-    fake.request.mockImplementationOnce(async ({ params }) => {
-      atSecondSend = storedRecord();
-      const hash = world.accept(params[0]);
-      world.mine(hash);
-      return hash;
-    });
-    result.current.mutate(OTHER_PARAMS);
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-
-    expect(sentOp(fake, 1).nonce).toBe(sentOp(fake, 0).nonce);
+    // 確かめる: 届いていなかったので同じ op を送り直す (署名・nonce の採番は増えない)。
+    result.current.retryReceipt();
+    await waitFor(() => expect(fake.bundlerSend).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(result.current.isPending).toBe(false));
+    expect(fake.bundlerSend.mock.calls[1][0]).toEqual(fake.bundlerSend.mock.calls[0][0]);
     expect(fake.getNonce).toHaveBeenCalledTimes(1);
-    const second = atSecondSend as StoredRecord | null;
-    expect(second?.callFingerprint).not.toBe(firstRecord?.callFingerprint);
-    // 別の内容の支払いなので、前の op の hash は「同じ支払いの作り直し」としては引き継がない。
-    expect(second?.send?.priorUserOpHashes).toBeUndefined();
-    expect(world.mined).toHaveLength(1);
+    expect(fake.signUserOperation).toHaveBeenCalledTimes(1);
   });
 
-  it('元の op が mempool に残ったまま作り直しても、確定するのは 1 本だけ (EntryPoint が同じ nonce の 2 本目を AA25 で断る)', async () => {
+  it('送り直しを bundler が検証で拒否 → 同じ nonce で作り直す。作り直しが allowlist の code (Replacement underpriced) で断られても閉じない (c3)', async () => {
     const fake = mountClients();
     acceptThenLoseResponse(fake);
     const { result } = render();
@@ -426,13 +537,11 @@ describe('bundler が断った送信と、同じ nonce での作り直し (A-1)'
     const op1 = sentOp(fake, 0);
     const hash1 = world.hashOf(op1);
 
-    // 確かめる: 送り直しに bundler が一時的な error (internal) で答える。元の op は mempool に残っている。
-    fake.request.mockImplementationOnce(async () => {
-      throw bundlerJsonRpcError(-32603, 'internal error');
-    });
+    // 確かめる: 送り直しを bundler が検証で拒否 (paymaster の期限切れ)。元の op は mempool に残っている。
+    replyOnce(fake, { error: { code: -32500, message: 'AA32 paymaster expired or not due' } });
     result.current.retryReceipt();
     // → 同じ nonce で作り直す (署名 2 回目) → bundler は同じ nonce の別の op を「Replacement underpriced」で断る。
-    await waitFor(() => expect(fake.request).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(fake.bundlerSend).toHaveBeenCalledTimes(3));
     await waitFor(() => expect(result.current.isPending).toBe(false));
 
     const op2 = sentOp(fake, 2);
@@ -440,9 +549,10 @@ describe('bundler が断った送信と、同じ nonce での作り直し (A-1)'
     expect(op2.nonce).toBe(op1.nonce);
     expect(op2).not.toEqual(op1);
     expect(fake.getNonce).toHaveBeenCalledTimes(1);
-    // 応答不明のまま。通常の error にも、新しい支払いにも開かない。
+    // 応答不明のまま。通常の error にも、新しい支払い・通常決済にも開かない。
     expect(result.current.isUnknown).toBe(true);
     expect(result.current.error).toBeNull();
+    expect(standardPaymentOpen(result.current)).toBe(false);
     const rebuilt = storedRecord();
     expect(rebuilt?.status).toBe('unknown');
     expect(rebuilt?.userOpHash).toBe(world.hashOf(op2));
@@ -465,6 +575,27 @@ describe('bundler が断った送信と、同じ nonce での作り直し (A-1)'
     expect(fake.signUserOperation).toHaveBeenCalledTimes(2);
   });
 
+  it.each<{ label: string; reply: BundlerHttpReply }>([
+    { label: 'HTTP 500 + -32603', reply: { error: { code: -32603, message: 'internal error' }, status: 500 } },
+    { label: 'HTTP 200 + -32603', reply: { error: { code: -32603, message: 'internal error' } } },
+  ])('送り直しへの答えが応答不明 ($label) → 作り直さない (署名を求めない)・開いたまま', async ({ reply }) => {
+    const fake = mountClients();
+    loseRequest(fake);
+    const { result } = render();
+    result.current.mutate(PARAMS);
+    await waitFor(() => expect(result.current.isUnknown).toBe(true));
+
+    replyOnce(fake, reply);
+    result.current.retryReceipt();
+    await waitFor(() => expect(fake.bundlerSend).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(result.current.isPending).toBe(false));
+
+    expect(fake.signUserOperation).toHaveBeenCalledTimes(1);
+    expect(fake.prepareUserOperation).toHaveBeenCalledTimes(1);
+    expect(result.current.isUnknown).toBe(true);
+    expect(result.current.error).toBeNull();
+  });
+
   it('作り直しより先に元の op が取り込まれていたら、作り直しは AA25 で落ち、元の op の receipt で確定する', async () => {
     const fake = mountClients();
     acceptThenLoseResponse(fake);
@@ -473,13 +604,13 @@ describe('bundler が断った送信と、同じ nonce での作り直し (A-1)'
     await waitFor(() => expect(result.current.isUnknown).toBe(true));
     const hash1 = world.hashOf(sentOp(fake, 0));
 
-    // 確かめる: nonce を読んだ直後に元の op が mine され、送り直しは AA25 で断られる (読みと送りの間の隙間)。
-    fake.request.mockImplementationOnce(async ({ params }) => {
+    // 確かめる: nonce を読んだ直後に元の op が mine され、送り直しは AA25 (-32500・HTTP 200) で断られる (読みと送りの間の隙間)。
+    fake.bundlerSend.mockImplementationOnce(async ({ params }) => {
       world.mine(hash1);
-      return world.accept(params[0]);
+      return world.respond(params[0]);
     });
     result.current.retryReceipt();
-    await waitFor(() => expect(fake.request).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(fake.bundlerSend).toHaveBeenCalledTimes(3));
     await waitFor(() => expect(result.current.isPending).toBe(false));
 
     // 作り直しの op (同じ nonce) も AA25 で断られた。確定は 1 本のまま、応答不明を保つ。
@@ -503,10 +634,8 @@ describe('bundler が断った送信と、同じ nonce での作り直し (A-1)'
     await waitFor(() => expect(result.current.isUnknown).toBe(true));
     const before = storedRecord();
 
-    // 送り直しを bundler が断る (paymaster の期限切れ) → 作り直しの署名をお客様が断る。
-    fake.request.mockImplementationOnce(async () => {
-      throw bundlerJsonRpcError(-32500, 'AA32 paymaster expired or not due');
-    });
+    // 送り直しを bundler が検証で拒否する (paymaster の期限切れ) → 作り直しの署名をお客様が断る。
+    replyOnce(fake, { error: { code: -32500, message: 'AA32 paymaster expired or not due' } });
     fake.signUserOperation.mockRejectedValueOnce(new Error('User rejected the request.'));
     result.current.retryReceipt();
     await waitFor(() => expect(fake.signUserOperation).toHaveBeenCalledTimes(2));
@@ -514,88 +643,215 @@ describe('bundler が断った送信と、同じ nonce での作り直し (A-1)'
 
     expect(result.current.isUnknown).toBe(true);
     expect(result.current.error).toBeNull();
-    expect(fake.request).toHaveBeenCalledTimes(2);
+    expect(fake.bundlerSend).toHaveBeenCalledTimes(2);
     const after = storedRecord();
     expect(after?.userOpHash).toBe(before?.userOpHash);
     expect(after?.send?.signedUserOp).toEqual(before?.send?.signedUserOp);
     expect(after?.send?.priorUserOpHashes).toBeUndefined();
   });
+});
 
-  it('断られたはずの op が実は取り込まれていた → 次の送信は新しい op を作らず、その receipt で確定する', async () => {
+describe('開いている intent の間は別の内容を受け付けず、成功の表示を確定した intent に結び付ける (MUST 2)', () => {
+  it('10 USDC が応答不明の間に 20 USDC へ変えても、署名も送信もしない。確定は 10 USDC の intent で、画面の最後の送信 (20) とは別と分かる (Codex の再現)', async () => {
     const fake = mountClients();
-    // bundler は op を mempool に入れた後で error を返した。
-    fake.request.mockImplementationOnce(async ({ params }) => {
-      world.accept(params[0]);
-      throw bundlerJsonRpcError(-32603, 'internal error');
-    });
+    acceptThenReply(fake, { error: { code: -32603, message: 'internal error' }, status: 500 });
     const { result } = render();
     result.current.mutate(PARAMS);
-    await waitFor(() => expect(result.current.isError).toBe(true));
-    expect(result.current.isUnknown).toBe(false);
-    const hash1 = world.hashOf(sentOp(fake, 0));
-    world.mine(hash1);
-
-    result.current.mutate(PARAMS);
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-
-    expect(result.current.data?.userOpHash).toBe(hash1);
-    expect(fake.signUserOperation).toHaveBeenCalledTimes(1);
-    expect(fake.request).toHaveBeenCalledTimes(1);
-    expect(world.mined).toHaveLength(1);
-    expect(pendingKeys()).toHaveLength(0);
-  });
-
-  it('断られたはずの op が取り込まれていたとき、別の内容の支払いは通さず、元の支払いの結果不明として保持する', async () => {
-    const fake = mountClients();
-    fake.request.mockImplementationOnce(async ({ params }) => {
-      world.accept(params[0]);
-      throw bundlerJsonRpcError(-32603, 'internal error');
-    });
-    const { result } = render();
-    result.current.mutate(PARAMS);
-    await waitFor(() => expect(result.current.isError).toBe(true));
-    const hash1 = world.hashOf(sentOp(fake, 0));
-    world.mine(hash1);
-
-    result.current.mutate(OTHER_PARAMS);
     await waitFor(() => expect(result.current.isUnknown).toBe(true));
+    const hash1 = world.hashOf(sentOp(fake, 0));
+
+    // 画面の金額を 20 USDC に変えて「支払う」(フォームは isUnknown の間は押させないが、hook の関所でも止める)。
+    result.current.mutate(OTHER_PARAMS);
+    await waitFor(() =>
+      expect(result.current.variables?.merchantAmount).toBe(OTHER_PARAMS.merchantAmount),
+    );
     await waitFor(() => expect(result.current.isPending).toBe(false));
-
-    expect(result.current.pendingUserOpHash).toBe(hash1);
+    expect(result.current.isUnknown).toBe(true);
     expect(fake.signUserOperation).toHaveBeenCalledTimes(1);
-    expect(fake.request).toHaveBeenCalledTimes(1);
-    expect(storedRecord()?.status).toBe('unknown');
+    expect(fake.getNonce).toHaveBeenCalledTimes(1);
+    expect(fake.bundlerSend).toHaveBeenCalledTimes(1);
+    // 候補の hash は intent に結び付いたまま。
+    expect(storedRecord()?.userOpHash).toBe(hash1);
 
-    // 確かめる → 元の支払いの結果として確定する。
+    // 元の 10 USDC が mine される → 確かめる → 10 USDC の intent として確定。
+    world.mine(hash1);
     result.current.retryReceipt();
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(result.current.data?.userOpHash).toBe(hash1);
     expect(result.current.variables?.merchantAmount).toBe(PARAMS.merchantAmount);
+    // 画面から最後に送ったのは 20 USDC。この成功を画面の金額・明細で出さない (components/PaymentForm.tsx)。
+    expect(result.current.settledOtherIntent).toBe(true);
     expect(world.mined).toHaveLength(1);
   });
 
-  it('断られた後の再試行で照会が失敗 → 通常の error のまま、何も作らない (記録も変えない)', async () => {
-    const fake = mountClients();
-    fake.request.mockImplementationOnce(async () => {
-      throw bundlerJsonRpcError(-32603, 'internal error');
-    });
-    const { result } = render();
-    result.current.mutate(PARAMS);
-    await waitFor(() => expect(result.current.isError).toBe(true));
-    const before = window.localStorage.getItem(pendingKeys()[0]);
+  it('reload の後に確定した支払いは、この画面から送った支払いではない (settledOtherIntent)', async () => {
+    const first = mountClients();
+    loseRequest(first);
+    const firstHook = render();
+    firstHook.result.current.mutate(PARAMS);
+    await waitFor(() => expect(firstHook.result.current.isUnknown).toBe(true));
+    firstHook.unmount();
 
-    fake.readContract.mockRejectedValueOnce(new Error('eth_call failed'));
-    result.current.mutate(PARAMS);
-    await waitFor(() => expect(result.current.error?.message).toBe('eth_call failed'));
-
-    expect(result.current.isUnknown).toBe(false);
-    expect(fake.signUserOperation).toHaveBeenCalledTimes(1);
-    expect(fake.request).toHaveBeenCalledTimes(1);
-    expect(window.localStorage.getItem(pendingKeys()[0])).toBe(before);
+    const second = mountClients();
+    const restored = render();
+    await waitFor(() => expect(restored.result.current.isUnknown).toBe(true));
+    acceptAndMine(second);
+    restored.result.current.retryReceipt();
+    await waitFor(() => expect(restored.result.current.isSuccess).toBe(true));
+    expect(restored.result.current.settledOtherIntent).toBe(true);
   });
 });
 
-describe('保存できないときは送らない (A-1)', () => {
+describe('期限: 黙って消さず、照合してから閉じる (c4・c5・MUST 3)', () => {
+  it('受理後に応答を失い、op は mine された。7 日後に戻っても記録は消えず、新しい nonce の支払いを作らずに元の op で確定する (Codex の再現)', async () => {
+    const first = mountClients();
+    acceptThenLoseResponse(first);
+    const firstHook = render();
+    firstHook.result.current.mutate(PARAMS);
+    await waitFor(() => expect(firstHook.result.current.isUnknown).toBe(true));
+    const hash1 = world.hashOf(sentOp(first, 0));
+    firstHook.unmount();
+    world.mine(hash1);
+    ageStoredRecord();
+
+    // 7 日後に戻る。直す前: 読み出しで記録を黙って消し、同じ支払いを新しい nonce で作れた (2 本とも成立)。
+    const second = mountClients();
+    const restored = render();
+    await waitFor(() => expect(restored.result.current.isUnknown).toBe(true));
+    expect(pendingKeys()).toHaveLength(1);
+    expect(standardPaymentOpen(restored.result.current)).toBe(false);
+
+    acceptAndMine(second);
+    restored.result.current.mutate(PARAMS);
+    await waitFor(() => expect(restored.result.current.isSuccess).toBe(true));
+    expect(restored.result.current.data?.userOpHash).toBe(hash1);
+    expect(second.getNonce).not.toHaveBeenCalled();
+    expect(second.signUserOperation).not.toHaveBeenCalled();
+    expect(second.bundlerSend).not.toHaveBeenCalled();
+    expect(world.mined).toHaveLength(1);
+    expect(pendingKeys()).toHaveLength(0);
+  });
+
+  it('7 日を過ぎ、候補に receipt が無く EntryPoint の nonce も未使用 → 送り直さずに閉じる (画面は通常の入力に戻る)。その後の支払いは新しい nonce', async () => {
+    const first = mountClients();
+    loseRequest(first);
+    const firstHook = render();
+    firstHook.result.current.mutate(PARAMS);
+    await waitFor(() => expect(firstHook.result.current.isUnknown).toBe(true));
+    const firstNonce = sentOp(first, 0).nonce;
+    firstHook.unmount();
+    ageStoredRecord();
+
+    const second = mountClients();
+    const restored = render();
+    // 期限を過ぎても、照合するまでは開いたまま。
+    await waitFor(() => expect(restored.result.current.isUnknown).toBe(true));
+
+    restored.result.current.retryReceipt();
+    await waitFor(() => expect(restored.result.current.isUnknown).toBe(false));
+    await waitFor(() => expect(restored.result.current.isPending).toBe(false));
+
+    // 7 日前の op は送り直していない (今送るとその時点で成立しうる)。署名も求めない。
+    expect(second.bundlerSend).not.toHaveBeenCalled();
+    expect(second.signUserOperation).not.toHaveBeenCalled();
+    expect(second.readContract).toHaveBeenCalledTimes(1);
+    expect(pendingKeys()).toHaveLength(0);
+    // 閉じたことは失敗ではない (画面に error を出さない)。通常決済も開く。
+    expect(restored.result.current.error).toBeNull();
+    expect(restored.result.current.data).toBeUndefined();
+    expect(standardPaymentOpen(restored.result.current)).toBe(true);
+    expect(logger.warn).toHaveBeenCalledWith('pimlico.pending.expired-closed', expect.anything());
+
+    acceptAndMine(second);
+    restored.result.current.mutate(OTHER_PARAMS);
+    await waitFor(() => expect(restored.result.current.isSuccess).toBe(true));
+    expect(second.getNonce).toHaveBeenCalledTimes(1);
+    expect(sentOp(second, 0).nonce).not.toBe(firstNonce);
+    expect(world.mined).toHaveLength(1);
+  });
+
+  it.each([
+    { label: '期限の前', expired: false },
+    { label: '期限の後', expired: true },
+  ])(
+    'EntryPoint の nonce を別の op が使い、候補に receipt が無い ($label) → 成功とも不成立ともせず開いたまま (c5・MetaMask の key 0)',
+    async ({ expired }) => {
+      const first = mountClients();
+      acceptThenLoseResponse(first);
+      const firstHook = render();
+      firstHook.result.current.mutate(PARAMS);
+      await waitFor(() => expect(firstHook.result.current.isUnknown).toBe(true));
+      // 同じ (key, seq) を別の op が使った (この支払いの hash には receipt が付かない)。
+      world.consumeNonceByOtherOp(BigInt(sentOp(first, 0).nonce as Hex));
+      firstHook.unmount();
+      if (expired) ageStoredRecord();
+
+      const second = mountClients();
+      const restored = render();
+      await waitFor(() => expect(restored.result.current.isUnknown).toBe(true));
+      restored.result.current.retryReceipt();
+      await waitFor(() => expect(second.waitForUserOperationReceipt).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(restored.result.current.isPending).toBe(false));
+
+      // 成功と表示しない・開けて新しい支払いを許さない・送らない・署名を求めない。
+      expect(restored.result.current.data).toBeUndefined();
+      expect(restored.result.current.isUnknown).toBe(true);
+      expect(standardPaymentOpen(restored.result.current)).toBe(false);
+      expect(second.bundlerSend).not.toHaveBeenCalled();
+      expect(second.signUserOperation).not.toHaveBeenCalled();
+      expect(pendingKeys()).toHaveLength(1);
+
+      restored.result.current.mutate(OTHER_PARAMS);
+      await waitFor(() =>
+        expect(restored.result.current.variables?.merchantAmount).toBe(OTHER_PARAMS.merchantAmount),
+      );
+      await waitFor(() => expect(restored.result.current.isPending).toBe(false));
+      expect(second.getNonce).not.toHaveBeenCalled();
+      expect(restored.result.current.isUnknown).toBe(true);
+      expect(world.mined).toHaveLength(0);
+    },
+  );
+});
+
+describe('保存できないときは送らない・送っていない op の記録を残したまま開けない (A-1・MUST 4)', () => {
+  // localStorage の読み戻しを失敗させる spy。setItem の直後の getItem (persistPimlicoPending の読み戻し) を
+  // failReadBacks 回だけ投げる。removeItem を投げさせることもできる。
+  function failStorage(options: { failReadBacks: number; failRemove?: boolean }) {
+    const realGet = Storage.prototype.getItem;
+    const realSet = Storage.prototype.setItem;
+    const realRemove = Storage.prototype.removeItem;
+    let budget = options.failReadBacks;
+    let readBackPending = false;
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (
+      this: Storage,
+      key: string,
+      value: string,
+    ) {
+      realSet.call(this, key, value);
+      readBackPending = key.startsWith(PIMLICO_PENDING_KEY_PREFIX) && budget > 0;
+    });
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(function (
+      this: Storage,
+      key: string,
+    ) {
+      if (readBackPending) {
+        readBackPending = false;
+        budget -= 1;
+        throw new DOMException('read failed', 'UnknownError');
+      }
+      return realGet.call(this, key);
+    });
+    vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(function (
+      this: Storage,
+      key: string,
+    ) {
+      if (options.failRemove && key.startsWith(PIMLICO_PENDING_KEY_PREFIX)) {
+        throw new DOMException('remove failed', 'UnknownError');
+      }
+      realRemove.call(this, key);
+    });
+  }
+
   it('保存の書き込みが throw → 送信しない。gasless だけ止め (pendingStoreUnavailable)、応答不明にはしない', async () => {
     const fake = mountClients();
     const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
@@ -609,7 +865,7 @@ describe('保存できないときは送らない (A-1)', () => {
     expect(setItem).toHaveBeenCalled();
     // 署名までは済んでいるが、op はどこにも送っていない。
     expect(fake.signUserOperation).toHaveBeenCalledTimes(1);
-    expect(fake.request).not.toHaveBeenCalled();
+    expect(fake.bundlerSend).not.toHaveBeenCalled();
     expect(world.mempoolHashes()).toHaveLength(0);
     // 送っていないので応答不明 (= 通常決済も止める) にはしない。通常の failure にも流さない (専用の文言)。
     expect(result.current.isUnknown).toBe(false);
@@ -617,7 +873,7 @@ describe('保存できないときは送らない (A-1)', () => {
     expect(pendingKeys()).toHaveLength(0);
   });
 
-  it('書き込みは通るが読み戻すと違う (保存を確かめられない) → 送信しない', async () => {
+  it('書き込みは通るが読み戻すと違う → 書いたかもしれない記録を消したと確かめて、送信しない', async () => {
     const fake = mountClients();
     vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => undefined);
     const { result } = render();
@@ -625,8 +881,57 @@ describe('保存できないときは送らない (A-1)', () => {
     result.current.mutate(PARAMS);
     await waitFor(() => expect(result.current.pendingStoreUnavailable).toBe(true));
 
-    expect(fake.request).not.toHaveBeenCalled();
+    expect(fake.bundlerSend).not.toHaveBeenCalled();
     expect(result.current.isUnknown).toBe(false);
+    expect(pendingKeys()).toHaveLength(0);
+  });
+
+  it('書けて読み戻しが投げる → 書いた記録を消したと確かめてから「保存できません」。reload の後に署名済みの op が送られない (Codex の再現)', async () => {
+    const first = mountClients();
+    failStorage({ failReadBacks: 1 });
+    const firstHook = render();
+
+    firstHook.result.current.mutate(PARAMS);
+    await waitFor(() => expect(firstHook.result.current.pendingStoreUnavailable).toBe(true));
+
+    expect(first.bundlerSend).not.toHaveBeenCalled();
+    expect(firstHook.result.current.isUnknown).toBe(false);
+    // 直す前: 署名済みの op の記録が storage に残り、画面は「保存できません」(= 通常決済は開く) だった。
+    expect(pendingKeys()).toHaveLength(0);
+    firstHook.unmount();
+    vi.restoreAllMocks();
+
+    // reload: 確かめる記録が無いので、何も送られない。
+    const second = mountClients();
+    const restored = render();
+    expect(restored.result.current.isUnknown).toBe(false);
+    restored.result.current.retryReceipt();
+    expect(second.bundlerSend).not.toHaveBeenCalled();
+    expect(world.mempoolHashes()).toHaveLength(0);
+  });
+
+  it('書けて読み戻しが投げ、記録を消すこともできない → 送っていなくても開いたまま (応答不明・通常決済も止める)', async () => {
+    const fake = mountClients();
+    failStorage({ failReadBacks: 1, failRemove: true });
+    const { result } = render();
+
+    result.current.mutate(PARAMS);
+    await waitFor(() => expect(result.current.isUnknown).toBe(true));
+    await waitFor(() => expect(result.current.isPending).toBe(false));
+
+    expect(fake.bundlerSend).not.toHaveBeenCalled();
+    expect(result.current.error).toBeNull();
+    expect(standardPaymentOpen(result.current)).toBe(false);
+    expect(logger.warn).toHaveBeenCalledWith('pimlico.pending.persist-unverified', expect.anything());
+
+    // 別の内容の支払いも作らない。
+    result.current.mutate(OTHER_PARAMS);
+    await waitFor(() =>
+      expect(result.current.variables?.merchantAmount).toBe(OTHER_PARAMS.merchantAmount),
+    );
+    await waitFor(() => expect(result.current.isPending).toBe(false));
+    expect(fake.getNonce).toHaveBeenCalledTimes(1);
+    expect(fake.signUserOperation).toHaveBeenCalledTimes(1);
   });
 
   it('応答不明の作り直しでも、保存できなければ送らない (元の記録のまま)', async () => {
@@ -637,9 +942,7 @@ describe('保存できないときは送らない (A-1)', () => {
     await waitFor(() => expect(result.current.isUnknown).toBe(true));
     const before = window.localStorage.getItem(pendingKeys()[0]);
 
-    fake.request.mockImplementationOnce(async () => {
-      throw bundlerJsonRpcError(-32500, 'AA32 paymaster expired or not due');
-    });
+    replyOnce(fake, { error: { code: -32500, message: 'AA32 paymaster expired or not due' } });
     vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
       throw new DOMException('quota', 'QuotaExceededError');
     });
@@ -647,10 +950,30 @@ describe('保存できないときは送らない (A-1)', () => {
     await waitFor(() => expect(result.current.pendingStoreUnavailable).toBe(true));
 
     // 送り直し (2 回目) は断られ、作り直しの op は保存できないので送っていない。
-    expect(fake.request).toHaveBeenCalledTimes(2);
+    expect(fake.bundlerSend).toHaveBeenCalledTimes(2);
     expect(fake.signUserOperation).toHaveBeenCalledTimes(2);
     expect(result.current.isUnknown).toBe(true);
     expect(window.localStorage.getItem(pendingKeys()[0])).toBe(before);
+  });
+
+  it('応答不明の作り直しで読み戻しが投げる → 元の記録に書き戻したと確かめ、送らない (開いたまま)', async () => {
+    const fake = mountClients();
+    loseRequest(fake);
+    const { result } = render();
+    result.current.mutate(PARAMS);
+    await waitFor(() => expect(result.current.isUnknown).toBe(true));
+    const before = storedRecord();
+
+    replyOnce(fake, { error: { code: -32500, message: 'AA32 paymaster expired or not due' } });
+    failStorage({ failReadBacks: 1 });
+    result.current.retryReceipt();
+    await waitFor(() => expect(result.current.pendingStoreUnavailable).toBe(true));
+
+    expect(fake.bundlerSend).toHaveBeenCalledTimes(2);
+    expect(fake.signUserOperation).toHaveBeenCalledTimes(2);
+    expect(result.current.isUnknown).toBe(true);
+    vi.restoreAllMocks();
+    expect(storedRecord()).toEqual(before);
   });
 });
 
@@ -687,12 +1010,12 @@ describe('reload の後 (保存した記録だけ) (A-1)', () => {
     expect(second.getNonce).not.toHaveBeenCalled();
     expect(second.prepareUserOperation).not.toHaveBeenCalled();
     expect(second.signUserOperation).not.toHaveBeenCalled();
-    expect(second.request).not.toHaveBeenCalled();
+    expect(second.bundlerSend).not.toHaveBeenCalled();
 
     // 同じ内容でもう一度「支払う」を押しても、新しい op は作らない (確かめるだけ)。
     // bundler は op を持っているので、送り直しは「Already known」→ receipt を待つ → まだ無い → 応答不明のまま。
     restored.result.current.mutate(PARAMS);
-    await waitFor(() => expect(second.request).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(second.bundlerSend).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(restored.result.current.isPending).toBe(false));
     expect(sentOp(second, 0)).toEqual(sentOp(first, 0));
     expect(restored.result.current.isUnknown).toBe(true);
@@ -714,10 +1037,10 @@ describe('reload の後 (保存した記録だけ) (A-1)', () => {
   it('保存の直後にページが落ちた (送信の結果を知らない pending の記録) も、応答不明として復元する', async () => {
     const first = mountClients();
     // 送信が返らないまま (ページが落ちる)。
-    first.request.mockImplementationOnce(() => new Promise<Hex>(() => undefined));
+    first.bundlerSend.mockImplementationOnce(() => new Promise<BundlerHttpReply>(() => undefined));
     const firstHook = render();
     firstHook.result.current.mutate(PARAMS);
-    await waitFor(() => expect(first.request).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(first.bundlerSend).toHaveBeenCalledTimes(1));
     expect(storedRecord()?.status).toBe('pending');
     firstHook.unmount();
 
@@ -732,94 +1055,6 @@ describe('reload の後 (保存した記録だけ) (A-1)', () => {
     expect(sentOp(second, 0)).toEqual(sentOp(first, 0));
     expect(second.signUserOperation).not.toHaveBeenCalled();
     expect(world.mined).toHaveLength(1);
-  });
-
-  it('断られた送信の記録 (rejected) は、reload の後も画面を応答不明にせず、次の送信を保存した nonce で作る', async () => {
-    const first = mountClients();
-    first.request.mockImplementationOnce(async () => {
-      throw bundlerJsonRpcError(-32603, 'internal error');
-    });
-    const firstHook = render();
-    firstHook.result.current.mutate(PARAMS);
-    await waitFor(() => expect(firstHook.result.current.isError).toBe(true));
-    const firstNonce = sentOp(first, 0).nonce;
-    firstHook.unmount();
-
-    const second = mountClients();
-    const restored = renderHook(() => useBatchPayment(usdcDep), {
-      wrapper: makeWrapper(),
-      reactStrictMode: true,
-    });
-    // 記録はあるが、応答不明ではない。
-    expect(storedRecord()?.status).toBe('rejected');
-    expect(restored.result.current.isUnknown).toBe(false);
-    expect(restored.result.current.pendingUserOpHash).toBeUndefined();
-
-    acceptAndMine(second);
-    restored.result.current.mutate(PARAMS);
-    await waitFor(() => expect(restored.result.current.isSuccess).toBe(true));
-    expect(restored.result.current.isUnknown).toBe(false);
-    expect(sentOp(second, 0).nonce).toBe(firstNonce);
-    expect(second.getNonce).not.toHaveBeenCalled();
-    expect(world.mined).toHaveLength(1);
-  });
-
-  // 記録の EntryPoint を、今の account の EntryPoint (0.8) と違うもの (0.7) に書き換える
-  // = 記録を書いた後に account の種類 (委任先) が変わった状態。
-  function rewriteRecordEntryPoint() {
-    const key = pendingKeys()[0];
-    const record = JSON.parse(window.localStorage.getItem(key) ?? '{}') as StoredRecord;
-    window.localStorage.setItem(
-      key,
-      JSON.stringify({ ...record, send: { ...record.send, entryPoint: entryPoint07Address } }),
-    );
-  }
-
-  it('記録の EntryPoint が今の account と違う → 同じ nonce が効かないので送らない (receipt を待つだけ)', async () => {
-    const first = mountClients();
-    loseRequest(first);
-    const firstHook = render();
-    firstHook.result.current.mutate(PARAMS);
-    await waitFor(() => expect(firstHook.result.current.isUnknown).toBe(true));
-    firstHook.unmount();
-    rewriteRecordEntryPoint();
-
-    const second = mountClients();
-    const restored = render();
-    await waitFor(() => expect(restored.result.current.isUnknown).toBe(true));
-    restored.result.current.retryReceipt();
-    await waitFor(() => expect(second.waitForUserOperationReceipt).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(restored.result.current.isPending).toBe(false));
-
-    // 別の EntryPoint の上では「同じ nonce は 1 本だけ」が成り立たない。送り直しも作り直しもしない。
-    expect(second.request).not.toHaveBeenCalled();
-    expect(second.readContract).not.toHaveBeenCalled();
-    expect(second.signUserOperation).not.toHaveBeenCalled();
-    expect(restored.result.current.isUnknown).toBe(true);
-  });
-
-  it('断られた送信の記録でも、EntryPoint が今の account と違えば新しい op を作らない (結果不明として保持)', async () => {
-    const first = mountClients();
-    first.request.mockImplementationOnce(async () => {
-      throw bundlerJsonRpcError(-32603, 'internal error');
-    });
-    const firstHook = render();
-    firstHook.result.current.mutate(PARAMS);
-    await waitFor(() => expect(firstHook.result.current.isError).toBe(true));
-    firstHook.unmount();
-    rewriteRecordEntryPoint();
-
-    const second = mountClients();
-    const restored = render();
-    expect(restored.result.current.isUnknown).toBe(false);
-    restored.result.current.mutate(PARAMS);
-    await waitFor(() => expect(restored.result.current.isUnknown).toBe(true));
-    await waitFor(() => expect(restored.result.current.isPending).toBe(false));
-
-    expect(second.getNonce).not.toHaveBeenCalled();
-    expect(second.signUserOperation).not.toHaveBeenCalled();
-    expect(second.request).not.toHaveBeenCalled();
-    expect(storedRecord()?.status).toBe('unknown');
   });
 
   it('送信の控えが無い古い記録も読める: 今までどおり hash の receipt の照会だけを行う', async () => {
@@ -857,10 +1092,99 @@ describe('reload の後 (保存した記録だけ) (A-1)', () => {
     expect(waitForReceipt).toHaveBeenCalledWith({ hash: legacyHash });
     expect(restored.result.current.data?.userOpHash).toBe(legacyHash);
     // 送り直し・nonce の読み取り・1 回ずつの receipt の照会はしない (控えが無いので、できない)。
-    expect(fake.request).not.toHaveBeenCalled();
+    expect(fake.bundlerSend).not.toHaveBeenCalled();
     expect(fake.readContract).not.toHaveBeenCalled();
     expect(fake.getUserOperationReceipt).not.toHaveBeenCalled();
     expect(pendingKeys()).toHaveLength(0);
+  });
+});
+
+describe('復元した記録の中の関係を確かめる (SHOULD)', () => {
+  // 応答不明の記録を作って unmount する (送信は届いていない = 送り直せば成立しうる op)。
+  async function seedUnknownRecord() {
+    const first = mountClients({ customer: CUSTOMER_A });
+    loseRequest(first);
+    const firstHook = render();
+    firstHook.result.current.mutate(PARAMS);
+    await waitFor(() => expect(firstHook.result.current.isUnknown).toBe(true));
+    firstHook.unmount();
+    return first;
+  }
+
+  async function expectReceiptOnly(second: Fake) {
+    const restored = render();
+    await waitFor(() => expect(restored.result.current.isUnknown).toBe(true));
+    restored.result.current.retryReceipt();
+    await waitFor(() => expect(second.waitForUserOperationReceipt).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(restored.result.current.isPending).toBe(false));
+    // 送り直しも作り直しも nonce の読み取りもしない。開いたまま。
+    expect(second.bundlerSend).not.toHaveBeenCalled();
+    expect(second.readContract).not.toHaveBeenCalled();
+    expect(second.signUserOperation).not.toHaveBeenCalled();
+    expect(restored.result.current.isUnknown).toBe(true);
+    expect(standardPaymentOpen(restored.result.current)).toBe(false);
+  }
+
+  it('記録の EntryPoint が今の account と違う → 同じ nonce が効かないので送らない (receipt を待つだけ)', async () => {
+    await seedUnknownRecord();
+    rewriteStoredRecord((record) => ({
+      ...record,
+      send: record.send && { ...record.send, entryPoint: entryPoint07Address },
+    }));
+    await expectReceiptOnly(mountClients({ customer: CUSTOMER_A }));
+  });
+
+  it('今の client の account (sender) が記録と違う (同じ接続先のまま account の中身が変わった) → 送らない', async () => {
+    await seedUnknownRecord();
+    await expectReceiptOnly(mountClients({ customer: CUSTOMER_A, sender: OTHER_SENDER }));
+  });
+
+  it('署名済みの op の nonce が記録の nonce と違う (記録の中が食い違う) → 送り直さない・作り直さない', async () => {
+    await seedUnknownRecord();
+    rewriteStoredRecord((record) => ({
+      ...record,
+      send: record.send && {
+        ...record.send,
+        nonceSeq: (BigInt(record.send.nonceSeq) + 1n).toString(),
+      },
+    }));
+    await expectReceiptOnly(mountClients({ customer: CUSTOMER_A }));
+  });
+
+  it('署名済みの op の sender が記録の sender と違う → 送り直さない・作り直さない', async () => {
+    await seedUnknownRecord();
+    rewriteStoredRecord((record) => ({
+      ...record,
+      send: record.send && {
+        ...record.send,
+        signedUserOp: { ...record.send.signedUserOp, sender: OTHER_SENDER },
+      },
+    }));
+    await expectReceiptOnly(mountClients({ customer: CUSTOMER_A }));
+  });
+
+  it('接続先を別の account に切り替えると、その account の支払いは別の範囲 (前の account の記録は残り、戻ると開いたまま)', async () => {
+    const fake = mountClients({ customer: CUSTOMER_A });
+    acceptThenLoseResponse(fake);
+    const hook = render();
+    hook.result.current.mutate(PARAMS);
+    await waitFor(() => expect(hook.result.current.isUnknown).toBe(true));
+
+    mockHook(useAccount, { chainId: baseSepolia.id, address: CUSTOMER_B });
+    hook.rerender();
+    await waitFor(() => expect(hook.result.current.isUnknown).toBe(false));
+    acceptAndMine(fake);
+    hook.result.current.mutate(OTHER_PARAMS);
+    await waitFor(() => expect(hook.result.current.isSuccess).toBe(true));
+    expect(fake.getNonce).toHaveBeenCalledTimes(2);
+    // A の記録はそのまま。
+    expect(pendingKeys()).toHaveLength(1);
+    expect(pendingKeys()[0]).toContain(CUSTOMER_A.toLowerCase());
+
+    mockHook(useAccount, { chainId: baseSepolia.id, address: CUSTOMER_A });
+    hook.rerender();
+    await waitFor(() => expect(hook.result.current.isUnknown).toBe(true));
+    expect(standardPaymentOpen(hook.result.current)).toBe(false);
   });
 });
 
@@ -868,9 +1192,9 @@ describe('hash の扱いと、分けない client (A-1)', () => {
   it('bundler の返した hash が計算と違う → 返った hash を正として記録を直し、warn を残す', async () => {
     const fake = mountClients();
     const returned = `0x${'e'.repeat(64)}` as Hex;
-    fake.request.mockImplementationOnce(async ({ params }) => {
+    fake.bundlerSend.mockImplementationOnce(async ({ params }) => {
       world.accept(params[0]);
-      return returned;
+      return { result: returned };
     });
     const waitForReceipt = vi.mocked(fake.waitForUserOperationReceipt);
     waitForReceipt.mockRejectedValueOnce(new Error('UserOperationReceiptTimeoutError'));
