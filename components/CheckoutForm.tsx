@@ -706,27 +706,8 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
     (useRelay && relay.restoredIntent != null) ||
     // 確定した Pimlico の支払いが、この画面から最後に送った支払いと別の intent (第 10 回レビュー A-1)。
     (!isStandard && !useRelay && gasless.settledOtherIntent);
-  // 復元した支払いの確定が、この会計の支払いでないと証明できたか (第 10 回レビュー H-S)。完了の欄の題と本文だけを
-  // 差し替える (お礼を出さず「この画面の支払いではありません」と「読み込み直す」を出す)。completed・再送の止め・受注通知・
-  // 大きな完了画面・success_url・払った記録・履歴の条件は restoredCheckoutCompletion のままで、ここでは変えない。
-  // この mount で送った支払いは判定しない。比べられない欄は一致 (lib/paymentFlowGuards/restoredSettlement)。
+  // 復元した支払いの確定がこの会計の支払いかを判定する、この会計の形 (第 10 回レビュー H-S・判定は下の foreignSettlement)。
   const settlementScreen = useMemo(() => checkoutSettlementScreen(params), [params]);
-  const foreignSettlement =
-    restoredCheckoutCompletion &&
-    // G-1 (この注文リンクの会計の鍵・chain・お店・額と一致した記録 = 「お店に知らせる」と払った記録を出す) を満たす復元は、
-    // 判定を呼ばずに一致とする。何の波及を断つか: 判定の入力 (token の表など) が env でずれても、この会計と一致した記録に
-    // 「この画面の支払いではありません」を出し、「お店に知らせる」と同時に出すこと。
-    restoredStandardOrderLinkAttempt === null &&
-    restoredRelayOrderIntent === null &&
-    isForeignSettlement(
-      settlementScreen,
-      isStandard
-        ? { kind: 'standard', record: standard.lastSubmittedParams }
-        : useRelay
-          // 注文に束縛した記録 (matchingDelivery) は、hook が今の会計と照らして復元したもの = 常に一致。
-          ? { kind: 'relay', bound: matchingDelivery !== null, record: relay.restoredIntent }
-          : { kind: 'gasless', record: gasless.variables },
-    );
 
   // ウォレットでの取り消しは失敗として数えない (Sentry の *.failed 通知を鳴らさない)。
   useEffect(() => {
@@ -1652,6 +1633,26 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
         : relay.data?.success && relay.data.txHash && restoredRelayOrderIntent
           ? notifyFor(relay.data.txHash, restoredRelayOrderIntent.from)
           : undefined;
+  // 復元した支払いの確定が、この会計の支払いでないと証明できたか (第 10 回レビュー H-S)。完了の欄の題と本文だけを
+  // 差し替える (お礼を出さず「この画面の支払いではありません」と「読み込み直す」を出す)。completed・再送の止め・受注通知・
+  // 大きな完了画面・success_url・払った記録・履歴の条件は restoredCheckoutCompletion のままで、ここでは変えない。
+  // この mount で送った支払いは判定しない。比べられない欄は一致 (lib/paymentFlowGuards/restoredSettlement)。
+  const foreignSettlement =
+    restoredCheckoutCompletion &&
+    // G-1 の欄を出す確定 (restoredCompletionNotify = 成功した確定が、この注文リンクの会計の鍵・chain・お店・額と一致) は、
+    // 判定を呼ばずに一致とする。G-1 の欄と同じ値を見るので、欄を出さない確定 (一致した記録の結果がまだ無い・別の経路の
+    // 記録) はこの守りに入らない。何の波及を断つか: 判定の入力 (token の表など) が env でずれても、この会計と一致した確定に
+    // 「この画面の支払いではありません」を出し、「お店に知らせる」と同時に出すこと。
+    restoredCompletionNotify === undefined &&
+    isForeignSettlement(
+      settlementScreen,
+      isStandard
+        ? { kind: 'standard', record: standard.lastSubmittedParams }
+        : useRelay
+          // 注文に束縛した記録 (matchingDelivery) は、hook が今の会計と照らして復元したもの = 常に一致。
+          ? { kind: 'relay', bound: matchingDelivery !== null, record: relay.restoredIntent }
+          : { kind: 'gasless', record: gasless.variables },
+    );
   // 読み直した画面: この会計 (同じ URL の中身) をこのタブで払った記録があれば、「注文を送る」を出す
   // (lib/orderConfirmation.ts の rememberOrderPayment)。完了画面を見ている間は出さない。
   const restoredNotifyData: NotifyShopData | undefined =

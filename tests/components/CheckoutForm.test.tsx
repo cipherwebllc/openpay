@@ -4982,6 +4982,76 @@ describe('CheckoutForm — 復元した決済の完了で「注文を送る」�
     expect(screen.queryByText(FOREIGN_TITLE)).toBeNull();
   });
 
+  // Codex 第 4 回: G-1 の守りは G-1 の欄を出す確定 (restoredCompletionNotify) と同じ値を見る。この注文リンクと合う記録が
+  // あっても、その結果がまだ無い・今の経路の確定でないなら守りに入らず、確定した別の支払いは W1 になる。判定は実物のまま。
+  const A_PARAMS: CheckoutParams = {
+    ...JPYC_PARAMS,
+    to: OTHER_MERCHANT,
+    orderId: 'ord-A',
+    items: [{ name: 'A', qty: 1, price: '1000' }],
+  };
+  const A_TOTAL = 1000n * 10n ** 18n;
+
+  it('この注文リンクと合う relay の記録 (結果はまだ無い) があっても、確定した通常決済の別の支払い A (別のお店・1,000 JPYC) は「この画面の支払いではありません」', async () => {
+    ready();
+    vi.mocked(resolveJpycGaslessProvider).mockReturnValue('eip3009-relay');
+    setRelayPayment('idle', { restoredIntent: relayIntent() });
+    setStandardPayment('success-no-fee', {
+      lastSubmittedParams: {
+        tokenAddress: deployment.address,
+        merchant: OTHER_MERCHANT,
+        merchantAmount: A_TOTAL,
+        feeReceiver: env.feeReceiver,
+        feeAmount: 0n,
+        chainId: deployment.chainId,
+        saleAmount: A_TOTAL,
+        contextKey: contextKeyOf({ ...A_PARAMS, mode: 'standard' }),
+        orderLinkKey: orderLinkKeyOf({ ...A_PARAMS, mode: 'standard' }),
+      },
+      lastSubmittedFrom: CUSTOMER,
+      restoredFromStorage: true,
+    });
+    render(<CheckoutForm params={RELAY_ORDER} />);
+
+    expect(screen.getAllByText(`0x${'c'.repeat(64)}`).length).toBeGreaterThan(0);
+    expect(screen.getByText(FOREIGN_TITLE)).toBeInTheDocument();
+    expect(screen.queryByText(DONE_TITLE)).toBeNull();
+    expect(screen.queryByRole('button', { name: '注文を送る' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'お店に知らせる' })).toBeNull();
+  });
+
+  // 逆の組み合わせ。この注文リンクと合う通常決済の記録は未確定 (結果なし) で、今の経路は relay。本物の hook は通常決済の
+  // 記録を復元すると hasAttempt を立てて経路を通常決済にするので、この組み合わせは hook の印を mock で組んで作る
+  // (Codex 第 4 回の推定: bfcache で戻った画面の古い hook の状態)。
+  it('この注文リンクと合う通常決済の記録 (未確定) があっても、確定した relay の別の支払い A (別のお店・1,000 JPYC) は「この画面の支払いではありません」', async () => {
+    ready();
+    setStandardPayment('idle', {
+      lastSubmittedParams: {
+        tokenAddress: deployment.address,
+        merchant: MERCHANT,
+        merchantAmount: TOTAL,
+        feeReceiver: env.feeReceiver,
+        feeAmount: 0n,
+        chainId: deployment.chainId,
+        saleAmount: TOTAL,
+        contextKey: contextKeyOf(RELAY_ORDER),
+        orderLinkKey: orderLinkKeyOf(RELAY_ORDER),
+      },
+      lastSubmittedFrom: CUSTOMER,
+      restoredFromStorage: true,
+    });
+    setRestoredRelaySuccess(
+      relayIntent({ merchant: OTHER_MERCHANT, merchantValue: A_TOTAL.toString(), orderLinkKey: orderLinkKeyOf(A_PARAMS) }),
+    );
+    render(<CheckoutForm params={RELAY_ORDER} />);
+
+    expect(screen.getAllByText(TX).length).toBeGreaterThan(0);
+    expect(screen.getByText(FOREIGN_TITLE)).toBeInTheDocument();
+    expect(screen.queryByText(DONE_TITLE)).toBeNull();
+    expect(screen.queryByRole('button', { name: '注文を送る' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'お店に知らせる' })).toBeNull();
+  });
+
   it('(対照) 判定を不一致に強制すると、G-1 を満たさない復元 (別の注文の指紋) は「この画面の支払いではありません」', async () => {
     settlementForce.foreign = true;
     ready();
