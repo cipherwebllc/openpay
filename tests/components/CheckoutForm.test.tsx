@@ -5113,8 +5113,9 @@ describe('CheckoutForm — 復元した決済の完了で「注文を送る」�
   });
 
   // 逆の組み合わせ。この注文リンクと合う通常決済の記録は未確定 (結果なし) で、今の経路は relay。本物の hook は通常決済の
-  // 記録を復元すると hasAttempt を立てて経路を通常決済にするので、この組み合わせは hook の印を mock で組んで作る
-  // (Codex 第 4 回の推定: bfcache で戻った画面の古い hook の状態)。
+  // 記録を復元すると hasAttempt を立てて経路を通常決済にする (lastSubmittedParams と hasAttempt は同じ ref から出る) ので、
+  // この組み合わせは本物の hook では作れない。hook の印を mock で組んだ、守りの形だけを確かめるテスト (守りが経路や
+  // もう一方の記録の有無でなく restoredCompletionNotify だけを見ること)。起きうる状態の再現ではない。
   it('この注文リンクと合う通常決済の記録 (未確定) があっても、確定した relay の別の支払い A (別のお店・1,000 JPYC) は「この画面の支払いではありません」', async () => {
     ready();
     setStandardPayment('idle', {

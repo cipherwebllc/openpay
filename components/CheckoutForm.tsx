@@ -1643,7 +1643,10 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
     // G-1 の欄を出す確定 (restoredCompletionNotify = 成功した確定が、この注文リンクの会計の鍵・chain・お店・額と一致) は、
     // 判定を呼ばずに一致とする。G-1 の欄と同じ値を見るので、欄を出さない確定 (一致した記録の結果がまだ無い・別の経路の
     // 記録) はこの守りに入らない。何の波及を断つか: 判定の入力 (token の表など) が env でずれても、この会計と一致した確定に
-    // 「この画面の支払いではありません」を出し、「お店に知らせる」と同時に出すこと。
+    // 「この画面の支払いではありません」を出すこと。
+    // 守るのは restoredCompletionNotify から出る欄だけ。下の restoredNotifyData は、このタブで払った記録 (rememberedPayment)
+    // からも「注文を送る」を出すので、「前に払ったこの会計 B の『注文を送る』」と「いま確定した別の支払い A の W1」は並んで
+    // 出うる (A と B は別の支払いで、どちらの表示も事実)。
     restoredCompletionNotify === undefined &&
     isForeignSettlement(
       settlementScreen,
