@@ -524,6 +524,80 @@ describe('確定の片付け (settle) は、同じ intent なら hash が変わ�
   });
 });
 
+// 記録の書き込みと読み戻しの間に、別のタブの書き込みが入る (同じタブの中では、その間に JS は走らない)。nth 回目の記録の
+// 書き込みの直後に、別のタブが B の記録 (別の nonce) を書く・記録を消す。
+function anotherTabWritesAfter(nth: number, mode: 'other' | 'removed') {
+  const realSet = Storage.prototype.setItem;
+  const realRemove = Storage.prototype.removeItem;
+  const state: { writes: number; otherRaw: string | null } = { writes: 0, otherRaw: null };
+  vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (
+    this: Storage,
+    key: string,
+    value: string,
+  ) {
+    realSet.call(this, key, value);
+    if (!key.startsWith(PIMLICO_PENDING_KEY_PREFIX) || ++state.writes !== nth) return;
+    if (mode === 'removed') {
+      realRemove.call(this, key);
+      return;
+    }
+    const mine = JSON.parse(value) as { send: Record<string, unknown> };
+    state.otherRaw = JSON.stringify({
+      ...mine,
+      userOpHash: `0x${'d'.repeat(64)}`,
+      send: { ...mine.send, nonceKey: '42' },
+    });
+    realSet.call(this, key, state.otherRaw);
+  });
+  return state;
+}
+
+describe('保存を確かめられない op の片付け (onNotStored) も、同じ intent の記録だけを消す・書き戻す', () => {
+  it('新しい支払いの保存の読み戻しの前に、別のタブが B の記録を書いた → 書いたかもしれない記録の片付けで B を消さない (送らずに開いたまま)', async () => {
+    const fake = mountClients();
+    const tab = anotherTabWritesAfter(1, 'other');
+    const hook = render();
+
+    hook.result.current.mutate(PARAMS);
+    await waitFor(() => expect(hook.result.current.isUnknown).toBe(true));
+    await waitFor(() => expect(hook.result.current.isPending).toBe(false));
+
+    // 直す前: key ごとの削除が B の記録を消し、「保存できません」(通常決済は開く) で終えた。
+    expect(storedRaw()).toBe(tab.otherRaw);
+    expect(fake.bundlerSend).not.toHaveBeenCalled();
+    expect(hook.result.current.pendingStoreUnavailable).toBe(false);
+    expect(logger.warn).toHaveBeenCalledWith('pimlico.pending.persist-unverified', expect.anything());
+  });
+
+  it.each([
+    { label: 'B の記録を書いた', mode: 'other' as const },
+    { label: '記録を閉じた (消した)', mode: 'removed' as const },
+  ])(
+    '作り直しの保存の読み戻しの前に、別のタブが$label → 元の記録を書き戻さない (送らずに開いたまま)',
+    async ({ mode }) => {
+      const fake = mountClients();
+      loseRequest(fake);
+      const hook = render();
+      hook.result.current.mutate(PARAMS);
+      await waitFor(() => expect(hook.result.current.isUnknown).toBe(true));
+      await waitFor(() => expect(hook.result.current.isPending).toBe(false));
+
+      // 確かめる → 送り直し (送る時刻の書き込み = 1 回目) を bundler が検証で拒否 → 同じ nonce で作り直す (書き込み = 2 回目)。
+      replyOnce(fake, PAYMASTER_EXPIRED);
+      const tab = anotherTabWritesAfter(2, mode);
+      hook.result.current.retryReceipt();
+      await waitFor(() => expect(fake.signUserOperation).toHaveBeenCalledTimes(2));
+      await waitFor(() => expect(hook.result.current.isPending).toBe(false));
+
+      // 直す前: 元の記録を key ごとに書き戻し、B の記録を上書きする・閉じた記録を復活させる。
+      expect(storedRaw()).toBe(tab.otherRaw);
+      expect(fake.bundlerSend).toHaveBeenCalledTimes(2);
+      expect(hook.result.current.isUnknown).toBe(true);
+      expect(logger.warn).toHaveBeenCalledWith('pimlico.pending.persist-unverified', expect.anything());
+    },
+  );
+});
+
 describe('控えの無い記録 (MAv2) の receipt 待ちの失敗 (hook) も、同じ記録 (hash) のときだけ書く', () => {
   const H1 = `0x${'a'.repeat(64)}` as Hex;
   const H2 = `0x${'c'.repeat(64)}` as Hex;
