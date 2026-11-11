@@ -2946,6 +2946,42 @@ describe('useJpycEip3009Payment — 復旧の枠を書けない端末では束�
     expect(logger.info).not.toHaveBeenCalledWith('payment.intent_storage_unavailable', expect.anything());
   });
 
+  // 変わらないこと: 画面を離れた試みは今までどおり payment_cancelled で止まり、離れた後に storage へ触れない
+  // (署名の前の確かめは、画面にいる試みだけが行う)。
+  it('recover の部品の読み込みを待つ間に unmount した試みは、枠を書けない端末でも確かめのキーに触れず payment_cancelled で止まる', async () => {
+    setRoute('recover');
+    mount();
+    const qc = new QueryClient({ defaultOptions: { mutations: { retry: false }, queries: { retry: false } } });
+    const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={qc}>{children}</QueryClientProvider>;
+    let releaseChunk: () => void = () => undefined;
+    const chunkGate = new Promise<void>((resolve) => { releaseChunk = resolve; });
+    vi.doMock('@/lib/relay/forwarderIntent', async () => {
+      await chunkGate;
+      return vi.importActual<typeof import('@/lib/relay/forwarderIntent')>('@/lib/relay/forwarderIntent');
+    });
+    try {
+      const view = renderHook(() => useJpycEip3009Payment(jpycDep), { wrapper });
+      await waitFor(() => expect(view.result.current.isRestoring).toBe(false));
+      const writes = breakSetItem(relayKeys);
+      act(() => view.result.current.mutate({ merchant: MERCHANT, value: VALUE }));
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 10));
+      });
+      expect(view.result.current.isPending).toBe(true);
+      view.unmount();
+      await act(async () => {
+        releaseChunk();
+      });
+      await waitFor(() => expect(qc.getMutationCache().getAll()[0]?.state.status).toBe('error'));
+      expect(qc.getMutationCache().getAll()[0].state.error?.message).toBe('payment_cancelled');
+      expect(writes.mock.calls.filter(([key]) => relayKeys(key as string))).toHaveLength(0);
+      expect(signTypedData).not.toHaveBeenCalled();
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      vi.doUnmock('@/lib/relay/forwarderIntent');
+    }
+  });
+
   // 変わらないこと: 束縛した注文は relay の枠を使わない (自分の slot・order_binding_storage_unavailable で止まる) ので、
   // relay の枠を書けない端末でも今までどおり送る。
   it('束縛した注文は relay の枠が書けなくても今までどおり署名して送る (この確かめの対象外)', async () => {

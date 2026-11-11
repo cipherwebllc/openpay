@@ -673,8 +673,10 @@ export function useJpycEip3009Payment(
       // lib/paymentIntentStorage の canStoreRelayIntent)。storageRef が null (storage の chunk を読めなかった) のときも
       // 枠を書けないので同じく止める。送ってよいかを決めるのは、署名の後に枠そのものを書いて読み戻す下の確かめ。
       // 束縛した注文は枠を使わず、署名の後の persistOrder (自分の slot の保存) で止まるので、ここでは見ない。
+      // 画面を離れた (unmount した) 試みは、直後の signWithLogging が payment_cancelled で止める。離れた後に storage へ
+      // 触れない・止める理由を変えないよう、ここでは確かめない。
       const assertRelayIntentStorable = (candidate: RelayIntentMetadata) => {
-        if (bind || storageRef.current?.canStoreRelayIntent(candidate)) return;
+        if (bind || !mountedRef.current || storageRef.current?.canStoreRelayIntent(candidate)) return;
         logger.info('payment.intent_storage_unavailable', { path: 'jpyc-relay', chainId, stage: 'probe' });
         throw new Error('intent_storage_unavailable');
       };
