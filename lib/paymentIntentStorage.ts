@@ -473,3 +473,58 @@ export function saveSalesMoveIntent(intent: SalesMoveIntentMetadata): void {
 export function clearSalesMoveIntent(): void {
   clear(SALES_MOVE_INTENT_STORAGE_KEY);
 }
+
+// 売上の移動の枠を、「読めなかった」と「空」を分けて読む (第 10 回レビュー PR-03 Codex SHOULD)。共有の load() は読み取りの
+// 失敗も null (空) にする (決済の画面を止めないための隔離)。売上の移動はそれを空と読むと、読めないまま残っている未解決の枠を
+// 次の移動が上書きして、新しい署名 (別の nonce) = 二重の移動へ進めてしまう。だから getItem が投げたときだけ 'unreadable' を
+// 返し、呼出側 (hooks/useSalesMove) が移動を止める。中身の扱い (形の崩れた記録は空として扱い、JSON として読めて形が違う
+// 記録は消す) は load() と同じ。
+export type SalesMoveIntentSlot =
+  | { kind: 'empty' }
+  | { kind: 'intent'; intent: SalesMoveIntentMetadata }
+  | { kind: 'unreadable' };
+
+export function readSalesMoveIntentSlot(): SalesMoveIntentSlot {
+  let raw: string | null;
+  try {
+    raw = window.sessionStorage.getItem(SALES_MOVE_INTENT_STORAGE_KEY);
+  } catch {
+    return { kind: 'unreadable' };
+  }
+  if (!raw) return { kind: 'empty' };
+  // 読めた中身はもう一度読まずに解く (読み直すと、2 回目の読み取りの失敗が空に化ける)。
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    return { kind: 'empty' };
+  }
+  const intent = parseSalesMoveIntent(value);
+  if (intent) return { kind: 'intent', intent };
+  clear(SALES_MOVE_INTENT_STORAGE_KEY);
+  return { kind: 'empty' };
+}
+
+// 署名を求める前の確かめ (第 10 回レビュー G-1)。枠と同じ中身を別のキーに書き、読み戻して消す。
+// 何の波及を断つか: 枠を書けない端末 (サイトのデータの保存を止めている・容量が一杯) で署名させてから「移せません」と
+// 止めること (無駄な署名)。枠そのもののキーには書かない: 署名の前に枠を残すと、ウォレットの署名を取りやめて開き直した
+// 画面が、送っていない移動を「送信済みかもしれない」として署名の期限が証明されるまで塞ぐ。
+// 送ってよいかを決めるのはこの確かめではなく、署名の後に枠そのものを書いて読み戻す確かめ (hooks/useSalesMove の send)。
+// 署名を待つ間に保存できなくなる端末を、この確かめは見つけられない。
+export const SALES_MOVE_INTENT_PROBE_KEY = 'openpay:move-intent:probe';
+
+export function canStoreSalesMoveIntent(intent: SalesMoveIntentMetadata): boolean {
+  try {
+    // 枠と同じ whitelist を通した中身 (署名や将来のフィールドを書かない・枠と同じ長さ)。
+    const record = parseSalesMoveIntent(intent);
+    if (!record) return false;
+    const raw = JSON.stringify(record);
+    window.sessionStorage.setItem(SALES_MOVE_INTENT_PROBE_KEY, raw);
+    const stored = window.sessionStorage.getItem(SALES_MOVE_INTENT_PROBE_KEY);
+    window.sessionStorage.removeItem(SALES_MOVE_INTENT_PROBE_KEY);
+    return stored === raw;
+  } catch {
+    // 書けない・読めない・消せない端末。呼出側 (売上の移動) が署名の前に止めて、画面で知らせる (握りつぶさない)。
+    return false;
+  }
+}
