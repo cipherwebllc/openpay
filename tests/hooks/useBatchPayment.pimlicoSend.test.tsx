@@ -46,14 +46,16 @@ vi.mock('@/lib/logger', () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 import { useSmartAccount } from '@/hooks/useSmartAccount';
-import { useAccount } from 'wagmi';
+import { useAccount, usePublicClient } from 'wagmi';
 import { logger } from '@/lib/logger';
 import { mockHook } from '../_helpers/wagmiMock';
 import {
   bundlerTimeout,
   createFakeBundlerWorld,
   fakePimlicoClients,
+  fakePublicClient,
   lostResponse,
+  routePimlicoReceiptApi,
   type BundlerHttpReply,
   type FakeBundlerWorld,
 } from '../_helpers/fakePimlicoBundler';
@@ -1458,5 +1460,343 @@ describe('hash の扱いと、分けない client (A-1)', () => {
     // この PR は MAv2 の送信を変えない (分けられない)。本番では JPYC は relay・USDC は MAv2 非対応で、ここに来ない。
     expect(result.current.isUnknown).toBe(false);
     expect(pendingKeys()).toHaveLength(0);
+  });
+});
+
+// ---- Codex 第 2 回レビュー (REQUEST CHANGES) の 3 件 ----------------------------------------------------------------
+
+// 1 回目の書き込みは通り、その読み戻しが投げる。片付け (removeItem) は通り、消えたかの確かめ (getItem) が投げる。
+// その後の書き込みはずっと投げる (Codex 第 2 回 MUST 1 の再現の storage)。
+function failStorageAfterPartialCleanup() {
+  const realGet = Storage.prototype.getItem;
+  const realSet = Storage.prototype.setItem;
+  const realRemove = Storage.prototype.removeItem;
+  let writes = 0;
+  let failNextGet = false;
+  const isPending = (key: string) => key.startsWith(PIMLICO_PENDING_KEY_PREFIX);
+  vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (
+    this: Storage,
+    key: string,
+    value: string,
+  ) {
+    if (!isPending(key)) return realSet.call(this, key, value);
+    writes += 1;
+    if (writes > 1) throw new DOMException('quota', 'QuotaExceededError');
+    realSet.call(this, key, value);
+    failNextGet = true;
+  });
+  vi.spyOn(Storage.prototype, 'getItem').mockImplementation(function (
+    this: Storage,
+    key: string,
+  ) {
+    if (failNextGet && isPending(key)) {
+      failNextGet = false;
+      throw new DOMException('read failed', 'UnknownError');
+    }
+    return realGet.call(this, key);
+  });
+  vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(function (
+    this: Storage,
+    key: string,
+  ) {
+    realRemove.call(this, key);
+    if (isPending(key)) failNextGet = true;
+  });
+}
+
+describe('送る前に保存を確かめる: memory にだけ残った署名済みの op は送らない (Codex 第 2 回 MUST 1)', () => {
+  it('保存の読み戻しが投げ、片付けの確かめも投げ、その後は書けない → 「同じ送信内容を再確認」で送らない。reload の後の支払いと合わせて、EntryPoint が実行する支払いは 1 本だけ (Codex の再現)', async () => {
+    const first = mountClients();
+    failStorageAfterPartialCleanup();
+    const hook = render();
+
+    hook.result.current.mutate(PARAMS);
+    await waitFor(() => expect(hook.result.current.isUnknown).toBe(true));
+    await waitFor(() => expect(hook.result.current.isPending).toBe(false));
+    // 送っていない。storage には残っていない (片付けは効いたが、確かめられなかった)。memory のラッチだけが残る。
+    expect(first.bundlerSend).not.toHaveBeenCalled();
+    expect(pendingKeys()).toHaveLength(0);
+    expect(standardPaymentOpen(hook.result.current)).toBe(false);
+
+    // 「同じ送信内容を再確認」: 照合 (receipt・nonce) は読むが、送る前に保存を確かめられないので送らない。
+    // 送っていれば、bundler は受理して応答だけ失われる (直す前はこの op が mempool に入っていた)。
+    acceptThenLoseResponse(first);
+    hook.result.current.retryReceipt();
+    await waitFor(() => expect(first.readContract).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(hook.result.current.isPending).toBe(false));
+    expect(first.bundlerSend).not.toHaveBeenCalled();
+    expect(world.mempoolHashes()).toHaveLength(0);
+    expect(hook.result.current.isUnknown).toBe(true);
+    expect(hook.result.current.pendingStoreUnavailable).toBe(true);
+    expect(hook.result.current.error).toBeNull();
+    expect(standardPaymentOpen(hook.result.current)).toBe(false);
+    expect(logger.warn).toHaveBeenCalledWith('pimlico.send.not-stored', expect.anything());
+    hook.unmount();
+    vi.restoreAllMocks();
+
+    // reload: 記録は無いので、新しい支払い (別の nonce) が通る。
+    const second = mountClients();
+    const restored = render();
+    expect(restored.result.current.isUnknown).toBe(false);
+    acceptAndMine(second);
+    restored.result.current.mutate(PARAMS);
+    await waitFor(() => expect(restored.result.current.isSuccess).toBe(true));
+
+    // bundler に残っている op があれば、それも mine される (直す前: 1 本目の 10 USDC も成立して 2 本)。
+    for (const hash of world.mempoolHashes()) world.mine(hash);
+    expect(world.mined).toHaveLength(1);
+  });
+
+  it('送り直しの前に、storage に同じ記録があれば書き直さずに送る (読めるだけで確かめられる)', async () => {
+    const fake = mountClients();
+    loseRequest(fake);
+    const { result } = render();
+    result.current.mutate(PARAMS);
+    await waitFor(() => expect(result.current.isUnknown).toBe(true));
+
+    const setItem = vi.spyOn(Storage.prototype, 'setItem');
+    acceptAndMine(fake);
+    result.current.retryReceipt();
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    expect(fake.bundlerSend).toHaveBeenCalledTimes(2);
+    expect(setItem.mock.calls.filter(([key]) => String(key).startsWith(PIMLICO_PENDING_KEY_PREFIX))).toEqual([]);
+  });
+
+  it('memory にだけある記録でも、書けるようになっていれば書いて読み戻してから送る (reload の後も同じ op を確かめられる)', async () => {
+    const fake = mountClients();
+    failStorageAfterPartialCleanup();
+    const { result } = render();
+    result.current.mutate(PARAMS);
+    await waitFor(() => expect(result.current.isUnknown).toBe(true));
+    await waitFor(() => expect(result.current.isPending).toBe(false));
+    expect(pendingKeys()).toHaveLength(0);
+    vi.restoreAllMocks();
+
+    loseRequest(fake);
+    result.current.retryReceipt();
+    await waitFor(() => expect(fake.bundlerSend).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(result.current.isPending).toBe(false));
+    // 送る前に保存した記録 = 送った op。
+    expect(storedRecord()?.send?.signedUserOp).toEqual(sentOp(fake, 0));
+    expect(result.current.pendingStoreUnavailable).toBe(false);
+    expect(result.current.isUnknown).toBe(true);
+  });
+});
+
+describe('別の intent の確定は、その intent 自体の受取先・金額だけで記録する (Codex 第 2 回 MUST 2)', () => {
+  it('reload の後に確定した intent は recoveredIntent に保存した params を返す (今の画面の店・注文と組み合わせる材料を出さない)', async () => {
+    const first = mountClients();
+    loseRequest(first);
+    const firstHook = render();
+    firstHook.result.current.mutate(PARAMS);
+    await waitFor(() => expect(firstHook.result.current.isUnknown).toBe(true));
+    firstHook.unmount();
+
+    const second = mountClients();
+    const restored = render();
+    await waitFor(() => expect(restored.result.current.isUnknown).toBe(true));
+    acceptAndMine(second);
+    restored.result.current.retryReceipt();
+    await waitFor(() => expect(restored.result.current.isSuccess).toBe(true));
+
+    expect(usdcDep.chainId).toBe(baseSepolia.id);
+    expect(restored.result.current.settledOtherIntent).toBe(true);
+    expect(restored.result.current.recoveredIntent).toEqual(PARAMS);
+  });
+
+  it('画面から送った支払いの確定では recoveredIntent は無い', async () => {
+    const fake = mountClients();
+    acceptAndMine(fake);
+    const { result } = render();
+    result.current.mutate(PARAMS);
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.settledOtherIntent).toBe(false);
+    expect(result.current.recoveredIntent).toBeNull();
+  });
+
+  it('記録の chain が今の画面の deployment と違う → 帰属を確かめられないので recoveredIntent は null (履歴・控えを書かない)', async () => {
+    const first = mountClients();
+    loseRequest(first);
+    const firstHook = render();
+    firstHook.result.current.mutate(PARAMS);
+    await waitFor(() => expect(firstHook.result.current.isUnknown).toBe(true));
+    firstHook.unmount();
+
+    // 同じ token の address を別の chain に持つ画面 (JPYC は chain をまたいで同じ address)。ウォレットは記録の chain のまま。
+    const otherChainDep = { ...usdcDep, chainId: 11_155_111 };
+    const second = mountClients();
+    const restored = renderHook(() => useBatchPayment(otherChainDep), { wrapper: makeWrapper() });
+    await waitFor(() => expect(restored.result.current.isUnknown).toBe(true));
+    acceptAndMine(second);
+    restored.result.current.retryReceipt();
+    await waitFor(() => expect(restored.result.current.isSuccess).toBe(true));
+
+    expect(restored.result.current.settledOtherIntent).toBe(true);
+    expect(restored.result.current.recoveredIntent).toBeNull();
+  });
+});
+
+describe('照合 (読むだけ) は今の account で送れるかに依存しない (Codex 第 2 回 MUST 3)', () => {
+  // 委任を外した (pristine に戻した): useSmartAccount は client を作らない (pristine を弾く)。
+  function revokeDelegation() {
+    mockHook(useSmartAccount, { data: undefined, isLoading: false, error: new Error('pristine') });
+    mockHook(useAccount, { chainId: baseSepolia.id });
+  }
+
+  // 応答不明の記録を作って unmount する。delivered = bundler に届いて mempool にある (mine は test が決める)。
+  async function seedOpenIntent(delivered: boolean) {
+    const first = mountClients();
+    if (delivered) acceptThenLoseResponse(first);
+    else loseRequest(first);
+    const firstHook = render();
+    firstHook.result.current.mutate(PARAMS);
+    await waitFor(() => expect(firstHook.result.current.isUnknown).toBe(true));
+    const hash = (storedRecord() as StoredRecord).userOpHash;
+    firstHook.unmount();
+    return hash;
+  }
+
+  async function renderRestored() {
+    const restored = render();
+    await waitFor(() => expect(restored.result.current.isUnknown).toBe(true));
+    expect(standardPaymentOpen(restored.result.current)).toBe(false);
+    return restored;
+  }
+
+  it('委任を外した後、7 日を過ぎた記録: receipt も nonce の使用も無い → 照合で閉じ、通常決済が開く (Codex の再現)', async () => {
+    const hash = await seedOpenIntent(false);
+    ageStoredRecord();
+    revokeDelegation();
+    const lookups = routePimlicoReceiptApi(world);
+    const pub = fakePublicClient(world);
+    vi.mocked(usePublicClient).mockReturnValue(pub.client as never);
+
+    const restored = await renderRestored();
+    restored.result.current.retryReceipt();
+    await waitFor(() => expect(restored.result.current.isUnknown).toBe(false));
+    await waitFor(() => expect(restored.result.current.isPending).toBe(false));
+
+    expect(lookups).toHaveBeenCalledWith(hash);
+    expect(pub.readContract).toHaveBeenCalledTimes(1);
+    expect(pub.readContract.mock.calls[0][0]).toMatchObject({
+      address: world.entryPoint,
+      functionName: 'getNonce',
+    });
+    expect(pendingKeys()).toHaveLength(0);
+    expect(restored.result.current.error).toBeNull();
+    expect(standardPaymentOpen(restored.result.current)).toBe(true);
+    expect(logger.warn).toHaveBeenCalledWith(
+      'pimlico.pending.expired-closed',
+      expect.objectContaining({ state: 'open' }),
+    );
+  });
+
+  it('委任を外した後でも、op が取り込まれていれば receipt で確定する (期限の前)', async () => {
+    const hash = await seedOpenIntent(true);
+    world.mine(hash);
+    revokeDelegation();
+    routePimlicoReceiptApi(world);
+    vi.mocked(usePublicClient).mockReturnValue(fakePublicClient(world).client as never);
+
+    const restored = await renderRestored();
+    restored.result.current.retryReceipt();
+    await waitFor(() => expect(restored.result.current.isSuccess).toBe(true));
+
+    expect(restored.result.current.data).toMatchObject({ userOpHash: hash, success: true });
+    expect(restored.result.current.isUnknown).toBe(false);
+    expect(pendingKeys()).toHaveLength(0);
+    expect(world.mined).toHaveLength(1);
+  });
+
+  it('委任を外した後、期限の前で receipt も無い → 送らずに開いたまま。照合は記録を書き換えない (期限を延ばさない) ので、7 日を過ぎた後の照合で閉じる', async () => {
+    await seedOpenIntent(false);
+    const before = window.localStorage.getItem(pendingKeys()[0]);
+    revokeDelegation();
+    routePimlicoReceiptApi(world);
+    vi.mocked(usePublicClient).mockReturnValue(fakePublicClient(world).client as never);
+
+    const restored = await renderRestored();
+    restored.result.current.retryReceipt();
+    await waitFor(() => expect(restored.result.current.isPending).toBe(false));
+    await waitFor(() => expect(logger.warn).toHaveBeenCalledWith('pimlico.verify.send-unavailable', expect.anything()));
+    expect(restored.result.current.isUnknown).toBe(true);
+    expect(standardPaymentOpen(restored.result.current)).toBe(false);
+    expect(window.localStorage.getItem(pendingKeys()[0])).toBe(before);
+    expect(world.mempoolHashes()).toHaveLength(0);
+    restored.unmount();
+
+    // 7 日後に戻る (記録の時刻は最後に送った時のまま)。
+    ageStoredRecord();
+    const later = await renderRestored();
+    later.result.current.retryReceipt();
+    await waitFor(() => expect(later.result.current.isUnknown).toBe(false));
+    expect(pendingKeys()).toHaveLength(0);
+    expect(standardPaymentOpen(later.result.current)).toBe(true);
+  });
+
+  it('照合に要る chain の client が読めない (wagmi の public client が無い・別の chain) → 7 日を過ぎていても開いたまま。読めるようになったら閉じる', async () => {
+    await seedOpenIntent(false);
+    ageStoredRecord();
+    revokeDelegation();
+    routePimlicoReceiptApi(world);
+    vi.mocked(usePublicClient).mockReturnValue(fakePublicClient(world, 1).client as never);
+
+    const restored = await renderRestored();
+    restored.result.current.retryReceipt();
+    await waitFor(() =>
+      expect(logger.warn).toHaveBeenCalledWith('pimlico.verify.probe-failed', expect.anything()),
+    );
+    await waitFor(() => expect(restored.result.current.isPending).toBe(false));
+    expect(restored.result.current.isUnknown).toBe(true);
+    expect(pendingKeys()).toHaveLength(1);
+    expect(standardPaymentOpen(restored.result.current)).toBe(false);
+
+    vi.mocked(usePublicClient).mockReturnValue(fakePublicClient(world).client as never);
+    restored.rerender();
+    restored.result.current.retryReceipt();
+    await waitFor(() => expect(restored.result.current.isUnknown).toBe(false));
+    expect(pendingKeys()).toHaveLength(0);
+  });
+
+  it('記録の EntryPoint が今の account と違う (委任先を変えた) → 送らないが、7 日を過ぎていれば記録の EntryPoint の nonce を読んで閉じる (Codex の再現)', async () => {
+    await seedOpenIntent(false);
+    rewriteStoredRecord((record) => ({
+      ...record,
+      send: record.send && { ...record.send, entryPoint: entryPoint07Address },
+    }));
+    ageStoredRecord();
+    const second = mountClients();
+
+    const restored = await renderRestored();
+    restored.result.current.retryReceipt();
+    await waitFor(() => expect(restored.result.current.isUnknown).toBe(false));
+    await waitFor(() => expect(restored.result.current.isPending).toBe(false));
+
+    expect(second.readContract.mock.calls[0][0]).toMatchObject({ address: entryPoint07Address });
+    expect(second.bundlerSend).not.toHaveBeenCalled();
+    expect(second.signUserOperation).not.toHaveBeenCalled();
+    expect(second.waitForUserOperationReceipt).not.toHaveBeenCalled();
+    expect(pendingKeys()).toHaveLength(0);
+    expect(standardPaymentOpen(restored.result.current)).toBe(true);
+  });
+
+  it('Circle の経路に切り替わった後も、7 日を過ぎた Pimlico の記録を照合で閉じる (送らない)', async () => {
+    await seedOpenIntent(false);
+    ageStoredRecord();
+    mockHook(useSmartAccount, {
+      data: { provider: 'circle' },
+      isLoading: false,
+      error: null,
+    } as never);
+    mockHook(useAccount, { chainId: baseSepolia.id });
+    routePimlicoReceiptApi(world);
+    vi.mocked(usePublicClient).mockReturnValue(fakePublicClient(world).client as never);
+
+    const restored = await renderRestored();
+    restored.result.current.retryReceipt();
+    await waitFor(() => expect(restored.result.current.isUnknown).toBe(false));
+    expect(pendingKeys()).toHaveLength(0);
+    expect(world.mempoolHashes()).toHaveLength(0);
   });
 });

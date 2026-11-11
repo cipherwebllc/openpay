@@ -777,6 +777,64 @@ describe('PaymentForm — 送信フロー', () => {
     },
   );
 
+  // 第 10 回レビュー A-1 (Codex 第 2 回 MUST 2): 別の intent の確定を、今の画面の店・明細と組み合わせて履歴・控えに書かない。
+  // recoveredIntent (確定した intent 自体の受取先・金額) があればそれだけで書き、無ければ (帰属を確かめられない) 書かない。
+  it.each([
+    { recovered: true },
+    { recovered: false },
+  ])(
+    'gasless: 別の intent の確定 (recoveredIntent あり=$recovered) は、intent の受取先・金額だけで記録し、画面の店名・商品名・明細を付けない',
+    async ({ recovered }) => {
+      window.localStorage.clear();
+      const user = userEvent.setup();
+      setURL(`to=${MERCHANT}&token=usdc&amount=100&store=Shop%20B&pname=Coffee`);
+      setAccount({ connected: true, chainId: baseSepolia.id });
+      setBalance(200_000_000n);
+      setSmartAccount(true);
+      setPayment('idle');
+      setGasQuote('ready', 0n);
+      const { rerender } = render(<PaymentForm />);
+      await user.click(screen.getByRole('button', { name: /100 USDC を支払う/ }));
+
+      // 実際に確定したのは、前に結果が分からなかった店 A への 10 USDC (保存した intent の params)。
+      const intentA = {
+        tokenAddress: getAddress('0x036CbD53842c5426634e7929541eC2318f3dCF7e'),
+        merchant: getAddress('0xa1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1'),
+        merchantAmount: 10_000_000n,
+        feeReceiver: getAddress('0xfee0fee0fee0fee0fee0fee0fee0fee0fee0fee0'),
+        feeAmount: 0n,
+      };
+      setPayment('success', undefined, {
+        settledOtherIntent: true,
+        recoveredIntent: recovered ? intentA : null,
+        variables: intentA,
+      });
+      rerender(<PaymentForm />);
+      // 画面には hash が出る (利用者が自分で確かめられる)。
+      expect((await screen.findAllByText(`0x${'b'.repeat(64)}`)).length).toBeGreaterThan(0);
+
+      if (!recovered) {
+        await waitFor(() => expect(loadHistory()).toHaveLength(0));
+        expect(loadPayerReceipts()).toHaveLength(0);
+        return;
+      }
+      await waitFor(() => expect(loadHistory()).toHaveLength(1));
+      const [history] = loadHistory();
+      expect(history.merchant).toBe(intentA.merchant);
+      expect(history.merchantAmount).toBe('10000000');
+      expect(history.feeReceiver).toBe(intentA.feeReceiver);
+      expect(history.storeName).toBe('');
+      expect(history.productName ?? null).toBeNull();
+      expect(history.lineItems ?? null).toBeNull();
+      await waitFor(() => expect(loadPayerReceipts()).toHaveLength(1));
+      const [receipt] = loadPayerReceipts();
+      expect(receipt.merchantAddress).toBe(intentA.merchant);
+      expect(receipt.amount).toBe('10');
+      expect(receipt.merchantName).toBeUndefined();
+      expect((receipt.lineItems ?? []).map((item) => item.name)).not.toContain('Coffee');
+    },
+  );
+
   it('据え置き QR (amount 無し) で顧客が金額入力 → mutate に反映', async () => {
     const user = userEvent.setup();
     setURL(`to=${MERCHANT}&token=usdc`);

@@ -505,7 +505,33 @@ export function TipForm({
     if (!flowSuccess || !flowTxHash) return;
     // 元の name/message は許可済み intent metadata に保存しない。reload 復元 hash から
     // 現在 URL の控えを生成して別 tip へ誤帰属させる波及を断ち、hash 表示だけ残す。
-    if (restoredPayment) return;
+    if (restoredPayment) {
+      // 別の Pimlico の intent の確定は、その intent 自体の受取先・金額 (useBatchPayment の recoveredIntent) で控えを残す。
+      // 今のチップの名前・メッセージは付けない (第 10 回レビュー A-1 の Codex 第 2 回 MUST 2・/pay /checkout と同じ規則)。
+      // recoveredIntent が無い (帰属を確かめられない) ときと relay の復元は、今までどおり控えを書かない。
+      const recovered = !isStandard && !useRelay ? gasless.recoveredIntent : null;
+      if (recovered) {
+        appendPayerReceipt(
+          buildPayerReceipt({
+            txHash: flowTxHash,
+            userOpHash: flowUserOpHash ?? null,
+            chainId: deployment.chainId,
+            asset: params.token,
+            tokenAddress: deployment.address,
+            amount: formatUnits(recovered.merchantAmount, deployment.decimals),
+            merchantAddress: recovered.merchant,
+            merchantName: null,
+            payerAddress: address,
+            paymentMode: 'gasless',
+            gasMode: 'customer',
+            memo: null,
+            sourceRoute: '/tip',
+            locale,
+          }),
+        );
+      }
+      return;
+    }
     // dedup 鍵: gasless は userOpHash、relay は txHash。
     const dedupKey = flowUserOpHash ?? flowTxHash;
     if (notifiedUserOpHashRef.current === dedupKey) return;
@@ -549,6 +575,7 @@ export function TipForm({
     useRelay,
     crossChainResult,
     restoredPayment,
+    gasless.recoveredIntent,
     params.to,
     params.token,
     params.name,
@@ -557,6 +584,7 @@ export function TipForm({
     address,
     deployment.chainId,
     deployment.address,
+    deployment.decimals,
     locale,
   ]);
 

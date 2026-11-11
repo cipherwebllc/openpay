@@ -1242,6 +1242,74 @@ describe('CheckoutForm — 成功時の挙動', () => {
     },
   );
 
+  // 第 10 回レビュー A-1 (Codex 第 2 回 MUST 2): 別の intent の確定は、その intent 自体の受取先・金額 (recoveredIntent) だけで
+  // 履歴・支払い者の控え (端末の localStorage) に書き、今の注文 (番号・明細・店名) を付けない。サーバーへ送るもの (受注通知 =
+  // /api/order/notify) と success_url への移動・「このタブで払った記録」は、今の注文の完了としては出さない。
+  it('gasless: 別の intent の確定 (recoveredIntent あり) → 履歴・控えは intent の受取先・金額だけ。受注通知・success_url・払った記録は出さない', async () => {
+    const user = userEvent.setup();
+    window.localStorage.clear();
+    window.sessionStorage.clear();
+    const fetchSpy = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    vi.stubGlobal('fetch', fetchSpy);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready', 100_000n);
+    const makeUi = () => (
+      <CheckoutForm
+        params={{
+          ...USDC_PARAMS,
+          storeName: 'Shop B',
+          successUrl: 'https://shop.example.com/thanks',
+          webhook: `${window.location.origin}/api/order/notify?h=alice`,
+        }}
+      />
+    );
+    const { rerender } = render(makeUi());
+    await user.click(screen.getByRole('button', { name: /を支払う/ }));
+    expect(mutate).toHaveBeenCalledOnce();
+    // 実際に確定したのは、前に結果が分からなかった店 A への 10 USDC (保存した intent の params)。
+    const intentA = {
+      tokenAddress: '0x036CbD53842c5426634e7929541eC2318f3dCF7e' as Address,
+      merchant: '0xa1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1' as Address,
+      merchantAmount: 10_000_000n,
+      feeReceiver: '0xfee0fee0fee0fee0fee0fee0fee0fee0fee0fee0' as Address,
+      feeAmount: 0n,
+    };
+    setBatchPayment('success', undefined, {
+      settledOtherIntent: true,
+      recoveredIntent: intentA,
+      variables: intentA,
+    });
+    rerender(makeUi());
+
+    // 画面には hash が出る (利用者が自分で確かめられる)。
+    expect((await screen.findAllByText(`0x${'b'.repeat(64)}`)).length).toBeGreaterThan(0);
+    await waitFor(() => expect(loadHistory()).toHaveLength(1));
+    const [history] = loadHistory();
+    expect(history.merchant).toBe(intentA.merchant);
+    expect(history.merchantAmount).toBe('10000000');
+    expect(history.storeName).toBe('');
+    expect(history.lineItems ?? null).toBeNull();
+    expect(history.productName ?? null).toBeNull();
+    const [receipt] = loadPayerReceipts();
+    expect(receipt.merchantAddress).toBe(intentA.merchant);
+    expect(receipt.orderId).toBeUndefined();
+    expect(receipt.merchantName).toBeUndefined();
+    expect((receipt.lineItems ?? []).map((item) => item.name)).not.toContain('Tシャツ');
+
+    // 今の注文の完了として扱わない: success_url の案内は出さず、受注通知も払った記録も無い (effect を待ってから確かめる)。
+    expect(screen.queryByRole('button', { name: /今すぐ確認ページへ/ })).toBeNull();
+    expect(screen.getByRole('button', { name: /OpenPay ホームへ戻る/ })).toBeInTheDocument();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(fetchSpy).not.toHaveBeenCalled();
+    const paidRecords = Array.from({ length: window.sessionStorage.length }, (_, i) =>
+      window.sessionStorage.key(i),
+    ).filter((key) => key?.startsWith('openpay:order-paid:v1:'));
+    expect(paidRecords).toHaveLength(0);
+    vi.unstubAllGlobals();
+  });
+
   it('レジの値引き: 受注 notify payload に discount を足す (items の合計 − discount = amount)', async () => {
     const user = userEvent.setup();
     const fetchSpy = vi.fn().mockResolvedValue({ ok: true, status: 200 });

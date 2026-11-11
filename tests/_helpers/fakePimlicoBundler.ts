@@ -232,6 +232,58 @@ function routeBundlerFetch(bundlerSend: Mock<BundlerSend>): void {
 }
 
 /**
+ * 記録の chain の bundler (lib/pimlico の pimlicoUrl) への eth_getUserOperationReceipt を、world の receipt で答える。
+ * 今の account の Pimlico の bundle が無いとき (委任を外した・Circle の経路)、hook は照合 (読むだけ) でここへ照会する
+ * (第 10 回レビュー A-1 の Codex 第 2 回 MUST 3)。戻り値は照会された hash を記録する mock。
+ */
+export function routePimlicoReceiptApi(world: FakeBundlerWorld): Mock<(hash: Hex) => void> {
+  const lookups: Mock<(hash: Hex) => void> = vi.fn();
+  const prefix = `https://api.pimlico.io/v2/${world.chainId}/rpc`;
+  const previousFetch = globalThis.fetch;
+  vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (!requestUrl(input).startsWith(prefix)) return previousFetch(input, init);
+    const body = JSON.parse(String(init?.body)) as { id: number; method: string; params: [Hex] };
+    if (body.method !== 'eth_getUserOperationReceipt') {
+      throw new Error(`fake pimlico api: 想定外の method ${body.method}`);
+    }
+    const [hash] = body.params;
+    lookups(hash);
+    const receipt = world.receiptOf(hash);
+    const result = receipt
+      ? {
+          userOpHash: hash,
+          success: receipt.success,
+          actualGasCost: `0x${receipt.actualGasCost.toString(16)}`,
+          actualGasUsed: '0x1',
+          logs: [],
+          receipt: {
+            transactionHash: receipt.receipt.transactionHash,
+            blockNumber: `0x${receipt.receipt.blockNumber.toString(16)}`,
+            logs: [],
+          },
+        }
+      : null;
+    return new Response(JSON.stringify({ jsonrpc: '2.0', id: body.id, result }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  });
+  return lookups;
+}
+
+/** wagmi の usePublicClient の偽物 (EntryPoint の getNonce(sender, key) を world で答える)。chainId は client の chain。 */
+export function fakePublicClient(world: FakeBundlerWorld, chainId: number = world.chainId) {
+  const readContract: Mock<
+    (parameters: {
+      address: Address;
+      functionName: string;
+      args: readonly [Address, bigint];
+    }) => Promise<bigint>
+  > = vi.fn(async ({ args: [, key] }) => world.currentNonce(key));
+  return { client: { chain: { id: chainId }, readContract }, readContract };
+}
+
+/**
  * useSmartAccount の data (Pimlico の bundle) の偽物。smartAccountClient は permissionless の
  * createSmartAccountClient と同じ「分けられる」形 (account・prepareUserOperation・bundler の http transport)。
  */

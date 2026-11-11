@@ -8,7 +8,7 @@
 // 重複対策は lib/history.ts 側 (id dedupe) に任せ、ここでは StrictMode の
 // 二重 effect / react-query onSuccess 再呼出を素朴に許容する。
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import type { Address, Hex } from 'viem';
 import {
   appendHistory,
@@ -121,7 +121,51 @@ export type GaslessSnapshot = {
   // react-query useMutation の variables (= mutate() に渡された params)。
   // 完了時 (data/error) effect で参照することで amount drift を避ける。
   variables?: SubmittedAmounts;
+  // 確定したのが、画面から最後に送った支払いとは別の Pimlico の intent か (useBatchPayment の settledOtherIntent)。
+  settledOtherIntent?: boolean;
+  // そのときの intent 自体の受取先・金額 (保存した params)。帰属を確かめられないときは null (useBatchPayment の recoveredIntent)。
+  recoveredIntent?: RecoveredGaslessIntent | null;
 };
+
+// 別の intent の確定の、intent 自体の受取先・金額 (useBatchPayment の BatchPaymentParams のうち履歴に使う欄)。
+type RecoveredGaslessIntent = {
+  merchant: Address;
+  merchantAmount: bigint;
+  feeReceiver: Address;
+  feeAmount: bigint;
+  saleAmount?: bigint;
+  networkFeeEquivalent?: bigint;
+};
+
+// 別の Pimlico の intent の確定 (reload の後や別の画面で「同じ送信内容を再確認」した支払い) を記録する ctx。受取先・金額は
+// その intent 自体のもので、今の画面にしか無い文脈 (店名・メモ・商品名・税・管理番号・明細・注文・インボイス・控えの店名・
+// FX の anchor・手数料の負担の形) は付けない (第 10 回レビュー A-1 の Codex 第 2 回 MUST 2: 店 A への支払いを店 B・注文 B と
+// して残さない)。chain・token は今の画面のもの (useBatchPayment が記録の chain・token と同じと確かめたときだけ intent を渡す)、
+// 顧客 (今の接続 = 記録の key の customer)・発生元の route・表示の locale も今の画面のもの。
+function recoveredHistoryCtx(
+  ctx: AppendPaymentHistoryCtx,
+  intent: RecoveredGaslessIntent,
+): AppendPaymentHistoryCtx {
+  return {
+    chainId: ctx.chainId,
+    chainSlug: ctx.chainSlug,
+    asset: ctx.asset,
+    tokenAddress: ctx.tokenAddress,
+    payMode: ctx.payMode,
+    gasMode: null,
+    merchant: intent.merchant,
+    merchantAmount: intent.merchantAmount,
+    customer: ctx.customer,
+    feeReceiver: intent.feeReceiver,
+    feeAmount: intent.feeAmount,
+    saleAmount: intent.saleAmount ?? null,
+    networkFeeEquivalent: intent.networkFeeEquivalent ?? null,
+    storeName: '',
+    note: '',
+    sourceRoute: ctx.sourceRoute,
+    locale: ctx.locale,
+  };
+}
 
 type StandardSnapshot = {
   data?: {
@@ -166,17 +210,32 @@ export function usePaymentHistory(
   // effect が再実行されると重複 append される (Codex A2 P3)。Error オブジェクト identity で
   // 1 回に絞る (react-query は次の mutation まで同一 Error 参照を保持する)。
   const appendedErrorRef = useRef<Error | null>(null);
+  // gasless の確定を記録する ctx。別の intent の確定は recoveredHistoryCtx で書き、帰属を確かめられなければ書かない (null・
+  // 画面には hash が出る)。
+  const gaslessSettledOtherIntent = gasless.settledOtherIntent === true;
+  const recoveredIntent = gasless.recoveredIntent ?? null;
+  const gaslessCtx = useMemo(
+    () =>
+      !gaslessSettledOtherIntent
+        ? ctx
+        : recoveredIntent
+          ? recoveredHistoryCtx(ctx, recoveredIntent)
+          : null,
+    [ctx, gaslessSettledOtherIntent, recoveredIntent],
+  );
 
   // R: gas quote 30s refetch / variable-amount /pay の編集で receipt 到達時に
   //    ctx.merchantAmount / ctx.feeAmount が drift する race を回避するため、
   //    submitted snapshot (mutation.variables / lastSubmittedParams) があれば
   //    それを優先する。snapshot 不在時は ctx fallback (e.g. 旧 test 互換)。
+  //    別の intent の確定では fallback も intent のもの (gaslessCtx) にする (今の画面の金額を混ぜない)。
+  const gaslessAmountsCtx = gaslessCtx ?? ctx;
   const gaslessMerchantAmount =
-    gaslessVariables?.merchantAmount ?? ctx.merchantAmount;
-  const gaslessFeeAmount = gaslessVariables?.feeAmount ?? ctx.feeAmount;
-  const gaslessSaleAmount = gaslessVariables?.saleAmount ?? ctx.saleAmount;
+    gaslessVariables?.merchantAmount ?? gaslessAmountsCtx.merchantAmount;
+  const gaslessFeeAmount = gaslessVariables?.feeAmount ?? gaslessAmountsCtx.feeAmount;
+  const gaslessSaleAmount = gaslessVariables?.saleAmount ?? gaslessAmountsCtx.saleAmount;
   const gaslessNetworkFee =
-    gaslessVariables?.networkFeeEquivalent ?? ctx.networkFeeEquivalent;
+    gaslessVariables?.networkFeeEquivalent ?? gaslessAmountsCtx.networkFeeEquivalent;
   const standardMerchantAmount =
     standardSubmittedParams?.merchantAmount ?? ctx.merchantAmount;
   const standardFeeAmount =
@@ -199,7 +258,7 @@ export function usePaymentHistory(
   // pending かつ txHash 無し (authorizationState 既使用 = 既に処理済) は、元の submission が
   // 既に記録済のため重複記録しない。
   useEffect(() => {
-    if (!gaslessData) return;
+    if (!gaslessData || !gaslessCtx) return;
     if (gaslessData.pending && !gaslessData.txHash) return;
     const status = gaslessData.pending
       ? ('pending' as const)
@@ -209,16 +268,16 @@ export function usePaymentHistory(
     const entry = buildHistoryEntry({
       flow: 'batch',
       status,
-      chainId: ctx.chainId,
-      chainSlug: ctx.chainSlug,
-      asset: ctx.asset,
-      tokenAddress: ctx.tokenAddress,
+      chainId: gaslessCtx.chainId,
+      chainSlug: gaslessCtx.chainSlug,
+      asset: gaslessCtx.asset,
+      tokenAddress: gaslessCtx.tokenAddress,
       payMode: 'gasless',
-      gasMode: ctx.gasMode,
-      merchant: ctx.merchant,
+      gasMode: gaslessCtx.gasMode,
+      merchant: gaslessCtx.merchant,
       merchantAmount: gaslessMerchantAmount,
-      customer: ctx.customer,
-      feeReceiver: ctx.feeReceiver,
+      customer: gaslessCtx.customer,
+      feeReceiver: gaslessCtx.feeReceiver,
       feeAmount: gaslessFeeAmount,
       saleAmount: gaslessSaleAmount,
       // circle はネットワーク手数料を検証ステータス付きで circlePaymasterNetUsdc に
@@ -229,32 +288,32 @@ export function usePaymentHistory(
       userOpHash: gaslessData.userOpHash,
       blockNumber: gaslessData.blockNumber,
       errorMessage: null,
-      storeName: ctx.storeName,
-      note: ctx.note,
+      storeName: gaslessCtx.storeName,
+      note: gaslessCtx.note,
       provider: gaslessData.provider ?? null,
       circlePaymasterAddress: gaslessData.circlePaymasterAddress ?? null,
       circlePaymasterNetUsdc: gaslessData.circlePaymasterNetUsdc ?? null,
       circleVerification: gaslessData.circleVerification ?? null,
-      anchorAmount: ctx.anchorAmount ?? null,
-      anchorSymbol: ctx.anchorSymbol ?? null,
-      fxRateUsdcJpy: ctx.fxRateUsdcJpy ?? null,
-      productName: ctx.productName ?? null,
-      memo: ctx.memo ?? null,
-      taxRate: ctx.taxRate ?? null,
-      taxCategory: ctx.taxCategory ?? null,
-      receiptNo: ctx.receiptNo ?? null,
-      lineItems: ctx.lineItems ?? null,
+      anchorAmount: gaslessCtx.anchorAmount ?? null,
+      anchorSymbol: gaslessCtx.anchorSymbol ?? null,
+      fxRateUsdcJpy: gaslessCtx.fxRateUsdcJpy ?? null,
+      productName: gaslessCtx.productName ?? null,
+      memo: gaslessCtx.memo ?? null,
+      taxRate: gaslessCtx.taxRate ?? null,
+      taxCategory: gaslessCtx.taxCategory ?? null,
+      receiptNo: gaslessCtx.receiptNo ?? null,
+      lineItems: gaslessCtx.lineItems ?? null,
     });
     appendHistory(entry);
     // 顧客向け電子レシート: 成功 / relay pending のみ控えを残す (reverted は控えない)。
-    if (status !== 'reverted') saveReceiptFor(entry, ctx);
+    if (status !== 'reverted') saveReceiptFor(entry, gaslessCtx);
   }, [
     gaslessData,
     gaslessMerchantAmount,
     gaslessFeeAmount,
     gaslessSaleAmount,
     gaslessNetworkFee,
-    ctx,
+    gaslessCtx,
   ]);
 
   // gasless: throw 系エラー (paymaster reject / RPC 障害 / 残高不足 等)。
