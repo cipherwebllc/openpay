@@ -55,6 +55,8 @@ import type {
   PimlicoSendLedger,
 } from '@/lib/smartAccount/pimlicoIntent';
 import type { SignedSendClient } from '@/lib/smartAccount/pimlicoSend';
+// 記録の「同じ intent」の定義 (import の無い小さな module・intent の関所と共有する)。
+import { isSameIntent } from '@/lib/smartAccount/pimlicoIntentOwner';
 import type { SmartAccountBundle } from '@/lib/smartAccount/simpleAccount';
 import type { TokenDeployment } from '@/lib/tokens';
 
@@ -489,11 +491,14 @@ function discardPimlicoPending(storageKey: string): boolean {
   }
 }
 
-function clearPimlicoPending(storageKey: string, userOpHash: Hex): void {
+// 確定した op の記録を片付ける。消すのは storage の記録が同じ intent (isSameIntent) のときだけ: 送信の控えのある記録は nonce が
+// 同じなら hash が違っても消す (ほかの画面が同じ nonce で作り直した・hash を直した記録も、この nonce の op が取り込まれた以上
+// 終わっている)。別の intent の記録は消さない (第 10 回レビュー PR-02 の Codex レビュー P1)。
+function clearPimlicoPending(storageKey: string, record: PimlicoPendingRecord): void {
   if (typeof window === 'undefined') return;
   try {
     const current = readPimlicoPending(storageKey);
-    if (current.kind === 'record' && current.record.userOpHash === userOpHash) {
+    if (current.kind === 'record' && isSameIntent(current.record, record)) {
       window.localStorage.removeItem(storageKey);
     }
   } catch (error) {
@@ -501,7 +506,7 @@ function clearPimlicoPending(storageKey: string, userOpHash: Hex): void {
     // record が残った場合は安全側の unknown latch として次回 receipt 再照会に収束する。
     logger.warn('pimlico.pending.clear-failed', {
       storageKey,
-      userOpHash,
+      userOpHash: record.userOpHash,
       error,
     });
   }
@@ -611,7 +616,7 @@ export function useBatchPayment(
       ): BatchPaymentResult => {
         // success / reverted の receipt 判定は従来どおり。どちらも on-chain 終端なので
         // unknown latch を解除し、次回の正規決済だけを許可する。
-        clearPimlicoPending(pimlicoStorageKey, record.userOpHash);
+        clearPimlicoPending(pimlicoStorageKey, record);
         releaseRecord(record);
         setSettledChainId(record.chainId);
         return {
@@ -647,7 +652,12 @@ export function useBatchPayment(
           };
           pendingRef.current = latched;
           setUnknownPending(latched);
-          persistPimlicoPending(pimlicoStorageKey, unknownRecord);
+          // storage の記録が同じ intent のときだけ書く (待つ間にほかの画面が閉じた記録を復活させない・別の支払いの記録を上書き
+          // しない・第 10 回レビュー PR-02 の Codex レビュー P1)。memory のラッチと応答不明の終わり方は同じ。
+          const current = readPimlicoPending(pimlicoStorageKey);
+          if (current.kind === 'record' && isSameIntent(current.record, record)) {
+            persistPimlicoPending(pimlicoStorageKey, unknownRecord);
+          }
           logger.warn('pimlico.receipt.response-unknown', {
             userOpHash: record.userOpHash,
             callFingerprint: record.callFingerprint,
@@ -681,6 +691,7 @@ export function useBatchPayment(
         sender,
         isAlive: () => mountedRef.current,
         isExpired: isPendingExpired,
+        read: () => readPimlicoPending(pimlicoStorageKey),
         persist: (record) => persistPimlicoPending(pimlicoStorageKey, record),
         discard: () => discardPimlicoPending(pimlicoStorageKey),
         hold: holdRecord,
