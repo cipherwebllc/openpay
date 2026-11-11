@@ -747,8 +747,10 @@ describe('useBatchPayment', () => {
       expect(result.current.error).toBeNull();
     });
 
-    it('gas ceiling 取得中に 2 回連続 mutate → 両方で getUserOperationGasPrice が呼ばれる (独立した実行)', async () => {
-      // gasPrice fetch を deferred にして、2 つの mutate を interleave させる
+    // 第 10 回レビュー A-3: 前は「2 回とも独立に走る」(getUserOperationGasPrice も送信も 2 回) を期待していた。それは署名の
+    // 要求が 2 つ出て、両方承認すると別の nonce の op が 2 本成立する挙動だったので、期待を「2 回目は無視」に変えた。
+    it('gas ceiling 取得中に 2 回連続 mutate → 2 回目は無視され、走るのは 1 回目だけ (試み中の印)', async () => {
+      // gasPrice fetch を deferred にして、1 回目が途中のうちに 2 回目の mutate を呼ぶ
       const gates: Array<() => void> = [];
       getUserOperationGasPrice = vi.fn<GetUserOperationGasPrice>().mockImplementation(
         () =>
@@ -784,7 +786,7 @@ describe('useBatchPayment', () => {
         wrapper: makeWrapper(),
       });
 
-      // 連続 mutate (両方とも gas price fetch 中で deferred)
+      // 連続 mutate (1 回目は gas price fetch 中で deferred)
       result.current.mutate({
         tokenAddress: TOKEN,
         merchant: MERCHANT,
@@ -800,15 +802,15 @@ describe('useBatchPayment', () => {
         feeAmount: 2n,
       });
 
-      await waitFor(() => expect(getUserOperationGasPrice).toHaveBeenCalledTimes(2));
-      // 両 gate を解放 → 両 mutation 完走
+      await waitFor(() => expect(getUserOperationGasPrice).toHaveBeenCalledTimes(1));
+      // gate を解放 → 1 回目の mutation だけが完走する
       gates[0]?.();
-      gates[1]?.();
-      await waitFor(() =>
-        expect(sendUserOperation).toHaveBeenCalledTimes(2),
-      );
-      // useMutation は最新の結果のみ保持。data があれば成功した mutation。
       await waitFor(() => expect(result.current.isSuccess).toBe(true));
+      expect(getUserOperationGasPrice).toHaveBeenCalledTimes(1);
+      expect(sendUserOperation).toHaveBeenCalledTimes(1);
+      // 確定したのは 1 回目の内容 (2 回目の内容は mutation にも fingerprint にもなっていない)。
+      expect(result.current.variables?.merchantAmount).toBe(1n);
+      expect(result.current.settledOtherIntent).toBe(false);
     });
 
     it('SA 未準備状態で連続 mutate → 全て同じエラーで rejected', async () => {
@@ -1622,6 +1624,37 @@ describe('useBatchPayment', () => {
       const d = decodeFunctionData({ abi: erc20Abi, data: arg.calls[0].data });
       expect(d.functionName).toBe('transfer');
       expect((d.args as readonly [string, bigint])[1]).toBe(99_000_000n);
+    });
+
+    // 第 10 回レビュー A-2: mutationFn の先頭の確認は provider によらない。Circle の経路の中 (runCirclePayment) は変えていない。
+    it('mutate と同じ tick に unmount → Circle の経路を始めない (gas の見積もりも executeCirclePayment も呼ばない)', async () => {
+      mountCircle();
+      const qc = new QueryClient({
+        defaultOptions: { mutations: { retry: false }, queries: { retry: false } },
+      });
+      const { result, unmount } = renderHook(() => useBatchPayment(usdcDep), {
+        wrapper: ({ children }: { children: ReactNode }) => (
+          <QueryClientProvider client={qc}>{children}</QueryClientProvider>
+        ),
+      });
+
+      result.current.mutate({
+        tokenAddress: TOKEN,
+        merchant: MERCHANT,
+        merchantAmount: 99_000_000n,
+        feeReceiver: FEE_RECV,
+        feeAmount: 0n,
+        circlePermitAmount: 5_000_000n,
+        paymentAttemptId: 'order-42',
+      });
+      unmount();
+
+      // 画面はもう無いので、mutation の終わり方は MutationCache で見る。
+      const state = () => qc.getMutationCache().getAll()[0].state;
+      await waitFor(() => expect(state().status).toBe('error'));
+      expect(state().error?.message).toBe('payment_cancelled');
+      expect(getCircleUserOpGasPrice).not.toHaveBeenCalled();
+      expect(executeCirclePayment).not.toHaveBeenCalled();
     });
 
     it('circlePermitAmount 未指定なら送信せずエラー (過少/過大 allowance 防止)', async () => {

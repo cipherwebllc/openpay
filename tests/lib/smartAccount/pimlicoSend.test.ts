@@ -447,6 +447,51 @@ describe.each(builders)('$name', ({ impl, entryPoint, build }) => {
     expect(bundlerMethods()).not.toContain('eth_estimateUserOperationGas');
   });
 
+  // 第 10 回レビュー A-2 の (b): 画面を離れた試みが、離れた後にウォレットへ署名の要求を出さないための継ぎ目。
+  it('beforeSign は準備の後・署名の前に 1 回呼ばれる。投げると、署名を求めずにその error で終わる', async () => {
+    const bundle = await build(jpycPolygon, polygon);
+    const client = splitClientOf(bundle);
+    const nonce = await reserveUserOpNonce(client);
+    // 署名の要求の数は account の signUserOperation で数える (MetaMask の builder は owner の鍵で直接署名し、RPC を通らない)。
+    const sign = vi.spyOn(client.account, 'signUserOperation');
+
+    // 通すとき: 呼ばれた時点で準備 (gas の見積もり) は済み、署名はまだ求めていない。結果は beforeSign なしと同じ。
+    const seen: Array<{ estimated: boolean; signatures: number }> = [];
+    const built = await prepareAndSignPimlicoUserOp({
+      client,
+      calls: CALLS,
+      nonce,
+      beforeSign: () => {
+        seen.push({
+          estimated: bundlerMethods().includes('eth_estimateUserOperationGas'),
+          signatures: sign.mock.calls.length,
+        });
+      },
+    });
+    expect(seen).toEqual([{ estimated: true, signatures: 0 }]);
+    expect(sign).toHaveBeenCalledTimes(1);
+    expect(built.signedUserOp.signature).toMatch(/^0x[0-9a-f]{130}$/);
+
+    // 投げるとき: 準備までは進み、署名の要求は増えない。error はそのまま届く。
+    rpcCalls = [];
+    const stop = new Error('payment_cancelled');
+    const error = await prepareAndSignPimlicoUserOp({
+      client,
+      calls: CALLS,
+      nonce,
+      beforeSign: () => {
+        throw stop;
+      },
+    }).then(
+      () => null,
+      (e: unknown) => e,
+    );
+    expect(error).toBe(stop);
+    expect(bundlerMethods()).toContain('eth_estimateUserOperationGas');
+    expect(sign).toHaveBeenCalledTimes(1);
+    expect(sentUserOps()).toEqual([]);
+  });
+
   it('作り直し: 同じ nonce を渡すと、fee が変わっても nonce は 1 本目と同じ (account の getNonce を読み直さない)', async () => {
     const bundle = await build(jpycPolygon, polygon);
     const client = splitClientOf(bundle);

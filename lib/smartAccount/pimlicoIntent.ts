@@ -21,6 +21,14 @@
 //   sendRecordedOp    = bundler へ op を渡す唯一の場所。送る前に、その op の記録が storage にあり読み戻せることを確かめる
 // 照合 (receipt と EntryPoint の nonce を読むだけ) は、保存した記録 (sender・EntryPoint・nonce・候補の hash・chain) だけで
 // 行い、今の account で送れるかどうかに依存しない。送り直し・作り直しだけが、記録と今の account の一致を要る。
+//
+// 失効 (第 10 回レビュー A-2): host を渡した hook の instance が画面から外れた (unmount した) 後も、react-query の mutation は
+// 走り続ける。原則は 1 つ: **失効した試みは、新しい効果を始めない** (ウォレットに署名を求めない・storage を書かない・消さない・
+// bundler へ op を渡さない)。host.isAlive() を見るのは、新しい効果の直前の 4 か所だけ:
+//   (a) sendRecordedOp の先頭 (保存と送信の前)  (b) 準備と署名の間  (c) buildAndSend の catch (元の記録を書き戻す前)
+//   (d) resolveOpenIntent が期限で閉じる discard の前
+// すでに bundler へ渡した op の後始末 (receipt 待ち・settle で記録を閉じる・hash の直し・応答不明の status) では見ない。
+// 渡した op は画面が無くても成立しうるので、その記録は今までどおり残す・直す。
 
 import { isAddress, isAddressEqual, isHex, type Address, type Client, type Hex } from 'viem';
 import { logger } from '@/lib/logger';
@@ -121,6 +129,8 @@ export type PimlicoIntentHost<Params, Result> = {
   publicClient: Client | undefined;
   // 送信: 無ければ送らない (照合だけ)。
   sender: PimlicoIntentSender | null;
+  // この host を渡した hook の instance がまだ画面にあるか (unmount の後は false のまま)。冒頭の「失効」。
+  isAlive: () => boolean;
   isExpired: (record: PimlicoIntentRecord<Params>) => boolean;
   persist: (record: PimlicoIntentRecord<Params>) => PimlicoPersistResult;
   // 記録を消し、消えたことを確かめる (true = この key の記録はもう storage に無い)。
@@ -139,6 +149,12 @@ export type PimlicoIntentHost<Params, Result> = {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+// 失効した試みを終える error (冒頭の「失効」)。relay の hook (hooks/useJpycEip3009Payment.ts) が unmount した試みを
+// 終えるのと同じ文字列。記録・memory のラッチには触らない (instance はもう無く、storage は新しい画面のもの)。
+function cancelled(): Error {
+  return new Error('payment_cancelled');
 }
 
 function ledgerNonce(send: PimlicoSendLedger): bigint {
@@ -247,11 +263,28 @@ async function sendRecordedOp<Params, Result>(
     record: LedgerIntentRecord<Params>;
     // 応答不明として画面に出ている intent の op か (送り直し・作り直し)。新しい支払いでは false。
     latched: boolean;
+    // いま署名したばかりの op か (新しい支払い・作り直し)。保存してあった op の送り直しでは false。失効で捨てた署名を
+    // 数える log にだけ使う。
+    signedNow: boolean;
     onNotStored: (stored: Exclude<PimlicoPersistResult, 'stored'>) => never;
     // bundler が検証で拒否した (HTTP 2xx + allowlist の code)。sent = 送った記録 (送った時刻入り)。
     onRejected: (error: unknown, sent: LedgerIntentRecord<Params>) => Promise<Result>;
   },
 ): Promise<Result> {
+  // (a) 失効した試みは、保存も送信もしない。何の波及を断つか: ウォレットの署名 (または照合の RPC・送り直しへの答え) を待つ間に
+  // 画面を離れ、開き直した画面 (新しい hook) で払い終えた後で、古い署名の要求を承認すると、古い試みが別の nonce の op を保存して
+  // 送り、二重払いになる (A-2)。新しい画面の intent が開いている間なら、同じ key の記録を上書きして消す。作り直しの op も同じ:
+  // 新しい画面が同じ nonce で確定して消した記録を、古い試みが書き戻して復活させない。
+  // この確認から下の persist まで await を挟まない (確かめた後に失効する隙間を作らない)。
+  if (!host.isAlive()) {
+    if (args.signedNow) {
+      logger.info('pimlico.sign_abandoned', {
+        chainId: args.record.chainId,
+        userOpHash: args.record.userOpHash,
+      });
+    }
+    throw cancelled();
+  }
   let record: LedgerIntentRecord<Params> = { ...args.record, updatedAt: Date.now() };
   const stored = host.persist(record);
   if (stored !== 'stored') return args.onNotStored(stored);
@@ -307,8 +340,22 @@ async function buildAndSend<Params, Result>(
   const { calls, callFingerprint, nonce, base, previous } = args;
   let built: Awaited<ReturnType<typeof prepareAndSignPimlicoUserOp>>;
   try {
-    built = await prepareAndSignPimlicoUserOp({ client: sender.client, calls, nonce });
+    built = await prepareAndSignPimlicoUserOp({
+      client: sender.client,
+      calls,
+      nonce,
+      // (b) 送金を止める確認ではない (保存と送信は (a) が止める)。何の波及を断つか: 準備 (nonce・paymaster・fee の RPC) を
+      // 待つ間に画面を離れた試みが、離れた後にウォレットへ署名の要求を出すこと (もう無い画面の要求がウォレットに残る)。
+      beforeSign: () => {
+        if (!host.isAlive()) throw cancelled();
+      },
+    });
   } catch (error) {
+    // (c) 失効した試みは、作り直しの途中でも元の記録を書き戻さない (下の holdAsUnknown は persist する)。何の波及を断つか:
+    // 元の記録は誰も触っていなければ storage に既にあり、書き戻す意味が無い。開き直した画面が同じ nonce で確定して記録を
+    // 消した後に書き戻すと、終わった支払いの記録が復活して期限 (7 日) まで止まり、別の intent の記録があれば上書きして消す。
+    // (b) の throw もここに落ちる。
+    if (!host.isAlive()) throw cancelled();
     // 応答不明の記録の作り直しで準備・署名が失敗した (ウォレットで断った等)。作り直しの op は送っていないので
     // 元の記録のまま応答不明を保つ (通常の error にすると画面が新しい支払いを開ける)。
     if (previous) return holdAsUnknown(host, previous, 'pimlico.rebuild.prepare-failed', error);
@@ -346,6 +393,7 @@ async function buildAndSend<Params, Result>(
   return sendRecordedOp(host, sender, {
     record,
     latched: previous !== undefined,
+    signedNow: true,
     // 保存を確かめられない: 署名済みの op はここで捨てる (どこにも送っていない)。保存なしで送ると、応答を失ったときに
     // 「同じ nonce」を失い、再試行が別の nonce の op になる (二重払い)。止めるのは gasless だけ (通常決済は、開いている
     // intent が無ければ開けたまま)。書けたかどうか分からない ('uncertain') ときは、送っていない op の記録を storage に
@@ -476,6 +524,10 @@ export async function resolveOpenIntent<Params, Result>(
     //   c5 (consumed): nonce はもう使われたので、候補の op はどれももう実行されない (同じ nonce は 1 本だけ)。開いたまま
     //     にする目的は「払い済みかもしれない支払いを、もう一度払わせない」ことだけで、将来の二重の実行を防ぐ意味は無い。
     //     期限まで待ったので閉じる (端末に永久に残る止めを作らない。実は払い済みだった可能性は残る・PR の「限界」)。
+    // (d) 失効した試みは閉じない (記録を消さない)。何の波及を断つか: 上の照合の RPC を待つ間に画面を離れ、開き直した画面が
+    // この記録を閉じて新しい支払いの記録を書いた後で、古い試みの discard (key ごとの無条件の削除) がその記録を消すこと
+    // (消えた後は、応答を失った新しい支払いを確かめられず、別の nonce で払い直せる)。閉じるのは次に確かめる画面に任せる。
+    if (!host.isAlive()) throw cancelled();
     if (!host.discard()) {
       // 消したと確かめないまま閉じると、残った署名済みの op が reload の後に送られ、その間に開けた通常決済と二重になる。
       return stayOpen(host, record, 'pimlico.pending.expired-close-failed', new Error('discard-failed'));
@@ -500,6 +552,7 @@ export async function resolveOpenIntent<Params, Result>(
   return sendRecordedOp(host, sender, {
     record,
     latched: true,
+    signedNow: false,
     // 送り直しの前に保存を確かめられない (memory にしか無い op): 送らず開いたまま。
     onNotStored: (stored) => {
       host.setStoreUnavailable(true);
