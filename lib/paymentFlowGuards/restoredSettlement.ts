@@ -30,6 +30,11 @@ export type SettlementScreen = {
    */
   amount: bigint | null;
   /**
+   * relay でお客様が利用料を上乗せして払う形 (お店の受取 = 額) がありうる会計 (/checkout でモバイル注文の利用料の種類を
+   * URL に持つ)。上乗せかお店の負担かは flag と負担者で決まり、払った後に変わりうるので、どちらの形でも一致とする。
+   */
+  customerFeeOnTop: boolean;
+  /**
    * /checkout: 受け付ける全 chain の会計の鍵 (lib/orderPaidLookup の orderPaymentContextKey)。/checkout の通常決済は必ず
    * この鍵を記録に付ける。鍵を付けない画面 (/pay・/tip) は null。
    */
@@ -82,13 +87,16 @@ export function isForeignSettlement(screen: SettlementScreen, restored: Restored
     const { chainId, merchant, merchantValue, feeValue, orderLinkKey } = restored.record;
     if (restored.bound) return false;
     if (screen.relayAlwaysBound) return true;
-    // 額: 「お店の受取」か「受取 + 利用料」のどちらかが画面の額と同じなら一致 (free とお客様の上乗せ = 受取が額・お店が
-    // 利用料を負担 = 受取 + 利用料が額)。利用料を今の設定で計算し直さない。
+    // 額: 「お店の受取 + 利用料」が画面の額と同じなら一致 (free = 利用料 0・お店が利用料を負担 = 受取が減る。式は
+    // lib/orderDeliveryContext の matchesOrderDeliveryContext と同じ)。利用料を今の設定で計算し直さない。お客様の上乗せが
+    // ありうる会計は「お店の受取」が額と同じでも一致。
     const received = BigInt(merchantValue);
     return (
       !screen.chainIds.includes(chainId) ||
       !same(screen.merchant, merchant) ||
-      (screen.amount !== null && received !== screen.amount && received + BigInt(feeValue) !== screen.amount) ||
+      (screen.amount !== null &&
+        received + BigInt(feeValue) !== screen.amount &&
+        !(screen.customerFeeOnTop && received === screen.amount)) ||
       orderLinkDiffers(screen, orderLinkKey)
     );
   }

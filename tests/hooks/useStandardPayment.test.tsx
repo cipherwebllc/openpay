@@ -1347,6 +1347,73 @@ describe('useStandardPayment', () => {
     ]);
   });
 
+  // H-U (第 10 回レビュー): retryFee は restoredFromStorage を false に戻す (上のテストが固定)。画面が「この画面から始めた
+  // 支払いか」を決めるための restoredAttempt は、利用料の再送の後も true のままで、新しい mutate でだけ false に戻る。
+  it('H-U: 復元した試みの印 (restoredAttempt) は利用料の再送の後も true のまま・新しい mutate でだけ false に戻る', async () => {
+    seedStandardIntent({ stage: 'fee-awaiting', merchantBlockNumber: '100' });
+    const { result, rerender } = renderHook(() => useStandardPayment());
+    await waitFor(() => expect(result.current.phase).toBe('fee-error'));
+    expect(result.current.restoredFromStorage).toBe(true);
+    expect(result.current.restoredAttempt).toBe(true);
+
+    // 元の支払い者が利用料を再送する。restoredFromStorage は今までどおり false に戻る。
+    act(() => result.current.retryFee());
+    rerender();
+    expect(useWriteContractMockB.writeContract).toHaveBeenCalledOnce();
+    expect(result.current.restoredFromStorage).toBe(false);
+    expect(result.current.restoredAttempt).toBe(true);
+
+    // 利用料が確定して成功になっても、復元した試みのまま。確定と同時に保存した印は片づく (読み直せば払える)。
+    const onFeeHash = useWriteContractMockB.writeContract.mock.calls[0][1]
+      .onSuccess as (hash: Hex) => void;
+    act(() => {
+      onFeeHash(FEE_TX);
+      useWriteContractMockState.b.data = FEE_TX;
+      useWaitMockState.b.data = minedReceipt(FEE_TX, 101n);
+      useWaitMockState.b.isSuccess = true;
+    });
+    rerender();
+    await waitFor(() => expect(result.current.phase).toBe('success'));
+    expect(result.current.data?.merchantTxHash).toBe(MERCHANT_TX);
+    expect(result.current.restoredFromStorage).toBe(false);
+    expect(result.current.restoredAttempt).toBe(true);
+    expect(window.sessionStorage.getItem(STANDARD_INTENT_STORAGE_KEY)).toBeNull();
+
+    // この画面から新しい支払いを始めると、復元した試みではなくなる。
+    act(() => {
+      result.current.mutate({
+        tokenAddress: TOKEN,
+        merchant: MERCHANT,
+        merchantAmount: 9_950_000n,
+        feeReceiver: FEE_RECEIVER,
+        feeAmount: 50_000n,
+        chainId: 84532,
+      });
+    });
+    rerender();
+    expect(useWriteContractMockA.writeContract).toHaveBeenCalledOnce();
+    expect(result.current.restoredAttempt).toBe(false);
+    expect(result.current.restoredFromStorage).toBe(false);
+  });
+
+  it('H-U: 保存された印の無い画面は、送る前も送った後も restoredAttempt が false', async () => {
+    const { result, rerender } = await renderReadyStandardPayment();
+    expect(result.current.restoredAttempt).toBe(false);
+    act(() => {
+      result.current.mutate({
+        tokenAddress: TOKEN,
+        merchant: MERCHANT,
+        merchantAmount: 10_000_000n,
+        feeReceiver: FEE_RECEIVER,
+        feeAmount: 0n,
+        chainId: 84532,
+      });
+    });
+    rerender();
+    expect(useWriteContractMockA.writeContract).toHaveBeenCalledOnce();
+    expect(result.current.restoredAttempt).toBe(false);
+  });
+
   it('reload: fee txHash を unknown として復元し、receipt 成功まで全 transfer を封鎖する', async () => {
     seedStandardIntent({
       stage: 'fee',

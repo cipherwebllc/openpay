@@ -103,18 +103,24 @@ describe('isForeignSettlement — /checkout・束縛しない relay', () => {
   it('モバイル注文の利用料: お店の負担 (受取 + 利用料 = 合計)・お客様の上乗せ (受取 = 合計) のどちらも一致', () => {
     const fee = mobileOrderFeeValue(TOTAL, 'preorder');
     expect(fee > 0n).toBe(true);
-    const merchantPays = checkoutSettlementScreen({ ...JPYC, feeKind: 'preorder', feePayer: 'merchant' }, false, false);
-    expect(
-      relay(merchantPays, relayRecord({ routeKind: 'recover', merchantValue: (TOTAL - fee).toString(), feeValue: fee.toString() })),
-    ).toBe(false);
-    const customerPays = checkoutSettlementScreen({ ...JPYC, feeKind: 'preorder', feePayer: 'customer' }, false, false);
-    expect(
-      relay(customerPays, relayRecord({ routeKind: 'recover', merchantValue: TOTAL.toString(), feeValue: fee.toString() })),
-    ).toBe(false);
-    // 払った後に率が変わっても (利用料の額が違っても) 同じ支払いは一致のまま。
-    expect(
-      relay(customerPays, relayRecord({ routeKind: 'recover', merchantValue: TOTAL.toString(), feeValue: (fee + 7n).toString() })),
-    ).toBe(false);
+    const absorbed = relayRecord({ routeKind: 'recover', merchantValue: (TOTAL - fee).toString(), feeValue: fee.toString() });
+    const onTop = relayRecord({ routeKind: 'recover', merchantValue: TOTAL.toString(), feeValue: fee.toString() });
+    // 上乗せかお店の負担かは flag と負担者 (feePayer) で決まり、払った後に変わりうる: URL がどちらでも、どちらの形も一致。
+    for (const feePayer of ['merchant', 'customer'] as const) {
+      const screen = checkoutSettlementScreen({ ...JPYC, feeKind: 'preorder', feePayer }, false, false);
+      expect(screen.customerFeeOnTop).toBe(true);
+      expect(relay(screen, absorbed)).toBe(false);
+      expect(relay(screen, onTop)).toBe(false);
+      // 払った後に率が変わっても (利用料の額が違っても) 同じ支払いは一致のまま。
+      expect(relay(screen, { ...onTop, feeValue: (fee + 7n).toString() })).toBe(false);
+      // 受取も受取 + 利用料も合計と違えば不一致。
+      expect(relay(screen, { ...onTop, merchantValue: (TOTAL + 1n).toString() })).toBe(true);
+    }
+  });
+
+  it('モバイル注文の利用料の無い会計: お客様の上乗せの形 (受取 = 合計・利用料あり = チップなど) は合計を超えるので不一致', () => {
+    expect(plain.customerFeeOnTop).toBe(false);
+    expect(relay(plain, relayRecord({ routeKind: 'recover', feeValue: (2n * 10n ** 18n).toString() }))).toBe(true);
   });
 
   it('受取先が違う・受け付けない chain・額が違う (受取も受取 + 利用料も合計と違う) は不一致', () => {
@@ -265,6 +271,7 @@ describe('isForeignSettlement — 鍵を付けない画面 (/pay・/tip の形)'
     tokenAddresses: [polygon.address],
     merchant: MERCHANT,
     amount: TOTAL,
+    customerFeeOnTop: false,
     contextKeys: null,
     orderLinkKeys: null,
     relayAlwaysBound: false,
@@ -314,6 +321,7 @@ describe('checkoutSettlementScreen — /checkout の画面の形', () => {
       tokenAddresses: [polygon.address],
       merchant: MERCHANT,
       amount: TOTAL - 500n * 10n ** 18n,
+      customerFeeOnTop: false,
       contextKeys: [orderPaymentContextKey(params, 'polygon')],
       orderLinkKeys: null,
       relayAlwaysBound: false,
@@ -330,6 +338,7 @@ describe('checkoutSettlementScreen — /checkout の画面の形', () => {
       tokenAddresses: [polygon.address, kaia.address],
       merchant: MERCHANT,
       amount: TOTAL,
+      customerFeeOnTop: false,
       contextKeys: keys,
       orderLinkKeys: keys.map((key) => orderLinkContextFingerprint(key, params)),
       relayAlwaysBound: true,

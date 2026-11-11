@@ -4697,6 +4697,7 @@ describe('CheckoutForm — 復元した決済の完了で「注文を送る」�
       hasActiveIntent: false,
       hasAttempt: true,
       restoredFromStorage: true,
+      restoredAttempt: true,
     };
     vi.mocked(useStandardPayment).mockReturnValue(restored);
   }

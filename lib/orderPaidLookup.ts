@@ -55,6 +55,7 @@ export function checkoutSettlementScreen(
     tokenAddresses: deployments.map((deployment) => deployment.address),
     merchant: params.to,
     amount: calcCheckoutPayable(params, deployments[0].decimals),
+    customerFeeOnTop: params.feeKind !== undefined,
     contextKeys,
     orderLinkKeys: remoteOrder ? contextKeys.map((key) => orderLinkContextFingerprint(key, params)) : null,
     relayAlwaysBound,
