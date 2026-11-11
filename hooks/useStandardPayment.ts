@@ -6,7 +6,14 @@
 // fee=0 のとき (Phase 1 alpha 期間中の常態) は fee tx を skip、merchant tx 1 件のみ実行。
 // fee>0 のときは merchant → fee の 2 件直列実行 (fee tx 単独失敗時は UI に retry 出す)。
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 import { erc20Abi, type Address, type Hex } from 'viem';
 import {
   useAccount,
@@ -15,7 +22,14 @@ import {
   useWriteContract,
 } from 'wagmi';
 import { classifyTransferReceipt } from '@/lib/replacedTransferReceipt';
+import {
+  addStandardWalletRequest,
+  removeStandardWalletRequest,
+  standardWalletRequestElsewhere,
+  subscribeStandardWalletRequests,
+} from '@/lib/standardPaymentOutstanding';
 import type {
+  StandardIntentMetadata,
   StandardIntentStage,
   StandardPaymentParams,
 } from '@/lib/paymentIntentStorage';
@@ -172,8 +186,90 @@ export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {
   const feeStartedRef = useRef(false);
 
   const { address: customer } = useAccount();
-  const merchantWrite = useWriteContract();
-  const feeWrite = useWriteContract();
+  // H-D (第 10 回レビュー): ウォレットの確認が出ている間に画面を離れ (unmount)、その後で承認されると、送金は broadcast
+  // されるのに、writeContract の第 2 引数の onSuccess (呼び出しごとの callback) は呼ばれない (TanStack Query は listener の
+  // 無い observer の呼び出しごとの callback を呼ばない)。復旧の印が残らないので、開き直した画面からもう一度送れてしまう。
+  // hook の options の onSuccess は Mutation 自身が呼ぶので unmount の後も走る。そこで unmount の後のときだけ印を書く
+  // (mount 中は今までどおり呼び出しごとの onSuccess が書く = 二重に書かない・mount 中の動きは変えない)。
+  // 断つ波及: 印の無いまま開き直した画面からの 2 本目の店への送金 (merchant)・2 本目の利用料 (fee)。
+  // 送信そのものは止めない (ウォレットが署名と broadcast を一度に行うので、要求を出した後は hook から止められない)。
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+  // 今の試み (writeContract に渡した variables と、印を組むのに要る値)。variables だけでは params を組み直せない。
+  // reset の後に送り直すと新しい試みに置き換わり、捨てた古い試みの hash は保存しない (呼び出しごとの onSuccess と同じ意味)。
+  const merchantAttemptRef = useRef<{
+    vars: object;
+    params: StandardPaymentParams;
+  } | null>(null);
+  const feeAttemptRef = useRef<{
+    vars: object;
+    params: StandardPaymentParams;
+    merchantHash: Hex;
+    merchantBlockNumber: bigint;
+  } | null>(null);
+  // H-D (Codex の MUST): 同じタブの中で、結果の出ていないウォレットへの要求を同時に 1 つだけにする登録簿
+  // (lib/standardPaymentOutstanding) での、この hook (1 つの画面) の持ち主の印。
+  // 登録は hook の options の onMutate (Mutation が mutationFn = ウォレットへの要求を呼ぶ前に、writeContract の中で同期に呼ぶ)。
+  // 外すのは結果が出たとき: hash = 印を保存してから (mount 中の今の試みは呼び出しごとの onSuccess・それ以外は hook の options の
+  // onSuccess)・拒否や失敗 = hook の options の onError。どれも Mutation 自身が呼ぶので、unmount の後も外れる。
+  // networkMode 'always' (Codex の 2 回目の MUST): 既定の 'online' だと、offline のとき TanStack は mutationFn を呼ぶ前に paused で
+  // 止まり、online に戻ると QueryClient が再開する。その間に provider ごと unmount されて QueryClient が入れ替わる ([locale] の
+  // layout の下で作るので言語の切り替えで起きうる) と、古い client は online の復帰の購読を外すので二度と再開せず、成功も失敗も
+  // 起きない = 登録簿から外れず、ウォレットに何も出ていないのに新しい画面が止まり続ける。ウォレットへの要求は端末の中の
+  // provider への呼び出しで network の復帰を待つ意味は無いので、paused を作らずすぐ要求を出す (登録 = 要求が出ている)。
+  const [requestOwner] = useState<object>(() => ({}));
+  const merchantWrite = useWriteContract({
+    mutation: {
+      networkMode: 'always',
+      onMutate: (variables) => {
+        addStandardWalletRequest(variables, requestOwner, 'merchant');
+      },
+      onSuccess: (hash, variables) => {
+        const attempt = merchantAttemptRef.current;
+        if (!mountedRef.current && attempt && attempt.vars === variables) {
+          persistIntent('merchant', attempt.params, hash);
+        }
+        // mount 中の今の試みは、この後に呼ばれる呼び出しごとの onSuccess が印を保存してから外す。
+        // 限界 (塞いでいない): この受け渡し (Mutation の execute の中の await 2 回の後の dispatch) の間に unmount すると、呼び出し
+        // ごとの onSuccess は呼ばれず (listener が無い)、送金は成功したのに印が残らず、登録簿からも外れない (読み直すまで止まる)。
+        // microtask の連なりは原子性の保証ではない (MutationCache の onSettled などの callback から unmount すれば起きる。今の
+        // app の QueryClient にその callback は無い)。
+        if (mountedRef.current && attempt?.vars === variables) return;
+        removeStandardWalletRequest(variables);
+      },
+      onError: (_error, variables) => {
+        removeStandardWalletRequest(variables);
+      },
+    },
+  });
+  const feeWrite = useWriteContract({
+    mutation: {
+      networkMode: 'always',
+      onMutate: (variables) => {
+        addStandardWalletRequest(variables, requestOwner, 'fee');
+      },
+      onSuccess: (hash, variables) => {
+        const attempt = feeAttemptRef.current;
+        if (!mountedRef.current && attempt && attempt.vars === variables) {
+          persistIntent('fee', attempt.params, attempt.merchantHash, {
+            feeHash: hash,
+            merchantBlockNumber: attempt.merchantBlockNumber,
+          });
+        }
+        // mount 中は呼び出しごとの onSuccess が保存してから外す (受け渡しの限界は merchant と同じ)。
+        if (mountedRef.current && attempt?.vars === variables) return;
+        removeStandardWalletRequest(variables);
+      },
+      onError: (_error, variables) => {
+        removeStandardWalletRequest(variables);
+      },
+    },
+  });
 
   // 同内容の置換 (高速化) で確認済みの実 hash を、試行 (chain・送った hash) に結び付けて保持する。
   // isSuccess に依存した一時的な算出値だと、成功後の再照会が RPC エラーになった時点で mine されて
@@ -405,23 +501,58 @@ export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {
       merchantBlockNumber: bigint,
     ) => {
       setPhase('fee-sending');
-      feeWrite.writeContract({
+      const vars = {
         chainId: params.chainId,
         address: params.tokenAddress,
         abi: erc20Abi,
         functionName: 'transfer',
         args: [params.feeReceiver, params.feeAmount],
-      }, {
+      } as const;
+      // H-D: unmount の後に承認された fee の hash を、hook の options の onSuccess が保存できるように置く。
+      feeAttemptRef.current = { vars, params, merchantHash, merchantBlockNumber };
+      feeWrite.writeContract(vars, {
         onSuccess: (hash) => {
           restoredFeeTxHashRef.current = hash;
           persistIntent('fee', params, merchantHash, {
             feeHash: hash,
             merchantBlockNumber,
           });
+          // H-D: 印を保存してから、出したままの要求を登録簿から外す。
+          removeStandardWalletRequest(vars);
         },
       });
     },
     [feeWrite, persistIntent],
+  );
+
+  // 保存された印からの復元。mount の読込と、別の画面の要求の結果が出た後の読み直し (H-D) の両方がここを通る
+  // (読み直しのときと同じ復元の道)。
+  const restoreStoredIntent = useCallback(
+    (storage: PaymentIntentStorage, intent: StandardIntentMetadata) => {
+      // 保存済み hash の確認より前に届いた submit を後から自動送信すると、復元成功直後の
+      // 2 本目へ波及する。未解決 intent を優先し、読込中に積まれた操作は破棄する。
+      queuedParamsRef.current = null;
+      const params = storage.standardParamsFromIntent(intent);
+      issuedAtRef.current = intent.issuedAt;
+      restoredFromStorageRef.current = true;
+      lastParamsRef.current = params;
+      lastSubmittedFromRef.current = intent.from;
+      setChainId(intent.chainId);
+      restoredMerchantTxHashRef.current = intent.merchantTxHash;
+      restoredFeeTxHashRef.current = intent.feeTxHash;
+      restoredMerchantBlockNumberRef.current =
+        intent.merchantBlockNumber !== undefined
+          ? BigInt(intent.merchantBlockNumber)
+          : undefined;
+      setHasStoredIntent(true);
+      if (intent.stage === 'merchant') {
+        setPhase('merchant-unknown');
+        return;
+      }
+      feeStartedRef.current = true;
+      setPhase(intent.stage === 'fee' ? 'fee-unknown' : 'fee-error');
+    },
+    [],
   );
 
   useEffect(() => {
@@ -435,28 +566,7 @@ export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {
         const intent = storage.loadStandardIntent();
         setStorageReady(true);
         if (!intent) return;
-        // 保存済み hash の確認より前に届いた submit を後から自動送信すると、復元成功直後の
-        // 2 本目へ波及する。未解決 intent を優先し、読込中に積まれた操作は破棄する。
-        queuedParamsRef.current = null;
-        const params = storage.standardParamsFromIntent(intent);
-        issuedAtRef.current = intent.issuedAt;
-        restoredFromStorageRef.current = true;
-        lastParamsRef.current = params;
-        lastSubmittedFromRef.current = intent.from;
-        setChainId(intent.chainId);
-        restoredMerchantTxHashRef.current = intent.merchantTxHash;
-        restoredFeeTxHashRef.current = intent.feeTxHash;
-        restoredMerchantBlockNumberRef.current =
-          intent.merchantBlockNumber !== undefined
-            ? BigInt(intent.merchantBlockNumber)
-            : undefined;
-        setHasStoredIntent(true);
-        if (intent.stage === 'merchant') {
-          setPhase('merchant-unknown');
-          return;
-        }
-        feeStartedRef.current = true;
-        setPhase(intent.stage === 'fee' ? 'fee-unknown' : 'fee-error');
+        restoreStoredIntent(storage, intent);
       })
       .catch(() => {
         if (!active) return;
@@ -466,7 +576,33 @@ export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {
     return () => {
       active = false;
     };
-  }, [enabled]);
+  }, [enabled, restoreStoredIntent]);
+
+  // H-D: 別の画面 (別の hook) がウォレットへ出したまま、結果の出ていない要求 (merchant / fee・無ければ null)。
+  // 登録簿の変化は mount 中のこの hook にも知らせる (useSyncExternalStore の subscribe)。
+  const requestElsewhereNow = useSyncExternalStore(
+    subscribeStandardWalletRequests,
+    () => standardWalletRequestElsewhere(requestOwner),
+    () => null,
+  );
+  const requestElsewhere = enabled ? requestElsewhereNow : null;
+  // 止めていた要求の結果が出たら、保存を読み直す。hash が返った = 印が保存されているので、読み直しのときと同じ復元の道
+  // (merchant-unknown → receipt の照会 など) へ入る。拒否・失敗 = 印は増えていない (merchant は印なし・fee は送る前の
+  // fee-awaiting のまま) ので、止める前の状態 (払える状態・利用料の送り直し) に戻る。
+  const waitedElsewhereRef = useRef(false);
+  useEffect(() => {
+    if (requestElsewhere !== null) {
+      waitedElsewhereRef.current = true;
+      return;
+    }
+    if (!waitedElsewhereRef.current) return;
+    waitedElsewhereRef.current = false;
+    const storage = storageRef.current;
+    // storage の読込がまだなら、mount の effect が読込の後に読む。
+    if (!storage) return;
+    const intent = storage.loadStandardIntent();
+    if (intent) restoreStoredIntent(storage, intent);
+  }, [requestElsewhere, restoreStoredIntent]);
 
   function mutate(params: StandardPaymentParams): void {
     if (!enabled) return;
@@ -476,11 +612,13 @@ export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {
     }
     // R: hash ありの receipt 不明中は、同じ送金が成功済みの可能性がある。
     //    receipt 再照会以外の新規 merchant transfer を禁止し、二重送金を防ぐ。
+    // H-D: 別の画面の要求がウォレットに出たまま (結果がまだ) の間も始めない (その結果が後からこの支払いの印を上書きする)。
     if (
       hasStoredIntent ||
       phase === 'merchant-unknown' ||
       phase === 'fee-unknown' ||
-      phase === 'fee-error'
+      phase === 'fee-error' ||
+      standardWalletRequestElsewhere(requestOwner) !== null
     ) {
       return;
     }
@@ -507,18 +645,25 @@ export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {
     //    receipt を待ち続けるため reset() で明示的にクリア。
     merchantWrite.reset();
     feeWrite.reset();
+    // H-D: reset で捨てた fee の試みは、後から承認されても保存しない (呼び出しごとの onSuccess が呼ばれなくなるのと同じ意味)。
+    feeAttemptRef.current = null;
+    const vars = {
+      chainId: params.chainId,
+      address: params.tokenAddress,
+      abi: erc20Abi,
+      functionName: 'transfer',
+      args: [params.merchant, params.merchantAmount],
+    } as const;
+    // H-D: unmount の後に承認された merchant の hash を、hook の options の onSuccess が保存できるように置く。
+    merchantAttemptRef.current = { vars, params };
     merchantWrite.writeContract(
-      {
-        chainId: params.chainId,
-        address: params.tokenAddress,
-        abi: erc20Abi,
-        functionName: 'transfer',
-        args: [params.merchant, params.merchantAmount],
-      },
+      vars,
       {
         onSuccess: (hash) => {
           restoredMerchantTxHashRef.current = hash;
           persistIntent('merchant', params, hash);
+          // H-D: 印を保存してから、出したままの要求を登録簿から外す。
+          removeStandardWalletRequest(vars);
         },
       },
     );
@@ -548,6 +693,7 @@ export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {
     //    status='reverted' 確定前の fee 再送を禁止する。
     // merchant leg の payer と別 wallet へ fee prompt を出し、第三者の残高から
     // 手数料を送らせる波及を断つ。未接続時も同じ intent latch を維持する。
+    // H-D: 別の画面の要求 (離れた画面の利用料など) がウォレットに出たままの間も送らない (2 本目の利用料・印の上書き)。
     if (
       phase === 'merchant-unknown' ||
       phase === 'fee-unknown' ||
@@ -555,7 +701,8 @@ export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {
       !params ||
       params.feeAmount <= 0n ||
       !merchantSettledTxHash ||
-      merchantBlockNumber === undefined
+      merchantBlockNumber === undefined ||
+      standardWalletRequestElsewhere(requestOwner) !== null
     ) {
       return;
     }
@@ -581,6 +728,7 @@ export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {
     isOriginalPayerConnected,
     persistIntent,
     submitFee,
+    requestOwner,
   ]);
 
   const retryReceipt = useCallback(() => {
@@ -861,13 +1009,21 @@ export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {
     customer,
   ]);
 
+  // H-D: 別の画面の要求がウォレットに出たままの間は、その要求の承認待ち (既存の送信中の phase) として見せる
+  // (ウォレットにはその送金の確認が残っている)。結果が出たら、上の読み直しの後の phase に戻る。
+  const shownPhase: StandardPhase =
+    requestElsewhere === 'merchant'
+      ? 'merchant-sending'
+      : requestElsewhere === 'fee'
+        ? 'fee-sending'
+        : phase;
   const isPending =
-    phase === 'merchant-sending' ||
-    phase === 'merchant-mining' ||
-    phase === 'fee-sending' ||
-    phase === 'fee-mining';
-  const isSuccess = phase === 'success';
-  const isError = phase === 'merchant-error' || phase === 'fee-error';
+    shownPhase === 'merchant-sending' ||
+    shownPhase === 'merchant-mining' ||
+    shownPhase === 'fee-sending' ||
+    shownPhase === 'fee-mining';
+  const isSuccess = shownPhase === 'success';
+  const isError = shownPhase === 'merchant-error' || shownPhase === 'fee-error';
 
   // 優先順: externalError (mutate 事前 validation) → merchant 系 → fee 系
   const error: Error | null =
@@ -906,18 +1062,18 @@ export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {
     mutate,
     retryFee,
     retryReceipt,
-    phase,
+    phase: shownPhase,
     isPending,
     isSuccess,
     isError,
     data,
     error,
     // "merchant 確定済 / fee 失敗" を UI で識別するための個別 flag (retry button gate)。
-    isFeeError: phase === 'fee-error',
-    isMerchantError: phase === 'merchant-error',
-    isUnknown: phase === 'merchant-unknown' || phase === 'fee-unknown',
-    isMerchantUnknown: phase === 'merchant-unknown',
-    isFeeUnknown: phase === 'fee-unknown',
+    isFeeError: shownPhase === 'fee-error',
+    isMerchantError: shownPhase === 'merchant-error',
+    isUnknown: shownPhase === 'merchant-unknown' || shownPhase === 'fee-unknown',
+    isMerchantUnknown: shownPhase === 'merchant-unknown',
+    isFeeUnknown: shownPhase === 'fee-unknown',
     // A1: 同内容の置換で mine されたら置換 tx の hash (fee-error 時の履歴補完・注文通知もこれを読む)。
     merchantTxHash: merchantSettledTxHash,
     feeTxHash: feeSettledTxHash,
@@ -932,7 +1088,9 @@ export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {
     lastSubmittedFrom: lastSubmittedFromRef.current,
     isRestoring: enabled && !storageReady,
     hasActiveIntent: hasStoredIntent,
-    hasAttempt: lastParamsRef.current !== null,
-    restoredFromStorage: restoredFromStorageRef.current,
+    // H-D: 別の画面の要求が出たままの間は、保存された印が残っているときと同じく、通常決済を本線に固定し (hasAttempt)、
+    // この画面の支払いとして扱わない (restoredFromStorage = 履歴・控え・注文の記録へ結び付けない)。
+    hasAttempt: requestElsewhere !== null || lastParamsRef.current !== null,
+    restoredFromStorage: requestElsewhere !== null || restoredFromStorageRef.current,
   };
 }
