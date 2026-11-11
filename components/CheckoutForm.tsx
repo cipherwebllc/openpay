@@ -29,7 +29,7 @@ import { CheckoutHeader } from './checkout/CheckoutHeader';
 import { CheckoutCompletion } from './checkout/CheckoutCompletion';
 import { shopContactLabel } from '@/lib/shopContact';
 import { rememberOrderPayment, type RememberedOrderPayment } from '@/lib/orderConfirmation';
-import { findRememberedOrderPayment } from '@/lib/orderPaidLookup';
+import { checkoutSettlementScreen, findRememberedOrderPayment } from '@/lib/orderPaidLookup';
 import {
   PaymentSuccessOverlay,
   type PaymentSuccessOverlayPayload,
@@ -67,6 +67,7 @@ import {
 import { isUserRejection } from '@/lib/walletErrors';
 import { useSwitchChainWithFeedback } from '@/hooks/useSwitchChainWithFeedback';
 import { deriveCheckoutGuards } from '@/lib/paymentFlowGuards/checkout';
+import { isForeignSettlement } from '@/lib/paymentFlowGuards/restoredSettlement';
 import { generateStatusToken } from '@/lib/orderStatusToken';
 import { isOrderTokenLike } from '@/lib/orderToken';
 import { useErc20BalanceAndChain } from '@/hooks/useErc20BalanceAndChain';
@@ -698,10 +699,32 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
     return intent;
   }, [deployment.chainId, orderLinkKey, params.to, relay.restoredIntent, totalWei]);
   const restoredCheckoutCompletion =
-    (isStandard && standard.restoredFromStorage) ||
+    // 通常決済: hook の restoredFromStorage は利用料の再送 (retryFee) で false に戻るので、復元した試みの印
+    // (restoredAttempt・新しい mutate でだけ false) も見る (第 10 回レビュー H-U: 復元した別の支払いの利用料を再送した後の
+    // 完了を、この画面の完了・履歴・払った記録にしない)。
+    (isStandard && (standard.restoredFromStorage || standard.restoredAttempt)) ||
     (useRelay && relay.restoredIntent != null) ||
     // 確定した Pimlico の支払いが、この画面から最後に送った支払いと別の intent (第 10 回レビュー A-1)。
     (!isStandard && !useRelay && gasless.settledOtherIntent);
+  // 復元した支払いの確定が、この会計の支払いでないと証明できたか (第 10 回レビュー H-S)。完了の欄の題と本文だけを
+  // 差し替える (お礼を出さず「この画面の支払いではありません」と「読み込み直す」を出す)。completed・再送の止め・受注通知・
+  // 大きな完了画面・success_url・払った記録・履歴の条件は restoredCheckoutCompletion のままで、ここでは変えない。
+  // この mount で送った支払いは判定しない。比べられない欄は一致 (lib/paymentFlowGuards/restoredSettlement)。
+  const settlementScreen = useMemo(
+    () => checkoutSettlementScreen(params, remoteOrder, sendsOrderNotify),
+    [params, remoteOrder, sendsOrderNotify],
+  );
+  const foreignSettlement =
+    restoredCheckoutCompletion &&
+    isForeignSettlement(
+      settlementScreen,
+      isStandard
+        ? { kind: 'standard', record: standard.lastSubmittedParams }
+        : useRelay
+          // 注文に束縛した記録 (matchingDelivery) は、hook が今の会計と照らして復元したもの = 常に一致。
+          ? { kind: 'relay', bound: matchingDelivery !== null, record: relay.restoredIntent }
+          : { kind: 'gasless', record: gasless.variables },
+    );
 
   // ウォレットでの取り消しは失敗として数えない (Sentry の *.failed 通知を鳴らさない)。
   useEffect(() => {
@@ -2133,6 +2156,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
           (このガードの内側で) 作る。 */}
       {completed && (gasless.data || standard.data || relay.data) && (
         <CheckoutCompletion
+          foreign={foreignSettlement}
           gasless={
             !isStandard && !useRelay && gasless.data
               ? {
