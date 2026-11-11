@@ -3166,5 +3166,106 @@ describe('useJpycEip3009Payment — 復旧の枠を書けない端末では束�
     await waitFor(() => expect(view.result.current.error?.message).toBe('order_binding_storage_unavailable'));
     expect(relayPosts()).toHaveLength(1);
     expect(signTypedData).toHaveBeenCalledTimes(1);
+    // 送っていない (429 だけを受けた) payload の保持は外す: 次の押下は新しい署名から。
+    expect(view.result.current.hasActiveIntent).toBe(false);
+  });
+
+  // Codex の再確認の再現 (MUST): 束縛した注文の 429 の後、同じ chain の checkout の文脈を読み直す (A → B → A) と、復元の
+  // effect が orderDelivery を null に戻し、署名済みの payload だけが残っていた。今までは再送が記録の確かめを通らずに、記録なしで
+  // POST した。その応答を待つ間に開き直して同じ注文をもう一度押すと、別の署名をもう 1 本送れた (実行できる authorization が
+  // 2 本・1 本目には復旧の記録が無い)。storage は正常。/checkout の払い方 (gasMode: merchant = 合計がそのまま value) で通す。
+  const CONTEXT_A = { ...ORDER_CONTEXT, totalValue: VALUE };
+  const CONTEXT_B = { ...CONTEXT_A, orderId: 'another-order' };
+  function renderBoundIn(context: typeof CONTEXT_A) {
+    return renderHook(
+      ({ ctx }) => useJpycEip3009Payment(jpycDep, { restoreOrderDelivery: true, orderContext: ctx }),
+      { initialProps: { ctx: context }, wrapper: makeWrapper() },
+    );
+  }
+  async function signedThen429(mode: 'free' | 'recover', orderId: string) {
+    const { latestOrderDelivery } = await import('../_helpers/orderDeliveryView');
+    const f = await boundOrder(mode, orderId);
+    setRoute(mode);
+    mount();
+    const atRelayPost: string[] = [];
+    fetchSpy.mockImplementation(async (url: string) => {
+      if (url !== '/api/relay/jpyc') return jsonResponse(200, { ok: true, state: 'indeterminate' });
+      atRelayPost.push(latestOrderDelivery().kind);
+      // 1 本目は IP 制限で拒否 (relay は body を処理していない)。再送の応答は返さない (未解決のまま開き直す)。
+      return atRelayPost.length === 1 ? jsonResponse(429, { ok: false, error: 'ip_rate_limited' }) : new Promise<Response>(() => undefined);
+    });
+    const view = renderBoundIn(CONTEXT_A);
+    await waitFor(() => expect(view.result.current.isRestoring).toBe(false));
+    act(() => view.result.current.mutate({ merchant: MERCHANT, value: VALUE, gasMode: 'merchant', order: f.order }));
+    await waitFor(() => expect(isRelayIpRateLimitedError(view.result.current.error)).toBe(true));
+    expect(view.result.current.hasActiveIntent).toBe(true);
+    // 429 は送っていない証明なので、slot は外れている (今までどおり)。
+    expect(latestOrderDelivery()).toEqual({ kind: 'empty' });
+    return { f, view, atRelayPost };
+  }
+
+  it.each(['free', 'recover'] as const)('%s: 429 の後に文脈を A → B → A と読み直しても、再送は束縛の記録を書いて読み戻してから送る。応答を待つ間に開き直して同じ注文を押しても、新しい署名を送らない', async (mode) => {
+    const { f, view, atRelayPost } = await signedThen429(mode, `bound-ctx-${mode}`);
+    // 文脈が変わると復元の effect が読み直す (読み終えるまでの押下は積まれるだけなので、読み終えるのを待つ)。
+    view.rerender({ ctx: CONTEXT_B });
+    await waitFor(() => expect(view.result.current.isRestoring).toBe(false));
+    expect(view.result.current.orderDelivery).toBeNull();
+    view.rerender({ ctx: CONTEXT_A });
+    await waitFor(() => expect(view.result.current.isRestoring).toBe(false));
+    expect(view.result.current.orderDelivery).toBeNull();
+    expect(view.result.current.hasActiveIntent).toBe(true);
+
+    act(() => view.result.current.retryRelay());
+    await waitFor(() => expect(relayPosts()).toHaveLength(2));
+    // 再送の瞬間には、この注文の記録が slot にある (読み直した画面がこの支払いを知る)。
+    expect(atRelayPost).toEqual(['ready', 'ready']);
+    expect((relayPosts()[1][1] as RequestInit).body).toBe((relayPosts()[0][1] as RequestInit).body);
+    expect(view.result.current.orderDelivery?.order).toEqual(f.order);
+    view.unmount();
+
+    // 再送の応答を待つ間に開き直し、同じ注文をもう一度押す。
+    const reopened = renderBoundIn(CONTEXT_A);
+    await waitFor(() => expect(reopened.result.current.isRestoring).toBe(false));
+    expect(reopened.result.current.hasActiveIntent).toBe(true);
+    act(() => reopened.result.current.mutate({ merchant: MERCHANT, value: VALUE, gasMode: 'merchant', order: f.order }));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 100));
+    });
+    expect(signTypedData).toHaveBeenCalledTimes(1);
+    expect(relayPosts()).toHaveLength(2);
+    reopened.unmount();
+  });
+
+  it.each(['free', 'recover'] as const)('%s: 429 の後に別の注文の文脈 (B) に変わった画面では、前の注文 (A) の payload を送らない (再送でも支払いの押下でも)。保持は外し、B は新しい署名から', async (mode) => {
+    const { view } = await signedThen429(mode, `bound-other-${mode}`);
+    const firstBody = (relayPosts()[0][1] as RequestInit).body;
+    view.rerender({ ctx: CONTEXT_B });
+    await waitFor(() => expect(view.result.current.isRestoring).toBe(false));
+    expect(view.result.current.orderDelivery).toBeNull();
+    expect(view.result.current.hasActiveIntent).toBe(true);
+
+    act(() => view.result.current.retryRelay());
+    await waitFor(() => expect(view.result.current.error?.message).toBe('order_binding_mismatch'));
+    expect(relayPosts()).toHaveLength(1);
+    expect(view.result.current.hasActiveIntent).toBe(false);
+
+    // B の注文を押すと、A の payload ではなく B の新しい署名で送る。
+    const other = await boundOrder(mode, 'another-order');
+    act(() => view.result.current.mutate({ merchant: MERCHANT, value: VALUE, gasMode: 'merchant', order: other.order }));
+    await waitFor(() => expect(relayPosts()).toHaveLength(2));
+    expect(signTypedData).toHaveBeenCalledTimes(2);
+    expect((relayPosts()[1][1] as RequestInit).body).not.toBe(firstBody);
+    view.unmount();
+  });
+
+  it('文脈が同じまま (A → A) なら、429 の後の再送は今までどおり同じ payload を送る (記録は送る前に読み戻す)', async () => {
+    const { view, atRelayPost } = await signedThen429('free', 'bound-same');
+    view.rerender({ ctx: { ...CONTEXT_A } });
+    act(() => view.result.current.retryRelay());
+    await waitFor(() => expect(relayPosts()).toHaveLength(2));
+    expect(atRelayPost).toEqual(['ready', 'ready']);
+    expect((relayPosts()[1][1] as RequestInit).body).toBe((relayPosts()[0][1] as RequestInit).body);
+    expect(signTypedData).toHaveBeenCalledTimes(1);
+    view.unmount();
   });
 });
