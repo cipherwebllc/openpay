@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import dynamic from 'next/dynamic';
 import { useLocale, useTranslations } from 'next-intl';
 import type { StandardPaymentParams } from '@/hooks/useStandardPayment';
@@ -98,6 +98,20 @@ import { tipFormTheme, HEADER_SHEEN } from '@/lib/tipFormTheme';
 
 const DEFAULT_THEME_COLOR = '#2563eb';
 const TIP_MESSAGE_MIN_WEI = 10n ** 18n;
+
+// このチップの画面が別のページの中 (iframe) で開かれているか (第 10 回レビュー H-R・user 裁定 Q7-2)。/create の
+// 「サイトに埋め込む」の iframe の URL は直接のリンクと同じで印が無い (components/tip-embed-generator/snippets.ts・
+// TipEmbedGenerator の tipUrl。既に貼られた埋め込みにも印は無い) ので、開いた window が最上位でないかで決める。
+function isInsideFrame(): boolean {
+  try {
+    return window.self !== window.top;
+  } catch {
+    // 何の波及を断つか: 親が別の origin のとき window.top の参照を拒むブラウザで、チップの画面が描けなくなること。
+    // 投げうるのは枠の中だけ (最上位の window.top は自分自身) なので、埋め込みとして扱う。
+    return true;
+  }
+}
+const noopSubscribe = () => () => {};
 
 export function TipForm({
   params,
@@ -216,7 +230,11 @@ export function TipForm({
   });
   const useRelay = isRelayRoute(route);
   const showTipMessageComposer = env.enableTipMessage && isRelayRoute(route);
-  const relay = useJpycEip3009Payment(deployment);
+  // 埋め込み (iframe) の中のチップは、復旧の枠を保存できなくても今までどおりガスレスで送る (user 裁定 Q7-2・受容台帳:
+  // third-party の storage を拒むブラウザで埋め込みのチップを使えなくする影響の方が大きい)。直接開いたページは確かめる
+  // (保存できない端末では送らない)。server の描画と hydration は false (= 確かめる側) で、hydration の後に決まる。
+  const embedded = useSyncExternalStore(noopSubscribe, isInsideFrame, () => false);
+  const relay = useJpycEip3009Payment(deployment, { skipIntentStorageCheck: embedded });
   // recover: relay かつ forwarder 設定済 chain (gas 相当額を JPYC 回収・tip は customer 上乗せ固定)。
   // 未設定は free (OpenPay 負担)。relayGasEquiv は amountWei 確定後に算出する (CDX-3: 実スケジュール
   // recoverFeeValue を使う。チップは gasMode=customer 固定でフロアのみ — bps を適用しないため

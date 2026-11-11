@@ -25,7 +25,9 @@ export function relayErrorKey(err: Error): RelayErrorKey {
       return 'errorRelayFeePaused';
     // この端末に復旧の枠 (公開 metadata) を書けないので、hook が送らずに止めた (hooks/useJpycEip3009Payment・
     // 第 10 回レビュー H-R)。server の応答ではない。時間をおいても直らないので「時間をおいて再度」の generic とは別の
-    // 文言にする (/pay・/checkout は通常決済か別のブラウザ、/tip は通常決済へ切り替えられないので別のブラウザだけを案内する)。
+    // 文言にする。どのフォームも通常決済へは案内せず、ブラウザの設定か別のブラウザだけを案内する (通常決済にも同じ穴がある・
+    // user 裁定 Q7-1。/pay・/checkout は切り替えの banner を出さない = lib/relay/relayResponseError の
+    // isIntentStorageUnavailableError)。
     case 'intent_storage_unavailable':
       return 'errorRelayStorageUnavailable';
     default:

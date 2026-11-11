@@ -11,10 +11,12 @@
 //
 // 復旧の枠 (openpay:relay-intent:v1・公開 metadata だけ) を書けない端末では、束縛しない支払い (/pay・/tip・束縛しない
 // /checkout) を送らない (第 10 回レビュー H-R): 署名の前に書けるかを確かめ、署名の後に枠そのものを書いて読み戻し、読めなければ
-// POST しない (intent_storage_unavailable・fallback-safe な error なので、フォームは通常決済への切り替えを出せる)。枠が無いまま
-// 送ると、relay が receipt を待つ間に読み直した・離れて戻った画面が未解決の支払いを知らず、新しい署名 (別の nonce) = 二重払いを
-// 許す。束縛した注文は従来どおり自分の slot の保存 (order_binding_storage_unavailable) で止まる。枠は sessionStorage (タブごと)
-// なので、タブを閉じて新しいタブで開き直す経路はこの確かめでは塞がらない (従来からの限界)。
+// POST しない (intent_storage_unavailable・送っていないので fallback-safe な error。ただしフォームは通常決済への切り替えを
+// 案内しない: 通常決済も同じ保存に頼っていて同じ穴があるため・user 裁定 Q7-1)。枠が無いまま送ると、relay が receipt を待つ間に
+// 読み直した・離れて戻った画面が未解決の支払いを知らず、新しい署名 (別の nonce) = 二重払いを許す。束縛した注文は従来どおり
+// 自分の slot の保存 (order_binding_storage_unavailable) で止まる。呼び出し側が skipIntentStorageCheck を渡したとき (埋め込みの
+// チップ・user 裁定 Q7-2) は、枠を書けなくても今までどおり送る。枠は sessionStorage (タブごと) なので、タブを閉じて新しいタブで
+// 開き直す経路はこの確かめでは塞がらない (従来からの限界)。
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
@@ -183,7 +185,18 @@ async function postRelayPayload(
 
 export function useJpycEip3009Payment(
   deployment: TokenDeployment,
-  { restoreOrderDelivery = false, orderContext }: { restoreOrderDelivery?: boolean; orderContext?: OrderDeliveryContext } = {},
+  {
+    restoreOrderDelivery = false,
+    orderContext,
+    skipIntentStorageCheck = false,
+  }: {
+    restoreOrderDelivery?: boolean;
+    orderContext?: OrderDeliveryContext;
+    // 復旧の枠を書けるかの確かめ (第 10 回レビュー H-R・下の 3 か所) をしない。枠は今までどおり書くが、書けなくても止めずに
+    // 送る。埋め込み (iframe) の中のチップだけが渡す (user 裁定 Q7-2: third-party の storage を拒むブラウザで埋め込みの
+    // チップを使えなくする影響の方が大きい・受容台帳)。埋め込みかどうかは呼び出し側が決め、この hook は window を見ない。
+    skipIntentStorageCheck?: boolean;
+  } = {},
 ) {
   const { merchant: contextMerchant, chainId: contextChain, tokenAddress: contextToken, webhook: contextWebhook, orderId: contextOrderId, totalValue: contextTotalValue } = orderContext ?? {};
   const { data: walletClient } = useWalletClient();
@@ -597,7 +610,8 @@ export function useJpycEip3009Payment(
         // 保存し直した枠が読み戻せなければ再送しない (第 10 回レビュー H-R・初回の POST の前と同じ確かめ)。この payload は
         // IP 制限 (relay の処理の前の拒否) しか受けていない = 送られていないので、保持を外す (次は新しい署名から・送らない署名は
         // 期限で失効する)。保持を残すと hasActiveIntent が立ったままになり、フォームが通常決済へ切り替えても払えない。
-        if (retained.savesRelayIntent && !storageRef.current?.saveRelayIntentVerified(retained.intent)) {
+        // skipIntentStorageCheck (埋め込みのチップ) は、書き込みは同じで、読み戻せなくても今までどおり再送する。
+        if (retained.savesRelayIntent && !storageRef.current?.saveRelayIntentVerified(retained.intent) && !skipIntentStorageCheck) {
           logger.info('payment.intent_storage_unavailable', { path: 'jpyc-relay', chainId: retained.intent.chainId, stage: 'retry' });
           retainedPayloadRef.current = null;
           throw new Error('intent_storage_unavailable');
@@ -674,9 +688,9 @@ export function useJpycEip3009Payment(
       // 枠を書けないので同じく止める。送ってよいかを決めるのは、署名の後に枠そのものを書いて読み戻す下の確かめ。
       // 束縛した注文は枠を使わず、署名の後の persistOrder (自分の slot の保存) で止まるので、ここでは見ない。
       // 画面を離れた (unmount した) 試みは、直後の signWithLogging が payment_cancelled で止める。離れた後に storage へ
-      // 触れない・止める理由を変えないよう、ここでは確かめない。
+      // 触れない・止める理由を変えないよう、ここでは確かめない。skipIntentStorageCheck (埋め込みのチップ) も確かめない。
       const assertRelayIntentStorable = (candidate: RelayIntentMetadata) => {
-        if (bind || !mountedRef.current || storageRef.current?.canStoreRelayIntent(candidate)) return;
+        if (bind || skipIntentStorageCheck || !mountedRef.current || storageRef.current?.canStoreRelayIntent(candidate)) return;
         logger.info('payment.intent_storage_unavailable', { path: 'jpyc-relay', chainId, stage: 'probe' });
         throw new Error('intent_storage_unavailable');
       };
@@ -881,7 +895,8 @@ export function useJpycEip3009Payment(
       // 送り、relay が receipt を待つ間に読み直した・離れて戻った画面が、新しい署名 (別の nonce) で二重に払うこと。
       // まだ何も送っていないので、署名済みの payload は保持せずに捨てる (次は新しい署名から・送らない署名は期限で失効する)。
       // storageRef が null (storage の chunk を読めなかった) のときも枠は無いので送らない。
-      if (!bind && !storageRef.current?.saveRelayIntentVerified(intent)) {
+      // skipIntentStorageCheck (埋め込みのチップ) は、書き込みは同じで、読み戻せなくても今までどおり送る。
+      if (!bind && !storageRef.current?.saveRelayIntentVerified(intent) && !skipIntentStorageCheck) {
         logger.info('payment.intent_storage_unavailable', { path: 'jpyc-relay', chainId, stage: 'save' });
         throw new Error('intent_storage_unavailable');
       }

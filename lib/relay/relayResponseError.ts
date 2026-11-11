@@ -40,3 +40,11 @@ export function isFallbackSafeRelayError(error: unknown): error is Error {
     !isRelayIpRateLimitedError(error)
   );
 }
+
+// 復旧の枠を書けない端末で、hook が送らずに止めた error (hooks/useJpycEip3009Payment・第 10 回レビュー H-R)。送っていない
+// ので fallback-safe のまま (switchToStandard の二重払いの判定は変えない) だが、/pay・/checkout は通常決済への切り替えの
+// banner を出さず、汎用の error の枠に出す: 通常決済 (hooks/useStandardPayment) も同じ保存に頼っていて同じ穴があり、
+// 同じ穴のある経路へ案内しない (user 裁定 Q7-1・受容台帳)。
+export function isIntentStorageUnavailableError(error: unknown): boolean {
+  return error instanceof Error && error.message === 'intent_storage_unavailable';
+}
