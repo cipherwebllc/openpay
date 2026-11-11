@@ -86,31 +86,47 @@ describe('license registration CONFIRM (real Lua)', () => {
     expect(saved.license).toEqual(definition);
   });
 
-  it('競合: 確認の途中で出品者が商品を更新していたら 0 → conflict で、相手の更新を上書きしない', async () => {
+  // 第 10 回レビュー B3-2: CAS の 0 は receipt・定義・イベントの不一致ではない (照合は CAS の前に済んでいる)。conflict を返すと
+  // worker が修復待ちにして、on-chain では登録済みの商品が登録待ちのまま固まる。その回は保留にし、次の回が読み直して確かめる。
+  it('競合: 確認の途中で出品者が商品を更新していたら 0 → pending で相手の更新を上書きせず、次の回に編集を残したまま registered', async () => {
     store.strings.set(KEY, PENDING);
     const edited = PENDING.replace('"title":"License"', '"title":"Edited"');
     h.afterSnapshot = () => store.strings.set(KEY, edited);
-    expect(await confirmLicenseRegistration(ID, HASH, rpc)).toBe('conflict');
+    expect(await confirmLicenseRegistration(ID, HASH, rpc)).toBe('pending');
     expect(store.strings.get(KEY)).toBe(edited);
+    expect(await confirmLicenseRegistration(ID, HASH, rpc)).toBe('registered');
+    const saved = JSON.parse(store.strings.get(KEY)!) as Record<string, unknown>;
+    expect(saved.title).toBe('Edited');
+    expect(saved.registration).toEqual({ status: 'registered', txHash: HASH, attempts: 2 });
+    expect(saved.saleActive).toBe(false);
   });
 
   // ⚠️ この fake の GET は型違いのキーで WRONGTYPE を出さず nil を返すので、ここでは Lua の TYPE 検査だけを外しても
   // (直後の GET の一致検査が 0 を返すため) 落ちない。本物の Redis では TYPE 検査が無いと EVAL が WRONGTYPE で失敗する。
-  it('競合: 確認の途中で商品のキーが文字列でなくなったら conflict で、キーを書き換えない', async () => {
+  it('競合: 確認の途中で商品のキーが文字列でなくなったら、その回は pending でキーを書き換えない', async () => {
     store.strings.set(KEY, PENDING);
     h.afterSnapshot = () => {
       store.delete(KEY);
       store.lists.set(KEY, [PENDING]);
     };
-    expect(await confirmLicenseRegistration(ID, HASH, rpc)).toBe('conflict');
+    expect(await confirmLicenseRegistration(ID, HASH, rpc)).toBe('pending');
     expect(store.lists.get(KEY)).toEqual([PENDING]);
     expect(store.strings.has(KEY)).toBe(false);
   });
 
-  it('競合: 確認の途中で商品が消えたら conflict で、キーを作り直さない', async () => {
+  it('競合: 確認の途中で商品が消えたら、その回は pending でキーを作り直さず、次の回が読み直して conflict (商品が無い)', async () => {
     store.strings.set(KEY, PENDING);
     h.afterSnapshot = () => store.delete(KEY);
+    expect(await confirmLicenseRegistration(ID, HASH, rpc)).toBe('pending');
+    expect(store.keys()).toEqual([]);
     expect(await confirmLicenseRegistration(ID, HASH, rpc)).toBe('conflict');
     expect(store.keys()).toEqual([]);
+  });
+
+  it('本物の不一致 (receipt に LicenseRegistered が無い) は conflict のままで、商品を書き換えない', async () => {
+    store.strings.set(KEY, PENDING);
+    const noEvent = { ...rpc, getTransactionReceipt: async () => ({ status: 'success', transactionHash: HASH, blockNumber: 10n, blockHash: HASH, logs: [] }) } as unknown as typeof rpc;
+    expect(await confirmLicenseRegistration(ID, HASH, noEvent)).toBe('conflict');
+    expect(store.strings.get(KEY)).toBe(PENDING);
   });
 });

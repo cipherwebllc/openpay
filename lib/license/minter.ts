@@ -43,7 +43,13 @@ const SHORT_FINALITY_WAITS = 5;
 const MAX_SCAN_ATTEMPTS = 10;
 export const licenseBackoff = (attempts: number) => Math.min(3_600_000, 300_000 * 2 ** Math.min(10, Math.max(0, attempts - 1)));
 class Deadline extends Error {}
-class Repair extends Error {}
+// lane = needs_repair を保存する回に送信枠 (worker:active) を返すか。'release' は関所 (processJob の ownNonceSettled) の
+// 戻り値だけを渡す。既定 ('keep') は枠を保持する (自分の送信の nonce の結果が確定したと言えない)。
+class Repair extends Error {
+  constructor(message: string, readonly lane: 'keep' | 'release' = 'keep') { super(message); }
+}
+// 関所が、決め手を読んだ後に finalized の head が変わったのを見つけた。修復待ちにせず、枠を保持して次の run で読み直す。
+class HeadChanged extends Error {}
 class LostLease extends Error {}
 
 function callData(job: LicenseJob): Hex {
@@ -78,7 +84,11 @@ async function processJob(member: string, token: string, deadline: number): Prom
     job = next; raw = JSON.stringify(next);
   };
   await save({ ...job, lease: { token, until: Date.now() + 55_000 } });
-  const reschedule = async (reason: string, repair = false) => {
+  // needs_repair は運営の修復を待つ終端で、通知の webhook は任意。保存できた回を warn (Sentry の rule) に残し、
+  // 発行が黙って止まる波及を断つ。lane = この回に送信枠を返したか ('keep' のまま枠を持つジョブは後続の送信を止める)。
+  // 載せるのは member・種別・固定の理由だけ (RPC の本文・鍵・署名は載せない)。
+  const warnRepair = (lane: 'keep' | 'release') => logger.warn('license.job_needs_repair', { member, kind: job.kind, lastError: job.lastError, lane });
+  const reschedule = async (reason: string, repair = false, lane: 'keep' | 'release' = 'keep') => {
     // 確定待ちが実障害の attempt 10 修復・通知境界へ波及しないよう、両待機理由を永続 finalityWaitAttempts で別計数する。
     // 待機中は attempts を増減せず、実障害を挟んでも待機回数を保持し、最初の 5 回だけ 60 秒、その後は既存 backoff を使う。
     const finalityWait = !repair && (reason === 'receipt_not_finalized' || reason === 'submission_unconfirmed');
@@ -89,8 +99,14 @@ async function processJob(member: string, token: string, deadline: number): Prom
       : licenseBackoff(attempts);
     // 不明な送信は attempt 10 でも submitted のまま hash を追う。新しい nonce で再 mint しない。
     const status = job.submission && !repair ? 'submitted' : repair || attempts >= 10 ? 'needs_repair' : 'retryable';
+    // submitted のまま attempt 10 に届いたジョブ (送信の結果を確かめられない・登録の確認が通らない) は needs_repair の warn の
+    // 対象外で、通知が任意の webhook だけだと、枠を持ったまま発行と登録が黙って止まる。その回に 1 回だけ warn を残す。
+    // 印 (stalledWarnedAt) は同じ CAS で保存し、毎回は出さない。載せるのは member・種別・固定の理由・回数だけ。
+    const stalled = status === 'submitted' && attempts >= 10 && job.stalledWarnedAt === undefined;
     await save({ ...job, status, attempts, ...(finalityWait ? { finalityWaitAttempts } : {}), lastError: reason, nextAttemptAt: Date.now() + delay,
-      ...(attempts >= 10 || repair ? { alertPending: job.alertedAt === undefined } : {}) });
+      ...(attempts >= 10 || repair ? { alertPending: job.alertedAt === undefined } : {}), ...(stalled ? { stalledWarnedAt: Date.now() } : {}) }, lane);
+    if (status === 'needs_repair') warnRepair(lane);
+    if (stalled) logger.warn('license.job_submission_stalled', { member, kind: job.kind, lastError: job.lastError, attempts });
   };
   const alert = async () => {
     if (!job.alertPending) return;
@@ -107,6 +123,7 @@ async function processJob(member: string, token: string, deadline: number): Prom
       lastError: reason, nextAttemptAt: Date.now() + licenseBackoff(scanAttempts),
       ...(nextBlock !== undefined ? { scanFromBlock: nextBlock } : {}),
       ...(needsRepair ? { alertPending: job.alertedAt === undefined } : {}) });
+    if (needsRepair) warnRepair('keep');
   };
   let scanning = false;
   try {
@@ -120,8 +137,26 @@ async function processJob(member: string, token: string, deadline: number): Prom
       if (receipt.transactionHash !== hash || block.hash !== receipt.blockHash) throw new Repair('receipt_reorg_or_mismatch');
       return receipt;
     };
+    // 最初に読んだ finalized の head と同じ番号の block の hash が、今も同じか。
+    const headUnchanged = async () => (await step(() => rpc.getBlock({ blockNumber: head.number }))).hash === head.hash;
     const stableHead = async () => {
-      if ((await step(() => rpc.getBlock({ blockNumber: head.number }))).hash !== head.hash) throw new Repair('finality_changed');
+      if (!await headUnchanged()) throw new Repair('finality_changed');
+    };
+    // 送信枠 (worker:active) を、義務が未解決のまま返してよいかを決める唯一の関所。枠の役目は「結果が未確定の署名済み tx の
+    // nonce を、ほかのジョブが使い回さないように隔離する」ことなので、返してよいのは、このジョブ自身の送信 (submission) の
+    // nonce の結果が finalized で確定したと言えるときだけ。license の検証 (発行できたか・登録を確かめられたか) の成否とは別。
+    // 呼ぶのは決め手を読んだ直後だけ: (a) 自分の送信の hash で complete に入り、canonicalReceipt が receipt を返した後
+    // (成功でも revert でも nonce は使用済み)、(b) finalized の nonce が署名の nonce を越えたのを読んだ後 (この署名はもう
+    // 取り込まれない)。scan の道 (自分の送信の receipt を直接読めず、ログから hash を見つけた回) では、見つけた hash が自分の
+    // 送信と言えないので返さない (rescheduleScan と同じく保持・次の run で自分の hash を直接読めれば返す)。
+    // 決め手を読んだ後に head の hash が変わっていないことを確かめる。決め手の読み取りが別のノード・別の fork に当たった
+    // 「検出できる不整合」を断つためで、確かめた後に起きる本物の finalized の巻き戻しまでは防げない。変わっていたら
+    // HeadChanged (needs_repair にせず、枠を保持したまま次の run で読み直す)。
+    // 義務が済んだ成功 (minted / registered) の回の 'release' はここを通らない (この関所より前からの挙動)。
+    const ownNonceSettled = async (): Promise<'keep' | 'release'> => {
+      if (scanning) return 'keep';
+      if (!await headUnchanged()) throw new HeadChanged();
+      return 'release';
     };
 
     if (job.kind === 'mint') {
@@ -157,18 +192,26 @@ async function processJob(member: string, token: string, deadline: number): Prom
     const complete = async (hash: Hex) => {
       const receipt = await canonicalReceipt(hash);
       if (!receipt) { await reschedule('receipt_not_finalized'); return; }
-      if (receipt.status !== 'success') throw new Repair('transaction_reverted');
+      // ここから receipt は finalized・canonical。自分の送信の hash で入った回 (scan でない道) なら、成功でも revert でも、
+      // その nonce は使用済み (枠を返すかは関所が決める)。scan で見つけた hash の不一致は下の catch が rescheduleScan へ回す。
+      if (receipt.status !== 'success') throw new Repair('transaction_reverted', await ownNonceSettled());
       if (job.kind === 'register') {
         const confirmed = await step(() => confirmLicenseRegistration(job.productId, hash, rpc));
-        if (confirmed === 'conflict') throw new Repair('registration_receipt_mismatch');
-        if (confirmed !== 'registered') { await reschedule('registration_' + confirmed); return; }
+        if (confirmed === 'conflict') throw new Repair('registration_receipt_mismatch', await ownNonceSettled());
+        // 確認の保留 (CAS の衝突・RPC・storage) は license の検証の話で、nonce は上の receipt で確定している。確認のやり直しは
+        // 続けたまま枠だけ先に返す (返さないと、出品者の編集が続く間、ほかの全部の発行と登録が止まる)。job は submitted のまま
+        // submission を持つので、この先も新しい署名の道 (下の送信) には入らない。後の run で RPC が食い違い、receipt も
+        // 登録も読めず finalized の nonce も進んでいないと答えた回は、下の `job.submission` の分岐が、保存済みの同じ
+        // 署名済み tx を出し直す (枠が空なら 'take' で取り直す・ほかのジョブが枠を持っていれば CAS が負けて何もしない)。
+        // 出し直すのは同じ bytes・同じ nonce なので、新しい署名にも、枠を返した後にほかのジョブが取った nonce との衝突にもならない。
+        if (confirmed !== 'registered') { await reschedule('registration_' + confirmed, false, await ownNonceSettled()); return; }
         await save({ ...job, status: 'registered', alertPending: false, mintTxHash: hash, mintBlock: { blockNumber: receipt.blockNumber.toString(), blockHash: receipt.blockHash } }, 'release');
       } else {
         const mint = job;
         const matches = parseEventLogs({ abi: LICENSE_ABI, eventName: 'LicenseMinted', logs: receipt.logs.filter((l) => isAddressEqual(l.address, d.contract)), strict: true })
           .some(({ args }) => args.id === BigInt(d.tokenId) && isAddressEqual(args.to, mint.payer) && args.paymentKey === mint.paymentKey);
         const record = await step(() => rpc.readContract({ address: d.contract, abi: LICENSE_ABI, functionName: 'paymentKeyOf', args: [mint.paymentKey], blockNumber: head.number }));
-        if (!matches || record.id !== BigInt(d.tokenId) || !isAddressEqual(record.to, mint.payer)) throw new Repair('mint_receipt_mismatch');
+        if (!matches || record.id !== BigInt(d.tokenId) || !isAddressEqual(record.to, mint.payer)) throw new Repair('mint_receipt_mismatch', await ownNonceSettled());
         await stableHead();
         await save({ ...mint, status: 'minted', alertPending: false, mintTxHash: hash, mintBlock: { blockNumber: receipt.blockNumber.toString(), blockHash: receipt.blockHash } }, 'release');
       }
@@ -192,7 +235,8 @@ async function processJob(member: string, token: string, deadline: number): Prom
         // RPC 障害/未採掘 hash が、新 nonce の発行へ波及しない。下で同じ署名だけ再送する。
         if (error instanceof Deadline) throw error;
       }
-      if (receipt) { await complete(s.hash); return; }
+      // complete の再試行で attempt 10 に届いた回の通知 (alertPending) を、この return で飛ばさない。
+      if (receipt) { await complete(s.hash); await alert(); return; }
     }
     if (consumed || (job.kind === 'register' && registered.exists)) {
       scanning = true;
@@ -244,7 +288,7 @@ async function processJob(member: string, token: string, deadline: number): Prom
         ? await step(() => rpc.getLogs({ address: d.contract, event: LICENSE_ABI[5], args: { paymentKey: (job as LicenseMintJob).paymentKey }, fromBlock, toBlock }))
         : await step(() => rpc.getLogs({ address: d.contract, event: LICENSE_ABI[4], args: { id: BigInt(d.tokenId) }, fromBlock, toBlock }));
       const hash = logs.find((l) => l.transactionHash)?.transactionHash;
-      if (hash) { await complete(hash); return; }
+      if (hash) { await complete(hash); await alert(); return; }
       // 空振りの cursor 更新だけで永久に due を占有する波及を断つ。消費済みでも 10 回で修復・通知する。
       await rescheduleScan('event_not_found', false, (toBlock + 1n).toString());
       await alert(); return;
@@ -252,7 +296,8 @@ async function processJob(member: string, token: string, deadline: number): Prom
     if (job.submission) {
       const s = job.submission;
       const finalizedNonce = await step(() => rpc.getTransactionCount({ address: s.signer, blockNumber: head.number }));
-      if (finalizedNonce > s.nonce) throw new Repair('nonce_replaced_without_license');
+      // finalized の nonce が署名の nonce を越えた = この署名はもう取り込まれない (置き換え済み・license は finalized に無い)。
+      if (finalizedNonce > s.nonce) throw new Repair('nonce_replaced_without_license', await ownNonceSettled());
       await save({ ...job, status: 'submitted' }, 'take');
       await step(() => rpc.sendRawTransaction({ serializedTransaction: s.serializedTransaction }));
       await reschedule('submission_unconfirmed'); return;
@@ -285,8 +330,13 @@ async function processJob(member: string, token: string, deadline: number): Prom
     // 期限切れ/lease 喪失で stale worker が追記や送信を続ける波及を断つ。
     if (error instanceof Deadline || error instanceof LostLease || Date.now() >= deadline) return;
     // RPC の本文/鍵/署名を永続エラーや通知へ漏らさず、失敗したジョブだけ再試行する。
-    const retry = scanning ? rescheduleScan : reschedule;
-    await retry(error instanceof Repair ? error.message : 'rpc_or_funding_failure', error instanceof Repair);
+    const repair = error instanceof Repair;
+    // HeadChanged は関所が見つけた検出できる不整合で、修復待ちにしない (固定の理由で再試行・枠は保持)。
+    const reason = repair ? error.message : error instanceof HeadChanged ? 'finalized_head_changed' : 'rpc_or_funding_failure';
+    if (scanning) await rescheduleScan(reason, repair);
+    // 関所を通った Repair だけ、needs_repair の保存と同じ CAS で送信枠を返す (Lua は枠の持ち主が自分のときだけ消す)。
+    // 返さないと、修復待ちの 1 件が枠を持ったまま、後続の全部の mint と登録を止める。ほかは従来どおり保持する。
+    else await reschedule(reason, repair, repair ? error.lane : 'keep');
   }
   await alert();
 }
