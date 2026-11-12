@@ -473,9 +473,9 @@ describe('H-Z: 窓の外・nonce が使用済み', () => {
   });
 
   it.each([
-    ['ちょうど 30 分 (1800 秒)', 30 * MIN, 'recover'],
-    ['30 分と 1 秒', 30 * MIN + SEC, 'proceed'],
-  ])('取り込みからの経過 (chain の時計) が %s → %s', async (_name, sinceInclusion, expected) => {
+    ['ちょうど 30 分 (1800 秒) → 窓の内 = 復旧', 30 * MIN, 'recover'],
+    ['30 分と 1 秒 → 窓の外 = 新しい支払い', 30 * MIN + SEC, 'proceed'],
+  ])('取り込みからの経過 (chain の時計) が %s', async (_name, sinceInclusion, expected) => {
     seed('submitting');
     include(OLD, { block: 100n, ms: T0 + 20 * MIN });
     chain.latestMs = T0 + 20 * MIN + sinceInclusion;
@@ -493,7 +493,7 @@ describe('H-Z: 窓の外・nonce が使用済み', () => {
     }
   });
 
-  it('取り込みからの経過は chain の時計で測る: 端末の時計が 10 日進んでいても、chain で 5 分前の取り込みなら復旧する', async () => {
+  it('取り込みからの経過は chain の時計で測る: 端末の時計が 6 日進んでいても、chain で 5 分前の取り込みなら復旧する', async () => {
     seed('submitting');
     include(OLD, { block: 100n, ms: T0 + 40 * MIN });
     chain.latestMs = T0 + 45 * MIN;
