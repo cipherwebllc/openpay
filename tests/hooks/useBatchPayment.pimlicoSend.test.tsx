@@ -1061,7 +1061,7 @@ describe('最初の送信の失敗の分類: 閉じるのは HTTP 2xx の検証�
       { label: '両方の時計で 30,000 ms', wallMs: 30_000, monoMs: 30_000 },
       { label: '壁時計だけ 30,000 ms', wallMs: 30_000, monoMs: 0 },
       { label: '単調な時計だけ 30,000 ms', wallMs: 0, monoMs: 30_000 },
-    ])('拒否の応答そのものが遅れて届く ($label・status はすぐ答える) → 閉じない', async ({ wallMs, monoMs }) => {
+    ])('拒否の応答そのものが遅れて届く ($label) → 閉じない (status はすぐ答える)', async ({ wallMs, monoMs }) => {
       const fake = mountClients();
       fake.bundlerSend.mockImplementationOnce(async () => {
         elapse({ wallMs, monoMs });
