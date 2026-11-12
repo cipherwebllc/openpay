@@ -12,6 +12,8 @@ import {
   CircleBroadcastError,
   buildCircleSmartAccountClient,
   entryPoint08Address,
+  waitForCircleReceipt,
+  CIRCLE_RECEIPT_TIMEOUT_MS,
   type CircleSmartAccountBundle,
 } from '@/lib/smartAccount/circleAccount';
 import { assertCirclePaymasterDeployed } from '@/lib/circlePermit';
@@ -634,6 +636,22 @@ describe('broadcastCircleUserOp / prepareCircleBroadcast (保存済みの署名�
       expect(error).toBeInstanceOf(CircleBroadcastError);
       expect((error as CircleBroadcastError).kind).toBe('validation-rejected');
     });
+  });
+});
+
+// circleSend.ts の時間の柵 (REJECTION_CLOSE_WINDOW_MS) は「ほかの試みは、この待ちが timeout するまで同じ op を送り直さない」を
+// 根拠にする。その timeout が、viem の既定に任せず、この値で渡っていることを固定する。
+describe('waitForCircleReceipt (receipt の待ち)', () => {
+  it('timeout は CIRCLE_RECEIPT_TIMEOUT_MS (120 秒) を明示して渡す', async () => {
+    const hash = ('0x' + '12'.repeat(32)) as Hex;
+    const waitForUserOperationReceipt = vi.fn(async () => ({ success: true }));
+    const bundle = fakeBundle({ waitForUserOperationReceipt });
+
+    await waitForCircleReceipt({ bundle, hash });
+
+    expect(CIRCLE_RECEIPT_TIMEOUT_MS).toBe(120_000);
+    expect(waitForUserOperationReceipt).toHaveBeenCalledTimes(1);
+    expect(waitForUserOperationReceipt).toHaveBeenCalledWith({ hash, timeout: CIRCLE_RECEIPT_TIMEOUT_MS });
   });
 });
 

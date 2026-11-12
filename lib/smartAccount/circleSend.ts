@@ -11,7 +11,9 @@
 //   - 永続 (pending store) は fail-closed: 書込が確証できなければ送信しない。
 //   - **submitting 到達後は fallback も新規 op 構築も禁止**。応答ロスト / wait timeout は
 //     「included しうる unknown」として扱い、recovery は (a) receipt 照会 か
-//     (b) *同一署名 op* の冪等 rebroadcast のみ。新しい op は決して作らない。
+//     (b) *同一署名 op* の冪等 rebroadcast のみ。新しい op は作らない。
+//     例外は 1 つだけ: 自分の最初の送信を bundler が検証で拒否し、下の条件で記録を failed に閉じたとき (下の「最初の送信の
+//     検証拒否で閉じる」)。その op は mempool に入っていない前提で、次の押下は新しい支払い (署名から) になる。
 //   - cross-invocation (reload / 再クリック): 同一 sender+chain+callHash の submitting
 //     宙吊りがあれば、新規送信せず先にそれを recover する。
 //
@@ -32,14 +34,21 @@
 // 最初の送信の検証拒否で閉じる (H-X): bundler が最初の送信を検証で拒否した op は mempool に入っていない。確認待ちに残すと、
 // その内容の支払いが、押すたびに 120 秒待ち → 同じ op の送り直し → また拒否 → 120 秒、を繰り返して払えない。なので記録を
 // failed に閉じ、(3) で終える。閉じるのは次が **全部** そろったときだけ (そろわなければ今までどおり復旧へ進み、(4) で終える):
-//   (a) この試みが自分で signed → submitting にした直後の、最初の送信である (executeCirclePayment の中のその 1 か所だけ。
-//       記録の状態からは決めない。**復旧の送り直しの拒否では閉じない**: 前の送信が受理されているかもしれず、送り直しへの
-//       拒否は「mempool に無い」ことの証拠にならない)
-//   (b) 送信の分類が「検証による確定的な拒否」である (HTTP 2xx + ERC-4337 の検証の code の allowlist。Pimlico の経路と同じ
+//   (a) executeCirclePayment の中の、自分の最初の送信の 1 か所である (**復旧の送り直しの拒否では閉じない**: 前の送信が
+//       受理されているかもしれず、送り直しへの拒否は「mempool に無い」ことの証拠にならない)
+//   (b) **自分の op の記録を、自分で signed → submitting にした** (markSubmitting を呼ぶ直前に同期で読んだ記録が「signed で、
+//       userOpHash が自分の今署名した op のもの」だった)。同じ key の 2 つの試み (複製したタブ) は署名を上書きし合えるので
+//       (markSigned は signed からの再入・markSubmitting は submitting からの再入を許す)、記録の op が自分のものでない・別の試みが
+//       先に submitting にしていたなら、記録に無い op が bundler に渡っているかもしれない。そのとき閉じると、生きている op の上に
+//       新しい支払いを開ける (第 10 回レビュー Codex の指摘 1)
+//   (c) 送信の分類が「検証による確定的な拒否」である (HTTP 2xx + ERC-4337 の検証の code の allowlist。Pimlico の経路と同じ
 //       定義・同じ bundler。bundler の文が nonce・mempool などに触れているときは拒否と読まない = circleAccount.ts の
 //       classifyCircleBroadcastError)
-//   (c) 記録がいまも submitting・userOpHash が同じ・updatedAt が自分の markSubmitting の返した値である (書く直前に同期で
-//       確かめる = lib/circlePending.ts の markRejected。拒否の応答を待つ間に、ほかの試みが確定させた・送り直した記録は閉じない)
+//   (d) **時間の柵**: 自分の markSubmitting から拒否の処理までの経過が REJECTION_CLOSE_WINDOW_MS (30 秒) 未満である (壁時計と
+//       単調な時計の両方で。下の REJECTION_CLOSE_WINDOW_MS のコメント)
+//   (e) 記録がいまも submitting・userOpHash が同じ・updatedAt が自分の markSubmitting の返した値である (書く直前に同期で
+//       確かめる = lib/circlePending.ts の markRejected)。確かめられるのは「読んだ時点の記録が、自分の書いたまま」だけで、
+//       別のタブとの間で原子的ではない (localStorage に lock は無い)。その窓は (d) が、ほかの試みが送り直しに着く前に閉じる
 // 残る前提: bundler が「検証で拒否」と答えた op は取り込まれない (Pimlico の経路の c2 と同じ前提)。破れたとき (閉じた op の
 // receipt が取れた) は、markConfirmed が failed → confirmed に直して error の log を残す。
 // 入口の scan・resume の読み取り・予約の書き込み (境界の外) が storage の失敗で投げたときは、hook の側が対応を残す (この押下は
@@ -130,6 +139,28 @@ const SUBMITTING_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 // 同一 callHash の「並行中だから新規を block するか」判断は guard が PRE_SUBMIT_STALE_MS で行い、
 // GC は純粋に容量管理 (どんな低速署名も到達しない長さ = 1時間) に限定して干渉を避ける。
 const PRE_SUBMIT_GC_MS = 60 * 60 * 1000;
+
+/** 自分の最初の送信の検証拒否で記録を閉じてよい、自分の markSubmitting からの経過の上限 (冒頭の「最初の送信の検証拒否で
+ * 閉じる」の (d) = 時間の柵)。
+ *
+ * 何の波及を断つか: 拒否の処理が遅れている間 (タブの停止・端末のスリープなど) に、ほかの試みがこの op を送り直して受理されたのに、
+ * それを知らずに failed にして新しい支払いを開けること (第 10 回レビュー Codex の指摘 2・3)。記録の確認 (markRejected の updatedAt)
+ * だけでは防げない: localStorage の読み → 比べる → 書くは別のタブと原子的でなく、#1079 より前のコードのタブは送り直しの **後** に
+ * 時刻を書く。
+ *
+ * 根拠 (コードで確かめた事実): ほかの試みがこの op を bundler に渡すのは、復旧 (recoverSubmitting) の「submitting の記録を
+ * 読む → receipt を待つ → **待ちが timeout** → 送り直しの前の確認 (markResending) → 送る」の順だけ (#1079 より前のコードも、
+ * 待ちが timeout したときだけ送り直す。待ちが error のときは送り直さずに投げる)。待ちは viem の waitForUserOperationReceipt で、
+ * timeout は circleAccount.ts の CIRCLE_RECEIPT_TIMEOUT_MS (120 秒・viem の既定と同じ値を明示して渡す)。記録が submitting に
+ * なるのは自分の markSubmitting から (閉じる条件の (b) で、その直前は signed だったことを確かめる)。なので、ほかの試みの送り直しは、
+ * 自分の markSubmitting から 120 秒より前には起きない。上限はその半分以下にし (テストで固定)、拒否の処理をその前に終える。
+ * 送信の HTTP の timeout は viem の http transport の既定 10 秒 (bundle の transport に timeout を渡していない) なので、タブが
+ * 動いていれば拒否はふつう 30 秒より前に届く。
+ *
+ * 経過は 2 つの時計で測り、**どちらかが上限以上、または壁時計の経過が負なら閉じない**: 壁時計 (now = Date.now) は端末の時計の
+ * 変更で戻る・進む。単調な時計 (performance.now) は戻らないが、実装によっては端末のスリープの間は進まない。片方だけでは、どちらかの
+ * 場合に「経過が短い」と誤って閉じる。 */
+export const REJECTION_CLOSE_WINDOW_MS = 30 * 1000;
 
 // cross-invocation ガードの処理優先度。confirmed/submitting を pre-submit より先に評価し、
 // stale でない pre-submit が confirmed/submitting を CirclePendingError で masked するのを防ぐ。
@@ -307,8 +338,9 @@ async function inPostSubmit<T>(
   }
 }
 
-// 送信の error が「検証による確定的な拒否」(冒頭の (b)) なら、その error を返す。circleAccount が投げる CircleBroadcastError の
-// kind を読む。それ以外 (already-known・unknown・分類の無い error) は null = 閉じない側。
+// 送信の error が「検証による確定的な拒否」(冒頭の「最初の送信の検証拒否で閉じる」の (c)) なら、その error を返す。
+// circleAccount が投げる CircleBroadcastError の kind を読む。それ以外 (already-known・unknown・分類の無い error) は null =
+// 閉じない側。
 // class の同一性 (instanceof) でなく name で見る: hook が CirclePendingError を見るのと同じ形で、circleAccount を境界として
 // 差し替える test でも、本物の class の instance をそのまま通せる。
 function validationRejectionOf(error: unknown): CircleBroadcastError | null {
@@ -318,42 +350,90 @@ function validationRejectionOf(error: unknown): CircleBroadcastError | null {
     : null;
 }
 
-// 自分の最初の送信が検証で拒否されたとき、記録を failed に閉じる (冒頭の「最初の送信の検証拒否で閉じる」の (c))。閉じられたら
-// true。記録がもう「自分が submitting にしたまま」でない (ほかの試みが確定させた・送り直した・別の op の記録に替わった・消えた)
-// ときは false = 閉じない (呼び出し側は今までどおり復旧へ進む)。storage の失敗は投げる (送った後の境界が確認待ちに変える)。
-// 記録に残す文は bundler の code と文だけ (viem の error の message は、署名済みの op と URL を含むので入れない)。
+// 16 進の長い連なり (41 桁以上・0x の有無を問わない) を伏せ字にする。アドレス (40 桁) は残り、署名 (65 byte = 130 桁)・
+// paymasterData・hash は伏せる。何の波及を断つか: bundler の JSON-RPC の error の message は信頼できない外の文で、送った
+// 署名を写して返すことがある (例「AA33 invalid signature 0x…」)。それを記録 (localStorage) と log (warn = Sentry へ送られる) に
+// そのまま入れないため。bundler の code と、AA33 などの理由の語は残る。
+export function redactLongHex(text: string): string {
+  return text.replace(/(?:0x)?[0-9a-f]{41,}/gi, '[redacted]');
+}
+
+// 自分の最初の送信の、閉じる資格の印 (冒頭の「最初の送信の検証拒否で閉じる」の (b) と、(d) の起点)。null = 資格が無い (自分の
+// op の記録を自分で signed → submitting にしたのではない)。
+type FirstSendMark = {
+  /** 自分の markSubmitting が返した記録の updatedAt (壁時計)。 */
+  submittedAt: number;
+  /** 自分の markSubmitting を呼ぶ直前の単調な時計の値。 */
+  submittedAtMono: number;
+};
+
+// 自分の最初の送信が検証で拒否されたとき、記録を failed に閉じる (冒頭の「最初の送信の検証拒否で閉じる」の (b)(d)(e))。閉じられたら
+// true。閉じる資格が無い (b)・遅れて届いた (d)・記録がもう「自分が submitting にしたまま」でない (e: ほかの試みが確定させた・
+// 送り直した・別の op の記録に替わった・消えた) ときは false = 閉じない (呼び出し側は今までどおり復旧へ進む)。storage の失敗は
+// 投げる (送った後の境界が確認待ちに変える)。
+// 記録と log に残す文は bundler の code と、伏せ字にした bundler の文だけ (viem の error の message は、署名済みの op と URL を
+// 含むので入れない)。
 function closeRejectedFirstSend(args: {
   key: string;
   sender: Address;
   userOpHash: Hex;
-  submittedAt: number;
+  firstSend: FirstSendMark | null;
   rejection: CircleBroadcastError;
   now: () => number;
+  monotonicNow: () => number;
 }): boolean {
-  const { key, sender, userOpHash, submittedAt, rejection, now } = args;
+  const { key, sender, userOpHash, firstSend, rejection, now, monotonicNow } = args;
+  if (!firstSend) {
+    logger.warn('circle.broadcast.rejected-not-closed', {
+      userOpHash,
+      code: rejection.code,
+      reason: 'not-own-submit',
+    });
+    return false;
+  }
+  // (d) 時間の柵。下の markRejected まで await を挟まない (測った後に遅れる隙間を作らない)。
+  const at = now();
+  const wallElapsedMs = at - firstSend.submittedAt;
+  const monoElapsedMs = monotonicNow() - firstSend.submittedAtMono;
+  if (
+    wallElapsedMs < 0 ||
+    wallElapsedMs >= REJECTION_CLOSE_WINDOW_MS ||
+    monoElapsedMs >= REJECTION_CLOSE_WINDOW_MS
+  ) {
+    logger.warn('circle.broadcast.rejected-not-closed', {
+      userOpHash,
+      code: rejection.code,
+      reason: 'late',
+      wallElapsedMs,
+      monoElapsedMs,
+    });
+    return false;
+  }
+  const details = rejection.details === undefined ? undefined : redactLongHex(rejection.details);
   try {
     markRejected({
       key,
       sender,
       userOpHash,
-      submittedAt,
-      errorMessage: `bundler rejected (code ${rejection.code}): ${rejection.details ?? ''}`,
-      now: now(),
+      submittedAt: firstSend.submittedAt,
+      errorMessage: `bundler rejected (code ${rejection.code}): ${details ?? ''}`,
+      now: at,
     });
   } catch (error) {
     if (!(error instanceof PendingStateError)) throw error;
     logger.warn('circle.broadcast.rejected-not-closed', {
       userOpHash,
       code: rejection.code,
-      reason: error.message,
+      reason: 'record-changed',
+      detail: error.message,
     });
     return false;
   }
-  // 監査用: 閉じた op の hash と、bundler の拒否の code・文。
+  // 監査用: 閉じた op の hash と、bundler の拒否の code・文 (伏せ字にしたもの)。
   logger.warn('circle.broadcast.rejected', {
     userOpHash,
     code: rejection.code,
-    details: rejection.details,
+    details,
   });
   return true;
 }
@@ -491,6 +571,9 @@ export type ExecuteCirclePaymentArgs = {
   paymentAttemptId: string;
   /** テスト用に注入可能な時刻源。 */
   now?: () => number;
+  /** テスト用に注入可能な単調な時計 (ms)。省略時は performance.now。最初の送信の拒否で閉じるときの時間の柵だけに使う
+   * (REJECTION_CLOSE_WINDOW_MS)。 */
+  monotonicNow?: () => number;
   /** この試みを始めた画面 (hook の instance) がまだあるか (unmount の後は false のまま)。冒頭の「失効」。
    * 省略時は常に true (失効を見ない)。 */
   isAlive?: () => boolean;
@@ -509,6 +592,7 @@ export async function executeCirclePayment(
 ): Promise<CirclePaymentResult> {
   const { bundle, publicClient, walletClient, owner, calls, permitAmount } = args;
   const now = args.now ?? (() => Date.now());
+  const monotonicNow = args.monotonicNow ?? (() => performance.now());
   const isAlive = args.isAlive ?? (() => true);
   // (a)(b) 送金を止める確認ではない (保存と送信は (c) が止める)。何の波及を断つか: 署名の前の RPC (permit の domain・nonce /
   // ガス価格・prepareUserOperation) を待つ間に画面を離れた試みが、離れた後にウォレットへ署名の要求を出すこと (もう無い画面の
@@ -723,10 +807,25 @@ export async function executeCirclePayment(
   // 作れなければ (bundle の設定の誤り)、下の境界の外 = ふつうの error (送っていない試みを確認待ちにしない)。
   const sendFirst = prepareCircleBroadcast(bundle);
 
-  // broadcast_intent を永続 (fail-closed)。ここを過ぎたら fallback/新規 op 禁止。
+  // 閉じる資格 (冒頭の「最初の送信の検証拒否で閉じる」の (b)): markSubmitting の **直前に同期で** 記録を読み、「signed で、
+  // userOpHash が自分の今署名した op のもの」のときだけ資格を持つ。この読みと markSubmitting の間に await を挟まない。
+  // 何の波及を断つか: 同じ key の別の試み (複製したタブ) が、自分の markSigned の後に記録を自分の署名で上書きした・先に submitting
+  // にしていたとき、こちらに返った拒否で記録を閉じ、記録に無い op が bundler に渡っているのに新しい支払いを開けること。
+  // 資格が無くても、今までどおり markSubmitting → 送信へ進む (資格は閉じるかどうかだけを決める。閉じなければ今までの復旧)。
+  // 記録を読めないときは markSubmitting も読めずに投げるので、ここで投げても今までと同じふつうの error (送っていない)。
+  const beforeSubmitting = loadPendingRecord(key);
+  const ownsSubmit =
+    beforeSubmitting?.status === 'signed' && beforeSubmitting.userOpHash === userOpHash;
+  // 時間の柵 (d) の起点。書く前に測る (経過を短く見積もらない側)。
+  const submittingAtMono = monotonicNow();
+
+  // broadcast_intent を永続 (fail-closed)。ここを過ぎたら fallback/新規 op 禁止 (例外は冒頭の「最初の送信の検証拒否で閉じる」)。
   // 書けなければ、下の境界の外 = ふつうの error (送っていない試みを確認待ちにしない)。
-  // submitted.updatedAt = この試みが、いま自分で signed → submitting にした時刻。下の「最初の送信」の印 (冒頭の (a)(c))。
   const submitted = markSubmitting({ key, sender, now: now() });
+  // submitted.updatedAt = この試みが、いま自分で signed → submitting にした時刻 (時間の柵の壁時計の起点・markRejected の (e))。
+  const firstSend: FirstSendMark | null = ownsSubmit
+    ? { submittedAt: submitted.updatedAt, submittedAtMono: submittingAtMono }
+    : null;
 
   // ここから先は「op を bundler に渡したかもしれない後」。終わり方は、結果・確認待ち・最初の送信の検証拒否で閉じた error だけ
   // (inPostSubmit)。
@@ -743,9 +842,10 @@ export async function executeCirclePayment(
           key,
           sender,
           userOpHash,
-          submittedAt: submitted.updatedAt,
+          firstSend,
           rejection,
           now,
+          monotonicNow,
         })
       ) {
         throw new CircleSendRejectedError(userOpHash);

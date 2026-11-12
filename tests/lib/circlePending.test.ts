@@ -483,7 +483,9 @@ describe('markConfirmed の userOpHash の確認', () => {
 });
 
 // 第 10 回レビュー H-X (PR-39b): 自分の最初の送信を bundler が検証で拒否したときに、その試みだけが記録を failed に閉じる。
-// 閉じてよいのは、記録がいまも「submitting・同じ userOpHash・updatedAt が自分の markSubmitting の返した時刻」のときだけ。
+// ここ (markRejected) が確かめるのは、記録がいまも「submitting・同じ userOpHash・updatedAt が自分の markSubmitting の返した
+// 時刻」であることだけ (別のタブとの間で原子的ではない)。閉じる資格と時間の柵は呼び出し側 (lib/smartAccount/circleSend.ts) が見る
+// = tests/lib/smartAccount/circleSend.test.ts の「F1」「F2」。
 describe('markRejected (最初の送信の検証拒否で submitting → failed)', () => {
   const HASH = '0xhash' as Hex; // advanceToSubmitting が書く userOpHash
   const SUBMITTED_AT = 1_300; // advanceToSubmitting の markSubmitting が書く updatedAt

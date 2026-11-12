@@ -22,7 +22,8 @@
 //   同期実行なので *同一タブ内* の read-modify-write はプリエンプトされず実質 atomic。
 //   タブ跨ぎの真の CAS primitive は無いが、冪等キー (sender+callHash 込み) で同一決済は
 //   同一レコードに収束し、submitting 到達後は「新規 op を作らない」不変条件で二重決済を
-//   防ぐ。reload で paymentAttemptId が失われるケースは findRecoverable (sender+chainId
+//   防ぐ (例外: 自分の最初の送信を bundler が検証で拒否し、markRejected で failed に閉じたとき)。
+//   reload で paymentAttemptId が失われるケースは findRecoverable (sender+chainId
 //   の二次 index スキャン) で submitting レコードを拾い receipt/rebroadcast で復旧する。
 //
 // FSM (横道 abandoned):
@@ -33,7 +34,8 @@
 //   破れた) だけ、markConfirmed が confirmed に直す。
 //   reserved/awaiting_signature/signed (= broadcast 前) は同一署名者が安全に abandon /
 //   supersede 可能 (popup 拒否・タブ閉じ)。**submitting 到達後は abandon も新規 op 構築も
-//   禁止** — recovery 経路のみ。
+//   禁止** — recovery 経路のみ。例外は markRejected で failed に閉じた記録だけ: その op は mempool に入っていない前提で、
+//   次の押下は新しい支払い (新しい key・署名から) になる (閉じる条件は lib/smartAccount/circleSend.ts の冒頭)。
 
 import {
   encodeAbiParameters,
@@ -387,8 +389,9 @@ function transition(args: {
   /** 渡されたら、記録の userOpHash がこの値であることも確かめる (違えば PendingStateError)。await の後の書き込み
    * (送り直しの前の時刻・confirmed・failed) が、待つ間に別の op の記録に替わっていたものを書き換えないため。 */
   expectUserOpHash?: Hex;
-  /** 渡されたら、記録の updatedAt がこの値であることも確かめる (違えば PendingStateError)。送り直しは送る前に時刻を書く
-   * (markResending) ので、時刻が変わっていない = 自分が書いた後、ほかの試みがこの op を送り直していない。 */
+  /** 渡されたら、記録の updatedAt がこの値であることも確かめる (違えば PendingStateError)。確かめられるのは「読んだ時点の
+   * 記録が、その時刻に書かれたまま」だけ。読み → 比べる → 書くは同じタブの中では割り込まれないが、別のタブとの間では原子的で
+   * ない (localStorage に lock は無い)。 */
   expectUpdatedAt?: number;
   /** true なら、署名済みの op (signedUserOp) を記録から消して書く。 */
   dropSignedUserOp?: boolean;
@@ -565,18 +568,21 @@ export function markConfirmed(args: {
 const REJECTED_MESSAGE_MAX = 200;
 
 /** submitting → failed。**自分の最初の送信を bundler が検証で拒否した** (= この op は mempool に入っていない) ときに、その
- * 試みだけが呼ぶ (lib/smartAccount/circleSend.ts)。閉じてよいのは、記録がいまも次の 3 つを全部満たすときだけで、書く直前に
- * 同期で読み直して確かめる (どれかが違えば PendingStateError・呼び出し側は閉じずに確認待ちへ進む):
+ * 試みだけが呼ぶ (lib/smartAccount/circleSend.ts。呼ぶ前に、閉じる資格 = 自分の op の記録を自分で signed → submitting にした
+ * ことと、時間の柵 = 自分の markSubmitting から 30 秒未満であることを確かめる)。ここでは、記録がいまも次の 3 つを全部満たす
+ * ことを、書く直前に同期で読み直して確かめる (どれかが違えば PendingStateError・呼び出し側は閉じずに確認待ちへ進む):
  *   - status が submitting (ほかの試みが confirmed にしていない)
  *   - userOpHash が拒否された op のもの (別の op の記録に替わっていない)
- *   - updatedAt が submittedAt = 自分の markSubmitting が返した時刻 (ほかの試みがこの op を送り直していない。送り直しは
- *     送る前に markResending で時刻を書く)
+ *   - updatedAt が submittedAt = 自分の markSubmitting が返した時刻 (読んだ時点の記録が、自分の書いたまま。今のコードの
+ *     送り直しは送る前に markResending で時刻を書くので、その後なら外れる)
  * 拒否の応答は await の後に届くので、送る前に読んだ記録を信じない。何の波及を断つか: 拒否の処理が遅れる間にほかの試みが
  * 同じ op を送り直して受理されていたのに failed にすると、scan と resume がその支払いを「払っていない」と扱い、取り込まれた
- * 後に 2 本目が開く。
+ * 後に 2 本目が開く。**この 3 つの確認だけでは防ぎ切れない**: 読み → 比べる → 書くは別のタブとの間で原子的でなく
+ * (localStorage に lock は無い)、#1079 より前のコードのタブは送り直しの **後** に時刻を書く。その窓は、呼び出し側の時間の柵が
+ * 閉じる (ほかの試みは、記録を submitting で読んでから receipt の待ちが timeout するまで送り直さない)。
  * failed にするとき、署名済みの op (signedUserOp) を記録から消す (閉じた記録の op を、後から誰も送り直せないようにする。
  * userOpHash は残す: 万一その op の receipt が取れたとき、markConfirmed が confirmed に直す手がかり)。
- * errorMessage は上限で切って保存する (呼び出し側は秘密・署名を入れない)。 */
+ * errorMessage は上限で切って保存する (呼び出し側は秘密・署名を入れない。bundler の文は 16 進の長い連なりを伏せてから渡す)。 */
 export function markRejected(args: {
   key: string;
   sender: Address;

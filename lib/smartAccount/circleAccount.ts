@@ -392,6 +392,12 @@ export async function broadcastCircleUserOp(args: {
   return prepareCircleBroadcast(args.bundle)(args.signedUserOp);
 }
 
+/** receipt の待ち (waitForCircleReceipt) の timeout (ms)。viem の waitForUserOperationReceipt の既定 (120_000) と同じ値を、
+ * 明示して渡す。circleSend.ts の時間の柵 (REJECTION_CLOSE_WINDOW_MS) は「ほかの試みは、この待ちが timeout するまで同じ op を
+ * 送り直さない」ことを根拠にしていて、その上限がこの値の半分以下であることをテストで固定している。この値を縮めるときは、
+ * 柵の上限も見直す。 */
+export const CIRCLE_RECEIPT_TIMEOUT_MS = 120_000;
+
 /** UserOp receipt を待つ。entryPoint=v0.8 / paymaster=Circle の確認は呼出側 (verifier)。 */
 export async function waitForCircleReceipt(args: {
   bundle: CircleSmartAccountBundle;
@@ -399,6 +405,7 @@ export async function waitForCircleReceipt(args: {
 }) {
   return args.bundle.bundlerClient.waitForUserOperationReceipt({
     hash: args.hash,
+    timeout: CIRCLE_RECEIPT_TIMEOUT_MS,
   });
 }
 

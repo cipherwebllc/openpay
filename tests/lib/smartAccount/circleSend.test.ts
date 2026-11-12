@@ -32,6 +32,8 @@ import {
   executeCirclePayment,
   CirclePendingError,
   CircleSendRejectedError,
+  REJECTION_CLOSE_WINDOW_MS,
+  redactLongHex,
 } from '@/lib/smartAccount/circleSend';
 import {
   computeCallHash,
@@ -47,6 +49,7 @@ import {
   markResending,
   abandon,
   PENDING_KEY_PREFIX,
+  PendingStateError,
   type PendingStatus,
 } from '@/lib/circlePending';
 import { logger } from '@/lib/logger';
@@ -975,8 +978,9 @@ describe('H-V: 画面を離れた試みは新しい効果を始めない', () =>
 //
 // hook は、CirclePendingError と storage の失敗 (PendingStoreUnavailableError・PendingStoreWriteError) 以外の error で attemptId の
 // 対応を消す (次の押下は新しい key = 新しい支払い)。なので、送った後に
-// ふつうの error で終わると、後から確定した前の支払いの後に 2 本目が開く。直した後の終わり方は 3 つだけ:
-//   結果 / CirclePendingError (確認待ち) / まだ渡していない試みの「既に終了」。
+// ふつうの error で終わると、後から確定した前の支払いの後に 2 本目が開く。直した後の終わり方は 4 つだけ:
+//   結果 / CirclePendingError (確認待ち) / まだ渡していない試みの「既に終了」/ 自分の最初の送信を bundler が検証で拒否し、
+//   記録を failed に閉じた CircleSendRejectedError (H-X・下の「H-X」の describe。閉じる条件は lib/smartAccount/circleSend.ts の冒頭)。
 //
 // ここの偽物は bundler とウォレットだけ (circleAccount の 4 つ + bundle の receipt の照会)。記録は本物 (jsdom の localStorage)。
 // 送った後の区間は境界 (inPostSubmit) の中なので、**偽物の中で expect しない** (落ちても CirclePendingError に吸われる)。
@@ -2370,6 +2374,240 @@ describe('H-W・H-Y: 送った後の終わり方', () => {
         expect(sentOps()).toEqual([]);
         expect(mockWait).not.toHaveBeenCalled();
         expect(loggedErrors()).toEqual([]);
+      });
+    });
+
+    const notClosedLogs = () =>
+      warnSpy.mock.calls.filter((c) => c[0] === 'circle.broadcast.rejected-not-closed');
+
+    // F1 (Codex の指摘 1): 閉じる資格は「自分の op の記録を、自分で signed → submitting にした」試みだけ。同じ key の 2 つの
+    // 試み (複製したタブ) は署名を上書きし合える (markSigned は signed からの再入を許す・markSubmitting は submitting からの再入を
+    // 許す)。localStorage はタブの間で原子的でないので、別のタブの書き込みは、こちらの同期の 2 行の間にも入りうる。ここでは
+    // その書き込みを、こちらの markSigned と markSubmitting の間 (送信の用意 = prepareCircleBroadcast の呼び出し) に差し込む。
+    describe('F1: 閉じる資格は、自分の op の記録を自分で signed → submitting にした試みだけ', () => {
+      const OP3 = op('33');
+
+      it('Codex の筋 1: A が signed A → B が signed B で上書き → A が submitting にして A を送る (受理) → B が submitting に再入して B を送り拒否 → B は閉じない・次の押下は新しい支払いを開かない', async () => {
+        // B = この試み (本物の executeCirclePayment)。A = 同じ key を使う別のタブ (書き込みだけを、その時点に差し込む)。
+        seed('awaiting_signature', { at: 900 });
+        mockPermit.mockResolvedValue(PERMIT);
+        mockPrepare.mockImplementationOnce(async () => {
+          // A のタブが、先に自分の署名 (OP1) を保存する。
+          markSigned({ key: KEY, sender: OWNER, signedUserOp: OP1.signedUserOp, userOpHash: OP1.userOpHash, now: now() });
+          return { signedUserOp: OP2.signedUserOp, userOpHash: OP2.userOpHash };
+        });
+        // B の markSigned (OP2 で上書き) の後・B の markSubmitting の前に、A のタブが submitting にして自分の op (OP1) を送り、
+        // bundler が受理する (A の送信はこのタブの外なので mockBroadcast には載らない)。
+        const acceptedFromA: unknown[] = [];
+        mockPrepareBroadcast.mockImplementationOnce((bundle) => {
+          markSubmitting({ key: KEY, sender: OWNER, now: now() });
+          acceptedFromA.push(OP1.signedUserOp);
+          return (signedUserOp) => mockBroadcast({ bundle, signedUserOp });
+        });
+        mockBroadcast.mockRejectedValueOnce(rejectedByValidation());
+        mockWait.mockRejectedValue(timeoutOf(OP2));
+
+        const { error } = await outcome(run());
+
+        // B の記録は、B が signed → submitting にしたものではない (A が先に submitting にした) → 閉じる資格が無い = 今までどおり
+        // 確認待ち。記録は submitting のまま (A の op は取り込まれうる)。
+        expect(error).toBeInstanceOf(CirclePendingError);
+        expect(stored()).toMatchObject({ status: 'submitting', userOpHash: OP2.userOpHash });
+        expect(acceptedFromA).toEqual([OP1.signedUserOp]);
+        expect(notClosedLogs()).toEqual([
+          [
+            'circle.broadcast.rejected-not-closed',
+            { userOpHash: OP2.userOpHash, code: -32501, reason: 'not-own-submit' },
+          ],
+        ]);
+
+        // 次の押下 (hook が対応を消した後と同じ = 新しい attemptId): scan が submitting の記録を見つけて復旧する。新しい署名を
+        // 求めず、新しい op (OP3) を送らない (直す前は、閉じた記録を scan が数えず、A の op が生きているのに OP3 を払った)。
+        mockPermit.mockClear();
+        mockPrepare.mockClear();
+        walletSigns(OP3);
+        const next = await outcome(run({ paymentAttemptId: 'attempt-2' }));
+        expect(next.error).toBeInstanceOf(CirclePendingError);
+        expect(mockPermit).not.toHaveBeenCalled();
+        expect(mockPrepare).not.toHaveBeenCalled();
+        expect(sentOps()).not.toContainEqual(OP3.signedUserOp);
+      });
+
+      it('同じ筋を A の側から: markSigned の後に記録を B の署名で上書きされたまま submitting にした A は、自分の op が拒否されても閉じようとしない', async () => {
+        walletSigns(OP1);
+        mockPrepareBroadcast.mockImplementationOnce((bundle) => {
+          // A の markSigned の後・markSubmitting の前に、B のタブが同じ key の記録を自分の署名 (OP2) で上書きする。
+          markSigned({ key: KEY, sender: OWNER, signedUserOp: OP2.signedUserOp, userOpHash: OP2.userOpHash, now: now() });
+          return (signedUserOp) => mockBroadcast({ bundle, signedUserOp });
+        });
+        mockBroadcast.mockRejectedValueOnce(rejectedByValidation());
+        mockWait.mockRejectedValue(timeoutOf(OP2));
+
+        const { error } = await outcome(run());
+
+        expect(error).toBeInstanceOf(CirclePendingError);
+        expect(sentOps()[0]).toBe(OP1.signedUserOp);
+        expect(stored()).toMatchObject({ status: 'submitting', userOpHash: OP2.userOpHash });
+        // 資格が無いので、記録を閉じに行かない (markRejected の hash の確認に頼らない)。
+        expect(notClosedLogs()).toEqual([
+          [
+            'circle.broadcast.rejected-not-closed',
+            { userOpHash: OP1.userOpHash, code: -32501, reason: 'not-own-submit' },
+          ],
+        ]);
+      });
+
+      it('逆の順: A の markSigned の後に、B が signed B → submitting → 拒否で閉じた → A の markSubmitting は failed から外れ、A は何も送らない', async () => {
+        walletSigns(OP1);
+        mockPrepareBroadcast.mockImplementationOnce((bundle) => {
+          // B のタブ: 上書き (signed OP2) → 自分で submitting → 送信が検証で拒否 → 閉じる。
+          markSigned({ key: KEY, sender: OWNER, signedUserOp: OP2.signedUserOp, userOpHash: OP2.userOpHash, now: now() });
+          const submittedByB = markSubmitting({ key: KEY, sender: OWNER, now: now() });
+          markRejected({
+            key: KEY,
+            sender: OWNER,
+            userOpHash: OP2.userOpHash,
+            submittedAt: submittedByB.updatedAt,
+            errorMessage: 'bundler rejected (code -32501): AA33 reverted (or OOG)',
+            now: now(),
+          });
+          return (signedUserOp) => mockBroadcast({ bundle, signedUserOp });
+        });
+
+        const { error } = await outcome(run());
+
+        // markSubmitting が外れる (境界の外 = ふつうの error)。A の op は bundler に渡らない。
+        expect(error).toBeInstanceOf(PendingStateError);
+        expect(error).not.toBeInstanceOf(CirclePendingError);
+        expect(sentOps()).toEqual([]);
+        expect(mockWait).not.toHaveBeenCalled();
+        expect(stored()).toMatchObject({ status: 'failed', userOpHash: OP2.userOpHash });
+      });
+    });
+
+    // F2 (Codex の指摘 2・3): 閉じてよいのは、自分の markSubmitting から短い時間 (30 秒未満) のうちに届いた拒否だけ。ほかの
+    // 試みがこの op を送り直すのは、記録を submitting で読んでから receipt の待ち (120 秒) が timeout した後だけなので、30 秒より
+    // 前の拒否の処理は、ほかの試みの送り直しより必ず前に終わる。経過は壁時計 (now) と単調な時計 (monotonicNow) の両方で測る。
+    describe('F2: 時間の柵 — 自分の markSubmitting から 30 秒未満に届いた拒否だけで閉じる', () => {
+      let mono: number;
+      const monotonicNow = () => mono;
+      beforeEach(() => {
+        mono = 0;
+      });
+      // 送信の答え (検証の拒否) が、自分の markSubmitting から wallMs (壁時計)・monoMs (単調な時計) たって届く。
+      function rejectedAfter(elapsed: { wallMs: number; monoMs: number }) {
+        mockBroadcast.mockImplementationOnce(async () => {
+          const submittedAt = stored()!.updatedAt;
+          clock = submittedAt + elapsed.wallMs; // 次の now() が、この時刻を返す
+          mono += elapsed.monoMs;
+          throw rejectedByValidation();
+        });
+      }
+      const late = (wallMs: number, monoMs: number) => [
+        [
+          'circle.broadcast.rejected-not-closed',
+          { userOpHash: OP1.userOpHash, code: -32501, reason: 'late', wallElapsedMs: wallMs, monoElapsedMs: monoMs },
+        ],
+      ];
+
+      it('上限は receipt の待ちの timeout の半分以下 (ほかの試みが送り直しに着く前に閉じる)', () => {
+        expect(REJECTION_CLOSE_WINDOW_MS).toBe(30_000);
+        expect(actualCircleAccount.CIRCLE_RECEIPT_TIMEOUT_MS).toBe(120_000);
+        expect(REJECTION_CLOSE_WINDOW_MS * 2).toBeLessThanOrEqual(actualCircleAccount.CIRCLE_RECEIPT_TIMEOUT_MS);
+      });
+
+      it('どちらの時計でも 29,999 ms → 閉じる', async () => {
+        walletSigns(OP1);
+        rejectedAfter({ wallMs: 29_999, monoMs: 29_999 });
+
+        const { error } = await outcome(run({ monotonicNow }));
+
+        expect(error).toBeInstanceOf(CircleSendRejectedError);
+        expect(stored()?.status).toBe('failed');
+      });
+
+      it.each([
+        { label: '壁時計だけ 30,000 ms (単調な時計は 0)', wallMs: 30_000, monoMs: 0 },
+        { label: '単調な時計だけ 30,000 ms (壁時計は 0 = 端末の時計を戻した・止まっていた)', wallMs: 0, monoMs: 30_000 },
+        { label: '壁時計が負 (時計が戻された)', wallMs: -1, monoMs: 10 },
+        { label: '両方 60,000 ms (receipt の待ちの timeout よりは前)', wallMs: 60_000, monoMs: 60_000 },
+      ])('$label → 閉じない・今までどおり確認待ち (記録は submitting・op も残る)', async ({ wallMs, monoMs }) => {
+        walletSigns(OP1);
+        rejectedAfter({ wallMs, monoMs });
+        mockWait.mockRejectedValue(timeoutOf(OP1));
+
+        const { error } = await outcome(run({ monotonicNow }));
+
+        expect(error).toBeInstanceOf(CirclePendingError);
+        expect(error?.userOpHash).toBe(OP1.userOpHash);
+        expect(stored()).toMatchObject({ status: 'submitting', signedUserOp: OP1.signedUserOp });
+        expect(notClosedLogs()).toEqual(late(wallMs, monoMs));
+      });
+
+      it('Codex の筋 3: 拒否の処理がタブの停止で 125 秒遅れ、その間に #1079 より前のコードのタブが待ちの timeout の後に送り直して受理された (時刻は送り直しの後に書く = まだ書いていない) → 閉じず、復旧の待ちで receipt を得て既払いの結果', async () => {
+        walletSigns(OP1);
+        // 古いタブの送り直しは、この試みの送信と同じ op を bundler に渡す (受理)。記録には何も書かない (古いコードは送り直しの
+        // 後に時刻を書く)。status・hash・updatedAt は、この試みが書いたまま = markRejected の 3 つの確認では見分けられない。
+        rejectedAfter({ wallMs: 125_000, monoMs: 125_000 });
+        mockWait.mockResolvedValueOnce(receiptOf(OP1));
+
+        const res = await run({ monotonicNow });
+
+        expect(res).toMatchObject({ userOpHash: OP1.userOpHash, txHash: OP1.txHash, success: true });
+        expect(stored()).toMatchObject({ status: 'confirmed', userOpHash: OP1.userOpHash });
+        expect(notClosedLogs()).toEqual(late(125_000, 125_000));
+      });
+    });
+
+    // F4 (Codex の指摘 4): bundler の JSON-RPC の error の message は信頼できない外の文で、送った署名を写して返すことがある。
+    // 記録の errorMessage と、新しい 2 つの log に入れる前に、16 進の長い連なり (41 桁以上) を伏せる。
+    describe('F4: bundler の文は、記録と log に入れる前に 16 進の長い連なりを伏せる', () => {
+      const SIG_HEX = 'a1b2c3d4e5'.repeat(13); // 130 桁 = 65 byte の署名
+      const echoesSignature = () =>
+        bundlerSays({ code: -32501, message: `AA33 invalid signature 0x${SIG_HEX}` });
+
+      it('閉じたとき: 記録の errorMessage と circle.broadcast.rejected の log に署名が無い・code と AA33 は残る', async () => {
+        walletSigns(OP1);
+        mockBroadcast.mockRejectedValueOnce(echoesSignature());
+
+        const { error } = await outcome(run());
+
+        expect(error).toBeInstanceOf(CircleSendRejectedError);
+        expect(stored()?.errorMessage).toBe('bundler rejected (code -32501): AA33 invalid signature [redacted]');
+        expect(rawRecord()).not.toContain('a1b2c3d4e5');
+        const rejectedLogs = warnSpy.mock.calls.filter((c) => c[0] === 'circle.broadcast.rejected');
+        expect(rejectedLogs).toEqual([
+          [
+            'circle.broadcast.rejected',
+            { userOpHash: OP1.userOpHash, code: -32501, details: 'AA33 invalid signature [redacted]' },
+          ],
+        ]);
+        expect(JSON.stringify(rejectedLogs)).not.toContain('a1b2c3d4e5');
+      });
+
+      it('閉じなかったとき (遅れて届いた): circle.broadcast.rejected-not-closed の log にも署名が無い', async () => {
+        walletSigns(OP1);
+        mockBroadcast.mockImplementationOnce(async () => {
+          clock = stored()!.updatedAt + 30_000;
+          throw echoesSignature();
+        });
+        mockWait.mockRejectedValue(timeoutOf(OP1));
+
+        const { error } = await outcome(run());
+
+        expect(error).toBeInstanceOf(CirclePendingError);
+        expect(notClosedLogs()).toHaveLength(1);
+        expect(JSON.stringify(notClosedLogs())).not.toContain('a1b2c3d4e5');
+      });
+
+      it('redactLongHex: 40 桁 (アドレス) は残し、41 桁以上は 0x の有無を問わず伏せる', () => {
+        const address = '0x' + 'ab'.repeat(20);
+        expect(redactLongHex(`to ${address}`)).toBe(`to ${address}`);
+        expect(redactLongHex('a'.repeat(40))).toBe('a'.repeat(40));
+        expect(redactLongHex('a'.repeat(41))).toBe('[redacted]');
+        expect(redactLongHex(`0x${'F'.repeat(41)} tail`)).toBe('[redacted] tail');
+        expect(redactLongHex(`sig ${SIG_HEX}, hash 0x${'1'.repeat(64)}`)).toBe('sig [redacted], hash [redacted]');
+        expect(redactLongHex('AA33 reverted (or OOG)')).toBe('AA33 reverted (or OOG)');
       });
     });
   });
