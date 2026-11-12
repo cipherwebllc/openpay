@@ -72,6 +72,9 @@ vi.mock('@/lib/kv', () => ({
     }
     if (script.includes('o.url=ARGV[2]')) {
       if (o.active === false) return { ok: true as const, value: -3 }; // 削除済は編集不可
+      // 公開待ちにした CAS だけ discovery index (KEYS[6]) の先頭へ動かす (LREM + LPUSH・本物の Lua は
+      // tests/app/api/facilitator-resource-url-change-lua.test.ts)。
+      let toHead = false;
       // B6: URL 変更でリセットするのは verification だけ (hidden は moderation 状態なので残す)。
       if (o.url !== args[1]) {
         delete o.verification;
@@ -82,6 +85,7 @@ vi.mock('@/lib/kv', () => ({
           // B3-3: 確かめていない URL への変更は、公開中の掲載だけ hidden + 印 (本物の Lua は registry-moderation-lua.test.ts)。
           o.hidden = true;
           o.pendingFirstVerification = true;
+          toHead = true;
         }
       }
       o.url = args[1];
@@ -102,6 +106,11 @@ vi.mock('@/lib/kv', () => ({
       o.updatedAt = Number(args[8]);
       const enc = JSON.stringify(o);
       store.kv.set(keys[0], enc);
+      if (toHead) {
+        const idx = (store.lists.get(keys[5]) ?? []).filter((x) => x !== args[13]);
+        idx.unshift(args[13]);
+        store.lists.set(keys[5], idx);
+      }
       return { ok: true as const, value: enc };
     }
     const removeFromDiscovery = () => {

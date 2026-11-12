@@ -520,7 +520,12 @@ export const CAS_OWNER_GUARD =
 //     (ID の照会で返す・削除で台帳を立てない) を得て、モデレーション状態を洗い流せる。
 //   - 台帳済 URL への変更は従来どおり台帳が勝つ (印なしの hidden)。
 //   - すでに印つきの hidden (公開待ち) はそのまま (印も hidden も残る)。
-// KEYS[2/3]=新/旧 claim、KEYS[4/5]=変更先の新/旧 hidden 台帳、ARGV[13/14]=読取時 URL/id。
+// この CAS で公開待ちにしたときだけ、掲載を discovery index (KEYS[6]) の先頭へ動かす (LREM で全部消してから LPUSH = 同じ id は
+// 1 つ・件数は同じ)。再検証 (lib/x402/reverify.ts listExternalReverifyIds) は index の先頭 500 件しか読まないので、位置 500 以降の
+// 掲載が公開待ちになると再検証が永久に届かず、一覧から消えたまま戻らない (PR #1081 の Codex P2)。新規登録の公開待ちは
+// CAS_CREATE の LPUSH で先頭に入るので、同じ位置に置く。先頭へ入れると位置 499 の 1 件が 500 件の外へ出るのは、新規登録
+// 1 件と同じ (今ある 500 件の窓の限界)。動かすのは掲載の record を保存した後 (保存の前に失敗しても index だけが動かない)。
+// KEYS[2/3]=新/旧 claim、KEYS[4/5]=変更先の新/旧 hidden 台帳、KEYS[6]=discovery index、ARGV[13/14]=読取時 URL/id。
 // 戻り: JSON=成功 / -1=未存在 / -2=malformed / -3=削除済 / -4=URL 競合 / -5=URL 使用中
 // / -6=claim 先破損 / 0=owner 不一致。URL 競合時は無変更で storage (503・再試行可能)。
 export const CAS_UPDATE =
@@ -537,10 +542,10 @@ export const CAS_UPDATE =
   // URL 変更時だけ継承し、同じ URL の価格/説明編集で再検証済の掲載を hidden に戻さない。
   // 継承した hidden はモデレーション状態なので、最初の再検証を待つ印 (pendingFirstVerification) は外す
   // (印の例外 = ID の照会で返す・台帳を立てない、をモデレーション済みの URL に持ち込まない)。
-  'if o.url~=ARGV[2] then o.verification=nil; ' +
+  'local toHead=false; if o.url~=ARGV[2] then o.verification=nil; ' +
   "if redis.call('EXISTS',KEYS[4])==1 or redis.call('EXISTS',KEYS[5])==1 then o.hidden=true; o.pendingFirstVerification=nil " +
   // ⚠️ この連結の中でテンプレートリテラルを使わない (lib/x402/reverify.ts REVERIFY_COUNTER_TRANSITION の注意)。
-  "elseif ARGV[15]=='1' and o.hidden~=true then o.hidden=true; o.pendingFirstVerification=true end; end; " +
+  "elseif ARGV[15]=='1' and o.hidden~=true then o.hidden=true; o.pendingFirstVerification=true; toHead=true end; end; " +
   'o.url=ARGV[2]; o.description=ARGV[3]; o.priceJpyc=ARGV[4]; o.category=ARGV[5]; o.payTo=ARGV[6]; ' +
   "if ARGV[7]=='' then o.docsUrl=nil else o.docsUrl=ARGV[7] end; " +
   "if ARGV[8]=='' then o.license=nil else o.license=ARGV[8] end; " +
@@ -551,6 +556,7 @@ export const CAS_UPDATE =
   'o.updatedAt=tonumber(ARGV[9]); ' +
   'local updated=cjson.encode(o); ' +
   "redis.call('SET',KEYS[1],updated); " +
+  "if toHead then redis.call('LREM',KEYS[6],0,ARGV[14]); redis.call('LPUSH',KEYS[6],ARGV[14]) end; " +
   "if KEYS[2]~=KEYS[3] then redis.call('SET',KEYS[2],ARGV[14]); " +
   "if KEYS[3]~='' and redis.call('GET',KEYS[3])==ARGV[14] then redis.call('DEL',KEYS[3]) end; end; " +
   'return updated';
@@ -608,8 +614,8 @@ async function readResourceClaim(id: string): Promise<
 // payTo (送金先) を書き換えさせない (認可の要)。owner 確認と書込を CAS で原子化し、KV エラー/破損は
 // not_found ではなく storage に倒す (outage を「未存在」と誤魔化さない)。input は検証済を渡す。
 // opts.pendingIfUrlChanged = 呼び元が input.url で、登録と同じ照合つきの OpenPay の 402 を確かめていない。この更新で URL が
-// 変わるなら、公開中の掲載を hidden + pendingFirstVerification にする (URL が変わったかは CAS が権威の record で判定する・
-// 規則は CAS_UPDATE のコメント)。
+// 変わるなら、公開中の掲載を hidden + pendingFirstVerification にして、discovery index の先頭へ動かす (URL が変わったかは
+// CAS が権威の record で判定する・規則は CAS_UPDATE のコメント)。
 export async function updateResource(
   id: string,
   owner: string,
@@ -621,7 +627,7 @@ export async function updateResource(
   if (!previous.ok) return previous;
   const cas = await kvEval<number | string>(CAS_UPDATE, [
     resourceKey(id), resourceUrlClaimKey(input.url), previous.key ?? '',
-    hiddenUrlLedgerKey(input.url), legacyHiddenUrlLedgerKey(input.url),
+    hiddenUrlLedgerKey(input.url), legacyHiddenUrlLedgerKey(input.url), RESOURCES_INDEX,
   ], [
     getAddress(owner),
     input.url,

@@ -85,6 +85,9 @@ vi.mock('@/lib/kv', () => ({
     }
     if (script.includes('o.url=ARGV[2]')) {
       if (o.active === false) return { ok: true as const, value: -3 }; // 削除済は編集不可
+      // 公開待ちにした CAS だけ discovery index (KEYS[6]) の先頭へ動かす (LREM + LPUSH・本物の Lua は
+      // tests/app/api/facilitator-resource-url-change-lua.test.ts)。
+      let toHead = false;
       if (o.url !== args[1]) {
         delete o.verification;
         if (store.kv.has(keys[3]) || store.kv.has(keys[4])) {
@@ -95,6 +98,7 @@ vi.mock('@/lib/kv', () => ({
           // tests/app/api/facilitator-resource-url-change-lua.test.ts)。
           o.hidden = true;
           o.pendingFirstVerification = true;
+          toHead = true;
         }
       }
       o.url = args[1];
@@ -113,6 +117,11 @@ vi.mock('@/lib/kv', () => ({
       o.updatedAt = Number(args[8]);
       const enc = JSON.stringify(o);
       store.kv.set(keys[0], enc);
+      if (toHead) {
+        const idx = (store.lists.get(keys[5]) ?? []).filter((x) => x !== args[13]);
+        idx.unshift(args[13]);
+        store.lists.set(keys[5], idx);
+      }
       return { ok: true as const, value: enc };
     }
     // N-5: hidden 済の削除だけ URL 台帳 (KEYS[3]) に印を残す (最初の再検証を待つ新規掲載は残さない)。

@@ -74,7 +74,8 @@ vi.mock('@/lib/x402/reverify', async (importOriginal) => ({
 
 import { utcDateId } from '@/lib/x402/reverify';
 import {
-  createResource, getPublicResource, listActiveResources, listResourcesForMerchant, resourceKey, updateResource,
+  createResource, getPublicResource, listActiveResources, listResourcesForMerchant, RESOURCES_INDEX, resourceKey,
+  updateResource,
 } from '@/lib/x402/registry';
 import { registrationAcceptExpectation } from '@/lib/x402/registrationGateMatch';
 import { hiddenUrlLedgerKey } from '@/lib/x402/hiddenUrlLedger';
@@ -396,6 +397,96 @@ describe('編集で公開待ちになった掲載の再検証 (新規登録の�
     expect(await publicIds()).toEqual([]);
     await reverifyAt('2026-11-12T10:00:00.000Z', gate402(SELLER));
     expect(await publicIds()).toEqual(['a']);
+  });
+});
+
+// PR #1081 の Codex P2: 再検証は index (x402:resources:index) の先頭 500 件 (位置 0〜499) だけを読み、cursor はその中を回る。
+// 新規登録の公開待ちは CAS_CREATE の LPUSH で必ず先頭に入るが、編集は掲載の位置を動かさないので、位置 500 以降の掲載が
+// URL を替えて公開待ちになると、再検証が永久に届かず一覧から消えたまま (dual-rail の USDC の中継も 404 のまま) になる。
+// 公開待ちにした CAS の中で、新規登録と同じく index の先頭へ動かす。index の ほかの id は record の無い id で、再検証は
+// 読むだけで probe しない (HTTP の境界に出るのは掲載 'a' だけ)。
+describe('公開待ちにした編集は index の先頭へ動き、位置によらず次の巡回で再検証が届く (新規登録と同じ)', () => {
+  const fillers = (from: number, count: number) =>
+    Array.from({ length: count }, (_, i) => `f${String(from + i).padStart(3, '0')}`);
+  const index = () => [...(holder.store!.lists.get(RESOURCES_INDEX) ?? [])];
+  // 掲載 'a' を index の位置 at に置く (前に at 件・後ろに after 件)。
+  function placeAt(at: number, after = 10) {
+    holder.store!.lists.set(RESOURCES_INDEX, [...fillers(0, at), 'a', ...fillers(at, after)]);
+  }
+  // 毎時の再検証を、cursor を引き継いで (本番と同じく巡回させて) 最大 hours 回流す。掲載 'a' が公開に戻った回の番号
+  // (1 始まり) を返す。戻らなければ null。
+  async function reverifyUntilRestored(fromIso: string, hours: number, respond: (url: string) => Response) {
+    holder.respond = respond;
+    holder.fetched = [];
+    for (let run = 1; run <= hours; run += 1) {
+      const now = new Date(Date.parse(fromIso) + (run - 1) * 3_600_000);
+      vi.setSystemTime(now);
+      holder.cursor = { ...holder.cursor, directoryDate: utcDateId(now) };
+      const response = await REVERIFY(new Request('https://open-pay.jp/api/cron/reverify', {
+        headers: { authorization: 'Bearer test' },
+      }));
+      expect(response.status).toBe(200);
+      if (((await response.json()) as Record<string, number>).restored === 1) return run;
+    }
+    return null;
+  }
+
+  it('位置 500 以降の公開中の掲載を確かめられない URL へ替える → 先頭へ動き、巡回のうちに照合つきの ok で公開に戻る', async () => {
+    await seedLive();
+    placeAt(510);
+    const before = index();
+    // cursor は先頭より後ろから始める (先頭に届くには 1 度折り返す)。500 件 / 25 件 = 20 回で 1 周。
+    holder.cursor = { offset: 137 };
+    expect((await patch({ url: NEW_URL }, status(404))).status).toBe(200);
+    expect(stored()).toMatchObject({ url: NEW_URL, hidden: true, pendingFirstVerification: true });
+
+    const restoredAt = await reverifyUntilRestored('2026-11-12T10:00:00.000Z', 40, gate402(SELLER));
+    expect(holder.fetched).toContain(NEW_URL);
+    expect(restoredAt).not.toBeNull();
+    expect(restoredAt!).toBeLessThanOrEqual(20);
+    expect(stored()).toMatchObject({ url: NEW_URL, hidden: false, verification: { failures: 0, probedUrl: NEW_URL } });
+    expect(stored()).not.toHaveProperty('pendingFirstVerification');
+    expect(await publicIds()).toEqual(['a']);
+
+    // 先頭へ動いただけ (同じ id は 1 つ・件数は同じ)。読まれる 500 件から外れたのは、位置 499 にあった 1 件だけ
+    // (新規登録 1 件の LPUSH と同じ)。
+    expect(index()).toEqual(['a', ...before.filter((id) => id !== 'a')]);
+    expect(index().filter((id) => id === 'a')).toHaveLength(1);
+    expect(index().slice(0, 500)).toEqual(['a', ...before.slice(0, 499)]);
+  });
+
+  it('読まれる 500 件の中にある掲載を公開待ちにしても、500 件の顔ぶれは変わらない (並びだけ変わる)', async () => {
+    await seedLive();
+    placeAt(40, 600);
+    const before = index();
+    expect((await patch({ url: NEW_URL }, status(404))).status).toBe(200);
+    expect(index()).toEqual(['a', ...before.filter((id) => id !== 'a')]);
+    expect(new Set(index().slice(0, 500))).toEqual(new Set(before.slice(0, 500)));
+  });
+
+  // 動かすのは「この CAS で公開待ちにした」ときだけ。
+  it.each([
+    ['URL を替えない編集 (確かめられない probe)', async () => patch({ description: 'paid v2' }, status(404))],
+    ['照合が通った URL 変更', async () => patch({ url: NEW_URL }, gate402(SELLER))],
+    ['照合が合わない URL 変更 (422・保存しない)', async () => patch({ url: NEW_URL }, gate402(OTHER))],
+    ['モデレーションで隠された掲載の URL 変更', async () => {
+      holder.store!.strings.set(resourceKey('a'), JSON.stringify({ ...stored(), hidden: true }));
+      return patch({ url: NEW_URL }, status(404));
+    }],
+    ['すでに公開待ちの掲載の URL 変更', async () => {
+      holder.store!.strings.set(resourceKey('a'), JSON.stringify({ ...stored(), hidden: true, pendingFirstVerification: true }));
+      return patch({ url: NEW_URL }, status(404));
+    }],
+    ['台帳にある URL への変更', async () => {
+      holder.store!.strings.set(hiddenUrlLedgerKey(NEW_URL), '1');
+      return patch({ url: NEW_URL }, status(404));
+    }],
+  ] as const)('%s では index を触らない', async (_name, edit) => {
+    await seedLive();
+    placeAt(510);
+    const before = index();
+    await edit();
+    expect(index()).toEqual(before);
   });
 });
 
