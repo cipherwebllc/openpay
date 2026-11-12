@@ -152,7 +152,7 @@ describe('server の transaction の span (location が無い環境)', () => {
 
   it('別の origin への span は description と url を origin だけにし、path の欄を落とす。受けた request (http.server) と自分の origin への span は今までのまま', () => {
     expect(globalThis.location).toBeUndefined();
-    const event = scrubSentryServerTransaction(rawServerTransaction(true));
+    const event = scrubSentryServerTransaction(rawServerTransaction(true))!;
     expect(JSON.stringify(event)).not.toContain(API_KEY);
     const [rpc, self] = event.spans!;
     expect(rpc.description).toBe('POST https://polygon-mainnet.g.alchemy.example');
@@ -168,7 +168,7 @@ describe('server の transaction の span (location が無い環境)', () => {
   });
 
   it('受けた request が event に無いときは、絶対 URL の span を全部別の origin として扱う (http.server は今までのまま)', () => {
-    const event = scrubSentryServerTransaction(rawServerTransaction(false));
+    const event = scrubSentryServerTransaction(rawServerTransaction(false))!;
     expect(JSON.stringify(event)).not.toContain(API_KEY);
     expect(event.spans!.map((item) => item.description)).toEqual([
       'POST https://polygon-mainnet.g.alchemy.example',

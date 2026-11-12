@@ -13,9 +13,10 @@ export function scrubReplayEvent<T extends Event>(event: T): T {
     clean.initialUrl = urlOriginForTelemetry(replay.initialUrl);
   }
   if (replay.request) {
+    // 伏せられなかったときは request を付けない (scrubSentryServerEvent は失敗すると null を返す)。
     clean.request = scrubSentryServerEvent({
       request: { ...replay.request, headers: { ...replay.request.headers } },
-    }).request;
+    })?.request;
   }
   return clean;
 }

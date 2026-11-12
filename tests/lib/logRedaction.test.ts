@@ -515,6 +515,107 @@ describe('Sentry の beforeSend / beforeBreadcrumb (設定ファイルが実際�
     expect((diag.data as { arguments: string[] }).arguments[0]).toBe(diag.message);
     expect((thirdParty.data as { arguments: [string, { message: string }] }).arguments[1].message).toContain(`URL: ${BUNDLER_ORIGIN}\n`);
   });
+
+  // 第 10 回レビュー PR-40 の Codex 2 回目の指摘: hook が投げると、beforeBreadcrumb は app の呼び出し元 (console.* や
+  // addBreadcrumb) に届き、beforeSend・beforeSendTransaction は Sentry が例外を内部の event として beforeSend を通さずに送る。
+  // hook は投げず、伏せられなかった breadcrumb / event は捨てる (null)。
+  describe('scrubber が失敗する入力 (throw する getter・配列の accessor・Proxy・凍結)', () => {
+    const TRACE_IDS = { trace_id: '1'.repeat(32), span_id: '2'.repeat(16) };
+    const boom = (): never => {
+      throw userOperationExecutionError();
+    };
+    const getterObject = () => Object.defineProperty({}, 'note', { enumerable: true, get: boom });
+    const accessorArray = () => Object.defineProperty([] as unknown[], 0, { enumerable: true, get: boom });
+    const throwingProxy = () => new Proxy({}, { ownKeys: boom, get: boom });
+
+    function deepFreeze<T>(value: T): T {
+      if (value && typeof value === 'object') {
+        for (const item of Object.values(value)) deepFreeze(item);
+        Object.freeze(value);
+      }
+      return value;
+    }
+
+    const failingEvents = (): Array<[string, Event]> => [
+      ['breadcrumb の data の getter', { breadcrumbs: [{ category: 'console', data: getterObject() }] }],
+      ['breadcrumb の data.arguments の accessor', { breadcrumbs: [{ category: 'console', data: { arguments: accessorArray() } }] }],
+      ['breadcrumb の data の Proxy', { breadcrumbs: [{ category: 'console', data: throwingProxy() }] }],
+      ['trace の description の getter', { contexts: { trace: Object.defineProperty({ ...TRACE_IDS }, 'description', { enumerable: true, get: boom }) } }],
+      ['trace の data の Proxy', { contexts: { trace: { ...TRACE_IDS, data: throwingProxy() } } }],
+      ['span の配列の accessor', { spans: accessorArray() } as Event],
+      ['extra の getter', { extra: getterObject() }],
+      ['extra の Proxy', { extra: throwingProxy() }],
+      ['exception の value の getter', { exception: { values: [Object.defineProperty({ type: 'Error' }, 'value', { enumerable: true, get: boom })] } }],
+      ['exception.values の accessor', { exception: { values: accessorArray() } } as Event],
+      ['exception の Proxy', { exception: throwingProxy() }],
+      ['凍結した exception (伏せる所がある)', { exception: { values: [Object.freeze({ type: 'RpcRequestError', value: rpcRequestError().message })] } }],
+      ['凍結した trace (伏せる所がある)', { contexts: { trace: Object.freeze({ ...TRACE_IDS, op: 'http.client', description: `POST https://api.example/v2/${API_KEY}` }) } }],
+    ];
+
+    it.each(['client', 'nodejs', 'edge'] as const)('%s: beforeSend と beforeSendTransaction は投げず、event を捨てる (null)', async (runtime) => {
+      const { beforeSend, beforeSendTransaction } = await installedHooks(runtime);
+      for (const [label, event] of failingEvents()) {
+        expect(() => beforeSend(event), label).not.toThrow();
+        expect(beforeSend(event), label).toBeNull();
+        const transaction = { ...event, type: 'transaction' } as TransactionEvent;
+        expect(() => beforeSendTransaction(transaction), label).not.toThrow();
+        // client の transaction の scrubber は exception・extra を見ない (transaction は持たない) ので、そこに置いた入力は通る。
+        if (runtime !== 'client' || !/^(?:exception|extra|凍結した exception)/.test(label)) {
+          expect(beforeSendTransaction(transaction), label).toBeNull();
+        }
+      }
+    });
+
+    it.each(['client', 'nodejs', 'edge'] as const)('%s: 凍結した event でも、伏せる所が無ければ同じ event のまま通る (値が変わらないときは書かない)', async (runtime) => {
+      const { beforeSend, beforeSendTransaction } = await installedHooks(runtime);
+      const event = (): Event => deepFreeze({
+        message: 'payment.failed',
+        request: { url: 'https://test.local', headers: { referer: 'https://test.local' } },
+        exception: {
+          values: [{ type: 'Error', value: 'AA21 prefund', stacktrace: { frames: [{ function: 'URL: ', filename: 'https://test.local' }] } }],
+        },
+        extra: { userOpHash: USER_OP_HASH, list: ['ok', 1] },
+        contexts: {
+          trace: { ...TRACE_IDS, op: 'ui.action', description: 'safe', data: { url: '/api/x' } },
+          nextjs: { request_path: '/api/order/status' },
+        },
+        spans: [
+          { ...TRACE_IDS, op: 'http.client', description: 'POST /api/log/payment', data: { url: '/api/log/payment' }, start_timestamp: 1 },
+          { ...TRACE_IDS, op: 'http.client', description: 'GET https://test.local/api/x', data: { url: 'https://test.local/api/x' }, start_timestamp: 1 },
+        ],
+        breadcrumbs: [{ category: 'console', message: 'ok', data: { logger: 'console', arguments: ['ok', { n: 1 }] } }],
+      } as Event);
+      const errorEvent = event();
+      expect(beforeSend(errorEvent)).toBe(errorEvent);
+      expect(errorEvent).toEqual(event());
+      const transaction = { ...event(), type: 'transaction' } as TransactionEvent;
+      expect(beforeSendTransaction(transaction)).toBe(transaction);
+    });
+
+    it('client: beforeBreadcrumb は投げない。読めない data の breadcrumb は捨て (null)、凍結した breadcrumb は伏せた写しを返す (元は書き換えない)', async () => {
+      const { beforeBreadcrumb } = await installedHooks('client');
+      for (const data of [getterObject(), { arguments: accessorArray() }, throwingProxy()]) {
+        expect(() => beforeBreadcrumb!({ category: 'console', message: 'm', data })).not.toThrow();
+        expect(beforeBreadcrumb!({ category: 'console', message: 'm', data })).toBeNull();
+      }
+      const message = Object.defineProperty({ category: 'console' }, 'message', { enumerable: true, get: boom });
+      expect(beforeBreadcrumb!(message as Breadcrumb)).toBeNull();
+
+      const raw = rpcRequestError().message;
+      const frozen = deepFreeze({ category: 'console', message: raw, data: { logger: 'console', arguments: [raw, 1] } });
+      const clean = beforeBreadcrumb!(frozen);
+      expect(clean).not.toBe(frozen);
+      expect(clean).toEqual({
+        category: 'console',
+        message: redactLogText(raw),
+        data: { logger: 'console', arguments: [redactLogText(raw), 1] },
+      });
+      expect(frozen.message).toBe(raw);
+      expect(frozen.data.arguments[0]).toBe(raw);
+      const safe = deepFreeze({ category: 'custom', data: { note: 'safe' } });
+      expect(beforeBreadcrumb!(safe)).toBe(safe);
+    });
+  });
 });
 
 describe('決済の監査 log (lib/paymentLog.ts → /api/log/payment)', () => {
