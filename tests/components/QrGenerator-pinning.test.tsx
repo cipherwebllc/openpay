@@ -6,18 +6,32 @@ import { renderWithIntl } from '../_helpers/i18n';
 import ja from '@/messages/ja.json';
 import en from '@/messages/en.json';
 
-// F-8 PR-21 (QrGenerator をセクション単位の component に分ける) の網。期待値はすべて分割前の component
-// (origin/main dc2b0659) で採取したもの。分割に合わせて採り直さない — 生成物や hash が変わったら、DOM か
-// 支払い URL が変わったので、分割の方を直す。この画面は支払い URL を作るので、生成物の完全一致を先に固定する
-// (計画 P4 の停止条件)。固定するもの:
+// QrGenerator の網 (F-8 PR-21 = セクション単位の component への分割 #951 のために作り、分割の後も残している)。
+// この file の期待値は 2 種類で、扱いが違う (第 10 回レビュー E-2):
+//   1. 生成物の完全一致 (支払い URL・EIP-681・クリップボードに書く値・保存名・「前回の受け取り QR」・着金の見張りに
+//      渡す値・受け渡しを作る呼び出し)。分割前の component (origin/main dc2b0659) で採った値のまま、一度も採り直して
+//      いない。採り直さない — 変わったら支払いの行き先か額が変わったので、実装の方を直す。
+//   2. DOM の sha256 ("all" と "modal" の 64 個)。分割 (#951) の後、見た目を変えた PR (#965・#967・#968・#969・#979・
+//      #1020) がそのたびに採り直している。「採り直さない」値ではない: UI を変える PR は意図して採り直し、PR の本文に
+//      DOM の差分 (どの要素の何が変わったか) を書く。hash は「変わった」ことしか言わないので、受取欄の名前・リンクの
+//      行き先・画面に出す額などの意味のある出力は、この file の末尾の describe「QrGenerator の名前つきの出力」が
+//      role / name / href / text で確かめる (hash を採り直しても、そちらが落ちたら壊れている)。
+// 1 と 2 は同じ inline snapshot に入っているので、`vitest -u` は 1 も一緒に書き換える。-u で採り直したら、diff が
+// "all" / "modal" / "parts" の行だけであることを確かめる (末尾の describe は代表の生成物を literal でも持つ)。
+// hash を role / name の assert に置き換えるのは、QrGenerator を hook に分けた後 (計画 PR-26 → PR-27)。それまでは
+// 分割の間に DOM を動かさない柵として残す。固定するもの:
 //   - 生成物の完全一致 (通貨 × チェーン × 金額 (空・小数・桁の多い額・最小単位) × 支払い方法 × 明細・値引き・
 //     為替換算・ENS 名・回収 / 無料の経路・en): QR に渡す値 (主 QR と互換 QR (EIP-681))・画面に出す URL・
 //     クリップボードに書く値 (URL と EIP-681)・SVG / PNG の保存名・印刷・「前回の受け取り QR」の保存値・
 //     着金の見張りに渡す値 (受取先・トークン・チェーン・期待額・有効か)・QR の画面の DOM の sha256
 //   - 「お店がガス代を肩代わりして送る」(flag ON) の /checkout の QR (受け渡しの id 付き) の完全一致と、受け渡しを
-//     作る呼び出しの引数 (受取先・請求額 wei・チェーン)・通常の QR に切り替えたときの QR と利用料の開示
+//     作る呼び出しの引数 (受取先・請求額 wei・チェーン)・通常の QR に切り替えたときの QR (利用料の開示の文は sha256 と
+//     末尾の describe)
 //   - 全 DOM の sha256 (主な状態: 新規・入力済み・設定シート・据え置き・QR の画面 (ガスレス・通常決済と EIP-681・
-//     回収・為替換算・Arc・着金)・値引き・明細・en・お店負担の各状態)
+//     回収・為替換算・Arc・着金)・値引き・明細・en・お店負担の各状態) — 上の 2 (UI の変更で採り直す)
+//   - 名前つきの出力 (末尾の describe): 受取欄・金額欄・設定シートの欄の名前 (可視の見出し / label から)・リンクの
+//     行き先・dialog の名前・会計パネルと QR の画面に出す額と支払い方法・押せない理由・着金の知らせ・利用料の開示・
+//     代表の生成物の literal
 //   - 子 component に分けても入力欄・QR の画面・設定シートを作り直さないこと (node の同一性と focus) と、QR の画面を
 //     作り直す条件 (閉じて開き直したとき・出せなくなったら閉じて勝手に開き直さない) が変わらないこと
 // 支払い URL の各 param の意味・節ごとの DOM の digest・既存の振る舞いは QrGenerator.extraction.test.tsx (R11b) と
@@ -441,8 +455,8 @@ afterEach(() => {
   Reflect.deleteProperty(navigator, 'clipboard');
 });
 
-describe('QrGenerator pre-split pinning (F-8 PR-21)', () => {
-  it('pins every generated JPYC output (chains・amounts・pay modes・accounting・discount・FX・ENS・recover / free・en)', async () => {
+describe('QrGenerator の pin (生成物の完全一致は採り直さない・DOM の sha256 は UI の変更で意図して採り直す)', () => {
+  it('JPYC の生成物の完全一致 (チェーン・金額・支払い方法・明細・値引き・為替換算・ENS 名・回収 / 無料・en) と、QR の画面の DOM の sha256 ("modal"・UI の変更で採り直す)', async () => {
     const cases: Record<string, Case> = {
       polygonGasless: { amount: '1000' },
       polygonStatic: { amount: null },
@@ -948,8 +962,8 @@ describe('QrGenerator pre-split pinning (F-8 PR-21)', () => {
 
   // 回収 (JPYC・forwarder あり) の利用料の下限 (2 JPYC) ちょうどと、それより小さい会計。着金の見張りに渡す期待額
   // (店舗の純受取額) は 0 で止まる (負の額にしない)。上の行列とは別の snapshot にして、行列の採取値 (保存時刻を含む) を
-  // 動かさない。期待値は分割前の component で採取したもの。
-  it('pins the recover outputs at and below the 2 JPYC floor (the expected amount for the payment watch stops at 0)', async () => {
+  // 動かさない。生成物の期待値は分割前の component で採取したもの ("modal" の sha256 だけは UI の変更で採り直している)。
+  it('回収の利用料の下限 (2 JPYC) ちょうどと未満の生成物の完全一致 (着金の見張りに渡す期待額は 0 で止まる) と、QR の画面の DOM の sha256 ("modal"・UI の変更で採り直す)', async () => {
     const cases: Record<string, Case> = {
       recoverAtFloor: { provider: 'eip3009-relay', forwarder: true, amount: '2' },
       recoverBelowFloor: { provider: 'eip3009-relay', forwarder: true, amount: '1' },
@@ -1021,7 +1035,7 @@ describe('QrGenerator pre-split pinning (F-8 PR-21)', () => {
     `);
   });
 
-  it('pins every generated USDC output (chains・cross-chain・split・standard / EIP-681・truncation・smallest unit・Arc・FX・discount)', async () => {
+  it('USDC の生成物の完全一致 (チェーン・他チェーンからの受取・分配・通常決済 / EIP-681・切り詰め・最小単位・Arc・為替換算・値引き) と、QR の画面の DOM の sha256 ("modal"・UI の変更で採り直す)', async () => {
     const cases: Record<string, Case> = {
       baseGasless: { settings: { token: 'usdc', chain: 'base' }, amount: '12.5' },
       arbitrumSplitNoCrossChain: {
@@ -1402,7 +1416,9 @@ describe('QrGenerator pre-split pinning (F-8 PR-21)', () => {
     `);
   });
 
-  it('pins the DOM of the main states (fresh・typed・settings sheet・static・modals・discount・accounting・en)', async () => {
+  // ここは sha256 だけ (意味のある出力は見ていない)。落ちたら "parts" でどの節かを見て、末尾の describe
+  // 「QrGenerator の名前つきの出力」が緑のままかを確かめ、意図した見た目の変更なら採り直して PR の本文に DOM の差分を書く。
+  it('主な状態の全 DOM の sha256 だけ (新規・入力済み・設定シート・据え置き・QR の画面・値引き・明細・en) — UI の変更で意図して採り直し、PR に DOM の差分を書く', async () => {
     const states: Record<string, unknown> = {};
     // 新規 (受取先の欄を会計画面に出す) → 受取先 → 金額 → 設定シート → 据え置き → QR の画面。
     let view = renderQr();
@@ -1770,7 +1786,10 @@ describe('QrGenerator pre-split pinning (F-8 PR-21)', () => {
     `);
   });
 
-  it('pins the store-pays QR (flag ON): /checkout bytes with the hand-off id, the hand-off call, blocked reasons, dimming and the normal QR with its fee disclosure', async () => {
+  // 完全一致で見ているのは、/checkout の QR の値・受け渡しを作る呼び出しの引数・QR の画面のボタンの並び・通常の QR の
+  // 生成物まで。押せない理由の文・QR を薄くすること・通常の QR の利用料の開示は、ここでは DOM の sha256 ("all" /
+  // "modal") にしか入っていない (名前で確かめるのは末尾の describe の「お店がガス代を肩代わり」)。
+  it('お店がガス代を肩代わり (flag ON): 受け渡しの id 付きの /checkout の QR・受け渡しを作る呼び出し・通常の QR の生成物の完全一致と、各状態 (押せない理由・薄くした QR・利用料の開示を含む) の DOM の sha256 (UI の変更で採り直す)', async () => {
     h.storeGas = true;
     sd.active = true;
     h.provider = 'eip3009-relay';
@@ -2211,5 +2230,518 @@ describe('QrGenerator pre-split pinning (F-8 PR-21)', () => {
         "urlBefore": "https://test.local/pay?to=0x000000000000000000000000000000000000dEaD&token=jpyc&chain=kaia&amount=900&disc=100&store=%E5%BA%97&pname=productName-1&memo=memo-1&rcpt=receipt-1",
       }
     `);
+  });
+});
+
+// 第 10 回レビュー E-2 (前半)。上の describe の DOM の sha256 は「変わった」ことしか言わないので、UI の PR が受取欄の
+// 名前やリンクの行き先を落としても、hash を採り直せば緑に戻ってしまう。ここは利用者・読み上げ・外へ出る値を名前で
+// 確かめる: 落ちたら、その名前のものが壊れている (hash と違い、採り直して済ませる値ではない)。
+// 見るのは描画された DOM (role / name / text / href) と外への呼び出しだけで、state や hook の名前には結び付けない
+// (QrGenerator を hook に分ける計画 PR-26 の間も、無変更で緑のまま)。文言そのものは messages から引き (文言の変更では
+// 落とさない)、行き先・額・URL は literal で持つ。
+describe('QrGenerator の名前つきの出力 (DOM の sha256 が落ちたとき、何が壊れたかを role / name / href / 画面に出す額で言う)', () => {
+  const fill = (template: string, vars: Record<string, string>) =>
+    template.replace(/\{(\w+)\}/g, (_, key: string) => vars[key]);
+  const mainQr = (dialog: HTMLElement) => dialog.querySelector('svg[data-qr-value][width="340"]')!;
+  // PC の会計パネル (<aside>) とスマホの下部の会計バー (「QRコードを表示する」の 2 つ目のボタンの枠)。
+  const panel = () => screen.getByRole('complementary');
+  const bar = () => showQrButtons()[1].parentElement!;
+  const disabledShowQr = () => showQrButtons().map((b) => b.hasAttribute('disabled'));
+  // 開いている dialog は QR の画面だけ (設定シートは閉じている)。名前では探さない — 名前は下の assert で確かめる。
+  async function openQr() {
+    fireEvent.click(showQrButtons()[0]);
+    await settle();
+    return screen.getByRole('dialog');
+  }
+
+  it('会計画面の受取欄 (新規): 欄と節の名前は可視の見出しの文字・「ウォレットをお持ちでない方へ」は /{locale}/guide/wallet#store-wallet・入力したら Explorer のリンクに替わる', async () => {
+    for (const loc of ['ja', 'en'] as const) {
+      locale = loc;
+      localStorage.clear();
+      const view = renderQr();
+      await settle();
+      const title = L().receiverInline.title;
+      const region = screen.getByRole('region', { name: title });
+      const heading = within(region).getByRole('heading', { level: 2, name: title });
+      const input = within(region).getByRole('textbox', { name: title });
+      expect(input).toBe(receiverInput());
+      // 名前は可視の見出しから (aria-labelledby)。可視の文字と食い違う aria-label を足さない (掟 8)。
+      expect(input).toHaveAccessibleName(heading.textContent!);
+      expect(input).not.toHaveAttribute('aria-label');
+      const guide = within(region).getByRole('link', { name: L().noWalletGuideLink });
+      expect(guide).toHaveAttribute('href', `/${loc}/guide/wallet#store-wallet`);
+      // サイト内のガイドなので同じタブ・名前は可視の文字だけ。
+      expect(guide).not.toHaveAttribute('target');
+      expect(guide).not.toHaveAttribute('aria-label');
+      expect(within(region).queryByRole('link', { name: /Explorer/ })).toBeNull();
+
+      fireEvent.change(input, { target: { value: RECEIVER } });
+      await settle();
+      expect(within(region).queryByRole('link', { name: L().noWalletGuideLink })).toBeNull();
+      const explorer = within(region).getByRole('link', {
+        name: fill(L().merchantExplorerLink, { chainName: 'Polygon Amoy' }),
+      });
+      expect(explorer).toHaveAttribute('href', `https://amoy.polygonscan.com/address/${RECEIVER}`);
+      expect(explorer).toHaveAttribute('target', '_blank');
+      expect(explorer).toHaveAttribute('rel', 'noreferrer noopener');
+      expect(explorer).not.toHaveAttribute('aria-label');
+      view.unmount();
+    }
+  });
+
+  it('金額欄: 欄と節の名前は可視の見出しと同じ文字 (値引きを開くと「値引き前の金額」)・金額指定 / 据え置きの押した状態・よく使う金額の名前に通貨', async () => {
+    seed();
+    let view = renderQr();
+    await settle();
+    const label = fill(L().amountLabel, { symbol: 'JPYC' });
+    const region = screen.getByRole('region', { name: label });
+    const heading = within(region).getByRole('heading', { level: 2, name: label });
+    const input = within(region).getByRole('textbox', { name: label });
+    expect(input).toBe(amountInput());
+    // 金額欄は aria-label。可視の見出しと 1 字も違わない (掟 8)。
+    expect(input).toHaveAttribute('aria-label', heading.textContent!);
+    expect(within(region).getByRole('button', { name: L().modeAmount })).toHaveAttribute('aria-pressed', 'true');
+    expect(within(region).getByRole('button', { name: L().modeStatic })).toHaveAttribute('aria-pressed', 'false');
+    // よく使う金額: 見た目は数字だけ・読み上げには通貨が付く。押すと金額欄に入る。
+    const chip = within(region).getByRole('button', { name: '1,000 JPYC' });
+    expect(within(region).getByRole('button', { name: L().quickAmountsEdit })).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(chip);
+    await settle();
+    expect(input).toHaveValue('1,000');
+
+    addDiscount('120');
+    await settle();
+    const before = fill(L().amountLabelBeforeDiscount, { symbol: 'JPYC' });
+    expect(within(region).getByRole('heading', { level: 2, name: before })).toBeInTheDocument();
+    expect(within(region).getByRole('textbox', { name: before })).toBe(input);
+    expect(input).toHaveAttribute('aria-label', before);
+
+    fireEvent.click(within(region).getByRole('button', { name: L().modeStatic }));
+    await settle();
+    expect(within(region).getByRole('button', { name: L().modeAmount })).toHaveAttribute('aria-pressed', 'false');
+    expect(within(region).getByRole('button', { name: L().modeStatic })).toHaveAttribute('aria-pressed', 'true');
+    expect(within(region).getByText(L().staticHint)).toBeInTheDocument();
+    view.unmount();
+
+    localStorage.clear();
+    seed({ token: 'usdc', chain: 'base' });
+    view = renderQr();
+    await settle();
+    const usdcLabel = fill(L().amountLabel, { symbol: 'USDC' });
+    expect(screen.getByRole('region', { name: usdcLabel })).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: usdcLabel })).toHaveAttribute(
+      'aria-label',
+      screen.getByRole('heading', { level: 2, name: usdcLabel }).textContent!,
+    );
+    view.unmount();
+  });
+
+  it('会計のカードの要約・会計パネル (PC)・下部の会計バー (スマホ): 店名・受取先・通貨とチェーン・支払い方法、出す額、押せない理由と押せるか', async () => {
+    // 新規: 受取先が無い → どちらの「QRコードを表示する」も押せず、理由は受取先。
+    let view = renderQr();
+    await settle();
+    const card = () => screen.getByRole('region', { name: new RegExp(`^(${L().bottomAmountLabel}|値引き前の金額) \\(`) });
+    expect(within(card()).getByText(L().shopSummary.noStoreName)).toBeInTheDocument();
+    expect(within(card()).getByText(L().shopSummary.noReceiver)).toBeInTheDocument();
+    expect(disabledShowQr()).toEqual([true, true]);
+    expect(within(panel()).getByText(L().notReady.receiver)).toBeInTheDocument();
+    expect(within(bar()).getByText(L().notReadyShort.receiver)).toBeInTheDocument();
+    expect(within(panel()).getByText('—')).toBeInTheDocument();
+
+    // 受取先だけ入れた → 理由は金額。要約に短い受取先・通貨とチェーン・支払い方法。
+    fireEvent.change(receiverInput(), { target: { value: RECEIVER } });
+    await settle();
+    expect(within(card()).getByText('0x8335…2913')).toBeInTheDocument();
+    expect(within(card()).getByText('Polygon Amoy').parentElement!.textContent).toBe('JPYC·Polygon Amoy');
+    expect(within(card()).getByText(L().posterPayModeGasless)).toBeInTheDocument();
+    expect(disabledShowQr()).toEqual([true, true]);
+    expect(within(panel()).getByText(L().notReady.amount)).toBeInTheDocument();
+    expect(within(bar()).getByText(L().notReadyShort.amount)).toBeInTheDocument();
+
+    // 金額を入れた → 押せる。出す額は桁区切りつきで 2 か所とも同じ。
+    setAmount('1000');
+    await settle();
+    expect(disabledShowQr()).toEqual([false, false]);
+    expect(within(panel()).getByText('1,000 JPYC')).toBeInTheDocument();
+    expect(within(bar()).getByText('1,000 JPYC')).toBeInTheDocument();
+
+    // 値引き: 請求するのは値引き後の額 (会計のカード・会計パネル・下部バーの 3 か所)。
+    addDiscount('120');
+    await settle();
+    expect(within(card()).getByText('880 JPYC')).toBeInTheDocument();
+    expect(within(panel()).getByText('880 JPYC')).toBeInTheDocument();
+    expect(within(bar()).getByText('880 JPYC')).toBeInTheDocument();
+    // 直している途中の値引き (JPYC は 1 円単位) → 押せず、理由は値引き。
+    fireEvent.change(screen.getByLabelText(msgs().Discount.amountInput), { target: { value: '20.5' } });
+    await settle();
+    expect(disabledShowQr()).toEqual([true, true]);
+    expect(within(panel()).getByText(L().notReady.discount)).toBeInTheDocument();
+    expect(within(bar()).getByText(L().notReadyShort.discount)).toBeInTheDocument();
+
+    // 据え置き: 額の代わりに「JPYC で金額を入力」。
+    fireEvent.click(screen.getByRole('button', { name: L().modeStatic }));
+    await settle();
+    const open = fill(L().posterOpenAmount, { symbol: 'JPYC' });
+    expect(within(panel()).getByText(open)).toBeInTheDocument();
+    expect(within(bar()).getByText(open)).toBeInTheDocument();
+    expect(disabledShowQr()).toEqual([false, false]);
+    view.unmount();
+
+    // USDC (通常決済): 額と参考の円 (1 USDC = 150 円)・要約の支払い方法は「通常決済」。
+    localStorage.clear();
+    seed({ token: 'usdc', chain: 'base', payMode: 'standard', storeName: '神田珈琲' });
+    view = renderQr();
+    await settle();
+    setAmount('12.5');
+    await settle();
+    expect(within(card()).getByText('神田珈琲')).toBeInTheDocument();
+    expect(within(card()).getByText('Base Sepolia').parentElement!.textContent).toBe('USDC·Base Sepolia');
+    expect(within(card()).getByText(L().shopSummary.payStandard)).toBeInTheDocument();
+    expect(within(panel()).getByText('12.5 USDC')).toBeInTheDocument();
+    expect(within(panel()).getByText('≈ ¥1,875')).toBeInTheDocument();
+    expect(within(bar()).getByText('12.5 USDC')).toBeInTheDocument();
+    expect(within(bar()).getByText('≈ ¥1,875')).toBeInTheDocument();
+    view.unmount();
+  });
+
+  it('お店の設定シート: dialog の名前は可視の見出し・受取先 / 店舗名 / インボイス登録番号 / ポスターの補足文の欄の名前は label・Explorer のリンクは受け取るチェーンのもの', async () => {
+    seed({ token: 'usdc', chain: 'base' });
+    const view = renderQr();
+    await settle();
+    fireEvent.click(settingsButton());
+    await settle();
+    const sheet = screen.getByRole('dialog', { name: L().shopSettings.title });
+    expect(sheet).toHaveAttribute('aria-modal', 'true');
+    expect(sheet).toHaveAccessibleName(within(sheet).getByRole('heading', { level: 2 }).textContent!);
+    expect(sheet).not.toHaveAttribute('aria-label');
+    const receiver = within(sheet).getByRole('textbox', { name: L().receiverLabel });
+    expect(receiver).toBe(within(sheet).getByPlaceholderText(msgs().AddressInput.placeholder));
+    expect(receiver).toHaveValue(RECEIVER);
+    expect(receiver).not.toHaveAttribute('aria-label');
+    expect(within(sheet).getByRole('textbox', { name: L().storeNameLabel })).toBe(
+      within(sheet).getByPlaceholderText(L().storeNamePlaceholder),
+    );
+    expect(within(sheet).getByRole('textbox', { name: L().invoiceNoLabel })).toBeInTheDocument();
+    expect(within(sheet).getByRole('textbox', { name: L().posterNoteLabel })).toBe(
+      within(sheet).getByPlaceholderText(L().posterNotePlaceholder),
+    );
+    // 受取先が入っているので「ウォレットをお持ちでない方へ」は出さず、Explorer は Base のもの。
+    expect(within(sheet).queryByRole('link', { name: L().noWalletGuideLink })).toBeNull();
+    const explorer = within(sheet).getByRole('link', {
+      name: fill(L().merchantExplorerLink, { chainName: 'Base Sepolia' }),
+    });
+    expect(explorer).toHaveAttribute('href', `https://sepolia.basescan.org/address/${RECEIVER}`);
+    expect(explorer).toHaveAttribute('target', '_blank');
+    expect(explorer).toHaveAttribute('rel', 'noreferrer noopener');
+    expect(within(sheet).getByRole('button', { name: L().shopSettings.done })).toBeInTheDocument();
+    view.unmount();
+  });
+
+  it('QR の画面 (お客様に見せるポスター): dialog の名前・店名・額・チェーン・支払い方法・支払先・補足文・操作の名前・リンクの表示', async () => {
+    // JPYC・ガス代不要・店名と補足文は未設定 (既定の文)。
+    seed();
+    let view = renderQr();
+    await settle();
+    setAmount('750');
+    await settle();
+    let dialog = await openQr();
+    expect(dialog).toHaveAttribute('aria-modal', 'true');
+    // dialog の名前 (aria-label) は、中の可視の見出しと同じ文字。
+    expect(dialog).toHaveAccessibleName(L().qrModalTitle);
+    expect(dialog).toHaveAttribute('aria-label', within(dialog).getByRole('heading', { level: 2 }).textContent!);
+    expect(within(dialog).getByRole('heading', { level: 3, name: L().posterDefaultStoreName })).toBeInTheDocument();
+    expect(within(dialog).getByText('750 JPYC')).toBeInTheDocument();
+    expect(within(dialog).getByText('Polygon Amoy')).toBeInTheDocument();
+    expect(within(dialog).getByText(L().posterPayModeGasless)).toBeInTheDocument();
+    expect(within(dialog).getByText('0x8335…2913').parentElement).toHaveTextContent(`${L().qrPayTo} 0x8335…2913`);
+    expect(within(dialog).getByText(L().posterDefaultNote)).toBeInTheDocument();
+    expect(within(dialog).getByText(L().localGenNote)).toBeInTheDocument();
+    expect(within(dialog).getAllByRole('button').map((b) => b.textContent)).toEqual([
+      L().qrModalClose,
+      L().printPoster,
+      L().qrCopy,
+      L().downloadSvg,
+      L().downloadPng,
+    ]);
+    // 「リンクを表示」の中の URL は QR と同じ値。
+    const shown = within(dialog).getByText(L().qrShowUrl).closest('details')!;
+    expect(within(shown).getByText(/^https:\/\/test\.local\//).textContent).toBe(
+      mainQr(dialog).getAttribute('data-qr-value'),
+    );
+    // コピーしたらボタンの文字が変わる (クリップボードには QR と同じ値)。
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole('button', { name: L().qrCopy }));
+    });
+    expect(writeText.mock.calls).toEqual([[mainQr(dialog).getAttribute('data-qr-value')]]);
+    expect(within(dialog).getByRole('button', { name: L().qrCopied })).toBeInTheDocument();
+    view.unmount();
+
+    // USDC・通常決済 (ガス代は ETH)・店名と補足文あり・互換 QR (EIP-681)。
+    localStorage.clear();
+    seed({ token: 'usdc', chain: 'base', payMode: 'standard', storeName: '神田珈琲', posterNote: '店頭でお見せください' });
+    view = renderQr();
+    await settle();
+    setAmount('1234.5');
+    await settle();
+    dialog = await openQr();
+    expect(within(dialog).getByRole('heading', { level: 3, name: '神田珈琲' })).toBeInTheDocument();
+    expect(within(dialog).getByText('1,234.5 USDC')).toBeInTheDocument();
+    expect(within(dialog).getByText('Base Sepolia')).toBeInTheDocument();
+    expect(within(dialog).getByText(fill(L().posterPayModeStandard, { nativeToken: 'ETH' }))).toBeInTheDocument();
+    expect(within(dialog).getByText('店頭でお見せください')).toBeInTheDocument();
+    const compat = within(dialog).getByText(L().eip681Title).closest('details')!;
+    expect(within(compat).getByText(L().eip681SummaryBadge)).toBeInTheDocument();
+    expect(within(compat).getByText(/^ethereum:/).textContent).toBe(
+      compat.querySelector('svg[data-qr-value][width="180"]')!.getAttribute('data-qr-value'),
+    );
+    expect(within(compat).getByRole('button', { name: L().eip681Copy })).toBeInTheDocument();
+    view.unmount();
+
+    // Arc (ガスも USDC) と据え置き (額はお客様が入力)。
+    localStorage.clear();
+    seed({ token: 'usdc', chain: 'arc' });
+    view = renderQr();
+    await settle();
+    fireEvent.click(screen.getByRole('button', { name: L().modeStatic }));
+    await settle();
+    dialog = await openQr();
+    expect(within(dialog).getByText(L().posterPayModeArc)).toBeInTheDocument();
+    expect(within(dialog).getByText(fill(L().posterOpenAmount, { symbol: 'USDC' }))).toBeInTheDocument();
+    view.unmount();
+
+    // en。
+    localStorage.clear();
+    locale = 'en';
+    seed({ chain: 'kaia' });
+    view = renderQr();
+    await settle();
+    setAmount('42');
+    await settle();
+    dialog = await openQr();
+    expect(dialog).toHaveAccessibleName(L().qrModalTitle);
+    expect(dialog).toHaveAttribute('aria-label', within(dialog).getByRole('heading', { level: 2 }).textContent!);
+    expect(within(dialog).getByRole('heading', { level: 3, name: L().posterDefaultStoreName })).toBeInTheDocument();
+    expect(within(dialog).getByText('42 JPYC')).toBeInTheDocument();
+    expect(within(dialog).getByText('Kairos Testnet')).toBeInTheDocument();
+    expect(within(dialog).getByText('0x8335…2913').parentElement).toHaveTextContent(`${L().qrPayTo} 0x8335…2913`);
+    view.unmount();
+  });
+
+  it('着金の知らせ (QR の画面の role="status"): 待っている間の文と、残高が増えたときの額', async () => {
+    seed();
+    const view = renderQr();
+    await settle();
+    setAmount('750');
+    await settle();
+    const dialog = await openQr();
+    const status = within(dialog).getByRole('status');
+    expect(status).toHaveAttribute('aria-live', 'polite');
+    expect(status.textContent).toBe(`${L().paymentWatching}${L().paymentWatchingNote}`);
+    h.balance = 10n ** 21n;
+    view.rerender(<QrGenerator />);
+    h.balance += 750n * 10n ** 18n;
+    view.rerender(<QrGenerator />);
+    await settle();
+    expect(within(dialog).getByRole('status').textContent).toBe(
+      `${fill(L().paymentReceived, { amount: '750 JPYC' })}${L().paymentReceivedNote}`,
+    );
+    view.unmount();
+  });
+
+  // 利用料の率 (NEXT_PUBLIC_RECOVER_FEE_BPS) はテストの env では既定の 0 = ガス相当の固定 2 JPYC (上の describe の
+  // 着金の見張りの期待額と同じ前提)。
+  it('回収 (JPYC・forwarder あり): 会計画面に出す利用料の開示の額 (ガス相当の 2 JPYC・店舗負担) と、利用料以下の額の警告', async () => {
+    h.provider = 'eip3009-relay';
+    h.forwarders = { 80002: FORWARDER, 1001: FORWARDER, 43113: FORWARDER };
+    seed();
+    const view = renderQr();
+    await settle();
+    const region = screen.getByRole('region', { name: fill(L().amountLabel, { symbol: 'JPYC' }) });
+    const fee = msgs().RecoverFee;
+    setAmount('5000');
+    await settle();
+    expect(within(region).getByText(fill(fee.disclosureGasOnly, { feeHuman: '2' }))).toBeInTheDocument();
+    expect(within(region).getByText(fill(fee.splitMerchant, { customerPays: '5,000', merchantReceives: '4,998' }))).toBeInTheDocument();
+    // 利用料以下の額は受け付けない (店舗の受取がマイナスになる分担の行は出さず、警告の行)。
+    setAmount('2');
+    await settle();
+    expect(within(region).getByText(fill(fee.tooSmall, { fee: '2' }))).toBeInTheDocument();
+    expect(within(region).queryByText(/店舗受取/)).toBeNull();
+    view.unmount();
+  });
+
+  it('お店がガス代を肩代わり (flag ON): 押せない理由の文・QR の画面の支払い方法と注記・別の受け渡しの間は QR を薄く・通常の QR の利用料の開示', async () => {
+    h.storeGas = true;
+    sd.active = true;
+    h.provider = 'eip3009-relay';
+    h.forwarders = { 80002: FORWARDER, 1001: FORWARDER };
+    const storeSeed = () => seed({ token: 'jpyc', chain: 'polygon', payMode: 'gasless', storePays: true });
+    const openStoreQr = async () => {
+      fireEvent.click(showQrButtons()[0]);
+      const opened = await screen.findByRole('dialog', { name: L().qrModalTitle });
+      await settle();
+      return opened;
+    };
+
+    // 使えない会計: 1 JPYC 未満 → 据え置き。理由は role="status" の文で、どちらのボタンも押せない。
+    storeSeed();
+    let view = renderQr();
+    await settle();
+    await screen.findByTestId('gas-wallet-panel');
+    // 会計のカードの要約の支払い方法は「ガス代はお店が負担」。
+    expect(
+      within(screen.getByRole('region', { name: fill(L().amountLabel, { symbol: 'JPYC' }) })).getByText(L().storeDevice.posterBadge),
+    ).toBeInTheDocument();
+    setAmount('0.5');
+    await settle();
+    expect(within(panel()).getByRole('status').textContent).toBe(L().storeDevice.blocked.min_amount);
+    expect(disabledShowQr()).toEqual([true, true]);
+    fireEvent.click(screen.getByRole('button', { name: L().modeStatic }));
+    await settle();
+    expect(within(panel()).getByRole('status').textContent).toBe(L().storeDevice.blocked.static);
+    expect(disabledShowQr()).toEqual([true, true]);
+    view.unmount();
+
+    // お店負担の QR: 支払い方法は「ガス代はお店が負担」・画面に出している間だけ使える注記・リンクと「圏外でも」は出さない。
+    // この QR の受け渡しが署名を待っている間ははっきり、別の受け渡しの間は薄く (次のお客様に読ませない)。
+    localStorage.clear();
+    storeSeed();
+    sd.state = { phase: 'waiting', session: { id: HS }, stale: false, degraded: false };
+    view = renderQr();
+    await settle();
+    setAmount('1500');
+    await settle();
+    let dialog = await openStoreQr();
+    await within(dialog).findByRole('status');
+    await settle();
+    expect(within(dialog).getByText('1,500 JPYC')).toBeInTheDocument();
+    expect(within(dialog).getByText(L().storeDevice.posterBadge)).toBeInTheDocument();
+    expect(within(dialog).getByText(L().storeDevice.actionsNote)).toBeInTheDocument();
+    expect(within(dialog).queryByText(L().qrShowUrl)).toBeNull();
+    expect(within(dialog).queryByText(L().localGenNote)).toBeNull();
+    expect(mainQr(dialog).parentElement).not.toHaveClass('opacity-40');
+    sd.state = { phase: 'waiting', session: { id: 'ZzZzZzZzZzZzZzZzZzZzZz' }, stale: false, degraded: false };
+    view.rerender(<QrGenerator />);
+    await settle();
+    expect(mainQr(dialog).parentElement).toHaveClass('opacity-40');
+    view.unmount();
+
+    // 作れなかった → 「通常の QR を出す」と、押す前に知らせる利用料の一文。出した通常の QR の画面の中に利用料の開示。
+    sd.start.mockReset().mockResolvedValue(null);
+    sd.state = { phase: 'create_failed', reason: 'unavailable' };
+    localStorage.clear();
+    storeSeed();
+    view = renderQr();
+    await settle();
+    setAmount('800');
+    await settle();
+    const showNormal = await within(panel()).findByRole('button', { name: L().storeDevice.showNormalQr });
+    expect(within(panel()).getByText(L().storeDevice.normalQrFeeNote)).toBeInTheDocument();
+    fireEvent.click(showNormal);
+    dialog = await screen.findByRole('dialog', { name: L().qrModalTitle });
+    await within(dialog).findByRole('alert');
+    await settle();
+    const fee = msgs().RecoverFee;
+    expect(within(dialog).getByText(fill(fee.disclosureGasOnly, { feeHuman: '2' }))).toBeInTheDocument();
+    expect(within(dialog).getByText(fill(fee.splitMerchant, { customerPays: '800', merchantReceives: '798' }))).toBeInTheDocument();
+    expect(within(dialog).getByText(L().posterPayModeGasless)).toBeInTheDocument();
+    expect(mainQr(dialog).parentElement).not.toHaveClass('opacity-40');
+    view.unmount();
+  });
+
+  // 上の describe の inline snapshot は DOM の sha256 と同じ object なので、`vitest -u` で hash を採り直すと生成物も
+  // 一緒に書き換わる。代表の生成物を literal で持ち、-u では動かない完全一致にする (網羅は上の行列)。
+  it('代表の生成物の literal (vitest -u で採り直せない): 支払い URL・EIP-681・クリップボードに書く値・保存名・受け渡しの id 付きの /checkout', async () => {
+    // JPYC・明細つき (店名・商品名・メモ・税・管理番号・インボイス番号)。
+    const jpycUrl =
+      'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&amount=750&store=%E7%A5%9E%E7%94%B0+%26+Coffee&pname=%E8%B1%86%2F%E8%A2%8B+%F0%9F%8E%89&memo=A%2BB+%3D+1%3F%23&tax=8&taxcat=taxable_8&rcpt=R-001%23%3F&inv=T1234567890123';
+    let out = await generated({
+      settings: {
+        storeName: ' 神田 & Coffee ',
+        productName: '豆/袋 🎉',
+        memo: 'A+B = 1?#',
+        taxRate: 8,
+        taxCategory: 'taxable_8',
+        invoiceNo: 't-1234-5678-90123',
+        posterNote: 'ありがとう',
+      },
+      receipt: 'R-001#?',
+      amount: '750',
+    });
+    expect(out.qr).toBe(jpycUrl);
+    expect(out.eip681).toBeNull();
+    expect(writeText.mock.calls).toEqual([[jpycUrl]]);
+    expect(out.downloads).toEqual([
+      '神田-&-Coffee-豆-袋-🎉-jpyc-polygon-750.svg <- blob:pinned',
+      '神田-&-Coffee-豆-袋-🎉-jpyc-polygon-750.png <- data:image/png',
+    ]);
+
+    // USDC・通常決済・値引き (互換 QR は値引き後の額を最小単位で)。
+    const usdcUrl =
+      'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=usdc&amount=9.75&disc=0.25&mode=standard';
+    const usdcEip681 =
+      'ethereum:0x036CbD53842c5426634e7929541eC2318f3dCF7e@84532/transfer?address=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&uint256=9750000';
+    out = await generated({ settings: { token: 'usdc', chain: 'base', payMode: 'standard' }, amount: '10', discount: '0.25' });
+    expect(out.qr).toBe(usdcUrl);
+    expect(out.eip681).toBe(usdcEip681);
+    expect(writeText.mock.calls).toEqual([[usdcUrl], [usdcEip681]]);
+    expect(out.downloads).toEqual([
+      'openpay-usdc-base-9-75.svg <- blob:pinned',
+      'openpay-usdc-base-9-75.png <- data:image/png',
+    ]);
+
+    // USDC・分配・他チェーンからの受取 OFF・店舗負担 (額は 6 桁に切り詰める)。
+    const splitUrl =
+      'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=usdc&chain=arbitrum&gas=merchant&amount=1.234567&split=0x2222222222222222222222222222222222222222%3A30%2C0x3333333333333333333333333333333333333333%3A20&crossChain=false';
+    out = await generated({
+      settings: {
+        token: 'usdc',
+        chain: 'arbitrum',
+        gasMode: 'merchant',
+        crossChain: false,
+        splits: [{ address: SPLIT, percent: '30' }, { address: SPLIT2, percent: '20' }],
+      },
+      amount: '1.23456789',
+    });
+    expect(out.qr).toBe(splitUrl);
+    expect(writeText.mock.calls).toEqual([[splitUrl]]);
+    expect(out.downloads).toEqual([
+      'openpay-usdc-arbitrum-1-234567.svg <- blob:pinned',
+      'openpay-usdc-arbitrum-1-234567.png <- data:image/png',
+    ]);
+
+    // JPYC・回収 (forwarder あり)・据え置き: gas=merchant が付き、額は付かず、保存名は open。
+    const recoverUrl = 'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&chain=kaia&gas=merchant';
+    out = await generated({ provider: 'eip3009-relay', forwarder: true, settings: { chain: 'kaia' }, amount: null });
+    expect(out.qr).toBe(recoverUrl);
+    expect(writeText.mock.calls).toEqual([[recoverUrl]]);
+    expect(out.downloads).toEqual([
+      'openpay-jpyc-kaia-open.svg <- blob:pinned',
+      'openpay-jpyc-kaia-open.png <- data:image/png',
+    ]);
+
+    // お店がガス代を肩代わり (flag ON): 受け渡しの id 付きの /checkout と、受け渡しを作る呼び出し (受取先・請求額 wei・チェーン)。
+    h.storeGas = true;
+    sd.active = true;
+    h.provider = 'eip3009-relay';
+    h.forwarders = { 80002: FORWARDER, 1001: FORWARDER };
+    locale = 'ja';
+    localStorage.clear();
+    seed({ token: 'jpyc', chain: 'polygon', payMode: 'gasless', storePays: true });
+    const view = renderQr();
+    await settle();
+    await screen.findByTestId('gas-wallet-panel');
+    setAmount('500');
+    await settle();
+    fireEvent.click(showQrButtons()[0]);
+    const dialog = await screen.findByRole('dialog', { name: L().qrModalTitle });
+    await settle();
+    expect(mainQr(dialog).getAttribute('data-qr-value')).toBe(
+      'https://test.local/checkout?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&items=%25E3%2581%258A%25E6%2594%25AF%25E6%2589%2595%25E3%2581%2584%3A1%3A500&gas=merchant&submit=store&hs=AbCdEfGhIjKlMnOpQrStUv',
+    );
+    expect(sd.start.mock.calls.map(([merchant, wei, chainId]) => [merchant, String(wei), chainId])).toEqual([
+      [RECEIVER, '500000000000000000000', 80002],
+    ]);
+    view.unmount();
   });
 });
