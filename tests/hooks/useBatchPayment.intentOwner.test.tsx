@@ -635,6 +635,47 @@ describe('送り直しの保存が「書けたかどうか分からない」で�
     expect(pendingKeys()).toHaveLength(0);
   });
 
+  it('送り直しの保存が書けなかった (書き込みが投げた・storage は T の版のまま) → memory も T の版のまま: T+7 日+1 ms の再確認は送り直さずに閉じる (c4・reload の後と同じ)', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(T0);
+    const fake = mountClients();
+    loseRequest(fake);
+    const hook = render();
+    hook.result.current.mutate(PARAMS);
+    await waitFor(() => expect(hook.result.current.isUnknown).toBe(true));
+    await waitFor(() => expect(hook.result.current.isPending).toBe(false));
+
+    // 6 日後の送り直し: 記録の書き込みが投げる (何も送らない)。
+    vi.setSystemTime(T0 + 6 * 24 * 60 * 60 * 1000);
+    const realSet = Storage.prototype.setItem;
+    let armed = true;
+    const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (
+      this: Storage,
+      key: string,
+      value: string,
+    ) {
+      if (armed && key.startsWith(PIMLICO_PENDING_KEY_PREFIX)) {
+        armed = false;
+        throw new DOMException('quota', 'QuotaExceededError');
+      }
+      realSet.call(this, key, value);
+    });
+    hook.result.current.retryReceipt();
+    await waitFor(() => expect(hook.result.current.pendingStoreUnavailable).toBe(true));
+    await waitFor(() => expect(hook.result.current.isPending).toBe(false));
+    setItem.mockRestore();
+    expect(fake.bundlerSend).toHaveBeenCalledTimes(1);
+    expect(storedUpdatedAt()).toBe(T0);
+
+    // 最後に bundler へ渡そうとして記録できたのは T。7 日を過ぎたら、7 日前の署名済みの op を送らずに閉じる。
+    vi.setSystemTime(T0 + SEVEN_DAYS + 1);
+    hook.result.current.retryReceipt();
+    await waitFor(() => expect(hook.result.current.isUnknown).toBe(false));
+    await waitFor(() => expect(hook.result.current.isPending).toBe(false));
+    expect(fake.bundlerSend).toHaveBeenCalledTimes(1);
+    expect(pendingKeys()).toHaveLength(0);
+  });
+
   it('期限の削除は同じ intent の記録だけ: 期限を判断する間に別のタブが閉じて始めた B の記録は、B 自身が期限を過ぎていても消さない (B の照合は B を確かめる画面が行う)', async () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(T0);
