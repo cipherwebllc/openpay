@@ -1789,5 +1789,173 @@ describe('useBatchPayment', () => {
         expect(window.sessionStorage.length).toBe(0);
       });
     });
+
+    // 第 10 回レビュー H-V: 画面を離れた (unmount した) 試みは、sessionStorage の attemptId の対応を作らない・消さない。
+    // 対応は「chain・sender・内容ごとに 1 つ」で、同じタブで開き直した画面も同じものを使う。executeCirclePayment は境界 mock
+    // (中の確認は tests/lib/smartAccount/circleSend.test.ts・本物を通す再現は useBatchPayment.circleUnmount.test.tsx)。
+    describe('画面を離れた試みと attemptId の対応 (H-V)', () => {
+      const PARAMS = {
+        tokenAddress: TOKEN,
+        merchant: MERCHANT,
+        merchantAmount: 99_000_000n,
+        feeReceiver: FEE_RECV,
+        feeAmount: 0n,
+        circlePermitAmount: 5_000_000n,
+      };
+      const PAID = {
+        userOpHash: `0x${'c'.repeat(64)}` as Hex,
+        txHash: `0x${'d'.repeat(64)}` as Hex,
+        blockNumber: 7n,
+        success: true,
+        actualGasCost: 0n,
+      };
+      type Paid = typeof PAID;
+
+      function deferred<T>() {
+        let resolve!: (value: T) => void;
+        let reject!: (error: unknown) => void;
+        const promise = new Promise<T>((res, rej) => {
+          resolve = res;
+          reject = rej;
+        });
+        return { promise, resolve, reject };
+      }
+
+      // sessionStorage の対応 (key → attemptId)。
+      function mappings(): Record<string, string | null> {
+        return Object.fromEntries(
+          Array.from({ length: window.sessionStorage.length }, (_, i) => {
+            const key = window.sessionStorage.key(i)!;
+            return [key, window.sessionStorage.getItem(key)];
+          }),
+        );
+      }
+
+      // 画面 (hook の instance) を 1 つ開く。unmount の後は result.current を待てないので、mutation の終わり方は
+      // MutationCache で見る (react-query の mutation は unmount の後も走り、cache に残る)。
+      function openScreen() {
+        const qc = new QueryClient({
+          defaultOptions: { mutations: { retry: false }, queries: { retry: false } },
+        });
+        const view = renderHook(() => useBatchPayment(usdcDep), {
+          wrapper: ({ children }: { children: ReactNode }) => (
+            <QueryClientProvider client={qc}>{children}</QueryClientProvider>
+          ),
+        });
+        const state = () => qc.getMutationCache().getAll()[0].state;
+        return { ...view, state };
+      }
+
+      beforeEach(() => {
+        window.sessionStorage.clear();
+      });
+
+      it('executeCirclePayment に isAlive を渡す (画面がある間は true・unmount の後は false)', async () => {
+        mountCircle();
+        const pending = deferred<Paid>();
+        vi.mocked(executeCirclePayment).mockReturnValueOnce(pending.promise);
+        const screen = openScreen();
+
+        screen.result.current.mutate(PARAMS);
+        await waitFor(() => expect(executeCirclePayment).toHaveBeenCalledOnce());
+        const { isAlive } = vi.mocked(executeCirclePayment).mock.calls[0][0];
+        expect(isAlive?.()).toBe(true);
+
+        screen.unmount();
+        expect(isAlive?.()).toBe(false);
+
+        pending.resolve(PAID);
+        await waitFor(() => expect(screen.state().status).toBe('success'));
+      });
+
+      it('unmount の後に成功しても、対応を消さない', async () => {
+        mountCircle();
+        const pending = deferred<Paid>();
+        vi.mocked(executeCirclePayment).mockReturnValueOnce(pending.promise);
+        const screen = openScreen();
+
+        screen.result.current.mutate(PARAMS);
+        await waitFor(() => expect(executeCirclePayment).toHaveBeenCalledOnce());
+        const before = mappings();
+        expect(Object.keys(before)).toHaveLength(1);
+
+        screen.unmount();
+        pending.resolve(PAID);
+        await waitFor(() => expect(screen.state().status).toBe('success'));
+
+        expect(mappings()).toEqual(before);
+      });
+
+      it.each([
+        ['一般の error (AA25)', new Error('AA25 invalid account nonce')],
+        ['失効の error (payment_cancelled)', new Error('payment_cancelled')],
+      ])('unmount の後に %s で終わっても、対応を消さない', async (_label, failure) => {
+        mountCircle();
+        const pending = deferred<Paid>();
+        vi.mocked(executeCirclePayment).mockReturnValueOnce(pending.promise);
+        const screen = openScreen();
+
+        screen.result.current.mutate(PARAMS);
+        await waitFor(() => expect(executeCirclePayment).toHaveBeenCalledOnce());
+        const before = mappings();
+        expect(Object.keys(before)).toHaveLength(1);
+
+        screen.unmount();
+        pending.reject(failure);
+        await waitFor(() => expect(screen.state().status).toBe('error'));
+        expect(screen.state().error?.message).toBe(failure.message);
+
+        expect(mappings()).toEqual(before);
+      });
+
+      it('失効した試みが成功した後、開き直した画面の次の押下は同じ attemptId で既払いの結果を受け取り、そこで対応を消す', async () => {
+        mountCircle();
+        const pending = deferred<Paid>();
+        vi.mocked(executeCirclePayment).mockReturnValueOnce(pending.promise);
+        const screenA = openScreen();
+        screenA.result.current.mutate(PARAMS);
+        await waitFor(() => expect(executeCirclePayment).toHaveBeenCalledTimes(1));
+        const first = vi.mocked(executeCirclePayment).mock.calls[0][0].paymentAttemptId;
+
+        screenA.unmount();
+        pending.resolve(PAID);
+        await waitFor(() => expect(screenA.state().status).toBe('success'));
+
+        // 開き直した画面 (新しい instance) で同じ内容を押す。同じ attemptId = 同じ key を resume する
+        // (本物の executeCirclePayment は confirmed の記録から既払いの結果を返す。ここは mock が PAID を返す)。
+        const screenB = openScreen();
+        screenB.result.current.mutate(PARAMS);
+        await waitFor(() => expect(executeCirclePayment).toHaveBeenCalledTimes(2));
+        expect(vi.mocked(executeCirclePayment).mock.calls[1][0].paymentAttemptId).toBe(first);
+        await waitFor(() => expect(screenB.result.current.isSuccess).toBe(true));
+        expect(screenB.result.current.data?.userOpHash).toBe(PAID.userOpHash);
+
+        // 画面のある試みが受け取ったので、対応はここで消える。その次の押下は新しい支払い。
+        expect(mappings()).toEqual({});
+        screenB.result.current.reset();
+        screenB.result.current.mutate(PARAMS);
+        await waitFor(() => expect(executeCirclePayment).toHaveBeenCalledTimes(3));
+        expect(vi.mocked(executeCirclePayment).mock.calls[2][0].paymentAttemptId).not.toBe(first);
+      });
+
+      it('ガス価格を待つ間に unmount → 対応を作らず payment_cancelled で終わる (executeCirclePayment を呼ばない)', async () => {
+        mountCircle();
+        const gas = deferred<{ maxFeePerGas: bigint; maxPriorityFeePerGas: bigint }>();
+        vi.mocked(getCircleUserOpGasPrice).mockReturnValueOnce(gas.promise);
+        const screen = openScreen();
+
+        screen.result.current.mutate(PARAMS);
+        // 動的 import を過ぎ、ガス価格を待っている (mutationFn の先頭の確認は通っている)。
+        await waitFor(() => expect(getCircleUserOpGasPrice).toHaveBeenCalledOnce());
+
+        screen.unmount();
+        gas.resolve({ maxFeePerGas: 5n * GWEI, maxPriorityFeePerGas: 1n });
+        await waitFor(() => expect(screen.state().status).toBe('error'));
+
+        expect(screen.state().error?.message).toBe('payment_cancelled');
+        expect(executeCirclePayment).not.toHaveBeenCalled();
+        expect(mappings()).toEqual({});
+      });
+    });
   });
 });

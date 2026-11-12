@@ -121,6 +121,9 @@ export async function signUsdcPermit(args: {
   bundle: CircleSmartAccountBundle;
   owner: Address;
   permitAmount: bigint;
+  // RPC の読み取り (domain・permit の nonce) が済み、ウォレットへ署名を求める直前に呼ぶ (任意)。投げると、署名を求めずに
+  // その error で終わる。呼び出し側 (circleSend.ts の executeCirclePayment) が、画面を離れた試みの署名の要求を出さないために使う。
+  beforeSign?: () => void;
 }): Promise<{ permitSignature: Hex; paymasterData: Hex }> {
   const { publicClient, walletClient, bundle, owner, permitAmount } = args;
   const token = bundle.deployment.address;
@@ -137,6 +140,7 @@ export async function signUsdcPermit(args: {
     nonce,
   });
 
+  args.beforeSign?.();
   const raw = await walletClient.signTypedData({
     account: owner,
     domain: typedData.domain,
@@ -205,6 +209,9 @@ export async function prepareAndSignCircleUserOp(args: {
   bundle: CircleSmartAccountBundle;
   calls: BatchCall[];
   paymasterData: Hex;
+  // 準備 (ガス価格・prepareUserOperation = ここで UserOperation の nonce が決まる) が済み、ウォレットへ署名を求める直前に呼ぶ
+  // (任意)。投げると、署名を求めずにその error で終わる。使い方は signUsdcPermit の beforeSign と同じ。
+  beforeSign?: () => void;
 }): Promise<{ signedUserOp: SignedCircleUserOp; userOpHash: Hex }> {
   const { bundle, calls, paymasterData } = args;
   const { maxFeePerGas, maxPriorityFeePerGas } =
@@ -228,6 +235,7 @@ export async function prepareAndSignCircleUserOp(args: {
       : CIRCLE_MIN_POSTOP_GAS;
   const floored = { ...prepared, paymasterPostOpGasLimit: postOp };
 
+  args.beforeSign?.();
   const signature = await bundle.account.signUserOperation(floored);
   const signed = { ...floored, signature };
 

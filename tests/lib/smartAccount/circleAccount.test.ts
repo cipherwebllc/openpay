@@ -128,6 +128,63 @@ describe('signUsdcPermit', () => {
       }),
     ).rejects.toThrow(/chainId/);
   });
+
+  // 第 10 回レビュー H-V (a): 呼び出し側 (circleSend.ts) が、画面を離れた試みの署名の要求を出さないために使う。RPC を待つ間に
+  // 離れたことを拾えるように、読み取り (domain・permit の nonce) の後・ウォレットの前で呼ぶ。
+  it('beforeSign は nonces の読み取りの後・signTypedData の前に 1 回呼ばれる', async () => {
+    const sig = `0x${'ab'.repeat(65)}` as Hex;
+    const signTypedData = vi.fn(async (_params: unknown) => sig);
+    const walletClient = {
+      signTypedData,
+    } as unknown as Parameters<typeof signUsdcPermit>[0]['walletClient'];
+    const publicClient = fakePublicClient({});
+    const readContract = vi.mocked(publicClient.readContract);
+    // beforeSign が呼ばれた時点の「読み取り済みの関数」と「署名を求めた回数」を持ち出す。
+    const seen: Array<{ reads: string[]; signRequests: number }> = [];
+    const beforeSign = vi.fn(() => {
+      seen.push({
+        reads: readContract.mock.calls.map(
+          (c) => (c[0] as { functionName: string }).functionName,
+        ),
+        signRequests: signTypedData.mock.calls.length,
+      });
+    });
+
+    const res = await signUsdcPermit({
+      publicClient,
+      walletClient,
+      bundle: fakeBundle(),
+      owner: OWNER,
+      permitAmount: 5_000_000n,
+      beforeSign,
+    });
+
+    expect(seen).toEqual([{ reads: ['eip712Domain', 'nonces'], signRequests: 0 }]);
+    // 投げなければ今までどおり署名を求めて返す。
+    expect(signTypedData).toHaveBeenCalledTimes(1);
+    expect(res.permitSignature).toBe(sig);
+  });
+
+  it('beforeSign が投げると、signTypedData を呼ばずにその error で終わる', async () => {
+    const signTypedData = vi.fn(async (_params: unknown) => `0x${'ab'.repeat(65)}` as Hex);
+    const walletClient = {
+      signTypedData,
+    } as unknown as Parameters<typeof signUsdcPermit>[0]['walletClient'];
+
+    await expect(
+      signUsdcPermit({
+        publicClient: fakePublicClient({}),
+        walletClient,
+        bundle: fakeBundle(),
+        owner: OWNER,
+        permitAmount: 5_000_000n,
+        beforeSign: () => {
+          throw new Error('payment_cancelled');
+        },
+      }),
+    ).rejects.toThrow('payment_cancelled');
+    expect(signTypedData).not.toHaveBeenCalled();
+  });
 });
 
 describe('getCircleUserOpGasPrice', () => {
@@ -238,6 +295,47 @@ describe('prepareAndSignCircleUserOp (Circle 下限は署名前に強制)', () =
     const { bundle, signUserOperation } = signingBundle(undefined);
     await prepareAndSignCircleUserOp({ bundle, calls: [], paymasterData: '0x' as Hex });
     expect(signUserOperation.mock.calls[0][0]).toMatchObject({ paymasterPostOpGasLimit: 15_000n });
+  });
+
+  // 第 10 回レビュー H-V (b): signUsdcPermit の beforeSign と同じ。準備 (ガス価格・prepareUserOperation) の後・ウォレットの前。
+  it('beforeSign は prepareUserOperation の後・signUserOperation の前に 1 回呼ばれる', async () => {
+    const { bundle, prepareUserOperation, signUserOperation } = signingBundle(22_000n);
+    const seen: Array<{ prepared: number; signRequests: number }> = [];
+    const beforeSign = vi.fn(() => {
+      seen.push({
+        // 準備が「返った」後であること (呼んだだけでなく) を、返り値の数で見る。
+        prepared: prepareUserOperation.mock.results.filter((r) => r.type === 'return').length,
+        signRequests: signUserOperation.mock.calls.length,
+      });
+    });
+
+    const { userOpHash } = await prepareAndSignCircleUserOp({
+      bundle,
+      calls: [],
+      paymasterData: '0x' as Hex,
+      beforeSign,
+    });
+
+    expect(seen).toEqual([{ prepared: 1, signRequests: 0 }]);
+    expect(signUserOperation).toHaveBeenCalledTimes(1);
+    expect(userOpHash).toMatch(/^0x[0-9a-f]{64}$/);
+  });
+
+  it('beforeSign が投げると、signUserOperation を呼ばずにその error で終わる', async () => {
+    const { bundle, prepareUserOperation, signUserOperation } = signingBundle(22_000n);
+
+    await expect(
+      prepareAndSignCircleUserOp({
+        bundle,
+        calls: [],
+        paymasterData: '0x' as Hex,
+        beforeSign: () => {
+          throw new Error('payment_cancelled');
+        },
+      }),
+    ).rejects.toThrow('payment_cancelled');
+    expect(prepareUserOperation).toHaveBeenCalledTimes(1);
+    expect(signUserOperation).not.toHaveBeenCalled();
   });
 });
 
