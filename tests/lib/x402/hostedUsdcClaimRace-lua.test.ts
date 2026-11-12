@@ -274,11 +274,13 @@ describe('B2-1: USDC の claim は from / to の大文字小文字に関係な�
     expect(settleBody.paymentPayload.payload.authorization).toMatchObject({ from, to });
   });
 
+  // 全部大文字でも EIP-55 として正しい address (例: 0x52908400098527886E0F7030069857D2E4169EE7) は isAddress を通る。
+  // ここの PAYER / SELLER は全部大文字にすると checksum と合わない (= checksum が壊れた形の 1 つ) ので拒まれる。
   it.each([
     ['from', 'checksum が壊れた形', (): Record<string, string> => ({ from: flipFirstLetterCase(PAYER) })],
     ['to', 'checksum が壊れた形', (): Record<string, string> => ({ to: flipFirstLetterCase(SELLER) })],
-    ['from', '全部大文字', (): Record<string, string> => ({ from: `0x${PAYER.slice(2).toUpperCase()}` })],
-    ['to', '全部大文字', (): Record<string, string> => ({ to: `0x${SELLER.slice(2).toUpperCase()}` })],
+    ['from', 'checksum と合わない全部大文字の形', (): Record<string, string> => ({ from: `0x${PAYER.slice(2).toUpperCase()}` })],
+    ['to', 'checksum と合わない全部大文字の形', (): Record<string, string> => ({ to: `0x${SELLER.slice(2).toUpperCase()}` })],
   ])('%s が%sの address は今までどおり verify の前に 409 invalid_payment_payload', async (_field, _kind, overrides) => {
     const quoted = await quote();
     const response = await pay(header(quoted, overrides()));
@@ -415,6 +417,7 @@ describe('B2-2: settling への CAS が reconcile と重なっても、同じ署
     let replaced = '';
     h.beforeSettlingCas.push(async () => {
       // 公開の関数からはこの状態にならない (signed の後に claim を書き換える経路は無い) ので、KV を直接書き換える。
+      // やり直しの回でこれを拒むのは rail の枠の Lua (CLAIM_RAIL: 取得済みの枠と authorizationHash が違えば conflict)。
       const key = storeUsdcIntentKey(quoted.intentSalt);
       const current = JSON.parse(h.store!.strings.get(key)!);
       const claim = canonicalClaim(quoted, OTHER_SIGNATURE);

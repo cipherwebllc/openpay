@@ -172,21 +172,6 @@ describe('Store USDC TypeScript admission and KV reply handling', () => {
     expect(h.select).toHaveBeenCalledTimes(2);
   });
 
-  it('does not retry a lost settlement CAS when the re-read intent carries a different authorization', async () => {
-    // 公開の関数からは signed の後に claim が変わらない。不変条件の確認として、読み直しの値だけを差し替える。
-    const claim = { ...active.claim, signatureFingerprint: 'e'.repeat(64) };
-    const other = { claim, authorizationHash: storeUsdcAuthorizationHash(claim) };
-    for (const latest of [{ ...signed, ...other }, { ...active, ...other }, { ...settled, ...other }]) {
-      expect(parseStoreUsdcIntent(JSON.stringify(latest))).toMatchObject({ state: latest.state, authorizationHash: other.authorizationHash });
-      h.kvEval.mockReset().mockResolvedValueOnce({ ok: true, value: -1 }).mockResolvedValue({ ok: true, value: 1 });
-      h.select.mockClear();
-      reads(key, signed, latest);
-      expect(await claimStoreUsdcSettlement({ intentSalt: SALT, now: active.settlementStartedAt })).toEqual({ ok: false, reason: 'conflict' });
-      expect(h.kvEval).toHaveBeenCalledTimes(1);
-      expect(h.select).toHaveBeenCalledTimes(1);
-    }
-  });
-
   it.each([
     ['settling', active, { ok: true, kind: 'pending' }],
     ['settled', settled, { ok: true, kind: 'settled' }],

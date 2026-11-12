@@ -791,23 +791,10 @@ const MAX_SETTLEMENT_CLAIM_RETRIES = 3;
 async function claimSettlementInternal(
   input: { intentSalt: Hex; now?: number },
   retries: number,
-  // やり直しのときだけ渡る: CAS が負けた回に読んでいた intent の authorizationHash。
-  retryOfAuthorizationHash?: string,
 ): Promise<ClaimStoreUsdcSettlementResult> {
   const read = await readIntent(input.intentSalt);
   if (!read.ok) return { ok: false, reason: read.reason };
   if (!read.intent || !read.raw) return { ok: false, reason: 'not_found' };
-  // やり直しは同じ署名のときだけ。authorizationHash は claim (from・to・value・validAfter・validBefore・nonce・署名の
-  // 指紋) の hash で、parseStoreUsdcIntent が claim との一致を確かめている。読み直した intent の署名が違うのに
-  // settling を取ると、この request が持つ署名を、保存された claim (期限の証明と照合の基準) と違うまま facilitator へ
-  // 送ることになる。その波及を断ち、今までどおり conflict を返す。
-  if (
-    retryOfAuthorizationHash !== undefined &&
-    (!('authorizationHash' in read.intent) ||
-      read.intent.authorizationHash !== retryOfAuthorizationHash)
-  ) {
-    return { ok: false, reason: 'conflict' };
-  }
   if (read.intent.state === 'settled') {
     return { ok: true, kind: 'settled', intent: read.intent };
   }
@@ -855,9 +842,10 @@ async function claimSettlementInternal(
     // この署名が持ったままなので、見積もりからやり直した買い手は前の署名の期限までその商品を買えない (B2-2)。
     // 最初から読み直す = 同じヘッダーを送り直したときと同じ判定を通す: すでに settling / indeterminate なら pending・
     // settled なら settled・まだ signed で同じ署名なら期限と rail を確かめ直してもう一度 CAS。
+    // 読み直した後は、最初の呼び出しと同じ判定を全部通る (rail の枠の Lua が、別の署名なら拒む)。
     // 'claimed' (= 呼び出し側が settle を呼ぶ) を返すのは、自分の CAS が通った回だけ。
     if (retries <= 0) return { ok: false, reason: 'conflict' };
-    return claimSettlementInternal(input, retries - 1, read.intent.authorizationHash);
+    return claimSettlementInternal(input, retries - 1);
   }
   return { ok: true, kind: 'claimed', intent: settling };
 }
