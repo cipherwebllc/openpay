@@ -4,6 +4,7 @@ import { kvIncr } from '@/lib/kv';
 import { licenseNftEnabled } from '@/lib/license/config';
 import { isSameOriginGet } from '@/lib/net/crossOriginWrite';
 import { acquireDeliveryBudget, releaseDeliveryBudget } from '@/lib/store/deliveryBudget';
+import { deliveryFailurePage } from '@/lib/store/deliveryFailurePage';
 import { DELIVERY_TICKET_TTL_SECONDS, deliveryTicketConfig, signDeliveryTicket } from '@/lib/store/deliveryTicket';
 import { buildDeliveryRedirect, parseDeliveryUrl } from '@/lib/store/deliveryUrl';
 import { isHostedId } from '@/lib/x402/hostedStore';
@@ -20,7 +21,13 @@ function error(code: string, status: number): NextResponse {
   return storePrivateJson({ ok: false, error: code }, status, PRIVATE_HEADERS);
 }
 
-export async function GET(req: Request, { params }: { params: Promise<{ resourceId: string }> }): Promise<NextResponse> {
+// 第 10 回レビュー D-5: 発行の本体 (issue) は変えていない。GET は issue の応答を受け取り、失敗で、要求がブラウザの
+// ナビゲーションのときだけ、同じ status の案内のページに差し替える。成功と、ナビゲーションでない要求への JSON は issue の応答そのまま。
+export async function GET(req: Request, context: { params: Promise<{ resourceId: string }> }): Promise<NextResponse> {
+  return deliveryFailurePage(req, await issue(req, context), 'buyer');
+}
+
+async function issue(req: Request, { params }: { params: Promise<{ resourceId: string }> }): Promise<NextResponse> {
   if (!env.enableCreatorStore || !env.enableStoreDeliveryTicket) return error('not_found', 404);
   const auth = await requireStoreSeller(req, 'delivery');
   if (!auth.ok) {
