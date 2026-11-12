@@ -12,8 +12,8 @@ import { parseEnv } from 'node:util';
 // 公開 boolean flag の見つけ方 (接頭辞だけに頼らない):
 //   (a) NEXT_PUBLIC_ENABLE_* という名前 (.env.local.example の文書と実装の両方から)
 //   (b) parseBoolFlag(['名前',] process.env.NEXT_PUBLIC_X) で読んでいるキー
-//       (lib/crossChain/config.ts の NEXT_PUBLIC_EXPERIMENTAL_CROSS_CHAIN_ENABLED・NEXT_PUBLIC_CROSS_CHAIN_DISABLED・
-//        NEXT_PUBLIC_CROSS_CHAIN_BURN_AUTORESUME のように ENABLE_ 接頭辞を持たない flag)
+//       (lib/crossChain/config.ts の NEXT_PUBLIC_CROSS_CHAIN_DISABLED・NEXT_PUBLIC_CROSS_CHAIN_BURN_AUTORESUME のように
+//        ENABLE_ 接頭辞を持たない flag)
 const ENABLE_KEY_RE = /NEXT_PUBLIC_ENABLE_[A-Z0-9_]+/g;
 const BOOL_READ_RE = /parseBoolFlag\(\s*(?:'[A-Z0-9_]+',\s*)?process\.env\.(NEXT_PUBLIC_[A-Z0-9_]+)/g;
 

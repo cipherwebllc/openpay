@@ -22,7 +22,6 @@ import {
 const CROSS_CHAIN_ENV_KEYS = [
   'NEXT_PUBLIC_NETWORK_ENV',
   'NEXT_PUBLIC_CIRCLE_GATEWAY_API_URL',
-  'NEXT_PUBLIC_EXPERIMENTAL_CROSS_CHAIN_ENABLED',
   'NEXT_PUBLIC_CROSS_CHAIN_DISABLED',
 ] as const;
 
@@ -124,31 +123,6 @@ describe('lib/crossChain/config', () => {
       expect(m.CIRCLE_GATEWAY_API_BASE_URL).toBe(
         'https://gateway-api-testnet.circle.com',
       );
-    });
-  });
-
-  describe('EXPERIMENTAL_CROSS_CHAIN_ENABLED', () => {
-    it('default: false (route 404 で隔離)', async () => {
-      const m = await import('@/lib/crossChain/config');
-      expect(m.EXPERIMENTAL_CROSS_CHAIN_ENABLED).toBe(false);
-    });
-
-    it('"true" で true', async () => {
-      process.env.NEXT_PUBLIC_EXPERIMENTAL_CROSS_CHAIN_ENABLED = 'true';
-      const m = await import('@/lib/crossChain/config');
-      expect(m.EXPERIMENTAL_CROSS_CHAIN_ENABLED).toBe(true);
-    });
-
-    it('"1" でも true (env.enableMav2 と同じ規約)', async () => {
-      process.env.NEXT_PUBLIC_EXPERIMENTAL_CROSS_CHAIN_ENABLED = '1';
-      const m = await import('@/lib/crossChain/config');
-      expect(m.EXPERIMENTAL_CROSS_CHAIN_ENABLED).toBe(true);
-    });
-
-    it('"True" (大文字混じり) は false 扱い (明示 string 比較)', async () => {
-      process.env.NEXT_PUBLIC_EXPERIMENTAL_CROSS_CHAIN_ENABLED = 'True';
-      const m = await import('@/lib/crossChain/config');
-      expect(m.EXPERIMENTAL_CROSS_CHAIN_ENABLED).toBe(false);
     });
   });
 
@@ -323,7 +297,7 @@ describe('CROSS_CHAIN_DISABLED (incident kill switch)', () => {
     expect(m.CROSS_CHAIN_DISABLED).toBe(true);
   });
 
-  it('"1" でも true (EXPERIMENTAL_CROSS_CHAIN_ENABLED と同 pattern)', async () => {
+  it('"1" でも true (env.enableMav2 と同じ規約)', async () => {
     process.env.NEXT_PUBLIC_CROSS_CHAIN_DISABLED = '1';
     const m = await import('@/lib/crossChain/config');
     expect(m.CROSS_CHAIN_DISABLED).toBe(true);

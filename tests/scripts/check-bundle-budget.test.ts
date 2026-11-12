@@ -49,8 +49,8 @@ const F11_PAGES: Array<[string, number]> = [
   ['/[locale]/transparency', 236],
 ];
 
-// 予算対象の route (2026-10-10 第 7 回レビュー F2/E22 で締め直した表と同じ 17 件 + 2026-10-20 の Arc の売上の受け取りページ
-// + 2026-10-30 F-11 の 33 ページ)。
+// 予算対象の route (2026-10-10 第 7 回レビュー F2/E22 で締め直した表の 17 件から、2026-11-12 に消した実験ページ
+// /[locale]/experimental/cross-chain-demo を除いた 16 件 + 2026-10-20 の Arc の売上の受け取りページ + 2026-10-30 F-11 の 33 ページ)。
 const BUDGETED = [
   '/_not-found',
   '/[locale]',
@@ -61,7 +61,6 @@ const BUDGETED = [
   '/[locale]/create',
   '/[locale]/discovery',
   '/[locale]/discovery/arc-payout',
-  '/[locale]/experimental/cross-chain-demo',
   '/[locale]/history',
   '/[locale]/order',
   '/[locale]/pay',
@@ -102,7 +101,6 @@ ${CHECKOUT_ROW}
 ├ ● /[locale]/disclaimer                          1.83 kB         214 kB
 ├ ● /[locale]/discovery                           28.3 kB         292 kB
 ├ ● /[locale]/discovery/arc-payout                21.8 kB         356 kB
-├ ● /[locale]/experimental/cross-chain-demo       18.2 kB         357 kB
 ├ ● /[locale]/explore                             9.76 kB         243 kB
 ├ ● /[locale]/guide                               2.46 kB         236 kB
 ├ ● /[locale]/guide/agent                         1.04 kB         238 kB

@@ -90,11 +90,6 @@ export const CIRCLE_GATEWAY_API_BASE_URL: string =
       ? CIRCLE_GATEWAY_API_MAINNET
       : CIRCLE_GATEWAY_API_TESTNET;
 
-// demo route mount control (default false = production で 404)。
-export const EXPERIMENTAL_CROSS_CHAIN_ENABLED: boolean = parseBoolFlag(
-  process.env.NEXT_PUBLIC_EXPERIMENTAL_CROSS_CHAIN_ENABLED,
-);
-
 // Incident kill switch: Circle attestation API mass failure / Sentry で
 // cross-chain.execute.failed の急増を観測した時、operator が Vercel env で
 // "true" / "1" を設定して再ビルド・再デプロイすると CrossChainHint が non-mount になる。

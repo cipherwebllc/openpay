@@ -35,7 +35,8 @@ import { budgetBuildEnv, publicFeatureFlagKeys, sourceTextsUnder } from './lib/b
 // 同じ PR で、下の「2026-11-11」の 17 行を「main e089ba5a の CI の Route 表の実測 + 5」に採り直した。2026-10-22 の
 // @sentry/nextjs 10.76.2 (#900) で共有 chunk が 194 → 171 kB に減ったのに予算は 2026-10-10 のままで、9〜28 kB 緩んでいた
 // (その後 /checkout は main の CI で 411 → 427 kB に増えたが、古い予算 436 の内側なので何も出なかった)。
-// /[locale]/experimental/cross-chain-demo の行は F-11 (消すかどうか) の PR で扱うので、ここでは変えない。
+// 2026-11-12 第 10 回レビュー F-11: 実験ページ /[locale]/experimental/cross-chain-demo を消したので、その行 (362) も消した。
+// ほかの行の数字は変えていない。
 const BUDGETS_KB = {
   '/_not-found': 177, // 2026-11-11 F-10: 実測 172 + 5 (前は 200)
   '/[locale]': 255, // 2026-11-11 F-10: 実測 250 + 5 (前は 273)
@@ -115,8 +116,6 @@ const BUDGETS_KB = {
   // build に入るので表に載せる。実測 377 + 5。
   // 2026-11-11 F-10: 実測 356 + 5 (前は 382)。NEXT_PUBLIC_ENABLE_ARC_PAYOUT をベクターに足しても同じ値。
   '/[locale]/discovery/arc-payout': 361,
-  // 実験ページ (本番導線なし)。UNBUDGETED_MAX_KB を超えるので表に載せる。実測 357 + 5。
-  '/[locale]/experimental/cross-chain-demo': 362,
   // 2026-10-30 第 8 回レビュー F-11: 予算表の外にあった /[locale] のページを全部載せる。表に無い route は
   // UNBUDGETED_MAX_KB (300 kB) を超えるまで落ちないので、たとえば /store/library が 257→290 kB に増えても CI を通っていた。
   // 実測 = main b90757b9 の CI (ci.yml の本番 flag build) の Route 表 (各行の注記) に各 +5。手元 (macOS) の build は

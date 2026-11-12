@@ -154,10 +154,6 @@ export const ROUTE_CLIENT_NAMESPACES = {
     'Nav',
     'News',
   ],
-  'experimental/cross-chain-demo': [
-    'ConnectButton',
-    'LocaleSwitcher',
-  ],
   'explore': [
     'ConnectButton',
     'Explore',
