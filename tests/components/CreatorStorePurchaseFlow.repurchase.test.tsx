@@ -522,6 +522,31 @@ describe('CreatorStorePurchaseFlow: 購入済みの商品をもう一度買う�
       expect(wallet.signTypedData).not.toHaveBeenCalled();
     });
 
+    it('「購入内容を確認する」で承諾した準備の応答を待つ間に A → B → A と切り替えたら、届いた見積もりの「支払って購入を確定する」でもう一度確認する', async () => {
+      const user = userEvent.setup();
+      const quote = deferred();
+      server.purchased = [async () => purchased()];
+      server.quotes = [quote.responder];
+      const fetchMock = installFetch();
+      const view = renderFlow();
+      await purchasedSettled(fetchMock, 1);
+
+      await user.click(screen.getByRole('button', { name: LABEL.review }));
+      await acceptRepurchase(user);
+      expect(callsTo(fetchMock, 'quote')).toHaveLength(1);
+      await view.switchWallet(OTHER_WALLET);
+      await view.switchWallet(PAYER);
+      // 切り替える前に始めた準備の応答が A に戻った後に届く (購入の hook は同じウォレットの見積もりとして受け取る)。
+      await quote.resolve(jsonResponse(paymentRequired(), 402));
+      await user.click(await screen.findByRole('button', { name: LABEL.confirm }));
+
+      expect(
+        await screen.findByRole('heading', { name: LABEL.title }),
+      ).toBeVisible();
+      expect(wallet.signTypedData).not.toHaveBeenCalled();
+      expect(callsTo(fetchMock, 'payment')).toHaveLength(0);
+    });
+
     it('画面を閉じて開き直すと、残っていた見積もりの「支払って購入を確定する」でも、もう一度確認する', async () => {
       const user = userEvent.setup();
       server.purchased = [async () => purchased()];
