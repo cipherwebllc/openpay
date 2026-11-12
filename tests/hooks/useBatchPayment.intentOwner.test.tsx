@@ -1,5 +1,12 @@
-// 第 10 回レビュー PR-02 の Codex レビュー (P1)・money-path: 記録への「後からの書き込み」と「削除」は、storage にいま入って
-// いる記録が同じ intent のときだけ行う (持ち主の確認)。
+// 第 10 回レビュー PR-02 の Codex レビュー (P1 とその 2 回目)・money-path: 記録への「後からの書き込み」と確定によらない「削除」は、
+// storage にいま入っている記録が、この試みが書いた (読んで判断した) 版のときだけ行う (版の一致 = 同じ intent・同じ hash・同じ
+// updatedAt)。確定の片付けだけは同じ intent のどの版も消す。
+//
+// 2 回目の失敗シナリオ (直す前・同じ intent の古い写し): 遅れて届いた最初の送信の拒否が、ほかの画面が作り直した (mempool にある)
+// op の記録を消す。古い写しの応答不明の書き込み・hash の直しが、ほかの画面が送り直した時刻を巻き戻し、期限で早く閉じる。
+// どちらも reload の後に別の nonce で払い直せる (二重払い)。下の「同じ intent でも、ほかの試みが新しくした記録」の describe。
+//
+// 1 回目の失敗シナリオ:
 //
 // 失敗シナリオ (直す前・Codex が本物の pimlicoIntent / pimlicoSend で再現した順番):
 //   筋 1: 画面 1 が A を送って receipt を待つ間に離れる → 画面 2 が A の receipt を得て A を閉じる → 画面 3 が別の nonce の B を
@@ -57,7 +64,10 @@ const usdcDep = defaultDeploymentForSymbol('usdc');
 const TOKEN: Address = getAddress('0x036CbD53842c5426634e7929541eC2318f3dCF7e');
 const MERCHANT: Address = getAddress('0x1111111111111111111111111111111111111111');
 const FEE_RECV: Address = getAddress('0x2222222222222222222222222222222222222222');
-const SEVEN_DAYS_AND_A_MINUTE = 7 * 24 * 60 * 60 * 1000 + 60_000;
+const SEVEN_DAYS = 7 * 24 * 60 * 60 * 1000;
+const SEVEN_DAYS_AND_A_MINUTE = SEVEN_DAYS + 60_000;
+// Date だけを fake timers で動かす test の起点 (2026-11-01)。
+const T0 = Date.UTC(2026, 10, 1);
 const PAYMASTER_EXPIRED = { error: { code: -32500, message: 'AA32 paymaster expired or not due' } };
 
 // 10 USDC の支払い (A)。
@@ -269,8 +279,227 @@ beforeEach(() => {
   world = createFakeBundlerWorld({ chainId: baseSepolia.id });
 });
 afterEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+});
+
+// 次の準備だけ fee を変える (client を作り直すと偽物の fee の数え方も最初からなので、そのままだと作り直しの op が元の op と同じになる)。
+function bumpNextPrepareFee(fake: Fake) {
+  const prepare = fake.prepareUserOperation.getMockImplementation();
+  if (!prepare) throw new Error('準備の偽物が無い');
+  fake.prepareUserOperation.mockImplementationOnce(async (parameters) => ({
+    ...(await prepare(parameters)),
+    maxFeePerGas: TIER.maxFeePerGas + 100n,
+  }));
+}
+
+function storedUpdatedAt(): number {
+  return (JSON.parse(storedRaw() ?? 'null') as { updatedAt: number }).updatedAt;
+}
+
+// 同じ intent の古い写し (Codex の 2 回目のレビュー): 後からの書き込みと、確定によらない削除は、storage の記録がこの試みの
+// 知っている版 (同じ intent・同じ hash・同じ updatedAt) のときだけ行う。ほかの試みが送り直した (updatedAt が進んだ)・作り直した
+// (hash が変わった) 記録は、同じ intent でも別の版。
+describe('同じ intent でも、ほかの試みが新しくした記録 (別の版) には、古い写しで書かない・消さない', () => {
+  it('A の最初の送信への拒否が遅れる間に、画面 2 が同じ nonce で作り直して送り、その応答を失った (作り直した op は mempool にある) → 遅れて届いた拒否は作り直した記録を消さない。reload の後もそれを確かめ、1 回だけ成立する (Codex 2 回目の再現 1)', async () => {
+    // 時計を止める: A と作り直した op の記録の updatedAt が同じになり、版を分けるのは hash だけになる。
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(T0);
+    const first = mountClients();
+    const rejection = deferred<BundlerHttpReply>();
+    first.bundlerSend.mockImplementationOnce(() => rejection.promise);
+    const firstHook = render();
+    firstHook.result.current.mutate(PARAMS);
+    await waitFor(() => expect(first.bundlerSend).toHaveBeenCalledTimes(1));
+    const aNonce = sentOp(first, 0).nonce;
+    firstHook.unmount();
+
+    // 画面 2: 送り直しを bundler が検証で拒否 → 同じ nonce で作り直す (別の hash) → 受理されたが応答を失う (mempool にある)。
+    const second = mountClients();
+    replyOnce(second, PAYMASTER_EXPIRED);
+    bumpNextPrepareFee(second);
+    acceptThenLoseResponse(second);
+    const secondHook = render();
+    await waitFor(() => expect(secondHook.result.current.isUnknown).toBe(true));
+    secondHook.result.current.retryReceipt();
+    await waitFor(() => expect(second.bundlerSend).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(secondHook.result.current.isPending).toBe(false));
+    expect(sentOp(second, 1).nonce).toBe(aNonce);
+    const rebuiltRaw = storedRaw();
+    const [rebuiltHash] = world.mempoolHashes();
+    expect((JSON.parse(rebuiltRaw ?? 'null') as { userOpHash: Hex }).userOpHash).toBe(rebuiltHash);
+    secondHook.unmount();
+
+    // A の最初の送信への拒否が今ごろ届く。直す前: 同じ intent なので作り直した記録を消し、閉じた (reload は何も知らず、
+    // 別の nonce で払い直せる)。
+    rejection.resolve(PAYMASTER_EXPIRED);
+    const ended = await settledMutation(firstHook);
+
+    expect(storedRaw()).toBe(rebuiltRaw);
+    expect(ended.error?.message).toBe('response-unknown');
+
+    const third = mountClients();
+    const thirdHook = render();
+    await waitFor(() => expect(thirdHook.result.current.isUnknown).toBe(true));
+    expect(thirdHook.result.current.pendingUserOpHash).toBe(rebuiltHash);
+    world.mine(rebuiltHash);
+    thirdHook.result.current.mutate(PARAMS);
+    await waitFor(() => expect(thirdHook.result.current.isSuccess).toBe(true));
+    expect(third.getNonce).not.toHaveBeenCalled();
+    expect(world.mined).toHaveLength(1);
+    expect(pendingKeys()).toHaveLength(0);
+  });
+
+  it('画面 1 が T に送って receipt を待つ間に離れ、画面 2 が T+60 秒に送り直す → 画面 1 の receipt 待ちの失敗は送り直した時刻を巻き戻さず、T+7 日+1 ms でも期限で閉じない (Codex 2 回目の再現 2)', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(T0);
+    const { firstHook, receiptWait, aHash } = await sendAndLeaveWhileWaiting();
+    expect(storedUpdatedAt()).toBe(T0);
+
+    // 画面 2: 確かめる → まだ取り込まれておらず nonce も未使用 → 保存した op を送り直す (送る時刻 T+60 秒を保存) → receipt は
+    // まだ無い (応答不明)。
+    vi.setSystemTime(T0 + 60_000);
+    const second = mountClients();
+    const secondHook = render();
+    await waitFor(() => expect(secondHook.result.current.isUnknown).toBe(true));
+    secondHook.result.current.retryReceipt();
+    await waitFor(() => expect(second.bundlerSend).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(secondHook.result.current.isPending).toBe(false));
+    const resent = storedRaw();
+    expect(storedUpdatedAt()).toBe(T0 + 60_000);
+    secondHook.unmount();
+
+    // 直す前: 画面 1 の応答不明の書き込みが、自分の古い写し (updatedAt = T) で上書きした。
+    vi.setSystemTime(T0 + 61_000);
+    receiptWait.reject(new WaitForUserOperationReceiptTimeoutError({ hash: aHash }));
+    const ended = await settledMutation(firstHook);
+    expect(ended.error?.message).toBe('response-unknown');
+    expect(storedRaw()).toBe(resent);
+
+    // 最初の送信から 7 日 + 1 ms (最後の送り直しからは 7 日たっていない = op はまだ実行されうる)。閉じず、新しい支払いも始めない。
+    vi.setSystemTime(T0 + SEVEN_DAYS + 1);
+    const third = mountClients();
+    const thirdHook = render();
+    await waitFor(() => expect(thirdHook.result.current.isUnknown).toBe(true));
+    thirdHook.result.current.retryReceipt();
+    await waitFor(() => expect(third.bundlerSend).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(thirdHook.result.current.isPending).toBe(false));
+    expect(thirdHook.result.current.isUnknown).toBe(true);
+    expect(logger.warn).not.toHaveBeenCalledWith('pimlico.pending.expired-closed', expect.anything());
+    expect(pendingKeys()).toHaveLength(1);
+
+    world.mine(aHash);
+    thirdHook.result.current.mutate(PARAMS);
+    await waitFor(() => expect(thirdHook.result.current.isSuccess).toBe(true));
+    expect(third.getNonce).not.toHaveBeenCalled();
+    expect(world.mined).toHaveLength(1);
+  });
+
+  it('画面 1 の送信への答え (計算と違う hash) が遅れる間に、画面 2 が T+60 秒に送り直した → 遅れて届いた hash の直しは、送り直した記録を書き換えない (時刻を巻き戻さない)', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(T0);
+    const answer = deferred<void>();
+    const receiptWait = deferred<FakeReceipt>();
+    const firstWait = vi.fn((_parameters: { hash: Hex }) => receiptWait.promise);
+    const first = mountClients({ waitForUserOperationReceipt: firstWait });
+    const returned = `0x${'e'.repeat(64)}` as Hex;
+    first.bundlerSend.mockImplementationOnce(async ({ params }) => {
+      world.accept(params[0]);
+      await answer.promise;
+      return { result: returned };
+    });
+    const firstHook = render();
+    firstHook.result.current.mutate(PARAMS);
+    await waitFor(() => expect(first.bundlerSend).toHaveBeenCalledTimes(1));
+    firstHook.unmount();
+
+    // 画面 2: T+60 秒に送り直す (bundler は同じ op を持っている = Already known) → receipt はまだ無い (応答不明)。
+    vi.setSystemTime(T0 + 60_000);
+    const second = mountClients();
+    const secondHook = render();
+    await waitFor(() => expect(secondHook.result.current.isUnknown).toBe(true));
+    secondHook.result.current.retryReceipt();
+    await waitFor(() => expect(second.bundlerSend).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(secondHook.result.current.isPending).toBe(false));
+    const resent = storedRaw();
+    expect(storedUpdatedAt()).toBe(T0 + 60_000);
+    secondHook.unmount();
+
+    // 直す前: hash の直しが、自分の古い写し (updatedAt = T) に返った hash を入れて上書きした。
+    answer.resolve();
+    await waitFor(() => expect(firstWait).toHaveBeenCalledWith({ hash: returned }));
+    expect(storedRaw()).toBe(resent);
+    receiptWait.reject(new WaitForUserOperationReceiptTimeoutError({ hash: returned }));
+    const ended = await settledMutation(firstHook);
+    expect(ended.error?.message).toBe('response-unknown');
+    expect(storedRaw()).toBe(resent);
+  });
+
+  it('期限の直前に別のタブが送り直した → このタブの (送り直す前の記録で判断した) 期限の片付けは、送り直した記録を消さず、閉じたとも伝えない', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(T0);
+    const seedFake = mountClients();
+    loseRequest(seedFake);
+    const seed = render();
+    seed.result.current.mutate(PARAMS);
+    await waitFor(() => expect(seed.result.current.isUnknown).toBe(true));
+    await waitFor(() => expect(seed.result.current.isPending).toBe(false));
+    seed.unmount();
+
+    // 期限の 2 秒前。タブ 1 とタブ 2 が同時に開いている。タブ 1 は EntryPoint の nonce の読み取りを待つ。
+    vi.setSystemTime(T0 + SEVEN_DAYS - 2_000);
+    const fake = mountClients();
+    const nonceRead = deferred<bigint>();
+    fake.readContract.mockImplementationOnce(() => nonceRead.promise);
+    const tab1 = render();
+    const tab2 = render();
+    await waitFor(() => expect(tab1.result.current.isUnknown).toBe(true));
+    await waitFor(() => expect(tab2.result.current.isUnknown).toBe(true));
+    tab1.result.current.retryReceipt();
+    await waitFor(() => expect(fake.readContract).toHaveBeenCalledTimes(1));
+
+    // タブ 2: まだ期限の前なので送り直す (送る時刻を保存)。受理されたが応答を失い、op は mempool にある。
+    acceptThenLoseResponse(fake);
+    tab2.result.current.retryReceipt();
+    await waitFor(() => expect(fake.bundlerSend).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(tab2.result.current.isPending).toBe(false));
+    const resent = storedRaw();
+    expect(storedUpdatedAt()).toBe(T0 + SEVEN_DAYS - 2_000);
+    vi.mocked(logger.warn).mockClear();
+
+    // タブ 1 の読み取りが返る (未使用)。タブ 1 が持つ記録 (送り直す前) では期限切れ。直す前: 同じ intent なので消して閉じた。
+    vi.setSystemTime(T0 + SEVEN_DAYS + 1_000);
+    nonceRead.resolve(0n);
+    await waitFor(() => expect(tab1.result.current.isPending).toBe(false));
+
+    expect(storedRaw()).toBe(resent);
+    expect(world.mempoolHashes()).toHaveLength(1);
+    expect(tab1.result.current.isUnknown).toBe(true);
+    expect(logger.warn).not.toHaveBeenCalledWith('pimlico.pending.expired-closed', expect.anything());
+  });
+
+  it('画面の無い試みが応答不明の status を書いた後でも、画面のある試みは (読んだときの pending の記録で) 期限で閉じられる (status は版に入れない)', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(T0);
+    const { receiptWait, aHash, firstHook } = await sendAndLeaveWhileWaiting();
+
+    // 画面 2 が開く (pending の記録を読んでラッチする)。その後で画面 1 の receipt 待ちが失敗し、status を unknown にする。
+    mountClients();
+    const live = render();
+    await waitFor(() => expect(live.result.current.isUnknown).toBe(true));
+    receiptWait.reject(new WaitForUserOperationReceiptTimeoutError({ hash: aHash }));
+    await settledMutation(firstHook);
+    expect((JSON.parse(storedRaw() ?? 'null') as { status: string }).status).toBe('unknown');
+
+    // 7 日を過ぎ、候補に receipt が無く nonce も未使用 → 閉じる (c4)。
+    vi.setSystemTime(T0 + SEVEN_DAYS_AND_A_MINUTE);
+    live.result.current.retryReceipt();
+    await waitFor(() => expect(live.result.current.isUnknown).toBe(false));
+    await waitFor(() => expect(live.result.current.isPending).toBe(false));
+    expect(pendingKeys()).toHaveLength(0);
+    expect(logger.warn).toHaveBeenCalledWith('pimlico.pending.expired-closed', expect.anything());
+  });
 });
 
 describe('筋 1: 送った後の応答不明の書き込み (holdAsUnknown) は、同じ intent の記録だけを書く', () => {

@@ -55,8 +55,8 @@ import type {
   PimlicoSendLedger,
 } from '@/lib/smartAccount/pimlicoIntent';
 import type { SignedSendClient } from '@/lib/smartAccount/pimlicoSend';
-// 記録の「同じ intent」の定義 (import の無い小さな module・intent の関所と共有する)。
-import { isSameIntent } from '@/lib/smartAccount/pimlicoIntentOwner';
+// 記録の「同じ intent」「同じ版」の定義 (import の無い小さな module・intent の関所と共有する)。
+import { isSameIntent, isSameVersion } from '@/lib/smartAccount/pimlicoIntentOwner';
 import type { SmartAccountBundle } from '@/lib/smartAccount/simpleAccount';
 import type { TokenDeployment } from '@/lib/tokens';
 
@@ -493,7 +493,8 @@ function discardPimlicoPending(storageKey: string): boolean {
 
 // 確定した op の記録を片付ける。消すのは storage の記録が同じ intent (isSameIntent) のときだけ: 送信の控えのある記録は nonce が
 // 同じなら hash が違っても消す (ほかの画面が同じ nonce で作り直した・hash を直した記録も、この nonce の op が取り込まれた以上
-// 終わっている)。別の intent の記録は消さない (第 10 回レビュー PR-02 の Codex レビュー P1)。
+// 終わっている)。別の intent の記録は消さない (第 10 回レビュー PR-02 の Codex レビュー P1)。確定以外の書き込み・削除と違い、
+// 版 (isSameVersion) では比べない: ほかの試みが送り直した・作り直した後の記録も、取り込まれた nonce の記録なので閉じる。
 function clearPimlicoPending(storageKey: string, record: PimlicoPendingRecord): void {
   if (typeof window === 'undefined') return;
   try {
@@ -652,10 +653,12 @@ export function useBatchPayment(
           };
           pendingRef.current = latched;
           setUnknownPending(latched);
-          // storage の記録が同じ intent のときだけ書く (待つ間にほかの画面が閉じた記録を復活させない・別の支払いの記録を上書き
-          // しない・第 10 回レビュー PR-02 の Codex レビュー P1)。memory のラッチと応答不明の終わり方は同じ。
+          // storage の記録が、この試みが書いた (読んだ) 版のときだけ書く (待つ間にほかの画面が閉じた記録を復活させない・別の支払いや
+          // ほかの試みが書き直した記録を古い写しで上書きしない・第 10 回レビュー PR-02 の Codex レビュー)。控えの無い記録は
+          // updatedAt を期限の基準にする (readPimlicoPending) ので、ここで今の時刻にするのは今までどおり期限を先へ延ばす側だけ
+          // (版が同じ = storage の時刻はこの試みの時刻なので、巻き戻らない)。memory のラッチと応答不明の終わり方は同じ。
           const current = readPimlicoPending(pimlicoStorageKey);
-          if (current.kind === 'record' && isSameIntent(current.record, record)) {
+          if (current.kind === 'record' && isSameVersion(current.record, record)) {
             persistPimlicoPending(pimlicoStorageKey, unknownRecord);
           }
           logger.warn('pimlico.receipt.response-unknown', {
