@@ -202,6 +202,16 @@ describe('Store USDC TypeScript admission and KV reply handling', () => {
     expect(h.kvEval).toHaveBeenCalledTimes(1);
   });
 
+  it('after a lost settlement CAS, an authorization that expired in the meantime is reported as expired', async () => {
+    reads(key, signed, { ...signed, nextReconcileAt: active.settlementStartedAt + 30_000 });
+    h.kvEval.mockResolvedValueOnce({ ok: true, value: -1 }).mockResolvedValue({ ok: true, value: 1 });
+    // やり直しの回は時刻を取り直す (期限の判定は settling を取る回の入場条件)。
+    const clock = vi.spyOn(Date, 'now').mockReturnValueOnce(active.settlementStartedAt).mockReturnValue(signed.fxQuoteExpiresAt);
+    expect(await claimStoreUsdcSettlement({ intentSalt: SALT })).toEqual({ ok: false, reason: 'expired' });
+    expect(h.kvEval).toHaveBeenCalledTimes(1);
+    clock.mockRestore();
+  });
+
   it('gives up with conflict after three retries of a lost settlement CAS', async () => {
     reads(key, signed);
     h.kvEval.mockResolvedValue({ ok: true, value: -1 });
