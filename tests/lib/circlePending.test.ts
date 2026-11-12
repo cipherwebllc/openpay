@@ -13,6 +13,7 @@ import {
   loadPendingRecord,
   markAwaitingSignature,
   markConfirmed,
+  markResending,
   markSigned,
   markSubmitting,
   PENDING_KEY_PREFIX,
@@ -26,6 +27,7 @@ import {
   stableAttemptId,
   type SerializedUserOp,
 } from '@/lib/circlePending';
+import { logger } from '@/lib/logger';
 
 const SENDER = getAddress('0x1111111111111111111111111111111111111111');
 const OTHER = getAddress('0x2222222222222222222222222222222222222222');
@@ -261,6 +263,219 @@ describe('CAS / FSM ガード', () => {
     expect(() =>
       markAwaitingSignature({ key, sender: OTHER, now: 1_100 }),
     ).toThrow(PendingAuthorizationError);
+  });
+});
+
+// 第 10 回レビュー H-W: 復旧の送り直しの前の CAS。呼び出し側 (circleSend の recoverSubmitting) は receipt を最大 120 秒待った
+// 後にここへ来る。待つ前に読んだ記録を信じず、「いまも submitting で、送り直す op の記録」のときだけ時刻を書く。
+describe('markResending (送り直しの前の CAS)', () => {
+  const HASH = '0xhash' as Hex; // advanceToSubmitting が書く userOpHash
+  const raw = (key: string) => window.localStorage.getItem(PENDING_KEY_PREFIX + key);
+
+  it('submitting で同じ userOpHash → 時刻だけ進む (status・op はそのまま)', () => {
+    const { key } = setup();
+    advanceToSubmitting(key);
+    const next = markResending({ key, sender: SENDER, userOpHash: HASH, now: 5_000 });
+    expect(next.status).toBe('submitting');
+    expect(next.updatedAt).toBe(5_000);
+    const stored = loadPendingRecord(key);
+    expect(stored?.status).toBe('submitting');
+    expect(stored?.updatedAt).toBe(5_000);
+    expect(stored?.userOpHash).toBe(HASH);
+    expect(stored?.signedUserOp).toEqual(SIGNED_OP);
+  });
+
+  it('待つ間に confirmed になっていた → PendingStateError・記録を書き換えない', () => {
+    const { key } = setup();
+    advanceToSubmitting(key);
+    markConfirmed({ key, sender: SENDER, txHash: '0xtx' as Hex, success: true, now: 2_000 });
+    const before = raw(key);
+    expect(() =>
+      markResending({ key, sender: SENDER, userOpHash: HASH, now: 5_000 }),
+    ).toThrow(PendingStateError);
+    expect(raw(key)).toBe(before);
+  });
+
+  it('userOpHash が違う (別の op の記録に替わっていた) → PendingStateError・記録を書き換えない', () => {
+    const { key } = setup();
+    advanceToSubmitting(key);
+    const before = raw(key);
+    expect(() =>
+      markResending({ key, sender: SENDER, userOpHash: '0xother' as Hex, now: 5_000 }),
+    ).toThrow(PendingStateError);
+    expect(raw(key)).toBe(before);
+  });
+
+  it('記録が無い → PendingStateError (作らない)', () => {
+    expect(() =>
+      markResending({ key: 'nope', sender: SENDER, userOpHash: HASH, now: 5_000 }),
+    ).toThrow(PendingStateError);
+    expect(raw('nope')).toBeNull();
+  });
+
+  it('signed (まだ送っていない記録) からは進めない → PendingStateError', () => {
+    const { key } = setup();
+    markAwaitingSignature({ key, sender: SENDER, now: 1_100 });
+    markSigned({ key, sender: SENDER, signedUserOp: SIGNED_OP, userOpHash: HASH, now: 1_200 });
+    expect(() =>
+      markResending({ key, sender: SENDER, userOpHash: HASH, now: 5_000 }),
+    ).toThrow(PendingStateError);
+    expect(loadPendingRecord(key)?.status).toBe('signed');
+  });
+
+  it('別 sender だと authorization エラー (CAS の失敗とは別の error)', () => {
+    const { key } = setup();
+    advanceToSubmitting(key);
+    expect(() =>
+      markResending({ key, sender: OTHER, userOpHash: HASH, now: 5_000 }),
+    ).toThrow(PendingAuthorizationError);
+  });
+
+  it('書けなければ PendingStoreWriteError (CAS の失敗とは別の error)', () => {
+    const { key } = setup();
+    advanceToSubmitting(key);
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new Error('QuotaExceededError');
+    });
+    expect(() =>
+      markResending({ key, sender: SENDER, userOpHash: HASH, now: 5_000 }),
+    ).toThrow(PendingStoreWriteError);
+  });
+});
+
+// 第 10 回レビュー H-W: receipt を取った op の hash を渡すと、記録の userOpHash が同じときだけ confirmed にする。
+describe('markConfirmed の userOpHash の確認', () => {
+  const HASH = '0xhash' as Hex;
+  const raw = (key: string) => window.localStorage.getItem(PENDING_KEY_PREFIX + key);
+  // failed を書く経路は無い (旧 record だけ) ので、保存済みの記録を直接書き換えて作る。
+  function forceStatus(key: string, status: string) {
+    const parsed = JSON.parse(raw(key)!) as Record<string, unknown>;
+    window.localStorage.setItem(PENDING_KEY_PREFIX + key, JSON.stringify({ ...parsed, status }));
+  }
+
+  it('userOpHash が同じ → confirmed', () => {
+    const { key } = setup();
+    advanceToSubmitting(key);
+    const c = markConfirmed({
+      key,
+      sender: SENDER,
+      txHash: '0xtx' as Hex,
+      success: true,
+      now: 2_000,
+      userOpHash: HASH,
+    });
+    expect(c.status).toBe('confirmed');
+    expect(loadPendingRecord(key)?.txHash).toBe('0xtx');
+  });
+
+  it('userOpHash が違う → PendingStateError・記録を書き換えない (別の op の記録を confirmed にしない)', () => {
+    const { key } = setup();
+    advanceToSubmitting(key);
+    const before = raw(key);
+    expect(() =>
+      markConfirmed({
+        key,
+        sender: SENDER,
+        txHash: '0xtx' as Hex,
+        success: true,
+        now: 2_000,
+        userOpHash: '0xother' as Hex,
+      }),
+    ).toThrow(PendingStateError);
+    expect(raw(key)).toBe(before);
+  });
+
+  it('confirmed への再入も、userOpHash が同じときだけ', () => {
+    const { key } = setup();
+    advanceToSubmitting(key);
+    markConfirmed({ key, sender: SENDER, txHash: '0xtx' as Hex, success: true, now: 2_000, userOpHash: HASH });
+    expect(
+      markConfirmed({ key, sender: SENDER, txHash: '0xtx' as Hex, success: true, now: 2_100, userOpHash: HASH })
+        .status,
+    ).toBe('confirmed');
+    expect(() =>
+      markConfirmed({
+        key,
+        sender: SENDER,
+        txHash: '0xtx2' as Hex,
+        success: true,
+        now: 2_200,
+        userOpHash: '0xother' as Hex,
+      }),
+    ).toThrow(PendingStateError);
+    expect(loadPendingRecord(key)?.txHash).toBe('0xtx');
+  });
+
+  it('failed の記録は、userOpHash が同じときだけ confirmed に直す (receipt が真実)・error の log を残す', () => {
+    const errorSpy = vi.spyOn(logger, 'error').mockImplementation(() => {});
+    const { key } = setup();
+    advanceToSubmitting(key);
+    forceStatus(key, 'failed');
+
+    const c = markConfirmed({
+      key,
+      sender: SENDER,
+      txHash: '0xtx' as Hex,
+      success: true,
+      now: 2_000,
+      userOpHash: HASH,
+    });
+
+    expect(c.status).toBe('confirmed');
+    expect(loadPendingRecord(key)?.status).toBe('confirmed');
+    expect(loadPendingRecord(key)?.txHash).toBe('0xtx');
+    expect(errorSpy).toHaveBeenCalledWith('circle.pending.confirmed-after-failed', {
+      userOpHash: HASH,
+      txHash: '0xtx',
+    });
+  });
+
+  it('failed の記録は、userOpHash が違えば直さない', () => {
+    const errorSpy = vi.spyOn(logger, 'error').mockImplementation(() => {});
+    const { key } = setup();
+    advanceToSubmitting(key);
+    forceStatus(key, 'failed');
+    const before = raw(key);
+    expect(() =>
+      markConfirmed({
+        key,
+        sender: SENDER,
+        txHash: '0xtx' as Hex,
+        success: true,
+        now: 2_000,
+        userOpHash: '0xother' as Hex,
+      }),
+    ).toThrow(PendingStateError);
+    expect(raw(key)).toBe(before);
+    expect(errorSpy).not.toHaveBeenCalled();
+  });
+
+  it('userOpHash を渡さない呼び出しは今までどおり: failed からは confirmed にできない', () => {
+    const { key } = setup();
+    advanceToSubmitting(key);
+    forceStatus(key, 'failed');
+    expect(() =>
+      markConfirmed({ key, sender: SENDER, txHash: '0xtx' as Hex, success: true, now: 2_000 }),
+    ).toThrow(PendingStateError);
+    expect(loadPendingRecord(key)?.status).toBe('failed');
+  });
+
+  it('abandoned の記録は、userOpHash が同じでも confirmed にしない', () => {
+    const { key } = setup();
+    markAwaitingSignature({ key, sender: SENDER, now: 1_100 });
+    markSigned({ key, sender: SENDER, signedUserOp: SIGNED_OP, userOpHash: HASH, now: 1_200 });
+    abandon({ key, sender: SENDER, now: 1_300 });
+    expect(() =>
+      markConfirmed({
+        key,
+        sender: SENDER,
+        txHash: '0xtx' as Hex,
+        success: true,
+        now: 2_000,
+        userOpHash: HASH,
+      }),
+    ).toThrow(PendingStateError);
+    expect(loadPendingRecord(key)?.status).toBe('abandoned');
   });
 });
 

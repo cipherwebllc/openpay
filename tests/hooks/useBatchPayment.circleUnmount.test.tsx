@@ -119,6 +119,8 @@ let permitRequests: Array<SignRequest<PermitResult>>;
 let userOpRequests: Array<SignRequest<UserOpResult>>;
 // hash ごとの receipt の待ち (置いた hash は、resolve するまで確定しない)。
 let receiptGates: Map<Hex, Promise<void>>;
+// true の間、bundler は receipt を返せない (5xx): receipt の待ちも、確定済みの op の receipt の照会も失敗する。
+let bundlerDown: boolean;
 // 時計。本物の時刻に足す (executeCirclePayment は Date.now を読む)。
 let clockOffset: number;
 
@@ -164,6 +166,7 @@ beforeEach(() => {
   permitRequests = [];
   userOpRequests = [];
   receiptGates = new Map();
+  bundlerDown = false;
   clockOffset = 0;
   const realNow = Date.now.bind(Date);
   vi.spyOn(Date, 'now').mockImplementation(() => realNow() + clockOffset);
@@ -175,7 +178,19 @@ beforeEach(() => {
       chainId: baseSepolia.id,
       paymasterAddress: PAYMASTER,
       account: {},
-      bundlerClient: {},
+      // confirmed の記録の結果を返すとき、circleSend は receipt を 1 回だけ照会する (bundler の RPC = 境界)。
+      bundlerClient: {
+        getUserOperationReceipt: (async ({ hash }: { hash: Hex }) => {
+          if (bundlerDown) throw new Error('HTTP request failed. Status: 503');
+          const found = ALL_OPS.find((o) => o.userOpHash === hash);
+          if (!found) throw new Error(`test: 知らない hash の receipt を照会した ${hash}`);
+          return {
+            receipt: { transactionHash: found.txHash, blockNumber: 10n },
+            success: true,
+            actualGasCost: 1000n,
+          };
+        }) as never,
+      },
       deployment: usdcDep,
     },
     isLoading: false,
@@ -210,6 +225,7 @@ beforeEach(() => {
     return found.userOpHash;
   });
   vi.mocked(waitForCircleReceipt).mockImplementation(async ({ hash }) => {
+    if (bundlerDown) throw new Error('HTTP request failed. Status: 503');
     const found = ALL_OPS.find((o) => o.userOpHash === hash);
     if (!found) throw new Error(`test: 知らない hash の receipt を待った ${hash}`);
     await receiptGates.get(hash);
@@ -429,5 +445,145 @@ describe('H-V: 画面を離れた Circle の試み (hook → 本物の executeCi
     expect(recordStatuses()).toEqual([]);
     expect(signUsdcPermit).not.toHaveBeenCalled();
     expect(permitRequests).toHaveLength(0);
+  });
+});
+
+// 第 10 回レビュー H-W・H-Y: op を bundler に渡した (かもしれない) 後の終わり方を、hook の「CirclePendingError 以外は attemptId の
+// 対応を消す」まで通して確かめる (hook の規則は変えていない。circleSend が、送った後をふつうの error で終えないことで守る)。
+//
+// 送った後の区間は circleSend の境界の中なので、偽物が投げる「知らない op / 知らない hash」は確認待ちに吸われる。
+// 送った op・待った hash は、下で値として確かめる。
+describe('H-W・H-Y: 送った後の終わり方 (hook → 本物の executeCirclePayment)', () => {
+  const waitedHashes = () => vi.mocked(waitForCircleReceipt).mock.calls.map((c) => c[0].hash);
+
+  // 署名 1・署名 2 を承認し、op (OP_A) が bundler に渡る所まで進める。
+  async function payUntilSent(screen: ReturnType<typeof openScreen>) {
+    screen.result.current.mutate(PARAMS);
+    await waitFor(() => expect(permitRequests).toHaveLength(1));
+    permitRequests[0].approve(PERMIT);
+    await waitFor(() => expect(userOpRequests).toHaveLength(1));
+    userOpRequests[0].approve(OP_A);
+    await waitFor(() => expect(sentOps()).toEqual([OP_A.signedUserOp]));
+  }
+
+  // H-Y (単独の画面で 2 本目まで届いた筋)。直す前: 開き直した画面の押下が confirmed の記録を resume し、receipt の取り直しが
+  // bundler の失敗で投げる → ふつうの error → 対応が消える → 次の押下は新しい key で、90 秒より前の confirmed は「正規の
+  // リピート」= 新しい署名を求め、承認すれば 2 本目を払う。
+  it('送った後に離れた試みが裏で確定 → 90 秒より後に開き直して押した瞬間、bundler が receipt を返せない → 既払いの結果が出る (新しい署名も 2 本目も無い)', async () => {
+    const receiptA = deferred<void>();
+    receiptGates.set(OP_A.userOpHash, receiptA.promise);
+
+    const screenA = openScreen();
+    await payUntilSent(screenA);
+    screenA.unmount();
+    receiptA.resolve();
+    await waitFor(() => expect(screenA.state().status).toBe('success'));
+    expect(recordStatuses()).toEqual(['confirmed']);
+    expect(Object.keys(mappings())).toHaveLength(1);
+
+    // 90 秒より後。押した瞬間、bundler は receipt を返せない。
+    clockOffset += 100_000;
+    bundlerDown = true;
+    const screenB = openScreen();
+    screenB.result.current.mutate(PARAMS);
+    await waitFor(() =>
+      expect(
+        screenB.result.current.isSuccess ||
+          screenB.result.current.isError ||
+          permitRequests.length > 1,
+      ).toBe(true),
+    );
+
+    // 保存した値で既払いの結果が出る。新しい署名を求めず、送った op は A の 1 本だけ。
+    expect(screenB.result.current.error).toBeNull();
+    expect(screenB.result.current.data).toMatchObject({
+      userOpHash: OP_A.userOpHash,
+      txHash: OP_A.txHash,
+      success: true,
+    });
+    expect(permitRequests).toHaveLength(1);
+    expect(userOpRequests).toHaveLength(1);
+    expect(sentOps()).toEqual([OP_A.signedUserOp]);
+    // 確定済みの op に、receipt の待ち (最大 120 秒) を使っていない (待ったのは A の送信の直後の 1 回だけ)。
+    expect(waitedHashes()).toEqual([OP_A.userOpHash]);
+    expect(recordStatuses()).toEqual(['confirmed']);
+    // 画面のある試みが既払いの結果を受け取ったので、対応はここで消える (今までどおり)。
+    expect(mappings()).toEqual({});
+
+    // 成功が出た後にさらに押すのは、新しい支払い (今までどおり)。署名を求めるだけで、承認するまで何も送らない。
+    bundlerDown = false;
+    screenB.result.current.mutate(PARAMS);
+    await waitFor(() => expect(permitRequests).toHaveLength(2));
+    expect(sentOps()).toEqual([OP_A.signedUserOp]);
+  });
+
+  // H-Y (待ちの失敗)。直す前: 待ちの失敗がふつうの error になり、送った op が未確定のまま対応が消えた。
+  it('op を送った後、receipt の待ちが失敗 (bundler の 5xx) → 確認待ち・対応が残る・その押下で送り直さない → もう一度押すと、署名なしで同じ op の結果を受け取る', async () => {
+    const screen = openScreen();
+    screen.result.current.mutate(PARAMS);
+    await waitFor(() => expect(permitRequests).toHaveLength(1));
+    permitRequests[0].approve(PERMIT);
+    await waitFor(() => expect(userOpRequests).toHaveLength(1));
+    const mappingBefore = mappings();
+    expect(Object.keys(mappingBefore)).toHaveLength(1);
+
+    bundlerDown = true; // 送信は通るが、その後の receipt の待ちが失敗する
+    userOpRequests[0].approve(OP_A);
+    await waitFor(() => expect(screen.result.current.isError).toBe(true));
+
+    expect(screen.result.current.error?.name).toBe('CirclePendingError');
+    expect(sentOps()).toEqual([OP_A.signedUserOp]);
+    expect(waitedHashes()).toEqual([OP_A.userOpHash]);
+    expect(recordStatuses()).toEqual(['submitting']);
+    // 確認待ちなので、対応は残る (次の押下は同じ key を resume する)。
+    expect(mappings()).toEqual(mappingBefore);
+
+    // bundler が戻ってから、同じ画面でもう一度押す。
+    bundlerDown = false;
+    screen.result.current.mutate(PARAMS);
+    await waitFor(() => expect(screen.result.current.isSuccess).toBe(true));
+
+    expect(screen.result.current.data).toMatchObject({
+      userOpHash: OP_A.userOpHash,
+      txHash: OP_A.txHash,
+      success: true,
+    });
+    expect(permitRequests).toHaveLength(1);
+    expect(userOpRequests).toHaveLength(1);
+    expect(sentOps()).toEqual([OP_A.signedUserOp]);
+    expect(waitedHashes()).toEqual([OP_A.userOpHash, OP_A.userOpHash]);
+    expect(recordStatuses()).toEqual(['confirmed']);
+    expect(mappings()).toEqual({});
+  });
+
+  // 境界。直す前: markSubmitting の後の storage の throw がふつうの error になり、op を渡したかもしれないのに対応が消えた。
+  it('op を渡した後に記録を読めなくなった (送信の応答を失い、localStorage が投げる) → 確認待ち・対応が残る', async () => {
+    const screen = openScreen();
+    screen.result.current.mutate(PARAMS);
+    await waitFor(() => expect(permitRequests).toHaveLength(1));
+    permitRequests[0].approve(PERMIT);
+    await waitFor(() => expect(userOpRequests).toHaveLength(1));
+    const mappingBefore = mappings();
+
+    // bundler は op を受け取ったが、応答が届かない。同じ頃から localStorage が読めない (sessionStorage は読める)。
+    const realGetItem = Storage.prototype.getItem;
+    let reads: { mockRestore: () => void } | undefined;
+    vi.mocked(broadcastCircleUserOp).mockImplementationOnce(async () => {
+      reads = vi
+        .spyOn(Storage.prototype, 'getItem')
+        .mockImplementation(function (this: Storage, key: string) {
+          if (this === window.localStorage) throw new Error('SecurityError: storage is not available');
+          return realGetItem.call(this, key);
+        });
+      throw new Error('socket hang up');
+    });
+    userOpRequests[0].approve(OP_A);
+    await waitFor(() => expect(screen.result.current.isError).toBe(true));
+    reads?.mockRestore();
+
+    expect(screen.result.current.error?.name).toBe('CirclePendingError');
+    expect(sentOps()).toEqual([OP_A.signedUserOp]);
+    expect(recordStatuses()).toEqual(['submitting']);
+    expect(mappings()).toEqual(mappingBefore);
   });
 });

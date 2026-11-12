@@ -15,6 +15,21 @@
 //   - cross-invocation (reload / 再クリック): 同一 sender+chain+callHash の submitting
 //     宙吊りがあれば、新規送信せず先にそれを recover する。
 //
+// 送った後の終わり方 (第 10 回レビュー H-W・H-Y): 自分の markSubmitting が返った後と、submitting / confirmed の記録を扱う枝
+// (scan・resume・markSigned の CAS が外れたとき) の終わり方は 3 つだけにする:
+//   (1) receipt が取れた・記録が confirmed → 結果
+//   (2) まだ bundler に op を渡していない試みが、終わった記録 (failed / abandoned / 記録なし) に当たった → 「既に終了」の error
+//   (3) それ以外すべて → CirclePendingError (確認待ち)
+// hook (useBatchPayment の runCirclePayment) は、CirclePendingError 以外の error で attemptId の対応を消す。op を渡したかも
+// しれない後にふつうの error で終わると、次の押下が新しい key になり、後から確定した前の支払い (90 秒より前の confirmed) を
+// 「正規のリピート」とみなして 2 本目を払う。なので (3) を 1 か所 (inPostSubmit) で保証する。
+//   - receipt の待ちの結果は receipt / timeout / error の 3 つ (waitReceipt)。**同じ op の送り直しへ進むのは timeout のとき
+//     だけ**。error (bundler の 429・5xx・通信断) では、送り直さず・記録の時刻も書かずに確認待ちで終える。
+//   - 送り直しの **前** に、記録がいまも「submitting で同じ userOpHash」であることを確かめて送る時刻を書く (markResending)。
+//     確かめられなければ送り直さず、記録の今の状態に従う (followRecord)。
+//   - receipt を取った後の記録の更新 (markConfirmed) が失敗しても、結果は返す (取り込まれた支払いを失敗と出さない)。
+//   - confirmed の記録の結果は、receipt を 1 回だけ照会し、取れなければ理由によらず保存した値で返す (resultFromConfirmed)。
+//
 // 失効 (第 10 回レビュー H-V): この試みを始めた画面 (hook の instance) が外れた (unmount した) 後も、react-query の mutation は
 // 走り続ける。原則は 1 つ: **失効した試みは、新しい効果を始めない** (ウォレットに署名を求めない・記録を書かない = markSigned・
 // markSubmitting・abandon・bundler へ op を渡さない)。args.isAlive() を見るのは、新しい効果の直前だけ:
@@ -48,8 +63,10 @@ import {
   loadPendingRecord,
   markAwaitingSignature,
   markConfirmed,
+  markResending,
   markSigned,
   markSubmitting,
+  PendingStateError,
   pruneStaleSubmitting,
   pruneTerminal,
   reserveOrResume,
@@ -147,68 +164,214 @@ function toResult(userOpHash: Hex, receipt: Receipt): CirclePaymentResult {
   };
 }
 
-// waitForUserOperationReceipt の timeout を「まだ pending」(null) に変換する。
-// それ以外の error は伝播させる (bundler 障害等は recovery 対象外)。
-async function waitOrNull(
+// まだ bundler に op を渡していない試みが、終わった記録 (failed / abandoned / 記録なし) に当たったときの error。送った後の
+// 境界 (inPostSubmit) を素通しする: hook が attemptId の対応を消し、次の押下は新しい支払い (署名から) になる。
+// name は 'Error' のまま (hook・フォームから見て、今までの new Error と同じ)。class にするのは境界が見分けるためだけ。
+class AttemptEndedError extends Error {}
+
+function attemptEnded(): AttemptEndedError {
+  return new AttemptEndedError(
+    'この決済試行は既に終了しています。新しい決済として実行し直してください。',
+  );
+}
+
+// receipt の待ちの結果。timeout = 待ち切ったがまだ無い (op は mempool に無いかもしれない)・error = 待ちそのものの失敗
+// (bundler の 429・5xx・通信断。receipt があるか無いかは分からない)。
+type WaitOutcome =
+  | { kind: 'receipt'; receipt: Receipt }
+  | { kind: 'timeout' }
+  | { kind: 'error' };
+
+// waitForUserOperationReceipt を待ち、結果を 3 つに分ける。**投げない**: ここは必ず bundler に op を渡した (かもしれない) 後に
+// 呼ばれる。待ちの失敗をそのまま投げると、ふつうの error として hook が attemptId の対応を消す (冒頭の「送った後の終わり方」)。
+// 呼び出し側は、timeout のときだけ同じ op の送り直しへ進み、error では送り直さずに確認待ちで終える。
+async function waitReceipt(
   bundle: CircleSmartAccountBundle,
   hash: Hex,
-): Promise<Receipt | null> {
+): Promise<WaitOutcome> {
   try {
-    return await waitForCircleReceipt({ bundle, hash });
+    return { kind: 'receipt', receipt: await waitForCircleReceipt({ bundle, hash }) };
   } catch (error) {
-    if (error instanceof WaitForUserOperationReceiptTimeoutError) return null;
-    throw error;
+    if (error instanceof WaitForUserOperationReceiptTimeoutError) {
+      return { kind: 'timeout' };
+    }
+    logger.warn('circle.wait.failed', {
+      userOpHash: hash,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return { kind: 'error' };
   }
+}
+
+// receipt を取った後の記録の更新 (submitting → confirmed)。**失敗しても結果は返す**: receipt がある = この op は取り込まれた、が
+// 真実で、記録を書けない (記録が消えた・別の op の記録に替わった・storage が書けない) ことを理由に「失敗」と出すと、
+// 払えているのに hook が対応を消し、次の押下が 2 本目になる。握りつぶさない: error の log を残す。記録が submitting のまま
+// 残っても、次の押下が同じ op を復旧して同じ結果を返す。
+function confirmAndResult(args: {
+  key: string;
+  sender: Address;
+  userOpHash: Hex;
+  receipt: Receipt;
+  now: () => number;
+}): CirclePaymentResult {
+  const { key, sender, userOpHash, receipt, now } = args;
+  try {
+    markConfirmed({
+      key,
+      sender,
+      userOpHash,
+      txHash: receipt.receipt.transactionHash,
+      success: receipt.success,
+      now: now(),
+    });
+  } catch (error) {
+    logger.error('circle.confirm.record-failed', {
+      userOpHash,
+      txHash: receipt.receipt.transactionHash,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+  return toResult(userOpHash, receipt);
+}
+
+// 送った後の境界 (冒頭の「送った後の終わり方」)。自分の markSubmitting が返った後の区間と、submitting / confirmed の記録を扱う
+// 枝を包み、想定していない throw (storage の読み書き・記録の sender の不一致・RPC) を CirclePendingError に変える。
+// 何の波及を断つか: op を bundler に渡したかもしれない後の付帯の失敗がふつうの error になり、hook が attemptId の対応を消して、
+// 後から確定した支払いの後に 2 本目が開くこと。確認待ちは「分からない」の正直な表示で、成功にはしない。握りつぶさない:
+// 元の error は専用の key で error の log に残す。
+// 素通しするのは、結果・CirclePendingError・AttemptEndedError (まだ渡していない試みの「既に終了」) だけ。
+// userOpHash は確認待ちの op の hash (分からない場面では undefined)。
+async function inPostSubmit<T>(
+  userOpHash: Hex | undefined,
+  run: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await run();
+  } catch (error) {
+    if (error instanceof CirclePendingError || error instanceof AttemptEndedError) {
+      throw error;
+    }
+    logger.error('circle.post_submit.unexpected', {
+      userOpHash,
+      error: error instanceof Error ? error : String(error),
+    });
+    throw new CirclePendingError(userOpHash);
+  }
+}
+
+type RecoveryContext = {
+  bundle: CircleSmartAccountBundle;
+  sender: Address;
+  now: () => number;
+};
+
+// 「記録に従う」: CAS が外れた (= 待つ間・署名の間に、ほかの試みが記録を進めた) とき、記録を読み直し、今の状態から終わり方を
+// 決める唯一の場所。内部の error (PendingStateError) を画面に出さない。**この押下で op を bundler に渡したか**で分ける:
+//
+//   渡していない (handedOff: false = markSigned の CAS が外れた・scan / resume の復旧で送り直しの前の CAS が外れた):
+//     confirmed (hash を問わない) → 記録の結果 (同じ支払いを先に済ませた試みの結果を受け取る)
+//     submitting                  → その op の復旧 (新しい op は作らない)
+//     failed / abandoned / pre-submit / 記録なし → 「既に終了」の error (対応は消える。この試みは何も送っていない)
+//
+//   渡した (handedOff: true = 自分の markSubmitting の後の復旧で、送り直しの前の CAS が外れた):
+//     confirmed かつ自分の userOpHash → 記録の結果
+//     それ以外は **failed も含めて** 確認待ち。自分が渡した op があるのに「既に終了」と出すと、hook が対応を消して新しい
+//     支払いを開けてしまう。failed は「閉じたのに、その後も送っていた」= 前提が破れた状態なので error の log を残す。
+async function followRecord(
+  ctx: RecoveryContext & { key: string },
+  mode:
+    | { handedOff: true; userOpHash: Hex }
+    // fromRecovery: 復旧 (recoverSubmitting) の中から来た。下の submitting の枝を見よ。
+    | { handedOff: false; fromRecovery: boolean },
+): Promise<CirclePaymentResult> {
+  const record = loadPendingRecord(ctx.key);
+
+  if (mode.handedOff) {
+    if (record?.status === 'confirmed' && record.userOpHash === mode.userOpHash) {
+      return resultFromConfirmed(ctx.bundle, record);
+    }
+    if (record?.status === 'failed') {
+      logger.error('circle.follow.failed-after-handoff', {
+        userOpHash: mode.userOpHash,
+        recordUserOpHash: record.userOpHash,
+      });
+    }
+    throw new CirclePendingError(mode.userOpHash);
+  }
+
+  if (record?.status === 'confirmed') {
+    return resultFromConfirmed(ctx.bundle, record);
+  }
+  if (record?.status === 'submitting') {
+    // 復旧の中から来て、記録がまだ submitting = 待つ間に、同じ key の記録が別の op のものに替わっていた (同じ op のままなら
+    // CAS は外れない)。この押下ではもう待たず、確認待ちで終える (次の押下がその op を復旧する)。復旧 → 記録に従う → 復旧、を
+    // 繰り返さない。
+    if (mode.fromRecovery) throw new CirclePendingError(record.userOpHash);
+    const recovered = await recoverSubmitting({ ...ctx, record, handedOff: false });
+    if (recovered) return recovered;
+    throw new CirclePendingError(record.userOpHash);
+  }
+  throw attemptEnded();
 }
 
 // submitting で宙吊りの record を確定させる recovery 経路。
 //   1) included を待つ (broadcast 済で応答だけロストしたケースを拾う)
-//   2) まだなら *同一署名 op* を冪等 rebroadcast (broadcast 自体が届かず crash したケース)
-//      → 再 wait
+//   2) 待ち切っても無い (timeout) ときだけ、*同一署名 op* を冪等 rebroadcast (broadcast 自体が届かず crash したケース)
+//      → 再 wait。待ちそのものが失敗した (error) ときは送り直さない (受理されているかもしれない op を、押すたびに送り直さない)。
 // confirmed にできたら結果を、まだ pending なら null を返す (record は submitting 維持)。
-async function recoverSubmitting(args: {
-  bundle: CircleSmartAccountBundle;
-  record: PendingRecord;
-  sender: Address;
-  now: () => number;
-}): Promise<CirclePaymentResult | null> {
-  const { bundle, record, sender, now } = args;
+// handedOff: この押下で、この op を bundler に渡したか (自分の markSubmitting の後の復旧 = true・scan / resume / markSigned の
+// CAS が外れた後の復旧 = false)。送り直しの前の CAS が外れたときの「記録に従う」の分け方に使う。
+async function recoverSubmitting(
+  args: RecoveryContext & { record: PendingRecord; handedOff: boolean },
+): Promise<CirclePaymentResult | null> {
+  const { bundle, record, sender, now, handedOff } = args;
   if (!record.userOpHash || !record.signedUserOp) {
     // submitting なのに署名済 op が無い = あり得ない (markSubmitting が防ぐ) が、
     // 万一なら確定不能なので pending 扱い (新規 op は作らない)。
     return null;
   }
   const hash = record.userOpHash;
+  const key = record.key;
 
-  let receipt = await waitOrNull(bundle, hash);
-  if (!receipt) {
-    logger.info('circle.recover.rebroadcast', { userOpHash: hash });
-    try {
-      await broadcastCircleUserOp({
-        bundle,
-        signedUserOp: record.signedUserOp,
-      });
-    } catch (error) {
-      // "already known" / nonce 使用済 等は in-flight or 確定済の証左なので無害。
-      logger.info('circle.recover.rebroadcast-noop', {
-        userOpHash: hash,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
-    // submitting を冪等再入して updatedAt を更新 (掃除対象から守る)。
-    markSubmitting({ key: record.key, sender, now: now() });
-    receipt = await waitOrNull(bundle, hash);
+  const first = await waitReceipt(bundle, hash);
+  if (first.kind === 'receipt') {
+    return confirmAndResult({ key, sender, userOpHash: hash, receipt: first.receipt, now });
+  }
+  // 待ちそのものの失敗では送り直さない (記録の時刻も書かない)。
+  if (first.kind === 'error') return null;
+
+  // 送り直しの前に、記録がいまも「submitting で同じ op」であることを確かめ、送る時刻を書く (掃除対象から守る)。上の待ちは
+  // 最大 120 秒で、その間にほかの試み (同じ key を resume した別の画面・自分の送信の receipt を待っている元の試み) が記録を
+  // confirmed にしていることがある。record は待つ前に読んだものなので信じない。now() は待った後のここで評価する。
+  try {
+    markResending({ key, sender, userOpHash: hash, now: now() });
+  } catch (error) {
+    // storage の失敗などは CAS が外れたのではない → 送った後の境界 (inPostSubmit) が確認待ちに変える。
+    if (!(error instanceof PendingStateError)) throw error;
+    return followRecord(
+      { bundle, sender, now, key },
+      handedOff
+        ? { handedOff: true, userOpHash: hash }
+        : { handedOff: false, fromRecovery: true },
+    );
   }
 
-  if (receipt) {
-    markConfirmed({
-      key: record.key,
-      sender,
-      txHash: receipt.receipt.transactionHash,
-      success: receipt.success,
-      now: now(),
+  logger.info('circle.recover.rebroadcast', { userOpHash: hash });
+  try {
+    await broadcastCircleUserOp({
+      bundle,
+      signedUserOp: record.signedUserOp,
     });
-    return toResult(hash, receipt);
+  } catch (error) {
+    // "already known" / nonce 使用済 等は in-flight or 確定済の証左なので無害。
+    logger.info('circle.recover.rebroadcast-noop', {
+      userOpHash: hash,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+  const second = await waitReceipt(bundle, hash);
+  if (second.kind === 'receipt') {
+    return confirmAndResult({ key, sender, userOpHash: hash, receipt: second.receipt, now });
   }
   return null;
 }
@@ -312,14 +475,22 @@ export async function executeCirclePayment(
         rec.success !== false &&
         now() - rec.updatedAt <= CONFIRMED_DEDUP_WINDOW_MS
       ) {
-        return await resultFromConfirmed(bundle, rec);
+        return await inPostSubmit(rec.userOpHash, () => resultFromConfirmed(bundle, rec));
       }
       continue;
     }
     if (rec.status === 'submitting') {
-      const recovered = await recoverSubmitting({ bundle, record: rec, sender, now });
-      if (recovered) return recovered;
-      throw new CirclePendingError(rec.userOpHash);
+      return await inPostSubmit(rec.userOpHash, async () => {
+        const recovered = await recoverSubmitting({
+          bundle,
+          record: rec,
+          sender,
+          now,
+          handedOff: false,
+        });
+        if (recovered) return recovered;
+        throw new CirclePendingError(rec.userOpHash);
+      });
     }
     // reserved / awaiting_signature / signed (pre-submit・未 broadcast)。
     if (now() - rec.updatedAt > PRE_SUBMIT_STALE_MS) {
@@ -349,17 +520,23 @@ export async function executeCirclePayment(
 
   if (resumed) {
     if (record.status === 'confirmed') {
-      return await resultFromConfirmed(bundle, record);
+      return await inPostSubmit(record.userOpHash, () => resultFromConfirmed(bundle, record));
     }
     if (record.status === 'submitting') {
-      const recovered = await recoverSubmitting({ bundle, record, sender, now });
-      if (recovered) return recovered;
-      throw new CirclePendingError(record.userOpHash as Hex);
+      return await inPostSubmit(record.userOpHash, async () => {
+        const recovered = await recoverSubmitting({
+          bundle,
+          record,
+          sender,
+          now,
+          handedOff: false,
+        });
+        if (recovered) return recovered;
+        throw new CirclePendingError(record.userOpHash as Hex);
+      });
     }
     if (record.status === 'failed' || record.status === 'abandoned') {
-      throw new Error(
-        'この決済試行は既に終了しています。新しい決済として実行し直してください。',
-      );
+      throw attemptEnded();
     }
     // pre-submit (reserved/awaiting_signature/signed): まだ broadcast していないので
     // 下の通常フローで (再) 署名して送信して良い。
@@ -421,66 +598,85 @@ export async function executeCirclePayment(
   }
 
   // 署名済 op を **broadcast 前に** 永続 (応答ロスト時に同一 op を rebroadcast するため)。
-  markSigned({
-    key,
-    sender,
-    signedUserOp,
-    userOpHash,
-    permitDigest: keccak256(permitSignature),
-    now: now(),
-  });
+  try {
+    markSigned({
+      key,
+      sender,
+      signedUserOp,
+      userOpHash,
+      permitDigest: keccak256(permitSignature),
+      now: now(),
+    });
+  } catch (error) {
+    // storage の失敗 (書けない・読めない)・sender の不一致は、今までどおりふつうの error (何も送っていない)。
+    if (!(error instanceof PendingStateError)) throw error;
+    // CAS が外れた = 署名を待つ間に、ほかの試みがこの key の記録を進めた (同じ key を使う別の画面が先に送った・scan や GC が
+    // abandoned にした)。自分の op は送らない (今までどおり)。内部の error を出さず、記録に従う: 先に送った試みがあれば、
+    // その結果 (または復旧) を受け取る。この試みは何も渡していないので handedOff: false。
+    return await inPostSubmit(undefined, () =>
+      followRecord({ bundle, sender, now, key }, { handedOff: false, fromRecovery: false }),
+    );
+  }
 
   // broadcast_intent を永続 (fail-closed)。ここを過ぎたら fallback/新規 op 禁止。
+  // 書けなければ、下の境界の外 = ふつうの error (送っていない試みを確認待ちにしない)。
   markSubmitting({ key, sender, now: now() });
 
-  try {
-    await broadcastCircleUserOp({ bundle, signedUserOp });
-  } catch (error) {
-    // 応答ロスト: op は受理・included しうる。auto-fallback 禁止 → recovery。
-    logger.warn('circle.broadcast.response-lost', {
-      userOpHash,
-      error: error instanceof Error ? error.message : String(error),
-    });
+  // ここから先は「op を bundler に渡したかもしれない後」。終わり方は結果か確認待ちだけ (inPostSubmit)。
+  return await inPostSubmit(userOpHash, async () => {
+    try {
+      await broadcastCircleUserOp({ bundle, signedUserOp });
+    } catch (error) {
+      // 応答ロスト: op は受理・included しうる。auto-fallback 禁止 → recovery。
+      logger.warn('circle.broadcast.response-lost', {
+        userOpHash,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      const rec = loadPendingRecord(key);
+      const recovered = rec
+        ? await recoverSubmitting({ bundle, record: rec, sender, now, handedOff: true })
+        : null;
+      if (recovered) return recovered;
+      throw new CirclePendingError(userOpHash);
+    }
+
+    // broadcast 受理 → included を待つ。
+    const waited = await waitReceipt(bundle, userOpHash);
+    if (waited.kind === 'receipt') {
+      return confirmAndResult({ key, sender, userOpHash, receipt: waited.receipt, now });
+    }
+    // 待ちそのものの失敗 → この押下では送り直さず、確認待ちで終える (次の押下が同じ op を復旧する)。
+    if (waited.kind === 'error') throw new CirclePendingError(userOpHash);
+    // 受理されたが timeout 内に未 included → recovery (rebroadcast + 再 wait)。
     const rec = loadPendingRecord(key);
     const recovered = rec
-      ? await recoverSubmitting({ bundle, record: rec, sender, now })
+      ? await recoverSubmitting({ bundle, record: rec, sender, now, handedOff: true })
       : null;
     if (recovered) return recovered;
     throw new CirclePendingError(userOpHash);
-  }
-
-  // broadcast 受理 → included を待つ。
-  const receipt = await waitOrNull(bundle, userOpHash);
-  if (receipt) {
-    markConfirmed({
-      key,
-      sender,
-      txHash: receipt.receipt.transactionHash,
-      success: receipt.success,
-      now: now(),
-    });
-    return toResult(userOpHash, receipt);
-  }
-  // 受理されたが timeout 内に未 included → recovery (rebroadcast + 再 wait)。
-  const rec = loadPendingRecord(key);
-  const recovered = rec
-    ? await recoverSubmitting({ bundle, record: rec, sender, now })
-    : null;
-  if (recovered) return recovered;
-  throw new CirclePendingError(userOpHash);
+  });
 }
 
-// confirmed record から結果を復元する (resume 時)。actualGasCost は recovery では
-// 取れないので receipt 再照会で success/txHash/blockNumber を埋め、無ければ **永続済の
-// record.success** を使う (receipt 取得失敗時に success:true を捏造して revert 済 op を
-// 成功誤報告しない)。record.success が未確定 (旧 record) なら false 側に倒す。
+// confirmed record から結果を復元する (scan の dedup・resume・「記録に従う」)。確定済みの op なので、receipt は **1 回だけ**
+// 照会する (waitForUserOperationReceipt の最大 120 秒の待ちは使わない)。取れれば success/txHash/blockNumber/actualGasCost を
+// receipt から埋め、**取れなければ、理由によらず** (まだ無い・bundler の 429・5xx・通信断) 永続済の record の値を返す。
+// 照会の失敗をふつうの error にすると、払い終えた支払いなのに hook が attemptId の対応を消し、次の押下が 2 本目になる (H-Y)。
+// 取れなかったときの success は永続済の record.success (success:true を捏造して revert 済 op を成功誤報告しない)。
+// record.success が未確定 (旧 record) なら false 側に倒す。
 async function resultFromConfirmed(
   bundle: CircleSmartAccountBundle,
   record: PendingRecord,
 ): Promise<CirclePaymentResult> {
   const hash = record.userOpHash as Hex;
-  const receipt = await waitOrNull(bundle, hash);
-  if (receipt) return toResult(hash, receipt);
+  try {
+    const receipt = await bundle.bundlerClient.getUserOperationReceipt({ hash });
+    return toResult(hash, receipt);
+  } catch (error) {
+    logger.warn('circle.confirmed.receipt-unavailable', {
+      userOpHash: hash,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
   return {
     userOpHash: hash,
     txHash: (record.txHash ?? ('0x' as Hex)) as Hex,

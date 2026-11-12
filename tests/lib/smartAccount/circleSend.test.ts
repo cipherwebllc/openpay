@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi, type MockInstance } from 'vitest';
 import { getAddress, type Address, type Hex } from 'viem';
 import { WaitForUserOperationReceiptTimeoutError } from 'viem/account-abstraction';
 
@@ -32,6 +32,7 @@ import {
   markSigned,
   markSubmitting,
   markConfirmed,
+  abandon,
   PENDING_KEY_PREFIX,
   type PendingStatus,
 } from '@/lib/circlePending';
@@ -48,13 +49,19 @@ const CALLS = [{ to: MERCHANT, data: '0xabcd' as Hex }];
 const SIGNED_OP = { sender: OWNER, nonce: '0x0', signature: '0x' + 'ab'.repeat(65) };
 const PERMIT_SIG = ('0x' + 'cd'.repeat(65)) as Hex;
 
+// confirmed の記録の結果を返すとき、circleSend は bundler に receipt を 1 回だけ照会する (bundlerClient.getUserOperationReceipt)。
+// bundle は呼び出し側が渡す RPC の client なので、ここも境界の偽物。既定は「receipt がある」。
+const mockLookup = vi.fn();
+
 const fakeBundle = {
   provider: 'circle',
   entryPointVersion: '0.8',
   chainId: CHAIN_ID,
   paymasterAddress: PAYMASTER,
   account: {},
-  bundlerClient: {},
+  bundlerClient: {
+    getUserOperationReceipt: (args: { hash: Hex }) => mockLookup(args),
+  },
   deployment: {},
 } as unknown as CircleSmartAccountBundle;
 
@@ -106,6 +113,8 @@ beforeEach(() => {
   mockPrepare.mockReset();
   mockBroadcast.mockReset();
   mockWait.mockReset();
+  mockLookup.mockReset();
+  mockLookup.mockResolvedValue(receipt());
 });
 
 afterEach(() => {
@@ -939,6 +948,911 @@ describe('H-V: 画面を離れた試みは新しい効果を始めない', () =>
       expect(b.attempt.value).toMatchObject({ userOpHash: OP_B.userOpHash, txHash: OP_B.txHash, success: true });
       expect(sentOps()).toEqual([OP_B.signedUserOp]);
       expect(loadPendingRecord(KEY)?.status).toBe('confirmed');
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 第 10 回レビュー H-W・H-Y: op を bundler に渡した (かもしれない) 後の終わり方。
+//
+// hook は、CirclePendingError 以外の error で attemptId の対応を消す (次の押下は新しい key = 新しい支払い)。なので、送った後に
+// ふつうの error で終わると、後から確定した前の支払いの後に 2 本目が開く。直した後の終わり方は 3 つだけ:
+//   結果 / CirclePendingError (確認待ち) / まだ渡していない試みの「既に終了」。
+//
+// ここの偽物は bundler とウォレットだけ (circleAccount の 4 つ + bundle の receipt の照会)。記録は本物 (jsdom の localStorage)。
+// 送った後の区間は境界 (inPostSubmit) の中なので、**偽物の中で expect しない** (落ちても CirclePendingError に吸われる)。
+// 送った op・待った hash・その時点の記録は、値として外に持ち出して確かめる。時計 (now) は呼ぶたびに進む。
+// ---------------------------------------------------------------------------
+describe('H-W・H-Y: 送った後の終わり方', () => {
+  const ENDED = 'この決済試行は既に終了しています。新しい決済として実行し直してください。';
+  const PERMIT = { paymasterData: '0xpm' as Hex, permitSignature: PERMIT_SIG };
+
+  // 試みごとに別の op・hash・tx。
+  function op(byte: string) {
+    return {
+      signedUserOp: { sender: OWNER, nonce: `0x${byte}`, signature: '0x' + byte.repeat(65) },
+      userOpHash: ('0x' + byte.repeat(32)) as Hex,
+      txHash: ('0x' + byte.repeat(31) + 'ff') as Hex,
+    };
+  }
+  type Op = ReturnType<typeof op>;
+  const OP1 = op('11');
+  const OP2 = op('22');
+
+  function receiptOf(o: Op, success = true) {
+    return {
+      receipt: { transactionHash: o.txHash, blockNumber: 10n },
+      success,
+      actualGasCost: 1000n,
+    } as never;
+  }
+  const timeoutOf = (o: Op) => new WaitForUserOperationReceiptTimeoutError({ hash: o.userOpHash });
+  // 待ち・照会そのものの失敗 (bundler の 5xx。viem の transport が再試行した後に投げる)。
+  const rpcDown = () => new Error('HTTP request failed. Status: 503');
+
+  const sentOps = () => mockBroadcast.mock.calls.map((c) => c[0].signedUserOp);
+  const waitedHashes = () => mockWait.mock.calls.map((c) => c[0].hash);
+  const lookedUpHashes = () => mockLookup.mock.calls.map((c) => (c[0] as { hash: Hex }).hash);
+
+  function keyOf(paymentAttemptId: string) {
+    return computeIdempotencyKey({
+      chainId: CHAIN_ID,
+      sender: OWNER,
+      paymentAttemptId,
+      callHash: computeCallHash(CALLS),
+    });
+  }
+  const KEY = keyOf('attempt-1');
+  const stored = (key = KEY) => loadPendingRecord(key);
+
+  // 記録を、指定した状態まで本物の遷移で進める。
+  function seed(
+    status: 'awaiting_signature' | 'signed' | 'submitting' | 'confirmed',
+    opts: { attemptId?: string; at?: number; o?: Op; success?: boolean } = {},
+  ) {
+    const { attemptId = 'attempt-1', at = 900, o = OP1, success = true } = opts;
+    const callHash = computeCallHash(CALLS);
+    const key = keyOf(attemptId);
+    reserveOrResume({
+      key,
+      chainId: CHAIN_ID,
+      sender: OWNER,
+      callHash,
+      paymentAttemptId: attemptId,
+      paymaster: PAYMASTER,
+      now: at,
+    });
+    markAwaitingSignature({ key, sender: OWNER, now: at });
+    if (status === 'awaiting_signature') return key;
+    markSigned({ key, sender: OWNER, signedUserOp: o.signedUserOp, userOpHash: o.userOpHash, now: at });
+    if (status === 'signed') return key;
+    markSubmitting({ key, sender: OWNER, now: at });
+    if (status === 'submitting') return key;
+    markConfirmed({ key, sender: OWNER, txHash: o.txHash, success, now: at });
+    return key;
+  }
+
+  // 保存済みの記録を直接書き換える (本物の遷移では作れない状態: failed・別の op の記録への差し替え)。
+  function rewrite(key: string, patch: Record<string, unknown>) {
+    const storageKey = PENDING_KEY_PREFIX + key;
+    const parsed = JSON.parse(window.localStorage.getItem(storageKey)!) as Record<string, unknown>;
+    window.localStorage.setItem(storageKey, JSON.stringify({ ...parsed, ...patch }));
+  }
+  const remove = (key: string) => window.localStorage.removeItem(PENDING_KEY_PREFIX + key);
+
+  // ウォレットは署名 1・署名 2 を承認し、署名 2 は o の op を返す。
+  function walletSigns(o: Op) {
+    mockPermit.mockResolvedValue(PERMIT);
+    mockPrepare.mockResolvedValue({ signedUserOp: o.signedUserOp, userOpHash: o.userOpHash });
+  }
+
+  // storage を壊す spy。試験の途中で戻す (返り値の mockRestore) ほか、afterEach でも必ず戻す。
+  let storageSpies: Array<{ mockRestore: () => void }>;
+  // localStorage を読めなくする (記録の読み取りが PendingStoreUnavailableError になる)。
+  function breakStorageReads() {
+    const spy = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new Error('SecurityError: storage is not available');
+    });
+    storageSpies.push(spy);
+    return spy;
+  }
+  // 指定した status の記録だけ書けなくする (quota)。
+  function failWritesOf(status: PendingStatus) {
+    const realSetItem = Storage.prototype.setItem;
+    const spy = vi
+      .spyOn(Storage.prototype, 'setItem')
+      .mockImplementation(function (this: Storage, k: string, v: string) {
+        if (k.startsWith(PENDING_KEY_PREFIX) && (JSON.parse(v) as { status: string }).status === status) {
+          throw new Error('QuotaExceededError');
+        }
+        realSetItem.call(this, k, v);
+      });
+    storageSpies.push(spy);
+    return spy;
+  }
+
+  // 終わり方を、error の種類ごと取り出す。
+  async function outcome(promise: Promise<unknown>) {
+    try {
+      return { value: (await promise) as Awaited<ReturnType<typeof run>>, error: undefined };
+    } catch (error) {
+      return { value: undefined, error: error as Error & { userOpHash?: Hex } };
+    }
+  }
+
+  function deferred<T>() {
+    let resolve!: (value: T) => void;
+    const promise = new Promise<T>((res) => {
+      resolve = res;
+    });
+    return { promise, resolve };
+  }
+  function track<T>(promise: Promise<T>) {
+    const t: { settled: boolean; value?: T; error?: Error } = { settled: false };
+    promise.then(
+      (value) => {
+        t.settled = true;
+        t.value = value;
+      },
+      (error: Error) => {
+        t.settled = true;
+        t.error = error;
+      },
+    );
+    return t;
+  }
+  const flush = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+  let warnSpy: MockInstance<typeof logger.warn>;
+  let errorSpy: MockInstance<typeof logger.error>;
+  const loggedErrors = () => errorSpy.mock.calls.map((c) => c[0]);
+  const loggedWarns = () => warnSpy.mock.calls.map((c) => c[0]);
+
+  beforeEach(() => {
+    storageSpies = [];
+    warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+    errorSpy = vi.spyOn(logger, 'error').mockImplementation(() => {});
+    // bundler は渡された op の hash を返す。receipt の照会は、hash ごとの receipt を返す (既定)。
+    mockBroadcast.mockImplementation(async ({ signedUserOp }) =>
+      signedUserOp === OP2.signedUserOp ? OP2.userOpHash : OP1.userOpHash,
+    );
+    mockLookup.mockImplementation(async ({ hash }: { hash: Hex }) =>
+      receiptOf(hash === OP2.userOpHash ? OP2 : OP1),
+    );
+  });
+
+  afterEach(() => {
+    for (const spy of storageSpies) spy.mockRestore();
+    warnSpy.mockRestore();
+    errorSpy.mockRestore();
+  });
+
+  // -------------------------------------------------------------------------
+  // H-W: 復旧の送り直しと、ほかの試みの confirmed が競う。
+  // 直す前: 送り直しの **後** に markSubmitting で時刻を書いていたので、その間に記録が confirmed になっていると
+  // PendingStateError (内部の error) で終わり、hook が対応を消した。
+  // -------------------------------------------------------------------------
+  describe('H-W: 復旧の送り直しの前に記録を確かめる', () => {
+    it('resume: 最初の待ちの間に元の試みが confirmed にした → 送り直さず、既払いの結果を返す', async () => {
+      const key = seed('submitting', { at: 900 });
+      mockWait.mockImplementationOnce(async () => {
+        // 自分の送信の receipt を待っていた元の試みが、この待ちの間に確定を書く。
+        markConfirmed({ key, sender: OWNER, txHash: OP1.txHash, success: true, now: now() });
+        throw timeoutOf(OP1);
+      });
+
+      const res = await run();
+
+      expect(res).toMatchObject({ userOpHash: OP1.userOpHash, txHash: OP1.txHash, success: true });
+      expect(sentOps()).toEqual([]);
+      expect(waitedHashes()).toEqual([OP1.userOpHash]);
+      expect(stored(key)?.status).toBe('confirmed');
+      expect(mockPermit).not.toHaveBeenCalled();
+      expect(loggedErrors()).toEqual([]);
+    });
+
+    it('scan (別の attemptId): 最初の待ちの間に元の試みが confirmed にした → 送り直さず、既払いの結果を返す', async () => {
+      const other = seed('submitting', { attemptId: 'other', at: 900 });
+      mockWait.mockImplementationOnce(async () => {
+        markConfirmed({ key: other, sender: OWNER, txHash: OP1.txHash, success: true, now: now() });
+        throw timeoutOf(OP1);
+      });
+
+      const res = await run();
+
+      expect(res).toMatchObject({ userOpHash: OP1.userOpHash, txHash: OP1.txHash, success: true });
+      expect(sentOps()).toEqual([]);
+      expect(mockPermit).not.toHaveBeenCalled();
+      // 自分の key の記録は作っていない (scan で終わった)。
+      expect(stored(KEY)).toBeUndefined();
+    });
+
+    it('resume: 送り直しの RPC の間に元の試みが confirmed にした → 内部の error にならず、既払いの結果を返す', async () => {
+      const key = seed('submitting', { at: 900 });
+      mockWait.mockRejectedValueOnce(timeoutOf(OP1));
+      mockBroadcast.mockImplementationOnce(async () => {
+        markConfirmed({ key, sender: OWNER, txHash: OP1.txHash, success: true, now: now() });
+        return OP1.userOpHash;
+      });
+      mockWait.mockResolvedValueOnce(receiptOf(OP1));
+
+      const res = await run();
+
+      expect(res).toMatchObject({ userOpHash: OP1.userOpHash, txHash: OP1.txHash, success: true });
+      expect(sentOps()).toEqual([OP1.signedUserOp]);
+      expect(waitedHashes()).toEqual([OP1.userOpHash, OP1.userOpHash]);
+      expect(stored(key)?.status).toBe('confirmed');
+      expect(loggedErrors()).toEqual([]);
+    });
+
+    it('timeout のときは今までどおり同じ op を送り直す。送る時刻は **送り直しの前** に書く', async () => {
+      const key = seed('submitting', { at: 900 });
+      const updatedAtAtResend: Array<number | undefined> = [];
+      mockWait.mockRejectedValueOnce(timeoutOf(OP1));
+      mockBroadcast.mockImplementationOnce(async () => {
+        updatedAtAtResend.push(stored(key)?.updatedAt);
+        return OP1.userOpHash;
+      });
+      mockWait.mockResolvedValueOnce(receiptOf(OP1));
+
+      const res = await run();
+
+      expect(res).toMatchObject({ userOpHash: OP1.userOpHash, txHash: OP1.txHash });
+      expect(sentOps()).toEqual([OP1.signedUserOp]);
+      // bundler へ渡す時点で、記録の時刻は seed (900) より後に進んでいる。
+      expect(updatedAtAtResend).toHaveLength(1);
+      expect(updatedAtAtResend[0]).toBeGreaterThan(900);
+    });
+
+    it('待つ間に、同じ key の記録が別の op のものに替わっていた → 古い op を送り直さず、替わった記録も書き換えない', async () => {
+      const key = seed('submitting', { at: 900 });
+      mockWait.mockImplementationOnce(async () => {
+        rewrite(key, { userOpHash: OP2.userOpHash, signedUserOp: OP2.signedUserOp, updatedAt: 950 });
+        throw timeoutOf(OP1);
+      });
+
+      const { error } = await outcome(run());
+
+      expect(error).toBeInstanceOf(CirclePendingError);
+      // 確認待ちの op は、いま記録にある op。
+      expect(error?.userOpHash).toBe(OP2.userOpHash);
+      expect(sentOps()).toEqual([]);
+      expect(waitedHashes()).toEqual([OP1.userOpHash]);
+      expect(stored(key)).toMatchObject({ status: 'submitting', userOpHash: OP2.userOpHash, updatedAt: 950 });
+    });
+
+    it('送り直しの前の時刻を書けない (storage) → 送り直さず、確認待ち・元の error は log に残す', async () => {
+      const key = seed('submitting', { at: 900 });
+      mockWait.mockRejectedValueOnce(timeoutOf(OP1));
+      const writes = failWritesOf('submitting');
+
+      const { error } = await outcome(run());
+      writes.mockRestore();
+
+      expect(error).toBeInstanceOf(CirclePendingError);
+      expect(error?.userOpHash).toBe(OP1.userOpHash);
+      expect(sentOps()).toEqual([]);
+      expect(stored(key)).toMatchObject({ status: 'submitting', updatedAt: 900 });
+      expect(loggedErrors()).toEqual(['circle.post_submit.unexpected']);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // H-Y (M1): receipt の待ちが timeout 以外で失敗した (bundler の 429・5xx・通信断)。
+  // 直す前: そのまま投げてふつうの error になり、hook が対応を消した。
+  // 直した後: 確認待ち。その押下では送り直さない・記録の時刻も進めない。
+  // -------------------------------------------------------------------------
+  describe('H-Y: 待ちの失敗 (timeout 以外) は確認待ち・その押下で送り直さない', () => {
+    it('自分の送信の後の待ちが失敗 → 確認待ち・送信は 1 回・記録は submitting のまま時刻も進まない', async () => {
+      walletSigns(OP1);
+      const updatedAtAtSend: Array<number | undefined> = [];
+      mockBroadcast.mockImplementationOnce(async () => {
+        updatedAtAtSend.push(stored()?.updatedAt);
+        return OP1.userOpHash;
+      });
+      mockWait.mockRejectedValue(rpcDown());
+
+      const { error } = await outcome(run());
+
+      expect(error).toBeInstanceOf(CirclePendingError);
+      expect(error?.userOpHash).toBe(OP1.userOpHash);
+      expect(sentOps()).toEqual([OP1.signedUserOp]);
+      expect(waitedHashes()).toEqual([OP1.userOpHash]);
+      expect(stored()).toMatchObject({ status: 'submitting', userOpHash: OP1.userOpHash });
+      expect(stored()?.signedUserOp).toEqual(OP1.signedUserOp);
+      expect(stored()?.updatedAt).toBe(updatedAtAtSend[0]);
+      // 想定した失敗: warn に残す。境界の「想定していない throw」ではない。
+      expect(loggedWarns()).toEqual(['circle.wait.failed']);
+      expect(loggedErrors()).toEqual([]);
+    });
+
+    it('自分の送信の応答を失い、復旧の待ちも失敗 → 確認待ち・送り直さない', async () => {
+      walletSigns(OP1);
+      mockBroadcast.mockRejectedValueOnce(new Error('socket hang up'));
+      mockWait.mockRejectedValue(rpcDown());
+
+      const { error } = await outcome(run());
+
+      expect(error).toBeInstanceOf(CirclePendingError);
+      expect(error?.userOpHash).toBe(OP1.userOpHash);
+      expect(sentOps()).toEqual([OP1.signedUserOp]);
+      expect(waitedHashes()).toEqual([OP1.userOpHash]);
+      expect(stored()?.status).toBe('submitting');
+      expect(loggedErrors()).toEqual([]);
+    });
+
+    it('resume の復旧: 最初の待ちが失敗 → 確認待ち・送り直さない・時刻は進まない', async () => {
+      const key = seed('submitting', { at: 900 });
+      mockWait.mockRejectedValue(rpcDown());
+
+      const { error } = await outcome(run());
+
+      expect(error).toBeInstanceOf(CirclePendingError);
+      expect(error?.userOpHash).toBe(OP1.userOpHash);
+      expect(sentOps()).toEqual([]);
+      expect(waitedHashes()).toEqual([OP1.userOpHash]);
+      expect(stored(key)).toMatchObject({ status: 'submitting', updatedAt: 900 });
+      expect(mockPermit).not.toHaveBeenCalled();
+      expect(loggedWarns()).toEqual(['circle.wait.failed']);
+      expect(loggedErrors()).toEqual([]);
+    });
+
+    it('scan の復旧 (別の attemptId): 最初の待ちが失敗 → 確認待ち・送り直さない・新しい署名も求めない', async () => {
+      const other = seed('submitting', { attemptId: 'other', at: 900 });
+      mockWait.mockRejectedValue(rpcDown());
+
+      const { error } = await outcome(run());
+
+      expect(error).toBeInstanceOf(CirclePendingError);
+      expect(error?.userOpHash).toBe(OP1.userOpHash);
+      expect(sentOps()).toEqual([]);
+      expect(stored(other)).toMatchObject({ status: 'submitting', updatedAt: 900 });
+      expect(mockPermit).not.toHaveBeenCalled();
+      expect(loggedErrors()).toEqual([]);
+    });
+
+    it('復旧: timeout → 送り直し → その後の待ちが失敗 → 確認待ち・送り直しは 1 回だけ・時刻は送り直しの前に書いたまま', async () => {
+      const key = seed('submitting', { at: 900 });
+      const updatedAtAtResend: Array<number | undefined> = [];
+      mockWait.mockRejectedValueOnce(timeoutOf(OP1));
+      mockBroadcast.mockImplementationOnce(async () => {
+        updatedAtAtResend.push(stored(key)?.updatedAt);
+        return OP1.userOpHash;
+      });
+      mockWait.mockRejectedValueOnce(rpcDown());
+
+      const { error } = await outcome(run());
+
+      expect(error).toBeInstanceOf(CirclePendingError);
+      expect(sentOps()).toEqual([OP1.signedUserOp]);
+      expect(waitedHashes()).toEqual([OP1.userOpHash, OP1.userOpHash]);
+      expect(stored(key)?.status).toBe('submitting');
+      expect(stored(key)?.updatedAt).toBe(updatedAtAtResend[0]);
+      expect(loggedErrors()).toEqual([]);
+    });
+
+    it('確認待ちの後、もう一度押すと同じ op を復旧して結果を返す (新しい署名も 2 本目の op も無い)', async () => {
+      walletSigns(OP1);
+      mockWait.mockRejectedValueOnce(rpcDown());
+      const first = await outcome(run());
+      expect(first.error).toBeInstanceOf(CirclePendingError);
+
+      mockWait.mockResolvedValueOnce(receiptOf(OP1));
+      const res = await run(); // 同じ attempt-1 (hook は確認待ちでは対応を残す)
+
+      expect(res).toMatchObject({ userOpHash: OP1.userOpHash, txHash: OP1.txHash, success: true });
+      expect(mockPermit).toHaveBeenCalledTimes(1);
+      expect(mockPrepare).toHaveBeenCalledTimes(1);
+      expect(sentOps()).toEqual([OP1.signedUserOp]);
+      expect(stored()?.status).toBe('confirmed');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // H-Y: confirmed の記録の結果。直す前は receipt を waitForUserOperationReceipt (最大 120 秒) で取り直し、timeout 以外の
+  // 失敗をそのまま投げていた (払い終えた支払いが、ふつうの error になって対応が消える)。
+  // -------------------------------------------------------------------------
+  describe('H-Y: confirmed の記録の結果は、receipt を取り直せなくても保存した値で返す', () => {
+    it('resume: receipt の照会が失敗 → 保存した値で既払いの結果を返す (120 秒の待ちは使わない)', async () => {
+      const key = seed('confirmed', { at: 900 });
+      mockLookup.mockRejectedValue(rpcDown());
+      mockWait.mockRejectedValue(rpcDown()); // 直す前の経路 (待ち) も同じく失敗する
+
+      const res = await run();
+
+      expect(res).toEqual({
+        userOpHash: OP1.userOpHash,
+        txHash: OP1.txHash,
+        blockNumber: 0n,
+        success: true,
+        actualGasCost: 0n,
+      });
+      expect(lookedUpHashes()).toEqual([OP1.userOpHash]);
+      expect(mockWait).not.toHaveBeenCalled();
+      expect(sentOps()).toEqual([]);
+      expect(mockPermit).not.toHaveBeenCalled();
+      expect(stored(key)?.status).toBe('confirmed');
+      expect(loggedWarns()).toEqual(['circle.confirmed.receipt-unavailable']);
+      expect(loggedErrors()).toEqual([]);
+    });
+
+    it('scan (90 秒以内の別の attemptId): receipt の照会が失敗 → 保存した値で既払いの結果を返す', async () => {
+      seed('confirmed', { attemptId: 'other', at: 990 });
+      mockLookup.mockRejectedValue(rpcDown());
+      mockWait.mockRejectedValue(rpcDown());
+
+      const res = await run();
+
+      expect(res).toMatchObject({ userOpHash: OP1.userOpHash, txHash: OP1.txHash, success: true });
+      expect(mockWait).not.toHaveBeenCalled();
+      expect(mockPermit).not.toHaveBeenCalled();
+      expect(sentOps()).toEqual([]);
+    });
+
+    it('receipt が取れれば receipt の値で返す (照会は 1 回・待ちは使わない)', async () => {
+      seed('confirmed', { at: 900 });
+
+      const res = await run();
+
+      expect(res).toEqual({
+        userOpHash: OP1.userOpHash,
+        txHash: OP1.txHash,
+        blockNumber: 10n,
+        success: true,
+        actualGasCost: 1000n,
+      });
+      expect(lookedUpHashes()).toEqual([OP1.userOpHash]);
+      expect(mockWait).not.toHaveBeenCalled();
+      expect(loggedWarns()).toEqual([]);
+    });
+
+    it('取り直せないとき、success は保存した値のまま (revert 済みを成功にしない・旧 record は false 側)', async () => {
+      const key = seed('confirmed', { at: 900, success: false });
+      mockLookup.mockRejectedValue(rpcDown());
+      expect((await run()).success).toBe(false);
+
+      // success を持たない旧 record。
+      const parsed = JSON.parse(window.localStorage.getItem(PENDING_KEY_PREFIX + key)!) as Record<string, unknown>;
+      delete parsed.success;
+      window.localStorage.setItem(PENDING_KEY_PREFIX + key, JSON.stringify(parsed));
+      expect((await run()).success).toBe(false);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // D5: 同じ key の 2 つの試み (複製したタブ・開き直した画面) が両方署名した。後から署名を終えた側の markSigned は CAS で
+  // 外れる。直す前: PendingStateError (内部の error) で終わり、対応を消した。直した後: 自分の op は送らず、記録に従う。
+  // -------------------------------------------------------------------------
+  describe('D5: markSigned の CAS が外れたら、自分の op は送らず、記録に従う', () => {
+    // 署名 2 を待つ間に、同じ key を使う別の画面が自分の op (OP1) を先に進める。こちらの署名 2 は OP2 を返す。
+    function otherScreenWhileSigning(advance: (key: string) => void) {
+      seed('awaiting_signature', { at: 900 });
+      mockPermit.mockResolvedValue(PERMIT);
+      mockPrepare.mockImplementationOnce(async () => {
+        advance(KEY);
+        return { signedUserOp: OP2.signedUserOp, userOpHash: OP2.userOpHash };
+      });
+    }
+    function otherSends(key: string) {
+      markSigned({ key, sender: OWNER, signedUserOp: OP1.signedUserOp, userOpHash: OP1.userOpHash, now: now() });
+      markSubmitting({ key, sender: OWNER, now: now() });
+    }
+
+    it('2 つの画面が同時に署名: 後の側は送らず、先の側の op の receipt を待って同じ結果を受け取る', async () => {
+      const signA = deferred<{ signedUserOp: Record<string, unknown>; userOpHash: Hex }>();
+      const signB = deferred<{ signedUserOp: Record<string, unknown>; userOpHash: Hex }>();
+      mockPermit.mockResolvedValue(PERMIT);
+      mockPrepare.mockReturnValueOnce(signA.promise).mockReturnValueOnce(signB.promise);
+      const included = deferred<void>();
+      mockWait.mockImplementation(async ({ hash }) => {
+        await included.promise;
+        return receiptOf(hash === OP2.userOpHash ? OP2 : OP1);
+      });
+
+      const a = track(run());
+      await flush();
+      const b = track(run()); // 同じ attempt-1 = 同じ key の記録 (awaiting_signature) を resume する
+      await flush();
+      expect(mockPrepare).toHaveBeenCalledTimes(2);
+
+      signA.resolve({ signedUserOp: OP1.signedUserOp, userOpHash: OP1.userOpHash });
+      await flush();
+      expect(sentOps()).toEqual([OP1.signedUserOp]);
+      expect(stored()).toMatchObject({ status: 'submitting', userOpHash: OP1.userOpHash });
+
+      signB.resolve({ signedUserOp: OP2.signedUserOp, userOpHash: OP2.userOpHash });
+      await flush();
+      // B は自分の op (OP2) を保存も送信もせず、A の op の receipt を待っている。
+      expect(b.settled).toBe(false);
+      expect(sentOps()).toEqual([OP1.signedUserOp]);
+      expect(stored()).toMatchObject({ status: 'submitting', userOpHash: OP1.userOpHash });
+
+      included.resolve();
+      await flush();
+
+      const paid = { userOpHash: OP1.userOpHash, txHash: OP1.txHash, success: true };
+      expect(a.value).toMatchObject(paid);
+      expect(b.value).toMatchObject(paid);
+      expect(sentOps()).toEqual([OP1.signedUserOp]);
+      expect(waitedHashes()).toEqual([OP1.userOpHash, OP1.userOpHash]);
+      expect(stored()).toMatchObject({ status: 'confirmed', userOpHash: OP1.userOpHash, txHash: OP1.txHash });
+      expect(loggedErrors()).toEqual([]);
+    });
+
+    it('先の側がもう confirmed → 記録の結果を返す (自分の op は送らない)', async () => {
+      otherScreenWhileSigning((key) => {
+        otherSends(key);
+        markConfirmed({ key, sender: OWNER, txHash: OP1.txHash, success: true, now: now() });
+      });
+
+      const res = await run();
+
+      expect(res).toMatchObject({ userOpHash: OP1.userOpHash, txHash: OP1.txHash, success: true });
+      expect(sentOps()).toEqual([]);
+      expect(mockWait).not.toHaveBeenCalled();
+      expect(stored()).toMatchObject({ status: 'confirmed', userOpHash: OP1.userOpHash });
+    });
+
+    it('先の側が submitting で、その op の待ちが timeout → 先の側の op (自分の op ではない) を送り直して結果を返す', async () => {
+      otherScreenWhileSigning(otherSends);
+      mockWait.mockRejectedValueOnce(timeoutOf(OP1));
+      mockWait.mockResolvedValueOnce(receiptOf(OP1));
+
+      const res = await run();
+
+      expect(res).toMatchObject({ userOpHash: OP1.userOpHash, txHash: OP1.txHash, success: true });
+      expect(sentOps()).toEqual([OP1.signedUserOp]);
+      expect(waitedHashes()).toEqual([OP1.userOpHash, OP1.userOpHash]);
+    });
+
+    it('先の側が submitting で、その op の待ちの間に先の側が confirmed にした → 送り直さず、記録の結果を返す', async () => {
+      otherScreenWhileSigning(otherSends);
+      mockWait.mockImplementationOnce(async () => {
+        markConfirmed({ key: KEY, sender: OWNER, txHash: OP1.txHash, success: true, now: now() });
+        throw timeoutOf(OP1);
+      });
+
+      const res = await run();
+
+      expect(res).toMatchObject({ userOpHash: OP1.userOpHash, txHash: OP1.txHash, success: true });
+      expect(sentOps()).toEqual([]);
+    });
+
+    it('先の側が submitting で、その op の待ちが失敗 → 確認待ち (先の側の op の hash)・何も送らない', async () => {
+      otherScreenWhileSigning(otherSends);
+      mockWait.mockRejectedValue(rpcDown());
+
+      const { error } = await outcome(run());
+
+      expect(error).toBeInstanceOf(CirclePendingError);
+      expect(error?.userOpHash).toBe(OP1.userOpHash);
+      expect(sentOps()).toEqual([]);
+      expect(stored()).toMatchObject({ status: 'submitting', userOpHash: OP1.userOpHash });
+    });
+
+    it('記録が abandoned になっていた (別のタブの scan が 3 分で見捨てた) → 「既に終了」・確認待ちにしない・何も送らない', async () => {
+      otherScreenWhileSigning((key) => {
+        abandon({ key, sender: OWNER, now: now() });
+      });
+
+      const { error } = await outcome(run());
+
+      expect(error).not.toBeInstanceOf(CirclePendingError);
+      expect(error?.name).toBe('Error');
+      expect(error?.message).toBe(ENDED);
+      expect(sentOps()).toEqual([]);
+      expect(stored()?.status).toBe('abandoned');
+      expect(loggedErrors()).toEqual([]);
+    });
+
+    it('渡していない試み: 記録が failed → 「既に終了」(確認待ちにしない)', async () => {
+      otherScreenWhileSigning((key) => {
+        otherSends(key);
+        rewrite(key, { status: 'failed' });
+      });
+
+      const { error } = await outcome(run());
+
+      expect(error).not.toBeInstanceOf(CirclePendingError);
+      expect(error?.message).toBe(ENDED);
+      expect(sentOps()).toEqual([]);
+      expect(mockWait).not.toHaveBeenCalled();
+      expect(stored()?.status).toBe('failed');
+    });
+
+    it('記録が消えていた → 「既に終了」・何も送らない', async () => {
+      otherScreenWhileSigning(remove);
+
+      const { error } = await outcome(run());
+
+      expect(error).not.toBeInstanceOf(CirclePendingError);
+      expect(error?.message).toBe(ENDED);
+      expect(sentOps()).toEqual([]);
+      expect(stored()).toBeUndefined();
+    });
+
+    it('markSigned を書けない (storage の失敗) は CAS の失敗ではない → 今までどおりふつうの error・何も送らない', async () => {
+      walletSigns(OP1);
+      const writes = failWritesOf('signed');
+
+      const { error } = await outcome(run());
+      writes.mockRestore();
+
+      expect(error?.name).toBe('PendingStoreWriteError');
+      expect(sentOps()).toEqual([]);
+      expect(stored()?.status).toBe('awaiting_signature');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // M2: 復旧の送り直しの前の CAS が外れたときの「記録に従う」は、この押下で op を渡したかで分ける。
+  // -------------------------------------------------------------------------
+  describe('M2: 記録に従う — この押下で op を渡したかで分ける', () => {
+    // 自分で署名して送り、待ちが timeout → 復旧の最初の待ちの間に、記録が書き換わる (whileWaiting) → timeout。
+    async function handedOffThenCasMiss(whileWaiting: () => void) {
+      walletSigns(OP1);
+      mockWait.mockRejectedValueOnce(timeoutOf(OP1));
+      mockWait.mockImplementationOnce(async () => {
+        whileWaiting();
+        throw timeoutOf(OP1);
+      });
+      return outcome(run());
+    }
+
+    it('渡した後: 記録が failed → 確認待ち (「既に終了」にしない)・error の log・送り直さない', async () => {
+      const { error } = await handedOffThenCasMiss(() => rewrite(KEY, { status: 'failed' }));
+
+      expect(error).toBeInstanceOf(CirclePendingError);
+      expect(error?.userOpHash).toBe(OP1.userOpHash);
+      expect(sentOps()).toEqual([OP1.signedUserOp]);
+      expect(stored()?.status).toBe('failed');
+      expect(errorSpy.mock.calls).toEqual([
+        [
+          'circle.follow.failed-after-handoff',
+          { userOpHash: OP1.userOpHash, recordUserOpHash: OP1.userOpHash },
+        ],
+      ]);
+    });
+
+    it('渡した後: 記録が消えていた → 確認待ち (「既に終了」にしない)', async () => {
+      const { error } = await handedOffThenCasMiss(() => remove(KEY));
+
+      expect(error).toBeInstanceOf(CirclePendingError);
+      expect(error?.userOpHash).toBe(OP1.userOpHash);
+      expect(sentOps()).toEqual([OP1.signedUserOp]);
+    });
+
+    it('渡した後: 記録が confirmed で自分の hash → 記録の結果 (別の画面の復旧が先に確定を書いた)', async () => {
+      const { value } = await handedOffThenCasMiss(() =>
+        markConfirmed({ key: KEY, sender: OWNER, txHash: OP1.txHash, success: true, now: now() }),
+      );
+
+      expect(value).toMatchObject({ userOpHash: OP1.userOpHash, txHash: OP1.txHash, success: true });
+      expect(sentOps()).toEqual([OP1.signedUserOp]);
+    });
+
+    it('渡した後: 記録が confirmed でも自分の hash でない → 結果にしない (確認待ち)', async () => {
+      const { error } = await handedOffThenCasMiss(() =>
+        rewrite(KEY, {
+          status: 'confirmed',
+          userOpHash: OP2.userOpHash,
+          signedUserOp: OP2.signedUserOp,
+          txHash: OP2.txHash,
+          success: true,
+        }),
+      );
+
+      expect(error).toBeInstanceOf(CirclePendingError);
+      expect(error?.userOpHash).toBe(OP1.userOpHash);
+      expect(sentOps()).toEqual([OP1.signedUserOp]);
+    });
+
+    // 渡していない試み (resume の復旧) の、同じ場面。
+    async function notHandedOffThenCasMiss(whileWaiting: (key: string) => void) {
+      const key = seed('submitting', { at: 900 });
+      mockWait.mockImplementationOnce(async () => {
+        whileWaiting(key);
+        throw timeoutOf(OP1);
+      });
+      return outcome(run());
+    }
+
+    it('渡していない: 記録が failed → 「既に終了」(確認待ちにしない)・送り直さない', async () => {
+      const { error } = await notHandedOffThenCasMiss((key) => rewrite(key, { status: 'failed' }));
+
+      expect(error).not.toBeInstanceOf(CirclePendingError);
+      expect(error?.message).toBe(ENDED);
+      expect(sentOps()).toEqual([]);
+      expect(loggedErrors()).toEqual([]);
+    });
+
+    it('渡していない: 記録が消えていた → 「既に終了」・送り直さない', async () => {
+      const { error } = await notHandedOffThenCasMiss(remove);
+
+      expect(error).not.toBeInstanceOf(CirclePendingError);
+      expect(error?.message).toBe(ENDED);
+      expect(sentOps()).toEqual([]);
+    });
+
+    it('渡していない: 記録が confirmed なら hash を問わず記録の結果を返す', async () => {
+      const { value } = await notHandedOffThenCasMiss((key) =>
+        rewrite(key, {
+          status: 'confirmed',
+          userOpHash: OP2.userOpHash,
+          signedUserOp: OP2.signedUserOp,
+          txHash: OP2.txHash,
+          success: true,
+        }),
+      );
+
+      expect(value).toMatchObject({ userOpHash: OP2.userOpHash, txHash: OP2.txHash, success: true });
+      expect(sentOps()).toEqual([]);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // receipt を取った後の記録の更新 (markConfirmed) の失敗。直す前: PendingStateError / 書込の error で終わり、
+  // 取り込まれた支払いが「失敗」と出て対応が消えた。
+  // -------------------------------------------------------------------------
+  describe('D4: receipt を取った後に記録を更新できなくても、結果は返す', () => {
+    it('待つ間に記録が消えていた → 結果を返す・error の log', async () => {
+      walletSigns(OP1);
+      mockWait.mockImplementationOnce(async () => {
+        remove(KEY);
+        return receiptOf(OP1);
+      });
+
+      const res = await run();
+
+      expect(res).toMatchObject({ userOpHash: OP1.userOpHash, txHash: OP1.txHash, success: true, blockNumber: 10n });
+      expect(sentOps()).toEqual([OP1.signedUserOp]);
+      expect(stored()).toBeUndefined();
+      expect(loggedErrors()).toEqual(['circle.confirm.record-failed']);
+      expect(errorSpy.mock.calls[0][1]).toMatchObject({ userOpHash: OP1.userOpHash, txHash: OP1.txHash });
+    });
+
+    it('confirmed を書けない (storage) → 結果を返す・記録は submitting のまま。次の押下は同じ op を復旧して同じ結果', async () => {
+      walletSigns(OP1);
+      mockWait.mockResolvedValue(receiptOf(OP1));
+      const writes = failWritesOf('confirmed');
+
+      const res = await run();
+      writes.mockRestore();
+
+      expect(res).toMatchObject({ userOpHash: OP1.userOpHash, txHash: OP1.txHash, success: true });
+      expect(stored()?.status).toBe('submitting');
+      expect(loggedErrors()).toEqual(['circle.confirm.record-failed']);
+
+      const again = await run();
+      expect(again).toMatchObject({ userOpHash: OP1.userOpHash, txHash: OP1.txHash, success: true });
+      expect(sentOps()).toEqual([OP1.signedUserOp]);
+      expect(mockPermit).toHaveBeenCalledTimes(1);
+      expect(stored()?.status).toBe('confirmed');
+    });
+
+    it('待つ間に記録が別の op のものに替わっていた → 結果は返すが、その記録を confirmed にしない', async () => {
+      walletSigns(OP1);
+      mockWait.mockImplementationOnce(async () => {
+        rewrite(KEY, { userOpHash: OP2.userOpHash, signedUserOp: OP2.signedUserOp });
+        return receiptOf(OP1);
+      });
+
+      const res = await run();
+
+      expect(res).toMatchObject({ userOpHash: OP1.userOpHash, txHash: OP1.txHash, success: true });
+      expect(stored()).toMatchObject({ status: 'submitting', userOpHash: OP2.userOpHash });
+      expect(stored()?.txHash).toBeUndefined();
+      expect(loggedErrors()).toEqual(['circle.confirm.record-failed']);
+    });
+
+    it('待つ間に記録が failed になっていたが receipt が取れた → 結果を返し、記録を confirmed に直す・error の log', async () => {
+      walletSigns(OP1);
+      mockWait.mockImplementationOnce(async () => {
+        rewrite(KEY, { status: 'failed' });
+        return receiptOf(OP1);
+      });
+
+      const res = await run();
+
+      expect(res).toMatchObject({ userOpHash: OP1.userOpHash, txHash: OP1.txHash, success: true });
+      expect(stored()).toMatchObject({ status: 'confirmed', userOpHash: OP1.userOpHash, txHash: OP1.txHash });
+      expect(loggedErrors()).toEqual(['circle.pending.confirmed-after-failed']);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // 境界: 自分の markSubmitting が返った後の、想定していない throw。
+  // -------------------------------------------------------------------------
+  describe('境界: 送った後の想定していない throw は確認待ちに変え、元の error を log に残す', () => {
+    it('送信の応答を失った後、記録を読めない (storage) → 確認待ち', async () => {
+      walletSigns(OP1);
+      let reads: ReturnType<typeof breakStorageReads> | undefined;
+      mockBroadcast.mockImplementationOnce(async () => {
+        reads = breakStorageReads();
+        throw new Error('socket hang up');
+      });
+
+      const { error } = await outcome(run());
+      reads?.mockRestore();
+
+      expect(error).toBeInstanceOf(CirclePendingError);
+      expect(error?.userOpHash).toBe(OP1.userOpHash);
+      expect(sentOps()).toEqual([OP1.signedUserOp]);
+      expect(mockWait).not.toHaveBeenCalled();
+      expect(stored()).toMatchObject({ status: 'submitting', userOpHash: OP1.userOpHash });
+      expect(loggedErrors()).toEqual(['circle.post_submit.unexpected']);
+      const fields = errorSpy.mock.calls[0][1] as { userOpHash: Hex; error: Error };
+      expect(fields.userOpHash).toBe(OP1.userOpHash);
+      expect(fields.error.name).toBe('PendingStoreUnavailableError');
+    });
+
+    it('送信の後の待ちが timeout し、記録を読めない (storage) → 確認待ち', async () => {
+      walletSigns(OP1);
+      let reads: ReturnType<typeof breakStorageReads> | undefined;
+      mockWait.mockImplementationOnce(async () => {
+        reads = breakStorageReads();
+        throw timeoutOf(OP1);
+      });
+
+      const { error } = await outcome(run());
+      reads?.mockRestore();
+
+      expect(error).toBeInstanceOf(CirclePendingError);
+      expect(error?.userOpHash).toBe(OP1.userOpHash);
+      expect(sentOps()).toEqual([OP1.signedUserOp]);
+      expect(stored()?.status).toBe('submitting');
+      expect(loggedErrors()).toEqual(['circle.post_submit.unexpected']);
+    });
+
+    it('scan の復旧 (別の attemptId) で、送り直しの前の時刻を書けない (storage) → 確認待ち・新しい署名へ進まない', async () => {
+      const other = seed('submitting', { attemptId: 'other', at: 900 });
+      mockWait.mockRejectedValueOnce(timeoutOf(OP1));
+      failWritesOf('submitting');
+
+      const { error } = await outcome(run());
+
+      expect(error).toBeInstanceOf(CirclePendingError);
+      expect(error?.userOpHash).toBe(OP1.userOpHash);
+      expect(sentOps()).toEqual([]);
+      expect(mockPermit).not.toHaveBeenCalled();
+      expect(stored(other)).toMatchObject({ status: 'submitting', updatedAt: 900 });
+      expect(loggedErrors()).toEqual(['circle.post_submit.unexpected']);
+    });
+
+    it('markSigned の CAS が外れて先の側の op を復旧する途中で、storage が投げる → 確認待ち・自分の op は送らない', async () => {
+      seed('awaiting_signature', { at: 900 });
+      mockPermit.mockResolvedValue(PERMIT);
+      mockPrepare.mockImplementationOnce(async () => {
+        // 同じ key を使う別の画面が、先に自分の op (OP1) を送った。その後、submitting の記録を書けなくなる。
+        markSigned({ key: KEY, sender: OWNER, signedUserOp: OP1.signedUserOp, userOpHash: OP1.userOpHash, now: now() });
+        markSubmitting({ key: KEY, sender: OWNER, now: now() });
+        failWritesOf('submitting');
+        return { signedUserOp: OP2.signedUserOp, userOpHash: OP2.userOpHash };
+      });
+      mockWait.mockRejectedValueOnce(timeoutOf(OP1));
+
+      const { error } = await outcome(run());
+
+      expect(error).toBeInstanceOf(CirclePendingError);
+      expect(sentOps()).toEqual([]);
+      expect(waitedHashes()).toEqual([OP1.userOpHash]);
+      expect(stored()).toMatchObject({ status: 'submitting', userOpHash: OP1.userOpHash });
+      expect(loggedErrors()).toEqual(['circle.post_submit.unexpected']);
+    });
+
+    it('markSubmitting を書けない → 境界の外 = ふつうの error (送っていない試みを確認待ちにしない)', async () => {
+      walletSigns(OP1);
+      const writes = failWritesOf('submitting');
+
+      const { error } = await outcome(run());
+      writes.mockRestore();
+
+      expect(error).not.toBeInstanceOf(CirclePendingError);
+      expect(error?.name).toBe('PendingStoreWriteError');
+      expect(sentOps()).toEqual([]);
+      expect(mockWait).not.toHaveBeenCalled();
+      expect(stored()?.status).toBe('signed');
+      expect(loggedErrors()).toEqual([]);
     });
   });
 });
