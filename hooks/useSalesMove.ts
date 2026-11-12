@@ -44,6 +44,10 @@
 // 使っていれば JPYC は動いている・第 10 回レビュー PR-03 Codex MUST 1)。照会で新しい署名を許すのは期限切れ未使用の証明だけ。
 // (200 の reverted は別: server が revert のブロックに固定して authorization が未使用だと読めたときだけ返す・lib/relay/revertRecheck.ts。)
 //
+// 成立が確定した後の次の移動 (第 10 回レビュー D-4): resetAfterSuccess が画面の結果だけを消して入力へ戻す。開けるのは、画面に
+// 返している result が success のときだけで、送信済み・確定待ち・応答不明・照会中・未解決の枠がある間は何もしない。枠・保持・
+// 控えには触らない (成立した移動の枠と保持は、成立が分かった時点で外れている)。次の移動は新しい署名 (新しい nonce) になる。
+//
 // 決済でもチップでもないので、お店の履歴 (lib/history・売上・CSV・集計) には入れない。支払う側の控え (lib/payerReceipt) にだけ
 // 「届く額」と「利用料」を別の項目で残す (§2.2・Q6)。署名・鍵・秘密の値はログに出さない (logger には chainId と段階だけ)。
 
@@ -702,6 +706,15 @@ export function useSalesMove(
   const mutationMutateAsync = mutation.mutateAsync;
   const mutationReset = mutation.reset;
 
+  // 画面に返す結果 (同じ画面での照会の終端 → mutation の data → 開き直したときの照会の順)。
+  const result = followedResult ?? mutationData ?? restoredResult ?? undefined;
+  // resetAfterSuccess が見る値。画面に返す result と同じ式の値を render ごとに写す (labelsRef と同じ形)。別の state や ref から
+  // 「成立した」を組み立て直さない (画面の表示と入口の条件を別々の式にしない)。写すのは render の時点なので、React が捨てた
+  // render の値が残ることはありうる (commit された DOM と一致する保証ではない)。その場合も、試み中は下の entryRef が、未解決の
+  // 保持がある間は runMove の保持の確認が、次の署名を止める。
+  const resultRef = useRef(result);
+  resultRef.current = result;
+
   // 入口の同期の部分: 試み中なら null (新しい mutation を作らない)。そうでなければ印を立てて試みの番号を返す。
   const claimEntry = useCallback((): number | null => {
     if (entryRef.current !== 'idle') return null;
@@ -764,6 +777,27 @@ export function useSalesMove(
     setFollowedResult(null);
   }, [mutationReset]);
 
+  // 「もう一度移す」(第 10 回レビュー D-4): 成立が確定した表示から入力へ戻し、次の移動を始められるようにする。
+  // 開けるのは、画面が「移しました」を描いているときだけ = 画面に返している result (resultRef) が success のとき。送信済み・
+  // 確定待ち (202)・応答不明・照会中・開き直した枠が未解決の間は result が success にならないので、呼ばれても何もしない
+  // (画面がボタンを出さないことだけに頼らない)。
+  // 消すのは画面の結果だけ (mutation の data・照会の結果)。復旧の枠・保持・支払う側の控えには触らない: 成立した移動の枠と保持は、
+  // 成立が分かった時点で send / resolveAmbiguous が外しているので、ここで消すものは残っていない (未解決の枠を消す道を作らない)。
+  // その移動の署名済みの payload も成立の時点で残っていない (保持は外れている・枠は署名を持たない) ので、ここから前の署名が
+  // 送られることは無く、次の移動は runMove が新しい intentSalt で新しい署名を求める。ここでは保持 (retainedRef) を見ない:
+  // 成立の後に moveAsync で始めた別の試みの保持が残っていても、この関数は保持に触らず、次の署名は runMove の保持の確認が止める。
+  const resetAfterSuccess = useCallback(() => {
+    if (resultRef.current?.success !== true) return;
+    // 試み中 (claimed / running) は何もしない。何の波及を断つか: mutationReset は observer を今の mutation から外すので、
+    // 試みの途中に呼ばれると、その試みの結果 (成立・送信済み) が画面に出なくなり、お店が知らずにもう 1 回移す操作へ進める。
+    // (成立の表示の後に moveAsync で始めた試みと同じ tick に呼ばれたとき。画面は move しか使わないので、画面からは来ない。)
+    if (entryRef.current !== 'idle') return;
+    mutationReset();
+    setRestoredResult(null);
+    setRestoredError(null);
+    setFollowedResult(null);
+  }, [mutationReset]);
+
   // 「もう一度確かめる」(第 10 回レビュー G-2): 照会を打ち切った後に、同じ nonce の status をもう一度読む。読み取りだけで、
   // 署名も POST もしない。送信済みかもしれない保持があるときだけ動く (IP 制限の再送待ち・保持なしでは何もしない)。照会が
   // 動いている間に押されても、同じ照会に付くだけで 2 本目は始めない (resolveAmbiguous)。
@@ -777,8 +811,9 @@ export function useSalesMove(
     moveAsync,
     move,
     reset,
+    resetAfterSuccess,
     recheck,
-    result: followedResult ?? mutationData ?? restoredResult ?? undefined,
+    result,
     // 同じ画面での照会が終端に着いたら、その前の応答不明の error は出さない (結果が分かった)。
     error: followedResult ? null : mutation.error ?? restoredError,
     isPending: !storageReady || mutation.isPending || recoveryState === 'auto',

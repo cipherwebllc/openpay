@@ -79,7 +79,14 @@ describe('salesMoveErrorKey', () => {
     // この端末に復旧の枠を書けないので送らなかった (第 10 回レビュー G-1)。「時間をおいて」の文言にしない。
     ['intent_storage_unavailable', 'storageUnavailable'],
     ['relay_unused', 'generic'],
-    ['signature_invalid', 'generic'],
+    // server が署名から送り元を確かめられなかった (第 10 回レビュー D-4)。待っても変わらないので「時間をおいて」の generic にしない。
+    ['signature_invalid', 'signatureRejected'],
+    ['signature_mismatch', 'signatureRejected'],
+    // 残高を読めなかった (server の RPC)・hosted intent の入口の拒否・知らないコードは generic のまま。
+    ['preflight_unavailable', 'generic'],
+    ['hosted_intent_required', 'generic'],
+    ['invalid_payload', 'generic'],
+    ['expired', 'generic'],
   ])('%s → %s', (code, key) => {
     expect(salesMoveErrorKey(new Error(code))).toBe(key);
   });

@@ -1,12 +1,12 @@
-# Private R2 delivery gate (SDK 0.8.0 initial generation)
+# Private R2 delivery gate (SDK 0.11.0 or later)
 
 This template verifies an OpenPay 60-second bearer ticket before accessing R2.
 It uses `openpay-x402-sdk/delivery`, standard WebCrypto `Ed25519`, and no Node
 compatibility flag. Package source/tests are not a real Workers deployment proof.
 
-1. Use the reviewed 0.8.0 package artifact in a seller project; it is not assumed
-   published. After publication, the dependency can be installed from the official
-   npm registry. Copy `worker.mjs` and `wrangler.toml` together.
+1. In your seller project, install the published `openpay-x402-sdk`, 0.11.0 or
+   later, from the official npm registry (`npm install openpay-x402-sdk`). Copy
+   `worker.mjs` and `wrangler.toml` together.
 2. Create a **private** R2 bucket, upload each immutable revision, and replace
    `bucket_name`. Disable public r2.dev access and public bucket custom domains.
    Remove any old unsigned object URL; ordinary product content should contain

@@ -175,14 +175,29 @@ export function NativeTipForm({ params }: { params: NativeTipParams }) {
     nativeSymbol,
   ]);
 
+  // 同じ tick の 2 回目のクリックを断つ同期の印 (AgentFundFromWallet の submittingRef と同じ型)。
+  // canSubmit の isSending は再描画の後にしか変わらないので、再描画の前に続けてクリックされると
+  // ウォレットへの送金の依頼が 2 件出て、両方を承認するとチップが二重に届く。その波及を断つ。
+  const sendingRef = useRef(false);
+
   function onSubmit() {
-    if (!canSubmit) return;
+    if (!canSubmit || sendingRef.current) return;
+    sendingRef.current = true;
     submittedAmountRef.current = amountStr;
-    sendTransaction({
-      to: params.to,
-      value: amountWei,
-      chainId: requiredChain.id,
-    });
+    sendTransaction(
+      {
+        to: params.to,
+        value: amountWei,
+        chainId: requiredChain.id,
+      },
+      {
+        // 依頼の結果が決まったら (hash が返った・拒否・error のどれでも) 外す。その後の再送の可否は
+        // 今までどおり canSubmit (txHash と revert) が決める。
+        onSettled: () => {
+          sendingRef.current = false;
+        },
+      },
+    );
   }
 
   const explorerBase = blockExplorerUrl(requiredChain.id);

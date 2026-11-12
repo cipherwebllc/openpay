@@ -40,6 +40,8 @@ const w = vi.hoisted(() => {
       connector: undefined,
     },
     balance: { data: undefined as bigint | undefined, isError: false },
+    // 「ウォレットにある JPYC」の読み直し (wagmi の useReadContract の refetch)。
+    refetchBalance: vi.fn(),
     resolveRelayIntent: vi.fn(),
   };
 });
@@ -48,7 +50,7 @@ vi.mock('wagmi', () => ({
   useAccount: () => w.account,
   useWalletClient: () => w.walletClient,
   usePublicClient: () => w.publicClient,
-  useReadContract: () => w.balance,
+  useReadContract: () => ({ ...w.balance, refetch: w.refetchBalance }),
   useSwitchChain: () => useSwitchChainStub(w.switchStub as SwitchChainStub),
 }));
 vi.mock('@/lib/env', async (importOriginal) => {
@@ -529,6 +531,263 @@ describe('SalesMoveForm: 確認と結果', () => {
   });
 });
 
+// 第 10 回レビュー D-4: 成立が確定した表示にだけ「もう一度移す」を出し、開き直さずに次の移動を始められる。hook は実物
+// (差し替えるのは wagmi・fetch・status の照会だけ)。
+describe('SalesMoveForm: 成立の後の「もう一度移す」(第 10 回レビュー D-4)', () => {
+  const DEST2: Address = '0x2222222222222222222222222222222222222222';
+  const TX2: Hex = `0x${'b'.repeat(64)}`;
+  const SIGNATURE1: Hex = `0x${'ab'.repeat(65)}`;
+  const SIGNATURE2: Hex = `0x${'cd'.repeat(65)}`;
+  const OK1: Reply = { status: 200, body: { ok: true, txHash: TX } };
+  const OK2: Reply = { status: 200, body: { ok: true, txHash: TX2 } };
+  const PENDING: Reply = { status: 202, body: { ok: false, pending: true, txHash: TX } };
+
+  function storeIntent() {
+    window.sessionStorage.setItem(
+      SALES_MOVE_INTENT_STORAGE_KEY,
+      JSON.stringify({
+        version: 1,
+        chainId: CHAIN,
+        from: FROM,
+        merchant: DEST,
+        merchantValue: (5n * JPYC).toString(),
+        feeValue: FEE.toString(),
+        nonce: `0x${'c'.repeat(64)}`,
+        validBefore: '9999999999',
+        issuedAt: 1_700_000_000_000,
+      }),
+    );
+  }
+
+  function posted(): Record<string, unknown>[] {
+    return fetchMock.mock.calls.map(([, init]) => JSON.parse(String(init?.body)));
+  }
+
+  async function sign() {
+    await waitFor(() => expect(screen.getByRole('button', { name: m.signButton })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: m.signButton }));
+  }
+
+  async function moveOnce(destination: string = DEST, amount = '5') {
+    await toReview(destination, amount);
+    await sign();
+  }
+
+  it('成功 → 「もう一度移す」→ 空の入力に戻る → 別の送り先・額を新しい nonce の署名で 1 回だけ POST する', async () => {
+    replies = [OK1, OK2];
+    w.signTypedData.mockResolvedValueOnce(SIGNATURE1).mockResolvedValueOnce(SIGNATURE2);
+    renderForm();
+    await moveOnce(DEST, '5');
+    expect(await screen.findByText(m.success)).toBeInTheDocument();
+    expect(w.refetchBalance).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: m.moveAgain }));
+    // 入力に戻る。前の送り先・額・確認・成立の表示を持ち越さない。
+    expect(screen.getByLabelText(m.destinationLabel)).toHaveValue('');
+    expect(screen.getByLabelText(m.amountLabel)).toHaveValue('');
+    expect(screen.queryByText(m.success)).toBeNull();
+    expect(screen.queryByText(m.pending)).toBeNull();
+    expect(screen.queryByRole('button', { name: m.signButton })).toBeNull();
+    expect(screen.queryByRole('button', { name: m.moveAgain })).toBeNull();
+    expect(screen.getByRole('button', { name: m.reviewButton })).toBeDisabled();
+    // 「ウォレットにある JPYC」を読み直す (移す前の額を出したままにしない)。
+    expect(w.refetchBalance).toHaveBeenCalledTimes(1);
+    // 戻っただけでは、署名も POST もしない。
+    expect(w.signTypedData).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    await moveOnce(DEST2, '7');
+    expect(await screen.findByRole('link', { name: `${m.viewTx} ↗` })).toHaveAttribute('href', txExplorerUrl(CHAIN, TX2));
+    expect(screen.getByText(m.success)).toBeInTheDocument();
+    expect(w.signTypedData).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(w.signTypedData.mock.calls[1][0].message.nonce).not.toBe(w.signTypedData.mock.calls[0][0].message.nonce);
+    const [first, second] = posted();
+    expect(first).toMatchObject({ signature: SIGNATURE1, merchant: DEST, merchantValue: (5n * JPYC).toString() });
+    expect(second).toMatchObject({ signature: SIGNATURE2, merchant: DEST2, merchantValue: (7n * JPYC).toString() });
+    expect(second.intentSalt).not.toBe(first.intentSalt);
+    expect(window.sessionStorage.getItem(SALES_MOVE_INTENT_STORAGE_KEY)).toBeNull();
+    // 2 回目の成立の後も、また始められる。
+    expect(screen.getByRole('button', { name: m.moveAgain })).toBeEnabled();
+  });
+
+  it('送り先が contract のときのチェックは、次の移動でやり直す (前のチェックを持ち越さない)', async () => {
+    w.getCode.mockResolvedValue('0x6080604052');
+    renderForm();
+    await toReview();
+    fireEvent.click(await screen.findByRole('checkbox', { name: m.contractConfirm }));
+    await sign();
+    await screen.findByText(m.success);
+
+    fireEvent.click(screen.getByRole('button', { name: m.moveAgain }));
+    await toReview(DEST, '5');
+    const checkbox = await screen.findByRole('checkbox', { name: m.contractConfirm });
+    expect(checkbox).not.toBeChecked();
+    expect(screen.getByRole('button', { name: m.signButton })).toBeDisabled();
+    expect(w.signTypedData).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('送信済み・未確定 (202) → 「もう一度確かめる」で成立 → 「もう一度移す」で入力に戻る (送信済みの表示に戻らない)', async () => {
+    replies = [PENDING, OK2];
+    renderForm();
+    await moveOnce();
+    const recheck = await screen.findByRole('button', { name: m.recheck });
+    expect(screen.queryByRole('button', { name: m.moveAgain })).toBeNull();
+    w.resolveRelayIntent.mockResolvedValueOnce({ kind: 'settled', txHash: TX, success: true });
+    fireEvent.click(recheck);
+    expect(await screen.findByText(m.success)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: m.moveAgain }));
+    expect(screen.getByLabelText(m.destinationLabel)).toHaveValue('');
+    expect(screen.queryByText(m.pending)).toBeNull();
+    expect(screen.queryByText(m.success)).toBeNull();
+
+    await moveOnce(DEST2, '3');
+    expect(await screen.findByRole('link', { name: `${m.viewTx} ↗` })).toHaveAttribute('href', txExplorerUrl(CHAIN, TX2));
+    expect(w.signTypedData).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(w.signTypedData.mock.calls[1][0].message.nonce).not.toBe(w.signTypedData.mock.calls[0][0].message.nonce);
+  });
+
+  it('開き直したときの照会で成立 → 「もう一度移す」で入力に戻り、新しい署名で移せる', async () => {
+    storeIntent();
+    w.resolveRelayIntent.mockResolvedValueOnce({ kind: 'settled', txHash: TX, success: true });
+    replies = [OK2];
+    renderForm();
+    expect(await screen.findByText(m.success)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: m.moveAgain }));
+    expect(screen.getByLabelText(m.destinationLabel)).toHaveValue('');
+    expect(w.signTypedData).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    await moveOnce(DEST2, '3');
+    expect(await screen.findByRole('link', { name: `${m.viewTx} ↗` })).toHaveAttribute('href', txExplorerUrl(CHAIN, TX2));
+    expect(w.signTypedData).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(w.signTypedData.mock.calls[0][0].message.nonce).not.toBe(`0x${'c'.repeat(64)}`);
+    expect(w.resolveRelayIntent).toHaveBeenCalledTimes(1);
+  });
+
+  // 成立が確定していない表示には出さない (送信済み・確定待ち・応答不明・照会中・未解決の枠・成立しなかった・拒否)。
+  it.each<[string, () => Promise<void>, string]>([
+    [
+      '送信済み・未確定 (202・照会を打ち切った後)',
+      async () => {
+        replies = [PENDING];
+        renderForm();
+        await moveOnce();
+        await screen.findByRole('button', { name: m.recheck });
+      },
+      m.pending,
+    ],
+    [
+      '送信済み・未確定 (202・照会の間)',
+      async () => {
+        replies = [PENDING];
+        w.resolveRelayIntent.mockReturnValueOnce(new Promise(() => undefined));
+        renderForm();
+        await moveOnce();
+        await screen.findByText(m.pending);
+      },
+      m.pending,
+    ],
+    [
+      '応答不明',
+      async () => {
+        replies = [{ network: true }];
+        renderForm();
+        await moveOnce();
+        await screen.findByRole('button', { name: m.recheck });
+      },
+      m.pending,
+    ],
+    [
+      '開き直した枠が未解決',
+      async () => {
+        storeIntent();
+        renderForm();
+        await screen.findByRole('button', { name: m.recheck });
+      },
+      m.pending,
+    ],
+    [
+      '成立しなかった (revert)',
+      async () => {
+        replies = [{ status: 200, body: { ok: false, reverted: true, txHash: TX } }];
+        renderForm();
+        await moveOnce();
+        await screen.findByText(m.reverted);
+      },
+      m.reverted,
+    ],
+    [
+      'server の拒否',
+      async () => {
+        replies = [{ status: 400, body: { ok: false, error: 'signature_mismatch' } }];
+        renderForm();
+        await moveOnce();
+        await screen.findByText(m.errors.signatureRejected);
+      },
+      m.errors.signatureRejected,
+    ],
+  ])('%s の表示には「もう一度移す」を出さない', async (_name, arrange, shown) => {
+    await arrange();
+    expect(screen.getByText(shown)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: m.moveAgain })).toBeNull();
+    expect(screen.queryByText(m.success)).toBeNull();
+  });
+
+  it('en でも「Move again」を出す', async () => {
+    renderForm('en');
+    fireEvent.change(screen.getByLabelText(en.Create.salesMove.destinationLabel), { target: { value: DEST } });
+    fireEvent.change(screen.getByLabelText(en.Create.salesMove.amountLabel), { target: { value: '5' } });
+    fireEvent.click(screen.getByRole('button', { name: en.Create.salesMove.reviewButton }));
+    await waitFor(() => expect(screen.getByRole('button', { name: en.Create.salesMove.signButton })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: en.Create.salesMove.signButton }));
+    await screen.findByText(en.Create.salesMove.success);
+    fireEvent.click(screen.getByRole('button', { name: en.Create.salesMove.moveAgain }));
+    expect(screen.getByLabelText(en.Create.salesMove.destinationLabel)).toHaveValue('');
+  });
+});
+
+// 第 10 回レビュー D-4: server が署名を確かめられなかったときは、「時間をおいて」の generic ではなく専用の文言を出す。
+describe('SalesMoveForm: 署名を確かめられなかったときの文言 (第 10 回レビュー D-4)', () => {
+  it.each(['signature_invalid', 'signature_mismatch'])('%s → 専用の文言 (generic を出さない)。JPYC は動いていないので、入力へ戻れる', async (code) => {
+    replies = [{ status: 400, body: { ok: false, error: code } }];
+    renderForm();
+    await toReview();
+    await waitFor(() => expect(screen.getByRole('button', { name: m.signButton })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: m.signButton }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(m.errors.signatureRejected);
+    expect(screen.queryByText(m.errors.generic)).toBeNull();
+    expect(screen.queryByText(m.pending)).toBeNull();
+    expect(screen.getByRole('button', { name: m.backButton })).toBeEnabled();
+    expect(window.sessionStorage.getItem(SALES_MOVE_INTENT_STORAGE_KEY)).toBeNull();
+  });
+
+  it('en の文言', async () => {
+    replies = [{ status: 400, body: { ok: false, error: 'signature_invalid' } }];
+    renderForm('en');
+    fireEvent.change(screen.getByLabelText(en.Create.salesMove.destinationLabel), { target: { value: DEST } });
+    fireEvent.change(screen.getByLabelText(en.Create.salesMove.amountLabel), { target: { value: '5' } });
+    fireEvent.click(screen.getByRole('button', { name: en.Create.salesMove.reviewButton }));
+    await waitFor(() => expect(screen.getByRole('button', { name: en.Create.salesMove.signButton })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: en.Create.salesMove.signButton }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(en.Create.salesMove.errors.signatureRejected);
+    expect(screen.queryByText(en.Create.salesMove.errors.generic)).toBeNull();
+  });
+
+  // 分かっているのは「server がこのウォレットの署名を確かめられなかった」ことだけ。待てば通るとも、このウォレットは使えないとも
+  // 書かない (試した範囲だけを書く)。連絡先も書かない。
+  it('文言は「時間をおいて」と言わず、ウォレットが使えないとも言い切らない', () => {
+    expect(m.errors.signatureRejected).not.toMatch(/時間をおいて|待って|使えません|対応していません|@/);
+    expect(en.Create.salesMove.errors.signatureRejected).not.toMatch(/later|wait|not supported|unsupported|can't be used|cannot be used|@/i);
+    expect(m.errors.signatureRejected).toContain('JPYC は動いていません');
+    expect(en.Create.salesMove.errors.signatureRejected).toContain("your JPYC didn't move");
+  });
+});
+
 describe('SalesMoveForm: 開き直したときの照会', () => {
   function storeIntent() {
     window.sessionStorage.setItem(
@@ -645,6 +904,37 @@ describe('SalesMoveForm: 文字のコントラスト (WCAG 2.2 AA)', () => {
     await screen.findByText(m.success);
     const { failures } = auditAllStates(screen.getByTestId('sales-move'));
     expect(failures).toEqual([]);
+  });
+
+  it('成立の表示の「もう一度移す」(第 10 回レビュー D-4)', async () => {
+    renderForm();
+    await toReview();
+    await waitFor(() => expect(screen.getByRole('button', { name: m.signButton })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: m.signButton }));
+    await screen.findByText(m.success);
+    const { failures, checked, boundaries } = auditAllStates(screen.getByTestId('sales-move'));
+    expect(failures).toEqual([]);
+    expect(checked.filter((c) => c.state === 'base').map((c) => c.text)).toEqual(
+      expect.arrayContaining([m.success, m.moveAgain]),
+    );
+    expect(boundaries.map((b) => b.text)).toContain(m.moveAgain);
+    // 押せるものは 44px (min-h-11)。a11y の名前は見えている文字から (aria-label を付けない・掟 8)。
+    const button = screen.getByRole('button', { name: m.moveAgain });
+    expect(button.className).toContain('min-h-11');
+    expect(button).not.toHaveAttribute('aria-label');
+    expect(button).toHaveTextContent(m.moveAgain);
+  });
+
+  it('署名を確かめられなかったときの文言 (確認の段のエラー・第 10 回レビュー D-4)', async () => {
+    replies = [{ status: 400, body: { ok: false, error: 'signature_invalid' } }];
+    renderForm();
+    await toReview();
+    await waitFor(() => expect(screen.getByRole('button', { name: m.signButton })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: m.signButton }));
+    await screen.findByText(m.errors.signatureRejected);
+    const { failures, checked } = auditAllStates(screen.getByTestId('sales-move'));
+    expect(failures).toEqual([]);
+    expect(checked.filter((c) => c.state === 'base').map((c) => c.text)).toContain(m.errors.signatureRejected);
   });
 
   it('送信済みの表示と「もう一度確かめる」(照会を打ち切った後)', async () => {

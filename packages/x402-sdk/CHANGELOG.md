@@ -1,6 +1,14 @@
 # Changelog
 
-## 0.11.0 — unreleased
+## 0.11.1 — 2026-11-12
+
+- Docs only. The 0.11.0 heading below now carries its release date (it said
+  "unreleased" in the 0.11.0 tarball), and the Cloudflare R2 example README now
+  says to install the published SDK, 0.11.0 or later, from the official npm
+  registry (it still described an unpublished 0.8.0 artifact). The code is
+  unchanged and there are no dependency changes.
+
+## 0.11.0 — 2026-11-10
 
 **Migration:** `DeliveryVerification.basis` gains a third value, `'seller'`, and
 the delivery verifier now admits seller tickets by default. If your code switches
