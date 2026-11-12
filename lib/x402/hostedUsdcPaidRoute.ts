@@ -3,6 +3,7 @@ import 'server-only';
 import { NextResponse } from 'next/server';
 import {
   formatUnits,
+  getAddress,
   isAddress,
   isAddressEqual,
   type Address,
@@ -330,9 +331,14 @@ function exactClaim(input: {
   ) {
     return { ok: false, error: 'invalid_payment_payload' };
   }
+  // claim の hash (storeUsdcAuthorizationHash) は claim の文字列から作る。保存する側 (claimSignedStoreUsdcIntent の
+  // parseClaim) と保存済みの intent (parseStoreUsdcIntent) は payer / to を checksum の形にそろえてから同じ hash を
+  // 作って比べるので、ここも同じ形にそろえる。そろえないと、小文字の address を送る client は verify を通った後に
+  // 必ず hash の不一致で 409 になる (第 10 回レビュー B2-1)。getAddress に渡すのは上の isAddress を通った値だけで、
+  // checksum が壊れた address は今までどおり上で invalid_payment_payload になる。
   const claim: StoreUsdcAuthorizationClaim = {
-    payer: from as Address,
-    to: to as Address,
+    payer: getAddress(from),
+    to: getAddress(to),
     value: BigInt(value).toString(),
     validAfter: BigInt(validAfter).toString(),
     validBefore: BigInt(validBefore).toString(),

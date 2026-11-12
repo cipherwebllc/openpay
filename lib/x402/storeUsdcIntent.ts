@@ -777,15 +777,21 @@ export async function claimSignedStoreUsdcIntent(input: {
   return { ok: true, intent: signed, kind: 'claimed' };
 }
 
-export async function claimStoreUsdcSettlement(input: {
-  intentSalt: Hex;
-  now?: number;
-}): Promise<
+type ClaimStoreUsdcSettlementResult =
   | { ok: true; kind: 'claimed'; intent: SettlingStoreUsdcIntent }
   | { ok: true; kind: 'pending'; intent: SettlingStoreUsdcIntent | IndeterminateStoreUsdcIntent }
   | { ok: true; kind: 'settled'; intent: SettledStoreUsdcIntent }
-  | { ok: false; reason: 'not_found' | 'expired' | 'conflict' | 'storage' | 'corrupt' }
-> {
+  | { ok: false; reason: 'not_found' | 'expired' | 'conflict' | 'storage' | 'corrupt' };
+
+// settling への移行の CAS が負けたときに、最初から読み直してやり直す回数の上限 (第 10 回レビュー B2-2)。
+// signed の intent を書き換える相手は reconcile (cron・status route) と、同じ署名の別 request だけで、どちらも
+// 1 回の実行で 1 回しか書かない。待たずに読み直すだけなので、小さい固定の回数にする。
+const MAX_SETTLEMENT_CLAIM_RETRIES = 3;
+
+async function claimSettlementInternal(
+  input: { intentSalt: Hex; now?: number },
+  retries: number,
+): Promise<ClaimStoreUsdcSettlementResult> {
   const read = await readIntent(input.intentSalt);
   if (!read.ok) return { ok: false, reason: read.reason };
   if (!read.intent || !read.raw) return { ok: false, reason: 'not_found' };
@@ -830,8 +836,25 @@ export async function claimStoreUsdcSettlement(input: {
   };
   const updated = await casIntent({ currentRaw: read.raw, next: settling });
   if (updated === 'storage') return { ok: false, reason: 'storage' };
-  if (updated === 'conflict') return { ok: false, reason: 'conflict' };
+  if (updated === 'conflict') {
+    // CAS は保存値の全文一致なので、read と CAS の間に reconcile が再試行時刻 (nextReconcileAt) を書いただけでも
+    // 負ける。そこで conflict を返すと、署名は生きているのに誰も settle せず、rail の枠 (claimStoreRailSelection) も
+    // この署名が持ったままなので、見積もりからやり直した買い手は前の署名の期限までその商品を買えない (B2-2)。
+    // 最初から読み直す = 同じヘッダーを送り直したときと同じ判定を通す: すでに settling / indeterminate なら pending・
+    // settled なら settled・まだ signed で同じ署名なら期限と rail を確かめ直してもう一度 CAS。
+    // 読み直した後は、最初の呼び出しと同じ判定を全部通る (rail の枠の Lua が、別の署名なら拒む)。
+    // 'claimed' (= 呼び出し側が settle を呼ぶ) を返すのは、自分の CAS が通った回だけ。
+    if (retries <= 0) return { ok: false, reason: 'conflict' };
+    return claimSettlementInternal(input, retries - 1);
+  }
   return { ok: true, kind: 'claimed', intent: settling };
+}
+
+export function claimStoreUsdcSettlement(input: {
+  intentSalt: Hex;
+  now?: number;
+}): Promise<ClaimStoreUsdcSettlementResult> {
+  return claimSettlementInternal(input, MAX_SETTLEMENT_CLAIM_RETRIES);
 }
 
 export async function markStoreUsdcIndeterminate(input: {

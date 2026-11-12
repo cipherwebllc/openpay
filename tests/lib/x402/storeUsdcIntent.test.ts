@@ -158,6 +158,52 @@ describe('Store USDC TypeScript admission and KV reply handling', () => {
     expect(h.select).not.toHaveBeenCalled();
   });
 
+  // 第 10 回レビュー B2-2: settling への CAS が負けたときのやり直し (本物の Lua を通す版は hostedUsdcClaimRace-lua.test.ts)。
+  it('retries a lost settlement CAS from the re-read intent when the authorization is the same', async () => {
+    const rescheduled = { ...signed, nextReconcileAt: active.settlementStartedAt + 30_000, reconcileFromBlock: '95' };
+    reads(key, signed, rescheduled);
+    h.kvEval.mockResolvedValueOnce({ ok: true, value: -1 }).mockResolvedValue({ ok: true, value: 1 });
+    const result = await claimStoreUsdcSettlement({ intentSalt: SALT, now: active.settlementStartedAt });
+    // reconcile が書いた cursor を消さない = 2 回目は読み直した値から作り、読み直した raw を CAS の基準にする。
+    expect(result).toMatchObject({ ok: true, kind: 'claimed', intent: { state: 'settling', reconcileFromBlock: '95', authorizationHash: signed.authorizationHash } });
+    expect(h.kvEval).toHaveBeenCalledTimes(2);
+    expect(h.kvEval.mock.calls[0]![2][3]).toBe(JSON.stringify(signed));
+    expect(h.kvEval.mock.calls[1]![2][3]).toBe(JSON.stringify(rescheduled));
+    expect(h.select).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    ['settling', active, { ok: true, kind: 'pending' }],
+    ['settled', settled, { ok: true, kind: 'settled' }],
+    ['storage', 'storage', { ok: false, reason: 'storage' }],
+  ] as const)('after a lost settlement CAS, a re-read %s intent is reported without a second CAS', async (_label, latest, expected) => {
+    if (latest === 'storage') {
+      h.kvGet.mockReset().mockResolvedValueOnce({ ok: true, value: JSON.stringify(signed) }).mockResolvedValue({ ok: false });
+    } else {
+      reads(key, signed, latest);
+    }
+    h.kvEval.mockResolvedValueOnce({ ok: true, value: -1 }).mockResolvedValue({ ok: true, value: 1 });
+    expect(await claimStoreUsdcSettlement({ intentSalt: SALT, now: active.settlementStartedAt })).toMatchObject(expected);
+    expect(h.kvEval).toHaveBeenCalledTimes(1);
+  });
+
+  it('after a lost settlement CAS, an authorization that expired in the meantime is reported as expired', async () => {
+    reads(key, signed, { ...signed, nextReconcileAt: active.settlementStartedAt + 30_000 });
+    h.kvEval.mockResolvedValueOnce({ ok: true, value: -1 }).mockResolvedValue({ ok: true, value: 1 });
+    // やり直しの回は時刻を取り直す (期限の判定は settling を取る回の入場条件)。
+    const clock = vi.spyOn(Date, 'now').mockReturnValueOnce(active.settlementStartedAt).mockReturnValue(signed.fxQuoteExpiresAt);
+    expect(await claimStoreUsdcSettlement({ intentSalt: SALT })).toEqual({ ok: false, reason: 'expired' });
+    expect(h.kvEval).toHaveBeenCalledTimes(1);
+    clock.mockRestore();
+  });
+
+  it('gives up with conflict after three retries of a lost settlement CAS', async () => {
+    reads(key, signed);
+    h.kvEval.mockResolvedValue({ ok: true, value: -1 });
+    expect(await claimStoreUsdcSettlement({ intentSalt: SALT, now: active.settlementStartedAt })).toEqual({ ok: false, reason: 'conflict' });
+    expect(h.kvEval).toHaveBeenCalledTimes(4);
+  });
+
   it('checks the attempt/hash before record and indeterminate CAS', async () => {
     const input = { intentSalt: SALT, attemptId: active.attemptId, txHash: TX, now: NOW };
     expect(await recordStoreUsdcTransaction(input)).toBe('updated');
