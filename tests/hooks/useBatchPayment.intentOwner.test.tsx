@@ -854,6 +854,11 @@ describe('筋 2: 最初の送信の拒否の片付け (c2) は、同じ intent �
       secondHook.result.current.retryReceipt();
       await waitFor(() => expect(secondHook.result.current.isSuccess).toBe(true));
       expect(sentOp(second, 1).nonce).toBe(aNonce);
+      // 作り直した op は A とは別の op (fake は準備のたびに fee を変える = 「fee が変わった作り直し」の模型で、本番の保証ではない)。
+      // 下の「閉じた扱い」の期待は、**hash が別のときだけ** 成り立つ: c2 は閉じる前に bundler へ A の hash の状態を聞き、bundler は
+      // その hash を知らない (not_found)。hash に入る欄が全部同じ作り直しは A と同じ hash になり、bundler はその hash を知って
+      // いるので閉じない (下の「同じ op を送り直して受理・確定した」の test と同じ結果 = 応答不明)。
+      expect(world.hashOf(sentOp(second, 1))).not.toBe(world.hashOf(sentOp(first, 0)));
       expect(world.mined).toHaveLength(1);
       expect(pendingKeys()).toHaveLength(0);
       secondHook.unmount();

@@ -8,9 +8,12 @@
 //   - bundler: 同じ op の 2 回目は「Already known」、同じ nonce の別の op は「Replacement underpriced」で断る
 //     (どちらも -32602・HTTP 200)。
 //   - mine() を呼ぶまで receipt は無い。
-//   - pimlico_getUserOperationStatus: 知らない hash は not_found・mempool にあれば submitted・mine 済みなら included
-//     (world.statusOf)。hook は、最初の送信の検証の拒否で閉じる前にこれを 1 回聞く。test は `bundlerStatus` の
-//     mockImplementationOnce で答え方 (任意の値・JSON-RPC の error・HTTP の失敗・応答なし) を変える。
+//   - pimlico_getUserOperationStatus (world.statusOf): Pimlico の bundler (Alto) の StatusManager の動きの模型。
+//     知らない hash は not_found・受理して mempool にあれば not_submitted・mine 済みなら included。status は **最後に書かれてから
+//     1 時間で消え**、その後は取り込み済みの op でも not_found (読んでも期限は延びない)。受理された op の重複の配送を断っても、
+//     前の status は書き換わらない (accept が投げるときは status に触らない)。時刻は Date.now (test が Date を fake にすれば従う)。
+//     hook は、最初の送信の検証の拒否で閉じる前にこれを 1 回聞く。test は `bundlerStatus` の mockImplementationOnce で答え方
+//     (任意の値・JSON-RPC の error・HTTP の失敗・応答なし) を変える。
 //
 // eth_sendUserOperation は HTTP の層で偽物にする: hook (pimlicoSend.ts の broadcastPimlicoUserOp) は client の
 // transport の URL へ、viem の http transport で送り、HTTP の status を見て失敗を分ける。fakePimlicoClients は global の
@@ -77,6 +80,9 @@ export type BundlerStatusReply =
   // 本文が JSON-RPC でない HTTP の失敗。
   | { status: number; body: string };
 
+/** fake の bundler が status を持つ時間 (最後の書き込みから)。Alto の StatusManager と Pimlico の文書の 1 時間。 */
+export const FAKE_STATUS_TTL_MS = 60 * 60 * 1000;
+
 /** 応答が返らなかったとき (http の timeout) に viem が投げる error (MAv2 の facade の test が使う)。 */
 export function bundlerTimeout(): TimeoutError {
   return new TimeoutError({
@@ -103,8 +109,10 @@ export function createFakeBundlerWorld(options?: { chainId?: number }) {
   // mine された op (確定した支払い)。
   const mined: Array<{ op: SignedOp; hash: Hex; success: boolean }> = [];
   let nextKey = 1_700_000_000_000n;
-  // 準備の通し番号 (client をまたいで数える: ページを読み直した後の作り直しも、元の op とは別の op になる)。
+  // 準備の通し番号 (client をまたいで数える)。下の fakePimlicoClients の prepareUserOperation のコメント。
   let prepared = 0n;
+  // status を最後に書いた時刻 (hash ごと)。書くのは受理 (accept) と取り込み (mine) のときだけ。
+  const statusWrittenAt = new Map<Hex, number>();
 
   const seqOf = (key: bigint) => nextSeq.get(key) ?? 0n;
 
@@ -136,6 +144,7 @@ export function createFakeBundlerWorld(options?: { chainId?: number }) {
     }
     const hash = legacyHashes.get(nonce) ?? hashOf(op);
     mempool.set(nonce, { op, hash });
+    statusWrittenAt.set(hash, Date.now());
     return hash;
   }
 
@@ -174,6 +183,7 @@ export function createFakeBundlerWorld(options?: { chainId?: number }) {
       },
     });
     mined.push({ op, hash: minedHash, success });
+    statusWrittenAt.set(minedHash, Date.now());
     return minedHash;
   }
 
@@ -186,12 +196,18 @@ export function createFakeBundlerWorld(options?: { chainId?: number }) {
     nextSeq.set(key, seq + 1n);
   }
 
-  /** bundler が知っている、その hash の op の状態 (pimlico_getUserOperationStatus の result)。 */
+  /** bundler が知っている、その hash の op の状態 (pimlico_getUserOperationStatus の result)。最後の書き込みから
+   * FAKE_STATUS_TTL_MS を過ぎた status は消えている (mempool にある op・取り込み済みの op でも not_found)。 */
   function statusOf(hash: Hex): { status: string; transactionHash: Hex | null } {
+    const writtenAt = statusWrittenAt.get(hash);
+    if (writtenAt === undefined || Date.now() - writtenAt >= FAKE_STATUS_TTL_MS) {
+      return { status: 'not_found', transactionHash: null };
+    }
     const receipt = receipts.get(hash);
     if (receipt) return { status: 'included', transactionHash: receipt.receipt.transactionHash };
+    // 受理した後に mempool から落とした op (consumeNonceByOtherOp) は rejected。
     const pending = [...mempool.values()].some((entry) => entry.hash === hash);
-    return { status: pending ? 'submitted' : 'not_found', transactionHash: null };
+    return { status: pending ? 'not_submitted' : 'rejected', transactionHash: null };
   }
 
   return {
@@ -339,9 +355,12 @@ export function fakePimlicoClients(args: {
 
   const getNonce: Mock<() => Promise<bigint>> = vi.fn(async () => world.reserveNonce());
 
-  // 準備のたびに fee が少し変わる (作り直しの op は、同じ nonce でも元の op と別の op になる)。通し番号は world が持つ:
-  // client ごとに数えると、読み直した後の画面の作り直しの op が、前の画面の op と 1 字も違わない (hash も同じ) op になり、
-  // bundler の status (hash で引く) が「作り直しの op」と「元の op」を取り違える。
+  // 準備のたびに fee が少し変わる。これは **「fee が変わった作り直し」の模型** で、本番の保証ではない: 本番では、読み込み直した
+  // 後の作り直しでも、hash に入る欄 (nonce・callData・gas・fee・paymaster の欄) が全部同じなら同じ userOpHash になる (署名は
+  // hash に入らないので、署名が違っても変わらない)。通し番号は world が持つ (client をまたいで数える): client ごとに数えると、
+  // 読み直した後の画面の作り直しの op が、前の画面の op と同じ hash になり、「作り直した別の op」の筋を書けない。
+  // 同じ hash になる筋 (bundler がその hash を知っている → 閉じない) は、test が同じ op を送り直して作る
+  // (tests/hooks/useBatchPayment.intentOwner.test.tsx の「同じ op を送り直して受理・確定した」)。
   const prepareUserOperation: Mock<
     (parameters: { calls: readonly Call[]; nonce: bigint }) => Promise<UserOperation>
   > = vi.fn(async ({ calls, nonce }) => {

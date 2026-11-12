@@ -9,8 +9,9 @@
 // 別の nonce の op・別の内容の支払いを作らず、画面は通常決済も止める (isUnknown)。閉じるのは
 //   c1 候補の hash のどれかに receipt がある
 //   c2 最初の送信を bundler が検証で拒否し (HTTP 2xx + ERC-7769 の code)、拒否の文 (bundler が返した文) が nonce・mempool・
-//      重複・置き換えに触れておらず、bundler にその op の状態を聞いて「その hash を知らない」(not_found) と答えた → 記録を
-//      消したと確かめてから。語に当たる・status が not_found でない・status を読めないときは閉じない (応答不明)
+//      重複・置き換えに触れておらず、bundler にその op の状態を聞いて「その hash を知らない」(not_found) と答え、渡してから
+//      status を聞き終えるまでが 30 秒未満 (壁時計と単調な時計の両方) → 記録を消したと確かめてから。語に当たる・status が
+//      not_found でない・status を読めない・30 秒以上たっているときは閉じない (応答不明)
 //   c4 最後に bundler へ渡してから 7 日を過ぎ、候補に receipt が無く、EntryPoint の nonce も未使用 → 記録を消したと確かめてから
 //   c5 nonce が進んだのに候補に receipt が無い → 期限までは開いたまま、期限で c4 と同じく閉じる
 // だけ。それ以外 (応答不明・送り直し / 作り直しの拒否 (c3)・照合できない・保存を確かめられない) は開いたまま。
@@ -36,6 +37,8 @@ import {
   useBatchPayment,
 } from '@/hooks/useBatchPayment';
 import { derivePayGuards } from '@/lib/paymentFlowGuards/pay';
+import { REJECTION_CLOSE_WINDOW_MS } from '@/lib/smartAccount/circleSend';
+import { PIMLICO_REJECTION_CLOSE_WINDOW_MS } from '@/lib/smartAccount/pimlicoIntent';
 import { bundlerErrorText, findRpcRequestError } from '@/lib/smartAccount/pimlicoSend';
 import { defaultDeploymentForSymbol } from '@/lib/tokens';
 
@@ -57,6 +60,7 @@ import { mockHook } from '../_helpers/wagmiMock';
 import {
   bundlerTimeout,
   createFakeBundlerWorld,
+  FAKE_STATUS_TTL_MS,
   fakePimlicoClients,
   fakePublicClient,
   lostResponse,
@@ -716,8 +720,8 @@ describe('最初の送信の失敗の分類: 閉じるのは HTTP 2xx の検証�
   // 閉じる前に bundler にその op の状態を聞く (PR #1084 の Codex の指摘): 検証の拒否が示すのは「この送信が断られた」ことだけ。
   // 送信が途中で 2 回届き、1 回目は受理され、重複の配送にだけ拒否が返る形は、拒否の文の語に関係なく起こる。閉じてよい根拠は
   // 「bundler がその hash を知らないと答えた」(pimlico_getUserOperationStatus が not_found) こと。fake の bundler は、知らない
-  // hash に not_found・mempool にあれば submitted・mine 済みなら included を返す (world.statusOf)。
-  it('Codex の筋: 1 回目の配送は受理されて mempool にある → 重複の配送に、語に当たらない拒否 (preVerificationGas・-32500) → status は submitted → 閉じずに応答不明。再確認で、署名を増やさずに元の op の receipt で成功 (取り込みは 1 本)', async () => {
+  // hash に not_found・mempool にあれば not_submitted・mine 済みなら included を返す (world.statusOf)。
+  it('Codex の筋: 1 回目の配送は受理されて mempool にある → 重複の配送に、語に当たらない拒否 (preVerificationGas・-32500) → status は not_submitted → 閉じずに応答不明。再確認で、署名を増やさずに元の op の receipt で成功 (取り込みは 1 本)', async () => {
     const fake = mountClients();
     fake.bundlerSend.mockImplementationOnce(async ({ params }) => {
       world.accept(params[0]);
@@ -745,7 +749,7 @@ describe('最初の送信の失敗の分類: 閉じるのは HTTP 2xx の検証�
     expect(fake.bundlerStatus.mock.calls).toEqual([[{ hash }]]);
     expect(logger.warn).toHaveBeenCalledWith(
       'pimlico.send.rejected-op-status',
-      expect.objectContaining({ userOpHash: hash, error: 'bundler-status:submitted' }),
+      expect.objectContaining({ userOpHash: hash, error: 'bundler-status:not_submitted' }),
     );
     expect(logger.warn).not.toHaveBeenCalledWith(
       'pimlico.send.rejected-nonce-or-mempool',
@@ -887,6 +891,211 @@ describe('最初の送信の失敗の分類: 閉じるのは HTTP 2xx の検証�
 
     expect(result.current.isUnknown).toBe(true);
     expect(fake.bundlerStatus).not.toHaveBeenCalled();
+  });
+
+  // 時間の柵 (PR #1084 の Codex の 2 回目の指摘): bundler の status は、最後に書かれてから 1 時間で消え、その後は取り込み済みの
+  // op でも not_found を返す (Pimlico の文書・Alto の StatusManager)。拒否の処理が遅れて再開すると (タブの停止など)、受理された
+  // op の status がもう消えていて not_found が返る。なので、閉じてよいのは「この試みが op を bundler に渡す直前から、status を
+  // 聞き終えた後までの経過が 30 秒未満」のときだけ (壁時計と単調な時計の両方で・Circle の経路の柵と同じ値)。
+  // 時計: 壁時計は Date (fake timers で止めて動かす)・単調な時計は performance.now (spy で止めて動かす)。fake の bundler の
+  // status の期限 (1 時間) も Date に従う。
+  describe('時間の柵: 閉じてよいのは、渡してから 30 秒未満に status を聞き終えたときだけ', () => {
+    const PVG = { code: -32500, message: 'preVerificationGas is not enough, required: 50001, got: 50000' };
+    const AA21 = { code: -32500, message: "AA21 didn't pay prefund" };
+    let mono: number;
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(T0);
+      mono = 5_000;
+      vi.spyOn(performance, 'now').mockImplementation(() => mono);
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+    // 壁時計を wallMs・単調な時計を monoMs 進める (壁時計は負の値で戻せる)。
+    function elapse(elapsed: { wallMs: number; monoMs: number }) {
+      vi.setSystemTime(Date.now() + elapsed.wallMs);
+      mono += elapsed.monoMs;
+    }
+    const lateLog = (wallMs: number, monoMs: number) =>
+      expect.objectContaining({ error: `late:wallElapsedMs=${wallMs},monoElapsedMs=${monoMs}` });
+
+    it('上限は Circle の経路の柵と同じ 30 秒。status の期限 (1 時間) より十分短く、送信と status の timeout (10 秒ずつ) より長い', () => {
+      expect(PIMLICO_REJECTION_CLOSE_WINDOW_MS).toBe(30_000);
+      expect(PIMLICO_REJECTION_CLOSE_WINDOW_MS).toBe(REJECTION_CLOSE_WINDOW_MS);
+      expect(PIMLICO_REJECTION_CLOSE_WINDOW_MS * 10).toBeLessThanOrEqual(FAKE_STATUS_TTL_MS);
+      expect(PIMLICO_REJECTION_CLOSE_WINDOW_MS).toBeGreaterThan(2 * 10_000);
+    });
+
+    it('Codex の筋 (待機中のまま): 1 回目の配送は受理されて mempool にある → 重複の配送に PVG の拒否 → その処理が 1 時間より後に再開する → status はもう消えていて not_found → 閉じない (応答不明)。新しい署名なしで、元の op の取り込みで成功 (1 本)', async () => {
+      const fake = mountClients();
+      fake.bundlerSend.mockImplementationOnce(async ({ params }) => {
+        world.accept(params[0]);
+        // 拒否の応答を受け取る処理が、1 時間 1 分の後に再開する (タブの停止など)。
+        elapse({ wallMs: FAKE_STATUS_TTL_MS + 60_000, monoMs: FAKE_STATUS_TTL_MS + 60_000 });
+        return { error: PVG };
+      });
+      const { result } = render();
+
+      result.current.mutate(PARAMS);
+      await waitFor(() => expect(result.current.isUnknown).toBe(true));
+      await waitFor(() => expect(result.current.isPending).toBe(false));
+
+      const op = sentOp(fake, 0);
+      const hash = world.hashOf(op);
+      // bundler は not_found と答えた (受理された op なのに、status の期限が過ぎている)。
+      expect(fake.bundlerStatus).toHaveBeenCalledTimes(1);
+      expect(await fake.bundlerStatus.mock.results[0].value).toEqual({
+        result: { status: 'not_found', transactionHash: null },
+      });
+      expect(world.mempoolHashes()).toEqual([hash]);
+      // 直す前 (3624ca68): not_found なので記録を消して閉じ、次の支払いが新しい nonce で通って 2 本になった。
+      expect(result.current.error).toBeNull();
+      expect(standardPaymentOpen(result.current)).toBe(false);
+      expect(storedRecord()).toMatchObject({ status: 'unknown', userOpHash: hash, send: { signedUserOp: op } });
+      expect(logger.warn).toHaveBeenCalledWith(
+        'pimlico.send.rejected-late',
+        lateLog(FAKE_STATUS_TTL_MS + 60_000, FAKE_STATUS_TTL_MS + 60_000),
+      );
+
+      // 開いている間は、別の内容の支払いも通さない (新しい nonce を採らない・署名を求めない)。
+      result.current.mutate(OTHER_PARAMS);
+      await waitFor(() =>
+        expect(result.current.variables?.merchantAmount).toBe(OTHER_PARAMS.merchantAmount),
+      );
+      await waitFor(() => expect(result.current.isPending).toBe(false));
+      expect(result.current.isUnknown).toBe(true);
+      expect(fake.getNonce).toHaveBeenCalledTimes(1);
+      expect(fake.signUserOperation).toHaveBeenCalledTimes(1);
+
+      world.mine(hash);
+      result.current.retryReceipt();
+      await waitFor(() => expect(result.current.isSuccess).toBe(true));
+      expect(result.current.data?.userOpHash).toBe(hash);
+      expect(fake.signUserOperation).toHaveBeenCalledTimes(1);
+      expect(fake.getNonce).toHaveBeenCalledTimes(1);
+      expect(world.mined).toHaveLength(1);
+      expect(world.mempoolHashes()).toHaveLength(0);
+    });
+
+    it('Codex の筋 (取り込み済み): 1 回目の配送は受理されて取り込まれた → 重複の配送に PVG の拒否 → その処理が 1 時間より後に再開する → status は not_found → 閉じない。再確認で元の op の receipt で成功 (1 本)', async () => {
+      const fake = mountClients();
+      fake.bundlerSend.mockImplementationOnce(async ({ params }) => {
+        world.mine(world.accept(params[0]));
+        elapse({ wallMs: FAKE_STATUS_TTL_MS + 60_000, monoMs: FAKE_STATUS_TTL_MS + 60_000 });
+        return { error: PVG };
+      });
+      const { result } = render();
+
+      result.current.mutate(PARAMS);
+      await waitFor(() => expect(result.current.isUnknown).toBe(true));
+      await waitFor(() => expect(result.current.isPending).toBe(false));
+
+      const hash = world.hashOf(sentOp(fake, 0));
+      expect(await fake.bundlerStatus.mock.results[0].value).toEqual({
+        result: { status: 'not_found', transactionHash: null },
+      });
+      expect(storedRecord()).toMatchObject({ status: 'unknown', userOpHash: hash });
+      expect(standardPaymentOpen(result.current)).toBe(false);
+      expect(logger.warn).toHaveBeenCalledWith('pimlico.send.rejected-late', expect.anything());
+
+      result.current.retryReceipt();
+      await waitFor(() => expect(result.current.isSuccess).toBe(true));
+      expect(result.current.data?.userOpHash).toBe(hash);
+      expect(fake.signUserOperation).toHaveBeenCalledTimes(1);
+      expect(fake.getNonce).toHaveBeenCalledTimes(1);
+      expect(fake.bundlerSend).toHaveBeenCalledTimes(1);
+      expect(world.mined).toHaveLength(1);
+      expect(pendingKeys()).toHaveLength(0);
+    });
+
+    it('status の答え (not_found) を、渡してから 29,999 ms (両方の時計) で受け取る → 今までどおり閉じる', async () => {
+      const fake = mountClients();
+      replyOnce(fake, { error: AA21 });
+      fake.bundlerStatus.mockImplementationOnce(async ({ hash }) => {
+        elapse({ wallMs: 29_999, monoMs: 29_999 });
+        return { result: world.statusOf(hash) };
+      });
+      const { result } = render();
+
+      result.current.mutate(PARAMS);
+      await waitFor(() => expect(result.current.isError).toBe(true));
+
+      expect(result.current.error?.name).toBe('UserOperationExecutionError');
+      expect(result.current.isUnknown).toBe(false);
+      expect(pendingKeys()).toHaveLength(0);
+      expect(standardPaymentOpen(result.current)).toBe(true);
+      expect(logger.warn).not.toHaveBeenCalledWith('pimlico.send.rejected-late', expect.anything());
+    });
+
+    it.each([
+      { label: '両方の時計で 30,000 ms', wallMs: 30_000, monoMs: 30_000 },
+      { label: '壁時計だけ 30,000 ms (単調な時計は 0)', wallMs: 30_000, monoMs: 0 },
+      { label: '単調な時計だけ 30,000 ms (壁時計は 0 = 端末の時計を戻した・止まっていた)', wallMs: 0, monoMs: 30_000 },
+      { label: '壁時計が負 (時計が戻された)', wallMs: -1, monoMs: 10 },
+      { label: '1 時間 (status の期限)', wallMs: 60 * 60 * 1000, monoMs: 60 * 60 * 1000 },
+    ])('status の答え (not_found) が遅れて届く ($label) → 閉じない (応答不明)・記録は残る', async ({ wallMs, monoMs }) => {
+      const fake = mountClients();
+      replyOnce(fake, { error: AA21 });
+      // 拒否はすぐ届き、status の答えが遅れる (経過は status を聞き終えた後に測る)。
+      fake.bundlerStatus.mockImplementationOnce(async ({ hash }) => {
+        elapse({ wallMs, monoMs });
+        return { result: world.statusOf(hash) };
+      });
+      const { result } = render();
+
+      result.current.mutate(PARAMS);
+      await waitFor(() => expect(result.current.isUnknown).toBe(true));
+      await waitFor(() => expect(result.current.isPending).toBe(false));
+
+      expect(result.current.error).toBeNull();
+      expect(standardPaymentOpen(result.current)).toBe(false);
+      expect(storedRecord()).toMatchObject({ status: 'unknown', send: { signedUserOp: sentOp(fake, 0) } });
+      expect(fake.bundlerStatus).toHaveBeenCalledTimes(1);
+      expect(logger.warn).toHaveBeenCalledWith('pimlico.send.rejected-late', lateLog(wallMs, monoMs));
+      expect(logger.warn).not.toHaveBeenCalledWith('pimlico.send.rejected-op-status', expect.anything());
+    });
+
+    // 起点は「op を bundler に渡す直前」(送信の応答を待つ時間も経過に入る)。
+    it.each([
+      { label: '両方の時計で 30,000 ms', wallMs: 30_000, monoMs: 30_000 },
+      { label: '壁時計だけ 30,000 ms', wallMs: 30_000, monoMs: 0 },
+      { label: '単調な時計だけ 30,000 ms', wallMs: 0, monoMs: 30_000 },
+    ])('拒否の応答そのものが遅れて届く ($label・status はすぐ答える) → 閉じない', async ({ wallMs, monoMs }) => {
+      const fake = mountClients();
+      fake.bundlerSend.mockImplementationOnce(async () => {
+        elapse({ wallMs, monoMs });
+        return { error: AA21 };
+      });
+      const { result } = render();
+
+      result.current.mutate(PARAMS);
+      await waitFor(() => expect(result.current.isUnknown).toBe(true));
+      await waitFor(() => expect(result.current.isPending).toBe(false));
+
+      expect(storedRecord()?.status).toBe('unknown');
+      expect(logger.warn).toHaveBeenCalledWith('pimlico.send.rejected-late', lateLog(wallMs, monoMs));
+    });
+
+    it('柵の外でも、status が not_found でなければ status の log (柵より先に status で止まる)', async () => {
+      const fake = mountClients();
+      fake.bundlerSend.mockImplementationOnce(async ({ params }) => {
+        world.accept(params[0]);
+        elapse({ wallMs: 60_000, monoMs: 60_000 });
+        return { error: PVG };
+      });
+      const { result } = render();
+
+      result.current.mutate(PARAMS);
+      await waitFor(() => expect(result.current.isUnknown).toBe(true));
+      await waitFor(() => expect(result.current.isPending).toBe(false));
+
+      expect(logger.warn).toHaveBeenCalledWith(
+        'pimlico.send.rejected-op-status',
+        expect.objectContaining({ error: 'bundler-status:not_submitted' }),
+      );
+      expect(logger.warn).not.toHaveBeenCalledWith('pimlico.send.rejected-late', expect.anything());
+    });
   });
 
   it('HTTP 500 に JSON-RPC の error (-32603) が載っても、bundler が受理していれば: 応答不明にして通常決済も止め、元の op の確定を待つ (MUST 1・Codex の再現)', async () => {

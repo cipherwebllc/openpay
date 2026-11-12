@@ -53,7 +53,9 @@
 //       閉じない。(c) の語に当たらない拒否 (preVerificationGas が足りない等) も、受理された op の重複の配送にだけ返ることが
 //       あるため。(c) の語の確認を残す理由: status と語は別の失敗を断つ。status の記録が bundler の中で反映される前に聞いて
 //       しまう場合 (受理した node と聞いた node のずれ) でも、nonce・重複の拒否は語で止まる。
-//       聞くのは (d) を測る **前** (await を挟むので)。読みが遅れて (d) の上限を過ぎたら閉じない。
+//       聞くのは (d) を測る **前** (await を挟むので)。読みが遅れて (d) の上限を過ぎたら閉じない。bundler の status は最後の
+//       書き込みから 1 時間で消え、その後は取り込み済みの op でも not_found を返す (pimlicoIntent.ts の冒頭)。拒否の処理が
+//       遅れて再開した場合のその形も、(d) が止める (上限は 1 時間より十分短い)。
 //   (d) **時間の柵**: 自分の markSubmitting から拒否の処理 ((f) の答えを受け取った後) までの経過が REJECTION_CLOSE_WINDOW_MS
 //       (30 秒) 未満である (壁時計と単調な時計の両方で。下の REJECTION_CLOSE_WINDOW_MS のコメント)
 //   (e) 記録がいまも submitting・userOpHash が同じ・updatedAt が自分の markSubmitting の返した値である (書く直前に同期で
