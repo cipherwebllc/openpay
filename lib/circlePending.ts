@@ -27,7 +27,8 @@
 //
 // FSM (横道 abandoned):
 //   reserved → awaiting_signature → signed → submitting → confirmed
-//   (failed は保存済み record の読み取り互換のため状態として残すが、そこへ遷移させる関数は無い)
+//   (failed は保存済み record の読み取り互換のため状態として残すが、そこへ遷移させる関数は無い。failed の記録の op の
+//    receipt が取れたときだけ、markConfirmed が confirmed に直す)
 //   reserved/awaiting_signature/signed (= broadcast 前) は同一署名者が安全に abandon /
 //   supersede 可能 (popup 拒否・タブ閉じ)。**submitting 到達後は abandon も新規 op 構築も
 //   禁止** — recovery 経路のみ。
@@ -381,6 +382,9 @@ function transition(args: {
       | 'errorMessage'
     >
   >;
+  /** 渡されたら、記録の userOpHash がこの値であることも確かめる (違えば PendingStateError)。await の後の書き込み
+   * (送り直しの前の時刻・confirmed) が、待つ間に別の op の記録に替わっていたものを書き換えないため。 */
+  expectUserOpHash?: Hex;
 }): PendingRecord {
   const current = loadPendingRecord(args.key);
   if (!current) {
@@ -391,6 +395,14 @@ function transition(args: {
   if (!fromSet.includes(current.status)) {
     throw new PendingStateError(
       `${args.key}: status=${current.status} は [${fromSet.join(',')}] からの遷移ではない (期待 → ${args.to})`,
+    );
+  }
+  if (
+    args.expectUserOpHash !== undefined &&
+    current.userOpHash !== args.expectUserOpHash
+  ) {
+    throw new PendingStateError(
+      `${args.key}: userOpHash=${current.userOpHash} は期待した ${args.expectUserOpHash} ではない (期待 → ${args.to})`,
     );
   }
   const next: PendingRecord = {
@@ -472,22 +484,64 @@ export function markSubmitting(args: {
   });
 }
 
+/** submitting → submitting (復旧の送り直しの **直前**)。記録がいまも「submitting で、userOpHash が送り直す op のもの」で
+ * あることを確かめてから、送る時刻 (updatedAt) を書く。確かめられなければ PendingStateError (呼び出し側は送り直さない)。
+ * 呼び出し側は receipt を待った (await の) 後にここへ来るので、待つ前に読んだ記録を信じない: 待つ間に別の試みが confirmed に
+ * していた・記録が消えていた・別の op の記録に替わっていた、のどれでも送り直さない。now は呼ぶ直前に評価した時刻を渡す
+ * (待つ前に取った時刻を渡すと updatedAt が巻き戻る)。markSubmitting (signed → submitting・自分の最初の送信の直前) とは別の関数。 */
+export function markResending(args: {
+  key: string;
+  sender: Address;
+  userOpHash: Hex;
+  now: number;
+}): PendingRecord {
+  return transition({
+    key: args.key,
+    sender: args.sender,
+    from: 'submitting',
+    to: 'submitting',
+    now: args.now,
+    expectUserOpHash: args.userOpHash,
+  });
+}
+
 /** submitting → confirmed (receipt 取得)。success は receipt.success を永続する
- * (resultFromConfirmed が receipt 再取得に失敗しても success を捏造しないため)。 */
+ * (resultFromConfirmed が receipt 再取得に失敗しても success を捏造しないため)。
+ *
+ * userOpHash (任意): receipt を取った op の hash。渡されたら、記録の userOpHash が同じであることも確かめる (違えば
+ * PendingStateError)。receipt を待つ間に別の op の記録に替わっていたら、その記録を confirmed にしない。
+ * userOpHash が一致するときだけ、failed → confirmed も許す: receipt がある = その op は取り込まれた、が真実で、failed の
+ * ままだと scan の dedup と resume がこの支払いを「払っていない」と扱う。failed を書く経路はまだ無い (旧 record だけ) が、
+ * 「閉じたのに取り込まれた」は前提が破れた状態なので error の log を残す。 */
 export function markConfirmed(args: {
   key: string;
   sender: Address;
   txHash: Hex;
   success: boolean;
   now: number;
+  userOpHash?: Hex;
 }): PendingRecord {
+  const expectUserOpHash = args.userOpHash;
+  if (expectUserOpHash !== undefined) {
+    const current = loadPendingRecord(args.key);
+    if (current?.status === 'failed' && current.userOpHash === expectUserOpHash) {
+      logger.error('circle.pending.confirmed-after-failed', {
+        userOpHash: expectUserOpHash,
+        txHash: args.txHash,
+      });
+    }
+  }
   return transition({
     key: args.key,
     sender: args.sender,
-    from: ['submitting', 'confirmed'],
+    from:
+      expectUserOpHash !== undefined
+        ? ['submitting', 'confirmed', 'failed']
+        : ['submitting', 'confirmed'],
     to: 'confirmed',
     now: args.now,
     patch: { txHash: args.txHash, success: args.success },
+    expectUserOpHash,
   });
 }
 

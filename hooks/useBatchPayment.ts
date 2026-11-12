@@ -1144,7 +1144,20 @@ async function runCirclePayment(args: {
     // resume させる。それ以外の確定的エラー (revert/拒否/abandon 済) はマッピングを破棄して、
     // resumed 分岐の「この決済試行は既に終了しています」に正規の再試行がぶつからないようにする。
     // 失効した試みは破棄しない (下の成功のときと同じ理由)。
-    if (usesStableMapping && isAlive() && (error as Error).name !== 'CirclePendingError') {
+    // storage の失敗 (lib/circlePending の PendingStoreUnavailableError・PendingStoreWriteError) も破棄しない: この押下は
+    // 自分の記録の状態を確かめられなかった (分からない)。何の波及を断つか: storage が一時的に読めない・書けない押下 (入口の
+    // scan・resume の読み取り・予約の書き込みなど、送った後の境界の外) が対応を消し、次の押下が新しい key になって、裏で確定して
+    // いた前の支払い (90 秒より前の confirmed) の後に 2 本目が開くこと (第 10 回レビュー PR-39a の Codex P2)。残しても、次の押下は
+    // 同じ記録を resume するだけで、記録が終わっていれば「既に終了」で破棄される。error の文はそのまま出す。
+    // circleSend・circlePending は静的 import しない (bundle budget・上の動的 import) ので、CirclePendingError と同じく name で判定する。
+    const name = (error as Error).name;
+    if (
+      usesStableMapping &&
+      isAlive() &&
+      name !== 'CirclePendingError' &&
+      name !== 'PendingStoreUnavailableError' &&
+      name !== 'PendingStoreWriteError'
+    ) {
       clearStableAttemptId(attemptArgs);
     }
     throw error;
