@@ -54,22 +54,32 @@ jobs:
       # cache の key は「Playwright の版・job 名・.deb の一覧の hash」。戻すときは一覧が前もって分からないので、
       # 版と job 名の prefix で一番新しい cache を戻す。入れ終えたら、今の版で取れなくなった古い .deb を
       # apt-get autoclean で消し、残った一覧が戻した cache と違えば (Ubuntu の更新を取った等) 新しい key で保存する。
-      # cache に入れるのは .deb だけ (partial/ と lock は apt のもの)。置き場所は /var/cache の下で、持ち主は runner の
-      # 利用者 (cache の restore/save が読み書きする)。$HOME の下だと apt の取得用の利用者 _apt が入れず、取得が root で
-      # 走っていた (W: Download is performed unsandboxed as root・2026-11-06 の CI)。
+      # .deb の置き場から cache に入れるのは .deb だけ (partial/ と lock は apt のもの)。置き場所は /var/cache の下で、
+      # 持ち主は runner の利用者 (cache の restore/save が読み書きする)。$HOME の下だと apt の取得用の利用者 _apt が入れず、
+      # 取得が root で走っていた (W: Download is performed unsandboxed as root・2026-11-06 の CI)。
+      # 2026-11-11 の 14:13〜17:45 UTC は、runner から Ubuntu のパッケージ置き場 (azure.archive・archive・security) の名前が
+      # 引けなかった。apt-get update は失敗しても先へ進み、apt は image に入っている古い一覧を使った。cache の .deb は新しい
+      # 一覧で選んだ版なので、古い一覧が指す版の 5 個 (WebKit 用) を取りに行って落ちた (main と PR 6 本)。そこで .deb と
+      # 一緒に、その .deb を選んだときの一覧 (Dir::State::Lists) も cache に入れる。一覧を取れた日は今までどおり新しい一覧で
+      # 入れ、取れない日は apt が cache の一覧を古い一覧として使うので、cache の .deb だけで入れ切れる。key は .deb の一覧の
+      # hash のままで、.deb の組が変わらない日は保存しないから、cache の一覧は「その .deb を選んだ日の一覧」のまま残る。
+      # 一覧の置き場も /var/cache の下で runner の利用者のもの。cache に入れるのは一覧のファイル (名前に _ が入る) だけで、
+      # lock・partial/・auxfiles/ は apt のもの。key の lists1 は cache の中身の形の版 (.deb だけだった頃の cache と分ける)。
       - name: Point apt at a cacheable package directory
         id: apt-cache
         run: |
-          sudo install -d -o "$(id -u)" -g "$(id -g)" /var/cache/openpay-apt-archives
-          mkdir -p /var/cache/openpay-apt-archives/partial
-          printf 'Dir::Cache::Archives "%s";\nAPT::Keep-Downloaded-Packages "true";\n' /var/cache/openpay-apt-archives | sudo tee /etc/apt/apt.conf.d/99-openpay-apt-archives
-          echo "prefix=apt-ubuntu-24.04-playwright-$(./node_modules/.bin/playwright --version | awk '{print $2}')-job-playwright-" >> "$GITHUB_OUTPUT"
+          sudo install -d -o "$(id -u)" -g "$(id -g)" /var/cache/openpay-apt-archives /var/cache/openpay-apt-lists
+          mkdir -p /var/cache/openpay-apt-archives/partial /var/cache/openpay-apt-lists/partial
+          printf 'Dir::Cache::Archives "%s";\nDir::State::Lists "%s";\nAPT::Keep-Downloaded-Packages "true";\n' /var/cache/openpay-apt-archives /var/cache/openpay-apt-lists | sudo tee /etc/apt/apt.conf.d/99-openpay-apt-cache
+          echo "prefix=apt-lists1-ubuntu-24.04-playwright-$(./node_modules/.bin/playwright --version | awk '{print $2}')-job-playwright-" >> "$GITHUB_OUTPUT"
 
       - name: Restore apt packages
         id: apt-restore
         uses: actions/cache/restore@v4
         with:
-          path: /var/cache/openpay-apt-archives/*.deb
+          path: |
+            /var/cache/openpay-apt-archives/*.deb
+            /var/cache/openpay-apt-lists/*_*
           # この key では保存しない (完全一致はさせず、下の restore-keys の prefix で一番新しいものを戻す)。
           key: ${{ steps.apt-cache.outputs.prefix }}restore
           restore-keys: ${{ steps.apt-cache.outputs.prefix }}
@@ -83,14 +93,18 @@ jobs:
           APT_CACHE_PREFIX: ${{ steps.apt-cache.outputs.prefix }}
         run: |
           sudo apt-get autoclean
+          echo "apt cache: $(find /var/cache/openpay-apt-archives -maxdepth 1 -name '*.deb' | wc -l) .deb, $(find /var/cache/openpay-apt-lists -maxdepth 1 -type f -name '*_*' | wc -l) list files"
           echo "key=${APT_CACHE_PREFIX}$(find /var/cache/openpay-apt-archives -maxdepth 1 -name '*.deb' -printf '%f\n' | sort | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
 
-      # 入れ終えた時点で保存する (後の e2e が落ちても、取り終えた .deb は次の run で使える)。
+      # 入れ終えた時点で保存する (後の e2e が落ちても、取り終えた .deb は次の run で使える)。保存するのは入れ終えた run
+      # だけなので、cache の一覧はいつも「その .deb を入れられた一覧」になる (取れずに落ちた run の一覧は保存しない)。
       - name: Save apt packages
         if: steps.apt-list.outputs.key != steps.apt-restore.outputs.cache-matched-key
         uses: actions/cache/save@v4
         with:
-          path: /var/cache/openpay-apt-archives/*.deb
+          path: |
+            /var/cache/openpay-apt-archives/*.deb
+            /var/cache/openpay-apt-lists/*_*
           key: ${{ steps.apt-list.outputs.key }}
 
       - name: Build
@@ -132,20 +146,23 @@ jobs:
       - name: Check installed packages for install-time scripts and rebuild the allowlisted ones
         run: node scripts/installed-scripts-gate.mjs --rebuild node_modules
 
-      # playwright job と同じ理由・同じ作り方で、Ubuntu のパッケージ (.deb) を cache から戻す (key の job 名で分ける)。
+      # playwright job と同じ理由・同じ作り方で、Ubuntu のパッケージ (.deb) と、それを選んだときの一覧を cache から戻す
+      # (key の job 名で分ける)。
       - name: Point apt at a cacheable package directory
         id: apt-cache
         run: |
-          sudo install -d -o "$(id -u)" -g "$(id -g)" /var/cache/openpay-apt-archives
-          mkdir -p /var/cache/openpay-apt-archives/partial
-          printf 'Dir::Cache::Archives "%s";\nAPT::Keep-Downloaded-Packages "true";\n' /var/cache/openpay-apt-archives | sudo tee /etc/apt/apt.conf.d/99-openpay-apt-archives
-          echo "prefix=apt-ubuntu-24.04-playwright-$(./node_modules/.bin/playwright --version | awk '{print $2}')-job-e2e-prodflags-" >> "$GITHUB_OUTPUT"
+          sudo install -d -o "$(id -u)" -g "$(id -g)" /var/cache/openpay-apt-archives /var/cache/openpay-apt-lists
+          mkdir -p /var/cache/openpay-apt-archives/partial /var/cache/openpay-apt-lists/partial
+          printf 'Dir::Cache::Archives "%s";\nDir::State::Lists "%s";\nAPT::Keep-Downloaded-Packages "true";\n' /var/cache/openpay-apt-archives /var/cache/openpay-apt-lists | sudo tee /etc/apt/apt.conf.d/99-openpay-apt-cache
+          echo "prefix=apt-lists1-ubuntu-24.04-playwright-$(./node_modules/.bin/playwright --version | awk '{print $2}')-job-e2e-prodflags-" >> "$GITHUB_OUTPUT"
 
       - name: Restore apt packages
         id: apt-restore
         uses: actions/cache/restore@v4
         with:
-          path: /var/cache/openpay-apt-archives/*.deb
+          path: |
+            /var/cache/openpay-apt-archives/*.deb
+            /var/cache/openpay-apt-lists/*_*
           key: ${{ steps.apt-cache.outputs.prefix }}restore
           restore-keys: ${{ steps.apt-cache.outputs.prefix }}
 
@@ -158,13 +175,16 @@ jobs:
           APT_CACHE_PREFIX: ${{ steps.apt-cache.outputs.prefix }}
         run: |
           sudo apt-get autoclean
+          echo "apt cache: $(find /var/cache/openpay-apt-archives -maxdepth 1 -name '*.deb' | wc -l) .deb, $(find /var/cache/openpay-apt-lists -maxdepth 1 -type f -name '*_*' | wc -l) list files"
           echo "key=${APT_CACHE_PREFIX}$(find /var/cache/openpay-apt-archives -maxdepth 1 -name '*.deb' -printf '%f\n' | sort | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
 
       - name: Save apt packages
         if: steps.apt-list.outputs.key != steps.apt-restore.outputs.cache-matched-key
         uses: actions/cache/save@v4
         with:
-          path: /var/cache/openpay-apt-archives/*.deb
+          path: |
+            /var/cache/openpay-apt-archives/*.deb
+            /var/cache/openpay-apt-lists/*_*
           key: ${{ steps.apt-list.outputs.key }}
 
       - name: Load public production flags (testnet fixtures)
