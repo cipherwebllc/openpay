@@ -711,15 +711,59 @@ describe('送り直しの保存が「書けたかどうか分からない」で�
     expect(tab1.result.current.isUnknown).toBe(true);
   });
 
-  it('書き込みが黙って落ち、storage は T の版のまま (memory は送ろうとした版) → 両方の版が期限を過ぎた後の再確認で閉じる', async () => {
-    const { hook } = await resendUncertainAt60s('write-dropped');
+  it('書き込みが黙って落ち、読み戻すと T の版のまま → memory も T の版のまま: T+7 日+1 ms の再確認は送り直さずに閉じる (reload の後と同じ)', async () => {
+    const { fake, hook } = await resendUncertainAt60s('write-dropped');
 
-    vi.setSystemTime(T0 + 60_000 + SEVEN_DAYS + 1);
+    vi.setSystemTime(T0 + SEVEN_DAYS + 1);
+    hook.result.current.retryReceipt();
+    await waitFor(() => expect(hook.result.current.isUnknown).toBe(false));
+    await waitFor(() => expect(hook.result.current.isPending).toBe(false));
+    expect(fake.bundlerSend).toHaveBeenCalledTimes(1);
+    expect(pendingKeys()).toHaveLength(0);
+    expect(logger.warn).toHaveBeenCalledWith('pimlico.pending.expired-closed', expect.anything());
+  });
+
+  it('memory と storage の版がずれたまま (hash の直しも、その後の応答不明の書き込みも書けない: memory は返った hash・storage は計算した hash) → 両方の版が期限を過ぎた後の再確認で閉じる', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(T0);
+    const fake = mountClients({
+      waitForUserOperationReceipt: async ({ hash }) => {
+        throw new WaitForUserOperationReceiptTimeoutError({ hash });
+      },
+    });
+    const returned = `0x${'e'.repeat(64)}` as Hex;
+    fake.bundlerSend.mockImplementationOnce(async ({ params }) => {
+      world.accept(params[0]);
+      return { result: returned };
+    });
+    // 記録の 2 回目 (hash の直し) と 3 回目 (応答不明) の書き込みが投げる。
+    const realSet = Storage.prototype.setItem;
+    let writes = 0;
+    const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (
+      this: Storage,
+      key: string,
+      value: string,
+    ) {
+      if (key.startsWith(PIMLICO_PENDING_KEY_PREFIX) && [2, 3].includes(++writes)) {
+        throw new DOMException('quota', 'QuotaExceededError');
+      }
+      realSet.call(this, key, value);
+    });
+    const hook = render();
+    hook.result.current.mutate(PARAMS);
+    await waitFor(() => expect(hook.result.current.isUnknown).toBe(true));
+    await waitFor(() => expect(hook.result.current.isPending).toBe(false));
+    setItem.mockRestore();
+    expect(hook.result.current.pendingUserOpHash).toBe(returned);
+    expect((JSON.parse(storedRaw() ?? 'null') as { userOpHash: Hex }).userOpHash).not.toBe(returned);
+
+    // 版の一致で消すと、memory の版 (返った hash) と storage の版 (計算した hash) が合わず、reload まで閉じない。
+    vi.setSystemTime(T0 + SEVEN_DAYS + 1);
     hook.result.current.retryReceipt();
     await waitFor(() => expect(hook.result.current.isUnknown).toBe(false));
     await waitFor(() => expect(hook.result.current.isPending).toBe(false));
     expect(pendingKeys()).toHaveLength(0);
-    expect(logger.warn).toHaveBeenCalledWith('pimlico.pending.expired-closed', expect.anything());
+    expect(fake.bundlerSend).toHaveBeenCalledTimes(1);
   });
 });
 

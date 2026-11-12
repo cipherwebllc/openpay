@@ -683,18 +683,16 @@ export async function resolveOpenIntent<Params, Result>(
     latched: true,
     signedNow: false,
     // 送り直しの前に保存を確かめられない (memory にしか無い op): 送らず開いたまま。memory に持つのは、storage に入ったかもしれない
-    // 一番新しい版: 書き込みが返った ('uncertain' = 読み戻しだけ失敗) なら送ろうとした版 (送る時刻入り)、書き込みが投げた
-    // ('not-stored' = storage は書く前のまま) なら前の記録 (Codex の 3 回目のレビュー)。何の波及を断つか: storage は送ろうとした
-    // 版なのに memory が前の版のままだと、次の再確認が前の版の時刻で期限を判断し (storage の版ではまだ送り直せる時に送らない)、
-    // reload まで storage と食い違う。
+    // 一番新しい版 (Codex の 3 回目のレビュー): 書き込みが投げた ('not-stored' = storage は書く前のまま) なら前の記録。書き込みは
+    // 返った ('uncertain') なら送ろうとした版 (送る時刻入り) だが、storage を読んで前の記録の版がそのまま残っていれば (書き込みが
+    // 黙って落ちた) 前の記録。何の波及を断つか: memory の版の時刻が storage の版とずれると、次の再確認が storage とは違う時刻で
+    // 期限を判断する。前の版のままだと、storage ではまだ送り直せる時に送らない。送ろうとした版を持つのに storage が前の版だと、
+    // storage (reload の後) では 7 日を過ぎて送らずに閉じる op を、この画面だけが送り直す (c4)。
     onNotStored: (stored, attempted) => {
       host.setStoreUnavailable(true);
-      return stayOpen(
-        host,
-        stored === 'uncertain' ? attempted : record,
-        'pimlico.send.not-stored',
-        new Error(`persist-${stored}`),
-      );
+      const latest =
+        stored === 'uncertain' && storedVersion(host, [record]) !== 'match' ? attempted : record;
+      return stayOpen(host, latest, 'pimlico.send.not-stored', new Error(`persist-${stored}`));
     },
     // bundler がその op を検証で拒否した (paymaster の期限切れ等) → 同じ nonce で作り直す (ウォレットの署名が
     // 1 回要る)。intent は開いたまま (c3)。元の op が先に取り込まれていれば、作り直しは AA25 で落ちる。作り直しの元は
