@@ -3,14 +3,15 @@
 // 無い記録の receipt 待ちの失敗と確定の片付け)。hook が静的に読むので、ここには何も import しない (/pay /checkout /tip /[handle] の
 // First Load JS)。
 //
-// 同じ intent (isSameIntent): 確定 (receipt が取れた op の記録の片付け) にだけ使う。その nonce の op が取り込まれた以上、同じ intent の
-// どの版の記録も終わっている。
+// 同じ intent (isSameIntent): 確定 (receipt が取れた op の記録の片付け) と、期限で閉じる削除に使う。確定は、その nonce の op が
+// 取り込まれた以上、同じ intent のどの版の記録も終わっている。期限で閉じる削除 (pimlicoIntent.ts の discardIfExpired) は、同じ intent で
+// あることに加えて、storage の記録自身が期限を過ぎていることを見る (版が違っても消すのは、その版も期限を過ぎているときだけ)。
 //   送信の控え (send) のある記録: EntryPoint・sender・nonce (key と seq) が同じ。同じ nonce で作り直した op・bundler の返した hash
 //     で直した記録は、hash が違っても同じ intent (EntryPoint は同じ EntryPoint・sender・nonce の op を最大 1 本しか実行しない)。
 //   控えの無い記録 (控えを足す前の記録・MAv2 の facade で送った記録): userOpHash が同じ。
 //   片方だけ控えがある: 別の intent (控えの無い記録が控えを持つようになる道は無い)。
 //
-// 同じ版 (isSameVersion): 確定によらない後からの書き込みと削除 (compare-and-set) に使う。同じ intent で、userOpHash と updatedAt も
+// 同じ版 (isSameVersion): 確定・期限によらない後からの書き込みと削除 (compare-and-set) に使う。同じ intent で、userOpHash と updatedAt も
 // 同じ。送り直しは updatedAt (期限の基準) を進め、作り直しと hash の直しは userOpHash を変えるので、ほかの試みが新しくした記録は
 // 「別の版」になる。何の波及を断つか: 古い写しを知っている試みが、新しくなった記録を上書きして期限の基準を巻き戻す (早く閉じて、
 // まだ実行されうる op の上に払い直せる)・作り直した op の記録を消す (reload の後に確かめられず払い直せる) こと。
