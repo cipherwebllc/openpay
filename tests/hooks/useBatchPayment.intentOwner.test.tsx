@@ -832,7 +832,7 @@ describe('筋 2: 最初の送信の拒否の片付け (c2) は、同じ intent �
     { label: '画面 3 の B が応答を失って開いている', withOther: true },
     { label: 'ほかに開いている支払いが無い', withOther: false },
   ])(
-    'A の最初の送信への拒否が遅れる間に、画面 2 が同じ nonce で A を作り直して確定し、$label → 遅れて届いた拒否は別の intent の記録を消さない・消す記録が無ければ閉じた扱い (Codex の再現)',
+    'A の最初の送信への拒否が遅れる間に、画面 2 が同じ nonce で A を作り直して確定し、$label → 遅れて届いた拒否は別の intent の記録を消さない・消す記録が無くても「閉じた」と伝えない (Codex の再現)',
     async ({ withOther }) => {
       // 画面 1: A を保存して送る。bundler は受け付けず、その答え (検証で拒否) が遅れる。
       const first = mountClients();
@@ -855,9 +855,9 @@ describe('筋 2: 最初の送信の拒否の片付け (c2) は、同じ intent �
       await waitFor(() => expect(secondHook.result.current.isSuccess).toBe(true));
       expect(sentOp(second, 1).nonce).toBe(aNonce);
       // 作り直した op は A とは別の op (fake は準備のたびに fee を変える = 「fee が変わった作り直し」の模型で、本番の保証ではない)。
-      // 下の「閉じた扱い」の期待は、**hash が別のときだけ** 成り立つ: c2 は閉じる前に bundler へ A の hash の状態を聞き、bundler は
-      // その hash を知らない (not_found)。hash に入る欄が全部同じ作り直しは A と同じ hash になり、bundler はその hash を知って
-      // いるので閉じない (下の「同じ op を送り直して受理・確定した」の test と同じ結果 = 応答不明)。
+      // hash が別なので、c2 が閉じる前に bundler へ聞く A の hash の状態は not_found (bundler はその hash を知らない) で、下の
+      // 結果は status ではなく **記録の確認** で決まる。hash に入る欄が全部同じ作り直しは A と同じ hash になり、bundler がその
+      // hash を知っているので status で止まる (下の「同じ op を送り直して受理・確定した」の test)。
       expect(world.hashOf(sentOp(second, 1))).not.toBe(world.hashOf(sentOp(first, 0)));
       expect(world.mined).toHaveLength(1);
       expect(pendingKeys()).toHaveLength(0);
@@ -883,8 +883,15 @@ describe('筋 2: 最初の送信の拒否の片付け (c2) は、同じ intent �
         expect(world.mempoolHashes()).toEqual([other.hash]);
         await reloadPaysOtherOnce(other.hash);
       } else {
-        // 消す記録がもう無い (ほかの画面が閉じた): 今までどおり閉じた扱い (検証の拒否の error)。
-        expect(ended.error?.name).toBe('UserOperationExecutionError');
+        // 消す記録がもう無い (ほかの画面が確定させて消した): 「閉じた」(検証の拒否の error) と伝えない。その支払いは済んでいる
+        // かもしれない (ここでは画面 2 が同じ nonce で確定させた)。応答不明で終え、消えた記録は書き戻さない。
+        // (PR #1084 の Codex の 3 回目の MUST 1 で変えた期待。前は `UserOperationExecutionError` = 閉じた扱いだった。)
+        expect(ended.error?.message).toBe('response-unknown');
+        expect(logger.warn).toHaveBeenCalledWith(
+          'pimlico.send.rejected-record-gone',
+          expect.objectContaining({ userOpHash: world.hashOf(sentOp(first, 0)) }),
+        );
+        expect(pendingKeys()).toHaveLength(0);
       }
     },
   );
@@ -930,6 +937,175 @@ describe('筋 2: 最初の送信の拒否の片付け (c2) は、同じ intent �
     // 閉じた記録は復活させない (空のときは書かない)。
     expect(pendingKeys()).toHaveLength(0);
     expect(world.mined).toHaveLength(1);
+  });
+
+  it('送るたびに、記録に一意の印 (rev) を書く: 最初の送信・送り直し・作り直しで全部違う。応答不明の書き込み (status だけ) では変えない', async () => {
+    const storedRev = () => (JSON.parse(storedRaw() ?? 'null') as { rev?: string }).rev;
+    const revs: Array<string | undefined> = [];
+    const fake = mountClients();
+    // 最初の送信: 届かない。
+    fake.bundlerSend.mockImplementationOnce(async () => {
+      revs.push(storedRev());
+      throw lostResponse();
+    });
+    const hook = render();
+    hook.result.current.mutate(PARAMS);
+    await waitFor(() => expect(hook.result.current.isUnknown).toBe(true));
+    await waitFor(() => expect(hook.result.current.isPending).toBe(false));
+    // 応答不明の書き込み (status を unknown に) は、同じ送信の版のまま。
+    expect(JSON.parse(storedRaw() ?? 'null')).toMatchObject({ status: 'unknown', rev: revs[0] });
+
+    // 再確認: 同じ op を送り直す → 検証で拒否 → 同じ nonce で作り直して送る → 受理されたが応答を失う。
+    fake.bundlerSend.mockImplementationOnce(async () => {
+      revs.push(storedRev());
+      return PAYMASTER_EXPIRED;
+    });
+    fake.bundlerSend.mockImplementationOnce(async ({ params }) => {
+      revs.push(storedRev());
+      world.accept(params[0]);
+      throw lostResponse();
+    });
+    hook.result.current.retryReceipt();
+    await waitFor(() => expect(fake.bundlerSend).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(hook.result.current.isPending).toBe(false));
+
+    expect(revs).toHaveLength(3);
+    for (const rev of revs) expect(rev).toMatch(/^[0-9a-f]{32}$/);
+    expect(new Set(revs).size).toBe(3);
+    expect(storedRev()).toBe(revs[2]);
+  });
+
+  // PR #1084 の Codex の 3 回目 (MUST 1): 記録が無いとき、c2 は「閉じた」と伝えない。上の筋は画面 1 を unmount しているので、
+  // 終わり方 (mutation の error) しか見ていない。こちらは **画面 A を開いたまま**: A が「断られた」と出すと通常決済とやり直しが
+  // 開き、やり直しは新しい nonce の op になる (別の画面が確定させた支払いと 2 本)。
+  it('画面 A を開いたまま: A の最初の送信への拒否が遅れる間に、別の画面が同じ nonce で作り直して確定し、記録を消した → A は「断られた」と伝えない (応答不明のまま)・やり直しても新しい nonce を採らない・取り込みは 1 本・消えた記録は書き戻さない', async () => {
+    const first = mountClients();
+    const rejection = deferred<BundlerHttpReply>();
+    first.bundlerSend.mockImplementationOnce(() => rejection.promise);
+    const screenA = render();
+    screenA.result.current.mutate(PARAMS);
+    await waitFor(() => expect(first.bundlerSend).toHaveBeenCalledTimes(1));
+    const aOp = sentOp(first, 0);
+    const aHash = world.hashOf(aOp);
+
+    // 画面 B (別のタブ): A を確かめる → 送り直しを bundler が検証で拒否 → 同じ nonce・別の hash で作り直す → 受理・mine →
+    // 確定 (記録は消える)。
+    const second = mountClients();
+    replyOnce(second, PAYMASTER_EXPIRED);
+    acceptAndMine(second);
+    const screenB = render();
+    await waitFor(() => expect(screenB.result.current.isUnknown).toBe(true));
+    screenB.result.current.retryReceipt();
+    await waitFor(() => expect(screenB.result.current.isSuccess).toBe(true));
+    expect(sentOp(second, 1).nonce).toBe(aOp.nonce);
+    expect(world.hashOf(sentOp(second, 1))).not.toBe(aHash);
+    expect(world.mined).toHaveLength(1);
+    expect(pendingKeys()).toHaveLength(0);
+    screenB.unmount();
+    vi.mocked(logger.warn).mockClear();
+
+    // A の最初の送信への拒否が今ごろ届く。bundler は A の hash を知らない (not_found・正しい)・2 つの時計も柵の内。
+    // 直す前 (e6e813e1): 消す記録が無いので「閉じた」扱い = `UserOperationExecutionError` を出して intent を外し、やり直しが
+    // 新しい nonce の op になった (2 本)。
+    rejection.resolve(PAYMASTER_EXPIRED);
+    const ended = await settledMutation(screenA);
+    expect(ended.status).toBe('error');
+    expect(ended.error?.message).toBe('response-unknown');
+    await waitFor(() => expect(screenA.result.current.isUnknown).toBe(true));
+    expect(screenA.result.current.error).toBeNull();
+    expect(logger.warn).toHaveBeenCalledWith(
+      'pimlico.send.rejected-record-gone',
+      expect.objectContaining({ userOpHash: aHash }),
+    );
+    // 消えた記録は書き戻さない (画面 A の memory のラッチだけが残る)。
+    expect(pendingKeys()).toHaveLength(0);
+
+    // A でやり直す (同じ内容): 開いている intent の再確認になる。候補 (A の hash) に receipt は無く、nonce は使用済み →
+    // 送らない・署名を求めない・新しい nonce を採らない・開いたまま。
+    const signedBefore = first.signUserOperation.mock.calls.length + second.signUserOperation.mock.calls.length;
+    const sentBefore = first.bundlerSend.mock.calls.length + second.bundlerSend.mock.calls.length;
+    screenA.result.current.mutate(PARAMS);
+    await waitFor(() =>
+      expect(second.waitForUserOperationReceipt).toHaveBeenCalledWith({ hash: aHash }),
+    );
+    const retried = await settledMutation(screenA);
+    expect(retried.error?.message).toBe('response-unknown');
+    expect(screenA.result.current.isUnknown).toBe(true);
+    expect(first.getNonce).toHaveBeenCalledTimes(1);
+    expect(second.getNonce).not.toHaveBeenCalled();
+    expect(first.signUserOperation.mock.calls.length + second.signUserOperation.mock.calls.length).toBe(signedBefore);
+    expect(first.bundlerSend.mock.calls.length + second.bundlerSend.mock.calls.length).toBe(sentBefore);
+    expect(world.mined).toHaveLength(1);
+    expect(world.mempoolHashes()).toHaveLength(0);
+    expect(pendingKeys()).toHaveLength(0);
+  });
+
+  // PR #1084 の Codex の 3 回目 (MUST 2): 版は時刻 (updatedAt) だけでは決まらない。同じ ms に送り直した別の画面の記録は、intent・
+  // hash・updatedAt が全部同じになる。送るたびに一意の印 (rev) を書き、版の一致はそれも比べる。
+  it('画面 A を開いたまま: A の status の答え (not_found) が遅れる間に、別の画面が同じ op を同じ時刻 (ms) に送り直して受理された (応答は失われた) → A は生きている op の記録を消さない・やり直しても新しい nonce を採らない・取り込みは 1 本', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(T0);
+    const first = mountClients();
+    replyOnce(first, PAYMASTER_EXPIRED);
+    // A の status の request は、まだ誰も受理していない時点の答え (not_found) を持ったまま、応答が遅れる。
+    const statusGate = deferred<void>();
+    first.bundlerStatus.mockImplementationOnce(async ({ hash }) => {
+      const snapshot = world.statusOf(hash);
+      await statusGate.promise;
+      return { result: snapshot };
+    });
+    const screenA = render();
+    screenA.result.current.mutate(PARAMS);
+    await waitFor(() => expect(first.bundlerStatus).toHaveBeenCalledTimes(1));
+    const aOp = sentOp(first, 0);
+    const aHash = world.hashOf(aOp);
+    const aRecord = JSON.parse(storedRaw() ?? 'null') as { updatedAt: number; rev?: string };
+    expect(aRecord.updatedAt).toBe(T0);
+
+    // 画面 B (別のタブ): A を確かめる → 同じ op を送り直す → bundler は受理したが、応答が失われる。時計は動いていない
+    // (B が送る直前に書く時刻は、A の時刻と同じ値)。
+    const second = mountClients();
+    acceptThenLoseResponse(second);
+    const screenB = render();
+    await waitFor(() => expect(screenB.result.current.isUnknown).toBe(true));
+    screenB.result.current.retryReceipt();
+    await waitFor(() => expect(second.bundlerSend).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screenB.result.current.isPending).toBe(false));
+    expect(sentOp(second, 0)).toEqual(aOp);
+    expect(world.mempoolHashes()).toEqual([aHash]);
+    const bRaw = storedRaw();
+    const bRecord = JSON.parse(bRaw ?? 'null') as { updatedAt: number; userOpHash: Hex; rev?: string };
+    // intent・hash・updatedAt は A の版と同じ。違うのは、送るたびに書く一意の印だけ。
+    expect(bRecord.updatedAt).toBe(T0);
+    expect(bRecord.userOpHash).toBe(aHash);
+    screenB.unmount();
+    vi.mocked(logger.warn).mockClear();
+
+    // A の status の答え (not_found) が届く。時間の柵は通る (壁時計は動いていない)。
+    // 直す前 (e6e813e1): 版が一致するので、A が生きている op の記録を消して「断られた」と出し、やり直しが新しい nonce の op に
+    // なった (2 本)。
+    statusGate.resolve();
+    const ended = await settledMutation(screenA);
+    expect(ended.status).toBe('error');
+    expect(ended.error?.message).toBe('response-unknown');
+    expect(storedRaw()).toBe(bRaw);
+    expect(logger.warn).toHaveBeenCalledWith('pimlico.send.rejected-unverified', expect.anything());
+    expect(typeof aRecord.rev).toBe('string');
+    expect(typeof bRecord.rev).toBe('string');
+    expect(bRecord.rev).not.toBe(aRecord.rev);
+    await waitFor(() => expect(screenA.result.current.isUnknown).toBe(true));
+
+    // op が取り込まれる。A でやり直す → 開いている intent の再確認 → 元の op の receipt で成功。新しい nonce・署名なし。
+    world.mine(aHash);
+    screenA.result.current.mutate(PARAMS);
+    await waitFor(() => expect(screenA.result.current.isSuccess).toBe(true));
+    expect(screenA.result.current.data?.userOpHash).toBe(aHash);
+    expect(first.getNonce).toHaveBeenCalledTimes(1);
+    expect(second.getNonce).not.toHaveBeenCalled();
+    expect(first.signUserOperation).toHaveBeenCalledTimes(1);
+    expect(second.signUserOperation).not.toHaveBeenCalled();
+    expect(world.mined).toHaveLength(1);
+    expect(pendingKeys()).toHaveLength(0);
   });
 });
 

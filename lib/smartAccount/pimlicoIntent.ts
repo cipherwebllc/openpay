@@ -10,9 +10,10 @@
 //   c1 候補の hash のどれかに receipt がある → 成功 / revert で確定
 //   c2 **最初の送信** を bundler が検証で拒否し (HTTP 2xx + allowlist の code・pimlicoSend.ts)、拒否の文 (bundler が返した文) が
 //      nonce・mempool・重複・置き換えに触れておらず、**bundler にその op の状態を聞いて「その hash を知らない」(not_found) と
-//      答え**、**渡す直前から status を聞き終えた後までが 30 秒未満** (時間の柵・壁時計と単調な時計の両方) → 記録を消したと
-//      確かめてから、今までどおりの error。検証の拒否だけでは閉じない (この op 自身がもう届いているために、重複の配送にだけ
-//      返った拒否かもしれない)。語に当たる・status が not_found でない・status を読めない・柵の外のときは応答不明
+//      答え**、**渡す直前から status を聞き終えた後までが 30 秒未満** (時間の柵・壁時計と単調な時計の両方) で、**storage の
+//      記録が自分の送った版のままで、それを自分で消せた** → 今までどおりの error。検証の拒否だけでは閉じない (この op 自身が
+//      もう届いているために、重複の配送にだけ返った拒否かもしれない)。語に当たる・status が not_found でない・status を読め
+//      ない・柵の外・記録が別の版・**記録がもう無い** (ほかの画面が確定させて消したかもしれない) ときは応答不明
 //      (buildAndSend の onRejected)
 //   c4 最後に bundler へ渡して (渡そうとして) から 7 日を過ぎ、候補のどれにも receipt が無く、EntryPoint の nonce も未使用 →
 //      記録を消したと確かめてから
@@ -77,7 +78,9 @@
 // 版の一致 (PR-02 の Codex レビュー P1 と、その 2 回目・3 回目): 記録への後からの書き込み (応答不明の status・hash の直し・作り直しの
 // 保存を確かめられないときの書き戻し) と、確定によらない削除 (c2 で閉じる・保存を確かめられない op の片付け) は、
 // storage にいま入っている記録が、この試みが書いた (または読んで判断した) 版そのもの (pimlicoIntentOwner.ts の isSameVersion =
-// 同じ intent・同じ userOpHash・同じ updatedAt) のときだけ行う (compare-and-set: persistIfVersion・discardIfVersion)。
+// 同じ intent・同じ userOpHash・同じ updatedAt・同じ rev) のときだけ行う (compare-and-set: persistIfVersion・discardIfVersion)。
+// rev は sendRecordedOp が bundler へ渡す直前の書き込みのたびに書く一意の印 (時刻は送信を一意に決めない: 別の画面が同じ op を
+// 同じ ms に送り直した記録は、intent・hash・updatedAt が同じになる)。
 // 期限 (c4・c5) で閉じる削除は、storage の記録が同じ intent で、その記録自身も期限を過ぎているときだけ行う (discardIfExpired:
 // memory のラッチと storage の版がずれても、両方の版が期限を過ぎれば閉じる)。保存を確かめられずに開いたままにするとき、memory に
 // 持つのは、送り直し・作り直しで書こうとした版 (書き込みが返った = storage に入ったかもしれない) か、前の版 (書き込みが投げた =
@@ -153,6 +156,10 @@ export type PimlicoIntentRecord<Params> = {
   // 期限 (7 日) の基準。送信の控えのある記録では「最後に op を bundler へ渡した (渡そうとした) 時刻」(sendRecordedOp が
   // 送る直前に書く)。控えの無い記録 (この欄を足す前・MAv2) は今までどおり最後に書いた時刻。
   updatedAt: number;
+  // 送信ごとの一意の印 (任意の欄・版の一致に使う = pimlicoIntentOwner.ts の isSameVersion)。sendRecordedOp が bundler へ渡す直前の
+  // 書き込み (最初の送信・送り直し・作り直し) のたびに新しい値を書く。送った後の書き込み (応答不明の status・hash の直し) は
+  // 同じ送信の版の書き換えなので、値を保つ。この欄を足す前の記録・控えの無い記録には無い。
+  rev?: string;
   send?: PimlicoSendLedger;
 };
 
@@ -232,6 +239,14 @@ export type PimlicoIntentHost<Params, Result> = {
  * この chunk に入れない・共有の pimlicoSend.ts を大きくしないため)。 */
 export const PIMLICO_REJECTION_CLOSE_WINDOW_MS = 30 * 1000;
 
+// 送信ごとの一意の印 (記録の rev)。128 bit の乱数 (16 進 32 桁)。crypto.getRandomValues は、viem の署名も使う Web Crypto の
+// 関数で、randomUUID と違い古い WebView・secure context でない origin にもある。
+function newRev(): string {
+  return Array.from(crypto.getRandomValues(new Uint32Array(4)), (word) =>
+    word.toString(16).padStart(8, '0'),
+  ).join('');
+}
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -279,11 +294,24 @@ function discardIfVersion<Params, Result>(
   host: PimlicoIntentHost<Params, Result>,
   known: readonly PimlicoIntentRecord<Params>[],
 ): boolean {
+  return discardOwnVersion(host, known) !== 'kept';
+}
+
+// 上と同じ削除で、「消した」と「もう無かった」を分けて返す (c2 が使う):
+//   discarded = storage の記録は known の版で、それを消して確かめた。
+//   gone      = この key に記録が無かった (ほかの試みが先に閉じた・確定させて消した・storage が消された)。
+//   kept      = 別の版・別の intent の記録がある・storage が読めない・消したと確かめられない (何も消していない)。
+// 「もう無かった」を「消した」と同じに扱ってよいのは、送っていない op の片付け (discardIfVersion の呼び出し元 = 保存を確かめ
+// られなかった op) だけ。bundler へ渡した op の記録が無いのは、ほかの画面がその支払いを確定させて消したからかもしれない。
+function discardOwnVersion<Params, Result>(
+  host: PimlicoIntentHost<Params, Result>,
+  known: readonly PimlicoIntentRecord<Params>[],
+): 'discarded' | 'gone' | 'kept' {
   const stored = storedVersion(host, known);
-  if (stored === 'match') return host.discard();
-  if (stored === 'none') return true;
+  if (stored === 'match') return host.discard() ? 'discarded' : 'kept';
+  if (stored === 'none') return 'gone';
   logger.warn('pimlico.pending.not-owner', { userOpHash: known[0]?.userOpHash, stored, action: 'discard' });
-  return false;
+  return 'kept';
 }
 
 // 期限 (c4・c5) で閉じる削除: true = この key に記録が無い (消して確かめた・ほかの試みが先に閉じていた)。消すのは、storage の記録が
@@ -450,7 +478,8 @@ async function sendRecordedOp<Params, Result>(
   }
   // c2 の時間の柵の起点 (単調な時計)。壁時計の起点は下の updatedAt。書く前に測る (経過を短く見積もらない側)。
   const sentAtMono = performance.now();
-  let record: LedgerIntentRecord<Params> = { ...args.record, updatedAt: Date.now() };
+  // rev = この送信の一意の印 (版の一致・冒頭)。渡す直前の書き込みのたびに新しい値にする (送り直しでも前の値を引き継がない)。
+  let record: LedgerIntentRecord<Params> = { ...args.record, updatedAt: Date.now(), rev: newRev() };
   const stored = host.persist(record);
   if (stored !== 'stored') return args.onNotStored(stored, record);
   host.setStoreUnavailable(false);
@@ -607,7 +636,7 @@ async function buildAndSend<Params, Result>(
       // 入っていない・取り込まれていないことは示さない。何の波及を断つか: **この op 自身がもう届いている** (送信が途中で 2 回届き、
       // 1 回目は受理された・先に取り込まれた) ために、重複の配送にだけ返った拒否で記録を消して閉じると、次の試みは新しい nonce の
       // op になり (本番で動く simple 7702 は nonce の key が時刻由来で、試みごとに新しい)、取り込まれる支払いの上にもう 1 本払う。
-      // 閉じる前に 3 つを確かめる。どれかで止まれば応答不明にして、次の再確認 (resolveOpenIntent) が候補の receipt と EntryPoint の
+      // 閉じる前に 4 つを確かめる。どれかで止まれば応答不明にして、次の再確認 (resolveOpenIntent) が候補の receipt と EntryPoint の
       // nonce を読んで決める (receipt があれば確定)。
       //
       // (1) 語: 拒否の文が nonce・mempool・重複・置き換えに触れているとき (HTTP 200 + -32500「AA25 invalid account nonce」・
@@ -662,15 +691,31 @@ async function buildAndSend<Params, Result>(
           new Error(`late:wallElapsedMs=${wallElapsedMs},monoElapsedMs=${monoElapsedMs}`),
         );
       }
-      // bundler はこの hash を知らないと答え、柵の内 = 閉じてよい。status の await の後なので、下の削除は版の一致
-      // (compare-and-set) を通す。
-      // 記録を消したと確かめられたとき (ほかの画面が先に閉じていたときを含む) だけ閉じ、今までどおりの error にする (nonce の
-      // 予約は残さない・金額を変えた再試行も通常決済もできる)。確かめられなければ、残った op が後で送られうるので開いたまま。
-      // 消すのは storage の記録が、この試みが送る直前に書いた版 (sent) のときだけ。拒否が示すのは「この送信が断られた」ことだけで、
-      // その後の送信や候補が無いことではない: 拒否の答えが遅れる間に、ほかの画面が同じ nonce で送り直した・作り直した (mempool に
-      // ある) 記録や、この intent を閉じて始めた別の支払いの記録は、消さずに開いたまま (応答不明。holdAsUnknown もそれには書かない)。
-      if (!discardIfVersion(host, [sent])) {
-        return holdAsUnknown(host, sent, [sent], 'pimlico.send.rejected-unverified', error);
+      // bundler はこの hash を知らないと答え、柵の内。status の await の後なので、下の削除は版の一致 (compare-and-set) を通す。
+      // (4) 記録: 閉じるのは、**storage の記録がこの試みが送る直前に書いた版 (sent) のままで、それを自分で消せたときだけ**
+      //     (今までどおりの error・nonce の予約は残さない・金額を変えた再試行も通常決済もできる)。拒否が示すのは「この送信が
+      //     断られた」ことだけで、その後の送信や候補が無いことではない:
+      //     - 別の版・別の intent の記録がある・storage が読めない・消したと確かめられない (kept): 拒否の答えが遅れる間に、
+      //       ほかの画面が同じ nonce で送り直した・作り直した (mempool にある) 記録や、この intent を閉じて始めた別の支払いの
+      //       記録は、消さずに開いたまま (応答不明。holdAsUnknown もそれには書かない)。版は送信ごとの印 (rev) でも比べるので、
+      //       同じ op を同じ ms に送り直した記録も別の版。
+      //     - **記録がもう無い (gone)**: 「断られた」と伝えない (応答不明)。何の波及を断つか: 拒否の答えが遅れる間に、ほかの画面が
+      //       同じ nonce で作り直して確定させ、記録を消していたとき (作り直した op は hash が別なので、上の status は正しく
+      //       not_found)、この画面が error を出して intent を外すと、やり直しが新しい nonce の op になり、済んだ支払いの上に
+      //       もう 1 本払う。holdAsUnknown は空の storage に書かない (消えた記録をよみがえらせない) ので、残るのはこの画面の
+      //       memory のラッチだけ: 次の再確認 (resolveOpenIntent) は候補の receipt と EntryPoint の nonce を読むだけで、新しい
+      //       nonce の署名へは進まない。
+      //       害: ほかの画面が同じ支払いを確定させた後、この画面は「送信結果を確認中」のまま残る (この画面は作り直した op の
+      //       hash を知らないので、再確認しても成功にならない。読み込み直すと消える)。
+      const discarded = discardOwnVersion(host, [sent]);
+      if (discarded !== 'discarded') {
+        return holdAsUnknown(
+          host,
+          sent,
+          [sent],
+          discarded === 'gone' ? 'pimlico.send.rejected-record-gone' : 'pimlico.send.rejected-unverified',
+          error,
+        );
       }
       host.release(sent);
       throw toUserOperationRejection(error, { signed: built.signed, calls });

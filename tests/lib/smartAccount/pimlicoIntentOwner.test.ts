@@ -68,4 +68,41 @@ describe('isSameVersion', () => {
     expect(isSameVersion({ userOpHash: H1, updatedAt: 1 }, { userOpHash: H1, updatedAt: 1 })).toBe(true);
     expect(isSameVersion({ userOpHash: H1, updatedAt: 1 }, { userOpHash: H1, updatedAt: 2 })).toBe(false);
   });
+
+  // PR #1084 の Codex の 3 回目 (MUST 2): 時刻 (updatedAt) は送信を一意に決めない (同じ ms に送り直した別の画面の記録は、intent・
+  // hash・updatedAt が全部同じ)。送るたびに書く一意の印 (rev) も比べる。
+  describe('送信ごとの印 (rev)', () => {
+    const REV_A = 'a'.repeat(32);
+    const REV_B = 'b'.repeat(32);
+
+    it('intent・hash・updatedAt が同じでも、rev が違えば別の版 (同じ時刻に送り直した記録)', () => {
+      expect(isSameVersion({ ...version, rev: REV_A }, { ...version, rev: REV_B })).toBe(false);
+    });
+
+    it('rev も同じなら同じ版 (status だけ違う書き込み・hash の直しの前後は rev を保つ)', () => {
+      const answeredUnknown = { ...version, rev: REV_A, status: 'unknown' };
+      expect(isSameVersion({ ...version, rev: REV_A }, answeredUnknown)).toBe(true);
+    });
+
+    it('rev が同じでも、hash や updatedAt が違えば別の版 (今までの比較はそのまま)', () => {
+      expect(isSameVersion({ ...version, rev: REV_A }, { ...version, rev: REV_A, userOpHash: H2 })).toBe(false);
+      expect(isSameVersion({ ...version, rev: REV_A }, { ...version, rev: REV_A, updatedAt: 2_000 })).toBe(false);
+    });
+
+    it('片方だけ rev を持つ (rev を足す前のコードが書いた記録と、足した後の記録) → 別の版', () => {
+      expect(isSameVersion({ ...version, rev: REV_A }, version)).toBe(false);
+      expect(isSameVersion(version, { ...version, rev: REV_A })).toBe(false);
+    });
+
+    it('どちらも rev を持たない (古い記録どうし・控えの無い記録) → 今までどおり intent・hash・updatedAt で比べる', () => {
+      expect(isSameVersion(version, { ...version })).toBe(true);
+      expect(isSameVersion(version, { ...version, updatedAt: 2_000 })).toBe(false);
+    });
+
+    it('storage の rev が文字列でない (壊れた値) → 自分の版とは一致しない', () => {
+      const broken = { ...version, rev: 123 } as unknown as typeof version & { rev: string };
+      expect(isSameVersion({ ...version, rev: REV_A }, broken)).toBe(false);
+      expect(isSameVersion(version, broken)).toBe(false);
+    });
+  });
 });

@@ -99,6 +99,8 @@ type StoredRecord = {
   userOpHash: Hex;
   callFingerprint: Hex;
   updatedAt: number;
+  // 送るたびに書く一意の印 (版の一致に使う)。
+  rev?: string;
   send?: {
     entryPoint: Address;
     sender: Address;
@@ -1654,10 +1656,12 @@ describe('保存できないときは送らない・送っていない op の記
     expect(fake.bundlerSend).toHaveBeenCalledTimes(2);
     expect(fake.signUserOperation).toHaveBeenCalledTimes(2);
     expect(result.current.isUnknown).toBe(true);
-    // storage は送り直した元の op の記録のまま (時刻だけが送り直した時刻に進む)。
+    // storage は送り直した元の op の記録のまま (送り直した時刻と、送るたびに書く印 (rev) だけが送り直しのものに進む)。
     const after = storedRecord();
-    expect({ ...after, updatedAt: 0 }).toEqual({ ...before, updatedAt: 0 });
+    expect({ ...after, updatedAt: 0, rev: '' }).toEqual({ ...before, updatedAt: 0, rev: '' });
     expect(after?.updatedAt).toBeGreaterThanOrEqual(before?.updatedAt ?? Infinity);
+    expect(after?.rev).toMatch(/^[0-9a-f]{32}$/);
+    expect(after?.rev).not.toBe(before?.rev);
   });
 
   it('応答不明の作り直しで読み戻しが投げる → 元の記録に書き戻したと確かめ、送らない (開いたまま)', async () => {
@@ -1678,10 +1682,12 @@ describe('保存できないときは送らない・送っていない op の記
     expect(fake.signUserOperation).toHaveBeenCalledTimes(2);
     expect(result.current.isUnknown).toBe(true);
     vi.restoreAllMocks();
-    // 書き戻したのは送り直した元の op の記録 (送り直した時刻入り)。作り直しの op は残っていない。
+    // 書き戻したのは送り直した元の op の記録 (送り直した時刻と、その送り直しの印 (rev) 入り)。作り直しの op は残っていない。
     const after = storedRecord();
-    expect({ ...after, updatedAt: 0 }).toEqual({ ...before, updatedAt: 0 });
+    expect({ ...after, updatedAt: 0, rev: '' }).toEqual({ ...before, updatedAt: 0, rev: '' });
     expect(after?.updatedAt).toBeGreaterThanOrEqual(before?.updatedAt ?? Infinity);
+    expect(after?.rev).toMatch(/^[0-9a-f]{32}$/);
+    expect(after?.rev).not.toBe(before?.rev);
   });
 });
 

@@ -192,6 +192,9 @@ export function createFakeBundlerWorld(options?: { chainId?: number }) {
   function consumeNonceByOtherOp(nonce: bigint): void {
     const { key, seq } = splitUserOpNonce(nonce);
     if (seqOf(key) !== seq) throw new Error('fake EntryPoint: この nonce はもう使われた');
+    // 受理していた op を落とす: status を rejected に書き直す (Alto の drop の遷移。期限はここから数え直す)。
+    const dropped = mempool.get(nonce);
+    if (dropped) statusWrittenAt.set(dropped.hash, Date.now());
     mempool.delete(nonce);
     nextSeq.set(key, seq + 1n);
   }
