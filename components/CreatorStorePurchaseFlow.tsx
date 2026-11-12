@@ -297,13 +297,11 @@ export function CreatorStorePurchaseFlow({
     }
     // 見積もりはまだ無い。この押下で始めた準備が返した見積もりにだけ結び付ける (ほかの準備が後から届けた
     // 見積もりには結び付けない)。準備が失敗したら quote は null のままで、次の押下はもう一度確認する。
+    // 結び付けるのはこの承諾 (この押下の epoch)。準備が返した時点で hook の見積もりはその quote に替わっているので、
+    // 間にできた別の state があっても、それは別の見積もり (または別の epoch) のもので、もう照合から外れている。
     const accepted: RepurchaseState = { step: 'accepted', epoch, quote: null };
     setRepurchase(accepted);
-    prepareReview((quote) => {
-      setRepurchase((current) =>
-        current === accepted ? { ...accepted, quote } : current,
-      );
-    });
+    prepareReview((quote) => setRepurchase({ ...accepted, quote }));
   };
 
   const cancelRepurchase = () => {
