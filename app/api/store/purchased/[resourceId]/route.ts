@@ -11,7 +11,7 @@ import {
 // /api/store/content/{id} を使うと、その読み取りがライブラリの商品の読み取りと購入の直後の読み戻しの
 // rate limit の枠を食うので、枠を分けたこの route を足した。
 //
-// - 返すのは購入の記録 (grant) の有無と最新の購入日時だけ。本文・配布先・intentSalt・txHash は返さない。
+// - 返すのは購入の記録 (grant) の有無と、grant 全部の中で一番新しい購入の時刻だけ。本文・配布先・intentSalt・txHash は返さない。
 // - 読むのはこのウォレットの購入の記録の key 1 つだけ (store:own:<address>:<id>)。商品・本文・権利の確認の RPC は
 //   読まない: 譲渡で license を持っているだけ (購入の記録が無い) は false、購入した license を譲った後も true
 //   (購入の記録は残る。確認の段は「購入した記録がある」という事実だけを言う)。
@@ -45,9 +45,16 @@ export async function GET(
   if (!owned.ownership) {
     return storePrivateJson({ ok: true, purchased: false });
   }
+  // 「前回の購入」は時刻の一番新しい購入。latestGrant は本文の revision が大きいものを時刻より先に選ぶので使わない
+  // (古い revision の見積もりを持ったまま新しい revision を買い、その後で古い方を払うと、latestGrant は古い時刻の方)。
+  // grants は保存側の検証 (lib/x402/purchase/parse.ts) で 1 つ以上ある。
+  const purchasedAt = owned.ownership.grants.reduce(
+    (newest, grant) => Math.max(newest, grant.purchasedAt),
+    0,
+  );
   return storePrivateJson({
     ok: true,
     purchased: true,
-    purchasedAt: owned.ownership.latestGrant.purchasedAt,
+    purchasedAt,
   });
 }

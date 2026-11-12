@@ -139,8 +139,13 @@ function ownershipRecord(
   payer: string,
   grants: StorePurchaseGrant[],
 ): string {
+  // 保存側 (lib/x402/purchase/parse.ts) と同じ選び方: 本文の revision が大きいもの・同じなら時刻が新しいもの。
   const latestGrant = grants.reduce((latest, candidate) =>
-    candidate.contentRevision > latest.contentRevision ? candidate : latest,
+    candidate.contentRevision > latest.contentRevision ||
+    (candidate.contentRevision === latest.contentRevision &&
+      candidate.purchasedAt > latest.purchasedAt)
+      ? candidate
+      : latest,
   );
   const record: StorePurchaseOwnership = {
     version: 1,
@@ -243,6 +248,56 @@ describe('GET /api/store/purchased/{id}', () => {
     expect(h.product).not.toHaveBeenCalled();
     expect(h.content).not.toHaveBeenCalled();
     expect(h.rights).not.toHaveBeenCalled();
+  });
+
+  it('新しい revision を買った後で古い revision の購入を済ませたときも、purchasedAt は一番新しい購入の時刻 (latestGrant の時刻ではない)', async () => {
+    // revision 1 の見積もりを持ったまま別のタブで revision 2 を買い、その後で revision 1 の支払いを済ませた記録。
+    // 保存側の latestGrant は revision の大きい revision 2 (古い時刻) になる。
+    const newerRevisionFirst: StorePurchaseGrant = {
+      ...grant,
+      intentSalt: `0x${'d'.repeat(64)}`,
+      nonce: `0x${'d'.repeat(64)}`,
+      contentRevision: 2,
+      contentRef: `x402:hosted:${ID}:content:2`,
+      purchasedAt: 1_700_000_000_000,
+    };
+    const olderRevisionLater: StorePurchaseGrant = {
+      ...oldGrant,
+      purchasedAt: 1_700_000_500_000,
+    };
+    h.store.set(
+      ownKey(ADDRESS),
+      ownershipRecord(ADDRESS, [newerRevisionFirst, olderRevisionLater]),
+    );
+    await expectJson(await purchased(), 200, {
+      ok: true,
+      purchased: true,
+      purchasedAt: olderRevisionLater.purchasedAt,
+    });
+  });
+
+  it('同じ revision を 2 回買ったときは、新しい方の時刻', async () => {
+    const again: StorePurchaseGrant = {
+      ...grant,
+      intentSalt: `0x${'e'.repeat(64)}`,
+      nonce: `0x${'e'.repeat(64)}`,
+      purchasedAt: grant.purchasedAt + 60_000,
+    };
+    h.store.set(ownKey(ADDRESS), ownershipRecord(ADDRESS, [grant, again]));
+    await expectJson(await purchased(), 200, {
+      ok: true,
+      purchased: true,
+      purchasedAt: again.purchasedAt,
+    });
+  });
+
+  it('購入が 1 つなら、その時刻', async () => {
+    h.store.set(ownKey(ADDRESS), ownershipRecord(ADDRESS, [oldGrant]));
+    await expectJson(await purchased(), 200, {
+      ok: true,
+      purchased: true,
+      purchasedAt: oldGrant.purchasedAt,
+    });
   });
 
   it('購入の記録が無ければ purchased: false', async () => {
