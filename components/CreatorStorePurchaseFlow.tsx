@@ -19,7 +19,10 @@ import { CreatorStorePurchaseState } from '@/components/CreatorStorePurchaseStat
 import { CreatorStoreRepurchaseNotice } from '@/components/CreatorStoreRepurchaseNotice';
 import { CreatorStoreUsageTerms } from '@/components/CreatorStoreUsageTerms';
 import { CreatorStoreProductGallery } from '@/components/CreatorStoreProductGallery';
-import { useHostedStorePurchase } from '@/hooks/useHostedStorePurchase';
+import {
+  useHostedStorePurchase,
+  type HostedStorePurchaseQuote,
+} from '@/hooks/useHostedStorePurchase';
 import { useModalFocus } from '@/hooks/useModalFocus';
 import { useSiweSession } from '@/hooks/useSiweSession';
 import { useStoreAlreadyPurchased } from '@/hooks/useStoreAlreadyPurchased';
@@ -56,6 +59,20 @@ export type CreatorStorePurchaseFlowProps = {
 
 // 購入済みの確認をはさんだ押下。prepare =「購入内容を確認する」・purchase =「支払って購入を確定する」。
 type RepurchaseAction = 'prepare' | 'purchase';
+
+// 確認の段と「もう一度購入する」の承諾は、どの購入の試みのものかに結び付ける (第 10 回レビュー H-K・Codex P2-1)。
+// 試み = epoch (画面を開いてから閉じるまでの、同じ商品・同じウォレット・同じ session の間) と quote (その試みの見積もり)。
+// quote は購入 hook の prepare が返して state に置く object そのもの (prepare のたびに新しく作られ、intentSalt を持つ)。
+// 文字列 (scope・intentSalt) で比べないのは、同じ値へ戻った・同じ値の見積もりが届いたときに古い承諾を生き返らせないため。
+type RepurchaseState =
+  | {
+      step: 'asking';
+      epoch: number;
+      quote: HostedStorePurchaseQuote | null;
+      action: RepurchaseAction;
+    }
+  // quote が null の承諾 =「購入内容を確認する」で承諾し、その押下で始めた準備がまだ見積もりを返していない。
+  | { step: 'accepted'; epoch: number; quote: HostedStorePurchaseQuote | null };
 
 export function CreatorStorePurchaseFlow({
   open,
@@ -140,15 +157,27 @@ export function CreatorStorePurchaseFlow({
     enabled: visible,
     refreshKey: buyer.quote?.intentSalt ?? null,
   });
-  // 確認はこの商品・この買い手・この購入の試みに限る (保存しない)。scope が変われば無かったことにする。
-  const repurchaseScope = `${product.id}:${address?.toLowerCase() ?? ''}:${sessionAddress?.toLowerCase() ?? ''}`;
-  const [repurchase, setRepurchase] = useState<
-    | { scope: string; step: 'asking'; action: RepurchaseAction }
-    | { scope: string; step: 'accepted' }
-    | null
-  >(null);
+  // 画面の開閉・商品・ウォレット・session のどれかが変わるたびに epoch を 1 つ進める。同じ値へ戻っても戻さないので、
+  // A → B → A と切り替えた・閉じて開き直した後に、前の承諾は生き返らない (確認はどこにも保存しない)。
+  // 前の描画の値と比べて描画中に更新する (React の「前の描画の情報を保存する」形。effect を待つ 1 描画の窓を作らない)。
+  const attemptContext = `${visible ? 'open' : 'closed'}:${product.id}:${address?.toLowerCase() ?? ''}:${sessionAddress?.toLowerCase() ?? ''}`;
+  const [attemptEpoch, setAttemptEpoch] = useState({
+    context: attemptContext,
+    epoch: 0,
+  });
+  if (attemptEpoch.context !== attemptContext) {
+    setAttemptEpoch({
+      context: attemptContext,
+      epoch: attemptEpoch.epoch + 1,
+    });
+  }
+  const epoch = attemptEpoch.epoch;
+  const [repurchase, setRepurchase] = useState<RepurchaseState | null>(null);
+  // 今の試み (同じ epoch・同じ見積もり) のものだけを使う。ほかは無かったことにする。
   const repurchaseNow =
-    repurchase !== null && repurchase.scope === repurchaseScope
+    repurchase !== null &&
+    repurchase.epoch === epoch &&
+    repurchase.quote === buyer.quote
       ? repurchase
       : null;
   // 確認の段を出している間だけ値を持つ (action = 確認の後に進める押下)。
@@ -156,6 +185,9 @@ export function CreatorStorePurchaseFlow({
     knownPurchase !== null && repurchaseNow?.step === 'asking'
       ? repurchaseNow
       : null;
+  // 承諾が確認を省くのは、承諾した試みの見積もりへの「支払って購入を確定する」だけ。
+  const purchaseAccepted =
+    repurchaseNow?.step === 'accepted' && repurchaseNow.quote !== null;
   const showRepurchaseNotice = repurchaseAsking !== null;
   const repurchaseTriggerRef = useRef<HTMLElement | null>(null);
 
@@ -176,8 +208,6 @@ export function CreatorStorePurchaseFlow({
   const closeAndResetReview = () => {
     buyer.reset();
     setFlowError(null);
-    // 次の見積もりは別の購入の試み。購入済みなら、もう一度確認する。
-    setRepurchase(null);
     onClose();
   };
 
@@ -190,9 +220,12 @@ export function CreatorStorePurchaseFlow({
     });
   };
 
-  const prepareReview = () => {
+  // onQuote = この押下で始めた準備が返した見積もりを受け取る (承諾をその見積もりに結び付ける)。
+  const prepareReview = (
+    onQuote?: (quote: HostedStorePurchaseQuote) => void,
+  ) => {
     setFlowError(null);
-    void buyer.prepare().catch((error: unknown) => {
+    void buyer.prepare().then(onQuote, (error: unknown) => {
       setFlowError(
         error instanceof Error ? error : new Error(String(error)),
       );
@@ -232,8 +265,6 @@ export function CreatorStorePurchaseFlow({
   const startOver = () => {
     buyer.reset();
     setFlowError(null);
-    // 次の見積もりは別の購入の試み。購入済みなら、もう一度確認する。
-    setRepurchase(null);
   };
 
   const runRepurchaseAction = (action: RepurchaseAction) => {
@@ -241,10 +272,11 @@ export function CreatorStorePurchaseFlow({
     else confirmPurchase();
   };
 
-  // 購入済みと分かっていて、この試みでまだ確認していなければ、進めずに確認の段を出す。
+  // 購入済みと分かっていれば、進めずに確認の段を出す。例外は、承諾した試みの見積もりへの
+  // 「支払って購入を確定する」だけ (「購入内容を確認する」は新しい試みを始めるので、承諾があってももう一度確認する)。
   // それ以外は action をそのまま実行する (今までどおり)。
   const requestRepurchaseChecked = (action: RepurchaseAction) => {
-    if (knownPurchase === null || repurchaseNow?.step === 'accepted') {
+    if (knownPurchase === null || (action === 'purchase' && purchaseAccepted)) {
       runRepurchaseAction(action);
       return;
     }
@@ -252,13 +284,26 @@ export function CreatorStorePurchaseFlow({
       document.activeElement instanceof HTMLElement
         ? document.activeElement
         : null;
-    setRepurchase({ scope: repurchaseScope, step: 'asking', action });
+    setRepurchase({ step: 'asking', epoch, quote: buyer.quote, action });
   };
 
-  // 「もう一度購入する」: この試みでは確認済みにして、はさんだ押下を今までどおり 1 回進める。
-  const continueRepurchase = (action: RepurchaseAction) => {
-    setRepurchase({ scope: repurchaseScope, step: 'accepted' });
-    runRepurchaseAction(action);
+  // 「もう一度購入する」: はさんだ押下を今までどおり 1 回進め、承諾をこの試みに結び付ける。
+  const continueRepurchase = (asking: RepurchaseState & { step: 'asking' }) => {
+    if (asking.action === 'purchase') {
+      // 確認した見積もりの署名まで (署名を断って最終確認へ戻っても、同じ見積もりならもう聞かない)。
+      setRepurchase({ step: 'accepted', epoch, quote: asking.quote });
+      confirmPurchase();
+      return;
+    }
+    // 見積もりはまだ無い。この押下で始めた準備が返した見積もりにだけ結び付ける (ほかの準備が後から届けた
+    // 見積もりには結び付けない)。準備が失敗したら quote は null のままで、次の押下はもう一度確認する。
+    const accepted: RepurchaseState = { step: 'accepted', epoch, quote: null };
+    setRepurchase(accepted);
+    prepareReview((quote) => {
+      setRepurchase((current) =>
+        current === accepted ? { ...accepted, quote } : current,
+      );
+    });
   };
 
   const cancelRepurchase = () => {
@@ -315,7 +360,7 @@ export function CreatorStorePurchaseFlow({
           <CreatorStoreRepurchaseNotice
             purchasedAt={knownPurchase.purchasedAt}
             libraryHref={`/${locale}/store/library`}
-            onContinue={() => continueRepurchase(repurchaseAsking.action)}
+            onContinue={() => continueRepurchase(repurchaseAsking)}
             onCancel={cancelRepurchase}
           />
         ) : null}

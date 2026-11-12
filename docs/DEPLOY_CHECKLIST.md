@@ -2538,7 +2538,7 @@ opt-in (既定 OFF)。詳細は plans/a2hs-retention-roadmap.md Phase 2・memory
 
 | env | 種別 | 効果 |
 | --- | --- | --- |
-| `ENABLE_CREATOR_STORE` | **server-only** | 出品 CRUD (`/api/store/products`・`/api/store/seller`)・hosted paid route (`/api/paid/hosted/[id]`)・購入 status (`/api/store/purchase/status`)・library/content API・reconcile cron の全 server surface |
+| `ENABLE_CREATOR_STORE` | **server-only** | 出品 CRUD (`/api/store/products`・`/api/store/seller`)・hosted paid route (`/api/paid/hosted/[id]`)・購入 status (`/api/store/purchase/status`)・library/content API・購入済みの確認 (`/api/store/purchased/[resourceId]`)・reconcile cron の全 server surface |
 | `NEXT_PUBLIC_ENABLE_CREATOR_STORE` | client | /create 管理セクション・@handle「販売中」節・/store/library ページ・WalletBadge の SIWE 導線 |
 
 点灯は **両方 '1'** (server だけ ON = UI 不在で不到達・client だけ ON = API 404 で全操作失敗)。

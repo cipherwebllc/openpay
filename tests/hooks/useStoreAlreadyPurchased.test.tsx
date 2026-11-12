@@ -2,8 +2,8 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useStoreAlreadyPurchased } from '@/hooks/useStoreAlreadyPurchased';
 
-// 第 10 回レビュー H-K: 購入の前に「この買い手はこの商品を購入済みか」を own content API で確かめる hook。
-// mock は fetch (境界) だけ。
+// 第 10 回レビュー H-K: 購入の前に「この買い手はこの商品を購入済みか」を、購入の有無だけを返す route
+// (GET /api/store/purchased/{id}) で確かめる hook。mock は fetch (境界) だけ。
 
 const RESOURCE_ID = `h_${'a'.repeat(32)}`;
 const OTHER_RESOURCE_ID = `h_${'b'.repeat(32)}`;
@@ -19,39 +19,15 @@ function jsonResponse(body: unknown, status: number): Response {
   });
 }
 
-/** app/api/store/content/[resourceId]/route.ts が購入 (grant) に基づいて返す 200。 */
+/** app/api/store/purchased/[resourceId]/route.ts が購入の記録 (grant) に基づいて返す 200。 */
 function purchasedBody(
   overrides: Record<string, unknown> = {},
 ): Record<string, unknown> {
   return {
     ok: true,
-    state: 'ready',
-    resourceId: RESOURCE_ID,
-    title: 'Prompt',
-    contentRevision: 1,
-    intentSalt: INTENT_SALT,
+    purchased: true,
     purchasedAt: PURCHASED_AT,
-    txHash: `0x${'ef'.repeat(32)}`,
-    kind: 'text',
-    value: 'secret body',
     ...overrides,
-  };
-}
-
-/** 同じ route が、購入せずに譲渡で license を持つウォレットへ返す 200 (購入の記録は無い)。 */
-function holderBody(): Record<string, unknown> {
-  return {
-    ok: true,
-    productKind: 'license',
-    resourceId: RESOURCE_ID,
-    title: 'Prompt',
-    contentRevision: 1,
-    license: { transferable: true },
-    entitled: true,
-    basis: 'holder',
-    state: 'ready',
-    kind: 'text',
-    value: 'secret body',
   };
 }
 
@@ -93,7 +69,7 @@ beforeEach(() => {
 });
 
 describe('useStoreAlreadyPurchased', () => {
-  it('own content API が購入の記録を返したら、購入日時つきで購入済みを返す (selector なし・cookie つき)', async () => {
+  it('購入の有無の route が購入の記録を返したら、購入日時つきで購入済みを返す (cookie つき)', async () => {
     const fetchMock = vi
       .spyOn(globalThis, 'fetch')
       .mockResolvedValue(jsonResponse(purchasedBody(), 200));
@@ -104,47 +80,41 @@ describe('useStoreAlreadyPurchased', () => {
     );
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0]!;
-    expect(url).toBe(`/api/store/content/${RESOURCE_ID}`);
+    // 商品の本文を返す /api/store/content/{id} は読まない (rate limit の枠を分けた route だけを読む)。
+    expect(url).toBe(`/api/store/purchased/${RESOURCE_ID}`);
     expect(init).toMatchObject({
       method: 'GET',
       cache: 'no-store',
       credentials: 'same-origin',
     });
-    // 商品の本文は state に出さない (返すのは購入日時だけ)。
-    expect(JSON.stringify(result.current)).not.toContain('secret body');
   });
 
-  it('提供が終わった商品 (provided-ended) も、購入の記録があれば購入済み', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      jsonResponse(
-        purchasedBody({
-          state: 'provided-ended',
-          kind: undefined,
-          value: undefined,
-        }),
-        200,
-      ),
-    );
-    const { result } = renderKnown();
-    await waitFor(() =>
-      expect(result.current).toEqual({ purchasedAt: PURCHASED_AT }),
-    );
+  it('id は URL に入れる前に encode する', async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(jsonResponse(purchasedBody(), 200));
+    renderKnown({ resourceId: 'h_a/b?c' });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(fetchMock.mock.calls[0]![0]).toBe('/api/store/purchased/h_a%2Fb%3Fc');
   });
 
   it.each([
-    ['404 (購入の記録なし)', () => jsonResponse({ ok: false, error: 'not_found' }, 404)],
-    ['401 (session 切れ)', () => jsonResponse({ ok: false, error: 'unauthorized' }, 401)],
+    ['purchased: false (購入の記録なし)', () => jsonResponse({ ok: true, purchased: false }, 200)],
+    ['404 (Store が OFF)', () => jsonResponse({ ok: false, error: 'not_found' }, 404)],
+    ['401 (session 切れ)', () => jsonResponse({ ok: false, error: 'unauthenticated' }, 401)],
     ['429 (rate limit)', () => jsonResponse({ ok: false, error: 'rate_limited' }, 429)],
-    ['503 (storage / 権利が不明)', () => jsonResponse({ ok: false, error: 'license_rights_unknown' }, 503)],
+    ['503 (storage)', () => jsonResponse({ ok: false, error: 'storage_unavailable' }, 503)],
     ['JSON でない 200', () => new Response('<html>', { status: 200 })],
     ['JSON の null', () => jsonResponse(null, 200)],
+    ['JSON の配列', () => jsonResponse([purchasedBody()], 200)],
     ['ok でない 200', () => jsonResponse(purchasedBody({ ok: false }), 200)],
-    ['別の商品の 200', () => jsonResponse(purchasedBody({ resourceId: OTHER_RESOURCE_ID }), 200)],
-    ['200 でない応答 (本文が購入の記録の形でも)', () => jsonResponse(purchasedBody(), 503)],
-    ['購入の intentSalt の無い 200', () => jsonResponse(purchasedBody({ intentSalt: undefined }), 200)],
+    ['purchased が true でない 200 (文字列)', () => jsonResponse(purchasedBody({ purchased: 'true' }), 200)],
+    ['purchased の無い 200', () => jsonResponse(purchasedBody({ purchased: undefined }), 200)],
+    ['200 でない応答 (本文が購入済みの形でも)', () => jsonResponse(purchasedBody(), 503)],
     ['購入日時の無い 200', () => jsonResponse(purchasedBody({ purchasedAt: undefined }), 200)],
     ['購入日時が数でない 200', () => jsonResponse(purchasedBody({ purchasedAt: '1799000000000' }), 200)],
-    ['購入せずに license を持つウォレット (source=holder) の 200', () => jsonResponse(holderBody(), 200)],
+    ['購入日時が 0 の 200', () => jsonResponse(purchasedBody({ purchasedAt: 0 }), 200)],
+    ['購入日時が整数でない 200', () => jsonResponse(purchasedBody({ purchasedAt: 1.5 }), 200)],
   ])('%s は購入済みにしない', async (_label, respond) => {
     const fetchMock = vi
       .spyOn(globalThis, 'fetch')
@@ -203,9 +173,9 @@ describe('useStoreAlreadyPurchased', () => {
     const fetchMock = vi
       .spyOn(globalThis, 'fetch')
       .mockImplementation(async (input) =>
-        String(input) === `/api/store/content/${RESOURCE_ID}`
+        String(input) === `/api/store/purchased/${RESOURCE_ID}`
           ? jsonResponse(purchasedBody(), 200)
-          : jsonResponse({ ok: false, error: 'not_found' }, 404),
+          : jsonResponse({ ok: true, purchased: false }, 200),
       );
     const { result, rerender } = renderKnown();
     await waitFor(() =>
@@ -234,7 +204,7 @@ describe('useStoreAlreadyPurchased', () => {
           }),
       )
       .mockImplementation(async () =>
-        jsonResponse({ ok: false, error: 'not_found' }, 404),
+        jsonResponse({ ok: true, purchased: false }, 200),
       );
     const { result, rerender } = renderKnown();
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
@@ -257,7 +227,7 @@ describe('useStoreAlreadyPurchased', () => {
     const fetchMock = vi
       .spyOn(globalThis, 'fetch')
       .mockImplementationOnce(async () =>
-        jsonResponse({ ok: false, error: 'not_found' }, 404),
+        jsonResponse({ ok: true, purchased: false }, 200),
       )
       .mockImplementation(async () => jsonResponse(purchasedBody(), 200));
     const { result, rerender } = renderKnown();

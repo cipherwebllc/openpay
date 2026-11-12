@@ -1,7 +1,7 @@
 'use client';
 
 // 購入済みの商品をもう一度買う前の確認の段 (第 10 回レビュー H-K)。表示専用。
-// 出すのは、own content API がこの買い手の購入の記録を返したときだけ (hooks/useStoreAlreadyPurchased)。
+// 出すのは、server がこの買い手の購入の記録を返したときだけ (hooks/useStoreAlreadyPurchased・/api/store/purchased/{id})。
 // 再購入は仕様 (同じ商品を何度でも買える) なので止めない: ライブラリへの導線を先に置き、
 // 「もう一度購入する」で今までどおりの購入へ進む。赤は使わない (破壊的な操作ではない)。
 

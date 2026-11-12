@@ -7,9 +7,9 @@
 // = 払えたことを知らずにもう一度払える。ここで分かるのは「server が購入の記録を返した」ことだけで、
 // 購入を止めるかどうかは呼び出し側 (CreatorStorePurchaseFlow の確認の段) が決める。
 //
-// 読むのは購入済みライブラリと同じ own content API (GET /api/store/content/{id}・SIWE 必須・selector なし
-// = 最新の購入)。新しい API は足さない。応答には商品の本文も入るが、ここでは購入の記録の有無と購入日時
-// だけを取り出し、本文は state に置かない。
+// 読むのは購入の有無だけを返す route (GET /api/store/purchased/{id}・SIWE 必須・応答は purchased と購入日時だけ)。
+// 商品の本文を返す own content API (/api/store/content/{id}) は読まない: rate limit の枠が別なので、この読み取りが
+// ライブラリの商品の読み取りと購入の直後の読み戻しの枠を食わない (Codex P2-2)。
 //
 // React Query を使わない: 購入画面の component テストは QueryClientProvider なしで描画しており、
 // この読み取りは 1 回きりで cache を共有する相手もいない。
@@ -33,18 +33,15 @@ type UseStoreAlreadyPurchasedInput = {
 
 type Known = { scope: string; purchasedAt: number };
 
-/** 購入 (grant) に基づく own content API の 200 だけを購入済みとみなす。 */
-function purchasedAtFrom(body: unknown, resourceId: string): number | null {
+/** 購入の記録がある (purchased: true と購入日時) 200 だけを購入済みとみなす。 */
+function purchasedAtFrom(body: unknown): number | null {
   if (body === null || typeof body !== 'object' || Array.isArray(body)) {
     return null;
   }
   const value = body as Record<string, unknown>;
-  // intentSalt / purchasedAt は購入の記録からの応答にだけ入る。購入せずに譲渡で license を持つ
-  // ウォレット (source=holder) の 200 には無いので、「購入済み」とは言わない。
   if (
     value.ok !== true ||
-    value.resourceId !== resourceId ||
-    typeof value.intentSalt !== 'string' ||
+    value.purchased !== true ||
     !Number.isSafeInteger(value.purchasedAt) ||
     (value.purchasedAt as number) <= 0
   ) {
@@ -54,8 +51,8 @@ function purchasedAtFrom(body: unknown, resourceId: string): number | null {
 }
 
 /**
- * 購入済みと server が返したときだけ値を返す。未ログイン・読み込み中・404 (購入の記録なし)・
- * 読み取りの失敗はすべて null で、呼び出し側は今までどおり購入へ進める。
+ * 購入済みと server が返したときだけ値を返す。未ログイン・読み込み中・purchased: false (購入の記録なし)・
+ * 読み取りの失敗 (401・429・503・通信の失敗) はすべて null で、呼び出し側は今までどおり購入へ進める。
  */
 export function useStoreAlreadyPurchased({
   resourceId,
@@ -75,7 +72,7 @@ export function useStoreAlreadyPurchased({
     void (async () => {
       try {
         const response = await fetch(
-          `/api/store/content/${encodeURIComponent(resourceId)}`,
+          `/api/store/purchased/${encodeURIComponent(resourceId)}`,
           {
             method: 'GET',
             headers: { accept: 'application/json' },
@@ -85,7 +82,7 @@ export function useStoreAlreadyPurchased({
           },
         );
         if (response.status !== 200) return;
-        const purchasedAt = purchasedAtFrom(await response.json(), resourceId);
+        const purchasedAt = purchasedAtFrom(await response.json());
         if (purchasedAt === null) return;
         // 応答が届いた時点の買い手・商品ではなく、依頼した時点の scope で記録する
         // (切り替えた後に届いた古い応答は、下の scope の照合で使われない)。
