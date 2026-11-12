@@ -154,6 +154,9 @@ const PRE_SUBMIT_GC_MS = 60 * 60 * 1000;
  * timeout は circleAccount.ts の CIRCLE_RECEIPT_TIMEOUT_MS (120 秒・viem の既定と同じ値を明示して渡す)。記録が submitting に
  * なるのは自分の markSubmitting から (閉じる条件の (b) で、その直前は signed だったことを確かめる)。なので、ほかの試みの送り直しは、
  * 自分の markSubmitting から 120 秒より前には起きない。上限はその半分以下にし (テストで固定)、拒否の処理をその前に終える。
+ * 「読んでから 120 秒」ではない: viem は同じ client・同じ hash の待ちを 1 つの観測にまとめるので、後から待ちに入った試みは、先に
+ * 始まった待ちの残り時間で timeout する (読んでから 1 秒で送り直すこともある)。それでも、いちばん早い待ちが始まるのは記録が
+ * submitting になった後なので、下限は自分の markSubmitting から 120 秒のまま。
  * 送信の HTTP の timeout は viem の http transport の既定 10 秒 (bundle の transport に timeout を渡していない) なので、タブが
  * 動いていれば拒否はふつう 30 秒より前に届く。
  *

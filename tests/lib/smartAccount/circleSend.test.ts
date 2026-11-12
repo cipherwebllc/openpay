@@ -2486,8 +2486,8 @@ describe('H-W・H-Y: 送った後の終わり方', () => {
     });
 
     // F2 (Codex の指摘 2・3): 閉じてよいのは、自分の markSubmitting から短い時間 (30 秒未満) のうちに届いた拒否だけ。ほかの
-    // 試みがこの op を送り直すのは、記録を submitting で読んでから receipt の待ち (120 秒) が timeout した後だけなので、30 秒より
-    // 前の拒否の処理は、ほかの試みの送り直しより必ず前に終わる。経過は壁時計 (now) と単調な時計 (monotonicNow) の両方で測る。
+    // 試みがこの op を送り直すのは receipt の待ち (120 秒) が timeout した後だけで、いちばん早い待ちが始まるのは記録が submitting に
+    // なった後なので、30 秒より前の拒否の処理は、ほかの試みの送り直しより前に終わる。経過は壁時計 (now) と単調な時計 (monotonicNow) の両方で測る。
     describe('F2: 時間の柵 — 自分の markSubmitting から 30 秒未満に届いた拒否だけで閉じる', () => {
       let mono: number;
       const monotonicNow = () => mono;

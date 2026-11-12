@@ -579,7 +579,7 @@ const REJECTED_MESSAGE_MAX = 200;
  * 同じ op を送り直して受理されていたのに failed にすると、scan と resume がその支払いを「払っていない」と扱い、取り込まれた
  * 後に 2 本目が開く。**この 3 つの確認だけでは防ぎ切れない**: 読み → 比べる → 書くは別のタブとの間で原子的でなく
  * (localStorage に lock は無い)、#1079 より前のコードのタブは送り直しの **後** に時刻を書く。その窓は、呼び出し側の時間の柵が
- * 閉じる (ほかの試みは、記録を submitting で読んでから receipt の待ちが timeout するまで送り直さない)。
+ * 閉じる (ほかの試みが送り直すのは receipt の待ちが timeout した後で、その待ちは記録が submitting になった後にしか始まらない)。
  * failed にするとき、署名済みの op (signedUserOp) を記録から消す (閉じた記録の op を、後から誰も送り直せないようにする。
  * userOpHash は残す: 万一その op の receipt が取れたとき、markConfirmed が confirmed に直す手がかり)。
  * errorMessage は上限で切って保存する (呼び出し側は秘密・署名を入れない。bundler の文は 16 進の長い連なりを伏せてから渡す)。 */
