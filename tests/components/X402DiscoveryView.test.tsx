@@ -1090,6 +1090,51 @@ describe('X402DiscoveryView', () => {
     expect(await screen.findByText(expected)).toBeInTheDocument();
   });
 
+  // 第 10 回レビュー B3-3: URL を替える編集で替えた先のゲートを確かめられないと、PATCH は 200 で hidden +
+  // pendingFirstVerification を返す (公開中の掲載が一覧から消える)。「更新しました。」だけで済ませない。
+  it.each([
+    [true, '更新しました。自動の確認が OpenPay の 402 を確かめるまで、カタログには載りません。'],
+    [false, '更新しました。'],
+  ])('編集の完了文言: pendingFirstVerification=%s', async (pendingFirstVerification, expected) => {
+    const fetchFn = renderAsOwner();
+    const routed = fetchFn.getMockImplementation() as (url: string, init?: RequestInit) => Promise<unknown>;
+    fetchFn.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (String(url).startsWith('/api/facilitator/resources/') && init?.method === 'PATCH') {
+        const body = JSON.parse(String(init.body ?? '{}'));
+        const resource = pendingFirstVerification ? { ...body, hidden: true, pendingFirstVerification: true } : body;
+        return { ok: true, status: 200, json: async () => ({ resource }) };
+      }
+      return routed(url, init);
+    });
+    fireEvent.click(await screen.findByRole('button', { name: '編集' }));
+    fireEvent.click(await screen.findByRole('button', { name: '更新する' }));
+    expect(await screen.findByText(expected)).toBeVisible();
+    if (pendingFirstVerification) expect(screen.queryByText('更新しました。')).not.toBeInTheDocument();
+  });
+
+  // URL を替える編集の 422 gate_accept_mismatch は、新規登録と同じ文言 (不一致の項目名つき) で出す。フォームは閉じない。
+  it('編集: gate_accept_mismatch 422 → 新規登録と同じ文言に不一致の項目名を出し、編集中のまま残す', async () => {
+    const fetchFn = renderAsOwner();
+    const routed = fetchFn.getMockImplementation() as (url: string, init?: RequestInit) => Promise<unknown>;
+    fetchFn.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (String(url).startsWith('/api/facilitator/resources/') && init?.method === 'PATCH') {
+        return { ok: false, status: 422, json: async () => ({ error: 'gate_accept_mismatch', mismatch: 'payTo' }) };
+      }
+      return routed(url, init);
+    });
+    fireEvent.click(await screen.findByRole('button', { name: '編集' }));
+    fireEvent.click(await screen.findByRole('button', { name: '更新する' }));
+    expect(
+      await screen.findByText(
+        'この URL の 402 が示す JPYC の受取先・チェーン・トークン・forwarder が登録内容と一致しません (payTo)。ゲートの設定を確かめてから、もう一度登録してください。',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/操作に失敗しました/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^更新しました。/)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '更新する' })).toBeInTheDocument();
+    expect(screen.getByDisplayValue(OWNED.url)).toBeInTheDocument();
+  });
+
   it.each(['missing', 'rejected', 'pending'] as const)('D2: clipboard %s never reports copied', async (mode) => {
     const rejected = Promise.reject(new Error('clipboard denied'));
     // Observe the test promise too, so the pre-fix run reports the UI assertion, not an unhandled rejection.

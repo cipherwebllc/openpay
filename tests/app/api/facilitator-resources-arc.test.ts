@@ -30,7 +30,6 @@ vi.mock('@/lib/x402/resourceRequestGuards', () => ({
 vi.mock('@/lib/httpBodyCap', () => ({ readJsonBodyCapped: async () => ({ ok: true, value: {} }) }));
 vi.mock('@/lib/x402/moderation', () => ({
   isFreelyAccessible: h.isFreelyAccessible,
-  probeGate: async () => 'openpay',
   // 登録の照合は tests/lib/x402/registration-gate-match.test.ts。ここは Arc の検査の配線だけを見る。
   probeGateDetailed: async () => ({ result: 'unknown', accepts: [] }),
 }));

@@ -3325,6 +3325,7 @@
     "updating": "更新中…",
     "cancelCta": "キャンセル",
     "updated": "更新しました。",
+    "updatedPending": "更新しました。自動の確認が OpenPay の 402 を確かめるまで、カタログには載りません。",
     "deleted": "削除しました。",
     "yourResourcesTitle": "あなたの登録",
     "ownedLiveCount": "公開中 {count}",

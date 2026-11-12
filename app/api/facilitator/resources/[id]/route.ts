@@ -1,5 +1,6 @@
 // x402 facilitator: 登録済み resource の **編集 (PATCH)** + **無効化 (DELETE)**。
-//   PATCH  → owner が url/description/priceJpyc/category/payTo を更新 → { resource }。
+//   PATCH  → owner が url/description/priceJpyc/category/payTo を更新 → { resource }。URL を替える編集は新規登録と
+//            同じ扱い (替えた先の 402 を照合・不一致は 422・確かめられなければ最初の再検証まで公開の一覧に出さない)。
 //   DELETE → owner が soft-delete (active:false) → { ok:true }。公開カタログ + owner 一覧から消えるが
 //            データは KV に残す (settlement の resourceId 参照・監査)。
 // **owner 認可が要**: SIWE セッション === resource.merchant のときだけ更新/削除を許可する (registry が
@@ -21,8 +22,9 @@ import {
   getResource,
 } from '@/lib/x402/registry';
 import { arcPayToRejection } from '@/lib/x402/arcPayToReachability';
-import { isFreelyAccessible, probeGate } from '@/lib/x402/moderation';
+import { isFreelyAccessible, probeGateDetailed } from '@/lib/x402/moderation';
 import { buildPaywallSnippet } from '@/lib/x402/paywallSnippet';
+import { gateAcceptMismatch, registrationAcceptExpectation } from '@/lib/x402/registrationGateMatch';
 import {
   checkResourceWalletRateLimit,
   RESOURCE_BODY_MAX_BYTES,
@@ -110,7 +112,9 @@ export async function PATCH(
   }
 
   // 新規登録と同じゲート方式検証 (URL を他 facilitator ゲートへ差し替えるミスマッチを防ぐ)。
-  if (existing && (await probeGate(parsed.input.url)) === 'foreign') {
+  // GET は今までと同じ 1 回で、その 402 の accepts も読む (下の URL 変更の照合に使う)。
+  const gate = existing ? await probeGateDetailed(parsed.input.url) : null;
+  if (gate?.result === 'foreign') {
     return NextResponse.json(
       {
         error: 'gate_not_openpay',
@@ -125,10 +129,41 @@ export async function PATCH(
     );
   }
 
+  // URL を替える編集は新規登録と同じ扱いにする (B3-3: 検証済みで公開中の掲載が、照合を通っていない URL を公開のまま指す
+  // 経路を断つ)。替えた先が OpenPay 方式の 402 を返したら、その JPYC accept を登録と同じ照合に通し、合わなければ保存しない。
+  // 期待値の受取先は保存した後の掲載の payTo (この編集が payTo も替えるなら新しい payTo)。
+  // URL が変わらない編集は不一致でも断らない: 出品者のゲート (SDK) は掲載の payTo を読んで 402 を作るので、payTo を替える
+  // 編集の時点ではまだ古い payTo の 402 しか返せず、必ず不一致になる (その 402 は毎時の再検証が新しい payTo で照合する)。
+  const mismatch = gate?.result === 'openpay'
+    ? gateAcceptMismatch(gate.accepts, registrationAcceptExpectation(parsed.input.payTo))
+    : null;
+  if (existing && existing.url !== parsed.input.url && mismatch) {
+    const redacted = await redactUrlForTelemetry(parsed.input.url);
+    logger.warn('x402.facilitator.gate_accept_mismatch', {
+      id,
+      merchant: session.address,
+      mismatch,
+      resourceOrigin: redacted.origin,
+      resourceHash: redacted.hash,
+    });
+    return NextResponse.json({ error: 'gate_accept_mismatch', mismatch }, { status: 422 });
+  }
+
   const arcRejection = await arcCheck;
   if (arcRejection) return NextResponse.json({ error: arcRejection.error }, { status: arcRejection.status });
 
-  const result = await updateResource(id, session.address, parsed.input);
+  // 替えた先の OpenPay の 402 を確かめていない URL 変更 (判定不能 'unknown': 404・3xx・timeout・5xx 等) は、新規登録の
+  // 判定不能と同じく保存は受けるが、最初の再検証が照合つきの 402 を確かめるまで公開の一覧に出さない (hidden +
+  // pendingFirstVerification・ID の照会は返るので出品者のゲートは動く)。
+  // 渡すのは「この URL と payTo で、照合の合う OpenPay の 402 を確かめたか」だけで、URL が変わったかは CAS が権威の record で
+  // 判定する = URL が変わらない編集は probe の結果によらず今までどおり。上の 422 は事前の読取の URL で判定しているので、
+  // 次の 2 つの場合も CAS の側で公開待ちに倒れる (確かめていない URL を公開のまま指させない):
+  //   - gate が null (事前の読取が null = 未存在か KV の読取失敗) で probe していないのに、CAS は通った URL 変更
+  //     (未存在なら CAS が not_found を返すだけ)。
+  //   - probe の間に並行の編集が URL を動かし、事前の読取では「URL は同じ」だったこの編集が CAS では URL 変更になった。
+  const result = await updateResource(id, session.address, parsed.input, Date.now(), {
+    pendingIfUrlChanged: gate?.result !== 'openpay' || mismatch !== null,
+  });
   if (!result.ok) {
     if (result.reason === 'url_taken') {
       return NextResponse.json({ error: 'url_taken' }, { status: 409 });

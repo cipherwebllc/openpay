@@ -82,6 +82,8 @@ export type X402Resource = {
   hidden?: boolean;
   // 新規登録の probe が判定不能 (unknown: 404・3xx・timeout・5xx 等) だった掲載の印。必ず hidden: true と一緒に
   // 付け、最初の再検証が OpenPay の 402 を確かめて hidden を解くときに一緒に消える (lib/x402/reverify.ts)。
+  // 公開中の掲載の URL を替える編集 (PATCH) で、替えた先の OpenPay の 402 を確かめられなかったときにも付く
+  // (新規登録と同じ扱い・下の CAS_UPDATE の ARGV[15]。周りのコメントの「新規掲載」はこの掲載も含む)。
   // 通常のモデレーションの hidden になったとき (台帳の継承・台帳済 URL への PATCH・再検証の違反の閾値) にも消え、
   // 以後は印のない hidden として従来どおり扱う = 印は「一度も検証されていないから隠しているだけ」の状態にだけ残る。
   // 既存の record には無い = 従来どおり (移行なし)。hidden を使う公開面はそのまま隠し、exact-ID の照会
@@ -511,6 +513,13 @@ export const CAS_OWNER_GUARD =
 // hidden は cron 再検証 (lib/x402/reverify.ts) が付けたモデレーション状態であり、owner が別 URL へ
 // PATCH → 元 URL へ PATCH し直すだけで解除できると自動 hidden が無意味になる (B6)。復帰は
 // 「再検証が ok_402_openpay を観測する」正規経路のみ (reverify の CAS が hidden=false に倒す)。
+// ARGV[15]='1' (替えた先の URL で、登録と同じ照合つきの OpenPay の 402 を確かめていない) の URL 変更は、公開中の掲載を
+// 新規登録の判定不能と同じ hidden + pendingFirstVerification にする (B3-3: 検証済みで公開中の掲載が、確かめていない URL を
+// 公開のまま指す経路を断つ)。URL が変わらない編集では何もしない。印を付けるのは公開中の掲載だけ:
+//   - すでに hidden の掲載 (モデレーション・台帳の継承) には付けない。付けると、隠された掲載が URL を替えるだけで印の例外
+//     (ID の照会で返す・削除で台帳を立てない) を得て、モデレーション状態を洗い流せる。
+//   - 台帳済 URL への変更は従来どおり台帳が勝つ (印なしの hidden)。
+//   - すでに印つきの hidden (公開待ち) はそのまま (印も hidden も残る)。
 // KEYS[2/3]=新/旧 claim、KEYS[4/5]=変更先の新/旧 hidden 台帳、ARGV[13/14]=読取時 URL/id。
 // 戻り: JSON=成功 / -1=未存在 / -2=malformed / -3=削除済 / -4=URL 競合 / -5=URL 使用中
 // / -6=claim 先破損 / 0=owner 不一致。URL 競合時は無変更で storage (503・再試行可能)。
@@ -529,7 +538,9 @@ export const CAS_UPDATE =
   // 継承した hidden はモデレーション状態なので、最初の再検証を待つ印 (pendingFirstVerification) は外す
   // (印の例外 = ID の照会で返す・台帳を立てない、をモデレーション済みの URL に持ち込まない)。
   'if o.url~=ARGV[2] then o.verification=nil; ' +
-  "if redis.call('EXISTS',KEYS[4])==1 or redis.call('EXISTS',KEYS[5])==1 then o.hidden=true; o.pendingFirstVerification=nil end; end; " +
+  "if redis.call('EXISTS',KEYS[4])==1 or redis.call('EXISTS',KEYS[5])==1 then o.hidden=true; o.pendingFirstVerification=nil " +
+  // ⚠️ この連結の中でテンプレートリテラルを使わない (lib/x402/reverify.ts REVERIFY_COUNTER_TRANSITION の注意)。
+  "elseif ARGV[15]=='1' and o.hidden~=true then o.hidden=true; o.pendingFirstVerification=true end; end; " +
   'o.url=ARGV[2]; o.description=ARGV[3]; o.priceJpyc=ARGV[4]; o.category=ARGV[5]; o.payTo=ARGV[6]; ' +
   "if ARGV[7]=='' then o.docsUrl=nil else o.docsUrl=ARGV[7] end; " +
   "if ARGV[8]=='' then o.license=nil else o.license=ARGV[8] end; " +
@@ -559,7 +570,8 @@ export const CAS_DEACTIVATE_BODY =
 // hidden の判定は権威レコード (o.hidden) 側で行うので、呼び元の読取と競合しても誤って印を残さない。
 // 台帳の規則: hidden かつ印 (pendingFirstVerification) なしのときだけ書く。印は「一度も検証されていないから隠して
 // いるだけ」の状態にしか残らない — 台帳を継承した作成は印を付けず (createResource)、台帳済 URL への PATCH
-// (CAS_UPDATE) と再検証の確定違反・締め出しの閾値 (reverify.ts) で印を外す。だから印つきの hidden には洗い流す
+// (CAS_UPDATE) と再検証の確定違反・締め出しの閾値 (reverify.ts) で印を外し、URL を替える編集の印 (CAS_UPDATE の
+// ARGV[15]) は公開中の掲載にしか付けない。だから印つきの hidden には洗い流す
 // モデレーション状態が無く、台帳を書くと新しい掲載を違反扱いにしてしまう (作り直した掲載が印のない hidden になり、
 // ID の照会が 404 → 出品者のゲートが 402 を返せず、再検証の ok に届かない)。再登録はどのみち登録時の probe を通る。
 export const CAS_DEACTIVATE_WITH_LEDGER =
@@ -595,11 +607,15 @@ async function readResourceClaim(id: string): Promise<
 // id/merchant/network/createdAt/active は不変。**merchant !== owner は forbidden** = 他人の掲載や
 // payTo (送金先) を書き換えさせない (認可の要)。owner 確認と書込を CAS で原子化し、KV エラー/破損は
 // not_found ではなく storage に倒す (outage を「未存在」と誤魔化さない)。input は検証済を渡す。
+// opts.pendingIfUrlChanged = 呼び元が input.url で、登録と同じ照合つきの OpenPay の 402 を確かめていない。この更新で URL が
+// 変わるなら、公開中の掲載を hidden + pendingFirstVerification にする (URL が変わったかは CAS が権威の record で判定する・
+// 規則は CAS_UPDATE のコメント)。
 export async function updateResource(
   id: string,
   owner: string,
   input: X402ResourceInput,
   nowMs = Date.now(),
+  opts: { pendingIfUrlChanged?: boolean } = {},
 ): Promise<UpdateResourceResult> {
   const previous = await readResourceClaim(id);
   if (!previous.ok) return previous;
@@ -621,6 +637,7 @@ export async function updateResource(
     input.trigger ?? '',
     previous.url,
     id,
+    opts.pendingIfUrlChanged ? '1' : '',
   ]);
   if (!cas.ok) return { ok: false, reason: 'storage' };
   if (cas.value === -5) return { ok: false, reason: 'url_taken' };

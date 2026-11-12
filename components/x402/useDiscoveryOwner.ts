@@ -35,7 +35,8 @@ export function useDiscoveryOwner(address: string | undefined, isSignedIn: boole
     resource: RegisteredResource;
     paywallSnippet: string;
   } | null>(null);
-  const [notice, setNotice] = useState<'updated' | 'deleted' | null>(null);
+  // updatedPending = 編集は保存したが、掲載は公開待ち (URL を替えた先のゲートを確かめられなかった・まだ最初の確認の前)。
+  const [notice, setNotice] = useState<'updated' | 'updatedPending' | 'deleted' | null>(null);
   // USDC 面つきで登録/更新した直後の「サーバーのゲート貼り替え」リマインダー。
   // 貼り替えるまで実サーバーの 402 は JPYC のみ = USDC では買えない (実運用で発覚した期待違い)。
   const [usdcReminder, setUsdcReminder] = useState(false);
@@ -216,7 +217,8 @@ export function useDiscoveryOwner(address: string | undefined, isSignedIn: boole
       // onSuccess の options は再描画で更新されるため、payload と同じ form から取得した値を使う。
       setUsdcReminder(result.usdcEnabled);
       if (result.wasEdit) {
-        setNotice('updated');
+        // 公開待ちの掲載を「更新しました。」だけで済ませない (編集の直後にカタログから消えた理由が伝わらない)。
+        setNotice(result.resource.pendingFirstVerification === true ? 'updatedPending' : 'updated');
         setCreated(null);
       } else {
         setCreated({

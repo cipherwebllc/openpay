@@ -404,11 +404,11 @@ export function DiscoveryRegistrationForm({
             {errorMsg}
           </p>
         ))}
-      {notice === 'updated' && (
+      {(notice === 'updated' || notice === 'updatedPending') && (
         <div className="space-y-2">
-          <p className="inline-flex items-center gap-1.5 text-sm text-emerald-700">
-            <CheckCircle2 className="h-4 w-4" aria-hidden />
-            {t('updated')}
+          <p className="flex items-start gap-1.5 text-sm text-emerald-700">
+            <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+            <span>{notice === 'updatedPending' ? t('updatedPending') : t('updated')}</span>
           </p>
           {usdcReminder && (
             <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-900">

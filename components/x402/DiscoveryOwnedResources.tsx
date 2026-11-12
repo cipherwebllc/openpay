@@ -22,8 +22,9 @@ function isAuthBlockedHide(resource: OwnedResource): boolean {
   );
 }
 
-// 登録の probe が判定不能で、最初の自動の確認を待つだけの新規掲載 (PR #954)。hidden だが違反ではないので、
-// 「非表示 (要対応)」ではなく「公開待ち」として出す (登録直後に違反と読まれないように)。
+// 登録の probe が判定不能で、最初の自動の確認を待つだけの新規掲載 (PR #954)。URL を替える編集で、替えた先のゲートを
+// 確かめられなかった掲載も同じ印を持つ。hidden だが違反ではないので、「非表示 (要対応)」ではなく「公開待ち」として出す
+// (登録・編集の直後に違反と読まれないように)。
 function isPendingFirstVerification(resource: OwnedResource): boolean {
   return resource.hidden === true && resource.pendingFirstVerification === true;
 }

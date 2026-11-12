@@ -197,3 +197,124 @@ describe('first verification pending (real Lua)', () => {
     expect(await listActiveResources()).toEqual([]);
   });
 });
+
+// 第 10 回レビュー B3-3: URL を替える編集で、替えた先の OpenPay の 402 を確かめていない (updateResource の
+// pendingIfUrlChanged = CAS_UPDATE の ARGV[15]) とき、公開中の掲載を新規登録の判定不能と同じ hidden + 印にする。
+// route からの通し (probe・照合・再検証) は tests/app/api/facilitator-resource-url-change-lua.test.ts。
+describe('URL change that the caller could not confirm (real Lua)', () => {
+  const PENDING = { pendingIfUrlChanged: true };
+  const ledgerKeys = () => holder.store!.keys().filter((key) => key.startsWith('x402:hidden-url:'));
+
+  it('公開中の掲載は hidden + 印になり、確認のカウンタを外し、一覧から消え、ID の照会と owner の一覧には出る', async () => {
+    await createResource(input(DUMMY), 'live', 1);
+    mark('live', { verification });
+    expect(await updateResource('live', OWNER, input(TARGET), 2, PENDING))
+      .toMatchObject({ ok: true, resource: { url: TARGET, hidden: true, pendingFirstVerification: true } });
+    expect(stored('live')).toMatchObject({ url: TARGET, hidden: true, pendingFirstVerification: true });
+    expect(stored('live')).not.toHaveProperty('verification');
+    expect(holder.store!.strings.get(resourceUrlClaimKey(TARGET))).toBe('live');
+    expect(holder.store!.strings.has(resourceUrlClaimKey(DUMMY))).toBe(false);
+    expect(await listActiveResources()).toEqual([]);
+    expect(await getPublicResource('live'))
+      .toEqual({ ok: true, resource: expect.objectContaining({ id: 'live', pendingFirstVerification: true }) });
+    expect(await listResourcesForMerchant(OWNER))
+      .toEqual([expect.objectContaining({ id: 'live', hidden: true, pendingFirstVerification: true })]);
+  });
+
+  it('URL が変わらない編集 (説明・価格・payTo) は、指定があっても公開のまま・確認のカウンタも残す', async () => {
+    await createResource(input(DUMMY), 'live', 1);
+    mark('live', { verification });
+    const edited = { ...input(DUMMY), description: 'updated', priceJpyc: '9', payTo: '0x2222222222222222222222222222222222222222' };
+    expect(await updateResource('live', OWNER, edited, 2, PENDING))
+      .toMatchObject({ ok: true, resource: { description: 'updated', priceJpyc: '9', payTo: edited.payTo, verification } });
+    expect(stored('live')).not.toHaveProperty('hidden');
+    expect(stored('live')).not.toHaveProperty('pendingFirstVerification');
+    expect(await listActiveResources()).toEqual([expect.objectContaining({ id: 'live' })]);
+  });
+
+  it.each([undefined, {}, { pendingIfUrlChanged: false }])(
+    '指定が無い (%o) URL 変更は従来どおり公開のまま (確認のカウンタだけ外す)',
+    async (opts) => {
+      await createResource(input(DUMMY), 'live', 1);
+      mark('live', { verification });
+      expect(await updateResource('live', OWNER, input(TARGET), 2, opts)).toMatchObject({ ok: true, resource: { url: TARGET } });
+      expect(stored('live')).not.toHaveProperty('hidden');
+      expect(stored('live')).not.toHaveProperty('pendingFirstVerification');
+      expect(stored('live')).not.toHaveProperty('verification');
+      expect(await listActiveResources()).toEqual([expect.objectContaining({ id: 'live' })]);
+    },
+  );
+
+  // 印を付けると、隠された掲載が URL を替えるだけで ID の照会に返り、削除で台帳も立たず、再検証でも違反に数えられなくなる。
+  it('モデレーションで隠された掲載 (印なしの hidden) には印を付けない: ID の照会は 404 のまま・削除で台帳を立てる', async () => {
+    await createResource(input(DUMMY), 'moderated', 1);
+    mark('moderated', { hidden: true, verification: { ...verification, failures: 3 } });
+    expect(await updateResource('moderated', OWNER, input(TARGET), 2, PENDING))
+      .toMatchObject({ ok: true, resource: { url: TARGET, hidden: true } });
+    expect(stored('moderated')).not.toHaveProperty('pendingFirstVerification');
+    expect(await getPublicResource('moderated')).toEqual({ ok: true, resource: null });
+    expect(await deactivateResource('moderated', OWNER)).toEqual({ ok: true });
+    expect(ledgerKeys()).toEqual([hiddenUrlLedgerKey(TARGET)]);
+  });
+
+  it('モデレーションで隠された掲載は、確かめていない URL との往復でも hidden を解除できず、印も得ない', async () => {
+    await createResource(input(DUMMY), 'moderated', 1);
+    mark('moderated', { hidden: true });
+    await updateResource('moderated', OWNER, input(TARGET), 2, PENDING);
+    await updateResource('moderated', OWNER, input(DUMMY), 3, PENDING);
+    expect(stored('moderated')).toMatchObject({ url: DUMMY, hidden: true });
+    expect(stored('moderated')).not.toHaveProperty('pendingFirstVerification');
+    expect(await listActiveResources()).toEqual([]);
+    expect(await getPublicResource('moderated')).toEqual({ ok: true, resource: null });
+  });
+
+  it('台帳済 URL への変更は台帳が勝つ (印なしの hidden・ID の照会も 404)', async () => {
+    await createResource(input(DUMMY), 'live', 1);
+    holder.store!.strings.set(hiddenUrlLedgerKey(TARGET), '1');
+    expect(await updateResource('live', OWNER, input(TARGET), 2, PENDING))
+      .toMatchObject({ ok: true, resource: { url: TARGET, hidden: true } });
+    expect(stored('live')).not.toHaveProperty('pendingFirstVerification');
+    expect(await getPublicResource('live')).toEqual({ ok: true, resource: null });
+  });
+
+  it('すでに公開待ちの掲載は、指定の有無によらず印と hidden のまま (編集では公開に戻らない)', async () => {
+    await createResource(input(DUMMY), 'live', 1);
+    await updateResource('live', OWNER, input(TARGET), 2, PENDING);
+    // 元の URL に戻す編集 (呼び元が照合つきの 402 を確かめた = 指定なし) でも、公開に戻すのは再検証の ok だけ。
+    expect(await updateResource('live', OWNER, input(DUMMY), 3))
+      .toMatchObject({ ok: true, resource: { url: DUMMY, hidden: true, pendingFirstVerification: true } });
+    expect(await updateResource('live', OWNER, input(TARGET + '?v=2'), 4, PENDING))
+      .toMatchObject({ ok: true, resource: { hidden: true, pendingFirstVerification: true } });
+    expect(await listActiveResources()).toEqual([]);
+  });
+
+  it('編集で公開待ちになった掲載は、再検証の ok で公開に戻り印が消える・違反の閾値では印のない hidden に移る', async () => {
+    await createResource(input(DUMMY), 'live', 1);
+    await updateResource('live', OWNER, input(TARGET), 2, PENDING);
+    expect(await applyExternalReverify('live', TARGET, 'transient', 't0', 'r0'))
+      .toMatchObject({ applied: true, hiddenBefore: true, hiddenAfter: true });
+    expect(stored('live')).toMatchObject({ hidden: true, pendingFirstVerification: true });
+    expect(ledgerKeys()).toEqual([]);
+    expect(await applyExternalReverify('live', TARGET, 'ok_402_openpay', 't1', 'r1', 'clear', OWNER))
+      .toMatchObject({ applied: true, hiddenBefore: true, hiddenAfter: false });
+    expect(stored('live').hidden).toBe(false);
+    expect(stored('live')).not.toHaveProperty('pendingFirstVerification');
+    expect(await listActiveResources()).toEqual([expect.objectContaining({ id: 'live', url: TARGET })]);
+
+    await createResource(input(DUMMY), 'gone', 5);
+    await updateResource('gone', OWNER, input(DUMMY + '/moved'), 6, PENDING);
+    for (let run = 1; run <= 3; run += 1) {
+      await applyExternalReverify('gone', DUMMY + '/moved', 'violation_gone', `g${run}`, `gr${run}`);
+    }
+    expect(stored('gone')).toMatchObject({ hidden: true });
+    expect(stored('gone')).not.toHaveProperty('pendingFirstVerification');
+    expect(await getPublicResource('gone')).toEqual({ ok: true, resource: null });
+  });
+
+  it('編集で公開待ちになった掲載を削除しても URL 台帳を立てない (新規登録の公開待ちと同じ)', async () => {
+    await createResource(input(DUMMY), 'live', 1);
+    await updateResource('live', OWNER, input(TARGET), 2, PENDING);
+    expect(await deactivateResource('live', OWNER)).toEqual({ ok: true });
+    expect(ledgerKeys()).toEqual([]);
+  });
+});

@@ -90,6 +90,11 @@ vi.mock('@/lib/kv', () => ({
         if (store.kv.has(keys[3]) || store.kv.has(keys[4])) {
           o.hidden = true;
           delete o.pendingFirstVerification;
+        } else if (args[14] === '1' && o.hidden !== true) {
+          // B3-3: 確かめていない URL への変更は、公開中の掲載だけ hidden + 印 (本物の Lua は
+          // tests/app/api/facilitator-resource-url-change-lua.test.ts)。
+          o.hidden = true;
+          o.pendingFirstVerification = true;
         }
       }
       o.url = args[1];
@@ -165,20 +170,16 @@ vi.mock('@/lib/logger', () => ({
 
 // モデレーション probe をモック (実 fetch を避ける)。既定 false = ゲート済扱いで通す。
 // isPrivateHost は parseResourceInput が使うため false (テスト URL は public 扱い) を返す。
-// 新規登録 (POST) は probeGateDetailed、編集 (PATCH) は probeGate を使う。
+// 新規登録 (POST) も編集 (PATCH) も probeGateDetailed を使う (PATCH は URL が変わるときだけ accepts を照合する)。
 type ProbeDetail = { result: 'openpay' | 'foreign' | 'unknown'; accepts: unknown[] };
-const { mockFreelyAccessible, mockProbeGate, mockProbeGateDetailed } = vi.hoisted(() => ({
+const { mockFreelyAccessible, mockProbeGateDetailed } = vi.hoisted(() => ({
   mockFreelyAccessible: vi.fn(async () => false),
-  mockProbeGate: vi.fn(
-    async (): Promise<'openpay' | 'foreign' | 'unknown'> => 'unknown',
-  ),
   mockProbeGateDetailed: vi.fn(
     async (): Promise<ProbeDetail> => ({ result: 'unknown', accepts: [] }),
   ),
 }));
 vi.mock('@/lib/x402/moderation', () => ({
   isFreelyAccessible: mockFreelyAccessible,
-  probeGate: mockProbeGate,
   probeGateDetailed: mockProbeGateDetailed,
   isPrivateHost: () => false,
 }));
@@ -297,10 +298,8 @@ beforeEach(() => {
   mockLoggerWarn.mockReset();
   mockFreelyAccessible.mockReset();
   mockFreelyAccessible.mockResolvedValue(false); // 既定: ゲート済 (通す)
-  mockProbeGate.mockReset();
-  mockProbeGate.mockResolvedValue('unknown'); // 既定: 判定不能 = fail-open (通す)
   mockProbeGateDetailed.mockReset();
-  // 新規登録の既定: 受取先が OWNER の OpenPay の 402 (すぐ公開)。判定不能 (unknown) の扱いは専用の describe で見る。
+  // 登録・編集の既定: 受取先が OWNER の OpenPay の 402 (すぐ公開)。判定不能 (unknown) の扱いは専用の describe で見る。
   mockProbeGateDetailed.mockResolvedValue(openpayProbe());
 });
 afterEach(() => {
@@ -694,7 +693,7 @@ describe('x402 facilitator /resources/[id] PATCH (編集)', () => {
     mockRequireSession.mockResolvedValue({ ok: true, address: OWNER });
     const id = await seedOne(resources);
     mockFreelyAccessible.mockClear();
-    mockProbeGate.mockClear();
+    mockProbeGateDetailed.mockClear();
 
     const res = await idRoute.PATCH(
       patchReq({ ...validBody, url }),
@@ -704,7 +703,7 @@ describe('x402 facilitator /resources/[id] PATCH (編集)', () => {
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({ error: 'invalid_url' });
     expect(mockFreelyAccessible).not.toHaveBeenCalled();
-    expect(mockProbeGate).not.toHaveBeenCalled();
+    expect(mockProbeGateDetailed).not.toHaveBeenCalled();
     expect(JSON.parse(store.kv.get(resourceKey(id))!).url).toBe(validBody.url);
   });
 
@@ -714,7 +713,7 @@ describe('x402 facilitator /resources/[id] PATCH (編集)', () => {
     const id = await seedOne(resources);
     resourceRate.check.mockClear();
     mockFreelyAccessible.mockClear();
-    mockProbeGate.mockClear();
+    mockProbeGateDetailed.mockClear();
     resourceRate.allowed = false;
 
     const res = await idRoute.PATCH(patchReq(validBody), ctx(id));
@@ -727,7 +726,7 @@ describe('x402 facilitator /resources/[id] PATCH (編集)', () => {
       60,
     );
     expect(mockFreelyAccessible).not.toHaveBeenCalled();
-    expect(mockProbeGate).not.toHaveBeenCalled();
+    expect(mockProbeGateDetailed).not.toHaveBeenCalled();
   });
 
   it('非 owner の PATCH は moderation probe を実行しない (SSRF 踏み台化防止)', async () => {
@@ -1396,7 +1395,7 @@ describe('public exact-ID discovery', () => {
     const { resources, idRoute } = await load();
     mockRequireSession.mockResolvedValue({ ok: true, address: OWNER });
     const id = await seedOne(resources);
-    mockProbeGate.mockResolvedValueOnce('foreign');
+    mockProbeGateDetailed.mockResolvedValueOnce({ result: 'foreign', accepts: [] });
     const res = await idRoute.PATCH(patchReq({ ...validBody, payTo: STRANGER,
       usdc: { priceUsd: '0.01', payTo: FIRST_PARTY_SELLER } }), ctx(id));
     expect(res.status).toBe(422);
@@ -1569,5 +1568,118 @@ describe('registration probe outcomes', () => {
     const { resource } = (await again.json()) as { resource: { id: string } };
     expect(resource).not.toHaveProperty('hidden');
     expect(await listedIds(discovery)).toContain(resource.id);
+  });
+});
+
+// 第 10 回レビュー B3-3: URL を替える編集 (PATCH) は新規登録と同じ扱い。URL を替えない編集は今までどおり。
+// 本物の probe の解釈・本物の Lua・再検証までの通しは tests/app/api/facilitator-resource-url-change-lua.test.ts。
+// ここは route の配線を、この file の設定 (forwarder・JPYC つき = asset / forwarder の不一致も出せる) で見る。
+describe('PATCH の probe outcomes (URL を替える編集)', () => {
+  const MOVED = 'https://api.example.jp/paid/translate-v2';
+  const MISMATCHES = [
+    ['payTo', openpayAccept(STRANGER)],
+    ['network', openpayAccept(OWNER, { network: 'eip155:137' })],
+    ['asset', openpayAccept(OWNER, { asset: STRANGER })],
+    ['forwarder', openpayAccept(OWNER, { payTo: STRANGER })],
+  ] as const;
+  async function readById(id: string) {
+    const route = await import('@/app/api/discovery/[id]/route');
+    return route.GET(new Request(`https://open-pay.jp/api/discovery/${id}`), ctx(id));
+  }
+  async function listedIds(discovery: () => Promise<Response>): Promise<string[]> {
+    const body = (await (await discovery()).json()) as { items: Array<{ id?: string }> };
+    return body.items.flatMap((item) => (item.id ? [item.id] : []));
+  }
+  const saved = (id: string) => JSON.parse(store.kv.get(resourceKey(id))!) as Record<string, unknown>;
+
+  it.each(MISMATCHES)('URL を替える: openpay の 402 が掲載と違う (%s) → 422 gate_accept_mismatch・保存しない', async (mismatch, accept) => {
+    const { resources, idRoute, discovery } = await load();
+    mockRequireSession.mockResolvedValue({ ok: true, address: OWNER });
+    const id = await seedOne(resources);
+    const before = store.kv.get(resourceKey(id));
+    mockLoggerWarn.mockClear();
+    mockProbeGateDetailed.mockResolvedValueOnce({ result: 'openpay', accepts: [accept] });
+
+    const res = await idRoute.PATCH(patchReq({ ...validBody, url: MOVED }), ctx(id));
+    expect(res.status).toBe(422);
+    expect(await res.json()).toEqual({ error: 'gate_accept_mismatch', mismatch });
+    expect(store.kv.get(resourceKey(id))).toBe(before);
+    expect(await listedIds(discovery)).toContain(id);
+    expect(mockLoggerWarn).toHaveBeenCalledWith(
+      'x402.facilitator.gate_accept_mismatch',
+      expect.objectContaining({ id, merchant: OWNER, mismatch, resourceOrigin: 'https://api.example.jp' }),
+    );
+  });
+
+  it.each(MISMATCHES)('URL を替えない: openpay の 402 が掲載と違っても (%s) 照合せず 200 (payTo・価格の編集)', async (_mismatch, accept) => {
+    const { resources, idRoute, discovery } = await load();
+    mockRequireSession.mockResolvedValue({ ok: true, address: OWNER });
+    const id = await seedOne(resources);
+    mockLoggerWarn.mockClear();
+    mockProbeGateDetailed.mockResolvedValueOnce({ result: 'openpay', accepts: [accept] });
+
+    const res = await idRoute.PATCH(patchReq({ ...validBody, payTo: STRANGER, priceJpyc: '2000' }), ctx(id));
+    expect(res.status).toBe(200);
+    expect(saved(id)).toMatchObject({ url: validBody.url, payTo: STRANGER, priceJpyc: '2000' });
+    expect(saved(id)).not.toHaveProperty('hidden');
+    expect(await listedIds(discovery)).toContain(id);
+    expect(mockLoggerWarn).not.toHaveBeenCalledWith('x402.facilitator.gate_accept_mismatch', expect.anything());
+  });
+
+  it('URL を替える: 期待値の受取先は保存した後の payTo (URL と payTo を同時に替える)', async () => {
+    const { resources, idRoute } = await load();
+    mockRequireSession.mockResolvedValue({ ok: true, address: OWNER });
+    const id = await seedOne(resources);
+    // ゲートがまだ古い payTo (OWNER) を返す → 不一致。
+    const stale = await idRoute.PATCH(patchReq({ ...validBody, url: MOVED, payTo: STRANGER }), ctx(id));
+    expect(stale.status).toBe(422);
+    expect(await stale.json()).toEqual({ error: 'gate_accept_mismatch', mismatch: 'payTo' });
+    // 新しい payTo を返すゲートなら保存する。
+    mockProbeGateDetailed.mockResolvedValueOnce(openpayProbe(STRANGER));
+    const fresh = await idRoute.PATCH(patchReq({ ...validBody, url: MOVED, payTo: STRANGER }), ctx(id));
+    expect(fresh.status).toBe(200);
+    expect(saved(id)).toMatchObject({ url: MOVED, payTo: STRANGER });
+    expect(saved(id)).not.toHaveProperty('hidden');
+  });
+
+  it('URL を替える: unknown は 200 で保存し、hidden + 印 (一覧から消え、ID の照会と owner の一覧には出る)', async () => {
+    const { resources, idRoute, discovery } = await load();
+    mockRequireSession.mockResolvedValue({ ok: true, address: OWNER });
+    const id = await seedOne(resources);
+    expect(await listedIds(discovery)).toContain(id);
+    mockProbeGateDetailed.mockResolvedValueOnce({ result: 'unknown', accepts: [] });
+
+    const res = await idRoute.PATCH(patchReq({ ...validBody, url: MOVED }), ctx(id));
+    expect(res.status).toBe(200);
+    expect((await res.json()).resource).toMatchObject({ url: MOVED, hidden: true, pendingFirstVerification: true });
+    expect(saved(id)).toMatchObject({ url: MOVED, hidden: true, pendingFirstVerification: true });
+    expect(await listedIds(discovery)).not.toContain(id);
+    expect((await readById(id)).status).toBe(200);
+    const owned = (await (await resources.GET()).json()) as { resources: Array<Record<string, unknown>> };
+    expect(owned.resources).toEqual([expect.objectContaining({ id, hidden: true, pendingFirstVerification: true })]);
+  });
+
+  it('URL を替えない: unknown でも今までどおり公開のまま', async () => {
+    const { resources, idRoute, discovery } = await load();
+    mockRequireSession.mockResolvedValue({ ok: true, address: OWNER });
+    const id = await seedOne(resources);
+    mockProbeGateDetailed.mockResolvedValueOnce({ result: 'unknown', accepts: [] });
+    const res = await idRoute.PATCH(patchReq({ ...validBody, description: '更新後' }), ctx(id));
+    expect(res.status).toBe(200);
+    expect(saved(id)).toMatchObject({ description: '更新後' });
+    expect(saved(id)).not.toHaveProperty('hidden');
+    expect(saved(id)).not.toHaveProperty('pendingFirstVerification');
+    expect(await listedIds(discovery)).toContain(id);
+  });
+
+  it('URL を替える: 一致する openpay の 402 なら公開のまま保存する', async () => {
+    const { resources, idRoute, discovery } = await load();
+    mockRequireSession.mockResolvedValue({ ok: true, address: OWNER });
+    const id = await seedOne(resources);
+    const res = await idRoute.PATCH(patchReq({ ...validBody, url: MOVED }), ctx(id));
+    expect(res.status).toBe(200);
+    expect(saved(id)).toMatchObject({ url: MOVED });
+    expect(saved(id)).not.toHaveProperty('hidden');
+    expect(await listedIds(discovery)).toContain(id);
   });
 });

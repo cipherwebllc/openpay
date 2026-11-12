@@ -78,6 +78,10 @@ vi.mock('@/lib/kv', () => ({
         if (store.alive(keys[3]) || store.alive(keys[4])) {
           o.hidden = true;
           delete o.pendingFirstVerification;
+        } else if (args[14] === '1' && o.hidden !== true) {
+          // B3-3: 確かめていない URL への変更は、公開中の掲載だけ hidden + 印 (本物の Lua は registry-moderation-lua.test.ts)。
+          o.hidden = true;
+          o.pendingFirstVerification = true;
         }
       }
       o.url = args[1];
