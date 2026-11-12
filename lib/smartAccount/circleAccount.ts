@@ -20,7 +20,14 @@
 //    block を提供し、FSM/idempotency は lib/smartAccount/circleSend.ts (useBatchPayment から
 //    呼ぶ) が prepare→persist→broadcast に分解して使う。
 
-import { http, type Address, type Hex, type PublicClient } from 'viem';
+import {
+  createClient,
+  http,
+  type Address,
+  type Hex,
+  type HttpTransportConfig,
+  type PublicClient,
+} from 'viem';
 import {
   createBundlerClient,
   entryPoint08Address,
@@ -43,6 +50,11 @@ import {
 } from '@/lib/circlePermit';
 import { pimlicoUrl } from '@/lib/pimlico';
 import { assertGasCeiling } from '@/lib/gasCeiling';
+import {
+  classifyBroadcastError,
+  findRpcRequestError,
+  type BroadcastFailureKind,
+} from '@/lib/smartAccount/pimlicoSend';
 import type { SmartAccountBundle } from '@/lib/smartAccount/simpleAccount';
 import type { ConnectedWalletClient } from '@/lib/smartAccount/simpleAccount';
 import type { TokenDeployment } from '@/lib/tokens';
@@ -250,25 +262,141 @@ export async function prepareAndSignCircleUserOp(args: {
   return { signedUserOp, userOpHash };
 }
 
+/** broadcast の失敗。kind が分類 (下の classifyCircleBroadcastError)。呼び出し側 (circleSend.ts) は name と kind で読む
+ * (この class を持たない error = 分類の無い error は 'unknown' として扱う)。
+ * message は元の error (viem) の文のまま。**送った request の本文 (署名済みの op) と URL を含む** ので、記録にも画面にも
+ * 出さない。bundler の言い分は code と details で持つ。 */
+export class CircleBroadcastError extends Error {
+  readonly kind: BroadcastFailureKind;
+  /** bundler が返した JSON-RPC の error の code (JSON-RPC の error でないときは undefined)。 */
+  readonly code: number | undefined;
+  /** bundler が返した JSON-RPC の error の message (JSON-RPC の error でないときは undefined)。 */
+  readonly details: string | undefined;
+  constructor(args: {
+    kind: BroadcastFailureKind;
+    code: number | undefined;
+    details: string | undefined;
+    cause: unknown;
+  }) {
+    super(args.cause instanceof Error ? args.cause.message : String(args.cause), {
+      cause: args.cause,
+    });
+    this.name = 'CircleBroadcastError';
+    this.kind = args.kind;
+    this.code = args.code;
+    this.details = args.details;
+  }
+}
+
+// 検証の拒否 (HTTP 2xx + allowlist の code) でも、bundler の言い分にこの語があるときは「この op を受け付けていない」と読まない
+// (第 10 回レビュー PR-39 の S1)。この経路の UserOperation の nonce は key が時刻由来で、試みごとに新しい (上の
+// prepareAndSignCircleUserOp は nonce を渡さない)。その op の最初の送信に nonce・mempool・重複・置き換えの拒否が返るなら、
+// もっとも考えやすいのは **この op 自身がもう届いている** こと (送信が途中で 2 回届いた・先に取り込まれた)。閉じると、取り込まれる
+// 支払いの上に新しい支払いが開く。語は広めに取る (外れても確認待ちに残るだけ = 払えない側)。
+//   AA25 = EntryPoint の「nonce が違う」/ nonce / mempool (「もう mempool にある」「mempool の上限」) /
+//   already (already known 以外の「もう…」) / replace (replacement underpriced = 同じ nonce の op がもうある)
+const NOT_REJECTION_PROOF_RE = /AA25|nonce|mempool|already|replace/i;
+
+/** bundler の JSON-RPC の error の文 (message と data) が、上の語を含むか。 */
+export function mentionsNonceOrMempool(bundlerText: string): boolean {
+  return NOT_REJECTION_PROOF_RE.test(bundlerText);
+}
+
+/**
+ * Circle の経路の送信の失敗を分ける。分類の定義 (HTTP 2xx + ERC-4337 の検証の code の allowlist = 検証による確定的な拒否・
+ * already-known = bundler がその op を持っている・それ以外は unknown) は Pimlico の経路のもの (pimlicoSend.ts の
+ * classifyBroadcastError) を 1 つのまま使う (bundler は同じ Pimlico の endpoint)。そのうえで、検証の拒否でも bundler の文が
+ * nonce・mempool などに触れているときは unknown に倒す (上の S1)。
+ * 見るのは bundler が返した文 (JSON-RPC の error の message と data) だけ。viem の error の message は、送った request の
+ * 本文 (署名済みの op = "nonce" という欄を必ず含む) を載せるので見ない。
+ */
+export function classifyCircleBroadcastError(
+  error: unknown,
+  httpStatus: number | undefined,
+): { kind: BroadcastFailureKind; code: number | undefined; details: string | undefined } {
+  const rpc = findRpcRequestError(error);
+  const code = typeof rpc?.code === 'number' ? rpc.code : undefined;
+  const details = typeof rpc?.details === 'string' ? rpc.details : undefined;
+  const kind = classifyBroadcastError(error, httpStatus);
+  if (kind !== 'validation-rejected') return { kind, code, details };
+  const data = rpc?.data === undefined ? '' : JSON.stringify(rpc.data);
+  return {
+    kind: mentionsNonceOrMempool(`${details ?? ''} ${data}`) ? 'unknown' : 'validation-rejected',
+    code,
+    details,
+  };
+}
+
+/**
+ * 送信の用意。bundle の bundler の transport と同じ URL・timeout で、送信のための http transport (再送なし・HTTP の status を
+ * 受け取る) を作り、「署名済みの op をそのまま送る関数」を返す。**ここでは何も送らない・同期** (await が無い)。
+ *
+ * 用意と送信を分ける理由: 呼び出し側 (circleSend.ts) が、記録を submitting にする **前** に用意を済ませるため。transport を
+ * 作れない (bundle の transport が URL を持たない = 設定の誤り) ときは、ここで viem の UrlRequiredError が同期で投げられる。
+ * submitting の後に作ると、何も送っていないのに「送ったかもしれない」確認待ちになる。
+ *
+ * 返す関数: raw の eth_sendUserOperation を 1 回だけ送り (prepareUserOperation を通さないので、保存した op と 1 字も違わない
+ * ものが届く)、bundler の返した hash を返す。失敗は CircleBroadcastError (分類つき) で投げる。HTTP の status を見る理由は
+ * pimlicoSend.ts の broadcastPimlicoUserOp のコメント (viem は HTTP 5xx に載った JSON-RPC の error を、HTTP 200 のときと
+ * 同じ error にする)。
+ */
+export function prepareCircleBroadcast(
+  bundle: CircleSmartAccountBundle,
+): (signedUserOp: SignedCircleUserOp) => Promise<Hex> {
+  const { url, timeout, fetchOptions } = bundle.bundlerClient.transport as {
+    url?: string;
+    timeout?: number;
+    fetchOptions?: HttpTransportConfig['fetchOptions'];
+  };
+  let httpStatus: number | undefined;
+  const sender = createClient({
+    transport: http(url, {
+      retryCount: 0,
+      timeout,
+      fetchOptions,
+      onFetchResponse: (response) => {
+        httpStatus = response.status;
+      },
+    }),
+  });
+  const request = sender.request as unknown as (
+    a: { method: string; params: unknown[] },
+    o: { retryCount: number },
+  ) => Promise<Hex>;
+  return async (signedUserOp) => {
+    try {
+      return await request(
+        {
+          method: 'eth_sendUserOperation',
+          params: [signedUserOp, entryPoint08Address],
+        },
+        { retryCount: 0 },
+      );
+    } catch (error) {
+      throw new CircleBroadcastError({
+        ...classifyCircleBroadcastError(error, httpStatus),
+        cause: error,
+      });
+    }
+  };
+}
+
 /** 保存済の署名済 op を **そのまま** broadcast する (raw eth_sendUserOperation・
  * retryCount 0)。prepareUserOperation を経由しないので同一 op が保証され、
- * ERC-4337 nonce により二重実行されない = **冪等 rebroadcast** に使える。 */
+ * ERC-4337 nonce により二重実行されない = **冪等 rebroadcast** に使える。
+ * 用意 (prepareCircleBroadcast) と送信を続けて行う。失敗は CircleBroadcastError (分類つき)。 */
 export async function broadcastCircleUserOp(args: {
   bundle: CircleSmartAccountBundle;
   signedUserOp: SignedCircleUserOp;
 }): Promise<Hex> {
-  const request = args.bundle.bundlerClient.request as unknown as (
-    a: { method: string; params: unknown[] },
-    o?: { retryCount: number },
-  ) => Promise<Hex>;
-  return request(
-    {
-      method: 'eth_sendUserOperation',
-      params: [args.signedUserOp, entryPoint08Address],
-    },
-    { retryCount: 0 },
-  );
+  return prepareCircleBroadcast(args.bundle)(args.signedUserOp);
 }
+
+/** receipt の待ち (waitForCircleReceipt) の timeout (ms)。viem の waitForUserOperationReceipt の既定 (120_000) と同じ値を、
+ * 明示して渡す。circleSend.ts の時間の柵 (REJECTION_CLOSE_WINDOW_MS) は「ほかの試みは、この待ちが timeout するまで同じ op を
+ * 送り直さない」ことを根拠にしていて、その上限がこの値の半分以下であることをテストで固定している。この値を縮めるときは、
+ * 柵の上限も見直す。 */
+export const CIRCLE_RECEIPT_TIMEOUT_MS = 120_000;
 
 /** UserOp receipt を待つ。entryPoint=v0.8 / paymaster=Circle の確認は呼出側 (verifier)。 */
 export async function waitForCircleReceipt(args: {
@@ -277,6 +405,7 @@ export async function waitForCircleReceipt(args: {
 }) {
   return args.bundle.bundlerClient.waitForUserOperationReceipt({
     hash: args.hash,
+    timeout: CIRCLE_RECEIPT_TIMEOUT_MS,
   });
 }
 

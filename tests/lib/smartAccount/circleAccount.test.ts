@@ -1,12 +1,19 @@
-import { describe, it, expect, vi } from 'vitest';
-import { encodePacked, getAddress, type Address, type Hex } from 'viem';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { encodePacked, getAddress, http, type Address, type Hex } from 'viem';
+import { createBundlerClient } from 'viem/account-abstraction';
 import {
   signUsdcPermit,
   getCircleUserOpGasPrice,
   prepareAndSignCircleUserOp,
   broadcastCircleUserOp,
+  prepareCircleBroadcast,
+  classifyCircleBroadcastError,
+  mentionsNonceOrMempool,
+  CircleBroadcastError,
   buildCircleSmartAccountClient,
   entryPoint08Address,
+  waitForCircleReceipt,
+  CIRCLE_RECEIPT_TIMEOUT_MS,
   type CircleSmartAccountBundle,
 } from '@/lib/smartAccount/circleAccount';
 import { assertCirclePaymasterDeployed } from '@/lib/circlePermit';
@@ -339,19 +346,312 @@ describe('prepareAndSignCircleUserOp (Circle 下限は署名前に強制)', () =
   });
 });
 
-describe('broadcastCircleUserOp (保存済みの署名済み op をそのまま送る)', () => {
-  it('raw eth_sendUserOperation に同じ op と EntryPoint v0.8 を渡し、再試行しない', async () => {
-    const request = vi.fn(async (..._args: unknown[]) => `0x${'ab'.repeat(32)}` as Hex);
-    const signedUserOp = { sender: SENDER, nonce: '0x0', signature: '0x11' };
-    const hash = await broadcastCircleUserOp({
-      bundle: fakeBundle({ request }),
-      signedUserOp,
-    });
-    expect(hash).toBe(`0x${'ab'.repeat(32)}`);
-    expect(request).toHaveBeenCalledWith(
-      { method: 'eth_sendUserOperation', params: [signedUserOp, entryPoint08Address] },
-      { retryCount: 0 },
+// 第 10 回レビュー H-X (PR-39b): 送信は、bundle の bundler の transport と同じ URL・timeout で作った 1 回用の http transport を
+// 通し、HTTP の status を見て失敗を分ける (Pimlico の経路の broadcastPimlicoUserOp と同じ考え方・分類の定義も同じもの)。
+// 前はここで「bundlerClient.request が { retryCount: 0 } で呼ばれる」ことを偽物の request で確かめていたが、送信は
+// bundlerClient.request を通らなくなった (request の error からは HTTP の status が見えない) ので、本物の viem の http transport と
+// 偽物の fetch で、実際に bundler へ届く HTTP の request (URL・method・params・回数) を確かめる形に書き直した
+// (tests/lib/smartAccount/pimlicoSend.test.ts の「送信は 1 回だけ・失敗の分類」と同じ作り)。
+describe('broadcastCircleUserOp / prepareCircleBroadcast (保存済みの署名済み op をそのまま送る・失敗を分類する)', () => {
+  // URL の query と op の中身に、S1 の語 (nonce・mempool・already・replace・AA25) をわざと入れる。viem の error の message は
+  // URL と request の本文を載せるので、分類が bundler の文でなく message を見ていると、どの拒否も「閉じない側」に倒れる。
+  const BUNDLER_URL = 'https://bundler.test/v2/421614/rpc?apikey=nonce-mempool-already-replace-AA25';
+  const HASH = `0x${'ab'.repeat(32)}` as Hex;
+  const SIGNED_OP = {
+    sender: SENDER,
+    nonce: '0xaa25',
+    callData: '0xAA25',
+    signature: `0x${'11'.repeat(65)}`,
+  };
+
+  type SendReply =
+    | { kind: 'hash' }
+    | { kind: 'rpc-error'; code: number; message: string; data?: unknown; status?: number }
+    | { kind: 'http'; status: number }
+    | { kind: 'network' }
+    | { kind: 'hang' };
+  let sendReply: SendReply;
+  let requests: Array<{ url: string; method: string; params: unknown[] }>;
+
+  beforeEach(() => {
+    sendReply = { kind: 'hash' };
+    requests = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string | URL, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body)) as { id: number; method: string; params: unknown[] };
+        requests.push({ url: String(url), method: body.method, params: body.params });
+        const reply = (payload: object, status = 200) =>
+          new Response(JSON.stringify({ jsonrpc: '2.0', id: body.id, ...payload }), {
+            status,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        if (sendReply.kind === 'hash') return reply({ result: HASH });
+        if (sendReply.kind === 'rpc-error') {
+          const { code, message, data } = sendReply;
+          return reply({ error: { code, message, ...(data === undefined ? {} : { data }) } }, sendReply.status);
+        }
+        if (sendReply.kind === 'http') return new Response('bad gateway', { status: sendReply.status });
+        if (sendReply.kind === 'network') throw new TypeError('Failed to fetch');
+        // hang: 応答を返さない (viem の http transport の timeout が abort するまで)。
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () =>
+            reject(new DOMException('The operation was aborted.', 'AbortError')),
+          );
+        });
+      }),
     );
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  // bundle の bundlerClient は本物 (viem の createBundlerClient + http transport)。buildCircleSmartAccountClient と同じ作り方。
+  function realBundle(): CircleSmartAccountBundle {
+    return {
+      ...fakeBundle(),
+      bundlerClient: createBundlerClient({ transport: http(BUNDLER_URL) }),
+    } as CircleSmartAccountBundle;
+  }
+
+  async function broadcastWith(reply: SendReply) {
+    sendReply = reply;
+    try {
+      const hash = await broadcastCircleUserOp({ bundle: realBundle(), signedUserOp: SIGNED_OP });
+      return { hash, error: undefined };
+    } catch (error) {
+      return { hash: undefined, error: error as CircleBroadcastError };
+    }
+  }
+
+  it('bundle の bundler の URL へ、raw の eth_sendUserOperation で同じ op と EntryPoint v0.8 を 1 回だけ送り、hash を返す', async () => {
+    const { hash } = await broadcastWith({ kind: 'hash' });
+    expect(hash).toBe(HASH);
+    expect(requests).toEqual([
+      { url: BUNDLER_URL, method: 'eth_sendUserOperation', params: [SIGNED_OP, entryPoint08Address] },
+    ]);
+  });
+
+  // ERC-7769 が eth_sendUserOperation の検証の失敗に割り当てる code (lib/smartAccount/pimlicoSend.ts の allowlist)。
+  it.each([
+    { code: -32602, message: 'invalid UserOperation field' },
+    { code: -32500, message: "AA21 didn't pay prefund" },
+    { code: -32501, message: 'AA33 reverted (or OOG)' },
+    { code: -32502, message: 'banned opcode' },
+    { code: -32503, message: 'AA22 expired or not due' },
+    { code: -32504, message: 'paymaster throttled' },
+    { code: -32505, message: 'paymaster stake too low' },
+    { code: -32506, message: 'unsupported aggregator' },
+    { code: -32507, message: 'AA24 signature error' },
+  ])('HTTP 200 + 検証の拒否 ($code) → validation-rejected・code と bundler の文を持つ・送信は 1 回だけ', async (reply) => {
+    const { error } = await broadcastWith({ kind: 'rpc-error', ...reply });
+    expect(error?.name).toBe('CircleBroadcastError');
+    expect(error).toBeInstanceOf(CircleBroadcastError);
+    expect(error?.kind).toBe('validation-rejected');
+    expect(error?.code).toBe(reply.code);
+    expect(error?.details).toBe(reply.message);
+    expect(requests).toHaveLength(1);
+  });
+
+  it.each([
+    // bundler が受理した後に proxy / 内部で失敗し、HTTP 5xx に JSON-RPC の error が載る (PR-02 の Codex の再現)。
+    { label: 'HTTP 500 + -32603 internal', code: -32603, status: 500 },
+    // allowlist の code でも、HTTP 5xx・4xx は「受け付けていない」と言えない。
+    { label: 'HTTP 500 + -32500', code: -32500, status: 500 },
+    { label: 'HTTP 502 + -32602', code: -32602, status: 502 },
+    { label: 'HTTP 429 + -32501', code: -32501, status: 429 },
+    { label: 'HTTP 429 + -32005 rate limit', code: -32005, status: 429 },
+    // HTTP 200 でも allowlist に無い code は分からない。
+    { label: 'HTTP 200 + -32603 internal', code: -32603, status: 200 },
+    { label: 'HTTP 200 + -32005 rate limit', code: -32005, status: 200 },
+    { label: 'HTTP 200 + -32601 method not found', code: -32601, status: 200 },
+    { label: 'HTTP 200 + -32508 (viem は持つが allowlist の外)', code: -32508, status: 200 },
+    { label: 'HTTP 200 + -32521 execution reverted', code: -32521, status: 200 },
+  ])('$label → unknown・送信は 1 回だけ', async ({ code, status }) => {
+    const { error } = await broadcastWith({ kind: 'rpc-error', code, message: 'failed', status });
+    expect(error).toBeInstanceOf(CircleBroadcastError);
+    expect(error?.kind).toBe('unknown');
+    expect(error?.code).toBe(code);
+    expect(requests).toHaveLength(1);
+  });
+
+  it('「Already known」の JSON-RPC の error → already-known (bundler がその op を持っている = 受理と同じ・閉じない側)', async () => {
+    const { error } = await broadcastWith({ kind: 'rpc-error', code: -32602, message: 'Already known' });
+    expect(error?.kind).toBe('already-known');
+  });
+
+  it('HTTP の失敗 (502・本文が JSON-RPC でない) → unknown。viem の既定の再試行 (3 回) をせず、送信は 1 回だけ', async () => {
+    const { error } = await broadcastWith({ kind: 'http', status: 502 });
+    expect(error).toBeInstanceOf(CircleBroadcastError);
+    expect(error?.kind).toBe('unknown');
+    expect(error?.code).toBeUndefined();
+    expect(error?.details).toBeUndefined();
+    expect(requests).toHaveLength(1);
+  });
+
+  it('通信断 (fetch の失敗) → unknown・送信は 1 回だけ', async () => {
+    const { error } = await broadcastWith({ kind: 'network' });
+    expect(error?.kind).toBe('unknown');
+    expect(requests).toHaveLength(1);
+  });
+
+  it('応答が返らない (bundle の transport の timeout = 既定 10 秒) → unknown・送信は 1 回だけ', async () => {
+    sendReply = { kind: 'hang' };
+    vi.useFakeTimers();
+    const pending = broadcastCircleUserOp({ bundle: realBundle(), signedUserOp: SIGNED_OP }).catch(
+      (error: CircleBroadcastError) => error,
+    );
+    await vi.advanceTimersByTimeAsync(10_001);
+    const error = (await pending) as CircleBroadcastError;
+
+    expect(error).toBeInstanceOf(CircleBroadcastError);
+    expect(error.kind).toBe('unknown');
+    expect((error.cause as Error).name).toBe('TimeoutError');
+    expect(requests).toHaveLength(1);
+  });
+
+  it('投げる error の message は元の error (viem) の文のまま・cause に元の error を持つ', async () => {
+    const { error } = await broadcastWith({ kind: 'rpc-error', code: -32501, message: 'AA33 reverted (or OOG)' });
+    const cause = error?.cause as Error;
+    expect(cause).toBeInstanceOf(Error);
+    expect(error?.message).toBe(cause.message);
+    // viem の文は、送った request の本文 (署名) を含む。だから呼び出し側は message を記録にも画面にも出さず、details を使う。
+    expect(error?.message).toContain(SIGNED_OP.signature);
+    expect(error?.details).not.toContain(SIGNED_OP.signature);
+  });
+
+  // S1: 検証の拒否 (HTTP 200 + allowlist の code) でも、bundler の文が nonce・mempool・重複・置き換えに触れているときは
+  // 「受け付けていない」と読まない。この経路の nonce は試みごとに新しい key なので、その op 自身がもう届いている疑いがある。
+  describe('S1: bundler の文が nonce・mempool などに触れている拒否は、閉じない側 (unknown / already-known) に倒す', () => {
+    it.each([
+      { message: 'AA25 invalid account nonce', kind: 'unknown' },
+      { message: 'UserOperation reverted during simulation with reason: AA25 invalid account nonce', kind: 'unknown' },
+      { message: 'invalid Nonce', kind: 'unknown' },
+      { message: 'sender has too many UserOperations in the mempool', kind: 'unknown' },
+      { message: 'userOp was already included', kind: 'unknown' },
+      { message: 'replacement underpriced', kind: 'unknown' },
+      { message: 'Replacement op must have higher fees', kind: 'unknown' },
+      // already known の形は Pimlico の経路と同じ分類 (already-known) のまま。
+      { message: 'Already known', kind: 'already-known' },
+      { message: 'UserOperation already in mempool', kind: 'already-known' },
+    ])('HTTP 200 + -32500「$message」→ $kind', async ({ message, kind }) => {
+      const { error } = await broadcastWith({ kind: 'rpc-error', code: -32500, message });
+      expect(error?.kind).toBe(kind);
+      expect(error?.code).toBe(-32500);
+      expect(requests).toHaveLength(1);
+    });
+
+    it('語が JSON-RPC の error の data の側にあるときも、閉じない側', async () => {
+      const { error } = await broadcastWith({
+        kind: 'rpc-error',
+        code: -32500,
+        message: 'validation failed',
+        data: { reason: 'AA25 invalid account nonce' },
+      });
+      expect(error?.kind).toBe('unknown');
+    });
+
+    it('data があっても、語が無ければ validation-rejected のまま', async () => {
+      const { error } = await broadcastWith({
+        kind: 'rpc-error',
+        code: -32501,
+        message: 'AA33 reverted (or OOG)',
+        data: { paymaster: PAYMASTER },
+      });
+      expect(error?.kind).toBe('validation-rejected');
+    });
+
+    it('語の一覧 (AA25・nonce・mempool・already・replace) と判定を固定する', () => {
+      for (const text of [
+        'AA25 invalid account nonce',
+        'aa25',
+        'invalid nonce',
+        'NONCE too low',
+        'already in mempool',
+        'Mempool is full',
+        'already known',
+        'Already processed',
+        'replacement underpriced',
+        'cannot REPLACE userOp',
+      ]) {
+        expect(mentionsNonceOrMempool(text), text).toBe(true);
+      }
+      // EntryPoint・paymaster の検証の拒否 (残高・署名・期限・paymaster) は、どの語にも当たらない。
+      for (const text of [
+        "AA21 didn't pay prefund",
+        'AA23 reverted (or OOG)',
+        'AA24 signature error',
+        'AA22 expired or not due',
+        'AA31 paymaster deposit too low',
+        'AA32 paymaster expired or not due',
+        'AA33 reverted (or OOG)',
+        'AA34 signature error',
+        'ERC20: transfer amount exceeds balance',
+        'paymaster throttled',
+        'invalid UserOperation field',
+        '',
+      ]) {
+        expect(mentionsNonceOrMempool(text), text).toBe(false);
+      }
+    });
+
+    it('分類の関数は、JSON-RPC の error を持たない error を unknown にする (HTTP の status に関わらず)', () => {
+      expect(classifyCircleBroadcastError(new Error('AA21 prefund'), 200)).toEqual({
+        kind: 'unknown',
+        code: undefined,
+        details: undefined,
+      });
+      expect(classifyCircleBroadcastError(undefined, 200).kind).toBe('unknown');
+    });
+  });
+
+  // S3: 用意 (transport を作る) と送信を分ける。呼び出し側 (circleSend.ts) は、記録を submitting にする前に用意を済ませる。
+  describe('prepareCircleBroadcast (送信の用意)', () => {
+    it('用意は同期で、何も送らない。返った関数を呼んだときに 1 回だけ送る', async () => {
+      const send = prepareCircleBroadcast(realBundle());
+      expect(typeof send).toBe('function');
+      expect(requests).toEqual([]);
+
+      await expect(send(SIGNED_OP)).resolves.toBe(HASH);
+      expect(requests).toEqual([
+        { url: BUNDLER_URL, method: 'eth_sendUserOperation', params: [SIGNED_OP, entryPoint08Address] },
+      ]);
+    });
+
+    it('bundle の transport が URL を持たない (設定の誤り) → 用意の時点で同期で投げる・何も送らない', () => {
+      // 偽物の bundlerClient (transport なし) ではなく、URL の無い transport を持つ形。
+      const bundle = {
+        ...fakeBundle(),
+        bundlerClient: { transport: { type: 'custom' } },
+      } as unknown as CircleSmartAccountBundle;
+      expect(() => prepareCircleBroadcast(bundle)).toThrow(/No URL was provided/);
+      expect(requests).toEqual([]);
+    });
+
+    it('用意した関数の失敗も、同じ分類の error', async () => {
+      const send = prepareCircleBroadcast(realBundle());
+      sendReply = { kind: 'rpc-error', code: -32507, message: 'AA24 signature error' };
+      const error = await send(SIGNED_OP).catch((e: CircleBroadcastError) => e);
+      expect(error).toBeInstanceOf(CircleBroadcastError);
+      expect((error as CircleBroadcastError).kind).toBe('validation-rejected');
+    });
+  });
+});
+
+// circleSend.ts の時間の柵 (REJECTION_CLOSE_WINDOW_MS) は「ほかの試みは、この待ちが timeout するまで同じ op を送り直さない」を
+// 根拠にする。その timeout が、viem の既定に任せず、この値で渡っていることを固定する。
+describe('waitForCircleReceipt (receipt の待ち)', () => {
+  it('timeout は CIRCLE_RECEIPT_TIMEOUT_MS (120 秒) を明示して渡す', async () => {
+    const hash = ('0x' + '12'.repeat(32)) as Hex;
+    const waitForUserOperationReceipt = vi.fn(async () => ({ success: true }));
+    const bundle = fakeBundle({ waitForUserOperationReceipt });
+
+    await waitForCircleReceipt({ bundle, hash });
+
+    expect(CIRCLE_RECEIPT_TIMEOUT_MS).toBe(120_000);
+    expect(waitForUserOperationReceipt).toHaveBeenCalledTimes(1);
+    expect(waitForUserOperationReceipt).toHaveBeenCalledWith({ hash, timeout: CIRCLE_RECEIPT_TIMEOUT_MS });
   });
 });
 
