@@ -763,6 +763,24 @@ describe('storage の失敗の押下と attemptId の対応 (hook → 本物の 
     expect(mappings()).toEqual({});
   });
 
+  // 対応を残しても止まる道が増えないことの確認 (ずっと読めない端末): hook の最初の確認 (Pimlico の記録の読み取り) で止まり、
+  // Circle の入口 (ガス価格・attemptId の対応・記録・署名) まで来ない。
+  it('localStorage がずっと読めない → hook の最初の確認で止まり、Circle の入口まで来ない (対応も記録も作らず、署名も求めない)', async () => {
+    const reads = breakLocalReads();
+    try {
+      const screen = openScreen();
+      screen.result.current.mutate(PARAMS);
+      await waitFor(() => expect(screen.result.current.pendingStoreUnavailable).toBe(true));
+      await waitFor(() => expect(screen.state().status).toBe('error'));
+      expect(getCircleUserOpGasPrice).not.toHaveBeenCalled();
+      expect(signUsdcPermit).not.toHaveBeenCalled();
+      expect(mappings()).toEqual({});
+    } finally {
+      reads.mockRestore();
+    }
+    expect(recordStatuses()).toEqual([]);
+  });
+
   // 今までどおり消す道: この試みは何も渡しておらず、記録は abandoned (終わった)。
   it('署名 1 を拒否 → 対応は消える (今までどおり) → 次の押下は新しい attemptId で、新しい支払いとして署名を求める', async () => {
     const screen = openScreen();
