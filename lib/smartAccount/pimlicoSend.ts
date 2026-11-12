@@ -118,6 +118,9 @@ export async function prepareAndSignPimlicoUserOp(args: {
   client: SignedSendClient;
   calls: readonly PimlicoCall[];
   nonce: bigint;
+  // 準備が済み、ウォレットへ署名を求める直前に呼ぶ (任意)。投げると、署名を求めずにその error で終わる。
+  // 呼び出し側 (pimlicoIntent.ts の buildAndSend) が、画面を離れた試みの署名の要求を出さないために使う。
+  beforeSign?: () => void;
 }): Promise<{
   // 署名済みの op (bigint の形)。送信を断られたときの error の文脈に使う。
   signed: UserOperation;
@@ -129,6 +132,7 @@ export async function prepareAndSignPimlicoUserOp(args: {
 }> {
   const { client, calls, nonce } = args;
   const prepared = await client.prepareUserOperation({ calls, nonce });
+  args.beforeSign?.();
   const signature = await client.account.signUserOperation(prepared);
   const signed = { ...prepared, signature } as UserOperation;
   // 本番の経路 (委任済みの simple 7702・EntryPoint 0.8) は authorization が付かず、bundler の返す hash と

@@ -55,6 +55,8 @@ import type {
   PimlicoSendLedger,
 } from '@/lib/smartAccount/pimlicoIntent';
 import type { SignedSendClient } from '@/lib/smartAccount/pimlicoSend';
+// 記録の「同じ intent」「同じ版」の定義 (import の無い小さな module・intent の関所と共有する)。
+import { isSameIntent, isSameVersion } from '@/lib/smartAccount/pimlicoIntentOwner';
 import type { SmartAccountBundle } from '@/lib/smartAccount/simpleAccount';
 import type { TokenDeployment } from '@/lib/tokens';
 
@@ -489,11 +491,15 @@ function discardPimlicoPending(storageKey: string): boolean {
   }
 }
 
-function clearPimlicoPending(storageKey: string, userOpHash: Hex): void {
+// 確定した op の記録を片付ける。消すのは storage の記録が同じ intent (isSameIntent) のときだけ: 送信の控えのある記録は nonce が
+// 同じなら hash が違っても消す (ほかの画面が同じ nonce で作り直した・hash を直した記録も、この nonce の op が取り込まれた以上
+// 終わっている)。別の intent の記録は消さない (第 10 回レビュー PR-02 の Codex レビュー P1)。確定以外の書き込み・削除と違い、
+// 版 (isSameVersion) では比べない: ほかの試みが送り直した・作り直した後の記録も、取り込まれた nonce の記録なので閉じる。
+function clearPimlicoPending(storageKey: string, record: PimlicoPendingRecord): void {
   if (typeof window === 'undefined') return;
   try {
     const current = readPimlicoPending(storageKey);
-    if (current.kind === 'record' && current.record.userOpHash === userOpHash) {
+    if (current.kind === 'record' && isSameIntent(current.record, record)) {
       window.localStorage.removeItem(storageKey);
     }
   } catch (error) {
@@ -501,7 +507,7 @@ function clearPimlicoPending(storageKey: string, userOpHash: Hex): void {
     // record が残った場合は安全側の unknown latch として次回 receipt 再照会に収束する。
     logger.warn('pimlico.pending.clear-failed', {
       storageKey,
-      userOpHash,
+      userOpHash: record.userOpHash,
       error,
     });
   }
@@ -549,12 +555,36 @@ export function useBatchPayment(
     setPendingStoreUnavailable(false);
   }, [pimlicoStorageKey]);
 
+  // この hook の instance が画面にあるか。何の波及を断つか: 画面を離れた (unmount した) 後も react-query の mutation は走り続け、
+  // 離れた後にウォレットの署名が返ると、開き直した画面 (新しい hook) の支払いとは別の nonce の op を保存して送る = 二重払い
+  // (第 10 回レビュー A-2)。失効した試みは新しい効果 (署名の要求・保存・削除・送信) を始めない。見る所は mutationFn の先頭と、
+  // lib/smartAccount/pimlicoIntent.ts の 4 か所 (host.isAlive)。
+  // useLayoutEffect にしない: /pay は <Suspense> の中にあり、再 suspend で隠れた子は layout effect だけが外れる。layout に
+  // すると、画面が残っているのに正当な署名を捨てる。StrictMode の mount → unmount → mount は effect が同期で true に戻す。
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+  // 試み中の印 (同期)。包みの mutate・mutateAsync と retryReceipt が、react-query に渡す直前に立て、その mutation が終わった
+  // とき (成功・失敗・throw のどれでも) に下の onSettled で外す。何の波及を断つか: 同じ描画のうちの二度押し (isPending を描いた
+  // 再描画より前の 2 回目) が 2 つ目の mutation を作り、署名の要求が 2 つ出て、両方承認すると別の nonce の op が 2 本成立する
+  // (第 10 回レビュー A-3)。isPending は react-query が知らせた後の再描画まで変わらないので、ref で同期に見る
+  // (hooks/useJpycEip3009Payment.ts・hooks/useUsageFeePayment.ts と同じ形)。
+  const attemptInFlightRef = useRef(false);
+
   // 確定した Pimlico の記録の chain (settleRetained が残す)。別の intent の確定を、今の画面の chain・token の支払いとして
   // 履歴・控えに書いてよいかを確かめるのに使う (recoveredIntent・第 10 回レビュー A-1 の Codex 第 2 回 MUST 2)。
   const [settledChainId, setSettledChainId] = useState<number | null>(null);
 
   const mutation = useMutation<BatchPaymentResult, Error, BatchPaymentParams>({
     mutationFn: async (params) => {
+      // 失効した試みは始めない (provider によらない: Pimlico・Circle・MAv2)。何の波及を断つか: mutate と同じ tick に unmount した
+      // 試み・offline で止まり unmount の後に再開した試みが、開き直した画面の後ろで、送り直しの保存・期限で閉じる削除・新しい
+      // 署名の要求へ進むこと。この先は何も読まず・書かず・求めない (relay の hook の入口と同じ文字列)。
+      if (!mountedRef.current) throw new Error('payment_cancelled');
       // memory の記録を差し替える。応答不明として画面に出す記録なら、画面の hash も合わせる。
       const holdRecord = (record: PimlicoPendingRecord, latched: boolean) => {
         const held = { storageKey: pimlicoStorageKey, record };
@@ -587,7 +617,7 @@ export function useBatchPayment(
       ): BatchPaymentResult => {
         // success / reverted の receipt 判定は従来どおり。どちらも on-chain 終端なので
         // unknown latch を解除し、次回の正規決済だけを許可する。
-        clearPimlicoPending(pimlicoStorageKey, record.userOpHash);
+        clearPimlicoPending(pimlicoStorageKey, record);
         releaseRecord(record);
         setSettledChainId(record.chainId);
         return {
@@ -623,7 +653,14 @@ export function useBatchPayment(
           };
           pendingRef.current = latched;
           setUnknownPending(latched);
-          persistPimlicoPending(pimlicoStorageKey, unknownRecord);
+          // storage の記録が、この試みが書いた (読んだ) 版のときだけ書く (待つ間にほかの画面が閉じた記録を復活させない・別の支払いや
+          // ほかの試みが書き直した記録を古い写しで上書きしない・第 10 回レビュー PR-02 の Codex レビュー)。控えの無い記録は
+          // updatedAt を期限の基準にする (readPimlicoPending) ので、ここで今の時刻にするのは今までどおり期限を先へ延ばす側だけ
+          // (版が同じ = storage の時刻はこの試みの時刻なので、巻き戻らない)。memory のラッチと応答不明の終わり方は同じ。
+          const current = readPimlicoPending(pimlicoStorageKey);
+          if (current.kind === 'record' && isSameVersion(current.record, record)) {
+            persistPimlicoPending(pimlicoStorageKey, unknownRecord);
+          }
           logger.warn('pimlico.receipt.response-unknown', {
             userOpHash: record.userOpHash,
             callFingerprint: record.callFingerprint,
@@ -655,7 +692,9 @@ export function useBatchPayment(
         bundler: bundle?.pimlicoClient ?? null,
         publicClient,
         sender,
+        isAlive: () => mountedRef.current,
         isExpired: isPendingExpired,
+        read: () => readPimlicoPending(pimlicoStorageKey),
         persist: (record) => persistPimlicoPending(pimlicoStorageKey, record),
         discard: () => discardPimlicoPending(pimlicoStorageKey),
         hold: holdRecord,
@@ -881,6 +920,11 @@ export function useBatchPayment(
         }),
       );
     },
+    // 試み中の印を外す。react-query は、作った mutation が終わると (成功でも、mutationFn の throw = 入口の payment_cancelled を
+    // 含む失敗でも・unmount の後でも) これを呼ぶ。外す所はここだけ。
+    onSettled: () => {
+      attemptInFlightRef.current = false;
+    },
   });
 
   const retryReceipt = useCallback(() => {
@@ -889,7 +933,12 @@ export function useBatchPayment(
         ? pendingRef.current.record
         : null;
     if (!retained || mutation.isPending) return;
-    mutation.mutate(deserializeBatchPaymentParams(retained.params));
+    // 印を立てる前に、return・throw しうる処理を済ませる (立てた後に mutation を作らずに抜けると、onSettled が来ず、
+    // 開き直すまで送れなくなる)。
+    const params = deserializeBatchPaymentParams(retained.params);
+    if (attemptInFlightRef.current) return;
+    attemptInFlightRef.current = true;
+    mutation.mutate(params);
   }, [mutation, pimlicoStorageKey]);
 
   // 画面 (フォーム) から最後に送った支払いの内容 (calls の fingerprint)。retryReceipt は保存した intent の params で
@@ -900,14 +949,24 @@ export function useBatchPayment(
   const { mutate: rawMutate, mutateAsync: rawMutateAsync } = mutation;
   const mutate = useCallback<typeof rawMutate>(
     (params, options) => {
+      // 試み中の 2 回目は何もしない。fingerprint を書く前に見る (無視した 2 回目が別の内容でも、1 回目の成功を
+      // 「別の intent の確定」(settledOtherIntent) にしない)。印を立ててから rawMutate までは同期で隣り合わせ。
+      if (attemptInFlightRef.current) return;
       setSubmittedFingerprint(attemptFingerprint(params));
+      attemptInFlightRef.current = true;
       rawMutate(params, options);
     },
     [rawMutate],
   );
   const mutateAsync = useCallback<typeof rawMutateAsync>(
     (params, options) => {
+      // 試み中の 2 回目は mutation を作らずに断る (hooks/useUsageFeePayment.ts と同じ)。断った押下に送金の結果は無いので、
+      // resolve せず reject する。1 回目の mutation と fingerprint には触らない。呼ぶ所は今は無い。
+      if (attemptInFlightRef.current) {
+        return Promise.reject(new Error('payment_in_progress'));
+      }
       setSubmittedFingerprint(attemptFingerprint(params));
+      attemptInFlightRef.current = true;
       return rawMutateAsync(params, options);
     },
     [rawMutateAsync],
