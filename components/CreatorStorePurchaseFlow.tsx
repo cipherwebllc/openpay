@@ -16,11 +16,13 @@ import { CreatorStoreDeliveryBadge } from '@/components/CreatorStoreDeliveryBadg
 import { CreatorStoreLicenseDetails } from '@/components/CreatorStoreLicenseDetails';
 import { CreatorStorePurchaseConfirmation } from '@/components/CreatorStorePurchaseConfirmation';
 import { CreatorStorePurchaseState } from '@/components/CreatorStorePurchaseState';
+import { CreatorStoreRepurchaseNotice } from '@/components/CreatorStoreRepurchaseNotice';
 import { CreatorStoreUsageTerms } from '@/components/CreatorStoreUsageTerms';
 import { CreatorStoreProductGallery } from '@/components/CreatorStoreProductGallery';
 import { useHostedStorePurchase } from '@/hooks/useHostedStorePurchase';
 import { useModalFocus } from '@/hooks/useModalFocus';
 import { useSiweSession } from '@/hooks/useSiweSession';
+import { useStoreAlreadyPurchased } from '@/hooks/useStoreAlreadyPurchased';
 import { useStoreCacheScope } from '@/hooks/useStoreCacheScope';
 import { buildHostedPurchaseSignPreview } from '@/lib/x402/hostedPurchaseWire';
 import type { StoreUsageTerms } from '@/lib/store/usageTerms';
@@ -52,6 +54,8 @@ export type CreatorStorePurchaseFlowProps = {
   showProductDetails?: boolean;
 };
 
+// 購入済みの確認をはさんだ押下。prepare =「購入内容を確認する」・purchase =「支払って購入を確定する」。
+type RepurchaseAction = 'prepare' | 'purchase';
 
 export function CreatorStorePurchaseFlow({
   open,
@@ -126,11 +130,54 @@ export function CreatorStorePurchaseFlow({
   const purchaseInFlight = buyer.phase === 'signing' || buyer.phase === 'submitting';
   useModalFocus(dialogRef, { open: visible, onEscape: purchaseInFlight ? undefined : onClose });
 
+  // 第 10 回レビュー H-K: 支払いの応答を失って読み直すと、購入 hook の「購入の途中」の印 (memory) が消え、
+  // 確定した後の再購入は仕様なので server も止めない = 払えたことを知らずにもう一度払える。
+  // server がこの買い手の購入の記録を返したときだけ、署名へ進む前に確認を 1 段はさむ。
+  // 分からないとき (未ログイン・読み込み中・読み取りの失敗) は knownPurchase が null で、今までどおり進む。
+  const knownPurchase = useStoreAlreadyPurchased({
+    resourceId: product.id,
+    sessionAddress: isSignedIn ? sessionAddress : null,
+    enabled: visible,
+    refreshKey: buyer.quote?.intentSalt ?? null,
+  });
+  // 確認はこの商品・この買い手・この購入の試みに限る (保存しない)。scope が変われば無かったことにする。
+  const repurchaseScope = `${product.id}:${address?.toLowerCase() ?? ''}:${sessionAddress?.toLowerCase() ?? ''}`;
+  const [repurchase, setRepurchase] = useState<
+    | { scope: string; step: 'asking'; action: RepurchaseAction }
+    | { scope: string; step: 'accepted' }
+    | null
+  >(null);
+  const repurchaseNow =
+    repurchase !== null && repurchase.scope === repurchaseScope
+      ? repurchase
+      : null;
+  // 確認の段を出している間だけ値を持つ (action = 確認の後に進める押下)。
+  const repurchaseAsking =
+    knownPurchase !== null && repurchaseNow?.step === 'asking'
+      ? repurchaseNow
+      : null;
+  const showRepurchaseNotice = repurchaseAsking !== null;
+  const repurchaseTriggerRef = useRef<HTMLElement | null>(null);
+
+  // 確認の段を閉じたら、押したボタンへ focus を戻す (下の画面は隠すだけで外さないので同じ要素が残る)。
+  // 戻せないとき (ボタンが disabled になった・画面が変わった) は dialog 自身へ置き、背後へ落とさない。
+  useEffect(() => {
+    if (showRepurchaseNotice) return;
+    const trigger = repurchaseTriggerRef.current;
+    if (trigger === null) return;
+    repurchaseTriggerRef.current = null;
+    if (trigger.isConnected) trigger.focus();
+    const dialog = dialogRef.current;
+    if (dialog && !dialog.contains(document.activeElement)) dialog.focus();
+  }, [showRepurchaseNotice]);
+
   if (!visible) return null;
 
   const closeAndResetReview = () => {
     buyer.reset();
     setFlowError(null);
+    // 次の見積もりは別の購入の試み。購入済みなら、もう一度確認する。
+    setRepurchase(null);
     onClose();
   };
 
@@ -185,6 +232,37 @@ export function CreatorStorePurchaseFlow({
   const startOver = () => {
     buyer.reset();
     setFlowError(null);
+    // 次の見積もりは別の購入の試み。購入済みなら、もう一度確認する。
+    setRepurchase(null);
+  };
+
+  const runRepurchaseAction = (action: RepurchaseAction) => {
+    if (action === 'prepare') prepareReview();
+    else confirmPurchase();
+  };
+
+  // 購入済みと分かっていて、この試みでまだ確認していなければ、進めずに確認の段を出す。
+  // それ以外は action をそのまま実行する (今までどおり)。
+  const requestRepurchaseChecked = (action: RepurchaseAction) => {
+    if (knownPurchase === null || repurchaseNow?.step === 'accepted') {
+      runRepurchaseAction(action);
+      return;
+    }
+    repurchaseTriggerRef.current =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    setRepurchase({ scope: repurchaseScope, step: 'asking', action });
+  };
+
+  // 「もう一度購入する」: この試みでは確認済みにして、はさんだ押下を今までどおり 1 回進める。
+  const continueRepurchase = (action: RepurchaseAction) => {
+    setRepurchase({ scope: repurchaseScope, step: 'accepted' });
+    runRepurchaseAction(action);
+  };
+
+  const cancelRepurchase = () => {
+    setRepurchase(null);
   };
 
   // 署名中・送信中は wrong chain になっても確認 UI (isSubmitting で操作不可) を出し続ける。
@@ -233,6 +311,16 @@ export function CreatorStorePurchaseFlow({
           </button>
         </div>
 
+        {repurchaseAsking && knownPurchase ? (
+          <CreatorStoreRepurchaseNotice
+            purchasedAt={knownPurchase.purchasedAt}
+            libraryHref={`/${locale}/store/library`}
+            onContinue={() => continueRepurchase(repurchaseAsking.action)}
+            onCancel={cancelRepurchase}
+          />
+        ) : null}
+        {/* 確認の段の間は下の画面を隠すだけで外さない (入力と focus の戻り先を保つ・隠れた要素は Tab の対象外)。 */}
+        <div hidden={showRepurchaseNotice}>
         {showConfirmation && buyer.quote ? (
           <>
             {displayedError ? (
@@ -263,7 +351,7 @@ export function CreatorStorePurchaseFlow({
                   buyer.phase === 'signing' || buyer.phase === 'submitting'
                 }
                 onBack={closeAndResetReview}
-                onConfirm={confirmPurchase}
+                onConfirm={() => requestRepurchaseChecked('purchase')}
               />
             ) : signPreview ? (
               <CreatorStorePurchaseConfirmation
@@ -286,7 +374,7 @@ export function CreatorStorePurchaseFlow({
                   buyer.phase === 'signing' || buyer.phase === 'submitting'
                 }
                 onBack={closeAndResetReview}
-                onConfirm={confirmPurchase}
+                onConfirm={() => requestRepurchaseChecked('purchase')}
               />
             ) : null}
           </>
@@ -545,7 +633,7 @@ export function CreatorStorePurchaseFlow({
               <button
                 type="button"
                 disabled={buyer.isBusy}
-                onClick={prepareReview}
+                onClick={() => requestRepurchaseChecked('prepare')}
                 className="mt-5 inline-flex min-h-11 items-center gap-2 rounded-xl bg-brand px-5 py-3 text-sm font-bold text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {buyer.phase === 'loading-quote' ? (
@@ -591,6 +679,7 @@ export function CreatorStorePurchaseFlow({
             </div>
           </div>
         )}
+        </div>
       </div>
     </div>
   );
