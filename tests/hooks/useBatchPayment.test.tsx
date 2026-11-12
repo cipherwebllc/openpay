@@ -5,6 +5,7 @@ import {
   decodeFunctionData,
   erc20Abi,
   getAddress,
+  UserRejectedRequestError,
   type Address,
   type Hex,
 } from 'viem';
@@ -15,6 +16,12 @@ import {
   useBatchPayment,
 } from '@/hooks/useBatchPayment';
 import { GasCongestedError, isGasCongestedError } from '@/lib/gasCeiling';
+import {
+  PendingAuthorizationError,
+  PendingStateError,
+  PendingStoreUnavailableError,
+  PendingStoreWriteError,
+} from '@/lib/circlePending';
 import { defaultDeploymentForSymbol, type PaymasterMode } from '@/lib/tokens';
 
 const usdcDep = defaultDeploymentForSymbol('usdc');
@@ -1764,6 +1771,30 @@ describe('useBatchPayment', () => {
         const { first, second } = await mutateTwice({
           firstThrows: new Error('AA25 invalid account nonce'),
         });
+        expect(first).not.toBe(second);
+      });
+
+      // 第 10 回レビュー PR-39a (Codex P2): storage を読めない・書けない押下は、記録の状態を確かめられない (分からない)。
+      // 対応を消すと、裏で確定していた前の支払いの後に 2 本目が開く。本物の記録を通す再現は useBatchPayment.circleUnmount.test.tsx。
+      it.each([
+        ['PendingStoreUnavailableError', new PendingStoreUnavailableError('SecurityError')],
+        ['PendingStoreWriteError', new PendingStoreWriteError('setItem throw: QuotaExceededError')],
+      ])('1 回目が storage の失敗 (%s) なら 2 回目は同一 attemptId (対応を残す)', async (_name, error) => {
+        const { first, second } = await mutateTwice({ firstThrows: error });
+        expect(first).toBe(second);
+      });
+
+      // この試みは終わっていて、渡した op も無い (と分かる) 終わり方は、今までどおり対応を消す。
+      it.each([
+        ['署名の拒否', new UserRejectedRequestError(new Error('User rejected the request.'))],
+        [
+          '「既に終了」',
+          new Error('この決済試行は既に終了しています。新しい決済として実行し直してください。'),
+        ],
+        ['記録の遷移の失敗 (PendingStateError)', new PendingStateError('record 不在')],
+        ['記録の署名者の不一致 (PendingAuthorizationError)', new PendingAuthorizationError('sender')],
+      ])('1 回目が %s なら 2 回目は別 attemptId (今までどおり対応を消す)', async (_label, error) => {
+        const { first, second } = await mutateTwice({ firstThrows: error });
         expect(first).not.toBe(second);
       });
 

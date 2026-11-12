@@ -20,9 +20,13 @@
 //   (1) receipt が取れた・記録が confirmed → 結果
 //   (2) まだ bundler に op を渡していない試みが、終わった記録 (failed / abandoned / 記録なし) に当たった → 「既に終了」の error
 //   (3) それ以外すべて → CirclePendingError (確認待ち)
-// hook (useBatchPayment の runCirclePayment) は、CirclePendingError 以外の error で attemptId の対応を消す。op を渡したかも
-// しれない後にふつうの error で終わると、次の押下が新しい key になり、後から確定した前の支払い (90 秒より前の confirmed) を
-// 「正規のリピート」とみなして 2 本目を払う。なので (3) を 1 か所 (inPostSubmit) で保証する。
+// hook (useBatchPayment の runCirclePayment) は、CirclePendingError と storage の失敗 (PendingStoreUnavailableError・
+// PendingStoreWriteError) 以外の error で attemptId の対応を消す。op を渡したかもしれない後にふつうの error で終わると、次の押下が
+// 新しい key になり、後から確定した前の支払い (90 秒より前の confirmed) を「正規のリピート」とみなして 2 本目を払う。なので (3) を
+// 1 か所 (inPostSubmit) で保証する。confirmed の記録の枝 (scan・resume) は包まない: resultFromConfirmed が照会の失敗を全部
+// 受けて (1) を返し、投げる処理が無い。
+// 入口の scan・resume の読み取り・予約の書き込み (境界の外) が storage の失敗で投げたときは、hook の側が対応を残す (この押下は
+// 記録の状態を確かめられなかった)。
 //   - receipt の待ちの結果は receipt / timeout / error の 3 つ (waitReceipt)。**同じ op の送り直しへ進むのは timeout のとき
 //     だけ**。error (bundler の 429・5xx・通信断) では、送り直さず・記録の時刻も書かずに確認待ちで終える。
 //   - 送り直しの **前** に、記録がいまも「submitting で同じ userOpHash」であることを確かめて送る時刻を書く (markResending)。
@@ -234,8 +238,10 @@ function confirmAndResult(args: {
   return toResult(userOpHash, receipt);
 }
 
-// 送った後の境界 (冒頭の「送った後の終わり方」)。自分の markSubmitting が返った後の区間と、submitting / confirmed の記録を扱う
-// 枝を包み、想定していない throw (storage の読み書き・記録の sender の不一致・RPC) を CirclePendingError に変える。
+// 送った後の境界 (冒頭の「送った後の終わり方」)。自分の markSubmitting が返った後の区間と、submitting の記録を扱う枝 (scan・
+// resume の submitting・markSigned の CAS が外れた後の「記録に従う」) を包み、想定していない throw (storage の読み書き・記録の
+// sender の不一致・RPC) を CirclePendingError に変える。confirmed の記録の枝 (scan・resume) は包まない: resultFromConfirmed が
+// 照会の失敗を全部受けるので、投げる処理が無い。
 // 何の波及を断つか: op を bundler に渡したかもしれない後の付帯の失敗がふつうの error になり、hook が attemptId の対応を消して、
 // 後から確定した支払いの後に 2 本目が開くこと。確認待ちは「分からない」の正直な表示で、成功にはしない。握りつぶさない:
 // 元の error は専用の key で error の log に残す。
@@ -475,7 +481,7 @@ export async function executeCirclePayment(
         rec.success !== false &&
         now() - rec.updatedAt <= CONFIRMED_DEDUP_WINDOW_MS
       ) {
-        return await inPostSubmit(rec.userOpHash, () => resultFromConfirmed(bundle, rec));
+        return await resultFromConfirmed(bundle, rec);
       }
       continue;
     }
@@ -520,7 +526,7 @@ export async function executeCirclePayment(
 
   if (resumed) {
     if (record.status === 'confirmed') {
-      return await inPostSubmit(record.userOpHash, () => resultFromConfirmed(bundle, record));
+      return await resultFromConfirmed(bundle, record);
     }
     if (record.status === 'submitting') {
       return await inPostSubmit(record.userOpHash, async () => {

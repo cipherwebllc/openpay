@@ -955,7 +955,8 @@ describe('H-V: 画面を離れた試みは新しい効果を始めない', () =>
 // ---------------------------------------------------------------------------
 // 第 10 回レビュー H-W・H-Y: op を bundler に渡した (かもしれない) 後の終わり方。
 //
-// hook は、CirclePendingError 以外の error で attemptId の対応を消す (次の押下は新しい key = 新しい支払い)。なので、送った後に
+// hook は、CirclePendingError と storage の失敗 (PendingStoreUnavailableError・PendingStoreWriteError) 以外の error で attemptId の
+// 対応を消す (次の押下は新しい key = 新しい支払い)。なので、送った後に
 // ふつうの error で終わると、後から確定した前の支払いの後に 2 本目が開く。直した後の終わり方は 3 つだけ:
 //   結果 / CirclePendingError (確認待ち) / まだ渡していない試みの「既に終了」。
 //

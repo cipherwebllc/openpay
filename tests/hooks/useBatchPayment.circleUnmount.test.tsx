@@ -448,8 +448,9 @@ describe('H-V: 画面を離れた Circle の試み (hook → 本物の executeCi
   });
 });
 
-// 第 10 回レビュー H-W・H-Y: op を bundler に渡した (かもしれない) 後の終わり方を、hook の「CirclePendingError 以外は attemptId の
-// 対応を消す」まで通して確かめる (hook の規則は変えていない。circleSend が、送った後をふつうの error で終えないことで守る)。
+// 第 10 回レビュー H-W・H-Y: op を bundler に渡した (かもしれない) 後の終わり方を、hook の「CirclePendingError (と storage の失敗)
+// 以外は attemptId の対応を消す」まで通して確かめる (送った後の区間は、circleSend が、ふつうの error で終えないことで守る。hook の
+// 規則に足したのは storage の失敗だけ = 下の describe)。
 //
 // 送った後の区間は circleSend の境界の中なので、偽物が投げる「知らない op / 知らない hash」は確認待ちに吸われる。
 // 送った op・待った hash は、下で値として確かめる。
@@ -585,5 +586,202 @@ describe('H-W・H-Y: 送った後の終わり方 (hook → 本物の executeCirc
     expect(sentOps()).toEqual([OP_A.signedUserOp]);
     expect(recordStatuses()).toEqual(['submitting']);
     expect(mappings()).toEqual(mappingBefore);
+  });
+});
+
+// Codex のレビュー (P2・main にもある既存の道): 入口の scan と resume の読み取りは、送った後の境界の外にある。storage を読めない・
+// 書けない押下は、自分の記録の状態を確かめられない (分からない) のに、hook が attemptId の対応を消していた。対応が消えると次の
+// 押下は新しい key になり、裏で確定していた前の支払い (90 秒より前の confirmed) を「正規のリピート」とみなして 2 本目を払う。
+// 直した後: storage の失敗 (PendingStoreUnavailableError・PendingStoreWriteError) の押下は対応を残す。消すのは今までどおり、
+// この試みが終わっていて渡した op も無いと分かったとき (署名の拒否・「既に終了」など) だけ。
+describe('storage の失敗の押下と attemptId の対応 (hook → 本物の executeCirclePayment)', () => {
+  type GasPrice = { maxFeePerGas: bigint; maxPriorityFeePerGas: bigint };
+
+  // localStorage の読み取りだけを投げさせる (sessionStorage は読める)。
+  function breakLocalReads() {
+    const realGetItem = Storage.prototype.getItem;
+    return vi
+      .spyOn(Storage.prototype, 'getItem')
+      .mockImplementation(function (this: Storage, key: string) {
+        if (this === window.localStorage) throw new Error('SecurityError: storage is not available');
+        return realGetItem.call(this, key);
+      });
+  }
+
+  // localStorage への、match に合う書き込みだけを投げさせる (容量の上限)。
+  function breakLocalWrites(match: (value: string) => boolean) {
+    const realSetItem = Storage.prototype.setItem;
+    return vi
+      .spyOn(Storage.prototype, 'setItem')
+      .mockImplementation(function (this: Storage, key: string, value: string) {
+        if (this === window.localStorage && match(value)) {
+          throw new Error('QuotaExceededError: the quota has been exceeded');
+        }
+        return realSetItem.call(this, key, value);
+      });
+  }
+
+  // 記録の attemptId の一覧。
+  function recordAttemptIds(): string[] {
+    return Array.from({ length: window.localStorage.length }, (_, i) => window.localStorage.key(i)!)
+      .filter((key) => key.startsWith(PENDING_KEY_PREFIX))
+      .map(
+        (key) =>
+          (JSON.parse(window.localStorage.getItem(key)!) as { paymentAttemptId: string })
+            .paymentAttemptId,
+      );
+  }
+
+  it('送った後に離れた試みが裏で確定 → 100 秒後に開き直して押し、ガス価格を待つ間に localStorage が読めなくなる → storage の error で終わり、対応は残る → 戻して押し直すと既払いの結果 (送られた op は A の 1 本だけ)', async () => {
+    const receiptA = deferred<void>();
+    receiptGates.set(OP_A.userOpHash, receiptA.promise);
+
+    const screenA = openScreen();
+    screenA.result.current.mutate(PARAMS);
+    await waitFor(() => expect(permitRequests).toHaveLength(1));
+    permitRequests[0].approve(PERMIT);
+    await waitFor(() => expect(userOpRequests).toHaveLength(1));
+    userOpRequests[0].approve(OP_A);
+    await waitFor(() => expect(sentOps()).toEqual([OP_A.signedUserOp]));
+
+    // 送った後に画面を離れ、op は裏で確定する (失効した試みは対応を消さない = #1074)。
+    screenA.unmount();
+    receiptA.resolve();
+    await waitFor(() => expect(screenA.state().status).toBe('success'));
+    expect(recordStatuses()).toEqual(['confirmed']);
+    const mappingOfA = mappings();
+    expect(Object.keys(mappingOfA)).toHaveLength(1);
+
+    // confirmed の dedup の窓 (90 秒) を過ぎてから、開き直した画面で同じ内容を押す。ウォレットが署名を求めれば、利用者は
+    // 承認する (前の支払いが済んだことを知らない)。
+    clockOffset += 100_000;
+    vi.mocked(signUsdcPermit).mockImplementation(async (args) => {
+      await Promise.resolve();
+      args.beforeSign?.();
+      return PERMIT;
+    });
+    vi.mocked(prepareAndSignCircleUserOp).mockImplementation(async (args) => {
+      await Promise.resolve();
+      args.beforeSign?.();
+      return OP_B;
+    });
+    const gas = deferred<GasPrice>();
+    vi.mocked(getCircleUserOpGasPrice).mockReturnValueOnce(gas.promise);
+    const screenB = openScreen();
+    screenB.result.current.mutate(PARAMS);
+    // hook の最初の storage の確認 (Pimlico の記録の読み取り) は通り、ガス価格を待っている。
+    await waitFor(() => expect(getCircleUserOpGasPrice).toHaveBeenCalledTimes(2));
+
+    // ガス価格を待つ間に localStorage が読めなくなる → 入口の scan が投げる。
+    const reads = breakLocalReads();
+    gas.resolve({ maxFeePerGas: 5n * GWEI, maxPriorityFeePerGas: 1n });
+    await waitFor(() => expect(screenB.result.current.isError).toBe(true));
+    reads.mockRestore();
+
+    // storage の error の文がそのまま出る (今までどおり)。記録の状態を確かめられなかったので、対応は残す。
+    expect(screenB.result.current.error?.name).toBe('PendingStoreUnavailableError');
+    expect(mappings()).toEqual(mappingOfA);
+    expect(sentOps()).toEqual([OP_A.signedUserOp]);
+    expect(signUsdcPermit).toHaveBeenCalledOnce();
+
+    // storage が戻ってから、同じ画面で押し直す。同じ attemptId を resume し、新しい署名を求めずに既払いの結果を受け取る。
+    screenB.result.current.mutate(PARAMS);
+    await waitFor(() => expect(screenB.result.current.isSuccess).toBe(true));
+    expect(screenB.result.current.data).toMatchObject({
+      userOpHash: OP_A.userOpHash,
+      txHash: OP_A.txHash,
+      success: true,
+    });
+    expect(sentOps()).toEqual([OP_A.signedUserOp]);
+    expect(signUsdcPermit).toHaveBeenCalledOnce();
+    expect(prepareAndSignCircleUserOp).toHaveBeenCalledOnce();
+    expect(recordStatuses()).toEqual(['confirmed']);
+    // 画面のある試みが受け取ったので、対応はここで消える (今までどおり)。
+    expect(mappings()).toEqual({});
+  });
+
+  it('新しい支払いで、記録の予約を書けない → storage の error で終わり、対応は残る → 戻して押し直すと、同じ attemptId で 1 回だけ送る', async () => {
+    const screen = openScreen();
+    const writes = breakLocalWrites(() => true);
+    screen.result.current.mutate(PARAMS);
+    await waitFor(() => expect(screen.result.current.isError).toBe(true));
+    writes.mockRestore();
+
+    expect(screen.result.current.error?.name).toBe('PendingStoreWriteError');
+    expect(recordStatuses()).toEqual([]);
+    expect(signUsdcPermit).not.toHaveBeenCalled();
+    const mappingAfterFailure = mappings();
+    expect(Object.keys(mappingAfterFailure)).toHaveLength(1);
+
+    // 戻してから押し直す。残した対応の attemptId で記録を予約し、署名を求める。
+    screen.result.current.mutate(PARAMS);
+    await waitFor(() => expect(permitRequests).toHaveLength(1));
+    expect(recordAttemptIds()).toEqual(Object.values(mappingAfterFailure));
+    permitRequests[0].approve(PERMIT);
+    await waitFor(() => expect(userOpRequests).toHaveLength(1));
+    userOpRequests[0].approve(OP_A);
+    await waitFor(() => expect(screen.result.current.isSuccess).toBe(true));
+
+    expect(screen.result.current.data).toMatchObject({ userOpHash: OP_A.userOpHash, success: true });
+    expect(sentOps()).toEqual([OP_A.signedUserOp]);
+    expect(recordStatuses()).toEqual(['confirmed']);
+    expect(mappings()).toEqual({});
+  });
+
+  // 直す前は、対応が消えて次の押下が新しい key になり、scan が自分の古い記録 (signed・3 分以内) を「別の試みが署名中」と
+  // みなして、3 分のあいだ確認待ちで止まっていた。
+  it('自分の markSubmitting を書けない (記録は signed・op は渡していない) → storage の error で終わり、対応は残る → 戻して押し直すと、同じ記録を resume して署名からやり直し、1 回だけ送る', async () => {
+    const screen = openScreen();
+    screen.result.current.mutate(PARAMS);
+    await waitFor(() => expect(permitRequests).toHaveLength(1));
+    permitRequests[0].approve(PERMIT);
+    await waitFor(() => expect(userOpRequests).toHaveLength(1));
+    const mappingBefore = mappings();
+    expect(Object.keys(mappingBefore)).toHaveLength(1);
+
+    const writes = breakLocalWrites((value) => value.includes('"status":"submitting"'));
+    userOpRequests[0].approve(OP_A);
+    await waitFor(() => expect(screen.result.current.isError).toBe(true));
+    writes.mockRestore();
+
+    expect(screen.result.current.error?.name).toBe('PendingStoreWriteError');
+    expect(sentOps()).toEqual([]);
+    expect(recordStatuses()).toEqual(['signed']);
+    expect(mappings()).toEqual(mappingBefore);
+
+    // 戻してから押し直す。同じ key の記録 (signed・まだ渡していない) を resume し、署名からやり直す。
+    screen.result.current.mutate(PARAMS);
+    await waitFor(() => expect(permitRequests).toHaveLength(2));
+    permitRequests[1].approve(PERMIT);
+    await waitFor(() => expect(userOpRequests).toHaveLength(2));
+    userOpRequests[1].approve(OP_B);
+    await waitFor(() => expect(screen.result.current.isSuccess).toBe(true));
+
+    expect(screen.result.current.data).toMatchObject({ userOpHash: OP_B.userOpHash, success: true });
+    expect(sentOps()).toEqual([OP_B.signedUserOp]);
+    expect(recordStatuses()).toEqual(['confirmed']);
+    expect(mappings()).toEqual({});
+  });
+
+  // 今までどおり消す道: この試みは何も渡しておらず、記録は abandoned (終わった)。
+  it('署名 1 を拒否 → 対応は消える (今までどおり) → 次の押下は新しい attemptId で、新しい支払いとして署名を求める', async () => {
+    const screen = openScreen();
+    screen.result.current.mutate(PARAMS);
+    await waitFor(() => expect(permitRequests).toHaveLength(1));
+    const mappingBefore = mappings();
+    expect(Object.keys(mappingBefore)).toHaveLength(1);
+
+    permitRequests[0].reject(new Error('User rejected the request.'));
+    await waitFor(() => expect(screen.result.current.isError).toBe(true));
+    expect(screen.result.current.error?.message).toBe('User rejected the request.');
+    expect(recordStatuses()).toEqual(['abandoned']);
+    expect(mappings()).toEqual({});
+
+    screen.result.current.mutate(PARAMS);
+    await waitFor(() => expect(permitRequests).toHaveLength(2));
+    const mappingAfter = mappings();
+    expect(Object.keys(mappingAfter)).toEqual(Object.keys(mappingBefore));
+    expect(Object.values(mappingAfter)).not.toEqual(Object.values(mappingBefore));
+    expect(sentOps()).toEqual([]);
   });
 });
