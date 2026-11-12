@@ -27,8 +27,10 @@
 //
 // FSM (横道 abandoned):
 //   reserved → awaiting_signature → signed → submitting → confirmed
-//   (failed は保存済み record の読み取り互換のため状態として残すが、そこへ遷移させる関数は無い。failed の記録の op の
-//    receipt が取れたときだけ、markConfirmed が confirmed に直す)
+//                                                    └→ failed
+//   submitting → failed は markRejected だけ (自分の最初の送信を bundler が検証で拒否したとき。署名済みの op は記録から消す)。
+//   それ以外に failed へ遷移させる関数は無い。failed の記録の op の receipt が取れたとき (閉じたのに取り込まれた = 前提が
+//   破れた) だけ、markConfirmed が confirmed に直す。
 //   reserved/awaiting_signature/signed (= broadcast 前) は同一署名者が安全に abandon /
 //   supersede 可能 (popup 拒否・タブ閉じ)。**submitting 到達後は abandon も新規 op 構築も
 //   禁止** — recovery 経路のみ。
@@ -112,7 +114,7 @@ export type PendingRecord = {
   /** receipt の success (UserOp が revert せず実行されたか)。confirmed 時に永続。
    * resultFromConfirmed の receipt 再取得失敗時に success を捏造しないために使う。 */
   success?: boolean;
-  // failed 時 (旧 record の読み取り互換・新しく書く経路は無い)。
+  // failed 時 (markRejected)。bundler の拒否の code と文を切り詰めたもの (監査用・画面には出さない)。
   errorMessage?: string;
 };
 
@@ -383,8 +385,13 @@ function transition(args: {
     >
   >;
   /** 渡されたら、記録の userOpHash がこの値であることも確かめる (違えば PendingStateError)。await の後の書き込み
-   * (送り直しの前の時刻・confirmed) が、待つ間に別の op の記録に替わっていたものを書き換えないため。 */
+   * (送り直しの前の時刻・confirmed・failed) が、待つ間に別の op の記録に替わっていたものを書き換えないため。 */
   expectUserOpHash?: Hex;
+  /** 渡されたら、記録の updatedAt がこの値であることも確かめる (違えば PendingStateError)。送り直しは送る前に時刻を書く
+   * (markResending) ので、時刻が変わっていない = 自分が書いた後、ほかの試みがこの op を送り直していない。 */
+  expectUpdatedAt?: number;
+  /** true なら、署名済みの op (signedUserOp) を記録から消して書く。 */
+  dropSignedUserOp?: boolean;
 }): PendingRecord {
   const current = loadPendingRecord(args.key);
   if (!current) {
@@ -405,12 +412,21 @@ function transition(args: {
       `${args.key}: userOpHash=${current.userOpHash} は期待した ${args.expectUserOpHash} ではない (期待 → ${args.to})`,
     );
   }
+  if (
+    args.expectUpdatedAt !== undefined &&
+    current.updatedAt !== args.expectUpdatedAt
+  ) {
+    throw new PendingStateError(
+      `${args.key}: updatedAt=${current.updatedAt} は期待した ${args.expectUpdatedAt} ではない (期待 → ${args.to})`,
+    );
+  }
   const next: PendingRecord = {
     ...current,
     ...args.patch,
     status: args.to,
     updatedAt: args.now,
   };
+  if (args.dropSignedUserOp) delete next.signedUserOp;
   writeRecord(next);
   return next;
 }
@@ -511,8 +527,8 @@ export function markResending(args: {
  * userOpHash (任意): receipt を取った op の hash。渡されたら、記録の userOpHash が同じであることも確かめる (違えば
  * PendingStateError)。receipt を待つ間に別の op の記録に替わっていたら、その記録を confirmed にしない。
  * userOpHash が一致するときだけ、failed → confirmed も許す: receipt がある = その op は取り込まれた、が真実で、failed の
- * ままだと scan の dedup と resume がこの支払いを「払っていない」と扱う。failed を書く経路はまだ無い (旧 record だけ) が、
- * 「閉じたのに取り込まれた」は前提が破れた状態なので error の log を残す。 */
+ * ままだと scan の dedup と resume がこの支払いを「払っていない」と扱う。failed は markRejected (最初の送信の検証拒否) が書く。
+ * 「閉じたのに取り込まれた」は前提 (検証で拒否された op は mempool に入っていない) が破れた状態なので error の log を残す。 */
 export function markConfirmed(args: {
   key: string;
   sender: Address;
@@ -542,6 +558,44 @@ export function markConfirmed(args: {
     now: args.now,
     patch: { txHash: args.txHash, success: args.success },
     expectUserOpHash,
+  });
+}
+
+// failed の記録に残す errorMessage の長さの上限 (文字数)。
+const REJECTED_MESSAGE_MAX = 200;
+
+/** submitting → failed。**自分の最初の送信を bundler が検証で拒否した** (= この op は mempool に入っていない) ときに、その
+ * 試みだけが呼ぶ (lib/smartAccount/circleSend.ts)。閉じてよいのは、記録がいまも次の 3 つを全部満たすときだけで、書く直前に
+ * 同期で読み直して確かめる (どれかが違えば PendingStateError・呼び出し側は閉じずに確認待ちへ進む):
+ *   - status が submitting (ほかの試みが confirmed にしていない)
+ *   - userOpHash が拒否された op のもの (別の op の記録に替わっていない)
+ *   - updatedAt が submittedAt = 自分の markSubmitting が返した時刻 (ほかの試みがこの op を送り直していない。送り直しは
+ *     送る前に markResending で時刻を書く)
+ * 拒否の応答は await の後に届くので、送る前に読んだ記録を信じない。何の波及を断つか: 拒否の処理が遅れる間にほかの試みが
+ * 同じ op を送り直して受理されていたのに failed にすると、scan と resume がその支払いを「払っていない」と扱い、取り込まれた
+ * 後に 2 本目が開く。
+ * failed にするとき、署名済みの op (signedUserOp) を記録から消す (閉じた記録の op を、後から誰も送り直せないようにする。
+ * userOpHash は残す: 万一その op の receipt が取れたとき、markConfirmed が confirmed に直す手がかり)。
+ * errorMessage は上限で切って保存する (呼び出し側は秘密・署名を入れない)。 */
+export function markRejected(args: {
+  key: string;
+  sender: Address;
+  userOpHash: Hex;
+  /** 自分の markSubmitting が返した記録の updatedAt。 */
+  submittedAt: number;
+  errorMessage: string;
+  now: number;
+}): PendingRecord {
+  return transition({
+    key: args.key,
+    sender: args.sender,
+    from: 'submitting',
+    to: 'failed',
+    now: args.now,
+    patch: { errorMessage: args.errorMessage.slice(0, REJECTED_MESSAGE_MAX) },
+    expectUserOpHash: args.userOpHash,
+    expectUpdatedAt: args.submittedAt,
+    dropSignedUserOp: true,
   });
 }
 

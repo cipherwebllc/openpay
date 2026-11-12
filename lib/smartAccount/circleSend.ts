@@ -16,15 +16,32 @@
 //     宙吊りがあれば、新規送信せず先にそれを recover する。
 //
 // 送った後の終わり方 (第 10 回レビュー H-W・H-Y): 自分の markSubmitting が返った後と、submitting / confirmed の記録を扱う枝
-// (scan・resume・markSigned の CAS が外れたとき) の終わり方は 3 つだけにする:
+// (scan・resume・markSigned の CAS が外れたとき) の終わり方は次だけにする:
 //   (1) receipt が取れた・記録が confirmed → 結果
 //   (2) まだ bundler に op を渡していない試みが、終わった記録 (failed / abandoned / 記録なし) に当たった → 「既に終了」の error
-//   (3) それ以外すべて → CirclePendingError (確認待ち)
+//   (3) **自分の最初の送信** を bundler が検証で拒否し、記録を failed に閉じられた → 「送信の受付で断られた」error
+//       (CircleSendRejectedError・第 10 回レビュー H-X。下の「最初の送信の検証拒否で閉じる」)
+//   (4) それ以外すべて → CirclePendingError (確認待ち)
 // hook (useBatchPayment の runCirclePayment) は、CirclePendingError と storage の失敗 (PendingStoreUnavailableError・
 // PendingStoreWriteError) 以外の error で attemptId の対応を消す。op を渡したかもしれない後にふつうの error で終わると、次の押下が
-// 新しい key になり、後から確定した前の支払い (90 秒より前の confirmed) を「正規のリピート」とみなして 2 本目を払う。なので (3) を
+// 新しい key になり、後から確定した前の支払い (90 秒より前の confirmed) を「正規のリピート」とみなして 2 本目を払う。なので (4) を
 // 1 か所 (inPostSubmit) で保証する。confirmed の記録の枝 (scan・resume) は包まない: resultFromConfirmed が照会の失敗を全部
-// 受けて (1) を返し、投げる処理が無い。
+// 受けて (1) を返し、投げる処理が無い。(2) と (3) は「この op は mempool に無い」と言える終わり方で、対応を消してよい
+// (次の押下は新しい支払い = 署名から)。
+//
+// 最初の送信の検証拒否で閉じる (H-X): bundler が最初の送信を検証で拒否した op は mempool に入っていない。確認待ちに残すと、
+// その内容の支払いが、押すたびに 120 秒待ち → 同じ op の送り直し → また拒否 → 120 秒、を繰り返して払えない。なので記録を
+// failed に閉じ、(3) で終える。閉じるのは次が **全部** そろったときだけ (そろわなければ今までどおり復旧へ進み、(4) で終える):
+//   (a) この試みが自分で signed → submitting にした直後の、最初の送信である (executeCirclePayment の中のその 1 か所だけ。
+//       記録の状態からは決めない。**復旧の送り直しの拒否では閉じない**: 前の送信が受理されているかもしれず、送り直しへの
+//       拒否は「mempool に無い」ことの証拠にならない)
+//   (b) 送信の分類が「検証による確定的な拒否」である (HTTP 2xx + ERC-4337 の検証の code の allowlist。Pimlico の経路と同じ
+//       定義・同じ bundler。bundler の文が nonce・mempool などに触れているときは拒否と読まない = circleAccount.ts の
+//       classifyCircleBroadcastError)
+//   (c) 記録がいまも submitting・userOpHash が同じ・updatedAt が自分の markSubmitting の返した値である (書く直前に同期で
+//       確かめる = lib/circlePending.ts の markRejected。拒否の応答を待つ間に、ほかの試みが確定させた・送り直した記録は閉じない)
+// 残る前提: bundler が「検証で拒否」と答えた op は取り込まれない (Pimlico の経路の c2 と同じ前提)。破れたとき (閉じた op の
+// receipt が取れた) は、markConfirmed が failed → confirmed に直して error の log を残す。
 // 入口の scan・resume の読み取り・予約の書き込み (境界の外) が storage の失敗で投げたときは、hook の側が対応を残す (この押下は
 // 記録の状態を確かめられなかった)。
 //   - receipt の待ちの結果は receipt / timeout / error の 3 つ (waitReceipt)。**同じ op の送り直しへ進むのは timeout のとき
@@ -51,9 +68,11 @@ import { WaitForUserOperationReceiptTimeoutError } from 'viem/account-abstractio
 import {
   broadcastCircleUserOp,
   prepareAndSignCircleUserOp,
+  prepareCircleBroadcast,
   signUsdcPermit,
   waitForCircleReceipt,
   type BatchCall,
+  type CircleBroadcastError,
   type CircleSmartAccountBundle,
   type SignedCircleUserOp,
 } from '@/lib/smartAccount/circleAccount';
@@ -67,6 +86,7 @@ import {
   loadPendingRecord,
   markAwaitingSignature,
   markConfirmed,
+  markRejected,
   markResending,
   markSigned,
   markSubmitting,
@@ -152,6 +172,23 @@ export class CirclePendingError extends Error {
         'ページを再読み込みしても二重決済にはなりません (自動で復旧を試みます)。',
     );
     this.name = 'CirclePendingError';
+    this.userOpHash = userOpHash;
+  }
+}
+
+/** 自分の最初の送信を bundler が検証で拒否し、記録を閉じた (冒頭の (3))。この op は mempool に入っていない = 送金されて
+ * いない。**確認待ちではない**: name を 'CirclePendingError' にしない (hook は attemptId の対応を消し、次の押下は新しい支払い =
+ * 署名からやり直す)。文は固定 (bundler・viem の生の文 = AA33… や request の本文を画面に出さない)。
+ * 文は第 10 回レビュー PR-39c で i18n に載せる前提の仮の文 (3 フォームは error の message をそのまま赤い枠に出す)。 */
+export class CircleSendRejectedError extends Error {
+  /** 断られた op の hash (監査用)。 */
+  readonly userOpHash: Hex;
+  constructor(userOpHash: Hex) {
+    super(
+      'USDC ガスレスの支払いは、送信の受付で断られました。この支払いは送金されていません。' +
+        '残高が足りないなどの理由が考えられます。もう一度お試しください (署名からやり直します)。',
+    );
+    this.name = 'CircleSendRejectedError';
     this.userOpHash = userOpHash;
   }
 }
@@ -245,7 +282,8 @@ function confirmAndResult(args: {
 // 何の波及を断つか: op を bundler に渡したかもしれない後の付帯の失敗がふつうの error になり、hook が attemptId の対応を消して、
 // 後から確定した支払いの後に 2 本目が開くこと。確認待ちは「分からない」の正直な表示で、成功にはしない。握りつぶさない:
 // 元の error は専用の key で error の log に残す。
-// 素通しするのは、結果・CirclePendingError・AttemptEndedError (まだ渡していない試みの「既に終了」) だけ。
+// 素通しするのは、結果・CirclePendingError・AttemptEndedError (まだ渡していない試みの「既に終了」)・CircleSendRejectedError
+// (最初の送信の検証拒否で記録を閉じた) だけ。
 // userOpHash は確認待ちの op の hash (分からない場面では undefined)。
 async function inPostSubmit<T>(
   userOpHash: Hex | undefined,
@@ -254,7 +292,11 @@ async function inPostSubmit<T>(
   try {
     return await run();
   } catch (error) {
-    if (error instanceof CirclePendingError || error instanceof AttemptEndedError) {
+    if (
+      error instanceof CirclePendingError ||
+      error instanceof AttemptEndedError ||
+      error instanceof CircleSendRejectedError
+    ) {
       throw error;
     }
     logger.error('circle.post_submit.unexpected', {
@@ -263,6 +305,57 @@ async function inPostSubmit<T>(
     });
     throw new CirclePendingError(userOpHash);
   }
+}
+
+// 送信の error が「検証による確定的な拒否」(冒頭の (b)) なら、その error を返す。circleAccount が投げる CircleBroadcastError の
+// kind を読む。それ以外 (already-known・unknown・分類の無い error) は null = 閉じない側。
+// class の同一性 (instanceof) でなく name で見る: hook が CirclePendingError を見るのと同じ形で、circleAccount を境界として
+// 差し替える test でも、本物の class の instance をそのまま通せる。
+function validationRejectionOf(error: unknown): CircleBroadcastError | null {
+  const candidate = error as Partial<CircleBroadcastError> | null;
+  return candidate?.name === 'CircleBroadcastError' && candidate.kind === 'validation-rejected'
+    ? (candidate as CircleBroadcastError)
+    : null;
+}
+
+// 自分の最初の送信が検証で拒否されたとき、記録を failed に閉じる (冒頭の「最初の送信の検証拒否で閉じる」の (c))。閉じられたら
+// true。記録がもう「自分が submitting にしたまま」でない (ほかの試みが確定させた・送り直した・別の op の記録に替わった・消えた)
+// ときは false = 閉じない (呼び出し側は今までどおり復旧へ進む)。storage の失敗は投げる (送った後の境界が確認待ちに変える)。
+// 記録に残す文は bundler の code と文だけ (viem の error の message は、署名済みの op と URL を含むので入れない)。
+function closeRejectedFirstSend(args: {
+  key: string;
+  sender: Address;
+  userOpHash: Hex;
+  submittedAt: number;
+  rejection: CircleBroadcastError;
+  now: () => number;
+}): boolean {
+  const { key, sender, userOpHash, submittedAt, rejection, now } = args;
+  try {
+    markRejected({
+      key,
+      sender,
+      userOpHash,
+      submittedAt,
+      errorMessage: `bundler rejected (code ${rejection.code}): ${rejection.details ?? ''}`,
+      now: now(),
+    });
+  } catch (error) {
+    if (!(error instanceof PendingStateError)) throw error;
+    logger.warn('circle.broadcast.rejected-not-closed', {
+      userOpHash,
+      code: rejection.code,
+      reason: error.message,
+    });
+    return false;
+  }
+  // 監査用: 閉じた op の hash と、bundler の拒否の code・文。
+  logger.warn('circle.broadcast.rejected', {
+    userOpHash,
+    code: rejection.code,
+    details: rejection.details,
+  });
+  return true;
 }
 
 type RecoveryContext = {
@@ -370,6 +463,8 @@ async function recoverSubmitting(
     });
   } catch (error) {
     // "already known" / nonce 使用済 等は in-flight or 確定済の証左なので無害。
+    // 送り直しの拒否では、検証による拒否 (分類が validation-rejected) でも記録を閉じない (冒頭の「最初の送信の検証拒否で
+    // 閉じる」の (a)): 前の送信が受理されているかもしれず、この拒否は「mempool に無い」ことの証拠にならない。
     logger.info('circle.recover.rebroadcast-noop', {
       userOpHash: hash,
       error: error instanceof Error ? error.message : String(error),
@@ -624,15 +719,37 @@ export async function executeCirclePayment(
     );
   }
 
+  // 送信の用意 (bundler への 1 回用の transport を作る・同期・何も送らない) は、submitting にする **前** に済ませる。
+  // 作れなければ (bundle の設定の誤り)、下の境界の外 = ふつうの error (送っていない試みを確認待ちにしない)。
+  const sendFirst = prepareCircleBroadcast(bundle);
+
   // broadcast_intent を永続 (fail-closed)。ここを過ぎたら fallback/新規 op 禁止。
   // 書けなければ、下の境界の外 = ふつうの error (送っていない試みを確認待ちにしない)。
-  markSubmitting({ key, sender, now: now() });
+  // submitted.updatedAt = この試みが、いま自分で signed → submitting にした時刻。下の「最初の送信」の印 (冒頭の (a)(c))。
+  const submitted = markSubmitting({ key, sender, now: now() });
 
-  // ここから先は「op を bundler に渡したかもしれない後」。終わり方は結果か確認待ちだけ (inPostSubmit)。
+  // ここから先は「op を bundler に渡したかもしれない後」。終わり方は、結果・確認待ち・最初の送信の検証拒否で閉じた error だけ
+  // (inPostSubmit)。
   return await inPostSubmit(userOpHash, async () => {
     try {
-      await broadcastCircleUserOp({ bundle, signedUserOp });
+      await sendFirst(signedUserOp);
     } catch (error) {
+      // 最初の送信を bundler が検証で拒否した (冒頭の「最初の送信の検証拒否で閉じる」)。記録を閉じられたときだけ、確認待ちに
+      // せず「送信の受付で断られた」で終える (待たない・送り直さない)。閉じられなければ、下の今までの扱い (復旧) へ進む。
+      const rejection = validationRejectionOf(error);
+      if (
+        rejection &&
+        closeRejectedFirstSend({
+          key,
+          sender,
+          userOpHash,
+          submittedAt: submitted.updatedAt,
+          rejection,
+          now,
+        })
+      ) {
+        throw new CircleSendRejectedError(userOpHash);
+      }
       // 応答ロスト: op は受理・included しうる。auto-fallback 禁止 → recovery。
       logger.warn('circle.broadcast.response-lost', {
         userOpHash,

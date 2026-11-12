@@ -220,18 +220,23 @@ export async function broadcastPimlicoUserOp(args: {
   }
 }
 
-type RpcRequestErrorLike = {
+export type RpcRequestErrorLike = {
   name: 'RpcRequestError';
   code?: unknown;
+  // bundler が返した JSON-RPC の error の message そのもの (viem の RpcRequestError の details)。
   details?: unknown;
+  // viem が組み立てた文。**送った request の本文 (署名済みの op) と URL を含む** ので、bundler の言い分として読まない。
   message?: unknown;
+  // bundler が返した JSON-RPC の error の data。
+  data?: unknown;
 };
 
 // viem の http transport は、応答の本文に JSON-RPC の error があるときだけ RpcRequestError を投げる
 // (node_modules/viem/clients/transports/http.ts)。client はそれを code ごとの RpcError で包むので cause をたどる。
 // timeout (TimeoutError)・本文が JSON-RPC の error でない HTTP の失敗 (HttpRequestError)・fetch の失敗には
 // RpcRequestError が無い。
-function findRpcRequestError(error: unknown): RpcRequestErrorLike | null {
+// export は Circle の経路 (lib/smartAccount/circleAccount.ts) が、同じ error から拒否の code と bundler の文を読むため。
+export function findRpcRequestError(error: unknown): RpcRequestErrorLike | null {
   let current: unknown = error;
   while (current !== null && typeof current === 'object') {
     if ((current as { name?: unknown }).name === 'RpcRequestError') {

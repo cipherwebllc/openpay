@@ -6,6 +6,7 @@ import {
   clearStableAttemptId,
   computeCallHash,
   computeIdempotencyKey,
+  findLiveByCallHash,
   findRecoverable,
   gcStalePreSubmit,
   isPreSubmit,
@@ -13,6 +14,7 @@ import {
   loadPendingRecord,
   markAwaitingSignature,
   markConfirmed,
+  markRejected,
   markResending,
   markSigned,
   markSubmitting,
@@ -347,7 +349,8 @@ describe('markResending (送り直しの前の CAS)', () => {
 describe('markConfirmed の userOpHash の確認', () => {
   const HASH = '0xhash' as Hex;
   const raw = (key: string) => window.localStorage.getItem(PENDING_KEY_PREFIX + key);
-  // failed を書く経路は無い (旧 record だけ) ので、保存済みの記録を直接書き換えて作る。
+  // 保存済みの記録を直接書き換えて failed を作る (署名済みの op が残った形 = 旧 record)。markRejected が書く本物の failed
+  // (署名済みの op を消した形) からの confirmed は、下の「markRejected」の describe で確かめる。
   function forceStatus(key: string, status: string) {
     const parsed = JSON.parse(raw(key)!) as Record<string, unknown>;
     window.localStorage.setItem(PENDING_KEY_PREFIX + key, JSON.stringify({ ...parsed, status }));
@@ -476,6 +479,158 @@ describe('markConfirmed の userOpHash の確認', () => {
       }),
     ).toThrow(PendingStateError);
     expect(loadPendingRecord(key)?.status).toBe('abandoned');
+  });
+});
+
+// 第 10 回レビュー H-X (PR-39b): 自分の最初の送信を bundler が検証で拒否したときに、その試みだけが記録を failed に閉じる。
+// 閉じてよいのは、記録がいまも「submitting・同じ userOpHash・updatedAt が自分の markSubmitting の返した時刻」のときだけ。
+describe('markRejected (最初の送信の検証拒否で submitting → failed)', () => {
+  const HASH = '0xhash' as Hex; // advanceToSubmitting が書く userOpHash
+  const SUBMITTED_AT = 1_300; // advanceToSubmitting の markSubmitting が書く updatedAt
+  const raw = (key: string) => window.localStorage.getItem(PENDING_KEY_PREFIX + key);
+  const reject = (key: string, overrides: Partial<Parameters<typeof markRejected>[0]> = {}) =>
+    markRejected({
+      key,
+      sender: SENDER,
+      userOpHash: HASH,
+      submittedAt: SUBMITTED_AT,
+      errorMessage: 'bundler rejected (code -32501): AA33 reverted',
+      now: 5_000,
+      ...overrides,
+    });
+
+  it('自分が submitting にしたままの記録 → failed・errorMessage を残し、署名済みの op を記録から消す (userOpHash は残す)', () => {
+    const { key } = setup();
+    advanceToSubmitting(key);
+    expect(loadPendingRecord(key)?.signedUserOp).toEqual(SIGNED_OP);
+
+    const next = reject(key);
+
+    expect(next.status).toBe('failed');
+    expect('signedUserOp' in next).toBe(false);
+    const stored = JSON.parse(raw(key)!) as Record<string, unknown>;
+    expect(stored.status).toBe('failed');
+    expect(stored.updatedAt).toBe(5_000);
+    expect(stored.errorMessage).toBe('bundler rejected (code -32501): AA33 reverted');
+    expect(stored.userOpHash).toBe(HASH);
+    expect('signedUserOp' in stored).toBe(false);
+    // 署名 (SIGNED_OP.signature) が、記録のどこにも残っていない。
+    expect(raw(key)).not.toContain(String(SIGNED_OP.signature));
+  });
+
+  it('markSubmitting の返した updatedAt を、そのまま submittedAt に渡せる', () => {
+    const { key } = setup();
+    markAwaitingSignature({ key, sender: SENDER, now: 1_100 });
+    markSigned({ key, sender: SENDER, signedUserOp: SIGNED_OP, userOpHash: HASH, now: 1_200 });
+    const submitted = markSubmitting({ key, sender: SENDER, now: 1_234 });
+    expect(reject(key, { submittedAt: submitted.updatedAt }).status).toBe('failed');
+  });
+
+  it('updatedAt が違う (ほかの試みが送り直した = markResending が時刻を書いた) → PendingStateError・記録を書き換えない', () => {
+    const { key } = setup();
+    advanceToSubmitting(key);
+    markResending({ key, sender: SENDER, userOpHash: HASH, now: 4_000 });
+    const before = raw(key);
+
+    expect(() => reject(key)).toThrow(PendingStateError);
+
+    expect(raw(key)).toBe(before);
+    expect(loadPendingRecord(key)).toMatchObject({ status: 'submitting', signedUserOp: SIGNED_OP });
+  });
+
+  it('userOpHash が違う (別の op の記録に替わっていた) → PendingStateError・記録を書き換えない', () => {
+    const { key } = setup();
+    advanceToSubmitting(key);
+    const before = raw(key);
+    expect(() => reject(key, { userOpHash: '0xother' as Hex })).toThrow(PendingStateError);
+    expect(raw(key)).toBe(before);
+  });
+
+  it('confirmed になっていた (ほかの試みが receipt を取った) → PendingStateError・confirmed のまま', () => {
+    const { key } = setup();
+    advanceToSubmitting(key);
+    // 時刻は SUBMITTED_AT のまま (updatedAt の確認だけでは見分けられない形) にして、status の確認を固定する。
+    markConfirmed({ key, sender: SENDER, txHash: '0xtx' as Hex, success: true, now: SUBMITTED_AT });
+    const before = raw(key);
+    expect(() => reject(key)).toThrow(PendingStateError);
+    expect(raw(key)).toBe(before);
+  });
+
+  it.each(['signed', 'abandoned'] as const)('%s (送っていない記録) は failed にしない', (status) => {
+    const { key } = setup();
+    markAwaitingSignature({ key, sender: SENDER, now: 1_100 });
+    markSigned({ key, sender: SENDER, signedUserOp: SIGNED_OP, userOpHash: HASH, now: SUBMITTED_AT });
+    if (status === 'abandoned') abandon({ key, sender: SENDER, now: SUBMITTED_AT });
+    expect(() => reject(key)).toThrow(PendingStateError);
+    expect(loadPendingRecord(key)?.status).toBe(status);
+  });
+
+  it('記録が無い → PendingStateError (作らない)', () => {
+    expect(() => reject('nope')).toThrow(PendingStateError);
+    expect(raw('nope')).toBeNull();
+  });
+
+  it('errorMessage は 200 字で切って保存する', () => {
+    const { key } = setup();
+    advanceToSubmitting(key);
+    reject(key, { errorMessage: 'x'.repeat(500) });
+    expect(loadPendingRecord(key)?.errorMessage).toBe('x'.repeat(200));
+  });
+
+  it('別 sender だと authorization エラー・書けなければ PendingStoreWriteError (CAS の失敗とは別の error)', () => {
+    const { key } = setup();
+    advanceToSubmitting(key);
+    expect(() => reject(key, { sender: OTHER })).toThrow(PendingAuthorizationError);
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new Error('QuotaExceededError');
+    });
+    expect(() => reject(key)).toThrow(PendingStoreWriteError);
+  });
+
+  it('閉じた記録は、scan (findLiveByCallHash・findRecoverable) に出ない・24 時間で掃除される', () => {
+    const { key, callHash } = setup();
+    advanceToSubmitting(key);
+    reject(key);
+    expect(findLiveByCallHash({ sender: SENDER, chainId: CHAIN_ID, callHash })).toEqual([]);
+    expect(findRecoverable({ sender: SENDER, chainId: CHAIN_ID })).toEqual([]);
+    const DAY = 24 * 60 * 60 * 1000;
+    expect(pruneTerminal(DAY, 5_000 + DAY)).toBe(0);
+    expect(pruneTerminal(DAY, 5_000 + DAY + 1)).toBe(1);
+    expect(raw(key)).toBeNull();
+  });
+
+  it('閉じた記録の op の receipt が取れたら、markConfirmed が confirmed に直す (閉じたのに取り込まれた)・error の log', () => {
+    const errorSpy = vi.spyOn(logger, 'error').mockImplementation(() => {});
+    const { key } = setup();
+    advanceToSubmitting(key);
+    reject(key);
+
+    const c = markConfirmed({
+      key,
+      sender: SENDER,
+      txHash: '0xtx' as Hex,
+      success: true,
+      now: 6_000,
+      userOpHash: HASH,
+    });
+
+    expect(c.status).toBe('confirmed');
+    expect(loadPendingRecord(key)).toMatchObject({ status: 'confirmed', txHash: '0xtx', userOpHash: HASH });
+    expect(errorSpy).toHaveBeenCalledWith('circle.pending.confirmed-after-failed', {
+      userOpHash: HASH,
+      txHash: '0xtx',
+    });
+  });
+
+  it('閉じた記録は、送り直しの前の CAS (markResending) も submitting への再入 (markSubmitting) も通さない', () => {
+    const { key } = setup();
+    advanceToSubmitting(key);
+    reject(key);
+    expect(() => markResending({ key, sender: SENDER, userOpHash: HASH, now: 6_000 })).toThrow(
+      PendingStateError,
+    );
+    expect(() => markSubmitting({ key, sender: SENDER, now: 6_000 })).toThrow(PendingStateError);
+    expect(loadPendingRecord(key)?.status).toBe('failed');
   });
 });
 
