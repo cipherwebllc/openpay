@@ -883,6 +883,49 @@ describe('筋 2: 最初の送信の拒否の片付け (c2) は、同じ intent �
       }
     },
   );
+
+  // PR #1084: c2 は、閉じる前に bundler にその op の状態を聞く。上の筋は「作り直した別の op」が確定した (bundler は A の hash を
+  // 知らない = not_found) ので閉じた扱いのまま。こちらは **同じ op** が確定した筋。
+  it('A の最初の送信への拒否が遅れる間に、画面 2 が同じ op を送り直して受理・確定した (記録は消えた) → 遅れて届いた拒否を「閉じた」と伝えない (bundler はその hash を知っている)・記録は書き戻さない', async () => {
+    // 画面 1: A を保存して送る。bundler は受け付けず、その答え (検証で拒否) が遅れる。
+    const first = mountClients();
+    const rejection = deferred<BundlerHttpReply>();
+    first.bundlerSend.mockImplementationOnce(() => rejection.promise);
+    const firstHook = render();
+    firstHook.result.current.mutate(PARAMS);
+    await waitFor(() => expect(first.bundlerSend).toHaveBeenCalledTimes(1));
+    const aOp = sentOp(first, 0);
+    const aHash = world.hashOf(aOp);
+    firstHook.unmount();
+
+    // 画面 2: A を確かめる → 同じ op を送り直す → 今度は受理・mine → 確定 (記録は消える)。
+    const second = mountClients();
+    acceptAndMine(second);
+    const secondHook = render();
+    await waitFor(() => expect(secondHook.result.current.isUnknown).toBe(true));
+    secondHook.result.current.retryReceipt();
+    await waitFor(() => expect(secondHook.result.current.isSuccess).toBe(true));
+    expect(sentOp(second, 0)).toEqual(aOp);
+    expect(world.mined.map((op) => op.hash)).toEqual([aHash]);
+    expect(pendingKeys()).toHaveLength(0);
+    secondHook.unmount();
+    vi.mocked(logger.warn).mockClear();
+
+    // A の最初の送信への拒否が今ごろ届く。直す前 (status を聞かない): 消す記録が無いので「閉じた」扱い (検証の拒否の error) で
+    // 終わり、画面が残っていれば、取り込まれた A の上に新しい支払いを開けた。
+    rejection.resolve(PAYMASTER_EXPIRED);
+    const ended = await settledMutation(firstHook);
+
+    expect(ended.status).toBe('error');
+    expect(ended.error?.message).toBe('response-unknown');
+    expect(logger.warn).toHaveBeenCalledWith(
+      'pimlico.send.rejected-op-status',
+      expect.objectContaining({ userOpHash: aHash, error: 'bundler-status:included' }),
+    );
+    // 閉じた記録は復活させない (空のときは書かない)。
+    expect(pendingKeys()).toHaveLength(0);
+    expect(world.mined).toHaveLength(1);
+  });
 });
 
 describe('hash の直し (bundler の返した hash で記録を直す) は、同じ intent の記録だけを直す', () => {

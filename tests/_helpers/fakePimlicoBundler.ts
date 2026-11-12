@@ -8,6 +8,9 @@
 //   - bundler: 同じ op の 2 回目は「Already known」、同じ nonce の別の op は「Replacement underpriced」で断る
 //     (どちらも -32602・HTTP 200)。
 //   - mine() を呼ぶまで receipt は無い。
+//   - pimlico_getUserOperationStatus: 知らない hash は not_found・mempool にあれば submitted・mine 済みなら included
+//     (world.statusOf)。hook は、最初の送信の検証の拒否で閉じる前にこれを 1 回聞く。test は `bundlerStatus` の
+//     mockImplementationOnce で答え方 (任意の値・JSON-RPC の error・HTTP の失敗・応答なし) を変える。
 //
 // eth_sendUserOperation は HTTP の層で偽物にする: hook (pimlicoSend.ts の broadcastPimlicoUserOp) は client の
 // transport の URL へ、viem の http transport で送り、HTTP の status を見て失敗を分ける。fakePimlicoClients は global の
@@ -65,6 +68,15 @@ export type BundlerHttpReply =
   // 本文が JSON-RPC でない HTTP の失敗。
   | { status: number; body: string };
 
+/** pimlico_getUserOperationStatus への HTTP の答え。bundlerStatus が throw すると応答が返らない (通信断)。 */
+export type BundlerStatusReply =
+  // HTTP 200 + result (形の崩れた値も渡せる)。
+  | { result: unknown }
+  // JSON-RPC の error (status の既定は 200)。
+  | { error: { code: number; message: string }; status?: number }
+  // 本文が JSON-RPC でない HTTP の失敗。
+  | { status: number; body: string };
+
 /** 応答が返らなかったとき (http の timeout) に viem が投げる error (MAv2 の facade の test が使う)。 */
 export function bundlerTimeout(): TimeoutError {
   return new TimeoutError({
@@ -91,6 +103,8 @@ export function createFakeBundlerWorld(options?: { chainId?: number }) {
   // mine された op (確定した支払い)。
   const mined: Array<{ op: SignedOp; hash: Hex; success: boolean }> = [];
   let nextKey = 1_700_000_000_000n;
+  // 準備の通し番号 (client をまたいで数える: ページを読み直した後の作り直しも、元の op とは別の op になる)。
+  let prepared = 0n;
 
   const seqOf = (key: bigint) => nextSeq.get(key) ?? 0n;
 
@@ -172,11 +186,20 @@ export function createFakeBundlerWorld(options?: { chainId?: number }) {
     nextSeq.set(key, seq + 1n);
   }
 
+  /** bundler が知っている、その hash の op の状態 (pimlico_getUserOperationStatus の result)。 */
+  function statusOf(hash: Hex): { status: string; transactionHash: Hex | null } {
+    const receipt = receipts.get(hash);
+    if (receipt) return { status: 'included', transactionHash: receipt.receipt.transactionHash };
+    const pending = [...mempool.values()].some((entry) => entry.hash === hash);
+    return { status: pending ? 'submitted' : 'not_found', transactionHash: null };
+  }
+
   return {
     chainId,
     entryPoint,
     accept,
     respond,
+    statusOf,
     mine,
     consumeNonceByOtherOp,
     hashOf,
@@ -184,6 +207,10 @@ export function createFakeBundlerWorld(options?: { chainId?: number }) {
     mempoolHashes: () => [...mempool.values()].map((v) => v.hash),
     receiptOf: (hash: Hex) => receipts.get(hash),
     // 以下は client の偽物が使う。
+    nextPrepared: () => {
+      prepared += 1n;
+      return prepared;
+    },
     reserveNonce: () => {
       const key = nextKey;
       nextKey += 1n;
@@ -201,6 +228,7 @@ export type FakeBundlerWorld = ReturnType<typeof createFakeBundlerWorld>;
 type LegacySendUserOperation = (parameters: { calls: Call[] }) => Promise<Hex>;
 type GasPriceTier = { maxFeePerGas: bigint; maxPriorityFeePerGas: bigint };
 type BundlerSend = (request: { params: [SignedOp, Address] }) => Promise<BundlerHttpReply>;
+type BundlerStatus = (request: { hash: Hex }) => Promise<BundlerStatusReply>;
 
 function requestUrl(input: RequestInfo | URL): string {
   if (typeof input === 'string') return input;
@@ -209,19 +237,22 @@ function requestUrl(input: RequestInfo | URL): string {
 
 // global の fetch を「FAKE_BUNDLER_URL だけ bundlerSend へ、ほかは差し替える前の fetch へ」にする。
 // test が先に fetch を差し替えていても (payment log の spy 等)、それを包むので log の呼び出しはその spy に届く。
-function routeBundlerFetch(bundlerSend: Mock<BundlerSend>): void {
+function routeBundlerFetch(bundlerSend: Mock<BundlerSend>, bundlerStatus: Mock<BundlerStatus>): void {
   const previousFetch = globalThis.fetch;
   vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
     if (requestUrl(input) !== FAKE_BUNDLER_URL) return previousFetch(input, init);
     const body = JSON.parse(String(init?.body)) as {
       id: number;
       method: string;
-      params: [SignedOp, Address];
+      params: unknown[];
     };
-    if (body.method !== 'eth_sendUserOperation') {
+    if (body.method !== 'eth_sendUserOperation' && body.method !== 'pimlico_getUserOperationStatus') {
       throw new Error(`fake bundler: 想定外の method ${body.method}`);
     }
-    const reply = await bundlerSend({ params: body.params });
+    const reply =
+      body.method === 'eth_sendUserOperation'
+        ? await bundlerSend({ params: body.params as [SignedOp, Address] })
+        : await bundlerStatus({ hash: body.params[0] as Hex });
     if ('body' in reply) return new Response(reply.body, { status: reply.status });
     const payload = 'result' in reply ? { result: reply.result } : { error: reply.error };
     return new Response(JSON.stringify({ jsonrpc: '2.0', id: body.id, ...payload }), {
@@ -308,12 +339,13 @@ export function fakePimlicoClients(args: {
 
   const getNonce: Mock<() => Promise<bigint>> = vi.fn(async () => world.reserveNonce());
 
-  // 準備のたびに fee が少し変わる (作り直しの op は、同じ nonce でも元の op と別の op になる)。
-  let prepared = 0n;
+  // 準備のたびに fee が少し変わる (作り直しの op は、同じ nonce でも元の op と別の op になる)。通し番号は world が持つ:
+  // client ごとに数えると、読み直した後の画面の作り直しの op が、前の画面の op と 1 字も違わない (hash も同じ) op になり、
+  // bundler の status (hash で引く) が「作り直しの op」と「元の op」を取り違える。
   const prepareUserOperation: Mock<
     (parameters: { calls: readonly Call[]; nonce: bigint }) => Promise<UserOperation>
   > = vi.fn(async ({ calls, nonce }) => {
-    prepared += 1n;
+    const prepared = world.nextPrepared();
     if (legacySendUserOperation) {
       world.rememberLegacyHash(nonce, await legacySendUserOperation({ calls: [...calls] }));
     }
@@ -338,7 +370,9 @@ export function fakePimlicoClients(args: {
   // bundler の HTTP の eth_sendUserOperation。既定は world.respond (受理 or HTTP 200 の JSON-RPC の error)。
   // test は mockImplementationOnce で「受理したが応答が返らない」「届かなかった」「HTTP 500」を作る。
   const bundlerSend: Mock<BundlerSend> = vi.fn(async ({ params }) => world.respond(params[0]));
-  routeBundlerFetch(bundlerSend);
+  // bundler の HTTP の pimlico_getUserOperationStatus。既定は world.statusOf (HTTP 200)。
+  const bundlerStatus: Mock<BundlerStatus> = vi.fn(async ({ hash }) => ({ result: world.statusOf(hash) }));
+  routeBundlerFetch(bundlerSend, bundlerStatus);
 
   // EntryPoint の getNonce(sender, key)。
   const readContract: Mock<
@@ -396,6 +430,7 @@ export function fakePimlicoClients(args: {
     prepareUserOperation,
     signUserOperation,
     bundlerSend,
+    bundlerStatus,
     readContract,
     getUserOperationReceipt,
     waitForUserOperationReceipt,

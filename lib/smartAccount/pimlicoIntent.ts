@@ -8,9 +8,11 @@
 // /pay と /checkout の通常決済も止める・lib/paymentFlowGuards)。作る op は必ず記録の nonce を使うので、送り直しても
 // 作り直しても EntryPoint は同じ nonce の op を最大 1 本しか実行しない。intent を閉じるのは次だけ:
 //   c1 候補の hash のどれかに receipt がある → 成功 / revert で確定
-//   c2 **最初の送信** を bundler が検証で拒否した (HTTP 2xx + allowlist の code・pimlicoSend.ts) → 記録を消したと確かめてから、
-//      今までどおりの error。ただし拒否の文 (bundler が返した文) が nonce・mempool・重複・置き換えに触れているときは閉じない
-//      (応答不明。この op 自身がもう届いているために返った拒否かもしれない・buildAndSend の onRejected)
+//   c2 **最初の送信** を bundler が検証で拒否し (HTTP 2xx + allowlist の code・pimlicoSend.ts)、拒否の文 (bundler が返した文) が
+//      nonce・mempool・重複・置き換えに触れておらず、**bundler にその op の状態を聞いて「その hash を知らない」(not_found) と
+//      答えた** → 記録を消したと確かめてから、今までどおりの error。検証の拒否だけでは閉じない (この op 自身がもう届いている
+//      ために、重複の配送にだけ返った拒否かもしれない)。語に当たる・status が not_found でない・status を読めないときは
+//      応答不明 (buildAndSend の onRejected)
 //   c4 最後に bundler へ渡して (渡そうとして) から 7 日を過ぎ、候補のどれにも receipt が無く、EntryPoint の nonce も未使用 →
 //      記録を消したと確かめてから
 //   c5 EntryPoint の nonce は進んだが、候補のどれにも receipt が無い → 期限までは開いたまま、期限で c4 と同じく閉じる
@@ -66,6 +68,7 @@ import {
   joinUserOpNonce,
   mentionsNonceOrMempool,
   prepareAndSignPimlicoUserOp,
+  readBundlerOpStatus,
   reserveUserOpNonce,
   splitUserOpNonce,
   toUserOperationRejection,
@@ -376,7 +379,7 @@ async function sendRecordedOp<Params, Result>(
       stored: Exclude<PimlicoPersistResult, 'stored'>,
       attempted: LedgerIntentRecord<Params>,
     ) => never;
-    // bundler が検証で拒否した (HTTP 2xx + allowlist の code)。sent = 送った記録 (送った時刻入り)。
+    // bundler がこの送信を検証で拒否した (HTTP 2xx + allowlist の code)。sent = 送った記録 (送った時刻入り)。
     onRejected: (error: unknown, sent: LedgerIntentRecord<Params>) => Promise<Result>;
   },
 ): Promise<Result> {
@@ -545,24 +548,45 @@ async function buildAndSend<Params, Result>(
         // 次に確かめるとき、前の op の receipt も引く。
         return holdAsUnknown(host, sent, [sent], 'pimlico.rebuild.rejected', error);
       }
-      // c2: 最初の送信を bundler が検証で拒否した。閉じてよいのは、その拒否が「この op は mempool に入っておらず、取り込まれても
-      // いない」と読めるときだけ。
-      // 拒否の文が nonce・mempool・重複・置き換えに触れているとき (HTTP 200 + -32500「AA25 invalid account nonce」・
-      // 「replacement underpriced」等) は、そう読めないので閉じない (応答不明)。何の波及を断つか: **この op 自身がもう届いている**
-      // (送信が途中で 2 回届いた・先に取り込まれた) ために返った拒否で記録を消して閉じると、次の試みは新しい nonce の op になり
-      // (本番で動く simple 7702 は nonce の key が時刻由来で、試みごとに新しい)、取り込まれる支払いの上にもう 1 本払う。
-      // 閉じなければ、次の再確認 (resolveOpenIntent) が候補の receipt と EntryPoint の nonce を読んで決める (receipt があれば確定)。
-      // 見るのは bundler が返した文だけ (viem の error の message は、送った request の本文 = "nonce" の欄を載せるので見ない・
-      // 語の定義は Circle の経路と同じ 1 つ = pimlicoSend.ts)。共有の分類 (classifyBroadcastError) には入れない: 送り直しの拒否
-      // (同じ nonce で作り直す) の動きを変えない。
-      // 害: nonce の key が固定 (0) の account (MetaMask のスマートアカウント。ガスレスは flag つきで、hooks/useSmartAccount.ts の
-      // コメントでは無効の扱い) では、別のタブ・別の dapp が先に nonce を使った正当な AA25 でも応答不明になり、同じ chain・
-      // customer・token の支払いが、期限 (最後に bundler へ渡してから 7 日・c5) まで止まる。利用者が自分で閉じる手段は無い。
-      // simple 7702 (key が時刻由来) では、最初の送信に nonce の拒否が返るのは、この op 自身が届いている場合に偏る (推測)。
+      // c2: 最初の送信を bundler が検証で拒否した。検証の拒否が示すのは「この送信が断られた」ことだけで、この op が mempool に
+      // 入っていない・取り込まれていないことは示さない。何の波及を断つか: **この op 自身がもう届いている** (送信が途中で 2 回届き、
+      // 1 回目は受理された・先に取り込まれた) ために、重複の配送にだけ返った拒否で記録を消して閉じると、次の試みは新しい nonce の
+      // op になり (本番で動く simple 7702 は nonce の key が時刻由来で、試みごとに新しい)、取り込まれる支払いの上にもう 1 本払う。
+      // 閉じる前に 2 つを確かめる。どちらかで止まれば応答不明にして、次の再確認 (resolveOpenIntent) が候補の receipt と EntryPoint の
+      // nonce を読んで決める (receipt があれば確定)。
+      //
+      // (1) 語: 拒否の文が nonce・mempool・重複・置き換えに触れているとき (HTTP 200 + -32500「AA25 invalid account nonce」・
+      //     「replacement underpriced」等) は閉じない。見るのは bundler が返した文だけ (viem の error の message は、送った request の
+      //     本文 = "nonce" の欄を載せるので見ない・語の定義は Circle の経路と同じ 1 つ = pimlicoSend.ts)。共有の分類
+      //     (classifyBroadcastError) には入れない: 送り直しの拒否 (同じ nonce で作り直す) の動きを変えない。
+      //     害: nonce の key が固定 (0) の account (MetaMask のスマートアカウント。ガスレスは flag つきで、hooks/useSmartAccount.ts の
+      //     コメントでは無効の扱い) では、別のタブ・別の dapp が先に nonce を使った正当な AA25 でも応答不明になり、同じ chain・
+      //     customer・token の支払いが、期限 (最後に bundler へ渡してから 7 日・c5) まで止まる。利用者が自分で閉じる手段は無い。
+      //     simple 7702 (key が時刻由来) では、最初の送信に nonce の拒否が返るのは、この op 自身が届いている場合に偏る (推測)。
       if (mentionsNonceOrMempool(bundlerErrorText(findRpcRequestError(error)))) {
         return holdAsUnknown(host, sent, [sent], 'pimlico.send.rejected-nonce-or-mempool', error);
       }
-      // それ以外の検証の拒否 (残高・署名・paymaster・op の形) = この送信の op は mempool に入っていない。
+      // (2) status: bundler にその op の状態を 1 回聞き、**「その hash を知らない」(not_found) と答えたときだけ** 閉じる。語に
+      //     当たらない拒否 (preVerificationGas が足りない等) も、受理された op の重複の配送にだけ返ることがある (pimlicoSend.ts の
+      //     readBundlerOpStatus)。ほかの status・型に無い値・読めない (通信の失敗・timeout・形の崩れた応答) は閉じない。
+      //     語の確認 (1) を残す理由: status と語は別の失敗を断つ。status の記録が bundler の中で反映される前に聞いてしまう場合
+      //     (受理した node と聞いた node のずれ) でも、nonce・重複の拒否は語で止まる。
+      //     害: 拒否のたびに request が 1 回増える。status を読めない間は閉じられず、応答不明になる (再確認は nonce が未使用なら
+      //     同じ op を送り直す)。限界は readBundlerOpStatus のコメント。
+      const status = await readBundlerOpStatus({
+        transport: sender.client.transport,
+        userOpHash: sent.userOpHash,
+      });
+      if (!status.unknownToBundler) {
+        return holdAsUnknown(
+          host,
+          sent,
+          [sent],
+          'pimlico.send.rejected-op-status',
+          new Error(`bundler-status:${status.status}`),
+        );
+      }
+      // bundler はこの hash を知らないと答えた = 閉じてよい。上の await の後なので、下の削除は版の一致 (compare-and-set) を通す。
       // 記録を消したと確かめられたとき (ほかの画面が先に閉じていたときを含む) だけ閉じ、今までどおりの error にする (nonce の
       // 予約は残さない・金額を変えた再試行も通常決済もできる)。確かめられなければ、残った op が後で送られうるので開いたまま。
       // 消すのは storage の記録が、この試みが送る直前に書いた版 (sent) のときだけ。拒否が示すのは「この送信が断られた」ことだけで、

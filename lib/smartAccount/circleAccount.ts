@@ -55,7 +55,9 @@ import {
   classifyBroadcastError,
   findRpcRequestError,
   mentionsNonceOrMempool,
+  readBundlerOpStatus,
   type BroadcastFailureKind,
+  type BundlerOpStatus,
 } from '@/lib/smartAccount/pimlicoSend';
 import type { SmartAccountBundle } from '@/lib/smartAccount/simpleAccount';
 import type { ConnectedWalletClient } from '@/lib/smartAccount/simpleAccount';
@@ -368,6 +370,26 @@ export function prepareCircleBroadcast(
       });
     }
   };
+}
+
+/**
+ * bundler に、その op (userOpHash) の状態を 1 回聞く (`pimlico_getUserOperationStatus`・再送なし)。送信と同じ bundler の URL・
+ * timeout (bundle の transport の既定 = 10 秒)。定義と限界は Pimlico の経路と同じ 1 つ (pimlicoSend.ts の readBundlerOpStatus):
+ * unknownToBundler が true になるのは bundler が not_found と答えたときだけで、読めなかったときは投げずに false で返す。
+ * 呼ぶのは circleSend.ts の closeRejectedFirstSend だけ (最初の送信の検証拒否で記録を閉じる前)。
+ */
+export function readCircleUserOpStatus(
+  bundle: CircleSmartAccountBundle,
+  userOpHash: Hex,
+): Promise<BundlerOpStatus> {
+  return readBundlerOpStatus({
+    transport: bundle.bundlerClient.transport as {
+      url?: string;
+      timeout?: number;
+      fetchOptions?: HttpTransportConfig['fetchOptions'];
+    },
+    userOpHash,
+  });
 }
 
 /** 保存済の署名済 op を **そのまま** broadcast する (raw eth_sendUserOperation・

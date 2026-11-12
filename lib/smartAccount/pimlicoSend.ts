@@ -157,7 +157,8 @@ export type PreparedPimlicoUserOp = Awaited<
 >;
 
 export type BroadcastFailureKind =
-  // HTTP 2xx の応答で、bundler が ERC-4337 の検証の拒否 (下の allowlist の code) を返した = この op を受け付けていない。
+  // HTTP 2xx の応答で、bundler が ERC-4337 の検証の拒否 (下の allowlist の code) を返した = **この送信** を受け付けなかった。
+  // 同じ op の前の配送 (送信が途中で 2 回届いたときの 1 回目) が受理されていないことまでは言えない (下の readBundlerOpStatus)。
   | 'validation-rejected'
   // bundler が JSON-RPC の error で「その op はもう持っている」と答えた (mempool にある)。
   | 'already-known'
@@ -249,7 +250,7 @@ export function findRpcRequestError(error: unknown): RpcRequestErrorLike | null 
 
 const ALREADY_KNOWN_RE = /already known|already in (?:the )?mempool/i;
 
-// 「bundler がこの op を受け付けていない」と言える JSON-RPC の error の code (allowlist)。
+// 「bundler がこの送信を受け付けなかった」と言える JSON-RPC の error の code (allowlist)。
 // 根拠: ERC-7769 (ERC-4337 の JSON-RPC の API) が eth_sendUserOperation の検証の失敗に割り当てる code で、
 // -32602 = UserOperation の形・値が不正、-32500 = EntryPoint の検証 (account の validateUserOp・作成) で拒否、
 // -32501 = paymaster の validatePaymasterUserOp で拒否、-32502 = opcode の規則に違反、-32503 = 有効期間の外、
@@ -269,6 +270,8 @@ const BUNDLER_VALIDATION_REJECTION_CODES: ReadonlySet<number> = new Set([
  * allowlist にあるときだけ。判別できないものは必ず 'unknown' に倒す (取り違えたときの被害が非対称:
  * unknown を「受け付けていない」と読むと、取り込まれうる op の上に通常決済や別の支払いが開く)。
  * httpStatus は応答が届いたときの status (届かなかったときは undefined)。
+ * 言えるのは「この送信」についてだけ。最初の送信の拒否で intent / 記録を閉じる側 (pimlicoIntent.ts の c2・circleSend.ts の
+ * closeRejectedFirstSend) は、これに加えて下の語の確認と、bundler にその op の状態を聞くこと (readBundlerOpStatus) を要る。
  */
 export function classifyBroadcastError(
   error: unknown,
@@ -306,11 +309,87 @@ export function bundlerErrorText(rpc: RpcRequestErrorLike | null): string {
 // 語の定義はここ 1 つ。使うのは「最初の送信の拒否で閉じてよいか」を決める 2 か所だけ: Circle の経路の分類
 // (circleAccount.ts の classifyCircleBroadcastError) と、Pimlico の経路の c2 (pimlicoIntent.ts の buildAndSend)。
 // 上の classifyBroadcastError には入れない (送り直しの拒否 = 同じ nonce で作り直す、の動きを変えない)。
+// 語に当たらなければ閉じてよい、ではない: 語に当たらない拒否 (preVerificationGas が足りない等) も、重複の配送にだけ返ることが
+// ある。閉じる前には必ず下の readBundlerOpStatus も聞く。語の確認を残す理由: status と語は別の失敗を断つ。status の記録が
+// bundler の中で反映される前に聞いてしまう場合 (受理した node と聞いた node のずれ) でも、nonce・重複の拒否は語で止まる。
 const NOT_REJECTION_PROOF_RE = /AA25|nonce|mempool|already|replace/i;
 
 /** bundler の JSON-RPC の error の文 (bundlerErrorText) が、上の語を含むか。 */
 export function mentionsNonceOrMempool(bundlerText: string): boolean {
   return NOT_REJECTION_PROOF_RE.test(bundlerText);
+}
+
+/** bundler に聞いた、ある op (userOpHash) の状態 (readBundlerOpStatus)。 */
+export type BundlerOpStatus = {
+  /** bundler が「その hash を知らない」(status が not_found) と答えたときだけ true。 */
+  unknownToBundler: boolean;
+  /** log に載せる値: bundler の答えた status (長さを切る)、読めなかったときは `unreadable:<理由>`。 */
+  status: string;
+};
+
+/**
+ * bundler に、その op (userOpHash) の状態を 1 回聞く (`pimlico_getUserOperationStatus`・再送なし・timeout は transport の値)。
+ *
+ * 何のためか: 最初の送信を bundler が検証で拒否したとき、intent / 記録を閉じてよいかを決める (pimlicoIntent.ts の c2・
+ * circleSend.ts の closeRejectedFirstSend)。検証の拒否が示すのは「この送信が断られた」ことだけで、同じ op の前の配送が受理されて
+ * いないことは示さない: 送信が途中で 2 回届き、1 回目は受理されて mempool にあり、2 回目 (重複の配送) にだけ拒否が返ることがある
+ * (例: 受理の後に preVerificationGas の必要量が上がり、重複の配送に「preVerificationGas is not enough」(-32500) が返る。
+ * Pimlico の bundler (Alto) はこの検査を、mempool の重複の確認より前に行う)。そこで閉じると、次の試みは新しい nonce の op に
+ * なり、2 本とも取り込まれる。閉じてよい根拠は **「bundler がその hash を知らないと答えた」(not_found)** こと。
+ *
+ * unknownToBundler が true になるのは not_found のときだけ。ほかの status (permissionless 0.2.57 の PimlicoUserOperationStatus:
+ * not_submitted・submitted・rejected・reverted・included・failed) も、型に無い値も、読めなかったとき (通信の失敗・timeout・
+ * HTTP の失敗・JSON-RPC の error・形の崩れた応答) も false = 閉じない側。rejected も閉じない側にする: その hash を bundler が
+ * 一度は受け取っていて、ここからは「取り込まれない」と言い切れない。
+ * 失敗は投げずに「読めなかった」で返す。何の波及を断つか: 付帯の照会の失敗が、送った後の扱い (応答不明・確認待ち) を別の error に
+ * 変えること。握りつぶさない: 呼び出し側が status の値 (unreadable:<error の name>) を log に残し、閉じない側へ進む。
+ * 理由に viem の error の message は入れない (URL を含む)。
+ *
+ * 限界 (2026-11-12 に Pimlico の公開 endpoint (Base Sepolia と Base) で確かめた範囲): 一度も受理されていない op (知らない hash・
+ * 検証で拒否された op の hash) には、拒否の直後と 3 秒後に `{"status":"not_found","transactionHash":null}` が返る。**「受理された
+ * op が not_found 以外を返す」ことは、有効な署名つきの op が要るので実測していない** (API の説明と permissionless の型による)。
+ * 本番の key つきの endpoint でも確かめていない。status の記録が bundler の中で遅れて反映される場合 (受理の直後に別の node が
+ * not_found と答える) は、語に当たらない拒否で閉じうる。聞く hash は手元で計算した hash で、bundler の hash と違う経路
+ * (prepareAndSignPimlicoUserOp のコメント) では、受理された op にも not_found が返りうる。
+ */
+export async function readBundlerOpStatus(args: {
+  // bundler の http transport の設定 (送信と同じ URL・timeout)。
+  transport: { url?: string; timeout?: number; fetchOptions?: HttpTransportConfig['fetchOptions'] };
+  userOpHash: Hex;
+}): Promise<BundlerOpStatus> {
+  try {
+    const { url, timeout, fetchOptions } = args.transport;
+    const reader = createClient({
+      transport: http(url, { retryCount: 0, timeout, fetchOptions }),
+    });
+    const request = reader.request as unknown as (
+      parameters: { method: 'pimlico_getUserOperationStatus'; params: [Hex] },
+      options: { retryCount: number },
+    ) => Promise<unknown>;
+    // viem の http は、HTTP が 2xx のときだけ result を返す (2xx 以外は、本文が JSON-RPC の error なら RpcRequestError・
+    // それ以外は HttpRequestError を投げる = 下の catch)。
+    const result = (await request(
+      { method: 'pimlico_getUserOperationStatus', params: [args.userOpHash] },
+      { retryCount: 0 },
+    )) as { status?: unknown; transactionHash?: unknown } | null;
+    const status = result?.status;
+    // 形の崩れた応答: status が文字列でない・「知らない」と言いながら transaction を持つ (知らないと読まない)。
+    if (
+      typeof status !== 'string' ||
+      (status === 'not_found' && (result?.transactionHash ?? null) !== null)
+    ) {
+      return { unknownToBundler: false, status: 'unreadable:malformed' };
+    }
+    return { unknownToBundler: status === 'not_found', status: status.slice(0, 40) };
+  } catch (error) {
+    const rpc = findRpcRequestError(error);
+    const reason = rpc
+      ? `RpcRequestError ${String(rpc.code)}`
+      : error instanceof Error
+        ? error.name
+        : 'unknown';
+    return { unknownToBundler: false, status: `unreadable:${reason}` };
+  }
 }
 
 /**

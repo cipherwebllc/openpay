@@ -48,6 +48,9 @@ vi.mock('@/lib/smartAccount/circleAccount', () => {
       (signedUserOp: unknown) =>
         broadcastCircleUserOp({ bundle, signedUserOp }),
     waitForCircleReceipt: vi.fn(),
+    // 最初の送信の検証拒否で閉じる前に、bundler にその op の状態を聞く (PR #1084)。偽物の bundler は「その hash を知らない」
+    // と答える (検証で拒否した op を一度も受理していない)。
+    readCircleUserOpStatus: async () => ({ unknownToBundler: true, status: 'not_found' }),
     getCircleUserOpGasPrice: vi.fn(),
     entryPoint08Address: '0x4337084D9E255Ff0702461CF8895CE9E3b5Ff108',
   };

@@ -34,8 +34,8 @@
 //   破れた) だけ、markConfirmed が confirmed に直す。
 //   reserved/awaiting_signature/signed (= broadcast 前) は同一署名者が安全に abandon /
 //   supersede 可能 (popup 拒否・タブ閉じ)。**submitting 到達後は abandon も新規 op 構築も
-//   禁止** — recovery 経路のみ。例外は markRejected で failed に閉じた記録だけ: その op は mempool に入っていない前提で、
-//   次の押下は新しい支払い (新しい key・署名から) になる (閉じる条件は lib/smartAccount/circleSend.ts の冒頭)。
+//   禁止** — recovery 経路のみ。例外は markRejected で failed に閉じた記録だけ: bundler がその op の hash を知らないと答えた
+//   うえで閉じ、次の押下は新しい支払い (新しい key・署名から) になる (閉じる条件は lib/smartAccount/circleSend.ts の冒頭)。
 
 import {
   encodeAbiParameters,
@@ -531,7 +531,8 @@ export function markResending(args: {
  * PendingStateError)。receipt を待つ間に別の op の記録に替わっていたら、その記録を confirmed にしない。
  * userOpHash が一致するときだけ、failed → confirmed も許す: receipt がある = その op は取り込まれた、が真実で、failed の
  * ままだと scan の dedup と resume がこの支払いを「払っていない」と扱う。failed は markRejected (最初の送信の検証拒否) が書く。
- * 「閉じたのに取り込まれた」は前提 (検証で拒否された op は mempool に入っていない) が破れた状態なので error の log を残す。 */
+ * 「閉じたのに取り込まれた」は前提 (bundler がその hash を知らないと答えた op は取り込まれない) が破れた状態なので error の
+ * log を残す。 */
 export function markConfirmed(args: {
   key: string;
   sender: Address;
@@ -567,9 +568,10 @@ export function markConfirmed(args: {
 // failed の記録に残す errorMessage の長さの上限 (文字数)。
 const REJECTED_MESSAGE_MAX = 200;
 
-/** submitting → failed。**自分の最初の送信を bundler が検証で拒否した** (= この op は mempool に入っていない) ときに、その
- * 試みだけが呼ぶ (lib/smartAccount/circleSend.ts。呼ぶ前に、閉じる資格 = 自分の op の記録を自分で signed → submitting にした
- * ことと、時間の柵 = 自分の markSubmitting から 30 秒未満であることを確かめる)。ここでは、記録がいまも次の 3 つを全部満たす
+/** submitting → failed。**自分の最初の送信を bundler が検証で拒否し、bundler がその op の hash を知らないと答えた** ときに、
+ * その試みだけが呼ぶ (lib/smartAccount/circleSend.ts。検証の拒否だけでは「この op は mempool に入っていない」と言えないので、
+ * 呼ぶ前に、閉じる資格 = 自分の op の記録を自分で signed → submitting にしたこと・bundler にその op の状態を聞いて not_found
+ * だったこと・時間の柵 = 自分の markSubmitting から 30 秒未満であることを確かめる)。ここでは、記録がいまも次の 3 つを全部満たす
  * ことを、書く直前に同期で読み直して確かめる (どれかが違えば PendingStateError・呼び出し側は閉じずに確認待ちへ進む):
  *   - status が submitting (ほかの試みが confirmed にしていない)
  *   - userOpHash が拒否された op のもの (別の op の記録に替わっていない)

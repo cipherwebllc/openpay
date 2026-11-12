@@ -17,6 +17,8 @@ vi.mock('@/lib/smartAccount/circleAccount', () => {
       (bundle: unknown) => (signedUserOp: unknown) => broadcastCircleUserOp({ bundle, signedUserOp }),
     ),
     waitForCircleReceipt: vi.fn(),
+    // 最初の送信の検証拒否で閉じる前に、bundler にその op の状態を聞く (PR #1084)。既定の答えは下の beforeEach (not_found)。
+    readCircleUserOpStatus: vi.fn(),
   };
 });
 
@@ -25,6 +27,7 @@ import {
   prepareAndSignCircleUserOp,
   broadcastCircleUserOp,
   prepareCircleBroadcast,
+  readCircleUserOpStatus,
   waitForCircleReceipt,
   type CircleSmartAccountBundle,
 } from '@/lib/smartAccount/circleAccount';
@@ -102,6 +105,7 @@ const mockPermit = vi.mocked(signUsdcPermit);
 const mockPrepare = vi.mocked(prepareAndSignCircleUserOp);
 const mockBroadcast = vi.mocked(broadcastCircleUserOp);
 const mockWait = vi.mocked(waitForCircleReceipt);
+const mockStatus = vi.mocked(readCircleUserOpStatus);
 
 let clock = 1_000;
 const now = () => clock++;
@@ -136,6 +140,9 @@ beforeEach(() => {
   mockWait.mockReset();
   mockLookup.mockReset();
   mockLookup.mockResolvedValue(receipt());
+  // bundler は、聞かれた hash を「知らない」と答える (検証で拒否した op を一度も受理していない)。
+  mockStatus.mockReset();
+  mockStatus.mockResolvedValue({ unknownToBundler: true, status: 'not_found' });
 });
 
 afterEach(() => {
@@ -2220,7 +2227,7 @@ describe('H-W・H-Y: 送った後の終わり方', () => {
       });
     });
 
-    // 残る前提 (bundler が検証で拒否した op は取り込まれない) が破れたとき。閉じる前から同じ op の receipt を待っていた別の試み
+    // 残る前提 (bundler がその hash を知らないと答えた op は取り込まれない) が破れたとき。閉じる前から同じ op の receipt を待っていた別の試み
     // (別のタブ) がいると、その試みが receipt を得る。
     describe('閉じる前から、別の試みが同じ op の receipt を待っていた', () => {
       // A (attempt-1) が送信中に、B (attempt-2) の scan が A の submitting を見つけて receipt を待つ。その後 A の送信に
@@ -2556,6 +2563,183 @@ describe('H-W・H-Y: 送った後の終わり方', () => {
         expect(res).toMatchObject({ userOpHash: OP1.userOpHash, txHash: OP1.txHash, success: true });
         expect(stored()).toMatchObject({ status: 'confirmed', userOpHash: OP1.userOpHash });
         expect(notClosedLogs()).toEqual(late(125_000, 125_000));
+      });
+    });
+
+    // F5 (PR #1084 の Codex の指摘): 検証の拒否だけでは閉じない。閉じる前に bundler にその op の状態を 1 回聞き
+    // (circleAccount の readCircleUserOpStatus = pimlico_getUserOperationStatus)、「その hash を知らない」(not_found) と答えたとき
+    // だけ閉じる。送信が途中で 2 回届き、1 回目は受理され、重複の配送にだけ拒否が返る形は、拒否の文の語に関係なく起こる。
+    // 偽物の既定は not_found (この file の beforeEach)。読めなかったときの本物の戻り値は { unknownToBundler: false,
+    // status: 'unreadable:…' } (投げない。HTTP の request からの確認は tests/lib/smartAccount/pimlicoSend.test.ts と circleAccount.test.ts)。
+    describe('F5: 閉じる前に、bundler がその op の hash を知らないことを確かめる', () => {
+      const PVG = { code: -32500, message: 'preVerificationGas is not enough, required: 50001, got: 50000' };
+      const statusNotClosed = (code: number, status: string) => [
+        [
+          'circle.broadcast.rejected-not-closed',
+          { userOpHash: OP1.userOpHash, code, reason: 'status', status },
+        ],
+      ];
+
+      it('not_found → 今までどおり閉じる。聞くのは 1 回・この bundle・拒否された op の hash・送信の後', async () => {
+        walletSigns(OP1);
+        mockBroadcast.mockRejectedValueOnce(rejectedByValidation());
+
+        const { error } = await outcome(run());
+
+        expect(error).toBeInstanceOf(CircleSendRejectedError);
+        expect(stored()?.status).toBe('failed');
+        expect(mockStatus.mock.calls).toEqual([[fakeBundle, OP1.userOpHash]]);
+        expect(mockStatus.mock.invocationCallOrder[0]).toBeGreaterThan(
+          mockBroadcast.mock.invocationCallOrder[0],
+        );
+      });
+
+      it('Codex の筋: 1 回目の配送は受理されていて、重複の配送に語に当たらない拒否 (preVerificationGas) → status は submitted → 閉じず、復旧の待ちで receipt を得て既払いの結果 (新しい署名・新しい op なし)', async () => {
+        walletSigns(OP1);
+        mockBroadcast.mockRejectedValueOnce(bundlerSays(PVG));
+        mockStatus.mockResolvedValueOnce({ unknownToBundler: false, status: 'submitted' });
+        mockWait.mockResolvedValueOnce(receiptOf(OP1));
+
+        const res = await run();
+
+        // 直す前 (1dd6cfdb): 記録を failed に閉じて CircleSendRejectedError → hook が対応を消し、次の押下が新しい op を送る
+        // (受理済みの 1 回目の op と両方取り込まれる)。
+        expect(res).toMatchObject({ userOpHash: OP1.userOpHash, txHash: OP1.txHash, success: true });
+        expect(stored()).toMatchObject({ status: 'confirmed', userOpHash: OP1.userOpHash });
+        expect(sentOps()).toEqual([OP1.signedUserOp]);
+        expect(mockPermit).toHaveBeenCalledTimes(1);
+        expect(mockPrepare).toHaveBeenCalledTimes(1);
+        expect(mockStatus.mock.calls).toEqual([[fakeBundle, OP1.userOpHash]]);
+        expect(notClosedLogs()).toEqual(statusNotClosed(-32500, 'submitted'));
+      });
+
+      it.each([
+        // permissionless の PimlicoUserOperationStatus にある値 (not_found 以外の全部)。
+        'not_submitted',
+        'submitted',
+        'rejected',
+        'reverted',
+        'included',
+        'failed',
+        // 型に無い値。
+        'queued',
+        // 読めなかった (通信の失敗・timeout・JSON-RPC の error・形の崩れた応答)。
+        'unreadable:HttpRequestError',
+        'unreadable:TimeoutError',
+        'unreadable:RpcRequestError -32601',
+        'unreadable:malformed',
+      ])('status が %s → 閉じない・今までどおり確認待ち (記録は submitting・op も残る・待って同じ op を送り直す)', async (status) => {
+        walletSigns(OP1);
+        mockBroadcast.mockRejectedValueOnce(rejectedByValidation());
+        mockStatus.mockResolvedValueOnce({ unknownToBundler: false, status });
+        mockWait.mockRejectedValue(timeoutOf(OP1));
+
+        const { error } = await outcome(run());
+
+        expect(error).toBeInstanceOf(CirclePendingError);
+        expect(error?.userOpHash).toBe(OP1.userOpHash);
+        expect(stored()).toMatchObject({ status: 'submitting', signedUserOp: OP1.signedUserOp });
+        expect(sentOps()).toEqual([OP1.signedUserOp, OP1.signedUserOp]);
+        // 聞くのは最初の送信の拒否の 1 回だけ (復旧の送り直しでは聞かない)。
+        expect(mockStatus).toHaveBeenCalledTimes(1);
+        expect(notClosedLogs()).toEqual(statusNotClosed(-32501, status));
+        expect(loggedErrors()).toEqual([]);
+      });
+
+      it('語に当たる拒否 (AA25) は、分類の時点で閉じない側: status を聞かない', async () => {
+        walletSigns(OP1);
+        mockBroadcast.mockRejectedValueOnce(
+          bundlerSays({ code: -32500, message: 'AA25 invalid account nonce' }),
+        );
+        mockWait.mockResolvedValueOnce(receiptOf(OP1));
+
+        await run();
+
+        expect(mockStatus).not.toHaveBeenCalled();
+        expect(stored()?.status).toBe('confirmed');
+      });
+
+      describe('時間の柵は status の答えを受け取った後に測る', () => {
+        let mono: number;
+        const monotonicNow = () => mono;
+        beforeEach(() => {
+          mono = 0;
+        });
+        // 拒否はすぐ届き、status の答えが、自分の markSubmitting から wallMs (壁時計)・monoMs (単調な時計) たって届く。
+        function statusAnswersAfter(elapsed: { wallMs: number; monoMs: number }) {
+          mockStatus.mockImplementationOnce(async () => {
+            clock = stored()!.updatedAt + elapsed.wallMs; // 次の now() が、この時刻を返す
+            mono += elapsed.monoMs;
+            return { unknownToBundler: true, status: 'not_found' };
+          });
+        }
+
+        it('status の答えが 29,999 ms で届く (not_found) → 閉じる', async () => {
+          walletSigns(OP1);
+          mockBroadcast.mockRejectedValueOnce(rejectedByValidation());
+          statusAnswersAfter({ wallMs: 29_999, monoMs: 29_999 });
+
+          const { error } = await outcome(run({ monotonicNow }));
+
+          expect(error).toBeInstanceOf(CircleSendRejectedError);
+          expect(stored()?.status).toBe('failed');
+        });
+
+        it.each([
+          { label: '両方の時計で 30,000 ms', wallMs: 30_000, monoMs: 30_000 },
+          { label: '壁時計だけ 30,000 ms', wallMs: 30_000, monoMs: 0 },
+          { label: '単調な時計だけ 30,000 ms', wallMs: 0, monoMs: 30_000 },
+        ])('status の答え (not_found) が遅れて届く ($label) → 閉じない (late)・今までどおり確認待ち', async ({ wallMs, monoMs }) => {
+          walletSigns(OP1);
+          mockBroadcast.mockRejectedValueOnce(rejectedByValidation());
+          statusAnswersAfter({ wallMs, monoMs });
+          mockWait.mockRejectedValue(timeoutOf(OP1));
+
+          const { error } = await outcome(run({ monotonicNow }));
+
+          expect(error).toBeInstanceOf(CirclePendingError);
+          expect(stored()).toMatchObject({ status: 'submitting', signedUserOp: OP1.signedUserOp });
+          expect(notClosedLogs()).toEqual([
+            [
+              'circle.broadcast.rejected-not-closed',
+              { userOpHash: OP1.userOpHash, code: -32501, reason: 'late', wallElapsedMs: wallMs, monoElapsedMs: monoMs },
+            ],
+          ]);
+        });
+
+        it('status を待つ間に、別の試みが同じ op を送り直していた (送る時刻が進んでいる) → not_found と答えても閉じない (記録の確認)', async () => {
+          walletSigns(OP1);
+          mockBroadcast.mockRejectedValueOnce(rejectedByValidation());
+          mockStatus.mockImplementationOnce(async () => {
+            markResending({ key: KEY, sender: OWNER, userOpHash: OP1.userOpHash, now: now() });
+            return { unknownToBundler: true, status: 'not_found' };
+          });
+          mockWait.mockRejectedValue(timeoutOf(OP1));
+
+          const { error } = await outcome(run({ monotonicNow }));
+
+          expect(error).toBeInstanceOf(CirclePendingError);
+          expect(stored()).toMatchObject({ status: 'submitting', signedUserOp: OP1.signedUserOp });
+          expect(notClosedLogs()).toHaveLength(1);
+          expect(notClosedLogs()[0][1]).toMatchObject({ reason: 'record-changed' });
+        });
+      });
+
+      it('閉じる資格が無い試み (記録が自分の op のものでない) は、status を聞かない', async () => {
+        walletSigns(OP1);
+        // 送信の用意 (markSigned と markSubmitting の間) に、同じ key の別の試みが記録を自分の署名で上書きする。
+        mockPrepareBroadcast.mockImplementationOnce((bundle) => {
+          markSigned({ key: KEY, sender: OWNER, signedUserOp: OP2.signedUserOp, userOpHash: OP2.userOpHash, now: now() });
+          return (signedUserOp) => mockBroadcast({ bundle, signedUserOp });
+        });
+        mockBroadcast.mockRejectedValueOnce(rejectedByValidation());
+        mockWait.mockRejectedValue(timeoutOf(OP2));
+
+        const { error } = await outcome(run());
+
+        expect(error).toBeInstanceOf(CirclePendingError);
+        expect(mockStatus).not.toHaveBeenCalled();
+        expect(notClosedLogs()[0][1]).toMatchObject({ reason: 'not-own-submit' });
       });
     });
 

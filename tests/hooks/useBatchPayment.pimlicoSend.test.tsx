@@ -8,8 +8,9 @@
 // 直した後の不変条件: 署名済みの op を保存した時点から、その intent は「開いている」。開いている間は、
 // 別の nonce の op・別の内容の支払いを作らず、画面は通常決済も止める (isUnknown)。閉じるのは
 //   c1 候補の hash のどれかに receipt がある
-//   c2 最初の送信を bundler が検証で拒否した (HTTP 2xx + ERC-7769 の code) → 記録を消したと確かめてから。ただし拒否の文
-//      (bundler が返した文) が nonce・mempool・重複・置き換えに触れているときは閉じない (応答不明)
+//   c2 最初の送信を bundler が検証で拒否し (HTTP 2xx + ERC-7769 の code)、拒否の文 (bundler が返した文) が nonce・mempool・
+//      重複・置き換えに触れておらず、bundler にその op の状態を聞いて「その hash を知らない」(not_found) と答えた → 記録を
+//      消したと確かめてから。語に当たる・status が not_found でない・status を読めないときは閉じない (応答不明)
 //   c4 最後に bundler へ渡してから 7 日を過ぎ、候補に receipt が無く、EntryPoint の nonce も未使用 → 記録を消したと確かめてから
 //   c5 nonce が進んだのに候補に receipt が無い → 期限までは開いたまま、期限で c4 と同じく閉じる
 // だけ。それ以外 (応答不明・送り直し / 作り直しの拒否 (c3)・照合できない・保存を確かめられない) は開いたまま。
@@ -61,6 +62,7 @@ import {
   lostResponse,
   routePimlicoReceiptApi,
   type BundlerHttpReply,
+  type BundlerStatusReply,
   type FakeBundlerWorld,
 } from '../_helpers/fakePimlicoBundler';
 
@@ -709,6 +711,182 @@ describe('最初の送信の失敗の分類: 閉じるのは HTTP 2xx の検証�
       'pimlico.send.rejected-nonce-or-mempool',
       expect.anything(),
     );
+  });
+
+  // 閉じる前に bundler にその op の状態を聞く (PR #1084 の Codex の指摘): 検証の拒否が示すのは「この送信が断られた」ことだけ。
+  // 送信が途中で 2 回届き、1 回目は受理され、重複の配送にだけ拒否が返る形は、拒否の文の語に関係なく起こる。閉じてよい根拠は
+  // 「bundler がその hash を知らないと答えた」(pimlico_getUserOperationStatus が not_found) こと。fake の bundler は、知らない
+  // hash に not_found・mempool にあれば submitted・mine 済みなら included を返す (world.statusOf)。
+  it('Codex の筋: 1 回目の配送は受理されて mempool にある → 重複の配送に、語に当たらない拒否 (preVerificationGas・-32500) → status は submitted → 閉じずに応答不明。再確認で、署名を増やさずに元の op の receipt で成功 (取り込みは 1 本)', async () => {
+    const fake = mountClients();
+    fake.bundlerSend.mockImplementationOnce(async ({ params }) => {
+      world.accept(params[0]);
+      return {
+        error: { code: -32500, message: 'preVerificationGas is not enough, required: 50001, got: 50000' },
+      };
+    });
+    const { result } = render();
+
+    result.current.mutate(PARAMS);
+    await waitFor(() => expect(result.current.isUnknown).toBe(true));
+    await waitFor(() => expect(result.current.isPending).toBe(false));
+
+    const op = sentOp(fake, 0);
+    const hash = world.hashOf(op);
+    // 直す前 (1dd6cfdb): 語に当たらないので記録を消して閉じ、同じ支払いを新しい nonce で送れた (2 本とも取り込まれる)。
+    expect(result.current.error).toBeNull();
+    expect(standardPaymentOpen(result.current)).toBe(false);
+    expect(storedRecord()).toMatchObject({
+      status: 'unknown',
+      userOpHash: hash,
+      send: { signedUserOp: op },
+    });
+    // 聞いたのは 1 回・この op の hash。log は語のときと別の event で、status の値を載せる。
+    expect(fake.bundlerStatus.mock.calls).toEqual([[{ hash }]]);
+    expect(logger.warn).toHaveBeenCalledWith(
+      'pimlico.send.rejected-op-status',
+      expect.objectContaining({ userOpHash: hash, error: 'bundler-status:submitted' }),
+    );
+    expect(logger.warn).not.toHaveBeenCalledWith(
+      'pimlico.send.rejected-nonce-or-mempool',
+      expect.anything(),
+    );
+
+    // 開いている間は、別の内容の支払いも通さない (新しい nonce を採らない)。
+    result.current.mutate(OTHER_PARAMS);
+    await waitFor(() =>
+      expect(result.current.variables?.merchantAmount).toBe(OTHER_PARAMS.merchantAmount),
+    );
+    await waitFor(() => expect(result.current.isPending).toBe(false));
+    expect(result.current.isUnknown).toBe(true);
+    expect(fake.getNonce).toHaveBeenCalledTimes(1);
+
+    // 1 回目の配送の op が取り込まれる → 再確認で、その receipt で成功。
+    world.mine(hash);
+    result.current.retryReceipt();
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.data?.userOpHash).toBe(hash);
+    expect(fake.signUserOperation).toHaveBeenCalledTimes(1);
+    expect(fake.bundlerSend).toHaveBeenCalledTimes(1);
+    expect(fake.getNonce).toHaveBeenCalledTimes(1);
+    expect(world.mined).toHaveLength(1);
+    expect(world.mempoolHashes()).toHaveLength(0);
+    expect(pendingKeys()).toHaveLength(0);
+  });
+
+  it('status が not_found (bundler はその hash を知らない) の拒否は今までどおり閉じる。聞くのは送信の後に 1 回・送った op の hash', async () => {
+    const fake = mountClients();
+    replyOnce(fake, { error: { code: -32500, message: "AA21 didn't pay prefund" } });
+    const { result } = render();
+
+    result.current.mutate(PARAMS);
+    await waitFor(() => expect(result.current.isError).toBe(true));
+
+    expect(result.current.error?.name).toBe('UserOperationExecutionError');
+    expect(result.current.isUnknown).toBe(false);
+    expect(pendingKeys()).toHaveLength(0);
+    expect(standardPaymentOpen(result.current)).toBe(true);
+    expect(fake.bundlerStatus.mock.calls).toEqual([[{ hash: world.hashOf(sentOp(fake, 0)) }]]);
+    expect(fake.bundlerStatus.mock.invocationCallOrder[0]).toBeGreaterThan(
+      fake.bundlerSend.mock.invocationCallOrder[0],
+    );
+    expect(logger.warn).not.toHaveBeenCalledWith('pimlico.send.rejected-op-status', expect.anything());
+  });
+
+  it.each<{ label: string; reply: () => Promise<BundlerStatusReply>; logged: string }>([
+    // permissionless の PimlicoUserOperationStatus にある値 (not_found 以外の全部)。
+    { label: 'not_submitted', reply: async () => ({ result: { status: 'not_submitted', transactionHash: null } }), logged: 'not_submitted' },
+    { label: 'submitted', reply: async () => ({ result: { status: 'submitted', transactionHash: `0x${'c'.repeat(64)}` } }), logged: 'submitted' },
+    { label: 'rejected', reply: async () => ({ result: { status: 'rejected', transactionHash: null } }), logged: 'rejected' },
+    { label: 'reverted', reply: async () => ({ result: { status: 'reverted', transactionHash: `0x${'c'.repeat(64)}` } }), logged: 'reverted' },
+    { label: 'included', reply: async () => ({ result: { status: 'included', transactionHash: `0x${'c'.repeat(64)}` } }), logged: 'included' },
+    { label: 'failed', reply: async () => ({ result: { status: 'failed', transactionHash: null } }), logged: 'failed' },
+    // 型に無い値。
+    { label: '型に無い値 (queued)', reply: async () => ({ result: { status: 'queued', transactionHash: null } }), logged: 'queued' },
+    { label: '大文字の NOT_FOUND', reply: async () => ({ result: { status: 'NOT_FOUND', transactionHash: null } }), logged: 'NOT_FOUND' },
+    // 形の崩れた応答。
+    { label: 'result が null', reply: async () => ({ result: null }), logged: 'unreadable:malformed' },
+    { label: 'status が無い', reply: async () => ({ result: { transactionHash: null } }), logged: 'unreadable:malformed' },
+    { label: 'status が文字列でない', reply: async () => ({ result: { status: 404 } }), logged: 'unreadable:malformed' },
+    { label: 'not_found なのに transactionHash がある', reply: async () => ({ result: { status: 'not_found', transactionHash: `0x${'c'.repeat(64)}` } }), logged: 'unreadable:malformed' },
+    // 読み取りの失敗。
+    { label: 'JSON-RPC の error (-32601)', reply: async () => ({ error: { code: -32601, message: 'method not found' } }), logged: 'unreadable:RpcRequestError -32601' },
+    { label: 'HTTP 500 に載った JSON-RPC の error', reply: async () => ({ error: { code: -32603, message: 'internal error' }, status: 500 }), logged: 'unreadable:RpcRequestError -32603' },
+    { label: 'HTTP 502 (本文が JSON-RPC でない)', reply: async () => ({ status: 502, body: 'bad gateway' }), logged: 'unreadable:HttpRequestError' },
+    { label: '通信断', reply: async () => { throw lostResponse(); }, logged: 'unreadable:HttpRequestError' },
+  ])('status が not_found と読めない ($label) → 語に当たらない拒否でも閉じない (応答不明)。再確認は nonce が未使用なら同じ op を送り直す (署名は増えない)', async ({ reply, logged }) => {
+    const fake = mountClients();
+    replyOnce(fake, { error: { code: -32500, message: "AA21 didn't pay prefund" } });
+    fake.bundlerStatus.mockImplementationOnce(reply);
+    const { result } = render();
+
+    result.current.mutate(PARAMS);
+    await waitFor(() => expect(result.current.isUnknown).toBe(true));
+    await waitFor(() => expect(result.current.isPending).toBe(false));
+
+    expect(result.current.error).toBeNull();
+    expect(standardPaymentOpen(result.current)).toBe(false);
+    expect(storedRecord()).toMatchObject({ status: 'unknown', send: { signedUserOp: sentOp(fake, 0) } });
+    // status は 1 回だけ聞く (再送しない)。
+    expect(fake.bundlerStatus).toHaveBeenCalledTimes(1);
+    expect(logger.warn).toHaveBeenCalledWith(
+      'pimlico.send.rejected-op-status',
+      expect.objectContaining({ error: `bundler-status:${logged}` }),
+    );
+
+    result.current.retryReceipt();
+    await waitFor(() => expect(fake.bundlerSend).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(result.current.isPending).toBe(false));
+    expect(fake.bundlerSend.mock.calls[1][0]).toEqual(fake.bundlerSend.mock.calls[0][0]);
+    expect(fake.signUserOperation).toHaveBeenCalledTimes(1);
+    expect(fake.getNonce).toHaveBeenCalledTimes(1);
+    expect(result.current.isUnknown).toBe(true);
+  });
+
+  it('語の確認は status より前に残す: 受理された op の重複の配送に AA25 が返り、bundler の status が遅れて not_found と答える場合でも、語で止まる (status は聞かない)', async () => {
+    const fake = mountClients();
+    fake.bundlerSend.mockImplementationOnce(async ({ params }) => {
+      world.mine(world.accept(params[0]));
+      return world.respond(params[0]);
+    });
+    // 受理した node と聞いた node のずれ: 聞かれたら not_found と答える。
+    fake.bundlerStatus.mockImplementation(async () => ({
+      result: { status: 'not_found', transactionHash: null },
+    }));
+    const { result } = render();
+
+    result.current.mutate(PARAMS);
+    await waitFor(() => expect(result.current.isUnknown).toBe(true));
+    await waitFor(() => expect(result.current.isPending).toBe(false));
+
+    expect(fake.bundlerStatus).not.toHaveBeenCalled();
+    expect(storedRecord()?.status).toBe('unknown');
+    expect(logger.warn).toHaveBeenCalledWith(
+      'pimlico.send.rejected-nonce-or-mempool',
+      expect.anything(),
+    );
+
+    result.current.retryReceipt();
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(fake.signUserOperation).toHaveBeenCalledTimes(1);
+    expect(world.mined).toHaveLength(1);
+  });
+
+  it('送り直しと作り直しの拒否では status を聞かない (閉じる場面ではない)', async () => {
+    const fake = mountClients();
+    acceptThenLoseResponse(fake);
+    const { result } = render();
+    result.current.mutate(PARAMS);
+    await waitFor(() => expect(result.current.isUnknown).toBe(true));
+
+    // 送り直しを bundler が検証で拒否 → 同じ nonce で作り直し → 作り直しも「Replacement underpriced」で拒否 (c3)。
+    replyOnce(fake, { error: { code: -32500, message: 'AA32 paymaster expired or not due' } });
+    result.current.retryReceipt();
+    await waitFor(() => expect(fake.bundlerSend).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(result.current.isPending).toBe(false));
+
+    expect(result.current.isUnknown).toBe(true);
+    expect(fake.bundlerStatus).not.toHaveBeenCalled();
   });
 
   it('HTTP 500 に JSON-RPC の error (-32603) が載っても、bundler が受理していれば: 応答不明にして通常決済も止め、元の op の確定を待つ (MUST 1・Codex の再現)', async () => {
