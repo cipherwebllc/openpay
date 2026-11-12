@@ -36,7 +36,7 @@ export function DiscoveryRegistrationForm({
   const locale = useLocale();
   const {
     form, setForm, editId, created, notice, usdcReminder,
-    error, errorSnippet, errorMismatch, attested, setAttested, ownedQuery, owned, onCancelEdit, submitMutation,
+    error, errorSnippet, errorMismatch, errorWasEdit, attested, setAttested, ownedQuery, owned, onCancelEdit, submitMutation,
   } = owner;
   const { copiedKey, copyText } = display;
   const atResourceLimit = owned.length >= maxResourcesPerMerchant;
@@ -47,14 +47,17 @@ export function DiscoveryRegistrationForm({
 
   // エラー key → 親切な文言。resource_not_gated は 402 自体が返らない URL、gate_not_openpay は
   // 402 は返るが OpenPay JPYC 方式でない URL、gate_accept_mismatch は OpenPay 方式の 402 だが JPYC の
-  // 受取先などが登録と違う URL、と原因と直し方を分ける。
+  // 受取先などが登録と違う URL、と原因と直し方を分ける。gate_accept_mismatch は、編集 (URL を替える PATCH) なら「掲載は変わって
+  // いない・ゲートを直してもう一度保存」を出す (登録し直すと別の掲載ができるか、URL の claim の衝突になる)。
   const errorMsg =
     error === 'resource_not_gated'
       ? t('errorNotGated')
       : error === 'gate_not_openpay' && errorSnippet
         ? t('errorGateNotOpenPay')
         : error === 'gate_accept_mismatch'
-          ? t('errorGateAcceptMismatch', { field: errorMismatch })
+          ? errorWasEdit
+            ? t('errorGateAcceptMismatchEdit')
+            : t('errorGateAcceptMismatch', { field: errorMismatch })
           : error === 'attestation_required'
           ? t('errorAttestationRequired')
           : error === 'too_many_resources'
@@ -404,11 +407,11 @@ export function DiscoveryRegistrationForm({
             {errorMsg}
           </p>
         ))}
-      {notice === 'updated' && (
+      {(notice === 'updated' || notice === 'updatedPending') && (
         <div className="space-y-2">
-          <p className="inline-flex items-center gap-1.5 text-sm text-emerald-700">
-            <CheckCircle2 className="h-4 w-4" aria-hidden />
-            {t('updated')}
+          <p className="flex items-start gap-1.5 text-sm text-emerald-700">
+            <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+            <span>{notice === 'updatedPending' ? t('updatedPending') : t('updated')}</span>
           </p>
           {usdcReminder && (
             <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-900">

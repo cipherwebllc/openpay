@@ -46,7 +46,10 @@ export type RegisteredResource = {
   category: string;
   docsUrl?: string;
   license?: string;
-  /** 登録の probe が判定不能で、最初の自動の確認を待つ新規掲載 (POST の 201 が返す・lib/x402/registry.ts)。 */
+  /**
+   * 登録の probe が判定不能で、最初の自動の確認を待つ新規掲載 (POST の 201 が返す・lib/x402/registry.ts)。
+   * URL を替える編集で替えた先のゲートを確かめられなかったときも付く (PATCH の 200 が返す)。
+   */
   pendingFirstVerification?: boolean;
 };
 
@@ -64,7 +67,7 @@ export type OwnedResource = {
   license?: string;
   paywallSnippet?: string;
   hidden?: boolean;
-  /** hidden のうち、最初の自動の確認を待つだけの新規掲載 (違反ではない・lib/x402/registry.ts)。 */
+  /** hidden のうち、自動の確認を待つだけの掲載 (新規登録か URL を替えた編集・違反ではない・lib/x402/registry.ts)。 */
   pendingFirstVerification?: boolean;
   /** 定期再検証の状態。authFailures は 401/403/別ドメイン転送の連続回数 (欠落 = 0)。 */
   verification?: { authFailures?: number };

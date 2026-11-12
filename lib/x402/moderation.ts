@@ -236,9 +236,9 @@ export async function isFreelyAccessible(
 //   'openpay' = 402 の accepts に extra.openpay.mode === 'forwarder-split' がある (掲載可)
 //   'foreign' = 402 は返すが accepts が他 facilitator (USDC/Base 等)・または解釈不能 (掲載拒否 —
 //               「JPYC で払える」というカタログの約束を守れないため)
-//   'unknown' = 200/402 以外・ネットワーク失敗・private 解決など判定不能 (登録は受ける — 新規登録は
-//               最初の再検証で OpenPay の 402 を確かめるまで公開の一覧に出さない (registry の
-//               pendingFirstVerification)・編集 (PATCH) は従来どおり通す)
+//   'unknown' = 200/402 以外・ネットワーク失敗・private 解決など判定不能 (登録は受ける — 新規登録と URL を
+//               替える編集 (PATCH) は、最初の再検証で OpenPay の 402 を確かめるまで公開の一覧に出さない
+//               (registry の pendingFirstVerification)・URL を変えない編集は従来どおり通す)
 // v1 (JSON body) と v2 (PAYMENT-REQUIRED ヘッダ) の両輸送を見る。
 export type GateProbeResult = 'openpay' | 'foreign' | 'unknown';
 
@@ -257,8 +257,8 @@ export function acceptsLookLikeOpenPay(accepts: unknown): boolean {
   });
 }
 
-// probeGate の判定に、'openpay' と判定した面 (v2 ヘッダか v1 body) の accepts を添える。新規登録 (POST) が
-// その accepts を登録内容と照合する (lib/x402/registrationGateMatch.ts)。取得と判定の順は probeGate と同じ
+// probeGate の判定に、'openpay' と判定した面 (v2 ヘッダか v1 body) の accepts を添える。新規登録 (POST) と URL を
+// 替える編集 (PATCH) がその accepts を登録内容と照合する (lib/x402/registrationGateMatch.ts)。取得と判定の順は probeGate と同じ
 // (v2 ヘッダが openpay なら body は読まない)。'openpay' 以外の accepts は常に空。
 export type GateProbeDetail = { result: GateProbeResult; accepts: unknown[] };
 

@@ -57,6 +57,7 @@ export const LUA_REAL_TEST_FILES = [
   'tests/app/api/cron-reverify-paired-lua.test.ts',
   'tests/app/api/cron-reverify-pending-match-lua.test.ts',
   'tests/app/api/cron-reverify-enforce-gate-lua.test.ts',
+  'tests/app/api/facilitator-resource-url-change-lua.test.ts',
   'tests/lib/x402/storeIndex-lua.test.ts',
   'tests/lib/x402/storeUsdcReconcile-lua.test.ts',
   'tests/scripts/kv-restore-lua.test.ts',

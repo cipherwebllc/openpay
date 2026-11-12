@@ -35,7 +35,8 @@ export function useDiscoveryOwner(address: string | undefined, isSignedIn: boole
     resource: RegisteredResource;
     paywallSnippet: string;
   } | null>(null);
-  const [notice, setNotice] = useState<'updated' | 'deleted' | null>(null);
+  // updatedPending = 編集は保存したが、掲載は公開待ち (URL を替えた先のゲートを確かめられなかった・まだ最初の確認の前)。
+  const [notice, setNotice] = useState<'updated' | 'updatedPending' | 'deleted' | null>(null);
   // USDC 面つきで登録/更新した直後の「サーバーのゲート貼り替え」リマインダー。
   // 貼り替えるまで実サーバーの 402 は JPYC のみ = USDC では買えない (実運用で発覚した期待違い)。
   const [usdcReminder, setUsdcReminder] = useState(false);
@@ -43,6 +44,9 @@ export function useDiscoveryOwner(address: string | undefined, isSignedIn: boole
   const [errorSnippet, setErrorSnippet] = useState('');
   // gate_accept_mismatch のときにサーバーが返す不一致の項目名 (payTo / network / asset / forwarder)。
   const [errorMismatch, setErrorMismatch] = useState('');
+  // error を返した送信が編集 (PATCH) だったか。文言を送信の種類で選ぶ (編集の 422 は「掲載は変わっていない・もう一度保存」、
+  // 新規登録の 422 は「もう一度登録」)。送信中も一覧の「編集」は押せるので、今の editId ではなく送信したときの値で持つ。
+  const [errorWasEdit, setErrorWasEdit] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   // 登録時 1 回きりだったスニペット表示を owner 一覧から再表示するためのトグル。
   const [snippetOpenId, setSnippetOpenId] = useState<string | null>(null);
@@ -125,8 +129,9 @@ export function useDiscoveryOwner(address: string | undefined, isSignedIn: boole
   const submitMutation = useMutation({
     mutationFn: async (): Promise<
       | { ok: true; wasEdit: boolean; usdcEnabled: boolean; resource: RegisteredResource; paywallSnippet: string }
-      | { ok: false; error: string; paywallSnippet: string; mismatch: string }
+      | { ok: false; wasEdit: boolean; error: string; paywallSnippet: string; mismatch: string }
     > => {
+      const wasEdit = Boolean(editId);
       const payload = {
         url: form.url,
         description: form.description,
@@ -176,6 +181,7 @@ export function useDiscoveryOwner(address: string | undefined, isSignedIn: boole
         if (!res.ok || !body.resource) {
           return {
             ok: false,
+            wasEdit,
             error: body.error ?? 'error',
             paywallSnippet: body.paywallSnippet ?? '',
             mismatch: body.mismatch ?? '',
@@ -183,13 +189,13 @@ export function useDiscoveryOwner(address: string | undefined, isSignedIn: boole
         }
         return {
           ok: true,
-          wasEdit: Boolean(editId),
+          wasEdit,
           usdcEnabled: form.usdcEnabled,
           resource: body.resource,
           paywallSnippet: body.paywallSnippet ?? '',
         };
       } catch {
-        return { ok: false, error: 'error', paywallSnippet: '', mismatch: '' };
+        return { ok: false, wasEdit, error: 'error', paywallSnippet: '', mismatch: '' };
       }
     },
     onMutate: () => {
@@ -211,12 +217,14 @@ export function useDiscoveryOwner(address: string | undefined, isSignedIn: boole
         setError(result.error);
         setErrorSnippet(result.paywallSnippet);
         setErrorMismatch(result.mismatch);
+        setErrorWasEdit(result.wasEdit);
         return;
       }
       // onSuccess の options は再描画で更新されるため、payload と同じ form から取得した値を使う。
       setUsdcReminder(result.usdcEnabled);
       if (result.wasEdit) {
-        setNotice('updated');
+        // 公開待ちの掲載を「更新しました。」だけで済ませない (編集の直後にカタログから消えた理由が伝わらない)。
+        setNotice(result.resource.pendingFirstVerification === true ? 'updatedPending' : 'updated');
         setCreated(null);
       } else {
         setCreated({
@@ -271,7 +279,7 @@ export function useDiscoveryOwner(address: string | undefined, isSignedIn: boole
 
   return {
     form, setForm, formOpen, setFormOpen, registrationRef, editId, created, notice, setNotice,
-    usdcReminder, error, errorSnippet, errorMismatch, confirmDeleteId, setConfirmDeleteId, snippetOpenId,
+    usdcReminder, error, errorSnippet, errorMismatch, errorWasEdit, confirmDeleteId, setConfirmDeleteId, snippetOpenId,
     setSnippetOpenId, attested, setAttested, ownedQuery, owned, onEdit, onCancelEdit,
     submitMutation, deleteMutation,
   };

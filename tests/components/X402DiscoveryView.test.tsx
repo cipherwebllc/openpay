@@ -1090,6 +1090,98 @@ describe('X402DiscoveryView', () => {
     expect(await screen.findByText(expected)).toBeInTheDocument();
   });
 
+  // 第 10 回レビュー B3-3: URL を替える編集で替えた先のゲートを確かめられないと、PATCH は 200 で hidden +
+  // pendingFirstVerification を返す (公開中の掲載が一覧から消える)。「更新しました。」だけで済ませない。
+  it.each([
+    [true, '更新しました。この URL のゲートをまだ確かめられていないため、公開待ちです。自動の確認が通るとカタログに載ります。'],
+    [false, '更新しました。'],
+  ])('編集の完了文言: pendingFirstVerification=%s', async (pendingFirstVerification, expected) => {
+    const fetchFn = renderAsOwner();
+    const routed = fetchFn.getMockImplementation() as (url: string, init?: RequestInit) => Promise<unknown>;
+    fetchFn.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (String(url).startsWith('/api/facilitator/resources/') && init?.method === 'PATCH') {
+        const body = JSON.parse(String(init.body ?? '{}'));
+        const resource = pendingFirstVerification ? { ...body, hidden: true, pendingFirstVerification: true } : body;
+        return { ok: true, status: 200, json: async () => ({ resource }) };
+      }
+      return routed(url, init);
+    });
+    fireEvent.click(await screen.findByRole('button', { name: '編集' }));
+    fireEvent.click(await screen.findByRole('button', { name: '更新する' }));
+    expect(await screen.findByText(expected)).toBeVisible();
+    if (pendingFirstVerification) expect(screen.queryByText('更新しました。')).not.toBeInTheDocument();
+  });
+
+  // URL を替える編集の 422 gate_accept_mismatch は、編集用の文言 (掲載は変わっていない・ゲートを直してもう一度保存) で出す。
+  // 新規登録の文言 (もう一度登録) は出さない: 登録し直すと別の掲載ができるか、URL の claim の衝突になる。フォームは閉じない。
+  const EDIT_MISMATCH_JA =
+    '替えた先の URL が返す 402 が、この掲載の受取先やチェーンと合いません。掲載は変更されていません。ゲートの設定を直してから、もう一度保存してください。';
+  const REGISTER_MISMATCH_JA =
+    'この URL の 402 が示す JPYC の受取先・チェーン・トークン・forwarder が登録内容と一致しません (payTo)。ゲートの設定を確かめてから、もう一度登録してください。';
+  it('編集: gate_accept_mismatch 422 → 編集用の文言を出し (登録し直しを案内しない)、編集中のまま残す', async () => {
+    const fetchFn = renderAsOwner();
+    const routed = fetchFn.getMockImplementation() as (url: string, init?: RequestInit) => Promise<unknown>;
+    fetchFn.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (String(url).startsWith('/api/facilitator/resources/') && init?.method === 'PATCH') {
+        return { ok: false, status: 422, json: async () => ({ error: 'gate_accept_mismatch', mismatch: 'payTo' }) };
+      }
+      return routed(url, init);
+    });
+    fireEvent.click(await screen.findByRole('button', { name: '編集' }));
+    fireEvent.click(await screen.findByRole('button', { name: '更新する' }));
+    expect(await screen.findByText(EDIT_MISMATCH_JA)).toBeInTheDocument();
+    expect(screen.queryByText(REGISTER_MISMATCH_JA)).not.toBeInTheDocument();
+    expect(screen.queryByText(/もう一度登録してください/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/操作に失敗しました/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^更新しました。/)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '更新する' })).toBeInTheDocument();
+    expect(screen.getByDisplayValue(OWNED.url)).toBeInTheDocument();
+  });
+
+  it('編集: gate_accept_mismatch 422 (en) → 編集用の文言', async () => {
+    state.connected = true;
+    state.address = OWNED.payTo;
+    state.signedIn = true;
+    const fetchFn = installRoutingFetch([OWNED]);
+    const routed = fetchFn.getMockImplementation() as (url: string, init?: RequestInit) => Promise<unknown>;
+    fetchFn.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (String(url).startsWith('/api/facilitator/resources/') && init?.method === 'PATCH') {
+        return { ok: false, status: 422, json: async () => ({ error: 'gate_accept_mismatch', mismatch: 'payTo' }) };
+      }
+      return routed(url, init);
+    });
+    renderView({}, 'en');
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Update' }));
+    expect(
+      await screen.findByText(
+        "The 402 returned by the new URL does not match this listing's recipient or network. The listing was not changed. Fix the gate settings, then save again.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/register again/)).not.toBeInTheDocument();
+  });
+
+  // 文言は送信の種類で選ぶ (今の editId では選ばない): 新規登録の送信中に一覧の「編集」を押しても、その登録の 422 には
+  // 登録の文言を出す。
+  it('新規登録の送信中に「編集」を押しても、登録の 422 gate_accept_mismatch には登録の文言を出す', async () => {
+    const fetchFn = renderAsOwner();
+    const routed = fetchFn.getMockImplementation() as (url: string, init?: RequestInit) => Promise<unknown>;
+    let answerPost: (value: unknown) => void = () => {};
+    fetchFn.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (String(url) === '/api/facilitator/resources' && init?.method === 'POST') {
+        return new Promise((resolve) => { answerPost = resolve; });
+      }
+      return routed(url, init);
+    });
+    fireEvent.click(await screen.findByRole('checkbox'));
+    fireEvent.click(screen.getByRole('button', { name: '登録する' }));
+    await waitFor(() => expect(fetchFn).toHaveBeenCalledWith('/api/facilitator/resources', expect.objectContaining({ method: 'POST' })));
+    fireEvent.click(screen.getByRole('button', { name: '編集' }));
+    answerPost({ ok: false, status: 422, json: async () => ({ error: 'gate_accept_mismatch', mismatch: 'payTo' }) });
+    expect(await screen.findByText(REGISTER_MISMATCH_JA)).toBeInTheDocument();
+    expect(screen.queryByText(EDIT_MISMATCH_JA)).not.toBeInTheDocument();
+  });
+
   it.each(['missing', 'rejected', 'pending'] as const)('D2: clipboard %s never reports copied', async (mode) => {
     const rejected = Promise.reject(new Error('clipboard denied'));
     // Observe the test promise too, so the pre-fix run reports the UI assertion, not an unhandled rejection.

@@ -58,8 +58,15 @@ const EXPECTED = [
   // registry.ts CAS_CREATE (台帳がある URL は hidden の doc = ARGV[4] で作る。印を付けないのは JS 側の
   // createResource が ARGV[4] を印なしで組むため = Lua の連結ではないので tests/lib/x402/registry-moderation-lua.test.ts が検査)
   "redis.call('EXISTS',KEYS[6])==1 then doc=ARGV[4]; code=3 end; redis.call('SET',KEYS[1],doc); ",
-  // registry.ts CAS_UPDATE (台帳済 URL への PATCH で印を外す)
-  "redis.call('EXISTS',KEYS[5])==1 then o.hidden=true; o.pendingFirstVerification=nil end; end; o.url=ARGV[2]; ",
+  // registry.ts CAS_UPDATE (台帳済 URL への PATCH で印を外す・確かめていない URL への PATCH は公開中の掲載だけ hidden + 印に
+  // する = 第 10 回レビュー B3-3)。`and o.hidden~=true` が落ちると、モデレーションで隠された掲載が URL を替えるだけで印を得る。
+  "redis.call('EXISTS',KEYS[5])==1 then o.hidden=true; o.pendingFirstVerification=nil " +
+    "elseif ARGV[15]=='1' and o.hidden~=true then o.hidden=true; o.pendingFirstVerification=true; toHead=true end; end; " +
+    'o.url=ARGV[2]; ',
+  // registry.ts CAS_UPDATE (公開待ちにした掲載を、保存の後で discovery index の先頭へ動かす・PR #1081 の Codex P2)。落ちると、
+  // 再検証が読む先頭 500 件の外の掲載が、公開待ちのまま永久に戻らない。
+  "redis.call('SET',KEYS[1],updated); if toHead then redis.call('LREM',KEYS[6],0,ARGV[14]); " +
+    "redis.call('LPUSH',KEYS[6],ARGV[14]) end; ",
   // registry.ts CAS_DEACTIVATE_WITH_LEDGER (印つきの削除は台帳を書かない)
   "if o.url~=ARGV[5] then return -4 end; if o.hidden==true and o.pendingFirstVerification~=true then " +
     "redis.call('SET',KEYS[3],ARGV[3],'EX',ARGV[4]) end; ",

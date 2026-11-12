@@ -174,7 +174,8 @@ async function processTarget(
     // 外部の掲載は、どの状態でも登録と同じ照合 (受取先・チェーン・JPYC・forwarder・掲載の payTo が期待値) を通った 402 だけを
     // ok にする (E-3・2026-10-30 user 裁定 (b) の「強制」の段・docs/DEPLOY_CHECKLIST.md §14.5)。照合に使った受取先を CAS に
     // 渡し、probe の間にそれが編集されていたら結果を捨てる。
-    //   公開待ち (pendingFirstVerification) = 合わなければ pending_gate_mismatch (違反に数えない・#957 のまま)
+    //   公開待ち (pendingFirstVerification) = 合わなければ pending_gate_mismatch (違反に数えない・#957 のまま)。
+    //     新規登録の判定不能と、URL を替える編集で替えた先を確かめられなかった掲載 (B3-3) の両方がこの印を持つ
     //   公開中・モデレーションの hidden    = 合わなければ violation_gate_mismatch (確定違反・閾値で hidden・hidden は戻らない)
     const pending = read.resource.pendingFirstVerification === true;
     const probe = pending
@@ -250,7 +251,7 @@ async function processTarget(
     runId,
     authClass,
   );
-  // first-party に公開待ちは無い (印は外部の掲載の登録だけが付ける) ので pendingAtRead は常に false。
+  // first-party に公開待ちは無い (印は外部の掲載の登録と URL を替える編集だけが付ける) ので pendingAtRead は常に false。
   warnVisibilityChanged(runId, target, probedUrl, verdict, apply, false);
   const storageError = !apply.applied && apply.reason === 'storage';
   return {
