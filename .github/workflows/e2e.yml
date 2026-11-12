@@ -84,6 +84,15 @@ jobs:
           key: ${{ steps.apt-cache.outputs.prefix }}restore
           restore-keys: ${{ steps.apt-cache.outputs.prefix }}
 
+      # TEMP・merge の前に消す: Ubuntu のパッケージ置き場 3 つに届かなくして、2026-11-11 の障害の日の動きを確かめる。
+      - name: TEMP (merge の前に消す) block the Ubuntu package mirrors
+        run: |
+          echo "restored: $(find /var/cache/openpay-apt-archives -maxdepth 1 -name '*.deb' | wc -l) .deb, $(find /var/cache/openpay-apt-lists -maxdepth 1 -type f -name '*_*' | wc -l) list files"
+          ls -la /var/cache/openpay-apt-lists
+          grep -H -E '^(Date|Valid-Until):' /var/lib/apt/lists/*InRelease /var/cache/openpay-apt-lists/*InRelease || true
+          echo '0.0.0.0 azure.archive.ubuntu.com archive.ubuntu.com security.ubuntu.com' | sudo tee -a /etc/hosts
+          getent hosts azure.archive.ubuntu.com archive.ubuntu.com security.ubuntu.com
+
       - name: Install Playwright browsers
         run: ./node_modules/.bin/playwright install --with-deps chromium webkit
 
@@ -165,6 +174,15 @@ jobs:
             /var/cache/openpay-apt-lists/*_*
           key: ${{ steps.apt-cache.outputs.prefix }}restore
           restore-keys: ${{ steps.apt-cache.outputs.prefix }}
+
+      # TEMP・merge の前に消す: Ubuntu のパッケージ置き場 3 つに届かなくして、2026-11-11 の障害の日の動きを確かめる。
+      - name: TEMP (merge の前に消す) block the Ubuntu package mirrors
+        run: |
+          echo "restored: $(find /var/cache/openpay-apt-archives -maxdepth 1 -name '*.deb' | wc -l) .deb, $(find /var/cache/openpay-apt-lists -maxdepth 1 -type f -name '*_*' | wc -l) list files"
+          ls -la /var/cache/openpay-apt-lists
+          grep -H -E '^(Date|Valid-Until):' /var/lib/apt/lists/*InRelease /var/cache/openpay-apt-lists/*InRelease || true
+          echo '0.0.0.0 azure.archive.ubuntu.com archive.ubuntu.com security.ubuntu.com' | sudo tee -a /etc/hosts
+          getent hosts azure.archive.ubuntu.com archive.ubuntu.com security.ubuntu.com
 
       - name: Install Chromium
         run: ./node_modules/.bin/playwright install --with-deps chromium
