@@ -1149,16 +1149,6 @@ async function runCirclePayment(args: {
     }
     throw error;
   }
-  // 成功確定 → マッピングを破棄 (次の同額購入は新 attempt。直近 double-click の dedup は
-  // scan の CONFIRMED_DEDUP_WINDOW_MS が引き続き担う)。
-  // 失効した試みは破棄しない (error でも成功でも)。何の波及を断つか: マッピングは「chain・sender・内容ごとに 1 つ」で、同じタブで
-  // 開き直した画面も同じものを使う。画面の無い試みが消すと、開き直した画面の次の押下が新しい key になり、この試みが送った op の
-  // 記録 (confirmed・90 秒を過ぎたもの) を「正規のリピート」とみなして 2 本目を払う (この支払いの成功は、もう無い画面にしか
-  // 出ていない)。残しておけば、次の押下は同じ key を resume して既払いの結果を受け取り、そこで破棄される。
-  // 代償: 失効した試みが払い終えた後、同じタブで同じ内容を意図してもう一度払うと、最初の 1 回は前の支払いの結果が出る
-  // (もう一度押せば新しい支払い)。払えたことを知らずにもう一度払う害の方が大きいので dedup の側に倒す
-  // (circleSend.ts の confirmed の dedup と同じ方針)。
-  if (usesStableMapping && isAlive()) clearStableAttemptId(attemptArgs);
 
   // 監査: receipt から net USDC を再計算 (client-reported)。pending record の
   // userOpHash/sender/paymaster を expected binding に使う。verify は best-effort で、
@@ -1206,6 +1196,19 @@ async function runCirclePayment(args: {
       error: error instanceof Error ? error.message : String(error),
     });
   }
+
+  // 成功確定 → マッピングを破棄 (次の同額購入は新 attempt。直近 double-click の dedup は
+  // scan の CONFIRMED_DEDUP_WINDOW_MS が引き続き担う)。
+  // 失効した試みは破棄しない (error でも成功でも)。何の波及を断つか: マッピングは「chain・sender・内容ごとに 1 つ」で、同じタブで
+  // 開き直した画面も同じものを使う。画面の無い試みが消すと、開き直した画面の次の押下が新しい key になり、この試みが送った op の
+  // 記録 (confirmed・90 秒を過ぎたもの) を「正規のリピート」とみなして 2 本目を払う (この支払いの成功は、もう無い画面にしか
+  // 出ていない)。残しておけば、次の押下は同じ key を resume して既払いの結果を受け取り、そこで破棄される。
+  // 監査の後ろで見るのは、確定の後も上の監査 (receipt の RPC) の await の間は成功がまだ画面に出ていないから。その間に画面を
+  // 離れた試みも、成功を画面に出せないまま終わるので、対応を残す (この確認から return まで await は無い)。
+  // 代償: 失効した試みが払い終えた後、同じタブで同じ内容を意図してもう一度払うと、最初の 1 回は前の支払いの結果が出る
+  // (もう一度押せば新しい支払い。ただし confirmed から 90 秒以内は、押すたびに前の結果を返す = 今までと同じ動き)。払えたことを
+  // 知らずにもう一度払う害の方が大きいので dedup の側に倒す (circleSend.ts の confirmed の dedup と同じ方針)。
+  if (usesStableMapping && isAlive()) clearStableAttemptId(attemptArgs);
 
   return {
     ...result,

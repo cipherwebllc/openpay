@@ -59,6 +59,10 @@ import {
   waitForCircleReceipt,
   getCircleUserOpGasPrice,
 } from '@/lib/smartAccount/circleAccount';
+import {
+  verifyCircleReceiptOnChain,
+  type CircleReconcileResult,
+} from '@/lib/circleReceiptVerifier';
 import { mockHook } from '../_helpers/wagmiMock';
 
 const usdcDep = defaultDeploymentForSymbol('usdc');
@@ -263,6 +267,108 @@ describe('H-V: 画面を離れた Circle の試み (hook → 本物の executeCi
     // 画面のある試みが受け取ったので、対応はここで消える (その次の押下は新しい支払い)。
     expect(mappings()).toEqual({});
   });
+
+  // Codex のレビュー (P2): 確定の後も、mutation が成功を返すまでに receipt の監査 (RPC) の await がある。その間に画面を
+  // 離れた試みは、確定していても成功を画面に出せない。監査の前に対応を消していると、上と同じ筋で 2 本目を払う。
+  it('確定の後、監査 (receipt の再計算) を待つ間に画面を離れる → 対応が残り、90 秒より後に開き直して押しても 2 本目を送らず、既払いの結果を受け取る', async () => {
+    // A の監査だけ止める (B の監査は既定の stub ですぐ返る)。
+    const auditA = deferred<CircleReconcileResult>();
+    vi.mocked(verifyCircleReceiptOnChain).mockReturnValueOnce(auditA.promise);
+
+    const screenA = openScreen();
+    screenA.result.current.mutate(PARAMS);
+    await waitFor(() => expect(permitRequests).toHaveLength(1));
+    permitRequests[0].approve(PERMIT);
+    await waitFor(() => expect(userOpRequests).toHaveLength(1));
+    userOpRequests[0].approve(OP_A);
+    // A は送って確定し、監査を待っている (画面はまだあり、成功はまだ画面に出ていない)。
+    await waitFor(() => expect(verifyCircleReceiptOnChain).toHaveBeenCalledOnce());
+    expect(sentOps()).toEqual([OP_A.signedUserOp]);
+    expect(recordStatuses()).toEqual(['confirmed']);
+    expect(screenA.result.current.isPending).toBe(true);
+
+    // 監査を待つ間に画面を離れる。A の成功は誰にも出ない。
+    screenA.unmount();
+    auditA.resolve({ status: 'unreconciled', reason: 'test-stub', kind: 'event-absent' });
+    await waitFor(() => expect(screenA.state().status).toBe('success'));
+    const mappingsAfterA = mappings();
+
+    // confirmed の dedup の窓 (90 秒) を過ぎてから、開き直した画面で同じ内容を押す。ウォレットが署名を求めれば、利用者は
+    // 承認する (前の支払いが済んだことを知らない)。
+    clockOffset += 100_000;
+    vi.mocked(signUsdcPermit).mockImplementation(async (args) => {
+      await Promise.resolve();
+      args.beforeSign?.();
+      return PERMIT;
+    });
+    vi.mocked(prepareAndSignCircleUserOp).mockImplementation(async (args) => {
+      await Promise.resolve();
+      args.beforeSign?.();
+      return OP_B;
+    });
+    const screenB = openScreen();
+    screenB.result.current.mutate(PARAMS);
+    await waitFor(() => expect(screenB.result.current.isSuccess).toBe(true));
+
+    // 送られた op は A の 1 本だけ。B は同じ attemptId を resume し、新しい署名を求めずに既払いの結果を受け取る。
+    expect(sentOps()).toEqual([OP_A.signedUserOp]);
+    expect(signUsdcPermit).toHaveBeenCalledOnce();
+    expect(prepareAndSignCircleUserOp).toHaveBeenCalledOnce();
+    expect(screenB.result.current.data).toMatchObject({
+      userOpHash: OP_A.userOpHash,
+      txHash: OP_A.txHash,
+      success: true,
+    });
+    expect(recordStatuses()).toEqual(['confirmed']);
+    // 監査の間に失効した A は対応を残していた。画面のある B が受け取ったので、ここで消える。
+    expect(Object.keys(mappingsAfterA)).toHaveLength(1);
+    expect(mappings()).toEqual({});
+  });
+
+  // 画面がある試みの成功は、監査の結果に関係なく、今までどおり対応を消す (次の同じ内容の押下は新しい支払い)。
+  const auditOutcomes: Array<[string, () => Promise<CircleReconcileResult>, string]> = [
+    [
+      'verified',
+      async () => ({ status: 'verified', netUsdc: 10_000n, pulledUsdc: 10_000n, refundedUsdc: 0n }),
+      'client-reported',
+    ],
+    [
+      'unreconciled',
+      async () => ({ status: 'unreconciled', reason: 'test', kind: 'event-absent' }),
+      'unreconciled',
+    ],
+    [
+      '投げた (RPC の失敗)',
+      async () => {
+        throw new Error('test: receipt の RPC に失敗');
+      },
+      'unreconciled',
+    ],
+  ];
+  it.each(auditOutcomes)(
+    '画面がある試みの成功は、監査が %s でも対応を消す',
+    async (_label, audit, verification) => {
+      vi.mocked(verifyCircleReceiptOnChain).mockImplementationOnce(audit);
+
+      const screen = openScreen();
+      screen.result.current.mutate(PARAMS);
+      await waitFor(() => expect(permitRequests).toHaveLength(1));
+      permitRequests[0].approve(PERMIT);
+      await waitFor(() => expect(userOpRequests).toHaveLength(1));
+      expect(Object.keys(mappings())).toHaveLength(1);
+      userOpRequests[0].approve(OP_A);
+      await waitFor(() => expect(screen.result.current.isSuccess).toBe(true));
+
+      expect(verifyCircleReceiptOnChain).toHaveBeenCalledOnce();
+      expect(screen.result.current.data).toMatchObject({
+        userOpHash: OP_A.userOpHash,
+        success: true,
+        circleVerification: verification,
+      });
+      expect(sentOps()).toEqual([OP_A.signedUserOp]);
+      expect(mappings()).toEqual({});
+    },
+  );
 
   it('署名 2 を待つ間に画面を離れ、開き直した画面が同じ key を resume する → 古い要求を承認しても送られず、対応も残る', async () => {
     const screenA = openScreen();
