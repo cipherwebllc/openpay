@@ -315,8 +315,8 @@ export async function readGatewayUnifiedBalance(
   }
 }
 
-// wallet ERC20 + Gateway unified を 1 callsite で並列取得 (CrossChainHint /
-// demo の primary entry point)。Gateway readiness probes run in parallel after
+// wallet ERC20 + Gateway unified を 1 callsite で並列取得 (CrossChainHint の
+// primary entry point)。Gateway readiness probes run in parallel after
 // its API response, adding up to 3 seconds to the balance query when a source hangs.
 export async function readAllCrossChainBalances(
   account: Address,

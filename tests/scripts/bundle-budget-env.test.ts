@@ -29,7 +29,6 @@ describe('bundle budget build env (--build)', () => {
   // 接頭辞 NEXT_PUBLIC_ENABLE_ でない公開 boolean flag (lib/crossChain/config.ts が parseBoolFlag で読む) も
   // 列挙に入れる。接頭辞だけに頼ると親 env の 1 が build に残った (Codex #789 2 回目 P3)。
   it.each([
-    'NEXT_PUBLIC_EXPERIMENTAL_CROSS_CHAIN_ENABLED',
     'NEXT_PUBLIC_CROSS_CHAIN_DISABLED',
     'NEXT_PUBLIC_CROSS_CHAIN_BURN_AUTORESUME',
   ])('includes the non-ENABLE boolean flag %s and turns a parent-shell 1 OFF', (key) => {

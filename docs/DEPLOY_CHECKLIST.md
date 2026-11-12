@@ -1122,9 +1122,12 @@ operator は以下の order で testnet → mainnet 段階検証を実施する�
 OpenPay 主要ターゲット (memory: [[project_hashport_target]]) で動かなければ
 phase 2 本線 UX は事実上意味を成さない。
 
+2026-11-12: この手順の画面だった実験ページ (`experimental` 配下の cross-chain の demo) と、その mount を決める env は
+削除した (第 10 回レビュー F-11)。OpenPay に Gateway へ預け入れる画面は無いので、下の deposit は OpenPay の外で行い、
+署名から先は §10.4 と同じく本線の `/pay` の CrossChainHint で確かめる (本線の Gateway 経路は
+`NEXT_PUBLIC_ENABLE_GATEWAY_CROSS_CHAIN` が ON の build でだけ出る。削除後、この節はまだ通していない)。
+
 - [ ] HashPort wallet を testnet (Polygon Amoy) で connect
-- [ ] `/[locale]/experimental/cross-chain-demo` で env=true で mount 確認
-      (Vercel `NEXT_PUBLIC_EXPERIMENTAL_CROSS_CHAIN_ENABLED=true` を一時設定)
 - [ ] GatewayWallet.deposit (Polygon Amoy USDC を 1 USDC pre-deposit)
 - [ ] 13-19 分待って Gateway balance 反映確認
 - [ ] BurnIntent EIP-712 sign が wallet 上で完了する (HashPort UI で承認可能か)
@@ -1153,7 +1156,6 @@ phase 2 本線 UX は事実上意味を成さない。
 
 Gateway API 応答後に、残高がある source の readiness probe を並列で実行する。
 RPC が応答しない場合、balance query に最大約 3 秒の待ち時間が加わる。
-operator demo の Gateway total は API の預入残高であり、経路の利用可否ではない。
 購入者向け chooser は readiness 検証済みの Gateway option だけを表示する。
 
 - [ ] Polygon Amoy source で live delay + margin が署名内容へ反映され、Circle が受理する
@@ -1260,8 +1262,6 @@ Next.js 仕様で build-time env (client bundle へ inline)。Vercel env の変�
 
 ### §10.7 Production opt-out 経路の確認
 
-- [ ] Vercel env で `NEXT_PUBLIC_EXPERIMENTAL_CROSS_CHAIN_ENABLED=false` (本線 UI
-      は別 flag) を再確認、experimental demo route は production で 404 になる
 - [ ] QrGenerator の crossChain toggle OFF で URL に `crossChain=false` が付き、
       該当 QR scan 時に CrossChainHint が表示されないこと
 - [ ] 本線 UX の direct path (USDC 同一 chain 送金) が cross-chain 機能投入後
