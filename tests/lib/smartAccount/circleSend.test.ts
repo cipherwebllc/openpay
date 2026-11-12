@@ -35,6 +35,7 @@ import {
   PENDING_KEY_PREFIX,
   type PendingStatus,
 } from '@/lib/circlePending';
+import { logger } from '@/lib/logger';
 
 const OWNER = getAddress('0x1111111111111111111111111111111111111111');
 const PAYMASTER = getAddress('0x3BA9A96eE3eFf3A69E2B18886AcF52027EFF8966');
@@ -556,5 +557,388 @@ describe('housekeeping GC (#121): 別 callHash の低速 in-flight を巻き込�
     happyMocks();
     await run();
     expect(loadPendingRecord(orphan)?.status).toBe('abandoned');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 第 10 回レビュー H-V: 画面を離れた (unmount した) 試み。hook が渡す isAlive が false になった試みは、新しい効果
+// (ウォレットへの署名の要求・markSigned・markSubmitting・abandon・bundler への送信) を始めない。
+//
+// ここの circleAccount の偽物は「ウォレットと RPC」: RPC に当たる await の後に、本物と同じ位置で args.beforeSign を呼び
+// (本物の位置は circleAccount.test.ts が固定する)、署名の要求を 1 つずつ積む。テストが要求ごとに承認・拒否する。
+// 送信と receipt は op / hash ごとに分ける (どの試みの op を送ったかを引数で確かめる)。
+// ---------------------------------------------------------------------------
+describe('H-V: 画面を離れた試みは新しい効果を始めない', () => {
+  type PermitResult = { paymasterData: Hex; permitSignature: Hex };
+  type UserOpResult = { signedUserOp: Record<string, unknown>; userOpHash: Hex };
+  type SignRequest<T> = {
+    approve: (value: T) => void;
+    reject: (error: Error) => void;
+  };
+
+  function deferred<T>() {
+    let resolve!: (value: T) => void;
+    let reject!: (error: unknown) => void;
+    const promise = new Promise<T>((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    return { promise, resolve, reject };
+  }
+
+  // 試みの終わり方を、待たずに読めるようにする (署名の要求が残っている間は settle しない)。
+  function track<T>(promise: Promise<T>) {
+    const t: { settled: boolean; value?: T; error?: Error } = { settled: false };
+    promise.then(
+      (value) => {
+        t.settled = true;
+        t.value = value;
+      },
+      (error: Error) => {
+        t.settled = true;
+        t.error = error;
+      },
+    );
+    return t;
+  }
+
+  // 溜まっている microtask を全部流す (署名の要求が出る・試みが終わる所まで進める)。
+  const flush = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+  // ウォレットに出ている署名の要求 (出た順)。
+  let permitRequests: Array<SignRequest<PermitResult>>;
+  let userOpRequests: Array<SignRequest<UserOpResult> & { calls: unknown }>;
+  // RPC に当たる await。既定は開いている。閉じた gate に差し替えると、開くまで署名の手前で待つ。
+  let permitRpc: Promise<void>;
+  let prepareRpc: Promise<void>;
+
+  const PERMIT: PermitResult = { paymasterData: '0xpm' as Hex, permitSignature: PERMIT_SIG };
+
+  // 試みごとに別の op・hash・tx (nonce の key が時刻由来で、別の試みの op は別物になる本番と同じ)。
+  function op(byte: string) {
+    return {
+      signedUserOp: { sender: OWNER, nonce: `0x${byte}`, signature: '0x' + byte.repeat(65) },
+      userOpHash: ('0x' + byte.repeat(32)) as Hex,
+      txHash: ('0x' + byte.repeat(31) + 'ff') as Hex,
+    };
+  }
+  const OP_A = op('a1');
+  const OP_B = op('b2');
+  const OP_X = op('c3');
+  const OP_Y = op('d4');
+  const OP_X2 = op('e5');
+  const ALL_OPS = [OP_A, OP_B, OP_X, OP_Y, OP_X2];
+
+  const sentOps = () => mockBroadcast.mock.calls.map((c) => c[0].signedUserOp);
+  const waitedHashes = () => mockWait.mock.calls.map((c) => c[0].hash);
+
+  function keyOf(calls: typeof CALLS, paymentAttemptId: string) {
+    return computeIdempotencyKey({
+      chainId: CHAIN_ID,
+      sender: OWNER,
+      paymentAttemptId,
+      callHash: computeCallHash(calls),
+    });
+  }
+  const KEY = keyOf(CALLS, 'attempt-1');
+
+  const infoSpy = vi.spyOn(logger, 'info');
+
+  beforeEach(() => {
+    permitRequests = [];
+    userOpRequests = [];
+    permitRpc = Promise.resolve();
+    prepareRpc = Promise.resolve();
+    mockPermit.mockImplementation(async (args) => {
+      await permitRpc; // permit の domain・nonce の読み取りに当たる
+      args.beforeSign?.();
+      const d = deferred<PermitResult>();
+      permitRequests.push({ approve: d.resolve, reject: d.reject });
+      return d.promise;
+    });
+    mockPrepare.mockImplementation(async (args) => {
+      await prepareRpc; // ガス価格・prepareUserOperation に当たる
+      args.beforeSign?.();
+      const d = deferred<UserOpResult>();
+      userOpRequests.push({ approve: d.resolve, reject: d.reject, calls: args.calls });
+      return d.promise;
+    });
+    // bundler は渡された op の hash を返し、receipt は hash ごとの tx を返す。
+    mockBroadcast.mockImplementation(async ({ signedUserOp }) => {
+      const found = ALL_OPS.find((o) => o.signedUserOp === signedUserOp);
+      if (!found) throw new Error('test: 知らない op が送られた');
+      return found.userOpHash;
+    });
+    mockWait.mockImplementation(async ({ hash }) => {
+      const found = ALL_OPS.find((o) => o.userOpHash === hash);
+      if (!found) throw new Error(`test: 知らない hash の receipt を待った ${hash}`);
+      return {
+        receipt: { transactionHash: found.txHash, blockNumber: 10n },
+        success: true,
+        actualGasCost: 1000n,
+      } as never;
+    });
+    infoSpy.mockClear();
+  });
+
+  // 試みを始め、署名 2 (UserOperation) の要求がウォレットに出る所まで進める。
+  async function startUntilUserOpRequest(
+    overrides: Partial<Parameters<typeof executeCirclePayment>[0]>,
+  ) {
+    const permitIndex = permitRequests.length;
+    const userOpIndex = userOpRequests.length;
+    const attempt = track(run(overrides));
+    await flush();
+    expect(permitRequests).toHaveLength(permitIndex + 1);
+    permitRequests[permitIndex].approve(PERMIT);
+    await flush();
+    expect(userOpRequests).toHaveLength(userOpIndex + 1);
+    return { attempt, userOpRequest: userOpRequests[userOpIndex] };
+  }
+
+  describe('(a)(b) 失効した試みはウォレットに署名を求めない', () => {
+    it('署名 1 の前の RPC を待つ間に失効 → 署名 1 を求めない・記録は awaiting_signature のまま', async () => {
+      const rpc = deferred<void>();
+      permitRpc = rpc.promise;
+      const screen = { alive: true };
+      const attempt = track(run({ isAlive: () => screen.alive }));
+      await flush();
+      expect(mockPermit).toHaveBeenCalledTimes(1); // RPC を待っている
+      expect(attempt.settled).toBe(false);
+
+      screen.alive = false; // 画面を離れる
+      rpc.resolve();
+      await flush();
+
+      expect(permitRequests).toHaveLength(0);
+      expect(attempt.error?.message).toBe('payment_cancelled');
+      expect(mockPrepare).not.toHaveBeenCalled();
+      expect(mockBroadcast).not.toHaveBeenCalled();
+      expect(loadPendingRecord(KEY)?.status).toBe('awaiting_signature');
+    });
+
+    it('署名 1 の承認の後、準備の RPC を待つ間に失効 → 署名 2 を求めない・記録は awaiting_signature のまま', async () => {
+      const rpc = deferred<void>();
+      prepareRpc = rpc.promise;
+      const screen = { alive: true };
+      const attempt = track(run({ isAlive: () => screen.alive }));
+      await flush();
+      permitRequests[0].approve(PERMIT);
+      await flush();
+      expect(mockPrepare).toHaveBeenCalledTimes(1); // 準備の RPC を待っている
+      expect(attempt.settled).toBe(false);
+
+      screen.alive = false;
+      rpc.resolve();
+      await flush();
+
+      expect(userOpRequests).toHaveLength(0);
+      expect(attempt.error?.message).toBe('payment_cancelled');
+      expect(mockBroadcast).not.toHaveBeenCalled();
+      expect(loadPendingRecord(KEY)?.status).toBe('awaiting_signature');
+    });
+
+    it('画面がある試みは、同じ偽物のウォレットで今までどおり払い終える (beforeSign は止めない)', async () => {
+      const { attempt, userOpRequest } = await startUntilUserOpRequest({ isAlive: () => true });
+      userOpRequest.approve(OP_A);
+      await flush();
+
+      expect(attempt.value).toMatchObject({ userOpHash: OP_A.userOpHash, txHash: OP_A.txHash, success: true });
+      expect(sentOps()).toEqual([OP_A.signedUserOp]);
+      expect(loadPendingRecord(KEY)?.status).toBe('confirmed');
+      expect(infoSpy).not.toHaveBeenCalledWith('circle.sign_abandoned', expect.anything());
+    });
+  });
+
+  describe('(c) 失効した試みは、署名 2 が返っても保存も送信もしない', () => {
+    it('署名 2 を待つ間に失効 → 承認しても markSigned も broadcast も起きない・log を 1 行', async () => {
+      const screen = { alive: true };
+      const { attempt, userOpRequest } = await startUntilUserOpRequest({ isAlive: () => screen.alive });
+
+      screen.alive = false;
+      userOpRequest.approve(OP_A);
+      await flush();
+
+      expect(attempt.error?.message).toBe('payment_cancelled');
+      expect(mockBroadcast).not.toHaveBeenCalled();
+      expect(mockWait).not.toHaveBeenCalled();
+      const record = loadPendingRecord(KEY);
+      expect(record?.status).toBe('awaiting_signature');
+      // 署名済みの op を記録に残していない (残すと、次の resume・別の試みの復旧がこの op を送りうる)。
+      expect(record?.signedUserOp).toBeUndefined();
+      expect(record?.userOpHash).toBeUndefined();
+      expect(infoSpy).toHaveBeenCalledWith('circle.sign_abandoned', {
+        chainId: CHAIN_ID,
+        userOpHash: OP_A.userOpHash,
+      });
+    });
+  });
+
+  describe('(d) 失効した試みは、拒否・失敗でも abandon しない', () => {
+    it('失効の後に署名 1 が拒否 → abandoned にならない・元の error でなく payment_cancelled', async () => {
+      const screen = { alive: true };
+      const attempt = track(run({ isAlive: () => screen.alive }));
+      await flush();
+
+      screen.alive = false;
+      permitRequests[0].reject(new Error('user rejected'));
+      await flush();
+
+      expect(attempt.error?.message).toBe('payment_cancelled');
+      expect(loadPendingRecord(KEY)?.status).toBe('awaiting_signature');
+      expect(mockPrepare).not.toHaveBeenCalled();
+    });
+
+    it('失効の後に署名 2 が拒否 → abandoned にならない・元の error でなく payment_cancelled', async () => {
+      const screen = { alive: true };
+      const { attempt, userOpRequest } = await startUntilUserOpRequest({ isAlive: () => screen.alive });
+
+      screen.alive = false;
+      userOpRequest.reject(new Error('popup2 rejected'));
+      await flush();
+
+      expect(attempt.error?.message).toBe('payment_cancelled');
+      expect(loadPendingRecord(KEY)?.status).toBe('awaiting_signature');
+      expect(mockBroadcast).not.toHaveBeenCalled();
+      // 拒否は「返った署名を捨てた」ではない。
+      expect(infoSpy).not.toHaveBeenCalledWith('circle.sign_abandoned', expect.anything());
+    });
+
+    it('画面がある試みの拒否は今までどおり: 署名 1 → abandoned・元の error', async () => {
+      const attempt = track(run({ isAlive: () => true }));
+      await flush();
+      permitRequests[0].reject(new Error('user rejected'));
+      await flush();
+
+      expect(attempt.error?.message).toBe('user rejected');
+      expect(loadPendingRecord(KEY)?.status).toBe('abandoned');
+    });
+
+    it('画面がある試みの拒否は今までどおり: 署名 2 → abandoned・元の error', async () => {
+      const { attempt, userOpRequest } = await startUntilUserOpRequest({ isAlive: () => true });
+      userOpRequest.reject(new Error('popup2 rejected'));
+      await flush();
+
+      expect(attempt.error?.message).toBe('popup2 rejected');
+      expect(loadPendingRecord(KEY)?.status).toBe('abandoned');
+    });
+  });
+
+  // (iii) 同じタブ・内容が違う: 画面 A (内容 X) が署名 2 を待つ間に離れ、開き直した画面 B で内容 Y を払う。ウォレットに残った
+  // A の要求を承認すると、直す前は A が X の op を保存して送った (key も scan も別なので止める所が無い = X と Y の両方が払われる)。
+  describe('(iii) の再現: 内容の違う支払いを開き直した画面で済ませた後、古い署名の要求を承認する', () => {
+    const CALLS_X = [{ to: MERCHANT, data: '0x1111' as Hex }];
+    const CALLS_Y = [{ to: MERCHANT, data: '0x2222' as Hex }];
+    const KEY_X = keyOf(CALLS_X, 'attempt-x');
+    const KEY_Y = keyOf(CALLS_Y, 'attempt-y');
+
+    // A (内容 X) が署名 2 を待つ → 画面を離れる → B (内容 Y) が払い終える → 残っていた A の要求を承認する。
+    async function leaveXThenPayYThenApproveX() {
+      const screenA = { alive: true };
+      const a = await startUntilUserOpRequest({
+        calls: CALLS_X,
+        paymentAttemptId: 'attempt-x',
+        isAlive: () => screenA.alive,
+      });
+      expect(a.userOpRequest.calls).toBe(CALLS_X);
+      screenA.alive = false;
+
+      const b = await startUntilUserOpRequest({
+        calls: CALLS_Y,
+        paymentAttemptId: 'attempt-y',
+        isAlive: () => true,
+      });
+      expect(b.userOpRequest.calls).toBe(CALLS_Y);
+      b.userOpRequest.approve(OP_Y);
+      await flush();
+      expect(b.attempt.value).toMatchObject({ userOpHash: OP_Y.userOpHash, txHash: OP_Y.txHash, success: true });
+
+      a.userOpRequest.approve(OP_X);
+      await flush();
+      return { a, b };
+    }
+
+    it('X の op は送られない (送ったのは Y の op だけ)・X の記録は awaiting_signature のまま', async () => {
+      const { a } = await leaveXThenPayYThenApproveX();
+
+      expect(a.attempt.error?.message).toBe('payment_cancelled');
+      expect(sentOps()).toEqual([OP_Y.signedUserOp]);
+      expect(waitedHashes()).toEqual([OP_Y.userOpHash]);
+      expect(loadPendingRecord(KEY_X)?.status).toBe('awaiting_signature');
+      expect(loadPendingRecord(KEY_X)?.signedUserOp).toBeUndefined();
+      expect(loadPendingRecord(KEY_Y)?.status).toBe('confirmed');
+      expect(loadPendingRecord(KEY_Y)?.userOpHash).toBe(OP_Y.userOpHash);
+    });
+
+    it('その後、同じタブで X を押し直すと、残った記録を resume して払える (詰まない)', async () => {
+      await leaveXThenPayYThenApproveX();
+
+      // 同じタブ・同じ内容 = sessionStorage の対応が残っていて、同じ attemptId (同じ key) になる。
+      const c = await startUntilUserOpRequest({
+        calls: CALLS_X,
+        paymentAttemptId: 'attempt-x',
+        isAlive: () => true,
+      });
+      c.userOpRequest.approve(OP_X2);
+      await flush();
+
+      expect(c.attempt.value).toMatchObject({ userOpHash: OP_X2.userOpHash, txHash: OP_X2.txHash, success: true });
+      // 送ったのは Y と、押し直しの X の op。離れた画面の X の op (OP_X) は最後まで送られない。
+      expect(sentOps()).toEqual([OP_Y.signedUserOp, OP_X2.signedUserOp]);
+      expect(loadPendingRecord(KEY_X)?.status).toBe('confirmed');
+      expect(loadPendingRecord(KEY_X)?.userOpHash).toBe(OP_X2.userOpHash);
+    });
+  });
+
+  // (ii) 同じタブ・同じ内容: 開き直した画面 B は A と同じ key の記録を resume して、同じ署名の要求を出す。直す前は、A の要求を
+  // 先に承認すると A が送り、B は markSigned の CAS で PendingStateError (払えているのに失敗と出る)。A の要求を拒否すると、
+  // A の abandon が B の記録 (同じ key) を abandoned にし、B も失敗になった。
+  describe('(ii) の再現: 同じ内容・同じ key を開き直した画面が resume している間に、古い署名の要求に答える', () => {
+    // A が署名 2 を待つ → 画面を離れる → B (同じ attemptId) が resume して署名 2 を待つ。
+    async function leaveThenResume() {
+      const screenA = { alive: true };
+      const a = await startUntilUserOpRequest({ isAlive: () => screenA.alive });
+      screenA.alive = false;
+      const b = await startUntilUserOpRequest({ isAlive: () => true });
+      expect(loadPendingRecord(KEY)?.status).toBe('awaiting_signature');
+      return { a, b };
+    }
+
+    it('A の要求を承認しても何も起きず、B が自分の op を 1 本だけ送って成功する', async () => {
+      const { a, b } = await leaveThenResume();
+
+      a.userOpRequest.approve(OP_A);
+      await flush();
+      expect(a.attempt.error?.message).toBe('payment_cancelled');
+      expect(mockBroadcast).not.toHaveBeenCalled();
+      expect(loadPendingRecord(KEY)?.status).toBe('awaiting_signature');
+      expect(b.attempt.settled).toBe(false);
+
+      b.userOpRequest.approve(OP_B);
+      await flush();
+      expect(b.attempt.value).toMatchObject({ userOpHash: OP_B.userOpHash, txHash: OP_B.txHash, success: true });
+      expect(sentOps()).toEqual([OP_B.signedUserOp]);
+      expect(waitedHashes()).toEqual([OP_B.userOpHash]);
+      const record = loadPendingRecord(KEY);
+      expect(record?.status).toBe('confirmed');
+      expect(record?.userOpHash).toBe(OP_B.userOpHash);
+      expect(record?.signedUserOp).toEqual(OP_B.signedUserOp);
+    });
+
+    it('A の要求を拒否しても B の記録は生きていて、B は払い終える', async () => {
+      const { a, b } = await leaveThenResume();
+
+      a.userOpRequest.reject(new Error('popup2 rejected'));
+      await flush();
+      expect(a.attempt.error?.message).toBe('payment_cancelled');
+      expect(loadPendingRecord(KEY)?.status).toBe('awaiting_signature');
+      expect(b.attempt.settled).toBe(false);
+
+      b.userOpRequest.approve(OP_B);
+      await flush();
+      expect(b.attempt.value).toMatchObject({ userOpHash: OP_B.userOpHash, txHash: OP_B.txHash, success: true });
+      expect(sentOps()).toEqual([OP_B.signedUserOp]);
+      expect(loadPendingRecord(KEY)?.status).toBe('confirmed');
+    });
   });
 });

@@ -516,9 +516,10 @@ function clearPimlicoPending(storageKey: string, record: PimlicoPendingRecord): 
 export function useBatchPayment(
   deployment: TokenDeployment,
   enabled: boolean = true,
-  // Circle 経路を抑止して Pimlico erc20 に固定する (TipForm 用)。useSmartAccount に伝播
-  // させないと、決済実行に使う内部 client が Circle に routing され circlePermitAmount 不在で
-  // 送信時に throw する (呼出元が表示用に disableCircle を立てても無効になる)。
+  // Circle 経路を抑止して Pimlico erc20 に固定する。useSmartAccount に伝播させないと、決済実行に使う内部 client が
+  // Circle に routing される (表示だけを Pimlico にしても、送信は Circle のまま circlePermitAmount 不在で throw する)。
+  // いまは本番の呼び出し元 (PaymentForm・CheckoutForm・TipForm) のどれも渡していない = 3 フォームとも既定の false で、
+  // USDC は Circle の経路になりうる (TipForm も circlePermitAmount を渡している)。
   disableCircle: boolean = false,
 ) {
   const { data: clients } = useSmartAccount(deployment, enabled, disableCircle);
@@ -558,7 +559,8 @@ export function useBatchPayment(
   // この hook の instance が画面にあるか。何の波及を断つか: 画面を離れた (unmount した) 後も react-query の mutation は走り続け、
   // 離れた後にウォレットの署名が返ると、開き直した画面 (新しい hook) の支払いとは別の nonce の op を保存して送る = 二重払い
   // (第 10 回レビュー A-2)。失効した試みは新しい効果 (署名の要求・保存・削除・送信) を始めない。見る所は mutationFn の先頭と、
-  // lib/smartAccount/pimlicoIntent.ts の 4 か所 (host.isAlive)。
+  // lib/smartAccount/pimlicoIntent.ts の 4 か所 (host.isAlive)。Circle の経路 (H-V) は runCirclePayment と
+  // lib/smartAccount/circleSend.ts の冒頭の「失効」。
   // useLayoutEffect にしない: /pay は <Suspense> の中にあり、再 suspend で隠れた子は layout effect だけが外れる。layout に
   // すると、画面が残っているのに正当な署名を捨てる。StrictMode の mount → unmount → mount は effect が同期で true に戻す。
   const mountedRef = useRef(true);
@@ -800,6 +802,7 @@ export function useBatchPayment(
           chainId,
           walletClient,
           publicClient,
+          isAlive: () => mountedRef.current,
         });
       }
 
@@ -1072,8 +1075,10 @@ async function runCirclePayment(args: {
   chainId: number | undefined;
   walletClient: ConnectedWalletClient | undefined;
   publicClient: PublicClient | undefined;
+  // この試みを始めた hook の instance がまだ画面にあるか (unmount の後は false のまま・第 10 回レビュー H-V)。
+  isAlive: () => boolean;
 }): Promise<BatchPaymentResult> {
-  const { bundle, params, customer, chainId, walletClient, publicClient } = args;
+  const { bundle, params, customer, chainId, walletClient, publicClient, isAlive } = args;
   if (!customer || !walletClient || !publicClient) {
     throw new Error(
       'ウォレットが接続されていません。接続とネットワークを確認してください。',
@@ -1106,6 +1111,12 @@ async function runCirclePayment(args: {
 
   const calls = buildTransferCalls(params);
 
+  // 失効した試みは、ここから先 (attemptId の対応の作成・古い記録の掃除と scan の abandon・記録の予約) を始めない。mutationFn の
+  // 先頭の確認の後に、上の await (動的 import・ガス価格) が 2 つある。何の波及を断つか: その間に画面を離れた試みが、誰も署名
+  // しない記録 (awaiting_signature) と対応を残すこと (別のタブの同じ内容の支払いが、その記録を「別の試みが署名中」とみなして
+  // 最大 3 分止まる)・古い記録の abandon を、画面の無い試みの判断で行うこと。
+  if (!isAlive()) throw new Error('payment_cancelled');
+
   // 冪等試行 ID:
   //   - 明示供給 (params.paymentAttemptId) があればそれを素通しし、マッピングは一切触らない。
   //   - 無ければ callHash 由来の安定マッピング (sessionStorage) で同一タブの再クリック/reload に
@@ -1126,19 +1137,18 @@ async function runCirclePayment(args: {
       calls,
       permitAmount,
       paymentAttemptId: attemptId,
+      isAlive,
     });
   } catch (error) {
     // CirclePendingError (broadcast 済・確認待ち) はマッピングを保持し、再クリックで自 attempt を
     // resume させる。それ以外の確定的エラー (revert/拒否/abandon 済) はマッピングを破棄して、
     // resumed 分岐の「この決済試行は既に終了しています」に正規の再試行がぶつからないようにする。
-    if (usesStableMapping && (error as Error).name !== 'CirclePendingError') {
+    // 失効した試みは破棄しない (下の成功のときと同じ理由)。
+    if (usesStableMapping && isAlive() && (error as Error).name !== 'CirclePendingError') {
       clearStableAttemptId(attemptArgs);
     }
     throw error;
   }
-  // 成功確定 → マッピングを破棄 (次の同額購入は新 attempt。直近 double-click の dedup は
-  // scan の CONFIRMED_DEDUP_WINDOW_MS が引き続き担う)。
-  if (usesStableMapping) clearStableAttemptId(attemptArgs);
 
   // 監査: receipt から net USDC を再計算 (client-reported)。pending record の
   // userOpHash/sender/paymaster を expected binding に使う。verify は best-effort で、
@@ -1186,6 +1196,19 @@ async function runCirclePayment(args: {
       error: error instanceof Error ? error.message : String(error),
     });
   }
+
+  // 成功確定 → マッピングを破棄 (次の同額購入は新 attempt。直近 double-click の dedup は
+  // scan の CONFIRMED_DEDUP_WINDOW_MS が引き続き担う)。
+  // 失効した試みは破棄しない (error でも成功でも)。何の波及を断つか: マッピングは「chain・sender・内容ごとに 1 つ」で、同じタブで
+  // 開き直した画面も同じものを使う。画面の無い試みが消すと、開き直した画面の次の押下が新しい key になり、この試みが送った op の
+  // 記録 (confirmed・90 秒を過ぎたもの) を「正規のリピート」とみなして 2 本目を払う (この支払いの成功は、もう無い画面にしか
+  // 出ていない)。残しておけば、次の押下は同じ key を resume して既払いの結果を受け取り、そこで破棄される。
+  // 監査の後ろで見るのは、確定の後も上の監査 (receipt の RPC) の await の間は成功がまだ画面に出ていないから。その間に画面を
+  // 離れた試みも、成功を画面に出せないまま終わるので、対応を残す (この確認から return まで await は無い)。
+  // 代償: 失効した試みが払い終えた後、同じタブで同じ内容を意図してもう一度払うと、最初の 1 回は前の支払いの結果が出る
+  // (もう一度押せば新しい支払い。ただし confirmed から 90 秒以内は、押すたびに前の結果を返す = 今までと同じ動き)。払えたことを
+  // 知らずにもう一度払う害の方が大きいので dedup の側に倒す (circleSend.ts の confirmed の dedup と同じ方針)。
+  if (usesStableMapping && isAlive()) clearStableAttemptId(attemptArgs);
 
   return {
     ...result,

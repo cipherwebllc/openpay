@@ -15,6 +15,14 @@
 //   - cross-invocation (reload / 再クリック): 同一 sender+chain+callHash の submitting
 //     宙吊りがあれば、新規送信せず先にそれを recover する。
 //
+// 失効 (第 10 回レビュー H-V): この試みを始めた画面 (hook の instance) が外れた (unmount した) 後も、react-query の mutation は
+// 走り続ける。原則は 1 つ: **失効した試みは、新しい効果を始めない** (ウォレットに署名を求めない・記録を書かない = markSigned・
+// markSubmitting・abandon・bundler へ op を渡さない)。args.isAlive() を見るのは、新しい効果の直前だけ:
+//   (a) 署名 1 (permit) を求める直前  (b) 署名 2 (UserOperation) を求める直前  (c) 署名 2 の後・markSigned の前
+//   (d) 署名 1・署名 2 の catch (abandon の前)
+// すでに bundler へ渡した op の後始末 (receipt 待ち・復旧の再送・markConfirmed) では見ない (渡した op は画面が無くても成立しうる)。
+// 失効した試みは payment_cancelled で終わり、記録は awaiting_signature のまま残す (開き直した画面が同じ key を resume する)。
+//
 // useBatchPayment の circle 分岐がこの executeCirclePayment を呼ぶ。permitAmount の
 // 算定 (gas 実費 + per-chain surcharge) は chunk 5 (useGasQuoteCircle) が担い、ここへは
 // 確定値が渡る (本 module は fee ポリシーを持たない)。
@@ -219,7 +227,16 @@ export type ExecuteCirclePaymentArgs = {
   paymentAttemptId: string;
   /** テスト用に注入可能な時刻源。 */
   now?: () => number;
+  /** この試みを始めた画面 (hook の instance) がまだあるか (unmount の後は false のまま)。冒頭の「失効」。
+   * 省略時は常に true (失効を見ない)。 */
+  isAlive?: () => boolean;
 };
+
+// 失効した試みを終える error (冒頭の「失効」)。relay の hook (hooks/useJpycEip3009Payment.ts) と Pimlico の経路
+// (lib/smartAccount/pimlicoIntent.ts) が unmount した試みを終えるのと同じ文字列。
+function cancelled(): Error {
+  return new Error('payment_cancelled');
+}
 
 /** Circle 経路の 1 決済を二重決済耐性付きで実行する。confirmed の結果を返すか、
  * 確認待ちなら CirclePendingError を投げる (失敗ではない・後で復旧可能)。 */
@@ -228,6 +245,13 @@ export async function executeCirclePayment(
 ): Promise<CirclePaymentResult> {
   const { bundle, publicClient, walletClient, owner, calls, permitAmount } = args;
   const now = args.now ?? (() => Date.now());
+  const isAlive = args.isAlive ?? (() => true);
+  // (a)(b) 送金を止める確認ではない (保存と送信は (c) が止める)。何の波及を断つか: 署名の前の RPC (permit の domain・nonce /
+  // ガス価格・prepareUserOperation) を待つ間に画面を離れた試みが、離れた後にウォレットへ署名の要求を出すこと (もう無い画面の
+  // 要求がウォレットに残り、開き直した画面の要求と見分けがつかない)。
+  const beforeSign = () => {
+    if (!isAlive()) throw cancelled();
+  };
   const sender = owner;
   const chainId = bundle.chainId;
   const callHash = computeCallHash(calls);
@@ -262,9 +286,12 @@ export async function executeCirclePayment(
   // status 優先 (confirmed > submitting > pre-submit) で処理し、stale でない pre-submit が
   // 先に来て confirmed/submitting を CirclePendingError で masked するのを防ぐ。
   // ⚠️ scan→reserve は単一同期 tick で自タブ内は実質 atomic だが、タブ/デバイス跨ぎの真の同時
-  // race は localStorage の限界で完全には塞げない。**並行 (同一 nonce) race** は両 attempt が
-  // 同一 sender の key-0 sequential nonce を取るため EntryPoint の nonce 一意性で吸収される
-  // (先着 1 件のみ included、後発は AA25 invalid-nonce で revert = merchant 転送は 1 回)。
+  // race は localStorage の限界で完全には塞げない。**その race を EntryPoint は止めない**: この経路の
+  // UserOperation の nonce は、key が時刻由来で呼ぶたびに変わる (circleAccount.ts は account にも prepareUserOperation
+  // にも nonce・nonceKey を渡さず、viem の toSmartAccount の getNonce が Date.now() 由来の key を採る)。別の試みが作る op は
+  // 別の key の nonce になり、EntryPoint の nonce の一意性では互いに止まらない (両方 included されうる)。別の試みの二重払いを
+  // 止めているのは、この scan・下の resume (同じ key)・記録の遷移の CAS だけ。EntryPoint が 1 回にするのは、同じ署名済み op の
+  // 再送 (復旧の rebroadcast) だけ。
   // ⚠️ ただし「先行が confirmed 済 → 別デバイス (ローカル記録なし) で同じ QR を再決済」は新しい
   // nonce を取るため別決済として通る。これは server 権威の請求状態を持たない非カストディ設計の
   // 一般特性で、JPYC relay / Pimlico 7702 / standard の全ライブ経路と同じ (Circle 固有ではない)。
@@ -350,10 +377,16 @@ export async function executeCirclePayment(
       bundle,
       owner,
       permitAmount,
+      beforeSign, // (a)
     }); // popup1
     paymasterData = signed.paymasterData;
     permitSignature = signed.permitSignature;
   } catch (error) {
+    // (d) 失効した試みは abandon しない。何の波及を断つか: 同じタブ・同じ内容で開き直した画面は同じ key の記録を resume して
+    // 使っている。画面の無い試みが、離れた後に返った拒否・失敗で abandoned にすると、開き直した画面の markSigned が CAS で
+    // 落ち、送金していないのに失敗になる。記録は awaiting_signature のまま残し、元の error ではなく payment_cancelled で終える
+    // ((a) の throw もここに落ちる)。
+    if (!isAlive()) throw cancelled();
     // 署名前/署名拒否 = 未 broadcast の確定的失敗 → abandon (二重決済リスクなし)。
     abandon({ key, sender, now: now() });
     throw error;
@@ -366,12 +399,25 @@ export async function executeCirclePayment(
       bundle,
       calls,
       paymasterData,
+      beforeSign, // (b)
     }); // popup2 (signUserOperation)
     signedUserOp = prepared.signedUserOp;
     userOpHash = prepared.userOpHash;
   } catch (error) {
+    // (d) 署名 1 の catch と同じ ((b) の throw もここに落ちる)。
+    if (!isAlive()) throw cancelled();
     abandon({ key, sender, now: now() });
     throw error;
+  }
+
+  // (c) 失効した試みは、署名が返っても保存も送信もしない。何の波及を断つか: 画面を離れた後にウォレットの署名が返ると、
+  // この op は開き直した画面の支払いとは別の nonce (key が時刻由来) で、EntryPoint では止まらない。内容が違えば key も scan も
+  // 別なので両方払われ、同じ内容なら、開き直した画面の記録 (同じ key) をこの op で上書きして送る (H-V)。記録には触らない
+  // (awaiting_signature のまま = 開き直した画面が resume する)。この確認から下の markSigned・markSubmitting・broadcast の開始
+  // まで await を挟まない (確かめた後に失効する隙間を作らない)。
+  if (!isAlive()) {
+    logger.info('circle.sign_abandoned', { chainId, userOpHash });
+    throw cancelled();
   }
 
   // 署名済 op を **broadcast 前に** 永続 (応答ロスト時に同一 op を rebroadcast するため)。
