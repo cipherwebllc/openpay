@@ -158,6 +158,57 @@ describe('Store USDC TypeScript admission and KV reply handling', () => {
     expect(h.select).not.toHaveBeenCalled();
   });
 
+  // 第 10 回レビュー B2-2: settling への CAS が負けたときのやり直し (本物の Lua を通す版は hostedUsdcClaimRace-lua.test.ts)。
+  it('retries a lost settlement CAS from the re-read intent when the authorization is the same', async () => {
+    const rescheduled = { ...signed, nextReconcileAt: active.settlementStartedAt + 30_000, reconcileFromBlock: '95' };
+    reads(key, signed, rescheduled);
+    h.kvEval.mockResolvedValueOnce({ ok: true, value: -1 }).mockResolvedValue({ ok: true, value: 1 });
+    const result = await claimStoreUsdcSettlement({ intentSalt: SALT, now: active.settlementStartedAt });
+    // reconcile が書いた cursor を消さない = 2 回目は読み直した値から作り、読み直した raw を CAS の基準にする。
+    expect(result).toMatchObject({ ok: true, kind: 'claimed', intent: { state: 'settling', reconcileFromBlock: '95', authorizationHash: signed.authorizationHash } });
+    expect(h.kvEval).toHaveBeenCalledTimes(2);
+    expect(h.kvEval.mock.calls[0]![2][3]).toBe(JSON.stringify(signed));
+    expect(h.kvEval.mock.calls[1]![2][3]).toBe(JSON.stringify(rescheduled));
+    expect(h.select).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not retry a lost settlement CAS when the re-read intent carries a different authorization', async () => {
+    // 公開の関数からは signed の後に claim が変わらない。不変条件の確認として、読み直しの値だけを差し替える。
+    const claim = { ...active.claim, signatureFingerprint: 'e'.repeat(64) };
+    const other = { claim, authorizationHash: storeUsdcAuthorizationHash(claim) };
+    for (const latest of [{ ...signed, ...other }, { ...active, ...other }, { ...settled, ...other }]) {
+      expect(parseStoreUsdcIntent(JSON.stringify(latest))).toMatchObject({ state: latest.state, authorizationHash: other.authorizationHash });
+      h.kvEval.mockReset().mockResolvedValueOnce({ ok: true, value: -1 }).mockResolvedValue({ ok: true, value: 1 });
+      h.select.mockClear();
+      reads(key, signed, latest);
+      expect(await claimStoreUsdcSettlement({ intentSalt: SALT, now: active.settlementStartedAt })).toEqual({ ok: false, reason: 'conflict' });
+      expect(h.kvEval).toHaveBeenCalledTimes(1);
+      expect(h.select).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it.each([
+    ['settling', active, { ok: true, kind: 'pending' }],
+    ['settled', settled, { ok: true, kind: 'settled' }],
+    ['storage', 'storage', { ok: false, reason: 'storage' }],
+  ] as const)('after a lost settlement CAS, a re-read %s intent is reported without a second CAS', async (_label, latest, expected) => {
+    if (latest === 'storage') {
+      h.kvGet.mockReset().mockResolvedValueOnce({ ok: true, value: JSON.stringify(signed) }).mockResolvedValue({ ok: false });
+    } else {
+      reads(key, signed, latest);
+    }
+    h.kvEval.mockResolvedValueOnce({ ok: true, value: -1 }).mockResolvedValue({ ok: true, value: 1 });
+    expect(await claimStoreUsdcSettlement({ intentSalt: SALT, now: active.settlementStartedAt })).toMatchObject(expected);
+    expect(h.kvEval).toHaveBeenCalledTimes(1);
+  });
+
+  it('gives up with conflict after three retries of a lost settlement CAS', async () => {
+    reads(key, signed);
+    h.kvEval.mockResolvedValue({ ok: true, value: -1 });
+    expect(await claimStoreUsdcSettlement({ intentSalt: SALT, now: active.settlementStartedAt })).toEqual({ ok: false, reason: 'conflict' });
+    expect(h.kvEval).toHaveBeenCalledTimes(4);
+  });
+
   it('checks the attempt/hash before record and indeterminate CAS', async () => {
     const input = { intentSalt: SALT, attemptId: active.attemptId, txHash: TX, now: NOW };
     expect(await recordStoreUsdcTransaction(input)).toBe('updated');

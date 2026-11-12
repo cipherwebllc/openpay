@@ -43,6 +43,7 @@ export const LUA_REAL_TEST_FILES = [
   'tests/lib/x402/purchaseIntent-lua.test.ts',
   'tests/lib/x402/purchaseIntent-lua-machine.test.ts',
   'tests/lib/x402/storeUsdcIntent-lua-machine.test.ts',
+  'tests/lib/x402/hostedUsdcClaimRace-lua.test.ts',
   'tests/lib/x402/purchaseIntent-expiry-lua.test.ts',
   'tests/lib/x402/hostedTakedown-lua.test.ts',
   'tests/lib/x402/purchaseQuoteRateLimit-lua.test.ts',
