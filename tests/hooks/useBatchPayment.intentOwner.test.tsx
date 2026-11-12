@@ -537,6 +537,151 @@ describe('同じ intent でも、ほかの試みが新しくした記録 (別の
   });
 });
 
+// 送り直しの直前の保存が「書けたかどうか分からない」('uncertain') で終わったとき、memory のラッチと storage の版がずれる
+// (Codex の 3 回目のレビュー)。画面のある試みが 1 つだけで起き、別のタブも hash の不一致も要らない。
+//   mode 'read-back-throws' = 書き込み (setItem) は通り、その読み戻しが 1 回だけ投げる (storage は送ろうとした版)。
+//   mode 'write-dropped'    = 書き込みが黙って落ち、読み戻すと前の版 (storage は前の版のまま)。
+function uncertainNextWrite(mode: 'read-back-throws' | 'write-dropped') {
+  const realSet = Storage.prototype.setItem;
+  const realGet = Storage.prototype.getItem;
+  let armed = true;
+  let failNextGet = false;
+  const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (
+    this: Storage,
+    key: string,
+    value: string,
+  ) {
+    if (armed && key.startsWith(PIMLICO_PENDING_KEY_PREFIX)) {
+      armed = false;
+      if (mode === 'write-dropped') return;
+      realSet.call(this, key, value);
+      failNextGet = true;
+      return;
+    }
+    realSet.call(this, key, value);
+  });
+  const getItem = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(function (
+    this: Storage,
+    key: string,
+  ) {
+    if (failNextGet && key.startsWith(PIMLICO_PENDING_KEY_PREFIX)) {
+      failNextGet = false;
+      throw new DOMException('read failed', 'UnknownError');
+    }
+    return realGet.call(this, key);
+  });
+  return () => {
+    setItem.mockRestore();
+    getItem.mockRestore();
+  };
+}
+
+describe('送り直しの保存が「書けたかどうか分からない」で終わった後も、画面のある試みは送り直すか期限で閉じる', () => {
+  // T に最初の送信の応答を失い (bundler に届いていない)、T+60 秒の送り直しで保存を確かめられずに何も送らない。
+  async function resendUncertainAt60s(mode: 'read-back-throws' | 'write-dropped') {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(T0);
+    const fake = mountClients();
+    loseRequest(fake);
+    const hook = render();
+    hook.result.current.mutate(PARAMS);
+    await waitFor(() => expect(hook.result.current.isUnknown).toBe(true));
+    await waitFor(() => expect(hook.result.current.isPending).toBe(false));
+    expect(storedUpdatedAt()).toBe(T0);
+
+    vi.setSystemTime(T0 + 60_000);
+    const restore = uncertainNextWrite(mode);
+    hook.result.current.retryReceipt();
+    await waitFor(() => expect(hook.result.current.pendingStoreUnavailable).toBe(true));
+    await waitFor(() => expect(hook.result.current.isPending).toBe(false));
+    restore();
+    expect(fake.bundlerSend).toHaveBeenCalledTimes(1);
+    expect(hook.result.current.isUnknown).toBe(true);
+    expect(storedUpdatedAt()).toBe(mode === 'read-back-throws' ? T0 + 60_000 : T0);
+    return { fake, hook };
+  }
+
+  it('保存は通り、読み戻しだけが投げた (storage は T+60 秒の版) → 両方の版が期限を過ぎた後の再確認で閉じ、新しい支払いが開く (Codex 3 回目の再現)', async () => {
+    const { fake, hook } = await resendUncertainAt60s('read-back-throws');
+
+    // 直す前: memory は T の版のままで、期限の削除が storage の T+60 秒の版と合わず、何度確かめても閉じない (30 日たっても)。
+    vi.setSystemTime(T0 + 60_000 + SEVEN_DAYS + 1);
+    hook.result.current.retryReceipt();
+    await waitFor(() => expect(hook.result.current.isUnknown).toBe(false));
+    await waitFor(() => expect(hook.result.current.isPending).toBe(false));
+    expect(pendingKeys()).toHaveLength(0);
+    expect(hook.result.current.error).toBeNull();
+    expect(logger.warn).toHaveBeenCalledWith('pimlico.pending.expired-closed', expect.anything());
+    expect(fake.bundlerSend).toHaveBeenCalledTimes(1);
+
+    acceptAndMine(fake);
+    hook.result.current.mutate(OTHER_PARAMS);
+    await waitFor(() => expect(hook.result.current.isSuccess).toBe(true));
+    expect(fake.getNonce).toHaveBeenCalledTimes(2);
+    expect(sentOp(fake, 1).nonce).not.toBe(sentOp(fake, 0).nonce);
+  });
+
+  it('保存は通り、読み戻しだけが投げた → 期限は storage の版 (送ろうとした T+60 秒) から数える: T+7 日+1 ms の再確認は閉じずに送り直す (reload の後と同じ)', async () => {
+    const { fake, hook } = await resendUncertainAt60s('read-back-throws');
+
+    // 直す前: memory の T の版で期限切れと判断し、storage の版とも合わないので、送り直しも閉じもしない。
+    vi.setSystemTime(T0 + SEVEN_DAYS + 1);
+    acceptAndMine(fake);
+    hook.result.current.retryReceipt();
+    await waitFor(() => expect(hook.result.current.isSuccess).toBe(true));
+    expect(fake.bundlerSend).toHaveBeenCalledTimes(2);
+    expect(sentOp(fake, 1)).toEqual(sentOp(fake, 0));
+    expect(world.mined).toHaveLength(1);
+    expect(pendingKeys()).toHaveLength(0);
+  });
+
+  it('期限の削除は同じ intent の記録だけ: 期限を判断する間に別のタブが閉じて始めた B の記録は、B 自身が期限を過ぎていても消さない (B の照合は B を確かめる画面が行う)', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(T0);
+    const seedFake = mountClients();
+    loseRequest(seedFake);
+    const seed = render();
+    seed.result.current.mutate(PARAMS);
+    await waitFor(() => expect(seed.result.current.isUnknown).toBe(true));
+    await waitFor(() => expect(seed.result.current.isPending).toBe(false));
+    seed.unmount();
+
+    vi.setSystemTime(T0 + SEVEN_DAYS_AND_A_MINUTE);
+    const fake = mountClients();
+    const nonceRead = deferred<bigint>();
+    fake.readContract.mockImplementationOnce(() => nonceRead.promise);
+    const tab1 = render();
+    const tab2 = render();
+    await waitFor(() => expect(tab1.result.current.isUnknown).toBe(true));
+    await waitFor(() => expect(tab2.result.current.isUnknown).toBe(true));
+    tab1.result.current.retryReceipt();
+    await waitFor(() => expect(fake.readContract).toHaveBeenCalledTimes(1));
+    tab2.result.current.retryReceipt();
+    await waitFor(() => expect(tab2.result.current.isUnknown).toBe(false));
+    await waitFor(() => expect(tab2.result.current.isPending).toBe(false));
+    const other = await openOtherIntent(fake, tab2);
+
+    // タブ 1 の読み取りが返るのは、B の記録も 7 日を過ぎた後。
+    vi.setSystemTime(T0 + 2 * SEVEN_DAYS_AND_A_MINUTE);
+    nonceRead.resolve(0n);
+    await waitFor(() => expect(tab1.result.current.isPending).toBe(false));
+
+    expect(storedRaw()).toBe(other.raw);
+    expect(tab1.result.current.isUnknown).toBe(true);
+  });
+
+  it('書き込みが黙って落ち、storage は T の版のまま (memory は送ろうとした版) → 両方の版が期限を過ぎた後の再確認で閉じる', async () => {
+    const { hook } = await resendUncertainAt60s('write-dropped');
+
+    vi.setSystemTime(T0 + 60_000 + SEVEN_DAYS + 1);
+    hook.result.current.retryReceipt();
+    await waitFor(() => expect(hook.result.current.isUnknown).toBe(false));
+    await waitFor(() => expect(hook.result.current.isPending).toBe(false));
+    expect(pendingKeys()).toHaveLength(0);
+    expect(logger.warn).toHaveBeenCalledWith('pimlico.pending.expired-closed', expect.anything());
+  });
+});
+
 describe('筋 1: 送った後の応答不明の書き込み (holdAsUnknown) は、同じ intent の記録だけを書く', () => {
   it.each([
     { label: '失敗する (応答不明)', fails: true },
