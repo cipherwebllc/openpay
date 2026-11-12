@@ -2,7 +2,7 @@
 // log の出口が伏せる対象 (key つきの URL・Request body・129 桁以上の 16 進) と、残す対象 (64 桁の hash・アドレス) を
 // 1 か所にまとめる。値はすべてテスト用の作り物。
 import { HttpRequestError, RpcRequestError, TimeoutError } from 'viem';
-import { UserOperationExecutionError } from 'viem/account-abstraction';
+import { UserOperationExecutionError, getUserOperationError } from 'viem/account-abstraction';
 
 export const API_KEY = 'KEY123';
 export const BUNDLER_ORIGIN = 'https://api.example';
@@ -53,10 +53,10 @@ export const USER_OP_BODY = {
   params: [userOperation, '0x0000000071727De22E5E9d8BAf0edAc6f37da032'],
 };
 
-export function rpcRequestError(): RpcRequestError {
+export function rpcRequestError(url: string = BUNDLER_URL): RpcRequestError {
   return new RpcRequestError({
     body: USER_OP_BODY,
-    url: BUNDLER_URL,
+    url,
     error: { code: -32500, message: RPC_DETAILS },
   });
 }
@@ -85,6 +85,34 @@ export function userOperationExecutionError(): UserOperationExecutionError {
     paymasterData: PAYMASTER_DATA,
     signature: SIGNATURE,
   } as never);
+}
+
+// lib/smartAccount/pimlicoSend.ts の toUserOperationRejection と同じ形 (viem の getUserOperationError)。bundler の AA14 は
+// InitCodeMustReturnSenderError になり、message は factoryData の行と `Request Arguments:` を持つが、`URL:` と
+// `Request body:` は持たない (cause の viem の request error の行は、shortMessage と metaMessages に入らない)。
+export function aa14UserOperationRejection() {
+  return getUserOperationError(
+    new RpcRequestError({
+      body: USER_OP_BODY,
+      url: BUNDLER_URL,
+      error: { code: -32500, message: 'AA14 initCode must return sender' },
+    }),
+    {
+      sender: SENDER,
+      nonce: 1n,
+      factory: userOperation.factory,
+      factoryData: SHORT_FACTORY_DATA,
+      callData: CALL_DATA,
+      callGasLimit: 21_000n,
+      verificationGasLimit: 100_000n,
+      preVerificationGas: 50_000n,
+      maxFeePerGas: 1_000_000_000n,
+      maxPriorityFeePerGas: 1_000_000_000n,
+      paymaster: userOperation.paymaster,
+      paymasterData: PAYMASTER_DATA,
+      signature: SIGNATURE,
+    } as never,
+  );
 }
 
 export const VIEM_ERROR_CASES = [

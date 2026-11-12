@@ -49,6 +49,8 @@ import {
 import { enumeratePathOptions } from '@/lib/crossChain/pathEnumerator';
 import { selectPath } from '@/lib/crossChain/router';
 import { env } from '@/lib/env';
+import { redactLogText } from '@/lib/telemetryRedaction';
+import { API_KEY, BUNDLER_ORIGIN, httpRequestError, leakedMarkers } from '../../helpers/viemRequestErrors';
 
 const ACCOUNT = '0x1234567890123456789012345678901234567890' as const;
 
@@ -156,6 +158,31 @@ describe('lib/crossChain/balance.readMultiChainWalletBalances', () => {
     const out = await readMultiChainWalletBalances(ACCOUNT);
     expect(out).toHaveLength(TESTNET_CHAIN_COUNT);
     expect(out.every((e) => e.status === 'error')).toBe(true);
+  });
+
+  // 第 10 回レビュー PR-40 (Codex 指摘 4): 診断の log は viem の error の文 (`URL: <RPC の URL>` の行) を console に出す。
+  // RPC の上書きの URL は path や query に API key を持つので、伏せてから出す (log は消さない)。
+  it('診断の log (console.warn) は、RPC の error の文の key つきの URL と本文を伏せて出す', async () => {
+    const error = httpRequestError();
+    for (const chain of ALL_TESTNET_CHAINS) {
+      readContractMocks.set(chain.id, vi.fn().mockRejectedValue(error));
+    }
+    vi.stubEnv('NODE_ENV', 'development');
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      const out = await readMultiChainWalletBalances(ACCOUNT);
+      expect(out.every((e) => e.status === 'error')).toBe(true);
+      const lines = warnSpy.mock.calls.map(([line]) => String(line));
+      expect(lines).toHaveLength(TESTNET_CHAIN_COUNT);
+      expect(lines[0]).toMatch(/^\[xchain-diag\] .+: FAILED after \d+ms — /);
+      expect(lines[0].endsWith(redactLogText(error.message))).toBe(true);
+      expect(lines[0]).toContain(`URL: ${BUNDLER_ORIGIN}\n`);
+      expect(lines.join('\n')).not.toContain(API_KEY);
+      expect(leakedMarkers(lines)).toEqual([]);
+    } finally {
+      warnSpy.mockRestore();
+      vi.unstubAllEnvs();
+    }
   });
 
   it('chainResolver injection: テスト用 chain で resolver 上書き', async () => {

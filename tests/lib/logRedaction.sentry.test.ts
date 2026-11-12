@@ -154,6 +154,42 @@ describe('本物の Sentry SDK を通した送信 (instrumentation-client.ts の
     expect(values[0].value).toContain(`Details: ${RPC_DETAILS}`);
   });
 
+  // Codex 指摘 7: logger は元の Error を渡す (伏せた写しを作ると AggregateError の子が落ちていた)。exception.values の
+  // 1 つずつ (cause の連なり・AggregateError の子) を beforeSend が伏せる。
+  it('AggregateError の子と cause の連なりは、落ちずに別の exception として送られ、どれも伏せてある', async () => {
+    const child = userOperationExecutionError();
+    const error = new AggregateError(
+      [child, new Error('AA21 prefund')],
+      `batch send failed: ${rpcRequestError().message}`,
+      { cause: rpcRequestError(`HTTPS://api.example/v2/${API_KEY}`) },
+    );
+    logger.error('circle.post_submit.unexpected', { error });
+    await Sentry.flush(2000);
+
+    expect(leakedMarkers(sent.envelopes)).toEqual([]);
+    expect(JSON.stringify(sent.envelopes)).not.toContain(API_KEY);
+    const [event] = sentEvents();
+    const values = event.exception!.values;
+    // 子 2 つ (UserOperationExecutionError とその cause・AA21) と、cause の RpcRequestError と、最上位の AggregateError。
+    expect(values.map((value) => value.type).sort()).toEqual(
+      ['AggregateError', 'Error', 'RpcRequestError', 'RpcRequestError', 'UserOperationExecutionError'].sort(),
+    );
+    expect(values.find((value) => value.type === 'Error')?.value).toBe('AA21 prefund');
+    expect(values.find((value) => value.type === 'UserOperationExecutionError')?.value).toBe(redactLogText(child.message));
+    expect(values.at(-1)!.type).toBe('AggregateError');
+    expect(values.at(-1)!.value).toBe(`batch send failed: ${redactLogText(rpcRequestError().message)}`);
+    for (const value of values.filter((item) => item.type === 'RpcRequestError')) {
+      expect(value.value).toContain(`URL: ${BUNDLER_ORIGIN}\n`);
+      expect(value.value).toContain(`Details: ${RPC_DETAILS}`);
+    }
+    expect(urlLineFrames(event).length).toBeGreaterThan(0);
+    expect(urlLineFrames(event).every((frame) => frame.filename === BUNDLER_ORIGIN)).toBe(true);
+    // Sentry の「送信済み」の印は元の Error に付く (main と同じ)。同じ Error を後でもう一度 capture しても送らない。
+    Sentry.captureException(error);
+    await Sentry.flush(2000);
+    expect(sentEvents()).toHaveLength(1);
+  });
+
   it('logger を通らない error (global-error.tsx の captureException・console.error の文) も、beforeSend と beforeBreadcrumb で伏せる', async () => {
     const error = userOperationExecutionError();
     // 伏せていない文が console の breadcrumb に入る (logger を通らない console.error)。

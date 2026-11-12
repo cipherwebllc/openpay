@@ -34,37 +34,32 @@ function replacer(_key: string, value: unknown): unknown {
   return value;
 }
 
-// captureException に渡す Error。伏せる所が無ければ元の Error をそのまま返す (Sentry の grouping は今までと同じ)。
-// あれば name・stack の frame・cause の並びを保った写しを返す (元の Error は書き換えない)。Sentry の browser の
-// stack parser は、stack の先頭に入った message の `URL: <url>` の行を frame として読むので、その frame の filename
-// だけが key つきの URL から origin に変わる (key を含んだままでは同じ group にできない)。
-// cause をたどるのは 5 段まで (Sentry の LinkedErrors が読む段数と同じ)。
-function redactError(error: Error, depth = 0): Error {
-  const message = redactLogText(error.message);
-  const stack = error.stack && redactLogText(error.stack);
-  const cause =
-    depth < 5 && error.cause instanceof Error ? redactError(error.cause, depth + 1) : undefined;
-  if (message === error.message && stack === error.stack && (!cause || cause === error.cause)) {
-    return error;
+// extra は fields を深く伏せた写し (console と同じ replacer を通した JSON の形・元の fields は書き換えない)。Sentry は
+// extra の中の Error の欄 (viem の url・body など・`URL:` の前置きが無い) も写すので、fields をそのまま渡さない。
+function redactedExtra(fields: Fields | undefined): Fields | undefined {
+  if (!fields) return undefined;
+  try {
+    return JSON.parse(JSON.stringify(fields, replacer)) as Fields;
+  } catch {
+    // Sentry 向けの写しの失敗 (循環する欄・toJSON が undefined を返す fields) が、logger の呼び出し元 (決済の処理) に
+    // throw として届くのを断つ。console の行は出た後なので、Sentry には伏せていない fields の代わりに印だけを送る。
+    return { redactionFailed: true };
   }
-  const copy = new Error(message, { cause });
-  copy.name = error.name;
-  copy.stack = stack;
-  return copy;
 }
 
 // Sentry へ "fingerprint" 用のグルーピングキーとして msg を渡す。
 // fields の中に Error が含まれていれば captureException で stack を保持。
+// Error は元のまま渡す (exception の値・stack の frame・cause の連なり・AggregateError の子は、3 つの設定の beforeSend
+// が送る前に伏せる)。
 function reportToSentry(level: 'warn' | 'error', msg: string, fields?: Fields): void {
   const errorField = fields
     ? Object.values(fields).find((v) => v instanceof Error)
     : undefined;
   // Sentry の SeverityLevel は 'warning' だが logger 側は 'warn' を使うため変換
   const sentryLevel: Sentry.SeverityLevel = level === 'warn' ? 'warning' : 'error';
-  // extra は fields を深く伏せた写し (console と同じ replacer を通した JSON の形・元の fields は書き換えない)。
-  const extra: Fields | undefined = fields && JSON.parse(JSON.stringify(fields, replacer));
+  const extra = redactedExtra(fields);
   if (errorField instanceof Error) {
-    Sentry.captureException(redactError(errorField), {
+    Sentry.captureException(errorField, {
       level: sentryLevel,
       tags: { event: msg },
       extra,

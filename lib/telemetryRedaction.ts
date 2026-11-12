@@ -40,10 +40,11 @@ export function urlOriginForTelemetry(raw: string): string {
 // 伏せるのは 3 つだけ: Request body の行 (行末まで)・`URL:` の path と query (origin は残す)・129 桁以上つづく 16 進
 // (署名 65 byte = 130 桁・callData・paymasterData)。64 桁の tx hash・userOpHash と 40 桁のアドレスは監査で要るので残す。
 // 2 回通しても結果は同じ (伏せた後の `Request body: [redacted]` は、その後ろの文を消さないようにもう一度は拾わない)。
+// URL の scheme は大文字小文字を問わない (RPC の上書きの URL は書かれたままの大文字で viem の文に入る)。
 export function redactLogText(text: string): string {
   return text
     .replace(/Request body:(?! \[redacted\]).*/g, 'Request body: [redacted]')
-    .replace(/URL: (https?:\/\/[^\s"'\\]+)/g, (_match, url: string) => `URL: ${urlOriginForTelemetry(url)}`)
+    .replace(/URL: (https?:\/\/[^\s"'\\]+)/gi, (match, url: string) => match.slice(0, 5) + urlOriginForTelemetry(url))
     .replace(/(?:0x)?[0-9a-fA-F]{129,}/g, '[redacted]');
 }
 
@@ -109,13 +110,39 @@ function withoutQueryOrFragment(raw: string): string {
   return endIndexes.length > 0 ? raw.slice(0, Math.min(...endIndexes)) : raw;
 }
 
+type TraceSpan = { op?: string; description?: string; data?: Record<string, unknown> };
+
+// 別の origin への request の span は、description と URL の欄を origin だけにする。RPC の URL は path に API key を
+// 持つ (https://…/v2/<key>) が、SDK が付ける description (`POST <URL>`)・url・url.path・http.target は path を残す
+// (http.url と url.full は上で origin)。自分の app の span (相対 path・同じ origin・受けた request の http.server) は
+// 今までの scrub のまま。own は event の request (browser は開いているページ・server は受けた request) の origin で、
+// request が無ければ location の origin (server で両方無ければ、絶対 URL は全部別の origin として扱う)。
+function scrubForeignSpanUrls(span: TraceSpan | undefined, own: string | undefined): void {
+  if (!span || span.op === 'http.server') return;
+  const foreign = (raw: unknown): raw is string =>
+    typeof raw === 'string' && /^https?:\/\//i.test(raw) && urlOriginForTelemetry(raw) !== own;
+  if (typeof span.description === 'string') {
+    span.description = span.description.replace(/https?:\/\/\S+/gi, (url) => (foreign(url) ? urlOriginForTelemetry(url) : url));
+  }
+  const data = span.data;
+  if (data && [data.url, data['url.full'], data['http.url']].some(foreign)) {
+    if (typeof data.url === 'string') data.url = urlOriginForTelemetry(data.url);
+    delete data['url.path'];
+    delete data['http.target'];
+  }
+}
+
 function scrubTraceUrlFields(event: Event): void {
+  let own = currentOrigin();
   if (typeof event.request?.url === 'string') {
-    event.request.url = urlOriginForTelemetry(event.request.url);
+    own = urlOriginForTelemetry(event.request.url);
+    event.request.url = own;
   }
   scrubUrlFields(event.contexts?.trace?.data, TRACE_URL_KEYS);
+  scrubForeignSpanUrls(event.contexts?.trace, own);
   for (const span of event.spans ?? []) {
     scrubUrlFields(span.data, TRACE_URL_KEYS);
+    scrubForeignSpanUrls(span, own);
   }
 }
 
@@ -152,9 +179,22 @@ function scrubServerTraceData(data: Record<string, unknown> | undefined): void {
 }
 
 export function scrubSentryBreadcrumb(breadcrumb: Breadcrumb): Breadcrumb {
-  // console の breadcrumb には、console に出た error の文がそのまま入る (logger を通らない console.error も)。
+  // console の breadcrumb には、console に出た error の文がそのまま入る (logger を通らない console.error も)。message と
+  // data (console は data.arguments に引数を持つ) を積む時点で伏せる (積んだ breadcrumb は error の event・transaction・
+  // Replay の録画に入る)。ここでの data はまだ normalize されていない元の引数 (Error・循環する object・DOM もある) なので、
+  // 伏せるのは data の欄と配列の 1 段目の文字列だけ。Error などの中の文は、normalize された写しを beforeSend と
+  // beforeSendTransaction が伏せる (scrubEventBreadcrumbs)。
   if (typeof breadcrumb.message === 'string') {
     breadcrumb.message = redactLogText(breadcrumb.message);
+  }
+  const data = breadcrumb.data;
+  if (data) {
+    for (const [key, value] of Object.entries(data)) {
+      if (typeof value === 'string') data[key] = redactLogText(value);
+      else if (Array.isArray(value)) {
+        data[key] = value.map((item: unknown) => (typeof item === 'string' ? redactLogText(item) : item));
+      }
+    }
   }
   if (!breadcrumb.category || !URL_BREADCRUMB_CATEGORIES.has(breadcrumb.category)) {
     return breadcrumb;
@@ -169,10 +209,20 @@ export function scrubSentryBreadcrumb(breadcrumb: Breadcrumb): Breadcrumb {
   return breadcrumb;
 }
 
+// event に載った breadcrumb (SDK が normalize した写し)。console の breadcrumb は、引数 (Error の message・stack) を
+// data.arguments にも持つ。transaction は beforeSend を通らないので、beforeSendTransaction でも同じ関数を通す。
+function scrubEventBreadcrumbs(event: Event): void {
+  for (const breadcrumb of event.breadcrumbs ?? []) {
+    scrubSentryBreadcrumb(breadcrumb);
+    if (breadcrumb.data) breadcrumb.data = redactLogData(breadcrumb.data);
+  }
+}
+
 export function scrubSentryTransaction(
   event: TransactionEvent,
 ): TransactionEvent {
   scrubTraceUrlFields(event);
+  scrubEventBreadcrumbs(event);
   return event;
 }
 
@@ -195,17 +245,14 @@ export function scrubSentryServerEvent<T extends Event>(event: T): T {
   if (nextjs && typeof nextjs.request_path === 'string') {
     nextjs.request_path = withoutQueryOrFragment(nextjs.request_path);
   }
-  for (const breadcrumb of event.breadcrumbs ?? []) {
-    scrubSentryBreadcrumb(breadcrumb);
-    // console の breadcrumb は、引数 (Error の message・stack) を data.arguments にも持つ。
-    if (breadcrumb.data) breadcrumb.data = redactLogData(breadcrumb.data);
-  }
-  // logger を通らずに届く error (未捕捉の例外・error boundary・onRequestError) の文も、送る前に伏せる。
+  scrubEventBreadcrumbs(event);
+  // error の文 (logger の captureException・未捕捉の例外・error boundary・onRequestError) は、ここで伏せる。
+  // exception.values は cause の連なりと AggregateError の子を 1 つずつ持つので、全部を通す。
   if (typeof event.message === 'string') event.message = redactLogText(event.message);
   for (const exception of event.exception?.values ?? []) {
     if (typeof exception.value === 'string') exception.value = redactLogText(exception.value);
     // Sentry の browser の stack parser は、stack の先頭に入った message の `URL: <url>` の行を frame として読む
-    // (function が 'URL: '・filename が key つきの URL)。logger が渡す写しの stack (伏せた後) と同じ形にそろえる。
+    // (function が 'URL: '・filename が key つきの URL)。その filename を origin だけにする。
     for (const frame of exception.stacktrace?.frames ?? []) {
       if (frame.function === 'URL: ' && frame.filename) {
         frame.filename = urlOriginForTelemetry(frame.filename);

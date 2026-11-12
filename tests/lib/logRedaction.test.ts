@@ -2,7 +2,7 @@
 // 出口 = logger の console・logger が Sentry へ渡す引数・Sentry の beforeSend / beforeBreadcrumb・決済の監査 log・Replay の録画。
 // error は node_modules/viem の class を実際に new して作る (tests/helpers/viemRequestErrors.ts)。
 // 本物の Sentry の SDK を通した送信の中身は tests/lib/logRedaction.sentry.test.ts が見る。
-import type { Event } from '@sentry/core';
+import type { Event, TransactionEvent } from '@sentry/core';
 import type { Breadcrumb, ReplayFrameEvent } from '@sentry/nextjs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Address } from 'viem';
@@ -106,6 +106,15 @@ describe('redactLogText (伏せる関数)', () => {
     expect(redactLogText(plain)).toBe(plain);
   });
 
+  it('URL の scheme は大文字小文字を問わない (RPC の上書きの URL は書かれたままの大文字で viem の文に入る)', () => {
+    const error = rpcRequestError(`HTTPS://api.example/v2/${API_KEY}?apikey=${API_KEY}`);
+    expect(error.message).toContain(`URL: HTTPS://api.example/v2/${API_KEY}`);
+    expect(redactLogText(error.message)).toBe(
+      `RPC Request failed.\n\nURL: ${BUNDLER_ORIGIN}\nRequest body: [redacted]\n\nDetails: ${RPC_DETAILS}\nVersion: viem@${error.version}`,
+    );
+    expect(redactLogText(`URL: Http://127.0.0.1:8545/${API_KEY}`)).toBe('URL: http://127.0.0.1:8545');
+  });
+
   it.each(VIEM_ERROR_CASES)('%s: 2 回通しても、JSON にした後でもう一度通しても、同じ結果のまま (後ろの文を消さない)', (_name, make) => {
     const once = redactLogText(make().message);
     expect(redactLogText(once)).toBe(once);
@@ -152,7 +161,7 @@ describe('logger (console と Sentry へ渡す引数)', () => {
   }
 
   describe.each(VIEM_ERROR_CASES)('%s', (_name, make) => {
-    it('Error を欄に渡す形 ({ error }): console の message・stack と、captureException の Error・extra に残らない', () => {
+    it('Error を欄に渡す形 ({ error }): console の message・stack と、captureException の extra に残らない (Error は元のまま渡す)', () => {
       const error = make();
       const rawMessage = error.message;
       const rawStack = error.stack;
@@ -171,14 +180,10 @@ describe('logger (console と Sentry へ渡す引数)', () => {
       expect(sentry.captureMessage).not.toHaveBeenCalled();
       expect(sentry.captureException).toHaveBeenCalledOnce();
       const [sent, options] = sentry.captureException.mock.calls[0] as [Error, { level: string; tags: { event: string }; extra: Record<string, unknown> }];
-      expect(leakedMarkers(sent)).toEqual([]);
+      // Error は元のまま (exception の値・stack・cause は beforeSend が伏せる。送られる中身は logRedaction.sentry.test.ts)。
+      expect(sent).toBe(error);
+      // Sentry は extra の中の Error の欄 (viem の url・body) も写すので、extra は伏せた写し。
       expect(leakedMarkers(options)).toEqual([]);
-      // grouping に使う type (name) と stack の frame は元と同じ。
-      expect(sent).toBeInstanceOf(Error);
-      expect(sent.name).toBe(error.name);
-      expect(sent.message).toBe(redactLogText(rawMessage));
-      expect(frames(sent.stack)).toEqual(frames(rawStack));
-      expect(frames(sent.stack).length).toBeGreaterThan(0);
       expect(options.level).toBe('error');
       expect(options.tags).toEqual({ event: EVENT });
       expect(options.extra).toMatchObject({ userOpHash: USER_OP_HASH, chainId: 137 });
@@ -238,45 +243,60 @@ describe('logger (console と Sentry へ渡す引数)', () => {
     });
   });
 
-  it('captureException に渡す写しは cause の並びも伏せて保つ (Sentry は cause を別の exception として送る)', () => {
-    const error = userOperationExecutionError();
-    logger.error(EVENT, { error });
-    const [sent] = sentry.captureException.mock.calls[0] as [Error & { cause?: Error }];
-    expect(sent).not.toBe(error);
-    expect(sent.cause).toBeInstanceOf(Error);
-    expect(sent.cause).not.toBe(error.cause);
-    expect(sent.cause?.name).toBe('RpcRequestError');
-    expect(sent.cause?.message).toBe(redactLogText(error.cause.message));
-    expect(frames(sent.cause?.stack)).toEqual(frames(error.cause.stack));
-    expect(leakedMarkers(sent)).toEqual([]);
+  it('大文字の scheme の URL (HTTPS://) も、console の行と Sentry の extra に残らない', () => {
+    const error = rpcRequestError(`HTTPS://api.example/v2/${API_KEY}?apikey=${API_KEY}`);
+    logger.warn(EVENT, { error: error.message, cause: error });
+    const line = consoleLine(warnSpy);
+    expect(line).not.toContain(API_KEY);
+    expect(JSON.parse(line).error).toContain(`URL: ${BUNDLER_ORIGIN}\n`);
+    const [, options] = sentry.captureException.mock.calls[0] as [Error, { extra: Record<string, unknown> }];
+    expect(JSON.stringify(options.extra)).not.toContain(API_KEY);
   });
 
-  it('最上位の文に伏せる所が無くても、cause にあれば cause を伏せた写しを渡す', () => {
-    const cause = rpcRequestError();
-    const error = new Error('send failed', { cause });
+  it('cause と AggregateError の子を持つ Error も、元のまま captureException に渡す (子を落とさない・元を書き換えない)', () => {
+    const child = rpcRequestError();
+    const childMessage = child.message;
+    const error = new AggregateError([child, new Error('AA21 prefund')], 'send failed', { cause: userOperationExecutionError() });
     logger.error(EVENT, { error });
-    const [sent] = sentry.captureException.mock.calls[0] as [Error & { cause?: Error }];
-    expect(sent).not.toBe(error);
-    expect(sent.message).toBe('send failed');
-    expect(frames(sent.stack)).toEqual(frames(error.stack));
-    expect(sent.cause?.message).toBe(redactLogText(cause.message));
-    expect(leakedMarkers(sent)).toEqual([]);
-    expect(error.cause).toBe(cause);
-  });
-
-  it('伏せる所が無い Error は、元の Error をそのまま captureException に渡す (cause も)', () => {
-    const cause = new Error('AA21 prefund');
-    const error = new Error('payment failed', { cause });
-    logger.error('payment.failed', { error });
-    const [sent] = sentry.captureException.mock.calls[0] as [Error];
+    const [sent] = sentry.captureException.mock.calls[0] as [AggregateError];
     expect(sent).toBe(error);
-    expect(sent.cause).toBe(cause);
+    expect(sent.errors).toHaveLength(2);
+    expect(sent.errors[0]).toBe(child);
+    expect(child.message).toBe(childMessage);
+  });
+
+  // 第 10 回レビュー PR-40 の Codex 指摘 5: Sentry 向けの写しを作る JSON の往復は、console の行が出た後に throw しうる。
+  // logger は決済の経路から呼ばれるので、付帯の写しの失敗を呼び出し元へ throw として届けない。
+  describe('Sentry 向けの extra の写しが作れない fields', () => {
+    it('循環する値が msg の欄にある (console では authoritative な msg で上書きされる): throw せず、console の行は出て、Sentry には印だけ', () => {
+      const circular: Record<string, unknown> = {};
+      circular.self = circular;
+      expect(() => logger.warn('payment.failed', { msg: circular })).not.toThrow();
+      expect(JSON.parse(consoleLine(warnSpy))).toMatchObject({ msg: 'payment.failed', level: 'warn' });
+      expect(sentry.captureMessage).toHaveBeenCalledOnce();
+      expect(sentry.captureMessage.mock.calls[0]).toEqual([
+        'payment.failed',
+        { level: 'warning', tags: { event: 'payment.failed' }, extra: { redactionFailed: true } },
+      ]);
+    });
+
+    it('fields の toJSON が undefined を返す: throw せず、console の行は出て、Sentry には印だけ (Error の欄があれば captureException)', () => {
+      const error = rpcRequestError();
+      expect(() => logger.error('payment.failed', { error, toJSON: () => undefined })).not.toThrow();
+      expect(errorSpy).toHaveBeenCalledOnce();
+      expect(sentry.captureException).toHaveBeenCalledOnce();
+      expect(sentry.captureException.mock.calls[0]).toEqual([
+        error,
+        { level: 'error', tags: { event: 'payment.failed' }, extra: { redactionFailed: true } },
+      ]);
+    });
   });
 });
 
 describe('Sentry の beforeSend / beforeBreadcrumb (設定ファイルが実際に渡している hook)', () => {
   type Hooks = {
     beforeSend: (event: Event) => Event;
+    beforeSendTransaction: (event: TransactionEvent) => TransactionEvent;
     beforeBreadcrumb?: (breadcrumb: Breadcrumb) => Breadcrumb;
   };
 
@@ -380,6 +400,120 @@ describe('Sentry の beforeSend / beforeBreadcrumb (設定ファイルが実際�
     const breadcrumb = beforeBreadcrumb!({ category: 'console', level: 'error', message: `send failed ${raw}` });
     expect(leakedMarkers(breadcrumb)).toEqual([]);
     expect(breadcrumb.message).toBe(`send failed ${redactLogText(raw)}`);
+  });
+
+  // Codex 指摘 1: data.arguments は error の event では beforeSend が伏せるが、transaction は beforeSend を通らない。
+  it('client: beforeBreadcrumb は data の文字列 (console の data.arguments の 1 段目) も積む時点で伏せ、元の引数の object は触らない', async () => {
+    const { beforeBreadcrumb } = await installedHooks('client');
+    const raw = rpcRequestError().message;
+    const error = rpcRequestError();
+    const circular: Record<string, unknown> = { note: raw };
+    circular.self = circular;
+    const args = [`[xchain-diag] Polygon (137): FAILED after 3ms — ${raw}`, error, circular, 7];
+    const breadcrumb = beforeBreadcrumb!({
+      category: 'console',
+      level: 'warning',
+      message: args[0] as string,
+      data: { logger: 'console', arguments: args, extra: raw },
+    });
+    const data = breadcrumb.data as { logger: string; arguments: unknown[]; extra: string };
+    expect(leakedMarkers(data.arguments[0])).toEqual([]);
+    expect(data.arguments[0]).toBe(`[xchain-diag] Polygon (137): FAILED after 3ms — ${redactLogText(raw)}`);
+    expect(data.extra).toBe(redactLogText(raw));
+    expect(data.logger).toBe('console');
+    // normalize される前の元の引数 (Error・循環する object) はそのまま (中の文は、normalize された写しを beforeSend と
+    // beforeSendTransaction が伏せる)。console に渡された配列も書き換えない。
+    expect(data.arguments[1]).toBe(error);
+    expect(data.arguments[2]).toBe(circular);
+    expect(data.arguments[3]).toBe(7);
+    expect(args[0]).toContain(API_KEY);
+  });
+
+  const KEYED_PATH_URL = `https://api.example/v2/${API_KEY}`;
+  const OWN = 'https://test.local';
+
+  function span(op: string, description: string, data: Record<string, unknown>) {
+    return { op, description, data, span_id: '3'.repeat(16), trace_id: '1'.repeat(32), start_timestamp: 1 };
+  }
+
+  // 失敗した RPC の request と、その後に console に出た文を持つ transaction (本物の SDK での形は
+  // logRedaction.sentry-transaction.test.ts)。span の欄の名前は @sentry/core の fetch.js・@sentry/browser の
+  // tracing/request.js・@sentry/node-core の undici-instrumentation.js・@sentry/opentelemetry の parseSpanDescription が付けるもの。
+  function rawTransaction(): TransactionEvent {
+    const error = rpcRequestError(KEYED_PATH_URL);
+    return {
+      type: 'transaction',
+      transaction: '/[locale]/pay',
+      request: { url: `${OWN}/ja/pay` },
+      contexts: {
+        trace: { trace_id: '1'.repeat(32), span_id: '2'.repeat(16), op: 'pageload', data: { 'url.full': `${OWN}/ja/pay` } },
+      },
+      breadcrumbs: [
+        {
+          category: 'console',
+          level: 'warning',
+          message: `[xchain-diag] Polygon (137): FAILED after 3ms — ${error.message}`,
+          data: { logger: 'console', arguments: [`[xchain-diag] Polygon (137): FAILED after 3ms — ${error.message}`] },
+        },
+        {
+          category: 'console',
+          level: 'error',
+          message: 'send failed',
+          data: { logger: 'console', arguments: ['send failed', { name: error.name, message: error.message, stack: error.stack }] },
+        },
+      ],
+      spans: [
+        span('http.client', `POST ${KEYED_PATH_URL}`, {
+          url: KEYED_PATH_URL,
+          'http.url': KEYED_PATH_URL,
+          'url.full': KEYED_PATH_URL,
+          'url.path': `/v2/${API_KEY}`,
+          'http.target': `/v2/${API_KEY}`,
+          'server.address': 'api.example',
+          'http.method': 'POST',
+        }),
+        span('http.client', `POST HTTPS://API.example/v2/${API_KEY} (getBalance)`, { url: `HTTPS://API.example/v2/${API_KEY}` }),
+        span('resource.script', `https://cdn.example/sdk.js?projectId=${API_KEY}`, { 'server.address': 'cdn.example' }),
+        span('http.client', 'POST /api/log/payment', { url: '/api/log/payment', 'http.method': 'POST' }),
+        span('http.client', `GET ${OWN}/api/order/status`, { url: `${OWN}/api/order/status`, 'url.path': '/api/order/status' }),
+      ],
+    } as TransactionEvent;
+  }
+
+  it.each(['client', 'nodejs', 'edge'] as const)('%s: beforeSendTransaction は breadcrumb と別の origin への span の URL を伏せ、自分の app の span は今までのまま', async (runtime) => {
+    const { beforeSendTransaction } = await installedHooks(runtime);
+    const raw = rawTransaction();
+    // 前提: breadcrumb の message・data.arguments と、span の description・data に、伏せる前の key が入っている。
+    for (const part of [raw.breadcrumbs?.[0].message, raw.breadcrumbs?.[0].data, raw.breadcrumbs?.[1].data, raw.spans?.[0].description, raw.spans?.[0].data]) {
+      expect(leakedMarkers(part)).toContain(API_KEY);
+    }
+
+    const event = beforeSendTransaction(raw);
+    expect(leakedMarkers(event)).toEqual([]);
+    expect(JSON.stringify(event)).not.toContain(API_KEY);
+
+    const [foreign, upper, resource, ownRelative, ownAbsolute] = event.spans!;
+    expect(foreign.description).toBe('POST https://api.example');
+    expect(foreign.data).toEqual({
+      url: 'https://api.example',
+      'http.url': 'https://api.example',
+      'url.full': 'https://api.example',
+      'server.address': 'api.example',
+      'http.method': 'POST',
+    });
+    expect(upper.description).toBe('POST https://api.example (getBalance)');
+    expect(upper.data).toEqual({ url: 'https://api.example' });
+    expect(resource.description).toBe('https://cdn.example');
+    // 自分の app への span (相対 path・同じ origin) は今までと同じ。
+    expect(ownRelative).toEqual(rawTransaction().spans![3]);
+    expect(ownAbsolute).toEqual(rawTransaction().spans![4]);
+    expect(event.transaction).toBe('/[locale]/pay');
+
+    const [diag, thirdParty] = event.breadcrumbs!;
+    expect(diag.message).toContain(`URL: ${BUNDLER_ORIGIN}\n`);
+    expect(diag.message).toContain(`Details: ${RPC_DETAILS}`);
+    expect((diag.data as { arguments: string[] }).arguments[0]).toBe(diag.message);
+    expect((thirdParty.data as { arguments: [string, { message: string }] }).arguments[1].message).toContain(`URL: ${BUNDLER_ORIGIN}\n`);
   });
 });
 

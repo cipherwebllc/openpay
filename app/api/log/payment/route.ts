@@ -35,6 +35,16 @@ const BUDGET_TTL_SEC = 2 * 24 * 60 * 60;
 // errorMessage は client 申告の自由文字列。body 上限 (5KB) 内でも 1 entry が肥大化して
 // 共有リストの容量を食い潰すため、保存前に切詰める (reject はしない — ログは best-effort)。
 const ERROR_MESSAGE_MAX = 500;
+// 伏せる前の版の client (開いたままのタブ) は、viem の error の文を 500 字に切っただけで送る。`Request Arguments:` の
+// 形 (UserOperationExecutionError・`  callData:   0x…` を 1 行ずつ) は `Request body:` を持たず、500 字の切れ目で 129 桁に
+// 満たなくなった 16 進が redactLogText の規則をすり抜けて残る。署名済みの UserOperation の欄は、名前で長さに関係なく
+// 伏せる (client の bundle に入らない server だけの規則)。
+const SIGNED_OP_FIELD_RE =
+  /\b(callData|signature|paymasterData|paymasterAndData|factoryData|initCode)("?\s*:\s*"?)0x?[0-9a-f]*/gi;
+
+function redactAuditErrorMessage(text: string): string {
+  return redactLogText(text).replace(SIGNED_OP_FIELD_RE, '$1$2[redacted]');
+}
 
 // flow 一覧:
 //   batch:             gasless 経路 (UserOp で merchant + fee を 1 batch 送信、
@@ -208,7 +218,7 @@ function validate(raw: unknown): Payload | null {
   // 伏せる前の版の client (開いたままのタブ) が送る viem の error の文から、署名済みの UserOperation と
   // key つきの URL を保存の前に伏せる (client の申告は信頼しない)。
   if (r.errorMessage !== undefined)
-    clean.errorMessage = redactLogText(r.errorMessage).slice(0, ERROR_MESSAGE_MAX);
+    clean.errorMessage = redactAuditErrorMessage(r.errorMessage).slice(0, ERROR_MESSAGE_MAX);
   if (r.bridge !== undefined) clean.bridge = r.bridge;
   if (r.sourceChainId !== undefined) clean.sourceChainId = r.sourceChainId;
   if (r.bridgedAmount !== undefined) clean.bridgedAmount = r.bridgedAmount;
