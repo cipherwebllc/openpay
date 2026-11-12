@@ -479,6 +479,41 @@ describe('同じ intent でも、ほかの試みが新しくした記録 (別の
     expect(logger.warn).not.toHaveBeenCalledWith('pimlico.pending.expired-closed', expect.anything());
   });
 
+  it('hash の直しの書き込みが届かなくても、その後の応答不明の書き込みが直した hash を書く (直す前の版もこの試みの版・今までどおり)', async () => {
+    const fake = mountClients({
+      waitForUserOperationReceipt: async ({ hash }) => {
+        throw new WaitForUserOperationReceiptTimeoutError({ hash });
+      },
+    });
+    const returned = `0x${'e'.repeat(64)}` as Hex;
+    fake.bundlerSend.mockImplementationOnce(async ({ params }) => {
+      world.accept(params[0]);
+      return { result: returned };
+    });
+    // 記録の 2 回目の書き込み (= hash の直し) だけが書けない。
+    const realSet = Storage.prototype.setItem;
+    let writes = 0;
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (
+      this: Storage,
+      key: string,
+      value: string,
+    ) {
+      if (key.startsWith(PIMLICO_PENDING_KEY_PREFIX) && ++writes === 2) {
+        throw new DOMException('quota', 'QuotaExceededError');
+      }
+      realSet.call(this, key, value);
+    });
+    const hook = render();
+
+    hook.result.current.mutate(PARAMS);
+    await waitFor(() => expect(hook.result.current.isUnknown).toBe(true));
+    await waitFor(() => expect(hook.result.current.isPending).toBe(false));
+
+    expect(writes).toBe(3);
+    expect(JSON.parse(storedRaw() ?? 'null')).toMatchObject({ userOpHash: returned, status: 'unknown' });
+    expect(hook.result.current.pendingUserOpHash).toBe(returned);
+  });
+
   it('画面の無い試みが応答不明の status を書いた後でも、画面のある試みは (読んだときの pending の記録で) 期限で閉じられる (status は版に入れない)', async () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(T0);
