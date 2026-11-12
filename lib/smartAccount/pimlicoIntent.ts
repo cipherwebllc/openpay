@@ -18,6 +18,25 @@
 //   c5 EntryPoint の nonce は進んだが、候補のどれにも receipt が無い → 期限までは開いたまま、期限で c4 と同じく閉じる
 // それ以外 (応答不明・送り直しや作り直しの拒否 (c3)・照合できない・保存を確かめられない) は開いたまま。
 //
+// 閉じる前に bundler へ聞く (c2 と、Circle の経路の circleSend.ts の closeRejectedFirstSend が使う。聞く関数は pimlicoSend.ts の
+// readBundlerOpStatus = `pimlico_getUserOperationStatus` の 1 つ):
+//   何のためか: 検証の拒否が示すのは「この送信が断られた」ことだけで、同じ op の前の配送が受理されていないことは示さない。送信が
+//     途中で 2 回届き、1 回目は受理されて mempool にあり、2 回目 (重複の配送) にだけ拒否が返ることがある (例: 受理の後に
+//     preVerificationGas の必要量が上がり、重複の配送に「preVerificationGas is not enough」(-32500) が返る。Pimlico の bundler
+//     (Alto) はこの検査を、mempool の重複の確認より前に行う)。そこで閉じると、次の試みは新しい nonce の op になり、2 本とも
+//     取り込まれる。閉じてよい根拠は **「bundler がその hash を知らないと答えた」(not_found)** こと。
+//   閉じない側: not_found 以外の status (permissionless 0.2.57 の PimlicoUserOperationStatus: not_submitted・submitted・rejected・
+//     reverted・included・failed)・型に無い値・読めなかったとき (通信の失敗・timeout・HTTP の失敗・JSON-RPC の error・形の崩れた
+//     応答)。rejected も閉じない側にする: その hash を bundler が一度は受け取っていて、ここからは「取り込まれない」と言い切れない。
+//   語の確認 (pimlicoSend.ts の mentionsNonceOrMempool) を残す理由: status と語は別の失敗を断つ。status の記録が bundler の中で
+//     反映される前に聞いてしまう場合 (受理した node と聞いた node のずれ) でも、nonce・重複の拒否は語で止まる。
+//   限界 (2026-11-12 に Pimlico の公開 endpoint (Base Sepolia と Base) で確かめた範囲): 一度も受理されていない op (知らない hash・
+//     検証で拒否された op の hash) には、拒否の直後と 3 秒後に `{"status":"not_found","transactionHash":null}` が返る。**「受理された
+//     op が not_found 以外を返す」ことは、有効な署名つきの op が要るので実測していない** (API の説明と permissionless の型による)。
+//     本番の key つきの endpoint でも確かめていない。status の記録が bundler の中で遅れて反映される場合 (受理の直後に別の node が
+//     not_found と答える) は、語に当たらない拒否で閉じうる。聞く hash は手元で計算した hash で、bundler の hash と違う経路
+//     (pimlicoSend.ts の prepareAndSignPimlicoUserOp のコメント) では、受理された op にも not_found が返りうる。
+//
 // 判定はこの module の入口に集める:
 //   resolveOpenIntent = 開いている intent への唯一の入口 (照合 → 閉じる / 送り直す / 作り直す / 開いたまま)
 //   startIntent       = 新しい intent (nonce を決める → 準備 → 署名 → 保存 → 送信)
@@ -567,12 +586,12 @@ async function buildAndSend<Params, Result>(
         return holdAsUnknown(host, sent, [sent], 'pimlico.send.rejected-nonce-or-mempool', error);
       }
       // (2) status: bundler にその op の状態を 1 回聞き、**「その hash を知らない」(not_found) と答えたときだけ** 閉じる。語に
-      //     当たらない拒否 (preVerificationGas が足りない等) も、受理された op の重複の配送にだけ返ることがある (pimlicoSend.ts の
-      //     readBundlerOpStatus)。ほかの status・型に無い値・読めない (通信の失敗・timeout・形の崩れた応答) は閉じない。
+      //     当たらない拒否 (preVerificationGas が足りない等) も、受理された op の重複の配送にだけ返ることがある (冒頭の「閉じる前に
+      //     bundler へ聞く」)。ほかの status・型に無い値・読めない (通信の失敗・timeout・形の崩れた応答) は閉じない。
       //     語の確認 (1) を残す理由: status と語は別の失敗を断つ。status の記録が bundler の中で反映される前に聞いてしまう場合
       //     (受理した node と聞いた node のずれ) でも、nonce・重複の拒否は語で止まる。
       //     害: 拒否のたびに request が 1 回増える。status を読めない間は閉じられず、応答不明になる (再確認は nonce が未使用なら
-      //     同じ op を送り直す)。限界は readBundlerOpStatus のコメント。
+      //     同じ op を送り直す)。限界は冒頭の「閉じる前に bundler へ聞く」。
       const status = await readBundlerOpStatus({
         transport: sender.client.transport,
         userOpHash: sent.userOpHash,

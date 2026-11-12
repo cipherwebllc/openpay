@@ -14,6 +14,10 @@
 // ここは通信と署名の素の部品だけを持つ。保存・ラッチ・分類の後の扱いは hook の側。
 // 対象は permissionless の createSmartAccountClient で作った client (simple 7702・MetaMask)。
 // MAv2 (lib/smartAccount/mav2.ts) は aa-sdk を包んだ facade で sendUserOperation しか無く、ここを通らない。
+//
+// bundle: この module は 2 つの遅延 chunk (pimlicoIntent.ts・circleAccount.ts) から共有される。型を外した後の大きさ (コメントを
+// 含む) が約 20 kB を超えると webpack が別の chunk に分け、/pay などの First Load が 26 byte 増える (2026-11-13 に build で
+// 実測: 20.4 kB で分かれ、18.3 kB で分かれない。splitChunks の minSize と合う)。長い説明は pimlicoIntent.ts の冒頭に置く。
 
 import {
   createClient,
@@ -157,8 +161,8 @@ export type PreparedPimlicoUserOp = Awaited<
 >;
 
 export type BroadcastFailureKind =
-  // HTTP 2xx の応答で、bundler が ERC-4337 の検証の拒否 (下の allowlist の code) を返した = **この送信** を受け付けなかった。
-  // 同じ op の前の配送 (送信が途中で 2 回届いたときの 1 回目) が受理されていないことまでは言えない (下の readBundlerOpStatus)。
+  // HTTP 2xx の応答で、bundler が ERC-4337 の検証の拒否 (下の allowlist の code) を返した = **この送信** を受け付けなかった
+  // (同じ op の前の配送が受理されていないことまでは言えない = 下の readBundlerOpStatus)。
   | 'validation-rejected'
   // bundler が JSON-RPC の error で「その op はもう持っている」と答えた (mempool にある)。
   | 'already-known'
@@ -270,8 +274,7 @@ const BUNDLER_VALIDATION_REJECTION_CODES: ReadonlySet<number> = new Set([
  * allowlist にあるときだけ。判別できないものは必ず 'unknown' に倒す (取り違えたときの被害が非対称:
  * unknown を「受け付けていない」と読むと、取り込まれうる op の上に通常決済や別の支払いが開く)。
  * httpStatus は応答が届いたときの status (届かなかったときは undefined)。
- * 言えるのは「この送信」についてだけ。最初の送信の拒否で intent / 記録を閉じる側 (pimlicoIntent.ts の c2・circleSend.ts の
- * closeRejectedFirstSend) は、これに加えて下の語の確認と、bundler にその op の状態を聞くこと (readBundlerOpStatus) を要る。
+ * 言えるのは「この送信」についてだけ。閉じる側は、下の語の確認と readBundlerOpStatus も要る。
  */
 export function classifyBroadcastError(
   error: unknown,
@@ -309,9 +312,8 @@ export function bundlerErrorText(rpc: RpcRequestErrorLike | null): string {
 // 語の定義はここ 1 つ。使うのは「最初の送信の拒否で閉じてよいか」を決める 2 か所だけ: Circle の経路の分類
 // (circleAccount.ts の classifyCircleBroadcastError) と、Pimlico の経路の c2 (pimlicoIntent.ts の buildAndSend)。
 // 上の classifyBroadcastError には入れない (送り直しの拒否 = 同じ nonce で作り直す、の動きを変えない)。
-// 語に当たらなければ閉じてよい、ではない: 語に当たらない拒否 (preVerificationGas が足りない等) も、重複の配送にだけ返ることが
-// ある。閉じる前には必ず下の readBundlerOpStatus も聞く。語の確認を残す理由: status と語は別の失敗を断つ。status の記録が
-// bundler の中で反映される前に聞いてしまう場合 (受理した node と聞いた node のずれ) でも、nonce・重複の拒否は語で止まる。
+// 語に当たらなければ閉じてよい、ではない。閉じる前には必ず下の readBundlerOpStatus も聞く (語の確認を残す理由も含めて
+// pimlicoIntent.ts の冒頭の「閉じる前に bundler へ聞く」)。
 const NOT_REJECTION_PROOF_RE = /AA25|nonce|mempool|already|replace/i;
 
 /** bundler の JSON-RPC の error の文 (bundlerErrorText) が、上の語を含むか。 */
@@ -329,28 +331,12 @@ export type BundlerOpStatus = {
 
 /**
  * bundler に、その op (userOpHash) の状態を 1 回聞く (`pimlico_getUserOperationStatus`・再送なし・timeout は transport の値)。
- *
- * 何のためか: 最初の送信を bundler が検証で拒否したとき、intent / 記録を閉じてよいかを決める (pimlicoIntent.ts の c2・
- * circleSend.ts の closeRejectedFirstSend)。検証の拒否が示すのは「この送信が断られた」ことだけで、同じ op の前の配送が受理されて
- * いないことは示さない: 送信が途中で 2 回届き、1 回目は受理されて mempool にあり、2 回目 (重複の配送) にだけ拒否が返ることがある
- * (例: 受理の後に preVerificationGas の必要量が上がり、重複の配送に「preVerificationGas is not enough」(-32500) が返る。
- * Pimlico の bundler (Alto) はこの検査を、mempool の重複の確認より前に行う)。そこで閉じると、次の試みは新しい nonce の op に
- * なり、2 本とも取り込まれる。閉じてよい根拠は **「bundler がその hash を知らないと答えた」(not_found)** こと。
- *
- * unknownToBundler が true になるのは not_found のときだけ。ほかの status (permissionless 0.2.57 の PimlicoUserOperationStatus:
- * not_submitted・submitted・rejected・reverted・included・failed) も、型に無い値も、読めなかったとき (通信の失敗・timeout・
- * HTTP の失敗・JSON-RPC の error・形の崩れた応答) も false = 閉じない側。rejected も閉じない側にする: その hash を bundler が
- * 一度は受け取っていて、ここからは「取り込まれない」と言い切れない。
+ * 最初の送信の検証の拒否で intent / 記録を閉じる前に使う (pimlicoIntent.ts の c2・circleSend.ts の closeRejectedFirstSend)。
+ * なぜ要るか・閉じない側の値・限界は pimlicoIntent.ts の冒頭の「閉じる前に bundler へ聞く」。
+ * unknownToBundler が true になるのは not_found のときだけ。ほかの status・型に無い値・読めなかったときは false = 閉じない側。
  * 失敗は投げずに「読めなかった」で返す。何の波及を断つか: 付帯の照会の失敗が、送った後の扱い (応答不明・確認待ち) を別の error に
  * 変えること。握りつぶさない: 呼び出し側が status の値 (unreadable:<error の name>) を log に残し、閉じない側へ進む。
  * 理由に viem の error の message は入れない (URL を含む)。
- *
- * 限界 (2026-11-12 に Pimlico の公開 endpoint (Base Sepolia と Base) で確かめた範囲): 一度も受理されていない op (知らない hash・
- * 検証で拒否された op の hash) には、拒否の直後と 3 秒後に `{"status":"not_found","transactionHash":null}` が返る。**「受理された
- * op が not_found 以外を返す」ことは、有効な署名つきの op が要るので実測していない** (API の説明と permissionless の型による)。
- * 本番の key つきの endpoint でも確かめていない。status の記録が bundler の中で遅れて反映される場合 (受理の直後に別の node が
- * not_found と答える) は、語に当たらない拒否で閉じうる。聞く hash は手元で計算した hash で、bundler の hash と違う経路
- * (prepareAndSignPimlicoUserOp のコメント) では、受理された op にも not_found が返りうる。
  */
 export async function readBundlerOpStatus(args: {
   // bundler の http transport の設定 (送信と同じ URL・timeout)。

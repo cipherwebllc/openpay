@@ -374,7 +374,8 @@ export function prepareCircleBroadcast(
 
 /**
  * bundler に、その op (userOpHash) の状態を 1 回聞く (`pimlico_getUserOperationStatus`・再送なし)。送信と同じ bundler の URL・
- * timeout (bundle の transport の既定 = 10 秒)。定義と限界は Pimlico の経路と同じ 1 つ (pimlicoSend.ts の readBundlerOpStatus):
+ * timeout (bundle の transport の既定 = 10 秒)。定義は Pimlico の経路と同じ 1 つ (pimlicoSend.ts の readBundlerOpStatus・
+ * なぜ要るかと限界は pimlicoIntent.ts の冒頭の「閉じる前に bundler へ聞く」):
  * unknownToBundler が true になるのは bundler が not_found と答えたときだけで、読めなかったときは投げずに false で返す。
  * 呼ぶのは circleSend.ts の closeRejectedFirstSend だけ (最初の送信の検証拒否で記録を閉じる前)。
  */

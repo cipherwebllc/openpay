@@ -60,7 +60,7 @@
 //       確かめる = lib/circlePending.ts の markRejected)。確かめられるのは「読んだ時点の記録が、自分の書いたまま」だけで、
 //       別のタブとの間で原子的ではない (localStorage に lock は無い)。その窓は (d) が、ほかの試みが送り直しに着く前に閉じる
 // 残る前提: bundler が「その hash を知らない」と答えた op は、受理されておらず取り込まれない (Pimlico の経路の c2 と同じ前提・
-// 限界は pimlicoSend.ts の readBundlerOpStatus のコメント: status の記録が bundler の中で遅れて反映される場合は、語に当たらない
+// 限界は pimlicoIntent.ts の冒頭の「閉じる前に bundler へ聞く」: status の記録が bundler の中で遅れて反映される場合は、語に当たらない
 // 拒否で閉じうる。受理された op が not_found 以外を返すことは実測していない)。破れたとき (閉じた op の receipt が取れた) は、
 // markConfirmed が failed → confirmed に直して error の log を残す。
 // 入口の scan・resume の読み取り・予約の書き込み (境界の外) が storage の失敗で投げたときは、hook の側が対応を残す (この押下は
