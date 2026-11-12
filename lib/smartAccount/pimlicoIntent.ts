@@ -9,7 +9,8 @@
 // 作り直しても EntryPoint は同じ nonce の op を最大 1 本しか実行しない。intent を閉じるのは次だけ:
 //   c1 候補の hash のどれかに receipt がある → 成功 / revert で確定
 //   c2 **最初の送信** を bundler が検証で拒否した (HTTP 2xx + allowlist の code・pimlicoSend.ts) → 記録を消したと確かめてから、
-//      今までどおりの error
+//      今までどおりの error。ただし拒否の文 (bundler が返した文) が nonce・mempool・重複・置き換えに触れているときは閉じない
+//      (応答不明。この op 自身がもう届いているために返った拒否かもしれない・buildAndSend の onRejected)
 //   c4 最後に bundler へ渡して (渡そうとして) から 7 日を過ぎ、候補のどれにも receipt が無く、EntryPoint の nonce も未使用 →
 //      記録を消したと確かめてから
 //   c5 EntryPoint の nonce は進んだが、候補のどれにも receipt が無い → 期限までは開いたまま、期限で c4 と同じく閉じる
@@ -58,9 +59,12 @@ import { createPimlico } from '@/lib/pimlico';
 import { isSameIntent, isSameVersion } from './pimlicoIntentOwner';
 import {
   broadcastPimlicoUserOp,
+  bundlerErrorText,
+  findRpcRequestError,
   findUserOperationReceipt,
   isUserOpNonceConsumed,
   joinUserOpNonce,
+  mentionsNonceOrMempool,
   prepareAndSignPimlicoUserOp,
   reserveUserOpNonce,
   splitUserOpNonce,
@@ -541,7 +545,24 @@ async function buildAndSend<Params, Result>(
         // 次に確かめるとき、前の op の receipt も引く。
         return holdAsUnknown(host, sent, [sent], 'pimlico.rebuild.rejected', error);
       }
-      // c2: 最初の送信を bundler が検証で拒否した = この送信の op は mempool に入っていない。
+      // c2: 最初の送信を bundler が検証で拒否した。閉じてよいのは、その拒否が「この op は mempool に入っておらず、取り込まれても
+      // いない」と読めるときだけ。
+      // 拒否の文が nonce・mempool・重複・置き換えに触れているとき (HTTP 200 + -32500「AA25 invalid account nonce」・
+      // 「replacement underpriced」等) は、そう読めないので閉じない (応答不明)。何の波及を断つか: **この op 自身がもう届いている**
+      // (送信が途中で 2 回届いた・先に取り込まれた) ために返った拒否で記録を消して閉じると、次の試みは新しい nonce の op になり
+      // (本番で動く simple 7702 は nonce の key が時刻由来で、試みごとに新しい)、取り込まれる支払いの上にもう 1 本払う。
+      // 閉じなければ、次の再確認 (resolveOpenIntent) が候補の receipt と EntryPoint の nonce を読んで決める (receipt があれば確定)。
+      // 見るのは bundler が返した文だけ (viem の error の message は、送った request の本文 = "nonce" の欄を載せるので見ない・
+      // 語の定義は Circle の経路と同じ 1 つ = pimlicoSend.ts)。共有の分類 (classifyBroadcastError) には入れない: 送り直しの拒否
+      // (同じ nonce で作り直す) の動きを変えない。
+      // 害: nonce の key が固定 (0) の account (MetaMask のスマートアカウント。ガスレスは flag つきで、hooks/useSmartAccount.ts の
+      // コメントでは無効の扱い) では、別のタブ・別の dapp が先に nonce を使った正当な AA25 でも応答不明になり、同じ chain・
+      // customer・token の支払いが、期限 (最後に bundler へ渡してから 7 日・c5) まで止まる。利用者が自分で閉じる手段は無い。
+      // simple 7702 (key が時刻由来) では、最初の送信に nonce の拒否が返るのは、この op 自身が届いている場合に偏る (推測)。
+      if (mentionsNonceOrMempool(bundlerErrorText(findRpcRequestError(error)))) {
+        return holdAsUnknown(host, sent, [sent], 'pimlico.send.rejected-nonce-or-mempool', error);
+      }
+      // それ以外の検証の拒否 (残高・署名・paymaster・op の形) = この送信の op は mempool に入っていない。
       // 記録を消したと確かめられたとき (ほかの画面が先に閉じていたときを含む) だけ閉じ、今までどおりの error にする (nonce の
       // 予約は残さない・金額を変えた再試行も通常決済もできる)。確かめられなければ、残った op が後で送られうるので開いたまま。
       // 消すのは storage の記録が、この試みが送る直前に書いた版 (sent) のときだけ。拒否が示すのは「この送信が断られた」ことだけで、

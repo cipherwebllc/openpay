@@ -53,10 +53,13 @@ import { buildMetaMaskSmartAccountClient } from '@/lib/smartAccount/metamask';
 import {
   asSignedSendClient,
   broadcastPimlicoUserOp,
+  bundlerErrorText,
   classifyBroadcastError,
+  findRpcRequestError,
   findUserOperationReceipt,
   isUserOpNonceConsumed,
   joinUserOpNonce,
+  mentionsNonceOrMempool,
   prepareAndSignPimlicoUserOp,
   reserveUserOpNonce,
   splitUserOpNonce,
@@ -137,7 +140,7 @@ let tokenAllowance = maxUint256;
 // eth_sendUserOperation への答え方。rpc-error の status は HTTP の status (既定 200)。
 type SendReply =
   | { kind: 'hash'; hash: Hex }
-  | { kind: 'rpc-error'; code: number; message: string; status?: number }
+  | { kind: 'rpc-error'; code: number; message: string; data?: unknown; status?: number }
   | { kind: 'http'; status: number }
   | { kind: 'network' }
   | { kind: 'hang' };
@@ -237,8 +240,9 @@ beforeEach(() => {
       if (body.method === 'eth_sendUserOperation') {
         if (sendReply.kind === 'hash') return reply({ result: sendReply.hash });
         if (sendReply.kind === 'rpc-error') {
+          const { code, message, data } = sendReply;
           return reply(
-            { error: { code: sendReply.code, message: sendReply.message } },
+            { error: { code, message, ...(data === undefined ? {} : { data }) } },
             sendReply.status,
           );
         }
@@ -658,6 +662,68 @@ describe('送信は 1 回だけ・失敗の分類 (実物の http transport・HT
     expect(classifyBroadcastError(new Error('Already known'), 200)).toBe('unknown');
     expect(classifyBroadcastError(undefined, 200)).toBe('unknown');
     expect(classifyBroadcastError('rejected', undefined)).toBe('unknown');
+  });
+
+  // 最初の送信の拒否で閉じてよいかを決める語 (Circle の経路の分類と、Pimlico の経路の c2 = pimlicoIntent.ts が使う)。
+  // 共有の分類 (classifyBroadcastError) には入れていない: nonce の拒否も validation-rejected のまま (送り直しの拒否で
+  // 同じ nonce の作り直しへ進む動きを変えない)。
+  describe('bundler が返した文 (bundlerErrorText) と、nonce・mempool の語', () => {
+    it('AA25 (HTTP 200・-32500) は、共有の分類では validation-rejected のまま。bundler の文は語を含む', async () => {
+      const { outcome } = await broadcastWith({
+        kind: 'rpc-error',
+        code: -32500,
+        message: 'AA25 invalid account nonce',
+      });
+      if (outcome.kind === 'accepted') throw new Error('断られるはず');
+      expect(outcome.kind).toBe('validation-rejected');
+      const text = bundlerErrorText(findRpcRequestError(outcome.error));
+      expect(text).toBe('AA25 invalid account nonce ');
+      expect(mentionsNonceOrMempool(text)).toBe(true);
+    });
+
+    it('viem の error の message は送った request の本文 ("nonce" の欄) を含むが、bundler の文には入れない', async () => {
+      const { outcome } = await broadcastWith({
+        kind: 'rpc-error',
+        code: -32500,
+        message: "AA21 didn't pay prefund",
+      });
+      if (outcome.kind === 'accepted') throw new Error('断られるはず');
+      const rpc = findRpcRequestError(outcome.error);
+      // 前提の確認: 実物の viem の RpcRequestError の message には、署名済みの op の "nonce" の欄が載っている。
+      expect(String(rpc?.message)).toMatch(/Request body: .*"nonce":"0x/);
+      expect(mentionsNonceOrMempool(String(rpc?.message))).toBe(true);
+      // bundler の文は、bundler が返した message だけ。
+      const text = bundlerErrorText(rpc);
+      expect(text).toBe("AA21 didn't pay prefund ");
+      expect(mentionsNonceOrMempool(text)).toBe(false);
+    });
+
+    it('語が JSON-RPC の error の data の側にだけあるときも、bundler の文に入る', async () => {
+      const { outcome } = await broadcastWith({
+        kind: 'rpc-error',
+        code: -32500,
+        message: 'validation failed',
+        data: { reason: 'AA25 invalid account nonce' },
+      });
+      if (outcome.kind === 'accepted') throw new Error('断られるはず');
+      expect(outcome.kind).toBe('validation-rejected');
+      const text = bundlerErrorText(findRpcRequestError(outcome.error));
+      expect(text).toBe('validation failed {"reason":"AA25 invalid account nonce"}');
+      expect(mentionsNonceOrMempool(text)).toBe(true);
+    });
+
+    it('data があっても、語が無ければ当たらない。JSON-RPC の error が無いときは空の文', async () => {
+      const { outcome } = await broadcastWith({
+        kind: 'rpc-error',
+        code: -32501,
+        message: 'AA33 reverted',
+        data: { paymaster: PAYMASTER },
+      });
+      if (outcome.kind === 'accepted') throw new Error('断られるはず');
+      expect(mentionsNonceOrMempool(bundlerErrorText(findRpcRequestError(outcome.error)))).toBe(false);
+      expect(bundlerErrorText(null)).toBe(' ');
+      expect(mentionsNonceOrMempool(bundlerErrorText(null))).toBe(false);
+    });
   });
 });
 

@@ -61,7 +61,7 @@ export type BundlerHttpReply =
   // HTTP 200 + result (受理)。
   | { result: Hex }
   // JSON-RPC の error (status の既定は 200)。
-  | { error: { code: number; message: string }; status?: number }
+  | { error: { code: number; message: string; data?: unknown }; status?: number }
   // 本文が JSON-RPC でない HTTP の失敗。
   | { status: number; body: string };
 

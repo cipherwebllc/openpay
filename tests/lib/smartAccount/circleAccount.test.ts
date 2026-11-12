@@ -8,7 +8,6 @@ import {
   broadcastCircleUserOp,
   prepareCircleBroadcast,
   classifyCircleBroadcastError,
-  mentionsNonceOrMempool,
   CircleBroadcastError,
   buildCircleSmartAccountClient,
   entryPoint08Address,
@@ -16,6 +15,8 @@ import {
   CIRCLE_RECEIPT_TIMEOUT_MS,
   type CircleSmartAccountBundle,
 } from '@/lib/smartAccount/circleAccount';
+// 語の定義は Pimlico の経路 (c2) と 1 つ (置き場所は pimlicoSend.ts)。
+import { mentionsNonceOrMempool } from '@/lib/smartAccount/pimlicoSend';
 import { assertCirclePaymasterDeployed } from '@/lib/circlePermit';
 import { resolveDeployment } from '@/lib/tokens';
 

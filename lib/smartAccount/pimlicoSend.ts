@@ -286,6 +286,34 @@ export function classifyBroadcastError(
 }
 
 /**
+ * bundler が返した JSON-RPC の error の文 (message = viem の RpcRequestError の details と、data の JSON)。
+ * viem の error の message は入れない: 送った request の本文 (署名済みの op = "nonce" という欄を必ず含む) と URL を載せるので、
+ * bundler の言い分として読むと、どの拒否も下の語に当たる。
+ */
+export function bundlerErrorText(rpc: RpcRequestErrorLike | null): string {
+  const details = typeof rpc?.details === 'string' ? rpc.details : '';
+  const data = rpc?.data === undefined ? '' : JSON.stringify(rpc.data);
+  return `${details} ${data}`;
+}
+
+// 検証の拒否 (HTTP 2xx + allowlist の code) でも、bundler の言い分にこの語があるときは「この op を受け付けていない」と読まない
+// (第 10 回レビュー PR-39 の S1)。nonce の key が時刻由来で試みごとに新しい op (Circle の経路・Pimlico の経路の simple 7702) の
+// **最初の送信** に nonce・mempool・重複・置き換えの拒否が返るなら、もっとも考えやすいのは **この op 自身がもう届いている** こと
+// (送信が途中で 2 回届いた・先に取り込まれた)。閉じると、取り込まれる支払いの上に新しい支払いが開く。語は広めに取る
+// (外れても確認待ちに残るだけ = 払えない側)。
+//   AA25 = EntryPoint の「nonce が違う」/ nonce / mempool (「もう mempool にある」「mempool の上限」) /
+//   already (already known 以外の「もう…」) / replace (replacement underpriced = 同じ nonce の op がもうある)
+// 語の定義はここ 1 つ。使うのは「最初の送信の拒否で閉じてよいか」を決める 2 か所だけ: Circle の経路の分類
+// (circleAccount.ts の classifyCircleBroadcastError) と、Pimlico の経路の c2 (pimlicoIntent.ts の buildAndSend)。
+// 上の classifyBroadcastError には入れない (送り直しの拒否 = 同じ nonce で作り直す、の動きを変えない)。
+const NOT_REJECTION_PROOF_RE = /AA25|nonce|mempool|already|replace/i;
+
+/** bundler の JSON-RPC の error の文 (bundlerErrorText) が、上の語を含むか。 */
+export function mentionsNonceOrMempool(bundlerText: string): boolean {
+  return NOT_REJECTION_PROOF_RE.test(bundlerText);
+}
+
+/**
  * bundler に断られた送信の error を、viem の sendUserOperation が投げるのと同じ形
  * (UserOperationExecutionError) にする。フォームの error の表示を分ける前と変えないため。
  */
