@@ -6,6 +6,7 @@
 // @sentry/nextjs の Sentry.* が安全な no-op になる (init を呼んでいないため)。
 
 import * as Sentry from '@sentry/nextjs';
+import { redactLogText } from './telemetryRedaction';
 
 type Level = 'debug' | 'info' | 'warn' | 'error';
 type Fields = Record<string, unknown>;
@@ -27,7 +28,29 @@ function replacer(_key: string, value: unknown): unknown {
     return { name: value.name, message: value.message, stack: value.stack };
   }
   if (typeof value === 'bigint') return value.toString();
+  // 署名済みの UserOperation と key つきの URL (viem の error の文) を log に出さない。上の Error の
+  // message・stack も、返した object の欄としてここを通る。
+  if (typeof value === 'string') return redactLogText(value);
   return value;
+}
+
+// captureException に渡す Error。伏せる所が無ければ元の Error をそのまま返す (Sentry の grouping は今までと同じ)。
+// あれば name・stack の frame・cause の並びを保った写しを返す (元の Error は書き換えない)。Sentry の browser の
+// stack parser は、stack の先頭に入った message の `URL: <url>` の行を frame として読むので、その frame の filename
+// だけが key つきの URL から origin に変わる (key を含んだままでは同じ group にできない)。
+// cause をたどるのは 5 段まで (Sentry の LinkedErrors が読む段数と同じ)。
+function redactError(error: Error, depth = 0): Error {
+  const message = redactLogText(error.message);
+  const stack = error.stack && redactLogText(error.stack);
+  const cause =
+    depth < 5 && error.cause instanceof Error ? redactError(error.cause, depth + 1) : undefined;
+  if (message === error.message && stack === error.stack && (!cause || cause === error.cause)) {
+    return error;
+  }
+  const copy = new Error(message, { cause });
+  copy.name = error.name;
+  copy.stack = stack;
+  return copy;
 }
 
 // Sentry へ "fingerprint" 用のグルーピングキーとして msg を渡す。
@@ -38,11 +61,13 @@ function reportToSentry(level: 'warn' | 'error', msg: string, fields?: Fields): 
     : undefined;
   // Sentry の SeverityLevel は 'warning' だが logger 側は 'warn' を使うため変換
   const sentryLevel: Sentry.SeverityLevel = level === 'warn' ? 'warning' : 'error';
+  // extra は fields を深く伏せた写し (console と同じ replacer を通した JSON の形・元の fields は書き換えない)。
+  const extra: Fields | undefined = fields && JSON.parse(JSON.stringify(fields, replacer));
   if (errorField instanceof Error) {
-    Sentry.captureException(errorField, {
+    Sentry.captureException(redactError(errorField), {
       level: sentryLevel,
       tags: { event: msg },
-      extra: fields,
+      extra,
     });
     return;
   }
@@ -52,7 +77,7 @@ function reportToSentry(level: 'warn' | 'error', msg: string, fields?: Fields): 
   Sentry.captureMessage(msg, {
     level: sentryLevel,
     tags: { event: msg },
-    extra: fields,
+    extra,
   });
 }
 

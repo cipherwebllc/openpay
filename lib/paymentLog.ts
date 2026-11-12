@@ -3,6 +3,7 @@
 
 import type { Address, Hex } from 'viem';
 import { logger } from './logger';
+import { redactLogText } from './telemetryRedaction';
 
 // KV log の fee/gas 内訳セマンティクスの版。本フィールドを持つ log は分離記録済
 // (feeAmount = OpenPay 利用手数料 = サービス料のみ・ガスは networkFeeEquivalent)。
@@ -182,7 +183,8 @@ export function buildPaymentLogEvent(
     // 監査に残す (未 retry でも submitted op handle を失わない)。
     return {
       ...base,
-      errorMessage: outcome.errorMessage.slice(0, 500),
+      // 署名済みの UserOperation と key つきの URL を監査 log へ送らない (切る前に伏せる)。
+      errorMessage: redactLogText(outcome.errorMessage).slice(0, 500),
       txHash: outcome.txHash,
       userOpHash: outcome.userOpHash,
     };

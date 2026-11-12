@@ -12,6 +12,7 @@ import {
   type ClientReportedCircleVerification,
 } from '@/lib/paymentLog';
 import { checkReadRateLimit } from '@/lib/relay/relayGuards';
+import { redactLogText } from '@/lib/telemetryRedaction';
 // P3: anonymizeIp を単一情報源化 (旧 local 実装は fallback が '' で relayRoute の 'unknown' と乖離し、
 // 不正形式 IP が同一空文字バケツを共有する rate-limit 相乗りの恐れがあった)。
 import { anonymizeIp, isDecWithin, MAX_UINT256_DEC_DIGITS } from '@/lib/relay/relayRoute';
@@ -204,8 +205,10 @@ function validate(raw: unknown): Payload | null {
   if (r.feeTxHash !== undefined) clean.feeTxHash = r.feeTxHash;
   if (r.blockNumber !== undefined) clean.blockNumber = r.blockNumber;
   // 自由文字列は保存前に切詰める (拒否はしない — ログ欠落より短縮を選ぶ)。
+  // 伏せる前の版の client (開いたままのタブ) が送る viem の error の文から、署名済みの UserOperation と
+  // key つきの URL を保存の前に伏せる (client の申告は信頼しない)。
   if (r.errorMessage !== undefined)
-    clean.errorMessage = r.errorMessage.slice(0, ERROR_MESSAGE_MAX);
+    clean.errorMessage = redactLogText(r.errorMessage).slice(0, ERROR_MESSAGE_MAX);
   if (r.bridge !== undefined) clean.bridge = r.bridge;
   if (r.sourceChainId !== undefined) clean.sourceChainId = r.sourceChainId;
   if (r.bridgedAmount !== undefined) clean.bridgedAmount = r.bridgedAmount;

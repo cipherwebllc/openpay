@@ -33,6 +33,32 @@ export function urlOriginForTelemetry(raw: string): string {
   }
 }
 
+// viem の error (RpcRequestError・HttpRequestError・TimeoutError など) の message は、`URL: <bundler の URL (API key つき)>`
+// と `Request body: <送った JSON>` の行を持つ。eth_sendUserOperation の失敗では、その本文が署名済みの UserOperation
+// (署名・paymasterData) になる。log の出口 (logger の console と Sentry・Sentry の beforeSend・決済の監査 log) で
+// この関数を通し、署名済みの op と key つきの URL が console・Sentry・監査 log へ出るのを断つ。
+// 伏せるのは 3 つだけ: Request body の行 (行末まで)・`URL:` の path と query (origin は残す)・129 桁以上つづく 16 進
+// (署名 65 byte = 130 桁・callData・paymasterData)。64 桁の tx hash・userOpHash と 40 桁のアドレスは監査で要るので残す。
+// 2 回通しても結果は同じ (伏せた後の `Request body: [redacted]` は、その後ろの文を消さないようにもう一度は拾わない)。
+export function redactLogText(text: string): string {
+  return text
+    .replace(/Request body:(?! \[redacted\]).*/g, 'Request body: [redacted]')
+    .replace(/URL: (https?:\/\/[^\s"'\\]+)/g, (_match, url: string) => `URL: ${urlOriginForTelemetry(url)}`)
+    .replace(/(?:0x)?[0-9a-fA-F]{129,}/g, '[redacted]');
+}
+
+// Sentry が normalize した後の JSON の形 (extra・breadcrumb の data) の中の文字列を伏せた写しを返す (元は書き換えない)。
+export function redactLogData<T>(value: T): T {
+  if (typeof value === 'string') return redactLogText(value) as T;
+  if (Array.isArray(value)) return value.map((item) => redactLogData(item)) as T;
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [key, redactLogData(item)]),
+    ) as T;
+  }
+  return value;
+}
+
 async function shortSha256(raw: string): Promise<string> {
   const subtle = globalThis.crypto?.subtle;
   if (!subtle) throw new Error('webcrypto_unavailable');
@@ -126,6 +152,10 @@ function scrubServerTraceData(data: Record<string, unknown> | undefined): void {
 }
 
 export function scrubSentryBreadcrumb(breadcrumb: Breadcrumb): Breadcrumb {
+  // console の breadcrumb には、console に出た error の文がそのまま入る (logger を通らない console.error も)。
+  if (typeof breadcrumb.message === 'string') {
+    breadcrumb.message = redactLogText(breadcrumb.message);
+  }
   if (!breadcrumb.category || !URL_BREADCRUMB_CATEGORIES.has(breadcrumb.category)) {
     return breadcrumb;
   }
@@ -167,7 +197,22 @@ export function scrubSentryServerEvent<T extends Event>(event: T): T {
   }
   for (const breadcrumb of event.breadcrumbs ?? []) {
     scrubSentryBreadcrumb(breadcrumb);
+    // console の breadcrumb は、引数 (Error の message・stack) を data.arguments にも持つ。
+    if (breadcrumb.data) breadcrumb.data = redactLogData(breadcrumb.data);
   }
+  // logger を通らずに届く error (未捕捉の例外・error boundary・onRequestError) の文も、送る前に伏せる。
+  if (typeof event.message === 'string') event.message = redactLogText(event.message);
+  for (const exception of event.exception?.values ?? []) {
+    if (typeof exception.value === 'string') exception.value = redactLogText(exception.value);
+    // Sentry の browser の stack parser は、stack の先頭に入った message の `URL: <url>` の行を frame として読む
+    // (function が 'URL: '・filename が key つきの URL)。logger が渡す写しの stack (伏せた後) と同じ形にそろえる。
+    for (const frame of exception.stacktrace?.frames ?? []) {
+      if (frame.function === 'URL: ' && frame.filename) {
+        frame.filename = urlOriginForTelemetry(frame.filename);
+      }
+    }
+  }
+  if (event.extra) event.extra = redactLogData(event.extra);
   return event;
 }
 
