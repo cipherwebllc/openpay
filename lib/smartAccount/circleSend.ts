@@ -821,6 +821,9 @@ export async function executeCirclePayment(
   };
   // (f) 対応の付け替え (冒頭の「対応の付け替え」)。scan が rec の結果を受け取りに行く枝の、最初の await の前に呼ぶ。
   // 失効した試みは書かない。何の波及を断つか: 画面の無い試みが、開き直した画面も使う対応を横から書き換えること。
+  // 今の呼び出し元 (hook の runCirclePayment) は、scan と同じ tick で失効を確かめてから入り、古い記録の照合を待った後は下の
+  // (e) が確かめるので、hook からの呼び出しではここは常に真。ここで見るのは、「失効した試みは新しい効果を始めない」を、
+  // 呼び出し側の順や、この先 scan の前に足される await に頼らずに、この関数の中で保つため。
   const adopt = (rec: PendingRecord) => {
     if (args.adoptAttempt && rec.paymentAttemptId && isAlive()) {
       args.adoptAttempt(rec.paymentAttemptId);
