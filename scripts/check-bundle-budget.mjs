@@ -76,7 +76,14 @@ const BUDGETS_KB = {
   //   code-split 済み (tip 448→446 / [handle] 487→484 kB に低減)。
   // 2026-10-10 F2: 実測 421 + 5 (上の注記の vendor 増分を含んだ実測)。
   // 2026-11-11 F-10: 実測 403 + 5 (前は 426)。
-  '/[locale]/pay': 408,
+  // 2026-11-13 第 10 回レビュー PR-41: /pay・/checkout・/[handle]・/tip/[address] の 4 行を各 +1 kB (user 裁定 2026-11-13)。
+  //   4 route とも予算ちょうどに張り付いていた。main 36fc6bbc の手元の本番 flag build で pay 408,297・checkout 432,464・
+  //   [handle] 447,288・tip 400,568 byte (Route 表は 3 桁に丸めるので、checkout は あと 36 byte で 433 kB になる)。
+  //   そこまで増えた分は、決済の error の文から key つきの URL と署名済みの op を出さないための code:
+  //   #1083 (log の出口の伏せ字・全 route に約 750 byte)・#1084 と、この PR (履歴に入れる error の文を伏せる・各 +36〜39 byte)。
+  //   この PR で checkout が 432,500 byte = 表で 433 kB になり、検査が落ちた (ほかの 3 行は予算ちょうどのまま通る)。
+  //   Phase 3 (描かれていない error の文言を消す) の後に、実測で下げ直す。それまでに増えたら、上げる前に code-split を先に見る。
+  '/[locale]/pay': 409,
   // 2026-08-18 store USDC P2: /pay と同型の chunk 再分割 +1kB (tip から新規 USDC モジュール
   // への import 経路なしを grep で確認)。
   // 2026-08-17 store USDC P3: Terms 13 条追記 (messages 増) による再分割 +1kB (tip から
@@ -87,7 +94,8 @@ const BUDGETS_KB = {
   // 2026-09-17 Arc USDC チップ: messages 増による再分割 +1kB (上の /pay コメント参照)。
   // 2026-10-10 F2: 実測 416 + 5。
   // 2026-11-11 F-10: 実測 396 + 5 (前は 421)。
-  '/[locale]/tip/[address]': 401,
+  // 2026-11-13 PR-41: +1 kB (理由は上の /pay の 2026-11-13 の注記・Phase 3 の後に下げ直す)。
+  '/[locale]/tip/[address]': 402,
   // 2026-09-02 全コードベースレビュー Phase 5 (F1): 予算対象が 5 route しかなく、実際に最も重い
   //   3 route (/create・/[handle]・/checkout) が無監視だった。/pay と同じ「余裕ゼロ」慣行で
   //   実測 +4kB を上限に据える (実測: [handle] 475 / checkout 442 kB)。
@@ -99,8 +107,9 @@ const BUDGETS_KB = {
   // 2026-09-09 npm audit fix のベンダー増分 (/pay のコメント参照): [handle] 482 / checkout 448 kB。
   // 2026-10-10 F2: 実測 [handle] 459 / checkout 431 に各 +5。
   // 2026-11-11 F-10: 実測 [handle] 442 / checkout 427 に各 +5 (前は 464 / 436)。
-  '/[locale]/[handle]': 447,
-  '/[locale]/checkout': 432,
+  // 2026-11-13 PR-41: 各 +1 kB (理由は上の /pay の 2026-11-13 の注記・Phase 3 の後に下げ直す)。
+  '/[locale]/[handle]': 448,
+  '/[locale]/checkout': 433,
   // 2026-10-10 E22/F2: 予算の外にあった主要画面。顧客の支払い導線 (/order = モバイル注文・/scan = 読み取り)・
   // お店の画面 (/history・/billing)・AI ストア (/store・/discovery)。実測 order 366 / scan 388 / history 407 /
   // store 259 / billing 331 / discovery 310 に各 +5。
