@@ -72,6 +72,9 @@ export async function detectAccountKind(
   return { kind: 'unknown', delegateAddress: target };
 }
 
+// 名前は i18nKey だが、messages に同じ名前の文は無い (描かれていなかったので 2026-11 の第 10 回レビュー PR-28a で消した)。
+// error の種類の名前として使う: 3 フォームは 'errorPristineNoBootstrap' かどうかだけを見て、文は SmartAccountFallback の
+// namespace から出す (components/SmartAccountFallbackBanner.tsx)。
 export type IncompatibleSmartAccountI18nKey =
   | 'errorIncompatibleSmartAccount'
   | 'errorMav2Disabled'

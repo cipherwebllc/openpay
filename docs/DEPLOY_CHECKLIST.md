@@ -1068,10 +1068,13 @@ claim が漏れ ありと判明、6 箇所に拡張):
 
 ### 9.6 MAv2 + Kaia defensive UI (実装済)
 
-MAv2 経路は Pimlico Kaia 非対応で早期 throw され、`errorMav2KaiaPolygon` i18n
-message で「Polygon / Base / Arbitrum / Optimism 等の他チェーン版をご利用くだ
-さい」と案内する (commit `7ee8bc4`、Payment/Tip/Checkout 3 form × ja/en 全カ
-バー)。
+MAv2 経路は Pimlico Kaia 非対応で早期 throw される (`IncompatibleSmartAccountError`・
+i18nKey `errorMav2KaiaPolygon`・commit `7ee8bc4`)。画面は Payment/Tip/Checkout の 3 form とも
+`SmartAccountFallback` の banner を出す (/pay・/checkout は「通常決済に切替」・/tip は
+「このウォレットではチップを送れません」)。`errorMav2KaiaPolygon` の名前の文 (「Polygon / Base /
+Arbitrum / Optimism 等の他チェーン版をご利用ください」) は 3 form の namespace にあったが、画面に
+描かれていなかったので消した (2026-11 第 10 回レビュー PR-28a)。i18nKey は error の種類の名前として
+コードに残る。
 
 **注意**: HashPort wallet は Kaia 非対応 (Ethereum/Polygon/Base/BNB/Avalanche/
 Arbitrum/Aptos のみ) のため、本ガードは現時点で実発火しない defensive 実装。
@@ -1081,8 +1084,10 @@ Arbitrum/Aptos のみ) のため、本ガードは現時点で実発火しない
 - [x] `lib/smartAccount/mav2.ts` chainId 8217/1001 で `errorMav2KaiaPolygon`
       i18nKey throw
 - [x] i18n message を `messages/{ja,en}.json` の Payment/Tip/Checkout 3
-      namespace に追加
-- [x] `tests/lib/i18nKeys.test.ts` で 6 件全て存在を fence
+      namespace に追加 → 描かれていなかったので PR-28a で削除 (画面の文は
+      `SmartAccountFallback` namespace)
+- [x] `tests/lib/i18nKeys.test.ts` で 6 件全て存在を fence → PR-28a で
+      「smart account の error の 7 つの名前の文が messages に無い」の fence に替えた
 - [ ] **将来 MAv2+Kaia wallet 出現時**: Sentry
       `smart_account.mav2_kaia_rejected` の実発火を観測したら、当該 wallet で
       実機 QA + 文言再確認
