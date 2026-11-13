@@ -3551,7 +3551,8 @@
     "busyElsewhere": "A payment with the same details is in progress in another tab or screen, so it wasn't started here. If you complete the payment there, don't press the button here. If you closed it, you can pay from here in a few minutes.",
     "attemptEnded": "This payment attempt has already ended. Nothing was sent in this attempt. Press the button again to start a new payment.",
     "sendRejected": "Your gasless USDC payment was declined when it was submitted. This payment was not sent. A possible reason is an insufficient balance. Please try again (you'll sign again).",
-    "unconfirmedEarlier": "There is a record of an earlier payment with the same details whose result we couldn't confirm yet. No new payment was started here. Pressing the button again re-checks it, but if you're asked to sign, that will be a new payment. To avoid paying twice, check the earlier payment in your wallet history before you sign."
+    "unconfirmedEarlier": "There is a record of an earlier payment with the same details whose result we couldn't confirm yet. No new payment was started here. Pressing the button again re-checks it, but if you're asked to sign, that will be a new payment. To avoid paying twice, check the earlier payment in your wallet history before you sign.",
+    "mappingUnavailable": "This device can't save payment records, so a new gasless USDC payment wasn't started (nothing was sent by this press). If you already sent a payment with the same details, check it in your wallet history first. To make a new payment, check your browser settings (site data storage) or try another browser."
   },
   "OrderLinkBuilder": {
     "noReceiver": "Not set",

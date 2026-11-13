@@ -537,7 +537,6 @@ export function useBatchPayment(
     useState<LatchedPimlicoPending | null>(null);
   // pending store が読めないまま送信要求が来た状態 (fail-closed)。broadcast 済 UserOp の
   // 有無を判定できないので gasless だけを止める。storage が再び読めた時点で解除する。
-  // Circle の経路で、タブの対応 (sessionStorage の attemptId) を保存できない端末でも立てる (runCirclePayment・r10-ss)。
   const [pendingStoreUnavailable, setPendingStoreUnavailable] = useState(false);
 
   useEffect(() => {
@@ -804,7 +803,6 @@ export function useBatchPayment(
           walletClient,
           publicClient,
           isAlive: () => mountedRef.current,
-          setStoreUnavailable: setPendingStoreUnavailable,
         });
       }
 
@@ -1079,8 +1077,6 @@ async function runCirclePayment(args: {
   publicClient: PublicClient | undefined;
   // この試みを始めた hook の instance がまだ画面にあるか (unmount の後は false のまま・第 10 回レビュー H-V)。
   isAlive: () => boolean;
-  // hook の pendingStoreUnavailable の setter (Pimlico の経路の intentHost.setStoreUnavailable と同じもの)。
-  setStoreUnavailable: (unavailable: boolean) => void;
 }): Promise<BatchPaymentResult> {
   const { bundle, params, customer, chainId, walletClient, publicClient, isAlive } = args;
   if (!customer || !walletClient || !publicClient) {
@@ -1133,9 +1129,11 @@ async function runCirclePayment(args: {
   //     「対応を保存できていない押下」)。**ここ (入口) では止めない**: 既にある支払いの復旧・結果の受け取り (scan) は、対応を
   //     保存できなくても今までどおり通す (入口で止めると、対応を保存した後に sessionStorage を読めなくなった端末で、送った
   //     支払いの結果を受け取れなくなる)。saved が false の attemptId は、保存していない、押すたびに変わる id で、scan に使う。
-  //     止まった押下 (下の catch) は、localStorage を読めない端末と同じ flag (pendingStoreUnavailable) を立てる: 画面には
-  //     「この端末では記録を保存できません」の欄が出る (gasless だけを止める・hook の error は null・3 フォームは flag で
-  //     送信を閉じる)。既にある対応を読めた押下 (saved: true・確認待ちの続き) は、今までどおり。
+  //     止まった押下は、場面の符号 (circleCode: 'mapping_unavailable') つきの error で終わり、フォームが赤い枠に locale の文を
+  //     出す (lib/circleErrorKey.ts)。**flag (pendingStoreUnavailable) は立てない・送信を閉じない**: 押せなくすると、後から
+  //     復旧できるようになった支払い (例: 最後に渡してから 30 分より後の記録で、receipt が後から引けるようになったもの) を、
+  //     この画面から受け取れなくなる。押すたびに scan が走り、復旧できれば結果を受け取り、できなければ、また新しい支払いの
+  //     直前で止まる。既にある対応を読めた押下 (saved: true・確認待ちの続き) は、今までどおり。
   // sender は executeCirclePayment が computeIdempotencyKey に使う owner (=customer) と同一値、
   // chainId は executeCirclePayment が使う bundle.chainId と同一値にする (key 不一致を避ける)。
   const usesStableMapping = params.paymentAttemptId === undefined;
@@ -1197,21 +1195,18 @@ async function runCirclePayment(args: {
     // いた前の支払い (90 秒より前の confirmed) の後に 2 本目が開くこと (第 10 回レビュー PR-39a の Codex P2)。残しても、次の押下は
     // 同じ記録を resume するだけで、記録が終わっていれば「既に終了」で破棄される。error の文はそのまま出す。
     // circleSend・circlePending は静的 import しない (bundle budget・上の動的 import) ので、CirclePendingError と同じく name で判定する。
+    // 対応を保存できていない押下が、新しい記録を予約する直前で止まった error (CircleAttemptMappingUnavailableError・上の
+    // 「冪等試行 ID」・circleSend.ts の冒頭の「対応を保存できていない押下」) でも破棄しない: この押下の attemptId は保存
+    // できていない id で、対応に残っている値 (読み戻しの不一致で残った値など) は、この試みのものと言えない。error はそのまま
+    // 投げる (場面の符号つき・フォームが locale の文を出す)。
     const name = (error as Error).name;
-    // 対応を保存できていない押下が、新しい記録を予約する直前で止まった (上の「冪等試行 ID」・circleSend.ts の冒頭の「対応を
-    // 保存できていない押下」)。新しい記録・署名・送信は何も始まっていない。「この端末では記録を保存できません」の欄の flag を
-    // 立て、localStorage を読めない端末と同じ error で終える (hook の error は null になる)。対応は破棄しない: この押下の
-    // attemptId は保存できていない id で、対応に残っている値 (読み戻しの不一致で残った値など) は、この試みのものと言えない。
-    if (name === 'CircleAttemptMappingUnavailableError') {
-      args.setStoreUnavailable(true);
-      throw new PimlicoPendingStoreUnavailableError('attempt-mapping-unavailable');
-    }
     if (
       usesStableMapping &&
       isAlive() &&
       name !== 'CirclePendingError' &&
       name !== 'PendingStoreUnavailableError' &&
-      name !== 'PendingStoreWriteError'
+      name !== 'PendingStoreWriteError' &&
+      name !== 'CircleAttemptMappingUnavailableError'
     ) {
       clearStableAttemptId(attemptArgs, mappedAttemptId);
     }

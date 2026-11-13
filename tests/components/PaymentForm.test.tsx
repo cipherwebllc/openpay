@@ -992,10 +992,9 @@ describe('PaymentForm — 送信フロー', () => {
     ).toBeDisabled();
   });
 
-  // 第 10 回レビューの後追い r10-ss: Circle の経路 (USDC ガスレス) でも同じ欄が出る。hook (useBatchPayment) は、タブの対応
-  // (sessionStorage) を保存できない端末で、新しい支払いを始める前に止めて flag (pendingStoreUnavailable) を立て、error は null で返す
-  // (tests/hooks/useBatchPayment.circleUnmount.test.tsx)。フォームの判定 (lib/paymentFlowGuards/pay.ts) は経路を見ないので、
-  // 上の Pimlico の経路と同じ欄になる。flag の無い行は、押せないのが flag のせいであること (ほかの準備の不足でない) の対照。
+  // Circle の経路 (USDC ガスレス) でも同じ欄が出る (localStorage を読めない端末で hook が立てる flag。フォームの判定 =
+  // lib/paymentFlowGuards/pay.ts は経路を見ない)。Circle の経路でこの欄を見る test が無かったので足した (第 10 回レビューの
+  // 後追い r10-ss)。flag の無い行は、押せないのが flag のせいであること (ほかの準備の不足でない) の対照。
   it.each([
     ['記録を保存できない (flag あり)', 'store-unavailable', true],
     ['対照: flag なし', 'idle', false],
@@ -1039,6 +1038,49 @@ describe('PaymentForm — 送信フロー', () => {
         await user.click(payButton);
         expect(mutate).toHaveBeenCalledOnce();
       }
+    },
+  );
+
+  // 第 10 回レビューの後追い r10-ss: タブの対応 (sessionStorage) を保存できない端末で、新しい支払いの直前で止まった押下は、
+  // 場面 (f) の符号つきの error で終わる (hook は flag を立てない・tests/hooks/useBatchPayment.circleUnmount.test.tsx)。
+  // フォームは赤い枠に locale の文を出し、**支払うボタンは押せるまま** (上の「記録を保存できません」の欄は出さない)。
+  // 押せなくすると、後から復旧できるようになった支払いを、この画面から受け取れない (押すたびに hook の scan が走る)。
+  it.each([
+    ['ja', CIRCLE_ERRORS_JA.mappingUnavailable],
+    ['en', CIRCLE_ERRORS_EN.mappingUnavailable],
+  ] as const)(
+    'Circle の経路・対応を保存できない端末の error (f)・%s → 赤い枠に CircleErrors の文・欄は出ない・支払うボタンは押せる',
+    async (locale, text) => {
+      const user = userEvent.setup();
+      vi.mocked(resolvePaymasterMode).mockReturnValue('erc20');
+      vi.mocked(resolveUsdcGaslessProvider).mockReturnValue('circle');
+      setURL(`to=${MERCHANT}&token=usdc&amount=10`);
+      setAccount({ connected: true, chainId: baseSepolia.id });
+      setBalance(20_000_000n);
+      setSmartAccount(true);
+      setCircleQuote('ready', { gasAmount: 0n, permitAmount: 10_050_000n });
+      // hook が返すのと同じ形: name と場面の符号を持つ error・message は日本語の固定文・flag は立っていない。
+      const stopped = Object.assign(codedError('mapping_unavailable', CIRCLE_ERRORS_JA.mappingUnavailable), {
+        name: 'CircleAttemptMappingUnavailableError',
+      });
+      setPayment('error', stopped);
+      render(<PaymentForm />, { locale });
+
+      // 赤い枠に、その locale の場面 (f) の文が出る (英語の画面に日本語の message を出さない)。
+      expect(await screen.findByText(text)).toBeInTheDocument();
+      if (locale === 'en') expect(screen.queryByText(CIRCLE_ERRORS_JA.mappingUnavailable)).toBeNull();
+      // 「記録を保存できません」の欄 (押せなくする flag の欄)・「確認中」の欄は出ない。
+      expect(screen.queryByText('この端末では記録を保存できません')).toBeNull();
+      expect(screen.queryByText(/通常送信をご利用ください/)).toBeNull();
+      expect(screen.queryByText('送信結果を確認中')).toBeNull();
+
+      // 支払うボタンは押せるまま: 押すと、hook の mutate を呼ぶ (hook が scan からやり直す)。
+      const payButton = screen.getByRole('button', {
+        name: locale === 'ja' ? /10 USDC を支払う/ : /Pay 10 USDC/,
+      });
+      expect(payButton).not.toBeDisabled();
+      await user.click(payButton);
+      expect(mutate).toHaveBeenCalledOnce();
     },
   );
 

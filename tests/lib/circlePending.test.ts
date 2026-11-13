@@ -1301,6 +1301,19 @@ describe('stableAttemptId / clearStableAttemptId (sessionStorage マッピング
       expect(Object.keys(warn.mock.calls[0][1] ?? {}).sort()).toEqual(['cause', 'chainId']);
     });
 
+    // 診断の warn の失敗 (console・Sentry の throw) を、呼ぶ側 (既にある支払いの復旧・新しい支払いを止める処理) に届かせない。
+    it('warn が throw しても投げない: 返す値は同じ (saved: false と、保存していない UUID)', () => {
+      const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {
+        throw new Error('test: logger is broken');
+      });
+      const setItem = breakSessionWrites();
+      const a = unsavedAttemptId();
+      const b = unsavedAttemptId();
+      setItem.mockRestore();
+      expect(a).not.toBe(b);
+      expect(warn).toHaveBeenCalledTimes(2);
+    });
+
     // UUID の採番は storage と関係ない。その失敗を「対応を保存できない」(saved: false) に化けさせない (今までも throw だった)。
     it('crypto.randomUUID の失敗は saved: false にしない (そのまま throw・warn は出さない)', () => {
       const warn = spyWarn();

@@ -229,7 +229,7 @@ function attemptStorageKey(args: {
  *   署名を求める。H-V・穴 B 以降、この対応は「同じタブの続き」を見分ける本体で、無くても払える付帯のものではない。
  *   saved が false のとき、呼ぶ側 (hooks/useBatchPayment.ts の runCirclePayment) はそれを executeCirclePayment に渡し、
  *   executeCirclePayment は **新しい記録を予約する直前で** 止める (lib/smartAccount/circleSend.ts の冒頭の「対応を保存できて
- *   いない押下」)。既にある支払いの復旧・結果の受け取り (scan) は、保存できなくても通す。そのために attemptId は必ず返す。
+ *   いない押下」・場面 (f) の error)。既にある支払いの復旧・結果の受け取り (scan) は、保存できなくても通す。そのために attemptId は必ず返す。
  *     - 既にある値を読めた → その値・saved: true (書かない)。前の押下で保存できていれば、その後に書けなくなった端末でも、
  *       確認待ちの支払いの続き (resume) はそのまま。
  *     - 無い → 新しい UUID を書き、読み戻して同じ値のときだけ saved: true。setItem が throw しない端末 (quota の silent
@@ -238,7 +238,7 @@ function attemptStorageKey(args: {
  *       押すたびに変わるので、その key に記録があることは無い (前の押下の記録は、scan が「別の key の記録」として拾う)。
  *   UUID の採番 (crypto.randomUUID) は try の外: storage と関係ない失敗を「保存できない」に化けさせない。
  *   saved が false のときは warn を 1 行出す (そういう端末がどれだけあるかを見る)。入れるのは chainId と、どこで失敗したか
- *   だけ (アドレス・callHash・attemptId・error の文は入れない)。
+ *   だけ (アドレス・callHash・attemptId・error の文は入れない)。warn の失敗 (throw) は握る (下の理由)。
  * - 値は、このタブが採番した attemptId とは限らない: scan が別の key の記録 (別のタブ・閉じたタブの支払い) の結果を
  *   受け取りに行くとき、hook がその記録の paymentAttemptId に付け替える (下の setStableAttemptId)。 */
 export function stableAttemptId(args: {
@@ -248,7 +248,12 @@ export function stableAttemptId(args: {
 }): { attemptId: string; saved: boolean } {
   const storageKeyName = attemptStorageKey(args);
   const unsaved = (cause: 'read' | 'write' | 'readback', attemptId: string) => {
-    logger.warn('circle.attempt_mapping.unavailable', { chainId: args.chainId, cause });
+    try {
+      logger.warn('circle.attempt_mapping.unavailable', { chainId: args.chainId, cause });
+    } catch {
+      // 何の波及を断つか: 診断の log の失敗 (console・Sentry の throw) が、この後の、既にある支払いの復旧 (scan) と、
+      // 新しい支払いを止める処理 (saved: false を呼ぶ側に返す) を巻き込むこと。warn が出なくても、返す値は同じ。
+    }
     return { attemptId, saved: false };
   };
   let existing: string | null;

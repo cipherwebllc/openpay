@@ -968,10 +968,12 @@ describe('r10-ss: 対応を保存できていない押下 (mappingSaved: false)'
     const error = await attempt.catch((e: unknown) => e);
     expect(error).toBeInstanceOf(CircleAttemptMappingUnavailableError);
     const stopped = error as CircleAttemptMappingUnavailableError;
-    // hook は name で受ける。フォームに場面の文を出させる符号 (circleCode) は持たない。確認待ちでもない。
+    // hook は name で見る (対応を消さない)。フォームは場面 (f) の符号から locale の文を出す。確認待ちではない。
+    // message (i18n を通らない出口 = 履歴・payment log・Sentry に出る) は、ja の同じ場面の文と同じ。
     expect(stopped.name).toBe('CircleAttemptMappingUnavailableError');
-    expect(stopped.message).toBe('circle-attempt-mapping-unavailable');
-    expect('circleCode' in stopped).toBe(false);
+    expect(stopped.circleCode).toBe('mapping_unavailable');
+    expect(Object.hasOwn(stopped, 'circleCode')).toBe(true);
+    expect(stopped.message).toBe(jaMessages.CircleErrors.mappingUnavailable);
     expect(stopped).not.toBeInstanceOf(CirclePendingError);
     // 自分の key の記録を作っていない・署名を求めていない・何も送っていない・待っていない。
     expect(stored('tab-2')).toBeUndefined();
@@ -1133,6 +1135,29 @@ describe('r10-ss: 対応を保存できていない押下 (mappingSaved: false)'
 
       expect(stored('tab-1')?.status).toBe('abandoned');
       expect(Object.keys(records())).toHaveLength(1);
+    });
+
+    // Codex の 2 回目の順 (止まった後に、復旧できるようになる支払い): 31 分より前の submitting・nonce は使用済みだが、bundler が
+    // まだ receipt を返さない → scan は飛ばすので止まる。その後 receipt が引けるようになる (取り込みは直近) → 次の押下の scan が
+    // 元の支払いの結果を返す。止まった押下が記録を書き換えていないので、次の押下が復旧できる。
+    it('31 分後・使用済みで receipt がまだ引けない → 止まる → receipt が引けるようになった後の次の押下は、元の支払いの結果を返す (署名なし)', async () => {
+      seed('submitting');
+      const at = T0 + 31 * MIN;
+      chain.consumed.add(OLD.nonceKey); // 取り込まれたが、bundler の索引がまだ追い付いていない
+      chain.latestMs = at;
+      const before = records();
+
+      await expectStopped(press(at, UNSAVED));
+      expect(records()).toEqual(before);
+
+      // bundler が receipt を返すようになる (取り込みは 1 分前)。同じ端末の次の押下 (保存していない別の id)。
+      include(OLD, { block: 100n, ms: at - MIN });
+      chain.latestMs = at + 10 * SEC;
+      const res = await press(at + 10 * SEC, { ...UNSAVED, paymentAttemptId: 'tab-2-next-press' });
+
+      expect(res).toMatchObject({ userOpHash: OLD.userOpHash, txHash: OLD.txHash });
+      expect(signatureRequests()).toBe(0);
+      expect(mockBroadcast).not.toHaveBeenCalled();
     });
 
     it('古い記録の照合を待つ間に失効 → 今までどおり payment_cancelled (止めた error より先)', async () => {

@@ -928,11 +928,17 @@ describe('H-X: 最初の送信の検証拒否 (hook → 本物の executeCircleP
 // stableAttemptId が保存していない新しい UUID を黙って返し、hook はそれで **新しい支払い** まで送っていた。その支払いが確認待ちで
 // 終わる (または、前の支払いが裏で確定して 90 秒を過ぎている) と、次の押下は別の attemptId (別の key) になり、2 本目の署名を求める。
 // 直した後: 対応を保存できていない押下は、**新しい記録を予約する直前** で止まり (executeCirclePayment の中・scan の後)、
-// localStorage を読めない端末と同じ flag (pendingStoreUnavailable) を立てる (画面は「この端末では記録を保存できません」の欄・
-// hook の error は null)。**既にある支払いの復旧・結果の受け取り (scan) は、対応を保存できなくても今までどおり** (入口で止めると、
-// 対応を保存した後に sessionStorage を読めなくなった端末で、送った支払いの結果を受け取れなくなる = Codex の指摘)。
+// 場面 (f) の符号つきの error (CircleAttemptMappingUnavailableError・circleCode 'mapping_unavailable') で終わる。フォームは
+// 赤い枠に locale の文を出す。**押せなくする flag (pendingStoreUnavailable) は立てない**: 押せなくすると、後から復旧できるように
+// なった支払いを、この画面から受け取れなくなる (Codex の 2 回目の指摘。その順は
+// tests/hooks/useBatchPayment.circleStaleSubmitting.test.tsx)。
+// **既にある支払いの復旧・結果の受け取り (scan) は、対応を保存できなくても今までどおり** (入口で止めると、対応を保存した後に
+// sessionStorage を読めなくなった端末で、送った支払いの結果を受け取れなくなる = Codex の 1 回目の指摘)。
 describe('r10-ss: タブの対応 (sessionStorage) を保存できていない押下は、新しい支払いを始めない (hook → 本物の executeCirclePayment)', () => {
   const UNAVAILABLE = 'circle.attempt_mapping.unavailable';
+  // 場面 (f) の文 (messages/ja.json の CircleErrors.mappingUnavailable と同じ文が、error の message に入る。ずれは
+  // tests/lib/circleErrorKey.test.ts が止める)。
+  const MAPPING_UNAVAILABLE_JA_HEAD = 'この端末では支払いの記録を保存できないため、USDC ガスレスの新しい支払いを始めていません';
   const unavailableWarns = () =>
     vi.mocked(logger.warn).mock.calls.filter(([msg]) => msg === UNAVAILABLE);
   const circleCodeOf = (error: unknown) => (error as { circleCode?: string } | null)?.circleCode;
@@ -972,7 +978,7 @@ describe('r10-ss: タブの対応 (sessionStorage) を保存できていない�
   }
 
   // sessionStorage の getItem だけを投げさせる (localStorage は読める = hook の最初の確認は通る)。
-  // from = 何回目の読み取りから投げるか (既定 1 = 全部。2 = 最初の読み取りは通り、書いた後の読み戻しから投げる)。
+  // from = 何回目の読み取りから投げるか (既定 1 = 全部。2 = 最初の読み取りは通り、書いた後の読み戻しだけ投げる)。
   function breakSessionReads(from = 1) {
     const realGetItem = Storage.prototype.getItem;
     let reads = 0;
@@ -987,6 +993,14 @@ describe('r10-ss: タブの対応 (sessionStorage) を保存できていない�
         }
         return realGetItem.call(this, key);
       });
+  }
+
+  // 診断の warn (対応を保存できなかった) だけを投げさせる (console・Sentry の失敗)。ほかの warn は今までどおり。
+  function breakUnavailableWarn() {
+    vi.mocked(logger.warn).mockImplementation((msg: string) => {
+      if (msg === UNAVAILABLE) throw new Error('test: logger is broken');
+    });
+    return { mockRestore: () => vi.mocked(logger.warn).mockReset() };
   }
 
   // 正常な端末で 1 回払い、送信の後の receipt の待ちが失敗して確認待ちで終わる所まで進める (記録は submitting・対応は保存済み・
@@ -1036,9 +1050,19 @@ describe('r10-ss: タブの対応 (sessionStorage) を保存できていない�
   }
   const NOTHING = { signatures: 0, sent: 0, records: [] as string[] };
 
-  // ---- 既にある支払いの復旧・結果の受け取りは、対応を保存できなくても今までどおり (Codex の順・main と同じ結果) ----
+  // 画面に出る error が、場面 (f) の error であること。押せなくする flag は立っていない。
+  function expectMappingUnavailableScene(current: ReturnType<typeof openScreen>['result']['current']) {
+    expect(current.error?.name).toBe('CircleAttemptMappingUnavailableError');
+    expect(circleCodeOf(current.error)).toBe('mapping_unavailable');
+    expect(current.error?.message.startsWith(MAPPING_UNAVAILABLE_JA_HEAD)).toBe(true);
+    expect(current.pendingStoreUnavailable).toBe(false);
+    expect(current.isUnknown).toBe(false);
+    expect(current.data).toBeUndefined();
+  }
 
-  it('Codex の順 1: 送った支払いが確認待ち (記録は submitting・対応は保存済み) → sessionStorage の getItem だけが throw するようになる → もう一度押す → 同じ op の結果を受け取る (欄は出ない・署名と送信は 1 回目の分だけ)', async () => {
+  // ---- 既にある支払いの復旧・結果の受け取りは、対応を保存できなくても今までどおり (Codex の 1 回目の順・main と同じ結果) ----
+
+  it('Codex の順 1: 送った支払いが確認待ち (記録は submitting・対応は保存済み) → sessionStorage の getItem だけが throw するようになる → もう一度押す → 同じ op の結果を受け取る (署名と送信は 1 回目の分だけ)', async () => {
     const screen = openScreen();
     await payUntilUnconfirmed(screen);
 
@@ -1060,7 +1084,7 @@ describe('r10-ss: タブの対応 (sessionStorage) を保存できていない�
     expect(unavailableWarns()).toEqual([[UNAVAILABLE, { chainId: baseSepolia.id, cause: 'read' }]]);
   });
 
-  it('Codex の順 2: 送った支払いが裏で確定 (記録は confirmed・成功はどの画面にも出ていない) → sessionStorage の getItem だけが throw → 90 秒以内に開き直して押す → 既払いの結果を受け取る (欄は出ない・署名と送信は 1 回目の分だけ)', async () => {
+  it('Codex の順 2: 送った支払いが裏で確定 (記録は confirmed・成功はどの画面にも出ていない) → sessionStorage の getItem だけが throw → 90 秒以内に開き直して押す → 既払いの結果を受け取る (署名と送信は 1 回目の分だけ)', async () => {
     await payAndLeaveBeforeConfirmed();
 
     clockOffset += 30_000;
@@ -1078,6 +1102,27 @@ describe('r10-ss: タブの対応 (sessionStorage) を保存できていない�
     expect(screenB.result.current.pendingStoreUnavailable).toBe(false);
     expect(screenB.result.current.error).toBeNull();
     expectNoNewPayment({ signatures: 2, sent: 1, records: ['confirmed'] });
+  });
+
+  // 診断の warn の失敗 (console・Sentry の throw) が、既にある支払いの復旧を巻き込まない。
+  it('対応を読めないことの warn が throw しても、既にある支払い (submitting) の結果を受け取れる', async () => {
+    const screen = openScreen();
+    await payUntilUnconfirmed(screen);
+
+    const reads = breakSessionReads();
+    const warn = breakUnavailableWarn();
+    bundlerDown = false;
+    screen.result.current.mutate(PARAMS);
+    await waitFor(() => expect(screen.result.current.isSuccess || screen.states()[1]?.status === 'error').toBe(true));
+    const warned = unavailableWarns();
+    reads.mockRestore();
+    warn.mockRestore();
+
+    expect(screen.result.current.isSuccess).toBe(true);
+    expect(screen.result.current.data).toMatchObject({ userOpHash: OP_A.userOpHash, success: true });
+    expectNoNewPayment({ signatures: 2, sent: 1, records: ['confirmed'] });
+    // warn は呼ばれている (投げた)。
+    expect(warned).toHaveLength(1);
   });
 
   // 最初の対応を保存できていない押下でも、付け替えを書けたら、この試みの「対応の指す先」は今までどおり付け替えた先になる
@@ -1105,7 +1150,7 @@ describe('r10-ss: タブの対応 (sessionStorage) を保存できていない�
   // Codex と同じ壊れ方 (getItem だけ throw・setItem は通る) で、復旧が確認待ちで終わる形。付け替えの書き込みは通るが、
   // 次の押下はその対応を読めない (resume にならず、また scan から入る)。(a) の「24 時間以内にこのタブで…もう一度押すと、まず
   // 同じ支払いの結果を確かめ直します」は言えないので、hook は付け替えを「書けた」と返さず、場面は (e) になる。
-  it('確認待ちの支払いがある端末で sessionStorage の getItem だけが throw するようになり (setItem は通る)、復旧の照会も失敗する → 確認待ち (e) で終わる ((a) にしない・欄は出ない・署名を求めない・送り直さない)。次の押下も scan から入り、bundler が戻れば同じ op の結果を受け取る', async () => {
+  it('確認待ちの支払いがある端末で sessionStorage の getItem だけが throw するようになり (setItem は通る)、復旧の照会も失敗する → 確認待ち (e) で終わる ((a) にしない・署名を求めない・送り直さない)。次の押下も scan から入り、bundler が戻れば同じ op の結果を受け取る', async () => {
     const screen = openScreen();
     await payUntilUnconfirmed(screen);
     const savedMapping = mappings();
@@ -1143,7 +1188,7 @@ describe('r10-ss: タブの対応 (sessionStorage) を保存できていない�
   });
 
   // 付け替えを書けないので (e)。次の押下も、保存していない別の id で scan から入り、同じ記録を復旧する。
-  it('確認待ちの支払いがある端末で sessionStorage が読めも書けもしなくなり、復旧の照会も失敗する → 確認待ち (e) で終わる (欄は出ない・署名を求めない・送り直さない)。次の押下も scan から入り、bundler が戻れば同じ op の結果を受け取る', async () => {
+  it('確認待ちの支払いがある端末で sessionStorage が読めも書けもしなくなり、復旧の照会も失敗する → 確認待ち (e) で終わる (署名を求めない・送り直さない)。次の押下も scan から入り、bundler が戻れば同じ op の結果を受け取る', async () => {
     const screen = openScreen();
     await payUntilUnconfirmed(screen);
 
@@ -1169,7 +1214,7 @@ describe('r10-ss: タブの対応 (sessionStorage) を保存できていない�
     expectNoNewPayment({ signatures: 2, sent: 1, records: ['confirmed'] });
   });
 
-  it('別の画面が署名の途中 (直近の pre-submit の記録) → 今までどおり (b) で終わる (欄は出ない・この押下は何も始めない)', async () => {
+  it('別の画面が署名の途中 (直近の pre-submit の記録) → 今までどおり (b) で終わる (この押下は何も始めない)', async () => {
     const screenA = openScreen();
     screenA.result.current.mutate(PARAMS);
     await waitFor(() => expect(permitRequests).toHaveLength(1));
@@ -1187,11 +1232,11 @@ describe('r10-ss: タブの対応 (sessionStorage) を保存できていない�
     expectNoNewPayment({ signatures: 1, sent: 0, records: ['awaiting_signature'] });
   });
 
-  // ---- 新しい支払いを作る所まで来た押下は、送らずに欄 ----
+  // ---- 新しい支払いを作る所まで来た押下は、送らずに場面 (f) の error ----
 
   // 2 つ目の「両方の setItem が throw」は、この PR が表示を変える形: 直す前は hook の最初の確認 (getItem だけ) を通り、記録の
   // 予約の書き込み (writeRecord) の PendingStoreWriteError がそのまま画面の error に出ていた (日本語の固定文・英語の画面でも)。
-  // 直した後は、予約の書き込みの前に止まり、flag になる (送らない点は前も後も同じ)。
+  // 直した後は、予約の書き込みの前に止まり、場面 (f) の error になる (送らない点は前も後も同じ)。
   // 最後の列 = 止まった後に sessionStorage に残っている対応の数 (hook は、この押下で対応を消しに行かない)。
   const brokenDevices: Array<[string, () => { mockRestore: () => void }, string, number]> = [
     ['sessionStorage の setItem だけが throw (localStorage は正常)', () => breakWrites('session'), 'write', 0],
@@ -1207,23 +1252,20 @@ describe('r10-ss: タブの対応 (sessionStorage) を保存できていない�
     ['sessionStorage の getItem だけが throw', breakSessionReads, 'read', 0],
   ];
   it.each(brokenDevices)(
-    '記録の無い新しい支払い・%s → 送らずに止まる: flag が立ち・hook の error は null・記録も署名も送信も無い',
+    '記録の無い新しい支払い・%s → 送らずに止まる: 場面 (f) の error・押せなくする flag は立たない・記録も署名も送信も無い',
     async (_label, breakStorage, cause, leftMappings) => {
       const broken = breakStorage();
       const removeItem = vi.spyOn(Storage.prototype, 'removeItem');
       const screen = openScreen();
       screen.result.current.mutate(PARAMS);
-      // flag と error は、mutation が終わった後の画面の状態で見る (最初の押下なので、isError が立つのは終わった後だけ)。
+      // error は、mutation が終わった後の画面の状態で見る (最初の押下なので、isError が立つのは終わった後だけ)。
       await waitFor(() => expect(screen.state().status).toBe('error'));
       await waitFor(() => expect(screen.result.current.isError).toBe(true));
       broken.mockRestore();
 
-      const raw = screen.state().error as (Error & { reason?: string }) | null;
-      expect(raw?.name).toBe('PimlicoPendingStoreUnavailableError');
-      expect(raw?.reason).toBe('attempt-mapping-unavailable');
-      expect(screen.result.current.pendingStoreUnavailable).toBe(true);
-      expect(screen.result.current.error).toBeNull();
-      expect(screen.result.current.data).toBeUndefined();
+      // hook は error を替えずにそのまま出す (PimlicoPendingStoreUnavailableError にしない・null にしない)。
+      expect(screen.result.current.error).toBe(screen.state().error);
+      expectMappingUnavailableScene(screen.result.current);
       expect(getCircleUserOpGasPrice).toHaveBeenCalledOnce();
       expectNoNewPayment(NOTHING);
       expect(broadcastCircleUserOp).not.toHaveBeenCalled();
@@ -1238,9 +1280,27 @@ describe('r10-ss: タブの対応 (sessionStorage) を保存できていない�
     },
   );
 
+  // 診断の warn の失敗 (console・Sentry の throw) が、新しい支払いを止める処理を巻き込まない。
+  it('対応を保存できないことの warn が throw しても、新しい支払いは場面 (f) で止まる (logger の error をそのまま出さない・送らない)', async () => {
+    const broken = breakWrites('session');
+    const warn = breakUnavailableWarn();
+    const screen = openScreen();
+    screen.result.current.mutate(PARAMS);
+    await waitFor(() => expect(screen.state().status).toBe('error'));
+    await waitFor(() => expect(screen.result.current.isError).toBe(true));
+    const warned = unavailableWarns();
+    broken.mockRestore();
+    warn.mockRestore();
+
+    expectMappingUnavailableScene(screen.result.current);
+    expectNoNewPayment(NOTHING);
+    expect(mappings()).toEqual({});
+    expect(warned).toHaveLength(1);
+  });
+
   // この PR が塞ぐ穴 (対応を保存した後に読めなくなった端末の形)。直す前: 保存していない id で scan に入り、90 秒より前の
   // confirmed は「正規のリピート」として飛ばし、新しい支払いに署名を求めていた (前の支払いの成功は、どの画面にも出ていない)。
-  it('送った支払いが裏で確定 (成功はどの画面にも出ていない) → sessionStorage の getItem が throw → 90 秒より後に開き直して押す → 2 本目を始めない (署名を求めず、欄を出す)', async () => {
+  it('送った支払いが裏で確定 (成功はどの画面にも出ていない) → sessionStorage の getItem が throw → 90 秒より後に開き直して押す → 2 本目を始めない (署名を求めず、場面 (f) の error)', async () => {
     await payAndLeaveBeforeConfirmed();
 
     clockOffset += 100_000;
@@ -1251,45 +1311,38 @@ describe('r10-ss: タブの対応 (sessionStorage) を保存できていない�
     await waitFor(() => expect(screenB.result.current.isError).toBe(true));
     reads.mockRestore();
 
-    expect(screenB.state().error?.name).toBe('PimlicoPendingStoreUnavailableError');
-    expect(screenB.result.current.pendingStoreUnavailable).toBe(true);
-    expect(screenB.result.current.error).toBeNull();
-    expect(screenB.result.current.data).toBeUndefined();
+    expectMappingUnavailableScene(screenB.result.current);
     expectNoNewPayment({ signatures: 2, sent: 1, records: ['confirmed'] });
     // 前の支払いの対応は残っている (読めるようになれば、次の押下はその記録を resume して既払いの結果を受け取る)。
     expect(Object.keys(mappings())).toHaveLength(1);
   });
 
-  // 画面 (3 フォーム) は flag で送信を閉じるが、安全をそれに頼らない: mutate をもう一度呼んでも、また送らずに止まる。
-  // flag は、押下の入口 (localStorage を読めた) でいったん下り、新しい記録の予約の直前でまた立つ (同じ押下の中の順番)。
-  it('止まった後にもう一度押す → また送らずに止まる (flag は入口で下り、また立つ)。sessionStorage が戻ってから押すと、今までどおり署名を求める', async () => {
+  // 送信は閉じない (flag を立てない) ので、止まった後も押せる。何も変わっていなければ、押すたびに同じ所で止まる
+  // (記録も署名も送信も増えない)。sessionStorage が戻れば、今までどおり新しい支払いになる。
+  it('止まった後にもう一度押す (何も変わっていない) → また場面 (f) で止まる。sessionStorage が戻ってから押すと、今までどおり署名を求める', async () => {
     const broken = breakWrites('session');
     const screen = openScreen();
     screen.result.current.mutate(PARAMS);
     await waitFor(() => expect(screen.states()[0].status).toBe('error'));
-    await waitFor(() => expect(screen.result.current.pendingStoreUnavailable).toBe(true));
+    await waitFor(() => expect(screen.result.current.isError).toBe(true));
+    expectMappingUnavailableScene(screen.result.current);
 
-    // 2 回目。ガス価格を待つ間は、入口が flag を下ろしている (試み中の印は 1 回目の終わりで外れている = Circle の入口まで来る)。
-    const gas = deferred<{ maxFeePerGas: bigint; maxPriorityFeePerGas: bigint }>();
-    vi.mocked(getCircleUserOpGasPrice).mockReturnValueOnce(gas.promise);
+    // 2 回目 (試み中の印は 1 回目の終わりで外れている = Circle の入口まで来る)。
     screen.result.current.mutate(PARAMS);
     await waitFor(() => expect(getCircleUserOpGasPrice).toHaveBeenCalledTimes(2));
-    await waitFor(() => expect(screen.result.current.pendingStoreUnavailable).toBe(false));
-    expect(screen.result.current.isPending).toBe(true);
-    gas.resolve({ maxFeePerGas: 5n * GWEI, maxPriorityFeePerGas: 1n });
     await waitFor(() => expect(screen.states()[1]?.status).toBe('error'));
-    await waitFor(() => expect(screen.result.current.pendingStoreUnavailable).toBe(true));
-    expect(screen.states()[1].error?.name).toBe('PimlicoPendingStoreUnavailableError');
-    expect(screen.result.current.error).toBeNull();
+    await waitFor(() => expect(screen.result.current.error).toBe(screen.states()[1].error));
+    expect(screen.states()[1].error).not.toBe(screen.states()[0].error);
+    expectMappingUnavailableScene(screen.result.current);
     expectNoNewPayment(NOTHING);
     expect(mappings()).toEqual({});
     expect(unavailableWarns()).toHaveLength(2);
 
-    // sessionStorage が戻ってから押す: 入口が flag を下ろし、対応を保存して、新しい支払いとして署名を求める。
+    // sessionStorage が戻ってから押す: 対応を保存して、新しい支払いとして署名を求める。
     broken.mockRestore();
     screen.result.current.mutate(PARAMS);
     await waitFor(() => expect(permitRequests).toHaveLength(1));
-    await waitFor(() => expect(screen.result.current.pendingStoreUnavailable).toBe(false));
+    expect(screen.result.current.pendingStoreUnavailable).toBe(false);
     expect(Object.keys(mappings())).toHaveLength(1);
     expect(recordStatuses()).toEqual(['awaiting_signature']);
     expect(sentOps()).toEqual([]);
@@ -1298,7 +1351,7 @@ describe('r10-ss: タブの対応 (sessionStorage) を保存できていない�
 
   // ---- 対応を保存できている押下・対応を使わない押下は、今までどおり ----
 
-  it('sessionStorage が正常 → 今までどおり (対応を保存して署名を求める・flag は立たない・warn も出ない)', async () => {
+  it('sessionStorage が正常 → 今までどおり (対応を保存して署名を求める・warn も出ない)', async () => {
     const screen = openScreen();
     screen.result.current.mutate(PARAMS);
     await waitFor(() => expect(permitRequests).toHaveLength(1));

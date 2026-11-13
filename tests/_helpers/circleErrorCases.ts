@@ -13,6 +13,7 @@ export const CIRCLE_ERROR_CASES = [
   ['attempt_ended', 'attemptEnded'],
   ['send_rejected', 'sendRejected'],
   ['unconfirmed_earlier', 'unconfirmedEarlier'],
+  ['mapping_unavailable', 'mappingUnavailable'],
 ] as const;
 
 export const CIRCLE_ERRORS_JA = jaMessages.CircleErrors;

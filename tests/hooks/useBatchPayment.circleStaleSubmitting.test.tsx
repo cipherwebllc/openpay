@@ -130,6 +130,8 @@ let userOpRequests: Array<SignRequest<UserOpResult>>;
 let landed: Map<Hex, { block: bigint; ms: number }>;
 // true の間、bundler の receipt の待ちは失敗する (5xx)。
 let bundlerDown: boolean;
+// true の間、bundler は取り込まれた op の receipt をまだ返さない (索引の遅れ: chain の nonce は使用済み・receipt は not found)。
+let bundlerIndexLagging: boolean;
 // 最初の画面 (閉じるタブ) の receipt の待ちは、最後まで返らない (タブと一緒に消える)。
 let hangNextWait: boolean;
 // 時計。本物の時刻に足す (executeCirclePayment は Date.now を読む)。
@@ -196,6 +198,7 @@ beforeEach(() => {
   userOpRequests = [];
   landed = new Map();
   bundlerDown = false;
+  bundlerIndexLagging = false;
   hangNextWait = false;
   clockOffset = 0;
   const realNow = Date.now.bind(Date);
@@ -227,7 +230,9 @@ beforeEach(() => {
       bundlerClient: {
         getUserOperationReceipt: (async ({ hash }: { hash: Hex }) => {
           const found = ALL_OPS.find((o) => o.userOpHash === hash);
-          if (!found || !landed.has(hash)) throw new UserOperationReceiptNotFoundError({ hash });
+          if (!found || !landed.has(hash) || bundlerIndexLagging) {
+            throw new UserOperationReceiptNotFoundError({ hash });
+          }
           return receiptOf(found);
         }) as never,
       },
@@ -368,5 +373,98 @@ describe('H-Z: タブを閉じた Circle の支払いの記録 (hook → 本物�
     });
     expect(sentOps()).toEqual([OP_A.signedUserOp]);
     expect(recordStatuses()).toEqual(['confirmed']);
+  });
+});
+
+// 第 10 回レビューの後追い r10-ss (Codex の 2 回目の順): タブの対応 (sessionStorage) を読めない端末で、新しい支払いの直前で
+// 止まった後に、前の支払いが復旧できるようになる筋。
+// 31 分より前の submitting の記録・nonce は使用済みだが、bundler がまだ receipt を返さない → scan は飛ばす → 対応を保存できて
+// いない押下は、新しい記録を予約する直前で止まる (場面 (f) の error)。その後 receipt が引けるようになる (取り込みは直近)。
+// main は、もう一度押せば元の支払いの結果を受け取れる (その間の新しい署名の要求を断った後)。この PR の途中の版は、止まった
+// 押下で「押せなくする flag」を立てていたので、画面を開き直すまで受け取れなかった。flag をやめたので、同じ画面でもう一度
+// 押すと受け取れる。
+describe('r10-ss: 新しい支払いの直前で止まった後に、復旧できるようになった支払い (hook → 本物の executeCirclePayment)', () => {
+  // sessionStorage の getItem だけを投げさせる (localStorage は読める)。
+  function breakSessionReads() {
+    const realGetItem = Storage.prototype.getItem;
+    return vi
+      .spyOn(Storage.prototype, 'getItem')
+      .mockImplementation(function (this: Storage, key: string) {
+        if (this === window.sessionStorage) throw new Error('SecurityError: storage is not available');
+        return realGetItem.call(this, key);
+      });
+  }
+  const circleCodeOf = (error: unknown) => (error as { circleCode?: string } | null)?.circleCode;
+
+  it('31 分より前の submitting (nonce は使用済み・receipt はまだ引けない) → 止まる (場面 (f)・押せなくならない) → receipt が引けるようになる → 同じ画面でもう一度押すと、元の支払いの結果を受け取る (署名・送信なし)', async () => {
+    await payAndCloseTab();
+
+    // 31 分後。前の op はいま取り込まれた (nonce は使用済み) が、bundler の索引がまだ追い付いていない。
+    clockOffset += 31 * MIN;
+    land(OP_A, 100n);
+    bundlerIndexLagging = true;
+    const reads = breakSessionReads();
+    const screenB = openScreen();
+    screenB.result.current.mutate(PARAMS);
+    await waitFor(() =>
+      expect(screenB.result.current.isError || permitRequests.length > 1).toBe(true),
+    );
+
+    // 新しい支払いを始めていない: 署名を求めず、場面 (f) の error で終わる。押せなくする flag は立たない。
+    expect(permitRequests).toHaveLength(1);
+    expect(screenB.result.current.error?.name).toBe('CircleAttemptMappingUnavailableError');
+    expect(circleCodeOf(screenB.result.current.error)).toBe('mapping_unavailable');
+    expect(screenB.result.current.pendingStoreUnavailable).toBe(false);
+    expect(readContract).toHaveBeenCalledTimes(1);
+    // 記録は書き換えていない (submitting のまま・新しい記録も無い)。
+    expect(recordStatuses()).toEqual(['submitting']);
+
+    // bundler が receipt を返すようになる。同じ画面でもう一度押す。
+    bundlerIndexLagging = false;
+    clockOffset += 10 * SEC;
+    screenB.result.current.mutate(PARAMS);
+    await waitFor(() =>
+      expect(screenB.result.current.isSuccess || permitRequests.length > 1).toBe(true),
+    );
+    reads.mockRestore();
+
+    expect(screenB.result.current.isSuccess).toBe(true);
+    expect(screenB.result.current.data).toMatchObject({
+      userOpHash: OP_A.userOpHash,
+      txHash: OP_A.txHash,
+      success: true,
+    });
+    expect(permitRequests).toHaveLength(1);
+    expect(userOpRequests).toHaveLength(1);
+    expect(sentOps()).toEqual([OP_A.signedUserOp]);
+    expect(recordStatuses()).toEqual(['confirmed']);
+  });
+
+  // 止まった後も、前の支払いが復旧できるようにならなければ (取り込みが 30 分より前だった)、押すたびに同じ所で止まる。
+  it('31 分より前の submitting・取り込みも 31 分より前 (飛ばす記録) → 押すたびに場面 (f) で止まり、2 本目を始めない', async () => {
+    await payAndCloseTab();
+    land(OP_A, 100n); // 閉じた直後に成立した
+
+    clockOffset += 31 * MIN;
+    const reads = breakSessionReads();
+    const screenB = openScreen();
+    let previous: Error | null = null;
+    for (const press of [1, 2]) {
+      screenB.result.current.mutate(PARAMS);
+      await waitFor(() => expect(readContract).toHaveBeenCalledTimes(press));
+      // この押下の error が画面に出るまで待つ (前の押下の error とは別の instance)。
+      await waitFor(() => {
+        const shown = screenB.result.current.error;
+        expect((shown !== null && shown !== previous) || permitRequests.length > 1).toBe(true);
+      });
+      previous = screenB.result.current.error;
+      expect(permitRequests).toHaveLength(1);
+      expect(circleCodeOf(previous)).toBe('mapping_unavailable');
+      expect(screenB.result.current.pendingStoreUnavailable).toBe(false);
+    }
+    reads.mockRestore();
+
+    expect(sentOps()).toEqual([OP_A.signedUserOp]);
+    expect(recordStatuses()).toEqual(['submitting']);
   });
 });

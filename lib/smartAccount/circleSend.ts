@@ -158,8 +158,13 @@
 // throw し setItem は通る端末では、書けても次の押下はその対応を読めず、resume ではなく scan から入る)。なので、その復旧の
 // 確認待ちは (e) になる ((a) の「このタブでもう一度押すと、まず同じ支払いの結果を確かめ直します」は言えない)。ここ (circleSend)
 // の規則は今までどおり「hook の関数が true を返したら (a)・false なら (e)」で、mappingSaved は見ない。
-// 止まった押下に、hook は対応の破棄 (clearStableAttemptId) をせず、「この端末では記録を保存できません」の欄の flag を立てる
-// (hooks/useBatchPayment.ts の runCirclePayment)。省略・true の呼び出し (明示の paymentAttemptId を含む) は今までどおり。
+// 止まった押下に、hook は対応の破棄 (clearStableAttemptId) をせず、error をそのまま投げる (hooks/useBatchPayment.ts の
+// runCirclePayment)。error は場面 (f) の符号 (circleCode: 'mapping_unavailable') を持ち、フォームが赤い枠に locale の文を出す。
+// **送信は閉じない** (押せなくする flag を立てない): 止まった後に復旧できるようになる支払いがある。例: 最後に渡してから
+// 30 分より後の submitting の記録で、nonce は使用済みだが bundler がまだ receipt を返さない間は、scan は飛ばす (上の「古い
+// submitting の記録」の 2) ので、ここで止まる。その後 receipt が引けるようになれば (取り込みが 30 分以内)、次の押下の scan が
+// 元の支払いの結果を返す。押せなくすると、その結果を、この画面から受け取れなくなる。
+// 省略・true の呼び出し (hook は、明示の paymentAttemptId の押下に true を渡す) は今までどおり。
 //
 // useBatchPayment の circle 分岐がこの executeCirclePayment を呼ぶ。permitAmount の
 // 算定 (gas 実費 + per-chain surcharge) は chunk 5 (useGasQuoteCircle) が担い、ここへは
@@ -314,7 +319,7 @@ export type CirclePaymentResult = {
   actualGasCost: bigint;
 };
 
-// 場面の符号と文 (第 10 回レビュー PR-39c)。下の 3 つの class は、どの場面の error かを own property `circleCode` に持つ。
+// 場面の符号と文 (第 10 回レビュー PR-39c)。下の 4 つの class は、どの場面の error かを own property `circleCode` に持つ。
 // 3 つのフォームは class も name も見ず、この符号から locale の文 (messages の CircleErrors) を出す (lib/circleErrorKey.ts)。
 // message にも日本語の文を残す: message は i18n を通らない出口にも出る (履歴に保存する error の文・payment log・Sentry)。
 // 符号だけにすると、履歴の画面に符号がそのまま出る。同じ文が messages/ja.json の CircleErrors にもあるので、ずれは
@@ -340,6 +345,12 @@ const CIRCLE_ERROR_JA = {
     'ここでは新しい支払いを始めていません。' +
     'もう一度押すと確かめ直しますが、署名を求められた場合は新しい支払いになります。' +
     '二重に払わないよう、署名の前にウォレットの履歴で以前の支払いを確かめてください。',
+  // (f) の文は案 (user の承認待ち・2026-11-13)。「次に押すと◯◯します」とは書かない: 次の押下が何をするかは、その時点の
+  // 記録で変わる (既にある支払いを復旧できれば結果を返し、できなければ、また新しい支払いの直前で止まる)。
+  mapping_unavailable:
+    'この端末では支払いの記録を保存できないため、USDC ガスレスの新しい支払いを始めていません (この押下では送金していません)。' +
+    '同じ内容の支払いを以前に送っていた場合は、先にウォレットの履歴で確かめてください。' +
+    '新しく支払うには、ブラウザの設定 (サイトのデータの保存) を確かめるか、別のブラウザでお試しください。',
 } as const satisfies Record<CircleErrorCode, string>;
 
 /** 確認待ち。**失敗ではない**。場面は 3 つ (reason)。(a) と (e) の違いは、**(a) の文の約束 (24 時間以内にこのタブで同じ内容の
@@ -410,12 +421,15 @@ export class CircleSendRejectedError extends Error {
 }
 
 /** attemptId の対応を保存できていない押下 (args.mappingSaved が false) が、新しい記録を予約する所まで来たので止めた (冒頭の
- * 「対応を保存できていない押下」)。この押下は、新しい記録の書き込み・署名・送信を何も始めていない。
- * hook (useBatchPayment の runCirclePayment) が name で受け、画面には出さずに「この端末では記録を保存できません」の欄の flag に
- * 替える。なので circleCode (フォームが場面の文を選ぶ符号) は持たず、message は内部向けの固定文。 */
+ * 「対応を保存できていない押下」)。場面 (f)。この押下は、新しい記録の書き込み・署名・送信を何も始めていない。
+ * **確認待ちではない**: name を 'CirclePendingError' にしない。hook (useBatchPayment の runCirclePayment) は、この name では
+ * attemptId の対応を消さず、error をそのまま投げる。フォームは符号から locale の文を赤い枠に出し、送信は閉じない
+ * (次の押下も scan から入り、既にある支払いを復旧できるようになっていれば結果を受け取る)。 */
 export class CircleAttemptMappingUnavailableError extends Error {
+  /** 場面の符号 (上の「場面の符号と文」)。 */
+  readonly circleCode: CircleErrorCode = 'mapping_unavailable';
   constructor() {
-    super('circle-attempt-mapping-unavailable');
+    super(CIRCLE_ERROR_JA.mapping_unavailable);
     this.name = 'CircleAttemptMappingUnavailableError';
   }
 }
