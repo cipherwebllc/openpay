@@ -998,12 +998,15 @@ describe('r10-ss: タブの対応 (sessionStorage) を保存できない端末�
     '%s → 送る前に止まる: flag が立ち・hook の error は null・記録も対応も署名も送信も無い',
     async (_label, breakStorage, cause) => {
       const broken = breakStorage();
+      const removeItem = vi.spyOn(Storage.prototype, 'removeItem');
       const screen = openScreen();
       screen.result.current.mutate(PARAMS);
       // flag と error は、mutation が終わった後の画面の状態で見る (最初の押下なので、isError が立つのは終わった後だけ)。
       await waitFor(() => expect(screen.state().status).toBe('error'));
       await waitFor(() => expect(screen.result.current.isError).toBe(true));
       broken.mockRestore();
+      // 止まった押下は、対応を消しにも行かない (executeCirclePayment を包む try の外で止まる。try の catch は対応を破棄しに行く)。
+      expect(removeItem).not.toHaveBeenCalled();
 
       const raw = screen.state().error as (Error & { reason?: string }) | null;
       expect(raw?.name).toBe('PimlicoPendingStoreUnavailableError');
