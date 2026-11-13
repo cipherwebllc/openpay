@@ -869,7 +869,7 @@ describe('TipForm — 送信', () => {
       expect(mutate).not.toHaveBeenCalled();
     });
 
-    it('保存できないだけ → 今までどおり通常送信を案内する', async () => {
+    it('保存できないだけ → ブラウザの設定か別のブラウザを案内する (通常送信は案内しない)', async () => {
       renderGasless('idle', true);
 
       expect(await screen.findByText(STANDARD_BODY)).toBeInTheDocument();
