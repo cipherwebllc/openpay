@@ -723,7 +723,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   // 引数は同じ名前の shorthand だけで渡す (似た型の別の値と取り違えない)。
   const {
     statusToken,
-    orderNotifyTooOld,
+    orderNotifyFailed,
     boundNotifyRetryable,
     boundNotifyAcknowledged,
     previousOrderNotice,
@@ -858,7 +858,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   }, [redirectIn]);
 
   function doRedirect() {
-    if (!params.successUrl || !completion || restoredCheckoutCompletion || orderNotifyTooOld ||
+    if (!params.successUrl || !completion || restoredCheckoutCompletion || orderNotifyFailed ||
       (boundOrderRef.current && !boundNotifyAcknowledged)) return;
     const u = new URL(params.successUrl);
     for (const [k, v] of Object.entries(completion.redirectQuery)) {
@@ -1656,7 +1656,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
           {t('retryOrderNotify')}
         </button>
       )}
-      {orderNotifyTooOld && (
+      {orderNotifyFailed && (
         <p role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
           {t('orderNotifyTooOld')}
         </p>
@@ -1700,7 +1700,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
           // (webhook 無) では statusToken が null ゆえ非表示。click は user gesture ＝ ここで AudioContext を解錠
           // (iOS 自動再生対策)。
           orderStatusHref={
-            env.enableOrderPickup && statusToken && !orderNotifyTooOld
+            env.enableOrderPickup && statusToken && !orderNotifyFailed
               ? `/${locale}/order/status?t=${statusToken}`
               : null
           }
@@ -1712,7 +1712,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
             relay.data?.txHash ?? undefined,
           ]}
           redirectNotice={
-            !restoredCheckoutCompletion && params.successUrl && !orderNotifyTooOld &&
+            !restoredCheckoutCompletion && params.successUrl && !orderNotifyFailed &&
               (!boundOrderRef.current || boundNotifyAcknowledged)
               ? (redirectIn !== null && redirectIn > 0
                 ? t('redirectingIn', { sec: redirectIn })
@@ -1757,7 +1757,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
           success_url 指定時は overlay 表示中も 3 秒 countdown が並走する仕様。gasless / relay /
           standard の 3 連は共通 PaymentSuccessOverlay へ集約 (payload で mode 差を吸収・挙動不変)。 */}
       <PaymentSuccessOverlay
-        dismissed={overlayDismissed || orderNotifyTooOld}
+        dismissed={overlayDismissed || orderNotifyFailed}
         payload={successOverlayPayload}
         notify={notifyData}
         onDismiss={() => setOverlayDismissed(true)}

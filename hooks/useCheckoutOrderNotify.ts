@@ -171,7 +171,7 @@ export function useCheckoutOrderNotify(args: UseCheckoutOrderNotifyArgs) {
   // 1 度だけ生成し、webhook payload (notify がポインタ保存) と完了画面の「注文状況を見る」リンクで
   // 使う。flag OFF では生成せず null = payload 無変化・リンク非表示 (byte-identical)。
   const [statusToken, setStatusToken] = useState<string | null>(null);
-  const [orderNotifyTooOld, setOrderNotifyTooOld] = useState(false);
+  const [orderNotifyFailed, setOrderNotifyFailed] = useState(false);
   const [boundNotifyRetry, setBoundNotifyRetry] = useState(0);
   const [boundNotifyRetryable, setBoundNotifyRetryable] = useState(false);
   const [boundNotifyAcknowledged, setBoundNotifyAcknowledged] = useState(false);
@@ -315,7 +315,7 @@ export function useCheckoutOrderNotify(args: UseCheckoutOrderNotifyArgs) {
                 (await res.json().catch(() => null))?.error === 'tx_too_old'
               ) {
                 // 受注拒否を決済失敗や再支払いへ波及させず、支払い済みのまま手動確認へ案内する。
-                setOrderNotifyTooOld(true);
+                setOrderNotifyFailed(true);
                 setRedirectIn(null);
               }
               const redacted = await webhookTelemetry;
@@ -445,7 +445,7 @@ export function useCheckoutOrderNotify(args: UseCheckoutOrderNotifyArgs) {
         const { acknowledgeOrderDelivery } = await import('@/lib/orderDelivery');
         if (!acknowledgeOrderDelivery(record)) setBindingStorageError(true);
         setBoundNotifyAcknowledged(true);
-        setOrderNotifyTooOld(false);
+        setOrderNotifyFailed(false);
         statusTokenRef.current = record.order.statusToken || null;
         setStatusToken(record.order.statusToken || null);
         try {
@@ -463,13 +463,13 @@ export function useCheckoutOrderNotify(args: UseCheckoutOrderNotifyArgs) {
       }
       // A terminal delivery shows assistance on this mount only; it must not hijack later payments.
       // A notification rejection is never a failed payment or permission to sign again.
-      setOrderNotifyTooOld(true);
+      setOrderNotifyFailed(true);
       setRedirectIn(null);
       setBoundNotifyRetryable(!terminal);
       logger.warn('checkout.webhook.non_ok', { status: res.status, statusText: res.statusText });
     }).catch(() => {
       // Lost notification response retains the same opening for safe replay, independently of payment.
-      setOrderNotifyTooOld(true);
+      setOrderNotifyFailed(true);
       setRedirectIn(null);
       setBoundNotifyRetryable(true);
       logger.warn('checkout.webhook.failed', { reason: 'order_notify_network' });
@@ -609,7 +609,7 @@ export function useCheckoutOrderNotify(args: UseCheckoutOrderNotifyArgs) {
             (await res.json().catch(() => null))?.error === 'tx_too_old'
           ) {
             // merchant leg は確定済み。受注拒否を店舗への二重送金へ波及させない。
-            setOrderNotifyTooOld(true);
+            setOrderNotifyFailed(true);
             setRedirectIn(null);
           }
           const redacted = await webhookTelemetry;
@@ -673,7 +673,7 @@ export function useCheckoutOrderNotify(args: UseCheckoutOrderNotifyArgs) {
 
   return {
     statusToken,
-    orderNotifyTooOld,
+    orderNotifyFailed,
     boundNotifyRetryable,
     boundNotifyAcknowledged,
     previousOrderNotice,
