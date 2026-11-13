@@ -5,6 +5,7 @@ import type { PaymentFlow, PaymentResult } from '../paymentLog';
 import type { TokenSymbol } from '../tokens';
 import type { TaxCategory } from '../tax';
 import { stripControlChars } from '../sanitize';
+import { redactStoredErrorText } from '../telemetryRedaction';
 import {
   FEE_BREAKDOWN_VERSION,
   HISTORY_ERROR_MESSAGE_MAX_LENGTH,
@@ -120,7 +121,7 @@ function sanitizeLineItems(
  *   - txHash あり    → `${flow}-${txHash}` (同一 tx の二重 append を防ぐ)
  *   - userOpHash あり → `${flow}-uo-${userOpHash}`
  *   - hash なし (writeContract 同期 throw / wallet rejected sign 等):
- *      `${flow}-err-${seconds}-${errorMessage.slice(0,32)}`
+ *      `${flow}-err-${seconds}-${伏せた後の errorMessage の先頭 32 字}`
  *      - seconds 解像度なので Next.js dev の React StrictMode 二重発火
  *        (microsecond 差) は同 id で dedupe される。
  *      - 1 秒以上開けたユーザ retry は別 id (= 別 entry) として記録。
@@ -134,11 +135,17 @@ export function buildHistoryEntry(
   input: BuildHistoryBase & { ts?: number },
 ): HistoryEntry {
   const ts = input.ts ?? Date.now();
+  // viem の error の文は `URL: <key つきの RPC / bundler の URL>` と `Request body: <送った JSON>` の行、または署名済みの op の
+  // 欄を 1 行ずつ並べた `Request Arguments:` を持つ。その key と request の本文が、端末の履歴 (localStorage)・履歴の画面・
+  // CSV へ出るのを断つ。保存する errorMessage も id の種も、伏せた後の文から作る (元の文を種にすると、先頭 32 字に key を
+  // 持つ短い文で id に key が残る)。viem の request error は先頭 32 字が伏せる前と後で同じなので、id は今までと同じ値。
+  const errorText =
+    input.errorMessage === null ? null : redactStoredErrorText(input.errorMessage);
   const id = input.txHash
     ? `${input.flow}-${input.txHash}`
     : input.userOpHash
       ? `${input.flow}-uo-${input.userOpHash}`
-      : `${input.flow}-err-${Math.floor(ts / 1000)}-${(input.errorMessage ?? 'noerr').slice(0, 32)}`;
+      : `${input.flow}-err-${Math.floor(ts / 1000)}-${(errorText ?? 'noerr').slice(0, 32)}`;
   return {
     schemaVersion: LATEST_SCHEMA_VERSION,
     id,
@@ -159,10 +166,9 @@ export function buildHistoryEntry(
     txHash: input.txHash,
     userOpHash: input.userOpHash,
     blockNumber: input.blockNumber === null ? null : input.blockNumber.toString(),
+    // 伏せた後に切る (先に切ると、切れ目より後ろの Details の行 = 失敗の理由が落ちる)。
     errorMessage:
-      input.errorMessage === null
-        ? null
-        : input.errorMessage.slice(0, HISTORY_ERROR_MESSAGE_MAX_LENGTH),
+      errorText === null ? null : errorText.slice(0, HISTORY_ERROR_MESSAGE_MAX_LENGTH),
     storeName: input.storeName,
     note: (input.note ?? '').slice(0, HISTORY_NOTE_MAX_LENGTH),
     provider: input.provider ?? null,

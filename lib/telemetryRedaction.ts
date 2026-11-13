@@ -48,6 +48,19 @@ export function redactLogText(text: string): string {
     .replace(/(?:0x)?[0-9a-fA-F]{129,}/g, '[redacted]');
 }
 
+// 保存する error の文 (決済の監査 log・端末の履歴・Gateway の再開の記録) を伏せる。redactLogText に加えて、署名済みの
+// UserOperation の欄 (callData・signature・paymasterData・paymasterAndData・factoryData・initCode) の値を、欄の名前で長さに
+// 関係なく伏せる。`Request Arguments:` の形 (`  callData:   0x…` を 1 行ずつ・`Request body:` の行を持たない) は、500 字に
+// 切られると 129 桁に満たない切れ端になり、129 桁に満たない欄 (factoryData など) と同じく redactLogText の規則をすり抜ける。
+// それが監査 log・履歴の画面・CSV・localStorage へ出るのを断つ。2 回通しても結果は同じ (伏せた後の値は 0 で始まらない)。
+// logger が全部の文に通す redactLogText には足さない (欄の名前を持つふつうの log の文まで変えない)。
+const SIGNED_OP_FIELD_RE =
+  /\b(callData|signature|paymasterData|paymasterAndData|factoryData|initCode)("?\s*:\s*"?)0x?[0-9a-f]*/gi;
+
+export function redactStoredErrorText(text: string): string {
+  return redactLogText(text).replace(SIGNED_OP_FIELD_RE, '$1$2[redacted]');
+}
+
 // 中の文字列を伏せた写しを返す (元は書き換えない・伏せる所が無ければ元をそのまま返す)。たどるのは配列と plain な object
 // だけで、depth 段まで (Error・DOM などの元の引数はたどらない)。
 function redactValues<T>(value: T, depth: number): T {

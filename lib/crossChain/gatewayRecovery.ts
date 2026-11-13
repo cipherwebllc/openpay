@@ -2,6 +2,7 @@ import { decodeFunctionResult, encodeFunctionData, parseAbi, type Hex, type Publ
 import type { AttestationResponse, TransferSpec } from './types';
 import { GATEWAY_MINTER_ADDRESS } from './config';
 import { validateGatewayAttestation } from './gatewayAttestation';
+import { redactStoredErrorText } from '../telemetryRedaction';
 
 export type GatewayStatus = 'unknown' | 'awaiting-finality' | 'expired-unused' | 'awaiting-balance' | 'replaceable' | 'mintable' | 'paid' | 'confirming' | 'abandoned-unsigned' | 'abandoned-unsent' | 'rejected-request';
 export interface GatewayObservation {
@@ -135,7 +136,9 @@ export async function reconcileGatewayAttempt(client: PublicClient, chainId: num
       status: latestUsed || latest.height > BigInt(attempt.maxBlockHeight) ? 'awaiting-finality' : 'mintable' };
   } catch (error) {
     // RPC/reorg failures cannot turn ambiguous payment evidence into replacement permission.
-    return { status: 'unknown', detail: error instanceof Error ? error.message : String(error) };
+    // detail は再開の記録 (localStorage) に保存される。viem の error の文に入る key つきの RPC の URL と Request body が、
+    // そこへ出るのを断つ (detail はどこの判定にも使わない・伏せるのは文だけ)。
+    return { status: 'unknown', detail: redactStoredErrorText(error instanceof Error ? error.message : String(error)) };
   }
 }
 
