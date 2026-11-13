@@ -80,8 +80,10 @@ const BUDGETS_KB = {
   //   4 route とも予算ちょうどに張り付いていた。main 36fc6bbc の手元の本番 flag build で pay 408,297・checkout 432,464・
   //   [handle] 447,288・tip 400,568 byte (Route 表は 3 桁に丸めるので、checkout は あと 36 byte で 433 kB になる)。
   //   そこまで増えた分は、決済の error の文から key つきの URL と署名済みの op を出さないための code:
-  //   #1083 (log の出口の伏せ字・全 route に約 750 byte)・#1084 と、この PR (履歴に入れる error の文を伏せる・各 +36〜39 byte)。
-  //   この PR で checkout が 432,500 byte = 表で 433 kB になり、検査が落ちた (ほかの 3 行は予算ちょうどのまま通る)。
+  //   #1083 (log の出口の伏せ字・全 route に約 750 byte)・#1084 と、この PR (履歴と Gateway の再開の記録に入れる error の文を伏せる)。
+  //   この PR の最初の commit (各 +36〜39 byte) で checkout が 432,500 byte = 表で 433 kB になり、検査が落ちた (ほかの 3 行は
+  //   予算ちょうどのまま通る)。署名済みの op の欄の規則を client にも入れた後は、main から各 +127〜129 byte
+  //   (pay 408,424・checkout 432,591・[handle] 447,417・tip 400,695)。
   //   Phase 3 (描かれていない error の文言を消す) の後に、実測で下げ直す。それまでに増えたら、上げる前に code-split を先に見る。
   '/[locale]/pay': 409,
   // 2026-08-18 store USDC P2: /pay と同型の chunk 再分割 +1kB (tip から新規 USDC モジュール
