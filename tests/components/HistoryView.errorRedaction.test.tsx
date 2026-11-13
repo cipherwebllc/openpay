@@ -39,7 +39,7 @@ import {
   HISTORY_STORAGE_KEY,
   type HistoryEntry,
 } from '@/lib/history';
-import { BUNDLER_ORIGIN, leakedMarkers, VIEM_ERROR_CASES } from '../helpers/viemRequestErrors';
+import { aa14UserOperationRejection, BUNDLER_ORIGIN, leakedMarkers, VIEM_ERROR_CASES } from '../helpers/viemRequestErrors';
 
 // jsdom の Blob には .text() が無いため FileReader で実内容を読み出す。
 function readBlobText(blob: Blob): Promise<string> {
@@ -101,6 +101,26 @@ describe('HistoryView: 保存済みの古い履歴の error の文', () => {
     expect(downloadSpy).toHaveBeenCalledOnce();
     const csv = await readBlobText(downloadSpy.mock.calls[0]![0]);
     expect(csv).toContain(`URL: ${BUNDLER_ORIGIN}\n`);
+    expect(leakedMarkers(csv)).toEqual([]);
+  });
+
+  // `Request body:` の行を持たない形 (AA14)。500 字で切れた callData の切れ端 (129 桁に満たない) と 120 桁の factoryData は、
+  // 16 進の長さの規則では拾えない。欄の名前の規則が伏せる。
+  it('AA14 の形 (Request Arguments): 画面と CSV に、callData の切れ端も factoryData も出さない', async () => {
+    const old = storedByOldBuild(aa14UserOperationRejection().message);
+    expect(leakedMarkers(old.errorMessage)).toEqual(['c0dec0dec0dec0de', 'f00df00df00df00d']);
+    window.localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify([old]));
+    const downloadSpy = vi.spyOn(downloadModule, 'downloadBlob').mockImplementation(() => undefined);
+
+    const { container } = render(<HistoryView />);
+
+    expect(await screen.findByText(/factoryData: \[redacted\]\s[\s\S]*callData:\s+\[redacted\]$/)).toBeInTheDocument();
+    expect(leakedMarkers(container.innerHTML)).toEqual([]);
+
+    await userEvent.setup().click(screen.getByRole('button', { name: 'CSV ダウンロード' }));
+    expect(downloadSpy).toHaveBeenCalledOnce();
+    const csv = await readBlobText(downloadSpy.mock.calls[0]![0]);
+    expect(csv).toMatch(/callData: +\[redacted\]/);
     expect(leakedMarkers(csv)).toEqual([]);
   });
 });

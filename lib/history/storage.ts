@@ -5,7 +5,7 @@
 
 import { safeGet, safeRemove, safeSet } from '../storage';
 import { logger } from '../logger';
-import { redactLogText } from '../telemetryRedaction';
+import { redactStoredErrorText } from '../telemetryRedaction';
 import {
   HISTORY_CHANGED_EVENT,
   HISTORY_MAX_ENTRIES,
@@ -22,12 +22,13 @@ type StoredHistoryItem = { raw: unknown; entry: HistoryEntry | null };
 let hasWarnedUnreadableEntries = false;
 
 // 伏せる前の版が保存した errorMessage は、viem の error の文の先頭 500 字そのまま (key つきの RPC / bundler の URL と、
-// 送った request の本文の先頭)。履歴の画面 (HistoryRow) と CSV (historyCsv) は、ここで読んだ entry だけを使うので、
-// 読み込みの 1 か所で伏せて、その 2 つへ出るのを断つ。わざわざ書き戻さない (次に履歴を保存するとき、伏せた形に置き換わる)。
+// 送った request の本文の先頭。`Request Arguments:` の形では、500 字で切れた callData の切れ端)。履歴の画面 (HistoryRow) と
+// CSV (historyCsv) は、ここで読んだ entry だけを使うので、読み込みの 1 か所で伏せて、その 2 つへ出るのを断つ。
+// わざわざ書き戻さない (次に履歴を保存するとき、伏せた形に置き換わる)。
 function withRedactedErrorMessage(entry: HistoryEntry): HistoryEntry {
   return entry.errorMessage === null
     ? entry
-    : { ...entry, errorMessage: redactLogText(entry.errorMessage) };
+    : { ...entry, errorMessage: redactStoredErrorText(entry.errorMessage) };
 }
 
 function loadHistoryItems(): StoredHistoryItem[] {
