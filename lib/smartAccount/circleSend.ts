@@ -15,7 +15,8 @@
 //     例外は 1 つだけ: 自分の最初の送信を bundler が検証で拒否し、下の条件で記録を failed に閉じたとき (下の「最初の送信の
 //     検証拒否で閉じる」)。bundler がその op の hash を知らないと答えたうえで閉じ、次の押下は新しい支払い (署名から) になる。
 //   - cross-invocation (reload / 再クリック): 同一 sender+chain+callHash の submitting
-//     宙吊りがあれば、新規送信せず先にそれを recover する。
+//     宙吊りがあれば、新規送信せず先にそれを recover する。ただし、最後に bundler へ渡してから 30 分より後の、別の key の
+//     記録は、EntryPoint の nonce を読んでから決める (下の「古い submitting の記録」)。
 //
 // 送った後の終わり方 (第 10 回レビュー H-W・H-Y): 自分の markSubmitting が返った後と、submitting / confirmed の記録を扱う枝
 // (scan・resume・markSigned の CAS が外れたとき) の終わり方は次だけにする:
@@ -74,11 +75,41 @@
 //   - receipt を取った後の記録の更新 (markConfirmed) が失敗しても、結果は返す (取り込まれた支払いを失敗と出さない)。
 //   - confirmed の記録の結果は、receipt を 1 回だけ照会し、取れなければ理由によらず保存した値で返す (resultFromConfirmed)。
 //
+// 古い submitting の記録 (第 10 回レビュー H-Z): 別の key (別のタブ・タブを開き直した後) の submitting の記録を、時間の窓なしで
+// 復旧すると、(筋 1) 何日も前に成立した支払いの receipt がすぐ返り、署名を 1 回も求めずに「前の支払い」を今回の成功として出す
+// (偽の成功)、または (筋 2) receipt を引けない op を押すたびに 120 秒待って送り直し、そのたびに記録の時刻が進んで 7 日の掃除に
+// 届かず、その内容の支払いが止まり続ける。なので、scan の snapshot にある **別の key の submitting** の記録のうち、最後に
+// bundler へ渡した時刻 (updatedAt。書くのは markSubmitting と markResending だけ = どちらも渡す直前) から
+// STALE_SUBMITTING_WINDOW_MS (30 分) より後のものは、scan の前に次の順で確かめる (judgeStaleSubmitting):
+//   1. EntryPoint の getNonce(sender, key) を読む。この経路の nonce の key は試みごとに別 (時刻由来) なので、
+//      **未使用 = その op はまだ一度も取り込まれていない** → 今までどおり同じ op を復旧する (新しい op を作ると、古い op と両方
+//      成立しうる。押した時点で未使用と確かめているので、その後に取れる receipt は押した後の成立 = 今回の支払いとして正しい)。
+//   2. 使用済み = その op は取り込まれた (revert を含む)。**取り込まれた時刻でもう一度判定する**: bundler へ receipt を 1 回
+//      照会し、見つかれば chain の時計 (最新の block の timestamp − 取り込まれた block の timestamp。端末の時計を持ち込まない)
+//      で経過を測る。経過が窓以下 → 今までどおり復旧 (前の結果を返す)。窓より前・receipt が見つからない → その記録を飛ばして
+//      新しい支払いへ進む (古い confirmed と同じ扱い)。
+//      取り込まれた時刻を見る理由: 1 で未使用 → 復旧の待ちが失敗して確認待ち → その直後に op が取り込まれる → すぐ押し直す、の
+//      押し直しは「最後に渡してから 30 分より後・使用済み」になる。時刻を見ずに進むと、いま成立したばかりの支払いの上に 2 本目を
+//      払う。
+//   3. 読み取り・照会がそれ以外の理由で失敗した・記録の中身が合わない → 照合の失敗 = 確認待ち (分からないまま進まない・
+//      分からないまま前の結果も返さない)。
+// 順は nonce が先 (receipt を先に読むと、未使用の op の「まだ無い」と、古すぎて引けない op の「もう無い」を見分けられない)。
+// 窓の意味 = 「最後に渡してから」と「取り込まれてから (分かれば)」の遅い方から 30 分。
+// **記録は書かない** (confirmed に直さない): markConfirmed は updatedAt を今にするので、古い支払いの記録が「直近の confirmed」に
+// なり、次の 90 秒は confirmed の枝が前の結果を返す (同じ偽の成功が別の枝から戻る)。代償: 記録は 7 日の掃除まで残り、同じ内容を
+// 払うたびに照合の RPC が増える。
+// 同じ key の resume (下の reserveOrResume の後) は変えない: 対応 (sessionStorage) が残っているのは、同じタブで成功を画面に
+// 出していない間だけなので、その記録は「この画面の支払いの続き」。
+// 残る限界: bundler の索引が遅れる間 (取り込まれた直後で receipt をまだ返さない) の押下は「使用済み・receipt なし」で新しい
+// 支払いへ進む / 'latest' の巻き戻し (使用済みと読んだ後に reorg で未使用に戻る) / 未使用のまま永久に実行されない op は、
+// 押すたびに今までどおり復旧を試みて止まる / 7 日の掃除の後は記録が無いので照合もしない。
+//
 // 失効 (第 10 回レビュー H-V): この試みを始めた画面 (hook の instance) が外れた (unmount した) 後も、react-query の mutation は
 // 走り続ける。原則は 1 つ: **失効した試みは、新しい効果を始めない** (ウォレットに署名を求めない・記録を書かない = markSigned・
 // markSubmitting・abandon・bundler へ op を渡さない)。args.isAlive() を見るのは、新しい効果の直前だけ:
 //   (a) 署名 1 (permit) を求める直前  (b) 署名 2 (UserOperation) を求める直前  (c) 署名 2 の後・markSigned の前
 //   (d) 署名 1・署名 2 の catch (abandon の前)
+//   (e) 古い submitting の記録の照合 (上の「古い submitting の記録」) の await の後・scan の前
 // すでに bundler へ渡した op の後始末 (receipt 待ち・復旧の再送・markConfirmed) では見ない (渡した op は画面が無くても成立しうる)。
 // 失効した試みは payment_cancelled で終わり、記録は awaiting_signature のまま残す (開き直した画面が同じ key を resume する)。
 //
@@ -87,7 +118,12 @@
 // 確定値が渡る (本 module は fee ポリシーを持たない)。
 
 import { keccak256, type Address, type Hex } from 'viem';
-import { WaitForUserOperationReceiptTimeoutError } from 'viem/account-abstraction';
+import {
+  entryPoint08Address,
+  WaitForUserOperationReceiptTimeoutError,
+} from 'viem/account-abstraction';
+import { getBlock } from 'viem/actions';
+import { getAction } from 'viem/utils';
 import {
   broadcastCircleUserOp,
   prepareAndSignCircleUserOp,
@@ -100,6 +136,10 @@ import {
   type CircleSmartAccountBundle,
   type SignedCircleUserOp,
 } from '@/lib/smartAccount/circleAccount';
+import {
+  findUserOperationReceipt,
+  isUserOpNonceConsumed,
+} from '@/lib/smartAccount/pimlicoSend';
 import type { ConnectedWalletClient } from '@/lib/smartAccount/simpleAccount';
 import {
   abandon,
@@ -143,9 +183,24 @@ const TERMINAL_RETENTION_MS = 24 * 60 * 60 * 1000;
 
 // submitting のまま放置された孤児 record を物理削除するまでの期間。broadcast 直後に reload →
 // 同一 callHash を二度と起動しないと、submitting record は gcStalePreSubmit (pre-submit のみ) にも
-// pruneTerminal (terminal のみ) にも該当せず永久残留する (緩慢リーク)。7 日後の同一 callHash
-// 再決済は CONFIRMED_DEDUP_WINDOW_MS (90s) を遥かに超え正規リピート扱いなので回収して安全。
+// pruneTerminal (terminal のみ) にも該当せず永久残留する (緩慢リーク)。基準は最後に bundler へ渡した時刻 (updatedAt)。
+// 消した後の同じ内容の押下は、記録が無いので新しい支払いになる (nonce の照合もしない)。「7 日たった op はもう取り込まれない」
+// という根拠は無い (op に期限は無い): 容量の回収のための線で、7 日より前に渡した op が未使用のまま残っていて、消した後に
+// 取り込まれると、新しい支払いと両方成立しうる (冒頭の「古い submitting の記録」の残る限界)。
 const SUBMITTING_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** 別の key の submitting の記録を、EntryPoint の nonce を読まずに復旧してよい、最後に bundler へ渡した時刻 (updatedAt) からの
+ * 経過の上限。取り込まれた op について、取り込まれた時刻からの経過の上限にも使う (冒頭の「古い submitting の記録」)。
+ * **ちょうど 30 分は窓の内** (今までどおり復旧)。
+ *
+ * 30 分は user の裁定 (2026-11-12)。server の受注通知が「30 分以内の tx」を今回の注文の支払いとして受ける線
+ * (app/api/order/notify) とそろえた値。窓ごとに失うもの:
+ *   - 窓の内: 同じ内容 (同じ店・同じ額・同じウォレット・同じ chain) の **別の購入** を別のタブから押しても、前の支払いの結果が
+ *     出る (署名なし)。成功を画面に出す前にタブが閉じた支払いの記録が残っている間だけ。
+ *   - 窓の外: 前の支払いが成立していたのに、その成功をどの画面でも見ていない人が、同じ内容を **押し直す** と、新しい支払いに
+ *     なる (2 本目)。
+ * 短くすると後者 (知らずに払う 2 本目) が増え、長くすると前者 (偽の成功) が増える。 */
+export const STALE_SUBMITTING_WINDOW_MS = 30 * 60 * 1000;
 
 // gcStalePreSubmit が pre-submit 孤児を「確実に死んでいる」とみなす閾値。
 // **PRE_SUBMIT_STALE_MS (3分) より遥かに長くする**こと。理由: GC は全 callHash 横断で
@@ -471,6 +526,107 @@ async function closeRejectedFirstSend(args: {
   return true;
 }
 
+// 古い submitting の記録の照合の結果 (冒頭の「古い submitting の記録」)。scan は、結果の無い記録を今までどおり復旧する。
+//   spent      = nonce は使用済みで、取り込みは窓より前 (または receipt が見つからない) → 飛ばして新しい支払いへ
+//   unverified = 確かめられなかった → 確認待ち
+type StaleVerdict = 'spent' | 'unverified';
+
+// 照合した記録の版。scan は照合の await の後に記録を読み直すので、その間に別のタブが進めた記録 (送り直して時刻を書いた・
+// confirmed にした・別の op の記録に替わった) に、古い照合の結果を当てない。updatedAt まで含めるのは、scan のほかの枝
+// (時刻で分ける) と扱いをそろえるため。
+function recordVersion(rec: PendingRecord): string {
+  return `${rec.key}|${rec.userOpHash ?? ''}|${rec.updatedAt}`;
+}
+
+const NONCE_HEX_RE = /^0x[0-9a-fA-F]+$/;
+
+// 記録の署名済み op から、照合に使う nonce を読む。読めるのは、op の sender が記録の sender で、nonce が 16 進の数のときだけ。
+// 何の波及を断つか: localStorage の記録は、この module が書いた形のままとは限らない (古い版・壊れた値)。別の account の nonce や
+// 壊れた nonce で EntryPoint を読むと「使用済み」「未使用」を取り違え、成立しうる op の上に新しい支払いを開ける。読めなければ
+// 照合の失敗 (確認待ち) にする。
+function storedOpNonce(rec: PendingRecord): bigint | null {
+  const op = rec.signedUserOp;
+  if (!op || !rec.userOpHash) return null;
+  const { sender, nonce } = op;
+  if (typeof sender !== 'string' || sender.toLowerCase() !== rec.sender.toLowerCase()) return null;
+  if (typeof nonce !== 'string' || !NONCE_HEX_RE.test(nonce)) return null;
+  return BigInt(nonce);
+}
+
+// 最後に渡してから窓より後の、別の key の submitting の記録を 1 件照合する (冒頭の「古い submitting の記録」の 1〜3)。
+// null = 今までどおり復旧する (未使用・または取り込みが窓の内)。**投げない・記録を書かない**: 結果は scan がその記録に着いた
+// ときに使う (照合の失敗をここで投げると、scan が先に見る直近の confirmed の結果より前に確認待ちで終わる)。
+// at は、この押下で窓を測った時刻 (log の経過用)。
+async function judgeStaleSubmitting(args: {
+  bundle: CircleSmartAccountBundle;
+  rec: PendingRecord;
+  at: number;
+}): Promise<StaleVerdict | null> {
+  const { bundle, rec, at } = args;
+  const sinceHandoffMs = at - rec.updatedAt;
+  const nonce = storedOpNonce(rec);
+  if (nonce === null || !rec.userOpHash) {
+    logger.warn('circle.stale_submitting.unverified', {
+      userOpHash: rec.userOpHash,
+      sinceHandoffMs,
+      step: 'record',
+    });
+    return 'unverified';
+  }
+  const userOpHash = rec.userOpHash;
+  // account を作ったときの chain の client (= bundle.chainId の publicClient)。記録の chain は scan が bundle.chainId に絞る。
+  const client = bundle.account.client;
+  let step: 'nonce' | 'receipt' | 'block' = 'nonce';
+  try {
+    const consumed = await isUserOpNonceConsumed({
+      client,
+      entryPoint: entryPoint08Address,
+      sender: rec.sender,
+      nonce,
+    });
+    if (!consumed) {
+      logger.info('circle.stale_submitting.recover', { userOpHash, sinceHandoffMs, reason: 'nonce-unused' });
+      return null;
+    }
+    step = 'receipt';
+    const found = await findUserOperationReceipt(bundle.bundlerClient, [userOpHash]);
+    if (!found) {
+      logger.warn('circle.stale_submitting.proceed', { userOpHash, sinceHandoffMs, receiptFound: false });
+      return 'spent';
+    }
+    step = 'block';
+    const readBlock = getAction(client, getBlock, 'getBlock');
+    const included = await readBlock({ blockNumber: found.receipt.receipt.blockNumber });
+    const latest = await readBlock({ blockTag: 'latest' });
+    // chain の時計どうしの差 (秒)。負 (最新の block を古い node が答えた) は窓の内 = 復旧の側。
+    const sinceInclusionMs = Number(latest.timestamp - included.timestamp) * 1000;
+    if (sinceInclusionMs <= STALE_SUBMITTING_WINDOW_MS) {
+      logger.info('circle.stale_submitting.recover', {
+        userOpHash,
+        sinceHandoffMs,
+        sinceInclusionMs,
+        reason: 'recent-inclusion',
+      });
+      return null;
+    }
+    logger.warn('circle.stale_submitting.proceed', {
+      userOpHash,
+      sinceHandoffMs,
+      sinceInclusionMs,
+      receiptFound: true,
+    });
+    return 'spent';
+  } catch (error) {
+    logger.warn('circle.stale_submitting.unverified', {
+      userOpHash,
+      sinceHandoffMs,
+      step,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return 'unverified';
+  }
+}
+
 type RecoveryContext = {
   bundle: CircleSmartAccountBundle;
   sender: Address;
@@ -661,7 +817,9 @@ export async function executeCirclePayment(
   // 生きている別 record を全状態スキャン**し、自 attempt (excludeKey) 以外が在れば新規 op を
   // 作らない:
   //   confirmed (直近)  → 偶発二重 → 既支払い結果を返す。confirmed (古い) → 正規の再決済とみなし通す。
-  //   submitting        → recover (receipt 照会 or 同一署名 op の冪等 rebroadcast)。
+  //   submitting        → recover (receipt 照会 or 同一署名 op の冪等 rebroadcast)。最後に渡してから 30 分より後の記録は、
+  //                        先に EntryPoint の nonce で確かめる (冒頭の「古い submitting の記録」): 未使用・取り込みが 30 分以内
+  //                        → recover / 取り込みが 30 分より前・receipt なし → 飛ばす / 確かめられない → CirclePendingError。
   //   pre-submit (直近)  → 別 attempt が署名中 → 並行 broadcast を作らず CirclePendingError。
   //   pre-submit (stale) → reload 放置の orphan → abandon して block しない。
   // status 優先 (confirmed > submitting > pre-submit) で処理し、stale でない pre-submit が
@@ -677,9 +835,49 @@ export async function executeCirclePayment(
   // nonce を取るため別決済として通る。これは server 権威の請求状態を持たない非カストディ設計の
   // 一般特性で、JPYC relay / Pimlico 7702 / standard の全ライブ経路と同じ (Circle 固有ではない)。
   // 正本は on-chain / 履歴で、店舗は着金確認で運用する (将来 server 請求 dedup を入れるなら全経路共通)。
-  const live = findLiveByCallHash({ sender, chainId, callHash, excludeKey: key }).sort(
-    (a, b) => statusRank(a.status) - statusRank(b.status),
-  );
+  const scanLive = () =>
+    findLiveByCallHash({ sender, chainId, callHash, excludeKey: key }).sort(
+      (a, b) => statusRank(a.status) - statusRank(b.status),
+    );
+  let live = scanLive();
+
+  // --- 古い submitting の記録の照合 (冒頭の「古い submitting の記録」) -------
+  // 別の key の submitting が snapshot に 1 件も無ければ、ここは何もしない (時刻も読まない・await も挟まない)。
+  let staleVerdicts: Map<string, StaleVerdict> | null = null;
+  const otherSubmitting = live.filter((rec) => rec.status === 'submitting');
+  if (otherSubmitting.length > 0) {
+    const at = now();
+    const stale = otherSubmitting.filter(
+      (rec) => at - rec.updatedAt > STALE_SUBMITTING_WINDOW_MS,
+    );
+    if (stale.length > 0) {
+      staleVerdicts = new Map();
+      // 直近の confirmed (下の scan が既払いの結果を返す記録) が snapshot にあれば、照合の RPC を読まない。何の波及を断つか:
+      // RPC を待つ間に 90 秒の窓を過ぎ、押した時点では既払いの結果を返すはずだった押下が新しい支払いへ進むこと。照合して
+      // いない記録は unverified として持ち越す (下の scan の now() が 90 秒の線をまたいでその記録に着いても、照合なしでは
+      // 復旧しない)。
+      const dedupByConfirmed = live.some(
+        (rec) =>
+          rec.status === 'confirmed' &&
+          rec.success !== false &&
+          at - rec.updatedAt <= CONFIRMED_DEDUP_WINDOW_MS,
+      );
+      if (dedupByConfirmed) {
+        for (const rec of stale) staleVerdicts.set(recordVersion(rec), 'unverified');
+      } else {
+        for (const rec of stale) {
+          const verdict = await judgeStaleSubmitting({ bundle, rec, at });
+          if (verdict) staleVerdicts.set(recordVersion(rec), verdict);
+        }
+        // (e) 何の波及を断つか: 照合の RPC を待つ間に画面を離れた試みが、離れた後に scan の abandon・記録の予約 (書き込み) を
+        // 始めること。hook は、この await の前に失効を確かめている (runCirclePayment)。
+        if (!isAlive()) throw cancelled();
+        // 待った後は読み直す。ここから下の予約 (reserveOrResume) までは、今までどおり await の無い 1 tick。
+        live = scanLive();
+      }
+    }
+  }
+
   for (const rec of live) {
     if (rec.status === 'confirmed') {
       // 直近 confirmed = reload/再クリックによる偶発二重 → 既支払い結果を返す (冪等)。
@@ -698,6 +896,11 @@ export async function executeCirclePayment(
       continue;
     }
     if (rec.status === 'submitting') {
+      // 照合した版のままの記録だけに、照合の結果を当てる (版が違う = 待つ間に別のタブが進めた → 今までの扱い)。
+      const verdict = staleVerdicts?.get(recordVersion(rec));
+      // 取り込みが窓より前の、終わった op の記録 = 古い confirmed と同じく飛ばす (記録は書かない)。
+      if (verdict === 'spent') continue;
+      if (verdict === 'unverified') throw new CirclePendingError(rec.userOpHash);
       return await inPostSubmit(rec.userOpHash, async () => {
         const recovered = await recoverSubmitting({
           bundle,

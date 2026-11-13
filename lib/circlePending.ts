@@ -657,7 +657,8 @@ export function findRecoverable(args: {
 /** 同一決済 (sender+chainId+callHash) の「生きている」record (abandoned/failed 以外 =
  * reserved/awaiting_signature/signed/submitting/confirmed) を列挙する。cross-invocation の
  * 二重決済ガードに使う: paymentAttemptId が呼出毎に変わっても callHash で別 attempt を検出し、
- * confirmed なら既支払い・submitting なら recover・pre-submit なら並行署名中として扱う。
+ * confirmed なら既支払い・submitting なら recover (最後に渡してから 30 分より後の記録は、呼出側が先に EntryPoint の nonce で
+ * 確かめる)・pre-submit なら並行署名中として扱う。
  * excludeKey で自 attempt の record を除外する (reserveOrResume の同一キー resume と二重に扱わない)。 */
 export function findLiveByCallHash(args: {
   sender: Address;
@@ -731,11 +732,17 @@ export function gcStalePreSubmit(
  * gcStalePreSubmit (pre-submit のみ) にも pruneTerminal (terminal のみ) にも該当せず
  * localStorage に永久残留する (緩慢リーク)。これを回収するための GC。
  *
- * 安全性根拠: submitting の物理削除は recover 手段 (receipt 照会 / 同一署名 op の冪等
- * rebroadcast) を失わせるが、maxAgeMs (7 日) 後の同一 callHash 再決済は
- * CONFIRMED_DEDUP_WINDOW (90s) を遥かに超えており正規リピートとして扱う設計。op 冪等性
- * (同一署名 op は EntryPoint nonce 一意性で included は最大 1 回) が二重決済の最終ガードで
- * あり、ここでの削除は容量回収が目的。 */
+ * 基準は updatedAt = 最後に bundler へ渡した時刻 (markSubmitting・markResending だけが書く)。
+ *
+ * 消すと失うもの: submitting の物理削除は recover 手段 (receipt 照会 / 同一署名 op の冪等 rebroadcast) と、別の key の押下が
+ * 「この op はもう取り込まれたか」を EntryPoint の nonce で確かめる手がかり (lib/smartAccount/circleSend.ts の冒頭の「古い
+ * submitting の記録」) を失わせる。消した後の同じ内容の押下は、記録が無いので新しい支払いになる。
+ * 「maxAgeMs (7 日) たった op はもう取り込まれない」という根拠は無い (op に期限は無い)。EntryPoint の nonce が 1 回にするのは
+ * **同じ署名済み op** の取り込みだけで、消した後に作る新しい op (別の nonce の key) との二重払いは止めない: 7 日より前に渡した
+ * op が未使用のまま残っていて、消した後に取り込まれると、両方成立しうる (残る限界)。ここでの削除は容量回収が目的で、7 日は
+ * 「それより前に最後に渡した op が、まだ mempool に残っていることはまず無い」という運用上の線。
+ * 30 分より後・7 日より前の記録は、別の key の押下のたびに circleSend が nonce を読む (使用済みで古ければ飛ばすだけで、記録は
+ * 書かない) ので、押すたびに時刻が進んでここに届かない、ということは起きない (時刻が進むのは同じ op を送り直したときだけ)。 */
 export function pruneStaleSubmitting(maxAgeMs: number, now: number): void {
   let storage: Storage;
   try {
