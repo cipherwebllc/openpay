@@ -522,7 +522,7 @@ describe('穴 B: 付け替えた後の次の押下 (R の key の resume)', () =
     clockOffset += 10 * SEC;
     await pressAndSettle(screenB);
     expect(screenB.result.current.isError).toBe(true);
-    expect((screenB.result.current.error as Error).message).toContain('この決済試行は既に終了しています');
+    expect((screenB.result.current.error as Error).message).toContain('この支払いの試みは既に終了しています');
     expect(permitRequests).toHaveLength(1);
     expect(mappedAttemptId()).toBeUndefined();
 
@@ -660,7 +660,7 @@ describe('穴 B: 同じ sessionStorage を使う 2 つの画面 (付け替えた
     tab1WaitTimesOut();
     await waitFor(() => expect(screenB.result.current.isError).toBe(true));
 
-    expect((screenB.result.current.error as Error).message).toContain('この決済試行は既に終了しています');
+    expect((screenB.result.current.error as Error).message).toContain('この支払いの試みは既に終了しています');
     // 付け替えた試みは、付け替えた先の attemptId を知っているので、対応を消す (次の押下は新しい支払い)。
     expect(mappedAttemptId()).toBeUndefined();
   });

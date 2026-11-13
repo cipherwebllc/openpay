@@ -248,12 +248,19 @@ function walletSigns(o: Op, landsAt: { block: bigint; ms: number }) {
   });
 }
 
+// 場面の符号 (第 10 回レビュー PR-39c)。press() が確認待ち (CirclePendingError) で終わるたびに、その error の circleCode を
+// ここに積む。各 test の後 (下の afterEach) で「'unconfirmed' 以外が残っていない」ことを確かめる = 照合の失敗 ('unverified')・
+// 復旧の待ちの失敗などの確認待ちは、すべて (a)。(b) 'busy_elsewhere' を期待する test (別のタブが署名の途中) だけが、
+// takePendingCodes() で取り出して確かめる。
+const pendingCodes: unknown[] = [];
+const takePendingCodes = () => pendingCodes.splice(0);
+
 // 押す。時刻は固定 (この押下の中の now() は全部 at)。
 function press(
   at: number,
   overrides: Partial<Parameters<typeof executeCirclePayment>[0]> = {},
 ) {
-  return executeCirclePayment({
+  const attempt = executeCirclePayment({
     bundle,
     publicClient: {} as never,
     walletClient: {} as never,
@@ -264,6 +271,11 @@ function press(
     now: () => at,
     ...overrides,
   });
+  // 見るだけ (返す promise は元のまま = test の側の rejects・catch は今までどおり)。
+  attempt.catch((error: unknown) => {
+    if (error instanceof CirclePendingError) pendingCodes.push(error.circleCode);
+  });
+  return attempt;
 }
 
 const signatureRequests = () => mockPermit.mock.calls.length + mockPrepare.mock.calls.length;
@@ -283,6 +295,7 @@ const staleWarnings = () =>
 
 beforeEach(() => {
   window.localStorage.clear();
+  pendingCodes.length = 0;
   for (const m of [mockPermit, mockPrepare, mockBroadcast, mockWait, mockLookup, mockRead, mockGetBlock]) {
     m.mockReset();
   }
@@ -318,6 +331,8 @@ beforeEach(() => {
 afterEach(() => {
   warnSpy.mockRestore();
   window.localStorage.clear();
+  // 確認待ちで終わった押下は、(b) を期待する test が取り出した分を除いて、すべて (a) 'unconfirmed'。
+  expect(pendingCodes.filter((code) => code !== 'unconfirmed')).toEqual([]);
 });
 
 describe('H-Z: 窓 (最後に bundler へ渡してから 30 分)', () => {
@@ -692,6 +707,8 @@ describe('H-Z: 照合の失敗 → すぐ確認待ち (待たない・送り直�
     const error = await press(AT).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(CirclePendingError);
     expect((error as CirclePendingError).userOpHash).toBe(OLD.userOpHash);
+    // 場面 (a) (PR-39c): 前の支払いの結果が分からない。「別のタブで進行中」(b) ではない。
+    expect((error as CirclePendingError).circleCode).toBe('unconfirmed');
     expect(mockWait).not.toHaveBeenCalled();
     expect(mockBroadcast).not.toHaveBeenCalled();
     expect(signatureRequests()).toBe(0);
@@ -903,6 +920,9 @@ describe('H-Z: 照合の結果は、scan がその記録に着いたときに使
 
     expect(error).toBeInstanceOf(CirclePendingError);
     expect((error as CirclePendingError).userOpHash).toBe(OLD2.userOpHash);
+    // 場面 (b) (PR-39c): 止めたのは、別のタブの署名の途中の記録 (scan の直近の pre-submit)。
+    expect((error as CirclePendingError).circleCode).toBe('busy_elsewhere');
+    expect(takePendingCodes()).toEqual(['busy_elsewhere']);
     expect(signatureRequests()).toBe(0);
     expect(sentOps()).toEqual([]);
   });

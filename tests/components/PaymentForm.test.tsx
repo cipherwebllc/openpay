@@ -10,6 +10,13 @@ import {
   within,
 } from '@testing-library/react';
 import { renderWithIntl as render } from '../_helpers/i18n';
+import {
+  CIRCLE_ERROR_CASES,
+  CIRCLE_ERRORS_EN,
+  CIRCLE_ERRORS_JA,
+  RAW_ERROR_MESSAGE,
+  codedError,
+} from '../_helpers/circleErrorCases';
 import userEvent from '@testing-library/user-event';
 import { baseSepolia, polygonAmoy } from 'viem/chains';
 import type { Address } from 'viem';
@@ -1152,6 +1159,36 @@ describe('PaymentForm — 送信フロー', () => {
     render(<PaymentForm />);
     expect(screen.getByText(/エラー/)).toBeInTheDocument();
     expect(screen.getByText(/prefund/)).toBeInTheDocument();
+  });
+
+  // 第 10 回レビュー PR-39c: Circle の経路 (USDC ガスレス) の error は、message (日本語の固定文) をそのまま出さず、
+  // error の場面の符号 (circleCode) から locale の文 (messages の CircleErrors) を出す。
+  describe('Circle の経路の error の案内 (CircleErrors)', () => {
+    function renderWithGaslessError(error: Error, locale: 'ja' | 'en' = 'ja') {
+      setURL(`to=${MERCHANT}&token=usdc&amount=10`);
+      setAccount({ connected: true, chainId: baseSepolia.id });
+      setBalance(20_000_000n);
+      setSmartAccount(true);
+      setPayment('error', error);
+      render(<PaymentForm />, { locale });
+    }
+
+    it.each(CIRCLE_ERROR_CASES)('符号 %s → その場面の文 (CircleErrors.%s) を出し、message は出さない', (code, key) => {
+      renderWithGaslessError(codedError(code));
+      expect(screen.getByText(CIRCLE_ERRORS_JA[key])).toBeInTheDocument();
+      expect(screen.queryByText(new RegExp(RAW_ERROR_MESSAGE))).toBeNull();
+    });
+
+    it.each(CIRCLE_ERROR_CASES)('英語の画面・符号 %s: message が日本語でも、英語の文を出す', (code, key) => {
+      renderWithGaslessError(codedError(code, CIRCLE_ERRORS_JA[key]), 'en');
+      expect(screen.getByText(CIRCLE_ERRORS_EN[key])).toBeInTheDocument();
+      expect(screen.queryByText(CIRCLE_ERRORS_JA[key])).toBeNull();
+    });
+
+    it('知らない符号・符号の無い error は、今までどおり message をそのまま出す', () => {
+      renderWithGaslessError(codedError('something_else'));
+      expect(screen.getByText(new RegExp(RAW_ERROR_MESSAGE))).toBeInTheDocument();
+    });
   });
 
   // ウォレットでの取り消しは失敗ではない (Sentry の payment.failed 通知を鳴らさない)。

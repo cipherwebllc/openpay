@@ -90,6 +90,7 @@ import { blockExplorerUrl, chainForSlug } from '@/lib/chains';
 import { env } from '@/lib/env';
 import { primeChimeAudio } from '@/lib/successChime';
 import { isGasCongestedError } from '@/lib/gasCeiling';
+import { circleErrorKey } from '@/lib/circleErrorKey';
 import { isIncompatibleSmartAccountError } from '@/lib/accountDetection';
 import { logger } from '@/lib/logger';
 import {
@@ -164,6 +165,7 @@ export function PaymentForm() {
 
 function PaymentDetails({ params }: { params: PayParams }) {
   const t = useTranslations('PaymentForm');
+  const tc = useTranslations('CircleErrors');
   const locale = useLocale();
   const [modeOverride, setModeOverride] = useState<'standard' | null>(null);
   const attemptRouteRef = useRef<PaymentRoute | null>(null);
@@ -563,11 +565,16 @@ function PaymentDetails({ params }: { params: PayParams }) {
       (standard.isMerchantError || standard.isFeeError) &&
       !standard.error);
   // relay 経路の error は code 文字列 (rate_limited 等) なので friendly i18n に差し替える。
+  // Circle の経路 (USDC ガスレス) の error は、場面の符号 (circleCode) から locale の文を出す (lib/circleErrorKey.ts・第 10 回
+  // レビュー PR-39c)。符号の無い error は今までどおり message をそのまま出す。
+  const circleKey = circleErrorKey(flowError);
   const flowErrorMessage = useRelay
     ? isFallbackSafeRelayError(flowError)
       ? t(relayErrorKey(flowError))
       : undefined
-    : flowError?.message;
+    : circleKey
+      ? tc(circleKey)
+      : flowError?.message;
   const error = isGasCongestedError(flowError)
     ? t('errorGasCongested')
     : (flowErrorMessage ??

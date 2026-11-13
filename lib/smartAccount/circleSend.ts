@@ -192,6 +192,7 @@ import {
   type PendingRecord,
   type PendingStatus,
 } from '@/lib/circlePending';
+import type { CircleErrorCode } from '@/lib/circleErrorKey';
 import { logger } from '@/lib/logger';
 import type { PublicClient } from 'viem';
 
@@ -296,34 +297,58 @@ export type CirclePaymentResult = {
   actualGasCost: bigint;
 };
 
-/** broadcast 済 (or 済かもしれない) だが timeout 内に included を確認できなかった状態。
- * **失敗ではない** — op は後で included しうるし、findRecoverable で復旧できる。UI は
- * 「送信済・確認待ち。再読み込みしても二重決済にならない」と案内する。 */
+// 場面の符号と文 (第 10 回レビュー PR-39c)。下の 3 つの class は、どの場面の error かを own property `circleCode` に持つ。
+// 3 つのフォームは class も name も見ず、この符号から locale の文 (messages の CircleErrors) を出す (lib/circleErrorKey.ts)。
+// message にも日本語の文を残す: message は i18n を通らない出口にも出る (履歴に保存する error の文・payment log・Sentry)。
+// 符号だけにすると、履歴の画面に符号がそのまま出る。同じ文が messages/ja.json の CircleErrors にもあるので、ずれは
+// tests/lib/circleErrorKey.test.ts と tests/lib/smartAccount/circleSend.test.ts が止める。
+const CIRCLE_ERROR_JA = {
+  unconfirmed:
+    'USDC ガスレスの支払いを送信しましたが、結果をまだ確認できていません。' +
+    'このタブで同じ内容のままもう一度押すと、まず同じ支払いの結果を確かめ直します。' +
+    '確かめられるまで、ほかの方法で払い直さないでください。',
+  busy_elsewhere:
+    '同じ内容の支払いが、別のタブまたは画面で進行中のため、ここでは始めていません。' +
+    'そちらで支払いを終えた場合は、ここでは押さないでください。' +
+    'そちらを閉じた場合は、数分後にここから支払えます。',
+  attempt_ended:
+    'この支払いの試みは既に終了しています。この試みでは送金していません。' +
+    'もう一度押すと、新しい支払いとして始めます。',
+  send_rejected:
+    'USDC ガスレスの支払いは、送信の受付で断られました。この支払いは送金されていません。' +
+    '残高が足りないなどの理由が考えられます。もう一度お試しください (署名からやり直します)。',
+} as const satisfies Record<CircleErrorCode, string>;
+
+/** 確認待ち。**失敗ではない**。場面は 2 つ (reason):
+ * - 'unconfirmed' (既定): op を bundler に渡した (渡したかもしれない) が、結果を確かめられなかった。op は後で included
+ *   しうる。同じタブで同じ内容のまま押し直すと、hook が残した attemptId の対応で、同じ op の結果を確かめ直す。
+ * - 'busy_elsewhere': 別の試み (別のタブ・画面) が署名の途中なので、この押下は何も始めなかった (scan の直近の pre-submit の
+ *   1 か所だけ)。
+ * 文は「再読み込みしても二重決済にならない」と約束しない: 30 分より前の支払いについては成り立たない場合がある (冒頭の
+ * 「古い submitting の記録」と、その「残る限界」)。 */
 export class CirclePendingError extends Error {
   /** 確認待ち op の hash。pre-submit (まだ未署名/未 broadcast の別 attempt 検出) では undefined。 */
   readonly userOpHash?: Hex;
-  constructor(userOpHash?: Hex) {
-    super(
-      'USDC ガスレス決済を処理中です (確認待ち、または別タブで進行中)。' +
-        'ページを再読み込みしても二重決済にはなりません (自動で復旧を試みます)。',
-    );
+  /** 場面の符号 (上の「場面の符号と文」)。 */
+  readonly circleCode: CircleErrorCode;
+  constructor(userOpHash?: Hex, reason: 'unconfirmed' | 'busy_elsewhere' = 'unconfirmed') {
+    super(CIRCLE_ERROR_JA[reason]);
     this.name = 'CirclePendingError';
     this.userOpHash = userOpHash;
+    this.circleCode = reason;
   }
 }
 
 /** 自分の最初の送信を bundler が検証で拒否し、bundler がその op の hash を知らないと答えたので、記録を閉じた (冒頭の (3))。
  * **確認待ちではない**: name を 'CirclePendingError' にしない (hook は attemptId の対応を消し、次の押下は新しい支払い =
- * 署名からやり直す)。文は固定 (bundler・viem の生の文 = AA33… や request の本文を画面に出さない)。
- * 文は第 10 回レビュー PR-39c で i18n に載せる前提の仮の文 (3 フォームは error の message をそのまま赤い枠に出す)。 */
+ * 署名からやり直す)。文は固定 (bundler・viem の生の文 = AA33… や request の本文を画面に出さない)。 */
 export class CircleSendRejectedError extends Error {
   /** 断られた op の hash (監査用)。 */
   readonly userOpHash: Hex;
+  /** 場面の符号 (上の「場面の符号と文」)。 */
+  readonly circleCode: CircleErrorCode = 'send_rejected';
   constructor(userOpHash: Hex) {
-    super(
-      'USDC ガスレスの支払いは、送信の受付で断られました。この支払いは送金されていません。' +
-        '残高が足りないなどの理由が考えられます。もう一度お試しください (署名からやり直します)。',
-    );
+    super(CIRCLE_ERROR_JA.send_rejected);
     this.name = 'CircleSendRejectedError';
     this.userOpHash = userOpHash;
   }
@@ -343,13 +368,15 @@ function toResult(userOpHash: Hex, receipt: Receipt): CirclePaymentResult {
 
 // まだ bundler に op を渡していない試みが、終わった記録 (failed / abandoned / 記録なし) に当たったときの error。送った後の
 // 境界 (inPostSubmit) を素通しする: hook が attemptId の対応を消し、次の押下は新しい支払い (署名から) になる。
-// name は 'Error' のまま (hook・フォームから見て、今までの new Error と同じ)。class にするのは境界が見分けるためだけ。
-class AttemptEndedError extends Error {}
+// name は 'Error' のまま (hook から見て、今までの new Error と同じ)。class にするのは境界が見分けるためと、フォームが場面を
+// 見分ける符号 (circleCode) を持たせるため。
+class AttemptEndedError extends Error {
+  /** 場面の符号 (上の「場面の符号と文」)。 */
+  readonly circleCode: CircleErrorCode = 'attempt_ended';
+}
 
 function attemptEnded(): AttemptEndedError {
-  return new AttemptEndedError(
-    'この決済試行は既に終了しています。新しい決済として実行し直してください。',
-  );
+  return new AttemptEndedError(CIRCLE_ERROR_JA.attempt_ended);
 }
 
 // receipt の待ちの結果。timeout = 待ち切ったがまだ無い (op は mempool に無いかもしれない)・error = 待ちそのものの失敗
@@ -975,7 +1002,8 @@ export async function executeCirclePayment(
       continue;
     }
     // 直近の pre-submit = 別 attempt が署名中。並行 broadcast を作らない。
-    throw new CirclePendingError(rec.userOpHash);
+    // 場面の符号を 'busy_elsewhere' にするのはここだけ (この押下は何も始めていない。ほかの確認待ちは既定の 'unconfirmed')。
+    throw new CirclePendingError(rec.userOpHash, 'busy_elsewhere');
   }
 
   // --- reserve (idempotency gate・自 attempt のクラッシュ resume) ----------

@@ -86,6 +86,7 @@ import { blockExplorerUrl, chainForSlug, type ChainSlug } from '@/lib/chains';
 import { env } from '@/lib/env';
 import { primeChimeAudio } from '@/lib/successChime';
 import { isGasCongestedError } from '@/lib/gasCeiling';
+import { circleErrorKey } from '@/lib/circleErrorKey';
 import { isIncompatibleSmartAccountError } from '@/lib/accountDetection';
 import { logger } from '@/lib/logger';
 import { redactUrlForTelemetry } from '@/lib/telemetryRedaction';
@@ -175,6 +176,7 @@ function isRetryableOrderNotify(status: number, body: { error?: string; bindingC
 
 export function CheckoutForm({ params }: { params: CheckoutParams }) {
   const t = useTranslations('CheckoutForm');
+  const tc = useTranslations('CircleErrors');
   const locale = useLocale();
   // 顧客向け「注文状況」トークン (お渡し準備完了通知・flag ENABLE_ORDER_PICKUP)。決済成功時に
   // 1 度だけ生成し、webhook payload (notify がポインタ保存) と完了画面の「注文状況を見る」リンクで
@@ -510,11 +512,16 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   // relay 経路の error は code 文字列 (rate_limited 等) なので friendly i18n に差し替える。
   // 束縛した注文の slot を保存できずに止めた error は、汎用の文 (「通常モードをご利用ください」) を出さない。下の専用の
   // 黄色の枠 (orderBindingStorageUnavailable) だけで知らせる (user 裁定 Q8 = A・lib/relay/relayResponseError)。
+  // Circle の経路 (USDC ガスレス) の error は、場面の符号 (circleCode) から locale の文を出す (lib/circleErrorKey.ts・第 10 回
+  // レビュー PR-39c)。符号の無い error は今までどおり message をそのまま出す。
+  const circleKey = circleErrorKey(flowError);
   const flowErrorMessage = useRelay
     ? isFallbackSafeRelayError(flowError) && !isOrderBindingStorageUnavailableError(flowError)
       ? t(relayErrorKey(flowError))
       : undefined
-    : flowError?.message;
+    : circleKey
+      ? tc(circleKey)
+      : flowError?.message;
   const error = orderAdmissionRejected
     ? t('orderNotAccepting')
     : isGasCongestedError(flowError)

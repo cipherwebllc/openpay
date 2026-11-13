@@ -1160,7 +1160,7 @@ async function runCirclePayment(args: {
     // CirclePendingError (broadcast 済・確認待ち) はマッピングを保持し、再クリックで自 attempt を
     // resume させる (scan が別の key の記録を復旧していた押下では、マッピングは上の adoptAttempt でその記録の attemptId に
     // 付け替わっているので、再クリックはその記録を resume する)。それ以外の確定的エラー (revert/拒否/abandon 済) はマッピングを破棄して、
-    // resumed 分岐の「この決済試行は既に終了しています」に正規の再試行がぶつからないようにする。
+    // resumed 分岐の「この支払いの試みは既に終了しています」に正規の再試行がぶつからないようにする。
     // 失効した試みは破棄しない (下の成功のときと同じ理由)。破棄するのは、マッピングがいまもこの試みの知っている attemptId を
     // 指しているときだけ (上の mappedAttemptId。別の試みが付け替えた後のマッピングは消さない)。
     // storage の失敗 (lib/circlePending の PendingStoreUnavailableError・PendingStoreWriteError) も破棄しない: この押下は

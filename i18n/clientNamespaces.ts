@@ -23,6 +23,7 @@ export const SHARED_CLIENT_NAMESPACES = [
 /** app/[locale] 配下の page.tsx 相対ディレクトリ → そのページ固有の namespace。 */
 export const ROUTE_CLIENT_NAMESPACES = {
   '[handle]': [
+    'CircleErrors',
     'ConnectButton',
     'CopyableField',
     'CreatorStoreLicense',
@@ -69,6 +70,7 @@ export const ROUTE_CLIENT_NAMESPACES = {
   ],
   'checkout': [
     'CheckoutForm',
+    'CircleErrors',
     'ConnectButton',
     'CopyableField',
     'InfoTooltip',
@@ -84,6 +86,7 @@ export const ROUTE_CLIENT_NAMESPACES = {
   ],
   'create': [
     'AddressInput',
+    'CircleErrors',
     'ConnectButton',
     'CopyableField',
     'Create',
@@ -327,6 +330,7 @@ export const ROUTE_CLIENT_NAMESPACES = {
     'Today',
   ],
   'pay': [
+    'CircleErrors',
     'ConnectButton',
     'CopyableField',
     'CrossChainForwardPendingPanel',
@@ -390,6 +394,7 @@ export const ROUTE_CLIENT_NAMESPACES = {
     'Terms',
   ],
   'tip/[address]': [
+    'CircleErrors',
     'ConnectButton',
     'CopyableField',
     'CrossChainForwardPendingPanel',

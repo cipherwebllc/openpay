@@ -537,8 +537,11 @@ describe('穴 B: 付け替えない枝', () => {
   it('直近の pre-submit (別の試みが署名中・op を渡していない記録) → 確認待ち・付け替えない', async () => {
     seed('signed', { handedOffAt: T0 });
 
-    await expect(press(T0 + MIN)).rejects.toBeInstanceOf(CirclePendingError);
+    const error = await press(T0 + MIN).catch((e: unknown) => e);
 
+    expect(error).toBeInstanceOf(CirclePendingError);
+    // 場面 (b) (第 10 回レビュー PR-39c): この押下は何も始めていない (別のタブや画面で進行中)。
+    expect((error as CirclePendingError).circleCode).toBe('busy_elsewhere');
     expect(adopted()).toEqual([]);
   });
 

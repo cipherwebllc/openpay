@@ -1789,7 +1789,13 @@ describe('useBatchPayment', () => {
         ['署名の拒否', new UserRejectedRequestError(new Error('User rejected the request.'))],
         [
           '「既に終了」',
-          new Error('この決済試行は既に終了しています。新しい決済として実行し直してください。'),
+          // 本物 (circleSend の AttemptEndedError) と同じ形: name は 'Error' のまま・場面の符号つき (第 10 回レビュー PR-39c)。
+          Object.assign(
+            new Error(
+              'この支払いの試みは既に終了しています。この試みでは送金していません。もう一度押すと、新しい支払いとして始めます。',
+            ),
+            { circleCode: 'attempt_ended' },
+          ),
         ],
         ['記録の遷移の失敗 (PendingStateError)', new PendingStateError('record 不在')],
         ['記録の署名者の不一致 (PendingAuthorizationError)', new PendingAuthorizationError('sender')],
