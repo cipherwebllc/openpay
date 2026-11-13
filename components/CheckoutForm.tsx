@@ -111,6 +111,7 @@ import {
   buildJpycRelaySignPreview,
   buildJpycRecoverSignPreview,
 } from '@/lib/signPreview';
+import { parseOwnOrderNotifyUrl } from '@/lib/order/ownNotifyUrl';
 import type { CanonicalOrder } from '@/lib/orderBind';
 import { matchesOrderDeliveryContext } from '@/lib/orderDeliveryContext';
 import { checkoutIntentContextFingerprint, orderLinkContextFingerprint } from '@/lib/checkoutIntentContext';
@@ -942,9 +943,16 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
       if (boundOrderPreparingRef.current) return;
       boundOrderPreparingRef.current = true;
       try {
-        const webhook = new URL(params.webhook);
-        if (webhook.origin === window.location.origin && webhook.pathname === '/api/order/notify') {
-          if (webhook.searchParams.getAll('h').length !== 1) throw new Error('invalid_handle');
+        // 自社の notify の URL なら `h` がちょうど 1 つを求めて注文を束ねる。自社でない URL は束ねずに払う。
+        // ほかの所との方針の差は lib/order/ownNotifyUrl.ts の冒頭の表。
+        const webhook = parseOwnOrderNotifyUrl(params.webhook, window.location.origin);
+        if (webhook.kind === 'unreadable') {
+          // 読めない URL は、束ねずに払うのではなく止める (移す前は new URL の例外が下の catch の else に落ちていた)。
+          setBindingStorageError(true);
+          return;
+        }
+        if (webhook.kind === 'own') {
+          if (webhook.handles.length !== 1) throw new Error('invalid_handle');
           const orderId = params.orderId || generateStatusToken().slice(0, 16);
           // Unlike advisory standard metadata, a bound memo must be read before signing or stop.
           const customerMemo = window.sessionStorage.getItem(`${ORDER_MEMO_STORAGE_PREFIX}${orderId}`) ?? '';
@@ -952,7 +960,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
           // A slow chunk must not carry a disconnected/switched wallet into signing.
           if (!paymentReadyRef.current) return;
           order = canonicalOrder({ chainId: deployment.chainId, tokenAddress: deployment.address,
-            merchant: params.to, handle: webhook.searchParams.get('h'), orderId, items: params.items,
+            merchant: params.to, handle: webhook.handles[0], orderId, items: params.items,
             description: params.description, pickupAt: params.pickupAt, customerMemo,
             statusToken: env.enableOrderPickup ? generateStatusToken() : '' });
           boundOrderRef.current = order;
