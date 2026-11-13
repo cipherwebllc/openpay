@@ -1171,11 +1171,16 @@ async function runCirclePayment(args: {
       // 書けたときだけ、この試みの「マッピングの指す先」も付け替えた先にする (書けなければマッピングは前の値のまま)。
       // 書けたかを返す (第 10 回レビュー PR-39c): 書けなかった付け替えの確認待ちを、circleSend が「このタブでもう一度押すと、
       // まず同じ支払いの結果を確かめ直します」の場面 (a) にしないため (対応が前の値のままなので、次の押下はその記録を resume しない)。
+      // **最初の対応を保存できていない押下 (saved が false) では、書けても false を返す** (第 10 回レビューの後追い r10-ss)。
+      // sessionStorage の getItem だけが throw し setItem は通る端末では、付け替えは「書けた」になるが、次の押下はその対応を
+      // 読めない (resume にならず、また scan から入る)。(a) の約束は言えないので、circleSend に (e) を出させる。
+      // 書き込み自体は今までどおり試す (後で読めるようになった端末では、対応がその記録を指している方がよい)。この試みの
+      // 「マッピングの指す先」を替えるのも、今までどおり「書けたとき」。
       adoptAttempt: usesStableMapping
         ? (adopted) => {
             const written = setStableAttemptId(attemptArgs, adopted);
             if (written) mappedAttemptId = adopted;
-            return written;
+            return written && saved;
           }
         : undefined,
     });

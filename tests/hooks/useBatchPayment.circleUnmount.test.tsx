@@ -1080,6 +1080,46 @@ describe('r10-ss: タブの対応 (sessionStorage) を保存できていない�
     expectNoNewPayment({ signatures: 2, sent: 1, records: ['confirmed'] });
   });
 
+  // Codex と同じ壊れ方 (getItem だけ throw・setItem は通る) で、復旧が確認待ちで終わる形。付け替えの書き込みは通るが、
+  // 次の押下はその対応を読めない (resume にならず、また scan から入る)。(a) の「24 時間以内にこのタブで…もう一度押すと、まず
+  // 同じ支払いの結果を確かめ直します」は言えないので、hook は付け替えを「書けた」と返さず、場面は (e) になる。
+  it('確認待ちの支払いがある端末で sessionStorage の getItem だけが throw するようになり (setItem は通る)、復旧の照会も失敗する → 確認待ち (e) で終わる ((a) にしない・欄は出ない・署名を求めない・送り直さない)。次の押下も scan から入り、bundler が戻れば同じ op の結果を受け取る', async () => {
+    const screen = openScreen();
+    await payUntilUnconfirmed(screen);
+    const savedMapping = mappings();
+
+    const reads = breakSessionReads();
+    const setItem = vi.spyOn(Storage.prototype, 'setItem');
+    screen.result.current.mutate(PARAMS); // bundler は止まったまま
+    await waitFor(() => expect(screen.states()[1]?.status).toBe('error'));
+    await waitFor(() =>
+      expect(circleCodeOf(screen.result.current.error)).toBe('unconfirmed_earlier'),
+    );
+    expect(screen.result.current.error?.name).toBe('CirclePendingError');
+    expect(screen.result.current.pendingStoreUnavailable).toBe(false);
+    expectNoNewPayment({ signatures: 2, sent: 1, records: ['submitting'] });
+    // 付け替えの書き込みは今までどおり試している (sessionStorage への setItem が 1 回・値はその記録の attemptId)。
+    const sessionWrites = setItem.mock.calls.filter(
+      (_call, i) => setItem.mock.contexts[i] === window.sessionStorage,
+    );
+    expect(sessionWrites.map(([, value]) => value)).toEqual(Object.values(savedMapping));
+    setItem.mockRestore();
+
+    // 次の押下も、保存していない別の id で scan から入る (warn が押下ごとに 1 行)。bundler が戻れば、同じ op の結果を受け取る。
+    bundlerDown = false;
+    screen.result.current.mutate(PARAMS);
+    await waitFor(() => expect(screen.result.current.isSuccess).toBe(true));
+    reads.mockRestore();
+
+    expect(screen.result.current.data).toMatchObject({ userOpHash: OP_A.userOpHash, success: true });
+    expect(screen.result.current.pendingStoreUnavailable).toBe(false);
+    expectNoNewPayment({ signatures: 2, sent: 1, records: ['confirmed'] });
+    expect(unavailableWarns()).toEqual([
+      [UNAVAILABLE, { chainId: baseSepolia.id, cause: 'read' }],
+      [UNAVAILABLE, { chainId: baseSepolia.id, cause: 'read' }],
+    ]);
+  });
+
   // 付け替えを書けないので (e)。次の押下も、保存していない別の id で scan から入り、同じ記録を復旧する。
   it('確認待ちの支払いがある端末で sessionStorage が読めも書けもしなくなり、復旧の照会も失敗する → 確認待ち (e) で終わる (欄は出ない・署名を求めない・送り直さない)。次の押下も scan から入り、bundler が戻れば同じ op の結果を受け取る', async () => {
     const screen = openScreen();
