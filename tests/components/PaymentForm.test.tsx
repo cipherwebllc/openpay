@@ -993,7 +993,7 @@ describe('PaymentForm — 送信フロー', () => {
   });
 
   // 第 10 回レビューの後追い r10-ss: Circle の経路 (USDC ガスレス) でも同じ欄が出る。hook (useBatchPayment) は、タブの対応
-  // (sessionStorage) を保存できない端末で、送る前に止めて flag (pendingStoreUnavailable) を立て、error は null で返す
+  // (sessionStorage) を保存できない端末で、新しい支払いを始める前に止めて flag (pendingStoreUnavailable) を立て、error は null で返す
   // (tests/hooks/useBatchPayment.circleUnmount.test.tsx)。フォームの判定 (lib/paymentFlowGuards/pay.ts) は経路を見ないので、
   // 上の Pimlico の経路と同じ欄になる。flag の無い行は、押せないのが flag のせいであること (ほかの準備の不足でない) の対照。
   it.each([

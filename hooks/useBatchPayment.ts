@@ -1125,25 +1125,25 @@ async function runCirclePayment(args: {
   //   - 明示供給 (params.paymentAttemptId) があればそれを素通しし、マッピングは一切触らない。
   //   - 無ければ callHash 由来の安定マッピング (sessionStorage) で同一タブの再クリック/reload に
   //     同じ attemptId を割り当て、executeCirclePayment 内の crash-resume 分岐を機能させる。
-  //     **対応を保存できなければ送らない** (stableAttemptId が null を返す = sessionStorage を読めない・書けない・書いても
-  //     残らない端末。第 10 回レビューの後追い r10-ss)。何の波及を断つか: 保存していない attemptId で送ると、その支払いが
-  //     確認待ちで終わった後の押下が別の attemptId (別の key) になり、裏で確定した前の支払い (90 秒より前の confirmed) の後に
-  //     2 本目の署名を求める (確認待ちの文の「このタブでもう一度押すと、まず同じ支払いの結果を確かめ直します」も成り立たない)。
-  //     止める所はここ = 下の executeCirclePayment (古い記録の掃除・scan・記録の予約・署名・送信) より前で、それを包む try の
-  //     外 (try の catch は対応を破棄しに行く)。ここまでに済んでいるのは、動的 import とガス価格の取得 (読むだけ)。
-  //     画面には、localStorage を読めない端末と同じ flag (pendingStoreUnavailable) で「この端末では記録を保存できません」の
-  //     欄が出る (gasless だけを止める・hook の error は null・3 フォームは flag で送信を閉じる)。
-  //     既にある対応を読めた押下 (確認待ちの続き) は止めない。対応の付け替えの書き込みの失敗 (下の adoptAttempt) でも
-  //     止めない: その押下は新しい支払いを始めていない (circleSend.ts の (e))。
+  //     **対応を保存できなかった押下は、新しい支払いを始めない** (stableAttemptId の saved が false = sessionStorage を
+  //     読めない・書けない・書いても残らない端末。第 10 回レビューの後追い r10-ss)。何の波及を断つか: 保存していない attemptId で
+  //     新しい支払いを送ると、その支払いが確認待ちで終わった後の押下が別の attemptId (別の key) になり、裏で確定した前の支払い
+  //     (90 秒より前の confirmed) の後に 2 本目の署名を求める。
+  //     止めるのは executeCirclePayment の中 = 新しい記録を予約する直前 (mappingSaved: false を渡す・circleSend.ts の冒頭の
+  //     「対応を保存できていない押下」)。**ここ (入口) では止めない**: 既にある支払いの復旧・結果の受け取り (scan) は、対応を
+  //     保存できなくても今までどおり通す (入口で止めると、対応を保存した後に sessionStorage を読めなくなった端末で、送った
+  //     支払いの結果を受け取れなくなる)。saved が false の attemptId は、保存していない、押すたびに変わる id で、scan に使う。
+  //     止まった押下 (下の catch) は、localStorage を読めない端末と同じ flag (pendingStoreUnavailable) を立てる: 画面には
+  //     「この端末では記録を保存できません」の欄が出る (gasless だけを止める・hook の error は null・3 フォームは flag で
+  //     送信を閉じる)。既にある対応を読めた押下 (saved: true・確認待ちの続き) は、今までどおり。
   // sender は executeCirclePayment が computeIdempotencyKey に使う owner (=customer) と同一値、
   // chainId は executeCirclePayment が使う bundle.chainId と同一値にする (key 不一致を避ける)。
   const usesStableMapping = params.paymentAttemptId === undefined;
   const attemptArgs = { chainId: bundle.chainId, sender: customer, callHash: computeCallHash(calls) };
-  const attemptId = params.paymentAttemptId ?? stableAttemptId(attemptArgs);
-  if (attemptId === null) {
-    args.setStoreUnavailable(true);
-    throw new PimlicoPendingStoreUnavailableError('attempt-mapping-unavailable');
-  }
+  const { attemptId, saved } =
+    params.paymentAttemptId === undefined
+      ? stableAttemptId(attemptArgs)
+      : { attemptId: params.paymentAttemptId, saved: true };
   // この試みが、マッピングの指す先だと知っている attemptId。入口で読んだ / 作った id で、この試みが付け替えたら
   // (下の adoptAttempt)、付け替えた先の id になる。マッピングを破棄するのは、マッピングがいまもこの値を指しているときだけ
   // (下の 2 か所の clearStableAttemptId)。何の波及を断つか: マッピングは同じタブの別の試み (同じ sessionStorage を使う別の
@@ -1162,6 +1162,7 @@ async function runCirclePayment(args: {
       permitAmount,
       paymentAttemptId: attemptId,
       isAlive,
+      mappingSaved: saved,
       // 対応の付け替え (第 10 回レビュー 穴 B・条件は circleSend.ts の冒頭の「対応の付け替え」)。scan が別の key の記録
       // (別のタブ・閉じたタブの支払い) の結果を受け取りに行く押下は、自分の attemptId の記録を作らない。そのまま画面を離れる・
       // 確認待ちで終わると、対応は記録の無い attemptId を指し、次の押下が、後から確定したその支払いを「正規のリピート」と
@@ -1192,6 +1193,14 @@ async function runCirclePayment(args: {
     // 同じ記録を resume するだけで、記録が終わっていれば「既に終了」で破棄される。error の文はそのまま出す。
     // circleSend・circlePending は静的 import しない (bundle budget・上の動的 import) ので、CirclePendingError と同じく name で判定する。
     const name = (error as Error).name;
+    // 対応を保存できていない押下が、新しい記録を予約する直前で止まった (上の「冪等試行 ID」・circleSend.ts の冒頭の「対応を
+    // 保存できていない押下」)。新しい記録・署名・送信は何も始まっていない。「この端末では記録を保存できません」の欄の flag を
+    // 立て、localStorage を読めない端末と同じ error で終える (hook の error は null になる)。対応は破棄しない: この押下の
+    // attemptId は保存できていない id で、対応に残っている値 (読み戻しの不一致で残った値など) は、この試みのものと言えない。
+    if (name === 'CircleAttemptMappingUnavailableError') {
+      args.setStoreUnavailable(true);
+      throw new PimlicoPendingStoreUnavailableError('attempt-mapping-unavailable');
+    }
     if (
       usesStableMapping &&
       isAlive() &&

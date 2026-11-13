@@ -42,6 +42,7 @@ import {
 } from '@/lib/smartAccount/circleAccount';
 import {
   executeCirclePayment,
+  CircleAttemptMappingUnavailableError,
   CirclePendingError,
   STALE_SUBMITTING_WINDOW_MS,
 } from '@/lib/smartAccount/circleSend';
@@ -936,5 +937,236 @@ describe('PR-39c: 自分の key の submitting の記録の resume — 残りの
 
     expect(res).toMatchObject({ userOpHash: OLD.userOpHash, txHash: OLD.txHash });
     expect(signatureRequests()).toBe(0);
+  });
+});
+
+// 第 10 回レビューの後追い r10-ss (money-path): hook が attemptId の対応 (sessionStorage) を保存できなかった押下は、
+// mappingSaved: false を渡す (paymentAttemptId は、保存していない、押すたびに変わる id = ここでは tab-2)。
+// 失敗シナリオ (直す前): その id のまま新しい支払いを送ると、確認待ちで終わった後の押下が別の key になり、裏で確定した前の
+// 支払い (90 秒より前の confirmed) を「正規のリピート」とみなして 2 本目を払う。
+// 直した後: 新しい記録を予約する直前 (scan の loop の後・reserveOrResume の前) で止める。**scan の中の動きは変えない**
+// (既にある支払いの結果を返す・復旧する・確認待ち・古い pre-submit の abandon)。入口で止めると、対応を保存した後に
+// sessionStorage を読めなくなった端末で、送った支払いの結果を受け取れなくなる (Codex の指摘)。
+describe('r10-ss: 対応を保存できていない押下 (mappingSaved: false)', () => {
+  const UNSAVED = { mappingSaved: false } as const;
+
+  // localStorage の Circle の記録 (key → status)。
+  function records(): Record<string, string> {
+    return Object.fromEntries(
+      Array.from({ length: window.localStorage.length }, (_, i) => window.localStorage.key(i)!)
+        .filter((storageKey) => storageKey.startsWith(PENDING_KEY_PREFIX))
+        .sort()
+        .map((storageKey) => [
+          storageKey,
+          (JSON.parse(window.localStorage.getItem(storageKey)!) as { status: string }).status,
+        ]),
+    );
+  }
+
+  // 押下が「新しい記録を予約する直前」で止まったこと: 専用の error で終わり、新しい支払いを何も始めていない。
+  async function expectStopped(attempt: Promise<unknown>) {
+    const error = await attempt.catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(CircleAttemptMappingUnavailableError);
+    const stopped = error as CircleAttemptMappingUnavailableError;
+    // hook は name で受ける。フォームに場面の文を出させる符号 (circleCode) は持たない。確認待ちでもない。
+    expect(stopped.name).toBe('CircleAttemptMappingUnavailableError');
+    expect(stopped.message).toBe('circle-attempt-mapping-unavailable');
+    expect('circleCode' in stopped).toBe(false);
+    expect(stopped).not.toBeInstanceOf(CirclePendingError);
+    // 自分の key の記録を作っていない・署名を求めていない・何も送っていない・待っていない。
+    expect(stored('tab-2')).toBeUndefined();
+    expect(signatureRequests()).toBe(0);
+    expect(mockBroadcast).not.toHaveBeenCalled();
+    expect(mockWait).not.toHaveBeenCalled();
+  }
+
+  describe('scan の枝は今までどおり (既にある支払いの結果を返す・復旧する・確認待ち)', () => {
+    it('直近の confirmed (30 秒後) → 既払いの結果を返す (付け替えも今までどおり呼ぶ)', async () => {
+      seed('confirmed');
+      include(OLD, { block: 100n, ms: T0 + SEC });
+
+      const res = await press(T0 + SEC + 30 * SEC, UNSAVED);
+
+      expect(res).toMatchObject({ userOpHash: OLD.userOpHash, txHash: OLD.txHash });
+      expect(adopted()).toEqual(['tab-1']);
+      expect(events).toEqual(['adopt', 'lookup']);
+      expect(signatureRequests()).toBe(0);
+      expect(stored('tab-2')).toBeUndefined();
+    });
+
+    it('窓の内の submitting (10 分後) → 同じ op を復旧して結果を返す', async () => {
+      seed('submitting');
+      include(OLD, { block: 100n, ms: T0 + 12 * SEC });
+
+      const res = await press(T0 + 10 * MIN, UNSAVED);
+
+      expect(res).toMatchObject({ userOpHash: OLD.userOpHash, txHash: OLD.txHash });
+      expect(adopted()).toEqual(['tab-1']);
+      expect(events).toEqual(['adopt', 'wait']);
+      expect(signatureRequests()).toBe(0);
+      expect(stored('tab-1')?.status).toBe('confirmed');
+      expect(stored('tab-2')).toBeUndefined();
+    });
+
+    it('窓の内の submitting・復旧が確認待ちで終わる・hook が付け替えを書けなかった (false) → (e)。復旧の進め方は同じ', async () => {
+      seed('submitting');
+      adoptAttempt.mockImplementation(() => {
+        events.push('adopt');
+        return false;
+      });
+
+      const error = await press(T0 + 10 * MIN, UNSAVED).catch((e: unknown) => e);
+
+      expect(error).toBeInstanceOf(CirclePendingError);
+      expect((error as CirclePendingError).circleCode).toBe('unconfirmed_earlier');
+      expect((error as CirclePendingError).userOpHash).toBe(OLD.userOpHash);
+      expect(takePendingCodes()).toEqual(['unconfirmed_earlier']);
+      // 待ち → timeout → 同じ op の送り直し → 待ち (新しい op は作らない)。
+      expect(events).toEqual(['adopt', 'wait', 'wait']);
+      expect(mockBroadcast).toHaveBeenCalledTimes(1);
+      expect(signatureRequests()).toBe(0);
+      expect(stored('tab-1')?.status).toBe('submitting');
+      expect(stored('tab-2')).toBeUndefined();
+    });
+
+    it('窓の内の submitting・復旧が確認待ちで終わる・hook が付け替えを書けた (true) → 今までどおり (a)', async () => {
+      seed('submitting');
+
+      const error = await press(T0 + 10 * MIN, UNSAVED).catch((e: unknown) => e);
+
+      expect(error).toBeInstanceOf(CirclePendingError);
+      expect((error as CirclePendingError).circleCode).toBe('unconfirmed');
+      expect(adopted()).toEqual(['tab-1']);
+      expect(stored('tab-2')).toBeUndefined();
+    });
+
+    it('31 分後・使用済みで取り込みは 5 分前 → 今までどおり前の結果を返す', async () => {
+      seed('submitting');
+      const at = T0 + 31 * MIN;
+      include(OLD, { block: 100n, ms: at - 5 * MIN });
+      chain.latestMs = at;
+
+      const res = await press(at, UNSAVED);
+
+      expect(res).toMatchObject({ userOpHash: OLD.userOpHash, txHash: OLD.txHash });
+      expect(signatureRequests()).toBe(0);
+    });
+
+    it('31 分後・nonce を読めない (確かめられない記録) → 今までどおり確認待ち (e)。止めた error にはしない', async () => {
+      seed('submitting');
+      mockRead.mockRejectedValue(new Error('HTTP request failed. Status: 503'));
+
+      const error = await press(T0 + 31 * MIN, UNSAVED).catch((e: unknown) => e);
+
+      expect(error).toBeInstanceOf(CirclePendingError);
+      expect(takePendingCodes()).toEqual(['unconfirmed_earlier']);
+      expect(events).toEqual([]);
+    });
+
+    it('直近の pre-submit (別の試みが署名中) → 今までどおり確認待ち (b)。止めた error にはしない', async () => {
+      seed('signed', { handedOffAt: T0 });
+
+      const error = await press(T0 + MIN, UNSAVED).catch((e: unknown) => e);
+
+      expect(error).toBeInstanceOf(CirclePendingError);
+      expect(takePendingCodes()).toEqual(['busy_elsewhere']);
+      expect(stored('tab-1')?.status).toBe('signed');
+      expect(stored('tab-2')).toBeUndefined();
+    });
+  });
+
+  describe('新しい支払いを作る所まで来たら、新しい記録を予約する直前で止まる', () => {
+    it('記録が何も無い → 止まる。記録は 1 つも増えない', async () => {
+      walletSigns(NEW, { block: 200n, ms: T0 });
+
+      await expectStopped(press(T0, UNSAVED));
+
+      expect(records()).toEqual({});
+      expect(adopted()).toEqual([]);
+    });
+
+    // この PR が塞ぐ穴: 直す前は、保存していない id で新しい支払い (2 本目) に署名を求めていた。
+    it('90 秒より前の confirmed (正規のリピートとして飛ばす記録) だけがある → 2 本目を始めずに止まる', async () => {
+      seed('confirmed');
+      include(OLD, { block: 100n, ms: T0 + SEC });
+      const at = T0 + SEC + 90 * SEC + 1;
+      walletSigns(NEW, { block: 200n, ms: at });
+      const before = records();
+
+      await expectStopped(press(at, UNSAVED));
+
+      expect(records()).toEqual(before);
+      expect(adopted()).toEqual([]);
+    });
+
+    it('revert した confirmed (dedup しない記録) だけがある → 止まる', async () => {
+      seed('confirmed', { success: false });
+      const at = T0 + SEC + 30 * SEC;
+      walletSigns(NEW, { block: 200n, ms: at });
+      const before = records();
+
+      await expectStopped(press(at, UNSAVED));
+
+      expect(records()).toEqual(before);
+    });
+
+    it('31 分後・使用済みで取り込みは 31 分前 (飛ばす submitting の記録) だけがある → 止まる。記録は書かない', async () => {
+      seed('submitting');
+      const at = T0 + 31 * MIN;
+      include(OLD, { block: 100n, ms: T0 + 12 * SEC });
+      chain.latestMs = at + 20 * SEC;
+      walletSigns(NEW, { block: 200n, ms: at });
+      const before = records();
+
+      await expectStopped(press(at, UNSAVED));
+
+      expect(records()).toEqual(before);
+      expect(stored('tab-1')?.status).toBe('submitting');
+    });
+
+    it('古い pre-submit (3 分より前) → 今までどおり abandoned にしてから、止まる', async () => {
+      seed('signed', { handedOffAt: T0 });
+      const at = T0 + 4 * MIN;
+      walletSigns(NEW, { block: 200n, ms: at });
+
+      await expectStopped(press(at, UNSAVED));
+
+      expect(stored('tab-1')?.status).toBe('abandoned');
+      expect(Object.keys(records())).toHaveLength(1);
+    });
+
+    it('古い記録の照合を待つ間に失効 → 今までどおり payment_cancelled (止めた error より先)', async () => {
+      seed('submitting');
+      const at = T0 + 31 * MIN;
+      include(OLD, { block: 100n, ms: T0 + 12 * SEC });
+      chain.latestMs = at + 20 * SEC;
+      let alive = true;
+      mockRead.mockImplementationOnce(async (params: { args: readonly [Address, bigint] }) => {
+        alive = false; // RPC を待つ間に画面を離れた
+        return (params.args[1] << 64n) + 1n; // 使用済み
+      });
+
+      await expect(press(at, { ...UNSAVED, isAlive: () => alive })).rejects.toThrow('payment_cancelled');
+
+      expect(stored('tab-2')).toBeUndefined();
+      expect(signatureRequests()).toBe(0);
+    });
+  });
+
+  describe('省略・true の呼び出しは今までどおり (明示の paymentAttemptId を含む)', () => {
+    it.each([
+      ['省略', {}],
+      ['true', { mappingSaved: true }],
+      ['undefined', { mappingSaved: undefined }],
+    ])('mappingSaved が %s・記録が何も無い → 新しい支払い (署名 2 回・送信 1 回)', async (_label, overrides) => {
+      walletSigns(NEW, { block: 200n, ms: T0 });
+
+      const res = await press(T0, overrides);
+
+      expect(res).toMatchObject({ userOpHash: NEW.userOpHash, txHash: NEW.txHash });
+      expect(signatureRequests()).toBe(2);
+      expect(mockBroadcast).toHaveBeenCalledTimes(1);
+      expect(stored('tab-2')?.status).toBe('confirmed');
+    });
   });
 });

@@ -1035,12 +1035,12 @@ describe('stableAttemptId / clearStableAttemptId (sessionStorage マッピング
     window.sessionStorage.clear();
   });
 
-  // stableAttemptId は、対応を保存できなかったとき null を返す (r10-ss)。保存できる前提の test は、null でないことを
-  // 確かめてから string として使う (null 同士の比較で空振りしない・clearStableAttemptId の第 2 引数は string)。
+  // stableAttemptId は { attemptId, saved } を返す (r10-ss)。保存できる前提の test は、saved が true であることを確かめてから
+  // attemptId を使う (保存できていない id 同士の比較で空振りしない)。
   function savedAttemptId(args: Parameters<typeof stableAttemptId>[0]): string {
-    const id = stableAttemptId(args);
-    if (id === null) throw new Error('test: 対応を保存できなかった (stableAttemptId が null を返した)');
-    return id;
+    const mapping = stableAttemptId(args);
+    if (!mapping.saved) throw new Error('test: 対応を保存できなかった (stableAttemptId の saved が false)');
+    return mapping.attemptId;
   }
 
   it('同一 (chainId,sender,callHash) は同じ attemptId を返す (再クリック/reload で resume)', () => {
@@ -1071,7 +1071,7 @@ describe('stableAttemptId / clearStableAttemptId (sessionStorage マッピング
       const own = savedAttemptId(ARGS);
       setStableAttemptId(ARGS, 'attempt-of-other-tab');
       clearStableAttemptId(ARGS, own);
-      expect(stableAttemptId(ARGS)).toBe('attempt-of-other-tab');
+      expect(savedAttemptId(ARGS)).toBe('attempt-of-other-tab');
     });
 
     it('付け替えた先の attemptId を渡せば破棄する (付け替えた試み自身の後片付け)', () => {
@@ -1091,7 +1091,7 @@ describe('stableAttemptId / clearStableAttemptId (sessionStorage マッピング
       const other = savedAttemptId({ ...ARGS, callHash: OTHER_HASH });
       clearStableAttemptId(ARGS, own);
       expect(window.sessionStorage.length).toBe(1);
-      expect(stableAttemptId({ ...ARGS, callHash: OTHER_HASH })).toBe(other);
+      expect(savedAttemptId({ ...ARGS, callHash: OTHER_HASH })).toBe(other);
     });
 
     it('sessionStorage を読めない・消せないときは投げない (マッピングはそのまま)', () => {
@@ -1107,16 +1107,18 @@ describe('stableAttemptId / clearStableAttemptId (sessionStorage マッピング
       expect(() => clearStableAttemptId(ARGS, own)).not.toThrow();
       expect(removeItem).toHaveBeenCalledTimes(1);
       removeItem.mockRestore();
-      expect(stableAttemptId(ARGS)).toBe(own);
+      expect(savedAttemptId(ARGS)).toBe(own);
     });
   });
 
-  // r10-ss: 対応を保存できたときだけ attemptId を返す。保存できなければ null (hook は送る前に止める)。
-  // 直す前は、保存していない新しい UUID を黙って返していた: その端末で送った支払いが確認待ちで終わると、次の押下は別の
-  // attemptId になり、裏で確定した前の支払い (90 秒より前の confirmed) の後に 2 本目の署名を求める。
-  describe('対応を保存できたときだけ attemptId を返す (保存できなければ null)', () => {
+  // r10-ss: attemptId と、それを sessionStorage に保存できたか (saved) を返す。保存できなければ、保存していない新しい UUID と
+  // saved: false (hook はそれを executeCirclePayment に渡し、新しい記録を予約する直前で止まる。scan には、この id を使う)。
+  // 直す前は、保存していない新しい UUID を黙って返していた (呼ぶ側は見分けられない): その端末で送った支払いが確認待ちで終わると、
+  // 次の押下は別の attemptId になり、裏で確定した前の支払い (90 秒より前の confirmed) の後に 2 本目の署名を求める。
+  describe('attemptId と、保存できたか (saved) を返す', () => {
     const ARGS = { chainId: CHAIN_ID, sender: SENDER, callHash: CALL_HASH };
     const UNAVAILABLE = 'circle.attempt_mapping.unavailable';
+    const UUID = /^[0-9a-f-]{36}$/i;
 
     // この describe の spy は sessionStorage だけを壊す (localStorage は本物のまま)。
     const realGetItem = Storage.prototype.getItem;
@@ -1132,36 +1134,49 @@ describe('stableAttemptId / clearStableAttemptId (sessionStorage マッピング
           return realSetItem.call(this, key, value);
         });
     }
+    // 保存できなかった結果 (saved: false) であることを確かめ、その (保存していない) attemptId を返す。
+    function unsavedAttemptId(): string {
+      const mapping = stableAttemptId(ARGS);
+      expect(mapping.saved).toBe(false);
+      expect(mapping.attemptId).toMatch(UUID);
+      expect(Object.keys(mapping).sort()).toEqual(['attemptId', 'saved']);
+      return mapping.attemptId;
+    }
+    // sessionStorage に残っている対応の値 (無ければ空)。
+    const storedValues = () =>
+      Array.from({ length: window.sessionStorage.length }, (_, i) =>
+        window.sessionStorage.getItem(window.sessionStorage.key(i)!),
+      );
 
-    it('対応が無い → 書いて、読み戻せた値を返す (書くのは 1 回・2 回目は同じ値を読むだけ)。warn は出さない', () => {
+    it('対応が無い → 書いて、読み戻せた値と saved: true を返す (書くのは 1 回・2 回目は同じ値を読むだけ)。warn は出さない', () => {
       const warn = spyWarn();
       const setItem = vi.spyOn(Storage.prototype, 'setItem');
       const first = stableAttemptId(ARGS);
-      expect(first).toMatch(/^[0-9a-f-]{36}$/i);
+      expect(first).toEqual({ attemptId: expect.stringMatching(UUID), saved: true });
       expect(setItem).toHaveBeenCalledTimes(1);
-      expect(window.sessionStorage.length).toBe(1);
-      expect(window.sessionStorage.getItem(window.sessionStorage.key(0)!)).toBe(first);
+      expect(storedValues()).toEqual([first.attemptId]);
 
-      expect(stableAttemptId(ARGS)).toBe(first);
+      expect(stableAttemptId(ARGS)).toEqual(first);
       expect(setItem).toHaveBeenCalledTimes(1);
       expect(warn).not.toHaveBeenCalled();
     });
 
-    it('setItem が throw → null (毎回)。何も残らない。warn は chainId と cause: write だけ', () => {
+    it('setItem が throw → saved: false と、保存していない UUID (押すたびに別の値)。何も残らない。warn は chainId と cause: write だけ', () => {
       const warn = spyWarn();
       const setItem = breakSessionWrites();
-      expect(stableAttemptId(ARGS)).toBeNull();
-      expect(stableAttemptId(ARGS)).toBeNull();
+      const a = unsavedAttemptId();
+      const b = unsavedAttemptId();
+      expect(a).not.toBe(b);
       expect(setItem).toHaveBeenCalledTimes(2);
       setItem.mockRestore();
-      expect(window.sessionStorage.length).toBe(0);
+      expect(storedValues()).toEqual([]);
       expect(warn.mock.calls).toEqual([
         [UNAVAILABLE, { chainId: CHAIN_ID, cause: 'write' }],
         [UNAVAILABLE, { chainId: CHAIN_ID, cause: 'write' }],
       ]);
     });
 
-    it('getItem が throw → null。書きに行かない。warn は cause: read', () => {
+    it('getItem が throw → saved: false (押すたびに別の UUID)。書きに行かない。warn は cause: read', () => {
       const warn = spyWarn();
       const setItem = vi.spyOn(Storage.prototype, 'setItem');
       const getItem = vi
@@ -1170,14 +1185,38 @@ describe('stableAttemptId / clearStableAttemptId (sessionStorage マッピング
           if (this === window.sessionStorage) throw new Error('SecurityError: storage is not available');
           return realGetItem.call(this, key);
         });
-      expect(stableAttemptId(ARGS)).toBeNull();
+      const a = unsavedAttemptId();
+      const b = unsavedAttemptId();
       getItem.mockRestore();
+      expect(a).not.toBe(b);
       expect(setItem).not.toHaveBeenCalled();
-      expect(window.sessionStorage.length).toBe(0);
-      expect(warn.mock.calls).toEqual([[UNAVAILABLE, { chainId: CHAIN_ID, cause: 'read' }]]);
+      expect(storedValues()).toEqual([]);
+      expect(warn.mock.calls).toEqual([
+        [UNAVAILABLE, { chainId: CHAIN_ID, cause: 'read' }],
+        [UNAVAILABLE, { chainId: CHAIN_ID, cause: 'read' }],
+      ]);
     });
 
-    it('setItem は通るが残らない (silent drop) → null。warn は cause: readback', () => {
+    // 保存した後に読めなくなった端末: 既にある対応の値は返さない (読めないので分からない)。保存していない別の UUID を返す。
+    it('対応を保存した後に getItem が throw するようになる → saved: false と、保存した値とは別の UUID。保存した値は残る', () => {
+      const own = savedAttemptId(ARGS);
+      const warn = spyWarn();
+      const getItem = vi
+        .spyOn(Storage.prototype, 'getItem')
+        .mockImplementation(function (this: Storage, key: string) {
+          if (this === window.sessionStorage) throw new Error('SecurityError: storage is not available');
+          return realGetItem.call(this, key);
+        });
+      const unsaved = unsavedAttemptId();
+      getItem.mockRestore();
+      expect(unsaved).not.toBe(own);
+      expect(storedValues()).toEqual([own]);
+      expect(warn.mock.calls).toEqual([[UNAVAILABLE, { chainId: CHAIN_ID, cause: 'read' }]]);
+      // 読めるようになれば、保存した値に戻る。
+      expect(savedAttemptId(ARGS)).toBe(own);
+    });
+
+    it('setItem は通るが残らない (silent drop) → saved: false。warn は cause: readback', () => {
       const warn = spyWarn();
       const setItem = vi
         .spyOn(Storage.prototype, 'setItem')
@@ -1185,26 +1224,28 @@ describe('stableAttemptId / clearStableAttemptId (sessionStorage マッピング
           if (this === window.sessionStorage) return;
           realSetItem.call(this, key, value);
         });
-      expect(stableAttemptId(ARGS)).toBeNull();
+      unsavedAttemptId();
       expect(setItem).toHaveBeenCalledTimes(1);
       setItem.mockRestore();
-      expect(window.sessionStorage.length).toBe(0);
+      expect(storedValues()).toEqual([]);
       expect(warn.mock.calls).toEqual([[UNAVAILABLE, { chainId: CHAIN_ID, cause: 'readback' }]]);
     });
 
-    it('読み戻すと別の値 → null。warn は cause: readback', () => {
+    it('読み戻すと別の値 → saved: false。返すのは、残った値ではなく、書こうとした UUID。warn は cause: readback', () => {
       const warn = spyWarn();
       const setItem = vi
         .spyOn(Storage.prototype, 'setItem')
         .mockImplementation(function (this: Storage, key: string, value: string) {
           realSetItem.call(this, key, this === window.sessionStorage ? 'some-other-value' : value);
         });
-      expect(stableAttemptId(ARGS)).toBeNull();
+      const unsaved = unsavedAttemptId();
       setItem.mockRestore();
+      expect(unsaved).not.toBe('some-other-value');
+      expect(storedValues()).toEqual(['some-other-value']);
       expect(warn.mock.calls).toEqual([[UNAVAILABLE, { chainId: CHAIN_ID, cause: 'readback' }]]);
     });
 
-    it('書いた後の読み戻しが throw → null。warn は cause: readback', () => {
+    it('書いた後の読み戻しが throw → saved: false。warn は cause: readback', () => {
       const warn = spyWarn();
       let reads = 0;
       const getItem = vi
@@ -1216,18 +1257,18 @@ describe('stableAttemptId / clearStableAttemptId (sessionStorage マッピング
           }
           return realGetItem.call(this, key);
         });
-      expect(stableAttemptId(ARGS)).toBeNull();
+      unsavedAttemptId();
       getItem.mockRestore();
       expect(reads).toBe(2);
       expect(warn.mock.calls).toEqual([[UNAVAILABLE, { chainId: CHAIN_ID, cause: 'readback' }]]);
     });
 
-    // 確認待ちの後の押下を誤って止めない: 前の押下で保存できた対応は、その後に書けなくなっても読める。
-    it('既に対応がある → その値を返し、書かない (setItem が throw する端末でも)', () => {
+    // 確認待ちの後の押下: 前の押下で保存できた対応は、その後に書けなくなっても読める (saved: true のまま = resume する)。
+    it('既に対応がある → その値と saved: true を返し、書かない (setItem が throw する端末でも)', () => {
       const own = savedAttemptId(ARGS);
       const warn = spyWarn();
       const setItem = breakSessionWrites();
-      expect(stableAttemptId(ARGS)).toBe(own);
+      expect(stableAttemptId(ARGS)).toEqual({ attemptId: own, saved: true });
       expect(setItem).not.toHaveBeenCalled();
       setItem.mockRestore();
       expect(warn).not.toHaveBeenCalled();
@@ -1240,34 +1281,35 @@ describe('stableAttemptId / clearStableAttemptId (sessionStorage マッピング
           if (this === window.localStorage) throw new Error('QuotaExceededError');
           return realSetItem.call(this, key, value);
         });
-      const id = stableAttemptId(ARGS);
+      const id = savedAttemptId(ARGS);
       setItem.mockRestore();
-      expect(id).toMatch(/^[0-9a-f-]{36}$/i);
-      expect(stableAttemptId(ARGS)).toBe(id);
+      expect(id).toMatch(UUID);
+      expect(savedAttemptId(ARGS)).toBe(id);
     });
 
     it('warn に sender・callHash・attemptId・error の文を入れない', () => {
       const warn = spyWarn();
       const setItem = breakSessionWrites();
-      stableAttemptId(ARGS);
+      const unsaved = unsavedAttemptId();
       setItem.mockRestore();
       expect(warn).toHaveBeenCalledTimes(1);
       const logged = JSON.stringify(warn.mock.calls).toLowerCase();
       expect(logged).not.toContain(SENDER.toLowerCase());
       expect(logged).not.toContain(CALL_HASH.toLowerCase());
+      expect(logged).not.toContain(unsaved.toLowerCase());
       expect(logged).not.toContain('quotaexceedederror');
       expect(Object.keys(warn.mock.calls[0][1] ?? {}).sort()).toEqual(['cause', 'chainId']);
     });
 
-    // UUID の採番は storage と関係ない。その失敗を「対応を保存できない」(null) に化けさせない (今までも throw だった)。
-    it('crypto.randomUUID の失敗は null にしない (そのまま throw・warn は出さない)', () => {
+    // UUID の採番は storage と関係ない。その失敗を「対応を保存できない」(saved: false) に化けさせない (今までも throw だった)。
+    it('crypto.randomUUID の失敗は saved: false にしない (そのまま throw・warn は出さない)', () => {
       const warn = spyWarn();
       const uuid = vi.spyOn(crypto, 'randomUUID').mockImplementation(() => {
         throw new Error('test: randomUUID is not available');
       });
       expect(() => stableAttemptId(ARGS)).toThrow('test: randomUUID is not available');
       uuid.mockRestore();
-      expect(window.sessionStorage.length).toBe(0);
+      expect(storedValues()).toEqual([]);
       expect(warn).not.toHaveBeenCalled();
     });
   });
@@ -1291,22 +1333,22 @@ describe('stableAttemptId / clearStableAttemptId (sessionStorage マッピング
     it('付け替えた後、同じ (chainId,sender,callHash) の stableAttemptId は渡した attemptId を返す (key は増えない)。書けたら true', () => {
       const own = savedAttemptId(ARGS);
       expect(setStableAttemptId(ARGS, 'attempt-of-other-tab')).toBe(true);
-      expect(stableAttemptId(ARGS)).toBe('attempt-of-other-tab');
-      expect(stableAttemptId(ARGS)).not.toBe(own);
+      expect(savedAttemptId(ARGS)).toBe('attempt-of-other-tab');
+      expect(savedAttemptId(ARGS)).not.toBe(own);
       expect(window.sessionStorage.length).toBe(1);
     });
 
     it('sender の大文字・小文字が違っても同じ対応を書く (stableAttemptId と同じ key)', () => {
       stableAttemptId(ARGS);
       setStableAttemptId({ ...ARGS, sender: SENDER.toLowerCase() as Address }, 'attempt-of-other-tab');
-      expect(stableAttemptId(ARGS)).toBe('attempt-of-other-tab');
+      expect(savedAttemptId(ARGS)).toBe('attempt-of-other-tab');
       expect(window.sessionStorage.length).toBe(1);
     });
 
     it('別の内容 (callHash) の対応には触らない', () => {
       const other = savedAttemptId({ ...ARGS, callHash: OTHER_HASH });
       setStableAttemptId(ARGS, 'attempt-of-other-tab');
-      expect(stableAttemptId({ ...ARGS, callHash: OTHER_HASH })).toBe(other);
+      expect(savedAttemptId({ ...ARGS, callHash: OTHER_HASH })).toBe(other);
     });
 
     it('sessionStorage.setItem が throw しても投げず、false を返す。対応は前のまま', () => {
@@ -1317,7 +1359,7 @@ describe('stableAttemptId / clearStableAttemptId (sessionStorage マッピング
       expect(setStableAttemptId(ARGS, 'attempt-of-other-tab')).toBe(false);
       expect(spy).toHaveBeenCalledTimes(1);
       spy.mockRestore();
-      expect(stableAttemptId(ARGS)).toBe(own);
+      expect(savedAttemptId(ARGS)).toBe(own);
     });
   });
 });
