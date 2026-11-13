@@ -992,6 +992,56 @@ describe('PaymentForm — 送信フロー', () => {
     ).toBeDisabled();
   });
 
+  // 第 10 回レビューの後追い r10-ss: Circle の経路 (USDC ガスレス) でも同じ欄が出る。hook (useBatchPayment) は、タブの対応
+  // (sessionStorage) を保存できない端末で、送る前に止めて flag (pendingStoreUnavailable) を立て、error は null で返す
+  // (tests/hooks/useBatchPayment.circleUnmount.test.tsx)。フォームの判定 (lib/paymentFlowGuards/pay.ts) は経路を見ないので、
+  // 上の Pimlico の経路と同じ欄になる。flag の無い行は、押せないのが flag のせいであること (ほかの準備の不足でない) の対照。
+  it.each([
+    ['記録を保存できない (flag あり)', 'store-unavailable', true],
+    ['対照: flag なし', 'idle', false],
+  ] as const)(
+    'Circle の経路・%s → 専用の欄 = %s (赤い error の枠は出ない・欄が出ている間は支払うボタンが押せない)',
+    async (_label, state, blocked) => {
+      const user = userEvent.setup();
+      vi.mocked(resolvePaymasterMode).mockReturnValue('erc20');
+      vi.mocked(resolveUsdcGaslessProvider).mockReturnValue('circle');
+      setURL(`to=${MERCHANT}&token=usdc&amount=10`);
+      setAccount({ connected: true, chainId: baseSepolia.id });
+      setBalance(20_000_000n);
+      setSmartAccount(true);
+      setCircleQuote('ready', { gasAmount: 0n, permitAmount: 10_050_000n });
+      setPayment(state);
+      render(<PaymentForm />);
+
+      // Circle の経路の画面であること (有界 permit の署名の案内が出ている。案内の部品は遅延読み込みなので待つ)。
+      expect(await screen.findByText(/利用許可 \(Spending cap\).+署名/)).toBeInTheDocument();
+
+      const title = screen.queryByText('この端末では記録を保存できません');
+      const body = screen.queryByText(
+        'この端末では支払い記録を保存できないため、ガスレス送信を止めています。通常送信をご利用ください。',
+      );
+      // 赤い error の枠 (題「エラー」) と、止めた error の生の message は、どちらの場合も出ない。
+      expect(screen.queryByText('エラー')).toBeNull();
+      expect(screen.queryByText(/pending-store-unavailable/)).toBeNull();
+      expect(screen.queryByText('送信結果を確認中')).toBeNull();
+
+      const payButton = screen.getByRole('button', { name: /10 USDC を支払う/ });
+      if (blocked) {
+        expect(title).toBeInTheDocument();
+        expect(body).toBeInTheDocument();
+        expect(payButton).toBeDisabled();
+        await user.click(payButton);
+        expect(mutate).not.toHaveBeenCalled();
+      } else {
+        expect(title).toBeNull();
+        expect(body).toBeNull();
+        expect(payButton).not.toBeDisabled();
+        await user.click(payButton);
+        expect(mutate).toHaveBeenCalledOnce();
+      }
+    },
+  );
+
   it('pending 記録を保存できなくても standard (通常送信) は使える', async () => {
     const user = userEvent.setup();
     setURL(`to=${MERCHANT}&token=usdc&amount=10&mode=standard`);

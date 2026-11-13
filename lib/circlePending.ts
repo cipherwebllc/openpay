@@ -222,26 +222,51 @@ function attemptStorageKey(args: {
  *   旧 confirmed record (TERMINAL_RETENTION_MS=24h 残存) に誤って resume させない。
  * - 別タブ/別デバイスは sessionStorage を共有しないが、その層は findLiveByCallHash の
  *   callHash スキャン (attemptId 非依存) が引き続き担う。
- * - sessionStorage 不可 (SSR / プライベートモード例外) は fresh UUID に fallback
- *   (= 従来挙動。マッピングは defense-in-depth であり決済可否を左右させない)。
+ * - **返すのは、sessionStorage に保存されている attemptId だけ。保存できなければ null** (第 10 回レビューの後追い r10-ss)。
+ *   呼ぶ側 (hooks/useBatchPayment.ts の runCirclePayment) は、null なら送る前に止める (記録の予約・署名・送信を始めない)。
+ *   何の波及を断つか: 保存できないまま送ると、その支払いが確認待ちで終わった後の押下が別の attemptId (別の key) になり、
+ *   裏で確定した前の支払い (90 秒より前の confirmed) を「正規のリピート」とみなして 2 本目の署名を求める。H-V・穴 B 以降、
+ *   この対応は「同じタブの続き」を見分ける本体で、無くても払える付帯のものではない。
+ *     - 既にある値を読めた → その値を返す (書かない)。前の押下で保存できていれば、その後に書けなくなった端末でも、確認待ちの
+ *       支払いの続き (resume) は止めない。
+ *     - 無い → 新しい UUID を書き、読み戻して同じ値のときだけ返す。setItem が throw しない端末 (quota の silent drop) も
+ *       見分ける (localStorage の記録の writeRecord・lib/paymentIntentStorage.ts の canStoreRelayIntent と同じ形)。
+ *     - getItem / setItem が throw・読み戻しが違う → null。throw はしない。
+ *   UUID の採番 (crypto.randomUUID) は try の外: storage と関係ない失敗を「保存できない」に化けさせない。
+ *   null のときは warn を 1 行出す (そういう端末がどれだけあるかを見る)。入れるのは chainId と、どこで失敗したかだけ
+ *   (アドレス・callHash・attemptId・error の文は入れない)。
  * - 値は、このタブが採番した attemptId とは限らない: scan が別の key の記録 (別のタブ・閉じたタブの支払い) の結果を
  *   受け取りに行くとき、hook がその記録の paymentAttemptId に付け替える (下の setStableAttemptId)。 */
 export function stableAttemptId(args: {
   chainId: number;
   sender: Address;
   callHash: Hex;
-}): string {
+}): string | null {
   const storageKeyName = attemptStorageKey(args);
+  const unavailable = (cause: 'read' | 'write' | 'readback'): null => {
+    logger.warn('circle.attempt_mapping.unavailable', { chainId: args.chainId, cause });
+    return null;
+  };
+  let existing: string | null;
   try {
-    const existing = window.sessionStorage.getItem(storageKeyName);
-    if (existing) return existing;
-    const fresh = crypto.randomUUID();
-    window.sessionStorage.setItem(storageKeyName, fresh);
-    return fresh;
+    existing = window.sessionStorage.getItem(storageKeyName);
   } catch {
-    // SSR / private mode / quota → 保存せず fresh UUID を返す (環境依存の制御フロー)。
-    return crypto.randomUUID();
+    return unavailable('read');
   }
+  if (existing) return existing;
+  const fresh = crypto.randomUUID();
+  try {
+    window.sessionStorage.setItem(storageKeyName, fresh);
+  } catch {
+    return unavailable('write');
+  }
+  let stored: string | null;
+  try {
+    stored = window.sessionStorage.getItem(storageKeyName);
+  } catch {
+    return unavailable('readback');
+  }
+  return stored === fresh ? fresh : unavailable('readback');
 }
 
 /** stableAttemptId のマッピングを破棄する (終端到達時)。次回は新規 attemptId を採番する。

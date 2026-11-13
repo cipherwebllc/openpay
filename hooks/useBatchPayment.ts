@@ -537,6 +537,7 @@ export function useBatchPayment(
     useState<LatchedPimlicoPending | null>(null);
   // pending store が読めないまま送信要求が来た状態 (fail-closed)。broadcast 済 UserOp の
   // 有無を判定できないので gasless だけを止める。storage が再び読めた時点で解除する。
+  // Circle の経路で、タブの対応 (sessionStorage の attemptId) を保存できない端末でも立てる (runCirclePayment・r10-ss)。
   const [pendingStoreUnavailable, setPendingStoreUnavailable] = useState(false);
 
   useEffect(() => {
@@ -803,6 +804,7 @@ export function useBatchPayment(
           walletClient,
           publicClient,
           isAlive: () => mountedRef.current,
+          setStoreUnavailable: setPendingStoreUnavailable,
         });
       }
 
@@ -1077,6 +1079,8 @@ async function runCirclePayment(args: {
   publicClient: PublicClient | undefined;
   // この試みを始めた hook の instance がまだ画面にあるか (unmount の後は false のまま・第 10 回レビュー H-V)。
   isAlive: () => boolean;
+  // hook の pendingStoreUnavailable の setter (Pimlico の経路の intentHost.setStoreUnavailable と同じもの)。
+  setStoreUnavailable: (unavailable: boolean) => void;
 }): Promise<BatchPaymentResult> {
   const { bundle, params, customer, chainId, walletClient, publicClient, isAlive } = args;
   if (!customer || !walletClient || !publicClient) {
@@ -1121,11 +1125,25 @@ async function runCirclePayment(args: {
   //   - 明示供給 (params.paymentAttemptId) があればそれを素通しし、マッピングは一切触らない。
   //   - 無ければ callHash 由来の安定マッピング (sessionStorage) で同一タブの再クリック/reload に
   //     同じ attemptId を割り当て、executeCirclePayment 内の crash-resume 分岐を機能させる。
+  //     **対応を保存できなければ送らない** (stableAttemptId が null を返す = sessionStorage を読めない・書けない・書いても
+  //     残らない端末。第 10 回レビューの後追い r10-ss)。何の波及を断つか: 保存していない attemptId で送ると、その支払いが
+  //     確認待ちで終わった後の押下が別の attemptId (別の key) になり、裏で確定した前の支払い (90 秒より前の confirmed) の後に
+  //     2 本目の署名を求める (確認待ちの文の「このタブでもう一度押すと、まず同じ支払いの結果を確かめ直します」も成り立たない)。
+  //     止める所はここ = 下の executeCirclePayment (古い記録の掃除・scan・記録の予約・署名・送信) より前で、それを包む try の
+  //     外 (try の catch は対応を破棄しに行く)。ここまでに済んでいるのは、動的 import とガス価格の取得 (読むだけ)。
+  //     画面には、localStorage を読めない端末と同じ flag (pendingStoreUnavailable) で「この端末では記録を保存できません」の
+  //     欄が出る (gasless だけを止める・hook の error は null・3 フォームは flag で送信を閉じる)。
+  //     既にある対応を読めた押下 (確認待ちの続き) は止めない。対応の付け替えの書き込みの失敗 (下の adoptAttempt) でも
+  //     止めない: その押下は新しい支払いを始めていない (circleSend.ts の (e))。
   // sender は executeCirclePayment が computeIdempotencyKey に使う owner (=customer) と同一値、
   // chainId は executeCirclePayment が使う bundle.chainId と同一値にする (key 不一致を避ける)。
   const usesStableMapping = params.paymentAttemptId === undefined;
   const attemptArgs = { chainId: bundle.chainId, sender: customer, callHash: computeCallHash(calls) };
   const attemptId = params.paymentAttemptId ?? stableAttemptId(attemptArgs);
+  if (attemptId === null) {
+    args.setStoreUnavailable(true);
+    throw new PimlicoPendingStoreUnavailableError('attempt-mapping-unavailable');
+  }
   // この試みが、マッピングの指す先だと知っている attemptId。入口で読んだ / 作った id で、この試みが付け替えたら
   // (下の adoptAttempt)、付け替えた先の id になる。マッピングを破棄するのは、マッピングがいまもこの値を指しているときだけ
   // (下の 2 か所の clearStableAttemptId)。何の波及を断つか: マッピングは同じタブの別の試み (同じ sessionStorage を使う別の

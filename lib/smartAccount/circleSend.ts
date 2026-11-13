@@ -331,11 +331,13 @@ const CIRCLE_ERROR_JA = {
  *   しうる。(a) を名乗ってよい出口は、次の 2 つが両方言える所だけ:
  *     1. hook の attemptId の対応が、その op の記録の key を指している (自分の key の記録、または scan が付け替えて、hook が
  *        対応を **書けた** 記録)。次の押下は、その記録を resume して同じ op の結果を確かめ直す。
- *        **確かめていないこと**: 自分の key の記録について、hook の対応そのものが保存されているか。最初の対応の保存
- *        (lib/circlePending.ts の stableAttemptId) が sessionStorage の失敗で書けなかった端末では、hook は保存されていない
- *        attemptId で送る。その新しい送信が確認待ちで終わると (a) を出すが、次の押下は別の attemptId になり、この記録を
- *        resume しない (その支払いが裏で確定して 90 秒を過ぎていれば、新しい支払いに署名を求める)。この押下は新しい支払いを
- *        始めているので、(e) にも当たらない。残る限界 (PR-39c の本文の「残る点」)。
+ *        自分の key の記録について、hook の対応そのものが保存されているかは、ここ (circleSend) では確かめない。hook が
+ *        入口で確かめる: 最初の対応の保存 (lib/circlePending.ts の stableAttemptId) は、sessionStorage に書いて読み戻せた
+ *        attemptId (または既にある値) だけを返し、保存できない端末では null を返す。hook はそのとき送る前に止め
+ *        (hooks/useBatchPayment.ts の runCirclePayment・executeCirclePayment を呼ばない)、「この端末では記録を保存
+ *        できません」の欄を出す (第 10 回レビューの後追い r10-ss)。なので、hook が対応を管理する押下がここに渡す
+ *        paymentAttemptId は、その押下の入口で対応に保存されていた値。明示の paymentAttemptId の呼び出し (対応を使わない・
+ *        本番の 3 フォームには無い) は、今までどおり確かめない。
  *     2. その記録が、**確認待ちで出る時点から** 24 時間は残る。確定した記録 (confirmed) は最後の updatedAt から 24 時間で
  *        掃除され (TERMINAL_RETENTION_MS)、submitting のままの記録は 7 日で掃除される (SUBMITTING_RETENTION_MS)。なので、
  *        submitting の記録は、最後に書いてから 6 日以内 (= 残りの寿命が 24 時間以上) であること。この押下が自分で op を渡した
