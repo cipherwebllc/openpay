@@ -10,7 +10,7 @@
 
 /** 場面の符号。error の側 (circleSend.ts の 3 つの class) が `circleCode` に持つ値。 */
 export type CircleErrorCode =
-  | 'unconfirmed' // (a) 送った支払いの結果がまだ分からない (次の押下は同じ支払いを確かめ直す)
+  | 'unconfirmed' // (a) 送った支払いの結果がまだ分からない (24 時間以内の次の押下は、同じ支払いを確かめ直す)
   | 'busy_elsewhere' // (b) 別のタブや画面で、同じ支払いが署名の途中
   | 'attempt_ended' // (c) この試みは既に終わっていた (何も送っていない)
   | 'send_rejected' // (d) 送信の受付で断られた (送金されていない)

@@ -59,6 +59,7 @@ import {
 } from '@/lib/circlePending';
 import { logger } from '@/lib/logger';
 import jaMessages from '@/messages/ja.json';
+import enMessages from '@/messages/en.json';
 
 const OWNER = getAddress('0xabcdefabcdefabcdefabcdefabcdefabcdefabcd');
 const PAYMASTER = getAddress('0x3BA9A96eE3eFf3A69E2B18886AcF52027EFF8966');
@@ -640,10 +641,39 @@ describe('穴 B: 付け替えた後の次の押下 (その記録の attemptId �
     expect(signatureRequests()).toBe(2);
     expect(stored('tab-1')).toMatchObject({ status: 'confirmed', userOpHash: NEW.userOpHash });
   });
+
+  // 第 10 回レビュー PR-39c (Codex の 2 回目): 場面 (a) の文は「24 時間以内にこのタブで同じ内容のままもう一度押すと、まず同じ
+  // 支払いの結果を確かめ直します。それより後は、新しい支払いとして署名を求める場合があります。」と言う。この期限は、確定した
+  // 記録を残す期間 (circleSend.ts の TERMINAL_RETENTION_MS・最後の updatedAt から。export していないので動きで固定する) と
+  // 同じでなければならない。期間だけを変えて文が古くなる・文だけを変えて期間とずれるのを、ここで止める。
+  // 動きは今までどおり (上の test と同じ。変えていない): 固定するのは「文の 24 時間 = 記録が残る期間」。
+  it('(a) の文の「24 時間以内」= 確定した記録が残る期間: 確定からちょうど 24 時間は既払いの結果 (署名なし)・1 ms 過ぎると新しい支払い', async () => {
+    expect(jaMessages.CircleErrors.unconfirmed).toContain('24 時間以内に');
+    expect(jaMessages.CircleErrors.unconfirmed).toContain('それより後は、新しい支払いとして署名を求める場合があります。');
+    expect(enMessages.CircleErrors.unconfirmed).toContain('within 24 hours');
+    const DAY = 24 * 60 * MIN;
+
+    seed('confirmed');
+    const confirmedAt = stored('tab-1')!.updatedAt;
+    include(OLD, { block: 100n, ms: confirmedAt });
+
+    // ちょうど 24 時間: 記録は残っている → 同じ支払いの結果を返す (新しい署名を求めない)。
+    const kept = await pressAdopted(confirmedAt + DAY);
+    expect(kept).toMatchObject({ userOpHash: OLD.userOpHash, txHash: OLD.txHash });
+    expect(signatureRequests()).toBe(0);
+    // 結果を返すだけで、記録の時刻は進めない (期限が延びない)。
+    expect(stored('tab-1')).toMatchObject({ status: 'confirmed', userOpHash: OLD.userOpHash, updatedAt: confirmedAt });
+
+    // 24 時間を 1 ms 過ぎた: 記録は掃除される → 新しい支払い (署名 2 回)。
+    walletSigns(NEW, { block: 200n, ms: confirmedAt + DAY + 1 });
+    const fresh = await pressAdopted(confirmedAt + DAY + 1);
+    expect(fresh).toMatchObject({ userOpHash: NEW.userOpHash, txHash: NEW.txHash });
+    expect(signatureRequests()).toBe(2);
+  });
 });
 
-// 第 10 回レビュー PR-39c (Codex の指摘): 場面 (a) の文は「このタブで同じ内容のままもう一度押すと、まず同じ支払いの結果を
-// 確かめ直します」と言う。それが成り立つのは、hook の対応が、確認待ちの op の記録の key を指しているときだけ。scan が別の key の
+// 第 10 回レビュー PR-39c (Codex の指摘): 場面 (a) の文は「24 時間以内にこのタブで同じ内容のままもう一度押すと、まず同じ支払いの
+// 結果を確かめ直します」と言う。それが成り立つのは、hook の対応が、確認待ちの op の記録の key を指しているときだけ。scan が別の key の
 // submitting の記録に当たり、**対応を付け替えないまま** 確認待ちで終わった押下は、次の押下もまた scan から入る (前の支払いが
 // その間に確定して 90 秒を過ぎていれば、新しい支払いに署名を求める = H-Z の設計。ここでは固定しない)。なので符号は (e)。
 // 固定するのは符号と文だけ。class・name・userOpHash は (a) のときと同じ。

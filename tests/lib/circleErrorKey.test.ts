@@ -23,11 +23,11 @@ const KEYS: Record<CircleErrorCode, CircleErrorKey> = {
 };
 const CODES = Object.keys(KEYS) as CircleErrorCode[];
 
-// user が承認した文 (2026-11-13)。一字も変えない。unconfirmedEarlier (場面 (e)) だけは案で、承認待ち (承認の後に文が
-// 変わったら、ここ・messages・circleSend.ts の 3 か所を一緒に替える)。
+// user が承認した文 (2026-11-13)。一字も変えない。unconfirmed (場面 (a)・期限を足した文) と unconfirmedEarlier (場面 (e)) は
+// 案で、承認待ち (承認の後に文が変わったら、ここ・messages・circleSend.ts の 3 か所を一緒に替える)。
 const APPROVED_JA: Record<CircleErrorKey, string> = {
   unconfirmed:
-    'USDC ガスレスの支払いを送信しましたが、結果をまだ確認できていません。このタブで同じ内容のままもう一度押すと、まず同じ支払いの結果を確かめ直します。確かめられるまで、ほかの方法で払い直さないでください。',
+    'USDC ガスレスの支払いを送信しましたが、結果をまだ確認できていません。24 時間以内にこのタブで同じ内容のままもう一度押すと、まず同じ支払いの結果を確かめ直します。それより後は、新しい支払いとして署名を求める場合があります。確かめられるまで、ほかの方法で払い直さないでください。',
   busyElsewhere:
     '同じ内容の支払いが、別のタブまたは画面で進行中のため、ここでは始めていません。そちらで支払いを終えた場合は、ここでは押さないでください。そちらを閉じた場合は、数分後にここから支払えます。',
   attemptEnded:
@@ -83,7 +83,7 @@ describe('Circle の経路の案内の文 (CircleErrors)', () => {
     expect(Object.keys(enMessages.CircleErrors).sort()).toEqual([...ALL_KEYS].sort());
   });
 
-  it.each(ALL_KEYS)('%s: ja は承認済みの文 (unconfirmedEarlier は案) と完全に同じ', (key) => {
+  it.each(ALL_KEYS)('%s: ja は承認済みの文 (unconfirmed・unconfirmedEarlier は案) と完全に同じ', (key) => {
     expect(ja(key)).toBe(APPROVED_JA[key]);
   });
 

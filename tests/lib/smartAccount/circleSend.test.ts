@@ -1907,7 +1907,8 @@ describe('H-W・H-Y: 送った後の終わり方', () => {
       expect(adoptAttempt.mock.calls).toEqual([['other']]);
       expect(error).toBeInstanceOf(CirclePendingError);
       expect(error?.userOpHash).toBe(OP1.userOpHash);
-      // 次の押下は、付け替えた先の記録の key を resume する → (a) の「同じ支払いの結果を確かめ直します」が成り立つ。
+      // 次の押下は、付け替えた先の記録の key を resume する (記録が残っている間) → (a) の「24 時間以内に…まず同じ支払いの結果を
+      // 確かめ直します」が成り立つ。
       expect(error?.circleCode).toBe('unconfirmed');
       expect(stored(other)).toMatchObject({ status: 'submitting', updatedAt: 900 });
       expect(loggedErrors()).toEqual(['circle.post_submit.unexpected']);
