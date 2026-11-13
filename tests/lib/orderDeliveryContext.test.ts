@@ -30,3 +30,9 @@ it('payment amount must equal merchantValue plus feeValue', () => {
   expect(matchesOrderDeliveryContext(order, exact, origin, intent)).toBe(true);
   expect(matchesOrderDeliveryContext(order, { ...exact, totalValue: 1000n }, origin, intent)).toBe(false);
 });
+
+it.each([
+  { merchantValue: 'x', feeValue: '0' }, { merchantValue: '1000', feeValue: '1.5' },
+])('a saved amount that is not an integer string %j does not match (and does not throw)', (unreadable) => {
+  expect(matchesOrderDeliveryContext(order, context, origin, unreadable)).toBe(false);
+});
