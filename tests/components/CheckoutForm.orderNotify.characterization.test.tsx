@@ -343,6 +343,9 @@ function installFetch(script: Reply[]) {
 // 空振りし、遅れた記録が次の test にまたがる)。digest の呼び出しを境界で数え (中身は実物のまま)、settle() と afterEach が
 // 終わりを待つ。
 const pendingDigests = new Set<Promise<unknown>>();
+// 偽の時計に替わる前の、本物の timer (この file の読み込み時に取っておく)。
+const REAL_SET_TIMEOUT = globalThis.setTimeout;
+const REAL_CLEAR_TIMEOUT = globalThis.clearTimeout;
 function trackDigests() {
   const subtle = globalThis.crypto.subtle;
   const real = subtle.digest.bind(subtle);
@@ -354,12 +357,35 @@ function trackDigests() {
     return pending;
   });
 }
+// digest の待ちの期限 (本物の時計)。遅い環境の digest (数百 ms) には十分長く、test の既定の timeout (5 秒) より十分短い。
+const DIGEST_DEADLINE_MS = 2_000;
 // 進行中の digest が無くなるまで待ち、その続き (記録を出す所まで) を流す。
+// 期限までに終わらない digest があれば、黙って先へ進まず、その test を分かる文で落とす (空振りにしない)。数えていた分は
+// 捨てるので、終わらない digest が後の待ちや次の test を止めることはない。期限は、偽の時計の下でも進む本物の timer で数える。
 async function nativeWorkSettled() {
   await vi.dynamicImportSettled();
-  while (pendingDigests.size > 0) {
-    await Promise.allSettled([...pendingDigests]);
-    await vi.dynamicImportSettled();
+  if (pendingDigests.size === 0) return;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<'期限切れ'>((resolve) => {
+    timer = REAL_SET_TIMEOUT(() => resolve('期限切れ'), DIGEST_DEADLINE_MS);
+  });
+  try {
+    while (pendingDigests.size > 0) {
+      const outcome = await Promise.race([Promise.allSettled([...pendingDigests]), deadline]);
+      if (outcome === '期限切れ') {
+        // event loop が止まっていただけなら、終わっていた digest の続きが期限の timer の後ろに並んでいる。1 巡だけ流してから数える。
+        await vi.dynamicImportSettled();
+        const stuck = pendingDigests.size;
+        if (stuck === 0) break;
+        pendingDigests.clear();
+        throw new Error(
+          `crypto.subtle.digest が ${DIGEST_DEADLINE_MS} ms で終わらなかった (${stuck} 件)。digest の後に出る記録 (logger.warn) を確かめられない。`,
+        );
+      }
+      await vi.dynamicImportSettled();
+    }
+  } finally {
+    REAL_CLEAR_TIMEOUT(timer);
   }
 }
 
@@ -411,11 +437,16 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
-  // 遅れた記録 (digest の後の logger.warn) を次の test に持ち越さない。
-  await nativeWorkSettled();
-  if (originalLocation) Object.defineProperty(window, 'location', originalLocation);
-  vi.useRealTimers();
-  vi.restoreAllMocks();
+  try {
+    // 遅れた記録 (digest の後の logger.warn) を次の test に持ち越さない。
+    await nativeWorkSettled();
+  } finally {
+    // 待ちが失敗・期限切れでも、片づけは必ず行う (1 つの test の失敗を次の test にまたがせない)。
+    pendingDigests.clear();
+    if (originalLocation) Object.defineProperty(window, 'location', originalLocation);
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  }
 });
 
 // ---------------------------------------------------------------------------------------------------------------------
