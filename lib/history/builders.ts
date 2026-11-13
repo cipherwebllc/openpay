@@ -5,6 +5,7 @@ import type { PaymentFlow, PaymentResult } from '../paymentLog';
 import type { TokenSymbol } from '../tokens';
 import type { TaxCategory } from '../tax';
 import { stripControlChars } from '../sanitize';
+import { redactLogText } from '../telemetryRedaction';
 import {
   FEE_BREAKDOWN_VERSION,
   HISTORY_ERROR_MESSAGE_MAX_LENGTH,
@@ -159,10 +160,14 @@ export function buildHistoryEntry(
     txHash: input.txHash,
     userOpHash: input.userOpHash,
     blockNumber: input.blockNumber === null ? null : input.blockNumber.toString(),
+    // viem の error の文は `URL: <key つきの RPC / bundler の URL>` と `Request body: <送った JSON>` の行を持つ。
+    // その key と request の本文の先頭が、端末の履歴 (localStorage)・履歴の画面・CSV へ出るのを断つ。切る前に伏せる
+    // (先に切ると、切れ目より後ろの Details の行が落ち、129 桁に満たなくなった 16 進が規則をすり抜ける)。
+    // 上の id の種は元の文の先頭 32 字のまま (同じ失敗の二重登録の判定を変えない)。
     errorMessage:
       input.errorMessage === null
         ? null
-        : input.errorMessage.slice(0, HISTORY_ERROR_MESSAGE_MAX_LENGTH),
+        : redactLogText(input.errorMessage).slice(0, HISTORY_ERROR_MESSAGE_MAX_LENGTH),
     storeName: input.storeName,
     note: (input.note ?? '').slice(0, HISTORY_NOTE_MAX_LENGTH),
     provider: input.provider ?? null,

@@ -5,6 +5,7 @@
 
 import { safeGet, safeRemove, safeSet } from '../storage';
 import { logger } from '../logger';
+import { redactLogText } from '../telemetryRedaction';
 import {
   HISTORY_CHANGED_EVENT,
   HISTORY_MAX_ENTRIES,
@@ -20,6 +21,15 @@ type StoredHistoryItem = { raw: unknown; entry: HistoryEntry | null };
 // 保持した未知項目の再読込が Sentry の警告・quota 消費へ繰り返し波及しないよう、ページ内で一度だけ通知。
 let hasWarnedUnreadableEntries = false;
 
+// 伏せる前の版が保存した errorMessage は、viem の error の文の先頭 500 字そのまま (key つきの RPC / bundler の URL と、
+// 送った request の本文の先頭)。履歴の画面 (HistoryRow) と CSV (historyCsv) は、ここで読んだ entry だけを使うので、
+// 読み込みの 1 か所で伏せて、その 2 つへ出るのを断つ。わざわざ書き戻さない (次に履歴を保存するとき、伏せた形に置き換わる)。
+function withRedactedErrorMessage(entry: HistoryEntry): HistoryEntry {
+  return entry.errorMessage === null
+    ? entry
+    : { ...entry, errorMessage: redactLogText(entry.errorMessage) };
+}
+
 function loadHistoryItems(): StoredHistoryItem[] {
   const raw = safeGet<unknown>(HISTORY_STORAGE_KEY, []);
   if (!Array.isArray(raw)) {
@@ -34,7 +44,7 @@ function loadHistoryItems(): StoredHistoryItem[] {
       invalid += 1;
     }
     // 旧 build の読込除外が次の書込で永久削除へ波及しないよう、生の未知項目も位置ごと保持。
-    items.push({ raw: item, entry: migrated });
+    items.push({ raw: item, entry: migrated && withRedactedErrorMessage(migrated) });
   }
   if (invalid > 0 && !hasWarnedUnreadableEntries) {
     hasWarnedUnreadableEntries = true;
