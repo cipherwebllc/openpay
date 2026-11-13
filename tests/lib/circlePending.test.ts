@@ -26,6 +26,7 @@ import {
   pruneStaleSubmitting,
   pruneTerminal,
   reserveOrResume,
+  setStableAttemptId,
   stableAttemptId,
   type SerializedUserOp,
 } from '@/lib/circlePending';
@@ -1078,6 +1079,51 @@ describe('stableAttemptId / clearStableAttemptId (sessionStorage マッピング
     expect(keys).toHaveLength(1);
     expect(keys[0].startsWith(ATTEMPT_KEY_PREFIX)).toBe(true);
     expect(keys[0].startsWith(PENDING_KEY_PREFIX)).toBe(false);
+  });
+
+  // 第 10 回レビュー 穴 B: scan が別の key の記録の結果を受け取りに行くとき、hook が対応をその記録の attemptId に付け替える。
+  describe('setStableAttemptId (対応の付け替え)', () => {
+    const ARGS = { chainId: CHAIN_ID, sender: SENDER, callHash: CALL_HASH };
+
+    it('付け替えた後、同じ (chainId,sender,callHash) の stableAttemptId は渡した attemptId を返す (key は増えない)', () => {
+      const own = stableAttemptId(ARGS);
+      setStableAttemptId(ARGS, 'attempt-of-other-tab');
+      expect(stableAttemptId(ARGS)).toBe('attempt-of-other-tab');
+      expect(stableAttemptId(ARGS)).not.toBe(own);
+      expect(window.sessionStorage.length).toBe(1);
+    });
+
+    it('sender の大文字・小文字が違っても同じ対応を書く (stableAttemptId と同じ key)', () => {
+      stableAttemptId(ARGS);
+      setStableAttemptId({ ...ARGS, sender: SENDER.toLowerCase() as Address }, 'attempt-of-other-tab');
+      expect(stableAttemptId(ARGS)).toBe('attempt-of-other-tab');
+      expect(window.sessionStorage.length).toBe(1);
+    });
+
+    it('別の内容 (callHash) の対応には触らない', () => {
+      const other = stableAttemptId({ ...ARGS, callHash: OTHER_HASH });
+      setStableAttemptId(ARGS, 'attempt-of-other-tab');
+      expect(stableAttemptId({ ...ARGS, callHash: OTHER_HASH })).toBe(other);
+    });
+
+    it('clearStableAttemptId は、付け替えた後の対応も消す (値によらない)', () => {
+      stableAttemptId(ARGS);
+      setStableAttemptId(ARGS, 'attempt-of-other-tab');
+      clearStableAttemptId(ARGS);
+      expect(window.sessionStorage.length).toBe(0);
+      expect(stableAttemptId(ARGS)).not.toBe('attempt-of-other-tab');
+    });
+
+    it('sessionStorage.setItem が throw しても投げない。対応は前のまま', () => {
+      const own = stableAttemptId(ARGS);
+      const spy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+        throw new Error('QuotaExceededError');
+      });
+      expect(() => setStableAttemptId(ARGS, 'attempt-of-other-tab')).not.toThrow();
+      expect(spy).toHaveBeenCalledTimes(1);
+      spy.mockRestore();
+      expect(stableAttemptId(ARGS)).toBe(own);
+    });
   });
 });
 

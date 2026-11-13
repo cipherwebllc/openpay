@@ -1097,7 +1097,7 @@ async function runCirclePayment(args: {
     { getCircleUserOpGasPrice, entryPoint08Address },
     { executeCirclePayment },
     { verifyCircleReceiptOnChain },
-    { computeCallHash, stableAttemptId, clearStableAttemptId },
+    { computeCallHash, stableAttemptId, clearStableAttemptId, setStableAttemptId },
   ] = await Promise.all([
     import('@/lib/smartAccount/circleAccount'),
     import('@/lib/smartAccount/circleSend'),
@@ -1138,10 +1138,19 @@ async function runCirclePayment(args: {
       permitAmount,
       paymentAttemptId: attemptId,
       isAlive,
+      // 対応の付け替え (第 10 回レビュー 穴 B・条件は circleSend.ts の冒頭の「対応の付け替え」)。scan が別の key の記録
+      // (別のタブ・閉じたタブの支払い) の結果を受け取りに行く押下は、自分の attemptId の記録を作らない。そのまま画面を離れる・
+      // 確認待ちで終わると、対応は記録の無い attemptId を指し、次の押下が、後から確定したその支払いを「正規のリピート」と
+      // みなして 2 本目を払う。なので、受け取りに行く直前に、対応をその記録の attemptId に付け替えさせる。
+      // 明示の paymentAttemptId のときは渡さない (上のとおり、マッピングは一切触らない)。
+      adoptAttempt: usesStableMapping
+        ? (adopted) => setStableAttemptId(attemptArgs, adopted)
+        : undefined,
     });
   } catch (error) {
     // CirclePendingError (broadcast 済・確認待ち) はマッピングを保持し、再クリックで自 attempt を
-    // resume させる。それ以外の確定的エラー (revert/拒否/abandon 済) はマッピングを破棄して、
+    // resume させる (scan が別の key の記録を復旧していた押下では、マッピングは上の adoptAttempt でその記録の attemptId に
+    // 付け替わっているので、再クリックはその記録を resume する)。それ以外の確定的エラー (revert/拒否/abandon 済) はマッピングを破棄して、
     // resumed 分岐の「この決済試行は既に終了しています」に正規の再試行がぶつからないようにする。
     // 失効した試みは破棄しない (下の成功のときと同じ理由)。
     // storage の失敗 (lib/circlePending の PendingStoreUnavailableError・PendingStoreWriteError) も破棄しない: この押下は
@@ -1216,6 +1225,11 @@ async function runCirclePayment(args: {
   // 開き直した画面も同じものを使う。画面の無い試みが消すと、開き直した画面の次の押下が新しい key になり、この試みが送った op の
   // 記録 (confirmed・90 秒を過ぎたもの) を「正規のリピート」とみなして 2 本目を払う (この支払いの成功は、もう無い画面にしか
   // 出ていない)。残しておけば、次の押下は同じ key を resume して既払いの結果を受け取り、そこで破棄される。
+  // これは、この試みが自分で送った支払いでも、scan で別の key の記録 (別のタブ・閉じたタブの支払い) の結果を受け取った場合でも
+  // 成り立つ: 後者は、受け取りに行く直前に対応をその記録の attemptId に付け替えてある (上の adoptAttempt)。付け替えない
+  // 場合 (最後に bundler へ渡してから 30 分より後の記録の復旧) だけは、対応は記録の無い attemptId のまま残り、次の押下は
+  // scan からやり直す (circleSend.ts の冒頭の「対応の付け替え」の残る限界)。clearStableAttemptId は対応の値によらず消す
+  // (storage の key は chain・sender・内容) ので、画面のある試みが結果を受け取れば、付け替えた後の対応もここで消える。
   // 監査の後ろで見るのは、確定の後も上の監査 (receipt の RPC) の await の間は成功がまだ画面に出ていないから。その間に画面を
   // 離れた試みも、成功を画面に出せないまま終わるので、対応を残す (この確認から return まで await は無い)。
   // 代償: 失効した試みが払い終えた後、同じタブで同じ内容を意図してもう一度払うと、最初の 1 回は前の支払いの結果が出る

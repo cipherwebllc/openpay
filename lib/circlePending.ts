@@ -223,7 +223,9 @@ function attemptStorageKey(args: {
  * - 別タブ/別デバイスは sessionStorage を共有しないが、その層は findLiveByCallHash の
  *   callHash スキャン (attemptId 非依存) が引き続き担う。
  * - sessionStorage 不可 (SSR / プライベートモード例外) は fresh UUID に fallback
- *   (= 従来挙動。マッピングは defense-in-depth であり決済可否を左右させない)。 */
+ *   (= 従来挙動。マッピングは defense-in-depth であり決済可否を左右させない)。
+ * - 値は、このタブが採番した attemptId とは限らない: scan が別の key の記録 (別のタブ・閉じたタブの支払い) の結果を
+ *   受け取りに行くとき、hook がその記録の paymentAttemptId に付け替える (下の setStableAttemptId)。 */
 export function stableAttemptId(args: {
   chainId: number;
   sender: Address;
@@ -252,6 +254,28 @@ export function clearStableAttemptId(args: {
     window.sessionStorage.removeItem(attemptStorageKey(args));
   } catch {
     // best-effort (破棄失敗は決済に影響しない)。
+  }
+}
+
+/** stableAttemptId のマッピングを、別の key の記録の paymentAttemptId に付け替える (第 10 回レビュー 穴 B = H-V の scan 版)。
+ * scan が、同じ chain・sender・callHash の別の key の記録 (別のタブ・閉じたタブの支払い) の結果を受け取りに行く直前に、
+ * hook (useBatchPayment の runCirclePayment) が呼ぶ。いつ呼ぶかの条件は lib/smartAccount/circleSend.ts の冒頭の「対応の
+ * 付け替え」。付け替えた後、このタブの次の押下は、その記録の key を resume する (confirmed なら時間の窓なしで既払いの結果)。
+ * 書けないとき (private mode・quota) は握る (best-effort)。何の波及を断つか: 付帯の書き込みの失敗が、進行中の復旧 (別の key の
+ * 記録の receipt の待ち・結果の受け取り) を巻き込んで error で終わらせること。付け替えられなくても、今までと同じ動き
+ * (対応はこのタブが採番した attemptId のまま) に落ちるだけで、偽の成功にはならない。 */
+export function setStableAttemptId(
+  args: {
+    chainId: number;
+    sender: Address;
+    callHash: Hex;
+  },
+  paymentAttemptId: string,
+): void {
+  try {
+    window.sessionStorage.setItem(attemptStorageKey(args), paymentAttemptId);
+  } catch {
+    // best-effort (上の理由)。
   }
 }
 
