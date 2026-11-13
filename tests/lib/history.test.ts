@@ -594,7 +594,8 @@ describe('history (LocalStorage)', () => {
 
     it('errorMessage: 500 文字 cap (buildHistoryEntry 内 2 段目の防壁)', () => {
       const e = buildHistoryEntry({
-        ...base({ errorMessage: 'E'.repeat(2000) }),
+        // 'E' は 16 進の字なので、2000 字つづくと長い 16 進として伏せられる (切る前に伏せる)。cap だけを見る字にする。
+        ...base({ errorMessage: 'Z'.repeat(2000) }),
       });
       expect(e.errorMessage?.length).toBe(500);
     });

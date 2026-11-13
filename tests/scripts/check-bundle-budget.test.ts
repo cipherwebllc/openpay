@@ -3,8 +3,8 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const SCRIPT = resolve('./scripts/check-bundle-budget.mjs');
-const PAY_ROW = '├ ● /[locale]/pay                                 10.3 kB         408 kB';
-const TIP_ROW = '├ ƒ /[locale]/tip/[address]                       12.5 kB         401 kB';
+const PAY_ROW = '├ ● /[locale]/pay                                 10.3 kB         409 kB';
+const TIP_ROW = '├ ƒ /[locale]/tip/[address]                       12.5 kB         402 kB';
 const CHECKOUT_ROW = '├ ● /[locale]/checkout                            20.2 kB         427 kB';
 const MANIFEST_ROW = '├ ○ /manifest.webmanifest                           620 B         171 kB';
 const SHARED_ROW = '+ First Load JS shared by all                      171 kB';
@@ -79,7 +79,8 @@ const BUDGETED = [
 // 2026-11-11 第 10 回レビュー F-10 で予算を採り直した 17 行 (/_not-found・/[locale]・[handle]・agent・billing・checkout・create・
 // discovery・discovery/arc-payout・history・order・scan・store・pay・tip・manifest・共有 chunk) の First Load JS は、
 // main e089ba5a の CI の Route 表の値に置き換えた (Size の列と API・metadata の行は元のまま)。
-// /pay と /tip は予算ちょうどの値にして「上限は通る」を固定する。
+// /pay と /tip は予算ちょうどの値にして「上限は通る」を固定する (2026-11-13 第 10 回レビュー PR-41 で /pay 408 → 409・/tip 401 → 402・
+// /checkout 432 → 433・/[handle] 447 → 448。理由は scripts/check-bundle-budget.mjs の /pay の注記)。
 const NORMAL_BUILD_OUTPUT = `
 Route (app)                                          Size  First Load JS
 ┌ ○ /_not-found                                   1.16 kB         172 kB
@@ -175,25 +176,25 @@ describe('check-bundle-budget CLI', () => {
     expect(result.stderr).toBe('');
     expect(result.stdout.match(/\[OK\]/g)).toHaveLength(BUDGETED.length);
     expect(result.stdout).toContain('[OK] /manifest.webmanifest: 171 kB / 予算 176 kB');
-    expect(result.stdout).toContain('[OK] /[locale]/pay: 408 kB / 予算 408 kB');
-    expect(result.stdout).toContain('[OK] /[locale]/tip/[address]: 401 kB / 予算 401 kB');
-    expect(result.stdout).toContain('[OK] /[locale]/checkout: 427 kB / 予算 432 kB');
+    expect(result.stdout).toContain('[OK] /[locale]/pay: 409 kB / 予算 409 kB');
+    expect(result.stdout).toContain('[OK] /[locale]/tip/[address]: 402 kB / 予算 402 kB');
+    expect(result.stdout).toContain('[OK] /[locale]/checkout: 427 kB / 予算 433 kB');
     expect(result.stdout).toContain('OK: 全ルートが予算内');
     // 予算表の外の API・metadata の route (/.well-known/x402・/api/relay/jpyc・/sitemap.xml) は出さない
     expect(result.stdout).not.toContain('[NO BUDGET]');
   });
 
   // 第 10 回レビュー F-10 (Codex): 見本の /checkout が CI の実測 427 kB と違う 409 kB だと、予算を誤って 410 に下げても
-  // 見本は通り、本番の build だけが落ちる。見本を実測にそろえ、予算 432 kB の境界 (432 は通る・433 は落ちる) を固定する。
+  // 見本は通り、本番の build だけが落ちる。見本を実測にそろえ、予算の境界 (433 は通る・434 は落ちる) を固定する (2026-11-13 PR-41 で 432 → 433)。
   it.each([
-    ['432 kB', 0, 'OK', '432'],
-    ['432001 B', 1, 'OVER', '432.001'],
-    ['433 kB', 1, 'OVER', '433'],
-  ])('enforces the /[locale]/checkout budget of 432 kB at %s', (size, status, label, expectedKb) => {
+    ['433 kB', 0, 'OK', '433'],
+    ['433001 B', 1, 'OVER', '433.001'],
+    ['434 kB', 1, 'OVER', '434'],
+  ])('enforces the /[locale]/checkout budget of 433 kB at %s', (size, status, label, expectedKb) => {
     const result = runGate(NORMAL_BUILD_OUTPUT.replace(CHECKOUT_ROW, `├ ● /[locale]/checkout   20.2 kB   ${size}`));
 
     expect(result.status).toBe(status);
-    expect(result.stdout).toContain(`[${label}] /[locale]/checkout: ${expectedKb} kB / 予算 432 kB`);
+    expect(result.stdout).toContain(`[${label}] /[locale]/checkout: ${expectedKb} kB / 予算 433 kB`);
   });
 
   // 第 8 回レビュー F-11: 予算表に無い route は 300 kB を超えるまで落ちなかった (/store/library が 257→290 kB でも通る)。
@@ -266,18 +267,18 @@ describe('check-bundle-budget CLI', () => {
     const withHeader = (output: string) => output.replace('Route (app)                                          Size  First Load JS', ISR_HEADER);
 
     it('reads a budgeted ISR route within budget', () => {
-      const result = runGate(withHeader(NORMAL_BUILD_OUTPUT).replace(PAY_ROW, '├ ◐ /[locale]/pay                                 10.3 kB         408 kB          5m      1y'));
+      const result = runGate(withHeader(NORMAL_BUILD_OUTPUT).replace(PAY_ROW, '├ ◐ /[locale]/pay                                 10.3 kB         409 kB          5m      1y'));
 
       expect(result.status).toBe(0);
-      expect(result.stdout).toContain('[OK] /[locale]/pay: 408 kB / 予算 408 kB');
+      expect(result.stdout).toContain('[OK] /[locale]/pay: 409 kB / 予算 409 kB');
       expect(result.stdout).not.toContain('[MISSING]');
     });
 
     it('fails a budgeted ISR route over budget', () => {
-      const result = runGate(withHeader(NORMAL_BUILD_OUTPUT).replace(PAY_ROW, '├ ◐ /[locale]/pay                                 10.3 kB         409 kB          1h      1y'));
+      const result = runGate(withHeader(NORMAL_BUILD_OUTPUT).replace(PAY_ROW, '├ ◐ /[locale]/pay                                 10.3 kB         410 kB          1h      1y'));
 
       expect(result.status).toBe(1);
-      expect(result.stdout).toContain('[OVER] /[locale]/pay: 409 kB / 予算 408 kB');
+      expect(result.stdout).toContain('[OVER] /[locale]/pay: 410 kB / 予算 409 kB');
     });
 
     it('fails an unbudgeted ISR route above 300 kB', () => {
@@ -288,10 +289,10 @@ describe('check-bundle-budget CLI', () => {
     });
 
     it('still takes First Load JS (the second size), not the Size column, on plain rows', () => {
-      const result = runGate(NORMAL_BUILD_OUTPUT.replace(PAY_ROW, '├ ● /[locale]/pay                                 409 kB          408 kB'));
+      const result = runGate(NORMAL_BUILD_OUTPUT.replace(PAY_ROW, '├ ● /[locale]/pay                                 410 kB          409 kB'));
 
       expect(result.status).toBe(0);
-      expect(result.stdout).toContain('[OK] /[locale]/pay: 408 kB / 予算 408 kB');
+      expect(result.stdout).toContain('[OK] /[locale]/pay: 409 kB / 予算 409 kB');
     });
 
     it('does not count shared chunk file rows (one size, no route) as routes', () => {
@@ -306,18 +307,18 @@ describe('check-bundle-budget CLI', () => {
   // MIN_DURATION)。この注記を許容しないと、注記付きの予算対象は [MISSING]・予算外の重い route は素通りになる (Codex #789 2 回目 P2)。
   describe('rows with a generation-time note after the route name', () => {
     it('reads a budgeted route with a note within budget', () => {
-      const result = runGate(NORMAL_BUILD_OUTPUT.replace(PAY_ROW, '├ ● /[locale]/pay (301 ms)                        10.3 kB         408 kB'));
+      const result = runGate(NORMAL_BUILD_OUTPUT.replace(PAY_ROW, '├ ● /[locale]/pay (301 ms)                        10.3 kB         409 kB'));
 
       expect(result.status).toBe(0);
-      expect(result.stdout).toContain('[OK] /[locale]/pay: 408 kB / 予算 408 kB');
+      expect(result.stdout).toContain('[OK] /[locale]/pay: 409 kB / 予算 409 kB');
       expect(result.stdout).not.toContain('[MISSING]');
     });
 
     it('fails a budgeted route with a note over budget', () => {
-      const result = runGate(NORMAL_BUILD_OUTPUT.replace(PAY_ROW, '├ ● /[locale]/pay (1.2 s)                         10.3 kB         409 kB'));
+      const result = runGate(NORMAL_BUILD_OUTPUT.replace(PAY_ROW, '├ ● /[locale]/pay (1.2 s)                         10.3 kB         410 kB'));
 
       expect(result.status).toBe(1);
-      expect(result.stdout).toContain('[OVER] /[locale]/pay: 409 kB / 予算 408 kB');
+      expect(result.stdout).toContain('[OVER] /[locale]/pay: 410 kB / 予算 409 kB');
     });
 
     it('fails an unbudgeted route with a note above 300 kB', () => {
@@ -328,10 +329,10 @@ describe('check-bundle-budget CLI', () => {
     });
 
     it('reads a note together with ISR columns', () => {
-      const result = runGate(NORMAL_BUILD_OUTPUT.replace(PAY_ROW, '├ ◐ /[locale]/pay (2345 ms)                       10.3 kB         409 kB          5m      1y'));
+      const result = runGate(NORMAL_BUILD_OUTPUT.replace(PAY_ROW, '├ ◐ /[locale]/pay (2345 ms)                       10.3 kB         410 kB          5m      1y'));
 
       expect(result.status).toBe(1);
-      expect(result.stdout).toContain('[OVER] /[locale]/pay: 409 kB / 予算 408 kB');
+      expect(result.stdout).toContain('[OVER] /[locale]/pay: 410 kB / 予算 409 kB');
     });
 
     it('does not count a child path with a note (no sizes) as a route', () => {
@@ -359,10 +360,10 @@ ${SHARED_ROW}
     });
 
     it('fails a budgeted route over budget when it is the only row', () => {
-      const result = runGate(NORMAL_BUILD_OUTPUT.replace(PAY_ROW, '─ ● /[locale]/pay                                 10.3 kB         409 kB'));
+      const result = runGate(NORMAL_BUILD_OUTPUT.replace(PAY_ROW, '─ ● /[locale]/pay                                 10.3 kB         410 kB'));
 
       expect(result.status).toBe(1);
-      expect(result.stdout).toContain('[OVER] /[locale]/pay: 409 kB / 予算 408 kB');
+      expect(result.stdout).toContain('[OVER] /[locale]/pay: 410 kB / 予算 409 kB');
     });
   });
 
@@ -392,7 +393,7 @@ Route (pages)                                        Size  First Load JS
     const result = runGate(NORMAL_BUILD_OUTPUT.replace(PAY_ROW, '├ ƒ /[locale]/pay   12 kB   1.02 MB'));
 
     expect(result.status).toBe(1);
-    expect(result.stdout).toContain('[OVER] /[locale]/pay: 1020 kB / 予算 408 kB');
+    expect(result.stdout).toContain('[OVER] /[locale]/pay: 1020 kB / 予算 409 kB');
     expect(result.stderr).toContain('FAIL:');
     expect(result.stdout).not.toContain('OK: 全ルートが予算内');
   });
@@ -420,10 +421,10 @@ Route (pages)                                        Size  First Load JS
   });
 
   it.each([
-    [PAY_ROW, '/[locale]/pay', '408001 B', '408.001', 408],
-    [PAY_ROW, '/[locale]/pay', '409 kB', '409', 408],
-    [TIP_ROW, '/[locale]/tip/[address]', '401001 B', '401.001', 401],
-    [TIP_ROW, '/[locale]/tip/[address]', '402 kB', '402', 401],
+    [PAY_ROW, '/[locale]/pay', '409001 B', '409.001', 409],
+    [PAY_ROW, '/[locale]/pay', '410 kB', '410', 409],
+    [TIP_ROW, '/[locale]/tip/[address]', '402001 B', '402.001', 402],
+    [TIP_ROW, '/[locale]/tip/[address]', '403 kB', '403', 402],
   ])('enforces the tightened budget for %s with %s at %s', (row, route, size, expectedKb, budget) => {
     const result = runGate(NORMAL_BUILD_OUTPUT.replace(row, `├ ƒ ${route}   12 kB   ${size}`));
 

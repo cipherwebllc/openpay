@@ -7,6 +7,7 @@ import { activeGatewayAttempt, gatewayCanRelease, reconcileGatewayReceipt, recon
 import { env } from '@/lib/env';
 import { executeGatewayTransfer, type GatewayResumeState } from '@/lib/crossChain/execute';
 import { gatewayAttestation, gatewaySpec, encodedSpec } from '../../fixtures/gateway';
+import { BUNDLER_ORIGIN, leakedMarkers, RPC_DETAILS, rpcRequestError } from '../../helpers/viemRequestErrors';
 
 const hash = pad('0x01');
 const address = (s: Hex) => `0x${s.slice(-40)}` as Hex;
@@ -543,4 +544,62 @@ it('marks a lost own fee confirmation unresolved before archiving the paid merch
   expect(state).toMatchObject({ completion: 'settled', feeUnresolved: true });
   expect(activeGatewayAttempt(state.fee)?.status).toBe('expired-unused');
   expect(s.wallet.signTypedData).not.toHaveBeenCalled(); expect(s.wallet.sendTransaction).not.toHaveBeenCalled();
+});
+
+// 第 10 回レビュー PR-41: 再開の記録 (localStorage の openpay.xchain.resume.gateway:…) の observation の detail に、RPC の
+// 失敗の文をそのまま入れていた。本物の viem の error (key つきの URL・Request body の行) で、伏せてから入ることを見る。
+describe('PR-41: Gateway の再開の記録に入る error の文', () => {
+  it('reconcile の RPC の失敗の detail に、key つきの URL と Request body の中身を入れない', async () => {
+    const s = setup();
+    s.client.request.mockRejectedValue(rpcRequestError());
+
+    const proof = await reconcileGatewayAttempt(s.args.destPublicClient, 80002, attempt());
+
+    expect(proof.status).toBe('unknown');
+    expect(leakedMarkers(proof)).toEqual([]);
+    expect(proof.detail).toContain(`URL: ${BUNDLER_ORIGIN}\nRequest body: [redacted]`);
+    // 失敗の理由 (RPC の Details の行) は残る。
+    expect(proof.detail).toContain(`Details: ${RPC_DETAILS}`);
+  });
+
+  it('再開で localStorage に保存される記録にも、key つきの URL と Request body の中身が無い', async () => {
+    localStorage.clear();
+    try {
+      const { saveGatewayResumeStateStrict } = await import('@/lib/crossChain/resumeStore');
+      const s = setup();
+      s.client.request.mockRejectedValue(rpcRequestError());
+      const key = { account: s.args.account, kind: 'gateway' as const, sourceChainId: 84532, destChainId: 80002,
+        recipient: s.args.recipient, valueAtomic: 1_000_000n, feeAtomic: 0n };
+
+      await expect(executeGatewayTransfer({ ...s.args, onStep: (state: GatewayResumeState) => saveGatewayResumeStateStrict(key, state) })).rejects.toThrow();
+
+      expect(localStorage.length).toBe(1);
+      const name = localStorage.key(0)!;
+      expect(name).toMatch(/^openpay\.xchain\.resume\.gateway:/);
+      const raw = localStorage.getItem(name)!;
+      // 記録は残り (再署名を開かない)、detail は伏せた文で入っている。
+      const saved = JSON.parse(raw) as GatewayResumeState;
+      expect(activeGatewayAttempt(saved.merchant)?.status).toBe('unknown');
+      expect(activeGatewayAttempt(saved.merchant)?.observations.at(-1)?.detail).toContain(`URL: ${BUNDLER_ORIGIN}\n`);
+      expect(leakedMarkers(raw)).toEqual([]);
+      expect(s.wallet.signTypedData).not.toHaveBeenCalled();
+    } finally { localStorage.clear(); }
+  });
+
+  it.each(['offline', 'Gateway snapshot changed'])('伏せる所の無い文はそのまま detail に入る: %s', async (message) => {
+    const s = setup();
+    s.client.request.mockRejectedValue(new Error(message));
+
+    expect(await reconcileGatewayAttempt(s.args.destPublicClient, 80002, attempt())).toEqual({ status: 'unknown', detail: message });
+  });
+
+  it('Error でない値が投げられても、文にして伏せる', async () => {
+    const s = setup();
+    s.client.request.mockRejectedValue(rpcRequestError().message);
+
+    const proof = await reconcileGatewayAttempt(s.args.destPublicClient, 80002, attempt());
+
+    expect(leakedMarkers(proof)).toEqual([]);
+    expect(proof.detail).toContain(`URL: ${BUNDLER_ORIGIN}\n`);
+  });
 });
