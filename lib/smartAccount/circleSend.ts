@@ -331,8 +331,13 @@ const CIRCLE_ERROR_JA = {
  *   しうる。(a) を名乗ってよい出口は、次の 2 つが両方言える所だけ:
  *     1. hook の attemptId の対応が、その op の記録の key を指している (自分の key の記録、または scan が付け替えて、hook が
  *        対応を **書けた** 記録)。次の押下は、その記録を resume して同じ op の結果を確かめ直す。
- *     2. その記録が、ここから 24 時間は残る。確定した記録 (confirmed) は最後の updatedAt から 24 時間で掃除され
- *        (TERMINAL_RETENTION_MS)、submitting のままの記録は 7 日で掃除される (SUBMITTING_RETENTION_MS)。なので、
+ *        **確かめていないこと**: 自分の key の記録について、hook の対応そのものが保存されているか。最初の対応の保存
+ *        (lib/circlePending.ts の stableAttemptId) が sessionStorage の失敗で書けなかった端末では、hook は保存されていない
+ *        attemptId で送る。その新しい送信が確認待ちで終わると (a) を出すが、次の押下は別の attemptId になり、この記録を
+ *        resume しない (その支払いが裏で確定して 90 秒を過ぎていれば、新しい支払いに署名を求める)。この押下は新しい支払いを
+ *        始めているので、(e) にも当たらない。残る限界 (PR-39c の本文の「残る点」)。
+ *     2. その記録が、**確認待ちで出る時点から** 24 時間は残る。確定した記録 (confirmed) は最後の updatedAt から 24 時間で
+ *        掃除され (TERMINAL_RETENTION_MS)、submitting のままの記録は 7 日で掃除される (SUBMITTING_RETENTION_MS)。なので、
  *        submitting の記録は、最後に書いてから 6 日以内 (= 残りの寿命が 24 時間以上) であること。この押下が自分で op を渡した
  *        記録・scan が付け替える記録 (30 分以内) は、書いたばかりなので当たる。古い自分の key の記録の resume は、下の (e)。
  *   文の「24 時間」と掃除の期間のずれは tests/lib/smartAccount/circleSend.adoptAttempt.test.ts が止める。
@@ -343,8 +348,8 @@ const CIRCLE_ERROR_JA = {
  *       書けなかった)。対応は自分の attemptId のままで、この押下は自分の記録を作らない (scan は予約より前) ので、次の押下は
  *       また scan から入る。その間に前の支払いが確定して 90 秒を過ぎていれば、次の押下は新しい支払いに署名を求める (冒頭の
  *       「対応の付け替え」の「残る限界」)。
- *     - 自分の key の resume の submitting の枝で、**入口で読んだ記録が、最後に書いてから 6 日より後** (残りの寿命が 24 時間
- *       より短い)。24 時間以内の次の押下でも、記録が掃除されていれば新しい支払いに署名を求める。
+ *     - 自分の key の resume の submitting の枝で、**確認待ちで出る時点で、入口で読んだ記録が、最後に書いてから 6 日より後**
+ *       (残りの寿命が 24 時間より短い)。24 時間以内の次の押下でも、記録が掃除されていれば新しい支払いに署名を求める。
  *   どちらも (a) の「24 時間以内に…まず同じ支払いの結果を確かめ直します」とは言わない。
  * - 'busy_elsewhere' (b): 別の試み (別のタブ・画面) が署名の途中なので、この押下は何も始めなかった (scan の直近の
  *   pre-submit の 1 か所だけ)。
@@ -498,15 +503,17 @@ async function inPostSubmit<T>(
 }
 
 // 枝の出口で、確認待ち (CirclePendingError) の場面の符号を (e) 'unconfirmed_earlier' に付け直す (CirclePendingError の上の
-// コメント)。promiseHolds = その枝の記録について、(a) の文の約束 (24 時間以内の次の押下が、同じ支払いの結果を確かめ直す) が
+// コメント)。promiseHolds() = その枝の記録について、(a) の文の約束 (24 時間以内の次の押下が、同じ支払いの結果を確かめ直す) が
 // 言えるか。言えるなら何も変えない。言えないなら、run の中から出る確認待ち (枝の中の throw・recoverSubmitting → followRecord の
 // 中の throw・inPostSubmit が想定外の throw を変えたもの) を、出口のここ 1 か所で受けて (e) にする。
+// promiseHolds は **確認待ちで出る時点** (ここで確認待ちを受けた時) に 1 回だけ呼ぶ: 約束の「24 時間」は画面に文が出る時から
+// 数えるので、復旧の待ち (最大 120 秒 × 2) にかかった時間を入れて判定する。結果・ほかの error で出るときは呼ばない。
 // 変えるのは符号と文だけ: class・name・userOpHash は同じで、結果と、確認待ち以外の error はそのまま通す。
-async function earlierUnless<T>(promiseHolds: boolean, run: () => Promise<T>): Promise<T> {
+async function earlierUnless<T>(promiseHolds: () => boolean, run: () => Promise<T>): Promise<T> {
   try {
     return await run();
   } catch (error) {
-    if (!promiseHolds && error instanceof CirclePendingError) {
+    if (error instanceof CirclePendingError && !promiseHolds()) {
       throw new CirclePendingError(error.userOpHash, 'unconfirmed_earlier');
     }
     throw error;
@@ -1031,18 +1038,20 @@ export async function executeCirclePayment(
       // 付け替えられなかった記録 (30 分の窓の外・記録に paymentAttemptId が無い・hook が対応を管理していない・hook が対応を
       // 書けなかった) の復旧が確認待ちで終わったら、場面は (e) (earlierUnless)。付け替えた記録は 30 分以内 = 書いたばかりなので、
       // 残りの寿命も足りる → (a)。
-      return await earlierUnless(adopted, () =>
-        inPostSubmit(rec.userOpHash, async () => {
-          const recovered = await recoverSubmitting({
-            bundle,
-            record: rec,
-            sender,
-            now,
-            handedOff: false,
-          });
-          if (recovered) return recovered;
-          throw new CirclePendingError(rec.userOpHash);
-        }),
+      return await earlierUnless(
+        () => adopted,
+        () =>
+          inPostSubmit(rec.userOpHash, async () => {
+            const recovered = await recoverSubmitting({
+              bundle,
+              record: rec,
+              sender,
+              now,
+              handedOff: false,
+            });
+            if (recovered) return recovered;
+            throw new CirclePendingError(rec.userOpHash);
+          }),
       );
     }
     // reserved / awaiting_signature / signed (pre-submit・未 broadcast)。
@@ -1063,7 +1072,6 @@ export async function executeCirclePayment(
   }
 
   // --- reserve (idempotency gate・自 attempt のクラッシュ resume) ----------
-  const reservedAt = now();
   const { record, resumed } = reserveOrResume({
     key,
     chainId,
@@ -1071,7 +1079,7 @@ export async function executeCirclePayment(
     callHash,
     paymentAttemptId: args.paymentAttemptId,
     paymaster: bundle.paymasterAddress,
-    now: reservedAt,
+    now: now(),
   });
 
   if (resumed) {
@@ -1079,25 +1087,27 @@ export async function executeCirclePayment(
       return await resultFromConfirmed(bundle, record);
     }
     if (record.status === 'submitting') {
-      // この記録が、ここから (a) の文の期限 (24 時間 = TERMINAL_RETENTION_MS。確定した記録を残す期間と同じ値) の間は残るか。
-      // submitting の記録は最後に書いてから SUBMITTING_RETENTION_MS (7 日) で掃除されるので、最後に書いてから 6 日より後の
-      // 記録は、24 時間以内の次の押下でも消えていることがある → その復旧が確認待ちで終わったら、場面は (e) (earlierUnless)。
-      // 入口で読んだ記録の時刻で決める: 復旧が同じ op を送り直すと記録の時刻は今になるが、そのとき (e) を出しても、言い足りない
-      // だけで事実に反しない。時刻は上の予約に渡した値を使う (now() を読む回数を変えない)。
-      const outlivesPromise =
-        reservedAt - record.updatedAt <= SUBMITTING_RETENTION_MS - TERMINAL_RETENTION_MS;
-      return await earlierUnless(outlivesPromise, () =>
-        inPostSubmit(record.userOpHash, async () => {
-          const recovered = await recoverSubmitting({
-            bundle,
-            record,
-            sender,
-            now,
-            handedOff: false,
-          });
-          if (recovered) return recovered;
-          throw new CirclePendingError(record.userOpHash as Hex);
-        }),
+      // この記録が、確認待ちで出る時点から (a) の文の期限 (24 時間 = TERMINAL_RETENTION_MS。確定した記録を残す期間と同じ値) の
+      // 間は残るか。submitting の記録は最後に書いてから SUBMITTING_RETENTION_MS (7 日) で掃除されるので、最後に書いてから
+      // 6 日より後の記録は、24 時間以内の次の押下でも消えていることがある → その復旧が確認待ちで終わったら、場面は (e)
+      // (earlierUnless)。
+      // 記録の時刻は入口で読んだ値・今の時刻は確認待ちで出る時点 (復旧の待ちにかかった時間を入れる。now() を読むのは、
+      // 確認待ちで出るときの 1 回だけで、符号にしか使わない)。復旧が同じ op を送り直すと記録の時刻は今になるが、入口の値で
+      // 判定して (e) を出しても、言い足りないだけで事実に反しない。
+      return await earlierUnless(
+        () => now() - record.updatedAt <= SUBMITTING_RETENTION_MS - TERMINAL_RETENTION_MS,
+        () =>
+          inPostSubmit(record.userOpHash, async () => {
+            const recovered = await recoverSubmitting({
+              bundle,
+              record,
+              sender,
+              now,
+              handedOff: false,
+            });
+            if (recovered) return recovered;
+            throw new CirclePendingError(record.userOpHash as Hex);
+          }),
       );
     }
     if (record.status === 'failed' || record.status === 'abandoned') {

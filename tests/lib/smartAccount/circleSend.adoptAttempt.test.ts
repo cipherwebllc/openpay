@@ -806,6 +806,7 @@ describe('PR-39c: scan の submitting の枝の確認待ち — 付け替えた�
 // submitting の記録の掃除 (7 日) まで 24 時間を切っていて、24 時間以内の次の押下でも記録が消えていることがある
 // (Codex の再現: 6 日 23 時間前の記録 → 照会の失敗で確認待ち → 1 時間 + 1 ms 後の押下は新しい支払いに署名する)。なので、
 // その枝の確認待ちは (e)。境界は「7 日 − 24 時間 = 6 日」(circleSend.ts の SUBMITTING_RETENTION_MS − TERMINAL_RETENTION_MS)。
+// 比べるのは、入口で読んだ記録の時刻と、確認待ちで出る時点の時刻。
 // 固定するのは符号と文だけ ((e) の後に実際に新しい支払いが始まるかは、今までの動きなので固定しない)。
 describe('PR-39c: 自分の key の submitting の記録の resume — 残りの寿命が 24 時間以上なら (a)・より短ければ (e)', () => {
   const DAY = 24 * 60 * MIN;
@@ -872,6 +873,59 @@ describe('PR-39c: 自分の key の submitting の記録の resume — 残りの
     expect(error.circleCode).toBe('unconfirmed');
     expect(error.name).toBe('CirclePendingError');
     expect(error.userOpHash).toBe(OLD.userOpHash);
+  });
+
+  // Codex の 4 回目: 期限の「24 時間」は、確認待ちの文が画面に出た時から数える。復旧の待ち (照会が長くかかって失敗する等) の
+  // 間に時計が進むので、判定は入口の時刻ではなく、確認待ちで出る時点の時刻で行う。上の境界の test は時計を止めたままなので、
+  // ここでは照会の間に時計を進める。
+  describe('復旧の待ちの間に時計が進む (判定は、確認待ちで出る時点の時刻)', () => {
+    // 押下の中の時計。照会 (receipt の待ち) が tookMs かかってから失敗する (bundler の 5xx)。
+    function pressWithSlowFailingLookup(enteredAt: number, tookMs: number) {
+      let clock = enteredAt;
+      mockWait.mockImplementationOnce(async () => {
+        clock += tookMs;
+        throw new Error('HTTP request failed. Status: 503');
+      });
+      return press(enteredAt, { paymentAttemptId: 'tab-1', now: () => clock });
+    }
+
+    it('Codex の順: 入口ではちょうど 6 日 → 照会が 1 分かかって失敗 → 出る時点では 6 日 + 1 分 → (e) (記録は動かない)', async () => {
+      seed('submitting');
+      const before = stored('tab-1')!;
+
+      const error = await pendingOf(pressWithSlowFailingLookup(T0 + 6 * DAY, MIN));
+
+      expect(error.circleCode).toBe('unconfirmed_earlier');
+      expect(error.message).toBe(jaMessages.CircleErrors.unconfirmedEarlier);
+      expect(error.name).toBe('CirclePendingError');
+      expect(error.userOpHash).toBe(OLD.userOpHash);
+      expect(takePendingCodes()).toEqual(['unconfirmed_earlier']);
+      expect(signatureRequests()).toBe(0);
+      expect(mockBroadcast).not.toHaveBeenCalled();
+      expect(stored('tab-1')).toEqual(before);
+    });
+
+    it('入口でも、出る時点でも 6 日以内 (6 日の 2 分前に入り、照会に 1 分) → (a)', async () => {
+      seed('submitting');
+
+      const error = await pendingOf(pressWithSlowFailingLookup(T0 + 6 * DAY - 2 * MIN, MIN));
+
+      expect(error.circleCode).toBe('unconfirmed');
+      expect(error.userOpHash).toBe(OLD.userOpHash);
+      expect(stored('tab-1')).toMatchObject({ status: 'submitting', updatedAt: T0 });
+    });
+
+    it('境界: 出る時点でちょうど 6 日 (6 日の 1 分前に入り、照会に 1 分) → (a)・1 ms 過ぎて出ると (e)', async () => {
+      seed('submitting');
+
+      const atBoundary = await pendingOf(pressWithSlowFailingLookup(T0 + 6 * DAY - MIN, MIN));
+      expect(atBoundary.circleCode).toBe('unconfirmed');
+      expect(stored('tab-1')).toMatchObject({ status: 'submitting', updatedAt: T0 });
+
+      const justAfter = await pendingOf(pressWithSlowFailingLookup(T0 + 6 * DAY - MIN, MIN + 1));
+      expect(justAfter.circleCode).toBe('unconfirmed_earlier');
+      expect(takePendingCodes()).toEqual(['unconfirmed', 'unconfirmed_earlier']);
+    });
   });
 
   it('古い記録でも、復旧が結果を受け取れたら結果を返す (確認待ち以外は変えない)', async () => {
