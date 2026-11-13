@@ -418,7 +418,7 @@ Tip widget の `params.to` (creator address) は EOA 想定。Kaia chain で USD
 
 - creator が「Kaia で JPYC tip だけ受けたい」というユースケースは現実にあるか? それとも社内 demo only か?
 - もし demo only なら chain chooser に注意書きを追加するか
-- **推奨**: 注意書き不要 (PaymentForm 側でも Kaia 注意書きはない、`messages/ja.json:235-237` の `errorMav2KaiaPolygon` で UI fallback 済)
+- **推奨**: 注意書き不要 (PaymentForm 側でも Kaia 注意書きはない、`messages/ja.json:235-237` の `errorMav2KaiaPolygon` で UI fallback 済 — 追記 2026-11: この文は画面に描かれておらず、第 10 回レビュー PR-28a で消した。画面が出すのは `SmartAccountFallback` の banner)
 
 ### Q4. cross-chain crossChain toggle の default ✅ 決定: default true
 

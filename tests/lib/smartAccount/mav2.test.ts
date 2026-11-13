@@ -202,8 +202,8 @@ describe('buildMav2SmartAccountClient', () => {
     // Pimlico Kaia 対応 Smart Account は Safe / Simple Account / Thirdweb のみ。
     // MAv2 wallet で Kaia 対応のものは 2026-05 時点で確認されていない (HashPort
     // wallet は Kaia 非対応) が、defensive guard として将来の MAv2 + Kaia 遭遇
-    // に対し errorMav2KaiaPolygon で他 chain (Polygon/Base/Arbitrum/Optimism)
-    // フォールバックを案内する。
+    // に対し専用の i18nKey (errorMav2KaiaPolygon) で止める。画面は SmartAccountFallback の banner を出す
+    // (他 chain を案内する同名の文は描かれていなかったので、第 10 回レビュー PR-28a で messages から消した)。
     const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const jpycKaia: TokenDeployment = {
       ...jpycSponsorship,
@@ -220,7 +220,7 @@ describe('buildMav2SmartAccountClient', () => {
       captured = e;
     });
     expect(captured).toBeInstanceOf(IncompatibleSmartAccountError);
-    // Polygon フォールバック専用の i18nKey に routing (generic errorIncompatible…
+    // MAv2 + Kaia 専用の i18nKey に routing (generic errorIncompatible…
     // ではなく specific errorMav2KaiaPolygon)
     expect(captured?.i18nKey).toBe('errorMav2KaiaPolygon');
     expect(captured?.delegateAddress).toBeNull();

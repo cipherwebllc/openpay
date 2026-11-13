@@ -112,39 +112,29 @@ describe('i18n: Tokutei の ja/en parity', () => {
   });
 });
 
-describe('i18n: smart account 互換性エラー (3 form 名前空間 × ja/en)', () => {
-  // useSmartAccount の router が IncompatibleSmartAccountError を投げる時の
-  // i18n key 2 種。HashPort などの MAv2 委任 EOA 対策で導入。
-  const SA_KEYS = [
+// smart account の互換性 error (lib/accountDetection.ts の IncompatibleSmartAccountError) の i18nKey の 7 つの名前は、
+// 3 フォームの namespace に同じ名前の文を持っていたが、どの画面も描いていなかった (3 フォームは i18nKey を
+// 'errorPristineNoBootstrap' かどうかの判定にだけ使い、文は SmartAccountFallback の namespace から出す =
+// components/SmartAccountFallbackBanner.tsx)。第 10 回レビュー PR-28a で messages から消した (user 裁定 2026-11-12)。
+// i18nKey の名前はコードに残るので、下の「使われていないキーが無い」の検査 (leaf 名がソースに出れば使用中とみなす) は
+// 文が戻っても落ちない。描かれない文が戻らないよう、ここで名前ごとに縛る。
+describe('i18n: smart account 互換性 error の文は messages に無い (描くのは SmartAccountFallback)', () => {
+  const REMOVED_SA_KEYS = [
     'errorIncompatibleSmartAccount',
     'errorMav2Disabled',
-    // Kaia + MAv2 (HashPort 等) 専用、Polygon フォールバック案内
-    // (memory:project_kaia_evaluation、mav2.ts の Kaia chainId 早期 throw 経路)
     'errorMav2KaiaPolygon',
-    // pristine EOA (未委任) は injected wallet で初回ガスレス委任不可
-    // (useSmartAccount が standard mode 案内に倒す)
+    'errorMetaMaskKaia',
     'errorPristineNoBootstrap',
-    // canonical EIP-7702 非対応 chain (Avalanche = ACP-209「7702 style」AA) で
-    // 委任済み EOA を standard mode に倒す (chainSupportsCanonical7702 ガード)
     'errorChainNo7702',
-    // MetaMask Smart Account ガスレスが viem 2.50 ERC-7739 非互換で一時無効
-    // (standard mode 案内に倒す・useSmartAccount の metamask-7702 ガード)
     'errorMetaMaskGaslessUnavailable',
   ] as const;
-  for (const ns of FORM_NAMESPACES) {
-    for (const key of SA_KEYS) {
-      it(`ja.${ns}.${key} は非空文字列`, () => {
-        const v = (ja[ns] as Record<string, unknown>)[key];
-        expect(typeof v).toBe('string');
-        expect(v).not.toBe('');
-      });
-      it(`en.${ns}.${key} は非空文字列`, () => {
-        const v = (en[ns] as Record<string, unknown>)[key];
-        expect(typeof v).toBe('string');
-        expect(v).not.toBe('');
-      });
-    }
-  }
+  it.each(['ja', 'en'] as const)('%s: 7 つの名前の文が、どの namespace にも無い', (locale) => {
+    const messages = { ja, en }[locale];
+    const holders = messageLeafPaths(messages).filter((leafPath) =>
+      REMOVED_SA_KEYS.some((key) => leafPath.split('.').includes(key)),
+    );
+    expect(holders).toEqual([]);
+  });
 });
 
 // 確認中の支払いを送り直す前に端末へ保存できないときの本文 (user 承認済みの文・2026-11-11)。3 フォームの
@@ -173,28 +163,6 @@ describe('i18n: pendingStoreUnavailableResendBody (3 form 名前空間 × ja/en)
       const form = messages[ns] as Record<string, string>;
       expect(form[KEY]).not.toMatch(/通常送信|standard payment/);
       expect(form.pendingStoreUnavailableBody).toMatch(/通常送信をご利用ください|use standard payment instead/);
-    }
-  });
-});
-
-// errorMetaMaskKaia は Kaia で MetaMask Smart Account を断るときの文。MetaMask Smart Account のガスレスは
-// 止めている (NEXT_PUBLIC_ENABLE_METAMASK_SMART_ACCOUNT は既定 OFF・同じ namespace の
-// errorMetaMaskGaslessUnavailable が「現在ご利用いただけません」と書く) ので、ほかのチェーンで使えるとは書かない。
-// 同名の key が 3 フォームの namespace にあるので、namespace ごとに確かめる。
-describe('i18n: errorMetaMaskKaia (3 form 名前空間 × ja/en)', () => {
-  const KEY = 'errorMetaMaskKaia';
-  it.each(['ja', 'en'] as const)('%s: 3 フォームの namespace だけにあり、Kaia のほかのチェーンの名前を出さない', (locale) => {
-    const messages = { ja, en }[locale] as Record<string, unknown>;
-    const holders = Object.entries(messages)
-      .filter(([, value]) => typeof value === 'object' && value !== null && KEY in value)
-      .map(([ns]) => ns);
-    expect(holders.sort()).toEqual([...FORM_NAMESPACES].sort());
-    for (const ns of FORM_NAMESPACES) {
-      const text = (messages[ns] as Record<string, unknown>)[KEY];
-      expect(typeof text).toBe('string');
-      expect(text).toContain('Kaia');
-      expect(text).not.toMatch(/\b(Polygon|Base|Arbitrum|Optimism|Ethereum|Avalanche|Arc)\b/);
-      expect(text).not.toMatch(/gasless|ガスレス/i);
     }
   });
 });
