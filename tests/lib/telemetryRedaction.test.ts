@@ -28,7 +28,7 @@ describe('telemetry URL redaction', () => {
       const breadcrumb = scrubSentryBreadcrumb({
         category,
         data: { url: SECRET_URL, method: 'POST' },
-      });
+      })!;
 
       expect(breadcrumb.data).toEqual({
         url: 'https://hooks.example.com',
@@ -45,7 +45,7 @@ describe('telemetry URL redaction', () => {
         from: `/before?bearer=${SECRET}`,
         to: `/after/${SECRET}`,
       },
-    });
+    })!;
 
     expect(breadcrumb.data).toEqual({
       from: window.location.origin,
@@ -73,7 +73,7 @@ describe('telemetry URL redaction', () => {
           start_timestamp: 1,
         },
       ],
-    });
+    })!;
 
     expect(event.request?.url).toBe('https://hooks.example.com');
     expect(event.contexts?.trace?.data?.['http.url']).toBe(
@@ -127,7 +127,7 @@ describe('telemetry URL redaction', () => {
           start_timestamp: 1,
         },
       ],
-    });
+    })!;
 
     expect(event.request).not.toHaveProperty('query_string');
     expect(event.request?.url).toBe('https://hooks.example.com');
@@ -174,7 +174,7 @@ describe('telemetry URL redaction', () => {
           data: { url: SECRET_URL, method: 'GET' },
         },
       ],
-    });
+    })!;
 
     expect(event.request).not.toHaveProperty('query_string');
     expect(event.request?.headers?.referer).toBe('https://hooks.example.com');
@@ -197,7 +197,7 @@ describe('telemetry URL redaction', () => {
         status_code: 502,
       },
     });
-    const direct = scrubSentryBreadcrumb(fetchBreadcrumb());
+    const direct = scrubSentryBreadcrumb(fetchBreadcrumb())!;
     expect(direct.data).not.toHaveProperty('http.query');
     expect(direct.data).not.toHaveProperty('http.fragment');
     expect(direct.data?.status_code).toBe(502);
@@ -208,7 +208,7 @@ describe('telemetry URL redaction', () => {
       breadcrumbs: [fetchBreadcrumb()],
       contexts: { trace: { data: { 'http.query': `?apikey=${SECRET}`, 'http.fragment': `#${SECRET}` } } },
       spans: [{ data: { 'http.query': `?apikey=${SECRET}` } }],
-    } as never);
+    } as never)!;
     expect(JSON.stringify(event)).not.toContain(SECRET);
     expect(JSON.stringify(direct)).not.toContain(SECRET);
   });
@@ -217,16 +217,16 @@ describe('telemetry URL redaction', () => {
 it('delivery redirect and JSON fields are scrubbed by the installed browser/server hooks', () => {
   const ticket = 'header.payload.signature-delivery-secret';
   const url = `https://files.example/private-gate?ticket=${ticket}`;
-  const breadcrumb = scrubSentryBreadcrumb({ category: 'fetch', data: { url, ticket, deliveryUrl: url, Location: url }, message: url });
+  const breadcrumb = scrubSentryBreadcrumb({ category: 'fetch', data: { url, ticket, deliveryUrl: url, Location: url }, message: url })!;
   expect(breadcrumb.data).toEqual({ url: 'https://files.example', Location: 'https://files.example' });
   const browser = scrubSentryTransaction({
     type: 'transaction', request: { url },
     contexts: { trace: { trace_id: '1'.repeat(32), span_id: '2'.repeat(16), data: { 'http.response.header.location': url, ticket } } },
-  });
+  })!;
   const server = scrubSentryServerEvent({
     request: { url, headers: { Location: url } }, breadcrumbs: [breadcrumb],
     contexts: { trace: { trace_id: '1'.repeat(32), span_id: '2'.repeat(16), data: { 'http.response.header.location': url, ticket } } },
-  });
+  })!;
   for (const scrubbed of [breadcrumb, browser, server]) {
     expect(JSON.stringify(scrubbed)).not.toContain(ticket); expect(JSON.stringify(scrubbed)).not.toContain('/private-gate');
   }
@@ -243,7 +243,7 @@ describe('認可トークンのヘッダ', () => {
           'x-safe': 'kept',
         },
       },
-    });
+    })!;
     expect(JSON.stringify(event)).not.toContain(SECRET);
     expect(event.request?.headers).toEqual({ 'x-safe': 'kept' });
   });

@@ -1,6 +1,6 @@
 import type { Envelope, Event, ReplayEvent } from '@sentry/core';
 import type { ReplayFrameEvent } from '@sentry/nextjs';
-import { scrubSentryServerEvent, urlOriginForTelemetry } from './telemetryRedaction';
+import { redactLogData, scrubSentryServerEvent, urlOriginForTelemetry } from './telemetryRedaction';
 
 // Replay は beforeSend を通らない。metadata の URL は error telemetry と同じく
 // origin のみにする (webhook の認証情報は path/userinfo にも入り得る)。
@@ -13,9 +13,10 @@ export function scrubReplayEvent<T extends Event>(event: T): T {
     clean.initialUrl = urlOriginForTelemetry(replay.initialUrl);
   }
   if (replay.request) {
+    // 伏せられなかったときは request を付けない (scrubSentryServerEvent は失敗すると null を返す)。
     clean.request = scrubSentryServerEvent({
       request: { ...replay.request, headers: { ...replay.request.headers } },
-    }).request;
+    })?.request;
   }
   return clean;
 }
@@ -91,7 +92,11 @@ export function scrubReplayRecordingEvent(event: ReplayFrameEvent): ReplayFrameE
         tag,
         payload: {
           ...payload,
-          data: scrubRecordingData(payload.data),
+          // console の breadcrumb は引数を data.arguments に持つ (Replay が normalize した写し)。録画は beforeSend を
+          // 通らないので、署名済みの UserOperation と key つきの URL (viem の error の文) をここで伏せる。
+          data: payload.category === 'console'
+            ? redactLogData(scrubRecordingData(payload.data))
+            : scrubRecordingData(payload.data),
           ...(typeof message === 'string' && (/^https?:\/\//i.test(message) || message.startsWith('/'))
             ? { message: urlOriginForTelemetry(message) } : {}),
         },

@@ -53,6 +53,16 @@ import {
 } from '@/lib/kv';
 import { logger } from '@/lib/logger';
 import { buildPaymentLogEvent, type PaymentLogContext } from '@/lib/paymentLog';
+import { redactLogText } from '@/lib/telemetryRedaction';
+import {
+  API_KEY,
+  BUNDLER_ORIGIN,
+  SENDER,
+  SIGNATURE,
+  VIEM_ERROR_CASES,
+  aa14UserOperationRejection,
+  leakedMarkers,
+} from '../../helpers/viemRequestErrors';
 
 // 通常の保存テストでは response 後の仕事も実行。latency のテストだけ postRoute を直接呼ぶ。
 async function POST(request: Request) {
@@ -514,6 +524,71 @@ describe('POST /api/log/payment', () => {
       await POST(req({ ...validBody, result: 'error', errorMessage: 'boom' }));
       const entry = JSON.parse(vi.mocked(kvLpush).mock.calls[0][1]);
       expect(entry.errorMessage).toBe('boom');
+    });
+
+    // 第 10 回レビュー PR-40: 伏せる前の版の client (開いたままのタブ) は、viem の error の文を 500 字に切っただけで送る。
+    it.each(VIEM_ERROR_CASES)('古い client が送る %s の文 (key つきの URL・署名済みの本文) は、伏せてから保存し log に渡す', async (_name, make) => {
+      const fromOldClient = make().message.slice(0, 500);
+      expect(leakedMarkers(fromOldClient)).toEqual(expect.arrayContaining([API_KEY, 'f00df00df00df00d', 'c0dec0dec0dec0de']));
+      const res = await POST(req({ ...validBody, result: 'error', errorMessage: fromOldClient }));
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ ok: true });
+      const entry = JSON.parse(vi.mocked(kvLpush).mock.calls[0][1]);
+      expect(leakedMarkers(entry)).toEqual([]);
+      expect(entry.errorMessage).toBe(redactLogText(fromOldClient));
+      expect(entry.errorMessage).toContain(`URL: ${BUNDLER_ORIGIN}\nRequest body: [redacted]`);
+      // 残すもの: 64 桁の hash と、ほかの欄。
+      expect(entry).toMatchObject({ userOpHash: validBody.userOpHash, txHash: validBody.txHash, result: 'error' });
+      expect(leakedMarkers(vi.mocked(logger.info).mock.calls)).toEqual([]);
+      expect(vi.mocked(logger.info).mock.calls[0][0]).toBe('payment.event');
+    });
+
+    it('Request body の行の外の 130 桁の署名も、保存の前に伏せる (64 桁の hash は残す)', async () => {
+      const hash = `0x${'c'.repeat(64)}`;
+      await POST(req({ ...validBody, result: 'error', errorMessage: `signature: ${SIGNATURE} hash: ${hash}` }));
+      const entry = JSON.parse(vi.mocked(kvLpush).mock.calls[0][1]);
+      expect(entry.errorMessage).toBe(`signature: [redacted] hash: ${hash}`);
+    });
+
+    // Codex 指摘 6: getUserOperationError (pimlicoSend.ts の toUserOperationRejection) の文は `Request body:` を持たず、
+    // 古い client が 500 字で切ると callData の値が 129 桁に満たない切れ端になって 16 進の規則をすり抜ける。
+    it('古い client が 500 字で切った Request Arguments の形 (AA14) は、署名済みの op の欄を名前で長さに関係なく伏せる', async () => {
+      const error = aa14UserOperationRejection();
+      expect(error.message).not.toContain('Request body:');
+      const fromOldClient = error.message.slice(0, 500);
+      // 前提: 切れ端の callData (129 桁に満たない) と、120 桁の factoryData が入っている。
+      const callDataTail = /callData: +(0x[0-9a-f]*)$/.exec(fromOldClient)?.[1] ?? '';
+      expect(callDataTail.length).toBeGreaterThan(2);
+      expect(callDataTail.length).toBeLessThan(131);
+      expect(leakedMarkers(fromOldClient)).toEqual(expect.arrayContaining(['c0dec0dec0dec0de', 'f00df00df00df00d']));
+
+      await POST(req({ ...validBody, result: 'error', errorMessage: fromOldClient }));
+      const entry = JSON.parse(vi.mocked(kvLpush).mock.calls[0][1]);
+      expect(leakedMarkers(entry)).toEqual([]);
+      expect(entry.errorMessage).toMatch(/\n {2}callData: +\[redacted\]$/);
+      expect(entry.errorMessage).toContain('\nfactoryData: [redacted]\n');
+      // 残すもの: アドレスと、欄の名前と、文の頭。
+      expect(entry.errorMessage).toContain(`sender: ${SENDER}`);
+      expect(entry.errorMessage).toContain('\nRequest Arguments:\n');
+      expect(entry.errorMessage.startsWith(error.message.slice(0, 60))).toBe(true);
+    });
+
+    it('欄の名前の規則は、JSON の形・切れ目が 0x の途中・ほかの欄にも効き、ほかの 16 進とアドレスは残す', async () => {
+      const hash = `0x${'c'.repeat(64)}`;
+      const message = [
+        `{"callData":"0xabc","paymasterAndData":"0x12","initCode":"0x"}`,
+        `  signature:  0`,
+        `paymaster: ${SENDER} userOpHash: ${hash}`,
+        `  paymasterData:  0x9d9d`,
+      ].join('\n');
+      await POST(req({ ...validBody, result: 'error', errorMessage: message }));
+      const entry = JSON.parse(vi.mocked(kvLpush).mock.calls[0][1]);
+      expect(entry.errorMessage).toBe([
+        `{"callData":"[redacted]","paymasterAndData":"[redacted]","initCode":"[redacted]"}`,
+        `  signature:  [redacted]`,
+        `paymaster: ${SENDER} userOpHash: ${hash}`,
+        `  paymasterData:  [redacted]`,
+      ].join('\n'));
     });
 
     it('limiter key は IPv6 /64 を共有し、別 /64 は別の HMAC bucket にする', async () => {

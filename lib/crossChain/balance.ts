@@ -36,6 +36,7 @@ import {
   worldchainSepolia,
 } from 'viem/chains';
 import { buyerOnlyChainForSlug, transportForChain } from '../chains';
+import { redactLogText } from '../telemetryRedaction';
 import { resolveDeployment } from '../tokens';
 import {
   BUYER_SOURCE_TARGETS,
@@ -138,7 +139,8 @@ function logBalanceDiag(
       outcome.error instanceof Error
         ? outcome.error.message
         : String(outcome.error);
-    console.warn(`${label}: FAILED after ${elapsedMs}ms — ${msg}`);
+    // viem の error の文は `URL: <RPC の URL>` の行を持ち、RPC の上書きの URL は path や query に API key を持つ。
+    console.warn(`${label}: FAILED after ${elapsedMs}ms — ${redactLogText(msg)}`);
   }
 }
 

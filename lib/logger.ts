@@ -6,6 +6,7 @@
 // @sentry/nextjs の Sentry.* が安全な no-op になる (init を呼んでいないため)。
 
 import * as Sentry from '@sentry/nextjs';
+import { redactLogText } from './telemetryRedaction';
 
 type Level = 'debug' | 'info' | 'warn' | 'error';
 type Fields = Record<string, unknown>;
@@ -27,22 +28,41 @@ function replacer(_key: string, value: unknown): unknown {
     return { name: value.name, message: value.message, stack: value.stack };
   }
   if (typeof value === 'bigint') return value.toString();
+  // 署名済みの UserOperation と key つきの URL (viem の error の文) を log に出さない。上の Error の
+  // message・stack も、返した object の欄としてここを通る。
+  if (typeof value === 'string') return redactLogText(value);
   return value;
+}
+
+// extra は fields を深く伏せた写し (console と同じ replacer を通した JSON の形・元の fields は書き換えない)。Sentry は
+// extra の中の Error の欄 (viem の url・body など・`URL:` の前置きが無い) も写すので、fields をそのまま渡さない。
+function redactedExtra(fields: Fields | undefined): Fields | undefined {
+  if (!fields) return undefined;
+  try {
+    return JSON.parse(JSON.stringify(fields, replacer)) as Fields;
+  } catch {
+    // Sentry 向けの写しの失敗 (循環する欄・toJSON が undefined を返す fields) が、logger の呼び出し元 (決済の処理) に
+    // throw として届くのを断つ。console の行は出た後なので、Sentry には伏せていない fields の代わりに印だけを送る。
+    return { redactionFailed: true };
+  }
 }
 
 // Sentry へ "fingerprint" 用のグルーピングキーとして msg を渡す。
 // fields の中に Error が含まれていれば captureException で stack を保持。
+// Error は元のまま渡す (exception の値・stack の frame・cause の連なり・AggregateError の子は、3 つの設定の beforeSend
+// が送る前に伏せる)。
 function reportToSentry(level: 'warn' | 'error', msg: string, fields?: Fields): void {
   const errorField = fields
     ? Object.values(fields).find((v) => v instanceof Error)
     : undefined;
   // Sentry の SeverityLevel は 'warning' だが logger 側は 'warn' を使うため変換
   const sentryLevel: Sentry.SeverityLevel = level === 'warn' ? 'warning' : 'error';
+  const extra = redactedExtra(fields);
   if (errorField instanceof Error) {
     Sentry.captureException(errorField, {
       level: sentryLevel,
       tags: { event: msg },
-      extra: fields,
+      extra,
     });
     return;
   }
@@ -52,7 +72,7 @@ function reportToSentry(level: 'warn' | 'error', msg: string, fields?: Fields): 
   Sentry.captureMessage(msg, {
     level: sentryLevel,
     tags: { event: msg },
-    extra: fields,
+    extra,
   });
 }
 
