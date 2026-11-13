@@ -99,7 +99,8 @@
 // なり、次の 90 秒は confirmed の枝が前の結果を返す (同じ偽の成功が別の枝から戻る)。代償: 記録は 7 日の掃除まで残り、同じ内容を
 // 払うたびに照合の RPC が増える。
 // 同じ key の resume (下の reserveOrResume の後) は変えない: 対応 (sessionStorage) が残っているのは、同じタブで成功を画面に
-// 出していない間だけなので、その記録は「この画面の支払いの続き」。
+// 出していない間だけなので、その記録は「この画面の支払いの続き」(このタブが送った支払い、または、このタブが結果を受け取りに
+// 行った別の key の支払い = 下の「対応の付け替え」。付け替えるのは窓の内の記録だけ)。
 // 残る限界: bundler の索引が遅れる間 (取り込まれた直後で receipt をまだ返さない) の押下は「使用済み・receipt なし」で新しい
 // 支払いへ進む / 'latest' の巻き戻し (使用済みと読んだ後に reorg で未使用に戻る) / 未使用のまま永久に実行されない op は、
 // 押すたびに今までどおり復旧を試みて止まる / 7 日の掃除の後は記録が無いので照合もしない。
@@ -111,7 +112,37 @@
 //   (d) 署名 1・署名 2 の catch (abandon の前)
 //   (e) 古い submitting の記録の照合 (上の「古い submitting の記録」) の await の後・scan の前
 // すでに bundler へ渡した op の後始末 (receipt 待ち・復旧の再送・markConfirmed) では見ない (渡した op は画面が無くても成立しうる)。
+// attemptId の対応の付け替え (下の「対応の付け替え」) の直前でも見ない: そこに来る試みは生きている。呼び出し元 (hook の
+// runCirclePayment) は失効を確かめた同じ tick でこの関数を呼び、入口から scan・付け替えまで await は無い。古い記録の照合の
+// await があった押下では (e) が確かめ、(e) から scan・付け替えまで await は無い。
 // 失効した試みは payment_cancelled で終わり、記録は awaiting_signature のまま残す (開き直した画面が同じ key を resume する)。
+//
+// 対応の付け替え (第 10 回レビュー 穴 B = H-V の scan 版): scan が **別の key の記録 R** (別のタブ・閉じたタブの支払い) の結果を
+// 受け取りに行く押下は、自分の key の記録を作らない (scan は予約より前)。その途中で画面を離れる (または確認待ちで終わる) と、
+// hook の attemptId の対応 (sessionStorage) は自分の attemptId のまま残り、その key には記録が無い。R はその後に確定するが、
+// 成功はどの画面にも出ていない。次の押下は、記録の無い自分の key で scan に戻り、R が confirmed から 90 秒を過ぎていれば
+// 「正規のリピート」とみなして 2 本目を払う。
+// なので、scan が R の結果を受け取りに行く **直前 (同期・await の前)** に、args.adoptAttempt で対応を R の paymentAttemptId に
+// 付け替える。次の押下は R の key を resume する (下の reserveOrResume の後): confirmed → 時間の窓なしで既払いの結果・
+// submitting → 同じ op の復旧・failed → 「既に終了」(hook が対応を消し、その次の押下は新しい支払い)・記録なし (confirmed・failed の記録は
+// 最後の updatedAt から 24 時間で掃除される) → 新しい支払い。画面のある試みが結果を受け取れた・ふつうの error で終わったときは、hook が今までどおり対応を消す。
+// 付け替えるのは次が全部そろったときだけ:
+//   - hook が対応を管理している (args.adoptAttempt が渡されている。明示の paymentAttemptId の呼び出しには渡らない)
+//   - 記録が paymentAttemptId を持つ
+//   - (1) submitting で、最後に bundler へ渡してから STALE_SUBMITTING_WINDOW_MS (30 分) 以内、または
+//     (2) confirmed で、scan が既払いの結果を返す記録 (success が false でない・90 秒以内)
+// 付け替えるのは画面のある試みだけ (失効した試みが書くと、開き直した画面の対応を横から変える)。ここでは確かめない: 上の
+// 「失効」のとおり、scan に着く試みは生きている (scan と付け替えの前に await を足すときは、その後に失効の確認を足す)。
+// 付け替えた対応を消すのは hook で、対応がいまもその試みの知っている attemptId (付け替えた試みは R の attemptId) を指している
+// ときだけ (同じタブの別の試みが、付け替えた対応を自分の古い attemptId のつもりで消さない)。
+// 付け替えない記録: 30 分より後の submitting を「未使用・取り込みが 30 分以内 → 復旧」とした記録 (付け替えると、次の押下が R の
+// key の resume になり、別の key の scan にだけ効く「古い submitting の記録」の照合を通らなくなる = このタブで筋 2 (止まり
+// 続ける) が戻る)・「飛ばす」「確認待ち」とした記録 (受け取りに行かない)・直近の pre-submit (op を渡していない記録)。
+// 代償: (1) 対応が R に付け替わったまま残る (失効・確認待ち) と、このタブで同じ内容を意図してもう一度払うとき、最初の 1 回は
+// R の結果が出る (署名なし。そこで hook が対応を消すので、もう一度押せば新しい支払い)。(2) R が永久に取り込まれない op だと、
+// このタブではその内容が確認待ちのまま (タブを閉じるまで。R を送った元のタブと同じ扱い)。
+// 残る限界: 30 分より後の記録を復旧する押下 (付け替えない) の途中で画面を離れ、その間に op が確定した場合は、今までどおり
+// (対応は自分の attemptId のまま。90 秒より後の次の押下は新しい支払い)。
 //
 // useBatchPayment の circle 分岐がこの executeCirclePayment を呼ぶ。permitAmount の
 // 算定 (gas 実費 + per-chain surcharge) は chunk 5 (useGasQuoteCircle) が担い、ここへは
@@ -766,6 +797,11 @@ export type ExecuteCirclePaymentArgs = {
   /** この試みを始めた画面 (hook の instance) がまだあるか (unmount の後は false のまま)。冒頭の「失効」。
    * 省略時は常に true (失効を見ない)。 */
   isAlive?: () => boolean;
+  /** scan が別の key の記録の結果を受け取りに行く直前に、その記録の paymentAttemptId を渡して同期で呼ぶ (冒頭の「対応の
+   * 付け替え」)。attemptId の対応 (sessionStorage) の持ち主は hook なので、書くのは hook の渡す関数。hook が対応を管理して
+   * いるときだけ渡す。省略時は付け替えない。呼ぶ前に失効は確かめない (呼び出し元は、失効を確かめた同じ tick でこの関数を
+   * 呼ぶこと。冒頭の「失効」)。 */
+  adoptAttempt?: (paymentAttemptId: string) => void;
 };
 
 // 失効した試みを終える error (冒頭の「失効」)。relay の hook (hooks/useJpycEip3009Payment.ts) と Pimlico の経路
@@ -788,6 +824,11 @@ export async function executeCirclePayment(
   // 要求がウォレットに残り、開き直した画面の要求と見分けがつかない)。
   const beforeSign = () => {
     if (!isAlive()) throw cancelled();
+  };
+  // 対応の付け替え (冒頭の「対応の付け替え」)。scan が rec の結果を受け取りに行く枝の、最初の await の前に呼ぶ。
+  // ここに来る試みは生きている (失効を確かめない): 呼び出し元の入口の確認、または下の (e) から、ここまで await が無い。
+  const adopt = (rec: PendingRecord) => {
+    if (args.adoptAttempt && rec.paymentAttemptId) args.adoptAttempt(rec.paymentAttemptId);
   };
   const sender = owner;
   const chainId = bundle.chainId;
@@ -816,6 +857,9 @@ export async function executeCirclePayment(
   // 別 attempt (別タブ/別デバイス/reload/再クリック) を捕捉できない。**callHash で同一決済の
   // 生きている別 record を全状態スキャン**し、自 attempt (excludeKey) 以外が在れば新規 op を
   // 作らない:
+  // 別の記録の結果を受け取りに行く枝 (直近の confirmed・最後に渡してから 30 分以内の submitting) は、その直前に attemptId の
+  // 対応をその記録に付け替える (冒頭の「対応の付け替え」): この押下は自分の key の記録を作らないので、途中で画面を離れた・
+  // 確認待ちで終わった後の次の押下が、その記録の key を resume できるようにする。
   //   confirmed (直近)  → 偶発二重 → 既支払い結果を返す。confirmed (古い) → 正規の再決済とみなし通す。
   //   submitting        → recover (receipt 照会 or 同一署名 op の冪等 rebroadcast)。最後に渡してから 30 分より後の記録は、
   //                        先に EntryPoint の nonce で確かめる (冒頭の「古い submitting の記録」): 未使用・取り込みが 30 分以内
@@ -891,6 +935,8 @@ export async function executeCirclePayment(
         rec.success !== false &&
         now() - rec.updatedAt <= CONFIRMED_DEDUP_WINDOW_MS
       ) {
+        // この記録の結果を受け取りに行く。下の照会 (await) の間に画面を離れても、次の押下がこの記録の key を resume する。
+        adopt(rec);
         return await resultFromConfirmed(bundle, rec);
       }
       continue;
@@ -901,6 +947,10 @@ export async function executeCirclePayment(
       // 取り込みが窓より前の、終わった op の記録 = 古い confirmed と同じく飛ばす (記録は書かない)。
       if (verdict === 'spent') continue;
       if (verdict === 'unverified') throw new CirclePendingError(rec.userOpHash);
+      // この記録の op を復旧する (結果を受け取りに行く)。下の待ち (最大 120 秒 × 2) の間に画面を離れても・確認待ちで
+      // 終わっても、次の押下がこの記録の key を resume する。最後に渡してから 30 分以内の記録だけ: それより後の記録 (上の照合が
+      // 「復旧」とした記録) は付け替えない (次の押下も、別の key の scan として照合を通す)。
+      if (now() - rec.updatedAt <= STALE_SUBMITTING_WINDOW_MS) adopt(rec);
       return await inPostSubmit(rec.userOpHash, async () => {
         const recovered = await recoverSubmitting({
           bundle,
