@@ -28,9 +28,8 @@ const KEYS: Record<CircleErrorCode, CircleErrorKey> = {
 };
 const CODES = Object.keys(KEYS) as CircleErrorCode[];
 
-// user が承認した文 (2026-11-13・(a)〜(e) の 5 つ)。一字も変えない (同じ文が、ここ・messages・circleSend.ts の 3 か所にある)。
-// 6 つ目の mappingUnavailable (f) は **案・user の承認待ち** (第 10 回レビューの後追い r10-ss)。承認の文に替わったら、
-// ここ・messages (ja / en)・circleSend.ts の CIRCLE_ERROR_JA を一緒に替える。
+// user が承認した文 (2026-11-13・(a)〜(f) の 6 つ。(f) = mappingUnavailable は第 10 回レビューの後追い r10-ss で足した)。
+// 一字も変えない (同じ文が、ここ・messages・circleSend.ts の CIRCLE_ERROR_JA の 3 か所にある。替えるときは en も一緒に)。
 const APPROVED_JA: Record<CircleErrorKey, string> = {
   unconfirmed:
     'USDC ガスレスの支払いを送信しましたが、結果をまだ確認できていません。24 時間以内にこのタブで同じ内容のままもう一度押すと、まず同じ支払いの結果を確かめ直します。それより後は、新しい支払いとして署名を求める場合があります。確かめられるまで、ほかの方法で払い直さないでください。',
