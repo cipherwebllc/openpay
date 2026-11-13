@@ -8,12 +8,57 @@
 // /pay と /checkout の通常決済も止める・lib/paymentFlowGuards)。作る op は必ず記録の nonce を使うので、送り直しても
 // 作り直しても EntryPoint は同じ nonce の op を最大 1 本しか実行しない。intent を閉じるのは次だけ:
 //   c1 候補の hash のどれかに receipt がある → 成功 / revert で確定
-//   c2 **最初の送信** を bundler が検証で拒否した (HTTP 2xx + allowlist の code・pimlicoSend.ts) → 記録を消したと確かめてから、
-//      今までどおりの error
+//   c2 **最初の送信** を bundler が検証で拒否し (HTTP 2xx + allowlist の code・pimlicoSend.ts)、拒否の文 (bundler が返した文) が
+//      nonce・mempool・重複・置き換えに触れておらず、**bundler にその op の状態を聞いて「その hash を知らない」(not_found) と
+//      答え**、**渡す直前から status を聞き終えた後までが 30 秒未満** (時間の柵・壁時計と単調な時計の両方) で、**storage の
+//      記録が自分の送った版のままで、それを自分で消せた** → 今までどおりの error。検証の拒否だけでは閉じない (この op 自身が
+//      もう届いているために、重複の配送にだけ返った拒否かもしれない)。語に当たる・status が not_found でない・status を読め
+//      ない・柵の外・記録が別の版・**記録がもう無い** (ほかの画面が確定させて消したかもしれない) ときは応答不明
+//      (buildAndSend の onRejected)
 //   c4 最後に bundler へ渡して (渡そうとして) から 7 日を過ぎ、候補のどれにも receipt が無く、EntryPoint の nonce も未使用 →
 //      記録を消したと確かめてから
 //   c5 EntryPoint の nonce は進んだが、候補のどれにも receipt が無い → 期限までは開いたまま、期限で c4 と同じく閉じる
 // それ以外 (応答不明・送り直しや作り直しの拒否 (c3)・照合できない・保存を確かめられない) は開いたまま。
+//
+// 閉じる前に bundler へ聞く (c2 と、Circle の経路の circleSend.ts の closeRejectedFirstSend が使う。聞く関数は pimlicoSend.ts の
+// readBundlerOpStatus = `pimlico_getUserOperationStatus` の 1 つ):
+//   何のためか: 検証の拒否が示すのは「この送信が断られた」ことだけで、同じ op の前の配送が受理されていないことは示さない。送信が
+//     途中で 2 回届き、1 回目は受理されて mempool にあり、2 回目 (重複の配送) にだけ拒否が返ることがある (例: 受理の後に
+//     preVerificationGas の必要量が上がり、重複の配送に「preVerificationGas is not enough」(-32500) が返る。Pimlico の bundler
+//     (Alto) はこの検査を、mempool の重複の確認より前に行う)。そこで閉じると、次の試みは新しい nonce の op になり、2 本とも
+//     取り込まれる。閉じてよい根拠は **「bundler がその hash を知らないと答えた」(not_found)** こと。
+//   閉じない側: not_found 以外の status (permissionless 0.2.57 の PimlicoUserOperationStatus: not_submitted・submitted・rejected・
+//     reverted・included・failed)・型に無い値・読めなかったとき (通信の失敗・timeout・HTTP の失敗・JSON-RPC の error・形の崩れた
+//     応答)。rejected も閉じない側にする: その hash を bundler が一度は受け取っていて、ここからは「取り込まれない」と言い切れない。
+//   語の確認 (pimlicoSend.ts の mentionsNonceOrMempool) を残す理由: status と語は別の失敗を断つ。status の記録が bundler の中で
+//     反映される前に聞いてしまう場合 (受理した node と聞いた node のずれ) でも、nonce・重複の拒否は語で止まる。
+//   status の意味 (Pimlico の bundler = Alto の upstream 6b79a00d を Codex が読んだもの・PR #1084 のレビュー):
+//     受理して bundle を待っている op = not_submitted (受理を返す前に書く)・bundle の tx が pending = submitted・受理の後に落とした
+//     op = rejected・取り込み済み = included。一度も受理されていない op には書き込みが無く not_found。**受理された op の重複の
+//     配送を admission で断っても、前の status は書き換わらない** (断るだけで StatusManager に触らない)。
+//     **status は最後に書かれてから 1 時間で消え、その後は取り込み済みの op でも not_found を返す** (Alto の StatusManager の TTL・
+//     Pimlico の文書。読んでも期限は延びない)。
+//   時間の柵 (PIMLICO_REJECTION_CLOSE_WINDOW_MS = 30 秒): not_found で閉じてよいのは、この試みが op を bundler に渡す直前から、
+//     status を聞き終えた後までの経過が上限未満のときだけ。何の波及を断つか: 拒否の処理が遅れて再開したとき (タブの停止・端末の
+//     スリープなど)、受理された op の status がもう消えていて not_found が返り、記録を消して閉じて、待機中・取り込み済みの op の
+//     上に新しい nonce の支払いを開けること (版の一致では防げない: 記録は元の版のまま)。上限は Circle の経路の柵
+//     (circleSend.ts の REJECTION_CLOSE_WINDOW_MS) と同じ値で、status の期限 (1 時間) より十分短く、送信の HTTP の timeout
+//     (10 秒) + status の照会の timeout (10 秒) より長い。経過は 2 つの時計で測り、**どちらかが上限以上、または壁時計の経過が
+//     負なら閉じない**: 壁時計 (Date.now) は端末の時計の変更で戻る・進む。単調な時計 (performance.now) は戻らないが、実装に
+//     よっては端末のスリープの間は進まない。測るのは status の await の後で、その後、記録を消すまで await を挟まない。
+//   限界:
+//     - 公開 endpoint (Base Sepolia と Base・2026-11-12) で確かめたのは「一度も受理されていない op (知らない hash・検証で拒否
+//       された op の hash) には、拒否の直後と 3 秒後に `{"status":"not_found","transactionHash":null}` が返る」ことだけ。
+//       **「受理された op が not_found 以外を返す」ことは、有効な署名つきの op が要るので実測していない** (上の upstream の
+//       読みと、API の説明による)。本番の key つきの endpoint でも確かめていない。
+//     - 水平に並べた bundler は、Redis の共有の store を設定したときだけ status を instance の間で共有する (設定が無ければ
+//       process ごと)。hosted の endpoint の設定は upstream からは確かめられない: 共有していなければ、別の instance が受理した
+//       op に not_found が返りうる。受理の直後に聞く場合の反映の遅れも同じで、語に当たらない拒否で閉じうる。
+//     - 置き換えられた op の古い status は、期限まで残りうる (閉じない側)。
+//     - 聞く hash は手元で計算した hash。本番の構成 (委任済みの simple 7702・EntryPoint 0.8) では bundler の hash との食い違いは
+//       見つかっていない (どちらも viem の EntryPoint 0.8 の EIP-712 の hash。受理のときは sendRecordedOp が返った hash と比べ、
+//       違えば `pimlico.send.hash-mismatch` を log に出して記録を直す)。構成が違えば (factory・EntryPoint の版・chain) 食い違い
+//       うる。
 //
 // 判定はこの module の入口に集める:
 //   resolveOpenIntent = 開いている intent への唯一の入口 (照合 → 閉じる / 送り直す / 作り直す / 開いたまま)
@@ -33,7 +78,9 @@
 // 版の一致 (PR-02 の Codex レビュー P1 と、その 2 回目・3 回目): 記録への後からの書き込み (応答不明の status・hash の直し・作り直しの
 // 保存を確かめられないときの書き戻し) と、確定によらない削除 (c2 で閉じる・保存を確かめられない op の片付け) は、
 // storage にいま入っている記録が、この試みが書いた (または読んで判断した) 版そのもの (pimlicoIntentOwner.ts の isSameVersion =
-// 同じ intent・同じ userOpHash・同じ updatedAt) のときだけ行う (compare-and-set: persistIfVersion・discardIfVersion)。
+// 同じ intent・同じ userOpHash・同じ updatedAt・同じ rev) のときだけ行う (compare-and-set: persistIfVersion・discardIfVersion)。
+// rev は sendRecordedOp が bundler へ渡す直前の書き込みのたびに書く一意の印 (時刻は送信を一意に決めない: 別の画面が同じ op を
+// 同じ ms に送り直した記録は、intent・hash・updatedAt が同じになる)。
 // 期限 (c4・c5) で閉じる削除は、storage の記録が同じ intent で、その記録自身も期限を過ぎているときだけ行う (discardIfExpired:
 // memory のラッチと storage の版がずれても、両方の版が期限を過ぎれば閉じる)。保存を確かめられずに開いたままにするとき、memory に
 // 持つのは、送り直し・作り直しで書こうとした版 (書き込みが返った = storage に入ったかもしれない) か、前の版 (書き込みが投げた =
@@ -58,10 +105,14 @@ import { createPimlico } from '@/lib/pimlico';
 import { isSameIntent, isSameVersion } from './pimlicoIntentOwner';
 import {
   broadcastPimlicoUserOp,
+  bundlerErrorText,
+  findRpcRequestError,
   findUserOperationReceipt,
   isUserOpNonceConsumed,
   joinUserOpNonce,
+  mentionsNonceOrMempool,
   prepareAndSignPimlicoUserOp,
+  readBundlerOpStatus,
   reserveUserOpNonce,
   splitUserOpNonce,
   toUserOperationRejection,
@@ -105,6 +156,10 @@ export type PimlicoIntentRecord<Params> = {
   // 期限 (7 日) の基準。送信の控えのある記録では「最後に op を bundler へ渡した (渡そうとした) 時刻」(sendRecordedOp が
   // 送る直前に書く)。控えの無い記録 (この欄を足す前・MAv2) は今までどおり最後に書いた時刻。
   updatedAt: number;
+  // 送信ごとの一意の印 (任意の欄・版の一致に使う = pimlicoIntentOwner.ts の isSameVersion)。sendRecordedOp が bundler へ渡す直前の
+  // 書き込み (最初の送信・送り直し・作り直し) のたびに新しい値を書く。送った後の書き込み (応答不明の status・hash の直し) は
+  // 同じ送信の版の書き換えなので、値を保つ。この欄を足す前の記録・控えの無い記録には無い。
+  rev?: string;
   send?: PimlicoSendLedger;
 };
 
@@ -179,6 +234,19 @@ export type PimlicoIntentHost<Params, Result> = {
   closedError: () => Error;
 };
 
+/** 最初の送信の検証の拒否 (c2) で記録を消して閉じてよい、op を bundler に渡す直前からの経過の上限 (冒頭の「時間の柵」)。
+ * Circle の経路の REJECTION_CLOSE_WINDOW_MS (circleSend.ts) と同じ値 (テストで固定。定数を 1 つにしないのは、Circle のコードを
+ * この chunk に入れない・共有の pimlicoSend.ts を大きくしないため)。 */
+export const PIMLICO_REJECTION_CLOSE_WINDOW_MS = 30 * 1000;
+
+// 送信ごとの一意の印 (記録の rev)。128 bit の乱数 (16 進 32 桁)。crypto.getRandomValues は、viem の署名も使う Web Crypto の
+// 関数で、randomUUID と違い古い WebView・secure context でない origin にもある。
+function newRev(): string {
+  return Array.from(crypto.getRandomValues(new Uint32Array(4)), (word) =>
+    word.toString(16).padStart(8, '0'),
+  ).join('');
+}
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -226,11 +294,24 @@ function discardIfVersion<Params, Result>(
   host: PimlicoIntentHost<Params, Result>,
   known: readonly PimlicoIntentRecord<Params>[],
 ): boolean {
+  return discardOwnVersion(host, known) !== 'kept';
+}
+
+// 上と同じ削除で、「消した」と「もう無かった」を分けて返す (c2 が使う):
+//   discarded = storage の記録は known の版で、それを消して確かめた。
+//   gone      = この key に記録が無かった (ほかの試みが先に閉じた・確定させて消した・storage が消された)。
+//   kept      = 別の版・別の intent の記録がある・storage が読めない・消したと確かめられない (何も消していない)。
+// 「もう無かった」を「消した」と同じに扱ってよいのは、送っていない op の片付け (discardIfVersion の呼び出し元 = 保存を確かめ
+// られなかった op) だけ。bundler へ渡した op の記録が無いのは、ほかの画面がその支払いを確定させて消したからかもしれない。
+function discardOwnVersion<Params, Result>(
+  host: PimlicoIntentHost<Params, Result>,
+  known: readonly PimlicoIntentRecord<Params>[],
+): 'discarded' | 'gone' | 'kept' {
   const stored = storedVersion(host, known);
-  if (stored === 'match') return host.discard();
-  if (stored === 'none') return true;
+  if (stored === 'match') return host.discard() ? 'discarded' : 'kept';
+  if (stored === 'none') return 'gone';
   logger.warn('pimlico.pending.not-owner', { userOpHash: known[0]?.userOpHash, stored, action: 'discard' });
-  return false;
+  return 'kept';
 }
 
 // 期限 (c4・c5) で閉じる削除: true = この key に記録が無い (消して確かめた・ほかの試みが先に閉じていた)。消すのは、storage の記録が
@@ -372,8 +453,13 @@ async function sendRecordedOp<Params, Result>(
       stored: Exclude<PimlicoPersistResult, 'stored'>,
       attempted: LedgerIntentRecord<Params>,
     ) => never;
-    // bundler が検証で拒否した (HTTP 2xx + allowlist の code)。sent = 送った記録 (送った時刻入り)。
-    onRejected: (error: unknown, sent: LedgerIntentRecord<Params>) => Promise<Result>;
+    // bundler がこの送信を検証で拒否した (HTTP 2xx + allowlist の code)。sent = 送った記録 (送った時刻入り = 壁時計)。
+    // sentAtMono = その時刻を書く直前の単調な時計 (performance.now)。c2 の時間の柵の起点 (冒頭)。
+    onRejected: (
+      error: unknown,
+      sent: LedgerIntentRecord<Params>,
+      sentAtMono: number,
+    ) => Promise<Result>;
   },
 ): Promise<Result> {
   // (a) 失効した試みは、保存も送信もしない。何の波及を断つか: ウォレットの署名 (または照合の RPC・送り直しへの答え) を待つ間に
@@ -390,7 +476,10 @@ async function sendRecordedOp<Params, Result>(
     }
     throw cancelled();
   }
-  let record: LedgerIntentRecord<Params> = { ...args.record, updatedAt: Date.now() };
+  // c2 の時間の柵の起点 (単調な時計)。壁時計の起点は下の updatedAt。書く前に測る (経過を短く見積もらない側)。
+  const sentAtMono = performance.now();
+  // rev = この送信の一意の印 (版の一致・冒頭)。渡す直前の書き込みのたびに新しい値にする (送り直しでも前の値を引き継がない)。
+  let record: LedgerIntentRecord<Params> = { ...args.record, updatedAt: Date.now(), rev: newRev() };
   const stored = host.persist(record);
   if (stored !== 'stored') return args.onNotStored(stored, record);
   host.setStoreUnavailable(false);
@@ -403,7 +492,9 @@ async function sendRecordedOp<Params, Result>(
     signedUserOp: record.send.signedUserOp,
     entryPoint: record.send.entryPoint,
   });
-  if (outcome.kind === 'validation-rejected') return args.onRejected(outcome.error, record);
+  if (outcome.kind === 'validation-rejected') {
+    return args.onRejected(outcome.error, record, sentAtMono);
+  }
   if (outcome.kind === 'unknown') {
     // bundler が受理した後に応答だけ失われた可能性がある。通常の error にすると、成立した op の上に
     // 再試行・通常決済が開いて二重払いになる (A-1)。保存済みの記録を応答不明としてラッチする。
@@ -534,21 +625,97 @@ async function buildAndSend<Params, Result>(
       host.setStoreUnavailable(true);
       throw host.storeUnavailableError();
     },
-    onRejected: async (error, sent) => {
+    onRejected: async (error, sent, sentAtMono) => {
       if (previous) {
         // c3: 作り直しの op を bundler が断った。前の候補が mempool に残っていることがある (Replacement
         // underpriced 等) ので、この拒否は前の候補が無いことの証拠にならない。code が allowlist のものでも開いたまま。
         // 次に確かめるとき、前の op の receipt も引く。
         return holdAsUnknown(host, sent, [sent], 'pimlico.rebuild.rejected', error);
       }
-      // c2: 最初の送信を bundler が検証で拒否した = この送信の op は mempool に入っていない。
-      // 記録を消したと確かめられたとき (ほかの画面が先に閉じていたときを含む) だけ閉じ、今までどおりの error にする (nonce の
-      // 予約は残さない・金額を変えた再試行も通常決済もできる)。確かめられなければ、残った op が後で送られうるので開いたまま。
-      // 消すのは storage の記録が、この試みが送る直前に書いた版 (sent) のときだけ。拒否が示すのは「この送信が断られた」ことだけで、
-      // その後の送信や候補が無いことではない: 拒否の答えが遅れる間に、ほかの画面が同じ nonce で送り直した・作り直した (mempool に
-      // ある) 記録や、この intent を閉じて始めた別の支払いの記録は、消さずに開いたまま (応答不明。holdAsUnknown もそれには書かない)。
-      if (!discardIfVersion(host, [sent])) {
-        return holdAsUnknown(host, sent, [sent], 'pimlico.send.rejected-unverified', error);
+      // c2: 最初の送信を bundler が検証で拒否した。検証の拒否が示すのは「この送信が断られた」ことだけで、この op が mempool に
+      // 入っていない・取り込まれていないことは示さない。何の波及を断つか: **この op 自身がもう届いている** (送信が途中で 2 回届き、
+      // 1 回目は受理された・先に取り込まれた) ために、重複の配送にだけ返った拒否で記録を消して閉じると、次の試みは新しい nonce の
+      // op になり (本番で動く simple 7702 は nonce の key が時刻由来で、試みごとに新しい)、取り込まれる支払いの上にもう 1 本払う。
+      // 閉じる前に 4 つを確かめる。どれかで止まれば応答不明にして、次の再確認 (resolveOpenIntent) が候補の receipt と EntryPoint の
+      // nonce を読んで決める (receipt があれば確定)。
+      //
+      // (1) 語: 拒否の文が nonce・mempool・重複・置き換えに触れているとき (HTTP 200 + -32500「AA25 invalid account nonce」・
+      //     「replacement underpriced」等) は閉じない。見るのは bundler が返した文だけ (viem の error の message は、送った request の
+      //     本文 = "nonce" の欄を載せるので見ない・語の定義は Circle の経路と同じ 1 つ = pimlicoSend.ts)。共有の分類
+      //     (classifyBroadcastError) には入れない: 送り直しの拒否 (同じ nonce で作り直す) の動きを変えない。
+      //     害: nonce の key が固定 (0) の account (MetaMask のスマートアカウント。ガスレスは flag つきで、hooks/useSmartAccount.ts の
+      //     コメントでは無効の扱い) では、別のタブ・別の dapp が先に nonce を使った正当な AA25 でも応答不明になり、同じ chain・
+      //     customer・token の支払いが、期限 (最後に bundler へ渡してから 7 日・c5) まで止まる。利用者が自分で閉じる手段は無い。
+      //     simple 7702 (key が時刻由来) では、最初の送信に nonce の拒否が返るのは、この op 自身が届いている場合に偏る (推測)。
+      if (mentionsNonceOrMempool(bundlerErrorText(findRpcRequestError(error)))) {
+        return holdAsUnknown(host, sent, [sent], 'pimlico.send.rejected-nonce-or-mempool', error);
+      }
+      // (2) status: bundler にその op の状態を 1 回聞き、**「その hash を知らない」(not_found) と答えたときだけ** 閉じる。語に
+      //     当たらない拒否 (preVerificationGas が足りない等) も、受理された op の重複の配送にだけ返ることがある (冒頭の「閉じる前に
+      //     bundler へ聞く」)。ほかの status・型に無い値・読めない (通信の失敗・timeout・形の崩れた応答) は閉じない。
+      //     語の確認 (1) を残す理由: status と語は別の失敗を断つ。status の記録が bundler の中で反映される前に聞いてしまう場合
+      //     (受理した node と聞いた node のずれ) でも、nonce・重複の拒否は語で止まる。
+      //     害: 拒否のたびに request が 1 回増える。status を読めない間は閉じられず、応答不明になる (再確認は nonce が未使用なら
+      //     同じ op を送り直す)。限界は冒頭の「閉じる前に bundler へ聞く」。
+      const status = await readBundlerOpStatus({
+        transport: sender.client.transport,
+        userOpHash: sent.userOpHash,
+      });
+      if (!status.unknownToBundler) {
+        return holdAsUnknown(
+          host,
+          sent,
+          [sent],
+          'pimlico.send.rejected-op-status',
+          new Error(`bundler-status:${status.status}`),
+        );
+      }
+      // (3) 時間の柵: not_found で閉じてよいのは、op を bundler に渡す直前から、status を聞き終えた今までが上限未満のときだけ
+      //     (壁時計と単調な時計の両方で。どちらかが上限以上・壁時計の経過が負なら閉じない)。何の波及を断つか: bundler の status は
+      //     最後の書き込みから 1 時間で消え、その後は受理された (待機中・取り込み済みの) op でも not_found が返る。拒否の処理が
+      //     遅れて再開したとき (タブの停止など) に、それを「知らない」と読んで記録を消し、新しい nonce の支払いを開けること (冒頭の
+      //     「時間の柵」)。ここから下の discardIfVersion まで await を挟まない (測った後に遅れる隙間を作らない)。
+      //     害: 拒否の処理が 30 秒以上遅れたとき (status の照会が遅い・タブが止まっていた) は、正当な拒否でも閉じず、応答不明になる。
+      const wallElapsedMs = Date.now() - sent.updatedAt;
+      const monoElapsedMs = Math.round(performance.now() - sentAtMono);
+      if (
+        wallElapsedMs < 0 ||
+        wallElapsedMs >= PIMLICO_REJECTION_CLOSE_WINDOW_MS ||
+        monoElapsedMs >= PIMLICO_REJECTION_CLOSE_WINDOW_MS
+      ) {
+        return holdAsUnknown(
+          host,
+          sent,
+          [sent],
+          'pimlico.send.rejected-late',
+          new Error(`late:wallElapsedMs=${wallElapsedMs},monoElapsedMs=${monoElapsedMs}`),
+        );
+      }
+      // bundler はこの hash を知らないと答え、柵の内。status の await の後なので、下の削除は版の一致 (compare-and-set) を通す。
+      // (4) 記録: 閉じるのは、**storage の記録がこの試みが送る直前に書いた版 (sent) のままで、それを自分で消せたときだけ**
+      //     (今までどおりの error・nonce の予約は残さない・金額を変えた再試行も通常決済もできる)。拒否が示すのは「この送信が
+      //     断られた」ことだけで、その後の送信や候補が無いことではない:
+      //     - 別の版・別の intent の記録がある・storage が読めない・消したと確かめられない (kept): 拒否の答えが遅れる間に、
+      //       ほかの画面が同じ nonce で送り直した・作り直した (mempool にある) 記録や、この intent を閉じて始めた別の支払いの
+      //       記録は、消さずに開いたまま (応答不明。holdAsUnknown もそれには書かない)。版は送信ごとの印 (rev) でも比べるので、
+      //       同じ op を同じ ms に送り直した記録も別の版。
+      //     - **記録がもう無い (gone)**: 「断られた」と伝えない (応答不明)。何の波及を断つか: 拒否の答えが遅れる間に、ほかの画面が
+      //       同じ nonce で作り直して確定させ、記録を消していたとき (作り直した op は hash が別なので、上の status は正しく
+      //       not_found)、この画面が error を出して intent を外すと、やり直しが新しい nonce の op になり、済んだ支払いの上に
+      //       もう 1 本払う。holdAsUnknown は空の storage に書かない (消えた記録をよみがえらせない) ので、残るのはこの画面の
+      //       memory のラッチだけ: 次の再確認 (resolveOpenIntent) は候補の receipt と EntryPoint の nonce を読むだけで、新しい
+      //       nonce の署名へは進まない。
+      //       害: ほかの画面が同じ支払いを確定させた後、この画面は「送信結果を確認中」のまま残る (この画面は作り直した op の
+      //       hash を知らないので、再確認しても成功にならない。読み込み直すと消える)。
+      const discarded = discardOwnVersion(host, [sent]);
+      if (discarded !== 'discarded') {
+        return holdAsUnknown(
+          host,
+          sent,
+          [sent],
+          discarded === 'gone' ? 'pimlico.send.rejected-record-gone' : 'pimlico.send.rejected-unverified',
+          error,
+        );
       }
       host.release(sent);
       throw toUserOperationRejection(error, { signed: built.signed, calls });

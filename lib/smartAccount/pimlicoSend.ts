@@ -14,6 +14,10 @@
 // ここは通信と署名の素の部品だけを持つ。保存・ラッチ・分類の後の扱いは hook の側。
 // 対象は permissionless の createSmartAccountClient で作った client (simple 7702・MetaMask)。
 // MAv2 (lib/smartAccount/mav2.ts) は aa-sdk を包んだ facade で sendUserOperation しか無く、ここを通らない。
+//
+// bundle: この module は 2 つの遅延 chunk (pimlicoIntent.ts・circleAccount.ts) から共有される。型を外した後の大きさ (コメントを
+// 含む) が約 20 kB を超えると webpack が別の chunk に分け、/pay などの First Load が 26 byte 増える (2026-11-13 に build で
+// 実測: 20.4 kB で分かれ、18.3 kB で分かれない。splitChunks の minSize と合う)。長い説明は pimlicoIntent.ts の冒頭に置く。
 
 import {
   createClient,
@@ -157,7 +161,8 @@ export type PreparedPimlicoUserOp = Awaited<
 >;
 
 export type BroadcastFailureKind =
-  // HTTP 2xx の応答で、bundler が ERC-4337 の検証の拒否 (下の allowlist の code) を返した = この op を受け付けていない。
+  // HTTP 2xx の応答で、bundler が ERC-4337 の検証の拒否 (下の allowlist の code) を返した = **この送信** を受け付けなかった
+  // (同じ op の前の配送が受理されていないことまでは言えない = 下の readBundlerOpStatus)。
   | 'validation-rejected'
   // bundler が JSON-RPC の error で「その op はもう持っている」と答えた (mempool にある)。
   | 'already-known'
@@ -220,18 +225,23 @@ export async function broadcastPimlicoUserOp(args: {
   }
 }
 
-type RpcRequestErrorLike = {
+export type RpcRequestErrorLike = {
   name: 'RpcRequestError';
   code?: unknown;
+  // bundler が返した JSON-RPC の error の message そのもの (viem の RpcRequestError の details)。
   details?: unknown;
+  // viem が組み立てた文。**送った request の本文 (署名済みの op) と URL を含む** ので、bundler の言い分として読まない。
   message?: unknown;
+  // bundler が返した JSON-RPC の error の data。
+  data?: unknown;
 };
 
 // viem の http transport は、応答の本文に JSON-RPC の error があるときだけ RpcRequestError を投げる
 // (node_modules/viem/clients/transports/http.ts)。client はそれを code ごとの RpcError で包むので cause をたどる。
 // timeout (TimeoutError)・本文が JSON-RPC の error でない HTTP の失敗 (HttpRequestError)・fetch の失敗には
 // RpcRequestError が無い。
-function findRpcRequestError(error: unknown): RpcRequestErrorLike | null {
+// export は Circle の経路 (lib/smartAccount/circleAccount.ts) が、同じ error から拒否の code と bundler の文を読むため。
+export function findRpcRequestError(error: unknown): RpcRequestErrorLike | null {
   let current: unknown = error;
   while (current !== null && typeof current === 'object') {
     if ((current as { name?: unknown }).name === 'RpcRequestError') {
@@ -244,7 +254,7 @@ function findRpcRequestError(error: unknown): RpcRequestErrorLike | null {
 
 const ALREADY_KNOWN_RE = /already known|already in (?:the )?mempool/i;
 
-// 「bundler がこの op を受け付けていない」と言える JSON-RPC の error の code (allowlist)。
+// 「bundler がこの送信を受け付けなかった」と言える JSON-RPC の error の code (allowlist)。
 // 根拠: ERC-7769 (ERC-4337 の JSON-RPC の API) が eth_sendUserOperation の検証の失敗に割り当てる code で、
 // -32602 = UserOperation の形・値が不正、-32500 = EntryPoint の検証 (account の validateUserOp・作成) で拒否、
 // -32501 = paymaster の validatePaymasterUserOp で拒否、-32502 = opcode の規則に違反、-32503 = 有効期間の外、
@@ -264,6 +274,7 @@ const BUNDLER_VALIDATION_REJECTION_CODES: ReadonlySet<number> = new Set([
  * allowlist にあるときだけ。判別できないものは必ず 'unknown' に倒す (取り違えたときの被害が非対称:
  * unknown を「受け付けていない」と読むと、取り込まれうる op の上に通常決済や別の支払いが開く)。
  * httpStatus は応答が届いたときの status (届かなかったときは undefined)。
+ * 言えるのは「この送信」についてだけ。閉じる側は、下の語の確認と readBundlerOpStatus も要る。
  */
 export function classifyBroadcastError(
   error: unknown,
@@ -278,6 +289,93 @@ export function classifyBroadcastError(
   return typeof rpc.code === 'number' && BUNDLER_VALIDATION_REJECTION_CODES.has(rpc.code)
     ? 'validation-rejected'
     : 'unknown';
+}
+
+/**
+ * bundler が返した JSON-RPC の error の文 (message = viem の RpcRequestError の details と、data の JSON)。
+ * viem の error の message は入れない: 送った request の本文 (署名済みの op = "nonce" という欄を必ず含む) と URL を載せるので、
+ * bundler の言い分として読むと、どの拒否も下の語に当たる。
+ */
+export function bundlerErrorText(rpc: RpcRequestErrorLike | null): string {
+  const details = typeof rpc?.details === 'string' ? rpc.details : '';
+  const data = rpc?.data === undefined ? '' : JSON.stringify(rpc.data);
+  return `${details} ${data}`;
+}
+
+// 検証の拒否 (HTTP 2xx + allowlist の code) でも、bundler の言い分にこの語があるときは「この op を受け付けていない」と読まない
+// (第 10 回レビュー PR-39 の S1)。nonce の key が時刻由来で試みごとに新しい op (Circle の経路・Pimlico の経路の simple 7702) の
+// **最初の送信** に nonce・mempool・重複・置き換えの拒否が返るなら、もっとも考えやすいのは **この op 自身がもう届いている** こと
+// (送信が途中で 2 回届いた・先に取り込まれた)。閉じると、取り込まれる支払いの上に新しい支払いが開く。語は広めに取る
+// (外れても確認待ちに残るだけ = 払えない側)。
+//   AA25 = EntryPoint の「nonce が違う」/ nonce / mempool (「もう mempool にある」「mempool の上限」) /
+//   already (already known 以外の「もう…」) / replace (replacement underpriced = 同じ nonce の op がもうある)
+// 語の定義はここ 1 つ。使うのは「最初の送信の拒否で閉じてよいか」を決める 2 か所だけ: Circle の経路の分類
+// (circleAccount.ts の classifyCircleBroadcastError) と、Pimlico の経路の c2 (pimlicoIntent.ts の buildAndSend)。
+// 上の classifyBroadcastError には入れない (送り直しの拒否 = 同じ nonce で作り直す、の動きを変えない)。
+// 語に当たらなければ閉じてよい、ではない。閉じる前には必ず下の readBundlerOpStatus も聞く (語の確認を残す理由も含めて
+// pimlicoIntent.ts の冒頭の「閉じる前に bundler へ聞く」)。
+const NOT_REJECTION_PROOF_RE = /AA25|nonce|mempool|already|replace/i;
+
+/** bundler の JSON-RPC の error の文 (bundlerErrorText) が、上の語を含むか。 */
+export function mentionsNonceOrMempool(bundlerText: string): boolean {
+  return NOT_REJECTION_PROOF_RE.test(bundlerText);
+}
+
+/** bundler に聞いた、ある op (userOpHash) の状態 (readBundlerOpStatus)。 */
+export type BundlerOpStatus = {
+  /** bundler が「その hash を知らない」(status が not_found) と答えたときだけ true。 */
+  unknownToBundler: boolean;
+  /** log に載せる値: bundler の答えた status (長さを切る)、読めなかったときは `unreadable:<理由>`。 */
+  status: string;
+};
+
+/**
+ * bundler に、その op (userOpHash) の状態を 1 回聞く (`pimlico_getUserOperationStatus`・再送なし・timeout は transport の値)。
+ * 最初の送信の検証の拒否で intent / 記録を閉じる前に使う (pimlicoIntent.ts の c2・circleSend.ts の closeRejectedFirstSend)。
+ * なぜ要るか・閉じない側の値・限界は pimlicoIntent.ts の冒頭の「閉じる前に bundler へ聞く」。
+ * unknownToBundler が true になるのは not_found のときだけ。ほかの status・型に無い値・読めなかったときは false = 閉じない側。
+ * 失敗は投げずに「読めなかった」で返す。何の波及を断つか: 付帯の照会の失敗が、送った後の扱い (応答不明・確認待ち) を別の error に
+ * 変えること。握りつぶさない: 呼び出し側が status の値 (unreadable:<error の name>) を log に残し、閉じない側へ進む。
+ * 理由に viem の error の message は入れない (URL を含む)。
+ */
+export async function readBundlerOpStatus(args: {
+  // bundler の http transport の設定 (送信と同じ URL・timeout)。
+  transport: { url?: string; timeout?: number; fetchOptions?: HttpTransportConfig['fetchOptions'] };
+  userOpHash: Hex;
+}): Promise<BundlerOpStatus> {
+  try {
+    const { url, timeout, fetchOptions } = args.transport;
+    const reader = createClient({
+      transport: http(url, { retryCount: 0, timeout, fetchOptions }),
+    });
+    const request = reader.request as unknown as (
+      parameters: { method: 'pimlico_getUserOperationStatus'; params: [Hex] },
+      options: { retryCount: number },
+    ) => Promise<unknown>;
+    // viem の http は、HTTP が 2xx のときだけ result を返す (2xx 以外は、本文が JSON-RPC の error なら RpcRequestError・
+    // それ以外は HttpRequestError を投げる = 下の catch)。
+    const result = (await request(
+      { method: 'pimlico_getUserOperationStatus', params: [args.userOpHash] },
+      { retryCount: 0 },
+    )) as { status?: unknown; transactionHash?: unknown } | null;
+    const status = result?.status;
+    // 形の崩れた応答: status が文字列でない・「知らない」と言いながら transaction を持つ (知らないと読まない)。
+    if (
+      typeof status !== 'string' ||
+      (status === 'not_found' && (result?.transactionHash ?? null) !== null)
+    ) {
+      return { unknownToBundler: false, status: 'unreadable:malformed' };
+    }
+    return { unknownToBundler: status === 'not_found', status: status.slice(0, 40) };
+  } catch (error) {
+    const rpc = findRpcRequestError(error);
+    const reason = rpc
+      ? `RpcRequestError ${String(rpc.code)}`
+      : error instanceof Error
+        ? error.name
+        : 'unknown';
+    return { unknownToBundler: false, status: `unreadable:${reason}` };
+  }
 }
 
 /**

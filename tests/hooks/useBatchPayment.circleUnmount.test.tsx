@@ -17,7 +17,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { getAddress, type Address, type Hex } from 'viem';
+import { getAddress, RpcRequestError, type Address, type Hex } from 'viem';
 import { baseSepolia } from 'viem/chains';
 import type { ReactNode } from 'react';
 import { useBatchPayment } from '@/hooks/useBatchPayment';
@@ -35,14 +35,26 @@ vi.mock('wagmi', () => ({
 vi.mock('@/lib/logger', () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
-vi.mock('@/lib/smartAccount/circleAccount', () => ({
-  signUsdcPermit: vi.fn(),
-  prepareAndSignCircleUserOp: vi.fn(),
-  broadcastCircleUserOp: vi.fn(),
-  waitForCircleReceipt: vi.fn(),
-  getCircleUserOpGasPrice: vi.fn(),
-  entryPoint08Address: '0x4337084D9E255Ff0702461CF8895CE9E3b5Ff108',
-}));
+vi.mock('@/lib/smartAccount/circleAccount', () => {
+  const broadcastCircleUserOp = vi.fn();
+  return {
+    signUsdcPermit: vi.fn(),
+    prepareAndSignCircleUserOp: vi.fn(),
+    broadcastCircleUserOp,
+    // 自分の最初の送信は「用意 (prepareCircleBroadcast) → 返った関数で送る」の 2 段 (PR-39b)。本物の broadcastCircleUserOp は
+    // 同じ用意と送信を続けて行うだけなので、偽物も同じ mock に流す (最初の送信も送り直しも broadcastCircleUserOp で見る)。
+    prepareCircleBroadcast:
+      (bundle: unknown) =>
+      (signedUserOp: unknown) =>
+        broadcastCircleUserOp({ bundle, signedUserOp }),
+    waitForCircleReceipt: vi.fn(),
+    // 最初の送信の検証拒否で閉じる前に、bundler にその op の状態を聞く (PR #1084)。偽物の bundler は「その hash を知らない」
+    // と答える (検証で拒否した op を一度も受理していない)。
+    readCircleUserOpStatus: async () => ({ unknownToBundler: true, status: 'not_found' }),
+    getCircleUserOpGasPrice: vi.fn(),
+    entryPoint08Address: '0x4337084D9E255Ff0702461CF8895CE9E3b5Ff108',
+  };
+});
 // 成功の後の監査 (receipt の再計算) は best-effort の RPC。結果は支払いの成否に関係しない。
 vi.mock('@/lib/circleReceiptVerifier', () => ({
   verifyCircleReceiptOnChain: vi.fn(async () => ({
@@ -64,6 +76,11 @@ import {
   type CircleReconcileResult,
 } from '@/lib/circleReceiptVerifier';
 import { mockHook } from '../_helpers/wagmiMock';
+
+// 本物の circleAccount の、送信の error の class と分類 (I/O ではない部分)。H-X の test が、本物と同じ error を作るのに使う。
+const actualCircleAccount = await vi.importActual<
+  typeof import('@/lib/smartAccount/circleAccount')
+>('@/lib/smartAccount/circleAccount');
 
 const usdcDep = defaultDeploymentForSymbol('usdc');
 const TOKEN: Address = getAddress('0x036CbD53842c5426634e7929541eC2318f3dCF7e');
@@ -801,5 +818,102 @@ describe('storage の失敗の押下と attemptId の対応 (hook → 本物の 
     expect(Object.keys(mappingAfter)).toEqual(Object.keys(mappingBefore));
     expect(Object.values(mappingAfter)).not.toEqual(Object.values(mappingBefore));
     expect(sentOps()).toEqual([]);
+  });
+});
+
+// 第 10 回レビュー H-X (PR-39b): 自分の最初の送信を bundler が検証で拒否したら、記録を閉じて「送信の受付で断られた」で終える。
+// 直す前: 「応答の喪失」と同じ扱いで確認待ち (CirclePendingError) になり、対応が残って、押すたびに 120 秒待ち → 同じ op の
+// 送り直し (また拒否) → 120 秒待ち、を繰り返した (その内容の支払いが、このタブで払えない)。
+// 送信の error は、本物の circleAccount が投げるのと同じもの (viem の RpcRequestError を本物の分類に通す)。
+describe('H-X: 最初の送信の検証拒否 (hook → 本物の executeCirclePayment)', () => {
+  const waitedHashes = () => vi.mocked(waitForCircleReceipt).mock.calls.map((c) => c[0].hash);
+
+  function bundlerSays(reply: { code: number; message: string }) {
+    const cause = new RpcRequestError({
+      body: { method: 'eth_sendUserOperation', params: [OP_A.signedUserOp] },
+      error: reply,
+      url: 'https://bundler.test/rpc',
+    });
+    return new actualCircleAccount.CircleBroadcastError({
+      ...actualCircleAccount.classifyCircleBroadcastError(cause, 200),
+      cause,
+    });
+  }
+
+  // 署名 1・署名 2 を承認する。OP_A の送信には bundler が reply の拒否を返す。
+  async function payAndGetRejected(
+    screen: ReturnType<typeof openScreen>,
+    reply: { code: number; message: string },
+  ) {
+    screen.result.current.mutate(PARAMS);
+    await waitFor(() => expect(permitRequests).toHaveLength(1));
+    permitRequests[0].approve(PERMIT);
+    await waitFor(() => expect(userOpRequests).toHaveLength(1));
+    vi.mocked(broadcastCircleUserOp).mockImplementationOnce(async () => {
+      throw bundlerSays(reply);
+    });
+    userOpRequests[0].approve(OP_A);
+    await waitFor(() => expect(screen.result.current.isError).toBe(true));
+  }
+
+  it('最初の送信を bundler が検証で拒否 → 専用の error・待たない・対応が消える → 次の押下は新しい支払い (署名 2 回から・別の op を 1 回だけ送る)', async () => {
+    const screen = openScreen();
+    await payAndGetRejected(screen, { code: -32501, message: 'AA33 reverted (or OOG)' });
+
+    // 確認待ちではない。画面に出る文は固定で、bundler の生の文 (AA33…) を含まない。
+    const error = screen.result.current.error;
+    expect(error?.name).toBe('CircleSendRejectedError');
+    expect(error?.message).toBe(
+      'USDC ガスレスの支払いは、送信の受付で断られました。この支払いは送金されていません。' +
+        '残高が足りないなどの理由が考えられます。もう一度お試しください (署名からやり直します)。',
+    );
+    // 拒否が返った時点で終わる (receipt を待たない・送り直さない)。記録は failed・対応は消える。
+    expect(sentOps()).toEqual([OP_A.signedUserOp]);
+    expect(waitedHashes()).toEqual([]);
+    expect(recordStatuses()).toEqual(['failed']);
+    expect(mappings()).toEqual({});
+
+    // 同じ画面でもう一度押す → 新しい attemptId の新しい支払い: 署名 1・署名 2 を求め直し、別の op を 1 回だけ送る。
+    screen.result.current.mutate(PARAMS);
+    await waitFor(() => expect(permitRequests).toHaveLength(2));
+    expect(Object.keys(mappings())).toHaveLength(1);
+    permitRequests[1].approve(PERMIT);
+    await waitFor(() => expect(userOpRequests).toHaveLength(2));
+    userOpRequests[1].approve(OP_B);
+    await waitFor(() => expect(screen.result.current.isSuccess).toBe(true));
+
+    expect(screen.result.current.data).toMatchObject({
+      userOpHash: OP_B.userOpHash,
+      txHash: OP_B.txHash,
+      success: true,
+    });
+    expect(permitRequests).toHaveLength(2);
+    expect(userOpRequests).toHaveLength(2);
+    expect(sentOps()).toEqual([OP_A.signedUserOp, OP_B.signedUserOp]);
+    expect(waitedHashes()).toEqual([OP_B.userOpHash]);
+    expect(recordStatuses().sort()).toEqual(['confirmed', 'failed']);
+    expect(mappings()).toEqual({});
+  });
+
+  // S1: nonce の拒否は「受け付けていない」と読まない (この op 自身がもう届いている疑い)。閉じず、今までどおり確認待ち。
+  it('最初の送信の拒否が nonce (AA25) → 閉じない: 確認待ち・対応が残る・記録は submitting のまま', async () => {
+    // receipt は返らない (bundler の 5xx)。待ちの失敗では、その押下で送り直さない (PR-39a)。
+    bundlerDown = true;
+    const screen = openScreen();
+    await payAndGetRejected(screen, { code: -32500, message: 'AA25 invalid account nonce' });
+
+    expect(screen.result.current.error?.name).toBe('CirclePendingError');
+    expect(sentOps()).toEqual([OP_A.signedUserOp]);
+    expect(waitedHashes()).toEqual([OP_A.userOpHash]);
+    expect(recordStatuses()).toEqual(['submitting']);
+    expect(Object.keys(mappings())).toHaveLength(1);
+
+    // bundler が戻ってからもう一度押すと、署名なしで同じ op の結果を受け取る (その op は取り込まれていた)。
+    bundlerDown = false;
+    screen.result.current.mutate(PARAMS);
+    await waitFor(() => expect(screen.result.current.isSuccess).toBe(true));
+    expect(screen.result.current.data).toMatchObject({ userOpHash: OP_A.userOpHash, success: true });
+    expect(permitRequests).toHaveLength(1);
+    expect(sentOps()).toEqual([OP_A.signedUserOp]);
   });
 });
