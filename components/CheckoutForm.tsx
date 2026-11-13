@@ -574,9 +574,12 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   //    される。同一 tx hash の重複 webhook を防ぐため key 単位の dedup gate を使う。
   const notifiedKeyRef = useRef<string | null>(null);
   const partialOrderNotifiedKeyRef = useRef<string | null>(null);
+  // customerMemo = 部分の通知が sessionStorage から読んだお客様のメモ。部分の通知は読んだ直後に sessionStorage から
+  // 消すので、同じ支払い (key = merchantTxHash) の後の通知 (2 回目の部分の通知・完了の通知) はここから載せる。
   const partialOrderNotifyPromiseRef = useRef<{
     key: string;
     promise: Promise<void>;
+    customerMemo: string | undefined;
   } | null>(null);
 
   // webhook/記録は「送金した瞬間の額」を報告する (成功描画時の live breakdown は
@@ -852,6 +855,15 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
           // sessionStorage 障害を受注通知/決済完了処理へ波及させない (メモは advisory)。
         }
       }
+      // 同じ支払い (key = merchantTxHash) の部分の通知。通常決済では、部分の通知が先にメモを読んで sessionStorage から
+      // 消している。その通知がサーバーに保存されず (通信の失敗・503・422)、この完了の通知が最初の保存になったときに
+      // メモだけ欠ける波及を断つため、部分の通知が読んだメモを載せる。sessionStorage に値があれば今までどおりそれを使う。
+      const partialNotify =
+        completion.mode === 'standard' &&
+        partialOrderNotifyPromiseRef.current?.key === completion.key
+          ? partialOrderNotifyPromiseRef.current
+          : null;
+      const notifyMemo = customerMemo ?? partialNotify?.customerMemo;
       const payload = {
         type: 'openpay.checkout.success',
         mode: completion.mode,
@@ -877,7 +889,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
         // 受取予定時刻 (任意・Phase 4・preorder)。受注に素通し保存され厨房/ホールが表示 (advisory)。
         ...(params.pickupAt !== undefined ? { pickupAt: params.pickupAt } : {}),
         // 同一 origin の受注 notify に限り、URL に載せず sessionStorage から任意メモを渡す。
-        ...(customerMemo ? { customerMemo } : {}),
+        ...(notifyMemo ? { customerMemo: notifyMemo } : {}),
         // URL 仕様 (lib/url.ts) で customerEmail は prefill 専用・クライアントから送信しない、
         // と明記しているため payload に含めない (orderId で突合可能)。
         ...completion.hashFields,
@@ -928,11 +940,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
               webhookHash: redacted.hash,
             });
           });
-      const partial =
-        completion.mode === 'standard' &&
-        partialOrderNotifyPromiseRef.current?.key === completion.key
-          ? partialOrderNotifyPromiseRef.current.promise
-          : null;
+      const partial = partialNotify?.promise;
       // merchant 確定通知の KV claim が処理中のまま通常成功通知と競合し、後者が 409 で失われる
       // 波及を断つ。部分通知の成否にかかわらず完了後に従来 payload を同じ byte で送る。
       if (partial) {
@@ -1138,6 +1146,15 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
         // sessionStorage 障害を受注通知へ波及させない (メモは advisory)。
       }
     }
+    // 1 回目の部分の通知はメモを読んだ直後に sessionStorage から消す。1 回目がサーバーに保存されず、2 回目
+    // (feeTxHash つき) が最初の保存になったときにメモだけ欠ける波及を断つため、同じ支払い (merchantTxHash) の
+    // 1 回目が読んだメモを 2 回目にも載せる。別の支払いのメモは使わない。
+    const earlierNotify = partialOrderNotifyPromiseRef.current;
+    const notifyMemo =
+      customerMemo ??
+      (earlierNotify?.key === standard.merchantTxHash
+        ? earlierNotify.customerMemo
+        : undefined);
 
     logger.info('checkout.order.delivered_fee_uncollected', {
       merchantTxHash: standard.merchantTxHash,
@@ -1167,7 +1184,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
       description: params.description,
       ...(statusTokenForOrder ? { statusToken: statusTokenForOrder } : {}),
       ...(params.pickupAt !== undefined ? { pickupAt: params.pickupAt } : {}),
-      ...(customerMemo ? { customerMemo } : {}),
+      ...(notifyMemo ? { customerMemo: notifyMemo } : {}),
       merchantTxHash: standard.merchantTxHash,
       ...(standard.feeTxHash ? { feeTxHash: standard.feeTxHash } : {}),
       blockNumber: standard.merchantBlockNumber.toString(),
@@ -1216,6 +1233,8 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
     partialOrderNotifyPromiseRef.current = {
       key: standard.merchantTxHash,
       promise: request,
+      // 2 回目の部分の通知が作り直すときも、覚えたメモを落とさない (中身は log に出さない)。
+      customerMemo: notifyMemo,
     };
 
     if (customerMemo && params.orderId) {

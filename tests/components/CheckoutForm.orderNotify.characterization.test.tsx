@@ -1024,7 +1024,7 @@ describe('応答の表 — 経路 D: 通常決済の部分の通知 (お店へ�
   });
 
   describe('D の後に A が続く順番 (利用料も確定して完了)', () => {
-    it('部分の通知 → 完了の通知 の順に 2 回。完了の通知は feeUncollected を持たず、同じ token を使い、メモは持たない', async () => {
+    it('部分の通知 → 完了の通知 の順に 2 回。完了の通知は feeUncollected を持たず、同じ token を使い、同じメモを載せる', async () => {
       window.sessionStorage.setItem(memoKey('ord-7'), 'ねぎ抜き');
       installFetch([OK]);
       await payStandard(params, ['fee-sending', 'success']);
@@ -1037,8 +1037,8 @@ describe('応答の表 — 経路 D: 通常決済の部分の通知 (お店へ�
       expect(completion).toMatchObject({ mode: 'standard', merchantTxHash: TX_MERCHANT, feeTxHash: TX_FEE, blockNumber: '123' });
       expect(completion).not.toHaveProperty('feeUncollected');
       expect(completion.statusToken).toBe(partial.statusToken);
-      // メモは部分の通知が持って行き、sessionStorage から消えているので、完了の通知には載らない。
-      expect(completion).not.toHaveProperty('customerMemo');
+      // メモは部分の通知が読んで sessionStorage から消している。完了の通知は、同じ支払いの部分の通知が読んだメモを載せる。
+      expect(completion.customerMemo).toBe('ねぎ抜き');
       expect(view.statusLink()).toHaveAttribute('href', `/ja/order/status?t=${partial.statusToken}`);
       expect(assignSpy).toHaveBeenCalledOnce();
     });
@@ -1057,7 +1057,7 @@ describe('応答の表 — 経路 D: 通常決済の部分の通知 (お店へ�
       expect(assignSpy).toHaveBeenCalledOnce();
     });
 
-    it('部分の通知が通信の失敗でも、完了の通知は送る (メモは部分の通知と一緒に消えていて、完了の通知には載らない)', async () => {
+    it('部分の通知が通信の失敗でも、完了の通知は送る (メモは sessionStorage から消えているが、完了の通知にも同じメモが載る)', async () => {
       window.sessionStorage.setItem(memoKey('ord-7'), 'ねぎ抜き');
       installFetch([networkFailure, OK]);
       await payStandard(params, ['fee-sending', 'success']);
@@ -1066,7 +1066,7 @@ describe('応答の表 — 経路 D: 通常決済の部分の通知 (お店へ�
       expect(notifySent).toHaveLength(2);
       expect(bodyOf(notifySent[0])).toMatchObject({ feeUncollected: true, customerMemo: 'ねぎ抜き' });
       expect(bodyOf(notifySent[1])).not.toHaveProperty('feeUncollected');
-      expect(bodyOf(notifySent[1])).not.toHaveProperty('customerMemo');
+      expect(bodyOf(notifySent[1]).customerMemo).toBe('ねぎ抜き');
       expect(window.sessionStorage.getItem(memoKey('ord-7'))).toBeNull();
       expect(webhookWarnings()).toEqual(['checkout.webhook.failed']);
       expect(view.notRegisteredAlert()).toHaveLength(0);
@@ -1084,6 +1084,216 @@ describe('応答の表 — 経路 D: 通常決済の部分の通知 (お店へ�
       expect(view.statusLink()).toBeNull();
       expect(view.redirectNow()).toBeNull();
       expect(assignSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  // 部分の通知は、メモを読んだ直後に sessionStorage から消す (消す時点は変えていない)。同じ支払い (お店への送金の hash) の
+  // 後の通知 (2 回目の部分の通知・完了の通知) は、部分の通知が読んだメモを載せる。サーバーは支払いの hash ごとに最初の
+  // 1 回だけ保存し、後の本文は見ないので、部分の通知が保存されなかったとき (通信の失敗・503・422) に、後の通知が最初の
+  // 保存になってもメモが欠けない。
+  describe('メモ: 部分の通知が読んだメモを、同じ支払いの後の通知にも載せる', () => {
+    const MEMO = 'ねぎ抜き';
+    const TX_OTHER_MERCHANT = `0x${'f'.repeat(64)}`;
+    const memoStored = () => window.sessionStorage.getItem(memoKey('ord-7'));
+    const memosSent = () => notifySent.map((sent) => bodyOf(sent).customerMemo);
+    const merchantTxSent = () => notifySent.map((sent) => bodyOf(sent).merchantTxHash);
+    // メモの key を sessionStorage から消した回数。
+    const watchMemoRemovals = () => {
+      const removeItem = vi.spyOn(Storage.prototype, 'removeItem');
+      return () => removeItem.mock.calls.filter(([key]) => key === memoKey('ord-7')).length;
+    };
+    // hook の状態を 1 つ進めて描き直す。merchantTxHash を渡すと、お店への送金の hash が別の支払いにする。
+    async function advance(page: Screen, state: StandardState, merchantTxHash?: string) {
+      setStandardPayment(state);
+      if (merchantTxHash) {
+        const current = (useStandardPayment as unknown as () => ReturnType<typeof useStandardPayment>)();
+        mockHook(useStandardPayment, {
+          ...current,
+          merchantTxHash,
+          data: current.data ? { ...current.data, merchantTxHash } : undefined,
+        } as Partial<ReturnType<typeof useStandardPayment>>);
+      }
+      page.rerender(page.makeUi());
+      await settle();
+    }
+
+    it.each([
+      { name: '503 rpc_error', rejected: json(503, { error: 'rpc_error' }) },
+      { name: '422 tx_not_found', rejected: json(422, { error: 'tx_not_found' }) },
+    ])('部分の通知が $name で拒否されても、完了の通知に同じメモが載る', async ({ rejected }) => {
+      window.sessionStorage.setItem(memoKey('ord-7'), MEMO);
+      installFetch([rejected, OK]);
+      const memoRemovals = watchMemoRemovals();
+      const page = await payStandard(params, ['fee-sending']);
+      // sessionStorage からは、部分の通知を送った時点で消えている (完了の通知を待たない)。
+      expect(notifySent).toHaveLength(1);
+      expect(memoStored()).toBeNull();
+      expect(memoRemovals()).toBe(1);
+      await advance(page, 'success');
+      await runClock();
+
+      expect(notifySent).toHaveLength(2);
+      expect(bodyOf(notifySent[0])).toMatchObject({ feeUncollected: true, customerMemo: MEMO });
+      expect(bodyOf(notifySent[1])).toMatchObject({ mode: 'standard', merchantTxHash: TX_MERCHANT, feeTxHash: TX_FEE, customerMemo: MEMO });
+      expect(bodyOf(notifySent[1])).not.toHaveProperty('feeUncollected');
+      // 完了の通知は sessionStorage に触らない (消すのは、読めた部分の通知の 1 回だけ)。
+      expect(memoStored()).toBeNull();
+      expect(memoRemovals()).toBe(1);
+    });
+
+    it.each([
+      { name: '200', first: OK },
+      { name: '通信の失敗', first: networkFailure },
+      { name: '503 rpc_error', first: json(503, { error: 'rpc_error' }) },
+    ])('1 回目の部分の通知が $name → 2 回目 (利用料の送金の hash つき) と完了の通知にも同じメモが載る', async ({ first }) => {
+      window.sessionStorage.setItem(memoKey('ord-7'), MEMO);
+      installFetch([first, OK]);
+      const memoRemovals = watchMemoRemovals();
+      await payStandard(params, ['fee-sending', 'fee-unknown', 'success']);
+      await runClock();
+
+      expect(notifySent).toHaveLength(3);
+      const [firstPartial, secondPartial, completion] = notifySent.map(bodyOf);
+      expect(firstPartial).toMatchObject({ feeUncollected: true });
+      expect(firstPartial).not.toHaveProperty('feeTxHash');
+      expect(secondPartial).toMatchObject({ merchantTxHash: TX_MERCHANT, feeTxHash: TX_FEE, feeUncollected: true });
+      expect(completion).toMatchObject({ merchantTxHash: TX_MERCHANT, feeTxHash: TX_FEE });
+      expect(completion).not.toHaveProperty('feeUncollected');
+      expect(memosSent()).toEqual([MEMO, MEMO, MEMO]);
+      // sessionStorage から消すのは、読めた 1 回目だけ。後の通知は消し直さない。
+      expect(memoStored()).toBeNull();
+      expect(memoRemovals()).toBe(1);
+    });
+
+    it('メモの無い注文: どの通知の本文にも customerMemo の欄は無い (完了の通知の欄は今までと同じ)', async () => {
+      installFetch([OK]);
+      const memoRemovals = watchMemoRemovals();
+      await payStandard(params, ['fee-sending', 'fee-unknown', 'success']);
+      await runClock();
+
+      expect(notifySent).toHaveLength(3);
+      for (const sent of notifySent) expect(bodyOf(sent)).not.toHaveProperty('customerMemo');
+      const completion = bodyOf(notifySent[2]);
+      expect(completion).toEqual({
+        type: 'openpay.checkout.success',
+        mode: 'standard',
+        merchant: MERCHANT,
+        from: CUSTOMER,
+        token: 'jpyc',
+        chain: 'polygon',
+        chainId: deployment.chainId,
+        amount: '3000',
+        items: [{ name: 'チケット', qty: 1, price: '3000' }],
+        merchantAmount: NET.toString(),
+        feeAmount: FEE.toString(),
+        customerPays: TOTAL.toString(),
+        orderId: 'ord-7',
+        description: 'テーブル 3',
+        statusToken: completion.statusToken,
+        merchantTxHash: TX_MERCHANT,
+        feeTxHash: TX_FEE,
+        blockNumber: '123',
+        ts: T0,
+      });
+      expect(memoRemovals()).toBe(0);
+    });
+
+    it('別の支払い (お店への送金の hash が違う) の完了の通知には、前の部分の通知が読んだメモを載せない', async () => {
+      window.sessionStorage.setItem(memoKey('ord-7'), MEMO);
+      installFetch([OK]);
+      const page = await payStandard(params, ['fee-sending']);
+      await advance(page, 'success', TX_OTHER_MERCHANT);
+      await runClock();
+
+      expect(merchantTxSent()).toEqual([TX_MERCHANT, TX_OTHER_MERCHANT]);
+      expect(bodyOf(notifySent[1])).not.toHaveProperty('feeUncollected');
+      expect(memosSent()).toEqual([MEMO, undefined]);
+    });
+
+    it('別の支払いの部分の通知にも、前の支払いのメモを載せない。その支払いの完了の通知にも載らない', async () => {
+      window.sessionStorage.setItem(memoKey('ord-7'), MEMO);
+      installFetch([OK]);
+      const page = await payStandard(params, ['fee-sending']);
+      await advance(page, 'fee-sending', TX_OTHER_MERCHANT);
+      await advance(page, 'success', TX_OTHER_MERCHANT);
+      await runClock();
+
+      expect(merchantTxSent()).toEqual([TX_MERCHANT, TX_OTHER_MERCHANT, TX_OTHER_MERCHANT]);
+      expect(notifySent.map((sent) => bodyOf(sent).feeUncollected)).toEqual([true, true, undefined]);
+      expect(memosSent()).toEqual([MEMO, undefined, undefined]);
+    });
+
+    it('sessionStorage に値があれば、後の通知も今までどおりそれを読んで載せ、送った時点で消す', async () => {
+      window.sessionStorage.setItem(memoKey('ord-7'), MEMO);
+      installFetch([OK]);
+      const page = await payStandard(params, ['fee-sending']);
+      expect(memoStored()).toBeNull();
+      window.sessionStorage.setItem(memoKey('ord-7'), 'わさび抜き');
+      await advance(page, 'fee-unknown');
+      expect(memoStored()).toBeNull();
+      window.sessionStorage.setItem(memoKey('ord-7'), '箸は 2 膳');
+      await advance(page, 'success');
+      await runClock();
+
+      expect(notifySent).toHaveLength(3);
+      expect(memosSent()).toEqual([MEMO, 'わさび抜き', '箸は 2 膳']);
+      expect(memoStored()).toBeNull();
+    });
+
+    it('メモを読めない (sessionStorage の読み取りが失敗する) なら、部分の通知も完了の通知もメモなしで送る', async () => {
+      window.sessionStorage.setItem(memoKey('ord-7'), MEMO);
+      installFetch([OK]);
+      const real = Storage.prototype.getItem;
+      vi.spyOn(Storage.prototype, 'getItem').mockImplementation(function (this: Storage, key: string) {
+        if (key === memoKey('ord-7')) throw new Error('storage denied');
+        return real.call(this, key);
+      });
+      const memoRemovals = watchMemoRemovals();
+      await payStandard(params, ['fee-sending', 'fee-unknown', 'success']);
+      await runClock();
+
+      expect(notifySent).toHaveLength(3);
+      expect(memosSent()).toEqual([undefined, undefined, undefined]);
+      expect(memoRemovals()).toBe(0);
+    });
+
+    it('部分の通知が無い完了 (利用料 0 の通常決済) は、今までどおり完了の通知が sessionStorage のメモを読んで載せ、消す', async () => {
+      flags.enableMobileOrderFee = false;
+      window.sessionStorage.setItem(memoKey('ord-7'), MEMO);
+      installFetch([json(503, { error: 'rpc_error' })]);
+      const memoRemovals = watchMemoRemovals();
+      await payStandard(params, ['success-no-fee']);
+      await runClock();
+
+      expect(notifySent).toHaveLength(1);
+      expect(bodyOf(notifySent[0])).toMatchObject({ mode: 'standard', merchantTxHash: TX_MERCHANT, customerMemo: MEMO });
+      expect(memoStored()).toBeNull();
+      expect(memoRemovals()).toBe(1);
+    });
+
+    it('Pimlico の gasless の完了は、sessionStorage にメモが無ければメモなしで送る', async () => {
+      installFetch([OK]);
+      const memoRemovals = watchMemoRemovals();
+      await completeGasless(params);
+      await runClock();
+
+      expect(notifySent).toHaveLength(1);
+      expect(bodyOf(notifySent[0])).toMatchObject({ mode: 'gasless', txHash: TX_GASLESS });
+      expect(bodyOf(notifySent[0])).not.toHaveProperty('customerMemo');
+      expect(memoRemovals()).toBe(0);
+    });
+
+    it('第三者の webhook (自社の notify でない URL) には、部分の通知も完了の通知も送らない。メモは読まず、sessionStorage に残る', async () => {
+      window.sessionStorage.setItem(memoKey('ord-7'), MEMO);
+      installFetch([OK]);
+      const memoRemovals = watchMemoRemovals();
+      await payStandard({ ...params, webhook: 'https://shop.example/hook?next=/api/order/notify' }, ['fee-sending', 'fee-unknown', 'success']);
+      await runClock();
+
+      expect(view.completed()).toBe(true);
+      expect(notifySent).toHaveLength(0);
+      expect(memoStored()).toBe(MEMO);
+      expect(memoRemovals()).toBe(0);
     });
   });
 });
