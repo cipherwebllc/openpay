@@ -883,7 +883,7 @@ describe('CheckoutForm — 送信', () => {
   describe('確認中の支払いを送り直す前に保存できない (gaslessResendBlocked)', () => {
     const TITLE = 'この端末では記録を保存できません';
     const STANDARD_BODY =
-      'この端末では支払い記録を保存できないため、ガスレス送信を止めています。通常送信をご利用ください。';
+      'この端末では支払い記録を保存できないため、ガスレス送信を止めています。ブラウザの設定 (サイトのデータの保存) を確かめるか、別のブラウザでお試しください。';
     const RESEND_BODY =
       'この端末では支払い記録を保存できないため、確認中の支払いを送り直せません。着金通知・受注画面でご確認ください。';
 
@@ -907,7 +907,7 @@ describe('CheckoutForm — 送信', () => {
       expect(await screen.findByText(RESEND_BODY)).toBeInTheDocument();
       expect(screen.getByText(TITLE)).toBeInTheDocument();
       expect(screen.queryByText(STANDARD_BODY)).not.toBeInTheDocument();
-      expect(screen.queryByText(/通常送信をご利用ください/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/ガスレス送信を止めています/)).not.toBeInTheDocument();
       // 確認中の欄と再確認のボタンはそのまま。
       expect(screen.getByText('送信結果を確認中')).toBeInTheDocument();
       expect(screen.getByText(`0x${'c'.repeat(64)}`)).toBeInTheDocument();

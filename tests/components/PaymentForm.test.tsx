@@ -982,7 +982,7 @@ describe('PaymentForm — 送信フロー', () => {
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        'この端末では支払い記録を保存できないため、ガスレス送信を止めています。通常送信をご利用ください。',
+        'この端末では支払い記録を保存できないため、ガスレス送信を止めています。ブラウザの設定 (サイトのデータの保存) を確かめるか、別のブラウザでお試しください。',
       ),
     ).toBeInTheDocument();
     // 「支払い確認中」(broadcast 済かもしれない状態) とは別表示にする。
@@ -1017,7 +1017,7 @@ describe('PaymentForm — 送信フロー', () => {
 
       const title = screen.queryByText('この端末では記録を保存できません');
       const body = screen.queryByText(
-        'この端末では支払い記録を保存できないため、ガスレス送信を止めています。通常送信をご利用ください。',
+        'この端末では支払い記録を保存できないため、ガスレス送信を止めています。ブラウザの設定 (サイトのデータの保存) を確かめるか、別のブラウザでお試しください。',
       );
       // 赤い error の枠 (題「エラー」) と、止めた error の生の message は、どちらの場合も出ない。
       expect(screen.queryByText('エラー')).toBeNull();
@@ -1071,7 +1071,7 @@ describe('PaymentForm — 送信フロー', () => {
       if (locale === 'en') expect(screen.queryByText(CIRCLE_ERRORS_JA.mappingUnavailable)).toBeNull();
       // 「記録を保存できません」の欄 (押せなくする flag の欄)・「確認中」の欄は出ない。
       expect(screen.queryByText('この端末では記録を保存できません')).toBeNull();
-      expect(screen.queryByText(/通常送信をご利用ください/)).toBeNull();
+      expect(screen.queryByText(/ガスレス送信を止めています/)).toBeNull();
       expect(screen.queryByText('送信結果を確認中')).toBeNull();
 
       // 支払うボタンは押せるまま: 押すと、hook の mutate を呼ぶ (hook が scan からやり直す)。
@@ -1107,7 +1107,7 @@ describe('PaymentForm — 送信フロー', () => {
   describe('確認中の支払いを送り直す前に保存できない (gaslessResendBlocked)', () => {
     const TITLE = 'この端末では記録を保存できません';
     const STANDARD_BODY =
-      'この端末では支払い記録を保存できないため、ガスレス送信を止めています。通常送信をご利用ください。';
+      'この端末では支払い記録を保存できないため、ガスレス送信を止めています。ブラウザの設定 (サイトのデータの保存) を確かめるか、別のブラウザでお試しください。';
     const RESEND_BODY =
       'この端末では支払い記録を保存できないため、確認中の支払いを送り直せません。着金通知・受注画面でご確認ください。';
 
@@ -1132,7 +1132,7 @@ describe('PaymentForm — 送信フロー', () => {
       expect(await screen.findByText(RESEND_BODY)).toBeInTheDocument();
       expect(screen.getByText(TITLE)).toBeInTheDocument();
       expect(screen.queryByText(STANDARD_BODY)).not.toBeInTheDocument();
-      expect(screen.queryByText(/通常送信をご利用ください/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/ガスレス送信を止めています/)).not.toBeInTheDocument();
       // 確認中の欄と再確認のボタンはそのまま。
       expect(screen.getByText('送信結果を確認中')).toBeInTheDocument();
       expect(screen.getByText(`0x${'c'.repeat(64)}`)).toBeInTheDocument();
