@@ -222,26 +222,60 @@ function attemptStorageKey(args: {
  *   旧 confirmed record (TERMINAL_RETENTION_MS=24h 残存) に誤って resume させない。
  * - 別タブ/別デバイスは sessionStorage を共有しないが、その層は findLiveByCallHash の
  *   callHash スキャン (attemptId 非依存) が引き続き担う。
- * - sessionStorage 不可 (SSR / プライベートモード例外) は fresh UUID に fallback
- *   (= 従来挙動。マッピングは defense-in-depth であり決済可否を左右させない)。
+ * - **attemptId と、それが sessionStorage に保存されているか (saved) を返す** (第 10 回レビューの後追い r10-ss)。
+ *   直す前は、保存できなくても、保存していない新しい UUID を黙って返していた (呼ぶ側は見分けられない)。
+ *   何の波及を断つか: 保存していない attemptId で **新しい支払い** を送ると、その支払いが確認待ちで終わった後の押下が別の
+ *   attemptId (別の key) になり、裏で確定した前の支払い (90 秒より前の confirmed) を「正規のリピート」とみなして 2 本目の
+ *   署名を求める。H-V・穴 B 以降、この対応は「同じタブの続き」を見分ける本体で、無くても払える付帯のものではない。
+ *   saved が false のとき、呼ぶ側 (hooks/useBatchPayment.ts の runCirclePayment) はそれを executeCirclePayment に渡し、
+ *   executeCirclePayment は **新しい記録を予約する直前で** 止める (lib/smartAccount/circleSend.ts の冒頭の「対応を保存できて
+ *   いない押下」・場面 (f) の error)。既にある支払いの復旧・結果の受け取り (scan) は、保存できなくても通す。そのために attemptId は必ず返す。
+ *     - 既にある値を読めた → その値・saved: true (書かない)。前の押下で保存できていれば、その後に書けなくなった端末でも、
+ *       確認待ちの支払いの続き (resume) はそのまま。
+ *     - 無い → 新しい UUID を書き、読み戻して同じ値のときだけ saved: true。setItem が throw しない端末 (quota の silent
+ *       drop) も見分ける (localStorage の記録の writeRecord・lib/paymentIntentStorage.ts の canStoreRelayIntent と同じ形)。
+ *     - getItem / setItem が throw・読み戻しが違う → 保存していない新しい UUID と saved: false。throw はしない。この UUID は
+ *       押すたびに変わるので、その key に記録があることは無い (前の押下の記録は、scan が「別の key の記録」として拾う)。
+ *   UUID の採番 (crypto.randomUUID) は try の外: storage と関係ない失敗を「保存できない」に化けさせない。
+ *   saved が false のときは warn を 1 行出す (そういう端末がどれだけあるかを見る)。入れるのは chainId と、どこで失敗したか
+ *   だけ (アドレス・callHash・attemptId・error の文は入れない)。warn の失敗 (throw) は握る (下の理由)。
  * - 値は、このタブが採番した attemptId とは限らない: scan が別の key の記録 (別のタブ・閉じたタブの支払い) の結果を
  *   受け取りに行くとき、hook がその記録の paymentAttemptId に付け替える (下の setStableAttemptId)。 */
 export function stableAttemptId(args: {
   chainId: number;
   sender: Address;
   callHash: Hex;
-}): string {
+}): { attemptId: string; saved: boolean } {
   const storageKeyName = attemptStorageKey(args);
+  const unsaved = (cause: 'read' | 'write' | 'readback', attemptId: string) => {
+    try {
+      logger.warn('circle.attempt_mapping.unavailable', { chainId: args.chainId, cause });
+    } catch {
+      // 何の波及を断つか: 診断の log の失敗 (console・Sentry の throw) が、この後の、既にある支払いの復旧 (scan) と、
+      // 新しい支払いを止める処理 (saved: false を呼ぶ側に返す) を巻き込むこと。warn が出なくても、返す値は同じ。
+    }
+    return { attemptId, saved: false };
+  };
+  let existing: string | null;
   try {
-    const existing = window.sessionStorage.getItem(storageKeyName);
-    if (existing) return existing;
-    const fresh = crypto.randomUUID();
-    window.sessionStorage.setItem(storageKeyName, fresh);
-    return fresh;
+    existing = window.sessionStorage.getItem(storageKeyName);
   } catch {
-    // SSR / private mode / quota → 保存せず fresh UUID を返す (環境依存の制御フロー)。
-    return crypto.randomUUID();
+    return unsaved('read', crypto.randomUUID());
   }
+  if (existing) return { attemptId: existing, saved: true };
+  const fresh = crypto.randomUUID();
+  try {
+    window.sessionStorage.setItem(storageKeyName, fresh);
+  } catch {
+    return unsaved('write', fresh);
+  }
+  let stored: string | null;
+  try {
+    stored = window.sessionStorage.getItem(storageKeyName);
+  } catch {
+    return unsaved('readback', fresh);
+  }
+  return stored === fresh ? { attemptId: fresh, saved: true } : unsaved('readback', fresh);
 }
 
 /** stableAttemptId のマッピングを破棄する (終端到達時)。次回は新規 attemptId を採番する。

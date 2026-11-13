@@ -6,15 +6,17 @@
 // circleSend を import しない。判定は error の `circleCode` の値だけで、class の同一性 (instanceof) も name も見ない (hook が
 // error を name で見るのと同じ理由 = chunk の境界を越える)。
 // 読むのは `error.circleCode` で、own property かどうかは確かめない (継承した circleCode も読む)。circleCode を持つ error は
-// circleSend の 3 つの class だけで、どれも own property に持つ (tests/lib/smartAccount/circleSend.test.ts)。
+// circleSend の 4 つの class だけで、どれも own property に持つ (tests/lib/smartAccount/circleSend.test.ts・
+// tests/lib/smartAccount/circleSend.adoptAttempt.test.ts)。
 
-/** 場面の符号。error の側 (circleSend.ts の 3 つの class) が `circleCode` に持つ値。 */
+/** 場面の符号。error の側 (circleSend.ts の 4 つの class) が `circleCode` に持つ値。 */
 export type CircleErrorCode =
   | 'unconfirmed' // (a) 送った支払いの結果がまだ分からない (24 時間以内の次の押下は、同じ支払いを確かめ直す)
   | 'busy_elsewhere' // (b) 別のタブや画面で、同じ支払いが署名の途中
   | 'attempt_ended' // (c) この試みは既に終わっていた (何も送っていない)
   | 'send_rejected' // (d) 送信の受付で断られた (送金されていない)
-  | 'unconfirmed_earlier'; // (e) 以前に送った記録の結果が分からない (次の押下が同じ支払いを確かめ直すとは限らない)
+  | 'unconfirmed_earlier' // (e) 以前に送った記録の結果が分からない (次の押下が同じ支払いを確かめ直すとは限らない)
+  | 'mapping_unavailable'; // (f) この端末はタブの対応を保存できないので、新しい支払いを始めなかった (何も送っていない)
 
 /** messages の namespace `CircleErrors` の key。 */
 export type CircleErrorKey =
@@ -22,7 +24,8 @@ export type CircleErrorKey =
   | 'busyElsewhere'
   | 'attemptEnded'
   | 'sendRejected'
-  | 'unconfirmedEarlier';
+  | 'unconfirmedEarlier'
+  | 'mappingUnavailable';
 
 const KEY_BY_CODE: Record<CircleErrorCode, CircleErrorKey> = {
   unconfirmed: 'unconfirmed',
@@ -30,6 +33,7 @@ const KEY_BY_CODE: Record<CircleErrorCode, CircleErrorKey> = {
   attempt_ended: 'attemptEnded',
   send_rejected: 'sendRejected',
   unconfirmed_earlier: 'unconfirmedEarlier',
+  mapping_unavailable: 'mappingUnavailable',
 };
 // Map で引く (object を直接引くと、'toString' のような継承した名前が key として返る)。
 const KEYS = new Map<unknown, CircleErrorKey>(Object.entries(KEY_BY_CODE));

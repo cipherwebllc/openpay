@@ -26,7 +26,8 @@
 //       (CircleSendRejectedError・第 10 回レビュー H-X。下の「最初の送信の検証拒否で閉じる」)
 //   (4) それ以外すべて → CirclePendingError (確認待ち)
 // hook (useBatchPayment の runCirclePayment) は、CirclePendingError と storage の失敗 (PendingStoreUnavailableError・
-// PendingStoreWriteError) 以外の error で attemptId の対応を消す。op を渡したかもしれない後にふつうの error で終わると、次の押下が
+// PendingStoreWriteError) と、対応を保存できていない押下の停止 (CircleAttemptMappingUnavailableError・下の「対応を保存できて
+// いない押下」) 以外の error で attemptId の対応を消す。op を渡したかもしれない後にふつうの error で終わると、次の押下が
 // 新しい key になり、後から確定した前の支払い (90 秒より前の confirmed) を「正規のリピート」とみなして 2 本目を払う。なので (4) を
 // 1 か所 (inPostSubmit) で保証する。confirmed の記録の枝 (scan・resume) は包まない: resultFromConfirmed が照会の失敗を全部
 // 受けて (1) を返し、投げる処理が無い。(2) は何も渡していない・(3) は bundler がその op の hash を知らないと答えた終わり方で、
@@ -143,6 +144,27 @@
 // このタブではその内容が確認待ちのまま (タブを閉じるまで。R を送った元のタブと同じ扱い)。
 // 残る限界: 30 分より後の記録を復旧する押下 (付け替えない) の途中で画面を離れ、その間に op が確定した場合は、今までどおり
 // (対応は自分の attemptId のまま。90 秒より後の次の押下は新しい支払い)。
+//
+// 対応を保存できていない押下 (第 10 回レビューの後追い r10-ss): hook が attemptId の対応 (sessionStorage) を保存できなかった
+// 押下 (読めない・書けない・書いても残らない端末) は、args.mappingSaved に false を渡す。その押下の paymentAttemptId は、保存して
+// いない、押すたびに変わる id。**そのまま新しい支払いを送ると**、確認待ちで終わった後の押下が別の key になり、裏で確定した
+// 前の支払い (90 秒より前の confirmed) を「正規のリピート」とみなして 2 本目の署名を求める。なので、**新しい記録を予約する
+// 直前 (下の scan の loop を抜けた後・reserveOrResume の前) で止める** (CircleAttemptMappingUnavailableError)。
+// 止める所より前に、新しい記録の書き込み・署名・送信は無い。scan の中の動きは、対応を保存できていない押下でも変えない:
+// 既にある支払いの結果を返す (直近の confirmed)・復旧する (submitting)・確認待ち (確かめられない記録・直近の pre-submit)・
+// 古い pre-submit の abandon・入口の掃除。**入口では止めない**: 既にある支払いの復旧まで止めると、取り出せる結果を失う
+// (対応を保存した後に sessionStorage を読めなくなった端末で、送った支払いの結果を受け取れなくなる)。
+// scan の枝の付け替え (adopt) も今までどおり呼ぶ。hook は書き込みを試すが、この押下では、書けても false を返す (getItem だけが
+// throw し setItem は通る端末では、書けても次の押下はその対応を読めず、resume ではなく scan から入る)。なので、その復旧の
+// 確認待ちは (e) になる ((a) の「このタブでもう一度押すと、まず同じ支払いの結果を確かめ直します」は言えない)。ここ (circleSend)
+// の規則は今までどおり「hook の関数が true を返したら (a)・false なら (e)」で、mappingSaved は見ない。
+// 止まった押下に、hook は対応の破棄 (clearStableAttemptId) をせず、error をそのまま投げる (hooks/useBatchPayment.ts の
+// runCirclePayment)。error は場面 (f) の符号 (circleCode: 'mapping_unavailable') を持ち、フォームが赤い枠に locale の文を出す。
+// **送信は閉じない** (押せなくする flag を立てない): 止まった後に復旧できるようになる支払いがある。例: 最後に渡してから
+// 30 分より後の submitting の記録で、nonce は使用済みだが bundler がまだ receipt を返さない間は、scan は飛ばす (上の「古い
+// submitting の記録」の 2) ので、ここで止まる。その後 receipt が引けるようになれば (取り込みが 30 分以内)、次の押下の scan が
+// 元の支払いの結果を返す。押せなくすると、その結果を、この画面から受け取れなくなる。
+// 省略・true の呼び出し (hook は、明示の paymentAttemptId の押下に true を渡す) は今までどおり。
 //
 // useBatchPayment の circle 分岐がこの executeCirclePayment を呼ぶ。permitAmount の
 // 算定 (gas 実費 + per-chain surcharge) は chunk 5 (useGasQuoteCircle) が担い、ここへは
@@ -297,7 +319,7 @@ export type CirclePaymentResult = {
   actualGasCost: bigint;
 };
 
-// 場面の符号と文 (第 10 回レビュー PR-39c)。下の 3 つの class は、どの場面の error かを own property `circleCode` に持つ。
+// 場面の符号と文 (第 10 回レビュー PR-39c)。下の 4 つの class は、どの場面の error かを own property `circleCode` に持つ。
 // 3 つのフォームは class も name も見ず、この符号から locale の文 (messages の CircleErrors) を出す (lib/circleErrorKey.ts)。
 // message にも日本語の文を残す: message は i18n を通らない出口にも出る (履歴に保存する error の文・payment log・Sentry)。
 // 符号だけにすると、履歴の画面に符号がそのまま出る。同じ文が messages/ja.json の CircleErrors にもあるので、ずれは
@@ -323,6 +345,12 @@ const CIRCLE_ERROR_JA = {
     'ここでは新しい支払いを始めていません。' +
     'もう一度押すと確かめ直しますが、署名を求められた場合は新しい支払いになります。' +
     '二重に払わないよう、署名の前にウォレットの履歴で以前の支払いを確かめてください。',
+  // (f) の文は user が承認した文 (2026-11-13)。「次に押すと◯◯します」とは書かない: 次の押下が何をするかは、その時点の
+  // 記録で変わる (既にある支払いを復旧できれば結果を返し、できなければ、また新しい支払いの直前で止まる)。
+  mapping_unavailable:
+    'この端末では支払いの記録を保存できないため、USDC ガスレスの新しい支払いを始めていません (この押下では送金していません)。' +
+    '同じ内容の支払いを以前に送っていた場合は、先にウォレットの履歴で確かめてください。' +
+    '新しく支払うには、ブラウザの設定 (サイトのデータの保存) を確かめるか、別のブラウザでお試しください。',
 } as const satisfies Record<CircleErrorCode, string>;
 
 /** 確認待ち。**失敗ではない**。場面は 3 つ (reason)。(a) と (e) の違いは、**(a) の文の約束 (24 時間以内にこのタブで同じ内容の
@@ -330,12 +358,16 @@ const CIRCLE_ERROR_JA = {
  * - 'unconfirmed' (a・既定): op を bundler に渡した (渡したかもしれない) が、結果を確かめられなかった。op は後で included
  *   しうる。(a) を名乗ってよい出口は、次の 2 つが両方言える所だけ:
  *     1. hook の attemptId の対応が、その op の記録の key を指している (自分の key の記録、または scan が付け替えて、hook が
- *        対応を **書けた** 記録)。次の押下は、その記録を resume して同じ op の結果を確かめ直す。
- *        **確かめていないこと**: 自分の key の記録について、hook の対応そのものが保存されているか。最初の対応の保存
- *        (lib/circlePending.ts の stableAttemptId) が sessionStorage の失敗で書けなかった端末では、hook は保存されていない
- *        attemptId で送る。その新しい送信が確認待ちで終わると (a) を出すが、次の押下は別の attemptId になり、この記録を
- *        resume しない (その支払いが裏で確定して 90 秒を過ぎていれば、新しい支払いに署名を求める)。この押下は新しい支払いを
- *        始めているので、(e) にも当たらない。残る限界 (PR-39c の本文の「残る点」)。
+ *        対応を **書けた** 記録。hook は、最初の対応を保存できていない押下では、書けても「書けた」と返さない = 下の続き)。
+ *        次の押下は、その記録を resume して同じ op の結果を確かめ直す。
+ *        自分の key の記録について、hook の対応そのものが保存されているか: 最初の対応の保存 (lib/circlePending.ts の
+ *        stableAttemptId) が sessionStorage の失敗で保存できなかった押下は、hook が mappingSaved: false を渡し、新しい記録を
+ *        予約する直前で止まる (冒頭の「対応を保存できていない押下」・第 10 回レビューの後追い r10-ss)。なので、hook が対応を
+ *        管理する押下が自分の key に作る記録の paymentAttemptId は、その押下の入口で対応に保存されていた値。保存できて
+ *        いない押下が scan で別の key の記録を復旧して確認待ちで終わるときは、(e) になる (下の (e) の 1 つ目の枝): hook の
+ *        adoptAttempt は、その押下では、付け替えを書けても false を返す。getItem だけが throw し setItem は通る端末では、
+ *        付け替えは書けるが、次の押下はその対応を読めず、resume ではなく scan から入るので、(a) の約束は言えない。
+ *        明示の paymentAttemptId の呼び出し (対応を使わない・本番の 3 フォームには無い) は、今までどおり確かめない。
  *     2. その記録が、**確認待ちで出る時点から** 24 時間は残る。確定した記録 (confirmed) は最後の updatedAt から 24 時間で
  *        掃除され (TERMINAL_RETENTION_MS)、submitting のままの記録は 7 日で掃除される (SUBMITTING_RETENTION_MS)。なので、
  *        submitting の記録は、最後に書いてから 6 日以内 (= 残りの寿命が 24 時間以上) であること。この押下が自分で op を渡した
@@ -345,7 +377,9 @@ const CIRCLE_ERROR_JA = {
  *   支払いを始めていない (復旧は、保存した同じ op を待つ・送り直すだけ)。出口は executeCirclePayment の 2 つの枝:
  *     - scan の submitting の枝 (別のタブ・閉じたタブが以前に送った支払い) で、**対応をその記録に付け替えられなかった**
  *       (30 分の窓の外・確かめられない記録・記録に paymentAttemptId が無い・hook が対応を管理していない・hook が対応を
- *       書けなかった)。対応は自分の attemptId のままで、この押下は自分の記録を作らない (scan は予約より前) ので、次の押下は
+ *       書けなかった・hook が最初の対応を保存できていない押下 = 付け替えを書けても、次の押下が読めると言えない)。
+ *       対応は自分の attemptId のままで (最初の対応を保存できていない押下では、対応が無い・読めない、または付け替えた値を
+ *       次の押下が読めると言えない)、この押下は自分の記録を作らない (scan は予約より前) ので、次の押下は
  *       また scan から入る。その間に前の支払いが確定して 90 秒を過ぎていれば、次の押下は新しい支払いに署名を求める (冒頭の
  *       「対応の付け替え」の「残る限界」)。
  *     - 自分の key の resume の submitting の枝で、**確認待ちで出る時点で、入口で読んだ記録が、最後に書いてから 6 日より後**
@@ -383,6 +417,20 @@ export class CircleSendRejectedError extends Error {
     super(CIRCLE_ERROR_JA.send_rejected);
     this.name = 'CircleSendRejectedError';
     this.userOpHash = userOpHash;
+  }
+}
+
+/** attemptId の対応を保存できていない押下 (args.mappingSaved が false) が、新しい記録を予約する所まで来たので止めた (冒頭の
+ * 「対応を保存できていない押下」)。場面 (f)。この押下は、新しい記録の書き込み・署名・送信を何も始めていない。
+ * **確認待ちではない**: name を 'CirclePendingError' にしない。hook (useBatchPayment の runCirclePayment) は、この name では
+ * attemptId の対応を消さず、error をそのまま投げる。フォームは符号から locale の文を赤い枠に出し、送信は閉じない
+ * (次の押下も scan から入り、既にある支払いを復旧できるようになっていれば結果を受け取る)。 */
+export class CircleAttemptMappingUnavailableError extends Error {
+  /** 場面の符号 (上の「場面の符号と文」)。 */
+  readonly circleCode: CircleErrorCode = 'mapping_unavailable';
+  constructor() {
+    super(CIRCLE_ERROR_JA.mapping_unavailable);
+    this.name = 'CircleAttemptMappingUnavailableError';
   }
 }
 
@@ -879,8 +927,13 @@ export type ExecuteCirclePaymentArgs = {
    * いるときだけ渡す。省略時は付け替えない。呼ぶ前に失効は確かめない (呼び出し元は、失効を確かめた同じ tick でこの関数を
    * 呼ぶこと。冒頭の「失効」)。
    * 返す値 = 対応を書けたか (書けたら true)。書けなかった (sessionStorage の失敗) なら、対応は前の値のままで、次の押下は
-   * その記録を resume しない。使うのは、確認待ちの場面の符号を (a) にするか (e) にするかだけ (復旧の進め方は変えない)。 */
+   * その記録を resume しない。hook は、最初の対応を保存できていない押下 (mappingSaved が false) でも false を返す
+   * (書けても、次の押下がその対応を読めると言えない)。使うのは、確認待ちの場面の符号を (a) にするか (e) にするかだけ (復旧の進め方は変えない)。 */
   adoptAttempt?: (paymentAttemptId: string) => boolean;
+  /** hook が、この押下の paymentAttemptId を attemptId の対応 (sessionStorage) に保存できているか (冒頭の「対応を保存できて
+   * いない押下」)。false のとき、scan (既にある支払いの復旧・結果の受け取り) は今までどおり行い、新しい記録を予約する直前で
+   * CircleAttemptMappingUnavailableError を投げる。省略時は true (明示の paymentAttemptId の呼び出しは今までどおり)。 */
+  mappingSaved?: boolean;
 };
 
 // 失効した試みを終える error (冒頭の「失効」)。relay の hook (hooks/useJpycEip3009Payment.ts) と Pimlico の経路
@@ -1070,6 +1123,12 @@ export async function executeCirclePayment(
     // 上の submitting の枝・下の resume の submitting の枝の 'unconfirmed_earlier')。
     throw new CirclePendingError(rec.userOpHash, 'busy_elsewhere');
   }
+
+  // --- 対応を保存できていない押下は、新しい記録を予約しない (冒頭の「対応を保存できていない押下」) ---
+  // ここに来た = 上の scan に、結果を返す記録も、復旧する記録も、待つ記録も無かった (この先は新しい支払い)。何の波及を断つか:
+  // 保存していない attemptId で新しい支払いを送ると、確認待ちで終わった後の押下が別の key になり、裏で確定した前の支払いの後に
+  // 2 本目を開ける。ここより前に、新しい記録の書き込み・署名・送信は無い (下の reserveOrResume が最初の書き込み)。
+  if (args.mappingSaved === false) throw new CircleAttemptMappingUnavailableError();
 
   // --- reserve (idempotency gate・自 attempt のクラッシュ resume) ----------
   const { record, resumed } = reserveOrResume({
