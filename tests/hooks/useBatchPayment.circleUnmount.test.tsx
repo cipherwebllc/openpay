@@ -1080,6 +1080,28 @@ describe('r10-ss: タブの対応 (sessionStorage) を保存できていない�
     expectNoNewPayment({ signatures: 2, sent: 1, records: ['confirmed'] });
   });
 
+  // 最初の対応を保存できていない押下でも、付け替えを書けたら、この試みの「対応の指す先」は今までどおり付け替えた先になる
+  // (hook が circleSend に返す値だけが false)。結果を受け取った画面のある試みは、付け替えた対応を今までどおり消す。
+  it('別のタブの支払いが裏で確定 (90 秒以内) → このタブは、最初の対応の読み戻しだけが throw (saved は false・その後は読める) → 押す → 既払いの結果を受け取り、付け替えた対応は今までどおり消える', async () => {
+    await payAndLeaveBeforeConfirmed();
+    // 別のタブ = このタブの sessionStorage には対応が無い。
+    window.sessionStorage.clear();
+
+    clockOffset += 30_000;
+    const reads = breakSessionReads(2);
+    const screenB = openScreen();
+    screenB.result.current.mutate(PARAMS);
+    await waitFor(() => expect(screenB.result.current.isSuccess).toBe(true));
+    reads.mockRestore();
+
+    expect(screenB.result.current.data).toMatchObject({ userOpHash: OP_A.userOpHash, success: true });
+    expect(screenB.result.current.pendingStoreUnavailable).toBe(false);
+    expectNoNewPayment({ signatures: 2, sent: 1, records: ['confirmed'] });
+    expect(unavailableWarns()).toEqual([[UNAVAILABLE, { chainId: baseSepolia.id, cause: 'readback' }]]);
+    // 最初に書いた (読み戻せなかった) 値は、付け替えで記録の attemptId に替わり、結果を受け取った所で消える。
+    expect(mappings()).toEqual({});
+  });
+
   // Codex と同じ壊れ方 (getItem だけ throw・setItem は通る) で、復旧が確認待ちで終わる形。付け替えの書き込みは通るが、
   // 次の押下はその対応を読めない (resume にならず、また scan から入る)。(a) の「24 時間以内にこのタブで…もう一度押すと、まず
   // 同じ支払いの結果を確かめ直します」は言えないので、hook は付け替えを「書けた」と返さず、場面は (e) になる。
