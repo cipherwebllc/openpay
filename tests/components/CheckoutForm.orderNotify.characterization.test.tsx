@@ -282,8 +282,8 @@ function setRelayPayment(
   } as Partial<ReturnType<typeof useJpycEip3009Payment>>);
 }
 
-function setGasQuote() {
-  const ready = { data: { gasAmount: 0n }, isLoading: false, isError: false, error: null };
+function setGasQuote(gasAmount = 0n) {
+  const ready = { data: { gasAmount }, isLoading: false, isError: false, error: null };
   mockHook(useGasQuoteUsdc, ready as Partial<ReturnType<typeof useGasQuoteUsdc>>);
   mockHook(useGasQuoteJpyc, ready as Partial<ReturnType<typeof useGasQuoteJpyc>>);
   mockHook(useGasQuoteCircle, {
@@ -338,12 +338,37 @@ function installFetch(script: Reply[]) {
   });
 }
 
-// 遅延 import と promise を流し、偽の時計を ms 進めて、React の更新を反映する。
+// WebCrypto の digest は、偽の時計と関係なく本物の非同期で終わる。経路 A・D の失敗の記録 (logger.warn) は、宛先の hash の
+// digest を待ってから出るので、時計を進めるだけでは「まだ出ていない」ことがある (digest が遅い環境で、記録を見る test が
+// 空振りし、遅れた記録が次の test にまたがる)。digest の呼び出しを境界で数え (中身は実物のまま)、settle() と afterEach が
+// 終わりを待つ。
+const pendingDigests = new Set<Promise<unknown>>();
+function trackDigests() {
+  const subtle = globalThis.crypto.subtle;
+  const real = subtle.digest.bind(subtle);
+  vi.spyOn(subtle, 'digest').mockImplementation((...args: Parameters<SubtleCrypto['digest']>) => {
+    const pending = real(...args);
+    pendingDigests.add(pending);
+    const done = () => pendingDigests.delete(pending);
+    pending.then(done, done);
+    return pending;
+  });
+}
+// 進行中の digest が無くなるまで待ち、その続き (記録を出す所まで) を流す。
+async function nativeWorkSettled() {
+  await vi.dynamicImportSettled();
+  while (pendingDigests.size > 0) {
+    await Promise.allSettled([...pendingDigests]);
+    await vi.dynamicImportSettled();
+  }
+}
+
+// 遅延 import・digest・promise を流し、偽の時計を ms 進めて、React の更新を反映する。
 async function settle(ms = 0) {
   await act(async () => {
-    await vi.dynamicImportSettled();
+    await nativeWorkSettled();
     await vi.advanceTimersByTimeAsync(ms);
-    await vi.dynamicImportSettled();
+    await nativeWorkSettled();
   });
 }
 
@@ -362,6 +387,7 @@ let originalLocation: PropertyDescriptor | undefined;
 beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(T0);
+  trackDigests();
   notifySent = [];
   otherSent = [];
   flags.enableMobileOrderFee = true;
@@ -384,7 +410,9 @@ beforeEach(() => {
   });
 });
 
-afterEach(() => {
+afterEach(async () => {
+  // 遅れた記録 (digest の後の logger.warn) を次の test に持ち越さない。
+  await nativeWorkSettled();
   if (originalLocation) Object.defineProperty(window, 'location', originalLocation);
   vi.useRealTimers();
   vi.restoreAllMocks();
@@ -691,6 +719,84 @@ describe('応答の表 — 経路 A: この画面で送った支払いの完了�
     ]);
   });
 
+  it('success_url へ移るのは、確定からちょうど 3 秒後 (notify の応答を待たない)', async () => {
+    installFetch([() => new Promise<Response>(() => {})]); // notify は応答しないまま
+    await completeGasless(params);
+
+    expect(notifySent).toHaveLength(1);
+    expect(screen.getByText('3 秒後に確認ページへ移動します')).toBeInTheDocument();
+    await settle(1_000);
+    expect(screen.getByText('2 秒後に確認ページへ移動します')).toBeInTheDocument();
+    await settle(1_000);
+    expect(screen.getByText('1 秒後に確認ページへ移動します')).toBeInTheDocument();
+    await settle(999);
+    expect(assignSpy).not.toHaveBeenCalled(); // 2,999 ms ではまだ
+    await settle(1);
+    expect(assignSpy).toHaveBeenCalledOnce(); // 3,000 ms で移る
+    expect(notifySent).toHaveLength(1);
+  });
+
+  // 送る額は、払うボタンを押した時点の値 (snapshot)。確定までに画面の額が変わっても、今の値に置き換えない。
+  it('額の 4 つの欄は払うボタンを押した時点の値: 確定と同じ描画で会計の額が変わっても、押した時点の額を送る', async () => {
+    installFetch([OK]);
+    readyWallet('gasless');
+    const page = mount(params);
+    await settle();
+    await clickPay();
+    expect(gaslessMutate).toHaveBeenCalledOnce();
+    // 確定と同じ描画で、会計の額が 3000 → 5000 JPYC に変わる。
+    setBatchPayment('success');
+    page.rerender(<CheckoutForm params={{ ...params, items: [{ name: 'チケット', qty: 1, price: '5000' }] }} />);
+    await runClock();
+
+    expect(screen.getAllByText('5000 JPYC').length).toBeGreaterThan(0); // 画面の明細は今の額
+    expect(notifySent).toHaveLength(1);
+    expect(bodyOf(notifySent[0])).toMatchObject({
+      amount: '3000',
+      merchantAmount: NET.toString(),
+      feeAmount: FEE.toString(),
+      customerPays: TOTAL.toString(),
+      txHash: TX_GASLESS,
+    });
+  });
+
+  it('ガス代の見積もりが確定までに変わっても (USDC・お客様の負担)、押した時点の支払い額を送る', async () => {
+    installFetch([OK]);
+    mockHook(useAccount, { address: CUSTOMER, isConnected: true, chainId: baseSepolia.id });
+    mockHook(useReadContract, { data: 200_000_000n, isLoading: false, error: null });
+    mockHook(useSmartAccount, {
+      data: { smartAccountClient: {}, pimlicoClient: {} },
+      isLoading: false,
+      error: null,
+    } as Partial<ReturnType<typeof useSmartAccount>>);
+    setGasQuote(100_000n); // 0.1 USDC
+    const page = mount({
+      to: MERCHANT,
+      token: 'usdc',
+      chain: 'base',
+      gas: 'customer',
+      items: [{ name: 'Tシャツ', qty: 1, price: '25.00' }],
+      webhook: OWN_NOTIFY,
+    });
+    await settle();
+    fireEvent.click(screen.getByRole('button', { name: /25\.1 USDC を支払う/ }));
+    await settle();
+    expect(gaslessMutate).toHaveBeenCalledOnce();
+    // 見積もりの取り直しで 0.1 → 0.3 USDC に変わった後に確定する。
+    setGasQuote(300_000n);
+    setBatchPayment('success');
+    page.rerender(page.makeUi());
+    await runClock();
+
+    expect(notifySent).toHaveLength(1);
+    expect(bodyOf(notifySent[0])).toMatchObject({
+      amount: '25',
+      merchantAmount: '25000000',
+      feeAmount: '0',
+      customerPays: '25100000',
+    });
+  });
+
   it('メモは応答が失敗でも消える (送り直しは無い)', async () => {
     window.sessionStorage.setItem(memoKey('ord-7'), 'ねぎ抜き');
     installFetch([json(503, { error: 'rpc_error' })]);
@@ -787,6 +893,31 @@ describe('応答の表 — 経路 D: 通常決済の部分の通知 (お店へ�
       expect(view.notRegisteredAlert()).toHaveLength(result === 'スタッフへ' ? 1 : 0);
       // お店への送金をやり直させない。
       expect(standardMutate).not.toHaveBeenCalled();
+    });
+  });
+
+  it('額の 4 つの欄は払うボタンを押した時点の値: お店への送金の確定と同じ描画で会計の額が変わっても、押した時点の額を送る', async () => {
+    installFetch([OK]);
+    readyWallet('standard');
+    const standardParams: CheckoutParams = { ...params, mode: 'standard' };
+    const page = mount(standardParams);
+    await settle();
+    await clickPay();
+    expect(standardMutate).toHaveBeenCalledOnce();
+    // お店への送金の確定と同じ描画で、会計の額が 3000 → 5000 JPYC に変わる。
+    setStandardPayment('fee-sending');
+    page.rerender(<CheckoutForm params={{ ...standardParams, items: [{ name: 'チケット', qty: 1, price: '5000' }] }} />);
+    await runClock();
+
+    expect(screen.getAllByText('5000 JPYC').length).toBeGreaterThan(0); // 画面の明細は今の額
+    expect(notifySent).toHaveLength(1);
+    expect(bodyOf(notifySent[0])).toMatchObject({
+      amount: '3000',
+      merchantAmount: NET.toString(),
+      feeAmount: FEE.toString(),
+      customerPays: TOTAL.toString(),
+      merchantTxHash: TX_MERCHANT,
+      feeUncollected: true,
     });
   });
 
@@ -1031,6 +1162,32 @@ describe('応答の表 — 経路 C: 束縛した注文 (relay) の通知', () =
       expect(slotState(record)).toBe('なし');
     });
 
+    // 応答を待つ間に画面を離れても (unmount)、後から届いた応答で sessionStorage の控えとメモは片づける
+    // (画面の案内は出せないが、外に残る記録は変わる)。
+    it.each([
+      { name: '登録できた → 控えとメモを消す', reply: json(200, { ok: true }), slot: 'なし', memo: null },
+      { name: '打ち切り → 控えを terminal にし、メモは残す', reply: json(422, { error: 'tx_too_old' }), slot: 'terminal', memo: 'ねぎ抜き' },
+      { name: '再試行できる → 控えもメモもそのまま', reply: json(503, { error: 'rpc_error' }), slot: 'notify-pending', memo: 'ねぎ抜き' },
+    ] as const)('画面を離れた (unmount) 後に応答が届く: $name', async ({ reply, slot, memo }) => {
+      let respond!: (response: Response | Promise<Response>) => void;
+      installFetch([() => new Promise<Response>((resolve) => { respond = resolve; })]);
+      const record = savedOrder();
+      window.sessionStorage.setItem(memoKey('ord-7'), 'ねぎ抜き');
+      const page = await restoreBoundOrder(params, record);
+      expect(notifySent).toHaveLength(1);
+
+      page.unmount();
+      expect(slotState(record)).toBe('notify-pending');
+      expect(window.sessionStorage.getItem(memoKey('ord-7'))).toBe('ねぎ抜き');
+
+      respond(reply());
+      await runClock();
+      expect(slotState(record)).toBe(slot);
+      expect(window.sessionStorage.getItem(memoKey('ord-7'))).toBe(memo);
+      expect(notifySent).toHaveLength(1);
+      expect(assignSpy).not.toHaveBeenCalled();
+    });
+
     it('「注文登録を再試行」: 同じ本文をもう 1 回送り、送っている間はボタンを消して案内は残す。登録できたら案内も消す', async () => {
       let respond!: (response: Response) => void;
       installFetch([networkFailure, () => new Promise<Response>((resolve) => { respond = resolve; })]);
@@ -1193,7 +1350,12 @@ describe('応答の表 — 経路 C: 束縛した注文 (relay) の通知', () =
       expect(view.redirectNow()).not.toBeNull();
       expect(screen.getByText('3 秒後に確認ページへ移動します')).toBeInTheDocument();
       expect(assignSpy).not.toHaveBeenCalled();
-      for (let i = 0; i < 4; i++) await settle(1_000);
+      // 登録できてからちょうど 3 秒後に移る。
+      await settle(1_000);
+      await settle(1_000);
+      await settle(999);
+      expect(assignSpy).not.toHaveBeenCalled();
+      await settle(1);
       expect(assignSpy).toHaveBeenCalledOnce();
     });
 
@@ -1456,6 +1618,21 @@ describe('応答の表 — 経路 B: 前の会計の未登録の注文の通知'
     await settle();
     expect(view.status(TEXT.previousPending)).toHaveLength(0);
     expect(slotState(record)).toBe('なし');
+  });
+
+  it('画面を離れた (unmount) 後に応答が届いても、前の注文の控えは片づける', async () => {
+    let respond!: (response: Response) => void;
+    installFetch([() => new Promise<Response>((resolve) => { respond = resolve; })]);
+    const record = savedOrder();
+    const page = await openWithPrevious([record]);
+    expect(notifySent).toHaveLength(1);
+
+    page.unmount();
+    expect(slotState(record)).toBe('notify-pending');
+    respond(Response.json({ ok: true }));
+    await runClock();
+    expect(slotState(record)).toBe('なし');
+    expect(notifySent).toHaveLength(1);
   });
 
   // 同じお店の前の支払いを hook が確認中 (previousPaymentSameMerchant) の間は、「保留」の案内だけを出さない
