@@ -51,9 +51,13 @@ import {
 import { pimlicoUrl } from '@/lib/pimlico';
 import { assertGasCeiling } from '@/lib/gasCeiling';
 import {
+  bundlerErrorText,
   classifyBroadcastError,
   findRpcRequestError,
+  mentionsNonceOrMempool,
+  readBundlerOpStatus,
   type BroadcastFailureKind,
+  type BundlerOpStatus,
 } from '@/lib/smartAccount/pimlicoSend';
 import type { SmartAccountBundle } from '@/lib/smartAccount/simpleAccount';
 import type { ConnectedWalletClient } from '@/lib/smartAccount/simpleAccount';
@@ -288,27 +292,15 @@ export class CircleBroadcastError extends Error {
   }
 }
 
-// 検証の拒否 (HTTP 2xx + allowlist の code) でも、bundler の言い分にこの語があるときは「この op を受け付けていない」と読まない
-// (第 10 回レビュー PR-39 の S1)。この経路の UserOperation の nonce は key が時刻由来で、試みごとに新しい (上の
-// prepareAndSignCircleUserOp は nonce を渡さない)。その op の最初の送信に nonce・mempool・重複・置き換えの拒否が返るなら、
-// もっとも考えやすいのは **この op 自身がもう届いている** こと (送信が途中で 2 回届いた・先に取り込まれた)。閉じると、取り込まれる
-// 支払いの上に新しい支払いが開く。語は広めに取る (外れても確認待ちに残るだけ = 払えない側)。
-//   AA25 = EntryPoint の「nonce が違う」/ nonce / mempool (「もう mempool にある」「mempool の上限」) /
-//   already (already known 以外の「もう…」) / replace (replacement underpriced = 同じ nonce の op がもうある)
-const NOT_REJECTION_PROOF_RE = /AA25|nonce|mempool|already|replace/i;
-
-/** bundler の JSON-RPC の error の文 (message と data) が、上の語を含むか。 */
-export function mentionsNonceOrMempool(bundlerText: string): boolean {
-  return NOT_REJECTION_PROOF_RE.test(bundlerText);
-}
-
 /**
  * Circle の経路の送信の失敗を分ける。分類の定義 (HTTP 2xx + ERC-4337 の検証の code の allowlist = 検証による確定的な拒否・
  * already-known = bundler がその op を持っている・それ以外は unknown) は Pimlico の経路のもの (pimlicoSend.ts の
  * classifyBroadcastError) を 1 つのまま使う (bundler は同じ Pimlico の endpoint)。そのうえで、検証の拒否でも bundler の文が
- * nonce・mempool などに触れているときは unknown に倒す (上の S1)。
- * 見るのは bundler が返した文 (JSON-RPC の error の message と data) だけ。viem の error の message は、送った request の
- * 本文 (署名済みの op = "nonce" という欄を必ず含む) を載せるので見ない。
+ * nonce・mempool などに触れているときは unknown に倒す (第 10 回レビュー PR-39 の S1。語の定義と理由は pimlicoSend.ts の
+ * mentionsNonceOrMempool・Pimlico の経路の c2 と同じ 1 つ)。この経路の UserOperation の nonce は key が時刻由来で、試みごとに
+ * 新しい (上の prepareAndSignCircleUserOp は nonce を渡さない)。
+ * 見るのは bundler が返した文 (JSON-RPC の error の message と data = pimlicoSend.ts の bundlerErrorText) だけ。viem の error の
+ * message は、送った request の本文 (署名済みの op = "nonce" という欄を必ず含む) を載せるので見ない。
  */
 export function classifyCircleBroadcastError(
   error: unknown,
@@ -319,9 +311,8 @@ export function classifyCircleBroadcastError(
   const details = typeof rpc?.details === 'string' ? rpc.details : undefined;
   const kind = classifyBroadcastError(error, httpStatus);
   if (kind !== 'validation-rejected') return { kind, code, details };
-  const data = rpc?.data === undefined ? '' : JSON.stringify(rpc.data);
   return {
-    kind: mentionsNonceOrMempool(`${details ?? ''} ${data}`) ? 'unknown' : 'validation-rejected',
+    kind: mentionsNonceOrMempool(bundlerErrorText(rpc)) ? 'unknown' : 'validation-rejected',
     code,
     details,
   };
@@ -379,6 +370,27 @@ export function prepareCircleBroadcast(
       });
     }
   };
+}
+
+/**
+ * bundler に、その op (userOpHash) の状態を 1 回聞く (`pimlico_getUserOperationStatus`・再送なし)。送信と同じ bundler の URL・
+ * timeout (bundle の transport の既定 = 10 秒)。定義は Pimlico の経路と同じ 1 つ (pimlicoSend.ts の readBundlerOpStatus・
+ * なぜ要るかと限界は pimlicoIntent.ts の冒頭の「閉じる前に bundler へ聞く」):
+ * unknownToBundler が true になるのは bundler が not_found と答えたときだけで、読めなかったときは投げずに false で返す。
+ * 呼ぶのは circleSend.ts の closeRejectedFirstSend だけ (最初の送信の検証拒否で記録を閉じる前)。
+ */
+export function readCircleUserOpStatus(
+  bundle: CircleSmartAccountBundle,
+  userOpHash: Hex,
+): Promise<BundlerOpStatus> {
+  return readBundlerOpStatus({
+    transport: bundle.bundlerClient.transport as {
+      url?: string;
+      timeout?: number;
+      fetchOptions?: HttpTransportConfig['fetchOptions'];
+    },
+    userOpHash,
+  });
 }
 
 /** 保存済の署名済 op を **そのまま** broadcast する (raw eth_sendUserOperation・

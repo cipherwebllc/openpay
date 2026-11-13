@@ -7,8 +7,8 @@ import {
   prepareAndSignCircleUserOp,
   broadcastCircleUserOp,
   prepareCircleBroadcast,
+  readCircleUserOpStatus,
   classifyCircleBroadcastError,
-  mentionsNonceOrMempool,
   CircleBroadcastError,
   buildCircleSmartAccountClient,
   entryPoint08Address,
@@ -16,6 +16,8 @@ import {
   CIRCLE_RECEIPT_TIMEOUT_MS,
   type CircleSmartAccountBundle,
 } from '@/lib/smartAccount/circleAccount';
+// 語の定義は Pimlico の経路 (c2) と 1 つ (置き場所は pimlicoSend.ts)。
+import { mentionsNonceOrMempool } from '@/lib/smartAccount/pimlicoSend';
 import { assertCirclePaymasterDeployed } from '@/lib/circlePermit';
 import { resolveDeployment } from '@/lib/tokens';
 
@@ -636,6 +638,76 @@ describe('broadcastCircleUserOp / prepareCircleBroadcast (保存済みの署名�
       expect(error).toBeInstanceOf(CircleBroadcastError);
       expect((error as CircleBroadcastError).kind).toBe('validation-rejected');
     });
+  });
+});
+
+// PR #1084: 最初の送信の検証拒否で記録を閉じる前に、bundler にその op の状態を聞く。定義は Pimlico の経路と同じ 1 つ
+// (pimlicoSend.ts の readBundlerOpStatus。答えごとの結果は tests/lib/smartAccount/pimlicoSend.test.ts)。ここでは、bundle の
+// bundler の transport (本物の viem の createBundlerClient + http) から、同じ URL へ聞くことを確かめる。
+describe('readCircleUserOpStatus (bundler にその op の状態を 1 回聞く)', () => {
+  const BUNDLER_URL = 'https://bundler.test/v2/421614/rpc?apikey=test';
+  const HASH = `0x${'cd'.repeat(32)}` as Hex;
+  let requests: Array<{ url: string; method: string; params: unknown[] }>;
+  let reply: { result: unknown } | { fail: true };
+
+  beforeEach(() => {
+    requests = [];
+    reply = { result: { status: 'not_found', transactionHash: null } };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string | URL, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body)) as { id: number; method: string; params: unknown[] };
+        requests.push({ url: String(url), method: body.method, params: body.params });
+        if ('fail' in reply) throw new TypeError('Failed to fetch');
+        return new Response(JSON.stringify({ jsonrpc: '2.0', id: body.id, result: reply.result }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }),
+    );
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const realBundle = () =>
+    ({
+      ...fakeBundle(),
+      bundlerClient: createBundlerClient({ transport: http(BUNDLER_URL) }),
+    }) as CircleSmartAccountBundle;
+
+  it('bundle の bundler の URL へ、pimlico_getUserOperationStatus をその hash で 1 回だけ聞く。not_found → 知らない (閉じてよい)', async () => {
+    expect(await readCircleUserOpStatus(realBundle(), HASH)).toEqual({
+      unknownToBundler: true,
+      status: 'not_found',
+    });
+    expect(requests).toEqual([
+      { url: BUNDLER_URL, method: 'pimlico_getUserOperationStatus', params: [HASH] },
+    ]);
+  });
+
+  it('not_found 以外 (submitted) → 知らないと読まない (閉じない側)', async () => {
+    reply = { result: { status: 'submitted', transactionHash: null } };
+    expect(await readCircleUserOpStatus(realBundle(), HASH)).toEqual({
+      unknownToBundler: false,
+      status: 'submitted',
+    });
+  });
+
+  it('読めない (通信断) → 投げずに「読めなかった」で返す・再送しない', async () => {
+    reply = { fail: true };
+    expect(await readCircleUserOpStatus(realBundle(), HASH)).toEqual({
+      unknownToBundler: false,
+      status: 'unreadable:HttpRequestError',
+    });
+    expect(requests).toHaveLength(1);
+  });
+
+  it('bundle の transport に URL が無い (偽物の bundlerClient) → 読めなかった (閉じない側)', async () => {
+    const status = await readCircleUserOpStatus(fakeBundle(), HASH);
+    expect(status.unknownToBundler).toBe(false);
+    expect(status.status).toMatch(/^unreadable:/);
+    expect(requests).toEqual([]);
   });
 });
 

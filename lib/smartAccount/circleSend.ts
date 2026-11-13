@@ -13,7 +13,7 @@
 //     「included しうる unknown」として扱い、recovery は (a) receipt 照会 か
 //     (b) *同一署名 op* の冪等 rebroadcast のみ。新しい op は作らない。
 //     例外は 1 つだけ: 自分の最初の送信を bundler が検証で拒否し、下の条件で記録を failed に閉じたとき (下の「最初の送信の
-//     検証拒否で閉じる」)。その op は mempool に入っていない前提で、次の押下は新しい支払い (署名から) になる。
+//     検証拒否で閉じる」)。bundler がその op の hash を知らないと答えたうえで閉じ、次の押下は新しい支払い (署名から) になる。
 //   - cross-invocation (reload / 再クリック): 同一 sender+chain+callHash の submitting
 //     宙吊りがあれば、新規送信せず先にそれを recover する。ただし、最後に bundler へ渡してから 30 分より後の、別の key の
 //     記録は、EntryPoint の nonce を読んでから決める (下の「古い submitting の記録」)。
@@ -29,12 +29,15 @@
 // PendingStoreWriteError) 以外の error で attemptId の対応を消す。op を渡したかもしれない後にふつうの error で終わると、次の押下が
 // 新しい key になり、後から確定した前の支払い (90 秒より前の confirmed) を「正規のリピート」とみなして 2 本目を払う。なので (4) を
 // 1 か所 (inPostSubmit) で保証する。confirmed の記録の枝 (scan・resume) は包まない: resultFromConfirmed が照会の失敗を全部
-// 受けて (1) を返し、投げる処理が無い。(2) と (3) は「この op は mempool に無い」と言える終わり方で、対応を消してよい
-// (次の押下は新しい支払い = 署名から)。
+// 受けて (1) を返し、投げる処理が無い。(2) は何も渡していない・(3) は bundler がその op の hash を知らないと答えた終わり方で、
+// 対応を消してよい (次の押下は新しい支払い = 署名から)。
 //
-// 最初の送信の検証拒否で閉じる (H-X): bundler が最初の送信を検証で拒否した op は mempool に入っていない。確認待ちに残すと、
-// その内容の支払いが、押すたびに 120 秒待ち → 同じ op の送り直し → また拒否 → 120 秒、を繰り返して払えない。なので記録を
-// failed に閉じ、(3) で終える。閉じるのは次が **全部** そろったときだけ (そろわなければ今までどおり復旧へ進み、(4) で終える):
+// 最初の送信の検証拒否で閉じる (H-X): bundler が最初の送信を検証で拒否した op を確認待ちに残すと、その内容の支払いが、
+// 押すたびに 120 秒待ち → 同じ op の送り直し → また拒否 → 120 秒、を繰り返して払えない。なので記録を failed に閉じ、(3) で
+// 終える。ただし **検証の拒否だけでは閉じない**: 拒否が示すのは「この送信が断られた」ことだけで、その op が mempool に入って
+// いないことは示さない (送信が途中で 2 回届き、1 回目は受理され、重複の配送にだけ拒否が返ることがある。下の (f))。閉じてよい
+// 根拠は「bundler がその hash を知らないと答えた」こと。
+// 閉じるのは次が **全部** そろったときだけ (そろわなければ今までどおり復旧へ進み、(4) で終える):
 //   (a) executeCirclePayment の中の、自分の最初の送信の 1 か所である (**復旧の送り直しの拒否では閉じない**: 前の送信が
 //       受理されているかもしれず、送り直しへの拒否は「mempool に無い」ことの証拠にならない)
 //   (b) **自分の op の記録を、自分で signed → submitting にした** (markSubmitting を呼ぶ直前に同期で読んだ記録が「signed で、
@@ -45,13 +48,24 @@
 //   (c) 送信の分類が「検証による確定的な拒否」である (HTTP 2xx + ERC-4337 の検証の code の allowlist。Pimlico の経路と同じ
 //       定義・同じ bundler。bundler の文が nonce・mempool などに触れているときは拒否と読まない = circleAccount.ts の
 //       classifyCircleBroadcastError)
-//   (d) **時間の柵**: 自分の markSubmitting から拒否の処理までの経過が REJECTION_CLOSE_WINDOW_MS (30 秒) 未満である (壁時計と
-//       単調な時計の両方で。下の REJECTION_CLOSE_WINDOW_MS のコメント)
+//   (f) **bundler にその op の状態を 1 回聞き、「その hash を知らない」(not_found) と答えた** (circleAccount.ts の
+//       readCircleUserOpStatus = pimlico_getUserOperationStatus・再送なし。Pimlico の経路の c2 と同じ 1 つの定義 =
+//       pimlicoSend.ts の readBundlerOpStatus)。ほかの status・型に無い値・読めない (通信の失敗・timeout・形の崩れた応答) は
+//       閉じない。(c) の語に当たらない拒否 (preVerificationGas が足りない等) も、受理された op の重複の配送にだけ返ることが
+//       あるため。(c) の語の確認を残す理由: status と語は別の失敗を断つ。status の記録が bundler の中で反映される前に聞いて
+//       しまう場合 (受理した node と聞いた node のずれ) でも、nonce・重複の拒否は語で止まる。
+//       聞くのは (d) を測る **前** (await を挟むので)。読みが遅れて (d) の上限を過ぎたら閉じない。bundler の status は最後の
+//       書き込みから 1 時間で消え、その後は取り込み済みの op でも not_found を返す (pimlicoIntent.ts の冒頭)。拒否の処理が
+//       遅れて再開した場合のその形も、(d) が止める (上限は 1 時間より十分短い)。
+//   (d) **時間の柵**: 自分の markSubmitting から拒否の処理 ((f) の答えを受け取った後) までの経過が REJECTION_CLOSE_WINDOW_MS
+//       (30 秒) 未満である (壁時計と単調な時計の両方で。下の REJECTION_CLOSE_WINDOW_MS のコメント)
 //   (e) 記録がいまも submitting・userOpHash が同じ・updatedAt が自分の markSubmitting の返した値である (書く直前に同期で
 //       確かめる = lib/circlePending.ts の markRejected)。確かめられるのは「読んだ時点の記録が、自分の書いたまま」だけで、
 //       別のタブとの間で原子的ではない (localStorage に lock は無い)。その窓は (d) が、ほかの試みが送り直しに着く前に閉じる
-// 残る前提: bundler が「検証で拒否」と答えた op は取り込まれない (Pimlico の経路の c2 と同じ前提)。破れたとき (閉じた op の
-// receipt が取れた) は、markConfirmed が failed → confirmed に直して error の log を残す。
+// 残る前提: bundler が「その hash を知らない」と答えた op は、受理されておらず取り込まれない (Pimlico の経路の c2 と同じ前提・
+// 限界は pimlicoIntent.ts の冒頭の「閉じる前に bundler へ聞く」: status の記録が bundler の中で遅れて反映される場合は、語に当たらない
+// 拒否で閉じうる。受理された op が not_found 以外を返すことは実測していない)。破れたとき (閉じた op の receipt が取れた) は、
+// markConfirmed が failed → confirmed に直して error の log を残す。
 // 入口の scan・resume の読み取り・予約の書き込み (境界の外) が storage の失敗で投げたときは、hook の側が対応を残す (この押下は
 // 記録の状態を確かめられなかった)。
 //   - receipt の待ちの結果は receipt / timeout / error の 3 つ (waitReceipt)。**同じ op の送り直しへ進むのは timeout のとき
@@ -114,6 +128,7 @@ import {
   broadcastCircleUserOp,
   prepareAndSignCircleUserOp,
   prepareCircleBroadcast,
+  readCircleUserOpStatus,
   signUsdcPermit,
   waitForCircleReceipt,
   type BatchCall,
@@ -213,7 +228,8 @@ const PRE_SUBMIT_GC_MS = 60 * 60 * 1000;
  * 始まった待ちの残り時間で timeout する (読んでから 1 秒で送り直すこともある)。それでも、いちばん早い待ちが始まるのは記録が
  * submitting になった後なので、下限は自分の markSubmitting から 120 秒のまま。
  * 送信の HTTP の timeout は viem の http transport の既定 10 秒 (bundle の transport に timeout を渡していない) なので、タブが
- * 動いていれば拒否はふつう 30 秒より前に届く。
+ * 動いていれば拒否はふつう 30 秒より前に届く。閉じる前の status の照会 (冒頭の (f)・同じ timeout・再送なし) を足しても、
+ * 最長で 20 秒。経過は status の答えを受け取った後に測るので、照会が遅れて上限を過ぎたら閉じない。
  *
  * 経過は 2 つの時計で測り、**どちらかが上限以上、または壁時計の経過が負なら閉じない**: 壁時計 (now = Date.now) は端末の時計の
  * 変更で戻る・進む。単調な時計 (performance.now) は戻らないが、実装によっては端末のスリープの間は進まない。片方だけでは、どちらかの
@@ -265,8 +281,8 @@ export class CirclePendingError extends Error {
   }
 }
 
-/** 自分の最初の送信を bundler が検証で拒否し、記録を閉じた (冒頭の (3))。この op は mempool に入っていない = 送金されて
- * いない。**確認待ちではない**: name を 'CirclePendingError' にしない (hook は attemptId の対応を消し、次の押下は新しい支払い =
+/** 自分の最初の送信を bundler が検証で拒否し、bundler がその op の hash を知らないと答えたので、記録を閉じた (冒頭の (3))。
+ * **確認待ちではない**: name を 'CirclePendingError' にしない (hook は attemptId の対応を消し、次の押下は新しい支払い =
  * 署名からやり直す)。文は固定 (bundler・viem の生の文 = AA33… や request の本文を画面に出さない)。
  * 文は第 10 回レビュー PR-39c で i18n に載せる前提の仮の文 (3 フォームは error の message をそのまま赤い枠に出す)。 */
 export class CircleSendRejectedError extends Error {
@@ -425,13 +441,14 @@ type FirstSendMark = {
   submittedAtMono: number;
 };
 
-// 自分の最初の送信が検証で拒否されたとき、記録を failed に閉じる (冒頭の「最初の送信の検証拒否で閉じる」の (b)(d)(e))。閉じられたら
-// true。閉じる資格が無い (b)・遅れて届いた (d)・記録がもう「自分が submitting にしたまま」でない (e: ほかの試みが確定させた・
-// 送り直した・別の op の記録に替わった・消えた) ときは false = 閉じない (呼び出し側は今までどおり復旧へ進む)。storage の失敗は
-// 投げる (送った後の境界が確認待ちに変える)。
+// 自分の最初の送信が検証で拒否されたとき、記録を failed に閉じる (冒頭の「最初の送信の検証拒否で閉じる」の (b)(f)(d)(e))。閉じられたら
+// true。閉じる資格が無い (b)・bundler がその hash を「知らない」と答えなかった (f: ほかの status・読めない)・遅れて届いた (d)・
+// 記録がもう「自分が submitting にしたまま」でない (e: ほかの試みが確定させた・送り直した・別の op の記録に替わった・消えた) ときは
+// false = 閉じない (呼び出し側は今までどおり復旧へ進む)。storage の失敗は投げる (送った後の境界が確認待ちに変える)。
 // 記録と log に残す文は bundler の code と、伏せ字にした bundler の文だけ (viem の error の message は、署名済みの op と URL を
 // 含むので入れない)。
-function closeRejectedFirstSend(args: {
+async function closeRejectedFirstSend(args: {
+  bundle: CircleSmartAccountBundle;
   key: string;
   sender: Address;
   userOpHash: Hex;
@@ -439,8 +456,8 @@ function closeRejectedFirstSend(args: {
   rejection: CircleBroadcastError;
   now: () => number;
   monotonicNow: () => number;
-}): boolean {
-  const { key, sender, userOpHash, firstSend, rejection, now, monotonicNow } = args;
+}): Promise<boolean> {
+  const { bundle, key, sender, userOpHash, firstSend, rejection, now, monotonicNow } = args;
   if (!firstSend) {
     logger.warn('circle.broadcast.rejected-not-closed', {
       userOpHash,
@@ -449,7 +466,20 @@ function closeRejectedFirstSend(args: {
     });
     return false;
   }
-  // (d) 時間の柵。下の markRejected まで await を挟まない (測った後に遅れる隙間を作らない)。
+  // (f) bundler にその op の状態を聞く。「知らない」(not_found) と答えたときだけ先へ進む。何の波及を断つか: 送信が途中で 2 回
+  // 届き、1 回目は受理されたのに、重複の配送への拒否 (語に当たらないもの = preVerificationGas が足りない等) で記録を閉じて、
+  // 取り込まれる op の上に新しい支払いを開けること。この await は (d) を測る前に置く。
+  const status = await readCircleUserOpStatus(bundle, userOpHash);
+  if (!status.unknownToBundler) {
+    logger.warn('circle.broadcast.rejected-not-closed', {
+      userOpHash,
+      code: rejection.code,
+      reason: 'status',
+      status: status.status,
+    });
+    return false;
+  }
+  // (d) 時間の柵。(f) の答えを受け取った後に測り、下の markRejected まで await を挟まない (測った後に遅れる隙間を作らない)。
   const at = now();
   const wallElapsedMs = at - firstSend.submittedAt;
   const monoElapsedMs = monotonicNow() - firstSend.submittedAtMono;
@@ -1044,7 +1074,8 @@ export async function executeCirclePayment(
       const rejection = validationRejectionOf(error);
       if (
         rejection &&
-        closeRejectedFirstSend({
+        (await closeRejectedFirstSend({
+          bundle,
           key,
           sender,
           userOpHash,
@@ -1052,7 +1083,7 @@ export async function executeCirclePayment(
           rejection,
           now,
           monotonicNow,
-        })
+        }))
       ) {
         throw new CircleSendRejectedError(userOpHash);
       }

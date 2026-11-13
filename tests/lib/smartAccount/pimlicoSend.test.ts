@@ -53,11 +53,15 @@ import { buildMetaMaskSmartAccountClient } from '@/lib/smartAccount/metamask';
 import {
   asSignedSendClient,
   broadcastPimlicoUserOp,
+  bundlerErrorText,
   classifyBroadcastError,
+  findRpcRequestError,
   findUserOperationReceipt,
   isUserOpNonceConsumed,
   joinUserOpNonce,
+  mentionsNonceOrMempool,
   prepareAndSignPimlicoUserOp,
+  readBundlerOpStatus,
   reserveUserOpNonce,
   splitUserOpNonce,
   toUserOperationRejection,
@@ -137,11 +141,23 @@ let tokenAllowance = maxUint256;
 // eth_sendUserOperation への答え方。rpc-error の status は HTTP の status (既定 200)。
 type SendReply =
   | { kind: 'hash'; hash: Hex }
-  | { kind: 'rpc-error'; code: number; message: string; status?: number }
+  | { kind: 'rpc-error'; code: number; message: string; data?: unknown; status?: number }
   | { kind: 'http'; status: number }
   | { kind: 'network' }
   | { kind: 'hang' };
 let sendReply: SendReply = { kind: 'hash', hash: `0x${'ab'.repeat(32)}` };
+// pimlico_getUserOperationStatus への答え方。既定は「その hash を知らない」。
+type StatusReply =
+  | { kind: 'result'; result: unknown }
+  | { kind: 'rpc-error'; code: number; message: string; status?: number }
+  | { kind: 'http'; status: number }
+  | { kind: 'network' }
+  | { kind: 'hang' };
+const STATUS_NOT_FOUND: StatusReply = {
+  kind: 'result',
+  result: { status: 'not_found', transactionHash: null },
+};
+let statusReply: StatusReply = STATUS_NOT_FOUND;
 
 // Base の上限 (10 gwei) と Polygon の上限 (1000 gwei) のどちらも下回る値。test が上げることがある。
 const NORMAL_GAS_PRICE_TIER = { maxFeePerGas: toHex(2n * 10n ** 9n), maxPriorityFeePerGas: toHex(10n ** 8n) };
@@ -218,6 +234,7 @@ beforeEach(() => {
   tokenAllowance = maxUint256;
   GAS_PRICE_TIER = NORMAL_GAS_PRICE_TIER;
   sendReply = { kind: 'hash', hash: `0x${'ab'.repeat(32)}` };
+  statusReply = STATUS_NOT_FOUND;
   // nonce の key は Date.now() から作られる (viem の toSmartAccount)。分ける前と後で同じ key にする。
   vi.spyOn(Date, 'now').mockReturnValue(1_800_000_000_000);
   vi.stubGlobal(
@@ -237,14 +254,31 @@ beforeEach(() => {
       if (body.method === 'eth_sendUserOperation') {
         if (sendReply.kind === 'hash') return reply({ result: sendReply.hash });
         if (sendReply.kind === 'rpc-error') {
+          const { code, message, data } = sendReply;
           return reply(
-            { error: { code: sendReply.code, message: sendReply.message } },
+            { error: { code, message, ...(data === undefined ? {} : { data }) } },
             sendReply.status,
           );
         }
         if (sendReply.kind === 'http') return new Response('bad gateway', { status: sendReply.status });
         if (sendReply.kind === 'network') throw new TypeError('Failed to fetch');
         // hang: 応答を返さない (viem の http transport の timeout が abort するまで)。
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () =>
+            reject(new DOMException('The operation was aborted.', 'AbortError')),
+          );
+        });
+      }
+      if (body.method === 'pimlico_getUserOperationStatus') {
+        if (statusReply.kind === 'result') return reply({ result: statusReply.result });
+        if (statusReply.kind === 'rpc-error') {
+          return reply(
+            { error: { code: statusReply.code, message: statusReply.message } },
+            statusReply.status,
+          );
+        }
+        if (statusReply.kind === 'http') return new Response('bad gateway', { status: statusReply.status });
+        if (statusReply.kind === 'network') throw new TypeError('Failed to fetch');
         return new Promise<Response>((_resolve, reject) => {
           init?.signal?.addEventListener('abort', () =>
             reject(new DOMException('The operation was aborted.', 'AbortError')),
@@ -658,6 +692,182 @@ describe('送信は 1 回だけ・失敗の分類 (実物の http transport・HT
     expect(classifyBroadcastError(new Error('Already known'), 200)).toBe('unknown');
     expect(classifyBroadcastError(undefined, 200)).toBe('unknown');
     expect(classifyBroadcastError('rejected', undefined)).toBe('unknown');
+  });
+
+  // 最初の送信の拒否で閉じてよいかを決める語 (Circle の経路の分類と、Pimlico の経路の c2 = pimlicoIntent.ts が使う)。
+  // 共有の分類 (classifyBroadcastError) には入れていない: nonce の拒否も validation-rejected のまま (送り直しの拒否で
+  // 同じ nonce の作り直しへ進む動きを変えない)。
+  describe('bundler が返した文 (bundlerErrorText) と、nonce・mempool の語', () => {
+    it('AA25 (HTTP 200・-32500) は、共有の分類では validation-rejected のまま。bundler の文は語を含む', async () => {
+      const { outcome } = await broadcastWith({
+        kind: 'rpc-error',
+        code: -32500,
+        message: 'AA25 invalid account nonce',
+      });
+      if (outcome.kind === 'accepted') throw new Error('断られるはず');
+      expect(outcome.kind).toBe('validation-rejected');
+      const text = bundlerErrorText(findRpcRequestError(outcome.error));
+      expect(text).toBe('AA25 invalid account nonce ');
+      expect(mentionsNonceOrMempool(text)).toBe(true);
+    });
+
+    it('viem の error の message は送った request の本文 ("nonce" の欄) を含むが、bundler の文には入れない', async () => {
+      const { outcome } = await broadcastWith({
+        kind: 'rpc-error',
+        code: -32500,
+        message: "AA21 didn't pay prefund",
+      });
+      if (outcome.kind === 'accepted') throw new Error('断られるはず');
+      const rpc = findRpcRequestError(outcome.error);
+      // 前提の確認: 実物の viem の RpcRequestError の message には、署名済みの op の "nonce" の欄が載っている。
+      expect(String(rpc?.message)).toMatch(/Request body: .*"nonce":"0x/);
+      expect(mentionsNonceOrMempool(String(rpc?.message))).toBe(true);
+      // bundler の文は、bundler が返した message だけ。
+      const text = bundlerErrorText(rpc);
+      expect(text).toBe("AA21 didn't pay prefund ");
+      expect(mentionsNonceOrMempool(text)).toBe(false);
+    });
+
+    it('語が JSON-RPC の error の data の側にだけあるときも、bundler の文に入る', async () => {
+      const { outcome } = await broadcastWith({
+        kind: 'rpc-error',
+        code: -32500,
+        message: 'validation failed',
+        data: { reason: 'AA25 invalid account nonce' },
+      });
+      if (outcome.kind === 'accepted') throw new Error('断られるはず');
+      expect(outcome.kind).toBe('validation-rejected');
+      const text = bundlerErrorText(findRpcRequestError(outcome.error));
+      expect(text).toBe('validation failed {"reason":"AA25 invalid account nonce"}');
+      expect(mentionsNonceOrMempool(text)).toBe(true);
+    });
+
+    it('data があっても、語が無ければ当たらない。JSON-RPC の error が無いときは空の文', async () => {
+      const { outcome } = await broadcastWith({
+        kind: 'rpc-error',
+        code: -32501,
+        message: 'AA33 reverted',
+        data: { paymaster: PAYMASTER },
+      });
+      if (outcome.kind === 'accepted') throw new Error('断られるはず');
+      expect(mentionsNonceOrMempool(bundlerErrorText(findRpcRequestError(outcome.error)))).toBe(false);
+      expect(bundlerErrorText(null)).toBe(' ');
+      expect(mentionsNonceOrMempool(bundlerErrorText(null))).toBe(false);
+    });
+  });
+});
+
+// PR #1084 の Codex の指摘: 最初の送信の検証の拒否で閉じる前に、bundler にその op の状態を聞く (pimlico_getUserOperationStatus)。
+// 閉じてよいのは「その hash を知らない」(not_found) と答えたときだけ。本物の viem の http transport と偽物の fetch で、bundler へ
+// 届く request と、答えごとの結果を確かめる。使う側の扱いは tests/hooks/useBatchPayment.pimlicoSend.test.tsx (Pimlico の c2) と
+// tests/lib/smartAccount/circleSend.test.ts (Circle)。
+describe('readBundlerOpStatus (bundler にその op の状態を 1 回聞く)', () => {
+  const HASH: Hex = `0x${'cd'.repeat(32)}`;
+  const transport = { url: BUNDLER_URL, timeout: 10_000 };
+  const statusRequests = () => rpcCalls.filter((c) => c.method === 'pimlico_getUserOperationStatus');
+
+  async function readWith(reply: StatusReply) {
+    statusReply = reply;
+    rpcCalls = [];
+    return readBundlerOpStatus({ transport, userOpHash: HASH });
+  }
+
+  it('not_found → 知らない (閉じてよい)。bundler の URL へ、その hash で 1 回だけ聞く', async () => {
+    const status = await readWith({ kind: 'result', result: { status: 'not_found', transactionHash: null } });
+    expect(status).toEqual({ unknownToBundler: true, status: 'not_found' });
+    expect(rpcCalls).toEqual([
+      { url: BUNDLER_URL, method: 'pimlico_getUserOperationStatus', params: [HASH] },
+    ]);
+  });
+
+  it('分けられる client (permissionless の SmartAccountClient) の transport をそのまま渡せる', async () => {
+    const bundle = await buildSimpleSmartAccountClient({
+      ...clientsFor(polygon),
+      chainId: polygon.id,
+      deployment: jpycPolygon,
+    });
+    rpcCalls = [];
+    const status = await readBundlerOpStatus({
+      transport: splitClientOf(bundle).transport,
+      userOpHash: HASH,
+    });
+    expect(status).toEqual({ unknownToBundler: true, status: 'not_found' });
+    expect(statusRequests()).toEqual([
+      { url: BUNDLER_URL, method: 'pimlico_getUserOperationStatus', params: [HASH] },
+    ]);
+  });
+
+  it('transactionHash の欄が無い not_found も、知らないと読む', async () => {
+    const status = await readWith({ kind: 'result', result: { status: 'not_found' } });
+    expect(status).toEqual({ unknownToBundler: true, status: 'not_found' });
+  });
+
+  // permissionless 0.2.57 の PimlicoUserOperationStatus の値 (not_found 以外の全部) と、型に無い値。
+  it.each(['not_submitted', 'submitted', 'rejected', 'reverted', 'included', 'failed', 'queued', 'NOT_FOUND', 'not_found ', ''])(
+    'status が「%s」→ 知らないと読まない (閉じない側)・値はそのまま返す',
+    async (value) => {
+      const status = await readWith({ kind: 'result', result: { status: value, transactionHash: null } });
+      expect(status).toEqual({ unknownToBundler: false, status: value });
+    },
+  );
+
+  it('長い値は 40 字で切る (log に載せる値)', async () => {
+    const status = await readWith({ kind: 'result', result: { status: 'x'.repeat(200) } });
+    expect(status).toEqual({ unknownToBundler: false, status: 'x'.repeat(40) });
+  });
+
+  it.each<{ label: string; result: unknown }>([
+    { label: 'result が null', result: null },
+    { label: 'result が文字列', result: 'not_found' },
+    { label: 'status が無い', result: { transactionHash: null } },
+    { label: 'status が文字列でない', result: { status: 404, transactionHash: null } },
+    { label: 'not_found なのに transactionHash がある', result: { status: 'not_found', transactionHash: `0x${'ee'.repeat(32)}` } },
+  ])('形の崩れた応答 ($label) → 読めなかった (閉じない側)', async ({ result }) => {
+    const status = await readWith({ kind: 'result', result });
+    expect(status).toEqual({ unknownToBundler: false, status: 'unreadable:malformed' });
+  });
+
+  it.each<{ label: string; reply: StatusReply; status: string }>([
+    { label: 'JSON-RPC の error (-32601)', reply: { kind: 'rpc-error', code: -32601, message: 'method not found' }, status: 'unreadable:RpcRequestError -32601' },
+    // HTTP 5xx に「not_found」の文が載っていても、result ではないので読めなかった扱い。
+    { label: 'HTTP 500 に載った JSON-RPC の error', reply: { kind: 'rpc-error', code: -32603, message: 'not_found', status: 500 }, status: 'unreadable:RpcRequestError -32603' },
+    { label: 'HTTP 502 (本文が JSON-RPC でない)', reply: { kind: 'http', status: 502 }, status: 'unreadable:HttpRequestError' },
+    { label: '通信断 (fetch の失敗)', reply: { kind: 'network' }, status: 'unreadable:HttpRequestError' },
+  ])('$label → 投げずに「読めなかった」で返す・再送しない (request は 1 回)', async ({ reply, status }) => {
+    expect(await readWith(reply)).toEqual({ unknownToBundler: false, status });
+    expect(statusRequests()).toHaveLength(1);
+  });
+
+  it('応答が返らない (transport の timeout = 10 秒) → 読めなかった・再送しない', async () => {
+    statusReply = { kind: 'hang' };
+    rpcCalls = [];
+    vi.useFakeTimers();
+    const pending = readBundlerOpStatus({ transport, userOpHash: HASH });
+    await vi.advanceTimersByTimeAsync(10_001);
+    expect(await pending).toEqual({ unknownToBundler: false, status: 'unreadable:TimeoutError' });
+    expect(statusRequests()).toHaveLength(1);
+  });
+
+  it('transport に URL が無い (設定の誤り) → 読めなかった (閉じない側)・何も送らない', async () => {
+    rpcCalls = [];
+    const status = await readBundlerOpStatus({ transport: {}, userOpHash: HASH });
+    expect(status.unknownToBundler).toBe(false);
+    expect(status.status).toMatch(/^unreadable:/);
+    expect(rpcCalls).toEqual([]);
+  });
+
+  it('読めなかったときの値に、URL (API key を含む) と request の本文を入れない', async () => {
+    const secretTransport = { url: `${BUNDLER_URL}?apikey=SECRET-KEY`, timeout: 10_000 };
+    for (const reply of [
+      { kind: 'rpc-error', code: -32601, message: 'method not found' },
+      { kind: 'http', status: 502 },
+      { kind: 'network' },
+    ] satisfies StatusReply[]) {
+      statusReply = reply;
+      const status = await readBundlerOpStatus({ transport: secretTransport, userOpHash: HASH });
+      expect(status.status).not.toContain('SECRET-KEY');
+      expect(status.status).not.toContain(HASH);
+    }
   });
 });
 
