@@ -434,6 +434,9 @@ describe('穴 B: scan で別のタブの支払いの結果を受け取りに行�
     const screenB = openScreen();
     await pressAndSettle(screenB);
     expect((screenB.result.current.error as Error).name).toBe('CirclePendingError');
+    // 場面 (a) (第 10 回レビュー PR-39c): 対応を R の記録に付け替えられた (書けた) ので、「このタブでもう一度押すと、まず同じ
+    // 支払いの結果を確かめ直します」と言ってよい。
+    expect((screenB.result.current.error as Error & { circleCode?: string }).circleCode).toBe('unconfirmed');
     expect(permitRequests).toHaveLength(1);
     // 確認待ちは対応を残す。残る中身は R の attemptId。
     expect(mappedAttemptId()).toBe(rAttemptId);
@@ -747,5 +750,41 @@ describe('穴 B: 付け替えない場合 (hook → 本物の executeCirclePayme
     await waitFor(() => expect(screenB.result.current.isSuccess).toBe(true));
     expectResultOfR(screenB);
     expect(mappedAttemptId()).toBeUndefined();
+  });
+
+  // 第 10 回レビュー PR-39c (Codex の 3 回目): 付け替えの書き込みが失敗した押下が確認待ちで終わると、対応は自分の attemptId の
+  // まま (その key に R の記録は無い)。R が後で確定して 90 秒を過ぎると、次の押下は新しい支払いを始める (今までの動き・ここでは
+  // 固定しない)。なので、その確認待ちは、場面 (a) (「このタブでもう一度押すと、まず同じ支払いの結果を確かめ直します」) ではなく
+  // (e)。hook が「書けたか」を circleSend に返すことを、hook から本物の executeCirclePayment まで通して確かめる。
+  it('sessionStorage に書けない (30 分以内の記録) → 復旧が確認待ちで終わる → 場面は (e)・対応は自分の attemptId のまま・署名を求めない', async () => {
+    const { rAttemptId } = await payInOtherTab();
+    const realSetItem = Storage.prototype.setItem;
+    const setItem = vi
+      .spyOn(Storage.prototype, 'setItem')
+      .mockImplementation(function (this: Storage, key: string, value: string) {
+        if (this === window.sessionStorage && value === rAttemptId) {
+          throw new DOMException('quota', 'QuotaExceededError');
+        }
+        realSetItem.call(this, key, value);
+      });
+
+    // このタブで押す (1 分後 = 30 分の窓の内)。bundler が receipt を返せず (5xx)、確認待ちで終わる。
+    clockOffset += 1 * MIN;
+    bundlerDown = true;
+    const screenB = openScreen();
+    await pressAndSettle(screenB);
+
+    const error = screenB.result.current.error as Error & { circleCode?: string; userOpHash?: string };
+    // hook が見る name は同じ (対応を消さない)。変わるのは場面の符号だけ。
+    expect(error.name).toBe('CirclePendingError');
+    expect(error.userOpHash).toBe(OP_R.userOpHash);
+    expect(error.circleCode).toBe('unconfirmed_earlier');
+    // 付け替えを試みて失敗した。対応は自分の attemptId のまま。
+    expect(setItem.mock.calls.some((c) => c[1] === rAttemptId)).toBe(true);
+    const own = mappedAttemptId();
+    expect(own).toBeDefined();
+    expect(own).not.toBe(rAttemptId);
+    // 新しい署名は求めていない (タブ 1 の署名 1 回だけ)。
+    expect(permitRequests).toHaveLength(1);
   });
 });

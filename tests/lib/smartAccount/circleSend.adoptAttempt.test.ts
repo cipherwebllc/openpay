@@ -209,8 +209,9 @@ function walletSigns(o: Op, landsAt: { block: bigint; ms: number }) {
 
 // 起きた順 (付け替え・receipt の待ち・receipt の照会)。付け替えが await の前であることを見る。
 let events: string[];
-// hook が渡す関数の偽物 (本物は sessionStorage に書く = tests/hooks/useBatchPayment.circleAdopt.test.tsx)。
-const adoptAttempt = vi.fn<(paymentAttemptId: string) => void>();
+// hook が渡す関数の偽物 (本物は sessionStorage に書き、書けたかを返す = tests/hooks/useBatchPayment.circleAdopt.test.tsx)。
+// 既定は true (書けた)。
+const adoptAttempt = vi.fn<(paymentAttemptId: string) => boolean>();
 
 // 場面の符号 (第 10 回レビュー PR-39c)。press() が確認待ち (CirclePendingError) で終わるたびに、その error の circleCode を
 // ここに積む。各 test の後 (下の afterEach) で「'unconfirmed' 以外が残っていない」ことを確かめる = 明示していない確認待ちは
@@ -260,6 +261,7 @@ beforeEach(() => {
   events = [];
   adoptAttempt.mockImplementation(() => {
     events.push('adopt');
+    return true;
   });
   chain = { consumed: new Set(), blocks: new Map(), latestMs: T0, receipts: new Map() };
 
@@ -744,6 +746,29 @@ describe('PR-39c: scan の submitting の枝の確認待ち — 付け替えた�
     expect(mockBroadcast).not.toHaveBeenCalled();
   });
 
+  // Codex の 3 回目: hook の関数は呼ばれたが、対応を書けなかった (sessionStorage の失敗 = false を返す)。対応は前の値のまま
+  // なので、次の押下はこの記録を resume しない。
+  it('窓の内・hook の関数を呼んだが、対応を書けなかった (false を返す) → (e)。復旧の進め方は同じ', async () => {
+    seed('submitting');
+    adoptAttempt.mockImplementation(() => {
+      events.push('adopt');
+      return false;
+    });
+
+    const error = await pendingOf(press(T0 + 10 * MIN));
+
+    expect(error.circleCode).toBe('unconfirmed_earlier');
+    expect(error.message).toBe(jaMessages.CircleErrors.unconfirmedEarlier);
+    expect(error.name).toBe('CirclePendingError');
+    expect(error.userOpHash).toBe(OLD.userOpHash);
+    expect(takePendingCodes()).toEqual(['unconfirmed_earlier']);
+    // 呼ぶ条件・順番・復旧 (待ち → 送り直し → 待ち) は、書けたときと同じ。
+    expect(adopted()).toEqual(['tab-1']);
+    expect(events).toEqual(['adopt', 'wait', 'wait']);
+    expect(signatureRequests()).toBe(0);
+    expect(stored('tab-2')).toBeUndefined();
+  });
+
   it('窓の内でも、hook が対応を管理していない呼び出し (adoptAttempt なし) → (e)', async () => {
     seed('submitting');
 
@@ -773,5 +798,89 @@ describe('PR-39c: scan の submitting の枝の確認待ち — 付け替えた�
     expect(error.circleCode).toBe('unconfirmed');
     expect(error.userOpHash).toBe(OLD.userOpHash);
     expect(adopted()).toEqual([]);
+  });
+});
+
+// 第 10 回レビュー PR-39c (Codex の 3 回目): (a) の文は「24 時間以内にこのタブで同じ内容のままもう一度押すと、まず同じ支払いの
+// 結果を確かめ直します」と言う。自分の key の submitting の記録の resume でも、その記録が古い (最後に書いてから 6 日より後) と、
+// submitting の記録の掃除 (7 日) まで 24 時間を切っていて、24 時間以内の次の押下でも記録が消えていることがある
+// (Codex の再現: 6 日 23 時間前の記録 → 照会の失敗で確認待ち → 1 時間 + 1 ms 後の押下は新しい支払いに署名する)。なので、
+// その枝の確認待ちは (e)。境界は「7 日 − 24 時間 = 6 日」(circleSend.ts の SUBMITTING_RETENTION_MS − TERMINAL_RETENTION_MS)。
+// 固定するのは符号と文だけ ((e) の後に実際に新しい支払いが始まるかは、今までの動きなので固定しない)。
+describe('PR-39c: 自分の key の submitting の記録の resume — 残りの寿命が 24 時間以上なら (a)・より短ければ (e)', () => {
+  const DAY = 24 * 60 * MIN;
+  // このタブの attemptId が tab-1 (自分の key の記録)。
+  const pressOwn = (at: number) => press(at, { paymentAttemptId: 'tab-1' });
+  // 復旧の最初の待ちが失敗する (bundler の 5xx)。送り直さないので、記録の時刻 (updatedAt) は動かない。
+  const lookupFails = () => mockWait.mockRejectedValueOnce(new Error('HTTP request failed. Status: 503'));
+  async function pendingOf(attempt: Promise<unknown>) {
+    const error = await attempt.catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(CirclePendingError);
+    return error as CirclePendingError;
+  }
+
+  it('Codex の順: 6 日 23 時間前の記録 → 照会の失敗で確認待ち → (e) (name・userOpHash は同じ・署名を求めない・記録は動かない)', async () => {
+    seed('submitting');
+    const before = stored('tab-1')!;
+    expect(before.updatedAt).toBe(T0);
+    lookupFails();
+
+    const error = await pendingOf(pressOwn(T0 + 7 * DAY - 60 * MIN));
+
+    expect(error.circleCode).toBe('unconfirmed_earlier');
+    expect(Object.hasOwn(error, 'circleCode')).toBe(true);
+    expect(error.message).toBe(jaMessages.CircleErrors.unconfirmedEarlier);
+    expect(error.name).toBe('CirclePendingError');
+    expect(error.userOpHash).toBe(OLD.userOpHash);
+    expect(takePendingCodes()).toEqual(['unconfirmed_earlier']);
+    expect(signatureRequests()).toBe(0);
+    expect(mockBroadcast).not.toHaveBeenCalled();
+    expect(adopted()).toEqual([]);
+    expect(stored('tab-1')).toEqual(before);
+  });
+
+  it('境界: 最後に書いてからちょうど 6 日 → 残りの寿命はちょうど 24 時間 → (a)', async () => {
+    seed('submitting');
+    lookupFails();
+
+    const error = await pendingOf(pressOwn(T0 + 6 * DAY));
+
+    expect(error.circleCode).toBe('unconfirmed');
+    expect(error.message).toBe(jaMessages.CircleErrors.unconfirmed);
+    expect(error.userOpHash).toBe(OLD.userOpHash);
+    expect(stored('tab-1')).toMatchObject({ status: 'submitting', updatedAt: T0 });
+  });
+
+  it('境界: 6 日を 1 ms 過ぎた → 残りの寿命は 24 時間より短い → (e)', async () => {
+    seed('submitting');
+    lookupFails();
+
+    const error = await pendingOf(pressOwn(T0 + 6 * DAY + 1));
+
+    expect(error.circleCode).toBe('unconfirmed_earlier');
+    expect(error.userOpHash).toBe(OLD.userOpHash);
+    expect(takePendingCodes()).toEqual(['unconfirmed_earlier']);
+    expect(stored('tab-1')).toMatchObject({ status: 'submitting', updatedAt: T0 });
+  });
+
+  it('新しい記録 (45 分前) の resume の確認待ちは (a) のまま', async () => {
+    seed('submitting');
+    lookupFails();
+
+    const error = await pendingOf(pressOwn(T0 + 45 * MIN));
+
+    expect(error.circleCode).toBe('unconfirmed');
+    expect(error.name).toBe('CirclePendingError');
+    expect(error.userOpHash).toBe(OLD.userOpHash);
+  });
+
+  it('古い記録でも、復旧が結果を受け取れたら結果を返す (確認待ち以外は変えない)', async () => {
+    seed('submitting');
+    include(OLD, { block: 100n, ms: T0 + 12 * SEC });
+
+    const res = await pressOwn(T0 + 7 * DAY - 60 * MIN);
+
+    expect(res).toMatchObject({ userOpHash: OLD.userOpHash, txHash: OLD.txHash });
+    expect(signatureRequests()).toBe(0);
   });
 });

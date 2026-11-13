@@ -1896,11 +1896,11 @@ describe('H-W・H-Y: 送った後の終わり方', () => {
       expect(loggedErrors()).toEqual(['circle.post_submit.unexpected']);
     });
 
-    it('同じ場面で、対応を付け替えた呼び出し (adoptAttempt あり) → 確認待ちは (a) のまま', async () => {
+    it('同じ場面で、対応を付け替えた呼び出し (adoptAttempt あり・書けた) → 確認待ちは (a) のまま', async () => {
       const other = seed('submitting', { attemptId: 'other', at: 900 });
       mockWait.mockRejectedValueOnce(timeoutOf(OP1));
       failWritesOf('submitting');
-      const adoptAttempt = vi.fn();
+      const adoptAttempt = vi.fn(() => true);
 
       const { error } = await outcome(run({ adoptAttempt }));
 
@@ -1910,6 +1910,23 @@ describe('H-W・H-Y: 送った後の終わり方', () => {
       // 次の押下は、付け替えた先の記録の key を resume する (記録が残っている間) → (a) の「24 時間以内に…まず同じ支払いの結果を
       // 確かめ直します」が成り立つ。
       expect(error?.circleCode).toBe('unconfirmed');
+      expect(stored(other)).toMatchObject({ status: 'submitting', updatedAt: 900 });
+      expect(loggedErrors()).toEqual(['circle.post_submit.unexpected']);
+    });
+
+    it('同じ場面で、hook の関数を呼んだが対応を書けなかった (false を返す) → 確認待ちは (e)', async () => {
+      const other = seed('submitting', { attemptId: 'other', at: 900 });
+      mockWait.mockRejectedValueOnce(timeoutOf(OP1));
+      failWritesOf('submitting');
+      const adoptAttempt = vi.fn(() => false);
+
+      const { error } = await outcome(run({ adoptAttempt }));
+
+      expect(adoptAttempt.mock.calls).toEqual([['other']]);
+      expect(error).toBeInstanceOf(CirclePendingError);
+      expect(error?.userOpHash).toBe(OP1.userOpHash);
+      expect(error?.circleCode).toBe('unconfirmed_earlier');
+      expect(takePendingCodes()).toEqual(['unconfirmed_earlier']);
       expect(stored(other)).toMatchObject({ status: 'submitting', updatedAt: 900 });
       expect(loggedErrors()).toEqual(['circle.post_submit.unexpected']);
     });
