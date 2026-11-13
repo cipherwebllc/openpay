@@ -243,14 +243,20 @@ async function payInOtherTab() {
   window.sessionStorage.clear();
   expect(recordStatuses()).toEqual(['submitting']);
   const rAttemptId = recordOf(OP_R).paymentAttemptId;
-  // R が chain に取り込まれ、タブ 1 の試みが記録を confirmed にする。
-  const confirmR = async () => {
-    land(OP_R, 100n);
+  // タブ 1 の receipt の待ちが返る。R が取り込まれていれば、タブ 1 の試みが記録を confirmed にする。
+  const tab1ReceiptArrives = async () => {
     gate.resolve();
     await waitFor(() => expect(tab1.state().status).toBe('success'));
     expect(recordOf(OP_R).status).toBe('confirmed');
   };
-  return { rAttemptId, confirmR };
+  // R が chain に取り込まれ、タブ 1 の試みが記録を confirmed にする。
+  const confirmR = async () => {
+    land(OP_R, 100n);
+    await tab1ReceiptArrives();
+  };
+  // タブ 1 の待ちが、receipt なし (120 秒の timeout) で返る。
+  const tab1WaitTimesOut = () => gate.resolve();
+  return { rAttemptId, confirmR, tab1ReceiptArrives, tab1WaitTimesOut };
 }
 
 beforeEach(() => {
@@ -545,6 +551,117 @@ describe('穴 B: 付け替えた後の次の押下 (R の key の resume)', () =
     // R の記録は掃除で消え、新しい記録が同じ attemptId (同じ key) に作られた。
     expect(records()).toHaveLength(1);
     expect(recordOf(OP_NEW)).toMatchObject({ status: 'confirmed', paymentAttemptId: rAttemptId });
+    expect(mappedAttemptId()).toBeUndefined();
+  });
+});
+
+// Codex のレビュー (MUST): 対応 (sessionStorage) は「chain・sender・内容ごとに 1 つ」で、同じタブの 2 つの画面 (同じ origin の
+// 埋め込みが 2 つ、など) が共有する。片方が R に付け替えた対応を、もう片方が「自分の attemptId」のつもりで消すと、穴 B が
+// 開き直す。対応を消すのは、対応がいまもその試みの知っている attemptId を指しているときだけ。
+describe('穴 B: 同じ sessionStorage を使う 2 つの画面 (付け替えた対応を、別の試みが消さない)', () => {
+  // R は 31 分前に取り込まれたが、記録は submitting のまま (タブ 1 が receipt を待っている)。画面 A が押すと、照合は R を
+  // 「飛ばす」とし、A は自分の attemptId (K) の記録を予約して、署名 1 を待つ。その後タブ 1 が R を confirmed にし、画面 B が
+  // 直近の confirmed を scan して R に付け替え、照会の途中で離れる (B の成功はどの画面にも出ない)。
+  async function twoScreens() {
+    const other = await payInOtherTab();
+    land(OP_R, 100n);
+    clockOffset += 31 * MIN;
+
+    const screenA = openScreen();
+    screenA.result.current.mutate(PARAMS);
+    await waitFor(() => expect(permitRequests).toHaveLength(2));
+    expect(readContract).toHaveBeenCalledTimes(1);
+    const ownAttemptId = mappedAttemptId();
+    expect(ownAttemptId).toBeDefined();
+    expect(ownAttemptId).not.toBe(other.rAttemptId);
+    expect(recordStatuses()).toEqual(['awaiting_signature', 'submitting']);
+
+    await other.tab1ReceiptArrives();
+
+    const lookupsBefore = lookups.length;
+    const lookupGate = deferred<void>();
+    lookupGates.set(OP_R.userOpHash, lookupGate.promise);
+    const screenB = openScreen();
+    screenB.result.current.mutate(PARAMS);
+    await waitFor(() => expect(lookups).toHaveLength(lookupsBefore + 1));
+    // B が対応を R に付け替えた (A はまだ署名を待っている)。
+    expect(mappedAttemptId()).toBe(other.rAttemptId);
+    screenB.unmount();
+
+    const finishB = async () => {
+      lookupGate.resolve();
+      await waitFor(() => expect(screenB.state().status).toBe('success'));
+    };
+    return { ...other, screenA, finishB };
+  }
+
+  it('A の署名が拒否される (ふつうの error) → A の後片付けは、B が付け替えた対応を消さない → 100 秒後の押下は署名を求めず R の結果', async () => {
+    const { rAttemptId, screenA, finishB } = await twoScreens();
+
+    // A の署名 1 を拒否する。A は画面のある試みで、ふつうの error で終わる (自分の記録は abandoned)。
+    permitRequests[1].reject(new Error('User rejected the request.'));
+    await waitFor(() => expect(screenA.result.current.isError).toBe(true));
+    expect(recordStatuses()).toEqual(['abandoned', 'confirmed']);
+    // 対応は R を指したまま (A の知っている attemptId ではないので、A は消さない)。
+    expect(mappedAttemptId()).toBe(rAttemptId);
+
+    await finishB();
+    expect(mappedAttemptId()).toBe(rAttemptId);
+
+    // R の確定から 90 秒より後に、A の画面で押し直す。
+    clockOffset += 100 * SEC;
+    await pressAndSettle(screenA);
+
+    // 新しい署名を求めず・2 本目を送らず、R の結果を受け取る。
+    expect(permitRequests).toHaveLength(2);
+    expect(userOpRequests).toHaveLength(1);
+    expect(sentOps()).toEqual([OP_R.signedUserOp]);
+    expect(screenA.result.current.data).toMatchObject({
+      userOpHash: OP_R.userOpHash,
+      txHash: OP_R.txHash,
+      success: true,
+    });
+    // R の attemptId で押した試みが受け取ったので、対応はここで消える。
+    expect(mappedAttemptId()).toBeUndefined();
+  });
+
+  it('A が署名して払い終える (成功) → A の後片付けは、B が付け替えた対応を消さない (A の知っている attemptId ではない)', async () => {
+    const { rAttemptId, screenA, finishB } = await twoScreens();
+
+    // A は新しい支払いとして署名し、払い終える (R は 31 分前の別の支払い = 照合が「飛ばす」とした)。
+    await approveNewPayment(screenA, OP_NEW);
+    expect(screenA.result.current.data).toMatchObject({ userOpHash: OP_NEW.userOpHash });
+    expect(recordStatuses()).toEqual(['confirmed', 'confirmed']);
+    expect(mappedAttemptId()).toBe(rAttemptId);
+
+    await finishB();
+    expect(mappedAttemptId()).toBe(rAttemptId);
+  });
+
+  it('付け替えた試み自身がふつうの error で終わる (復旧の途中で R が failed に閉じられた) → R を指す対応を自分で消す', async () => {
+    const { rAttemptId, tab1WaitTimesOut } = await payInOtherTab();
+
+    clockOffset += 1 * MIN;
+    const screenB = openScreen();
+    screenB.result.current.mutate(PARAMS);
+    await waitFor(() => expect(waitForCircleReceipt).toHaveBeenCalledTimes(2));
+    expect(mappedAttemptId()).toBe(rAttemptId);
+
+    // 待つ間に、タブ 1 が R を閉じた (本物の遷移)。その後、待ちは receipt なしで返る。
+    const r = recordOf(OP_R);
+    markRejected({
+      key: r.key,
+      sender: CUSTOMER,
+      userOpHash: OP_R.userOpHash,
+      submittedAt: r.updatedAt,
+      errorMessage: 'bundler rejected (code -32500): AA21',
+      now: Date.now(),
+    });
+    tab1WaitTimesOut();
+    await waitFor(() => expect(screenB.result.current.isError).toBe(true));
+
+    expect((screenB.result.current.error as Error).message).toContain('この決済試行は既に終了しています');
+    // 付け替えた試みは、付け替えた先の attemptId を知っているので、対応を消す (次の押下は新しい支払い)。
     expect(mappedAttemptId()).toBeUndefined();
   });
 });

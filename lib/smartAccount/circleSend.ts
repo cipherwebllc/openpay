@@ -111,8 +111,10 @@
 //   (a) 署名 1 (permit) を求める直前  (b) 署名 2 (UserOperation) を求める直前  (c) 署名 2 の後・markSigned の前
 //   (d) 署名 1・署名 2 の catch (abandon の前)
 //   (e) 古い submitting の記録の照合 (上の「古い submitting の記録」) の await の後・scan の前
-//   (f) attemptId の対応の付け替え (下の「対応の付け替え」) の直前
 // すでに bundler へ渡した op の後始末 (receipt 待ち・復旧の再送・markConfirmed) では見ない (渡した op は画面が無くても成立しうる)。
+// attemptId の対応の付け替え (下の「対応の付け替え」) の直前でも見ない: そこに来る試みは生きている。呼び出し元 (hook の
+// runCirclePayment) は失効を確かめた同じ tick でこの関数を呼び、入口から scan・付け替えまで await は無い。古い記録の照合の
+// await があった押下では (e) が確かめ、(e) から scan・付け替えまで await は無い。
 // 失効した試みは payment_cancelled で終わり、記録は awaiting_signature のまま残す (開き直した画面が同じ key を resume する)。
 //
 // 対応の付け替え (第 10 回レビュー 穴 B = H-V の scan 版): scan が **別の key の記録 R** (別のタブ・閉じたタブの支払い) の結果を
@@ -122,14 +124,17 @@
 // 「正規のリピート」とみなして 2 本目を払う。
 // なので、scan が R の結果を受け取りに行く **直前 (同期・await の前)** に、args.adoptAttempt で対応を R の paymentAttemptId に
 // 付け替える。次の押下は R の key を resume する (下の reserveOrResume の後): confirmed → 時間の窓なしで既払いの結果・
-// submitting → 同じ op の復旧・failed → 「既に終了」(hook が対応を消し、その次の押下は新しい支払い)・記録なし (24 時間の掃除の
-// 後) → 新しい支払い。画面のある試みが結果を受け取れた・ふつうの error で終わったときは、hook が今までどおり対応を消す。
+// submitting → 同じ op の復旧・failed → 「既に終了」(hook が対応を消し、その次の押下は新しい支払い)・記録なし (confirmed・failed の記録は
+// 最後の updatedAt から 24 時間で掃除される) → 新しい支払い。画面のある試みが結果を受け取れた・ふつうの error で終わったときは、hook が今までどおり対応を消す。
 // 付け替えるのは次が全部そろったときだけ:
 //   - hook が対応を管理している (args.adoptAttempt が渡されている。明示の paymentAttemptId の呼び出しには渡らない)
-//   - 画面のある試み (上の「失効」の (f)。失効した試みが書くと、開き直した画面の対応を横から変える)
 //   - 記録が paymentAttemptId を持つ
 //   - (1) submitting で、最後に bundler へ渡してから STALE_SUBMITTING_WINDOW_MS (30 分) 以内、または
 //     (2) confirmed で、scan が既払いの結果を返す記録 (success が false でない・90 秒以内)
+// 付け替えるのは画面のある試みだけ (失効した試みが書くと、開き直した画面の対応を横から変える)。ここでは確かめない: 上の
+// 「失効」のとおり、scan に着く試みは生きている (scan と付け替えの前に await を足すときは、その後に失効の確認を足す)。
+// 付け替えた対応を消すのは hook で、対応がいまもその試みの知っている attemptId (付け替えた試みは R の attemptId) を指している
+// ときだけ (同じタブの別の試みが、付け替えた対応を自分の古い attemptId のつもりで消さない)。
 // 付け替えない記録: 30 分より後の submitting を「未使用・取り込みが 30 分以内 → 復旧」とした記録 (付け替えると、次の押下が R の
 // key の resume になり、別の key の scan にだけ効く「古い submitting の記録」の照合を通らなくなる = このタブで筋 2 (止まり
 // 続ける) が戻る)・「飛ばす」「確認待ち」とした記録 (受け取りに行かない)・直近の pre-submit (op を渡していない記録)。
@@ -794,7 +799,8 @@ export type ExecuteCirclePaymentArgs = {
   isAlive?: () => boolean;
   /** scan が別の key の記録の結果を受け取りに行く直前に、その記録の paymentAttemptId を渡して同期で呼ぶ (冒頭の「対応の
    * 付け替え」)。attemptId の対応 (sessionStorage) の持ち主は hook なので、書くのは hook の渡す関数。hook が対応を管理して
-   * いるときだけ渡す。省略時は付け替えない。 */
+   * いるときだけ渡す。省略時は付け替えない。呼ぶ前に失効は確かめない (呼び出し元は、失効を確かめた同じ tick でこの関数を
+   * 呼ぶこと。冒頭の「失効」)。 */
   adoptAttempt?: (paymentAttemptId: string) => void;
 };
 
@@ -819,15 +825,10 @@ export async function executeCirclePayment(
   const beforeSign = () => {
     if (!isAlive()) throw cancelled();
   };
-  // (f) 対応の付け替え (冒頭の「対応の付け替え」)。scan が rec の結果を受け取りに行く枝の、最初の await の前に呼ぶ。
-  // 失効した試みは書かない。何の波及を断つか: 画面の無い試みが、開き直した画面も使う対応を横から書き換えること。
-  // 今の呼び出し元 (hook の runCirclePayment) は、scan と同じ tick で失効を確かめてから入り、古い記録の照合を待った後は下の
-  // (e) が確かめるので、hook からの呼び出しではここは常に真。ここで見るのは、「失効した試みは新しい効果を始めない」を、
-  // 呼び出し側の順や、この先 scan の前に足される await に頼らずに、この関数の中で保つため。
+  // 対応の付け替え (冒頭の「対応の付け替え」)。scan が rec の結果を受け取りに行く枝の、最初の await の前に呼ぶ。
+  // ここに来る試みは生きている (失効を確かめない): 呼び出し元の入口の確認、または下の (e) から、ここまで await が無い。
   const adopt = (rec: PendingRecord) => {
-    if (args.adoptAttempt && rec.paymentAttemptId && isAlive()) {
-      args.adoptAttempt(rec.paymentAttemptId);
-    }
+    if (args.adoptAttempt && rec.paymentAttemptId) args.adoptAttempt(rec.paymentAttemptId);
   };
   const sender = owner;
   const chainId = bundle.chainId;

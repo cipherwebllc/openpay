@@ -1126,6 +1126,12 @@ async function runCirclePayment(args: {
   const usesStableMapping = params.paymentAttemptId === undefined;
   const attemptArgs = { chainId: bundle.chainId, sender: customer, callHash: computeCallHash(calls) };
   const attemptId = params.paymentAttemptId ?? stableAttemptId(attemptArgs);
+  // この試みが、マッピングの指す先だと知っている attemptId。入口で読んだ / 作った id で、この試みが付け替えたら
+  // (下の adoptAttempt)、付け替えた先の id になる。マッピングを破棄するのは、マッピングがいまもこの値を指しているときだけ
+  // (下の 2 か所の clearStableAttemptId)。何の波及を断つか: マッピングは同じタブの別の試み (同じ sessionStorage を使う別の
+  // 画面) と共有する。別の試みが、まだ画面に出ていない支払いの記録へ付け替えた後に、この試みが自分の古い attemptId のつもりで
+  // 消すと、次の押下が新しい key になり、その支払いが確定して 90 秒を過ぎていれば 2 本目を払う (穴 B の Codex の指摘)。
+  let mappedAttemptId = attemptId;
 
   let result: Awaited<ReturnType<typeof executeCirclePayment>>;
   try {
@@ -1143,8 +1149,11 @@ async function runCirclePayment(args: {
       // 確認待ちで終わると、対応は記録の無い attemptId を指し、次の押下が、後から確定したその支払いを「正規のリピート」と
       // みなして 2 本目を払う。なので、受け取りに行く直前に、対応をその記録の attemptId に付け替えさせる。
       // 明示の paymentAttemptId のときは渡さない (上のとおり、マッピングは一切触らない)。
+      // 書けたときだけ、この試みの「マッピングの指す先」も付け替えた先にする (書けなければマッピングは前の値のまま)。
       adoptAttempt: usesStableMapping
-        ? (adopted) => setStableAttemptId(attemptArgs, adopted)
+        ? (adopted) => {
+            if (setStableAttemptId(attemptArgs, adopted)) mappedAttemptId = adopted;
+          }
         : undefined,
     });
   } catch (error) {
@@ -1152,7 +1161,8 @@ async function runCirclePayment(args: {
     // resume させる (scan が別の key の記録を復旧していた押下では、マッピングは上の adoptAttempt でその記録の attemptId に
     // 付け替わっているので、再クリックはその記録を resume する)。それ以外の確定的エラー (revert/拒否/abandon 済) はマッピングを破棄して、
     // resumed 分岐の「この決済試行は既に終了しています」に正規の再試行がぶつからないようにする。
-    // 失効した試みは破棄しない (下の成功のときと同じ理由)。
+    // 失効した試みは破棄しない (下の成功のときと同じ理由)。破棄するのは、マッピングがいまもこの試みの知っている attemptId を
+    // 指しているときだけ (上の mappedAttemptId。別の試みが付け替えた後のマッピングは消さない)。
     // storage の失敗 (lib/circlePending の PendingStoreUnavailableError・PendingStoreWriteError) も破棄しない: この押下は
     // 自分の記録の状態を確かめられなかった (分からない)。何の波及を断つか: storage が一時的に読めない・書けない押下 (入口の
     // scan・resume の読み取り・予約の書き込みなど、送った後の境界の外) が対応を消し、次の押下が新しい key になって、裏で確定して
@@ -1167,7 +1177,7 @@ async function runCirclePayment(args: {
       name !== 'PendingStoreUnavailableError' &&
       name !== 'PendingStoreWriteError'
     ) {
-      clearStableAttemptId(attemptArgs);
+      clearStableAttemptId(attemptArgs, mappedAttemptId);
     }
     throw error;
   }
@@ -1228,14 +1238,16 @@ async function runCirclePayment(args: {
   // これは、この試みが自分で送った支払いでも、scan で別の key の記録 (別のタブ・閉じたタブの支払い) の結果を受け取った場合でも
   // 成り立つ: 後者は、受け取りに行く直前に対応をその記録の attemptId に付け替えてある (上の adoptAttempt)。付け替えない
   // 場合 (最後に bundler へ渡してから 30 分より後の記録の復旧) だけは、対応は記録の無い attemptId のまま残り、次の押下は
-  // scan からやり直す (circleSend.ts の冒頭の「対応の付け替え」の残る限界)。clearStableAttemptId は対応の値によらず消す
-  // (storage の key は chain・sender・内容) ので、画面のある試みが結果を受け取れば、付け替えた後の対応もここで消える。
+  // scan からやり直す (circleSend.ts の冒頭の「対応の付け替え」の残る限界)。付け替えた試みは、付け替えた先の id を
+  // mappedAttemptId に持つので、画面のある試みが結果を受け取れば、付け替えた後の対応もここで消える。
+  // 画面のある試みでも、マッピングがこの試みの知らない値に替わっていたら破棄しない (上の mappedAttemptId): 同じタブの別の
+  // 試みが付け替えた・作り直したマッピングで、その試みの支払いの続きに要る。
   // 監査の後ろで見るのは、確定の後も上の監査 (receipt の RPC) の await の間は成功がまだ画面に出ていないから。その間に画面を
   // 離れた試みも、成功を画面に出せないまま終わるので、対応を残す (この確認から return まで await は無い)。
   // 代償: 失効した試みが払い終えた後、同じタブで同じ内容を意図してもう一度払うと、最初の 1 回は前の支払いの結果が出る
   // (もう一度押せば新しい支払い。ただし confirmed から 90 秒以内は、押すたびに前の結果を返す = 今までと同じ動き)。払えたことを
   // 知らずにもう一度払う害の方が大きいので dedup の側に倒す (circleSend.ts の confirmed の dedup と同じ方針)。
-  if (usesStableMapping && isAlive()) clearStableAttemptId(attemptArgs);
+  if (usesStableMapping && isAlive()) clearStableAttemptId(attemptArgs, mappedAttemptId);
 
   return {
     ...result,

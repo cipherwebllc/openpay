@@ -400,18 +400,47 @@ describe('穴 B: 別の key の submitting の記録を復旧するとき', () =
     expect(adopted()).toEqual([]);
   });
 
-  it('失効した試み (画面が無い) → 付け替えない。渡した op の後始末 (復旧) は今までどおり進む', async () => {
+  // 付け替えの直前に失効は確かめない。根拠は「ここに来る試みは生きている」= 呼び出し元 (hook) が失効を確かめた同じ tick から、
+  // 付け替えまで await が無いこと。その「await が無い」を固定する: executeCirclePayment を呼んで promise が返った時点
+  // (= 最初の await に着いた時点) で、付け替えはもう済んでいる。
+  it('入口から付け替えまで await が無い: 呼び出しが promise を返した時点で、付け替えは済んでいる (待ちはまだ返っていない)', async () => {
     seed('submitting');
     include(OLD, { block: 100n, ms: T0 + 12 * SEC });
 
-    const res = await press(T0 + 10 * MIN, { isAlive: () => false });
+    const pending = press(T0 + 10 * MIN);
+    // ここは press と同じ tick (await していない)。
+    expect(adopted()).toEqual(['tab-1']);
+    expect(stored('tab-1')?.status).toBe('submitting');
 
-    expect(res).toMatchObject({ userOpHash: OLD.userOpHash, txHash: OLD.txHash });
-    expect(adopted()).toEqual([]);
-    expect(stored('tab-1')?.status).toBe('confirmed');
+    await expect(pending).resolves.toMatchObject({ userOpHash: OLD.userOpHash });
   });
 
-  it('古い記録の照合を待つ間に失効 → payment_cancelled で終わり、窓の内の記録があっても付け替えない', async () => {
+  // 古い記録の照合 (await) があった押下では、その後の失効の確認 (e) から付け替えまで await が無い。確認の中で microtask を
+  // 積み、付け替えがその microtask より前 (= 確認と同じ tick) に起きることを見る。
+  it('照合の await の後の失効の確認から付け替えまで await が無い (確認と同じ tick で付け替える)', async () => {
+    const key = seed('submitting');
+    const at = T0 + 31 * MIN;
+    chain.latestMs = at;
+    mockRead.mockImplementationOnce(async (params: { args: readonly [Address, bigint] }) => {
+      // 待つ間に別のタブが同じ op を送り直した (読み直した記録は窓の内 = 付け替える記録になる)。
+      markResending({ key, sender: OWNER, userOpHash: OLD.userOpHash, now: at });
+      include(OLD, { block: 100n, ms: at });
+      return params.args[1] << 64n;
+    });
+    const isAlive = () => {
+      events.push('alive-check');
+      queueMicrotask(() => events.push('next-tick'));
+      return true;
+    };
+
+    await press(at, { isAlive });
+
+    expect(adopted()).toEqual(['tab-1']);
+    expect(events.slice(0, 3)).toEqual(['alive-check', 'adopt', 'wait']);
+    expect(events.indexOf('adopt')).toBeLessThan(events.indexOf('next-tick'));
+  });
+
+  it('古い記録の照合を待つ間に失効 → scan に着かず payment_cancelled で終わる (窓の内の記録があっても付け替えない)', async () => {
     seed('submitting'); // tab-1: 31 分前 (照合する)
     seed('submitting', { attemptId: 'tab-3', o: OLD2, handedOffAt: T0 + 25 * MIN }); // 窓の内
     const at = T0 + 31 * MIN;
@@ -481,14 +510,15 @@ describe('穴 B: 別の key の confirmed の記録の結果を返すとき (90 
     expect(adopted()).toEqual([]);
   });
 
-  it('失効した試み → 付け替えない (結果の照会は今までどおり)', async () => {
+  it('入口から付け替えまで await が無い: 呼び出しが promise を返した時点で、付け替えは済んでいる (照会はまだ返っていない)', async () => {
     seed('confirmed');
     include(OLD, { block: 100n, ms: T0 + SEC });
 
-    const res = await press(CONFIRMED_AT + 30 * SEC, { isAlive: () => false });
+    const pending = press(CONFIRMED_AT + 30 * SEC);
+    // ここは press と同じ tick (await していない)。
+    expect(adopted()).toEqual(['tab-1']);
 
-    expect(res).toMatchObject({ userOpHash: OLD.userOpHash, txHash: OLD.txHash });
-    expect(adopted()).toEqual([]);
+    await expect(pending).resolves.toMatchObject({ userOpHash: OLD.userOpHash, txHash: OLD.txHash });
   });
 
   it('古い confirmed (飛ばす) と窓の内の submitting が両方ある → 受け取りに行く submitting の記録に付け替える', async () => {

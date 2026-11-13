@@ -244,14 +244,26 @@ export function stableAttemptId(args: {
   }
 }
 
-/** stableAttemptId のマッピングを破棄する (終端到達時)。次回は新規 attemptId を採番する。 */
-export function clearStableAttemptId(args: {
-  chainId: number;
-  sender: Address;
-  callHash: Hex;
-}): void {
+/** stableAttemptId のマッピングを破棄する (終端到達時)。次回は新規 attemptId を採番する。
+ * **破棄するのは、マッピングがいまも expectedAttemptId (呼ぶ試みが、マッピングの指す先だと知っている attemptId) を指して
+ * いるときだけ**。違う値なら何もしない。何の波及を断つか: マッピングは「chain・sender・内容ごとに 1 つ」で、同じタブの
+ * 別の試み (同じ sessionStorage を使う別の画面) と共有する。別の試みが、まだ画面に出ていない支払いの記録へ付け替えた
+ * (下の setStableAttemptId) 後に、この試みが自分の古い attemptId のつもりで消すと、次の押下が新しい key になり、その支払いが
+ * 確定して 90 秒を過ぎていれば 2 本目を払う (第 10 回レビュー 穴 B の Codex の指摘)。
+ * 値を読めない・消せないときは握る (best-effort・破棄失敗は決済に影響しない)。 */
+export function clearStableAttemptId(
+  args: {
+    chainId: number;
+    sender: Address;
+    callHash: Hex;
+  },
+  expectedAttemptId: string,
+): void {
   try {
-    window.sessionStorage.removeItem(attemptStorageKey(args));
+    const storageKeyName = attemptStorageKey(args);
+    if (window.sessionStorage.getItem(storageKeyName) === expectedAttemptId) {
+      window.sessionStorage.removeItem(storageKeyName);
+    }
   } catch {
     // best-effort (破棄失敗は決済に影響しない)。
   }
@@ -263,7 +275,9 @@ export function clearStableAttemptId(args: {
  * 付け替え」。付け替えた後、このタブの次の押下は、その記録の key を resume する (confirmed なら時間の窓なしで既払いの結果)。
  * 書けないとき (private mode・quota) は握る (best-effort)。何の波及を断つか: 付帯の書き込みの失敗が、進行中の復旧 (別の key の
  * 記録の receipt の待ち・結果の受け取り) を巻き込んで error で終わらせること。付け替えられなくても、今までと同じ動き
- * (対応はこのタブが採番した attemptId のまま) に落ちるだけで、偽の成功にはならない。 */
+ * (対応はこのタブが採番した attemptId のまま) に落ちるだけで、偽の成功にはならない。
+ * 書けたら true を返す。呼ぶ側 (hook) は、true のときだけ「この試みのマッピングの指す先」を渡した値に替え、
+ * clearStableAttemptId に渡す (書けなかったときは、マッピングは前の値のままなので、前の値で破棄する)。 */
 export function setStableAttemptId(
   args: {
     chainId: number;
@@ -271,11 +285,13 @@ export function setStableAttemptId(
     callHash: Hex;
   },
   paymentAttemptId: string,
-): void {
+): boolean {
   try {
     window.sessionStorage.setItem(attemptStorageKey(args), paymentAttemptId);
+    return true;
   } catch {
     // best-effort (上の理由)。
+    return false;
   }
 }
 
