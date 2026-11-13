@@ -317,13 +317,24 @@ const CIRCLE_ERROR_JA = {
   send_rejected:
     'USDC ガスレスの支払いは、送信の受付で断られました。この支払いは送金されていません。' +
     '残高が足りないなどの理由が考えられます。もう一度お試しください (署名からやり直します)。',
+  unconfirmed_earlier:
+    '同じ内容の支払いを以前に送信した記録があり、その結果をまだ確認できていません。' +
+    'ここでは新しい支払いを始めていません。' +
+    'もう一度押すと確かめ直しますが、署名を求められた場合は新しい支払いになります。' +
+    '二重に払わないよう、署名の前にウォレットの履歴で以前の支払いを確かめてください。',
 } as const satisfies Record<CircleErrorCode, string>;
 
-/** 確認待ち。**失敗ではない**。場面は 2 つ (reason):
- * - 'unconfirmed' (既定): op を bundler に渡した (渡したかもしれない) が、結果を確かめられなかった。op は後で included
- *   しうる。同じタブで同じ内容のまま押し直すと、hook が残した attemptId の対応で、同じ op の結果を確かめ直す。
- * - 'busy_elsewhere': 別の試み (別のタブ・画面) が署名の途中なので、この押下は何も始めなかった (scan の直近の pre-submit の
- *   1 か所だけ)。
+/** 確認待ち。**失敗ではない**。場面は 3 つ (reason)。(a) と (e) の違いは、**次の押下が同じ支払いを確かめ直すと言えるか**:
+ * - 'unconfirmed' (a・既定): op を bundler に渡した (渡したかもしれない) が、結果を確かめられなかった。op は後で included
+ *   しうる。hook の attemptId の対応が、その op の記録の key を指している (自分の key の記録・scan が付け替えた記録) ので、
+ *   同じタブで同じ内容のまま押し直すと、その記録を resume して同じ op の結果を確かめ直す。
+ * - 'unconfirmed_earlier' (e): scan が別の key の submitting の記録 (別のタブ・閉じたタブが以前に送った支払い) に当たり、
+ *   **対応をその記録に付け替えないまま** 確認待ちで終わった (executeCirclePayment の scan の submitting の枝)。この押下は
+ *   新しい支払いを始めていない。対応は自分の attemptId のまま (その key に記録は無い) なので、次の押下はまた scan から
+ *   入る。その間に前の支払いが確定して 90 秒を過ぎていれば、次の押下は新しい支払いに署名を求める (冒頭の「対応の付け替え」の
+ *   「残る限界」)。なので (a) の「同じ支払いの結果を確かめ直します」とは言わない。
+ * - 'busy_elsewhere' (b): 別の試み (別のタブ・画面) が署名の途中なので、この押下は何も始めなかった (scan の直近の
+ *   pre-submit の 1 か所だけ)。
  * 文は「再読み込みしても二重決済にならない」と約束しない: 30 分より前の支払いについては成り立たない場合がある (冒頭の
  * 「古い submitting の記録」と、その「残る限界」)。 */
 export class CirclePendingError extends Error {
@@ -331,7 +342,10 @@ export class CirclePendingError extends Error {
   readonly userOpHash?: Hex;
   /** 場面の符号 (上の「場面の符号と文」)。 */
   readonly circleCode: CircleErrorCode;
-  constructor(userOpHash?: Hex, reason: 'unconfirmed' | 'busy_elsewhere' = 'unconfirmed') {
+  constructor(
+    userOpHash?: Hex,
+    reason: 'unconfirmed' | 'busy_elsewhere' | 'unconfirmed_earlier' = 'unconfirmed',
+  ) {
     super(CIRCLE_ERROR_JA[reason]);
     this.name = 'CirclePendingError';
     this.userOpHash = userOpHash;
@@ -854,8 +868,13 @@ export async function executeCirclePayment(
   };
   // 対応の付け替え (冒頭の「対応の付け替え」)。scan が rec の結果を受け取りに行く枝の、最初の await の前に呼ぶ。
   // ここに来る試みは生きている (失効を確かめない): 呼び出し元の入口の確認、または下の (e) から、ここまで await が無い。
-  const adopt = (rec: PendingRecord) => {
-    if (args.adoptAttempt && rec.paymentAttemptId) args.adoptAttempt(rec.paymentAttemptId);
+  // 返す値 = hook の関数を呼んだか。呼ばなかった (hook が対応を管理していない・記録に paymentAttemptId が無い) なら、対応は
+  // 付け替わっていない。確認待ちの場面の符号を (a) にするか (e) にするかにだけ使う (scan の submitting の枝)。
+  // hook の関数が sessionStorage に書けなかった付け替え (呼んだが、対応は前の値のまま) は見分けない: 呼んだら true。
+  const adopt = (rec: PendingRecord): boolean => {
+    if (!args.adoptAttempt || !rec.paymentAttemptId) return false;
+    args.adoptAttempt(rec.paymentAttemptId);
+    return true;
   };
   const sender = owner;
   const chainId = bundle.chainId;
@@ -973,22 +992,34 @@ export async function executeCirclePayment(
       const verdict = staleVerdicts?.get(recordVersion(rec));
       // 取り込みが窓より前の、終わった op の記録 = 古い confirmed と同じく飛ばす (記録は書かない)。
       if (verdict === 'spent') continue;
-      if (verdict === 'unverified') throw new CirclePendingError(rec.userOpHash);
+      // 確かめられない記録は付け替えない (受け取りに行かない) → 場面 (e)。
+      if (verdict === 'unverified') throw new CirclePendingError(rec.userOpHash, 'unconfirmed_earlier');
       // この記録の op を復旧する (結果を受け取りに行く)。下の待ち (最大 120 秒 × 2) の間に画面を離れても・確認待ちで
       // 終わっても、次の押下がこの記録の key を resume する。最後に渡してから 30 分以内の記録だけ: それより後の記録 (上の照合が
       // 「復旧」とした記録) は付け替えない (次の押下も、別の key の scan として照合を通す)。
-      if (now() - rec.updatedAt <= STALE_SUBMITTING_WINDOW_MS) adopt(rec);
-      return await inPostSubmit(rec.userOpHash, async () => {
-        const recovered = await recoverSubmitting({
-          bundle,
-          record: rec,
-          sender,
-          now,
-          handedOff: false,
+      const adopted = now() - rec.updatedAt <= STALE_SUBMITTING_WINDOW_MS && adopt(rec);
+      try {
+        return await inPostSubmit(rec.userOpHash, async () => {
+          const recovered = await recoverSubmitting({
+            bundle,
+            record: rec,
+            sender,
+            now,
+            handedOff: false,
+          });
+          if (recovered) return recovered;
+          throw new CirclePendingError(rec.userOpHash);
         });
-        if (recovered) return recovered;
-        throw new CirclePendingError(rec.userOpHash);
-      });
+      } catch (error) {
+        // 付け替えていない記録 (30 分の窓の外・記録に paymentAttemptId が無い・hook が対応を管理していない) の復旧が確認待ちで
+        // 終わったら、場面の符号を (e) に付け直す (CirclePendingError の上のコメント)。この枝から出る確認待ち (上の throw・
+        // recoverSubmitting → followRecord の中の throw・inPostSubmit が想定外の throw を変えたもの) を、出口のここ 1 か所で
+        // 受ける。変えるのは符号と文だけ: class・name・userOpHash は同じで、確認待ち以外の error はそのまま通す。
+        if (!adopted && error instanceof CirclePendingError) {
+          throw new CirclePendingError(error.userOpHash, 'unconfirmed_earlier');
+        }
+        throw error;
+      }
     }
     // reserved / awaiting_signature / signed (pre-submit・未 broadcast)。
     if (now() - rec.updatedAt > PRE_SUBMIT_STALE_MS) {
@@ -1002,7 +1033,8 @@ export async function executeCirclePayment(
       continue;
     }
     // 直近の pre-submit = 別 attempt が署名中。並行 broadcast を作らない。
-    // 場面の符号を 'busy_elsewhere' にするのはここだけ (この押下は何も始めていない。ほかの確認待ちは既定の 'unconfirmed')。
+    // 場面の符号を 'busy_elsewhere' にするのはここだけ (この押下は何も始めていない。ほかの確認待ちは、既定の 'unconfirmed' か、
+    // 上の submitting の枝の 'unconfirmed_earlier')。
     throw new CirclePendingError(rec.userOpHash, 'busy_elsewhere');
   }
 

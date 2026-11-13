@@ -58,6 +58,7 @@ import {
   PENDING_KEY_PREFIX,
 } from '@/lib/circlePending';
 import { logger } from '@/lib/logger';
+import jaMessages from '@/messages/ja.json';
 
 const OWNER = getAddress('0xabcdefabcdefabcdefabcdefabcdefabcdefabcd');
 const PAYMASTER = getAddress('0x3BA9A96eE3eFf3A69E2B18886AcF52027EFF8966');
@@ -210,12 +211,20 @@ let events: string[];
 // hook が渡す関数の偽物 (本物は sessionStorage に書く = tests/hooks/useBatchPayment.circleAdopt.test.tsx)。
 const adoptAttempt = vi.fn<(paymentAttemptId: string) => void>();
 
+// 場面の符号 (第 10 回レビュー PR-39c)。press() が確認待ち (CirclePendingError) で終わるたびに、その error の circleCode を
+// ここに積む。各 test の後 (下の afterEach) で「'unconfirmed' 以外が残っていない」ことを確かめる = 明示していない確認待ちは
+// すべて (a)。(a) 以外を期待する test は、takePendingCodes() で取り出して、その場で確かめる:
+//   (e) 'unconfirmed_earlier' = scan が別の key の submitting の記録に当たり、対応を付け替えないまま確認待ちで終わった。
+//   (b) 'busy_elsewhere' = 別の試みが署名の途中。
+const pendingCodes: unknown[] = [];
+const takePendingCodes = () => pendingCodes.splice(0);
+
 // 押す (このタブの attemptId は tab-2)。時刻は固定 (この押下の中の now() は全部 at)。
 function press(
   at: number,
   overrides: Partial<Parameters<typeof executeCirclePayment>[0]> = {},
 ) {
-  return executeCirclePayment({
+  const attempt = executeCirclePayment({
     bundle,
     publicClient: {} as never,
     walletClient: {} as never,
@@ -227,6 +236,11 @@ function press(
     adoptAttempt,
     ...overrides,
   });
+  // 見るだけ (返す promise は元のまま = test の側の rejects・catch は今までどおり)。
+  attempt.catch((error: unknown) => {
+    if (error instanceof CirclePendingError) pendingCodes.push(error.circleCode);
+  });
+  return attempt;
 }
 
 const signatureRequests = () => mockPermit.mock.calls.length + mockPrepare.mock.calls.length;
@@ -237,6 +251,7 @@ let infoSpy: MockInstance<typeof logger.info>;
 
 beforeEach(() => {
   window.localStorage.clear();
+  pendingCodes.length = 0;
   for (const m of [mockPermit, mockPrepare, mockBroadcast, mockWait, mockLookup, mockRead, mockGetBlock]) {
     m.mockReset();
   }
@@ -281,6 +296,8 @@ afterEach(() => {
   warnSpy.mockRestore();
   infoSpy.mockRestore();
   window.localStorage.clear();
+  // 確認待ちで終わった押下は、(e)・(b) を期待する test が取り出した分を除いて、すべて (a) 'unconfirmed'。
+  expect(pendingCodes.filter((code) => code !== 'unconfirmed')).toEqual([]);
 });
 
 describe('穴 B: 別の key の submitting の記録を復旧するとき', () => {
@@ -301,8 +318,12 @@ describe('穴 B: 別の key の submitting の記録を復旧するとき', () =
   it('復旧が確認待ちで終わる (op がまだ取り込まれていない) ときも、付け替えは済んでいる', async () => {
     seed('submitting');
 
-    await expect(press(T0 + 10 * MIN)).rejects.toBeInstanceOf(CirclePendingError);
+    const error = await press(T0 + 10 * MIN).catch((e: unknown) => e);
 
+    expect(error).toBeInstanceOf(CirclePendingError);
+    // 場面 (a) (PR-39c): 付け替えたので、次の押下はこの記録の key を resume する (同じ支払いの結果を確かめ直す)。
+    expect((error as CirclePendingError).circleCode).toBe('unconfirmed');
+    expect((error as CirclePendingError).message).toBe(jaMessages.CircleErrors.unconfirmed);
     expect(adopted()).toEqual(['tab-1']);
     // 待ち → timeout → 同じ op の送り直し → 待ち。付け替えはその前。
     expect(events).toEqual(['adopt', 'wait', 'wait']);
@@ -326,6 +347,8 @@ describe('穴 B: 別の key の submitting の記録を復旧するとき', () =
 
     await expect(press(at)).rejects.toBeInstanceOf(CirclePendingError);
 
+    // 場面 (e) (PR-39c): 付け替えていない。
+    expect(takePendingCodes()).toEqual(['unconfirmed_earlier']);
     expect(mockRead).toHaveBeenCalledTimes(1);
     // 復旧はしている (待ち → 送り直し → 待ち)。
     expect(events).toEqual(['wait', 'wait']);
@@ -365,6 +388,8 @@ describe('穴 B: 別の key の submitting の記録を復旧するとき', () =
 
     await expect(press(T0 + 31 * MIN)).rejects.toBeInstanceOf(CirclePendingError);
 
+    // 場面 (e) (PR-39c): 付け替えていない。
+    expect(takePendingCodes()).toEqual(['unconfirmed_earlier']);
     expect(adopted()).toEqual([]);
     expect(events).toEqual([]);
   });
@@ -542,6 +567,7 @@ describe('穴 B: 付け替えない枝', () => {
     expect(error).toBeInstanceOf(CirclePendingError);
     // 場面 (b) (第 10 回レビュー PR-39c): この押下は何も始めていない (別のタブや画面で進行中)。
     expect((error as CirclePendingError).circleCode).toBe('busy_elsewhere');
+    expect(takePendingCodes()).toEqual(['busy_elsewhere']);
     expect(adopted()).toEqual([]);
   });
 
@@ -613,5 +639,109 @@ describe('穴 B: 付け替えた後の次の押下 (その記録の attemptId �
     expect(res).toMatchObject({ userOpHash: NEW.userOpHash, txHash: NEW.txHash });
     expect(signatureRequests()).toBe(2);
     expect(stored('tab-1')).toMatchObject({ status: 'confirmed', userOpHash: NEW.userOpHash });
+  });
+});
+
+// 第 10 回レビュー PR-39c (Codex の指摘): 場面 (a) の文は「このタブで同じ内容のままもう一度押すと、まず同じ支払いの結果を
+// 確かめ直します」と言う。それが成り立つのは、hook の対応が、確認待ちの op の記録の key を指しているときだけ。scan が別の key の
+// submitting の記録に当たり、**対応を付け替えないまま** 確認待ちで終わった押下は、次の押下もまた scan から入る (前の支払いが
+// その間に確定して 90 秒を過ぎていれば、新しい支払いに署名を求める = H-Z の設計。ここでは固定しない)。なので符号は (e)。
+// 固定するのは符号と文だけ。class・name・userOpHash は (a) のときと同じ。
+describe('PR-39c: scan の submitting の枝の確認待ち — 付け替えたら (a)・付け替えていなければ (e)', () => {
+  async function pendingOf(attempt: Promise<unknown>) {
+    const error = await attempt.catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(CirclePendingError);
+    return error as CirclePendingError;
+  }
+  function expectEarlier(error: CirclePendingError) {
+    expect(error.circleCode).toBe('unconfirmed_earlier');
+    expect(Object.hasOwn(error, 'circleCode')).toBe(true);
+    expect(error.message).toBe(jaMessages.CircleErrors.unconfirmedEarlier);
+    // 変わるのは符号と文だけ。
+    expect(error.name).toBe('CirclePendingError');
+    expect(error.userOpHash).toBe(OLD.userOpHash);
+    expect(takePendingCodes()).toEqual(['unconfirmed_earlier']);
+    // この押下は付け替えていない・新しい支払いを始めていない。
+    expect(adopted()).toEqual([]);
+    expect(signatureRequests()).toBe(0);
+    expect(stored('tab-2')).toBeUndefined();
+  }
+
+  it('窓の内 (10 分後)・hook が対応を管理している → 付け替える → (a)', async () => {
+    seed('submitting');
+
+    const error = await pendingOf(press(T0 + 10 * MIN));
+
+    expect(adopted()).toEqual(['tab-1']);
+    expect(error.circleCode).toBe('unconfirmed');
+    expect(error.message).toBe(jaMessages.CircleErrors.unconfirmed);
+    expect(error.name).toBe('CirclePendingError');
+    expect(error.userOpHash).toBe(OLD.userOpHash);
+  });
+
+  it('Codex の順 1: 31 分前の記録・確かめられない (nonce を読めない) → 付け替えない → (e)', async () => {
+    seed('submitting');
+    mockRead.mockRejectedValue(new Error('HTTP request failed. Status: 503'));
+
+    const error = await pendingOf(press(T0 + 31 * MIN));
+
+    expectEarlier(error);
+    // 復旧にも進んでいない (待たない・送り直さない)。
+    expect(events).toEqual([]);
+  });
+
+  it('Codex の順 2: 31 分前の記録・nonce は未使用 → 復旧 (待ち → 送り直し → 待ち) が確認待ちで終わる → 付け替えない → (e)', async () => {
+    seed('submitting');
+    const at = T0 + 31 * MIN;
+    chain.latestMs = at;
+
+    const error = await pendingOf(press(at));
+
+    expectEarlier(error);
+    expect(mockRead).toHaveBeenCalledTimes(1);
+    expect(events).toEqual(['wait', 'wait']);
+  });
+
+  it('31 分前の記録・未使用 → 復旧の最初の待ちが失敗 (bundler の 5xx) → 付け替えない → (e)', async () => {
+    seed('submitting');
+    const at = T0 + 31 * MIN;
+    chain.latestMs = at;
+    mockWait.mockRejectedValueOnce(new Error('HTTP request failed. Status: 503'));
+
+    const error = await pendingOf(press(at));
+
+    expectEarlier(error);
+    expect(mockBroadcast).not.toHaveBeenCalled();
+  });
+
+  it('窓の内でも、hook が対応を管理していない呼び出し (adoptAttempt なし) → (e)', async () => {
+    seed('submitting');
+
+    const error = await pendingOf(press(T0 + 10 * MIN, { adoptAttempt: undefined }));
+
+    expectEarlier(error);
+  });
+
+  it.each([
+    ['空の文字列', ''],
+    ['field が無い', undefined],
+  ])('窓の内でも、記録の paymentAttemptId が %s → 付け替えられない → (e)', async (_name, value) => {
+    seed('submitting');
+    rewrite('tab-1', { paymentAttemptId: value });
+
+    const error = await pendingOf(press(T0 + 10 * MIN));
+
+    expectEarlier(error);
+  });
+
+  it('付け替えた後の次の押下 (その記録の key の resume) の確認待ちは (a)', async () => {
+    seed('submitting');
+
+    // 付け替えた記録の attemptId で押す = hook が、付け替えた対応から同じ key を引く。
+    const error = await pendingOf(press(T0 + 10 * MIN, { paymentAttemptId: 'tab-1' }));
+
+    expect(error.circleCode).toBe('unconfirmed');
+    expect(error.userOpHash).toBe(OLD.userOpHash);
+    expect(adopted()).toEqual([]);
   });
 });

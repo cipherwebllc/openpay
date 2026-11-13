@@ -3550,7 +3550,8 @@
     "unconfirmed": "Your gasless USDC payment was submitted, but we couldn't confirm the result yet. If you press the button again in this tab without changing anything, we'll first re-check the result of the same payment. Until it's confirmed, please don't pay again by another method.",
     "busyElsewhere": "A payment with the same details is in progress in another tab or screen, so it wasn't started here. If you complete the payment there, don't press the button here. If you closed it, you can pay from here in a few minutes.",
     "attemptEnded": "This payment attempt has already ended. Nothing was sent in this attempt. Press the button again to start a new payment.",
-    "sendRejected": "Your gasless USDC payment was declined when it was submitted. This payment was not sent. A possible reason is an insufficient balance. Please try again (you'll sign again)."
+    "sendRejected": "Your gasless USDC payment was declined when it was submitted. This payment was not sent. A possible reason is an insufficient balance. Please try again (you'll sign again).",
+    "unconfirmedEarlier": "There is a record of an earlier payment with the same details whose result we couldn't confirm yet. No new payment was started here. Pressing the button again re-checks it, but if you're asked to sign, that will be a new payment. To avoid paying twice, check the earlier payment in your wallet history before you sign."
   },
   "OrderLinkBuilder": {
     "noReceiver": "Not set",

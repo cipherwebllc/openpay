@@ -2,7 +2,7 @@ import jaMessages from '../../messages/ja.json';
 import enMessages from '../../messages/en.json';
 
 // Circle の経路 (USDC ガスレス) の error を、3 つのフォーム (PaymentForm・CheckoutForm・TipForm) がどう出すかの test で
-// 共通に使う (第 10 回レビュー PR-39c)。フォームは error の own property `circleCode` (場面の符号) だけを見て、messages の
+// 共通に使う (第 10 回レビュー PR-39c)。フォームは error の `circleCode` (場面の符号) だけを見て、messages の
 // CircleErrors の文を出す。class は見ないので、ここでは符号を付けただけの Error を使う (本物の class が符号を持つことは
 // tests/lib/circleErrorKey.test.ts と tests/lib/smartAccount/circleSend.test.ts)。
 
@@ -12,6 +12,7 @@ export const CIRCLE_ERROR_CASES = [
   ['busy_elsewhere', 'busyElsewhere'],
   ['attempt_ended', 'attemptEnded'],
   ['send_rejected', 'sendRejected'],
+  ['unconfirmed_earlier', 'unconfirmedEarlier'],
 ] as const;
 
 export const CIRCLE_ERRORS_JA = jaMessages.CircleErrors;

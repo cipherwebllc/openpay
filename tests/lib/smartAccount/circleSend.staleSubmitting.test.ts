@@ -73,6 +73,7 @@ import {
   PENDING_KEY_PREFIX,
 } from '@/lib/circlePending';
 import { logger } from '@/lib/logger';
+import jaMessages from '@/messages/ja.json';
 
 // EntryPoint 0.8 (viem の entryPoint08Address)。literal で固定する (0.7 の address を読む変更を落とす)。
 const ENTRY_POINT_08 = '0x4337084D9E255Ff0702461CF8895CE9E3b5Ff108';
@@ -249,9 +250,12 @@ function walletSigns(o: Op, landsAt: { block: bigint; ms: number }) {
 }
 
 // 場面の符号 (第 10 回レビュー PR-39c)。press() が確認待ち (CirclePendingError) で終わるたびに、その error の circleCode を
-// ここに積む。各 test の後 (下の afterEach) で「'unconfirmed' 以外が残っていない」ことを確かめる = 照合の失敗 ('unverified')・
-// 復旧の待ちの失敗などの確認待ちは、すべて (a)。(b) 'busy_elsewhere' を期待する test (別のタブが署名の途中) だけが、
-// takePendingCodes() で取り出して確かめる。
+// ここに積む。各 test の後 (下の afterEach) で「'unconfirmed' 以外が残っていない」ことを確かめる。(a) 以外を期待する test は、
+// takePendingCodes() で取り出して、その場で確かめる:
+//   (e) 'unconfirmed_earlier' = scan が別の key の submitting の記録に当たり、対応を付け替えないまま確認待ちで終わった。
+//       この file の press() は adoptAttempt を渡さない (hook が対応を管理していない呼び出し) ので、その枝の確認待ちは、照合の
+//       失敗 ('unverified') も復旧の待ちの失敗も、すべて (e)。付け替えた記録が (a) になることは circleSend.adoptAttempt.test.ts。
+//   (b) 'busy_elsewhere' = 別のタブが署名の途中。
 const pendingCodes: unknown[] = [];
 const takePendingCodes = () => pendingCodes.splice(0);
 
@@ -331,7 +335,7 @@ beforeEach(() => {
 afterEach(() => {
   warnSpy.mockRestore();
   window.localStorage.clear();
-  // 確認待ちで終わった押下は、(b) を期待する test が取り出した分を除いて、すべて (a) 'unconfirmed'。
+  // 確認待ちで終わった押下は、(e)・(b) を期待する test が取り出した分を除いて、すべて (a) 'unconfirmed'。
   expect(pendingCodes.filter((code) => code !== 'unconfirmed')).toEqual([]);
 });
 
@@ -659,6 +663,8 @@ describe('H-Z: M1 — 未使用と確かめて復旧 → 確認待ち → その
     mockWait.mockRejectedValueOnce(rpcDown());
     const before = rawRecord('tab-1');
     await expect(press(P1)).rejects.toBeInstanceOf(CirclePendingError);
+    // 場面 (e) (PR-39c): 窓の外の記録は付け替えない。その復旧が確認待ちで終わった (次の押下は、下の test のとおり scan から入る)。
+    expect(takePendingCodes()).toEqual(['unconfirmed_earlier']);
     expect(rawRecord('tab-1')).toBe(before);
     expect(stored('tab-2')).toBeUndefined();
     expect(signatureRequests()).toBe(0);
@@ -707,8 +713,10 @@ describe('H-Z: 照合の失敗 → すぐ確認待ち (待たない・送り直�
     const error = await press(AT).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(CirclePendingError);
     expect((error as CirclePendingError).userOpHash).toBe(OLD.userOpHash);
-    // 場面 (a) (PR-39c): 前の支払いの結果が分からない。「別のタブで進行中」(b) ではない。
-    expect((error as CirclePendingError).circleCode).toBe('unconfirmed');
+    // 場面 (e) (PR-39c): 確かめられない古い記録は付け替えない。(a) の「同じ支払いの結果を確かめ直します」とは言わない。
+    expect((error as CirclePendingError).circleCode).toBe('unconfirmed_earlier');
+    expect((error as CirclePendingError).message).toBe(jaMessages.CircleErrors.unconfirmedEarlier);
+    expect(takePendingCodes()).toEqual(['unconfirmed_earlier']);
     expect(mockWait).not.toHaveBeenCalled();
     expect(mockBroadcast).not.toHaveBeenCalled();
     expect(signatureRequests()).toBe(0);
@@ -770,6 +778,7 @@ describe('H-Z: 照合の失敗 → すぐ確認待ち (待たない・送り直�
 
     await expect(press(AT, { bundle: bundleWith({}) })).rejects.toBeInstanceOf(CirclePendingError);
 
+    expect(takePendingCodes()).toEqual(['unconfirmed_earlier']);
     expect(mockWait).not.toHaveBeenCalled();
     expect(mockBroadcast).not.toHaveBeenCalled();
     expect(signatureRequests()).toBe(0);
@@ -782,6 +791,7 @@ describe('H-Z: 照合の失敗 → すぐ確認待ち (待たない・送り直�
     chain.latestMs = AT;
     mockRead.mockRejectedValueOnce(rpcDown());
     await expect(press(AT)).rejects.toBeInstanceOf(CirclePendingError);
+    expect(takePendingCodes()).toEqual(['unconfirmed_earlier']);
 
     walletSigns(NEW, { block: 200n, ms: AT + 10 * SEC });
     chain.latestMs = AT + 10 * SEC;
@@ -815,6 +825,7 @@ describe('H-Z: 記録の中身が合わない → 照合の失敗 (chain を読�
     const error = await press(AT).catch((e: unknown) => e);
 
     expect(error).toBeInstanceOf(CirclePendingError);
+    expect(takePendingCodes()).toEqual(['unconfirmed_earlier']);
     expect(mockRead).not.toHaveBeenCalled();
     expect(mockLookup).not.toHaveBeenCalled();
     expect(mockWait).not.toHaveBeenCalled();
@@ -948,6 +959,7 @@ describe('H-Z: 照合の結果は、scan がその記録に着いたときに使
 
     expect(error).toBeInstanceOf(CirclePendingError);
     expect((error as CirclePendingError).userOpHash).toBe(OLD.userOpHash);
+    expect(takePendingCodes()).toEqual(['unconfirmed_earlier']);
     expect(mockRead).not.toHaveBeenCalled();
     expect(mockWait).not.toHaveBeenCalled();
     expect(signatureRequests()).toBe(0);

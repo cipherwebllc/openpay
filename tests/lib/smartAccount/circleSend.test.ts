@@ -112,8 +112,11 @@ let clock = 1_000;
 const now = () => clock++;
 
 // 場面の符号 (第 10 回レビュー PR-39c)。run() が確認待ち (CirclePendingError) で終わるたびに、その error の circleCode を
-// ここに積む。各 test の後 (下の afterEach) で「'unconfirmed' 以外が残っていない」ことを確かめる = この file のどの確認待ちの
-// 場面も (a)。(b) 'busy_elsewhere' を期待する test (別の試みが署名の途中) だけが、takePendingCodes() で取り出して確かめる。
+// ここに積む。各 test の後 (下の afterEach) で「'unconfirmed' 以外が残っていない」ことを確かめる = 明示していない確認待ちは
+// すべて (a)。(a) 以外を期待する test は、takePendingCodes() で取り出して、その場で確かめる:
+//   (b) 'busy_elsewhere' = 別の試みが署名の途中 (scan の直近の pre-submit)。
+//   (e) 'unconfirmed_earlier' = scan が別の key の submitting の記録に当たり、対応を付け替えないまま確認待ちで終わった
+//       (run() は既定で adoptAttempt を渡さないので、その枝の確認待ちは (e)。付け替えた呼び出しは (a))。
 const pendingCodes: unknown[] = [];
 const takePendingCodes = () => pendingCodes.splice(0);
 
@@ -160,7 +163,7 @@ beforeEach(() => {
 
 afterEach(() => {
   window.localStorage.clear();
-  // 確認待ちで終わった押下は、(b) を期待する test が取り出した分を除いて、すべて (a) 'unconfirmed'。
+  // 確認待ちで終わった押下は、(b)・(e) を期待する test が取り出した分を除いて、すべて (a) 'unconfirmed'。
   expect(pendingCodes.filter((code) => code !== 'unconfirmed')).toEqual([]);
 });
 
@@ -1369,6 +1372,8 @@ describe('H-W・H-Y: 送った後の終わり方', () => {
 
       expect(error).toBeInstanceOf(CirclePendingError);
       expect(error?.userOpHash).toBe(OP1.userOpHash);
+      // 場面 (e) (PR-39c): この呼び出しは対応を付け替えていない (adoptAttempt を渡していない)。
+      expect(takePendingCodes()).toEqual(['unconfirmed_earlier']);
       expect(sentOps()).toEqual([]);
       expect(stored(other)).toMatchObject({ status: 'submitting', updatedAt: 900 });
       expect(mockPermit).not.toHaveBeenCalled();
@@ -1881,8 +1886,29 @@ describe('H-W・H-Y: 送った後の終わり方', () => {
 
       expect(error).toBeInstanceOf(CirclePendingError);
       expect(error?.userOpHash).toBe(OP1.userOpHash);
+      // 場面 (e) (PR-39c): 境界 (inPostSubmit) が想定外の throw から作った確認待ちも、付け替えていない記録なら (e)。
+      expect(error?.circleCode).toBe('unconfirmed_earlier');
+      expect(error?.name).toBe('CirclePendingError');
+      expect(takePendingCodes()).toEqual(['unconfirmed_earlier']);
       expect(sentOps()).toEqual([]);
       expect(mockPermit).not.toHaveBeenCalled();
+      expect(stored(other)).toMatchObject({ status: 'submitting', updatedAt: 900 });
+      expect(loggedErrors()).toEqual(['circle.post_submit.unexpected']);
+    });
+
+    it('同じ場面で、対応を付け替えた呼び出し (adoptAttempt あり) → 確認待ちは (a) のまま', async () => {
+      const other = seed('submitting', { attemptId: 'other', at: 900 });
+      mockWait.mockRejectedValueOnce(timeoutOf(OP1));
+      failWritesOf('submitting');
+      const adoptAttempt = vi.fn();
+
+      const { error } = await outcome(run({ adoptAttempt }));
+
+      expect(adoptAttempt.mock.calls).toEqual([['other']]);
+      expect(error).toBeInstanceOf(CirclePendingError);
+      expect(error?.userOpHash).toBe(OP1.userOpHash);
+      // 次の押下は、付け替えた先の記録の key を resume する → (a) の「同じ支払いの結果を確かめ直します」が成り立つ。
+      expect(error?.circleCode).toBe('unconfirmed');
       expect(stored(other)).toMatchObject({ status: 'submitting', updatedAt: 900 });
       expect(loggedErrors()).toEqual(['circle.post_submit.unexpected']);
     });
@@ -2085,6 +2111,8 @@ describe('H-W・H-Y: 送った後の終わり方', () => {
         const { error } = await outcome(run({ paymentAttemptId: 'attempt-2' }));
 
         expect(error).toBeInstanceOf(CirclePendingError);
+        // 場面 (e) (PR-39c): 別の key の記録を、付け替えずに復旧して確認待ちで終わった。
+        expect(takePendingCodes()).toEqual(['unconfirmed_earlier']);
         expect(mockPermit).not.toHaveBeenCalled();
         expectStillSubmitting(key);
       });
@@ -2477,6 +2505,8 @@ describe('H-W・H-Y: 送った後の終わり方', () => {
         walletSigns(OP3);
         const next = await outcome(run({ paymentAttemptId: 'attempt-2' }));
         expect(next.error).toBeInstanceOf(CirclePendingError);
+        // 場面の符号 (PR-39c): 1 回目は自分の key の記録の確認待ち = (a)。2 回目は別の key の記録を付け替えずに復旧した = (e)。
+        expect(takePendingCodes()).toEqual(['unconfirmed', 'unconfirmed_earlier']);
         expect(mockPermit).not.toHaveBeenCalled();
         expect(mockPrepare).not.toHaveBeenCalled();
         expect(sentOps()).not.toContainEqual(OP3.signedUserOp);

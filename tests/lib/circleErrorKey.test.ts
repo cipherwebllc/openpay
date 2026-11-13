@@ -6,7 +6,7 @@ import { circleErrorKey, type CircleErrorCode, type CircleErrorKey } from '@/lib
 import { CirclePendingError, CircleSendRejectedError } from '@/lib/smartAccount/circleSend';
 
 // Circle の経路 (USDC ガスレス) の error の「場面の符号」→ 案内の文 (messages の CircleErrors) (第 10 回レビュー PR-39c)。
-// 3 つのフォームは、error の class も name も見ず、own property `circleCode` だけからこの key を引く
+// 3 つのフォームは、error の class も name も見ず、`circleCode` の値だけからこの key を引く
 // (class は遅延 import の chunk にあり、フォームは First Load に入る)。
 // (c) AttemptEndedError は class を export していないので、本物の instance での確認は
 // tests/lib/smartAccount/circleSend.test.ts (「記録が abandoned になっていた」) にある。
@@ -19,10 +19,12 @@ const KEYS: Record<CircleErrorCode, CircleErrorKey> = {
   busy_elsewhere: 'busyElsewhere',
   attempt_ended: 'attemptEnded',
   send_rejected: 'sendRejected',
+  unconfirmed_earlier: 'unconfirmedEarlier',
 };
 const CODES = Object.keys(KEYS) as CircleErrorCode[];
 
-// user が承認した文 (2026-11-13)。一字も変えない。
+// user が承認した文 (2026-11-13)。一字も変えない。unconfirmedEarlier (場面 (e)) だけは案で、承認待ち (承認の後に文が
+// 変わったら、ここ・messages・circleSend.ts の 3 か所を一緒に替える)。
 const APPROVED_JA: Record<CircleErrorKey, string> = {
   unconfirmed:
     'USDC ガスレスの支払いを送信しましたが、結果をまだ確認できていません。このタブで同じ内容のままもう一度押すと、まず同じ支払いの結果を確かめ直します。確かめられるまで、ほかの方法で払い直さないでください。',
@@ -32,6 +34,8 @@ const APPROVED_JA: Record<CircleErrorKey, string> = {
     'この支払いの試みは既に終了しています。この試みでは送金していません。もう一度押すと、新しい支払いとして始めます。',
   sendRejected:
     'USDC ガスレスの支払いは、送信の受付で断られました。この支払いは送金されていません。残高が足りないなどの理由が考えられます。もう一度お試しください (署名からやり直します)。',
+  unconfirmedEarlier:
+    '同じ内容の支払いを以前に送信した記録があり、その結果をまだ確認できていません。ここでは新しい支払いを始めていません。もう一度押すと確かめ直しますが、署名を求められた場合は新しい支払いになります。二重に払わないよう、署名の前にウォレットの履歴で以前の支払いを確かめてください。',
 };
 
 describe('circleErrorKey', () => {
@@ -39,10 +43,11 @@ describe('circleErrorKey', () => {
     expect(circleErrorKey(Object.assign(new Error('x'), { circleCode: code }))).toBe(KEYS[code]);
   });
 
-  it('本物の class の instance: 確認待ちの既定は (a)・理由つきは (b)・送信の受付の拒否は (d)', () => {
+  it('本物の class の instance: 確認待ちの既定は (a)・理由つきは (b) (e)・送信の受付の拒否は (d)', () => {
     expect(circleErrorKey(new CirclePendingError(HASH))).toBe('unconfirmed');
     expect(circleErrorKey(new CirclePendingError())).toBe('unconfirmed');
     expect(circleErrorKey(new CirclePendingError(HASH, 'busy_elsewhere'))).toBe('busyElsewhere');
+    expect(circleErrorKey(new CirclePendingError(HASH, 'unconfirmed_earlier'))).toBe('unconfirmedEarlier');
     expect(circleErrorKey(new CircleSendRejectedError(HASH))).toBe('sendRejected');
   });
 
@@ -73,12 +78,12 @@ describe('Circle の経路の案内の文 (CircleErrors)', () => {
   const en = createTranslator({ locale: 'en', messages: enMessages, namespace: 'CircleErrors' });
   const ALL_KEYS = Object.values(KEYS);
 
-  it('ja と en に 4 つの場面の文があり、余分な鍵が無い', () => {
+  it('ja と en に 5 つの場面の文があり、余分な鍵が無い', () => {
     expect(Object.keys(jaMessages.CircleErrors).sort()).toEqual([...ALL_KEYS].sort());
     expect(Object.keys(enMessages.CircleErrors).sort()).toEqual([...ALL_KEYS].sort());
   });
 
-  it.each(ALL_KEYS)('%s: ja は承認済みの文と完全に同じ', (key) => {
+  it.each(ALL_KEYS)('%s: ja は承認済みの文 (unconfirmedEarlier は案) と完全に同じ', (key) => {
     expect(ja(key)).toBe(APPROVED_JA[key]);
   });
 
@@ -92,6 +97,7 @@ describe('Circle の経路の案内の文 (CircleErrors)', () => {
   it('error の class の message は、ja の同じ場面の文と完全に同じ', () => {
     expect(new CirclePendingError(HASH).message).toBe(ja('unconfirmed'));
     expect(new CirclePendingError(HASH, 'busy_elsewhere').message).toBe(ja('busyElsewhere'));
+    expect(new CirclePendingError(HASH, 'unconfirmed_earlier').message).toBe(ja('unconfirmedEarlier'));
     expect(new CircleSendRejectedError(HASH).message).toBe(ja('sendRejected'));
   });
 
