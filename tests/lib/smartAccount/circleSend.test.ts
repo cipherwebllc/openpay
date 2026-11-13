@@ -56,6 +56,7 @@ import {
   type PendingStatus,
 } from '@/lib/circlePending';
 import { logger } from '@/lib/logger';
+import jaMessages from '@/messages/ja.json';
 
 // 本物の circleAccount の、送信の error の class と分類 (I/O ではない部分)。H-X の test が、本物と同じ error を作るのに使う。
 const actualCircleAccount = await vi.importActual<
@@ -110,8 +111,17 @@ const mockStatus = vi.mocked(readCircleUserOpStatus);
 let clock = 1_000;
 const now = () => clock++;
 
+// 場面の符号 (第 10 回レビュー PR-39c)。run() が確認待ち (CirclePendingError) で終わるたびに、その error の circleCode を
+// ここに積む。各 test の後 (下の afterEach) で「'unconfirmed' 以外が残っていない」ことを確かめる = 明示していない確認待ちは
+// すべて (a)。(a) 以外を期待する test は、takePendingCodes() で取り出して、その場で確かめる:
+//   (b) 'busy_elsewhere' = 別の試みが署名の途中 (scan の直近の pre-submit)。
+//   (e) 'unconfirmed_earlier' = scan が別の key の submitting の記録に当たり、対応を付け替えないまま確認待ちで終わった
+//       (run() は既定で adoptAttempt を渡さないので、その枝の確認待ちは (e)。付け替えた呼び出しは (a))。
+const pendingCodes: unknown[] = [];
+const takePendingCodes = () => pendingCodes.splice(0);
+
 function run(overrides: Partial<Parameters<typeof executeCirclePayment>[0]> = {}) {
-  return executeCirclePayment({
+  const attempt = executeCirclePayment({
     bundle: fakeBundle,
     publicClient: {} as never,
     walletClient: {} as never,
@@ -122,6 +132,11 @@ function run(overrides: Partial<Parameters<typeof executeCirclePayment>[0]> = {}
     now,
     ...overrides,
   });
+  // 見るだけ (返す promise は元のまま = test の側の rejects・catch は今までどおり)。
+  attempt.catch((error: unknown) => {
+    if (error instanceof CirclePendingError) pendingCodes.push(error.circleCode);
+  });
+  return attempt;
 }
 
 function happyMocks() {
@@ -134,6 +149,7 @@ function happyMocks() {
 beforeEach(() => {
   window.localStorage.clear();
   clock = 1_000;
+  pendingCodes.length = 0;
   mockPermit.mockReset();
   mockPrepare.mockReset();
   mockBroadcast.mockReset();
@@ -147,6 +163,8 @@ beforeEach(() => {
 
 afterEach(() => {
   window.localStorage.clear();
+  // 確認待ちで終わった押下は、(b)・(e) を期待する test が取り出した分を除いて、すべて (a) 'unconfirmed'。
+  expect(pendingCodes.filter((code) => code !== 'unconfirmed')).toEqual([]);
 });
 
 describe('happy path', () => {
@@ -267,7 +285,13 @@ describe('応答ロスト recovery (二重決済防止の要)', () => {
     mockBroadcast.mockResolvedValue(UOH);
     mockWait.mockRejectedValue(timeout()); // ずっと未 included
 
-    await expect(run()).rejects.toBeInstanceOf(CirclePendingError);
+    const error = await run().catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(CirclePendingError);
+    // 場面 (a) (第 10 回レビュー PR-39c): op を渡した後の確認待ち。文は messages/ja.json の CircleErrors と同じ。
+    expect((error as CirclePendingError).circleCode).toBe('unconfirmed');
+    expect(Object.hasOwn(error as object, 'circleCode')).toBe(true);
+    expect((error as CirclePendingError).message).toBe(jaMessages.CircleErrors.unconfirmed);
+    expect((error as CirclePendingError).userOpHash).toBe(UOH);
     const key = computeIdempotencyKey({
       chainId: CHAIN_ID,
       sender: OWNER,
@@ -394,13 +418,25 @@ describe('cross-invocation 二重決済ガード (別 attemptId・同 callHash)'
     expect(mockBroadcast).not.toHaveBeenCalled();
   });
 
-  it('別 attemptId が直近の signed (pre-submit) → CirclePendingError で並行 broadcast しない', async () => {
-    happyMocks();
-    seedOtherAttempt('other', 'signed', 900); // clock 開始 1000 に近い = 直近
-    await expect(run()).rejects.toBeInstanceOf(CirclePendingError);
-    expect(mockPermit).not.toHaveBeenCalled();
-    expect(mockBroadcast).not.toHaveBeenCalled();
-  });
+  // 場面 (b) (第 10 回レビュー PR-39c): 確認待ちの error のうち、ここだけが「別のタブや画面で進行中」('busy_elsewhere')。
+  // この押下は何も始めていない (署名を求めない・送らない) ので、「送信しましたが…」の文 (a) を出さない。
+  it.each(['reserved', 'awaiting_signature', 'signed'] as const)(
+    '別 attemptId が直近の %s (pre-submit) → CirclePendingError (場面 (b) = busy_elsewhere) で並行 broadcast しない',
+    async (status) => {
+      happyMocks();
+      seedOtherAttempt('other', status, 900); // clock 開始 1000 に近い = 直近
+      const error = await run().catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(CirclePendingError);
+      // hook が見る name は今までどおり (対応を残す)。
+      expect((error as CirclePendingError).name).toBe('CirclePendingError');
+      expect((error as CirclePendingError).circleCode).toBe('busy_elsewhere');
+      expect(Object.hasOwn(error as object, 'circleCode')).toBe(true);
+      expect((error as CirclePendingError).message).toBe(jaMessages.CircleErrors.busyElsewhere);
+      expect(takePendingCodes()).toEqual(['busy_elsewhere']);
+      expect(mockPermit).not.toHaveBeenCalled();
+      expect(mockBroadcast).not.toHaveBeenCalled();
+    },
+  );
 
   it('別 attemptId が直近の submitting → recover (新規送信しない)', async () => {
     happyMocks();
@@ -994,7 +1030,8 @@ describe('H-V: 画面を離れた試みは新しい効果を始めない', () =>
 // 送った op・待った hash・その時点の記録は、値として外に持ち出して確かめる。時計 (now) は呼ぶたびに進む。
 // ---------------------------------------------------------------------------
 describe('H-W・H-Y: 送った後の終わり方', () => {
-  const ENDED = 'この決済試行は既に終了しています。新しい決済として実行し直してください。';
+  const ENDED =
+    'この支払いの試みは既に終了しています。この試みでは送金していません。もう一度押すと、新しい支払いとして始めます。';
   const PERMIT = { paymasterData: '0xpm' as Hex, permitSignature: PERMIT_SIG };
 
   // 試みごとに別の op・hash・tx。
@@ -1106,7 +1143,7 @@ describe('H-W・H-Y: 送った後の終わり方', () => {
     try {
       return { value: (await promise) as Awaited<ReturnType<typeof run>>, error: undefined };
     } catch (error) {
-      return { value: undefined, error: error as Error & { userOpHash?: Hex } };
+      return { value: undefined, error: error as Error & { userOpHash?: Hex; circleCode?: string } };
     }
   }
 
@@ -1335,6 +1372,8 @@ describe('H-W・H-Y: 送った後の終わり方', () => {
 
       expect(error).toBeInstanceOf(CirclePendingError);
       expect(error?.userOpHash).toBe(OP1.userOpHash);
+      // 場面 (e) (PR-39c): この呼び出しは対応を付け替えていない (adoptAttempt を渡していない)。
+      expect(takePendingCodes()).toEqual(['unconfirmed_earlier']);
       expect(sentOps()).toEqual([]);
       expect(stored(other)).toMatchObject({ status: 'submitting', updatedAt: 900 });
       expect(mockPermit).not.toHaveBeenCalled();
@@ -1570,6 +1609,10 @@ describe('H-W・H-Y: 送った後の終わり方', () => {
       expect(error).not.toBeInstanceOf(CirclePendingError);
       expect(error?.name).toBe('Error');
       expect(error?.message).toBe(ENDED);
+      // 場面 (c) (PR-39c)。name は 'Error' のまま (hook の扱いは今までどおり) で、場面は符号で分かる。
+      expect(error?.circleCode).toBe('attempt_ended');
+      expect(Object.hasOwn(error!, 'circleCode')).toBe(true);
+      expect(ENDED).toBe(jaMessages.CircleErrors.attemptEnded);
       expect(sentOps()).toEqual([]);
       expect(stored()?.status).toBe('abandoned');
       expect(loggedErrors()).toEqual([]);
@@ -1843,8 +1886,47 @@ describe('H-W・H-Y: 送った後の終わり方', () => {
 
       expect(error).toBeInstanceOf(CirclePendingError);
       expect(error?.userOpHash).toBe(OP1.userOpHash);
+      // 場面 (e) (PR-39c): 境界 (inPostSubmit) が想定外の throw から作った確認待ちも、付け替えていない記録なら (e)。
+      expect(error?.circleCode).toBe('unconfirmed_earlier');
+      expect(error?.name).toBe('CirclePendingError');
+      expect(takePendingCodes()).toEqual(['unconfirmed_earlier']);
       expect(sentOps()).toEqual([]);
       expect(mockPermit).not.toHaveBeenCalled();
+      expect(stored(other)).toMatchObject({ status: 'submitting', updatedAt: 900 });
+      expect(loggedErrors()).toEqual(['circle.post_submit.unexpected']);
+    });
+
+    it('同じ場面で、対応を付け替えた呼び出し (adoptAttempt あり・書けた) → 確認待ちは (a) のまま', async () => {
+      const other = seed('submitting', { attemptId: 'other', at: 900 });
+      mockWait.mockRejectedValueOnce(timeoutOf(OP1));
+      failWritesOf('submitting');
+      const adoptAttempt = vi.fn(() => true);
+
+      const { error } = await outcome(run({ adoptAttempt }));
+
+      expect(adoptAttempt.mock.calls).toEqual([['other']]);
+      expect(error).toBeInstanceOf(CirclePendingError);
+      expect(error?.userOpHash).toBe(OP1.userOpHash);
+      // 次の押下は、付け替えた先の記録の key を resume する (記録が残っている間) → (a) の「24 時間以内に…まず同じ支払いの結果を
+      // 確かめ直します」が成り立つ。
+      expect(error?.circleCode).toBe('unconfirmed');
+      expect(stored(other)).toMatchObject({ status: 'submitting', updatedAt: 900 });
+      expect(loggedErrors()).toEqual(['circle.post_submit.unexpected']);
+    });
+
+    it('同じ場面で、hook の関数を呼んだが対応を書けなかった (false を返す) → 確認待ちは (e)', async () => {
+      const other = seed('submitting', { attemptId: 'other', at: 900 });
+      mockWait.mockRejectedValueOnce(timeoutOf(OP1));
+      failWritesOf('submitting');
+      const adoptAttempt = vi.fn(() => false);
+
+      const { error } = await outcome(run({ adoptAttempt }));
+
+      expect(adoptAttempt.mock.calls).toEqual([['other']]);
+      expect(error).toBeInstanceOf(CirclePendingError);
+      expect(error?.userOpHash).toBe(OP1.userOpHash);
+      expect(error?.circleCode).toBe('unconfirmed_earlier');
+      expect(takePendingCodes()).toEqual(['unconfirmed_earlier']);
       expect(stored(other)).toMatchObject({ status: 'submitting', updatedAt: 900 });
       expect(loggedErrors()).toEqual(['circle.post_submit.unexpected']);
     });
@@ -1931,6 +2013,10 @@ describe('H-W・H-Y: 送った後の終わり方', () => {
       expect(error).not.toBeInstanceOf(CirclePendingError);
       expect(error?.name).toBe('CircleSendRejectedError');
       expect(error?.message).toBe(REJECTED);
+      // 場面 (d) (PR-39c)。
+      expect(error?.circleCode).toBe('send_rejected');
+      expect(Object.hasOwn(error!, 'circleCode')).toBe(true);
+      expect(REJECTED).toBe(jaMessages.CircleErrors.sendRejected);
       expect(error?.userOpHash).toBe(OP1.userOpHash);
       // 拒否が返った時点で終わる: receipt を待たない (直す前は 120 秒 × 2)・送り直さない。
       expect(sentOps()).toEqual([OP1.signedUserOp]);
@@ -2043,6 +2129,8 @@ describe('H-W・H-Y: 送った後の終わり方', () => {
         const { error } = await outcome(run({ paymentAttemptId: 'attempt-2' }));
 
         expect(error).toBeInstanceOf(CirclePendingError);
+        // 場面 (e) (PR-39c): 別の key の記録を、付け替えずに復旧して確認待ちで終わった。
+        expect(takePendingCodes()).toEqual(['unconfirmed_earlier']);
         expect(mockPermit).not.toHaveBeenCalled();
         expectStillSubmitting(key);
       });
@@ -2435,6 +2523,8 @@ describe('H-W・H-Y: 送った後の終わり方', () => {
         walletSigns(OP3);
         const next = await outcome(run({ paymentAttemptId: 'attempt-2' }));
         expect(next.error).toBeInstanceOf(CirclePendingError);
+        // 場面の符号 (PR-39c): 1 回目は自分の key の記録の確認待ち = (a)。2 回目は別の key の記録を付け替えずに復旧した = (e)。
+        expect(takePendingCodes()).toEqual(['unconfirmed', 'unconfirmed_earlier']);
         expect(mockPermit).not.toHaveBeenCalled();
         expect(mockPrepare).not.toHaveBeenCalled();
         expect(sentOps()).not.toContainEqual(OP3.signedUserOp);

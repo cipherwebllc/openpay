@@ -60,6 +60,7 @@ import { blockExplorerUrl, chainForSlug } from '@/lib/chains';
 import { env } from '@/lib/env';
 import { primeChimeAudio } from '@/lib/successChime';
 import { isGasCongestedError } from '@/lib/gasCeiling';
+import { circleErrorKey } from '@/lib/circleErrorKey';
 import { isIncompatibleSmartAccountError } from '@/lib/accountDetection';
 import { logger } from '@/lib/logger';
 import { resolvePaymasterMode } from '@/lib/pimlico';
@@ -130,6 +131,7 @@ export function TipForm({
   recipientFromHandleConfig?: boolean;
 }) {
   const t = useTranslations('TipForm');
+  const tc = useTranslations('CircleErrors');
   const locale = useLocale();
   // parseTipParams は chain を常に解決するが、型上は optional。安全側で default に倒す。
   const chainSlug = params.chain ?? DEFAULT_CHAIN_FOR_SYMBOL[params.token];
@@ -473,11 +475,16 @@ export function TipForm({
     : useRelay
       ? relayError
       : gasless.error;
+  // Circle の経路 (USDC ガスレス) の error は、場面の符号 (circleCode) から locale の文を出す (lib/circleErrorKey.ts・第 10 回
+  // レビュー PR-39c)。符号の無い error は今までどおり message をそのまま出す。
+  const circleKey = circleErrorKey(flowError);
   const flowErrorMessage = useRelay
     ? isFallbackSafeRelayError(flowError)
       ? t(relayErrorKey(flowError))
       : undefined
-    : flowError?.message;
+    : circleKey
+      ? tc(circleKey)
+      : flowError?.message;
   const error = isGasCongestedError(flowError)
     ? t('errorGasCongested')
     : (flowErrorMessage ??
