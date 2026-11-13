@@ -705,6 +705,29 @@ eslint・eslint-plugin-*・@eslint/* → minimatch@3.1.5
 [GHSA-mrwp-f3q8-3g9p](https://github.com/advisories/GHSA-mrwp-f3q8-3g9p) (HIGH: 別 realm の sensitiveHeaders 配列が捨てられ、独自の認証ヘッダがリダイレクト先へ送られる)。
 経路は x402-next → @coinbase/cdp-sdk → axios → follow-redirects。lockfile の 1 件だけの更新。
 
+### 7.17 MODERATE: `basic-ftp` (GHSA-5pm8-86m8-9m6r)・Lighthouse CI の道具の lockfile だけ (2026-11-13)
+
+**Root advisory**:
+- [GHSA-5pm8-86m8-9m6r](https://github.com/advisories/GHSA-5pm8-86m8-9m6r): FTP サーバーが返す一覧 (MLSD) の 1 行に `__proto__` という名前を入れると、basic-ftp の client が捕まえられない TypeError で落ちる (basic-ftp <=6.2.3・修正は 6.2.4)
+
+**Propagation chain** (`tools/lighthouse/package-lock.json` だけ。本体と packages/ の lockfile には basic-ftp は無い):
+```
+@lhci/cli@0.14.0 → proxy-agent → pac-proxy-agent → get-uri@6.0.5 → basic-ftp@5.3.1
+```
+
+**Reachability for OpenPay**: CI の Lighthouse の job の中だけ —
+- 動くのは `.github/workflows/lighthouse.yml` の `lhci collect / assert / upload` だけで、本番にも利用者の端末にも入らない
+- basic-ftp が呼ばれるのは、proxy の設定が `pac+ftp://` の PAC file を指すときだけ (get-uri が ftp: の URL を取りに行く)。workflow は proxy の環境変数を設定していないので、FTP の接続は起きない
+- 起きても、落ちるのは CI の job 1 つ (DoS)。秘密の値や成果物には届かない
+- 修正版 6.2.4 は get-uri@6.0.5 の範囲 (`^5.0.2`) の外で、Dependabot は更新できなかった (2026-11-13 の update job が「latest resolvable 5.3.1」で失敗)。override で 6 系に上げると get-uri の ftp の取得を壊すおそれがある
+  → 依存側の更新を待つ accepted risk (2026-11-13・user 承認・Dependabot alert #112 を理由つきで dismiss)
+
+**Gate との関係**: `scripts/audit-gate.mjs` は本体の lockfile の本番依存を見るので、この advisory は allowlist の対象ではない (下の表に足さない)。`tools/lighthouse` の lockfile は `scripts/lockfile-gate.mjs` (取得元) だけが検査する。
+
+**Reassess triggers**:
+- @lhci/cli か get-uri が basic-ftp>=6.2.4 を取れる版を出す → `tools/lighthouse` の lockfile を更新する
+- Lighthouse の workflow に proxy の設定を足す変更 (**その PR で即再評価**)
+
 ### 7.7 CI gate: allowlist 方式 (`scripts/audit-gate.mjs`)
 
 `.github/workflows/ci.yml` の audit step は `node scripts/audit-gate.mjs` を呼ぶ。
