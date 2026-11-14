@@ -45,6 +45,7 @@ const SignReassurance = dynamic(
 );
 import { useBatchPayment } from '@/hooks/useBatchPayment';
 import { useJpycEip3009Payment } from '@/hooks/useJpycEip3009Payment';
+import { usePaymentRoute } from '@/hooks/usePaymentRoute';
 import { useSmartAccount } from '@/hooks/useSmartAccount';
 import { useGasQuote } from '@/hooks/useGasQuote';
 import { useGasQuoteCircle } from '@/hooks/useGasQuoteCircle';
@@ -64,15 +65,7 @@ import { circleErrorKey } from '@/lib/circleErrorKey';
 import { isIncompatibleSmartAccountError } from '@/lib/accountDetection';
 import { logger } from '@/lib/logger';
 import { resolvePaymasterMode } from '@/lib/pimlico';
-import { resolveJpycGaslessProvider } from '@/lib/jpycGaslessProvider';
-import { resolveUsdcGaslessProvider } from '@/lib/circlePaymaster';
-import { jpycForwarderFor } from '@/lib/relay/forwarderConfig';
-import {
-  resolvePaymentRoute,
-  isRelayRoute,
-  isRecoverRoute,
-  isCircleRoute,
-} from '@/lib/paymentRoute';
+import { isRelayRoute } from '@/lib/paymentRoute';
 import { recoverFeeValue } from '@/lib/relay/recoverFee';
 import { relayErrorKey } from '@/lib/relay/relayErrorMessage';
 import { isFallbackSafeRelayError } from '@/lib/relay/relayResponseError';
@@ -188,10 +181,10 @@ export function TipForm({
   );
 
   // 決済経路の単一情報源 (Phase 1.1)。散在していた useRelay / useRecover / isCircle を
-  // この 1 値から導出する。引数は現行どおりに算出した解決済み値で、判定の優先順位・短絡は
+  // この 1 値から導出する。引数は現行どおりに算出した値で、resolver に聞くのは hooks/usePaymentRoute.ts。判定の優先順位・短絡は
   // resolvePaymentRoute が現行ロジックをそのまま再現する (挙動不変)。/pay・/checkout と同型だが、
-  // Arc のみ standard、gas=customer 固定。split 非対応のため disableRelay は省略。
-  // ⚠️ chain 引数は TipForm の現行どおり deployment.chainId を渡す (PaymentForm/CheckoutForm は
+  // Arc のみ standard、gas=customer 固定。split 非対応のため disableRelay は false、経路を固定しないので pinnedRoute は null。
+  // ⚠️ chain は TipForm の現行どおり deployment.chainId で聞く (walletChainId: undefined。PaymentForm/CheckoutForm は
   // useAccount() の chainId ?? deployment.chainId だが、TipForm は chainId を読まないため差異あり)。
   //   - JPYC ガスレスを EIP-3009 relay に倒すか (flag ON + JPYC + relay 対応 chain)。OFF / 非対応 /
   //     USDC は 'pimlico-7702' で従来挙動 (Pimlico fallback)。relay は smart account / gas quote 不要で
@@ -199,7 +192,13 @@ export function TipForm({
   //   - recover: forwarder 設定済 chain は gas 相当額を JPYC 回収 (tip は customer 上乗せ固定)。
   //     未設定は free (OpenPay 負担)。
   //   - USDC ガスレスが Circle に解決される場合は Circle Paymaster (permit + surcharge 込み quote)。
-  const isStandard = params.mode === 'standard';
+  const { route, isStandard, useRelay, useRecover, isCircle } = usePaymentRoute({
+    deployment,
+    walletChainId: undefined,
+    standardRequested: params.mode === 'standard',
+    disableRelay: false,
+    pinnedRoute: null,
+  });
   // useStandardPayment は TipStandardEngine (next/dynamic) 内でだけ mount する。engine が
   // 読み込まれるまでは isRestoring=true で送信を塞ぐ (preview は engine を mount しない)。
   const [standard, setStandard] = useState<TipStandardState>(() => ({
@@ -227,30 +226,12 @@ export function TipForm({
   const ownsStandardAttempt = isStandard && !standard.restoredFromStorage &&
     submittedByThisFormRef.current !== null && standard.lastSubmittedParams === submittedByThisFormRef.current;
   const restoredStandardPayment = isStandard && standard.restoredFromStorage;
-  const route = resolvePaymentRoute({
-    isStandard,
-    jpycGaslessProvider: resolveJpycGaslessProvider(
-      deployment,
-      deployment.chainId,
-    ),
-    usdcGaslessProvider: resolveUsdcGaslessProvider(
-      deployment,
-      deployment.chainId,
-    ),
-    hasJpycForwarder: jpycForwarderFor(deployment.chainId) !== null,
-  });
-  const useRelay = isRelayRoute(route);
   const showTipMessageComposer = env.enableTipMessage && isRelayRoute(route);
   // 埋め込み (iframe) の中のチップは、復旧の枠を保存できなくても今までどおりガスレスで送る (user 裁定 Q7-2・受容台帳:
   // third-party の storage を拒むブラウザで埋め込みのチップを使えなくする影響の方が大きい)。直接開いたページは確かめる
   // (保存できない端末では送らない)。server の描画と hydration は false (= 確かめる側) で、hydration の後に決まる。
   const embedded = useSyncExternalStore(noopSubscribe, isInsideFrame, () => false);
   const relay = useJpycEip3009Payment(deployment, { skipIntentStorageCheck: embedded });
-  // recover: relay かつ forwarder 設定済 chain (gas 相当額を JPYC 回収・tip は customer 上乗せ固定)。
-  // 未設定は free (OpenPay 負担)。relayGasEquiv は amountWei 確定後に算出する (CDX-3: 実スケジュール
-  // recoverFeeValue を使う。チップは gasMode=customer 固定でフロアのみ — bps を適用しないため
-  // bps>0 でも常にフロア = 従来挙動と一致)。
-  const useRecover = isRecoverRoute(route);
 
   // relay 時は smart account / batch / gas quote とも skip (enabled=!useRelay)。
   const paymentEnabled = !preview && !useRelay && !isStandard;
@@ -261,7 +242,6 @@ export function TipForm({
   const gasless = useBatchPayment(deployment, paymentEnabled);
   const gasQuote = useGasQuote(deployment, paymentEnabled);
   // USDC ガスレスが Circle に解決される場合は Circle Paymaster (route 由来)。
-  const isCircle = isCircleRoute(route);
   const circleQuote = useGasQuoteCircle(
     deployment,
     paymentEnabled && isCircle,
@@ -299,6 +279,10 @@ export function TipForm({
   );
   const [crossChainResult, setCrossChainResult] = useState<ExecuteResult>();
 
+  // recover: relay かつ forwarder 設定済 chain (gas 相当額を JPYC 回収・tip は customer 上乗せ固定)。
+  // 未設定は free (OpenPay 負担)。relayGasEquiv は amountWei 確定後に算出する (CDX-3: 実スケジュール
+  // recoverFeeValue を使う。チップは gasMode=customer 固定でフロアのみ — bps を適用しないため
+  // bps>0 でも常にフロア = 従来挙動と一致)。
   // recover 時に回収する利用料 (= 実 settle で feeReceiver へ分割される額)。CDX-3: 実スケジュール
   // recoverFeeValue を使う。チップは gasMode=customer 固定で、recoverFeeValue は customer に bps を
   // 適用せず常にフロア (= 2 JPYC) を返す → bps>0 でもフロアのまま従来挙動と一致。free (非 recover) は 0n。
