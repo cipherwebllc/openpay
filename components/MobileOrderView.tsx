@@ -317,6 +317,12 @@ export function MobileOrderView({
   const [pickupAt, setPickupAt] = useState<number | null>(null);
   const [admissionPending, setAdmissionPending] = useState(false);
   const [admissionRejected, setAdmissionRejected] = useState(false);
+  // 受付の確認の応答を待つ間は、注文の中身 (行き先の URL と確認の本文に効くもの) を変える操作を止める。
+  // 応答の後に進むのは押した時点の URL なので、待つ間に変えられると、画面の額と進む先の注文が食い違う。
+  // 止めるのは人の操作だけ (数量・オプション・チェーン・テーブル番号・受け取りの枠・前回と同じ注文)。
+  // 時刻の取り直しと売り切れの反映は止めない。オプションの選択モーダルは「選ぶ」を止めれば開かない
+  // (開いている間は画面全体を覆い、Tab も中だけを回るので「支払いへ進む」を押せない)。
+  const orderLocked = admissionPending;
   // 時間経過で選択スロットが候補外 (過去) になったら解除 (過去の受取時刻を送らない)。スロットは
   // 15分グリッド固定ゆえ、まだ未来の選択は候補に残り続け、過去落ちしたときだけ false になる。
   useEffect(() => {
@@ -534,10 +540,15 @@ export function MobileOrderView({
     async (event: React.MouseEvent<HTMLAnchorElement>) => {
       // 「前回と同じ注文」用に id カートを保存 (ハンドオフ点・送信はしない)。save は no-throw
       // (storage 拒否を決済導線へ波及させない)。支払い完了の判定は次回訪問時に控えと突合する。
+      // 保存する中身は /checkout へ渡す明細 (cartLines) から作る。数量の state から作ると、売り切れで
+      // 注文から外れた品が保存に残り、注文していない品が次回の「前回と同じ注文」に入る。
       if (cartItems.length > 0) {
         saveLastOrder({
           receiver: config.receiver.toLowerCase(),
-          cart: cartFromState(qty, optionEntries),
+          cart: cartFromState(
+            Object.fromEntries(cartLines.filter((l) => !l.isOption).map((l) => [l.itemId, l.qty])),
+            cartLines.filter((l) => l.isOption),
+          ),
           ts: Date.now(),
         });
       }
@@ -573,13 +584,12 @@ export function MobileOrderView({
     [
       admissionPending,
       cartItems.length,
+      cartLines,
       checkoutUrl,
       config.mode,
       config.receiver,
       handle,
-      optionEntries,
       pickupAt,
-      qty,
       saveLastOrder,
       timeEnabled,
     ],
@@ -605,6 +615,7 @@ export function MobileOrderView({
       isSoldOut={soldOutSet.has(item.id)}
       hasOptions={hasOptions(item)}
       optionCount={optionCount(item.id)}
+      locked={orderLocked}
       onQtyChange={setItemQty}
       onOpenOptions={setOptionModalItem}
     />
@@ -714,6 +725,7 @@ export function MobileOrderView({
                   key={c}
                   type="button"
                   onClick={() => setSelectedChain(c)}
+                  disabled={orderLocked}
                   aria-pressed={c === chain}
                   className={`rounded-full border px-3 py-1 text-xs font-medium transition ${
                     c === chain
@@ -765,6 +777,7 @@ export function MobileOrderView({
         <button
           type="button"
           onClick={applyLastOrder}
+          disabled={orderLocked}
           className="flex w-full items-center justify-center gap-2 rounded-2xl border px-4 py-3 text-sm font-semibold transition hover:bg-slate-50"
           style={{ borderColor: accent, color: accentText }}
         >
@@ -912,6 +925,7 @@ export function MobileOrderView({
           tableNumber={tableNumber}
           onTableNumberChange={updateTableNumber}
           needsTable={needsTable}
+          locked={orderLocked}
           pickup={{
             show: timeEnabled && isPreorder,
             slots: pickupSlotList,
