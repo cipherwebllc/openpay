@@ -3009,6 +3009,7 @@
     "pickupLabel": "Pickup time",
     "pickupAsap": "Soonest (unspecified)",
     "pickupNone": "No pickup times available today",
+    "admissionRetryNotice": "Couldn't continue to payment. Please wait a moment, then tap “Proceed to pay” again.",
     "discountGroup": "Discount (optional)",
     "discountKindLabel": "Mobile order discount",
     "discountKind": {

@@ -83,6 +83,16 @@ export type CartLineView = OptionCartEntry & { isOption: boolean };
 // 店内 (dineIn) 時のテーブル番号入力の最大長。/checkout の description (200) に十分収まる短さ。
 const TABLE_NUMBER_MAX = 16;
 const ORDER_TABLE_STORAGE_PREFIX = 'openpay:order-table:';
+// 注文に載るテーブル番号: 店内 (dineIn) の店だけ・前後の空白は落とす (入力欄の値そのものは、空白ごと state に持つ)。
+// 行き先の URL の description と、未入力の判定・店員を呼ぶボタンが使う。
+function orderTableNumber(dineIn: boolean | undefined, input: string): string {
+  return dineIn ? input.trim() : '';
+}
+// 受付を確かめられなかった (通信の例外・429・500 以上) ときに、同じ画面で「押し直してください」の案内を出す回数の上限。
+// これを超えた失敗は、お店の停止と同じ表示にする (開き直すまで押す所が無い)。受付の確認の rate limit の枠は IP の
+// prefix で共有 (/checkout の送信とも共有) なので、1 つの画面からの押し直しが、同じ prefix のほかのお客様の枠を
+// 使い切る波及を小さく抑える。
+const ADMISSION_RETRY_NOTICE_MAX = 2;
 const ORDER_MEMO_MAX = 120;
 const ORDER_MEMO_STORAGE_PREFIX = 'openpay:order-memo:';
 
@@ -203,6 +213,26 @@ export function MobileOrderView({
   // 注文内容 (カート明細) の開閉。既定は閉 (カートマークのタップで展開)。事前充填時は AI が選んだ明細を
   // 人が確認してから支払えるよう既定で開く (M2 の「人間の最終確認面」)。
   const [cartOpen, setCartOpen] = useState(prefilled);
+  const [admissionPending, setAdmissionPending] = useState(false);
+  const [admissionRejected, setAdmissionRejected] = useState(false);
+  // 受付を確かめられなかった (通信の例外・429・500 以上) ときの案内 (支払い欄の「支払いへ進む」のすぐ上)。支払い欄を
+  // 残し、押し直すと新しい確認を送る。通った確認を覚えておく state は持たない。案内を出した回数は、この画面を
+  // 開いている間の合計で数える (注文を変えても数え直さない = 上限を回り込む道を作らない)。
+  const [admissionRetryNotice, setAdmissionRetryNotice] = useState(false);
+  const admissionRetryNoticeCountRef = useRef(0);
+  // 受付の確認の応答の後に進むのは、押した時点の URL。応答を待つ間にお客様が注文の中身 (行き先の URL と確認の本文に
+  // 効くもの) を変えたら、待っている確認を無効にして「支払いへ進む」を押し直せる状態に戻す。無効にしないと、画面は
+  // 新しい額・進む先は変える前の注文になる。待つ間の操作を止める形にはしない (確認が返ってこないと、ずっと変えられない)。
+  // 世代を進めるのはお客様の操作だけ (数量・オプション・チェーン・テーブル番号・受け取りの枠・前回と同じ注文) で、
+  // その操作で中身が変わるときだけ (上限の数量で ＋・選んであるチェーンをもう一度押す、などは進めない = 今までどおり
+  // 待っていた確認で進む)。「変わらない」は、この描画の時点の値と次の値が同じ、で決める。同じでなければ進める。
+  // 時刻の取り直し・売り切れの反映・枠が自動で外れる、では進めない (押した時点の注文で進む = 今までどおり)。
+  // 押すときは世代を進めない (同じ中身の確認が 2 本飛んでも、どちらも有効 = 今までどおり)。
+  const admissionGenRef = useRef(0);
+  const invalidateAdmission = useCallback(() => {
+    admissionGenRef.current += 1;
+    setAdmissionPending(false);
+  }, []);
   // 店内 (dineIn) 時に顧客が入力するテーブル番号 (注文時のみ・config には保存しない)。
   const [tableNumber, setTableNumber] = useState('');
   useEffect(() => {
@@ -214,21 +244,6 @@ export function MobileOrderView({
       // sessionStorage の拒否を店舗ページ全体へ波及させず、テーブル番号の復元だけを諦める。
     }
   }, [config.dineIn, handle]);
-  const updateTableNumber = useCallback(
-    (value: string) => {
-      const next = value.slice(0, TABLE_NUMBER_MAX);
-      setTableNumber(next);
-      if (!handle) return;
-      try {
-        const key = `${ORDER_TABLE_STORAGE_PREFIX}${handle}`;
-        if (next) window.sessionStorage.setItem(key, next);
-        else window.sessionStorage.removeItem(key);
-      } catch {
-        // sessionStorage の拒否/容量障害を注文・決済導線へ波及させない (入力 state は維持)。
-      }
-    },
-    [handle],
-  );
   // 受注リレー (flag ON) 用の短い受付番号。この注文ページ訪問で安定 (再描画/チェーン切替で不変)。
   // 客の完了画面 (/checkout の order_id) と店主の受注カードの双方に表示され、受け渡し照合に使う。
   const [orderId, setOrderId] = useState<string | null>(null);
@@ -281,10 +296,16 @@ export function MobileOrderView({
 
   const decimals = deploymentForSlug('jpyc', chain).decimals;
   // MenuItemCard へ安定参照で渡す (memo が効くよう useCallback 化)。setQty は不変・定数のみ参照。
+  // 今の数量は ref で読む (qty を deps に入れると、数量が変わるたびに全部のカードを描き直す)。
+  const qtyRef = useRef(qty);
+  qtyRef.current = qty;
   const setItemQty = useCallback(
-    (id: string, n: number) =>
-      setQty((q) => ({ ...q, [id]: Math.max(0, Math.min(CHECKOUT_QTY_MAX, n)) })),
-    [],
+    (id: string, n: number) => {
+      const next = Math.max(0, Math.min(CHECKOUT_QTY_MAX, n));
+      if (next !== (qtyRef.current[id] ?? 0)) invalidateAdmission();
+      setQty((q) => ({ ...q, [id]: next }));
+    },
+    [invalidateAdmission],
   );
 
   // ライブ運用状態 (売り切れ / 受付一時停止)。未指定 (flag OFF / ?s= 経路) は制限なし (EMPTY)。
@@ -315,13 +336,15 @@ export function MobileOrderView({
   const noPickupSlots =
     timeEnabled && isPreorder && pickupSlotList.length === 0;
   const [pickupAt, setPickupAt] = useState<number | null>(null);
-  const [admissionPending, setAdmissionPending] = useState(false);
-  const [admissionRejected, setAdmissionRejected] = useState(false);
-  // 時間経過で選択スロットが候補外 (過去) になったら解除 (過去の受取時刻を送らない)。スロットは
-  // 15分グリッド固定ゆえ、まだ未来の選択は候補に残り続け、過去落ちしたときだけ false になる。
+  // 選んだ枠が候補から外れたら解除する (候補に無い受取時刻を送らない)。外れるのは、時間が進んで最短の受け取り
+  // (今 + 準備の時間) がその枠を越えたとき。枠は 15 分の格子に固定なので、候補に残っている選択はそのまま残る。
   useEffect(() => {
     if (pickupAt !== null && !pickupSlotList.includes(pickupAt)) setPickupAt(null);
   }, [pickupAt, pickupSlotList]);
+  const choosePickupAt = (value: number | null) => {
+    if (value !== pickupAt) invalidateAdmission();
+    setPickupAt(value);
+  };
 
   // メニューオプション (サイズ/トッピング)・flag 裏。OFF では options を無視し従来の数量ステッパのみ
   // (オプション無し商品は常に従来の qty マップを使う = 既存挙動不変)。
@@ -341,6 +364,12 @@ export function MobileOrderView({
     selections: { groupId: string; choiceId: string }[],
   ) => {
     const key = selectionKey(item.id, selections);
+    // 同じ選び方の行が上限の数量なら、足しても変わらない。選ぶ画面を開いている間に売り切れになった品も、足した行は
+    // 注文の明細 (cartLines) に入らないので変わらない (cartLines と同じ soldOutSet で見る)。
+    const sameLine = optionEntries.find((e) => e.key === key);
+    if (!soldOutSet.has(item.id) && (!sameLine || sameLine.qty < CHECKOUT_QTY_MAX)) {
+      invalidateAdmission();
+    }
     setOptionEntries((list) => {
       const idx = list.findIndex((e) => e.key === key);
       if (idx >= 0) {
@@ -364,12 +393,15 @@ export function MobileOrderView({
     });
     setOptionModalItem(null);
   };
-  const setOptionEntryQty = (key: string, n: number) =>
+  const setOptionEntryQty = (key: string, n: number) => {
+    const next = n <= 0 ? 0 : Math.min(CHECKOUT_QTY_MAX, n);
+    if (next !== (optionEntries.find((e) => e.key === key)?.qty ?? 0)) invalidateAdmission();
     setOptionEntries((list) =>
       n <= 0
         ? list.filter((e) => e.key !== key)
         : list.map((e) => (e.key === key ? { ...e, qty: Math.min(CHECKOUT_QTY_MAX, n) } : e)),
     );
+  };
 
   // カート行を統合 (明細表示 + 決済 items の単一情報源・売り切れは除外)。
   const cartLines = useMemo<CartLineView[]>(() => {
@@ -426,6 +458,7 @@ export function MobileOrderView({
       setReorderNotice('none');
       return;
     }
+    invalidateAdmission();
     setQty(restoredQty);
     setOptionEntries(restoredEntries);
     setCartOpen(true);
@@ -469,8 +502,7 @@ export function MobileOrderView({
   const cartCount = cartItems.reduce((sum, it) => sum + it.qty, 0);
   // 店内 (dineIn) 時: テーブル番号を /checkout の description (→ 控え/履歴 memo) に載せ、
   // 受け渡し先を記録する (後続のフルフィルメント = Nostr 通知 / QR 照合 でも引き継げる)。
-  const tableNum = config.dineIn ? tableNumber.trim() : '';
-  const orderDescription = tableNum ? t('tableDescPrefix', { table: tableNum }) : undefined;
+  const tableNum = orderTableNumber(config.dineIn, tableNumber);
   // 店内なのにテーブル番号が未入力なら支払いを止める (どのテーブルか不明な注文を防ぐ)。
   const needsTable = Boolean(config.dineIn) && tableNum.length === 0;
   // 受注リレー (flag ON + @handle 公開時のみ): 決済成功 webhook を /api/order/notify?h= へ向け、
@@ -480,64 +512,92 @@ export function MobileOrderView({
       ? `${origin}/api/order/notify?h=${encodeURIComponent(handle)}`
       : undefined;
   const awaitsOrderId = env.enableOrderRelay && Boolean(handle) && orderId === null;
-  const baseCheckoutUrl =
-    origin &&
-    cartItems.length > 0 &&
-    !tooMany &&
-    !awaitsOrderId &&
-    !noPickupSlots &&
-    // 値引きは @handle の店だけ (署名前に公開設定と照合する)。照合先の無いページ (ビルダーのプレビュー) では
-    // 値引き後の額を表示したまま定価の支払いへ進ませない。
-    (discountWei === 0n || Boolean(handle))
-      ? buildCheckoutUrl(origin, {
-          to: config.receiver,
-          token: 'jpyc',
-          chain, // 顧客が選んだ受取チェーン (単一なら config.chain)
-          gas: 'customer',
-          items: cartItems,
-          description: orderDescription, // 店内のテーブル番号 (テイクアウトは undefined)
-          // モバイル注文システム利用料。CheckoutForm/relay が feeKind/feePayer から
-          // 経路非依存に 1%(店頭)/3%(事前) を分割するのは課金 flag ON のときだけ。
-          // mode は署名前 admission の店舗設定束縛にも使うため常に運ぶ。実際の課金は
-          // CheckoutForm の enableMobileOrderFee gate が従来どおり決め、flag OFF では発生しない。
-          feeKind: config.mode,
-          feePayer: config.feePayer,
-          // 店名とインボイス登録番号 (顧客の控えに出す表示専用・金額/受取先/束縛には関与しない)。
-          // 店名が @handle の代用名のときは「発行事業者の名称」にならないので、公開設定を組む側
-          // (lib/handle/record.ts) が invoiceNo を載せない。ここでは店名の形で判定しない。
-          storeName: config.shopName,
-          ...(config.invoiceNo ? { invoiceNo: config.invoiceNo } : {}),
-          // @handle 店舗は checkout submit の署名前 admission で最新 KV 設定へ再束縛する。
-          // self-contained ?s= 注文は server 権威の handle が無いため付けない。
-          ...(handle ? { storeHandle: handle } : {}),
-          // 受注リレー用 (flag ON + @handle 公開時のみ・OFF では付かず inert)。
-          // orderId = webhook→店主の受注フィード + 完了画面の見出し。
-          // receiptNo = 同じ受付番号を顧客の控え (localStorage・/scan で後から確認可) にも残す
-          //   → 完了画面を閉じても「レシート番号」として受付番号を再確認できる (受け渡し照合用)。
-          ...(orderRelayWebhook && orderId
-            ? { webhook: orderRelayWebhook, orderId, receiptNo: orderId }
-            : {}),
-          // 受取予定時刻 (Phase 4・preorder で顧客が選んだスロット・flag OFF/未選択は付かない)。
-          ...(timeEnabled && isPreorder && pickupAt ? { pickupAt } : {}),
-          // 店舗の値引き (在るときだけ)。/checkout の支払額 = 小計 − 値引き・署名前に公開設定と照合される。
-          ...(discountWei > 0n ? { discount: formatUnits(discountWei, decimals) } : {}),
-        })
-      : '';
-  // /checkout の「←」を店舗へ戻すため back/backName を付与 (@handle 公開時に backHref が渡る)。
-  // buildCheckoutUrl は常に query を含むので & 連結で安全。値は encode 済み。
-  const checkoutUrl =
-    baseCheckoutUrl && backHref
+  // 行き先の URL を、テーブル番号の入力から作る (ほかの値は、この描画の時点のもの)。今の入力の URL (checkoutUrl) と、
+  // 「入力をこの値にしたら URL が変わるか」の判定 (updateTableNumber) の両方が、この 1 つを使う。
+  const buildCheckoutUrlFor = (tableInput: string): string => {
+    const table = orderTableNumber(config.dineIn, tableInput);
+    const orderDescription = table ? t('tableDescPrefix', { table }) : undefined;
+    const baseCheckoutUrl =
+      origin &&
+      cartItems.length > 0 &&
+      !tooMany &&
+      !awaitsOrderId &&
+      !noPickupSlots &&
+      // 値引きは @handle の店だけ (署名前に公開設定と照合する)。照合先の無いページ (ビルダーのプレビュー) では
+      // 値引き後の額を表示したまま定価の支払いへ進ませない。
+      (discountWei === 0n || Boolean(handle))
+        ? buildCheckoutUrl(origin, {
+            to: config.receiver,
+            token: 'jpyc',
+            chain, // 顧客が選んだ受取チェーン (単一なら config.chain)
+            gas: 'customer',
+            items: cartItems,
+            description: orderDescription, // 店内のテーブル番号 (テイクアウトは undefined)
+            // モバイル注文システム利用料。CheckoutForm/relay が feeKind/feePayer から
+            // 経路非依存に 1%(店頭)/3%(事前) を分割するのは課金 flag ON のときだけ。
+            // mode は署名前 admission の店舗設定束縛にも使うため常に運ぶ。実際の課金は
+            // CheckoutForm の enableMobileOrderFee gate が従来どおり決め、flag OFF では発生しない。
+            feeKind: config.mode,
+            feePayer: config.feePayer,
+            // 店名とインボイス登録番号 (顧客の控えに出す表示専用・金額/受取先/束縛には関与しない)。
+            // 店名が @handle の代用名のときは「発行事業者の名称」にならないので、公開設定を組む側
+            // (lib/handle/record.ts) が invoiceNo を載せない。ここでは店名の形で判定しない。
+            storeName: config.shopName,
+            ...(config.invoiceNo ? { invoiceNo: config.invoiceNo } : {}),
+            // @handle 店舗は checkout submit の署名前 admission で最新 KV 設定へ再束縛する。
+            // self-contained ?s= 注文は server 権威の handle が無いため付けない。
+            ...(handle ? { storeHandle: handle } : {}),
+            // 受注リレー用 (flag ON + @handle 公開時のみ・OFF では付かず inert)。
+            // orderId = webhook→店主の受注フィード + 完了画面の見出し。
+            // receiptNo = 同じ受付番号を顧客の控え (localStorage・/scan で後から確認可) にも残す
+            //   → 完了画面を閉じても「レシート番号」として受付番号を再確認できる (受け渡し照合用)。
+            ...(orderRelayWebhook && orderId
+              ? { webhook: orderRelayWebhook, orderId, receiptNo: orderId }
+              : {}),
+            // 受取予定時刻 (Phase 4・preorder で顧客が選んだスロット・flag OFF/未選択は付かない)。
+            ...(timeEnabled && isPreorder && pickupAt ? { pickupAt } : {}),
+            // 店舗の値引き (在るときだけ)。/checkout の支払額 = 小計 − 値引き・署名前に公開設定と照合される。
+            ...(discountWei > 0n ? { discount: formatUnits(discountWei, decimals) } : {}),
+          })
+        : '';
+    // /checkout の「←」を店舗へ戻すため back/backName を付与 (@handle 公開時に backHref が渡る)。
+    // buildCheckoutUrl は常に query を含むので & 連結で安全。値は encode 済み。
+    return baseCheckoutUrl && backHref
       ? `${baseCheckoutUrl}&back=${encodeURIComponent(backHref)}` +
-        (backLabel ? `&backName=${encodeURIComponent(backLabel)}` : '')
+          (backLabel ? `&backName=${encodeURIComponent(backLabel)}` : '')
       : baseCheckoutUrl;
+  };
+  const checkoutUrl = buildCheckoutUrlFor(tableNumber);
+  // テーブル番号の入力。入れた値で行き先の URL が変わるときだけ、待っている確認を無効にする。前後の空白や、URL を
+  // 作るときに落ちる文字 (制御文字・片方だけのサロゲート) を足しただけなら、URL は同じなので無効にしない。
+  // URL が空の間は次の値でも空なので無効にしないが、その間に確認を待ったままこの欄が出る場面は無い
+  // (10 品を超えた・受け取りの枠が無い、では欄が出ない)。
+  const updateTableNumber = (value: string) => {
+    const next = value.slice(0, TABLE_NUMBER_MAX);
+    if (buildCheckoutUrlFor(next) !== checkoutUrl) invalidateAdmission();
+    setTableNumber(next);
+    if (!handle) return;
+    try {
+      const key = `${ORDER_TABLE_STORAGE_PREFIX}${handle}`;
+      if (next) window.sessionStorage.setItem(key, next);
+      else window.sessionStorage.removeItem(key);
+    } catch {
+      // sessionStorage の拒否/容量障害を注文・決済導線へ波及させない (入力 state は維持)。
+    }
+  };
   const checkOrderAdmission = useCallback(
     async (event: React.MouseEvent<HTMLAnchorElement>) => {
       // 「前回と同じ注文」用に id カートを保存 (ハンドオフ点・送信はしない)。save は no-throw
       // (storage 拒否を決済導線へ波及させない)。支払い完了の判定は次回訪問時に控えと突合する。
+      // 保存する中身は /checkout へ渡す明細 (cartLines) から作る。数量の state から作ると、売り切れで
+      // 注文から外れた品が保存に残り、注文していない品が次回の「前回と同じ注文」に入る。
       if (cartItems.length > 0) {
         saveLastOrder({
           receiver: config.receiver.toLowerCase(),
-          cart: cartFromState(qty, optionEntries),
+          cart: cartFromState(
+            Object.fromEntries(cartLines.filter((l) => !l.isOption).map((l) => [l.itemId, l.qty])),
+            cartLines.filter((l) => l.isOption),
+          ),
           ts: Date.now(),
         });
       }
@@ -545,7 +605,19 @@ export function MobileOrderView({
       if (!handle || !timeEnabled) return;
       event.preventDefault();
       if (!checkoutUrl || admissionPending) return;
+      // この確認が待っている間にお客様が注文を変えたら (世代が進んだら)、応答は使わない: 移らない・止まった案内を出さない・
+      // 押し直した次の確認の待ち状態も解かない。
+      const gen = admissionGenRef.current;
       setAdmissionPending(true);
+      setAdmissionRetryNotice(false);
+      // 押し直しの案内を出す。上限まで出した後は出さない (false = 呼ぶ側が、お店の停止と同じ表示にする)。
+      // 呼ぶのは世代の確認の後だけ (注文を変えて無効にした確認の失敗は数えない)。
+      const offerRetry = () => {
+        if (admissionRetryNoticeCountRef.current >= ADMISSION_RETRY_NOTICE_MAX) return false;
+        admissionRetryNoticeCountRef.current += 1;
+        setAdmissionRetryNotice(true);
+        return true;
+      };
       try {
         const response = await fetch('/api/order/admission', {
           method: 'POST',
@@ -558,28 +630,34 @@ export function MobileOrderView({
             ...(pickupAt !== null ? { pickupAt } : {}),
           }),
         });
+        if (gen !== admissionGenRef.current) return;
         if (!response.ok) {
+          // 確かめられなかっただけの応答 (429・500 以上) は、お店が止めたとは言わない: 支払い欄を残して押し直せるままにする。
+          // 進むのは下の 1 行だけなので、押し直しても、その確認が通らなければ進まない。それ以外の応答 (409 など) は、
+          // status だけで停止の表示にする (本文は読まない)。
+          if ((response.status === 429 || response.status >= 500) && offerRetry()) return;
           setAdmissionRejected(true);
           return;
         }
         window.location.assign(checkoutUrl);
       } catch {
-        // 最新受付を確認できない障害から、不可逆な wallet 決済へ進む波及を断つため fail-closed。
-        setAdmissionRejected(true);
+        if (gen !== admissionGenRef.current) return;
+        // 最新受付を確認できない障害から、不可逆な wallet 決済へ進む波及を断つため fail-closed (進まない)。
+        // 確かめられなかっただけなので、お店が止めたとは言わず、押し直せるままにする (上限まで)。
+        if (!offerRetry()) setAdmissionRejected(true);
       } finally {
-        setAdmissionPending(false);
+        if (gen === admissionGenRef.current) setAdmissionPending(false);
       }
     },
     [
       admissionPending,
       cartItems.length,
+      cartLines,
       checkoutUrl,
       config.mode,
       config.receiver,
       handle,
-      optionEntries,
       pickupAt,
-      qty,
       saveLastOrder,
       timeEnabled,
     ],
@@ -713,7 +791,10 @@ export function MobileOrderView({
                 <button
                   key={c}
                   type="button"
-                  onClick={() => setSelectedChain(c)}
+                  onClick={() => {
+                    if (c !== chain) invalidateAdmission();
+                    setSelectedChain(c);
+                  }}
                   aria-pressed={c === chain}
                   className={`rounded-full border px-3 py-1 text-xs font-medium transition ${
                     c === chain
@@ -916,7 +997,7 @@ export function MobileOrderView({
             show: timeEnabled && isPreorder,
             slots: pickupSlotList,
             value: pickupAt,
-            onChange: setPickupAt,
+            onChange: choosePickupAt,
           }}
           cart={{
             open: cartOpen,
@@ -935,6 +1016,7 @@ export function MobileOrderView({
           lastOrder={timeEnabled ? config.lastOrder : undefined}
           checkoutUrl={checkoutUrl}
           checkoutPending={awaitsOrderId || admissionPending}
+          checkoutNotice={admissionRetryNotice ? t('admissionRetryNotice') : undefined}
           discountNote={
             config.discount && discountWei === 0n && orderWei > 0n
               ? t('discountNotAppliedNote')
