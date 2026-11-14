@@ -2499,7 +2499,8 @@ describe('PaymentForm → CrossChainHint props 統合 (LARP audit C1)', () => {
     expect(
       (await screen.findAllByText(/決済が完了しました|決済完了/)).length,
     ).toBeGreaterThan(0);
-    expect(screen.getAllByText(mintTxHash).length).toBeGreaterThan(0);
+    // hash を出す panel も遅れて読み込む部品なので、同じく出るまで待つ (見出しは overlay だけでも出る)。
+    expect((await screen.findAllByText(mintTxHash)).length).toBeGreaterThan(0);
     await waitFor(() => expect(loadPayerReceipts()).toHaveLength(1));
     expect(loadPayerReceipts()[0]).toEqual(
       expect.objectContaining({
