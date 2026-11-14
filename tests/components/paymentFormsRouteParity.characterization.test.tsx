@@ -574,8 +574,14 @@ type Observed = {
 const deploymentKey = (deployment: TokenDeployment) => `${deployment.symbol}@${deployment.chainId}`;
 const sortedSet = (values: number[]) => [...new Set(values)].sort((a, b) => a - b);
 const byDeploymentKey = (a: TokenDeployment, b: TokenDeployment) => deploymentKey(a).localeCompare(deploymentKey(b));
-// 同じ中身の組を 1 つにまとめる (集合にする)。中身は JSON にして比べる (bigint は字にする)。
-const contentKey = (value: unknown) => JSON.stringify(value, (_key, inner) => (typeof inner === 'bigint' ? `${inner}n` : inner));
+// 同じ中身の組を 1 つにまとめる (集合にする)。中身は JSON にして比べる。bigint は字にし、object の欄は名前の順に並べ替える
+// (中身が同じで欄の順だけ違う object を、別の組として数えない)。配列の順は意味があるので並べ替えない。
+const contentKey = (value: unknown) =>
+  JSON.stringify(value, (_key, inner: unknown) => {
+    if (typeof inner === 'bigint') return `${inner}n`;
+    if (inner === null || typeof inner !== 'object' || Array.isArray(inner)) return inner;
+    return Object.fromEntries(Object.entries(inner).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
+  });
 const distinct = <T,>(values: T[]): T[] => [...new Map(values.map((value) => [contentKey(value), value])).values()];
 const unknownKeys = (options: object, known: string[]) => Object.keys(options).filter((key) => !known.includes(key)).length;
 type Calls = { mock: { calls: unknown[][] } };
