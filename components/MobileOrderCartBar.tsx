@@ -46,6 +46,8 @@ export function MobileOrderCartBar({
     slots: number[];
     value: number | null;
     onChange: (value: number | null) => void;
+    /** 選んだ受取時間を自動で「最短」に戻したことの案内 (欄のすぐ下)。無ければ出さない。 */
+    notice?: string;
   };
   /** カート明細 + 合計 + システム利用料 + ステッパのコールバック束。 */
   cart: {
@@ -127,19 +129,27 @@ export function MobileOrderCartBar({
                 {pickup.slots.length === 0 ? (
                   <p className="mt-1 text-xs text-amber-700">{t('pickupNone')}</p>
                 ) : (
-                  <select
-                    id="mo-pickup"
-                    value={pickup.value ?? ''}
-                    onChange={(e) => pickup.onChange(e.target.value ? Number(e.target.value) : null)}
-                    className="mt-1 h-11 w-full rounded-lg border border-slate-300 bg-white px-3 text-base focus:border-[var(--mo-accent-text)] focus:outline-none sm:text-sm"
-                  >
-                    <option value="">{t('pickupAsap')}</option>
-                    {pickup.slots.map((ms) => (
-                      <option key={ms} value={ms}>
-                        {tokyoHHMM(ms)}
-                      </option>
-                    ))}
-                  </select>
+                  <>
+                    <select
+                      id="mo-pickup"
+                      value={pickup.value ?? ''}
+                      onChange={(e) => pickup.onChange(e.target.value ? Number(e.target.value) : null)}
+                      className="mt-1 h-11 w-full rounded-lg border border-slate-300 bg-white px-3 text-base focus:border-[var(--mo-accent-text)] focus:outline-none sm:text-sm"
+                    >
+                      <option value="">{t('pickupAsap')}</option>
+                      {pickup.slots.map((ms) => (
+                        <option key={ms} value={ms}>
+                          {tokyoHHMM(ms)}
+                        </option>
+                      ))}
+                    </select>
+                    {/* 自動で起きた変化の知らせ (お客様の操作の結果ではない) なので status。選び直せる欄があるときだけ出す。 */}
+                    {pickup.notice && (
+                      <p role="status" className="mt-1 text-xs text-amber-700">
+                        {pickup.notice}
+                      </p>
+                    )}
+                  </>
                 )}
               </div>
             )}
