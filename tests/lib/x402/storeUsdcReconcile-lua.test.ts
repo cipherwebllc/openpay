@@ -78,7 +78,7 @@ import { logger } from '@/lib/logger';
 import { paymentClaimKey } from '@/lib/paymentClaim';
 import {
   claimSignedStoreUsdcIntent, claimStoreUsdcSettlement, createQuotedStoreUsdcIntent,
-  getStoreUsdcIntent, markStoreUsdcIndeterminate, parseStoreUsdcIntent,
+  finalizeStoreUsdcPurchase, getStoreUsdcIntent, markStoreUsdcIndeterminate, parseStoreUsdcIntent,
   readSettledStoreUsdcAccess, reconcilePendingStoreUsdcPurchases, reconcileStoreUsdcIntent,
   storeUsdcAuthorizationHash, storeUsdcIntentKey, storeUsdcPendingKey,
   STORE_USDC_RECONCILE_MAX_DEFERRED, STORE_USDC_RECONCILE_RETRY_MS,
@@ -104,7 +104,8 @@ const EVENTS = parseAbi([
   'event AuthorizationUsed(address indexed authorizer, bytes32 indexed nonce)',
 ]);
 
-async function active(storedHash?: Hex, signedOnly = false) {
+// quotedOnly = 見積もりだけ作って返す (署名もしない)。既定は今までどおり署名まで (signedOnly でなければ indeterminate まで)。
+async function active(storedHash?: Hex, signedOnly = false, quotedOnly = false) {
   const quoted = await createQuotedStoreUsdcIntent({
     resourceId: ID, contentRevision: 1,
     metadata: { owner: MERCHANT, payTo: MERCHANT, title: 'USDC', priceJpyc: '300', contentKind: 'text', label: 'prompt' },
@@ -112,6 +113,7 @@ async function active(storedHash?: Hex, signedOnly = false) {
     rounding: 'ceil', fxQuoteExpiresAt: NOW + 180_000, anchorBlock: 90n, now: NOW, intentSalt: SALT,
   });
   if (!quoted.ok) throw new Error(quoted.reason);
+  if (quotedOnly) return quoted.intent;
   const claim = {
     payer: PAYER, to: MERCHANT, value: quoted.intent.usdcQuoteAtomic, validAfter: '0',
     validBefore: quoted.intent.authorizationValidBeforeMax, nonce: quoted.intent.nonce,
@@ -1115,5 +1117,94 @@ describe('USDC pending quarantine with real Lua', () => {
     expect(await reconcilePendingStoreUsdcPurchases({ now: CHECKED_AT })).toMatchObject({ storageErrors: 1 });
     expect(h.store!.zsets.get(storeUsdcPendingKey())?.has(SALT)).toBe(true);
     expect(h.store!.zsets.has(QUARANTINE)).toBe(false);
+  });
+});
+
+// PR-20: 競り合い (read と script の間に別の書き込みが入る) と、pending の score が cron の拾う時刻を決めることを、
+// 本物の Lua で通す。今の動き (main) をそのまま書いた characterization で、「あるべき姿」の裁定ではない。
+describe('PR-20: USDC races and pending schedule with real Lua', () => {
+  const NONE = { checked: 0, settled: 0, failed: 0, pending: 0, storageErrors: 0, deferred: 0 };
+  const CAS_MARK = 'if current ~= ARGV[4]';
+  const FINALIZE_MARK = "redis.call('EXISTS', KEYS[7])";
+
+  // G3: finalize の read と finalizer の script の間に intent が書き換わると script は -1 を返し、finalize は読み直して
+  // もう一度確定する (reconcile の再試行の時刻の保存と重なっても、確定を取りこぼさない)。
+  it('finalize re-reads and succeeds when the intent changes between its read and the finalizer script', async () => {
+    const intent = await active(TX);
+    const replies: unknown[] = [];
+    h.reply = async (script, run) => {
+      if (!script.includes(FINALIZE_MARK)) return run();
+      // 1 回目だけ、read の後・script の前に reconcile が再試行の時刻を書いた形にする。
+      if (replies.length === 0) patchIntent({ nextReconcileAt: CHECKED_AT + 1 });
+      const value = await run();
+      replies.push(value);
+      return value;
+    };
+    expect(await finalizeStoreUsdcPurchase({ intentSalt: SALT, txHash: TX, now: CHECKED_AT, client: chain(intent.nonce) }))
+      .toMatchObject({ ok: true, kind: 'finalized', intent: { state: 'settled', txHash: TX, nextReconcileAt: CHECKED_AT + 1 } });
+    expect(replies).toEqual([-1, 1]);
+    // 確定後の値は読み直した値から作る (間に入った書き込みを消さない)。
+    expect(rawIntent()).toMatchObject({ state: 'settled', txHash: TX, settledAt: CHECKED_AT, nextReconcileAt: CHECKED_AT + 1 });
+    await expectSettled();
+  });
+
+  // G5: 署名の CAS が、並行の要求に先を越されて負けたとき。同じ署名なら読み直して idempotent、別の署名なら conflict。
+  // どちらも保存されるのは先に通った方の 1 つだけ。
+  it.each(['same', 'another'] as const)('a signing CAS that loses to a concurrent request with %s authorization keeps the single stored claim', async (which) => {
+    const quoted = await active(undefined, false, true);
+    const mine = {
+      payer: PAYER, to: MERCHANT, value: quoted.usdcQuoteAtomic, validAfter: '0',
+      validBefore: quoted.authorizationValidBeforeMax, nonce: quoted.nonce, signatureFingerprint: '5'.repeat(64),
+    };
+    const rival = which === 'same' ? mine : { ...mine, signatureFingerprint: '6'.repeat(64) };
+    let rivalResult: unknown = null;
+    h.reply = async (script, run) => {
+      // 自分の read の後・CAS の前に、並行の要求の署名を先に通す (再入した呼び出しはそのまま本物の Lua へ)。
+      if (rivalResult === null && script.includes(CAS_MARK)) {
+        rivalResult = 'running';
+        rivalResult = await claimSignedStoreUsdcIntent({
+          intentSalt: SALT, claim: rival, authorizationHash: storeUsdcAuthorizationHash(rival), now: NOW + 500,
+        });
+      }
+      return run();
+    };
+    const result = await claimSignedStoreUsdcIntent({
+      intentSalt: SALT, claim: mine, authorizationHash: storeUsdcAuthorizationHash(mine), now: NOW + 1_000,
+    });
+    expect(rivalResult).toMatchObject({ ok: true, kind: 'claimed' });
+    expect(result).toMatchObject(which === 'same'
+      ? { ok: true, kind: 'idempotent', intent: { state: 'signed', signedAt: NOW + 500 } }
+      : { ok: false, reason: 'conflict' });
+    expect(rawIntent()).toMatchObject({ state: 'signed', signedAt: NOW + 500, authorizationHash: storeUsdcAuthorizationHash(rival), claim: rival });
+    expect(h.store!.zsets.get(storeUsdcPendingKey())?.get(SALT)).toBe(NOW + 500);
+    expect(h.calls.filter(({ script }) => script.includes(CAS_MARK))).toHaveLength(2);
+  });
+
+  // G10: pending の score が、cron (batch) が拾う時刻を決める。署名の直後は拾う・確定も失敗もしなかった回の後は
+  // 30 秒拾わない・settling の lease (60 秒) の間は拾わない。秒数は動きの契約なので実値で固定する。
+  it('a signed intent is due from its signing time, and after an unresolved check not again for 30 seconds', async () => {
+    const intent = await active(undefined, true);
+    const client = chain(intent.nonce);
+    // 署名は未使用・期限前 = 確定も失敗もしない回。
+    vi.mocked(client.readContract).mockResolvedValue(false);
+    const batch = (now: number) => reconcilePendingStoreUsdcPurchases({ now, client });
+    expect(await batch(NOW + 1_000 - 1)).toEqual(NONE);
+    expect(await batch(NOW + 1_000)).toEqual({ ...NONE, checked: 1, pending: 1 });
+    expect(await batch(NOW + 1_000 + 30_000 - 1)).toEqual(NONE);
+    expect(client.readContract).toHaveBeenCalledTimes(1);
+    expect(await batch(NOW + 1_000 + 30_000)).toEqual({ ...NONE, checked: 1, pending: 1 });
+    expect(rawIntent()).toMatchObject({ state: 'signed', nextReconcileAt: NOW + 1_000 + 30_000 + 30_000 });
+  });
+
+  it('a settling intent is not due during its 60 second lease', async () => {
+    const intent = await active(undefined, true);
+    expect(await claimStoreUsdcSettlement({ intentSalt: SALT, now: NOW + 2_000 })).toMatchObject({ ok: true, kind: 'claimed' });
+    const client = chain(intent.nonce);
+    vi.mocked(client.readContract).mockResolvedValue(false);
+    const batch = (now: number) => reconcilePendingStoreUsdcPurchases({ now, client });
+    expect(await batch(NOW + 2_000 + 60_000 - 1)).toEqual(NONE);
+    expect(client.readContract).not.toHaveBeenCalled();
+    expect(await batch(NOW + 2_000 + 60_000)).toEqual({ ...NONE, checked: 1, pending: 1 });
+    expect(rawIntent()).toMatchObject({ state: 'settling', nextReconcileAt: NOW + 2_000 + 60_000 + 30_000 });
   });
 });
