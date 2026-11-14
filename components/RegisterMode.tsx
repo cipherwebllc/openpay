@@ -99,6 +99,30 @@ type RegisterShopLive = {
   isPending: boolean;
 };
 
+/**
+ * オプションの選択から作る行 (表示名・単価) と、その選択をまとめる先の行の探し方。行を足す所 (addOptionLine) と、
+ * 行が上限のときに「足せるか」を決める所 (オプションのモーダルのボタン) が、同じ 1 つの判定を使う。
+ */
+function optionLineFor(p: ProductPreset, choices: OptionChoice[]) {
+  const name = composeLineName(p.name, choices);
+  const unitPrice = effectiveUnitPrice(p.unitPrice, choices);
+  // 行の単価が、いま足す選択の単価と同じ額か。行の単価は手で書き換えられる文字列なので、表記の揺れ
+  // (「700」と「700.0」) を effectiveUnitPrice の正規化 (同じ額は同じ文字列) で揃えてから比べる。数字でない
+  // 入力の途中 (空・「7.」) は、どの額とも同じにしない (effectiveUnitPrice は数字でないものを 0 と読むため)。
+  const samePrice = (linePrice: string) =>
+    DECIMAL_PATTERN.test(linePrice) && effectiveUnitPrice(linePrice, []) === unitPrice;
+  return {
+    name,
+    unitPrice,
+    // まとめる先 = 同じ商品・同じ表示名・同じ単価の行 (無ければ undefined)。表示名は選択肢の label をつないだもの
+    // なので、別のグループの同じ label (「肉増し: あり +200」と「トッピング: あり +150」) は、表示名が同じで単価が
+    // 違うことがある。単価を比べないと、後の選択が先の行の単価で数えられて合計がずれる。足す選択の名前・額と
+    // 違う行にはまとめない (行の名前や単価を書き換えた結果が、足す名前・額と同じなら、まとまる)。
+    mergeTarget: (lines: CartLine[]) =>
+      lines.find((l) => l.presetId === p.id && l.name === name && samePrice(l.unitPrice)),
+  };
+}
+
 export function RegisterMode(props: RegisterModeProps) {
   // flag OFF では SIWE / handle / live の query を一切起動せず、従来のレジ依存境界を保つ。
   return env.enableShopLive ? (
@@ -350,24 +374,16 @@ function RegisterModeContent({
     if (cart.length === 0 && p.token !== settings.token) {
       setSettings((s) => switchTokenKeepingPrefs(s, p.token));
     }
-    const name = composeLineName(p.name, choices);
-    const unitPrice = effectiveUnitPrice(p.unitPrice, choices);
-    // 行の単価が、いま足す選択の単価と同じ額か。行の単価は手で書き換えられる文字列なので、表記の揺れ
-    // (「700」と「700.0」) を effectiveUnitPrice の正規化 (同じ額は同じ文字列) で揃えてから比べる。数字でない
-    // 入力の途中 (空・「7.」) は、どの額とも同じにしない (effectiveUnitPrice は数字でないものを 0 と読むため)。
-    const samePrice = (linePrice: string) =>
-      DECIMAL_PATTERN.test(linePrice) && effectiveUnitPrice(linePrice, []) === unitPrice;
+    const { name, unitPrice, mergeTarget } = optionLineFor(p, choices);
     setCart((c) => {
-      // 同じ商品・同じ表示名・同じ単価の行だけ qty+1 にまとめる (10 行上限の浪費防止)。表示名は選択肢の label を
-      // つないだものなので、別のグループの同じ label (「肉増し: あり +200」と「トッピング: あり +150」) は表示名が
-      // 同じで単価が違う。単価を比べないと、後の選択が先の行の単価で数えられて合計がずれる。
-      // 行の名前か単価の額を書き換え済みなら一致せず新規行になる (許容)。
-      const existing = c.find((l) => l.presetId === p.id && l.name === name && samePrice(l.unitPrice));
+      // まとめる先の行 (optionLineFor) があれば qty+1 (10 行上限の浪費防止)。無ければ新しい行。
+      const existing = mergeTarget(c);
       if (existing) {
         return c.map((l) =>
           l.id === existing.id ? { ...l, quantity: Math.min(999, l.quantity + 1) } : l,
         );
       }
+      // 最後の守り。行が上限で、まとめる先の無い選択は、モーダルのボタンを押せなくしてある (下の canAdd)。
       if (c.length >= CHECKOUT_MAX_ITEMS) return c;
       return [
         ...c,
@@ -1257,6 +1273,12 @@ function RegisterModeContent({
               optionModalPreset.token,
               DEFAULT_CHAIN_FOR_SYMBOL[optionModalPreset.token],
             ).displaySymbol
+          }
+          // 行が上限のときは、まとめる先の行がある選択だけ足せる (数量 +1)。新しい行になる選択は、押しても入らずに
+          // モーダルだけ閉じる (入ったように見える) ので、ボタンを押せなくする。判定は addOptionLine と同じ optionLineFor。
+          canAdd={(choices) =>
+            cart.length < CHECKOUT_MAX_ITEMS ||
+            optionLineFor(optionModalPreset, choices).mergeTarget(cart) !== undefined
           }
           onConfirm={(choices) => addOptionLine(optionModalPreset, choices)}
           onClose={() => setOptionModalPreset(null)}

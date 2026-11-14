@@ -865,28 +865,126 @@ describe('RegisterMode: 作られる支払い URL と、カートの境目', () 
       expect(qtyAt(1)).toHaveValue('1');
     });
 
-    it('行が上限の 10 のとき、表示名が同じで単価が違う選択は入らない (先の行の単価で数えない・合計はそのまま)', async () => {
-      const fillers: Preset[] = Array.from({ length: 9 }, (_, i) => ({ id: `f${i}`, name: `品${i + 1}番`, unitPrice: '100' }));
-      seedPresets([GYUDON_ARI, ...fillers]);
-      const user = userEvent.setup();
-      render(<RegisterMode />);
-      for (let i = 1; i <= 9; i += 1) await tap(user, new RegExp(`品${i}番`));
-      await addWithOptions(user, /牛丼/, { checkbox: /\+200/ });
-      expect(cartLines()).toHaveLength(10);
-      expect(summaryRow('合計').getByText('1,600 JPYC')).toBeInTheDocument();
+    // 行の上限 (10) では、新しい行になる選択は入らない。押せるままだと、入らないのにモーダルだけ閉じて、入ったように
+    // 見える。まとめる先の行 (同じ商品・同じ表示名・同じ単価) がある選択だけ「カートに追加」を押せる。
+    describe('行が上限の 10 のとき', () => {
+      const ADD = 'カートに追加';
+      /** 100 の品を n 行入れる (品1番 〜 品n番)。 */
+      async function fill(user: User, n: number) {
+        for (let i = 1; i <= n; i += 1) await tap(user, new RegExp(`品${i}番`));
+      }
+      function addButton() {
+        return within(screen.getByRole('dialog', { name: '牛丼' })).getByRole('button', { name: ADD });
+      }
+      beforeEach(() => {
+        const fillers: Preset[] = Array.from({ length: 9 }, (_, i) => ({ id: `f${i}`, name: `品${i + 1}番`, unitPrice: '100' }));
+        seedPresets([GYUDON_ARI, ...fillers]);
+      });
 
-      await addWithOptions(user, /牛丼/, { checkbox: /\+150/ });
-      expect(screen.queryByRole('dialog')).toBeNull();
-      expect(cartLines()).toHaveLength(10);
-      expect(qtyAt(9)).toHaveValue('1');
-      expect(await findTile(/牛丼/)).toHaveAccessibleName('牛丼 500 JPYC カートに 1 点');
-      expect(summaryRow('合計').getByText('1,600 JPYC')).toBeInTheDocument();
+      it('9 行 + 700 の牛丼の後、表示名が同じで単価が違う選択 (650) は押せない (先の行の単価で数えず、入ったようにも見せない)', async () => {
+        const user = userEvent.setup();
+        render(<RegisterMode />);
+        await fill(user, 9);
+        await addWithOptions(user, /牛丼/, { checkbox: /\+200/ });
+        expect(cartLines()).toHaveLength(10);
+        expect(summaryRow('合計').getByText('1,600 JPYC')).toBeInTheDocument();
 
-      // 表示名も単価も同じ選択は、上限でも今までどおり足し込める。
-      await addWithOptions(user, /牛丼/, { checkbox: /\+200/ });
-      expect(cartLines()).toHaveLength(10);
-      expect(qtyAt(9)).toHaveValue('2');
-      expect(summaryRow('合計').getByText('2,300 JPYC')).toBeInTheDocument();
+        await tap(user, /牛丼/);
+        await user.click(screen.getByRole('checkbox', { name: /\+150/ }));
+        expect(addButton()).toBeDisabled();
+        await user.click(addButton());
+        // モーダルは開いたまま (入ったように閉じない)。カートは 700 の行に足されても (2,300)、新しい行が増えてもいない。
+        expect(screen.getByRole('dialog', { name: '牛丼' })).toBeInTheDocument();
+        expect(cartLines()).toHaveLength(10);
+        expect(qtyAt(9)).toHaveValue('1');
+        expect(lineAt(9).getByText('700 JPYC')).toBeInTheDocument();
+        expect(await findTile(/牛丼/)).toHaveAccessibleName('牛丼 500 JPYC カートに 1 点');
+        expect(summaryRow('合計').getByText('1,600 JPYC')).toBeInTheDocument();
+
+        await user.click(screen.getByRole('button', { name: 'キャンセル' }));
+        expect(screen.queryByRole('dialog')).toBeNull();
+        expect(cartLines()).toHaveLength(10);
+        expect(summaryRow('合計').getByText('1,600 JPYC')).toBeInTheDocument();
+      });
+
+      it('表示名も単価も同じ選択は、上限でも押せて数量 +1 (今までどおり)', async () => {
+        const user = userEvent.setup();
+        render(<RegisterMode />);
+        await fill(user, 9);
+        await addWithOptions(user, /牛丼/, { checkbox: /\+200/ });
+
+        await tap(user, /牛丼/);
+        await user.click(screen.getByRole('checkbox', { name: /\+200/ }));
+        expect(addButton()).toBeEnabled();
+        await user.click(addButton());
+        expect(screen.queryByRole('dialog')).toBeNull();
+        expect(cartLines()).toHaveLength(10);
+        expect(qtyAt(9)).toHaveValue('2');
+        expect(summaryRow('合計').getByText('2,300 JPYC')).toBeInTheDocument();
+      });
+
+      it('選択を切り替えるたびに押せる / 押せないが変わる (まとめる先の行がある選択だけ押せる)', async () => {
+        const user = userEvent.setup();
+        render(<RegisterMode />);
+        await fill(user, 9);
+        await addWithOptions(user, /牛丼/, { checkbox: /\+200/ });
+
+        await tap(user, /牛丼/);
+        const plus200 = screen.getByRole('checkbox', { name: /\+200/ });
+        const plus150 = screen.getByRole('checkbox', { name: /\+150/ });
+        // 何も選ばない (牛丼 500): 表示名が違うので新しい行になる → 押せない。
+        expect(addButton()).toBeDisabled();
+        // +200 (牛丼（あり）700): 同じ行がある → 押せる。
+        await user.click(plus200);
+        expect(addButton()).toBeEnabled();
+        // +200 と +150 (牛丼（あり・あり）850): 新しい行になる → 押せない。
+        await user.click(plus150);
+        expect(addButton()).toBeDisabled();
+        // +150 だけ (牛丼（あり）650): 表示名は同じでも単価が違う → 押せない。
+        await user.click(plus200);
+        expect(addButton()).toBeDisabled();
+        // +200 に戻す → 押せて、700 の行に数量 +1。
+        await user.click(plus150);
+        await user.click(plus200);
+        expect(addButton()).toBeEnabled();
+        await user.click(addButton());
+        expect(cartLines()).toHaveLength(10);
+        expect(qtyAt(9)).toHaveValue('2');
+        expect(summaryRow('合計').getByText('2,300 JPYC')).toBeInTheDocument();
+      });
+
+      it('行を 1 つ消して上限でなくなれば、新しい行になる選択も押せる', async () => {
+        const user = userEvent.setup();
+        render(<RegisterMode />);
+        await fill(user, 9);
+        await addWithOptions(user, /牛丼/, { checkbox: /\+200/ });
+        await deleteLine(user, '品1番');
+        expect(cartLines()).toHaveLength(9);
+
+        await tap(user, /牛丼/);
+        await user.click(screen.getByRole('checkbox', { name: /\+150/ }));
+        expect(addButton()).toBeEnabled();
+        await user.click(addButton());
+        expect(cartLines()).toHaveLength(10);
+        expect(lineAt(8).getByText('700 JPYC')).toBeInTheDocument();
+        expect(lineAt(9).getByText('650 JPYC')).toBeInTheDocument();
+        // 100 × 8 + 700 + 650。
+        expect(summaryRow('合計').getByText('2,150 JPYC')).toBeInTheDocument();
+      });
+
+      it('上限の 1 つ手前 (9 行) では、新しい行になる選択も押せて、10 行目として入る', async () => {
+        const user = userEvent.setup();
+        render(<RegisterMode />);
+        await fill(user, 9);
+
+        await tap(user, /牛丼/);
+        await user.click(screen.getByRole('checkbox', { name: /\+150/ }));
+        expect(addButton()).toBeEnabled();
+        await user.click(addButton());
+        expect(cartLines()).toHaveLength(10);
+        expect(lineAt(9).getByText('650 JPYC')).toBeInTheDocument();
+        expect(summaryRow('合計').getByText('1,550 JPYC')).toBeInTheDocument();
+      });
     });
 
     it('表示名が同じ選択の足し込みも 998 → 999 で止まり、もう 1 回足しても 999', async () => {

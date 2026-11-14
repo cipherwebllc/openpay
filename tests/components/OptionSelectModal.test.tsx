@@ -6,7 +6,7 @@ import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import { renderWithIntl } from '../_helpers/i18n';
 import { OptionSelectModal } from '@/components/OptionSelectModal';
-import type { OptionGroup } from '@/lib/menuOptions';
+import type { OptionChoice, OptionGroup } from '@/lib/menuOptions';
 
 const OPTIONS: OptionGroup[] = [
   {
@@ -30,6 +30,24 @@ const OPTIONS: OptionGroup[] = [
     ],
   },
 ];
+
+/** はじめから開いたモーダル (canAdd を渡す / 渡さない)。 */
+function renderOpen(props: { canAdd?: (choices: OptionChoice[]) => boolean; options?: OptionGroup[] } = {}) {
+  const onConfirm = vi.fn();
+  renderWithIntl(
+    <OptionSelectModal
+      open
+      itemName="ラーメン"
+      basePrice="800"
+      options={props.options ?? OPTIONS}
+      symbol="JPYC"
+      canAdd={props.canAdd}
+      onConfirm={onConfirm}
+      onClose={vi.fn()}
+    />,
+  );
+  return { onConfirm, add: () => screen.getByRole('button', { name: 'カートに追加' }) };
+}
 
 function Harness({ onClose = vi.fn() }: { onClose?: () => void }) {
   const [open, setOpen] = useState(false);
@@ -119,5 +137,58 @@ describe('OptionSelectModal: focus 管理 (D1)', () => {
     const dialog = screen.getByRole('dialog', { name: 'ラーメン' });
     fireEvent.keyDown(dialog, { key: 'Escape', isComposing: true });
     expect(onClose).not.toHaveBeenCalled();
+  });
+});
+
+// 「カートに追加」を押せるかを親が決める (レジの行の上限)。渡さない画面 (モバイル注文) は今までどおり。
+describe('OptionSelectModal: canAdd (いまの選択を足せるか)', () => {
+  it('canAdd を渡さなければ、いつでも押せて、選択を親へ返す', async () => {
+    const user = userEvent.setup();
+    const { onConfirm, add } = renderOpen();
+    expect(add()).toBeEnabled();
+    await user.click(screen.getByRole('checkbox', { name: /卵/ }));
+    expect(add()).toBeEnabled();
+    await user.click(add());
+    expect(onConfirm).toHaveBeenCalledTimes(1);
+    expect(onConfirm.mock.calls[0][0].map((c: OptionChoice) => c.id)).toEqual(['s', 'egg']);
+  });
+
+  it('canAdd には、確定で親へ返すのと同じ選択が渡り、false の間は押せない (選択を変えると変わる)', async () => {
+    const user = userEvent.setup();
+    // 卵を選んだ選択だけ足せない。
+    const canAdd = vi.fn((choices: OptionChoice[]) => !choices.some((c) => c.id === 'egg'));
+    const { onConfirm, add } = renderOpen({ canAdd });
+    expect(add()).toBeEnabled();
+    expect(canAdd.mock.lastCall?.[0].map((c) => c.id)).toEqual(['s']);
+
+    await user.click(screen.getByRole('checkbox', { name: /卵/ }));
+    expect(canAdd.mock.lastCall?.[0].map((c) => c.id)).toEqual(['s', 'egg']);
+    expect(add()).toBeDisabled();
+    await user.click(add());
+    expect(onConfirm).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole('checkbox', { name: /卵/ }));
+    await user.click(screen.getByRole('radio', { name: /^L/ }));
+    expect(add()).toBeEnabled();
+    await user.click(add());
+    expect(onConfirm).toHaveBeenCalledTimes(1);
+    expect(onConfirm.mock.calls[0][0].map((c: OptionChoice) => c.id)).toEqual(['l']);
+  });
+
+  it('必須のグループが未選択の間は canAdd を聞かず、押すと「選んでください」を出す (今までどおり)', async () => {
+    const user = userEvent.setup();
+    const canAdd = vi.fn(() => false);
+    const { onConfirm, add } = renderOpen({
+      canAdd,
+      options: [{ id: 'must', name: '焼き方', type: 'multi', required: true, choices: [{ id: 'w', label: 'よく焼き', priceDelta: '0' }] }],
+    });
+    expect(canAdd).not.toHaveBeenCalled();
+    expect(add()).toBeEnabled();
+    await user.click(add());
+    expect(onConfirm).not.toHaveBeenCalled();
+    expect(screen.getByText('選択してください')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('checkbox', { name: /よく焼き/ }));
+    expect(add()).toBeDisabled();
   });
 });
