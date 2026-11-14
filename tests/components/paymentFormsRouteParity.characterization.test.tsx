@@ -4,7 +4,7 @@
 // この後の PR-16〜18 (経路の決め方を hooks/usePaymentRoute.ts へ出す) は、この file を 1 字も変えずに緑のまま通す。そのため、
 // 見るのは描かれた DOM (明細の行・ボタン) と外への呼び出し (mock した hook と resolver に渡った引数・mutate に渡った値) だけで、
 // 部品の中の変数名・式の形・hook や resolver を呼んだ回数と順番には触れない (見るのは「渡った引数の組の集合」。hook は引数の
-// 全部を比べ、省いた引数は既定値として読む)。
+// 全部を中身まで比べ、省いた引数は既定値として読む)。
 //
 // 3 つのフォームの、意図して違う 5 点 (どれも今の動き。表の期待の列をフォームごとに持つ理由):
 //
@@ -41,7 +41,7 @@
 //   - resolver の mock は chain を見る: 行が「どの chain で relay / forwarder あり / Circle と答えるか」を指定する。兄弟の 3 file は
 //     引数を見ない mock (vi.fn(() => 'pimlico-7702')) なので、上の (a) はここで初めて固定される。token も本物と同じく見る
 //     (JPYC でなければ relay と答えない・USDC でなければ Circle と答えない)。
-//   - 支払いの hook の mock は enabled を見る: enabled=false なら data を返さない (本物と同じ向き)。
+//   - 支払いの hook の mock は enabled を見る: enabled=false なら data を返さない (本物と同じ向き。省かれたら既定の true)。
 //   - 経路が変わる場面は、resolver の答えの表を変えずに、実際の入力 (URL / params・ウォレットの chain・hook が返す状態) を変えて
 //     描き直す。入力が同じなら答えも同じなので、経路の計算を (入力を全部依存に入れて) memo しても、この file は通る。
 //   - env は、手元の設定に左右されないよう enableTipMessage=false に固定し、enableMobileOrderFee (本番と同じ ON が既定)・
@@ -313,18 +313,20 @@ function arrange(
     wallet === 'sa-incompatible'
       ? new IncompatibleSmartAccountError({ delegateAddress: DELEGATE, i18nKey: 'errorIncompatibleSmartAccount' })
       : null;
+  // enabled を見る mock は、省かれた enabled を本物の hook の既定値で読む (useSmartAccount・useGasQuoteUsdc・useGasQuoteJpyc・
+  // useGasQuoteCircle は、どれも `enabled: boolean = true`)。下の観察 (accountCalls / quoteCalls) と同じ読み方。
   vi.mocked(useSmartAccount).mockImplementation(
-    (_deployment, enabled) =>
+    (_deployment, enabled = true) =>
       ({
         data: enabled && saReady ? { smartAccountClient: {}, pimlicoClient: {} } : undefined,
-        isLoading: !!enabled && !saReady && !saError,
+        isLoading: enabled && !saReady && !saError,
         error: enabled ? saError : null,
       }) as unknown as ReturnType<typeof useSmartAccount>,
   );
   const quoteReady = wallet !== 'quote-loading';
-  const quote = (gasAmount: bigint) => (_deployment: TokenDeployment, enabled?: boolean) => ({
+  const quote = (gasAmount: bigint) => (_deployment: TokenDeployment, enabled = true) => ({
     data: enabled && quoteReady ? { gasAmount } : undefined,
-    isLoading: !!enabled && !quoteReady,
+    isLoading: enabled && !quoteReady,
     isError: false,
     error: null,
   });
@@ -333,7 +335,7 @@ function arrange(
     quote(input.token === 'jpyc' ? QUOTE_JPYC : QUOTE_USDC) as unknown as typeof useGasQuoteJpyc,
   );
   vi.mocked(useGasQuoteCircle).mockImplementation(
-    (_deployment, enabled) =>
+    (_deployment, enabled = true) =>
       ({
         data: enabled && quoteReady ? QUOTE_CIRCLE : undefined,
         error: null,
@@ -530,13 +532,19 @@ type Row = [label: Message | string, value: Message | string];
 type AskedOn = { jpyc: number[]; forwarder: number[]; usdc: number[] };
 
 // hook に渡った引数の見方: 見ている区間 (描いてから、または forgetHookCalls の後) に渡った **引数の組の集合** を、引数の全部で比べる。
-// 呼んだ回数と順番は見ない。省いた引数は、hook の既定値として読む (enabled の既定は true・ほかの真偽の既定は false)。
+// 呼んだ回数と順番は見ない。省いた引数は、本物の hook の既定値として読む (useSmartAccount・useBatchPayment・useGasQuoteUsdc・
+// useGasQuoteJpyc・useGasQuoteCircle の enabled と、useStandardPayment の enabled の既定は true。disableCircle・
+// restoreOrderDelivery・skipIntentStorageCheck の既定は false。useRelayHealth の enabled に既定は無い)。
 // 期待の集合は、どの行も 1 つだけ (= その区間のどの描画でも同じ引数)。途中の描画だけ別の値になる行は無い。
+// deployment は、渡った object の全体 (symbol・address・decimals・chainId・paymasterMode など) を、lib/tokens の一覧から
+// その行の token と chain で引いた本物と比べる。
 // extra = 知らない引数・知らない option の数 (0 のはず。足したら、ここに読み方を足す)。
 // (deployment, enabled = true, disableCircle = false) の形: useSmartAccount・useBatchPayment。
-type AccountCall = { deployment: string; enabled: boolean; disableCircle: boolean; extra: number };
+type AccountCall = { deployment: TokenDeployment; enabled: boolean; disableCircle: boolean; extra: number };
 // (deployment, enabled = true) の形: useGasQuoteUsdc・useGasQuoteJpyc・useGasQuoteCircle。
-type QuoteCall = { deployment: string; enabled: boolean; extra: number };
+type QuoteCall = { deployment: TokenDeployment; enabled: boolean; extra: number };
+// Checkout が useJpycEip3009Payment に渡す orderContext (この会計の、注文の復元の照合に使う欄)。
+type OrderContext = NonNullable<NonNullable<Parameters<typeof useJpycEip3009Payment>[1]>['orderContext']>;
 type Observed = {
   smartAccount: AccountCall[];
   batch: AccountCall[];
@@ -546,28 +554,36 @@ type Observed = {
   // useRelayHealth({ chainId, enabled })。Tip は呼ばない (空)。
   health: Array<{ chainId: number; enabled: boolean; extra: number }>;
   // useJpycEip3009Payment(deployment, { restoreOrderDelivery = false, orderContext, skipIntentStorageCheck = false })。
-  // orderContext は、渡したかどうかだけ (中身は見ない)。
-  relay: Array<{ deployment: string; restoreOrderDelivery: boolean; skipIntentStorageCheck: boolean; orderContext: boolean; extra: number }>;
+  // orderContext は中身を比べる (渡さなければ null)。
+  relay: Array<{
+    deployment: TokenDeployment;
+    restoreOrderDelivery: boolean;
+    skipIntentStorageCheck: boolean;
+    orderContext: OrderContext | null;
+    extra: number;
+  }>;
   // useStandardPayment({ enabled = true })。Tip は standard の engine が出たときだけ呼ぶ (それ以外は空)。
   standard: Array<{ enabled: boolean; extra: number }>;
   askedOn: AskedOn;
-  // 2 つの resolver が聞かれた deployment (第 1 引数) の集合。
-  askedAbout: string[];
+  // 2 つの resolver が聞かれた deployment (第 1 引数) の集合。これも object の全体。
+  askedAbout: TokenDeployment[];
   rows: Array<[string, string]>;
   button: [string, boolean];
 };
 
 const deploymentKey = (deployment: TokenDeployment) => `${deployment.symbol}@${deployment.chainId}`;
 const sortedSet = (values: number[]) => [...new Set(values)].sort((a, b) => a - b);
-// 同じ中身の組を 1 つにまとめる (集合にする)。
-const distinct = <T,>(values: T[]): T[] => [...new Map(values.map((value) => [JSON.stringify(value), value])).values()];
+const byDeploymentKey = (a: TokenDeployment, b: TokenDeployment) => deploymentKey(a).localeCompare(deploymentKey(b));
+// 同じ中身の組を 1 つにまとめる (集合にする)。中身は JSON にして比べる (bigint は字にする)。
+const contentKey = (value: unknown) => JSON.stringify(value, (_key, inner) => (typeof inner === 'bigint' ? `${inner}n` : inner));
+const distinct = <T,>(values: T[]): T[] => [...new Map(values.map((value) => [contentKey(value), value])).values()];
 const unknownKeys = (options: object, known: string[]) => Object.keys(options).filter((key) => !known.includes(key)).length;
 type Calls = { mock: { calls: unknown[][] } };
 
 function accountCalls(hook: Calls): AccountCall[] {
   return distinct(
     hook.mock.calls.map(([deployment, enabled = true, disableCircle = false, ...rest]) => ({
-      deployment: deploymentKey(deployment as TokenDeployment),
+      deployment: deployment as TokenDeployment,
       enabled: enabled as boolean,
       disableCircle: disableCircle as boolean,
       extra: rest.length,
@@ -577,7 +593,7 @@ function accountCalls(hook: Calls): AccountCall[] {
 function quoteCalls(hook: Calls): QuoteCall[] {
   return distinct(
     hook.mock.calls.map(([deployment, enabled = true, ...rest]) => ({
-      deployment: deploymentKey(deployment as TokenDeployment),
+      deployment: deployment as TokenDeployment,
       enabled: enabled as boolean,
       extra: rest.length,
     })),
@@ -620,10 +636,10 @@ function observe(view: View, buttonLabel: string): Observed {
     ),
     relay: distinct(
       vi.mocked(useJpycEip3009Payment).mock.calls.map(([deployment, options = {}, ...rest]) => ({
-        deployment: deploymentKey(deployment),
+        deployment,
         restoreOrderDelivery: options.restoreOrderDelivery ?? false,
         skipIntentStorageCheck: options.skipIntentStorageCheck ?? false,
-        orderContext: options.orderContext !== undefined,
+        orderContext: options.orderContext ?? null,
         extra: rest.length + unknownKeys(options, ['restoreOrderDelivery', 'orderContext', 'skipIntentStorageCheck']),
       })),
     ),
@@ -640,9 +656,9 @@ function observe(view: View, buttonLabel: string): Observed {
     },
     askedAbout: distinct(
       [resolveJpycGaslessProvider, resolveUsdcGaslessProvider].flatMap((resolver) =>
-        vi.mocked(resolver).mock.calls.map(([asked]) => deploymentKey(asked)),
+        vi.mocked(resolver).mock.calls.map(([asked]) => asked),
       ),
-    ).sort(),
+    ).sort(byDeploymentKey),
     rows: breakdownRows(view),
     button: observeButton(buttonLabel),
   };
@@ -667,15 +683,18 @@ type RouteExpect = {
   mutate?: Mutate | null;
   // Tip だけ: standard の engine が出て、useStandardPayment が呼ばれる。
   engine?: true;
+  // Checkout だけ: useJpycEip3009Payment に渡す orderContext のうち、既定と違う欄。既定は、受取先・deployment の chain と
+  // token の address・webhook と orderId は無し・totalValue は額面 (お客様が払う総額が額面と違う行と、webhook / orderId を
+  // 持つ会計の行だけが書く)。
+  orderContext?: Partial<Pick<OrderContext, 'webhook' | 'orderId' | 'totalValue'>>;
 };
 
 // 期待の観察。フォームごとに決まっているもの (どの deployment を渡すか・useRelayHealth の chainId・useJpycEip3009Payment の
 // option・useStandardPayment を呼ぶか) は、ここで足す。
 function expectedObservation(form: Form, input: Input, expected: RouteExpect): Observed {
   const deployment = deploymentOf(input);
-  const key = deploymentKey(deployment);
-  const account = (enabled: boolean): AccountCall[] => [{ deployment: key, enabled, disableCircle: false, extra: 0 }];
-  const quote = (enabled: boolean): QuoteCall[] => [{ deployment: key, enabled, extra: 0 }];
+  const account = (enabled: boolean): AccountCall[] => [{ deployment, enabled, disableCircle: false, extra: 0 }];
+  const quote = (enabled: boolean): QuoteCall[] => [{ deployment, enabled, extra: 0 }];
   const askedOn = expected.askedOn ?? { jpyc: [deployment.chainId], forwarder: [deployment.chainId], usdc: [deployment.chainId] };
   return {
     smartAccount: account(expected.hooks.smartAccount),
@@ -685,20 +704,32 @@ function expectedObservation(form: Form, input: Input, expected: RouteExpect): O
     quoteCircle: quote(expected.hooks.quoteCircle),
     // useRelayHealth の chainId は、ウォレットの chain でなく deployment の chain。
     health: expected.health === 'never' ? [] : [{ chainId: deployment.chainId, enabled: expected.health, extra: 0 }],
-    // Pay は option なし・Checkout は注文の復元を頼む・Tip は埋め込みかどうか (jsdom は最上位の window なので false = 既定と同じ)。
+    // Pay は option なし・Checkout は注文の復元を頼んで、この会計の orderContext を渡す・Tip は埋め込みかどうか (jsdom は最上位の
+    // window なので false = 既定と同じ)。
     relay: [
       {
-        deployment: key,
+        deployment,
         restoreOrderDelivery: form === 'checkout',
         skipIntentStorageCheck: false,
-        orderContext: form === 'checkout',
+        orderContext:
+          form === 'checkout'
+            ? {
+                merchant: MERCHANT,
+                chainId: deployment.chainId,
+                tokenAddress: deployment.address,
+                webhook: undefined,
+                orderId: undefined,
+                totalValue: parseUnits(amountOf(input), deployment.decimals),
+                ...expected.orderContext,
+              }
+            : null,
         extra: 0,
       },
     ],
     // Pay と Checkout は必ず呼ぶ。Tip は standard の engine が出たときだけ。
     standard: form !== 'tip' || expected.engine ? [{ enabled: true, extra: 0 }] : [],
     askedOn: { jpyc: sortedSet(askedOn.jpyc), forwarder: sortedSet(askedOn.forwarder), usdc: sortedSet(askedOn.usdc) },
-    askedAbout: (expected.askedAbout ?? [deployment]).map(deploymentKey).sort(),
+    askedAbout: [...(expected.askedAbout ?? [deployment])].sort(byDeploymentKey),
     rows: expected.rows.map(([label, value]) => [
       text(form, label),
       typeof value === 'string' ? value : text(form, value),
@@ -735,6 +766,7 @@ type FormExpect = {
   mutate?: Mutate | null;
   askedOn?: AskedOn;
   engine?: true;
+  orderContext?: RouteExpect['orderContext']; // Checkout の列だけ
 };
 type Case = {
   name: string;
@@ -765,6 +797,7 @@ const perForm = (cases: Case[]): Array<Titled<RouteRow>> =>
         button: column.button,
         mutate: 'mutate' in column ? column.mutate : row.mutate,
         engine: column.engine,
+        orderContext: column.orderContext,
       };
       return [[`${form}: ${row.name}`, { form, input: row.input, expected }]];
     }),
@@ -1542,6 +1575,8 @@ const ROUTE_TABLE: Case[] = [
     health: true,
     mutate: ['relay', { merchant: MERCHANT, value: J('1000'), gasMode: 'customer', feeKind: 'preorder' }],
     checkout: {
+      // 注文の復元の照合に渡す総額は、お客様が払う額 (額面 1000 + 利用料 30)。
+      orderContext: { totalValue: J('1030') },
       rows: [
         ['subtotalRow', '1000 JPYC'],
         ['feeRow', '30 JPYC'],
@@ -2223,21 +2258,19 @@ describe('表 3: 経路が変わる・変わらない場面', () => {
         name: 'resolver は「relay でない」と答えるが、復元した注文は recover → relay の recover',
         saved: 'recover' as const,
         resolvers: {},
-        expected: { hooks: OFF, health: true, rows: RELAY_RECOVER_ROWS.checkout, button: [PAY_JPYC, false] } satisfies RouteExpect,
+        expected: { hooks: OFF, health: true, rows: RELAY_RECOVER_ROWS.checkout },
       },
       {
         name: 'resolver は「relay・forwarder あり」(recover) と答えるが、復元した注文は free → relay の free',
         saved: 'free' as const,
         resolvers: { relayOn: 'all', forwarderOn: 'all' } satisfies Partial<Input>,
-        expected: { hooks: OFF, health: true, rows: JPYC_FREE_ROWS.checkout, button: [PAY_JPYC, false] } satisfies RouteExpect,
+        expected: { hooks: OFF, health: true, rows: JPYC_FREE_ROWS.checkout },
       },
     ].map((row): Titled<typeof row> => [`checkout: ${row.name}`, row]))('%s', async (_title, { saved, resolvers, expected }) => {
       const input: Input = { token: 'jpyc', ...resolvers };
-      const view = await mount('checkout', input, {
-        relayState: savedOrder(saved),
-        checkoutExtra: { orderId: 'ord-1', webhook: OWN_NOTIFY },
-      });
-      check('checkout', input, expected, view);
+      const order = { orderId: 'ord-1', webhook: OWN_NOTIFY };
+      const view = await mount('checkout', input, { relayState: savedOrder(saved), checkoutExtra: order });
+      check('checkout', input, { ...expected, button: [PAY_JPYC, false], orderContext: order }, view);
     });
   });
 });
