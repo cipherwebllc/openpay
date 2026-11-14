@@ -3009,6 +3009,7 @@
     "pickupLabel": "受取時間",
     "pickupAsap": "最短（指定なし）",
     "pickupNone": "本日受け取れる時間がありません",
+    "admissionRetryNotice": "お支払いへ進めませんでした。少し待ってから、もう一度「支払いへ進む」を押してください。",
     "discountGroup": "値引き（任意）",
     "discountKindLabel": "モバイルオーダーの値引き",
     "discountKind": {

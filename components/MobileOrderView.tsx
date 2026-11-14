@@ -88,6 +88,11 @@ const ORDER_TABLE_STORAGE_PREFIX = 'openpay:order-table:';
 function orderTableNumber(dineIn: boolean | undefined, input: string): string {
   return dineIn ? input.trim() : '';
 }
+// 受付を確かめられなかった (通信の例外・429・500 以上) 最初の失敗の後に、同じ画面から送れる受付の確認の本数。
+// 使い切った後は、お店の停止と同じ表示にする (開き直すまで押す所が無い)。受付の確認の rate limit の枠は IP の
+// prefix で共有 (/checkout の送信とも共有) なので、1 つの画面からの押し直しが、同じ prefix のほかのお客様の枠を
+// 使う波及を、+2 本までに抑える。
+const ADMISSION_RETRY_SEND_MAX = 2;
 const ORDER_MEMO_MAX = 120;
 const ORDER_MEMO_STORAGE_PREFIX = 'openpay:order-memo:';
 
@@ -210,6 +215,13 @@ export function MobileOrderView({
   const [cartOpen, setCartOpen] = useState(prefilled);
   const [admissionPending, setAdmissionPending] = useState(false);
   const [admissionRejected, setAdmissionRejected] = useState(false);
+  // 受付を確かめられなかった (通信の例外・429・500 以上) ときの案内 (支払い欄の「支払いへ進む」のすぐ上)。支払い欄を
+  // 残し、押し直すと新しい確認を送る。通った確認を覚えておく state は持たない。
+  const [admissionRetryNotice, setAdmissionRetryNotice] = useState(false);
+  // 最初の「確かめられなかった」失敗の後に、この画面からまだ送れる確認の本数 (null = その失敗がまだ無い = 数えない)。
+  // 減らすのは送る直前 (同期) なので、再描画の前の二度押しも、注文を変えて無効にした確認も、送った分だけ減る。
+  // 注文を変えても・確認が通っても戻さない (上限を回り込む道を作らない)。
+  const admissionRetrySendsLeftRef = useRef<number | null>(null);
   // 受付の確認の応答の後に進むのは、押した時点の URL。応答を待つ間にお客様が注文の中身 (行き先の URL と確認の本文に
   // 効くもの) を変えたら、待っている確認を無効にして「支払いへ進む」を押し直せる状態に戻す。無効にしないと、画面は
   // 新しい額・進む先は変える前の注文になる。待つ間の操作を止める形にはしない (確認が返ってこないと、ずっと変えられない)。
@@ -222,6 +234,8 @@ export function MobileOrderView({
   const invalidateAdmission = useCallback(() => {
     admissionGenRef.current += 1;
     setAdmissionPending(false);
+    // 送れる本数を使い切っているときは、押せる「支払いへ進む」に戻さず、停止の表示にする (押しても送れないため)。
+    if (admissionRetrySendsLeftRef.current === 0) setAdmissionRejected(true);
   }, []);
   // 店内 (dineIn) 時に顧客が入力するテーブル番号 (注文時のみ・config には保存しない)。
   const [tableNumber, setTableNumber] = useState('');
@@ -595,10 +609,30 @@ export function MobileOrderView({
       if (!handle || !timeEnabled) return;
       event.preventDefault();
       if (!checkoutUrl || admissionPending) return;
+      setAdmissionRetryNotice(false);
+      // 最初の「確かめられなかった」失敗の後は、送る前に本数を数える。使い切っていたら送らずに停止の表示にする。
+      const sendsLeft = admissionRetrySendsLeftRef.current;
+      if (sendsLeft !== null) {
+        if (sendsLeft === 0) {
+          setAdmissionRejected(true);
+          return;
+        }
+        admissionRetrySendsLeftRef.current = sendsLeft - 1;
+      }
       // この確認が待っている間にお客様が注文を変えたら (世代が進んだら)、応答は使わない: 移らない・止まった案内を出さない・
       // 押し直した次の確認の待ち状態も解かない。
       const gen = admissionGenRef.current;
       setAdmissionPending(true);
+      // 押し直しの案内を出す。送れる本数が残っていなければ出さない (false = 呼ぶ側が、お店の停止と同じ表示にする)。
+      // 呼ぶのは世代の確認の後だけ。最初に呼ばれた時から、送る本数を数え始める。
+      const offerRetry = () => {
+        if (admissionRetrySendsLeftRef.current === null) {
+          admissionRetrySendsLeftRef.current = ADMISSION_RETRY_SEND_MAX;
+        }
+        if (admissionRetrySendsLeftRef.current === 0) return false;
+        setAdmissionRetryNotice(true);
+        return true;
+      };
       try {
         const response = await fetch('/api/order/admission', {
           method: 'POST',
@@ -613,14 +647,19 @@ export function MobileOrderView({
         });
         if (gen !== admissionGenRef.current) return;
         if (!response.ok) {
+          // 確かめられなかっただけの応答 (429・500 以上) は、お店が止めたとは言わない: 支払い欄を残して押し直せるままにする。
+          // 進むのは下の 1 行だけなので、押し直しても、その確認が通らなければ進まない。それ以外の応答 (409 など) は、
+          // status だけで停止の表示にする (本文は読まない)。
+          if ((response.status === 429 || response.status >= 500) && offerRetry()) return;
           setAdmissionRejected(true);
           return;
         }
         window.location.assign(checkoutUrl);
       } catch {
         if (gen !== admissionGenRef.current) return;
-        // 最新受付を確認できない障害から、不可逆な wallet 決済へ進む波及を断つため fail-closed。
-        setAdmissionRejected(true);
+        // 最新受付を確認できない障害から、不可逆な wallet 決済へ進む波及を断つため fail-closed (進まない)。
+        // 確かめられなかっただけなので、お店が止めたとは言わず、押し直せるままにする (送れる本数が残っている間)。
+        if (!offerRetry()) setAdmissionRejected(true);
       } finally {
         if (gen === admissionGenRef.current) setAdmissionPending(false);
       }
@@ -992,6 +1031,7 @@ export function MobileOrderView({
           lastOrder={timeEnabled ? config.lastOrder : undefined}
           checkoutUrl={checkoutUrl}
           checkoutPending={awaitsOrderId || admissionPending}
+          checkoutNotice={admissionRetryNotice ? t('admissionRetryNotice') : undefined}
           discountNote={
             config.discount && discountWei === 0n && orderWei > 0n
               ? t('discountNotAppliedNote')

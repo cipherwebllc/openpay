@@ -7,7 +7,8 @@
 // 行き先の URL は「origin と path」と「query の全部の key と値」を比べる (key の並びには依らない)。
 // 題に「(今の動き)」と付けた行は、こうあるべきという主張ではなく、今こう動いているという記録。
 // 付けていない行のうち、「待っている間に注文を変えたら、待っていた確認は使わない」と「前回の注文の保存に売り切れの品を
-// 残さない」は、守る約束。
+// 残さない」と「受付を確かめられなかっただけのときは、止まった表示にせず、押し直せるままにする (進むのは、その押した
+// 確認が通ったときだけ)」は、守る約束。
 
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { screen, fireEvent, within } from '@testing-library/react';
@@ -65,6 +66,8 @@ import { buildPayerReceipt } from '@/lib/payerReceipt';
 import { calcCheckoutPayable, CHECKOUT_QTY_MAX, parseCheckoutParams } from '@/lib/url';
 import type { MobileOrderConfig } from '@/lib/mobileOrder';
 import type { ShopLiveState } from '@/lib/shopLive';
+import jaMessages from '@/messages/ja.json';
+import enMessages from '@/messages/en.json';
 
 // ---------------------------------------------------------------------------------------------------------------------
 // 店の設定
@@ -133,6 +136,8 @@ const TEXT = {
   soldOut: '売り切れ',
   pickup: '受取時間',
   pickupAsap: '最短（指定なし）',
+  // 受付の確認が通らなかったときの、支払い欄の案内 (承認済みの字のまま)。
+  retryNotice: 'お支払いへ進めませんでした。少し待ってから、もう一度「支払いへ進む」を押してください。',
 };
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -219,6 +224,14 @@ function cartLine(name: string): HTMLElement {
 
 const payLink = () => screen.queryByRole('link', { name: TEXT.pay });
 const payButton = () => screen.queryByRole('button', { name: TEXT.pay });
+/** 支払い欄の案内 (role="alert")。この画面で alert はこれだけ。出ていなければ null。 */
+const notice = () => screen.queryByRole('alert');
+/** 受付の確認を断る応答 (本文は route と同じ形)。 */
+const refused = (status: number, error: string) =>
+  new Response(JSON.stringify({ ok: false, error }), {
+    status,
+    headers: { 'content-type': 'application/json' },
+  });
 /** 支払い欄 (下のカートバー) の合計のボタン。 */
 const cartToggle = () => screen.queryByRole('button', { name: /ご注文内容/ });
 
@@ -723,7 +736,7 @@ describe('MobileOrderView — 「支払いへ進む」: 受付の確認を通る
     expect(assignSpy.mock.calls).toEqual([[next]]);
   });
 
-  it.each(['409', '例外'])('無効にした確認が %s で返っても、止まった案内は出ない。押し直した確認が断られたら、そこで止まる', async (kind) => {
+  it.each(['409', '例外'])('無効にした確認が %s で返っても、止まった案内も押し直しの案内も出ない。押し直した確認が 409 なら止まり、例外なら押し直しの案内が出る', async (kind) => {
     const gate = gatedFetches();
     const settle = (index: number) =>
       kind === '409' ? gate.respond(index, new Response('{}', { status: 409 })) : gate.fail(index);
@@ -735,6 +748,7 @@ describe('MobileOrderView — 「支払いへ進む」: 受付の確認を通る
     await settle(0);
 
     expect(screen.queryByText(TEXT.closed)).toBeNull();
+    expect(notice()).toBeNull();
     expect(assignSpy).not.toHaveBeenCalled();
     expect(payLink()).not.toBeNull();
     expect(screen.getByText('600 JPYC')).toBeInTheDocument();
@@ -743,9 +757,15 @@ describe('MobileOrderView — 「支払いへ進む」: 受付の確認を通る
     await settle(1);
 
     expect(assignSpy).not.toHaveBeenCalled();
-    expect(screen.getByText(TEXT.closed)).toBeInTheDocument();
-    expect(payLink()).toBeNull();
-    expect(cartToggle()).toBeNull();
+    if (kind === '409') {
+      expect(screen.getByText(TEXT.closed)).toBeInTheDocument();
+      expect(payLink()).toBeNull();
+      expect(cartToggle()).toBeNull();
+    } else {
+      expect(screen.queryByText(TEXT.closed)).toBeNull();
+      expect(notice()?.textContent).toBe(TEXT.retryNotice);
+      expect(payLink()).not.toBeNull();
+    }
   });
 
   it.each(['200', '409', '例外'])('押し直した確認を待っている間に、無効にした前の確認が %s で返っても、待ちは解けない (移らない・案内も出ない)。押し直した確認が通ると移る', async (kind) => {
@@ -1015,20 +1035,530 @@ describe('MobileOrderView — 「支払いへ進む」: 受付の確認を通る
     expect(assignSpy.mock.calls).toEqual([[href], [href]]);
   });
 
-  it('fetch が例外で落ちたら移らない。受付停止の案内が出て支払い欄が消え、数量を変えても戻らない。開き直すと戻る (今の動き)', async () => {
-    const gate = gatedFetch();
-    const view = renderWithIntl(<MobileOrderView config={config} handle={HANDLE} />);
+  // -------------------------------------------------------------------------------------------------------------------
+  // 受付の確認が通らなかったとき。進むのは「その押した確認が 200」のときだけ (ここは変わらない)。
+  //   - 確かめられなかっただけ (通信の例外・429・500 以上): 止まった表示にせず、支払い欄に案内を出して、押し直せるままにする。
+  //     最初のその失敗の後に、この画面から送れる確認は 2 本まで。使い切った後は、止まった表示。
+  //   - それ以外 (409 の全部の理由・知らない応答): 今までどおり、status だけで止まった表示 (開き直すまで戻らない)。
+  // -------------------------------------------------------------------------------------------------------------------
+  it('fetch が例外で落ちたら移らない。止まった表示にはせず、支払い欄を残して「支払いへ進む」のすぐ上に案内を出す。自動では送り直さない。もう一度押すと新しい確認を送り、200 なら移る', async () => {
+    const gate = gatedFetches();
+    renderWithIntl(<MobileOrderView config={config} handle={HANDLE} />);
     add('ブレンド');
+    const href = payHref();
     fireEvent.click(payLink()!);
 
-    await gate.fail();
+    await gate.fail(0);
 
     expect(assignSpy).not.toHaveBeenCalled();
+    expect(screen.queryByText(TEXT.closed)).toBeNull();
+    expect(notice()?.textContent).toBe(TEXT.retryNotice);
+    expect(notice()?.nextElementSibling).toBe(payLink());
+    expect(cartToggle()).not.toBeNull();
+    expect(payHref()).toBe(href);
+    // 自動の送り直しは無い: 時間が進んでも、確認は 1 回のまま・案内も出たまま・移らない。
+    act(() => {
+      vi.advanceTimersByTime(120_000);
+    });
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(notice()?.textContent).toBe(TEXT.retryNotice);
+    expect(assignSpy).not.toHaveBeenCalled();
+
+    // 押し直す: 新しい確認を送る。押した時に案内は消え、応答を待つ間は押せないボタン。
+    fireEvent.click(payLink()!);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(notice()).toBeNull();
+    expect(payButton()).toBeDisabled();
+    expect(assignSpy).not.toHaveBeenCalled();
+
+    await gate.admit(1);
+
+    expect(postedBodies()).toEqual([
+      { handle: HANDLE, merchant: RECEIVER, mode: 'storefront' },
+      { handle: HANDLE, merchant: RECEIVER, mode: 'storefront' },
+    ]);
+    expect(assignSpy.mock.calls).toEqual([[href]]);
+    expect(notice()).toBeNull();
+  });
+
+  it.each([429, 500, 502, 503, 504])('応答が %i なら移らない。止まった表示にはせず、支払い欄を残して案内を出す。押し直した確認をお店の停止 (409) で断られたら、そこで止まる', async (status) => {
+    fetchSpy.mockImplementation(async () => refused(status, 'x'));
+    renderWithIntl(<MobileOrderView config={config} handle={HANDLE} />);
+    add('ブレンド');
+    const href = payHref();
+
+    await pressPay();
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(assignSpy).not.toHaveBeenCalled();
+    expect(screen.queryByText(TEXT.closed)).toBeNull();
+    expect(notice()?.textContent).toBe(TEXT.retryNotice);
+    expect(payHref()).toBe(href);
+    expect(cartToggle()).not.toBeNull();
+
+    // やり直しでも、進むには新しい確認の 200 が要る。お店が止めていれば進まない。
+    fetchSpy.mockImplementation(async () => refused(409, 'store_not_accepting'));
+    await pressPay();
+
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(assignSpy).not.toHaveBeenCalled();
+    expect(screen.getByText(TEXT.closed)).toBeInTheDocument();
+    expect(notice()).toBeNull();
+    expect(payLink()).toBeNull();
+    expect(cartToggle()).toBeNull();
+  });
+
+  it('429 が 2 回続いても、押し直すたびに新しい確認を送る (案内は押した時に消え、断られるとまた出る)。3 回目が 200 なら移る', async () => {
+    const gate = gatedFetches();
+    renderWithIntl(<MobileOrderView config={config} handle={HANDLE} />);
+    add('ブレンド');
+    const href = payHref();
+
+    fireEvent.click(payLink()!);
+    await gate.respond(0, refused(429, 'rate_limited'));
+    expect(notice()?.textContent).toBe(TEXT.retryNotice);
+
+    fireEvent.click(payLink()!);
+    expect(notice()).toBeNull();
+    await gate.respond(1, refused(429, 'rate_limited'));
+    expect(notice()?.textContent).toBe(TEXT.retryNotice);
+    expect(assignSpy).not.toHaveBeenCalled();
+
+    fireEvent.click(payLink()!);
+    await gate.admit(2);
+
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
+    expect(assignSpy.mock.calls).toEqual([[href]]);
+  });
+
+  // 最初の「確かめられなかった」失敗の後に、この画面から送れる確認は 2 本まで (送る時に数える)。受付の確認の枠
+  // (rate limit) は、同じネットワークのほかのお客様と共有なので、その失敗の後に 1 つの画面が足せる確認は、今までの
+  // 0 本に対して最大 +2 本。二度押しでも、注文を変えて押し直しても、通って移った後でも、この 2 本は増えない。
+  /** n 本目 (0 始まり) の確認を、種類ごとの「確かめられなかった」で返す。 */
+  const failAs = (gate: ReturnType<typeof gatedFetches>, index: number, kind: string) =>
+    kind === '例外' ? gate.fail(index) : gate.respond(index, refused(Number(kind), 'x'));
+
+  it('例外 → 案内 → 押す → 429 → 案内 → 押す → 503 で、止まった表示になる (確認は 3 本・案内は消える・その後は押す所が無く、品を足しても・時間が進んでも戻らない)', async () => {
+    const gate = gatedFetches();
+    renderWithIntl(<MobileOrderView config={config} handle={HANDLE} />);
+    add('ブレンド');
+
+    fireEvent.click(payLink()!);
+    await gate.fail(0);
+    expect(notice()?.textContent).toBe(TEXT.retryNotice);
+
+    fireEvent.click(payLink()!);
+    await gate.respond(1, refused(429, 'rate_limited'));
+    expect(notice()?.textContent).toBe(TEXT.retryNotice);
+    expect(screen.queryByText(TEXT.closed)).toBeNull();
+
+    fireEvent.click(payLink()!);
+    await gate.respond(2, refused(503, 'kv_unavailable'));
+
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
+    expect(assignSpy).not.toHaveBeenCalled();
+    expect(screen.getByText(TEXT.closed)).toBeInTheDocument();
+    expect(notice()).toBeNull();
+    expect(payLink()).toBeNull();
+    expect(payButton()).toBeNull();
+    expect(cartToggle()).toBeNull();
+    add('水');
+    act(() => {
+      vi.advanceTimersByTime(60_000);
+    });
+    expect(screen.getByText(TEXT.closed)).toBeInTheDocument();
+    expect(payLink()).toBeNull();
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
+  });
+
+  it.each(['例外', '429', '500', '503'])('案内を 2 回出した後の 3 回目の失敗が %s なら、止まった表示', async (kind) => {
+    const gate = gatedFetches();
+    renderWithIntl(<MobileOrderView config={config} handle={HANDLE} />);
+    add('ブレンド');
+    for (const index of [0, 1]) {
+      fireEvent.click(payLink()!);
+      await failAs(gate, index, kind);
+      expect(notice()?.textContent).toBe(TEXT.retryNotice);
+    }
+
+    fireEvent.click(payLink()!);
+    await failAs(gate, 2, kind);
+
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
+    expect(assignSpy).not.toHaveBeenCalled();
+    expect(screen.getByText(TEXT.closed)).toBeInTheDocument();
+    expect(notice()).toBeNull();
+    expect(payLink()).toBeNull();
+  });
+
+  it('注文を変えても、送れる本数は戻らない: 案内 → 品を足して押す → 案内 → 品を足して押す → 3 回目の失敗で止まった表示', async () => {
+    const gate = gatedFetches();
+    renderWithIntl(<MobileOrderView config={config} handle={HANDLE} />);
+    add('ブレンド');
+    fireEvent.click(payLink()!);
+    await gate.fail(0);
+    expect(notice()?.textContent).toBe(TEXT.retryNotice);
+
+    add('水');
+    fireEvent.click(payLink()!);
+    await gate.fail(1);
+    expect(notice()?.textContent).toBe(TEXT.retryNotice);
+
+    add('チーズケーキ');
+    fireEvent.click(payLink()!);
+    await gate.fail(2);
+
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
+    expect(screen.getByText(TEXT.closed)).toBeInTheDocument();
+    expect(notice()).toBeNull();
+    expect(payLink()).toBeNull();
+  });
+
+  it.each(['例外', '429'])('最初の有効な失敗の前は、今までどおり数えない: 注文を変えて無効にした確認が 3 本 %s で返った後でも、有効な失敗の後に 2 本送れる (案内は 2 回出て、3 回目の失敗で止まる)', async (kind) => {
+    const gate = gatedFetches();
+    renderWithIntl(<MobileOrderView config={config} handle={HANDLE} />);
+    add('ブレンド');
+    // 押す → 待つ間に品を足す (待っていた確認は無効) → その確認が失敗で返る、を 3 回。
+    for (const index of [0, 1, 2]) {
+      fireEvent.click(payLink()!);
+      add('水');
+      await failAs(gate, index, kind);
+      expect(notice()).toBeNull();
+      expect(screen.queryByText(TEXT.closed)).toBeNull();
+    }
+
+    for (const index of [3, 4]) {
+      fireEvent.click(payLink()!);
+      await failAs(gate, index, kind);
+      expect(notice()?.textContent).toBe(TEXT.retryNotice);
+      expect(screen.queryByText(TEXT.closed)).toBeNull();
+    }
+    fireEvent.click(payLink()!);
+    await failAs(gate, 5, kind);
+
+    expect(fetchSpy).toHaveBeenCalledTimes(6);
+    expect(assignSpy).not.toHaveBeenCalled();
+    expect(screen.getByText(TEXT.closed)).toBeInTheDocument();
+  });
+
+  /** 再描画が挟まらずに届く 2 回の click (押せないボタンに替わる前の二度押し)。 */
+  const doublePress = async () => {
+    const link = payLink()!;
+    await act(async () => {
+      fireEvent.click(link);
+      fireEvent.click(link);
+      for (let i = 0; i < 5; i++) await Promise.resolve();
+    });
+  };
+  const unavailable = () => refused(503, 'kv_unavailable');
+
+  it('最初の失敗の後に二度押しを繰り返しても、送れる確認は 2 本まで: 最初の 1 本と合わせて確認は 3 本で、片方の失敗で止まった表示になる (もう一度押す所が無い)', async () => {
+    const gate = gatedFetches();
+    renderWithIntl(<MobileOrderView config={config} handle={HANDLE} />);
+    add('ブレンド');
+    fireEvent.click(payLink()!);
+    await gate.respond(0, unavailable());
+    expect(notice()?.textContent).toBe(TEXT.retryNotice);
+
+    // 押し直しの二度押し: 2 本とも送る (これで使い切る)。
+    await doublePress();
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
+
+    await gate.respond(1, unavailable());
+
+    expect(screen.getByText(TEXT.closed)).toBeInTheDocument();
+    expect(notice()).toBeNull();
+    expect(payLink()).toBeNull();
+    expect(payButton()).toBeNull();
+
+    await gate.respond(2, unavailable());
+
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
+    expect(assignSpy).not.toHaveBeenCalled();
+    expect(screen.getByText(TEXT.closed)).toBeInTheDocument();
+    expect(payLink()).toBeNull();
+  });
+
+  it('最初の失敗の後に「押し直す → 待つ間に数量を変える → 古い確認が失敗で返る」を繰り返しても、送れる確認は 2 本まで: 確認は 3 本で、2 回目に数量を変えた所で止まった表示になる', async () => {
+    const gate = gatedFetches();
+    renderWithIntl(<MobileOrderView config={config} handle={HANDLE} />);
+    add('ブレンド');
+    fireEvent.click(payLink()!);
+    await gate.respond(0, unavailable());
+    expect(notice()?.textContent).toBe(TEXT.retryNotice);
+
+    // 水の追加と削除を交互に、4 回まで試す。押す所がなくなったら、そこで終わり。
+    let rounds = 0;
+    for (const round of [0, 1, 2, 3]) {
+      if (!payLink()) break;
+      rounds += 1;
+      fireEvent.click(payLink()!);
+      if (round % 2 === 0) add('水');
+      else removeOne('水');
+      await gate.respond(round + 1, unavailable());
+    }
+
+    expect(rounds).toBe(2);
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
+    expect(assignSpy).not.toHaveBeenCalled();
+    expect(screen.getByText(TEXT.closed)).toBeInTheDocument();
+    expect(notice()).toBeNull();
+    expect(payLink()).toBeNull();
+    expect(payButton()).toBeNull();
+    expect(cartToggle()).toBeNull();
+  });
+
+  it('送れる確認が 1 本残っている間は、待つ間に注文を変えても押し直せる。最後の 1 本を待つ間に注文を変えると、その場で止まった表示になる (押しても送れない「支払いへ進む」を出さない)。無効にした確認が 200 で返っても移らない', async () => {
+    const gate = gatedFetches();
+    renderWithIntl(<MobileOrderView config={config} handle={HANDLE} />);
+    add('ブレンド');
+    fireEvent.click(payLink()!);
+    await gate.fail(0);
+    expect(notice()?.textContent).toBe(TEXT.retryNotice);
+
+    // 1 本目の押し直し (残り 1 本) を待つ間に注文を変える: 今までどおり、押し直せる状態に戻る。
+    fireEvent.click(payLink()!);
+    add('水');
+    expect(payLink()).not.toBeNull();
+    expect(screen.queryByText(TEXT.closed)).toBeNull();
+
+    // 2 本目の押し直し (これで使い切る) を待つ間に注文を変える: 押し直せる状態には戻さない。
+    fireEvent.click(payLink()!);
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
+    expect(payButton()).toBeDisabled();
+    add('チーズケーキ');
+
     expect(screen.getByText(TEXT.closed)).toBeInTheDocument();
     expect(payLink()).toBeNull();
     expect(payButton()).toBeNull();
     expect(cartToggle()).toBeNull();
-    // 通信の失敗でも「受け付けていません」のまま。もう一度押す場所は無く、品を足しても・時間が進んでも戻らない。
+
+    await gate.admit(2);
+
+    expect(assignSpy).not.toHaveBeenCalled();
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
+    expect(screen.getByText(TEXT.closed)).toBeInTheDocument();
+  });
+
+  it('最後の 1 本でも、待つ間に注文を変えず、200 で返れば移る (途中で注文を変えて押し直した分も 1 本に数える)', async () => {
+    const gate = gatedFetches();
+    renderWithIntl(<MobileOrderView config={config} handle={HANDLE} />);
+    add('ブレンド');
+    fireEvent.click(payLink()!);
+    await gate.fail(0);
+    fireEvent.click(payLink()!);
+    add('水');
+    const next = payHref();
+
+    fireEvent.click(payLink()!);
+    await gate.admit(2);
+
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
+    expect(assignSpy.mock.calls).toEqual([[next]]);
+    expect(screen.queryByText(TEXT.closed)).toBeNull();
+  });
+
+  it('「確かめられなかった」失敗がまだ無い間は、今までどおり何本でも送れる: 待つ間に注文を変えて押し直すのを 5 回繰り返した後でも、次の確認が 200 なら移る', async () => {
+    const gate = gatedFetches();
+    renderWithIntl(<MobileOrderView config={config} handle={HANDLE} />);
+    add('ブレンド');
+    for (let round = 0; round < 5; round++) {
+      fireEvent.click(payLink()!);
+      add('水');
+    }
+    const next = payHref();
+
+    fireEvent.click(payLink()!);
+    expect(fetchSpy).toHaveBeenCalledTimes(6);
+    await gate.admit(5);
+
+    expect(assignSpy.mock.calls).toEqual([[next]]);
+    expect(screen.queryByText(TEXT.closed)).toBeNull();
+  });
+
+  // 確認が通ると /checkout へ移る。ここでは移動を受け止めているので、同じ画面が残る (ブラウザの「戻る」で同じ画面が
+  // そのまま戻った場合にあたる)。
+  it('押し直した確認が通って移った後も、送れる本数は戻らない: 失敗 → 200 → 同じ画面で押す → 失敗で、案内でなく止まった表示 (確認は 3 本)', async () => {
+    const gate = gatedFetches();
+    renderWithIntl(<MobileOrderView config={config} handle={HANDLE} />);
+    add('ブレンド');
+    const href = payHref();
+    fireEvent.click(payLink()!);
+    await gate.fail(0);
+    fireEvent.click(payLink()!);
+    await gate.admit(1);
+    expect(assignSpy.mock.calls).toEqual([[href]]);
+
+    fireEvent.click(payLink()!);
+    await gate.fail(2);
+
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
+    expect(screen.getByText(TEXT.closed)).toBeInTheDocument();
+    expect(notice()).toBeNull();
+    expect(payLink()).toBeNull();
+    expect(assignSpy.mock.calls).toEqual([[href]]);
+  });
+
+  it('送れる本数を使い切った後に「支払いへ進む」を押すと、確認を送らずに止まった表示にする: 失敗 → 失敗 → 200 で移った後、同じ画面で押す', async () => {
+    const gate = gatedFetches();
+    renderWithIntl(<MobileOrderView config={config} handle={HANDLE} />);
+    add('ブレンド');
+    const href = payHref();
+    fireEvent.click(payLink()!);
+    await gate.fail(0);
+    fireEvent.click(payLink()!);
+    await gate.fail(1);
+    expect(notice()?.textContent).toBe(TEXT.retryNotice);
+    fireEvent.click(payLink()!);
+    await gate.admit(2);
+    expect(assignSpy.mock.calls).toEqual([[href]]);
+    expect(payLink()).not.toBeNull();
+
+    const pressed = await pressPay();
+
+    // link の移動も止めたまま (受付を確かめずに /checkout へ行かせない)。
+    expect(pressed.defaultPrevented).toBe(true);
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
+    expect(screen.getByText(TEXT.closed)).toBeInTheDocument();
+    expect(payLink()).toBeNull();
+    expect(assignSpy.mock.calls).toEqual([[href]]);
+  });
+
+  it('送れる確認が 1 本のときの二度押しは、1 本だけ送る。2 回目の click は送らずに止まった表示にし、送った 1 本が 200 で返れば移る (今の動き)', async () => {
+    const gate = gatedFetches();
+    renderWithIntl(<MobileOrderView config={config} handle={HANDLE} />);
+    add('ブレンド');
+    const href = payHref();
+    fireEvent.click(payLink()!);
+    await gate.fail(0);
+    fireEvent.click(payLink()!);
+    await gate.fail(1);
+    expect(notice()?.textContent).toBe(TEXT.retryNotice);
+
+    await doublePress();
+
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
+    expect(screen.getByText(TEXT.closed)).toBeInTheDocument();
+    expect(payLink()).toBeNull();
+    expect(assignSpy).not.toHaveBeenCalled();
+
+    await gate.admit(2);
+
+    expect(assignSpy.mock.calls).toEqual([[href]]);
+  });
+
+  // 後から届く応答。送れる本数を数え始める前 (最初の失敗の前) から飛んでいた確認は、数に入っていない。その確認が
+  // 後から失敗で返っても、送れる本数は増えも減りもしない (減らすのは送る時だけ)。
+  it('再描画の前の二度押しで 2 本飛び、1 本目の失敗の後に押し直してから、2 本目が後から失敗で返っても、送れる本数は変わらない: 案内が出て、もう 1 本だけ送れる。その失敗で止まった表示 (確認は 2 + 2 = 4 本)', async () => {
+    const gate = gatedFetches();
+    renderWithIntl(<MobileOrderView config={config} handle={HANDLE} />);
+    add('ブレンド');
+    await doublePress();
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+
+    // 1 本目が失敗: ここから、送れるのは 2 本。
+    await gate.respond(0, unavailable());
+    expect(notice()?.textContent).toBe(TEXT.retryNotice);
+
+    // 押し直す (残り 1 本)。最初から飛んでいた 2 本目が、その後に失敗で返る。
+    fireEvent.click(payLink()!);
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
+    await gate.respond(1, unavailable());
+
+    // 残りは 1 本のまま: 止まった表示ではなく案内で、押し直せる。
+    expect(screen.queryByText(TEXT.closed)).toBeNull();
+    expect(notice()?.textContent).toBe(TEXT.retryNotice);
+
+    // 最後の 1 本。その失敗で止まる。
+    fireEvent.click(payLink()!);
+    expect(fetchSpy).toHaveBeenCalledTimes(4);
+    await gate.respond(3, unavailable());
+
+    expect(screen.getByText(TEXT.closed)).toBeInTheDocument();
+    expect(notice()).toBeNull();
+    expect(payLink()).toBeNull();
+    expect(payButton()).toBeNull();
+
+    // 押し直しの 1 本目 (まだ返っていなかった確認) が失敗で返っても、そのまま。
+    await gate.respond(2, unavailable());
+
+    expect(fetchSpy).toHaveBeenCalledTimes(4);
+    expect(assignSpy).not.toHaveBeenCalled();
+    expect(screen.getByText(TEXT.closed)).toBeInTheDocument();
+    expect(payLink()).toBeNull();
+  });
+
+  it('再描画の前の二度押しの 2 本が、同じ描画の間に 2 本とも失敗で返っても、送れる本数は 2 本のまま (2 本目の失敗で書き換えない・減らさない): 押し直しの 1 本目の失敗では案内、2 本目の失敗で止まった表示 (確認は 2 + 2 = 4 本)', async () => {
+    const rejects: ((error: Error) => void)[] = [];
+    fetchSpy.mockImplementation(
+      () =>
+        new Promise<Response>((_resolve, reject) => {
+          rejects.push(reject);
+        }),
+    );
+    const failTogether = async (...indexes: number[]) => {
+      await act(async () => {
+        for (const index of indexes) rejects[index](new TypeError('Failed to fetch'));
+        for (let i = 0; i < 5; i++) await Promise.resolve();
+      });
+    };
+    renderWithIntl(<MobileOrderView config={config} handle={HANDLE} />);
+    add('ブレンド');
+    await doublePress();
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+
+    await failTogether(0, 1);
+
+    expect(screen.queryByText(TEXT.closed)).toBeNull();
+    expect(notice()?.textContent).toBe(TEXT.retryNotice);
+
+    // 押し直しの 1 本目 (残り 1 本) の失敗: まだ送れるので案内。
+    fireEvent.click(payLink()!);
+    await failTogether(2);
+    expect(screen.queryByText(TEXT.closed)).toBeNull();
+    expect(notice()?.textContent).toBe(TEXT.retryNotice);
+
+    // 押し直しの 2 本目 (これで使い切る) の失敗: 止まった表示。
+    fireEvent.click(payLink()!);
+    await failTogether(3);
+
+    expect(fetchSpy).toHaveBeenCalledTimes(4);
+    expect(assignSpy).not.toHaveBeenCalled();
+    expect(screen.getByText(TEXT.closed)).toBeInTheDocument();
+    expect(notice()).toBeNull();
+    expect(payLink()).toBeNull();
+    expect(payButton()).toBeNull();
+  });
+
+  // お店の側の拒否と、知らない応答。やり直せると決めない。409 は理由によらず止まった表示 (本文は読まない)。
+  const stopResponses: { name: string; response: () => Response }[] = [
+    { name: '400', response: () => refused(400, 'invalid_request') },
+    { name: '404', response: () => refused(404, 'storefront_not_found') },
+    { name: '413', response: () => refused(413, 'payload_too_large') },
+    { name: '409 store_not_accepting', response: () => refused(409, 'store_not_accepting') },
+    { name: '409 storefront_changed', response: () => refused(409, 'storefront_changed') },
+    { name: '409 pickup_slots_unavailable', response: () => refused(409, 'pickup_slots_unavailable') },
+    { name: '409 pickup_slot_unavailable', response: () => refused(409, 'pickup_slot_unavailable') },
+    { name: '409 知らない理由', response: () => refused(409, 'something_new') },
+    { name: '409 理由なし', response: () => new Response('{}', { status: 409 }) },
+    { name: '409 本文が JSON でない', response: () => new Response('<html>', { status: 409 }) },
+    { name: '409 本文が空', response: () => new Response(null, { status: 409 }) },
+  ];
+
+  it.each(stopResponses)('応答が $name なら、今までどおり止まった表示: 移らず、支払い欄が消え、押し直しの案内は出ない。品を足しても・時間が進んでも戻らない。開き直すと戻る', async ({ response }) => {
+    fetchSpy.mockImplementation(async () => response());
+    const view = renderWithIntl(<MobileOrderView config={config} handle={HANDLE} />);
+    add('ブレンド');
+
+    await pressPay();
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(assignSpy).not.toHaveBeenCalled();
+    expect(screen.getByText(TEXT.closed)).toBeInTheDocument();
+    expect(notice()).toBeNull();
+    expect(payLink()).toBeNull();
+    expect(payButton()).toBeNull();
+    expect(cartToggle()).toBeNull();
     add('水');
     act(() => {
       vi.advanceTimersByTime(60_000);
@@ -1045,20 +1575,166 @@ describe('MobileOrderView — 「支払いへ進む」: 受付の確認を通る
     expect(payLink()).not.toBeNull();
   });
 
-  it.each([429, 503])('応答が %i でも 409 と同じ扱い: 移らず、受付停止の案内が出て支払い欄が消える (今の動き)', async (status) => {
-    fetchSpy.mockImplementation(
-      async () => new Response(JSON.stringify({ ok: false, error: 'x' }), { status }),
-    );
-    renderWithIntl(<MobileOrderView config={config} handle={HANDLE} />);
+  // 受け取りの枠 (事前注文・準備 30 分)。12:00:00 に開くと、候補は 12:30 から。
+  const slotConfig: MobileOrderConfig = { ...config, mode: 'preorder', minLeadMinutes: 30 };
+  const pickupSelect = () => screen.getByLabelText(TEXT.pickup) as HTMLSelectElement;
+  const pickupOption = (name: string) =>
+    within(pickupSelect()).queryByRole<HTMLOptionElement>('option', { name });
+  const choosePickup = (name: string) =>
+    fireEvent.change(pickupSelect(), { target: { value: pickupOption(name)!.value } });
+
+  // 枠を選んだ確認でも同じ。押す前に時計だけ 1 ms 進めた場合 (今 + 準備 30 分の最短の枠が 12:45 になり、選んだ 12:30 が
+  // 端末の計算でも候補から外れる。画面の候補は 30 秒の取り直しまで古いまま) も、枠を外して続けたりはしない。
+  it.each(
+    stopResponses.flatMap((r) => [
+      { ...r, clockAhead: 0 },
+      { ...r, clockAhead: 1 },
+    ]),
+  )('12:30 の枠を選んだ確認への応答が $name なら (押す前に時計 +$clockAhead ms)、止まった表示: 枠は選んだまま・押し直しの案内は出ない', async ({ response, clockAhead }) => {
+    fetchSpy.mockImplementation(async () => response());
+    renderWithIntl(<MobileOrderView config={slotConfig} handle={HANDLE} />);
     add('ブレンド');
+    choosePickup('12:30');
+    vi.setSystemTime(TOKYO_NOON + clockAhead);
 
     await pressPay();
 
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(postedBodies()).toEqual([
+      { handle: HANDLE, merchant: RECEIVER, mode: 'preorder', pickupAt: tokyo(12, 30) },
+    ]);
     expect(assignSpy).not.toHaveBeenCalled();
     expect(screen.getByText(TEXT.closed)).toBeInTheDocument();
+    expect(notice()).toBeNull();
     expect(payLink()).toBeNull();
     expect(cartToggle()).toBeNull();
+  });
+
+  it.each(['枠なし', '枠あり'])('409 は status だけで止まる (%s): 本文を読まないので、本文が届かなくても待たない', async (kind) => {
+    const json = vi.fn(() => new Promise<unknown>(() => {}));
+    const text = vi.fn(() => new Promise<string>(() => {}));
+    const gate = gatedFetches();
+    renderWithIntl(<MobileOrderView config={slotConfig} handle={HANDLE} />);
+    add('ブレンド');
+    if (kind === '枠あり') choosePickup('12:30');
+    fireEvent.click(payLink()!);
+
+    await gate.respond(0, { ok: false, status: 409, json, text } as unknown as Response);
+
+    expect(screen.getByText(TEXT.closed)).toBeInTheDocument();
+    expect(payButton()).toBeNull();
+    expect(notice()).toBeNull();
+    expect(json).not.toHaveBeenCalled();
+    expect(text).not.toHaveBeenCalled();
+  });
+
+  it('案内「お支払いへ進めませんでした」は、品を足しても・受け取り時間を選んでも、次に押すまで残る。押した時に消える', async () => {
+    const gate = gatedFetches();
+    renderWithIntl(<MobileOrderView config={slotConfig} handle={HANDLE} />);
+    add('ブレンド');
+    fireEvent.click(payLink()!);
+    await gate.fail(0);
+    expect(notice()?.textContent).toBe(TEXT.retryNotice);
+
+    add('水');
+    expect(notice()?.textContent).toBe(TEXT.retryNotice);
+    choosePickup('12:45');
+    expect(notice()?.textContent).toBe(TEXT.retryNotice);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+    const next = payHref();
+    fireEvent.click(payLink()!);
+
+    expect(notice()).toBeNull();
+    expect(payButton()).toBeDisabled();
+    await gate.admit(1);
+    expect(postedBodies()[1]).toEqual({
+      handle: HANDLE,
+      merchant: RECEIVER,
+      mode: 'preorder',
+      pickupAt: tokyo(12, 45),
+    });
+    expect(assignSpy.mock.calls).toEqual([[next]]);
+  });
+
+  // 押せないボタンに替わる前に届いた 2 回目の click は止めていない (上の「POST も移動も 2 回」)。1 本目の例外で押し直せる
+  // 状態に戻った後、まだ返っていない 2 本目の 200 で古い URL へ移らないのは、「注文を変えたら待っている確認は無効」が効くから。
+  it('再描画の前に click が 2 回届き、1 本目が例外で案内が出た後に受け取り時間を変えると、2 本目が 200 で返っても、変える前の URL へ移らない。押し直すと変えた後の URL へ移る', async () => {
+    const gate = gatedFetches();
+    renderWithIntl(<MobileOrderView config={slotConfig} handle={HANDLE} />);
+    add('ブレンド');
+    const before = payHref();
+    const link = payLink()!;
+    await act(async () => {
+      fireEvent.click(link);
+      fireEvent.click(link);
+      for (let i = 0; i < 5; i++) await Promise.resolve();
+    });
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+
+    await gate.fail(0);
+
+    // 1 本目の例外で待ちが解け、案内が出ている (2 本目はまだ返っていない)。
+    expect(notice()?.textContent).toBe(TEXT.retryNotice);
+    expect(payHref()).toBe(before);
+
+    choosePickup('12:45');
+    const next = payHref();
+    expect(readCheckoutUrl(next).query).toEqual({
+      ...readCheckoutUrl(before).query,
+      pickup_at: String(tokyo(12, 45)),
+    });
+
+    await gate.admit(1);
+
+    expect(assignSpy).not.toHaveBeenCalled();
+    expect(screen.queryByText(TEXT.closed)).toBeNull();
+    expect(payHref()).toBe(next);
+
+    fireEvent.click(payLink()!);
+    await gate.admit(2);
+
+    expect(postedBodies()).toEqual([
+      { handle: HANDLE, merchant: RECEIVER, mode: 'preorder' },
+      { handle: HANDLE, merchant: RECEIVER, mode: 'preorder' },
+      { handle: HANDLE, merchant: RECEIVER, mode: 'preorder', pickupAt: tokyo(12, 45) },
+    ]);
+    expect(assignSpy.mock.calls).toEqual([[next]]);
+  });
+
+  it('再描画の前に click が 2 回届き、1 本目が例外・2 本目が 200 で、その間に注文を変えていなければ、押したときの URL へ移る (2 本とも同じ中身の確認・今の動き)', async () => {
+    const gate = gatedFetches();
+    renderWithIntl(<MobileOrderView config={config} handle={HANDLE} />);
+    add('ブレンド');
+    const href = payHref();
+    const link = payLink()!;
+    await act(async () => {
+      fireEvent.click(link);
+      fireEvent.click(link);
+      for (let i = 0; i < 5; i++) await Promise.resolve();
+    });
+
+    await gate.fail(0);
+    expect(notice()?.textContent).toBe(TEXT.retryNotice);
+    expect(assignSpy).not.toHaveBeenCalled();
+
+    await gate.admit(1);
+
+    expect(assignSpy.mock.calls).toEqual([[href]]);
+  });
+
+  // 案内の文は、ボタンの名前を引いている。ボタンの字を変えたら、案内の文も一緒に直す。
+  it.each([
+    ['ja', jaMessages.MobileOrder],
+    ['en', enMessages.MobileOrder],
+  ] as const)('案内の文 (%s) は、「支払いへ進む」のボタンを、画面と同じ字で引いている', (_locale, m) => {
+    expect(m.admissionRetryNotice).toContain(m.payButton);
+  });
+
+  it('案内の文は承認された字のまま (ja / en)', () => {
+    expect(jaMessages.MobileOrder.admissionRetryNotice).toBe(TEXT.retryNotice);
+    expect(enMessages.MobileOrder.admissionRetryNotice).toBe(
+      "Couldn't continue to payment. Please wait a moment, then tap “Proceed to pay” again.",
+    );
   });
 
   it('応答の本文は読まない: status が 200 なら、本文が ok: false でも移る (今の動き・/checkout の側は本文も見る)', async () => {
