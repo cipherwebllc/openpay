@@ -478,6 +478,9 @@ const CLAIM_MISMATCHES: [string, Partial<StoreUsdcAuthorizationClaim>][] = [
   ['payer', { payer: OTHER_ADDRESS }],
 ];
 const BELOW_LIMIT = String(BigInt(quoted.authorizationValidBeforeMax) - 80n);
+// kvEval の 1 回の呼び出しに渡した引数のうち、intent の JSON として読めるもの。ARGV の何番目かは数えない
+// (位置は Lua との契約で、本物の Lua を通す test と storeWireCharacterization が見る)。
+const intentArgs = (call: unknown[]) => (call[2] as string[]).flatMap((arg) => parseStoreUsdcIntent(arg) ?? []);
 
 describe('PR-20 G15: parser rejects a stored claim that no longer matches the quote', () => {
   it.each(CLAIM_MISMATCHES)('rejects a claimed intent whose stored claim %s differs, even when authorizationHash matches the claim', (_label, patch) => {
@@ -537,10 +540,11 @@ describe('PR-20 G13: create stops when the parent rail intent cannot be associat
 
 describe('PR-20 G5・G6: claimSigned admission', () => {
   // 今の動きの固定で、仕様の裁定ではない。route (lib/x402/hostedUsdcPaidRoute.ts の `if (found.state === 'quoted')` の中)
-  // は quoted を読んだときだけ claimSigned を呼び、ほかの state を読んだ要求は手前で応答が決まる (settling /
-  // indeterminate は 202・settled は確定済みの応答・failed は 409 purchase_intent_failed)。だから同じ hash でここへ
-  // 来るのは、route が quoted を読んだ後に並行の要求が先に進めた競り合いのときだけ (そのとき route は 409
-  // purchase_intent_conflict を返す)。
+  // は quoted を読んだときだけ claimSigned を呼ぶ。ここの 4 つの state を読んだ要求は、claimSigned の手前で応答が決まる:
+  // settling / indeterminate / settled は期限の判定を飛ばし、保存済みの署名と完全に一致する再送なら 202 (settled は
+  // 確定済みの応答)。failed は quoted と同じく exactClaim の期限の判定を先に通り、期限切れなら 409
+  // purchase_intent_expired、通った場合は 409 purchase_intent_failed。だから同じ hash でここへ来るのは、route が quoted を
+  // 読んだ後に並行の要求が先に進めた競り合いのときだけ (そのとき route は 409 purchase_intent_conflict を返す)。
   it.each([active, indeterminate, settled, failed])('reports conflict for a $state intent even when the authorization hash is the same', async (intent) => {
     reads(key, intent);
     expect(signInput().authorizationHash).toBe(intent.authorizationHash);
@@ -564,9 +568,9 @@ describe('PR-20 G5・G6: claimSigned admission', () => {
       reads(key, quoted, latest);
     }
     h.kvEval.mockResolvedValue({ ok: true, value: -1 });
+    // 読み直したことは、読み直した値 (latest) で結果が変わることで見る (GET の回数は数えない)。
     expect(await claimSignedStoreUsdcIntent(signInput())).toMatchObject(expected);
     expect(h.kvEval).toHaveBeenCalledTimes(1);
-    expect(h.kvGet).toHaveBeenCalledTimes(2);
   });
 
   it.each(CLAIM_MISMATCHES)('refuses a well-formed claim whose %s differs from the quote, without a CAS', async (_label, patch) => {
@@ -574,7 +578,7 @@ describe('PR-20 G5・G6: claimSigned admission', () => {
     const claim = { ...active.claim, ...patch };
     expect(await claimSignedStoreUsdcIntent({ intentSalt: SALT, claim, authorizationHash: storeUsdcAuthorizationHash(claim), now: active.signedAt })).toEqual(CONFLICT);
     // 形は正しいので intent を読むところまでは進む (読む前の拒否は下の件)。
-    expect(h.kvGet).toHaveBeenCalledTimes(1);
+    expect(h.kvGet).toHaveBeenCalled();
     expect(h.kvEval).not.toHaveBeenCalled();
   });
 
@@ -585,7 +589,8 @@ describe('PR-20 G5・G6: claimSigned admission', () => {
     const authorizationHash = storeUsdcAuthorizationHash(claim);
     expect(await claimSignedStoreUsdcIntent({ intentSalt: SALT, claim, authorizationHash, now: active.signedAt }))
       .toMatchObject({ ok: true, kind: 'claimed', intent: { state: 'signed', claim, authorizationHash } });
-    expect(JSON.parse(h.kvEval.mock.calls[0]![2][4])).toMatchObject({ state: 'signed', claim, authorizationHash, signedAt: active.signedAt });
+    expect(intentArgs(h.kvEval.mock.calls[0]!))
+      .toContainEqual(expect.objectContaining({ state: 'signed', claim, authorizationHash, signedAt: active.signedAt }));
   });
 
   it.each([
@@ -636,8 +641,8 @@ describe('PR-20 G7・G12: claimSettlement admission and the lease', () => {
     expect(await claimStoreUsdcSettlement({ intentSalt: SALT, now })).toMatchObject({
       ok: true, kind: 'claimed', intent: { state: 'settling', settlementStartedAt: now, leaseUntil: now + 60_000, nextReconcileAt: now + 60_000 },
     });
-    // CAS の ARGV[9] (0 始まりで 8) = pending の score。
-    expect(h.kvEval.mock.calls[0]![2][8]).toBe(String(now + 60_000));
+    // lease の終わりを script にも渡す (pending の score になることは、本物の Lua を通す lua-machine の件が見る)。
+    expect(h.kvEval.mock.calls[0]![2]).toContain(String(now + 60_000));
   });
 });
 
@@ -682,11 +687,10 @@ describe('PR-20 G8: nonce lookup', () => {
 });
 
 describe('PR-20 G1〜G4: finalize admission and finalizer reply handling', () => {
-  it.each([quoted, signed, failed])('refuses a $state intent before any chain or further KV call', async (intent) => {
+  it.each([quoted, signed, failed])('refuses a $state intent before any chain call or KV write', async (intent) => {
     reads(key, intent);
     expect(await finalize()).toEqual(CONFLICT);
     expect(h.verify).not.toHaveBeenCalled();
-    expect(h.kvGet).toHaveBeenCalledTimes(1);
     expect(h.kvEval).not.toHaveBeenCalled();
     expect(h.release).not.toHaveBeenCalled();
   });
@@ -699,7 +703,6 @@ describe('PR-20 G1〜G4: finalize admission and finalizer reply handling', () =>
     reads(key, intent);
     expect(await finalize({ txHash: OTHER_TX })).toEqual(CONFLICT);
     expect(h.verify).not.toHaveBeenCalled();
-    expect(h.kvGet).toHaveBeenCalledTimes(1);
     expect(h.kvEval).not.toHaveBeenCalled();
   });
 
@@ -715,11 +718,12 @@ describe('PR-20 G1〜G4: finalize admission and finalizer reply handling', () =>
     expect(h.release).not.toHaveBeenCalled();
   });
 
-  it('re-reads and retries a lost finalizer CAS four times, then reports conflict', async () => {
+  // やり直しの上限は finalizer を呼んだ回数で見る (最初の 1 回 + やり直し 4 回)。その間のオンチェーンの照合や
+  // GET の回数は上限の契約でないので数えない。
+  it('retries a lost finalizer CAS four times, then reports conflict', async () => {
     h.kvEval.mockResolvedValue({ ok: true, value: -1 });
     expect(await finalize()).toEqual(CONFLICT);
     expect(h.kvEval).toHaveBeenCalledTimes(5);
-    expect(h.verify).toHaveBeenCalledTimes(5);
     expect(h.release).not.toHaveBeenCalled();
   });
 
@@ -729,10 +733,12 @@ describe('PR-20 G1〜G4: finalize admission and finalizer reply handling', () =>
     h.kvEval.mockResolvedValueOnce({ ok: true, value: -1 }).mockResolvedValue({ ok: true, value: 1 });
     expect(await finalize()).toMatchObject({ ok: true, kind: 'finalized', intent: { state: 'settled', txHash: TX, reconcileFromBlock: '95' } });
     expect(h.kvEval).toHaveBeenCalledTimes(2);
-    // ARGV[14] (0 始まりで 13) = CAS の基準にする「読んだ全文」・ARGV[6] (5) = 確定後の全文。2 回目は読み直した値から作る。
-    expect(h.kvEval.mock.calls[0]![2][13]).toBe(JSON.stringify(active));
-    expect(h.kvEval.mock.calls[1]![2][13]).toBe(JSON.stringify(rescheduled));
-    expect(JSON.parse(h.kvEval.mock.calls[1]![2][5])).toMatchObject({ state: 'settled', txHash: TX, reconcileFromBlock: '95' });
+    // 1 回目は最初に読んだ全文を、2 回目は読み直した全文を finalizer に渡し (CAS の基準)、確定後の値も読み直した値から作る。
+    const [first, second] = h.kvEval.mock.calls;
+    expect(first![2]).toContain(JSON.stringify(active));
+    expect(second![2]).toContain(JSON.stringify(rescheduled));
+    expect(second![2]).not.toContain(JSON.stringify(active));
+    expect(intentArgs(second!)).toContainEqual(expect.objectContaining({ state: 'settled', txHash: TX, reconcileFromBlock: '95' }));
     expect(h.release).toHaveBeenCalledTimes(1);
   });
 
@@ -752,17 +758,16 @@ describe('PR-20 G1〜G4: finalize admission and finalizer reply handling', () =>
     reads(purchaseKey, scenario === 'purchase record' ? { ...fixture.purchase, purchasedAt: earlier } : fixture.purchase);
     h.reads.set(globalKey, [scenario === 'global claim' ? `r:store:0x${'77'.repeat(32)}` : `r:store:${SALT}`]);
     expect(await finalize()).toEqual(CONFLICT);
-    expect(h.verify).toHaveBeenCalledTimes(1);
+    expect(h.verify).toHaveBeenCalled();
     expect(h.kvEval).not.toHaveBeenCalled();
     expect(h.release).not.toHaveBeenCalled();
   });
 });
 
 describe('PR-20 G12・G14・G17: reconciler entry conditions', () => {
-  it.each([quoted, settled, failed])('reconciling a $state intent reads it once and writes nothing', async (intent) => {
+  it.each([quoted, settled, failed])('reconciling a $state intent writes nothing', async (intent) => {
     reads(key, intent);
     await reconcileStoreUsdcIntent(SALT, { now: NOW });
-    expect(h.kvGet).toHaveBeenCalledTimes(1);
     expect(h.kvEval).not.toHaveBeenCalled();
     expect(h.release).not.toHaveBeenCalled();
   });
@@ -775,10 +780,11 @@ describe('PR-20 G12・G14・G17: reconciler entry conditions', () => {
     expect(await reconcileStoreUsdcIntent(SALT, { now })).toEqual({ ok: true, state: 'pending' });
     expect(h.expired).not.toHaveBeenCalled();
     expect(h.release).not.toHaveBeenCalled();
-    expect(h.kvEval).toHaveBeenCalledTimes(1);
-    // 再試行の保存だけ (state は settling のまま・pending から外さない = ARGV[6] が '0')。
-    expect(JSON.parse(h.kvEval.mock.calls[0]![2][4])).toMatchObject({ state: 'settling', nextReconcileAt: now + 30_000 });
-    expect(h.kvEval.mock.calls[0]![2][5]).toBe('0');
+    // 書くのは再試行の時刻の保存だけ: script に渡す intent はどれも settling のまま (failed にしない) で、次の照合は 30 秒後。
+    // pending に残ることは、本物の Lua を通す reconcile-lua の「30 秒後にもう一度拾う」件が見る。
+    const written = h.kvEval.mock.calls.flatMap(intentArgs);
+    expect(written).toContainEqual(expect.objectContaining({ state: 'settling', nextReconcileAt: now + 30_000 }));
+    expect(written.map((intent) => intent.state)).not.toContain('failed_prebroadcast');
   });
 
   // 走査の件数は引数で決まり、省略時は定数。値 (今は 50) そのものは運用で変えるので実値では縛らない。
@@ -787,9 +793,14 @@ describe('PR-20 G12・G14・G17: reconciler entry conditions', () => {
     const none = { checked: 0, settled: 0, failed: 0, pending: 0, storageErrors: 0, deferred: 0 };
     expect(await reconcilePendingStoreUsdcPurchases({ now: NOW })).toEqual(none);
     expect(await reconcilePendingStoreUsdcPurchases({ now: NOW, limit: 7 })).toEqual(none);
-    expect(h.kvEval.mock.calls.map(([, keys, args]) => [keys, args])).toEqual([
-      [[storeUsdcPendingKey()], [String(NOW), String(STORE_USDC_RECONCILE_BATCH_SIZE)]],
-      [[storeUsdcPendingKey()], [String(NOW), '7']],
-    ]);
+    // どちらも pending の index を、時刻 now までを上限に読む。件数は 1 回目が定数・2 回目が引数 (ARGV の位置は数えない)。
+    const [byDefault, byLimit] = h.kvEval.mock.calls;
+    for (const call of [byDefault!, byLimit!]) {
+      expect(call[1]).toEqual([storeUsdcPendingKey()]);
+      expect(call[2]).toContain(String(NOW));
+    }
+    expect(byDefault![2]).toContain(String(STORE_USDC_RECONCILE_BATCH_SIZE));
+    expect(byLimit![2]).toContain('7');
+    expect(h.kvEval).toHaveBeenCalledTimes(2);
   });
 });

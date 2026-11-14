@@ -1124,16 +1124,19 @@ describe('USDC pending quarantine with real Lua', () => {
 // 本物の Lua で通す。今の動き (main) をそのまま書いた characterization で、「あるべき姿」の裁定ではない。
 describe('PR-20: USDC races and pending schedule with real Lua', () => {
   const NONE = { checked: 0, settled: 0, failed: 0, pending: 0, storageErrors: 0, deferred: 0 };
-  const CAS_MARK = 'if current ~= ARGV[4]';
-  const FINALIZE_MARK = "redis.call('EXISTS', KEYS[7])";
+  // 差し込む相手の script は、Lua の本文でなく渡す key で見分ける (kvEval の mock は h.reply の前に呼び出しを h.calls へ積む)。
+  // finalizer = 買い手の ownership の key を受け取る script。署名の CAS = pending の index を受け取る script
+  // (G5 の件で走るのは見積もりの作成と署名の CAS だけで、見積もりの作成は pending の index を受け取らない)。
+  const ownKey = `store:own:${PAYER.toLowerCase()}:${ID}`;
+  const currentCallTakes = (keyName: string) => h.calls.at(-1)!.keys.includes(keyName);
 
   // G3: finalize の read と finalizer の script の間に intent が書き換わると script は -1 を返し、finalize は読み直して
   // もう一度確定する (reconcile の再試行の時刻の保存と重なっても、確定を取りこぼさない)。
   it('finalize re-reads and succeeds when the intent changes between its read and the finalizer script', async () => {
     const intent = await active(TX);
     const replies: unknown[] = [];
-    h.reply = async (script, run) => {
-      if (!script.includes(FINALIZE_MARK)) return run();
+    h.reply = async (_script, run) => {
+      if (!currentCallTakes(ownKey)) return run();
       // 1 回目だけ、read の後・script の前に reconcile が再試行の時刻を書いた形にする。
       if (replies.length === 0) patchIntent({ nextReconcileAt: CHECKED_AT + 1 });
       const value = await run();
@@ -1158,9 +1161,9 @@ describe('PR-20: USDC races and pending schedule with real Lua', () => {
     };
     const rival = which === 'same' ? mine : { ...mine, signatureFingerprint: '6'.repeat(64) };
     let rivalResult: unknown = null;
-    h.reply = async (script, run) => {
+    h.reply = async (_script, run) => {
       // 自分の read の後・CAS の前に、並行の要求の署名を先に通す (再入した呼び出しはそのまま本物の Lua へ)。
-      if (rivalResult === null && script.includes(CAS_MARK)) {
+      if (rivalResult === null && currentCallTakes(storeUsdcPendingKey())) {
         rivalResult = 'running';
         rivalResult = await claimSignedStoreUsdcIntent({
           intentSalt: SALT, claim: rival, authorizationHash: storeUsdcAuthorizationHash(rival), now: NOW + 500,
@@ -1177,7 +1180,8 @@ describe('PR-20: USDC races and pending schedule with real Lua', () => {
       : { ok: false, reason: 'conflict' });
     expect(rawIntent()).toMatchObject({ state: 'signed', signedAt: NOW + 500, authorizationHash: storeUsdcAuthorizationHash(rival), claim: rival });
     expect(h.store!.zsets.get(storeUsdcPendingKey())?.get(SALT)).toBe(NOW + 500);
-    expect(h.calls.filter(({ script }) => script.includes(CAS_MARK))).toHaveLength(2);
+    // CAS を試みたのは並行の要求と自分の 1 回ずつ (負けた側は読み直すだけで、もう一度は書きに行かない)。
+    expect(h.calls.filter(({ keys }) => keys.includes(storeUsdcPendingKey()))).toHaveLength(2);
   });
 
   // G10: pending の score が、cron (batch) が拾う時刻を決める。署名の直後は拾う・確定も失敗もしなかった回の後は
