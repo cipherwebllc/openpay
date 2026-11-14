@@ -28,7 +28,8 @@
 //                     押した後に mutate へ渡る値。
 //   表 2 ボタンの表   経路の類 × ウォレットの状態ごとに、ボタンの文言と押せるか。
 //   表 3 経路が変わる・変わらない場面  ウォレットが別の chain・復元した通常決済の試み・「通常決済に切替」・描いた後に入力が
-//                     変わる (params の chain・ウォレットの chain・復元した試み)・送った後の固定・復元した relay の注文。
+//                     変わる (params の chain・ウォレットの chain・復元した試み・Tip が復元した通常決済からガスレスの params へ)・
+//                     送った後の固定・復元した relay の注文。
 //
 // 期待の書き方: 画面の文は i18n の key で書き (文言を直す PR で動かないように)、テストの中で messages/ja.json から引いて比べる。
 // 額は字で書く。
@@ -245,7 +246,33 @@ type Input = {
   wallet?: Wallet;
   balance?: string; // 残高 (token の単位)。書かなければ十分にある (wallet = 'insufficient' なら最小の単位で 1)
   hasStandardAttempt?: true; // useStandardPayment が「復元した通常決済の試みがある」(hasAttempt) を返す
+  // useStandardPayment が、storage から復元した通常決済 (店への送金の確認中) を返す (下の RESTORED_STANDARD_TX)。
+  // Tip は standard の engine が出ている間だけ、これを親の state に写す。
+  restoredStandardTx?: true;
 };
+
+// storage から復元した通常決済。本物の hook が、保存された印 (stage = merchant) を読んだ直後に返す形 (hooks/useStandardPayment.ts の
+// restoreStoredIntent): 店への送金の確認中 (merchant-unknown)・印あり・復元した試み・保存された hash と、印から戻した params。
+const RESTORED_TX_HASH = `0x${'ab'.repeat(32)}` as const;
+const RESTORED_STANDARD_TX = {
+  phase: 'merchant-unknown',
+  isUnknown: true,
+  isMerchantUnknown: true,
+  hasActiveIntent: true,
+  hasAttempt: true,
+  restoredFromStorage: true,
+  restoredAttempt: true,
+  merchantTxHash: RESTORED_TX_HASH,
+  lastSubmittedParams: {
+    tokenAddress: USDC_ARC.address,
+    merchant: MERCHANT,
+    merchantAmount: U('10'),
+    feeReceiver: FEE_RECEIVER,
+    feeAmount: 0n,
+    chainId: ARC,
+  },
+  lastSubmittedFrom: CUSTOMER,
+} satisfies Partial<ReturnType<typeof useStandardPayment>>;
 
 const chainSlugOf = (input: Input) => input.chain ?? (input.token === 'jpyc' ? 'polygon' : 'base');
 const deploymentOf = (input: Input): TokenDeployment => deploymentForSlug(input.token, chainSlugOf(input));
@@ -389,6 +416,7 @@ function arrange(
     lastSubmittedFrom: undefined,
     restoredFromStorage: false,
     restoredAttempt: false,
+    ...(input.restoredStandardTx ? RESTORED_STANDARD_TX : {}),
   } as Partial<ReturnType<typeof useStandardPayment>>);
   mockHook(useJpycEip3009Payment, {
     mutate: relayMutate,
@@ -2159,6 +2187,93 @@ describe('表 3: 経路が変わる・変わらない場面', () => {
       await changeInput(view, form, input);
       check(form, input, expected, view);
     });
+
+    // Tip だけ: 通常決済 (Arc) の画面で、standard の engine が「storage から復元した通常決済」を親の state に写した後に、
+    // 同じ TipForm のまま params がガスレスの組に変わる (/tip/[address] の URL の token・chain だけが変わる、など)。
+    // engine は外れるが、親の state には復元した試みの最後の値が残る。storage の中身は変わらないので、useStandardPayment は
+    // 呼ばれれば同じ復元を返す。それでも Tip の経路は params の mode だけで決まり、ガスレスに戻る (冒頭の (b))。
+    // Pay と Checkout は逆 (復元した試みがあれば通常決済・上の行) なので、同じ条件を Tip に持ち込むと、ここが落ちる。
+    // 上の「描いた後に見つかる」の Tip の行は、ガスレスの Tip が engine を出さず、復元が親の state に届かないので、これを見分けない。
+    const ARC_RESTORED: Input = { token: 'usdc', chain: 'arc', mode: 'standard', relayOn: 'all', restoredStandardTx: true };
+    const backToGasless: Array<{ name: string; next: Input; expected: Omit<RouteExpect, 'health' | 'askedOn' | 'askedAbout'> }> = [
+      {
+        name: 'USDC の Base → Pimlico',
+        next: { token: 'usdc', relayOn: 'all', restoredStandardTx: true },
+        expected: {
+          hooks: SPONSORSHIP,
+          rows: USDC_SPONSORSHIP_ROWS.tip,
+          button: [m('btnSend', { amount: '10.1 USDC' }), true],
+          mutate: [
+            'gasless',
+            gaslessPayload(USDC_BASE, {
+              merchantAmount: U('10'),
+              feeAmount: 0n,
+              gasReimbursement: U('0.1'),
+              saleAmount: U('10'),
+              networkFeeEquivalent: U('0.1'),
+              circlePermitAmount: undefined,
+            }),
+          ],
+        },
+      },
+      {
+        name: 'JPYC の Polygon → relay の free',
+        next: { token: 'jpyc', amount: '10', relayOn: 'all', restoredStandardTx: true },
+        expected: {
+          hooks: OFF,
+          rows: [
+            ['creatorRow', '10 JPYC'],
+            ['gasRowFree', m('gasRowRelayFree')],
+            ['customerRow', '10 JPYC'],
+          ],
+          button: [m('btnSend', { amount: '10 JPYC' }), true],
+          mutate: ['relay', { merchant: MERCHANT, value: J('10'), gasMode: 'customer' }],
+        },
+      },
+    ];
+    it.each(backToGasless.map((row): Titled<typeof row> => [row.name, row]))(
+      'tip: 復元した通常決済 (Arc) を親に写した後に、params が %s に変わる → 経路はガスレスに戻る',
+      async (_title, { next, expected }) => {
+        const view = await mount('tip', ARC_RESTORED);
+        // 遅れて読み込む部品が 2 段ある (engine が復元を親に写す → 親が「以前の送信の確認」の欄を出す。欄も next/dynamic) ので、
+        // もう 1 回待つ (この行が file の中で最初に欄を読み込む場合にだけ効く)。
+        await settle();
+        // 変える前: 通常決済。engine が出て、復元した試みが親の state に届いている (「以前の送信の確認」の欄に、その hash が出る)。
+        // ボタンの「送信中…」は、engine が届く前 (isRestoring) も同じなので、届いたことは hash で確かめる。
+        check(
+          'tip',
+          ARC_RESTORED,
+          {
+            hooks: OFF,
+            health: 'never',
+            engine: true,
+            rows: [
+              ['creatorRow', '10 USDC'],
+              ['gasRow', m('gasRowUsdcArc')],
+              ['customerRow', '10 USDC'],
+            ],
+            button: ['btnSending', false],
+          },
+          view,
+        );
+        expect(screen.queryByText(RESTORED_TX_HASH, { exact: false })).not.toBeNull();
+
+        await changeInput(view, 'tip', next);
+        const chains = [ARC, deploymentOf(next).chainId];
+        check(
+          'tip',
+          next,
+          {
+            ...expected,
+            health: 'never',
+            askedOn: { jpyc: chains, forwarder: chains, usdc: chains },
+            askedAbout: [USDC_ARC, deploymentOf(next)],
+          },
+          view,
+        );
+        expect(screen.queryByText(RESTORED_TX_HASH, { exact: false })).toBeNull();
+      },
+    );
   });
 
   describe('(d) 経路の固定 (Pay と Checkout は送った後、試みの間は経路を変えない・Tip は固定しない)', () => {
