@@ -4,7 +4,7 @@
 // single=ラジオ (既定で先頭を選択) / multi=チェックボックス。required グループ未選択は確定不可。
 // 確定すると選択 choice 配列 + 識別用 selections を親へ返す (親が実効単価 + 名前サフィックスを組む)。
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { useModalFocus } from '@/hooks/useModalFocus';
 import {
@@ -32,6 +32,7 @@ export function OptionSelectModal({
   options,
   symbol,
   canAdd,
+  addBlockedNotice,
   onConfirm,
   onClose,
 }: {
@@ -42,6 +43,8 @@ export function OptionSelectModal({
   symbol: string;
   /** いまの選択を足せるか (任意・渡さなければいつでも足せる)。false の間は「カートに追加」を押せない。 */
   canAdd?: (choices: OptionChoice[]) => boolean;
+  /** canAdd が false で押せない間、ボタンの上に出す理由の文 (任意・文は親が持つ・渡さなければ何も出さない)。 */
+  addBlockedNotice?: string;
   onConfirm: (
     choices: OptionChoice[],
     selections: { groupId: string; choiceId: string }[],
@@ -64,6 +67,10 @@ export function OptionSelectModal({
   const priceText = resolved.ok ? effectiveUnitPrice(basePrice, resolved.choices) : basePrice;
   // 必須のグループが未選択の間は親に聞かない (押すと「選んでください」を出す今の動きのまま)。
   const addBlocked = resolved.ok && !!canAdd && !canAdd(resolved.choices);
+  // 押せない間に出す理由の文 (親が渡したときだけ)。出た瞬間に読み上げられるよう role="status" にし、押せないボタンとは
+  // aria-describedby で結ぶ。文が無い画面 (モバイル注文) では、id も属性も DOM に出さない。
+  const blockedNotice = addBlocked ? addBlockedNotice : undefined;
+  const blockedNoticeId = useId();
 
   // aria-modal を名乗るので実挙動も揃える (D1): 開いたら dialog (名前 = 商品名) へ focus・Tab は中だけ・
   // Escape で閉じる・閉じたら押した商品ボタンへ戻す。
@@ -151,6 +158,11 @@ export function OptionSelectModal({
             </fieldset>
           ))}
         </div>
+        {blockedNotice && (
+          <p id={blockedNoticeId} role="status" className="-mb-2 mt-4 text-xs text-amber-700">
+            {blockedNotice}
+          </p>
+        )}
         <div className="mt-4 flex items-center justify-between gap-2">
           <span className="text-sm font-bold text-slate-900">
             {priceText} {symbol}
@@ -167,6 +179,7 @@ export function OptionSelectModal({
               type="button"
               onClick={confirm}
               disabled={addBlocked}
+              aria-describedby={blockedNotice ? blockedNoticeId : undefined}
               className="min-h-11 rounded-lg bg-brand px-4 text-sm font-semibold text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"
             >
               {t('addToCart')}

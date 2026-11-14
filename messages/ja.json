@@ -2525,6 +2525,7 @@
     "copied": "コピーしました",
     "presetManagerTitle": "商品を編集",
     "currencyMismatch": "カートは {symbol} のみです。別通貨の商品は別のカートで作成してください。",
+    "cartFull": "1 回の会計に入れられるのは {max} 品目までです。品目を減らすと、ほかの商品を追加できます。",
     "cartEmpty": "商品を選ぶか「自由入力」で追加してください。",
     "removeLine": "この商品を削除",
     "memoLabel": "メモ",

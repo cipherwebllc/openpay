@@ -92,7 +92,9 @@ vi.mock('@/components/StoreGasWalletPanel', () => ({
 }));
 
 import { RegisterMode } from '@/components/RegisterMode';
-import { calcCheckoutPayable, parseCheckoutParams } from '@/lib/url';
+import { CHECKOUT_MAX_ITEMS, calcCheckoutPayable, parseCheckoutParams } from '@/lib/url';
+import jaMessages from '@/messages/ja.json';
+import enMessages from '@/messages/en.json';
 
 const VALID = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 const FORWARDER = '0x752B7AaD0089286EB7b553d84D05233d80c9FCB4';
@@ -1138,6 +1140,180 @@ describe('RegisterMode: 作られる支払い URL と、カートの境目', () 
         expect(cartLines()).toHaveLength(10);
         expect(lineAt(9).getByText('650 JPYC')).toBeInTheDocument();
         expect(summaryRow('合計').getByText('1,550 JPYC')).toBeInTheDocument();
+      });
+
+      // 押せない理由の案内 (RegisterMode.cartFull)。押せる / 押せないは上のテストのまま = ここは文が出る場面だけを見る。
+      // 文は 2 か所に出る: 商品のタイルの下 (行が上限の間ずっと) と、オプションを選ぶ画面の「カートに追加」の上
+      // (その選択が足せない間だけ・選ぶ画面は全面を覆い、タイルの下の文が見えないため)。
+      describe('押せない理由の案内', () => {
+        const CART_FULL = jaMessages.RegisterMode.cartFull.replace('{max}', String(CHECKOUT_MAX_ITEMS));
+        const CART_FULL_EN = enMessages.RegisterMode.cartFull.replace('{max}', String(CHECKOUT_MAX_ITEMS));
+        // 案内は、出た瞬間に読み上げられるよう role="status" (同じレジの storeDevice.saleBlocked と同じ形)。
+        // 下の 2 つは、その役割を持つ要素だけを文で探す (役割が外れると、どのテストでも見つからない)。
+        const STATUS = { selector: '[role="status"]' };
+        /** 商品のタイルの下の案内 (無ければ null)。 */
+        async function tileNote(text = CART_FULL) {
+          return within(await screen.findByRole('region', { name: /^(商品|Products)$/ })).queryByText(text, STATUS);
+        }
+        /** オプションを選ぶ画面の中の案内 (無ければ null)。 */
+        function modalNote(name = '牛丼', text = CART_FULL) {
+          return within(screen.getByRole('dialog', { name })).queryByText(text, STATUS);
+        }
+        function isBefore(a: Element, b: Element) {
+          return (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+        }
+
+        it('文は messages の {max} に行の上限 (10) を入れたもの (数字を文に直に書いていない)', () => {
+          expect(jaMessages.RegisterMode.cartFull).toContain('{max}');
+          expect(enMessages.RegisterMode.cartFull).toContain('{max}');
+          expect(CART_FULL).toBe('1 回の会計に入れられるのは 10 品目までです。品目を減らすと、ほかの商品を追加できます。');
+          expect(CART_FULL_EN).toBe('A checkout can have up to 10 lines. Remove a line to add another item.');
+        });
+
+        it('9 行では出ない・10 行で商品のタイルの下に出る・数量を増やしても出たまま・行を 1 つ消すと消える', async () => {
+          const user = userEvent.setup();
+          render(<RegisterMode />);
+          await fill(user, 9);
+          expect(cartLines()).toHaveLength(9);
+          expect(await tileNote()).toBeNull();
+
+          await tap(user, /定食/);
+          expect(cartLines()).toHaveLength(10);
+          expect(await tileNote()).toBeInTheDocument();
+          // 選ぶ画面を開いていない間、画面にあるのはタイルの下の 1 つだけ。
+          expect(screen.getAllByText(CART_FULL)).toHaveLength(1);
+
+          // 上限のまま、行がある品の数量を増やしても (行は 10 のまま) 出たまま。
+          await tap(user, /品3番/);
+          expect(qtyOf('品3番')).toHaveValue('2');
+          expect(cartLines()).toHaveLength(10);
+          expect(await tileNote()).toBeInTheDocument();
+
+          await deleteLine(user, '品1番');
+          expect(cartLines()).toHaveLength(9);
+          expect(screen.queryByText(CART_FULL)).toBeNull();
+          // 文のとおり、行を減らすと、ほかの商品 (カートに無い品1番) を足せる。
+          const first = await findTile(/品1番/);
+          expect(first).toBeEnabled();
+          await user.click(first);
+          expect(cartLines()).toHaveLength(10);
+          expect(await tileNote()).toBeInTheDocument();
+        });
+
+        it('自由入力の行だけで上限になっても出る (押せなくなる「自由入力」の理由)', async () => {
+          const user = userEvent.setup();
+          render(<RegisterMode />);
+          const free = await screen.findByRole('button', { name: '自由入力' });
+          for (let i = 0; i < 9; i += 1) await user.click(free);
+          expect(cartLines()).toHaveLength(9);
+          expect(free).toBeEnabled();
+          expect(await tileNote()).toBeNull();
+
+          await user.click(free);
+          expect(cartLines()).toHaveLength(10);
+          expect(free).toBeDisabled();
+          expect(await tileNote()).toBeInTheDocument();
+        });
+
+        it('通貨の案内と同時に出る (通貨の案内 → 上限の案内の順・同じ見た目・上限の案内だけ role="status")', async () => {
+          const user = userEvent.setup();
+          render(<RegisterMode />);
+          await fill(user, 9);
+          await tap(user, /定食/);
+          expect(screen.queryByText(CURRENCY_NOTE)).toBeNull();
+          expect(await tileNote()).toBeInTheDocument();
+
+          await tap(user, /Sticker/);
+          const currency = screen.getByText(CURRENCY_NOTE);
+          const full = (await tileNote()) as HTMLElement;
+          expect(full).toBeInTheDocument();
+          expect(isBefore(currency, full)).toBe(true);
+          expect(full.tagName).toBe(currency.tagName);
+          expect(full.className).toBe(currency.className);
+          // 上限の案内に足した属性は role だけ。通貨の案内は今までどおり (class だけ)。
+          expect(full.getAttributeNames().sort()).toEqual(['class', 'role']);
+          expect(currency.getAttributeNames()).toEqual(['class']);
+          expect(cartLines()).toHaveLength(10);
+        });
+
+        it('オプションを選ぶ画面: 足せない選択の間だけ「カートに追加」の上に出て、足せる選択に切り替えると消える', async () => {
+          const user = userEvent.setup();
+          render(<RegisterMode />);
+          await fill(user, 9);
+          await addWithOptions(user, /牛丼/, { checkbox: /\+200/ });
+          expect(cartLines()).toHaveLength(10);
+
+          await tap(user, /牛丼/);
+          const plus200 = screen.getByRole('checkbox', { name: /\+200/ });
+          const plus150 = screen.getByRole('checkbox', { name: /\+150/ });
+          // 何も選ばない (牛丼 500): 新しい行になる → 押せない → 出る (押せないボタンより前)。
+          expect(addButton()).toBeDisabled();
+          const note = modalNote() as HTMLElement;
+          expect(note).toBeInTheDocument();
+          expect(isBefore(note, addButton())).toBe(true);
+          // 押せないボタンの説明として、この案内を指す (ボタンの名前は「カートに追加」のまま)。
+          expect(note.id).not.toBe('');
+          expect(addButton()).toHaveAttribute('aria-describedby', note.id);
+          expect(addButton()).toHaveAccessibleDescription(CART_FULL);
+          expect(addButton()).toHaveAccessibleName(ADD);
+          // 選ぶ画面の中に 1 つ・背後のタイルの下に 1 つ。
+          expect(screen.getAllByText(CART_FULL)).toHaveLength(2);
+          // +200 (700 の行がある): 押せる → 消える (ボタンの説明も外れる)。
+          await user.click(plus200);
+          expect(addButton()).toBeEnabled();
+          expect(modalNote()).toBeNull();
+          expect(addButton()).not.toHaveAttribute('aria-describedby');
+          // +200 と +150 (新しい行になる): 押せない → 出る。
+          await user.click(plus150);
+          expect(addButton()).toBeDisabled();
+          expect(modalNote()).toBeInTheDocument();
+          expect(addButton()).toHaveAccessibleDescription(CART_FULL);
+        });
+
+        it('オプションを選ぶ画面: 上限でないとき (9 行) は、新しい行になる選択でも出ない', async () => {
+          const user = userEvent.setup();
+          render(<RegisterMode />);
+          await fill(user, 9);
+
+          await tap(user, /牛丼/);
+          expect(addButton()).toBeEnabled();
+          expect(modalNote()).toBeNull();
+          await user.click(screen.getByRole('checkbox', { name: /\+150/ }));
+          expect(addButton()).toBeEnabled();
+          expect(modalNote()).toBeNull();
+          expect(screen.queryByText(CART_FULL)).toBeNull();
+        });
+
+        it('オプションを選ぶ画面: 通貨の違う品は上限でも押せるので、選ぶ画面には出ない (タイルの下には出ている)', async () => {
+          const user = userEvent.setup();
+          render(<RegisterMode />);
+          await fill(user, 9);
+          await tap(user, /定食/);
+          expect(cartLines()).toHaveLength(10);
+
+          await tap(user, /Tee/);
+          const teeAdd = within(screen.getByRole('dialog', { name: 'Tee' })).getByRole('button', { name: ADD });
+          expect(teeAdd).toBeEnabled();
+          expect(modalNote('Tee')).toBeNull();
+          expect(teeAdd).not.toHaveAttribute('aria-describedby');
+          expect(await tileNote()).toBeInTheDocument();
+        });
+
+        it('en: 同じ場面で英語の文が出る (タイルの下・選ぶ画面)', async () => {
+          const user = userEvent.setup();
+          const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+          renderWithIntl(<QueryClientProvider client={qc}><RegisterMode /></QueryClientProvider>, { locale: 'en' });
+          await fill(user, 9);
+          expect(await tileNote(CART_FULL_EN)).toBeNull();
+          await tap(user, /定食/);
+          expect(await tileNote(CART_FULL_EN)).toBeInTheDocument();
+
+          await tap(user, /牛丼/);
+          const enAdd = within(screen.getByRole('dialog', { name: '牛丼' })).getByRole('button', { name: 'Add to cart' });
+          expect(enAdd).toBeDisabled();
+          expect(modalNote('牛丼', CART_FULL_EN)).toBeInTheDocument();
+          expect(enAdd).toHaveAccessibleDescription(CART_FULL_EN);
+        });
       });
     });
 
