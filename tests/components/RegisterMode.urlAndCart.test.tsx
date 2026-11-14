@@ -1,11 +1,11 @@
 // レジ (components/RegisterMode.tsx) が作る支払いの URL と、カートの境目の動きを固定する (characterization)。
 // ほかの RegisterMode のテストは URL を項目ごと (parseCheckoutParams の一部) に見ていて、次が固定されていなかった:
 //   - URL の全 param の完全一致 (とくに誰がガス代を払うかの gas)
-//   - カートが空になったら値引きを外す (次のお客様に前の値引きを付けない)
+//   - カートが空になったら値引きと管理番号を外す (次のお客様に前の値引き・前の番号を付けない)
 //   - 数量の上限 999 (/checkout が受け付ける上限と同じ)
-//   - 同じ品で、作った表示名 (品の名前 + 選んだ選択肢の名前) が同じ行をまとめる / 表示名が異なる選択は別の行
+//   - 同じ品で、作った表示名 (品の名前 + 選んだ選択肢の名前) も単価も同じ行だけをまとめる / どちらかが異なれば別の行
 //   - お店負担 (お店の端末で送る) の最低額 1 JPYC の境目
-// 期待はどれも「今の動き」。QR の中身は qrcode.react を差し替えて読む (お客様が読み取る値そのもの)。
+// QR の中身は qrcode.react を差し替えて読む (お客様が読み取る値そのもの)。
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -144,6 +144,17 @@ const GYUDON: Preset = {
   ],
 };
 
+// 別のグループに同じ名前の選択肢「あり」がある品 (肉増し +200・トッピング +150)。作った表示名はどちらも「牛丼（あり）」。
+const GYUDON_ARI: Preset = {
+  id: 'ga',
+  name: '牛丼',
+  unitPrice: '500',
+  options: [
+    { id: 'niku', name: '肉増し', type: 'multi', choices: [{ id: 'n1', label: 'あり', priceDelta: '200' }] },
+    { id: 'top', name: 'トッピング', type: 'multi', choices: [{ id: 't1', label: 'あり', priceDelta: '150' }] },
+  ],
+};
+
 async function findTile(name: RegExp) {
   const region = await screen.findByRole('region', { name: /^(商品|Products)$/ });
   return within(region).findByRole('button', { name });
@@ -166,6 +177,13 @@ function cartLine(name: string | RegExp) {
   const li = cartLines().find((el) => within(el).queryByRole('button', { name }) !== null);
   if (!li) throw new Error(`カートに行が無い: ${String(name)}`);
   return within(li);
+}
+/** カートの i 番目の行 (同じ名前の行が 2 つあるときは名前で選べない)。 */
+function lineAt(i: number) {
+  return within(cartLines()[i]);
+}
+function qtyAt(i: number) {
+  return lineAt(i).getByRole('textbox', { name: '数量' }) as HTMLInputElement;
 }
 function qtyOf(name: string | RegExp) {
   return cartLine(name).getByRole('textbox', { name: '数量' }) as HTMLInputElement;
@@ -196,6 +214,12 @@ async function addWithOptions(user: User, tile: RegExp, choices: { radio?: RegEx
   if (choices.radio) await user.click(screen.getByRole('radio', { name: choices.radio }));
   if (choices.checkbox) await user.click(screen.getByRole('checkbox', { name: choices.checkbox }));
   await user.click(screen.getByRole('button', { name: 'カートに追加' }));
+}
+/** 開いている行の単価の欄を書き換える (空の文字なら、消したままにする)。 */
+async function retypePrice(user: User, value: string) {
+  const price = screen.getByRole('textbox', { name: '単価 (JPYC)' });
+  await user.clear(price);
+  if (value) await user.type(price, value);
 }
 
 /** QR のボタン (PC の注文パネルとスマホの下部バーの 2 つ・jsdom には両方ある) の 1 つ目を押し、QR の中身を返す。 */
@@ -479,23 +503,74 @@ describe('RegisterMode: 作られる支払い URL と、カートの境目', () 
       expect(payableOf(searchParams, JPYC)).toBe(2980n * JPYC);
     });
 
-    // 【気になる今の動き】外れるのは値引きだけ。管理番号は、カートを空にしても state に残り、次の会計の URL (rcpt) に
-    // そのまま乗る。カートが空の間は管理番号の欄が画面から消え、次の品を入れると欄は閉じた状態で出直すので、
-    // 店員には前の番号が残っていることが見えない。直すかどうかは別に決める (ここは今の動きを書いただけ)。
-    it('【気になる今の動き】管理番号はカートを空にしても外れず、次の会計の URL に前の番号が乗る', async () => {
+  });
+
+  // カートが空の間は管理番号の欄が画面から消え、次の品を入れると欄は閉じた状態で出直す。番号が残っていると、
+  // 店員に見えないまま次の会計の URL (rcpt) に乗る。
+  describe('カートが空になったら管理番号も外す (次のお客様に前の番号を付けない)', () => {
+    const FIELD = '管理番号 / レシート番号';
+    const SHIRT = `${enc('Tシャツ')}:1:3000:10:taxable_10:`;
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('手で入れた管理番号は、カートを空にすると外れる (次の会計の URL に rcpt が無く、欄を開くと空)', async () => {
       const user = userEvent.setup();
       seedSettings();
       render(<RegisterMode />);
       await tap(user, /コーヒー/);
       await typeReceiptNo(user, 'R-001');
       await deleteLine(user, /コーヒー/);
-      expect(orderPanel().queryByLabelText('管理番号 / レシート番号')).toBeNull();
+      expect(orderPanel().queryByLabelText(FIELD)).toBeNull();
 
       await tap(user, /Tシャツ/);
-      expect(orderPanel().getByLabelText('管理番号 / レシート番号')).toHaveValue('R-001');
-      expect(orderPanel().getByText('管理番号を付ける（任意）').closest('details')).not.toHaveAttribute('open');
+      const summary = orderPanel().getByText('管理番号を付ける（任意）');
+      expect(summary.closest('details')).not.toHaveAttribute('open');
+      await user.click(summary);
+      expect(orderPanel().getByLabelText(FIELD)).toHaveValue('');
       const { query } = parts(await openQr(user));
-      expect(query).toEqual({ to: VALID, token: 'jpyc', items: `${enc('Tシャツ')}:1:3000:10:taxable_10:`, rcpt: 'R-001' });
+      expect(query).toEqual({ to: VALID, token: 'jpyc', items: SHIRT });
+    });
+
+    it('「採番」で付けた番号も外れる。採番の連番は戻さない (次に採番すると次の番号)', async () => {
+      // 番号は日付つき (R-YYYYMMDD-NNN)。日付だけ止める (timer は本物のまま)。
+      vi.useFakeTimers({ toFake: ['Date'], now: new Date(2026, 10, 14, 12, 0, 0) });
+      const user = userEvent.setup();
+      seedSettings();
+      render(<RegisterMode />);
+      await tap(user, /コーヒー/);
+      await user.click(orderPanel().getByText('管理番号を付ける（任意）'));
+      await user.click(orderPanel().getByRole('button', { name: '採番' }));
+      expect(orderPanel().getByLabelText(FIELD)).toHaveValue('R-20261114-001');
+      await deleteLine(user, /コーヒー/);
+
+      await tap(user, /Tシャツ/);
+      expect(orderPanel().getByLabelText(FIELD)).toHaveValue('');
+      const first = parts(await openQr(user));
+      expect(first.query).toEqual({ to: VALID, token: 'jpyc', items: SHIRT });
+      await user.click(within(screen.getByRole('dialog')).getAllByRole('button', { name: '閉じる' })[0]);
+
+      // 自動では次の番号を付けない。店員が採番を押すと 002 (001 をもう一度出さない)。
+      await user.click(orderPanel().getByText('管理番号を付ける（任意）'));
+      await user.click(orderPanel().getByRole('button', { name: '採番' }));
+      expect(orderPanel().getByLabelText(FIELD)).toHaveValue('R-20261114-002');
+      const second = parts(await openQr(user));
+      expect(second.query).toEqual({ to: VALID, token: 'jpyc', items: SHIRT, rcpt: 'R-20261114-002' });
+    });
+
+    it('行を消してもカートに品が残っていれば、管理番号は付いたまま', async () => {
+      const user = userEvent.setup();
+      seedSettings();
+      render(<RegisterMode />);
+      await tap(user, /コーヒー/);
+      await tap(user, /Tシャツ/);
+      await typeReceiptNo(user, 'R-001');
+
+      await deleteLine(user, /コーヒー/);
+      expect(orderPanel().getByLabelText(FIELD)).toHaveValue('R-001');
+      const { query } = parts(await openQr(user));
+      expect(query).toEqual({ to: VALID, token: 'jpyc', items: SHIRT, rcpt: 'R-001' });
     });
   });
 
@@ -598,7 +673,7 @@ describe('RegisterMode: 作られる支払い URL と、カートの境目', () 
     });
   });
 
-  // 行の鍵は「商品の id + 作った表示名 (品の名前 + 選んだ選択肢の名前)」。選択肢の id は比べない。
+  // 行の鍵は「商品の id + 作った表示名 (品の名前 + 選んだ選択肢の名前) + 単価」。選択肢の id は比べない。
   describe('オプションつきの品の行 (flag ON)', () => {
     beforeEach(() => {
       hold.menuOptions = true;
@@ -652,6 +727,418 @@ describe('RegisterMode: 作られる支払い URL と、カートの境目', () 
       expect(cartLines()).toHaveLength(2);
       expect(qtyOf('牛丼（大盛り）!')).toHaveValue('1');
       expect(qtyOf('牛丼（大盛り）')).toHaveValue('1');
+    });
+
+    it('別のグループの同じ名前の選択肢 (単価が違う) は別の行になり、合計と URL の額が正しい (500 の品に +200 と +150 → 1,350)', async () => {
+      seedPresets([GYUDON_ARI]);
+      const user = userEvent.setup();
+      render(<RegisterMode />);
+      await addWithOptions(user, /牛丼/, { checkbox: /\+200/ });
+      await addWithOptions(user, /牛丼/, { checkbox: /\+150/ });
+
+      // 表示名はどちらも「牛丼（あり）」。単価が違うので 1 行にまとめない。
+      expect(cartLines()).toHaveLength(2);
+      expect(lineAt(0).getByRole('button', { name: /^牛丼（あり）/ })).toBeInTheDocument();
+      expect(lineAt(1).getByRole('button', { name: /^牛丼（あり）/ })).toBeInTheDocument();
+      expect(qtyAt(0)).toHaveValue('1');
+      expect(qtyAt(1)).toHaveValue('1');
+      expect(lineAt(0).getByText('700 JPYC')).toBeInTheDocument();
+      expect(lineAt(1).getByText('650 JPYC')).toBeInTheDocument();
+      expect(await findTile(/牛丼/)).toHaveAccessibleName('牛丼 500 JPYC カートに 2 点');
+      expect(summaryRow('合計').getByText('1,350 JPYC')).toBeInTheDocument();
+
+      const { query, searchParams } = parts(await openQr(user));
+      expect(query).toEqual({
+        to: VALID,
+        token: 'jpyc',
+        items: `${enc('牛丼（あり）')}:1:700:10:taxable_10:,${enc('牛丼（あり）')}:1:650:10:taxable_10:`,
+      });
+      expect(payableOf(searchParams, JPYC)).toBe(1350n * JPYC);
+    });
+
+    it('表示名が同じ行が 2 つあるとき、足し込む先は単価も同じ行 (先にある行ではない)', async () => {
+      seedPresets([GYUDON_ARI]);
+      const user = userEvent.setup();
+      render(<RegisterMode />);
+      await addWithOptions(user, /牛丼/, { checkbox: /\+200/ });
+      await addWithOptions(user, /牛丼/, { checkbox: /\+150/ });
+      await addWithOptions(user, /牛丼/, { checkbox: /\+150/ });
+      await addWithOptions(user, /牛丼/, { checkbox: /\+200/ });
+      await addWithOptions(user, /牛丼/, { checkbox: /\+150/ });
+
+      expect(cartLines()).toHaveLength(2);
+      expect(qtyAt(0)).toHaveValue('2');
+      expect(qtyAt(1)).toHaveValue('3');
+      expect(lineAt(0).getByText('1,400 JPYC')).toBeInTheDocument();
+      expect(lineAt(1).getByText('1,950 JPYC')).toBeInTheDocument();
+      expect(summaryRow('合計').getByText('3,350 JPYC')).toBeInTheDocument();
+      const { searchParams } = parts(await openQr(user));
+      expect(payableOf(searchParams, JPYC)).toBe(3350n * JPYC);
+    });
+
+    it('別のグループの同じ名前の選択肢でも、単価まで同じなら 1 行にまとまる (まとめても合計は同じ)', async () => {
+      seedPresets([
+        {
+          id: 'gb',
+          name: '牛丼',
+          unitPrice: '500',
+          options: [
+            { id: 'niku', name: '肉増し', type: 'multi', choices: [{ id: 'n1', label: 'あり', priceDelta: '100' }] },
+            { id: 'top', name: 'トッピング', type: 'multi', choices: [{ id: 't1', label: 'あり', priceDelta: '100' }] },
+          ],
+        },
+      ]);
+      const user = userEvent.setup();
+      render(<RegisterMode />);
+      await tap(user, /牛丼/);
+      await user.click(screen.getAllByRole('checkbox', { name: /あり/ })[0]);
+      await user.click(screen.getByRole('button', { name: 'カートに追加' }));
+      await tap(user, /牛丼/);
+      await user.click(screen.getAllByRole('checkbox', { name: /あり/ })[1]);
+      await user.click(screen.getByRole('button', { name: 'カートに追加' }));
+
+      expect(cartLines()).toHaveLength(1);
+      expect(qtyOf('牛丼（あり）')).toHaveValue('2');
+      expect(summaryRow('合計').getByText('1,200 JPYC')).toBeInTheDocument();
+      const { query, searchParams } = parts(await openQr(user));
+      expect(query).toEqual({ to: VALID, token: 'jpyc', items: `${enc('牛丼（あり）')}:2:600:10:taxable_10:` });
+      expect(payableOf(searchParams, JPYC)).toBe(1200n * JPYC);
+    });
+
+    it('単価を書き換えた行には足し込まない (同じ選択でも単価が合わず、選んだ単価の新しい行になる)', async () => {
+      const user = userEvent.setup();
+      render(<RegisterMode />);
+      await addWithOptions(user, /牛丼/, { radio: /大盛り/ });
+      await openLine(user, '牛丼（大盛り）');
+      await retypePrice(user, '650');
+      await addWithOptions(user, /牛丼/, { radio: /大盛り/ });
+
+      expect(cartLines()).toHaveLength(2);
+      expect(qtyAt(0)).toHaveValue('1');
+      expect(qtyAt(1)).toHaveValue('1');
+      expect(lineAt(0).getByText('650 JPYC')).toBeInTheDocument();
+      expect(lineAt(1).getByText('700 JPYC')).toBeInTheDocument();
+      expect(summaryRow('合計').getByText('1,350 JPYC')).toBeInTheDocument();
+      const { query, searchParams } = parts(await openQr(user));
+      expect(query).toEqual({
+        to: VALID,
+        token: 'jpyc',
+        items: `${enc('牛丼（大盛り）')}:1:650:10:taxable_10:,${enc('牛丼（大盛り）')}:1:700:10:taxable_10:`,
+      });
+      expect(payableOf(searchParams, JPYC)).toBe(1350n * JPYC);
+    });
+
+    it('単価の書き方だけが違う行 (700 を 700.0 と打ち直した) は同じ額なので、足し込む', async () => {
+      const user = userEvent.setup();
+      render(<RegisterMode />);
+      await addWithOptions(user, /牛丼/, { radio: /大盛り/ });
+      await openLine(user, '牛丼（大盛り）');
+      await retypePrice(user, '700.0');
+      await addWithOptions(user, /牛丼/, { radio: /大盛り/ });
+
+      expect(cartLines()).toHaveLength(1);
+      expect(qtyOf('牛丼（大盛り）')).toHaveValue('2');
+      expect(summaryRow('合計').getByText('1,400 JPYC')).toBeInTheDocument();
+      const { searchParams } = parts(await openQr(user));
+      expect(payableOf(searchParams, JPYC)).toBe(1400n * JPYC);
+    });
+
+    it('単価の欄が数字でない行 (空にした) には足し込まない (単価 0 の選択を足しても、空を 0 と同じ額とは見ない)', async () => {
+      seedPresets([
+        {
+          id: 'om',
+          name: 'おまけ',
+          unitPrice: '0',
+          options: [{ id: 'g', name: '包み', type: 'multi', choices: [{ id: 'f', label: '袋', priceDelta: '0' }] }],
+        },
+      ]);
+      const user = userEvent.setup();
+      render(<RegisterMode />);
+      await addWithOptions(user, /おまけ/, { checkbox: /袋/ });
+      await openLine(user, 'おまけ（袋）');
+      expect(screen.getByRole('textbox', { name: '単価 (JPYC)' })).toHaveValue('0');
+      await retypePrice(user, '');
+      await addWithOptions(user, /おまけ/, { checkbox: /袋/ });
+
+      expect(cartLines()).toHaveLength(2);
+      expect(qtyAt(0)).toHaveValue('1');
+      expect(qtyAt(1)).toHaveValue('1');
+    });
+
+    // 行の上限 (10) では、新しい行は入らない。押せるままだと、入らないのに何も出ず (オプションの画面は閉じて)、入ったように
+    // 見える。足し込む先の行がある品・選択だけ押せる (オプションの選択 = 同じ商品・同じ表示名・同じ単価の行 /
+    // オプションの無い品 = 同じ商品の行)。通貨の違う品は押せて、通貨の案内が出る。
+    describe('行が上限の 10 のとき', () => {
+      const ADD = 'カートに追加';
+      /** 100 の品を n 行入れる (品1番 〜 品n番)。 */
+      async function fill(user: User, n: number) {
+        for (let i = 1; i <= n; i += 1) await tap(user, new RegExp(`品${i}番`));
+      }
+      function addButton() {
+        return within(screen.getByRole('dialog', { name: '牛丼' })).getByRole('button', { name: ADD });
+      }
+      const CURRENCY_NOTE = 'カートは JPYC のみです。別通貨の商品は別のカートで作成してください。';
+      beforeEach(() => {
+        const fillers: Preset[] = Array.from({ length: 9 }, (_, i) => ({ id: `f${i}`, name: `品${i + 1}番`, unitPrice: '100' }));
+        seedPresets([
+          GYUDON_ARI,
+          ...fillers,
+          { id: 'ts', name: '定食', unitPrice: '1000' },
+          { id: 'u1', name: 'Sticker', unitPrice: '5.5', token: 'usdc' },
+          {
+            id: 'u2',
+            name: 'Tee',
+            unitPrice: '20',
+            token: 'usdc',
+            options: [{ id: 'sz', name: 'Size', type: 'single', required: true, choices: [{ id: 'm', label: 'M', priceDelta: '0' }] }],
+          },
+        ]);
+      });
+
+      it('9 行 + 700 の牛丼の後、表示名が同じで単価が違う選択 (650) は押せない (先の行の単価で数えず、入ったようにも見せない)', async () => {
+        const user = userEvent.setup();
+        render(<RegisterMode />);
+        await fill(user, 9);
+        await addWithOptions(user, /牛丼/, { checkbox: /\+200/ });
+        expect(cartLines()).toHaveLength(10);
+        expect(summaryRow('合計').getByText('1,600 JPYC')).toBeInTheDocument();
+
+        await tap(user, /牛丼/);
+        await user.click(screen.getByRole('checkbox', { name: /\+150/ }));
+        expect(addButton()).toBeDisabled();
+        await user.click(addButton());
+        // モーダルは開いたまま (入ったように閉じない)。カートは 700 の行に足されても (2,300)、新しい行が増えてもいない。
+        expect(screen.getByRole('dialog', { name: '牛丼' })).toBeInTheDocument();
+        expect(cartLines()).toHaveLength(10);
+        expect(qtyAt(9)).toHaveValue('1');
+        expect(lineAt(9).getByText('700 JPYC')).toBeInTheDocument();
+        expect(await findTile(/牛丼/)).toHaveAccessibleName('牛丼 500 JPYC カートに 1 点');
+        expect(summaryRow('合計').getByText('1,600 JPYC')).toBeInTheDocument();
+
+        await user.click(screen.getByRole('button', { name: 'キャンセル' }));
+        expect(screen.queryByRole('dialog')).toBeNull();
+        expect(cartLines()).toHaveLength(10);
+        expect(summaryRow('合計').getByText('1,600 JPYC')).toBeInTheDocument();
+      });
+
+      it('表示名も単価も同じ選択は、上限でも押せて数量 +1 (今までどおり)', async () => {
+        const user = userEvent.setup();
+        render(<RegisterMode />);
+        await fill(user, 9);
+        await addWithOptions(user, /牛丼/, { checkbox: /\+200/ });
+
+        await tap(user, /牛丼/);
+        await user.click(screen.getByRole('checkbox', { name: /\+200/ }));
+        expect(addButton()).toBeEnabled();
+        await user.click(addButton());
+        expect(screen.queryByRole('dialog')).toBeNull();
+        expect(cartLines()).toHaveLength(10);
+        expect(qtyAt(9)).toHaveValue('2');
+        expect(summaryRow('合計').getByText('2,300 JPYC')).toBeInTheDocument();
+      });
+
+      it('選択を切り替えるたびに押せる / 押せないが変わる (まとめる先の行がある選択だけ押せる)', async () => {
+        const user = userEvent.setup();
+        render(<RegisterMode />);
+        await fill(user, 9);
+        await addWithOptions(user, /牛丼/, { checkbox: /\+200/ });
+
+        await tap(user, /牛丼/);
+        const plus200 = screen.getByRole('checkbox', { name: /\+200/ });
+        const plus150 = screen.getByRole('checkbox', { name: /\+150/ });
+        // 何も選ばない (牛丼 500): 表示名が違うので新しい行になる → 押せない。
+        expect(addButton()).toBeDisabled();
+        // +200 (牛丼（あり）700): 同じ行がある → 押せる。
+        await user.click(plus200);
+        expect(addButton()).toBeEnabled();
+        // +200 と +150 (牛丼（あり・あり）850): 新しい行になる → 押せない。
+        await user.click(plus150);
+        expect(addButton()).toBeDisabled();
+        // +150 だけ (牛丼（あり）650): 表示名は同じでも単価が違う → 押せない。
+        await user.click(plus200);
+        expect(addButton()).toBeDisabled();
+        // +200 に戻す → 押せて、700 の行に数量 +1。
+        await user.click(plus150);
+        await user.click(plus200);
+        expect(addButton()).toBeEnabled();
+        await user.click(addButton());
+        expect(cartLines()).toHaveLength(10);
+        expect(qtyAt(9)).toHaveValue('2');
+        expect(summaryRow('合計').getByText('2,300 JPYC')).toBeInTheDocument();
+      });
+
+      it('行を 1 つ消して上限でなくなれば、新しい行になる選択も押せる', async () => {
+        const user = userEvent.setup();
+        render(<RegisterMode />);
+        await fill(user, 9);
+        await addWithOptions(user, /牛丼/, { checkbox: /\+200/ });
+        await deleteLine(user, '品1番');
+        expect(cartLines()).toHaveLength(9);
+
+        await tap(user, /牛丼/);
+        await user.click(screen.getByRole('checkbox', { name: /\+150/ }));
+        expect(addButton()).toBeEnabled();
+        await user.click(addButton());
+        expect(cartLines()).toHaveLength(10);
+        expect(lineAt(8).getByText('700 JPYC')).toBeInTheDocument();
+        expect(lineAt(9).getByText('650 JPYC')).toBeInTheDocument();
+        // 100 × 8 + 700 + 650。
+        expect(summaryRow('合計').getByText('2,150 JPYC')).toBeInTheDocument();
+      });
+
+      // 行が分かれると、上限に 1 行早く届く。100 の品 8 行 + 牛丼 700 + 同じ表示名の 650 で 10 行 (行をまとめていた
+      // ときは 9 行)。この後のオプションの無い品は入らないので、タイルを押せなくする (押せて何も出ずに入らない、にしない)。
+      it('8 行 + 牛丼 700 + 同じ表示名の 650 で 10 行になった後、カートに無い品 (1,000) のタイルは押せない・行を消すと押せて入る', async () => {
+        const user = userEvent.setup();
+        render(<RegisterMode />);
+        await fill(user, 8);
+        await addWithOptions(user, /牛丼/, { checkbox: /\+200/ });
+        await addWithOptions(user, /牛丼/, { checkbox: /\+150/ });
+        expect(cartLines()).toHaveLength(10);
+        expect(summaryRow('合計').getByText('2,150 JPYC')).toBeInTheDocument();
+
+        const teishoku = await findTile(/定食/);
+        expect(teishoku).toBeDisabled();
+        await user.click(teishoku);
+        expect(cartLines()).toHaveLength(10);
+        expect(teishoku).toHaveAccessibleName('定食 1,000 JPYC');
+        expect(summaryRow('合計').getByText('2,150 JPYC')).toBeInTheDocument();
+        // 自由入力も押せない (上限で押せないのは前からの動き)。ただし、この操作の順では、行を単価ごとに分けた分だけ
+        // 早く上限に届く (行をまとめていた main では、ここは 9 行で、自由入力はまだ押せる)。
+        expect(screen.getByRole('button', { name: '自由入力' })).toBeDisabled();
+        // QR の額は、画面の合計 (カートに入っている品) と同じ。
+        const { searchParams } = parts(await openQr(user));
+        expect(payableOf(searchParams, JPYC)).toBe(2150n * JPYC);
+        await user.click(within(screen.getByRole('dialog')).getAllByRole('button', { name: '閉じる' })[0]);
+
+        // 行を 1 つ消すと押せて、10 行目として入る (2,150 − 100 + 1,000)。
+        await deleteLine(user, '品1番');
+        expect(teishoku).toBeEnabled();
+        await user.click(teishoku);
+        expect(cartLines()).toHaveLength(10);
+        expect(teishoku).toHaveAccessibleName('定食 1,000 JPYC カートに 1 点');
+        expect(summaryRow('合計').getByText('3,050 JPYC')).toBeInTheDocument();
+      });
+
+      it('上限でも、カートに行がある品のタイルは押せて数量 +1 (今までどおり)・行が無い品のタイルは押せない', async () => {
+        const user = userEvent.setup();
+        render(<RegisterMode />);
+        await fill(user, 9);
+        await addWithOptions(user, /牛丼/, { checkbox: /\+200/ });
+        expect(cartLines()).toHaveLength(10);
+
+        expect(await findTile(/定食/)).toBeDisabled();
+        const third = await findTile(/品3番/);
+        expect(third).toBeEnabled();
+        await user.click(third);
+        expect(cartLines()).toHaveLength(10);
+        expect(qtyOf('品3番')).toHaveValue('2');
+        expect(third).toHaveAccessibleName('品3番 100 JPYC カートに 2 点');
+        expect(summaryRow('合計').getByText('1,700 JPYC')).toBeInTheDocument();
+      });
+
+      // 足し込む先は「同じ商品の行」(行を足すときと同じ探し方)。行の名前では探さない。
+      it('上限で押せるかは、同じ商品の行があるかで決まる (名前を書き換えた行があれば押せる・同じ名前の自由入力の行では押せない)', async () => {
+        const user = userEvent.setup();
+        render(<RegisterMode />);
+        await fill(user, 9);
+        // 商品の「定食」と同じ名前の、自由入力の行 (商品の行ではない)。
+        await user.click(screen.getByRole('button', { name: '自由入力' }));
+        await user.type(screen.getByRole('textbox', { name: '商品名' }), '定食');
+        await user.type(screen.getByRole('textbox', { name: '単価 (JPYC)' }), '1000');
+        // 品3番の行の名前を書き換える。
+        await openLine(user, '品3番');
+        await user.type(screen.getByRole('textbox', { name: '商品名' }), '改');
+        expect(cartLines()).toHaveLength(10);
+        expect(summaryRow('合計').getByText('1,900 JPYC')).toBeInTheDocument();
+
+        expect(await findTile(/定食/)).toBeDisabled();
+        const third = await findTile(/品3番/);
+        expect(third).toBeEnabled();
+        await user.click(third);
+        expect(cartLines()).toHaveLength(10);
+        expect(qtyOf('品3番改')).toHaveValue('2');
+        expect(summaryRow('合計').getByText('2,000 JPYC')).toBeInTheDocument();
+      });
+
+      it('上限でも、オプションつきの品のタイルは押せて、選ぶ画面が開く (足せるかは選択で決まる)', async () => {
+        const user = userEvent.setup();
+        render(<RegisterMode />);
+        await fill(user, 9);
+        await tap(user, /定食/);
+        expect(cartLines()).toHaveLength(10);
+
+        // 牛丼の行はカートに無い。それでもタイルは押せる。
+        const gyudon = await findTile(/牛丼/);
+        expect(gyudon).toBeEnabled();
+        await user.click(gyudon);
+        expect(screen.getByRole('dialog', { name: '牛丼' })).toBeInTheDocument();
+        expect(addButton()).toBeDisabled();
+      });
+
+      it('上限の 1 つ手前 (9 行) では、カートに無い品のタイルも押せて 10 行目として入り、そこで残りの品のタイルが押せなくなる', async () => {
+        const user = userEvent.setup();
+        render(<RegisterMode />);
+        await fill(user, 8);
+        await addWithOptions(user, /牛丼/, { checkbox: /\+200/ });
+        expect(cartLines()).toHaveLength(9);
+        expect(await findTile(/品9番/)).toBeEnabled();
+        const teishoku = await findTile(/定食/);
+        expect(teishoku).toBeEnabled();
+
+        await user.click(teishoku);
+        expect(cartLines()).toHaveLength(10);
+        expect(summaryRow('合計').getByText('2,500 JPYC')).toBeInTheDocument();
+        expect(teishoku).toBeEnabled();
+        expect(await findTile(/品9番/)).toBeDisabled();
+      });
+
+      it('通貨の違う品のタイルは、上限でも押せて、通貨の案内が出る (行は入らない・今までどおり)', async () => {
+        const user = userEvent.setup();
+        render(<RegisterMode />);
+        await fill(user, 9);
+        await tap(user, /定食/);
+        expect(cartLines()).toHaveLength(10);
+        expect(screen.queryByText(CURRENCY_NOTE)).toBeNull();
+
+        const sticker = await findTile(/Sticker/);
+        expect(sticker).toBeEnabled();
+        await user.click(sticker);
+        expect(screen.getByText(CURRENCY_NOTE)).toBeInTheDocument();
+        expect(cartLines()).toHaveLength(10);
+        expect(summaryRow('合計').getByText('1,900 JPYC')).toBeInTheDocument();
+      });
+
+      it('通貨の違うオプションつきの品は、上限でも「カートに追加」を押せて、通貨の案内が出る (行は入らない・今までどおり)', async () => {
+        const user = userEvent.setup();
+        render(<RegisterMode />);
+        await fill(user, 9);
+        await tap(user, /定食/);
+        expect(cartLines()).toHaveLength(10);
+
+        await tap(user, /Tee/);
+        const add = within(screen.getByRole('dialog', { name: 'Tee' })).getByRole('button', { name: ADD });
+        expect(add).toBeEnabled();
+        await user.click(add);
+        expect(screen.queryByRole('dialog')).toBeNull();
+        expect(screen.getByText(CURRENCY_NOTE)).toBeInTheDocument();
+        expect(cartLines()).toHaveLength(10);
+        expect(summaryRow('合計').getByText('1,900 JPYC')).toBeInTheDocument();
+      });
+
+      it('上限の 1 つ手前 (9 行) では、新しい行になる選択も押せて、10 行目として入る', async () => {
+        const user = userEvent.setup();
+        render(<RegisterMode />);
+        await fill(user, 9);
+
+        await tap(user, /牛丼/);
+        await user.click(screen.getByRole('checkbox', { name: /\+150/ }));
+        expect(addButton()).toBeEnabled();
+        await user.click(addButton());
+        expect(cartLines()).toHaveLength(10);
+        expect(lineAt(9).getByText('650 JPYC')).toBeInTheDocument();
+        expect(summaryRow('合計').getByText('1,550 JPYC')).toBeInTheDocument();
+      });
     });
 
     it('表示名が同じ選択の足し込みも 998 → 999 で止まり、もう 1 回足しても 999', async () => {

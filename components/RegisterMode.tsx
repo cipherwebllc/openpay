@@ -99,6 +99,40 @@ type RegisterShopLive = {
   isPending: boolean;
 };
 
+/**
+ * オプションの選択から作る行 (表示名・単価) と、その選択をまとめる先の行の探し方。行を足す所 (addOptionLine) と、
+ * 行が上限のときに「足せるか」を決める所 (オプションのモーダルのボタン) が、同じ 1 つの判定を使う。
+ */
+function optionLineFor(p: ProductPreset, choices: OptionChoice[]) {
+  const name = composeLineName(p.name, choices);
+  const unitPrice = effectiveUnitPrice(p.unitPrice, choices);
+  // 行の単価が、いま足す選択の単価と同じ額か。行の単価は手で書き換えられる文字列なので、表記の揺れ
+  // (「700」と「700.0」) を effectiveUnitPrice の正規化 (同じ額は同じ文字列) で揃えてから比べる。数字でない
+  // 入力の途中 (空・「7.」) は、どの額とも同じにしない (effectiveUnitPrice は数字でないものを 0 と読むため)。
+  const samePrice = (linePrice: string) =>
+    DECIMAL_PATTERN.test(linePrice) && effectiveUnitPrice(linePrice, []) === unitPrice;
+  return {
+    name,
+    unitPrice,
+    // まとめる先 = 同じ商品・同じ表示名・同じ単価の行 (無ければ undefined)。表示名は選択肢の label をつないだもの
+    // なので、別のグループの同じ label (「肉増し: あり +200」と「トッピング: あり +150」) は、表示名が同じで単価が
+    // 違うことがある。単価を比べないと、後の選択が先の行の単価で数えられて合計がずれる。足す選択の名前・額と
+    // 違う行にはまとめない (行の名前や単価を書き換えた結果が、足す名前・額と同じなら、まとまる)。
+    // 単価の違う選択を別の行に持つので、その分だけ行の上限 (CHECKOUT_MAX_ITEMS) に早く届く。分かれた行を後から
+    // 同じ額に書き換えても、行は 1 つに戻らない (行を空けるには、行を消す)。
+    mergeTarget: (lines: CartLine[]) =>
+      lines.find((l) => l.presetId === p.id && l.name === name && samePrice(l.unitPrice)),
+  };
+}
+
+/**
+ * オプションの無い品を足し込む先の行 = 同じ商品の行 (無ければ undefined・名前や単価を書き換えた行にも足し込む)。
+ * 行を足す所 (addFromPreset) と、行が上限のときに商品のタイルを押せるかを決める所が、同じ 1 つの判定を使う。
+ */
+function presetMergeTarget(p: ProductPreset, lines: CartLine[]) {
+  return lines.find((l) => l.presetId === p.id);
+}
+
 export function RegisterMode(props: RegisterModeProps) {
   // flag OFF では SIWE / handle / live の query を一切起動せず、従来のレジ依存境界を保つ。
   return env.enableShopLive ? (
@@ -300,9 +334,17 @@ function RegisterModeContent({
     [shopLive?.state.soldOut],
   );
 
+  // カートと通貨の違う品か (同一カート単一通貨)。押すと通貨の案内を出して、行は足さない。
+  const currencyClash = (p: ProductPreset) => cart.length > 0 && p.token !== settings.token;
+  // 押しても行が入らず、何も出ない場合 = 行が上限で、足し込む先の行 (target) が無い。このときは押せなくする
+  // (商品のタイル・オプションのモーダルのボタン)。押せるままだと、入っていないことに気づけない。
+  // 通貨の違う品は止めない (押すと通貨の案内が出る)。
+  const noRoomFor = (p: ProductPreset, target: CartLine | undefined) =>
+    cart.length >= CHECKOUT_MAX_ITEMS && !currencyClash(p) && target === undefined;
+
   function addFromPreset(p: ProductPreset) {
     // 異通貨プリセットはカート非空時に警告 (同一カート単一通貨)。空なら通貨を切替。
-    if (cart.length > 0 && p.token !== settings.token) {
+    if (currencyClash(p)) {
       setCurrencyWarning(true);
       return;
     }
@@ -311,13 +353,14 @@ function RegisterModeContent({
       setSettings((s) => switchTokenKeepingPrefs(s, p.token));
     }
     setCart((c) => {
-      const existing = c.find((l) => l.presetId === p.id);
+      const existing = presetMergeTarget(p, c);
       if (existing) {
         // 同じプリセットの再追加は数量 +1 (レジとして自然)。
         return c.map((l) =>
           l.id === existing.id ? { ...l, quantity: Math.min(999, l.quantity + 1) } : l,
         );
       }
+      // 最後の守り。行が上限で、足し込む先の無い品は、タイルを押せなくしてある (noRoomFor)。
       if (c.length >= CHECKOUT_MAX_ITEMS) return c;
       return [
         ...c,
@@ -338,11 +381,11 @@ function RegisterModeContent({
   const hasPresetOptions = (p: ProductPreset) =>
     env.enableMenuOptions && (p.options?.length ?? 0) > 0;
 
-  // オプション付き preset: モーダルで選択 → 実効単価 + サフィックス名で新規行を追加 (option 行は dedup せず・
-  // 行は通常どおり編集可)。通貨ガードは addFromPreset と同じ。
+  // オプション付き preset: モーダルで選択 → 実効単価 + サフィックス名の行を足す (同じ商品・同じ表示名・同じ単価の
+  // 行があれば数量 +1・行は通常どおり編集可)。通貨ガードは addFromPreset と同じ。
   function addOptionLine(p: ProductPreset, choices: OptionChoice[]) {
     setOptionModalPreset(null);
-    if (cart.length > 0 && p.token !== settings.token) {
+    if (currencyClash(p)) {
       setCurrencyWarning(true);
       return;
     }
@@ -350,17 +393,16 @@ function RegisterModeContent({
     if (cart.length === 0 && p.token !== settings.token) {
       setSettings((s) => switchTokenKeepingPrefs(s, p.token));
     }
-    const name = composeLineName(p.name, choices);
-    const unitPrice = effectiveUnitPrice(p.unitPrice, choices);
+    const { name, unitPrice, mergeTarget } = optionLineFor(p, choices);
     setCart((c) => {
-      // 同一 preset + 同一オプション (= 同一表示名) の行は qty+1 にまとめる (10 行上限の浪費防止)。
-      // 行をリネーム済なら一致せず新規行になる (許容)。
-      const existing = c.find((l) => l.presetId === p.id && l.name === name);
+      // まとめる先の行 (optionLineFor) があれば qty+1 (10 行上限の浪費防止)。無ければ新しい行。
+      const existing = mergeTarget(c);
       if (existing) {
         return c.map((l) =>
           l.id === existing.id ? { ...l, quantity: Math.min(999, l.quantity + 1) } : l,
         );
       }
+      // 最後の守り。行が上限で、まとめる先の無い選択は、モーダルのボタンを押せなくしてある (noRoomFor・下の canAdd)。
       if (c.length >= CHECKOUT_MAX_ITEMS) return c;
       return [
         ...c,
@@ -474,10 +516,13 @@ function RegisterModeContent({
     deployment.decimals,
     taxDec,
   ).totalTax;
-  // 会計が空になったら (次のお客様) 値引きを外す。
+  // 会計が空になったら (次のお客様) 値引きと管理番号を外す。管理番号は手で入れたものも「採番」のものも同じ扱い。
+  // 外さないと、カートが空の間は欄が消え、次の品で欄は閉じたまま出直すので、店員に見えないまま次の会計の URL
+  // (rcpt) に前の番号が乗る。採番の連番 (presetStore.nextReceiptNo) は進めも戻しもしない。
   useEffect(() => {
     if (cart.length > 0) return;
     resetDiscount();
+    setReceiptNo('');
   }, [cart.length, resetDiscount]);
 
   // WebKit (モバイル Safari・SNS アプリ内ブラウザ) では position:sticky な下部会計バーの
@@ -814,7 +859,11 @@ function RegisterModeContent({
                       key={p.id}
                       type="button"
                       onClick={() => (hasPresetOptions(p) ? setOptionModalPreset(p) : addFromPreset(p))}
-                      className={`relative flex min-h-[76px] flex-col justify-center rounded-xl border bg-white px-3 py-3 text-left transition hover:border-brand active:scale-[0.98] active:bg-brand/5 ${categoryColors ? `border-l-4 ${categoryColors.border}` : ''} ${
+                      // 行が上限で、この品の行も無いときは押せない (押しても入らない)。この品の行があれば押せて数量 +1。
+                      // 通貨の違う品は別で、上限でも押せる (押すと通貨の案内が出る・行は入らない)。
+                      // オプションつきの品は選ぶ画面を開く (足せるかは選択で変わるので、その画面のボタンが決める)。
+                      disabled={!hasPresetOptions(p) && noRoomFor(p, presetMergeTarget(p, cart))}
+                      className={`relative flex min-h-[76px] flex-col justify-center rounded-xl border bg-white px-3 py-3 text-left transition hover:border-brand active:scale-[0.98] active:bg-brand/5 disabled:cursor-not-allowed disabled:opacity-50 ${categoryColors ? `border-l-4 ${categoryColors.border}` : ''} ${
                         inCart
                           ? 'border-brand ring-2 ring-brand/15'
                           : 'border-slate-200'
@@ -1247,6 +1296,12 @@ function RegisterModeContent({
               optionModalPreset.token,
               DEFAULT_CHAIN_FOR_SYMBOL[optionModalPreset.token],
             ).displaySymbol
+          }
+          // 行が上限のときは、まとめる先の行がある選択だけ足せる (数量 +1)。新しい行になる選択は、押しても入らずに
+          // モーダルだけ閉じる (入ったように見える) ので、ボタンを押せなくする。判定は addOptionLine と同じ optionLineFor。
+          // 通貨の違う品は別で、上限でも押せる (押すと通貨の案内が出てモーダルは閉じる・行は入らない)。
+          canAdd={(choices) =>
+            !noRoomFor(optionModalPreset, optionLineFor(optionModalPreset, choices).mergeTarget(cart))
           }
           onConfirm={(choices) => addOptionLine(optionModalPreset, choices)}
           onClose={() => setOptionModalPreset(null)}
