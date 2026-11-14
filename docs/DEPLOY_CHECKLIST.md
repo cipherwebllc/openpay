@@ -2015,9 +2015,19 @@ relay の支払いの行の「受け付ける」は、receipt の中で支払い
        (`:368-370`・`:384-387`・`lib/relay/relayGuards.ts:124-136`・`lib/net/ipPrefix.ts:9-19`)。
      - `limiter: tx` が基準より増えたら、txHash の枠の使い切りを疑う。`limiter: subnet` だけが増えたなら、同じ /24 (IPv6 は
        /64) からの多くの通知 (flood か、大きな NAT)。`ipPrefix` で送り元の範囲が分かる (warn を書いた 1 件目の分だけ)。
-   - お客様のブラウザの warn `checkout.webhook.non_ok` (Sentry) も目安になる。`status` と `statusText` を持ち (束縛なしの
-     経路 `components/CheckoutForm.tsx:889-894` は通知先の origin・hash も持つ・束縛つきの経路 `:1037` は持たない)、
-     応答 body の理由 (`error`) はどちらも持たない。
+   - お客様のブラウザの warn `checkout.webhook.non_ok` (Sentry) も目安になる。`status` と `statusText` を持つ。束縛なしの
+     経路 (`hooks/useCheckoutOrderNotify.ts` の完了の通知と通常決済の部分の通知) は通知先の origin・hash も持ち、束縛つきの
+     経路 (同じ file の束縛した注文の通知) は持たない。応答 body の理由 (`error`) は、完了の通知が 422 (か、本文が
+     `{ ok: true }` でない 2xx) を受けたときだけ `serverError` の欄に入る (`lib/order/notifyRetry.ts` に並べた、route が
+     返す語のときだけ)。
+   - 完了の通知は、最初の失敗を上の event で 1 件出した後、自動で 2 回まで送り直す。それでも届かなかったとき (と、
+     送り直さない失敗のとき) に warn `checkout.webhook.undelivered` を 1 件出す。欄は `status` (通信の失敗なら `error`)・
+     `attempts` (送った回数)・`serverError`・`noticeShown` (お客様に「自動登録できませんでした」を出したか)・通知先の
+     origin・hash。`noticeShown` が false になるのは、同じ支払いの部分の通知が届いていたとき (注文はお店にある) と、
+     お客様が画面を離れた後に止まったとき (届いたかは、この欄からは分からない)。送り直し・案内・この event は、同じ
+     支払いの部分の通知が全部終わってから (応答が返り、2xx なら本文も読み終えてから) で、終わらない間は出ない。
+     例外は、完了の通知が 422 `tx_too_old` を受けたとき: 部分の通知を待たず、届いていたかも見ずに、応答を受けた時点で
+     案内とこの event を出す (案内を出す時点を、今までの画面と同じにするため。`noticeShown` は画面があれば true)。
 
 **4. 戻し方**
 - `ENABLE_ORDER_BIND_ENFORCE` を消すか `false` にして、再 deploy する。束縛なしの relay 通知は、また `bindingMissing` を

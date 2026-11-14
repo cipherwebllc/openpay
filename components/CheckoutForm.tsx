@@ -725,6 +725,8 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   const {
     statusToken,
     orderNotifyFailed,
+    directNotifyRetryable,
+    retryDirectNotify,
     boundNotifyRetryable,
     boundNotifyAcknowledged,
     previousOrderNotice,
@@ -1659,8 +1661,14 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
           {t('orderBindingRestoreUnavailable')}
         </p>
       )}
-      {boundNotifyRetryable && (
-        <button type="button" className="rounded-xl border border-amber-400 p-3 text-sm font-semibold" onClick={() => setBoundNotifyRetry((v) => v + 1)}>
+      {/* 「注文登録を再試行」は 1 つだけ描く。束縛した注文 (経路 C) と完了の通知 (経路 A・束縛した注文では走らない) は
+          状態も押したときの処理も別で、両方が立ったら経路 C を先にする。 */}
+      {(boundNotifyRetryable || directNotifyRetryable) && (
+        <button
+          type="button"
+          className="rounded-xl border border-amber-400 p-3 text-sm font-semibold"
+          onClick={boundNotifyRetryable ? () => setBoundNotifyRetry((v) => v + 1) : retryDirectNotify}
+        >
           {t('retryOrderNotify')}
         </button>
       )}

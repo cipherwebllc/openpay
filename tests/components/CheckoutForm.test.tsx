@@ -472,6 +472,12 @@ function setStandardPayment(
   } as Partial<ReturnType<typeof useStandardPayment>>);
 }
 
+// 受注 notify (/api/order/notify) が注文を保存できたときの応答。server は 200 のとき必ず JSON の { ok: true, … } を返す。
+// 完了の通知は r10-notify から本文を読み、{ ok: true } でない 2xx を「届いていない」として 2 秒後・17 秒後に送り直すので、
+// 届いた場合の test はこの形を返す (届いていない形のままだと、送り直しの timer が後の test の fetch の spy に入る)。
+// 本文は 1 回しか読めないので、呼ばれるたびに新しい Response を作る。
+const notifyDelivered = async () => Response.json({ ok: true });
+
 // 第三者 webhook (2026-10 user 裁定 R1) は退役: 外部 origin への fetch が 1 件も無いことを確かめる。
 // 相対 URL (/api/log/payment 等) と同一 origin の受注 notify は対象外。
 function externalFetchUrls(spy: { mock: { calls: unknown[][] } }): string[] {
@@ -1249,7 +1255,7 @@ describe('CheckoutForm — 成功時の挙動', () => {
 
   it('同一 origin の受注 notify 指定 → POST が発火 (items・customerEmail は不在)', async () => {
     const user = userEvent.setup();
-    const fetchSpy = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    const fetchSpy = vi.fn().mockImplementation(notifyDelivered);
     vi.stubGlobal('fetch', fetchSpy);
     setAccount({ connected: true, chainId: baseSepolia.id });
     setBalance(200_000_000n);
@@ -1301,7 +1307,7 @@ describe('CheckoutForm — 成功時の挙動', () => {
     async ({ settledOtherIntent, attributed }) => {
       const user = userEvent.setup();
       window.sessionStorage.clear();
-      const fetchSpy = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+      const fetchSpy = vi.fn().mockImplementation(notifyDelivered);
       vi.stubGlobal('fetch', fetchSpy);
       setAccount({ connected: true, chainId: baseSepolia.id });
       setBalance(200_000_000n);
@@ -1417,7 +1423,7 @@ describe('CheckoutForm — 成功時の挙動', () => {
 
   it('レジの値引き: 受注 notify payload に discount を足す (items の合計 − discount = amount)', async () => {
     const user = userEvent.setup();
-    const fetchSpy = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    const fetchSpy = vi.fn().mockImplementation(notifyDelivered);
     vi.stubGlobal('fetch', fetchSpy);
     setAccount({ connected: true, chainId: baseSepolia.id });
     setBalance(200_000_000n);
@@ -1443,7 +1449,7 @@ describe('CheckoutForm — 成功時の挙動', () => {
   it('注文メモ不在時は notify webhook payload が byte-for-byte 既存値のまま', async () => {
     const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000);
     const user = userEvent.setup();
-    const fetchSpy = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    const fetchSpy = vi.fn().mockImplementation(notifyDelivered);
     vi.stubGlobal('fetch', fetchSpy);
     setAccount({ connected: true, chainId: baseSepolia.id });
     setBalance(200_000_000n);
@@ -1481,7 +1487,7 @@ describe('CheckoutForm — 成功時の挙動', () => {
 
   it('注文メモあり時は同一 origin notify payload に含め、送信後 sessionStorage から削除', async () => {
     const user = userEvent.setup();
-    const fetchSpy = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    const fetchSpy = vi.fn().mockImplementation(notifyDelivered);
     vi.stubGlobal('fetch', fetchSpy);
     window.sessionStorage.setItem('openpay:order-memo:ord-42', '卵なし');
     setAccount({ connected: true, chainId: baseSepolia.id });
@@ -1533,7 +1539,7 @@ describe('CheckoutForm — 成功時の挙動', () => {
   it('お渡し準備完了通知 ON → payload に statusToken 同梱 + 完了画面に「注文状況を見る」リンク', async () => {
     feeFlags.enableOrderPickup = true;
     const user = userEvent.setup();
-    const fetchSpy = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    const fetchSpy = vi.fn().mockImplementation(notifyDelivered);
     vi.stubGlobal('fetch', fetchSpy);
     setAccount({ connected: true, chainId: baseSepolia.id });
     setBalance(200_000_000n);
@@ -1608,7 +1614,7 @@ describe('CheckoutForm — 成功時の挙動', () => {
 
   it('[regression] 異なる userOpHash (新規送金) では受注 notify が再発火する (ref が永久 lock しない)', async () => {
     const user = userEvent.setup();
-    const fetchSpy = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    const fetchSpy = vi.fn().mockImplementation(notifyDelivered);
     vi.stubGlobal('fetch', fetchSpy);
     setAccount({ connected: true, chainId: baseSepolia.id });
     setBalance(200_000_000n);
@@ -1662,7 +1668,7 @@ describe('CheckoutForm — 成功時の挙動', () => {
 
   it('[regression] 同一 userOpHash で再 render が起きても受注 notify は 1 回しか POST されない (gasQuote refetch 耐性)', async () => {
     const user = userEvent.setup();
-    const fetchSpy = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    const fetchSpy = vi.fn().mockImplementation(notifyDelivered);
     vi.stubGlobal('fetch', fetchSpy);
     setAccount({ connected: true, chainId: baseSepolia.id });
     setBalance(200_000_000n);
@@ -1696,7 +1702,7 @@ describe('CheckoutForm — 成功時の挙動', () => {
 
   it('[regression] 受注 notify payload の amount/customerPays は submit 時点の値 (成功後の gas quote 変動を反映しない)', async () => {
     const user = userEvent.setup();
-    const fetchSpy = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    const fetchSpy = vi.fn().mockImplementation(notifyDelivered);
     vi.stubGlobal('fetch', fetchSpy);
     setAccount({ connected: true, chainId: baseSepolia.id });
     setBalance(200_000_000n);
@@ -1773,80 +1779,125 @@ describe('CheckoutForm — 成功時の挙動', () => {
     vi.useRealTimers();
   });
 
-  it('受注 notify 失敗 (network) → UI には影響しない (logger.warn のみ・URL は origin + hash)', async () => {
-    const user = userEvent.setup();
-    const fetchSpy = vi
-      .fn()
-      .mockRejectedValue(new Error('network down'));
-    vi.stubGlobal('fetch', fetchSpy);
-    setAccount({ connected: true, chainId: baseSepolia.id });
-    setBalance(200_000_000n);
-    setSmartAccount(true);
-    setGasQuote('ready', 100_000n);
-    const secret = 'Bearer-checkout-failed-secret';
-    const webhook = `${window.location.origin}/api/order/notify?h=alice&token=${secret}`;
-    const makeUi = () => (
-      <CheckoutForm
-        params={{
-          ...USDC_PARAMS,
-          webhook,
-        }}
-      />
-    );
-    const { rerender } = render(makeUi());
-    await submitGaslessThenSucceed(user, rerender, makeUi);
-    await waitFor(() =>
-      expect(loggerWarn).toHaveBeenCalledWith(
-        'checkout.webhook.failed',
-        expect.objectContaining({
-          webhookOrigin: window.location.origin,
-          webhookHash: expect.stringMatching(/^[0-9a-f]{16}$/),
-        }),
-      ),
-    );
-    const fields = loggerWarn.mock.calls.find(
-      ([event]) => event === 'checkout.webhook.failed',
-    )?.[1];
-    expect(JSON.stringify(fields)).not.toContain(secret);
-    expect(fields).not.toHaveProperty('url');
-    // 成功 UI は影響を受けない
-    expect(screen.getByText(/お支払いが完了しました/)).toBeInTheDocument();
-    vi.unstubAllGlobals();
+  // 完了の通知 (r10-notify): 待てば通る失敗 (通信の失敗・5xx) は 2 秒後・17 秒後に送り直す。
+  // 記録は、最初の失敗が今までと同じ時点・同じ event・同じ欄で 1 件。送り直しを使い切って届かなければ
+  // `checkout.webhook.undelivered` が 1 件で、そのときに「自動登録できませんでした」の案内と「注文登録を再試行」が出る。
+  async function runNotifyRetriesOut() {
+    for (let i = 0; i < 18; i++) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1000);
+      });
+    }
+  }
+  const warnsOf = (name: string) => loggerWarn.mock.calls.filter(([event]) => event === name);
+
+  it('受注 notify 失敗 (network) → 記録は今までどおりすぐ 1 件 (URL は origin + hash)。2 回送り直しても届かなければ、案内と再試行を出す', async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchSpy = vi
+        .fn()
+        .mockRejectedValue(new Error('network down'));
+      vi.stubGlobal('fetch', fetchSpy);
+      setAccount({ connected: true, chainId: baseSepolia.id });
+      setBalance(200_000_000n);
+      setSmartAccount(true);
+      setGasQuote('ready', 100_000n);
+      const secret = 'Bearer-checkout-failed-secret';
+      const webhook = `${window.location.origin}/api/order/notify?h=alice&token=${secret}`;
+      const makeUi = () => (
+        <CheckoutForm
+          params={{
+            ...USDC_PARAMS,
+            webhook,
+          }}
+        />
+      );
+      const { rerender } = render(makeUi());
+      submitGaslessThenSucceedSync(rerender, makeUi);
+      // 1 回目の失敗の記録は、送り直しを待たずに出る (今までと同じ event・同じ欄)。案内はまだ出ない。
+      await vi.waitFor(() => expect(warnsOf('checkout.webhook.failed')).toHaveLength(1));
+      const fields = warnsOf('checkout.webhook.failed')[0][1];
+      expect(fields).toEqual({
+        error: expect.any(Error),
+        webhookOrigin: window.location.origin,
+        webhookHash: expect.stringMatching(/^[0-9a-f]{16}$/),
+      });
+      expect(JSON.stringify(fields)).not.toContain(secret);
+      expect(fields).not.toHaveProperty('url');
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      expect(screen.queryByText(/再度支払わず/)).toBeNull();
+
+      await runNotifyRetriesOut();
+      await vi.waitFor(() => expect(warnsOf('checkout.webhook.undelivered')).toHaveLength(1));
+      expect(fetchSpy).toHaveBeenCalledTimes(3);
+      const stopped = warnsOf('checkout.webhook.undelivered')[0][1];
+      expect(stopped).toEqual({
+        error: expect.any(Error),
+        attempts: 3,
+        noticeShown: true,
+        webhookOrigin: window.location.origin,
+        webhookHash: expect.stringMatching(/^[0-9a-f]{16}$/),
+      });
+      expect(JSON.stringify(stopped)).not.toContain(secret);
+      // 送り直しの途中の失敗は warn に出さない (最初の 1 件のまま)。
+      expect(warnsOf('checkout.webhook.failed')).toHaveLength(1);
+      // 完了の欄は残る (支払いは成立済み)。届かなかった案内と再試行が出る。
+      expect(screen.getByText(/お支払いが完了しました/)).toBeInTheDocument();
+      expect(screen.getByText(/再度支払わず/)).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: '注文登録を再試行' })).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    }
   });
 
-  it('受注 notify non-OK → origin + hash のみ記録し query の秘密を残さない', async () => {
-    const user = userEvent.setup();
-    const fetchSpy = vi
-      .fn()
-      .mockResolvedValue(new Response('failed', { status: 500 }));
-    vi.stubGlobal('fetch', fetchSpy);
-    setAccount({ connected: true, chainId: baseSepolia.id });
-    setBalance(200_000_000n);
-    setSmartAccount(true);
-    setGasQuote('ready', 100_000n);
-    const secret = 'Bearer-checkout-non-ok-secret';
-    const webhook = `${window.location.origin}/api/order/notify?h=alice&token=${secret}`;
-    const makeUi = () => (
-      <CheckoutForm params={{ ...USDC_PARAMS, webhook }} />
-    );
-    const { rerender } = render(makeUi());
-    await submitGaslessThenSucceed(user, rerender, makeUi);
+  it('受注 notify non-OK (500) → 今までどおり origin + hash のみ記録し query の秘密を残さない。2 回送り直しても届かなければ undelivered を 1 件', async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchSpy = vi.fn(async () => new Response('failed', { status: 500 }));
+      vi.stubGlobal('fetch', fetchSpy);
+      setAccount({ connected: true, chainId: baseSepolia.id });
+      setBalance(200_000_000n);
+      setSmartAccount(true);
+      setGasQuote('ready', 100_000n);
+      const secret = 'Bearer-checkout-non-ok-secret';
+      const webhook = `${window.location.origin}/api/order/notify?h=alice&token=${secret}`;
+      const makeUi = () => (
+        <CheckoutForm params={{ ...USDC_PARAMS, webhook }} />
+      );
+      const { rerender } = render(makeUi());
+      submitGaslessThenSucceedSync(rerender, makeUi);
 
-    await waitFor(() =>
-      expect(loggerWarn).toHaveBeenCalledWith(
-        'checkout.webhook.non_ok',
-        expect.objectContaining({
-          webhookOrigin: window.location.origin,
-          webhookHash: expect.stringMatching(/^[0-9a-f]{16}$/),
-        }),
-      ),
-    );
-    const fields = loggerWarn.mock.calls.find(
-      ([event]) => event === 'checkout.webhook.non_ok',
-    )?.[1];
-    expect(JSON.stringify(fields)).not.toContain(secret);
-    expect(fields).not.toHaveProperty('url');
-    vi.unstubAllGlobals();
+      await vi.waitFor(() => expect(warnsOf('checkout.webhook.non_ok')).toHaveLength(1));
+      const fields = warnsOf('checkout.webhook.non_ok')[0][1];
+      // 今までと同じ欄 (足していない)。
+      expect(fields).toEqual({
+        status: 500,
+        statusText: '',
+        webhookOrigin: window.location.origin,
+        webhookHash: expect.stringMatching(/^[0-9a-f]{16}$/),
+      });
+      expect(JSON.stringify(fields)).not.toContain(secret);
+      expect(fields).not.toHaveProperty('url');
+
+      await runNotifyRetriesOut();
+      await vi.waitFor(() => expect(warnsOf('checkout.webhook.undelivered')).toHaveLength(1));
+      expect(fetchSpy).toHaveBeenCalledTimes(3);
+      const stopped = warnsOf('checkout.webhook.undelivered')[0][1];
+      // 本文が JSON でない応答からは、server の error の語を載せない。
+      expect(stopped).toEqual({
+        status: 500,
+        attempts: 3,
+        noticeShown: true,
+        webhookOrigin: window.location.origin,
+        webhookHash: expect.stringMatching(/^[0-9a-f]{16}$/),
+      });
+      expect(JSON.stringify(stopped)).not.toContain(secret);
+      expect(warnsOf('checkout.webhook.non_ok')).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    }
   });
 
   it('cancel_url 指定 → 「中止して戻る」リンクを描画', () => {
@@ -2134,9 +2185,7 @@ describe('CheckoutForm — mode=standard 統合', () => {
     const user = userEvent.setup();
     setAccount({ connected: true, chainId: baseSepolia.id });
     setBalance(200_000_000n);
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(null, { status: 200 }),
-    );
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(notifyDelivered);
     const makeUi = () => (
       <CheckoutForm
         params={{
@@ -2173,9 +2222,7 @@ describe('CheckoutForm — mode=standard 統合', () => {
     const user = userEvent.setup();
     setAccount({ connected: true, chainId: baseSepolia.id });
     setBalance(200_000_000n);
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(null, { status: 200 }),
-    );
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(notifyDelivered);
     const makeUi = () => (
       <CheckoutForm
         params={{
