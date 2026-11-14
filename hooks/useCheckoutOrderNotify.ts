@@ -401,7 +401,9 @@ export function useCheckoutOrderNotify(args: UseCheckoutOrderNotifyArgs) {
       // 先に使い、通るはずだった部分の通知 (= 注文の保存) を 429 にする。(2) 部分の通知が届く前に「届かなかった」と
       // 決めて、お店に届いた注文に「自動登録できませんでした」を出す。
       // 待っている間に、この支払いの部分の通知が新しく始まっていたら、それも待つ (増えなくなるまで)。今の画面では、完了の
-      // 後に部分の通知は始まらない (effect D の最初の条件) が、その前提が崩れても、始まった部分の通知より先に動かない。
+      // 後に部分の通知は始まらない (effect D の最初の条件)。その前提が崩れた場合も、待ち終わるまでに始まった部分の通知は
+      // 待つ。完全な排他ではない: 待ち終わってから送るまでのわずかな間 (microtask) に始まるものは待てず、案内を出した後に
+      // 始まった部分の通知が届いても案内は消さない (今の画面でこの順を作る道は見つかっていない)。
       const partialsSettled = async () => {
         for (let waited = -1; waited !== payment.partials.length; ) {
           waited = payment.partials.length;
