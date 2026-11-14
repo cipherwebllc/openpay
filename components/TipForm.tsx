@@ -1237,7 +1237,7 @@ export function TipForm({
       {/* 支払い記録を保存できない端末では gasless だけを止める (relay 経路は使える)。
           「支払い確認中」とは別文言 — 送信済みかもしれない状態ではないため。
           確認中の支払いを送り直す前に保存できないとき (gaslessResendBlocked) は上の「確認中」の欄と並んで出る。
-          そのときは本文だけを通常送信の案内から「送り直せません」に替える。 */}
+          そのときは本文だけを「ブラウザの設定か別のブラウザ」の案内から「送り直せません」に替える。 */}
       {gaslessStoreUnavailable && (
         <PaymentStatusPanel
           title={t('pendingStoreUnavailableTitle')}

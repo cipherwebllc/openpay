@@ -1560,7 +1560,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
       {/* 支払い記録を保存できない端末では gasless だけを止める (通常送信は使える)。
           「支払い確認中」とは別文言 — 送信済みかもしれない状態ではないため。
           確認中の支払いを送り直す前に保存できないとき (gaslessResendBlocked) は上の「確認中」の欄と並んで出る。
-          確認中は通常送信も閉じているので、本文だけを通常送信の案内から「送り直せません」に替える。 */}
+          確認中は通常送信も閉じているので、本文だけを「ブラウザの設定か別のブラウザ」の案内から「送り直せません」に替える。 */}
       {!completed && gaslessStoreUnavailable && (
         <PaymentStatusPanel
           title={t('pendingStoreUnavailableTitle')}

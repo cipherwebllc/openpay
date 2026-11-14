@@ -162,7 +162,21 @@ describe('i18n: pendingStoreUnavailableResendBody (3 form 名前空間 × ja/en)
     for (const ns of FORM_NAMESPACES) {
       const form = messages[ns] as Record<string, string>;
       expect(form[KEY]).not.toMatch(/通常送信|standard payment/);
-      expect(form.pendingStoreUnavailableBody).toMatch(/通常送信をご利用ください|use standard payment instead/);
+      expect(form.pendingStoreUnavailableBody).not.toBe(form[KEY]);
+    }
+  });
+  // 保存できないだけのときの本文 (user 承認済みの文・2026-11-14)。前は「通常送信をご利用ください」で終わっていたが、
+  // USDC の画面には通常送信へ切り替えるボタンが無く、案内どおりに動けなかった。どの画面でもできる案内にした。
+  const STORE_BODY = {
+    ja: 'この端末では支払い記録を保存できないため、ガスレス送信を止めています。ブラウザの設定 (サイトのデータの保存) を確かめるか、別のブラウザでお試しください。',
+    en: "We can't save a payment record on this device, so gasless submission is disabled. Check your browser settings (site data storage) or try another browser.",
+  } as const;
+  it.each(['ja', 'en'] as const)('%s: 保存できないだけのときの本文は、3 フォームとも承認済みの文で、通常送信を案内しない', (locale) => {
+    const messages = { ja, en }[locale];
+    for (const ns of FORM_NAMESPACES) {
+      const form = messages[ns] as Record<string, string>;
+      expect(form.pendingStoreUnavailableBody).toBe(STORE_BODY[locale]);
+      expect(form.pendingStoreUnavailableBody).not.toMatch(/通常送信|standard payment/);
     }
   });
 });
