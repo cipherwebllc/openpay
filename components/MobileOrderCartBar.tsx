@@ -27,6 +27,7 @@ export function MobileOrderCartBar({
   lastOrder,
   checkoutUrl,
   checkoutPending,
+  checkoutNotice,
   discountNote,
   onCheckout,
 }: {
@@ -69,6 +70,8 @@ export function MobileOrderCartBar({
   checkoutUrl: string;
   /** 受付番号の mount 後生成待ち。true の間は checkout link を無効化する。 */
   checkoutPending: boolean;
+  /** 受付の確認が通らず、押し直せるときの案内 (支払いボタンのすぐ上)。無ければ出さない。 */
+  checkoutNotice?: string;
   /** 値引きの補足 (この注文に値引きが付かない理由・プレビューでは支払えない理由)。無ければ出さない。 */
   discountNote?: string;
   /** @handle 注文の server admission を通してから /checkout へ進む。 */
@@ -223,6 +226,11 @@ export function MobileOrderCartBar({
               </p>
             )}
             <p className="text-xs text-amber-700">{t('irreversibleNote')}</p>
+            {checkoutNotice && (
+              <p role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+                {checkoutNotice}
+              </p>
+            )}
             {needsTable || checkoutPending || !checkoutUrl ? (
               // テーブル番号 未入力、受付番号の生成前、支払い先の URL が無い (値引きを照合できないプレビュー等) ときは
               // 支払いを止める (行き先の無いリンクを押せる見た目で出さない)。
