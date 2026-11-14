@@ -52,17 +52,9 @@ import { useSmartAccount } from '@/hooks/useSmartAccount';
 import { useGasQuote } from '@/hooks/useGasQuote';
 import { useGasQuoteCircle } from '@/hooks/useGasQuoteCircle';
 import { useJpycEip3009Payment } from '@/hooks/useJpycEip3009Payment';
-import { resolveUsdcGaslessProvider } from '@/lib/circlePaymaster';
-import { resolveJpycGaslessProvider } from '@/lib/jpycGaslessProvider';
+import { usePaymentRoute } from '@/hooks/usePaymentRoute';
 import { jpycForwarderFor } from '@/lib/relay/forwarderConfig';
-import {
-  resolvePaymentRoute,
-  isStandardRoute,
-  isRelayRoute,
-  isRecoverRoute,
-  isCircleRoute,
-  type PaymentRoute,
-} from '@/lib/paymentRoute';
+import type { PaymentRoute } from '@/lib/paymentRoute';
 import { recoverFeeValue } from '@/lib/relay/recoverFee';
 import { relayErrorKey } from '@/lib/relay/relayErrorMessage';
 import {
@@ -186,38 +178,23 @@ function PaymentDetails({ params }: { params: PayParams }) {
   // 受取人ごとに送る。JPYC と split の組み合わせは下の splitBlock で送信させない。
   const hasSplit = !!params.split && params.split.length > 0;
 
-  // 決済経路の単一情報源 (Phase 1.1)。散在していた isStandard / useRelay / useRecover / isCircle を
-  // この 1 値から導出する。引数は現行どおりに算出した解決済み値で、判定の優先順位・短絡は
-  // resolvePaymentRoute が現行ロジックをそのまま再現する (挙動不変)。CheckoutForm と同型だが、
-  // PaymentForm は split 決済に対応するため disableRelay=hasSplit を渡す (現行 useRelay の
-  // `!hasSplit` ガード相当。split は Phase 1 relay 非対応なので非 relay 経路へ倒す)。
-  //   - isStandard: params.mode='standard' か SA fallback の override。
-  //   - JPYC ガスレスを EIP-3009 relay に倒すか (flag ON + JPYC + relay 対応 chain)。OFF / 非対応 /
-  //     split は 'pimlico-7702' 同等で従来挙動 (Pimlico fallback)。relay は smart account / gas quote
-  //     不要で、顧客が署名するだけ・自前 relayer がガス負担 (memory:jpyc-eip3009)。
-  //   - recover: forwarder 設定済 chain は gas 相当額を JPYC 回収 (gasMode で顧客上乗せ/店主吸収)。
-  //     未設定は free (OpenPay 負担)。
-  //   - USDC ガスレスが Circle に解決される場合は surcharge 込み quote + permit allowance。
-  const resolvedRoute = resolvePaymentRoute({
-    isStandard:
+  // 決済経路 (hooks/usePaymentRoute.ts)。isStandard / useRelay / useRecover / isCircle は route の 1 値から出る。
+  // 経路の決め方 (relay・recover・Circle) の説明は hook の頭。
+  //   - standardRequested: params.mode='standard' か SA fallback の override。
+  //   - PaymentForm は split 決済に対応するため disableRelay=hasSplit を渡す (現行 useRelay の
+  //     `!hasSplit` ガード相当。split は Phase 1 relay 非対応なので非 relay 経路へ倒す)。
+  const { route, isStandard, useRelay, useRecover, isCircle } = usePaymentRoute({
+    deployment,
+    walletChainId: chainId,
+    standardRequested:
       params.mode === 'standard' ||
       modeOverride === 'standard' ||
       standard.hasAttempt,
-    jpycGaslessProvider: resolveJpycGaslessProvider(
-      deployment,
-      chainId ?? deployment.chainId,
-    ),
-    usdcGaslessProvider: resolveUsdcGaslessProvider(
-      deployment,
-      deployment.chainId,
-    ),
-    hasJpycForwarder: jpycForwarderFor(chainId ?? deployment.chainId) !== null,
     disableRelay: hasSplit,
+    // submit gesture で選ばれた経路を attempt 単位で固定する。relay POST と degraded banner の
+    // click が競合しても、進行中 attempt が standard へ差し替わる窓を作らない。
+    pinnedRoute: attemptRouteRef.current,
   });
-  // submit gesture で選ばれた経路を attempt 単位で固定する。relay POST と degraded banner の
-  // click が競合しても、進行中 attempt が standard へ差し替わる窓を作らない。
-  const route = attemptRouteRef.current ?? resolvedRoute;
-  const isStandard = isStandardRoute(route);
   // 分配 (split) つきの QR を払えない組み合わせ (2026-10-11 user 承認)。送信可否 (derivePayGuards) で
   // お金が動く前に止め、下の案内で理由を出す。
   //   - jpyc: JPYC の relay は 1 件の送金だけで分配を送れず、分配を送れる Pimlico の sponsorship 経路は
@@ -234,7 +211,6 @@ function PaymentDetails({ params }: { params: PayParams }) {
         : null;
   const splitBlocked = splitBlock !== null;
   const isErc20Paymaster = !isStandard && paymasterMode === 'erc20';
-  const useRelay = isRelayRoute(route);
   const relay = useJpycEip3009Payment(deployment);
   // B1 Layer B: relay 経路でのみ relayer の事前 (preflight) 健全性を polling する。degraded なら
   // 署名 *前* に「通常決済へ切替」を先回り案内する (Layer A は submit 失敗 *後* の reactive な導線)。
@@ -243,11 +219,6 @@ function PaymentDetails({ params }: { params: PayParams }) {
     chainId: deployment.chainId,
     enabled: useRelay,
   });
-
-  // recover: relay かつ forwarder 設定済 chain (gas 相当額を JPYC 回収)。relayGasEquiv (= recover 時の
-  // 利用料) は amountWei 確定後に算出する (CDX-3: 実スケジュール recoverFeeValue を使い、bps>0 で
-  // 会計サマリと実 settle 額を一致させる)。
-  const useRecover = isRecoverRoute(route);
 
   // 確定モデル (2026-06-12): JPYC recover 決済は店舗が常に手数料を吸収する固定 (gasMode=merchant)。
   // 旧 QR が gas=customer を載せていても無視し merchant に倒す (発行済 QR の audience は極小で
@@ -267,7 +238,6 @@ function PaymentDetails({ params }: { params: PayParams }) {
   const gasQuote = useGasQuote(deployment, !isStandard && !useRelay);
   // USDC ガスレスが Circle Paymaster に解決される場合は surcharge 込みの quote +
   // permit allowance を Circle 専用フックから取る (route 由来。provider は flag/allowlist/fee で決まる)。
-  const isCircle = isCircleRoute(route);
   const circleQuote = useGasQuoteCircle(deployment, !isStandard && isCircle);
   // 表示・readiness・error は circle のときは circleQuote を本線にする。
   const activeQuote = isCircle ? circleQuote : gasQuote;
@@ -346,6 +316,8 @@ function PaymentDetails({ params }: { params: PayParams }) {
     DECIMAL_PATTERN.test(amountStr) &&
     exceedsTokenPrecision(amountStr, deployment.decimals);
 
+  // relayGasEquiv (= recover 時の利用料) は amountWei 確定後に算出する (CDX-3: 実スケジュール
+  // recoverFeeValue を使い、bps>0 で会計サマリと実 settle 額を一致させる)。
   // recover 時に回収する利用料 (= 実 settle で feeReceiver へ分割される額)。CDX-3: 実スケジュール
   // recoverFeeValue(billAmount, effectiveGas) を使う。billAmount は relay.mutate に渡す amountWei、
   // effectiveGas は recover で強制される 'merchant'。これにより会計サマリ・merchant net・履歴
