@@ -552,6 +552,28 @@ describe('MobileOrderView — 「支払いへ進む」: 受付の確認を通る
     expect(readCheckoutUrl(next).payable()).toBe('1000');
   });
 
+  // 数量が「開いたときの値 (0)」へ戻る操作でも、今の数量 (1) から変わるので無効にする (比べる相手は今の数量)。
+  it('待っている間に − で品を外してカートを空にすると、支払い欄が消え、待っていた確認が 200 で返っても移らない', async () => {
+    const gate = gatedFetches();
+    renderWithIntl(<MobileOrderView config={config} handle={HANDLE} />);
+    add('ブレンド');
+    fireEvent.click(payLink()!);
+
+    removeOne('ブレンド');
+
+    expect(cartToggle()).toBeNull();
+    expect(payButton()).toBeNull();
+    await gate.admit(0);
+    expect(assignSpy).not.toHaveBeenCalled();
+    expect(screen.queryByText(TEXT.closed)).toBeNull();
+    // 入れ直すと、新しい確認から始まる。
+    add('ブレンド');
+    const next = payHref();
+    fireEvent.click(payLink()!);
+    await gate.admit(1);
+    expect(assignSpy.mock.calls).toEqual([[next]]);
+  });
+
   // 操作の種類ごと。品: 牛丼 (オプションつき)・水・お茶。店内 (テーブル番号)・事前注文 (受け取りの枠)・チェーン 2 つ。
   // 押す前のカート: 牛丼（大盛り・えび）× 1 と 水 × 2、テーブル 7、枠は指定なし、チェーンは Polygon。
   const editConfig: MobileOrderConfig = {
