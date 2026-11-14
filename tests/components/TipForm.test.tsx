@@ -2746,6 +2746,132 @@ describe('TipForm — R14 二重送信 (in-flight 後の再 click)', () => {
   });
 });
 
+// PR-15d: 額の欄 (preset のボタン・カスタム額の欄) とメッセージの欄は、送信の途中 (deriveTipGuards の flowPending) は
+// 押せない / 入力できない。送信のボタンの側は上の行が見ているが、入力の側を見る行が無かった。
+// 取り方は role・name・placeholder だけにする (class・並び・包む要素に依らない): この 2 つの欄を表示だけの部品へ
+// 移しても、同じ DOM を出すかぎり通る。
+describe('TipForm — 額の欄とメッセージの欄は、送信の途中は押せない (PR-15d)', () => {
+  // preset のボタン全部 + カスタム額の欄。state を変えるたびに取り直す (前の node を持ち回らない)。
+  function amountControls(
+    symbol: 'USDC' | 'JPYC',
+    presets: string[],
+    placeholder: string,
+  ): HTMLElement[] {
+    return [
+      // name は完全一致なので、送信のボタン (「1 USDC を送る」) は拾わない。
+      ...presets.map((amount) =>
+        screen.getByRole('button', { name: `${amount} ${symbol}` }),
+      ),
+      screen.getByPlaceholderText(placeholder),
+    ];
+  }
+  const usdcAmountControls = () =>
+    amountControls('USDC', USDC_PARAMS.presets!, '例: 7.50');
+  const jpycAmountControls = () =>
+    amountControls('JPYC', JPYC_PARAMS.presets!, '例: 2500');
+  const messageBox = () =>
+    screen.getByRole('textbox', { name: '応援メッセージ (任意)' });
+  function expectAllEnabled(controls: HTMLElement[]) {
+    expect(controls).toHaveLength(4);
+    for (const control of controls) expect(control).toBeEnabled();
+  }
+  function expectAllDisabled(controls: HTMLElement[]) {
+    expect(controls).toHaveLength(4);
+    for (const control of controls) expect(control).toBeDisabled();
+  }
+
+  describe('USDC (ガスレス)', () => {
+    beforeEach(() => {
+      crossChainHintSpy.mockClear();
+      setAccount({ connected: true, chainId: baseSepolia.id });
+      setBalance(20_000_000n);
+      setSmartAccount(true);
+      setGasQuote('ready', 0n);
+    });
+
+    it('ガスレスの送信が pending の間だけ、preset のボタンとカスタム額の欄が disabled', () => {
+      const view = render(<TipForm params={USDC_PARAMS} />);
+      expectAllEnabled(usdcAmountControls());
+
+      setBatchPayment('pending');
+      view.rerender(<TipForm params={USDC_PARAMS} />);
+      expectAllDisabled(usdcAmountControls());
+
+      setBatchPayment('idle');
+      view.rerender(<TipForm params={USDC_PARAMS} />);
+      expectAllEnabled(usdcAmountControls());
+    });
+
+    // flowPending と directFlowPending を分ける行。cross-chain の実行中は、直接の送金 (ガスレス) は動いていないので
+    // directFlowPending は false のまま (子へ渡す executionDisabled が false = 子の実行は止めない) で、
+    // flowPending だけが crossChainLocked で true になる。額の欄が見るのは flowPending の側。
+    it('cross-chain の実行中は、直接の送金が動いていなくても preset のボタンとカスタム額の欄が disabled。終わると戻る', async () => {
+      render(<TipForm params={USDC_PARAMS} />);
+
+      await waitFor(() => expect(crossChainHintSpy).toHaveBeenCalled());
+      type HintProps = {
+        executionDisabled: boolean;
+        onAttemptStart: (amount: bigint) => void;
+        onExecutingChange: (executing: boolean) => void;
+      };
+      const hintProps = () => crossChainHintSpy.mock.lastCall![0] as HintProps;
+      expectAllEnabled(usdcAmountControls());
+
+      act(() => {
+        hintProps().onAttemptStart(1_000_000n);
+        hintProps().onExecutingChange(true);
+      });
+      expectAllDisabled(usdcAmountControls());
+      // この場面で directFlowPending (と directSettledNoRetry) は false: 2 つの値が違う場面であることの確かめ。
+      expect(hintProps().executionDisabled).toBe(false);
+
+      act(() => hintProps().onExecutingChange(false));
+      expectAllEnabled(usdcAmountControls());
+    });
+  });
+
+  describe('JPYC (relay)', () => {
+    beforeEach(() => {
+      vi.mocked(resolveJpycGaslessProvider).mockReturnValue('eip3009-relay');
+      setAccount({ connected: true, chainId: polygonAmoy.id });
+      setBalance(1000n * 10n ** 18n);
+      setTipMessageFlag(true);
+    });
+
+    // 既定の preset は 100 JPYC = メッセージを付けられる額 (1 JPYC 以上)。だから idle では入力でき、
+    // disabled になる理由は送信の途中であることだけ (最低額の側の disabled は「1 JPYC 未満では…」の行が見ている)。
+    it('relay の送信が pending の間だけ、メッセージの欄が disabled', () => {
+      const view = render(<TipForm params={JPYC_PARAMS} />);
+      expect(messageBox()).toBeEnabled();
+      fireEvent.change(messageBox(), { target: { value: '応援しています' } });
+      expect(messageBox()).toHaveValue('応援しています');
+
+      setRelay('pending');
+      view.rerender(<TipForm params={JPYC_PARAMS} />);
+      expect(messageBox()).toBeDisabled();
+      // 書いた文は消えない (送信の途中で入力を止めるだけ)。
+      expect(messageBox()).toHaveValue('応援しています');
+
+      setRelay('idle');
+      view.rerender(<TipForm params={JPYC_PARAMS} />);
+      expect(messageBox()).toBeEnabled();
+    });
+
+    it('relay の送信が pending の間だけ、preset のボタンとカスタム額の欄が disabled', () => {
+      const view = render(<TipForm params={JPYC_PARAMS} />);
+      expectAllEnabled(jpycAmountControls());
+
+      setRelay('pending');
+      view.rerender(<TipForm params={JPYC_PARAMS} />);
+      expectAllDisabled(jpycAmountControls());
+
+      setRelay('idle');
+      view.rerender(<TipForm params={JPYC_PARAMS} />);
+      expectAllEnabled(jpycAmountControls());
+    });
+  });
+});
+
 // 第 9 回レビュー A-4: 控えの支払者は、確定時に接続しているアドレスでなく送信した時点のアドレス。確定を待つ間に
 // 拡張機能で別のウォレット (B) へ切り替えても、控えに B を残さない (控えは pending → confirmed の昇格しか受けず、
 // A に戻しても保存済みの支払者は直らない)。送信時のスナップショットを今の address に戻すと各 it が落ちる。
