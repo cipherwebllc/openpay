@@ -83,8 +83,8 @@ export type CartLineView = OptionCartEntry & { isOption: boolean };
 // 店内 (dineIn) 時のテーブル番号入力の最大長。/checkout の description (200) に十分収まる短さ。
 const TABLE_NUMBER_MAX = 16;
 const ORDER_TABLE_STORAGE_PREFIX = 'openpay:order-table:';
-// 注文に載るテーブル番号: 店内 (dineIn) の店だけ・前後の空白は落とす。行き先の URL (description) と、
-// 「入力で注文の中身が変わるか」の判定の両方がこれを使う (入力欄の値そのものは、空白ごと state に持つ)。
+// 注文に載るテーブル番号: 店内 (dineIn) の店だけ・前後の空白は落とす (入力欄の値そのものは、空白ごと state に持つ)。
+// 行き先の URL の description と、未入力の判定・店員を呼ぶボタンが使う。
 function orderTableNumber(dineIn: boolean | undefined, input: string): string {
   return dineIn ? input.trim() : '';
 }
@@ -238,24 +238,6 @@ export function MobileOrderView({
       // sessionStorage の拒否を店舗ページ全体へ波及させず、テーブル番号の復元だけを諦める。
     }
   }, [config.dineIn, handle]);
-  const updateTableNumber = useCallback(
-    (value: string) => {
-      const next = value.slice(0, TABLE_NUMBER_MAX);
-      if (orderTableNumber(config.dineIn, next) !== orderTableNumber(config.dineIn, tableNumber)) {
-        invalidateAdmission();
-      }
-      setTableNumber(next);
-      if (!handle) return;
-      try {
-        const key = `${ORDER_TABLE_STORAGE_PREFIX}${handle}`;
-        if (next) window.sessionStorage.setItem(key, next);
-        else window.sessionStorage.removeItem(key);
-      } catch {
-        // sessionStorage の拒否/容量障害を注文・決済導線へ波及させない (入力 state は維持)。
-      }
-    },
-    [config.dineIn, handle, invalidateAdmission, tableNumber],
-  );
   // 受注リレー (flag ON) 用の短い受付番号。この注文ページ訪問で安定 (再描画/チェーン切替で不変)。
   // 客の完了画面 (/checkout の order_id) と店主の受注カードの双方に表示され、受け渡し照合に使う。
   const [orderId, setOrderId] = useState<string | null>(null);
@@ -517,7 +499,6 @@ export function MobileOrderView({
   // 店内 (dineIn) 時: テーブル番号を /checkout の description (→ 控え/履歴 memo) に載せ、
   // 受け渡し先を記録する (後続のフルフィルメント = Nostr 通知 / QR 照合 でも引き継げる)。
   const tableNum = orderTableNumber(config.dineIn, tableNumber);
-  const orderDescription = tableNum ? t('tableDescPrefix', { table: tableNum }) : undefined;
   // 店内なのにテーブル番号が未入力なら支払いを止める (どのテーブルか不明な注文を防ぐ)。
   const needsTable = Boolean(config.dineIn) && tableNum.length === 0;
   // 受注リレー (flag ON + @handle 公開時のみ): 決済成功 webhook を /api/order/notify?h= へ向け、
@@ -527,56 +508,79 @@ export function MobileOrderView({
       ? `${origin}/api/order/notify?h=${encodeURIComponent(handle)}`
       : undefined;
   const awaitsOrderId = env.enableOrderRelay && Boolean(handle) && orderId === null;
-  const baseCheckoutUrl =
-    origin &&
-    cartItems.length > 0 &&
-    !tooMany &&
-    !awaitsOrderId &&
-    !noPickupSlots &&
-    // 値引きは @handle の店だけ (署名前に公開設定と照合する)。照合先の無いページ (ビルダーのプレビュー) では
-    // 値引き後の額を表示したまま定価の支払いへ進ませない。
-    (discountWei === 0n || Boolean(handle))
-      ? buildCheckoutUrl(origin, {
-          to: config.receiver,
-          token: 'jpyc',
-          chain, // 顧客が選んだ受取チェーン (単一なら config.chain)
-          gas: 'customer',
-          items: cartItems,
-          description: orderDescription, // 店内のテーブル番号 (テイクアウトは undefined)
-          // モバイル注文システム利用料。CheckoutForm/relay が feeKind/feePayer から
-          // 経路非依存に 1%(店頭)/3%(事前) を分割するのは課金 flag ON のときだけ。
-          // mode は署名前 admission の店舗設定束縛にも使うため常に運ぶ。実際の課金は
-          // CheckoutForm の enableMobileOrderFee gate が従来どおり決め、flag OFF では発生しない。
-          feeKind: config.mode,
-          feePayer: config.feePayer,
-          // 店名とインボイス登録番号 (顧客の控えに出す表示専用・金額/受取先/束縛には関与しない)。
-          // 店名が @handle の代用名のときは「発行事業者の名称」にならないので、公開設定を組む側
-          // (lib/handle/record.ts) が invoiceNo を載せない。ここでは店名の形で判定しない。
-          storeName: config.shopName,
-          ...(config.invoiceNo ? { invoiceNo: config.invoiceNo } : {}),
-          // @handle 店舗は checkout submit の署名前 admission で最新 KV 設定へ再束縛する。
-          // self-contained ?s= 注文は server 権威の handle が無いため付けない。
-          ...(handle ? { storeHandle: handle } : {}),
-          // 受注リレー用 (flag ON + @handle 公開時のみ・OFF では付かず inert)。
-          // orderId = webhook→店主の受注フィード + 完了画面の見出し。
-          // receiptNo = 同じ受付番号を顧客の控え (localStorage・/scan で後から確認可) にも残す
-          //   → 完了画面を閉じても「レシート番号」として受付番号を再確認できる (受け渡し照合用)。
-          ...(orderRelayWebhook && orderId
-            ? { webhook: orderRelayWebhook, orderId, receiptNo: orderId }
-            : {}),
-          // 受取予定時刻 (Phase 4・preorder で顧客が選んだスロット・flag OFF/未選択は付かない)。
-          ...(timeEnabled && isPreorder && pickupAt ? { pickupAt } : {}),
-          // 店舗の値引き (在るときだけ)。/checkout の支払額 = 小計 − 値引き・署名前に公開設定と照合される。
-          ...(discountWei > 0n ? { discount: formatUnits(discountWei, decimals) } : {}),
-        })
-      : '';
-  // /checkout の「←」を店舗へ戻すため back/backName を付与 (@handle 公開時に backHref が渡る)。
-  // buildCheckoutUrl は常に query を含むので & 連結で安全。値は encode 済み。
-  const checkoutUrl =
-    baseCheckoutUrl && backHref
+  // 行き先の URL を、テーブル番号の入力から作る (ほかの値は、この描画の時点のもの)。今の入力の URL (checkoutUrl) と、
+  // 「入力をこの値にしたら URL が変わるか」の判定 (updateTableNumber) の両方が、この 1 つを使う。
+  const buildCheckoutUrlFor = (tableInput: string): string => {
+    const table = orderTableNumber(config.dineIn, tableInput);
+    const orderDescription = table ? t('tableDescPrefix', { table }) : undefined;
+    const baseCheckoutUrl =
+      origin &&
+      cartItems.length > 0 &&
+      !tooMany &&
+      !awaitsOrderId &&
+      !noPickupSlots &&
+      // 値引きは @handle の店だけ (署名前に公開設定と照合する)。照合先の無いページ (ビルダーのプレビュー) では
+      // 値引き後の額を表示したまま定価の支払いへ進ませない。
+      (discountWei === 0n || Boolean(handle))
+        ? buildCheckoutUrl(origin, {
+            to: config.receiver,
+            token: 'jpyc',
+            chain, // 顧客が選んだ受取チェーン (単一なら config.chain)
+            gas: 'customer',
+            items: cartItems,
+            description: orderDescription, // 店内のテーブル番号 (テイクアウトは undefined)
+            // モバイル注文システム利用料。CheckoutForm/relay が feeKind/feePayer から
+            // 経路非依存に 1%(店頭)/3%(事前) を分割するのは課金 flag ON のときだけ。
+            // mode は署名前 admission の店舗設定束縛にも使うため常に運ぶ。実際の課金は
+            // CheckoutForm の enableMobileOrderFee gate が従来どおり決め、flag OFF では発生しない。
+            feeKind: config.mode,
+            feePayer: config.feePayer,
+            // 店名とインボイス登録番号 (顧客の控えに出す表示専用・金額/受取先/束縛には関与しない)。
+            // 店名が @handle の代用名のときは「発行事業者の名称」にならないので、公開設定を組む側
+            // (lib/handle/record.ts) が invoiceNo を載せない。ここでは店名の形で判定しない。
+            storeName: config.shopName,
+            ...(config.invoiceNo ? { invoiceNo: config.invoiceNo } : {}),
+            // @handle 店舗は checkout submit の署名前 admission で最新 KV 設定へ再束縛する。
+            // self-contained ?s= 注文は server 権威の handle が無いため付けない。
+            ...(handle ? { storeHandle: handle } : {}),
+            // 受注リレー用 (flag ON + @handle 公開時のみ・OFF では付かず inert)。
+            // orderId = webhook→店主の受注フィード + 完了画面の見出し。
+            // receiptNo = 同じ受付番号を顧客の控え (localStorage・/scan で後から確認可) にも残す
+            //   → 完了画面を閉じても「レシート番号」として受付番号を再確認できる (受け渡し照合用)。
+            ...(orderRelayWebhook && orderId
+              ? { webhook: orderRelayWebhook, orderId, receiptNo: orderId }
+              : {}),
+            // 受取予定時刻 (Phase 4・preorder で顧客が選んだスロット・flag OFF/未選択は付かない)。
+            ...(timeEnabled && isPreorder && pickupAt ? { pickupAt } : {}),
+            // 店舗の値引き (在るときだけ)。/checkout の支払額 = 小計 − 値引き・署名前に公開設定と照合される。
+            ...(discountWei > 0n ? { discount: formatUnits(discountWei, decimals) } : {}),
+          })
+        : '';
+    // /checkout の「←」を店舗へ戻すため back/backName を付与 (@handle 公開時に backHref が渡る)。
+    // buildCheckoutUrl は常に query を含むので & 連結で安全。値は encode 済み。
+    return baseCheckoutUrl && backHref
       ? `${baseCheckoutUrl}&back=${encodeURIComponent(backHref)}` +
-        (backLabel ? `&backName=${encodeURIComponent(backLabel)}` : '')
+          (backLabel ? `&backName=${encodeURIComponent(backLabel)}` : '')
       : baseCheckoutUrl;
+  };
+  const checkoutUrl = buildCheckoutUrlFor(tableNumber);
+  // テーブル番号の入力。入れた値で行き先の URL が変わるときだけ、待っている確認を無効にする。前後の空白や、URL を
+  // 作るときに落ちる文字 (制御文字・片方だけのサロゲート) を足しただけなら、URL は同じなので無効にしない。
+  // URL が空の間は次の値でも空なので無効にしないが、その間に確認を待ったままこの欄が出る場面は無い
+  // (10 品を超えた・受け取りの枠が無い、では欄が出ない)。
+  const updateTableNumber = (value: string) => {
+    const next = value.slice(0, TABLE_NUMBER_MAX);
+    if (buildCheckoutUrlFor(next) !== checkoutUrl) invalidateAdmission();
+    setTableNumber(next);
+    if (!handle) return;
+    try {
+      const key = `${ORDER_TABLE_STORAGE_PREFIX}${handle}`;
+      if (next) window.sessionStorage.setItem(key, next);
+      else window.sessionStorage.removeItem(key);
+    } catch {
+      // sessionStorage の拒否/容量障害を注文・決済導線へ波及させない (入力 state は維持)。
+    }
+  };
   const checkOrderAdmission = useCallback(
     async (event: React.MouseEvent<HTMLAnchorElement>) => {
       // 「前回と同じ注文」用に id カートを保存 (ハンドオフ点・送信はしない)。save は no-throw
