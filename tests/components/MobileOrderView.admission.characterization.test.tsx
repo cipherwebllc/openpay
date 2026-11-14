@@ -12,7 +12,7 @@
 
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { screen, fireEvent, within } from '@testing-library/react';
-import { act } from 'react';
+import { act, useEffect } from 'react';
 import { formatUnits } from 'viem';
 import { renderWithIntl } from '../_helpers/i18n';
 
@@ -138,6 +138,9 @@ const TEXT = {
   pickupAsap: '最短（指定なし）',
   // 受付の確認が通らなかったときの、支払い欄の案内 (承認済みの字のまま)。
   retryNotice: 'お支払いへ進めませんでした。少し待ってから、もう一度「支払いへ進む」を押してください。',
+  // 選んだ受取時間を、自動で「最短（指定なし）」に戻したときの、受取時間の欄の下の案内 (承認済みの字のまま)。
+  pickupReset:
+    '選んだ受取時間は選べなくなったため、「最短（指定なし）」に戻しました。ほかの時間がよければ、選び直してください。',
 };
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -226,6 +229,8 @@ const payLink = () => screen.queryByRole('link', { name: TEXT.pay });
 const payButton = () => screen.queryByRole('button', { name: TEXT.pay });
 /** 支払い欄の案内 (role="alert")。この画面で alert はこれだけ。出ていなければ null。 */
 const notice = () => screen.queryByRole('alert');
+/** 受取時間の欄の下の案内 (role="status")。この画面で status はこれだけ。出ていなければ null。 */
+const pickupReset = () => screen.queryByRole('status');
 /** 受付の確認を断る応答 (本文は route と同じ形)。 */
 const refused = (status: number, error: string) =>
   new Response(JSON.stringify({ ok: false, error }), {
@@ -985,6 +990,8 @@ describe('MobileOrderView — 「支払いへ進む」: 受付の確認を通る
     // 待ちは解けていない。
     expect(payLink()).toBeNull();
     expect(payButton()).toBeDisabled();
+    // 待っている確認は 12:30 の枠で送ってあり、200 なら 12:30 つきの URL へ移る。「最短に戻しました」は、ここでは出さない。
+    expect(pickupReset()).toBeNull();
 
     await gate.admit(0);
 
@@ -994,6 +1001,8 @@ describe('MobileOrderView — 「支払いへ進む」: 受付の確認を通る
     expect(assignSpy.mock.calls).toEqual([[href]]);
     // 応答の後の画面の link は、枠の無い URL。
     expect(readCheckoutUrl(payHref()).query.pickup_at).toBeUndefined();
+    // 枠つきで移り始めた後も、出さない。
+    expect(pickupReset()).toBeNull();
   });
 
   it('待っている間に売り切れが反映されても、待っていた確認は有効のまま: 画面の合計は減るが、進む先は押したときの URL (今の動き)', async () => {
@@ -1964,7 +1973,7 @@ describe('MobileOrderView — 時間の経過 (時間の flag ON)', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it('選んだ受け取りの枠が候補から外れたら選択を外す: URL から pickup_at が消え、POST の本文にも載らない', async () => {
+  it('選んだ受け取りの枠が候補から外れたら選択を外し、欄の下に案内を出す: URL から pickup_at が消え、POST の本文にも載らない', async () => {
     renderWithIntl(
       <MobileOrderView
         config={{ ...config, mode: 'preorder', minLeadMinutes: 30 }}
@@ -1978,6 +1987,7 @@ describe('MobileOrderView — 時間の経過 (時間の flag ON)', () => {
       (within(select()).getByRole('option', { name }) as HTMLOptionElement).value;
     fireEvent.change(select(), { target: { value: optionValue('12:30') } });
     expect(readCheckoutUrl(payHref()).query.pickup_at).toBe(String(tokyo(12, 30)));
+    expect(pickupReset()).toBeNull();
 
     // 30 秒たつと 12:00:30 + 30 分 → 最初の枠は 12:45。12:30 は候補から外れる。
     act(() => {
@@ -1987,6 +1997,7 @@ describe('MobileOrderView — 時間の経過 (時間の flag ON)', () => {
     expect(within(select()).queryByRole('option', { name: '12:30' })).toBeNull();
     expect(select().value).toBe('');
     expect(within(select()).getByRole<HTMLOptionElement>('option', { name: TEXT.pickupAsap }).selected).toBe(true);
+    expect(pickupReset()?.textContent).toBe(TEXT.pickupReset);
     const url = readCheckoutUrl(payHref());
     expect(url.query).toEqual({
       to: RECEIVER,
@@ -2002,9 +2013,11 @@ describe('MobileOrderView — 時間の経過 (時間の flag ON)', () => {
 
     expect(postedBodies()).toEqual([{ handle: HANDLE, merchant: RECEIVER, mode: 'preorder' }]);
     expect(assignSpy.mock.calls).toEqual([[payHref()]]);
+    // 進んだ先は枠の無い URL (最短)。案内は出たまま。
+    expect(pickupReset()?.textContent).toBe(TEXT.pickupReset);
   });
 
-  it('まだ候補に残っている枠は、時間が進んでも選んだまま', () => {
+  it('まだ候補に残っている枠は、時間が進んでも選んだまま (案内も出ない)', () => {
     renderWithIntl(
       <MobileOrderView config={{ ...config, mode: 'preorder', minLeadMinutes: 30 }} />,
     );
@@ -2019,6 +2032,607 @@ describe('MobileOrderView — 時間の経過 (時間の flag ON)', () => {
 
     expect(select().value).toBe(String(tokyo(12, 45)));
     expect(readCheckoutUrl(payHref()).query.pickup_at).toBe(String(tokyo(12, 45)));
+    expect(pickupReset()).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------------------
+// 4b. 選んだ受取時間を、自動で「最短（指定なし）」に戻したときの案内 (受取時間の欄のすぐ下・role="status")
+//   - 出すのは、選んでいた枠が候補から外れて、選択を最短に戻した時。最初から最短・枠が候補に残っている間は出さない。
+//   - 案内が言うのは「今の選択は最短で、この先は最短で進む」。枠つきの URL へ進む (進むかもしれない) 間は出さない:
+//     ページを離れ始めた後は出さない。受付の確認を待っている間は出さず、その確認が移らずに終わった所で出す。
+//   - 消えるのは、お客様が受取時間を選んだ時だけ。
+//   - 送るもの (確認の本文)・進む先 (URL)・枠を外す動き・世代・送れる本数は、案内の有無で変わらない。
+// ---------------------------------------------------------------------------------------------------------------------
+describe('MobileOrderView — 選んだ受取時間を自動で「最短（指定なし）」に戻したときの案内 (時間の flag ON)', () => {
+  beforeEach(() => {
+    envHold.enablePreorderTime = true;
+  });
+
+  // 事前注文・準備 30 分。12:00:00 に開くと、候補は 12:30 から。30 秒後の取り直しで、12:30 は候補から外れる。
+  const slotConfig: MobileOrderConfig = { ...config, mode: 'preorder', minLeadMinutes: 30 };
+  const pickupSelect = () => screen.getByLabelText(TEXT.pickup) as HTMLSelectElement;
+  const pickupOption = (name: string) =>
+    within(pickupSelect()).queryByRole<HTMLOptionElement>('option', { name });
+  const choosePickup = (name: string) =>
+    fireEvent.change(pickupSelect(), { target: { value: pickupOption(name)!.value } });
+  const passTime = (ms = 30_000) =>
+    act(() => {
+      vi.advanceTimersByTime(ms);
+    });
+  const SLOT_BODY = { handle: HANDLE, merchant: RECEIVER, mode: 'preorder', pickupAt: tokyo(12, 30) };
+  const ASAP_BODY = { handle: HANDLE, merchant: RECEIVER, mode: 'preorder' };
+  /** 再描画を挟まない二度押し (2 本とも同じ中身の確認)。 */
+  async function pressPayTwiceAtOnce() {
+    const link = payLink()!;
+    await act(async () => {
+      fireEvent.click(link);
+      fireEvent.click(link);
+      for (let i = 0; i < 5; i++) await Promise.resolve();
+    });
+  }
+
+  it('案内の文は承認された字のまま (ja / en)。key は MobileOrder の中だけにある', () => {
+    expect(jaMessages.MobileOrder.pickupResetNotice).toBe(TEXT.pickupReset);
+    expect(enMessages.MobileOrder.pickupResetNotice).toBe(
+      "The pickup time you chose is no longer available, so it's been reset to “Soonest (unspecified)”. Choose another time if you'd like.",
+    );
+    // 同じ名前の key が、ほかの namespace (入れ子も) に無い。
+    const pathsOf = (node: unknown, path: string[] = []): string[] =>
+      node !== null && typeof node === 'object'
+        ? Object.entries(node).flatMap(([key, value]) =>
+            key === 'pickupResetNotice'
+              ? [[...path, key].join('.')]
+              : pathsOf(value, [...path, key]),
+          )
+        : [];
+    expect(pathsOf(jaMessages)).toEqual(['MobileOrder.pickupResetNotice']);
+    expect(pathsOf(enMessages)).toEqual(['MobileOrder.pickupResetNotice']);
+  });
+
+  // 案内の文は、欄の選択肢の名前を引いている。選択肢の字を変えたら、案内の文も一緒に直す。
+  it.each([
+    ['ja', jaMessages.MobileOrder],
+    ['en', enMessages.MobileOrder],
+  ] as const)('案内の文 (%s) は、「最短（指定なし）」の選択肢を、欄と同じ字で引いている', (_locale, m) => {
+    expect(m.pickupResetNotice).toContain(m.pickupAsap);
+  });
+
+  it('最初から「最短（指定なし）」のままなら、時間が進んで候補が入れ替わっても、案内は出ない', () => {
+    renderWithIntl(<MobileOrderView config={slotConfig} handle={HANDLE} />);
+    add('ブレンド');
+    expect(pickupOption('12:30')).not.toBeNull();
+    expect(pickupReset()).toBeNull();
+
+    passTime();
+
+    expect(pickupOption('12:30')).toBeNull();
+    expect(pickupSelect().value).toBe('');
+    expect(pickupReset()).toBeNull();
+    passTime(20 * 60_000);
+    expect(pickupOption('12:45')).toBeNull();
+    expect(pickupReset()).toBeNull();
+  });
+
+  it('選んだ枠が候補に残っている間は出ない。候補から外れた所で、欄のすぐ下に出る (role は status・alert ではない・aria-label なし)', () => {
+    renderWithIntl(<MobileOrderView config={slotConfig} handle={HANDLE} />);
+    add('ブレンド');
+    choosePickup('12:45');
+
+    // 12:15:00 ちょうどの取り直しまでは、最短の受け取り (今 + 30 分) が 12:45 の枠に収まる。
+    passTime(15 * 60_000);
+    expect(pickupSelect().value).toBe(String(tokyo(12, 45)));
+    expect(pickupReset()).toBeNull();
+
+    // 12:15:30 の取り直しで、最短は 13:00 の枠になる。
+    passTime();
+
+    expect(pickupOption('12:45')).toBeNull();
+    expect(pickupSelect().value).toBe('');
+    expect(pickupOption(TEXT.pickupAsap)!.selected).toBe(true);
+    const shown = pickupReset()!;
+    expect(shown.textContent).toBe(jaMessages.MobileOrder.pickupResetNotice);
+    expect(shown.textContent).toContain(pickupOption(TEXT.pickupAsap)!.textContent);
+    expect(pickupSelect().nextElementSibling).toBe(shown);
+    expect(shown.tagName).toBe('P');
+    expect(shown.hasAttribute('aria-label')).toBe(false);
+    // 支払いのボタンの上の案内 (alert) とは別の要素。そちらは出ていない。
+    expect(notice()).toBeNull();
+    // 選び直せる: 欄には次の候補がある。支払い欄も残っている。
+    expect(pickupOption('13:00')).not.toBeNull();
+    expect(readCheckoutUrl(payHref()).query.pickup_at).toBeUndefined();
+  });
+
+  it('英語の画面では、英語の案内が出る', () => {
+    renderWithIntl(<MobileOrderView config={slotConfig} handle={HANDLE} />, { locale: 'en' });
+    fireEvent.click(
+      within(menuCard('ブレンド')).getByRole('button', { name: enMessages.MobileOrder.qtyIncrease }),
+    );
+    const select = () => screen.getByLabelText(enMessages.MobileOrder.pickupLabel) as HTMLSelectElement;
+    fireEvent.change(select(), { target: { value: String(tokyo(12, 30)) } });
+    expect(select().value).toBe(String(tokyo(12, 30)));
+
+    passTime();
+
+    expect(select().value).toBe('');
+    expect(select().selectedOptions[0].textContent).toBe(enMessages.MobileOrder.pickupAsap);
+    expect(pickupReset()?.textContent).toBe(enMessages.MobileOrder.pickupResetNotice);
+    expect(select().nextElementSibling).toBe(pickupReset());
+  });
+
+  it('案内は、お客様が別の受取時間を選ぶと消える。選び直した枠がまた候補から外れると、また出る', () => {
+    renderWithIntl(<MobileOrderView config={slotConfig} handle={HANDLE} />);
+    add('ブレンド');
+    choosePickup('12:30');
+    passTime();
+    expect(pickupReset()?.textContent).toBe(TEXT.pickupReset);
+
+    choosePickup('12:45');
+
+    expect(pickupReset()).toBeNull();
+    expect(readCheckoutUrl(payHref()).query.pickup_at).toBe(String(tokyo(12, 45)));
+
+    // 12:15:30 の取り直しで 12:45 も外れる。
+    passTime(15 * 60_000);
+
+    expect(pickupSelect().value).toBe('');
+    expect(pickupReset()?.textContent).toBe(TEXT.pickupReset);
+  });
+
+  it('自分で選び直して消えた案内は、その後の確認が失敗で返っても戻らない (選んだ枠は選んだまま)', async () => {
+    const gate = gatedFetches();
+    renderWithIntl(<MobileOrderView config={slotConfig} handle={HANDLE} />);
+    add('ブレンド');
+    choosePickup('12:30');
+    passTime();
+    expect(pickupReset()).not.toBeNull();
+    choosePickup('12:45');
+    expect(pickupReset()).toBeNull();
+
+    fireEvent.click(payLink()!);
+    await gate.fail(0);
+
+    expect(notice()?.textContent).toBe(TEXT.retryNotice);
+    expect(pickupSelect().value).toBe(String(tokyo(12, 45)));
+    expect(pickupReset()).toBeNull();
+    // 注文を変えて、押し直した確認を無効にした所でも戻らない。
+    fireEvent.click(payLink()!);
+    add('水');
+    expect(pickupReset()).toBeNull();
+    expect(postedBodies()).toEqual([
+      { ...ASAP_BODY, pickupAt: tokyo(12, 45) },
+      { ...ASAP_BODY, pickupAt: tokyo(12, 45) },
+    ]);
+  });
+
+  // 案内が出ている間、欄の選択は「最短（指定なし）」。ブラウザは、選んである選択肢をもう一度選んでも change を出さないので、
+  // この行は「最短を選ぶ change でも消える (自分で選んだ後は出さない)」を、change を直接送って確かめる。
+  it('案内は、「最短（指定なし）」を選ぶ change でも消える', () => {
+    renderWithIntl(<MobileOrderView config={slotConfig} handle={HANDLE} />);
+    add('ブレンド');
+    choosePickup('12:30');
+    passTime();
+    expect(pickupReset()).not.toBeNull();
+
+    fireEvent.change(pickupSelect(), { target: { value: '' } });
+
+    expect(pickupSelect().value).toBe('');
+    expect(pickupReset()).toBeNull();
+  });
+
+  it('案内は、受取時間を選ぶ以外では消えない (品を足す・明細を開く・時間が進む・カートを空にして入れ直す・「支払いへ進む」を押して待つ)。そのまま進む先は枠の無い URL', async () => {
+    const gate = gatedFetches();
+    renderWithIntl(<MobileOrderView config={slotConfig} handle={HANDLE} />);
+    add('ブレンド');
+    choosePickup('12:30');
+    passTime();
+    expect(pickupReset()?.textContent).toBe(TEXT.pickupReset);
+
+    add('水');
+    expect(pickupReset()?.textContent).toBe(TEXT.pickupReset);
+    fireEvent.click(cartToggle()!);
+    fireEvent.click(cartToggle()!);
+    expect(pickupReset()?.textContent).toBe(TEXT.pickupReset);
+    passTime(60_000);
+    expect(pickupReset()?.textContent).toBe(TEXT.pickupReset);
+
+    // カートを空にすると支払い欄 (受取時間の欄ごと) が消える。入れ直すと、欄と一緒に案内も戻る (選択は最短のまま)。
+    removeOne('ブレンド');
+    removeOne('水');
+    expect(cartToggle()).toBeNull();
+    expect(pickupReset()).toBeNull();
+    add('ブレンド');
+    expect(pickupSelect().value).toBe('');
+    expect(pickupReset()?.textContent).toBe(TEXT.pickupReset);
+
+    // 押して待つ間も出たまま。この確認は枠なし (最短) で、進む先も枠の無い URL。
+    const href = payHref();
+    expect(readCheckoutUrl(href).query.pickup_at).toBeUndefined();
+    fireEvent.click(payLink()!);
+    expect(payButton()).toBeDisabled();
+    expect(pickupReset()?.textContent).toBe(TEXT.pickupReset);
+
+    await gate.admit(0);
+
+    expect(postedBodies()).toEqual([ASAP_BODY]);
+    expect(assignSpy.mock.calls).toEqual([[href]]);
+    expect(pickupReset()?.textContent).toBe(TEXT.pickupReset);
+  });
+
+  // 受付の確認が 200 で返り、選んだ枠つきの URL へ移り始めた後も、/checkout が返るまでこのページは残り、時刻の取り直しも
+  // 動き続ける。その間に枠が外れても、「最短に戻しました」は出さない (進む先は選んだ枠)。
+  it('移動を始めた後 (選んだ枠つきの URL へ assign した後) に枠が外れても、案内は出ない', async () => {
+    renderWithIntl(<MobileOrderView config={slotConfig} handle={HANDLE} />);
+    add('ブレンド');
+    choosePickup('12:30');
+    const href = payHref();
+
+    await pressPay();
+
+    expect(postedBodies()).toEqual([SLOT_BODY]);
+    expect(assignSpy.mock.calls).toEqual([[href]]);
+    expect(readCheckoutUrl(href).query.pickup_at).toBe(String(tokyo(12, 30)));
+
+    passTime();
+
+    // 枠を外す動きそのものは今までどおり。
+    expect(pickupOption('12:30')).toBeNull();
+    expect(pickupSelect().value).toBe('');
+    expect(pickupReset()).toBeNull();
+    passTime(5 * 60_000);
+    expect(pickupReset()).toBeNull();
+  });
+
+  it.each(['例外', '429', '503'])('待っている間に枠が外れても、その場では出ない。その確認がやり直せる失敗 (%s) で終わると、押し直しの案内と一緒に出る。押し直した確認は枠なし (最短) で、進む先も枠の無い URL', async (kind) => {
+    const gate = gatedFetches();
+    renderWithIntl(<MobileOrderView config={slotConfig} handle={HANDLE} />);
+    add('ブレンド');
+    choosePickup('12:30');
+    fireEvent.click(payLink()!);
+
+    passTime();
+
+    expect(pickupSelect().value).toBe('');
+    expect(payButton()).toBeDisabled();
+    expect(pickupReset()).toBeNull();
+
+    if (kind === '例外') await gate.fail(0);
+    else await gate.respond(0, refused(Number(kind), 'x'));
+
+    // 2 つの案内は別の場所: 受取時間の欄のすぐ下 (status) と、「支払いへ進む」のすぐ上 (alert)。
+    expect(assignSpy).not.toHaveBeenCalled();
+    expect(notice()?.textContent).toBe(TEXT.retryNotice);
+    expect(notice()?.nextElementSibling).toBe(payLink());
+    expect(pickupReset()?.textContent).toBe(TEXT.pickupReset);
+    expect(pickupSelect().nextElementSibling).toBe(pickupReset());
+    expect(
+      pickupReset()!.compareDocumentPosition(notice()!) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+
+    // 押し直す: 押し直しの案内は押した時に消える。受取時間の案内は残る (選び直していない)。
+    const next = payHref();
+    expect(readCheckoutUrl(next).query.pickup_at).toBeUndefined();
+    fireEvent.click(payLink()!);
+    expect(notice()).toBeNull();
+    expect(pickupReset()?.textContent).toBe(TEXT.pickupReset);
+
+    await gate.admit(1);
+
+    expect(postedBodies()).toEqual([SLOT_BODY, ASAP_BODY]);
+    expect(assignSpy.mock.calls).toEqual([[next]]);
+  });
+
+  it('待っている間に枠が外れ、注文を変えて待っていた確認を無効にすると、その場で案内が出る。無効にした確認が 200 で返っても移らず、押し直した確認は枠なし', async () => {
+    const gate = gatedFetches();
+    renderWithIntl(<MobileOrderView config={slotConfig} handle={HANDLE} />);
+    add('ブレンド');
+    choosePickup('12:30');
+    fireEvent.click(payLink()!);
+    passTime();
+    expect(pickupReset()).toBeNull();
+
+    add('水');
+
+    // 待っていた確認 (12:30 の枠つき) は、もう使わない。次に押すと最短で送る。
+    expect(pickupReset()?.textContent).toBe(TEXT.pickupReset);
+    expect(notice()).toBeNull();
+    const next = payHref();
+    expect(readCheckoutUrl(next).query.pickup_at).toBeUndefined();
+
+    await gate.admit(0);
+
+    expect(assignSpy).not.toHaveBeenCalled();
+    expect(pickupReset()?.textContent).toBe(TEXT.pickupReset);
+
+    fireEvent.click(payLink()!);
+    await gate.admit(1);
+
+    expect(postedBodies()).toEqual([SLOT_BODY, ASAP_BODY]);
+    expect(assignSpy.mock.calls).toEqual([[next]]);
+  });
+
+  it('待っている間に枠が外れた後、お客様が自分で別の枠を選ぶと、案内は出ない (待っていた確認は無効・押し直した確認は選んだ枠)', async () => {
+    const gate = gatedFetches();
+    renderWithIntl(<MobileOrderView config={slotConfig} handle={HANDLE} />);
+    add('ブレンド');
+    choosePickup('12:30');
+    fireEvent.click(payLink()!);
+    passTime();
+
+    choosePickup('12:45');
+
+    expect(pickupReset()).toBeNull();
+    await gate.admit(0);
+    expect(assignSpy).not.toHaveBeenCalled();
+    expect(pickupReset()).toBeNull();
+
+    const next = payHref();
+    fireEvent.click(payLink()!);
+    await gate.admit(1);
+
+    expect(postedBodies()).toEqual([SLOT_BODY, { ...ASAP_BODY, pickupAt: tokyo(12, 45) }]);
+    expect(assignSpy.mock.calls).toEqual([[next]]);
+    expect(pickupReset()).toBeNull();
+  });
+
+  it('待っている間に枠が外れ、その確認が 409 で終わると、今までどおり止まった表示 (支払い欄ごと消えるので、案内は見えない)', async () => {
+    const gate = gatedFetches();
+    renderWithIntl(<MobileOrderView config={slotConfig} handle={HANDLE} />);
+    add('ブレンド');
+    choosePickup('12:30');
+    fireEvent.click(payLink()!);
+    passTime();
+
+    await gate.respond(0, refused(409, 'pickup_slot_unavailable'));
+
+    expect(screen.getByText(TEXT.closed)).toBeInTheDocument();
+    expect(cartToggle()).toBeNull();
+    expect(payLink()).toBeNull();
+    expect(notice()).toBeNull();
+    expect(pickupReset()).toBeNull();
+    expect(postedBodies()).toEqual([SLOT_BODY]);
+  });
+
+  it('押し直しの案内が出ている所 (待っていない) で枠が外れると、その場で出る: 2 つの案内が別の場所に同時に出る', async () => {
+    const gate = gatedFetches();
+    renderWithIntl(<MobileOrderView config={slotConfig} handle={HANDLE} />);
+    add('ブレンド');
+    choosePickup('12:30');
+    fireEvent.click(payLink()!);
+    await gate.fail(0);
+    expect(notice()?.textContent).toBe(TEXT.retryNotice);
+    expect(pickupSelect().value).toBe(String(tokyo(12, 30)));
+    expect(pickupReset()).toBeNull();
+
+    passTime();
+
+    expect(pickupSelect().value).toBe('');
+    expect(pickupReset()?.textContent).toBe(TEXT.pickupReset);
+    expect(pickupSelect().nextElementSibling).toBe(pickupReset());
+    expect(notice()?.textContent).toBe(TEXT.retryNotice);
+    expect(notice()?.nextElementSibling).toBe(payLink());
+  });
+
+  // 再描画の前の二度押しでは、1 本目が返った所で「支払いへ進む」は押せる link に戻るが、2 本目 (同じ枠つき) はまだ飛んでいる。
+  // 2 本目が 200 なら枠つきの URL へ移る (今の動き) ので、2 本目が返るまでは「最短に戻しました」を出さない。
+  it('二度押しの 1 本目が失敗で返った後に枠が外れても、2 本目が返るまでは出ない。2 本目が 200 なら、出ないまま選んだ枠つきの URL へ移る', async () => {
+    const gate = gatedFetches();
+    renderWithIntl(<MobileOrderView config={slotConfig} handle={HANDLE} />);
+    add('ブレンド');
+    choosePickup('12:30');
+    const href = payHref();
+    await pressPayTwiceAtOnce();
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+
+    await gate.fail(0);
+    expect(notice()?.textContent).toBe(TEXT.retryNotice);
+    expect(payLink()).not.toBeNull();
+
+    passTime();
+
+    expect(pickupSelect().value).toBe('');
+    expect(pickupReset()).toBeNull();
+
+    await gate.admit(1);
+
+    expect(postedBodies()).toEqual([SLOT_BODY, SLOT_BODY]);
+    expect(assignSpy.mock.calls).toEqual([[href]]);
+    expect(readCheckoutUrl(href).query.pickup_at).toBe(String(tokyo(12, 30)));
+    expect(pickupReset()).toBeNull();
+  });
+
+  it('二度押しの 1 本目が失敗で返った後に枠が外れ、2 本目も失敗で返ると、そこで出る', async () => {
+    const gate = gatedFetches();
+    renderWithIntl(<MobileOrderView config={slotConfig} handle={HANDLE} />);
+    add('ブレンド');
+    choosePickup('12:30');
+    await pressPayTwiceAtOnce();
+    await gate.fail(0);
+    passTime();
+    expect(pickupReset()).toBeNull();
+
+    await gate.fail(1);
+
+    expect(assignSpy).not.toHaveBeenCalled();
+    expect(pickupReset()?.textContent).toBe(TEXT.pickupReset);
+    expect(notice()?.textContent).toBe(TEXT.retryNotice);
+  });
+
+  it('二度押しの 1 本目が失敗で返った後に枠が外れ、押し直した確認 (枠なし) を待つ間に、2 本目 (枠つき) が 200 で返ると、出ないまま枠つきの URL へ移る (進む先は今の動き)', async () => {
+    const gate = gatedFetches();
+    renderWithIntl(<MobileOrderView config={slotConfig} handle={HANDLE} />);
+    add('ブレンド');
+    choosePickup('12:30');
+    const href = payHref();
+    await pressPayTwiceAtOnce();
+    await gate.fail(0);
+    passTime();
+
+    fireEvent.click(payLink()!);
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
+    expect(pickupReset()).toBeNull();
+
+    await gate.admit(1);
+
+    expect(postedBodies()).toEqual([SLOT_BODY, SLOT_BODY, ASAP_BODY]);
+    expect(assignSpy.mock.calls).toEqual([[href]]);
+    expect(pickupReset()).toBeNull();
+    // 移り始めた後は、残りの確認が失敗で返っても出さない。
+    await gate.fail(2);
+    expect(pickupReset()).toBeNull();
+  });
+
+  // 枠を外す effect が動いてから描き直すまでの間に click が届くと、その click は「描き直す前の画面」の枠つきで進む
+  // (進む先と本文は今の動き)。effect はその時点で誰も待っていないので案内を出すと決めているが、この click が取り下げる。
+  // click を「effect の直後・描き直しの前」に届けるために、同じ commit の後ろの effect から押す。
+  function ClickAfterCommit({ run }: { run: (() => void) | null }) {
+    useEffect(() => {
+      run?.();
+    }, [run]);
+    return null;
+  }
+  it.each(['200', '例外'])('枠を外す effect の直後・描き直しの前に届いた click の確認が %s で返る: 200 なら出ないまま枠つきの URL へ移る・失敗なら、そこで出る', async (kind) => {
+    const gate = gatedFetches();
+    const tree = (run: (() => void) | null) => (
+      <>
+        <MobileOrderView config={slotConfig} handle={HANDLE} />
+        <ClickAfterCommit run={run} />
+      </>
+    );
+    const view = renderWithIntl(tree(null));
+    add('ブレンド');
+    choosePickup('12:30');
+    const href = payHref();
+
+    await act(async () => {
+      vi.advanceTimersByTime(30_000);
+      view.rerender(tree(() => fireEvent.click(payLink()!)));
+      for (let i = 0; i < 5; i++) await Promise.resolve();
+    });
+
+    // click は、枠が外れる前の画面の中身で確認を送っている。
+    expect(postedBodies()).toEqual([SLOT_BODY]);
+    expect(pickupSelect().value).toBe('');
+    expect(payButton()).toBeDisabled();
+    expect(pickupReset()).toBeNull();
+
+    if (kind === '200') {
+      await gate.admit(0);
+      expect(assignSpy.mock.calls).toEqual([[href]]);
+      expect(readCheckoutUrl(href).query.pickup_at).toBe(String(tokyo(12, 30)));
+      expect(pickupReset()).toBeNull();
+    } else {
+      await gate.fail(0);
+      expect(assignSpy).not.toHaveBeenCalled();
+      expect(notice()?.textContent).toBe(TEXT.retryNotice);
+      expect(pickupReset()?.textContent).toBe(TEXT.pickupReset);
+    }
+  });
+
+  it('待つ間に枠が外れて案内が出ても、送れる確認の本数は変わらない: 失敗 → 押す → 失敗 → 押す → 失敗で止まった表示 (確認は 3 本・2 本目からは枠なし)', async () => {
+    const gate = gatedFetches();
+    renderWithIntl(<MobileOrderView config={slotConfig} handle={HANDLE} />);
+    add('ブレンド');
+    choosePickup('12:30');
+    fireEvent.click(payLink()!);
+    passTime();
+    await gate.fail(0);
+    expect(pickupReset()?.textContent).toBe(TEXT.pickupReset);
+
+    fireEvent.click(payLink()!);
+    await gate.respond(1, refused(429, 'rate_limited'));
+    expect(notice()?.textContent).toBe(TEXT.retryNotice);
+    expect(pickupReset()?.textContent).toBe(TEXT.pickupReset);
+
+    fireEvent.click(payLink()!);
+    await gate.fail(2);
+
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
+    expect(postedBodies()).toEqual([SLOT_BODY, ASAP_BODY, ASAP_BODY]);
+    expect(assignSpy).not.toHaveBeenCalled();
+    expect(screen.getByText(TEXT.closed)).toBeInTheDocument();
+    expect(payLink()).toBeNull();
+    expect(pickupReset()).toBeNull();
+  });
+
+  // 受付の確認を通らない経路 (@handle の無いページ = ?s= の注文ページ・ビルダーのプレビュー)。
+  it('@handle の無いページでも、選んだ枠が候補から外れた所で出る', () => {
+    renderWithIntl(<MobileOrderView config={slotConfig} />);
+    add('ブレンド');
+    choosePickup('12:30');
+
+    passTime();
+
+    expect(pickupSelect().value).toBe('');
+    expect(pickupReset()?.textContent).toBe(TEXT.pickupReset);
+    expect(readCheckoutUrl(payHref()).query.pickup_at).toBeUndefined();
+  });
+
+  it('@handle の無いページで link を押した後 (link の移動でページを離れ始めた後) に枠が外れても、案内は出ない。link の移動は止めない', async () => {
+    renderWithIntl(<MobileOrderView config={slotConfig} />);
+    add('ブレンド');
+    choosePickup('12:30');
+    const href = payHref();
+    expect(readCheckoutUrl(href).query.pickup_at).toBe(String(tokyo(12, 30)));
+
+    const pressed = await pressPay();
+
+    expect(pressed.defaultPrevented).toBe(false);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(assignSpy).not.toHaveBeenCalled();
+
+    passTime();
+
+    expect(pickupSelect().value).toBe('');
+    expect(pickupReset()).toBeNull();
+  });
+
+  it('ビルダーのプレビューで、店主が準備時間を延ばして選んだ枠が外れた場合も出る (文は理由を言っていない)', () => {
+    const view = renderWithIntl(<MobileOrderView config={slotConfig} />);
+    add('ブレンド');
+    choosePickup('12:30');
+
+    view.rerender(<MobileOrderView config={{ ...slotConfig, minLeadMinutes: 60 }} />);
+
+    expect(pickupOption('12:30')).toBeNull();
+    expect(pickupOption('13:00')).not.toBeNull();
+    expect(pickupSelect().value).toBe('');
+    expect(pickupReset()?.textContent).toBe(TEXT.pickupReset);
+  });
+
+  it('候補が 1 つも無くなって枠が外れたときは、支払い欄ごと消えるので見えない (選び直す欄が無い)', () => {
+    const view = renderWithIntl(<MobileOrderView config={slotConfig} />);
+    add('ブレンド');
+    choosePickup('12:30');
+
+    // ラストオーダー 12:10: 最短の受け取り (12:30) がラストオーダーを越えるので、候補は 0 件。
+    view.rerender(<MobileOrderView config={{ ...slotConfig, lastOrder: '12:10' }} />);
+
+    expect(screen.getByText(TEXT.closed)).toBeInTheDocument();
+    expect(cartToggle()).toBeNull();
+    expect(pickupReset()).toBeNull();
+  });
+
+  // 「選べなくなった」が事実なのは、外した枠が候補に無い間だけ。プレビューで店主が設定を戻して、外した枠が候補に戻ったら
+  // 出さない (選択は最短のまま)。その枠が時間の経過でまた候補から外れたら、また出る。
+  it('外した枠が候補に戻っている間は出さない (プレビューで準備時間を延ばして戻した)。その枠がまた候補から外れると出る', () => {
+    const view = renderWithIntl(<MobileOrderView config={slotConfig} />);
+    add('ブレンド');
+    choosePickup('12:30');
+    view.rerender(<MobileOrderView config={{ ...slotConfig, minLeadMinutes: 60 }} />);
+    expect(pickupReset()?.textContent).toBe(TEXT.pickupReset);
+
+    view.rerender(<MobileOrderView config={slotConfig} />);
+
+    expect(pickupOption('12:30')).not.toBeNull();
+    expect(pickupSelect().value).toBe('');
+    expect(pickupReset()).toBeNull();
+
+    passTime();
+
+    expect(pickupOption('12:30')).toBeNull();
+    expect(pickupSelect().value).toBe('');
+    expect(pickupReset()?.textContent).toBe(TEXT.pickupReset);
   });
 });
 

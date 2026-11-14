@@ -231,12 +231,39 @@ export function MobileOrderView({
   // 時刻の取り直し・売り切れの反映・枠が自動で外れる、では進めない (押した時点の注文で進む = 今までどおり)。
   // 押すときは世代を進めない (同じ中身の確認が 2 本飛んでも、どちらも有効 = 今までどおり)。
   const admissionGenRef = useRef(0);
+  // 選んだ受取時間が候補から外れて、自動で「最短（指定なし）」に戻したことの案内 (受取時間の欄のすぐ下)。
+  // 案内が言うのは「今の選択は最短で、この先は最短で進む」。それが事実になる時にだけ出す:
+  //   - このページを離れ始めた後 (navigatingRef) は出さない。/checkout が返るまでページは残り、枠は外れるが、
+  //     進む先は押した時点の URL (選んだ枠つきのことがある)。離れ始めた印は戻さない (移れなかったときも、出ないだけ)。
+  //   - 今の世代の確認が 1 本でも返っていない間 (admissionInFlightRef) は出さず、持ち越す (pickupResetHeldRef)。
+  //     その確認は押した時点の枠で送ってあり、200 なら枠つきの URL へ移る。全部が移らずに終わった所 (失敗で返った・
+  //     注文を変えて無効にした) で出す。本数は ref で数える (押せないボタンに替える state は、二度押しの 1 本目が
+  //     返った所で解けるので、まだ飛んでいる 2 本目を数えられない)。
+  // 持つのは外した枠 (ms)。その枠が候補に戻っている間 (プレビューで設定を戻した、など) は「選べなくなった」が事実で
+  // ないので、描く所で出さない。消すのは、お客様が受取時間を選んだ時だけ。送るもの・進む先・世代・送れる本数には使わない。
+  const [pickupResetSlot, setPickupResetSlot] = useState<number | null>(null);
+  const navigatingRef = useRef(false);
+  const admissionInFlightRef = useRef(0);
+  const pickupResetHeldRef = useRef<number | null>(null);
+  const showHeldPickupReset = useCallback(() => {
+    if (
+      pickupResetHeldRef.current !== null &&
+      admissionInFlightRef.current === 0 &&
+      !navigatingRef.current
+    ) {
+      setPickupResetSlot(pickupResetHeldRef.current);
+      pickupResetHeldRef.current = null;
+    }
+  }, []);
   const invalidateAdmission = useCallback(() => {
     admissionGenRef.current += 1;
     setAdmissionPending(false);
     // 送れる本数を使い切っているときは、押せる「支払いへ進む」に戻さず、停止の表示にする (押しても送れないため)。
     if (admissionRetrySendsLeftRef.current === 0) setAdmissionRejected(true);
-  }, []);
+    // 飛んでいた確認は、もう使わない (応答が来ても移らない)。待つ間に枠が外れていたら、ここで案内を出す。
+    admissionInFlightRef.current = 0;
+    showHeldPickupReset();
+  }, [showHeldPickupReset]);
   // 店内 (dineIn) 時に顧客が入力するテーブル番号 (注文時のみ・config には保存しない)。
   const [tableNumber, setTableNumber] = useState('');
   useEffect(() => {
@@ -343,11 +370,18 @@ export function MobileOrderView({
   // 選んだ枠が候補から外れたら解除する (候補に無い受取時刻を送らない)。外れるのは、時間が進んで最短の受け取り
   // (今 + 準備の時間) がその枠を越えたとき。枠は 15 分の格子に固定なので、候補に残っている選択はそのまま残る。
   useEffect(() => {
-    if (pickupAt !== null && !pickupSlotList.includes(pickupAt)) setPickupAt(null);
-  }, [pickupAt, pickupSlotList]);
+    if (pickupAt !== null && !pickupSlotList.includes(pickupAt)) {
+      setPickupAt(null);
+      // 黙って最短に戻さない: 案内を出す (確認を待っている間・ページを離れ始めた後は、その場では出さない)。
+      pickupResetHeldRef.current = pickupAt;
+      showHeldPickupReset();
+    }
+  }, [pickupAt, pickupSlotList, showHeldPickupReset]);
   const choosePickupAt = (value: number | null) => {
     if (value !== pickupAt) invalidateAdmission();
     setPickupAt(value);
+    // 自分で選んだ後は、「戻しました」の案内は要らない (最短を選び直した場合も)。
+    setPickupResetSlot(null);
   };
 
   // メニューオプション (サイズ/トッピング)・flag 裏。OFF では options を無視し従来の数量ステッパのみ
@@ -605,8 +639,19 @@ export function MobileOrderView({
           ts: Date.now(),
         });
       }
+      // この描画の枠が、もう候補に無い = 枠を外す effect が動く前後の、描き直しの前の click。この click は外れた枠つきで
+      // 進むので、effect が出すと決めたばかりの (まだ描かれていない) 案内は取り下げて、持ち越す (枠つきで移るなら出さない・
+      // 移らずに終わったら出す)。
+      if (pickupAt !== null && !pickupSlotList.includes(pickupAt)) {
+        pickupResetHeldRef.current = pickupAt;
+        setPickupResetSlot(null);
+      }
       // 時間 admission は @handle + flag ON だけ。flag OFF / self-contained token は従来の直リンク。
-      if (!handle || !timeEnabled) return;
+      if (!handle || !timeEnabled) {
+        // link の既定の移動で、このページを離れ始める (移動そのものには触れない)。
+        navigatingRef.current = true;
+        return;
+      }
       event.preventDefault();
       if (!checkoutUrl || admissionPending) return;
       setAdmissionRetryNotice(false);
@@ -622,6 +667,7 @@ export function MobileOrderView({
       // この確認が待っている間にお客様が注文を変えたら (世代が進んだら)、応答は使わない: 移らない・止まった案内を出さない・
       // 押し直した次の確認の待ち状態も解かない。
       const gen = admissionGenRef.current;
+      admissionInFlightRef.current += 1;
       setAdmissionPending(true);
       // 押し直しの案内を出す。送れる本数が残っていなければ出さない (false = 呼ぶ側が、お店の停止と同じ表示にする)。
       // 呼ぶのは世代の確認の後だけ。最初に呼ばれた時から、送る本数を数え始める。
@@ -654,6 +700,7 @@ export function MobileOrderView({
           setAdmissionRejected(true);
           return;
         }
+        navigatingRef.current = true;
         window.location.assign(checkoutUrl);
       } catch {
         if (gen !== admissionGenRef.current) return;
@@ -661,7 +708,12 @@ export function MobileOrderView({
         // 確かめられなかっただけなので、お店が止めたとは言わず、押し直せるままにする (送れる本数が残っている間)。
         if (!offerRetry()) setAdmissionRejected(true);
       } finally {
-        if (gen === admissionGenRef.current) setAdmissionPending(false);
+        if (gen === admissionGenRef.current) {
+          setAdmissionPending(false);
+          // 今の世代の確認が全部返った所で、待つ間に外れた枠の案内を出す (移り始めていれば出さない)。
+          admissionInFlightRef.current -= 1;
+          showHeldPickupReset();
+        }
       }
     },
     [
@@ -673,7 +725,9 @@ export function MobileOrderView({
       config.receiver,
       handle,
       pickupAt,
+      pickupSlotList,
       saveLastOrder,
+      showHeldPickupReset,
       timeEnabled,
     ],
   );
@@ -1013,6 +1067,10 @@ export function MobileOrderView({
             slots: pickupSlotList,
             value: pickupAt,
             onChange: choosePickupAt,
+            notice:
+              pickupResetSlot !== null && !pickupSlotList.includes(pickupResetSlot)
+                ? t('pickupResetNotice')
+                : undefined,
           }}
           cart={{
             open: cartOpen,
