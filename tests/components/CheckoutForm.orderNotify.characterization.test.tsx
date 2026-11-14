@@ -975,7 +975,8 @@ describe('応答の表 — 経路 A: この画面で送った支払いの完了�
     expect(undeliveredFields()).toMatchObject({ status: 503, attempts: 3, noticeShown: false });
   });
 
-  // header の後に本文が終わらない応答。足した本文の読み取りは 3 秒で諦めるので、送り直し・案内・記録は止まらない。
+  // header の後に本文が終わらない応答。status だけで分類できる応答 (5xx・429) は本文を待たない。本文で決まる応答 (2xx・409・422)
+  // は、読み終わるまで「届いた」とも「届いていない」とも決めず、その先は何もしない (今までと同じ。時間では決めない)。
   it('503 の header の後に本文が終わらない: 最初の失敗の記録はすぐ出て (今までと同じ)、送り直しも案内も止まらない', async () => {
     installFetch([hangingBody(503)]);
     await completeGasless(plain);
@@ -992,32 +993,72 @@ describe('応答の表 — 経路 A: この画面で送った支払いの完了�
     expect(undeliveredFields()).not.toHaveProperty('serverError');
   });
 
-  it('200 の header の後に本文が終わらない: 3 秒で読むのをやめ、届いていない応答として送り直す', async () => {
-    installFetch([hangingBody(200)]);
-    await completeGasless(plain);
-    await settle(2_999);
-    expect(webhookWarnings()).toEqual([]);
-    await settle(1);
-    expect(webhookWarnings()).toEqual(['checkout.webhook.non_ok 200']);
-    await runClock();
-
-    // 0 秒 → (3 秒待って諦める + 2 秒) → 5 秒 → (3 秒 + 15 秒) → 23 秒。
-    expect(notifySent.map((sent) => sent.at)).toEqual([0, 5_000, 23_000]);
-    expect(view.notRegisteredAlert()).toHaveLength(1);
-    expect(view.retryButton()).not.toBeNull();
-    expect(webhookWarnings()).toEqual(['checkout.webhook.non_ok 200', 'checkout.webhook.undelivered 200']);
-  });
-
-  // 今までも本文を読んでいた所 (409 の表が processing かを見る所・422 が tx_too_old かを見る所) は、今までと同じ読み方のまま。
-  it.each([409, 422])('%s の header の後に本文が終わらない: 今までと同じ (本文を待ち続けるので、記録も案内も出ない)', async (status) => {
+  it.each([200, 409, 422])('%s の header の後に本文が終わらない: 今までと同じ (送り直さず、記録も案内も出ない)', async (status) => {
     installFetch([hangingBody(status)]);
     await completeGasless(plain);
     await runClock();
+    await settle(150_000); // 310 秒たっても同じ
 
     expect(notifySent).toHaveLength(1);
     expect(webhookWarnings()).toEqual([]);
     expect(view.notRegisteredAlert()).toHaveLength(0);
+    expect(view.retryButton()).toBeNull();
     expect(view.successDialog()).not.toBeNull();
+    expect(view.statusLink()).not.toBeNull();
+  });
+
+  it('送り直しの 1 回が 409 で、本文が終わらない: processing かどうかを時間で決めず、その先は何もしない', async () => {
+    installFetch([RPC_ERROR, hangingBody(409)]);
+    await completeGasless(plain);
+    await runClock();
+
+    expect(notifySent.map((sent) => sent.at)).toEqual([0, 2_000]);
+    expect(view.notRegisteredAlert()).toHaveLength(0);
+    expect(view.retryButton()).toBeNull();
+    expect(webhookWarnings()).toEqual(['checkout.webhook.non_ok 503']);
+    expect(undeliveredFields()).toBeUndefined();
+  });
+
+  // レビューの順: 200 の header はすぐ届き、正しい本文 ({ ok: true }) が 4 秒後に届く。届いた応答を、時間で「届いていない」と
+  // 決めて送り直さない (今までも、送るのは 0 秒の 1 回だけ・案内なし・記録なし)。
+  it('200 の正しい本文が遅れて届く (4 秒後): 送るのは最初の 1 回だけ。案内も記録も出さない', async () => {
+    const slow = slowOkBody();
+    installFetch([slow.reply]);
+    await completeGasless(plain);
+    for (let i = 0; i < 4; i++) await settle(1_000);
+    expect(notifySent.map((sent) => sent.at)).toEqual([0]);
+    expect(view.notRegisteredAlert()).toHaveLength(0);
+
+    slow.finish();
+    await runClock();
+    expect(notifySent.map((sent) => sent.at)).toEqual([0]);
+    expect(view.notRegisteredAlert()).toHaveLength(0);
+    expect(view.retryButton()).toBeNull();
+    expect(view.successDialog()).not.toBeNull();
+    expect(webhookWarnings()).toEqual([]);
+    expect(undeliveredFields()).toBeUndefined();
+  });
+
+  // レビューの順: 完了の通知が 0 / 2 / 17 秒に 503 → 17.1 秒にボタン → 409 processing。ボタンの 1 回は 1 回の送信だけで、
+  // 409 の表 (0.25 秒後・1 秒後 …) を回さない (回すと、18.35 秒の送信が 60 秒の枠の 6 回目になる)。
+  it('「注文登録を再試行」の 1 回は 1 回の送信だけ: 409 processing が返っても重ねて送らず、ボタンを出し直す', async () => {
+    installFetch([RPC_ERROR, RPC_ERROR, RPC_ERROR, PROCESSING]);
+    await completeGasless(plain);
+    for (let i = 0; i < 17; i++) await settle(1_000);
+    await settle(100);
+    expect(notifySent.map((sent) => sent.at)).toEqual(AUTO_RETRY_AT);
+
+    fireEvent.click(view.retryButton()!);
+    await runClock();
+    expect(notifySent.map((sent) => sent.at)).toEqual([...AUTO_RETRY_AT, 17_100]);
+    expectDirectSends(notifySent, OWN_NOTIFY);
+    expect(view.retryButton()).not.toBeNull();
+    expect(view.notRegisteredAlert()).toHaveLength(1);
+    expect(webhookWarnings()).toEqual([
+      'checkout.webhook.non_ok 503',
+      'checkout.webhook.undelivered 503',
+      'checkout.webhook.non_ok 409',
+    ]);
   });
 
   it('USDC の会計で自社の URL (手で作った URL だけ): server の 400 unsupported_token で、案内が出る (ボタンなし)', async () => {
@@ -1621,7 +1662,10 @@ describe('応答の表 — 経路 D: 通常決済の部分の通知 (お店へ�
       expect(webhookWarnings()).toEqual(['checkout.webhook.non_ok 503', 'checkout.webhook.non_ok 503']);
     });
 
-    // D1 の応答が遅く、D2 は失敗。完了の通知はいちばん新しい D2 の後に送って届かず、案内を出す。その後で D1 が届く。
+    // ---- 決まり: 完了の通知の「追加の動き」(自動の送り直し・案内とボタン・ボタンの送信) は、同じ支払いの部分の通知が全部
+    //      すっかり終わった後だけ (応答が返り、409 の表の送り直しも終わり、2xx なら本文も読み終えた)。時間の上限は無い ----
+
+    // D1 の応答が遅く、D2 は失敗。完了の通知は、いちばん新しい D2 の後に最初の 1 回を送る (今までと同じ)。
     async function payWithSlowFirstPartial(order: CheckoutParams, completionReply: () => Response) {
       let respond!: (response: Response) => void;
       installServer((sent) => {
@@ -1631,15 +1675,18 @@ describe('応答の表 — 経路 D: 通常決済の部分の通知 (お店へ�
       });
       await payStandard(order, ['fee-sending', 'fee-unknown', 'success']);
       await settle();
-      return { partialDelivers: () => respond(Response.json({ ok: true })) };
+      return {
+        partialDelivers: () => respond(Response.json({ ok: true })),
+        partialFails: () => respond(Response.json({ error: 'rpc_error' }, { status: 503 })),
+      };
     }
     const INVALID = () => Response.json({ error: 'invalid_body' }, { status: 400 });
+    const UNAVAILABLE = () => Response.json({ error: 'rpc_error' }, { status: 503 });
+    const completionSentAt = () => notifySent.filter((sent) => kindOf(sent) === 'A').map((sent) => sent.at);
 
-    // レビューの順: D1 の応答が遅い → D2 は失敗 → 完了の通知も 503 → 18 秒に D1 が 200 { ok: true }。
-    // 完了の通知の送り直しは D1 が送り終わる (応答を扱い終える) まで始めないので、D1 が届く前に使い切って案内を出すことが無い。
+    // レビュー (1 回目) の順: D1 の応答が遅い → D2 は失敗 → 完了の通知も 503 → 18 秒に D1 が 200 { ok: true }。
     it('先に送った部分の通知の応答を待っている間は、完了の通知を送り直さない。届いた後に送り直し、届かなくても案内は出さない', async () => {
-      const { partialDelivers } = await payWithSlowFirstPartial(plain, () => Response.json({ error: 'rpc_error' }, { status: 503 }));
-      const completionSentAt = () => notifySent.filter((sent) => kindOf(sent) === 'A').map((sent) => sent.at);
+      const { partialDelivers } = await payWithSlowFirstPartial(plain, UNAVAILABLE);
       for (let i = 0; i < 18; i++) await settle(1_000);
       // 18 秒: 完了の通知は最初の 1 回だけ。案内も出ていない。
       expect(completionSentAt()).toEqual([0]);
@@ -1655,62 +1702,91 @@ describe('応答の表 — 経路 D: 通常決済の部分の通知 (お店へ�
       expect(undeliveredFields()).toMatchObject({ status: 503, attempts: 3, noticeShown: false });
     });
 
-    it('案内を出した後で、先に送っていた部分の通知が届いたと分かったら、案内を消す (注文はお店にある)', async () => {
-      const { partialDelivers } = await payWithSlowFirstPartial(plain, INVALID);
-      expect(notifySent.map(kindOf)).toEqual(['D1', 'D2', 'A']);
-      expect(view.notRegisteredAlert()).toHaveLength(1);
-      expect(view.successDialog()).toBeNull();
-      expect(view.statusLink()).toBeNull();
+    it('上限なしで待つ: 部分の通知の応答が 200 秒後に失敗で返ったら、そこから送り直し、使い切ってから案内とボタンを出す', async () => {
+      const { partialFails } = await payWithSlowFirstPartial(plain, UNAVAILABLE);
+      await runClock(); // 160 秒
+      await settle(40_000); // 200 秒
+      expect(completionSentAt()).toEqual([0]);
+      expect(view.notRegisteredAlert()).toHaveLength(0);
+      expect(undeliveredFields()).toBeUndefined();
 
-      await settle(18_000);
-      partialDelivers();
+      partialFails();
       await settle();
+      await settle(15_000);
+      await settle();
+      expect(completionSentAt()).toEqual([0, 200_000, 215_000]);
+      expect(view.notRegisteredAlert()).toHaveLength(1);
+      expect(view.retryButton()).not.toBeNull();
+      expect(undeliveredFields()).toMatchObject({ status: 503, attempts: 3, noticeShown: true });
+    });
+
+    // 部分の通知がいつまでも終わらなければ、完了の通知は最初の 1 回の後、何もしない (今までと同じ)。
+    it.each([
+      {
+        name: '応答が返らない fetch',
+        start: () => payWithSlowFirstPartial(plain, UNAVAILABLE),
+        // D2 の 503 (今までどおり) と、完了の通知の最初の失敗 (今までどおり)。
+        warn: ['checkout.webhook.non_ok 503', 'checkout.webhook.non_ok 503'],
+      },
+      {
+        name: '200 の header の後に本文が終わらない応答',
+        start: async () => {
+          installFetch([hangingBody(200), RPC_ERROR]);
+          await payStandard(plain, ['fee-sending', 'success']);
+        },
+        warn: ['checkout.webhook.non_ok 503'],
+      },
+    ])('部分の通知が終わらない ($name): 完了の通知は送り直さず、案内も undelivered も出さない', async ({ start, warn }) => {
+      await start();
+      await runClock();
+      await settle(150_000); // 310 秒
+
+      expect(completionSentAt()).toEqual([0]);
       expect(view.notRegisteredAlert()).toHaveLength(0);
       expect(view.retryButton()).toBeNull();
       expect(view.successDialog()).not.toBeNull();
-      expect(view.statusLink()).not.toBeNull();
-      expect(notifySent).toHaveLength(3);
+      expect(webhookWarnings()).toEqual(warn);
+      expect(undeliveredFields()).toBeUndefined();
     });
 
-    it('同じ順で success_url つき: 案内が止めていた移動を、届いたと分かった時点から 3 秒で始め直す', async () => {
-      const { partialDelivers } = await payWithSlowFirstPartial(params, INVALID);
-      expect(view.notRegisteredAlert()).toHaveLength(1);
+    // 完了の通知が「何度送っても通らない失敗」(400) ですぐ止まっても、部分の通知が終わるまでは「届かなかった」と決めない。
+    it.each([
+      { name: '届いた → 案内は出さないまま', deliver: true, alerts: 0, noticeShown: false },
+      { name: '届かずに終わった → その時点で案内を出す (ボタンなし)', deliver: false, alerts: 1, noticeShown: true },
+    ])('完了の通知が 400 ですぐ止まっても、部分の通知が終わるまで案内を出さない。$name', async ({ deliver, alerts, noticeShown }) => {
+      const partial = await payWithSlowFirstPartial(plain, INVALID);
+      expect(notifySent.map(kindOf)).toEqual(['D1', 'D2', 'A']);
       await settle(18_000);
-      expect(assignSpy).not.toHaveBeenCalled();
-
-      partialDelivers();
-      await settle();
       expect(view.notRegisteredAlert()).toHaveLength(0);
-      expect(screen.getByText('3 秒後に確認ページへ移動します')).toBeInTheDocument();
+      expect(view.successDialog()).not.toBeNull();
+      // 完了の通知の最初の失敗の記録は出ている (今までと同じ)。届かなかったと決めた記録は、まだ無い。
+      expect(webhookWarnings()).toEqual(['checkout.webhook.non_ok 503', 'checkout.webhook.non_ok 400']);
+      expect(undeliveredFields()).toBeUndefined();
+
+      if (deliver) partial.partialDelivers();
+      else partial.partialFails();
+      await runClock();
+      expect(notifySent).toHaveLength(3);
+      expect(view.notRegisteredAlert()).toHaveLength(alerts);
+      expect(view.retryButton()).toBeNull();
+      expect(view.successDialog() === null).toBe(alerts === 1);
+      expect(undeliveredFields()).toMatchObject({ status: 400, attempts: 1, noticeShown });
+    });
+
+    it('同じ順で success_url つき: 部分の通知が終わっていない間は案内を出さないので、移動は今までどおり確定から 3 秒後', async () => {
+      await payWithSlowFirstPartial(params, INVALID);
       await settle(1_000);
       await settle(1_000);
       await settle(999);
       expect(assignSpy).not.toHaveBeenCalled();
       await settle(1);
       expect(assignSpy).toHaveBeenCalledOnce();
-    });
-
-    it('部分の通知の応答が返らないときは、150 秒で待つのをやめて送り直す。案内とボタンを出した後で届いたと分かれば、両方消す', async () => {
-      const { partialDelivers } = await payWithSlowFirstPartial(plain, () => Response.json({ error: 'rpc_error' }, { status: 503 }));
-      await runClock(); // 160 秒
-      await settle(10_000); // 170 秒
-
-      // 完了の通知: 0 秒 (503) → 2 秒待ち、そこから 150 秒は D1 を待つ → 152 秒 → 15 秒後 (もう待ち直さない) の 167 秒。
-      expect(notifySent.filter((sent) => kindOf(sent) === 'A').map((sent) => sent.at)).toEqual([0, 152_000, 167_000]);
-      expect(view.notRegisteredAlert()).toHaveLength(1);
-      expect(view.retryButton()).not.toBeNull();
-
-      await settle(30_000);
-      partialDelivers();
-      await settle();
       expect(view.notRegisteredAlert()).toHaveLength(0);
-      expect(view.retryButton()).toBeNull();
-      expect(view.successDialog()).not.toBeNull();
     });
 
-    // 部分の通知の 200 の本文 ({ ok: true }) が遅い応答。本文を読むのは「届いたか」を知るためだけなので、完了の通知を
-    // 送り始める時点 (部分の通知の応答の header が届いた時点) は今までと変えない。
-    it('完了の通知を送り始める時点は今までと同じ: 部分の通知の 200 の本文を読み終わるのを待たない', async () => {
+    // 部分の通知の 200 の本文 ({ ok: true }) が遅い応答。本文を読むのは「届いたか」を知るためだけなので、完了の通知の
+    // 最初の 1 回を送る時点 (部分の通知の応答の header が届いた時点) は今までと変えない。届いたかは、読み終わるまで決めない。
+    it('完了の通知の最初の 1 回を送る時点は今までと同じ: 部分の通知の 200 の本文を読み終わるのを待たない', async () => {
       const slow = slowOkBody();
       installFetch([slow.reply, json(400, { error: 'invalid_body' })]);
       await payStandard(plain, ['fee-sending', 'success']);
@@ -1718,35 +1794,29 @@ describe('応答の表 — 経路 D: 通常決済の部分の通知 (お店へ�
       // 部分の通知の本文はまだ届いていないが、完了の通知はもう送っている。
       expect(notifySent.map(kindOf)).toEqual(['D1', 'A']);
       expect(notifySent.map((sent) => sent.at)).toEqual([0, 0]);
-      // 完了の通知は 400。部分の通知が届いたかを読んでいる途中なので、案内はまだ出さない (3 秒までは待つ)。
-      await settle(2_000);
-      expect(view.notRegisteredAlert()).toHaveLength(0);
+    });
+
+    // レビュー (2 回目) の順: 部分の通知は 0 秒に 200 の header・本文 ({ ok: true }) は 5 秒。完了の通知は 400。
+    it('部分の通知の 200 の本文が 5 秒後に届く・完了の通知は 400: 本文を読み終わるまで案内を出さず、届いていたので出さないまま', async () => {
+      const slow = slowOkBody();
+      installFetch([slow.reply, json(400, { error: 'invalid_body' })]);
+      await payStandard(plain, ['fee-sending', 'success']);
+      for (let i = 0; i < 5; i++) {
+        await settle(1_000);
+        expect(view.notRegisteredAlert()).toHaveLength(0);
+      }
+      expect(undeliveredFields()).toBeUndefined();
+
       slow.finish();
       await runClock();
-
       expect(view.notRegisteredAlert()).toHaveLength(0);
       expect(view.successDialog()).not.toBeNull();
+      expect(notifySent).toHaveLength(2);
       expect(webhookWarnings()).toEqual(['checkout.webhook.non_ok 400', 'checkout.webhook.undelivered 400']);
       expect(undeliveredFields()).toMatchObject({ status: 400, attempts: 1, noticeShown: false });
     });
 
-    it('部分の通知の 200 の本文が 3 秒たっても届かなければ、いったん案内を出し、届いた時点で消す', async () => {
-      const slow = slowOkBody();
-      installFetch([slow.reply, json(400, { error: 'invalid_body' })]);
-      await payStandard(plain, ['fee-sending', 'success']);
-      await settle(2_999);
-      expect(view.notRegisteredAlert()).toHaveLength(0);
-      await settle(1);
-      expect(view.notRegisteredAlert()).toHaveLength(1);
-
-      await settle(2_000);
-      slow.finish();
-      await settle();
-      expect(view.notRegisteredAlert()).toHaveLength(0);
-      expect(view.successDialog()).not.toBeNull();
-    });
-
-    it('案内を出していなければ、部分の通知が後から届いたと分かっても、success_url への移動の秒読みを始め直さない', async () => {
+    it('部分の通知の本文が遅れて届いても、success_url への移動は確定からちょうど 3 秒後 (秒読みを始め直さない)', async () => {
       const slow = slowOkBody();
       installFetch([slow.reply, OK]);
       await payStandard(params, ['fee-sending', 'success']);
@@ -1756,8 +1826,157 @@ describe('応答の表 — 経路 D: 通常決済の部分の通知 (お店へ�
       await settle(999);
       expect(assignSpy).not.toHaveBeenCalled();
       await settle(1);
-      // 確定からちょうど 3 秒 (2 秒の時点から数え直していない)。
       expect(assignSpy).toHaveBeenCalledOnce();
+    });
+
+    // ---- 利用料の送金の hash が替わるたびに、部分の通知がもう 1 本始まる (2 本とは限らない) ----
+    // hook が fee-unknown で新しい hash を返した形にして描き直す。
+    async function partialWithFeeHash(page: Screen, feeTxHash: string) {
+      setStandardPayment('fee-unknown');
+      const current = (useStandardPayment as unknown as () => ReturnType<typeof useStandardPayment>)();
+      mockHook(useStandardPayment, { ...current, feeTxHash } as Partial<ReturnType<typeof useStandardPayment>>);
+      page.rerender(page.makeUi());
+      await settle();
+    }
+    const feeHash = (n: number) => `0x${String(n).repeat(64)}`;
+    // 送った順に D1・D2 … と名前を付ける (同じ通知の送り直しは同じ名前)。完了の通知は A。
+    function labeler() {
+      const names = new Map<string, string>();
+      return (sent: Sent) => {
+        const body = sent.init.body as string;
+        if (!bodyOf(sent).feeUncollected) return 'A';
+        if (!names.has(body)) names.set(body, `D${names.size + 1}`);
+        return names.get(body)!;
+      };
+    }
+    // header はすぐ・本文は bodyAt (最初の送信からの ms) に届く応答。
+    const bodyArrivingAt = (status: number, body: unknown, sentAt: number, bodyAt: number) =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            setTimeout(() => {
+              controller.enqueue(new TextEncoder().encode(JSON.stringify(body)));
+              controller.close();
+            }, bodyAt - sentAt);
+          },
+        }),
+        { status, headers: { 'Content-Type': 'application/json' } },
+      );
+
+    // レビュー (2 回目) の MUST 1 の順。D1〜D4 が 0 / 5 / 10 / 15 秒に 409 processing (本文だけ 171 / 173 / 175 / 190 秒まで
+    // 遅い)。D5 (20 秒) と完了の通知 (20.2 秒) は 503 kv_unavailable (枠より前)。処理中の印は 120 秒で切れ、その後の
+    // RPC の障害は 190 秒に直る。今までは、190.25 秒の D4 が 200 で注文が保存される。完了の通知の追加の送信が先に枠を
+    // 使うと、その D4 が 6 回目で 429 になる。
+    it('部分の通知が 150 秒を超えて送り続けていても、全部終わるまで完了の通知は送り直さない (枠を数える偽の server)', async () => {
+      const label = labeler();
+      const counted: number[] = [];
+      const served: string[] = [];
+      const slowFirstBody: Record<string, number> = { D1: 171_000, D2: 173_000, D3: 175_000, D4: 190_000 };
+      const seen = new Set<string>();
+      installServer((sent) => {
+        const name = label(sent);
+        const first = !seen.has(name);
+        seen.add(name);
+        const reply = (status: number, body: unknown, bodyAt?: number) => {
+          served.push(`${name} ${sent.at} → ${status}`);
+          return bodyAt === undefined ? Response.json(body, { status }) : bodyArrivingAt(status, body, sent.at, bodyAt);
+        };
+        // route と同じ順: handle の解決 → 枠 (60 秒に 5 回・断った要求も数える) → 処理中の印 → on-chain の検証。
+        if (sent.at >= 20_000 && sent.at <= 20_300) return reply(503, { ok: false, error: 'kv_unavailable' });
+        counted.push(sent.at);
+        if (counted.filter((at) => sent.at - at < 60_000).length > 5) return reply(429, { ok: false, error: 'rate_limited' });
+        if (sent.at < 120_000) return reply(409, { ok: false, error: 'processing' }, first ? slowFirstBody[name] : undefined);
+        if (sent.at < 190_000) return reply(503, { ok: false, error: 'rpc_error' });
+        return reply(200, { ok: true });
+      });
+      readyWallet('standard');
+      const page = mount({ ...plain, mode: 'standard' });
+      await settle();
+      await clickPay();
+      setStandardPayment('fee-sending');
+      page.rerender(page.makeUi());
+      await settle();
+      for (const n of [1, 2, 3, 4]) {
+        await settle(5_000);
+        await partialWithFeeHash(page, feeHash(n));
+      }
+      await settle(200);
+      setStandardPayment('success');
+      page.rerender(page.makeUi());
+      await settle();
+      // 20.2 秒 → 170 秒は一度に進める。本文が届く 171〜190 秒の前後は 1 秒刻み (本文の読み取りの続きを、その時刻のうちに流す)。
+      await settle(149_800);
+      for (let i = 0; i < 25; i++) await settle(1_000);
+
+      expect(served).toEqual([
+        'D1 0 → 409',
+        'D2 5000 → 409',
+        'D3 10000 → 409',
+        'D4 15000 → 409',
+        'D5 20000 → 503',
+        'A 20200 → 503', // 完了の通知の最初の 1 回 (今までと同じ時点)。この後、D が全部終わるまで 1 回も送らない
+        'D1 171250 → 503',
+        'D2 173250 → 503',
+        'D3 175250 → 503',
+        'D4 190250 → 200', // 注文が保存される (今までと同じ)
+        'A 190250 → 200', // D が全部終わった後の、完了の通知の送り直し (枠の 5 回目で通る)
+      ]);
+      expect(view.notRegisteredAlert()).toHaveLength(0);
+      expect(view.retryButton()).toBeNull();
+      expect(view.successDialog()).not.toBeNull();
+    });
+
+    // レビュー (2 回目) の SHOULD 1 の順。利用料の hash の切り替えで古い部分の通知が 7 本残り (最初の 409 の本文が遅い)、
+    // 215.25〜235.25 秒に送り直す。いちばん新しい部分の通知と完了の通知は 75 / 75.2 秒に失敗する。
+    // 完了の通知は、古い 7 本が全部終わる 235.25 秒まで枠を数えない。そこで 1 回数えれば足りる (その後に増える送信が無い)。
+    it('古い部分の通知が残っている間は、完了の通知は枠を数えず待つ。全部終わってから 1 回数えて送る (待っている間に送信は増えない)', async () => {
+      const label = labeler();
+      const slowFirstBody: Record<string, number> = {
+        D1: 215_000, D2: 216_000, D3: 218_000, D4: 219_000, D5: 220_000, D6: 223_000, D7: 235_000,
+      };
+      const seen = new Set<string>();
+      installServer((sent) => {
+        const name = label(sent);
+        const first = !seen.has(name);
+        seen.add(name);
+        if (first && slowFirstBody[name] !== undefined) {
+          return bodyArrivingAt(409, { ok: false, error: 'processing' }, sent.at, slowFirstBody[name]);
+        }
+        return Response.json({ ok: false, error: 'rpc_error' }, { status: 503 });
+      });
+      readyWallet('standard');
+      const page = mount({ ...plain, mode: 'standard' });
+      await settle();
+      await clickPay();
+      setStandardPayment('fee-sending');
+      page.rerender(page.makeUi());
+      await settle();
+      for (const n of [1, 2, 3, 4, 5, 6]) await partialWithFeeHash(page, feeHash(n));
+      await settle(75_000);
+      await partialWithFeeHash(page, feeHash(7)); // D8 (75 秒) → 503
+      await settle(200);
+      setStandardPayment('success'); // 完了の通知 (75.2 秒) → 503
+      page.rerender(page.makeUi());
+      await settle();
+      await settle(134_800); // 210 秒
+      // 本文が届く 215〜235 秒の前後は 1 秒刻み (本文の読み取りの続きを、その時刻のうちに流す)。
+      for (let i = 0; i < 30; i++) await settle(1_000); // 240 秒
+      await settle(39_250); // 279.25 秒
+      await settle(15_000); // 294.25 秒
+      await settle(750);
+
+      const at = (name: string) => notifySent.filter((sent) => label(sent) === name).map((sent) => sent.at);
+      expect(['D1', 'D2', 'D3', 'D4', 'D5', 'D6', 'D7'].map((name) => at(name)[1])).toEqual([
+        215_250, 216_250, 218_250, 219_250, 220_250, 223_250, 235_250,
+      ]);
+      // 完了の通知: 75.2 秒 → (全部終わる 235.25 秒まで待つ → 新しい方から 5 番目 = 218.25 秒の送信の 61 秒後) 279.25 秒 → 15 秒後。
+      expect(at('A')).toEqual([75_200, 279_250, 294_250]);
+      // 完了の通知が枠を数えてから送るまでの間 (235.25〜279.25 秒) に、この支払いの送信は増えていない。
+      expect(notifySent.filter((sent) => sent.at > 235_250 && sent.at < 279_250)).toHaveLength(0);
+      // 送った時点で、直近 61 秒の送信は 5 回以下。
+      for (const sentAt of [279_250, 294_250]) {
+        expect(notifySent.filter((sent) => sent.at <= sentAt && sent.at > sentAt - 61_000).length).toBeLessThanOrEqual(5);
+      }
     });
   });
 

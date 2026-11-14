@@ -2024,7 +2024,8 @@ relay の支払いの行の「受け付ける」は、receipt の中で支払い
      送り直さない失敗のとき) に warn `checkout.webhook.undelivered` を 1 件出す。欄は `status` (通信の失敗なら `error`)・
      `attempts` (送った回数)・`serverError`・`noticeShown` (お客様に「自動登録できませんでした」を出したか)・通知先の
      origin・hash。`noticeShown` が false になるのは、同じ支払いの部分の通知が届いていたとき (注文はお店にある) と、
-     お客様が画面を離れた後に止まったとき (届いたかは、この欄からは分からない)。
+     お客様が画面を離れた後に止まったとき (届いたかは、この欄からは分からない)。送り直し・案内・この event は、同じ
+     支払いの部分の通知が全部終わってから (応答が返り、2xx なら本文も読み終えてから) で、終わらない間は出ない。
 
 **4. 戻し方**
 - `ENABLE_ORDER_BIND_ENFORCE` を消すか `false` にして、再 deploy する。束縛なしの relay 通知は、また `bindingMissing` を

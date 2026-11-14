@@ -11,11 +11,10 @@ export const ORDER_NOTIFY_AUTO_RETRY_DELAYS_MS = [2_000, 15_000] as const;
 // server の窓 (60 秒) より 1 秒長く見る (端末と server の時計・届くまでの時間の差の分)。
 export const ORDER_NOTIFY_RATE_WINDOW_MS = 61_000;
 export const ORDER_NOTIFY_RATE_LIMIT = 5;
-// 自動の送り直しの前に、同じ支払いの部分の通知 (effect D) が送り終えるのを待つ上限。部分の通知の 409 の表は
-// 最後の送信まで 140.25 秒。応答が返らない送信を、いつまでも待たない。
-export const ORDER_NOTIFY_PARTIAL_WAIT_MS = 150_000;
-// 完了の通知のために足した本文の読み取りを待つ上限。header の後に本文が終わらない応答で、送り直し・案内・記録を止めない。
-export const ORDER_NOTIFY_BODY_WAIT_MS = 3_000;
+// 記録の欄 (serverError) のために応答の本文を読むのを待つ上限。status だけで分類できる応答 (5xx・429 など) の本文は
+// 記録にしか使わないので、header の後に本文が終わらなくても、最後の記録 (undelivered) を止めない (欄が欠けるだけ)。
+// 届いたか・送り直すか・案内を出すかは、時間では決めない (この上限は使わない)。
+export const ORDER_NOTIFY_LOG_BODY_WAIT_MS = 3_000;
 
 // retryIndex 回目 (0 始まり) の自動の送り直しの、枠を見る前の待ち時間。上限を超えていたら null (もう送り直さない)。
 // lastStatus = 直前の失敗の HTTP status (fetch が投げたときは null)。
@@ -28,7 +27,7 @@ export function orderNotifyAutoRetryBaseDelayMs(retryIndex: number, lastStatus: 
 
 // 枠の確かめ: いま送ると直近 61 秒の送信が 5 回を超えるなら、あと何 ms 待てばよいか (待たなくてよければ 0)。
 // sentAtMs = この支払いでこの画面が送った時刻の全部 (順は問わない)。新しい方から 5 番目の送信が窓の外に出る
-// (その送信から 61 秒たつ) まで待つ。hook は、送る直前にこれを呼び直す (待っている間にほかの送信が増えることがある)。
+// (その送信から 61 秒たつ) まで待つ。hook は、同じ支払いの部分の通知が全部終わった後、送る直前にこれを呼ぶ。
 export function orderNotifyQuotaWaitMs(sentAtMs: readonly number[], nowMs: number): number {
   if (sentAtMs.length < ORDER_NOTIFY_RATE_LIMIT) return 0;
   const fifthNewest = [...sentAtMs].sort((a, b) => b - a)[ORDER_NOTIFY_RATE_LIMIT - 1];

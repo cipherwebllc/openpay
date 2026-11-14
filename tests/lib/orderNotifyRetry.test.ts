@@ -2,8 +2,7 @@ import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 import {
   ORDER_NOTIFY_AUTO_RETRY_DELAYS_MS,
-  ORDER_NOTIFY_BODY_WAIT_MS,
-  ORDER_NOTIFY_PARTIAL_WAIT_MS,
+  ORDER_NOTIFY_LOG_BODY_WAIT_MS,
   ORDER_NOTIFY_RATE_LIMIT,
   ORDER_NOTIFY_RATE_WINDOW_MS,
   ORDER_NOTIFY_SERVER_ERRORS,
@@ -40,13 +39,11 @@ describe('orderNotifyAutoRetryBaseDelayMs: 自動の送り直しの待ち時間�
     expect(orderNotifyAutoRetryBaseDelayMs(retryIndex, status)).toBe(want);
   });
 
-  it('回数の上限は 2 回・server の窓 (60 秒) より 1 秒長く待つ・枠は 5 回・待つ上限 (部分の通知 150 秒・本文 3 秒)', () => {
+  it('回数の上限は 2 回・server の窓 (60 秒) より 1 秒長く待つ・枠は 5 回・記録の欄のために本文を待つのは 3 秒まで', () => {
     expect(ORDER_NOTIFY_AUTO_RETRY_DELAYS_MS).toEqual([2_000, 15_000]);
     expect(ORDER_NOTIFY_RATE_WINDOW_MS).toBe(61_000);
     expect(ORDER_NOTIFY_RATE_LIMIT).toBe(5);
-    // 部分の通知の 409 の表の最後の送信 (140.25 秒) より長い。
-    expect(ORDER_NOTIFY_PARTIAL_WAIT_MS).toBe(150_000);
-    expect(ORDER_NOTIFY_BODY_WAIT_MS).toBe(3_000);
+    expect(ORDER_NOTIFY_LOG_BODY_WAIT_MS).toBe(3_000);
   });
 });
 
