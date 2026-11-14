@@ -83,6 +83,11 @@ export type CartLineView = OptionCartEntry & { isOption: boolean };
 // 店内 (dineIn) 時のテーブル番号入力の最大長。/checkout の description (200) に十分収まる短さ。
 const TABLE_NUMBER_MAX = 16;
 const ORDER_TABLE_STORAGE_PREFIX = 'openpay:order-table:';
+// 注文に載るテーブル番号: 店内 (dineIn) の店だけ・前後の空白は落とす。行き先の URL (description) と、
+// 「入力で注文の中身が変わるか」の判定の両方がこれを使う (入力欄の値そのものは、空白ごと state に持つ)。
+function orderTableNumber(dineIn: boolean | undefined, input: string): string {
+  return dineIn ? input.trim() : '';
+}
 const ORDER_MEMO_MAX = 120;
 const ORDER_MEMO_STORAGE_PREFIX = 'openpay:order-memo:';
 
@@ -236,7 +241,9 @@ export function MobileOrderView({
   const updateTableNumber = useCallback(
     (value: string) => {
       const next = value.slice(0, TABLE_NUMBER_MAX);
-      if (next !== tableNumber) invalidateAdmission();
+      if (orderTableNumber(config.dineIn, next) !== orderTableNumber(config.dineIn, tableNumber)) {
+        invalidateAdmission();
+      }
       setTableNumber(next);
       if (!handle) return;
       try {
@@ -247,7 +254,7 @@ export function MobileOrderView({
         // sessionStorage の拒否/容量障害を注文・決済導線へ波及させない (入力 state は維持)。
       }
     },
-    [handle, invalidateAdmission, tableNumber],
+    [config.dineIn, handle, invalidateAdmission, tableNumber],
   );
   // 受注リレー (flag ON) 用の短い受付番号。この注文ページ訪問で安定 (再描画/チェーン切替で不変)。
   // 客の完了画面 (/checkout の order_id) と店主の受注カードの双方に表示され、受け渡し照合に使う。
@@ -371,9 +378,12 @@ export function MobileOrderView({
     selections: { groupId: string; choiceId: string }[],
   ) => {
     const key = selectionKey(item.id, selections);
-    // 同じ選び方の行が上限の数量なら、足しても変わらない。
+    // 同じ選び方の行が上限の数量なら、足しても変わらない。選ぶ画面を開いている間に売り切れになった品も、足した行は
+    // 注文の明細 (cartLines) に入らないので変わらない (cartLines と同じ soldOutSet で見る)。
     const sameLine = optionEntries.find((e) => e.key === key);
-    if (!sameLine || sameLine.qty < CHECKOUT_QTY_MAX) invalidateAdmission();
+    if (!soldOutSet.has(item.id) && (!sameLine || sameLine.qty < CHECKOUT_QTY_MAX)) {
+      invalidateAdmission();
+    }
     setOptionEntries((list) => {
       const idx = list.findIndex((e) => e.key === key);
       if (idx >= 0) {
@@ -506,7 +516,7 @@ export function MobileOrderView({
   const cartCount = cartItems.reduce((sum, it) => sum + it.qty, 0);
   // 店内 (dineIn) 時: テーブル番号を /checkout の description (→ 控え/履歴 memo) に載せ、
   // 受け渡し先を記録する (後続のフルフィルメント = Nostr 通知 / QR 照合 でも引き継げる)。
-  const tableNum = config.dineIn ? tableNumber.trim() : '';
+  const tableNum = orderTableNumber(config.dineIn, tableNumber);
   const orderDescription = tableNum ? t('tableDescPrefix', { table: tableNum }) : undefined;
   // 店内なのにテーブル番号が未入力なら支払いを止める (どのテーブルか不明な注文を防ぐ)。
   const needsTable = Boolean(config.dineIn) && tableNum.length === 0;

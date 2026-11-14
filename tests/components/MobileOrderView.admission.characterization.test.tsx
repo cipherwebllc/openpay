@@ -719,7 +719,8 @@ describe('MobileOrderView — 「支払いへ進む」: 受付の確認を通る
     expect(assignSpy.mock.calls).toEqual([[next]]);
   });
 
-  // 待っている間にカートが空になる道は、売り切れの反映だけ。店のページは開いたときの売り切れしか持たないので、
+  // 「前回と同じ注文」は、カートが空のときだけ出る。確認を待ったまま空になる道は、売り切れの反映だけ (お客様が数量を
+  // 減らして空にしたときは、その操作で確認が無効になっている)。店のページは開いたときの売り切れしか持たないので、
   // 今の画面でこの道が起きるのは、待っている間にページが描き直されたときだけ。
   it('待っている間に売り切れでカートが空になって出た「前回と同じ注文」を押すと、待っていた確認は無効になる: 200 で返っても移らず、押し直すと戻した注文で進む', async () => {
     seedPaidLastOrder([{ id: 'c', qty: 1 }]);
@@ -802,7 +803,28 @@ describe('MobileOrderView — 「支払いへ進む」: 受付の確認を通る
   // 注文の中身を変える部品を押しても、中身が変わらないなら (上限の数量で ＋ など)、待っていた確認はそのまま使う。
   // 押す前のカート: 水 と 牛丼（大盛り・えび）がどちらも上限の数量、テーブル番号は上限の長さ (16 字)、枠は 12:45、チェーンは Polygon。
   const TABLE_16 = '1234567890123456';
-  const unchangedEdits: { name: string; edit: () => void }[] = [
+  const tableInput = () => screen.getByLabelText('テーブル番号') as HTMLInputElement;
+  const unchangedEdits: {
+    name: string;
+    edit: () => void;
+    /** 押す前のテーブル番号 (既定は上限の長さ)。 */
+    table?: string;
+    /** 操作の後の入力欄の値 (見るときだけ)。 */
+    typed?: string;
+  }[] = [
+    // 行き先の URL に載るテーブル番号は、前後の空白を落とした値。空白を足しただけでは注文は変わらない (入力欄には残る)。
+    {
+      name: 'テーブル番号の末尾に空白を足す',
+      table: '7',
+      edit: () => fireEvent.change(tableInput(), { target: { value: '7 ' } }),
+      typed: '7 ',
+    },
+    {
+      name: 'テーブル番号の先頭に空白を足す',
+      table: '7',
+      edit: () => fireEvent.change(tableInput(), { target: { value: ' 7' } }),
+      typed: ' 7',
+    },
     {
       name: '上限の数量で、メニューの ＋',
       edit: () =>
@@ -842,7 +864,7 @@ describe('MobileOrderView — 「支払いへ進む」: 受付の確認を通る
     },
   ];
 
-  it.each(unchangedEdits)('待っている間の操作「$name」は注文の中身を変えないので、待っていた確認は無効にならない: 200 で返ると、押したときの URL へそのまま移る', async ({ edit }) => {
+  it.each(unchangedEdits)('待っている間の操作「$name」は注文の中身を変えないので、待っていた確認は無効にならない: 200 で返ると、押したときの URL へそのまま移る', async ({ edit, table = TABLE_16, typed }) => {
     envHold.enableMenuOptions = true;
     const gate = gatedFetches();
     renderWithIntl(
@@ -856,12 +878,12 @@ describe('MobileOrderView — 「支払いへ進む」: 受付の確認を通る
         ]}
       />,
     );
-    fireEvent.change(screen.getByLabelText('テーブル番号'), { target: { value: TABLE_16 } });
+    fireEvent.change(tableInput(), { target: { value: table } });
     fireEvent.change(screen.getByLabelText(TEXT.pickup), { target: { value: String(tokyo(12, 45)) } });
     const href = payHref();
     expect(readCheckoutUrl(href).query).toMatchObject({
       items: [item('水', CHECKOUT_QTY_MAX, '100'), item(GYUDON, CHECKOUT_QTY_MAX, '850')].join(','),
-      description: `テーブル ${TABLE_16}`,
+      description: `テーブル ${table}`,
       pickup_at: String(tokyo(12, 45)),
     });
     expect(readCheckoutUrl(href).query.chain).toBeUndefined();
@@ -870,6 +892,7 @@ describe('MobileOrderView — 「支払いへ進む」: 受付の確認を通る
 
     edit();
 
+    if (typed !== undefined) expect(tableInput()).toHaveValue(typed);
     // 待ちは解けていない。
     expect(payLink()).toBeNull();
     expect(payButton()).toBeDisabled();
@@ -877,6 +900,34 @@ describe('MobileOrderView — 「支払いへ進む」: 受付の確認を通る
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     expect(assignSpy.mock.calls).toEqual([[href]]);
     // 応答の後の画面の link も、押したときと同じ URL (中身は変わっていない)。
+    expect(payHref()).toBe(href);
+  });
+
+  // 売り切れの品の行は注文の明細に入らない。選ぶ画面を開いた後で売り切れが反映された品を足しても、注文は変わらない。
+  it('待っている間に「選ぶ」を開き、その品が売り切れになってから足しても、注文の中身は変わらないので、待っていた確認は無効にならない', async () => {
+    envHold.enableMenuOptions = true;
+    const gate = gatedFetches();
+    const view = renderWithIntl(
+      <MobileOrderView config={optionConfig} handle={HANDLE} live={live([])} />,
+    );
+    add('水');
+    const href = payHref();
+    fireEvent.click(payLink()!);
+
+    fireEvent.click(within(menuCard('牛丼')).getByRole('button', { name: /選ぶ/ }));
+    view.rerender(<MobileOrderView config={optionConfig} handle={HANDLE} live={live(['gyudon'], 2)} />);
+    // 選ぶ画面は開いたまま。
+    fireEvent.click(screen.getByRole('radio', { name: /大盛り/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'カートに追加' }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+
+    // 合計も待ちもそのまま。
+    expect(screen.getByText('100 JPYC')).toBeInTheDocument();
+    expect(payLink()).toBeNull();
+    expect(payButton()).toBeDisabled();
+    await gate.admit(0);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(assignSpy.mock.calls).toEqual([[href]]);
     expect(payHref()).toBe(href);
   });
 
