@@ -18,13 +18,16 @@ import en from '@/messages/en.json';
 //      role / name / href / text で確かめる (hash を採り直しても、そちらが落ちたら壊れている)。
 // 1 は literal (`toStrictEqual`)、2 は inline snapshot で持ち、同じ assert に入れない。`vitest -u` は、落ちた inline
 // snapshot を 1 つの `toMatchInlineSnapshot` の単位で丸ごと書き換える (literal は書き換えない) ので、この file の inline
-// snapshot に入れてよいのは "all" / "modal" / "parts" だけ。採り直しの手順 (UI を変えた PR で 2 が落ちたとき):
-//   `npx vitest run tests/components/QrGenerator-pinning.test.tsx -u` → `git diff` がこの file の "all" / "modal" /
-//   "parts" の行だけであることを確かめる。
+// snapshot に入れてよいのは 2 だけ: 全 DOM の hash (`expect(states)`・状態ごとの "all" と、その補助の "parts") と、QR の
+// 画面の hash (`expect(modal)`・case 名を key にした `"<case 名>": "<sha256>"`)。採り直しの手順 (UI を変えた PR で 2 が
+// 落ちたとき):
+//   `npx vitest run tests/components/QrGenerator-pinning.test.tsx -u` → `git diff` で、この file の変わった行が次の
+//   3 種類だけであることを確かめる: `"all": "<sha256>"` の行・"parts" の中の `"<tag> <12 桁> <冒頭の文字>"` の行・
+//   case 名を key にした QR の画面の hash の行 (例: `"accountingMeta": "<sha256>"`)。
 // 1 が落ちたら -u では通らない (同じ it の中で 2 より先に置いてあるので、1 が落ちている間は、その it の後ろにある hash も
 // 採り直せない)。支払いの行き先・額・保存名を変えるつもりがなければ実装を直す。変えるつもりの PR は literal を手で直す。
-// hash を role / name の assert に置き換えるのは、QrGenerator を hook に分けた後 (計画 PR-26 → PR-27)。それまでは
-// 分割の間に DOM を動かさない柵として残す。固定するもの:
+// hash を名前つきの assert に置き換えるかは決めていない。class だけの変更 (押せる範囲の高さなど) で落ちるのは、この file
+// では hash の側 (名前つきの出力が class を見るのは、QR を薄くする `opacity-40` だけ)。固定するもの:
 //   - 生成物の完全一致 (通貨 × チェーン × 金額 (空・小数・桁の多い額・最小単位) × 支払い方法 × 明細・値引き・
 //     為替換算・ENS 名・回収 / 無料の経路・en): QR に渡す値 (主 QR と互換 QR (EIP-681))・画面に出す URL・
 //     クリップボードに書く値 (URL と EIP-681)・SVG / PNG の保存名・印刷・「前回の受け取り QR」の保存値・
@@ -2278,7 +2281,7 @@ describe('QrGenerator の pin (生成物の完全一致は採り直さない・D
 // 名前やリンクの行き先を落としても、hash を採り直せば緑に戻ってしまう。ここは利用者・読み上げ・外へ出る値を名前で
 // 確かめる: 落ちたら、その名前のものが壊れている (hash と違い、採り直して済ませる値ではない)。
 // 見るのは描画された DOM (role / name / text / href) と外への呼び出しだけで、state や hook の名前には結び付けない
-// (QrGenerator を hook に分ける計画 PR-26 の間も、無変更で緑のまま)。文言そのものは messages から引き (文言の変更では
+// (component の中の組み方を変えても、描画と外への呼び出しが同じなら落ちない)。文言そのものは messages から引き (文言の変更では
 // 落とさない)、行き先・額・URL は literal で持つ。
 describe('QrGenerator の名前つきの出力 (DOM の sha256 が落ちたとき、何が壊れたかを role / name / href / 画面に出す額で言う)', () => {
   const fill = (template: string, vars: Record<string, string>) =>
