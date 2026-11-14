@@ -16,8 +16,13 @@ import en from '@/messages/en.json';
 //      DOM の差分 (どの要素の何が変わったか) を書く。hash は「変わった」ことしか言わないので、受取欄の名前・リンクの
 //      行き先・画面に出す額などの意味のある出力は、この file の末尾の describe「QrGenerator の名前つきの出力」が
 //      role / name / href / text で確かめる (hash を採り直しても、そちらが落ちたら壊れている)。
-// 1 と 2 は同じ inline snapshot に入っているので、`vitest -u` は 1 も一緒に書き換える。-u で採り直したら、diff が
-// "all" / "modal" / "parts" の行だけであることを確かめる (末尾の describe は代表の生成物を literal でも持つ)。
+// 1 は literal (`toStrictEqual`)、2 は inline snapshot で持ち、同じ assert に入れない。`vitest -u` は、落ちた inline
+// snapshot を 1 つの `toMatchInlineSnapshot` の単位で丸ごと書き換える (literal は書き換えない) ので、この file の inline
+// snapshot に入れてよいのは "all" / "modal" / "parts" だけ。採り直しの手順 (UI を変えた PR で 2 が落ちたとき):
+//   `npx vitest run tests/components/QrGenerator-pinning.test.tsx -u` → `git diff` がこの file の "all" / "modal" /
+//   "parts" の行だけであることを確かめる。
+// 1 が落ちたら -u では通らない (同じ it の中で 2 より先に置いてあるので、1 が落ちている間は、その it の後ろにある hash も
+// 採り直せない)。支払いの行き先・額・保存名を変えるつもりがなければ実装を直す。変えるつもりの PR は literal を手で直す。
 // hash を role / name の assert に置き換えるのは、QrGenerator を hook に分けた後 (計画 PR-26 → PR-27)。それまでは
 // 分割の間に DOM を動かさない柵として残す。固定するもの:
 //   - 生成物の完全一致 (通貨 × チェーン × 金額 (空・小数・桁の多い額・最小単位) × 支払い方法 × 明細・値引き・
@@ -414,6 +419,23 @@ async function generated(c: Case) {
   return out;
 }
 
+// 生成物 (採り直さない値・literal で確かめる) と、QR の画面の DOM の sha256 ("modal"・採り直す値・inline snapshot で
+// 確かめる) を分ける。QR の画面を出さなかった case ("modal" が無い) は、生成物の側だけに残る。
+function splitModal(outputs: Record<string, unknown>) {
+  const generatedValues: Record<string, unknown> = {};
+  const modal: Record<string, unknown> = {};
+  for (const [name, out] of Object.entries(outputs)) {
+    if (typeof out === 'object' && out !== null && 'modal' in out) {
+      const { modal: hash, ...rest } = out;
+      generatedValues[name] = rest;
+      modal[name] = hash;
+    } else {
+      generatedValues[name] = out;
+    }
+  }
+  return { generatedValues, modal };
+}
+
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] });
   vi.setSystemTime(NOW);
@@ -492,476 +514,481 @@ describe('QrGenerator の pin (生成物の完全一致は採り直さない・D
     };
     const outputs: Record<string, unknown> = {};
     for (const [name, c] of Object.entries(cases)) outputs[name] = await generated(c);
-    expect(outputs).toMatchInlineSnapshot(`
+    const { generatedValues, modal } = splitModal(outputs);
+    // 生成物 (採り直さない値): literal。`vitest -u` では書き換わらない。落ちたら実装の方を見る。
+    expect(generatedValues).toStrictEqual({
+      accountingMeta: {
+        copies: [
+          '=qr',
+        ],
+        downloads: [
+          '神田-&-Coffee-豆-袋-🎉-jpyc-polygon-750.svg <- blob:pinned',
+          '神田-&-Coffee-豆-袋-🎉-jpyc-polygon-750.png <- data:image/png',
+        ],
+        eip681: null,
+        lastQr: {
+          amountLabel: '750 JPYC',
+          payUrl: '=qr',
+          storeName: '神田 & Coffee',
+          tokenChainLabel: 'JPYC · Polygon Amoy',
+          ts: 1790208000720,
+        },
+        printed: 1,
+        qr: 'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&amount=750&store=%E7%A5%9E%E7%94%B0+%26+Coffee&pname=%E8%B1%86%2F%E8%A2%8B+%F0%9F%8E%89&memo=A%2BB+%3D+1%3F%23&tax=8&taxcat=taxable_8&rcpt=R-001%23%3F&inv=T1234567890123',
+        shownEip681: null,
+        shownUrl: '=qr',
+        watch: {
+          chainId: 80002,
+          enabled: true,
+          expectedAmountWei: '750000000000000000000',
+          receiver: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+          tokenAddress: '0x0000000000000000000000000000000000000aBc',
+        },
+      },
+      avalancheLarge18Decimals: {
+        copies: [
+          '=qr',
+          '=eip681',
+        ],
+        downloads: [
+          'openpay-jpyc-avalanche-123456789-123456789012345678.svg <- blob:pinned',
+          'openpay-jpyc-avalanche-123456789-123456789012345678.png <- data:image/png',
+        ],
+        eip681: 'ethereum:0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29@43113/transfer?address=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&uint256=123456789123456789012345678',
+        lastQr: {
+          amountLabel: '123,456,789.123456789012345678 JPYC',
+          payUrl: '=qr',
+          tokenChainLabel: 'JPYC · Avalanche Fuji',
+          ts: 1790208000480,
+        },
+        printed: 1,
+        qr: 'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&chain=avalanche&amount=123456789.123456789012345678&mode=standard',
+        shownEip681: '=eip681',
+        shownUrl: '=qr',
+        watch: {
+          chainId: 43113,
+          enabled: true,
+          expectedAmountWei: '123456789123456789012345678',
+          receiver: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+          tokenAddress: '0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29',
+        },
+      },
+      discount: {
+        copies: [
+          '=qr',
+        ],
+        downloads: [
+          'openpay-jpyc-polygon-980.svg <- blob:pinned',
+          'openpay-jpyc-polygon-980.png <- data:image/png',
+        ],
+        eip681: null,
+        lastQr: {
+          amountLabel: '980 JPYC',
+          payUrl: '=qr',
+          tokenChainLabel: 'JPYC · Polygon Amoy',
+          ts: 1790208001120,
+        },
+        printed: 1,
+        qr: 'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&amount=980&disc=20',
+        shownEip681: null,
+        shownUrl: '=qr',
+        watch: {
+          chainId: 80002,
+          enabled: true,
+          expectedAmountWei: '980000000000000000000',
+          receiver: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+          tokenAddress: '0x0000000000000000000000000000000000000aBc',
+        },
+      },
+      discountInvalidFraction: {
+        amountShown: '1,000',
+        dialog: false,
+        qr: null,
+      },
+      en: {
+        copies: [
+          '=qr',
+        ],
+        downloads: [
+          'Cafe-jpyc-kaia-42.svg <- blob:pinned',
+          'Cafe-jpyc-kaia-42.png <- data:image/png',
+        ],
+        eip681: null,
+        lastQr: {
+          amountLabel: '42 JPYC',
+          payUrl: '=qr',
+          storeName: 'Cafe',
+          tokenChainLabel: 'JPYC · Kairos Testnet',
+          ts: 1790208001440,
+        },
+        printed: 1,
+        qr: 'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&chain=kaia&amount=42&store=Cafe',
+        shownEip681: null,
+        shownUrl: '=qr',
+        watch: {
+          chainId: 1001,
+          enabled: true,
+          expectedAmountWei: '42000000000000000000',
+          receiver: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+          tokenAddress: '0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29',
+        },
+      },
+      ensReceiver: {
+        copies: [
+          '=qr',
+        ],
+        downloads: [
+          'openpay-jpyc-polygon-100.svg <- blob:pinned',
+          'openpay-jpyc-polygon-100.png <- data:image/png',
+        ],
+        eip681: null,
+        lastQr: {
+          amountLabel: '100 JPYC',
+          payUrl: '=qr',
+          tokenChainLabel: 'JPYC · Polygon Amoy',
+          ts: 1790208001280,
+        },
+        printed: 1,
+        qr: 'https://test.local/pay?to=0x000000000000000000000000000000000000dEaD&token=jpyc&amount=100',
+        shownEip681: null,
+        shownUrl: '=qr',
+        watch: {
+          chainId: 80002,
+          enabled: true,
+          expectedAmountWei: '100000000000000000000',
+          receiver: '0x000000000000000000000000000000000000dEaD',
+          tokenAddress: '0x0000000000000000000000000000000000000aBc',
+        },
+      },
+      free: {
+        copies: [
+          '=qr',
+        ],
+        downloads: [
+          'openpay-jpyc-polygon-500.svg <- blob:pinned',
+          'openpay-jpyc-polygon-500.png <- data:image/png',
+        ],
+        eip681: null,
+        lastQr: {
+          amountLabel: '500 JPYC',
+          payUrl: '=qr',
+          tokenChainLabel: 'JPYC · Polygon Amoy',
+          ts: 1790208001040,
+        },
+        printed: 1,
+        qr: 'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&amount=500',
+        shownEip681: null,
+        shownUrl: '=qr',
+        watch: {
+          chainId: 80002,
+          enabled: true,
+          expectedAmountWei: '500000000000000000000',
+          receiver: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+          tokenAddress: '0x0000000000000000000000000000000000000aBc',
+        },
+      },
+      freshTypedReceiver: {
+        copies: [
+          '=qr',
+        ],
+        downloads: [
+          'openpay-jpyc-polygon-2500.svg <- blob:pinned',
+          'openpay-jpyc-polygon-2500.png <- data:image/png',
+        ],
+        eip681: null,
+        lastQr: {
+          amountLabel: '2,500 JPYC',
+          payUrl: '=qr',
+          tokenChainLabel: 'JPYC · Polygon Amoy',
+          ts: 1790208000320,
+        },
+        printed: 1,
+        qr: 'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&amount=2500',
+        shownEip681: null,
+        shownUrl: '=qr',
+        watch: {
+          chainId: 80002,
+          enabled: true,
+          expectedAmountWei: '2500000000000000000000',
+          receiver: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+          tokenAddress: '0x0000000000000000000000000000000000000aBc',
+        },
+      },
+      fxToUsdc: {
+        copies: [
+          '=qr',
+        ],
+        downloads: [
+          'openpay-usdc-polygon-6-666667.svg <- blob:pinned',
+          'openpay-usdc-polygon-6-666667.png <- data:image/png',
+        ],
+        eip681: null,
+        lastQr: {
+          amountLabel: '6.666667 USDC',
+          payUrl: '=qr',
+          tokenChainLabel: 'USDC · Base Sepolia / Arbitrum Sepolia / OP Sepolia / Polygon Amoy / Sepolia / Avalanche Fuji / Unichain Sepolia / World Chain Sepolia / Sonic Blaze Testnet / Sei Testnet / HyperEVM Testnet',
+          ts: 1790208001360,
+        },
+        printed: 1,
+        qr: 'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=usdc&chain=polygon&amount=6.666667&exp=1790208181&refAmt=1000&fxRate=150',
+        shownEip681: null,
+        shownUrl: '=qr',
+        watch: {
+          chainId: 80002,
+          enabled: true,
+          expectedAmountWei: '6666667',
+          receiver: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+          tokenAddress: '0x41E94Eb019C0762f9Bfcf9Fb1E58725BfB0e7582',
+        },
+      },
+      kaiaDecimal: {
+        copies: [
+          '=qr',
+        ],
+        downloads: [
+          'openpay-jpyc-kaia-0-5.svg <- blob:pinned',
+          'openpay-jpyc-kaia-0-5.png <- data:image/png',
+        ],
+        eip681: null,
+        lastQr: {
+          amountLabel: '0.5 JPYC',
+          payUrl: '=qr',
+          tokenChainLabel: 'JPYC · Kairos Testnet',
+          ts: 1790208000400,
+        },
+        printed: 1,
+        qr: 'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&chain=kaia&amount=0.5',
+        shownEip681: null,
+        shownUrl: '=qr',
+        watch: {
+          chainId: 1001,
+          enabled: true,
+          expectedAmountWei: '500000000000000000',
+          receiver: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+          tokenAddress: '0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29',
+        },
+      },
+      kaiaStandardStatic: {
+        copies: [
+          '=qr',
+        ],
+        downloads: [
+          'openpay-jpyc-kaia-open.svg <- blob:pinned',
+          'openpay-jpyc-kaia-open.png <- data:image/png',
+        ],
+        eip681: null,
+        lastQr: {
+          amountLabel: 'JPYC で金額を入力',
+          payUrl: '=qr',
+          tokenChainLabel: 'JPYC · Kairos Testnet',
+          ts: 1790208000640,
+        },
+        printed: 1,
+        qr: 'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&chain=kaia&mode=standard',
+        shownEip681: null,
+        shownUrl: '=qr',
+        watch: {
+          chainId: 1001,
+          enabled: false,
+          expectedAmountWei: '0',
+          receiver: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+          tokenAddress: '0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29',
+        },
+      },
+      polygonEmptyAmount: {
+        amountShown: '',
+        dialog: false,
+        qr: null,
+      },
+      polygonGasless: {
+        copies: [
+          '=qr',
+        ],
+        downloads: [
+          'openpay-jpyc-polygon-1000.svg <- blob:pinned',
+          'openpay-jpyc-polygon-1000.png <- data:image/png',
+        ],
+        eip681: null,
+        lastQr: {
+          amountLabel: '1,000 JPYC',
+          payUrl: '=qr',
+          tokenChainLabel: 'JPYC · Polygon Amoy',
+          ts: 1790208000060,
+        },
+        printed: 1,
+        qr: 'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&amount=1000',
+        shownEip681: null,
+        shownUrl: '=qr',
+        watch: {
+          chainId: 80002,
+          enabled: true,
+          expectedAmountWei: '1000000000000000000000',
+          receiver: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+          tokenAddress: '0x0000000000000000000000000000000000000aBc',
+        },
+      },
+      polygonStandardLarge: {
+        copies: [
+          '=qr',
+          '=eip681',
+        ],
+        downloads: [
+          'openpay-jpyc-polygon-1234567-89.svg <- blob:pinned',
+          'openpay-jpyc-polygon-1234567-89.png <- data:image/png',
+        ],
+        eip681: 'ethereum:0x0000000000000000000000000000000000000aBc@80002/transfer?address=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&uint256=1234567890000000000000000',
+        lastQr: {
+          amountLabel: '1,234,567.89 JPYC',
+          payUrl: '=qr',
+          tokenChainLabel: 'JPYC · Polygon Amoy',
+          ts: 1790208000560,
+        },
+        printed: 1,
+        qr: 'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&amount=1234567.89&mode=standard',
+        shownEip681: '=eip681',
+        shownUrl: '=qr',
+        watch: {
+          chainId: 80002,
+          enabled: true,
+          expectedAmountWei: '1234567890000000000000000',
+          receiver: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+          tokenAddress: '0x0000000000000000000000000000000000000aBc',
+        },
+      },
+      polygonStatic: {
+        copies: [
+          '=qr',
+        ],
+        downloads: [
+          'openpay-jpyc-polygon-open.svg <- blob:pinned',
+          'openpay-jpyc-polygon-open.png <- data:image/png',
+        ],
+        eip681: null,
+        lastQr: {
+          amountLabel: 'JPYC で金額を入力',
+          payUrl: '=qr',
+          tokenChainLabel: 'JPYC · Polygon Amoy',
+          ts: 1790208000140,
+        },
+        printed: 1,
+        qr: 'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc',
+        shownEip681: null,
+        shownUrl: '=qr',
+        watch: {
+          chainId: 80002,
+          enabled: false,
+          expectedAmountWei: '0',
+          receiver: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+          tokenAddress: '0x0000000000000000000000000000000000000aBc',
+        },
+      },
+      recover: {
+        copies: [
+          '=qr',
+        ],
+        downloads: [
+          'openpay-jpyc-polygon-500.svg <- blob:pinned',
+          'openpay-jpyc-polygon-500.png <- data:image/png',
+        ],
+        eip681: null,
+        lastQr: {
+          amountLabel: '500 JPYC',
+          payUrl: '=qr',
+          tokenChainLabel: 'JPYC · Polygon Amoy',
+          ts: 1790208000800,
+        },
+        printed: 1,
+        qr: 'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&gas=merchant&amount=500',
+        shownEip681: null,
+        shownUrl: '=qr',
+        watch: {
+          chainId: 80002,
+          enabled: true,
+          expectedAmountWei: '498000000000000000000',
+          receiver: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+          tokenAddress: '0x0000000000000000000000000000000000000aBc',
+        },
+      },
+      recoverFloor: {
+        copies: [
+          '=qr',
+        ],
+        downloads: [
+          'openpay-jpyc-polygon-3.svg <- blob:pinned',
+          'openpay-jpyc-polygon-3.png <- data:image/png',
+        ],
+        eip681: null,
+        lastQr: {
+          amountLabel: '3 JPYC',
+          payUrl: '=qr',
+          tokenChainLabel: 'JPYC · Polygon Amoy',
+          ts: 1790208000880,
+        },
+        printed: 1,
+        qr: 'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&gas=merchant&amount=3',
+        shownEip681: null,
+        shownUrl: '=qr',
+        watch: {
+          chainId: 80002,
+          enabled: true,
+          expectedAmountWei: '1000000000000000000',
+          receiver: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+          tokenAddress: '0x0000000000000000000000000000000000000aBc',
+        },
+      },
+      recoverKaiaStatic: {
+        copies: [
+          '=qr',
+        ],
+        downloads: [
+          'openpay-jpyc-kaia-open.svg <- blob:pinned',
+          'openpay-jpyc-kaia-open.png <- data:image/png',
+        ],
+        eip681: null,
+        lastQr: {
+          amountLabel: 'JPYC で金額を入力',
+          payUrl: '=qr',
+          tokenChainLabel: 'JPYC · Kairos Testnet',
+          ts: 1790208000960,
+        },
+        printed: 1,
+        qr: 'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&chain=kaia&gas=merchant',
+        shownEip681: null,
+        shownUrl: '=qr',
+        watch: {
+          chainId: 1001,
+          enabled: false,
+          expectedAmountWei: '0',
+          receiver: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+          tokenAddress: '0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29',
+        },
+      },
+    });
+    // QR の画面の DOM の sha256 (採り直す値): UI の変更で `vitest -u` で採り直す。
+    expect(modal).toMatchInlineSnapshot(`
       {
-        "accountingMeta": {
-          "copies": [
-            "=qr",
-          ],
-          "downloads": [
-            "神田-&-Coffee-豆-袋-🎉-jpyc-polygon-750.svg <- blob:pinned",
-            "神田-&-Coffee-豆-袋-🎉-jpyc-polygon-750.png <- data:image/png",
-          ],
-          "eip681": null,
-          "lastQr": {
-            "amountLabel": "750 JPYC",
-            "payUrl": "=qr",
-            "storeName": "神田 & Coffee",
-            "tokenChainLabel": "JPYC · Polygon Amoy",
-            "ts": 1790208000720,
-          },
-          "modal": "27adadeb7aaf36a9579d676f4064b2c94a45393c8000ed760b12d18036944bc0",
-          "printed": 1,
-          "qr": "https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&amount=750&store=%E7%A5%9E%E7%94%B0+%26+Coffee&pname=%E8%B1%86%2F%E8%A2%8B+%F0%9F%8E%89&memo=A%2BB+%3D+1%3F%23&tax=8&taxcat=taxable_8&rcpt=R-001%23%3F&inv=T1234567890123",
-          "shownEip681": null,
-          "shownUrl": "=qr",
-          "watch": {
-            "chainId": 80002,
-            "enabled": true,
-            "expectedAmountWei": "750000000000000000000",
-            "receiver": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-            "tokenAddress": "0x0000000000000000000000000000000000000aBc",
-          },
-        },
-        "avalancheLarge18Decimals": {
-          "copies": [
-            "=qr",
-            "=eip681",
-          ],
-          "downloads": [
-            "openpay-jpyc-avalanche-123456789-123456789012345678.svg <- blob:pinned",
-            "openpay-jpyc-avalanche-123456789-123456789012345678.png <- data:image/png",
-          ],
-          "eip681": "ethereum:0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29@43113/transfer?address=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&uint256=123456789123456789012345678",
-          "lastQr": {
-            "amountLabel": "123,456,789.123456789012345678 JPYC",
-            "payUrl": "=qr",
-            "tokenChainLabel": "JPYC · Avalanche Fuji",
-            "ts": 1790208000480,
-          },
-          "modal": "f6df3812e0447d622b7ab78d808d410458653bd146ace04f25575efb4658e137",
-          "printed": 1,
-          "qr": "https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&chain=avalanche&amount=123456789.123456789012345678&mode=standard",
-          "shownEip681": "=eip681",
-          "shownUrl": "=qr",
-          "watch": {
-            "chainId": 43113,
-            "enabled": true,
-            "expectedAmountWei": "123456789123456789012345678",
-            "receiver": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-            "tokenAddress": "0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29",
-          },
-        },
-        "discount": {
-          "copies": [
-            "=qr",
-          ],
-          "downloads": [
-            "openpay-jpyc-polygon-980.svg <- blob:pinned",
-            "openpay-jpyc-polygon-980.png <- data:image/png",
-          ],
-          "eip681": null,
-          "lastQr": {
-            "amountLabel": "980 JPYC",
-            "payUrl": "=qr",
-            "tokenChainLabel": "JPYC · Polygon Amoy",
-            "ts": 1790208001120,
-          },
-          "modal": "946e65f8372fb54d69ba1a01f91a92283818e5e91f08edfce51d4a96558a6bfc",
-          "printed": 1,
-          "qr": "https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&amount=980&disc=20",
-          "shownEip681": null,
-          "shownUrl": "=qr",
-          "watch": {
-            "chainId": 80002,
-            "enabled": true,
-            "expectedAmountWei": "980000000000000000000",
-            "receiver": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-            "tokenAddress": "0x0000000000000000000000000000000000000aBc",
-          },
-        },
-        "discountInvalidFraction": {
-          "amountShown": "1,000",
-          "dialog": false,
-          "qr": null,
-        },
-        "en": {
-          "copies": [
-            "=qr",
-          ],
-          "downloads": [
-            "Cafe-jpyc-kaia-42.svg <- blob:pinned",
-            "Cafe-jpyc-kaia-42.png <- data:image/png",
-          ],
-          "eip681": null,
-          "lastQr": {
-            "amountLabel": "42 JPYC",
-            "payUrl": "=qr",
-            "storeName": "Cafe",
-            "tokenChainLabel": "JPYC · Kairos Testnet",
-            "ts": 1790208001440,
-          },
-          "modal": "77b269ce8bcb1428199551559341df2345a44a56bff48b845c0b341b34d7dbd1",
-          "printed": 1,
-          "qr": "https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&chain=kaia&amount=42&store=Cafe",
-          "shownEip681": null,
-          "shownUrl": "=qr",
-          "watch": {
-            "chainId": 1001,
-            "enabled": true,
-            "expectedAmountWei": "42000000000000000000",
-            "receiver": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-            "tokenAddress": "0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29",
-          },
-        },
-        "ensReceiver": {
-          "copies": [
-            "=qr",
-          ],
-          "downloads": [
-            "openpay-jpyc-polygon-100.svg <- blob:pinned",
-            "openpay-jpyc-polygon-100.png <- data:image/png",
-          ],
-          "eip681": null,
-          "lastQr": {
-            "amountLabel": "100 JPYC",
-            "payUrl": "=qr",
-            "tokenChainLabel": "JPYC · Polygon Amoy",
-            "ts": 1790208001280,
-          },
-          "modal": "77587e6f86f4c307f454e6e1dafce19c372837a250967a05eb2052b2ab9e9609",
-          "printed": 1,
-          "qr": "https://test.local/pay?to=0x000000000000000000000000000000000000dEaD&token=jpyc&amount=100",
-          "shownEip681": null,
-          "shownUrl": "=qr",
-          "watch": {
-            "chainId": 80002,
-            "enabled": true,
-            "expectedAmountWei": "100000000000000000000",
-            "receiver": "0x000000000000000000000000000000000000dEaD",
-            "tokenAddress": "0x0000000000000000000000000000000000000aBc",
-          },
-        },
-        "free": {
-          "copies": [
-            "=qr",
-          ],
-          "downloads": [
-            "openpay-jpyc-polygon-500.svg <- blob:pinned",
-            "openpay-jpyc-polygon-500.png <- data:image/png",
-          ],
-          "eip681": null,
-          "lastQr": {
-            "amountLabel": "500 JPYC",
-            "payUrl": "=qr",
-            "tokenChainLabel": "JPYC · Polygon Amoy",
-            "ts": 1790208001040,
-          },
-          "modal": "578ad230b7c10ecc5d4beb994048f01dff0a84b83f5c4ebd14fe525964b931c3",
-          "printed": 1,
-          "qr": "https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&amount=500",
-          "shownEip681": null,
-          "shownUrl": "=qr",
-          "watch": {
-            "chainId": 80002,
-            "enabled": true,
-            "expectedAmountWei": "500000000000000000000",
-            "receiver": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-            "tokenAddress": "0x0000000000000000000000000000000000000aBc",
-          },
-        },
-        "freshTypedReceiver": {
-          "copies": [
-            "=qr",
-          ],
-          "downloads": [
-            "openpay-jpyc-polygon-2500.svg <- blob:pinned",
-            "openpay-jpyc-polygon-2500.png <- data:image/png",
-          ],
-          "eip681": null,
-          "lastQr": {
-            "amountLabel": "2,500 JPYC",
-            "payUrl": "=qr",
-            "tokenChainLabel": "JPYC · Polygon Amoy",
-            "ts": 1790208000320,
-          },
-          "modal": "374aed62592bb157f61fbdb4eced8e42094b6c5d225ef36d62b204b096dd99ee",
-          "printed": 1,
-          "qr": "https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&amount=2500",
-          "shownEip681": null,
-          "shownUrl": "=qr",
-          "watch": {
-            "chainId": 80002,
-            "enabled": true,
-            "expectedAmountWei": "2500000000000000000000",
-            "receiver": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-            "tokenAddress": "0x0000000000000000000000000000000000000aBc",
-          },
-        },
-        "fxToUsdc": {
-          "copies": [
-            "=qr",
-          ],
-          "downloads": [
-            "openpay-usdc-polygon-6-666667.svg <- blob:pinned",
-            "openpay-usdc-polygon-6-666667.png <- data:image/png",
-          ],
-          "eip681": null,
-          "lastQr": {
-            "amountLabel": "6.666667 USDC",
-            "payUrl": "=qr",
-            "tokenChainLabel": "USDC · Base Sepolia / Arbitrum Sepolia / OP Sepolia / Polygon Amoy / Sepolia / Avalanche Fuji / Unichain Sepolia / World Chain Sepolia / Sonic Blaze Testnet / Sei Testnet / HyperEVM Testnet",
-            "ts": 1790208001360,
-          },
-          "modal": "c8dea8a165fa703f8d218fbae4cb4233e3f98d384b4fb9fd8c1a47009dc55018",
-          "printed": 1,
-          "qr": "https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=usdc&chain=polygon&amount=6.666667&exp=1790208181&refAmt=1000&fxRate=150",
-          "shownEip681": null,
-          "shownUrl": "=qr",
-          "watch": {
-            "chainId": 80002,
-            "enabled": true,
-            "expectedAmountWei": "6666667",
-            "receiver": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-            "tokenAddress": "0x41E94Eb019C0762f9Bfcf9Fb1E58725BfB0e7582",
-          },
-        },
-        "kaiaDecimal": {
-          "copies": [
-            "=qr",
-          ],
-          "downloads": [
-            "openpay-jpyc-kaia-0-5.svg <- blob:pinned",
-            "openpay-jpyc-kaia-0-5.png <- data:image/png",
-          ],
-          "eip681": null,
-          "lastQr": {
-            "amountLabel": "0.5 JPYC",
-            "payUrl": "=qr",
-            "tokenChainLabel": "JPYC · Kairos Testnet",
-            "ts": 1790208000400,
-          },
-          "modal": "c0fa3085d4bfa1878558ee1f0aeeecc1bd5e199e5ac32291302b0489836355c5",
-          "printed": 1,
-          "qr": "https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&chain=kaia&amount=0.5",
-          "shownEip681": null,
-          "shownUrl": "=qr",
-          "watch": {
-            "chainId": 1001,
-            "enabled": true,
-            "expectedAmountWei": "500000000000000000",
-            "receiver": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-            "tokenAddress": "0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29",
-          },
-        },
-        "kaiaStandardStatic": {
-          "copies": [
-            "=qr",
-          ],
-          "downloads": [
-            "openpay-jpyc-kaia-open.svg <- blob:pinned",
-            "openpay-jpyc-kaia-open.png <- data:image/png",
-          ],
-          "eip681": null,
-          "lastQr": {
-            "amountLabel": "JPYC で金額を入力",
-            "payUrl": "=qr",
-            "tokenChainLabel": "JPYC · Kairos Testnet",
-            "ts": 1790208000640,
-          },
-          "modal": "67032bfd27e812bc5b86d8659f0fc50c9a9544f7debf8b1be96bdea7e137639e",
-          "printed": 1,
-          "qr": "https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&chain=kaia&mode=standard",
-          "shownEip681": null,
-          "shownUrl": "=qr",
-          "watch": {
-            "chainId": 1001,
-            "enabled": false,
-            "expectedAmountWei": "0",
-            "receiver": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-            "tokenAddress": "0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29",
-          },
-        },
-        "polygonEmptyAmount": {
-          "amountShown": "",
-          "dialog": false,
-          "qr": null,
-        },
-        "polygonGasless": {
-          "copies": [
-            "=qr",
-          ],
-          "downloads": [
-            "openpay-jpyc-polygon-1000.svg <- blob:pinned",
-            "openpay-jpyc-polygon-1000.png <- data:image/png",
-          ],
-          "eip681": null,
-          "lastQr": {
-            "amountLabel": "1,000 JPYC",
-            "payUrl": "=qr",
-            "tokenChainLabel": "JPYC · Polygon Amoy",
-            "ts": 1790208000060,
-          },
-          "modal": "0bde47b4498cffa6fcf78537060f8dcbd8de170296b8bb4d03a1ea71b84835bf",
-          "printed": 1,
-          "qr": "https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&amount=1000",
-          "shownEip681": null,
-          "shownUrl": "=qr",
-          "watch": {
-            "chainId": 80002,
-            "enabled": true,
-            "expectedAmountWei": "1000000000000000000000",
-            "receiver": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-            "tokenAddress": "0x0000000000000000000000000000000000000aBc",
-          },
-        },
-        "polygonStandardLarge": {
-          "copies": [
-            "=qr",
-            "=eip681",
-          ],
-          "downloads": [
-            "openpay-jpyc-polygon-1234567-89.svg <- blob:pinned",
-            "openpay-jpyc-polygon-1234567-89.png <- data:image/png",
-          ],
-          "eip681": "ethereum:0x0000000000000000000000000000000000000aBc@80002/transfer?address=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&uint256=1234567890000000000000000",
-          "lastQr": {
-            "amountLabel": "1,234,567.89 JPYC",
-            "payUrl": "=qr",
-            "tokenChainLabel": "JPYC · Polygon Amoy",
-            "ts": 1790208000560,
-          },
-          "modal": "4f1c7967555c9b72ac5fb30ef2106e0f8f03f764ca0669e13bc04c9cf035c71a",
-          "printed": 1,
-          "qr": "https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&amount=1234567.89&mode=standard",
-          "shownEip681": "=eip681",
-          "shownUrl": "=qr",
-          "watch": {
-            "chainId": 80002,
-            "enabled": true,
-            "expectedAmountWei": "1234567890000000000000000",
-            "receiver": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-            "tokenAddress": "0x0000000000000000000000000000000000000aBc",
-          },
-        },
-        "polygonStatic": {
-          "copies": [
-            "=qr",
-          ],
-          "downloads": [
-            "openpay-jpyc-polygon-open.svg <- blob:pinned",
-            "openpay-jpyc-polygon-open.png <- data:image/png",
-          ],
-          "eip681": null,
-          "lastQr": {
-            "amountLabel": "JPYC で金額を入力",
-            "payUrl": "=qr",
-            "tokenChainLabel": "JPYC · Polygon Amoy",
-            "ts": 1790208000140,
-          },
-          "modal": "23d6d5faa7b0c2c2bd370818b58c2335071ad77c8bab2b9d0b61b6cec169bd7f",
-          "printed": 1,
-          "qr": "https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc",
-          "shownEip681": null,
-          "shownUrl": "=qr",
-          "watch": {
-            "chainId": 80002,
-            "enabled": false,
-            "expectedAmountWei": "0",
-            "receiver": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-            "tokenAddress": "0x0000000000000000000000000000000000000aBc",
-          },
-        },
-        "recover": {
-          "copies": [
-            "=qr",
-          ],
-          "downloads": [
-            "openpay-jpyc-polygon-500.svg <- blob:pinned",
-            "openpay-jpyc-polygon-500.png <- data:image/png",
-          ],
-          "eip681": null,
-          "lastQr": {
-            "amountLabel": "500 JPYC",
-            "payUrl": "=qr",
-            "tokenChainLabel": "JPYC · Polygon Amoy",
-            "ts": 1790208000800,
-          },
-          "modal": "e93fc78e443b2cb7c46ad7eab901d8b05f3272f2b6b27dc125413247f13bdef7",
-          "printed": 1,
-          "qr": "https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&gas=merchant&amount=500",
-          "shownEip681": null,
-          "shownUrl": "=qr",
-          "watch": {
-            "chainId": 80002,
-            "enabled": true,
-            "expectedAmountWei": "498000000000000000000",
-            "receiver": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-            "tokenAddress": "0x0000000000000000000000000000000000000aBc",
-          },
-        },
-        "recoverFloor": {
-          "copies": [
-            "=qr",
-          ],
-          "downloads": [
-            "openpay-jpyc-polygon-3.svg <- blob:pinned",
-            "openpay-jpyc-polygon-3.png <- data:image/png",
-          ],
-          "eip681": null,
-          "lastQr": {
-            "amountLabel": "3 JPYC",
-            "payUrl": "=qr",
-            "tokenChainLabel": "JPYC · Polygon Amoy",
-            "ts": 1790208000880,
-          },
-          "modal": "05ed15f40d6f0f8973a168638dcbaf24d80b734e45ff632536cbd2b96f67c4ba",
-          "printed": 1,
-          "qr": "https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&gas=merchant&amount=3",
-          "shownEip681": null,
-          "shownUrl": "=qr",
-          "watch": {
-            "chainId": 80002,
-            "enabled": true,
-            "expectedAmountWei": "1000000000000000000",
-            "receiver": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-            "tokenAddress": "0x0000000000000000000000000000000000000aBc",
-          },
-        },
-        "recoverKaiaStatic": {
-          "copies": [
-            "=qr",
-          ],
-          "downloads": [
-            "openpay-jpyc-kaia-open.svg <- blob:pinned",
-            "openpay-jpyc-kaia-open.png <- data:image/png",
-          ],
-          "eip681": null,
-          "lastQr": {
-            "amountLabel": "JPYC で金額を入力",
-            "payUrl": "=qr",
-            "tokenChainLabel": "JPYC · Kairos Testnet",
-            "ts": 1790208000960,
-          },
-          "modal": "e32a5c2dc2801eba8864f28fdabc3d0c17c52ecb4ec748d3eff69c52669848ae",
-          "printed": 1,
-          "qr": "https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&chain=kaia&gas=merchant",
-          "shownEip681": null,
-          "shownUrl": "=qr",
-          "watch": {
-            "chainId": 1001,
-            "enabled": false,
-            "expectedAmountWei": "0",
-            "receiver": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-            "tokenAddress": "0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29",
-          },
-        },
+        "accountingMeta": "27adadeb7aaf36a9579d676f4064b2c94a45393c8000ed760b12d18036944bc0",
+        "avalancheLarge18Decimals": "f6df3812e0447d622b7ab78d808d410458653bd146ace04f25575efb4658e137",
+        "discount": "946e65f8372fb54d69ba1a01f91a92283818e5e91f08edfce51d4a96558a6bfc",
+        "en": "77b269ce8bcb1428199551559341df2345a44a56bff48b845c0b341b34d7dbd1",
+        "ensReceiver": "77587e6f86f4c307f454e6e1dafce19c372837a250967a05eb2052b2ab9e9609",
+        "free": "578ad230b7c10ecc5d4beb994048f01dff0a84b83f5c4ebd14fe525964b931c3",
+        "freshTypedReceiver": "374aed62592bb157f61fbdb4eced8e42094b6c5d225ef36d62b204b096dd99ee",
+        "fxToUsdc": "c8dea8a165fa703f8d218fbae4cb4233e3f98d384b4fb9fd8c1a47009dc55018",
+        "kaiaDecimal": "c0fa3085d4bfa1878558ee1f0aeeecc1bd5e199e5ac32291302b0489836355c5",
+        "kaiaStandardStatic": "67032bfd27e812bc5b86d8659f0fc50c9a9544f7debf8b1be96bdea7e137639e",
+        "polygonGasless": "0bde47b4498cffa6fcf78537060f8dcbd8de170296b8bb4d03a1ea71b84835bf",
+        "polygonStandardLarge": "4f1c7967555c9b72ac5fb30ef2106e0f8f03f764ca0669e13bc04c9cf035c71a",
+        "polygonStatic": "23d6d5faa7b0c2c2bd370818b58c2335071ad77c8bab2b9d0b61b6cec169bd7f",
+        "recover": "e93fc78e443b2cb7c46ad7eab901d8b05f3272f2b6b27dc125413247f13bdef7",
+        "recoverFloor": "05ed15f40d6f0f8973a168638dcbaf24d80b734e45ff632536cbd2b96f67c4ba",
+        "recoverKaiaStatic": "e32a5c2dc2801eba8864f28fdabc3d0c17c52ecb4ec748d3eff69c52669848ae",
       }
     `);
   });
 
   // 回収 (JPYC・forwarder あり) の利用料の下限 (2 JPYC) ちょうどと、それより小さい会計。着金の見張りに渡す期待額
-  // (店舗の純受取額) は 0 で止まる (負の額にしない)。上の行列とは別の snapshot にして、行列の採取値 (保存時刻を含む) を
+  // (店舗の純受取額) は 0 で止まる (負の額にしない)。上の行列とは別の it にして、行列の採取値 (保存時刻を含む) を
   // 動かさない。生成物の期待値は分割前の component で採取したもの ("modal" の sha256 だけは UI の変更で採り直している)。
   it('回収の利用料の下限 (2 JPYC) ちょうどと未満の生成物の完全一致 (着金の見張りに渡す期待額は 0 で止まる) と、QR の画面の DOM の sha256 ("modal"・UI の変更で採り直す)', async () => {
     const cases: Record<string, Case> = {
@@ -973,64 +1000,69 @@ describe('QrGenerator の pin (生成物の完全一致は採り直さない・D
     for (const out of Object.values(outputs)) {
       expect(BigInt((out.watch as Watch).expectedAmountWei as string)).toBeGreaterThanOrEqual(0n);
     }
-    expect(outputs).toMatchInlineSnapshot(`
+    const { generatedValues, modal } = splitModal(outputs);
+    // 生成物 (採り直さない値): literal。`vitest -u` では書き換わらない。落ちたら実装の方を見る。
+    expect(generatedValues).toStrictEqual({
+      recoverAtFloor: {
+        copies: [
+          '=qr',
+        ],
+        downloads: [
+          'openpay-jpyc-polygon-2.svg <- blob:pinned',
+          'openpay-jpyc-polygon-2.png <- data:image/png',
+        ],
+        eip681: null,
+        lastQr: {
+          amountLabel: '2 JPYC',
+          payUrl: '=qr',
+          tokenChainLabel: 'JPYC · Polygon Amoy',
+          ts: 1790208000060,
+        },
+        printed: 1,
+        qr: 'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&gas=merchant&amount=2',
+        shownEip681: null,
+        shownUrl: '=qr',
+        watch: {
+          chainId: 80002,
+          enabled: true,
+          expectedAmountWei: '0',
+          receiver: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+          tokenAddress: '0x0000000000000000000000000000000000000aBc',
+        },
+      },
+      recoverBelowFloor: {
+        copies: [
+          '=qr',
+        ],
+        downloads: [
+          'openpay-jpyc-polygon-1.svg <- blob:pinned',
+          'openpay-jpyc-polygon-1.png <- data:image/png',
+        ],
+        eip681: null,
+        lastQr: {
+          amountLabel: '1 JPYC',
+          payUrl: '=qr',
+          tokenChainLabel: 'JPYC · Polygon Amoy',
+          ts: 1790208000140,
+        },
+        printed: 1,
+        qr: 'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&gas=merchant&amount=1',
+        shownEip681: null,
+        shownUrl: '=qr',
+        watch: {
+          chainId: 80002,
+          enabled: true,
+          expectedAmountWei: '0',
+          receiver: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+          tokenAddress: '0x0000000000000000000000000000000000000aBc',
+        },
+      },
+    });
+    // QR の画面の DOM の sha256 (採り直す値): UI の変更で `vitest -u` で採り直す。
+    expect(modal).toMatchInlineSnapshot(`
       {
-        "recoverAtFloor": {
-          "copies": [
-            "=qr",
-          ],
-          "downloads": [
-            "openpay-jpyc-polygon-2.svg <- blob:pinned",
-            "openpay-jpyc-polygon-2.png <- data:image/png",
-          ],
-          "eip681": null,
-          "lastQr": {
-            "amountLabel": "2 JPYC",
-            "payUrl": "=qr",
-            "tokenChainLabel": "JPYC · Polygon Amoy",
-            "ts": 1790208000060,
-          },
-          "modal": "6f79254ff03e87e6044c5ad8a49db9ade2e26454d8231657f4fc581e2b023530",
-          "printed": 1,
-          "qr": "https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&gas=merchant&amount=2",
-          "shownEip681": null,
-          "shownUrl": "=qr",
-          "watch": {
-            "chainId": 80002,
-            "enabled": true,
-            "expectedAmountWei": "0",
-            "receiver": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-            "tokenAddress": "0x0000000000000000000000000000000000000aBc",
-          },
-        },
-        "recoverBelowFloor": {
-          "copies": [
-            "=qr",
-          ],
-          "downloads": [
-            "openpay-jpyc-polygon-1.svg <- blob:pinned",
-            "openpay-jpyc-polygon-1.png <- data:image/png",
-          ],
-          "eip681": null,
-          "lastQr": {
-            "amountLabel": "1 JPYC",
-            "payUrl": "=qr",
-            "tokenChainLabel": "JPYC · Polygon Amoy",
-            "ts": 1790208000140,
-          },
-          "modal": "a339a2ca8f66a6c6ee90c715c075502c5398aa040e9320a48409eab6a599b965",
-          "printed": 1,
-          "qr": "https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&gas=merchant&amount=1",
-          "shownEip681": null,
-          "shownUrl": "=qr",
-          "watch": {
-            "chainId": 80002,
-            "enabled": true,
-            "expectedAmountWei": "0",
-            "receiver": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-            "tokenAddress": "0x0000000000000000000000000000000000000aBc",
-          },
-        },
+        "recoverAtFloor": "6f79254ff03e87e6044c5ad8a49db9ade2e26454d8231657f4fc581e2b023530",
+        "recoverBelowFloor": "a339a2ca8f66a6c6ee90c715c075502c5398aa040e9320a48409eab6a599b965",
       }
     `);
   });
@@ -1069,349 +1101,354 @@ describe('QrGenerator の pin (生成物の完全一致は採り直さない・D
     };
     const outputs: Record<string, unknown> = {};
     for (const [name, c] of Object.entries(cases)) outputs[name] = await generated(c);
-    expect(outputs).toMatchInlineSnapshot(`
+    const { generatedValues, modal } = splitModal(outputs);
+    // 生成物 (採り直さない値): literal。`vitest -u` では書き換わらない。落ちたら実装の方を見る。
+    expect(generatedValues).toStrictEqual({
+      arbitrumSplitNoCrossChain: {
+        copies: [
+          '=qr',
+        ],
+        downloads: [
+          'openpay-usdc-arbitrum-1-234567.svg <- blob:pinned',
+          'openpay-usdc-arbitrum-1-234567.png <- data:image/png',
+        ],
+        eip681: null,
+        lastQr: {
+          amountLabel: '1.234567 USDC',
+          payUrl: '=qr',
+          tokenChainLabel: 'USDC · Arbitrum Sepolia',
+          ts: 1790208000140,
+        },
+        printed: 1,
+        qr: 'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=usdc&chain=arbitrum&gas=merchant&amount=1.234567&split=0x2222222222222222222222222222222222222222%3A30%2C0x3333333333333333333333333333333333333333%3A20&crossChain=false',
+        shownEip681: null,
+        shownUrl: '=qr',
+        watch: {
+          chainId: 421614,
+          enabled: true,
+          expectedAmountWei: '1234567',
+          receiver: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+          tokenAddress: '0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d',
+        },
+      },
+      arc: {
+        copies: [
+          '=qr',
+          '=eip681',
+        ],
+        downloads: [
+          'openpay-usdc-arc-3.svg <- blob:pinned',
+          'openpay-usdc-arc-3.png <- data:image/png',
+        ],
+        eip681: 'ethereum:0x3600000000000000000000000000000000000000@5042002/transfer?address=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&uint256=3000000',
+        lastQr: {
+          amountLabel: '3 USDC',
+          payUrl: '=qr',
+          tokenChainLabel: 'USDC · Arc Testnet',
+          ts: 1790208000620,
+        },
+        printed: 1,
+        qr: 'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=usdc&chain=arc&amount=3&mode=standard&crossChain=false',
+        shownEip681: '=eip681',
+        shownUrl: '=qr',
+        watch: {
+          chainId: 5042002,
+          enabled: true,
+          expectedAmountWei: '3000000',
+          receiver: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+          tokenAddress: '0x3600000000000000000000000000000000000000',
+        },
+      },
+      arcStatic: {
+        copies: [
+          '=qr',
+        ],
+        downloads: [
+          'Arc-店-usdc-arc-open.svg <- blob:pinned',
+          'Arc-店-usdc-arc-open.png <- data:image/png',
+        ],
+        eip681: null,
+        lastQr: {
+          amountLabel: 'USDC で金額を入力',
+          payUrl: '=qr',
+          storeName: 'Arc 店',
+          tokenChainLabel: 'USDC · Arc Testnet',
+          ts: 1790208000700,
+        },
+        printed: 1,
+        qr: 'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=usdc&chain=arc&mode=standard&crossChain=false&store=Arc+%E5%BA%97',
+        shownEip681: null,
+        shownUrl: '=qr',
+        watch: {
+          chainId: 5042002,
+          enabled: false,
+          expectedAmountWei: '0',
+          receiver: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+          tokenAddress: '0x3600000000000000000000000000000000000000',
+        },
+      },
+      avalancheSmallestStandard: {
+        copies: [
+          '=qr',
+          '=eip681',
+        ],
+        downloads: [
+          'openpay-usdc-avalanche-0-000001.svg <- blob:pinned',
+          'openpay-usdc-avalanche-0-000001.png <- data:image/png',
+        ],
+        eip681: 'ethereum:0x5425890298aed601595a70AB815c96711a31Bc65@43113/transfer?address=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&uint256=1',
+        lastQr: {
+          amountLabel: '0.000001 USDC',
+          payUrl: '=qr',
+          tokenChainLabel: 'USDC · Base Sepolia / Arbitrum Sepolia / OP Sepolia / Polygon Amoy / Sepolia / Avalanche Fuji / Unichain Sepolia / World Chain Sepolia / Sonic Blaze Testnet / Sei Testnet / HyperEVM Testnet',
+          ts: 1790208000540,
+        },
+        printed: 1,
+        qr: 'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=usdc&chain=avalanche&amount=0.000001&mode=standard',
+        shownEip681: '=eip681',
+        shownUrl: '=qr',
+        watch: {
+          chainId: 43113,
+          enabled: true,
+          expectedAmountWei: '1',
+          receiver: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+          tokenAddress: '0x5425890298aed601595a70AB815c96711a31Bc65',
+        },
+      },
+      baseGasless: {
+        copies: [
+          '=qr',
+        ],
+        downloads: [
+          'openpay-usdc-base-12-5.svg <- blob:pinned',
+          'openpay-usdc-base-12-5.png <- data:image/png',
+        ],
+        eip681: null,
+        lastQr: {
+          amountLabel: '12.5 USDC',
+          payUrl: '=qr',
+          tokenChainLabel: 'USDC · Base Sepolia / Arbitrum Sepolia / OP Sepolia / Polygon Amoy / Sepolia / Avalanche Fuji / Unichain Sepolia / World Chain Sepolia / Sonic Blaze Testnet / Sei Testnet / HyperEVM Testnet',
+          ts: 1790208000060,
+        },
+        printed: 1,
+        qr: 'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=usdc&amount=12.5',
+        shownEip681: null,
+        shownUrl: '=qr',
+        watch: {
+          chainId: 84532,
+          enabled: true,
+          expectedAmountWei: '12500000',
+          receiver: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+          tokenAddress: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+        },
+      },
+      discount: {
+        copies: [
+          '=qr',
+          '=eip681',
+        ],
+        downloads: [
+          'openpay-usdc-base-9-75.svg <- blob:pinned',
+          'openpay-usdc-base-9-75.png <- data:image/png',
+        ],
+        eip681: 'ethereum:0x036CbD53842c5426634e7929541eC2318f3dCF7e@84532/transfer?address=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&uint256=9750000',
+        lastQr: {
+          amountLabel: '9.75 USDC',
+          payUrl: '=qr',
+          tokenChainLabel: 'USDC · Base Sepolia / Arbitrum Sepolia / OP Sepolia / Polygon Amoy / Sepolia / Avalanche Fuji / Unichain Sepolia / World Chain Sepolia / Sonic Blaze Testnet / Sei Testnet / HyperEVM Testnet',
+          ts: 1790208000860,
+        },
+        printed: 1,
+        qr: 'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=usdc&amount=9.75&disc=0.25&mode=standard',
+        shownEip681: '=eip681',
+        shownUrl: '=qr',
+        watch: {
+          chainId: 84532,
+          enabled: true,
+          expectedAmountWei: '9750000',
+          receiver: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+          tokenAddress: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+        },
+      },
+      en: {
+        copies: [
+          '=qr',
+        ],
+        downloads: [
+          'openpay-usdc-optimism-7-77.svg <- blob:pinned',
+          'openpay-usdc-optimism-7-77.png <- data:image/png',
+        ],
+        eip681: null,
+        lastQr: {
+          amountLabel: '7.77 USDC',
+          payUrl: '=qr',
+          tokenChainLabel: 'USDC · Base Sepolia / Arbitrum Sepolia / OP Sepolia / Polygon Amoy / Sepolia / Avalanche Fuji / Unichain Sepolia / World Chain Sepolia / Sonic Blaze Testnet / Sei Testnet / HyperEVM Testnet',
+          ts: 1790208000940,
+        },
+        printed: 1,
+        qr: 'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=usdc&chain=optimism&amount=7.77&memo=memo&rcpt=9',
+        shownEip681: null,
+        shownUrl: '=qr',
+        watch: {
+          chainId: 11155420,
+          enabled: true,
+          expectedAmountWei: '7770000',
+          receiver: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+          tokenAddress: '0x5fd84259d66Cd46123540766Be93DFE6D43130D7',
+        },
+      },
+      ethereumLarge: {
+        copies: [
+          '=qr',
+        ],
+        downloads: [
+          'openpay-usdc-ethereum-99999999-999999.svg <- blob:pinned',
+          'openpay-usdc-ethereum-99999999-999999.png <- data:image/png',
+        ],
+        eip681: null,
+        lastQr: {
+          amountLabel: '99,999,999.999999 USDC',
+          payUrl: '=qr',
+          tokenChainLabel: 'USDC · Base Sepolia / Arbitrum Sepolia / OP Sepolia / Polygon Amoy / Sepolia / Avalanche Fuji / Unichain Sepolia / World Chain Sepolia / Sonic Blaze Testnet / Sei Testnet / HyperEVM Testnet',
+          ts: 1790208000460,
+        },
+        printed: 1,
+        qr: 'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=usdc&chain=ethereum&amount=99999999.999999',
+        shownEip681: null,
+        shownUrl: '=qr',
+        watch: {
+          chainId: 11155111,
+          enabled: true,
+          expectedAmountWei: '99999999999999',
+          receiver: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+          tokenAddress: '0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238',
+        },
+      },
+      fxToJpyc: {
+        copies: [
+          '=qr',
+        ],
+        downloads: [
+          'openpay-jpyc-polygon-1875.svg <- blob:pinned',
+          'openpay-jpyc-polygon-1875.png <- data:image/png',
+        ],
+        eip681: null,
+        lastQr: {
+          amountLabel: '1,875 JPYC',
+          payUrl: '=qr',
+          tokenChainLabel: 'JPYC · Polygon Amoy',
+          ts: 1790208000780,
+        },
+        printed: 1,
+        qr: 'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&amount=1875&exp=1790208180&refAmt=12.5&fxRate=150',
+        shownEip681: null,
+        shownUrl: '=qr',
+        watch: {
+          chainId: 80002,
+          enabled: true,
+          expectedAmountWei: '1875000000000000000000',
+          receiver: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+          tokenAddress: '0x0000000000000000000000000000000000000aBc',
+        },
+      },
+      optimismStandard: {
+        copies: [
+          '=qr',
+          '=eip681',
+        ],
+        downloads: [
+          'openpay-usdc-optimism-5.svg <- blob:pinned',
+          'openpay-usdc-optimism-5.png <- data:image/png',
+        ],
+        eip681: 'ethereum:0x5fd84259d66Cd46123540766Be93DFE6D43130D7@11155420/transfer?address=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&uint256=5000000',
+        lastQr: {
+          amountLabel: '5 USDC',
+          payUrl: '=qr',
+          tokenChainLabel: 'USDC · Base Sepolia / Arbitrum Sepolia / OP Sepolia / Polygon Amoy / Sepolia / Avalanche Fuji / Unichain Sepolia / World Chain Sepolia / Sonic Blaze Testnet / Sei Testnet / HyperEVM Testnet',
+          ts: 1790208000300,
+        },
+        printed: 1,
+        qr: 'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=usdc&chain=optimism&amount=5&mode=standard',
+        shownEip681: '=eip681',
+        shownUrl: '=qr',
+        watch: {
+          chainId: 11155420,
+          enabled: true,
+          expectedAmountWei: '5000000',
+          receiver: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+          tokenAddress: '0x5fd84259d66Cd46123540766Be93DFE6D43130D7',
+        },
+      },
+      polygonStandardStatic: {
+        copies: [
+          '=qr',
+        ],
+        downloads: [
+          'openpay-usdc-polygon-open.svg <- blob:pinned',
+          'openpay-usdc-polygon-open.png <- data:image/png',
+        ],
+        eip681: null,
+        lastQr: {
+          amountLabel: 'USDC で金額を入力',
+          payUrl: '=qr',
+          tokenChainLabel: 'USDC · Base Sepolia / Arbitrum Sepolia / OP Sepolia / Polygon Amoy / Sepolia / Avalanche Fuji / Unichain Sepolia / World Chain Sepolia / Sonic Blaze Testnet / Sei Testnet / HyperEVM Testnet',
+          ts: 1790208000380,
+        },
+        printed: 1,
+        qr: 'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=usdc&chain=polygon&mode=standard',
+        shownEip681: null,
+        shownUrl: '=qr',
+        watch: {
+          chainId: 80002,
+          enabled: false,
+          expectedAmountWei: '0',
+          receiver: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+          tokenAddress: '0x41E94Eb019C0762f9Bfcf9Fb1E58725BfB0e7582',
+        },
+      },
+      splitWithInvalidEntry: {
+        copies: [
+          '=qr',
+        ],
+        downloads: [
+          'openpay-usdc-base-20.svg <- blob:pinned',
+          'openpay-usdc-base-20.png <- data:image/png',
+        ],
+        eip681: null,
+        lastQr: {
+          amountLabel: '20 USDC',
+          payUrl: '=qr',
+          tokenChainLabel: 'USDC · Base Sepolia / Arbitrum Sepolia / OP Sepolia / Polygon Amoy / Sepolia / Avalanche Fuji / Unichain Sepolia / World Chain Sepolia / Sonic Blaze Testnet / Sei Testnet / HyperEVM Testnet',
+          ts: 1790208000220,
+        },
+        printed: 1,
+        qr: 'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=usdc&amount=20',
+        shownEip681: null,
+        shownUrl: '=qr',
+        watch: {
+          chainId: 84532,
+          enabled: true,
+          expectedAmountWei: '20000000',
+          receiver: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+          tokenAddress: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+        },
+      },
+    });
+    // QR の画面の DOM の sha256 (採り直す値): UI の変更で `vitest -u` で採り直す。
+    expect(modal).toMatchInlineSnapshot(`
       {
-        "arbitrumSplitNoCrossChain": {
-          "copies": [
-            "=qr",
-          ],
-          "downloads": [
-            "openpay-usdc-arbitrum-1-234567.svg <- blob:pinned",
-            "openpay-usdc-arbitrum-1-234567.png <- data:image/png",
-          ],
-          "eip681": null,
-          "lastQr": {
-            "amountLabel": "1.234567 USDC",
-            "payUrl": "=qr",
-            "tokenChainLabel": "USDC · Arbitrum Sepolia",
-            "ts": 1790208000140,
-          },
-          "modal": "6d2330258efd311f58dbb78fcad22bea3b9086d0114f377767dcfca6e6d2fda1",
-          "printed": 1,
-          "qr": "https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=usdc&chain=arbitrum&gas=merchant&amount=1.234567&split=0x2222222222222222222222222222222222222222%3A30%2C0x3333333333333333333333333333333333333333%3A20&crossChain=false",
-          "shownEip681": null,
-          "shownUrl": "=qr",
-          "watch": {
-            "chainId": 421614,
-            "enabled": true,
-            "expectedAmountWei": "1234567",
-            "receiver": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-            "tokenAddress": "0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d",
-          },
-        },
-        "arc": {
-          "copies": [
-            "=qr",
-            "=eip681",
-          ],
-          "downloads": [
-            "openpay-usdc-arc-3.svg <- blob:pinned",
-            "openpay-usdc-arc-3.png <- data:image/png",
-          ],
-          "eip681": "ethereum:0x3600000000000000000000000000000000000000@5042002/transfer?address=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&uint256=3000000",
-          "lastQr": {
-            "amountLabel": "3 USDC",
-            "payUrl": "=qr",
-            "tokenChainLabel": "USDC · Arc Testnet",
-            "ts": 1790208000620,
-          },
-          "modal": "058925846ea3c2bb7cdd1fb7e13edf3fbf658c7a3435d63db9c5ddc7b0a8ed0d",
-          "printed": 1,
-          "qr": "https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=usdc&chain=arc&amount=3&mode=standard&crossChain=false",
-          "shownEip681": "=eip681",
-          "shownUrl": "=qr",
-          "watch": {
-            "chainId": 5042002,
-            "enabled": true,
-            "expectedAmountWei": "3000000",
-            "receiver": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-            "tokenAddress": "0x3600000000000000000000000000000000000000",
-          },
-        },
-        "arcStatic": {
-          "copies": [
-            "=qr",
-          ],
-          "downloads": [
-            "Arc-店-usdc-arc-open.svg <- blob:pinned",
-            "Arc-店-usdc-arc-open.png <- data:image/png",
-          ],
-          "eip681": null,
-          "lastQr": {
-            "amountLabel": "USDC で金額を入力",
-            "payUrl": "=qr",
-            "storeName": "Arc 店",
-            "tokenChainLabel": "USDC · Arc Testnet",
-            "ts": 1790208000700,
-          },
-          "modal": "9358d2e07e93788f84b9396c5c365c91c0c79afcb0ab7ae0a6de5ca26c72b26b",
-          "printed": 1,
-          "qr": "https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=usdc&chain=arc&mode=standard&crossChain=false&store=Arc+%E5%BA%97",
-          "shownEip681": null,
-          "shownUrl": "=qr",
-          "watch": {
-            "chainId": 5042002,
-            "enabled": false,
-            "expectedAmountWei": "0",
-            "receiver": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-            "tokenAddress": "0x3600000000000000000000000000000000000000",
-          },
-        },
-        "avalancheSmallestStandard": {
-          "copies": [
-            "=qr",
-            "=eip681",
-          ],
-          "downloads": [
-            "openpay-usdc-avalanche-0-000001.svg <- blob:pinned",
-            "openpay-usdc-avalanche-0-000001.png <- data:image/png",
-          ],
-          "eip681": "ethereum:0x5425890298aed601595a70AB815c96711a31Bc65@43113/transfer?address=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&uint256=1",
-          "lastQr": {
-            "amountLabel": "0.000001 USDC",
-            "payUrl": "=qr",
-            "tokenChainLabel": "USDC · Base Sepolia / Arbitrum Sepolia / OP Sepolia / Polygon Amoy / Sepolia / Avalanche Fuji / Unichain Sepolia / World Chain Sepolia / Sonic Blaze Testnet / Sei Testnet / HyperEVM Testnet",
-            "ts": 1790208000540,
-          },
-          "modal": "e4260cc9c6246a5aa2d50471083322946ff74eec1f01f20c0d2b48d1e2b50201",
-          "printed": 1,
-          "qr": "https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=usdc&chain=avalanche&amount=0.000001&mode=standard",
-          "shownEip681": "=eip681",
-          "shownUrl": "=qr",
-          "watch": {
-            "chainId": 43113,
-            "enabled": true,
-            "expectedAmountWei": "1",
-            "receiver": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-            "tokenAddress": "0x5425890298aed601595a70AB815c96711a31Bc65",
-          },
-        },
-        "baseGasless": {
-          "copies": [
-            "=qr",
-          ],
-          "downloads": [
-            "openpay-usdc-base-12-5.svg <- blob:pinned",
-            "openpay-usdc-base-12-5.png <- data:image/png",
-          ],
-          "eip681": null,
-          "lastQr": {
-            "amountLabel": "12.5 USDC",
-            "payUrl": "=qr",
-            "tokenChainLabel": "USDC · Base Sepolia / Arbitrum Sepolia / OP Sepolia / Polygon Amoy / Sepolia / Avalanche Fuji / Unichain Sepolia / World Chain Sepolia / Sonic Blaze Testnet / Sei Testnet / HyperEVM Testnet",
-            "ts": 1790208000060,
-          },
-          "modal": "11488b478b880a5b9dd37d2910d160af1b807156726ec3af444f53f791bf37e7",
-          "printed": 1,
-          "qr": "https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=usdc&amount=12.5",
-          "shownEip681": null,
-          "shownUrl": "=qr",
-          "watch": {
-            "chainId": 84532,
-            "enabled": true,
-            "expectedAmountWei": "12500000",
-            "receiver": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-            "tokenAddress": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
-          },
-        },
-        "discount": {
-          "copies": [
-            "=qr",
-            "=eip681",
-          ],
-          "downloads": [
-            "openpay-usdc-base-9-75.svg <- blob:pinned",
-            "openpay-usdc-base-9-75.png <- data:image/png",
-          ],
-          "eip681": "ethereum:0x036CbD53842c5426634e7929541eC2318f3dCF7e@84532/transfer?address=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&uint256=9750000",
-          "lastQr": {
-            "amountLabel": "9.75 USDC",
-            "payUrl": "=qr",
-            "tokenChainLabel": "USDC · Base Sepolia / Arbitrum Sepolia / OP Sepolia / Polygon Amoy / Sepolia / Avalanche Fuji / Unichain Sepolia / World Chain Sepolia / Sonic Blaze Testnet / Sei Testnet / HyperEVM Testnet",
-            "ts": 1790208000860,
-          },
-          "modal": "9423ceb33020abb32ac0be0aa4fb072e36af28c95f6fb165eb81724d957c2a1f",
-          "printed": 1,
-          "qr": "https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=usdc&amount=9.75&disc=0.25&mode=standard",
-          "shownEip681": "=eip681",
-          "shownUrl": "=qr",
-          "watch": {
-            "chainId": 84532,
-            "enabled": true,
-            "expectedAmountWei": "9750000",
-            "receiver": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-            "tokenAddress": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
-          },
-        },
-        "en": {
-          "copies": [
-            "=qr",
-          ],
-          "downloads": [
-            "openpay-usdc-optimism-7-77.svg <- blob:pinned",
-            "openpay-usdc-optimism-7-77.png <- data:image/png",
-          ],
-          "eip681": null,
-          "lastQr": {
-            "amountLabel": "7.77 USDC",
-            "payUrl": "=qr",
-            "tokenChainLabel": "USDC · Base Sepolia / Arbitrum Sepolia / OP Sepolia / Polygon Amoy / Sepolia / Avalanche Fuji / Unichain Sepolia / World Chain Sepolia / Sonic Blaze Testnet / Sei Testnet / HyperEVM Testnet",
-            "ts": 1790208000940,
-          },
-          "modal": "a3350e92ff925736225ff0ca57b2359db4965effd975ba430465dd6b81058c61",
-          "printed": 1,
-          "qr": "https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=usdc&chain=optimism&amount=7.77&memo=memo&rcpt=9",
-          "shownEip681": null,
-          "shownUrl": "=qr",
-          "watch": {
-            "chainId": 11155420,
-            "enabled": true,
-            "expectedAmountWei": "7770000",
-            "receiver": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-            "tokenAddress": "0x5fd84259d66Cd46123540766Be93DFE6D43130D7",
-          },
-        },
-        "ethereumLarge": {
-          "copies": [
-            "=qr",
-          ],
-          "downloads": [
-            "openpay-usdc-ethereum-99999999-999999.svg <- blob:pinned",
-            "openpay-usdc-ethereum-99999999-999999.png <- data:image/png",
-          ],
-          "eip681": null,
-          "lastQr": {
-            "amountLabel": "99,999,999.999999 USDC",
-            "payUrl": "=qr",
-            "tokenChainLabel": "USDC · Base Sepolia / Arbitrum Sepolia / OP Sepolia / Polygon Amoy / Sepolia / Avalanche Fuji / Unichain Sepolia / World Chain Sepolia / Sonic Blaze Testnet / Sei Testnet / HyperEVM Testnet",
-            "ts": 1790208000460,
-          },
-          "modal": "aa91947f0e36e81b388c8e138bf288b6772f955c98a21c3a1a672cbef3c49776",
-          "printed": 1,
-          "qr": "https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=usdc&chain=ethereum&amount=99999999.999999",
-          "shownEip681": null,
-          "shownUrl": "=qr",
-          "watch": {
-            "chainId": 11155111,
-            "enabled": true,
-            "expectedAmountWei": "99999999999999",
-            "receiver": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-            "tokenAddress": "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
-          },
-        },
-        "fxToJpyc": {
-          "copies": [
-            "=qr",
-          ],
-          "downloads": [
-            "openpay-jpyc-polygon-1875.svg <- blob:pinned",
-            "openpay-jpyc-polygon-1875.png <- data:image/png",
-          ],
-          "eip681": null,
-          "lastQr": {
-            "amountLabel": "1,875 JPYC",
-            "payUrl": "=qr",
-            "tokenChainLabel": "JPYC · Polygon Amoy",
-            "ts": 1790208000780,
-          },
-          "modal": "eade324e704e8c7b444824cd0898e1787c63f4b46080d63c2fb60df18b6cc95f",
-          "printed": 1,
-          "qr": "https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&amount=1875&exp=1790208180&refAmt=12.5&fxRate=150",
-          "shownEip681": null,
-          "shownUrl": "=qr",
-          "watch": {
-            "chainId": 80002,
-            "enabled": true,
-            "expectedAmountWei": "1875000000000000000000",
-            "receiver": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-            "tokenAddress": "0x0000000000000000000000000000000000000aBc",
-          },
-        },
-        "optimismStandard": {
-          "copies": [
-            "=qr",
-            "=eip681",
-          ],
-          "downloads": [
-            "openpay-usdc-optimism-5.svg <- blob:pinned",
-            "openpay-usdc-optimism-5.png <- data:image/png",
-          ],
-          "eip681": "ethereum:0x5fd84259d66Cd46123540766Be93DFE6D43130D7@11155420/transfer?address=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&uint256=5000000",
-          "lastQr": {
-            "amountLabel": "5 USDC",
-            "payUrl": "=qr",
-            "tokenChainLabel": "USDC · Base Sepolia / Arbitrum Sepolia / OP Sepolia / Polygon Amoy / Sepolia / Avalanche Fuji / Unichain Sepolia / World Chain Sepolia / Sonic Blaze Testnet / Sei Testnet / HyperEVM Testnet",
-            "ts": 1790208000300,
-          },
-          "modal": "874a09dfcd77c74939bdac582c7c10817c84735e42df9ce87627c7602a6eb3f4",
-          "printed": 1,
-          "qr": "https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=usdc&chain=optimism&amount=5&mode=standard",
-          "shownEip681": "=eip681",
-          "shownUrl": "=qr",
-          "watch": {
-            "chainId": 11155420,
-            "enabled": true,
-            "expectedAmountWei": "5000000",
-            "receiver": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-            "tokenAddress": "0x5fd84259d66Cd46123540766Be93DFE6D43130D7",
-          },
-        },
-        "polygonStandardStatic": {
-          "copies": [
-            "=qr",
-          ],
-          "downloads": [
-            "openpay-usdc-polygon-open.svg <- blob:pinned",
-            "openpay-usdc-polygon-open.png <- data:image/png",
-          ],
-          "eip681": null,
-          "lastQr": {
-            "amountLabel": "USDC で金額を入力",
-            "payUrl": "=qr",
-            "tokenChainLabel": "USDC · Base Sepolia / Arbitrum Sepolia / OP Sepolia / Polygon Amoy / Sepolia / Avalanche Fuji / Unichain Sepolia / World Chain Sepolia / Sonic Blaze Testnet / Sei Testnet / HyperEVM Testnet",
-            "ts": 1790208000380,
-          },
-          "modal": "c9727c46dc094bbc96748f721b4eb3eab5f153e4aef6e577fd280adb788da490",
-          "printed": 1,
-          "qr": "https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=usdc&chain=polygon&mode=standard",
-          "shownEip681": null,
-          "shownUrl": "=qr",
-          "watch": {
-            "chainId": 80002,
-            "enabled": false,
-            "expectedAmountWei": "0",
-            "receiver": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-            "tokenAddress": "0x41E94Eb019C0762f9Bfcf9Fb1E58725BfB0e7582",
-          },
-        },
-        "splitWithInvalidEntry": {
-          "copies": [
-            "=qr",
-          ],
-          "downloads": [
-            "openpay-usdc-base-20.svg <- blob:pinned",
-            "openpay-usdc-base-20.png <- data:image/png",
-          ],
-          "eip681": null,
-          "lastQr": {
-            "amountLabel": "20 USDC",
-            "payUrl": "=qr",
-            "tokenChainLabel": "USDC · Base Sepolia / Arbitrum Sepolia / OP Sepolia / Polygon Amoy / Sepolia / Avalanche Fuji / Unichain Sepolia / World Chain Sepolia / Sonic Blaze Testnet / Sei Testnet / HyperEVM Testnet",
-            "ts": 1790208000220,
-          },
-          "modal": "d3dd51e2f320dae38bc44cfc2aa3cca400eb8061be4d783b9b593e7dad4d5cfc",
-          "printed": 1,
-          "qr": "https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=usdc&amount=20",
-          "shownEip681": null,
-          "shownUrl": "=qr",
-          "watch": {
-            "chainId": 84532,
-            "enabled": true,
-            "expectedAmountWei": "20000000",
-            "receiver": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-            "tokenAddress": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
-          },
-        },
+        "arbitrumSplitNoCrossChain": "6d2330258efd311f58dbb78fcad22bea3b9086d0114f377767dcfca6e6d2fda1",
+        "arc": "058925846ea3c2bb7cdd1fb7e13edf3fbf658c7a3435d63db9c5ddc7b0a8ed0d",
+        "arcStatic": "9358d2e07e93788f84b9396c5c365c91c0c79afcb0ab7ae0a6de5ca26c72b26b",
+        "avalancheSmallestStandard": "e4260cc9c6246a5aa2d50471083322946ff74eec1f01f20c0d2b48d1e2b50201",
+        "baseGasless": "11488b478b880a5b9dd37d2910d160af1b807156726ec3af444f53f791bf37e7",
+        "discount": "9423ceb33020abb32ac0be0aa4fb072e36af28c95f6fb165eb81724d957c2a1f",
+        "en": "a3350e92ff925736225ff0ca57b2359db4965effd975ba430465dd6b81058c61",
+        "ethereumLarge": "aa91947f0e36e81b388c8e138bf288b6772f955c98a21c3a1a672cbef3c49776",
+        "fxToJpyc": "eade324e704e8c7b444824cd0898e1787c63f4b46080d63c2fb60df18b6cc95f",
+        "optimismStandard": "874a09dfcd77c74939bdac582c7c10817c84735e42df9ce87627c7602a6eb3f4",
+        "polygonStandardStatic": "c9727c46dc094bbc96748f721b4eb3eab5f153e4aef6e577fd280adb788da490",
+        "splitWithInvalidEntry": "d3dd51e2f320dae38bc44cfc2aa3cca400eb8061be4d783b9b593e7dad4d5cfc",
       }
     `);
   });
@@ -1902,131 +1939,136 @@ describe('QrGenerator の pin (生成物の完全一致は採り直さない・D
     };
     view.unmount();
 
-    expect(results).toMatchInlineSnapshot(`
-      {
-        "blockedMinAmount": [
+    const { generatedValues, modal } = splitModal(results);
+    // 生成物 (採り直さない値): literal。`vitest -u` では書き換わらない。落ちたら実装の方を見る。
+    expect(generatedValues).toStrictEqual({
+      blockedMinAmount: [
+        [
+          true,
+          '請求金額0.5 JPYCQRコードを表示する',
+        ],
+        [
+          true,
+          '請求金額0.5 JPYCQRコードを表示する',
+        ],
+      ],
+      decimalWaiting: {
+        buttons: [
+          '閉じる',
+        ],
+        copies: [],
+        downloads: [],
+        eip681: null,
+        lastQr: null,
+        printed: 0,
+        qr: 'https://test.local/checkout?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&items=%25E3%2581%258A%25E6%2594%25AF%25E6%2589%2595%25E3%2581%2584%3A1%3A1.5&gas=merchant&submit=store&hs=AbCdEfGhIjKlMnOpQrStUv',
+        shownEip681: null,
+        shownUrl: null,
+        start: [
           [
-            true,
-            "請求金額0.5 JPYCQRコードを表示する",
-          ],
-          [
-            true,
-            "請求金額0.5 JPYCQRコードを表示する",
+            '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+            '1500000000000000000',
+            80002,
           ],
         ],
-        "decimalWaiting": {
-          "buttons": [
-            "閉じる",
-          ],
-          "copies": [],
-          "downloads": [],
-          "eip681": null,
-          "lastQr": null,
-          "modal": "ac2136ac5c3ab4aef932fd2de4d92c7785fdd38f7146478d2b49de7fa22267b6",
-          "printed": 0,
-          "qr": "https://test.local/checkout?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&items=%25E3%2581%258A%25E6%2594%25AF%25E6%2589%2595%25E3%2581%2584%3A1%3A1.5&gas=merchant&submit=store&hs=AbCdEfGhIjKlMnOpQrStUv",
-          "shownEip681": null,
-          "shownUrl": null,
-          "start": [
-            [
-              "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-              "1500000000000000000",
-              80002,
-            ],
-          ],
-          "watch": {
-            "chainId": 80002,
-            "enabled": false,
-            "expectedAmountWei": "0",
-            "receiver": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-            "tokenAddress": "0x0000000000000000000000000000000000000aBc",
-          },
+        watch: {
+          chainId: 80002,
+          enabled: false,
+          expectedAmountWei: '0',
+          receiver: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+          tokenAddress: '0x0000000000000000000000000000000000000aBc',
         },
-        "kaiaMetaDiscount": {
-          "buttons": [
-            "閉じる",
+      },
+      kaiaMetaDiscount: {
+        buttons: [
+          '閉じる',
+        ],
+        copies: [],
+        downloads: [],
+        eip681: null,
+        lastQr: null,
+        printed: 0,
+        qr: 'https://test.local/checkout?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&chain=kaia&items=%25E3%2583%25A9%25E3%2583%25B3%25E3%2583%2581%2520%2526%2520%25E7%258F%2588%25E7%2590%25B2%3A1%3A1200%3A%3A%3A2%2520%25E5%2590%258D&disc=200&gas=merchant&store=Cafe&submit=store&hs=AbCdEfGhIjKlMnOpQrStUv&tax=10&taxcat=taxable_10&rcpt=R-7&inv=T1234567890123',
+        shownEip681: null,
+        shownUrl: null,
+        start: [
+          [
+            '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+            '1000000000000000000000',
+            1001,
           ],
-          "copies": [],
-          "downloads": [],
-          "eip681": null,
-          "lastQr": null,
-          "modal": "030f2f86b5f38839b2654b2a72252ad816ebc44c7c90e127bb02beb0926e7d3b",
-          "printed": 0,
-          "qr": "https://test.local/checkout?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&chain=kaia&items=%25E3%2583%25A9%25E3%2583%25B3%25E3%2583%2581%2520%2526%2520%25E7%258F%2588%25E7%2590%25B2%3A1%3A1200%3A%3A%3A2%2520%25E5%2590%258D&disc=200&gas=merchant&store=Cafe&submit=store&hs=AbCdEfGhIjKlMnOpQrStUv&tax=10&taxcat=taxable_10&rcpt=R-7&inv=T1234567890123",
-          "shownEip681": null,
-          "shownUrl": null,
-          "start": [
-            [
-              "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-              "1000000000000000000000",
-              1001,
-            ],
-          ],
-          "watch": {
-            "chainId": 1001,
-            "enabled": false,
-            "expectedAmountWei": "998000000000000000000",
-            "receiver": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-            "tokenAddress": "0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29",
-          },
+        ],
+        watch: {
+          chainId: 1001,
+          enabled: false,
+          expectedAmountWei: '998000000000000000000',
+          receiver: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+          tokenAddress: '0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29',
         },
-        "normalAfterCreateFailed": {
-          "copies": [
-            "=qr",
-          ],
-          "downloads": [
-            "openpay-jpyc-polygon-800.svg <- blob:pinned",
-            "openpay-jpyc-polygon-800.png <- data:image/png",
-          ],
-          "eip681": null,
-          "lastQr": {
-            "amountLabel": "800 JPYC",
-            "payUrl": "=qr",
-            "tokenChainLabel": "JPYC · Polygon Amoy",
-            "ts": 1790208000320,
-          },
-          "modal": "9601a8f921293f70a638a0d0b2290d78222b8b449da91e885793cb35c5085baa",
-          "printed": 1,
-          "qr": "https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&gas=merchant&amount=800",
-          "releaseForNormal": 1,
-          "shownEip681": null,
-          "shownUrl": "=qr",
-          "watch": {
-            "chainId": 80002,
-            "enabled": true,
-            "expectedAmountWei": "798000000000000000000",
-            "receiver": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-            "tokenAddress": "0x0000000000000000000000000000000000000aBc",
-          },
+      },
+      normalAfterCreateFailed: {
+        copies: [
+          '=qr',
+        ],
+        downloads: [
+          'openpay-jpyc-polygon-800.svg <- blob:pinned',
+          'openpay-jpyc-polygon-800.png <- data:image/png',
+        ],
+        eip681: null,
+        lastQr: {
+          amountLabel: '800 JPYC',
+          payUrl: '=qr',
+          tokenChainLabel: 'JPYC · Polygon Amoy',
+          ts: 1790208000320,
         },
-        "polygon500": {
-          "buttons": [
-            "閉じる",
-          ],
-          "copies": [],
-          "downloads": [],
-          "eip681": null,
-          "lastQr": null,
-          "modal": "c396cc43abedb8e152b810b33effa2bb7182b76ea0552f2e15dc704a7daa40cc",
-          "printed": 0,
-          "qr": "https://test.local/checkout?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&items=%25E3%2581%258A%25E6%2594%25AF%25E6%2589%2595%25E3%2581%2584%3A1%3A500&gas=merchant&submit=store&hs=AbCdEfGhIjKlMnOpQrStUv",
-          "shownEip681": null,
-          "shownUrl": null,
-          "start": [
-            [
-              "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-              "500000000000000000000",
-              80002,
-            ],
-          ],
-          "watch": {
-            "chainId": 80002,
-            "enabled": false,
-            "expectedAmountWei": "498000000000000000000",
-            "receiver": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-            "tokenAddress": "0x0000000000000000000000000000000000000aBc",
-          },
+        printed: 1,
+        qr: 'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&gas=merchant&amount=800',
+        releaseForNormal: 1,
+        shownEip681: null,
+        shownUrl: '=qr',
+        watch: {
+          chainId: 80002,
+          enabled: true,
+          expectedAmountWei: '798000000000000000000',
+          receiver: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+          tokenAddress: '0x0000000000000000000000000000000000000aBc',
         },
+      },
+      polygon500: {
+        buttons: [
+          '閉じる',
+        ],
+        copies: [],
+        downloads: [],
+        eip681: null,
+        lastQr: null,
+        printed: 0,
+        qr: 'https://test.local/checkout?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&items=%25E3%2581%258A%25E6%2594%25AF%25E6%2589%2595%25E3%2581%2584%3A1%3A500&gas=merchant&submit=store&hs=AbCdEfGhIjKlMnOpQrStUv',
+        shownEip681: null,
+        shownUrl: null,
+        start: [
+          [
+            '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+            '500000000000000000000',
+            80002,
+          ],
+        ],
+        watch: {
+          chainId: 80002,
+          enabled: false,
+          expectedAmountWei: '498000000000000000000',
+          receiver: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+          tokenAddress: '0x0000000000000000000000000000000000000aBc',
+        },
+      },
+    });
+    // QR の画面の DOM の sha256 (採り直す値): UI の変更で `vitest -u` で採り直す。
+    expect(modal).toMatchInlineSnapshot(`
+      {
+        "decimalWaiting": "ac2136ac5c3ab4aef932fd2de4d92c7785fdd38f7146478d2b49de7fa22267b6",
+        "kaiaMetaDiscount": "030f2f86b5f38839b2654b2a72252ad816ebc44c7c90e127bb02beb0926e7d3b",
+        "normalAfterCreateFailed": "9601a8f921293f70a638a0d0b2290d78222b8b449da91e885793cb35c5085baa",
+        "polygon500": "c396cc43abedb8e152b810b33effa2bb7182b76ea0552f2e15dc704a7daa40cc",
       }
     `);
     expect(states).toMatchInlineSnapshot(`
@@ -2224,12 +2266,11 @@ describe('QrGenerator の pin (生成物の完全一致は採り直さない・D
     const reopened = qrDialog()!;
     expect(reopened).not.toBe(dialog);
     expect(reopened).toHaveFocus();
-    expect({ urlBefore, urlAfter }).toMatchInlineSnapshot(`
-      {
-        "urlAfter": "https://test.local/pay?to=0x000000000000000000000000000000000000dEaD&token=jpyc&chain=kaia&amount=1100&disc=100&store=%E5%BA%97&pname=productName-1&memo=memo-1&rcpt=receipt-1",
-        "urlBefore": "https://test.local/pay?to=0x000000000000000000000000000000000000dEaD&token=jpyc&chain=kaia&amount=900&disc=100&store=%E5%BA%97&pname=productName-1&memo=memo-1&rcpt=receipt-1",
-      }
-    `);
+    // 生成物 (採り直さない値): literal。`vitest -u` では書き換わらない。
+    expect({ urlBefore, urlAfter }).toStrictEqual({
+      urlAfter: 'https://test.local/pay?to=0x000000000000000000000000000000000000dEaD&token=jpyc&chain=kaia&amount=1100&disc=100&store=%E5%BA%97&pname=productName-1&memo=memo-1&rcpt=receipt-1',
+      urlBefore: 'https://test.local/pay?to=0x000000000000000000000000000000000000dEaD&token=jpyc&chain=kaia&amount=900&disc=100&store=%E5%BA%97&pname=productName-1&memo=memo-1&rcpt=receipt-1',
+    });
   });
 });
 
@@ -2649,8 +2690,9 @@ describe('QrGenerator の名前つきの出力 (DOM の sha256 が落ちたと�
     view.unmount();
   });
 
-  // 上の describe の inline snapshot は DOM の sha256 と同じ object なので、`vitest -u` で hash を採り直すと生成物も
-  // 一緒に書き換わる。代表の生成物を literal で持ち、-u では動かない完全一致にする (網羅は上の行列)。
+  // 代表の生成物を、QR の画面から読んだままの値で確かめる (網羅は上の describe の行列。そちらも literal で、`vitest -u`
+  // では動かない)。行列はクリップボードに書いた値を「QR と同じ」の印 ("=qr" / "=eip681") で持つので、ここは書いた値
+  // そのものを literal と比べる。
   it('代表の生成物の literal (vitest -u で採り直せない): 支払い URL・EIP-681・クリップボードに書く値・保存名・受け渡しの id 付きの /checkout', async () => {
     // JPYC・明細つき (店名・商品名・メモ・税・管理番号・インボイス番号)。
     const jpycUrl =
