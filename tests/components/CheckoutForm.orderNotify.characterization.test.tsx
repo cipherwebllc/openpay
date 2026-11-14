@@ -1061,6 +1061,50 @@ describe('応答の表 — 経路 A: この画面で送った支払いの完了�
     ]);
   });
 
+  // レビュー (3 回目) の順: 完了の通知が 0 / 0.25 秒に 409・1.25 秒に 503 → 自動の送り直し 3.25 / 18.25 秒に 503 → 18.30 秒に
+  // server が直る → 18.35 秒にボタン。押した時点で送ると、直近 60 秒の 6 回目で 429 になる (断った要求も枠に数えられるので、
+  // 押し続けると、いつまでも通らない)。ボタンの 1 回も、枠が空くまで待ってから送る。
+  it('「注文登録を再試行」も、枠が空くまで待ってから 1 回だけ送る (押した直後だと 6 回目になる順・枠を数える偽の server)', async () => {
+    const counted: number[] = [];
+    const served: string[] = [];
+    installServer((sent) => {
+      const reply = (status: number, body: unknown) => {
+        served.push(`${sent.at} → ${status}`);
+        return Response.json(body, { status });
+      };
+      counted.push(sent.at);
+      if (counted.filter((at) => sent.at - at < 60_000).length > 5) return reply(429, { ok: false, error: 'rate_limited' });
+      if (sent.at >= 18_300) return reply(200, { ok: true });
+      if (sent.at < 1_000) return reply(409, { ok: false, error: 'processing' });
+      return reply(503, { ok: false, error: 'rpc_error' });
+    });
+    await completeGasless(plain);
+    for (let i = 0; i < 18; i++) await settle(1_000);
+    await settle(350);
+    expect(served).toEqual(['0 → 409', '250 → 409', '1250 → 503', '3250 → 503', '18250 → 503']);
+    expect(view.notRegisteredAlert()).toHaveLength(1);
+
+    fireEvent.click(view.retryButton()!);
+    await settle();
+    // 18.35 秒: 押した時点では送らない。待っている間は、ボタンを出さず、案内は残す。
+    expect(notifySent).toHaveLength(5);
+    expect(view.retryButton()).toBeNull();
+    expect(view.notRegisteredAlert()).toHaveLength(1);
+    await settle(42_649);
+    expect(notifySent).toHaveLength(5);
+    expect(view.retryButton()).toBeNull();
+
+    await settle(1);
+    // 61.0 秒 (0 秒の送信の 61 秒後 = 押してから 42.65 秒) に 1 回だけ送って、届く。
+    expect(served).toEqual(['0 → 409', '250 → 409', '1250 → 503', '3250 → 503', '18250 → 503', '61000 → 200']);
+    expectDirectSends(notifySent, OWN_NOTIFY);
+    expect(view.notRegisteredAlert()).toHaveLength(0);
+    expect(view.retryButton()).toBeNull();
+    expect(view.successDialog()).not.toBeNull();
+    await runClock();
+    expect(notifySent).toHaveLength(6);
+  });
+
   it('USDC の会計で自社の URL (手で作った URL だけ): server の 400 unsupported_token で、案内が出る (ボタンなし)', async () => {
     installFetch([json(400, { error: 'unsupported_token' })]);
     mockHook(useAccount, { address: CUSTOMER, isConnected: true, chainId: baseSepolia.id });

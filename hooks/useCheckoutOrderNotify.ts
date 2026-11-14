@@ -400,9 +400,25 @@ export function useCheckoutOrderNotify(args: UseCheckoutOrderNotifyArgs) {
       // 断つ波及は 2 つ: (1) 完了の通知の追加の送信が server の枠 (同じ支払いと IP で 60 秒に 5 回・断った要求も数える) を
       // 先に使い、通るはずだった部分の通知 (= 注文の保存) を 429 にする。(2) 部分の通知が届く前に「届かなかった」と
       // 決めて、お店に届いた注文に「自動登録できませんでした」を出す。
-      // 完了の後に、この支払いの部分の通知が新しく始まることは無い (effect D の最初の条件) ので、待った後に送っても、
-      // 枠を先に使われる部分の通知はもう無い。
-      const partialsSettled = () => Promise.all(payment.partials);
+      // 待っている間に、この支払いの部分の通知が新しく始まっていたら、それも待つ (増えなくなるまで)。今の画面では、完了の
+      // 後に部分の通知は始まらない (effect D の最初の条件) が、その前提が崩れても、始まった部分の通知より先に動かない。
+      const partialsSettled = async () => {
+        for (let waited = -1; waited !== payment.partials.length; ) {
+          waited = payment.partials.length;
+          await Promise.all(payment.partials);
+        }
+      };
+      // 追加の送信 (自動の送り直し・ボタンの 1 回) の直前に必ず通す: 部分の通知が全部終わるのを待ち、server の枠
+      // (この支払いで送った時刻から数える) が空くまで待つ。枠を待った後は、その間に部分の通知が始まっていないかを
+      // もう一度見る。
+      const beforeExtraSend = async () => {
+        for (;;) {
+          await partialsSettled();
+          const quotaWaitMs = orderNotifyQuotaWaitMs(payment.sentAt, Date.now());
+          if (quotaWaitMs <= 0) return;
+          await sleep(quotaWaitMs);
+        }
+      };
       // 今までと同じ時点・同じ event 名・同じ欄の記録 (応答を見た時点。本文を読んでいれば serverError を足す)。
       const warnFailure = async (seen: DirectNotifyFailureSeen) => {
         const redacted = await webhookTelemetry;
@@ -475,6 +491,8 @@ export function useCheckoutOrderNotify(args: UseCheckoutOrderNotifyArgs) {
       // 届くか、送り直しを使い切るか、何度送っても通らない失敗が返るまで送る。届いたら null・届かなければ最後の失敗。
       // autoRetry = false (ボタン) は 1 回だけ。timer と fetch は、409 の送り直しと同じく画面を離れても止めない。
       const deliver = async (autoRetry: boolean): Promise<DirectNotifyFailure | null> => {
+        // ボタンの 1 回は、最初から追加の送信。押した直後に送って、server の枠の 6 回目 (429) にしない。
+        if (!autoRetry) await beforeExtraSend();
         for (let retry = 0; ; retry += 1) {
           // 最初の 1 回だけ、今までどおり 409 の表つき。自動の送り直しとボタンの 1 回は、1 回の送信だけ
           // (中で 409 の表を回して、枠を見ない送信を重ねない)。最初の 1 回とボタンの 1 回は、今までどおりの記録を出す。
@@ -491,10 +509,7 @@ export function useCheckoutOrderNotify(args: UseCheckoutOrderNotifyArgs) {
           if (baseDelayMs === null) return failure;
           logger.info('checkout.webhook.retry_scheduled', { status: failure.status, attempts, waitMs: baseDelayMs });
           await sleep(baseDelayMs);
-          await partialsSettled();
-          // 枠は送る直前に数える (部分の通知が送り終えた後なので、この後に増える送信は無い)。空くまで待つ。
-          const quotaWaitMs = orderNotifyQuotaWaitMs(payment.sentAt, Date.now());
-          if (quotaWaitMs > 0) await sleep(quotaWaitMs);
+          await beforeExtraSend();
         }
       };
       // 送り終えた後の、画面と記録。manual = 「注文登録を再試行」で送った 1 回。
@@ -544,8 +559,9 @@ export function useCheckoutOrderNotify(args: UseCheckoutOrderNotifyArgs) {
       };
       const sendOrderNotify = () => deliver(true).then((failure) => finish(failure, false));
       directNotifyRetryRef.current = () => {
-        // 押した時点でボタンを消す (click の中の更新は、次の click が届く前に描き直される = 送っている間は押せない)。
-        // 結果が出たら、待てば通る失敗のときだけ出し直す。ボタンが出るのは案内の後 = 部分の通知が全部終わった後。
+        // 押した時点でボタンを消す (click の中の更新は、次の click が届く前に描き直される = 待っている間・送っている間は
+        // 押せない)。送るのは、部分の通知が全部終わり、枠が空いてから (deliver の頭)。結果が出たら、待てば通る失敗の
+        // ときだけ出し直す。
         setDirectNotifyRetryable(false);
         void deliver(false).then((failure) => finish(failure, true));
       };
@@ -856,8 +872,8 @@ export function useCheckoutOrderNotify(args: UseCheckoutOrderNotifyArgs) {
         });
       });
     // 完了の通知 (effect A) の追加の動きが、この通知がすっかり終わる (応答を扱い終え、2xx なら本文も読み終える) まで
-    // 待てるように覚える。完了 (standard.data) の後は、この effect が最初の条件で戻るので、同じ支払いの部分の通知が
-    // 新しく始まることは無い。
+    // 待てるように覚える。完了 (standard.data) の後は、この effect が最初の条件で戻るので、今の画面では、同じ支払いの
+    // 部分の通知が新しく始まることは無い (始まっても、完了の通知は待っている間に増えた分まで待つ)。
     payment.partials.push(request.then(() => bodyRead));
     partialOrderNotifyPromiseRef.current = {
       key: standard.merchantTxHash,
