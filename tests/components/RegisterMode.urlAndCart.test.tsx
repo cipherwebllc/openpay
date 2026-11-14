@@ -3,7 +3,7 @@
 //   - URL の全 param の完全一致 (とくに誰がガス代を払うかの gas)
 //   - カートが空になったら値引きを外す (次のお客様に前の値引きを付けない)
 //   - 数量の上限 999 (/checkout が受け付ける上限と同じ)
-//   - 同じ品・同じオプションの行をまとめる / 違うオプションは別の行
+//   - 同じ品で、作った表示名 (品の名前 + 選んだ選択肢の名前) が同じ行をまとめる / 表示名が異なる選択は別の行
 //   - お店負担 (お店の端末で送る) の最低額 1 JPYC の境目
 // 期待はどれも「今の動き」。QR の中身は qrcode.react を差し替えて読む (お客様が読み取る値そのもの)。
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -183,6 +183,13 @@ async function addDiscount(user: User, mode: 'amount' | 'percent', value: string
   if (mode === 'percent') await user.click(orderPanel().getByRole('button', { name: '割引率' }));
   await user.type(orderPanel().getByLabelText(mode === 'amount' ? '値引きの金額' : '割引率 (%)'), value);
 }
+/** 管理番号を入れる。欄は閉じた折りたたみの中にあるので、店員と同じように見出しを押して開いてから打つ。 */
+async function typeReceiptNo(user: User, value: string) {
+  const summary = orderPanel().getByText('管理番号を付ける（任意）');
+  await user.click(summary);
+  expect(summary.closest('details')).toHaveAttribute('open');
+  await user.type(orderPanel().getByLabelText('管理番号 / レシート番号'), value);
+}
 /** オプションつきの品を、選んだ選択肢でカートに入れる。 */
 async function addWithOptions(user: User, tile: RegExp, choices: { radio?: RegExp; checkbox?: RegExp }) {
   await tap(user, tile);
@@ -206,7 +213,10 @@ function parts(value: string) {
   if (new Set(keys).size !== keys.length) throw new Error(`param が重なっている: ${keys.join(',')}`);
   return { base: `${url.origin}${url.pathname}`, query: Object.fromEntries(url.searchParams), searchParams: url.searchParams };
 }
-/** URL から /checkout が請求する額 (小計 − 値引き)。 */
+/**
+ * URL の「明細の合計 − 値引き」(calcCheckoutPayable)。ガス代・利用料を含む最終の支払額ではない
+ * (USDC のお客様負担では、この後にガス相当額が乗りうる)。
+ */
 function payableOf(searchParams: URLSearchParams, unit: bigint) {
   const parsed = parseCheckoutParams(searchParams);
   if (!parsed.ok) throw new Error(`/checkout が受け付けない URL: ${parsed.error}`);
@@ -229,7 +239,7 @@ describe('RegisterMode: 作られる支払い URL と、カートの境目', () 
     global.fetch = vi.fn(async () => ({ ok: false, status: 404, json: async () => ({}) }) as Response) as unknown as typeof fetch;
   });
 
-  describe('支払い URL の完全一致 (path と全 param)・URL の額 = 画面の合計', () => {
+  describe('支払い URL の完全一致 (path と全 param)・URL の「明細の合計 − 値引き」= 画面の合計', () => {
     type Row = {
       name: string;
       settings?: Record<string, unknown>;
@@ -240,7 +250,7 @@ describe('RegisterMode: 作られる支払い URL と、カートの境目', () 
       build: (user: User) => Promise<void>;
       /** 注文パネルと QR の画面に出る合計。 */
       total: string;
-      /** URL が請求する額 (最小単位)。 */
+      /** URL の「明細の合計 − 値引き」(最小単位)。 */
       payable: bigint;
       unit: bigint;
       query: Record<string, string>;
@@ -373,7 +383,7 @@ describe('RegisterMode: 作られる支払い URL と、カートの境目', () 
           await user.click(screen.getByRole('button', { name: '自由入力' }));
           await user.type(screen.getByRole('textbox', { name: '商品名' }), 'ふくろ');
           await user.type(screen.getByRole('textbox', { name: '単価 (JPYC)' }), '5');
-          await user.type(orderPanel().getByLabelText('管理番号 / レシート番号'), 'R-001');
+          await typeReceiptNo(user, 'R-001');
         },
         total: '1,095 JPYC',
         payable: 1095n * JPYC,
@@ -406,7 +416,7 @@ describe('RegisterMode: 作られる支払い URL と、カートの境目', () 
       const { base, query, searchParams } = parts(value);
       expect(base).toBe('https://test.local/checkout');
       expect(query).toEqual(row.query);
-      // URL の額 (小計 − 値引き) = 画面の合計 = お客様に見せる QR の画面の額。
+      // URL の「明細の合計 − 値引き」= 画面の合計 = お客様に見せる QR の画面の額。
       expect(payableOf(searchParams, row.unit)).toBe(row.payable);
       const dialog = within(screen.getByRole('dialog'));
       expect(dialog.getByText(row.total)).toBeInTheDocument();
@@ -477,7 +487,7 @@ describe('RegisterMode: 作られる支払い URL と、カートの境目', () 
       seedSettings();
       render(<RegisterMode />);
       await tap(user, /コーヒー/);
-      await user.type(orderPanel().getByLabelText('管理番号 / レシート番号'), 'R-001');
+      await typeReceiptNo(user, 'R-001');
       await deleteLine(user, /コーヒー/);
       expect(orderPanel().queryByLabelText('管理番号 / レシート番号')).toBeNull();
 
@@ -588,6 +598,7 @@ describe('RegisterMode: 作られる支払い URL と、カートの境目', () 
     });
   });
 
+  // 行の鍵は「商品の id + 作った表示名 (品の名前 + 選んだ選択肢の名前)」。選択肢の id は比べない。
   describe('オプションつきの品の行 (flag ON)', () => {
     beforeEach(() => {
       hold.menuOptions = true;
@@ -595,7 +606,7 @@ describe('RegisterMode: 作られる支払い URL と、カートの境目', () 
       seedPresets([GYUDON]);
     });
 
-    it('同じ品・同じオプションは 1 行にまとまり数量 +1、違うオプションは別の行 (URL の items も同じ並び)', async () => {
+    it('同じ品で表示名が同じ選択は 1 行にまとまり数量 +1、表示名が異なる選択は別の行 (URL の items も同じ並び)', async () => {
       const user = userEvent.setup();
       render(<RegisterMode />);
       await addWithOptions(user, /牛丼/, { radio: /大盛り/ });
@@ -620,7 +631,7 @@ describe('RegisterMode: 作られる支払い URL と、カートの境目', () 
       expect(payableOf(searchParams, JPYC)).toBe(1900n * JPYC);
     });
 
-    it('選択肢の組が違えば別の行 (大盛り と 大盛り・えび)', async () => {
+    it('選択肢の組が違って表示名が異なれば別の行 (大盛り と 大盛り・えび)', async () => {
       const user = userEvent.setup();
       render(<RegisterMode />);
       await addWithOptions(user, /牛丼/, { radio: /大盛り/ });
@@ -631,7 +642,7 @@ describe('RegisterMode: 作られる支払い URL と、カートの境目', () 
       expect(summaryRow('合計').getByText('1,550 JPYC')).toBeInTheDocument();
     });
 
-    it('名前を書き換えた行にはまとめない (同じオプションでも新しい行になる)', async () => {
+    it('名前を書き換えた行にはまとめない (同じ選択でも表示名が合わず、新しい行になる)', async () => {
       const user = userEvent.setup();
       render(<RegisterMode />);
       await addWithOptions(user, /牛丼/, { radio: /大盛り/ });
@@ -643,7 +654,7 @@ describe('RegisterMode: 作られる支払い URL と、カートの境目', () 
       expect(qtyOf('牛丼（大盛り）')).toHaveValue('1');
     });
 
-    it('同じオプションの足し込みも 998 → 999 で止まり、もう 1 回足しても 999', async () => {
+    it('表示名が同じ選択の足し込みも 998 → 999 で止まり、もう 1 回足しても 999', async () => {
       const user = userEvent.setup();
       render(<RegisterMode />);
       await addWithOptions(user, /牛丼/, { radio: /大盛り/ });
