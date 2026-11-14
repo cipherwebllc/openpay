@@ -216,14 +216,17 @@ function payHref(): string {
   return link.getAttribute('href') ?? '';
 }
 
-/** URL を「origin と path」と「query の全部」に分ける。同じ key が 2 回出たら落とす (全部を比べるため)。 */
+/**
+ * 行き先の URL を読む。origin と path はここで比べる (どの URL も https://test.local/checkout)。
+ * query は全部の key と値を返す。同じ key が 2 回出たら落とす (全部を比べるため)。
+ */
 function readCheckoutUrl(href: string) {
   const url = new URL(href);
+  expect(`${url.origin}${url.pathname}`).toBe('https://test.local/checkout');
   const keys = [...url.searchParams.keys()];
   expect(new Set(keys).size).toBe(keys.length);
   expect(url.hash).toBe('');
   return {
-    base: `${url.origin}${url.pathname}`,
     query: Object.fromEntries(url.searchParams.entries()),
     /** /checkout が URL から作り直す支払額 (小計 − 値引き)。利用料の上乗せは含まない。 */
     payable: () => {
@@ -271,6 +274,7 @@ function gatedFetch() {
   };
   return {
     admit: () => settle(() => resolve(admitted())),
+    respond: (response: Response) => settle(() => resolve(response)),
     fail: () => settle(() => reject(new TypeError('Failed to fetch'))),
   };
 }
@@ -305,7 +309,6 @@ describe('MobileOrderView — 「支払いへ進む」: 受付の確認を通る
 
     const href = payHref();
     const url = readCheckoutUrl(href);
-    expect(url.base).toBe('https://test.local/checkout');
     expect(url.query).toEqual({
       to: RECEIVER,
       token: 'jpyc',
@@ -380,7 +383,6 @@ describe('MobileOrderView — 「支払いへ進む」: 受付の確認を通る
 
     const href = payHref();
     const url = readCheckoutUrl(href);
-    expect(url.base).toBe('https://test.local/checkout');
     expect(url.query).toEqual({
       to: RECEIVER,
       token: 'jpyc',
@@ -519,24 +521,38 @@ describe('MobileOrderView — 「支払いへ進む」: 受付の確認を通る
   });
 
   it('「支払いへ進む」を押した時点で、受付の確認の結果を待たずに「前回の注文」を保存する (拒否されても残る)', async () => {
-    fetchSpy.mockImplementation(async () => new Response('{}', { status: 409 }));
+    const gate = gatedFetch();
     renderWithIntl(<MobileOrderView config={config} handle={HANDLE} />);
     add('ブレンド', 2);
     add('水');
-
-    await pressPay();
-
-    expect(assignSpy).not.toHaveBeenCalled();
-    expect(
-      JSON.parse(window.localStorage.getItem(`openpay:last-order:v1:h:${HANDLE}`) ?? 'null'),
-    ).toEqual({
+    const saved = () =>
+      JSON.parse(
+        window.localStorage.getItem(`openpay:last-order:v1:h:${HANDLE}`) ?? 'null',
+      ) as unknown;
+    const record = {
       receiver: RECEIVER,
       cart: [
         { id: 'a', qty: 2 },
         { id: 'c', qty: 1 },
       ],
       ts: TOKYO_NOON,
-    });
+    };
+    expect(saved()).toBeNull();
+
+    fireEvent.click(payLink()!);
+
+    // 応答はまだ返っていない (POST は出た・移っていない・拒否の案内も無い)。この時点でもう保存してある。
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(assignSpy).not.toHaveBeenCalled();
+    expect(screen.queryByText(TEXT.closed)).toBeNull();
+    expect(saved()).toEqual(record);
+
+    await gate.respond(new Response('{}', { status: 409 }));
+
+    // 拒否されても、保存はそのまま残る。
+    expect(assignSpy).not.toHaveBeenCalled();
+    expect(screen.getByText(TEXT.closed)).toBeInTheDocument();
+    expect(saved()).toEqual(record);
   });
 });
 
@@ -563,7 +579,6 @@ describe('MobileOrderView — 「支払いへ進む」: 受付の確認を通ら
     add('水');
 
     const url = readCheckoutUrl(payHref());
-    expect(url.base).toBe('https://test.local/checkout');
     expect(url.query).toEqual({
       to: RECEIVER,
       token: 'jpyc',
@@ -886,7 +901,9 @@ describe('MobileOrderView — カートに入れた後で売り切れになっ�
     expect(cartToggle()).toBeNull();
   });
 
-  it('売り切れで URL から落ちた品も、「前回の注文」の保存には数量ごと残る (今の動き・注文していない品が次の「前回と同じ注文」に入る)', async () => {
+  // ここで見るのは保存の中身だけ。保存に残った品が実際に「前回と同じ注文」でカートへ戻るのは、その注文が
+  // 支払い済みと判定され、次に開いたときに売り切れが解除されている場合 (復元のときにも売り切れは除く)。
+  it('売り切れで URL から落ちた品も、「前回の注文」の保存には数量ごと残る (今の動き・支払い済みと判定され、次回に売り切れが解除されていれば、前回と同じ注文に入る)', async () => {
     const view = renderWithIntl(<MobileOrderView config={config} handle={HANDLE} live={live([])} />);
     add('ブレンド', 2);
     add('水');
