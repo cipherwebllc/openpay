@@ -29,7 +29,7 @@
 //   表 2 ボタンの表   経路の類 × ウォレットの状態ごとに、ボタンの文言と押せるか。
 //   表 3 経路が変わる・変わらない場面  ウォレットが別の chain・復元した通常決済の試み・「通常決済に切替」・描いた後に入力が
 //                     変わる (params の chain・ウォレットの chain・復元した試み・Tip が復元した通常決済からガスレスの params へ)・
-//                     送った後の固定・復元した relay の注文。
+//                     送った後の固定・復元した relay の注文・固定と復元した注文が食い違うとき (固定が先)。
 //
 // 期待の書き方: 画面の文は i18n の key で書き (文言を直す PR で動かないように)、テストの中で messages/ja.json から引いて比べる。
 // 額は字で書く。
@@ -2393,5 +2393,55 @@ describe('表 3: 経路が変わる・変わらない場面', () => {
       const view = await mount('checkout', input, { relayState: savedOrder(saved), checkoutExtra: order });
       check('checkout', input, { ...expected, button: [PAY_JPYC, false], orderContext: order }, view);
     });
+
+    // Checkout だけ: 送信で決めた経路 (固定) と、復元した relay の注文の経路が食い違うときは、固定が勝つ (CheckoutForm の
+    // pinnedRoute は「固定 ?? 復元」の順。逆の「復元 ?? 固定」にすると、ここの 2 行が落ちる)。上の行は固定と復元を 1 つずつ
+    // 見ていて、両方があるときの順を見ていない。向きを 2 つとも持つのは、片方だけだと「両方あれば常に recover」と区別できないため。
+    // この食い違いは、通常の操作では作れない (本物の hook は描いた直後に注文を復元し、その間は押せない)。優先の決まりを
+    // 保存するための行。送った後に変えるのは、useJpycEip3009Payment が返す state (orderDelivery・restoredIntent・hasActiveIntent)
+    // だけで、resolver の答えの表も params も変えない。hook が返す state は描き直しで変わりうる本物の入力なので、経路の計算を
+    // memo するなら依存に入る値 = この行は、正当な書き換え (memo・式の組み替え) を縛らない。
+    it.each([
+      {
+        name: 'recover で送った後に、free の復元した注文が現れても recover のまま',
+        resolvers: { relayOn: 'all', forwarderOn: 'all' } satisfies Partial<Input>,
+        sentGasMode: 'merchant',
+        saved: 'free' as const,
+        rows: RELAY_RECOVER_ROWS.checkout,
+      },
+      {
+        name: 'free で送った後に、recover の復元した注文が現れても free のまま',
+        resolvers: { relayOn: 'all' } satisfies Partial<Input>,
+        sentGasMode: 'customer',
+        saved: 'recover' as const,
+        rows: JPYC_FREE_ROWS.checkout,
+      },
+    ].map((row): Titled<typeof row> => [`checkout: ${row.name} (固定が、復元した注文の経路より先)`, row]))(
+      '%s',
+      async (_title, { resolvers, sentGasMode, saved, rows }) => {
+        const input: Input = { token: 'jpyc', ...resolvers };
+        const order = { orderId: 'ord-1', webhook: OWN_NOTIFY };
+        const view = await mount('checkout', input, { checkoutExtra: order });
+        // 送る前: resolver の答えどおりの経路。
+        check('checkout', input, { hooks: OFF, health: true, rows, button: [PAY_JPYC, true], orderContext: order }, view);
+
+        // 送る (= 経路を固定する)。自社の notify の URL を持つ会計は、注文を束ねてから送る (lib/orderBind を遅れて読み込む) ので、
+        // mutate に届くまで待つ。束ねた注文の中身は、ここでは見ない (番号と handle だけ)。
+        fireEvent.click(screen.getByRole('button', { name: text('checkout', PAY_JPYC) }));
+        await settle();
+        const sent = {
+          merchant: MERCHANT,
+          value: J('1000'),
+          gasMode: sentGasMode,
+          order: expect.objectContaining({ orderId: 'ord-1', handle: 'alice' }),
+        };
+        expectMutates({ relay: [sent] });
+
+        // 送った後に、この会計と一致する、逆の経路の復元した注文が現れる。固定した経路のまま。
+        await changeInput(view, 'checkout', input, { relayState: savedOrder(saved), checkoutExtra: order });
+        check('checkout', input, { hooks: OFF, health: true, rows, button: [PAY_JPYC, false], orderContext: order }, view);
+        expectMutates({ relay: [sent] });
+      },
+    );
   });
 });
