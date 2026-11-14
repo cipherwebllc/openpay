@@ -2017,9 +2017,14 @@ relay の支払いの行の「受け付ける」は、receipt の中で支払い
        /64) からの多くの通知 (flood か、大きな NAT)。`ipPrefix` で送り元の範囲が分かる (warn を書いた 1 件目の分だけ)。
    - お客様のブラウザの warn `checkout.webhook.non_ok` (Sentry) も目安になる。`status` と `statusText` を持つ。束縛なしの
      経路 (`hooks/useCheckoutOrderNotify.ts` の完了の通知と通常決済の部分の通知) は通知先の origin・hash も持ち、束縛つきの
-     経路 (同じ file の束縛した注文の通知) は持たない。応答 body の理由 (`error`) を持つのは完了の通知だけで、欄は
-     `serverError` (小文字と `_` だけの語のときだけ出す)。完了の通知は、自動の送り直し (最大 2 回) を終えても届かなかった
-     ときに 1 件だけ出し、送った回数を `attempts` に持つ (「注文登録を再試行」の 1 回が失敗するたびにも 1 件)。
+     経路 (同じ file の束縛した注文の通知) は持たない。応答 body の理由 (`error`) は、完了の通知が 422 (か、本文が
+     `{ ok: true }` でない 2xx) を受けたときだけ `serverError` の欄に入る (`lib/order/notifyRetry.ts` に並べた、route が
+     返す語のときだけ)。
+   - 完了の通知は、最初の失敗を上の event で 1 件出した後、自動で 2 回まで送り直す。それでも届かなかったとき (と、
+     送り直さない失敗のとき) に warn `checkout.webhook.undelivered` を 1 件出す。欄は `status` (通信の失敗なら `error`)・
+     `attempts` (送った回数)・`serverError`・`noticeShown` (お客様に「自動登録できませんでした」を出したか)・通知先の
+     origin・hash。`noticeShown` が false になるのは、同じ支払いの部分の通知が届いていたとき (注文はお店にある) と、
+     お客様が画面を離れた後に止まったとき (届いたかは、この欄からは分からない)。
 
 **4. 戻し方**
 - `ENABLE_ORDER_BIND_ENFORCE` を消すか `false` にして、再 deploy する。束縛なしの relay 通知は、また `bindingMissing` を

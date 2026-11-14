@@ -94,7 +94,10 @@ describe('完了の通知 (経路 A) が届かなかったとき: 画面の状�
     await waitFor(() => expect(result.current.orderNotifyFailed).toBe(true));
     expect(result.current.directNotifyRetryable).toBe(false);
     expect(args.setRedirectIn).toHaveBeenCalledExactlyOnceWith(null);
-    await waitFor(() => expect(webhookWarnings()).toHaveLength(1));
+    // 記録: 最初の失敗 (今までと同じ event) + 届かずに止まった 1 件 (案内を出した)。
+    await waitFor(() => expect(webhookWarnings()).toHaveLength(2));
+    expect(webhookWarnings().map(([event]) => event)).toEqual(['checkout.webhook.non_ok', 'checkout.webhook.undelivered']);
+    expect(webhookWarnings()[1][1]).toMatchObject({ status: 400, attempts: 1, serverError: 'invalid_body', noticeShown: true });
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
@@ -107,10 +110,29 @@ describe('完了の通知 (経路 A) が届かなかったとき: 画面の状�
 
     unmount();
     respond(INVALID());
-    await waitFor(() => expect(webhookWarnings()).toHaveLength(1));
-    expect(webhookWarnings()[0]).toEqual([
-      'checkout.webhook.non_ok',
-      expect.objectContaining({ status: 400, attempts: 1, serverError: 'invalid_body' }),
+    await waitFor(() => expect(webhookWarnings()).toHaveLength(2));
+    expect(webhookWarnings()[0]).toEqual(['checkout.webhook.non_ok', expect.objectContaining({ status: 400 })]);
+    // 画面が無いので、案内は出していない (noticeShown: false)。
+    expect(webhookWarnings()[1]).toEqual([
+      'checkout.webhook.undelivered',
+      expect.objectContaining({ status: 400, attempts: 1, serverError: 'invalid_body', noticeShown: false }),
+    ]);
+    expect(args.setRedirectIn).not.toHaveBeenCalled();
+  });
+
+  it('応答の前に画面を離れた (unmount) → 後から届いた 422 tx_too_old でも state を書かない', async () => {
+    let respond!: (response: Response) => void;
+    fetchMock.mockImplementation(() => new Promise<Response>((resolve) => { respond = resolve; }));
+    const args = paidArgs();
+    const { unmount } = renderHook(() => useCheckoutOrderNotify(args));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+
+    unmount();
+    respond(Response.json({ error: 'tx_too_old' }, { status: 422 }));
+    await waitFor(() => expect(webhookWarnings()).toHaveLength(2));
+    expect(webhookWarnings()[1]).toEqual([
+      'checkout.webhook.undelivered',
+      expect.objectContaining({ status: 422, serverError: 'tx_too_old', noticeShown: false }),
     ]);
     expect(args.setRedirectIn).not.toHaveBeenCalled();
   });
@@ -137,7 +159,8 @@ describe('完了の通知 (経路 A) が届かなかったとき: 画面の状�
       await new Promise((resolve) => setTimeout(resolve, 20));
     });
     expect(args.setRedirectIn).not.toHaveBeenCalled();
-    expect(webhookWarnings()).toHaveLength(1); // 最初の失敗の 1 件だけ
+    // 最初の失敗と、自動の送信が止まったときの 2 件だけ (ボタンで届いた分は出さない)。
+    expect(webhookWarnings().map(([event]) => event)).toEqual(['checkout.webhook.non_ok', 'checkout.webhook.undelivered']);
   });
 
   it('画面がある間に「注文登録を再試行」が届く → 案内を消し、success_url への 3 秒の移動を始め直す', async () => {
@@ -164,7 +187,8 @@ describe('完了の通知 (経路 A) が届かなかったとき: 画面の状�
 
     await waitFor(() => expect(result.current.orderNotifyFailed).toBe(true));
     expect(args.setRedirectIn).toHaveBeenCalledExactlyOnceWith(null);
-    await waitFor(() => expect(webhookWarnings()).toHaveLength(1));
+    await waitFor(() => expect(webhookWarnings()).toHaveLength(2));
+    expect(webhookWarnings()[1][1]).toMatchObject({ noticeShown: true });
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 });

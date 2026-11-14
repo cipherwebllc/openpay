@@ -20,8 +20,10 @@ import type { ChainSlug } from '@/lib/chains';
 import { env } from '@/lib/env';
 import { logger } from '@/lib/logger';
 import {
+  ORDER_NOTIFY_BODY_WAIT_MS,
+  ORDER_NOTIFY_PARTIAL_WAIT_MS,
   orderNotifyAutoRetryBaseDelayMs,
-  orderNotifyRetryWaitMs,
+  orderNotifyQuotaWaitMs,
   orderNotifyServerErrorForLog,
 } from '@/lib/order/notifyRetry';
 import { parseOwnOrderNotifyUrl } from '@/lib/order/ownNotifyUrl';
@@ -153,23 +155,56 @@ async function readOrderNotifyBody(res: Response) {
   }
 }
 
-// 支払い (key) ごとに、この画面が /api/order/notify へ送った時刻の列 (無ければ作る)。
-function orderNotifySendTimes(log: Map<string, number[]>, key: string): number[] {
-  let times = log.get(key);
-  if (!times) {
-    times = [];
-    log.set(key, times);
+// promise を ms まで待つ。先に終わればその値、終わらなければ undefined (待つのをやめるだけで、promise は止めない)。
+async function settledWithin<T>(promise: Promise<T>, ms: number): Promise<T | undefined> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<undefined>((resolve) => {
+    timer = setTimeout(() => resolve(undefined), ms);
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    clearTimeout(timer);
   }
-  return times;
 }
 
-// 完了の通知 (effect A) の 1 回の送信が届かなかったときの中身。
-type DirectNotifyFailure = {
+// この画面が 1 つの支払い (key) について覚えるもの。完了の通知 (effect A) と部分の通知 (effect D) が同じものを見る。
+type OrderNotifyPayment = {
+  // /api/order/notify へ送った時刻 (部分・完了・409 の送り直し・自動の送り直し・ボタンの全部)。
+  sentAt: number[];
+  // 部分の通知の promise (送り終えて応答を扱った時点で終わる。今までと同じ時点)。
+  partials: Promise<void>[];
+  // 部分の通知の 2xx の応答の本文の読み取り (上の promise の外で走る)。
+  partialReads: Promise<void>[];
+  // 部分の通知が 1 回でも届いた (2xx かつ本文が { ok: true }) = 注文はお店にある。
+  partialDelivered: boolean;
+  // 届いたと分かった時点で呼ぶ (完了の通知が、先に出していた自分の案内を片づける)。
+  onPartialDelivered: (() => void) | null;
+};
+
+function orderNotifyPayment(log: Map<string, OrderNotifyPayment>, key: string): OrderNotifyPayment {
+  let payment = log.get(key);
+  if (!payment) {
+    payment = { sentAt: [], partials: [], partialReads: [], partialDelivered: false, onPartialDelivered: null };
+    log.set(key, payment);
+  }
+  return payment;
+}
+
+// 完了の通知 (effect A) の 1 回の送信が届かなかったときの、応答を見た時点で分かる分 (今までの記録の欄)。
+type DirectNotifyFailureSeen = {
   // fetch が投げたときは null (error に投げられた値)。
   status: number | null;
   statusText?: string;
   error?: unknown;
+  // 応答の JSON の error (server が決めた語だけ)。本文をまだ読んでいない時点では無い。
   serverError?: string;
+};
+
+// 上に、送り直すか・案内をどう出すかを決める分を足したもの。
+type DirectNotifyFailure = Omit<DirectNotifyFailureSeen, 'serverError'> & {
+  // 本文を待たずに分類できる応答 (5xx・429 など) では、後から読める (上限つき)。
+  serverError: Promise<string | undefined> | string | undefined;
   // 422 tx_too_old (支払いが受付の期限より前)。何度送っても通らない。
   tooOld: boolean;
   // 待てば通る種類 (5xx・429・409 processing・422 tx_not_found・通信の失敗・2xx で届いた形でない応答)。
@@ -219,10 +254,8 @@ export function useCheckoutOrderNotify(args: UseCheckoutOrderNotifyArgs) {
   const [directNotifyRetryable, setDirectNotifyRetryable] = useState(false);
   // 「注文登録を再試行」が押されたときに 1 回だけ送る処理 (effect A が、送った本文をそのまま持つ closure を置く)。
   const directNotifyRetryRef = useRef<(() => void) | null>(null);
-  // この画面が、支払い (key) ごとに /api/order/notify へ送った時刻 (部分・完了・409 の送り直し・自動の送り直し・ボタン)。
-  const orderNotifySentAtRef = useRef(new Map<string, number[]>());
-  // 部分の通知 (effect D) が届いた支払い (key = merchantTxHash)。届いていれば、完了の通知が届かなくても注文はお店にある。
-  const partialDeliveredKeyRef = useRef<string | null>(null);
+  // 支払い (key = 通常決済は merchantTxHash) ごとの、送った時刻・部分の通知の promise・部分の通知が届いたか。
+  const orderNotifyPaymentsRef = useRef(new Map<string, OrderNotifyPayment>());
   const [boundNotifyRetry, setBoundNotifyRetry] = useState(0);
   const [boundNotifyRetryable, setBoundNotifyRetryable] = useState(false);
   const [boundNotifyAcknowledged, setBoundNotifyAcknowledged] = useState(false);
@@ -358,100 +391,169 @@ export function useCheckoutOrderNotify(args: UseCheckoutOrderNotifyArgs) {
         mode: 'cors',
         keepalive: true,
       };
-      const sentAt = orderNotifySendTimes(orderNotifySentAtRef.current, paymentKey);
-      // 完了の通知が送った回数 (409 の送り直しも数える)。記録 (warn) の attempts。
+      const payment = orderNotifyPayment(orderNotifyPaymentsRef.current, paymentKey);
+      // 完了の通知が送った回数 (409 の送り直しも数える)。記録の attempts。
       let attempts = 0;
-      // 1 回送り (409 processing の表は今までどおり postOrderNotify の中)、届いたら null・届かなければ中身を返す。
-      const sendOnce = async (): Promise<DirectNotifyFailure | null> => {
+      const onSend = () => {
+        attempts += 1;
+        payment.sentAt.push(Date.now());
+      };
+      const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+      // 完了の通知が立てた案内が、いま出ているか。
+      let noticeRaised = false;
+      // 完了の通知が立てた案内とボタンを片づけ、案内が止めていた success_url への移動を始め直す (経路 C が登録できたとき
+      // と同じ)。ボタンで届いたときと、案内を出した後で同じ支払いの部分の通知が届いたと分かったときに呼ぶ。
+      const clearOwnNotice = () => {
+        if (!noticeRaised || !previousNotificationMountedRef.current) return;
+        noticeRaised = false;
+        setDirectNotifyFailed(false);
+        setDirectNotifyRetryable(false);
+        if (params.successUrl) setRedirectIn(SUCCESS_REDIRECT_DELAY_MS / 1000);
+      };
+      // 注文がお店に届いたと分かった後も「自動登録できませんでした」が残り、お客様がスタッフを探す波及を断つ。
+      payment.onPartialDelivered = clearOwnNotice;
+      // 今までと同じ時点・同じ event 名・同じ欄の記録 (応答を見た時点。本文を読んでいれば serverError を足す)。
+      const warnFailure = async (seen: DirectNotifyFailureSeen) => {
+        const redacted = await webhookTelemetry;
+        if (seen.status === null) {
+          logger.warn('checkout.webhook.failed', {
+            error: seen.error,
+            webhookOrigin: redacted.origin,
+            webhookHash: redacted.hash,
+          });
+        } else {
+          logger.warn('checkout.webhook.non_ok', {
+            status: seen.status,
+            statusText: seen.statusText,
+            webhookOrigin: redacted.origin,
+            webhookHash: redacted.hash,
+            ...(seen.serverError ? { serverError: seen.serverError } : {}),
+          });
+        }
+      };
+      // 1 回送り、届いたら null・届かなければ中身を返す。processingTable = 409 processing の表 (今までどおり
+      // postOrderNotify の中) を回すか。onSeen = 今までの記録を出していた時点で、その時点で分かる分を知らせる。
+      const sendOnce = async (
+        processingTable: boolean,
+        onSeen: ((seen: DirectNotifyFailureSeen) => void) | null,
+      ): Promise<DirectNotifyFailure | null> => {
         let res: Response;
         try {
-          res = await postOrderNotify(orderNotifyUrl, init, true, () => {
-            attempts += 1;
-            sentAt.push(Date.now());
-          });
+          res = await postOrderNotify(orderNotifyUrl, init, processingTable, onSend);
         } catch (error) {
-          return { status: null, error, tooOld: false, waitable: true };
+          onSeen?.({ status: null, error });
+          return { status: null, error, serverError: undefined, tooOld: false, waitable: true };
         }
-        // 本文は 1 回しか読めないので、ここで 1 度だけ読み、届いたか・期限切れか・待てば通るか・error の語を全部ここから取る。
-        const body = await readOrderNotifyBody(res);
-        // 届いた = 2xx かつ本文が { ok: true } (経路 C と同じ見方)。server は 200 のとき必ず { ok: true, … } を返す。
-        if (res.ok && body?.ok === true) return null;
+        const seen = { status: res.status, statusText: res.statusText };
+        // 足した本文の読み取りは、どれも上限つき: header の後に本文が終わらない応答で、送り直し・案内・記録を止めない。
+        const readBody = () => settledWithin(readOrderNotifyBody(res), ORDER_NOTIFY_BODY_WAIT_MS);
+        if (res.ok) {
+          // 届いた = 2xx かつ本文が { ok: true } (経路 C と同じ見方)。server は 200 のとき必ず { ok: true, … } を返す。
+          // そうでない 2xx (中継や captive portal の HTML・本文が終わらない) は、通信の失敗と同じく待てば通る扱い。
+          const body = await readBody();
+          if (body?.ok === true) return null;
+          const serverError = orderNotifyServerErrorForLog(body?.error);
+          onSeen?.({ ...seen, serverError });
+          return { ...seen, serverError, tooOld: false, waitable: true };
+        }
+        if (res.status === 422) {
+          // 今までと同じ読み方 (上限なし)。中継層の非 JSON 応答が既存の HTTP status 記録を飛ばす波及を断つ。
+          const error = (await res.json().catch(() => null))?.error;
+          const serverError = orderNotifyServerErrorForLog(error);
+          onSeen?.({ ...seen, serverError });
+          return { ...seen, serverError, tooOld: error === 'tx_too_old', waitable: error === 'tx_not_found' };
+        }
+        // ここから下は、今までは本文を読まずに記録していた応答。記録は本文を待たずに出す。
+        onSeen?.(seen);
+        if (res.status === 409) {
+          // processing (待てば通る) か、予約済みなど (何度送っても通らない) かは、本文で決まる。
+          const error = (await readBody())?.error;
+          return { ...seen, serverError: orderNotifyServerErrorForLog(error), tooOld: false, waitable: error === 'processing' };
+        }
         return {
-          status: res.status,
-          statusText: res.statusText,
-          serverError: orderNotifyServerErrorForLog(body?.error),
-          tooOld: res.status === 422 && body?.error === 'tx_too_old',
-          // 2xx なのに { ok: true } でない応答 (中継や captive portal の HTML) は、通信の失敗と同じく待てば通る扱い。
-          waitable: res.ok || isRetryableOrderNotify(res.status, body),
+          ...seen,
+          // status だけで分類する (本文を待たない)。error の語は、最後の記録のために後から読む。
+          serverError: readBody().then((body) => orderNotifyServerErrorForLog(body?.error)),
+          tooOld: false,
+          waitable: res.status >= 500 || res.status === 429,
         };
       };
       // 届くか、送り直しを使い切るか、何度送っても通らない失敗が返るまで送る。届いたら null・届かなければ最後の失敗。
       // autoRetry = false (ボタン) は 1 回だけ。timer と fetch は、409 の送り直しと同じく画面を離れても止めない。
       const deliver = async (autoRetry: boolean): Promise<DirectNotifyFailure | null> => {
+        // 部分の通知を待つ期限 (最初に待ち始めた時点から数える。送り直しのたびに待ち直さない)。
+        let partialWaitUntil: number | null = null;
         for (let retry = 0; ; retry += 1) {
-          const failure = await sendOnce();
+          // 最初の 1 回 (ボタンの 1 回も) は、今までどおり 409 の表つきで、今までどおりの記録を出す。
+          // 自動の送り直しは 1 回の送信だけ (中で 409 の表を回して、枠を見ない送信を重ねない)。
+          const failure = await sendOnce(retry === 0, retry === 0 ? (seen) => void warnFailure(seen) : null);
           if (!failure) {
             if (retry > 0) logger.info('checkout.webhook.retry_delivered', { attempts });
             return null;
           }
-          // 409 processing は postOrderNotify の表が送り直した後なので、ここでは重ねて送り直さない。
+          // 409 の表を回し切った直後 (最初の 1 回が 409 で終わった) は、重ねて送り直さない。
           const baseDelayMs =
-            autoRetry && failure.waitable && failure.status !== 409
+            autoRetry && failure.waitable && !(retry === 0 && failure.status === 409)
               ? orderNotifyAutoRetryBaseDelayMs(retry, failure.status)
               : null;
           if (baseDelayMs === null) return failure;
-          // server の枠 (同じ支払いと IP で 60 秒に 5 回・断った要求も数える) を自動の送り直しで使い切り、
-          // 通るはずの送信まで 429 にする波及を断つ: この支払いで送った時刻を見て、枠が空くまで待つ。
-          const waitMs = orderNotifyRetryWaitMs(sentAt, Date.now(), baseDelayMs);
-          logger.info('checkout.webhook.retry_scheduled', { status: failure.status, attempts, waitMs });
-          await new Promise((resolve) => setTimeout(resolve, waitMs));
+          logger.info('checkout.webhook.retry_scheduled', { status: failure.status, attempts, waitMs: baseDelayMs });
+          await sleep(baseDelayMs);
+          // 同じ支払いの部分の通知が 409 の表の途中なら、送り終えるまで待つ。server の枠 (同じ支払いと IP で 60 秒に
+          // 5 回・断った要求も数える) を完了の通知の追加の送信が先に使い、通るはずだった部分の通知 (= 注文の保存) を
+          // 429 にする波及を断つ。応答が返らない送信をいつまでも待たないよう、上限つき。
+          partialWaitUntil ??= Date.now() + ORDER_NOTIFY_PARTIAL_WAIT_MS;
+          const partialWaitMs = partialWaitUntil - Date.now();
+          if (partialWaitMs > 0) await settledWithin(Promise.all(payment.partials), partialWaitMs);
+          // 枠は送る直前に数え直す (待っている間に、部分の通知の送信が増えている)。空くまで待つ。
+          for (;;) {
+            const quotaWaitMs = orderNotifyQuotaWaitMs(payment.sentAt, Date.now());
+            if (quotaWaitMs <= 0) break;
+            await sleep(quotaWaitMs);
+          }
         }
       };
       // 送り終えた後の、画面と記録。manual = 「注文登録を再試行」で送った 1 回。
       const finish = async (failure: DirectNotifyFailure | null, manual: boolean) => {
-        // 画面を離れた (unmount) 後に出た結果で、もう無い画面の状態を書き換えない。記録 (warn) は出す。
-        const mounted = previousNotificationMountedRef.current;
         if (!failure) {
-          // 自動の送り直しで届いたときは、案内をまだ出していないので何も変えない。ボタンで届いたときは、完了の通知が
-          // 立てた案内だけを消し、案内が止めていた success_url への移動を始め直す (経路 C が登録できたときと同じ)。
-          if (manual && mounted) {
-            setDirectNotifyFailed(false);
-            if (params.successUrl) setRedirectIn(SUCCESS_REDIRECT_DELAY_MS / 1000);
-          }
+          // 自動の送り直しで届いたときは、案内をまだ出していないので何も変えない。
+          if (manual) clearOwnNotice();
           return;
         }
-        if (mounted) {
-          if (failure.tooOld) {
+        let noticeShown = false;
+        if (failure.tooOld) {
+          // 画面を離れた (unmount) 後に出た結果で、もう無い画面の状態を書き換えない (下も同じ)。記録は出す。
+          if (previousNotificationMountedRef.current) {
             // 受注拒否を決済失敗や再支払いへ波及させず、支払い済みのまま手動確認へ案内する。
             setOrderNotifyFailed(true);
             setRedirectIn(null);
-          } else if (partialDeliveredKeyRef.current !== paymentKey) {
+            noticeShown = true;
+          }
+        } else {
+          // 部分の通知の応答の本文を読んでいる途中なら、読み終わるのを少しだけ待ってから決める。
+          await settledWithin(Promise.all(payment.partialReads), ORDER_NOTIFY_BODY_WAIT_MS);
+          if (previousNotificationMountedRef.current && !payment.partialDelivered) {
             // 注文がお店に届いていないのに、完了の画面と「注文状況を見る」だけが出て、お客様が届いたと思い込む波及を断つ。
             // 部分の通知が届いた支払いでは出さない (注文はお店にある。遅れるのは利用料の清算だけ)。
+            noticeRaised = true;
             setDirectNotifyFailed(true);
             setRedirectIn(null);
             setDirectNotifyRetryable(failure.waitable);
+            noticeShown = true;
           }
         }
-        // 記録は、止まったとき (自動の送り直しを終えた後・ボタンの 1 回ごと) に 1 件。部分の通知が届いていても出す。
-        const redacted = await webhookTelemetry;
-        if (failure.status === null) {
-          logger.warn('checkout.webhook.failed', {
-            error: failure.error,
-            webhookOrigin: redacted.origin,
-            webhookHash: redacted.hash,
-            attempts,
-          });
-        } else {
-          logger.warn('checkout.webhook.non_ok', {
-            status: failure.status,
-            statusText: failure.statusText,
-            webhookOrigin: redacted.origin,
-            webhookHash: redacted.hash,
-            attempts,
-            ...(failure.serverError ? { serverError: failure.serverError } : {}),
-          });
-        }
+        // ボタンの 1 回の失敗は、送った時点の記録 (上の warnFailure) の 1 件だけ。
+        if (manual) return;
+        // 自動の送信を終えても届かなかった = 1 件。部分の通知が届いていても出す (利用料の清算が遅れている手がかり)。
+        const [redacted, serverError] = await Promise.all([webhookTelemetry, failure.serverError]);
+        logger.warn('checkout.webhook.undelivered', {
+          ...(failure.status === null ? { error: failure.error } : { status: failure.status }),
+          attempts,
+          ...(serverError ? { serverError } : {}),
+          noticeShown,
+          webhookOrigin: redacted.origin,
+          webhookHash: redacted.hash,
+        });
       };
       const sendOrderNotify = () => deliver(true).then((failure) => finish(failure, false));
       directNotifyRetryRef.current = () => {
@@ -712,8 +814,7 @@ export function useCheckoutOrderNotify(args: UseCheckoutOrderNotifyArgs) {
       feeUncollected: true,
       ts: Date.now(),
     };
-    const merchantTxHash = standard.merchantTxHash;
-    const sentAt = orderNotifySendTimes(orderNotifySentAtRef.current, merchantTxHash);
+    const payment = orderNotifyPayment(orderNotifyPaymentsRef.current, standard.merchantTxHash);
     const request = postOrderNotify(
       params.webhook,
       {
@@ -726,14 +827,21 @@ export function useCheckoutOrderNotify(args: UseCheckoutOrderNotifyArgs) {
       true,
       // 送り方は変えない。同じ支払いの完了の通知 (effect A) の自動の送り直しが、server の枠を数えるための時刻だけ記す。
       () => {
-        sentAt.push(Date.now());
+        payment.sentAt.push(Date.now());
       },
     )
       .then(async (res) => {
-        // 届いた (2xx かつ本文が { ok: true }) 支払いを記す。完了の通知が届かなかったときに、注文がもうお店にあるかを
-        // 見分けるためだけに使う (この通知の記録・案内は変えない)。
-        if (res.ok && (await readOrderNotifyBody(res))?.ok === true) {
-          partialDeliveredKeyRef.current = merchantTxHash;
+        if (res.ok) {
+          // 届いた (2xx かつ本文が { ok: true }) かを記す。完了の通知が届かなかったときに、注文がもうお店にあるかを
+          // 見分けるためだけに使う (この通知の記録・案内は変えない)。本文はこの promise の外で読む: 完了の通知は
+          // この promise の後に送るので、ここで本文を待つと送り始めが今までより遅れる。
+          payment.partialReads.push(
+            readOrderNotifyBody(res).then((body) => {
+              if (body?.ok !== true) return;
+              payment.partialDelivered = true;
+              payment.onPartialDelivered?.();
+            }),
+          );
         }
         if (!res.ok) {
           // 中継層の非 JSON 応答が既存の HTTP status 記録を飛ばす波及を断つ。
@@ -762,6 +870,8 @@ export function useCheckoutOrderNotify(args: UseCheckoutOrderNotifyArgs) {
           webhookHash: redacted.hash,
         });
       });
+    // 完了の通知の自動の送り直しが、この支払いの部分の通知を全部送り終えるまで待てるように覚える。
+    payment.partials.push(request);
     partialOrderNotifyPromiseRef.current = {
       key: standard.merchantTxHash,
       promise: request,

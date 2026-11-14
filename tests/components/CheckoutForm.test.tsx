@@ -1779,8 +1779,9 @@ describe('CheckoutForm — 成功時の挙動', () => {
     vi.useRealTimers();
   });
 
-  // 完了の通知 (r10-notify): 待てば通る失敗 (通信の失敗・5xx) は 2 秒後・17 秒後に送り直す。記録は、使い切って止まった
-  // ときの 1 件だけで、そのときに「自動登録できませんでした」の案内と「注文登録を再試行」が出る (完了の欄は残る)。
+  // 完了の通知 (r10-notify): 待てば通る失敗 (通信の失敗・5xx) は 2 秒後・17 秒後に送り直す。
+  // 記録は、最初の失敗が今までと同じ時点・同じ event・同じ欄で 1 件。送り直しを使い切って届かなければ
+  // `checkout.webhook.undelivered` が 1 件で、そのときに「自動登録できませんでした」の案内と「注文登録を再試行」が出る。
   async function runNotifyRetriesOut() {
     for (let i = 0; i < 18; i++) {
       await act(async () => {
@@ -1788,8 +1789,9 @@ describe('CheckoutForm — 成功時の挙動', () => {
       });
     }
   }
+  const warnsOf = (name: string) => loggerWarn.mock.calls.filter(([event]) => event === name);
 
-  it('受注 notify 失敗 (network) → 2 回送り直した後に記録 (URL は origin + hash)。完了の欄は残り、届かなかった案内と再試行を出す', async () => {
+  it('受注 notify 失敗 (network) → 記録は今までどおりすぐ 1 件 (URL は origin + hash)。2 回送り直しても届かなければ、案内と再試行を出す', async () => {
     vi.useFakeTimers();
     try {
       const fetchSpy = vi
@@ -1812,33 +1814,33 @@ describe('CheckoutForm — 成功時の挙動', () => {
       );
       const { rerender } = render(makeUi());
       submitGaslessThenSucceedSync(rerender, makeUi);
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(0);
+      // 1 回目の失敗の記録は、送り直しを待たずに出る (今までと同じ event・同じ欄)。案内はまだ出ない。
+      await vi.waitFor(() => expect(warnsOf('checkout.webhook.failed')).toHaveLength(1));
+      const fields = warnsOf('checkout.webhook.failed')[0][1];
+      expect(fields).toEqual({
+        error: expect.any(Error),
+        webhookOrigin: window.location.origin,
+        webhookHash: expect.stringMatching(/^[0-9a-f]{16}$/),
       });
-      // 1 回目の失敗の時点では、記録も案内もまだ出ない (送り直しの途中)。
+      expect(JSON.stringify(fields)).not.toContain(secret);
+      expect(fields).not.toHaveProperty('url');
       expect(fetchSpy).toHaveBeenCalledTimes(1);
-      expect(loggerWarn).not.toHaveBeenCalledWith('checkout.webhook.failed', expect.anything());
       expect(screen.queryByText(/再度支払わず/)).toBeNull();
 
       await runNotifyRetriesOut();
-      await vi.waitFor(() =>
-        expect(loggerWarn).toHaveBeenCalledWith(
-          'checkout.webhook.failed',
-          expect.objectContaining({
-            webhookOrigin: window.location.origin,
-            webhookHash: expect.stringMatching(/^[0-9a-f]{16}$/),
-            attempts: 3,
-          }),
-        ),
-      );
+      await vi.waitFor(() => expect(warnsOf('checkout.webhook.undelivered')).toHaveLength(1));
       expect(fetchSpy).toHaveBeenCalledTimes(3);
-      const failed = loggerWarn.mock.calls.filter(
-        ([event]) => event === 'checkout.webhook.failed',
-      );
-      expect(failed).toHaveLength(1);
-      const fields = failed[0][1];
-      expect(JSON.stringify(fields)).not.toContain(secret);
-      expect(fields).not.toHaveProperty('url');
+      const stopped = warnsOf('checkout.webhook.undelivered')[0][1];
+      expect(stopped).toEqual({
+        error: expect.any(Error),
+        attempts: 3,
+        noticeShown: true,
+        webhookOrigin: window.location.origin,
+        webhookHash: expect.stringMatching(/^[0-9a-f]{16}$/),
+      });
+      expect(JSON.stringify(stopped)).not.toContain(secret);
+      // 送り直しの途中の失敗は warn に出さない (最初の 1 件のまま)。
+      expect(warnsOf('checkout.webhook.failed')).toHaveLength(1);
       // 完了の欄は残る (支払いは成立済み)。届かなかった案内と再試行が出る。
       expect(screen.getByText(/お支払いが完了しました/)).toBeInTheDocument();
       expect(screen.getByText(/再度支払わず/)).toBeInTheDocument();
@@ -1849,7 +1851,7 @@ describe('CheckoutForm — 成功時の挙動', () => {
     }
   });
 
-  it('受注 notify non-OK (500) → 2 回送り直した後に、origin + hash のみ記録し query の秘密を残さない', async () => {
+  it('受注 notify non-OK (500) → 今までどおり origin + hash のみ記録し query の秘密を残さない。2 回送り直しても届かなければ undelivered を 1 件', async () => {
     vi.useFakeTimers();
     try {
       const fetchSpy = vi.fn(async () => new Response('failed', { status: 500 }));
@@ -1865,29 +1867,33 @@ describe('CheckoutForm — 成功時の挙動', () => {
       );
       const { rerender } = render(makeUi());
       submitGaslessThenSucceedSync(rerender, makeUi);
-      await runNotifyRetriesOut();
 
-      await vi.waitFor(() =>
-        expect(loggerWarn).toHaveBeenCalledWith(
-          'checkout.webhook.non_ok',
-          expect.objectContaining({
-            status: 500,
-            webhookOrigin: window.location.origin,
-            webhookHash: expect.stringMatching(/^[0-9a-f]{16}$/),
-            attempts: 3,
-          }),
-        ),
-      );
-      expect(fetchSpy).toHaveBeenCalledTimes(3);
-      const nonOk = loggerWarn.mock.calls.filter(
-        ([event]) => event === 'checkout.webhook.non_ok',
-      );
-      expect(nonOk).toHaveLength(1);
-      const fields = nonOk[0][1];
+      await vi.waitFor(() => expect(warnsOf('checkout.webhook.non_ok')).toHaveLength(1));
+      const fields = warnsOf('checkout.webhook.non_ok')[0][1];
+      // 今までと同じ欄 (足していない)。
+      expect(fields).toEqual({
+        status: 500,
+        statusText: '',
+        webhookOrigin: window.location.origin,
+        webhookHash: expect.stringMatching(/^[0-9a-f]{16}$/),
+      });
       expect(JSON.stringify(fields)).not.toContain(secret);
       expect(fields).not.toHaveProperty('url');
+
+      await runNotifyRetriesOut();
+      await vi.waitFor(() => expect(warnsOf('checkout.webhook.undelivered')).toHaveLength(1));
+      expect(fetchSpy).toHaveBeenCalledTimes(3);
+      const stopped = warnsOf('checkout.webhook.undelivered')[0][1];
       // 本文が JSON でない応答からは、server の error の語を載せない。
-      expect(fields).not.toHaveProperty('serverError');
+      expect(stopped).toEqual({
+        status: 500,
+        attempts: 3,
+        noticeShown: true,
+        webhookOrigin: window.location.origin,
+        webhookHash: expect.stringMatching(/^[0-9a-f]{16}$/),
+      });
+      expect(JSON.stringify(stopped)).not.toContain(secret);
+      expect(warnsOf('checkout.webhook.non_ok')).toHaveLength(1);
     } finally {
       vi.useRealTimers();
       vi.unstubAllGlobals();
