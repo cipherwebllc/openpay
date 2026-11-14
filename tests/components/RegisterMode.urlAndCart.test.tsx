@@ -1036,6 +1036,30 @@ describe('RegisterMode: 作られる支払い URL と、カートの境目', () 
         expect(summaryRow('合計').getByText('1,700 JPYC')).toBeInTheDocument();
       });
 
+      // 足し込む先は「同じ商品の行」(行を足すときと同じ探し方)。行の名前では探さない。
+      it('上限で押せるかは、同じ商品の行があるかで決まる (名前を書き換えた行があれば押せる・同じ名前の自由入力の行では押せない)', async () => {
+        const user = userEvent.setup();
+        render(<RegisterMode />);
+        await fill(user, 9);
+        // 商品の「定食」と同じ名前の、自由入力の行 (商品の行ではない)。
+        await user.click(screen.getByRole('button', { name: '自由入力' }));
+        await user.type(screen.getByRole('textbox', { name: '商品名' }), '定食');
+        await user.type(screen.getByRole('textbox', { name: '単価 (JPYC)' }), '1000');
+        // 品3番の行の名前を書き換える。
+        await openLine(user, '品3番');
+        await user.type(screen.getByRole('textbox', { name: '商品名' }), '改');
+        expect(cartLines()).toHaveLength(10);
+        expect(summaryRow('合計').getByText('1,900 JPYC')).toBeInTheDocument();
+
+        expect(await findTile(/定食/)).toBeDisabled();
+        const third = await findTile(/品3番/);
+        expect(third).toBeEnabled();
+        await user.click(third);
+        expect(cartLines()).toHaveLength(10);
+        expect(qtyOf('品3番改')).toHaveValue('2');
+        expect(summaryRow('合計').getByText('2,000 JPYC')).toBeInTheDocument();
+      });
+
       it('上限でも、オプションつきの品のタイルは押せて、選ぶ画面が開く (足せるかは選択で決まる)', async () => {
         const user = userEvent.setup();
         render(<RegisterMode />);
