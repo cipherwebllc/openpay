@@ -627,15 +627,15 @@ export function MobileOrderView({
             const body = (await response.json().catch(() => null)) as { error?: unknown } | null;
             // 本文を読む間にお客様が注文を変えていたら、この応答は使わない。
             if (gen !== admissionGenRef.current) return;
-            const t = Date.now();
+            const checkedAt = Date.now();
             // 選んだ枠だけが過ぎていた場合: この端末の時計でもその枠が候補に無いときだけ、枠を「最短」に戻して続けられるようにする。
             // 端末の候補に残っている枠を断られたとき (お店が準備時間やラストオーダーを変えた・端末の時計が遅い) は、選び直しても
             // 同じ枠がまた出るので、下の停止の表示のまま。
             if (
               body?.error === 'pickup_slot_unavailable' &&
-              !pickupSlots(t, config.minLeadMinutes, config.lastOrder).includes(pickupAt)
+              !pickupSlots(checkedAt, config.minLeadMinutes, config.lastOrder).includes(pickupAt)
             ) {
-              setNow(t);
+              setNow(checkedAt);
               setPickupAt(null);
               setAdmissionNotice('slot');
               return;
