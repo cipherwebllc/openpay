@@ -60,7 +60,7 @@ vi.mock('@/lib/circlePaymaster', async () => {
 // component で stub する (Hint 自体の動作は CrossChainHint.test.tsx で検証)。
 // TipForm から Hint へ渡される props は crossChainHintSpy で capture して検証。
 const crossChainHintSpy = vi.fn();
-// A-1 のテストだけが false にし、「子がまだ報告していない」状態 (遅延ロード中・走査中) を固定する。
+// A-1 のテストと PR-15e の Arc の describe が false にし、「子がまだ報告していない」状態 (遅延ロード中・走査中) を固定する。
 const crossChainHintReports = { onMount: true };
 vi.mock('@/components/CrossChainHint', async () => {
   const React = await import('react');
@@ -2868,6 +2868,178 @@ describe('TipForm — 額の欄とメッセージの欄は、送信の途中は�
       setRelay('idle');
       view.rerender(<TipForm params={JPYC_PARAMS} />);
       expectAllEnabled(jpycAmountControls());
+    });
+  });
+});
+
+// PR-15e: cross-chain (CrossChainHint の子) の走査と実行の間は、直接の送信をさせない。判定の式は deriveTipGuards
+// (tests/lib/paymentFlowGuards.test.ts の真理値表) が見ているが、画面の段 (TipForm が持つ lock の state・scope・子へ渡す
+// callback 3 つ → 送信のボタン) を見ていたのは、CCTP の中断記録の行 (上の A-1) と、実行中の行 (上の「cross-chain 実行中は
+// 親 Send を止める」と PR-15d の行。どちらも onAttemptStart と onExecutingChange(true) を同じ act で呼ぶ) だけだった。
+// ここでは残りの 4 つを固定する: Arc の最初の報告まで・scope (account・受取先・額) が変わってから報告し直すまで・
+// onAttemptStart だけ・onSuccess の後。
+// 見るのは、送信のボタン (role・name)・送信の関数が呼ばれた回数と引数 (受取先・額)・子へ渡す executionDisabled (Arc の行で、
+// 通常決済の準備が済んだことの待ちに使う)。state の持ち方・callback の作り方には依らない。
+describe('TipForm — cross-chain の走査と実行の間は、直接の送信ができない (PR-15e)', () => {
+  type HintProps = {
+    executionDisabled: boolean;
+    onAttemptStart: (amount: bigint) => void;
+    onExecutingChange: (executing: boolean) => void;
+    onSuccess: (result: import('@/hooks/useCrossChainPayment').ExecuteResult) => void;
+  };
+  // 子へ渡した最新の props (callback は scope が変わると作り直されるので、呼ぶたびに取り直す)。
+  const hintProps = () => crossChainHintSpy.mock.lastCall![0] as HintProps;
+  const sendingButton = () => screen.getByRole('button', { name: /送信中/ });
+
+  // Arc の走査の lock が効くのは token = usdc・chain = arc・接続済み・preview でないとき (deriveTipGuards の arcRecoveryScanning)。
+  describe('Arc (通常決済): 子が走査の結果を報告するまで', () => {
+    const ARC_CHAIN_ID = 5042002;
+    const OTHER_CREATOR: Address = '0x3333333333333333333333333333333333333333';
+    const OTHER_FAN: Address = '0x8888888888888888888888888888888888888888';
+    const arcParams: TipParams = { ...USDC_PARAMS, mode: 'standard', chain: 'arc', presets: ['0.5', '1'] };
+    let walletWrite: ReturnType<typeof vi.fn>;
+
+    beforeEach(async () => {
+      window.sessionStorage.clear();
+      window.localStorage.clear();
+      // 既定の stub は mount と callback の作り直しのたびに自分で報告する。ここでは止めて、報告を 1 回ずつ手で届ける
+      // (「子がまだ報告していない間」を見るため)。
+      crossChainHintReports.onMount = false;
+      crossChainHintSpy.mockClear();
+      setAccount({ connected: true, chainId: ARC_CHAIN_ID });
+      setBalance(10_000_000n);
+      // 通常決済の送信の関数 (wagmi の writeContract)。何も返さない = ウォレットの確認待ちのまま。
+      walletWrite = vi.fn();
+      const wagmi = await import('wagmi');
+      vi.mocked(wagmi.useWriteContract).mockImplementation(() => ({ data: undefined, error: null, isPending: false, writeContract: walletWrite, reset: vi.fn() }) as never);
+      vi.mocked(wagmi.useWaitForTransactionReceipt).mockImplementation(() => ({ data: undefined, error: null, isSuccess: false, isError: false, refetch: vi.fn() }) as never);
+    });
+    afterEach(() => {
+      crossChainHintReports.onMount = true;
+    });
+
+    // 通常決済の engine (next/dynamic) が届いて復元の確認が終わるまで待つ。子へ渡す executionDisabled は直接の送金の側
+    // (directFlowPending・directSettledNoRetry) だけを写すので、false になった後に送信のボタンを閉じているのは
+    // 走査の lock だけになる。
+    async function waitForDirectFlowIdle() {
+      await waitFor(() => expect(crossChainHintSpy).toHaveBeenCalled());
+      await waitFor(() => expect(hintProps().executionDisabled).toBe(false));
+    }
+    function expectClosed() {
+      expect(sendingButton()).toBeDisabled();
+      expect(screen.queryByRole('button', { name: /USDC を送る/ })).toBeNull();
+      fireEvent.click(sendingButton());
+      expect(walletWrite).not.toHaveBeenCalled();
+    }
+    function expectOpenAndSend(name: string, args: [Address, bigint]) {
+      const send = screen.getByRole('button', { name });
+      expect(send).toBeEnabled();
+      fireEvent.click(send);
+      expect(walletWrite).toHaveBeenCalledOnce();
+      expect(walletWrite.mock.calls[0][0]).toMatchObject({ functionName: 'transfer', args });
+    }
+
+    it('報告が届くまで送信のボタンは押せず、押しても送信されない。「実行中」(true) の報告でも閉じたままで、「実行中でない」(false) が届くと送れる', async () => {
+      render(<TipForm params={arcParams} />);
+      await waitForDirectFlowIdle();
+      expectClosed();
+
+      act(() => hintProps().onExecutingChange(true));
+      expectClosed();
+
+      act(() => hintProps().onExecutingChange(false));
+      expectOpenAndSend('0.5 USDC を送る', [CREATOR, 500_000n]);
+    });
+
+    // scope = account・chain・受取先・額。どれかが変わると、前の scope への報告では開かない。
+    it.each<[string, (view: ReturnType<typeof render>) => void, string, [Address, bigint]]>([
+      [
+        '額',
+        () => fireEvent.click(screen.getByRole('button', { name: '1 USDC' })),
+        '1 USDC を送る',
+        [CREATOR, 1_000_000n],
+      ],
+      [
+        '受取先',
+        (view) => view.rerender(<TipForm params={{ ...arcParams, to: OTHER_CREATOR }} />),
+        '0.5 USDC を送る',
+        [OTHER_CREATOR, 500_000n],
+      ],
+      [
+        'account',
+        (view) => {
+          mockHook(useAccount, { address: OTHER_FAN, isConnected: true, chainId: ARC_CHAIN_ID });
+          view.rerender(<TipForm params={arcParams} />);
+        },
+        '0.5 USDC を送る',
+        [CREATOR, 500_000n],
+      ],
+    ])('報告の後に %s が変わると、子が報告し直すまで閉じる', async (_name, change, sendName, args) => {
+      const view = render(<TipForm params={arcParams} />);
+      await waitForDirectFlowIdle();
+      act(() => hintProps().onExecutingChange(false));
+      expect(screen.getByRole('button', { name: '0.5 USDC を送る' })).toBeEnabled();
+
+      change(view);
+      expectClosed();
+
+      act(() => hintProps().onExecutingChange(false));
+      expectOpenAndSend(sendName, args);
+    });
+  });
+
+  describe('USDC (ガスレス): 子が実行を始めた後', () => {
+    beforeEach(() => {
+      window.localStorage.clear();
+      crossChainHintSpy.mockClear();
+      setAccount({ connected: true, chainId: baseSepolia.id });
+      setBalance(20_000_000n);
+      setSmartAccount(true);
+      setGasQuote('ready', 0n);
+    });
+
+    // 上の「cross-chain 実行中は親 Send を止める」は onAttemptStart と onExecutingChange(true) を同じ act で呼ぶので、
+    // onAttemptStart の lock を消しても通る。ここは onAttemptStart だけで見る。
+    it('onAttemptStart だけで (onExecutingChange(true) が届く前でも) 閉じ、押しても送信されない。「実行中でない」が届くと戻る', async () => {
+      render(<TipForm params={USDC_PARAMS} />);
+      await waitFor(() => expect(crossChainHintSpy).toHaveBeenCalled());
+      expect(screen.getByRole('button', { name: '1 USDC を送る' })).toBeEnabled();
+
+      act(() => hintProps().onAttemptStart(1_000_000n));
+      expect(sendingButton()).toBeDisabled();
+      expect(screen.queryByRole('button', { name: '1 USDC を送る' })).toBeNull();
+      fireEvent.click(sendingButton());
+      expect(mutate).not.toHaveBeenCalled();
+
+      act(() => hintProps().onExecutingChange(false));
+      expect(screen.getByRole('button', { name: '1 USDC を送る' })).toBeEnabled();
+    });
+
+    // lock (送信中) は onSuccess で外れるが、cross-chain の結果がある間は「やり直せない」で閉じたまま
+    // (もう一度送ると、同じ受取先への 2 件目の送金になる)。
+    it('onSuccess の後は「送信中」の表示が外れても、送信のボタンは押せないまま。子の報告でも開かない', async () => {
+      render(<TipForm params={USDC_PARAMS} />);
+      await waitFor(() => expect(crossChainHintSpy).toHaveBeenCalled());
+      expect(screen.getByRole('button', { name: '1 USDC を送る' })).toBeEnabled();
+
+      act(() => hintProps().onAttemptStart(1_000_000n));
+      expect(sendingButton()).toBeDisabled();
+      act(() => hintProps().onSuccess({
+        path: 'cctp-v2',
+        burnTxHash: `0x${'f'.repeat(64)}`,
+        mintTxHash: `0x${'e'.repeat(64)}`,
+        destChainId: baseSepolia.id,
+      }));
+
+      const send = screen.getByRole('button', { name: '1 USDC を送る' });
+      expect(send).toBeDisabled();
+      expect(screen.queryByRole('button', { name: /送信中/ })).toBeNull();
+      fireEvent.click(send);
+      expect(mutate).not.toHaveBeenCalled();
+
+      act(() => hintProps().onExecutingChange(false));
+      expect(screen.getByRole('button', { name: '1 USDC を送る' })).toBeDisabled();
+      expect(mutate).not.toHaveBeenCalled();
     });
   });
 });
