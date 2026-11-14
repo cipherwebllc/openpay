@@ -140,6 +140,7 @@ import { resolvePaymasterMode } from '@/lib/pimlico';
 import { resolveJpycGaslessProvider } from '@/lib/jpycGaslessProvider';
 import { jpycForwarderFor } from '@/lib/relay/forwarderConfig';
 import { PaymentForm } from '@/components/PaymentForm';
+import { env } from '@/lib/env';
 import { logger } from '@/lib/logger';
 import { loadHistory } from '@/lib/history';
 import { loadPayerReceipts } from '@/lib/payerReceipt';
@@ -2513,6 +2514,142 @@ describe('PaymentForm → CrossChainHint props 統合 (LARP audit C1)', () => {
     expect(
       await screen.findByText('OpenPay 電子レシート'),
     ).toBeInTheDocument();
+  });
+});
+
+// PR-15e: cross-chain (CrossChainHint の子) の走査と実行の間は、直接の払いをさせない。判定の式は derivePayGuards
+// (tests/lib/paymentFlowGuards.test.ts の真理値表) が見ているが、画面の段 (PaymentForm が持つ lock の state・scope・子へ渡す
+// callback → 支払いのボタン) を見ていたのは、CCTP の中断記録の行 (上の A-1) と、実行中・成功の後の行 (すぐ上) だけだった。
+// ここでは残りの 3 つを固定する: Arc の最初の報告まで・scope (account・受取先・額) が変わってから報告し直すまで・
+// onAttemptStart だけ。この file の stub は自分では報告しないので、報告は 1 回ずつ手で届ける。
+describe('PaymentForm — cross-chain の走査と実行の間は、直接の払いができない (PR-15e)', () => {
+  type HintProps = {
+    onAttemptStart: (amount: bigint) => void;
+    onExecutingChange: (executing: boolean) => void;
+  };
+  // 子へ渡した最新の props (callback は scope が変わると作り直されるので、呼ぶたびに取り直す)。
+  const hintProps = () => crossChainHintSpy.mock.lastCall![0] as HintProps;
+  const sendingButton = () => screen.getByRole('button', { name: /送信中/ });
+
+  beforeEach(() => {
+    crossChainHintSpy.mockClear();
+  });
+
+  // Arc の走査の lock が効くのは token = usdc・chain = arc・接続済みのとき (derivePayGuards の arcRecoveryScanning)。
+  describe('Arc (通常決済): 子が走査の結果を報告するまで', () => {
+    const ARC_CHAIN_ID = 5042002;
+    const OTHER_MERCHANT: Address = '0x3333333333333333333333333333333333333333';
+    const OTHER_CUSTOMER: Address = '0x8888888888888888888888888888888888888888';
+    const arcFlag = env as { enableUsdcArc: boolean };
+    const arcFlagBefore = env.enableUsdcArc;
+    const connectArc = (address: Address) =>
+      mockHook(useAccount, { address, isConnected: true, chainId: ARC_CHAIN_ID });
+
+    beforeEach(() => {
+      // URL の parser は、flag が ON のときだけ chain=arc を通す (Arc は mode=standard だけ)。
+      arcFlag.enableUsdcArc = true;
+      connectArc(CUSTOMER);
+      setBalance(50_000_000n);
+    });
+    afterEach(() => {
+      arcFlag.enableUsdcArc = arcFlagBefore;
+    });
+
+    function expectClosed() {
+      expect(sendingButton()).toBeDisabled();
+      expect(screen.queryByRole('button', { name: /USDC を支払う/ })).toBeNull();
+      fireEvent.click(sendingButton());
+      expect(standardMutate).not.toHaveBeenCalled();
+      expect(mutate).not.toHaveBeenCalled();
+    }
+    function expectOpenAndPay(name: string, merchant: Address, merchantAmount: bigint) {
+      const pay = screen.getByRole('button', { name });
+      expect(pay).toBeEnabled();
+      fireEvent.click(pay);
+      expect(standardMutate).toHaveBeenCalledOnce();
+      expect(standardMutate.mock.calls[0][0]).toMatchObject({ merchant, merchantAmount });
+    }
+
+    it('報告が届くまで支払いのボタンは押せず、押しても送信されない。「実行中」(true) の報告でも閉じたままで、「実行中でない」(false) が届くと払える', async () => {
+      setURL(`to=${MERCHANT}&token=usdc&chain=arc&mode=standard&amount=10`);
+      render(<PaymentForm />);
+      await waitFor(() => expect(crossChainHintSpy).toHaveBeenCalled());
+      expectClosed();
+
+      act(() => hintProps().onExecutingChange(true));
+      expectClosed();
+
+      act(() => hintProps().onExecutingChange(false));
+      expectOpenAndPay('10 USDC を支払う', MERCHANT, 10_000_000n);
+    });
+
+    // scope = account・chain・受取先・額。どれかが変わると、前の scope への報告では開かない。
+    it.each<[string, string, (view: ReturnType<typeof render>) => void, string, Address, bigint]>([
+      [
+        '額',
+        `to=${MERCHANT}&token=usdc&chain=arc&mode=standard`,
+        () => fireEvent.change(screen.getByPlaceholderText('10.00'), { target: { value: '20' } }),
+        '20 USDC を支払う',
+        MERCHANT,
+        20_000_000n,
+      ],
+      [
+        '受取先',
+        `to=${MERCHANT}&token=usdc&chain=arc&mode=standard&amount=10`,
+        (view) => {
+          setURL(`to=${OTHER_MERCHANT}&token=usdc&chain=arc&mode=standard&amount=10`);
+          view.rerender(<PaymentForm />);
+        },
+        '10 USDC を支払う',
+        OTHER_MERCHANT,
+        10_000_000n,
+      ],
+      [
+        'account',
+        `to=${MERCHANT}&token=usdc&chain=arc&mode=standard&amount=10`,
+        (view) => {
+          connectArc(OTHER_CUSTOMER);
+          view.rerender(<PaymentForm />);
+        },
+        '10 USDC を支払う',
+        MERCHANT,
+        10_000_000n,
+      ],
+    ])('報告の後に %s が変わると、子が報告し直すまで閉じる', async (_name, query, change, payName, merchant, merchantAmount) => {
+      setURL(query);
+      const view = render(<PaymentForm />);
+      await waitFor(() => expect(crossChainHintSpy).toHaveBeenCalled());
+      act(() => hintProps().onExecutingChange(false));
+      expect(screen.queryByRole('button', { name: /送信中/ })).toBeNull();
+
+      change(view);
+      expectClosed();
+
+      act(() => hintProps().onExecutingChange(false));
+      expectOpenAndPay(payName, merchant, merchantAmount);
+    });
+  });
+
+  // すぐ上の「cross-chain 実行中は親 Pay を止め…」は onAttemptStart と onExecutingChange(true) を同じ act で呼ぶので、
+  // onAttemptStart の lock を消しても通る。ここは onAttemptStart だけで見る。
+  it('USDC (ガスレス): onAttemptStart だけで (onExecutingChange(true) が届く前でも) 閉じ、押しても送信されない。「実行中でない」が届くと戻る', async () => {
+    setURL(`to=${MERCHANT}&token=usdc&amount=10`);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(20_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready', 0n);
+    render(<PaymentForm />);
+    await waitFor(() => expect(crossChainHintSpy).toHaveBeenCalled());
+    expect(screen.getByRole('button', { name: '10 USDC を支払う' })).toBeEnabled();
+
+    act(() => hintProps().onAttemptStart(10_000_000n));
+    expect(sendingButton()).toBeDisabled();
+    expect(screen.queryByRole('button', { name: '10 USDC を支払う' })).toBeNull();
+    fireEvent.click(sendingButton());
+    expect(mutate).not.toHaveBeenCalled();
+
+    act(() => hintProps().onExecutingChange(false));
+    expect(screen.getByRole('button', { name: '10 USDC を支払う' })).toBeEnabled();
   });
 });
 
