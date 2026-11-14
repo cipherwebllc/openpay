@@ -62,7 +62,7 @@ vi.mock('@/hooks/useOrigin', () => ({
 
 import { MobileOrderView } from '@/components/MobileOrderView';
 import { buildPayerReceipt } from '@/lib/payerReceipt';
-import { calcCheckoutPayable, parseCheckoutParams } from '@/lib/url';
+import { calcCheckoutPayable, CHECKOUT_QTY_MAX, parseCheckoutParams } from '@/lib/url';
 import type { MobileOrderConfig } from '@/lib/mobileOrder';
 import type { ShopLiveState } from '@/lib/shopLive';
 
@@ -747,6 +747,87 @@ describe('MobileOrderView — 「支払いへ進む」: 受付の確認を通る
     await gate.admit(1);
 
     expect(assignSpy.mock.calls).toEqual([[next]]);
+  });
+
+  // 注文の中身を変える部品を押しても、中身が変わらないなら (上限の数量で ＋ など)、待っていた確認はそのまま使う。
+  // 押す前のカート: 水 と 牛丼（大盛り・えび）がどちらも上限の数量、テーブル番号は上限の長さ (16 字)、枠は 12:45、チェーンは Polygon。
+  const TABLE_16 = '1234567890123456';
+  const unchangedEdits: { name: string; edit: () => void }[] = [
+    {
+      name: '上限の数量で、メニューの ＋',
+      edit: () =>
+        fireEvent.click(
+          within(
+            screen.getAllByRole('listitem').filter((li) => within(li).queryByText('水') !== null)[0],
+          ).getByRole('button', { name: TEXT.plus }),
+        ),
+    },
+    {
+      name: '上限の数量で、明細の行の ＋ (オプションのない品)',
+      edit: () => fireEvent.click(within(cartLine('水')).getByRole('button', { name: TEXT.plus })),
+    },
+    {
+      name: '上限の数量で、明細の行の ＋ (オプションの行)',
+      edit: () => fireEvent.click(within(cartLine(GYUDON)).getByRole('button', { name: TEXT.plus })),
+    },
+    {
+      name: '上限の数量の行と同じ選び方を、「選ぶ」から足す',
+      edit: () => addGyudonLargeWithShrimp(),
+    },
+    {
+      name: '選んであるチェーンをもう一度押す',
+      edit: () => fireEvent.click(screen.getByRole('button', { name: 'JPYC (Polygon)' })),
+    },
+    {
+      name: '選んである受け取りの枠をもう一度選ぶ',
+      edit: () => {
+        const select = screen.getByLabelText(TEXT.pickup) as HTMLSelectElement;
+        fireEvent.change(select, { target: { value: String(tokyo(12, 45)) } });
+      },
+    },
+    {
+      name: '上限の長さのテーブル番号に 1 字足す (切り詰めて同じ値)',
+      edit: () =>
+        fireEvent.change(screen.getByLabelText('テーブル番号'), { target: { value: `${TABLE_16}7` } }),
+    },
+  ];
+
+  it.each(unchangedEdits)('待っている間の操作「$name」は注文の中身を変えないので、待っていた確認は無効にならない: 200 で返ると、押したときの URL へそのまま移る', async ({ edit }) => {
+    envHold.enableMenuOptions = true;
+    const gate = gatedFetches();
+    renderWithIntl(
+      <MobileOrderView
+        config={editConfig}
+        handle={HANDLE}
+        // 上限の数量から始める (事前に入れたカートなので、明細は開いている)。
+        initialCart={[
+          { id: 'water', qty: CHECKOUT_QTY_MAX },
+          { id: 'gyudon', qty: CHECKOUT_QTY_MAX, options: { g1: 'l', g2: ['ebi'] } },
+        ]}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText('テーブル番号'), { target: { value: TABLE_16 } });
+    fireEvent.change(screen.getByLabelText(TEXT.pickup), { target: { value: String(tokyo(12, 45)) } });
+    const href = payHref();
+    expect(readCheckoutUrl(href).query).toMatchObject({
+      items: [item('水', CHECKOUT_QTY_MAX, '100'), item(GYUDON, CHECKOUT_QTY_MAX, '850')].join(','),
+      description: `テーブル ${TABLE_16}`,
+      pickup_at: String(tokyo(12, 45)),
+    });
+    expect(readCheckoutUrl(href).query.chain).toBeUndefined();
+    fireEvent.click(payLink()!);
+    expect(payButton()).toBeDisabled();
+
+    edit();
+
+    // 待ちは解けていない。
+    expect(payLink()).toBeNull();
+    expect(payButton()).toBeDisabled();
+    await gate.admit(0);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(assignSpy.mock.calls).toEqual([[href]]);
+    // 応答の後の画面の link も、押したときと同じ URL (中身は変わっていない)。
+    expect(payHref()).toBe(href);
   });
 
   it('注文の中身を変えない操作 (明細を開く・「選ぶ」を開いてキャンセルする) では、待っていた確認は無効にならない', async () => {

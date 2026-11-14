@@ -208,7 +208,9 @@ export function MobileOrderView({
   // 受付の確認の応答の後に進むのは、押した時点の URL。応答を待つ間にお客様が注文の中身 (行き先の URL と確認の本文に
   // 効くもの) を変えたら、待っている確認を無効にして「支払いへ進む」を押し直せる状態に戻す。無効にしないと、画面は
   // 新しい額・進む先は変える前の注文になる。待つ間の操作を止める形にはしない (確認が返ってこないと、ずっと変えられない)。
-  // 世代を進めるのはお客様の操作だけ (数量・オプション・チェーン・テーブル番号・受け取りの枠・前回と同じ注文)。
+  // 世代を進めるのはお客様の操作だけ (数量・オプション・チェーン・テーブル番号・受け取りの枠・前回と同じ注文) で、
+  // その操作で中身が変わるときだけ (上限の数量で ＋・選んであるチェーンをもう一度押す、などは進めない = 今までどおり
+  // 待っていた確認で進む)。「変わらない」は、この描画の時点の値と次の値が同じ、で決める。同じでなければ進める。
   // 時刻の取り直し・売り切れの反映・枠が自動で外れる、では進めない (押した時点の注文で進む = 今までどおり)。
   // 押すときは世代を進めない (同じ中身の確認が 2 本飛んでも、どちらも有効 = 今までどおり)。
   const admissionGenRef = useRef(0);
@@ -229,8 +231,8 @@ export function MobileOrderView({
   }, [config.dineIn, handle]);
   const updateTableNumber = useCallback(
     (value: string) => {
-      invalidateAdmission();
       const next = value.slice(0, TABLE_NUMBER_MAX);
+      if (next !== tableNumber) invalidateAdmission();
       setTableNumber(next);
       if (!handle) return;
       try {
@@ -241,7 +243,7 @@ export function MobileOrderView({
         // sessionStorage の拒否/容量障害を注文・決済導線へ波及させない (入力 state は維持)。
       }
     },
-    [handle, invalidateAdmission],
+    [handle, invalidateAdmission, tableNumber],
   );
   // 受注リレー (flag ON) 用の短い受付番号。この注文ページ訪問で安定 (再描画/チェーン切替で不変)。
   // 客の完了画面 (/checkout の order_id) と店主の受注カードの双方に表示され、受け渡し照合に使う。
@@ -295,10 +297,14 @@ export function MobileOrderView({
 
   const decimals = deploymentForSlug('jpyc', chain).decimals;
   // MenuItemCard へ安定参照で渡す (memo が効くよう useCallback 化)。setQty は不変・定数のみ参照。
+  // 今の数量は ref で読む (qty を deps に入れると、数量が変わるたびに全部のカードを描き直す)。
+  const qtyRef = useRef(qty);
+  qtyRef.current = qty;
   const setItemQty = useCallback(
     (id: string, n: number) => {
-      invalidateAdmission();
-      setQty((q) => ({ ...q, [id]: Math.max(0, Math.min(CHECKOUT_QTY_MAX, n)) }));
+      const next = Math.max(0, Math.min(CHECKOUT_QTY_MAX, n));
+      if (next !== (qtyRef.current[id] ?? 0)) invalidateAdmission();
+      setQty((q) => ({ ...q, [id]: next }));
     },
     [invalidateAdmission],
   );
@@ -337,7 +343,7 @@ export function MobileOrderView({
     if (pickupAt !== null && !pickupSlotList.includes(pickupAt)) setPickupAt(null);
   }, [pickupAt, pickupSlotList]);
   const choosePickupAt = (value: number | null) => {
-    invalidateAdmission();
+    if (value !== pickupAt) invalidateAdmission();
     setPickupAt(value);
   };
 
@@ -359,7 +365,9 @@ export function MobileOrderView({
     selections: { groupId: string; choiceId: string }[],
   ) => {
     const key = selectionKey(item.id, selections);
-    invalidateAdmission();
+    // 同じ選び方の行が上限の数量なら、足しても変わらない。
+    const sameLine = optionEntries.find((e) => e.key === key);
+    if (!sameLine || sameLine.qty < CHECKOUT_QTY_MAX) invalidateAdmission();
     setOptionEntries((list) => {
       const idx = list.findIndex((e) => e.key === key);
       if (idx >= 0) {
@@ -384,7 +392,8 @@ export function MobileOrderView({
     setOptionModalItem(null);
   };
   const setOptionEntryQty = (key: string, n: number) => {
-    invalidateAdmission();
+    const next = n <= 0 ? 0 : Math.min(CHECKOUT_QTY_MAX, n);
+    if (next !== (optionEntries.find((e) => e.key === key)?.qty ?? 0)) invalidateAdmission();
     setOptionEntries((list) =>
       n <= 0
         ? list.filter((e) => e.key !== key)
@@ -745,7 +754,7 @@ export function MobileOrderView({
                   key={c}
                   type="button"
                   onClick={() => {
-                    invalidateAdmission();
+                    if (c !== chain) invalidateAdmission();
                     setSelectedChain(c);
                   }}
                   aria-pressed={c === chain}
