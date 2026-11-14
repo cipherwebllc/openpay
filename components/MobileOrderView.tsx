@@ -203,6 +203,19 @@ export function MobileOrderView({
   // 注文内容 (カート明細) の開閉。既定は閉 (カートマークのタップで展開)。事前充填時は AI が選んだ明細を
   // 人が確認してから支払えるよう既定で開く (M2 の「人間の最終確認面」)。
   const [cartOpen, setCartOpen] = useState(prefilled);
+  const [admissionPending, setAdmissionPending] = useState(false);
+  const [admissionRejected, setAdmissionRejected] = useState(false);
+  // 受付の確認の応答の後に進むのは、押した時点の URL。応答を待つ間にお客様が注文の中身 (行き先の URL と確認の本文に
+  // 効くもの) を変えたら、待っている確認を無効にして「支払いへ進む」を押し直せる状態に戻す。無効にしないと、画面は
+  // 新しい額・進む先は変える前の注文になる。待つ間の操作を止める形にはしない (確認が返ってこないと、ずっと変えられない)。
+  // 世代を進めるのはお客様の操作だけ (数量・オプション・チェーン・テーブル番号・受け取りの枠・前回と同じ注文)。
+  // 時刻の取り直し・売り切れの反映・枠が自動で外れる、では進めない (押した時点の注文で進む = 今までどおり)。
+  // 押すときは世代を進めない (同じ中身の確認が 2 本飛んでも、どちらも有効 = 今までどおり)。
+  const admissionGenRef = useRef(0);
+  const invalidateAdmission = useCallback(() => {
+    admissionGenRef.current += 1;
+    setAdmissionPending(false);
+  }, []);
   // 店内 (dineIn) 時に顧客が入力するテーブル番号 (注文時のみ・config には保存しない)。
   const [tableNumber, setTableNumber] = useState('');
   useEffect(() => {
@@ -216,6 +229,7 @@ export function MobileOrderView({
   }, [config.dineIn, handle]);
   const updateTableNumber = useCallback(
     (value: string) => {
+      invalidateAdmission();
       const next = value.slice(0, TABLE_NUMBER_MAX);
       setTableNumber(next);
       if (!handle) return;
@@ -227,7 +241,7 @@ export function MobileOrderView({
         // sessionStorage の拒否/容量障害を注文・決済導線へ波及させない (入力 state は維持)。
       }
     },
-    [handle],
+    [handle, invalidateAdmission],
   );
   // 受注リレー (flag ON) 用の短い受付番号。この注文ページ訪問で安定 (再描画/チェーン切替で不変)。
   // 客の完了画面 (/checkout の order_id) と店主の受注カードの双方に表示され、受け渡し照合に使う。
@@ -282,9 +296,11 @@ export function MobileOrderView({
   const decimals = deploymentForSlug('jpyc', chain).decimals;
   // MenuItemCard へ安定参照で渡す (memo が効くよう useCallback 化)。setQty は不変・定数のみ参照。
   const setItemQty = useCallback(
-    (id: string, n: number) =>
-      setQty((q) => ({ ...q, [id]: Math.max(0, Math.min(CHECKOUT_QTY_MAX, n)) })),
-    [],
+    (id: string, n: number) => {
+      invalidateAdmission();
+      setQty((q) => ({ ...q, [id]: Math.max(0, Math.min(CHECKOUT_QTY_MAX, n)) }));
+    },
+    [invalidateAdmission],
   );
 
   // ライブ運用状態 (売り切れ / 受付一時停止)。未指定 (flag OFF / ?s= 経路) は制限なし (EMPTY)。
@@ -315,19 +331,15 @@ export function MobileOrderView({
   const noPickupSlots =
     timeEnabled && isPreorder && pickupSlotList.length === 0;
   const [pickupAt, setPickupAt] = useState<number | null>(null);
-  const [admissionPending, setAdmissionPending] = useState(false);
-  const [admissionRejected, setAdmissionRejected] = useState(false);
-  // 受付の確認の応答を待つ間は、注文の中身 (行き先の URL と確認の本文に効くもの) を変える操作を止める。
-  // 応答の後に進むのは押した時点の URL なので、待つ間に変えられると、画面の額と進む先の注文が食い違う。
-  // 止めるのは人の操作だけ (数量・オプション・チェーン・テーブル番号・受け取りの枠・前回と同じ注文)。
-  // 時刻の取り直しと売り切れの反映は止めない。オプションの選択モーダルは「選ぶ」を止めれば開かない
-  // (開いている間は画面全体を覆い、Tab も中だけを回るので「支払いへ進む」を押せない)。
-  const orderLocked = admissionPending;
-  // 時間経過で選択スロットが候補外 (過去) になったら解除 (過去の受取時刻を送らない)。スロットは
-  // 15分グリッド固定ゆえ、まだ未来の選択は候補に残り続け、過去落ちしたときだけ false になる。
+  // 選んだ枠が候補から外れたら解除する (候補に無い受取時刻を送らない)。外れるのは、時間が進んで最短の受け取り
+  // (今 + 準備の時間) がその枠を越えたとき。枠は 15 分の格子に固定なので、候補に残っている選択はそのまま残る。
   useEffect(() => {
     if (pickupAt !== null && !pickupSlotList.includes(pickupAt)) setPickupAt(null);
   }, [pickupAt, pickupSlotList]);
+  const choosePickupAt = (value: number | null) => {
+    invalidateAdmission();
+    setPickupAt(value);
+  };
 
   // メニューオプション (サイズ/トッピング)・flag 裏。OFF では options を無視し従来の数量ステッパのみ
   // (オプション無し商品は常に従来の qty マップを使う = 既存挙動不変)。
@@ -347,6 +359,7 @@ export function MobileOrderView({
     selections: { groupId: string; choiceId: string }[],
   ) => {
     const key = selectionKey(item.id, selections);
+    invalidateAdmission();
     setOptionEntries((list) => {
       const idx = list.findIndex((e) => e.key === key);
       if (idx >= 0) {
@@ -370,12 +383,14 @@ export function MobileOrderView({
     });
     setOptionModalItem(null);
   };
-  const setOptionEntryQty = (key: string, n: number) =>
+  const setOptionEntryQty = (key: string, n: number) => {
+    invalidateAdmission();
     setOptionEntries((list) =>
       n <= 0
         ? list.filter((e) => e.key !== key)
         : list.map((e) => (e.key === key ? { ...e, qty: Math.min(CHECKOUT_QTY_MAX, n) } : e)),
     );
+  };
 
   // カート行を統合 (明細表示 + 決済 items の単一情報源・売り切れは除外)。
   const cartLines = useMemo<CartLineView[]>(() => {
@@ -432,6 +447,7 @@ export function MobileOrderView({
       setReorderNotice('none');
       return;
     }
+    invalidateAdmission();
     setQty(restoredQty);
     setOptionEntries(restoredEntries);
     setCartOpen(true);
@@ -556,6 +572,9 @@ export function MobileOrderView({
       if (!handle || !timeEnabled) return;
       event.preventDefault();
       if (!checkoutUrl || admissionPending) return;
+      // この確認が待っている間にお客様が注文を変えたら (世代が進んだら)、応答は使わない: 移らない・止まった案内を出さない・
+      // 押し直した次の確認の待ち状態も解かない。
+      const gen = admissionGenRef.current;
       setAdmissionPending(true);
       try {
         const response = await fetch('/api/order/admission', {
@@ -569,16 +588,18 @@ export function MobileOrderView({
             ...(pickupAt !== null ? { pickupAt } : {}),
           }),
         });
+        if (gen !== admissionGenRef.current) return;
         if (!response.ok) {
           setAdmissionRejected(true);
           return;
         }
         window.location.assign(checkoutUrl);
       } catch {
+        if (gen !== admissionGenRef.current) return;
         // 最新受付を確認できない障害から、不可逆な wallet 決済へ進む波及を断つため fail-closed。
         setAdmissionRejected(true);
       } finally {
-        setAdmissionPending(false);
+        if (gen === admissionGenRef.current) setAdmissionPending(false);
       }
     },
     [
@@ -615,7 +636,6 @@ export function MobileOrderView({
       isSoldOut={soldOutSet.has(item.id)}
       hasOptions={hasOptions(item)}
       optionCount={optionCount(item.id)}
-      locked={orderLocked}
       onQtyChange={setItemQty}
       onOpenOptions={setOptionModalItem}
     />
@@ -724,8 +744,10 @@ export function MobileOrderView({
                 <button
                   key={c}
                   type="button"
-                  onClick={() => setSelectedChain(c)}
-                  disabled={orderLocked}
+                  onClick={() => {
+                    invalidateAdmission();
+                    setSelectedChain(c);
+                  }}
                   aria-pressed={c === chain}
                   className={`rounded-full border px-3 py-1 text-xs font-medium transition ${
                     c === chain
@@ -777,7 +799,6 @@ export function MobileOrderView({
         <button
           type="button"
           onClick={applyLastOrder}
-          disabled={orderLocked}
           className="flex w-full items-center justify-center gap-2 rounded-2xl border px-4 py-3 text-sm font-semibold transition hover:bg-slate-50"
           style={{ borderColor: accent, color: accentText }}
         >
@@ -925,12 +946,11 @@ export function MobileOrderView({
           tableNumber={tableNumber}
           onTableNumberChange={updateTableNumber}
           needsTable={needsTable}
-          locked={orderLocked}
           pickup={{
             show: timeEnabled && isPreorder,
             slots: pickupSlotList,
             value: pickupAt,
-            onChange: setPickupAt,
+            onChange: choosePickupAt,
           }}
           cart={{
             open: cartOpen,

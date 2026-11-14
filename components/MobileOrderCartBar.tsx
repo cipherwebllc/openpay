@@ -22,7 +22,6 @@ export function MobileOrderCartBar({
   tableNumber,
   onTableNumberChange,
   needsTable,
-  locked,
   pickup,
   cart,
   lastOrder,
@@ -40,11 +39,6 @@ export function MobileOrderCartBar({
   onTableNumberChange: (value: string) => void;
   /** 店内なのにテーブル番号が未入力 → 支払いを止める (入力欄と支払いボタンの両方で使用)。 */
   needsTable: boolean;
-  /**
-   * 受付の確認の応答を待つ間。true でテーブル番号・受け取りの枠・明細の数量を変えられなくする
-   * (注文の中身を変えさせない。明細の開閉は止めない)。
-   */
-  locked: boolean;
   /** 受取スロット (Phase 4・preorder + flag ON のときだけ show=true)。 */
   pickup: {
     show: boolean;
@@ -106,7 +100,6 @@ export function MobileOrderCartBar({
                   inputMode="numeric"
                   value={tableNumber}
                   onChange={(e) => onTableNumberChange(e.target.value)}
-                  disabled={locked}
                   placeholder={t('tablePlaceholder')}
                   aria-required="true"
                   aria-invalid={needsTable && tableTouched}
@@ -135,7 +128,6 @@ export function MobileOrderCartBar({
                     id="mo-pickup"
                     value={pickup.value ?? ''}
                     onChange={(e) => pickup.onChange(e.target.value ? Number(e.target.value) : null)}
-                    disabled={locked}
                     className="mt-1 h-11 w-full rounded-lg border border-slate-300 bg-white px-3 text-base focus:border-[var(--mo-accent-text)] focus:outline-none sm:text-sm"
                   >
                     <option value="">{t('pickupAsap')}</option>
@@ -161,7 +153,6 @@ export function MobileOrderCartBar({
                         <button
                           type="button"
                           onClick={() => adjust(l.qty - 1)}
-                          disabled={locked}
                           aria-label={t('qtyDecrease')}
                           className="relative flex h-8 w-8 items-center justify-center rounded-full border border-slate-300 text-slate-600 after:absolute after:-inset-1.5 after:content-['']"
                         >
@@ -171,7 +162,6 @@ export function MobileOrderCartBar({
                         <button
                           type="button"
                           onClick={() => adjust(l.qty + 1)}
-                          disabled={locked}
                           aria-label={t('qtyIncrease')}
                           className="relative flex h-8 w-8 items-center justify-center rounded-full border border-slate-300 text-slate-600 after:absolute after:-inset-1.5 after:content-['']"
                         >

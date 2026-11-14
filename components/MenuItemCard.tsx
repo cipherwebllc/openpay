@@ -20,7 +20,6 @@ function MenuItemCardImpl({
   isSoldOut,
   hasOptions,
   optionCount,
-  locked,
   onQtyChange,
   onOpenOptions,
 }: {
@@ -33,8 +32,6 @@ function MenuItemCardImpl({
   hasOptions: boolean;
   /** この品でカートに入っているオプション行の合計点数 (「選ぶ (n)」併記用)。 */
   optionCount: number;
-  /** 受付の確認の応答を待つ間。true で「選ぶ」と数量のボタンを押せなくする (注文の中身を変えさせない)。 */
-  locked?: boolean;
   /** 数量変更 (安定参照)。オプション無し商品のステッパから (id, 次の数量) で呼ぶ。 */
   onQtyChange: (id: string, n: number) => void;
   /** オプション選択モーダルを開く (安定参照)。オプション有り商品の「選ぶ」から呼ぶ。 */
@@ -93,7 +90,6 @@ function MenuItemCardImpl({
               <button
                 type="button"
                 onClick={() => onOpenOptions(item)}
-                disabled={locked}
                 className="shrink-0 rounded-full border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:border-[var(--mo-accent-text)] hover:text-[var(--mo-accent-text)]"
               >
                 {t('viewChooseOptions')}
@@ -104,7 +100,6 @@ function MenuItemCardImpl({
               <button
                 type="button"
                 onClick={() => onQtyChange(item.id, 1)}
-                disabled={locked}
                 aria-label={t('qtyIncrease')}
                 className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[var(--mo-accent)] text-lg leading-none text-[var(--mo-accent-ink)] shadow-sm transition after:absolute after:-inset-1 after:content-[''] hover:brightness-95 active:scale-90"
               >
@@ -116,7 +111,6 @@ function MenuItemCardImpl({
                 <button
                   type="button"
                   onClick={() => onQtyChange(item.id, n - 1)}
-                  disabled={locked}
                   aria-label={t('qtyDecrease')}
                   className="relative flex h-9 w-9 items-center justify-center rounded-full bg-white text-slate-700 shadow-sm transition after:absolute after:-inset-1 after:content-[''] active:scale-90"
                 >
@@ -126,7 +120,6 @@ function MenuItemCardImpl({
                 <button
                   type="button"
                   onClick={() => onQtyChange(item.id, n + 1)}
-                  disabled={locked}
                   aria-label={t('qtyIncrease')}
                   className="relative flex h-9 w-9 items-center justify-center rounded-full bg-[var(--mo-accent)] text-[var(--mo-accent-ink)] shadow-sm transition after:absolute after:-inset-1 after:content-[''] hover:brightness-95 active:scale-90"
                 >

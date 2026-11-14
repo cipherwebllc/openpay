@@ -6,11 +6,11 @@
 //
 // 行き先の URL は「origin と path」と「query の全部の key と値」を比べる (key の並びには依らない)。
 // 題に「(今の動き)」と付けた行は、こうあるべきという主張ではなく、今こう動いているという記録。
-// 付けていない行のうち、「応答を待っている間は … できない」と「前回の注文の保存に売り切れの品を残さない」は、守る約束。
+// 付けていない行のうち、「待っている間に注文を変えたら、待っていた確認は使わない」と「前回の注文の保存に売り切れの品を
+// 残さない」は、守る約束。
 
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { screen, fireEvent, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { act } from 'react';
 import { formatUnits } from 'viem';
 import { renderWithIntl } from '../_helpers/i18n';
@@ -208,11 +208,14 @@ function addGyudonLargeWithShrimp() {
   fireEvent.click(screen.getByRole('button', { name: 'カートに追加' }));
 }
 
-/** 画面にある「数量を増やす / 減らす」のボタンの全部 (メニューのカードと、開いた明細の行)。 */
-const steppers = () => [
-  ...screen.queryAllByRole('button', { name: TEXT.plus }),
-  ...screen.queryAllByRole('button', { name: TEXT.minus }),
-];
+/** 開いた明細の行 (品の名前で探す)。メニューのカードにも同じ名前があるときは、後ろ (明細) の方。 */
+function cartLine(name: string): HTMLElement {
+  const items = screen
+    .getAllByRole('listitem')
+    .filter((li) => within(li).queryByText(name) !== null);
+  if (items.length === 0) throw new Error(`cart line "${name}": 0 件`);
+  return items[items.length - 1];
+}
 
 const payLink = () => screen.queryByRole('link', { name: TEXT.pay });
 const payButton = () => screen.queryByRole('button', { name: TEXT.pay });
@@ -285,6 +288,28 @@ function gatedFetch() {
     admit: () => settle(() => resolve(admitted())),
     respond: (response: Response) => settle(() => resolve(response)),
     fail: () => settle(() => reject(new TypeError('Failed to fetch'))),
+  };
+}
+
+/** 呼ばれるたびに別の応答を待つ fetch。何本目 (0 始まり) の応答かを選んで、外から返す。 */
+function gatedFetches() {
+  const gates: { resolve: (response: Response) => void; reject: (error: Error) => void }[] = [];
+  fetchSpy.mockImplementation(
+    () =>
+      new Promise<Response>((resolve, reject) => {
+        gates.push({ resolve, reject });
+      }),
+  );
+  const settle = async (fn: () => void) => {
+    await act(async () => {
+      fn();
+      for (let i = 0; i < 5; i++) await Promise.resolve();
+    });
+  };
+  return {
+    admit: (index: number) => settle(() => gates[index].resolve(admitted())),
+    respond: (index: number, response: Response) => settle(() => gates[index].resolve(response)),
+    fail: (index: number) => settle(() => gates[index].reject(new TypeError('Failed to fetch'))),
   };
 }
 
@@ -471,169 +496,283 @@ describe('MobileOrderView — 「支払いへ進む」: 受付の確認を通る
     expect(assignSpy.mock.calls).toEqual([[href], [href]]);
   });
 
-  // 応答の後に進むのは「押した時点の URL」。待つ間に注文の中身を変えられると、画面の額と進む先の注文が食い違うので、
-  // 待つ間は中身を変える操作を止める (disabled)。ボタンは「押しても変わらない」ことまで見る。
-  it('応答を待っている間は、メニューと明細の数量の ＋ / − が押せない: 押しても画面の合計は変わらず、進む先は押したときの URL。受け付けられた後はまた押せる', async () => {
-    const gate = gatedFetch();
+  // 応答の後に進むのは「押した時点の URL」。待っている間にお客様が注文の中身を変えたら、待っていた確認は使わない
+  // (移らない・止まった案内を出さない)。「支払いへ進む」は押し直せる状態に戻り、押し直すと新しい中身で確認を送る。
+  it('待っている間に品を足すと、待っていた確認が 200 で返っても、足す前の URL へ移らない。押し直すと 2 本目の確認を送り、足した後の URL へ移る', async () => {
+    const gate = gatedFetches();
     renderWithIntl(<MobileOrderView config={config} handle={HANDLE} />);
     add('ブレンド');
-    fireEvent.click(cartToggle()!); // 明細を開く (明細の行の ＋ / − も見る)
     const href = payHref();
-    // メニューの ブレンド (−・＋)・チーズケーキ (＋)・水 (＋) と、明細の ブレンド (−・＋)。
-    expect(steppers()).toHaveLength(6);
-    for (const button of steppers()) expect(button).toBeEnabled();
-
     fireEvent.click(payLink()!);
+    expect(payButton()).toBeDisabled();
 
-    for (const button of steppers()) fireEvent.click(button);
-    expect(screen.getByText('500 JPYC')).toBeInTheDocument();
-    expect(within(cartToggle()!).getByText('1')).toBeInTheDocument(); // 点数
-    expect(steppers()).toHaveLength(6);
-    for (const button of steppers()) expect(button).toBeDisabled();
-    // 明細を開くボタンは止めない (注文の中身を変えない)。
-    expect(cartToggle()).toBeEnabled();
-
-    await gate.admit();
-
-    expect(assignSpy.mock.calls).toEqual([[href]]);
-    expect(payHref()).toBe(href);
-    expect(screen.getByText('500 JPYC')).toBeInTheDocument();
-    for (const button of steppers()) expect(button).toBeEnabled();
     add('水');
-    expect(screen.getByText('600 JPYC')).toBeInTheDocument();
-  });
+    await gate.admit(0);
 
-  it('応答を待っている間は、オプションの「選ぶ」が押せず (選ぶ画面が開かない)、オプションで入れた行の ＋ / − も押せない。断られた後は「選ぶ」がまた押せる (flag ON)', async () => {
-    envHold.enableMenuOptions = true;
-    const gate = gatedFetch();
-    renderWithIntl(<MobileOrderView config={optionConfig} handle={HANDLE} />);
-    addGyudonLargeWithShrimp(); // 850
-    fireEvent.click(cartToggle()!);
-    const choose = () => screen.getByRole('button', { name: /選ぶ/ });
-
-    fireEvent.click(payLink()!);
-
-    fireEvent.click(choose());
-    expect(screen.queryByRole('dialog')).toBeNull();
-    // 明細の 牛丼（大盛り・えび）(−・＋) と、メニューの 水 (＋)。
-    expect(steppers()).toHaveLength(3);
-    for (const button of steppers()) fireEvent.click(button);
-    expect(screen.getByText('850 JPYC')).toBeInTheDocument();
-    expect(choose()).toBeDisabled();
-    for (const button of steppers()) expect(button).toBeDisabled();
-
-    await gate.respond(new Response('{}', { status: 409 }));
-
-    // 断られた後は今までどおり (案内が出て支払い欄が消える)。メニューの操作は戻る。
     expect(assignSpy).not.toHaveBeenCalled();
-    expect(screen.getByText(TEXT.closed)).toBeInTheDocument();
-    expect(cartToggle()).toBeNull();
-    expect(choose()).toBeEnabled();
-    for (const button of steppers()) expect(button).toBeEnabled();
-    fireEvent.click(choose());
-    expect(screen.getByRole('dialog')).toBeInTheDocument();
-  });
-
-  // 入力欄と選択欄は、jsdom の fireEvent だと disabled でも change が届く (本物のブラウザでは届かない)。
-  // 人の操作をまねる user-event (disabled の部品には何も届けない) で、同じ操作が「待つ間は効かず、応答の後は効く」を見る。
-  it('応答を待っている間は、チェーン・テーブル番号・受け取りの枠を変えられない。受け付けられたら押したときの URL と本文で進み、その後はまた変えられる', async () => {
-    // user-event は本物の timer を待つので、この行だけ、止めるのを時計 (Date) だけにする。
-    vi.useRealTimers();
-    vi.useFakeTimers({ toFake: ['Date'] });
-    vi.setSystemTime(TOKYO_NOON);
-    const user = userEvent.setup();
-    const gate = gatedFetch();
-    renderWithIntl(
-      <MobileOrderView
-        config={{
-          ...config,
-          mode: 'preorder',
-          minLeadMinutes: 30,
-          dineIn: true,
-          chains: ['polygon', 'kaia'],
-        }}
-        handle={HANDLE}
-      />,
-    );
-    add('ブレンド');
-    const chainButton = (name: 'Polygon' | 'Kaia') =>
-      screen.getByRole('button', { name: `JPYC (${name})` });
-    const table = () => screen.getByLabelText('テーブル番号') as HTMLInputElement;
-    const pickup = () => screen.getByLabelText(TEXT.pickup) as HTMLSelectElement;
-    await user.click(chainButton('Kaia'));
-    await user.type(table(), '7');
-    await user.selectOptions(pickup(), '12:30');
-    const href = payHref();
-    const before = readCheckoutUrl(href).query;
-    expect(before).toMatchObject({
-      chain: 'kaia',
-      description: 'テーブル 7',
-      pickup_at: String(tokyo(12, 30)),
+    expect(screen.queryByText(TEXT.closed)).toBeNull();
+    // 足したところで待ちが解けて、新しい合計の link が出ている。
+    expect(screen.getByText('600 JPYC')).toBeInTheDocument();
+    const next = payHref();
+    expect(readCheckoutUrl(next).query).toEqual({
+      ...readCheckoutUrl(href).query,
+      items: [item('ブレンド', 1, '500', ':10:taxable_10:'), item('水', 1, '100', ':8:taxable_8:')].join(','),
     });
+    expect(readCheckoutUrl(next).payable()).toBe('600');
 
     fireEvent.click(payLink()!);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(payButton()).toBeDisabled();
+    await gate.admit(1);
 
-    await user.click(chainButton('Polygon'));
-    await user.type(table(), '9');
-    await user.selectOptions(pickup(), '12:45');
-    expect(chainButton('Kaia')).toHaveAttribute('aria-pressed', 'true');
-    expect(chainButton('Polygon')).toHaveAttribute('aria-pressed', 'false');
-    expect(table()).toHaveValue('7');
-    expect(pickup()).toHaveValue(String(tokyo(12, 30)));
-    expect(chainButton('Kaia')).toBeDisabled();
-    expect(chainButton('Polygon')).toBeDisabled();
-    expect(table()).toBeDisabled();
-    expect(pickup()).toBeDisabled();
+    expect(assignSpy.mock.calls).toEqual([[next]]);
+  });
 
-    await gate.admit();
+  it('確認が返ってこないままでも、注文を変えれば「支払いへ進む」を押し直せる。変えなければ押せないまま (今の動き)', async () => {
+    const gate = gatedFetches();
+    renderWithIntl(<MobileOrderView config={config} handle={HANDLE} />);
+    add('ブレンド');
+    fireEvent.click(payLink()!);
+
+    // 1 本目は返ってこない。変えなければ、時間が進んでも押せないまま。
+    act(() => {
+      vi.advanceTimersByTime(60_000);
+    });
+    expect(payLink()).toBeNull();
+    expect(payButton()).toBeDisabled();
+
+    add('ブレンド');
+
+    expect(screen.getByText('1000 JPYC')).toBeInTheDocument();
+    const next = payHref();
+    fireEvent.click(payLink()!);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    await gate.admit(1);
+    expect(assignSpy.mock.calls).toEqual([[next]]);
+    expect(readCheckoutUrl(next).payable()).toBe('1000');
+  });
+
+  // 操作の種類ごと。品: 牛丼 (オプションつき)・水・お茶。店内 (テーブル番号)・事前注文 (受け取りの枠)・チェーン 2 つ。
+  // 押す前のカート: 牛丼（大盛り・えび）× 1 と 水 × 2、テーブル 7、枠は指定なし、チェーンは Polygon。
+  const editConfig: MobileOrderConfig = {
+    ...optionConfig,
+    menu: [...optionConfig.menu, { id: 'tea', name: 'お茶', price: '50' }],
+    mode: 'preorder',
+    minLeadMinutes: 30,
+    dineIn: true,
+    chains: ['polygon', 'kaia'],
+  };
+  const GYUDON = '牛丼（大盛り・えび）';
+  const openCart = () => fireEvent.click(cartToggle()!);
+  const edits: {
+    name: string;
+    edit: () => void;
+    /** 変えた後の URL の query で、押したときから変わる key。 */
+    changed: Record<string, string>;
+    /** 押し直した確認の本文に足されるもの。 */
+    body?: Record<string, unknown>;
+  }[] = [
+    {
+      name: 'メニューの ＋ (まだ入れていない品)',
+      edit: () => add('お茶'),
+      changed: { items: [item('水', 2, '100'), item('お茶', 1, '50'), item(GYUDON, 1, '850')].join(',') },
+    },
+    {
+      name: 'メニューの ＋ (入れてある品)',
+      edit: () => add('水'),
+      changed: { items: [item('水', 3, '100'), item(GYUDON, 1, '850')].join(',') },
+    },
+    {
+      name: 'メニューの −',
+      edit: () => removeOne('水'),
+      changed: { items: [item('水', 1, '100'), item(GYUDON, 1, '850')].join(',') },
+    },
+    {
+      name: '「選ぶ」からオプションの品を足す',
+      edit: () => addGyudonLargeWithShrimp(),
+      changed: { items: [item('水', 2, '100'), item(GYUDON, 2, '850')].join(',') },
+    },
+    {
+      name: '明細の行の ＋ (オプションの行)',
+      edit: () => {
+        openCart();
+        fireEvent.click(within(cartLine(GYUDON)).getByRole('button', { name: TEXT.plus }));
+      },
+      changed: { items: [item('水', 2, '100'), item(GYUDON, 2, '850')].join(',') },
+    },
+    {
+      name: '明細の行の − (オプションの行)',
+      edit: () => {
+        openCart();
+        fireEvent.click(within(cartLine(GYUDON)).getByRole('button', { name: TEXT.minus }));
+      },
+      changed: { items: item('水', 2, '100') },
+    },
+    {
+      name: '明細の行の − (オプションのない品)',
+      edit: () => {
+        openCart();
+        fireEvent.click(within(cartLine('水')).getByRole('button', { name: TEXT.minus }));
+      },
+      changed: { items: [item('水', 1, '100'), item(GYUDON, 1, '850')].join(',') },
+    },
+    {
+      name: 'テーブル番号',
+      edit: () => fireEvent.change(screen.getByLabelText('テーブル番号'), { target: { value: '8' } }),
+      changed: { description: 'テーブル 8' },
+    },
+    {
+      name: '受け取りの枠',
+      edit: () => {
+        const select = screen.getByLabelText(TEXT.pickup) as HTMLSelectElement;
+        fireEvent.change(select, {
+          target: { value: (within(select).getByRole('option', { name: '12:45' }) as HTMLOptionElement).value },
+        });
+      },
+      changed: { pickup_at: String(tokyo(12, 45)) },
+      body: { pickupAt: tokyo(12, 45) },
+    },
+    {
+      name: '支払いチェーン',
+      edit: () => fireEvent.click(screen.getByRole('button', { name: 'JPYC (Kaia)' })),
+      changed: { chain: 'kaia' },
+    },
+  ];
+
+  it.each(edits)('待っている間の操作「$name」で、待っていた確認は無効になる: 200 で返っても移らず、押し直すと変えた後の中身で進む', async ({ edit, changed, body }) => {
+    envHold.enableMenuOptions = true;
+    const gate = gatedFetches();
+    renderWithIntl(<MobileOrderView config={editConfig} handle={HANDLE} />);
+    addGyudonLargeWithShrimp();
+    add('水', 2);
+    fireEvent.change(screen.getByLabelText('テーブル番号'), { target: { value: '7' } });
+    const before = readCheckoutUrl(payHref()).query;
+    expect(before).toMatchObject({
+      items: [item('水', 2, '100'), item(GYUDON, 1, '850')].join(','),
+      description: 'テーブル 7',
+    });
+    expect(before.chain).toBeUndefined();
+    expect(before.pickup_at).toBeUndefined();
+    fireEvent.click(payLink()!);
+    expect(payLink()).toBeNull();
+    expect(payButton()).toBeDisabled();
+
+    edit();
+
+    // 待ちが解けて、変えた後の URL の link が出る。
+    const next = payHref();
+    expect(readCheckoutUrl(next).query).toEqual({ ...before, ...changed });
+    await gate.admit(0);
+    expect(assignSpy).not.toHaveBeenCalled();
+    expect(payHref()).toBe(next);
+
+    fireEvent.click(payLink()!);
+    await gate.admit(1);
 
     expect(postedBodies()).toEqual([
-      { handle: HANDLE, merchant: RECEIVER, mode: 'preorder', pickupAt: tokyo(12, 30) },
+      { handle: HANDLE, merchant: RECEIVER, mode: 'preorder' },
+      { handle: HANDLE, merchant: RECEIVER, mode: 'preorder', ...body },
     ]);
-    expect(assignSpy.mock.calls).toEqual([[href]]);
-    expect(readCheckoutUrl(payHref()).query).toEqual(before);
-    // 応答の後は、同じ操作が効く。
-    await user.click(chainButton('Polygon'));
-    await user.type(table(), '9');
-    await user.selectOptions(pickup(), '12:45');
-    const { chain: _kaia, ...rest } = before;
-    expect(readCheckoutUrl(payHref()).query).toEqual({
-      ...rest,
-      description: 'テーブル 79',
-      pickup_at: String(tokyo(12, 45)),
-    });
+    expect(assignSpy.mock.calls).toEqual([[next]]);
   });
 
-  // 待つ間にカートが空になる道は、売り切れの反映だけ (人の操作は止めてある)。店のページは開いたときの売り切れしか
-  // 持たないので、今の画面でこの道が起きるのは、待つ間にページが描き直されたときだけ。
-  it('応答を待っている間に売り切れでカートが空になり「前回と同じ注文」が出ても、押せない (カートに戻らない)。進む先は押したときの URL のまま (今の動き)', async () => {
+  // 待っている間にカートが空になる道は、売り切れの反映だけ。店のページは開いたときの売り切れしか持たないので、
+  // 今の画面でこの道が起きるのは、待っている間にページが描き直されたときだけ。
+  it('待っている間に売り切れでカートが空になって出た「前回と同じ注文」を押すと、待っていた確認は無効になる: 200 で返っても移らず、押し直すと戻した注文で進む', async () => {
     seedPaidLastOrder([{ id: 'c', qty: 1 }]);
-    const gate = gatedFetch();
+    const gate = gatedFetches();
     const view = renderWithIntl(<MobileOrderView config={config} handle={HANDLE} live={live([])} />);
     add('ブレンド');
-    const href = payHref();
-    const reorder = () => screen.getByRole('button', { name: '前回と同じ注文（1 品）' });
+    fireEvent.click(payLink()!);
+    view.rerender(<MobileOrderView config={config} handle={HANDLE} live={live(['a'], 2)} />);
+    expect(cartToggle()).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: '前回と同じ注文（1 品）' }));
+
+    expect(screen.getByText('100 JPYC')).toBeInTheDocument();
+    const next = payHref();
+    expect(readCheckoutUrl(next).query.items).toBe(item('水', 1, '100', ':8:taxable_8:'));
+    await gate.admit(0);
+    expect(assignSpy).not.toHaveBeenCalled();
 
     fireEvent.click(payLink()!);
-    // 売り切れの反映は、待つ間も止めない。
-    view.rerender(<MobileOrderView config={config} handle={HANDLE} live={live(['a'], 2)} />);
-
-    fireEvent.click(reorder());
-    expect(cartToggle()).toBeNull();
-    expect(reorder()).toBeDisabled();
-
-    await gate.admit();
-
-    // 受け付けられたのは押した時点の注文。売り切れになった品が入ったままの URL へ進む。
-    expect(assignSpy.mock.calls).toEqual([[href]]);
-    expect(readCheckoutUrl(href).query.items).toBe(item('ブレンド', 1, '500', ':10:taxable_10:'));
-    expect(reorder()).toBeEnabled();
-    fireEvent.click(reorder());
-    expect(screen.getByText('100 JPYC')).toBeInTheDocument();
+    await gate.admit(1);
+    expect(assignSpy.mock.calls).toEqual([[next]]);
   });
 
-  it('応答を待っている間も、時刻の取り直しは止まらない: 選んだ枠が候補から外れると画面の選択は外れるが、進む先と確認の本文は押したときのまま (今の動き)', async () => {
-    const gate = gatedFetch();
+  it.each(['409', '例外'])('無効にした確認が %s で返っても、止まった案内は出ない。押し直した確認が断られたら、そこで止まる', async (kind) => {
+    const gate = gatedFetches();
+    const settle = (index: number) =>
+      kind === '409' ? gate.respond(index, new Response('{}', { status: 409 })) : gate.fail(index);
+    renderWithIntl(<MobileOrderView config={config} handle={HANDLE} />);
+    add('ブレンド');
+    fireEvent.click(payLink()!);
+    add('水');
+
+    await settle(0);
+
+    expect(screen.queryByText(TEXT.closed)).toBeNull();
+    expect(assignSpy).not.toHaveBeenCalled();
+    expect(payLink()).not.toBeNull();
+    expect(screen.getByText('600 JPYC')).toBeInTheDocument();
+
+    fireEvent.click(payLink()!);
+    await settle(1);
+
+    expect(assignSpy).not.toHaveBeenCalled();
+    expect(screen.getByText(TEXT.closed)).toBeInTheDocument();
+    expect(payLink()).toBeNull();
+    expect(cartToggle()).toBeNull();
+  });
+
+  it.each(['200', '409', '例外'])('押し直した確認を待っている間に、無効にした前の確認が %s で返っても、待ちは解けない (移らない・案内も出ない)。押し直した確認が通ると移る', async (kind) => {
+    const gate = gatedFetches();
+    renderWithIntl(<MobileOrderView config={config} handle={HANDLE} />);
+    add('ブレンド');
+    fireEvent.click(payLink()!);
+    add('水');
+    const next = payHref();
+    fireEvent.click(payLink()!);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+
+    if (kind === '200') await gate.admit(0);
+    else if (kind === '409') await gate.respond(0, new Response('{}', { status: 409 }));
+    else await gate.fail(0);
+
+    expect(assignSpy).not.toHaveBeenCalled();
+    expect(screen.queryByText(TEXT.closed)).toBeNull();
+    expect(payLink()).toBeNull();
+    expect(payButton()).toBeDisabled();
+
+    await gate.admit(1);
+
+    expect(assignSpy.mock.calls).toEqual([[next]]);
+  });
+
+  it('注文の中身を変えない操作 (明細を開く・「選ぶ」を開いてキャンセルする) では、待っていた確認は無効にならない', async () => {
+    envHold.enableMenuOptions = true;
+    const gate = gatedFetches();
+    renderWithIntl(<MobileOrderView config={optionConfig} handle={HANDLE} />);
+    add('水');
+    const href = payHref();
+    fireEvent.click(payLink()!);
+
+    fireEvent.click(cartToggle()!);
+    expect(cartToggle()).toHaveAttribute('aria-expanded', 'true');
+    fireEvent.click(within(menuCard('牛丼')).getByRole('button', { name: /選ぶ/ }));
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'キャンセル' }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+
+    expect(payLink()).toBeNull();
+    expect(payButton()).toBeDisabled();
+    await gate.admit(0);
+    expect(assignSpy.mock.calls).toEqual([[href]]);
+  });
+
+  // 自動の更新 (時刻の取り直し・売り切れの反映) では無効にしない: 押した時点の注文で進む。
+  it('待っている間に時刻の取り直しで選んだ枠が外れても、待っていた確認は有効のまま: 進む先と確認の本文は押したときの枠 (今の動き)', async () => {
+    const gate = gatedFetches();
     renderWithIntl(
       <MobileOrderView
         config={{ ...config, mode: 'preorder', minLeadMinutes: 30 }}
@@ -649,24 +788,46 @@ describe('MobileOrderView — 「支払いへ進む」: 受付の確認を通る
     expect(readCheckoutUrl(href).query.pickup_at).toBe(String(tokyo(12, 30)));
 
     fireEvent.click(payLink()!);
-    // 30 秒たつと最初の枠は 12:45。12:30 は候補から外れる。
+    // 30 秒たつと、最短の受け取り (今 + 準備 30 分) は 12:45 の枠になる。12:30 の枠は (まだ先の時刻だが) 候補から外れる。
     act(() => {
       vi.advanceTimersByTime(30_000);
     });
 
     expect(within(select()).queryByRole('option', { name: '12:30' })).toBeNull();
     expect(select().value).toBe('');
-    expect(select()).toBeDisabled();
+    // 待ちは解けていない。
+    expect(payLink()).toBeNull();
+    expect(payButton()).toBeDisabled();
 
-    await gate.admit();
+    await gate.admit(0);
 
     expect(postedBodies()).toEqual([
       { handle: HANDLE, merchant: RECEIVER, mode: 'preorder', pickupAt: tokyo(12, 30) },
     ]);
     expect(assignSpy.mock.calls).toEqual([[href]]);
-    // 応答の後の画面の link は、枠の無い URL (選び直せる)。
+    // 応答の後の画面の link は、枠の無い URL。
     expect(readCheckoutUrl(payHref()).query.pickup_at).toBeUndefined();
-    expect(select()).toBeEnabled();
+  });
+
+  it('待っている間に売り切れが反映されても、待っていた確認は有効のまま: 画面の合計は減るが、進む先は押したときの URL (今の動き)', async () => {
+    const gate = gatedFetches();
+    const view = renderWithIntl(<MobileOrderView config={config} handle={HANDLE} live={live([])} />);
+    add('ブレンド');
+    add('水');
+    const href = payHref();
+    fireEvent.click(payLink()!);
+
+    view.rerender(<MobileOrderView config={config} handle={HANDLE} live={live(['a'], 2)} />);
+
+    expect(screen.getByText('100 JPYC')).toBeInTheDocument();
+    expect(payLink()).toBeNull();
+    expect(payButton()).toBeDisabled();
+
+    await gate.admit(0);
+
+    // 受け付けられたのは押した時点の注文。売り切れになった品が入ったままの URL へ進む。
+    expect(assignSpy.mock.calls).toEqual([[href]]);
+    expect(readCheckoutUrl(href).payable()).toBe('600');
   });
 
   // 押せないボタンに替わるのは再描画の後。handler の中の二度押しの印も state なので、再描画の前に届いた
