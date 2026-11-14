@@ -338,8 +338,8 @@ function RegisterModeContent({
   const hasPresetOptions = (p: ProductPreset) =>
     env.enableMenuOptions && (p.options?.length ?? 0) > 0;
 
-  // オプション付き preset: モーダルで選択 → 実効単価 + サフィックス名で新規行を追加 (option 行は dedup せず・
-  // 行は通常どおり編集可)。通貨ガードは addFromPreset と同じ。
+  // オプション付き preset: モーダルで選択 → 実効単価 + サフィックス名の行を足す (同じ商品・同じ表示名・同じ単価の
+  // 行があれば数量 +1・行は通常どおり編集可)。通貨ガードは addFromPreset と同じ。
   function addOptionLine(p: ProductPreset, choices: OptionChoice[]) {
     setOptionModalPreset(null);
     if (cart.length > 0 && p.token !== settings.token) {
@@ -352,10 +352,17 @@ function RegisterModeContent({
     }
     const name = composeLineName(p.name, choices);
     const unitPrice = effectiveUnitPrice(p.unitPrice, choices);
+    // 行の単価が、いま足す選択の単価と同じ額か。行の単価は手で書き換えられる文字列なので、表記の揺れ
+    // (「700」と「700.0」) を effectiveUnitPrice の正規化 (同じ額は同じ文字列) で揃えてから比べる。数字でない
+    // 入力の途中 (空・「7.」) は、どの額とも同じにしない (effectiveUnitPrice は数字でないものを 0 と読むため)。
+    const samePrice = (linePrice: string) =>
+      DECIMAL_PATTERN.test(linePrice) && effectiveUnitPrice(linePrice, []) === unitPrice;
     setCart((c) => {
-      // 同一 preset + 同一オプション (= 同一表示名) の行は qty+1 にまとめる (10 行上限の浪費防止)。
-      // 行をリネーム済なら一致せず新規行になる (許容)。
-      const existing = c.find((l) => l.presetId === p.id && l.name === name);
+      // 同じ商品・同じ表示名・同じ単価の行だけ qty+1 にまとめる (10 行上限の浪費防止)。表示名は選択肢の label を
+      // つないだものなので、別のグループの同じ label (「肉増し: あり +200」と「トッピング: あり +150」) は表示名が
+      // 同じで単価が違う。単価を比べないと、後の選択が先の行の単価で数えられて合計がずれる。
+      // 行の名前か単価の額を書き換え済みなら一致せず新規行になる (許容)。
+      const existing = c.find((l) => l.presetId === p.id && l.name === name && samePrice(l.unitPrice));
       if (existing) {
         return c.map((l) =>
           l.id === existing.id ? { ...l, quantity: Math.min(999, l.quantity + 1) } : l,
@@ -474,10 +481,13 @@ function RegisterModeContent({
     deployment.decimals,
     taxDec,
   ).totalTax;
-  // 会計が空になったら (次のお客様) 値引きを外す。
+  // 会計が空になったら (次のお客様) 値引きと管理番号を外す。管理番号は手で入れたものも「採番」のものも同じ扱い。
+  // 外さないと、カートが空の間は欄が消え、次の品で欄は閉じたまま出直すので、店員に見えないまま次の会計の URL
+  // (rcpt) に前の番号が乗る。採番の連番 (presetStore.nextReceiptNo) は進めも戻しもしない。
   useEffect(() => {
     if (cart.length > 0) return;
     resetDiscount();
+    setReceiptNo('');
   }, [cart.length, resetDiscount]);
 
   // WebKit (モバイル Safari・SNS アプリ内ブラウザ) では position:sticky な下部会計バーの
