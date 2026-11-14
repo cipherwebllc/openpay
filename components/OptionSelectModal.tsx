@@ -31,6 +31,7 @@ export function OptionSelectModal({
   basePrice,
   options,
   symbol,
+  canAdd,
   onConfirm,
   onClose,
 }: {
@@ -39,6 +40,8 @@ export function OptionSelectModal({
   basePrice: string;
   options: OptionGroup[];
   symbol: string;
+  /** いまの選択を足せるか (任意・渡さなければいつでも足せる)。false の間は「カートに追加」を押せない。 */
+  canAdd?: (choices: OptionChoice[]) => boolean;
   onConfirm: (
     choices: OptionChoice[],
     selections: { groupId: string; choiceId: string }[],
@@ -59,6 +62,8 @@ export function OptionSelectModal({
 
   const resolved = useMemo(() => resolveSelection(options, sel), [options, sel]);
   const priceText = resolved.ok ? effectiveUnitPrice(basePrice, resolved.choices) : basePrice;
+  // 必須のグループが未選択の間は親に聞かない (押すと「選んでください」を出す今の動きのまま)。
+  const addBlocked = resolved.ok && !!canAdd && !canAdd(resolved.choices);
 
   // aria-modal を名乗るので実挙動も揃える (D1): 開いたら dialog (名前 = 商品名) へ focus・Tab は中だけ・
   // Escape で閉じる・閉じたら押した商品ボタンへ戻す。
@@ -161,7 +166,8 @@ export function OptionSelectModal({
             <button
               type="button"
               onClick={confirm}
-              className="min-h-11 rounded-lg bg-brand px-4 text-sm font-semibold text-white hover:bg-brand-dark"
+              disabled={addBlocked}
+              className="min-h-11 rounded-lg bg-brand px-4 text-sm font-semibold text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"
             >
               {t('addToCart')}
             </button>
