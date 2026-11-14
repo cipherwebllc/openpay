@@ -60,7 +60,7 @@ vi.mock('@/lib/circlePaymaster', async () => {
 // component で stub する (Hint 自体の動作は CrossChainHint.test.tsx で検証)。
 // TipForm から Hint へ渡される props は crossChainHintSpy で capture して検証。
 const crossChainHintSpy = vi.fn();
-// A-1 のテストだけが false にし、「子がまだ報告していない」状態 (遅延ロード中・走査中) を固定する。
+// A-1 のテストと PR-15e の Arc の describe が false にし、「子がまだ報告していない」状態 (遅延ロード中・走査中) を固定する。
 const crossChainHintReports = { onMount: true };
 vi.mock('@/components/CrossChainHint', async () => {
   const React = await import('react');
@@ -2874,9 +2874,12 @@ describe('TipForm — 額の欄とメッセージの欄は、送信の途中は�
 
 // PR-15e: cross-chain (CrossChainHint の子) の走査と実行の間は、直接の送信をさせない。判定の式は deriveTipGuards
 // (tests/lib/paymentFlowGuards.test.ts の真理値表) が見ているが、画面の段 (TipForm が持つ lock の state・scope・子へ渡す
-// callback 3 つ → 送信のボタン) を見ていたのは CCTP の中断記録の行 (上の A-1) だけだった。ここでは残りの 4 つを固定する:
-// Arc の最初の報告まで・scope (account・受取先・額) が変わってから報告し直すまで・onAttemptStart だけ・onSuccess の後。
-// 見るのは送信のボタン (role・name) と、送信の関数が呼ばれた回数だけ。state の持ち方・callback の作り方には依らない。
+// callback 3 つ → 送信のボタン) を見ていたのは、CCTP の中断記録の行 (上の A-1) と、実行中の行 (上の「cross-chain 実行中は
+// 親 Send を止める」と PR-15d の行。どちらも onAttemptStart と onExecutingChange(true) を同じ act で呼ぶ) だけだった。
+// ここでは残りの 4 つを固定する: Arc の最初の報告まで・scope (account・受取先・額) が変わってから報告し直すまで・
+// onAttemptStart だけ・onSuccess の後。
+// 見るのは、送信のボタン (role・name)・送信の関数が呼ばれた回数と引数 (受取先・額)・子へ渡す executionDisabled (Arc の行で、
+// 通常決済の準備が済んだことの待ちに使う)。state の持ち方・callback の作り方には依らない。
 describe('TipForm — cross-chain の走査と実行の間は、直接の送信ができない (PR-15e)', () => {
   type HintProps = {
     executionDisabled: boolean;
@@ -3017,6 +3020,7 @@ describe('TipForm — cross-chain の走査と実行の間は、直接の送信�
     it('onSuccess の後は「送信中」の表示が外れても、送信のボタンは押せないまま。子の報告でも開かない', async () => {
       render(<TipForm params={USDC_PARAMS} />);
       await waitFor(() => expect(crossChainHintSpy).toHaveBeenCalled());
+      expect(screen.getByRole('button', { name: '1 USDC を送る' })).toBeEnabled();
 
       act(() => hintProps().onAttemptStart(1_000_000n));
       expect(sendingButton()).toBeDisabled();
