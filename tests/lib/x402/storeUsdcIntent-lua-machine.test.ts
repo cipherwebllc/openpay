@@ -88,6 +88,7 @@ import {
   type QuotedStoreUsdcIntent,
   type StoreUsdcAuthorizationClaim,
 } from '@/lib/x402/storeUsdcIntent';
+import { paymentClaimKey } from '@/lib/paymentClaim';
 
 const NOW = 1_900_000_000_000;
 const RESOURCE = `h_${'a'.repeat(32)}`;
@@ -105,10 +106,10 @@ const META = {
   label: 'prompt' as const,
 };
 
-async function quote(salt = SALT): Promise<QuotedStoreUsdcIntent> {
+async function quote(salt = SALT, contentRevision = 2): Promise<QuotedStoreUsdcIntent> {
   const result = await createQuotedStoreUsdcIntent({
     resourceId: RESOURCE,
-    contentRevision: 2,
+    contentRevision,
     metadata: META,
     payer: PAYER,
     usdcQuoteAtomic: '2000000',
@@ -544,5 +545,134 @@ describe('USDC Lua state machine and positional contracts', () => {
       expect(call.before.zsets.get(call.keys[1])?.get('invalid-salt')).toBe(NOW);
       expect(call.before.zsets.has(call.keys[0])).toBe(false);
     }
+  });
+});
+
+// PR-20: 入場の条件と状態遷移のうち、これまで固定されていなかった所を本物の Lua で通す。
+// 今の動き (main) をそのまま書いた characterization で、「あるべき姿」の裁定ではない。
+describe('PR-20: USDC transitions pinned with real Lua', () => {
+  const SALT2 = `0x${'34'.repeat(32)}` as Hex;
+  const TX2 = `0x${'45'.repeat(32)}` as Hex;
+  const ownKey = `store:own:${PAYER.toLowerCase()}:${RESOURCE}`;
+  const libraryKey = `store:lib:${PAYER.toLowerCase()}`;
+  const purchaseKey = (txHash: Hex) => `store:purchase:8453:${txHash}`;
+  const pendingScore = (salt: Hex = SALT) => memory.store!.zsets.get(storeUsdcPendingKey())?.get(salt);
+
+  // 見積もり → 署名 → settling → 確定までを公開関数だけで進める (同じ買い手・同じ商品)。
+  async function purchase(salt: Hex, contentRevision: number, txHash: Hex, at: number) {
+    const intent = await quote(salt, contentRevision);
+    expect(await sign(intent)).toMatchObject({ ok: true, kind: 'claimed' });
+    expect(await claimStoreUsdcSettlement({ intentSalt: salt, now: NOW + 2_000 })).toMatchObject({ ok: true, kind: 'claimed' });
+    expect(await finalizeStoreUsdcPurchase({ intentSalt: salt, txHash, now: at })).toMatchObject({ ok: true, kind: 'finalized' });
+    return intent;
+  }
+
+  // G1: finalize は quoted・signed を拒み、KV を 1 つも書かない (Lua も呼ばない)。
+  it('finalize refuses a quoted and a signed intent and leaves every key as it was', async () => {
+    const intent = await quote();
+    for (const stage of ['quoted', 'signed'] as const) {
+      if (stage === 'signed') expect(await sign(intent)).toMatchObject({ ok: true, kind: 'claimed' });
+      const before = redisState(memory.store!);
+      const calls = memory.calls.length;
+      expect(await finalizeStoreUsdcPurchase({ intentSalt: SALT, txHash: TX, now: NOW + 3_000 })).toEqual({ ok: false, reason: 'conflict' });
+      expect(memory.calls).toHaveLength(calls);
+      expect(redisState(memory.store!)).toEqual(before);
+    }
+    expect(await getStoreUsdcIntent(SALT)).toMatchObject({ state: 'signed' });
+  });
+
+  // G4: 既に ownership がある買い手の 2 回目の購入。grant は足す (前の grant を消さない)・firstPurchasedAt と library の
+  // score は早い方・updatedAt は遅い方・latestGrant は revision が大きい方 (同じなら purchasedAt が遅い方)。
+  it.each([
+    ['a newer revision', 3, NOW + 9_000, SALT2],
+    ['the same revision, bought later', 2, NOW + 9_000, SALT2],
+    ['an older revision', 1, NOW + 9_000, SALT],
+    ['the same revision, finalized with an earlier time', 2, NOW + 2_500, SALT],
+  ] as const)('a second purchase of the same product (%s) appends its grant and keeps the first purchase readable', async (_label, revision, at, latestSalt) => {
+    await purchase(SALT, 2, TX, NOW + 3_000);
+    const firstPurchase = memory.store!.strings.get(purchaseKey(TX));
+    expect(firstPurchase).toBeDefined();
+    await purchase(SALT2, revision, TX2, at);
+
+    const own = JSON.parse(memory.store!.strings.get(ownKey)!) as {
+      firstPurchasedAt: number; updatedAt: number; latestGrant: { intentSalt: Hex };
+      grants: { intentSalt: Hex; contentRevision: number; txHash: Hex; purchasedAt: number }[];
+    };
+    expect(own.grants.map((grant) => [grant.intentSalt, grant.contentRevision, grant.txHash, grant.purchasedAt])).toEqual([
+      [SALT, 2, TX, NOW + 3_000],
+      [SALT2, revision, TX2, at],
+    ]);
+    const first = Math.min(NOW + 3_000, at);
+    expect(own).toMatchObject({ firstPurchasedAt: first, updatedAt: Math.max(NOW + 3_000, at), latestGrant: { intentSalt: latestSalt } });
+    expect(memory.store!.zsets.get(libraryKey)?.get(RESOURCE)).toBe(first);
+    expect(memory.store!.strings.get(purchaseKey(TX))).toBe(firstPurchase);
+    expect(JSON.parse(memory.store!.strings.get(purchaseKey(TX2))!)).toMatchObject({ intentSalt: SALT2, contentRevision: revision, purchasedAt: at });
+    for (const [salt, txHash] of [[SALT, TX], [SALT2, TX2]] as const) {
+      expect(memory.store!.strings.get(paymentClaimKey(8453, txHash))).toBe(`r:store:${salt}`);
+      expect(await readSettledStoreUsdcAccess(salt)).toMatchObject({ ok: true, intent: { intentSalt: salt, txHash } });
+      expect(pendingScore(salt)).toBeUndefined();
+    }
+  });
+
+  // G5: 見積もりの 2 key は 720 秒 (期限 600 秒 + 猶予 120 秒) で消える。その後の署名は not_found で、何も書かない。
+  it('signing after the quote keys expired (720 seconds) is not_found and writes nothing', async () => {
+    const intent = await quote();
+    memory.store!.advance(720_000 - 1);
+    expect(await getStoreUsdcIntent(SALT)).toMatchObject({ state: 'quoted' });
+    memory.store!.advance(1);
+    expect(await sign(intent)).toEqual({ ok: false, reason: 'not_found' });
+    expect(memory.store!.keys()).toEqual([]);
+    expect(memory.calls).toHaveLength(1);
+  });
+
+  // G9: 確定済みの購入の読み取りは、intent・ownership (その intent の grant)・購入の記録・global claim・library の score が
+  // そろって同じ購入を指すときだけ通る。1 か所でも欠けるか食い違えば conflict (配信しない)。library の欠落は既存の件。
+  it.each([
+    'ownership-missing', 'grant-missing', 'grant-changed', 'purchase-missing', 'purchase-changed',
+    'global-claim-missing', 'global-claim-other', 'library-score',
+  ] as const)('settled access is refused with conflict on %s', async (scenario) => {
+    await purchase(SALT, 2, TX, NOW + 3_000);
+    expect(await readSettledStoreUsdcAccess(SALT)).toMatchObject({ ok: true });
+    const strings = memory.store!.strings;
+    const own = JSON.parse(strings.get(ownKey)!) as { grants: Record<string, unknown>[] };
+    const regrant = (patch: Record<string, unknown>) => {
+      const grant = { ...own.grants[0], ...patch };
+      strings.set(ownKey, JSON.stringify({ ...own, grants: [grant], latestGrant: grant }));
+    };
+    if (scenario === 'ownership-missing') strings.delete(ownKey);
+    if (scenario === 'grant-missing') regrant({ intentSalt: SALT2 });
+    if (scenario === 'grant-changed') regrant({ purchasedAt: NOW + 3_001 });
+    if (scenario === 'purchase-missing') strings.delete(purchaseKey(TX));
+    if (scenario === 'purchase-changed') {
+      strings.set(purchaseKey(TX), JSON.stringify({ ...JSON.parse(strings.get(purchaseKey(TX))!), purchasedAt: NOW + 3_001 }));
+    }
+    if (scenario === 'global-claim-missing') strings.delete(paymentClaimKey(8453, TX));
+    if (scenario === 'global-claim-other') strings.set(paymentClaimKey(8453, TX), `r:store:${SALT2}`);
+    if (scenario === 'library-score') memory.store!.zsets.get(libraryKey)!.set(RESOURCE, NOW + 3_001);
+    expect(await readSettledStoreUsdcAccess(SALT)).toEqual({ ok: false, reason: 'conflict' });
+  });
+
+  it('settled access is not_found for a missing intent and for one that is not settled, even with a recorded hash', async () => {
+    expect(await readSettledStoreUsdcAccess(SALT)).toEqual({ ok: false, reason: 'not_found' });
+    const active = await settling();
+    expect(await recordStoreUsdcTransaction({ intentSalt: SALT, attemptId: active.attemptId, txHash: TX })).toBe('updated');
+    expect(await readSettledStoreUsdcAccess(SALT)).toEqual({ ok: false, reason: 'not_found' });
+  });
+
+  // G11: tx hash の記録は pending の score を動かさない (settling なら lease の終わり = settling を取った時刻 + 60 秒のまま)。
+  it('recording the transaction on a settling intent keeps the pending score at the lease end (60 seconds)', async () => {
+    const active = await settling();
+    expect(pendingScore()).toBe(NOW + 2_000 + 60_000);
+    expect(await recordStoreUsdcTransaction({ intentSalt: SALT, attemptId: active.attemptId, txHash: TX })).toBe('updated');
+    expect(pendingScore()).toBe(NOW + 2_000 + 60_000);
+    expect(await getStoreUsdcIntent(SALT)).toMatchObject({ state: 'settling', txHash: TX, leaseUntil: NOW + 62_000, nextReconcileAt: NOW + 62_000 });
+  });
+
+  it('a transaction can be recorded on an indeterminate attempt that has no hash yet, without moving its score', async () => {
+    const active = await settling();
+    expect(await markStoreUsdcIndeterminate({ intentSalt: SALT, attemptId: active.attemptId, now: NOW + 3_000 })).toBe('updated');
+    expect(await recordStoreUsdcTransaction({ intentSalt: SALT, attemptId: active.attemptId, txHash: TX })).toBe('updated');
+    expect(await getStoreUsdcIntent(SALT)).toMatchObject({ state: 'indeterminate', txHash: TX, indeterminateAt: NOW + 3_000 });
+    expect(pendingScore()).toBe(NOW + 3_000);
   });
 });

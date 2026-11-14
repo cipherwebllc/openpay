@@ -2,6 +2,7 @@
 // TypeScript parser/reconciler coverage stays in the regular CI job. These fixed
 // KV replies never evaluate, inspect, or simulate a Lua script's side effects.
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Hex } from 'viem';
 import fixture from '../../fixtures/x402/storeUsdcIntent.json';
 
 const h = vi.hoisted(() => ({
@@ -28,7 +29,9 @@ import {
   markStoreUsdcIndeterminate, parseStoreUsdcIntent, readSettledStoreUsdcAccess,
   reconcilePendingStoreUsdcPurchases, reconcileStoreUsdcIntent, recordStoreUsdcTransaction,
   storeUsdcAuthorizationHash, storeUsdcIntentKey, storeUsdcNonce, storeUsdcNonceIntentKey,
+  storeUsdcPendingKey, STORE_USDC_RECONCILE_BATCH_SIZE,
   type QuotedStoreUsdcIntent, type SettledStoreUsdcIntent, type SettlingStoreUsdcIntent,
+  type StoreUsdcAuthorizationClaim,
 } from '@/lib/x402/storeUsdcIntent';
 import { hostedPurchaseRecordKey, purchaseOwnershipKey } from '@/lib/x402/purchaseIntent';
 import { STORE_RECONCILE_CURSOR_RESERVE_MS, STORE_RECONCILE_PAGE_RPC_TIMEOUT_MS } from '@/lib/x402/reconcileBudget';
@@ -442,5 +445,362 @@ describe('Store USDC reconciler decisions (no Lua)', () => {
     expect(h.warn).toHaveBeenCalledTimes(2);
     h.kvEval.mockResolvedValue({ ok: false });
     expect(await reconcilePendingStoreUsdcPurchases({ now: NOW })).toBe('storage');
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------------------
+// PR-20: 入場の条件と状態遷移のうち、これまで固定されていなかった所。
+// 今の動き (main) をそのまま書いた characterization で、「あるべき姿」の裁定ではない。
+// ---------------------------------------------------------------------------------------------------------------------
+const OTHER_TX = `0x${'66'.repeat(32)}` as Hex;
+const OTHER_ADDRESS = '0x3333333333333333333333333333333333333333' as const;
+const OTHER_NONCE = `0x${'99'.repeat(32)}` as Hex;
+const indeterminate = { ...active, state: 'indeterminate' as const, indeterminateAt: NOW };
+const failed = { ...active, state: 'failed_prebroadcast' as const, failedAt: NOW, failureReason: 'authorization_expired_unused' };
+const ownKey = purchaseOwnershipKey(active.claim.payer, active.resourceId);
+const purchaseKey = hostedPurchaseRecordKey(active.chainId, TX);
+const globalKey = paymentClaimKey(active.chainId, TX);
+const CONFLICT = { ok: false, reason: 'conflict' } as const;
+const finalize = (input: { txHash?: Hex; now?: number } = {}) =>
+  finalizeStoreUsdcPurchase({ intentSalt: SALT, txHash: input.txHash ?? TX, now: input.now ?? settled.settledAt });
+// 保存された intent の claim を差し替え、authorizationHash も claim に合わせて作り直す (hash の不一致では落ちない形にする)。
+function withClaim<T extends { claim: StoreUsdcAuthorizationClaim }>(intent: T, patch: Partial<StoreUsdcAuthorizationClaim>) {
+  const claim = { ...intent.claim, ...patch };
+  return { ...intent, claim, authorizationHash: storeUsdcAuthorizationHash(claim) };
+}
+// 見積もりと食い違う claim (形は正しい)。claimSigned の入力と、保存された intent の parse の両方で使う。
+const CLAIM_MISMATCHES: [string, Partial<StoreUsdcAuthorizationClaim>][] = [
+  ['to', { to: OTHER_ADDRESS }],
+  ['value', { value: '1999999' }],
+  ['validAfter', { validAfter: '1' }],
+  ['validBefore (above the quote limit)', { validBefore: String(BigInt(quoted.authorizationValidBeforeMax) + 1n) }],
+  ['nonce', { nonce: OTHER_NONCE }],
+  ['payer', { payer: OTHER_ADDRESS }],
+];
+const BELOW_LIMIT = String(BigInt(quoted.authorizationValidBeforeMax) - 80n);
+// kvEval の 1 回の呼び出しに渡した引数のうち、intent の JSON として読めるもの。ARGV の何番目かは数えない
+// (位置は Lua との契約で、本物の Lua を通す test と storeWireCharacterization が見る)。
+const intentArgs = (call: unknown[]) => (call[2] as string[]).flatMap((arg) => parseStoreUsdcIntent(arg) ?? []);
+
+describe('PR-20 G15: parser rejects a stored claim that no longer matches the quote', () => {
+  it.each(CLAIM_MISMATCHES)('rejects a claimed intent whose stored claim %s differs, even when authorizationHash matches the claim', (_label, patch) => {
+    for (const intent of [signed, active, indeterminate, settled, failed]) {
+      expect(parseStoreUsdcIntent(JSON.stringify(withClaim(intent, patch)))).toBeNull();
+    }
+  });
+
+  // 上の行の対照: claim を差し替えて hash を作り直す形そのものは通る (validBefore は上限以下なら見積もりと違ってよい)。
+  it('accepts a stored claim whose validBefore is below the quote limit', () => {
+    for (const intent of [signed, active, indeterminate, settled, failed]) {
+      expect(parseStoreUsdcIntent(JSON.stringify(withClaim(intent, { validBefore: BELOW_LIMIT }))))
+        .toMatchObject({ state: intent.state, claim: { validBefore: BELOW_LIMIT } });
+    }
+  });
+
+  it.each([
+    ['an authorizationHash that is not the hash of the claim', { authorizationHash: 'f'.repeat(64) }],
+    ['a malformed authorizationHash', { authorizationHash: 'xyz' }],
+    ['no authorizationHash', { authorizationHash: undefined }],
+    ['no signedAt', { signedAt: undefined }],
+    ['a negative signedAt', { signedAt: -1 }],
+    ['no claim', { claim: undefined }],
+  ])('rejects a claimed intent with %s', (_label, patch) => {
+    for (const intent of [signed, active, indeterminate, settled, failed]) {
+      expect(parseStoreUsdcIntent(JSON.stringify({ ...intent, ...patch }))).toBeNull();
+    }
+  });
+
+  it.each([
+    ['settled without settledAt', { ...settled, settledAt: undefined }],
+    ['settled without txHash', { ...settled, txHash: undefined }],
+    ['settling without settlementStartedAt', { ...active, settlementStartedAt: undefined }],
+    ['settling without leaseUntil', { ...active, leaseUntil: undefined }],
+    ['settling without attemptId', { ...active, attemptId: undefined }],
+    ['indeterminate without indeterminateAt', { ...indeterminate, indeterminateAt: undefined }],
+    ['failed without failedAt', { ...failed, failedAt: undefined }],
+    ['failed without failureReason', { ...failed, failureReason: undefined }],
+  ])('rejects %s', (_label, intent) => {
+    expect(parseStoreUsdcIntent(JSON.stringify(intent))).toBeNull();
+  });
+});
+
+describe('PR-20 G13: create stops when the parent rail intent cannot be associated', () => {
+  const input = { ...quoted, payer: quoted.payerHint, anchorBlock: BigInt(quoted.anchorBlock), now: quoted.createdAt };
+
+  it.each([['storage', 'storage'], ['invalid', 'invalid'], ['corrupt', 'invalid']] as const)('association failure %s is reported as %s and nothing is stored', async (reason, outcome) => {
+    h.associate.mockResolvedValue({ ok: false, reason });
+    expect(await createQuotedStoreUsdcIntent(input)).toEqual({ ok: false, reason: outcome });
+    expect(h.associate).toHaveBeenCalledWith({
+      intentSalt: SALT, intentKey: key, payer: quoted.payerHint,
+      resourceId: quoted.resourceId, contentRevision: quoted.contentRevision, now: quoted.createdAt,
+    });
+    expect(h.kvEval).not.toHaveBeenCalled();
+  });
+});
+
+describe('PR-20 G5・G6: claimSigned admission', () => {
+  // 今の動きの固定で、仕様の裁定ではない。route (lib/x402/hostedUsdcPaidRoute.ts の `if (found.state === 'quoted')` の中)
+  // は quoted を読んだときだけ claimSigned を呼ぶ。ここの 4 つの state を読んだ要求は、claimSigned の手前で応答が決まる:
+  // settling / indeterminate / settled は期限の判定を飛ばし、保存済みの署名と完全に一致する再送なら 202 (settled は
+  // 確定済みの応答)。failed は quoted と同じく exactClaim の期限の判定を先に通り、期限切れなら 409
+  // purchase_intent_expired、通った場合は 409 purchase_intent_failed。だから同じ hash でここへ来るのは、route が quoted を
+  // 読んだ後に並行の要求が先に進めた競り合いのときだけ (そのとき route は 409 purchase_intent_conflict を返す)。
+  it.each([active, indeterminate, settled, failed])('reports conflict for a $state intent even when the authorization hash is the same', async (intent) => {
+    reads(key, intent);
+    expect(signInput().authorizationHash).toBe(intent.authorizationHash);
+    expect(await claimSignedStoreUsdcIntent(signInput())).toEqual(CONFLICT);
+    expect(h.kvEval).not.toHaveBeenCalled();
+  });
+
+  const otherClaim = { ...active.claim, signatureFingerprint: 'e'.repeat(64) };
+  // 下の 3 行目 (settling × 同じ hash) と 5 行目 (読み直しの storage) も今の動きの固定。3 行目は上の it.each と同じ競り合い、
+  // 5 行目は読み直しの KV 障害が storage でなく conflict (route は 503 でなく 409) になる。
+  it.each([
+    ['a signed intent with the same authorization', signed, { ok: true, kind: 'idempotent', intent: { state: 'signed', authorizationHash: active.authorizationHash } }],
+    ['a signed intent with another authorization', withClaim(signed, otherClaim), CONFLICT],
+    ['a settling intent with the same authorization', active, CONFLICT],
+    ['a missing intent', null, CONFLICT],
+    ['a storage failure', 'storage', CONFLICT],
+  ] as const)('after a lost signing CAS, re-reading %s decides the result without a second CAS', async (_label, latest, expected) => {
+    if (latest === 'storage') {
+      h.kvGet.mockReset().mockResolvedValueOnce({ ok: true, value: JSON.stringify(quoted) }).mockResolvedValue({ ok: false });
+    } else {
+      reads(key, quoted, latest);
+    }
+    h.kvEval.mockResolvedValue({ ok: true, value: -1 });
+    // 読み直したことは、読み直した値 (latest) で結果が変わることで見る (GET の回数は数えない)。
+    expect(await claimSignedStoreUsdcIntent(signInput())).toMatchObject(expected);
+    expect(h.kvEval).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(CLAIM_MISMATCHES)('refuses a well-formed claim whose %s differs from the quote, without a CAS', async (_label, patch) => {
+    reads(key, quoted);
+    const claim = { ...active.claim, ...patch };
+    expect(await claimSignedStoreUsdcIntent({ intentSalt: SALT, claim, authorizationHash: storeUsdcAuthorizationHash(claim), now: active.signedAt })).toEqual(CONFLICT);
+    // 形は正しいので intent を読むところまでは進む (読む前の拒否は下の件)。
+    expect(h.kvGet).toHaveBeenCalled();
+    expect(h.kvEval).not.toHaveBeenCalled();
+  });
+
+  // 上の行の対照: validBefore は見積もりの上限以下なら受ける。
+  it('accepts a claim whose validBefore is below the quote limit and stores that claim', async () => {
+    reads(key, quoted);
+    const claim = { ...active.claim, validBefore: BELOW_LIMIT };
+    const authorizationHash = storeUsdcAuthorizationHash(claim);
+    expect(await claimSignedStoreUsdcIntent({ intentSalt: SALT, claim, authorizationHash, now: active.signedAt }))
+      .toMatchObject({ ok: true, kind: 'claimed', intent: { state: 'signed', claim, authorizationHash } });
+    expect(intentArgs(h.kvEval.mock.calls[0]!))
+      .toContainEqual(expect.objectContaining({ state: 'signed', claim, authorizationHash, signedAt: active.signedAt }));
+  });
+
+  it.each([
+    ['an authorization hash that is not the hash of the claim', { authorizationHash: 'f'.repeat(64) }],
+    ['a malformed claim', { claim: { ...active.claim, signatureFingerprint: 'xyz' } }],
+  ])('refuses %s before reading the intent', async (_label, patch) => {
+    reads(key, quoted);
+    expect(await claimSignedStoreUsdcIntent({ ...signInput(), ...patch })).toEqual(CONFLICT);
+    expect(h.kvGet).not.toHaveBeenCalled();
+    expect(h.kvEval).not.toHaveBeenCalled();
+  });
+});
+
+describe('PR-20 G7・G12: claimSettlement admission and the lease', () => {
+  // fxQuoteExpiresAt 側の境界は既存の件が見ている。ここは保存された claim の validBefore 側 (期限の余白 5 秒)。
+  it.each([active.claim.validBefore, BELOW_LIMIT])('applies the 5 second safety margin to the stored claim validBefore %s', async (validBefore) => {
+    reads(key, withClaim(signed, { validBefore }));
+    const edge = Number(validBefore) * 1_000 - 5_000;
+    expect(edge).toBeLessThan(signed.fxQuoteExpiresAt);
+    expect(await claimStoreUsdcSettlement({ intentSalt: SALT, now: edge })).toEqual({ ok: false, reason: 'expired' });
+    expect(h.select).not.toHaveBeenCalled();
+    expect(h.kvEval).not.toHaveBeenCalled();
+    expect(await claimStoreUsdcSettlement({ intentSalt: SALT, now: edge - 1 })).toMatchObject({ ok: true, kind: 'claimed' });
+  });
+
+  it.each([quoted, failed])('reports conflict for a $state intent without touching the rail', async (intent) => {
+    reads(key, intent);
+    expect(await claimStoreUsdcSettlement({ intentSalt: SALT, now: active.settlementStartedAt })).toEqual(CONFLICT);
+    expect(h.select).not.toHaveBeenCalled();
+    expect(h.kvEval).not.toHaveBeenCalled();
+  });
+
+  it.each([['conflict', 'conflict'], ['storage', 'storage'], ['corrupt', 'storage'], ['not_found', 'storage']] as const)('rail selection failure %s is reported as %s and the intent stays signed (no CAS)', async (reason, outcome) => {
+    reads(key, signed);
+    h.select.mockResolvedValue({ ok: false, reason });
+    expect(await claimStoreUsdcSettlement({ intentSalt: SALT, now: active.settlementStartedAt })).toEqual({ ok: false, reason: outcome });
+    expect(h.select).toHaveBeenCalledWith({
+      parentIntentId: signed.parentIntentId, intentSalt: SALT, intentKey: key, payer: active.claim.payer,
+      resourceId: active.resourceId, contentRevision: active.contentRevision, rail: 'usdc', authorizationHash: active.authorizationHash,
+    });
+    expect(h.kvEval).not.toHaveBeenCalled();
+  });
+
+  // lease の 60 秒は動きの契約なので実値で固定する (定数を参照すると、値を変えても落ちない)。
+  it('holds a claimed settlement for a 60 second lease and schedules the next reconcile at the lease end', async () => {
+    reads(key, signed);
+    const now = active.settlementStartedAt;
+    expect(await claimStoreUsdcSettlement({ intentSalt: SALT, now })).toMatchObject({
+      ok: true, kind: 'claimed', intent: { state: 'settling', settlementStartedAt: now, leaseUntil: now + 60_000, nextReconcileAt: now + 60_000 },
+    });
+    // lease の終わりを script にも渡す (pending の score になることは、本物の Lua を通す lua-machine の件が見る)。
+    expect(h.kvEval.mock.calls[0]![2]).toContain(String(now + 60_000));
+  });
+});
+
+describe('PR-20 G16: mark / record admission', () => {
+  const input = { intentSalt: SALT, attemptId: active.attemptId, txHash: TX, now: NOW };
+
+  it.each([['storage', 'storage'], ['missing', 'conflict'], ['corrupt', 'conflict']] as const)('a %s read is reported as %s by both, without a CAS', async (scenario, outcome) => {
+    if (scenario === 'storage') h.kvGet.mockResolvedValue({ ok: false });
+    if (scenario === 'missing') reads(key, null);
+    if (scenario === 'corrupt') h.reads.set(key, ['{broken']);
+    expect(await recordStoreUsdcTransaction(input)).toBe(outcome);
+    expect(await markStoreUsdcIndeterminate(input)).toBe(outcome);
+    expect(h.kvEval).not.toHaveBeenCalled();
+  });
+
+  it.each([quoted, signed, settled, failed])('a $state intent is never recorded or marked indeterminate', async (intent) => {
+    reads(key, intent);
+    expect(await recordStoreUsdcTransaction(input)).toBe('conflict');
+    expect(await markStoreUsdcIndeterminate(input)).toBe('conflict');
+    expect(h.kvEval).not.toHaveBeenCalled();
+  });
+});
+
+describe('PR-20 G8: nonce lookup', () => {
+  it('a mapping that leads to an intent with another nonce is corrupt', async () => {
+    h.reads.set(storeUsdcNonceIntentKey(OTHER_NONCE), [SALT]);
+    expect(await findStoreUsdcIntentByNonce(OTHER_NONCE)).toBe('corrupt');
+  });
+
+  it('a missing mapping, or a mapping whose intent is gone, is null', async () => {
+    expect(await findStoreUsdcIntentByNonce(active.nonce)).toBeNull();
+    h.reads.set(storeUsdcNonceIntentKey(active.nonce), [SALT]);
+    reads(key, null);
+    expect(await findStoreUsdcIntentByNonce(active.nonce)).toBeNull();
+  });
+
+  it('a mapping whose intent cannot be parsed is corrupt', async () => {
+    h.reads.set(storeUsdcNonceIntentKey(active.nonce), [SALT]);
+    h.reads.set(key, ['{broken']);
+    expect(await findStoreUsdcIntentByNonce(active.nonce)).toBe('corrupt');
+  });
+});
+
+describe('PR-20 G1〜G4: finalize admission and finalizer reply handling', () => {
+  it.each([quoted, signed, failed])('refuses a $state intent before any chain call or KV write', async (intent) => {
+    reads(key, intent);
+    expect(await finalize()).toEqual(CONFLICT);
+    expect(h.verify).not.toHaveBeenCalled();
+    expect(h.kvEval).not.toHaveBeenCalled();
+    expect(h.release).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['settled', settled],
+    ['settling', { ...active, txHash: TX }],
+    ['indeterminate', { ...indeterminate, txHash: TX }],
+  ] as const)('refuses a %s intent whose stored hash differs from the input, before chain verification', async (_label, intent) => {
+    reads(key, intent);
+    expect(await finalize({ txHash: OTHER_TX })).toEqual(CONFLICT);
+    expect(h.verify).not.toHaveBeenCalled();
+    expect(h.kvEval).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [{ ok: true, value: 0 }, 'not_found'],
+    [{ ok: true, value: -3 }, 'corrupt'],
+    [{ ok: true, value: 7 }, 'conflict'],
+    [{ ok: false }, 'storage'],
+  ] as const)('maps finalizer reply %j to %s without releasing the rail', async (reply, reason) => {
+    h.kvEval.mockResolvedValue(reply);
+    expect(await finalize()).toEqual({ ok: false, reason });
+    expect(h.kvEval).toHaveBeenCalledTimes(1);
+    expect(h.release).not.toHaveBeenCalled();
+  });
+
+  // やり直しの上限は finalizer を呼んだ回数で見る (最初の 1 回 + やり直し 4 回)。その間のオンチェーンの照合や
+  // GET の回数は上限の契約でないので数えない。
+  it('retries a lost finalizer CAS four times, then reports conflict', async () => {
+    h.kvEval.mockResolvedValue({ ok: true, value: -1 });
+    expect(await finalize()).toEqual(CONFLICT);
+    expect(h.kvEval).toHaveBeenCalledTimes(5);
+    expect(h.release).not.toHaveBeenCalled();
+  });
+
+  it('retries a lost finalizer CAS from the re-read intent', async () => {
+    const rescheduled = { ...active, nextReconcileAt: NOW + 30_000, reconcileFromBlock: '95' };
+    reads(key, active, rescheduled);
+    h.kvEval.mockResolvedValueOnce({ ok: true, value: -1 }).mockResolvedValue({ ok: true, value: 1 });
+    expect(await finalize()).toMatchObject({ ok: true, kind: 'finalized', intent: { state: 'settled', txHash: TX, reconcileFromBlock: '95' } });
+    expect(h.kvEval).toHaveBeenCalledTimes(2);
+    // 1 回目は最初に読んだ全文を、2 回目は読み直した全文を finalizer に渡し (CAS の基準)、確定後の値も読み直した値から作る。
+    const [first, second] = h.kvEval.mock.calls;
+    expect(first![2]).toContain(JSON.stringify(active));
+    expect(second![2]).toContain(JSON.stringify(rescheduled));
+    expect(second![2]).not.toContain(JSON.stringify(active));
+    expect(intentArgs(second!)).toContainEqual(expect.objectContaining({ state: 'settled', txHash: TX, reconcileFromBlock: '95' }));
+    expect(h.release).toHaveBeenCalledTimes(1);
+  });
+
+  // 下の 3 行の対照: 既にある ownership・購入の記録・global claim が今回の確定と同じ中身なら、そのまま finalizer へ進む。
+  it('goes on to the finalizer when the existing ownership, purchase record and global claim match exactly', async () => {
+    reads(ownKey, fixture.ownership);
+    reads(purchaseKey, fixture.purchase);
+    h.reads.set(globalKey, [`r:store:${SALT}`]);
+    expect(await finalize()).toMatchObject({ ok: true, kind: 'finalized', ownership: fixture.ownership });
+    expect(h.kvEval).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['grant of the same intent', 'purchase record', 'global claim'] as const)('refuses an existing %s that disagrees with this settlement, after verification and without writing', async (scenario) => {
+    const earlier = settled.settledAt - 1;
+    const grant = { ...fixture.ownership.grants[0]!, purchasedAt: earlier };
+    reads(ownKey, scenario === 'grant of the same intent' ? { ...fixture.ownership, firstPurchasedAt: earlier, grants: [grant], latestGrant: grant } : fixture.ownership);
+    reads(purchaseKey, scenario === 'purchase record' ? { ...fixture.purchase, purchasedAt: earlier } : fixture.purchase);
+    h.reads.set(globalKey, [scenario === 'global claim' ? `r:store:0x${'77'.repeat(32)}` : `r:store:${SALT}`]);
+    expect(await finalize()).toEqual(CONFLICT);
+    expect(h.verify).toHaveBeenCalled();
+    expect(h.kvEval).not.toHaveBeenCalled();
+    expect(h.release).not.toHaveBeenCalled();
+  });
+});
+
+describe('PR-20 G12・G14・G17: reconciler entry conditions', () => {
+  it.each([quoted, settled, failed])('reconciling a $state intent writes nothing', async (intent) => {
+    reads(key, intent);
+    await reconcileStoreUsdcIntent(SALT, { now: NOW });
+    expect(h.kvEval).not.toHaveBeenCalled();
+    expect(h.release).not.toHaveBeenCalled();
+  });
+
+  // 期限切れ未使用の証明 (finalized block の RPC) は、壁時計が validBefore に達してからだけ求める。
+  it('does not ask for the expired-unused proof while the wall clock is before validBefore', async () => {
+    h.used.mockResolvedValue(false);
+    h.expired.mockResolvedValue(true);
+    const now = Number(active.claim.validBefore) * 1_000 - 1;
+    expect(await reconcileStoreUsdcIntent(SALT, { now })).toEqual({ ok: true, state: 'pending' });
+    expect(h.expired).not.toHaveBeenCalled();
+    expect(h.release).not.toHaveBeenCalled();
+    // 書くのは再試行の時刻の保存だけ: script に渡す intent はどれも settling のまま (failed にしない) で、次の照合は 30 秒後。
+    // pending に残ることは、本物の Lua を通す reconcile-lua の「30 秒後にもう一度拾う」件が見る。
+    const written = h.kvEval.mock.calls.flatMap(intentArgs);
+    expect(written).toContainEqual(expect.objectContaining({ state: 'settling', nextReconcileAt: now + 30_000 }));
+    expect(written.map((intent) => intent.state)).not.toContain('failed_prebroadcast');
+  });
+
+  // 走査の件数は引数で決まり、省略時は定数。値 (今は 50) そのものは運用で変えるので実値では縛らない。
+  it('lists due pending intents up to the given limit, defaulting to the batch size constant', async () => {
+    h.kvEval.mockResolvedValue({ ok: true, value: [] });
+    const none = { checked: 0, settled: 0, failed: 0, pending: 0, storageErrors: 0, deferred: 0 };
+    expect(await reconcilePendingStoreUsdcPurchases({ now: NOW })).toEqual(none);
+    expect(await reconcilePendingStoreUsdcPurchases({ now: NOW, limit: 7 })).toEqual(none);
+    // どちらも pending の index を、時刻 now までを上限に読む。件数は 1 回目が定数・2 回目が引数 (ARGV の位置は数えない)。
+    const [byDefault, byLimit] = h.kvEval.mock.calls;
+    for (const call of [byDefault!, byLimit!]) {
+      expect(call[1]).toEqual([storeUsdcPendingKey()]);
+      expect(call[2]).toContain(String(NOW));
+    }
+    expect(byDefault![2]).toContain(String(STORE_USDC_RECONCILE_BATCH_SIZE));
+    expect(byLimit![2]).toContain('7');
+    expect(h.kvEval).toHaveBeenCalledTimes(2);
   });
 });
