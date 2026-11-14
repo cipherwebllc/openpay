@@ -88,6 +88,11 @@ const ORDER_TABLE_STORAGE_PREFIX = 'openpay:order-table:';
 function orderTableNumber(dineIn: boolean | undefined, input: string): string {
   return dineIn ? input.trim() : '';
 }
+// 受付を確かめられなかった (通信の例外・429・500 以上) ときに、同じ画面で「押し直してください」の案内を出す回数の上限。
+// これを超えた失敗は、お店の停止と同じ表示にする (開き直すまで押す所が無い)。受付の確認の rate limit の枠は IP の
+// prefix で共有 (/checkout の送信とも共有) なので、1 つの画面からの押し直しが、同じ prefix のほかのお客様の枠を
+// 使い切る波及を小さく抑える。
+const ADMISSION_RETRY_NOTICE_MAX = 2;
 const ORDER_MEMO_MAX = 120;
 const ORDER_MEMO_STORAGE_PREFIX = 'openpay:order-memo:';
 
@@ -210,10 +215,11 @@ export function MobileOrderView({
   const [cartOpen, setCartOpen] = useState(prefilled);
   const [admissionPending, setAdmissionPending] = useState(false);
   const [admissionRejected, setAdmissionRejected] = useState(false);
-  // 受付の確認が「お店が止めている」以外の理由で通らなかったときの案内 (支払い欄の「支払いへ進む」のすぐ上)。
-  // 'retry' = 確かめられなかった (通信の失敗・429・500 以上)。'slot' = 選んだ受け取りの枠だけが過ぎていた。
-  // どちらも支払い欄を残し、押し直すと新しい確認を送る。通った確認を覚えておく state は持たない。
-  const [admissionNotice, setAdmissionNotice] = useState<'retry' | 'slot' | null>(null);
+  // 受付を確かめられなかった (通信の例外・429・500 以上) ときの案内 (支払い欄の「支払いへ進む」のすぐ上)。支払い欄を
+  // 残し、押し直すと新しい確認を送る。通った確認を覚えておく state は持たない。案内を出した回数は、この画面を
+  // 開いている間の合計で数える (注文を変えても数え直さない = 上限を回り込む道を作らない)。
+  const [admissionRetryNotice, setAdmissionRetryNotice] = useState(false);
+  const admissionRetryNoticeCountRef = useRef(0);
   // 受付の確認の応答の後に進むのは、押した時点の URL。応答を待つ間にお客様が注文の中身 (行き先の URL と確認の本文に
   // 効くもの) を変えたら、待っている確認を無効にして「支払いへ進む」を押し直せる状態に戻す。無効にしないと、画面は
   // 新しい額・進む先は変える前の注文になる。待つ間の操作を止める形にはしない (確認が返ってこないと、ずっと変えられない)。
@@ -337,8 +343,6 @@ export function MobileOrderView({
   }, [pickupAt, pickupSlotList]);
   const choosePickupAt = (value: number | null) => {
     if (value !== pickupAt) invalidateAdmission();
-    // 「最短に戻しました」の案内は、お客様が受け取り時間を選び直すと事実でなくなるので消す。
-    if (admissionNotice === 'slot') setAdmissionNotice(null);
     setPickupAt(value);
   };
 
@@ -605,7 +609,15 @@ export function MobileOrderView({
       // 押し直した次の確認の待ち状態も解かない。
       const gen = admissionGenRef.current;
       setAdmissionPending(true);
-      setAdmissionNotice(null);
+      setAdmissionRetryNotice(false);
+      // 押し直しの案内を出す。上限まで出した後は出さない (false = 呼ぶ側が、お店の停止と同じ表示にする)。
+      // 呼ぶのは世代の確認の後だけ (注文を変えて無効にした確認の失敗は数えない)。
+      const offerRetry = () => {
+        if (admissionRetryNoticeCountRef.current >= ADMISSION_RETRY_NOTICE_MAX) return false;
+        admissionRetryNoticeCountRef.current += 1;
+        setAdmissionRetryNotice(true);
+        return true;
+      };
       try {
         const response = await fetch('/api/order/admission', {
           method: 'POST',
@@ -621,30 +633,9 @@ export function MobileOrderView({
         if (gen !== admissionGenRef.current) return;
         if (!response.ok) {
           // 確かめられなかっただけの応答 (429・500 以上) は、お店が止めたとは言わない: 支払い欄を残して押し直せるままにする。
-          // 進むのは下の 1 行だけなので、押し直しても、その確認が通らなければ進まない。
-          if (response.status === 429 || response.status >= 500) {
-            setAdmissionNotice('retry');
-            return;
-          }
-          if (response.status === 409 && pickupAt !== null) {
-            // 本文が読めない 409 は、理由の分からない拒否として下の停止の表示にする (やり直せると決めない)。
-            const body = (await response.json().catch(() => null)) as { error?: unknown } | null;
-            // 本文を読む間にお客様が注文を変えていたら、この応答は使わない。
-            if (gen !== admissionGenRef.current) return;
-            const checkedAt = Date.now();
-            // 選んだ枠だけが過ぎていた場合: この端末の時計でもその枠が候補に無いときだけ、枠を「最短」に戻して続けられるようにする。
-            // 端末の候補に残っている枠を断られたとき (お店が準備時間やラストオーダーを変えた・端末の時計が遅い) は、選び直しても
-            // 同じ枠がまた出るので、下の停止の表示のまま。
-            if (
-              body?.error === 'pickup_slot_unavailable' &&
-              !pickupSlots(checkedAt, config.minLeadMinutes, config.lastOrder).includes(pickupAt)
-            ) {
-              setNow(checkedAt);
-              setPickupAt(null);
-              setAdmissionNotice('slot');
-              return;
-            }
-          }
+          // 進むのは下の 1 行だけなので、押し直しても、その確認が通らなければ進まない。それ以外の応答 (409 など) は、
+          // status だけで停止の表示にする (本文は読まない)。
+          if ((response.status === 429 || response.status >= 500) && offerRetry()) return;
           setAdmissionRejected(true);
           return;
         }
@@ -652,8 +643,8 @@ export function MobileOrderView({
       } catch {
         if (gen !== admissionGenRef.current) return;
         // 最新受付を確認できない障害から、不可逆な wallet 決済へ進む波及を断つため fail-closed (進まない)。
-        // 確かめられなかっただけなので、お店が止めたとは言わず、押し直せるままにする。
-        setAdmissionNotice('retry');
+        // 確かめられなかっただけなので、お店が止めたとは言わず、押し直せるままにする (上限まで)。
+        if (!offerRetry()) setAdmissionRejected(true);
       } finally {
         if (gen === admissionGenRef.current) setAdmissionPending(false);
       }
@@ -663,8 +654,6 @@ export function MobileOrderView({
       cartItems.length,
       cartLines,
       checkoutUrl,
-      config.lastOrder,
-      config.minLeadMinutes,
       config.mode,
       config.receiver,
       handle,
@@ -1027,13 +1016,7 @@ export function MobileOrderView({
           lastOrder={timeEnabled ? config.lastOrder : undefined}
           checkoutUrl={checkoutUrl}
           checkoutPending={awaitsOrderId || admissionPending}
-          checkoutNotice={
-            admissionNotice === 'retry'
-              ? t('admissionRetryNotice')
-              : admissionNotice === 'slot'
-                ? t('admissionSlotNotice')
-                : undefined
-          }
+          checkoutNotice={admissionRetryNotice ? t('admissionRetryNotice') : undefined}
           discountNote={
             config.discount && discountWei === 0n && orderWei > 0n
               ? t('discountNotAppliedNote')
