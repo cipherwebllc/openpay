@@ -2525,6 +2525,7 @@
     "copied": "Copied",
     "presetManagerTitle": "Edit products",
     "currencyMismatch": "This cart is {symbol}-only. Use a separate cart for other currencies.",
+    "cartFull": "A checkout can have up to {max} lines. Remove a line to add another item.",
     "cartEmpty": "Pick an item or add a custom one.",
     "removeLine": "Remove item",
     "memoLabel": "Memo",

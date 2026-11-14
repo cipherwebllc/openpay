@@ -935,6 +935,12 @@ function RegisterModeContent({
                   {t('currencyMismatch', { symbol })}
                 </p>
               )}
+              {/* 行が上限の間、押せないタイルと「自由入力」の理由を出す (押せる / 押せないは、上の disabled が決める)。 */}
+              {cart.length >= CHECKOUT_MAX_ITEMS && (
+                <p className="mt-3 text-xs text-amber-700">
+                  {t('cartFull', { max: CHECKOUT_MAX_ITEMS })}
+                </p>
+              )}
               {/* レジの商品 (有効な JPYC 商品) はそのままモバイル注文のメニュー。メニューにできる商品があるときだけ橋を出す。
                   PC はここ (商品カードの中)・スマホはご注文の後ろ (タイル → ご注文の間に挟まない)。 */}
               {startMobileOrder && (
@@ -1303,6 +1309,8 @@ function RegisterModeContent({
           canAdd={(choices) =>
             !noRoomFor(optionModalPreset, optionLineFor(optionModalPreset, choices).mergeTarget(cart))
           }
+          // 選ぶ画面は全面を覆い、タイルの下の案内が見えないので、押せない理由をボタンの上にも出す (同じ文)。
+          addBlockedNotice={t('cartFull', { max: CHECKOUT_MAX_ITEMS })}
           onConfirm={(choices) => addOptionLine(optionModalPreset, choices)}
           onClose={() => setOptionModalPreset(null)}
         />

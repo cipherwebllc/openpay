@@ -32,6 +32,7 @@ export function OptionSelectModal({
   options,
   symbol,
   canAdd,
+  addBlockedNotice,
   onConfirm,
   onClose,
 }: {
@@ -42,6 +43,8 @@ export function OptionSelectModal({
   symbol: string;
   /** いまの選択を足せるか (任意・渡さなければいつでも足せる)。false の間は「カートに追加」を押せない。 */
   canAdd?: (choices: OptionChoice[]) => boolean;
+  /** canAdd が false で押せない間、ボタンの上に出す理由の文 (任意・文は親が持つ・渡さなければ何も出さない)。 */
+  addBlockedNotice?: string;
   onConfirm: (
     choices: OptionChoice[],
     selections: { groupId: string; choiceId: string }[],
@@ -151,6 +154,9 @@ export function OptionSelectModal({
             </fieldset>
           ))}
         </div>
+        {addBlocked && addBlockedNotice && (
+          <p className="-mb-2 mt-4 text-xs text-amber-700">{addBlockedNotice}</p>
+        )}
         <div className="mt-4 flex items-center justify-between gap-2">
           <span className="text-sm font-bold text-slate-900">
             {priceText} {symbol}

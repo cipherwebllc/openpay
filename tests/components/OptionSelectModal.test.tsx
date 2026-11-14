@@ -32,7 +32,9 @@ const OPTIONS: OptionGroup[] = [
 ];
 
 /** はじめから開いたモーダル (canAdd を渡す / 渡さない)。 */
-function renderOpen(props: { canAdd?: (choices: OptionChoice[]) => boolean; options?: OptionGroup[] } = {}) {
+function renderOpen(
+  props: { canAdd?: (choices: OptionChoice[]) => boolean; addBlockedNotice?: string; options?: OptionGroup[] } = {},
+) {
   const onConfirm = vi.fn();
   renderWithIntl(
     <OptionSelectModal
@@ -42,6 +44,7 @@ function renderOpen(props: { canAdd?: (choices: OptionChoice[]) => boolean; opti
       options={props.options ?? OPTIONS}
       symbol="JPYC"
       canAdd={props.canAdd}
+      addBlockedNotice={props.addBlockedNotice}
       onConfirm={onConfirm}
       onClose={vi.fn()}
     />,
@@ -190,5 +193,67 @@ describe('OptionSelectModal: canAdd (いまの選択を足せるか)', () => {
 
     await user.click(screen.getByRole('checkbox', { name: /よく焼き/ }));
     expect(add()).toBeDisabled();
+  });
+});
+
+// 押せない理由の文は親が渡す (レジの行の上限)。モーダルは文を持たない = 渡さない画面 (モバイル注文) には何も出ない。
+describe('OptionSelectModal: addBlockedNotice (押せない間に出す理由の文)', () => {
+  const NOTICE = '親が渡した、足せない理由の文';
+  const dialog = () => screen.getByRole('dialog', { name: 'ラーメン' });
+  // 卵を選んだ選択だけ足せない。
+  const noEgg = (choices: OptionChoice[]) => !choices.some((c) => c.id === 'egg');
+
+  it('canAdd が false の間だけ「カートに追加」の前に出て、足せる選択に変えると消える', async () => {
+    const user = userEvent.setup();
+    const { add } = renderOpen({ canAdd: noEgg, addBlockedNotice: NOTICE });
+    expect(add()).toBeEnabled();
+    expect(screen.queryByText(NOTICE)).toBeNull();
+
+    await user.click(screen.getByRole('checkbox', { name: /卵/ }));
+    expect(add()).toBeDisabled();
+    const note = within(dialog()).getByText(NOTICE);
+    expect(note.compareDocumentPosition(add()) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+    // 文を足すだけ: ボタンの名前は変えず、aria-label も付けない。
+    expect(add()).toHaveAccessibleName('カートに追加');
+    expect(add()).not.toHaveAttribute('aria-label');
+
+    await user.click(screen.getByRole('checkbox', { name: /卵/ }));
+    expect(add()).toBeEnabled();
+    expect(screen.queryByText(NOTICE)).toBeNull();
+  });
+
+  it('文を渡さなければ、canAdd が false で押せない間も何も出ない (空の段落も足さない)', async () => {
+    const user = userEvent.setup();
+    const { add } = renderOpen({ canAdd: noEgg });
+    await user.click(screen.getByRole('checkbox', { name: /卵/ }));
+    expect(add()).toBeDisabled();
+    expect(dialog().querySelector('p')).toBeNull();
+  });
+
+  it('canAdd を渡さない画面では、文を渡しても出ない (いつでも押せる)', async () => {
+    const user = userEvent.setup();
+    const { add } = renderOpen({ addBlockedNotice: NOTICE });
+    await user.click(screen.getByRole('checkbox', { name: /卵/ }));
+    expect(add()).toBeEnabled();
+    expect(screen.queryByText(NOTICE)).toBeNull();
+  });
+
+  it('必須のグループが未選択の間は出ない (「選択してください」と同時に出ない)・選ぶと「選択してください」が消えて文が出る', async () => {
+    const user = userEvent.setup();
+    const { add } = renderOpen({
+      canAdd: () => false,
+      addBlockedNotice: NOTICE,
+      options: [{ id: 'must', name: '焼き方', type: 'multi', required: true, choices: [{ id: 'w', label: 'よく焼き', priceDelta: '0' }] }],
+    });
+    expect(add()).toBeEnabled();
+    expect(screen.queryByText(NOTICE)).toBeNull();
+    await user.click(add());
+    expect(screen.getByText('選択してください')).toBeInTheDocument();
+    expect(screen.queryByText(NOTICE)).toBeNull();
+
+    await user.click(screen.getByRole('checkbox', { name: /よく焼き/ }));
+    expect(add()).toBeDisabled();
+    expect(screen.queryByText('選択してください')).toBeNull();
+    expect(screen.getByText(NOTICE)).toBeInTheDocument();
   });
 });
