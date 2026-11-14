@@ -17,9 +17,14 @@
 //     payload や statusToken を送りうる (effect A のコメント)。
 //   - 1 が読めない URL を「自社でない」にする: 不正な callback が、関係のない会計の画面に受注の復旧の警告を出さないため
 //     (isOwnOrderNotifyUrl のコメント)。
-//   - 2 が読み直した画面でだけ `h` と `store_handle` を照らす: 読み直した画面の部分の通知は、保存した送金の hash を今の URL の
-//     items / orderId に結び付けて送る (effect D の「fingerprint が一致しない復元 hash を現在 URL の … へ通知する波及を断つ」)。
-//     `h` を照らす条件そのものの理由と、4 と違って `@` を外さない理由は、記録に無い。
+//   - 2 が読み直した画面でだけ `h` と `store_handle` を照らす: 読み直した画面の部分の通知は、保存した送金の hash を今の URL に
+//     結び付けて、URL の webhook の文字列そのままへ送る。結び付けてよいかは会計の指紋 (lib/checkoutIntentContext.ts の
+//     checkoutIntentContextFingerprint) で確かめるが、指紋の値の列に `store_handle` は入っていて、webhook は入っていない
+//     (「callback URL … は入力にせず」)。指紋が合っても webhook の `h` が別のお店を指す URL だと、そのお店へ通知してしまうので、
+//     `h` を `store_handle` と照らす (tests/components/CheckoutForm.test.tsx の「standard reload: fingerprint が一致しても
+//     webhook handle が店舗と違えば通知しない」。この条件とテストは commit 0e268d38 で一緒に入った)。
+//     この画面で払ったとき (復元ではなく、指紋も使わない) は照らさない。
+//     4 と違って `@` を外さない理由は、記録に無い。
 //   - 3 が `h` 1 つを求める: 自社の URL なのに注文を束ねられないまま送金に進ませない (catch のコメント
 //     「Storage/invalid own-origin context must not broadcast an order with a missing opening」)。
 //     読めない URL が「URL が不正」でなく「保存できない」の案内になるのは、移す前に `new URL` の例外が catch の

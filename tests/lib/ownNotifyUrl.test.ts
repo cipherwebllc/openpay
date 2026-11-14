@@ -108,28 +108,69 @@ describe('parseOwnOrderNotifyUrl', () => {
 });
 
 // =====================================================================================================================
-// 柵: 5 つ目の実装を足させない
+// 柵: 5 つ目の実装が足されたら気づく (尽くしてはいない)
 // =====================================================================================================================
 // 「自社の notify の URL か」の解析は lib/order/ownNotifyUrl.ts だけ。client 側 (components/・hooks/・lib/) のコードに、
 // path の文字列 `api/order/notify` が、宛先を組む形のほかで現れたら落とす (pathname との比較・endsWith・正規表現・定数への代入も)。
-// コメントは見ない (構文木の文字列・テンプレート・正規表現だけ)。app/ (server の route) は見ない。
+// コメントは見ない (構文木の文字列・テンプレート・正規表現だけ)。
+//
+// この柵が見ていないもの (ここを通れば 5 つ目の判定は書ける。素直に書いた 5 つ目に気づくための柵で、必ず止めるものではない):
+//   - 文字列を分けて組む形 (`'/api/order/' + 'notify'`・`['api', 'order', 'notify'].join('/')` など)。
+//   - app/ の中 (server の route と page)。見るのは SCANNED_ROOTS だけ。
+//   - SCANNED_ROOTS の外 (app/・外の package) で定数にして、import して持ち込む形。
+//   - 宛先として組んだ `new URL(…)` を変数に置き、別の文でその `.pathname` / `.origin` を比べる形
+//     (同じ式の中で読む・比べる形だけ、下の comparesCreatedUrl が落とす)。
 const NEEDLE = 'api/order/notify';
+const NOTIFY_PATH = '/api/order/notify';
 const OWN_PARSER_FILE = 'lib/order/ownNotifyUrl.ts';
 const SCANNED_ROOTS = ['components', 'hooks', 'lib'];
-// 宛先を組む形のうち `new URL('/api/order/notify', …)` はいくつあってもよい (下の isDestinationOfNewUrl)。
+// 宛先を組む `new URL('/api/order/notify…', …)` はいくつあってもよい (下の notifyDestinationNewUrl)。
 // それ以外の形で path の文字列を持ってよい所は、ここに 1 つずつ書く (file → その式の字)。
 const ALLOWED_OTHER_USES: Record<string, string[]> = {
   // モバイル注文の画面が、/checkout へ渡す webhook の URL を組む (宛先。判定ではない)。
   'components/MobileOrderView.tsx': ['`${origin}/api/order/notify?h=${encodeURIComponent(handle)}`'],
 };
+// 組んだ URL から読むと「判定」になる部分。
+const COMPARED_PARTS = new Set(['pathname', 'origin']);
+const EQUALITY_OPERATORS = new Set([
+  ts.SyntaxKind.EqualsEqualsEqualsToken, ts.SyntaxKind.ExclamationEqualsEqualsToken,
+  ts.SyntaxKind.EqualsEqualsToken, ts.SyntaxKind.ExclamationEqualsToken,
+]);
 
 type Use = { file: string; line: number; text: string; destination: boolean };
 
-function isDestinationOfNewUrl(node: ts.Node): boolean {
+// 宛先を組む形: `new URL(<ここ>, …)` の 1 つ目の引数で、path がちょうど '/api/order/notify' (後ろは無いか、query か fragment)。
+// テンプレートは最初の `${` の前の字で見る (path の直後に置換が続く `/api/order/notify${x}` は、別の path になりうるので通さない)。
+function notifyDestinationNewUrl(node: ts.Node): ts.NewExpression | null {
+  const head = ts.isStringLiteralLike(node) ? node.text : ts.isTemplateExpression(node) ? node.head.text : null;
+  if (head === null || !head.startsWith(NOTIFY_PATH)) return null;
+  const rest = head.slice(NOTIFY_PATH.length);
+  if (!(ts.isTemplateExpression(node) ? /^[?#]/ : /^(?:[?#]|$)/).test(rest)) return null;
   const parent = node.parent;
-  return ts.isStringLiteralLike(node) && node.text === '/api/order/notify' &&
-    ts.isNewExpression(parent) && ts.isIdentifier(parent.expression) && parent.expression.text === 'URL' &&
-    parent.arguments?.[0] === node;
+  return ts.isNewExpression(parent) && ts.isIdentifier(parent.expression) && parent.expression.text === 'URL' &&
+    parent.arguments?.[0] === node ? parent : null;
+}
+
+// 組んだ URL を、同じ式の中で判定に使っているか: `.pathname` / `.origin` を読む、または (`.href`・`.toString()` などを挟んでも)
+// `===` / `!==` / `==` / `!=` の片側になる。宛先として使うだけ (変数に置く・fetch に渡す・文字列にする) なら false。
+function comparesCreatedUrl(created: ts.NewExpression): boolean {
+  let node: ts.Node = created;
+  for (;;) {
+    const parent = node.parent;
+    if (ts.isParenthesizedExpression(parent) || ts.isAsExpression(parent) || ts.isSatisfiesExpression(parent) || ts.isNonNullExpression(parent)) {
+      node = parent;
+    } else if (ts.isPropertyAccessExpression(parent) && parent.expression === node) {
+      if (COMPARED_PARTS.has(parent.name.text)) return true;
+      node = parent;
+    } else if (ts.isElementAccessExpression(parent) && parent.expression === node) {
+      if (ts.isStringLiteralLike(parent.argumentExpression) && COMPARED_PARTS.has(parent.argumentExpression.text)) return true;
+      node = parent;
+    } else if (ts.isCallExpression(parent) && parent.expression === node) {
+      node = parent;
+    } else {
+      return ts.isBinaryExpression(parent) && EQUALITY_OPERATORS.has(parent.operatorToken.kind);
+    }
+  }
 }
 
 function usesOfNotifyPath(file: string, source: string): Use[] {
@@ -143,11 +184,12 @@ function usesOfNotifyPath(file: string, source: string): Use[] {
           : ts.isRegularExpressionLiteral(node) ? node.text.replaceAll('\\/', '/')
             : null;
     if (text !== null && text.includes(NEEDLE)) {
+      const created = notifyDestinationNewUrl(node);
       found.push({
         file,
         line: tree.getLineAndCharacterOfPosition(node.getStart(tree)).line + 1,
         text: node.getText(tree),
-        destination: isDestinationOfNewUrl(node),
+        destination: created !== null && !comparesCreatedUrl(created),
       });
     }
     ts.forEachChild(node, visit);
@@ -179,17 +221,58 @@ describe('柵: 自社の notify の URL の判定は parseOwnOrderNotifyUrl だ�
     ['switch の case', "switch (url.pathname) { case '/api/order/notify': break; }"],
     ['new URL の 2 つ目の引数', "const url = new URL(path, '/api/order/notify');"],
     ['URL でない class の引数', "const url = new Request('/api/order/notify');"],
-    ['new URL でも query つきの字', "const url = new URL('/api/order/notify?h=alice', origin);"],
+    // new URL の 1 つ目の引数でも、path が '/api/order/notify' ちょうどでないものは宛先として通さない。
+    ['new URL の path の後ろに別の segment', "const url = new URL('/api/order/notify/extra', origin);"],
+    ['new URL の path の後ろに字が続く', "const url = new URL('/api/order/notifyx', origin);"],
+    ['new URL の path の直後に置換が続くテンプレート', 'const url = new URL(`/api/order/notify${suffix}`, origin);'],
+    ['new URL の path の前に別の segment', "const url = new URL('/ja/api/order/notify', origin);"],
   ])('判定に使える形は見つける: %s', (_name, source) => {
     const found = scan(source);
     expect(found).toHaveLength(1);
     expect(found[0].destination).toBe(false);
   });
 
+  // (a) 宛先を組む new URL は、query つき・fragment つき・テンプレートでも通す。組んだものを宛先として使うだけなら通す。
   it.each([
     ['new URL の 1 つ目の引数', "const url = new URL('/api/order/notify', window.location.origin);"],
-  ])('宛先を組む形は対象にしない: %s', (_name, source) => {
+    ['query つきの字', "const url = new URL('/api/order/notify?h=alice', origin);"],
+    ['fragment つきの字', "const url = new URL('/api/order/notify#x', origin);"],
+    ['query を置換で組むテンプレート', 'const url = new URL(`/api/order/notify?h=${encodeURIComponent(handle)}`, origin);'],
+    ['置換の無いテンプレート', 'const url = new URL(`/api/order/notify`, origin);'],
+    ['組んでから searchParams に足す', "const url = new URL('/api/order/notify', origin);\nurl.searchParams.set('h', handle);"],
+    ['文字列にして変数に置く (toString)', "const target = new URL('/api/order/notify', origin).toString();"],
+    ['文字列にして変数に置く (href)', "const target = new URL('/api/order/notify?h=alice', origin).href;"],
+    ['fetch に渡す', "void fetch(new URL('/api/order/notify', origin), { method: 'POST' });"],
+    ['searchParams を読む', "const h = new URL('/api/order/notify?h=alice', origin).searchParams.get('h');"],
+  ])('(a) 宛先を組む形は対象にしない: %s', (_name, source) => {
     expect(scan(source)).toEqual([expect.objectContaining({ destination: true })]);
+  });
+
+  // (b) 宛先の形の new URL でも、組んだものを同じ式の中で判定に使えば落とす (前は「宛先」として通っていた)。
+  it.each([
+    ['pathname を読んで比べる', "const own = url.origin === origin && url.pathname === new URL('/api/order/notify', origin).pathname;"],
+    ['比較の左右が逆', "const own = new URL('/api/order/notify', origin).pathname !== url.pathname;"],
+    ['origin を読んで比べる', "const own = url.origin === new URL('/api/order/notify?h=alice', origin).origin;"],
+    ['pathname を読んで変数に置く', "const path = new URL('/api/order/notify', origin).pathname;"],
+    ['pathname を [] で読む', "const path = new URL('/api/order/notify', origin)['pathname'];"],
+    ['括弧と as を挟んで pathname を読む', "const path = (new URL('/api/order/notify', origin) as URL).pathname;"],
+    ['pathname を読んでから method を呼ぶ', "const own = new URL('/api/order/notify', origin).pathname.endsWith(url.pathname);"],
+    ['href を比べる', "const own = url.href === new URL('/api/order/notify', origin).href;"],
+    ['toString を比べる', "const own = webhook === new URL('/api/order/notify?h=alice', origin).toString();"],
+    ['緩い比較 (!=)', "const other = webhook != new URL('/api/order/notify', origin).href;"],
+    ['テンプレートで組んで比べる', 'const own = webhook === new URL(`/api/order/notify?h=${handle}`, origin).href;'],
+  ])('(b) 組んだ URL を同じ式の中で判定に使う形は見つける: %s', (_name, source) => {
+    const found = scan(source);
+    expect(found).toHaveLength(1);
+    expect(found[0].destination).toBe(false);
+  });
+
+  // 柵の限界 (冒頭のコメント) を、通ってしまう例として固定する。ここが落ちたら、柵が広がったので冒頭のコメントを直す。
+  it.each([
+    ['文字列を分けて組む', "const own = url.pathname === '/api/order/' + 'notify';", []],
+    ['変数に置いた new URL を別の文で比べる', "const target = new URL('/api/order/notify', origin);\nconst own = url.pathname === target.pathname;", [true]],
+  ])('見ていない形 (通ってしまう): %s', (_name, source, destinations) => {
+    expect(scan(source).map((use) => use.destination)).toEqual(destinations);
   });
 
   it.each([
