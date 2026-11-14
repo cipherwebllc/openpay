@@ -18,6 +18,7 @@ import type { useStandardPayment } from '@/hooks/useStandardPayment';
 import type { ChainSlug } from '@/lib/chains';
 import { env } from '@/lib/env';
 import { logger } from '@/lib/logger';
+import { parseOwnOrderNotifyUrl } from '@/lib/order/ownNotifyUrl';
 import type { CanonicalOrder } from '@/lib/orderBind';
 import type { OrderDelivery } from '@/lib/orderDelivery';
 import { generateStatusToken } from '@/lib/orderStatusToken';
@@ -132,14 +133,11 @@ async function postOrderNotify(
   return response;
 }
 
+// origin と pathname だけを見る (`h` は見ない)。使う所ごとの方針の差は lib/order/ownNotifyUrl.ts の冒頭の表。
 export function isOwnOrderNotifyUrl(webhook: string, origin: string): boolean {
-  try {
-    const url = new URL(webhook);
-    return url.origin === origin && url.pathname === '/api/order/notify';
-  } catch {
-    // An invalid callback must not make unrelated checkout pages display order-recovery warnings.
-    return false;
-  }
+  // An invalid callback must not make unrelated checkout pages display order-recovery warnings
+  // (読めない URL は 'unreadable' = 自社でない)。
+  return parseOwnOrderNotifyUrl(webhook, origin).kind === 'own';
 }
 
 function isRetryableOrderNotify(status: number, body: { error?: string; bindingConflict?: boolean } | null): boolean {
@@ -503,20 +501,17 @@ export function useCheckoutOrderNotify(args: UseCheckoutOrderNotifyArgs) {
     if (!attempt) return;
     const { snapshot } = attempt;
 
-    let isOrderNotifyWebhook = false;
-    try {
-      const webhook = new URL(params.webhook);
-      isOrderNotifyWebhook =
-        webhook.origin === window.location.origin &&
-        webhook.pathname === '/api/order/notify' &&
-        (mountedSnapshot !== null ||
-          (!!params.storeHandle &&
-            webhook.searchParams.getAll('h').length === 1 &&
-            webhook.searchParams.get('h')?.toLowerCase() ===
-              params.storeHandle.toLowerCase()));
-    } catch {
-      isOrderNotifyWebhook = false;
-    }
+    // この画面で払ったとき (mountedSnapshot あり) は自社の URL であることだけ。読み直した画面では、加えて `h` がちょうど 1 つで、
+    // お店の @handle (store_handle) と大文字小文字を除いて同じこと (`@` は外さない)。読めない URL は自社でない = 送らない。
+    // ほかの所との方針の差は lib/order/ownNotifyUrl.ts の冒頭の表。
+    const webhook = parseOwnOrderNotifyUrl(params.webhook, window.location.origin);
+    const isOrderNotifyWebhook =
+      webhook.kind === 'own' &&
+      (mountedSnapshot !== null ||
+        (!!params.storeHandle &&
+          webhook.handles.length === 1 &&
+          webhook.handles[0].toLowerCase() ===
+            params.storeHandle.toLowerCase()));
     if (!isOrderNotifyWebhook) return;
     const partialNotifyKey =
       `${standard.merchantTxHash}:${standard.feeTxHash ?? 'awaiting'}`;

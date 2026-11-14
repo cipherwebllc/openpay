@@ -1,3 +1,4 @@
+import { parseOwnOrderNotifyUrl } from '@/lib/order/ownNotifyUrl';
 import type { CanonicalOrder } from '@/lib/orderBind';
 import type { RelayIntentMetadata } from '@/lib/paymentIntentStorage';
 
@@ -21,11 +22,13 @@ export function matchesOrderDeliveryContext(order: CanonicalOrder, context: Orde
     (context.orderId !== undefined && context.orderId !== order.orderId) || !context.webhook) return false;
   try {
     if (BigInt(intent.merchantValue) + BigInt(intent.feeValue) !== context.totalValue) return false;
-    const url = new URL(context.webhook);
-    return url.origin === origin && url.pathname === '/api/order/notify' &&
-      url.searchParams.getAll('h').length === 1 && normalizeHandle(url.searchParams.get('h')!) === order.handle;
+    // An invalid current callback cannot attribute a different checkout's saved payment here
+    // (読めない URL は 'unreadable' = 自社でない)。`h` がちょうど 1 つで、正規化して保存した注文の handle と同じこと。
+    // ほかの所との方針の差は lib/order/ownNotifyUrl.ts の冒頭の表。
+    const webhook = parseOwnOrderNotifyUrl(context.webhook, origin);
+    return webhook.kind === 'own' && webhook.handles.length === 1 && normalizeHandle(webhook.handles[0]) === order.handle;
   } catch {
-    // An invalid current callback cannot attribute a different checkout's saved payment here.
+    // 保存した額が数として読めない (BigInt が投げる) 記録を、この会計のものとして扱わない。
     return false;
   }
 }
