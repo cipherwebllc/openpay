@@ -1447,6 +1447,89 @@ describe('MobileOrderView — 「支払いへ進む」: 受付の確認を通る
     expect(assignSpy.mock.calls).toEqual([[href]]);
   });
 
+  // 後から届く応答。送れる本数を数え始める前 (最初の失敗の前) から飛んでいた確認は、数に入っていない。その確認が
+  // 後から失敗で返っても、送れる本数は増えも減りもしない (減らすのは送る時だけ)。
+  it('再描画の前の二度押しで 2 本飛び、1 本目の失敗の後に押し直してから、2 本目が後から失敗で返っても、送れる本数は変わらない: 案内が出て、もう 1 本だけ送れる。その失敗で止まった表示 (確認は 2 + 2 = 4 本)', async () => {
+    const gate = gatedFetches();
+    renderWithIntl(<MobileOrderView config={config} handle={HANDLE} />);
+    add('ブレンド');
+    await doublePress();
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+
+    // 1 本目が失敗: ここから、送れるのは 2 本。
+    await gate.respond(0, unavailable());
+    expect(notice()?.textContent).toBe(TEXT.retryNotice);
+
+    // 押し直す (残り 1 本)。最初から飛んでいた 2 本目が、その後に失敗で返る。
+    fireEvent.click(payLink()!);
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
+    await gate.respond(1, unavailable());
+
+    // 残りは 1 本のまま: 止まった表示ではなく案内で、押し直せる。
+    expect(screen.queryByText(TEXT.closed)).toBeNull();
+    expect(notice()?.textContent).toBe(TEXT.retryNotice);
+
+    // 最後の 1 本。その失敗で止まる。
+    fireEvent.click(payLink()!);
+    expect(fetchSpy).toHaveBeenCalledTimes(4);
+    await gate.respond(3, unavailable());
+
+    expect(screen.getByText(TEXT.closed)).toBeInTheDocument();
+    expect(notice()).toBeNull();
+    expect(payLink()).toBeNull();
+    expect(payButton()).toBeNull();
+
+    // 押し直しの 1 本目 (まだ返っていなかった確認) が失敗で返っても、そのまま。
+    await gate.respond(2, unavailable());
+
+    expect(fetchSpy).toHaveBeenCalledTimes(4);
+    expect(assignSpy).not.toHaveBeenCalled();
+    expect(screen.getByText(TEXT.closed)).toBeInTheDocument();
+    expect(payLink()).toBeNull();
+  });
+
+  it('再描画の前の二度押しの 2 本が、同じ描画の間に 2 本とも失敗で返っても、送れる本数は 2 本のまま (2 本目の失敗で書き換えない・減らさない): 押し直しの 1 本目の失敗では案内、2 本目の失敗で止まった表示 (確認は 2 + 2 = 4 本)', async () => {
+    const rejects: ((error: Error) => void)[] = [];
+    fetchSpy.mockImplementation(
+      () =>
+        new Promise<Response>((_resolve, reject) => {
+          rejects.push(reject);
+        }),
+    );
+    const failTogether = async (...indexes: number[]) => {
+      await act(async () => {
+        for (const index of indexes) rejects[index](new TypeError('Failed to fetch'));
+        for (let i = 0; i < 5; i++) await Promise.resolve();
+      });
+    };
+    renderWithIntl(<MobileOrderView config={config} handle={HANDLE} />);
+    add('ブレンド');
+    await doublePress();
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+
+    await failTogether(0, 1);
+
+    expect(screen.queryByText(TEXT.closed)).toBeNull();
+    expect(notice()?.textContent).toBe(TEXT.retryNotice);
+
+    // 押し直しの 1 本目 (残り 1 本) の失敗: まだ送れるので案内。
+    fireEvent.click(payLink()!);
+    await failTogether(2);
+    expect(screen.queryByText(TEXT.closed)).toBeNull();
+    expect(notice()?.textContent).toBe(TEXT.retryNotice);
+
+    // 押し直しの 2 本目 (これで使い切る) の失敗: 止まった表示。
+    fireEvent.click(payLink()!);
+    await failTogether(3);
+
+    expect(fetchSpy).toHaveBeenCalledTimes(4);
+    expect(assignSpy).not.toHaveBeenCalled();
+    expect(screen.getByText(TEXT.closed)).toBeInTheDocument();
+    expect(notice()).toBeNull();
+    expect(payLink()).toBeNull();
+    expect(payButton()).toBeNull();
+  });
+
   // お店の側の拒否と、知らない応答。やり直せると決めない。409 は理由によらず止まった表示 (本文は読まない)。
   const stopResponses: { name: string; response: () => Response }[] = [
     { name: '400', response: () => refused(400, 'invalid_request') },
