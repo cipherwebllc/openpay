@@ -1257,7 +1257,7 @@ describe('MobileOrderView — 「支払いへ進む」: 受付の確認を通る
   it.each([
     { slot: '12:30', clockAhead: 0 },
     { slot: '12:45', clockAhead: 1 },
-  ])('端末の時計ではまだ候補に残っている枠 ($slot・時計 +$clockAhead ms) への 409 pickup_slot_unavailable は、止まった表示', async ({ slot, clockAhead }) => {
+  ])('端末の時計ではまだ候補に残っている枠 $slot (時計は開いたときから +$clockAhead ms) への 409 pickup_slot_unavailable は、止まった表示', async ({ slot, clockAhead }) => {
     fetchSpy.mockImplementation(async () => refused(409, 'pickup_slot_unavailable'));
     renderWithIntl(<MobileOrderView config={slotConfig} handle={HANDLE} />);
     add('ブレンド');
