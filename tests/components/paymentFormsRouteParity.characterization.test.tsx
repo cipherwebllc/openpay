@@ -3,7 +3,8 @@
 //
 // この後の PR-16〜18 (経路の決め方を hooks/usePaymentRoute.ts へ出す) は、この file を 1 字も変えずに緑のまま通す。そのため、
 // 見るのは描かれた DOM (明細の行・ボタン) と外への呼び出し (mock した hook と resolver に渡った引数・mutate に渡った値) だけで、
-// 部品の中の変数名・式の形・hook や resolver を呼んだ回数と順番には触れない (見るのは「最後に渡った引数」と「渡った引数の集合」)。
+// 部品の中の変数名・式の形・hook や resolver を呼んだ回数と順番には触れない (見るのは「渡った引数の組の集合」。hook は引数の
+// 全部を比べ、省いた引数は既定値として読む)。
 //
 // 3 つのフォームの、意図して違う 5 点 (どれも今の動き。表の期待の列をフォームごとに持つ理由):
 //
@@ -26,8 +27,8 @@
 //   表 1 経路の表     準備ができた状態で、経路 × token × paymaster の組ごとに、hook の引数・resolver の引数・明細の行・ボタン・
 //                     押した後に mutate へ渡る値。
 //   表 2 ボタンの表   経路の類 × ウォレットの状態ごとに、ボタンの文言と押せるか。
-//   表 3 経路が変わる・変わらない場面  ウォレットが別の chain・復元した通常決済の試み・「通常決済に切替」・送った後の固定・
-//                     復元した relay の注文。
+//   表 3 経路が変わる・変わらない場面  ウォレットが別の chain・復元した通常決済の試み・「通常決済に切替」・描いた後に入力が
+//                     変わる (params の chain・ウォレットの chain・復元した試み)・送った後の固定・復元した relay の注文。
 //
 // 期待の書き方: 画面の文は i18n の key で書き (文言を直す PR で動かないように)、テストの中で messages/ja.json から引いて比べる。
 // 額は字で書く。
@@ -41,8 +42,11 @@
 //     引数を見ない mock (vi.fn(() => 'pimlico-7702')) なので、上の (a) はここで初めて固定される。token も本物と同じく見る
 //     (JPYC でなければ relay と答えない・USDC でなければ Circle と答えない)。
 //   - 支払いの hook の mock は enabled を見る: enabled=false なら data を返さない (本物と同じ向き)。
-//   - env は、手元の設定に左右されないよう recoverFeeBps=0・enableTipMessage=false に固定し、enableMobileOrderFee (本番と同じ ON が
-//     既定) と enableUsdcArc (既定 OFF) を getter にする。enableUsdcArc を ON にするのは Pay の Arc の行だけで、URL の chain=arc を
+//   - 経路が変わる場面は、resolver の答えの表を変えずに、実際の入力 (URL / params・ウォレットの chain・hook が返す状態) を変えて
+//     描き直す。入力が同じなら答えも同じなので、経路の計算を (入力を全部依存に入れて) memo しても、この file は通る。
+//   - env は、手元の設定に左右されないよう enableTipMessage=false に固定し、enableMobileOrderFee (本番と同じ ON が既定)・
+//     enableUsdcArc (既定 OFF)・recoverFeeBps (既定 0) を getter にする。recover の利用料の下限 (relayGasFeeValue) も env で
+//     決まる値なので mock し、行が chain ごとの値を与える (既定は 2 JPYC)。enableUsdcArc を ON にするのは Pay の Arc の行だけで、URL の chain=arc を
 //     通すため (lib/chains の isValidChainSlug が呼ばれたときに読む)。module の読み込みで決まる定数 (USDC_CHAINS など) は動かない。
 //
 // 表に入れていないもの (ここでは固定しない): 止める理由の文 (error の箱・fallback の案内)・受注通知 (PR-12 の
@@ -95,7 +99,7 @@ vi.mock('@/lib/jpycGaslessProvider', async () => {
 });
 vi.mock('@/lib/relay/forwarderConfig', async () => {
   const actual = await vi.importActual<typeof import('@/lib/relay/forwarderConfig')>('@/lib/relay/forwarderConfig');
-  // relayGasFeeValue = recover の利用料の下限 (2 JPYC)。env で決まる値なので固定する (兄弟のテストと同じ)。
+  // relayGasFeeValue = recover の利用料の下限。env で決まる値なので、行が chain ごとの値を与える (既定は 2 JPYC)。
   return { ...actual, jpycForwarderFor: vi.fn(() => null), relayGasFeeValue: vi.fn(() => 2n * 10n ** 18n) };
 });
 vi.mock('@/lib/pimlico', async () => {
@@ -120,15 +124,17 @@ vi.mock('@/components/CrossChainHint', async () => {
     },
   };
 });
-const flags = vi.hoisted(() => ({ enableMobileOrderFee: true, enableUsdcArc: false }));
+const flags = vi.hoisted(() => ({ enableMobileOrderFee: true, enableUsdcArc: false, recoverFeeBps: 0 }));
 vi.mock('@/lib/env', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/env')>();
   return {
     ...actual,
     env: {
       ...actual.env,
-      recoverFeeBps: 0,
       enableTipMessage: false,
+      get recoverFeeBps() {
+        return flags.recoverFeeBps;
+      },
       get enableMobileOrderFee() {
         return flags.enableMobileOrderFee;
       },
@@ -151,7 +157,7 @@ import { useGasQuoteCircle } from '@/hooks/useGasQuoteCircle';
 import { useRelayHealth } from '@/hooks/useRelayHealth';
 import { resolveUsdcGaslessProvider } from '@/lib/circlePaymaster';
 import { resolveJpycGaslessProvider } from '@/lib/jpycGaslessProvider';
-import { jpycForwarderFor } from '@/lib/relay/forwarderConfig';
+import { jpycForwarderFor, relayGasFeeValue } from '@/lib/relay/forwarderConfig';
 import { resolvePaymasterMode } from '@/lib/pimlico';
 import { IncompatibleSmartAccountError } from '@/lib/accountDetection';
 import { PaymentForm } from '@/components/PaymentForm';
@@ -173,6 +179,7 @@ const FEE_RECEIVER = env.feeReceiver;
 
 const JPYC_POLYGON = deploymentForSlug('jpyc', 'polygon');
 const USDC_BASE = deploymentForSlug('usdc', 'base');
+const USDC_POLYGON = deploymentForSlug('usdc', 'polygon'); // JPYC_POLYGON と同じ chain の、別の token
 const USDC_ARC = deploymentForSlug('usdc', 'arc');
 const AMOY = polygonAmoy.id; // JPYC の Polygon (testnet)
 const KAIROS = kairos.id; // JPYC の Kaia (testnet)。JPYC_POLYGON のフォームから見た「別の chain」
@@ -215,14 +222,15 @@ type Wallet =
   | 'sa-init' // smart account の準備中 (enabled でも data なし)
   | 'sa-incompatible' // smart account が合わない (IncompatibleSmartAccountError)
   | 'quote-loading' // 見積の取得中 (enabled でも data なし)
-  | 'insufficient'; // 残高が足りない
+  | 'insufficient'; // 残高が足りない (最小の単位で 1)
 type Chains = 'all' | readonly number[];
 type Input = {
   token: 'jpyc' | 'usdc';
-  arc?: true; // USDC の Arc (既定は jpyc = Polygon・usdc = Base)
+  chain?: 'polygon' | 'kaia' | 'base' | 'arc'; // 既定は jpyc = Polygon・usdc = Base
   mode?: 'standard';
   gas?: 'customer' | 'merchant';
-  noAmount?: true; // 額なし (Pay = 金額なしの QR・Tip = カスタム額の欄を選んで空のまま)。既定は jpyc = 1000・usdc = 10
+  amount?: string; // 額 (token の単位)。既定は jpyc = 1000・usdc = 10
+  noAmount?: true; // 額なし (Pay = 金額なしの QR・Tip = カスタム額の欄を選んで空のまま)
   split?: true; // Pay だけ: 30% を SPLIT_TO へ分配する QR
   mobile?: { feeKind: 'storefront' | 'preorder'; feePayer?: 'merchant' | 'customer'; flagOff?: true }; // Checkout だけ
   strayGas?: 'merchant'; // Tip だけ: TipParams に無い gas の欄を紛れ込ませる (読まれないこと)
@@ -231,16 +239,20 @@ type Input = {
   forwarderOn?: Chains; // jpycForwarderFor が forwarder の address を返す chain
   circleOn?: Chains; // resolveUsdcGaslessProvider が 'circle' と答える chain
   paymaster?: 'erc20'; // resolvePaymasterMode の答え。書かなければ本物 (testnet: sponsorship・Arc: unavailable)
+  // recover の利用料の設定。書かなければ、率は 0 (下限だけ)・下限はどの chain でも 2 JPYC。
+  recoverBps?: number; // env.recoverFeeBps (100 = 1%。お店の負担のときだけ掛かる)
+  floorJpyc?: Record<number, string>; // relayGasFeeValue (下限) を chain ごとに変える
   wallet?: Wallet;
+  balance?: string; // 残高 (token の単位)。書かなければ十分にある (wallet = 'insufficient' なら最小の単位で 1)
   hasStandardAttempt?: true; // useStandardPayment が「復元した通常決済の試みがある」(hasAttempt) を返す
 };
 
-const deploymentOf = (input: Input): TokenDeployment =>
-  input.token === 'jpyc' ? JPYC_POLYGON : input.arc ? USDC_ARC : USDC_BASE;
-const chainSlugOf = (input: Input) => (input.token === 'jpyc' ? 'polygon' : input.arc ? 'arc' : 'base');
-const amountOf = (input: Input) => (input.token === 'jpyc' ? '1000' : '10');
+const chainSlugOf = (input: Input) => input.chain ?? (input.token === 'jpyc' ? 'polygon' : 'base');
+const deploymentOf = (input: Input): TokenDeployment => deploymentForSlug(input.token, chainSlugOf(input));
+const amountOf = (input: Input) => input.amount ?? (input.token === 'jpyc' ? '1000' : '10');
 // 「別の chain」: フォームの deployment とは別の、ウォレットがつながっている chain。
-const otherChainOf = (input: Input) => (input.token === 'jpyc' ? KAIROS : input.arc ? BASE : ARBITRUM);
+const OTHER_CHAIN = { polygon: KAIROS, kaia: AMOY, base: ARBITRUM, arc: BASE } as const;
+const otherChainOf = (input: Input) => OTHER_CHAIN[chainSlugOf(input)];
 
 const answersOn = (chains: Chains | undefined, chainId: number) =>
   chains === 'all' || (chains?.includes(chainId) ?? false);
@@ -250,33 +262,33 @@ beforeAll(async () => {
   actualResolvePaymasterMode = (await vi.importActual<typeof import('@/lib/pimlico')>('@/lib/pimlico')).resolvePaymasterMode;
 });
 
+// mutate の mock。行ごとに作り直す (描いた後に入力を変える行は、同じものを使い続ける)。
 let standardMutate: ReturnType<typeof vi.fn>;
 let relayMutate: ReturnType<typeof vi.fn>;
 let gaslessMutate: ReturnType<typeof vi.fn>;
 
-// resolver の答えを入れる (経路が変わる場面の行は、描いた後にもう一度呼んで答えを変える)。
-function setResolvers(input: Pick<Input, 'relayOn' | 'forwarderOn' | 'circleOn' | 'paymaster'>) {
-  vi.mocked(resolveJpycGaslessProvider).mockImplementation((deployment, chainId) =>
-    deployment.symbol === 'jpyc' && answersOn(input.relayOn, chainId) ? 'eip3009-relay' : 'pimlico-7702',
-  );
-  vi.mocked(jpycForwarderFor).mockImplementation((chainId) => (answersOn(input.forwarderOn, chainId) ? FORWARDER : null));
-  vi.mocked(resolveUsdcGaslessProvider).mockImplementation((deployment, chainId) =>
-    deployment.symbol === 'usdc' && answersOn(input.circleOn, chainId) ? 'circle' : 'pimlico',
-  );
-  vi.mocked(resolvePaymasterMode).mockImplementation((deployment) => input.paymaster ?? actualResolvePaymasterMode(deployment));
-}
-
 // 行の入力から、境界の mock を全部入れ直す (前の行の値を残さない)。
 function arrange(
   input: Input,
-  relayState: Partial<ReturnType<typeof useJpycEip3009Payment>> = {},
+  opts: { relayState?: Partial<ReturnType<typeof useJpycEip3009Payment>>; keepMutates?: true } = {},
 ) {
   const wallet = input.wallet ?? 'ready';
   const deployment = deploymentOf(input);
   const connected = wallet !== 'disconnected';
   flags.enableMobileOrderFee = !input.mobile?.flagOff;
   flags.enableUsdcArc = false;
-  setResolvers(input);
+  flags.recoverFeeBps = input.recoverBps ?? 0;
+
+  // resolver と、env で決まる値。chain (と token) を見て答える。
+  vi.mocked(resolveJpycGaslessProvider).mockImplementation((asked, chainId) =>
+    asked.symbol === 'jpyc' && answersOn(input.relayOn, chainId) ? 'eip3009-relay' : 'pimlico-7702',
+  );
+  vi.mocked(jpycForwarderFor).mockImplementation((chainId) => (answersOn(input.forwarderOn, chainId) ? FORWARDER : null));
+  vi.mocked(resolveUsdcGaslessProvider).mockImplementation((asked, chainId) =>
+    asked.symbol === 'usdc' && answersOn(input.circleOn, chainId) ? 'circle' : 'pimlico',
+  );
+  vi.mocked(resolvePaymasterMode).mockImplementation((asked) => input.paymaster ?? actualResolvePaymasterMode(asked));
+  vi.mocked(relayGasFeeValue).mockImplementation((chainId) => J(input.floorJpyc?.[chainId] ?? '2'));
 
   mockHook(useAccount, {
     address: connected ? CUSTOMER : undefined,
@@ -285,7 +297,13 @@ function arrange(
   });
   mockHook(useSwitchChain, { switchChain: vi.fn(), isPending: false, error: null, variables: undefined });
   mockHook(useReadContract, {
-    data: !connected ? undefined : wallet === 'insufficient' ? 1n : parseUnits('100000', deployment.decimals),
+    data: !connected
+      ? undefined
+      : input.balance !== undefined
+        ? parseUnits(input.balance, deployment.decimals)
+        : wallet === 'insufficient'
+          ? 1n
+          : parseUnits('100000', deployment.decimals),
     isLoading: false,
     error: null,
   });
@@ -324,7 +342,11 @@ function arrange(
   );
   vi.mocked(useRelayHealth).mockReturnValue({ degraded: false });
 
-  gaslessMutate = vi.fn();
+  if (!opts.keepMutates) {
+    gaslessMutate = vi.fn();
+    standardMutate = vi.fn();
+    relayMutate = vi.fn();
+  }
   mockHook(useBatchPayment, {
     mutate: gaslessMutate,
     retryReceipt: vi.fn(),
@@ -340,8 +362,6 @@ function arrange(
     data: undefined,
     error: null,
   } as Partial<ReturnType<typeof useBatchPayment>>);
-
-  standardMutate = vi.fn();
   mockHook(useStandardPayment, {
     mutate: standardMutate,
     retryFee: vi.fn(),
@@ -368,8 +388,6 @@ function arrange(
     restoredFromStorage: false,
     restoredAttempt: false,
   } as Partial<ReturnType<typeof useStandardPayment>>);
-
-  relayMutate = vi.fn();
   mockHook(useJpycEip3009Payment, {
     mutate: relayMutate,
     retryRelay: vi.fn(),
@@ -389,7 +407,7 @@ function arrange(
     orderDeliveryLoadError: false,
     previousPaymentPending: false,
     previousPaymentSameMerchant: false,
-    ...relayState,
+    ...opts.relayState,
   } as Partial<ReturnType<typeof useJpycEip3009Payment>>);
 }
 
@@ -428,7 +446,7 @@ function tipParams(input: Input): TipParams {
 function formElement(form: Form, input: Input, checkoutExtra?: Partial<CheckoutParams>): ReactElement {
   if (form === 'pay') {
     // Arc は flag が OFF だと URL の parser が chain を通さない。Pay の Arc の行だけ ON にする (冒頭の env の節)。
-    flags.enableUsdcArc = input.arc === true;
+    flags.enableUsdcArc = input.chain === 'arc';
     vi.mocked(useSearchParams).mockReturnValue(new URLSearchParams(payQuery(input)) as unknown as ReadonlyURLSearchParams);
     return <PaymentForm />;
   }
@@ -444,12 +462,9 @@ async function settle() {
 }
 
 type View = ReturnType<typeof render>;
-async function mount(
-  form: Form,
-  input: Input,
-  opts: { relayState?: Partial<ReturnType<typeof useJpycEip3009Payment>>; checkoutExtra?: Partial<CheckoutParams> } = {},
-): Promise<View> {
-  arrange(input, opts.relayState);
+type MountOptions = { relayState?: Partial<ReturnType<typeof useJpycEip3009Payment>>; checkoutExtra?: Partial<CheckoutParams> };
+async function mount(form: Form, input: Input, opts: MountOptions = {}): Promise<View> {
+  arrange(input, { relayState: opts.relayState });
   const view = render(formElement(form, input, opts.checkoutExtra));
   await settle();
   if (input.noAmount && form === 'tip') {
@@ -459,10 +474,38 @@ async function mount(
   return view;
 }
 
+// ここまでに支払いの hook へ渡った引数の記録を消す (この後の描画で渡った引数だけを見るため)。mock の答えは残る。
+// resolver の記録は消さない: 入力が変わらなければ resolver を聞き直さない実装 (memo) も正しいので、resolver が聞かれた chain は
+// 「描いてからの全部」の集合で見る。
+function forgetHookCalls() {
+  for (const mock of [
+    useSmartAccount,
+    useBatchPayment,
+    useGasQuoteUsdc,
+    useGasQuoteJpyc,
+    useGasQuoteCircle,
+    useRelayHealth,
+    useJpycEip3009Payment,
+    useStandardPayment,
+  ]) {
+    vi.mocked(mock).mockClear();
+  }
+}
+
+// 描いた後に、実際の入力 (URL / params・ウォレットの chain・hook が返す状態) が変わる。境界の mock を次の入力に入れ直して
+// (mutate の mock は同じものを使い続ける)、同じ画面を描き直す。resolver の答えの表 (relayOn など) は前と同じにしておき、
+// 「同じ入力に対する答え」は変えない (変わるのは入力のほう)。
+async function changeInput(view: View, form: Form, next: Input, opts: MountOptions = {}) {
+  arrange(next, { relayState: opts.relayState, keepMutates: true });
+  forgetHookCalls();
+  view.rerender(formElement(form, next, opts.checkoutExtra));
+  await settle();
+}
+
 // ---------------------------------------------------------------------------------------------------------------------
 // 観察 (描かれた DOM と、mock に渡った引数)
 // ---------------------------------------------------------------------------------------------------------------------
-// hook に最後に渡った enabled (第 2 引数)。
+// hook の enabled (行ではこの形で書く)。
 type HookEnabled = {
   smartAccount: boolean; // useSmartAccount
   batch: boolean; // useBatchPayment
@@ -485,17 +528,61 @@ type Row = [label: Message | string, value: Message | string];
 // resolver が聞かれた chain の集合 (小さい順)。jpyc = resolveJpycGaslessProvider の第 2 引数・forwarder = jpycForwarderFor の引数・
 // usdc = resolveUsdcGaslessProvider の第 2 引数。呼ばれた回数と順番は見ない。
 type AskedOn = { jpyc: number[]; forwarder: number[]; usdc: number[] };
+
+// hook に渡った引数の見方: 見ている区間 (描いてから、または forgetHookCalls の後) に渡った **引数の組の集合** を、引数の全部で比べる。
+// 呼んだ回数と順番は見ない。省いた引数は、hook の既定値として読む (enabled の既定は true・ほかの真偽の既定は false)。
+// 期待の集合は、どの行も 1 つだけ (= その区間のどの描画でも同じ引数)。途中の描画だけ別の値になる行は無い。
+// extra = 知らない引数・知らない option の数 (0 のはず。足したら、ここに読み方を足す)。
+// (deployment, enabled = true, disableCircle = false) の形: useSmartAccount・useBatchPayment。
+type AccountCall = { deployment: string; enabled: boolean; disableCircle: boolean; extra: number };
+// (deployment, enabled = true) の形: useGasQuoteUsdc・useGasQuoteJpyc・useGasQuoteCircle。
+type QuoteCall = { deployment: string; enabled: boolean; extra: number };
 type Observed = {
-  hooks: HookEnabled;
-  // useRelayHealth の enabled。Tip は呼ばない ('never')。
-  health: boolean | 'never';
+  smartAccount: AccountCall[];
+  batch: AccountCall[];
+  quoteUsdc: QuoteCall[];
+  quoteJpyc: QuoteCall[];
+  quoteCircle: QuoteCall[];
+  // useRelayHealth({ chainId, enabled })。Tip は呼ばない (空)。
+  health: Array<{ chainId: number; enabled: boolean; extra: number }>;
+  // useJpycEip3009Payment(deployment, { restoreOrderDelivery = false, orderContext, skipIntentStorageCheck = false })。
+  // orderContext は、渡したかどうかだけ (中身は見ない)。
+  relay: Array<{ deployment: string; restoreOrderDelivery: boolean; skipIntentStorageCheck: boolean; orderContext: boolean; extra: number }>;
+  // useStandardPayment({ enabled = true })。Tip は standard の engine が出たときだけ呼ぶ (それ以外は空)。
+  standard: Array<{ enabled: boolean; extra: number }>;
   askedOn: AskedOn;
+  // 2 つの resolver が聞かれた deployment (第 1 引数) の集合。
+  askedAbout: string[];
   rows: Array<[string, string]>;
   button: [string, boolean];
 };
 
-const lastEnabled = (hook: { mock: { lastCall?: unknown[] } }) => hook.mock.lastCall?.[1] as boolean;
+const deploymentKey = (deployment: TokenDeployment) => `${deployment.symbol}@${deployment.chainId}`;
 const sortedSet = (values: number[]) => [...new Set(values)].sort((a, b) => a - b);
+// 同じ中身の組を 1 つにまとめる (集合にする)。
+const distinct = <T,>(values: T[]): T[] => [...new Map(values.map((value) => [JSON.stringify(value), value])).values()];
+const unknownKeys = (options: object, known: string[]) => Object.keys(options).filter((key) => !known.includes(key)).length;
+type Calls = { mock: { calls: unknown[][] } };
+
+function accountCalls(hook: Calls): AccountCall[] {
+  return distinct(
+    hook.mock.calls.map(([deployment, enabled = true, disableCircle = false, ...rest]) => ({
+      deployment: deploymentKey(deployment as TokenDeployment),
+      enabled: enabled as boolean,
+      disableCircle: disableCircle as boolean,
+      extra: rest.length,
+    })),
+  );
+}
+function quoteCalls(hook: Calls): QuoteCall[] {
+  return distinct(
+    hook.mock.calls.map(([deployment, enabled = true, ...rest]) => ({
+      deployment: deploymentKey(deployment as TokenDeployment),
+      enabled: enabled as boolean,
+      extra: rest.length,
+    })),
+  );
+}
 
 // 明細の表 (最初の dl) の行。ラベルは dt の文 (tooltip の「?」のボタンは除く)・値は dd の文。
 function breakdownRows(view: View): Array<[string, string]> {
@@ -519,48 +606,99 @@ function observeButton(label: string): [string, boolean] {
 
 function observe(view: View, buttonLabel: string): Observed {
   return {
-    hooks: {
-      smartAccount: lastEnabled(vi.mocked(useSmartAccount)),
-      batch: lastEnabled(vi.mocked(useBatchPayment)),
-      quoteUsdc: lastEnabled(vi.mocked(useGasQuoteUsdc)),
-      quoteJpyc: lastEnabled(vi.mocked(useGasQuoteJpyc)),
-      quoteCircle: lastEnabled(vi.mocked(useGasQuoteCircle)),
-    },
-    health: vi.mocked(useRelayHealth).mock.lastCall?.[0].enabled ?? 'never',
+    smartAccount: accountCalls(vi.mocked(useSmartAccount)),
+    batch: accountCalls(vi.mocked(useBatchPayment)),
+    quoteUsdc: quoteCalls(vi.mocked(useGasQuoteUsdc)),
+    quoteJpyc: quoteCalls(vi.mocked(useGasQuoteJpyc)),
+    quoteCircle: quoteCalls(vi.mocked(useGasQuoteCircle)),
+    health: distinct(
+      vi.mocked(useRelayHealth).mock.calls.map(([options, ...rest]) => ({
+        chainId: options.chainId,
+        enabled: options.enabled,
+        extra: rest.length + unknownKeys(options, ['chainId', 'enabled']),
+      })),
+    ),
+    relay: distinct(
+      vi.mocked(useJpycEip3009Payment).mock.calls.map(([deployment, options = {}, ...rest]) => ({
+        deployment: deploymentKey(deployment),
+        restoreOrderDelivery: options.restoreOrderDelivery ?? false,
+        skipIntentStorageCheck: options.skipIntentStorageCheck ?? false,
+        orderContext: options.orderContext !== undefined,
+        extra: rest.length + unknownKeys(options, ['restoreOrderDelivery', 'orderContext', 'skipIntentStorageCheck']),
+      })),
+    ),
+    standard: distinct(
+      vi.mocked(useStandardPayment).mock.calls.map(([options = {}, ...rest]) => ({
+        enabled: options.enabled ?? true,
+        extra: rest.length + unknownKeys(options, ['enabled']),
+      })),
+    ),
     askedOn: {
       jpyc: sortedSet(vi.mocked(resolveJpycGaslessProvider).mock.calls.map(([, chainId]) => chainId)),
       forwarder: sortedSet(vi.mocked(jpycForwarderFor).mock.calls.map(([chainId]) => chainId)),
       usdc: sortedSet(vi.mocked(resolveUsdcGaslessProvider).mock.calls.map(([, chainId]) => chainId)),
     },
+    askedAbout: distinct(
+      [resolveJpycGaslessProvider, resolveUsdcGaslessProvider].flatMap((resolver) =>
+        vi.mocked(resolver).mock.calls.map(([asked]) => deploymentKey(asked)),
+      ),
+    ).sort(),
     rows: breakdownRows(view),
     button: observeButton(buttonLabel),
   };
 }
 
 // 行の期待 (経路と、そこから派生するもの)。
-type Mutate = ['standard' | 'relay' | 'gasless', Record<string, unknown>];
+type MutateKind = 'standard' | 'relay' | 'gasless';
+type Mutate = [MutateKind, Record<string, unknown>];
 type RouteExpect = {
   hooks: HookEnabled;
+  // useRelayHealth の enabled。Tip は呼ばない ('never')。
   health: boolean | 'never';
   // resolver が聞かれる chain の集合。書かなければ、3 つとも deployment の chain だけ (ウォレットが正しい chain にいる行は、
   // どのフォームも同じ)。
   askedOn?: AskedOn;
+  // resolver が聞かれる deployment。書かなければ、その行の deployment だけ (描いた後に token が変わる行だけが書く)。
+  askedAbout?: TokenDeployment[];
   rows: Row[];
   // [文言, 押せるか]
   button: [Message | string, boolean];
   // 押した後に呼ばれる mutate と、渡る値。null = 押してもどれも呼ばれない。書かなければ押さない (準備ができていない行)。
   mutate?: Mutate | null;
-  // Tip だけ: standard の engine が出て、useStandardPayment({ enabled: true }) が呼ばれる。
+  // Tip だけ: standard の engine が出て、useStandardPayment が呼ばれる。
   engine?: true;
 };
 
+// 期待の観察。フォームごとに決まっているもの (どの deployment を渡すか・useRelayHealth の chainId・useJpycEip3009Payment の
+// option・useStandardPayment を呼ぶか) は、ここで足す。
 function expectedObservation(form: Form, input: Input, expected: RouteExpect): Observed {
-  const chainId = deploymentOf(input).chainId;
-  const askedOn = expected.askedOn ?? { jpyc: [chainId], forwarder: [chainId], usdc: [chainId] };
+  const deployment = deploymentOf(input);
+  const key = deploymentKey(deployment);
+  const account = (enabled: boolean): AccountCall[] => [{ deployment: key, enabled, disableCircle: false, extra: 0 }];
+  const quote = (enabled: boolean): QuoteCall[] => [{ deployment: key, enabled, extra: 0 }];
+  const askedOn = expected.askedOn ?? { jpyc: [deployment.chainId], forwarder: [deployment.chainId], usdc: [deployment.chainId] };
   return {
-    hooks: expected.hooks,
-    health: expected.health,
+    smartAccount: account(expected.hooks.smartAccount),
+    batch: account(expected.hooks.batch),
+    quoteUsdc: quote(expected.hooks.quoteUsdc),
+    quoteJpyc: quote(expected.hooks.quoteJpyc),
+    quoteCircle: quote(expected.hooks.quoteCircle),
+    // useRelayHealth の chainId は、ウォレットの chain でなく deployment の chain。
+    health: expected.health === 'never' ? [] : [{ chainId: deployment.chainId, enabled: expected.health, extra: 0 }],
+    // Pay は option なし・Checkout は注文の復元を頼む・Tip は埋め込みかどうか (jsdom は最上位の window なので false = 既定と同じ)。
+    relay: [
+      {
+        deployment: key,
+        restoreOrderDelivery: form === 'checkout',
+        skipIntentStorageCheck: false,
+        orderContext: form === 'checkout',
+        extra: 0,
+      },
+    ],
+    // Pay と Checkout は必ず呼ぶ。Tip は standard の engine が出たときだけ。
+    standard: form !== 'tip' || expected.engine ? [{ enabled: true, extra: 0 }] : [],
     askedOn: { jpyc: sortedSet(askedOn.jpyc), forwarder: sortedSet(askedOn.forwarder), usdc: sortedSet(askedOn.usdc) },
+    askedAbout: (expected.askedAbout ?? [deployment]).map(deploymentKey).sort(),
     rows: expected.rows.map(([label, value]) => [
       text(form, label),
       typeof value === 'string' ? value : text(form, value),
@@ -569,42 +707,11 @@ function expectedObservation(form: Form, input: Input, expected: RouteExpect): O
   };
 }
 
-// hook と resolver に渡った引数のうち、行に書かない (フォームごとに決まっている) もの。
-function expectCallShapes(form: Form, input: Input, expected: RouteExpect) {
-  const deployment = deploymentOf(input);
-  const sameDeployment = expect.objectContaining({ symbol: deployment.symbol, chainId: deployment.chainId });
-  // どの hook も、第 1 引数は URL / params の token と chain の deployment。
-  for (const hook of [useSmartAccount, useBatchPayment, useGasQuoteUsdc, useGasQuoteJpyc, useGasQuoteCircle]) {
-    expect(vi.mocked(hook).mock.lastCall?.[0]).toEqual(sameDeployment);
-  }
-  // resolver の第 1 引数も同じ deployment (聞かれた chain = 第 2 引数は observe の askedOn)。
-  for (const resolver of [resolveJpycGaslessProvider, resolveUsdcGaslessProvider]) {
-    for (const [asked] of vi.mocked(resolver).mock.calls) expect(asked).toEqual(sameDeployment);
-  }
-  // useRelayHealth の chainId は、ウォレットの chain でなく deployment の chain (Pay と Checkout。Tip は呼ばない)。
-  if (form !== 'tip') expect(vi.mocked(useRelayHealth).mock.lastCall?.[0].chainId).toBe(deployment.chainId);
-  // useJpycEip3009Payment の option: Pay は無し・Checkout は注文の復元・Tip は埋め込みかどうか (jsdom は最上位の window = false)。
-  expect(vi.mocked(useJpycEip3009Payment).mock.lastCall).toEqual(
-    form === 'pay'
-      ? [sameDeployment]
-      : form === 'checkout'
-        ? [sameDeployment, { restoreOrderDelivery: true, orderContext: expect.any(Object) }]
-        : [sameDeployment, { skipIntentStorageCheck: false }],
-  );
-  // useStandardPayment: Pay と Checkout は引数なしで必ず呼ぶ。Tip は standard の engine が出たときだけ { enabled: true } で呼ぶ。
-  if (form !== 'tip') expect(vi.mocked(useStandardPayment).mock.lastCall).toEqual([]);
-  else if (expected.engine) expect(vi.mocked(useStandardPayment).mock.lastCall).toEqual([{ enabled: true }]);
-  else expect(useStandardPayment).not.toHaveBeenCalled();
-}
-
-function expectMutate(expected: Mutate | null) {
+// mutate に渡った値 (押した順)。書いていない mutate は、1 回も呼ばれていないこと。
+function expectMutates(expected: Partial<Record<MutateKind, Array<Record<string, unknown>>>>) {
   const mutates = { standard: standardMutate, relay: relayMutate, gasless: gaslessMutate };
-  for (const [kind, mutate] of Object.entries(mutates)) {
-    if (expected?.[0] === kind) {
-      expect(mutate.mock.calls, `${kind} の mutate に渡った値`).toEqual([[expected[1]]]);
-    } else {
-      expect(mutate, `${kind} の mutate は呼ばれない`).not.toHaveBeenCalled();
-    }
+  for (const kind of Object.keys(mutates) as MutateKind[]) {
+    expect(mutates[kind].mock.calls, `${kind} の mutate に渡った値`).toEqual((expected[kind] ?? []).map((payload) => [payload]));
   }
 }
 
@@ -612,11 +719,10 @@ function expectMutate(expected: Mutate | null) {
 function check(form: Form, input: Input, expected: RouteExpect, view: View) {
   const buttonLabel = text(form, expected.button[0]);
   expect(observe(view, buttonLabel)).toEqual(expectedObservation(form, input, expected));
-  expectCallShapes(form, input, expected);
   if (expected.mutate === undefined) return;
   const button = findSubmit(buttonLabel);
   if (button) fireEvent.click(button);
-  expectMutate(expected.mutate);
+  expectMutates(expected.mutate ? { [expected.mutate[0]]: [expected.mutate[1]] } : {});
 }
 
 // 表の 1 行 = 同じ入力と、フォームごとの期待の列。列が無いフォームは、その入力を受け付けない。
@@ -645,9 +751,10 @@ const FORMS: Form[] = ['pay', 'checkout', 'tip'];
 // it.each に渡す [test の題, 行] の組。題は自分で組んで '%s' で渡す (vitest は '$name' で差し込む値を 40 字で切るので、
 // 長い名前の行が同じ題になってしまう)。
 type Titled<T> = [title: string, row: T];
-const perForm = (cases: Case[]): Array<Titled<{ form: Form; input: Input; expected: RouteExpect }>> =>
+type RouteRow = { form: Form; input: Input; expected: RouteExpect };
+const perForm = (cases: Case[]): Array<Titled<RouteRow>> =>
   cases.flatMap((row) =>
-    FORMS.flatMap((form): Array<Titled<{ form: Form; input: Input; expected: RouteExpect }>> => {
+    FORMS.flatMap((form): Array<Titled<RouteRow>> => {
       const column = row[form];
       if (!column) return [];
       const expected: RouteExpect = {
@@ -706,9 +813,9 @@ beforeEach(() => {
 // ---------------------------------------------------------------------------------------------------------------------
 // 行 = 経路 × token × paymaster の 9 つの組 (通常決済 × {JPYC・USDC・USDC の Arc}・relay の free・relay の recover・Circle・
 // Pimlico × {USDC の erc20・USDC の sponsorship・JPYC の sponsorship}) × ガス代の負担 (意味のある組だけ)。
-// 足した行: 見積の取得中・分配つき (Pay)・モバイル注文 (Checkout)・Tip に gas が紛れ込んだとき。フォームが受け付けない組は列を
+// 足した行: recover の率と下限・見積の取得中・分配つき (Pay)・モバイル注文 (Checkout)・Tip に gas が紛れ込んだとき。フォームが受け付けない組は列を
 // 書かない (Tip の通常決済は Arc だけ・Tip にガス代の負担の軸は無い)。
-// 額: JPYC は 1000・USDC は 10。recover の利用料は 2 JPYC。見積は Pimlico の USDC = 0.1・Circle = 0.06 (permit の上限 10.5)・
+// 額: JPYC は 1000・USDC は 10。recover の利用料は 2 JPYC (率と下限を変える 2 行を除く)。見積は Pimlico の USDC = 0.1・Circle = 0.06 (permit の上限 10.5)・
 // Pimlico の JPYC = 3 (JPYC は徴収しないので、どの行にも出てこない)。
 const ROUTE_TABLE: Case[] = [
   // ---- 通常決済 (mode=standard が、resolver の答えより先) ----
@@ -765,7 +872,7 @@ const ROUTE_TABLE: Case[] = [
   },
   {
     name: '通常決済・USDC の Arc (Tip が通常決済になる唯一の組)',
-    input: { token: 'usdc', arc: true, mode: 'standard' },
+    input: { token: 'usdc', chain: 'arc', mode: 'standard' },
     hooks: OFF,
     health: false,
     pay: {
@@ -923,6 +1030,71 @@ const ROUTE_TABLE: Case[] = [
         ['totalRowMerchantGas', '1000 JPYC'],
       ],
       button: [m('btnPay', { amount: '1000 JPYC' }), true],
+    },
+  },
+
+  {
+    name: 'relay の recover・率 1% (recoverFeeBps=100): Pay と Checkout はお店の負担なので 1000 の 1% = 10 JPYC・Tip はお客様の負担なので下限の 2 JPYC のまま',
+    input: { token: 'jpyc', relayOn: 'all', forwarderOn: 'all', recoverBps: 100 },
+    hooks: OFF,
+    health: true,
+    mutate: ['relay', { merchant: MERCHANT, value: J('1000'), gasMode: 'merchant' }],
+    pay: {
+      rows: [
+        ['merchantRowAfterFee', '990 JPYC'],
+        ['gasRowMerchant', '10 JPYC'],
+        ['customerMerchantGas', '1000 JPYC'],
+      ],
+      button: [m('btnPay', { amount: '1000 JPYC' }), true],
+    },
+    checkout: {
+      rows: [
+        ['subtotalRow', '1000 JPYC'],
+        ['gasRowMerchant', '10 JPYC'],
+        ['totalRowMerchantGas', '1000 JPYC'],
+      ],
+      button: [m('btnPay', { amount: '1000 JPYC' }), true],
+    },
+    tip: {
+      rows: [
+        ['creatorRow', '1000 JPYC'],
+        ['gasRow', '2 JPYC'],
+        ['customerRow', '1002 JPYC'],
+      ],
+      button: [m('btnSend', { amount: '1002 JPYC' }), true],
+      mutate: ['relay', { merchant: MERCHANT, value: J('1000'), gasMode: 'customer' }],
+    },
+  },
+  {
+    name: 'relay の recover・JPYC の Kaia・下限が chain で違う (Kaia だけ 5 JPYC): Kaia の画面は 5 JPYC',
+    input: { token: 'jpyc', chain: 'kaia', relayOn: 'all', forwarderOn: 'all', floorJpyc: { [KAIROS]: '5' } },
+    hooks: OFF,
+    health: true,
+    mutate: ['relay', { merchant: MERCHANT, value: J('1000'), gasMode: 'merchant' }],
+    pay: {
+      rows: [
+        ['merchantRowAfterFee', '995 JPYC'],
+        ['gasRowMerchant', '5 JPYC'],
+        ['customerMerchantGas', '1000 JPYC'],
+      ],
+      button: [m('btnPay', { amount: '1000 JPYC' }), true],
+    },
+    checkout: {
+      rows: [
+        ['subtotalRow', '1000 JPYC'],
+        ['gasRowMerchant', '5 JPYC'],
+        ['totalRowMerchantGas', '1000 JPYC'],
+      ],
+      button: [m('btnPay', { amount: '1000 JPYC' }), true],
+    },
+    tip: {
+      rows: [
+        ['creatorRow', '1000 JPYC'],
+        ['gasRow', '5 JPYC'],
+        ['customerRow', '1005 JPYC'],
+      ],
+      button: [m('btnSend', { amount: '1005 JPYC' }), true],
+      mutate: ['relay', { merchant: MERCHANT, value: J('1000'), gasMode: 'customer' }],
     },
   },
 
@@ -1455,7 +1627,7 @@ type RouteClass = 'standard' | 'relay' | 'circle' | 'pimlico-usdc' | 'pimlico-jp
 const ROUTE_CLASS: Record<RouteClass, { payAndCheckout: Input; tip: Input }> = {
   standard: {
     payAndCheckout: { token: 'jpyc', mode: 'standard' },
-    tip: { token: 'usdc', arc: true, mode: 'standard' },
+    tip: { token: 'usdc', chain: 'arc', mode: 'standard' },
   },
   relay: { payAndCheckout: { token: 'jpyc', relayOn: 'all' }, tip: { token: 'jpyc', relayOn: 'all' } },
   circle: {
@@ -1528,8 +1700,61 @@ const buttonRows = BUTTON_TABLE.flatMap(({ route, state, ...byForm }) =>
   }),
 );
 
+// 残高の境目。残高と比べるのは、額面でなく、お客様が払う総額 (額面 + お客様が負担するガス代・利用料)。
+// 「額面には足りるが総額には足りない残高」は押せず、「総額ちょうどの残高」は押せる。
+type BalanceCase = { name: string; input: Input; pay?: ButtonExpect; checkout?: ButtonExpect; tip?: ButtonExpect };
+const PIMLICO_USDC_PAY: Message = m('btnPay', { amount: '10.1 USDC' });
+const PIMLICO_USDC_SEND: Message = m('btnSend', { amount: '10.1 USDC' });
+const BALANCE_TABLE: BalanceCase[] = [
+  // ---- Pimlico・USDC (額面 10 + 見積 0.1 = 総額 10.1) ----
+  {
+    name: 'Pimlico・USDC・残高 10 (額面ちょうど。総額 10.1 に足りない)',
+    input: { token: 'usdc', balance: '10' },
+    pay: [PIMLICO_USDC_PAY, false],
+    checkout: [PIMLICO_USDC_PAY, false],
+    tip: [PIMLICO_USDC_SEND, false],
+  },
+  {
+    name: 'Pimlico・USDC・残高 10.1 (総額ちょうど)',
+    input: { token: 'usdc', balance: '10.1' },
+    pay: [PIMLICO_USDC_PAY, true],
+    checkout: [PIMLICO_USDC_PAY, true],
+    tip: [PIMLICO_USDC_SEND, true],
+  },
+  // ---- Tip の recover (額面 1000 + 利用料 2 = 総額 1002。Pay と Checkout の recover はお店の負担なので総額 = 額面) ----
+  {
+    name: 'relay の recover・JPYC・残高 1000 (Tip は総額 1002 に足りない・Pay と Checkout は総額 1000 ちょうど)',
+    input: { token: 'jpyc', relayOn: 'all', forwarderOn: 'all', balance: '1000' },
+    pay: [PAY_JPYC, true],
+    checkout: [PAY_JPYC, true],
+    tip: [m('btnSend', { amount: '1002 JPYC' }), false],
+  },
+  {
+    name: 'relay の recover・JPYC・残高 1002 (Tip の総額ちょうど)',
+    input: { token: 'jpyc', relayOn: 'all', forwarderOn: 'all', balance: '1002' },
+    tip: [m('btnSend', { amount: '1002 JPYC' }), true],
+  },
+  // ---- Checkout のモバイル注文・事前 3% (お客様の負担。額面 1000 + 利用料 30 = 総額 1030) ----
+  {
+    name: 'モバイル注文・事前 3% (お客様の負担)・残高 1000 (総額 1030 に足りない)',
+    input: { token: 'jpyc', mobile: { feeKind: 'preorder', feePayer: 'customer' }, relayOn: 'all', forwarderOn: 'all', balance: '1000' },
+    checkout: [m('btnPay', { amount: '1030 JPYC' }), false],
+  },
+  {
+    name: 'モバイル注文・事前 3% (お客様の負担)・残高 1030 (総額ちょうど)',
+    input: { token: 'jpyc', mobile: { feeKind: 'preorder', feePayer: 'customer' }, relayOn: 'all', forwarderOn: 'all', balance: '1030' },
+    checkout: [m('btnPay', { amount: '1030 JPYC' }), true],
+  },
+];
+const balanceRows = BALANCE_TABLE.flatMap(({ name, input, ...byForm }) =>
+  FORMS.flatMap((form): Array<Titled<ButtonRow>> => {
+    const expected = byForm[form];
+    return expected ? [[`${form}: ${name}`, { form, input, expected }]] : [];
+  }),
+);
+
 describe('表 2: ボタンの表 (経路の類 × ウォレットの状態ごとの、ボタンの文言と押せるか)', () => {
-  it.each(buttonRows)('%s', async (_title, { form, input, expected }) => {
+  it.each([...buttonRows, ...balanceRows])('%s', async (_title, { form, input, expected }) => {
     await mount(form, input);
     const label = text(form, expected[0]);
     expect(observeButton(label)).toEqual([label, expected[1]]);
@@ -1594,6 +1819,32 @@ const CIRCLE_ROWS = {
     ['customerRow', '10.06 USDC'],
   ],
 } satisfies Record<Form, Row[]>;
+// Pimlico・USDC の sponsorship (額面 10 + 見積 0.1)。描いた後に token が USDC に変わる行で使う。
+const USDC_SPONSORSHIP_ROWS = {
+  pay: [
+    ['merchantRowAfterFee', '10 USDC'],
+    ['gasRow', m('gasRowValue', { amount: '0.1 USDC' })],
+    ['customerCustomerGas', '10.1 USDC'],
+  ],
+  checkout: [
+    ['subtotalRow', '10 USDC'],
+    ['gasRow', m('gasRowValue', { amount: '0.1 USDC' })],
+    ['totalRow', '10.1 USDC'],
+  ],
+  tip: [
+    ['creatorRow', '10 USDC'],
+    ['gasRow', m('gasRowValue', { amount: '0.1 USDC' })],
+    ['customerRow', '10.1 USDC'],
+  ],
+} satisfies Record<Form, Row[]>;
+const USDC_POLYGON_PAYLOAD = gaslessPayload(USDC_POLYGON, {
+  merchantAmount: U('10'),
+  feeAmount: 0n,
+  gasReimbursement: U('0.1'),
+  saleAmount: U('10'),
+  networkFeeEquivalent: U('0.1'),
+  circlePermitAmount: undefined,
+});
 // Pay と Checkout (ウォレットは Kaia): JPYC の resolver と forwarder は Kaia で聞かれ、USDC の resolver は Polygon で聞かれる。
 const ASKED_ON_WALLET: AskedOn = { jpyc: [KAIROS], forwarder: [KAIROS], usdc: [AMOY] };
 // 同じく Pay と Checkout で、経路が recover になったとき: recover の利用料の案内 (RecoverFeeNotice) も forwarder を聞き、
@@ -1629,6 +1880,15 @@ const CHAIN_TABLE: Case[] = [
     pay: { askedOn: ASKED_ON_WALLET_RECOVER, rows: RELAY_RECOVER_ROWS.pay, button: ['btnSwitchChain', false] },
     checkout: { askedOn: ASKED_ON_WALLET_RECOVER, rows: RELAY_RECOVER_ROWS.checkout, button: ['btnSwitchChain', false] },
     tip: { askedOn: ASKED_ON_DEPLOYMENT, rows: JPYC_FREE_ROWS.tip, button: ['btnSwitchChain', false] },
+  },
+  {
+    name: 'JPYC (Polygon) の画面・ウォレットは Kaia・recover の下限は Kaia だけ 5 JPYC → 3 つとも 2 JPYC (下限は deployment の chain で引く)',
+    input: { token: 'jpyc', wallet: 'wrong-chain', relayOn: 'all', forwarderOn: 'all', floorJpyc: { [KAIROS]: '5' } },
+    hooks: OFF,
+    health: true,
+    pay: { askedOn: ASKED_ON_WALLET_RECOVER, rows: RELAY_RECOVER_ROWS.pay, button: ['btnSwitchChain', false] },
+    checkout: { askedOn: ASKED_ON_WALLET_RECOVER, rows: RELAY_RECOVER_ROWS.checkout, button: ['btnSwitchChain', false] },
+    tip: { askedOn: ASKED_ON_DEPLOYMENT, rows: RELAY_RECOVER_ROWS.tip, button: ['btnSwitchChain', false] },
   },
   {
     name: 'USDC (Base) の画面・ウォレットは Arbitrum・Circle は Base でだけ答える → 3 つとも Circle (USDC の resolver は deployment の chain で聞く)',
@@ -1777,6 +2037,7 @@ describe('表 3: 経路が変わる・変わらない場面', () => {
       const view = await mount(form, SA_INCOMPATIBLE);
       check(form, SA_INCOMPATIBLE, BEFORE_SWITCH[form], view);
 
+      forgetHookCalls();
       fireEvent.click(screen.getByRole('button', { name: SWITCH_TO_STANDARD }));
       await settle();
 
@@ -1790,32 +2051,151 @@ describe('表 3: 経路が変わる・変わらない場面', () => {
     });
   });
 
-  describe('(d) 経路の固定 (Pay と Checkout は送った後、試みの間は経路を変えない・Tip は毎回決め直す)', () => {
-    // relay の free で送った後に、resolver が「relay でない」と答えるようになる (Pay と Checkout は、送った後にウォレットの chain が
-    // 変わると起こりうる)。描き直しても、Pay と Checkout は relay のまま。Tip は Pimlico に変わる (Tip は deployment の chain で
-    // 聞くので、本番では答えは変わらない。ここでは mock の答えを変えて、経路を固定していないことだけを確かめる)。
-    const RELAY_FREE: Input = { token: 'jpyc', relayOn: 'all' };
-    const submitLabel = { pay: PAY_JPYC, checkout: PAY_JPYC, tip: SEND_JPYC } satisfies Record<Form, Message>;
-    const afterResolverChange = {
-      pay: { hooks: OFF, health: true, rows: JPYC_FREE_ROWS.pay, button: [PAY_JPYC, true] },
-      checkout: { hooks: OFF, health: true, rows: JPYC_FREE_ROWS.checkout, button: [PAY_JPYC, true] },
-      tip: { hooks: SPONSORSHIP, health: 'never', rows: JPYC_FREE_ROWS.tip, button: [SEND_JPYC, true] },
-    } satisfies Record<Form, RouteExpect>;
+  // 描いた後に、実際の入力が変わる場面。resolver の答えの表 (どの chain で relay / forwarder ありと答えるか) は変えない。
+  // 経路の計算を memo するなら、ここで変わる入力 (deployment・ウォレットの chain・hasAttempt。「通常決済に切替」は (b)) を
+  // 依存に入れること (入れ忘れると、ここの行が落ちる)。入力が変わらないフォーム (ウォレットの chain を見ない Tip など) は、
+  // resolver を聞き直さなくてよい (聞かれた chain は、描いてからの全部の集合で見る)。
+  describe('描いた後に入力が変わる (送る前は、どのフォームも経路を決め直す)', () => {
+    // URL / params の token が JPYC → USDC に変わる (同じ Polygon・ウォレットもそのまま)。変わるのは deployment だけ。
+    // JPYC の画面は relay。USDC の画面は、relay と答える token でないので Pimlico (3 つとも)。
+    it.each(FORMS)('%s: params の token が変わる (同じ Polygon の JPYC → USDC) → 新しい deployment で決め直す', async (form) => {
+      const view = await mount(form, { token: 'jpyc', amount: '10', relayOn: 'all' });
+      const usdc: Input = { token: 'usdc', chain: 'polygon', amount: '10', relayOn: 'all' };
+      await changeInput(view, form, usdc);
+      check(
+        form,
+        usdc,
+        {
+          hooks: SPONSORSHIP,
+          health: form === 'tip' ? 'never' : false,
+          askedAbout: [JPYC_POLYGON, USDC_POLYGON],
+          rows: USDC_SPONSORSHIP_ROWS[form],
+          button: [m(form === 'tip' ? 'btnSend' : 'btnPay', { amount: '10.1 USDC' }), true],
+          mutate: ['gasless', USDC_POLYGON_PAYLOAD],
+        },
+        view,
+      );
+    });
 
-    it.each(FORMS)('%s: relay で送った後に resolver の答えが変わる', async (form) => {
-      const view = await mount(form, RELAY_FREE);
-      fireEvent.click(screen.getByRole('button', { name: text(form, submitLabel[form]) }));
-      expectMutate(['relay', { merchant: MERCHANT, value: J('1000'), gasMode: 'customer' }]);
+    // ウォレットが Kaia → Polygon に切り替わる (「ネットワークを切替え」の後)。relay と forwarder は Polygon でだけ答える。
+    // 切り替える前は表 3 (a) の 2 行目と同じ入力 (Pay と Checkout は Kaia で聞いて Pimlico・Tip は Polygon で聞いて recover)。
+    // 切り替えた後は 3 つとも recover。Pay と Checkout は Kaia と Polygon の両方で聞いたことになり、Tip は Polygon だけ。
+    const ONLY_ON_POLYGON = { relayOn: [AMOY], forwarderOn: [AMOY] } satisfies Partial<Input>;
+    const ASKED_ON_BOTH: AskedOn = { jpyc: [KAIROS, AMOY], forwarder: [KAIROS, AMOY], usdc: [AMOY] };
+    const afterWalletSwitch = {
+      pay: {
+        askedOn: ASKED_ON_BOTH,
+        button: [PAY_JPYC, true],
+        mutate: ['relay', { merchant: MERCHANT, value: J('1000'), gasMode: 'merchant' }],
+      },
+      checkout: {
+        askedOn: ASKED_ON_BOTH,
+        button: [PAY_JPYC, true],
+        mutate: ['relay', { merchant: MERCHANT, value: J('1000'), gasMode: 'merchant' }],
+      },
+      tip: {
+        askedOn: ASKED_ON_DEPLOYMENT,
+        button: [m('btnSend', { amount: '1002 JPYC' }), true],
+        mutate: ['relay', { merchant: MERCHANT, value: J('1000'), gasMode: 'customer' }],
+      },
+    } satisfies Record<Form, Pick<RouteExpect, 'askedOn' | 'button' | 'mutate'>>;
+    it.each(FORMS)('%s: ウォレットの chain が変わる (Kaia → Polygon) → Pay と Checkout は決め直す (Tip は元から Polygon で聞いている)', async (form) => {
+      const view = await mount(form, { token: 'jpyc', wallet: 'wrong-chain', ...ONLY_ON_POLYGON });
+      const onPolygon: Input = { token: 'jpyc', ...ONLY_ON_POLYGON };
+      await changeInput(view, form, onPolygon);
+      check(
+        form,
+        onPolygon,
+        { hooks: OFF, health: form === 'tip' ? 'never' : true, rows: RELAY_RECOVER_ROWS[form], ...afterWalletSwitch[form] },
+        view,
+      );
+    });
 
-      setResolvers({});
-      // 描き直した後に渡った引数だけを見る (送る前の描画の呼び出しを消す)。
-      for (const mock of [useSmartAccount, useBatchPayment, useGasQuoteUsdc, useGasQuoteJpyc, useGasQuoteCircle, useRelayHealth]) {
-        vi.mocked(mock).mockClear();
-      }
-      view.rerender(formElement(form, RELAY_FREE));
-      await settle();
+    // 描いた後に、useStandardPayment が「復元した通常決済の試みがある」を返すようになる (別の画面の要求が出たまま、など)。
+    // 期待は (b) の表と同じ (Pay と Checkout は通常決済・Tip はガスレスのまま)。
+    it.each(perForm(STANDARD_ATTEMPT_TABLE))('描いた後に見つかる → %s', async (_title, { form, input, expected }) => {
+      const view = await mount(form, { ...input, hasStandardAttempt: undefined });
+      await changeInput(view, form, input);
+      check(form, input, expected, view);
+    });
+  });
 
-      check(form, RELAY_FREE, afterResolverChange[form], view);
+  describe('(d) 経路の固定 (Pay と Checkout は送った後、試みの間は経路を変えない・Tip は固定しない)', () => {
+    const RECOVER_PAYLOAD = { merchant: MERCHANT, value: J('1000'), gasMode: 'merchant' };
+
+    // relay の recover で送った後に、useStandardPayment が hasAttempt を返すようになる (送る前なら通常決済に変わる入力)。
+    // Pay と Checkout は recover のまま。もう一度押すと、通常決済でなく relay へ、同じ値で送る (表示だけでなく、送る先も固定)。
+    it.each(['pay', 'checkout'] as const)(
+      '%s: recover で送った後に hasAttempt が立っても recover のまま・もう一度押しても relay へ送る',
+      async (form) => {
+        const recover: Input = { token: 'jpyc', relayOn: 'all', forwarderOn: 'all' };
+        const view = await mount(form, recover);
+        fireEvent.click(screen.getByRole('button', { name: text(form, PAY_JPYC) }));
+        expectMutates({ relay: [RECOVER_PAYLOAD] });
+
+        const withAttempt: Input = { ...recover, hasStandardAttempt: true };
+        await changeInput(view, form, withAttempt);
+        check(form, withAttempt, { hooks: OFF, health: true, rows: RELAY_RECOVER_ROWS[form], button: [PAY_JPYC, true] }, view);
+
+        fireEvent.click(screen.getByRole('button', { name: text(form, PAY_JPYC) }));
+        expectMutates({ relay: [RECOVER_PAYLOAD, RECOVER_PAYLOAD] });
+      },
+    );
+
+    // recover で送った後に、ウォレットが forwarder の無い chain (Kaia) へ移る (送る前なら relay の free に変わる入力)。
+    // Pay と Checkout は recover のまま (利用料 2 JPYC の行が残る)。違う chain なので押せない。
+    it.each(['pay', 'checkout'] as const)(
+      '%s: recover で送った後にウォレットが forwarder の無い chain へ移っても recover のまま (free にならない)',
+      async (form) => {
+        const recover: Input = { token: 'jpyc', relayOn: 'all', forwarderOn: [AMOY] };
+        const view = await mount(form, recover);
+        fireEvent.click(screen.getByRole('button', { name: text(form, PAY_JPYC) }));
+
+        const walletMoved: Input = { ...recover, wallet: 'wrong-chain' };
+        await changeInput(view, form, walletMoved);
+        check(
+          form,
+          walletMoved,
+          {
+            hooks: OFF,
+            health: true,
+            // 送る前は Polygon で、移った後は Kaia で聞いている (recover の利用料の案内は Polygon で聞く)。
+            askedOn: { jpyc: [AMOY, KAIROS], forwarder: [AMOY, KAIROS], usdc: [AMOY] },
+            rows: RELAY_RECOVER_ROWS[form],
+            button: ['btnSwitchChain', false],
+          },
+          view,
+        );
+        expectMutates({ relay: [RECOVER_PAYLOAD] });
+      },
+    );
+
+    // Tip は固定しない: relay の free で送った後に params の token が変わる (同じ Polygon の JPYC → USDC) と、新しい deployment の
+    // 経路 (Pimlico) になり、もう一度押すと Pimlico へ送る。
+    it('tip: relay で送った後でも、params の token が変わると経路を決め直す・もう一度押すと新しい経路へ送る', async () => {
+      const view = await mount('tip', { token: 'jpyc', amount: '10', relayOn: 'all' });
+      fireEvent.click(screen.getByRole('button', { name: text('tip', m('btnSend', { amount: '10 JPYC' })) }));
+      const sentByRelay = { merchant: MERCHANT, value: J('10'), gasMode: 'customer' };
+      expectMutates({ relay: [sentByRelay] });
+
+      const usdc: Input = { token: 'usdc', chain: 'polygon', amount: '10', relayOn: 'all' };
+      await changeInput(view, 'tip', usdc);
+      const sendUsdc = m('btnSend', { amount: '10.1 USDC' });
+      check(
+        'tip',
+        usdc,
+        {
+          hooks: SPONSORSHIP,
+          health: 'never',
+          askedAbout: [JPYC_POLYGON, USDC_POLYGON],
+          rows: USDC_SPONSORSHIP_ROWS.tip,
+          button: [sendUsdc, true],
+        },
+        view,
+      );
+
+      fireEvent.click(screen.getByRole('button', { name: text('tip', sendUsdc) }));
+      expectMutates({ relay: [sentByRelay], gasless: [USDC_POLYGON_PAYLOAD] });
     });
 
     // Checkout だけ: 復元した relay の注文 (この会計と一致する、束縛した注文の記録) があるときは、resolver の答えでなく、
