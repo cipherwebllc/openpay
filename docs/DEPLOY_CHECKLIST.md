@@ -2015,9 +2015,11 @@ relay の支払いの行の「受け付ける」は、receipt の中で支払い
        (`:368-370`・`:384-387`・`lib/relay/relayGuards.ts:124-136`・`lib/net/ipPrefix.ts:9-19`)。
      - `limiter: tx` が基準より増えたら、txHash の枠の使い切りを疑う。`limiter: subnet` だけが増えたなら、同じ /24 (IPv6 は
        /64) からの多くの通知 (flood か、大きな NAT)。`ipPrefix` で送り元の範囲が分かる (warn を書いた 1 件目の分だけ)。
-   - お客様のブラウザの warn `checkout.webhook.non_ok` (Sentry) も目安になる。`status` と `statusText` を持ち (束縛なしの
-     経路 `components/CheckoutForm.tsx:889-894` は通知先の origin・hash も持つ・束縛つきの経路 `:1037` は持たない)、
-     応答 body の理由 (`error`) はどちらも持たない。
+   - お客様のブラウザの warn `checkout.webhook.non_ok` (Sentry) も目安になる。`status` と `statusText` を持つ。束縛なしの
+     経路 (`hooks/useCheckoutOrderNotify.ts` の完了の通知と通常決済の部分の通知) は通知先の origin・hash も持ち、束縛つきの
+     経路 (同じ file の束縛した注文の通知) は持たない。応答 body の理由 (`error`) を持つのは完了の通知だけで、欄は
+     `serverError` (小文字と `_` だけの語のときだけ出す)。完了の通知は、自動の送り直し (最大 2 回) を終えても届かなかった
+     ときに 1 件だけ出し、送った回数を `attempts` に持つ (「注文登録を再試行」の 1 回が失敗するたびにも 1 件)。
 
 **4. 戻し方**
 - `ENABLE_ORDER_BIND_ENFORCE` を消すか `false` にして、再 deploy する。束縛なしの relay 通知は、また `bindingMissing` を

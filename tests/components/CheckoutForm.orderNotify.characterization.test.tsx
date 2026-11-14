@@ -4,6 +4,10 @@
 // 1 字も変えずに緑のまま通す。そのため、見るのは描かれた DOM (文・role・リンク・ボタン) と外への呼び出し (fetch・
 // sessionStorage・window.location.assign・logger) だけで、部品の中の state や関数の名前には触れない。
 //
+// r10-notify (完了の通知を送り直し、届かないときは案内と再試行を出す) は動きを変える PR なので、経路 A の、届かなかったときの
+// 行だけ期待を変えた (表は COMPLETION_ROWS に分けた)。経路 B・C・D の行、URL の表、届いたときの行、D → A の順番の行は
+// 変えていない。
+//
 // 受注通知を送る経路は 4 つ (components/CheckoutForm.tsx の effect 4 つ):
 //   A 完了の通知     この画面で送った支払い (Pimlico の gasless・通常決済) が確定したとき。URL の webhook へそのまま送る。
 //   B 前の注文の通知 hook が見つけた、前の会計の未登録の注文 (backgroundOrderDeliveries)。保存した handle から宛先を組む。
@@ -613,6 +617,8 @@ async function payBoundOrder(params: CheckoutParams): Promise<Screen & { record:
 //   スタッフへ … 「自動登録できませんでした」(role=alert)・大きな完了画面を隠す・「注文状況を見る」を隠す・success_url へ移らない。
 // 「スタッフへ」になるのは 422 で本文が JSON の { error: 'tx_too_old' } のときだけ。429・5xx・通信の失敗でも案内は出ず、
 // 再試行のボタンも無い (経路 C との違い)。
+// この表 (DIRECT_ROWS) は経路 D の動き。経路 A (完了の通知) は r10-notify で、待てば通る失敗を自動で送り直し、届かなければ
+// 案内と再試行を出すように変えたので、下の COMPLETION_ROWS に分けた (DIRECT_ROWS は 1 行も変えていない)。
 type DirectRow = { name: string; replies: Reply[]; at: number[]; result: 'そのまま' | 'スタッフへ'; warn: string[] };
 const DIRECT_ROWS: DirectRow[] = [
   { name: '200 { ok: true }', replies: [OK], at: [0], result: 'そのまま', warn: [] },
@@ -648,30 +654,81 @@ function expectDirectSends(sent: Sent[], url: string) {
   }
 }
 
+// 経路 A (完了の通知) の応答の表 (r10-notify)。見える結果は 3 つ:
+//   そのまま     … 案内なし・大きな完了画面あり・「注文状況を見る」あり・success_url へ移る。
+//   スタッフへ   … 「自動登録できませんでした」(role=alert) だけ。大きな完了画面・「注文状況を見る」を隠し、success_url へ移らない。
+//   再試行できる … 「スタッフへ」と同じ案内 + 「注文登録を再試行」。
+// 届いた = 2xx で本文が JSON の { ok: true } のときだけ。
+// 待てば通る失敗 (5xx・429・422 tx_not_found・通信の失敗・2xx で届いた形でない応答) は、同じ本文を自動で 2 回まで送り直す
+// (2 秒後・15 秒後。直前が 429 なら 61 秒後)。それでも届かなければ「再試行できる」。409 processing は今までどおりの表
+// (RETRY_AT) で送り直し、続けば「再試行できる」(重ねて自動では送り直さない)。
+// 何度送っても通らない失敗 (ほかの 4xx・JSON でない 409 / 422) は、送り直さずに「スタッフへ」。
+// ここは部分の通知 (経路 D) が無い支払い。D が届いている支払いの動きは、下の「D の後に A が続く順番」。
+type CompletionResult = 'そのまま' | 'スタッフへ' | '再試行できる';
+type CompletionRow = { name: string; replies: Reply[]; at: number[]; result: CompletionResult; warn: string[] };
+// 自動の送り直し: 最初の送信から 2 秒後・さらに 15 秒後。
+const AUTO_RETRY_AT = [0, 2_000, 17_000];
+const COMPLETION_ROWS: CompletionRow[] = [
+  { name: '200 { ok: true }', replies: [OK], at: [0], result: 'そのまま', warn: [] },
+  { name: '200 { ok: true, duplicate: true }', replies: [json(200, { ok: true, duplicate: true })], at: [0], result: 'そのまま', warn: [] },
+  { name: '200 { ok: true, bindingConflict: true }', replies: [json(200, { ok: true, bindingConflict: true })], at: [0], result: 'そのまま', warn: [] },
+  { name: '200 本文なし', replies: [noBody(200)], at: AUTO_RETRY_AT, result: '再試行できる', warn: ['checkout.webhook.non_ok 200'] },
+  { name: '200 JSON でない本文', replies: [notJson(200)], at: AUTO_RETRY_AT, result: '再試行できる', warn: ['checkout.webhook.non_ok 200'] },
+  { name: '200 { ok: false }', replies: [json(200, { ok: false })], at: AUTO_RETRY_AT, result: '再試行できる', warn: ['checkout.webhook.non_ok 200'] },
+  { name: '409 processing が続く', replies: [PROCESSING], at: RETRY_AT, result: '再試行できる', warn: ['checkout.webhook.non_ok 409'] },
+  { name: '409 processing → 200', replies: [PROCESSING, OK], at: [0, 250], result: 'そのまま', warn: [] },
+  { name: '409 processing ×2 → 503', replies: [PROCESSING, PROCESSING, json(503, { error: 'rpc_error' })], at: [0, 250, 1_250, 3_250, 18_250], result: '再試行できる', warn: ['checkout.webhook.non_ok 503'] },
+  { name: '409 processing → 422 tx_too_old', replies: [PROCESSING, json(422, { error: 'tx_too_old' })], at: [0, 250], result: 'スタッフへ', warn: ['checkout.webhook.non_ok 422'] },
+  { name: '409 JSON でない本文', replies: [notJson(409)], at: [0], result: 'スタッフへ', warn: ['checkout.webhook.non_ok 409'] },
+  { name: '409 reserved_order', replies: [json(409, { error: 'reserved_order' })], at: [0], result: 'スタッフへ', warn: ['checkout.webhook.non_ok 409'] },
+  { name: '422 tx_too_old', replies: [json(422, { ok: false, error: 'tx_too_old' })], at: [0], result: 'スタッフへ', warn: ['checkout.webhook.non_ok 422'] },
+  { name: '422 tx_not_found', replies: [json(422, { error: 'tx_not_found' })], at: AUTO_RETRY_AT, result: '再試行できる', warn: ['checkout.webhook.non_ok 422'] },
+  { name: '422 tx_not_found → 200', replies: [json(422, { error: 'tx_not_found' }), OK], at: [0, 2_000], result: 'そのまま', warn: [] },
+  { name: '422 tx_not_found → 422 tx_too_old', replies: [json(422, { error: 'tx_not_found' }), json(422, { error: 'tx_too_old' })], at: [0, 2_000], result: 'スタッフへ', warn: ['checkout.webhook.non_ok 422'] },
+  { name: '422 amount_too_low', replies: [json(422, { error: 'amount_too_low' })], at: [0], result: 'スタッフへ', warn: ['checkout.webhook.non_ok 422'] },
+  { name: '422 JSON でない本文', replies: [notJson(422)], at: [0], result: 'スタッフへ', warn: ['checkout.webhook.non_ok 422'] },
+  { name: '400 tx_too_old (422 ではない)', replies: [json(400, { error: 'tx_too_old' })], at: [0], result: 'スタッフへ', warn: ['checkout.webhook.non_ok 400'] },
+  // 429 の後は、server の 60 秒の窓が空くまで (61 秒) 待つ。
+  { name: '429', replies: [json(429, { error: 'rate_limited' })], at: [0, 61_000, 122_000], result: '再試行できる', warn: ['checkout.webhook.non_ok 429'] },
+  { name: '429 → 200', replies: [json(429, { error: 'rate_limited' }), OK], at: [0, 61_000], result: 'そのまま', warn: [] },
+  { name: '503', replies: [json(503, { error: 'rpc_error' })], at: AUTO_RETRY_AT, result: '再試行できる', warn: ['checkout.webhook.non_ok 503'] },
+  { name: '503 → 200', replies: [json(503, { error: 'rpc_error' }), OK], at: [0, 2_000], result: 'そのまま', warn: [] },
+  { name: '503 ×2 → 200', replies: [json(503, { error: 'rpc_error' }), json(503, { error: 'rpc_error' }), OK], at: AUTO_RETRY_AT, result: 'そのまま', warn: [] },
+  { name: '503 → 409 processing → 200 (送り直しの中でも 409 の表は同じ)', replies: [json(503, { error: 'rpc_error' }), PROCESSING, OK], at: [0, 2_000, 2_250], result: 'そのまま', warn: [] },
+  { name: '503 JSON でない本文', replies: [notJson(503)], at: AUTO_RETRY_AT, result: '再試行できる', warn: ['checkout.webhook.non_ok 503'] },
+  { name: '503 → 400 (送り直しで、通らない失敗に変わる)', replies: [json(503, { error: 'rpc_error' }), json(400, { error: 'invalid_body' })], at: [0, 2_000], result: 'スタッフへ', warn: ['checkout.webhook.non_ok 400'] },
+  { name: '通信の失敗', replies: [networkFailure], at: AUTO_RETRY_AT, result: '再試行できる', warn: ['checkout.webhook.failed'] },
+  { name: '通信の失敗 → 200', replies: [networkFailure, OK], at: [0, 2_000], result: 'そのまま', warn: [] },
+];
+
 describe('応答の表 — 経路 A: この画面で送った支払いの完了の通知', () => {
   const params: CheckoutParams = { ...MOBILE_ORDER, successUrl: SUCCESS_URL };
 
   describe.each([
     {
       route: 'Pimlico の gasless',
-      complete: () => completeGasless(params),
+      complete: (order: CheckoutParams) => completeGasless(order),
       hash: { txHash: TX_GASLESS, userOpHash: USEROP, blockNumber: '99' },
       redirectTx: TX_GASLESS,
     },
     {
       route: '通常決済 (利用料 0・部分の通知なし)',
-      complete: async () => {
+      complete: async (order: CheckoutParams) => {
         // 利用料の flag が OFF なら通常決済は 1 回の送金で終わり、部分の通知 (経路 D) は出ない。
         flags.enableMobileOrderFee = false;
-        return payStandard(params, ['success-no-fee']);
+        return payStandard(order, ['success-no-fee']);
       },
       hash: { merchantTxHash: TX_MERCHANT, blockNumber: '123' },
       redirectTx: TX_MERCHANT,
     },
   ])('$route', ({ complete, hash, redirectTx }) => {
-    it.each(DIRECT_ROWS)('$name → $result', async ({ replies, at, result, warn }) => {
+    it.each(COMPLETION_ROWS)('$name → $result', async ({ replies, at, result, warn }) => {
       installFetch(replies);
-      await complete();
+      // success_url への移動は、通知を待たずに 3 秒で起きる (下の「…ちょうど 3 秒後」と「…送り直しの途中で移る」)。
+      // 届かないと決まるのが移動より後 (最後の送信が 3 秒以降) の行は、移動した後の画面の話になるので、success_url なしで
+      // 見る。届いた行と、移動より前に決まる行は、今までどおり success_url つきで、移動するか止まるかまで見る。
+      const settlesBeforeRedirect = result === 'そのまま' || at[at.length - 1] < 3_000;
+      await complete(settlesBeforeRedirect ? params : MOBILE_ORDER);
 
       // 確定した時点で 1 回目を送っている (空振りでない)。応答を待たずに完了の画面も出ている。
       expect(notifySent).toHaveLength(1);
@@ -684,10 +741,11 @@ describe('応答の表 — 経路 A: この画面で送った支払いの完了�
       expect(bodyOf(notifySent[0])).not.toHaveProperty('feeUncollected');
       // 受付 (admission) は払う前の 1 回だけで、notify より先。
       expect(otherSent.map((sent) => sent.url)).toEqual(['/api/order/admission']);
+      // 記録 (logger.warn) は、止まったときの 1 件だけ (送り直しの途中の失敗は出さない)。
       expect(webhookWarnings()).toEqual(warn);
 
-      // 再試行のボタンはどの応答でも出ない。前の注文の案内も出ない。
-      expect(view.retryButton()).toBeNull();
+      // 再試行のボタンは「再試行できる」のときだけ。前の注文の案内は出ない。
+      expect(view.retryButton() !== null).toBe(result === '再試行できる');
       expect(view.status(TEXT.previousPending)).toHaveLength(0);
       expect(view.status(TEXT.previousStaff)).toHaveLength(0);
       expect(view.completed()).toBe(true);
@@ -709,6 +767,182 @@ describe('応答の表 — 経路 A: この画面で送った支払いの完了�
         expect(assignSpy).not.toHaveBeenCalled();
       }
     });
+  });
+
+  // ---- 自動の送り直しと、届かなかったときの案内・「注文登録を再試行」(r10-notify) ----
+  const plain = MOBILE_ORDER; // success_url なし
+  const RPC_ERROR = json(503, { error: 'rpc_error' });
+
+  it('自動で送り直している間 (最後の送信の応答が出るまで) は、今までと同じ画面のまま: 案内もボタンも出さない', async () => {
+    installFetch([RPC_ERROR]);
+    await completeGasless(plain);
+    for (let i = 0; i < 16; i++) await settle(1_000);
+
+    // 16 秒: 2 回送って、3 回目 (17 秒) を待っている。
+    expect(notifySent.map((sent) => sent.at)).toEqual([0, 2_000]);
+    expect(view.notRegisteredAlert()).toHaveLength(0);
+    expect(view.retryButton()).toBeNull();
+    expect(view.successDialog()).not.toBeNull();
+    expect(view.statusLink()).not.toBeNull();
+    expect(webhookWarnings()).toEqual([]);
+
+    await settle(1_000);
+    expect(notifySent.map((sent) => sent.at)).toEqual(AUTO_RETRY_AT);
+    expect(view.notRegisteredAlert()).toHaveLength(1);
+    expect(view.retryButton()).not.toBeNull();
+    expect(view.successDialog()).toBeNull();
+    expect(view.statusLink()).toBeNull();
+  });
+
+  it('success_url つき × 待てば通る失敗: 移動は今までどおり確定から 3 秒後 (送り直しの途中で移る。止めるのは、移る前に届かないと決まったときだけ)', async () => {
+    installFetch([RPC_ERROR]);
+    await completeGasless(params);
+    await settle(1_000);
+    await settle(1_000);
+    await settle(999);
+    expect(assignSpy).not.toHaveBeenCalled();
+    expect(view.notRegisteredAlert()).toHaveLength(0);
+    await settle(1);
+
+    expect(assignSpy).toHaveBeenCalledOnce();
+    // 移るまでに送れたのは、最初の 1 回と 2 秒後の 1 回。
+    expect(notifySent.map((sent) => sent.at)).toEqual([0, 2_000]);
+  });
+
+  it('「注文登録を再試行」: 同じ本文を 1 回だけ送り、送っている間はボタンを消して案内は残す。届いたら案内が消え、大きな完了画面と「注文状況を見る」が戻る', async () => {
+    let respond!: (response: Response) => void;
+    installFetch([RPC_ERROR, RPC_ERROR, RPC_ERROR, () => new Promise<Response>((resolve) => { respond = resolve; })]);
+    await completeGasless(plain);
+    await runClock();
+    expect(notifySent).toHaveLength(3);
+    expect(view.notRegisteredAlert()).toHaveLength(1);
+
+    fireEvent.click(view.retryButton()!);
+    await settle();
+    expect(notifySent).toHaveLength(4);
+    expectDirectSends(notifySent, OWN_NOTIFY);
+    expect(view.retryButton()).toBeNull();
+    expect(view.notRegisteredAlert()).toHaveLength(1);
+
+    respond(Response.json({ ok: true }));
+    await runClock();
+    expect(notifySent).toHaveLength(4);
+    expect(view.notRegisteredAlert()).toHaveLength(0);
+    expect(view.retryButton()).toBeNull();
+    expect(view.successDialog()).not.toBeNull();
+    expect(view.statusLink()).toHaveAttribute('href', `/ja/order/status?t=${bodyOf(notifySent[0]).statusToken}`);
+    // 記録は、自動の送り直しが止まったときの 1 件だけ (ボタンで届いた分は出さない)。
+    expect(webhookWarnings()).toEqual(['checkout.webhook.non_ok 503']);
+  });
+
+  it('「注文登録を再試行」がまた失敗したら、ボタンが戻る。1 回押すと 1 回だけ送る (自動の送り直しは始めない)', async () => {
+    installFetch([RPC_ERROR]);
+    await completeGasless(plain);
+    await runClock();
+    expect(notifySent).toHaveLength(3);
+
+    for (let presses = 1; presses <= 2; presses++) {
+      fireEvent.click(view.retryButton()!);
+      await runClock(); // 160 秒待っても、押した 1 回のほかは送らない
+      expect(notifySent).toHaveLength(3 + presses);
+      expect(view.retryButton()).not.toBeNull();
+      expect(view.notRegisteredAlert()).toHaveLength(1);
+    }
+    expectDirectSends(notifySent, OWN_NOTIFY);
+    // 記録は、止まるたびに 1 件 (自動の送り直しの後・ボタンの 1 回ごと)。
+    expect(webhookWarnings()).toEqual(Array(3).fill('checkout.webhook.non_ok 503'));
+  });
+
+  it('押した時点でボタンが消えるので、同じ tap で 2 回 click されても、送るのは 1 回', async () => {
+    installFetch([RPC_ERROR]);
+    await completeGasless(plain);
+    await runClock();
+    const button = view.retryButton()!;
+    fireEvent.click(button);
+    expect(view.retryButton()).toBeNull(); // 応答を待たずに、押した click の中で消える
+    fireEvent.click(button);
+    await runClock();
+    expect(notifySent).toHaveLength(4);
+  });
+
+  it.each([
+    { name: '422 tx_too_old', reply: json(422, { error: 'tx_too_old' }) },
+    { name: '400 (何度送っても通らない)', reply: json(400, { error: 'invalid_body' }) },
+  ])('「注文登録を再試行」で $name が返ったら、ボタンは消えて案内だけ残る', async ({ reply }) => {
+    installFetch([RPC_ERROR, RPC_ERROR, RPC_ERROR, reply]);
+    await completeGasless(plain);
+    await runClock();
+    fireEvent.click(view.retryButton()!);
+    await runClock();
+
+    expect(notifySent).toHaveLength(4);
+    expect(view.retryButton()).toBeNull();
+    expect(view.notRegisteredAlert()).toHaveLength(1);
+    expect(view.successDialog()).toBeNull();
+  });
+
+  // success_url つきで「注文登録を再試行」が出るのは、移動 (window.location.assign) の後もこの画面が残っているとき
+  // (ブラウザの「戻る」で画面がそのまま戻ったときなど)。ここでは assign を受け止めているので、画面が残る。
+  it('「注文登録を再試行」で届いたら、success_url への 3 秒の移動を始め直す (経路 C が登録できたときと同じ)', async () => {
+    installFetch([RPC_ERROR, RPC_ERROR, RPC_ERROR, OK]);
+    await completeGasless(params);
+    await runClock();
+    expect(assignSpy).toHaveBeenCalledOnce(); // 1 回目は確定から 3 秒後 (送り直しの途中)
+    expect(view.notRegisteredAlert()).toHaveLength(1);
+    expect(view.redirectNow()).toBeNull();
+
+    fireEvent.click(view.retryButton()!);
+    await settle();
+    expect(view.notRegisteredAlert()).toHaveLength(0);
+    expect(screen.getByText('3 秒後に確認ページへ移動します')).toBeInTheDocument();
+    await settle(1_000);
+    await settle(1_000);
+    await settle(999);
+    expect(assignSpy).toHaveBeenCalledOnce();
+    await settle(1);
+    expect(assignSpy).toHaveBeenCalledTimes(2);
+    expect(new URL(String(assignSpy.mock.calls[1][0])).searchParams.get('tx_hash')).toBe(TX_GASLESS);
+  });
+
+  it('画面を離れた (unmount) 後も、送り直しは最後まで送り、記録も出す', async () => {
+    installFetch([RPC_ERROR]);
+    const page = await completeGasless(plain);
+    expect(notifySent).toHaveLength(1);
+    page.unmount();
+    await runClock();
+
+    expect(notifySent.map((sent) => sent.at)).toEqual(AUTO_RETRY_AT);
+    expect(webhookWarnings()).toEqual(['checkout.webhook.non_ok 503']);
+  });
+
+  it('USDC の会計で自社の URL (手で作った URL だけ): server の 400 unsupported_token で、案内が出る (ボタンなし)', async () => {
+    installFetch([json(400, { error: 'unsupported_token' })]);
+    mockHook(useAccount, { address: CUSTOMER, isConnected: true, chainId: baseSepolia.id });
+    mockHook(useReadContract, { data: 200_000_000n, isLoading: false, error: null });
+    mockHook(useSmartAccount, {
+      data: { smartAccountClient: {}, pimlicoClient: {} },
+      isLoading: false,
+      error: null,
+    } as Partial<ReturnType<typeof useSmartAccount>>);
+    const page = mount({
+      to: MERCHANT,
+      token: 'usdc',
+      chain: 'base',
+      gas: 'customer',
+      items: [{ name: 'Tシャツ', qty: 1, price: '25.00' }],
+      webhook: OWN_NOTIFY,
+    });
+    await settle();
+    fireEvent.click(screen.getByRole('button', { name: /USDC を支払う/ }));
+    await settle();
+    setBatchPayment('success');
+    page.rerender(page.makeUi());
+    await runClock();
+
+    expect(notifySent).toHaveLength(1);
+    expect(view.notRegisteredAlert()).toHaveLength(1);
+    expect(view.retryButton()).toBeNull();
+    expect(view.successDialog()).toBeNull();
   });
 
   it('送る本文 (Pimlico の gasless): 送信した時点の額・明細・受付番号・hash・注文状況の token・メモ', async () => {
@@ -828,15 +1062,24 @@ describe('応答の表 — 経路 A: この画面で送った支払いの完了�
     });
   });
 
-  it('メモは応答が失敗でも消える (送り直しは無い)', async () => {
+  it('メモは応答が失敗でも、送った直後に消える (消す時点は同じ)。自動の送り直しと「注文登録を再試行」は、メモを載せた同じ本文を送る', async () => {
     window.sessionStorage.setItem(memoKey('ord-7'), 'ねぎ抜き');
     installFetch([json(503, { error: 'rpc_error' })]);
-    await completeGasless(params);
+    const removeItem = vi.spyOn(Storage.prototype, 'removeItem');
+    await completeGasless(plain);
+    // 1 回目を送った時点 (応答の前後を問わず) で、もう消えている。
+    expect(notifySent).toHaveLength(1);
+    expect(window.sessionStorage.getItem(memoKey('ord-7'))).toBeNull();
+    await runClock();
+    fireEvent.click(view.retryButton()!);
     await runClock();
 
-    expect(notifySent).toHaveLength(1);
+    expect(notifySent).toHaveLength(4);
+    expectDirectSends(notifySent, OWN_NOTIFY);
     expect(bodyOf(notifySent[0]).customerMemo).toBe('ねぎ抜き');
     expect(window.sessionStorage.getItem(memoKey('ord-7'))).toBeNull();
+    // 消すのは最初の 1 回だけ (送り直しは sessionStorage に触らない)。
+    expect(removeItem.mock.calls.filter(([key]) => key === memoKey('ord-7'))).toHaveLength(1);
   });
 
   it('お渡しの通知の flag が OFF なら、本文に statusToken を入れず「注文状況を見る」も出さない', async () => {
@@ -1085,6 +1328,129 @@ describe('応答の表 — 経路 D: 通常決済の部分の通知 (お店へ�
       expect(view.redirectNow()).toBeNull();
       expect(assignSpy).not.toHaveBeenCalled();
     });
+
+    // ---- 完了の通知が届かなかったとき (r10-notify)。部分の通知の送り方・回数・記録は変えていない ----
+    const plain = MOBILE_ORDER; // success_url なし
+    const RPC_ERROR = json(503, { error: 'rpc_error' });
+    const feeUncollectedSent = () => notifySent.map((sent) => bodyOf(sent).feeUncollected === true);
+
+    it('部分の通知が届いた後に、完了の通知が届かない: 自動で送り直すが、案内もボタンも出さない (注文はお店にある)。記録は出す', async () => {
+      installFetch([OK, RPC_ERROR]);
+      await payStandard(plain, ['fee-sending', 'success']);
+      await runClock();
+
+      expect(notifySent.map((sent) => sent.at)).toEqual([0, 0, 2_000, 17_000]);
+      expect(feeUncollectedSent()).toEqual([true, false, false, false]);
+      expect(view.notRegisteredAlert()).toHaveLength(0);
+      expect(view.retryButton()).toBeNull();
+      expect(view.successDialog()).not.toBeNull();
+      expect(view.statusLink()).not.toBeNull();
+      expect(webhookWarnings()).toEqual(['checkout.webhook.non_ok 503']);
+    });
+
+    it.each([
+      { name: '何度送っても通らない失敗 (400)', reply: json(400, { error: 'invalid_body' }), sends: 2, warn: 'checkout.webhook.non_ok 400' },
+      { name: '表の最後まで続く 409 processing', reply: PROCESSING, sends: 8, warn: 'checkout.webhook.non_ok 409' },
+    ])('部分の通知が届いた後に、完了の通知が $name: 案内もボタンも出さない。記録は出す', async ({ reply, sends, warn }) => {
+      installFetch([OK, reply]);
+      await payStandard(plain, ['fee-sending', 'success']);
+      await runClock();
+
+      expect(notifySent).toHaveLength(sends);
+      expect(view.notRegisteredAlert()).toHaveLength(0);
+      expect(view.retryButton()).toBeNull();
+      expect(view.successDialog()).not.toBeNull();
+      expect(view.statusLink()).not.toBeNull();
+      expect(webhookWarnings()).toEqual([warn]);
+    });
+
+    it('部分の通知が届いていても、完了の通知が 422 tx_too_old なら、今までどおり案内を出す (ボタンなし)', async () => {
+      installFetch([OK, json(422, { error: 'tx_too_old' })]);
+      await payStandard(plain, ['fee-sending', 'success']);
+      await runClock();
+
+      expect(notifySent).toHaveLength(2);
+      expect(view.notRegisteredAlert()).toHaveLength(1);
+      expect(view.retryButton()).toBeNull();
+      expect(view.successDialog()).toBeNull();
+    });
+
+    it('1 回目の部分の通知が届かなくても、2 回目 (利用料の送金の hash つき) が届いていれば、完了の通知が届かなくても案内は出さない', async () => {
+      installFetch([RPC_ERROR, OK, RPC_ERROR]);
+      await payStandard(plain, ['fee-sending', 'fee-unknown', 'success']);
+      await runClock();
+
+      expect(feeUncollectedSent()).toEqual([true, true, false, false, false]);
+      expect(view.notRegisteredAlert()).toHaveLength(0);
+      expect(view.retryButton()).toBeNull();
+      // 1 件目 = 1 回目の部分の通知 (今までどおり)・2 件目 = 完了の通知が止まったとき。
+      expect(webhookWarnings()).toEqual(['checkout.webhook.non_ok 503', 'checkout.webhook.non_ok 503']);
+    });
+
+    it('部分の通知も完了の通知も届かない: 完了の通知を送り直した後に、案内と「注文登録を再試行」を出す', async () => {
+      installFetch([RPC_ERROR]);
+      await payStandard(plain, ['fee-sending', 'success']);
+      // 部分の通知の失敗の時点では、案内もボタンも出ない (部分の通知は今までどおり 1 回だけ)。
+      expect(view.notRegisteredAlert()).toHaveLength(0);
+      await runClock();
+
+      expect(notifySent.map((sent) => sent.at)).toEqual([0, 0, 2_000, 17_000]);
+      expect(feeUncollectedSent()).toEqual([true, false, false, false]);
+      expect(view.notRegisteredAlert()).toHaveLength(1);
+      expect(view.retryButton()).not.toBeNull();
+      expect(view.successDialog()).toBeNull();
+      expect(view.statusLink()).toBeNull();
+      expect(webhookWarnings()).toEqual(['checkout.webhook.non_ok 503', 'checkout.webhook.non_ok 503']);
+    });
+
+    it('2xx でも本文が { ok: true } でない部分の通知は、届いた扱いにしない: 完了の通知も届かなければ案内を出す', async () => {
+      installFetch([notJson(200), RPC_ERROR]);
+      await payStandard(plain, ['fee-sending', 'success']);
+      await runClock();
+
+      expect(feeUncollectedSent()).toEqual([true, false, false, false]);
+      expect(view.notRegisteredAlert()).toHaveLength(1);
+      expect(view.retryButton()).not.toBeNull();
+      // 部分の通知は、2xx なら今までどおり記録を出さない。
+      expect(webhookWarnings()).toEqual(['checkout.webhook.non_ok 503']);
+    });
+
+    it('部分の通知が 422 tx_too_old で立てた案内は、完了の通知の「注文登録を再試行」が届いても消さない', async () => {
+      installFetch([json(422, { error: 'tx_too_old' }), RPC_ERROR, RPC_ERROR, RPC_ERROR, OK]);
+      await payStandard(plain, ['fee-sending', 'success']);
+      await runClock();
+      expect(notifySent).toHaveLength(4);
+      expect(view.notRegisteredAlert()).toHaveLength(1);
+
+      fireEvent.click(view.retryButton()!);
+      await runClock();
+      expect(notifySent).toHaveLength(5);
+      expect(view.retryButton()).toBeNull();
+      // 部分の通知が立てた案内は残る (大きな完了画面と「注文状況を見る」も隠れたまま)。
+      expect(view.notRegisteredAlert()).toHaveLength(1);
+      expect(view.successDialog()).toBeNull();
+      expect(view.statusLink()).toBeNull();
+    });
+
+    // server は、同じ支払いと IP の組を 60 秒に 5 回まで受ける (断った要求も数える)。部分の通知が 409 の表で 5 回送った
+    // 直後は、完了の通知の自動の送り直しが枠を使い切らないよう、新しい方から 5 番目の送信の 61 秒後まで待つ。
+    it('部分の通知が 409 の表で 5 回送った後は、完了の通知の自動の送り直しを、枠が空くまで待たせる', async () => {
+      installFetch([PROCESSING, PROCESSING, PROCESSING, PROCESSING, OK, RPC_ERROR]);
+      await payStandard(plain, ['fee-sending', 'success']);
+      await runClock();
+
+      // 部分の通知: 0 / 0.25 / 1.25 / 5.25 / 20.25 秒 (5 回目で届く)。完了の通知: 20.25 秒 (部分の通知の直後・503) →
+      // 2 秒後ではなく 61.25 秒 (0.25 秒の送信の 61 秒後) → その 15 秒後 (もう枠は空いている)。
+      expect(notifySent.map((sent) => sent.at)).toEqual([0, 250, 1_250, 5_250, 20_250, 20_250, 61_250, 76_250]);
+      expect(feeUncollectedSent()).toEqual([true, true, true, true, true, false, false, false]);
+      // 送るたびに、その時点から 61 秒の間の送信 (自分を入れて) は 5 回以下。最初の完了の通知 (自動の送り直しではない) を除く。
+      for (const index of [6, 7]) {
+        const at = notifySent[index].at;
+        expect(notifySent.filter((sent) => sent.at <= at && sent.at > at - 61_000)).toHaveLength(index === 6 ? 5 : 4);
+      }
+      expect(view.notRegisteredAlert()).toHaveLength(0);
+      expect(webhookWarnings()).toEqual(['checkout.webhook.non_ok 503']);
+    });
   });
 
   // 部分の通知は、メモを読んだ直後に sessionStorage から消す (消す時点は変えていない)。同じ支払い (お店への送金の hash) の
@@ -1262,10 +1628,16 @@ describe('応答の表 — 経路 D: 通常決済の部分の通知 (お店へ�
       window.sessionStorage.setItem(memoKey('ord-7'), MEMO);
       installFetch([json(503, { error: 'rpc_error' })]);
       const memoRemovals = watchMemoRemovals();
-      await payStandard(params, ['success-no-fee']);
+      // 届かない完了の通知は自動で 2 回送り直す (r10-notify)。結果が出るのは 3 秒の移動より後なので、success_url なしで見る。
+      await payStandard(MOBILE_ORDER, ['success-no-fee']);
+      // 消すのは、1 回目を送った時点 (今までどおり)。
+      expect(notifySent).toHaveLength(1);
+      expect(memoStored()).toBeNull();
       await runClock();
 
-      expect(notifySent).toHaveLength(1);
+      // 送り直しも、メモを載せた同じ本文。sessionStorage には触らない (消すのは最初の 1 回だけ)。
+      expect(notifySent).toHaveLength(3);
+      expectDirectSends(notifySent, OWN_NOTIFY);
       expect(bodyOf(notifySent[0])).toMatchObject({ mode: 'standard', merchantTxHash: TX_MERCHANT, customerMemo: MEMO });
       expect(memoStored()).toBeNull();
       expect(memoRemovals()).toBe(1);
@@ -1684,7 +2056,6 @@ describe('通知の失敗の記録 (logger.warn) の中身', () => {
   const warnCalls = () => loggerWarn.mock.calls.filter(([event]) => String(event).startsWith('checkout.webhook'));
 
   it.each([
-    { route: 'A 完了', run: () => completeGasless(params) },
     { route: 'D 部分', run: () => payStandard(params, ['fee-sending']) },
   ])('経路 $route: 応答の status と、宛先の origin・短い hash (URL の全文は出さない)', async ({ run }) => {
     installFetch([json(503, { error: 'rpc_error' })]);
@@ -1699,7 +2070,6 @@ describe('通知の失敗の記録 (logger.warn) の中身', () => {
   });
 
   it.each([
-    { route: 'A 完了', run: () => completeGasless(params) },
     { route: 'D 部分', run: () => payStandard(params, ['fee-sending']) },
   ])('経路 $route: 通信の失敗は、error と宛先の origin・短い hash', async ({ run }) => {
     installFetch([networkFailure]);
@@ -1710,6 +2080,79 @@ describe('通知の失敗の記録 (logger.warn) の中身', () => {
       ['checkout.webhook.failed', { error: expect.any(TypeError), webhookOrigin: ORIGIN, webhookHash: expect.stringMatching(/^[0-9a-f]{16}$/) }],
     ]);
     expect(JSON.stringify(warnCalls())).not.toContain(SECRET);
+  });
+
+  // 経路 A (r10-notify): 記録は、届かずに止まったときの 1 件だけ。今までの欄に、送った回数 (attempts) と、server の error の語
+  // (serverError・小文字と `_` だけの語のときだけ) を足す。
+  it('経路 A 完了: 送り直しを使い切って止まったときの 1 件。今までの欄 + 送った回数 + server の error の語 (URL の全文は出さない)', async () => {
+    installFetch([json(503, { error: 'rpc_error' })]);
+    await completeGasless(params);
+    await runClock();
+
+    expect(notifySent.map((sent) => sent.url)).toEqual(Array(3).fill(`${OWN_NOTIFY}&token=${SECRET}`));
+    expect(warnCalls()).toEqual([
+      [
+        'checkout.webhook.non_ok',
+        { status: 503, statusText: '', webhookOrigin: ORIGIN, webhookHash: expect.stringMatching(/^[0-9a-f]{16}$/), attempts: 3, serverError: 'rpc_error' },
+      ],
+    ]);
+    expect(JSON.stringify(warnCalls())).not.toContain(SECRET);
+  });
+
+  it('経路 A 完了: 通信の失敗は、error と宛先の origin・短い hash + 送った回数', async () => {
+    installFetch([networkFailure]);
+    await completeGasless(params);
+    await runClock();
+
+    expect(warnCalls()).toEqual([
+      ['checkout.webhook.failed', { error: expect.any(TypeError), webhookOrigin: ORIGIN, webhookHash: expect.stringMatching(/^[0-9a-f]{16}$/), attempts: 3 }],
+    ]);
+    expect(JSON.stringify(warnCalls())).not.toContain(SECRET);
+  });
+
+  it.each([
+    { name: '語の形でない文字列', error: `Bearer ${SECRET}` },
+    { name: '文字列でない値', error: { message: SECRET } },
+    { name: '41 字以上', error: 'a'.repeat(41) },
+  ])('経路 A 完了: 応答の error が $name なら、serverError の欄ごと出さない (中継が返す任意の文字列を記録に入れない)', async ({ error }) => {
+    installFetch([json(400, { error })]);
+    await completeGasless(params);
+    await runClock();
+
+    expect(warnCalls()).toEqual([
+      ['checkout.webhook.non_ok', { status: 400, statusText: '', webhookOrigin: ORIGIN, webhookHash: expect.stringMatching(/^[0-9a-f]{16}$/), attempts: 1 }],
+    ]);
+    expect(JSON.stringify(warnCalls())).not.toContain(SECRET);
+  });
+
+  it('経路 A 完了: 409 の表の送り直しも送った回数に数える。「注文登録を再試行」の 1 回ごとにも 1 件 (回数は通算)', async () => {
+    installFetch([PROCESSING, json(503, { error: 'rpc_error' })]);
+    await completeGasless(params);
+    await runClock();
+    fireEvent.click(view.retryButton()!);
+    await runClock();
+
+    // 0 秒 (409) → 0.25 秒 (503) → 2.25 秒 (503) → 17.25 秒 (503) = 4 回で止まる。ボタンで 5 回目。
+    expect(notifySent).toHaveLength(5);
+    expect(warnCalls().map(([event, fields]) => [event, fields.attempts])).toEqual([
+      ['checkout.webhook.non_ok', 4],
+      ['checkout.webhook.non_ok', 5],
+    ]);
+  });
+
+  it('経路 A 完了: 送り直しの途中と、送り直して届いたことは logger.info だけ (既定では出ない)。メモ・本文・宛先は載せない', async () => {
+    window.sessionStorage.setItem(memoKey('ord-7'), 'ねぎ抜き');
+    installFetch([json(503, { error: 'rpc_error' }), json(429, { error: 'rate_limited' }), OK]);
+    await completeGasless(params);
+    await runClock();
+
+    expect(notifySent.map((sent) => sent.at)).toEqual([0, 2_000, 63_000]);
+    expect(warnCalls()).toEqual([]);
+    expect(infoEvents('checkout.webhook.retry_scheduled')).toEqual([
+      { status: 503, attempts: 1, waitMs: 2_000 },
+      { status: 429, attempts: 2, waitMs: 61_000 },
+    ]);
+    expect(infoEvents('checkout.webhook.retry_delivered')).toEqual([{ attempts: 3 }]);
   });
 
   it('経路 C: 応答の status だけ。通信の失敗は理由の符号だけ。経路 B は何も出さない', async () => {
@@ -1930,13 +2373,16 @@ describe('応答の表 — 経路 B: 前の会計の未登録の注文の通知'
 // =====================================================================================================================
 // 「自動登録できませんでした」の案内 (state の名前は orderNotifyTooOld) が実際に表すもの
 // =====================================================================================================================
-// 上の表を、案内の側から 1 つにまとめ直したもの。経路 A・D では「期限切れ (422 tx_too_old)」のときだけ出るが、経路 C では
+// 上の表を、案内の側から 1 つにまとめ直したもの。経路 D では「期限切れ (422 tx_too_old)」のときだけ出るが、経路 C では
 // 登録を確かめられなかった応答すべて (5xx・429・409 processing の出尽くし・通信の失敗) で出て、登録できれば消える。
+// 経路 A (r10-notify から) も、届かずに止まれば出る: 5xx・429・通信の失敗は自動の送り直しを使い切った後、409 processing は
+// 表の出尽くしの後 (どちらも確定から 3 秒より後 = success_url つきなら移動した後なので、success_url なしで見る)。
 // 経路 B の応答では出ない。出ている間は、大きな完了画面・「注文状況を見る」・success_url への移動を止める。
 describe('「自動登録できませんでした」の案内が出る条件 (名前は too_old だが、期限切れだけではない)', () => {
   const params: CheckoutParams = { ...MOBILE_ORDER, successUrl: SUCCESS_URL };
   const drivers = {
     'A 完了': () => completeGasless(params),
+    'A 完了 (success_url なし)': () => completeGasless(MOBILE_ORDER),
     'D 部分': () => payStandard(params, ['fee-sending']),
     'C 束縛 (復元)': () => restoreBoundOrder(params, savedOrder()),
     'C 束縛 (この画面)': () => payBoundOrder(params),
@@ -1958,10 +2404,10 @@ describe('「自動登録できませんでした」の案内が出る条件 (�
   };
   it.each([
     { route: 'A 完了', reply: '422 tx_too_old', shown: true },
-    { route: 'A 完了', reply: '503', shown: false },
-    { route: 'A 完了', reply: '429', shown: false },
-    { route: 'A 完了', reply: '409 processing が続く', shown: false },
-    { route: 'A 完了', reply: '通信の失敗', shown: false },
+    { route: 'A 完了 (success_url なし)', reply: '503', shown: true },
+    { route: 'A 完了 (success_url なし)', reply: '429', shown: true },
+    { route: 'A 完了 (success_url なし)', reply: '409 processing が続く', shown: true },
+    { route: 'A 完了 (success_url なし)', reply: '通信の失敗', shown: true },
     { route: 'A 完了', reply: '200 { ok: true }', shown: false },
     { route: 'D 部分', reply: '422 tx_too_old', shown: true },
     { route: 'D 部分', reply: '503', shown: false },
