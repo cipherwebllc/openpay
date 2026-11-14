@@ -935,9 +935,10 @@ function RegisterModeContent({
                   {t('currencyMismatch', { symbol })}
                 </p>
               )}
-              {/* 行が上限の間、押せないタイルと「自由入力」の理由を出す (押せる / 押せないは、上の disabled が決める)。 */}
+              {/* 行が上限の間、押せないタイルと「自由入力」の理由を出す (押せる / 押せないは、上の disabled が決める)。
+                  出た瞬間に読み上げられるよう role="status" (下の storeDevice.saleBlocked と同じ形)。 */}
               {cart.length >= CHECKOUT_MAX_ITEMS && (
-                <p className="mt-3 text-xs text-amber-700">
+                <p role="status" className="mt-3 text-xs text-amber-700">
                   {t('cartFull', { max: CHECKOUT_MAX_ITEMS })}
                 </p>
               )}

@@ -202,6 +202,8 @@ describe('OptionSelectModal: addBlockedNotice (押せない間に出す理由の
   const dialog = () => screen.getByRole('dialog', { name: 'ラーメン' });
   // 卵を選んだ選択だけ足せない。
   const noEgg = (choices: OptionChoice[]) => !choices.some((c) => c.id === 'egg');
+  // 案内のために足した属性 (文が出ていない間は、モーダルの中に 1 つも無い)。
+  const ADDED_ATTRS = '[id], [aria-describedby], [role="status"]';
 
   it('canAdd が false の間だけ「カートに追加」の前に出て、足せる選択に変えると消える', async () => {
     const user = userEvent.setup();
@@ -216,10 +218,17 @@ describe('OptionSelectModal: addBlockedNotice (押せない間に出す理由の
     // 文を足すだけ: ボタンの名前は変えず、aria-label も付けない。
     expect(add()).toHaveAccessibleName('カートに追加');
     expect(add()).not.toHaveAttribute('aria-label');
+    // 出た瞬間に読み上げられる役割 (status) で、押せないボタンの説明としてこの文を指す。
+    expect(within(dialog()).getByRole('status')).toBe(note);
+    expect(note.id).not.toBe('');
+    expect(add()).toHaveAttribute('aria-describedby', note.id);
+    expect(add()).toHaveAccessibleDescription(NOTICE);
 
     await user.click(screen.getByRole('checkbox', { name: /卵/ }));
     expect(add()).toBeEnabled();
     expect(screen.queryByText(NOTICE)).toBeNull();
+    expect(within(dialog()).queryByRole('status')).toBeNull();
+    expect(add()).not.toHaveAttribute('aria-describedby');
   });
 
   it('文を渡さなければ、canAdd が false で押せない間も何も出ない (空の段落も足さない)', async () => {
@@ -228,6 +237,9 @@ describe('OptionSelectModal: addBlockedNotice (押せない間に出す理由の
     await user.click(screen.getByRole('checkbox', { name: /卵/ }));
     expect(add()).toBeDisabled();
     expect(dialog().querySelector('p')).toBeNull();
+    // 文が無ければ、ボタンに説明の属性も、id も、status も足さない (モバイル注文の DOM を変えない)。
+    expect(add()).not.toHaveAttribute('aria-describedby');
+    expect(dialog().querySelector(ADDED_ATTRS)).toBeNull();
   });
 
   it('canAdd を渡さない画面では、文を渡しても出ない (いつでも押せる)', async () => {
@@ -236,6 +248,17 @@ describe('OptionSelectModal: addBlockedNotice (押せない間に出す理由の
     await user.click(screen.getByRole('checkbox', { name: /卵/ }));
     expect(add()).toBeEnabled();
     expect(screen.queryByText(NOTICE)).toBeNull();
+    expect(dialog().querySelector(ADDED_ATTRS)).toBeNull();
+  });
+
+  it('canAdd も文も渡さない画面 (モバイル注文の使い方) の DOM には、id・aria-describedby・status が 1 つも無い', async () => {
+    const user = userEvent.setup();
+    const { add } = renderOpen();
+    expect(dialog().querySelector(ADDED_ATTRS)).toBeNull();
+    await user.click(screen.getByRole('checkbox', { name: /卵/ }));
+    await user.click(screen.getByRole('radio', { name: /^L/ }));
+    expect(add()).toBeEnabled();
+    expect(dialog().querySelector(ADDED_ATTRS)).toBeNull();
   });
 
   it('必須のグループが未選択の間は出ない (「選択してください」と同時に出ない)・選ぶと「選択してください」が消えて文が出る', async () => {
@@ -250,10 +273,12 @@ describe('OptionSelectModal: addBlockedNotice (押せない間に出す理由の
     await user.click(add());
     expect(screen.getByText('選択してください')).toBeInTheDocument();
     expect(screen.queryByText(NOTICE)).toBeNull();
+    expect(add()).not.toHaveAttribute('aria-describedby');
 
     await user.click(screen.getByRole('checkbox', { name: /よく焼き/ }));
     expect(add()).toBeDisabled();
     expect(screen.queryByText('選択してください')).toBeNull();
     expect(screen.getByText(NOTICE)).toBeInTheDocument();
+    expect(add()).toHaveAccessibleDescription(NOTICE);
   });
 });

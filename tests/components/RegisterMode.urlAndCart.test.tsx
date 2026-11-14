@@ -1148,13 +1148,16 @@ describe('RegisterMode: 作られる支払い URL と、カートの境目', () 
       describe('押せない理由の案内', () => {
         const CART_FULL = jaMessages.RegisterMode.cartFull.replace('{max}', String(CHECKOUT_MAX_ITEMS));
         const CART_FULL_EN = enMessages.RegisterMode.cartFull.replace('{max}', String(CHECKOUT_MAX_ITEMS));
+        // 案内は、出た瞬間に読み上げられるよう role="status" (同じレジの storeDevice.saleBlocked と同じ形)。
+        // 下の 2 つは、その役割を持つ要素だけを文で探す (役割が外れると、どのテストでも見つからない)。
+        const STATUS = { selector: '[role="status"]' };
         /** 商品のタイルの下の案内 (無ければ null)。 */
         async function tileNote(text = CART_FULL) {
-          return within(await screen.findByRole('region', { name: /^(商品|Products)$/ })).queryByText(text);
+          return within(await screen.findByRole('region', { name: /^(商品|Products)$/ })).queryByText(text, STATUS);
         }
         /** オプションを選ぶ画面の中の案内 (無ければ null)。 */
-        function modalNote(name = '牛丼') {
-          return within(screen.getByRole('dialog', { name })).queryByText(CART_FULL);
+        function modalNote(name = '牛丼', text = CART_FULL) {
+          return within(screen.getByRole('dialog', { name })).queryByText(text, STATUS);
         }
         function isBefore(a: Element, b: Element) {
           return (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
@@ -1212,7 +1215,7 @@ describe('RegisterMode: 作られる支払い URL と、カートの境目', () 
           expect(await tileNote()).toBeInTheDocument();
         });
 
-        it('通貨の案内と同時に出る (通貨の案内 → 上限の案内の順・同じ見た目・role は足さない)', async () => {
+        it('通貨の案内と同時に出る (通貨の案内 → 上限の案内の順・同じ見た目・上限の案内だけ role="status")', async () => {
           const user = userEvent.setup();
           render(<RegisterMode />);
           await fill(user, 9);
@@ -1227,7 +1230,9 @@ describe('RegisterMode: 作られる支払い URL と、カートの境目', () 
           expect(isBefore(currency, full)).toBe(true);
           expect(full.tagName).toBe(currency.tagName);
           expect(full.className).toBe(currency.className);
-          expect(full.getAttributeNames()).toEqual(currency.getAttributeNames());
+          // 上限の案内に足した属性は role だけ。通貨の案内は今までどおり (class だけ)。
+          expect(full.getAttributeNames().sort()).toEqual(['class', 'role']);
+          expect(currency.getAttributeNames()).toEqual(['class']);
           expect(cartLines()).toHaveLength(10);
         });
 
@@ -1246,16 +1251,23 @@ describe('RegisterMode: 作られる支払い URL と、カートの境目', () 
           const note = modalNote() as HTMLElement;
           expect(note).toBeInTheDocument();
           expect(isBefore(note, addButton())).toBe(true);
+          // 押せないボタンの説明として、この案内を指す (ボタンの名前は「カートに追加」のまま)。
+          expect(note.id).not.toBe('');
+          expect(addButton()).toHaveAttribute('aria-describedby', note.id);
+          expect(addButton()).toHaveAccessibleDescription(CART_FULL);
+          expect(addButton()).toHaveAccessibleName(ADD);
           // 選ぶ画面の中に 1 つ・背後のタイルの下に 1 つ。
           expect(screen.getAllByText(CART_FULL)).toHaveLength(2);
-          // +200 (700 の行がある): 押せる → 消える。
+          // +200 (700 の行がある): 押せる → 消える (ボタンの説明も外れる)。
           await user.click(plus200);
           expect(addButton()).toBeEnabled();
           expect(modalNote()).toBeNull();
+          expect(addButton()).not.toHaveAttribute('aria-describedby');
           // +200 と +150 (新しい行になる): 押せない → 出る。
           await user.click(plus150);
           expect(addButton()).toBeDisabled();
           expect(modalNote()).toBeInTheDocument();
+          expect(addButton()).toHaveAccessibleDescription(CART_FULL);
         });
 
         it('オプションを選ぶ画面: 上限でないとき (9 行) は、新しい行になる選択でも出ない', async () => {
@@ -1280,8 +1292,10 @@ describe('RegisterMode: 作られる支払い URL と、カートの境目', () 
           expect(cartLines()).toHaveLength(10);
 
           await tap(user, /Tee/);
-          expect(within(screen.getByRole('dialog', { name: 'Tee' })).getByRole('button', { name: ADD })).toBeEnabled();
+          const teeAdd = within(screen.getByRole('dialog', { name: 'Tee' })).getByRole('button', { name: ADD });
+          expect(teeAdd).toBeEnabled();
           expect(modalNote('Tee')).toBeNull();
+          expect(teeAdd).not.toHaveAttribute('aria-describedby');
           expect(await tileNote()).toBeInTheDocument();
         });
 
@@ -1295,9 +1309,10 @@ describe('RegisterMode: 作られる支払い URL と、カートの境目', () 
           expect(await tileNote(CART_FULL_EN)).toBeInTheDocument();
 
           await tap(user, /牛丼/);
-          const dialog = within(screen.getByRole('dialog', { name: '牛丼' }));
-          expect(dialog.getByRole('button', { name: 'Add to cart' })).toBeDisabled();
-          expect(dialog.getByText(CART_FULL_EN)).toBeInTheDocument();
+          const enAdd = within(screen.getByRole('dialog', { name: '牛丼' })).getByRole('button', { name: 'Add to cart' });
+          expect(enAdd).toBeDisabled();
+          expect(modalNote('牛丼', CART_FULL_EN)).toBeInTheDocument();
+          expect(enAdd).toHaveAccessibleDescription(CART_FULL_EN);
         });
       });
     });
