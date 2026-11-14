@@ -120,7 +120,17 @@ describe('parseOwnOrderNotifyUrl', () => {
 //   - SCANNED_ROOTS の外 (app/・外の package) で定数にして、import して持ち込む形。
 //   - 宛先として組んだ `new URL(…)` を変数に置き、別の文でその `.pathname` / `.origin` を比べる形
 //     (同じ式の中で読む・比べる形だけ、下の comparesCreatedUrl が落とす)。
+//   - 同じ式の中でも、宛先として組んだ `new URL(…)` をメソッドの引数に渡して比べる形
+//     (`url.href.startsWith(new URL('/api/order/notify?h=alice', origin).href)`)。comparesCreatedUrl が見るのは
+//     `.pathname` / `.origin` を読む形と、等号の比較の片側になる形だけ。
+//   - 本物の file では、path の字を escape で書く形 (`'/api/order/notify'`)。本物の file は、先に中身の字で絞ってから
+//     構文木にかけるので (下の mayUseNotifyPath)、source の字に path が現れない file は構文木を見ない。
 const NEEDLE = 'api/order/notify';
+// 本物の file を全部 構文木にかけると重い (CI は coverage つきで手元の数倍遅く、5 秒の timeout を超えた)。構文木にかけるのは、
+// source の字に path が現れる file だけにする。正規表現の中の `\/` で書いた path も拾う。字が現れない file には、
+// usesOfNotifyPath が拾うもの (文字列・テンプレート・正規表現の中の path) が無い (上の escape の形を除く)。
+const MAY_USE_NOTIFY_PATH = /api\\?\/order\\?\/notify/;
+const mayUseNotifyPath = (source: string) => MAY_USE_NOTIFY_PATH.test(source);
 const NOTIFY_PATH = '/api/order/notify';
 const OWN_PARSER_FILE = 'lib/order/ownNotifyUrl.ts';
 const SCANNED_ROOTS = ['components', 'hooks', 'lib'];
@@ -271,8 +281,29 @@ describe('柵: 自社の notify の URL の判定は parseOwnOrderNotifyUrl だ�
   it.each([
     ['文字列を分けて組む', "const own = url.pathname === '/api/order/' + 'notify';", []],
     ['変数に置いた new URL を別の文で比べる', "const target = new URL('/api/order/notify', origin);\nconst own = url.pathname === target.pathname;", [true]],
+    ['組んだ new URL をメソッドの引数に渡して比べる', "const own = url.href.startsWith(new URL('/api/order/notify?h=alice', origin).href);", [true]],
   ])('見ていない形 (通ってしまう): %s', (_name, source, destinations) => {
     expect(scan(source).map((use) => use.destination)).toEqual(destinations);
+  });
+
+  // 本物の file を構文木にかける前の、字での絞り込み。scanner が拾う形は、絞り込みも通す。
+  it.each([
+    ['pathname との比較', "const own = url.pathname === '/api/order/notify';", true],
+    ['宛先を組むテンプレート', 'const target = `${origin}/api/order/notify?h=${handle}`;', true],
+    ['正規表現 (\\/ で書いた path)', 'const own = /^\\/api\\/order\\/notify$/.test(url.pathname);', true],
+    ['コメントだけ (構文木にかけるが、scanner は拾わない)', "// '/api/order/notify'\nconst a = 1;", true],
+    ['path の字が無い', "const own = url.pathname === '/api/order/status';", false],
+    ['文字列を分けて組む (見ていない形)', "const own = url.pathname === '/api/order/' + 'notify';", false],
+  ])('字での絞り込み: %s', (_name, source, expected) => {
+    expect(mayUseNotifyPath(source)).toBe(expected);
+    // 絞り込みが外す source には、scanner が拾うものも無い。
+    if (!expected) expect(scan(source)).toEqual([]);
+  });
+
+  it('字での絞り込みの限界: path の字を escape で書くと、scanner は拾うが、絞り込みで外れる (本物の file では見ない)', () => {
+    const source = "const own = url.pathname === '/api/order/noti\\u0066y';";
+    expect(scan(source)).toHaveLength(1);
+    expect(mayUseNotifyPath(source)).toBe(false);
   });
 
   it.each([
@@ -291,11 +322,15 @@ describe('柵: 自社の notify の URL の判定は parseOwnOrderNotifyUrl だ�
 
   it('components/・hooks/・lib/ に、宛先を組む形のほかで path の文字列が残っていない', () => {
     const files = SCANNED_ROOTS.flatMap(sourceFilesUnder).filter((file) => file !== OWN_PARSER_FILE);
-    // 探す範囲が空になっていない (移した 3 つの呼び出し側を含む)。
+    // 探す範囲が空になっていない (移した 3 つの呼び出し側を含む・2026-11-14 時点で 822 file)。
+    expect(files.length).toBeGreaterThan(500);
     expect(files).toEqual(expect.arrayContaining([
       'components/CheckoutForm.tsx', 'hooks/useCheckoutOrderNotify.ts', 'lib/orderDeliveryContext.ts',
     ]));
-    const uses = files.flatMap((file) => usesOfNotifyPath(file, readSource(file)));
+    // 構文木にかけるのは、source の字に path が現れる file だけ (2026-11-14 時点で 8 file)。宛先を組む 2 つの file は残る。
+    const candidates = files.filter((file) => mayUseNotifyPath(readSource(file)));
+    expect(candidates).toEqual(expect.arrayContaining(['hooks/useCheckoutOrderNotify.ts', 'components/MobileOrderView.tsx']));
+    const uses = candidates.flatMap((file) => usesOfNotifyPath(file, readSource(file)));
     // 宛先を組む new URL は今もある (前の会計・束縛した注文の通知)。探し方が本物の file で効いている。
     expect(uses.filter((use) => use.destination).map((use) => use.file)).toContain('hooks/useCheckoutOrderNotify.ts');
 
