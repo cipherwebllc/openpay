@@ -1003,7 +1003,8 @@ describe('RegisterMode: 作られる支払い URL と、カートの境目', () 
         expect(cartLines()).toHaveLength(10);
         expect(teishoku).toHaveAccessibleName('定食 1,000 JPYC');
         expect(summaryRow('合計').getByText('2,150 JPYC')).toBeInTheDocument();
-        // 自由入力も押せない (前からの動き)。
+        // 自由入力も押せない (上限で押せないのは前からの動き)。ただし、この操作の順では、行を単価ごとに分けた分だけ
+        // 早く上限に届く (行をまとめていた main では、ここは 9 行で、自由入力はまだ押せる)。
         expect(screen.getByRole('button', { name: '自由入力' })).toBeDisabled();
         // QR の額は、画面の合計 (カートに入っている品) と同じ。
         const { searchParams } = parts(await openQr(user));

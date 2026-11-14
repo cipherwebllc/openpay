@@ -118,6 +118,8 @@ function optionLineFor(p: ProductPreset, choices: OptionChoice[]) {
     // なので、別のグループの同じ label (「肉増し: あり +200」と「トッピング: あり +150」) は、表示名が同じで単価が
     // 違うことがある。単価を比べないと、後の選択が先の行の単価で数えられて合計がずれる。足す選択の名前・額と
     // 違う行にはまとめない (行の名前や単価を書き換えた結果が、足す名前・額と同じなら、まとまる)。
+    // 単価の違う選択を別の行に持つので、その分だけ行の上限 (CHECKOUT_MAX_ITEMS) に早く届く。分かれた行を後から
+    // 同じ額に書き換えても、行は 1 つに戻らない (行を空けるには、行を消す)。
     mergeTarget: (lines: CartLine[]) =>
       lines.find((l) => l.presetId === p.id && l.name === name && samePrice(l.unitPrice)),
   };
@@ -858,6 +860,7 @@ function RegisterModeContent({
                       type="button"
                       onClick={() => (hasPresetOptions(p) ? setOptionModalPreset(p) : addFromPreset(p))}
                       // 行が上限で、この品の行も無いときは押せない (押しても入らない)。この品の行があれば押せて数量 +1。
+                      // 通貨の違う品は別で、上限でも押せる (押すと通貨の案内が出る・行は入らない)。
                       // オプションつきの品は選ぶ画面を開く (足せるかは選択で変わるので、その画面のボタンが決める)。
                       disabled={!hasPresetOptions(p) && noRoomFor(p, presetMergeTarget(p, cart))}
                       className={`relative flex min-h-[76px] flex-col justify-center rounded-xl border bg-white px-3 py-3 text-left transition hover:border-brand active:scale-[0.98] active:bg-brand/5 disabled:cursor-not-allowed disabled:opacity-50 ${categoryColors ? `border-l-4 ${categoryColors.border}` : ''} ${
@@ -1296,6 +1299,7 @@ function RegisterModeContent({
           }
           // 行が上限のときは、まとめる先の行がある選択だけ足せる (数量 +1)。新しい行になる選択は、押しても入らずに
           // モーダルだけ閉じる (入ったように見える) ので、ボタンを押せなくする。判定は addOptionLine と同じ optionLineFor。
+          // 通貨の違う品は別で、上限でも押せる (押すと通貨の案内が出てモーダルは閉じる・行は入らない)。
           canAdd={(choices) =>
             !noRoomFor(optionModalPreset, optionLineFor(optionModalPreset, choices).mergeTarget(cart))
           }
