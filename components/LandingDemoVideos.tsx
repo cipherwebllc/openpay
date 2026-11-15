@@ -93,8 +93,8 @@ export function LandingDemoVideos({
                 <source src={d.src} type="video/mp4" />
               </video>
             </div>
-            {/* 図の幅で折り返すときは、行の長さをそろえる (1 字・1 語だけの行を出さない)。 */}
-            <figcaption className="mt-2 text-balance text-center text-[13px] font-medium text-slate-700 [word-break:auto-phrase]">
+            {/* モバイルは図の幅で折り返すので、行の長さをそろえる (1 字・1 語だけの行になりにくい)。sm 以上は今までの折り方。 */}
+            <figcaption className="mt-2 text-balance text-center text-[13px] font-medium text-slate-700 [word-break:auto-phrase] sm:text-wrap">
               {d.label}
               <span className="sr-only">: {d.description}</span>
             </figcaption>
@@ -106,7 +106,7 @@ export function LandingDemoVideos({
               w-0 + min-w-full = 列の幅を広げずに、列の幅で折り返す。
             - ボタンは ①② の列の下。横に送っても画面の左に残る (sticky) ので、③ を見ているときも止められる。 */}
         <div className="contents sm:col-span-3 sm:mt-2 sm:flex sm:flex-wrap sm:items-center sm:justify-center sm:gap-x-4 sm:text-center">
-          <p className="col-start-3 row-start-2 mt-1.5 w-0 min-w-full text-balance text-center text-xs text-slate-500 [word-break:auto-phrase] sm:mt-0 sm:w-auto sm:min-w-0">
+          <p className="col-start-3 row-start-2 mt-1.5 w-0 min-w-full text-balance text-center text-xs text-slate-500 [word-break:auto-phrase] sm:mt-0 sm:w-auto sm:min-w-0 sm:text-wrap">
             {note}
           </p>
           <button

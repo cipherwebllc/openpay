@@ -99,10 +99,12 @@ describe('LandingDemoVideos', () => {
     const region = screen.getByRole('region', { name: '実際の画面で見る' });
     const note = screen.getByText('③ はサンプル');
     expect(region).toContainElement(note);
-    expect(region).toContainElement(screen.getByRole('button', { name: '動画を止める' }));
-    // 注は 3 本の動画の後ろ (読み上げの順は 動画 → 注 → ボタン)。
+    const button = screen.getByRole('button', { name: '動画を止める' });
+    expect(region).toContainElement(button);
+    // DOM の順 (= 読み上げと Tab の順) は 動画 3 本 → 注 → ボタン。
     const figures = region.querySelectorAll('figure');
     expect(figures).toHaveLength(3);
     expect(figures[2].compareDocumentPosition(note) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(note.compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });

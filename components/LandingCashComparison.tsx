@@ -28,9 +28,9 @@ const ROWS: readonly { id: RowId; labelKey: string }[] = [
 // 値のセル。スマホは上の余白 (pt-7) に行の名前が載るので、値は上にそろえる (名前のすぐ下から読める)。
 const CELL = 'px-2 pb-3 pt-7 text-center align-top sm:px-4 sm:py-3 sm:align-middle';
 
-// 文字は変えずに、折ってよい場所を句の切れ目 (「・」「。」の後ろ・「（」の前) だけにする (句ごとの inline-block)。
-// 文節で折る word-break:auto-phrase が効かないブラウザ (WebKit = iPhone の Safari) でも、「カード・コ / ード決済」
-// 「…決済 / QR）」のように語の途中で折れない。句が欄より長いときは、句の中で折り返す (はみ出さない)。
+// 文字は変えずに、句の切れ目 (「・」「。」の後ろ・「（」の前) を優先して折る (句ごとの inline-block)。
+// 句が欄に入るかぎり、文節で折る word-break:auto-phrase が効かないブラウザ (WebKit = iPhone の Safari) でも、
+// 「カード・コ / ード決済」「…決済 / QR）」のように語の途中では折れない。欄より長い句は、句の中でも折る (はみ出さない)。
 // keep: 空白のない句 (日本語の短い句) は、句の中でも折らない。列の最小の幅がその句の幅になる (ブラウザごとの字の幅に合う)。
 // 列の見出しのように、句が必ず短いところでだけ使う。
 function Phrases({ text, keep = false }: { text: string; keep?: boolean }) {
@@ -99,11 +99,13 @@ export async function LandingCashComparison() {
                         <span className="block text-lg font-bold leading-tight text-brand-dark sm:text-xl">
                           {t('cashCellFeeOpenPay')}
                         </span>
-                        {/* 条件と注は句の切れ目で折り、行の長さをそろえる (「QR）」「別料金。」だけの短い行を出さない)。 */}
-                        <span className="mt-1 block text-balance text-xs font-semibold leading-snug text-slate-800">
+                        {/* 条件と注は句の切れ目を優先して折る (「QR）」「別料金。」だけの短い行になりにくい)。
+                            スマホは欄が狭く、句の中でも折れるので、行の長さもそろえる (text-balance)。sm 以上は欄が広いので、
+                            そろえない (en の「customer pays gas」が「customer pays / gas」に割れる)。 */}
+                        <span className="mt-1 block text-balance text-xs font-semibold leading-snug text-slate-800 sm:text-wrap">
                           <Phrases text={t('cashCellFeeOpenPayCondition')} />
                         </span>
-                        <span className="mt-1 block text-balance text-xs font-normal leading-snug text-slate-600">
+                        <span className="mt-1 block text-balance text-xs font-normal leading-snug text-slate-600 sm:text-wrap">
                           <Phrases text={t('cashCellFeeOpenPayNote', LANDING_PAYMENT_FEE_VALUES)} />
                         </span>
                       </>
