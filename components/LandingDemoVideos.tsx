@@ -9,6 +9,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Pause, Play } from 'lucide-react';
+import { LANDING_NOTE_TEXT } from '@/components/LandingControls';
 
 export type LandingDemo = { src: string; poster: string; label: string; description: string };
 
@@ -106,7 +107,7 @@ export function LandingDemoVideos({
               w-0 + min-w-full = 列の幅を広げずに、列の幅で折り返す。
             - ボタンは ①② の列の下。横に送っても画面の左に残る (sticky) ので、③ を見ているときも止められる。 */}
         <div className="contents sm:col-span-3 sm:mt-2 sm:flex sm:flex-wrap sm:items-center sm:justify-center sm:gap-x-4 sm:text-center">
-          <p className="col-start-3 row-start-2 mt-1.5 w-0 min-w-full text-balance text-center text-xs text-slate-500 [word-break:auto-phrase] sm:mt-0 sm:w-auto sm:min-w-0 sm:text-wrap">
+          <p className={`col-start-3 row-start-2 mt-1.5 w-0 min-w-full text-balance text-center [word-break:auto-phrase] sm:mt-0 sm:w-auto sm:min-w-0 sm:text-wrap ${LANDING_NOTE_TEXT}`}>
             {note}
           </p>
           <button

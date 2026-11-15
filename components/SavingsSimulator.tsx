@@ -11,6 +11,7 @@
 import { useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import { DISCLOSED_RECOVER_FEE } from '@/lib/disclosedRecoverFee';
+import { LANDING_FIGURE, LANDING_NOTE } from '@/components/LandingControls';
 
 // 月商スライダー: 10 万円〜500 万円・10 万円刻み・既定 100 万円 (すべて「円」単位)。
 const MONTHLY_MIN = 100_000;
@@ -147,8 +148,8 @@ export function SavingsSimulator() {
       <div className="mt-6 text-center">
         <p className="text-sm text-slate-600">{t('cashSimResultPrefix')}</p>
         <p className="mt-1 flex items-baseline justify-center gap-1">
-          {/* PC (lg) はトップの右の列 (約 400px) に入るので一段小さく (最大額でも列に収まる)。 */}
-          <span className="tabular-nums text-5xl font-extrabold leading-none text-brand sm:text-6xl lg:text-5xl">
+          {/* 節に 1 つだけの結果の数字 (大きい数字の型・どの幅でも 3rem)。PC のトップの右の列 (約 400px) にも、最大額のまま入る。 */}
+          <span className={`text-brand ${LANDING_FIGURE.result}`}>
             {heroNumber}
           </span>
           <span className="text-2xl font-bold text-brand-dark">
@@ -170,7 +171,8 @@ export function SavingsSimulator() {
         )}
       </div>
 
-      <p className="mt-4 text-[11px] leading-relaxed text-slate-600">
+      {/* 試算の前提の注 (注の型)。上の空きは、ほかの注と同じ mt-3。 */}
+      <p className={`mt-3 ${LANDING_NOTE}`}>
         {t('cashSimNote', {
           percent: DISCLOSED_RECOVER_FEE.percentFromJulyBps / 100,
           floor: DISCLOSED_RECOVER_FEE.floorJpyc,

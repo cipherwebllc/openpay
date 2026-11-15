@@ -14,8 +14,8 @@ import { LANDING_PAYMENT_FEE_VALUES } from '@/lib/legal';
 import Link from 'next/link';
 import { getLocale, getTranslations } from 'next-intl/server';
 import { SavingsSimulator } from '@/components/SavingsSimulator';
-import { GUIDE_SECONDARY_ACTION } from '@/components/guide/GuideHeader';
 import { LandingSectionHeader } from '@/components/LandingSectionHeader';
+import { LANDING_FIGURE, LANDING_NOTE, LANDING_SECONDARY } from '@/components/LandingControls';
 
 // 比較表の行定義。i18n key は `cashCell{Row}{Col}` で命名統一。
 type RowId = 'Fee' | 'Settle' | 'Setup';
@@ -96,7 +96,7 @@ export async function LandingCashComparison() {
                   <td className={`bg-brand/5 font-semibold text-slate-900 ${CELL}`}>
                     {id === 'Fee' ? (
                       <>
-                        <span className="block text-lg font-bold leading-tight text-brand-dark sm:text-xl">
+                        <span className={`block text-brand-dark ${LANDING_FIGURE.cell}`}>
                           {t('cashCellFeeOpenPay')}
                         </span>
                         {/* 条件と注は句の切れ目を優先して折る (「QR）」「別料金。」だけの短い行になりにくい)。
@@ -119,21 +119,20 @@ export async function LandingCashComparison() {
           </table>
         </div>
 
-        <p className="mx-auto mt-3 max-w-3xl text-xs leading-relaxed text-slate-500">
-          {t('cashTableFootnote')}
-        </p>
+        {/* 表に付く注 (注の型)。表と同じ幅で、左をそろえる。 */}
+        <p className={`mx-auto mt-3 max-w-3xl ${LANDING_NOTE}`}>{t('cashTableFootnote')}</p>
         </div>
         {/* 節約シミュレータ (client) */}
         <div className="min-w-0 lg:mt-8 lg:[&>*:first-child]:mt-0">
           <SavingsSimulator />
         </div>
       </div>
-      {/* 店頭キット (印刷物) への入口は、比較と試算を読み終えた節の末尾に置く (ボタンの型はガイドの従ボタンと同じ)。 */}
+      {/* 店頭キット (印刷物) への入口は、比較と試算を読み終えた節の末尾に置く (副ボタンの型)。 */}
       <div className="mt-8 flex justify-center">
         <Link
           href={`/${locale}/kit`}
           prefetch={false}
-          className={GUIDE_SECONDARY_ACTION}
+          className={LANDING_SECONDARY.brand}
         >
           {t('cashStoreKitCta')}
         </Link>

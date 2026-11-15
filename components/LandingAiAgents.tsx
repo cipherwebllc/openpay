@@ -7,6 +7,7 @@ import Link from 'next/link';
 import { getLocale, getTranslations } from 'next-intl/server';
 import { env } from '@/lib/env';
 import { LandingSectionHeader } from '@/components/LandingSectionHeader';
+import { LANDING_ACTION_ROW, LANDING_NOTE_CENTERED, LANDING_PRIMARY, LANDING_SECONDARY } from '@/components/LandingControls';
 
 export async function LandingAiAgents() {
   const locale = await getLocale();
@@ -17,27 +18,24 @@ export async function LandingAiAgents() {
       {/* ヒーローの「AI・開発者向け」から飛んでくる節 (ヘッダの下に見出しが隠れないよう余白を取る)。 */}
       <LandingSectionHeader eyebrow={t('eyebrowAgent')} title={t('aiEraTitle')} lead={t('aiEraBody')} />
 
-      {/* 主導線は /agent (Agent を接続して試す)。/agent は flag なしで常に公開。ボタンの形 (角丸・高さ 44px) はガイドとそろえる。 */}
+      {/* 主導線は /agent (Agent を接続して試す)。/agent は flag なしで常に公開。節の主ボタンの型 (中身の幅。スマホでも全幅にしない =
+          ヒーローの主ボタンより大きく見せない)。 */}
       <div className="mt-8 flex flex-col items-center">
-        <Link
-          href={`/${locale}/agent`}
-          prefetch={false}
-          className="inline-flex min-h-11 w-full items-center justify-center whitespace-nowrap rounded-xl bg-blue-600 px-6 py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 active:scale-[0.98] sm:w-auto sm:text-base"
-        >
+        <Link href={`/${locale}/agent`} prefetch={false} className={LANDING_PRIMARY.brand}>
           {t('aiEraCtaAgent')}
         </Link>
-        {/* 注は 4 文ある。スマホで中央寄せにすると行の頭がそろわず読みにくいので、スマホは左寄せ。sm 以上は 1 行を長くしすぎない幅で中央寄せ。 */}
-        <p className="mx-auto mt-3 max-w-xl text-left text-xs text-slate-500 [word-break:auto-phrase] supports-[word-break:auto-phrase]:text-pretty sm:text-center sm:text-sm">{t('aiEraAgentNote')}</p>
+        {/* 注は 4 文ある。スマホで中央寄せにすると行の頭がそろわず読みにくいので、スマホは左寄せ (注の型)。 */}
+        <p className={`mt-3 ${LANDING_NOTE_CENTERED}`}>{t('aiEraAgentNote')}</p>
       </div>
 
       {/* 補助の 3 つは小さな横並び (スマホで 3 段の全幅ボタンにすると主導線と同じ重さに見える)。 */}
-      <div className="mt-5 flex flex-wrap items-center justify-center gap-2 sm:gap-3">
+      <div className={`mt-5 ${LANDING_ACTION_ROW}`}>
         {/* /discovery は flag OFF で notFound になるため、OFF 環境では 404 導線を出さない。 */}
         {env.enableX402Facilitator && (
           <Link
             href={`/${locale}/discovery`}
             prefetch={false}
-            className="inline-flex min-h-11 items-center justify-center whitespace-nowrap rounded-xl bg-white px-4 text-sm font-semibold text-slate-700 ring-1 ring-inset ring-slate-300 transition-colors hover:bg-slate-50 hover:text-brand active:scale-[0.98] sm:px-5"
+            className={LANDING_SECONDARY.brand}
           >
             {t('aiEraCtaStore')}
           </Link>
@@ -45,20 +43,20 @@ export async function LandingAiAgents() {
         <Link
           href={`/${locale}/guide/ai-pay`}
           prefetch={false}
-          className="inline-flex min-h-11 items-center justify-center whitespace-nowrap rounded-xl bg-white px-4 text-sm font-semibold text-slate-700 ring-1 ring-inset ring-slate-300 transition-colors hover:bg-slate-50 hover:text-brand active:scale-[0.98] sm:px-5"
+          className={LANDING_SECONDARY.brand}
         >
           {t('aiEraCtaPay')}
         </Link>
         <Link
           href={`/${locale}/guide/sell`}
           prefetch={false}
-          className="inline-flex min-h-11 items-center justify-center whitespace-nowrap rounded-xl bg-white px-4 text-sm font-semibold text-slate-700 ring-1 ring-inset ring-slate-300 transition-colors hover:bg-slate-50 hover:text-brand active:scale-[0.98] sm:px-5"
+          className={LANDING_SECONDARY.brand}
         >
           {t('aiEraCtaSell')}
         </Link>
       </div>
       {/* 売り手側の一言: 「実売済み」の証拠は /guide/sell が持つ (LP は控えめに 1 行だけ)。 */}
-      <p className="mt-3 text-center text-xs text-slate-500 [word-break:auto-phrase] supports-[word-break:auto-phrase]:text-pretty">{t('aiEraSellNote')}</p>
+      <p className={`mt-3 ${LANDING_NOTE_CENTERED}`}>{t('aiEraSellNote')}</p>
     </section>
   );
 }

@@ -4,6 +4,7 @@
 import Link from 'next/link';
 import { getLocale, getTranslations } from 'next-intl/server';
 import { LandingSupportCard } from '@/components/LandingSupportCard';
+import { LANDING_ACTION_STACK, LANDING_PRIMARY, LANDING_SECONDARY } from '@/components/LandingControls';
 
 export async function LandingTrust() {
   const [locale, t] = await Promise.all([
@@ -25,19 +26,17 @@ export async function LandingTrust() {
         <p className="mx-auto mt-4 max-w-2xl text-sm leading-relaxed text-slate-300 sm:text-base">
           {t('closingBody')}
         </p>
-        <div className="mt-7 flex flex-col items-center justify-center gap-3 sm:flex-row">
-          <Link
-            href={`/${locale}/create`}
-            prefetch={false}
-            className="inline-flex min-h-11 w-full items-center justify-center rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-all hover:-translate-y-0.5 hover:bg-blue-700 hover:shadow-card-hover active:translate-y-0 active:scale-[0.98] sm:w-auto"
-          >
+        {/* 濃い紺の面の上の型: 主ボタンは白の塗り・副ボタンは枠だけ (白く塗った副ボタンが、青い主ボタンより強く見えていた)。
+            スマホは 2 つを縦に積んで幅をそろえる (中身の幅)。 */}
+        <div className={`mt-7 ${LANDING_ACTION_STACK}`}>
+          <Link href={`/${locale}/create`} prefetch={false} className={LANDING_PRIMARY.onDark}>
             {t('closingCtaStart')}
           </Link>
           <a
             href="https://github.com/cipherwebllc/openpay"
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-white px-5 py-2.5 text-sm font-semibold text-slate-900 shadow-sm transition-all hover:-translate-y-0.5 hover:bg-slate-100 hover:shadow-card-hover active:translate-y-0 active:scale-[0.98] sm:w-auto"
+            className={LANDING_SECONDARY.onDark}
           >
             <GithubIcon />
             {t('trustGithubLabel')} ↗
