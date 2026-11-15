@@ -29,9 +29,10 @@ function readSeed(): LandingLookSeed | null {
 
 function writeSeed(seed: LandingLookSeed | null): void {
   // 書き込みの失敗をプロフのタブの操作に波及させないための防御。失敗したときの動き:
-  // - 書く (setItem) だけ失敗: 今の mount の間は state の印で判定し、再 mount・再読み込みの後は印なし (手を入れたものと数える)。
-  // - 消す (removeItem) だけ失敗: 今の mount の間は印なし。再 mount の後は前に保存した古い印を読むが、今の値と違えばすぐ消す
-  //   (手付かずと数えるのは、今の値が偶然その古い印と同じで、ほかが既定のときだけ)。
+  // - 書く (setItem) だけ失敗: 今の mount の間は state の印で判定する。再 mount・再読み込みの後は、保存できた印が無ければ
+  //   印なし (手を入れたものと数える)。前に保存できた古い印があれば、それを読む (扱いは下の行と同じ)。
+  // - 消す (removeItem) だけ失敗: 今の mount の間は印なし。再 mount の後は前に保存した古い印を読むが、今の値と違えばすぐ
+  //   state から消す (保存の側には残り得る)。手付かずと数えるのは、今の値が偶然その古い印と同じで、ほかが既定のときだけ。
   try {
     if (seed) window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(seed));
     else window.sessionStorage.removeItem(STORAGE_KEY);
