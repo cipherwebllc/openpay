@@ -59,7 +59,10 @@ export async function LandingHowItWorks() {
           {merchant.map((step, i) => (
             <li key={i} className="flex items-start gap-3 text-sm text-slate-700">
               <span className={STEP_BADGE}>{i + 1}</span>
-              <span className="pt-0.5 leading-relaxed">{step}</span>
+              {/* 文節で折る (word-break:auto-phrase・Chromium 系)。最後の行を短くしすぎない text-wrap:pretty は、文節で折れる
+                  ブラウザでだけ付ける: 文節が分からないブラウザ (WebKit) で pretty だけが効くと「(印 / 刷して置いてもOK)」と語の途中で折る。
+                  トップのほかの節の本文も同じ組み合わせ。 */}
+              <span className="pt-0.5 leading-relaxed [word-break:auto-phrase] supports-[word-break:auto-phrase]:text-pretty">{step}</span>
             </li>
           ))}
         </ol>

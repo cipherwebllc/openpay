@@ -39,6 +39,13 @@ describe('LandingCashComparison', () => {
     expect(feeCell).toHaveTextContent('ガスレス決済は 1%・最低 2 JPYC（店舗負担）。モバイル注文は別料金。');
     expect(screen.queryByText('ガスレス 1%')).toBeNull();
 
+    // 列と行の見出しは table のまま (スマホで行の名前を上に出すのは CSS だけ)。句ごとに折る span に分けても、文字は欠けない。
+    expect(screen.getAllByRole('columnheader').map((th) => th.textContent)).toEqual(['現金', 'カード・コード決済', 'OpenPay']);
+    expect(screen.getAllByRole('rowheader').map((th) => th.textContent)).toEqual(['決済手数料', '入金', '導入費と機器']);
+    expect(feeCell.textContent).toBe(
+      '0円〜お客様がガス代を払う通常決済（レジ・決済QR）ガスレス決済は 1%・最低 2 JPYC（店舗負担）。モバイル注文は別料金。',
+    );
+
     // カード・コード決済の列は、決済会社ごとに違う項目を一律に断定しない。料率は例であることをセルに書く。
     expect(screen.getByText('1.98〜3.24%（例）')).toBeInTheDocument();
     expect(screen.getAllByText('契約により異なる')).toHaveLength(2);

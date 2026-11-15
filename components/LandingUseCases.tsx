@@ -75,7 +75,7 @@ export async function LandingUseCases() {
                   <useCase.icon aria-hidden className="h-4 w-4 shrink-0 text-brand" />
                   {t(`useCase${useCase.id}Title`)}
                 </h3>
-                <p className="text-[13px] leading-relaxed text-slate-600 sm:text-sm">
+                <p className="text-[13px] leading-relaxed text-slate-600 [word-break:auto-phrase] supports-[word-break:auto-phrase]:text-pretty sm:text-sm">
                   {t(`useCase${useCase.id}Body`)}
                 </p>
               </div>

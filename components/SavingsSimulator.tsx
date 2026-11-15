@@ -155,7 +155,8 @@ export function SavingsSimulator() {
             {t('cashSimResultUnit')}
           </span>
         </p>
-        <p className="mt-2 text-sm font-semibold text-slate-700">
+        {/* 中央寄せの短い 1 文。折り返すときは行の長さをそろえる (「…OpenPay が割 / 高）」のように 1〜2 字だけの行を出さない)。 */}
+        <p className="mt-2 text-balance text-sm font-semibold text-slate-700 [word-break:auto-phrase]">
           {t('cashSimResultSuffix')}
         </p>
         {/* 万円ヒーロー (ja) は端数を丸めるため、正確な円差額を補足。en は

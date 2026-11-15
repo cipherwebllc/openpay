@@ -93,4 +93,16 @@ describe('LandingDemoVideos', () => {
     expect(screen.getByText('③ はサンプル')).toBeInTheDocument();
     expect(container.querySelectorAll('[aria-label]')).toHaveLength(0);
   });
+
+  it('③ の注と「動画を止める」は、横スクロールの region の中に置く (スマホで、注が ③ と一緒に流れる)', () => {
+    render(<LandingDemoVideos {...props} />);
+    const region = screen.getByRole('region', { name: '実際の画面で見る' });
+    const note = screen.getByText('③ はサンプル');
+    expect(region).toContainElement(note);
+    expect(region).toContainElement(screen.getByRole('button', { name: '動画を止める' }));
+    // 注は 3 本の動画の後ろ (読み上げの順は 動画 → 注 → ボタン)。
+    const figures = region.querySelectorAll('figure');
+    expect(figures).toHaveLength(3);
+    expect(figures[2].compareDocumentPosition(note) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
 });

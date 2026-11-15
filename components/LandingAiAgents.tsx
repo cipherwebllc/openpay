@@ -26,7 +26,8 @@ export async function LandingAiAgents() {
         >
           {t('aiEraCtaAgent')}
         </Link>
-        <p className="mt-3 text-center text-xs text-slate-500 sm:text-sm">{t('aiEraAgentNote')}</p>
+        {/* 注は 4 文ある。スマホで中央寄せにすると行の頭がそろわず読みにくいので、スマホは左寄せ。sm 以上は 1 行を長くしすぎない幅で中央寄せ。 */}
+        <p className="mx-auto mt-3 max-w-xl text-left text-xs text-slate-500 [word-break:auto-phrase] supports-[word-break:auto-phrase]:text-pretty sm:text-center sm:text-sm">{t('aiEraAgentNote')}</p>
       </div>
 
       {/* 補助の 3 つは小さな横並び (スマホで 3 段の全幅ボタンにすると主導線と同じ重さに見える)。 */}
@@ -57,7 +58,7 @@ export async function LandingAiAgents() {
         </Link>
       </div>
       {/* 売り手側の一言: 「実売済み」の証拠は /guide/sell が持つ (LP は控えめに 1 行だけ)。 */}
-      <p className="mt-3 text-center text-xs text-slate-500">{t('aiEraSellNote')}</p>
+      <p className="mt-3 text-center text-xs text-slate-500 [word-break:auto-phrase] supports-[word-break:auto-phrase]:text-pretty">{t('aiEraSellNote')}</p>
     </section>
   );
 }

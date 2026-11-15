@@ -25,6 +25,22 @@ const ROWS: readonly { id: RowId; labelKey: string }[] = [
   { id: 'Setup', labelKey: 'cashRowSetup' },
 ];
 
+// 値のセル。スマホは上の余白 (pt-7) に行の名前が載るので、値は上にそろえる (名前のすぐ下から読める)。
+const CELL = 'px-2 pb-3 pt-7 text-center align-top sm:px-4 sm:py-3 sm:align-middle';
+
+// 文字は変えずに、折ってよい場所を句の切れ目 (「・」「。」の後ろ・「（」の前) だけにする (句ごとの inline-block)。
+// 文節で折る word-break:auto-phrase が効かないブラウザ (WebKit = iPhone の Safari) でも、「カード・コ / ード決済」
+// 「…決済 / QR）」のように語の途中で折れない。句が欄より長いときは、句の中で折り返す (はみ出さない)。
+// keep: 空白のない句 (日本語の短い句) は、句の中でも折らない。列の最小の幅がその句の幅になる (ブラウザごとの字の幅に合う)。
+// 列の見出しのように、句が必ず短いところでだけ使う。
+function Phrases({ text, keep = false }: { text: string; keep?: boolean }) {
+  return text.split(/(?<=[・。])|(?=（)/).map((part, i) => (
+    <span key={i} className={keep && !/\s/.test(part) ? 'inline-block whitespace-nowrap' : 'inline-block'}>
+      {part}
+    </span>
+  ));
+}
+
 export async function LandingCashComparison() {
   const locale = await getLocale();
   const t = await getTranslations('Landing');
@@ -42,12 +58,13 @@ export async function LandingCashComparison() {
           <table className="w-full border-collapse bg-white text-[13px] [word-break:auto-phrase] sm:text-sm">
             <thead>
               <tr className="border-b border-slate-200">
-                <td className="px-2 py-3 sm:px-4" />
+                <td className="p-0 sm:px-4 sm:py-3" />
                 <th className="min-w-[3.25rem] px-2 py-3 sm:min-w-[4.75rem] sm:px-4 text-center font-semibold text-slate-700">
                   {t('cashColCash')}
                 </th>
+                {/* 見出しは「カード・」「コード決済」の句の中では折らない (この列の幅が「コード決済」の幅より狭くならない)。 */}
                 <th className="min-w-[4.5rem] px-2 py-3 sm:min-w-[6.5rem] sm:px-4 text-center font-semibold text-slate-700">
-                  {t('cashColCard')}
+                  <Phrases text={t('cashColCard')} keep />
                 </th>
                 <th className="bg-brand/5 px-2 py-3 sm:px-4 text-center font-bold text-brand-dark">
                   {t('cashColOpenPay')}
@@ -60,30 +77,34 @@ export async function LandingCashComparison() {
                   key={id}
                   className="border-b border-slate-100 last:border-b-0"
                 >
+                  {/* スマホは、行の名前を列にしない: 列の幅を 0 にして、名前は行の上の余白 (各セルの pt-7) に重ねて置く。
+                      名前の列 (約 90px) のぶんを OpenPay の列に回すため (名前の列があると OpenPay の手数料の欄は約 130px で、条件が 7 行に割れる)。
+                      table のまま (display は変えない) なので、行と列の見出しの対応は読み上げでも変わらない。sm 以上は名前の列に戻す。 */}
                   <th
                     scope="row"
-                    className="whitespace-nowrap px-2 py-3 sm:px-4 text-left text-xs font-semibold text-slate-500"
+                    className="relative w-0 p-0 text-left text-xs font-semibold text-slate-500 sm:static sm:w-auto sm:whitespace-nowrap sm:px-4 sm:py-3"
                   >
-                    {t(labelKey)}
+                    <span className="absolute left-2 top-2 whitespace-nowrap sm:static">{t(labelKey)}</span>
                   </th>
                   {/* 現金の列は短い語だけ (0%・その場・0円)。狭い幅で「その/場」と折れないようにする。 */}
-                  <td className="whitespace-nowrap px-2 py-3 sm:px-4 text-center text-slate-600">
+                  <td className={`whitespace-nowrap text-slate-600 ${CELL}`}>
                     {t(`cashCell${id}Cash`)}
                   </td>
-                  <td className="px-2 py-3 sm:px-4 text-center text-slate-600">
+                  <td className={`text-slate-600 ${CELL}`}>
                     {t(`cashCell${id}Card`)}
                   </td>
-                  <td className="bg-brand/5 px-2 py-3 sm:px-4 text-center font-semibold text-slate-900">
+                  <td className={`bg-brand/5 font-semibold text-slate-900 ${CELL}`}>
                     {id === 'Fee' ? (
                       <>
                         <span className="block text-lg font-bold leading-tight text-brand-dark sm:text-xl">
                           {t('cashCellFeeOpenPay')}
                         </span>
-                        <span className="mt-1 block text-xs font-semibold leading-snug text-slate-800">
-                          {t('cashCellFeeOpenPayCondition')}
+                        {/* 条件と注は句の切れ目で折り、行の長さをそろえる (「QR）」「別料金。」だけの短い行を出さない)。 */}
+                        <span className="mt-1 block text-balance text-xs font-semibold leading-snug text-slate-800">
+                          <Phrases text={t('cashCellFeeOpenPayCondition')} />
                         </span>
-                        <span className="mt-1 block text-xs font-normal leading-snug text-slate-600">
-                          {t('cashCellFeeOpenPayNote', LANDING_PAYMENT_FEE_VALUES)}
+                        <span className="mt-1 block text-balance text-xs font-normal leading-snug text-slate-600">
+                          <Phrases text={t('cashCellFeeOpenPayNote', LANDING_PAYMENT_FEE_VALUES)} />
                         </span>
                       </>
                     ) : (
