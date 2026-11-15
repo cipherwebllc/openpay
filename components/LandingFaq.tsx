@@ -15,6 +15,7 @@ import { getLocale, getTranslations } from 'next-intl/server';
 import { ChevronDown } from 'lucide-react';
 import { LandingSectionHeader } from '@/components/LandingSectionHeader';
 import { LANDING_FAQ, type LandingFaqAnswerKey } from '@/lib/landingFaq';
+import { LANDING_CARD } from '@/components/LandingControls';
 
 function FaqLink({ href, children }: { href: string; children: ReactNode }) {
   return (
@@ -53,16 +54,19 @@ export async function LandingFaq() {
 
   return (
     <section className="mt-16 sm:mt-28">
-      <LandingSectionHeader eyebrow={t('eyebrowFaq')} title={t('faqTitle')} />
+      {/* 補足の節 (読みたい人が開く質問): 見出しを 1 段小さくし、見出しから中身までも狭くして、ふつうの節より一段弱く見せる。 */}
+      <LandingSectionHeader eyebrow={t('eyebrowFaq')} title={t('faqTitle')} size="sm" />
 
-      <ul className="mx-auto mt-8 max-w-3xl divide-y divide-slate-100 overflow-hidden rounded-2xl bg-white shadow-card ring-1 ring-slate-200/70">
+      <ul className={`mx-auto mt-6 max-w-3xl divide-y divide-slate-100 overflow-hidden ${LANDING_CARD}`}>
         {LANDING_FAQ.map(({ q, a }) => (
           <li key={q}>
             <details className="group px-5 py-4 transition-colors open:bg-slate-50/60 sm:px-6 sm:py-5">
               <summary className="flex cursor-pointer list-none items-start gap-3 text-left text-sm font-semibold text-slate-800 sm:text-[15px]">
                 <span className="flex-1 [word-break:auto-phrase] supports-[word-break:auto-phrase]:text-pretty">{t(q)}</span>
+                {/* 開いた印の回転は、動きを減らす設定 (prefers-reduced-motion: reduce) でないときだけ。そのときも開いた印は
+                    矢印の色 (紺) と開いた答えで分かる。 */}
                 <ChevronDown
-                  className="mt-0.5 h-4 w-4 flex-shrink-0 text-slate-400 transition-transform duration-200 group-open:rotate-180 group-open:text-brand"
+                  className="mt-0.5 h-4 w-4 flex-shrink-0 text-slate-400 transition-transform duration-200 motion-safe:group-open:rotate-180 group-open:text-brand"
                   aria-hidden
                 />
               </summary>

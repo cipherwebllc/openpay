@@ -10,6 +10,7 @@ import Image from 'next/image';
 import { Gift, Smartphone, Store, Ticket, type LucideIcon } from 'lucide-react';
 import { getTranslations } from 'next-intl/server';
 import { LandingSectionHeader } from '@/components/LandingSectionHeader';
+import { LANDING_CARD, LANDING_CARD_TITLE } from '@/components/LandingControls';
 
 const USE_CASES = [
   {
@@ -59,7 +60,7 @@ export async function LandingUseCases() {
           {USE_CASES.map((useCase) => (
             <li
               key={useCase.id}
-              className="w-[72%] shrink-0 snap-start overflow-hidden rounded-2xl bg-white shadow-card ring-1 ring-slate-200/70 sm:w-[calc(50%-0.5rem)] sm:shrink lg:w-[calc((100%-3rem)/4)]"
+              className={`w-[72%] shrink-0 snap-start overflow-hidden sm:w-[calc(50%-0.5rem)] sm:shrink lg:w-[calc((100%-3rem)/4)] ${LANDING_CARD}`}
             >
               <Image
                 src={useCase.image}
@@ -71,7 +72,7 @@ export async function LandingUseCases() {
               />
               <div className="flex flex-col gap-1.5 p-3.5 sm:gap-2 sm:p-5">
                 {/* 見出しの記号は線のアイコンでそろえる (絵文字は端末ごとに見た目が変わる・plans/lp-polish-2026-09.md P2)。 */}
-                <h3 className="flex items-center gap-1.5 text-sm font-semibold text-slate-900 sm:text-base">
+                <h3 className={`flex items-center gap-1.5 ${LANDING_CARD_TITLE}`}>
                   <useCase.icon aria-hidden className="h-4 w-4 shrink-0 text-brand" />
                   {t(`useCase${useCase.id}Title`)}
                 </h3>

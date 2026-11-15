@@ -7,6 +7,7 @@ import type { LucideIcon } from 'lucide-react';
 import { ChainLogo } from '@/components/AssetLogo';
 import type { ChainSlug } from '@/lib/chains';
 import { LandingSectionHeader } from '@/components/LandingSectionHeader';
+import { LANDING_CARD, LANDING_CARD_TITLE } from '@/components/LandingControls';
 
 type FeatureCard = {
   Icon: LucideIcon;
@@ -87,10 +88,10 @@ export async function LandingFeatures() {
           return (
             <li
               key={titleKey}
-              className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 rounded-2xl bg-white p-4 shadow-card ring-1 ring-slate-200/70 sm:flex sm:flex-col sm:gap-2 sm:p-6"
+              className={`grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 p-4 sm:flex sm:flex-col sm:gap-2 sm:p-6 ${LANDING_CARD}`}
             >
               <Icon className={`row-span-3 mt-0.5 h-6 w-6 ${c.ink}`} aria-hidden />
-              <h3 className="text-base font-semibold text-slate-900">
+              <h3 className={LANDING_CARD_TITLE}>
                 {t(titleKey)}
               </h3>
               {/* ガス代不要の条件 (誰がガス代を払うか) は料金ページが説明する (plans/lp-polish-2026-10.md P2)。 */}

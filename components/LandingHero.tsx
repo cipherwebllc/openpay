@@ -51,14 +51,15 @@ export async function LandingHero() {
           <p className="mx-auto mt-5 max-w-xl text-balance text-[15px] leading-relaxed text-slate-600 [word-break:auto-phrase] sm:text-base lg:mx-0">
             {t('heroBody')}
           </p>
+          {/* 押したときの縮みと矢印の移動は、動きを減らす設定 (prefers-reduced-motion: reduce) でないときだけ (節のボタンと同じ)。 */}
           <div className="mt-7 flex justify-center lg:justify-start">
             <Link
               href={`/${locale}/create`}
               prefetch={false}
-              className="group inline-flex min-h-12 items-center justify-center gap-2 rounded-2xl bg-brand px-6 text-base font-bold text-white shadow-lift transition hover:bg-brand-dark active:scale-[0.99]"
+              className="group inline-flex min-h-12 items-center justify-center gap-2 rounded-2xl bg-brand px-6 text-base font-bold text-white shadow-lift transition hover:bg-brand-dark motion-safe:active:scale-[0.99]"
             >
               {t('heroCta')}
-              <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" aria-hidden />
+              <ArrowRight className="h-4 w-4 transition-transform motion-safe:group-hover:translate-x-0.5" aria-hidden />
             </Link>
           </div>
           {/* お店以外の方の入口。リンク名は見えている文字 (掟 8)。 */}

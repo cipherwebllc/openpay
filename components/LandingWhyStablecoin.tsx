@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { LandingSectionHeader } from '@/components/LandingSectionHeader';
 import { GuideCallout } from '@/components/guide/GuideCallout';
+import { LANDING_CARD, LANDING_CARD_TITLE, LANDING_ICON_BOX } from '@/components/LandingControls';
 
 // JPYC 入門+運用・ウォレット選びの note 記事 (2026-08-05 user 指示で追加)。
 const JPYC_NOTE_ARTICLE_URL = 'https://note.com/masia02/n/ned04a4cdb00a';
@@ -28,20 +29,21 @@ export async function LandingWhyStablecoin() {
 
   return (
     <section className="mt-16 sm:mt-28">
-      <LandingSectionHeader eyebrow={t('eyebrowWhy')} title={t('whyStablecoinTitle')} lead={t('whyStablecoinSubtitle')} />
-      {/* スマホも PC も 2 枚を横に並べる小さなタイル。
+      {/* 補足の節 (はじめての方への前提知識): 見出しを 1 段小さくし、見出しから中身までも狭くして、ふつうの節より一段弱く見せる。 */}
+      <LandingSectionHeader eyebrow={t('eyebrowWhy')} title={t('whyStablecoinTitle')} lead={t('whyStablecoinSubtitle')} size="sm" />
+      {/* スマホも PC も 2 枚を横に並べる小さなタイル (カードの型)。
           狭いタイルで語の途中 (「強 / い」) で折れないよう、文節の切れ目で改行する (Safari は通常の改行のまま)。 */}
-      <div className="mx-auto mt-8 grid max-w-4xl grid-cols-2 gap-3 sm:gap-4">
+      <div className="mx-auto mt-6 grid max-w-4xl grid-cols-2 gap-3 sm:gap-4">
         {ITEMS.map(({ key, icon: Icon }) => (
           <div
             key={key}
-            className="flex flex-col rounded-2xl border border-slate-200/80 bg-white p-4 shadow-[0_2px_8px_-2px_rgba(15,23,42,0.07)] [word-break:auto-phrase] sm:p-5"
+            className={`flex flex-col p-4 [word-break:auto-phrase] sm:p-5 ${LANDING_CARD}`}
           >
             <span className="flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:gap-3">
-              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-brand/10 sm:h-10 sm:w-10">
+              <span className={`${LANDING_ICON_BOX} bg-brand/10`}>
                 <Icon className="h-5 w-5 text-brand" aria-hidden />
               </span>
-              <span className="text-sm font-bold text-slate-900 sm:text-lg">
+              <span className={LANDING_CARD_TITLE}>
                 {t(`whyItem${key}Title`)}
               </span>
             </span>

@@ -8,7 +8,7 @@
 import Link from 'next/link';
 import { getLocale, getTranslations } from 'next-intl/server';
 import { ArrowRight, Link2 } from 'lucide-react';
-import { LANDING_LINK_ARROW, LANDING_TEXT_LINK } from '@/components/LandingControls';
+import { LANDING_CARD, LANDING_ICON_BOX, LANDING_LINK_ARROW, LANDING_TEXT_LINK } from '@/components/LandingControls';
 
 export async function LandingOrderLink() {
   const locale = await getLocale();
@@ -16,9 +16,10 @@ export async function LandingOrderLink() {
 
   return (
     <section className="mt-4">
-      <div className="flex flex-col gap-2 rounded-[1.5rem] bg-white p-5 shadow-card ring-1 ring-slate-200/70 sm:flex-row sm:items-center sm:gap-5 sm:p-6">
+      {/* カードの型・アイコンの箱の型 (36px)。 */}
+      <div className={`flex flex-col gap-2 p-5 sm:flex-row sm:items-center sm:gap-5 sm:p-6 ${LANDING_CARD}`}>
         <div className="flex min-w-0 flex-1 items-start gap-3.5">
-          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-emerald-50 ring-1 ring-inset ring-emerald-200/70">
+          <span className={`${LANDING_ICON_BOX} bg-emerald-50`}>
             <Link2 className="h-5 w-5 text-emerald-700" aria-hidden />
           </span>
           <div className="min-w-0">
@@ -29,11 +30,11 @@ export async function LandingOrderLink() {
           </div>
         </div>
         {/* 文字リンクの型 (押せる高さ 44px)。色はこの節の緑。リンク名は可視テキストだけ (矢印は aria-hidden・掟 8)。
-            スマホの字下げ (アイコンの幅ぶん) は margin で取る (padding だと focus の輪が字下げの空きまで囲む)。 */}
+            スマホの字下げ (アイコンの箱 36px + 間 14px = 3.125rem) は margin で取る (padding だと focus の輪が字下げの空きまで囲む)。 */}
         <Link
           href={`/${locale}/guide/order-link`}
           prefetch={false}
-          className={`ml-[3.375rem] shrink-0 self-start sm:ml-0 sm:self-center ${LANDING_TEXT_LINK.shop}`}
+          className={`ml-[3.125rem] shrink-0 self-start sm:ml-0 sm:self-center ${LANDING_TEXT_LINK.shop}`}
         >
           {t('orderLinkStripLink')}
           <ArrowRight aria-hidden className={LANDING_LINK_ARROW} />
