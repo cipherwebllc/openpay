@@ -233,7 +233,8 @@ const OWN_PAGE_FOCUS = {
  * 自分の公開ページの URL (今の origin + /@handle・locale なし = components/HandleShareButton.tsx と同じ) をコピーする。
  * 公開ページへのリンクの外の独立したボタンで、名前は見えている「コピー」(掟 8)。押した後も見える文字は変えず、印だけを
  * 変える (幅が変わらない)。「コピーしました」は見えない role="status" で読ませ、1.5 秒で消す (useCopyToClipboard)。
- * コピーに失敗したときは印も通知も出さない (偽の成功を作らない・失敗は hook の中で止まり、帯へ波及しない)。
+ * 印と通知は、押すたびにその試行の結果に合わせて出す: 押したら前の成功の印と通知を消し、成功したときだけ出す
+ * (失敗した試行では出さない = 偽の成功を作らない・失敗は hook の中で止まり、帯へ波及しない)。
  * clipboard の無い環境 (http の非 localhost など) では押しても何も起きないので、ボタンを出さない。
  */
 function CopyPageUrl({ handle, dark, label, copiedLabel }: { handle: string; dark: boolean; label: string; copiedLabel: string }) {
@@ -251,6 +252,8 @@ function CopyPageUrl({ handle, dark, label, copiedLabel }: { handle: string; dar
         <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden />
         {label}
       </button>
+      {/* 押すと hook が copied を一度 false にして (押した時の更新)、書き込みの完了の後に true にする (別の更新)。
+          そのため 1.5 秒以内に続けて成功しても、文がいったん消えてから足され、成功のたびに読み上げられる。 */}
       <span role="status" className="sr-only">
         {copied ? copiedLabel : ''}
       </span>

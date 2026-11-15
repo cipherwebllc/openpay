@@ -750,6 +750,64 @@ describe('YourOpenPayPage: 自分のページの URL のコピー (P5b)', () => 
     expect(screen.getByRole('link', { name: L.yourOpenPayPageEdit })).toBeInTheDocument();
   });
 
+  // 印と通知は、押すたびにその試行の結果に合わせる (前の試行の成功を、後の失敗の後に残さない)。
+  it('成功の直後 (1.5 秒以内) に押し直して失敗したら、前の成功の印と通知を消す', async () => {
+    handles([komorebi()]);
+    signIn();
+    renderStrip(page());
+    const button = await screen.findByRole('button', { name: L.yourOpenPayPageCopy });
+    vi.useFakeTimers();
+    await click(button);
+    expect(status()).toHaveTextContent(L.yourOpenPayPageCopied);
+    expect(icon(button)).toContain('lucide-check');
+    writeText.mockRejectedValueOnce(new DOMException('denied', 'NotAllowedError'));
+    await click(button);
+    expect(writeText).toHaveBeenCalledTimes(2);
+    expect(status()).toHaveTextContent('');
+    expect(icon(button)).toContain('lucide-copy');
+    // 前の成功の 1.5 秒の timer が、後から何かを出したり消したりしない。
+    await act(async () => {
+      vi.advanceTimersByTime(1500);
+    });
+    expect(status()).toHaveTextContent('');
+    expect(icon(button)).toContain('lucide-copy');
+  });
+
+  it('失敗の後に押し直して成功したら、成功の印と通知を出す', async () => {
+    writeText.mockRejectedValueOnce(new DOMException('denied', 'NotAllowedError'));
+    handles([komorebi()]);
+    signIn();
+    renderStrip(page());
+    const button = await screen.findByRole('button', { name: L.yourOpenPayPageCopy });
+    await click(button);
+    expect(status()).toHaveTextContent('');
+    expect(icon(button)).toContain('lucide-copy');
+    await click(button);
+    expect(writeText).toHaveBeenCalledTimes(2);
+    expect(status()).toHaveTextContent(L.yourOpenPayPageCopied);
+    expect(icon(button)).toContain('lucide-check');
+  });
+
+  it('1.5 秒以内に続けて成功しても、成功のたびに読み上げの文を入れ直す (status に文が足される変化が 2 回)', async () => {
+    handles([komorebi()]);
+    signIn();
+    renderStrip(page());
+    const button = await screen.findByRole('button', { name: L.yourOpenPayPageCopy });
+    const region = status()!;
+    const records: MutationRecord[] = [];
+    const observer = new MutationObserver((list) => records.push(...list));
+    observer.observe(region, { childList: true, subtree: true, characterData: true });
+    vi.useFakeTimers();
+    await click(button);
+    await click(button);
+    records.push(...observer.takeRecords());
+    observer.disconnect();
+    expect(writeText).toHaveBeenCalledTimes(2);
+    const added = records.flatMap((r) => [...r.addedNodes]).filter((n) => n.textContent === L.yourOpenPayPageCopied);
+    expect(added).toHaveLength(2);
+    expect(region).toHaveTextContent(L.yourOpenPayPageCopied);
+  });
+
   it('clipboard の無い環境では、押しても何も起きないボタンを出さない (カードと編集はそのまま)', async () => {
     delete (navigator as unknown as Record<string, unknown>).clipboard;
     handles([komorebi()]);
