@@ -3,8 +3,9 @@
 // 節約シミュレータ (components/SavingsSimulator.tsx) の結果の表示 (年間の差額)。
 // どちらが安いかは、万円に丸める前の差額の符号で決めて、ラベルの言葉で示す (安くなる / OpenPay の方が高くなる /
 // 変わらない・2026-11-15 user 承認の文)。数字はどれもマイナスを付けない (絶対値)。
-// ja は 1 万円以上を万円で、1 万円未満を円で出し、下の行に正確な円の補足を出す (今までどおり ja だけ・en は大きい数字が
-// 円そのものなので出さない)。差額 0 は「0 円」と「変わりません」で、数字とラベルが同じことを言う (「約 ¥0」は出さない)。
+// ja は 1 万円以上を万円で、1 万円未満を円で出す。下の行の正確な円の補足は ja だけで、見せるのは万円のときだけ
+// (円のときは同じ数の繰り返しなので、場所だけ取って見せない。en は大きい数字が円そのものなので行ごと出さない)。
+// 差額 0 は「0 円」と「変わりません」で、数字とラベルが同じことを言う。
 // 試算の部品から分けてあるのはテストのため: 今の料率と刻み (平均決済額は 50 円刻み・最低 2 JPYC) では差額がちょうど 0 に
 // ならないので、0 と -0 は差額を直接渡して確かめる。
 
@@ -50,9 +51,14 @@ export function SavingsSimulatorResult({ annualDiffYen }: { annualDiffYen: numbe
             ? t('cashSimResultExtra')
             : t('cashSimResultSame')}
       </p>
-      {/* 正確な円の補足 (ja だけ)。差額 0 は上のラベルが「変わりません」と言うので出さない。 */}
-      {isJa && annualDiffYen !== 0 && (
-        <p className="mt-1 tabular-nums text-xs text-slate-600">
+      {/* 正確な円の補足 (ja だけ)。見せるのは大きい数字が万円のときだけ。円のとき (1 万円未満・差額 0) は同じ数を 2 回言うので、
+          見せず (invisible)・読ませない (aria-hidden)。行は描いたまま場所を取り、万円と円の切り替わりで試算の箱の高さを変えない
+          (スライダーを動かす途中で、下の注とボタンが上下しない)。 */}
+      {isJa && (
+        <p
+          aria-hidden={inMan ? undefined : true}
+          className={`mt-1 tabular-nums text-xs text-slate-600${inMan ? '' : ' invisible'}`}
+        >
           {t('cashSimYenExact', { yen: `¥${formatYen(absYen)}` })}
         </p>
       )}
