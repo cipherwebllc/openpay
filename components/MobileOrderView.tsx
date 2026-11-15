@@ -37,7 +37,7 @@ import {
   type MenuItem,
 } from '@/lib/mobileOrder';
 import { EMPTY_SHOP_LIVE, type ShopLiveState } from '@/lib/shopLive';
-import { isBeforeOpen, isPastLastOrder, pickupSlots } from '@/lib/shopTime';
+import { earliestPickup, isBeforeOpen, isPastLastOrder, pickupSlots } from '@/lib/shopTime';
 import {
   mobileOrderFeeBps,
   mobileOrderFeeValue,
@@ -93,6 +93,30 @@ function orderTableNumber(dineIn: boolean | undefined, input: string): string {
 // prefix で共有 (/checkout の送信とも共有) なので、1 つの画面からの押し直しが、同じ prefix のほかのお客様の枠を
 // 使う波及を、+2 本までに抑える。
 const ADMISSION_RETRY_SEND_MAX = 2;
+// 受取時間の欄で、受付の期限 (枠 − 準備の時間) までこの分数を切った枠は、新しくは選べない。選んでから /checkout で
+// 「支払う」を押すまでの間に期限が来て、支払えなくなる注文を減らす。枠の刻み (15 分) より小さいことが前提:
+// 隠れるのは常に、候補の先頭の 1 枠だけ。
+const PICKUP_SELECT_MARGIN_MIN = 5;
+/**
+ * 受取時間の欄に出す枠。候補 (pickupSlots の結果) のうち、選んである枠と、受付の期限までの残りが
+ * PICKUP_SELECT_MARGIN_MIN 分以上の枠。
+ * - 期限は、候補を作る側と同じ earliestPickup で決める (準備の時間の丸め・上限・未設定の扱いが同じ)。枠は 15 分の
+ *   格子の上なので、「枠 >= earliestPickup(今 + その分数)」は「今 <= 枠の期限 − その分数」と同じ。
+ * - 選んである枠は外さない (本当の期限まで、選んだまま進める)。
+ * - 残る枠が無いとき (その日の最後の 1 枠の期限が近い) は、絞らない。その枠を隠しても、代わりの「最短（指定なし）」も
+ *   同じ時刻に受付が終わる。
+ * 使うのは欄の選択肢だけ。受付の判定・選んだ枠を外す判定・案内・送るものは、絞る前の候補で決める。
+ */
+export function pickupSelectSlots(
+  slots: number[],
+  selected: number | null,
+  nowMs: number,
+  minLeadMinutes: number | undefined,
+): number[] {
+  const firstSelectable = earliestPickup(nowMs + PICKUP_SELECT_MARGIN_MIN * 60_000, minLeadMinutes);
+  const shown = slots.filter((ms) => ms === selected || ms >= firstSelectable);
+  return shown.length > 0 ? shown : slots;
+}
 const ORDER_MEMO_MAX = 120;
 const ORDER_MEMO_STORAGE_PREFIX = 'openpay:order-memo:';
 
@@ -353,7 +377,19 @@ export function MobileOrderView({
   useEffect(() => {
     if (!timeEnabled) return;
     const id = setInterval(() => setNow(Date.now()), 30_000);
-    return () => clearInterval(id);
+    // 画面に戻ってきた時 (裏のタブ・別のアプリ・「戻る」での復元) は、timer が止まっていた分だけ時刻が古い。
+    // 次の 30 秒を待たずに取り直す (timer が後でやることを早めるだけ)。
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') setNow(Date.now());
+    };
+    const onPageShow = () => setNow(Date.now());
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('pageshow', onPageShow);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('pageshow', onPageShow);
+    };
   }, [timeEnabled]);
   // preorder の受取スロット候補 (絶対 ms・昇順)。storefront/flag OFF は空。
   const pickupSlotList = useMemo(
@@ -383,6 +419,11 @@ export function MobileOrderView({
     // 自分で選んだ後は、「戻しました」の案内は要らない (最短を選び直した場合も)。
     setPickupResetSlot(null);
   };
+  // 受取時間の欄に出す枠。受付の期限が近い枠を外すのは、受付の確認がある handle のページだけ (handle の無いページ =
+  // ?s= の注文ページ・ビルダーのプレビューは、確認がどこにも無く、期限で支払えなくなることが無いので、候補のまま)。
+  const pickupSelectList = handle
+    ? pickupSelectSlots(pickupSlotList, pickupAt, now, config.minLeadMinutes)
+    : pickupSlotList;
 
   // メニューオプション (サイズ/トッピング)・flag 裏。OFF では options を無視し従来の数量ステッパのみ
   // (オプション無し商品は常に従来の qty マップを使う = 既存挙動不変)。
@@ -1064,7 +1105,7 @@ export function MobileOrderView({
           needsTable={needsTable}
           pickup={{
             show: timeEnabled && isPreorder,
-            slots: pickupSlotList,
+            slots: pickupSelectList,
             value: pickupAt,
             onChange: choosePickupAt,
             notice:
