@@ -341,6 +341,56 @@ describe('見本の印はタブごと (sessionStorage) に持つ', () => {
     expect(screen.getByTestId('handle-mini-preview')).toBeInTheDocument();
   });
 
+  /** sessionStorage の setItem か removeItem だけを失敗させる (localStorage の下書きの保存はそのまま)。 */
+  function failSessionStorage(method: 'setItem' | 'removeItem') {
+    const original = Storage.prototype[method];
+    vi.spyOn(Storage.prototype, method).mockImplementation(function (this: Storage, ...args: [string, string]) {
+      if (this === window.sessionStorage) throw new DOMException('quota', 'QuotaExceededError');
+      return (original as (...a: [string, string]) => void).apply(this, args);
+    });
+  }
+
+  it('印の書き込み (setItem) だけ失敗: 今の mount の間は手付かず、再 mount の後は手を入れたものと数える', async () => {
+    failSessionStorage('setItem');
+    window.history.replaceState(null, '', '/ja/create?tab=profile&theme=night&color=violet');
+    const first = renderBuilder();
+    await expectLook('night', VIOLET);
+    expect(seed()).toBeNull();
+    // 下書き (localStorage) は保存できている。
+    await waitFor(() => expect(stored()).toMatchObject({ theme: 'night', color: VIOLET }));
+    expect(screen.queryByTestId('handle-mini-preview')).toBeNull();
+    first.unmount();
+    renderBuilder();
+    await expectLook('night', VIOLET);
+    expect(screen.getByTestId('handle-mini-preview')).toBeInTheDocument();
+  });
+
+  it('印の削除 (removeItem) だけ失敗: 残った古い印は、今の値と違えば読んだ後すぐ消し、手付かずと数えない', async () => {
+    window.history.replaceState(null, '', '/ja/create?tab=profile&theme=night&color=violet');
+    const first = renderBuilder();
+    await expectLook('night', VIOLET);
+    failSessionStorage('removeItem');
+    fireEvent.click(screen.getByRole('button', { name: 'Bold' }));
+    await waitFor(() => expect(screen.getByTestId('handle-mini-preview')).toBeInTheDocument());
+    // 消せなかったので、古い印が sessionStorage に残る。
+    expect(seed()).toEqual({ theme: 'night', color: VIOLET });
+    first.unmount();
+    // 再 mount: 古い印を読むが、今の値 (Bold) と違うので手付かずではない。
+    const second = renderBuilder();
+    await expectLook('bold', VIOLET);
+    expect(screen.getByTestId('handle-mini-preview')).toBeInTheDocument();
+    // この mount の間に偶然同じ値 (Night) へ戻しても、読んだ印は消してあるので手付かずではない。
+    fireEvent.click(screen.getByRole('button', { name: 'Night' }));
+    await expectLook('night', VIOLET);
+    expect(screen.getByTestId('handle-mini-preview')).toBeInTheDocument();
+    second.unmount();
+    // さらに再 mount すると、残った古い印と今の値が偶然同じで、ほかが既定なので手付かずと数える (値だけでは区別できない・
+    // 受け入れている場合と同じ)。
+    renderBuilder();
+    await expectLook('night', VIOLET);
+    expect(screen.queryByTestId('handle-mini-preview')).toBeNull();
+  });
+
   it('別のタブ (B) が見本の値を入れても、手で選んだ値が未保存のまま前面に戻ったタブ (A) は手付かずにならない', async () => {
     // A は先に開いていたタブ (印なし)。B は見本の Bold × 緑で開いたタブ。
     window.history.replaceState(null, '', '/ja/create?tab=profile');
