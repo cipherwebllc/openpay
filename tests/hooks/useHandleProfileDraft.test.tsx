@@ -385,3 +385,99 @@ describe('sameProfileDraft (保存時と同じ正規化で、すべての項目�
     expect(sameProfileDraft({ ...DEFAULT_PROFILE_DRAFT, socials: [''] }, DEFAULT_PROFILE_DRAFT)).toBe(false);
   });
 });
+
+// トップの見本から入れたテーマと色の印 (seededLook・plans/lp-polish-2026-11.md P6)。
+describe('見本から入れたテーマと色の印 (seededLook)', () => {
+  const WALLET = '0x52d4901142e2B5680027da5EB47C86CB02a3cA81';
+  const SEEDED = { ...DEFAULT_PROFILE_DRAFT, theme: 'night', color: '#7c3aed', seededLook: { theme: 'night', color: '#7c3aed' } } as const;
+
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  it('印の無い旧い下書きはそのまま読めて、印のキーを足さない (保存し直しもしない)', async () => {
+    const legacy = JSON.stringify({ ...DEFAULT_PROFILE_DRAFT, name: 'Alice', theme: 'bold' });
+    localStorage.setItem(STORAGE_KEY, legacy);
+    const { result } = renderHook(() => useHandleProfileDraft());
+    await waitFor(() => expect(result.current.hydrated).toBe(true));
+    expect(result.current.settings).toMatchObject({ name: 'Alice', theme: 'bold' });
+    expect(Object.hasOwn(result.current.settings, 'seededLook')).toBe(false);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(localStorage.getItem(STORAGE_KEY)).toBe(legacy);
+  });
+
+  it('印は値と一緒に保存され、読み直しても残る', async () => {
+    const first = renderHook(() => useHandleProfileDraft());
+    await waitFor(() => expect(first.result.current.hydrated).toBe(true));
+    act(() => first.result.current.setSettings((s) => ({ ...s, theme: 'night', color: '#7c3aed', seededLook: { theme: 'night', color: '#7c3aed' } })));
+    await waitFor(() =>
+      expect(JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}')).toMatchObject({ theme: 'night', color: '#7c3aed', seededLook: { theme: 'night', color: '#7c3aed' } }),
+    );
+    first.unmount();
+    const restored = renderHook(() => useHandleProfileDraft());
+    await waitFor(() => expect(restored.result.current.hydrated).toBe(true));
+    expect(restored.result.current.settings.seededLook).toEqual({ theme: 'night', color: '#7c3aed' });
+    expect(isPristineProfileDraft(restored.result.current.settings)).toBe(true);
+  });
+
+  it.each([
+    ['テーマが一覧に無い', { theme: 'neon', color: '#7c3aed' }],
+    ['色が #rrggbb でない', { theme: 'night', color: 'violet' }],
+    ['色が無い', { theme: 'night' }],
+    ['配列', ['night', '#7c3aed']],
+    ['文字列', 'night'],
+    ['null', null],
+  ])('壊れた印 (%s) は印なしに戻し、値 (テーマと色) はそのまま', async (_label, seededLook) => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ theme: 'night', color: '#7c3aed', seededLook }));
+    const { result } = renderHook(() => useHandleProfileDraft());
+    await waitFor(() => expect(result.current.hydrated).toBe(true));
+    expect(result.current.settings).toMatchObject({ theme: 'night', color: '#7c3aed' });
+    expect(Object.hasOwn(result.current.settings, 'seededLook')).toBe(false);
+    // 印が無いので、既定でないテーマと色の下書きは手が入ったものと数える (今までと同じ)。
+    expect(isPristineProfileDraft(result.current.settings)).toBe(false);
+  });
+
+  it('別のタブで入れた値と印は、前面に戻ったときに一緒に取り込む', async () => {
+    const a = renderHook(() => useHandleProfileDraft()).result;
+    const b = renderHook(() => useHandleProfileDraft()).result;
+    await waitFor(() => expect(a.current.hydrated && b.current.hydrated).toBe(true));
+    act(() => a.current.setSettings((s) => ({ ...s, theme: 'night', color: '#7c3aed', seededLook: { theme: 'night', color: '#7c3aed' } })));
+    expect(b.current.settings.theme).toBe('clean');
+    act(() => {
+      window.dispatchEvent(new Event('focus'));
+    });
+    expect(b.current.settings).toMatchObject({ theme: 'night', color: '#7c3aed', seededLook: { theme: 'night', color: '#7c3aed' } });
+    expect(isPristineProfileDraft(b.current.settings)).toBe(true);
+    // 片方のタブで公開中の内容を読み込む (印の無い下書きに置き換わる) と、もう片方からも印が消える。
+    act(() => a.current.setSettings(() => ({ ...DEFAULT_PROFILE_DRAFT, to: WALLET, theme: 'night', color: '#7c3aed' })));
+    act(() => {
+      window.dispatchEvent(new Event('focus'));
+    });
+    expect(Object.hasOwn(b.current.settings, 'seededLook')).toBe(false);
+    expect(isPristineProfileDraft(b.current.settings, WALLET)).toBe(false);
+  });
+
+  it('手付かずの判定: 入れた値のままでほかが既定なら手付かず (受取先が接続中のウォレットでも)', () => {
+    expect(isPristineProfileDraft(SEEDED)).toBe(true);
+    expect(isPristineProfileDraft({ ...SEEDED, to: WALLET }, WALLET)).toBe(true);
+    // 片方だけ入れた印 (もう片方は既定の値のまま)。
+    expect(isPristineProfileDraft({ ...DEFAULT_PROFILE_DRAFT, theme: 'night', seededLook: { theme: 'night', color: DEFAULT_PROFILE_DRAFT.color } })).toBe(true);
+  });
+
+  it('手付かずの判定: テーマか色を入れた値から変えた・ほかの項目を書いた・別の受取先を打った下書きは手付かずではない', () => {
+    expect(isPristineProfileDraft({ ...SEEDED, theme: 'bold' })).toBe(false);
+    expect(isPristineProfileDraft({ ...SEEDED, color: '#059669' })).toBe(false);
+    expect(isPristineProfileDraft({ ...SEEDED, name: 'Alice' })).toBe(false);
+    expect(isPristineProfileDraft({ ...SEEDED, font: 'serif' })).toBe(false);
+    expect(isPristineProfileDraft({ ...SEEDED, message: 'x' })).toBe(false);
+    expect(isPristineProfileDraft({ ...SEEDED, to: WALLET })).toBe(false);
+    // 既定のテーマと色に戻した下書きは、印があっても今までどおり手付かず。
+    expect(isPristineProfileDraft({ ...SEEDED, theme: 'clean', color: '#2563eb' })).toBe(true);
+  });
+
+  it('公開中との比較 (sameProfileDraft) は印を比べない', () => {
+    const { seededLook: _seededLook, ...published } = SEEDED;
+    expect(sameProfileDraft(SEEDED, published)).toBe(true);
+    expect(sameProfileDraft(SEEDED, { ...published, color: '#059669' })).toBe(false);
+  });
+});

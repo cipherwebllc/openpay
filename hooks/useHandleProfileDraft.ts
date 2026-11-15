@@ -15,7 +15,7 @@ import {
   MAX_PROFILE_LINKS,
   MAX_SOCIAL_LINKS,
 } from '@/lib/handle';
-import { resolveHandleTheme } from '@/lib/handleTheme';
+import { isHandleTheme, resolveHandleTheme } from '@/lib/handleTheme';
 import { isSettledReceiverInput } from '@/lib/format';
 import type {
   DraftHeading,
@@ -57,9 +57,16 @@ export const DEFAULT_PROFILE_DRAFT: HandleProfileDraft = {
 /** 既定値を持たない任意の文字列項目 (高度な設定)。空のままなら手付かず。 */
 const OPTIONAL_TEXT_KEYS = ['message', 'thanks', 'thanksUrl'] as const satisfies readonly (keyof HandleProfileDraft)[];
 
-/** 下書きが既定のまま (この端末でまだプロフィールを作っていない) か。持っている @handle を自動で編集に入る判定に使う。
- *  受取先 (to) は空か、接続中のウォレット (自動で入る値) のときだけ手付かずと見なす (別の宛先を打った人の入力を消さない)。 */
-export function isPristineProfileDraft(d: HandleProfileDraft, wallet?: string): boolean {
+/** 下書きが既定のまま (この端末でまだプロフィールを作っていない) か。持っている @handle を自動で編集に入る判定と、
+ *  ミニプレビューを出すかの判定に使う。
+ *  受取先 (to) は空か、接続中のウォレット (自動で入る値) のときだけ手付かずと見なす (別の宛先を打った人の入力を消さない)。
+ *  トップの見本から入れたテーマと色 (seededLook) のままなら、テーマと色は既定と同じに数える (見本で選んで来ただけの人も、
+ *  持っている @handle の編集に今までどおり自動で入る)。テーマか色を入れた値から変えたら手付かずではない。 */
+export function isPristineProfileDraft(draft: HandleProfileDraft, wallet?: string): boolean {
+  const seed = draft.seededLook;
+  const d = seed && draft.theme === seed.theme && draft.color === seed.color
+    ? { ...draft, theme: DEFAULT_PROFILE_DRAFT.theme, color: DEFAULT_PROFILE_DRAFT.color }
+    : draft;
   const to = d.to.trim();
   const toUntouched = to === '' || (!!wallet && to.toLowerCase() === wallet.toLowerCase());
   return (
@@ -154,11 +161,19 @@ function sanitizeSocials(loaded: unknown): string[] {
   return out;
 }
 
+/** 見本から入れたテーマと色の印。壊れた値・形の違う値は印なし (= 見本から入れていない) に戻す。 */
+function sanitizeSeededLook(loaded: unknown): HandleProfileDraft['seededLook'] {
+  if (!loaded || typeof loaded !== 'object' || Array.isArray(loaded)) return undefined;
+  const { theme, color } = loaded as Record<string, unknown>;
+  if (!isHandleTheme(theme) || typeof color !== 'string' || !COLOR_PATTERN.test(color)) return undefined;
+  return { theme, color: color.toLowerCase() };
+}
+
 function sanitize(loaded: Partial<HandleProfileDraft>): HandleProfileDraft {
   const str = (v: unknown, d: string) => (typeof v === 'string' ? v : d);
   const bool = (v: unknown, d: boolean) => (typeof v === 'boolean' ? v : d);
   const d = defaultPresets();
-  return {
+  const draft: HandleProfileDraft = {
     to: str(loaded.to, ''),
     name: str(loaded.name, ''),
     message: typeof loaded.message === 'string' ? loaded.message : undefined,
@@ -183,12 +198,20 @@ function sanitize(loaded: Partial<HandleProfileDraft>): HandleProfileDraft {
     links: sanitizeLinks(loaded.links),
     theme: resolveHandleTheme(loaded.theme),
   };
+  // 印が無い下書き (旧い下書き・見本から入れていない) は今までと同じ形のまま (キーを足さない)。
+  const seededLook = sanitizeSeededLook(loaded.seededLook);
+  return seededLook ? { ...draft, seededLook } : draft;
 }
 
 /** 2 つの下書きが (保存時と同じ正規化のうえで) すべての項目で同じか。公開に載らない入力途中の値 (空の URL の
- *  リンク行・ENS 名の受取先など) も比べる。持っている @handle の編集に自動で入っても失うものが無いかの判定に使う。 */
+ *  リンク行・ENS 名の受取先など) も比べる。持っている @handle の編集に自動で入っても失うものが無いかの判定に使う。
+ *  見本から入れた印 (seededLook) は公開中の内容に無いので比べない (印があるだけで「公開中と違う」にしない)。 */
 export function sameProfileDraft(a: HandleProfileDraft, b: HandleProfileDraft): boolean {
-  return JSON.stringify(sanitize(a)) === JSON.stringify(sanitize(b));
+  const comparable = (draft: HandleProfileDraft) => {
+    const { seededLook: _seededLook, ...rest } = sanitize(draft);
+    return JSON.stringify(rest);
+  };
+  return comparable(a) === comparable(b);
 }
 
 // 別のタブとの同期の決まり (hooks/useLocalStorageSettings)。受け取り方法 (チェーンと通貨の組) は 1 つの組として保存も

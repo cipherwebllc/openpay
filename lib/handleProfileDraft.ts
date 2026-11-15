@@ -53,4 +53,9 @@ export interface HandleProfileDraft {
   links: DraftLink[];
   // 着せ替えテーマ (clean 既定)。公開ページ/プレビューの見た目を切替える。
   theme: HandleTheme;
+  // トップの見本で選んで、作成画面に来たときに入れたテーマと色 (plans/lp-polish-2026-11.md P6)。今のテーマと色がこの値の
+  // ままでほかが既定なら、まだ手を入れていない下書きと数える (持っている @handle の自動編集・ミニプレビュー)。
+  // 値と同じ下書きの中に持つので、再読み込み・別のタブにも値と一緒に伝わる。公開には載せず、公開中との比較からも外す。
+  // 無い = 見本から入れていない (旧い下書きも同じ)。
+  seededLook?: { theme: HandleTheme; color: string };
 }

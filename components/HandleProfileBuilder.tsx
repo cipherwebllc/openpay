@@ -32,6 +32,7 @@ import {
 import {
   handlePreviewBackground,
 } from '@/lib/handleTheme';
+import { readLandingLook, withoutLandingLook } from '@/lib/landingProfilePreset';
 import { useOrigin } from '@/hooks/useOrigin';
 import { getPublicHandleUrl } from '@/lib/publicHandleUrl';
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard';
@@ -189,6 +190,31 @@ export function HandleProfileBuilder({
     setSettings((s) => ({ ...s, to: connected }));
   }, [hydrated, editingHandle, draft.to, connected, setSettings]);
 
+  // トップの見本で選んだテーマと色 (`?theme=…&color=…`・plans/lp-polish-2026-11.md P6) を入れるかを決めたか。URL に無い人
+  // (ほとんど) は最初から決まっている (今までと同じ)。この部品は作成画面が ssr:false で読むので、最初の描画から URL を読める。
+  const [lookPending, setLookPending] = useState(() => readLandingLook(window.location.search) !== null);
+  // 下書きを読み込んだ後に 1 回だけ決める。入れるのは、まだ手を入れていない下書き (前に見本から入れた値のままを含む) で、
+  // どの @handle も編集していないときだけ (書きかけの下書きや、読み込んだ公開中の内容に見本の値を重ねない)。入れるのは
+  // テーマと色だけで、受取先や名前は変えない。入れた値は下書きの印 (seededLook) に残し、手付かずの判定に使う。
+  // 読んだら theme と color だけを URL から消す (再読み込み・戻る・タブの往復で二重に入れない。tab と hash は残す)。
+  useEffect(() => {
+    if (!hydrated || !lookPending) return;
+    const look = readLandingLook(window.location.search);
+    if (look) {
+      window.history.replaceState(null, '', withoutLandingLook(window.location.pathname, window.location.search, window.location.hash));
+      if (look.theme || look.color) {
+        // 入れる時点の最新の下書きと編集の状態で決める (自動編集は下の canAutoEdit で決まるまで待たせているが、公開中の内容を
+        // 読み込んだ後に見本の値を重ねる事故は、ここでも断つ)。
+        setSettings((s) => {
+          if (editingRef.current !== null || !isPristineProfileDraft(s, connected)) return s;
+          const next = { ...s, ...look };
+          return { ...next, seededLook: { theme: next.theme, color: next.color } };
+        });
+      }
+    }
+    setLookPending(false);
+  }, [hydrated, lookPending, connected, setSettings]);
+
   // 受取先が未設定のときは、公開に欠かせないので受け取りカードの中に入力欄を直接出す (決済QR と同じ型)。読み込み後に
   // 未設定だったら出し、入力の途中で消さない (シートで受取先を決めて閉じたら要約に戻す)。シートを開いている間は
   // 切り替えない (シートの入力欄を空にした瞬間に欄が裏へ移り、focus を失って打ち直せなくなるため)。
@@ -201,7 +227,9 @@ export function HandleProfileBuilder({
   // か、公開中の内容から組み直した下書きとすべての項目で同じ (前に編集へ入った後の再読み込み・タブを戻ったとき)
   // なら、入っても失うものが無い。公開に載らない入力途中の値 (空の URL のリンク行・ENS 名の受取先) も比べるので、
   // それが残っている下書きでは入らない (受取先の解決を待たずに決まる)。
-  const canAutoEdit = hydrated && editingHandle === null
+  // 見本のテーマと色を入れるかが決まるまでは渡さない: HandleClaimPanel は判定が false でも「試した」にして二度と試さない
+  // ので、入れる前の下書きで判定させない (入れた後なら、見本の値のままの下書きは手付かずと数える)。
+  const canAutoEdit = hydrated && editingHandle === null && !lookPending
     ? (c: HandleTipConfig, p?: HandleProfile) =>
       isPristineProfileDraft(draft, connected) || sameProfileDraft(draftFromPublished(c, p), draft)
     : undefined;
