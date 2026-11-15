@@ -8,10 +8,24 @@ import { render, within } from '@testing-library/react';
 import { SummaryCard } from '@/components/pricing/PricingPieces';
 import { PRICING } from '@/lib/pricing';
 
-// 見えなくする・切り詰める class (どの幅の指定でも: max-sm:hidden・sm:sr-only なども)。
-const HIDING = /^(?:[\w-]+:)*(?:hidden|sr-only|invisible|collapse|truncate|line-clamp-\d+|opacity-0|h-0|max-h-0)$/;
-// カード (li) の並びを変える class。縦 (flex-col) 以外の並びは、どの幅の指定でも持たない。
-const LAYOUT = /^(?:[\w-]+:)*(?:flex-row|flex-row-reverse|flex-col-reverse|flex-wrap|flex-wrap-reverse|grid|inline-flex|inline-grid|block|contents|items-baseline)$/;
+// class の前置き (variant) を全部はがした、末尾の utility。variant は `xxx:` の繰り返しで、角括弧や丸括弧の中の `:`
+// (`max-[640px]:`・`supports-[display:grid]:`・`[@media(max-width:639px)]:` など) は区切りに数えない。`!` (important) も外す。
+function utilityOf(token: string): string {
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < token.length; i++) {
+    const c = token[i];
+    if (c === '[' || c === '(') depth++;
+    else if (c === ']' || c === ')') depth--;
+    else if (c === ':' && depth === 0) start = i + 1;
+  }
+  return token.slice(start).replace(/^!|!$/g, '');
+}
+
+// 見えなくする・切り詰める utility (どの幅・どの条件の指定でも: max-sm:hidden・max-[640px]:hidden・supports-[…]:sr-only なども)。
+const HIDING = /^(?:hidden|sr-only|invisible|collapse|truncate|line-clamp-(?:\d+|\[.+\])|opacity-0|h-0|max-h-0|\[display:none\]|\[visibility:hidden\])$/;
+// カード (li) の並びを変える utility。縦 (flex-col) 以外の並びは、どの幅・どの条件の指定でも持たない。
+const LAYOUT = /^(?:flex-row|flex-row-reverse|flex-col-reverse|flex-wrap|flex-wrap-reverse|grid|inline-flex|inline-grid|block|contents|items-baseline|\[display:.+\]|\[flex-direction:.+\]|\[flex-wrap:.+\])$/;
 
 describe.each(['ja', 'en'] as const)('%s 料金がかかる場合のカード', (locale) => {
   it.each(PRICING[locale].summary.map((item) => [item.id, item] as const))(
@@ -37,11 +51,11 @@ describe.each(['ja', 'en'] as const)('%s 料金がかかる場合のカード', 
       // 並びはどの幅でも縦 (スマホで料金の名前を数字の横に並べると、5 枚の数字の左がそろわない)。
       const cardTokens = (card.getAttribute('class') ?? '').split(/\s+/).filter(Boolean);
       expect(cardTokens).toContain('flex-col');
-      expect(cardTokens.filter((token) => LAYOUT.test(token))).toEqual([]);
+      expect(cardTokens.filter((token) => LAYOUT.test(utilityOf(token)))).toEqual([]);
       // カードの中のどの要素にも、見えなくする・切り詰める class が無い。読み上げから外すのは文字の無いアイコンだけ。
       for (const el of [card, ...card.querySelectorAll('*')]) {
         const tokens = (el.getAttribute('class') ?? '').split(/\s+/).filter(Boolean);
-        expect(tokens.filter((token) => HIDING.test(token)), el.outerHTML.slice(0, 80)).toEqual([]);
+        expect(tokens.filter((token) => HIDING.test(utilityOf(token))), el.outerHTML.slice(0, 80)).toEqual([]);
         if (el.getAttribute('aria-hidden') === 'true') expect(el.textContent).toBe('');
       }
     },
