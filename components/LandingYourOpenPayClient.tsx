@@ -13,7 +13,7 @@ import { useAccount } from 'wagmi';
 import { useMutationState, useQuery } from '@tanstack/react-query';
 import { Check, ChevronRight, Copy } from 'lucide-react';
 import { ExternalImage } from '@/components/ExternalImage';
-import { useCopyToClipboard } from '@/hooks/useCopyToClipboard';
+import { COPIED_FEEDBACK_MS, useCopyToClipboard } from '@/hooks/useCopyToClipboard';
 import { useOrigin } from '@/hooks/useOrigin';
 import { useSiweSession } from '@/hooks/useSiweSession';
 import { fetchMyHandles, myHandlesQueryKey, type OwnedHandle } from '@/lib/handleMine';
@@ -239,7 +239,9 @@ const OWN_PAGE_FOCUS = {
  */
 function CopyPageUrl({ handle, dark, label, copiedLabel }: { handle: string; dark: boolean; label: string; copiedLabel: string }) {
   const origin = useOrigin();
-  const { copied, available, copy } = useCopyToClipboard();
+  // resetOnAttempt: 押すたびに前の成功の印と通知を消し、最新の試行が成功したときだけ出す (このボタンだけの指定・
+  // ほかの部品は既定のまま)。
+  const { copied, available, copy } = useCopyToClipboard(COPIED_FEEDBACK_MS, { resetOnAttempt: true });
   if (!available) return null;
   const Icon = copied ? Check : Copy;
   return (
@@ -253,7 +255,7 @@ function CopyPageUrl({ handle, dark, label, copiedLabel }: { handle: string; dar
         {label}
       </button>
       {/* 押すと hook が copied を一度 false にして (押した時の更新)、書き込みの完了の後に true にする (別の更新)。
-          そのため 1.5 秒以内に続けて成功しても、文がいったん消えてから足され、成功のたびに読み上げられる。 */}
+          そのため 1.5 秒以内に続けて成功しても、成功のたびに status の文を入れ直す (実際の読み上げは読み上げソフトしだい)。 */}
       <span role="status" className="sr-only">
         {copied ? copiedLabel : ''}
       </span>

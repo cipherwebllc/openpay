@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { screen, within } from '@testing-library/react';
+import { act, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithIntl } from '../_helpers/i18n';
 
@@ -158,6 +158,32 @@ describe('NewsList: 最新はカード・古いものはたたむ / 1 件ずつ�
       await user.click(within(card).getByRole('button', { name: 'リンクをコピー' }));
       expect(writeText).toHaveBeenCalledWith(`${window.location.origin}/ja/news#${first.id}`);
       expect(within(card).getByRole('button', { name: '✓ コピーしました' })).toBeInTheDocument();
+    } finally {
+      writeText.mockRestore();
+    }
+  });
+
+  // 2026-11-16: 共通の useCopyToClipboard は、既定では押し直しても成功の表示を保つ (試行の始めに消すのはトップの
+  // 自分のページのコピーだけ)。ボタンの名前を「コピーしました」→「リンクをコピー」→「コピーしました」と揺らさない。
+  it('「コピーしました」の間に押し直しても、書き込みを待つ間に名前が「リンクをコピー」に戻らない', async () => {
+    const user = userEvent.setup();
+    const writeText = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue(undefined);
+    try {
+      window.history.replaceState(null, '', '/ja/news');
+      renderWithIntl(<NewsList items={newsEntriesFor('ja')} />);
+      const card = document.getElementById(sortedNews()[0].id)!;
+      await user.click(within(card).getByRole('button', { name: 'リンクをコピー' }));
+      const button = within(card).getByRole('button', { name: '✓ コピーしました' });
+      let resolve!: () => void;
+      writeText.mockImplementationOnce(() => new Promise<void>((r) => (resolve = r)));
+      await user.click(button);
+      expect(writeText).toHaveBeenCalledTimes(2);
+      // 2 回目の書き込みを待つ間も、成功の名前のまま。
+      expect(button).toHaveAccessibleName('✓ コピーしました');
+      await act(async () => {
+        resolve();
+      });
+      expect(button).toHaveAccessibleName('✓ コピーしました');
     } finally {
       writeText.mockRestore();
     }
