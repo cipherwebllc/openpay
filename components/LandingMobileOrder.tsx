@@ -10,7 +10,7 @@
 import Image from 'next/image';
 import Link from 'next/link';
 import { getLocale, getTranslations } from 'next-intl/server';
-import { ArrowRight } from 'lucide-react';
+import { LANDING_ACTION_STACK, LANDING_PRIMARY, LANDING_SECONDARY } from '@/components/LandingControls';
 
 export async function LandingMobileOrder() {
   const locale = await getLocale();
@@ -30,22 +30,13 @@ export async function LandingMobileOrder() {
             <p className="mx-auto mt-3 max-w-md text-sm leading-relaxed text-slate-600 sm:text-base lg:mx-0">
               {t('mobileOrderBannerLead')}
             </p>
-            <div className="mt-7 flex flex-col items-stretch gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-center lg:justify-start">
-              <Link
-                href={createHref}
-                prefetch={false}
-                className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-emerald-700 px-6 py-3 sm:whitespace-nowrap text-sm font-semibold text-white shadow-sm transition-all hover:-translate-y-0.5 hover:bg-emerald-800 hover:shadow-card-hover active:translate-y-0"
-              >
+            {/* 節の主ボタンと副ボタンの型。色はこの節の緑 (お店の道具)。スマホは 2 つを縦に積んで幅をそろえる (中身の幅)。 */}
+            <div className={`mt-7 ${LANDING_ACTION_STACK} lg:mx-0 lg:justify-start`}>
+              <Link href={createHref} prefetch={false} className={LANDING_PRIMARY.shop}>
                 {t('mobileOrderBannerCta')}
-                <ArrowRight className="h-4 w-4" aria-hidden />
               </Link>
-              <Link
-                href={`/${locale}/guide/shop`}
-                prefetch={false}
-                className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-white/80 px-6 py-3 sm:whitespace-nowrap text-sm font-semibold text-slate-700 ring-1 ring-slate-200/80 transition-colors hover:bg-white hover:text-emerald-800 hover:ring-emerald-300"
-              >
+              <Link href={`/${locale}/guide/shop`} prefetch={false} className={LANDING_SECONDARY.shop}>
                 {t('mobileOrderBannerLearnMore')}
-                <ArrowRight className="h-4 w-4" aria-hidden />
               </Link>
             </div>
           </div>

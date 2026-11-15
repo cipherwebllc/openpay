@@ -7,6 +7,7 @@ import Link from 'next/link';
 import { getLocale, getTranslations } from 'next-intl/server';
 import { ArrowRight, ClipboardCheck, Palette, QrCode, Store, type LucideIcon } from 'lucide-react';
 import { guideNavFor, type GuideSlug } from '@/lib/guideNav';
+import { LANDING_LINK_ARROW, LANDING_TEXT_LINK } from '@/components/LandingControls';
 
 const CARDS: readonly { readonly slug: GuideSlug; readonly icon: LucideIcon }[] = [
   { slug: 'start', icon: ClipboardCheck },
@@ -57,15 +58,15 @@ export async function LandingEntryPoints() {
           );
         })}
       </ul>
-      {/* リンク名は可視テキストだけ (矢印は aria-hidden・掟 8)。min-h-11 で tap target 44px。 */}
+      {/* 文字リンクの型 (押せる高さ 44px)。色はこの節の緑。リンク名は可視テキストだけ (矢印は aria-hidden・掟 8)。 */}
       <p className="mt-3 text-center">
         <Link
           href={`/${locale}/guide`}
           prefetch={false}
-          className="group inline-flex min-h-11 items-center gap-1 text-sm font-semibold text-emerald-700 hover:text-emerald-900"
+          className={LANDING_TEXT_LINK.shop}
         >
           {t('entryAllGuides')}
-          <ArrowRight aria-hidden className="h-4 w-4 shrink-0 transition-transform group-hover:translate-x-0.5" />
+          <ArrowRight aria-hidden className={LANDING_LINK_ARROW} />
         </Link>
       </p>
     </div>

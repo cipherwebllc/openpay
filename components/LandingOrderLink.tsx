@@ -8,6 +8,7 @@
 import Link from 'next/link';
 import { getLocale, getTranslations } from 'next-intl/server';
 import { ArrowRight, Link2 } from 'lucide-react';
+import { LANDING_LINK_ARROW, LANDING_TEXT_LINK } from '@/components/LandingControls';
 
 export async function LandingOrderLink() {
   const locale = await getLocale();
@@ -27,14 +28,15 @@ export async function LandingOrderLink() {
             <p className="mt-1 text-sm leading-relaxed text-slate-600 [word-break:auto-phrase]">{t('orderLinkStripBody')}</p>
           </div>
         </div>
-        {/* リンク名は可視テキストだけ (矢印は aria-hidden・掟 8)。min-h-11 で押せる範囲 44px。 */}
+        {/* 文字リンクの型 (押せる高さ 44px)。色はこの節の緑。リンク名は可視テキストだけ (矢印は aria-hidden・掟 8)。
+            スマホの字下げ (アイコンの幅ぶん) は margin で取る (padding だと focus の輪が字下げの空きまで囲む)。 */}
         <Link
           href={`/${locale}/guide/order-link`}
           prefetch={false}
-          className="group inline-flex min-h-11 shrink-0 items-center gap-1 self-start pl-[3.375rem] text-sm font-semibold text-emerald-800 underline-offset-2 hover:underline sm:self-center sm:pl-0"
+          className={`ml-[3.375rem] shrink-0 self-start sm:ml-0 sm:self-center ${LANDING_TEXT_LINK.shop}`}
         >
           {t('orderLinkStripLink')}
-          <ArrowRight aria-hidden className="h-4 w-4 shrink-0 transition-transform group-hover:translate-x-0.5" />
+          <ArrowRight aria-hidden className={LANDING_LINK_ARROW} />
         </Link>
       </div>
     </section>

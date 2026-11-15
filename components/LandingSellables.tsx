@@ -7,11 +7,11 @@
 
 import Link from 'next/link';
 import { getLocale, getTranslations } from 'next-intl/server';
-import { ArrowRight, BookOpen } from 'lucide-react';
 import { env } from '@/lib/env';
 import { HOSTED_PRODUCT_CATEGORIES } from '@/lib/x402/storeMeta';
 import { LandingSectionHeader } from '@/components/LandingSectionHeader';
 import { LandingProfileDemo } from '@/components/LandingProfileDemo';
+import { LANDING_ACTION_ROW, LANDING_PRIMARY, LANDING_SECONDARY } from '@/components/LandingControls';
 
 export async function LandingSellables() {
   if (!env.enableCreatorStoreUi) return null;
@@ -61,21 +61,11 @@ export async function LandingSellables() {
           },
         }}
       />
-      <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
-        <Link
-          href={`/${locale}/create?tab=profile`}
-          prefetch={false}
-          className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-brand px-5 py-3 text-sm font-semibold text-white shadow-sm transition-all hover:-translate-y-0.5 hover:bg-brand-dark"
-        >
+      <div className={`mt-6 ${LANDING_ACTION_ROW}`}>
+        <Link href={`/${locale}/create?tab=profile`} prefetch={false} className={LANDING_PRIMARY.brand}>
           {t('sellablesCtaSell')}
-          <ArrowRight className="h-4 w-4" aria-hidden />
         </Link>
-        <Link
-          href={`/${locale}/guide/store`}
-          prefetch={false}
-          className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-700 ring-1 ring-inset ring-slate-300 transition-colors hover:bg-slate-50"
-        >
-          <BookOpen className="h-4 w-4" aria-hidden />
+        <Link href={`/${locale}/guide/store`} prefetch={false} className={LANDING_SECONDARY.brand}>
           {t('sellablesCtaGuide')}
         </Link>
       </div>

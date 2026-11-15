@@ -10,6 +10,7 @@ import { ArrowRight } from 'lucide-react';
 import { LandingSectionHeader } from '@/components/LandingSectionHeader';
 import { SummaryCard } from '@/components/pricing/PricingPieces';
 import { pricingContentFor } from '@/lib/pricing';
+import { LANDING_LINK_ARROW, LANDING_NOTE_CENTERED, LANDING_TEXT_LINK } from '@/components/LandingControls';
 
 export async function LandingSupport() {
   const t = await getTranslations('Landing');
@@ -29,19 +30,18 @@ export async function LandingSupport() {
         ))}
       </ul>
 
-      <p className="mx-auto mt-6 max-w-2xl text-center text-xs leading-relaxed text-slate-500">
-        {t('supportFeeNote')}
-      </p>
+      {/* カードに付く注 (注の型)。説明する対象のすぐ下に置く (上の空きは、ほかの注と同じ mt-3)。 */}
+      <p className={`mt-3 ${LANDING_NOTE_CENTERED}`}>{t('supportFeeNote')}</p>
       {/* 機能ごとの料金と計算例 (/pricing) への入口 (plans/pricing-page.md §2.6)。
-          リンク名は可視テキストだけ (矢印は aria-hidden・掟 8)。min-h-11 で tap target 44px (WCAG 2.5.8)。 */}
+          文字リンクの型 (押せる高さ 44px・WCAG 2.5.8)。リンク名は可視テキストだけ (矢印は aria-hidden・掟 8)。 */}
       <p className="mt-2 text-center">
         <Link
           href={`/${locale}/pricing`}
           prefetch={false}
-          className="group inline-flex min-h-11 items-center gap-1 text-sm font-semibold text-brand underline-offset-2 hover:underline"
+          className={LANDING_TEXT_LINK.brand}
         >
           {t('supportFeeDetailsLink')}
-          <ArrowRight aria-hidden className="h-4 w-4 shrink-0 transition-transform group-hover:translate-x-0.5" />
+          <ArrowRight aria-hidden className={LANDING_LINK_ARROW} />
         </Link>
       </p>
     </section>

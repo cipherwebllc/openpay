@@ -16,6 +16,7 @@ import { Coins, Rocket, Zap, UserCheck } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { LandingSectionHeader } from '@/components/LandingSectionHeader';
 import { PAYER_TONE } from '@/components/pricing/PayerPill';
+import { LANDING_FIGURE } from '@/components/LandingControls';
 
 // i18n key は `benefits${BenefitId}{Focal,Title,Body}` で命名統一済 (messages/*.json)、
 // 1 つの BenefitId discriminator から template literal で 3 key を派生させる。
@@ -70,10 +71,11 @@ export async function LandingBenefits() {
                 <Icon className="h-5 w-5" aria-hidden />
               </span>
 
-              {/* focal: ビッグナンバー。文字サイズを「最大 (2.25rem / sm 3rem)」と「カード幅に収まる
-                  大きさ」の小さい方にして 1 行に収める (lib/focalFit.ts)。未知の書体で収まらなければ空白で折り返す。 */}
+              {/* focal: ビッグナンバー (大きい数字の型)。文字サイズを「最大 2.25rem (料金のカードの数字と同じ)」と「カード幅に収まる
+                  大きさ」の小さい方にして 1 行に収める (lib/focalFit.ts)。未知の書体で収まらなければ空白で折り返す。
+                  PC も 2.25rem まで: 3rem にすると 4 列のカードに入る語と入らない語で大きさがばらつく (ja の 1280px 幅で 48 / 37 / 48 / 44px)。 */}
               <p
-                className={`mt-4 break-keep text-[length:min(2.25rem,var(--focal-fit))] font-extrabold leading-none ${c.focal} sm:text-[length:min(3rem,var(--focal-fit))]`}
+                className={`mt-4 break-keep text-[length:min(2.25rem,var(--focal-fit))] ${LANDING_FIGURE.base} ${c.focal}`}
                 style={{ '--focal-fit': focalFitCqi(focal) } as CSSProperties}
                 data-focal=""
               >

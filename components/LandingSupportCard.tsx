@@ -9,6 +9,7 @@
 import Image from 'next/image';
 import { getTranslations } from 'next-intl/server';
 import { ExternalLink, Heart } from 'lucide-react';
+import { LANDING_PRIMARY } from '@/components/LandingControls';
 
 const TIP_ORIGIN = 'https://open-pay.jp';
 // 運営の恒久プロフィール (link-in-bio + JPYC/USDC 応援)。会社 @handle は FEE_RECEIVER ウォレットで
@@ -66,13 +67,14 @@ export async function LandingSupportCard() {
           </span>
         </span>
 
-        {/* CTA pill (装飾・aria-hidden)。色は同じ節の「受け取りを始める」と同じ青。スマホは締めの節の余白で幅が狭いので、名前と説明に 1 行を譲って下の段に置く。 */}
-        <span
-          aria-hidden
-          className="inline-flex w-full shrink-0 items-center justify-center gap-1.5 rounded-xl bg-blue-600 px-3 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors group-hover:bg-blue-700 sm:w-auto sm:px-4"
-        >
-          <Heart className="h-4 w-4" />
-          {t('supportProfileCta')}
+        {/* CTA pill (装飾・aria-hidden)。白いカードの上なので、節の主ボタンの型 (紺)。カード全体が 1 つのリンクなので、色はカードの hover で変える。
+            スマホは締めの節の余白で幅が狭いので、名前と説明に 1 行を譲って下の段に置く。幅は中身の幅のまま右に寄せる
+            (カードの幅いっぱいにすると、この節の主ボタンやヒーローの主ボタンより大きく見える)。 */}
+        <span aria-hidden className="flex w-full shrink-0 justify-end sm:w-auto">
+          <span className={`group-hover:bg-brand-dark ${LANDING_PRIMARY.brand}`}>
+            <Heart className="h-4 w-4" />
+            {t('supportProfileCta')}
+          </span>
         </span>
       </a>
     </div>
