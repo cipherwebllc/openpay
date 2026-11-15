@@ -2,17 +2,21 @@
 // 全節で同じ大きさ・余白にそろえ、章ラベルで「いまどの章か」を示す (plans/lp-polish-2026-09.md P2)。
 
 import type { ReactNode } from 'react';
+import { LANDING_BAND_SPACE, LANDING_SECTION_TITLE } from '@/components/LandingControls';
 
 export function LandingSectionHeader({
   eyebrow,
   title,
   lead,
   id,
+  size = 'md',
 }: {
   eyebrow?: ReactNode;
   title: ReactNode;
   lead?: ReactNode;
   id?: string;
+  /** 見出しの大きさ。sm = 補足の節 (前提知識・よくある質問)。章ラベル・副題・見出しの階層 (h2) は同じ。 */
+  size?: keyof typeof LANDING_SECTION_TITLE;
 }) {
   return (
     <div className="mx-auto max-w-3xl text-center">
@@ -21,7 +25,7 @@ export function LandingSectionHeader({
           単語の途中の改行を出さない・日本語は html lang=ja で効く word-break:auto-phrase)。 */}
       <h2
         id={id}
-        className={`text-[1.75rem] font-bold leading-tight tracking-tight text-slate-900 [word-break:auto-phrase] text-balance sm:text-4xl ${eyebrow ? 'mt-2' : ''}`}
+        className={`${LANDING_SECTION_TITLE[size]} font-bold leading-tight tracking-tight text-slate-900 [word-break:auto-phrase] text-balance ${eyebrow ? 'mt-2' : ''}`}
       >
         {title}
       </h2>
@@ -32,10 +36,10 @@ export function LandingSectionHeader({
 
 // 章の帯: 全幅の白地で章をまとめ、ページの地色 (slate-50) と交互にしてリズムを作る。
 // 全幅の地色は box-shadow + clip-path で描く (100vw の要素はスクロールバーぶん横にはみ出すが、影は幅に数えられない)。
-// 帯の中の最初の節は上の余白を持たない (帯の上下の余白でそろえる)。
+// 帯の中の最初の節は上の余白を持たない (帯の上下の余白でそろえる)。帯の外・中・後ろの空きは LANDING_BAND_SPACE で同じにする。
 export function LandingBand({ children }: { children: ReactNode }) {
   return (
-    <div className="mt-16 bg-white py-9 shadow-[0_0_0_100vmax_white] [clip-path:inset(0_-100vmax)] sm:mt-28 sm:py-20 [&>*:first-child]:mt-0">
+    <div className={`bg-white shadow-[0_0_0_100vmax_white] [clip-path:inset(0_-100vmax)] [&>*:first-child]:mt-0 ${LANDING_BAND_SPACE}`}>
       {children}
     </div>
   );

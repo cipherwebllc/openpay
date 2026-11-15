@@ -9,7 +9,7 @@
 import Image from 'next/image';
 import { getTranslations } from 'next-intl/server';
 import { ExternalLink, Heart } from 'lucide-react';
-import { LANDING_PRIMARY } from '@/components/LandingControls';
+import { LANDING_LINK_CARD, LANDING_PRIMARY } from '@/components/LandingControls';
 
 const TIP_ORIGIN = 'https://open-pay.jp';
 // 運営の恒久プロフィール (link-in-bio + JPYC/USDC 応援)。会社 @handle は FEE_RECEIVER ウォレットで
@@ -28,12 +28,13 @@ export async function LandingSupportCard() {
       {/* 応援プロフカード: 5 ボタンを 1 つに集約。カード全体が @openpay_jp プロフへの 1 link
           (入れ子の interactive 要素を避けるため CTA は span)。a11y 名は内側の可視テキストから導出する。
           aria-label は付けない: 可視テキストを含まない aria-label は label-content-name-mismatch
-          (WCAG 2.5.3 Label in Name) となり Lighthouse a11y が落ちる。 */}
+          (WCAG 2.5.3 Label in Name) となり Lighthouse a11y が落ちる。
+          押せるカードの型 (濃い紺の面の上 = focus の輪は白・hover で浮かせない。hover は中のボタンの色で分かる)。 */}
       <a
         href={PROFILE_URL}
         target="_blank"
         rel="noopener noreferrer"
-        className="group mt-5 flex flex-wrap items-center gap-x-4 gap-y-3 rounded-2xl bg-white p-4 text-left shadow-card transition-all duration-200 hover:-translate-y-0.5 hover:shadow-card-hover sm:p-5"
+        className={`group mt-5 flex flex-wrap items-center gap-x-4 gap-y-3 p-4 text-left sm:p-5 ${LANDING_LINK_CARD.onDark}`}
       >
         {/* avatar (装飾): OpenPay ブランドマーク。@handle プロフの「顔」を見せて実例感を出す。 */}
         <span

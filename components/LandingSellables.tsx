@@ -27,7 +27,7 @@ export async function LandingSellables() {
         {HOSTED_PRODUCT_CATEGORIES.map((category) => (
           <span
             key={category}
-            className="rounded-full bg-white px-3 py-1.5 text-[13px] font-semibold text-slate-700 shadow-[0_2px_8px_-2px_rgba(15,23,42,0.07)] ring-1 ring-slate-200 sm:px-4 sm:py-2 sm:text-sm"
+            className="rounded-full bg-white px-3 py-1.5 text-[13px] font-semibold text-slate-700 shadow-card ring-1 ring-slate-200/70 sm:px-4 sm:py-2 sm:text-sm"
           >
             {tCatalog(`categories.${category}`)}
           </span>

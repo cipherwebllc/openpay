@@ -7,7 +7,13 @@ import Link from 'next/link';
 import { getLocale, getTranslations } from 'next-intl/server';
 import { ArrowRight, ClipboardCheck, Palette, QrCode, Store, type LucideIcon } from 'lucide-react';
 import { guideNavFor, type GuideSlug } from '@/lib/guideNav';
-import { LANDING_LINK_ARROW, LANDING_TEXT_LINK } from '@/components/LandingControls';
+import {
+  LANDING_CARD_TITLE,
+  LANDING_ICON_BOX,
+  LANDING_LINK_ARROW,
+  LANDING_LINK_CARD,
+  LANDING_TEXT_LINK,
+} from '@/components/LandingControls';
 
 const CARDS: readonly { readonly slug: GuideSlug; readonly icon: LucideIcon }[] = [
   { slug: 'start', icon: ClipboardCheck },
@@ -32,24 +38,21 @@ export async function LandingEntryPoints() {
           const item = nav.items[slug];
           return (
             <li key={slug}>
-              {/* リンク名 = 名前 + 説明 (可視テキストだけ・掟 8)。 */}
+              {/* リンク名 = 名前 + 説明 (可視テキストだけ・掟 8)。押せるカードの型 (色はこの節の緑・hover で浮かせない)。 */}
               <Link
                 href={`/${locale}/guide/${slug}`}
                 prefetch={false}
-                className="group flex h-full items-center gap-3 rounded-2xl bg-white p-3 ring-1 ring-slate-200/80 transition [word-break:auto-phrase] hover:-translate-y-0.5 hover:ring-emerald-300 sm:items-start sm:p-4"
+                className={`group flex h-full items-center gap-3 p-3 [word-break:auto-phrase] sm:items-start sm:p-4 ${LANDING_LINK_CARD.shop}`}
               >
-                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-emerald-50">
+                <span className={`${LANDING_ICON_BOX} bg-emerald-50`}>
                   <Icon className="h-5 w-5 text-emerald-700" aria-hidden />
                 </span>
                 {/* 1 文節 (「導入前チェックリスト」) が欄の幅を超えるほど狭いときは、ページを横にはみ出させずに
                     文節の途中でも折る (overflow-wrap:anywhere)。 */}
                 <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">
-                  <span className="flex items-center gap-1 text-sm font-bold leading-snug text-slate-900">
+                  <span className={`flex items-center gap-1 leading-snug ${LANDING_CARD_TITLE}`}>
                     {item.label}
-                    <ArrowRight
-                      aria-hidden
-                      className="h-4 w-4 shrink-0 text-emerald-700 transition-transform group-hover:translate-x-0.5"
-                    />
+                    <ArrowRight aria-hidden className={`text-emerald-700 ${LANDING_LINK_ARROW}`} />
                   </span>
                   <span className="mt-1 hidden text-sm leading-relaxed text-slate-600 sm:block">{item.summary}</span>
                 </span>

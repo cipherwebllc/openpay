@@ -1,5 +1,5 @@
-// トップの節で使う、ボタン・文字リンク・注・大きい数字の型 (class の定数)。Server / Client どちらからも使える。
-// 節ごとに色・角・高さ・字の大きさが違っていたのを、役割ごとに 1 つの型にそろえる (plans/lp-polish-2026-11.md P2)。
+// トップの節で使う、ボタン・文字リンク・注・大きい数字・カード・アイコンの箱・見出しの型 (class の定数)。Server / Client どちらからも使える。
+// 節ごとに色・角・高さ・字の大きさが違っていたのを、役割ごとに 1 つの型にそろえる (plans/lp-polish-2026-11.md P2・P3)。
 // 強さの順は「ヒーローの主ボタン > 節の主ボタン > 副ボタン > 文字リンク」。ヒーローの主ボタン (components/LandingHero.tsx) は
 // ページで 1 つだけの、いちばん大きいボタン (角 2xl・高さ 48px・太字 16px・大きな影・矢印つき) で、ここの型は使わない。
 //
@@ -85,3 +85,54 @@ export const LANDING_FIGURE = {
   /** 大きさを使う側が決めるとき (カードの幅に合わせて縮める導入メリットの数字)。上限は card と同じ 2.25rem にする。 */
   base: FIGURE,
 } as const;
+
+// ---- 入れ物の型 (P3) ----
+// カードは 1 つの形 (角 2xl・白・低い影・淡い枠) にそろえる。枠は ring (box-shadow) で描き、幅を取らない。
+// 形の違うもの (着色の入力の面 = 試算・料金のカード = /pricing と共有・主役の大きい面 = モバイルオーダーと締め・
+// 比較表の外枠・実画面の見本) は、役割が違うので型にしない。
+
+// カードの面 (角・白・低い影)。淡い枠 (ring) は、明るい地 (白い帯・slate-50) の上で白い面の縁を見せるためのもの。
+const CARD_FACE = 'rounded-2xl bg-white shadow-card';
+
+/** 静的なカード (導入メリット・特長・用途・3 ステップ・FAQ の外枠・なぜ今・注文リンク・見本の外枠・動画の枠)。 */
+export const LANDING_CARD = `${CARD_FACE} ring-1 ring-slate-200/70`;
+
+// 押せるカード (カード全体が 1 つのリンク)。hover は影を少し深くし、枠を濃くするだけ (浮かせない: 節のボタンと同じく
+// 位置の動きを使わない)。focus の輪は節のボタンと同じ 2px・外側 2px。
+const LINK_CARD_ACTION = 'transition hover:shadow-card-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2';
+
+/** 押せるカード。色 (tone) は節の色: shop = 緑 (ガイドの入口)・onDark = 締めの濃い紺の面の上の白いカード (応援カード)。 */
+export const LANDING_LINK_CARD = {
+  shop: `${LANDING_CARD} ${LINK_CARD_ACTION} hover:ring-emerald-300 focus-visible:outline-emerald-700`,
+  // 濃い紺の面の上では、白い面だけで縁が見える。淡い枠を付けると、白い面と地の間に灰色の縁が出る (撮って確かめた) ので付けない。
+  // hover は中の飾りのボタンの色で分かる。focus の輪は白 (紺や緑の輪は地との差が小さく見えない・白は地との差 17.8:1)。
+  onDark: `${CARD_FACE} ${LINK_CARD_ACTION} focus-visible:outline-white`,
+} as const;
+
+/**
+ * カードの小見出しの大きさ・太さ・色 (14px・sm 以上 16px・中太字)。料金のカード (SummaryCard) と同じ。
+ * タグ (h3 / span) と見出しの階層は使う側のまま。
+ */
+export const LANDING_CARD_TITLE = 'text-sm font-semibold text-slate-900 sm:text-base';
+
+/**
+ * アイコンの箱 (36px・角 xl)。中のアイコンは h-5 w-5。地の色と字の色は使う側が決める (誰が払うか・節の色の意味があるため)。
+ * 箱なしの裸のアイコン (特長・用途・3 ステップ) は文字の頭の印なので、箱にしない。
+ */
+export const LANDING_ICON_BOX = 'grid h-9 w-9 shrink-0 place-items-center rounded-xl';
+
+/**
+ * 節の見出し (h2) の大きさ。md = ふつうの節・sm = 補足の節 (読みたい人が読む前提知識とよくある質問)。
+ * 補足の節は 1 段小さくして、ふつうの節より一段弱く見せる (11 節が同じ強さで続いていた・P3)。
+ */
+export const LANDING_SECTION_TITLE = {
+  md: 'text-[1.75rem] sm:text-4xl',
+  sm: 'text-2xl sm:text-3xl',
+} as const;
+
+/**
+ * 白い帯 (LandingBand) の上下の空き。帯の外 (上の節 → 帯の縁)・帯の中 (縁 → 中の節)・帯の後ろ (縁 → 次の節) を同じにする
+ * (スマホ 48px・sm 以上 80px)。帯の後ろの節は自分の上の余白 (64 / 112px) を持つので、帯の側で「直後の節」の上の余白を
+ * 打ち消す (帯の後ろの節は Store の flag で変わる = 販売の節が出ないときは AI の節。page.tsx で節ごとに付けると漏れる)。
+ */
+export const LANDING_BAND_SPACE = 'mt-12 py-12 sm:mt-20 sm:py-20 [&+section]:mt-12 sm:[&+section]:mt-20';

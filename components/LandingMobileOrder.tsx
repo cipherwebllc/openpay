@@ -42,11 +42,12 @@ export async function LandingMobileOrder() {
           </div>
 
           {/* バナー画像はそのまま主 CTA への大きなクリック領域にする (画像内の擬似ボタンを実リンク化)。
-              link の a11y 名は画像 alt が担う (内側に競合する可視テキストは無いので不一致は起きない)。 */}
+              link の a11y 名は画像 alt が担う (内側に競合する可視テキストは無いので不一致は起きない)。
+              hover で浮く・画像が少し大きくなる動きは、動きを減らす設定 (prefers-reduced-motion: reduce) でないときだけ。 */}
           <Link
             href={createHref}
             prefetch={false}
-            className="group block overflow-hidden rounded-2xl bg-white shadow-lift ring-1 ring-inset ring-emerald-900/10 transition-all duration-200 hover:-translate-y-1 hover:ring-emerald-500/30"
+            className="group block overflow-hidden rounded-2xl bg-white shadow-lift ring-1 ring-inset ring-emerald-900/10 transition-all duration-200 hover:ring-emerald-500/30 motion-safe:hover:-translate-y-1"
           >
             <Image
               src="/landing/mobileorder.webp"
@@ -54,7 +55,7 @@ export async function LandingMobileOrder() {
               width={1280}
               height={670}
               sizes="(min-width: 1024px) 560px, (min-width: 640px) 640px, calc(100vw - 3rem)"
-              className="h-auto w-full transition-transform duration-300 group-hover:scale-[1.015]"
+              className="h-auto w-full transition-transform duration-300 motion-safe:group-hover:scale-[1.015]"
             />
           </Link>
         </div>

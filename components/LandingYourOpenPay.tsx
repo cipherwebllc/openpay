@@ -72,7 +72,7 @@ export async function LandingYourOpenPay() {
                     <span className="block text-sm font-bold text-slate-900">{t('yourOpenPayPageTitle')}</span>
                     <span className="block truncate text-xs text-slate-600">{t('yourOpenPayPageBody')}</span>
                   </span>
-                  <ChevronRight className="h-4 w-4 shrink-0 text-brand transition-transform group-hover:translate-x-0.5" aria-hidden />
+                  <ChevronRight className="h-4 w-4 shrink-0 text-brand transition-transform motion-safe:group-hover:translate-x-0.5" aria-hidden />
                 </Link>
               }
             />

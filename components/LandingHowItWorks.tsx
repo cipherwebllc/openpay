@@ -8,6 +8,7 @@ import { Store } from 'lucide-react';
 import { LandingSectionHeader } from '@/components/LandingSectionHeader';
 import { STEP_BADGE } from '@/components/guide/PosGuidePieces';
 import { LandingDemoVideos } from '@/components/LandingDemoVideos';
+import { LANDING_CARD } from '@/components/LandingControls';
 
 export async function LandingHowItWorks() {
   const t = await getTranslations('Landing');
@@ -50,7 +51,7 @@ export async function LandingHowItWorks() {
           },
         ]}
       />
-      <article className="mt-8 rounded-2xl bg-white p-6 shadow-card ring-1 ring-slate-200/70">
+      <article className={`mt-8 p-6 ${LANDING_CARD}`}>
         <h3 className="flex items-center gap-2 text-base font-semibold text-emerald-900">
           <Store aria-hidden className="h-5 w-5 text-emerald-600" />
           {t('howItWorksMerchantTitle')}

@@ -14,6 +14,7 @@ import {
   handleViewTheme,
   type HandleTheme,
 } from '@/lib/handleTheme';
+import { LANDING_CARD } from '@/components/LandingControls';
 
 const ACCENTS = {
   blue: '#2563eb',
@@ -60,7 +61,8 @@ export function LandingProfileDemo({ c }: { c: LandingProfileDemoCopy }) {
     }`;
 
   return (
-    <div className="mx-auto mt-8 grid max-w-4xl grid-cols-1 items-center gap-5 rounded-3xl bg-white p-4 shadow-card ring-1 ring-slate-200/70 sm:grid-cols-[minmax(0,1fr)_16rem] sm:gap-8 sm:p-8">
+    // 外枠はカードの型 (中の見本の枠は公開ページの形のまま)。
+    <div className={`mx-auto mt-8 grid max-w-4xl grid-cols-1 items-center gap-5 p-4 sm:grid-cols-[minmax(0,1fr)_16rem] sm:gap-8 sm:p-8 ${LANDING_CARD}`}>
       <div className="min-w-0">
         <h3 className="text-lg font-bold text-slate-900 sm:text-xl">{c.title}</h3>
         <p className="mt-1 text-sm leading-relaxed text-slate-600">{c.hint}</p>

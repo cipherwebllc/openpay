@@ -9,7 +9,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Pause, Play } from 'lucide-react';
-import { LANDING_NOTE_TEXT } from '@/components/LandingControls';
+import { LANDING_CARD, LANDING_NOTE_TEXT } from '@/components/LandingControls';
 
 export type LandingDemo = { src: string; poster: string; label: string; description: string };
 
@@ -76,8 +76,8 @@ export function LandingDemoVideos({
           // モバイルの幅は画面の 40% (上限 176px): 2 本と、3 本目の端が見えて「横に続く」と分かる。幅を figure に持たせるので、
           // 長い見出し (en) は図の幅で折り返す (図を押し広げない)。sm 以上は列の幅いっぱい (動画は 208px)。
           <figure key={d.src} className="relative flex w-[40vw] max-w-[176px] snap-center flex-col items-center sm:w-auto sm:max-w-none">
-            {/* 動画は 390x720 (スマホの画面の上側)。3 本とも同じ大きさ。 */}
-            <div className="w-full overflow-hidden rounded-2xl bg-white shadow-card ring-1 ring-slate-200/70 sm:w-auto">
+            {/* 動画は 390x720 (スマホの画面の上側)。3 本とも同じ大きさ。枠はカードの型。 */}
+            <div className={`w-full overflow-hidden sm:w-auto ${LANDING_CARD}`}>
               <video
                 ref={(el) => {
                   videoRefs.current[i] = el;

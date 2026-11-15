@@ -16,7 +16,7 @@ import { Coins, Rocket, Zap, UserCheck } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { LandingSectionHeader } from '@/components/LandingSectionHeader';
 import { PAYER_TONE } from '@/components/pricing/PayerPill';
-import { LANDING_FIGURE } from '@/components/LandingControls';
+import { LANDING_CARD, LANDING_CARD_TITLE, LANDING_FIGURE, LANDING_ICON_BOX } from '@/components/LandingControls';
 
 // i18n key は `benefits${BenefitId}{Focal,Title,Body}` で命名統一済 (messages/*.json)、
 // 1 つの BenefitId discriminator から template literal で 3 key を派生させる。
@@ -65,9 +65,9 @@ export async function LandingBenefits() {
           return (
             <li
               key={id}
-              className="flex flex-col rounded-2xl bg-white p-5 shadow-card ring-1 ring-slate-200/70 [container-type:inline-size] [word-break:auto-phrase] sm:p-6"
+              className={`flex flex-col p-5 [container-type:inline-size] [word-break:auto-phrase] sm:p-6 ${LANDING_CARD}`}
             >
-              <span className={`grid h-9 w-9 place-items-center rounded-xl ${c.iconBox}`}>
+              <span className={`${LANDING_ICON_BOX} ${c.iconBox}`}>
                 <Icon className="h-5 w-5" aria-hidden />
               </span>
 
@@ -82,7 +82,7 @@ export async function LandingBenefits() {
                 {focal}
               </p>
 
-              <h3 className="mt-3 text-sm font-semibold text-slate-900 sm:text-base">
+              <h3 className={`mt-3 ${LANDING_CARD_TITLE}`}>
                 {t(`benefits${id}Title`)}
               </h3>
               <p className="mt-2 text-[13px] leading-relaxed text-slate-600 sm:text-sm">
