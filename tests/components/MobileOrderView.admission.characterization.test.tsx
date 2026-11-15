@@ -2815,8 +2815,9 @@ describe('MobileOrderView — 選んだ受取時間を自動で「最短（指�
     expect(pickupSelect()).toHaveAccessibleDescription(TEXT.pickupReset);
   });
 
-  // 「案内の文はあるが、案内を描かない」場面 (候補が 0 件・受取時間の欄を出さない) は、MobileOrderView からは作れない
-  // (候補が 0 件なら支払い欄ごと消える)。部品の約束として、props を直接渡して確かめる: 描かない案内を、リンクは指さない。
+  // 下で渡す props の組み合わせ (案内の文があり、候補が 0 件、または受取時間の欄を出さないのに、押せるリンクが出ている) は、
+  // このテスト file の MobileOrderView の描き方からは作っていない (候補が 0 件なら支払い欄ごと消える)。
+  // 部品の約束として、props を直接渡して確かめる: 描かない案内を、リンクは指さない。
   it('案内の文が渡っても、案内を描かないとき (候補が 0 件・受取時間の欄を出さない) は、リンクに aria-describedby の属性が無い', () => {
     const bar = (pickup: { show: boolean; slots: number[] }) => (
       <MobileOrderCartBar
