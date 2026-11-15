@@ -1,4 +1,21 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
+
+// 読み込みの最初から数えた表示のずれ (layout shift・addInitScript で window.__cls に足していく) が 0.01 未満であることを確かめる。
+// Playwright の WebKit (mobile-safari) は layout-shift を出さないので、何も数えられずに 0 のまま通ってしまう。数えられない
+// browser では検査を飛ばし、飛ばしたことを結果の注記 (annotation) に残す。Chromium は数えられることも確かめる (数えられなく
+// なったら、空振りで通らずに落ちる)。
+async function expectNoLayoutShift(page: Page, browserName: string) {
+  const { cls, supported } = await page.evaluate(() => ({
+    cls: (window as unknown as { __cls: number }).__cls,
+    supported: PerformanceObserver.supportedEntryTypes.includes('layout-shift'),
+  }));
+  if (browserName === 'chromium') expect(supported, 'Chromium は layout-shift を数えられる').toBe(true);
+  if (!supported) {
+    test.info().annotations.push({ type: 'CLS の検査なし', description: `${browserName} は layout-shift を出さない` });
+    return;
+  }
+  expect(cls).toBeLessThan(0.01);
+}
 
 test.describe('landing / (LP)', () => {
   // 2026-10-25: 5 秒で誰向けか分かるよう、ヒーローはお店向けの見出し + 主ボタン 1 つ (決済QRを作る) +
@@ -73,6 +90,7 @@ test.describe('landing / (LP)', () => {
   // script の結果を保つこと (再接続できない CI でも消えない = 下の節を押し上げない) を実ブラウザで確かめる。
   test('再訪の接続者にはヒーローより前に「あなたの OpenPay」を出し、hydration 後も消さない・初めての訪問者には出さない', async ({
     page,
+    browserName,
   }) => {
     const frame = page.locator('[data-returning]');
     // hydration の完了 = 描画前 script が外れた (script は server の HTML と hydration のときだけ描く)。
@@ -111,9 +129,71 @@ test.describe('landing / (LP)', () => {
     const stripBox = await strip.boundingBox();
     const heroBox = await page.getByRole('heading', { name: 'お店のJPYC決済を、利用料0円から。' }).boundingBox();
     expect(stripBox && heroBox && stripBox.y < heroBox.y).toBe(true);
-    // 枠が後から出入りすると、ヒーロー以下が丸ごと動いて 0.1 前後になる。最初の描画から場所を取っていれば 0。
-    const cls = await page.evaluate(() => (window as unknown as { __cls: number }).__cls);
-    expect(cls).toBeLessThan(0.01);
+    // 枠が後から出入りすると、ヒーロー以下が丸ごと動いて 0.1 前後になる。最初の描画から場所を取っていれば、枠はずれを足さない
+    // (読み込みで小さいずれが出ることはあるので、0 ではなく 0.01 未満で見る)。
+    await expectNoLayoutShift(page, browserName);
+  });
+
+  // 2026-11-16 (plans/lp-polish-2026-11.md P5a): 開いたときに再訪と判定した接続者には、ヒーローを小さくする (帯で自分の道具へ
+  // 行ける人に、初めての人向けの大きな紹介で 1 画面目を使わせない)。タグラインのピルと主ボタン (帯の「決済QR」と行き先が近い) を
+  // 出さず、見出しを一段小さく。見出し・本文 (利用料の開示)・お店以外の方の入口は残す。描画前 script が帯の外枠に付ける属性を
+  // CSS で見るので、最初の描画から決まる (後から縮まない = 縮めることでずれを足さない)。未接続の人の見た目は変えない。
+  test('再訪の接続者にはヒーローのピルと主ボタンを出さず、見出し・本文・お店以外の方の入口は残す・未接続の人には今までどおり出す', async ({
+    page,
+    browserName,
+  }) => {
+    const heading = page.getByRole('heading', { name: 'お店のJPYC決済を、利用料0円から。' });
+    const hero = page.locator('section').filter({ has: heading });
+    const pill = hero.getByText('決済QR・レジ・モバイルオーダー・注文リンク', { exact: true });
+    const cta = hero.getByRole('link', { name: '決済QRを作る（無料）' });
+    const body = hero.getByText('お客様がガス代を払う通常決済なら、利用料は0円（モバイル注文を除く）。', { exact: false });
+    const audience = page.getByRole('navigation', { name: 'お店以外の方は' });
+    const hydrated = () => expect(page.locator('[data-returning] > script')).toHaveCount(0);
+    const fontSize = () => heading.evaluate((el) => Number.parseFloat(getComputedStyle(el).fontSize));
+
+    // 未接続 (初めての訪問者): ピルも主ボタンも見える。
+    await page.goto('/ja');
+    await hydrated();
+    await expect(pill).toBeVisible();
+    await expect(cta).toBeVisible();
+    await expect(page.locator('[data-returning]')).not.toHaveAttribute('data-returning-open', 'yes');
+    const fullSize = await fontSize();
+
+    await page.addInitScript(() => {
+      window.localStorage.setItem(
+        'wagmi.store',
+        JSON.stringify({ state: { connections: { __type: 'Map', value: [] }, chainId: 137, current: 'e2e-uid' }, version: 2 }),
+      );
+      const w = window as unknown as { __cls: number };
+      w.__cls = 0;
+      new PerformanceObserver((list) => {
+        for (const entry of list.getEntries() as (PerformanceEntry & { value: number; hadRecentInput: boolean })[]) {
+          if (!entry.hadRecentInput) w.__cls += entry.value;
+        }
+      }).observe({ type: 'layout-shift', buffered: true });
+    });
+    await page.goto('/ja');
+    const strip = page.getByRole('region', { name: 'あなたの OpenPay' });
+    await expect(strip).toBeVisible();
+    // hydration と再接続の試行が済んでも、開いたときの判定は変わらない (CI では再接続できない = つながらないまま)。
+    await hydrated();
+    await page.waitForLoadState('networkidle');
+    await expect(page.locator('[data-returning]')).toHaveAttribute('data-returning-open', 'yes');
+    await expect(pill).toBeHidden();
+    await expect(cta).toBeHidden();
+    await expect(heading).toBeVisible();
+    await expect(body).toBeVisible();
+    await expect(audience).toBeVisible();
+    await expect(audience.getByRole('link', { name: /お客様向け/ })).toHaveAttribute('href', '/ja/guide/pay');
+    // 見出しは一段小さく、PC でも中央寄せ (写真のない 1 列で、右を空けない)。
+    expect(await fontSize()).toBeLessThan(fullSize);
+    expect(await heading.evaluate((el) => getComputedStyle(el).textAlign)).toBe('center');
+    // 帯はヒーローより上 (1 画面目で自分の道具へ行ける)。
+    const stripBox = await strip.boundingBox();
+    const headingBox = await heading.boundingBox();
+    expect(stripBox && headingBox && stripBox.y + stripBox.height <= headingBox.y).toBe(true);
+    // 小さくしたヒーローも最初の描画から決まっている (後から縮むと、下の節が丸ごと動く)。
+    await expectNoLayoutShift(page, browserName);
   });
 
   test('en: Hero と主な節の見出し・主ボタンが英語で描画される', async ({ page }) => {

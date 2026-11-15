@@ -38,21 +38,25 @@ export async function LandingHero() {
       />
       {/* 再訪の接続者 (直前の「あなたの OpenPay」帯が data-returning=yes) には写真を出さず、文字だけの短いヒーローにする
           (帯で自分の道具へ行ける人に、宣伝の写真で 1 画面目を使わせない)。帯の有無は描画前 script が決めるので、
-          最初の描画から写真の場所を取らない (後から動かない・CLS 0)。 */}
+          最初の描画から写真の場所を取らない (後から動かない = 写真を外すことでずれを足さない)。
+          開いたときに再訪と判定した接続者 (帯が data-returning-open=yes) には、さらに紹介を小さくする: タグラインのピルと
+          主ボタン (帯の「決済QR」と行き先が近い) を出さず、見出しを節の見出しの大きさに・PC は中央寄せ (右の空きを片側に
+          寄せない)。見出し・本文 (利用料の開示)・お店以外の方の入口は残す。このページでつないだとき (data-returning だけ yes)
+          は縮めない (接続のときのずれを増やさない)。どれも属性を見る CSS だけで、最初の描画から決まる。 */}
       <div className="mx-auto grid max-w-5xl items-center gap-9 pt-4 sm:pt-10 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)] lg:gap-12 lg:pt-12 lg:[[data-returning=yes]+section_&]:grid-cols-1">
-        <div className="text-center lg:text-left">
-          <p className="inline-flex items-center gap-1.5 rounded-full border border-blue-200/70 bg-blue-50/90 px-3 py-1 text-xs font-semibold tracking-wide text-brand">
+        <div className="text-center lg:text-left lg:[[data-returning-open=yes]+section_&]:text-center">
+          <p className="inline-flex items-center gap-1.5 rounded-full border border-blue-200/70 bg-blue-50/90 px-3 py-1 text-xs font-semibold tracking-wide text-brand [[data-returning-open=yes]+section_&]:hidden">
             <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-brand" />
             {t('tagline')}
           </p>
-          <h2 className="mt-5 text-[2.25rem] font-bold leading-[1.1] tracking-[-0.02em] text-slate-900 [word-break:auto-phrase] text-balance sm:text-5xl lg:text-[3rem]">
+          <h2 className="mt-5 text-[2.25rem] font-bold leading-[1.1] tracking-[-0.02em] text-slate-900 [word-break:auto-phrase] text-balance sm:text-5xl lg:text-[3rem] [[data-returning-open=yes]+section_&]:text-[1.75rem] sm:[[data-returning-open=yes]+section_&]:text-4xl">
             {t('heroLeadline')}
           </h2>
-          <p className="mx-auto mt-5 max-w-xl text-balance text-[15px] leading-relaxed text-slate-600 [word-break:auto-phrase] sm:text-base lg:mx-0">
+          <p className="mx-auto mt-5 max-w-xl text-balance text-[15px] leading-relaxed text-slate-600 [word-break:auto-phrase] sm:text-base lg:mx-0 lg:[[data-returning-open=yes]+section_&]:mx-auto">
             {t('heroBody')}
           </p>
           {/* 押したときの縮みと矢印の移動は、動きを減らす設定 (prefers-reduced-motion: reduce) でないときだけ (節のボタンと同じ)。 */}
-          <div className="mt-7 flex justify-center lg:justify-start">
+          <div className="mt-7 flex justify-center lg:justify-start [[data-returning-open=yes]+section_&]:hidden">
             <Link
               href={`/${locale}/create`}
               prefetch={false}
@@ -68,7 +72,7 @@ export async function LandingHero() {
               {t('heroAudienceLead')}
             </p>
             {/* 主ボタンより軽く見せるため、枠のない文字のリンクを 1 行に並べる (押せる高さは 40px)。 */}
-            <ul className="flex flex-wrap justify-center gap-x-4 lg:justify-start">
+            <ul className="flex flex-wrap justify-center gap-x-4 lg:justify-start lg:[[data-returning-open=yes]+section_&]:justify-center">
               {audiences.map(({ key, href, label, inPage }) => (
                 <li key={key}>
                   <Link
