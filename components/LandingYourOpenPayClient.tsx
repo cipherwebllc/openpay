@@ -23,20 +23,32 @@ export function YourOpenPayFrame({ children }: { children: ReactNode }) {
   const { status } = useAccount();
   const { hydrating, returning } = useReturningWallet(status === 'connected');
   const connectedHere = useConnectedOnThisPage(status === 'connected');
-  // 枠を出すのは、開いたときに決まった分 (再訪の目印・アプリ内の移動で来たときの接続) と、このページで user がつないだときだけ。
+  // 枠を出すのは、開いたときに決まった分 (再訪の目印・client の遷移で来たときの接続) と、このページで user がつないだときだけ。
   // 自動の再接続では後から出さない (ヒーローより前に差し込むと、操作なしで下の節を押し下げる)。
   // 開いたときに出した枠は、再接続の失敗・切断でも消さない (同じく押し上げない)。
   const visible = returning === null ? null : returning || connectedHere;
   return (
     // null は server と hydration のときだけ。属性を描かず、script が付けた値を hydration で消さない。
     // 判定後は yes / no を明示して上書きする (script の値が残らないように)。
+    // data-returning-open は開いたときの判定 (returning) だけで決める (このページでつないだ分 = connectedHere は含めない)。
+    // ヒーローはこちらを見て小さくなる (components/LandingHero.tsx)。script が付けた値と同じ値を React でも付けるのは、
+    // script が走らない描画 (別のページから client の遷移で来た・hydration の失敗で帯を作り直した) でも付けるため。
     // 印刷では出さない: data 属性の block は print:hidden より詳細度が高いので ! で上書きする。
-    <div data-returning={visible === null ? undefined : visible ? 'yes' : 'no'} suppressHydrationWarning className="hidden data-[returning=yes]:block print:!hidden">
+    <div
+      data-returning={yesNo(visible)}
+      data-returning-open={yesNo(returning)}
+      suppressHydrationWarning
+      className="hidden data-[returning=yes]:block print:!hidden"
+    >
       {/* script は server の HTML と hydration のときだけ描く (client だけの描画では React が script を実行しない)。 */}
       {hydrating ? <script dangerouslySetInnerHTML={{ __html: RETURNING_WALLET_PREPAINT }} /> : null}
       {children}
     </div>
   );
+}
+
+function yesNo(value: boolean | null): 'yes' | 'no' | undefined {
+  return value === null ? undefined : value ? 'yes' : 'no';
 }
 
 // このページで user がつないだか = ヘッダの接続 (wagmi の connect 操作・mutationKey ['connect']) が、この帯を出したあとに成功した。

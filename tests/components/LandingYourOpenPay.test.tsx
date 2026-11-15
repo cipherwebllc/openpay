@@ -1,5 +1,5 @@
 import { createTranslator, NextIntlClientProvider } from 'next-intl';
-import { act, type ReactElement, type ReactNode } from 'react';
+import { act, useEffect, type ReactElement, type ReactNode } from 'react';
 import { renderToString } from 'react-dom/server';
 import { hydrateRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -22,6 +22,8 @@ vi.mock('next-intl/server', () => ({
 }));
 
 import { LandingYourOpenPay } from '@/components/LandingYourOpenPay';
+import { LandingHero } from '@/components/LandingHero';
+import { LANDING_SECTION_TITLE } from '@/components/LandingControls';
 import { YourOpenPayFrame, YourOpenPayPage } from '@/components/LandingYourOpenPayClient';
 import { handleViewTheme } from '@/lib/handleTheme';
 import { RETURNING_WALLET_PREPAINT, WAGMI_STORE_KEY, resetReturningWalletForTest } from '@/hooks/useReturningWallet';
@@ -113,13 +115,43 @@ describe('描画前 script (再訪の目印)', () => {
     expect(parent.hasAttribute('data-returning')).toBe(false);
     spy.mockRestore();
   });
+  // P5a: ヒーローを小さくするのは「開いたときに再訪」だけ。script は帯を出す属性と一緒に、開いたときの属性も付ける。
+  it('再訪なら、帯を出す data-returning と一緒に、開いたときの印 data-returning-open も付ける', () => {
+    const parent = document.createElement('div');
+    window.localStorage.setItem(WAGMI_STORE_KEY, JSON.stringify({ state: { connections: { __type: 'Map', value: [] }, chainId: 137, current: 'uid-1' }, version: 2 }));
+    runPrepaint(parent);
+    expect(parent.getAttribute('data-returning-open')).toBe('yes');
+    window.localStorage.clear();
+    const fresh = document.createElement('div');
+    runPrepaint(fresh);
+    expect(fresh.hasAttribute('data-returning-open')).toBe(false);
+  });
+  // React は「script が走った読み込み」と「別のページから client の遷移で来た (script は走っていない)」を、window の結果の有無で
+  // 見分ける。読めなかったときも false を残さないと、読めなかった読み込みを「走っていない」と取り違える。
+  it('読めなかったとき (壊れた JSON・localStorage の例外) も、script が走った印として false を残す', () => {
+    window.localStorage.setItem(WAGMI_STORE_KEY, '{not json');
+    runPrepaint(document.createElement('div'));
+    expect(win[GLOBAL]).toBe(false);
+    delete win[GLOBAL];
+    const spy = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new Error('SecurityError');
+    });
+    const parent = document.createElement('div');
+    runPrepaint(parent);
+    expect(win[GLOBAL]).toBe(false);
+    expect(parent.hasAttribute('data-returning-open')).toBe(false);
+    spy.mockRestore();
+  });
 });
 
 describe('YourOpenPayFrame (枠を出すか)', () => {
   const frame = () => document.querySelector('[data-returning]');
 
   // server の HTML (属性なし + 描画前 script) を置き、script の働きを再現してから hydrate する。
-  async function hydrate(returning: boolean): Promise<{ el: HTMLElement; root: Root; rerender: () => Promise<void> }> {
+  async function hydrate(
+    returning: boolean,
+    beforeHydrate?: (el: HTMLElement) => void,
+  ): Promise<{ el: HTMLElement; root: Root; rerender: () => Promise<void> }> {
     const tree = () => (
       <Providers>
         <YourOpenPayFrame>strip</YourOpenPayFrame>
@@ -130,9 +162,14 @@ describe('YourOpenPayFrame (枠を出すか)', () => {
     document.body.appendChild(container);
     const el = container.querySelector('div') as HTMLElement;
     expect(el.hasAttribute('data-returning')).toBe(false);
+    expect(el.hasAttribute('data-returning-open')).toBe(false);
     expect(container.querySelector('script')?.textContent).toBe(RETURNING_WALLET_PREPAINT);
     win[GLOBAL] = returning;
-    if (returning) el.setAttribute('data-returning', 'yes');
+    if (returning) {
+      el.setAttribute('data-returning', 'yes');
+      el.setAttribute('data-returning-open', 'yes');
+    }
+    beforeHydrate?.(el);
     // RTL を通さない hydrateRoot なので、act を使える環境だと React に伝える。
     (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     let root!: Root;
@@ -202,6 +239,201 @@ describe('YourOpenPayFrame (枠を出すか)', () => {
     win[GLOBAL] = true;
     renderStrip(<YourOpenPayFrame>strip</YourOpenPayFrame>);
     expect(frame()).toHaveAttribute('data-returning', 'yes');
+  });
+
+  // ---- P5a: 開いたときの判定 (data-returning-open = ヒーローを小さくする印)・client の遷移で来た帯 ----
+  const open = () => frame()?.getAttribute('data-returning-open') ?? null;
+
+  it('開いたときの再訪: script が付けた data-returning-open=yes を hydration の間も一度も消さず、その後も yes のまま', async () => {
+    const records: MutationRecord[] = [];
+    let observer!: MutationObserver;
+    const { el, rerender } = await hydrate(true, (target) => {
+      observer = new MutationObserver((list) => records.push(...list));
+      observer.observe(target, { attributes: true, attributeOldValue: true, attributeFilter: ['data-returning-open'] });
+    });
+    records.push(...observer.takeRecords());
+    observer.disconnect();
+    expect(el).toHaveAttribute('data-returning-open', 'yes');
+    // 属性が消えた (または no になった) 瞬間があれば、その次の変化の記録の oldValue が null / 'no' になる。
+    expect(records.map((r) => r.oldValue).filter((v) => v !== 'yes')).toEqual([]);
+    // 再接続の途中・失敗 (切断)・つなぎ直し・このページでの接続の操作のどれでも変えない (後から縮め直したり戻したりしない)。
+    for (const status of ['connecting', 'reconnecting', 'disconnected', 'connected']) {
+      account.status = status;
+      await rerender();
+      expect(el).toHaveAttribute('data-returning-open', 'yes');
+    }
+    await userConnects();
+    await rerender();
+    expect(el).toHaveAttribute('data-returning', 'yes');
+    expect(el).toHaveAttribute('data-returning-open', 'yes');
+  });
+  it('このページで user がつないだときは帯を出すが、data-returning-open は no のまま (ヒーローを縮めない = 接続のときのずれを増やさない)', async () => {
+    const { el, rerender } = await hydrate(false);
+    expect(el).toHaveAttribute('data-returning-open', 'no');
+    await userConnects();
+    account.status = 'connected';
+    account.address = SHOP;
+    await rerender();
+    expect(el).toHaveAttribute('data-returning', 'yes');
+    expect(el).toHaveAttribute('data-returning-open', 'no');
+  });
+  it('hydration に失敗して帯を DOM ごと作り直しても (script の値は消える)、作り直した帯に React が data-returning-open=yes を付ける', async () => {
+    // server と client で文字が違う兄弟を置き、hydration を失敗させる (React は root を client で描き直す)。
+    let side = 'server';
+    function Mismatch() {
+      return <p>{side}</p>;
+    }
+    const tree = () => (
+      <Providers>
+        <Mismatch />
+        <YourOpenPayFrame>strip</YourOpenPayFrame>
+      </Providers>
+    );
+    const container = document.createElement('div');
+    container.innerHTML = renderToString(tree());
+    document.body.appendChild(container);
+    const before = container.querySelector('script')!.parentElement as HTMLElement;
+    win[GLOBAL] = true;
+    before.setAttribute('data-returning', 'yes');
+    before.setAttribute('data-returning-open', 'yes');
+    side = 'client';
+    (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const errors: unknown[] = [];
+    await act(async () => {
+      hydrateRoot(container, tree(), { onRecoverableError: (error) => errors.push(error) });
+    });
+    // 本当に hydration に失敗して、帯を作り直したこと (このテストが空振りしない)。
+    expect(errors.length).toBeGreaterThan(0);
+    expect(before.isConnected).toBe(false);
+    const after = frame() as HTMLElement;
+    expect(after).not.toBe(before);
+    expect(after).toHaveAttribute('data-returning', 'yes');
+    expect(after).toHaveAttribute('data-returning-open', 'yes');
+    expect(after.querySelector('script')).toBeNull();
+  });
+  it('別のページから client の遷移で初めて来た帯 (script は走っていない) は、mount の時点でつながっていれば出し、ヒーローも小さくする', () => {
+    // script が走っていない = window に結果が無い (前の版は、この帯を「最初の帯」として結果なし = 再訪でないと判定していた)。
+    expect(win[GLOBAL]).toBeUndefined();
+    account.status = 'connected';
+    account.address = SHOP;
+    renderStrip(<YourOpenPayFrame>strip</YourOpenPayFrame>);
+    expect(frame()).toHaveAttribute('data-returning', 'yes');
+    expect(open()).toBe('yes');
+  });
+  it('別のページから client の遷移で初めて来た帯は、mount の時点で未接続なら出さず、後の自動の再接続でも出さない', async () => {
+    account.status = 'reconnecting';
+    const { rerender } = renderStrip(<YourOpenPayFrame>strip</YourOpenPayFrame>);
+    expect(frame()).toHaveAttribute('data-returning', 'no');
+    expect(open()).toBe('no');
+    account.status = 'connected';
+    account.address = SHOP;
+    rerender(<YourOpenPayFrame>strip</YourOpenPayFrame>);
+    expect(frame()).toHaveAttribute('data-returning', 'no');
+    expect(open()).toBe('no');
+  });
+  it('接続 / 切断の後の往復: 開いたときの判定は、その帯を mount した時点の接続だけで決まり、読み込み時の script の結果を持ち越さない', async () => {
+    // 1. 読み込み (script: 再訪) → このページで切断しても、開いたときに出した帯とヒーローは変えない (押し上げない)。
+    const loaded = await hydrate(true);
+    account.status = 'disconnected';
+    await loaded.rerender();
+    expect(loaded.el).toHaveAttribute('data-returning', 'yes');
+    expect(loaded.el).toHaveAttribute('data-returning-open', 'yes');
+    await act(async () => loaded.root.unmount());
+    // 2. 切断したままほかのページから戻る → 出さない (読み込み時の script の結果 yes を使わない)。
+    const back = renderStrip(<YourOpenPayFrame>strip</YourOpenPayFrame>);
+    expect(frame()).toHaveAttribute('data-returning', 'no');
+    expect(open()).toBe('no');
+    // 3. この帯の上でつなぐ → 帯は出すが、ヒーローは縮めない。
+    await userConnects();
+    account.status = 'connected';
+    account.address = SHOP;
+    back.rerender(<YourOpenPayFrame>strip</YourOpenPayFrame>);
+    expect(frame()).toHaveAttribute('data-returning', 'yes');
+    expect(open()).toBe('no');
+    back.unmount();
+    // 4. つないだままほかのページから戻る → 開いたときにつながっているので、帯もヒーローの縮みも最初から。
+    renderStrip(<YourOpenPayFrame>strip</YourOpenPayFrame>);
+    expect(frame()).toHaveAttribute('data-returning', 'yes');
+    expect(open()).toBe('yes');
+  });
+  it('React 19 の StrictMode (効果が mount → unmount → mount) でも、script の結果を使った後に判定が変わらない', () => {
+    win[GLOBAL] = true;
+    const effects: string[] = [];
+    function Probe() {
+      useEffect(() => {
+        effects.push('mount');
+        return () => {
+          effects.push('unmount');
+        };
+      }, []);
+      return null;
+    }
+    const strict = render(
+      <YourOpenPayFrame>
+        <Probe />
+        strip
+      </YourOpenPayFrame>,
+      { wrapper: Providers, reactStrictMode: true },
+    );
+    // StrictMode の二重の mount が本当に起きた (このテストが空振りしない)。
+    expect(effects).toEqual(['mount', 'unmount', 'mount']);
+    expect(frame()).toHaveAttribute('data-returning', 'yes');
+    expect(open()).toBe('yes');
+    // 使った結果は消す (アプリ内の移動で戻ってきた帯に持ち越さない)。
+    expect(win[GLOBAL]).toBeUndefined();
+    strict.unmount();
+    render(<YourOpenPayFrame>strip</YourOpenPayFrame>, { wrapper: Providers, reactStrictMode: true });
+    expect(frame()).toHaveAttribute('data-returning', 'no');
+    expect(open()).toBe('no');
+  });
+});
+
+// ヒーローは帯の外枠 (直前の兄弟) の属性を `[属性]+section` の CSS で見る (最初の描画から決まる = 後から動かない)。
+// jsdom は Tailwind の CSS を当てないので、どの要素がどの属性の指定を持つかを class で固定する (実ブラウザは e2e/landing.spec.ts)。
+describe('ヒーロー (開いたときの再訪で小さくする・P5a)', () => {
+  const OPEN = '[[data-returning-open=yes]+section_&]';
+  const tokens = (el: Element) => (el.getAttribute('class') ?? '').split(/\s+/).filter(Boolean);
+  /** el から節までのどこかに、指定の属性で隠す class があるか。 */
+  const hiddenBy = (el: Element, root: Element, variant: string) => {
+    for (let n: Element | null = el; n && n !== root; n = n.parentElement) if (tokens(n).includes(`${variant}:hidden`)) return true;
+    return false;
+  };
+
+  async function renderHero() {
+    const root = render(await LandingHero()).container.querySelector('section') as HTMLElement;
+    return {
+      root,
+      pill: within(root).getByText(ja.Landing.tagline),
+      h2: within(root).getByRole('heading', { level: 2, name: ja.Landing.heroLeadline }),
+      body: within(root).getByText(ja.Landing.heroBody),
+      cta: within(root).getByRole('link', { name: ja.Landing.heroCta }),
+      nav: within(root).getByRole('navigation', { name: ja.Landing.heroAudienceLead }),
+    };
+  }
+
+  it('開いたときの再訪だけで、タグラインのピルと主ボタンを隠す。見出し・本文 (利用料の開示)・お店以外の方の入口は隠さない', async () => {
+    const { root, pill, h2, body, cta, nav } = await renderHero();
+    expect(hiddenBy(pill, root, OPEN)).toBe(true);
+    expect(hiddenBy(cta, root, OPEN)).toBe(true);
+    for (const el of [h2, body, nav, ...within(nav).getAllByRole('link')]) expect(hiddenBy(el, root, OPEN)).toBe(false);
+    // このページでつないだとき (data-returning だけ yes) は、ピルも主ボタンも隠さない (縮めるのは開いたときの判定だけ)。
+    for (const el of [pill, cta, h2, body, nav]) expect(hiddenBy(el, root, '[[data-returning=yes]+section_&]')).toBe(false);
+    // 主ボタンの class は変えない (隠すのは外側の行)。
+    expect(tokens(cta).filter((token) => token.includes('data-returning'))).toEqual([]);
+  });
+
+  it('開いたときの再訪の見出しは、節の見出し (md) と同じ大きさ。PC は見出し・本文・入口の行を中央に寄せる', async () => {
+    const { h2, body, nav } = await renderHero();
+    // LANDING_SECTION_TITLE.md の各指定に、開いたときの属性を足したもの (sm: などの幅の指定は外側に置く)。
+    const expected = LANDING_SECTION_TITLE.md.split(/\s+/).map((token) => {
+      const m = token.match(/^((?:sm|md|lg|xl):)?(.+)$/)!;
+      return `${m[1] ?? ''}${OPEN}:${m[2]}`;
+    });
+    expect(tokens(h2).filter((token) => token.includes('data-returning') && token.includes(':text-'))).toEqual(expected);
+    // 中央寄せ: 文字の行 (見出しと本文の外側の塊)・本文の左右の余白・入口の行。
+    expect(tokens(h2.parentElement!)).toContain(`lg:${OPEN}:text-center`);
+    expect(tokens(body)).toContain(`lg:${OPEN}:mx-auto`);
+    expect(tokens(nav.querySelector('ul')!)).toContain(`lg:${OPEN}:justify-center`);
   });
 });
 
