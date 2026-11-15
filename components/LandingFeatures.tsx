@@ -94,7 +94,7 @@ export async function LandingFeatures() {
                 {t(titleKey)}
               </h3>
               {/* ガス代不要の条件 (誰がガス代を払うか) は料金ページが説明する (plans/lp-polish-2026-10.md P2)。 */}
-              <p className="text-sm leading-relaxed text-slate-700">
+              <p className="text-sm leading-relaxed text-slate-700 [word-break:auto-phrase] supports-[word-break:auto-phrase]:text-pretty">
                 {t.rich(bodyKey, {
                   pricing: (chunks) => (
                     <Link

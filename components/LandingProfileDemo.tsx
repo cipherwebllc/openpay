@@ -41,8 +41,12 @@ const CLEAN_LINK = { backgroundColor: '#ffffff', color: '#1e293b', boxShadow: '0
 // sm 以上は折り返す。中のボタンは押せるので、スクロールする領域もキーボードで届く。
 // fieldset は既定で中身の幅より縮まない (min-inline-size: min-content) ので、使う側で min-w-0 を付ける
 // (付けないと横に流した行の幅でページが横にはみ出す)。
+// スマホは右端の 2.5rem を薄くして「横に続く」ことを見せる (スクロールバーを出していないので、ほかに手がかりが無い)。
+// 右の余白を同じ 2.5rem にしてあるので、最後まで送ると最後の選択肢は薄い所の手前で止まる。
+// 行の中の選択肢に focus がある間は薄くしない (focus-within): 横送りの途中でキーボードの focus が右端の選択肢に来ると、
+// 薄い所に文字と focus の輪が入って、どこに focus があるかが見えにくくなる。
 const CHOICE_ROW =
-  '-mx-4 mt-2 flex gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none] sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0 sm:pb-0 [&::-webkit-scrollbar]:hidden';
+  '-mx-4 mt-2 flex gap-2 overflow-x-auto pb-1 pl-4 pr-10 [mask-image:linear-gradient(to_right,#000_calc(100%_-_2.5rem),transparent)] [scrollbar-width:none] focus-within:[mask-image:none] sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0 sm:pb-0 sm:[mask-image:none] [&::-webkit-scrollbar]:hidden';
 
 export function LandingProfileDemo({ c }: { c: LandingProfileDemoCopy }) {
   const [theme, setTheme] = useState<HandleTheme>('gradient');

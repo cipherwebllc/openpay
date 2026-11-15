@@ -60,13 +60,13 @@ export async function LandingFaq() {
           <li key={q}>
             <details className="group px-5 py-4 transition-colors open:bg-slate-50/60 sm:px-6 sm:py-5">
               <summary className="flex cursor-pointer list-none items-start gap-3 text-left text-sm font-semibold text-slate-800 sm:text-[15px]">
-                <span className="flex-1">{t(q)}</span>
+                <span className="flex-1 [word-break:auto-phrase] supports-[word-break:auto-phrase]:text-pretty">{t(q)}</span>
                 <ChevronDown
                   className="mt-0.5 h-4 w-4 flex-shrink-0 text-slate-400 transition-transform duration-200 group-open:rotate-180 group-open:text-brand"
                   aria-hidden
                 />
               </summary>
-              <p className="mt-3 text-sm leading-relaxed text-slate-600">
+              <p className="mt-3 text-sm leading-relaxed text-slate-600 [word-break:auto-phrase] supports-[word-break:auto-phrase]:text-pretty">
                 {renderAnswer(a)}
               </p>
             </details>

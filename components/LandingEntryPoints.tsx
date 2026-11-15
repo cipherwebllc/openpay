@@ -23,13 +23,15 @@ export async function LandingEntryPoints() {
   return (
     <div className="mt-10">
       <h3 className="text-center text-base font-bold text-slate-900 sm:text-lg">{t('entryTitle')}</h3>
-      {/* スマホは 2×2 の小さなタイル (名前だけ)。説明は sm 以上 (ハブのカードと同じ形)。 */}
-      <ul className="mt-4 grid grid-cols-2 gap-2 sm:gap-3">
+      {/* スマホは 1 列の行 (アイコン + 名前 + 矢印)。2 列にすると名前の幅が約 100px しかなく、「レジ・モバイルオーダ / ー」
+          のように 1 字・2 字だけ次の行に落ちる (文節で折る word-break:auto-phrase が効く Chromium でも、効かない WebKit でも)。
+          1 列なら 320px 幅でも名前が 1 行に入る。説明は sm 以上 (ハブのカードと同じ形の 2 列)。 */}
+      <ul className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-3">
         {CARDS.map(({ slug, icon: Icon }) => {
           const item = nav.items[slug];
           return (
             <li key={slug}>
-              {/* リンク名 = 名前 + 説明 (可視テキストだけ・掟 8)。狭いタイルで語の途中 (「モバイルオ / ーダー」) で折れないよう文節で改行。 */}
+              {/* リンク名 = 名前 + 説明 (可視テキストだけ・掟 8)。 */}
               <Link
                 href={`/${locale}/guide/${slug}`}
                 prefetch={false}
@@ -38,14 +40,14 @@ export async function LandingEntryPoints() {
                 <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-emerald-50">
                   <Icon className="h-5 w-5 text-emerald-700" aria-hidden />
                 </span>
-                {/* 320px 幅では 1 文節 (「導入前チェックリスト」) がカードの幅を超えてページが横にはみ出していたので、
-                    収まらないときだけ文節の途中でも折る (overflow-wrap:anywhere・390px 以上は今までどおり文節で折れる)。 */}
+                {/* 1 文節 (「導入前チェックリスト」) が欄の幅を超えるほど狭いときは、ページを横にはみ出させずに
+                    文節の途中でも折る (overflow-wrap:anywhere)。 */}
                 <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">
                   <span className="flex items-center gap-1 text-sm font-bold leading-snug text-slate-900">
                     {item.label}
                     <ArrowRight
                       aria-hidden
-                      className="hidden h-4 w-4 shrink-0 text-emerald-700 transition-transform group-hover:translate-x-0.5 sm:block"
+                      className="h-4 w-4 shrink-0 text-emerald-700 transition-transform group-hover:translate-x-0.5"
                     />
                   </span>
                   <span className="mt-1 hidden text-sm leading-relaxed text-slate-600 sm:block">{item.summary}</span>

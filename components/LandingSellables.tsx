@@ -33,7 +33,7 @@ export async function LandingSellables() {
           </span>
         ))}
       </div>
-      <p className="mx-auto mt-5 max-w-xl text-center text-sm leading-relaxed text-slate-600">
+      <p className="mx-auto mt-5 max-w-xl text-center text-sm leading-relaxed text-slate-600 [word-break:auto-phrase] supports-[word-break:auto-phrase]:text-pretty">
         {t('sellablesBody')}
       </p>
       {/* 自己表現: 自分のページ (テーマ・色) を作れることを、触って伝える (plans/lp-polish-2026-09.md P3)。 */}
