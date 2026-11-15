@@ -56,8 +56,18 @@ describe('LandingCashComparison', () => {
     expect(screen.getByText(/主な決済会社が公表している料率の例です（2026年10月時点）/)).toBeInTheDocument();
     expect(screen.getByText(/料率・入金の時期・費用は、決済会社やプランにより異なります/)).toBeInTheDocument();
     expect(
-      screen.getByRole('link', { name: '店頭キットを印刷する (無料)' }),
+      screen.getByRole('link', { name: '店頭キットを印刷する（無料）' }),
     ).toHaveAttribute('href', '/ja/kit');
+  });
+
+  it('章ラベル「お店向け」を付けない (すぐ上の導入メリットの節の章ラベルが同じ章の始まりを示す・2026-11-15 user)', async () => {
+    const ui = await LandingCashComparison();
+    const { container } = render(ui);
+    expect(screen.queryByText('お店向け')).toBeNull();
+    // 見出しの塊の最初の子が見出し (h2) そのもの = 章ラベルの行が無い。
+    const h2 = screen.getByRole('heading', { level: 2, name: '現金に戻したお店へ' });
+    expect(h2.parentElement!.firstElementChild).toBe(h2);
+    expect(container.querySelectorAll('h2')).toHaveLength(1);
   });
 
   it('シミュレータ (client 子) を描画し、1:1 の帯は出さない (「なぜ今」・JPYC の注記と重なるので外した)', async () => {
@@ -66,7 +76,7 @@ describe('LandingCashComparison', () => {
     expect(screen.getByTestId('savings-simulator')).toBeInTheDocument();
     expect(screen.queryByText('円と JPYC は 1:1')).toBeNull();
     // 店頭キットへの入口は節の末尾 (試算の後ろ)。
-    const kit = screen.getByRole('link', { name: '店頭キットを印刷する (無料)' });
+    const kit = screen.getByRole('link', { name: '店頭キットを印刷する（無料）' });
     expect(screen.getByTestId('savings-simulator').compareDocumentPosition(kit) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });
