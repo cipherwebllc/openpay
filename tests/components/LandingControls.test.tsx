@@ -19,6 +19,7 @@ import { LandingSupport } from '@/components/LandingSupport';
 import { LandingTrust } from '@/components/LandingTrust';
 import {
   LANDING_FIGURE,
+  LANDING_LINK_ARROW,
   LANDING_NOTE,
   LANDING_NOTE_CENTERED,
   LANDING_PRIMARY,
@@ -47,6 +48,11 @@ function expectType(el: HTMLElement, type: string) {
 
 const link = (root: HTMLElement, name: string) => within(root).getByRole('link', { name });
 
+/** 描いた要素が、幅を広げる class を持たない (型に足して全幅に戻すと、ヒーローの主ボタンより大きく見える)。 */
+function expectNotFullWidth(el: HTMLElement) {
+  expect(el.className.split(/\s+/).filter((token) => /(^|:)w-full$/.test(token))).toEqual([]);
+}
+
 describe('トップの節の入口は、役割ごとに 1 つの型を使う', () => {
   it('節の主ボタン: 紺 (販売・AI)・緑 (モバイルオーダー)・濃い面の上は白 (締め)。応援カードの飾りのボタンも紺', async () => {
     const sell = render(await LandingSellables()).container;
@@ -60,6 +66,23 @@ describe('トップの節の入口は、役割ごとに 1 つの型を使う', (
     const { LandingSupportCard } = await vi.importActual<typeof import('@/components/LandingSupportCard')>('@/components/LandingSupportCard');
     const card = render(await LandingSupportCard()).container;
     expectType(within(card).getByText(L.supportProfileCta), LANDING_PRIMARY.brand);
+    // 今まで全幅だった主ボタン (AI・モバイルオーダー・締め・応援カード) は、型の外から全幅を足していない。
+    for (const el of [
+      link(ai, L.aiEraCtaAgent),
+      link(mobileOrder, L.mobileOrderBannerCta),
+      link(trust, L.closingCtaStart),
+      within(card).getByText(L.supportProfileCta),
+    ]) {
+      expectNotFullWidth(el);
+    }
+  });
+
+  it('動きを減らす設定 (prefers-reduced-motion: reduce) のときは、型の動き (押したときの縮み・矢印の移動) を付けない', () => {
+    const types = [...Object.values(LANDING_PRIMARY), ...Object.values(LANDING_SECONDARY), ...Object.values(LANDING_TEXT_LINK), LANDING_LINK_ARROW];
+    const moving = types.flatMap((type) => type.split(/\s+/)).filter((token) => /(^|:)-?(scale|translate|rotate)-/.test(token));
+    // 動きの class がある (このテストが空振りしない) こと。
+    expect(moving.length).toBeGreaterThan(0);
+    expect(moving.filter((token) => !token.startsWith('motion-safe:'))).toEqual([]);
   });
 
   it('副ボタン: 白地に枠。濃い面の上は枠だけ', async () => {

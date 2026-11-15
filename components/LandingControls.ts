@@ -8,9 +8,10 @@
 
 // 高さ 44px (押せる範囲)・角 xl・14px の中太字。幅は中身の幅 (全幅にしない = ヒーローの主ボタンより大きく見せない)。
 // 上下の余白 (py-2.5) は、狭い画面で名前が 2 行に折れたときに字が縁に付かないため (1 行のときの高さは min-h-11 の 44px のまま)。
-// 動きは色の変化と、押したときのわずかな縮みだけ (hover で浮かせない)。
+// 動きは色の変化と、押したときのわずかな縮みだけ (hover で浮かせない)。縮みは、動きを減らす設定 (prefers-reduced-motion:
+// reduce) のときは付けない (motion-safe:)。型をそろえたことで、今まで縮まなかった副ボタンにも縮みが付くため。
 const BUTTON =
-  'inline-flex min-h-11 items-center justify-center gap-2 rounded-xl py-2.5 text-center text-sm font-semibold transition active:scale-[0.99] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2';
+  'inline-flex min-h-11 items-center justify-center gap-2 rounded-xl py-2.5 text-center text-sm font-semibold transition motion-safe:active:scale-[0.99] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2';
 // 左右の余白: 主ボタンは 20px。副ボタンは 1 行に 2〜3 個並ぶので、スマホは 16px (320px 幅でも 2 つが 1 行に入る)・sm 以上は 20px。
 const PRIMARY = `${BUTTON} px-5`;
 const SECONDARY = `${BUTTON} px-4 sm:px-5`;
@@ -52,8 +53,8 @@ export const LANDING_TEXT_LINK = {
   shop: `${TEXT_LINK} text-emerald-800 focus-visible:outline-emerald-700`,
 } as const;
 
-/** 文字リンクの矢印 (lucide の ArrowRight に付ける)。 */
-export const LANDING_LINK_ARROW = 'h-4 w-4 shrink-0 transition-transform group-hover:translate-x-0.5';
+/** 文字リンクの矢印 (lucide の ArrowRight に付ける)。hover で右へ動くのは、動きを減らす設定でないときだけ。 */
+export const LANDING_LINK_ARROW = 'h-4 w-4 shrink-0 transition-transform motion-safe:group-hover:translate-x-0.5';
 
 // 小さな注 (但し書き・開示の補足)。12px・行間 1.625・slate-600。
 // slate-600 は、白 (7.6:1)・ページの地 slate-50 (7.2:1)・試算の淡い青の地 (7.0:1) のどれの上でも 4.5:1 を超える
