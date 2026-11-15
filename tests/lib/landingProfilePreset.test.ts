@@ -57,6 +57,12 @@ describe('readLandingLook (作成画面で読む)', () => {
     expect(readLandingLook('?tab=profile&theme=night&color=violet')).toEqual({ theme: 'night', color: '#7c3aed' });
   });
 
+  it('同じ名前が重なったときは先頭の値を採る', () => {
+    expect(readLandingLook('?theme=night&theme=bold&color=rose&color=green')).toEqual({ theme: 'night', color: '#e11d48' });
+    // 先頭が不正なら、後ろに正しい値があってもその名前は入れない。
+    expect(readLandingLook('?theme=neon&theme=bold&color=black&color=green')).toEqual({});
+  });
+
   it('片方だけ正しいときは、正しい方だけ', () => {
     expect(readLandingLook('?theme=night&color=black')).toEqual({ theme: 'night' });
     expect(readLandingLook('?theme=dark&color=rose')).toEqual({ color: '#e11d48' });

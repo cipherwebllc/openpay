@@ -33,6 +33,7 @@ import {
   handlePreviewBackground,
 } from '@/lib/handleTheme';
 import { readLandingLook, withoutLandingLook } from '@/lib/landingProfilePreset';
+import { useLandingLookSeed } from '@/hooks/useLandingLookSeed';
 import { useOrigin } from '@/hooks/useOrigin';
 import { getPublicHandleUrl } from '@/lib/publicHandleUrl';
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard';
@@ -193,27 +194,32 @@ export function HandleProfileBuilder({
   // トップの見本で選んだテーマと色 (`?theme=…&color=…`・plans/lp-polish-2026-11.md P6) を入れるかを決めたか。URL に無い人
   // (ほとんど) は最初から決まっている (今までと同じ)。この部品は作成画面が ssr:false で読むので、最初の描画から URL を読める。
   const [lookPending, setLookPending] = useState(() => readLandingLook(window.location.search) !== null);
-  // 下書きを読み込んだ後に 1 回だけ決める。入れるのは、まだ手を入れていない下書き (前に見本から入れた値のままを含む) で、
-  // どの @handle も編集していないときだけ (書きかけの下書きや、読み込んだ公開中の内容に見本の値を重ねない)。入れるのは
-  // テーマと色だけで、受取先や名前は変えない。入れた値は下書きの印 (seededLook) に残し、手付かずの判定に使う。
+  // このタブが見本から入れたテーマと色 (タブごとの sessionStorage・下書きには入れない)。今のテーマと色がこの値のままなら、
+  // 手付かずの判定 (自動編集・ミニプレビュー) でテーマと色を既定と同じに数える。
+  const [lookSeed, setLookSeed] = useLandingLookSeed();
+  // 今のテーマか色が印と違う値になったら、その時点で印を消す (後で同じ値に戻しても、手付かずとは数えない)。
+  // 下の「入れる」effect より前に置く: 同じ描画で入れ直した新しい印を、古い印の食い違いで消さないため。
+  useEffect(() => {
+    if (hydrated && lookSeed && (draft.theme !== lookSeed.theme || draft.color !== lookSeed.color)) setLookSeed(null);
+  }, [hydrated, lookSeed, draft.theme, draft.color, setLookSeed]);
+  // 下書きを読み込んだ後に 1 回だけ決める。入れるのは、まだ手を入れていない下書き (このタブで前に見本から入れた値のままを
+  // 含む) で、どの @handle も編集していないときだけ (書きかけの下書きや、読み込んだ公開中の内容に見本の値を重ねない)。
+  // 入れるのはテーマと色だけで、受取先や名前は変えない。入れた値はこのタブの印に残す。
   // 読んだら theme と color だけを URL から消す (再読み込み・戻る・タブの往復で二重に入れない。tab と hash は残す)。
   useEffect(() => {
     if (!hydrated || !lookPending) return;
     const look = readLandingLook(window.location.search);
     if (look) {
       window.history.replaceState(null, '', withoutLandingLook(window.location.pathname, window.location.search, window.location.hash));
-      if (look.theme || look.color) {
-        // 入れる時点の最新の下書きと編集の状態で決める (自動編集は下の canAutoEdit で決まるまで待たせているが、公開中の内容を
-        // 読み込んだ後に見本の値を重ねる事故は、ここでも断つ)。
-        setSettings((s) => {
-          if (editingRef.current !== null || !isPristineProfileDraft(s, connected)) return s;
-          const next = { ...s, ...look };
-          return { ...next, seededLook: { theme: next.theme, color: next.color } };
-        });
+      if ((look.theme || look.color) && editingRef.current === null && isPristineProfileDraft(draft, connected, lookSeed)) {
+        // 下書きの更新は、その時点の最新の下書きでもう一度確かめる。入れなかったときは、残した印が今の値と食い違うので、
+        // 上の effect がすぐ消す。
+        setSettings((s) => (editingRef.current !== null || !isPristineProfileDraft(s, connected, lookSeed) ? s : { ...s, ...look }));
+        setLookSeed({ theme: look.theme ?? draft.theme, color: look.color ?? draft.color });
       }
     }
     setLookPending(false);
-  }, [hydrated, lookPending, connected, setSettings]);
+  }, [hydrated, lookPending, draft, connected, lookSeed, setSettings, setLookSeed]);
 
   // 受取先が未設定のときは、公開に欠かせないので受け取りカードの中に入力欄を直接出す (決済QR と同じ型)。読み込み後に
   // 未設定だったら出し、入力の途中で消さない (シートで受取先を決めて閉じたら要約に戻す)。シートを開いている間は
@@ -231,7 +237,7 @@ export function HandleProfileBuilder({
   // ので、入れる前の下書きで判定させない (入れた後なら、見本の値のままの下書きは手付かずと数える)。
   const canAutoEdit = hydrated && editingHandle === null && !lookPending
     ? (c: HandleTipConfig, p?: HandleProfile) =>
-      isPristineProfileDraft(draft, connected) || sameProfileDraft(draftFromPublished(c, p), draft)
+      isPristineProfileDraft(draft, connected, lookSeed) || sameProfileDraft(draftFromPublished(c, p), draft)
     : undefined;
 
   if (!env.enableHandles) return null;
@@ -275,6 +281,8 @@ export function HandleProfileBuilder({
     // 新規作成モードから編集に入る初回のみ、現在の下書きを退避 (編集→別編集の連続では
     // 退避済みの「編集前」を保ったまま上書きしない)。
     if (editingHandle === null) preEditDraftRef.current = draft;
+    // 公開中の内容を読み込んだので、このタブの見本の印は消す (編集をやめて戻した下書きは、手を入れたものと数える)。
+    setLookSeed(null);
     setEditingHandle(handle);
     onPublishedHandleChange?.(handle);
     // パネル (右カラム/モバイルは下部) から押すとフォームの書き換わりが見えないため、
@@ -336,7 +344,7 @@ export function HandleProfileBuilder({
         <div className="min-w-0 space-y-5 lg:[&>section:first-of-type]:mt-0">
           {/* 上のミニプレビューは、この端末で手を入れ始めたか編集中のときだけ (何も触っていない新規の状態で
               ダミーの「@handle」「H」を貼り付けない)。 */}
-          {hydrated && (!isPristineProfileDraft(draft, connected) || editingHandle !== null) && (
+          {hydrated && (!isPristineProfileDraft(draft, connected, lookSeed) || editingHandle !== null) && (
             <HandleMiniPreview
               draftName={draft.name}
               editingHandle={editingHandle}
