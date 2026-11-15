@@ -4,8 +4,9 @@ import { renderToString } from 'react-dom/server';
 import { hydrateRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import ja from '../../messages/ja.json';
+import en from '../../messages/en.json';
 import { localDateKey, TODAY_SUMMARY_KEY } from '@/lib/history';
 
 // wagmi の接続状態を test ごとに切り替える。
@@ -492,7 +493,13 @@ describe('LandingYourOpenPay (中身)', () => {
 describe('YourOpenPayPage (自分のページ・P4b)', () => {
   const OWNER = '0xAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAa';
   const page = () => (
-    <YourOpenPayPage fallback={<a href="#default-row">既定の行</a>} pageLabel={ja.Landing.yourOpenPayPageTitle} editLabel={ja.Landing.yourOpenPayPageEdit} />
+    <YourOpenPayPage
+      fallback={<a href="#default-row">既定の行</a>}
+      pageLabel={ja.Landing.yourOpenPayPageTitle}
+      editLabel={ja.Landing.yourOpenPayPageEdit}
+      copyLabel={ja.Landing.yourOpenPayPageCopy}
+      copiedLabel={ja.Landing.yourOpenPayPageCopied}
+    />
   );
   function mockHandles(body: unknown, status = 200) {
     const spy = vi.spyOn(globalThis, 'fetch');
@@ -620,5 +627,282 @@ describe('YourOpenPayPage (自分のページ・P4b)', () => {
     // 飾りのカードなので失敗しても取り直さない (KV を叩き直さない)。既定の再試行は 1 秒後からなので、設定そのものを見る。
     expect(failing).toHaveBeenCalledTimes(1);
     expect(queryClient.getQueryCache().find({ queryKey: ['handle-mine', OWNER] })?.options.retry).toBe(false);
+  });
+});
+
+// P5b (plans/lp-polish-2026-11.md): 自分のページのカードの「編集」の隣に、公開ページの URL のコピー。文言は user が 11/16 に承認。
+describe('YourOpenPayPage: 自分のページの URL のコピー (P5b)', () => {
+  const OWNER = '0xAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAa';
+  const L = ja.Landing;
+  const page = () => (
+    <YourOpenPayPage
+      fallback={<a href="#default-row">既定の行</a>}
+      pageLabel={L.yourOpenPayPageTitle}
+      editLabel={L.yourOpenPayPageEdit}
+      copyLabel={L.yourOpenPayPageCopy}
+      copiedLabel={L.yourOpenPayPageCopied}
+    />
+  );
+  const tokens = (el: Element) => (el.getAttribute('class') ?? '').split(/\s+/).filter(Boolean);
+  const icon = (button: HTMLElement) => button.querySelector('svg')?.getAttribute('class') ?? '';
+  const status = () => document.querySelector('[role="status"]');
+  let clipboardDesc: PropertyDescriptor | undefined;
+  let writeText: ReturnType<typeof vi.fn<(text: string) => Promise<void>>>;
+
+  function handles(list: unknown[]) {
+    const spy = vi.spyOn(globalThis, 'fetch');
+    spy.mockClear();
+    return spy.mockResolvedValue(new Response(JSON.stringify({ ok: true, max: 3, handles: list }), { status: 200 }));
+  }
+  const komorebi = (theme = 'gradient') => ({ handle: 'komorebi', config: { to: OWNER, name: 'こもれび', color: '#0d9488', methods: [] }, profile: { theme }, updatedAt: 1 });
+  function signIn() {
+    account.status = 'connected';
+    account.address = OWNER;
+    siwe.isSignedIn = true;
+    siwe.sessionAddress = OWNER;
+  }
+  async function click(button: HTMLElement) {
+    await act(async () => {
+      fireEvent.click(button);
+      // clipboard の Promise を待つ (fake timers の間も進む microtask だけで待つ)。
+      for (let i = 0; i < 5; i++) await Promise.resolve();
+    });
+  }
+
+  beforeEach(() => {
+    clipboardDesc = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+    writeText = vi.fn<(text: string) => Promise<void>>().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    if (clipboardDesc) Object.defineProperty(navigator, 'clipboard', clipboardDesc);
+    else delete (navigator as unknown as Record<string, unknown>).clipboard;
+  });
+
+  it('承認済みの文言: ボタンは「コピー」/「Copy」・押した後の読み上げは「コピーしました」/「Copied」(Landing の namespace)', () => {
+    expect([ja.Landing.yourOpenPayPageCopy, ja.Landing.yourOpenPayPageCopied]).toEqual(['コピー', 'コピーしました']);
+    expect([en.Landing.yourOpenPayPageCopy, en.Landing.yourOpenPayPageCopied]).toEqual(['Copy', 'Copied']);
+  });
+
+  it('サインイン済みで @handle があるときだけ出す。未サインイン・handle なしは既定の行のまま', async () => {
+    handles([komorebi()]);
+    account.status = 'connected';
+    account.address = OWNER;
+    const anon = renderStrip(page());
+    await act(async () => {});
+    expect(screen.queryByRole('button')).toBeNull();
+    anon.unmount();
+    signIn();
+    handles([]);
+    queryClient = new QueryClient();
+    const none = renderStrip(page());
+    await act(async () => {});
+    expect(screen.getByRole('link', { name: '既定の行' })).toBeInTheDocument();
+    expect(screen.queryByRole('button')).toBeNull();
+    none.unmount();
+    handles([komorebi()]);
+    queryClient = new QueryClient();
+    renderStrip(page());
+    // 名前は見えている「コピー」そのもの (aria-label で置き換えない・掟 8)。
+    const button = await screen.findByRole('button', { name: L.yourOpenPayPageCopy });
+    expect(button).toHaveTextContent(L.yourOpenPayPageCopy);
+    expect(button).not.toHaveAttribute('aria-label');
+    expect(document.querySelector('[aria-label]')).toBeNull();
+  });
+
+  it('押すと、今の origin + /@handle (locale なし) をコピーし、見えない status で「コピーしました」と読ませる。見える文字は「コピー」のまま印だけ変え、1.5 秒で戻す', async () => {
+    handles([komorebi()]);
+    signIn();
+    renderStrip(page());
+    const button = await screen.findByRole('button', { name: L.yourOpenPayPageCopy });
+    expect(icon(button)).toContain('lucide-copy');
+    expect(status()).toHaveTextContent('');
+    vi.useFakeTimers();
+    await click(button);
+    expect(writeText).toHaveBeenCalledTimes(1);
+    expect(writeText).toHaveBeenCalledWith(`${window.location.origin}/@komorebi`);
+    expect(status()).toHaveTextContent(L.yourOpenPayPageCopied);
+    expect(status()).toHaveClass('sr-only');
+    expect(button).toHaveTextContent(L.yourOpenPayPageCopy);
+    expect(button).toHaveAccessibleName(L.yourOpenPayPageCopy);
+    expect(icon(button)).toContain('lucide-check');
+    // 印は字と同じ大きさのまま (幅を変えない)。
+    expect(tokens(button.querySelector('svg')!)).toEqual(expect.arrayContaining(['h-3.5', 'w-3.5']));
+    await act(async () => {
+      vi.advanceTimersByTime(1500);
+    });
+    expect(status()).toHaveTextContent('');
+    expect(icon(button)).toContain('lucide-copy');
+  });
+
+  it('コピーに失敗したとき (権限の拒否など) は、status も印も出さず、カードはそのまま', async () => {
+    writeText.mockRejectedValue(new DOMException('denied', 'NotAllowedError'));
+    handles([komorebi()]);
+    signIn();
+    renderStrip(page());
+    const button = await screen.findByRole('button', { name: L.yourOpenPayPageCopy });
+    await click(button);
+    expect(writeText).toHaveBeenCalledTimes(1);
+    expect(status()).toHaveTextContent('');
+    expect(icon(button)).toContain('lucide-copy');
+    expect(screen.getByRole('link', { name: /こもれび/ })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: L.yourOpenPayPageEdit })).toBeInTheDocument();
+  });
+
+  // 印と通知は、押すたびにその試行の結果に合わせる (前の試行の成功を、後の失敗の後に残さない)。
+  it('成功の直後 (1.5 秒以内) に押し直して失敗したら、前の成功の印と通知を消す', async () => {
+    handles([komorebi()]);
+    signIn();
+    renderStrip(page());
+    const button = await screen.findByRole('button', { name: L.yourOpenPayPageCopy });
+    vi.useFakeTimers();
+    await click(button);
+    expect(status()).toHaveTextContent(L.yourOpenPayPageCopied);
+    expect(icon(button)).toContain('lucide-check');
+    writeText.mockRejectedValueOnce(new DOMException('denied', 'NotAllowedError'));
+    await click(button);
+    expect(writeText).toHaveBeenCalledTimes(2);
+    expect(status()).toHaveTextContent('');
+    expect(icon(button)).toContain('lucide-copy');
+    // 前の成功の 1.5 秒の timer が、後から何かを出したり消したりしない。
+    await act(async () => {
+      vi.advanceTimersByTime(1500);
+    });
+    expect(status()).toHaveTextContent('');
+    expect(icon(button)).toContain('lucide-copy');
+  });
+
+  it('失敗の後に押し直して成功したら、成功の印と通知を出す', async () => {
+    writeText.mockRejectedValueOnce(new DOMException('denied', 'NotAllowedError'));
+    handles([komorebi()]);
+    signIn();
+    renderStrip(page());
+    const button = await screen.findByRole('button', { name: L.yourOpenPayPageCopy });
+    await click(button);
+    expect(status()).toHaveTextContent('');
+    expect(icon(button)).toContain('lucide-copy');
+    await click(button);
+    expect(writeText).toHaveBeenCalledTimes(2);
+    expect(status()).toHaveTextContent(L.yourOpenPayPageCopied);
+    expect(icon(button)).toContain('lucide-check');
+  });
+
+  it('1.5 秒以内に続けて成功しても、成功のたびに読み上げの文を入れ直す (status に文が足される変化が 2 回)', async () => {
+    handles([komorebi()]);
+    signIn();
+    renderStrip(page());
+    const button = await screen.findByRole('button', { name: L.yourOpenPayPageCopy });
+    const region = status()!;
+    const records: MutationRecord[] = [];
+    const observer = new MutationObserver((list) => records.push(...list));
+    observer.observe(region, { childList: true, subtree: true, characterData: true });
+    vi.useFakeTimers();
+    await click(button);
+    await click(button);
+    records.push(...observer.takeRecords());
+    observer.disconnect();
+    expect(writeText).toHaveBeenCalledTimes(2);
+    const added = records.flatMap((r) => [...r.addedNodes]).filter((n) => n.textContent === L.yourOpenPayPageCopied);
+    expect(added).toHaveLength(2);
+    expect(region).toHaveTextContent(L.yourOpenPayPageCopied);
+  });
+
+  it('clipboard の無い環境では、押しても何も起きないボタンを出さない (カードと編集はそのまま)', async () => {
+    delete (navigator as unknown as Record<string, unknown>).clipboard;
+    handles([komorebi()]);
+    signIn();
+    renderStrip(page());
+    await screen.findByRole('link', { name: /こもれび/ });
+    expect(screen.queryByRole('button')).toBeNull();
+    expect(screen.getByRole('link', { name: L.yourOpenPayPageEdit })).toBeInTheDocument();
+  });
+
+  it('公開ページへのリンクの外の独立したボタン。行の順は 名前のリンク → コピー → 編集', async () => {
+    handles([komorebi()]);
+    signIn();
+    renderStrip(page());
+    const button = await screen.findByRole('button', { name: L.yourOpenPayPageCopy });
+    expect(button.closest('a')).toBeNull();
+    const pageLink = screen.getByRole('link', { name: /こもれび/ });
+    expect(pageLink).toHaveAttribute('href', '/ja/@komorebi');
+    expect(pageLink.contains(button)).toBe(false);
+    const row = pageLink.parentElement!;
+    const controls = [...row.querySelectorAll(':scope > a, :scope > button')];
+    expect(controls.map((el) => el.textContent)).toEqual([expect.stringContaining('こもれび'), L.yourOpenPayPageCopy, L.yourOpenPayPageEdit]);
+    // 読み上げの欄もカードの中 (行の高さを取らない sr-only)。
+    expect(row.contains(status())).toBe(true);
+  });
+
+  it('形は「編集」と同じ型 (大きさ・角・字・地の色)。focus の輪は 2px・外側 2px で、暗いテーマ (night) は白・地も「編集」と同じ出し分け', async () => {
+    handles([komorebi('gradient')]);
+    signIn();
+    const light = renderStrip(page());
+    let button = await screen.findByRole('button', { name: L.yourOpenPayPageCopy });
+    let edit = screen.getByRole('link', { name: L.yourOpenPayPageEdit });
+    expect(tokens(button)).toEqual(expect.arrayContaining(tokens(edit)));
+    expect(tokens(button)).toEqual(expect.arrayContaining(['focus-visible:outline', 'focus-visible:outline-2', 'focus-visible:outline-offset-2', 'focus-visible:outline-brand']));
+    expect(tokens(button)).toContain('bg-white/90');
+    light.unmount();
+    handles([komorebi('night')]);
+    queryClient = new QueryClient();
+    renderStrip(page());
+    button = await screen.findByRole('button', { name: L.yourOpenPayPageCopy });
+    edit = screen.getByRole('link', { name: L.yourOpenPayPageEdit });
+    expect(tokens(button)).toEqual(expect.arrayContaining(tokens(edit)));
+    expect(tokens(button)).toContain('bg-white/15');
+    expect(tokens(button)).toContain('focus-visible:outline-white');
+    expect(tokens(button)).not.toContain('focus-visible:outline-brand');
+  });
+
+  it('「編集」にも「コピー」と同じ focus の輪 (2px・外側 2px・明るい地は紺・night は白)。何もしないときの形と地の色は今のまま', async () => {
+    const RING = ['focus-visible:outline', 'focus-visible:outline-2', 'focus-visible:outline-offset-2'];
+    // 太さ (数字) と外側の指定を除いた focus-visible:outline-* が、色の指定 (ちょうど 1 つ)。
+    const ringColors = (el: Element) => tokens(el).filter((token) => /^focus-visible:outline-(?!\d|offset-)/.test(token));
+    handles([komorebi('gradient')]);
+    signIn();
+    const light = renderStrip(page());
+    let edit = await screen.findByRole('link', { name: L.yourOpenPayPageEdit });
+    expect(tokens(edit)).toEqual(expect.arrayContaining([...RING, 'bg-white/90', 'text-slate-700', 'ring-1', 'ring-slate-200', 'rounded-full', 'py-1.5']));
+    expect(ringColors(edit)).toEqual(['focus-visible:outline-brand']);
+    light.unmount();
+    handles([komorebi('night')]);
+    queryClient = new QueryClient();
+    renderStrip(page());
+    edit = await screen.findByRole('link', { name: L.yourOpenPayPageEdit });
+    expect(tokens(edit)).toEqual(expect.arrayContaining([...RING, 'bg-white/15', 'text-white']));
+    expect(ringColors(edit)).toEqual(['focus-visible:outline-white']);
+    expect(ringColors(screen.getByRole('button', { name: L.yourOpenPayPageCopy }))).toEqual(['focus-visible:outline-white']);
+  });
+
+  it('360px 未満だけ行の中を詰めて名前の欄を広げる (アバター・間・ボタンの左右の余白)。ボタンの高さ・見える文字・印は変えない', async () => {
+    handles([komorebi()]);
+    signIn();
+    renderStrip(page());
+    const button = await screen.findByRole('button', { name: L.yourOpenPayPageCopy });
+    const edit = screen.getByRole('link', { name: L.yourOpenPayPageEdit });
+    const pageLink = screen.getByRole('link', { name: /こもれび/ });
+    const card = pageLink.parentElement!;
+    const avatar = pageLink.firstElementChild!;
+    const narrow = (el: Element) => tokens(el).filter((token) => token.startsWith('max-[359px]:'));
+    expect(narrow(card)).toEqual(['max-[359px]:gap-1.5', 'max-[359px]:pl-2.5']);
+    expect(narrow(pageLink)).toEqual(['max-[359px]:gap-2']);
+    expect(narrow(avatar)).toEqual(['max-[359px]:h-8', 'max-[359px]:w-8']);
+    expect(narrow(button)).toEqual(['max-[359px]:px-2']);
+    expect(narrow(edit)).toEqual(['max-[359px]:px-2']);
+    // 文字・印・読み上げの欄には狭い画面だけの指定を付けない (隠さない・小さくしない)。
+    for (const el of [button.querySelector('svg')!, ...[...card.querySelectorAll('span')].filter((span) => span !== avatar)]) expect(narrow(el)).toEqual([]);
+    // 360px 以上の指定は今のまま (カードの高さ 56px・ボタンの高さ 28px)。
+    expect(tokens(card)).toEqual(expect.arrayContaining(['h-14', 'gap-3', 'pl-3.5', 'pr-2']));
+    for (const el of [button, edit]) expect(tokens(el)).toEqual(expect.arrayContaining(['px-3', 'py-1.5', 'text-xs']));
+  });
+
+  it('server の帯 (LandingYourOpenPay) が Landing の文言をボタンと読み上げに渡す', async () => {
+    handles([komorebi()]);
+    signIn();
+    renderStrip(await LandingYourOpenPay());
+    const button = await screen.findByRole('button', { name: L.yourOpenPayPageCopy });
+    await click(button);
+    expect(status()).toHaveTextContent(L.yourOpenPayPageCopied);
   });
 });

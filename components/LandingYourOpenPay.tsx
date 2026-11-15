@@ -54,11 +54,13 @@ export async function LandingYourOpenPay() {
             ))}
           </ul>
           {/* 自分のページ: 既定は作る・編集する入口。サインイン済みで @handle があれば、そのテーマと色のカードに差し替える
-              (YourOpenPayPage・同じ高さ)。 */}
+              (YourOpenPayPage・同じ高さ)。カードには公開ページの URL のコピーと編集のボタンが並ぶ。 */}
           {env.enableHandles ? (
             <YourOpenPayPage
               pageLabel={t('yourOpenPayPageTitle')}
               editLabel={t('yourOpenPayPageEdit')}
+              copyLabel={t('yourOpenPayPageCopy')}
+              copiedLabel={t('yourOpenPayPageCopied')}
               fallback={
                 <Link
                   href={`/${locale}/create?tab=profile`}
