@@ -61,8 +61,9 @@ vi.mock('@/hooks/useOrigin', () => ({
   useOrigin: () => originHold.value,
 }));
 
-import { MobileOrderView } from '@/components/MobileOrderView';
+import { MobileOrderView, pickupSelectSlots } from '@/components/MobileOrderView';
 import { buildPayerReceipt } from '@/lib/payerReceipt';
+import { pickupSlots } from '@/lib/shopTime';
 import { calcCheckoutPayable, CHECKOUT_QTY_MAX, parseCheckoutParams } from '@/lib/url';
 import type { MobileOrderConfig } from '@/lib/mobileOrder';
 import type { ShopLiveState } from '@/lib/shopLive';
@@ -125,6 +126,15 @@ const optionConfig: MobileOrderConfig = {
 const TOKYO_NOON = Date.UTC(2024, 0, 15, 3, 0);
 const tokyo = (hour: number, minute: number, second = 0) =>
   Date.UTC(2024, 0, 15, hour - 9, minute, second);
+// 準備 30 分の店では、12:30 の枠の受付の期限は 12:00:00。handle のあるページでは、期限まで 5 分を切った枠 (11:55:00 より後の
+// 12:30) は、選んでいなければ受取時間の欄に出ない (下の 4c)。「12:00:00 に 12:30 の枠を選んである」場面は、11:55:00 に開いて
+// 選び、12:00:00 まで時間を進めて作る (選んである枠は期限まで欄に残る。30 秒ごとの取り直しは 12:00:00 ちょうどにあり、
+// 次は 12:00:30 = 12:00:00 に開いたときと同じ)。
+const SELECTABLE_UNTIL = tokyo(11, 55);
+const untilNoon = () =>
+  act(() => {
+    vi.advanceTimersByTime(TOKYO_NOON - Date.now());
+  });
 
 const TEXT = {
   pay: '支払いへ進む',
@@ -421,6 +431,7 @@ describe('MobileOrderView — 「支払いへ進む」: 受付の確認を通る
     envHold.enableMobileOrderFee = true;
     envHold.enableMenuOptions = true;
     fixOrderCode();
+    vi.setSystemTime(SELECTABLE_UNTIL);
     renderWithIntl(
       <MobileOrderView
         config={{
@@ -447,6 +458,7 @@ describe('MobileOrderView — 「支払いへ進む」: 受付の確認を通る
     fireEvent.change(select, {
       target: { value: (within(select).getByRole('option', { name: '12:30' }) as HTMLOptionElement).value },
     });
+    untilNoon();
 
     // 小計 2,000 − 値引き 10% (200) = 1,800。利用料 3% (54) はお客様に上乗せ → 画面の合計 1,854。
     expect(screen.getByText('1854 JPYC')).toBeInTheDocument();
@@ -965,6 +977,7 @@ describe('MobileOrderView — 「支払いへ進む」: 受付の確認を通る
   // 自動の更新 (時刻の取り直し・売り切れの反映) では無効にしない: 押した時点の注文で進む。
   it('待っている間に時刻の取り直しで選んだ枠が外れても、待っていた確認は有効のまま: 進む先と確認の本文は押したときの枠 (今の動き)', async () => {
     const gate = gatedFetches();
+    vi.setSystemTime(SELECTABLE_UNTIL);
     renderWithIntl(
       <MobileOrderView
         config={{ ...config, mode: 'preorder', minLeadMinutes: 30 }}
@@ -976,6 +989,7 @@ describe('MobileOrderView — 「支払いへ進む」: 受付の確認を通る
     fireEvent.change(select(), {
       target: { value: (within(select()).getByRole('option', { name: '12:30' }) as HTMLOptionElement).value },
     });
+    untilNoon();
     const href = payHref();
     expect(readCheckoutUrl(href).query.pickup_at).toBe(String(tokyo(12, 30)));
 
@@ -1601,9 +1615,11 @@ describe('MobileOrderView — 「支払いへ進む」: 受付の確認を通る
     ]),
   )('12:30 の枠を選んだ確認への応答が $name なら (押す前に時計 +$clockAhead ms)、止まった表示: 枠は選んだまま・押し直しの案内は出ない', async ({ response, clockAhead }) => {
     fetchSpy.mockImplementation(async () => response());
+    vi.setSystemTime(SELECTABLE_UNTIL);
     renderWithIntl(<MobileOrderView config={slotConfig} handle={HANDLE} />);
     add('ブレンド');
     choosePickup('12:30');
+    untilNoon();
     vi.setSystemTime(TOKYO_NOON + clockAhead);
 
     await pressPay();
@@ -1622,9 +1638,13 @@ describe('MobileOrderView — 「支払いへ進む」: 受付の確認を通る
     const json = vi.fn(() => new Promise<unknown>(() => {}));
     const text = vi.fn(() => new Promise<string>(() => {}));
     const gate = gatedFetches();
+    if (kind === '枠あり') vi.setSystemTime(SELECTABLE_UNTIL);
     renderWithIntl(<MobileOrderView config={slotConfig} handle={HANDLE} />);
     add('ブレンド');
-    if (kind === '枠あり') choosePickup('12:30');
+    if (kind === '枠あり') {
+      choosePickup('12:30');
+      untilNoon();
+    }
     fireEvent.click(payLink()!);
 
     await gate.respond(0, { ok: false, status: 409, json, text } as unknown as Response);
@@ -1974,6 +1994,7 @@ describe('MobileOrderView — 時間の経過 (時間の flag ON)', () => {
   });
 
   it('選んだ受け取りの枠が候補から外れたら選択を外し、欄の下に案内を出す: URL から pickup_at が消え、POST の本文にも載らない', async () => {
+    vi.setSystemTime(SELECTABLE_UNTIL);
     renderWithIntl(
       <MobileOrderView
         config={{ ...config, mode: 'preorder', minLeadMinutes: 30 }}
@@ -1986,6 +2007,7 @@ describe('MobileOrderView — 時間の経過 (時間の flag ON)', () => {
     const optionValue = (name: string) =>
       (within(select()).getByRole('option', { name }) as HTMLOptionElement).value;
     fireEvent.change(select(), { target: { value: optionValue('12:30') } });
+    untilNoon();
     expect(readCheckoutUrl(payHref()).query.pickup_at).toBe(String(tokyo(12, 30)));
     expect(pickupReset()).toBeNull();
 
@@ -2101,7 +2123,9 @@ describe('MobileOrderView — 選んだ受取時間を自動で「最短（指�
   it('最初から「最短（指定なし）」のままなら、時間が進んで候補が入れ替わっても、案内は出ない', () => {
     renderWithIntl(<MobileOrderView config={slotConfig} handle={HANDLE} />);
     add('ブレンド');
-    expect(pickupOption('12:30')).not.toBeNull();
+    // 12:00:00 は 12:30 の枠の受付の期限ちょうど (期限まで 5 分を切っている) なので、選んでいない 12:30 は欄に無い (4c)。
+    expect(pickupOption('12:30')).toBeNull();
+    expect(pickupOption('12:45')).not.toBeNull();
     expect(pickupReset()).toBeNull();
 
     passTime();
@@ -2144,12 +2168,14 @@ describe('MobileOrderView — 選んだ受取時間を自動で「最短（指�
   });
 
   it('英語の画面では、英語の案内が出る', () => {
+    vi.setSystemTime(SELECTABLE_UNTIL);
     renderWithIntl(<MobileOrderView config={slotConfig} handle={HANDLE} />, { locale: 'en' });
     fireEvent.click(
       within(menuCard('ブレンド')).getByRole('button', { name: enMessages.MobileOrder.qtyIncrease }),
     );
     const select = () => screen.getByLabelText(enMessages.MobileOrder.pickupLabel) as HTMLSelectElement;
     fireEvent.change(select(), { target: { value: String(tokyo(12, 30)) } });
+    untilNoon();
     expect(select().value).toBe(String(tokyo(12, 30)));
 
     passTime();
@@ -2161,9 +2187,11 @@ describe('MobileOrderView — 選んだ受取時間を自動で「最短（指�
   });
 
   it('案内は、お客様が別の受取時間を選ぶと消える。選び直した枠がまた候補から外れると、また出る', () => {
+    vi.setSystemTime(SELECTABLE_UNTIL);
     renderWithIntl(<MobileOrderView config={slotConfig} handle={HANDLE} />);
     add('ブレンド');
     choosePickup('12:30');
+    untilNoon();
     passTime();
     expect(pickupReset()?.textContent).toBe(TEXT.pickupReset);
 
@@ -2181,9 +2209,11 @@ describe('MobileOrderView — 選んだ受取時間を自動で「最短（指�
 
   it('自分で選び直して消えた案内は、その後の確認が失敗で返っても戻らない (選んだ枠は選んだまま)', async () => {
     const gate = gatedFetches();
+    vi.setSystemTime(SELECTABLE_UNTIL);
     renderWithIntl(<MobileOrderView config={slotConfig} handle={HANDLE} />);
     add('ブレンド');
     choosePickup('12:30');
+    untilNoon();
     passTime();
     expect(pickupReset()).not.toBeNull();
     choosePickup('12:45');
@@ -2208,9 +2238,11 @@ describe('MobileOrderView — 選んだ受取時間を自動で「最短（指�
   // 案内が出ている間、欄の選択は「最短（指定なし）」。ブラウザは、選んである選択肢をもう一度選んでも change を出さないので、
   // この行は「最短を選ぶ change でも消える (自分で選んだ後は出さない)」を、change を直接送って確かめる。
   it('案内は、「最短（指定なし）」を選ぶ change でも消える', () => {
+    vi.setSystemTime(SELECTABLE_UNTIL);
     renderWithIntl(<MobileOrderView config={slotConfig} handle={HANDLE} />);
     add('ブレンド');
     choosePickup('12:30');
+    untilNoon();
     passTime();
     expect(pickupReset()).not.toBeNull();
 
@@ -2222,9 +2254,11 @@ describe('MobileOrderView — 選んだ受取時間を自動で「最短（指�
 
   it('案内は、受取時間を選ぶ以外では消えない (品を足す・明細を開く・時間が進む・カートを空にして入れ直す・「支払いへ進む」を押して待つ)。そのまま進む先は枠の無い URL', async () => {
     const gate = gatedFetches();
+    vi.setSystemTime(SELECTABLE_UNTIL);
     renderWithIntl(<MobileOrderView config={slotConfig} handle={HANDLE} />);
     add('ブレンド');
     choosePickup('12:30');
+    untilNoon();
     passTime();
     expect(pickupReset()?.textContent).toBe(TEXT.pickupReset);
 
@@ -2262,9 +2296,11 @@ describe('MobileOrderView — 選んだ受取時間を自動で「最短（指�
   // 受付の確認が 200 で返り、選んだ枠つきの URL へ移り始めた後も、/checkout が返るまでこのページは残り、時刻の取り直しも
   // 動き続ける。その間に枠が外れても、「最短に戻しました」は出さない (進む先は選んだ枠)。
   it('移動を始めた後 (選んだ枠つきの URL へ assign した後) に枠が外れても、案内は出ない', async () => {
+    vi.setSystemTime(SELECTABLE_UNTIL);
     renderWithIntl(<MobileOrderView config={slotConfig} handle={HANDLE} />);
     add('ブレンド');
     choosePickup('12:30');
+    untilNoon();
     const href = payHref();
 
     await pressPay();
@@ -2285,9 +2321,11 @@ describe('MobileOrderView — 選んだ受取時間を自動で「最短（指�
 
   it.each(['例外', '429', '503'])('待っている間に枠が外れても、その場では出ない。その確認がやり直せる失敗 (%s) で終わると、押し直しの案内と一緒に出る。押し直した確認は枠なし (最短) で、進む先も枠の無い URL', async (kind) => {
     const gate = gatedFetches();
+    vi.setSystemTime(SELECTABLE_UNTIL);
     renderWithIntl(<MobileOrderView config={slotConfig} handle={HANDLE} />);
     add('ブレンド');
     choosePickup('12:30');
+    untilNoon();
     fireEvent.click(payLink()!);
 
     passTime();
@@ -2324,9 +2362,11 @@ describe('MobileOrderView — 選んだ受取時間を自動で「最短（指�
 
   it('待っている間に枠が外れ、注文を変えて待っていた確認を無効にすると、その場で案内が出る。無効にした確認が 200 で返っても移らず、押し直した確認は枠なし', async () => {
     const gate = gatedFetches();
+    vi.setSystemTime(SELECTABLE_UNTIL);
     renderWithIntl(<MobileOrderView config={slotConfig} handle={HANDLE} />);
     add('ブレンド');
     choosePickup('12:30');
+    untilNoon();
     fireEvent.click(payLink()!);
     passTime();
     expect(pickupReset()).toBeNull();
@@ -2353,9 +2393,11 @@ describe('MobileOrderView — 選んだ受取時間を自動で「最短（指�
 
   it('待っている間に枠が外れた後、お客様が自分で別の枠を選ぶと、案内は出ない (待っていた確認は無効・押し直した確認は選んだ枠)', async () => {
     const gate = gatedFetches();
+    vi.setSystemTime(SELECTABLE_UNTIL);
     renderWithIntl(<MobileOrderView config={slotConfig} handle={HANDLE} />);
     add('ブレンド');
     choosePickup('12:30');
+    untilNoon();
     fireEvent.click(payLink()!);
     passTime();
 
@@ -2377,9 +2419,11 @@ describe('MobileOrderView — 選んだ受取時間を自動で「最短（指�
 
   it('待っている間に枠が外れ、その確認が 409 で終わると、今までどおり止まった表示 (支払い欄ごと消えるので、案内は見えない)', async () => {
     const gate = gatedFetches();
+    vi.setSystemTime(SELECTABLE_UNTIL);
     renderWithIntl(<MobileOrderView config={slotConfig} handle={HANDLE} />);
     add('ブレンド');
     choosePickup('12:30');
+    untilNoon();
     fireEvent.click(payLink()!);
     passTime();
 
@@ -2395,9 +2439,11 @@ describe('MobileOrderView — 選んだ受取時間を自動で「最短（指�
 
   it('押し直しの案内が出ている所 (待っていない) で枠が外れると、その場で出る: 2 つの案内が別の場所に同時に出る', async () => {
     const gate = gatedFetches();
+    vi.setSystemTime(SELECTABLE_UNTIL);
     renderWithIntl(<MobileOrderView config={slotConfig} handle={HANDLE} />);
     add('ブレンド');
     choosePickup('12:30');
+    untilNoon();
     fireEvent.click(payLink()!);
     await gate.fail(0);
     expect(notice()?.textContent).toBe(TEXT.retryNotice);
@@ -2417,9 +2463,11 @@ describe('MobileOrderView — 選んだ受取時間を自動で「最短（指�
   // 2 本目が 200 なら枠つきの URL へ移る (今の動き) ので、2 本目が返るまでは「最短に戻しました」を出さない。
   it('二度押しの 1 本目が失敗で返った後に枠が外れても、2 本目が返るまでは出ない。2 本目が 200 なら、出ないまま選んだ枠つきの URL へ移る', async () => {
     const gate = gatedFetches();
+    vi.setSystemTime(SELECTABLE_UNTIL);
     renderWithIntl(<MobileOrderView config={slotConfig} handle={HANDLE} />);
     add('ブレンド');
     choosePickup('12:30');
+    untilNoon();
     const href = payHref();
     await pressPayTwiceAtOnce();
     expect(fetchSpy).toHaveBeenCalledTimes(2);
@@ -2443,9 +2491,11 @@ describe('MobileOrderView — 選んだ受取時間を自動で「最短（指�
 
   it('二度押しの 1 本目が失敗で返った後に枠が外れ、2 本目も失敗で返ると、そこで出る', async () => {
     const gate = gatedFetches();
+    vi.setSystemTime(SELECTABLE_UNTIL);
     renderWithIntl(<MobileOrderView config={slotConfig} handle={HANDLE} />);
     add('ブレンド');
     choosePickup('12:30');
+    untilNoon();
     await pressPayTwiceAtOnce();
     await gate.fail(0);
     passTime();
@@ -2460,9 +2510,11 @@ describe('MobileOrderView — 選んだ受取時間を自動で「最短（指�
 
   it('二度押しの 1 本目が失敗で返った後に枠が外れ、押し直した確認 (枠なし) を待つ間に、2 本目 (枠つき) が 200 で返ると、出ないまま枠つきの URL へ移る (進む先は今の動き)', async () => {
     const gate = gatedFetches();
+    vi.setSystemTime(SELECTABLE_UNTIL);
     renderWithIntl(<MobileOrderView config={slotConfig} handle={HANDLE} />);
     add('ブレンド');
     choosePickup('12:30');
+    untilNoon();
     const href = payHref();
     await pressPayTwiceAtOnce();
     await gate.fail(0);
@@ -2499,9 +2551,11 @@ describe('MobileOrderView — 選んだ受取時間を自動で「最短（指�
         <ClickAfterCommit run={run} />
       </>
     );
+    vi.setSystemTime(SELECTABLE_UNTIL);
     const view = renderWithIntl(tree(null));
     add('ブレンド');
     choosePickup('12:30');
+    untilNoon();
     const href = payHref();
 
     await act(async () => {
@@ -2531,9 +2585,11 @@ describe('MobileOrderView — 選んだ受取時間を自動で「最短（指�
 
   it('待つ間に枠が外れて案内が出ても、送れる確認の本数は変わらない: 失敗 → 押す → 失敗 → 押す → 失敗で止まった表示 (確認は 3 本・2 本目からは枠なし)', async () => {
     const gate = gatedFetches();
+    vi.setSystemTime(SELECTABLE_UNTIL);
     renderWithIntl(<MobileOrderView config={slotConfig} handle={HANDLE} />);
     add('ブレンド');
     choosePickup('12:30');
+    untilNoon();
     fireEvent.click(payLink()!);
     passTime();
     await gate.fail(0);
@@ -2633,6 +2689,534 @@ describe('MobileOrderView — 選んだ受取時間を自動で「最短（指�
     expect(pickupOption('12:30')).toBeNull();
     expect(pickupSelect().value).toBe('');
     expect(pickupReset()?.textContent).toBe(TEXT.pickupReset);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------------------
+// 4c. 受付の期限が近い受取時間は、受取時間の欄で新しくは選べない (handle のあるページ・時間の flag ON)
+//   - 枠の受付の期限 = 枠 − 準備の時間。期限まで 5 分を切った枠は、選んでいなければ欄の選択肢に出さない。
+//   - 選んである枠は、本当の期限まで欄に残る (選んだまま進める。期限で、4b のとおり最短に戻して案内を出す)。
+//   - 残る枠が無いとき (その日の最後の 1 枠の期限が近い) は、絞らない。
+//   - handle の無いページ (受付の確認が無い) は、絞らない。
+//   - 変わるのは欄の選択肢だけ。受付の判定 (支払い欄が出る / 止まった表示)・選んだ枠を外す時・案内・確認の本文・進む先は、
+//     絞る前の候補で決まる。
+// ---------------------------------------------------------------------------------------------------------------------
+describe('MobileOrderView — 受付の期限が近い受取時間は、新しくは選べない (時間の flag ON)', () => {
+  beforeEach(() => {
+    envHold.enablePreorderTime = true;
+  });
+
+  // 事前注文・準備 30 分。12:30 の枠の受付の期限は 12:00:00、その 5 分前は 11:55:00。
+  const slotConfig: MobileOrderConfig = { ...config, mode: 'preorder', minLeadMinutes: 30 };
+  const MARGIN_EDGE = tokyo(11, 55);
+  const pickupSelect = () => screen.getByLabelText(TEXT.pickup) as HTMLSelectElement;
+  const pickupOption = (name: string) =>
+    within(pickupSelect()).queryByRole<HTMLOptionElement>('option', { name });
+  const choosePickup = (name: string) =>
+    fireEvent.change(pickupSelect(), { target: { value: pickupOption(name)!.value } });
+  /** 欄の選択肢の字 (上から)。 */
+  const optionNames = (count?: number) =>
+    within(pickupSelect())
+      .getAllByRole('option')
+      .map((option) => option.textContent)
+      .slice(0, count);
+  const passTime = (ms = 30_000) =>
+    act(() => {
+      vi.advanceTimersByTime(ms);
+    });
+  const SLOT_BODY = { handle: HANDLE, merchant: RECEIVER, mode: 'preorder', pickupAt: tokyo(12, 30) };
+  const ASAP_BODY = { handle: HANDLE, merchant: RECEIVER, mode: 'preorder' };
+  // ブレンド 1 つを入れた、枠の無い (最短の) URL の query の全部。
+  const ASAP_QUERY = {
+    to: RECEIVER,
+    token: 'jpyc',
+    items: item('ブレンド', 1, '500', ':10:taxable_10:'),
+    fee_kind: 'preorder',
+    fee_payer: 'merchant',
+    store_handle: HANDLE,
+    store: 'テスト珈琲店',
+  };
+
+  it.each([
+    { name: '期限の 5 分前より 1 ms 前', at: MARGIN_EDGE - 1, first: ['12:30', '12:45'], count: 48 },
+    { name: '期限の 5 分前ちょうど', at: MARGIN_EDGE, first: ['12:30', '12:45'], count: 48 },
+    { name: '期限の 5 分前から 1 ms 後', at: MARGIN_EDGE + 1, first: ['12:45', '13:00'], count: 47 },
+    { name: '期限ちょうど', at: TOKYO_NOON, first: ['12:45', '13:00'], count: 47 },
+  ])('$name に開く: 欄の先頭は $first (隠れるのは先頭の 1 枠だけ)', ({ at, first, count }) => {
+    vi.setSystemTime(at);
+    renderWithIntl(<MobileOrderView config={slotConfig} handle={HANDLE} />);
+    add('ブレンド');
+
+    expect(optionNames(3)).toEqual([TEXT.pickupAsap, ...first]);
+    expect(optionNames()).toHaveLength(1 + count);
+    // 欄の選択は最短のまま。案内は出ない。支払い欄は出ている。
+    expect(pickupSelect().value).toBe('');
+    expect(pickupReset()).toBeNull();
+    expect(readCheckoutUrl(payHref()).query).toEqual(ASAP_QUERY);
+  });
+
+  it('開いたまま時間が進むと、期限の 5 分前を過ぎた次の取り直しで、選んでいない先頭の枠が欄から消える (選択は最短のまま・案内は出ない・支払い欄は残る)', () => {
+    vi.setSystemTime(tokyo(11, 54, 30));
+    renderWithIntl(<MobileOrderView config={slotConfig} handle={HANDLE} />);
+    add('ブレンド');
+    expect(optionNames(2)).toEqual([TEXT.pickupAsap, '12:30']);
+
+    // 11:55:00 ちょうどの取り直しでは、まだ出ている。
+    passTime();
+    expect(optionNames(2)).toEqual([TEXT.pickupAsap, '12:30']);
+
+    // 11:55:30 の取り直しで消える。
+    passTime();
+
+    expect(optionNames(3)).toEqual([TEXT.pickupAsap, '12:45', '13:00']);
+    expect(pickupSelect().value).toBe('');
+    expect(pickupReset()).toBeNull();
+    expect(notice()).toBeNull();
+    expect(readCheckoutUrl(payHref()).query).toEqual(ASAP_QUERY);
+
+    // 本当の期限 (12:00:00) を過ぎても、選んでいなかった枠の案内は出ない。
+    passTime(5 * 60_000);
+    expect(optionNames(2)).toEqual([TEXT.pickupAsap, '12:45']);
+    expect(pickupReset()).toBeNull();
+  });
+
+  it('選んである枠は、期限まで 5 分を切っても欄に残り、選んだままで押すと、その枠の本文と URL で進む', async () => {
+    vi.setSystemTime(MARGIN_EDGE);
+    renderWithIntl(<MobileOrderView config={slotConfig} handle={HANDLE} />);
+    add('ブレンド');
+    choosePickup('12:30');
+
+    // 11:56:00 (期限まで 4 分)。
+    passTime(60_000);
+
+    expect(optionNames(3)).toEqual([TEXT.pickupAsap, '12:30', '12:45']);
+    expect(pickupSelect().value).toBe(String(tokyo(12, 30)));
+    expect(pickupReset()).toBeNull();
+    const href = payHref();
+    expect(readCheckoutUrl(href).query).toEqual({ ...ASAP_QUERY, pickup_at: String(tokyo(12, 30)) });
+
+    const pressed = await pressPay();
+
+    expect(pressed.defaultPrevented).toBe(true);
+    expect(postedBodies()).toEqual([SLOT_BODY]);
+    expect(assignSpy.mock.calls).toEqual([[href]]);
+    expect(screen.queryByText(TEXT.closed)).toBeNull();
+  });
+
+  it('選んである枠は、本当の期限 (12:00:00) までは選んだまま。期限を過ぎた次の取り直しで、最短に戻して案内を出す', async () => {
+    vi.setSystemTime(MARGIN_EDGE);
+    renderWithIntl(<MobileOrderView config={slotConfig} handle={HANDLE} />);
+    add('ブレンド');
+    choosePickup('12:30');
+
+    untilNoon();
+
+    expect(optionNames(2)).toEqual([TEXT.pickupAsap, '12:30']);
+    expect(pickupSelect().value).toBe(String(tokyo(12, 30)));
+    expect(pickupReset()).toBeNull();
+
+    passTime();
+
+    expect(optionNames(2)).toEqual([TEXT.pickupAsap, '12:45']);
+    expect(pickupSelect().value).toBe('');
+    expect(pickupReset()?.textContent).toBe(TEXT.pickupReset);
+    const href = payHref();
+    expect(readCheckoutUrl(href).query).toEqual(ASAP_QUERY);
+
+    await pressPay();
+
+    expect(postedBodies()).toEqual([ASAP_BODY]);
+    expect(assignSpy.mock.calls).toEqual([[href]]);
+  });
+
+  it.each(['12:45', TEXT.pickupAsap])('期限まで 5 分を切った枠から「%s」に選び直すと、元の枠は欄から消える (もう一度は選べない)', (next) => {
+    vi.setSystemTime(MARGIN_EDGE);
+    renderWithIntl(<MobileOrderView config={slotConfig} handle={HANDLE} />);
+    add('ブレンド');
+    choosePickup('12:30');
+    passTime(60_000);
+    expect(pickupOption('12:30')).not.toBeNull();
+
+    choosePickup(next);
+
+    expect(pickupOption('12:30')).toBeNull();
+    expect(optionNames(2)).toEqual([TEXT.pickupAsap, '12:45']);
+    expect(pickupSelect().value).toBe(next === '12:45' ? String(tokyo(12, 45)) : '');
+    // 自分で選び直したので、「最短に戻しました」は出ない。
+    expect(pickupReset()).toBeNull();
+  });
+
+  it('隠れた枠は欄の選択肢に無く、選べない。「最短（指定なし）」のまま押すと、枠の無い本文と URL で進む', async () => {
+    vi.setSystemTime(tokyo(11, 56));
+    renderWithIntl(<MobileOrderView config={slotConfig} handle={HANDLE} />);
+    add('ブレンド');
+
+    expect(pickupOption('12:30')).toBeNull();
+    // 選択肢に無い値を送っても、選択は最短のまま。
+    fireEvent.change(pickupSelect(), { target: { value: String(tokyo(12, 30)) } });
+    expect(pickupSelect().value).toBe('');
+    const href = payHref();
+    expect(readCheckoutUrl(href).query).toEqual(ASAP_QUERY);
+
+    const pressed = await pressPay();
+
+    expect(pressed.defaultPrevented).toBe(true);
+    expect(postedBodies()).toEqual([ASAP_BODY]);
+    expect(assignSpy.mock.calls).toEqual([[href]]);
+    expect(screen.queryByText(TEXT.closed)).toBeNull();
+  });
+
+  it('先頭の枠が隠れている間も、次の枠は選べて、その枠の本文と URL で進む', async () => {
+    vi.setSystemTime(tokyo(11, 56));
+    renderWithIntl(<MobileOrderView config={slotConfig} handle={HANDLE} />);
+    add('ブレンド');
+
+    choosePickup('12:45');
+
+    const href = payHref();
+    expect(readCheckoutUrl(href).query).toEqual({ ...ASAP_QUERY, pickup_at: String(tokyo(12, 45)) });
+    await pressPay();
+    expect(postedBodies()).toEqual([{ ...ASAP_BODY, pickupAt: tokyo(12, 45) }]);
+    expect(assignSpy.mock.calls).toEqual([[href]]);
+  });
+
+  // その日の最後の 1 枠を隠しても、代わりの「最短（指定なし）」も同じ時刻に受付が終わる。隠さない。
+  it('その日の最後の 1 枠だけが残っているときは、期限まで 5 分を切っても隠さない: 選べて、その枠で進む', async () => {
+    vi.setSystemTime(tokyo(11, 56));
+    renderWithIntl(<MobileOrderView config={{ ...slotConfig, lastOrder: '12:30' }} handle={HANDLE} />);
+    add('ブレンド');
+
+    expect(optionNames()).toEqual([TEXT.pickupAsap, '12:30']);
+    expect(screen.queryByText(jaMessages.MobileOrder.pickupNone)).toBeNull();
+
+    choosePickup('12:30');
+    const href = payHref();
+    expect(readCheckoutUrl(href).query.pickup_at).toBe(String(tokyo(12, 30)));
+    await pressPay();
+    expect(postedBodies()).toEqual([SLOT_BODY]);
+    expect(assignSpy.mock.calls).toEqual([[href]]);
+  });
+
+  it('枠が 2 つ残っているときは、期限の近い先頭の 1 枠だけ隠す', () => {
+    vi.setSystemTime(tokyo(11, 56));
+    renderWithIntl(<MobileOrderView config={{ ...slotConfig, lastOrder: '12:45' }} handle={HANDLE} />);
+    add('ブレンド');
+
+    expect(optionNames()).toEqual([TEXT.pickupAsap, '12:45']);
+  });
+
+  it('候補が 1 つも無いときは、今までどおり止まった表示 (受取時間の欄も支払い欄も出ない)', () => {
+    vi.setSystemTime(tokyo(11, 56));
+    // 最短の受け取り (12:30) がラストオーダー 12:15 を越える。
+    renderWithIntl(<MobileOrderView config={{ ...slotConfig, lastOrder: '12:15' }} handle={HANDLE} />);
+    add('ブレンド');
+
+    expect(screen.getByText(TEXT.closed)).toBeInTheDocument();
+    expect(screen.queryByLabelText(TEXT.pickup)).toBeNull();
+    expect(cartToggle()).toBeNull();
+    expect(payLink()).toBeNull();
+  });
+
+  // 受付の確認が無いページ (?s= の注文ページ・ビルダーのプレビュー) は、期限で支払えなくなることが無いので、絞らない。
+  it('handle の無いページでは絞らない: 期限まで 5 分を切った先頭の枠も欄に出て、選べる', async () => {
+    vi.setSystemTime(tokyo(11, 56));
+    renderWithIntl(<MobileOrderView config={slotConfig} />);
+    add('ブレンド');
+
+    expect(optionNames(3)).toEqual([TEXT.pickupAsap, '12:30', '12:45']);
+    expect(optionNames()).toHaveLength(1 + 48);
+
+    choosePickup('12:30');
+
+    const { store_handle: _storeHandle, ...withoutHandle } = ASAP_QUERY;
+    expect(readCheckoutUrl(payHref()).query).toEqual({
+      ...withoutHandle,
+      pickup_at: String(tokyo(12, 30)),
+    });
+    const pressed = await pressPay();
+    expect(pressed.defaultPrevented).toBe(false);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('時間の flag OFF の handle のページは今までどおり: 受取時間の欄は無く、link のまま移る', async () => {
+    envHold.enablePreorderTime = false;
+    vi.setSystemTime(tokyo(11, 56));
+    renderWithIntl(<MobileOrderView config={slotConfig} handle={HANDLE} />);
+    add('ブレンド');
+
+    expect(screen.queryByLabelText(TEXT.pickup)).toBeNull();
+    expect(readCheckoutUrl(payHref()).query).toEqual(ASAP_QUERY);
+    const pressed = await pressPay();
+    expect(pressed.defaultPrevented).toBe(false);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('店頭の注文 (事前注文でない) の handle のページは今までどおり: 受取時間の欄は無く、枠の無い本文で確かめて進む', async () => {
+    vi.setSystemTime(tokyo(11, 56));
+    renderWithIntl(
+      <MobileOrderView config={{ ...slotConfig, mode: 'storefront' }} handle={HANDLE} />,
+    );
+    add('ブレンド');
+
+    expect(screen.queryByLabelText(TEXT.pickup)).toBeNull();
+    const href = payHref();
+    expect(readCheckoutUrl(href).query).toEqual({
+      to: RECEIVER,
+      token: 'jpyc',
+      items: item('ブレンド', 1, '500', ':10:taxable_10:'),
+      fee_kind: 'storefront',
+      store_handle: HANDLE,
+      store: 'テスト珈琲店',
+    });
+    await pressPay();
+    expect(postedBodies()).toEqual([{ handle: HANDLE, merchant: RECEIVER, mode: 'storefront' }]);
+    expect(assignSpy.mock.calls).toEqual([[href]]);
+  });
+
+  // 受付の判定は、絞る前の候補で決まる: 欄から枠が隠れている時刻でも、「最短（指定なし）」の注文は、最後の枠の期限まで進める。
+  // 最後の枠は 12:30 (ラストオーダー 12:30・準備 30 分) で、その期限は 12:00:00。ラストオーダーの無い店は、いつでも進める。
+  it.each([
+    { name: 'ラストオーダー 12:30・11:54:00', lastOrder: '12:30', at: tokyo(11, 54), accepting: true },
+    { name: 'ラストオーダー 12:30・11:55:00 の 1 ms 後', lastOrder: '12:30', at: MARGIN_EDGE + 1, accepting: true },
+    { name: 'ラストオーダー 12:30・11:59:59', lastOrder: '12:30', at: tokyo(11, 59, 59), accepting: true },
+    { name: 'ラストオーダー 12:30・12:00:00 (最後の枠の期限ちょうど)', lastOrder: '12:30', at: TOKYO_NOON, accepting: true },
+    { name: 'ラストオーダー 12:30・12:00:00 の 1 ms 後', lastOrder: '12:30', at: TOKYO_NOON + 1, accepting: false },
+    { name: 'ラストオーダー 12:45・11:56:00 (先頭の枠が隠れている)', lastOrder: '12:45', at: tokyo(11, 56), accepting: true },
+    { name: 'ラストオーダーなし・11:56:00 (先頭の枠が隠れている)', lastOrder: undefined, at: tokyo(11, 56), accepting: true },
+    { name: 'ラストオーダーなし・12:00:00 の 1 ms 後', lastOrder: undefined, at: TOKYO_NOON + 1, accepting: true },
+  ])('受付の判定は今までどおり ($name): 最短のままの注文は $accepting', async ({ lastOrder, at, accepting }) => {
+    vi.setSystemTime(at);
+    renderWithIntl(<MobileOrderView config={{ ...slotConfig, lastOrder }} handle={HANDLE} />);
+    add('ブレンド');
+
+    if (!accepting) {
+      expect(screen.getByText(TEXT.closed)).toBeInTheDocument();
+      expect(cartToggle()).toBeNull();
+      expect(payLink()).toBeNull();
+      return;
+    }
+    expect(screen.queryByText(TEXT.closed)).toBeNull();
+    expect(pickupSelect().value).toBe('');
+    const href = payHref();
+    expect(readCheckoutUrl(href).query).toEqual(ASAP_QUERY);
+    await pressPay();
+    expect(postedBodies()).toEqual([ASAP_BODY]);
+    expect(assignSpy.mock.calls).toEqual([[href]]);
+  });
+
+  // 「最短に戻しました」の案内を出す条件は、絞る前の候補 (外した枠が候補に無い間だけ出す = 4b の最後の行と同じ)。
+  // 設定が戻って、外した枠が候補に戻ると、案内は消える。その枠の期限が近ければ、欄には出ない (今の動き)。
+  it('案内を出す条件は、絞る前の候補で決まる: 外した枠が候補に戻ると、欄に出ていなくても案内は消える。また候補から外れると出る (今の動き)', () => {
+    vi.setSystemTime(MARGIN_EDGE);
+    const view = renderWithIntl(<MobileOrderView config={slotConfig} handle={HANDLE} />);
+    add('ブレンド');
+    choosePickup('12:30');
+    untilNoon();
+    view.rerender(<MobileOrderView config={{ ...slotConfig, minLeadMinutes: 60 }} handle={HANDLE} />);
+    expect(pickupSelect().value).toBe('');
+    expect(pickupReset()?.textContent).toBe(TEXT.pickupReset);
+
+    view.rerender(<MobileOrderView config={slotConfig} handle={HANDLE} />);
+
+    expect(pickupOption('12:30')).toBeNull();
+    expect(pickupSelect().value).toBe('');
+    expect(pickupReset()).toBeNull();
+
+    passTime();
+
+    expect(pickupReset()?.textContent).toBe(TEXT.pickupReset);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------------------
+// 4d. 受取時間の欄に出す枠を決める計算 (pickupSelectSlots)。候補は、画面と同じ pickupSlots で作る。
+// ---------------------------------------------------------------------------------------------------------------------
+describe('pickupSelectSlots — 受取時間の欄に出す枠', () => {
+  const MIN = 60_000;
+
+  it('期限 (枠 − 準備の時間) の 5 分前ちょうどまでは先頭の枠を出し、1 ms 過ぎると外す', () => {
+    const candidates = pickupSlots(tokyo(11, 55), 30);
+    expect(candidates[0]).toBe(tokyo(12, 30));
+    expect(pickupSelectSlots(candidates, null, tokyo(11, 55), 30)).toEqual(candidates);
+    expect(pickupSelectSlots(candidates, null, tokyo(11, 55) + 1, 30)).toEqual(candidates.slice(1));
+    expect(pickupSelectSlots(candidates, null, TOKYO_NOON, 30)).toEqual(candidates.slice(1));
+  });
+
+  it.each([undefined, 0, 1, 7, 30, 44, 45, 90, 30.9, -5, Number.NaN])('準備 %s 分: どの時刻でも、出す枠は「期限まで 5 分以上」の枠で、外すのは先頭の 1 枠まで', (lead) => {
+    // 候補を作る側 (earliestPickup) と同じ読み方: 整数に切り捨て・正の数でなければ 0。
+    const leadMs =
+      typeof lead === 'number' && Number.isFinite(lead) && lead > 0 ? Math.floor(lead) * MIN : 0;
+    // 12:00:00 から 20 秒ごとに 30 分ぶん + 境目の前後 1 ms。
+    const times = Array.from({ length: 90 }, (_, i) => TOKYO_NOON + i * 20_000).flatMap((time) => [
+      time - 1,
+      time,
+      time + 1,
+    ]);
+    for (const now of times) {
+      const candidates = pickupSlots(now, lead);
+      const shown = pickupSelectSlots(candidates, null, now, lead);
+      const expected = candidates.filter((ms) => ms - leadMs - now >= 5 * MIN);
+      expect(shown).toEqual(expected);
+      expect(candidates.length - shown.length).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it('選んである枠は、期限まで 5 分を切っても外さない。ほかの枠を選んでいるときは外す', () => {
+    const now = tokyo(11, 58);
+    const candidates = pickupSlots(now, 30);
+    expect(pickupSelectSlots(candidates, tokyo(12, 30), now, 30)).toEqual(candidates);
+    expect(pickupSelectSlots(candidates, tokyo(12, 45), now, 30)).toEqual(candidates.slice(1));
+  });
+
+  it('候補に無い枠を選んでいても、足さない', () => {
+    const now = tokyo(11, 58);
+    const candidates = pickupSlots(now, 30);
+    expect(pickupSelectSlots(candidates, tokyo(12, 15), now, 30)).toEqual(candidates.slice(1));
+  });
+
+  it('残る枠が無いとき (最後の 1 枠の期限が近い) は、絞らない。2 枠あれば先頭だけ外す。候補が空なら空', () => {
+    const now = tokyo(11, 58);
+    expect(pickupSelectSlots(pickupSlots(now, 30, '12:30'), null, now, 30)).toEqual([tokyo(12, 30)]);
+    expect(pickupSelectSlots(pickupSlots(now, 30, '12:45'), null, now, 30)).toEqual([tokyo(12, 45)]);
+    expect(pickupSlots(now, 30, '12:15')).toEqual([]);
+    expect(pickupSelectSlots([], null, now, 30)).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------------------
+// 4e. 画面に戻ってきた時 (裏のタブ・別のアプリ・「戻る」での復元) に、30 秒の取り直しを待たずに時刻を取り直す
+//   - 30 秒の timer が後でやることを早めるだけ。timer は増やさない。
+//   - 登録するのは時間の flag ON の間だけ。画面を閉じると外す。
+// ---------------------------------------------------------------------------------------------------------------------
+describe('MobileOrderView — 画面に戻ってきた時に、時刻を取り直す (時間の flag ON)', () => {
+  beforeEach(() => {
+    envHold.enablePreorderTime = true;
+  });
+  afterEach(() => {
+    Reflect.deleteProperty(document, 'visibilityState');
+  });
+
+  const slotConfig: MobileOrderConfig = { ...config, mode: 'preorder', minLeadMinutes: 30 };
+  const pickupSelect = () => screen.getByLabelText(TEXT.pickup) as HTMLSelectElement;
+  const optionNames = (count: number) =>
+    within(pickupSelect())
+      .getAllByRole('option')
+      .map((option) => option.textContent)
+      .slice(0, count);
+  const setVisibility = (state: DocumentVisibilityState) =>
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => state });
+  /** 時計だけを進める (30 秒の timer は動かさない = 画面を離れていた間、取り直しが止まっていた)。 */
+  const awayUntil = (time: number) => vi.setSystemTime(time);
+  const comeBack = (how: 'visibilitychange' | 'pageshow') =>
+    act(() => {
+      if (how === 'pageshow') window.dispatchEvent(new Event('pageshow'));
+      else {
+        setVisibility('visible');
+        document.dispatchEvent(new Event('visibilitychange'));
+      }
+    });
+
+  it.each(['visibilitychange', 'pageshow'] as const)('%s で戻ると、その場で時刻を取り直して、欄の候補が変わる (30 秒を待たない)', (how) => {
+    // 11:54:45 に開く。12:30 の枠 (期限 12:00:00) は、まだ選べる。
+    vi.setSystemTime(tokyo(11, 54, 45));
+    renderWithIntl(<MobileOrderView config={slotConfig} handle={HANDLE} />);
+    add('ブレンド');
+    expect(optionNames(2)).toEqual([TEXT.pickupAsap, '12:30']);
+
+    // 画面を離れている間に 11:57:00 になった。取り直すまでは、欄は開いたときのまま。
+    awayUntil(tokyo(11, 57));
+    expect(optionNames(2)).toEqual([TEXT.pickupAsap, '12:30']);
+
+    comeBack(how);
+
+    expect(optionNames(3)).toEqual([TEXT.pickupAsap, '12:45', '13:00']);
+    expect(pickupSelect().value).toBe('');
+    expect(pickupReset()).toBeNull();
+  });
+
+  it('visibilitychange でも、画面が隠れた側 (hidden) では取り直さない。見える側に戻った所で取り直す', () => {
+    vi.setSystemTime(tokyo(11, 54, 45));
+    renderWithIntl(<MobileOrderView config={slotConfig} handle={HANDLE} />);
+    add('ブレンド');
+
+    awayUntil(tokyo(11, 57));
+    act(() => {
+      setVisibility('hidden');
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+
+    expect(optionNames(2)).toEqual([TEXT.pickupAsap, '12:30']);
+
+    comeBack('visibilitychange');
+
+    expect(optionNames(2)).toEqual([TEXT.pickupAsap, '12:45']);
+  });
+
+  it('選んである枠の期限を、画面を離れている間に過ぎていたら、戻った所で最短に戻して案内を出す (4b と同じ動きが早まるだけ)', () => {
+    vi.setSystemTime(tokyo(11, 55));
+    renderWithIntl(<MobileOrderView config={slotConfig} handle={HANDLE} />);
+    add('ブレンド');
+    fireEvent.change(pickupSelect(), { target: { value: String(tokyo(12, 30)) } });
+    expect(pickupSelect().value).toBe(String(tokyo(12, 30)));
+
+    awayUntil(tokyo(12, 3));
+    comeBack('visibilitychange');
+
+    expect(optionNames(2)).toEqual([TEXT.pickupAsap, '12:45']);
+    expect(pickupSelect().value).toBe('');
+    expect(pickupReset()?.textContent).toBe(TEXT.pickupReset);
+    expect(readCheckoutUrl(payHref()).query.pickup_at).toBeUndefined();
+  });
+
+  it('ラストオーダーの停止の表示も、戻った所で出る (handle の無い店頭のページでも)', () => {
+    vi.setSystemTime(tokyo(12, 9, 50));
+    renderWithIntl(<MobileOrderView config={{ ...config, lastOrder: '12:10' }} />);
+    add('ブレンド');
+    expect(payLink()).not.toBeNull();
+
+    awayUntil(tokyo(12, 10, 5));
+    expect(payLink()).not.toBeNull();
+    comeBack('pageshow');
+
+    expect(screen.getByText(TEXT.pastLastOrder)).toBeInTheDocument();
+    expect(payLink()).toBeNull();
+  });
+
+  it('listener は時間の flag ON の間だけ 1 つずつ登録し、画面を閉じると同じものを外す。戻ってきても 30 秒の timer は 1 本のまま', () => {
+    const documentAdd = vi.spyOn(document, 'addEventListener');
+    const documentRemove = vi.spyOn(document, 'removeEventListener');
+    const windowAdd = vi.spyOn(window, 'addEventListener');
+    const windowRemove = vi.spyOn(window, 'removeEventListener');
+    const ofType = (spy: { mock: { calls: unknown[][] } }, type: string) =>
+      spy.mock.calls.filter(([eventType]) => eventType === type);
+
+    envHold.enablePreorderTime = false;
+    const off = renderWithIntl(<MobileOrderView config={slotConfig} handle={HANDLE} />);
+    expect(ofType(documentAdd, 'visibilitychange')).toEqual([]);
+    expect(ofType(windowAdd, 'pageshow')).toEqual([]);
+    const withoutClock = vi.getTimerCount();
+    off.unmount();
+    expect(vi.getTimerCount()).toBe(0);
+
+    envHold.enablePreorderTime = true;
+    const on = renderWithIntl(<MobileOrderView config={slotConfig} handle={HANDLE} />);
+    const visibility = ofType(documentAdd, 'visibilitychange');
+    const pageShow = ofType(windowAdd, 'pageshow');
+    expect(visibility).toHaveLength(1);
+    expect(pageShow).toHaveLength(1);
+    expect(vi.getTimerCount()).toBe(withoutClock + 1);
+
+    comeBack('visibilitychange');
+    comeBack('pageshow');
+    expect(vi.getTimerCount()).toBe(withoutClock + 1);
+    expect(ofType(documentRemove, 'visibilitychange')).toEqual([]);
+    expect(ofType(windowRemove, 'pageshow')).toEqual([]);
+
+    on.unmount();
+
+    expect(ofType(documentRemove, 'visibilitychange')).toEqual([visibility[0]]);
+    expect(ofType(windowRemove, 'pageshow')).toEqual([pageShow[0]]);
+    expect(vi.getTimerCount()).toBe(0);
   });
 });
 
