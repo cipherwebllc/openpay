@@ -1,5 +1,6 @@
 // トップの節見出しの型: 章ラベル (eyebrow) + 見出し (h2) + 1 行のリード。Server/Client どちらからも使える純表示。
-// 全節で同じ大きさ・余白にそろえ、章ラベルで「いまどの章か」を示す (plans/lp-polish-2026-09.md P2)。
+// 章ラベルで「いまどの章か」を示す (plans/lp-polish-2026-09.md P2)。見出しの大きさは 2 段: ふつうの節 (md) と、
+// 読みたい人が読む補足の節 (sm = 前提知識・よくある質問・1 段小さい・P3)。共通の見出しを使う節は 10 節。
 
 import type { ReactNode } from 'react';
 import { LANDING_BAND_SPACE, LANDING_SECTION_TITLE } from '@/components/LandingControls';

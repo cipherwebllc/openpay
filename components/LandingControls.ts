@@ -123,7 +123,7 @@ export const LANDING_ICON_BOX = 'grid h-9 w-9 shrink-0 place-items-center rounde
 
 /**
  * 節の見出し (h2) の大きさ。md = ふつうの節・sm = 補足の節 (読みたい人が読む前提知識とよくある質問)。
- * 補足の節は 1 段小さくして、ふつうの節より一段弱く見せる (11 節が同じ強さで続いていた・P3)。
+ * 補足の節は 1 段小さくして、ふつうの節より一段弱く見せる (共通の見出しを使う 10 節が同じ強さで続いていた・P3)。
  */
 export const LANDING_SECTION_TITLE = {
   md: 'text-[1.75rem] sm:text-4xl',

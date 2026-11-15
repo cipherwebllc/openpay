@@ -423,3 +423,55 @@ describe('トップの中の動き (P3)', () => {
     expect(tokens.filter((token) => !token.startsWith('motion-safe:'))).toEqual([]);
   });
 });
+
+type RingColor = 'brand' | 'emerald-700' | 'white';
+
+/**
+ * キーボードの focus の輪: 2px・外側 2px で、色の指定はちょうど 1 つ (color)。
+ * 上の検査は「描いた要素が型の class を持つ」なので、型の定数から色を消しても通ってしまう。色はここで型と別に固定する。
+ */
+function expectFocusRing(el: Element | null | undefined, color: RingColor) {
+  expect(el).toBeTruthy();
+  const tokens = classTokens(el!);
+  expect(tokens).toEqual(expect.arrayContaining(['focus-visible:outline', 'focus-visible:outline-2', 'focus-visible:outline-offset-2']));
+  // 太さ (数字) と外側の指定を除いた focus-visible:outline-* が、色の指定。
+  expect(tokens.filter((token) => /^focus-visible:outline-(?!\d|offset-)/.test(token))).toEqual([`focus-visible:outline-${color}`]);
+}
+
+describe('キーボードの focus の輪の色 (P3)', () => {
+  it('輪の色は地で決まる: ふつうの節 = 紺・緑の節 (モバイルオーダー・注文リンク・ガイド) = 緑・濃い紺の面 (締め) = 白。描いた要素で見る', async () => {
+    const sell = render(await LandingSellables()).container;
+    const ai = render(await LandingAiAgents()).container;
+    const mobileOrder = render(await LandingMobileOrder()).container;
+    const cash = render(await LandingCashComparison()).container;
+    const trust = render(await LandingTrust()).container;
+    const pricing = render(await LandingSupport()).container;
+    const orderLink = render(await LandingOrderLink()).container;
+    const guides = render(await LandingEntryPoints()).container;
+    const { LandingSupportCard } = await vi.importActual<typeof import('@/components/LandingSupportCard')>('@/components/LandingSupportCard');
+    const support = render(await LandingSupportCard()).container;
+    const github = within(trust).getByRole('link', { name: new RegExp(L.trustGithubLabel.replace(/[()]/g, '\\$&')) });
+    const rings: (readonly [Element | null, RingColor])[] = [
+      // 節の主ボタン
+      [link(sell, L.sellablesCtaSell), 'brand'],
+      [link(ai, L.aiEraCtaAgent), 'brand'],
+      [link(mobileOrder, L.mobileOrderBannerCta), 'emerald-700'],
+      [link(trust, L.closingCtaStart), 'white'],
+      // 副ボタン
+      [link(sell, L.sellablesCtaGuide), 'brand'],
+      ...[L.aiEraCtaStore, L.aiEraCtaPay, L.aiEraCtaSell].map((name) => [link(ai, name), 'brand'] as const),
+      [link(cash, L.cashStoreKitCta), 'brand'],
+      [link(mobileOrder, L.mobileOrderBannerLearnMore), 'emerald-700'],
+      [github, 'white'],
+      // 矢印つきの文字リンク
+      [link(pricing, L.supportFeeDetailsLink), 'brand'],
+      [link(orderLink, L.orderLinkStripLink), 'emerald-700'],
+      [link(guides, L.entryAllGuides), 'emerald-700'],
+      // 押せるカード
+      ...GUIDE_SLUGS.map((slug) => [guides.querySelector(`a[href="/ja/guide/${slug}"]`), 'emerald-700'] as const),
+      [support.querySelector('a[href*="openpay_jp"]'), 'white'],
+    ];
+    expect(rings).toHaveLength(4 + 7 + 3 + 5);
+    for (const [el, color] of rings) expectFocusRing(el, color);
+  });
+});
