@@ -53,11 +53,16 @@ const SUMMARY_ICONS: Record<PricingSummaryId, LucideIcon> = {
 /**
  * 冒頭の「料金がかかるのは、この 5 つです」のカード。
  * sm 以上の 2 列で数が奇数のとき、最後の 1 枚は 2 列分の幅にする (右半分が空いたまま片側に寄らないように・5 枚にした 2026-11-07)。
+ *
+ * 並びはどの幅でも縦 (名前と払う人 → 料金の名前 → 数字と補足 → 対象)。5 枚の大きい数字の左がそろう (見比べられる)。
+ * スマホ (sm 未満) だけ、カードの上下の余白 (16 → 14px)・名前と払う人の行の下 (12 → 8px)・数字の下 (8 → 6px) を詰める
+ * (トップと /pricing で 5 枚が縦に並ぶ・2026-11-15)。左右の余白 (16px) と、料金の名前と数字の間 (4px) は変えない。
+ * 何も隠さない (払う人・最低額・対象は常に見せる・2026-10-12 user 裁定)。sm 以上は今までと同じ。
  */
 export function SummaryCard({ item }: { item: PricingSummaryCase }) {
   const Icon = SUMMARY_ICONS[item.id];
   return (
-    <li className="flex flex-col rounded-2xl bg-white p-4 shadow-card ring-1 ring-slate-200/70 sm:odd:last:col-span-2">
+    <li className="flex flex-col rounded-2xl bg-white p-4 shadow-card ring-1 ring-slate-200/70 max-sm:py-3.5 sm:odd:last:col-span-2">
       <div className="flex items-start justify-between gap-3">
         <h3 className="flex min-w-0 items-center gap-2 text-sm font-semibold text-slate-900 sm:text-base">
           <Icon className="h-5 w-5 shrink-0 text-brand" aria-hidden />
@@ -65,7 +70,7 @@ export function SummaryCard({ item }: { item: PricingSummaryCase }) {
         </h3>
         <PayerPill payer={item.payer} />
       </div>
-      <p className="mt-3 text-xs font-medium text-slate-500">{item.feeName}</p>
+      <p className="mt-3 text-xs font-medium text-slate-500 max-sm:mt-2">{item.feeName}</p>
       <p className="mt-1 flex flex-wrap items-baseline gap-x-2 gap-y-1">
         {/* 「約 2 JPYC」のような長い値は 1 段小さくし、「1%」より面積で勝たないようにする (視線の優先を料率に)。 */}
         <span
@@ -80,7 +85,7 @@ export function SummaryCard({ item }: { item: PricingSummaryCase }) {
         ) : null}
       </p>
       {/* 文節で改行する (「…ありませ / ん」のような 1 文字の孤立を防ぐ・Safari は通常の改行)。 */}
-      <p className="mt-2 text-sm leading-relaxed text-slate-600 [word-break:auto-phrase]">{item.detail}</p>
+      <p className="mt-2 text-sm leading-relaxed text-slate-600 [word-break:auto-phrase] max-sm:mt-1.5">{item.detail}</p>
     </li>
   );
 }
