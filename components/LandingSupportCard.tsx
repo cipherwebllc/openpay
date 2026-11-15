@@ -19,8 +19,9 @@ const PROFILE_URL = `${TIP_ORIGIN}/${PROFILE_HANDLE}`;
 
 export async function LandingSupportCard() {
   const t = await getTranslations('Landing');
+  // 区切りの線の上下の空き: スマホは 32 / 24px (技術説明の区切りと同じ)・sm 以上は 40 / 32px。
   return (
-    <div className="mx-auto mt-10 max-w-xl border-t border-slate-700/80 pt-8 text-center">
+    <div className="mx-auto mt-8 max-w-xl border-t border-slate-700/80 pt-6 text-center sm:mt-10 sm:pt-8">
       <p className="text-sm font-medium leading-relaxed text-slate-200">
         {t('supportTipRequest')}
       </p>

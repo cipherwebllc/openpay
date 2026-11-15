@@ -43,7 +43,8 @@ export async function LandingTrust() {
           </a>
         </div>
 
-        <div className="mt-10 border-t border-slate-700/80 pt-8">
+        {/* 区切りの線の上下の空き: スマホは 32 / 24px (応援枠の区切りと同じ)・sm 以上は 40 / 32px。 */}
+        <div className="mt-8 border-t border-slate-700/80 pt-6 sm:mt-10 sm:pt-8">
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
             {t('trustTitle')}
           </p>
