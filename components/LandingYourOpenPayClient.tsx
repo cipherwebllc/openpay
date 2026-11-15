@@ -3,7 +3,7 @@
 // トップの「あなたの OpenPay」帯の client 部分 (plans/lp-polish-2026-09.md P4a)。
 //   - YourOpenPayFrame: 帯を出すかの切り替えだけ (中身は server が描く)。
 //   - YourOpenPayToday: 今日の売上 (TodayCard と同じ端末内の集計・ネットワークなし)。
-//   - YourOpenPayPage: サインイン済みなら自分の @handle をそのテーマと色で (P4b・GET /api/handle)。
+//   - YourOpenPayPage: サインイン済みなら自分の @handle をそのテーマと色で (P4b・GET /api/handle)。URL のコピーと編集のボタンつき。
 // 未接続の訪問者には帯を描かず (display:none)、リクエストも増やさない。
 
 import { useEffect, useState, type ReactNode } from 'react';
@@ -11,8 +11,10 @@ import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
 import { useAccount } from 'wagmi';
 import { useMutationState, useQuery } from '@tanstack/react-query';
-import { ChevronRight } from 'lucide-react';
+import { Check, ChevronRight, Copy } from 'lucide-react';
 import { ExternalImage } from '@/components/ExternalImage';
+import { useCopyToClipboard } from '@/hooks/useCopyToClipboard';
+import { useOrigin } from '@/hooks/useOrigin';
 import { useSiweSession } from '@/hooks/useSiweSession';
 import { fetchMyHandles, myHandlesQueryKey, type OwnedHandle } from '@/lib/handleMine';
 import { handlePageTheme, handleViewTheme, resolveHandleTheme } from '@/lib/handleTheme';
@@ -122,7 +124,19 @@ function initialOf(name: string | undefined, handle: string): string {
  * 再読み込みを越えて控える (sessionStorage) ことはしない: 編集画面で保存した直後に開き直すと古いテーマが出るため
  * (plans/lp-polish-2026-09.md §2.4.2)。
  */
-export function YourOpenPayPage({ fallback, pageLabel, editLabel }: { fallback: ReactNode; pageLabel: string; editLabel: string }) {
+export function YourOpenPayPage({
+  fallback,
+  pageLabel,
+  editLabel,
+  copyLabel,
+  copiedLabel,
+}: {
+  fallback: ReactNode;
+  pageLabel: string;
+  editLabel: string;
+  copyLabel: string;
+  copiedLabel: string;
+}) {
   const locale = useLocale();
   const { status } = useAccount();
   const { isSignedIn, sessionAddress } = useSiweSession();
@@ -188,15 +202,51 @@ export function YourOpenPayPage({ fallback, pageLabel, editLabel }: { fallback: 
           </span>
         </span>
       </Link>
-      <Link
-        href={`/${locale}/create?tab=profile`}
-        prefetch={false}
-        className={`relative shrink-0 rounded-full px-3 py-1.5 text-xs font-semibold transition ${
-          page.dark ? 'bg-white/15 text-white hover:bg-white/25' : 'bg-white/90 text-slate-700 ring-1 ring-slate-200 hover:ring-brand/40'
-        }`}
-      >
+      <CopyPageUrl handle={own.handle} dark={page.dark} label={copyLabel} copiedLabel={copiedLabel} />
+      <Link href={`/${locale}/create?tab=profile`} prefetch={false} className={`${OWN_PAGE_CHIP} ${page.dark ? OWN_PAGE_CHIP_TONE.dark : OWN_PAGE_CHIP_TONE.light}`}>
         {editLabel}
       </Link>
     </div>
+  );
+}
+
+// 自分のページのカードの右の小さい丸いボタン (コピー・編集) の型。地のテーマが暗いときは白の半透明。
+const OWN_PAGE_CHIP = 'relative shrink-0 rounded-full px-3 py-1.5 text-xs font-semibold transition';
+const OWN_PAGE_CHIP_TONE = {
+  light: 'bg-white/90 text-slate-700 ring-1 ring-slate-200 hover:ring-brand/40',
+  dark: 'bg-white/15 text-white hover:bg-white/25',
+} as const;
+// キーボードの focus の輪 (トップの節のボタンと同じ 2px・外側 2px)。暗い地の上は白。
+const OWN_PAGE_FOCUS = {
+  light: 'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand',
+  dark: 'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white',
+} as const;
+
+/**
+ * 自分の公開ページの URL (今の origin + /@handle・locale なし = components/HandleShareButton.tsx と同じ) をコピーする。
+ * 公開ページへのリンクの外の独立したボタンで、名前は見えている「コピー」(掟 8)。押した後も見える文字は変えず、印だけを
+ * 変える (幅が変わらない)。「コピーしました」は見えない role="status" で読ませ、1.5 秒で消す (useCopyToClipboard)。
+ * コピーに失敗したときは印も通知も出さない (偽の成功を作らない・失敗は hook の中で止まり、帯へ波及しない)。
+ * clipboard の無い環境 (http の非 localhost など) では押しても何も起きないので、ボタンを出さない。
+ */
+function CopyPageUrl({ handle, dark, label, copiedLabel }: { handle: string; dark: boolean; label: string; copiedLabel: string }) {
+  const origin = useOrigin();
+  const { copied, available, copy } = useCopyToClipboard();
+  if (!available) return null;
+  const Icon = copied ? Check : Copy;
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => void copy(origin ? `${origin}/@${handle}` : '')}
+        className={`${OWN_PAGE_CHIP} inline-flex items-center gap-1 ${dark ? `${OWN_PAGE_CHIP_TONE.dark} ${OWN_PAGE_FOCUS.dark}` : `${OWN_PAGE_CHIP_TONE.light} ${OWN_PAGE_FOCUS.light}`}`}
+      >
+        <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden />
+        {label}
+      </button>
+      <span role="status" className="sr-only">
+        {copied ? copiedLabel : ''}
+      </span>
+    </>
   );
 }
