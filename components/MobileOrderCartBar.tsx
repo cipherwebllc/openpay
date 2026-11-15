@@ -84,6 +84,9 @@ export function MobileOrderCartBar({
   // エラー前のエラー表示になり、直下の取消不可注意 (真の警告・同色) の目立ちも薄める —
   // 触れる前はニュートラル色の案内、blur 後の未入力だけ警告色にする。
   const [tableTouched, setTableTouched] = useState(false);
+  // 受取時間の案内が DOM に出ているか (下で案内を描く条件と同じ)。出ている間だけ、受取時間の欄と「支払いへ進む」の
+  // 説明 (aria-describedby) として案内を指す。出ていない間は属性を出さない (無い id を指さない)。
+  const pickupNoticeShown = pickup.show && pickup.slots.length > 0 && Boolean(pickup.notice);
   return (
     <div className="sticky bottom-3 z-30">
       <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_-1px_3px_rgba(15,23,42,0.04),0_18px_44px_-14px_rgba(15,23,42,0.35)] supports-[backdrop-filter]:bg-white/85 supports-[backdrop-filter]:backdrop-blur">
@@ -134,6 +137,7 @@ export function MobileOrderCartBar({
                       id="mo-pickup"
                       value={pickup.value ?? ''}
                       onChange={(e) => pickup.onChange(e.target.value ? Number(e.target.value) : null)}
+                      aria-describedby={pickupNoticeShown ? 'mo-pickup-notice' : undefined}
                       className="mt-1 h-11 w-full rounded-lg border border-slate-300 bg-white px-3 text-base focus:border-[var(--mo-accent-text)] focus:outline-none sm:text-sm"
                     >
                       <option value="">{t('pickupAsap')}</option>
@@ -144,8 +148,8 @@ export function MobileOrderCartBar({
                       ))}
                     </select>
                     {/* 自動で起きた変化の知らせ (お客様の操作の結果ではない) なので status。選び直せる欄があるときだけ出す。 */}
-                    {pickup.notice && (
-                      <p role="status" className="mt-1 text-xs text-amber-700">
+                    {pickupNoticeShown && (
+                      <p id="mo-pickup-notice" role="status" className="mt-1 text-xs text-amber-700">
                         {pickup.notice}
                       </p>
                     )}
@@ -255,6 +259,7 @@ export function MobileOrderCartBar({
               <a
                 href={checkoutUrl}
                 onClick={onCheckout}
+                aria-describedby={pickupNoticeShown ? 'mo-pickup-notice' : undefined}
                 className="block rounded-xl bg-[var(--mo-accent)] px-4 py-3 text-center text-sm font-semibold text-[var(--mo-accent-ink)] hover:brightness-95"
               >
                 {t('payButton')}

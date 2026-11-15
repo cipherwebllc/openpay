@@ -62,6 +62,7 @@ vi.mock('@/hooks/useOrigin', () => ({
 }));
 
 import { MobileOrderView, pickupSelectSlots } from '@/components/MobileOrderView';
+import { MobileOrderCartBar } from '@/components/MobileOrderCartBar';
 import { buildPayerReceipt } from '@/lib/payerReceipt';
 import { pickupSlots } from '@/lib/shopTime';
 import { calcCheckoutPayable, CHECKOUT_QTY_MAX, parseCheckoutParams } from '@/lib/url';
@@ -2689,6 +2690,176 @@ describe('MobileOrderView — 選んだ受取時間を自動で「最短（指�
     expect(pickupOption('12:30')).toBeNull();
     expect(pickupSelect().value).toBe('');
     expect(pickupReset()?.textContent).toBe(TEXT.pickupReset);
+  });
+
+  // -------------------------------------------------------------------------------------------------------------------
+  // 案内を、受取時間の欄と「支払いへ進む」の説明 (aria-describedby) として結ぶ。
+  //   - 支払う人は必ず「支払いへ進む」に触れる。そこで、最短に戻した理由が説明として読まれる (案内がその場で読み上げ
+  //     られたかどうかに依らない)。
+  //   - 結ぶのは、案内が DOM に出ている間だけ。出ていない間は属性そのものを出さない (無い id を指さない)。
+  //   - 名前 (欄 = 「受取時間」・リンク = 「支払いへ進む」) は変えない。押し直しの案内 (alert) は説明に混ぜない。
+  // -------------------------------------------------------------------------------------------------------------------
+  const NOTICE_ID = 'mo-pickup-notice';
+  /** 12:30 を選び、その枠が候補から外れて「最短（指定なし）」に戻った所 (案内が出ている)。 */
+  function openWithResetNotice() {
+    vi.setSystemTime(SELECTABLE_UNTIL);
+    renderWithIntl(<MobileOrderView config={slotConfig} handle={HANDLE} />);
+    add('ブレンド');
+    choosePickup('12:30');
+    untilNoon();
+    passTime();
+  }
+  const describedBy = (el: Element | null) => el!.getAttribute('aria-describedby');
+
+  it('案内が出ている間、受取時間の欄と「支払いへ進む」の説明は、案内の文になる (名前は変わらない)', () => {
+    openWithResetNotice();
+
+    expect(pickupReset()?.id).toBe(NOTICE_ID);
+    expect(describedBy(pickupSelect())).toBe(NOTICE_ID);
+    expect(pickupSelect()).toHaveAccessibleDescription(TEXT.pickupReset);
+    expect(pickupSelect()).toHaveAccessibleName(TEXT.pickup);
+    expect(describedBy(payLink())).toBe(NOTICE_ID);
+    expect(payLink()).toHaveAccessibleDescription(TEXT.pickupReset);
+    expect(payLink()).toHaveAccessibleName(TEXT.pay);
+  });
+
+  it('英語の画面では、欄と「Proceed to pay」の説明は、英語の案内の文になる', () => {
+    vi.setSystemTime(SELECTABLE_UNTIL);
+    renderWithIntl(<MobileOrderView config={slotConfig} handle={HANDLE} />, { locale: 'en' });
+    fireEvent.click(
+      within(menuCard('ブレンド')).getByRole('button', { name: enMessages.MobileOrder.qtyIncrease }),
+    );
+    const select = () => screen.getByLabelText(enMessages.MobileOrder.pickupLabel) as HTMLSelectElement;
+    fireEvent.change(select(), { target: { value: String(tokyo(12, 30)) } });
+    untilNoon();
+    passTime();
+
+    const link = screen.getByRole('link', { name: enMessages.MobileOrder.payButton });
+    expect(select()).toHaveAccessibleDescription(enMessages.MobileOrder.pickupResetNotice);
+    expect(link).toHaveAccessibleDescription(enMessages.MobileOrder.pickupResetNotice);
+  });
+
+  it('案内が出ていない間は、欄にもリンクにも aria-describedby の属性そのものが無い (最初から・選んだ直後・選んだ枠が候補に残っている間)', () => {
+    renderWithIntl(<MobileOrderView config={slotConfig} handle={HANDLE} />);
+    add('ブレンド');
+    const expectNotDescribed = () => {
+      expect(pickupReset()).toBeNull();
+      expect(document.getElementById(NOTICE_ID)).toBeNull();
+      expect(pickupSelect().hasAttribute('aria-describedby')).toBe(false);
+      expect(payLink()!.hasAttribute('aria-describedby')).toBe(false);
+    };
+    expectNotDescribed();
+
+    choosePickup('12:45');
+    expectNotDescribed();
+
+    passTime();
+    expect(pickupSelect().value).toBe(String(tokyo(12, 45)));
+    expectNotDescribed();
+  });
+
+  it('選び直して案内が消えると、欄とリンクの属性も消える。選び直した枠がまた外れて案内が戻ると、属性も戻る', () => {
+    openWithResetNotice();
+    expect(describedBy(pickupSelect())).toBe(NOTICE_ID);
+    expect(describedBy(payLink())).toBe(NOTICE_ID);
+
+    choosePickup('12:45');
+
+    expect(pickupReset()).toBeNull();
+    expect(pickupSelect().hasAttribute('aria-describedby')).toBe(false);
+    expect(payLink()!.hasAttribute('aria-describedby')).toBe(false);
+
+    // 12:15:30 の取り直しで 12:45 も外れる。
+    passTime(15 * 60_000);
+
+    expect(pickupSelect().value).toBe('');
+    expect(pickupSelect()).toHaveAccessibleDescription(TEXT.pickupReset);
+    expect(payLink()).toHaveAccessibleDescription(TEXT.pickupReset);
+  });
+
+  it('案内の id は、出ている間、画面に 1 つだけ (カートを空にして入れ直した後も)', () => {
+    openWithResetNotice();
+    expect(document.querySelectorAll(`#${NOTICE_ID}`)).toHaveLength(1);
+    expect(document.getElementById(NOTICE_ID)).toBe(pickupReset());
+
+    removeOne('ブレンド');
+    expect(document.querySelectorAll(`#${NOTICE_ID}`)).toHaveLength(0);
+    add('ブレンド');
+
+    expect(document.querySelectorAll(`#${NOTICE_ID}`)).toHaveLength(1);
+    expect(payLink()).toHaveAccessibleDescription(TEXT.pickupReset);
+  });
+
+  it('押し直しの案内 (alert) と同時に出たときも、リンクの説明は受取時間の案内だけ (alert の文は混ざらない)', async () => {
+    const gate = gatedFetches();
+    vi.setSystemTime(SELECTABLE_UNTIL);
+    renderWithIntl(<MobileOrderView config={slotConfig} handle={HANDLE} />);
+    add('ブレンド');
+    choosePickup('12:30');
+    untilNoon();
+    fireEvent.click(payLink()!);
+    passTime();
+    // 待っている間は、案内もリンクも無い (押せないボタン)。
+    expect(pickupReset()).toBeNull();
+    expect(payLink()).toBeNull();
+    expect(pickupSelect().hasAttribute('aria-describedby')).toBe(false);
+
+    await gate.fail(0);
+
+    // 2 つの案内とリンクが、同じ描き直しで出る。
+    expect(notice()?.textContent).toBe(TEXT.retryNotice);
+    expect(pickupReset()?.textContent).toBe(TEXT.pickupReset);
+    expect(describedBy(payLink())).toBe(NOTICE_ID);
+    expect(payLink()).toHaveAccessibleDescription(TEXT.pickupReset);
+    expect(payLink()).toHaveAccessibleName(TEXT.pay);
+    expect(pickupSelect()).toHaveAccessibleDescription(TEXT.pickupReset);
+  });
+
+  // 下で渡す props の組み合わせ (案内の文があり、候補が 0 件、または受取時間の欄を出さないのに、押せるリンクが出ている) は、
+  // このテスト file の MobileOrderView の描き方からは作っていない (候補が 0 件なら支払い欄ごと消える)。
+  // 部品の約束として、props を直接渡して確かめる: 描かない案内を、リンクは指さない。
+  it('案内の文が渡っても、案内を描かないとき (候補が 0 件・受取時間の欄を出さない) は、リンクに aria-describedby の属性が無い', () => {
+    const bar = (pickup: { show: boolean; slots: number[] }) => (
+      <MobileOrderCartBar
+        tooMany={false}
+        tableNumber=""
+        onTableNumberChange={() => {}}
+        needsTable={false}
+        pickup={{ ...pickup, value: null, onChange: () => {}, notice: TEXT.pickupReset }}
+        cart={{
+          open: false,
+          onToggle: () => {},
+          lines: [],
+          decimals: JPYC_DECIMALS,
+          count: 1,
+          totalHuman: '500',
+          subtotalHuman: '500',
+          discount: 0n,
+          feeUpcharge: 0n,
+          feeBps: 0,
+          onItemQtyChange: () => {},
+          onOptionQtyChange: () => {},
+        }}
+        checkoutUrl="https://test.local/checkout?to=x"
+        checkoutPending={false}
+      />
+    );
+    // 比べる元: 欄と候補があれば、案内が出て、リンクが指す。
+    const view = renderWithIntl(bar({ show: true, slots: [tokyo(12, 45)] }));
+    expect(pickupReset()?.id).toBe(NOTICE_ID);
+    expect(describedBy(payLink())).toBe(NOTICE_ID);
+
+    // 候補が 0 件: 欄の代わりに「本日受け取れる時間がありません」。案内は描かない。
+    view.rerender(bar({ show: true, slots: [] }));
+    expect(screen.getByText(jaMessages.MobileOrder.pickupNone)).toBeInTheDocument();
+    expect(document.getElementById(NOTICE_ID)).toBeNull();
+    expect(payLink()!.hasAttribute('aria-describedby')).toBe(false);
+
+    // 受取時間の欄を出さない (候補はある)。
+    view.rerender(bar({ show: false, slots: [tokyo(12, 45)] }));
+    expect(screen.queryByLabelText(TEXT.pickup)).toBeNull();
+    expect(document.getElementById(NOTICE_ID)).toBeNull();
+    expect(payLink()!.hasAttribute('aria-describedby')).toBe(false);
   });
 });
 
