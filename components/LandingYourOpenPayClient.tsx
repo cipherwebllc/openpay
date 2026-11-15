@@ -165,17 +165,19 @@ export function YourOpenPayPage({
   const avatar = own.profile?.avatar && own.profile.avatar !== failedAvatar ? own.profile.avatar : null;
   const name = own.config.name?.trim();
 
+  // 360px 未満 (max-[359px]:) は、アバター・間・2 つのボタンの左右の余白を詰めて、名前の欄を広げる (詰めないと 320px で
+  // 短い名前も「こ…」まで省略され、誰のページか分からない)。ボタンの高さと見える文字・印は変えない。
   return (
     <div
-      className="relative flex h-14 items-center gap-3 overflow-hidden rounded-2xl pl-3.5 pr-2 ring-1 ring-slate-200/70 lg:h-auto"
+      className="relative flex h-14 items-center gap-3 overflow-hidden rounded-2xl pl-3.5 pr-2 ring-1 ring-slate-200/70 max-[359px]:gap-1.5 max-[359px]:pl-2.5 lg:h-auto"
       style={{ background: page.full ? page.background : '#ffffff' }}
     >
       {page.full ? null : <div aria-hidden className="absolute inset-0" style={{ background: page.background }} />}
       {/* リンク名 = 見えている名前と @handle (掟 8)。 */}
-      <Link href={`/${locale}/@${own.handle}`} prefetch={false} className="relative flex min-w-0 flex-1 items-center gap-3">
+      <Link href={`/${locale}/@${own.handle}`} prefetch={false} className="relative flex min-w-0 flex-1 items-center gap-3 max-[359px]:gap-2">
         {/* PC は行の高さが 40px (道具のボタンと同じ)。アバターの外側の輪 (最大 6px) ごと収まるよう 28px にする。 */}
         <span
-          className="grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-full text-base font-bold text-white lg:h-7 lg:w-7 lg:text-xs"
+          className="grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-full text-base font-bold text-white max-[359px]:h-8 max-[359px]:w-8 lg:h-7 lg:w-7 lg:text-xs"
           style={{ backgroundColor: accent, boxShadow: view.avatarRing }}
         >
           {avatar ? (
@@ -203,7 +205,11 @@ export function YourOpenPayPage({
         </span>
       </Link>
       <CopyPageUrl handle={own.handle} dark={page.dark} label={copyLabel} copiedLabel={copiedLabel} />
-      <Link href={`/${locale}/create?tab=profile`} prefetch={false} className={`${OWN_PAGE_CHIP} ${page.dark ? OWN_PAGE_CHIP_TONE.dark : OWN_PAGE_CHIP_TONE.light}`}>
+      <Link
+        href={`/${locale}/create?tab=profile`}
+        prefetch={false}
+        className={`${OWN_PAGE_CHIP} ${page.dark ? `${OWN_PAGE_CHIP_TONE.dark} ${OWN_PAGE_FOCUS.dark}` : `${OWN_PAGE_CHIP_TONE.light} ${OWN_PAGE_FOCUS.light}`}`}
+      >
         {editLabel}
       </Link>
     </div>
@@ -211,12 +217,13 @@ export function YourOpenPayPage({
 }
 
 // 自分のページのカードの右の小さい丸いボタン (コピー・編集) の型。地のテーマが暗いときは白の半透明。
-const OWN_PAGE_CHIP = 'relative shrink-0 rounded-full px-3 py-1.5 text-xs font-semibold transition';
+// 360px 未満は左右の余白だけを詰める (高さ 28px は変えない)。
+const OWN_PAGE_CHIP = 'relative shrink-0 rounded-full px-3 py-1.5 text-xs font-semibold transition max-[359px]:px-2';
 const OWN_PAGE_CHIP_TONE = {
   light: 'bg-white/90 text-slate-700 ring-1 ring-slate-200 hover:ring-brand/40',
   dark: 'bg-white/15 text-white hover:bg-white/25',
 } as const;
-// キーボードの focus の輪 (トップの節のボタンと同じ 2px・外側 2px)。暗い地の上は白。
+// キーボードの focus の輪 (トップの節のボタンと同じ 2px・外側 2px)。コピーと編集の両方。暗い地の上は白。
 const OWN_PAGE_FOCUS = {
   light: 'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand',
   dark: 'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white',

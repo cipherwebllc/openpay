@@ -797,6 +797,48 @@ describe('YourOpenPayPage: 自分のページの URL のコピー (P5b)', () => 
     expect(tokens(button)).not.toContain('focus-visible:outline-brand');
   });
 
+  it('「編集」にも「コピー」と同じ focus の輪 (2px・外側 2px・明るい地は紺・night は白)。何もしないときの形と地の色は今のまま', async () => {
+    const RING = ['focus-visible:outline', 'focus-visible:outline-2', 'focus-visible:outline-offset-2'];
+    // 太さ (数字) と外側の指定を除いた focus-visible:outline-* が、色の指定 (ちょうど 1 つ)。
+    const ringColors = (el: Element) => tokens(el).filter((token) => /^focus-visible:outline-(?!\d|offset-)/.test(token));
+    handles([komorebi('gradient')]);
+    signIn();
+    const light = renderStrip(page());
+    let edit = await screen.findByRole('link', { name: L.yourOpenPayPageEdit });
+    expect(tokens(edit)).toEqual(expect.arrayContaining([...RING, 'bg-white/90', 'text-slate-700', 'ring-1', 'ring-slate-200', 'rounded-full', 'py-1.5']));
+    expect(ringColors(edit)).toEqual(['focus-visible:outline-brand']);
+    light.unmount();
+    handles([komorebi('night')]);
+    queryClient = new QueryClient();
+    renderStrip(page());
+    edit = await screen.findByRole('link', { name: L.yourOpenPayPageEdit });
+    expect(tokens(edit)).toEqual(expect.arrayContaining([...RING, 'bg-white/15', 'text-white']));
+    expect(ringColors(edit)).toEqual(['focus-visible:outline-white']);
+    expect(ringColors(screen.getByRole('button', { name: L.yourOpenPayPageCopy }))).toEqual(['focus-visible:outline-white']);
+  });
+
+  it('360px 未満だけ行の中を詰めて名前の欄を広げる (アバター・間・ボタンの左右の余白)。ボタンの高さ・見える文字・印は変えない', async () => {
+    handles([komorebi()]);
+    signIn();
+    renderStrip(page());
+    const button = await screen.findByRole('button', { name: L.yourOpenPayPageCopy });
+    const edit = screen.getByRole('link', { name: L.yourOpenPayPageEdit });
+    const pageLink = screen.getByRole('link', { name: /こもれび/ });
+    const card = pageLink.parentElement!;
+    const avatar = pageLink.firstElementChild!;
+    const narrow = (el: Element) => tokens(el).filter((token) => token.startsWith('max-[359px]:'));
+    expect(narrow(card)).toEqual(['max-[359px]:gap-1.5', 'max-[359px]:pl-2.5']);
+    expect(narrow(pageLink)).toEqual(['max-[359px]:gap-2']);
+    expect(narrow(avatar)).toEqual(['max-[359px]:h-8', 'max-[359px]:w-8']);
+    expect(narrow(button)).toEqual(['max-[359px]:px-2']);
+    expect(narrow(edit)).toEqual(['max-[359px]:px-2']);
+    // 文字・印・読み上げの欄には狭い画面だけの指定を付けない (隠さない・小さくしない)。
+    for (const el of [button.querySelector('svg')!, ...[...card.querySelectorAll('span')].filter((span) => span !== avatar)]) expect(narrow(el)).toEqual([]);
+    // 360px 以上の指定は今のまま (カードの高さ 56px・ボタンの高さ 28px)。
+    expect(tokens(card)).toEqual(expect.arrayContaining(['h-14', 'gap-3', 'pl-3.5', 'pr-2']));
+    for (const el of [button, edit]) expect(tokens(el)).toEqual(expect.arrayContaining(['px-3', 'py-1.5', 'text-xs']));
+  });
+
   it('server の帯 (LandingYourOpenPay) が Landing の文言をボタンと読み上げに渡す', async () => {
     handles([komorebi()]);
     signIn();
