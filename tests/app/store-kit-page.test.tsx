@@ -104,8 +104,9 @@ describe('StoreKit i18n', () => {
   });
 
   it('Landing の店頭キット導線 key が ja/en 両方にある', () => {
+    // ja の括弧は全角 (トップのヒーローと締めのボタンの「（無料）」とそろえる・2026-11-15 user)。en は半角のまま。
     expect(ja.Landing.cashStoreKitCta).toBe(
-      '店頭キットを印刷する (無料)',
+      '店頭キットを印刷する（無料）',
     );
     expect(en.Landing.cashStoreKitCta).toBe('Print the in-store kit (free)');
   });

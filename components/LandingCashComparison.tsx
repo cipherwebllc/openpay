@@ -47,7 +47,8 @@ export async function LandingCashComparison() {
 
   return (
     <section className="mt-16 sm:mt-28">
-      <LandingSectionHeader eyebrow={t('eyebrowShops')} title={t('cashTitle')} lead={t('cashSubtitle')} />
+      {/* 章ラベルは付けない: すぐ上の導入メリットの節の「お店向け」が、同じ章の始まりを示す (見出し自体にも「お店」がある・2026-11-15 user)。 */}
+      <LandingSectionHeader title={t('cashTitle')} lead={t('cashSubtitle')} />
 
       {/* PC (lg 以上) は 左 = 比較表 / 右 = 試算 の 2 列 (縦に積むと 1 画面半・plans/lp-polish-2026-09.md P2)。 */}
       <div className="mx-auto max-w-3xl lg:grid lg:max-w-none lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)] lg:items-start lg:gap-8">

@@ -3,7 +3,7 @@
 // 「現金に戻したお店へ」セクションの節約シミュレータ (client)。
 // 月商・平均決済額スライダー × 今の決済手段 (カード 3.24% / コード決済 1.98%) から、
 // OpenPay のガスレス決済 (開示料率・1 回あたりの最低額) に置き換えた年間差額を
-// ビッグナンバーで示す。crypto 語彙は出さず、店主が直感的に得を掴めるようにする。
+// ビッグナンバーで示す (結果の出し分けは components/SavingsSimulatorResult.tsx)。crypto 語彙は出さず、店主が直感的に得を掴めるようにする。
 //
 // 金額計算は整数円で行い (Math.round)、float の見た目誤差 (26.8799…) を出さない。
 // hydration 安全 (Date / random を使わず、既定値は固定)。
@@ -11,7 +11,8 @@
 import { useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import { DISCLOSED_RECOVER_FEE } from '@/lib/disclosedRecoverFee';
-import { LANDING_FIGURE, LANDING_NOTE } from '@/components/LandingControls';
+import { LANDING_NOTE } from '@/components/LandingControls';
+import { SavingsSimulatorResult, formatYen } from '@/components/SavingsSimulatorResult';
 
 // 月商スライダー: 10 万円〜500 万円・10 万円刻み・既定 100 万円 (すべて「円」単位)。
 const MONTHLY_MIN = 100_000;
@@ -32,14 +33,9 @@ const COMPARE = {
 } as const;
 type CompareId = keyof typeof COMPARE;
 
-// 円をカンマ区切りに (整数のみ・en-US grouping は node/browser で決定的)。
-function formatYen(n: number): string {
-  return n.toLocaleString('en-US', { maximumFractionDigits: 0 });
-}
-
 export function SavingsSimulator() {
   const t = useTranslations('Landing');
-  // ja は「万円」でヒーロー表示、en は full 円でヒーロー表示 (万 は英語で読みにくい)。
+  // 月商の現在値: ja は「万円」、en は full 円 (万 は英語で読みにくい)。
   const isJa = useLocale() === 'ja';
   const [monthlyYen, setMonthlyYen] = useState(MONTHLY_DEFAULT);
   const [ticketYen, setTicketYen] = useState(TICKET_DEFAULT);
@@ -49,16 +45,12 @@ export function SavingsSimulator() {
     DISCLOSED_RECOVER_FEE.floorJpyc,
     ticketYen * DISCLOSED_RECOVER_FEE.percentFromJulyBps / 10_000,
   );
-  // 年間差額 (整数円): 比較先の年額 − 月間決済件数 × 1 決済の利用料 × 12。
+  // 年間差額 (整数円): 比較先の年額 − 月間決済件数 × 1 決済の利用料 × 12。正 = OpenPay の方が安い。
   const annualDiffYen = Math.round(
     monthlyYen * 12 * COMPARE[compare] - (monthlyYen / ticketYen) * feePerPayment * 12,
   );
-  // ビッグナンバーは万円単位。+ 0 で丸め後の -0 を正規化し、「-0 万円」と表示しない。
-  const annualDiffMan = Math.round(annualDiffYen / 10000) + 0;
   // スライダー現在値の表示 (万円・10 万刻みなので常に整数)。
   const monthlyMan = monthlyYen / 10000;
-  // ヒーローの数字: ja=万円 (annualDiffMan) / en=full 円 (annualDiffYen)。
-  const heroNumber = formatYen(isJa ? annualDiffMan : annualDiffYen);
 
   return (
     <div className="mt-8 rounded-2xl border border-brand/30 bg-brand/5 p-5 sm:p-6">
@@ -144,32 +136,7 @@ export function SavingsSimulator() {
         </div>
       </div>
 
-      {/* 結果: 割高な場合も負の差額をそのまま示す。 */}
-      <div className="mt-6 text-center">
-        <p className="text-sm text-slate-600">{t('cashSimResultPrefix')}</p>
-        <p className="mt-1 flex items-baseline justify-center gap-1">
-          {/* 節に 1 つだけの結果の数字 (大きい数字の型・どの幅でも 3rem)。PC のトップの右の列 (約 400px) にも、最大額のまま入る。 */}
-          <span className={`text-brand ${LANDING_FIGURE.result}`}>
-            {heroNumber}
-          </span>
-          <span className="text-2xl font-bold text-brand-dark">
-            {t('cashSimResultUnit')}
-          </span>
-        </p>
-        {/* 中央寄せの短い 1 文。折り返すときは行の長さをそろえる (「…OpenPay が割 / 高）」のように 1〜2 字だけの行を出さない)。 */}
-        <p className="mt-2 text-balance text-sm font-semibold text-slate-700 [word-break:auto-phrase]">
-          {t('cashSimResultSuffix')}
-        </p>
-        {/* 万円ヒーロー (ja) は端数を丸めるため、正確な円差額を補足。en は
-            ヒーローが full 円ゆえ重複しないよう出さない。 */}
-        {isJa && (
-          <p className="mt-1 tabular-nums text-xs text-slate-600">
-            {t('cashSimYenExact', {
-              yen: `${annualDiffYen < 0 ? '-' : ''}¥${formatYen(Math.abs(annualDiffYen))}`,
-            })}
-          </p>
-        )}
-      </div>
+      <SavingsSimulatorResult annualDiffYen={annualDiffYen} />
 
       {/* 試算の前提の注 (注の型)。上の空きは、ほかの注と同じ mt-3。 */}
       <p className={`mt-3 ${LANDING_NOTE}`}>
