@@ -3,9 +3,11 @@ import {
   getLastSeenNewsId,
   setLastSeenNewsId,
   unreadCount,
+  NEWS_BASELINE_STORAGE_KEY,
   NEWS_LAST_SEEN_STORAGE_KEY,
   NEWS_CHANGED_EVENT,
 } from '@/lib/newsRead';
+import { logger } from '@/lib/logger';
 import type { NewsItem } from '@/lib/news';
 
 // 降順 (新しい順) の固定 fixture。実 NEWS_ITEMS に依存させず判定ロジックを検証する。
@@ -84,5 +86,63 @@ describe('lib/newsRead: storage 不可環境でも throw しない (safeGet/safe
     });
     expect(() => getLastSeenNewsId()).not.toThrow();
     expect(getLastSeenNewsId()).toBeNull();
+  });
+});
+
+// 既読の記録がある間、基準 (初めて来た時の最新) は読まれない。容量を既読の保存に回すため、先に消す。
+describe('lib/newsRead: setLastSeenNewsId は基準を消してから既読の記録を書く', () => {
+  beforeEach(() => window.localStorage.clear());
+  afterEach(() => vi.restoreAllMocks());
+
+  it('基準を消し、そのあとに既読の記録を書く (この順)', () => {
+    window.localStorage.setItem(NEWS_BASELINE_STORAGE_KEY, JSON.stringify('a'));
+    const realRemove = Storage.prototype.removeItem;
+    const realSet = Storage.prototype.setItem;
+    const order: string[] = [];
+    vi.spyOn(Storage.prototype, 'removeItem').mockImplementation((key: string) => {
+      order.push(`remove ${key}`);
+      realRemove.call(window.localStorage, key);
+    });
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation((key: string, value: string) => {
+      order.push(`set ${key}`);
+      realSet.call(window.localStorage, key, value);
+    });
+    setLastSeenNewsId('c');
+    expect(order).toEqual([`remove ${NEWS_BASELINE_STORAGE_KEY}`, `set ${NEWS_LAST_SEEN_STORAGE_KEY}`]);
+    expect(window.localStorage.getItem(NEWS_BASELINE_STORAGE_KEY)).toBeNull();
+    expect(getLastSeenNewsId()).toBe('c');
+  });
+
+  it('基準を消せなくても (removeItem が throw)、既読の記録は書けて、warn は出さない', () => {
+    vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(() => {
+      throw new Error('SecurityError');
+    });
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    expect(() => setLastSeenNewsId('c')).not.toThrow();
+    expect(getLastSeenNewsId()).toBe('c');
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('storage の参照そのものが throw: 落ちず、warn は safeSet の 1 回だけ (基準を消す方は出さない)', () => {
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    const handler = vi.fn();
+    window.addEventListener(NEWS_CHANGED_EVENT, handler);
+    const original = Object.getOwnPropertyDescriptor(window, 'localStorage');
+    Object.defineProperty(window, 'localStorage', {
+      configurable: true,
+      get: () => {
+        throw new Error('SecurityError');
+      },
+    });
+    try {
+      expect(() => setLastSeenNewsId('c')).not.toThrow();
+    } finally {
+      if (original) Object.defineProperty(window, 'localStorage', original);
+      else delete (window as { localStorage?: Storage }).localStorage;
+      window.removeEventListener(NEWS_CHANGED_EVENT, handler);
+    }
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith('localStorage.set failed', expect.anything());
+    expect(handler).toHaveBeenCalledTimes(1);
   });
 });
