@@ -109,6 +109,30 @@ describe('お店の端末で送る の会計の写し (sessionStorage・受け�
     expect(stored().map((s) => s.id)).toEqual([id(2), id(3)]);
   });
 
+  it('次の保存が無くても、読むときに 60 分の期限が効く (直前は使う・ちょうど / 過ぎたら使わない = 掃除と同じ境界)', () => {
+    const at = Date.now();
+    saveStoreDeviceSaleSnapshot(HS, checkout);
+    const path = buildCheckoutPath({ ...checkout, handoffId: HS });
+    vi.setSystemTime(at + 60 * 60_000 - 1);
+    expect(readStoreDeviceSaleSnapshot(HS)).toBe(path);
+    vi.setSystemTime(at + 60 * 60_000);
+    expect(readStoreDeviceSaleSnapshot(HS)).toBeNull();
+    vi.setSystemTime(at + 60 * 60_000 + 1);
+    expect(readStoreDeviceSaleSnapshot(HS)).toBeNull();
+    // 読み取りは写しを消さない (保存の掃除は次の保存のとき)
+    expect(stored().map((s) => s.id)).toEqual([HS]);
+  });
+
+  it('端末の時計が戻った (写しの時刻が今より先) ときは使わない・保存した時刻ちょうどは使う', () => {
+    const at = Date.now();
+    saveStoreDeviceSaleSnapshot(HS, checkout);
+    expect(readStoreDeviceSaleSnapshot(HS)).toBe(buildCheckoutPath({ ...checkout, handoffId: HS }));
+    vi.setSystemTime(at - 1);
+    expect(readStoreDeviceSaleSnapshot(HS)).toBeNull();
+    vi.setSystemTime(at - 10 * 60_000);
+    expect(readStoreDeviceSaleSnapshot(HS)).toBeNull();
+  });
+
   it('保存してある値が読めない形でも落ちない (写しなしとして読み、次の保存で置き換える)', () => {
     window.sessionStorage.setItem(STORE_DEVICE_SALE_SNAPSHOT_KEY, '{broken');
     expect(readStoreDeviceSaleSnapshot(HS)).toBeNull();

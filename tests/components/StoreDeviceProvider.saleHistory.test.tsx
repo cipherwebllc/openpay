@@ -266,6 +266,51 @@ describe('StoreDeviceProvider × お店の取引履歴 (お店の端末で送る
     expect(rows[0]).toMatchObject({ id: `batch-${SETTLED_HASH}`, txHash: SETTLED_HASH, receiptNo: 'R-0012' });
   });
 
+  // 写しの期限 (60 分) は読むときにも効く: QR を出す → 送る → receipt を読めず「結果が分からない」→ 次の写しの保存なしで
+  // 時間が過ぎる → 「いま確認する」で入金の確認。60 分を過ぎた (ちょうど 60 分を含む) 写しは使わず、明細なしの行。
+  it.each([
+    ['60 分の直前 (写しを使う)', 60 * 60_000 - 1, true],
+    ['ちょうど 60 分 (写しを使わない)', 60 * 60_000, false],
+    ['61 分 (写しを使わない)', 61 * 60_000, false],
+  ])('結果が分からないまま QR から %s で「いま確認する」→ 入金の確認', async (_label, elapsed, withSnapshot) => {
+    send.waitReceipt.mockResolvedValue(null);
+    mount();
+    await advance(0);
+    await act(async () => {
+      screen.getByRole('button', { name: 'start' }).click();
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    const savedAt = (JSON.parse(window.sessionStorage.getItem(STORE_DEVICE_SALE_SNAPSHOT_KEY) ?? '[]') as { at: number }[])
+      .map((s) => s.at);
+    expect(savedAt).toEqual([NOW]);
+    readRes = () => json({ ok: true, state: 'signed', merchant: SHOP, amount: AMOUNT.toString(), auth: AUTH });
+    await advance(3_000);
+    expect(screen.getByTestId('phase').textContent).toBe('unknown:true');
+    // 自動の確認 (最長 15 分) が終わった後も、結論が出ないまま QR を出した時点から elapsed まで (次の保存なし)
+    await advance(NOW + elapsed - Date.now());
+    expect(Date.now()).toBe(NOW + elapsed);
+    expect(screen.getByTestId('phase').textContent).toBe('unknown:true');
+    expect(writer.calls).toBe(0);
+    expect(loadHistory()).toEqual([]);
+    await act(async () => {
+      screen.getByRole('button', { name: 'いま確認する' }).click();
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    await advance(0);
+    expect(Date.now()).toBe(NOW + elapsed);
+    expect(screen.getByTestId('phase').textContent).toBe('received:false');
+    expect(writer.calls).toBe(1);
+    const rows = loadHistory();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ id: `batch-${HASH}`, merchantAmount: AMOUNT.toString(), customer: PAYER, txHash: HASH });
+    if (withSnapshot) {
+      expect(rows[0]).toMatchObject({ receiptNo: 'R-0012', productName: 'カフェラテ' });
+      expect(rows[0].lineItems).toEqual([expect.objectContaining({ name: 'カフェラテ', quantity: 2, amount: '1000' })]);
+    } else {
+      expect(rows[0]).toMatchObject({ receiptNo: null, productName: null, lineItems: null, memo: null, taxRate: null });
+    }
+  });
+
   it('成立しなかった (期限切れ・未使用) 支払いは書かない', async () => {
     send.waitReceipt.mockResolvedValue(null);
     resolveRes = () => json({ ok: true, state: 'expired_unused' });
