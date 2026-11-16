@@ -31,9 +31,11 @@ export async function LandingYourOpenPay() {
   return (
     <YourOpenPayFrame>
       <section aria-labelledby="your-openpay-title" className="mt-3 rounded-3xl bg-white p-4 shadow-card ring-1 ring-slate-200/70 sm:p-5">
-        {/* 見出しの行は高さ固定。今日の売上は右に 1 行で出る (出ても下の段を動かさない)。 */}
-        <div className="flex h-8 items-center justify-between gap-3">
-          <h2 id="your-openpay-title" className="min-w-0 truncate text-base font-bold text-slate-900 sm:text-lg">
+        {/* 見出しの行は高さ固定。今日の売上は右に 1 行で出る (出ても下の段を動かさない)。
+            行に入りきらないときに縮むのは見出しだけ (flex-1 で残りの幅を取り、入らない分を「…」で省く)。今日の売上は中身の幅のまま
+            (縮めると、丸い枠だけが狭くなって数字が枠と帯の外へ出る)。 */}
+        <div className="flex h-8 items-center gap-3">
+          <h2 id="your-openpay-title" className="min-w-0 flex-1 truncate text-base font-bold text-slate-900 sm:text-lg">
             {t('yourOpenPayTitle')}
           </h2>
           <YourOpenPayToday label={t('yourOpenPayToday')} />

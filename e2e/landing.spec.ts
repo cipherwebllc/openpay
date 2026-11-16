@@ -329,6 +329,42 @@ test.describe('landing / (LP)', () => {
     await expect(a1Body).toBeVisible();
   });
 
+  test('ja: FAQ は行の余白を押しても開閉する (押せる範囲は質問の文字でなく行の全体)', async ({ page }) => {
+    await page.goto('/ja');
+    const q1 = page.locator('summary', { hasText: '本当にガス代は不要ですか?' });
+    const row = page.locator('details').filter({ has: q1 });
+    await expect(row).not.toHaveAttribute('open', '');
+    // 描画の frame を待つ操作 (click の stable 待ち・1 個ずつの boundingBox) を使わない (e2e/chain-chooser-grid.spec.ts と
+    // 同じ理由: CI の mobile-safari では WebKit が数秒に 1 枚しか frame を出さず、click 1 回の stable 待ちに数秒〜13 秒かかる)。
+    // 1 回の evaluate で、行を画面に入れ、行の左上の余白 (質問の文字の外・行の左上の角から 6px) の座標にある要素を引いて
+    // click の event を送る。寸法と押した先は同じ瞬間のレイアウトで読む。
+    const pressRowPadding = () =>
+      row.evaluate((details) => {
+        // ページの scroll-behavior: smooth を使わずに、すぐ動かす (動いている途中の座標を読まない)。
+        details.scrollIntoView({ block: 'center', behavior: 'instant' });
+        const summary = details.querySelector('summary')!;
+        const rowRect = details.getBoundingClientRect();
+        const summaryRect = summary.getBoundingClientRect();
+        const target = document.elementFromPoint(rowRect.left + 6, rowRect.top + 6);
+        if (target instanceof HTMLElement) target.click();
+        return {
+          row: { width: rowRect.width, height: rowRect.height },
+          summary: { width: summaryRect.width, height: summaryRect.height },
+          // 押した先。summary の余白なら summary 自身 (余白が details にあると details になり、押しても開かない)。
+          hit: target === summary ? 'summary' : (target?.tagName.toLowerCase() ?? null),
+        };
+      });
+    const first = await pressRowPadding();
+    // 閉じた行は、質問 (summary) が行の全体を占める (余白は summary が持つ)。押せる高さは 44px 以上。
+    expect(first.summary.width).toBeCloseTo(first.row.width, 0);
+    expect(first.summary.height).toBeCloseTo(first.row.height, 0);
+    expect(first.summary.height).toBeGreaterThanOrEqual(44);
+    expect(first.hit).toBe('summary');
+    await expect(row).toHaveAttribute('open', '');
+    expect((await pressRowPadding()).hit).toBe('summary');
+    await expect(row).not.toHaveAttribute('open', '');
+  });
+
   test('ja: Benefits セクション — Fee「0円〜」(通常決済の条件つき) + 4 focal・宛名は章ラベル', async ({
     page,
   }) => {

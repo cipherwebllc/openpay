@@ -166,6 +166,24 @@ describe('SavingsSimulator', () => {
     ).toHaveAttribute('aria-pressed', 'true');
   });
 
+  it.each(['ja', 'en'] as const)('%s: スマホでは比較先のボタンの押せる高さが 40px 以上・sm 以上は今までの高さ (jsdom は CSS を当てないので class で見る)', (locale) => {
+    renderWithIntl(<SavingsSimulator />, { locale });
+    const chips = screen.getAllByRole('button').filter((button) => button.hasAttribute('aria-pressed'));
+    // カードとコード決済の 2 つ。
+    expect(chips.map((chip) => chip.textContent)).toContain(CODE_CHIP[locale]);
+    expect(chips).toHaveLength(2);
+    for (const chip of chips) {
+      const tokens = chip.className.split(/\s+/);
+      // 高さの指定 (どの幅・どの条件でも) は、スマホ (sm 未満) の最小の高さだけ。sm 以上は字の高さ + 余白のまま。
+      const heights = tokens.filter((token) => /(?:^|:)(?:min-h|max-h|h)-/.test(token));
+      expect(heights).toEqual(['max-sm:min-h-10']);
+      // min-h-10 = 2.5rem = 40px。
+      expect(Number(heights[0].match(/min-h-(\d+)$/)![1]) * 4).toBeGreaterThanOrEqual(40);
+      // 中身は縦の中央 (高くした分、字が上に寄らない)。
+      expect(tokens).toEqual(expect.arrayContaining(['inline-flex', 'items-center']));
+    }
+  });
+
   it('スライダーを 500 万円に変更するとヒーローが更新される', () => {
     renderWithIntl(<SavingsSimulator />);
     const slider = screen.getByLabelText('月商');

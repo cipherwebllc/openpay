@@ -62,6 +62,22 @@ describe('LandingProfileDemo', () => {
     expect(container.querySelector('[aria-label]')).toBeNull();
     expect(screen.getByText('Komorebi').closest('[aria-hidden]')).not.toBeNull();
   });
+  it('スマホではテーマと色の選択肢の押せる高さが 40px 以上・sm 以上は今までの 36px (jsdom は CSS を当てないので class で見る)', () => {
+    render(<LandingProfileDemo c={c} cta={cta} />);
+    const options = ['Clean', 'Gradient', 'Bold', 'Outline', 'Night', 'Soft', 'Blue', 'Green', 'Rose', 'Amber', 'Violet'].map((name) =>
+      screen.getByRole('button', { name }),
+    );
+    for (const option of options) {
+      const tokens = option.className.split(/\s+/);
+      // 高さの指定 (どの幅・どの条件でも) は、スマホの最小の高さと sm 以上の最小の高さの 2 つだけ (h-* で固定しない)。
+      const heights = tokens.filter((token) => /(?:^|:)(?:min-h|max-h|h)-/.test(token));
+      expect(heights.sort()).toEqual(['min-h-10', 'sm:min-h-9']);
+      // min-h-10 = 2.5rem = 40px。字の高さ (12px の字・行 16px) + 上下の余白 12px = 28px なので、高さを決めるのは最小の高さ。
+      expect(Number(heights[0].match(/^min-h-(\d+)$/)![1]) * 4).toBeGreaterThanOrEqual(40);
+      // 中身は縦の中央 (高くした分、字が上に寄らない)。横に流す行で縮まない。
+      expect(tokens).toEqual(expect.arrayContaining(['inline-flex', 'items-center', 'shrink-0']));
+    }
+  });
   it('uses a reserved handle for the sample, so no one can claim the page the top page shows', () => {
     // 見本のハンドルを第三者が取ると「トップで紹介されたページ」に見せかけられる。予約語で塞ぐ。
     for (const messages of [ja, en]) {

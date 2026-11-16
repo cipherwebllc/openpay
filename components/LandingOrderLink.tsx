@@ -23,7 +23,10 @@ export async function LandingOrderLink() {
             <Link2 className="h-5 w-5 text-emerald-700" aria-hidden />
           </span>
           <div className="min-w-0">
-            <h2 className="text-base font-bold leading-snug text-slate-900 [word-break:auto-phrase] sm:text-lg">
+            {/* 文節で折れるブラウザ (Chromium 系) は、文節で折るだけ (「…注文には / 「注文リンク」」)。文節が分からないブラウザ
+                (WebKit = iPhone の Safari) は、行の長さをそろえる (text-balance): そろえないと「…「注文リン / ク」」と
+                1 字だけ次の行に落ちる。 */}
+            <h2 className="text-balance text-base font-bold leading-snug text-slate-900 [word-break:auto-phrase] supports-[word-break:auto-phrase]:text-wrap sm:text-lg">
               {t('orderLinkStripTitle')}
             </h2>
             <p className="mt-1 text-sm leading-relaxed text-slate-600 [word-break:auto-phrase]">{t('orderLinkStripBody')}</p>
