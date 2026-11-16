@@ -44,6 +44,7 @@ import {
   LANDING_SECTION_TITLE,
   LANDING_TEXT_LINK,
 } from '@/components/LandingControls';
+import { PAYER_TONE } from '@/components/pricing/PayerPill';
 
 vi.mock('next-intl/server', () => ({
   getLocale: async () => 'ja',
@@ -157,8 +158,15 @@ describe('トップの節の入口は、役割ごとに 1 つの型を使う', (
     const focals = [...benefits.querySelectorAll<HTMLElement>('[data-focal]')];
     expect(focals).toHaveLength(4);
     for (const focal of focals) expectType(focal, LANDING_FIGURE.base);
-    // お店 = 緑・お客様 = 青 のまま。
-    expect(focals.map((f) => (f.className.match(/text-(emerald|blue)-600/) ?? [])[1])).toEqual(['emerald', 'emerald', 'emerald', 'blue']);
+    // お店 = 緑・お客様 = 青 のまま。色の指定は料金の数字と同じ値 (PAYER_TONE.focal) ただ 1 つ。濃さ (白の上で 4.5:1 以上) は
+    // tests/components/PayerPill.test.tsx がパレットから計算して固定する。
+    expect(focals.map((f) => (f.className.match(/(?:^|\s)text-(emerald|blue)-\d{3}(?=\s|$)/) ?? [])[1])).toEqual(['emerald', 'emerald', 'emerald', 'blue']);
+    expect(focals.map((f) => classTokens(f).filter((token) => /^text-[a-z]+-\d{2,3}$/.test(token)))).toEqual([
+      [PAYER_TONE.shop.focal],
+      [PAYER_TONE.shop.focal],
+      [PAYER_TONE.shop.focal],
+      [PAYER_TONE.customer.focal],
+    ]);
     const cash = render(await LandingCashComparison()).container;
     expectType(within(cash).getByText(L.cashCellFeeOpenPay), LANDING_FIGURE.cell);
     for (const type of Object.values(LANDING_FIGURE)) expect(type).not.toMatch(/\btext-(emerald|blue|brand|slate)/);
