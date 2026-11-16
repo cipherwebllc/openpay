@@ -23,6 +23,7 @@ import {
 import { latestNewsId, NEWS_ITEMS, newsEntriesFor, sortedNews } from '@/lib/news';
 import { sortedNewsIndex } from '@/lib/newsIndex';
 import { logger } from '@/lib/logger';
+import { isSuccessSoundEnabled, setSuccessSoundEnabled } from '@/lib/soundPref';
 import { NewsBell } from '@/components/NewsBell';
 import { NewsList } from '@/components/NewsList';
 
@@ -39,6 +40,16 @@ const oldestId = () => sortedNews()[sortedNews().length - 1].id;
 /** spy (getItem / setItem) のうち、key が一致する呼び出しの回数。 */
 const callsFor = (spy: { mock: { calls: unknown[][] } }, key: string) =>
   spy.mock.calls.filter(([k]) => k === key).length;
+/** localStorage の中身 (key → 値) の写し。 */
+const snapshot = () => {
+  const ls = window.localStorage;
+  const out: Record<string, string | null> = {};
+  for (let i = 0; i < ls.length; i++) {
+    const k = ls.key(i)!;
+    out[k] = ls.getItem(k);
+  }
+  return out;
+};
 /** 新しい版で足されたお知らせ (古い版の索引には無い)。 */
 const ADDED = { id: 'added-in-new-version', date: '2099-01-01' } as const;
 /** window.localStorage の参照そのものが throw する環境 (cookie の拒否等) で fn を実行する。 */
@@ -346,6 +357,21 @@ describe('useNewsRead: 保存できない・読めない環境 (落ちない・�
     expect(setItem).not.toHaveBeenCalled();
   });
 
+  it('基準を書いた後の既読の記録の読み直しだけが throw: 印を出さず、warn は 0 回', () => {
+    const realGet = Storage.prototype.getItem;
+    let lastSeenReads = 0;
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation((key: string) => {
+      if (key === NEWS_LAST_SEEN_STORAGE_KEY && ++lastSeenReads === 2) throw new Error('SecurityError');
+      return realGet.call(window.localStorage, key);
+    });
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    const { result } = renderHook(() => useNewsRead());
+    expect(lastSeenReads).toBe(2);
+    expect(result.current.hydrated).toBe(true);
+    expect(result.current.hasUnread).toBe(false);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
   it('window.localStorage の参照そのものが throw: 落ちず印を出さず、mount の warn は 1 回 (event の後も印なし)', () => {
     const warn = vi.spyOn(logger, 'warn').mockImplementation(() => undefined);
     withStorageGetterThrowing(() => {
@@ -364,7 +390,7 @@ describe('useNewsRead: 保存できない・読めない環境 (落ちない・�
 });
 
 describe('useNewsRead: 別のタブとの競合 (既読の記録は既読化だけが書く)', () => {
-  it('古い版のタブ A が「記録なし」を読んだ直後に、新しい版のタブ B が /news で既読化 → A は既読の記録を巻き戻さず、B の未読は 0', () => {
+  it('古い版のタブ A が「記録なし」を読んだ直後に、新しい版のタブ B が /news で既読化を終える → A は既読の記録を巻き戻さず、書いた基準も消して記録で数え、B の未読は 0', () => {
     const oldIndex = sortedNewsIndex();
     const realGet = Storage.prototype.getItem;
     const realSet = Storage.prototype.setItem;
@@ -382,11 +408,14 @@ describe('useNewsRead: 別のタブとの競合 (既読の記録は既読化だ�
     h.index = oldIndex;
     const a = renderHook(() => useNewsRead());
     expect(interleaved).toBe(true);
-    expect(a.result.current.unreadCount).toBe(0);
-    // A は既読の記録に書かない (書くのは基準だけ)。
+    // A は書いた後の読み直しで B の記録を見つけ、その記録で数える。記録の id は古い版の一覧に無いので全件
+    // (main の A も、mount で「記録なし」を読むので全件)。
+    expect(a.result.current.unreadCount).toBe(oldIndex.length);
+    // A は既読の記録に書かない (書くのは基準だけ)。書いた基準は、記録を見つけて消す。
     expect(callsFor(setItem, NEWS_LAST_SEEN_STORAGE_KEY)).toBe(0);
+    expect(callsFor(setItem, NEWS_BASELINE_STORAGE_KEY)).toBe(1);
     expect(stored()).toBe(JSON.stringify(ADDED.id));
-    expect(storedBaseline()).toBe(JSON.stringify(oldIndex[0].id));
+    expect(storedBaseline()).toBeNull();
     a.unmount();
     vi.restoreAllMocks();
 
@@ -394,6 +423,44 @@ describe('useNewsRead: 別のタブとの競合 (既読の記録は既読化だ�
     h.index = [ADDED, ...oldIndex];
     const b = renderHook(() => useNewsRead());
     expect(b.result.current.unreadCount).toBe(0);
+  });
+
+  it('既読化の「基準を消す」と「既読の記録を書く」の間に A が基準を書いて読み直しまで終えた → 基準は残るが、記録がある次の mount で消える', () => {
+    const oldIndex = sortedNewsIndex();
+    const realGet = Storage.prototype.getItem;
+    const realSet = Storage.prototype.setItem;
+    const realRemove = Storage.prototype.removeItem;
+    let lastSeenReads = 0;
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation((key: string) => {
+      const value = realGet.call(window.localStorage, key);
+      if (key === NEWS_LAST_SEEN_STORAGE_KEY) {
+        lastSeenReads += 1;
+        // 1 回目の読みの後に B が基準を消し、A の読み直しの後に B が既読の記録を書く。
+        if (lastSeenReads === 1) realRemove.call(window.localStorage, NEWS_BASELINE_STORAGE_KEY);
+        if (lastSeenReads === 2) realSet.call(window.localStorage, NEWS_LAST_SEEN_STORAGE_KEY, JSON.stringify(ADDED.id));
+      }
+      return value;
+    });
+    h.index = oldIndex;
+    const a = renderHook(() => useNewsRead());
+    expect(lastSeenReads).toBe(2);
+    expect(stored()).toBe(JSON.stringify(ADDED.id));
+    expect(storedBaseline()).toBe(JSON.stringify(oldIndex[0].id));
+    expect(a.result.current.unreadCount).toBe(0);
+    // B の保存の event で、A は記録で数える (main と同じ)。
+    act(() => {
+      window.dispatchEvent(new StorageEvent('storage', { key: NEWS_LAST_SEEN_STORAGE_KEY }));
+    });
+    expect(a.result.current.unreadCount).toBe(oldIndex.length);
+    a.unmount();
+    vi.restoreAllMocks();
+
+    // 記録がある次の mount (どの版のタブでも) が、残った基準を消す。
+    h.index = [ADDED, ...oldIndex];
+    const b = renderHook(() => useNewsRead());
+    expect(b.result.current.unreadCount).toBe(0);
+    expect(storedBaseline()).toBeNull();
+    expect(stored()).toBe(JSON.stringify(ADDED.id));
   });
 
   it('お知らせを足すだけの版どうしの 2 つのタブで初めて開く: 基準は古い版の最新に落ち着き、書き合いにならない (新しい版の未読は足された分だけ)', () => {
@@ -569,6 +636,40 @@ describe('useNewsRead: 既読化と容量 (基準が既読の保存の容量を�
     expect(warn).not.toHaveBeenCalled();
   });
 
+  it('古い版 A が「記録なし」を読む → 新しい版 B が既読化を終える → A が基準を書く: A は基準を消すので、残りの容量でほかの機能 (完了音を OFF) の保存が入る (main と同じ)', () => {
+    const oldIndex = sortedNewsIndex();
+    // 完了音の OFF の保存 (lib/soundPref.ts: key 'openpay:success-sound' に '0') の文字数。
+    const soundOff = 'openpay:success-sound'.length + '0'.length;
+    // 残りの容量 = B の既読の記録 + A の基準 (この組み立てで、基準が残ると完了音の保存が入らない)。
+    const limit = entrySize(NEWS_LAST_SEEN_STORAGE_KEY, ADDED.id) + entrySize(NEWS_BASELINE_STORAGE_KEY, oldIndex[0].id);
+    expect(entrySize(NEWS_LAST_SEEN_STORAGE_KEY, ADDED.id) + soundOff).toBeLessThanOrEqual(limit); // main は入る
+    limitStorage(limit);
+    const realGet = Storage.prototype.getItem;
+    let interleaved = false;
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation((key: string) => {
+      const value = realGet.call(window.localStorage, key);
+      if (key === NEWS_LAST_SEEN_STORAGE_KEY && !interleaved) {
+        interleaved = true;
+        // A の 1 回目の読みの後に、B の既読化 (基準を消す → 既読の記録を書く) が終わる。
+        window.localStorage.removeItem(NEWS_BASELINE_STORAGE_KEY);
+        window.localStorage.setItem(NEWS_LAST_SEEN_STORAGE_KEY, JSON.stringify(ADDED.id));
+      }
+      return value;
+    });
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => undefined);
+
+    h.index = oldIndex;
+    const a = renderHook(() => useNewsRead());
+    expect(interleaved).toBe(true);
+    expect(stored()).toBe(JSON.stringify(ADDED.id));
+    expect(storedBaseline()).toBeNull();
+    a.unmount();
+
+    setSuccessSoundEnabled(false);
+    expect(isSuccessSoundEnabled()).toBe(false);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
   it('基準を消した後に既読の保存が失敗: warn 1 回 (main と同じ)・その mount は mount の基準のまま (main は全件)・次の mount は初めての訪問として印なし', () => {
     const all = sortedNewsIndex();
     seedBaseline(all[1].id);
@@ -595,16 +696,45 @@ describe('useNewsRead: 既読化と容量 (基準が既読の保存の容量を�
 });
 
 describe('useNewsRead: 既読の記録がある人は今までどおり', () => {
-  it('mount で記録を書き換えず、基準の key を読まない・書かない (localStorage の読み 1 回)', () => {
+  it('mount で記録を書き換えず、基準の key を読まない・書かない・残っていれば消す (読み 1 回・消去 1 回)', () => {
     seedSeen(oldestId());
     seedBaseline(latestNewsId()!);
     const getItem = vi.spyOn(Storage.prototype, 'getItem');
     const setItem = vi.spyOn(Storage.prototype, 'setItem');
+    const removeItem = vi.spyOn(Storage.prototype, 'removeItem');
     const { result } = renderHook(() => useNewsRead());
     expect(result.current.unreadCount).toBe(NEWS_ITEMS.length - 1);
     expect(getItem.mock.calls).toEqual([[NEWS_LAST_SEEN_STORAGE_KEY]]);
     expect(setItem).not.toHaveBeenCalled();
+    expect(removeItem.mock.calls).toEqual([[NEWS_BASELINE_STORAGE_KEY]]);
     expect(stored()).toBe(JSON.stringify(oldestId()));
+    expect(storedBaseline()).toBeNull();
+  });
+
+  it('基準の key が無いときの mount の消去は、何も変えず、event も warn も出さない', () => {
+    seedSeen(oldestId());
+    const before = snapshot();
+    expect(Object.keys(before)).toEqual([NEWS_LAST_SEEN_STORAGE_KEY]);
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    const removeItem = vi.spyOn(Storage.prototype, 'removeItem');
+    const dispatch = vi.spyOn(window, 'dispatchEvent');
+    const onStorage = vi.fn();
+    const onChanged = vi.fn();
+    window.addEventListener('storage', onStorage);
+    window.addEventListener(NEWS_CHANGED_EVENT, onChanged);
+    try {
+      const { result } = renderHook(() => useNewsRead());
+      expect(result.current.unreadCount).toBe(NEWS_ITEMS.length - 1);
+    } finally {
+      window.removeEventListener('storage', onStorage);
+      window.removeEventListener(NEWS_CHANGED_EVENT, onChanged);
+    }
+    expect(removeItem.mock.calls).toEqual([[NEWS_BASELINE_STORAGE_KEY]]);
+    expect(snapshot()).toEqual(before);
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(onStorage).not.toHaveBeenCalled();
+    expect(onChanged).not.toHaveBeenCalled();
+    expect(warn).not.toHaveBeenCalled();
   });
 
   it('記録の id が一覧に無い (消されたお知らせ) → 全件未読のまま・記録も基準も書き換えない', () => {

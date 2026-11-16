@@ -11,7 +11,10 @@
 // 初めての訪問 (既読の記録が無い) では印を出さない (2026-11-16 裁定)。そのための基準 (初めて来た時の
 // 最新 id) は、既読の記録とは別の key (baselineId) に持つ。既読の記録 (lastSeenId) に書くのは
 // setLastSeenNewsId (= /news を開いた既読化) だけ — 基準の保存が、別のタブの既読化を巻き戻さないため。
-// 既読化では基準を消してから既読の記録を書く (記録がある間、基準は読まれない)。
+// 既読の記録がある間、基準は読まれないので、端末に残さない: 既読化では基準を消してから既読の記録を書き、
+// 既読の記録がある mount は残っている基準を消し、基準を書いた mount は書いた後に既読の記録を読み直して、
+// その間に記録ができていたら今書いた基準を消す。基準は、既読の記録ができた後は、次の mount か次の
+// 既読化までに消える。
 
 import { logger } from './logger';
 import { safeGet, safeSet } from './storage';
@@ -29,16 +32,23 @@ export function getLastSeenNewsId(): string | null {
   return typeof v === 'string' ? v : null;
 }
 
-/** lastSeenId を保存し CHANGED_EVENT を broadcast (同タブ即時同期)。 */
-export function setLastSeenNewsId(id: string): void {
-  // 既読の記録を書く前に、基準を消す (既読の記録がある間、基準は読まれない)。容量が残りわずかな端末で、
-  // 要らなくなった基準が既読の保存の容量を奪うのを断つ。
+/**
+ * 基準の key を消す (既読の記録がある間、基準は読まれない)。要らなくなった基準が、既読の記録やほかの
+ * 機能の保存の容量を奪うのを断つ。key が無ければ何も起きない (storage event も出ない)。
+ */
+function removeBaselineQuietly(): void {
   try {
     window.localStorage.removeItem(NEWS_BASELINE_STORAGE_KEY);
   } catch {
-    // 消せなくても既読化は今までどおり進める。warn は出さない — storage が使えなければ、すぐ下の
-    // safeSet が今までどおり 1 回 warn する (既読化 1 回の warn を増やさない)。
+    // 消せなくても呼び出し元 (既読化・mount) は今までどおり進める。warn は出さない — storage が
+    // 使えなければ、既読化の safeSet と mount の既読の記録の読みが今までどおり 1 回 warn する。
   }
+}
+
+/** lastSeenId を保存し CHANGED_EVENT を broadcast (同タブ即時同期)。 */
+export function setLastSeenNewsId(id: string): void {
+  // 既読の記録を書く前に基準を消す (容量が残りわずかな端末で、基準が既読の保存の容量を奪わない)。
+  removeBaselineQuietly();
   safeSet(NEWS_LAST_SEEN_STORAGE_KEY, id);
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new Event(NEWS_CHANGED_EVENT));
@@ -60,10 +70,12 @@ function parseStoredId(raw: string | null): string | null {
 
 /**
  * mount で 1 回、未読を数える基準を決める (hooks/useNewsRead.ts から呼ぶ)。
- * - 既読の記録がある → { lastSeen: 記録, baseline: 今の最新 }。基準の key は読まない・書かない
- *   (localStorage の読み 1 回・数え方は記録で決まる)。
+ * - 既読の記録がある → { lastSeen: 記録, baseline: 今の最新 }。基準の key は読まない・書かない。
+ *   残っていれば消す (localStorage の読み 1 回・消去 1 回・数え方は記録で決まる)。
  * - 無い → 基準の key を読む。一覧にある id ならそれを基準にする。無い・壊れている・一覧に無い
  *   (消されたお知らせ・古い版のタブが新しい版の id を見た) → 今の最新を基準として書く (書き直す)。
+ *   書いた後に既読の記録を読み直し、その間に別のタブの既読化で記録ができていたら、今書いた基準を
+ *   消して、その記録で数える。
  * - 既読の記録を読めない環境 → { lastSeen: null, baseline: 今の最新 } (印なし) と warn 1 回。
  *   基準を読めない・書けないだけなら、その mount は今の最新を基準にする (warn なし)。
  * 既読の記録 (lastSeenId) には書かない。
@@ -84,16 +96,30 @@ export function loadNewsReadState(items: readonly HasId[]): {
     logger.warn('localStorage.get failed', { key: NEWS_LAST_SEEN_STORAGE_KEY, error });
     return { lastSeen: null, baseline: latest };
   }
-  if (lastSeen !== null) return { lastSeen, baseline: latest };
+  if (lastSeen !== null) {
+    // タブの割り込みで、既読の記録ができた後に書かれた基準が残っていれば消す。
+    removeBaselineQuietly();
+    return { lastSeen, baseline: latest };
+  }
   try {
     const baseline = parseStoredId(storage.getItem(NEWS_BASELINE_STORAGE_KEY));
     if (baseline !== null && items.some((it) => it.id === baseline)) {
       return { lastSeen: null, baseline };
     }
-    if (latest !== null) storage.setItem(NEWS_BASELINE_STORAGE_KEY, JSON.stringify(latest));
+    if (latest !== null) {
+      storage.setItem(NEWS_BASELINE_STORAGE_KEY, JSON.stringify(latest));
+      // 上で記録が無いと読んでから基準を書くまでの間に、別のタブの既読化が終わっていたら、今書いた基準は
+      // 要らない (記録がある間は読まれない)。消さないと、既読の記録ができた後も容量を使い続ける。
+      const seenMeanwhile = parseStoredId(storage.getItem(NEWS_LAST_SEEN_STORAGE_KEY));
+      if (seenMeanwhile !== null) {
+        removeBaselineQuietly();
+        return { lastSeen: seenMeanwhile, baseline: latest };
+      }
+    }
   } catch {
-    // 基準を読めない・書けない (容量超過・private mode) ときは、この mount は今の最新を基準にする (印なし)。
-    // 読めないときは書きに行かない (読めない基準を上書きしない)。warn は出さない — 基準の読み書きの
+    // 基準を読めない・書けない (容量超過・private mode)・書いた後の読み直しが throw するときは、この mount は
+    // 今の最新を基準にする (印なし)。読めないときは書きに行かない (読めない基準を上書きしない)。
+    // warn は出さない — 基準の読み書きの
     // 失敗で、page を開くたびに Sentry の event ('localStorage.set failed' の急増の alert も見ている) が
     // 出るのを断つ。storage が使えないことは、既読の記録の読み (上) と /news の既読化 (safeSet) が warn する。
   }
