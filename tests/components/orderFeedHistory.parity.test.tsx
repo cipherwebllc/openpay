@@ -7,6 +7,8 @@
 // 受注 (server と同じ sanitize を通した StoredOrder) から組む。
 //
 // 違ってよい欄は、経路ごとに名前を挙げて固定する (ここに無い欄が 1 つでも違えば落ちる)。
+// 利用料の額が 2 つの経路の式に合って欄を決められない注文は、4 欄 (負担者・利用料・売上総額・ネットワーク手数料相当額) を
+// null にする (推測で埋めない)。その違いも名前を挙げて固定する。
 
 import type { ReactElement } from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -99,7 +101,6 @@ import { sanitizeOrderItems, sanitizeTable, type StoredOrder } from '@/lib/order
 import {
   buildOrderSaleEntry,
   readOrderSaleEvidence,
-  type OrderSaleEvidence,
   type OrderSaleReceipt,
 } from '@/lib/orderFeedHistory';
 
@@ -264,10 +265,8 @@ function storedOrder(params: CheckoutParams, over: Partial<StoredOrder> & Pick<S
   };
 }
 
-function shopRow(order: StoredOrder, receipt: OrderSaleReceipt | null): HistoryEntry {
-  const evidence: OrderSaleEvidence | null = receipt
-    ? readOrderSaleEvidence(order, MERCHANT, receipt)
-    : { kind: 'none' };
+function shopRow(order: StoredOrder, receipt: OrderSaleReceipt): HistoryEntry {
+  const evidence = readOrderSaleEvidence(order, MERCHANT, receipt);
   expect(evidence).not.toBeNull();
   const entry = buildOrderSaleEntry(order, MERCHANT, evidence!);
   expect(entry).not.toBeNull();
@@ -282,6 +281,8 @@ function differingFields(payer: HistoryEntry, shop: HistoryEntry): string[] {
 
 // 時刻だけは必ず違う: 払った側は払った端末の時計、お店の行は server が受注を受け取った時刻。
 const ONLY_TS = ['ts'];
+// 経路を決められない注文: 時刻と、経路で変わる 4 欄だけが違う (着金額・お客様・tx・明細は同じ)。
+const UNKNOWN_SPLIT_FIELDS = ['ts', 'gasMode', 'feeAmount', 'saleAmount', 'networkFeeEquivalent'];
 
 async function recoverCase(params: CheckoutParams) {
   const { vars, row: payer } = await payByRelay(params);
@@ -289,7 +290,7 @@ async function recoverCase(params: CheckoutParams) {
   const order = storedOrder(params, { amount: split.merchantValue.toString(), txHash: RELAY_TX });
   const receipt = recoverReceipt({
     token: JPYC.address, forwarder: FORWARDER, customer: CUSTOMER, merchant: MERCHANT,
-    feeReceiver: env.feeReceiver, ...split,
+    feeReceiver: env.feeReceiver, txHash: RELAY_TX, ...split,
   });
   return { vars, split, payer, order, receipt, shop: shopRow(order, receipt) };
 }
@@ -351,17 +352,46 @@ describe('受注から書く行は、払った側の行と欄ごとに同じ —
     expect(shop).toMatchObject({ gasMode: 'merchant', feeAmount: '0', networkFeeEquivalent: (15n * ONE).toString(), saleAmount: (1_500n * ONE).toString() });
   });
 
-  it('限界: 利用料の flag が ON の build で、モバイル注文の画面を通らない会計 (feeKind なし) の 1% の回収は、利用料の欄に入る', async () => {
+  it('利用料の flag が ON・回収が 1% の build で、feeKind の無い会計の 1% の回収: 利用料 1% と見分けられないので 4 欄 null', async () => {
     // チェーンに載る額が「モバイル注文の利用料 1%・お店が負担」と同じで、receipt からは見分けられない。
-    // モバイル注文の画面は必ず feeKind を付けるので、この形は手で作った /checkout の URL だけ。
     feeFlags.enableMobileOrderFee = true;
     feeFlags.recoverFeeBps = 100;
     const { payer, shop } = await recoverCase(mobileOrderParams({ feeKind: undefined }));
-    expect(differingFields(payer, shop)).toEqual(['ts', 'feeAmount', 'networkFeeEquivalent']);
-    expect(payer).toMatchObject({ feeAmount: '0', networkFeeEquivalent: (15n * ONE).toString() });
-    expect(shop).toMatchObject({ feeAmount: (15n * ONE).toString(), networkFeeEquivalent: null });
-    // 着金額・売上総額・負担者は同じ。
-    expect(shop).toMatchObject({ merchantAmount: payer.merchantAmount, saleAmount: payer.saleAmount, gasMode: payer.gasMode });
+    expect(differingFields(payer, shop)).toEqual(UNKNOWN_SPLIT_FIELDS);
+    expect(payer).toMatchObject({ gasMode: 'merchant', feeAmount: '0', saleAmount: (1_500n * ONE).toString(), networkFeeEquivalent: (15n * ONE).toString() });
+    expect(shop).toMatchObject({ gasMode: null, feeAmount: null, saleAmount: null, networkFeeEquivalent: null });
+    // 着金額・お客様・id は同じ。
+    expect(shop).toMatchObject({ merchantAmount: payer.merchantAmount, customer: payer.customer, id: payer.id });
+  });
+
+  it('利用料の flag が ON・回収が 1% の build で、店頭 1% (お店が負担) の注文: 売上が 200 JPYC 以上なら回収と見分けられないので 4 欄 null', async () => {
+    feeFlags.enableMobileOrderFee = true;
+    feeFlags.recoverFeeBps = 100;
+    const { payer, shop, split } = await recoverCase(mobileOrderParams());
+    expect(split).toEqual({ merchantValue: 1_485n * ONE, feeValue: 15n * ONE });
+    // ネットワーク手数料相当額は、払った側 (モバイル注文の利用料) も null なので同じ。
+    expect(differingFields(payer, shop)).toEqual(['ts', 'gasMode', 'feeAmount', 'saleAmount']);
+    expect(payer).toMatchObject({ gasMode: 'merchant', feeAmount: (15n * ONE).toString(), saleAmount: (1_500n * ONE).toString(), networkFeeEquivalent: null });
+    expect(shop).toMatchObject({ gasMode: null, feeAmount: null, saleAmount: null, networkFeeEquivalent: null, merchantAmount: payer.merchantAmount, customer: CUSTOMER });
+  });
+
+  it('利用料の flag が ON・回収が 1% の build で、店頭 1% の注文が 200 JPYC 未満: 1% がフロア (2 JPYC) と違うので、時刻のほかは全部同じ', async () => {
+    feeFlags.enableMobileOrderFee = true;
+    feeFlags.recoverFeeBps = 100;
+    const { payer, shop, split } = await recoverCase(mobileOrderParams({ items: [{ name: 'ブレンド', qty: 1, price: '150' }] }));
+    expect(split.feeValue).toBe(15n * ONE / 10n);
+    expect(differingFields(payer, shop)).toEqual(ONLY_TS);
+  });
+
+  it.each([
+    ['お店が負担', undefined],
+    ['お客様が負担', 'customer'],
+  ] as const)('利用料の flag が ON・回収が 1% の build でも、事前 3% の注文 (%s) は時刻のほかは全部同じ', async (_label, feePayer) => {
+    feeFlags.enableMobileOrderFee = true;
+    feeFlags.recoverFeeBps = 100;
+    const { payer, shop } = await recoverCase(mobileOrderParams({ feeKind: 'preorder', feePayer }));
+    expect(differingFields(payer, shop)).toEqual(ONLY_TS);
+    expect(shop.feeAmount).toBe((45n * ONE).toString());
   });
 
   it('端数の出る額でも、利用料の式どおりに見分ける (1% の切り捨て)', async () => {
@@ -402,15 +432,6 @@ describe('受注から書く行は、払った側の行と欄ごとに同じ —
     expect(shop.lineItems?.map((l) => [l.taxRate, l.taxCategory, l.taxAmount])).toEqual([[null, null, '0'], [null, null, '0']]);
   });
 
-  it('receipt を読めなかったとき: 負担者・お客様・利用料・売上総額だけが空になる (着金額と明細は同じ)', async () => {
-    feeFlags.enableMobileOrderFee = true;
-    const { payer, order } = await recoverCase(mobileOrderParams());
-    const shop = shopRow(order, null);
-    expect(differingFields(payer, shop)).toEqual(['ts', 'gasMode', 'customer', 'feeAmount', 'saleAmount']);
-    expect(shop).toMatchObject({ gasMode: null, customer: null, feeAmount: null, saleAmount: null, networkFeeEquivalent: null });
-    expect(shop.merchantAmount).toBe(payer.merchantAmount);
-    expect(shop.id).toBe(payer.id);
-  });
 });
 
 describe('受注から書く行は、払った側の行と欄ごとに同じ — forwarder の無いチェーンの relay (Settled なし)', () => {
@@ -420,7 +441,7 @@ describe('受注から書く行は、払った側の行と欄ごとに同じ —
     const { vars, row: payer } = await payByRelay(params);
     expect(vars).toMatchObject({ gasMode: 'customer', value: 1_500n * ONE });
     const order = storedOrder(params, { amount: vars.value.toString(), txHash: RELAY_TX });
-    const shop = shopRow(order, directReceipt({ token: JPYC.address, customer: CUSTOMER, merchant: MERCHANT, value: vars.value }));
+    const shop = shopRow(order, directReceipt({ token: JPYC.address, customer: CUSTOMER, merchant: MERCHANT, value: vars.value, txHash: RELAY_TX }));
     expect(differingFields(payer, shop)).toEqual(ONLY_TS);
     expect(shop).toMatchObject({ flow: 'batch', payMode: 'gasless', gasMode: 'customer', feeAmount: '0', networkFeeEquivalent: '0', saleAmount: (1_500n * ONE).toString(), blockNumber: null });
   });
@@ -430,7 +451,7 @@ describe('受注から書く行は、払った側の行と欄ごとに同じ —
   async function standardCase(params: CheckoutParams) {
     const { vars, row: payer, rows } = await payByStandard(params);
     const order = storedOrder(params, { amount: vars.merchantAmount.toString(), txHash: STANDARD_TX, unboundPayment: true });
-    const receipt = directReceipt({ token: JPYC.address, customer: CUSTOMER, merchant: MERCHANT, value: vars.merchantAmount, blockNumber: 123n });
+    const receipt = directReceipt({ token: JPYC.address, customer: CUSTOMER, merchant: MERCHANT, value: vars.merchantAmount, blockNumber: 123n, txHash: STANDARD_TX });
     return { vars, payer, rows, order, shop: shopRow(order, receipt) };
   }
 
@@ -462,10 +483,4 @@ describe('受注から書く行は、払った側の行と欄ごとに同じ —
     expect(shop).toMatchObject({ feeAmount: null, saleAmount: null, merchantAmount: (1_500n * ONE).toString() });
   });
 
-  it('receipt を読めなかったとき: お客様と block も空になる', async () => {
-    const { payer, order } = await standardCase(mobileOrderParams());
-    const shop = shopRow(order, null);
-    expect(differingFields(payer, shop)).toEqual(['ts', 'customer', 'blockNumber']);
-    expect(shop).toMatchObject({ customer: null, blockNumber: null, feeAmount: '0', saleAmount: (1_500n * ONE).toString() });
-  });
 });

@@ -1,21 +1,26 @@
 // モバイルオーダーの受注 (受注フィードの 1 件) から、お店の端末の取引履歴の 1 行を組む純関数。
 // RPC も localStorage も触らない (読む・書くのは lib/orderFeedHistoryRecorder.ts)。
 //
-// 行は、払った側 (CheckoutForm → usePaymentHistory) が同じ注文で書く行と、同じ id・同じ値にそろえる。
+// 第一の約束は「誤った売上の行を作らない」。確かめられない注文は書かず、確かめられない欄は null にする。
+//   - 書くのは、お客様のブラウザから払ったモバイル注文だけ (エージェント注文は書かない・isRecordableOrder)。
+//   - 書くのは、tx の receipt を読めて、要求した tx の receipt で、成功していて、受取先 (SIWE の session のアドレス) への
+//     入金がある注文だけ (readOrderSaleEvidence が null を返したら書かない)。
 //   - 金額の欄 (着金・利用料・売上総額・ネットワーク手数料相当額・負担者・お客様) は、server がオンチェーンで確かめた
 //     着金額 (order.amount) と、tx の receipt (forwarder の Settled・token の Transfer) と、build の定数だけから決める。
 //     お客様の申告 (明細の合計・order.from) からは決めない。決められない欄は null (履歴の「内訳なし」と同じ扱い)。
 //   - 説明の欄 (明細・メモ・管理番号・商品名) は、受注の画面に出ている注文の値をそのまま写す。
+// 行は、払った側 (CheckoutForm → usePaymentHistory) が同じ注文で書く行と、同じ id・同じ値にそろえる。
 //
-// 経路ごとの対応 (M = 着金額・F = Settled の feeValue):
+// 経路ごとの対応 (M = 着金額・F = Settled の feeValue・G = M + F)。Settled の F が式にちょうど合う経路だけを候補にする:
 //   forwarder の Settled あり (ガスレス・recover)
-//     モバイル注文の利用料・お客様が負担 (F = M の 3%)        gasMode customer / fee F / 売上 M     / 網 null
-//     モバイル注文の利用料・お店が負担 (F = (M+F) の 1% か 3%) gasMode merchant / fee F / 売上 M + F / 網 null
-//     それ以外 (ガス相当額の回収)                             gasMode merchant / fee 0 / 売上 M + F / 網 F
-//   Settled なし・relay (forwarder の無いチェーン)             gasMode customer / fee 0 / 売上 M     / 網 0
-//   Settled なし・通常決済 (unboundPayment)                    gasMode null     / 利用料の flag が OFF なら fee 0・売上 M、
-//                                                              ON なら fee・売上は null (利用料は別の tx で、この receipt に無い)
-//   receipt を読めなかった                                     分かる欄 (着金額・明細など) だけ。ほかは null
+//     モバイル注文の利用料・お客様が負担 (F = M の 3%)          gasMode customer / fee F / 売上 M / 網 null   (flag ON の build だけ)
+//     モバイル注文の利用料・お店が負担 (F = G の 1% か 3%)      gasMode merchant / fee F / 売上 G / 網 null   (flag ON の build だけ)
+//     ガス相当額の回収・お店が負担 (F = max(フロア, G × 率))     gasMode merchant / fee 0 / 売上 G / 網 F
+//     どれにも合わない・2 つ以上に合う                          gasMode・fee・売上・網はすべて null
+//       (回収が max(2 JPYC, 1%) の build では、店頭 1% の注文で G が 200 JPYC 以上のとき、お店負担の利用料と回収の両方に合う)
+//   Settled なし・relay (forwarder の無いチェーン)               gasMode customer / fee 0 / 売上 M / 網 0
+//   Settled なし・通常決済 (unboundPayment)                      gasMode null     / 利用料の flag が OFF なら fee 0・売上 M、
+//                                                                ON なら fee・売上は null (利用料は別の tx で、この receipt に無い)
 
 import { formatUnits, getAddress, isAddressEqual, type Address } from 'viem';
 import { buildCheckoutLineItems } from './checkoutLineItems';
@@ -27,29 +32,48 @@ import { mobileOrderFeeValue } from './mobileOrderFee';
 import { receiptSettlements, receiptTokenTransfers } from './order/agentOrderReceipt';
 import { isTxHashLike, type StoredOrder } from './orderRelay';
 import { configuredJpycForwarderFor } from './relay/forwarderConfig';
+import { recoverFeeValue } from './relay/recoverFee';
 import { resolveDeployment } from './tokens';
 
 /** 読んだ receipt のうち、行を組むのに使う部分。 */
 export type OrderSaleReceipt = {
+  transactionHash: string;
   status: 'success' | 'reverted';
   blockNumber: bigint;
   logs: readonly { address: string; topics: readonly string[]; data: string }[];
 };
 
-/** receipt から分かったこと。none = 読めなかった・どの入金か 1 つに決められなかった。 */
+/** receipt で確かめた、この受取先への入金。 */
 export type OrderSaleEvidence =
   | { kind: 'settled'; customer: Address; feeValue: bigint; blockNumber: bigint }
-  | { kind: 'direct'; customer: Address | null; blockNumber: bigint }
-  | { kind: 'none' };
+  | { kind: 'direct'; customer: Address | null; blockNumber: bigint };
 
-/** 行を書いてよい注文か (txHash があり、着金額が数字で、明細が配列)。受注フィードの応答は型を確かめずに届く。 */
+// エージェント注文の受付番号の頭。server は x402 で払われたエージェント注文を、orderId = `agent-<nonce の頭>` で同じ受注リストに
+// 保存する (lib/order/agentOrderFinalize.ts・app/api/agent-order/pay/route.ts)。受注の画面は人の注文と区別しない。
+const AGENT_ORDER_ID_PREFIX = 'agent-';
+
+/**
+ * エージェント注文か。料金の式が人の注文と違い (お客様への上乗せ・x402 の料金)、同じ tx に複数の受注が載りうるので、
+ * お店の履歴には書かない。お客様が `agent-` で始まる受付番号を名乗った注文も書かれないだけ (書かない側に倒れる)。
+ */
+export function isAgentOrder(order: StoredOrder): boolean {
+  return typeof order.orderId === 'string' && order.orderId.startsWith(AGENT_ORDER_ID_PREFIX);
+}
+
+/**
+ * 行を書いてよい注文か (txHash があり、着金額が数字で、明細が配列で、chain・token の表にあり、エージェント注文でない)。
+ * 受注フィードの応答は型を確かめずに届く。
+ */
 export function isRecordableOrder(order: StoredOrder): boolean {
   return (
     isTxHashLike(order.txHash) &&
     typeof order.amount === 'string' &&
     /^\d+$/.test(order.amount) &&
     Number.isInteger(order.chainId) &&
-    Array.isArray(order.items)
+    Array.isArray(order.items) &&
+    resolveDeployment('jpyc', order.chainId) !== undefined &&
+    slugForChain(order.chainId) !== undefined &&
+    !isAgentOrder(order)
   );
 }
 
@@ -59,32 +83,35 @@ export function orderSaleFlow(order: StoredOrder): 'batch' | 'standard-merchant'
 }
 
 /**
- * receipt から、この注文の入金の証拠を読む。null = receipt がこの受取先への入金を示していない (行を書かない)。
- * 読み解きは server が受注を確かめたときと同じ関数 (lib/order/agentOrderReceipt.ts)。
+ * receipt から、この受取先への入金を読む。null = 行を書かない (要求した tx の receipt でない・成功していない・この受取先への
+ * 入金が無い・どの入金か 1 つに決められない)。読み解きは server が受注を確かめたときと同じ関数 (lib/order/agentOrderReceipt.ts)。
  */
 export function readOrderSaleEvidence(
   order: StoredOrder,
   merchant: Address,
   receipt: OrderSaleReceipt,
 ): OrderSaleEvidence | null {
-  const deployment = resolveDeployment('jpyc', order.chainId);
-  if (!deployment) return { kind: 'none' };
+  // RPC が別の tx の receipt を返したら、その tx のお客様・利用料をこの注文の行に写さない。
+  if (
+    typeof receipt.transactionHash !== 'string' ||
+    receipt.transactionHash.toLowerCase() !== order.txHash.toLowerCase()
+  ) {
+    return null;
+  }
   if (receipt.status !== 'success') return null;
-  const toMerchant = receiptTokenTransfers(receipt.logs, deployment.address).filter((t) =>
-    isAddressEqual(t.to, merchant),
-  );
-  // 受注フィードの応答は server の session で決まる。別のウォレットへ切り替えた直後に、前のウォレットの名義で
-  // 別の受取先の注文を売上として書かないよう、この受取先への入金が receipt に無い注文は書かない。
-  if (toMerchant.length === 0) return null;
+  const deployment = resolveDeployment('jpyc', order.chainId);
+  if (!deployment) return null;
   const amount = BigInt(order.amount);
   const forwarder = configuredJpycForwarderFor(order.chainId);
   const settlements = forwarder ? receiptSettlements(receipt.logs, forwarder) : [];
+  // 受注フィードの応答は、その時の cookie の session で決まる。別のタブで別の店主にサインインした後に届いた注文
+  // (別の受取先への入金) を、この受取先の売上として書かないよう、この受取先への入金が receipt に無い注文は書かない。
   if (settlements.length > 0) {
     const mine = settlements.filter(
       (s) => isAddressEqual(s.merchant, merchant) && s.merchantValue === amount,
     );
-    // 同じ tx に、同じ受取先・同じ額の Settled が 2 つ以上あると、どちらのお客様・利用料か決められない。
-    if (mine.length !== 1) return { kind: 'none' };
+    // この受取先・この額の Settled が無い、または 2 つ以上 (どちらのお客様・利用料か決められない) なら書かない。
+    if (mine.length !== 1) return null;
     return {
       kind: 'settled',
       customer: getAddress(mine[0].from),
@@ -92,6 +119,10 @@ export function readOrderSaleEvidence(
       blockNumber: receipt.blockNumber,
     };
   }
+  const toMerchant = receiptTokenTransfers(receipt.logs, deployment.address).filter((t) =>
+    isAddressEqual(t.to, merchant),
+  );
+  if (toMerchant.length === 0) return null;
   // Settled が無い = お客様から受取先への直接の Transfer (通常決済・forwarder を通らない relay)。受取先への Transfer が
   // ちょうど 1 本で、額が着金額と同じときだけ、その送り主をお客様とする。
   const only = toMerchant.length === 1 && toMerchant[0].value === amount ? toMerchant[0] : null;
@@ -100,17 +131,56 @@ export function readOrderSaleEvidence(
   return { kind: 'direct', customer, blockNumber: receipt.blockNumber };
 }
 
-type SaleMoney = {
+/** 経路で変わる欄 (負担者・利用料・売上総額・ネットワーク手数料相当額)。 */
+export type OrderSaleSplit = {
   gasMode: GasMode | null;
-  customer: Address | null;
   feeAmount: bigint | null;
   saleAmount: bigint | null;
   networkFeeEquivalent: bigint | null;
-  blockNumber: bigint | null;
 };
 
+const UNKNOWN_SPLIT: OrderSaleSplit = {
+  gasMode: null,
+  feeAmount: null,
+  saleAmount: null,
+  networkFeeEquivalent: null,
+};
+
+/**
+ * forwarder の Settled (着金額 amount・利用料 feeValue) から、経路で変わる欄を決める。feeValue が、払った側の式
+ * (hooks/useRelayGaslessSnapshot.ts: feeKind ありはモバイル注文の利用料・無しは回収) のどれかとちょうど合う経路だけを候補にし、
+ * 候補が無い・2 つ以上あるときは 4 欄とも null (推測で売上総額を作らない)。候補の 3 つは、どの 2 つも欄が違う
+ * (お客様が負担とほかの 2 つは gasMode が、お店が負担の利用料と回収は feeAmount と networkFeeEquivalent が違う)。
+ */
+export function settledSaleSplit(amount: bigint, feeValue: bigint, chainId: number): OrderSaleSplit {
+  const gross = amount + feeValue;
+  const candidates: OrderSaleSplit[] = [];
+  // モバイル注文の利用料 (lib/mobileOrderFee.ts・払う額の一律 %)。利用料の flag が OFF の build では、払った側も使わない。
+  if (env.enableMobileOrderFee) {
+    // お客様が負担 (preorder・feePayer=customer): 利用料 = 注文額 (= 着金額) の 3%。
+    if (feeValue === mobileOrderFeeValue(amount, 'preorder')) {
+      candidates.push({ gasMode: 'customer', feeAmount: feeValue, saleAmount: amount, networkFeeEquivalent: null });
+    }
+    // お店が負担 (storefront 1%・preorder 3%): 利用料 = 注文額 (= 着金額 + 利用料) の %。
+    if (
+      feeValue === mobileOrderFeeValue(gross, 'storefront') ||
+      feeValue === mobileOrderFeeValue(gross, 'preorder')
+    ) {
+      candidates.push({ gasMode: 'merchant', feeAmount: feeValue, saleAmount: gross, networkFeeEquivalent: null });
+    }
+  }
+  // ガス相当額の回収 (feeKind の無い会計・利用料の flag が OFF の build)。/checkout の回収はお店の負担に固定
+  // (lib/paymentMoney.ts の effectiveGasMode)。払った側はネットワーク手数料相当額の欄に入れ、利用料は 0。
+  if (feeValue === recoverFeeValue(gross, 'merchant', chainId)) {
+    candidates.push({ gasMode: 'merchant', feeAmount: 0n, saleAmount: gross, networkFeeEquivalent: feeValue });
+  }
+  return candidates.length === 1 ? candidates[0] : UNKNOWN_SPLIT;
+}
+
+type SaleMoney = OrderSaleSplit & { customer: Address | null; blockNumber: bigint | null };
+
 function saleMoney(order: StoredOrder, amount: bigint, evidence: OrderSaleEvidence): SaleMoney {
-  const customer = evidence.kind === 'none' ? null : evidence.customer;
+  const customer = evidence.customer;
   if (order.unboundPayment) {
     // 通常決済: モバイル注文の利用料は別の tx (お店は hash を知らない)。利用料の flag が OFF の build では利用料 0・売上 = 着金額。
     // ON では、お店が負担 (売上 = 着金額 + 利用料) かお客様が負担 (売上 = 着金額) かが receipt から分からない。
@@ -122,33 +192,15 @@ function saleMoney(order: StoredOrder, amount: bigint, evidence: OrderSaleEviden
       saleAmount: noFee ? amount : null,
       networkFeeEquivalent: null,
       // 払った側の通常決済の行は、店舗への送金の block を持つ。
-      blockNumber: evidence.kind === 'none' ? null : evidence.blockNumber,
+      blockNumber: evidence.blockNumber,
     };
   }
   // ここから relay (払った側の行は block を持たない)。
   if (evidence.kind === 'settled') {
-    const fee = evidence.feeValue;
-    const gross = amount + fee;
-    if (env.enableMobileOrderFee) {
-      // モバイル注文の利用料は、払う額の一律 % (lib/mobileOrderFee.ts)。チェーンに載った額が式とちょうど合うかで見分ける。
-      if (fee === mobileOrderFeeValue(amount, 'preorder')) {
-        return { gasMode: 'customer', customer, feeAmount: fee, saleAmount: amount, networkFeeEquivalent: null, blockNumber: null };
-      }
-      if (
-        fee === mobileOrderFeeValue(gross, 'storefront') ||
-        fee === mobileOrderFeeValue(gross, 'preorder')
-      ) {
-        return { gasMode: 'merchant', customer, feeAmount: fee, saleAmount: gross, networkFeeEquivalent: null, blockNumber: null };
-      }
-    }
-    // モバイル注文の利用料でない recover = ガス相当額の回収 (お店が負担)。
-    return { gasMode: 'merchant', customer, feeAmount: 0n, saleAmount: gross, networkFeeEquivalent: fee, blockNumber: null };
+    return { ...settledSaleSplit(amount, evidence.feeValue, order.chainId), customer, blockNumber: null };
   }
-  if (evidence.kind === 'direct') {
-    // forwarder を通らない relay (利用料なし・ガスは OpenPay が負担)。モバイル注文の画面は gas=customer で会計を作る。
-    return { gasMode: 'customer', customer, feeAmount: 0n, saleAmount: amount, networkFeeEquivalent: 0n, blockNumber: null };
-  }
-  return { gasMode: null, customer: null, feeAmount: null, saleAmount: null, networkFeeEquivalent: null, blockNumber: null };
+  // forwarder を通らない relay (利用料なし・ガスは OpenPay が負担)。モバイル注文の画面は gas=customer で会計を作る。
+  return { gasMode: 'customer', customer, feeAmount: 0n, saleAmount: amount, networkFeeEquivalent: 0n, blockNumber: null };
 }
 
 function orderLineItems(order: StoredOrder, decimals: number): HistoryLineItem[] | null {
@@ -178,8 +230,8 @@ function orderLineItems(order: StoredOrder, decimals: number): HistoryLineItem[]
 }
 
 /**
- * 受注 1 件 → 履歴の 1 行。null = この注文は書けない (chain・token の表に無い = chainSlug と tokenAddress を埋められない)。
- * merchant は受注フィードを読んだ SIWE の session のアドレス (注文は受取先を持たない)。
+ * 受注 1 件 + receipt で確かめた入金 → 履歴の 1 行。null = この注文は書けない (chain・token の表に無い = chainSlug と
+ * tokenAddress を埋められない)。merchant は受注フィードを読んだ SIWE の session のアドレス (注文は受取先を持たない)。
  */
 export function buildOrderSaleEntry(
   order: StoredOrder,

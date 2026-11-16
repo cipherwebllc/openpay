@@ -14,7 +14,7 @@ vi.mock('@/lib/relay/forwarderConfig', async () => {
     configuredJpycForwarderFor: vi.fn(() => (forwarderHold.on ? '0x1111111111111111111111111111111111111111' : null)),
   };
 });
-const feeFlags = vi.hoisted(() => ({ enableMobileOrderFee: true }));
+const feeFlags = vi.hoisted(() => ({ enableMobileOrderFee: true, recoverFeeBps: 0 }));
 vi.mock('@/lib/env', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/env')>();
   return {
@@ -24,6 +24,10 @@ vi.mock('@/lib/env', async (importOriginal) => {
       get enableMobileOrderFee() {
         return feeFlags.enableMobileOrderFee;
       },
+      // hermetic: 回収の率は手元の NEXT_PUBLIC_RECOVER_FEE_BPS に頼らずテストが決める (既定はフロア 2 JPYC だけ)。
+      get recoverFeeBps() {
+        return feeFlags.recoverFeeBps;
+      },
     },
   };
 });
@@ -32,9 +36,11 @@ import { env } from '@/lib/env';
 import { appendHistory, loadHistory } from '@/lib/history';
 import {
   buildOrderSaleEntry,
+  isAgentOrder,
   isRecordableOrder,
   orderSaleFlow,
   readOrderSaleEvidence,
+  settledSaleSplit,
 } from '@/lib/orderFeedHistory';
 import type { StoredOrder } from '@/lib/orderRelay';
 import { deploymentForSlug } from '@/lib/tokens';
@@ -71,6 +77,7 @@ const settle = (over: Partial<Parameters<typeof recoverReceipt>[0]> = {}) =>
 beforeEach(() => {
   forwarderHold.on = true;
   feeFlags.enableMobileOrderFee = true;
+  feeFlags.recoverFeeBps = 0;
 });
 
 describe('isRecordableOrder — 行を書いてよい注文か', () => {
@@ -85,6 +92,25 @@ describe('isRecordableOrder — 行を書いてよい注文か', () => {
     expect(isRecordableOrder(order({ amount: '' }))).toBe(false);
     expect(isRecordableOrder(order({ amount: '1e21' }))).toBe(false);
     expect(isRecordableOrder({ ...order(), items: undefined } as unknown as StoredOrder)).toBe(false);
+  });
+
+  it('chain・token の表に無い chainId の注文は書かない', () => {
+    expect(isRecordableOrder(order({ chainId: 999_999 }))).toBe(false);
+  });
+
+  it('エージェント注文 (server が orderId = agent-<nonce> で保存する) は書かない', () => {
+    // lib/order/agentOrderFinalize.ts の orderId の形。
+    const agent = order({ orderId: `agent-0x${'1'.repeat(16)}` });
+    expect(isAgentOrder(agent)).toBe(true);
+    expect(isRecordableOrder(agent)).toBe(false);
+    // お客様が agent- で始まる番号を名乗った注文も書かれない (書かない側に倒れる)。
+    expect(isRecordableOrder(order({ orderId: 'agent-7K3Q' }))).toBe(false);
+    // 途中に agent を含むだけの番号・大文字の番号は人の注文。
+    expect(isAgentOrder(order({ orderId: 'my-agent-1' }))).toBe(false);
+    expect(isAgentOrder(order({ orderId: 'AGENT-1' }))).toBe(false);
+    expect(isRecordableOrder(order({ orderId: 'my-agent-1' }))).toBe(true);
+    // 受注フィードの応答は型を確かめずに届く: orderId が文字列でなくても投げない。
+    expect(isAgentOrder({ ...order(), orderId: undefined } as unknown as StoredOrder)).toBe(false);
   });
 });
 
@@ -104,6 +130,13 @@ describe('readOrderSaleEvidence — receipt の読み方', () => {
 
   it('revert した receipt は入金の証拠にしない (null = 書かない)', () => {
     expect(readOrderSaleEvidence(order(), MERCHANT, { ...settle(), status: 'reverted' })).toBeNull();
+  });
+
+  it('要求した tx でない receipt (RPC が別の tx の receipt を返した) は null = 書かない。大文字小文字の違いは同じ tx', () => {
+    expect(readOrderSaleEvidence(order(), MERCHANT, settle({ txHash: `0x${'b'.repeat(64)}` }))).toBeNull();
+    expect(readOrderSaleEvidence(order(), MERCHANT, { ...settle(), transactionHash: undefined } as unknown as ReturnType<typeof settle>)).toBeNull();
+    expect(readOrderSaleEvidence(order(), MERCHANT, settle({ txHash: `0x${'A'.repeat(64)}` }))).toMatchObject({ kind: 'settled' });
+    expect(readOrderSaleEvidence(order({ txHash: `0x${'A'.repeat(64)}` }), MERCHANT, settle())).toMatchObject({ kind: 'settled' });
   });
 
   it('この受取先への Transfer が無い receipt (別の受取先の注文) は null = 書かない', () => {
@@ -130,19 +163,26 @@ describe('readOrderSaleEvidence — receipt の読み方', () => {
     });
   });
 
-  it('同じ受取先・同じ額の Settled が 2 つある tx は、どちらか決めない (none)', () => {
+  it('同じ受取先・同じ額の Settled が 2 つある tx は、どちらか決めないので書かない (null)', () => {
     const a = settle();
     const b = settle({ customer: CUSTOMER_2, feeValue: 30n * ONE });
-    expect(readOrderSaleEvidence(order(), MERCHANT, { ...a, logs: [...a.logs, ...b.logs] })).toEqual({ kind: 'none' });
+    expect(readOrderSaleEvidence(order(), MERCHANT, { ...a, logs: [...a.logs, ...b.logs] })).toBeNull();
   });
 
-  it('Settled の額が着金額と違うときは使わない (none)', () => {
-    expect(readOrderSaleEvidence(order({ amount: (991n * ONE).toString() }), MERCHANT, settle())).toEqual({ kind: 'none' });
+  it('Settled の額が着金額と違うときは書かない (null)', () => {
+    expect(readOrderSaleEvidence(order({ amount: (991n * ONE).toString() }), MERCHANT, settle())).toBeNull();
+  });
+
+  it('Settled のある tx で、この受取先への Settled が無ければ、受取先への Transfer があっても書かない', () => {
+    const theirs = settle({ merchant: OTHER_MERCHANT });
+    const receipt = { ...theirs, logs: [...theirs.logs, transferLog(JPYC.address, CUSTOMER, MERCHANT, 990n * ONE)] };
+    expect(readOrderSaleEvidence(order(), MERCHANT, receipt)).toBeNull();
   });
 
   it('forwarder でないコントラクトが出した Settled は読まない (直接の Transfer として扱う)', () => {
     const fake = '0x5555555555555555555555555555555555555555' as Address;
     const receipt = {
+      transactionHash: TX,
       status: 'success' as const,
       blockNumber: 5n,
       logs: [
@@ -174,8 +214,8 @@ describe('buildOrderSaleEntry — 注文の形の端', () => {
   const settled = { kind: 'settled', customer: CUSTOMER, feeValue: 10n * ONE, blockNumber: 777n } as const;
 
   it('chain・token の表に無い chainId の注文は書けない (null)', () => {
-    expect(buildOrderSaleEntry(order({ chainId: 999_999 }), MERCHANT, { kind: 'none' })).toBeNull();
-    expect(readOrderSaleEvidence(order({ chainId: 999_999 }), MERCHANT, settle())).toEqual({ kind: 'none' });
+    expect(buildOrderSaleEntry(order({ chainId: 999_999 }), MERCHANT, settled)).toBeNull();
+    expect(readOrderSaleEvidence(order({ chainId: 999_999 }), MERCHANT, settle())).toBeNull();
   });
 
   it('時刻は server が受注を受け取った時刻。無い注文は今の時刻', () => {
@@ -190,7 +230,7 @@ describe('buildOrderSaleEntry — 注文の形の端', () => {
     expect(entry).toMatchObject({ receiptNo: null, note: '', memo: null });
   });
 
-  it('利用料の flag が ON でも、利用料の式に合わない回収額はネットワーク手数料相当額に入れる', () => {
+  it('利用料の flag が ON でも、回収の式 (フロア) にだけ合う額はネットワーク手数料相当額に入れる', () => {
     // 998 + 2: 2 は 1,000 の 1% (10) でも 3% (30) でも、998 の 3% (29.94) でもない = ガス相当額の回収。
     const entry = buildOrderSaleEntry(
       order({ amount: (998n * ONE).toString() }), MERCHANT, { ...settled, feeValue: 2n * ONE },
@@ -213,7 +253,7 @@ describe('buildOrderSaleEntry — 注文の形の端', () => {
     const entry = buildOrderSaleEntry(
       order({ unboundPayment: true, items: [{ name: '水', qty: 2, price: '' }, { name: 'パン', qty: 1, price: 'abc' }] }),
       MERCHANT,
-      { kind: 'none' },
+      { kind: 'direct', customer: CUSTOMER, blockNumber: 5n },
     )!;
     expect(entry.lineItems).toEqual([
       { id: '0', name: '水', quantity: 2, unitPrice: '', amount: '', taxRate: null, taxCategory: null, memo: null },
@@ -225,11 +265,79 @@ describe('buildOrderSaleEntry — 注文の形の端', () => {
   it('組んだ行は、履歴に保存して読み直しても同じ (読み込みの検査を通る形)', () => {
     const rows = [
       buildOrderSaleEntry(order(), MERCHANT, settled)!,
-      buildOrderSaleEntry(order({ txHash: `0x${'b'.repeat(64)}`, unboundPayment: true }), MERCHANT, { kind: 'none' })!,
-      buildOrderSaleEntry(order({ txHash: `0x${'c'.repeat(64)}`, items: [{ name: '水', qty: 2, price: '' }] }), MERCHANT, { kind: 'none' })!,
+      buildOrderSaleEntry(order({ txHash: `0x${'b'.repeat(64)}`, unboundPayment: true }), MERCHANT, { kind: 'direct', customer: null, blockNumber: 5n })!,
+      buildOrderSaleEntry(order({ txHash: `0x${'c'.repeat(64)}`, items: [{ name: '水', qty: 2, price: '' }] }), MERCHANT, { kind: 'direct', customer: CUSTOMER, blockNumber: 5n })!,
+      // 経路を決められない (4 欄 null) 行も、保存の検査を通る。
+      buildOrderSaleEntry(order({ txHash: `0x${'e'.repeat(64)}` }), MERCHANT, { ...settled, feeValue: 7n * ONE })!,
       buildOrderSaleEntry(order({ txHash: `0x${'d'.repeat(64)}`, discount: (100n * ONE).toString(), amount: (891n * ONE).toString() }), MERCHANT, { ...settled, feeValue: 9n * ONE })!,
     ];
     for (const row of rows) appendHistory(row);
     expect(loadHistory()).toEqual([...rows].reverse());
+  });
+});
+
+describe('settledSaleSplit — Settled の利用料が式にちょうど合う経路だけで欄を埋める', () => {
+  const M = (n: bigint) => n * ONE;
+  const UNKNOWN = { gasMode: null, feeAmount: null, saleAmount: null, networkFeeEquivalent: null };
+
+  it('モバイル注文の利用料・お店が負担 (店頭 1%・事前 3%): 利用料の欄・売上 = 着金額 + 利用料', () => {
+    // 店頭 1%: 1,500 → 15 (回収はフロア 2 なので合わない)。
+    expect(settledSaleSplit(M(1_485n), M(15n), JPYC.chainId)).toEqual({ gasMode: 'merchant', feeAmount: M(15n), saleAmount: M(1_500n), networkFeeEquivalent: null });
+    // 事前 3%・お店が負担: 1,500 → 45。
+    expect(settledSaleSplit(M(1_455n), M(45n), JPYC.chainId)).toEqual({ gasMode: 'merchant', feeAmount: M(45n), saleAmount: M(1_500n), networkFeeEquivalent: null });
+  });
+
+  it('モバイル注文の利用料・お客様が負担 (事前 3%): 利用料の欄・売上 = 着金額', () => {
+    expect(settledSaleSplit(M(1_500n), M(45n), JPYC.chainId)).toEqual({ gasMode: 'customer', feeAmount: M(45n), saleAmount: M(1_500n), networkFeeEquivalent: null });
+  });
+
+  it('回収 (フロア): ネットワーク手数料相当額の欄・利用料 0・売上 = 着金額 + 回収額', () => {
+    expect(settledSaleSplit(M(1_498n), M(2n), JPYC.chainId)).toEqual({ gasMode: 'merchant', feeAmount: 0n, saleAmount: M(1_500n), networkFeeEquivalent: M(2n) });
+  });
+
+  it('どの式にも合わない額は、4 欄とも null (推測で売上総額を作らない)', () => {
+    expect(settledSaleSplit(M(990n), M(7n), JPYC.chainId)).toEqual(UNKNOWN);
+    // 1 wei ずれた利用料も合わない。
+    expect(settledSaleSplit(M(1_485n), M(15n) + 1n, JPYC.chainId)).toEqual(UNKNOWN);
+  });
+
+  it('回収が 1% の build: 店頭 1% の注文で売上が 200 JPYC 以上なら、利用料と回収の両方に合うので 4 欄とも null', () => {
+    feeFlags.recoverFeeBps = 100;
+    // 1,500 の 1% = 15 = max(2, 15)。払った側は、店頭の注文なら利用料の欄・feeKind の無い会計なら網の欄に入れる。
+    expect(settledSaleSplit(M(1_485n), M(15n), JPYC.chainId)).toEqual(UNKNOWN);
+    // ちょうど 200 (1% = 2 = フロア) も両方に合う。
+    expect(settledSaleSplit(M(198n), M(2n), JPYC.chainId)).toEqual(UNKNOWN);
+    // 200 未満は 1% (1.99) がフロア (2) と違うので、店頭 1% だけに合う。
+    expect(settledSaleSplit(M(197n) + ONE / 100n, M(1n) + (ONE * 99n) / 100n, JPYC.chainId)).toMatchObject({ gasMode: 'merchant', feeAmount: M(1n) + (ONE * 99n) / 100n, networkFeeEquivalent: null });
+    // 事前 3% (お店が負担・お客様が負担) は 1% の回収と額が違うので、そのまま埋める。
+    expect(settledSaleSplit(M(1_455n), M(45n), JPYC.chainId)).toMatchObject({ gasMode: 'merchant', feeAmount: M(45n) });
+    expect(settledSaleSplit(M(1_500n), M(45n), JPYC.chainId)).toMatchObject({ gasMode: 'customer', feeAmount: M(45n) });
+  });
+
+  it('回収が 3% の build (feeKind の無い 3% の回収): 事前 3%・お店が負担と両方に合うので 4 欄とも null', () => {
+    feeFlags.recoverFeeBps = 300;
+    expect(settledSaleSplit(M(1_455n), M(45n), JPYC.chainId)).toEqual(UNKNOWN);
+  });
+
+  it('利用料の flag が OFF の build: モバイル注文の利用料の式は候補にしない (回収の式だけ)', () => {
+    feeFlags.enableMobileOrderFee = false;
+    // 店頭 1% の額は、回収 (フロア 2) に合わない = null。
+    expect(settledSaleSplit(M(1_485n), M(15n), JPYC.chainId)).toEqual(UNKNOWN);
+    // 回収が 1% の build では、同じ額が回収だけに合う。
+    feeFlags.recoverFeeBps = 100;
+    expect(settledSaleSplit(M(1_485n), M(15n), JPYC.chainId)).toEqual({ gasMode: 'merchant', feeAmount: 0n, saleAmount: M(1_500n), networkFeeEquivalent: M(15n) });
+  });
+
+  it('行に写すと: 4 欄は null・着金額・お客様・tx は入る', () => {
+    feeFlags.recoverFeeBps = 100;
+    const entry = buildOrderSaleEntry(
+      order({ amount: M(1_485n).toString() }),
+      MERCHANT,
+      { kind: 'settled', customer: CUSTOMER, feeValue: M(15n), blockNumber: 777n },
+    )!;
+    expect(entry).toMatchObject({
+      id: `batch-${TX}`, flow: 'batch', payMode: 'gasless', merchantAmount: M(1_485n).toString(), customer: CUSTOMER,
+      gasMode: null, feeAmount: null, saleAmount: null, networkFeeEquivalent: null, blockNumber: null,
+    });
   });
 });

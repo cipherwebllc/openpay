@@ -1,5 +1,5 @@
-// lib/orderFeedHistoryRecorder.ts: 受注フィードの注文を、履歴に 1 件 1 行・1 回だけ書く。
-// receipt の読み取り (lib/orderFeedReceipt.ts) だけを差し替え、履歴 (localStorage) は実物。
+// lib/orderFeedHistoryRecorder.ts: 受注フィードの注文を、receipt で確かめてから履歴に 1 件 1 行・1 回だけ書く。
+// receipt の読み取り (lib/orderFeedReceipt.ts) だけを差し替え、履歴と「書いた」印 (localStorage) は実物。
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { Address, Hex } from 'viem';
@@ -16,12 +16,12 @@ vi.mock('@/lib/relay/forwarderConfig', async () => {
 });
 vi.mock('@/lib/env', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/env')>();
-  return { ...actual, env: { ...actual.env, enableMobileOrderFee: true } };
+  return { ...actual, env: { ...actual.env, enableMobileOrderFee: true, recoverFeeBps: 0 } };
 });
 const warn = vi.hoisted(() => vi.fn());
 vi.mock('@/lib/logger', () => ({ logger: { debug: vi.fn(), info: vi.fn(), warn, error: vi.fn() } }));
-// 履歴は実物。読んだ回数・書いた回数を数え、保存の失敗を差し込めるようにだけする。
-const historyHold = vi.hoisted(() => ({ failAppend: false, loads: 0, appends: 0 }));
+// 履歴は実物。読んだ回数・書いた回数を数え、保存の失敗 (throw・黙って入らない) を差し込めるようにだけする。
+const historyHold = vi.hoisted(() => ({ failAppend: false, dropAppend: false, loads: 0, appends: 0 }));
 vi.mock('@/lib/history', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/history')>();
   return {
@@ -33,19 +33,23 @@ vi.mock('@/lib/history', async (importOriginal) => {
     appendHistory: (entry: Parameters<typeof actual.appendHistory>[0]) => {
       historyHold.appends += 1;
       if (historyHold.failAppend) throw new Error('storage_broken');
+      // appendHistory は localStorage の書き込みの失敗を投げない (safeSet)。その「黙って入らない」を再現する。
+      if (historyHold.dropAppend) return;
       actual.appendHistory(entry);
     },
   };
 });
 
 import { env } from '@/lib/env';
-import { appendHistory, buildHistoryEntry, loadHistory } from '@/lib/history';
+import { appendHistory, buildHistoryEntry, clearHistory, loadHistory, removeHistoryEntry } from '@/lib/history';
 import {
   ORDER_RECEIPT_MAX_READS,
   ORDER_RECEIPT_READS_PER_PASS,
+  ORDER_SALE_MARKS_KEY,
+  ORDER_SALE_MARKS_MAX,
   createOrderSaleRecorder,
 } from '@/lib/orderFeedHistoryRecorder';
-import type { StoredOrder } from '@/lib/orderRelay';
+import { ORDER_LIST_MAX, type StoredOrder } from '@/lib/orderRelay';
 import { deploymentForSlug } from '@/lib/tokens';
 
 const FORWARDER: Address = '0x1111111111111111111111111111111111111111';
@@ -71,25 +75,44 @@ function order(n: number, over: Partial<StoredOrder> = {}): StoredOrder {
   };
 }
 
-const receipt = (merchant: Address = MERCHANT) =>
+/** この tx の receipt (お客様 → forwarder → 受取先・利用料 10 = 1,000 の 1%)。 */
+const receipt = (hash: string, merchant: Address = MERCHANT) =>
   recoverReceipt({
     token: JPYC.address, forwarder: FORWARDER, customer: CUSTOMER, merchant,
-    merchantValue: 990n * ONE, feeReceiver: env.feeReceiver, feeValue: 10n * ONE,
+    merchantValue: 990n * ONE, feeReceiver: env.feeReceiver, feeValue: 10n * ONE, txHash: hash,
   });
+
+/** 「書いた」印 (localStorage の生の値)。 */
+function marks(): [string, number][] {
+  const raw = window.localStorage.getItem(ORDER_SALE_MARKS_KEY);
+  return raw === null ? [] : (JSON.parse(raw) as [string, number][]);
+}
+const markedHashes = () => marks().map(([hash]) => hash).sort();
+
+/** 外から resolve する receipt (遅れて返る・2 つのタブが同時に待つ)。 */
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((r) => {
+    resolve = r;
+  });
+  return { promise, resolve };
+}
 
 beforeEach(() => {
   read.mockReset();
-  read.mockImplementation(async () => receipt());
+  read.mockImplementation(async (_chainId: number, hash: string) => receipt(hash));
   historyHold.failAppend = false;
+  historyHold.dropAppend = false;
   historyHold.loads = 0;
   historyHold.appends = 0;
+  warn.mockReset();
 });
 afterEach(() => {
   vi.useRealTimers();
 });
 
 describe('createOrderSaleRecorder — 1 件 1 行・1 回だけ', () => {
-  it('新しい注文で 1 行。次の polling でも 1 行のまま (履歴も receipt も読み直さない)', async () => {
+  it('新しい注文で 1 行と「書いた」印。次の polling でも 1 行のまま (履歴も receipt も読み直さない)', async () => {
     const record = createOrderSaleRecorder();
     const orders = [order(1)];
     await record(orders, MERCHANT);
@@ -101,6 +124,7 @@ describe('createOrderSaleRecorder — 1 件 1 行・1 回だけ', () => {
     });
     expect(read).toHaveBeenCalledTimes(1);
     expect(read).toHaveBeenCalledWith(JPYC.chainId, tx(1));
+    expect(markedHashes()).toEqual([tx(1)]);
     const loadsAfterFirst = historyHold.loads;
 
     await record(orders, MERCHANT);
@@ -153,7 +177,16 @@ describe('createOrderSaleRecorder — 1 件 1 行・1 回だけ', () => {
     expect(read).toHaveBeenCalledTimes(1);
   });
 
-  it('72 時間ぶんがまとめて届いたとき: 件数ぶん 1 行ずつ・新しい注文が上・1 回の polling で読む receipt は上限まで', async () => {
+  it('エージェント注文は書かない (receipt も読まない・印も付けない)。ほかの注文は書く', async () => {
+    const record = createOrderSaleRecorder();
+    await record([order(2, { orderId: `agent-0x${'1'.repeat(16)}` }), order(1)], MERCHANT);
+    await record([order(2, { orderId: `agent-0x${'1'.repeat(16)}` }), order(1)], MERCHANT);
+    expect(loadHistory().map((e) => e.receiptNo)).toEqual(['N1']);
+    expect(read.mock.calls.map(([, hash]) => hash)).toEqual([tx(1)]);
+    expect(markedHashes()).toEqual([tx(1)]);
+  });
+
+  it('受注フィードの注文がまとめて届いたとき: 件数ぶん 1 行ずつ・新しい注文が上・1 回の polling で読む receipt は上限まで', async () => {
     const total = ORDER_RECEIPT_READS_PER_PASS + 5;
     // 受注フィードは新しい順に届く。
     const orders = Array.from({ length: total }, (_, i) => order(total - i));
@@ -183,26 +216,27 @@ describe('createOrderSaleRecorder — 1 件 1 行・1 回だけ', () => {
   });
 });
 
-describe('createOrderSaleRecorder — receipt を読む回数の上限', () => {
-  it('読めない注文は、上限の回数まで次の polling で読み直し、使い切ったら分かる欄だけの行を書く。その後は読まない', async () => {
+describe('createOrderSaleRecorder — receipt で確かめた注文だけを書く', () => {
+  it('receipt を上限の回数まで読めない注文は書かない・印も付けない。次に画面を開いたら、もう一度読んで書く', async () => {
     read.mockRejectedValue(new Error('rpc down'));
     const record = createOrderSaleRecorder();
     const orders = [order(1)];
-    for (let i = 1; i < ORDER_RECEIPT_MAX_READS; i += 1) {
+    for (let i = 1; i <= ORDER_RECEIPT_MAX_READS; i += 1) {
       await record(orders, MERCHANT);
       expect(read).toHaveBeenCalledTimes(i);
-      expect(loadHistory()).toHaveLength(0);
     }
-    await record(orders, MERCHANT);
-    expect(read).toHaveBeenCalledTimes(ORDER_RECEIPT_MAX_READS);
-    expect(loadHistory()).toHaveLength(1);
-    expect(loadHistory()[0]).toMatchObject({
-      id: `batch-${tx(1)}`, merchantAmount: (990n * ONE).toString(), merchant: MERCHANT,
-      customer: null, feeAmount: null, saleAmount: null, gasMode: null, receiptNo: 'N1',
-    });
+    // 上限を使い切ったら、この画面では読まない。
     for (let i = 0; i < 5; i += 1) await record(orders, MERCHANT);
     expect(read).toHaveBeenCalledTimes(ORDER_RECEIPT_MAX_READS);
+    expect(loadHistory()).toHaveLength(0);
+    expect(historyHold.appends).toBe(0);
+    expect(marks()).toEqual([]);
+    // 次に受注の画面を開いたとき (新しい書き手)。
+    read.mockReset();
+    read.mockImplementation(async (_chainId: number, hash: string) => receipt(hash));
+    await createOrderSaleRecorder()(orders, MERCHANT);
     expect(loadHistory()).toHaveLength(1);
+    expect(loadHistory()[0]).toMatchObject({ customer: CUSTOMER, feeAmount: (10n * ONE).toString() });
   });
 
   it('1 回目に読めず 2 回目に読めた注文は、全部の欄が入った行になる', async () => {
@@ -215,20 +249,49 @@ describe('createOrderSaleRecorder — receipt を読む回数の上限', () => {
     expect(read).toHaveBeenCalledTimes(2);
   });
 
+  it('RPC が別の tx の receipt を返したら書かない・印も付けない (この画面では読み直さない・次に開いたら読む)', async () => {
+    read.mockImplementation(async () => receipt(tx(0x999)));
+    const record = createOrderSaleRecorder();
+    for (let i = 0; i < 3; i += 1) await record([order(1)], MERCHANT);
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(loadHistory()).toHaveLength(0);
+    expect(marks()).toEqual([]);
+    read.mockImplementation(async (_chainId: number, hash: string) => receipt(hash));
+    await createOrderSaleRecorder()([order(1)], MERCHANT);
+    expect(loadHistory().map((e) => e.txHash)).toEqual([tx(1)]);
+  });
+
+  it('この受取先への入金が receipt に無い注文 (別の店主の注文) は書かない・印も付けない', async () => {
+    read.mockImplementation(async (_chainId: number, hash: string) => receipt(hash, OTHER_MERCHANT));
+    const record = createOrderSaleRecorder();
+    for (let i = 0; i < 4; i += 1) await record([order(1)], MERCHANT);
+    expect(loadHistory()).toHaveLength(0);
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(marks()).toEqual([]);
+  });
+
+  it('revert した tx の注文は書かない・印も付けない', async () => {
+    read.mockImplementation(async (_chainId: number, hash: string) => ({ ...receipt(hash), status: 'reverted' }));
+    await createOrderSaleRecorder()([order(1)], MERCHANT);
+    expect(loadHistory()).toHaveLength(0);
+    expect(marks()).toEqual([]);
+  });
+
   it('読めない注文があっても、同じ polling のほかの注文は書く', async () => {
     read.mockImplementation(async (_chainId: number, hash: Hex) => {
       if (hash === tx(1)) throw new Error('not found');
-      return receipt();
+      return receipt(hash);
     });
     const record = createOrderSaleRecorder();
     await record([order(3), order(2), order(1)], MERCHANT);
     expect(loadHistory().map((e) => e.receiptNo)).toEqual(['N3', 'N2']);
+    expect(markedHashes()).toEqual([tx(2), tx(3)]);
   });
 
-  it('RPC が返らないとき: 待ち時間で切り上げ、後ろの注文と次の polling を止めない', async () => {
+  it('RPC が返らないとき: 待ち時間で切り上げ、後ろの注文と次の polling を止めない。上限まで返らなければ書かない', async () => {
     vi.useFakeTimers();
     read.mockImplementation((_chainId: number, hash: Hex) =>
-      hash === tx(1) ? new Promise(() => {}) : Promise.resolve(receipt()),
+      hash === tx(1) ? new Promise(() => {}) : Promise.resolve(receipt(hash)),
     );
     const record = createOrderSaleRecorder();
     const orders = [order(2), order(1)];
@@ -238,23 +301,43 @@ describe('createOrderSaleRecorder — receipt を読む回数の上限', () => {
     expect(read).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(7_000);
     await first;
-    // 後ろの注文 (2) は同じ回で書けている。返らなかった注文 (1) はまだ書かない。
+    // 後ろの注文 (2) は同じ回で書けている。返らなかった注文 (1) は書かない。
     expect(loadHistory().map((e) => e.receiptNo)).toEqual(['N2']);
-    for (let i = 1; i < ORDER_RECEIPT_MAX_READS; i += 1) {
+    for (let i = 1; i < ORDER_RECEIPT_MAX_READS + 2; i += 1) {
       const pass = record(orders, MERCHANT);
       await vi.advanceTimersByTimeAsync(7_000);
       await pass;
     }
-    // 上限を使い切って、分かる欄だけの行。
-    expect(loadHistory().map((e) => [e.receiptNo, e.customer])).toEqual([['N1', null], ['N2', CUSTOMER]]);
+    expect(loadHistory().map((e) => e.receiptNo)).toEqual(['N2']);
     expect(read.mock.calls.filter(([, hash]) => hash === tx(1))).toHaveLength(ORDER_RECEIPT_MAX_READS);
+    expect(markedHashes()).toEqual([tx(2)]);
+  });
+
+  it('待ち時間の後に遅れて返った receipt は使わない (書かない)。次の polling で読み直して 1 行だけ書く', async () => {
+    vi.useFakeTimers();
+    const late = deferred<ReturnType<typeof receipt>>();
+    read.mockImplementationOnce(() => late.promise);
+    const record = createOrderSaleRecorder();
+    const first = record([order(1)], MERCHANT);
+    await vi.advanceTimersByTimeAsync(7_000);
+    await first;
+    expect(loadHistory()).toHaveLength(0);
+    // 切り上げた後に返る。
+    late.resolve(receipt(tx(1)));
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(loadHistory()).toHaveLength(0);
+    expect(historyHold.appends).toBe(0);
+    await record([order(1)], MERCHANT);
+    expect(read).toHaveBeenCalledTimes(2);
+    expect(loadHistory()).toHaveLength(1);
+    expect(historyHold.appends).toBe(1);
   });
 
   it('1 回の polling で receipt の読み取りに使う時間を超えたら、残りは次の polling で読む', async () => {
     vi.useFakeTimers();
-    read.mockImplementation(async () => {
+    read.mockImplementation(async (_chainId: number, hash: string) => {
       vi.setSystemTime(Date.now() + 6_000); // 遅い RPC: 1 回に 6 秒
-      return receipt();
+      return receipt(hash);
     });
     const record = createOrderSaleRecorder();
     const orders = [order(4), order(3), order(2), order(1)];
@@ -266,14 +349,6 @@ describe('createOrderSaleRecorder — receipt を読む回数の上限', () => {
     expect(loadHistory().map((e) => e.receiptNo)).toEqual(['N4', 'N3', 'N2', 'N1']);
   });
 
-  it('この受取先への入金が receipt に無い注文は書かず、読み直しもしない', async () => {
-    read.mockImplementation(async () => receipt(OTHER_MERCHANT));
-    const record = createOrderSaleRecorder();
-    for (let i = 0; i < 4; i += 1) await record([order(1)], MERCHANT);
-    expect(loadHistory()).toHaveLength(0);
-    expect(read).toHaveBeenCalledTimes(1);
-  });
-
   it('chain の表に無い注文は、receipt を読まずに外す', async () => {
     const record = createOrderSaleRecorder();
     await record([order(1, { chainId: 999_999 }), order(2)], MERCHANT);
@@ -282,8 +357,183 @@ describe('createOrderSaleRecorder — receipt を読む回数の上限', () => {
   });
 });
 
+describe('createOrderSaleRecorder — 消した行を書き戻さない (「書いた」印)', () => {
+  it('書いた行を履歴から消しても、次に画面を開いたときに書き戻さない (receipt も読まない)', async () => {
+    await createOrderSaleRecorder()([order(2), order(1)], MERCHANT);
+    expect(loadHistory()).toHaveLength(2);
+    removeHistoryEntry(`batch-${tx(1)}`);
+    expect(loadHistory().map((e) => e.receiptNo)).toEqual(['N2']);
+    read.mockClear();
+    await createOrderSaleRecorder()([order(2), order(1)], MERCHANT);
+    expect(loadHistory().map((e) => e.receiptNo)).toEqual(['N2']);
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it('全て削除しても、書き戻さない。印は消えない', async () => {
+    await createOrderSaleRecorder()([order(2), order(1)], MERCHANT);
+    clearHistory();
+    expect(loadHistory()).toHaveLength(0);
+    expect(markedHashes()).toEqual([tx(1), tx(2)]);
+    await createOrderSaleRecorder()([order(3), order(2), order(1)], MERCHANT);
+    // 新しく届いた注文だけが入る。
+    expect(loadHistory().map((e) => e.receiptNo)).toEqual(['N3']);
+  });
+
+  it('既に履歴にあった注文 (払った側が同じ端末で書いた行) にも印を付け、その行を消しても書かない', async () => {
+    const payerRow = buildHistoryEntry({
+      flow: 'batch', status: 'success', chainId: JPYC.chainId, chainSlug: 'polygon', asset: 'jpyc',
+      tokenAddress: JPYC.address, payMode: 'gasless', gasMode: 'merchant', merchant: MERCHANT,
+      merchantAmount: 990n * ONE, customer: CUSTOMER, feeReceiver: env.feeReceiver, feeAmount: 10n * ONE,
+      txHash: tx(1), userOpHash: null, blockNumber: null, errorMessage: null, storeName: '', note: '',
+    });
+    appendHistory(payerRow);
+    await createOrderSaleRecorder()([order(1)], MERCHANT);
+    expect(markedHashes()).toEqual([tx(1)]);
+    clearHistory();
+    await createOrderSaleRecorder()([order(1)], MERCHANT);
+    expect(loadHistory()).toHaveLength(0);
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it('印は txHash (小文字) と時刻。履歴とは別の key', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(1_763_500_000_000);
+    const upper = order(0xabc, { txHash: `0x${tx(0xabc).slice(2).toUpperCase()}` });
+    await createOrderSaleRecorder()([upper], MERCHANT);
+    expect(loadHistory()).toHaveLength(1);
+    expect(marks()).toEqual([[tx(0xabc), 1_763_500_000_000]]);
+    expect(ORDER_SALE_MARKS_KEY).not.toBe('openpay:history:v1');
+  });
+
+  it('印は期限で捨てない (受注フィードに何日も残る注文を、何日後でも書き戻さない)', async () => {
+    window.localStorage.setItem(ORDER_SALE_MARKS_KEY, JSON.stringify([[tx(1), Date.now() - 365 * 86_400_000]]));
+    await createOrderSaleRecorder()([order(1)], MERCHANT);
+    expect(loadHistory()).toHaveLength(0);
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it(`印は ${ORDER_SALE_MARKS_MAX} 件まで (受注フィードの上限の 2 倍)。超えたら古い印から捨てる`, async () => {
+    expect(ORDER_SALE_MARKS_MAX).toBe(ORDER_LIST_MAX * 2);
+    const old = Array.from({ length: ORDER_SALE_MARKS_MAX }, (_, i) => [tx(0x10000 + i), 1_000 + i] as [string, number]);
+    window.localStorage.setItem(ORDER_SALE_MARKS_KEY, JSON.stringify(old));
+    await createOrderSaleRecorder()([order(1)], MERCHANT);
+    const kept = marks();
+    expect(kept).toHaveLength(ORDER_SALE_MARKS_MAX);
+    expect(kept.map(([hash]) => hash)).not.toContain(tx(0x10000));
+    expect(kept.map(([hash]) => hash)).toContain(tx(0x10001));
+    expect(kept[kept.length - 1][0]).toBe(tx(1));
+  });
+
+  it('保存した行が履歴に入らなかった (localStorage が黙って書けなかった) ときは、印を付けない', async () => {
+    historyHold.dropAppend = true;
+    const record = createOrderSaleRecorder();
+    await record([order(1)], MERCHANT);
+    expect(historyHold.appends).toBe(1);
+    expect(loadHistory()).toHaveLength(0);
+    expect(marks()).toEqual([]);
+    // 次に画面を開いたとき、書ける。
+    historyHold.dropAppend = false;
+    await createOrderSaleRecorder()([order(1)], MERCHANT);
+    expect(loadHistory()).toHaveLength(1);
+  });
+
+  it('印の値が壊れているときは、無いものとして履歴の確認だけで動き、次に付けた印で直る', async () => {
+    for (const broken of ['{not json', '"text"', JSON.stringify({ a: 1 }), JSON.stringify([['0x1234', 1], [tx(9), 'x'], 5])]) {
+      window.localStorage.clear();
+      window.localStorage.setItem(ORDER_SALE_MARKS_KEY, broken);
+      await createOrderSaleRecorder()([order(1)], MERCHANT);
+      expect(loadHistory()).toHaveLength(1);
+      expect(markedHashes()).toEqual([tx(1)]);
+      // 2 回目の画面: 履歴にあるので書かない。
+      await createOrderSaleRecorder()([order(1)], MERCHANT);
+      expect(loadHistory()).toHaveLength(1);
+    }
+  });
+
+  it('印の key だけ読めない・書けない (localStorage の障害) ときは、履歴の確認だけで動く', async () => {
+    const getItem = Storage.prototype.getItem;
+    const setItem = Storage.prototype.setItem;
+    const get = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(function (this: Storage, key: string) {
+      if (key === ORDER_SALE_MARKS_KEY) throw new Error('SecurityError');
+      return getItem.call(this, key);
+    });
+    const set = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key: string, value: string) {
+      if (key === ORDER_SALE_MARKS_KEY) throw new Error('QuotaExceededError');
+      setItem.call(this, key, value);
+    });
+    try {
+      await expect(createOrderSaleRecorder()([order(2), order(1)], MERCHANT)).resolves.toBeUndefined();
+      expect(loadHistory().map((e) => e.receiptNo)).toEqual(['N2', 'N1']);
+      // 2 回目の画面: 履歴にあるので書かない (印が無くても 2 行にならない)。
+      await createOrderSaleRecorder()([order(2), order(1)], MERCHANT);
+      expect(loadHistory()).toHaveLength(2);
+      expect(warn).not.toHaveBeenCalled();
+      expect(get).toHaveBeenCalledWith(ORDER_SALE_MARKS_KEY);
+      expect(set).toHaveBeenCalledWith(ORDER_SALE_MARKS_KEY, expect.any(String));
+    } finally {
+      get.mockRestore();
+      set.mockRestore();
+    }
+    // 印は書けていない (障害が効いていた)。
+    expect(marks()).toEqual([]);
+  });
+});
+
+describe('createOrderSaleRecorder — 保存の直前にもう一度見る (2 つのタブ)', () => {
+  it('2 つのタブが同じ注文の receipt を同時に待っても、1 行だけ', async () => {
+    const pending = deferred<ReturnType<typeof receipt>>();
+    read.mockImplementation(() => pending.promise);
+    const tabA = createOrderSaleRecorder()([order(1)], MERCHANT);
+    const tabB = createOrderSaleRecorder()([order(1)], MERCHANT);
+    await Promise.resolve();
+    expect(read).toHaveBeenCalledTimes(2);
+    pending.resolve(receipt(tx(1)));
+    await Promise.all([tabA, tabB]);
+    expect(loadHistory()).toHaveLength(1);
+    expect(historyHold.appends).toBe(1);
+    expect(markedHashes()).toEqual([tx(1)]);
+  });
+
+  it('receipt を待っている間に、別のタブが大文字の txHash で同じ注文を書いた: 2 行にしない (印は付ける)', async () => {
+    const pending = deferred<ReturnType<typeof receipt>>();
+    read.mockImplementation(() => pending.promise);
+    const tab = createOrderSaleRecorder()([order(1)], MERCHANT);
+    await Promise.resolve();
+    // 別のタブ (受注フィードの txHash が大文字) が先に書いた。
+    appendHistory(
+      buildHistoryEntry({
+        flow: 'batch', status: 'success', chainId: JPYC.chainId, chainSlug: 'polygon', asset: 'jpyc',
+        tokenAddress: JPYC.address, payMode: 'gasless', gasMode: 'merchant', merchant: MERCHANT,
+        merchantAmount: 990n * ONE, customer: CUSTOMER, feeReceiver: env.feeReceiver, feeAmount: 10n * ONE,
+        txHash: `0x${tx(1).slice(2).toUpperCase()}`, userOpHash: null, blockNumber: null, errorMessage: null,
+        storeName: '', note: '別のタブ',
+      }),
+    );
+    historyHold.appends = 0;
+    pending.resolve(receipt(tx(1)));
+    await tab;
+    expect(loadHistory()).toHaveLength(1);
+    expect(loadHistory()[0].note).toBe('別のタブ');
+    expect(historyHold.appends).toBe(0);
+    expect(markedHashes()).toEqual([tx(1)]);
+  });
+
+  it('receipt を待っている間に、別のタブが書いて店主が消した (印だけが残る): 書き戻さない', async () => {
+    const pending = deferred<ReturnType<typeof receipt>>();
+    read.mockImplementationOnce(() => pending.promise);
+    const tab = createOrderSaleRecorder()([order(1)], MERCHANT);
+    await Promise.resolve();
+    await createOrderSaleRecorder()([order(1)], MERCHANT);
+    expect(loadHistory()).toHaveLength(1);
+    clearHistory();
+    pending.resolve(receipt(tx(1)));
+    await tab;
+    expect(loadHistory()).toHaveLength(0);
+  });
+});
+
 describe('createOrderSaleRecorder — 失敗を呼び出し元へ出さない', () => {
-  it('履歴の保存が throw しても reject しない。残りの注文も試し、警告は 1 回だけ。同じ画面では書き直さない', async () => {
+  it('履歴の保存が throw しても reject しない。残りの注文も試し、警告は 1 回だけ。印は付けない。同じ画面では書き直さない', async () => {
     historyHold.failAppend = true;
     const record = createOrderSaleRecorder();
     const orders = [order(2), order(1)];
@@ -291,6 +541,7 @@ describe('createOrderSaleRecorder — 失敗を呼び出し元へ出さない', 
     expect(historyHold.appends).toBe(2);
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn).toHaveBeenCalledWith('orderFeedHistory.append_failed', expect.anything());
+    expect(marks()).toEqual([]);
     historyHold.failAppend = false;
     await record(orders, MERCHANT);
     expect(historyHold.appends).toBe(2);

@@ -1,5 +1,5 @@
 // lib/orderFeedReceipt.ts の実物 (tests/setup.ts の既定のスタブを外して読む)。
-// RPC へは 1 回だけ (送り直さない)・読めなければ throw・返すのは status / blockNumber / logs だけ。
+// RPC へは 1 回だけ (送り直さない)・読めなければ throw・返すのは transactionHash / status / blockNumber / logs だけ。
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { Hex } from 'viem';
@@ -59,10 +59,12 @@ function stubRpc(respond: (body: { id: number; method: string }) => Response) {
 }
 
 describe('readOrderReceipt', () => {
-  it('eth_getTransactionReceipt を 1 回読み、status・blockNumber・logs を返す', async () => {
+  it('eth_getTransactionReceipt を 1 回読み、transactionHash・status・blockNumber・logs を返す', async () => {
     stubRpc((body) => Response.json({ jsonrpc: '2.0', id: body.id, result: rpcReceipt }));
     const { readOrderReceipt } = await loadActual();
     const receipt = await readOrderReceipt(JPYC.chainId, TX);
+    // 要求した hash と同じかは書き手の側で確かめる (ここでは RPC が返した値をそのまま返す)。
+    expect(receipt.transactionHash).toBe(TX);
     expect(receipt.status).toBe('success');
     expect(receipt.blockNumber).toBe(777n);
     expect(receipt.logs).toHaveLength(1);

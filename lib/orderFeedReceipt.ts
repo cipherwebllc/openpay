@@ -1,5 +1,8 @@
 // 受注の tx の receipt を、お店の端末から RPC で 1 回読む (今ある transport = lib/chains.ts の transportForChain)。
 // server は通らない。読めないときは throw する (回数の上限と、読めなかったときの扱いは lib/orderFeedHistoryRecorder.ts)。
+// 返った receipt の transactionHash もそのまま返す (要求した hash と同じかは lib/orderFeedHistory.ts が確かめる)。
+// Ethereum (と Sepolia) の transport は公開 RPC の fallback を順に試すので、1 回の読み取りで RPC への要求が
+// 最大で endpoint の数だけ出る (timeout は endpoint の数で割る・lib/chains.ts)。
 // テストの既定は「読めない」スタブ (tests/setup.ts): テストが外の RPC を叩かない。
 
 import { createPublicClient, type Hex, type PublicClient } from 'viem';
@@ -23,5 +26,10 @@ export async function readOrderReceipt(chainId: number, txHash: Hex): Promise<Or
     clients.set(chainId, client);
   }
   const receipt = await client.getTransactionReceipt({ hash: txHash });
-  return { status: receipt.status, blockNumber: receipt.blockNumber, logs: receipt.logs };
+  return {
+    transactionHash: receipt.transactionHash,
+    status: receipt.status,
+    blockNumber: receipt.blockNumber,
+    logs: receipt.logs,
+  };
 }

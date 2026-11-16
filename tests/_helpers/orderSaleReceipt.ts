@@ -11,6 +11,9 @@ const ABI = parseAbi([
 
 type TestLog = OrderSaleReceipt['logs'][number];
 
+/** receipt の transactionHash の既定 (テストの注文の txHash と同じにする)。 */
+export const RECEIPT_TX = `0x${'a'.repeat(64)}` as Hex;
+
 export function transferLog(token: Address, from: Address, to: Address, value: bigint): TestLog {
   return {
     address: token,
@@ -47,8 +50,10 @@ export function recoverReceipt(a: {
   feeReceiver: Address;
   feeValue: bigint;
   blockNumber?: bigint;
+  txHash?: string;
 }): OrderSaleReceipt {
   return {
+    transactionHash: a.txHash ?? RECEIPT_TX,
     status: 'success',
     blockNumber: a.blockNumber ?? 777n,
     logs: [
@@ -73,8 +78,10 @@ export function directReceipt(a: {
   merchant: Address;
   value: bigint;
   blockNumber?: bigint;
+  txHash?: string;
 }): OrderSaleReceipt {
   return {
+    transactionHash: a.txHash ?? RECEIPT_TX,
     status: 'success',
     blockNumber: a.blockNumber ?? 123n,
     logs: [transferLog(a.token, a.customer, a.merchant, a.value)],
