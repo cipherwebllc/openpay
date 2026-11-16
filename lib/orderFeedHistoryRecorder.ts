@@ -12,9 +12,10 @@
 //   - 同じ txHash の行が履歴にあれば何もしない (receipt も読まない)。
 //   - 「この注文は履歴に書いた」印 (ORDER_SALE_MARKS_KEY・履歴とは別の key) があれば何もしない。印は履歴の行を消しても・
 //     全て削除しても消えないので、店主が消した行を、受注フィードに注文が残っている間に書き戻さない。
-//   - 約束: この書き手が書いた行には、必ず印がある。印を読めない端末では書かない。保存の直前に先に印を書き、書けなければ
-//     行を書かない。行が履歴に入ったことを確かめられなければ、付けた印を外す (外せなければ、その注文はこの端末の履歴に
-//     入らない)。= 印を読めない・書けない端末では、受注の行は入らない (消した行が戻るより安全な側)。
+//   - 約束: 印の付いた注文は、二度と書かない。印は一度付けたら外さない (保存の失敗と、保存の後に店主が消したことは、
+//     後から見分けられないので、外すと消した行を書き戻しうる)。印を読めない端末では書かない。保存の直前に先に印を書き、
+//     書けなければ行を書かない。= 印を読めない・書けない端末では、受注の行は入らない (消した行が戻るより安全な側)。
+//   - 受け入れている限界: 印を書いた後に履歴の保存が失敗した注文 (保存領域の障害) は、その端末の履歴に入らない。
 //   - receipt を待っている間に別のタブ (または開き直した受注の画面) が同じ注文を書くことがあるので、保存の直前にもう一度
 //     履歴と印を見る。同じ書き手の 2 つのタブは、同じ注文に同じ id の行を作るので、確認の直後に重なっても appendHistory
 //     (id で重複を除く) が 1 行にする。
@@ -40,8 +41,8 @@ import { ORDER_RECEIPT_TIMEOUT_MS, readOrderReceipt } from './orderFeedReceipt';
 import { isTxHashLike, ORDER_LIST_MAX, type StoredOrder } from './orderRelay';
 
 /**
- * 注文 1 件につき、この画面を開いている間に試す回数の上限。receipt を読めなかった・印か行を保存できなかったときに数え、
- * 使い切ったら、この画面では書かない。
+ * 注文 1 件につき、この画面を開いている間に試す回数の上限。receipt を読めなかった・読み解きが throw した・印を保存できなかった
+ * ときに数え、使い切ったら、この画面では書かない。
  */
 export const ORDER_RECEIPT_MAX_READS = 3;
 /** 1 回の polling で読む receipt の数の上限 (受注フィードの注文がまとめて届いたときに、RPC へ一度に投げない)。 */
@@ -115,13 +116,6 @@ function addSaleMarks(hashes: readonly string[]): boolean {
   return writeSaleMarks(marks);
 }
 
-/** 履歴に入らなかった注文の印を外す。外せなければそのまま (その注文は、この端末の履歴には入らない)。 */
-function removeSaleMark(hash: string): void {
-  const marks = readSaleMarks();
-  if (!marks || !marks.delete(hash)) return;
-  writeSaleMarks(marks);
-}
-
 function historyTxHashes(): Set<string> {
   return new Set(loadHistory().flatMap((e) => (e.txHash ? [e.txHash.toLowerCase()] : [])));
 }
@@ -151,7 +145,7 @@ type SaveResult = 'written' | 'present' | 'failed';
 export function createOrderSaleRecorder(): OrderSaleRecorder {
   // この画面を開いている間に決着した注文 (書いた・既に履歴にあった・印があった・receipt で書かないと決まった)。
   const settled = new Set<string>();
-  // 試して書けなかった回数 (receipt を読めなかった・印か行を保存できなかった)。
+  // 試して書けなかった回数 (receipt を読めなかった・読み解きが throw した・印を保存できなかった)。
   const failures = new Map<string, number>();
   let running = false;
   let warned = false;
@@ -162,10 +156,8 @@ export function createOrderSaleRecorder(): OrderSaleRecorder {
     logger.warn(event, { error });
   };
 
-  // 保存の直前の確認 → 印 → 行 → 行が入ったことの確認。履歴 (上限 1,000 件) を読むのは 1 件につき 3 回 (直前の確認・
-  // appendHistory の中・入ったことの確認) で、1 回の polling で書くのは 25 件までなので、始めの確認を合わせて 1 回の polling で
-  // 最大 76 回。入ったことの確認を次の注文の直前の確認と使い回すと、その間の receipt の待ち時間に店主が消した行を
-  // 「入らなかった」と読んで印を外し、書き戻してしまうので、保存のすぐ後 (同じ tick) で読む。
+  // 保存の直前の確認 → 印 → 行。履歴 (上限 1,000 件) を読むのは 1 件につき 2 回 (直前の確認・appendHistory の中) で、
+  // 1 回の polling で書くのは 25 件までなので、始めの確認を合わせて 1 回の polling で最大 51 回。
   const save = (entry: HistoryEntry, hash: string): SaveResult => {
     const marks = readSaleMarks();
     if (!marks) return 'failed';
@@ -177,16 +169,10 @@ export function createOrderSaleRecorder(): OrderSaleRecorder {
     try {
       appendHistory(entry);
     } catch (error) {
-      // 履歴の保存の失敗を、残りの注文の記録と受注の画面へ波及させない。印を外し、次の polling でもう一度書く。
+      // 履歴の保存の失敗を、残りの注文の記録と受注の画面へ波及させない。印は外さない (この注文は、この端末の履歴に入らない)。
       warnOnce('orderFeedHistory.append_failed', error);
-      removeSaleMark(hash);
-      return 'failed';
     }
-    // appendHistory は localStorage の書き込みの失敗を投げない (lib/storage.ts の safeSet)。入ったことを読んで確かめ、
-    // 入っていなければ印を外す (入っていない注文に印を残して、二度と書かれなくすることを断つ)。
-    if (loadHistory().some((e) => e.id === entry.id)) return 'written';
-    removeSaleMark(hash);
-    return 'failed';
+    return 'written';
   };
 
   return async function recordOrderSales(orders, merchantInput) {
@@ -209,7 +195,7 @@ export function createOrderSaleRecorder(): OrderSaleRecorder {
       // 履歴を読むのは、まだ決着していない注文があり、印を読めるときだけ (上限 1,000 件の parse を polling のたびにしない)。
       const known = historyTxHashes();
       // 既に履歴にあった注文の印は、この回の終わりにまとめて付ける (印の key を注文ごとに書き直さない)。
-      const foundInHistory: { key: string; hash: string }[] = [];
+      const foundInHistory: string[] = [];
       const fail = (key: string) => failures.set(key, (failures.get(key) ?? 0) + 1);
       const startedAt = Date.now();
       let readsThisPass = 0;
@@ -220,7 +206,7 @@ export function createOrderSaleRecorder(): OrderSaleRecorder {
           const hash = order.txHash.toLowerCase();
           if (known.has(hash)) {
             settled.add(key);
-            if (!marks.has(hash)) foundInHistory.push({ key, hash });
+            if (!marks.has(hash)) foundInHistory.push(hash);
             continue;
           }
           if (marks.has(hash)) {
@@ -235,32 +221,31 @@ export function createOrderSaleRecorder(): OrderSaleRecorder {
             break;
           }
           readsThisPass += 1;
-          let receipt: OrderSaleReceipt;
+          // 注文 1 件の処理 (receipt の読み取り・読み解き・行の組み立て・保存) を 1 つの try で包む: 1 件の読めない・壊れた
+          // receipt (log の形の崩れで読み解きが throw するものを含む) が、ほかの注文の記帳と RPC の回数へ波及するのを断つ。
+          // throw した注文は失敗として数え (この画面では上限の回数まで)、次の注文へ進む。
           try {
-            receipt = await withDeadline(
+            const receipt: OrderSaleReceipt = await withDeadline(
               readOrderReceipt(order.chainId, order.txHash as Hex),
               ORDER_RECEIPT_TIMEOUT_MS + 1_000,
             );
+            const evidence = readOrderSaleEvidence(order, merchant, receipt);
+            const entry = evidence ? buildOrderSaleEntry(order, merchant, evidence) : null;
+            if (!entry) {
+              // 確かめられなかった注文は書かず、印も付けない (次に受注の画面を開いたときにもう一度確かめる)。
+              settled.add(key);
+              continue;
+            }
+            if (save(entry, hash) === 'failed') fail(key);
+            else settled.add(key);
           } catch {
-            // 読めなかった: 上限までは次の polling でもう一度読む。使い切ったら、この画面では書かない。
             fail(key);
-            continue;
           }
-          const evidence = readOrderSaleEvidence(order, merchant, receipt);
-          const entry = evidence ? buildOrderSaleEntry(order, merchant, evidence) : null;
-          if (!entry) {
-            // 確かめられなかった注文は書かず、印も付けない (次に受注の画面を開いたときにもう一度確かめる)。
-            settled.add(key);
-            continue;
-          }
-          if (save(entry, hash) === 'failed') fail(key);
-          else settled.add(key);
         }
       } finally {
-        // 印を付けられなかった「既にあった」注文は、次の polling でもう一度付ける。
-        if (foundInHistory.length > 0 && !addSaleMarks(foundInHistory.map((f) => f.hash))) {
-          for (const { key } of foundInHistory) settled.delete(key);
-        }
+        // 印を付けられなかった「既にあった」注文は、この画面では付け直さない (決着のまま)。付け直すために決着から外すと、
+        // その間に店主がその行を消したとき、次の polling で書き戻しうる。
+        if (foundInHistory.length > 0) addSaleMarks(foundInHistory);
       }
     } catch (error) {
       // 受注フィードの応答の形の崩れなど、ここまでで拾っていない失敗を、呼び出し元 (受注の画面の effect) へ波及させない。
