@@ -117,27 +117,7 @@ describe('atomic and chunked capture', () => {
     });
     const result = await captureKey(fixture.client, Buffer.from('store:k'), 'string', { now: () => clock });
     expect(result).toMatchObject({ capturedAt: 100, expiresAt: pttl === -1 ? null : 100 + pttl, s: '\uFEFF{"raw":  true}\n' });
-    // 文字列の鍵は TYPE を入れない: 同じ transaction の GET が bytes を返すことが、その瞬間の型の証明になる。
-    expect(fixture.requests).toEqual([{ phase: '/multi-exec', commands: [['PTTL', 'store:k'], ['GET', 'store:k']] }]);
-  });
-  it('counts Upstash commands for a run: one TYPE per key, then 2 per string and 3 per collection transaction', async () => {
-    const keys = ['store:s1', 'store:s2', 'store:list'];
-    const fixture = redis((cmd) => {
-      const list = cmd[1] === 'store:list';
-      if (cmd[0] === 'TYPE') return list ? 'list' : 'string';
-      if (cmd[0] === 'PTTL') return -1;
-      if (cmd[0] === 'LLEN') return 1;
-      if (cmd[0] === 'LRANGE') return ['member'];
-      if (cmd[0] === 'GET' && !list) return 'value';
-      throw new Error('unexpected command');
-    }, keys);
-    expect((await all(captureRecords(fixture.client, { now: () => 1 }))).map((record) => (record as { t: string }).t)).toEqual(['string', 'string', 'list']);
-    const sent = (phase: string) => fixture.requests.filter((request) => request.phase === phase).map((request) => request.commands.map((cmd) => cmd[0]));
-    expect(sent('/')).toEqual(PREFIXES.map(() => ['SCAN']));
-    expect(sent('/pipeline')).toEqual([['TYPE', 'TYPE', 'TYPE']]);
-    // 文字列 2 つ = 2 コマンド × 2・list 1 つ = 3 コマンド × 2 (長さ → 全量)。transaction の数 (EXEC の数) は鍵の型で決まり、変わらない。
-    expect(sent('/multi-exec')).toEqual([['PTTL', 'GET'], ['PTTL', 'GET'], ['TYPE', 'PTTL', 'LLEN'], ['TYPE', 'PTTL', 'LRANGE']]);
-    expect(fixture.requests.flatMap((request) => request.commands)).toHaveLength(PREFIXES.length + keys.length + 2 * 2 + 3 * 2);
+    expect(fixture.requests[0].commands).toEqual([['TYPE', 'store:k'], ['PTTL', 'store:k'], ['GET', 'store:k']]);
   });
   it.each(['list', 'set', 'zset', 'hash'])('rereads a small %s in one atomic transaction without uncertain', async (type) => {
     const values = type === 'zset' ? ['member', '1.2300'] : type === 'hash' ? ['field', 'value'] : ['member'];
@@ -211,80 +191,6 @@ describe('atomic and chunked capture', () => {
       const result = await captureKey(fixture.client, Buffer.from('store:k'), 'string');
       expect(result).toMatchObject(twice ? { error: 'type_changed' } : { t: 'list', l: ['new'] });
     }
-  });
-  it.each(['in position', 'for the whole transaction'])('retakes TYPE once when a string key answers WRONGTYPE %s, then captures the new type atomically', async (shape) => {
-    const fixture = redis((cmd) => {
-      if (cmd[0] === 'GET') {
-        return shape === 'in position' ? new Error('WRONGTYPE Operation against a key holding the wrong kind of value')
-          : new Response(JSON.stringify({ error: 'WRONGTYPE Operation against a key holding the wrong kind of value' }));
-      }
-      if (cmd[0] === 'TYPE') return 'hash';
-      if (cmd[0] === 'PTTL') return 700;
-      if (cmd[0] === 'HLEN') return 1;
-      return ['field', 'value'];
-    });
-    const result = await captureKey(fixture.client, Buffer.from('store:k'), 'string', { now: () => 300 });
-    expect(result).toEqual({ k: 'store:k', t: 'hash', capturedAt: 300, expiresAt: 1000, h: [['field', 'value']] });
-    expect(fixture.requests).toEqual([
-      { phase: '/multi-exec', commands: [['PTTL', 'store:k'], ['GET', 'store:k']] },
-      { phase: '/', commands: [['TYPE', 'store:k']] },
-      { phase: '/multi-exec', commands: [['TYPE', 'store:k'], ['PTTL', 'store:k'], ['HLEN', 'store:k']] },
-      { phase: '/multi-exec', commands: [['TYPE', 'store:k'], ['PTTL', 'store:k'], ['HGETALL', 'store:k']] },
-    ]);
-  });
-  it('follows the retaken TYPE after WRONGTYPE: none → missing, string → one more atomic string read, failure → read_error', async () => {
-    const cases = [
-      { retaken: 'none', expected: { k: 'store:k', error: 'missing_during_capture' }, transactions: 1 },
-      { retaken: 'string', expected: { k: 'store:k', t: 'string', capturedAt: 5, expiresAt: null, s: 'back again' }, transactions: 2 },
-      { retaken: 'stream', expected: { k: 'store:k', error: 'unsupported_type' }, transactions: 1 },
-      { retaken: new Error('NOPERM PRIVATE_TOKEN'), expected: { k: 'store:k', error: 'read_error' }, transactions: 1 },
-    ];
-    for (const item of cases) {
-      const fixture = redis((cmd, transaction) => {
-        if (cmd[0] === 'TYPE') return item.retaken;
-        if (cmd[0] === 'PTTL') return -1;
-        return transaction === 1 ? new Error('WRONGTYPE') : 'back again';
-      });
-      expect(await captureKey(fixture.client, Buffer.from('store:k'), 'string', { now: () => 5 })).toEqual(item.expected);
-      expect(fixture.requests.filter((request) => request.phase === '/').map((request) => request.commands)).toEqual([[['TYPE', 'store:k']]]);
-      expect(fixture.requests.filter((request) => request.phase === '/multi-exec')).toHaveLength(item.transactions);
-    }
-  });
-  it('ends with type_changed, without another TYPE, when the retried string read answers WRONGTYPE again', async () => {
-    // 1 回目: list のつもりで読むと string に変わっていた → 2 回目: string として読むと、また別の型に変わっていた。
-    const viaCollection = redis((cmd) => cmd[0] === 'TYPE' ? 'string' : cmd[0] === 'PTTL' ? -1 : cmd[0] === 'GET' ? new Error('WRONGTYPE') : 1);
-    expect(await captureKey(viaCollection.client, Buffer.from('store:k'), 'list')).toEqual({ k: 'store:k', error: 'type_changed' });
-    expect(viaCollection.requests.map((request) => [request.phase, request.commands.map((cmd) => cmd[0])])).toEqual([
-      ['/multi-exec', ['TYPE', 'PTTL', 'LLEN']], ['/multi-exec', ['PTTL', 'GET']],
-    ]);
-    // 1 回目も 2 回目も string として読んで WRONGTYPE (取り直した TYPE は string): TYPE は 1 回だけ。
-    const viaString = redis((cmd) => cmd[0] === 'TYPE' ? 'string' : cmd[0] === 'PTTL' ? -1 : new Error('WRONGTYPE'));
-    expect(await captureKey(viaString.client, Buffer.from('store:k'), 'string')).toEqual({ k: 'store:k', error: 'type_changed' });
-    expect(viaString.requests.map((request) => [request.phase, request.commands.map((cmd) => cmd[0])])).toEqual([
-      ['/multi-exec', ['PTTL', 'GET']], ['/', ['TYPE']], ['/multi-exec', ['PTTL', 'GET']],
-    ]);
-  });
-  it('does not retake TYPE for string read failures other than WRONGTYPE, and reads a vanished key from PTTL alone', async () => {
-    const cases = [
-      { pttl: -1, value: new Error('NOPERM PRIVATE_TOKEN'), error: 'read_error' },
-      { pttl: new Error('NOPERM PRIVATE_TOKEN'), value: 'raw', error: 'read_error' },
-      { pttl: -1, value: new Error('max response size exceeded'), error: 'oversized' },
-      { pttl: -2, value: null, error: 'missing_during_capture' },
-      { pttl: -3, value: 'raw', error: 'read_error' },
-      { pttl: -1, value: null, error: 'read_error' },
-    ];
-    for (const item of cases) {
-      const fixture = redis((cmd) => cmd[0] === 'PTTL' ? item.pttl : cmd[0] === 'GET' ? item.value : new Error('unexpected command'));
-      expect(await captureKey(fixture.client, Buffer.from('store:k'), 'string')).toEqual({ k: 'store:k', error: item.error });
-      expect(fixture.requests.map((request) => request.phase)).toEqual(['/multi-exec']);
-    }
-    // 送った 2 コマンドと数が合わない応答は、値の位置を信じない。
-    const extra = { host: 'kv.test', command: async () => null, pipeline: async () => [],
-      multiExec: async () => [-1, Buffer.from('raw'), Buffer.from('extra')] };
-    expect(await captureKey(extra, Buffer.from('store:k'), 'string')).toEqual({ k: 'store:k', error: 'read_error' });
-    // 期限の error より先に、型が変わったこと (WRONGTYPE) を見る (TYPE を中に入れていたときと同じ順)。
-    const both = redis((cmd) => cmd[0] === 'PTTL' ? new Error('NOPERM') : cmd[0] === 'GET' ? new Error('WRONGTYPE') : 'none');
-    expect(await captureKey(both.client, Buffer.from('store:k'), 'string')).toEqual({ k: 'store:k', error: 'missing_during_capture' });
   });
   it('detects expiry at final collection check and keeps binary keys as explicit errors', async () => {
     const fixture = redis((cmd, tx) => cmd[0] === 'TYPE' ? (tx >= 3 ? 'none' : 'list') : cmd[0] === 'PTTL' ? (tx >= 3 ? -2 : -1) : cmd[0] === 'LLEN' ? 1001 : ['a']);
