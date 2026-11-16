@@ -8,8 +8,9 @@
 //   (古い state の全体を書くと、別のタブが変えたもう片方の項目を消す・戻すため)。読み直しと書き込みは 1 つの同期の
 //   処理で、タブをまたぐロックは取らない: 2 つのタブが同じ瞬間 (この処理の途中) に別々の項目を確定したときだけ、
 //   先に書いた方の項目が消え得る (残る限界。人の操作では起きない間隔)。
-// - storage を読めない (getItem が throw) ときは、取り込まず、書きもしない: 今の名前を保ち、変えた項目は覚えておいて
-//   次に読めたときに書く (読めないまま古い state の全体を書くと、別のタブが変えた項目を戻すため)。
+// - storage を読めない (getItem が throw) ときは、取り込まず、書きもしない: 今の名前を保ち、その間に変えた項目は
+//   この画面の間だけ使う (保存しない・後から書かない)。読めないまま古い state の全体を書いたり、後からまとめて
+//   書いたりすると、別のタブが変えた項目を戻す・上書きするため。読めるようになって前面に戻ると、保存値に合わせる。
 // - 保存の key が無い・保存値が JSON でないときは、守る保存値が無いので、今の名前を土台に書く。取り込みはしない
 //   (見えている名前を既定の科目に戻さない)。
 // 共通の useLocalStorageSettings は使わない (履歴ページに共有の chunk を足さないため・項目が 2 つで組も無い)。
@@ -58,9 +59,8 @@ export function useAccountingAccounts() {
   // 保存の key が無い・JSON でないときに、書き込みの土台に使う「今の名前」(描画のたびに合わせる)。
   const savedRef = useRef(saved);
   savedRef.current = saved;
-  // まだ保存できていない項目 (storage を読めなかった・書けなかった = 容量超過・private mode 等)。その mount の間は
-  // 店が入れた名前で書き出せるように、前面に戻ったときの取り込みで保存値 (前の名前) に戻さず、次に書くときに
-  // 一緒に書き直す。
+  // 読めたが書けなかった項目 (容量超過等)。その mount の間は店が入れた名前で書き出せるように、前面に戻ったときの
+  // 取り込みで保存値 (前の名前) に戻さず、次に書くときに一緒に書き直す。
   const unsavedRef = useRef<Partial<AccountingAccounts>>({});
 
   useEffect(() => {
@@ -88,15 +88,19 @@ export function useAccountingAccounts() {
   /** 1 項目を保存する。name は検証済みの名前か、既定に戻す空文字 (検証を通らない名前・既定と同じ名前は空文字)。 */
   const setAccount = useCallback((side: AccountSide, name: string) => {
     const value = normalizeAccountingAccounts({ [side]: name })[side];
-    const unsaved = { ...unsavedRef.current, [side]: value };
     const stored = readStoredAccounts();
-    // 読めないときは書かない (変えた項目は覚えておく)。読めたら、最新の保存値に、変えた項目だけを重ねて書く。
-    // 保存値が無いときの土台は今の名前。
-    unsavedRef.current =
-      stored.readable &&
-      safeSet(ACCOUNTING_ACCOUNTS_STORAGE_KEY, { ...(stored.value ?? savedRef.current), ...unsaved })
+    // 読めないときは書かず、覚えもしない: この変更は、この画面の間だけ使う (画面と CSV には出る)。後から書くと、
+    // その間に別のタブが同じ項目に入れた新しい名前を、このタブの古い変更で上書きするため。
+    if (stored.readable) {
+      // 最新の保存値に、変えた項目 (と、前に書けなかった項目) だけを重ねて書く。保存値が無いときの土台は今の名前。
+      const unsaved = { ...unsavedRef.current, [side]: value };
+      unsavedRef.current = safeSet(ACCOUNTING_ACCOUNTS_STORAGE_KEY, {
+        ...(stored.value ?? savedRef.current),
+        ...unsaved,
+      })
         ? {}
         : unsaved;
+    }
     setSaved((cur) => (cur[side] === value ? cur : { ...cur, [side]: value }));
   }, []);
 
