@@ -109,6 +109,7 @@ import { OrderFulfillmentBoard } from '@/components/OrderFulfillmentBoard';
 import { OrderPickupMonitor } from '@/components/OrderPickupMonitor';
 import { env } from '@/lib/env';
 import { loadHistory, removeHistoryEntry } from '@/lib/history';
+import { ORDER_SALE_MARKS_KEY } from '@/lib/orderFeedHistoryRecorder';
 import { deploymentForSlug } from '@/lib/tokens';
 
 const JPYC = deploymentForSlug('jpyc', 'polygon');
@@ -459,6 +460,8 @@ describe('OrderFeedPanel — 書き込みがどう失敗しても、受注の画
     await waitFor(() => expect(posts).toHaveLength(1));
     fireEvent.click(screen.getByRole('button', { name: '更新' }));
     await waitFor(() => expect(feedGets.length).toBeGreaterThanOrEqual(2));
+    // 「更新」で届いた応答で書き手がもう一度動く (書けなかった注文を試す)。その回を終えてから外す (次のテストへ持ち越さない)。
+    await settle();
     const result = { html, post: JSON.parse(posts[0].body) as { txHash: string; fulfilled: boolean }, feedGets: feedGets.length };
     view.unmount();
     posts.length = 0;
@@ -525,10 +528,12 @@ describe('OrderFeedPanel — 書き込みがどう失敗しても、受注の画
       throw new Error('QuotaExceededError');
     });
     try {
+      // 書き手は「書いた」印を読めないので、receipt も読まずに止まる (印の無い行を作らない)。
       const failed = await runPanel(async () => {
-        await waitFor(() => expect(read).toHaveBeenCalledTimes(2));
+        await waitFor(() => expect(getItem).toHaveBeenCalledWith(ORDER_SALE_MARKS_KEY));
       });
       expect(failed).toEqual(ok);
+      expect(read).not.toHaveBeenCalled();
     } finally {
       getItem.mockRestore();
       setItem.mockRestore();

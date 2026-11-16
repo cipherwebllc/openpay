@@ -193,15 +193,32 @@ describe('readOrderSaleEvidence — receipt の読み方', () => {
     expect(readOrderSaleEvidence(order(), MERCHANT, receipt)).toEqual({ kind: 'direct', customer: CUSTOMER, blockNumber: 5n });
   });
 
-  it('Settled が無い receipt: 受取先への Transfer がちょうど 1 本・同じ額のときだけ、送り主をお客様にする', () => {
+  it('Settled が無い receipt: この受取先への Transfer の合計が着金額とちょうど同じときだけ書く。1 本なら送り主をお客様にする', () => {
     const one = directReceipt({ token: JPYC.address, customer: CUSTOMER, merchant: MERCHANT, value: 990n * ONE, blockNumber: 9n });
     expect(readOrderSaleEvidence(order(), MERCHANT, one)).toEqual({ kind: 'direct', customer: CUSTOMER, blockNumber: 9n });
-    // 2 本に分かれた入金 (server は合計で確かめる): お客様は決めない。
+    // 2 本に分かれた入金 (server は送り主に関係なく合計で確かめる): 合計が同じなら書く・お客様は決めない。
     const two = { ...one, logs: [transferLog(JPYC.address, CUSTOMER, MERCHANT, 400n * ONE), transferLog(JPYC.address, CUSTOMER_2, MERCHANT, 590n * ONE)] };
     expect(readOrderSaleEvidence(order(), MERCHANT, two)).toEqual({ kind: 'direct', customer: null, blockNumber: 9n });
-    // 額が違う 1 本: お客様は決めない。
+    // 額が違う 1 本・合計が 1 wei 違う 2 本: 書かない。
     const off = directReceipt({ token: JPYC.address, customer: CUSTOMER, merchant: MERCHANT, value: 989n * ONE, blockNumber: 9n });
-    expect(readOrderSaleEvidence(order(), MERCHANT, off)).toEqual({ kind: 'direct', customer: null, blockNumber: 9n });
+    expect(readOrderSaleEvidence(order(), MERCHANT, off)).toBeNull();
+    const twoOff = { ...one, logs: [transferLog(JPYC.address, CUSTOMER, MERCHANT, 400n * ONE), transferLog(JPYC.address, CUSTOMER_2, MERCHANT, 590n * ONE + 1n)] };
+    expect(readOrderSaleEvidence(order(), MERCHANT, twoOff)).toBeNull();
+  });
+
+  it('同じ receipt に、別の受取先への大きい入金と、この受取先への小さい入金がある: 書かない (別の店の注文を、この店の売上にしない)', () => {
+    const receipt = {
+      transactionHash: TX,
+      status: 'success' as const,
+      blockNumber: 9n,
+      logs: [transferLog(JPYC.address, CUSTOMER, OTHER_MERCHANT, 990n * ONE), transferLog(JPYC.address, CUSTOMER_2, MERCHANT, 1n * ONE)],
+    };
+    expect(readOrderSaleEvidence(order({ unboundPayment: true }), MERCHANT, receipt)).toBeNull();
+    expect(readOrderSaleEvidence(order({ unboundPayment: true }), OTHER_MERCHANT, receipt)).toMatchObject({ kind: 'direct', customer: CUSTOMER });
+    // forwarder の経路: 別の受取先の Settled (990) と、この受取先の Settled (1) がある。
+    const big = settle({ merchant: OTHER_MERCHANT });
+    const small = settle({ merchantValue: 1n * ONE, feeValue: 2n * ONE, customer: CUSTOMER_2 });
+    expect(readOrderSaleEvidence(order(), MERCHANT, { ...big, logs: [...big.logs, ...small.logs] })).toBeNull();
   });
 
   it('Settled の無い forwarder からの Transfer は、forwarder をお客様にしない', () => {

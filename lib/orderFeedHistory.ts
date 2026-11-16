@@ -4,7 +4,7 @@
 // 第一の約束は「誤った売上の行を作らない」。確かめられない注文は書かず、確かめられない欄は null にする。
 //   - 書くのは、お客様のブラウザから払ったモバイル注文だけ (エージェント注文は書かない・isRecordableOrder)。
 //   - 書くのは、tx の receipt を読めて、要求した tx の receipt で、成功していて、受取先 (SIWE の session のアドレス) への
-//     入金がある注文だけ (readOrderSaleEvidence が null を返したら書かない)。
+//     入金が着金額 (order.amount) とちょうど同じ注文だけ (readOrderSaleEvidence が null を返したら書かない)。
 //   - 金額の欄 (着金・利用料・売上総額・ネットワーク手数料相当額・負担者・お客様) は、server がオンチェーンで確かめた
 //     着金額 (order.amount) と、tx の receipt (forwarder の Settled・token の Transfer) と、build の定数だけから決める。
 //     お客様の申告 (明細の合計・order.from) からは決めない。決められない欄は null (履歴の「内訳なし」と同じ扱い)。
@@ -88,7 +88,8 @@ export function orderSaleFlow(order: StoredOrder): 'batch' | 'standard-merchant'
 
 /**
  * receipt から、この受取先への入金を読む。null = 行を書かない (要求した tx の receipt でない・成功していない・この受取先への
- * 入金が無い・どの入金か 1 つに決められない)。読み解きは server が受注を確かめたときと同じ関数 (lib/order/agentOrderReceipt.ts)。
+ * 入金が無い・入金の額が着金額と違う・どの入金か 1 つに決められない)。読み解きは server が受注を確かめたときと同じ関数
+ * (lib/order/agentOrderReceipt.ts)。
  */
 export function readOrderSaleEvidence(
   order: StoredOrder,
@@ -114,7 +115,8 @@ export function readOrderSaleEvidence(
     const mine = settlements.filter(
       (s) => isAddressEqual(s.merchant, merchant) && s.merchantValue === amount,
     );
-    // この受取先・この額の Settled が無い、または 2 つ以上 (どちらのお客様・利用料か決められない) なら書かない。
+    // この受取先・この額 (着金額とちょうど同じ merchantValue) の Settled が無い、または 2 つ以上 (どちらのお客様・利用料か
+    // 決められない) なら書かない。server も、受取先への Settled を 1 つに決めて、その merchantValue を着金額にする。
     if (mine.length !== 1) return null;
     return {
       kind: 'settled',
@@ -127,9 +129,14 @@ export function readOrderSaleEvidence(
     isAddressEqual(t.to, merchant),
   );
   if (toMerchant.length === 0) return null;
-  // Settled が無い = お客様から受取先への直接の Transfer (通常決済・forwarder を通らない relay)。受取先への Transfer が
-  // ちょうど 1 本で、額が着金額と同じときだけ、その送り主をお客様とする。
-  const only = toMerchant.length === 1 && toMerchant[0].value === amount ? toMerchant[0] : null;
+  // Settled が無い = お客様から受取先への直接の Transfer (通常決済・forwarder を通らない relay)。server
+  // (app/api/order/notify → lib/feeVerify.ts の verifyJpycTransferTo) は、受取先への JPYC の Transfer を送り主に関係なく
+  // 合計して着金額にする。同じ数え方で、この受取先への合計が着金額とちょうど同じときだけ書く (同じ receipt にある別の
+  // 受取先への入金を、この受取先の売上として書かない)。数え方の違いは壊れた log だけ (server は topics と data を寛く読み、
+  // ここは strict に decode する): そのときは合計が合わず、書かない側に倒れる。
+  if (toMerchant.reduce((sum, t) => sum + t.value, 0n) !== amount) return null;
+  // 受取先への Transfer がちょうど 1 本のときだけ、その送り主をお客様とする。
+  const only = toMerchant.length === 1 ? toMerchant[0] : null;
   const customer =
     only && !(forwarder && isAddressEqual(only.from, forwarder)) ? getAddress(only.from) : null;
   return { kind: 'direct', customer, blockNumber: receipt.blockNumber };

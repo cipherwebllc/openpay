@@ -3,7 +3,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { Address, Hex } from 'viem';
-import { recoverReceipt } from '../_helpers/orderSaleReceipt';
+import { recoverReceipt, transferLog } from '../_helpers/orderSaleReceipt';
 
 const read = vi.hoisted(() => vi.fn());
 vi.mock('@/lib/orderFeedReceipt', () => ({
@@ -49,6 +49,7 @@ import {
   ORDER_SALE_MARKS_MAX,
   createOrderSaleRecorder,
 } from '@/lib/orderFeedHistoryRecorder';
+import { buildOrderSaleEntry } from '@/lib/orderFeedHistory';
 import { ORDER_LIST_MAX, type StoredOrder } from '@/lib/orderRelay';
 import { deploymentForSlug } from '@/lib/tokens';
 
@@ -58,7 +59,8 @@ const OTHER_MERCHANT: Address = '0x2222222222222222222222222222222222222222';
 const CUSTOMER: Address = '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045';
 const JPYC = deploymentForSlug('jpyc', 'polygon');
 const ONE = 10n ** 18n;
-const tx = (n: number) => `0x${n.toString(16).padStart(64, '0')}` as Hex;
+// 16 進の英字を含む hash (大文字にすると別の文字列になる = 大文字小文字の違いの確認が効く)。
+const tx = (n: number) => `0x${'ab'.repeat(24)}${n.toString(16).padStart(16, '0')}` as Hex;
 
 function order(n: number, over: Partial<StoredOrder> = {}): StoredOrder {
   return {
@@ -270,6 +272,49 @@ describe('createOrderSaleRecorder — receipt で確かめた注文だけを書�
     expect(marks()).toEqual([]);
   });
 
+  describe('この受取先への入金の額が、着金額とちょうど同じ注文だけを書く (Transfer だけの receipt)', () => {
+    const OTHER_PAYER: Address = '0x3333333333333333333333333333333333333333';
+    /** 通常決済の注文 (着金額 990) の receipt に、指定の Transfer を並べる。 */
+    const withTransfers = (...logs: ReturnType<typeof transferLog>[]) =>
+      read.mockImplementation(async (_chainId: number, hash: string) => ({
+        transactionHash: hash, status: 'success', blockNumber: 9n, logs,
+      }));
+
+    it('同じ receipt に、別の受取先への大きい入金 (990) と、この受取先への小さい入金 (1) がある: 書かない', async () => {
+      withTransfers(
+        transferLog(JPYC.address, CUSTOMER, OTHER_MERCHANT, 990n * ONE),
+        transferLog(JPYC.address, OTHER_PAYER, MERCHANT, 1n * ONE),
+      );
+      await createOrderSaleRecorder()([order(1, { unboundPayment: true })], MERCHANT);
+      expect(loadHistory()).toHaveLength(0);
+      expect(marks()).toEqual([]);
+    });
+
+    it('この受取先への入金の合計が、着金額と 1 wei 違う: 書かない', async () => {
+      withTransfers(
+        transferLog(JPYC.address, CUSTOMER, MERCHANT, 500n * ONE),
+        transferLog(JPYC.address, OTHER_PAYER, MERCHANT, 490n * ONE - 1n),
+      );
+      await createOrderSaleRecorder()([order(1, { unboundPayment: true })], MERCHANT);
+      expect(loadHistory()).toHaveLength(0);
+      withTransfers(transferLog(JPYC.address, CUSTOMER, MERCHANT, 990n * ONE + 1n));
+      await createOrderSaleRecorder()([order(1, { unboundPayment: true })], MERCHANT);
+      expect(loadHistory()).toHaveLength(0);
+    });
+
+    it('この受取先への入金の合計が、着金額とちょうど同じ (server と同じく送り主に関係なく合計): 1 行', async () => {
+      withTransfers(
+        transferLog(JPYC.address, CUSTOMER, MERCHANT, 500n * ONE),
+        transferLog(JPYC.address, OTHER_PAYER, MERCHANT, 490n * ONE),
+        transferLog(JPYC.address, CUSTOMER, OTHER_MERCHANT, 7n * ONE),
+      );
+      await createOrderSaleRecorder()([order(1, { unboundPayment: true })], MERCHANT);
+      expect(loadHistory()).toHaveLength(1);
+      // 受取先への Transfer が 2 本なので、お客様は決めない。
+      expect(loadHistory()[0]).toMatchObject({ merchantAmount: (990n * ONE).toString(), customer: null, flow: 'standard-merchant' });
+    });
+  });
+
   it('revert した tx の注文は書かない・印も付けない', async () => {
     read.mockImplementation(async (_chainId: number, hash: string) => ({ ...receipt(hash), status: 'reverted' }));
     await createOrderSaleRecorder()([order(1)], MERCHANT);
@@ -424,58 +469,141 @@ describe('createOrderSaleRecorder — 消した行を書き戻さない (「書�
     expect(kept[kept.length - 1][0]).toBe(tx(1));
   });
 
-  it('保存した行が履歴に入らなかった (localStorage が黙って書けなかった) ときは、印を付けない', async () => {
+  it('保存した行が履歴に入らなかった (localStorage が黙って書けなかった) ときは、先に付けた印を外し、次の polling で書く', async () => {
     historyHold.dropAppend = true;
     const record = createOrderSaleRecorder();
     await record([order(1)], MERCHANT);
     expect(historyHold.appends).toBe(1);
     expect(loadHistory()).toHaveLength(0);
     expect(marks()).toEqual([]);
-    // 次に画面を開いたとき、書ける。
     historyHold.dropAppend = false;
+    await record([order(1)], MERCHANT);
+    expect(loadHistory()).toHaveLength(1);
+    expect(markedHashes()).toEqual([tx(1)]);
+  });
+
+  it('印の値が壊れている (JSON でない・配列でない・形の違う要素がある) ときは、読めない印として書かない (空として作り直さない)', async () => {
+    for (const broken of [
+      '{not json',
+      '"text"',
+      JSON.stringify({ a: 1 }),
+      JSON.stringify([[tx(5), 1], ['0x1234', 1]]),
+      JSON.stringify([[tx(5), 1], [tx(6), 'x']]),
+      JSON.stringify([[tx(5), 1], 5]),
+    ]) {
+      window.localStorage.clear();
+      read.mockClear();
+      window.localStorage.setItem(ORDER_SALE_MARKS_KEY, broken);
+      await createOrderSaleRecorder()([order(1)], MERCHANT);
+      expect(loadHistory()).toHaveLength(0);
+      expect(read).not.toHaveBeenCalled();
+      // 値はそのまま (作り直して、それまでの印を失わない)。
+      expect(window.localStorage.getItem(ORDER_SALE_MARKS_KEY)).toBe(broken);
+    }
+  });
+
+  it('印の key が無いのは、印が 0 件 (書く)', async () => {
+    expect(window.localStorage.getItem(ORDER_SALE_MARKS_KEY)).toBeNull();
     await createOrderSaleRecorder()([order(1)], MERCHANT);
     expect(loadHistory()).toHaveLength(1);
   });
 
-  it('印の値が壊れているときは、無いものとして履歴の確認だけで動き、次に付けた印で直る', async () => {
-    for (const broken of ['{not json', '"text"', JSON.stringify({ a: 1 }), JSON.stringify([['0x1234', 1], [tx(9), 'x'], 5])]) {
-      window.localStorage.clear();
-      window.localStorage.setItem(ORDER_SALE_MARKS_KEY, broken);
-      await createOrderSaleRecorder()([order(1)], MERCHANT);
-      expect(loadHistory()).toHaveLength(1);
-      expect(markedHashes()).toEqual([tx(1)]);
-      // 2 回目の画面: 履歴にあるので書かない。
-      await createOrderSaleRecorder()([order(1)], MERCHANT);
-      expect(loadHistory()).toHaveLength(1);
-    }
-  });
-
-  it('印の key だけ読めない・書けない (localStorage の障害) ときは、履歴の確認だけで動く', async () => {
+  /** 印の key だけ、読み取り・書き込みを壊す (ほかの key は実物)。 */
+  function breakMarks(mode: { get?: boolean; set?: boolean }) {
     const getItem = Storage.prototype.getItem;
     const setItem = Storage.prototype.setItem;
     const get = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(function (this: Storage, key: string) {
-      if (key === ORDER_SALE_MARKS_KEY) throw new Error('SecurityError');
+      if (mode.get && key === ORDER_SALE_MARKS_KEY) throw new Error('SecurityError');
       return getItem.call(this, key);
     });
     const set = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key: string, value: string) {
-      if (key === ORDER_SALE_MARKS_KEY) throw new Error('QuotaExceededError');
+      if (mode.set && key === ORDER_SALE_MARKS_KEY) throw new Error('QuotaExceededError');
       setItem.call(this, key, value);
     });
+    return {
+      get,
+      set,
+      restore: () => {
+        get.mockRestore();
+        set.mockRestore();
+      },
+    };
+  }
+
+  it('印の読み取りが throw する: 書かない (receipt も履歴も読まない)。直ったら書く', async () => {
+    const broken = breakMarks({ get: true });
     try {
-      await expect(createOrderSaleRecorder()([order(2), order(1)], MERCHANT)).resolves.toBeUndefined();
-      expect(loadHistory().map((e) => e.receiptNo)).toEqual(['N2', 'N1']);
-      // 2 回目の画面: 履歴にあるので書かない (印が無くても 2 行にならない)。
-      await createOrderSaleRecorder()([order(2), order(1)], MERCHANT);
-      expect(loadHistory()).toHaveLength(2);
-      expect(warn).not.toHaveBeenCalled();
-      expect(get).toHaveBeenCalledWith(ORDER_SALE_MARKS_KEY);
-      expect(set).toHaveBeenCalledWith(ORDER_SALE_MARKS_KEY, expect.any(String));
+      await expect(createOrderSaleRecorder()([order(1)], MERCHANT)).resolves.toBeUndefined();
+      expect(broken.get).toHaveBeenCalledWith(ORDER_SALE_MARKS_KEY);
     } finally {
-      get.mockRestore();
-      set.mockRestore();
+      broken.restore();
     }
-    // 印は書けていない (障害が効いていた)。
+    expect(historyHold.loads).toBe(0);
+    expect(read).not.toHaveBeenCalled();
+    expect(loadHistory()).toHaveLength(0);
+    await createOrderSaleRecorder()([order(1)], MERCHANT);
+    expect(loadHistory()).toHaveLength(1);
+  });
+
+  it('印の書き込みが throw する: 行を書かない。この画面では上限の回数まで試し、直ったら次に開いた画面が書く', async () => {
+    const broken = breakMarks({ set: true });
+    const record = createOrderSaleRecorder();
+    try {
+      for (let i = 0; i < ORDER_RECEIPT_MAX_READS + 2; i += 1) await record([order(1)], MERCHANT);
+      expect(broken.set).toHaveBeenCalledWith(ORDER_SALE_MARKS_KEY, expect.any(String));
+    } finally {
+      broken.restore();
+    }
+    expect(historyHold.appends).toBe(0);
+    expect(loadHistory()).toHaveLength(0);
+    expect(read).toHaveBeenCalledTimes(ORDER_RECEIPT_MAX_READS);
+    expect(warn).not.toHaveBeenCalled();
+    await createOrderSaleRecorder()([order(1)], MERCHANT);
+    expect(loadHistory()).toHaveLength(1);
+    expect(markedHashes()).toEqual([tx(1)]);
+  });
+
+  it('行があるなら印もある: 途中で印を書けなくなっても、書いた行には印があり、消しても戻らない', async () => {
+    const record = createOrderSaleRecorder();
+    await record([order(1)], MERCHANT);
+    expect(loadHistory().map((e) => e.receiptNo)).toEqual(['N1']);
+    // ここから印を書けない。新しく届いた注文は書かない。
+    const broken = breakMarks({ set: true });
+    try {
+      await record([order(2), order(1)], MERCHANT);
+    } finally {
+      broken.restore();
+    }
+    expect(loadHistory().map((e) => e.receiptNo)).toEqual(['N1']);
+    for (const row of loadHistory()) expect(markedHashes()).toContain(row.txHash!.toLowerCase());
+    // 書いた行を消して開き直す: 戻らない。印を書けなかった注文は、ここで書く (印と一緒に)。
+    clearHistory();
+    await createOrderSaleRecorder()([order(2), order(1)], MERCHANT);
+    expect(loadHistory().map((e) => e.receiptNo)).toEqual(['N2']);
+    expect(markedHashes()).toEqual([tx(1), tx(2)]);
+  });
+
+  it('既に履歴にあった注文に印を付けられなかったときは、次の polling でもう一度付ける', async () => {
+    appendHistory(
+      buildHistoryEntry({
+        flow: 'batch', status: 'success', chainId: JPYC.chainId, chainSlug: 'polygon', asset: 'jpyc',
+        tokenAddress: JPYC.address, payMode: 'gasless', gasMode: 'merchant', merchant: MERCHANT,
+        merchantAmount: 990n * ONE, customer: CUSTOMER, feeReceiver: env.feeReceiver, feeAmount: 10n * ONE,
+        txHash: tx(1), userOpHash: null, blockNumber: null, errorMessage: null, storeName: '', note: '払った側',
+      }),
+    );
+    const record = createOrderSaleRecorder();
+    const broken = breakMarks({ set: true });
+    try {
+      await record([order(1)], MERCHANT);
+    } finally {
+      broken.restore();
+    }
     expect(marks()).toEqual([]);
+    await record([order(1)], MERCHANT);
+    expect(markedHashes()).toEqual([tx(1)]);
+    expect(read).not.toHaveBeenCalled();
+    expect(loadHistory()).toHaveLength(1);
   });
 });
 
@@ -492,6 +620,17 @@ describe('createOrderSaleRecorder — 保存の直前にもう一度見る (2 �
     expect(loadHistory()).toHaveLength(1);
     expect(historyHold.appends).toBe(1);
     expect(markedHashes()).toEqual([tx(1)]);
+  });
+
+  it('同じ書き手の 2 つのタブは、同じ注文に同じ id の行を作る: 2 つとも保存の直前の確認を通っても 1 行 (appendHistory が id で除く)', () => {
+    // 2 つのタブは同じ受注フィードの注文 (同じ txHash の文字列) から行を組む。
+    const evidence = { kind: 'settled', customer: CUSTOMER, feeValue: 10n * ONE, blockNumber: 1n } as const;
+    const tabA = buildOrderSaleEntry(order(1), MERCHANT, evidence)!;
+    const tabB = buildOrderSaleEntry(order(1), MERCHANT, evidence)!;
+    expect(tabB.id).toBe(tabA.id);
+    appendHistory(tabA);
+    appendHistory(tabB);
+    expect(loadHistory()).toHaveLength(1);
   });
 
   it('receipt を待っている間に、別のタブが大文字の txHash で同じ注文を書いた: 2 行にしない (印は付ける)', async () => {
@@ -533,7 +672,7 @@ describe('createOrderSaleRecorder — 保存の直前にもう一度見る (2 �
 });
 
 describe('createOrderSaleRecorder — 失敗を呼び出し元へ出さない', () => {
-  it('履歴の保存が throw しても reject しない。残りの注文も試し、警告は 1 回だけ。印は付けない。同じ画面では書き直さない', async () => {
+  it('履歴の保存が throw しても reject しない。残りの注文も試し、警告は 1 回だけ。先に付けた印は外し、次の polling で書く', async () => {
     historyHold.failAppend = true;
     const record = createOrderSaleRecorder();
     const orders = [order(2), order(1)];
@@ -544,11 +683,8 @@ describe('createOrderSaleRecorder — 失敗を呼び出し元へ出さない', 
     expect(marks()).toEqual([]);
     historyHold.failAppend = false;
     await record(orders, MERCHANT);
-    expect(historyHold.appends).toBe(2);
-    expect(read).toHaveBeenCalledTimes(2);
-    // 次に画面を開いたとき (新しい書き手) には書ける。
-    await createOrderSaleRecorder()(orders, MERCHANT);
-    expect(loadHistory()).toHaveLength(2);
+    expect(loadHistory().map((e) => e.receiptNo)).toEqual(['N2', 'N1']);
+    expect(markedHashes()).toEqual([tx(1), tx(2)]);
   });
 
   it('受取先のアドレスが読めない・注文の一覧が配列でないときも reject しない (何も書かない)', async () => {
