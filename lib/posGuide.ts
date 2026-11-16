@@ -126,7 +126,7 @@ const ja: GuideContent = {
   overviewTitle: '仕組み',
   overviewBody:
     'レジは「売上の記録」係、OpenPay は「JPYC の受け取り」係。別々に動かして、閉店後に突き合わせるだけです。',
-  overviewFlow: ['POS レジで売上を記録', 'OpenPay で JPYC を受け取る', '閉店後に金額・番号で突き合わせる'],
+  overviewFlow: ['POS レジで売上を記録', 'OpenPay で JPYC を受け取る', '閉店後に金額・時刻で突き合わせる'],
 
   setupTitle: '最初の一度だけの準備 (約 5 分)',
   setupSteps: [
@@ -269,7 +269,7 @@ const en: GuideContent = {
   overviewTitle: 'How it works',
   overviewBody:
     'The POS records the sale; OpenPay receives the JPYC. They run separately — you just reconcile after closing.',
-  overviewFlow: ['Record the sale on the POS', 'Receive JPYC with OpenPay', 'Reconcile by amount and number after closing'],
+  overviewFlow: ['Record the sale on the POS', 'Receive JPYC with OpenPay', 'Reconcile by amount and time after closing'],
 
   setupTitle: 'One-time setup (about 5 minutes)',
   setupSteps: [

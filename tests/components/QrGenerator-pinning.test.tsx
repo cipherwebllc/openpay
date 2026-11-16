@@ -970,21 +970,21 @@ describe('QrGenerator の pin (生成物の完全一致は採り直さない・D
     // QR の画面の DOM の sha256 (採り直す値): UI の変更で `vitest -u` で採り直す。
     expect(modal).toMatchInlineSnapshot(`
       {
-        "accountingMeta": "690427a7ab0c3b49becf8a507193879a6424ec49144e3a519bbc39707687663e",
-        "avalancheLarge18Decimals": "e432586e276f27e99642abf386ffdecb0761b8163c3b3da5155f441814c9d7b5",
-        "discount": "677a44d40254e7598e8b4301779f5f521ea3abdbe53704bf8e0b84b7014757b2",
-        "en": "0dfd98cc9068764df5dbd9835b861792cbdac64d1ad1d161fcbd56e30833b119",
-        "ensReceiver": "216f7868fe7b86aa121789c0178f6e13c21a5e7d3a09c4b8204a2e8115d44fd7",
-        "free": "a95dd27d1e4fda02548bc7dd67342a349119fde17109a4462ab4ad8ed0781c92",
-        "freshTypedReceiver": "04ad159f5909c46a7c81bff79023dd353d9a4bce93d867e159f367d6d449eecd",
-        "fxToUsdc": "3dd239c0337213466c0414fe4d21595e5c078b1ee4e3b165a7b687ef32a934c7",
-        "kaiaDecimal": "17a8ca440e25f5840be140baf03db237eab6b880e1b6302554018d2e6a897162",
+        "accountingMeta": "4f995bf804ee392d7732717d102042e4131d5102e596993506a9262eccca79dd",
+        "avalancheLarge18Decimals": "df76fd79befa442fbef767920e8015a8891517db0aaf32f5078be2def3c81a62",
+        "discount": "816b469096cc34463349c85198192cf7e802ac43416ff4cafc4309687abae67c",
+        "en": "806680ca1ef47b472df657cb348092c611fa4f18d44c84614884f5e3ff3ca133",
+        "ensReceiver": "f047527d89620a48b48e10b1935efc233ceef5fc9357bce8810e958596ff6943",
+        "free": "faf2b6ec56aa1fbc895d6c9869baa8172d604b529041ac7ab9d931047d1c1d9e",
+        "freshTypedReceiver": "6969d5515e54eb9234333c6b3581a3ec2e06f9967a9226374103a00d47be4710",
+        "fxToUsdc": "d3a660256d2a3182f044d80ca54478efe036f4b0c410e8c23224a50e61f993b0",
+        "kaiaDecimal": "3a7bc3f44089af47a2f39584053567fd7698ea9e3a030f9ea63c436c86cfe289",
         "kaiaStandardStatic": "67032bfd27e812bc5b86d8659f0fc50c9a9544f7debf8b1be96bdea7e137639e",
-        "polygonGasless": "6b739ea0faac2bbe0c4ead70f9d43d25c71b1a7ed788b0d1985c5c66fce4ff24",
-        "polygonStandardLarge": "8457bf3ade2bc3945b95ce4918288836f98fffa251c5584d31255830e915135b",
+        "polygonGasless": "41b50f0b5efe76b90e3fc36f7bfe5f0c85782e90ac7c86cc2d5e7198e31c9675",
+        "polygonStandardLarge": "00ed3006e7ab7ca8c19f6375a36b15ee2965a78c25ecb5fe5120211a0ba3520e",
         "polygonStatic": "23d6d5faa7b0c2c2bd370818b58c2335071ad77c8bab2b9d0b61b6cec169bd7f",
-        "recover": "544f3fb17e23f56f348a1108ba9f4891e38eb47cf64131b6a814be4c8ba9de99",
-        "recoverFloor": "ba18182ef3d824dcfbf6b1513fc379c166cb455d84d8a3fe386de9fd07d30594",
+        "recover": "bf9cc527d1b853119024fcf18cc863dea00e0e265a99125144c9ed9ca8fc7cfe",
+        "recoverFloor": "30cc73b1818aef4a95afbc662ce087dbe2fb1b7da73f802dff6731d2421cf3c6",
         "recoverKaiaStatic": "e32a5c2dc2801eba8864f28fdabc3d0c17c52ecb4ec748d3eff69c52669848ae",
       }
     `);
@@ -1440,18 +1440,18 @@ describe('QrGenerator の pin (生成物の完全一致は採り直さない・D
     // QR の画面の DOM の sha256 (採り直す値): UI の変更で `vitest -u` で採り直す。
     expect(modal).toMatchInlineSnapshot(`
       {
-        "arbitrumSplitNoCrossChain": "b1b7927038c269337a7a56fcaff6d647e5e49451d53a5657cc7ec1b4b0c16601",
-        "arc": "8341f7889a6003038f36e26ec5e36df6e68ee43545c8f1af6d0d825f92c232a6",
+        "arbitrumSplitNoCrossChain": "ca97d88ff810b41b39ab05298a49f3630b0bef5a5fc40f9d1168c5d7d25c217a",
+        "arc": "0f776f6348dc7645faa2d451f7078ece091709549fe7085dd0c66ce00021ed89",
         "arcStatic": "9358d2e07e93788f84b9396c5c365c91c0c79afcb0ab7ae0a6de5ca26c72b26b",
-        "avalancheSmallestStandard": "42493327d9a38a53b2637d79360d032e4ccf19e406fdcfd7c4f4b3b2231be388",
-        "baseGasless": "dea424ce5f2a326188875c16925966cbf18f52fe941fa96cc89a088d4c054c02",
-        "discount": "8d10ca43ba3ab4d49d33329a29b2c640d258676354d3de987b6d7ed901851051",
-        "en": "4afc3a5634dcd5da45692a603c699ddeb190767f83d32abb1e2fc37cbccb4ea1",
-        "ethereumLarge": "4993347fe72b5a67415ffdeb9ed8fd14eddb11e601da165b7e51077143ad6971",
-        "fxToJpyc": "95849059cedfc3601c575c276b9482a42041dcbe9395dab87b82d14b7f105ad8",
-        "optimismStandard": "886126f3b8c7ad14ee115247aa428dddb317b6c07b248bbf3aca89d578f52a12",
+        "avalancheSmallestStandard": "8cef63ef8144e9630b0d8c173369a313a9e8e95916b94aed392aa728a7cb7046",
+        "baseGasless": "8f2de9002b23b018b915c9c46d60cbe43ea83f30369f1962d4cc65e62cab8e79",
+        "discount": "a77bbc61657c3e91b05526f0ef7feaf8e1ef23d378d87db3c5090dc90b214b95",
+        "en": "2179dcbd861120c2b3979365f83c12233e6f8d88c42091d5a0cccc4eb4d85488",
+        "ethereumLarge": "2bc2c7719be7d343ad46e78b9bbd710775f46575d9a1d08b22601305dd1ead2c",
+        "fxToJpyc": "8c397f8b0db7d500a68d560d256a8f6ecdcf4ef128a70c570199af56a9df646d",
+        "optimismStandard": "8e836bcd4a468a2c783bfc7e4ee0f581a01d2c1aaec82a60fcb33fa8a01b3ea7",
         "polygonStandardStatic": "c9727c46dc094bbc96748f721b4eb3eab5f153e4aef6e577fd280adb788da490",
-        "splitWithInvalidEntry": "7a4ec5cf843d08a0bf06015ea87e946812c93fcc7af40baccabc5f612d3d97c1",
+        "splitWithInvalidEntry": "d5245ec6a2bec65e7eb0c9073587f75e837b0c99577e26fbe4372776ea887ab8",
       }
     `);
   });
@@ -1623,12 +1623,12 @@ describe('QrGenerator の pin (生成物の完全一致は採り直さない・D
           ],
         },
         "arcModal": {
-          "all": "5bb70eaa5e0d9116a77d9ef6b1694e4dd7f3453668401a07c3592ebbdf454ce3",
+          "all": "a48f754fa1a539953085c75ab2e48cf378f37c15f76a9bbd5f236fb0fbed01a3",
           "parts": [
             "div 77d610789dd9 ",
             "div f5f936bf11bc 店名未設定0x8335…2913",
             "aside 2d22fb287f20 請求金額3 USDC≈ ¥450",
-            "div 8341f7889a60 決済用 QR コード閉じるOpe",
+            "div 0f776f6348dc 決済用 QR コード閉じるOpe",
             "div 250c78e3d30a 請求金額3 USDC≈ ¥450",
           ],
         },
@@ -1651,12 +1651,12 @@ describe('QrGenerator の pin (生成物の完全一致は採り直さない・D
           ],
         },
         "discountModal": {
-          "all": "9a47eafaedc82f5d45daae1618930dbc7adb1aedf8441b70d87442269470fb9a",
+          "all": "18fb0dd151790e247e9359213191b4607e535ed1ebcd80869342b3163da875fc",
           "parts": [
             "div 77d610789dd9 ",
             "div 4e32a97b772b Cafe0x8335…2913J",
             "aside 3651b5379f53 請求金額880 JPYCQRコー",
-            "div 1e15f1477c48 決済用 QR コード閉じるOpe",
+            "div 6b22fcdbff2c 決済用 QR コード閉じるOpe",
             "div c2aed2ae5974 請求金額880 JPYCQRコー",
           ],
         },
@@ -1670,12 +1670,12 @@ describe('QrGenerator の pin (生成物の完全一致は採り直さない・D
           ],
         },
         "enModal": {
-          "all": "622e10fd86b9fa4ab335ac7917e06cacdf29067bd718e10acfc7f911b5ee5ef5",
+          "all": "857344e41a052e4c39417cca83d9ccb27a8ec29900583471e83f72e848f9d57e",
           "parts": [
             "div 77d610789dd9 ",
             "div 7bc8aeab7f39 No shop name0x83",
             "aside db456af43b57 Amount12 JPYCSho",
-            "div b4f4c9801163 Payment QR codeC",
+            "div 50c3094608b8 Payment QR codeC",
             "div 43cacceebc91 Amount12 JPYCSho",
           ],
         },
@@ -1745,22 +1745,22 @@ describe('QrGenerator の pin (生成物の完全一致は採り直さない・D
           ],
         },
         "recoverModal": {
-          "all": "7ae47d911073570b6326ac147d683f0441e1d48e3a4cce7a536232eb2660191e",
+          "all": "ca8afa43b57ff708cf16cc497f8839ab6b10c27603d86d1708efc5d20cd9b1b3",
           "parts": [
             "div 77d610789dd9 ",
             "div 186e8982cec1 店名未設定0x8335…2913",
             "aside 2cc76e1c1637 請求金額500 JPYCQRコー",
-            "div 544f3fb17e23 決済用 QR コード閉じるOpe",
+            "div bf9cc527d1b8 決済用 QR コード閉じるOpe",
             "div 26fa70486c48 請求金額500 JPYCQRコー",
           ],
         },
         "standardModalEip681Copied": {
-          "all": "ddefb7ccfcd67b6620b69ba824d57f82e11e33174c76fe8f999cc0349b579756",
+          "all": "9ac3416aa115ccb8cd01aa08b9e32deaf6b05fecfe9f9dbb28562353abafea98",
           "parts": [
             "div 77d610789dd9 ",
             "div a7ec42aa48cb 神田珈琲0x8335…2913U",
             "aside 4b4a106c5654 請求金額5 USDC≈ ¥750",
-            "div 003fe37307cd 決済用 QR コード閉じるOpe",
+            "div faf8aaff0c04 決済用 QR コード閉じるOpe",
             "div 75d49299c4ea 請求金額5 USDC≈ ¥750",
           ],
         },
@@ -1783,12 +1783,12 @@ describe('QrGenerator の pin (生成物の完全一致は採り直さない・D
           ],
         },
         "usdcFxModal": {
-          "all": "8a2926f46b0dd89c071556e5dbeedb7c3b638fceaced60d57fd65f35c2178942",
+          "all": "aac1586d8debe8e5b211a00d8ff0e9dbb4129f8f2311e4c9c6b8545fa739da9d",
           "parts": [
             "div 77d610789dd9 ",
             "div 8937b7864de3 店名未設定0x8335…2913",
             "aside 1f554979d6b2 請求金額1,875 JPYCQR",
-            "div 95849059cedf 決済用 QR コード閉じるOpe",
+            "div 8c397f8b0db7 決済用 QR コード閉じるOpe",
             "div 9297eecd7c80 請求金額1,875 JPYCQR",
           ],
         },
@@ -1803,22 +1803,22 @@ describe('QrGenerator の pin (生成物の完全一致は採り直さない・D
           ],
         },
         "watchReceived": {
-          "all": "b8db183b6947b405cdd49f55b3a7548b575bbe7c73cf306a73213667b8261026",
+          "all": "5a7cd0dd04b766f7e8c534a042e41723d64dc5c4f64acea486873448c714e61e",
           "parts": [
             "div 77d610789dd9 ",
             "div a096ad605709 店名未設定0x8335…2913",
             "aside 21a611c68df2 請求金額750 JPYCQRコー",
-            "div 724e6cc9cc56 決済用 QR コード閉じるOpe",
+            "div ac7c40496907 決済用 QR コード閉じるOpe",
             "div 7ec07a0f813b 請求金額750 JPYCQRコー",
           ],
         },
         "watchWatching": {
-          "all": "fe92817664bba7c478f2795656a7a1d84480c18eb41bcf2b435f24ce1aee96d5",
+          "all": "f279789337d92c6c566e4533b6aecc917ad782c78082e323d2dcd981d85897fb",
           "parts": [
             "div 77d610789dd9 ",
             "div a096ad605709 店名未設定0x8335…2913",
             "aside 21a611c68df2 請求金額750 JPYCQRコー",
-            "div 825e3edb8d06 決済用 QR コード閉じるOpe",
+            "div 607ef235d929 決済用 QR コード閉じるOpe",
             "div 7ec07a0f813b 請求金額750 JPYCQRコー",
           ],
         },
@@ -2070,7 +2070,7 @@ describe('QrGenerator の pin (生成物の完全一致は採り直さない・D
       {
         "decimalWaiting": "ac2136ac5c3ab4aef932fd2de4d92c7785fdd38f7146478d2b49de7fa22267b6",
         "kaiaMetaDiscount": "030f2f86b5f38839b2654b2a72252ad816ebc44c7c90e127bb02beb0926e7d3b",
-        "normalAfterCreateFailed": "8ed8fdae31d59ebcc3f122d01a066b4135648ebc3909ab2419fd93d835d91da1",
+        "normalAfterCreateFailed": "c8a3001926ec321aadef1498cc868b8b8bfc17314196e61f96a957d175fb28c8",
         "polygon500": "c396cc43abedb8e152b810b33effa2bb7182b76ea0552f2e15dc704a7daa40cc",
       }
     `);
@@ -2134,12 +2134,12 @@ describe('QrGenerator の pin (生成物の完全一致は採り直さない・D
           ],
         },
         "storeNormalQr": {
-          "all": "fc1926acc447901fc2361f5f1478d82dee70f6d80ad154dd11516bf82d9c34fc",
+          "all": "09bf70d791c13f2ed1550321a23f88f26f16587d8e1da2d831e0201cab14700b",
           "parts": [
             "div 77d610789dd9 ",
             "div 4486398be930 店名未設定0x8335…2913",
             "aside 16d1e218b2b8 通常の QR を出す通常の QR",
-            "div 8ed8fdae31d5 決済用 QR コード閉じるOpe",
+            "div c8a3001926ec 決済用 QR コード閉じるOpe",
             "div 3cf4eb536ffb 請求金額800 JPYCQRコー",
           ],
         },
