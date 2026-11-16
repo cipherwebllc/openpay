@@ -455,7 +455,7 @@ describe('useNewsRead: 別のタブとの競合 (既読の記録は既読化だ�
     a.unmount();
     vi.restoreAllMocks();
 
-    // 記録がある次の mount (どの版のタブでも) が、残った基準を消す。
+    // 記録がある次の mount (この変更が入った版のタブなら、どのタブでも) が、残った基準を消す。
     h.index = [ADDED, ...oldIndex];
     const b = renderHook(() => useNewsRead());
     expect(b.result.current.unreadCount).toBe(0);
