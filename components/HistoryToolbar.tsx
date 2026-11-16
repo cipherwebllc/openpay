@@ -4,8 +4,9 @@
 // フィルタ状態は HistoryView が保持 (single source)。期間はプリセット/カスタムを UI 表現として
 // ローカルに持ち、ms 境界 (fromTs/toTs) に変換して onFiltersChange で上げる。
 
-import { useState } from 'react';
+import { useId, useRef, useState, type RefObject } from 'react';
 import { useTranslations } from 'next-intl';
+import { ChevronDown } from 'lucide-react';
 import { downloadBlob } from '@/lib/download';
 import { encodeShiftJis, sjisLossyChars } from '@/lib/sjis';
 import { clearHistory, type HistoryEntry } from '@/lib/history';
@@ -16,7 +17,15 @@ import {
   toAccountingCsv,
   type AccountingFormat,
 } from '@/lib/accountingCsv';
+import {
+  ACCOUNT_NAME_MAX_CHARS,
+  DEFAULT_ACCOUNTING_ACCOUNTS,
+  checkAccountName,
+  type AccountNameError,
+  type AccountSide,
+} from '@/lib/accountingAccounts';
 import { lineItemsCsvFilename, toLineItemsCsv } from '@/lib/lineItemsCsv';
+import { useAccountingAccounts } from '@/hooks/useAccountingAccounts';
 import {
   currentMonthKey,
   dayRangeToTsBounds,
@@ -68,6 +77,21 @@ const DIRECTION_OPTIONS: ReadonlyArray<{
 
 type DatePreset = 'all' | 'this' | 'last' | 'custom';
 
+// 勘定科目の入力に出す理由 (空欄は既定の科目に戻すので、エラーにしない)。
+type AccountInputError = Exclude<AccountNameError, 'empty'>;
+
+const ACCOUNT_ERROR_KEY = {
+  tooLong: 'accountingAccountTooLong',
+  forbidden: 'accountingAccountForbidden',
+  formula: 'accountingAccountFormula',
+} as const satisfies Record<AccountInputError, string>;
+
+const NO_ACCOUNT_DRAFTS: Record<AccountSide, string | null> = { debit: null, credit: null };
+const NO_ACCOUNT_ERRORS: Record<AccountSide, AccountInputError | null> = {
+  debit: null,
+  credit: null,
+};
+
 export function HistoryToolbar({
   entries,
   filters,
@@ -105,6 +129,16 @@ export function HistoryToolbar({
   const [acctFormat, setAcctFormat] = useState<AccountingFormat>('freee');
   // 弥生ネイティブ (Shift_JIS) 書き出しで `?` に置換される文字。ダウンロードは止めず警告のみ出す。
   const [sjisLossy, setSjisLossy] = useState<string[] | null>(null);
+  // 会計CSV の勘定科目 (この端末に保存・既定は 売掛金 / 売上高)。見出し・入力・書き出しは同じ accounts から出す。
+  const { accounts, setAccount } = useAccountingAccounts();
+  // 入力の途中の値 (null = 編集していない)。表示は「途中の値 ?? 保存値」にして、保存値の読み込み
+  // (hydrate) や別のタブの変更にそのまま追従する (state の初期値に保存値を写すと、読み込み前の既定値が残る)。
+  const [accountDrafts, setAccountDrafts] = useState(NO_ACCOUNT_DRAFTS);
+  const [accountErrors, setAccountErrors] = useState(NO_ACCOUNT_ERRORS);
+  const accountsDetailsRef = useRef<HTMLDetailsElement>(null);
+  const debitInputRef = useRef<HTMLInputElement>(null);
+  const creditInputRef = useRef<HTMLInputElement>(null);
+  const accountFieldId = useId();
 
   // pass ロック (CSV 24時間パス未保持) は **ボタンを無効化せず** 🔒 を付けて click で購入モーダルを開く。
   // fee ロック (a1 利用料延滞) は従来どおり disabled (支払いは /billing 経由)。
@@ -146,9 +180,59 @@ export function HistoryToolbar({
     downloadBlob(blob, historyCsvFilename());
   }
 
+  /**
+   * 途中の入力を確定する (blur・Enter・書き出し)。通れば保存し、空欄は既定の科目に戻す。
+   * 戻り値は確定後に使う名前 (途中の入力が無ければ今の保存値)。通らなければ理由を出して null (保存値は前のまま)。
+   */
+  function settleAccount(side: AccountSide): string | null {
+    const draft = accountDrafts[side];
+    if (draft === null) return accounts[side];
+    const checked = checkAccountName(draft);
+    if (!checked.ok && checked.reason !== 'empty') {
+      const reason = checked.reason;
+      setAccountErrors((cur) => ({ ...cur, [side]: reason }));
+      return null;
+    }
+    const name = checked.ok ? checked.value : '';
+    setAccount(side, name);
+    setAccountDrafts((cur) => ({ ...cur, [side]: null }));
+    setAccountErrors((cur) => ({ ...cur, [side]: null }));
+    return name || DEFAULT_ACCOUNTING_ACCOUNTS[side];
+  }
+
+  function handleFormatChange(next: AccountingFormat) {
+    setAcctFormat(next);
+    // freee 形式は借方を使わない (入力は disabled)。直せない欄に途中の入力とエラーを残さない:
+    // 通る入力は確定し、通らない入力は捨てる (保存値は前のまま)。
+    if (next === 'freee' && settleAccount('debit') === null) {
+      setAccountDrafts((cur) => ({ ...cur, debit: null }));
+      setAccountErrors((cur) => ({ ...cur, debit: null }));
+    }
+  }
+
   function handleAccountingExport() {
     if (exportGuard()) return;
-    const r = toAccountingCsv(entries, { format: acctFormat, usdcJpy });
+    // 書き出しは blur に頼らない (ボタンを押しても入力から focus が外れない端末がある)。有効な欄の途中の入力を
+    // ここで確定し、通らなければ書き出さずにその欄へ戻す (前の科目のまま書き出して気づかれないのを防ぐ)。
+    const sides: AccountSide[] = acctFormat === 'freee' ? ['credit'] : ['debit', 'credit'];
+    const exportAccounts = { ...accounts };
+    let invalid: AccountSide | null = null;
+    for (const side of sides) {
+      const name = settleAccount(side);
+      if (name === null) invalid ??= side;
+      else exportAccounts[side] = name;
+    }
+    if (invalid !== null) {
+      // 欄が閉じていても理由が見えるように、開いてから focus する。
+      if (accountsDetailsRef.current) accountsDetailsRef.current.open = true;
+      (invalid === 'debit' ? debitInputRef : creditInputRef).current?.focus();
+      return;
+    }
+    const r = toAccountingCsv(entries, {
+      format: acctFormat,
+      usdcJpy,
+      accounts: exportAccounts,
+    });
     if (!r.ok) {
       const msg =
         r.reason === 'rate-unavailable'
@@ -320,7 +404,7 @@ export function HistoryToolbar({
           <label className="text-[11px] text-slate-500">{t('accountingFormatLabel')}</label>
           <select
             value={acctFormat}
-            onChange={(e) => setAcctFormat(e.target.value as AccountingFormat)}
+            onChange={(e) => handleFormatChange(e.target.value as AccountingFormat)}
             aria-label={t('accountingFormatLabel')}
             disabled={entries.length === 0 || feeLock}
             className="h-11 rounded-lg border border-slate-300 bg-white px-2 text-base focus:border-brand focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 sm:text-sm"
@@ -386,7 +470,122 @@ export function HistoryToolbar({
           })}
         </p>
       )}
+      {/* 会計CSV の勘定科目。閉じたままでも、今の科目 (= 書き出される科目) が見出しで分かる。 */}
+      <details ref={accountsDetailsRef} className="group/acct rounded-xl border border-slate-200">
+        <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 px-3 py-2 text-xs font-medium text-slate-700 [&::-webkit-details-marker]:hidden">
+          <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">
+            {acctFormat === 'freee'
+              ? t('accountingAccountsSummaryFreee', { credit: accounts.credit })
+              : t('accountingAccountsSummary', {
+                  debit: accounts.debit,
+                  credit: accounts.credit,
+                })}
+          </span>
+          <ChevronDown
+            className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-open/acct:rotate-180"
+            aria-hidden
+          />
+        </summary>
+        <div className="space-y-3 border-t border-slate-100 px-3 pb-3 pt-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {(['debit', 'credit'] as const).map((side) => {
+              const error = accountErrors[side];
+              // freee 形式 (単式) は借方の列が無い。値は消さずに、入力だけ止める。
+              const unused = side === 'debit' && acctFormat === 'freee';
+              return (
+                <AccountField
+                  key={side}
+                  id={`${accountFieldId}-${side}`}
+                  inputRef={side === 'debit' ? debitInputRef : creditInputRef}
+                  label={t(side === 'debit' ? 'accountingDebitLabel' : 'accountingCreditLabel')}
+                  value={accountDrafts[side] ?? accounts[side]}
+                  disabled={feeLock || unused}
+                  note={unused ? t('accountingDebitUnusedFreee') : undefined}
+                  error={
+                    error ? t(ACCOUNT_ERROR_KEY[error], { max: ACCOUNT_NAME_MAX_CHARS }) : undefined
+                  }
+                  onChange={(value) => {
+                    setAccountDrafts((cur) => ({ ...cur, [side]: value }));
+                    setAccountErrors((cur) => (cur[side] === null ? cur : { ...cur, [side]: null }));
+                  }}
+                  onSettle={() => settleAccount(side)}
+                />
+              );
+            })}
+          </div>
+          <p className="text-[11px] text-slate-500">{t('accountingAccountsHint')}</p>
+        </div>
+      </details>
       <p className="text-[11px] text-slate-500">{t('accountingIncomeOnlyNote')}</p>
+    </div>
+  );
+}
+
+// 勘定科目の入力 1 つ。打っている間は自由で、確定 (blur か Enter) のときに親が検証する。
+// a11y の名前は見える label から (aria-label を付けない)。理由は role="alert" と aria-describedby で伝える。
+function AccountField({
+  id,
+  inputRef,
+  label,
+  value,
+  disabled,
+  note,
+  error,
+  onChange,
+  onSettle,
+}: {
+  id: string;
+  inputRef: RefObject<HTMLInputElement | null>;
+  label: string;
+  value: string;
+  disabled: boolean;
+  note?: string;
+  error?: string;
+  onChange: (value: string) => void;
+  onSettle: () => void;
+}) {
+  const noteId = `${id}-note`;
+  const errorId = `${id}-error`;
+  const describedBy = [error ? errorId : null, note ? noteId : null].filter(Boolean).join(' ');
+  return (
+    <div className="min-w-0">
+      <label htmlFor={id} className="block text-[11px] font-medium text-slate-600">
+        {label}
+      </label>
+      <input
+        ref={inputRef}
+        id={id}
+        type="text"
+        value={value}
+        disabled={disabled}
+        autoComplete="off"
+        enterKeyHint="done"
+        aria-invalid={error ? true : undefined}
+        aria-describedby={describedBy || undefined}
+        onChange={(e) => onChange(e.target.value)}
+        onBlur={onSettle}
+        onKeyDown={(e) => {
+          // IME の変換を確定する Enter では確定しない (229 は isComposing が false になるブラウザの互換用)。
+          if (e.key !== 'Enter' || e.nativeEvent.isComposing || e.keyCode === 229) return;
+          e.preventDefault();
+          onSettle();
+        }}
+        // エラー中は focus しても枠を赤のままにする (focus の青で理由の赤が消えないように)。枠の色が変わらない分、
+        // focus の場所は外側の赤い輪で示す (キーボードで今どの欄にいるかが分かるように)。
+        className={`mt-1 h-11 w-full rounded-lg border bg-white px-3 text-base text-slate-900 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 sm:text-sm ${
+          error ? 'border-red-500 focus:ring-2 focus:ring-red-200' : 'border-slate-300 focus:border-brand'
+        }`}
+      />
+      {note && (
+        <p id={noteId} className="mt-1 text-[11px] text-slate-500">
+          {note}
+        </p>
+      )}
+      {error && (
+        <p id={errorId} role="alert" className="mt-1 text-[11px] font-medium text-red-700">
+          {error}
+        </p>
+      )}
     </div>
   );
 }

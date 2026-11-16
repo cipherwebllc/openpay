@@ -17,6 +17,14 @@ export const ACCOUNTING_MAX_ROWS = 5000;
 
 const INJECTION_PREFIX = /^[=+\-@\t\r]/;
 
+/**
+ * 値の先頭が、escapeCsvCell が single quote を前に付ける字 (`=` `+` `-` `@` tab CR) か。
+ * 入力の検証 (会計 CSV の勘定科目など) が同じ判定を使うための述語。判定は上の正規表現 1 つ。
+ */
+export function startsWithCsvFormulaChar(value: string): boolean {
+  return INJECTION_PREFIX.test(value);
+}
+
 export function escapeCsvCell(value: string): string {
   const defanged = INJECTION_PREFIX.test(value) ? `'${value}` : value;
   const needsQuoting = /[",\r\n]/.test(defanged);
