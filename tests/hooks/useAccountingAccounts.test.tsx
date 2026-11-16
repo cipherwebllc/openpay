@@ -248,6 +248,43 @@ describe('useAccountingAccounts: 別のタブの変更の取り込み', () => {
     expect(result.current.accounts).toEqual({ debit: '売掛金', credit: '売上' });
   });
 
+  it('前面に戻ったときに保存値を読めない (getItem が throw) → 今の名前を保つ (既定の科目に戻さない)', async () => {
+    save({ debit: '現金', credit: '売上' });
+    const { result } = await mountHook();
+    expect(result.current.accounts).toEqual({ debit: '現金', credit: '売上' });
+    vi.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new Error('SecurityError');
+    });
+    focusTab();
+    expect(result.current.accounts).toEqual({ debit: '現金', credit: '売上' });
+  });
+
+  it.each([
+    ['保存の key が消えた (別のタブが保存を消した)', () => window.localStorage.removeItem(KEY)],
+    ['保存値が JSON でない', () => window.localStorage.setItem(KEY, '{not json')],
+  ])('前面に戻ったときに %s → 今の名前を保つ', async (_label, breakStorage) => {
+    save({ debit: '現金', credit: '売上' });
+    const { result } = await mountHook();
+    vi.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    breakStorage();
+    focusTab();
+    expect(result.current.accounts).toEqual({ debit: '現金', credit: '売上' });
+  });
+
+  it('保存値を読めないときに 1 項目を書いても、もう片方は今の名前のまま書く (既定で消さない)', async () => {
+    save({ debit: '現金', credit: '売上' });
+    const { result } = await mountHook();
+    vi.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    const getItem = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new Error('SecurityError');
+    });
+    act(() => result.current.setAccount('debit', '普通預金'));
+    getItem.mockRestore();
+    expect(stored()).toEqual({ debit: '普通預金', credit: '売上' });
+    expect(result.current.accounts).toEqual({ debit: '普通預金', credit: '売上' });
+  });
+
   it('unmount した後は取り込まない (listener を外す)', async () => {
     const removeWindow = vi.spyOn(window, 'removeEventListener');
     const removeDocument = vi.spyOn(document, 'removeEventListener');
