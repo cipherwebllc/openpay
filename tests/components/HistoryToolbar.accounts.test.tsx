@@ -3,6 +3,7 @@
 // - 入力は確定 (blur・Enter) で検証して保存する。書き出しは blur に頼らず、途中の入力をその場で確かめる。
 // - 保存値の読み込み (hydrate) と別のタブの変更に追従し、読み込み前の既定値で保存値を消さない。
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { useLayoutEffect, type ReactNode } from 'react';
 import { act, fireEvent, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithIntl as render } from '../_helpers/i18n';
@@ -67,11 +68,13 @@ type ToolbarProps = Partial<{
   csvLockReason: 'fee' | 'pass';
   onCsvPassRequired: () => void;
   locale: 'ja' | 'en';
+  /** toolbar の後ろに置く要素 (hydrate の前を見るテスト用)。 */
+  after: ReactNode;
 }>;
 
 function renderToolbar(props: ToolbarProps = {}) {
   const entries = props.entries ?? [entry()];
-  return render(
+  const toolbar = (
     <HistoryToolbar
       entries={entries}
       filters={EMPTY_HISTORY_FILTERS}
@@ -83,7 +86,17 @@ function renderToolbar(props: ToolbarProps = {}) {
       csvLockReason={props.csvLockReason}
       onCsvPassRequired={props.onCsvPassRequired ?? vi.fn()}
       csvPassExpiresAt={null}
-    />,
+    />
+  );
+  return render(
+    props.after === undefined ? (
+      toolbar
+    ) : (
+      <>
+        {toolbar}
+        {props.after}
+      </>
+    ),
     { locale: props.locale ?? 'ja' },
   );
 }
@@ -94,6 +107,13 @@ const debitInput = () => screen.getByLabelText(DEBIT_LABEL) as HTMLInputElement;
 const creditInput = () => screen.getByLabelText(CREDIT_LABEL) as HTMLInputElement;
 const exportButton = () => screen.getByRole('button', { name: EXPORT });
 const details = () => creditInput().closest('details') as HTMLDetailsElement;
+const summaryText = () => details().querySelector('summary')?.textContent;
+/** CSV の 1 行目 (データ) の科目。freee 形式は貸方だけ [2]・MF 形式は借方 [2] と貸方 [8]。 */
+const freeeCredit = (csv: string) => csv.split('\r\n')[1].split(',')[2];
+const mfNames = (csv: string) => {
+  const row = csv.split('\r\n')[1].split(',');
+  return { debit: row[2], credit: row[8] };
+};
 
 async function selectFormat(user: ReturnType<typeof userEvent.setup>, format: string) {
   await user.selectOptions(screen.getByLabelText('会計ソフト形式'), format);
@@ -155,6 +175,8 @@ describe('HistoryToolbar: 勘定科目の欄', () => {
         // iOS が入力で拡大しない字の大きさ。
         expect(input.className).toContain('text-base');
         expect(input.className).toContain('sm:text-sm');
+        // エラーの無い入力は、focus で枠が青になる。
+        expect(input.className).toContain('focus:border-brand');
       }
       expect(debitInput().id).not.toBe(creditInput().id);
     });
@@ -184,14 +206,23 @@ describe('HistoryToolbar: 勘定科目の欄', () => {
     it('en: 見出し・label・エラーの文', async () => {
       const user = userEvent.setup();
       renderToolbar({ locale: 'en' });
-      const credit = screen.getByLabelText('Sales account title (credit)') as HTMLInputElement;
+      const credit = screen.getByLabelText('Credit account title (for sales)') as HTMLInputElement;
       const summary = credit.closest('details')?.querySelector('summary');
       expect(summary?.textContent).toBe('Account title: 売上高');
       await user.selectOptions(screen.getByLabelText('Accounting format'), 'mf');
       expect(summary?.textContent).toBe('Account titles: 売掛金 / 売上高');
-      expect(screen.getByLabelText('Debit account title (payments received)')).toBeEnabled();
+      expect(screen.getByLabelText('Debit account title (for payments received)')).toBeEnabled();
       await typeAndBlur(user, credit, 'a'.repeat(13));
       expect(screen.getByRole('alert')).toHaveTextContent('Use 12 characters or fewer.');
+      await typeAndBlur(user, credit, 'a"b');
+      expect(screen.getByRole('alert')).toHaveTextContent(
+        'Commas, double quotes (") and invisible characters can\'t be used.',
+      );
+      expect(
+        screen.getByText(
+          'The accounting CSV exports successful sales (income) only. You can change the account titles in the account title section. If tax category names differ from your software\'s, check them when importing.',
+        ),
+      ).toBeInTheDocument();
     });
   });
 
@@ -214,7 +245,8 @@ describe('HistoryToolbar: 勘定科目の欄', () => {
       await user.clear(creditInput());
       await user.type(creditInput(), '売上');
       expect(creditInput().value).toBe('売上');
-      expect(stored()).toEqual({ debit: '', credit: '' });
+      // 開いただけ・打っている途中では保存の key を作らない。
+      expect(stored()).toBeNull();
       expect(details().querySelector('summary')?.textContent).toBe('勘定科目: 売上高');
     });
 
@@ -233,9 +265,9 @@ describe('HistoryToolbar: 勘定科目の欄', () => {
       renderToolbar();
       fireEvent.change(creditInput(), { target: { value: 'うりあげ' } });
       fireEvent.keyDown(creditInput(), { key: 'Enter', isComposing: true });
-      expect(stored()).toEqual({ debit: '', credit: '' });
+      expect(stored()).toBeNull();
       fireEvent.keyDown(creditInput(), { key: 'Enter', keyCode: 229 });
-      expect(stored()).toEqual({ debit: '', credit: '' });
+      expect(stored()).toBeNull();
       expect(creditInput().value).toBe('うりあげ');
       // 変換が終わった後の Enter で確定する。
       fireEvent.keyDown(creditInput(), { key: 'Enter', keyCode: 13 });
@@ -246,7 +278,7 @@ describe('HistoryToolbar: 勘定科目の欄', () => {
       renderToolbar();
       fireEvent.change(creditInput(), { target: { value: '売上' } });
       fireEvent.keyDown(creditInput(), { key: 'a' });
-      expect(stored()).toEqual({ debit: '', credit: '' });
+      expect(stored()).toBeNull();
     });
 
     it('空欄で確定すると既定の科目に戻る', async () => {
@@ -274,12 +306,12 @@ describe('HistoryToolbar: 勘定科目の欄', () => {
 
     it.each([
       ['長すぎる (13 字)', 'あ'.repeat(13), '12 字以内で入力してください。'],
-      ['カンマ', '売上,高', '改行・カンマ・引用符・見えない文字は使えません。'],
-      ['引用符', '売上"高', '改行・カンマ・引用符・見えない文字は使えません。'],
+      ['カンマ', '売上,高', 'カンマ・二重引用符 (")・見えない文字は使えません。'],
+      ['二重引用符', '売上"高', 'カンマ・二重引用符 (")・見えない文字は使えません。'],
       [
         'ゼロ幅の字',
         `売上${String.fromCodePoint(0x200b)}高`,
-        '改行・カンマ・引用符・見えない文字は使えません。',
+        'カンマ・二重引用符 (")・見えない文字は使えません。',
       ],
       ['先頭の =', '=売上', '先頭に = + - @ は使えません。'],
       ['先頭の +', '+売上', '先頭に = + - @ は使えません。'],
@@ -299,6 +331,9 @@ describe('HistoryToolbar: 勘定科目の欄', () => {
       expect(creditInput()).toHaveAttribute('aria-invalid', 'true');
       expect(creditInput().getAttribute('aria-describedby')).toBe(alert.id);
       expect(alert.id).not.toBe('');
+      // 枠は赤で、focus しても青 (focus:border-brand) に変えない。
+      expect(creditInput().className).toContain('border-red-500');
+      expect(creditInput().className).not.toContain('focus:border-brand');
       // 入力は打ったまま残り (直せる)、保存値と見出しは前のまま。
       expect(creditInput().value).toBe(text);
       expect(stored()).toEqual({ debit: '', credit: '売上' });
@@ -327,6 +362,9 @@ describe('HistoryToolbar: 勘定科目の欄', () => {
       expect(screen.queryByRole('alert')).toBeNull();
       expect(creditInput()).not.toHaveAttribute('aria-invalid');
       expect(creditInput()).not.toHaveAttribute('aria-describedby');
+      // 理由が消えたら、枠は普段の色 (focus で青) に戻る。
+      expect(creditInput().className).not.toContain('border-red-500');
+      expect(creditInput().className).toContain('focus:border-brand');
       await user.type(creditInput(), '売上');
       await user.tab();
       expect(stored().credit).toBe('売上');
@@ -362,7 +400,7 @@ describe('HistoryToolbar: 勘定科目の欄', () => {
 
     it('別のタブの変更は、前面に戻ったときに入力と見出しへ出る', async () => {
       renderToolbar();
-      await waitFor(() => expect(stored()).toEqual({ debit: '', credit: '' }));
+      expect(stored()).toBeNull();
       save({ debit: '', credit: '別タブ売上' });
       act(() => {
         window.dispatchEvent(new Event('focus'));
@@ -523,7 +561,7 @@ describe('HistoryToolbar: 勘定科目の欄', () => {
       renderToolbar();
       // ボタンを押しても入力から focus が外れない端末を模して、blur を起こさない。
       fireEvent.change(creditInput(), { target: { value: ' 売上 ' } });
-      expect(stored()).toEqual({ debit: '', credit: '' });
+      expect(stored()).toBeNull();
       fireEvent.click(exportButton());
       expect(downloadSpy).toHaveBeenCalledOnce();
       expect(lastCsv().split('\r\n')[1].split(',')[2]).toBe('売上');
@@ -615,7 +653,7 @@ describe('HistoryToolbar: 勘定科目の欄', () => {
       expect(downloadSpy).toHaveBeenCalledOnce();
       expect(lastCsv().split('\r\n')[1].split(',')[2]).toBe('売上高');
       expect(screen.queryByRole('alert')).toBeNull();
-      expect(stored()).toEqual({ debit: '', credit: '' });
+      expect(stored()).toBeNull();
     });
 
     it('freee 形式では disabled の借方を見ない: 借方にエラーが残っていても、切り替えれば書き出せる', async () => {
@@ -660,6 +698,102 @@ describe('HistoryToolbar: 勘定科目の欄', () => {
       expect(screen.getByRole('status')).toHaveTextContent(/表現できない文字が 2 種類あります/);
       await waitFor(() => expect(downloadSpy).toHaveBeenCalledOnce());
       expect(downloadSpy.mock.calls[0]![1]).toMatch(/^openpay-yayoi-native-/);
+    });
+  });
+
+  describe('見出しの名前と書き出しの名前が一致する (順番ごと)', () => {
+    afterEach(() => {
+      delete (navigator as { locks?: unknown }).locks;
+    });
+
+    it('hydrate の前 (保存値を読む前) は、見出しも書き出しも既定の科目。読んだ後は、見出しも書き出しも保存値', async () => {
+      const { csvSpy, lastCsv } = spyExport();
+      save({ debit: '現金', credit: '売上' });
+      const beforeHydrate: { summary?: string | null; csvCredit?: string } = {};
+      // 後ろの兄弟の useLayoutEffect は、toolbar が保存値を読む useEffect より前に走る (= hydrate の前の画面)。
+      // そこで見出しを読み、書き出しを押す。
+      function BeforeHydrate() {
+        useLayoutEffect(() => {
+          beforeHydrate.summary = summaryText();
+          exportButton().click();
+          beforeHydrate.csvCredit = freeeCredit(lastCsv());
+        }, []);
+        return null;
+      }
+      renderToolbar({ after: <BeforeHydrate /> });
+      expect(beforeHydrate).toEqual({ summary: '勘定科目: 売上高', csvCredit: '売上高' });
+
+      // 読んだ後。
+      expect(summaryText()).toBe('勘定科目: 売上');
+      fireEvent.click(exportButton());
+      expect(csvSpy).toHaveBeenCalledTimes(2);
+      expect(freeeCredit(lastCsv())).toBe('売上');
+      // 読んだだけでは書かない (hydrate の前の既定の科目で保存値を消さない)。
+      expect(stored()).toEqual({ debit: '現金', credit: '売上' });
+    });
+
+    it('タブに戻った直後: 別のタブが変えた科目が見出しと書き出しに同じ名前で出る。途中の入力は取り込みで消えない', async () => {
+      const user = userEvent.setup();
+      const { lastCsv } = spyExport();
+      renderToolbar();
+      await selectFormat(user, 'mf');
+      // このタブの借方は打ちかけ (確定していない)。
+      fireEvent.change(debitInput(), { target: { value: '現金' } });
+      // 別のタブが貸方を変えてから、このタブに戻る。
+      save({ debit: '', credit: '別タブ売上' });
+      act(() => {
+        window.dispatchEvent(new Event('focus'));
+      });
+      expect(summaryText()).toBe('勘定科目: 売掛金 / 別タブ売上');
+      expect(creditInput().value).toBe('別タブ売上');
+      expect(debitInput().value).toBe('現金');
+
+      fireEvent.click(exportButton());
+      expect(mfNames(lastCsv())).toEqual({ debit: '現金', credit: '別タブ売上' });
+      expect(summaryText()).toBe('勘定科目: 現金 / 別タブ売上');
+      // 書くのは借方だけ (別のタブが変えた貸方を消さない)。
+      expect(stored()).toEqual({ debit: '現金', credit: '別タブ売上' });
+    });
+
+    it('保存の直後 (Enter で確定した直後): Web Locks を待たずに保存値があり、見出しと書き出しも同じ名前', async () => {
+      // Web Locks が返らない環境 (ロックの中で書く作りなら、いつまでも保存されない)。
+      const request = vi.fn(() => new Promise<never>(() => undefined));
+      Object.defineProperty(navigator, 'locks', { configurable: true, value: { request } });
+      const user = userEvent.setup();
+      const { lastCsv } = spyExport();
+      renderToolbar();
+      await user.clear(creditInput());
+      await user.type(creditInput(), '売上{Enter}');
+      expect(stored()).toEqual({ debit: '', credit: '売上' });
+      expect(request).not.toHaveBeenCalled();
+      expect(summaryText()).toBe('勘定科目: 売上');
+      fireEvent.click(exportButton());
+      expect(freeeCredit(lastCsv())).toBe('売上');
+    });
+
+    it('本物の blur → click の順 (打って、そのまま書き出しを押す): 見出し・書き出し・保存値が同じ名前', async () => {
+      const user = userEvent.setup();
+      const { downloadSpy, lastCsv } = spyExport();
+      renderToolbar();
+      await selectFormat(user, 'mf');
+      await user.click(debitInput());
+      await user.clear(debitInput());
+      await user.type(debitInput(), '現金');
+      // 借方から貸方へ (借方の blur)。
+      await user.click(creditInput());
+      await user.clear(creditInput());
+      await user.type(creditInput(), '売上');
+      const order: string[] = [];
+      creditInput().addEventListener('blur', () => order.push('blur'));
+      exportButton().addEventListener('click', () => order.push('click'));
+      await user.click(exportButton());
+
+      expect(order).toEqual(['blur', 'click']);
+      expect(downloadSpy).toHaveBeenCalledOnce();
+      expect(mfNames(lastCsv())).toEqual({ debit: '現金', credit: '売上' });
+      expect(summaryText()).toBe('勘定科目: 現金 / 売上');
+      expect(stored()).toEqual({ debit: '現金', credit: '売上' });
+      expect(screen.queryByRole('alert')).toBeNull();
     });
   });
 

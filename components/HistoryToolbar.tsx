@@ -570,8 +570,9 @@ function AccountField({
           e.preventDefault();
           onSettle();
         }}
-        className={`mt-1 h-11 w-full rounded-lg border bg-white px-3 text-base text-slate-900 focus:border-brand focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 sm:text-sm ${
-          error ? 'border-red-500' : 'border-slate-300'
+        // エラー中は focus しても枠を赤のままにする (focus の青で理由の赤が消えないように)。
+        className={`mt-1 h-11 w-full rounded-lg border bg-white px-3 text-base text-slate-900 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 sm:text-sm ${
+          error ? 'border-red-500' : 'border-slate-300 focus:border-brand'
         }`}
       />
       {note && (
