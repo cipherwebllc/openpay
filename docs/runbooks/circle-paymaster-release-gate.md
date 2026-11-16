@@ -159,13 +159,15 @@ Pimlico paymaster ↔ Circle paymaster を往復しても壊れない」** を�
    - `/pay` で USDC ガスレス決済を 1 件実行 (gas=customer)。
    - UI の gas help が **Circle Paymaster (公式)** 表記になっていること
      (`gasInfoUsdcCircle`、"Pimlico" が出ないこと)。
-   - 送信成功 → 履歴に `provider=circle` / Circle ガス代 (USDC) 行が出ること。
+   - 送信成功 → 履歴に `provider=circle` / Circle ガス代 (USDC) 行が出ること
+     (**受取先を、払うウォレットと同じアドレスにして実行する**。他のアドレス宛てでは、払った側の履歴に行は出ず、
+     「支払い」の控えだけが残る・2026-11-17 から。控えに provider の欄は無い)。
    - Explorer で receipt を開き、UserOperationEvent の paymaster が
      allowlist の Circle v0.8 アドレス (`reference: circle-paymaster-addresses`)
      であること、customer→paymaster の USDC Transfer が permitAmount 以内であること。
 3. **(B) JPYC 経路 (EntryPoint v0.7 / Pimlico sponsorship)** — 同一 EOA で
    Polygon Amoy 等:
-   - `/pay` で JPYC ガスレス決済を 1 件実行 → 成功 → 履歴に `provider=pimlico`。
+   - `/pay` で JPYC ガスレス決済を 1 件実行 → 成功 → 履歴に `provider=pimlico` (受取先 = 払うウォレットで実行する・上と同じ)。
    - Circle 経路を一度通った後でも JPYC (v0.7) 送信が壊れないこと
      (nonce / validation regression が無い)。
 4. **(A)→(B)→(A) を最低 1 往復**繰り返し、両方向で receipt 成功を確認。

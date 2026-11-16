@@ -63,11 +63,13 @@
 - [ ] **店 (FEE_RECEIVER ではなく受取アドレス) に満額 1000 JPYC が着金** (手数料/ガス天引きゼロ)
 - [ ] Polygonscan で当該 tx を確認: **ガスを払ったのは relayer アドレス** (客ではない)
 - [ ] 完了画面が出る・客側にレシート控えが残る (`/scan` で後から確認できる)
-- [ ] 店の `/history` に当該取引が記録される (金額・通貨・チェーン・txHash)
+- [ ] 客の `/history` に「支払い」の控えが出る (金額・通貨・チェーン・txHash)。店の着金は、店のウォレットか Explorer で確かめる
+  (通常の QR の入金は、店の `/history` には入らない。店の端末の履歴に行が入るのは「お店の端末で送る」とモバイルオーダーの受注だけ・
+  払った側の `/history` に「受取」の行が出るのは、払う人 = 受取先のときだけ・2026-11-17 から)
 
 ### P0-2. JPYC ガスレス決済 (Kaia) — もう1つの mainnet LIVE チェーン
 
-- [ ] 上記 P0-1 と同じ流れを Kaia で実施 → 満額着金・relayer がガス負担・履歴記録
+- [ ] 上記 P0-1 と同じ流れを Kaia で実施 → 満額着金・relayer がガス負担・客の `/history` に支払いの控え
 
 ### P0-3. relayer 枯渇/失敗時の振る舞い (壊れ方の確認)
 
@@ -84,7 +86,7 @@
 
 ### P1-1. USDC ガスレス決済 (Pimlico paymaster)
 
-- [ ] `/create` で USDC を選んで QR 生成 → 客が paymaster 経由でガスレス支払い → 着金・履歴記録
+- [ ] `/create` で USDC を選んで QR 生成 → 客が paymaster 経由でガスレス支払い → 着金・客の `/history` に支払いの控え
 - [ ] Pimlico 残高が減る (`check-pimlico-balance.mjs`)・sponsorship policy が当該チェーンを許可
 
 ### P1-2. standard モード (ガスレス不可ウォレットの fallback)
@@ -93,11 +95,11 @@
 
 ### P1-3. /checkout (固定金額チェックアウト)
 
-- [ ] `/checkout` 系の URL で金額確定 → 支払い → 着金・履歴記録
+- [ ] `/checkout` 系の URL で金額確定 → 支払い → 着金・客の `/history` に支払いの控え
 
 ### P1-4. /tip/[address] (投げ銭)
 
-- [ ] `/tip/<アドレス>` を開き任意額で送金 → 着金・履歴記録
+- [ ] `/tip/<アドレス>` を開き任意額で送金 → 着金・客の `/history` に支払いの控え
 
 ### P1-5. レジ / カート (POS) — `/create` レジモード
 
