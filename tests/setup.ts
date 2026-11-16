@@ -95,6 +95,16 @@ import { cleanup } from '@testing-library/react';
   });
 })();
 
+// 受注の画面 (OrderFeedPanel) は、届いた注文の tx の receipt をお店の端末から RPC で読んで取引履歴に書く
+// (lib/orderFeedReceipt.ts)。既定は「読めない」スタブ: テストが外の RPC を叩かず、fetch を差し替えたテストに RPC の
+// POST が混ざらない。読めたときの動きを確かめるテストは、その file の vi.mock で上書きする。
+vi.mock('@/lib/orderFeedReceipt', () => ({
+  ORDER_RECEIPT_TIMEOUT_MS: 6_000,
+  readOrderReceipt: async () => {
+    throw new Error('order_receipt_stubbed_in_tests');
+  },
+}));
+
 // jsdom は matchMedia を実装しないため、既定の no-op スタブを各テスト前に用意する
 // (matches=false = 非 standalone / 非モバイル)。PwaInstallHint は広く render される
 // (QrGenerator / HistoryView / ScanShell) 一方で usePwaDisplayMode 経由で matchMedia を
