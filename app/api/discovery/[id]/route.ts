@@ -1,7 +1,7 @@
 // Public exact-ID lookup for seller gates; same item shape/visibility as discovery.
 import { NextResponse } from 'next/server';
 import { env } from '@/lib/env';
-import { logger } from '@/lib/logger';
+import { warnThrottled } from '@/lib/warnThrottle';
 import { getPublicResource } from '@/lib/x402/registry';
 import { publicDiscoveryItem } from '@/lib/x402/discoveryItem';
 
@@ -20,11 +20,12 @@ export const maxDuration = 15;
 // 400/404/503 は no-store のまま: 公開に戻った掲載・新しい掲載を「無い」と焼き付けない・障害を残さない。
 // relay/requirements は edge に置かない (lib/x402/dualRailRelay.ts の handleDualRailRequirements の注記)。
 //
-// KV で数える IP ごとの制限 (checkIpRateLimit) は置かない。守る物 (掲載の GET 1 コマンド) より、判定
-// (INCR + EXPIRE NX の 2 コマンド・制限に当たった後の request でも 2) の方が高くつくため。置かなければ、どれだけ
-// 呼ばれても KV は 1 回 1 コマンド。返すのは公開の情報だけ。open-pay.jp の入口には Cloudflare 側の制限 (/api に
-// 50 req / 10 秒) があり、本当の IP で数える (Vercel から見える接続元は Cloudflare なので、Vercel 側の IP の制限は
-// 使えない)。この route 自身は 429 を返さない (Cloudflare の 429 は来うる)。tests/app/api/x402-public-reads-kv.test.ts。
+// KV で数える IP ごとの制限 (checkIpRateLimit) は置かない: 判定 (INCR + EXPIRE NX の 2 コマンド・制限に当たった後の
+// request でも 2) が、守っている掲載の GET 1 コマンドより高い。置かなければ、どれだけ呼ばれても KV は 1 回 1 コマンド。
+// 返すのは公開の情報だけ。この route 自身は 429 を返さない。tests/app/api/x402-public-reads-kv.test.ts。
+//   - 回数の制限は open-pay.jp の入口の Cloudflare の rule だけ (2026-11-16 に確認した値は docs/DEPLOY_CHECKLIST.md
+//     §14.9c・rule を変えたらそこを見直す)。Cloudflare を通らない経路 (*.vercel.app など) には回数の制限が無い。
+//   - 掲載の読み取りの失敗の警告は warnThrottled で instance ごとに 60 秒に 1 回まで (lib/warnThrottle.ts)。
 const EDGE_CACHE_OK = 'public, s-maxage=300';
 
 export async function GET(
@@ -42,7 +43,7 @@ export async function GET(
   const read = await getPublicResource(id);
   // Storage failure must not become a cached missing listing and disable a healthy seller gate.
   if (!read.ok) {
-    logger.warn('x402.discovery.read_failed', { id });
+    warnThrottled('x402.discovery.read_failed', { id });
     return NextResponse.json({ error: 'storage_unavailable' }, { status: 503, headers });
   }
   if (!read.resource) {
