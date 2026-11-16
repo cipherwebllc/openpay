@@ -12,9 +12,10 @@
 // (レジストリの親 flag)。動作には X402_VANILLA_FACILITATOR=cdp (CDP 鍵) が必要 (無ければ 503
 // = 「掲載されない中継」を黙って提供しない)。
 //
-// 認証なし (rate limit のみ) で安全な理由: verify/settle の入力は購入者が EIP-3009 で署名した
-// 支払いそのもの。第三者が横取りしても settle 先は登録済み出品者の payTo に固定され、nonce は
-// 一度で消費される — 不正者が得るものがない。requirements は公開情報 (402 に載る内容) のみ。
+// 認証なし (verify/settle は IP ごとの rate limit のみ) で安全な理由: verify/settle の入力は購入者が
+// EIP-3009 で署名した支払いそのもの。第三者が横取りしても settle 先は登録済み出品者の payTo に固定され、
+// nonce は一度で消費される — 不正者が得るものがない。requirements は公開情報 (402 に載る内容) のみで、
+// KV の rate limit も置かない (handleDualRailRequirements の注記)。
 
 import 'server-only';
 
@@ -25,6 +26,7 @@ import { logger } from '@/lib/logger';
 import { atomicToHuman, recordSettleLedgerAfterResponse } from '@/lib/x402/settleLedger';
 import { clientIp, hashIpBucket } from '@/lib/net/ipHash';
 import { checkIpRateLimit } from '@/lib/relay/relayGuards';
+import { warnThrottled } from '@/lib/warnThrottle';
 import { x402Config } from './config';
 import { getResource, type X402Resource } from './registry';
 import {
@@ -96,10 +98,15 @@ type RelayTarget = {
   accepts: PreparedAccepts;
 };
 
+// accepts を作れなかったときの警告の出し方。'every' = 失敗のたびに出す (verify / settle = 決済の経路・既定)。
+// 'throttled' = warnThrottled を通す (requirements = KV の IP 制限を置かない公開の GET・lib/warnThrottle.ts)。
+type AcceptsFailedWarn = 'every' | 'throttled';
+
 // resourceId → 中継対象。未存在 / 無効化 / モデレーション hidden / USDC 面なしはすべて 404
 // (存在の有無を外部に区別させない)。accepts は登録値だけから決定的に生成する。
 async function resolveTarget(
   resourceId: unknown,
+  acceptsFailedWarn: AcceptsFailedWarn = 'every',
 ): Promise<{ ok: true; target: RelayTarget } | { ok: false; response: NextResponse }> {
   if (
     typeof resourceId !== 'string' ||
@@ -125,10 +132,15 @@ async function resolveTarget(
     });
   } catch (e) {
     // network が base 系でない等の設定不正。壊れた要件を配らない。
-    logger.warn('x402.dualrail.accepts_failed', {
+    const fields = {
       resourceId: resource.id,
       error: e instanceof Error ? e.message : String(e),
-    });
+    };
+    if (acceptsFailedWarn === 'throttled') {
+      warnThrottled('x402.dualrail.accepts_failed', fields);
+    } else {
+      logger.warn('x402.dualrail.accepts_failed', fields);
+    }
     return { ok: false, response: jsonError(503, 'relay_unconfigured') };
   }
   return { ok: true, target: { resource, usdc: resource.usdc, accepts } };
@@ -145,19 +157,28 @@ async function resolveTarget(
  * edge (CDN) には置かない: verify/settle の 409 (価格の不一致) を受けた gate はキャッシュを捨てて
  * ここを取り直す (SDK dualGate・スニペット)。edge が古い要件を返すと、価格を変えた後の USDC 決済が
  * edge の期限まで 409 を繰り返して止まる。/api/discovery/[id] (JPYC) は取り直しの経路が無いので 5 分置く。
+ *
+ * KV で数える IP ごとの制限は置かない (verify / settle の rateLimit() はそのまま):
+ *   - 判定 (INCR + EXPIRE NX の 2 コマンド・制限に当たった後の request でも 2) が、守っている resolveTarget の
+ *     掲載の GET 1 コマンドより高い。置かなければ、どれだけ呼ばれても KV は 1 回 1 コマンド。
+ *   - 返すのは公開の情報だけ。
+ *   - 回数の制限は open-pay.jp の入口の Cloudflare の rule だけ (2026-11-16 に確認した値は docs/DEPLOY_CHECKLIST.md
+ *     §14.9c・rule を変えたらそこを見直す)。Cloudflare を通らない経路 (*.vercel.app など) には回数の制限が無い。
+ *   - verify / settle の枠 ('x402-dual-rail') をここで使わない: ここを呼ばれても、同じ IP の verify / settle の
+ *     枠は減らない。
+ *   - accepts を作れない設定不正の警告は、ここから呼んだときだけ instance ごとに 60 秒に 1 回まで
+ *     (resolveTarget の 'throttled')。verify / settle から呼んだときは失敗のたびに出す。
+ * ここ自身は 429 を返さない。tests/app/api/x402-public-reads-kv.test.ts。
  */
 export async function handleDualRailRequirements(req: Request): Promise<NextResponse> {
   const gated = gate();
   if (gated) return gated;
-  // Match resolveTarget's existing ID bounds before the KV limiter, preventing
-  // malformed public lookups from draining storage shared with verify/settle.
+  // resolveTarget と同じ ID の範囲を先に見る。形の合わない照会は KV を読まずに 400。
   const resourceId = new URL(req.url).searchParams.get('resourceId');
   if (!resourceId || resourceId.length > MAX_RESOURCE_ID) {
     return jsonError(400, 'invalid_resource_id');
   }
-  const limited = await rateLimit(req);
-  if (limited) return limited;
-  const resolved = await resolveTarget(resourceId);
+  const resolved = await resolveTarget(resourceId, 'throttled');
   if (!resolved.ok) return resolved.response;
   const { resource, usdc, accepts } = resolved.target;
   const v2Accept = toV2Accept(accepts.v1Caip2);

@@ -160,13 +160,17 @@ describe('dualRailRelay gate', () => {
     expect(await res.json()).toEqual({ error: 'relay_unconfigured' });
   });
 
-  it('rate limit 超過 → 429', async () => {
+  it.each(['verify', 'settle'] as const)('%s: rate limit 超過 → 429 (掲載も facilitator も読まない)', async (action) => {
     state.rateLimited = true;
     const res = await handleDualRailRelay(
-      post('verify', { resourceId: 'res-1', paymentHeader: v1Header() }),
-      'verify',
+      post(action, { resourceId: 'res-1', paymentHeader: v1Header() }),
+      action,
     );
     expect(res.status).toBe(429);
+    expect(await res.json()).toEqual({ error: 'rate_limited' });
+    expect(checkIpRateLimit).toHaveBeenCalledExactlyOnceWith('x402-dual-rail', null, 60, 60);
+    expect(getResource).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 
@@ -207,21 +211,23 @@ describe('dualRailRequirements', () => {
     expect(getResource).not.toHaveBeenCalled();
   });
 
-  it('valid unknown resource ID still reaches the limiter and lookup', async () => {
+  it('valid unknown resource ID reaches the lookup without the KV limiter', async () => {
     state.resource = null;
     const res = await handleDualRailRequirements(reqGet('a'.repeat(100)));
     expect(res.status).toBe(404);
     expect(await res.json()).toEqual({ error: 'resource_not_found' });
-    expect(checkIpRateLimit).toHaveBeenCalledOnce();
-    expect(getResource).toHaveBeenCalledWith('a'.repeat(100));
+    expect(checkIpRateLimit).not.toHaveBeenCalled();
+    expect(getResource).toHaveBeenCalledExactlyOnceWith('a'.repeat(100));
   });
 
-  it('valid resource ID remains rate limited before lookup', async () => {
+  it('valid resource ID is served even while the verify/settle limiter is denying', async () => {
+    // verify / settle が 429 になる状態でも、requirements は制限を呼ばずに要件を返す。
     state.rateLimited = true;
     const res = await handleDualRailRequirements(reqGet('res-1'));
-    expect(res.status).toBe(429);
-    expect(await res.json()).toEqual({ error: 'rate_limited' });
-    expect(getResource).not.toHaveBeenCalled();
+    expect(res.status).toBe(200);
+    expect((await res.json()).resourceId).toBe('res-1');
+    expect(checkIpRateLimit).not.toHaveBeenCalled();
+    expect(getResource).toHaveBeenCalledExactlyOnceWith('res-1');
   });
 
   it('登録値から USDC 要件一式を返す (payTo=出品者・Base USDC・atomic 変換)', async () => {

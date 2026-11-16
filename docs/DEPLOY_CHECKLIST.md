@@ -2349,6 +2349,26 @@ flag ON + forwarder/JPYC 設定済の Amoy (80002) で 1 周する。route テ�
   (96 run/日で約 290/日)。押さえが 1 件でもある run は ZRANGEBYSCORE と ZCOUNT の 2 (照合の窓を過ぎた古い押さえが
   あれば見本の 1) と、範囲に入った押さえ (最大 20) の GET が増える。期限切れの押さえを照合した run だけ、照合
   (license の CAS) と数え直しの分がさらに増える。
+- **公開の読み取り 2 本は KV の IP 制限を数えない**: `GET /api/discovery/{id}` (関数まで届くのは edge の MISS だけ) と
+  `GET /api/x402/relay/requirements` は、1 回 = 掲載の GET 1 コマンド。IP の制限の判定は INCR + EXPIRE NX の 2 コマンドで、
+  制限に当たった後の request でも 2 コマンドを使う = 判定 2 コマンドが、守っている GET 1 コマンドより高いので、この 2 本には
+  `checkIpRateLimit` を置いていない (`tests/app/api/x402-public-reads-kv.test.ts`)。2 本は自分では 429 を返さない。
+  - 回数の制限は、open-pay.jp の入口の Cloudflare の rule だけ。**2026-11-16 に運営者が dashboard で確認した値**: rule 名
+    `api-per-ip`・式 `(starts_with(http.request.uri.path, "/api/"))`・同じ特性 = IP・10 秒に 50 を超えたら block・
+    block の期間 10 秒・順序 first・アクティブ (§11.6 の注記の「/api 50 req/10s」はこの rule)。これは確認した日の値で、
+    恒久の保証ではない。**この rule を外す・緩める・式を変えるときは、この 2 本に回数の制限が無くなることを先に見て、
+    ここも書き直す**。
+  - Vercel の Firewall からは Cloudflare の IP しか見えない (本当の IP で数えられない)。app の中では、信頼できる接続元
+    (Cloudflare の公開レンジ) のときだけ `cf-connecting-ip` を採って数えている (`lib/net/ipHash.ts` の `clientIp`)。
+    この 2 本で app の中の制限をやめた理由は、上の「判定 2 コマンドが、守っている GET 1 コマンドより高い」。
+  - Cloudflare を通らない経路 (`*.vercel.app` など・`vercel.json` の deny は host が open-pay.jp のときだけ) では、この 2 本に
+    回数の制限が無い。そこでも KV は 1 回 1 コマンド (制限があったときは、通った request で 3・制限に当たった request で 2)
+    で、失敗の警告 (`x402.discovery.read_failed`・`GET /api/discovery/{id}` から呼ばれた
+    `x402.discovery.requirements_failed`・requirements から呼ばれた `x402.dualrail.accepts_failed`) は instance ごとに
+    60 秒に 1 回まで (`lib/warnThrottle.ts`・最初の 1 回は必ず出る)。カタログ (`GET /api/discovery`) の
+    `x402.discovery.requirements_failed` は抑えない。
+  - relay の verify / settle は `x402-dual-rail` の枠 (IP ごとに 60 回 / 60 秒) のままで、requirements を呼ばれても
+    この枠は減らない。verify / settle から呼ばれた `x402.dualrail.accepts_failed` は抑えない (失敗のたびに出る)。
 - 総数は `INFO stats` の `total_commands_processed` で見られるが、複数ノードで値が分かれる (書き込みは主ノード側の値)。
 
 ### §14.9b OpenPay Agent の North Star (月間の外部 JPYC Agent 購入者数)

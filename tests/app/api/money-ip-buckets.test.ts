@@ -71,7 +71,7 @@ import { POST as orderCallPost } from '@/app/api/order/call/route';
 import { GET as hostedGet } from '@/app/api/paid/hosted/[id]/route';
 import { guardPaidShopsApi } from '@/app/api/shops/_shared';
 import { hashIp } from '@/lib/net/ipHash';
-import { handleDualRailRelay, handleDualRailRequirements } from '@/lib/x402/dualRailRelay';
+import { handleDualRailRelay } from '@/lib/x402/dualRailRelay';
 
 const PAYER = '0x1111111111111111111111111111111111111111';
 const RESOURCE_ID = `h_${'1'.repeat(32)}`;
@@ -119,7 +119,8 @@ const admissionRoutes = [
   { name: 'facilitator/settle', run: settlePost, scope: 'relay-admission', max: 120 },
   { name: 'dualRailRelay verify', run: (req: Request) => handleDualRailRelay(req, 'verify'), scope: 'x402-dual-rail', max: 60 },
   { name: 'dualRailRelay settle', run: (req: Request) => handleDualRailRelay(req, 'settle'), scope: 'x402-dual-rail', max: 60 },
-  { name: 'dualRailRelay requirements', run: handleDualRailRequirements, scope: 'x402-dual-rail', max: 60 },
+  // dualRailRelay requirements (GET) はこの表に無い: KV の IP 制限を通らない公開の読み取りで、verify / settle の
+  // 'x402-dual-rail' の枠を使わない (tests/app/api/x402-public-reads-kv.test.ts が固定する)。
   { name: 'shops-paid', run: guardPaidShopsApi, scope: 'shops-paid', max: 10 },
   { name: 'x402-status', run: facilitatorStatusPost, scope: 'x402-status', max: 30 },
   { name: 'order/call', run: orderCallPost, scope: 'order-call', max: 5 },

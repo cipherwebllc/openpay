@@ -1382,20 +1382,28 @@ describe('public exact-ID discovery', () => {
     expect(flagOff.headers.get('cache-control')).toBe('no-store');
   });
 
-  it('rate-limits public exact-ID reads before listing storage and keeps flag-off inert', async () => {
+  it('does not consult the KV IP limiter for public exact-ID reads and keeps flag-off inert', async () => {
     vi.stubEnv('IP_HASH_SECRET', '0123456789abcdef0123456789abcdef');
-    await load();
+    const { resources } = await load();
+    mockRequireSession.mockResolvedValue({ ok: true, address: OWNER });
+    const id = await seedOne(resources);
+    // 制限が拒否を返す状態でも、照会は制限を呼ばず、掲載の読み取りの結果をそのまま返す (429 にならない)。
     ipRate.state.allowed = false;
-    store.failGet = true;
-    const res = await read('seller-id', '203.0.113.12');
-    expect(res.status).toBe(429);
-    expect(res.headers.get('cache-control')).toBe('no-store');
-    expect(res.headers.get('retry-after')).toBe('60');
-    expect(await res.json()).toEqual({ error: 'rate_limited' });
-    expect(ipRate.check).toHaveBeenCalledWith('x402-discovery-resource', expect.any(String), 60, 60);
-    expect(mockLoggerWarn).not.toHaveBeenCalledWith('x402.discovery.read_failed', expect.anything());
-    await load('');
     ipRate.check.mockClear();
+    const found = await read(id, '203.0.113.12');
+    expect(found.status).toBe(200);
+    expect(found.headers.get('cache-control')).toBe('public, s-maxage=300');
+    expect(found.headers.get('retry-after')).toBeNull();
+    const missing = await read('missing', '203.0.113.12');
+    expect(missing.status).toBe(404);
+    expect(await missing.json()).toEqual({ error: 'not_found' });
+    store.failGet = true;
+    const failed = await read(id, '203.0.113.12');
+    expect(failed.status).toBe(503);
+    expect(await failed.json()).toEqual({ error: 'storage_unavailable' });
+    expect(mockLoggerWarn).toHaveBeenCalledWith('x402.discovery.read_failed', { id });
+    expect(ipRate.check).not.toHaveBeenCalled();
+    await load('');
     expect((await read('seller-id', '203.0.113.12')).status).toBe(404);
     expect(ipRate.check).not.toHaveBeenCalled();
   });
@@ -1427,6 +1435,127 @@ describe('public exact-ID discovery', () => {
       expect(snippet).toContain(`EXPECTED_RECIPIENT = "${STRANGER}"`);
       expect(snippet).toContain(`EXPECTED_USDC_RECIPIENT = "${FIRST_PARTY_SELLER}"`);
     }
+  });
+});
+
+// accepts を作れない掲載 (ここでは価格 0) の警告 (x402.discovery.requirements_failed)。
+// GET /api/discovery/[id] は KV の IP 制限を置かないので、warnThrottled で instance ごとに 60 秒に 1 回まで (lib/warnThrottle.ts)。
+// カタログ (GET /api/discovery の .map(publicDiscoveryItem)) と publicDiscoveryItem(r) は今までどおり失敗のたびに出す。
+// 応答は変えない (200・accepts は []・[id] は edge 5 分)。
+describe('accepts を作れない掲載の警告', () => {
+  const T0 = Date.UTC(2026, 10, 16, 0, 0, 0);
+  const AMOUNT_ZERO = 'x402: amount must be > 0';
+
+  function at(ms: number): void {
+    vi.setSystemTime(T0 + ms);
+  }
+  async function readById(id: string) {
+    const route = await import('@/app/api/discovery/[id]/route');
+    return route.GET(new Request(`https://open-pay.jp/api/discovery/${id}`), ctx(id));
+  }
+  function requirementsFailed(): unknown[] {
+    return mockLoggerWarn.mock.calls
+      .filter(([msg]) => msg === 'x402.discovery.requirements_failed')
+      .map(([, fields]) => fields);
+  }
+  function brokenRecord(id: string) {
+    return {
+      id,
+      merchant: OWNER,
+      url: `https://api.example.jp/paid/${id}`,
+      description: 'JP→EN 翻訳 API',
+      priceJpyc: '0',
+      category: 'api',
+      payTo: OWNER,
+      network: 'eip155:80002',
+      active: true,
+      createdAt: 1,
+    };
+  }
+  // 価格の壊れた掲載を KV と一覧の index に置く。
+  function seedBroken(ids: string[]): void {
+    for (const id of ids) store.kv.set(resourceKey(id), JSON.stringify(brokenRecord(id)));
+    store.lists.set(RESOURCES_INDEX, [...ids]);
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    at(0);
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('[id] は同じ掲載を 61 回読んでも警告は最初の 1 回だけ・応答は毎回 200 で accepts は []・60 秒でまた 1 回', async () => {
+    await load();
+    seedBroken(['broken-1']);
+    for (let i = 0; i < 61; i += 1) {
+      const res = await readById('broken-1');
+      expect(res.status).toBe(200);
+      expect(res.headers.get('cache-control')).toBe('public, s-maxage=300');
+      const item = await res.json();
+      expect(item.id).toBe('broken-1');
+      expect(item.accepts).toEqual([]);
+    }
+    expect(requirementsFailed()).toEqual([{ id: 'broken-1', error: AMOUNT_ZERO }]);
+    at(59_999);
+    expect((await readById('broken-1')).status).toBe(200);
+    expect(requirementsFailed()).toHaveLength(1);
+    at(60_000);
+    expect((await readById('broken-1')).status).toBe(200);
+    expect(requirementsFailed()).toEqual([
+      { id: 'broken-1', error: AMOUNT_ZERO },
+      { id: 'broken-1', error: AMOUNT_ZERO },
+    ]);
+  });
+
+  it('[id] は掲載が毎回違っても、警告は 60 秒に 1 回 (request の値で別に数えない)', async () => {
+    await load();
+    const ids = Array.from({ length: 61 }, (_, i) => `broken-${i}`);
+    seedBroken(ids);
+    for (const id of ids) {
+      const res = await readById(id);
+      expect(res.status).toBe(200);
+      expect((await res.json()).accepts).toEqual([]);
+    }
+    expect(requirementsFailed()).toEqual([{ id: 'broken-0', error: AMOUNT_ZERO }]);
+  });
+
+  it('カタログは呼ばれるたびに、掲載ごとに警告する (main と同じ)・[id] の抑えと別に数える', async () => {
+    const { discovery } = await load();
+    seedBroken(['broken-1', 'broken-2', 'broken-3']);
+    expect((await readById('broken-1')).status).toBe(200);
+    expect(requirementsFailed()).toHaveLength(1);
+    for (let i = 0; i < 3; i += 1) {
+      const res = await discovery();
+      expect(res.status).toBe(200);
+      const { items } = (await res.json()) as { items: Array<{ id?: string; accepts: unknown[] }> };
+      expect(items.filter((item) => item.id).map((item) => [item.id, item.accepts])).toEqual([
+        ['broken-1', []], ['broken-2', []], ['broken-3', []],
+      ]);
+    }
+    // [id] の 1 回 + カタログ 3 回 × 3 件。
+    expect(requirementsFailed()).toHaveLength(10);
+    // カタログの警告で [id] の抑えは進まない (60 秒の間はまだ抑える)。
+    expect((await readById('broken-2')).status).toBe(200);
+    expect(requirementsFailed()).toHaveLength(10);
+  });
+
+  it('publicDiscoveryItem(r) の直接の呼び出しと .map(publicDiscoveryItem) は毎回警告する (map の index は効かない)', async () => {
+    await load();
+    const { publicDiscoveryItem, publicDiscoveryItemForLookup } = await import('@/lib/x402/discoveryItem');
+    const broken = brokenRecord('broken-1');
+    for (let i = 0; i < 3; i += 1) expect(publicDiscoveryItem(broken).accepts).toEqual([]);
+    expect(requirementsFailed()).toHaveLength(3);
+    // .map は 2 つ目に index (0, 1, …) を渡す。それでも毎回出る。
+    const mapped = Array.from({ length: 61 }, () => broken).map(publicDiscoveryItem);
+    expect(mapped.every((item) => item.accepts.length === 0)).toBe(true);
+    expect(requirementsFailed()).toHaveLength(64);
+    // [id] 用の形だけが抑える (最初の 1 回は出る)。
+    for (let i = 0; i < 61; i += 1) publicDiscoveryItemForLookup(broken);
+    expect(requirementsFailed()).toHaveLength(65);
+    // 中身は同じ形。
+    expect(publicDiscoveryItemForLookup(broken)).toEqual(publicDiscoveryItem(broken));
   });
 });
 

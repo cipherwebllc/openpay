@@ -1,6 +1,7 @@
 // Shared public projection: never expose owner-only registry/moderation fields.
 import { env } from '@/lib/env';
 import { logger } from '@/lib/logger';
+import { warnThrottled } from '@/lib/warnThrottle';
 import type { X402Resource } from './registry';
 import { createJpycPaymentRequirements } from './requirements';
 import { x402FacilitatorConfig } from './facilitatorConfig';
@@ -12,7 +13,22 @@ function updatedAtIso(value: number | undefined): string | undefined {
   return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
 }
 
+// accepts を作れなかったときの警告の出し方。'every' = 失敗のたびに出す (カタログ・既定)。
+// 'throttled' = warnThrottled を通す (GET /api/discovery/[id] = KV の IP 制限を置かない公開の GET・lib/warnThrottle.ts)。
+type RequirementsFailedWarn = 'every' | 'throttled';
+
+// カタログ (GET /api/discovery の .map(publicDiscoveryItem)) とテストが使う形。引数は 1 つのまま: .map に直接
+// 渡すので、2 つ目の引数を足すと index が入る。失敗のたびに警告する。
 export function publicDiscoveryItem(r: X402Resource) {
+  return discoveryItem(r, 'every');
+}
+
+// GET /api/discovery/[id] 用。中身は publicDiscoveryItem と同じで、accepts を作れない警告だけ 60 秒に 1 回まで。
+export function publicDiscoveryItemForLookup(r: X402Resource) {
+  return discoveryItem(r, 'throttled');
+}
+
+function discoveryItem(r: X402Resource, requirementsFailedWarn: RequirementsFailedWarn) {
   // priceJpyc (human 整数) → atomic。accepts は facilitator 未準備 (forwarder/feeReceiver 欠落) や
   // 不正 price では生成不能なので per-item で握りつぶし [] にする (カタログ自体は出す)。
   let accepts: ReturnType<typeof createJpycPaymentRequirements> = [];
@@ -26,10 +42,15 @@ export function publicDiscoveryItem(r: X402Resource) {
       chainId: x402FacilitatorConfig.chainId,
     });
   } catch (e) {
-    logger.warn('x402.discovery.requirements_failed', {
+    const fields = {
       id: r.id,
       error: e instanceof Error ? e.message : String(e),
-    });
+    };
+    if (requirementsFailedWarn === 'throttled') {
+      warnThrottled('x402.discovery.requirements_failed', fields);
+    } else {
+      logger.warn('x402.discovery.requirements_failed', fields);
+    }
   }
   const updatedAt = updatedAtIso(r.updatedAt);
   return {

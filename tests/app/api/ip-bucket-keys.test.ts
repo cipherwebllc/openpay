@@ -73,7 +73,8 @@ const routes: RouteCase[] = [
   { name: 'agent unbind', scope: 'agent-purchases-unbind', max: 30, call: async (r) => (await import('@/app/api/agent/proof/unbind/route')).POST(r) },
   { name: 'agent purchases', scope: 'agent-purchases-purchases', max: 60, call: async (r) => (await import('@/app/api/agent/purchases/route')).GET(r) },
   { name: 'agent bindings', scope: 'agent-purchases-bindings', max: 60, call: async (r) => (await import('@/app/api/agent/purchases/bindings/route')).GET(r) },
-  { name: 'discovery resource', scope: 'x402-discovery-resource', max: 60, call: async (r) => (await import('@/app/api/discovery/[id]/route')).GET(r, context) },
+  // GET /api/discovery/[id] はこの表に無い: KV の IP 制限を通らない公開の読み取り
+  // (tests/app/api/x402-public-reads-kv.test.ts が固定する)。
   { name: 'resource POST', scope: 'x402-resource-write', max: 30, call: async (r) => (await import('@/app/api/facilitator/resources/route')).POST(r) },
   { name: 'resource PATCH', scope: 'x402-resource-write', max: 30, call: async (r) => (await import('@/app/api/facilitator/resources/[id]/route')).PATCH(r, context) },
   // 第 7 回レビュー C9 / X1: SIWE 必須の書き込みにも IP limiter (SIWE は誰でも無料で取れる)。
