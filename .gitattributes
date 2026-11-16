@@ -1,0 +1,3 @@
+# BudouX の日本語の model (lib/phrase/README.md)。upstream の file を 1 byte も変えずに置く (sha256 をテストが固定) ので、
+# git の text の変換 (改行の付け替え) の対象から外す。
+lib/phrase/budoux-ja.json -text

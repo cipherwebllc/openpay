@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { getLocale, getTranslations } from 'next-intl/server';
 import { LandingSupportCard } from '@/components/LandingSupportCard';
 import { LANDING_ACTION_STACK, LANDING_PRIMARY, LANDING_SECONDARY } from '@/components/LandingControls';
+import { phrased } from '@/components/Phrased';
 
 export async function LandingTrust() {
   const [locale, t] = await Promise.all([
@@ -21,10 +22,10 @@ export async function LandingTrust() {
       />
       <div className="mx-auto max-w-3xl text-center">
         <h2 className="text-2xl font-bold leading-tight tracking-tight text-white [word-break:auto-phrase] text-balance sm:text-4xl">
-          {t('closingTitle')}
+          {phrased(t('closingTitle'), locale)}
         </h2>
         <p className="mx-auto mt-4 max-w-2xl text-sm leading-relaxed text-slate-300 sm:text-base">
-          {t('closingBody')}
+          {phrased(t('closingBody'), locale)}
         </p>
         {/* 濃い紺の面の上の型: 主ボタンは白の塗り・副ボタンは枠だけ (白く塗った副ボタンが、青い主ボタンより強く見えていた)。
             スマホは 2 つを縦に積んで幅をそろえる (中身の幅)。 */}
@@ -49,7 +50,7 @@ export async function LandingTrust() {
             {t('trustTitle')}
           </p>
           <p className="mx-auto mt-3 max-w-2xl text-sm leading-relaxed text-slate-300 sm:text-base">
-            {t('trustBody')}
+            {phrased(t('trustBody'), locale)}
           </p>
         </div>
         {/* 運営の応援 (オープンな運営の文脈で・料金の節から移した)。 */}

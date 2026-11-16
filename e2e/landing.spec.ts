@@ -514,4 +514,52 @@ test.describe('landing / (LP)', () => {
     await expect(guide).toHaveAttribute('href', '/ja/guide/shop');
     await expect(guide).not.toHaveAttribute('target', '_blank');
   });
+
+  // 2026-11-16: 文節で折る CSS (word-break: auto-phrase) が無い WebKit (iPhone の Safari) でも文節で折れるよう、ja の見出しや
+  // 本文に、server が文節の区切り (<span class="phrased">塊<wbr>塊…</span>) を入れる。字は 1 字も変えない。
+  // どの検査も 1 回の evaluate で読むだけ (click や表示の待ちを重ねない)。
+  test('ja: 文節の区切りを入れても、ヒーローの見出しと本文の文字は元の文のまま・en には区切りを入れない', async ({ page }) => {
+    await page.goto('/ja');
+    const hero = await page.evaluate(() => {
+      const h2 = [...document.querySelectorAll('main h2')].find((el) => el.textContent?.startsWith('お店の'));
+      const body = h2?.nextElementSibling;
+      const read = (el: Element | null | undefined) =>
+        el ? { text: el.textContent, inner: (el as HTMLElement).innerText, wbr: el.querySelectorAll('.phrased > wbr').length } : null;
+      const selection = getSelection()!;
+      if (h2) selection.selectAllChildren(h2);
+      const selected = selection.toString();
+      selection.removeAllRanges();
+      return { h2: read(h2), body: read(body), selected, phrased: document.querySelectorAll('main .phrased').length };
+    });
+    // 見出し: 区切りが入っていて (<wbr> 2 つ)、文字 (textContent・innerText・選んでコピーする文字) は元の文と同じ。
+    expect(hero.h2).toEqual({ text: 'お店のJPYC決済を、利用料0円から。', inner: 'お店のJPYC決済を、利用料0円から。', wbr: 2 });
+    expect(hero.selected).toBe('お店のJPYC決済を、利用料0円から。');
+    const bodyText = 'お客様がガス代を払う通常決済なら、利用料は0円（モバイル注文を除く）。売上はその場で、あなたのウォレットへ届きます。';
+    expect(hero.body).toEqual({ text: bodyText, inner: bodyText, wbr: 12 });
+    expect(hero.phrased).toBeGreaterThan(40);
+
+    // en は今までと同じ DOM (区切りの span も <wbr> も無い)。
+    await page.goto('/en');
+    expect(await page.evaluate(() => document.querySelectorAll('main .phrased, main wbr').length)).toBe(0);
+  });
+
+  test('ja: 区切りを入れた見出しの名前は、ブラウザ自身の計算 (Chromium の Accessibility tree) でも元の文と同じ', async ({ page, browserName }) => {
+    // Accessibility tree を読めるのは Chromium (CDP) だけ。WebKit は、名前で探すほかのテスト (getByRole) が見る。
+    test.skip(browserName !== 'chromium', 'Accessibility tree は Chromium の CDP で読む');
+    await page.goto('/ja');
+    // 区切り (<wbr>) の入った見出しの文字。
+    const phrasedHeadings = await page.evaluate(() =>
+      [...document.querySelectorAll('main h2, main h3')].filter((el) => el.querySelector('.phrased > wbr')).map((el) => el.textContent ?? ''),
+    );
+    expect(phrasedHeadings.length).toBeGreaterThan(10);
+    expect(phrasedHeadings).toEqual(
+      expect.arrayContaining(['お店のJPYC決済を、利用料0円から。', '売上を待たない。', '上限を決めて、AI に JPYC を払わせる。', 'よくある質問', '人にも、AIにも。オープンな決済を。']),
+    );
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send('Accessibility.enable');
+    const { nodes } = await cdp.send('Accessibility.getFullAXTree');
+    const names = new Set(nodes.filter((node) => node.role?.value === 'heading').map((node) => String(node.name?.value ?? '')));
+    // 名前に空白や欠けがあれば、ここに残る。
+    expect(phrasedHeadings.filter((text) => !names.has(text))).toEqual([]);
+  });
 });

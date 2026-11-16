@@ -8,6 +8,7 @@ import { getLocale, getTranslations } from 'next-intl/server';
 import { env } from '@/lib/env';
 import { LandingSectionHeader } from '@/components/LandingSectionHeader';
 import { LANDING_ACTION_ROW, LANDING_NOTE_CENTERED, LANDING_PRIMARY, LANDING_SECONDARY } from '@/components/LandingControls';
+import { phrased } from '@/components/Phrased';
 
 export async function LandingAiAgents() {
   const locale = await getLocale();
@@ -16,7 +17,7 @@ export async function LandingAiAgents() {
   return (
     <section id="lp-ai" className="mt-16 scroll-mt-24 sm:mt-28">
       {/* ヒーローの「AI・開発者向け」から飛んでくる節 (ヘッダの下に見出しが隠れないよう余白を取る)。 */}
-      <LandingSectionHeader eyebrow={t('eyebrowAgent')} title={t('aiEraTitle')} lead={t('aiEraBody')} />
+      <LandingSectionHeader eyebrow={t('eyebrowAgent')} title={phrased(t('aiEraTitle'), locale)} lead={phrased(t('aiEraBody'), locale)} />
 
       {/* 主導線は /agent (Agent を接続して試す)。/agent は flag なしで常に公開。節の主ボタンの型 (中身の幅。スマホでも全幅にしない =
           ヒーローの主ボタンより大きく見せない)。 */}
@@ -25,7 +26,7 @@ export async function LandingAiAgents() {
           {t('aiEraCtaAgent')}
         </Link>
         {/* 注は 4 文ある。スマホで中央寄せにすると行の頭がそろわず読みにくいので、スマホは左寄せ (注の型)。 */}
-        <p className={`mt-3 ${LANDING_NOTE_CENTERED}`}>{t('aiEraAgentNote')}</p>
+        <p className={`mt-3 ${LANDING_NOTE_CENTERED}`}>{phrased(t('aiEraAgentNote'), locale)}</p>
       </div>
 
       {/* 補助の 3 つは小さな横並び (スマホで 3 段の全幅ボタンにすると主導線と同じ重さに見える)。 */}
@@ -56,7 +57,7 @@ export async function LandingAiAgents() {
         </Link>
       </div>
       {/* 売り手側の一言: 「実売済み」の証拠は /guide/sell が持つ (LP は控えめに 1 行だけ)。 */}
-      <p className={`mt-3 ${LANDING_NOTE_CENTERED}`}>{t('aiEraSellNote')}</p>
+      <p className={`mt-3 ${LANDING_NOTE_CENTERED}`}>{phrased(t('aiEraSellNote'), locale)}</p>
     </section>
   );
 }

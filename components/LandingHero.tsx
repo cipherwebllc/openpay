@@ -11,6 +11,7 @@ import { getLocale, getTranslations } from 'next-intl/server';
 import { ArrowDown, ArrowRight } from 'lucide-react';
 import { env } from '@/lib/env';
 import { guideNavFor } from '@/lib/guideNav';
+import { phrased } from '@/components/Phrased';
 
 export async function LandingHero() {
   const locale = await getLocale();
@@ -50,10 +51,10 @@ export async function LandingHero() {
             {t('tagline')}
           </p>
           <h2 className="mt-5 text-[2.25rem] font-bold leading-[1.1] tracking-[-0.02em] text-slate-900 [word-break:auto-phrase] text-balance sm:text-5xl lg:text-[3rem] [[data-returning-open=yes]+section_&]:text-[1.75rem] sm:[[data-returning-open=yes]+section_&]:text-4xl">
-            {t('heroLeadline')}
+            {phrased(t('heroLeadline'), locale)}
           </h2>
           <p className="mx-auto mt-5 max-w-xl text-balance text-[15px] leading-relaxed text-slate-600 [word-break:auto-phrase] sm:text-base lg:mx-0 lg:[[data-returning-open=yes]+section_&]:mx-auto">
-            {t('heroBody')}
+            {phrased(t('heroBody'), locale)}
           </p>
           {/* 押したときの縮みと矢印の移動は、動きを減らす設定 (prefers-reduced-motion: reduce) でないときだけ (節のボタンと同じ)。 */}
           <div className="mt-7 flex justify-center lg:justify-start [[data-returning-open=yes]+section_&]:hidden">

@@ -7,9 +7,10 @@
 // 締めは濃い紺の面なので、案内の文字は明るく、カードは白にする。
 
 import Image from 'next/image';
-import { getTranslations } from 'next-intl/server';
+import { getLocale, getTranslations } from 'next-intl/server';
 import { ExternalLink, Heart } from 'lucide-react';
 import { LANDING_LINK_CARD, LANDING_PRIMARY } from '@/components/LandingControls';
+import { phrased } from '@/components/Phrased';
 
 const TIP_ORIGIN = 'https://open-pay.jp';
 // 運営の恒久プロフィール (link-in-bio + JPYC/USDC 応援)。会社 @handle は FEE_RECEIVER ウォレットで
@@ -18,12 +19,13 @@ const PROFILE_HANDLE = '@openpay_jp';
 const PROFILE_URL = `${TIP_ORIGIN}/${PROFILE_HANDLE}`;
 
 export async function LandingSupportCard() {
+  const locale = await getLocale();
   const t = await getTranslations('Landing');
   // 区切りの線の上下の空き: スマホは 32 / 24px (技術説明の区切りと同じ)・sm 以上は 40 / 32px。
   return (
     <div className="mx-auto mt-8 max-w-xl border-t border-slate-700/80 pt-6 text-center sm:mt-10 sm:pt-8">
       <p className="text-sm font-medium leading-relaxed text-slate-200">
-        {t('supportTipRequest')}
+        {phrased(t('supportTipRequest'), locale)}
       </p>
 
       {/* 応援プロフカード: 5 ボタンを 1 つに集約。カード全体が @openpay_jp プロフへの 1 link

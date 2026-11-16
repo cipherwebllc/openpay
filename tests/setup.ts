@@ -109,6 +109,19 @@ beforeEach(() => {
   }
 });
 
+// jsdom は <wbr> の display を空の文字列で返す (ブラウザの既定は inline)。見出しやボタンの名前を計算する
+// dom-accessibility-api は「inline でない子」の前後に空白を入れるので、文節の区切りに <wbr> を入れた文
+// (components/Phrased.tsx) の名前が「お店の JPYC決済を、 利用料0円から。」になり、getByRole(…, { name }) が当たらない。
+// 実ブラウザでは <wbr> は名前に何も足さない。jsdom の document にブラウザの既定と同じ指定を足して合わせる。
+// document を作り直すテストがあっても付くよう、各テストの前に無ければ足す。
+beforeEach(() => {
+  if (typeof document === 'undefined' || document.head.querySelector('style[data-jsdom-wbr-inline]')) return;
+  const style = document.createElement('style');
+  style.setAttribute('data-jsdom-wbr-inline', '');
+  style.textContent = 'wbr { display: inline; }';
+  document.head.appendChild(style);
+});
+
 // jsdom は IntersectionObserver と動画の再生 (HTMLMediaElement.play/pause) を実装しない。トップの操作の動画
 // (LandingDemoVideos) はトップ全体を描くテストでも描かれるので、既定は「何も起きない」スタブにする。
 // 画面に入ったときの動きを確かめるテスト (tests/components/LandingDemoVideos.test.tsx) は body 内で上書きする。

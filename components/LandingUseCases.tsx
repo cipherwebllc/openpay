@@ -8,9 +8,10 @@
 
 import Image from 'next/image';
 import { Gift, Smartphone, Store, Ticket, type LucideIcon } from 'lucide-react';
-import { getTranslations } from 'next-intl/server';
+import { getLocale, getTranslations } from 'next-intl/server';
 import { LandingSectionHeader } from '@/components/LandingSectionHeader';
 import { LANDING_CARD, LANDING_CARD_TITLE } from '@/components/LandingControls';
+import { phrased } from '@/components/Phrased';
 
 const USE_CASES = [
   {
@@ -41,11 +42,17 @@ const USE_CASES = [
 ] as const satisfies readonly { id: string; icon: LucideIcon; image: string; altKey: string }[];
 
 export async function LandingUseCases() {
+  const locale = await getLocale();
   const t = await getTranslations('Landing');
 
   return (
     <section className="mt-16 sm:mt-28">
-      <LandingSectionHeader id="lp-use-cases-title" eyebrow={t('eyebrowUseCases')} title={t('useCasesTitle')} lead={t('useCasesSubtitle')} />
+      <LandingSectionHeader
+        id="lp-use-cases-title"
+        eyebrow={t('eyebrowUseCases')}
+        title={phrased(t('useCasesTitle'), locale)}
+        lead={phrased(t('useCasesSubtitle'), locale)}
+      />
 
       {/* スマホは横スクロールの 1 行 (2 列の格子 4 段 ≒ 1 画面強を 1 段に・plans/lp-polish-2026-09.md P1)。
           次のカードが少し見えて「横に続く」と分かる幅にする。スクロール領域はキーボードでも動かせるよう
@@ -74,10 +81,10 @@ export async function LandingUseCases() {
                 {/* 見出しの記号は線のアイコンでそろえる (絵文字は端末ごとに見た目が変わる・plans/lp-polish-2026-09.md P2)。 */}
                 <h3 className={`flex items-center gap-1.5 ${LANDING_CARD_TITLE}`}>
                   <useCase.icon aria-hidden className="h-4 w-4 shrink-0 text-brand" />
-                  {t(`useCase${useCase.id}Title`)}
+                  {phrased(t(`useCase${useCase.id}Title`), locale)}
                 </h3>
                 <p className="text-[13px] leading-relaxed text-slate-600 [word-break:auto-phrase] supports-[word-break:auto-phrase]:text-pretty sm:text-sm">
-                  {t(`useCase${useCase.id}Body`)}
+                  {phrased(t(`useCase${useCase.id}Body`), locale)}
                 </p>
               </div>
             </li>

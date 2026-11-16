@@ -3,7 +3,7 @@
 // 1 セクションに統合する (2 分割は LP の縦長化に対して冗長という裁定)。
 // 投資・価格上昇の訴求はしない。1 JPYC = 1 円は言い切らず、JPYC EX で 1 円として払い戻せる事実で書く (2026-10-25 user 裁定・規約の免責はペッグを保証しない)。
 
-import { getTranslations } from 'next-intl/server';
+import { getLocale, getTranslations } from 'next-intl/server';
 import {
   JapaneseYen,
   Coins,
@@ -13,6 +13,7 @@ import {
 import { LandingSectionHeader } from '@/components/LandingSectionHeader';
 import { GuideCallout } from '@/components/guide/GuideCallout';
 import { LANDING_CARD, LANDING_CARD_TITLE, LANDING_ICON_BOX } from '@/components/LandingControls';
+import { phrased } from '@/components/Phrased';
 
 // JPYC 入門+運用・ウォレット選びの note 記事 (2026-08-05 user 指示で追加)。
 const JPYC_NOTE_ARTICLE_URL = 'https://note.com/masia02/n/ned04a4cdb00a';
@@ -25,12 +26,18 @@ const ITEMS: readonly { key: 1 | 3; icon: LucideIcon }[] = [
 ];
 
 export async function LandingWhyStablecoin() {
+  const locale = await getLocale();
   const t = await getTranslations('Landing');
 
   return (
     <section className="mt-16 sm:mt-28">
       {/* 補足の節 (はじめての方への前提知識): 見出しを 1 段小さくし、見出しから中身までも狭くして、ふつうの節より一段弱く見せる。 */}
-      <LandingSectionHeader eyebrow={t('eyebrowWhy')} title={t('whyStablecoinTitle')} lead={t('whyStablecoinSubtitle')} size="sm" />
+      <LandingSectionHeader
+        eyebrow={t('eyebrowWhy')}
+        title={phrased(t('whyStablecoinTitle'), locale)}
+        lead={phrased(t('whyStablecoinSubtitle'), locale)}
+        size="sm"
+      />
       {/* スマホも PC も 2 枚を横に並べる小さなタイル (カードの型)。
           狭いタイルで語の途中 (「強 / い」) で折れないよう、文節の切れ目で改行する (Safari は通常の改行のまま)。 */}
       <div className="mx-auto mt-6 grid max-w-4xl grid-cols-2 gap-3 sm:gap-4">
@@ -44,9 +51,11 @@ export async function LandingWhyStablecoin() {
                 <Icon className="h-5 w-5 text-brand" aria-hidden />
               </span>
               <span className={LANDING_CARD_TITLE}>
-                {t(`whyItem${key}Title`)}
+                {phrased(t(`whyItem${key}Title`), locale)}
               </span>
             </span>
+            {/* 本文には文節の区切り (phrased) を入れない: 区切りを入れると、文節で折れる Chromium でも折れる場所が増え、
+                幅 375px で最後の行が「まま。」だけになる (入れなければ「感覚のまま。」)。 */}
             <p className="mt-2 text-[13px] leading-relaxed text-slate-600 sm:mt-3 sm:text-sm">
               {t(`whyItem${key}Body`)}
             </p>

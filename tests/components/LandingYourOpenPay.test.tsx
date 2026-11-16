@@ -27,6 +27,7 @@ import { LandingHero } from '@/components/LandingHero';
 import { LANDING_SECTION_TITLE } from '@/components/LandingControls';
 import { YourOpenPayFrame, YourOpenPayPage } from '@/components/LandingYourOpenPayClient';
 import { handleViewTheme } from '@/lib/handleTheme';
+import { textHolder } from '@/tests/helpers/phrased';
 import { RETURNING_WALLET_PREPAINT, WAGMI_STORE_KEY, resetReturningWalletForTest } from '@/hooks/useReturningWallet';
 
 const SHOP = '0xAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAa';
@@ -406,7 +407,8 @@ describe('ヒーロー (開いたときの再訪で小さくする・P5a)', () =
       root,
       pill: within(root).getByText(ja.Landing.tagline),
       h2: within(root).getByRole('heading', { level: 2, name: ja.Landing.heroLeadline }),
-      body: within(root).getByText(ja.Landing.heroBody),
+      // 本文は文節の区切りの span に包まれる。class は、本文を置いた p が持つ。
+      body: textHolder(within(root).getByText(ja.Landing.heroBody)),
       cta: within(root).getByRole('link', { name: ja.Landing.heroCta }),
       nav: within(root).getByRole('navigation', { name: ja.Landing.heroAudienceLead }),
     };
