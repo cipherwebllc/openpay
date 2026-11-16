@@ -146,6 +146,23 @@ describe('phrased(): 文節の区切りを入れる', () => {
   });
 });
 
+describe('jsdom の土台 (tests/setup.ts)', () => {
+  it('区切りの <wbr> (.phrased の中) にだけ、ブラウザの既定と同じ display: inline を教える。ほかの <wbr> は jsdom のまま', () => {
+    const { container } = render(
+      <div>
+        <p>{phrased(L.heroLeadline, 'ja')}</p>
+        <h3>
+          長い語
+          <wbr />
+          の途中
+        </h3>
+      </div>,
+    );
+    expect(getComputedStyle(container.querySelector('.phrased wbr')!).display).toBe('inline');
+    expect(getComputedStyle(container.querySelector('h3 wbr')!).display).toBe('');
+  });
+});
+
 describe('トップの ja: 区切りを当てる範囲', () => {
   it('当てた文はこの一覧だけ (節ごと)。塊が 2 つ以上の文は全部 span に包まれ、ほかの文は包まれない', async () => {
     const sections = await renderSections();

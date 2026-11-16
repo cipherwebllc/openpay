@@ -13,7 +13,9 @@
 //   1. 禁則: 開き括弧の直後と、閉じ括弧・句読点・小さいかな・長音・繰り返しの記号の直前では区切らない
 //      (model は「なります | （ | お試しにも」と出し、狭い画面で「…なります（ / お試しにもどうぞ）。」と折れた)。
 //   2. 割らない語 (PHRASE_KEEP_WORDS): 表にある語の中では区切らない (model は「その | 場」「完結で | きます」と出す)。
-//   3. 日本語の字 (ひらがな・カタカナ・漢字) を含まない文は、区切らずにそのまま返す。
+//   3. つないだままにする組 (PHRASE_KEEP_RUNS): 文節で折れる Chromium の折れ方を変えないために、表にある並びの中では区切らない。
+//   4. 書記素 (見た目の 1 字) の途中では区切らない (結合文字・異体字セレクタ・ZWJ でつないだ絵文字)。
+//   5. 日本語の字 (ひらがな・カタカナ・漢字) を含まない文は、区切らずにそのまま返す。
 // どの決まりも区切りを減らすだけで、字は 1 つも変えない (返した塊をつなぐと、元の文字列に戻る)。
 
 import 'server-only';
@@ -81,7 +83,42 @@ const NO_BREAK_BEFORE = new Set([...'）」』〕】］)、。，．・：；！
  */
 export const PHRASE_KEEP_WORDS: readonly string[] = ['しくみ', 'できます', 'として', '払い戻', 'その場', 'により'];
 
-const JAPANESE = /[぀-ヿ㐀-鿿]/;
+/**
+ * つないだままにする組。語の途中ではないが、この並びの中では区切らない (前後の区切りはそのまま)。
+ * 文節で折れる Chromium (word-break: auto-phrase) の折れ方を、区切りを入れる前と同じに保つためのもの:
+ * Chromium は <wbr> の所でも折れるので、Chromium 自身が折らない所に区切りを入れると、行が変わる。
+ *   機器なしで今日から = 用途のカードの本文。区切り (機器なしで | 今日から。) を入れると、Chromium の幅 390 / 430px で
+ *   「…少額も、 / 機器なしで今日から。」が「…少額も、機器なしで / 今日から。」になり、最後の行が短くなる。
+ * 載せるのは、撮り比べて Chromium の行が変わった所だけ。
+ */
+export const PHRASE_KEEP_RUNS: readonly string[] = ['機器なしで今日から'];
+
+// ひらがな・カタカナ (U+3040〜30FF) と漢字 (U+3400〜9FFF)。
+const JAPANESE = /[\u3040-\u30ff\u3400-\u9fff]/;
+
+// 書記素 (見た目の 1 字) の区切り。結合文字 (NFD の濁点・半濁点)・異体字セレクタ・ZWJ でつないだ絵文字の途中を見分ける。
+const graphemes = new Intl.Segmenter('ja', { granularity: 'grapheme' });
+
+/**
+ * model の生の区切り (createBoundaryParser の結果・昇順) に、この file の決まりを掛ける。区切りを減らすだけで、順は変えない。
+ *   - 禁則: 開き括弧の直後と、閉じ括弧・句読点・小さいかな・長音・繰り返しの記号の直前の区切りを消す。
+ *   - 割らない語・つないだままにする組: 並びの中の区切りを消す。
+ *   - 書記素の途中の区切りを消す (文字は正規化しない。NFD の「か + 濁点」の間で区切ると、濁点だけが次の行の頭に落ちる)。
+ */
+export function refinePhraseBoundaries(text: string, boundaries: readonly number[]): number[] {
+  if (boundaries.length === 0) return [];
+  const inside = new Set<number>();
+  for (const run of [...PHRASE_KEEP_WORDS, ...PHRASE_KEEP_RUNS]) {
+    for (let at = text.indexOf(run); at !== -1; at = text.indexOf(run, at + 1)) {
+      for (let i = at + 1; i < at + run.length; i++) inside.add(i);
+    }
+  }
+  const graphemeStarts = new Set<number>();
+  for (const { index } of graphemes.segment(text)) graphemeStarts.add(index);
+  return boundaries.filter(
+    (i) => !NO_BREAK_AFTER.has(text[i - 1]) && !NO_BREAK_BEFORE.has(text[i]) && !inside.has(i) && graphemeStarts.has(i),
+  );
+}
 
 const jaBoundaries = createBoundaryParser(jaModel);
 
@@ -93,19 +130,9 @@ export function phrasesJa(text: string): string[] {
   if (text === '') return [];
   if (!JAPANESE.test(text)) return [text];
 
-  const boundaries = new Set(jaBoundaries(text));
-  for (const i of [...boundaries]) {
-    if (NO_BREAK_AFTER.has(text[i - 1]) || NO_BREAK_BEFORE.has(text[i])) boundaries.delete(i);
-  }
-  for (const word of PHRASE_KEEP_WORDS) {
-    for (let at = text.indexOf(word); at !== -1; at = text.indexOf(word, at + 1)) {
-      for (let i = at + 1; i < at + word.length; i++) boundaries.delete(i);
-    }
-  }
-
   const parts: string[] = [];
   let start = 0;
-  for (const i of [...boundaries].sort((a, b) => a - b)) {
+  for (const i of refinePhraseBoundaries(text, jaBoundaries(text))) {
     parts.push(text.slice(start, i));
     start = i;
   }

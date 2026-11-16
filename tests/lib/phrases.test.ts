@@ -1,6 +1,6 @@
 // 日本語の文を文節で区切る lib/phrase/phrases.ts のテスト。
 //   - upstream (BudouX v0.10.3 の parser) と同じ式であること (upstream のテストの例)
-//   - この file が足している決まり (禁則・割らない語・日本語を含まない文)
+//   - この file が足している決まり (禁則・割らない語・つないだままにする組・書記素・日本語を含まない文)
 //   - トップの文言を 1 字も変えないこと (つなぐと元に戻る)
 //   - 置いた model と LICENSE が upstream のままであること (sha256)
 //   - model が client の bundle に入らないこと ('use client' の file からたどれない)
@@ -12,7 +12,7 @@ import { describe, expect, it } from 'vitest';
 import ja from '@/messages/ja.json';
 import en from '@/messages/en.json';
 import model from '@/lib/phrase/budoux-ja.json';
-import { PHRASE_KEEP_WORDS, createBoundaryParser, phrasesJa } from '@/lib/phrase/phrases';
+import { PHRASE_KEEP_RUNS, PHRASE_KEEP_WORDS, createBoundaryParser, phrasesJa, refinePhraseBoundaries } from '@/lib/phrase/phrases';
 import { pricingContentFor } from '@/lib/pricing';
 
 const ROOT = resolve(__dirname, '../..');
@@ -152,7 +152,7 @@ describe('この file が足している決まり', () => {
         starts.add(offset);
         offset += part.length;
       }
-      for (const word of PHRASE_KEEP_WORDS) {
+      for (const word of [...PHRASE_KEEP_WORDS, ...PHRASE_KEEP_RUNS]) {
         for (let at = text.indexOf(word); at !== -1; at = text.indexOf(word, at + 1)) {
           for (let i = at + 1; i < at + word.length; i++) if (starts.has(i)) bad.push(`${key}: 「${word}」の途中`);
         }
@@ -178,6 +178,86 @@ describe('この file が足している決まり', () => {
     expect(rawPhrases('支払いを完結できます。残高だけで支払いを完結できます。')).toEqual(['支払いを', '完結で', 'きます。', '残高だけで', '支払いを', '完結で', 'きます。']);
     expect(phrasesJa('支払いを完結できます。残高だけで支払いを完結できます。')).toEqual(['支払いを', '完結できます。', '残高だけで', '支払いを', '完結できます。']);
     expect(phrasesJa('売上はその場で、注文もその場で、届きます。')).toEqual(['売上は', 'その場で、', '注文も', 'その場で、', '届きます。']);
+  });
+});
+
+describe('つないだままにする組 (Chromium の折れ方を、区切りを入れる前と同じに保つ)', () => {
+  it('表は、この 1 組 (足すのは、撮り比べて Chromium の行が変わった所だけ)', () => {
+    expect([...PHRASE_KEEP_RUNS]).toEqual(['機器なしで今日から']);
+  });
+
+  it('用途のカードの本文: model は「機器なしで | 今日から。」と区切るが、つないだままにする', () => {
+    // Chromium は <wbr> の所でも折れる。ここに区切りがあると、幅 390 / 430px で「…少額も、機器なしで / 今日から。」になる
+    // (区切りが無ければ、Chromium 自身の文節の区切りで「…少額も、 / 機器なしで今日から。」)。
+    expect(rawPhrases(L.useCase5Body)).toEqual(['クレカが', '割に', '合わない', '少額も、', '機器なしで', '今日から。']);
+    expect(phrasesJa(L.useCase5Body)).toEqual(['クレカが', '割に', '合わない', '少額も、', '機器なしで今日から。']);
+  });
+
+  it('組の前後の区切りは消さない・組でない「今日から」の前の区切りも消さない', () => {
+    const parts = phrasesJa(L.useCase5Body);
+    expect(parts[parts.indexOf('機器なしで今日から。') - 1]).toBe('少額も、');
+    // 「今日から」だけでは組に当たらない (導入メリットの本文・締めの本文の区切りはそのまま)。
+    expect(phrasesJa(L.benefitsCostBody)).toEqual(rawPhrases(L.benefitsCostBody));
+    expect(rawPhrases(L.benefitsCostBody)).toContain('今日から');
+    expect(phrasesJa(L.closingBody)).toEqual(rawPhrases(L.closingBody));
+    expect(rawPhrases(L.closingBody)).toContain('今日から、');
+  });
+});
+
+describe('書記素 (見た目の 1 字) の途中では区切らない', () => {
+  const DAKUTEN = String.fromCodePoint(0x3099);
+  const ZWJ = String.fromCodePoint(0x200d);
+  const VS16 = String.fromCodePoint(0xfe0f);
+  const IVS = String.fromCodePoint(0xe0100);
+  const FAMILY = [0x1f468, 0x200d, 0x1f469, 0x200d, 0x1f467].map((code) => String.fromCodePoint(code)).join('');
+  /** 字の境の全部 (1 〜 長さ − 1)。「どこにでも区切りたがる model」の代わり。 */
+  const everywhere = (text: string) => Array.from({ length: text.length - 1 }, (_, i) => i + 1);
+  /** 区切りの位置から塊へ。 */
+  const split = (text: string, boundaries: number[]) => {
+    const parts: string[] = [];
+    let start = 0;
+    for (const i of boundaries) {
+      parts.push(text.slice(start, i));
+      start = i;
+    }
+    parts.push(text.slice(start));
+    return parts;
+  };
+
+  it('NFD の文: model は「か」と濁点の間に区切りを出すが、消す。文字は正規化しない', () => {
+    const nfd = 'お客様がガス代を払う'.normalize('NFD');
+    expect(nfd).not.toBe('お客様がガス代を払う');
+    // model の生の出力が、濁点の直前で区切っていること (この検査が空振りしない)。
+    expect(rawBoundaries(nfd).filter((i) => nfd[i] === DAKUTEN).length).toBeGreaterThan(0);
+    const parts = phrasesJa(nfd);
+    for (const part of parts) expect(part.startsWith(DAKUTEN)).toBe(false);
+    expect(parts.join('')).toBe(nfd);
+    expect(parts.join('')).not.toBe(nfd.normalize('NFC'));
+  });
+
+  it('どこにでも区切りがあっても、結合文字・異体字セレクタ・ZWJ でつないだ絵文字の途中の区切りは残らない', () => {
+    const text = `注文${FAMILY}家族葛${IVS}飾区❤${VS16}店か${DAKUTEN}開く`;
+    const refined = refinePhraseBoundaries(text, everywhere(text));
+    expect(split(text, refined)).toEqual(['注', '文', FAMILY, '家', '族', `葛${IVS}`, '飾', '区', `❤${VS16}`, '店', `か${DAKUTEN}`, '開', 'く']);
+    expect(split(text, refined).join('')).toBe(text);
+    // ZWJ の前後・異体字セレクタの前・濁点の前には、どれも区切りが無い。
+    for (const i of refined) {
+      expect(text[i]).not.toBe(ZWJ);
+      expect(text[i - 1]).not.toBe(ZWJ);
+      expect(text[i]).not.toBe(VS16);
+      expect(text[i]).not.toBe(DAKUTEN);
+    }
+  });
+
+  it('後処理は区切りを減らすだけで、順 (昇順) は変えない。区切りが無ければ空', () => {
+    for (const [, text] of LANDING_JA) {
+      const raw = rawBoundaries(text);
+      const refined = refinePhraseBoundaries(text, raw);
+      expect(refined.filter((i) => !raw.includes(i))).toEqual([]);
+      expect(refined).toEqual([...refined].sort((a, b) => a - b));
+    }
+    expect(refinePhraseBoundaries('今日は天気です。', [])).toEqual([]);
+    expect(refinePhraseBoundaries('今日は天気です。', [3])).toEqual([3]);
   });
 });
 

@@ -13,7 +13,8 @@
 //     (「お店の JPYC決済を、 利用料0円から。」・Accessibility tree で確かめた)。付けると、名前は元の文のまま。
 //   - 属性 (aria-label・alt・title) と、client component が template に混ぜる文字列には使わない (文字列のまま渡す)。
 //   - 塊が欄より長くなる狭い欄 (スマホで 2 列のカードの本文・表のセル) には使わない: 塊の途中で折れる。
-// jsdom のテスト: jsdom は <wbr> の display を空で返すので、tests/setup.ts が inline と教えている (見出しの名前に空白が入らない)。
+// jsdom のテスト: jsdom は <wbr> の display を空で返すので、tests/setup.ts が .phrased の中の <wbr> は inline と教えている
+// (jsdom の名前の計算に空白が入らない)。
 
 import 'server-only';
 import type { ReactNode } from 'react';
