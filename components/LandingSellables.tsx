@@ -10,6 +10,7 @@ import { env } from '@/lib/env';
 import { HOSTED_PRODUCT_CATEGORIES } from '@/lib/x402/storeMeta';
 import { LandingSectionHeader } from '@/components/LandingSectionHeader';
 import { LandingProfileDemo } from '@/components/LandingProfileDemo';
+import { phrased } from '@/components/Phrased';
 
 export async function LandingSellables() {
   if (!env.enableCreatorStoreUi) return null;
@@ -20,7 +21,11 @@ export async function LandingSellables() {
   return (
     <section id="lp-sell" className="mt-16 scroll-mt-24 sm:mt-28">
       {/* ヒーローの「クリエイター向け」から飛んでくる節 (ヘッダの下に見出しが隠れないよう余白を取る)。 */}
-      <LandingSectionHeader eyebrow={t('eyebrowSell')} title={t('sellablesTitle')} lead={t('sellablesSubtitle')} />
+      <LandingSectionHeader
+        eyebrow={t('eyebrowSell')}
+        title={phrased(t('sellablesTitle'), locale)}
+        lead={phrased(t('sellablesSubtitle'), locale)}
+      />
       <div className="mx-auto mt-7 flex max-w-2xl flex-wrap justify-center gap-1.5 sm:gap-2">
         {HOSTED_PRODUCT_CATEGORIES.map((category) => (
           <span
@@ -32,7 +37,7 @@ export async function LandingSellables() {
         ))}
       </div>
       <p className="mx-auto mt-5 max-w-xl text-center text-sm leading-relaxed text-slate-600 [word-break:auto-phrase] supports-[word-break:auto-phrase]:text-pretty">
-        {t('sellablesBody')}
+        {phrased(t('sellablesBody'), locale)}
       </p>
       {/* 自己表現: 自分のページ (テーマ・色) を作れることを、触って伝える (plans/lp-polish-2026-09.md P3)。
           見本の下の入口の行 (「出品をはじめる」「販売ガイド」) も見本が描く (見本で選んだテーマと色を作成画面へ持って行く・

@@ -16,6 +16,7 @@ import { ChevronDown } from 'lucide-react';
 import { LandingSectionHeader } from '@/components/LandingSectionHeader';
 import { LANDING_FAQ, type LandingFaqAnswerKey } from '@/lib/landingFaq';
 import { LANDING_CARD } from '@/components/LandingControls';
+import { phrased } from '@/components/Phrased';
 
 // 行の左右の余白 (スマホ 20px・sm 以上 24px)。質問 (summary) と答えで同じ値を使い、答えの左を質問の左にそろえる。
 const ROW_X = 'px-5 sm:px-6';
@@ -66,7 +67,7 @@ export async function LandingFaq() {
   return (
     <section className="mt-16 sm:mt-28">
       {/* 補足の節 (読みたい人が開く質問): 見出しを 1 段小さくし、見出しから中身までも狭くして、ふつうの節より一段弱く見せる。 */}
-      <LandingSectionHeader eyebrow={t('eyebrowFaq')} title={t('faqTitle')} size="sm" />
+      <LandingSectionHeader eyebrow={t('eyebrowFaq')} title={phrased(t('faqTitle'), locale)} size="sm" />
 
       <ul className={`mx-auto mt-6 max-w-3xl divide-y divide-slate-100 overflow-hidden ${LANDING_CARD}`}>
         {LANDING_FAQ.map(({ q, a }) => (
@@ -79,7 +80,7 @@ export async function LandingFaq() {
                 {/* 質問の折り返し: 文節で折れるブラウザ (Chromium 系) は、文節で折って最後の行を短くしすぎない (text-pretty)。
                     文節が分からないブラウザ (WebKit = iPhone の Safari) は、行の長さをそろえる (text-balance)。そろえないと
                     「…換金するに / は?」のように最後の行が 1〜2 字になる。 */}
-                <span className="flex-1 text-balance [word-break:auto-phrase] supports-[word-break:auto-phrase]:text-pretty">{t(q)}</span>
+                <span className="flex-1 text-balance [word-break:auto-phrase] supports-[word-break:auto-phrase]:text-pretty">{phrased(t(q), locale)}</span>
                 {/* 開いた印の回転は、動きを減らす設定 (prefers-reduced-motion: reduce) でないときだけ。そのときも開いた印は
                     矢印の色 (紺) と開いた答えで分かる。 */}
                 <ChevronDown

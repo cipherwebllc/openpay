@@ -45,6 +45,7 @@ import {
   LANDING_TEXT_LINK,
 } from '@/components/LandingControls';
 import { PAYER_TONE } from '@/components/pricing/PayerPill';
+import { textHolder } from '@/tests/helpers/phrased';
 
 vi.mock('next-intl/server', () => ({
   getLocale: async () => 'ja',
@@ -145,12 +146,13 @@ describe('トップの節の入口は、役割ごとに 1 つの型を使う', (
 
   it('小さな注: 比較表・料金・AI の節の注は同じ型 (文は消さない)', async () => {
     const cash = render(await LandingCashComparison()).container;
-    expectType(within(cash).getByText(L.cashTableFootnote), LANDING_NOTE);
+    // 注の文は文節の区切りの span に包まれる。型の class は、文を置いた p が持つ。
+    expectType(textHolder(within(cash).getByText(L.cashTableFootnote)), LANDING_NOTE);
     const pricing = render(await LandingSupport()).container;
-    expectType(within(pricing).getByText(L.supportFeeNote), LANDING_NOTE_CENTERED);
+    expectType(textHolder(within(pricing).getByText(L.supportFeeNote)), LANDING_NOTE_CENTERED);
     const ai = render(await LandingAiAgents()).container;
-    expectType(within(ai).getByText(L.aiEraAgentNote), LANDING_NOTE_CENTERED);
-    expectType(within(ai).getByText(L.aiEraSellNote), LANDING_NOTE_CENTERED);
+    expectType(textHolder(within(ai).getByText(L.aiEraAgentNote)), LANDING_NOTE_CENTERED);
+    expectType(textHolder(within(ai).getByText(L.aiEraSellNote)), LANDING_NOTE_CENTERED);
   });
 
   it('大きい数字: 導入メリットと比較表の「0円〜」は同じ太さ・行の高さ・字間・数字の幅。色は型に入れない (誰が払うかの意味)', async () => {
@@ -311,7 +313,8 @@ describe('トップのカード・アイコンの箱・カードの小見出し�
     const why = render(await LandingWhyStablecoin()).container;
     const guides = render(await LandingEntryPoints()).container;
     const nav = guideNavFor('ja');
-    const whyTitles = WHY_TITLES.map((title) => within(why).getByText(title));
+    // なぜ今の題は文節の区切りの span に包まれる。型の class は、題を置いた span が持つ。
+    const whyTitles = WHY_TITLES.map((title) => textHolder(within(why).getByText(title)));
     const guideTitles = GUIDE_SLUGS.map((slug) => within(guides).getByText(nav.items[slug].label));
     // なぜ今の題・ガイドの入口の題は span のまま (見出しを増やさない)。
     for (const el of [...whyTitles, ...guideTitles]) expect(el.tagName).toBe('SPAN');

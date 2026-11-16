@@ -11,12 +11,13 @@
 import type { CSSProperties } from 'react';
 import { LANDING_PAYMENT_FEE_VALUES } from '@/lib/legal';
 import { focalFitCqi } from '@/lib/focalFit';
-import { getTranslations } from 'next-intl/server';
+import { getLocale, getTranslations } from 'next-intl/server';
 import { Coins, Rocket, Zap, UserCheck } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { LandingSectionHeader } from '@/components/LandingSectionHeader';
 import { PAYER_TONE } from '@/components/pricing/PayerPill';
 import { LANDING_CARD, LANDING_CARD_TITLE, LANDING_FIGURE, LANDING_ICON_BOX } from '@/components/LandingControls';
+import { phrased } from '@/components/Phrased';
 
 // i18n key は `benefits${BenefitId}{Focal,Title,Body}` で命名統一済 (messages/*.json)、
 // 1 つの BenefitId discriminator から template literal で 3 key を派生させる。
@@ -50,13 +51,18 @@ const TONE = {
 } as const satisfies Record<BenefitCard['audience'], unknown>;
 
 export async function LandingBenefits() {
+  const locale = await getLocale();
   const t = await getTranslations('Landing');
 
   return (
     <section className="mt-16 sm:mt-28">
       {/* 見出しは「売上を待たない。」(旧・独立節の一文)。「導入メリット」は章ラベルに回し、
           即時着金の一文と 4 枚の実利を 1 か所で読ませる。 */}
-      <LandingSectionHeader eyebrow={t('benefitsTitle')} title={t('payoutStatementTitle')} lead={t('payoutStatementBody')} />
+      <LandingSectionHeader
+        eyebrow={t('benefitsTitle')}
+        title={phrased(t('payoutStatementTitle'), locale)}
+        lead={phrased(t('payoutStatementBody'), locale)}
+      />
 
       <ul className="mt-8 grid grid-cols-2 gap-4 lg:grid-cols-4">
         {CARDS.map(({ id, audience, Icon }) => {
@@ -83,7 +89,7 @@ export async function LandingBenefits() {
               </p>
 
               <h3 className={`mt-3 ${LANDING_CARD_TITLE}`}>
-                {t(`benefits${id}Title`)}
+                {phrased(t(`benefits${id}Title`), locale)}
               </h3>
               <p className="mt-2 text-[13px] leading-relaxed text-slate-600 sm:text-sm">
                 {t(`benefits${id}Body`, LANDING_PAYMENT_FEE_VALUES)}

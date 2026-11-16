@@ -16,6 +16,7 @@ import { getLocale, getTranslations } from 'next-intl/server';
 import { SavingsSimulator } from '@/components/SavingsSimulator';
 import { LandingSectionHeader } from '@/components/LandingSectionHeader';
 import { LANDING_FIGURE, LANDING_NOTE, LANDING_SECONDARY } from '@/components/LandingControls';
+import { phrased } from '@/components/Phrased';
 
 // 比較表の行定義。i18n key は `cashCell{Row}{Col}` で命名統一。
 type RowId = 'Fee' | 'Settle' | 'Setup';
@@ -48,7 +49,7 @@ export async function LandingCashComparison() {
   return (
     <section className="mt-16 sm:mt-28">
       {/* 章ラベルは付けない: すぐ上の導入メリットの節の「お店向け」が、同じ章の始まりを示す (見出し自体にも「お店」がある・2026-11-15 user)。 */}
-      <LandingSectionHeader title={t('cashTitle')} lead={t('cashSubtitle')} />
+      <LandingSectionHeader title={phrased(t('cashTitle'), locale)} lead={phrased(t('cashSubtitle'), locale)} />
 
       {/* PC (lg 以上) は 左 = 比較表 / 右 = 試算 の 2 列 (縦に積むと 1 画面半・plans/lp-polish-2026-09.md P2)。 */}
       <div className="mx-auto max-w-3xl lg:grid lg:max-w-none lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)] lg:items-start lg:gap-8">
@@ -121,7 +122,7 @@ export async function LandingCashComparison() {
         </div>
 
         {/* 表に付く注 (注の型)。表と同じ幅で、左をそろえる。 */}
-        <p className={`mx-auto mt-3 max-w-3xl ${LANDING_NOTE}`}>{t('cashTableFootnote')}</p>
+        <p className={`mx-auto mt-3 max-w-3xl ${LANDING_NOTE}`}>{phrased(t('cashTableFootnote'), locale)}</p>
         </div>
         {/* 節約シミュレータ (client) */}
         <div className="min-w-0 lg:mt-8 lg:[&>*:first-child]:mt-0">

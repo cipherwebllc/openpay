@@ -11,6 +11,7 @@ import { LandingSectionHeader } from '@/components/LandingSectionHeader';
 import { SummaryCard } from '@/components/pricing/PricingPieces';
 import { pricingContentFor } from '@/lib/pricing';
 import { LANDING_LINK_ARROW, LANDING_NOTE_CENTERED, LANDING_TEXT_LINK } from '@/components/LandingControls';
+import { phrased } from '@/components/Phrased';
 
 export async function LandingSupport() {
   const t = await getTranslations('Landing');
@@ -19,7 +20,11 @@ export async function LandingSupport() {
 
   return (
     <section className="mt-16 sm:mt-28">
-      <LandingSectionHeader eyebrow={t('eyebrowPricing')} title={pricing.summaryTitle} lead={pricing.lead} />
+      <LandingSectionHeader
+        eyebrow={t('eyebrowPricing')}
+        title={phrased(pricing.summaryTitle, locale)}
+        lead={phrased(pricing.lead, locale)}
+      />
 
       {/* 料金がかかる 5 つの場合 (料金ページ /pricing の冒頭と同じカード・料率は lib/legal.ts の DISCLOSED_* から)。
           機能ごとの説明と計算例は料金ページに任せる (2026-10-12 user 裁定: トップは料金がかかる場合 + 料金ページへの入口)。
@@ -31,7 +36,7 @@ export async function LandingSupport() {
       </ul>
 
       {/* カードに付く注 (注の型)。説明する対象のすぐ下に置く (上の空きは、ほかの注と同じ mt-3)。 */}
-      <p className={`mt-3 ${LANDING_NOTE_CENTERED}`}>{t('supportFeeNote')}</p>
+      <p className={`mt-3 ${LANDING_NOTE_CENTERED}`}>{phrased(t('supportFeeNote'), locale)}</p>
       {/* 機能ごとの料金と計算例 (/pricing) への入口 (plans/pricing-page.md §2.6)。
           文字リンクの型 (押せる高さ 44px・WCAG 2.5.8)。リンク名は可視テキストだけ (矢印は aria-hidden・掟 8)。 */}
       <p className="mt-2 text-center">

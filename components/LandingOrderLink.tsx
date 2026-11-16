@@ -9,6 +9,7 @@ import Link from 'next/link';
 import { getLocale, getTranslations } from 'next-intl/server';
 import { ArrowRight, Link2 } from 'lucide-react';
 import { LANDING_CARD, LANDING_ICON_BOX, LANDING_LINK_ARROW, LANDING_TEXT_LINK } from '@/components/LandingControls';
+import { phrased } from '@/components/Phrased';
 
 export async function LandingOrderLink() {
   const locale = await getLocale();
@@ -27,9 +28,9 @@ export async function LandingOrderLink() {
                 (WebKit = iPhone の Safari) は、行の長さをそろえる (text-balance): そろえないと「…「注文リン / ク」」と
                 1 字だけ次の行に落ちる。 */}
             <h2 className="text-balance text-base font-bold leading-snug text-slate-900 [word-break:auto-phrase] supports-[word-break:auto-phrase]:text-wrap sm:text-lg">
-              {t('orderLinkStripTitle')}
+              {phrased(t('orderLinkStripTitle'), locale)}
             </h2>
-            <p className="mt-1 text-sm leading-relaxed text-slate-600 [word-break:auto-phrase]">{t('orderLinkStripBody')}</p>
+            <p className="mt-1 text-sm leading-relaxed text-slate-600 [word-break:auto-phrase]">{phrased(t('orderLinkStripBody'), locale)}</p>
           </div>
         </div>
         {/* 文字リンクの型 (押せる高さ 44px)。色はこの節の緑。リンク名は可視テキストだけ (矢印は aria-hidden・掟 8)。

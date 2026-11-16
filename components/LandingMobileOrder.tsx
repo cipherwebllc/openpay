@@ -11,6 +11,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { getLocale, getTranslations } from 'next-intl/server';
 import { LANDING_ACTION_STACK, LANDING_PRIMARY, LANDING_SECONDARY } from '@/components/LandingControls';
+import { phrased } from '@/components/Phrased';
 
 export async function LandingMobileOrder() {
   const locale = await getLocale();
@@ -25,10 +26,10 @@ export async function LandingMobileOrder() {
         <div className="grid items-center gap-8 p-6 sm:p-10 lg:grid-cols-[5fr,6fr] lg:gap-12 lg:p-12">
           <div className="text-center lg:text-left">
             <h2 className="text-[1.75rem] font-bold leading-tight tracking-tight text-slate-900 [word-break:auto-phrase] text-balance sm:text-4xl">
-              {t('mobileOrderBannerTitle')}
+              {phrased(t('mobileOrderBannerTitle'), locale)}
             </h2>
             <p className="mx-auto mt-3 max-w-md text-sm leading-relaxed text-slate-600 sm:text-base lg:mx-0">
-              {t('mobileOrderBannerLead')}
+              {phrased(t('mobileOrderBannerLead'), locale)}
             </p>
             {/* 節の主ボタンと副ボタンの型。色はこの節の緑 (お店の道具)。スマホは 2 つを縦に積んで幅をそろえる (中身の幅)。 */}
             <div className={`mt-7 ${LANDING_ACTION_STACK} lg:mx-0 lg:justify-start`}>

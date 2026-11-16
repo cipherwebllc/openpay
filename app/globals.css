@@ -48,6 +48,22 @@ body {
   text-rendering: optimizeLegibility;
 }
 
+/* 文節の区切りを入れた日本語の文 (components/Phrased.tsx の <span class="phrased">塊<wbr>塊…</span>)。
+   文節で折る CSS (word-break: auto-phrase) が無いブラウザ (WebKit = iPhone の Safari・Firefox) だけ、server が入れた区切り
+   (<wbr>) と空白・句読点の後ろでだけ折る (keep-all = 日本語の字の間では折らない)。塊が欄より長いときは、はみ出さずに
+   塊の中でも折る (overflow-wrap: anywhere)。keep-all は区切りを入れた span にだけ付ける: 区切りの無い文に付くと、
+   句読点でしか折れなくなる。
+   対応しているブラウザ (Chromium) には何も足さない: 今までどおり auto-phrase で折り、<wbr> の所でも折れる。
+   <wbr> を display: none で消さない: 消すと、見出しの名前を自前で計算する道具 (Playwright の getByRole) が、
+   inline でない子の前後に空白を入れて、名前が元の文と合わなくなる。ブラウザ自身の名前に <wbr> が空白を足さないように
+   するのは、<wbr> の aria-hidden (components/Phrased.tsx)。 */
+@supports not (word-break: auto-phrase) {
+  .phrased {
+    word-break: keep-all;
+    overflow-wrap: anywhere;
+  }
+}
+
 /* 電子レシート (PayerReceiptDetail) の「印刷」: 印刷時は対象レシート 1 枚だけを
    残し他要素を隠す。print ボタン押下で body に openpay-printing-receipt を付与し、
    対象 root に data-receipt-printing を立てる (afterprint で両者を解除)。

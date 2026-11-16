@@ -8,6 +8,7 @@ import { ChainLogo } from '@/components/AssetLogo';
 import type { ChainSlug } from '@/lib/chains';
 import { LandingSectionHeader } from '@/components/LandingSectionHeader';
 import { LANDING_CARD, LANDING_CARD_TITLE } from '@/components/LandingControls';
+import { phrased } from '@/components/Phrased';
 
 type FeatureCard = {
   Icon: LucideIcon;
@@ -76,7 +77,11 @@ export async function LandingFeatures() {
 
   return (
     <section className="mt-16 sm:mt-28">
-      <LandingSectionHeader eyebrow={t('eyebrowTech')} title={t('featuresTitle')} lead={t('featuresSubtitle')} />
+      <LandingSectionHeader
+        eyebrow={t('eyebrowTech')}
+        title={phrased(t('featuresTitle'), locale)}
+        lead={phrased(t('featuresSubtitle'), locale)}
+      />
 
       {/* 開発者向けの技術詳細は最下部 Trust「オープン技術と透明性」の技術スタックに
           一本化した (旧: ガスレスカード下に featuresGaslessTech の小注釈を出していた)。
@@ -92,7 +97,7 @@ export async function LandingFeatures() {
             >
               <Icon className={`row-span-3 mt-0.5 h-6 w-6 ${c.ink}`} aria-hidden />
               <h3 className={LANDING_CARD_TITLE}>
-                {t(titleKey)}
+                {phrased(t(titleKey), locale)}
               </h3>
               {/* ガス代不要の条件 (誰がガス代を払うか) は料金ページが説明する (plans/lp-polish-2026-10.md P2)。 */}
               <p className="text-sm leading-relaxed text-slate-700 [word-break:auto-phrase] supports-[word-break:auto-phrase]:text-pretty">
