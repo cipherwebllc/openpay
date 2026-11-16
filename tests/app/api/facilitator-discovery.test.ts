@@ -1382,20 +1382,28 @@ describe('public exact-ID discovery', () => {
     expect(flagOff.headers.get('cache-control')).toBe('no-store');
   });
 
-  it('rate-limits public exact-ID reads before listing storage and keeps flag-off inert', async () => {
+  it('does not consult the KV IP limiter for public exact-ID reads and keeps flag-off inert', async () => {
     vi.stubEnv('IP_HASH_SECRET', '0123456789abcdef0123456789abcdef');
-    await load();
+    const { resources } = await load();
+    mockRequireSession.mockResolvedValue({ ok: true, address: OWNER });
+    const id = await seedOne(resources);
+    // 制限が拒否を返す状態でも、照会は制限を呼ばず、掲載の読み取りの結果をそのまま返す (429 にならない)。
     ipRate.state.allowed = false;
-    store.failGet = true;
-    const res = await read('seller-id', '203.0.113.12');
-    expect(res.status).toBe(429);
-    expect(res.headers.get('cache-control')).toBe('no-store');
-    expect(res.headers.get('retry-after')).toBe('60');
-    expect(await res.json()).toEqual({ error: 'rate_limited' });
-    expect(ipRate.check).toHaveBeenCalledWith('x402-discovery-resource', expect.any(String), 60, 60);
-    expect(mockLoggerWarn).not.toHaveBeenCalledWith('x402.discovery.read_failed', expect.anything());
-    await load('');
     ipRate.check.mockClear();
+    const found = await read(id, '203.0.113.12');
+    expect(found.status).toBe(200);
+    expect(found.headers.get('cache-control')).toBe('public, s-maxage=300');
+    expect(found.headers.get('retry-after')).toBeNull();
+    const missing = await read('missing', '203.0.113.12');
+    expect(missing.status).toBe(404);
+    expect(await missing.json()).toEqual({ error: 'not_found' });
+    store.failGet = true;
+    const failed = await read(id, '203.0.113.12');
+    expect(failed.status).toBe(503);
+    expect(await failed.json()).toEqual({ error: 'storage_unavailable' });
+    expect(mockLoggerWarn).toHaveBeenCalledWith('x402.discovery.read_failed', { id });
+    expect(ipRate.check).not.toHaveBeenCalled();
+    await load('');
     expect((await read('seller-id', '203.0.113.12')).status).toBe(404);
     expect(ipRate.check).not.toHaveBeenCalled();
   });

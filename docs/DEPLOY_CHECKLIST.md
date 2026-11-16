@@ -2349,6 +2349,13 @@ flag ON + forwarder/JPYC 設定済の Amoy (80002) で 1 周する。route テ�
   (96 run/日で約 290/日)。押さえが 1 件でもある run は ZRANGEBYSCORE と ZCOUNT の 2 (照合の窓を過ぎた古い押さえが
   あれば見本の 1) と、範囲に入った押さえ (最大 20) の GET が増える。期限切れの押さえを照合した run だけ、照合
   (license の CAS) と数え直しの分がさらに増える。
+- **公開の読み取り 2 本は KV の IP 制限を数えない**: `GET /api/discovery/{id}` (関数まで届くのは edge の MISS だけ) と
+  `GET /api/x402/relay/requirements` は、1 回 = 掲載の GET 1 コマンド。IP の制限の判定は INCR + EXPIRE NX の 2 コマンドで、
+  制限に当たった後の request でも 2 コマンドを使う = 守る物 (GET 1) より高くつくので、この 2 本には `checkIpRateLimit` を
+  置いていない (`tests/app/api/x402-public-reads-kv.test.ts`)。2 本は自分では 429 を返さない。回数の制限は Cloudflare 側の
+  /api 50 req/10s ルール (§11.6 の注記) だけなので、**このルールを外す・緩めるときは、この 2 本に回数の制限が無くなることを
+  先に見る**。relay の verify / settle は `x402-dual-rail` の枠 (IP ごとに 60 回 / 60 秒) のままで、requirements を呼ばれても
+  この枠は減らない。
 - 総数は `INFO stats` の `total_commands_processed` で見られるが、複数ノードで値が分かれる (書き込みは主ノード側の値)。
 
 ### §14.9b OpenPay Agent の North Star (月間の外部 JPYC Agent 購入者数)

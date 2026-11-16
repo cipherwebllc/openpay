@@ -12,9 +12,10 @@
 // (レジストリの親 flag)。動作には X402_VANILLA_FACILITATOR=cdp (CDP 鍵) が必要 (無ければ 503
 // = 「掲載されない中継」を黙って提供しない)。
 //
-// 認証なし (rate limit のみ) で安全な理由: verify/settle の入力は購入者が EIP-3009 で署名した
-// 支払いそのもの。第三者が横取りしても settle 先は登録済み出品者の payTo に固定され、nonce は
-// 一度で消費される — 不正者が得るものがない。requirements は公開情報 (402 に載る内容) のみ。
+// 認証なし (verify/settle は IP ごとの rate limit のみ) で安全な理由: verify/settle の入力は購入者が
+// EIP-3009 で署名した支払いそのもの。第三者が横取りしても settle 先は登録済み出品者の payTo に固定され、
+// nonce は一度で消費される — 不正者が得るものがない。requirements は公開情報 (402 に載る内容) のみで、
+// KV の rate limit も置かない (handleDualRailRequirements の注記)。
 
 import 'server-only';
 
@@ -145,18 +146,25 @@ async function resolveTarget(
  * edge (CDN) には置かない: verify/settle の 409 (価格の不一致) を受けた gate はキャッシュを捨てて
  * ここを取り直す (SDK dualGate・スニペット)。edge が古い要件を返すと、価格を変えた後の USDC 決済が
  * edge の期限まで 409 を繰り返して止まる。/api/discovery/[id] (JPYC) は取り直しの経路が無いので 5 分置く。
+ *
+ * KV で数える IP ごとの制限は置かない (verify / settle の rateLimit() はそのまま):
+ *   - 守る物 (resolveTarget の掲載の GET 1 コマンド) より、判定 (INCR + EXPIRE NX の 2 コマンド・制限に当たった
+ *     後の request でも 2) の方が高くつく。置かなければ、どれだけ呼ばれても KV は 1 回 1 コマンド。
+ *   - 返すのは公開の情報だけ。
+ *   - open-pay.jp の入口には Cloudflare 側の制限 (/api に 50 req / 10 秒) があり、本当の IP で数える。Vercel から
+ *     見える接続元は Cloudflare なので、Vercel 側の IP の制限は使えない。
+ *   - verify / settle の枠 ('x402-dual-rail') をここで使わない: ここを呼ばれても、同じ IP の verify / settle の
+ *     枠は減らない。
+ * ここ自身は 429 を返さない (Cloudflare の 429 は来うる)。tests/app/api/x402-public-reads-kv.test.ts。
  */
 export async function handleDualRailRequirements(req: Request): Promise<NextResponse> {
   const gated = gate();
   if (gated) return gated;
-  // Match resolveTarget's existing ID bounds before the KV limiter, preventing
-  // malformed public lookups from draining storage shared with verify/settle.
+  // resolveTarget と同じ ID の範囲を先に見る。形の合わない照会は KV を読まずに 400。
   const resourceId = new URL(req.url).searchParams.get('resourceId');
   if (!resourceId || resourceId.length > MAX_RESOURCE_ID) {
     return jsonError(400, 'invalid_resource_id');
   }
-  const limited = await rateLimit(req);
-  if (limited) return limited;
   const resolved = await resolveTarget(resourceId);
   if (!resolved.ok) return resolved.response;
   const { resource, usdc, accepts } = resolved.target;
