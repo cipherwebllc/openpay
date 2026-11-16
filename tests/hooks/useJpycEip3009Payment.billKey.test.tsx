@@ -210,7 +210,7 @@ describe('bill key あり・forwarder のある経路・束縛なし: intentSalt
     expect(JSON.parse(b.typed).message.nonce).not.toBe(JSON.parse(a.typed).message.nonce);
   });
 
-  it('別の画面 (別の mount) で同じ bill key を同じ秒に払う: intentSalt も有効期限も nonce も同じ (relay とチェーンが 2 本目を止める)', async () => {
+  it('別の画面 (別の mount) で同じ bill key を同じ秒に払う: intentSalt も有効期限も nonce も同じになる (2 本目の扱いは relay と復旧の既存の作り・ここでは確かめない)', async () => {
     const a = await attempt(FORWARDER, { gasMode: 'merchant', billKey: VALID_BK });
     relay.posts.length = 0;
     signTypedData.mockClear();

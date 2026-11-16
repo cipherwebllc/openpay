@@ -171,13 +171,17 @@ afterEach(() => {
 
 const capturePath = process.env.BILL_KEY_GOLDEN_CAPTURE;
 
-describe.runIf(capturePath)('GOLDEN を採る (bill key を読む前の code で走らせる)', () => {
-  const collected: Record<string, Captured> = {};
-  it.each(Object.entries(SCENARIOS))('%s', async (name, scenario) => {
-    collected[name] = await attempt(scenario, {});
+// 採る test は、環境変数があるときだけ定義する (普段の実行では登録しない = skipped として数えない。
+// CI の scripts/run-tests.mjs は skipped を「run されなかった test」として落とす)。
+if (capturePath) {
+  describe('GOLDEN を採る (bill key を読む前の code で走らせる)', () => {
+    const collected: Record<string, Captured> = {};
+    it.each(Object.entries(SCENARIOS))('%s', async (name, scenario) => {
+      collected[name] = await attempt(scenario, {});
+    });
+    afterAll(() => writeFileSync(capturePath, JSON.stringify(collected, null, 2)));
   });
-  afterAll(() => writeFileSync(capturePath!, JSON.stringify(collected, null, 2)));
-});
+}
 
 describe.skipIf(capturePath)('bill key を使わない支払いは、bill key を読む前の code と同じ', () => {
   describe.each(Object.entries(SCENARIOS))('%s', (name, scenario) => {
