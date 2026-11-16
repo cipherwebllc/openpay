@@ -330,6 +330,22 @@ describe('useNewsRead: 保存できない・読めない環境 (落ちない・�
     expect(setItem).not.toHaveBeenCalled();
   });
 
+  it('既読の記録は読めて、基準の読みだけが throw: 印を出さず、warn は 0 回 (main と同じ)・読めない基準を上書きしない', () => {
+    const realGet = Storage.prototype.getItem;
+    const getItem = vi.spyOn(Storage.prototype, 'getItem').mockImplementation((key: string) => {
+      if (key === NEWS_BASELINE_STORAGE_KEY) throw new Error('SecurityError');
+      return realGet.call(window.localStorage, key);
+    });
+    const setItem = vi.spyOn(Storage.prototype, 'setItem');
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    const { result } = renderHook(() => useNewsRead());
+    expect(result.current.hydrated).toBe(true);
+    expect(result.current.hasUnread).toBe(false);
+    expect(callsFor(getItem, NEWS_BASELINE_STORAGE_KEY)).toBe(1);
+    expect(warn).not.toHaveBeenCalled();
+    expect(setItem).not.toHaveBeenCalled();
+  });
+
   it('window.localStorage の参照そのものが throw: 落ちず印を出さず、mount の warn は 1 回 (event の後も印なし)', () => {
     const warn = vi.spyOn(logger, 'warn').mockImplementation(() => undefined);
     withStorageGetterThrowing(() => {
@@ -380,7 +396,7 @@ describe('useNewsRead: 別のタブとの競合 (既読の記録は既読化だ�
     expect(b.result.current.unreadCount).toBe(0);
   });
 
-  it('版の違う 2 つのタブで初めて開く: 基準は古い版の最新に落ち着き、書き合いにならない (新しい版の未読は足された分だけ)', () => {
+  it('お知らせを足すだけの版どうしの 2 つのタブで初めて開く: 基準は古い版の最新に落ち着き、書き合いにならない (新しい版の未読は足された分だけ)', () => {
     const oldIndex = sortedNewsIndex();
     const newIndex = [ADDED, ...oldIndex];
     // 新しい版のタブが先に基準 (新しい最新) を書く。
@@ -410,7 +426,42 @@ describe('useNewsRead: 別のタブとの競合 (既読の記録は既読化だ�
     expect(stored()).toBeNull();
   });
 
-  it('別のタブが localStorage を全部消した → 印を出さない (次の mount は初めての訪問として基準を置く)', () => {
+  it('互いの最新を消した版どうしは、mount のたびに基準を書き合う (mount 1 回につき 1 回まで・event では書かない・印は出ない)', () => {
+    const v1 = sortedNewsIndex();
+    // v2 は v1 の最新を消し、別のお知らせを足した版。
+    const v2 = [ADDED, ...v1.slice(1)];
+    const setItem = vi.spyOn(Storage.prototype, 'setItem');
+    const rounds: [readonly { id: string; date: string }[], string][] = [
+      [v2, ADDED.id],
+      [v1, v1[0].id],
+      [v2, ADDED.id],
+      [v1, v1[0].id],
+    ];
+    for (const [index, latestId] of rounds) {
+      h.index = index;
+      const r = renderHook(() => useNewsRead());
+      expect(r.result.current.unreadCount).toBe(0);
+      expect(storedBaseline()).toBe(JSON.stringify(latestId));
+      r.unmount();
+    }
+    expect(callsFor(setItem, NEWS_BASELINE_STORAGE_KEY)).toBe(rounds.length);
+
+    // 開いたままのタブは、別のタブが基準を書き換えた event でも、全消去・既読化の event でも書かない。
+    h.index = v2;
+    const open = renderHook(() => useNewsRead());
+    const writesAfterMount = setItem.mock.calls.length;
+    seedBaseline(v1[0].id);
+    act(() => {
+      window.dispatchEvent(new StorageEvent('storage', { key: NEWS_BASELINE_STORAGE_KEY }));
+      window.dispatchEvent(new StorageEvent('storage', { key: null }));
+      window.dispatchEvent(new Event(NEWS_CHANGED_EVENT));
+    });
+    expect(setItem.mock.calls.length).toBe(writesAfterMount + 1); // seedBaseline の 1 回だけ
+    expect(open.result.current.unreadCount).toBe(0);
+    expect(stored()).toBeNull();
+  });
+
+  it('既読の記録がある人 (mount の基準は今の最新) のときに別のタブが全部消した → 印を出さない (次の mount は初めての訪問として基準を置く)', () => {
     seedSeen(oldestId());
     const first = renderHook(() => useNewsRead());
     expect(first.result.current.unreadCount).toBe(NEWS_ITEMS.length - 1);
@@ -426,6 +477,120 @@ describe('useNewsRead: 別のタブとの競合 (既読の記録は既読化だ�
     expect(second.result.current.hasUnread).toBe(false);
     expect(storedBaseline()).toBe(JSON.stringify(latestNewsId()));
     expect(stored()).toBeNull();
+  });
+
+  it('基準が古い (未読 1) ときに別のタブが全部消した → mount 中の基準が残るので未読 1 のまま (main は全件)・次の mount は今の最新を基準にして 0', () => {
+    const all = sortedNewsIndex();
+    seedBaseline(all[1].id);
+    const first = renderHook(() => useNewsRead());
+    expect(first.result.current.unreadCount).toBe(1);
+
+    window.localStorage.clear();
+    act(() => {
+      window.dispatchEvent(new StorageEvent('storage', { key: null }));
+    });
+    expect(first.result.current.unreadCount).toBe(1);
+    first.unmount();
+
+    const second = renderHook(() => useNewsRead());
+    expect(second.result.current.unreadCount).toBe(0);
+    expect(storedBaseline()).toBe(JSON.stringify(all[0].id));
+  });
+
+  it('別のタブの既読化で基準が消えた event (key = 基準) では読み直さず、既読の記録の event で読み直す', () => {
+    const all = sortedNewsIndex();
+    seedBaseline(all[1].id);
+    const { result } = renderHook(() => useNewsRead());
+    expect(result.current.unreadCount).toBe(1);
+
+    const getItem = vi.spyOn(Storage.prototype, 'getItem');
+    window.localStorage.removeItem(NEWS_BASELINE_STORAGE_KEY);
+    act(() => {
+      window.dispatchEvent(new StorageEvent('storage', { key: NEWS_BASELINE_STORAGE_KEY }));
+    });
+    expect(getItem).not.toHaveBeenCalled();
+    expect(result.current.unreadCount).toBe(1);
+
+    seedSeen(all[0].id);
+    act(() => {
+      window.dispatchEvent(new StorageEvent('storage', { key: NEWS_LAST_SEEN_STORAGE_KEY }));
+    });
+    expect(result.current.unreadCount).toBe(0);
+  });
+});
+
+// 既読化 (markAllSeen) は基準を消してから既読の記録を書く。
+describe('useNewsRead: 既読化と容量 (基準が既読の保存の容量を奪わない)', () => {
+  /** 合計 (key と値の文字数) が limit を超える setItem を QuotaExceededError で断る (容量に上限のある端末の模擬)。 */
+  function limitStorage(limit: number) {
+    const realGet = Storage.prototype.getItem;
+    const realSet = Storage.prototype.setItem;
+    const realKey = Storage.prototype.key;
+    return vi.spyOn(Storage.prototype, 'setItem').mockImplementation((key: string, value: string) => {
+      const ls = window.localStorage;
+      let used = 0;
+      for (let i = 0; i < ls.length; i++) {
+        const k = realKey.call(ls, i)!;
+        if (k !== key) used += k.length + (realGet.call(ls, k) ?? '').length;
+      }
+      if (used + key.length + value.length > limit) {
+        throw new DOMException('The quota has been exceeded.', 'QuotaExceededError');
+      }
+      realSet.call(ls, key, value);
+    });
+  }
+  const entrySize = (key: string, id: string) => key.length + JSON.stringify(id).length;
+
+  it('容量が 1 件ぶんしか残っていない: 古い版で初めて来て基準を保存 → 新しい版の /news で既読化しても保存でき、未読 0・warn 0 (main と同じ)', () => {
+    const oldIndex = sortedNewsIndex();
+    const limit = Math.max(
+      entrySize(NEWS_BASELINE_STORAGE_KEY, oldIndex[0].id),
+      entrySize(NEWS_LAST_SEEN_STORAGE_KEY, ADDED.id),
+    );
+    // 基準と既読の記録は、同時には入らない。
+    expect(
+      entrySize(NEWS_BASELINE_STORAGE_KEY, oldIndex[0].id) + entrySize(NEWS_LAST_SEEN_STORAGE_KEY, ADDED.id),
+    ).toBeGreaterThan(limit);
+    limitStorage(limit);
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => undefined);
+
+    h.index = oldIndex;
+    const a = renderHook(() => useNewsRead());
+    expect(storedBaseline()).toBe(JSON.stringify(oldIndex[0].id));
+    a.unmount();
+
+    h.index = [ADDED, ...oldIndex];
+    const b = renderHook(() => useNewsRead());
+    expect(b.result.current.unreadCount).toBe(1);
+    act(() => b.result.current.markAllSeen());
+    expect(stored()).toBe(JSON.stringify(ADDED.id));
+    expect(storedBaseline()).toBeNull();
+    expect(b.result.current.unreadCount).toBe(0);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('基準を消した後に既読の保存が失敗: warn 1 回 (main と同じ)・その mount は mount の基準のまま (main は全件)・次の mount は初めての訪問として印なし', () => {
+    const all = sortedNewsIndex();
+    seedBaseline(all[1].id);
+    const first = renderHook(() => useNewsRead());
+    expect(first.result.current.unreadCount).toBe(1);
+
+    const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new DOMException('The quota has been exceeded.', 'QuotaExceededError');
+    });
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    act(() => first.result.current.markAllSeen());
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith('localStorage.set failed', expect.anything());
+    expect(stored()).toBeNull();
+    expect(storedBaseline()).toBeNull();
+    expect(first.result.current.unreadCount).toBe(1);
+    first.unmount();
+
+    setItem.mockRestore();
+    const second = renderHook(() => useNewsRead());
+    expect(second.result.current.unreadCount).toBe(0);
+    expect(storedBaseline()).toBe(JSON.stringify(all[0].id));
   });
 });
 
@@ -461,17 +626,21 @@ describe('ヘッダのベル + お知らせの一覧 (hook を mock しない)',
     return bells[0].querySelector('.bg-rose-500');
   };
 
-  it('初めての訪問で /news を開く: ベルは印なしのまま、一覧の既読化で既読の記録が最新になる', () => {
+  it.each([
+    ['', false],
+    [' (StrictMode)', true],
+  ])('初めての訪問で /news を開く%s: ベルは印なしのまま、一覧の既読化で既読の記録が最新になり基準は消える', (_label, strict) => {
     renderWithIntl(
       <>
         <NewsBell />
         <NewsList items={newsEntriesFor('ja')} />
       </>,
+      { reactStrictMode: strict },
     );
     expect(screen.getByRole('link', { name: 'お知らせを開く' })).toBeInTheDocument();
     expect(bellDot()).toBeNull();
     expect(stored()).toBe(JSON.stringify(latestNewsId()));
-    expect(storedBaseline()).toBe(JSON.stringify(latestNewsId()));
+    expect(storedBaseline()).toBeNull();
   });
 
   it('古い記録の人: ベルだけの page では印と件数 → /news に移ると一覧の既読化でベルの印が消える', () => {
