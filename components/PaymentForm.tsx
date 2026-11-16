@@ -106,6 +106,7 @@ import {
   splitSupportedForToken,
   type PayParams,
 } from '@/lib/url';
+import { readBillKeyParam } from '@/lib/url/billKey';
 import { formatRemaining, isExpired, secondsRemaining } from '@/lib/fx';
 import { formatTokenAmount, shortAddress } from '@/lib/format';
 import {
@@ -927,10 +928,13 @@ function PaymentDetails({ params }: { params: PayParams }) {
     } else if (useRelay) {
       // JPYC EIP-3009 relay: 顧客が transferWithAuthorization に署名 → Gelato が gas 負担で submit。
       // fee=0・gas は OpenPay 肩代わりなので、全額 (amountWei) をそのまま merchant へ単発送金。
+      // 会計ごとの印 (URL の `bk`) があれば文字列のまま渡す (使うかどうかは hook が決める・lib/url/billKey.ts)。
+      const billKey = readBillKeyParam();
       relay.mutate({
         merchant: params.to,
         value: amountWei,
         gasMode: effectiveGas,
+        ...(billKey ? { billKey } : {}),
       });
     } else if (splitBreakdown) {
       // recipients[0] は primary (params.to)、それ以降が split entries

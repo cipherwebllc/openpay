@@ -66,6 +66,10 @@ export type JpycEip3009Params = {
   // 注文リンクの支払いの指紋 (lib/checkoutIntentContext の orderLinkContextFingerprint)。束縛しない支払いの
   // 復旧 intent にだけ残し、署名・relay POST には載せない (第 9 回レビュー G-1)。
   orderLinkKey?: Hex;
+  // 会計ごとの印 (bill key): お店の QR の URL の `bk` の文字列そのまま (/pay・/checkout だけが渡す・lib/url/billKey.ts)。
+  // forwarder のある経路 (recover) で、注文の束縛が無く、形が正しいときだけ、乱数の代わりに intentSalt の元にする (下の
+  // mutationFn の注記)。この文字列そのものは、署名・復旧 intent・relay POST・ログのどこにも載せない (POST に載るのは hash)。
+  billKey?: string;
 };
 // success=false は「relay は成立したが tx が on-chain で revert」(B2 と同じ表示方針)。
 // pending=true は「broadcast 済だが未確定」(receipt timeout / authorizationState 既使用)。
@@ -231,6 +235,9 @@ export function useJpycEip3009Payment(
   // 切り替えると、クリックしたときの接続先と実際の送金元がずれる。履歴・控え・確認の署名のウォレットを実際の
   // 送金元にそろえるために出す。署名の前に止まった試み (未接続・保留中の注文) では undefined。
   const lastSignedFromRef = useRef<Address | undefined>(undefined);
+  // この mount で、bill key の署名に使った有効期限 (lib/relay/billKeySalt の billKeyIntent が書き足す)。bill key の
+  // intentSalt は毎回同じなので、同じ有効期限の署名し直しは同じ nonce になる。それを避けるために持つ (memory だけ)。
+  const billKeyUsedRef = useRef(new Set<string>());
   const storageRef = useRef<PaymentIntentStorage | null>(null);
   const deliveryStorageRef = useRef<typeof import('@/lib/orderDelivery') | null>(null);
   const orderDeliveryRef = useRef<OrderDelivery | null>(null);
@@ -588,6 +595,7 @@ export function useJpycEip3009Payment(
       tipMessage,
       order,
       orderLinkKey,
+      billKey,
     }) => {
       // 何の波及を断つか: 画面を離れた (unmount した) hook の試みが、離れた後に POST と復旧の枠 (openpay:relay-intent:v1)
       // の保存へ進むこと。react-query の mutation は (アプリで 1 つの) QueryClient の MutationCache に残るので、mutate と
@@ -701,7 +709,8 @@ export function useJpycEip3009Payment(
       const from = address as Address;
       lastSignedFromRef.current = from;
       const nowSec = Math.floor(Date.now() / 1000);
-      const validBefore = BigInt(nowSec + AUTHORIZATION_VALIDITY_WINDOW_SEC);
+      // 代入し直すのは、下の bill key の分岐 (同じ bill key の署名し直し) だけ。
+      let validBefore = BigInt(nowSec + AUTHORIZATION_VALIDITY_WINDOW_SEC);
       const forwarder = jpycForwarderFor(chainId);
 
       const bindModule = order ? await import('@/lib/orderBind') : null;
@@ -795,6 +804,31 @@ export function useJpycEip3009Payment(
           : recoverFeeValue(value, gasMode, chainId);
         const merchantValue = gasMode === 'merchant' ? value - feeValue : value;
         if (merchantValue <= 0n) throw new Error('amount_too_small');
+        // 会計ごとの印 (bill key): 呼び出し側が URL の `bk` を渡し、注文の束縛が無いときだけ入る分岐。形が正しければ、乱数の
+        // 代わりに bill key から作った intentSalt を使う (お店の端末が Settled の nonce を計算し直して「この会計の入金」と
+        // 確かめるための印・lib/relay/billKeySalt.ts)。形の検査と hash は遅延 chunk に置く (First Load JS に載せない)。
+        // - bill key を渡さない支払い (チップ・古い QR) はこの分岐に入らず、await も import も増えない (下の乱数の式と
+        //   lazy import の位置は今までどおり)。形の違う bill key は null が返り、乱数で払う (支払いは止めない)。
+        // - 束縛した注文は束縛の salt を使う (bill key を使うと server の束縛の検証が落ちて注文が届かない。束縛の有効期限
+        //   (bind.validBefore) もここで動かさない)。
+        // - forwarder の無い経路 (下の else) は bill key を見ない (salt が EIP-3009 の nonce そのもので有効期限が混ざらず、
+        //   同じ bill key の 2 回目が、払っていないのに 1 回目の結果になる)。
+        // - 同じ bill key の署名し直しは、有効期限を重ならない値にずらして別の nonce にする (billKeyIntent の注記)。
+        // 何の波及を断つか (catch): bill key はお店の側の照合のための付帯で、支払いが本体。遅延 chunk を読めないとき
+        // (回線・deploy の切り替わり) に支払いを止めず、bill key を無いものとして乱数で払う (その入金は、bill key の無い
+        // 支払いと同じく、お店の端末の照合に一致しないだけ)。
+        let billSalt: Hex | null = null;
+        if (billKey && !boundSalt) {
+          try {
+            const bill = (await import('@/lib/relay/billKeySalt')).billKeyIntent(billKey, validBefore, billKeyUsedRef.current);
+            if (bill) {
+              billSalt = bill.intentSalt;
+              validBefore = bill.validBefore;
+            }
+          } catch {
+            // 上の注記のとおり、乱数で払う。
+          }
+        }
         const params: ForwarderSettleParams = {
           from,
           merchant,
@@ -803,7 +837,7 @@ export function useJpycEip3009Payment(
           feeValue,
           validAfter: 0n,
           validBefore,
-          intentSalt: boundSalt ?? randomAuthorizationNonce(),
+          intentSalt: boundSalt ?? billSalt ?? randomAuthorizationNonce(),
         };
         // recover 専用の intent 構築は lazy import (initial /pay バンドルに encodeAbiParameters
         // 等を載せない・予算節約)。recover 決済が実行された時のみ chunk を読み込む。
