@@ -385,3 +385,104 @@ describe('sameProfileDraft (保存時と同じ正規化で、すべての項目�
     expect(sameProfileDraft({ ...DEFAULT_PROFILE_DRAFT, socials: [''] }, DEFAULT_PROFILE_DRAFT)).toBe(false);
   });
 });
+
+// トップの見本から入れたテーマと色 (plans/lp-polish-2026-11.md P6)。印は下書きに入れず、タブごとに持つ (hooks/useLandingLookSeed)。
+// 手付かずの判定は、このタブの印を渡したときだけ、テーマと色が印のままなら既定と同じに数える。
+describe('isPristineProfileDraft: このタブの見本の印 (seed) を渡したとき', () => {
+  const WALLET = '0x52d4901142e2B5680027da5EB47C86CB02a3cA81';
+  const SEED = { theme: 'night', color: '#7c3aed' } as const;
+  const LOOK = { ...DEFAULT_PROFILE_DRAFT, theme: 'night', color: '#7c3aed' } as const;
+
+  it('テーマと色が印のままで、ほかが既定なら手付かず (受取先が接続中のウォレットでも)', () => {
+    expect(isPristineProfileDraft(LOOK, undefined, SEED)).toBe(true);
+    expect(isPristineProfileDraft({ ...LOOK, to: WALLET }, WALLET, SEED)).toBe(true);
+    // 既定のテーマと色は、印があっても今までどおり手付かず。
+    expect(isPristineProfileDraft(DEFAULT_PROFILE_DRAFT, undefined, SEED)).toBe(true);
+  });
+
+  it('印を渡さない (別のタブ・印が無い) ときは今までと同じ: 見本の値の入った下書きは手を入れたもの', () => {
+    expect(isPristineProfileDraft(LOOK)).toBe(false);
+    expect(isPristineProfileDraft(LOOK, WALLET, null)).toBe(false);
+  });
+
+  it('テーマか色が印と違う・ほかの項目を書いた・別の受取先を打った下書きは手付かずではない', () => {
+    expect(isPristineProfileDraft({ ...LOOK, theme: 'bold' }, undefined, SEED)).toBe(false);
+    expect(isPristineProfileDraft({ ...LOOK, color: '#059669' }, undefined, SEED)).toBe(false);
+    expect(isPristineProfileDraft({ ...LOOK, name: 'Alice' }, undefined, SEED)).toBe(false);
+    expect(isPristineProfileDraft({ ...LOOK, font: 'serif' }, undefined, SEED)).toBe(false);
+    expect(isPristineProfileDraft({ ...LOOK, message: 'x' }, undefined, SEED)).toBe(false);
+    expect(isPristineProfileDraft({ ...LOOK, to: WALLET }, undefined, SEED)).toBe(false);
+  });
+});
+
+// 2 つのタブ (同じ localStorage) で、片方のタブの変更がまだ保存されていない間に前面に戻る順。同期の決まり (SYNC_RULES) は
+// main のまま: テーマと色はそれぞれ別の単位で、両方のタブの変更が混ざって残る。見本の印を下書きに入れない (P6) ので、別のタブの
+// 見本の値が、このタブの手入力を「手付かず」に変えることもない。
+describe('別のタブとの同期: テーマと色 (main と同じ結果)', () => {
+  const focusTab = () => act(() => {
+    window.dispatchEvent(new Event('focus'));
+  });
+  const look = (d: { theme: string; color: string }) => ({ theme: d.theme, color: d.color });
+  const storedLook = () => look(JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}'));
+
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  async function twoTabs() {
+    const a = renderHook(() => useHandleProfileDraft()).result;
+    const b = renderHook(() => useHandleProfileDraft()).result;
+    await waitFor(() => expect(a.current.hydrated && b.current.hydrated).toBe(true));
+    return { a, b };
+  }
+
+  it('B が見本の Bold × 緑を保存 → A が手で Bold を選んで未保存のまま前面に戻る: A は手付かずにならない', async () => {
+    const { a, b } = await twoTabs();
+    // B は見本の値を入れたタブ (B の印は B だけのもの)。
+    act(() => b.current.setSettings((s) => ({ ...s, theme: 'bold', color: '#059669' })));
+    act(() => {
+      a.current.setSettings((s) => ({ ...s, theme: 'bold' }));
+      window.dispatchEvent(new Event('focus'));
+    });
+    expect(look(a.current.settings)).toEqual({ theme: 'bold', color: '#059669' });
+    // A には印が無い: 手入力の入った下書きは手付かずではない (持っている @handle の自動編集に入らない)。
+    expect(isPristineProfileDraft(a.current.settings)).toBe(false);
+    expect(isPristineProfileDraft(b.current.settings, undefined, { theme: 'bold', color: '#059669' })).toBe(true);
+  });
+
+  it('B が緑を保存 → A が未保存の Bold のまま前面に戻る → 両方の変更が残る', async () => {
+    const { a, b } = await twoTabs();
+    act(() => b.current.setSettings((s) => ({ ...s, color: '#059669' })));
+    act(() => {
+      a.current.setSettings((s) => ({ ...s, theme: 'bold' }));
+      window.dispatchEvent(new Event('focus'));
+    });
+    focusTab();
+    expect(storedLook()).toEqual({ theme: 'bold', color: '#059669' });
+    expect(look(a.current.settings)).toEqual({ theme: 'bold', color: '#059669' });
+    expect(look(b.current.settings)).toEqual({ theme: 'bold', color: '#059669' });
+  });
+
+  it('B が緑を保存 → A が前面に戻らずに Bold を保存 → 両方の変更が残る', async () => {
+    const { a, b } = await twoTabs();
+    act(() => b.current.setSettings((s) => ({ ...s, color: '#059669' })));
+    act(() => a.current.setSettings((s) => ({ ...s, theme: 'bold' })));
+    expect(storedLook()).toEqual({ theme: 'bold', color: '#059669' });
+    focusTab();
+    expect(look(a.current.settings)).toEqual({ theme: 'bold', color: '#059669' });
+    expect(look(b.current.settings)).toEqual({ theme: 'bold', color: '#059669' });
+  });
+
+  it('B が Bold を保存 → A が未保存の緑のまま前面に戻る → 両方の変更が残る', async () => {
+    const { a, b } = await twoTabs();
+    act(() => b.current.setSettings((s) => ({ ...s, theme: 'bold' })));
+    act(() => {
+      a.current.setSettings((s) => ({ ...s, color: '#059669' }));
+      window.dispatchEvent(new Event('focus'));
+    });
+    focusTab();
+    expect(storedLook()).toEqual({ theme: 'bold', color: '#059669' });
+    expect(look(a.current.settings)).toEqual({ theme: 'bold', color: '#059669' });
+    expect(look(b.current.settings)).toEqual({ theme: 'bold', color: '#059669' });
+  });
+});

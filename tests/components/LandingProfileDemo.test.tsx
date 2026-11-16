@@ -1,10 +1,28 @@
-import { describe, expect, it } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
-import { LandingProfileDemo, type LandingProfileDemoCopy } from '@/components/LandingProfileDemo';
+import { describe, expect, it, vi } from 'vitest';
+import { createTranslator } from 'next-intl';
+import { fireEvent, render, screen, within } from '@testing-library/react';
+import { LandingProfileDemo, type LandingProfileDemoCopy, type LandingProfileDemoCta } from '@/components/LandingProfileDemo';
+import { LandingSellables } from '@/components/LandingSellables';
 import { handlePageTheme, handleViewTheme } from '@/lib/handleTheme';
 import { normalizeHandle, validateHandle } from '@/lib/handle';
 import ja from '../../messages/ja.json';
 import en from '../../messages/en.json';
+
+// 販売の節 (server) を ja / en で描いて、見本の下の入口の行の文言と行き先の土台が server から渡ることを見る。
+const intl = vi.hoisted(() => ({ locale: 'ja' as 'ja' | 'en' }));
+vi.mock('next-intl/server', async () => {
+  const messages = { ja: (await import('../../messages/ja.json')).default, en: (await import('../../messages/en.json')).default };
+  return {
+    getLocale: async () => intl.locale,
+    getTranslations: async (namespace: 'Landing' | 'StoreCatalog') =>
+      createTranslator({ locale: intl.locale, messages: messages[intl.locale], namespace }),
+  };
+});
+// 販売の節は Store の UI の flag が ON のときだけ描く (本番は ON)。
+vi.mock('@/lib/env', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/env')>();
+  return { ...actual, env: { ...actual.env, enableCreatorStoreUi: true } };
+});
 
 const c: LandingProfileDemoCopy = {
   title: 'Make the page yours',
@@ -14,10 +32,11 @@ const c: LandingProfileDemoCopy = {
   colorNames: { blue: 'Blue', green: 'Green', rose: 'Rose', amber: 'Amber', violet: 'Violet' },
   sample: { tag: 'Sample', initial: 'K', name: 'Komorebi', handle: '@your_name', bio: 'Illustrations.', featured: 'Wallpaper set', link: 'See my work' },
 };
+const cta: LandingProfileDemoCta = { sellHref: '/en/create?tab=profile', sellLabel: 'Start selling', guideHref: '/en/guide/store', guideLabel: 'Selling guide' };
 
 describe('LandingProfileDemo', () => {
   it('previews the public-profile look for the chosen theme and color (same tokens as the real page)', () => {
-    render(<LandingProfileDemo c={c} />);
+    render(<LandingProfileDemo c={c} cta={cta} />);
     const preview = screen.getByText('Komorebi').closest('[aria-hidden]') as HTMLElement;
     // 既定は Gradient × 青。
     expect(screen.getByRole('button', { name: 'Gradient' })).toHaveAttribute('aria-pressed', 'true');
@@ -36,7 +55,7 @@ describe('LandingProfileDemo', () => {
     expect(handleViewTheme('#7c3aed', 'night').inkColor).toBe('#f8fafc');
   });
   it('names every option by its visible text and keeps the decorative preview out of the reading order', () => {
-    const { container } = render(<LandingProfileDemo c={c} />);
+    const { container } = render(<LandingProfileDemo c={c} cta={cta} />);
     for (const name of ['Clean', 'Gradient', 'Bold', 'Outline', 'Night', 'Soft', 'Blue', 'Green', 'Rose', 'Amber', 'Violet']) {
       expect(screen.getByRole('button', { name })).toBeInTheDocument();
     }
@@ -49,5 +68,53 @@ describe('LandingProfileDemo', () => {
       const handle = normalizeHandle(messages.Landing.profileDemoSampleHandle);
       expect(validateHandle(handle)).toEqual({ ok: false, reason: 'reserved' });
     }
+  });
+});
+
+describe('LandingProfileDemo: 見本で選んだテーマと色を「出品をはじめる」の行き先に付ける (P6)', () => {
+  const sell = () => screen.getByRole('link', { name: 'Start selling' });
+
+  it('触っていない人の行き先は今のまま (作成画面は既定の見た目で始まる)。販売ガイドの行き先は変えない', () => {
+    render(<LandingProfileDemo c={c} cta={cta} />);
+    expect(sell()).toHaveAttribute('href', '/en/create?tab=profile');
+    expect(screen.getByRole('link', { name: 'Selling guide' })).toHaveAttribute('href', '/en/guide/store');
+  });
+
+  it('テーマか色を選んだら、選んだテーマと色の名前を付ける (片方だけ選んでも両方)', () => {
+    render(<LandingProfileDemo c={c} cta={cta} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Night' }));
+    expect(sell()).toHaveAttribute('href', '/en/create?tab=profile&theme=night&color=blue');
+    fireEvent.click(screen.getByRole('button', { name: 'Violet' }));
+    expect(sell()).toHaveAttribute('href', '/en/create?tab=profile&theme=night&color=violet');
+    expect(screen.getByRole('link', { name: 'Selling guide' })).toHaveAttribute('href', '/en/guide/store');
+  });
+
+  it('色だけ選んでも付ける・選んだ後に既定 (Gradient × 青) へ戻しても、選んだ値として付けたまま', () => {
+    render(<LandingProfileDemo c={c} cta={cta} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Rose' }));
+    expect(sell()).toHaveAttribute('href', '/en/create?tab=profile&theme=gradient&color=rose');
+    fireEvent.click(screen.getByRole('button', { name: 'Blue' }));
+    expect(sell()).toHaveAttribute('href', '/en/create?tab=profile&theme=gradient&color=blue');
+  });
+
+  it.each([
+    ['ja', ja, '紫'],
+    ['en', en, 'Violet'],
+  ] as const)('販売の節 (%s): 文言と行き先の土台は server から。入口の行は見本のすぐ後 (DOM の順は今のまま)', async (locale, messages, violet) => {
+    intl.locale = locale;
+    const { container } = render(await LandingSellables());
+    const section = container.querySelector('section#lp-sell') as HTMLElement;
+    const link = within(section).getByRole('link', { name: messages.Landing.sellablesCtaSell });
+    const guide = within(section).getByRole('link', { name: messages.Landing.sellablesCtaGuide });
+    expect(link).toHaveAttribute('href', `/${locale}/create?tab=profile`);
+    expect(guide).toHaveAttribute('href', `/${locale}/guide/store`);
+    // 入口の行は見本のカードのすぐ後 (DOM の順は今のまま)。
+    const card = within(section).getByRole('heading', { level: 3, name: messages.Landing.profileDemoTitle }).parentElement!.parentElement!;
+    expect(card.nextElementSibling).toBe(link.parentElement);
+    expect(link.parentElement!.lastElementChild).toBe(guide);
+    fireEvent.click(within(section).getByRole('button', { name: 'Bold' }));
+    fireEvent.click(within(section).getByRole('button', { name: violet }));
+    expect(link).toHaveAttribute('href', `/${locale}/create?tab=profile&theme=bold&color=violet`);
+    expect(guide).toHaveAttribute('href', `/${locale}/guide/store`);
   });
 });

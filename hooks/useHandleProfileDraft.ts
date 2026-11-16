@@ -15,7 +15,7 @@ import {
   MAX_PROFILE_LINKS,
   MAX_SOCIAL_LINKS,
 } from '@/lib/handle';
-import { resolveHandleTheme } from '@/lib/handleTheme';
+import { resolveHandleTheme, type HandleTheme } from '@/lib/handleTheme';
 import { isSettledReceiverInput } from '@/lib/format';
 import type {
   DraftHeading,
@@ -58,8 +58,17 @@ export const DEFAULT_PROFILE_DRAFT: HandleProfileDraft = {
 const OPTIONAL_TEXT_KEYS = ['message', 'thanks', 'thanksUrl'] as const satisfies readonly (keyof HandleProfileDraft)[];
 
 /** 下書きが既定のまま (この端末でまだプロフィールを作っていない) か。持っている @handle を自動で編集に入る判定に使う。
- *  受取先 (to) は空か、接続中のウォレット (自動で入る値) のときだけ手付かずと見なす (別の宛先を打った人の入力を消さない)。 */
-export function isPristineProfileDraft(d: HandleProfileDraft, wallet?: string): boolean {
+ *  受取先 (to) は空か、接続中のウォレット (自動で入る値) のときだけ手付かずと見なす (別の宛先を打った人の入力を消さない)。
+ *  seed = このタブがトップの見本から入れたテーマと色 (hooks/useLandingLookSeed・plans/lp-polish-2026-11.md P6)。渡したときだけ、
+ *  今のテーマと色がその値のままなら既定と同じに数える。渡さない呼び出しは今までと同じ結果。 */
+export function isPristineProfileDraft(
+  draft: HandleProfileDraft,
+  wallet?: string,
+  seed?: { theme: HandleTheme; color: string } | null,
+): boolean {
+  const d = seed && draft.theme === seed.theme && draft.color === seed.color
+    ? { ...draft, theme: DEFAULT_PROFILE_DRAFT.theme, color: DEFAULT_PROFILE_DRAFT.color }
+    : draft;
   const to = d.to.trim();
   const toUntouched = to === '' || (!!wallet && to.toLowerCase() === wallet.toLowerCase());
   return (

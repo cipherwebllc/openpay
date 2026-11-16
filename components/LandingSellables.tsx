@@ -5,13 +5,11 @@
 // 要らない (提案の「構造を変えず拡張できる」を実装で担保)。
 // Store 系 UI flag OFF (self-host 等) ではセクションごと出さない (navItems と同思想)。
 
-import Link from 'next/link';
 import { getLocale, getTranslations } from 'next-intl/server';
 import { env } from '@/lib/env';
 import { HOSTED_PRODUCT_CATEGORIES } from '@/lib/x402/storeMeta';
 import { LandingSectionHeader } from '@/components/LandingSectionHeader';
 import { LandingProfileDemo } from '@/components/LandingProfileDemo';
-import { LANDING_ACTION_ROW, LANDING_PRIMARY, LANDING_SECONDARY } from '@/components/LandingControls';
 
 export async function LandingSellables() {
   if (!env.enableCreatorStoreUi) return null;
@@ -36,7 +34,9 @@ export async function LandingSellables() {
       <p className="mx-auto mt-5 max-w-xl text-center text-sm leading-relaxed text-slate-600 [word-break:auto-phrase] supports-[word-break:auto-phrase]:text-pretty">
         {t('sellablesBody')}
       </p>
-      {/* 自己表現: 自分のページ (テーマ・色) を作れることを、触って伝える (plans/lp-polish-2026-09.md P3)。 */}
+      {/* 自己表現: 自分のページ (テーマ・色) を作れることを、触って伝える (plans/lp-polish-2026-09.md P3)。
+          見本の下の入口の行 (「出品をはじめる」「販売ガイド」) も見本が描く (見本で選んだテーマと色を作成画面へ持って行く・
+          plans/lp-polish-2026-11.md P6)。文言と行き先の土台はここから渡す。 */}
       <LandingProfileDemo
         c={{
           title: t('profileDemoTitle'),
@@ -60,15 +60,13 @@ export async function LandingSellables() {
             link: t('profileDemoSampleLink'),
           },
         }}
+        cta={{
+          sellHref: `/${locale}/create?tab=profile`,
+          sellLabel: t('sellablesCtaSell'),
+          guideHref: `/${locale}/guide/store`,
+          guideLabel: t('sellablesCtaGuide'),
+        }}
       />
-      <div className={`mt-6 ${LANDING_ACTION_ROW}`}>
-        <Link href={`/${locale}/create?tab=profile`} prefetch={false} className={LANDING_PRIMARY.brand}>
-          {t('sellablesCtaSell')}
-        </Link>
-        <Link href={`/${locale}/guide/store`} prefetch={false} className={LANDING_SECONDARY.brand}>
-          {t('sellablesCtaGuide')}
-        </Link>
-      </div>
     </section>
   );
 }
