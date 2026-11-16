@@ -642,6 +642,40 @@ describe('createOrderSaleRecorder — 消した行を書き戻さない (「書�
     expect(read).not.toHaveBeenCalled();
     expect(loadHistory()).toHaveLength(0);
   });
+
+  it('receipt を待っている間に払った側の行が入り、保存の直前の確認で見つけた注文に印を付けられなかったときも、この画面では決着にし、その行を消しても書き戻さない', async () => {
+    const pending = deferred<ReturnType<typeof receipt>>();
+    read.mockImplementationOnce(() => pending.promise);
+    const record = createOrderSaleRecorder();
+    const pass = record([order(1)], MERCHANT);
+    await Promise.resolve();
+    // 待っている間に、同じ端末で払った側の行が入る。印の保存はここから失敗する。
+    appendHistory(
+      buildHistoryEntry({
+        flow: 'batch', status: 'success', chainId: JPYC.chainId, chainSlug: 'polygon', asset: 'jpyc',
+        tokenAddress: JPYC.address, payMode: 'gasless', gasMode: 'merchant', merchant: MERCHANT,
+        merchantAmount: 990n * ONE, customer: CUSTOMER, feeReceiver: env.feeReceiver, feeAmount: 10n * ONE,
+        txHash: tx(1), userOpHash: null, blockNumber: null, errorMessage: null, storeName: '', note: '払った側',
+      }),
+    );
+    historyHold.appends = 0;
+    const broken = breakMarks({ set: true });
+    try {
+      pending.resolve(receipt(tx(1)));
+      await pass;
+      expect(broken.set).toHaveBeenCalledWith(ORDER_SALE_MARKS_KEY, expect.any(String));
+    } finally {
+      broken.restore();
+    }
+    expect(marks()).toEqual([]);
+    expect(historyHold.appends).toBe(0);
+    // 店主がその行を消し、保存領域が戻った。同じ画面の次の polling では書き戻さない (receipt も読み直さない)。
+    clearHistory();
+    for (let i = 0; i < 3; i += 1) await record([order(1)], MERCHANT);
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(historyHold.appends).toBe(0);
+    expect(loadHistory()).toHaveLength(0);
+  });
 });
 
 describe('createOrderSaleRecorder — 書き手の途中に、別のタブの削除・払った側の保存が割り込む', () => {

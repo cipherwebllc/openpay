@@ -19,9 +19,10 @@
 //   - receipt を待っている間に別のタブ (または開き直した受注の画面) が同じ注文を書くことがあるので、保存の直前にもう一度
 //     履歴と印を見る。同じ書き手の 2 つのタブは、同じ注文に同じ id の行を作るので、確認の直後に重なっても appendHistory
 //     (id で重複を除く) が 1 行にする。
-//   - 受け入れている限界: localStorage にはタブをまたぐ排他が無い。「確認 → 保存」の間 (同じ tick の中) に、別のタブが
-//     同じ注文の行を別の id で書くと (同じブラウザで払った側の行・txHash の大文字小文字の違う行)、2 行になりうる。印の
-//     読み → 書きも、2 つのタブが同時だと片方の印を失いうる。払った側の appendHistory も同じ性質。
+//   - 受け入れている限界: localStorage には、タブをまたいで読み書きの順を守らせる仕組みが無い。同じ端末の別のタブが、
+//     この書き手 (または既存の appendHistory) の「読む → 書く」のあいだに割り込んだ結果 (同じ注文が別の id で 2 行になる・
+//     印を 1 つ失う・その瞬間に別のタブで消した行が書き戻される) は、受け入れる限界。既存の appendHistory (払った側の
+//     保存) も同じ性質を持つ。Web Locks などの排他は足さない。
 //   - 決着した注文 (書いた・既にあった・書かないと決まった) は、この画面を開いている間は覚えておき、polling のたびに
 //     履歴も receipt も読み直さない。
 //
@@ -163,7 +164,12 @@ export function createOrderSaleRecorder(): OrderSaleRecorder {
     if (!marks) return 'failed';
     if (marks.has(hash)) return 'present';
     // receipt を待っている間に、別のタブが同じ注文を書いた (大文字小文字の違う txHash でも)。その行にも印を付ける。
-    if (historyTxHashes().has(hash)) return addSaleMarks([hash]) ? 'present' : 'failed';
+    // 印を書けなくても、この画面では決着にする (pass の始めに履歴にあった注文と同じ): 試し直すと、その間に店主がその行を
+    // 消したとき、次の polling で書き戻しうる。
+    if (historyTxHashes().has(hash)) {
+      addSaleMarks([hash]);
+      return 'present';
+    }
     // 先に印を書く。書けなければ行を書かない (この書き手が書いた行には、必ず印がある)。
     if (!addSaleMarks([hash])) return 'failed';
     try {
