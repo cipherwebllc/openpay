@@ -285,6 +285,22 @@ describe('useAccountingAccounts: 別のタブの変更の取り込み', () => {
     expect(result.current.accounts).toEqual({ debit: '普通預金', credit: '売上' });
   });
 
+  it('保存値を読めないときに 2 項目を続けて書いても (同じ処理の中)、先に書いた項目を消さない', async () => {
+    save({ debit: '現金', credit: '売上' });
+    const { result } = await mountHook();
+    vi.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    const getItem = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new Error('SecurityError');
+    });
+    act(() => {
+      result.current.setAccount('debit', '普通預金');
+      result.current.setAccount('credit', '売上金');
+    });
+    getItem.mockRestore();
+    expect(stored()).toEqual({ debit: '普通預金', credit: '売上金' });
+    expect(result.current.accounts).toEqual({ debit: '普通預金', credit: '売上金' });
+  });
+
   it('unmount した後は取り込まない (listener を外す)', async () => {
     const removeWindow = vi.spyOn(window, 'removeEventListener');
     const removeDocument = vi.spyOn(document, 'removeEventListener');

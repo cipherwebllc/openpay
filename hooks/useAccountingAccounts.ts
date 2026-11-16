@@ -75,6 +75,9 @@ export function useAccountingAccounts() {
     })
       ? {}
       : unsaved;
+    // 同じ処理の中で続けて呼ばれても (書き出しのときに 2 つの入力を続けて確定する)、次の呼び出しの土台に
+    // この項目が入っているように、描画を待たずに合わせておく。
+    savedRef.current = { ...savedRef.current, [side]: value };
     setSaved((cur) => (cur[side] === value ? cur : { ...cur, [side]: value }));
   }, []);
 
