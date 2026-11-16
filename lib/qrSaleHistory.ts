@@ -3,12 +3,20 @@
 //
 // 確かめ方: お店は QR を出すたびに乱数の bill key を作って画面の QR の URL (`bk`) に載せ、払う側 (hooks/useJpycEip3009Payment)
 // は intentSalt = billKeySalt(bill key) で署名する。forwarder の nonce (lib/relay/forwarderIntent の buildForwarderNonce) は
-// 払った人・受取先・着金額・利用料・有効期限・intentSalt・チェーン・forwarder の全部の hash なので、チェーンの `Settled` の
-// nonce が、同じ式で計算し直した値と一致すれば「この bill key の QR から作られた、この受取先への支払い」と分かる。
-// 一致しない `Settled` (bill key を使わない支払い・ほかの端末の会計・古い画面) は、何の行にもしない。
-//   - nonce は log の値 (from・merchant・merchantValue・feeValue) で計算する。会計の期待値と比べるのは一致した後。
+// 払った人・受取先・着金額・利用料・有効期限・intentSalt・チェーン・forwarder の全部の hash。
+// この会計の支払いとして扱うのは、次の 2 つが両方とも成り立つ `Settled` だけ (matchSettledToBill):
+//   1. 受取先・着金額・利用料が、この会計の期待値 (利用料は払う側と同じ recoverFeeValue の式) とちょうど同じ。
+//   2. nonce が、この会計の bill key の intentSalt と log の値 (from・merchant・merchantValue・feeValue) で計算し直した値と
+//      ちょうど一致する。
+// nonce の一致が保証するのは「log にある金額が、この bill key を使った署名で、この受取先へ実際に払われたこと」。金額は
+// 署名する人が決めるので、bill key を知った人は別の額でも署名できる。そこで 1 で、金額が会計の期待値と同じ入金だけを
+// この会計の支払いとして扱う。bill key を知った人にできるのは、その金額をその受取先へ実際に払うことだけ。
+// 1 に当たらない `Settled` (bill key は合うが金額が違う支払いを含む) は nonce を 1 回も計算しない。2 に当たらない `Settled`
+// (bill key を使わない支払い・ほかの端末の会計・古い画面) も、何の行にもしない。
 //   - 有効期限 (validBefore) は log に無いので、取り込まれた block の時刻 T から T+1 … T+AUTHORIZATION_LOOKUP_WINDOW_SEC を
 //     1 秒ずつ試す (署名は block の時刻より後まで有効・relay の server は受付時刻 + 20 分より先の有効期限を受けない)。
+//     計算の量 = 1 に当たる (log, 会計) の組 1 つにつき最大 1,230 回 (一致した所で止める)。1 回に照合する組の数の上限は
+//     lib/qrSaleWatch.ts が持つ。
 //   - salt と nonce の式は、払う側と同じ関数を import して使う (再実装しない)。
 //
 // 行の欄は、払った側 (/pay の PaymentForm・/checkout の CheckoutForm → hooks/usePaymentHistory.ts) が同じ支払いで書く行に
@@ -154,12 +162,21 @@ const VALID_BEFORE_OFFSETS: readonly bigint[] = (() => {
   return out;
 })();
 
+/** この `Settled` の受取先・着金額・利用料が、この会計の期待値とちょうど同じか (nonce を探すのは、同じときだけ)。 */
+export function settledMatchesExpected(settled: SettledLog, bill: QrBill): boolean {
+  return (
+    isAddressEqual(settled.merchant, bill.merchant) &&
+    settled.merchantValue === bill.expected.merchantValue &&
+    settled.feeValue === bill.expected.feeValue
+  );
+}
+
 /**
- * この `Settled` が、この会計の bill key で署名された支払いか。一致したら、その署名の有効期限 (validBefore) を返す。
- * blockTime = この `Settled` が取り込まれた block の時刻 (unix 秒)。
+ * この `Settled` が、この会計の支払いか (受取先・金額が期待値と同じで、nonce がこの会計の bill key の署名と一致する)。
+ * 一致したら、その署名の有効期限 (validBefore) を返す。blockTime = この `Settled` が取り込まれた block の時刻 (unix 秒)。
  */
 export function matchSettledToBill(settled: SettledLog, blockTime: bigint, bill: QrBill): bigint | null {
-  if (!isAddressEqual(settled.merchant, bill.merchant)) return null;
+  if (!settledMatchesExpected(settled, bill)) return null;
   const nonce = settled.nonce.toLowerCase();
   for (const offset of VALID_BEFORE_OFFSETS) {
     const validBefore = blockTime + offset;
@@ -180,13 +197,6 @@ export function matchSettledToBill(settled: SettledLog, blockTime: bigint, bill:
     if (candidate.toLowerCase() === nonce) return validBefore;
   }
   return null;
-}
-
-/** 一致した `Settled` の着金額と利用料が、この会計の期待値とちょうど同じか (明細を付けてよいか)。 */
-export function settledMatchesExpected(settled: SettledLog, bill: QrBill): boolean {
-  return (
-    settled.merchantValue === bill.expected.merchantValue && settled.feeValue === bill.expected.feeValue
-  );
 }
 
 // 会計の写しから作る欄 (払った側の historyCtx と同じ組み方)。
@@ -281,7 +291,7 @@ function checkoutDetail(params: CheckoutParams, decimals: number): SaleDetail {
 
 /**
  * 一致した `Settled` → 履歴の 1 行。金額・お客様は log の値・時刻は block の時刻。withDetail = この会計の写しの明細・
- * 管理番号などを付けるか (その会計の 1 件目で、金額も期待値と同じときだけ・決めるのは lib/qrSaleWatch.ts)。
+ * 管理番号などを付けるか (その会計の 1 件目の一致だけ・決めるのは lib/qrSaleWatch.ts)。
  */
 export function buildQrSaleEntry(
   bill: QrBill,

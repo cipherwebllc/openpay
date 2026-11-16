@@ -98,13 +98,13 @@ vi.mock('@/lib/qrSaleWatch', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/qrSaleWatch')>();
   return {
     ...actual,
-    showQrBill: (input: Parameters<typeof actual.showQrBill>[0]) => {
-      hold.shown.push(input);
-      actual.showQrBill(input);
+    showQrBill: (...args: Parameters<typeof actual.showQrBill>) => {
+      hold.shown.push(args[0]);
+      actual.showQrBill(...args);
     },
-    hideQrBill: (billKey: string) => {
-      hold.hidden.push(billKey);
-      actual.hideQrBill(billKey);
+    hideQrBill: (...args: Parameters<typeof actual.hideQrBill>) => {
+      hold.hidden.push(args[0]);
+      actual.hideQrBill(...args);
     },
   };
 });
@@ -348,10 +348,13 @@ describe('レジ → 見張り → 取引履歴', () => {
     await user.type(orderPanel().getByLabelText('管理番号 / レシート番号'), 'R-001');
     const dialog = await openQr(user);
     const billKey = BK_SUFFIX.exec(qrValue(dialog))![1];
+    // 入金が取り込まれた block の時刻 (QR を出した後・会計が生きていた間)。
+    const blockTime = BigInt(Math.floor(Date.now() / 1000)) + 5n;
+    rpc.time.mockResolvedValue(blockTime);
     // 会計: 500 × 2 + 3,000 − 100 = 3,900。利用料 2 (下限)・着金 3,898。
     const sale = {
       from: CUSTOMER, merchant: VALID, merchantValue: 3_898n * ONE, feeValue: 2n * ONE,
-      validBefore: 1_790_000_000n + 295n, chainId: 80002, forwarder: FORWARDER,
+      validBefore: blockTime + 295n, chainId: 80002, forwarder: FORWARDER,
     };
     const TX = `0x${'d1'.repeat(32)}`;
     rpc.logs.mockResolvedValue([settledRpcLog({ ...sale, nonce: billNonce(billKey, sale), txHash: TX, blockNumber: 995n })]);
@@ -361,7 +364,7 @@ describe('レジ → 見張り → 取引履歴', () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({
       id: `batch-${TX}`,
-      ts: 1_790_000_000_000,
+      ts: Number(blockTime) * 1000,
       merchant: VALID,
       customer: CUSTOMER,
       merchantAmount: (3_898n * ONE).toString(),

@@ -134,13 +134,13 @@ vi.mock('@/lib/qrSaleWatch', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/qrSaleWatch')>();
   return {
     ...actual,
-    showQrBill: (input: Parameters<typeof actual.showQrBill>[0]) => {
-      h.shown.push(input);
-      actual.showQrBill(input);
+    showQrBill: (...args: Parameters<typeof actual.showQrBill>) => {
+      h.shown.push(args[0]);
+      actual.showQrBill(...args);
     },
-    hideQrBill: (billKey: string) => {
-      h.hidden.push(billKey);
-      actual.hideQrBill(billKey);
+    hideQrBill: (...args: Parameters<typeof actual.hideQrBill>) => {
+      h.hidden.push(args[0]);
+      actual.hideQrBill(...args);
     },
   };
 });
@@ -168,6 +168,8 @@ const HS = 'AbCdEfGhIjKlMnOpQrStUv';
 const SETTINGS_KEY = 'openpay:qr-settings:v2';
 const LAST_QR_KEY = 'openpay:lastQr:v1';
 const NOW = Date.parse('2026-11-17T03:00:00.000Z');
+// 入金が取り込まれた block の時刻 (QR を出した 10 秒後・会計が生きていた間)。
+const BLOCK_TIME = BigInt(NOW / 1000) + 10n;
 const ONE = 10n ** 18n;
 const BK_SUFFIX = /&bk=([A-Za-z0-9_-]{11})$/;
 
@@ -243,7 +245,7 @@ beforeEach(() => {
   sd.releaseForNormal.mockReset().mockResolvedValue(true);
   rpc.head.mockReset().mockResolvedValue(1_000n);
   rpc.logs.mockReset().mockResolvedValue([]);
-  rpc.time.mockReset().mockResolvedValue(1_790_000_000n);
+  rpc.time.mockReset().mockResolvedValue(BLOCK_TIME);
 });
 afterEach(() => {
   stopQrSaleWatch();
@@ -507,7 +509,7 @@ describe('決済QR → 見張り → 取引履歴', () => {
   const payment = (billKey: string, block: bigint, tx: string, over: { merchantValue?: bigint; feeValue?: bigint } = {}) => {
     const sale = {
       from: CUSTOMER, merchant: RECEIVER, merchantValue: over.merchantValue ?? 1_398n * ONE,
-      feeValue: over.feeValue ?? 2n * ONE, validBefore: 1_790_000_000n + 296n, chainId: 80002, forwarder: FORWARDER,
+      feeValue: over.feeValue ?? 2n * ONE, validBefore: BLOCK_TIME + 296n, chainId: 80002, forwarder: FORWARDER,
     };
     return settledRpcLog({ ...sale, nonce: billNonce(billKey, sale), txHash: tx, blockNumber: block });
   };
@@ -539,7 +541,7 @@ describe('決済QR → 見張り → 取引履歴', () => {
     const [second, first] = loadHistory();
     expect(first).toMatchObject({
       id: `batch-${TX1}`,
-      ts: 1_790_000_000_000,
+      ts: Number(BLOCK_TIME) * 1000,
       merchant: RECEIVER,
       customer: CUSTOMER,
       merchantAmount: (1_398n * ONE).toString(),

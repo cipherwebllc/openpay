@@ -17,8 +17,20 @@ const hold = vi.hoisted(() => ({
   failAppend: false,
   appends: 0,
   matches: 0,
+  nonces: 0,
   visibility: 'visible' as 'visible' | 'hidden',
 }));
+// nonce の計算は本物 (払う側と同じ関数)。何回計算したかだけ数える。
+vi.mock('@/lib/relay/forwarderIntent', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/relay/forwarderIntent')>();
+  return {
+    ...actual,
+    buildForwarderNonce: (...args: Parameters<typeof actual.buildForwarderNonce>) => {
+      hold.nonces += 1;
+      return actual.buildForwarderNonce(...args);
+    },
+  };
+});
 // 一致の判定は本物。何回判定したかだけ数える。
 vi.mock('@/lib/qrSaleHistory', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/qrSaleHistory')>();
@@ -56,13 +68,16 @@ import {
   HISTORY_STORAGE_KEY,
   loadHistory,
   removeHistoryEntry,
+  TODAY_SUMMARY_KEY,
 } from '@/lib/history';
 import { ORDER_SALE_MARKS_KEY } from '@/lib/orderFeedHistoryRecorder';
 import { ORDER_FEED_MARKS_KEY, QR_SALE_MARKS_KEY, QR_SALE_MARKS_MAX } from '@/lib/qrSaleMarks';
 import type { QrSaleLog } from '@/lib/qrSaleRpc';
 import {
+  QR_SALE_CLOCK_SKEW_MS,
   QR_SALE_KEEP_AFTER_HIDE_MS,
   QR_SALE_MAX_BACK_BLOCKS,
+  QR_SALE_MAX_PAIRS_PER_PASS,
   QR_SALE_OVERLAP_BLOCKS,
   QR_SALE_POLL_MS,
   hideQrBill,
@@ -85,8 +100,12 @@ const ONE = 10n ** 18n;
 const POLYGON = deploymentForSlug('jpyc', 'polygon');
 const KAIA = deploymentForSlug('jpyc', 'kaia');
 const NOW = Date.UTC(2026, 10, 17, 3, 0, 0);
-// block n の時刻 (unix 秒)。
-const blockTime = (n: bigint) => 1_790_000_000n + n * 2n;
+// block n の時刻 (unix 秒)。block 1,000 = NOW (テストの始めの端末の時刻)・1 block 2 秒。
+const blockTime = (n: bigint) => BigInt(NOW / 1000) + (n - 1_000n) * 2n;
+// 見張りの回 1 つで、+290 秒の有効期限の nonce に一致するまでの計算の回数 (+300 → +299 → +301 → … → +290 は 20 回目)。
+const NONCES_TO_MATCH = 20;
+// 一致しない (log, 会計) の組 1 つの計算の回数 (+1 … +1,230 の全部)。
+const NONCES_PER_MISS = 1_230;
 // 16 進の英字を含む hash (大文字にすると別の文字列になる)。
 const tx = (n: number) => `0x${'ab'.repeat(24)}${n.toString(16).padStart(16, '0')}` as Hex;
 
@@ -95,8 +114,12 @@ const chain = { head: 1_000n, logs: [] as QrSaleLog[] };
 
 const payUrl = (over: Partial<PayParams> = {}) =>
   buildPayUrl(ORIGIN, { to: SHOP, token: 'jpyc', chain: 'polygon', gas: 'merchant', mode: 'gasless', amount: '1000', ...over });
-const show = (billKey = BK, over: Partial<PayParams> = {}) =>
-  showQrBill({ billKey, kind: 'pay', url: payUrl({ productName: 'ランチ', receiptNo: 'R-1', ...over }), itemName: 'お支払い' });
+const show = (billKey = BK, over: Partial<PayParams> = {}, shownAt = Date.now()) =>
+  showQrBill(
+    { billKey, kind: 'pay', url: payUrl({ productName: 'ランチ', receiptNo: 'R-1', ...over }), itemName: 'お支払い' },
+    shownAt,
+  );
+const hide = (billKey = BK, hiddenAt = Date.now()) => hideQrBill(billKey, hiddenAt);
 
 /** block に、この bill key の QR から署名した支払いの Settled を足す (既定 = 1,000 JPYC の会計どおりの金額)。 */
 function settle(
@@ -141,6 +164,7 @@ beforeEach(() => {
   hold.failAppend = false;
   hold.appends = 0;
   hold.matches = 0;
+  hold.nonces = 0;
   hold.visibility = 'visible';
   Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => hold.visibility });
   rpc.head.mockReset().mockImplementation(async () => chain.head);
@@ -181,12 +205,12 @@ describe('読む範囲と間隔', () => {
 
   it('見張らない QR (USDC・通常決済・金額なし・forwarder の無いチェーン・形の違う bill key) では、RPC を 1 回も読まない', async () => {
     const usdc = buildPayUrl(ORIGIN, { to: SHOP, token: 'usdc', chain: 'base', gas: 'customer', mode: 'gasless', amount: '5' });
-    showQrBill({ billKey: BK, kind: 'pay', url: usdc, itemName: '' });
-    showQrBill({ billKey: BK2, kind: 'pay', url: payUrl({ mode: 'standard' }), itemName: '' });
-    showQrBill({ billKey: BK3, kind: 'pay', url: payUrl({ amount: undefined }), itemName: '' });
-    showQrBill({ billKey: 'short', kind: 'pay', url: payUrl(), itemName: '' });
+    showQrBill({ billKey: BK, kind: 'pay', url: usdc, itemName: '' }, NOW);
+    showQrBill({ billKey: BK2, kind: 'pay', url: payUrl({ mode: 'standard' }), itemName: '' }, NOW);
+    showQrBill({ billKey: BK3, kind: 'pay', url: payUrl({ amount: undefined }), itemName: '' }, NOW);
+    showQrBill({ billKey: 'short', kind: 'pay', url: payUrl(), itemName: '' }, NOW);
     hold.forwarders = {};
-    showQrBill({ billKey: 'AAAAAAAAAAA', kind: 'pay', url: payUrl(), itemName: '' });
+    showQrBill({ billKey: 'AAAAAAAAAAA', kind: 'pay', url: payUrl(), itemName: '' }, NOW);
     await tick(20);
     expect(rpc.head).not.toHaveBeenCalled();
     expect(rpc.logs).not.toHaveBeenCalled();
@@ -366,19 +390,23 @@ describe('一致した入金だけを行にする', () => {
     settle(990n, 1, { salt: `0x${'a1'.repeat(32)}` });
     settle(991n, 2, { billKey: BK2 });
     settle(992n, 3, { merchant: OTHER_SHOP });
+    hold.nonces = 0;
     await tick();
-    expect(rpc.time).toHaveBeenCalledTimes(3);
     expect(loadHistory()).toEqual([]);
     expect(window.localStorage.getItem(QR_SALE_MARKS_KEY)).toBeNull();
     expect(hold.appends).toBe(0);
-    // 生きている会計は 1 つ。Settled 1 つにつき 1 回ずつ判定した。
-    expect(hold.matches).toBe(3);
+    // 金額が会計と同じ 2 つ (乱数の salt・別の bill key) だけ、block の時刻を読み、範囲の全部で nonce を計算した。
+    // 別の受取先宛ての Settled は、block の時刻も読まず、nonce も計算しない。
+    expect(rpc.time.mock.calls.map(([, block]) => block)).toEqual([990n, 991n]);
+    expect(hold.matches).toBe(2);
+    expect(hold.nonces).toBe(2 * NONCES_PER_MISS);
     // 重ねて読んだ分は、もう一度確かめない (block の時刻も読まず、判定もし直さない)。
     await tick();
     await tick();
     expect(rpc.logs).toHaveBeenCalledTimes(3);
-    expect(rpc.time).toHaveBeenCalledTimes(3);
-    expect(hold.matches).toBe(3);
+    expect(rpc.time).toHaveBeenCalledTimes(2);
+    expect(hold.matches).toBe(2);
+    expect(hold.nonces).toBe(2 * NONCES_PER_MISS);
   });
 
   it('同じ会計への 2 件目の入金 (同じ QR の 2 回目の支払い) は、明細なしの行', async () => {
@@ -410,17 +438,23 @@ describe('一致した入金だけを行にする', () => {
     expect(byId[`batch-${tx(2)}`].receiptNo).toBeNull();
   });
 
-  it('bill key は合うが金額が会計と違う入金は、明細なしの行 (金額は log の値)。その後の入金も 2 件目として明細なし', async () => {
+  it('bill key は合うが金額が会計と違う入金は、行にしない (block の時刻も読まず、nonce も計算しない)。明細の 1 件目も消費しない', async () => {
     show();
-    settle(994n, 1, { merchantValue: 498n * ONE, feeValue: 2n * ONE });
-    settle(995n, 2);
+    // 別の額・合計は同じで内訳 (着金額と利用料) が違う額を、この会計の bill key で署名した入金。その後に本物の支払い。
+    settle(993n, 1, { merchantValue: 498n * ONE, feeValue: 2n * ONE });
+    settle(994n, 2, { merchantValue: 997n * ONE, feeValue: 3n * ONE });
+    settle(995n, 3);
+    hold.nonces = 0;
     await tick();
-    const [second, first] = loadHistory();
-    expect(first).toMatchObject({
-      id: `batch-${tx(1)}`, merchantAmount: (498n * ONE).toString(), saleAmount: (500n * ONE).toString(),
-      networkFeeEquivalent: (2n * ONE).toString(), lineItems: null, receiptNo: null, productName: null,
-    });
-    expect(second).toMatchObject({ id: `batch-${tx(2)}`, lineItems: null, receiptNo: null });
+    // 本物の支払いが、この会計の 1 件目 (明細・管理番号つき)。
+    expect(loadHistory().map((e) => e.id)).toEqual([`batch-${tx(3)}`]);
+    expect(loadHistory()[0]).toMatchObject({ receiptNo: 'R-1', productName: 'ランチ', merchantAmount: (998n * ONE).toString() });
+    expect(loadHistory()[0].lineItems).toHaveLength(1);
+    expect(marks()).toEqual([tx(3)]);
+    // 金額の違う 2 つは、block の時刻を読まず、nonce を 1 回も計算しない (計算したのは本物の支払いが一致するまでの分だけ)。
+    expect(rpc.time.mock.calls.map(([, block]) => block)).toEqual([995n]);
+    expect(hold.matches).toBe(1);
+    expect(hold.nonces).toBe(NONCES_TO_MATCH);
   });
 
   it('金額が同じなだけ (bill key が違う) の入金は、行にしない', async () => {
@@ -447,7 +481,7 @@ describe('一致した入金だけを行にする', () => {
       to: SHOP, token: 'jpyc', chain: 'polygon', gas: 'merchant', mode: 'gasless', receiptNo: 'R-0012',
       items: [{ name: 'コーヒー', qty: 2, price: '500' }, { name: 'ケーキ', qty: 1, price: '480' }],
     });
-    showQrBill({ billKey: BK, kind: 'checkout', url, itemName: '' });
+    showQrBill({ billKey: BK, kind: 'checkout', url, itemName: '' }, NOW);
     settle(995n, 1, { merchantValue: 1_478n * ONE });
     await tick();
     expect(loadHistory()[0]).toMatchObject({
@@ -456,19 +490,55 @@ describe('一致した入金だけを行にする', () => {
     expect(loadHistory()[0].lineItems).toHaveLength(2);
   });
 
-  it('同じ tx に一致が 2 つ以上あるときは、どれも書かない (履歴の行は tx ごとに 1 つ)', async () => {
+  it('同じ tx に、このお店の会計への一致が 2 つ: 行は最初に見つけた 1 つだけ (tx ごとに 1 行)', async () => {
     show(BK);
-    show(BK2, { amount: '300' });
+    show(BK2, { amount: '300', receiptNo: 'R-2' });
     settle(995n, 1, { logIndex: 0 });
     settle(995n, 1, { logIndex: 1, billKey: BK2, merchantValue: 298n * ONE });
-    settle(996n, 2);
+    // BK2 の会計への、別の tx の入金。
+    settle(996n, 2, { billKey: BK2, merchantValue: 298n * ONE });
     await tick();
-    // 別の tx の入金は書く (その会計の 2 件目なので明細なし)。
-    expect(loadHistory().map((e) => e.id)).toEqual([`batch-${tx(2)}`]);
-    expect(loadHistory()[0].lineItems).toBeNull();
-    expect(marks()).toEqual([tx(2)]);
-    expect(warn).toHaveBeenCalledTimes(1);
-    expect(warn).toHaveBeenCalledWith('qrSale.multiple_matches_in_tx', {});
+    const byId = Object.fromEntries(loadHistory().map((e) => [e.id, e]));
+    expect(Object.keys(byId).sort()).toEqual([`batch-${tx(1)}`, `batch-${tx(2)}`]);
+    // tx(1) の行は、先に見つけた BK の会計の行 (明細つき)。
+    expect(byId[`batch-${tx(1)}`]).toMatchObject({ receiptNo: 'R-1', merchantAmount: (998n * ONE).toString() });
+    // BK2 の会計の 1 件目は tx(1) の中の入金だったので、tx(2) は 2 件目 (明細なし)。
+    expect(byId[`batch-${tx(2)}`]).toMatchObject({ receiptNo: null, lineItems: null, merchantAmount: (298n * ONE).toString() });
+    expect(marks().sort()).toEqual([tx(1), tx(2)]);
+    expect(hold.appends).toBe(2);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('取得の途中で会計が増えても (先頭を読む間に別の受取先の QR を出した)、同じ tx の 2 つの一致は 1 行のまま', async () => {
+    // getLogs は、受取先の topic で絞った log だけを返す (本物の RPC と同じ)。
+    rpc.logs.mockImplementation(async (_chainId: number, _forwarder: Address, merchants: Address[], from: bigint, to: bigint) =>
+      chain.logs.filter(
+        (log) =>
+          log.blockNumber! >= from && log.blockNumber! <= to &&
+          merchants.some((m) => getAddress(`0x${log.topics[3]!.slice(26)}`) === getAddress(m)),
+      ),
+    );
+    let release!: (head: bigint) => void;
+    rpc.head.mockImplementationOnce(() => new Promise<bigint>((resolve) => { release = resolve; }));
+    show(BK);
+    await tick();
+    // 1 回目が先頭を待っている間に、別の受取先の QR を出す。両方の会計への入金が 1 つの tx に入る。
+    show(BK2, { to: OTHER_SHOP, receiptNo: 'R-2' });
+    settle(995n, 1, { logIndex: 0 });
+    settle(995n, 1, { logIndex: 1, billKey: BK2, merchant: OTHER_SHOP });
+    release(1_000n);
+    await vi.advanceTimersByTimeAsync(0);
+    // 1 回目は、始めた時の受取先 (SHOP) 宛てだけを読んだ。
+    expect(rpc.logs.mock.calls[0][2]).toEqual([getAddress(SHOP)]);
+    expect(loadHistory().map((e) => [e.id, e.receiptNo])).toEqual([[`batch-${tx(1)}`, 'R-1']]);
+    // 2 回目は両方の受取先を読み、同じ tx の BK2 への一致を見つけるが、tx(1) の行・印があるので書かない。
+    await tick();
+    expect(rpc.logs.mock.calls[1][2]).toEqual([getAddress(SHOP), getAddress(OTHER_SHOP)]);
+    expect(hold.matches).toBe(2);
+    expect(loadHistory().map((e) => [e.id, e.receiptNo])).toEqual([[`batch-${tx(1)}`, 'R-1']]);
+    expect(hold.appends).toBe(1);
+    expect(marks()).toEqual([tx(1)]);
+    expect(warn).not.toHaveBeenCalled();
   });
 
   it('番号の無い log (取り込み前) と、forwarder の Settled として読めない log は無視する', async () => {
@@ -675,12 +745,13 @@ describe('保存の決まり (同じ tx は 1 行・印が先・印は外さな�
     show();
     settle(995n, 1);
     await tick();
-    hideQrBill(BK);
+    hide();
     await tick();
     const dump = (storage: Storage) =>
       Array.from({ length: storage.length }, (_, i) => `${storage.key(i)}=${storage.getItem(storage.key(i)!)}`).join('\n');
+    // 履歴の行・tx の印と、履歴の保存が今日の行から作る今日の集計 (lib/history の appendHistory)。
     expect(Array.from({ length: window.localStorage.length }, (_, i) => window.localStorage.key(i)).sort()).toEqual(
-      [HISTORY_STORAGE_KEY, QR_SALE_MARKS_KEY].sort(),
+      [HISTORY_STORAGE_KEY, QR_SALE_MARKS_KEY, TODAY_SUMMARY_KEY].sort(),
     );
     expect(dump(window.localStorage)).not.toContain(BK);
     expect(dump(window.localStorage)).not.toContain('bk=');
@@ -688,11 +759,72 @@ describe('保存の決まり (同じ tx は 1 行・印が先・印は外さな�
   });
 });
 
+describe('照合の量の上限 (同じ金額の会計を出したまま、同じ金額の関係ない入金が届く)', () => {
+  const random = (n: number) => `0x${n.toString(16).padStart(2, '0').repeat(32)}` as Hex;
+
+  it('1 回に照合する (log, 会計) の組は 4 つまで。超える log は次の回に回し (読んだ範囲を進めない)、順に全部を照合する', async () => {
+    expect(QR_SALE_MAX_PAIRS_PER_PASS).toBe(4);
+    // 同じ金額の会計 3 つ。同じ金額の関係ない入金 (乱数の salt) 3 つの後に、BK3 の会計の本物の支払い。
+    show(BK);
+    show(BK2, { receiptNo: 'R-2' });
+    show(BK3, { receiptNo: 'R-3' });
+    settle(990n, 1, { salt: random(0xa1) });
+    settle(991n, 2, { salt: random(0xa2) });
+    settle(992n, 3, { salt: random(0xa3) });
+    settle(993n, 4, { billKey: BK3 });
+    const perPass: number[] = [];
+    for (let i = 0; i < 4; i += 1) {
+      hold.nonces = 0;
+      await tick();
+      perPass.push(hold.nonces);
+    }
+    // 1 回に log 1 つ (3 組) だけ: 次の log まで照合すると 6 組で上限を超える。
+    expect(perPass).toEqual([
+      3 * NONCES_PER_MISS,
+      3 * NONCES_PER_MISS,
+      3 * NONCES_PER_MISS,
+      2 * NONCES_PER_MISS + NONCES_TO_MATCH,
+    ]);
+    expect(hold.matches).toBe(12);
+    // 本物の支払いは BK3 の会計の 1 件目。
+    expect(loadHistory().map((e) => [e.id, e.receiptNo])).toEqual([[`batch-${tx(4)}`, 'R-3']]);
+    // 読み残した回は読んだ範囲を進めず、先頭 − 90 から読み直した。読み終えた後は前回の続きから。
+    await tick();
+    expect(ranges()).toEqual([[987n, 997n], [910n, 997n], [910n, 997n], [910n, 997n], [987n, 997n]]);
+  });
+
+  it('組の数がちょうど上限までなら同じ回に照合する。1 つの log の組が上限を超えても、その回の最初の log なら照合する', async () => {
+    // 会計 2 つ・関係ない入金 3 つ: 1 回目に log 2 つ (4 組)、2 回目に 1 つ (2 組)。
+    show(BK);
+    show(BK2);
+    settle(990n, 1, { salt: random(0xb1) });
+    settle(991n, 2, { salt: random(0xb2) });
+    settle(992n, 3, { salt: random(0xb3) });
+    hold.nonces = 0;
+    await tick();
+    expect(hold.nonces).toBe(4 * NONCES_PER_MISS);
+    hold.nonces = 0;
+    await tick();
+    expect(hold.nonces).toBe(2 * NONCES_PER_MISS);
+
+    // 同じ金額の会計 5 つ (1 つの log で 5 組): 5 つ目の会計への本物の支払いも、その回に照合して書く (止まらない)。
+    stopQrSaleWatch();
+    chain.logs = [];
+    const keys = [BK, BK2, BK3, 'AAAAAAAAAAA', 'BBBBBBBBBBB'];
+    keys.forEach((key, i) => show(key, { receiptNo: `R-${i}` }));
+    settle(995n, 9, { billKey: keys[4] });
+    hold.nonces = 0;
+    await tick();
+    expect(hold.nonces).toBe(4 * NONCES_PER_MISS + NONCES_TO_MATCH);
+    expect(loadHistory().map((e) => [e.id, e.receiptNo])).toEqual([[`batch-${tx(9)}`, 'R-4']]);
+  });
+});
+
 describe('表示をやめた後・止めた後', () => {
   it('QR を閉じた後 60 秒は読み続け、その間の入金を行にする。60 秒を過ぎたら読むのをやめる', async () => {
     show();
     await tick();
-    hideQrBill(BK);
+    hide();
     chain.head = 1_020n;
     settle(1_010n, 1);
     await tick(5);
@@ -714,7 +846,7 @@ describe('表示をやめた後・止めた後', () => {
   it('出し直した QR: 前の bill key も 60 秒は生きていて、その会計の明細で行になる。過ぎたら前の会計の入金は行にしない', async () => {
     show(BK, { receiptNo: 'OLD' });
     await tick();
-    hideQrBill(BK);
+    hide();
     show(BK2, { receiptNo: 'NEW', amount: '700' });
     chain.head = 1_010n;
     settle(1_004n, 1);
@@ -733,7 +865,7 @@ describe('表示をやめた後・止めた後', () => {
 
   it('同じ bill key を出し直す (StrictMode の effect の二重: 出す → やめる → 出す) と表示中に戻り、見張りは 1 つのまま', async () => {
     show();
-    hideQrBill(BK);
+    hide();
     show();
     expect(vi.getTimerCount()).toBe(1);
     await tick(15);
@@ -746,8 +878,82 @@ describe('表示をやめた後・止めた後', () => {
   });
 
   it('出していない bill key の hide は何もしない', () => {
-    expect(() => hideQrBill(BK)).not.toThrow();
+    expect(() => hide()).not.toThrow();
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('60 秒は、画面の側が渡した「やめた時刻」から数える (hide が届いた時刻からではない)', async () => {
+    // 表示を始めたのは 55 秒前・やめたのは 50 秒前 (見張りの読み込みが遅く、今まとめて届いた)。
+    show(BK, {}, NOW - 55_000);
+    hide(BK, NOW - 50_000);
+    // やめてから 56 秒の回は読む。62 秒の回で捨てて、読むのをやめる。
+    await tick();
+    expect(rpc.head).toHaveBeenCalledTimes(1);
+    await tick(4);
+    expect(rpc.head).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('やめてから 60 秒を過ぎて届いた会計 (見張りの読み込みが遅かった) は持たない。読んでいる途中の回にも使わない', async () => {
+    let release!: (logs: QrSaleLog[]) => void;
+    show(BK);
+    rpc.logs.mockImplementationOnce(() => new Promise<QrSaleLog[]>((resolve) => { release = resolve; }));
+    await tick();
+    // BK の回が getLogs を待っている間に、80 秒前に出して 70 秒前にやめた会計 (BK2) の show と hide が続けて届く。
+    show(BK2, { receiptNo: 'LATE' }, NOW - 80_000);
+    hide(BK2, NOW - 70_000);
+    // BK2 が生きていた間 (block の時刻 = 今の 50 秒前) に取り込まれた、BK2 の bill key の支払い。
+    settle(975n, 1, { billKey: BK2 });
+    hold.nonces = 0;
+    release(chain.logs);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(loadHistory()).toEqual([]);
+    expect(hold.matches).toBe(0);
+    expect(hold.nonces).toBe(0);
+  });
+
+  it('読み取りが遅れた入金: 読み終えた時には、やめてから 60 秒を過ぎていても、block の時刻が生きていた間なら書く', async () => {
+    show();
+    await tick();
+    hide();
+    const hiddenAt = Date.now();
+    // やめてから 48 秒まで、入金は無い。
+    await tick(8);
+    chain.head = 1_020n;
+    // block の時刻 = やめた 14 秒後 (生きていた間)。
+    settle(1_010n, 1);
+    // やめてから 54 秒に始まる回の getLogs が 6.5 秒かかる (読み終えるのは、やめてから 60.5 秒)。
+    rpc.logs.mockImplementationOnce(
+      (_chainId: number, _forwarder: Address, _merchants: Address[], from: bigint, to: bigint) =>
+        new Promise<QrSaleLog[]>((resolve) => {
+          setTimeout(() => resolve(chain.logs.filter((log) => log.blockNumber! >= from && log.blockNumber! <= to)), 6_500);
+        }),
+    );
+    await tick();
+    await vi.advanceTimersByTimeAsync(6_500);
+    expect(Date.now() - hiddenAt).toBeGreaterThan(QR_SALE_KEEP_AFTER_HIDE_MS);
+    expect(loadHistory().map((e) => [e.id, e.receiptNo])).toEqual([[`batch-${tx(1)}`, 'R-1']]);
+  });
+
+  it('block の時刻が、会計の生きていた間 (表示を始めてから、やめて 60 秒まで・時計のずれ 30 秒) の外なら書かない', async () => {
+    expect(QR_SALE_CLOCK_SKEW_MS).toBe(30_000);
+    // 表示を始めた時刻 = やめた時刻 = NOW。生きていた間 = block の時刻が NOW − 30 秒 〜 NOW + 90 秒。
+    show(BK, {}, NOW);
+    hide(BK, NOW);
+    rpc.logs.mockImplementation(async () => chain.logs);
+    settle(984n, 1); // NOW − 32 秒: 外
+    settle(985n, 2); // NOW − 30 秒: 内 (端)
+    settle(1_045n, 3); // NOW + 90 秒: 内 (端)
+    settle(1_046n, 4); // NOW + 92 秒: 外
+    hold.nonces = 0;
+    await tick();
+    expect(loadHistory().map((e) => [e.id, e.receiptNo])).toEqual([
+      [`batch-${tx(3)}`, null],
+      [`batch-${tx(2)}`, 'R-1'],
+    ]);
+    // 外の 2 つは照合しない (nonce を計算しない)。
+    expect(hold.matches).toBe(2);
+    expect(hold.nonces).toBe(2 * NONCES_TO_MATCH);
   });
 
   it('/create を離れたら (stop) すぐ止める。RPC を待っている回が後から返っても、行を書かない', async () => {
@@ -796,8 +1002,10 @@ describe('表示をやめた後・止めた後', () => {
   });
 
   it('外に出す関数は throw しない (会計の写しを読めない・RPC が壊れた値を返す)', async () => {
-    expect(() => showQrBill({ billKey: BK, kind: 'pay', url: 'not a url', itemName: '' })).not.toThrow();
-    expect(() => showQrBill({ billKey: BK, kind: 'checkout', url: `${ORIGIN}/checkout?items=%%%`, itemName: '' })).not.toThrow();
+    expect(() => showQrBill({ billKey: BK, kind: 'pay', url: 'not a url', itemName: '' }, NOW)).not.toThrow();
+    expect(() =>
+      showQrBill({ billKey: BK, kind: 'checkout', url: `${ORIGIN}/checkout?items=%%%`, itemName: '' }, NOW),
+    ).not.toThrow();
     show(BK2);
     rpc.head.mockResolvedValue('1000' as unknown as bigint);
     await tick();

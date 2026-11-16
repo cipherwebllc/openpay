@@ -105,7 +105,7 @@ import {
   type PayParams,
 } from '@/lib/url';
 import { mockHook } from '../_helpers/wagmiMock';
-import { settledRpcLog } from '../_helpers/qrSale';
+import { billNonce, settledRpcLog } from '../_helpers/qrSale';
 import { FIXED_NOW_MS, stubRelayFetch } from '../_helpers/relayAttemptCapture';
 
 const ORIGIN = 'https://shop.test';
@@ -276,7 +276,8 @@ async function shopWatches(c: Case, logs: ReturnType<typeof settledOnChain>[]): 
   rpc.head.mockResolvedValue(1_000n);
   rpc.logs.mockResolvedValue(logs);
   rpc.time.mockResolvedValue(SIGNED_AT + INCLUDED_AFTER_SEC);
-  showQrBill({ billKey: BK, kind: c.kind, url: plainUrl(c), itemName: ITEM_NAME });
+  // お店が QR を出したのは、払う側が署名する 1 秒前。
+  showQrBill({ billKey: BK, kind: c.kind, url: plainUrl(c), itemName: ITEM_NAME }, FIXED_NOW_MS - 1_000);
   await vi.advanceTimersByTimeAsync(6_000);
   return loadHistory();
 }
@@ -405,11 +406,36 @@ describe('QR の会計: 払う側の本物の署名に、お店の側の判定�
     expect(await shopWatches(c, [log])).toEqual([]);
   });
 
-  it('同じブラウザに両方が書いても 1 行 (払った側が先・お店が先のどちらでも)', async () => {
+  it('同じブラウザに両方が書いても 1 行 (払った側が先): 払った側の行が残り、お店の端末は書かない', async () => {
     const c = CASES[2];
     const paid = await payFromScreenQr(c, withBillKey(plainUrl(c), BK));
     // 払った側の行がある → お店の端末は書かない。
     expect(await shopWatches(c, [settledOnChain(c, paid)])).toEqual([paid.row]);
+  });
+
+  it('同じブラウザに両方が書いても 1 行 (お店が先): 先に書いたお店の行が残り、払った側は書き足さない', async () => {
+    const c = CASES[2];
+    const bill = readQrBill({ billKey: BK, kind: c.kind, url: plainUrl(c), itemName: ITEM_NAME })!;
+    // 払う側がこの後に署名する値 (署名の時刻と bill key が決まっている) で取り込まれた Settled を、先にお店の端末に読ませる。
+    const sale = {
+      from: SHOP, merchant: SHOP, merchantValue: bill.expected.merchantValue, feeValue: bill.expected.feeValue,
+      validBefore: SIGNED_AT + 300n, chainId: bill.chainId, forwarder: FORWARDER,
+    };
+    const nonce = billNonce(BK, sale);
+    const shopRows = await shopWatches(c, [settledRpcLog({ ...sale, nonce, txHash: TX, blockNumber: 995n })]);
+    expect(shopRows).toHaveLength(1);
+    expect(shopRows[0]).toMatchObject({
+      id: `batch-${TX}`, ts: Number(SIGNED_AT + INCLUDED_AFTER_SEC) * 1000, receiptNo: 'QR-7', productName: 'ランチセット',
+    });
+    // 同じブラウザで払う側が払う (見張りを止め、時計を署名の時刻に戻す)。
+    stopQrSaleWatch();
+    vi.useRealTimers();
+    vi.useFakeTimers({ toFake: ['Date'], now: FIXED_NOW_MS });
+    const paid = await payFromScreenQr(c, withBillKey(plainUrl(c), BK));
+    // お店が先に書いた tx と同じ支払い (同じ nonce・同じ tx)。
+    expect(paid.nonce).toBe(nonce);
+    expect(paid.body.intentSalt).toBe(billKeySalt(BK));
+    expect(loadHistory()).toEqual(shopRows);
   });
 
   it('お客様 (お店の受取先でないウォレット) が払うと、払った側は履歴の行を書かず控えだけ・お店の端末は行を書く', async () => {

@@ -63,9 +63,17 @@ export function useQrBillKey({ kind, url, shown, itemName = '' }: QrBillKeyArgs)
   useEffect(() => {
     if (!issued) return;
     const { billKey } = issued;
-    withWatch((watch) => watch.showQrBill({ billKey, kind, url: issued.url, itemName: itemNameRef.current }));
+    // 表示を始めた時刻・やめた時刻は、ここ (その瞬間) で決めて渡す。見張りの chunk の読み込みを待った後の時刻にすると、
+    // 読み込みが遅いとき「やめてから 60 秒」の数え始めが後ろへずれる。
+    const shownAt = Date.now();
+    withWatch((watch) =>
+      watch.showQrBill({ billKey, kind, url: issued.url, itemName: itemNameRef.current }, shownAt),
+    );
     // 表示をやめた bill key も、見張りが 60 秒は持つ (閉じた直後・出し直した直後の入金を拾う)。
-    return () => withWatch((watch) => watch.hideQrBill(billKey));
+    return () => {
+      const hiddenAt = Date.now();
+      withWatch((watch) => watch.hideQrBill(billKey, hiddenAt));
+    };
   }, [issued, kind]);
   return current ? withBillKey(current.url, current.billKey) : undefined;
 }

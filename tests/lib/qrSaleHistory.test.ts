@@ -156,7 +156,7 @@ describe('readQrBill — 見張る QR と、見張らない QR', () => {
   });
 });
 
-describe('matchSettledToBill — nonce がちょうど一致したときだけ', () => {
+describe('matchSettledToBill — 受取先・金額が期待値と同じで、nonce がちょうど一致したときだけ', () => {
   it.each([1n, 2n, 299n, 300n, 301n, 600n, BigInt(AUTHORIZATION_LOOKUP_WINDOW_SEC)])(
     '有効期限 = block の時刻 + %s 秒 → 一致 (その有効期限を返す)',
     (offset) => {
@@ -250,9 +250,12 @@ describe('matchSettledToBill — nonce がちょうど一致したときだけ',
   it('log の金額・払った人が署名と違えば一致しない (nonce は log の値で計算する)', () => {
     const bill = payBill()!;
     const signed = settledFor(bill, 300n);
-    expect(matchSettledToBill({ ...signed, merchantValue: signed.merchantValue + 1n }, T, bill)).toBeNull();
-    expect(matchSettledToBill({ ...signed, feeValue: signed.feeValue - 1n }, T, bill)).toBeNull();
     expect(matchSettledToBill({ ...signed, from: OTHER_SHOP }, T, bill)).toBeNull();
+    // log の額 (1,001 の会計の期待値) と、署名した額 (1,000 の会計) が違う: 金額のふるいは通るが、nonce が一致しない。
+    const bigger = payBill({ amount: '1001' })!;
+    const relabeled = { ...signed, merchantValue: bigger.expected.merchantValue, feeValue: bigger.expected.feeValue };
+    expect(settledMatchesExpected(relabeled, bigger)).toBe(true);
+    expect(matchSettledToBill(relabeled, T, bigger)).toBeNull();
     expect(matchSettledToBill(signed, T, bill)).toBe(T + 300n);
   });
 
@@ -266,15 +269,30 @@ describe('matchSettledToBill — nonce がちょうど一致したときだけ',
     expect(matchSettledToBill({ ...settledFor(bill, 300n), nonce }, T, bill)).toBeNull();
   });
 
-  it('会計の期待値と違う金額でも、その金額で bill key の署名がされていれば一致する (明細を付けるかは別に決める)', () => {
+  it('受取先・着金額・利用料が会計の期待値と違えば、この bill key の正しい署名でも一致しない (nonce を 1 回も計算しない)', () => {
     const bill = payBill()!;
-    const other = settledFor(bill, 300n, { merchantValue: 500n * ONE, feeValue: 2n * ONE });
-    expect(matchSettledToBill(other, T, bill)).toBe(T + 300n);
-    expect(settledMatchesExpected(other, bill)).toBe(false);
+    const others = [
+      // 別の額。
+      settledFor(bill, 300n, { merchantValue: 500n * ONE, feeValue: 2n * ONE }),
+      // 合計は同じで、着金額と利用料の分け方が違う。
+      settledFor(bill, 300n, { merchantValue: 997n * ONE, feeValue: 3n * ONE }),
+      // 利用料だけ・着金額だけが違う。
+      settledFor(bill, 300n, { feeValue: 3n * ONE }),
+      settledFor(bill, 300n, { merchantValue: 997n * ONE }),
+      // 別の受取先。
+      settledFor(bill, 300n, { merchant: OTHER_SHOP }),
+    ];
+    for (const other of others) {
+      expect(settledMatchesExpected(other, bill)).toBe(false);
+      hold.nonces = 0;
+      expect(matchSettledToBill(other, T, bill)).toBeNull();
+      expect(hold.nonces).toBe(0);
+    }
     expect(settledMatchesExpected(settledFor(bill, 300n), bill)).toBe(true);
-    // 着金額だけ・利用料だけが同じでは「期待値と同じ」としない。
-    expect(settledMatchesExpected(settledFor(bill, 300n, { feeValue: 3n * ONE }), bill)).toBe(false);
-    expect(settledMatchesExpected(settledFor(bill, 300n, { merchantValue: 997n * ONE }), bill)).toBe(false);
+    // nonce の一致が示すのは「log の額が、この bill key の署名で払われたこと」: その額の会計 (同じ bill key) なら一致する。
+    const fiveHundred = payBill({ amount: '502' })!;
+    expect(fiveHundred.expected).toEqual({ merchantValue: 500n * ONE, feeValue: 2n * ONE });
+    expect(matchSettledToBill(others[0], T, fiveHundred)).toBe(T + 300n);
   });
 
   it('nonce の大文字小文字が違っても一致する', () => {
@@ -347,16 +365,16 @@ describe('buildQrSaleEntry — 履歴の行', () => {
     ]);
   });
 
-  it('明細なしの行 (2 件目・金額違い): 金額・お客様・tx だけで、会計の写しの欄は入れない', () => {
+  it('明細なしの行 (同じ会計の 2 件目): 金額・お客様・tx だけで、会計の写しの欄は入れない', () => {
     const bill = payBill({ storeName: 'OpenPay Cafe', productName: 'ランチ', memo: '店内', taxRate: 10, taxCategory: 'taxable_10', receiptNo: 'R-1' })!;
-    const paid = settledFor(bill, 300n, { merchantValue: 500n * ONE, feeValue: 2n * ONE });
+    const paid = settledFor(bill, 300n);
     const entry = buildQrSaleEntry(bill, paid, TX, T, false);
     expect(entry).toMatchObject({
       id: `batch-${TX}`,
       merchant: getAddress(SHOP),
       customer: getAddress(CUSTOMER),
-      merchantAmount: (500n * ONE).toString(),
-      saleAmount: (502n * ONE).toString(),
+      merchantAmount: (998n * ONE).toString(),
+      saleAmount: (1_000n * ONE).toString(),
       networkFeeEquivalent: (2n * ONE).toString(),
       feeAmount: '0',
       storeName: '',
