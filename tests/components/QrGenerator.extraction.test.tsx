@@ -379,6 +379,9 @@ describe('R11b: generated payment URL fixtures', () => {
 // 設定シートの「完了」・全画面 QR の閉じる/コピー/リンクを表示)。旧 DOM との差が class だけであることを確認してから値を写した。
 // 2026-11-06 受取欄が空の間だけ「ウォレットをお持ちでない方へ」(/guide/wallet#store-wallet) を出す (user)。受取欄が空の節
 // (fresh-*/empty) の receiver と full だけ更新 (入力済み・設定シートの節は不変 = 入力したら消えることも確認)。
+// 2026-11-16 着金の注記 (paymentWatchingNote / paymentReceivedNote) の確かめ先を、取引履歴から店舗ウォレットと
+// Explorer に (文言だけ)。注記の出る節 (usdc/fx-modal・standard/modal-eip681・watch/*) の modal と full だけ更新。
+// messages を前の文に戻すと前の値で通ることを確認してから値を写した (旧 DOM との差は注記の文だけ)。
 const DOM_BASELINE: Record<string, string> = {
   'fresh-ja/empty':
     'shape=2/3/3/0 offline=77d610789dd9 grid=bf14446808c6 left=f91415023c7f amount=ab22f9ef234c receiver=0997d0084f56 accounting=1fec91400d91 preview=1a4e0aab7a49 bar=9491363e27ea full=7d8726b9bee0',
@@ -421,7 +424,7 @@ const DOM_BASELINE: Record<string, string> = {
   'usdc/fx-applied':
     'shape=2/4/2/0 offline=77d610789dd9 grid=bf14446808c6 left=f91415023c7f amount=7b612d9bc9a3 accounting=efdf7eea2b3f preview=1f554979d6b2 sheet=a243f818c83b bar=9297eecd7c80 full=eefa7dabe614',
   'usdc/fx-modal':
-    'shape=2/4/3/0 offline=77d610789dd9 grid=bf14446808c6 left=f91415023c7f amount=7b612d9bc9a3 accounting=efdf7eea2b3f left2=f0506b8ca563 preview=1f554979d6b2 modal=eade324e704e bar=9297eecd7c80 full=dd8d4584bc3c',
+    'shape=2/4/3/0 offline=77d610789dd9 grid=bf14446808c6 left=f91415023c7f amount=7b612d9bc9a3 accounting=efdf7eea2b3f left2=f0506b8ca563 preview=1f554979d6b2 modal=8c397f8b0db7 bar=9297eecd7c80 full=6a7662d58880',
   'usdc/fx-expired':
     'shape=2/3/3/0 offline=77d610789dd9 grid=bf14446808c6 left=f91415023c7f amount=cabb121fe3bc accounting=efdf7eea2b3f left2=f0506b8ca563 preview=1f554979d6b2 bar=9297eecd7c80 full=5eb85aa48434',
   'standard/closed':
@@ -429,7 +432,7 @@ const DOM_BASELINE: Record<string, string> = {
   'standard/advanced':
     'shape=2/4/2/0 offline=77d610789dd9 grid=bf14446808c6 left=f91415023c7f amount=b16b41bd7789 accounting=ce5bb989cd4a preview=4b4a106c5654 sheet=092ba4d1e6e4 bar=75d49299c4ea full=bc5bf7b804de',
   'standard/modal-eip681':
-    'shape=2/4/3/0 offline=77d610789dd9 grid=bf14446808c6 left=f91415023c7f amount=b16b41bd7789 accounting=ce5bb989cd4a left2=f0506b8ca563 preview=4b4a106c5654 modal=44e802e80783 bar=75d49299c4ea full=7e22c2f03eed',
+    'shape=2/4/3/0 offline=77d610789dd9 grid=bf14446808c6 left=f91415023c7f amount=b16b41bd7789 accounting=ce5bb989cd4a left2=f0506b8ca563 preview=4b4a106c5654 modal=74caf4504fed bar=75d49299c4ea full=5369c7fb7c5e',
   'recover/closed':
     'shape=2/3/2/0 offline=77d610789dd9 grid=bf14446808c6 left=f91415023c7f amount=6441a1cb78e4 accounting=fc2b295a8866 preview=2cc76e1c1637 bar=26fa70486c48 full=e7299250d4da',
   'recover/advanced':
@@ -445,9 +448,9 @@ const DOM_BASELINE: Record<string, string> = {
   'usage-fee/mismatch':
     'shape=2/4/2/0 offline=77d610789dd9 grid=bf14446808c6 left=f91415023c7f amount=820f27bded71 accounting=7213d13c6c09 preview=3fcd31b86f55 sheet=34f0a98a57e6 bar=739ef6dfdbb0 full=99cad2898f79',
   'watch/watching':
-    'shape=2/4/3/0 offline=77d610789dd9 grid=bf14446808c6 left=f91415023c7f amount=7f84484f533d accounting=7695e775de6e left2=f0506b8ca563 preview=21a611c68df2 modal=2df49707dd8e bar=7ec07a0f813b full=62ebf44eb35d',
+    'shape=2/4/3/0 offline=77d610789dd9 grid=bf14446808c6 left=f91415023c7f amount=7f84484f533d accounting=7695e775de6e left2=f0506b8ca563 preview=21a611c68df2 modal=607ef235d929 bar=7ec07a0f813b full=5d28a6fa3303',
   'watch/received':
-    'shape=2/4/3/0 offline=77d610789dd9 grid=bf14446808c6 left=f91415023c7f amount=7f84484f533d accounting=7695e775de6e left2=f0506b8ca563 preview=21a611c68df2 modal=ff63a3ce803b bar=7ec07a0f813b full=fa61f8ffb920',
+    'shape=2/4/3/0 offline=77d610789dd9 grid=bf14446808c6 left=f91415023c7f amount=7f84484f533d accounting=7695e775de6e left2=f0506b8ca563 preview=21a611c68df2 modal=ac7c40496907 bar=7ec07a0f813b full=ca2c8c4769c2',
   'watch/closed-with-pwa-hint':
     'shape=2/3/3/0 offline=77d610789dd9 grid=bf14446808c6 left=f91415023c7f amount=7f84484f533d accounting=7695e775de6e left2=f0506b8ca563 preview=21a611c68df2 bar=7ec07a0f813b full=5e9a75c770e1',
 };

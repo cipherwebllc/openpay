@@ -110,7 +110,7 @@ const JA: QrGuideContent = {
   receiveFlowSteps: [
     'ウォレットを接続して、金額を入力する',
     'できた QR をお客様に見せる (印刷して置いてもOK)',
-    '支払い完了と同時にウォレットへ着金 — 履歴で確認できます',
+    '支払い完了と同時にウォレットへ着金 — お店のウォレットで確認できます',
   ],
   payFlowTitle: '支払いの流れ (お客様側)',
   payFlowSteps: [
@@ -202,7 +202,7 @@ const EN: QrGuideContent = {
   receiveFlowSteps: [
     'Connect a wallet and enter the amount',
     'Show the QR to the customer (printing it works too)',
-    'Funds land in your wallet the moment payment completes — check it in history',
+    'Funds land in your wallet the moment payment completes — check it in your wallet',
   ],
   payFlowTitle: 'How paying works (customer side)',
   payFlowSteps: [

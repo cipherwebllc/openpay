@@ -63,12 +63,12 @@ export type QrPreviewAsset = {
 };
 
 // 店員が QR を提示している間の「着金検知ヒント」表示 (任意)。watching=監視中、
-// received=おおよその着金を検知。あくまで advisory (正本は Explorer / 履歴)。
+// received=おおよその着金を検知。あくまで advisory (正本はお店のウォレット / Explorer)。
 // 印刷ポスターには出さない (print:hidden)。prop 省略時は何も描画しない。
 export type QrPreviewPaymentStatus = {
   state: 'watching' | 'received';
   text: string;
-  /** 小さな注記 (例: 検知は目安・結果は取引履歴で)。省略可。 */
+  /** 小さな注記 (例: 検知は目安・結果はお店のウォレットか Explorer で)。省略可。 */
   note?: string;
 };
 
