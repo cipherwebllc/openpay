@@ -76,6 +76,7 @@ import {
   storeDeviceChainNames,
 } from '@/lib/storeDevicePayment';
 import { storePaysActive, storePaysRequested } from '@/lib/storePaysMode';
+import { saveStoreDeviceSaleSnapshot } from '@/lib/storeDeviceSaleSnapshot';
 import { groupAmountDigits, truncateAmount } from '@/lib/amount';
 
 // 「お店がガス代を肩代わりして送る」(flag 裏) の部品は選んだときだけ読み込む (ガス用ウォレットの鍵の扱い = viem の
@@ -723,6 +724,8 @@ export function QrGenerator() {
       device.stop();
       return false;
     }
+    // QR に載せる会計を写す (入金を確かめたときの、お店の取引履歴の行の明細の元・失敗しても QR は出す)。
+    saveStoreDeviceSaleSnapshot(session.id, checkout);
     setStoreQr({ id: session.id, url: buildCheckoutUrl(origin, { ...checkout, handoffId: session.id }), amountText });
     setQrModalOpen(true);
     return true;
