@@ -331,9 +331,12 @@ describe('HistoryToolbar: 勘定科目の欄', () => {
       expect(creditInput()).toHaveAttribute('aria-invalid', 'true');
       expect(creditInput().getAttribute('aria-describedby')).toBe(alert.id);
       expect(alert.id).not.toBe('');
-      // 枠は赤で、focus しても青 (focus:border-brand) に変えない。
+      // 枠は赤で、focus しても青 (focus:border-brand) に変えない。focus の場所は外側の赤い輪で示す。
       expect(creditInput().className).toContain('border-red-500');
       expect(creditInput().className).not.toContain('focus:border-brand');
+      expect(creditInput().className.split(/\s+/)).toEqual(
+        expect.arrayContaining(['focus:ring-2', 'focus:ring-red-200']),
+      );
       // 入力は打ったまま残り (直せる)、保存値と見出しは前のまま。
       expect(creditInput().value).toBe(text);
       expect(stored()).toEqual({ debit: '', credit: '売上' });
@@ -362,9 +365,10 @@ describe('HistoryToolbar: 勘定科目の欄', () => {
       expect(screen.queryByRole('alert')).toBeNull();
       expect(creditInput()).not.toHaveAttribute('aria-invalid');
       expect(creditInput()).not.toHaveAttribute('aria-describedby');
-      // 理由が消えたら、枠は普段の色 (focus で青) に戻る。
+      // 理由が消えたら、枠は普段の色 (focus で青) に戻り、赤い輪も付かない。
       expect(creditInput().className).not.toContain('border-red-500');
       expect(creditInput().className).toContain('focus:border-brand');
+      expect(creditInput().className).not.toContain('focus:ring-red-200');
       await user.type(creditInput(), '売上');
       await user.tab();
       expect(stored().credit).toBe('売上');

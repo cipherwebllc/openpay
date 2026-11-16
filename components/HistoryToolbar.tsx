@@ -570,9 +570,10 @@ function AccountField({
           e.preventDefault();
           onSettle();
         }}
-        // エラー中は focus しても枠を赤のままにする (focus の青で理由の赤が消えないように)。
+        // エラー中は focus しても枠を赤のままにする (focus の青で理由の赤が消えないように)。枠の色が変わらない分、
+        // focus の場所は外側の赤い輪で示す (キーボードで今どの欄にいるかが分かるように)。
         className={`mt-1 h-11 w-full rounded-lg border bg-white px-3 text-base text-slate-900 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 sm:text-sm ${
-          error ? 'border-red-500' : 'border-slate-300 focus:border-brand'
+          error ? 'border-red-500 focus:ring-2 focus:ring-red-200' : 'border-slate-300 focus:border-brand'
         }`}
       />
       {note && (
