@@ -96,6 +96,7 @@ import {
   offOriginCallbackHosts,
   type CheckoutParams,
 } from '@/lib/url';
+import { readBillKeyParam } from '@/lib/url/billKey';
 import { useOrigin } from '@/hooks/useOrigin';
 import { buildCheckoutLineItems } from '@/lib/checkoutLineItems';
 import { formatTokenAmount, shortAddress } from '@/lib/format';
@@ -997,6 +998,9 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
       // JPYC EIP-3009 relay: 顧客が transferWithAuthorization に署名 → 自前 relayer が gas 負担で
       // submit。fee=0・gas は OpenPay 肩代わり (free) or JPYC 回収 (recover・hook 内で分割)。
       // 全額 (totalWei) をそのまま relay に渡す (recover の控除は hook 側)。
+      // 会計ごとの印 (URL の `bk`) があれば文字列のまま渡す (使うかどうかは hook が決める: 束縛した注文では使わない・
+      // lib/url/billKey.ts)。
+      const billKey = readBillKeyParam();
       relay.mutate({
         merchant: params.to,
         value: totalWei,
@@ -1008,6 +1012,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
         // 注文リンクの支払いの指紋を復旧 intent にだけ残す (読み直した後の完了を同じ注文リンクに結び付ける・第 9 回
         // レビュー G-1)。束縛した注文 (order) は自分の slot で復旧するので付けない。relay POST には載らない。
         ...(orderLinkKey && !order ? { orderLinkKey } : {}),
+        ...(billKey ? { billKey } : {}),
       });
     } else {
       gasless.mutate({
