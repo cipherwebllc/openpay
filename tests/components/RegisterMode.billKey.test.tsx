@@ -359,7 +359,7 @@ describe('レジ → 見張り → 取引履歴', () => {
     const TX = `0x${'d1'.repeat(32)}`;
     rpc.logs.mockResolvedValue([settledRpcLog({ ...sale, nonce: billNonce(billKey, sale), txHash: TX, blockNumber: 995n })]);
     await tick();
-    expect(rpc.logs).toHaveBeenCalledWith(80002, FORWARDER, [VALID], 987n, 997n);
+    expect(rpc.logs).toHaveBeenCalledWith(80002, FORWARDER, [VALID], 910n, 997n);
     const rows = loadHistory();
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({

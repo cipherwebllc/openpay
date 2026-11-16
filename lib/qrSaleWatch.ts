@@ -12,8 +12,10 @@
 // 待った後の時刻にしない)。60 秒はその時刻から数え、届いた時点でもう 60 秒を過ぎていた会計は持たない。
 //
 // 読み方 (チェーンごと・6 秒おき):
-//   - getBlockNumber → getLogs (forwarder の Settled・この受取先宛て)。範囲は「前回読んだ最後の block − 10」から
-//     「先頭 − 1 (Polygon は先頭 − 3)」。前回から間が空いても、先頭 − 90 より前は読まない。読む block が無ければ何もしない。
+//   - getBlockNumber → getLogs (forwarder の Settled・この受取先宛て)。範囲の終わりは「先頭 − 1 (Polygon は先頭 − 3)」。
+//     始まりは、そのチェーンを初めて読む回と、新しい会計が加わった後の回は「先頭 − 90」(見張りの読み込みが遅れても、
+//     表示を始めた後の入金を覆う。古すぎる log は下の時刻の窓で落ちる)。それ以外は「前回、照合し終えた block − 10」
+//     (先頭 − 90 より前は読まない)。読む block が無ければ何もしない。
 //   - 読んだ log (tx と log の番号) は覚えておき、重ねて読んだ分は落とす。
 //   - タブが裏のあいだは読まない。RPC の失敗・時間切れは、その回を飛ばす (次の回に同じ範囲から読み直す)。
 //   - 見つけた Settled ごとに、まず受取先・着金額・利用料が、生きている会計のどれかの期待値とちょうど同じかを見る
@@ -25,9 +27,13 @@
 //     入金がいくつも届く順でも重くなりすぎないように、1 回 (チェーンごと) に照合する (log, 会計) の組は 4 つまでにして、
 //     残りの log は次の回に回す (読んだことにしない)。1 回に最低 1 つの log は照合する (進まなくならない)。
 //
-// 行にするもの (log を 1 つずつ、チェーンの順に):
+// 行にするもの (log を 1 つずつ、必ず古い順 = block → log の番号の順に):
 //   - その会計の 1 件目の一致 → 会計の写しの明細・管理番号つきの行。
 //   - 同じ会計の 2 件目以降の一致 (同じ QR への 2 回目の入金) → 明細なしの行 (金額・お客様・tx)。
+//   - 照合の上限・block の時刻の読み取りの失敗で次の回に回すのは、その log から後ろだけ。次の回は、照合し終えた所の
+//     続きから読む。= 同じ会計への入金は、チェーンに取り込まれた順に 1 件目が決まる。受け入れている限界: 読み取りの都合
+//     (RPC が古い node から空を返した、など) で、同じ会計への古い入金が新しい入金より後に見つかった場合、明細は先に
+//     見つかった方に付く。
 //   - 行は tx ごとに 1 つ (同じ tx の行・印があれば書かない)。受け入れている限界: 1 つの tx に、このお店の会計への
 //     Settled が 2 つ以上ある場合 (OpenPay の relayer は 1 つの tx に settle を 1 つしか送らないので、第三者がまとめて
 //     送ったときだけ)、行は最初に見つけた 1 つだけ。払った側の行も 1 tx 1 行。
@@ -90,10 +96,8 @@ type WatchedBill = {
   matched: number;
 };
 type ChainCursor = {
-  /** 前回読んだ最後の block (まだ読めていなければ null)。 */
+  /** 前回、照合し終えた最後の block (null = 次の回は先頭 − 90 から読む: 初めての回・新しい会計が加わった後)。 */
   lastTo: bigint | null;
-  /** まだ 1 回も読み終えていないあいだに、読めなかった・読み残した回 (RPC の失敗・タブが裏・照合の上限) があった。 */
-  missed: boolean;
 };
 
 const bills = new Map<string, WatchedBill>();
@@ -124,7 +128,7 @@ function clearState(): void {
 function cursorFor(chainId: number): ChainCursor {
   let cursor = cursors.get(chainId);
   if (!cursor) {
-    cursor = { lastTo: null, missed: false };
+    cursor = { lastTo: null };
     cursors.set(chainId, cursor);
   }
   return cursor;
@@ -205,14 +209,9 @@ async function pollChain(chainId: number, startedGeneration: number): Promise<vo
   if (typeof head !== 'bigint') throw new Error('qr_sale_head_unreadable');
   const toBlock = head - headMargin(chainId);
   const oldest = head - QR_SALE_MAX_BACK_BLOCKS;
-  let fromBlock: bigint;
-  if (cursor.lastTo !== null) {
-    const next = cursor.lastTo - QR_SALE_OVERLAP_BLOCKS;
-    fromBlock = next > oldest ? next : oldest;
-  } else {
-    // 初めて読む回。QR を出してから読めない回があったら、その間の block も読む。
-    fromBlock = cursor.missed ? oldest : toBlock - QR_SALE_OVERLAP_BLOCKS;
-  }
+  // 初めての回・新しい会計が加わった後の回は先頭 − 90 から。それ以外は、照合し終えた所の続き − 10 から (先頭 − 90 まで)。
+  const next = cursor.lastTo === null ? oldest : cursor.lastTo - QR_SALE_OVERLAP_BLOCKS;
+  let fromBlock = next > oldest ? next : oldest;
   if (fromBlock < 0n) fromBlock = 0n;
   if (toBlock < fromBlock) return;
 
@@ -231,7 +230,8 @@ async function pollChain(chainId: number, startedGeneration: number): Promise<vo
 
   // この回に照合した (log, 会計) の組の数 (上限 QR_SALE_MAX_PAIRS_PER_PASS)。
   let pairs = 0;
-  let complete = true;
+  // 次の回に回した最初の log の block (null = この回の範囲を全部照合し終えた)。
+  let stoppedAt: bigint | null = null;
   for (const { log, txHash, logIndex, blockNumber } of ordered) {
     const id = `${chainId}:${txHash.toLowerCase()}:${logIndex}`;
     if (seenLogs.has(id)) continue;
@@ -245,16 +245,17 @@ async function pollChain(chainId: number, startedGeneration: number): Promise<vo
     try {
       blockTime = await blockTimeOf(chainId, blockNumber);
     } catch {
-      // block の時刻を読めなかった log は「読んだ」ことにしない。ここまでの分は書き、残りは次の回に同じ範囲から読み直す。
-      complete = false;
+      // block の時刻を読めなかった log は「読んだ」ことにしない。ここまでの分は書き、この log から後ろは次の回に回す。
+      stoppedAt = blockNumber;
       break;
     }
     if (startedGeneration !== generation) return;
     // 待つ間に増えた・表示をやめた会計も入れて選び直す。その block の時刻に生きていた会計だけ。
     const candidates = billsFitting(chainId, settled).filter((w) => aliveAt(w, blockTime));
-    // 照合の量の上限 (頭の注記)。超える log は次の回に回す (読んだことにしない)。この回の最初の log は必ず照合する。
+    // 照合の量の上限 (頭の注記)。超えたら、この log から後ろを次の回に回す (古い log を飛ばして新しい log を先に
+    // 照合しない)。この回の最初の log は必ず照合する。
     if (pairs > 0 && pairs + candidates.length > QR_SALE_MAX_PAIRS_PER_PASS) {
-      complete = false;
+      stoppedAt = blockNumber;
       break;
     }
     pairs += candidates.length;
@@ -274,13 +275,8 @@ async function pollChain(chainId: number, startedGeneration: number): Promise<vo
       break;
     }
   }
-  if (!complete) {
-    // 読み残した log は、次の回に同じ範囲から読み直す (前回の位置を進めない・まだ 1 回も読めていなければ先頭 − 90 から)。
-    cursor.missed = true;
-    return;
-  }
-  cursor.lastTo = toBlock;
-  cursor.missed = false;
+  // 次の回は、照合し終えた所の続きから (回した log の block から読み直す)。
+  cursor.lastTo = stoppedAt === null ? toBlock : stoppedAt - 1n;
 }
 
 async function tick(): Promise<void> {
@@ -296,10 +292,7 @@ async function tick(): Promise<void> {
   }
   const chainIds = [...new Set([...bills.values()].map((w) => w.bill.chainId))];
   // タブが裏のあいだは読まない (戻ったら、前回の続き・先頭 − 90 のうち新しい方から読む)。
-  if (document.visibilityState === 'hidden') {
-    for (const chainId of chainIds) cursorFor(chainId).missed = true;
-    return;
-  }
+  if (document.visibilityState === 'hidden') return;
   running = true;
   const startedGeneration = generation;
   try {
@@ -307,8 +300,7 @@ async function tick(): Promise<void> {
       try {
         await pollChain(chainId, startedGeneration);
       } catch {
-        // RPC の失敗・時間切れ・読めない応答は、その回を飛ばす (次の回に同じ範囲から読み直す)。
-        if (startedGeneration === generation) cursorFor(chainId).missed = true;
+        // RPC の失敗・時間切れ・読めない応答は、その回を飛ばす (前回の位置を変えない = 次の回に同じ範囲から読み直す)。
       }
       if (startedGeneration !== generation) return;
     }
@@ -331,6 +323,9 @@ export function showQrBill(input: QrBillInput, shownAt: number): void {
       // 見張れない QR (lib/qrSaleHistory.ts の readQrBill) は足さない = RPC を読まない。
       if (!bill) return;
       bills.set(input.billKey, { bill, shownAt, hiddenAt: null, matched: 0 });
+      // 新しい会計が加わった: そのチェーンの次の回は先頭 − 90 から読み直す (表示を始めた後の入金を覆う・読んだ log は落とす)。
+      // 位置を消す (null にしない): 読んでいる途中の回が、終わった後に古い位置を書き戻さないように、別の物にする。
+      cursors.delete(bill.chainId);
     }
     if (timer === null) {
       timer = setInterval(() => {

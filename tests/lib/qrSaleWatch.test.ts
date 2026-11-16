@@ -1,6 +1,8 @@
 // lib/qrSaleWatch.ts: QR を出している間と閉じた後 60 秒、forwarder の Settled を読み、bill key の nonce と一致した入金だけを
-// 取引履歴に書く見張り。RPC の読み取り (lib/qrSaleRpc.ts) だけを差し替え、一致の判定・行の組み立て・履歴と印 (localStorage)
-// は実物。時間は fake timer で進める。
+// 取引履歴に書く見張り。RPC の読み取り (lib/qrSaleRpc.ts) と nonce の式 (軽い差し替え・下) を差し替え、一致の判定・行の組み立て・
+// 履歴と印 (localStorage) は実物。時間は fake timer で進める。
+// nonce の本物の式 (keccak) と一致の判定が合うことは tests/lib/qrSaleHistory.test.ts と
+// tests/components/qrSaleHistory.parity.test.tsx が確かめる。ここは見張りの回し方 (範囲・順・上限・時刻の窓・保存) を見る。
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { getAddress, type Address, type Hex } from 'viem';
@@ -20,14 +22,18 @@ const hold = vi.hoisted(() => ({
   nonces: 0,
   visibility: 'visible' as 'visible' | 'hidden',
 }));
-// nonce の計算は本物 (払う側と同じ関数)。何回計算したかだけ数える。
+// nonce の式は軽い差し替え (tests/_helpers/fakeForwarderNonce.ts: 入力の組ごとに決まった値・一致の判定にとっては本物の
+// hash と同じ)。本物の keccak を 1,230 回 × 組の数だけ計算すると、coverage つきの CI で遅い。何回計算したかを数える。
+// 払う側の nonce (テストの道具 billNonce) も同じ差し替えで作る。
 vi.mock('@/lib/relay/forwarderIntent', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/relay/forwarderIntent')>();
+  const { createFakeForwarderNonce } = await import('@/tests/_helpers/fakeForwarderNonce');
+  const fake = createFakeForwarderNonce();
   return {
     ...actual,
     buildForwarderNonce: (...args: Parameters<typeof actual.buildForwarderNonce>) => {
       hold.nonces += 1;
-      return actual.buildForwarderNonce(...args);
+      return fake(...args);
     },
   };
 });
@@ -106,6 +112,8 @@ const blockTime = (n: bigint) => BigInt(NOW / 1000) + (n - 1_000n) * 2n;
 const NONCES_TO_MATCH = 20;
 // 一致しない (log, 会計) の組 1 つの計算の回数 (+1 … +1,230 の全部)。
 const NONCES_PER_MISS = 1_230;
+// 乱数の intentSalt (bill key を使わない支払い)。
+const random = (n: number) => `0x${n.toString(16).padStart(2, '0').repeat(32)}` as Hex;
 // 16 進の英字を含む hash (大文字にすると別の文字列になる)。
 const tx = (n: number) => `0x${'ab'.repeat(24)}${n.toString(16).padStart(16, '0')}` as Hex;
 
@@ -168,16 +176,25 @@ beforeEach(() => {
   hold.visibility = 'visible';
   Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => hold.visibility });
   rpc.head.mockReset().mockImplementation(async () => chain.head);
+  // getLogs は、範囲と受取先の topic で絞った log を返す (本物の RPC と同じ)。
   rpc.logs
     .mockReset()
-    .mockImplementation(async (_chainId: number, _forwarder: Address, _merchants: Address[], from: bigint, to: bigint) =>
-      chain.logs.filter((log) => log.blockNumber! >= from && log.blockNumber! <= to),
+    .mockImplementation(async (_chainId: number, _forwarder: Address, merchants: Address[], from: bigint, to: bigint) =>
+      chain.logs.filter(
+        (log) =>
+          log.blockNumber! >= from && log.blockNumber! <= to &&
+          merchants.some((m) => getAddress(`0x${log.topics[3]!.slice(26)}`) === getAddress(m)),
+      ),
     );
   rpc.time.mockReset().mockImplementation(async (_chainId: number, block: bigint) => blockTime(block));
   warn.mockReset();
 });
 afterEach(() => {
+  // 見張りの module の状態と数を、テストが失敗・時間切れで終わっても次のテストへ持ち越さない。
   stopQrSaleWatch();
+  hold.nonces = 0;
+  hold.matches = 0;
+  hold.appends = 0;
   Reflect.deleteProperty(document, 'visibilityState');
   vi.useRealTimers();
   vi.restoreAllMocks();
@@ -194,9 +211,9 @@ describe('読む範囲と間隔', () => {
     await vi.advanceTimersByTimeAsync(1);
     expect(rpc.head).toHaveBeenCalledTimes(1);
     expect(rpc.head).toHaveBeenCalledWith(POLYGON.chainId);
-    // 初めての回: 「先頭 − 3 (Polygon)」までの 10 block。
+    // 初めての回: 先頭 − 90 から「先頭 − 3 (Polygon)」まで。
     expect(rpc.logs).toHaveBeenCalledTimes(1);
-    expect(rpc.logs).toHaveBeenCalledWith(POLYGON.chainId, FORWARDER, [getAddress(SHOP)], 987n, 997n);
+    expect(rpc.logs).toHaveBeenCalledWith(POLYGON.chainId, FORWARDER, [getAddress(SHOP)], 910n, 997n);
     // 一致する Settled が無ければ、block の時刻は読まない。
     expect(rpc.time).not.toHaveBeenCalled();
     await tick();
@@ -218,21 +235,21 @@ describe('読む範囲と間隔', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it('次の回は「前回の最後の block − 10」から。Polygon は先頭 − 3 まで・Kaia は先頭 − 1 まで', async () => {
+  it('初めての回は先頭 − 90 から、次の回は「前回の最後の block − 10」から。Polygon は先頭 − 3 まで・Kaia は先頭 − 1 まで', async () => {
     show();
     await tick();
     chain.head = 1_004n;
     await tick();
     chain.head = 1_004n;
     await tick();
-    expect(ranges()).toEqual([[987n, 997n], [987n, 1_001n], [991n, 1_001n]]);
+    expect(ranges()).toEqual([[910n, 997n], [987n, 1_001n], [991n, 1_001n]]);
     expect(QR_SALE_OVERLAP_BLOCKS).toBe(10n);
 
     stopQrSaleWatch();
     rpc.logs.mockClear();
     show(BK2, { chain: 'kaia' });
     await tick();
-    expect(rpc.logs).toHaveBeenCalledWith(KAIA.chainId, FORWARDER, [getAddress(SHOP)], 993n, 1_003n);
+    expect(rpc.logs).toHaveBeenCalledWith(KAIA.chainId, FORWARDER, [getAddress(SHOP)], 914n, 1_003n);
   });
 
   it('前回から間が空いたら、先頭 − 90 より前は読まない', async () => {
@@ -288,7 +305,7 @@ describe('読む範囲と間隔', () => {
     await tick();
     chain.head = 1_012n;
     await tick();
-    expect(ranges()).toEqual([[987n, 997n], [987n, 1_007n], [987n, 1_009n]]);
+    expect(ranges()).toEqual([[910n, 997n], [987n, 1_007n], [987n, 1_009n]]);
   });
 
   it('前の回がまだ RPC を待っている間は、次の回を重ねない', async () => {
@@ -510,14 +527,6 @@ describe('一致した入金だけを行にする', () => {
   });
 
   it('取得の途中で会計が増えても (先頭を読む間に別の受取先の QR を出した)、同じ tx の 2 つの一致は 1 行のまま', async () => {
-    // getLogs は、受取先の topic で絞った log だけを返す (本物の RPC と同じ)。
-    rpc.logs.mockImplementation(async (_chainId: number, _forwarder: Address, merchants: Address[], from: bigint, to: bigint) =>
-      chain.logs.filter(
-        (log) =>
-          log.blockNumber! >= from && log.blockNumber! <= to &&
-          merchants.some((m) => getAddress(`0x${log.topics[3]!.slice(26)}`) === getAddress(m)),
-      ),
-    );
     let release!: (head: bigint) => void;
     rpc.head.mockImplementationOnce(() => new Promise<bigint>((resolve) => { release = resolve; }));
     show(BK);
@@ -567,8 +576,8 @@ describe('一致した入金だけを行にする', () => {
     rpc.time.mockImplementation(async (_chainId: number, block: bigint) => blockTime(block));
     chain.head = 1_002n;
     await tick();
-    // 読めた範囲として進めていない (まだ 1 回も読み終えていないので、先頭 − 90 から読み直す)。
-    expect(ranges()).toEqual([[987n, 997n], [912n, 999n]]);
+    // 照合し終えた所 (994) の続きから読み直す (994 − 10 = 984 から)。
+    expect(ranges()).toEqual([[910n, 997n], [984n, 999n]]);
     expect(loadHistory().map((e) => e.id)).toEqual([`batch-${tx(2)}`, `batch-${tx(1)}`]);
     // 2 件目として明細なし。
     expect(loadHistory()[0].lineItems).toBeNull();
@@ -760,9 +769,7 @@ describe('保存の決まり (同じ tx は 1 行・印が先・印は外さな�
 });
 
 describe('照合の量の上限 (同じ金額の会計を出したまま、同じ金額の関係ない入金が届く)', () => {
-  const random = (n: number) => `0x${n.toString(16).padStart(2, '0').repeat(32)}` as Hex;
-
-  it('1 回に照合する (log, 会計) の組は 4 つまで。超える log は次の回に回し (読んだ範囲を進めない)、順に全部を照合する', async () => {
+  it('1 回に照合する (log, 会計) の組は 4 つまで。超える log から後ろを次の回に回し (照合し終えた所の続きから読む)、古い順に全部を照合する', async () => {
     expect(QR_SALE_MAX_PAIRS_PER_PASS).toBe(4);
     // 同じ金額の会計 3 つ。同じ金額の関係ない入金 (乱数の salt) 3 つの後に、BK (最初に出した会計) の本物の支払い。
     show(BK);
@@ -784,9 +791,9 @@ describe('照合の量の上限 (同じ金額の会計を出したまま、同�
     expect(hold.matches).toBe(10);
     // 本物の支払いは BK の会計の 1 件目。
     expect(loadHistory().map((e) => [e.id, e.receiptNo])).toEqual([[`batch-${tx(4)}`, 'R-1']]);
-    // 読み残した回は読んだ範囲を進めず、先頭 − 90 から読み直した。読み終えた後は前回の続きから。
+    // 次の回は、照合し終えた所 (990・991・992) の続き − 10 から。全部を照合し終えた後は前回の最後 (997) の続きから。
     await tick();
-    expect(ranges()).toEqual([[987n, 997n], [910n, 997n], [910n, 997n], [910n, 997n], [987n, 997n]]);
+    expect(ranges()).toEqual([[910n, 997n], [980n, 997n], [981n, 997n], [982n, 997n], [987n, 997n]]);
   });
 
   it('組の数がちょうど上限までなら同じ回に照合する。1 つの log の組が上限を超えても、その回の最初の log なら照合する', async () => {
@@ -813,6 +820,70 @@ describe('照合の量の上限 (同じ金額の会計を出したまま、同�
     await tick();
     expect(hold.nonces).toBe(4 * NONCES_PER_MISS + NONCES_TO_MATCH);
     expect(loadHistory().map((e) => [e.id, e.receiptNo])).toEqual([[`batch-${tx(9)}`, 'R-4']]);
+  });
+});
+
+describe('初めての回の範囲と、古い順', () => {
+  const rows = () => loadHistory().map((e) => [e.id, e.receiptNo]);
+
+  it('見張りの読み込みが遅れても (表示 → 入金 → 30 秒後に読み込み → 初めての先頭が 18 block 先)、表示した後の入金を拾い、明細は古い方に付く', async () => {
+    // QR を出したのは block 1,000 の時刻 (NOW)。見張りが読み込まれて会計が届いたのは 30 秒後。同じ金額の会計が 3 つ。
+    vi.setSystemTime(NOW + 30_000);
+    show(BK, {}, NOW);
+    show(BK2, { receiptNo: 'R-2' }, NOW);
+    show(BK3, { receiptNo: 'R-3' }, NOW);
+    chain.head = 1_018n;
+    settle(1_001n, 1);
+    settle(1_005n, 2, { salt: random(0xc1) });
+    // 同じ会計への 2 回目の入金 (二重払い) と、同じ block の同じ金額の関係ない入金。
+    settle(1_010n, 3);
+    settle(1_010n, 4, { salt: random(0xc2), logIndex: 1 });
+    await tick(4);
+    // 初めての回は先頭 − 90 から (1,001 を覆う)。照合の上限で回した回は、照合し終えた所の続きから。
+    expect(ranges()).toEqual([[928n, 1_015n], [994n, 1_015n], [999n, 1_015n], [999n, 1_015n]]);
+    expect(rows()).toEqual([
+      [`batch-${tx(3)}`, null],
+      [`batch-${tx(1)}`, 'R-1'],
+    ]);
+  });
+
+  it('照合の上限で回すのは後ろの log だけ: 古い log を飛ばして、新しい log を先に照合しない', async () => {
+    // log ごとに照合する会計の数が違う順を作る (端末の時計が block の時刻より遅れている)。BK2・BK3 は 50 秒前に出して
+    // 40 秒前にやめた (block の時刻で NOW − 80 秒 〜 NOW + 50 秒に生きていた)。BK は表示中。どれも同じ金額。
+    show(BK2, { receiptNo: 'R-2' }, NOW - 50_000);
+    hide(BK2, NOW - 40_000);
+    show(BK3, { receiptNo: 'R-3' }, NOW - 50_000);
+    hide(BK3, NOW - 40_000);
+    show(BK, {}, NOW - 50_000);
+    chain.head = 1_043n;
+    settle(1_001n, 1, { salt: random(0xd1) }); // 3 組
+    settle(1_002n, 2); // BK の 1 件目: 3 組
+    settle(1_040n, 3); // BK の 2 件目 (NOW + 80 秒・BK2 と BK3 は生きていない): 1 組
+    // 1 回目: 1,001 (3 組) の後、1,002 は 6 組で上限を超える → 1,002 から後ろ (1,040 も) を次の回へ。
+    await tick();
+    expect(rows()).toEqual([]);
+    // 2 回目: 1,002 (3 組) が BK の 1 件目 (明細つき)・1,040 (1 組・合わせて 4 組) が 2 件目 (明細なし)。
+    await tick();
+    expect(rows()).toEqual([
+      [`batch-${tx(3)}`, null],
+      [`batch-${tx(2)}`, 'R-1'],
+    ]);
+  });
+
+  it('新しい会計が加わった後の回は、先頭 − 90 から読み直す (別の受取先の会計の、見張りに届く前の入金も拾う)', async () => {
+    show(BK);
+    await tick();
+    chain.head = 1_020n;
+    await tick();
+    // 別の受取先の QR を block 1,000 の時刻に出し、1,003 に入金があった。見張りに会計が届いたのは、その後。
+    settle(1_003n, 1, { billKey: BK2, merchant: OTHER_SHOP });
+    show(BK2, { to: OTHER_SHOP, receiptNo: 'R-2' }, NOW);
+    await tick();
+    expect(ranges()).toEqual([[910n, 997n], [987n, 1_017n], [930n, 1_017n]]);
+    expect(rows()).toEqual([[`batch-${tx(1)}`, 'R-2']]);
+    // その次の回は、前回の続きから。
+    await tick();
+    expect(ranges().at(-1)).toEqual([1_007n, 1_017n]);
   });
 });
 
@@ -993,7 +1064,7 @@ describe('表示をやめた後・止めた後', () => {
     settle(4_995n, 1);
     settle(4_996n, 2, { billKey: BK2 });
     await tick();
-    expect(ranges()).toEqual([[4_987n, 4_997n]]);
+    expect(ranges()).toEqual([[4_910n, 4_997n]]);
     expect(loadHistory().map((e) => [e.id, e.receiptNo])).toEqual([[`batch-${tx(2)}`, 'NEXT']]);
   });
 

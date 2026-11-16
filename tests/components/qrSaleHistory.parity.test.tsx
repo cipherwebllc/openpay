@@ -399,11 +399,11 @@ describe('QR の会計: 払う側の本物の署名に、お店の側の判定�
     expect(paid.body.intentSalt).not.toBe(billKeySalt(BK));
     const bill = readQrBill({ billKey: BK, kind: 'pay', url: plainUrl(c), itemName: ITEM_NAME })!;
     const log = settledOnChain(c, paid);
-    // 金額・受取先・払った人は会計どおりでも、一致しない。
+    // 受取先・金額・払った人は会計どおり (お店の端末は nonce を本物の式で範囲の全部を計算する) でも、一致しない。
     expect(settledMatchesExpected(readSettledLog(log, FORWARDER)!, bill)).toBe(true);
-    expect(matchSettledToBill(readSettledLog(log, FORWARDER)!, SIGNED_AT + INCLUDED_AFTER_SEC, bill)).toBeNull();
     clearHistory();
     expect(await shopWatches(c, [log])).toEqual([]);
+    expect(rpc.time).toHaveBeenCalledTimes(1);
   });
 
   it('同じブラウザに両方が書いても 1 行 (払った側が先): 払った側の行が残り、お店の端末は書かない', async () => {

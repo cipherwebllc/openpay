@@ -8,18 +8,27 @@ const hold = vi.hoisted(() => ({
   forwarders: {} as Record<number, string>,
   bps: 0,
   nonces: 0,
+  real: false,
 }));
-// nonce の計算は本物 (払う側と同じ関数)。何回計算したかだけ数える。
+// nonce の式: 一致の場面 (`realNonce()` を呼ぶテスト) は本物 (払う側と同じ関数・keccak)。ほか (一致しない場面・計算の回数) は
+// 軽い差し替え (tests/_helpers/fakeForwarderNonce.ts・入力の組ごとに決まった値)。本物の keccak で範囲の全部 (1,230 回) を
+// 計算するテストを重ねると、coverage つきの CI で 1 件 1 秒を超える。どちらでも、何回計算したかを数える。
 vi.mock('@/lib/relay/forwarderIntent', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/relay/forwarderIntent')>();
+  const { createFakeForwarderNonce } = await import('@/tests/_helpers/fakeForwarderNonce');
+  const fake = createFakeForwarderNonce();
   return {
     ...actual,
     buildForwarderNonce: (...args: Parameters<typeof actual.buildForwarderNonce>) => {
       hold.nonces += 1;
-      return actual.buildForwarderNonce(...args);
+      return hold.real ? actual.buildForwarderNonce(...args) : fake(...args);
     },
   };
 });
+/** このテストの nonce は本物の式で計算する (払う側の署名の nonce と、お店の側の計算が、本物の keccak で一致すること)。 */
+const realNonce = () => {
+  hold.real = true;
+};
 vi.mock('@/lib/relay/forwarderConfig', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/relay/forwarderConfig')>()),
   jpycForwarderFor: (chainId: number) => hold.forwarders[chainId] ?? null,
@@ -97,6 +106,8 @@ function settledFor(bill: QrBill, offset: bigint, over: Partial<SettledLog> & { 
 beforeEach(() => {
   hold.forwarders = { [JPYC.chainId]: FORWARDER, [KAIA.chainId]: FORWARDER };
   hold.bps = 0;
+  hold.nonces = 0;
+  hold.real = false;
 });
 
 describe('readQrBill — 見張る QR と、見張らない QR', () => {
@@ -158,8 +169,9 @@ describe('readQrBill — 見張る QR と、見張らない QR', () => {
 
 describe('matchSettledToBill — 受取先・金額が期待値と同じで、nonce がちょうど一致したときだけ', () => {
   it.each([1n, 2n, 299n, 300n, 301n, 600n, BigInt(AUTHORIZATION_LOOKUP_WINDOW_SEC)])(
-    '有効期限 = block の時刻 + %s 秒 → 一致 (その有効期限を返す)',
+    '有効期限 = block の時刻 + %s 秒 → 一致 (その有効期限を返す・本物の keccak)',
     (offset) => {
+      realNonce();
       const bill = payBill()!;
       expect(matchSettledToBill(settledFor(bill, offset), T, bill)).toBe(T + offset);
     },
@@ -203,7 +215,8 @@ describe('matchSettledToBill — 受取先・金額が期待値と同じで、no
     },
   );
 
-  it('レジ (/checkout) の会計も同じ式で一致する', () => {
+  it('レジ (/checkout) の会計も同じ式で一致する (本物の keccak)', () => {
+    realNonce();
     const bill = checkoutBill()!;
     expect(matchSettledToBill(settledFor(bill, 297n), T, bill)).toBe(T + 297n);
   });
@@ -295,7 +308,8 @@ describe('matchSettledToBill — 受取先・金額が期待値と同じで、no
     expect(matchSettledToBill(others[0], T, fiveHundred)).toBe(T + 300n);
   });
 
-  it('nonce の大文字小文字が違っても一致する', () => {
+  it('nonce の大文字小文字が違っても一致する (本物の keccak)', () => {
+    realNonce();
     const bill = payBill()!;
     const signed = settledFor(bill, 300n);
     expect(matchSettledToBill({ ...signed, nonce: signed.nonce.toUpperCase().replace('0X', '0x') as Hex }, T, bill)).toBe(T + 300n);

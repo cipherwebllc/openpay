@@ -206,10 +206,10 @@ async function reopen() {
   return dialog()!;
 }
 
-/** SVG の markup を画像にして、QR として読んだ中身。 */
+/** SVG の markup を画像にして、QR として読んだ中身 (340px = 画面の QR と同じ大きさ・1 マス 6px 前後)。 */
 async function decodeQr(svgMarkup: string): Promise<string | null> {
   const raw = await sharp(Buffer.from(svgMarkup))
-    .resize(680, 680, { fit: 'fill' })
+    .resize(340, 340, { fit: 'fill' })
     .flatten({ background: '#ffffff' })
     .raw()
     .ensureAlpha()
@@ -527,7 +527,7 @@ describe('決済QR → 見張り → 取引履歴', () => {
     await settle();
     const billKey = BK_SUFFIX.exec(mainQrValue(dialog()!))![1];
     await tick();
-    expect(rpc.logs).toHaveBeenCalledWith(80002, FORWARDER, [RECEIVER], 987n, 997n);
+    expect(rpc.logs).toHaveBeenCalledWith(80002, FORWARDER, [RECEIVER], 910n, 997n);
     expect(loadHistory()).toEqual([]);
 
     // QR を閉じ、別のタブへ移る (QrGenerator が外れる)。その後に入金が取り込まれる。
