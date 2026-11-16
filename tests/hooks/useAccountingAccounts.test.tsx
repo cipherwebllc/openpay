@@ -295,9 +295,10 @@ describe('useAccountingAccounts: 別のタブの変更の取り込み', () => {
     expect(warn).toHaveBeenCalledWith('localStorage.get failed', expect.objectContaining({ key: KEY }));
     // 画面 (と CSV) は、この画面の間は新しい名前。
     expect(result.current.accounts).toEqual({ debit: '普通預金', credit: '売上金' });
-    // 読めないまま前面に戻っても、新しい名前のまま。
+    // 読めないまま前面に戻っても、新しい名前のまま。取り込みの読みの失敗でも warn は 1 回 (累計 3 回)。
     focusTab();
     expect(result.current.accounts).toEqual({ debit: '普通預金', credit: '売上金' });
+    expect(warn).toHaveBeenCalledTimes(3);
     getItem.mockRestore();
     expect(stored()).toEqual({ debit: '現金', credit: '売上' });
     // 読めるようになった次の書き込みは、その項目だけ。読めない間の変更 (借方) は後から書かない。
@@ -359,6 +360,34 @@ describe('useAccountingAccounts: 別のタブの変更の取り込み', () => {
     act(() => result.current.setAccount('debit', '普通預金'));
     expect(stored()).toEqual({ debit: '普通預金', credit: '売上' });
     expect(result.current.accounts).toEqual({ debit: '普通預金', credit: '売上' });
+  });
+
+  it('読めない間に借方を変え、読めるようになったときに保存値が無ければ、次の書き込みで借方も一緒に保存される', async () => {
+    save({ debit: '現金', credit: '売上' });
+    const { result } = await mountHook();
+    vi.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    const getItem = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new Error('SecurityError');
+    });
+    act(() => result.current.setAccount('debit', '普通預金'));
+    getItem.mockRestore();
+    // 守る保存値が無い (key が消えた) ので、今の名前の全体が土台になる。
+    window.localStorage.removeItem(KEY);
+    act(() => result.current.setAccount('credit', '売上金'));
+    expect(stored()).toEqual({ debit: '普通預金', credit: '売上金' });
+  });
+
+  it('保存値が JSON でないときの読みは、warn が 1 回 (取り込み 1 回・書き込みの前の読み 1 回につき 1 回ずつ)', async () => {
+    save({ debit: '現金', credit: '売上' });
+    const { result } = await mountHook();
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    window.localStorage.setItem(KEY, '{not json');
+    focusTab();
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith('localStorage.get failed', expect.objectContaining({ key: KEY }));
+    act(() => result.current.setAccount('debit', '普通預金'));
+    expect(warn).toHaveBeenCalledTimes(2);
+    expect(stored()).toEqual({ debit: '普通預金', credit: '売上' });
   });
 
   it('unmount した後は取り込まない (listener を外す)', async () => {
