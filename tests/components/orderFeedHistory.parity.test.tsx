@@ -7,8 +7,8 @@
 // 受注 (server と同じ sanitize を通した StoredOrder) から組む。
 //
 // 違ってよい欄は、経路ごとに名前を挙げて固定する (ここに無い欄が 1 つでも違えば落ちる)。
-// 利用料の額が 2 つの経路の式に合って欄を決められない注文は、4 欄 (負担者・利用料・売上総額・ネットワーク手数料相当額) を
-// null にする (推測で埋めない)。その違いも名前を挙げて固定する。
+// 受け入れている限界 (利用料の flag が ON の build で、feeKind の無い手作りの /checkout の URL の回収が利用料の式にも合う額は、
+// 利用料として書く) も、違う欄の名前を挙げて固定する。
 
 import type { ReactElement } from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -281,8 +281,6 @@ function differingFields(payer: HistoryEntry, shop: HistoryEntry): string[] {
 
 // 時刻だけは必ず違う: 払った側は払った端末の時計、お店の行は server が受注を受け取った時刻。
 const ONLY_TS = ['ts'];
-// 経路を決められない注文: 時刻と、経路で変わる 4 欄だけが違う (着金額・お客様・tx・明細は同じ)。
-const UNKNOWN_SPLIT_FIELDS = ['ts', 'gasMode', 'feeAmount', 'saleAmount', 'networkFeeEquivalent'];
 
 async function recoverCase(params: CheckoutParams) {
   const { vars, row: payer } = await payByRelay(params);
@@ -352,35 +350,43 @@ describe('受注から書く行は、払った側の行と欄ごとに同じ —
     expect(shop).toMatchObject({ gasMode: 'merchant', feeAmount: '0', networkFeeEquivalent: (15n * ONE).toString(), saleAmount: (1_500n * ONE).toString() });
   });
 
-  it('利用料の flag が ON・回収が 1% の build で、feeKind の無い会計の 1% の回収: 利用料 1% と見分けられないので 4 欄 null', async () => {
-    // チェーンに載る額が「モバイル注文の利用料 1%・お店が負担」と同じで、receipt からは見分けられない。
+  it.each([
+    ['200 JPYC 以上 (1% がフロアより大きい)', undefined, 15n * ONE],
+    ['ちょうど 200 JPYC (1% = フロア 2 JPYC)', [{ name: 'ブレンド', qty: 1, price: '200' }], 2n * ONE],
+    ['200 JPYC 未満 (1% がフロアより小さい)', [{ name: 'ブレンド', qty: 1, price: '150' }], (15n * ONE) / 10n],
+  ] as const)('本番の設定 (利用料の flag が ON・回収 1%) の店頭 1% (お店が負担) の注文・%s: 時刻のほかは全部同じ', async (_label, items, fee) => {
     feeFlags.enableMobileOrderFee = true;
     feeFlags.recoverFeeBps = 100;
-    const { payer, shop } = await recoverCase(mobileOrderParams({ feeKind: undefined }));
-    expect(differingFields(payer, shop)).toEqual(UNKNOWN_SPLIT_FIELDS);
-    expect(payer).toMatchObject({ gasMode: 'merchant', feeAmount: '0', saleAmount: (1_500n * ONE).toString(), networkFeeEquivalent: (15n * ONE).toString() });
-    expect(shop).toMatchObject({ gasMode: null, feeAmount: null, saleAmount: null, networkFeeEquivalent: null });
-    // 着金額・お客様・id は同じ。
-    expect(shop).toMatchObject({ merchantAmount: payer.merchantAmount, customer: payer.customer, id: payer.id });
-  });
-
-  it('利用料の flag が ON・回収が 1% の build で、店頭 1% (お店が負担) の注文: 売上が 200 JPYC 以上なら回収と見分けられないので 4 欄 null', async () => {
-    feeFlags.enableMobileOrderFee = true;
-    feeFlags.recoverFeeBps = 100;
-    const { payer, shop, split } = await recoverCase(mobileOrderParams());
-    expect(split).toEqual({ merchantValue: 1_485n * ONE, feeValue: 15n * ONE });
-    // ネットワーク手数料相当額は、払った側 (モバイル注文の利用料) も null なので同じ。
-    expect(differingFields(payer, shop)).toEqual(['ts', 'gasMode', 'feeAmount', 'saleAmount']);
-    expect(payer).toMatchObject({ gasMode: 'merchant', feeAmount: (15n * ONE).toString(), saleAmount: (1_500n * ONE).toString(), networkFeeEquivalent: null });
-    expect(shop).toMatchObject({ gasMode: null, feeAmount: null, saleAmount: null, networkFeeEquivalent: null, merchantAmount: payer.merchantAmount, customer: CUSTOMER });
-  });
-
-  it('利用料の flag が ON・回収が 1% の build で、店頭 1% の注文が 200 JPYC 未満: 1% がフロア (2 JPYC) と違うので、時刻のほかは全部同じ', async () => {
-    feeFlags.enableMobileOrderFee = true;
-    feeFlags.recoverFeeBps = 100;
-    const { payer, shop, split } = await recoverCase(mobileOrderParams({ items: [{ name: 'ブレンド', qty: 1, price: '150' }] }));
-    expect(split.feeValue).toBe(15n * ONE / 10n);
+    const { payer, shop, split } = await recoverCase(mobileOrderParams(items ? { items: [...items] } : {}));
+    expect(split.feeValue).toBe(fee);
     expect(differingFields(payer, shop)).toEqual(ONLY_TS);
+    expect(shop).toMatchObject({ gasMode: 'merchant', feeAmount: fee.toString(), networkFeeEquivalent: null });
+  });
+
+  it('利用料の flag が ON で、feeKind の無い会計の回収が利用料の式に合わない額 (フロア): 回収として、時刻のほかは全部同じ', async () => {
+    feeFlags.enableMobileOrderFee = true;
+    feeFlags.recoverFeeBps = 100;
+    const { payer, shop, split } = await recoverCase(
+      mobileOrderParams({ feeKind: undefined, items: [{ name: 'ブレンド', qty: 1, price: '150' }] }),
+    );
+    expect(split.feeValue).toBe(2n * ONE);
+    expect(differingFields(payer, shop)).toEqual(ONLY_TS);
+    expect(shop).toMatchObject({ gasMode: 'merchant', feeAmount: '0', networkFeeEquivalent: (2n * ONE).toString() });
+  });
+
+  it.each([
+    ['回収 1% の build', 100, 15n * ONE],
+    ['回収 3% の build', 300, 45n * ONE],
+  ] as const)('限界 (%s): feeKind の無い会計の回収が利用料の式にも合う額は、利用料として書く (利用料とネットワーク手数料相当額の欄だけが違う)', async (_label, bps, fee) => {
+    feeFlags.enableMobileOrderFee = true;
+    feeFlags.recoverFeeBps = bps;
+    const { payer, shop, split } = await recoverCase(mobileOrderParams({ feeKind: undefined }));
+    expect(split.feeValue).toBe(fee);
+    expect(differingFields(payer, shop)).toEqual(['ts', 'feeAmount', 'networkFeeEquivalent']);
+    expect(payer).toMatchObject({ feeAmount: '0', networkFeeEquivalent: fee.toString() });
+    expect(shop).toMatchObject({ feeAmount: fee.toString(), networkFeeEquivalent: null });
+    // 着金額・売上総額・負担者・お客様は同じ。
+    expect(shop).toMatchObject({ merchantAmount: payer.merchantAmount, saleAmount: payer.saleAmount, gasMode: payer.gasMode, customer: payer.customer });
   });
 
   it.each([

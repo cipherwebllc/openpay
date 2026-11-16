@@ -11,13 +11,17 @@
 //   - 説明の欄 (明細・メモ・管理番号・商品名) は、受注の画面に出ている注文の値をそのまま写す。
 // 行は、払った側 (CheckoutForm → usePaymentHistory) が同じ注文で書く行と、同じ id・同じ値にそろえる。
 //
-// 経路ごとの対応 (M = 着金額・F = Settled の feeValue・G = M + F)。Settled の F が式にちょうど合う経路だけを候補にする:
-//   forwarder の Settled あり (ガスレス・recover)
-//     モバイル注文の利用料・お客様が負担 (F = M の 3%)          gasMode customer / fee F / 売上 M / 網 null   (flag ON の build だけ)
-//     モバイル注文の利用料・お店が負担 (F = G の 1% か 3%)      gasMode merchant / fee F / 売上 G / 網 null   (flag ON の build だけ)
-//     ガス相当額の回収・お店が負担 (F = max(フロア, G × 率))     gasMode merchant / fee 0 / 売上 G / 網 F
-//     どれにも合わない・2 つ以上に合う                          gasMode・fee・売上・網はすべて null
-//       (回収が max(2 JPYC, 1%) の build では、店頭 1% の注文で G が 200 JPYC 以上のとき、お店負担の利用料と回収の両方に合う)
+// 経路ごとの対応 (M = 着金額・F = Settled の feeValue・G = M + F)。Settled の F が式にちょうど合うかで決める (settledSaleSplit):
+//   forwarder の Settled あり (ガスレス・recover)・利用料の flag が ON の build (利用料の式を先に見る)
+//     モバイル注文の利用料・お店が負担 (F = G の 1% か 3%)       gasMode merchant / fee F / 売上 G / 網 null
+//     モバイル注文の利用料・お客様が負担 (F = M の 3%)           gasMode customer / fee F / 売上 M / 網 null
+//     利用料の式の 2 つ以上に合う                               どの式でも同じ欄だけ (式で変わる欄は null)
+//     利用料の式に合わず、回収の式 (F = max(フロア, G × 率)) に合う  gasMode merchant / fee 0 / 売上 G / 網 F
+//     どれにも合わない                                         gasMode・fee・売上・網はすべて null
+//     (限界: feeKind の無い手作りの /checkout の URL の回収が利用料の式にも合う額は、利用料として書く。払った側は fee 0・網 F)
+//   forwarder の Settled あり・利用料の flag が OFF の build
+//     回収の式に合う                                           gasMode merchant / fee 0 / 売上 G / 網 F
+//     合わない                                                 gasMode・fee・売上・網はすべて null
 //   Settled なし・relay (forwarder の無いチェーン)               gasMode customer / fee 0 / 売上 M / 網 0
 //   Settled なし・通常決済 (unboundPayment)                      gasMode null     / 利用料の flag が OFF なら fee 0・売上 M、
 //                                                                ON なら fee・売上は null (利用料は別の tx で、この receipt に無い)
@@ -146,35 +150,53 @@ const UNKNOWN_SPLIT: OrderSaleSplit = {
   networkFeeEquivalent: null,
 };
 
+/** 経路の候補が 2 つ以上あるとき: どの候補でも同じ欄だけを残し、候補で変わる欄は null にする。 */
+function sharedSplit([first, ...rest]: readonly [OrderSaleSplit, ...OrderSaleSplit[]]): OrderSaleSplit {
+  const shared = <K extends keyof OrderSaleSplit>(key: K): OrderSaleSplit[K] | null =>
+    rest.every((s) => s[key] === first[key]) ? first[key] : null;
+  return {
+    gasMode: shared('gasMode'),
+    feeAmount: shared('feeAmount'),
+    saleAmount: shared('saleAmount'),
+    networkFeeEquivalent: shared('networkFeeEquivalent'),
+  };
+}
+
 /**
  * forwarder の Settled (着金額 amount・利用料 feeValue) から、経路で変わる欄を決める。feeValue が、払った側の式
- * (hooks/useRelayGaslessSnapshot.ts: feeKind ありはモバイル注文の利用料・無しは回収) のどれかとちょうど合う経路だけを候補にし、
- * 候補が無い・2 つ以上あるときは 4 欄とも null (推測で売上総額を作らない)。候補の 3 つは、どの 2 つも欄が違う
- * (お客様が負担とほかの 2 つは gasMode が、お店が負担の利用料と回収は feeAmount と networkFeeEquivalent が違う)。
+ * (hooks/useRelayGaslessSnapshot.ts: feeKind ありはモバイル注文の利用料・無しは回収) にちょうど合うかで経路を決める。
+ *   - 利用料の flag が ON の build: 受注フィードの注文はモバイル注文の画面を通り、画面は必ず feeKind を付ける (払った側の行は
+ *     利用料の欄に F)。よって利用料の式を先に見て、1 つでも合えば回収の式は候補にしない。利用料の式の 2 つ以上に合うとき
+ *     (事前 3% のお店が負担とお客様が負担が、1,100 wei 以下の額で重なる) は、どちらでも同じ欄だけを埋める。利用料の式に
+ *     合わず回収の式に合えば回収。どれにも合わなければ 4 欄とも null (推測で売上総額を作らない)。
+ *     限界: feeKind の無い手作りの /checkout の URL の回収が、利用料の式にも合う額 (回収 1% の build の店頭 1%・回収 3% の
+ *     build の事前 3%・額がフロアと同じ) だと、利用料として書く (払った側は利用料 0・ネットワーク手数料相当額 F)。
+ *   - 利用料の flag が OFF の build: 回収の式に合えば回収・合わなければ 4 欄とも null。
  */
 export function settledSaleSplit(amount: bigint, feeValue: bigint, chainId: number): OrderSaleSplit {
   const gross = amount + feeValue;
-  const candidates: OrderSaleSplit[] = [];
-  // モバイル注文の利用料 (lib/mobileOrderFee.ts・払う額の一律 %)。利用料の flag が OFF の build では、払った側も使わない。
-  if (env.enableMobileOrderFee) {
-    // お客様が負担 (preorder・feePayer=customer): 利用料 = 注文額 (= 着金額) の 3%。
-    if (feeValue === mobileOrderFeeValue(amount, 'preorder')) {
-      candidates.push({ gasMode: 'customer', feeAmount: feeValue, saleAmount: amount, networkFeeEquivalent: null });
-    }
-    // お店が負担 (storefront 1%・preorder 3%): 利用料 = 注文額 (= 着金額 + 利用料) の %。
-    if (
-      feeValue === mobileOrderFeeValue(gross, 'storefront') ||
-      feeValue === mobileOrderFeeValue(gross, 'preorder')
-    ) {
-      candidates.push({ gasMode: 'merchant', feeAmount: feeValue, saleAmount: gross, networkFeeEquivalent: null });
-    }
-  }
   // ガス相当額の回収 (feeKind の無い会計・利用料の flag が OFF の build)。/checkout の回収はお店の負担に固定
   // (lib/paymentMoney.ts の effectiveGasMode)。払った側はネットワーク手数料相当額の欄に入れ、利用料は 0。
-  if (feeValue === recoverFeeValue(gross, 'merchant', chainId)) {
-    candidates.push({ gasMode: 'merchant', feeAmount: 0n, saleAmount: gross, networkFeeEquivalent: feeValue });
+  const recover: OrderSaleSplit | null =
+    feeValue === recoverFeeValue(gross, 'merchant', chainId)
+      ? { gasMode: 'merchant', feeAmount: 0n, saleAmount: gross, networkFeeEquivalent: feeValue }
+      : null;
+  if (!env.enableMobileOrderFee) return recover ?? UNKNOWN_SPLIT;
+  // モバイル注文の利用料 (lib/mobileOrderFee.ts・払う額の一律 %)。
+  const mobile: OrderSaleSplit[] = [];
+  // お店が負担 (storefront 1%・preorder 3%): 利用料 = 注文額 (= 着金額 + 利用料) の %。
+  for (const kind of ['storefront', 'preorder'] as const) {
+    if (feeValue === mobileOrderFeeValue(gross, kind)) {
+      mobile.push({ gasMode: 'merchant', feeAmount: feeValue, saleAmount: gross, networkFeeEquivalent: null });
+    }
   }
-  return candidates.length === 1 ? candidates[0] : UNKNOWN_SPLIT;
+  // お客様が負担 (preorder・feePayer=customer): 利用料 = 注文額 (= 着金額) の 3%。
+  if (feeValue === mobileOrderFeeValue(amount, 'preorder')) {
+    mobile.push({ gasMode: 'customer', feeAmount: feeValue, saleAmount: amount, networkFeeEquivalent: null });
+  }
+  const [first, ...rest] = mobile;
+  if (first) return sharedSplit([first, ...rest]);
+  return recover ?? UNKNOWN_SPLIT;
 }
 
 type SaleMoney = OrderSaleSplit & { customer: Address | null; blockNumber: bigint | null };

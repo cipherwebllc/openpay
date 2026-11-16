@@ -276,67 +276,90 @@ describe('buildOrderSaleEntry — 注文の形の端', () => {
   });
 });
 
-describe('settledSaleSplit — Settled の利用料が式にちょうど合う経路だけで欄を埋める', () => {
+describe('settledSaleSplit — Settled の利用料が式にちょうど合う経路で欄を埋める', () => {
   const M = (n: bigint) => n * ONE;
   const UNKNOWN = { gasMode: null, feeAmount: null, saleAmount: null, networkFeeEquivalent: null };
+  const storefront = (amount: bigint, fee: bigint) => ({ gasMode: 'merchant', feeAmount: fee, saleAmount: amount + fee, networkFeeEquivalent: null });
+  const customerPays = (amount: bigint, fee: bigint) => ({ gasMode: 'customer', feeAmount: fee, saleAmount: amount, networkFeeEquivalent: null });
+  const recovered = (amount: bigint, fee: bigint) => ({ gasMode: 'merchant', feeAmount: 0n, saleAmount: amount + fee, networkFeeEquivalent: fee });
 
   it('モバイル注文の利用料・お店が負担 (店頭 1%・事前 3%): 利用料の欄・売上 = 着金額 + 利用料', () => {
-    // 店頭 1%: 1,500 → 15 (回収はフロア 2 なので合わない)。
-    expect(settledSaleSplit(M(1_485n), M(15n), JPYC.chainId)).toEqual({ gasMode: 'merchant', feeAmount: M(15n), saleAmount: M(1_500n), networkFeeEquivalent: null });
+    // 店頭 1%: 1,500 → 15。
+    expect(settledSaleSplit(M(1_485n), M(15n), JPYC.chainId)).toEqual(storefront(M(1_485n), M(15n)));
     // 事前 3%・お店が負担: 1,500 → 45。
-    expect(settledSaleSplit(M(1_455n), M(45n), JPYC.chainId)).toEqual({ gasMode: 'merchant', feeAmount: M(45n), saleAmount: M(1_500n), networkFeeEquivalent: null });
+    expect(settledSaleSplit(M(1_455n), M(45n), JPYC.chainId)).toEqual(storefront(M(1_455n), M(45n)));
   });
 
   it('モバイル注文の利用料・お客様が負担 (事前 3%): 利用料の欄・売上 = 着金額', () => {
-    expect(settledSaleSplit(M(1_500n), M(45n), JPYC.chainId)).toEqual({ gasMode: 'customer', feeAmount: M(45n), saleAmount: M(1_500n), networkFeeEquivalent: null });
+    expect(settledSaleSplit(M(1_500n), M(45n), JPYC.chainId)).toEqual(customerPays(M(1_500n), M(45n)));
   });
 
-  it('回収 (フロア): ネットワーク手数料相当額の欄・利用料 0・売上 = 着金額 + 回収額', () => {
-    expect(settledSaleSplit(M(1_498n), M(2n), JPYC.chainId)).toEqual({ gasMode: 'merchant', feeAmount: 0n, saleAmount: M(1_500n), networkFeeEquivalent: M(2n) });
+  it('利用料の flag が ON で、利用料の式に合わず回収の式 (フロア) に合う額: 回収 (ネットワーク手数料相当額の欄・利用料 0)', () => {
+    expect(settledSaleSplit(M(1_498n), M(2n), JPYC.chainId)).toEqual(recovered(M(1_498n), M(2n)));
   });
 
-  it('どの式にも合わない額は、4 欄とも null (推測で売上総額を作らない)', () => {
+  it('利用料の flag が ON で、どの式にも合わない額は、4 欄とも null (推測で売上総額を作らない)', () => {
     expect(settledSaleSplit(M(990n), M(7n), JPYC.chainId)).toEqual(UNKNOWN);
     // 1 wei ずれた利用料も合わない。
     expect(settledSaleSplit(M(1_485n), M(15n) + 1n, JPYC.chainId)).toEqual(UNKNOWN);
   });
 
-  it('回収が 1% の build: 店頭 1% の注文で売上が 200 JPYC 以上なら、利用料と回収の両方に合うので 4 欄とも null', () => {
+  it('本番の設定 (利用料の flag が ON・回収 1%): 店頭 1% の注文は、売上が 200 JPYC 未満・ちょうど・以上のどれでも利用料 (お店が負担)', () => {
     feeFlags.recoverFeeBps = 100;
-    // 1,500 の 1% = 15 = max(2, 15)。払った側は、店頭の注文なら利用料の欄・feeKind の無い会計なら網の欄に入れる。
-    expect(settledSaleSplit(M(1_485n), M(15n), JPYC.chainId)).toEqual(UNKNOWN);
-    // ちょうど 200 (1% = 2 = フロア) も両方に合う。
-    expect(settledSaleSplit(M(198n), M(2n), JPYC.chainId)).toEqual(UNKNOWN);
-    // 200 未満は 1% (1.99) がフロア (2) と違うので、店頭 1% だけに合う。
-    expect(settledSaleSplit(M(197n) + ONE / 100n, M(1n) + (ONE * 99n) / 100n, JPYC.chainId)).toMatchObject({ gasMode: 'merchant', feeAmount: M(1n) + (ONE * 99n) / 100n, networkFeeEquivalent: null });
-    // 事前 3% (お店が負担・お客様が負担) は 1% の回収と額が違うので、そのまま埋める。
-    expect(settledSaleSplit(M(1_455n), M(45n), JPYC.chainId)).toMatchObject({ gasMode: 'merchant', feeAmount: M(45n) });
-    expect(settledSaleSplit(M(1_500n), M(45n), JPYC.chainId)).toMatchObject({ gasMode: 'customer', feeAmount: M(45n) });
+    // 200 以上: 1,500 の 1% = 15 = max(2, 15) で回収の式にも合うが、利用料の式を先に見る。
+    expect(settledSaleSplit(M(1_485n), M(15n), JPYC.chainId)).toEqual(storefront(M(1_485n), M(15n)));
+    // ちょうど 200: 1% = 2 = フロア。
+    expect(settledSaleSplit(M(198n), M(2n), JPYC.chainId)).toEqual(storefront(M(198n), M(2n)));
+    // 200 未満: 199 の 1% = 1.99 (フロア 2 と違う)。
+    const fee199 = M(1n) + (ONE * 99n) / 100n;
+    expect(settledSaleSplit(M(199n) - fee199, fee199, JPYC.chainId)).toEqual(storefront(M(199n) - fee199, fee199));
+    // 事前 3% (お店が負担・お客様が負担) も利用料のまま。
+    expect(settledSaleSplit(M(1_455n), M(45n), JPYC.chainId)).toEqual(storefront(M(1_455n), M(45n)));
+    expect(settledSaleSplit(M(1_500n), M(45n), JPYC.chainId)).toEqual(customerPays(M(1_500n), M(45n)));
+    // 利用料の式に合わない回収: 150 の回収はフロアの 2 (1% は 1.5・3% は 4.5 と 4.44)。
+    expect(settledSaleSplit(M(148n), M(2n), JPYC.chainId)).toEqual(recovered(M(148n), M(2n)));
   });
 
-  it('回収が 3% の build (feeKind の無い 3% の回収): 事前 3%・お店が負担と両方に合うので 4 欄とも null', () => {
+  it('利用料の額がフロア (2 JPYC) と同じ注文: お客様が負担の 3% で利用料が 2 になる着金額も、利用料として埋める', () => {
+    // floor(M × 3%) = 2 JPYC になる最小の着金額 (約 66.67 JPYC)。回収 (フロア 2) の式にも合う。
+    const amount = (2n * ONE * 100n + 2n) / 3n;
+    expect((amount * 300n) / 10_000n).toBe(M(2n));
+    expect(settledSaleSplit(amount, M(2n), JPYC.chainId)).toEqual(customerPays(amount, M(2n)));
+    // 1 wei 少ない着金額は 3% が 2 JPYC に届かないので、回収だけに合う。
+    expect(settledSaleSplit(amount - 1n, M(2n), JPYC.chainId)).toEqual(recovered(amount - 1n, M(2n)));
+  });
+
+  it('回収が 3% の build でも、事前 3%・お店が負担の注文は利用料として埋める (feeKind の無い 3% の回収も利用料になる限界)', () => {
     feeFlags.recoverFeeBps = 300;
-    expect(settledSaleSplit(M(1_455n), M(45n), JPYC.chainId)).toEqual(UNKNOWN);
+    expect(settledSaleSplit(M(1_455n), M(45n), JPYC.chainId)).toEqual(storefront(M(1_455n), M(45n)));
   });
 
-  it('利用料の flag が OFF の build: モバイル注文の利用料の式は候補にしない (回収の式だけ)', () => {
+  it('利用料の式の 2 つ以上に合う額 (事前 3% のお店が負担とお客様が負担・1,100 wei 以下だけ): どちらでも同じ欄だけを埋める', () => {
+    // 着金額 34 wei・利用料 1 wei: floor(35 × 3%) = 1 (お店が負担) と floor(34 × 3%) = 1 (お客様が負担) の両方に合う。
+    // 負担者と売上総額は式で変わるので null・利用料とネットワーク手数料相当額 (どちらも null) はそのまま。
+    expect(settledSaleSplit(34n, 1n, JPYC.chainId)).toEqual({ gasMode: null, feeAmount: 1n, saleAmount: null, networkFeeEquivalent: null });
+    // 着金額 1,100 wei・利用料 33 wei も両方に合う。
+    expect(settledSaleSplit(1_100n, 33n, JPYC.chainId)).toEqual({ gasMode: null, feeAmount: 33n, saleAmount: null, networkFeeEquivalent: null });
+  });
+
+  it('利用料の flag が OFF の build: 回収の式に合えば回収・合わなければ 4 欄とも null', () => {
     feeFlags.enableMobileOrderFee = false;
+    expect(settledSaleSplit(M(1_498n), M(2n), JPYC.chainId)).toEqual(recovered(M(1_498n), M(2n)));
     // 店頭 1% の額は、回収 (フロア 2) に合わない = null。
     expect(settledSaleSplit(M(1_485n), M(15n), JPYC.chainId)).toEqual(UNKNOWN);
-    // 回収が 1% の build では、同じ額が回収だけに合う。
+    // 回収が 1% の build では、同じ額が回収に合う。
     feeFlags.recoverFeeBps = 100;
-    expect(settledSaleSplit(M(1_485n), M(15n), JPYC.chainId)).toEqual({ gasMode: 'merchant', feeAmount: 0n, saleAmount: M(1_500n), networkFeeEquivalent: M(15n) });
+    expect(settledSaleSplit(M(1_485n), M(15n), JPYC.chainId)).toEqual(recovered(M(1_485n), M(15n)));
   });
 
-  it('行に写すと: 4 欄は null・着金額・お客様・tx は入る', () => {
-    feeFlags.recoverFeeBps = 100;
+  it('行に写すと: どの式にも合わない注文は 4 欄が null・着金額・お客様・tx は入る', () => {
     const entry = buildOrderSaleEntry(
-      order({ amount: M(1_485n).toString() }),
+      order({ amount: M(990n).toString() }),
       MERCHANT,
-      { kind: 'settled', customer: CUSTOMER, feeValue: M(15n), blockNumber: 777n },
+      { kind: 'settled', customer: CUSTOMER, feeValue: M(7n), blockNumber: 777n },
     )!;
     expect(entry).toMatchObject({
-      id: `batch-${TX}`, flow: 'batch', payMode: 'gasless', merchantAmount: M(1_485n).toString(), customer: CUSTOMER,
+      id: `batch-${TX}`, flow: 'batch', payMode: 'gasless', merchantAmount: M(990n).toString(), customer: CUSTOMER,
       gasMode: null, feeAmount: null, saleAmount: null, networkFeeEquivalent: null, blockNumber: null,
     });
   });
