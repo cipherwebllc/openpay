@@ -25,10 +25,10 @@ const MARK = Math.round(QR_SIZE * QR_CENTER_MARK_RATIO);
 const PAY_URL =
   'https://open-pay.jp/pay?to=0x428483fba62edcef1e3a100d3799f6d71759c560&token=jpyc&gas=merchant&amount=12345';
 
-function markup(level: 'L' | 'M' | 'Q' | 'H' = QR_LEVEL, markSize = MARK): string {
+function markup(level: 'L' | 'M' | 'Q' | 'H' = QR_LEVEL, markSize = MARK, value = PAY_URL): string {
   return renderToStaticMarkup(
     <QRCodeSVG
-      value={PAY_URL}
+      value={value}
       size={QR_SIZE}
       includeMargin
       level={level}
@@ -87,5 +87,37 @@ describe('決済 QR の読み取り可能性 (中央マーク付き)', () => {
 
   it('マークは data URI である (外部参照は PNG 保存でロゴが欠落する)', () => {
     expect(QR_CENTER_MARK.startsWith('data:image/')).toBe(true);
+  });
+});
+
+// 会計ごとの印 (bill key・`&bk=` + 22 字) は、画面に表示中の JPYC・回収の QR にだけ載る (hooks/useQrBillKey.ts)。
+// URL が 26 字長くなり、QR のマスが増える (1 マスが細る)。どこまで読めるかを、bill key なしの QR と同じ条件で固定する。
+describe('会計ごとの印 (bill key) つきの決済 QR の読み取り', () => {
+  const BILL_KEY_URL = `${PAY_URL}&bk=Zm9vYmFyYmF6cXV4MTIzNA`;
+  // 余白 (includeMargin = 4 マスずつ) を除いた、QR の 1 辺のマスの数。
+  const modules = (svg: string) => Number(/viewBox="0 0 (\d+) \d+"/.exec(svg)![1]) - 8;
+  const withKey = () => markup(QR_LEVEL, MARK, BILL_KEY_URL);
+
+  it('1 辺のマスは 49 → 57 に増える (version 8 → 10・画面の QR だけ。印刷・保存の QR は 49 のまま)', () => {
+    expect(PAY_URL).toHaveLength(106);
+    expect(BILL_KEY_URL).toHaveLength(132);
+    expect(modules(markup())).toBe(49);
+    expect(modules(withKey())).toBe(57);
+  });
+
+  it('鮮明な描画と、縮小 + ぼかし (240px まで) ではデコードできる', async () => {
+    expect(await decode(withKey(), QR_SIZE)).toBe(BILL_KEY_URL);
+    expect(await decode(withKey(), QR_SIZE * 3)).toBe(BILL_KEY_URL);
+    expect(await decode(withKey(), QR_SIZE, 1.5)).toBe(BILL_KEY_URL);
+    expect(await decode(withKey(), 240, 1.2)).toBe(BILL_KEY_URL);
+  });
+
+  // 既知の限界: いちばん厳しい条件 (170px + ぼかし) では、bill key つきの QR は読めない (bill key なしは読める)。
+  // マスの数は、上の「level を H に上げた QR」(読めない) と同じ 57。実機の読み取りは、この条件より楽なことも厳しいことも
+  // あるので、実機で確かめる。bill key を短くする・URL を短くするなどでこの条件を通せるようになったら、期待を直す。
+  it('170px + ぼかしでは読めない (bill key なしの QR は読める = マスが細った分の差)', async () => {
+    expect(await decode(markup(), 170, 1.0)).toBe(PAY_URL);
+    expect(await decode(withKey(), 170, 1.0)).toBeNull();
+    expect(modules(markup('H'))).toBe(modules(withKey()));
   });
 });

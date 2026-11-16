@@ -15,6 +15,7 @@ import { MiniHistoryRecent } from '@/components/MiniHistoryRecent';
 import { QrGenerator } from '@/components/QrGenerator';
 import { OrdersTabBadge } from '@/components/OrdersTabBadge';
 import { StoreDeviceProvider, useStoreDeviceMode } from '@/components/StoreDeviceProvider';
+import { useQrSaleWatchScope } from '@/hooks/useQrBillKey';
 import { env } from '@/lib/env';
 import type { Locale } from '@/i18n';
 import { getExchangeLink } from '@/lib/links';
@@ -95,6 +96,8 @@ function CreatePageBody() {
   const t = useTranslations('Create');
   const locale = useLocale() as Locale;
   const storeDevice = useStoreDeviceMode();
+  // QR の会計の入金の見張り (決済QR・レジが出した QR) は、タブを切り替えても続け、このページを離れたら止める。
+  useQrSaleWatchScope();
   // お店の端末が支払いを送っている・結果を待っている間はタブを切り替えさせない (別のタブで通常の QR を出して
   // 同じ会計を二重に払わせない)。署名を待っている・閉じた QR の締め切りを待っている受け渡しは、移る前に締め切る
   // (署名が入っていたら端末が送るので移らない)。

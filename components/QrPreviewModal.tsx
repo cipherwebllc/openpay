@@ -7,8 +7,10 @@
 //
 // 状態は持たず props で受ける (labels-as-props)。印刷はポスター部に print: クラスを
 // 持たせ、モーダルの chrome (header / ボタン) は print:hidden で隠す。
+// 自分で持つ状態は 1 つだけ: 画面の QR にだけ描く値 (screenQrValue) があるとき、印刷・保存のあいだ qrValue で描き直す印。
 
-import { useRef, type ReactNode, type RefObject } from 'react';
+import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { flushSync } from 'react-dom';
 import { QRCodeSVG } from 'qrcode.react';
 import { ChevronDown, CircleCheck, Eye, Printer, ScanLine, X } from 'lucide-react';
 import NextImage from 'next/image';
@@ -89,6 +91,7 @@ export function QrPreviewModal({
   onClose,
   labels,
   qrValue,
+  screenQrValue,
   qrRef,
   storeName,
   amountText,
@@ -113,6 +116,11 @@ export function QrPreviewModal({
   onClose: () => void;
   labels: QrPreviewModalLabels;
   qrValue: string;
+  /**
+   * 画面の QR にだけ描く値 (qrValue に会計ごとの印 = bill key を足した URL・hooks/useQrBillKey.ts)。省略時は qrValue を描く。
+   * 画面の外へ出るもの (リンクの表示・印刷・SVG / PNG の保存) は qrValue のまま。
+   */
+  screenQrValue?: string;
   qrRef: RefObject<HTMLDivElement | null>;
   storeName: string;
   amountText: string;
@@ -139,6 +147,45 @@ export function QrPreviewModal({
   const dialogRef = useRef<HTMLDivElement>(null);
   // 開いたら dialog へ focus・Tab は中だけ・Escape で閉じる・閉じたら元の要素へ戻す。
   useModalFocus(dialogRef, { open, onEscape: onClose });
+
+  // 印刷・保存は画面の QR の <svg> をそのまま使うので、そのあいだだけ画面の QR を qrValue (bill key なし) で描く。
+  // 「どの screenQrValue の間か」で持つ (QR を出し直したら、新しい bill key の QR に戻る)。
+  const [plainFor, setPlainFor] = useState<string | null>(null);
+  const shownQrValue = screenQrValue !== undefined && plainFor !== screenQrValue ? screenQrValue : qrValue;
+  // ブラウザのメニュー・ショートカットからの印刷も同じにする (印刷の前に描き直し、終わったら戻す)。
+  useEffect(() => {
+    if (!open || screenQrValue === undefined) return;
+    const before = () => flushSync(() => setPlainFor(screenQrValue));
+    const after = () => setPlainFor(null);
+    window.addEventListener('beforeprint', before);
+    window.addEventListener('afterprint', after);
+    return () => {
+      window.removeEventListener('beforeprint', before);
+      window.removeEventListener('afterprint', after);
+    };
+  }, [open, screenQrValue]);
+  // 保存: 描き直してから <svg> を読ませ、すぐ戻す (同じ操作の中なので、画面には bill key なしの QR は出ない)。
+  const savePlain = (save: (() => void) | undefined) =>
+    save && screenQrValue !== undefined
+      ? () => {
+          flushSync(() => setPlainFor(screenQrValue));
+          try {
+            save();
+          } finally {
+            setPlainFor(null);
+          }
+        }
+      : save;
+  // 印刷: 描き直してから印刷を始める。戻すのは印刷が終わったとき (上の afterprint)。
+  const printPlain =
+    onPrint && screenQrValue !== undefined
+      ? () => {
+          flushSync(() => setPlainFor(screenQrValue));
+          onPrint();
+        }
+      : onPrint;
+  const saveSvg = savePlain(onDownloadSvg);
+  const savePng = savePlain(onDownloadPng);
 
   if (!open) return null;
 
@@ -248,7 +295,7 @@ export function QrPreviewModal({
                   訂正能力より 1 マスの大きさが効く、という QR の性質に従う。
                   マークは data URI (lib/qrCenterMark) — 外部参照だと PNG 保存で消える。 */}
               <QRCodeSVG
-                value={qrValue}
+                value={shownQrValue}
                 size={QR_SIZE}
                 includeMargin
                 level="Q"
@@ -349,10 +396,10 @@ export function QrPreviewModal({
 
         {/* 操作ボタン (印刷では隠す)。Print が primary CTA、他は outline。 */}
         <div className="mt-4 flex flex-wrap justify-center gap-2 print:hidden">
-          {onPrint && labels.print && (
+          {printPlain && labels.print && (
             <button
               type="button"
-              onClick={onPrint}
+              onClick={printPlain}
               disabled={convertExpired}
               className={`inline-flex min-h-11 items-center gap-1.5 rounded-lg bg-brand px-4 text-sm font-semibold text-white hover:bg-brand-dark${convertExpired ? ' cursor-not-allowed opacity-50' : ''}`}
             >
@@ -370,20 +417,20 @@ export function QrPreviewModal({
               {copied ? labels.copied : labels.copy}
             </button>
           )}
-          {onDownloadSvg && labels.downloadSvg && (
+          {saveSvg && labels.downloadSvg && (
             <button
               type="button"
-              onClick={onDownloadSvg}
+              onClick={saveSvg}
               disabled={convertExpired}
               className={`min-h-11 rounded-lg border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-700 hover:border-brand hover:text-brand-dark${convertExpired ? ' cursor-not-allowed opacity-50' : ''}`}
             >
               {labels.downloadSvg}
             </button>
           )}
-          {onDownloadPng && labels.downloadPng && (
+          {savePng && labels.downloadPng && (
             <button
               type="button"
-              onClick={onDownloadPng}
+              onClick={savePng}
               disabled={convertExpired}
               className={`min-h-11 rounded-lg border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-700 hover:border-brand hover:text-brand-dark${convertExpired ? ' cursor-not-allowed opacity-50' : ''}`}
             >

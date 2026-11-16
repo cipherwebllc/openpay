@@ -34,6 +34,7 @@ export function PaymentQrModal({
   converted,
   storeQr,
   payUrl,
+  screenPayUrl,
   amountLabelText,
   tokenChainLabelText,
   qrRef,
@@ -67,6 +68,11 @@ export function PaymentQrModal({
   /** 出しているお店負担の QR (店員が通常の QR を選んだとき・出していないときは null)。 */
   storeQr: { url: string; amountText: string } | null;
   payUrl: string;
+  /**
+   * 画面の QR にだけ描く URL (payUrl に会計ごとの印を足したもの・hooks/useQrBillKey.ts)。載せない QR と、お店負担の QR を
+   * 出している間は undefined (親が、通常の QR を表示している間だけ渡す)。
+   */
+  screenPayUrl: string | undefined;
   amountLabelText: string;
   tokenChainLabelText: string;
   qrRef: RefObject<HTMLDivElement | null>;
@@ -117,6 +123,7 @@ export function PaymentQrModal({
         step3: t('posterStepDone'),
       }}
       qrValue={storeQr ? storeQr.url : payUrl}
+      {...(screenPayUrl !== undefined ? { screenQrValue: screenPayUrl } : {})}
       qrRef={qrRef}
       storeName={settings.storeName.trim() || t('posterDefaultStoreName')}
       amountText={storeQr ? storeQr.amountText : amountLabelText}

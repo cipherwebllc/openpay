@@ -68,6 +68,7 @@ import { recoverFeeValue } from '@/lib/relay/recoverFee';
 import { resolveJpycGaslessProvider } from '@/lib/jpycGaslessProvider';
 import { pickEffectiveAddress } from '@/lib/format';
 import { useIncomingPaymentWatch } from '@/hooks/useIncomingPaymentWatch';
+import { useQrBillKey } from '@/hooks/useQrBillKey';
 import { useStoreDeviceMode } from '@/components/StoreDeviceProvider';
 import { env } from '@/lib/env';
 import {
@@ -787,6 +788,16 @@ export function QrGenerator() {
     setQrModalOpen(true);
   }
   const storeQrShown = storeQr !== null && !forceNormalQr;
+  // 会計ごとの印 (bill key) を、画面に表示中の通常の QR にだけ載せる: JPYC の回収 (forwarder のあるチェーンのガスレス) で
+  // 金額のある QR。お店負担の QR・金額なし・通常決済・USDC・forwarder の無いチェーンには載せない。URL のコピー・印刷・保存・
+  // 互換 QR・前回の受け取り QR は payUrl のまま (hooks/useQrBillKey.ts)。入金は、お店の端末がチェーンで確かめて取引履歴に書く。
+  const screenPayUrl = useQrBillKey({
+    kind: 'pay',
+    url: isJpycRecover && mode === 'amount' ? payUrl : '',
+    shown: qrModalOpen && qrShowable && !storeQrShown,
+    // 値引きの行の名前 (商品名も店名も無いとき)。払う側の画面 (PaymentForm の discountItemName) と同じ言葉。
+    itemName: t('storeDevice.itemName'),
+  });
   // お店負担を選んでいて、店員が通常の QR に切り替えた (出ている QR は回収・利用料は店舗負担)。RecoverFeeNotice は
   // 回収でない QR (USDC 等) では何も出さない。
   const normalQrFeeShown = storeRequested && forceNormalQr && recoverBillAmount !== null;
@@ -978,6 +989,7 @@ export function QrGenerator() {
           converted={!!convert}
           storeQr={storeQrShown ? storeQr : null}
           payUrl={payUrl}
+          screenPayUrl={screenPayUrl}
           amountLabelText={amountLabelText}
           tokenChainLabelText={tokenChainLabelText}
           qrRef={qrRef}
