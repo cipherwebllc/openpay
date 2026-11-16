@@ -112,7 +112,7 @@ const ORIGIN = 'https://shop.test';
 // お店の受取先 = 払う人 (払った側が本物の行を書く会計)。
 const SHOP: Address = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 const OTHER_CUSTOMER: Address = '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045';
-const BK = 'Zm9vYmFyYmF6cXV4MTIzNA';
+const BK = 'Zm9vYmFyYmE';
 // relay の応答の txHash (tests/_helpers/relayAttemptCapture.ts の既定)。
 const TX = `0x${'b'.repeat(64)}`;
 // 署名から取り込みまでの秒 (block の時刻 = 署名の時刻 + これ)。

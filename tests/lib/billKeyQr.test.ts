@@ -15,12 +15,12 @@ afterEach(() => {
 });
 
 describe('newBillKey', () => {
-  it('128 bit の乱数 (crypto.getRandomValues に 16 byte) を、base64url の 22 字にする', () => {
+  it('64 bit の乱数 (crypto.getRandomValues に 8 byte) を、base64url の 11 字にする', () => {
     const random = vi.spyOn(globalThis.crypto, 'getRandomValues');
     const billKey = newBillKey();
-    expect(billKey).toMatch(/^[A-Za-z0-9_-]{22}$/);
+    expect(billKey).toMatch(/^[A-Za-z0-9_-]{11}$/);
     expect(random).toHaveBeenCalledTimes(1);
-    expect((random.mock.calls[0][0] as Uint8Array).byteLength).toBe(16);
+    expect((random.mock.calls[0][0] as Uint8Array).byteLength).toBe(8);
   });
 
   it('乱数の byte をそのまま写す (+ / は - _ に・padding なし)', () => {
@@ -29,29 +29,53 @@ describe('newBillKey', () => {
         if (array) new Uint8Array(array.buffer, array.byteOffset, array.byteLength).set(bytes);
         return array;
       });
-    fill(new Array(16).fill(0));
-    expect(newBillKey()).toBe('AAAAAAAAAAAAAAAAAAAAAA');
+    fill(new Array(8).fill(0));
+    expect(newBillKey()).toBe('AAAAAAAAAAA');
+    vi.restoreAllMocks();
+    // "foobarba" の 8 byte (tests/lib/billKeySalt.test.ts の golden vector の bill key)。
+    fill([...Buffer.from('foobarba')]);
+    expect(newBillKey()).toBe('Zm9vYmFyYmE');
     vi.restoreAllMocks();
     // 0xfb 0xff … は base64 で + と / を含む並び (base64url では - と _)。
-    fill([0xfb, 0xff, 0xbf, 0xfb, 0xff, 0xbf, 0xfb, 0xff, 0xbf, 0xfb, 0xff, 0xbf, 0xfb, 0xff, 0xbf, 0xff]);
+    const bytes = [0xfb, 0xff, 0xbf, 0xfb, 0xff, 0xbf, 0xfb, 0xff];
+    fill(bytes);
     const billKey = newBillKey();
-    expect(billKey).toBe(Buffer.from([0xfb, 0xff, 0xbf, 0xfb, 0xff, 0xbf, 0xfb, 0xff, 0xbf, 0xfb, 0xff, 0xbf, 0xfb, 0xff, 0xbf, 0xff]).toString('base64url'));
+    expect(billKey).toBe(Buffer.from(bytes).toString('base64url'));
+    expect(billKey).toBe('-_-_-_-_-_8');
     expect(billKey).toMatch(/[-_]/);
     expect(billKey).not.toMatch(/[+/=]/);
+  });
+
+  it('11 字目は、余りの 2 bit が 0 の 16 通りの字だけ (8 byte = 64 bit を 11 字 = 66 bit に入れた余り)', () => {
+    const last = new Set<string>();
+    for (let byte = 0; byte < 256; byte += 1) {
+      vi.spyOn(globalThis.crypto, 'getRandomValues').mockImplementation(<T extends ArrayBufferView | null>(array: T): T => {
+        if (array) new Uint8Array(array.buffer, array.byteOffset, array.byteLength).fill(byte);
+        return array;
+      });
+      const billKey = newBillKey();
+      vi.restoreAllMocks();
+      expect(billKey).toHaveLength(11);
+      expect(billKeySalt(billKey)).not.toBeNull();
+      // 作った 11 字を 8 byte に戻すと、元の乱数と同じ (乱数の 64 bit を落としていない)。
+      expect([...Buffer.from(billKey, 'base64url')]).toEqual(new Array(8).fill(byte));
+      last.add(billKey[10]);
+    }
+    expect([...last].sort()).toEqual([...'AEIMQUYcgkosw048'].sort());
   });
 
   it('呼ぶたびに違う値で、どれも払う側が受ける形 (billKeySalt が null を返さない)', () => {
     const keys = Array.from({ length: 200 }, () => newBillKey());
     expect(new Set(keys).size).toBe(200);
     for (const billKey of keys) {
-      expect(billKey).toHaveLength(22);
+      expect(billKey).toHaveLength(11);
       expect(billKeySalt(billKey)).toMatch(/^0x[0-9a-f]{64}$/);
     }
   });
 });
 
 describe('withBillKey', () => {
-  const BK = 'Zm9vYmFyYmF6cXV4MTIzNA';
+  const BK = 'Zm9vYmFyYmE';
 
   it('元の URL の末尾に &bk=<bill key> を足す。元の param は 1 字も変えない', () => {
     const pay = buildPayUrl('https://shop.test', {

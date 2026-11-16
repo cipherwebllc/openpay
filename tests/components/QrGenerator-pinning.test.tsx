@@ -130,7 +130,7 @@ vi.mock('@/hooks/useIncomingPaymentWatch', async (importOriginal) => {
 // (QR の値と同じでなくなるので、'=qr' ではなく URL をそのまま書く)。
 vi.mock('@/lib/url/billKeyQr', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/url/billKeyQr')>()),
-  newBillKey: () => 'PinnedBillKey_0123-abc',
+  newBillKey: () => 'PinnedKey_0',
 }));
 // QR に渡す値をそのまま読む (描画は本物の qrcode.react・値は data 属性に写すだけ = DOM の hash では外す)。
 vi.mock('qrcode.react', async (importOriginal) => {
@@ -909,7 +909,7 @@ describe('QrGenerator の pin (生成物の完全一致は採り直さない・D
           ts: 1790208000800,
         },
         printed: 1,
-        qr: 'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&gas=merchant&amount=500&bk=PinnedBillKey_0123-abc',
+        qr: 'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&gas=merchant&amount=500&bk=PinnedKey_0',
         shownEip681: null,
         shownUrl: 'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&gas=merchant&amount=500',
         watch: {
@@ -936,7 +936,7 @@ describe('QrGenerator の pin (生成物の完全一致は採り直さない・D
           ts: 1790208000880,
         },
         printed: 1,
-        qr: 'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&gas=merchant&amount=3&bk=PinnedBillKey_0123-abc',
+        qr: 'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&gas=merchant&amount=3&bk=PinnedKey_0',
         shownEip681: null,
         shownUrl: 'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&gas=merchant&amount=3',
         watch: {
@@ -1030,7 +1030,7 @@ describe('QrGenerator の pin (生成物の完全一致は採り直さない・D
           ts: 1790208000060,
         },
         printed: 1,
-        qr: 'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&gas=merchant&amount=2&bk=PinnedBillKey_0123-abc',
+        qr: 'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&gas=merchant&amount=2&bk=PinnedKey_0',
         shownEip681: null,
         shownUrl: 'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&gas=merchant&amount=2',
         watch: {
@@ -1057,7 +1057,7 @@ describe('QrGenerator の pin (生成物の完全一致は採り直さない・D
           ts: 1790208000140,
         },
         printed: 1,
-        qr: 'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&gas=merchant&amount=1&bk=PinnedBillKey_0123-abc',
+        qr: 'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&gas=merchant&amount=1&bk=PinnedKey_0',
         shownEip681: null,
         shownUrl: 'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&gas=merchant&amount=1',
         watch: {
@@ -2033,7 +2033,7 @@ describe('QrGenerator の pin (生成物の完全一致は採り直さない・D
           ts: 1790208000320,
         },
         printed: 1,
-        qr: 'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&gas=merchant&amount=800&bk=PinnedBillKey_0123-abc',
+        qr: 'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&gas=merchant&amount=800&bk=PinnedKey_0',
         releaseForNormal: 1,
         shownEip681: null,
         shownUrl: 'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&gas=merchant&amount=800',

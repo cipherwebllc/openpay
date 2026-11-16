@@ -44,7 +44,7 @@ const hold = vi.hoisted(() => ({
 // 決まった値にする。載るのは、JPYC の回収 (中継が有効・forwarder あり・ガス代不要) の通常の QR の、画面の QR だけ。
 vi.mock('@/lib/url/billKeyQr', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/url/billKeyQr')>()),
-  newBillKey: () => 'PinnedBillKey_0123-abc',
+  newBillKey: () => 'PinnedKey_0',
 }));
 // QR の中身 (URL) を読む。お店負担の QR は URL を画面に出さないので、どの QR も同じ取り方にする。
 vi.mock('qrcode.react', () => ({
@@ -106,7 +106,7 @@ const VALID = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 const FORWARDER = '0x752B7AaD0089286EB7b553d84D05233d80c9FCB4';
 const HS = 'AbCdEfGhIjKlMnOpQrStUv';
 // 上の mock が返す bill key。
-const BK = 'PinnedBillKey_0123-abc';
+const BK = 'PinnedKey_0';
 const QR_KEY = 'openpay:qr-settings:v2';
 const PRESETS_KEY = 'openpay:product-presets:v1';
 const JPYC = 10n ** 18n;

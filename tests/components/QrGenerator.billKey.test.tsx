@@ -169,7 +169,7 @@ const SETTINGS_KEY = 'openpay:qr-settings:v2';
 const LAST_QR_KEY = 'openpay:lastQr:v1';
 const NOW = Date.parse('2026-11-17T03:00:00.000Z');
 const ONE = 10n ** 18n;
-const BK_SUFFIX = /&bk=([A-Za-z0-9_-]{22})$/;
+const BK_SUFFIX = /&bk=([A-Za-z0-9_-]{11})$/;
 
 function seed(settings: Record<string, unknown> = {}) {
   localStorage.setItem(SETTINGS_KEY, JSON.stringify({ receiver: RECEIVER, receiverSource: 'manual', ...settings }));
@@ -253,7 +253,7 @@ afterEach(() => {
 });
 
 describe('決済QR: bill key を載せる QR', () => {
-  it('JPYC・回収・金額あり・通常の QR: 画面の QR だけが `&bk=<22 字>` つき。リンクの表示・前回の受け取り QR は元の URL', async () => {
+  it('JPYC・回収・金額あり・通常の QR: 画面の QR だけが `&bk=<11 字>` つき。リンクの表示・前回の受け取り QR は元の URL', async () => {
     const { dialog: d } = await openQr('1000', { storeName: 'OpenPay Cafe' });
     const plain = `https://test.local/pay?to=${RECEIVER}&token=jpyc&gas=merchant&amount=1000&store=OpenPay+Cafe`;
     const value = mainQrValue(d);

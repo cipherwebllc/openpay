@@ -70,10 +70,10 @@ const CUSTOMER: Address = getAddress('0x9999999999999999999999999999999999999999
 const FORWARDER: Address = '0x3333333333333333333333333333333333333333';
 const VALUE = 1000n * 10n ** 18n;
 const ORDER_LINK_KEY = `0x${'5'.repeat(64)}` as Hex;
-const VALID_BK = 'Zm9vYmFyYmF6cXV4MTIzNA';
+const VALID_BK = 'Zm9vYmFyYmE';
 // tests/lib/billKeySalt.test.ts の golden vector (cast で計算した値)。
-const VALID_BK_SALT = '0x69f93cd3b5a483ef1d119580ad5aff6b3b657cf379145e02b344199ea334c499';
-const OTHER_BK = 'a-b_c-d_e-f_g-h_0123Zz';
+const VALID_BK_SALT = '0xf71ee2a8eaaff2864b1bb71e47354a28af9038a73387875ed5159ddba2e4c311';
+const OTHER_BK = 'a-b_c-d_e-8';
 const FIXED_VALID_BEFORE = BigInt(Math.floor(FIXED_NOW_MS / 1000) + 300);
 
 const ORDER = canonicalOrder({
@@ -402,7 +402,7 @@ describe('約束 7: 同じ mount・同じ bill key の署名し直しは、有�
   });
 
   it('形の違う bill key の署名し直しも今と同じ (ずらさない・乱数)', async () => {
-    const bad: JpycEip3009Params = { ...withKey, billKey: VALID_BK.slice(0, 21) };
+    const bad: JpycEip3009Params = { ...withKey, billKey: VALID_BK.slice(0, 10) };
     await twice(bad, bad);
     expect(body(1).validBefore).toBe(FIXED_VALID_BEFORE.toString());
     expect(body(0).intentSalt).toBe(randomHex32(0));

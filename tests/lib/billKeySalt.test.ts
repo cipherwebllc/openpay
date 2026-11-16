@@ -8,13 +8,16 @@ import { buildForwarderNonce, type ForwarderSettleParams } from '@/lib/relay/for
 // 期待値は、実装 (viem) と別の道具 (Foundry の cast) で計算した:
 //   TAG  = cast keccak "openpay.bill-key.v1"
 //   salt = cast keccak $(cast abi-encode "f(bytes32,string)" $TAG "<bill key>")
-// 払う側とお店の端末が同じ値を作ることを、この vector で固定する (お店の端末は K2 で同じ関数を import する)。
+// 払う側とお店の端末が同じ値を作ることを、この vector で固定する (お店の端末は lib/qrSaleHistory.ts で同じ関数を import する)。
+// bill key は 11 字 (64 bit の乱数の base64url)。Zm9vYmFyYmE は "foobarba" の 8 byte。
 const TAG = '0x08bdd09c9e48e277d98780b5c95461c094c5c00794ae799a9e9eb73815490796';
 const VECTORS: [string, Hex][] = [
-  ['AAAAAAAAAAAAAAAAAAAAAA', '0xd47315f7150d1e487d4e9fec2a1e61d28c55443e29061299c54f5205dee83406'],
-  ['Zm9vYmFyYmF6cXV4MTIzNA', '0x69f93cd3b5a483ef1d119580ad5aff6b3b657cf379145e02b344199ea334c499'],
-  ['a-b_c-d_e-f_g-h_0123Zz', '0xe374137dba2c694dc1107b09fdd263fc9a81c40e9652947177487d46e50b9ea4'],
+  ['AAAAAAAAAAA', '0xcd21456b4b5c6b2f73e4a1f9dd4535d7b7e6092a5444d45af4260b3dc994ec43'],
+  ['Zm9vYmFyYmE', '0xf71ee2a8eaaff2864b1bb71e47354a28af9038a73387875ed5159ddba2e4c311'],
+  ['a-b_c-d_e-8', '0xd7b269e373189582c23e8556cfde09f612ca0fe46bcbccc214929895e2aa702e'],
 ];
+// 前の形 (128 bit・22 字)。いまは形の違う bill key = 無いものとして扱う。
+const OLD_22 = 'Zm9vYmFyYmF6cXV4MTIzNA';
 
 // tests/lib/forwarderIntent.test.ts (= contracts/test/Eip3009Forwarder.t.sol の golden vector) と同じ固定の入力。
 const GOLDEN: Omit<ForwarderSettleParams, 'intentSalt'> = {
@@ -39,17 +42,17 @@ describe('billKeySalt', () => {
     expect(billKeySalt(billKey)).toBe(salt);
   });
 
-  it('encode の形: abi.encode(bytes32 TAG, string bill key) = TAG ‖ 0x40 ‖ 長さ 22 ‖ utf8 の 22 byte (右を 0 で埋める)', () => {
-    const utf8 = '5a6d3976596d4679596d4636635856344d54497a4e41'; // "Zm9vYmFyYmF6cXV4MTIzNA"
-    const encoded = `0x${TAG.slice(2)}${'40'.padStart(64, '0')}${'16'.padStart(64, '0')}${utf8.padEnd(64, '0')}` as Hex;
-    expect(toHex('Zm9vYmFyYmF6cXV4MTIzNA')).toBe(`0x${utf8}`);
-    expect(billKeySalt('Zm9vYmFyYmF6cXV4MTIzNA')).toBe(keccak256(encoded));
+  it('encode の形: abi.encode(bytes32 TAG, string bill key) = TAG ‖ 0x40 ‖ 長さ 11 ‖ utf8 の 11 byte (右を 0 で埋める)', () => {
+    const utf8 = '5a6d3976596d4679596d45'; // "Zm9vYmFyYmE"
+    const encoded = `0x${TAG.slice(2)}${'40'.padStart(64, '0')}${'0b'.padStart(64, '0')}${utf8.padEnd(64, '0')}` as Hex;
+    expect(toHex('Zm9vYmFyYmE')).toBe(`0x${utf8}`);
+    expect(billKeySalt('Zm9vYmFyYmE')).toBe(keccak256(encoded));
   });
 
   it('forwarder の nonce の golden vector (bill key から作った intentSalt を入れた例・cast で計算)', () => {
-    const intentSalt = billKeySalt('Zm9vYmFyYmF6cXV4MTIzNA')!;
+    const intentSalt = billKeySalt('Zm9vYmFyYmE')!;
     expect(buildForwarderNonce({ ...GOLDEN, intentSalt }, CHAIN, FORWARDER)).toBe(
-      '0x7ad3d0a6ed8d157e19aeb7b60e78306e762e109f03a4313e492b2da5421b38c2',
+      '0x0c5e6828d506861e706ff9118267bf80702dfa0cf48cb0d12a479a298d91c588',
     );
   });
 
@@ -62,15 +65,16 @@ describe('billKeySalt', () => {
   });
 
   it('同じ bill key は同じ salt・違う bill key は違う salt (大文字と小文字も区別する)', () => {
-    expect(billKeySalt('Zm9vYmFyYmF6cXV4MTIzNA')).toBe(billKeySalt('Zm9vYmFyYmF6cXV4MTIzNA'));
-    expect(billKeySalt('zm9vYmFyYmF6cXV4MTIzNA')).not.toBe(billKeySalt('Zm9vYmFyYmF6cXV4MTIzNA'));
+    expect(billKeySalt('Zm9vYmFyYmE')).toBe(billKeySalt('Zm9vYmFyYmE'));
+    expect(billKeySalt('zm9vYmFyYmE')).not.toBeNull();
+    expect(billKeySalt('zm9vYmFyYmE')).not.toBe(billKeySalt('Zm9vYmFyYmE'));
     expect(new Set(VECTORS.map(([billKey]) => billKeySalt(billKey))).size).toBe(VECTORS.length);
   });
 
-  it('文字列をそのまま hash する: base64 として同じ 16 byte になる 2 つの文字列 (末尾の余りの 4 bit だけが違う) は別の salt', () => {
-    // 22 字 = 132 bit で、16 byte = 128 bit。最後の字の下 4 bit は decode で捨てられるので、A と B は同じ byte 列になる。
-    const a = 'AAAAAAAAAAAAAAAAAAAAAA';
-    const b = 'AAAAAAAAAAAAAAAAAAAAAB';
+  it('文字列をそのまま hash する: base64 として同じ 8 byte になる 2 つの文字列 (末尾の余りの 2 bit だけが違う) は別の salt', () => {
+    // 11 字 = 66 bit で、8 byte = 64 bit。最後の字の下 2 bit は decode で捨てられるので、A と B は同じ byte 列になる。
+    const a = 'AAAAAAAAAAA';
+    const b = 'AAAAAAAAAAB';
     expect(Buffer.from(a, 'base64url').equals(Buffer.from(b, 'base64url'))).toBe(true);
     expect(billKeySalt(a)).not.toBeNull();
     expect(billKeySalt(b)).not.toBeNull();
@@ -79,20 +83,24 @@ describe('billKeySalt', () => {
 
   it.each([
     ['空', ''],
-    ['21 字', 'Zm9vYmFyYmF6cXV4MTIzN'],
-    ['23 字', 'Zm9vYmFyYmF6cXV4MTIzNAA'],
-    ['44 字', 'Zm9vYmFyYmF6cXV4MTIzNAZm9vYmFyYmF6cXV4MTIzNA'],
-    ['+ 入り (base64 の標準形)', 'Zm9vYmFyYmF6cXV4MTIzN+'],
-    ['/ 入り', 'Zm9vYmFyYmF6cXV4MTIzN/'],
-    ['= 入り (padding)', 'Zm9vYmFyYmF6cXV4MTIzN='],
-    ['空白入り', 'Zm9vYmFyYmF6cXV4MTIzN '],
-    ['前に空白', ' Zm9vYmFyYmF6cXV4MTIzNA'],
-    ['後ろに改行', 'Zm9vYmFyYmF6cXV4MTIzNA\n'],
-    ['22 字で後ろが改行', 'Zm9vYmFyYmF6cXV4MTIzN\n'],
-    ['ASCII でない字入り', 'Zm9vYmFyYmF6cXV4MTIzNあ'],
-    ['全角の英数', 'ＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡＡ'],
-    ['% 入り', 'Zm9vYmFyYmF6cXV4MTI%2B'],
-    ['. 入り', 'Zm9vYmFyYmF6cXV4MTIzN.'],
+    ['10 字', 'Zm9vYmFyYm'],
+    ['12 字', 'Zm9vYmFyYmEA'],
+    ['12 字 (8 byte の base64 の padding つき)', 'Zm9vYmFyYmE='],
+    ['21 字', OLD_22.slice(0, 21)],
+    ['22 字 (前の形・128 bit)', OLD_22],
+    ['22 字 (正しい形を 2 つつなげた)', 'Zm9vYmFyYmEZm9vYmFyYmE'],
+    ['23 字', `${OLD_22}A`],
+    ['+ 入り (base64 の標準形)', 'Zm9vYmFyYm+'],
+    ['/ 入り', 'Zm9vYmFyYm/'],
+    ['= 入り (padding)', 'Zm9vYmFyYm='],
+    ['空白入り', 'Zm9vYmFyYm '],
+    ['前に空白', ' Zm9vYmFyYmE'],
+    ['後ろに改行', 'Zm9vYmFyYmE\n'],
+    ['11 字で後ろが改行', 'Zm9vYmFyYm\n'],
+    ['ASCII でない字入り', 'Zm9vYmFyYmあ'],
+    ['全角の英数', 'ＡＡＡＡＡＡＡＡＡＡＡ'],
+    ['% 入り', 'Zm9vYmFy%2B'],
+    ['. 入り', 'Zm9vYmFyYm.'],
     ['32 byte の hex (intentSalt そのもの)', `0x${'ab'.repeat(32)}`],
   ])('形の違う文字列は null (throw しない): %s', (_label, value) => {
     expect(billKeySalt(value)).toBeNull();
@@ -101,19 +109,19 @@ describe('billKeySalt', () => {
   it.each([
     ['undefined', undefined],
     ['null', null],
-    ['数', 1234567890123456789012],
+    ['数 (11 桁)', 12345678901],
     ['真偽', true],
-    ['22 字の配列', Array.from('Zm9vYmFyYmF6cXV4MTIzNA')],
-    ['正しい文字列 1 つの配列', ['Zm9vYmFyYmF6cXV4MTIzNA']],
-    ['object', { toString: () => 'Zm9vYmFyYmF6cXV4MTIzNA' }],
+    ['11 字の配列', Array.from('Zm9vYmFyYmE')],
+    ['正しい文字列 1 つの配列', ['Zm9vYmFyYmE']],
+    ['object', { toString: () => 'Zm9vYmFyYmE' }],
   ])('文字列でない値は null (throw しない): %s', (_label, value) => {
     expect(billKeySalt(value)).toBeNull();
   });
 });
 
 describe('billKeyIntent (払う側の 1 回の署名に使う intentSalt と有効期限)', () => {
-  const KEY = 'Zm9vYmFyYmF6cXV4MTIzNA';
-  const OTHER = 'AAAAAAAAAAAAAAAAAAAAAA';
+  const KEY = 'Zm9vYmFyYmE';
+  const OTHER = 'AAAAAAAAAAA';
 
   it('最初の署名: 有効期限はそのまま・intentSalt は billKeySalt', () => {
     const used = new Set<string>();
@@ -158,7 +166,8 @@ describe('billKeyIntent (払う側の 1 回の署名に使う intentSalt と有�
 
   it('形の違う bill key は null で、used に何も足さない', () => {
     const used = new Set<string>();
-    expect(billKeyIntent('Zm9vYmFyYmF6cXV4MTIzN', 1000n, used)).toBeNull();
+    expect(billKeyIntent('Zm9vYmFyYm', 1000n, used)).toBeNull();
+    expect(billKeyIntent(OLD_22, 1000n, used)).toBeNull();
     expect(billKeyIntent(undefined, 1000n, used)).toBeNull();
     expect(used.size).toBe(0);
   });

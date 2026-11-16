@@ -59,8 +59,8 @@ const CUSTOMER: Address = getAddress('0x9999999999999999999999999999999999999999
 const FORWARDER: Address = '0x3333333333333333333333333333333333333333';
 const VALUE = 1000n * 10n ** 18n;
 const ORDER_LINK_KEY = `0x${'5'.repeat(64)}` as Hex;
-// 形の正しい bill key (22 字の base64url)。
-const VALID_BK = 'Zm9vYmFyYmF6cXV4MTIzNA';
+// 形の正しい bill key (11 字の base64url)。
+const VALID_BK = 'Zm9vYmFyYmE';
 
 const ORDER = canonicalOrder({
   chainId: jpycDep.chainId,
@@ -109,17 +109,18 @@ const NO_BILL_KEY: [string, Record<string, unknown>][] = [
   ['空の文字列', { billKey: '' }],
 ];
 const MALFORMED_BILL_KEY: [string, Record<string, unknown>][] = [
-  ['21 字', { billKey: VALID_BK.slice(0, 21) }],
-  ['23 字', { billKey: `${VALID_BK}A` }],
-  ['44 字 (正しい形を 2 つつなげた)', { billKey: `${VALID_BK}${VALID_BK}` }],
-  ['記号 + 入り (base64 の標準形)', { billKey: `${VALID_BK.slice(0, 21)}+` }],
-  ['記号 / 入り', { billKey: `${VALID_BK.slice(0, 21)}/` }],
-  ['記号 = 入り (padding)', { billKey: `${VALID_BK.slice(0, 21)}=` }],
-  ['空白入り', { billKey: `${VALID_BK.slice(0, 21)} ` }],
-  ['前に空白 (23 字)', { billKey: ` ${VALID_BK}` }],
-  ['後ろに改行 (23 字)', { billKey: `${VALID_BK}\n` }],
-  ['22 字だが ASCII でない字入り', { billKey: `${VALID_BK.slice(0, 21)}あ` }],
-  ['22 字だが % 入り (URL の escape の残り)', { billKey: `${VALID_BK.slice(0, 19)}%2B` }],
+  ['10 字', { billKey: VALID_BK.slice(0, 10) }],
+  ['12 字', { billKey: `${VALID_BK}A` }],
+  ['22 字 (正しい形を 2 つつなげた)', { billKey: `${VALID_BK}${VALID_BK}` }],
+  ['22 字 (前の形・128 bit)', { billKey: 'Zm9vYmFyYmF6cXV4MTIzNA' }],
+  ['記号 + 入り (base64 の標準形)', { billKey: `${VALID_BK.slice(0, 10)}+` }],
+  ['記号 / 入り', { billKey: `${VALID_BK.slice(0, 10)}/` }],
+  ['記号 = 入り (padding)', { billKey: `${VALID_BK.slice(0, 10)}=` }],
+  ['空白入り', { billKey: `${VALID_BK.slice(0, 10)} ` }],
+  ['前に空白 (12 字)', { billKey: ` ${VALID_BK}` }],
+  ['後ろに改行 (12 字)', { billKey: `${VALID_BK}\n` }],
+  ['11 字だが ASCII でない字入り', { billKey: `${VALID_BK.slice(0, 10)}あ` }],
+  ['11 字だが % 入り (URL の escape の残り)', { billKey: `${VALID_BK.slice(0, 8)}%2B` }],
 ];
 
 let signTypedData: ReturnType<typeof vi.fn>;

@@ -26,12 +26,12 @@ describe('useQrBillKey — 見張りを読み込めないとき', () => {
         (p: { url: string; shown: boolean }) => useQrBillKey({ kind: 'pay', ...p }),
         { initialProps: { url: URL_A, shown: true } },
       );
-      expect(result.current).toMatch(new RegExp(`^${URL_A.replace(/[?]/g, '\\?')}&bk=[A-Za-z0-9_-]{22}$`));
+      expect(result.current).toMatch(new RegExp(`^${URL_A.replace(/[?]/g, '\\?')}&bk=[A-Za-z0-9_-]{11}$`));
       await waitFor(() => expect(hold.imports).toBe(1));
       await settle();
       // 出し直し (URL が変わる): 前の bill key の hide と、新しい bill key の show が、もう一度読み込みを試す。
       rerender({ url: URL_B, shown: true });
-      expect(result.current).toMatch(/&bk=[A-Za-z0-9_-]{22}$/);
+      expect(result.current).toMatch(/&bk=[A-Za-z0-9_-]{11}$/);
       await waitFor(() => expect(hold.imports).toBeGreaterThanOrEqual(2));
       await settle();
       unmount();

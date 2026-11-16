@@ -47,10 +47,10 @@ beforeEach(() => {
 });
 
 describe('useQrBillKey — 画面の QR の URL', () => {
-  it('表示中の QR: 元の URL の末尾に &bk=<22 字の base64url> を足した URL を返し、その会計を見張りに渡す', async () => {
+  it('表示中の QR: 元の URL の末尾に &bk=<11 字の base64url> を足した URL を返し、その会計を見張りに渡す', async () => {
     const { result } = renderHook(() => useQrBillKey(args()));
     const billKey = keyOf(result.current);
-    expect(billKey).toMatch(/^[A-Za-z0-9_-]{22}$/);
+    expect(billKey).toMatch(/^[A-Za-z0-9_-]{11}$/);
     // 払う側が受ける形 (lib/relay/billKeySalt.ts)。
     expect(billKeySalt(billKey)).toMatch(/^0x[0-9a-f]{64}$/);
     // URL として読むと、元の param はそのままで bk だけが増える。

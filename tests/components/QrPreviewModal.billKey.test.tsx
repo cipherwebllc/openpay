@@ -14,8 +14,8 @@ vi.mock('qrcode.react', () => ({
 import { QrPreviewModal } from '@/components/QrPreviewModal';
 
 const PLAIN = 'https://test.local/pay?to=0xabc&token=jpyc&gas=merchant&amount=500';
-const SCREEN = `${PLAIN}&bk=Zm9vYmFyYmF6cXV4MTIzNA`;
-const SCREEN2 = `${PLAIN}&bk=a-b_c-d_e-f_g-h_0123Zz`;
+const SCREEN = `${PLAIN}&bk=Zm9vYmFyYmE`;
+const SCREEN2 = `${PLAIN}&bk=a-b_c-d_e-8`;
 const LABELS = {
   title: '決済用 QR コード',
   close: '閉じる',

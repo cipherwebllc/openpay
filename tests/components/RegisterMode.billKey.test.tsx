@@ -130,7 +130,7 @@ const HS = 'AbCdEfGhIjKlMnOpQrStUv';
 const QR_KEY = 'openpay:qr-settings:v2';
 const PRESETS_KEY = 'openpay:product-presets:v1';
 const ONE = 10n ** 18n;
-const BK_SUFFIX = /&bk=([A-Za-z0-9_-]{22})$/;
+const BK_SUFFIX = /&bk=([A-Za-z0-9_-]{11})$/;
 const enc = encodeURIComponent;
 const COFFEE = `${enc('コーヒー')}:1:500:10:taxable_10:`;
 const SHIRT = `${enc('Tシャツ')}:1:3000:10:taxable_10:`;
@@ -196,7 +196,7 @@ afterEach(() => {
 });
 
 describe('レジ: bill key を載せる QR', () => {
-  it('JPYC・回収・通常の QR: 画面の QR だけが `&bk=<22 字>` つき。画面に出す URL とコピーする値は元の URL', async () => {
+  it('JPYC・回収・通常の QR: 画面の QR だけが `&bk=<11 字>` つき。画面に出す URL とコピーする値は元の URL', async () => {
     const writeText = vi.fn(async (_value: string) => {});
     seedSettings({ storeName: 'OpenPay Cafe' });
     const user = userEvent.setup();

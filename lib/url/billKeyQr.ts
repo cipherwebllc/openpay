@@ -5,9 +5,12 @@
 // buildCheckoutUrl・URL のコピー・印刷 / PNG / SVG の保存・前回の受け取り QR の保存は bill key を知らない
 // (印のある URL を画面の外へ出さない: 後から払われても、お店の端末はその会計をもう持っていない)。
 
-/** 新しい bill key = 128 bit の乱数を base64url にした 22 字 (lib/relay/billKeySalt.ts が受ける形)。 */
+/**
+ * 新しい bill key = 64 bit の乱数を base64url にした 11 字 (lib/relay/billKeySalt.ts が受ける形・短い理由もそこに)。
+ * 8 byte の base64 は 11 字 + padding 1 字で、padding を落とす。11 字目は余りの 2 bit が 0 の 16 通りの字になる。
+ */
 export function newBillKey(): string {
-  const bytes = new Uint8Array(16);
+  const bytes = new Uint8Array(8);
   crypto.getRandomValues(bytes);
   return btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
