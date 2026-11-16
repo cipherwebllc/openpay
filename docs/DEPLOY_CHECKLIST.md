@@ -2329,7 +2329,7 @@ flag ON + forwarder/JPYC 設定済の Amoy (80002) で 1 周する。route テ�
 - リクエストごとの行は残さない (402 は巡回で大量に出る)。誰が・いくらで買ったかは settle 台帳 (`x402:settle:ledger:<月>`)。
 - 読み出し = `node scripts/x402-funnel-report.mjs [日数]` (本番 KV の URL/TOKEN を export・読み取りのみ)。
   ⚠️ challenge は検索クローラを含む = 買い手の数ではない。成立率は「支払いを試みた件数」を分母にする。
-  2026-09-26 から challenge は抽出して記録 (Upstash の KV 予算。期待値は同じ): 9/26〜 **10 件に 1 件で 10 を足す**・2026-09-29 の変更の反映後は **50 件に 1 件で 50 を足す** (表示は 50 単位の概数)。
+  2026-09-26 から challenge は抽出して記録 (Upstash の KV 予算。期待値は同じ): 9/26〜 **10 件に 1 件で 10 を足す**・2026-09-29 の変更の反映後は 50 件に 1 件で 50 を足す・2026-11-16 の変更の反映後は **200 件に 1 件で 200 を足す** (表示は 200 単位の概数・変更をまたぐ日は 50 と 200 が混ざる)。
   支払いを試みた後の段階 (invalid_payload 以降) は全件記録のまま。
 - 対象外 (今回): JPYC の first-party 経路・Store の閲覧〜購入。必要になったら同じ形で足す。
 
@@ -2759,9 +2759,10 @@ merge 後は `main` の定期 backup job が新 prefix を走査するため、�
 コード更新だけでは本番 ACL は変更されない。
 
 **取得**: GitHub Actions `kv-backup.yml` (1 日 1 回・`17 3 * * *` UTC・dispatch 可・2026-09-29 に 12h から変更) が Upstash REST を **backup 専用 ACL user の token** で
-`SCAN` → key ごとに `/multi-exec [TYPE, PTTL, 値]` で原子取得 (base64 応答・bytes 保持・小コレクションは全量・大コレクションは chunk で `uncertain`) →
+`SCAN` → `TYPE` (pipeline) → key ごとに `/multi-exec` で原子取得 (文字列は `[PTTL, GET]`・コレクションは `[TYPE, PTTL, 値]`・base64 応答・bytes 保持・小コレクションは全量・大コレクションは chunk で `uncertain`) →
 JSONL → gzip → AES-256-GCM (鍵 1 本・header を AAD) → Cloudflare R2 private bucket へ S3 API (自前 SigV4) で PUT + HEAD 照合 → 平文 `meta.json` (機密なし) を隣に PUT。
 これは **fuzzy snapshot** (走査中の遷移は前後どちらかの状態で入る)。
+文字列の transaction に `TYPE` を入れないのは Upstash のコマンド数のため (鍵 1 つにつき 1 減る): 同じ transaction の `GET` が bytes を返せば、その瞬間の型は string (別の型なら `WRONGTYPE`・鍵が無ければ `PTTL` は -2)。`WRONGTYPE` のときだけ `TYPE` を取り直し、その型で 1 回だけ撮り直す。
 
 **成功状態**: Stored (保存と照合完了) → Capture complete (errors=0) → Needs reconciliation (復元後・gate 前は常にここ) → Released (16.6.3 の gate 通過を人が宣言)。
 run green = archive と meta が Stored かつ status complete。partial は保存するが run は赤。

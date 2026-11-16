@@ -6,7 +6,7 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { BackupError, LIMITS, PREFIXES, byteText, createManifest, createMeta, createRecord,
   isAllowedKey, parseKey, representBytes, verifyArchive, writeArchive } from './lib/kv-backup-core.mjs';
-import { createUpstashClient, UpstashLimitError } from './lib/upstash-rest.mjs';
+import { createUpstashClient, UpstashCommandError, UpstashLimitError } from './lib/upstash-rest.mjs';
 import { createR2Client, fileDigest } from './lib/r2.mjs';
 
 const LENGTH = { list: 'LLEN', set: 'SCARD', zset: 'ZCARD', hash: 'HLEN' };
@@ -17,6 +17,7 @@ class CaptureError extends Error {
   constructor(code) { super(code); this.code = code; }
 }
 const smaller = (size, min) => Math.max(min, Math.floor(size / 2));
+const wrongType = (value) => value instanceof UpstashCommandError && value.code === 'wrong_type';
 const identity = (bytes) => Buffer.from(bytes).toString('base64');
 
 export async function scanKeys(client, limits = LIMITS) {
@@ -103,6 +104,25 @@ export async function captureKey(client, keyBytes, initialType, { limits = LIMIT
     if (!Number.isSafeInteger(pttl) || pttl < -1) throw new CaptureError('read_error');
     return { capturedAt, pttl, value: result[2] };
   }
+  // 文字列の鍵は TYPE を transaction に入れない (Upstash のコマンド数を鍵 1 つにつき 1 減らす)。同じ transaction の GET が
+  // bytes を返すこと自体が「その瞬間の型は string」の証明になる: 別の型なら GET は WRONGTYPE、鍵が無ければ PTTL は -2。
+  // 値・期限・型が同じ瞬間のものという保証は [TYPE, PTTL, GET] のときと変わらない。
+  // 型が変わっていた (WRONGTYPE) ときは null を返し、呼び出し側が今の型を TYPE で取り直して撮り直す (TYPE を中に入れていた
+  // ときの「型が違えばその型で 1 回だけ撮り直す」と同じ)。WRONGTYPE は、結果の配列の中の error でも、transaction 全体の
+  // error でも同じに扱う (どちらの形で返るかで、撮り直せる鍵を read_error にして archive を partial にしない)。
+  async function stringTransaction() {
+    const capturedAt = now(); // This is immediately before sending the phase 2 request.
+    let result;
+    try { result = await client.multiExec([['PTTL', k], ['GET', k]]); }
+    catch (error) { if (wrongType(error)) return null; throw error; }
+    if (!Array.isArray(result) || result.length !== 2) throw new CaptureError('read_error');
+    if (result[0] === -2) throw new CaptureError('missing_during_capture');
+    if (wrongType(result[1])) return null;
+    for (const value of result) if (value instanceof Error) throw value;
+    const pttl = result[0];
+    if (!Number.isSafeInteger(pttl) || pttl < -1) throw new CaptureError('read_error');
+    return { capturedAt, pttl, value: result[1] };
+  }
   function record(data, uncertain = false) {
     const value = createRecord({ key: keyBytes, type, ...data, uncertain });
     if (Buffer.byteLength(JSON.stringify(value)) + 1 > limits.lineBytes) throw new CaptureError('oversized');
@@ -113,8 +133,10 @@ export async function captureKey(client, keyBytes, initialType, { limits = LIMIT
       if (type === 'none') throw new CaptureError('missing_during_capture');
       if (type === 'string') {
         let data;
-        try { data = await transaction(['GET', k]); }
+        try { data = await stringTransaction(); }
         catch (error) { if (error instanceof UpstashLimitError) throw new CaptureError('oversized'); throw error; }
+        // 2 回目も型が違えば type_changed で終わるので、今の型は 1 回目だけ取り直す。
+        if (!data) throw new TypeChanged(attempt === 0 ? byteText(await client.command(['TYPE', k])) : type);
         if (!(data.value instanceof Uint8Array)) throw new CaptureError('read_error');
         if (data.value.byteLength > limits.stringMax) throw new CaptureError('oversized');
         return record(data);

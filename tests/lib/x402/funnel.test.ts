@@ -66,13 +66,19 @@ describe('x402 funnel counters', () => {
     expect(args).toEqual(['settled|base|/api/paid/hello', String(FUNNEL_TTL_SEC), '1']);
   });
 
-  it('challenge は 50 件に 1 件だけ記録して 50 を足す (KV 予算・期待値は同じ)', async () => {
-    expect(FUNNEL_CHALLENGE_SAMPLE_RATE).toBe(50);
+  it('challenge は 200 件に 1 件だけ記録して 200 を足す (KV 予算・期待値は同じ)', async () => {
+    expect(FUNNEL_CHALLENGE_SAMPLE_RATE).toBe(200);
     await recordFunnel('challenge', 'none', 'https://open-pay.jp/api/paid/hello', () => 0.5);
     expect(kv.evalMock).not.toHaveBeenCalled();
     await recordFunnel('challenge', 'none', 'https://open-pay.jp/api/paid/hello', () => 0.03);
     expect(kv.evalMock).not.toHaveBeenCalled();
+    // 50 件に 1 件のときは記録していた乱数 (0.019 < 1/50)。200 件に 1 件では外れ。
     await recordFunnel('challenge', 'none', 'https://open-pay.jp/api/paid/hello', () => 0.019);
+    expect(kv.evalMock).not.toHaveBeenCalled();
+    // 境目は 1/200 = 0.005。
+    await recordFunnel('challenge', 'none', 'https://open-pay.jp/api/paid/hello', () => 0.005);
+    expect(kv.evalMock).not.toHaveBeenCalled();
+    await recordFunnel('challenge', 'none', 'https://open-pay.jp/api/paid/hello', () => 0.0049);
     expect(kv.evalMock).toHaveBeenCalledTimes(1);
     expect(kv.evalMock.mock.calls[0][2]).toEqual([
       'challenge|none|/api/paid/hello', String(FUNNEL_TTL_SEC), String(FUNNEL_CHALLENGE_SAMPLE_RATE),
