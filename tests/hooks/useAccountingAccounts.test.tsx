@@ -179,6 +179,13 @@ describe('useAccountingAccounts: 保存 (setAccount)', () => {
     expect(b.result.current.accounts).toEqual({ debit: '現金', credit: '売上' });
   });
 
+  it('書くときは、読み直した保存値の壊れた項目・余分な key を保存の形にそろえる', async () => {
+    window.localStorage.setItem(KEY, JSON.stringify({ debit: '=現金', credit: '売上', extra: 1 }));
+    const { result } = await mountHook();
+    act(() => result.current.setAccount('credit', '収入'));
+    expect(raw()).toBe(JSON.stringify({ debit: '', credit: '収入' }));
+  });
+
   it('書けない環境: state は変えたまま (その mount の間は使える)。warn は safeSet の今の動き', async () => {
     const warn = vi.spyOn(logger, 'warn').mockImplementation(() => undefined);
     vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
