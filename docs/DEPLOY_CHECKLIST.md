@@ -2363,8 +2363,10 @@ flag ON + forwarder/JPYC 設定済の Amoy (80002) で 1 周する。route テ�
     この 2 本で app の中の制限をやめた理由は、上の「判定 2 コマンドが、守っている GET 1 コマンドより高い」。
   - Cloudflare を通らない経路 (`*.vercel.app` など・`vercel.json` の deny は host が open-pay.jp のときだけ) では、この 2 本に
     回数の制限が無い。そこでも KV は 1 回 1 コマンド (制限があったときは、通った request で 3・制限に当たった request で 2)
-    で、失敗の警告 (`x402.discovery.read_failed`・requirements から呼ばれた `x402.dualrail.accepts_failed`) は instance
-    ごとに 60 秒に 1 回まで (`lib/warnThrottle.ts`・最初の 1 回は必ず出る)。
+    で、失敗の警告 (`x402.discovery.read_failed`・`GET /api/discovery/{id}` から呼ばれた
+    `x402.discovery.requirements_failed`・requirements から呼ばれた `x402.dualrail.accepts_failed`) は instance ごとに
+    60 秒に 1 回まで (`lib/warnThrottle.ts`・最初の 1 回は必ず出る)。カタログ (`GET /api/discovery`) の
+    `x402.discovery.requirements_failed` は抑えない。
   - relay の verify / settle は `x402-dual-rail` の枠 (IP ごとに 60 回 / 60 秒) のままで、requirements を呼ばれても
     この枠は減らない。verify / settle から呼ばれた `x402.dualrail.accepts_failed` は抑えない (失敗のたびに出る)。
 - 総数は `INFO stats` の `total_commands_processed` で見られるが、複数ノードで値が分かれる (書き込みは主ノード側の値)。

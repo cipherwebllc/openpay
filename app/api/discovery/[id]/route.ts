@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server';
 import { env } from '@/lib/env';
 import { warnThrottled } from '@/lib/warnThrottle';
 import { getPublicResource } from '@/lib/x402/registry';
-import { publicDiscoveryItem } from '@/lib/x402/discoveryItem';
+import { publicDiscoveryItemForLookup } from '@/lib/x402/discoveryItem';
 
 export const runtime = 'nodejs';
 export const maxDuration = 15;
@@ -25,7 +25,9 @@ export const maxDuration = 15;
 // 返すのは公開の情報だけ。この route 自身は 429 を返さない。tests/app/api/x402-public-reads-kv.test.ts。
 //   - 回数の制限は open-pay.jp の入口の Cloudflare の rule だけ (2026-11-16 に確認した値は docs/DEPLOY_CHECKLIST.md
 //     §14.9c・rule を変えたらそこを見直す)。Cloudflare を通らない経路 (*.vercel.app など) には回数の制限が無い。
-//   - 掲載の読み取りの失敗の警告は warnThrottled で instance ごとに 60 秒に 1 回まで (lib/warnThrottle.ts)。
+//   - 掲載の読み取りの失敗 (x402.discovery.read_failed) と、JPYC の要件を作れない (x402.discovery.requirements_failed・
+//     publicDiscoveryItemForLookup) の警告は、warnThrottled で instance ごとに 60 秒に 1 回まで (lib/warnThrottle.ts)。
+//     カタログ (GET /api/discovery) の requirements_failed は抑えない。
 const EDGE_CACHE_OK = 'public, s-maxage=300';
 
 export async function GET(
@@ -49,7 +51,7 @@ export async function GET(
   if (!read.resource) {
     return NextResponse.json({ error: 'not_found' }, { status: 404, headers });
   }
-  return NextResponse.json(publicDiscoveryItem(read.resource), {
+  return NextResponse.json(publicDiscoveryItemForLookup(read.resource), {
     headers: { 'Cache-Control': EDGE_CACHE_OK },
   });
 }
