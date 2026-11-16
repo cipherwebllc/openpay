@@ -68,8 +68,9 @@ export function LandingProfileDemo({ c, cta }: { c: LandingProfileDemoCopy; cta:
   const accent = ACCENTS[accentKey];
   const view = handleViewTheme(accent, theme);
   const page = handlePageTheme(accent, theme);
+  // 選択肢の高さ: スマホ (sm 未満) は押せる高さ 40px・sm 以上は今までの 36px。
   const chip = (active: boolean) =>
-    `inline-flex min-h-9 shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand ${
+    `inline-flex min-h-10 shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand sm:min-h-9 ${
       active ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
     }`;
 
@@ -78,7 +79,8 @@ export function LandingProfileDemo({ c, cta }: { c: LandingProfileDemoCopy; cta:
       {/* 外枠はカードの型 (中の見本の枠は公開ページの形のまま)。 */}
       <div className={`mx-auto mt-8 grid max-w-4xl grid-cols-1 items-center gap-5 p-4 sm:grid-cols-[minmax(0,1fr)_16rem] sm:gap-8 sm:p-8 ${LANDING_CARD}`}>
         <div className="min-w-0">
-          <h3 className="text-lg font-bold text-slate-900 sm:text-xl">{c.title}</h3>
+          {/* 題は文節で折り、行の長さをそろえる (320px 幅で「…あなたらしいペー / ジに」と 2 字だけ次の行に落ちていた)。 */}
+          <h3 className="text-balance text-lg font-bold text-slate-900 [word-break:auto-phrase] sm:text-xl">{c.title}</h3>
           <p className="mt-1 text-sm leading-relaxed text-slate-600">{c.hint}</p>
           {/* 選択肢は見えている名前 (テーマ名・色名) をそのまま名前にする (掟 8)。 */}
           <fieldset className="mt-4 min-w-0">

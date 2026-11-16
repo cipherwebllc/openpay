@@ -123,7 +123,8 @@ export function SavingsSimulator() {
                 type="button"
                 aria-pressed={active}
                 onClick={() => setCompare(id)}
-                className={`rounded-full border px-4 py-1.5 text-sm font-semibold transition ${
+                // スマホ (sm 未満) は押せる高さを 40px にする (字の高さ + 余白だけだと 34px)。sm 以上は今の高さのまま。
+                className={`inline-flex items-center rounded-full border px-4 py-1.5 text-sm font-semibold transition max-sm:min-h-10 ${
                   active
                     ? 'border-brand bg-brand text-white'
                     : 'border-slate-300 bg-white text-slate-700 hover:border-brand hover:text-brand-dark'

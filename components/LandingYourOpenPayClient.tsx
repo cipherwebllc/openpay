@@ -87,11 +87,13 @@ export function YourOpenPayToday({ label }: { label: string }) {
   const usdc = todayAtomicToNumber(today.usdcAtomic, HISTORY_ASSET_DECIMALS.usdc);
 
   // 見出しの行 (高さ固定) の右に 1 行で収める。出ても消えても、行の高さと下の段は動かない。
+  // 幅は中身のまま縮めない (shrink-0)。行に入りきらない分は、隣の見出しが縮んで受ける (components/LandingYourOpenPay.tsx)。
+  // 縮められると、丸い枠だけが狭くなり、折り返さない中身 (金額と件数) が枠と帯の外へ出る (320px 幅で起きていた)。
   return (
     <Link
       href={`/${locale}/history`}
       prefetch={false}
-      className="inline-flex h-8 min-w-0 items-center gap-1.5 whitespace-nowrap rounded-full bg-brand/5 pl-3 pr-1.5 text-slate-900 ring-1 ring-brand/15 transition hover:ring-brand/40"
+      className="inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full bg-brand/5 pl-3 pr-1.5 text-slate-900 ring-1 ring-brand/15 transition hover:ring-brand/40"
     >
       <span className="text-xs font-semibold text-slate-600">{label}</span>
       <span className="text-sm font-bold tabular-nums">¥{yen.toLocaleString('en-US')}</span>

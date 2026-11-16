@@ -112,8 +112,12 @@ export const LANDING_LINK_CARD = {
 /**
  * カードの小見出しの大きさ・太さ・色 (14px・sm 以上 16px・中太字)。料金のカード (SummaryCard) と同じ。
  * タグ (h3 / span) と見出しの階層は使う側のまま。
+ * 折り返すときは文節で折る (word-break:auto-phrase・Chromium 系)。スマホ (sm 未満) は、行の長さもそろえる (text-balance):
+ * 狭いカードで、最後の行が 1〜2 字だけにならない (320px 幅の 2 列のカードで、文節で折れる Chromium は「端末も契約も / 不要」・
+ * 文節が分からない WebKit = iPhone の Safari は「端末も契約も不 / 要」と落ちていた)。WebKit は行の長さだけをそろえるので、
+ * 折れ目が語の途中になることは残る (「端末も契 / 約も不要」)。sm 以上はカードが広く、折り返しは今までどおり。
  */
-export const LANDING_CARD_TITLE = 'text-sm font-semibold text-slate-900 sm:text-base';
+export const LANDING_CARD_TITLE = 'text-sm font-semibold text-slate-900 [word-break:auto-phrase] max-sm:text-balance sm:text-base';
 
 /**
  * アイコンの箱 (36px・角 xl)。中のアイコンは h-5 w-5。地の色と字の色は使う側が決める (誰が払うか・節の色の意味があるため)。

@@ -329,6 +329,24 @@ test.describe('landing / (LP)', () => {
     await expect(a1Body).toBeVisible();
   });
 
+  test('ja: FAQ は行の余白を押しても開閉する (押せる範囲は質問の文字でなく行の全体)', async ({ page }) => {
+    await page.goto('/ja');
+    const q1 = page.locator('summary', { hasText: '本当にガス代は不要ですか?' });
+    const row = page.locator('details').filter({ has: q1 });
+    await expect(row).not.toHaveAttribute('open', '');
+    // 閉じた行は、質問 (summary) が行の全体を占める (余白は summary が持つ)。押せる高さは 44px 以上。
+    const rowBox = (await row.boundingBox())!;
+    const summaryBox = (await q1.boundingBox())!;
+    expect(summaryBox.width).toBeCloseTo(rowBox.width, 0);
+    expect(summaryBox.height).toBeCloseTo(rowBox.height, 0);
+    expect(summaryBox.height).toBeGreaterThanOrEqual(44);
+    // 行の左上の余白 (質問の文字の外) を押す。
+    await row.click({ position: { x: 6, y: 6 } });
+    await expect(row).toHaveAttribute('open', '');
+    await row.click({ position: { x: 6, y: 6 } });
+    await expect(row).not.toHaveAttribute('open', '');
+  });
+
   test('ja: Benefits セクション — Fee「0円〜」(通常決済の条件つき) + 4 focal・宛名は章ラベル', async ({
     page,
   }) => {

@@ -424,6 +424,42 @@ describe('トップの中の動き (P3)', () => {
   });
 });
 
+// ---- P7: 短い題の折り返し ----
+
+// 折り返しの指定 (どの幅・どの条件の指定でも): text-wrap (balance / pretty / wrap / nowrap) と word-break。
+const WRAP = /(?:^|:)text-(?:balance|pretty|wrap|nowrap)$|word-break/;
+
+/** 描いた要素の折り返しの指定 (並べ替えたもの)。 */
+const wrapOf = (el: Element | null | undefined) => {
+  expect(el).toBeTruthy();
+  return classTokens(el!).filter((token) => WRAP.test(token)).sort();
+};
+// 文節で折れるブラウザ (word-break:auto-phrase に対応する Chromium 系) では、ふつうの折り返しに戻す指定。これを text-balance と
+// 組むと、行の長さをそろえるのは文節で折れないブラウザ (WebKit = iPhone の Safari) だけになる (Chromium の折り返しは変えない)。
+const WRAP_WHERE_PHRASES = 'supports-[word-break:auto-phrase]:text-wrap';
+
+describe('短い題は、最後の行が 1〜2 字だけにならないよう、行の長さをそろえて折る (P7)', () => {
+  it('カードの小見出しの型: 文節で折り、スマホ (sm 未満) はどのブラウザでも行の長さをそろえる (型を使う 17 個の題に効く)', () => {
+    // 320px 幅の 2 列のカードで、文節で折れる Chromium も「端末も契約も / 不要」と 2 字だけ落ちていたので、スマホは両方でそろえる。
+    // sm 以上の折り返しは今までどおり (幅の指定なしの text-balance にすると、PC の題の折れ方まで変わる)。
+    const wrap = LANDING_CARD_TITLE.split(/\s+/).filter((token) => WRAP.test(token)).sort();
+    expect(wrap).toEqual(['[word-break:auto-phrase]', 'max-sm:text-balance']);
+  });
+
+  it('見本の題: 文節で折り、行の長さをそろえる (320px 幅の Chromium で「…あなたらしいペー / ジに」と落ちていた)', async () => {
+    const sell = render(await LandingSellables()).container;
+    expect(wrapOf(within(sell).getByRole('heading', { level: 3, name: L.profileDemoTitle }))).toEqual(['[word-break:auto-phrase]', 'text-balance']);
+  });
+
+  it('注文リンクの帯の見出し: 行の長さをそろえるのは、文節で折れないブラウザ (WebKit) だけ', async () => {
+    // WebKit は「…「注文リン / ク」」と 1 字だけ落ちていた。文節で折れる Chromium は「…注文には / 「注文リンク」」のままにする。
+    const orderLink = render(await LandingOrderLink()).container;
+    expect(wrapOf(within(orderLink).getByRole('heading', { level: 2, name: L.orderLinkStripTitle }))).toEqual(
+      ['[word-break:auto-phrase]', WRAP_WHERE_PHRASES, 'text-balance'].sort(),
+    );
+  });
+});
+
 type RingColor = 'brand' | 'emerald-700' | 'white';
 
 /**

@@ -465,6 +465,26 @@ describe('LandingYourOpenPay (中身)', () => {
     expect(pill).toHaveTextContent('¥12,300');
     expect(pill).toHaveTextContent('8 件');
   });
+  it('見出しの行に入りきらないときに縮むのは見出しだけ。今日の売上は中身の幅のまま (丸い枠より外へ数字を出さない)', async () => {
+    // 320px 幅で、見出しと今日の売上が同じ割合で縮み、丸い枠だけが狭くなって金額と件数が枠と帯の外へ出ていた。
+    // jsdom は CSS を当てないので、どちらが縮むかを class で固定する (実際の幅は実機で測る)。
+    storeToday(SHOP);
+    account.status = 'connected';
+    account.address = SHOP;
+    renderStrip(await LandingYourOpenPay());
+    const tokens = (el: Element) => (el.getAttribute('class') ?? '').split(/\s+/).filter(Boolean);
+    const title = screen.getByRole('heading', { level: 2, name: ja.Landing.yourOpenPayTitle });
+    const pill = screen.getByText(ja.Landing.yourOpenPayToday).closest('a')!;
+    const row = title.parentElement!;
+    expect(pill.parentElement).toBe(row);
+    expect(tokens(row)).toContain('flex');
+    // 見出し: 残りの幅を取り (flex-1)、入らない分は「…」で省く (min-w-0 + truncate)。
+    expect(tokens(title)).toEqual(expect.arrayContaining(['min-w-0', 'flex-1', 'truncate']));
+    expect(tokens(title).filter((t) => /(?:^|:)(?:shrink-0|flex-none)$/.test(t))).toEqual([]);
+    // 今日の売上: 縮まない・折り返さない。幅を縮める指定 (min-w-0・flex-1・w-*・max-w-*) と、中身を切る指定を持たない。
+    expect(tokens(pill)).toEqual(expect.arrayContaining(['shrink-0', 'whitespace-nowrap']));
+    expect(tokens(pill).filter((t) => /(?:^|:)(?:min-w-0|flex-1|shrink|truncate|overflow-hidden|(?:max-)?w-.+)$/.test(t))).toEqual([]);
+  });
   it('再接続の途中・別のアドレスでは売上を出さない', async () => {
     storeToday(SHOP);
     account.status = 'reconnecting';
