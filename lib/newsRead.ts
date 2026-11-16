@@ -31,8 +31,11 @@ export function setLastSeenNewsId(id: string): void {
 
 /**
  * lastSeen より新しい (= 降順配列で lastSeen の前に出る) お知らせの件数。
- * lastSeen が null (初回) なら全件が未読。lastSeen が配列に存在しなければ
+ * lastSeen が null なら全件が未読。lastSeen が配列に存在しなければ
  * (item が削除された等) 全件を未読扱いにして取りこぼしを防ぐ。
+ *
+ * 初めての訪問 (記録が無い) で印を出さないのは hooks/useNewsRead.ts の役目 — mount で今の最新を
+ * 基準として保存し、記録が無い間は最新を渡すので、ヘッダの印の判定に null は届かない。
  */
 export function unreadCount(items: readonly HasId[], lastSeen: string | null): number {
   if (items.length === 0) return 0;
