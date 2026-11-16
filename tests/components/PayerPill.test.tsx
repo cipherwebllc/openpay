@@ -28,8 +28,12 @@ function rgbOf(token: string): RGB {
 const tokens = (el: Element) => (el.getAttribute('class') ?? '').split(/\s+/).filter(Boolean);
 /** variant なしの文字の色 (`text-<色>-<濃さ>`) の指定。 */
 const textColors = (el: Element) => tokens(el).filter((t) => /^text-[a-z]+-\d{2,3}$/.test(t));
+/** `text-<色>-<濃さ>` の色相 (`emerald` など)。 */
+const hueOf = (token: string) => token.match(/^text-([a-z]+)-\d{2,3}$/)?.[1];
 
 const TONES = Object.keys(PAYER_TONE) as PricingPayerTone[];
+// 払う人を表す色相 (お店 = 緑・お客様側 = 青)。「どちらもあり得る」の灰は、ふつうの文字と同じ色なので含めない。
+const PAYER_HUES = (['shop', 'customer'] as const).map((tone) => hueOf(PAYER_TONE[tone].focal));
 
 describe('料金の数字の色 (PAYER_TONE.focal)', () => {
   it.each(TONES)('%s: 白の上で 4.5:1 以上 (小さい数字でも読める)', (tone) => {
@@ -61,7 +65,7 @@ describe('料金の数字の色 (PAYER_TONE.focal)', () => {
     }
   });
 
-  it.each(['ja', 'en'] as const)('%s 計算機: 利用料の数字の色は、その場面で払う人の色ただ 1 つ。ほかの項は払う人の色を使わない', (locale) => {
+  it.each(['ja', 'en'] as const)('%s 計算機: 利用料の数字の色は、その場面で払う人の色ただ 1 つ。ほかの項は払う人を表す色 (緑・青) を使わない', (locale) => {
     const copy = PRICING[locale].calc;
     render(<PricingCalculator copy={copy} rates={disclosedPricingRates()} presets={[100, 1_000, 10_000]} defaultAmount={1_000} />);
     const tones = new Set<string>();
@@ -73,8 +77,10 @@ describe('料金の数字の色 (PAYER_TONE.focal)', () => {
       const want = PAYER_TONE[mode.payer.tone].focal;
       expect(textColors(values[1]), mode.id).toEqual([want]);
       for (const other of [values[0], values[2]]) {
-        expect(textColors(other), mode.id).toHaveLength(1);
-        expect(contrastRatio(rgbOf(textColors(other)[0]), WHITE)).toBeGreaterThanOrEqual(4.5);
+        const colors = textColors(other);
+        expect(colors, mode.id).toHaveLength(1);
+        expect(PAYER_HUES, `${mode.id}: ${colors[0]}`).not.toContain(hueOf(colors[0]));
+        expect(contrastRatio(rgbOf(colors[0]), WHITE)).toBeGreaterThanOrEqual(4.5);
       }
       tones.add(mode.payer.tone);
     }
