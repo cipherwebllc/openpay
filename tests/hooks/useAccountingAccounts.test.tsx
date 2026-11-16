@@ -272,33 +272,63 @@ describe('useAccountingAccounts: 別のタブの変更の取り込み', () => {
     expect(result.current.accounts).toEqual({ debit: '現金', credit: '売上' });
   });
 
-  it('保存値を読めないときに 1 項目を書いても、もう片方は今の名前のまま書く (既定で消さない)', async () => {
+  it('storage を読めない (getItem が throw) ときは書かない: 画面は新しい名前・保存値はそのまま・読めた次の書き込みで一緒に書く', async () => {
     save({ debit: '現金', credit: '売上' });
     const { result } = await mountHook();
     vi.spyOn(logger, 'warn').mockImplementation(() => undefined);
-    const getItem = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
-      throw new Error('SecurityError');
-    });
-    act(() => result.current.setAccount('debit', '普通預金'));
-    getItem.mockRestore();
-    expect(stored()).toEqual({ debit: '普通預金', credit: '売上' });
-    expect(result.current.accounts).toEqual({ debit: '普通預金', credit: '売上' });
-  });
-
-  it('保存値を読めないときに 2 項目を続けて書いても (同じ処理の中)、先に書いた項目を消さない', async () => {
-    save({ debit: '現金', credit: '売上' });
-    const { result } = await mountHook();
-    vi.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    const setItem = vi.spyOn(Storage.prototype, 'setItem');
     const getItem = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
       throw new Error('SecurityError');
     });
     act(() => {
+      // 書き出しのときと同じく、同じ処理の中で 2 項目を続けて確定する。
       result.current.setAccount('debit', '普通預金');
       result.current.setAccount('credit', '売上金');
     });
-    getItem.mockRestore();
-    expect(stored()).toEqual({ debit: '普通預金', credit: '売上金' });
+    expect(setItem).not.toHaveBeenCalled();
     expect(result.current.accounts).toEqual({ debit: '普通預金', credit: '売上金' });
+    getItem.mockRestore();
+    expect(stored()).toEqual({ debit: '現金', credit: '売上' });
+    // 前面に戻っても、まだ保存できていない名前を保存値 (前の名前) に戻さない。
+    focusTab();
+    expect(result.current.accounts).toEqual({ debit: '普通預金', credit: '売上金' });
+    // 読めるようになった次の書き込みで、覚えていた項目も一緒に書く。
+    act(() => result.current.setAccount('credit', '売上金'));
+    expect(stored()).toEqual({ debit: '普通預金', credit: '売上金' });
+  });
+
+  it('別のタブが貸方を既定に戻した後、このタブが storage を読めないまま借方を変えても、貸方を前の名前に戻さない', async () => {
+    save({ debit: '現金', credit: '売上' });
+    const a = await mountHook();
+    const b = await mountHook();
+    act(() => b.result.current.setAccount('credit', ''));
+    expect(stored()).toEqual({ debit: '現金', credit: '' });
+    vi.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    const getItem = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new Error('SecurityError');
+    });
+    act(() => a.result.current.setAccount('debit', '普通預金'));
+    getItem.mockRestore();
+    // A の古い state (貸方 = 売上) の全体では書かない。
+    expect(stored()).toEqual({ debit: '現金', credit: '' });
+    // 読めるようになって前面に戻ると、B の変更 (貸方 = 既定) を取り込み、A の借方は覚えたまま。
+    focusTab();
+    expect(a.result.current.accounts).toEqual({ debit: '普通預金', credit: '売上高' });
+    act(() => a.result.current.setAccount('debit', '普通預金'));
+    expect(stored()).toEqual({ debit: '普通預金', credit: '' });
+  });
+
+  it.each([
+    ['保存の key が無い', () => window.localStorage.removeItem(KEY)],
+    ['保存値が JSON でない', () => window.localStorage.setItem(KEY, '{not json')],
+  ])('%s ときに 1 項目を書くと、もう片方は今の名前のまま書く (既定で消さない)', async (_label, breakStorage) => {
+    save({ debit: '現金', credit: '売上' });
+    const { result } = await mountHook();
+    vi.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    breakStorage();
+    act(() => result.current.setAccount('debit', '普通預金'));
+    expect(stored()).toEqual({ debit: '普通預金', credit: '売上' });
+    expect(result.current.accounts).toEqual({ debit: '普通預金', credit: '売上' });
   });
 
   it('unmount した後は取り込まない (listener を外す)', async () => {

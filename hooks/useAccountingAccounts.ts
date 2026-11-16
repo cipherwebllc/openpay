@@ -5,10 +5,13 @@
 // - 読むのは mount のときと、このタブが前面に戻ったとき (focus・visibilitychange で visible)。mount では書かない
 //   (履歴ページを開くだけで保存の key を作らない)。hydrate の前は既定の科目。
 // - 書くのは setAccount のときだけで、その場で (同期で) 書く。最新の保存値を読み直し、変えた項目だけを置き換える
-//   (古い state の全体を書くと、別のタブが変えたもう片方の項目を消すため)。読み直しと書き込みは 1 つの同期の処理で、
-//   タブをまたぐロックは取らない: 2 つのタブが同じ瞬間 (この処理の途中) に別々の項目を確定したときだけ、先に書いた
-//   方の項目が消え得る (残る限界。人の操作では起きない間隔)。
-// - 保存値が無い・読めないときは、今の名前を保つ (見えている名前を、読めなかっただけで既定の科目に戻さない)。
+//   (古い state の全体を書くと、別のタブが変えたもう片方の項目を消す・戻すため)。読み直しと書き込みは 1 つの同期の
+//   処理で、タブをまたぐロックは取らない: 2 つのタブが同じ瞬間 (この処理の途中) に別々の項目を確定したときだけ、
+//   先に書いた方の項目が消え得る (残る限界。人の操作では起きない間隔)。
+// - storage を読めない (getItem が throw) ときは、取り込まず、書きもしない: 今の名前を保ち、変えた項目は覚えておいて
+//   次に読めたときに書く (読めないまま古い state の全体を書くと、別のタブが変えた項目を戻すため)。
+// - 保存の key が無い・保存値が JSON でないときは、守る保存値が無いので、今の名前を土台に書く。取り込みはしない
+//   (見えている名前を既定の科目に戻さない)。
 // 共通の useLocalStorageSettings は使わない (履歴ページに共有の chunk を足さないため・項目が 2 つで組も無い)。
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -19,36 +22,54 @@ import {
   type AccountingAccounts,
   type AccountSide,
 } from '@/lib/accountingAccounts';
-import { safeGet, safeSet } from '@/lib/storage';
+import { logger } from '@/lib/logger';
+import { safeSet } from '@/lib/storage';
 
 export const ACCOUNTING_ACCOUNTS_STORAGE_KEY = 'openpay:accounting-accounts:v1';
 
 /**
- * 保存値を保存の形で読む。壊れた項目は、その項目だけ既定 (空文字)。
- * 保存の key が無い・読めない (storage が throw・JSON でない) ときは null — 呼ぶ側は、今の名前を保つ。
+ * 保存値を読む。
+ * - readable: false = storage を読めない (getItem が throw)。別のタブの保存値があるかどうかが分からない。
+ * - readable: true・value: null = 保存の key が無い・保存値が JSON でない (守る保存値が無い)。
+ * - readable: true・value あり = 保存の形にそろえた値 (壊れた項目は、その項目だけ既定 = 空文字)。
+ * 失敗の warn は lib/storage.ts の safeGet と同じ (1 回の読みの失敗で 1 回)。safeGet を使わないのは、
+ * 「読めない」と「無い」を分けるため。
  */
-function readStoredAccounts(): AccountingAccounts | null {
-  const raw = safeGet<unknown>(ACCOUNTING_ACCOUNTS_STORAGE_KEY, undefined);
-  return raw === undefined ? null : normalizeAccountingAccounts(raw);
+function readStoredAccounts(): { readable: false } | { readable: true; value: AccountingAccounts | null } {
+  let raw: string | null;
+  try {
+    raw = window.localStorage.getItem(ACCOUNTING_ACCOUNTS_STORAGE_KEY);
+  } catch (error) {
+    logger.warn('localStorage.get failed', { key: ACCOUNTING_ACCOUNTS_STORAGE_KEY, error });
+    return { readable: false };
+  }
+  if (raw === null) return { readable: true, value: null };
+  try {
+    return { readable: true, value: normalizeAccountingAccounts(JSON.parse(raw)) };
+  } catch (error) {
+    logger.warn('localStorage.get failed', { key: ACCOUNTING_ACCOUNTS_STORAGE_KEY, error });
+    return { readable: true, value: null };
+  }
 }
 
 export function useAccountingAccounts() {
   const [saved, setSaved] = useState<AccountingAccounts>(EMPTY_ACCOUNTING_ACCOUNTS);
   const [hydrated, setHydrated] = useState(false);
-  // setAccount が、保存値を読めないときの土台に使う「今の名前」(描画のたびに合わせる)。
+  // 保存の key が無い・JSON でないときに、書き込みの土台に使う「今の名前」(描画のたびに合わせる)。
   const savedRef = useRef(saved);
   savedRef.current = saved;
-  // 書けなかった項目 (容量超過・private mode 等)。その mount の間は店が入れた名前で書き出せるように、前面に戻った
-  // ときの取り込みで保存値 (前の名前) に戻さず、次に書くときに一緒に書き直す。
+  // まだ保存できていない項目 (storage を読めなかった・書けなかった = 容量超過・private mode 等)。その mount の間は
+  // 店が入れた名前で書き出せるように、前面に戻ったときの取り込みで保存値 (前の名前) に戻さず、次に書くときに
+  // 一緒に書き直す。
   const unsavedRef = useRef<Partial<AccountingAccounts>>({});
 
   useEffect(() => {
     const pull = () => {
       const stored = readStoredAccounts();
-      // 保存値が無い・読めないときは取り込まない: 画面に見えている名前 (= CSV に出る名前) を、読めなかっただけで
+      // 読めない・保存値が無いときは取り込まない: 画面に見えている名前 (= CSV に出る名前) を、読めなかっただけで
       // 既定の科目に戻さない。mount のときは state が既定のままなので、結果は「既定の科目」で同じ。
-      if (stored === null) return;
-      const next = { ...stored, ...unsavedRef.current };
+      if (!stored.readable || stored.value === null) return;
+      const next = { ...stored.value, ...unsavedRef.current };
       setSaved((cur) => (cur.debit === next.debit && cur.credit === next.credit ? cur : next));
     };
     pull();
@@ -68,16 +89,14 @@ export function useAccountingAccounts() {
   const setAccount = useCallback((side: AccountSide, name: string) => {
     const value = normalizeAccountingAccounts({ [side]: name })[side];
     const unsaved = { ...unsavedRef.current, [side]: value };
-    // 土台は最新の保存値。無い (初めての保存)・読めないときは、今の名前 (もう片方の項目を既定で消さない)。
-    unsavedRef.current = safeSet(ACCOUNTING_ACCOUNTS_STORAGE_KEY, {
-      ...(readStoredAccounts() ?? savedRef.current),
-      ...unsaved,
-    })
-      ? {}
-      : unsaved;
-    // 同じ処理の中で続けて呼ばれても (書き出しのときに 2 つの入力を続けて確定する)、次の呼び出しの土台に
-    // この項目が入っているように、描画を待たずに合わせておく。
-    savedRef.current = { ...savedRef.current, [side]: value };
+    const stored = readStoredAccounts();
+    // 読めないときは書かない (変えた項目は覚えておく)。読めたら、最新の保存値に、変えた項目だけを重ねて書く。
+    // 保存値が無いときの土台は今の名前。
+    unsavedRef.current =
+      stored.readable &&
+      safeSet(ACCOUNTING_ACCOUNTS_STORAGE_KEY, { ...(stored.value ?? savedRef.current), ...unsaved })
+        ? {}
+        : unsaved;
     setSaved((cur) => (cur[side] === value ? cur : { ...cur, [side]: value }));
   }, []);
 
