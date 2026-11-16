@@ -153,7 +153,7 @@ const ja: GuideContent = {
     {
       n: 2,
       title: 'OpenPay で同じ金額の QR を表示',
-      body: '別端末 (またはレジ端末) で OpenPay に同じ金額を入力して QR を表示。厳密に合わせたい場合はレシート番号を「メモ」へ (任意)。',
+      body: '別端末 (またはレジ端末) で OpenPay に同じ金額を入力して QR を表示。',
     },
     {
       n: 3,
@@ -163,7 +163,7 @@ const ja: GuideContent = {
     {
       n: 4,
       title: '着金を確認してからレジを締める',
-      body: 'QR 画面の「残高の増加を検知」は、この支払いを特定するものではありません。取引履歴かブロックチェーン Explorer で該当する支払いを確かめてから、商品を渡してレジを締めます。',
+      body: 'QR 画面の「残高の増加を検知」は、この支払いを特定するものではありません。お店のウォレットかブロックチェーン Explorer で該当する入金を確かめてから、商品を渡してレジを締めます。',
     },
   ],
   safetyNote:
@@ -171,13 +171,12 @@ const ja: GuideContent = {
 
   reconcileTitle: '閉店後: 売上の付け合わせ',
   reconcileBody:
-    'レジの「OpenPay 決済」合計と、OpenPay の着金記録を突き合わせます。',
+    'レジの「OpenPay 決済」合計と、お店のウォレットの入金を突き合わせます。',
   reconcileBullets: [
-    '基本: POS の売上額と時刻で照合 (例: 14:32 の ¥1,200)。履歴は利用料を引いた純額 (例: 1,188 JPYC) で、行を開くと売上総額 (1,200 JPYC) が出ます',
-    '厳密: 会計時にメモへ入れたレシート番号で 1 対 1 照合',
-    'まとめて: 「履歴」の CSV をレジの「その他決済」明細と突合。freee／マネーフォワード／弥生の取込形式に対応しています',
+    '基本: POS の売上額と時刻で照合 (例: 14:32 の ¥1,200)。JPYC のガス代不要の支払いでは、ウォレットに届くのは利用料を引いた額です (例: 1,188 JPYC)',
+    'まとめて: ブロックチェーン Explorer でお店のウォレットの入金の一覧を開き、レジの「その他決済」明細と突き合わせます',
   ],
-  reconcileImage: { file: 'history-reconcile.svg', alt: 'POS の明細と OpenPay の履歴を時刻・番号で突き合わせる図 (履歴一覧は純額表示)' },
+  reconcileImage: { file: 'history-reconcile.svg', alt: 'POS の明細と、お店のウォレットの入金を時刻・金額で突き合わせる図 (ウォレットには利用料を引いた額が届く)' },
 
   posTitle: 'どの POS レジを使えばいい？',
   posBody:
@@ -219,7 +218,7 @@ const ja: GuideContent = {
     },
     {
       q: '二重に売上が記録されない？',
-      a: 'レジは「売上の記録」、OpenPay は「実際の着金」を担います。閉店時に金額 (またはレシート番号) で突き合わせれば、ズレを防げます。',
+      a: 'レジは「売上の記録」、OpenPay は「実際の着金」を担います。閉店時に金額と時刻で突き合わせれば、ズレを防げます。',
     },
     {
       q: '返金したいときは？',
@@ -297,7 +296,7 @@ const en: GuideContent = {
     {
       n: 2,
       title: 'Show the same amount as an OpenPay QR',
-      body: 'On a separate device (or the POS device), enter the same amount in OpenPay and show the QR. For precise books, put the receipt number in “memo” (optional).',
+      body: 'On a separate device (or the POS device), enter the same amount in OpenPay and show the QR.',
     },
     {
       n: 3,
@@ -307,7 +306,7 @@ const en: GuideContent = {
     {
       n: 4,
       title: 'Confirm the payment, then close',
-      body: 'The QR screen’s “Balance increase detected” hint does not identify this payment. Check the payment in transaction history or a blockchain explorer before handing over goods and closing the sale.',
+      body: 'The QR screen’s “Balance increase detected” hint does not identify this payment. Check the incoming payment in your shop wallet or a blockchain explorer before handing over goods and closing the sale.',
     },
   ],
   safetyNote:
@@ -315,13 +314,12 @@ const en: GuideContent = {
 
   reconcileTitle: 'After closing — reconciling sales',
   reconcileBody:
-    'Match your POS “OpenPay” total against OpenPay’s received records.',
+    'Match your POS “OpenPay” total against the incoming payments in your shop wallet.',
   reconcileBullets: [
-    'Basic: match by POS sale amount and time (e.g. ¥1,200 at 14:32). History shows the net after the usage fee (e.g. 1,188 JPYC); open the entry to see the gross sale amount (1,200 JPYC)',
-    'Precise: one-to-one match by the receipt number you put in the memo',
-    'In bulk: export CSV from “History” and match against POS “other payment” entries. Supports freee / Money Forward / Yayoi import formats',
+    'Basic: match by POS sale amount and time (e.g. ¥1,200 at 14:32). For gasless JPYC payments, your wallet receives the amount after the usage fee (e.g. 1,188 JPYC)',
+    'In bulk: open your shop wallet’s incoming transfers in a blockchain explorer and match them against POS “other payment” entries',
   ],
-  reconcileImage: { file: 'history-reconcile.svg', alt: 'Matching POS entries with OpenPay history by time and receipt number (history lists the net amount)' },
+  reconcileImage: { file: 'history-reconcile.svg', alt: 'Matching POS entries with your shop wallet’s incoming payments by time and amount (the wallet receives the amount after the usage fee)' },
 
   posTitle: 'Which POS should you use?',
   posBody:
@@ -363,7 +361,7 @@ const en: GuideContent = {
     },
     {
       q: 'Won’t sales be double-counted?',
-      a: 'The POS records the sale; OpenPay records the actual receipt. Reconcile by amount (or receipt number) at closing to avoid drift.',
+      a: 'The POS records the sale; OpenPay records the actual receipt. Reconcile by amount and time at closing to avoid drift.',
     },
     {
       q: 'How do refunds work?',

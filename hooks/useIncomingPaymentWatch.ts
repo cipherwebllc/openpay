@@ -7,7 +7,8 @@
 //
 // ⚠️ これは「何かが着金した」ことを店員の目の前で素早く示すための検知ヒントに
 // すぎない。THIS 取引が完了した保証ではない (同一アドレスへの無関係な並行着金でも
-// 発火しうる)。正本はオンチェーン Explorer / /history。誤検知を許容できる用途
+// 発火しうる)。正本はお店のウォレット / オンチェーン Explorer (お店のブラウザの /history には、
+// お客様が自分のスマホで払った決済が入らない)。誤検知を許容できる用途
 // (対面でレジ横の安心表示) に限る。
 //
 // 残高取得は useErc20BalanceAndChain と同じく wagmi useReadContract +
@@ -73,7 +74,7 @@ export function useIncomingPaymentWatch(params: {
 
   // A payment arriving before this fresh read completes is part of the baseline, so may
   // not trigger the hint. Balance deltas cannot identify an invoice; the UI directs the
-  // merchant to transaction history even while acquiring the baseline.
+  // merchant to the shop wallet or a blockchain explorer even while acquiring the baseline.
   // baseline 未確定かつ watch 有効で、残高を初めて取得できたら baseline に固定する。
   // 以降のポーリングでは上書きしない (delta 計測の基準点を保つ)。
   if (watchActive && baselineRef.current === null && currentBalance !== undefined) {

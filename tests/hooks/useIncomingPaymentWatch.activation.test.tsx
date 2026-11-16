@@ -124,15 +124,22 @@ describe('X10: activation-specific fresh balance', () => {
 
   it('Japanese and English hints describe balance growth and do not confirm an invoice', () => {
     // 2026-10 磨き上げ P5: 短い状態 (ピル) と注記に分けた。注記で「この支払いとは限らない」「直後は検知できない」
-    // 「結果は取引履歴で」を伝え続ける (決済の確定に見せない)。
+    // 「結果はお店のウォレットかブロックチェーン Explorer で」を伝え続ける (決済の確定に見せない)。
+    // 確かめ先に取引履歴を挙げない: 履歴に行を書くのは支払いの操作をしたブラウザだけで、
+    // お客様が自分のスマホで払った決済は、お店のブラウザの履歴に入らない。
     expect(ja.QrGenerator.paymentReceived).toContain('残高');
     expect(ja.QrGenerator.paymentReceivedNote).toContain('この支払いとは限りません');
-    expect(ja.QrGenerator.paymentReceivedNote).toContain('取引履歴');
     expect(en.QrGenerator.paymentReceived).toContain('Balance');
     expect(en.QrGenerator.paymentReceivedNote).toContain('may not be this payment');
     expect(ja.QrGenerator.paymentWatchingNote).toContain('表示した直後に届いた支払い');
     expect(en.QrGenerator.paymentWatchingNote).toContain('right after this screen opens');
-    expect(ja.QrGenerator.paymentWatchingNote).toContain('取引履歴');
-    expect(en.QrGenerator.paymentWatchingNote).toContain('history');
+    for (const note of [ja.QrGenerator.paymentReceivedNote, ja.QrGenerator.paymentWatchingNote]) {
+      expect(note).toContain('お店のウォレットかブロックチェーン Explorer');
+      expect(note).not.toContain('履歴');
+    }
+    for (const note of [en.QrGenerator.paymentReceivedNote, en.QrGenerator.paymentWatchingNote]) {
+      expect(note).toContain('your shop wallet or a blockchain explorer');
+      expect(note).not.toMatch(/history/i);
+    }
   });
 });
