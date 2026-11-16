@@ -1747,7 +1747,8 @@ on-chain 検証経路 (実 `getTransactionReceipt` → 実 JPYC `Transfer` log �
 flag ON + forwarder 設定済の testnet (Amoy / Fuji / Kairos) で実 settle を確認する。route テストは
 forwarderRecover を mock しているため、**実 on-chain 分割の実証はこの手順のみ**:
 1. **モバイル 店頭 (storefront・店舗負担)**: 注文 → 顧客は原価のみ支払い → settle で merchant = 原価−1%・
-   `FEE_RECEIVER` = 1% が同一 tx で着金することを explorer で確認。履歴/CSV が feeAmount (システム利用料) 記帳。
+   `FEE_RECEIVER` = 1% が同一 tx で着金することを explorer で確認。店主の端末 (サインインして受注の画面を開いた後) の履歴/CSV が feeAmount (システム利用料) 記帳
+   (払った側の履歴に「受取」の行が出るのは、払う人 = 受取先のときだけ・2026-11-17 から)。
 2. **モバイル 事前 (preorder・顧客上乗せ)**: 客の表示総額 = 原価+3% → merchant = 原価満額・`FEE_RECEIVER` = 3%。
 3. **モバイル 事前 (preorder・店舗負担)**: 客 = 原価のみ → merchant = 原価−3%・`FEE_RECEIVER` = 3%。
 4. **改竄耐性**: 改ざんした feeValue で relay POST → `fee_value_mismatch` で拒否 (server 権威・率は再計算)。
@@ -3018,7 +3019,7 @@ console.log(response.status, await response.json());
 - [ ] https://faucet.circle.com で Arc testnet USDC を取得し、chain ID 5042002 に接続。
 - [ ] `/create` で USDC / Arc を選ぶ。通常決済固定、cross-chain 選択なし、ガスは USDC・別トークン不要の案内を確認。
 - [ ] `/pay` とレジ `/checkout` で少額の標準決済を実行。gasless URL は拒否されることを確認。
-- [ ] 履歴・払い手控え・レシートに宛先と USDC 金額が正しく記録され、receipt 検出が完了することを確認。
+- [ ] 払い手控え・レシートに宛先と USDC 金額が正しく記録され、receipt 検出が完了することを確認 (履歴の「受取」の行は、払う人 = 受取先のときだけ・2026-11-17 から)。
 - [ ] Explorer リンクが `https://explorer.testnet.arc.io/tx/<hash>` で、送金先・金額・成功状態が一致することを確認。
 - [ ] Arc の ERC-20 表示は 6 decimals、native gas は 18 decimals。別チェーンへの bridge / tip / @handle / Store は本 smoke 対象外。
 **実施記録 (2026-09-17・Fable)**: 上記を Arc testnet で完走。実 wagmi injected 経路 (Playwright に EIP-1193 provider を注入し、テスト鍵で `eth_sendTransaction` を署名) で `/ja/pay?…chain=arc&mode=standard` から 0.5 USDC を標準決済 → 成功画面 (Tx/ブロック/Explorer リンク) → `/ja/history` に支払い+受取の 2 行 (chainSlug=arc) → `/ja/scan` の払い手控えに「USDC / Arc Testnet」と Explorer リンク。on-chain: [tx 0x0756edde…65aa2e](https://explorer.testnet.arc.io/tx/0x0756eddee9fb890364e23e32eca9f38bd8f7f8c1dace27d171f8015c0565aa2e) status=success・block 62422950・gasUsed 48,734・20 gwei (≈0.000975 USDC)。
