@@ -4,6 +4,7 @@ import { usePaymentHistory } from '@/hooks/usePaymentHistory';
 import { HISTORY_STORAGE_KEY, loadHistory } from '@/lib/history';
 import { loadPayerReceipts } from '@/lib/payerReceipt';
 
+// 他店への支払い (払った人 ≠ 受取先)。履歴の行 (「受取」) は書かず、「支払い」の控えだけを残す。
 const CTX = {
   chainId: 80002,
   chainSlug: 'polygon' as const,
@@ -21,6 +22,8 @@ const CTX = {
   storeName: '',
   note: '',
 };
+// 受取先 = 自分 (払った人と受取先が同じアドレス。表記の大文字小文字は違う)。履歴の行も書く。
+const SELF = { ...CTX, customer: '0xMERCHANT' as `0x${string}` };
 
 const NO_STANDARD = {
   data: undefined,
@@ -32,7 +35,8 @@ const NO_STANDARD = {
 
 const NO_GASLESS = { data: undefined, error: null };
 
-describe('usePaymentHistory', () => {
+// 行の値の検査。会計は「受取先 = 自分」(SELF) = 払った側のブラウザが履歴の行を書く、ただ 1 つの場合。
+describe('usePaymentHistory: 受取先 = 自分 のとき、履歴の行を書く', () => {
   beforeEach(() => {
     window.localStorage.clear();
   });
@@ -40,7 +44,7 @@ describe('usePaymentHistory', () => {
   it('gasless success → status=success の batch entry を append', () => {
     renderHook(() =>
       usePaymentHistory(
-        CTX,
+        SELF,
         {
           data: {
             txHash: '0xTx',
@@ -63,7 +67,7 @@ describe('usePaymentHistory', () => {
   it('gasless success: saleAmount / networkFeeEquivalent / feeBreakdownVersion を分離記録', () => {
     renderHook(() =>
       usePaymentHistory(
-        CTX,
+        SELF,
         {
           data: {
             txHash: '0xTxS',
@@ -77,16 +81,16 @@ describe('usePaymentHistory', () => {
       ),
     );
     const e = loadHistory()[0];
-    expect(e.saleAmount).toBe('1000'); // CTX.saleAmount (gross)
-    expect(e.networkFeeEquivalent).toBe('10'); // CTX.networkFeeEquivalent (gas 相当)
-    expect(e.feeAmount).toBe('10'); // CTX.feeAmount (サービス料・分離後はこれのみ)
+    expect(e.saleAmount).toBe('1000'); // SELF.saleAmount (gross)
+    expect(e.networkFeeEquivalent).toBe('10'); // SELF.networkFeeEquivalent (gas 相当)
+    expect(e.feeAmount).toBe('10'); // SELF.feeAmount (サービス料・分離後はこれのみ)
     expect(e.feeBreakdownVersion).toBe(1); // native v3 = 分離済
   });
 
   it('circle gasless: networkFeeEquivalent は null (circlePaymasterNetUsdc 側に検証付きで保持)', () => {
     renderHook(() =>
       usePaymentHistory(
-        CTX,
+        SELF,
         {
           data: {
             txHash: '0xTxC',
@@ -113,7 +117,7 @@ describe('usePaymentHistory', () => {
   it('gasless reverted (success=false) → status=reverted で記録', () => {
     renderHook(() =>
       usePaymentHistory(
-        CTX,
+        SELF,
         {
           data: {
             txHash: '0xTxR',
@@ -133,7 +137,7 @@ describe('usePaymentHistory', () => {
   it('gasless error → status=error の entry (txHash=null)', () => {
     renderHook(() =>
       usePaymentHistory(
-        CTX,
+        SELF,
         { data: undefined, error: new Error('paymaster rejected') },
         NO_STANDARD,
       ),
@@ -147,7 +151,7 @@ describe('usePaymentHistory', () => {
 
   it('standard success (fee tx あり) → merchant + fee の 2 件が入る', () => {
     renderHook(() =>
-      usePaymentHistory(CTX, NO_GASLESS, {
+      usePaymentHistory(SELF, NO_GASLESS, {
         data: {
           merchantTxHash: '0xMTx',
           feeTxHash: '0xFTx',
@@ -170,7 +174,7 @@ describe('usePaymentHistory', () => {
   // 第 7 回レビュー A9: 手数料 leg の block は手数料 tx 自身のもの (店舗送金の block を流用しない)。
   it('standard success: 手数料 leg の blockNumber は手数料 receipt の block・店舗 leg は店舗の block', () => {
     renderHook(() =>
-      usePaymentHistory(CTX, NO_GASLESS, {
+      usePaymentHistory(SELF, NO_GASLESS, {
         data: {
           merchantTxHash: '0xMTxA9',
           feeTxHash: '0xFTxA9',
@@ -190,7 +194,7 @@ describe('usePaymentHistory', () => {
 
   it('standard success: 手数料の block が取れていなければ、手数料 leg の blockNumber は空 (店舗の block を入れない)', () => {
     renderHook(() =>
-      usePaymentHistory(CTX, NO_GASLESS, {
+      usePaymentHistory(SELF, NO_GASLESS, {
         data: {
           merchantTxHash: '0xMTxA9b',
           feeTxHash: '0xFTxA9b',
@@ -209,7 +213,7 @@ describe('usePaymentHistory', () => {
 
   it('standard success (fee tx なし、極小 fee=0) → merchant のみ 1 件', () => {
     renderHook(() =>
-      usePaymentHistory(CTX, NO_GASLESS, {
+      usePaymentHistory(SELF, NO_GASLESS, {
         data: {
           merchantTxHash: '0xMTx2',
           feeTxHash: undefined,
@@ -228,7 +232,7 @@ describe('usePaymentHistory', () => {
 
   it('standard merchant-error → status=error の standard-merchant entry', () => {
     renderHook(() =>
-      usePaymentHistory(CTX, NO_GASLESS, {
+      usePaymentHistory(SELF, NO_GASLESS, {
         data: undefined,
         phase: 'merchant-error',
         merchantTxHash: '0xMTxRevert',
@@ -245,7 +249,7 @@ describe('usePaymentHistory', () => {
 
   it('standard fee-error → status=error の standard-fee entry (merchant 着金済)', () => {
     renderHook(() =>
-      usePaymentHistory(CTX, NO_GASLESS, {
+      usePaymentHistory(SELF, NO_GASLESS, {
         data: undefined,
         phase: 'fee-error',
         merchantTxHash: '0xMTxOk',
@@ -261,7 +265,7 @@ describe('usePaymentHistory', () => {
 
   it('fee-awaiting の reload 復元は merchant 成功だけを保持し、hash 無し fee-error 行を増やさない', () => {
     renderHook(() =>
-      usePaymentHistory(CTX, NO_GASLESS, {
+      usePaymentHistory(SELF, NO_GASLESS, {
         data: undefined,
         phase: 'fee-error',
         merchantTxHash: '0xMTxRestored',
@@ -286,7 +290,7 @@ describe('usePaymentHistory', () => {
     const longMsg = 'X'.repeat(2000);
     renderHook(() =>
       usePaymentHistory(
-        CTX,
+        SELF,
         { data: undefined, error: new Error(longMsg) },
         NO_STANDARD,
       ),
@@ -311,7 +315,7 @@ describe('usePaymentHistory', () => {
     const { rerender } = renderHook(
       (gaslessData: GaslessData) =>
         usePaymentHistory(
-          CTX,
+          SELF,
           { data: gaslessData, error: null },
           NO_STANDARD,
         ),
@@ -323,7 +327,7 @@ describe('usePaymentHistory', () => {
 
   it('standard merchant-error: error が null のとき errorMessage は null (phase 名 fallback ではない)', () => {
     renderHook(() =>
-      usePaymentHistory(CTX, NO_GASLESS, {
+      usePaymentHistory(SELF, NO_GASLESS, {
         data: undefined,
         phase: 'merchant-error',
         merchantTxHash: '0xMTx',
@@ -340,7 +344,7 @@ describe('usePaymentHistory', () => {
 
   it('standard fee-error: error が null のとき errorMessage は null', () => {
     renderHook(() =>
-      usePaymentHistory(CTX, NO_GASLESS, {
+      usePaymentHistory(SELF, NO_GASLESS, {
         data: undefined,
         phase: 'fee-error',
         merchantTxHash: '0xMTx',
@@ -359,7 +363,7 @@ describe('usePaymentHistory', () => {
   //    merchant success entry を補完 append する。
   it('standard fee-error: merchantBlockNumber 付き → merchant 成功行 + fee 失敗行の 2 件', () => {
     renderHook(() =>
-      usePaymentHistory(CTX, NO_GASLESS, {
+      usePaymentHistory(SELF, NO_GASLESS, {
         data: undefined,
         phase: 'fee-error',
         merchantTxHash: '0xMTxConfirmed',
@@ -383,7 +387,7 @@ describe('usePaymentHistory', () => {
 
   it('standard fee-error: merchantBlockNumber 不在 (sign 直後拒否等) → fee 失敗行のみ', () => {
     renderHook(() =>
-      usePaymentHistory(CTX, NO_GASLESS, {
+      usePaymentHistory(SELF, NO_GASLESS, {
         data: undefined,
         phase: 'fee-error',
         merchantTxHash: '0xMTxNoReceipt',
@@ -402,7 +406,7 @@ describe('usePaymentHistory', () => {
   it('gasless: variables (submitted amounts) が ctx より優先される (amount drift 防御)', () => {
     renderHook(() =>
       usePaymentHistory(
-        { ...CTX, merchantAmount: 9999n, feeAmount: 9999n }, // 後から drift した live ctx
+        { ...SELF, merchantAmount: 9999n, feeAmount: 9999n }, // 後から drift した live ctx
         {
           data: {
             txHash: '0xTxDrift',
@@ -424,7 +428,7 @@ describe('usePaymentHistory', () => {
   it('gasless error: variables が ctx より優先される (error 行でも snapshot)', () => {
     renderHook(() =>
       usePaymentHistory(
-        { ...CTX, merchantAmount: 9999n, feeAmount: 9999n },
+        { ...SELF, merchantAmount: 9999n, feeAmount: 9999n },
         {
           data: undefined,
           error: new Error('paymaster rejected'),
@@ -441,7 +445,7 @@ describe('usePaymentHistory', () => {
   it('standard success: saleAmount 未送信の旧 snapshot は merchant + fee で復元', () => {
     renderHook(() =>
       usePaymentHistory(
-        { ...CTX, merchantAmount: 9999n, feeAmount: 9999n },
+        { ...SELF, merchantAmount: 9999n, feeAmount: 9999n },
         NO_GASLESS,
         {
           data: {
@@ -471,7 +475,7 @@ describe('usePaymentHistory', () => {
 
   it('顧客上乗せ standard は saleAmount (商品小計) を優先し手数料を gross に足さない', () => {
     renderHook(() =>
-      usePaymentHistory(CTX, NO_GASLESS, {
+      usePaymentHistory(SELF, NO_GASLESS, {
         data: {
           merchantTxHash: '0xMtxGross',
           feeTxHash: '0xFtxGross',
@@ -499,7 +503,7 @@ describe('usePaymentHistory', () => {
   it('standard fee-error: lastSubmittedParams が補完 merchant 行にも適用される', () => {
     renderHook(() =>
       usePaymentHistory(
-        { ...CTX, merchantAmount: 9999n, feeAmount: 9999n },
+        { ...SELF, merchantAmount: 9999n, feeAmount: 9999n },
         NO_GASLESS,
         {
           data: undefined,
@@ -522,7 +526,7 @@ describe('usePaymentHistory', () => {
   it('LocalStorage に直接 entry が出る (key=openpay:history:v1)', () => {
     renderHook(() =>
       usePaymentHistory(
-        CTX,
+        SELF,
         {
           data: {
             txHash: '0xTxLs',
@@ -562,8 +566,28 @@ describe('usePaymentHistory: 顧客向け電子レシート (PayerReceipt) 保�
     expect(receipts[0].status).toBe('confirmed');
     expect(receipts[0].receiptId).toBe('0xTxR');
     expect(receipts[0].sourceRoute).toBe('/pay');
-    // 店舗側履歴とは別ストア (history 1 件 + receipt 1 件)。
+    // 他店への支払い: 控えだけ (履歴の「受取」の行は書かない)。
+    expect(loadHistory()).toHaveLength(0);
+  });
+
+  it('受取先 = 自分 の gasless success → 履歴 1 行 + 控え 1 件 (別ストア・控えの中身は払った人の欄のほかは他店への支払いと同じ)', () => {
+    const data = { txHash: '0xTxR' as const, userOpHash: '0xUOR' as const, blockNumber: 1n, success: true };
+    renderHook(() =>
+      usePaymentHistory({ ...CTX, sourceRoute: '/pay', locale: 'ja' }, { data, error: null }, NO_STANDARD),
+    );
+    const [other] = loadPayerReceipts();
+    window.localStorage.clear();
+    renderHook(() =>
+      usePaymentHistory({ ...SELF, sourceRoute: '/pay', locale: 'ja' }, { data, error: null }, NO_STANDARD),
+    );
     expect(loadHistory()).toHaveLength(1);
+    const receipts = loadPayerReceipts();
+    expect(receipts).toHaveLength(1);
+    expect(receipts[0].payerAddress).toBe('0xMERCHANT');
+    expect(other.payerAddress).toBe('0xCustomer');
+    // 時刻 (書いた瞬間の端末の時計) と払った人のほかは、欄ごとに同じ。
+    const rest = (r: (typeof receipts)[number]) => ({ ...r, payerAddress: '', createdAt: '', paidAt: '' });
+    expect(rest(receipts[0])).toEqual(rest(other));
   });
 
   it('gasless reverted → 控えは作らない (status reverted は除外)', () => {
@@ -577,7 +601,7 @@ describe('usePaymentHistory: 顧客向け電子レシート (PayerReceipt) 保�
         NO_STANDARD,
       ),
     );
-    expect(loadHistory()).toHaveLength(1); // reverted は履歴には残る
+    expect(loadHistory()).toHaveLength(0); // 他店への支払い: reverted は履歴にも残らない
     expect(loadPayerReceipts()).toHaveLength(0); // 控えは作らない
   });
 
@@ -649,10 +673,10 @@ describe('usePaymentHistory: 顧客向け電子レシート (PayerReceipt) 保�
     expect(receipts[0].receiptId).toBe('0xpend');
   });
 
-  it('pending かつ txHash 無し (authorizationState 既使用) → 履歴も控えも作らない', () => {
+  it('pending かつ txHash 無し (authorizationState 既使用) → 受取先 = 自分 でも、履歴も控えも作らない', () => {
     renderHook(() =>
       usePaymentHistory(
-        CTX,
+        SELF,
         {
           data: { txHash: null, userOpHash: null, blockNumber: null, success: false, pending: true },
           error: null,
@@ -664,7 +688,7 @@ describe('usePaymentHistory: 顧客向け電子レシート (PayerReceipt) 保�
     expect(loadPayerReceipts()).toHaveLength(0);
   });
 
-  it('再レンダー (同一 txHash の新 data 参照) → receiptId dedupe で控えは 1 件のまま', () => {
+  it('再レンダー (同一 txHash の新 data 参照・受取先 = 自分) → receiptId dedupe で控えは 1 件・履歴も 1 行のまま', () => {
     // 毎回新しいオブジェクト参照を返すが txHash は同一。
     const data = () => ({
       txHash: '0xdup' as `0x${string}`,
@@ -674,7 +698,7 @@ describe('usePaymentHistory: 顧客向け電子レシート (PayerReceipt) 保�
     });
     const { rerender } = renderHook(
       ({ d }: { d: ReturnType<typeof data> }) =>
-        usePaymentHistory({ ...CTX, sourceRoute: '/pay' }, { data: d, error: null }, NO_STANDARD),
+        usePaymentHistory({ ...SELF, sourceRoute: '/pay' }, { data: d, error: null }, NO_STANDARD),
       { initialProps: { d: data() } },
     );
     expect(loadPayerReceipts()).toHaveLength(1);
@@ -733,10 +757,16 @@ describe('usePaymentHistory: 別の intent の確定 (settledOtherIntent)', () =
     success: true,
   };
 
-  it('intent 自体の受取先・金額で履歴と控えを書き、今の画面の店名・注文・明細・メモ・税・インボイス・anchor は付けない', () => {
+  // 履歴の行を書くかは、その intent の受取先が払った人かで決める (今の画面の受取先では決めない)。
+  // 自分宛ての画面 (払った人 = 店 B の受取先。表記の大文字小文字は違う)。
+  const SELF_SCREEN_B = { ...SCREEN_B, customer: '0xMERCHANTB' as `0x${string}` };
+  // 払った人 (SCREEN_B.customer = 0xCustomer) 自身が受取先の intent。
+  const INTENT_SELF = { ...INTENT_A, merchant: '0xCUSTOMER' as `0x${string}` };
+
+  it('自分宛ての画面で、他店への別の intent が確定 → 履歴の行は書かない。控えは intent 自体の受取先・金額で書き、今の画面の店名・注文・明細・インボイスは付けない', () => {
     renderHook(() =>
       usePaymentHistory(
-        SCREEN_B,
+        SELF_SCREEN_B,
         {
           data: SETTLED,
           error: null,
@@ -747,9 +777,36 @@ describe('usePaymentHistory: 別の intent の確定 (settledOtherIntent)', () =
         NO_STANDARD,
       ),
     );
+    expect(loadHistory()).toHaveLength(0);
+
+    const [receipt] = loadPayerReceipts();
+    expect(receipt.merchantAddress).toBe('0xMerchantA');
+    expect(receipt.orderId).toBeUndefined();
+    expect(receipt.merchantName).toBeUndefined();
+    expect(receipt.merchantInvoiceNo).toBeUndefined();
+    expect(receipt.receiptNo).toBeUndefined();
+    expect((receipt.lineItems ?? []).map((item) => item.name)).not.toContain('Item B');
+    expect(receipt.sourceRoute).toBe('/checkout');
+  });
+
+  it('他店宛ての画面で、自分宛ての別の intent が確定 → intent 自体の受取先・金額で履歴と控えを書き、今の画面の店名・注文・明細・メモ・税・インボイス・anchor は付けない', () => {
+    renderHook(() =>
+      usePaymentHistory(
+        SCREEN_B,
+        {
+          data: SETTLED,
+          error: null,
+          variables: INTENT_SELF,
+          settledOtherIntent: true,
+          recoveredIntent: INTENT_SELF,
+        },
+        NO_STANDARD,
+      ),
+    );
     const [entry] = loadHistory();
     expect(entry).toMatchObject({
-      merchant: '0xMerchantA',
+      merchant: '0xCUSTOMER',
+      customer: '0xCustomer',
       merchantAmount: '1000',
       feeReceiver: '0xFeeA',
       saleAmount: '1000',
@@ -769,7 +826,7 @@ describe('usePaymentHistory: 別の intent の確定 (settledOtherIntent)', () =
     expect(entry.anchorAmount ?? null).toBeNull();
 
     const [receipt] = loadPayerReceipts();
-    expect(receipt.merchantAddress).toBe('0xMerchantA');
+    expect(receipt.merchantAddress).toBe('0xCUSTOMER');
     expect(receipt.orderId).toBeUndefined();
     expect(receipt.merchantName).toBeUndefined();
     expect(receipt.merchantInvoiceNo).toBeUndefined();
@@ -778,10 +835,10 @@ describe('usePaymentHistory: 別の intent の確定 (settledOtherIntent)', () =
     expect(receipt.sourceRoute).toBe('/checkout');
   });
 
-  it('帰属を確かめられない (recoveredIntent が null) → 履歴も控えも書かない', () => {
+  it('帰属を確かめられない (recoveredIntent が null) → 自分宛ての画面でも、履歴も控えも書かない', () => {
     renderHook(() =>
       usePaymentHistory(
-        SCREEN_B,
+        SELF_SCREEN_B,
         {
           data: SETTLED,
           error: null,
@@ -796,10 +853,10 @@ describe('usePaymentHistory: 別の intent の確定 (settledOtherIntent)', () =
     expect(loadPayerReceipts()).toHaveLength(0);
   });
 
-  it('画面から送った支払いの確定 (settledOtherIntent=false) は今までどおり画面の文脈で書く', () => {
+  it('画面から送った支払いの確定 (settledOtherIntent=false・自分宛ての画面) は今までどおり画面の文脈で書く', () => {
     renderHook(() =>
       usePaymentHistory(
-        SCREEN_B,
+        SELF_SCREEN_B,
         { data: SETTLED, error: null, settledOtherIntent: false, recoveredIntent: null },
         NO_STANDARD,
       ),
@@ -808,5 +865,157 @@ describe('usePaymentHistory: 別の intent の確定 (settledOtherIntent)', () =
     expect(entry.merchant).toBe('0xMerchantB');
     expect(entry.storeName).toBe('Shop B');
     expect(loadPayerReceipts()[0].orderId).toBe('order-B');
+  });
+});
+
+// 履歴の行 (「受取」) を払った側のブラウザが書くのは、受取先が自分のときだけ。他店への支払い (CTX) は、どの状態でも行を
+// 書かない。「支払い」の控えは今までどおり (成功・pending・店舗着金の確定で 1 件)。
+describe('usePaymentHistory: 他店への支払い (受取先 ≠ 自分) は履歴の行を書かない', () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  type Gasless = Parameters<typeof usePaymentHistory>[1];
+  type Standard = Parameters<typeof usePaymentHistory>[2];
+  const settled = (over: Partial<NonNullable<Gasless['data']>> = {}): Gasless => ({
+    data: { txHash: '0xTx', userOpHash: '0xUO', blockNumber: 1n, success: true, ...over },
+    error: null,
+  });
+  const standard = (over: Partial<Standard>): Standard => ({ ...NO_STANDARD, ...over });
+  const STD_CTX = { payMode: 'standard' as const, gasMode: null };
+
+  // [状態, gasless, standard, 控えの [receiptId, status], 受取先 = 自分 のときの行の [flow, status] (並べ替え済み)]
+  const CASES: [string, Gasless, Standard, [string, string][], [string, string][]][] = [
+    ['gasless 成功', settled(), NO_STANDARD, [['0xTx', 'confirmed']], [['batch', 'success']]],
+    [
+      'gasless pending (relay・hash あり)',
+      settled({ userOpHash: null, blockNumber: null, success: false, pending: true }),
+      NO_STANDARD,
+      [['0xTx', 'pending']],
+      [['batch', 'pending']],
+    ],
+    ['gasless reverted', settled({ success: false }), NO_STANDARD, [], [['batch', 'reverted']]],
+    ['gasless error', { data: undefined, error: new Error('paymaster rejected') }, NO_STANDARD, [], [['batch', 'error']]],
+    [
+      'standard 成功 (fee tx あり)',
+      NO_GASLESS,
+      standard({ data: { merchantTxHash: '0xM', feeTxHash: '0xF', blockNumber: 5n }, phase: 'success' }),
+      [['0xM', 'confirmed']],
+      [['standard-fee', 'success'], ['standard-merchant', 'success']],
+    ],
+    [
+      'standard 成功 (fee tx なし)',
+      NO_GASLESS,
+      standard({ data: { merchantTxHash: '0xM', feeTxHash: undefined, blockNumber: 5n }, phase: 'success' }),
+      [['0xM', 'confirmed']],
+      [['standard-merchant', 'success']],
+    ],
+    [
+      'standard merchant-error',
+      NO_GASLESS,
+      standard({ phase: 'merchant-error', merchantTxHash: '0xM', error: new Error('insufficient gas') }),
+      [],
+      [['standard-merchant', 'error']],
+    ],
+    [
+      'standard fee-error (merchant 着金確定 = merchant の行の補完 + fee の失敗)',
+      NO_GASLESS,
+      standard({ phase: 'fee-error', merchantTxHash: '0xM', merchantBlockNumber: 9n, feeTxHash: '0xF', error: new Error('fee reverted') }),
+      [['0xM', 'confirmed']],
+      [['standard-fee', 'error'], ['standard-merchant', 'success']],
+    ],
+    [
+      'standard fee-error (merchant の block 未確定)',
+      NO_GASLESS,
+      standard({ phase: 'fee-error', merchantTxHash: '0xM', error: new Error('fee write rejected') }),
+      [],
+      [['standard-fee', 'error']],
+    ],
+    [
+      'standard fee-error の reload 復元 (merchant の行の補完だけ)',
+      NO_GASLESS,
+      standard({ phase: 'fee-error', merchantTxHash: '0xM', merchantBlockNumber: 9n, restoredFromStorage: true }),
+      [['0xM', 'confirmed']],
+      [['standard-merchant', 'success']],
+    ],
+  ];
+  const receiptsNow = () => loadPayerReceipts().map((r) => [r.receiptId, r.status]);
+  const rowsNow = () => loadHistory().map((e) => [e.flow, e.status]).sort();
+
+  it.each(CASES)('%s: 履歴の行は 0・控えは今までどおり (受取先 = 自分 なら行を書く)', (_name, gasless, std, receipts, selfRows) => {
+    const ctxOf = (base: typeof CTX) => (std === NO_STANDARD ? base : { ...base, ...STD_CTX });
+    // 他店への支払い。
+    const other = renderHook(() => usePaymentHistory(ctxOf(CTX), gasless, std));
+    expect(loadHistory()).toEqual([]);
+    expect(window.localStorage.getItem(HISTORY_STORAGE_KEY)).toBeNull();
+    expect(receiptsNow()).toEqual(receipts);
+    for (const r of loadPayerReceipts()) expect(r).toMatchObject({ payerAddress: '0xCustomer', merchantAddress: '0xMerchant' });
+    other.unmount();
+
+    // 対照: 同じ状態で、受取先 = 自分 (表記の大文字小文字は違う) なら行を書く。控えの件数は同じ。
+    window.localStorage.clear();
+    renderHook(() => usePaymentHistory(ctxOf(SELF), gasless, std));
+    expect(rowsNow()).toEqual(selfRows);
+    expect(receiptsNow()).toEqual(receipts);
+  });
+
+  it.each([
+    ['同じ表記', '0xMerchant'],
+    ['小文字', '0xmerchant'],
+    ['大文字', '0XMERCHANT'],
+  ])('受取先 = 自分 の判定は大文字小文字を無視する (払った人が %s)', (_label, customer) => {
+    renderHook(() => usePaymentHistory({ ...CTX, customer: customer as `0x${string}` }, settled(), NO_STANDARD));
+    const rows = loadHistory();
+    expect(rows).toHaveLength(1);
+    // 行の欄は渡した表記のまま (判定のために書き換えない)。
+    expect(rows[0]).toMatchObject({ merchant: '0xMerchant', customer });
+  });
+
+  it.each([
+    ['1 文字多い', '0xMerchant0'],
+    ['1 文字少ない', '0xMerchan'],
+    ['未接続 (払った人が分からない)', undefined],
+  ])('払った人が受取先と %s → 自分ではない (行を書かない・控えは書く)', (_label, customer) => {
+    renderHook(() => usePaymentHistory({ ...CTX, customer: customer as `0x${string}` | undefined }, settled(), NO_STANDARD));
+    expect(loadHistory()).toEqual([]);
+    expect(receiptsNow()).toEqual([['0xTx', 'confirmed']]);
+  });
+
+  // 手数料の leg (standard-fee) の行は merchant 欄が feeReceiver になる。書くかどうかは、その支払いの売上の受取先で決める
+  // (売上の行と同じ結果)。払った人 = feeReceiver でも、売上の受取先が他人なら、どちらの行も書かない。
+  it.each<[string, Standard]>([
+    ['成功', standard({ data: { merchantTxHash: '0xM', feeTxHash: '0xF', blockNumber: 5n }, phase: 'success' })],
+    ['fee-error', standard({ phase: 'fee-error', merchantTxHash: '0xM', merchantBlockNumber: 9n, feeTxHash: '0xF', error: new Error('fee reverted') })],
+  ])('通常決済 (%s): 払った人が利用料の受取先 (feeReceiver) でも、売上の受取先が他人なら fee の行も書かない', (_label, std) => {
+    renderHook(() => usePaymentHistory({ ...CTX, ...STD_CTX, customer: '0xFEE' as `0x${string}` }, NO_GASLESS, std));
+    expect(loadHistory()).toEqual([]);
+    expect(receiptsNow()).toEqual([['0xM', 'confirmed']]);
+  });
+
+  it('通常決済: 受取先 = 自分 なら、売上の行と fee の行の両方 (fee の行の merchant 欄は feeReceiver のまま)', () => {
+    renderHook(() =>
+      usePaymentHistory(
+        { ...SELF, ...STD_CTX },
+        NO_GASLESS,
+        standard({ data: { merchantTxHash: '0xM', feeTxHash: '0xF', blockNumber: 5n }, phase: 'success' }),
+      ),
+    );
+    const rows = loadHistory();
+    expect(rows.map((e) => [e.flow, e.merchant]).sort()).toEqual([
+      ['standard-fee', '0xFee'],
+      ['standard-merchant', '0xMerchant'],
+    ]);
+  });
+
+  // 失敗の行は txHash が無く id で重複を落とせないので、その失敗 (Error) が届いたときの会計で 1 回だけ決める。
+  it('gasless error: 他店への支払いの失敗は、後から会計が受取先 = 自分 に変わっても行を書き足さない', () => {
+    const error = new Error('paymaster rejected');
+    const { rerender } = renderHook(
+      ({ ctx }: { ctx: typeof CTX }) => usePaymentHistory(ctx, { data: undefined, error }, NO_STANDARD),
+      { initialProps: { ctx: CTX } },
+    );
+    expect(loadHistory()).toEqual([]);
+    rerender({ ctx: SELF });
+    expect(loadHistory()).toEqual([]);
   });
 });

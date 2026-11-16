@@ -3,6 +3,10 @@
 // 方針: SUT (PaymentForm / usePaymentHistory / lib/history / lib/storage / LocalStorage)
 // は実コードを実行する。境界 mock は wagmi / payment hook / smartAccount / gasQuote のみ。
 // → "決済が成功したとき、本当に LocalStorage に正しい entry が入るか" を実 LocalStorage で確認。
+//
+// 履歴の行 (「受取」) を払った側のブラウザが書くのは、受取先が自分のときだけ (hooks/usePaymentHistory の paidToSelf)。
+// 行の値を確かめるテストは、受取先 (MERCHANT) のウォレットでつないで払う。他店への支払い (CUSTOMER でつなぐ) は、
+// 末尾の describe で「履歴の行は 0・控えは今までどおり」を状態ごとに確かめる。
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
@@ -93,6 +97,7 @@ import {
   loadHistory,
   type HistoryEntry,
 } from '@/lib/history';
+import { loadPayerReceipts } from '@/lib/payerReceipt';
 import { mockHook } from '../_helpers/wagmiMock';
 
 // digit-only addresses to side-step EIP-55 checksum validation (任意 mixed case を
@@ -110,9 +115,10 @@ function setURL(query: string) {
   );
 }
 
-function setAccount(connected: boolean, chainId?: number) {
+// address の既定は MERCHANT = 受取先が自分 (履歴の行を書く)。他店への支払いは CUSTOMER を渡す。
+function setAccount(connected: boolean, chainId?: number, address: Address = MERCHANT) {
   mockHook(useAccount, {
-    address: connected ? CUSTOMER : undefined,
+    address: connected ? address : undefined,
     isConnected: connected,
     chainId: connected ? chainId : undefined,
     chain: connected
@@ -173,7 +179,7 @@ beforeEach(() => {
   setAccount(true, polygonAmoy.id);
 });
 
-describe('PaymentForm → usePaymentHistory → LocalStorage 統合', () => {
+describe('PaymentForm → usePaymentHistory → LocalStorage 統合 (受取先 = 自分)', () => {
   it('gasless 成功: 実 LocalStorage に flow=batch / status=success の entry が入る', async () => {
     setURL(`to=${MERCHANT}&token=jpyc&amount=1000`);
     mockHook(useBatchPayment, {
@@ -203,7 +209,7 @@ describe('PaymentForm → usePaymentHistory → LocalStorage 統合', () => {
     expect(entry.chainId).toBe(polygonAmoy.id);
     expect(entry.chainSlug).toBe('polygon');
     expect(entry.merchant).toBe(MERCHANT);
-    expect(entry.customer).toBe(CUSTOMER);
+    expect(entry.customer).toBe(MERCHANT);
     expect(entry.txHash).toBe(GASLESS_TX);
     expect(entry.userOpHash).toBe(GASLESS_UO);
     expect(entry.blockNumber).toBe('42');
@@ -599,5 +605,151 @@ describe('PaymentForm: 複数決済の累積 (実 LocalStorage シーケンス)'
     const loaded = loadHistory();
     // appendHistory は newest-at-front
     expect(loaded.map((e: HistoryEntry) => e.txHash)).toEqual([tx3, tx2, tx1]);
+  });
+});
+
+// 他店への支払い (払った人 ≠ 受取先): 履歴の行 (「受取」) は書かない。「支払い」の控えは今までどおり
+// (成功・店舗着金の確定で 1 件・失敗と巻き戻りは 0 件)。同じ状態を受取先のウォレットで描くと、行が書かれる。
+describe('PaymentForm: 他店への支払いは履歴の行を書かず、控えだけを残す', () => {
+  const gasless = (over: Record<string, unknown>) => () =>
+    mockHook(useBatchPayment, {
+      mutate: vi.fn(),
+      isPending: false,
+      isSuccess: false,
+      isError: false,
+      data: undefined,
+      error: null,
+      ...over,
+    });
+  const standard = (over: Record<string, unknown>) => () =>
+    mockHook(useStandardPayment, {
+      mutate: vi.fn(),
+      retryFee: vi.fn(),
+      phase: 'idle',
+      isPending: false,
+      isSuccess: false,
+      isError: false,
+      isFeeError: false,
+      isMerchantError: false,
+      data: undefined,
+      error: null,
+      merchantTxHash: undefined,
+      feeTxHash: undefined,
+      ...over,
+    });
+  const settled = (success: boolean) =>
+    gasless({ isSuccess: true, data: { userOpHash: GASLESS_UO, txHash: GASLESS_TX, blockNumber: 42n, success } });
+  const GASLESS_URL = `to=${MERCHANT}&token=jpyc&amount=1000`;
+  const STANDARD_URL = `${GASLESS_URL}&mode=standard`;
+
+  // [状態, URL, hook の状態, 控えの receiptId, 受取先 = 自分 のときの行の flow (並べ替え済み)]
+  const CASES: [string, string, () => void, string[], string[]][] = [
+    ['gasless 成功', GASLESS_URL, settled(true), [GASLESS_TX], ['batch']],
+    ['gasless reverted', GASLESS_URL, settled(false), [], ['batch']],
+    ['gasless エラー', GASLESS_URL, gasless({ isError: true, error: new Error('paymaster rejected') }), [], ['batch']],
+    [
+      'standard 成功 (fee あり)',
+      STANDARD_URL,
+      standard({
+        phase: 'success',
+        isSuccess: true,
+        data: { merchantTxHash: STD_MERCHANT_TX, feeTxHash: STD_FEE_TX, blockNumber: 77n },
+        merchantTxHash: STD_MERCHANT_TX,
+        feeTxHash: STD_FEE_TX,
+      }),
+      [STD_MERCHANT_TX],
+      ['standard-fee', 'standard-merchant'],
+    ],
+    [
+      'standard 成功 (fee なし)',
+      STANDARD_URL,
+      standard({
+        phase: 'success',
+        isSuccess: true,
+        data: { merchantTxHash: STD_MERCHANT_TX, feeTxHash: undefined, blockNumber: 77n },
+        merchantTxHash: STD_MERCHANT_TX,
+      }),
+      [STD_MERCHANT_TX],
+      ['standard-merchant'],
+    ],
+    [
+      'standard merchant-error',
+      STANDARD_URL,
+      standard({
+        phase: 'merchant-error',
+        isError: true,
+        isMerchantError: true,
+        error: new Error('user rejected request'),
+        merchantTxHash: STD_MERCHANT_TX,
+      }),
+      [],
+      ['standard-merchant'],
+    ],
+    [
+      'standard fee-error (店舗着金は確定 = merchant の行の補完 + fee の失敗)',
+      STANDARD_URL,
+      standard({
+        phase: 'fee-error',
+        isError: true,
+        isFeeError: true,
+        error: new Error('fee tx reverted'),
+        merchantTxHash: STD_MERCHANT_TX,
+        feeTxHash: STD_FEE_TX,
+        merchantBlockNumber: 77n,
+      }),
+      [STD_MERCHANT_TX],
+      ['standard-fee', 'standard-merchant'],
+    ],
+    [
+      'standard fee-error (merchant の block 未確定)',
+      STANDARD_URL,
+      standard({ phase: 'fee-error', isError: true, isFeeError: true, error: new Error('fee write rejected') }),
+      [],
+      ['standard-fee'],
+    ],
+  ];
+
+  it.each(CASES)('%s: 履歴の行は 0・控えは今までどおり', async (_name, url, setState, receiptIds, selfFlows) => {
+    setURL(url);
+    setState();
+
+    // 他店への支払い。
+    setAccount(true, polygonAmoy.id, CUSTOMER);
+    const other = render(withIntl(<PaymentForm />));
+    await waitFor(() => expect(loadPayerReceipts().map((r) => r.receiptId)).toEqual(receiptIds));
+    expect(loadHistory()).toEqual([]);
+    expect(window.localStorage.getItem(HISTORY_STORAGE_KEY)).toBeNull();
+    for (const r of loadPayerReceipts()) expect(r).toMatchObject({ payerAddress: CUSTOMER, merchantAddress: MERCHANT });
+    other.unmount();
+
+    // 対照: 同じ状態を、受取先のウォレットで描くと行が書かれる (上の 0 行が、状態が届いていないせいではない)。
+    window.localStorage.clear();
+    setAccount(true, polygonAmoy.id, MERCHANT);
+    render(withIntl(<PaymentForm />));
+    await waitFor(() => expect(loadHistory().map((e) => e.flow).sort()).toEqual(selfFlows));
+    expect(loadPayerReceipts().map((r) => r.receiptId)).toEqual(receiptIds);
+  });
+
+  it('受取先 = 自分 は、アドレスの表記の大文字小文字が違っても同じ (URL は checksum・ウォレットは小文字)', async () => {
+    // EIP-55 の checksum が全部大文字になるアドレス。
+    const shop = '0x52908400098527886E0F7030069857D2E4169EE7';
+    const wallet = shop.toLowerCase() as Address;
+    setURL(`to=${shop}&token=jpyc&amount=1000`);
+    settled(true)();
+    setAccount(true, polygonAmoy.id, wallet);
+    render(withIntl(<PaymentForm />));
+    await waitFor(() => expect(loadHistory()).toHaveLength(1));
+    const [entry] = loadHistory();
+    expect(entry.merchant).toBe(shop);
+    expect(entry.customer).toBe(wallet);
+    expect(entry.merchant).not.toBe(entry.customer);
+  });
+
+  it('未接続では履歴の行を書かない (払った人が分からない = 自分ではない)', () => {
+    setURL(GASLESS_URL);
+    settled(true)();
+    setAccount(false);
+    render(withIntl(<PaymentForm />));
+    expect(loadHistory()).toEqual([]);
   });
 });

@@ -6,10 +6,12 @@ import { renderWithIntl } from '../_helpers/i18n';
 // お店の端末で送る の同じ支払いを、払った側 (本物の StoreDeviceCheckoutForm + useStoreDevicePayment + usePaymentHistory) と
 // お店の端末 (本物の写し + recordStoreDeviceSale) の両方で実際に行にして、欄ごとに比べる (片方を手で写した期待値にしない)。
 // 差し替えるのは、ウォレット (wagmi)・通信 (fetch)・画面の部品 (接続ボタン・控えの表示・残高) だけ。
-const PAYER = '0x0000000000000000000000000000000000000def';
-const w = vi.hoisted(() => ({ signTypedData: vi.fn() }));
+// 払った側のブラウザが履歴の行を書くのは、受取先が自分のときだけ (hooks/usePaymentHistory の paidToSelf)。払った側の本物の行を
+// 作るために、払う人 = お店の受取先 (SHOP と同じアドレス) の会計で比べる。払った側が書く行の値そのものは、払う人が誰でも同じ式。
+const PAYER = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
+const w = vi.hoisted(() => ({ signTypedData: vi.fn(), address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913' }));
 vi.mock('wagmi', () => ({
-  useAccount: () => ({ address: '0x0000000000000000000000000000000000000def', isConnected: true, chainId: 80002 }),
+  useAccount: () => ({ address: w.address, isConnected: true, chainId: 80002 }),
   useWalletClient: () => ({ data: { signTypedData: w.signTypedData } }),
   useSwitchChain: () => ({ switchChain: vi.fn(), isPending: false }),
 }));
@@ -37,6 +39,7 @@ vi.mock('@/lib/relay/forwarderConfig', async (importOriginal) => ({
 
 import { StoreDeviceCheckoutForm } from '@/components/StoreDeviceCheckoutForm';
 import { clearHistory, loadHistory, type HistoryEntry } from '@/lib/history';
+import { loadPayerReceipts } from '@/lib/payerReceipt';
 import { recordStoreDeviceSale } from '@/lib/storeDeviceSaleHistory';
 import { readStoreDeviceSaleSnapshot, saveStoreDeviceSaleSnapshot } from '@/lib/storeDeviceSaleSnapshot';
 import type { DeviceSentMark } from '@/lib/storeDeviceSend';
@@ -101,6 +104,7 @@ beforeEach(() => {
   window.localStorage.clear();
   window.sessionStorage.clear();
   authBody = null;
+  w.address = PAYER;
   w.signTypedData.mockReset().mockResolvedValue(SIG);
   // Web Locks の代わり (jsdom には無い)。
   Object.defineProperty(window.navigator, 'locks', {
@@ -229,5 +233,40 @@ describe('お店の端末で送る: お店の履歴の行は、払った側が�
     authBody = null;
     await payerRow(url);
     expect(loadHistory()).toEqual([shop]);
+  });
+
+  it('お客様 (お店の受取先でないウォレット) が払うと、払った側は履歴の行を書かず控えだけ・お店の端末は行を書く', async () => {
+    const CUSTOMER = '0x0000000000000000000000000000000000000def';
+    w.address = CUSTOMER;
+    const checkout = CASES[0][1];
+    saveStoreDeviceSaleSnapshot(HS, checkout);
+    const parsed = parseCheckoutParams(new URL(buildCheckoutUrl(ORIGIN, { ...checkout, handoffId: HS })).searchParams);
+    if (!parsed.ok) throw new Error(`QR の URL を読めない: ${parsed.error}`);
+    const view = renderWithIntl(<StoreDeviceCheckoutForm params={parsed.params} />);
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /JPYC を支払う/ }));
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    for (let i = 0; i < 10 && loadPayerReceipts().length === 0; i += 1) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5_000);
+      });
+    }
+    // 払った側: 「支払い」の控えが 1 件・「受取」の行は無い。
+    expect(loadPayerReceipts()).toHaveLength(1);
+    expect(loadPayerReceipts()[0]).toMatchObject({
+      receiptId: TX,
+      status: 'confirmed',
+      payerAddress: getAddress(CUSTOMER),
+      merchantAddress: SHOP,
+    });
+    expect(loadHistory()).toEqual([]);
+    view.unmount();
+
+    // お店の端末: 同じ支払いの行を書く (お客様の欄は払ったウォレット)。
+    expect(recordStoreDeviceSale(sentMark(checkout), TX)).toBe(true);
+    const rows = loadHistory();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ id: `batch-${TX}`, merchant: SHOP, customer: getAddress(CUSTOMER) });
   });
 });
