@@ -17,6 +17,7 @@ import { CheckCircle2, ChefHat, Clock, RefreshCw, RotateCcw, UtensilsCrossed } f
 import { env } from '@/lib/env';
 import { fetchOrderFeed, orderFeedQueryKey } from '@/hooks/useOrderFeed';
 import { useOrderCalls } from '@/hooks/useOrderCalls';
+import { useOrderFeedHistory } from '@/hooks/useOrderFeedHistory';
 import { useSiweSession } from '@/hooks/useSiweSession';
 import { SignInGate } from '@/components/SignInGate';
 import { ShopLivePanel } from '@/components/ShopLivePanel';
@@ -78,6 +79,8 @@ export function OrderFeedPanel({
     refetchInterval: 12_000, // ~12s ポーリング (serverless 親和・タブレット常時表示向け)
     queryFn: () => fetchOrderFeed(),
   });
+  // 届いた注文を、この端末の取引履歴に 1 行ずつ書く (画面には何も出さない・失敗しても受注の表示は変わらない)。
+  useOrderFeedHistory(feed.data, sessionAddress, feed.dataUpdatedAt);
   const callFeed = useOrderCalls(sessionAddress, isSignedIn, 12_000);
 
   // 対応済み = 削除でなくフラグ化。対象は txHash で指定 (受付番号は短縮で衝突しうるため)。
