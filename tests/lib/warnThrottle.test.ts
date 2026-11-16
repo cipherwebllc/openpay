@@ -63,13 +63,17 @@ describe('warnThrottled', () => {
     expect(warn.mock.calls).toEqual([0, 60, 120, 180].map((s) => ['x402.dualrail.accepts_failed', { s }]));
   });
 
-  it('名前ごとに別に数える: 片方の警告が、もう片方の最初の 1 回を消さない', () => {
-    warnThrottled('x402.discovery.read_failed', { id: 'res-1' });
-    warnThrottled('x402.dualrail.accepts_failed', { resourceId: 'res-1' });
-    warnThrottled('x402.discovery.read_failed', { id: 'res-1' });
-    warnThrottled('x402.dualrail.accepts_failed', { resourceId: 'res-1' });
+  it('名前ごとに別に数える: ある名前の警告が、ほかの名前の最初の 1 回を消さない (3 つの名前とも)', () => {
+    const emit = () => {
+      warnThrottled('x402.discovery.read_failed', { id: 'res-1' });
+      warnThrottled('x402.discovery.requirements_failed', { id: 'res-1', error: 'e' });
+      warnThrottled('x402.dualrail.accepts_failed', { resourceId: 'res-1' });
+    };
+    emit();
+    emit();
     expect(warn.mock.calls).toEqual([
       ['x402.discovery.read_failed', { id: 'res-1' }],
+      ['x402.discovery.requirements_failed', { id: 'res-1', error: 'e' }],
       ['x402.dualrail.accepts_failed', { resourceId: 'res-1' }],
     ]);
   });
