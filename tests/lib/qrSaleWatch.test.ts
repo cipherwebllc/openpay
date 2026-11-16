@@ -764,30 +764,26 @@ describe('照合の量の上限 (同じ金額の会計を出したまま、同�
 
   it('1 回に照合する (log, 会計) の組は 4 つまで。超える log は次の回に回し (読んだ範囲を進めない)、順に全部を照合する', async () => {
     expect(QR_SALE_MAX_PAIRS_PER_PASS).toBe(4);
-    // 同じ金額の会計 3 つ。同じ金額の関係ない入金 (乱数の salt) 3 つの後に、BK3 の会計の本物の支払い。
+    // 同じ金額の会計 3 つ。同じ金額の関係ない入金 (乱数の salt) 3 つの後に、BK (最初に出した会計) の本物の支払い。
     show(BK);
     show(BK2, { receiptNo: 'R-2' });
     show(BK3, { receiptNo: 'R-3' });
     settle(990n, 1, { salt: random(0xa1) });
     settle(991n, 2, { salt: random(0xa2) });
     settle(992n, 3, { salt: random(0xa3) });
-    settle(993n, 4, { billKey: BK3 });
+    settle(993n, 4, { billKey: BK });
     const perPass: number[] = [];
     for (let i = 0; i < 4; i += 1) {
       hold.nonces = 0;
       await tick();
       perPass.push(hold.nonces);
     }
-    // 1 回に log 1 つ (3 組) だけ: 次の log まで照合すると 6 組で上限を超える。
-    expect(perPass).toEqual([
-      3 * NONCES_PER_MISS,
-      3 * NONCES_PER_MISS,
-      3 * NONCES_PER_MISS,
-      2 * NONCES_PER_MISS + NONCES_TO_MATCH,
-    ]);
-    expect(hold.matches).toBe(12);
-    // 本物の支払いは BK3 の会計の 1 件目。
-    expect(loadHistory().map((e) => [e.id, e.receiptNo])).toEqual([[`batch-${tx(4)}`, 'R-3']]);
+    // 1 回に log 1 つ (3 組) だけ: 次の log まで照合すると 6 組で上限を超える。本物の支払いは最初の会計で一致し、
+    // 残りの会計とは照合しない (bill key は会計ごとに違うので、一致する会計は多くても 1 つ)。
+    expect(perPass).toEqual([3 * NONCES_PER_MISS, 3 * NONCES_PER_MISS, 3 * NONCES_PER_MISS, NONCES_TO_MATCH]);
+    expect(hold.matches).toBe(10);
+    // 本物の支払いは BK の会計の 1 件目。
+    expect(loadHistory().map((e) => [e.id, e.receiptNo])).toEqual([[`batch-${tx(4)}`, 'R-1']]);
     // 読み残した回は読んだ範囲を進めず、先頭 − 90 から読み直した。読み終えた後は前回の続きから。
     await tick();
     expect(ranges()).toEqual([[987n, 997n], [910n, 997n], [910n, 997n], [910n, 997n], [987n, 997n]]);
