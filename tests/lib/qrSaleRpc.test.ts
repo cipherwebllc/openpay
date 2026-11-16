@@ -131,6 +131,37 @@ describe('readSettledLogs', () => {
     await expect(readSettledLogs(JPYC.chainId, FORWARDER, [SHOP], 1n, 2n)).rejects.toThrow();
     expect(calls).toHaveLength(1);
   });
+
+  // 見張り (lib/qrSaleWatch.ts) は、getLogs の「範囲が広すぎる」の error だけを見て 10 block ずつ読み直す。その判定が、
+  // viem が実際に投げる error (HTTP の status・provider の文面の入れ方) で働くことを、本物の transport で確かめる。
+  it.each([
+    [
+      'Alchemy の無料枠 (HTTP 400・11 block 以上)',
+      400,
+      {
+        code: -32600,
+        message:
+          'Under the Free tier plan, you can make eth_getLogs requests with up to a 10 block range. Based on your ' +
+          'parameters, this block range should work: [0x1, 0xa]. Upgrade to PAYG for expanded block range.',
+      },
+      true,
+    ],
+    ['JSON-RPC の error (HTTP 200・code -32005・結果が多すぎる)', 200, { code: -32005, message: 'query returned more than 10000 results' }, true],
+    ['JSON-RPC の error (HTTP 200・範囲が広すぎる)', 200, { code: -32000, message: 'block range is too large' }, true],
+    ['rate limit (HTTP 429)', 429, { code: 429, message: 'Your app has exceeded its compute units per second capacity.' }, false],
+    ['関係ない 400', 400, { code: -32602, message: 'invalid argument 0: hex string has length 3' }, false],
+  ])('範囲の制限の判定は、viem が投げた error で働く: %s → %s', async (_name, status, error, expected) => {
+    stubRpc((body) => Response.json({ jsonrpc: '2.0', id: body.id, error }, { status }));
+    const { readSettledLogs } = await loadActual();
+    const { isBlockRangeLimitError } = await import('@/lib/qrSaleWatch');
+    const thrown = await readSettledLogs(JPYC.chainId, FORWARDER, [SHOP], 1n, 11n).then(
+      () => null,
+      (e: unknown) => e,
+    );
+    expect(thrown).not.toBeNull();
+    expect(isBlockRangeLimitError(thrown)).toBe(expected);
+    expect(calls).toHaveLength(1);
+  });
 });
 
 describe('readBlockTime', () => {

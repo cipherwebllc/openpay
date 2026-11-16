@@ -16,6 +16,13 @@
 //     始まりは、そのチェーンを初めて読む回と、新しい会計が加わった後の回は「先頭 − 90」(見張りの読み込みが遅れても、
 //     表示を始めた後の入金を覆う。古すぎる log は下の時刻の窓で落ちる)。それ以外は「前回、照合し終えた block − 10」
 //     (先頭 − 90 より前は読まない)。読む block が無ければ何もしない。
+//   - getLogs の 1 回の範囲に制限のある RPC がある (Alchemy の無料枠は両端を含めて 10 block まで・11 block で HTTP 400)。
+//     まず範囲を 1 回で読み、範囲の制限の error が返ったら、そのチェーンを「10 block ずつ」と覚えて (この画面にいる間)、
+//     同じ回の中で同じ所から、古い方へ 10 block ずつ読み直す。以後そのチェーンは初めから 10 block ずつ。制限の無い RPC は
+//     今までどおり 1 回で読む。分けて読む途中の 1 つが失敗したら (rate limit・時間切れ・ほかの error)、そこで読むのをやめ、
+//     読めた所までを照合する (次の回は、読めた所の続きから = 読めていない範囲を飛ばさない)。getLogs は 1 回 (チェーン
+//     ごと) に 10 回まで (範囲の制限を知る 1 回 + 90 block を 10 block ずつ 9 回 = 初めての回を 1 回で読み切れる数)。
+//     重ね (前回 − 10) は、制限のあるチェーンでも小さくしない (普段の回の getLogs は 2 回になる)。
 //   - 読んだ log (tx と log の番号) は覚えておき、重ねて読んだ分は落とす。
 //   - タブが裏のあいだは読まない。RPC の失敗・時間切れは、その回を飛ばす (次の回に同じ範囲から読み直す)。
 //   - 見つけた Settled ごとに、まず受取先・着金額・利用料が、生きている会計のどれかの期待値とちょうど同じかを見る
@@ -64,7 +71,7 @@ import {
   type SettledLog,
 } from './qrSaleHistory';
 import { addQrSaleMark, ORDER_FEED_MARKS_KEY, QR_SALE_MARKS_KEY, readTxMarks } from './qrSaleMarks';
-import { QR_SALE_RPC_TIMEOUT_MS, readBlockTime, readChainHead, readSettledLogs } from './qrSaleRpc';
+import { QR_SALE_RPC_TIMEOUT_MS, readBlockTime, readChainHead, readSettledLogs, type QrSaleLog } from './qrSaleRpc';
 
 /** 読む間隔。 */
 export const QR_SALE_POLL_MS = 6_000;
@@ -81,6 +88,53 @@ export const QR_SALE_CLOCK_SKEW_MS = 30_000;
  * 超える log は次の回に回す。1 回に最低 1 つの log は照合する。
  */
 export const QR_SALE_MAX_PAIRS_PER_PASS = 4;
+/** getLogs の範囲に制限のある RPC で、1 回に読む block の数 (両端を含む・Alchemy の無料枠の上限)。 */
+export const QR_SALE_SMALL_RANGE_BLOCKS = 10n;
+/** 1 回 (チェーンごと) の getLogs の回数の上限 (範囲の制限を知る 1 回 + 90 block を 10 block ずつ 9 回)。 */
+export const QR_SALE_MAX_GETLOGS_PER_PASS = 10;
+
+// getLogs の「1 回の範囲が広すぎる」の error か (RPC の提供者ごとに文面が違うので、部分一致)。範囲を小さくすれば通る
+// error だけを拾う。rate limit を先に見て外す (時間を置けば同じ範囲が通る・範囲を小さくしても通らない)。JSON-RPC の
+// code -32005 は rate limit と「結果が多すぎる」の両方に使われるので、code では決めない。
+// (lib/crossChain/burnMarker.ts の isRangeError と同じ考え方。あの module は import しない = この遅延 chunk に閉じる)
+const RANGE_LIMIT_PATTERNS = [
+  // Alchemy の無料枠: "Under the Free tier plan, you can make eth_getLogs requests with up to a 10 block range. …"
+  'block range',
+  // QuickNode: "eth_getLogs is limited to a 10,000 blocks range"
+  'blocks range',
+  'range is too large',
+  'range too large',
+  'too many blocks',
+  'exceed maximum block range',
+  // Infura など: "query returned more than 10000 results"
+  'query returned more than',
+];
+const RATE_LIMIT_PATTERNS = [
+  'rate limit',
+  'rate-limit',
+  'too many requests',
+  'compute units',
+  'request limit reached',
+  'throttled',
+  'over quota',
+];
+
+export function isBlockRangeLimitError(error: unknown): boolean {
+  const texts: string[] = [];
+  let status429 = false;
+  // viem の error は provider の生の文面を details・shortMessage・metaMessages・cause に分けて持つ。
+  const visit = (e: unknown, depth: number): void => {
+    if (depth > 4 || e === null || typeof e !== 'object') return;
+    const rec = e as { message?: unknown; details?: unknown; shortMessage?: unknown; status?: unknown; cause?: unknown };
+    for (const v of [rec.message, rec.details, rec.shortMessage]) if (typeof v === 'string') texts.push(v.toLowerCase());
+    if (rec.status === 429) status429 = true;
+    visit(rec.cause, depth + 1);
+  };
+  visit(error, 0);
+  const text = texts.join(' | ');
+  if (status429 || RATE_LIMIT_PATTERNS.some((p) => text.includes(p))) return false;
+  return RANGE_LIMIT_PATTERNS.some((p) => text.includes(p));
+}
 
 // 先頭から何 block 手前までを読むか (取り込まれたばかりの block を読まない)。Polygon は 3・ほかは 1。
 const HEAD_MARGIN_BLOCKS: Record<number, bigint> = { [polygon.id]: 3n, [polygonAmoy.id]: 3n };
@@ -104,6 +158,9 @@ const bills = new Map<string, WatchedBill>();
 const cursors = new Map<number, ChainCursor>();
 const seenLogs = new Set<string>();
 const blockTimes = new Map<string, bigint>();
+// getLogs の範囲に制限のある RPC と分かったチェーン (10 block ずつ読む)。/create を離れるまで持つ (会計が無くなって
+// 読むのをやめた間も、同じ画面の RPC は変わらない = もう一度 1 回で読もうとして失敗しない)。
+const smallRangeChains = new Set<number>();
 let timer: ReturnType<typeof setInterval> | null = null;
 let running = false;
 // stopQrSaleWatch のたびに進める。RPC を待っている間に止められた回は、戻った後に何も書かない。
@@ -215,8 +272,33 @@ async function pollChain(chainId: number, startedGeneration: number): Promise<vo
   if (fromBlock < 0n) fromBlock = 0n;
   if (toBlock < fromBlock) return;
 
-  const logs = await withDeadline(readSettledLogs(chainId, forwarder, merchants, fromBlock, toBlock));
-  if (startedGeneration !== generation) return;
+  // 古い方から読む (頭の注記の「getLogs の 1 回の範囲に制限のある RPC」)。readTo = 読めた最後の block。
+  const logs: QrSaleLog[] = [];
+  let readTo = fromBlock - 1n;
+  for (let calls = 0; readTo < toBlock && calls < QR_SALE_MAX_GETLOGS_PER_PASS; calls += 1) {
+    const from = readTo + 1n;
+    const small = smallRangeChains.has(chainId);
+    const end = from + QR_SALE_SMALL_RANGE_BLOCKS - 1n;
+    const to = small && end < toBlock ? end : toBlock;
+    let part: QrSaleLog[];
+    try {
+      part = await withDeadline(readSettledLogs(chainId, forwarder, merchants, from, to));
+    } catch (error) {
+      if (startedGeneration !== generation) return;
+      // 範囲の制限: このチェーンは以後 10 block ずつ。同じ回の中で、同じ所から読み直す。
+      if (!small && isBlockRangeLimitError(error)) {
+        smallRangeChains.add(chainId);
+        continue;
+      }
+      // rate limit・時間切れ・ほかの error: ここで読むのをやめ、読めた所までを照合する。
+      break;
+    }
+    if (startedGeneration !== generation) return;
+    logs.push(...part);
+    readTo = to;
+  }
+  // 1 つも読めなかった回は飛ばす (前回の位置を変えない = 次の回に同じ範囲から読み直す)。
+  if (readTo < fromBlock) return;
   // チェーンの順 (block → log の番号) に見る (同じ会計への 1 件目・2 件目の順)。番号の無い log (取り込み前) は読まない。
   const ordered = logs
     .flatMap((log) =>
@@ -275,8 +357,8 @@ async function pollChain(chainId: number, startedGeneration: number): Promise<vo
       break;
     }
   }
-  // 次の回は、照合し終えた所の続きから (回した log の block から読み直す)。
-  cursor.lastTo = stoppedAt === null ? toBlock : stoppedAt - 1n;
+  // 次の回は、照合し終えた所の続きから (読めた所まで・回した log の block から読み直す)。
+  cursor.lastTo = stoppedAt === null ? readTo : stoppedAt - 1n;
 }
 
 async function tick(): Promise<void> {
@@ -355,6 +437,7 @@ export function hideQrBill(billKey: string, hiddenAt: number): void {
 export function stopQrSaleWatch(): void {
   generation += 1;
   clearState();
+  smallRangeChains.clear();
   // 警告は /create を開いている間に 1 回 (開き直したら、また 1 回は残す)。
   warned = false;
 }

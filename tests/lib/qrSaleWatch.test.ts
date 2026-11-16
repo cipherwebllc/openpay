@@ -5,7 +5,7 @@
 // tests/components/qrSaleHistory.parity.test.tsx が確かめる。ここは見張りの回し方 (範囲・順・上限・時刻の窓・保存) を見る。
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { getAddress, type Address, type Hex } from 'viem';
+import { getAddress, HttpRequestError, type Address, type Hex } from 'viem';
 
 const rpc = vi.hoisted(() => ({ head: vi.fn(), logs: vi.fn(), time: vi.fn() }));
 vi.mock('@/lib/qrSaleRpc', () => ({
@@ -83,10 +83,13 @@ import {
   QR_SALE_CLOCK_SKEW_MS,
   QR_SALE_KEEP_AFTER_HIDE_MS,
   QR_SALE_MAX_BACK_BLOCKS,
+  QR_SALE_MAX_GETLOGS_PER_PASS,
   QR_SALE_MAX_PAIRS_PER_PASS,
+  QR_SALE_SMALL_RANGE_BLOCKS,
   QR_SALE_OVERLAP_BLOCKS,
   QR_SALE_POLL_MS,
   hideQrBill,
+  isBlockRangeLimitError,
   showQrBill,
   stopQrSaleWatch,
 } from '@/lib/qrSaleWatch';
@@ -158,6 +161,13 @@ function settle(
   );
 }
 
+/** チェーンの log のうち、範囲 (両端を含む) と受取先の topic に当たるもの (本物の getLogs の絞り込み)。 */
+const logsIn = (merchants: readonly Address[], from: bigint, to: bigint) =>
+  chain.logs.filter(
+    (log) =>
+      log.blockNumber! >= from && log.blockNumber! <= to &&
+      merchants.some((m) => getAddress(`0x${log.topics[3]!.slice(26)}`) === getAddress(m)),
+  );
 const tick = (times = 1) => vi.advanceTimersByTimeAsync(QR_SALE_POLL_MS * times);
 const marks = (key = QR_SALE_MARKS_KEY) =>
   (JSON.parse(window.localStorage.getItem(key) ?? '[]') as [string, number][]).map(([hash]) => hash);
@@ -176,15 +186,11 @@ beforeEach(() => {
   hold.visibility = 'visible';
   Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => hold.visibility });
   rpc.head.mockReset().mockImplementation(async () => chain.head);
-  // getLogs は、範囲と受取先の topic で絞った log を返す (本物の RPC と同じ)。
+  // getLogs は、範囲と受取先の topic で絞った log を返す (本物の RPC と同じ・範囲の制限なし)。
   rpc.logs
     .mockReset()
     .mockImplementation(async (_chainId: number, _forwarder: Address, merchants: Address[], from: bigint, to: bigint) =>
-      chain.logs.filter(
-        (log) =>
-          log.blockNumber! >= from && log.blockNumber! <= to &&
-          merchants.some((m) => getAddress(`0x${log.topics[3]!.slice(26)}`) === getAddress(m)),
-      ),
+      logsIn(merchants, from, to),
     );
   rpc.time.mockReset().mockImplementation(async (_chainId: number, block: bigint) => blockTime(block));
   warn.mockReset();
@@ -297,11 +303,11 @@ describe('読む範囲と間隔', () => {
     expect(warn).not.toHaveBeenCalled();
   });
 
-  it('getLogs を読めない回は飛ばし、次の回に同じ範囲の頭から読み直す (範囲の制限・rate limit・時間切れ)', async () => {
+  it('getLogs を読めない回は飛ばし、次の回に同じ範囲の頭から読み直す (rate limit・時間切れ・ほかの error)', async () => {
     show();
     await tick();
     chain.head = 1_010n;
-    rpc.logs.mockRejectedValueOnce(new Error('query returned more than 10000 results'));
+    rpc.logs.mockRejectedValueOnce(Object.assign(new Error('HTTP request failed.'), { status: 429, details: 'Too Many Requests' }));
     await tick();
     chain.head = 1_012n;
     await tick();
@@ -820,6 +826,135 @@ describe('照合の量の上限 (同じ金額の会計を出したまま、同�
     await tick();
     expect(hold.nonces).toBe(4 * NONCES_PER_MISS + NONCES_TO_MATCH);
     expect(loadHistory().map((e) => [e.id, e.receiptNo])).toEqual([[`batch-${tx(9)}`, 'R-4']]);
+  });
+});
+
+describe('getLogs の範囲に制限のある RPC (Alchemy の無料枠: 両端を含めて 10 block まで)', () => {
+  const rows = () => loadHistory().map((e) => [e.id, e.receiptNo]);
+  // Alchemy の無料枠が 11 block 以上の getLogs に返す error (viem が HTTP 400 の応答から作る形)。
+  const alchemyRangeError = () =>
+    new HttpRequestError({
+      url: 'https://rpc.test/v2/key',
+      status: 400,
+      details: JSON.stringify({
+        code: -32600,
+        message:
+          'Under the Free tier plan, you can make eth_getLogs requests with up to a 10 block range. Based on your ' +
+          'parameters, this block range should work: [0x3de, 0x3e7]. Upgrade to PAYG for expanded block range.',
+      }),
+    });
+  const rateLimited = () =>
+    new HttpRequestError({
+      url: 'https://rpc.test/v2/key',
+      status: 429,
+      details: 'Your app has exceeded its compute units per second capacity.',
+    });
+  /** 11 block 以上の範囲は error を返す RPC。fail は 10 block までの範囲で、ほかの失敗を差し込む。 */
+  const limitedRpc = (fail: (from: bigint, to: bigint) => Error | null = () => null) =>
+    rpc.logs.mockImplementation(async (_chainId: number, _forwarder: Address, merchants: Address[], from: bigint, to: bigint) => {
+      if (to - from + 1n > QR_SALE_SMALL_RANGE_BLOCKS) throw alchemyRangeError();
+      const error = fail(from, to);
+      if (error) throw error;
+      return logsIn(merchants, from, to);
+    });
+  // 910 から 997 までを 10 block ずつ。
+  const chunks = (from: bigint, to: bigint) => {
+    const out: bigint[][] = [];
+    for (let start = from; start <= to; start += 10n) out.push([start, start + 9n < to ? start + 9n : to]);
+    return out;
+  };
+
+  it('初めての回: 1 回で読もうとして範囲の制限の error → 同じ回の中で、古い方から 10 block ずつ読み切って入金を拾う。次の回からは初めから 10 block ずつ', async () => {
+    expect(QR_SALE_SMALL_RANGE_BLOCKS).toBe(10n);
+    expect(QR_SALE_MAX_GETLOGS_PER_PASS).toBe(10);
+    limitedRpc();
+    show();
+    settle(995n, 1);
+    await tick();
+    // 範囲の制限を知る 1 回 + 88 block を 10 block ずつ 9 回 = 10 回 (1 回の上限ちょうど)。
+    expect(ranges()).toEqual([[910n, 997n], ...chunks(910n, 997n)]);
+    expect(rpc.logs).toHaveBeenCalledTimes(10);
+    expect(rows()).toEqual([[`batch-${tx(1)}`, 'R-1']]);
+    // 次の回は、1 回で読もうとしない (範囲の制限の error を繰り返さない)。重ね (前回 − 10) は同じなので 2 回になる。
+    rpc.logs.mockClear();
+    chain.head = 1_004n;
+    await tick();
+    expect(ranges()).toEqual([[987n, 996n], [997n, 1_001n]]);
+  });
+
+  it('分けて読む途中の 1 つが失敗したら、読めた所までを照合し、次の回はその続きから読む (読めていない範囲を飛ばさない)', async () => {
+    let failed = false;
+    limitedRpc((from) => {
+      if (from !== 950n || failed) return null;
+      failed = true;
+      return new Error('upstream 503');
+    });
+    // QR を出したのは 4 分前。945 と 955 に、この会計への入金 (955 は 2 回目)。
+    show(BK, {}, NOW - 240_000);
+    settle(945n, 1);
+    settle(955n, 2);
+    await tick();
+    // 1 回目: 940〜949 まで読め、950〜959 で失敗 → 945 だけを照合した。
+    expect(ranges()).toEqual([[910n, 997n], ...chunks(910n, 959n)]);
+    expect(rows()).toEqual([[`batch-${tx(1)}`, 'R-1']]);
+    // 2 回目: 読めた所 (949) − 10 から。955 も読み、2 件目 (明細なし) として書く。
+    rpc.logs.mockClear();
+    await tick();
+    expect(ranges()).toEqual(chunks(939n, 997n));
+    expect(rows()).toEqual([
+      [`batch-${tx(2)}`, null],
+      [`batch-${tx(1)}`, 'R-1'],
+    ]);
+  });
+
+  it('rate limit (429) が返ったら、その回はそこで止め、次の回に続きから読む。範囲の制限とは覚えない', async () => {
+    // 制限の無い RPC で、初めての getLogs が 429 → その回は何も読めない (前回の位置を変えない)。次の回も 1 回で読む。
+    rpc.logs.mockRejectedValueOnce(rateLimited());
+    show();
+    await tick();
+    await tick();
+    expect(ranges()).toEqual([[910n, 997n], [910n, 997n]]);
+
+    // 制限のある RPC で、分けて読む途中に 429 → 読めた所 (929) までで止め、次の回はその続きから 10 block ずつ。
+    stopQrSaleWatch();
+    rpc.logs.mockClear();
+    let limited = false;
+    limitedRpc((from) => {
+      if (from !== 930n || limited) return null;
+      limited = true;
+      return rateLimited();
+    });
+    show(BK2);
+    await tick();
+    expect(ranges()).toEqual([[910n, 997n], [910n, 919n], [920n, 929n], [930n, 939n]]);
+    rpc.logs.mockClear();
+    await tick();
+    expect(ranges()).toEqual(chunks(919n, 997n));
+  });
+
+  it('範囲の制限の無い RPC は、今までどおり 1 回で読む (初めての回の 88 block も、普段の回も)', async () => {
+    show();
+    settle(995n, 1);
+    await tick();
+    chain.head = 1_004n;
+    await tick();
+    expect(ranges()).toEqual([[910n, 997n], [987n, 1_001n]]);
+    expect(rows()).toEqual([[`batch-${tx(1)}`, 'R-1']]);
+  });
+
+  it.each([
+    ['Alchemy の無料枠 (HTTP 400・details に provider の文面)', alchemyRangeError(), true],
+    ['QuickNode', new Error('eth_getLogs is limited to a 10,000 blocks range'), true],
+    ['一般の「block range」 (cause の奥)', new Error('request failed', { cause: new Error('block range is too large') }), true],
+    ['最大の範囲を超えた', Object.assign(new Error('RPC Request failed.'), { details: 'exceed maximum block range: 5000' }), true],
+    ['結果が多すぎる (code -32005)', Object.assign(new Error('query returned more than 10000 results'), { code: -32005 }), true],
+    ['関係ない 400', new HttpRequestError({ url: 'https://rpc.test', status: 400, details: 'invalid argument 0: hex string has length 3' }), false],
+    ['rate limit (429・Alchemy の文面)', rateLimited(), false],
+    ['rate limit の文面に block range が混ざる', new Error('Too many requests for this block range, please slow down'), false],
+    ['時間切れ', new Error('qr_sale_rpc_timeout'), false],
+    ['error でない値', 'block range', false],
+  ])('範囲の制限の error の判定: %s → %s', (_name, error, expected) => {
+    expect(isBlockRangeLimitError(error)).toBe(expected);
   });
 });
 
