@@ -150,7 +150,7 @@ describe('readSettledLogs', () => {
     ['JSON-RPC の error (HTTP 200・範囲が広すぎる)', 200, { code: -32000, message: 'block range is too large' }, true],
     ['rate limit (HTTP 429)', 429, { code: 429, message: 'Your app has exceeded its compute units per second capacity.' }, false],
     ['関係ない 400', 400, { code: -32602, message: 'invalid argument 0: hex string has length 3' }, false],
-  ])('範囲の制限の判定は、viem が投げた error で働く: %s → %s', async (_name, status, error, expected) => {
+  ])('範囲の制限の判定は、viem が投げた error で働く: %s', async (_name, status, error, expected) => {
     stubRpc((body) => Response.json({ jsonrpc: '2.0', id: body.id, error }, { status }));
     const { readSettledLogs } = await loadActual();
     const { isBlockRangeLimitError } = await import('@/lib/qrSaleWatch');
