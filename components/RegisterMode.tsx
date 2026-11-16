@@ -37,6 +37,7 @@ import {
   storeDeviceChainNames,
 } from '@/lib/storeDevicePayment';
 import { storePaysActive, storePaysRequested } from '@/lib/storePaysMode';
+import { saveStoreDeviceSaleSnapshot } from '@/lib/storeDeviceSaleSnapshot';
 import { ExternalImage } from './ExternalImage';
 import { ProductPresetManager } from './ProductPresetManager';
 import { switchTokenKeepingPrefs, useQrSettings, withChain } from '@/hooks/useQrSettings';
@@ -645,6 +646,8 @@ function RegisterModeContent({
       device.stop();
       return false;
     }
+    // QR に載せる会計を写す (入金を確かめたときの、お店の取引履歴の行の明細の元・失敗しても QR は出す)。
+    saveStoreDeviceSaleSnapshot(s.id, checkout);
     setStoreQr({ id: s.id, url: buildCheckoutUrl(origin, { ...checkout, handoffId: s.id }) });
     setQrModalOpen(true);
     return true;

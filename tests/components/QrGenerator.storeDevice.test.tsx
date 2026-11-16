@@ -92,6 +92,9 @@ vi.mock('@/components/StoreDeviceProvider', () => ({
 import { QrGenerator } from '@/components/QrGenerator';
 import { calcCheckoutPayable, parseCheckoutParams } from '@/lib/url';
 import { LAST_QR_KEY } from '@/lib/offlineQr';
+import { loadHistory } from '@/lib/history';
+import { recordStoreDeviceSale } from '@/lib/storeDeviceSaleHistory';
+import { STORE_DEVICE_SALE_SNAPSHOT_KEY, readStoreDeviceSaleSnapshot } from '@/lib/storeDeviceSaleSnapshot';
 import { findQrAmountInput, qrAmountInput } from '../_helpers/qrAmount';
 
 const VALID = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
@@ -616,6 +619,94 @@ describe('QrGenerator × お店の端末で送る (flag ON)', () => {
       expect(JSON.parse(window.localStorage.getItem(KEY)!).storePays).toBe(true);
       // 選んでいる状態は保つ (送る設定は OFF にしない = 送れなかった支払いの「もう一度送る」を消さない)
       expect(sd.setOn).toHaveBeenLastCalledWith(true);
+    });
+
+    // plans/shop-history-gap.md の P1: 入金を確かめたときの、お店の取引履歴の行の明細の元。
+    describe('QR に載せた会計の写し (お店の取引履歴の行の元)', () => {
+      const HASH = `0x${'cd'.repeat(32)}` as const;
+      const mark = (amount: bigint) => ({
+        handoffId: HS,
+        chainId: 80002,
+        nonce: `0x${'33'.repeat(32)}` as const,
+        hash: HASH,
+        from: '0x0000000000000000000000000000000000000DeF' as const,
+        merchant: VALID as `0x${string}`,
+        amount: amount.toString(),
+        validBefore: '9999999999',
+        intentSalt: `0x${'11'.repeat(32)}` as const,
+        at: Date.now(),
+      });
+      beforeEach(() => window.sessionStorage.clear());
+
+      it('QR を出すときに、QR に載せた URL と同じ中身を受け渡しの id で写す', async () => {
+        const user = userEvent.setup();
+        seed({ productName: 'ランチ', memo: '2 名', taxRate: 10, storeName: 'Cafe' });
+        const [btn] = await ready(user, '1200');
+        expect(readStoreDeviceSaleSnapshot(HS)).toBeNull();
+        await user.click(btn);
+        await waitFor(() => expect(shownQr()).not.toBeNull());
+        expect(`https://test.local${readStoreDeviceSaleSnapshot(HS)}`).toBe(shownQr());
+      });
+
+      it('QR を閉じた後に金額・商品名を直しても、写しと履歴の行は QR を出した時点の会計のまま', async () => {
+        const user = userEvent.setup();
+        seed({ productName: 'ランチ', memo: '2 名', taxRate: 10 });
+        const [btn] = await ready(user, '1200');
+        await user.click(btn);
+        await waitFor(() => expect(shownQr()).not.toBeNull());
+        const snapshot = readStoreDeviceSaleSnapshot(HS);
+        await user.click(within(screen.getByRole('dialog')).getAllByRole('button', { name: /閉じる/ })[0]);
+        // お客様の署名を端末が送っている間に、次の会計の金額を打ち直す
+        await user.type(qrAmountInput(), '0'); // 1200 → 12000
+        expect(readStoreDeviceSaleSnapshot(HS)).toBe(snapshot);
+        expect(recordStoreDeviceSale(mark(1200n * 10n ** 18n), HASH)).toBe(true);
+        expect(loadHistory()).toEqual([
+          expect.objectContaining({
+            id: `batch-${HASH}`,
+            merchantAmount: (1200n * 10n ** 18n).toString(),
+            productName: 'ランチ',
+            taxRate: 10,
+            lineItems: [expect.objectContaining({ name: 'ランチ', quantity: 1, amount: '1200', memo: '2 名', taxRate: 10 })],
+          }),
+        ]);
+      });
+
+      it('受け渡しを作れなかった・作る間に金額を変えたときは写さない', async () => {
+        const user = userEvent.setup();
+        seed();
+        sd.start.mockResolvedValue(null);
+        const [btn] = await ready(user);
+        await user.click(btn);
+        await waitFor(() => expect(sd.start).toHaveBeenCalledTimes(1));
+        expect(readStoreDeviceSaleSnapshot(HS)).toBeNull();
+        let resolve!: (v: unknown) => void;
+        sd.start.mockReturnValue(new Promise((r) => { resolve = r; }));
+        await user.click(btn);
+        await user.type(qrAmountInput(), '0'); // 500 → 5000
+        resolve({ id: HS, token: 'ab'.repeat(32), expiresAt: 0, merchant: VALID, amount: '1', chainId: 80002 });
+        await waitFor(() => expect(sd.stop).toHaveBeenCalled());
+        expect(readStoreDeviceSaleSnapshot(HS)).toBeNull();
+      });
+
+      it('写しを保存できない端末 (sessionStorage が throw) でも、QR は今までどおり出る', async () => {
+        const user = userEvent.setup();
+        seed();
+        const [btn] = await ready(user);
+        const original = Storage.prototype.setItem;
+        const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key: string, value: string) {
+          if (key === STORE_DEVICE_SALE_SNAPSHOT_KEY) throw new Error('QuotaExceededError');
+          original.call(this, key, value);
+        });
+        try {
+          await user.click(btn);
+          await waitFor(() => expect(shownQr()).not.toBeNull());
+          expect(new URL(shownQr()!).searchParams.get('hs')).toBe(HS);
+          expect(setItem.mock.calls.some(([key]) => key === STORE_DEVICE_SALE_SNAPSHOT_KEY)).toBe(true);
+          expect(readStoreDeviceSaleSnapshot(HS)).toBeNull();
+        } finally {
+          setItem.mockRestore();
+        }
+      });
     });
   });
 

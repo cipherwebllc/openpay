@@ -15,6 +15,7 @@ import type { Address } from 'viem';
 import { env } from '@/lib/env';
 import { storeDeviceChainIds } from '@/lib/storeDevicePayment';
 import { useStoreDeviceRegister } from '@/hooks/useStoreDeviceRegister';
+import { useStoreDeviceSaleHistory } from '@/hooks/useStoreDeviceSaleHistory';
 import { readQrSettings } from '@/hooks/useQrSettings';
 import { storePaysRequested } from '@/lib/storePaysMode';
 
@@ -95,6 +96,8 @@ function useStoreDeviceModeState(active: boolean): StoreDeviceMode {
     monitor,
     gasAddress: gasAddress ?? null,
   });
+  // 入金を確かめた支払いを、お店の取引履歴に 1 行書く (状態は読むだけ・失敗は送信と表示に波及させない)。
+  useStoreDeviceSaleHistory(device.state);
   return {
     on,
     setOn,
