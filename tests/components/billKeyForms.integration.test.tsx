@@ -90,6 +90,7 @@ import { buildCheckoutUrl, buildPayUrl, parseCheckoutParams, parsePayParams } fr
 import { checkoutFormKey } from '@/lib/checkoutFormKey';
 import { checkoutIntentContextFingerprint, orderLinkContextFingerprint } from '@/lib/checkoutIntentContext';
 import { buildForwarderNonce } from '@/lib/relay/forwarderIntent';
+import { orderBindSalt, orderDigest } from '@/lib/orderBind';
 import { PAYER_RECEIPTS_STORAGE_KEY } from '@/lib/payerReceipt';
 import { env } from '@/lib/env';
 import { mockHook } from '../_helpers/wagmiMock';
@@ -151,6 +152,23 @@ const FORMS = {
 } as const;
 type FormName = keyof typeof FORMS;
 
+// bill key を使わない経路: forwarder の無い経路 (free) と、束縛した注文 (自社の notify の URL つきの /checkout)。
+// 形の正しい bk が URL にあっても、main の値と同じになる (約束 3 の柵)。
+const BOUND_QUERY = `${CHECKOUT_QUERY}&order_id=A-1&webhook=${encodeURIComponent(`${location.origin}/api/order/notify?h=alice`)}`;
+const FENCED = {
+  '/pay・free': { form: '/pay', query: PAY_QUERY, forwarder: null },
+  '/checkout・free': { form: '/checkout', query: CHECKOUT_QUERY, forwarder: null },
+  '/checkout・束縛した注文': { form: '/checkout', query: BOUND_QUERY, forwarder: FORWARDER },
+  '/checkout・束縛した注文・free': { form: '/checkout', query: BOUND_QUERY, forwarder: null },
+} as const;
+type FencedName = keyof typeof FENCED;
+const FENCED_NAMES = Object.keys(FENCED) as FencedName[];
+
+function payFenced(name: FencedName, suffix: string): Promise<Captured> {
+  vi.mocked(jpycForwarderFor).mockReturnValue(FENCED[name].forwarder);
+  return payByRelay(FENCED[name].form, `${FENCED[name].query}${suffix}`);
+}
+
 // 押せるようになるのを待ってから押す (本物の relay の hook は、復旧の枠を読み終えるまで全経路の送信を止める)。
 async function clickWhenEnabled(name: RegExp) {
   const user = userEvent.setup();
@@ -209,17 +227,20 @@ afterEach(() => {
 });
 
 const capturePath = process.env.BILL_KEY_GOLDEN_CAPTURE;
-const GOLDEN: Record<FormName, Captured> = goldenFromMain;
+const GOLDEN: Record<FormName | FencedName, Captured> = goldenFromMain;
 
 describe.runIf(capturePath)('GOLDEN を採る (bill key を読む前の code で走らせる)', () => {
   const collected: Record<string, Captured> = {};
   it.each(Object.keys(FORMS) as FormName[])('%s', async (form) => {
     collected[form] = await payByRelay(form, FORMS[form].query);
   });
+  it.each(FENCED_NAMES)('%s', async (name) => {
+    collected[name] = await payFenced(name, '');
+  });
   afterAll(() => writeFileSync(capturePath!, JSON.stringify(collected, null, 2)));
 });
 
-describe.skipIf(capturePath)('bill key を読む前の code と同じ (recover の経路・/pay と /checkout)', () => {
+describe.skipIf(capturePath)('bill key を読む前の code と同じ (/pay と /checkout)', () => {
   describe.each(Object.keys(FORMS) as FormName[])('%s', (form) => {
     it.each([
       ['bk が無い', ''],
@@ -237,11 +258,31 @@ describe.skipIf(capturePath)('bill key を読む前の code と同じ (recover �
     });
   });
 
-  it('GOLDEN の中身の確かめ: intentSalt は乱数・復旧の枠に intentSalt は無い', () => {
-    for (const golden of Object.values(GOLDEN)) {
-      expect(JSON.parse(golden.body).intentSalt).toMatch(/^0x(a[0-9a-f]){32}$/);
-      expect(golden.storageAtPost).not.toContain(JSON.parse(golden.body).intentSalt);
+  // 約束 3 の柵: forwarder の無い経路 (free) と束縛した注文は、形の正しい bk が URL にあっても main と同じ。
+  describe.each(FENCED_NAMES)('%s', (name) => {
+    it.each([
+      ['bk が無い', ''],
+      ['形の正しい bk', `&bk=${VALID_BK}`],
+      ['形の違う bk (21 字)', `&bk=${VALID_BK.slice(0, 21)}`],
+    ])('%s: typed data・POST の body・保存するものが同じ', async (_label, suffix) => {
+      expect(await payFenced(name, suffix)).toEqual(GOLDEN[name]);
+    });
+  });
+
+  it('GOLDEN の中身の確かめ: recover は intentSalt が乱数・free は nonce が乱数・束縛した注文は乱数でない salt と注文の slot', () => {
+    const firstRandom = `0x${'a0'.repeat(32)}`;
+    for (const form of Object.keys(FORMS) as FormName[]) {
+      expect(JSON.parse(GOLDEN[form].body).intentSalt).toBe(firstRandom);
+      expect(GOLDEN[form].storageAtPost).not.toContain(firstRandom);
     }
+    expect(JSON.parse(GOLDEN['/pay・free'].body).nonce).toBe(firstRandom);
+    expect(JSON.parse(GOLDEN['/checkout・free'].body).nonce).toBe(firstRandom);
+    const bound = GOLDEN['/checkout・束縛した注文'];
+    expect(JSON.parse(bound.body).intentSalt).toMatch(/^0x[0-9a-f]{64}$/);
+    expect(JSON.parse(bound.body).intentSalt).not.toBe(firstRandom);
+    expect(bound.storageAtPost).toContain('openpay:undelivered-order:v1');
+    expect(bound.storageAtPost).toContain('\\"orderId\\":\\"A-1\\"');
+    expect(JSON.parse(GOLDEN['/checkout・束縛した注文・free'].body).nonce).toBe(JSON.parse(bound.body).intentSalt);
   });
 });
 
@@ -305,6 +346,32 @@ describe.skipIf(capturePath)('約束 3 の柵: bk つきの URL でも、bill ke
     expect(body).not.toHaveProperty('intentSalt');
     expect(JSON.parse(captured.typed).message.nonce).toBe(randomHex32(0));
     expect(captured.body).not.toContain(VALID_BK_SALT);
+  });
+
+  it('/checkout・束縛した注文: bk があっても、束縛の salt (注文の digest と secret から) のまま・nonce は束縛の有効期限で合う', async () => {
+    const captured = await payFenced('/checkout・束縛した注文', `&bk=${VALID_BK}`);
+    const slots = JSON.parse(captured.storageAtPost).session as Record<string, string>;
+    const record = JSON.parse(Object.values(slots)[0]) as {
+      order: Parameters<typeof orderDigest>[0];
+      bind: { secret: Hex; validAfter: string; validBefore: string };
+      intent: { nonce: Hex; merchantValue: string; feeValue: string };
+    };
+    const body = JSON.parse(captured.body) as Record<string, string>;
+    const salt = orderBindSalt(orderDigest(record.order), record.bind.secret);
+    expect(body.intentSalt).toBe(salt);
+    expect(body.intentSalt).not.toBe(VALID_BK_SALT);
+    expect(body.validBefore).toBe(record.bind.validBefore);
+    // server (lib/order/orderBindingVerify.ts) が Settled の nonce と比べる式。
+    expect(JSON.parse(captured.typed).message.nonce).toBe(buildForwarderNonce({
+      from: CUSTOMER,
+      merchant: MERCHANT,
+      merchantValue: BigInt(record.intent.merchantValue),
+      feeReceiver: env.feeReceiver as Address,
+      feeValue: BigInt(record.intent.feeValue),
+      validAfter: BigInt(record.bind.validAfter),
+      validBefore: BigInt(record.bind.validBefore),
+      intentSalt: salt,
+    }, polygonAmoy.id, FORWARDER));
   });
 
   function expectNoBillKey(args: unknown) {
