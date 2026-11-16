@@ -173,7 +173,7 @@ const ja: GuideContent = {
   reconcileBody:
     'レジの「OpenPay 決済」合計と、お店のウォレットの入金を突き合わせます。',
   reconcileBullets: [
-    '基本: POS の売上額と時刻で照合 (例: 14:32 の ¥1,200)。JPYC のガス代不要の支払いでは、ウォレットに届くのは利用料を引いた額です (例: 1,188 JPYC)',
+    '基本: POS の売上額と時刻で照合 (例: 14:32 の ¥1,200)。利用料がかかる支払いでは、ウォレットに届くのは利用料を引いた額です (例: 1,188 JPYC)',
     'まとめて: ブロックチェーン Explorer でお店のウォレットの入金の一覧を開き、レジの「その他決済」明細と突き合わせます',
   ],
   reconcileImage: { file: 'history-reconcile.svg', alt: 'POS の明細と、お店のウォレットの入金を時刻・金額で突き合わせる図 (ウォレットには利用料を引いた額が届く)' },
@@ -316,7 +316,7 @@ const en: GuideContent = {
   reconcileBody:
     'Match your POS “OpenPay” total against the incoming payments in your shop wallet.',
   reconcileBullets: [
-    'Basic: match by POS sale amount and time (e.g. ¥1,200 at 14:32). For gasless JPYC payments, your wallet receives the amount after the usage fee (e.g. 1,188 JPYC)',
+    'Basic: match by POS sale amount and time (e.g. ¥1,200 at 14:32). For payments with a usage fee, your wallet receives the amount after the fee (e.g. 1,188 JPYC)',
     'In bulk: open your shop wallet’s incoming transfers in a blockchain explorer and match them against POS “other payment” entries',
   ],
   reconcileImage: { file: 'history-reconcile.svg', alt: 'Matching POS entries with your shop wallet’s incoming payments by time and amount (the wallet receives the amount after the usage fee)' },
