@@ -1213,6 +1213,16 @@ describe('i18n: History フィルタ/集計/会計CSV keys (ja/en parity)', () =
     'accountingFormatYayoiNative',
     'exportAccountingCsv',
     'accountingIncomeOnlyNote',
+    // 会計CSV の勘定科目の欄 (見出し・label・補足・エラー)。
+    'accountingAccountsSummary',
+    'accountingAccountsSummaryFreee',
+    'accountingDebitLabel',
+    'accountingCreditLabel',
+    'accountingAccountsHint',
+    'accountingDebitUnusedFreee',
+    'accountingAccountTooLong',
+    'accountingAccountForbidden',
+    'accountingAccountFormula',
     'accountingRateUnavailable',
     'accountingNoRows',
     'accountingTooManyRows',
@@ -1246,6 +1256,27 @@ describe('i18n: History フィルタ/集計/会計CSV keys (ja/en parity)', () =
       const h = m.History as Record<string, string>;
       expect(h.summaryGmv).toContain('{amount}');
       expect(h.accountingTooManyRows).toContain('{max}');
+      // 勘定科目の見出し: 弥生・MF は借方と貸方、freee (単式) は貸方だけ。
+      expect(h.accountingAccountsSummary).toContain('{debit}');
+      expect(h.accountingAccountsSummary).toContain('{credit}');
+      expect(h.accountingAccountsSummaryFreee).toContain('{credit}');
+      expect(h.accountingAccountsSummaryFreee).not.toContain('{debit}');
+      expect(h.accountingAccountTooLong).toContain('{max}');
+    }
+  });
+
+  it('勘定科目の欄の key は History の namespace だけにある (同じ名前の key を別の namespace に足していない)', () => {
+    const accountKeys = HISTORY_KEYS.filter(
+      (key) => key.startsWith('accountingAccount') || /^accounting(Debit|Credit)/.test(key),
+    );
+    expect(accountKeys).toHaveLength(9);
+    for (const m of [ja, en]) {
+      for (const key of accountKeys) {
+        const owners = Object.entries(m as Record<string, unknown>)
+          .filter(([, ns]) => ns !== null && typeof ns === 'object' && key in (ns as object))
+          .map(([name]) => name);
+        expect(owners, key).toEqual(['History']);
+      }
     }
   });
 });

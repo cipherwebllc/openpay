@@ -11,10 +11,13 @@
 // 整数円。会計に失敗/revert/手数料 leg を入れない (income-success 固定・UI status フィルタとは独立)。
 //
 // 文字コード: 'yayoi-native' のみ Shift_JIS (UTF-8 BOM を付けず charset を返す → 書き出し直前に
-// 呼出側がバイト変換)。それ以外は UTF-8 BOM。⚠️ 列順・税区分コード・文字コードは実取込で検証すること
-// (勘定科目/税区分は各社の取込ウィザードで再マッピング可)。
+// 呼出側がバイト変換)。それ以外は UTF-8 BOM。⚠️ 列順・税区分コード・文字コードは実取込で検証すること。
+//
+// 勘定科目: 既定は 借方 売掛金 / 貸方 売上高。店が変えた名前は opts.accounts で受け取る (lib/accountingAccounts.ts・
+// 入口で検証し直すので、CSV に出るのは検証済みの名前か既定の科目だけ)。税区分の名前は lib/tax.ts の固定値。
 
 import { ACCOUNTING_MAX_ROWS, buildCsv } from './csv';
+import { resolveAccountingAccounts, type AccountingAccounts } from './accountingAccounts';
 import { tokyoDateKey } from './shopTime';
 import { shortAddress } from './format';
 import { isIncomeSaleEntry } from './historyFilters';
@@ -44,6 +47,9 @@ export type AccountingCsvOptions = {
   /** USDC・anchor 無し行の円換算に使う現レート (useMarketRates 由来・未取得は undefined)。 */
   usdcJpy: number | undefined;
   now?: Date;
+  /** 勘定科目の名前 (店が変えたもの)。渡さない・空文字・検証を通らない項目は既定の科目 (売掛金 / 売上高)。
+   *  freee 形式 (単式) は credit だけを使う。 */
+  accounts?: AccountingAccounts;
 };
 
 export type AccountingCsvResult =
@@ -195,7 +201,7 @@ function partner(e: HistoryEntry): string {
   return store.length > 0 ? store : (e.customer ?? '');
 }
 
-// freee 取引(収入) 形式: ヘッダ + 1 行 1 取引。勘定科目/税区分はデフォルト値 (取込時に再マッピング可)。
+// freee 取引(収入) 形式: ヘッダ + 1 行 1 取引。単式なので勘定科目は売上の科目 (accounts.credit) だけを使う。
 // 行生成関数はデータ行だけを返し、ヘッダは FORMAT_SPEC が付ける (上限判定をデータ行数で行うため・E14)。
 const FREEE_HEADER = [
   '収支区分',
@@ -207,7 +213,7 @@ const FREEE_HEADER = [
   '備考',
 ] as const;
 
-function freeeRows(valued: ReadonlyArray<Valued>): string[][] {
+function freeeRows(valued: ReadonlyArray<Valued>, accounts: AccountingAccounts): string[][] {
   const rows: string[][] = [];
   for (const { e, yv } of valued) {
     const groups = taxGroupsForEntry(e, yv); // 混在税率は税区分別に分割 (合計 === yv.yen)
@@ -215,7 +221,7 @@ function freeeRows(valued: ReadonlyArray<Valued>): string[][] {
       rows.push([
         '収入',
         tokyoDateKey(e.ts),
-        '売上高',
+        accounts.credit, // 勘定科目 (売上の科目)
         freeeTaxLabel(g.taxCategory), // 税区分: グループ別 (単一グループは代表値)
         String(g.yen),
         partner(e),
@@ -226,10 +232,10 @@ function freeeRows(valued: ReadonlyArray<Valued>): string[][] {
   return rows;
 }
 
-// 弥生「仕訳データ受入形式」(25列・ヘッダ無し)。収入 1 件 = 借方 売掛金 / 貸方 売上高 の 1 仕訳。
+// 弥生「仕訳データ受入形式」(25列・ヘッダ無し)。収入 1 件 = 借方 (既定 売掛金) / 貸方 (既定 売上高) の 1 仕訳。
 // 税込経理前提 (金額は税込 gross)。税額は 0 とし取込側が税区分から算出。
 // 混在税率は税区分別に分割し、分割行も独立仕訳として伝票No を連番採番する。
-function yayoiRows(valued: ReadonlyArray<Valued>): string[][] {
+function yayoiRows(valued: ReadonlyArray<Valued>, accounts: AccountingAccounts): string[][] {
   const rows: string[][] = [];
   let voucherNo = 0; // 伝票No (分割行も独立仕訳として連番継続)
   for (const { e, yv } of valued) {
@@ -242,13 +248,13 @@ function yayoiRows(valued: ReadonlyArray<Valued>): string[][] {
         String(voucherNo), // 伝票No
         '', // 決算
         tokyoDateKey(e.ts, '/'), // 取引日付 (JST)
-        '売掛金', // 借方勘定科目
+        accounts.debit, // 借方勘定科目
         '', // 借方補助科目
         '', // 借方部門
         '対象外', // 借方税区分
         yen, // 借方金額
         '0', // 借方税金額
-        '売上高', // 貸方勘定科目
+        accounts.credit, // 貸方勘定科目
         '', // 貸方補助科目
         '', // 貸方部門
         yayoiCreditTaxLabel(g.taxCategory), // 貸方税区分 (税込・グループ別)
@@ -270,7 +276,7 @@ function yayoiRows(valued: ReadonlyArray<Valued>): string[][] {
 }
 
 // マネーフォワード クラウド会計「仕訳帳」インポート形式 (ヘッダ付き・複式)。
-// 収入 1 件 = 借方 売掛金 / 貸方 売上高。税区分は取込時に再マッピング可。
+// 収入 1 件 = 借方 (既定 売掛金) / 貸方 (既定 売上高)。
 const MF_HEADER = [
   '取引No',
   '取引日',
@@ -290,7 +296,7 @@ const MF_HEADER = [
 ] as const;
 
 // 混在税率は税区分別に分割し、分割行も独立仕訳として取引No を連番採番する。
-function mfRows(valued: ReadonlyArray<Valued>): string[][] {
+function mfRows(valued: ReadonlyArray<Valued>, accounts: AccountingAccounts): string[][] {
   const rows: string[][] = [];
   let txNo = 0; // 取引No (分割行も独立仕訳として連番継続)
   for (const { e, yv } of valued) {
@@ -301,13 +307,13 @@ function mfRows(valued: ReadonlyArray<Valued>): string[][] {
       rows.push([
         String(txNo), // 取引No
         tokyoDateKey(e.ts, '/'), // 取引日 (JST)
-        '売掛金', // 借方勘定科目
+        accounts.debit, // 借方勘定科目
         '', // 借方補助科目
         '', // 借方部門
         '対象外', // 借方税区分
         yen, // 借方金額(円)
         '0', // 借方税額
-        '売上高', // 貸方勘定科目
+        accounts.credit, // 貸方勘定科目
         '', // 貸方補助科目
         '', // 貸方部門
         mfCreditTaxLabel(g.taxCategory), // 貸方税区分 (グループ別)
@@ -326,7 +332,7 @@ const FORMAT_SPEC: Record<
   AccountingFormat,
   {
     header: readonly string[] | null;
-    rows: (valued: ReadonlyArray<Valued>) => string[][];
+    rows: (valued: ReadonlyArray<Valued>, accounts: AccountingAccounts) => string[][];
     charset: AccountingCharset;
   }
 > = {
@@ -359,7 +365,8 @@ export function toAccountingCsv(
     return { ok: false, reason: 'rate-unavailable', blockingRowCount: blocking };
   }
   const spec = FORMAT_SPEC[opts.format];
-  const dataRows = spec.rows(valued);
+  // 画面の検証を通っていない値が来ても、CSV には検証済みの名前か既定の科目しか出さない。
+  const dataRows = spec.rows(valued, resolveAccountingAccounts(opts.accounts));
   // 混在税率の取引は税区分ごとに複数行へ分かれる。会計ソフトが弾くのは書き出した行数なので、
   // 取引数ではなく実際の仕訳行数 (ヘッダ除く) で判定する (会計明細CSV と同じ基準・E14)。
   if (dataRows.length > ACCOUNTING_MAX_ROWS) {
