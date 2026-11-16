@@ -38,6 +38,20 @@ export type NewsItem = {
 // 表示順を強制しないが、可読性のため宣言時点でも新しい順に並べる。
 export const NEWS_ITEMS: readonly NewsItem[] = [
   {
+    id: 'accounting-accounts-2026-11-16',
+    date: '2026-11-16',
+    category: 'feature',
+    title: {
+      ja: '会計CSVの勘定科目を変えられるようになりました',
+      en: 'You can now change the account titles in the accounting CSV',
+    },
+    body: {
+      ja: '取引履歴の会計CSVで、勘定科目を、お使いの会計ソフトに登録している名前に変えられるようになりました (freee 形式は売上の科目・弥生とマネーフォワードの形式は借方と貸方)。履歴ページの「勘定科目」の欄で設定し、この端末に保存されます。変えなければ、今までと同じ「売掛金」「売上高」で書き出します。',
+      en: 'In the accounting CSV on the History page, you can now change the account titles to the names registered in your accounting software (the sales account for the freee format; the debit and credit accounts for the Yayoi and Money Forward formats). Set them in the “Account titles” section on the History page; they are saved on this device. If you change nothing, the CSV is exported with the same 売掛金 and 売上高 as before.',
+    },
+    link: { href: '/history', labelJa: '取引履歴を開く', labelEn: 'Open History' },
+  },
+  {
     id: 'sales-move-2026-11-07',
     date: '2026-11-07',
     category: 'feature',
