@@ -12,7 +12,7 @@
 
 import type { ReactElement } from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { cleanup, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { isDeepStrictEqual } from 'node:util';
 import { parseUnits, type Address, type Hex } from 'viem';
@@ -95,6 +95,7 @@ import type { CheckoutParams } from '@/lib/url';
 import { deploymentForSlug } from '@/lib/tokens';
 import { env } from '@/lib/env';
 import { loadHistory, type HistoryEntry } from '@/lib/history';
+import { loadPayerReceipts } from '@/lib/payerReceipt';
 import { mobileOrderFeeValue } from '@/lib/mobileOrderFee';
 import { recoverFeeValue } from '@/lib/relay/recoverFee';
 import { sanitizeOrderItems, sanitizeTable, type StoredOrder } from '@/lib/orderRelay';
@@ -106,7 +107,10 @@ import {
 
 // wagmi が返す形 (checksum つき) のアドレス。大文字小文字の違いも「違う欄」として落ちるようにする。
 const MERCHANT: Address = '0x52d4901142e2B5680027da5EB47C86CB02a3cA81';
-const CUSTOMER: Address = '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045';
+// 払った側のブラウザが履歴の行を書くのは、受取先が自分のときだけ (hooks/usePaymentHistory の paidToSelf)。払った側の本物の行を
+// 作るために、払う人 = お店の受取先 の会計で比べる (払った側が書く行の値そのものは、払う人が誰でも同じ式)。
+// お客様が別のウォレットのとき (払った側は行を書かない・お店の行のお客様の欄は receipt の from) は、末尾の describe で確かめる。
+const CUSTOMER: Address = MERCHANT;
 const RELAY_TX = `0x${'e'.repeat(64)}` as Hex;
 const STANDARD_TX = `0x${'c'.repeat(64)}` as Hex; // setStandard の merchantTxHash
 const JPYC = deploymentForSlug('jpyc', 'polygon');
@@ -146,7 +150,9 @@ function setIdle() {
 }
 
 let relayMutate: ReturnType<typeof vi.fn>;
-function setRelay(done?: { variables: NonNullable<ReturnType<typeof useJpycEip3009Payment>['variables']> }) {
+function setRelay(
+  done?: { variables: NonNullable<ReturnType<typeof useJpycEip3009Payment>['variables']>; from?: Address },
+) {
   relayMutate = vi.fn();
   mockHook(useJpycEip3009Payment, {
     mutate: relayMutate,
@@ -157,7 +163,7 @@ function setRelay(done?: { variables: NonNullable<ReturnType<typeof useJpycEip30
     retrySamePayload: vi.fn(),
     recoveryState: null,
     variables: done?.variables,
-    lastSignedFrom: done ? CUSTOMER : undefined,
+    lastSignedFrom: done ? (done.from ?? CUSTOMER) : undefined,
     restoredIntent: null,
     orderDelivery: null,
   } as Partial<ReturnType<typeof useJpycEip3009Payment>>);
@@ -489,4 +495,45 @@ describe('受注から書く行は、払った側の行と欄ごとに同じ —
     expect(shop).toMatchObject({ feeAmount: null, saleAmount: null, merchantAmount: (1_500n * ONE).toString() });
   });
 
+});
+
+describe('お客様が別のウォレットで払った注文: 払った側は履歴の行を書かず控えだけ・お店の行は receipt から書く', () => {
+  const OTHER: Address = '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045';
+
+  it('ガスレス (forwarder の Settled あり): お店の行のお客様の欄は払ったウォレット。ほかの欄は、受取先が払った同じ注文の行と同じ', async () => {
+    feeFlags.enableMobileOrderFee = true;
+    const params = mobileOrderParams();
+    // 対照: 受取先が自分で払った同じ注文 (払った側の行があり、お店の行と時刻のほかは同じ)。
+    const self = await recoverCase(params);
+    expect(differingFields(self.payer, self.shop)).toEqual(ONLY_TS);
+    cleanup();
+    window.localStorage.clear();
+    window.sessionStorage.clear();
+
+    // お客様 (受取先でないウォレット) が払う。
+    mockHook(useAccount, { address: OTHER, isConnected: true, chainId: JPYC.chainId });
+    setRelay();
+    const user = userEvent.setup();
+    const ui = (): ReactElement => <CheckoutForm params={params} />;
+    const { rerender } = render(ui());
+    await user.click(screen.getByRole('button', { name: /を支払う/ }));
+    await waitFor(() => expect(relayMutate).toHaveBeenCalledOnce());
+    const vars = relayMutate.mock.calls[0][0] as RelayVars;
+    expect(vars).toEqual(self.vars);
+    setRelay({ variables: vars, from: OTHER });
+    rerender(ui());
+    // 払った側: 「支払い」の控えが 1 件・「受取」の行は無い。
+    await waitFor(() => expect(loadPayerReceipts()).toHaveLength(1));
+    expect(loadPayerReceipts()[0]).toMatchObject({ receiptId: RELAY_TX, payerAddress: OTHER, merchantAddress: MERCHANT });
+    expect(loadHistory()).toEqual([]);
+
+    // お店の行: 同じ受注と、お客様が OTHER の receipt から。
+    const receipt = recoverReceipt({
+      token: JPYC.address, forwarder: FORWARDER, customer: OTHER, merchant: MERCHANT,
+      feeReceiver: env.feeReceiver, txHash: RELAY_TX, ...self.split,
+    });
+    const shop = shopRow(self.order, receipt);
+    expect(shop.customer).toBe(OTHER);
+    expect(differingFields(self.shop, shop)).toEqual(['customer']);
+  });
 });

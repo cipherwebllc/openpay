@@ -162,12 +162,15 @@ function setURL(query: string) {
   );
 }
 
+// address の既定は CUSTOMER (他店への支払い = 履歴の行は書かず、控えだけ)。履歴の行の値を確かめるテストは
+// address: MERCHANT (受取先 = 自分) でつなぐ (hooks/usePaymentHistory の paidToSelf)。
 function setAccount(opts: {
   connected: boolean;
   chainId?: number;
+  address?: Address;
 }) {
   mockHook(useAccount, {
-    address: opts.connected ? CUSTOMER : undefined,
+    address: opts.connected ? (opts.address ?? CUSTOMER) : undefined,
     isConnected: opts.connected,
     chainId: opts.connected ? opts.chainId : undefined,
     chain: opts.connected
@@ -797,16 +800,20 @@ describe('PaymentForm — 送信フロー', () => {
 
   // 第 10 回レビュー A-1 (Codex 第 2 回 MUST 2): 別の intent の確定を、今の画面の店・明細と組み合わせて履歴・控えに書かない。
   // recoveredIntent (確定した intent 自体の受取先・金額) があればそれだけで書き、無ければ (帰属を確かめられない) 書かない。
+  // 履歴の行 (「受取」) を書くかは、その intent の受取先が払った人かで決める (今の画面の受取先では決めない)。
   it.each([
-    { recovered: true },
-    { recovered: false },
+    // 他店宛ての画面で、自分宛ての intent が確定 → 履歴の行も書く。
+    { recovered: true, self: 'intent' as const },
+    // 自分宛ての画面で、他店への intent が確定 → 履歴の行は書かない (控えは書く)。
+    { recovered: true, self: 'screen' as const },
+    { recovered: false, self: 'intent' as const },
   ])(
-    'gasless: 別の intent の確定 (recoveredIntent あり=$recovered) は、intent の受取先・金額だけで記録し、画面の店名・商品名・明細を付けない',
-    async ({ recovered }) => {
+    'gasless: 別の intent の確定 (recoveredIntent あり=$recovered / 自分宛てなのは $self ) は、intent の受取先・金額だけで記録し、画面の店名・商品名・明細を付けない',
+    async ({ recovered, self }) => {
       window.localStorage.clear();
       const user = userEvent.setup();
       setURL(`to=${MERCHANT}&token=usdc&amount=100&store=Shop%20B&pname=Coffee`);
-      setAccount({ connected: true, chainId: baseSepolia.id });
+      setAccount({ connected: true, chainId: baseSepolia.id, address: self === 'screen' ? MERCHANT : CUSTOMER });
       setBalance(200_000_000n);
       setSmartAccount(true);
       setPayment('idle');
@@ -817,7 +824,7 @@ describe('PaymentForm — 送信フロー', () => {
       // 実際に確定したのは、前に結果が分からなかった店 A への 10 USDC (保存した intent の params)。
       const intentA = {
         tokenAddress: getAddress('0x036CbD53842c5426634e7929541eC2318f3dCF7e'),
-        merchant: getAddress('0xa1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1'),
+        merchant: self === 'intent' ? CUSTOMER : getAddress('0xa1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1'),
         merchantAmount: 10_000_000n,
         feeReceiver: getAddress('0xfee0fee0fee0fee0fee0fee0fee0fee0fee0fee0'),
         feeAmount: 0n,
@@ -836,7 +843,18 @@ describe('PaymentForm — 送信フロー', () => {
         expect(loadPayerReceipts()).toHaveLength(0);
         return;
       }
-      await waitFor(() => expect(loadHistory()).toHaveLength(1));
+      await waitFor(() => expect(loadPayerReceipts()).toHaveLength(1));
+      const [receipt] = loadPayerReceipts();
+      expect(receipt.merchantAddress).toBe(intentA.merchant);
+      expect(receipt.amount).toBe('10');
+      expect(receipt.merchantName).toBeUndefined();
+      expect((receipt.lineItems ?? []).map((item) => item.name)).not.toContain('Coffee');
+      if (self === 'screen') {
+        // 控えを書いた後 (= 記録の effect が走った後) でも、履歴の行は無い。
+        expect(loadHistory()).toHaveLength(0);
+        return;
+      }
+      expect(loadHistory()).toHaveLength(1);
       const [history] = loadHistory();
       expect(history.merchant).toBe(intentA.merchant);
       expect(history.merchantAmount).toBe('10000000');
@@ -844,12 +862,6 @@ describe('PaymentForm — 送信フロー', () => {
       expect(history.storeName).toBe('');
       expect(history.productName ?? null).toBeNull();
       expect(history.lineItems ?? null).toBeNull();
-      await waitFor(() => expect(loadPayerReceipts()).toHaveLength(1));
-      const [receipt] = loadPayerReceipts();
-      expect(receipt.merchantAddress).toBe(intentA.merchant);
-      expect(receipt.amount).toBe('10');
-      expect(receipt.merchantName).toBeUndefined();
-      expect((receipt.lineItems ?? []).map((item) => item.name)).not.toContain('Coffee');
     },
   );
 
@@ -876,7 +888,7 @@ describe('PaymentForm — 送信フロー', () => {
     window.localStorage.clear();
     const user = userEvent.setup();
     setURL(`to=${MERCHANT}&token=usdc&pname=Coffee`);
-    setAccount({ connected: true, chainId: baseSepolia.id });
+    setAccount({ connected: true, chainId: baseSepolia.id, address: MERCHANT });
     setBalance(200_000_000n);
     setSmartAccount(true);
     setPayment('idle');
@@ -2980,7 +2992,7 @@ describe('PaymentForm — relay 失敗時の通常決済フォールバック (B
     vi.mocked(resolveJpycGaslessProvider).mockReturnValue('eip3009-relay');
     vi.mocked(jpycForwarderFor).mockReturnValue(null);
     setURL(`to=${MERCHANT}&token=jpyc&amount=300`);
-    setAccount({ connected: true, chainId: polygonAmoy.id });
+    setAccount({ connected: true, chainId: polygonAmoy.id, address: MERCHANT });
     setBalance(10_000n * 10n ** 18n);
     const value = 300n * 10n ** 18n;
     const variables = { merchant: MERCHANT, value, gasMode: 'merchant' as const };
@@ -3603,7 +3615,7 @@ describe('PaymentForm — 決済QR の値引き (disc)', () => {
     window.localStorage.clear();
     const user = userEvent.setup();
     setURL(`to=${MERCHANT}&token=usdc&amount=9.8&disc=0.2&pname=Coffee`);
-    setAccount({ connected: true, chainId: baseSepolia.id });
+    setAccount({ connected: true, chainId: baseSepolia.id, address: MERCHANT });
     setBalance(200_000_000n);
     setSmartAccount(true);
     setPayment('idle');
@@ -3637,7 +3649,7 @@ describe('PaymentForm — 決済QR の値引き (disc)', () => {
     window.localStorage.clear();
     const user = userEvent.setup();
     setURL(`to=${MERCHANT}&token=usdc&amount=9.8&disc=0.2`);
-    setAccount({ connected: true, chainId: baseSepolia.id });
+    setAccount({ connected: true, chainId: baseSepolia.id, address: MERCHANT });
     setBalance(200_000_000n);
     setSmartAccount(true);
     setPayment('idle');
@@ -3700,7 +3712,7 @@ describe('PaymentForm — 決済QR の値引き (disc)', () => {
   it('この画面で送っていない決済 (前の画面の確認待ちを再照会して確定) には、この画面の値引き明細を付けない', async () => {
     window.localStorage.clear();
     setURL(`to=${MERCHANT}&token=usdc&amount=9.8&disc=0.2&pname=Coffee`);
-    setAccount({ connected: true, chainId: baseSepolia.id });
+    setAccount({ connected: true, chainId: baseSepolia.id, address: MERCHANT });
     setBalance(200_000_000n);
     setSmartAccount(true);
     setGasQuote('ready', 0n);
@@ -3874,11 +3886,18 @@ describe('PaymentForm — 履歴と控えの支払者は送信した時点のア
     window.localStorage.clear();
   });
 
-  it('relay: 送信 → B に切り替え → 成功が届く でも、履歴と控えの支払者は送った A', async () => {
+  // A = 送った時点のアドレス。他店への支払い (A ≠ 受取先) は控えだけ・受取先 = 自分 (A = 受取先) は履歴の行も書く。
+  // どちらも、判定と支払者の欄に使うのは送った A (切り替えた先の B ではない)。
+  const PAYERS = [
+    ['他店への支払い: 控えの支払者は送った A・履歴の行は書かない', CUSTOMER],
+    ['受取先 = 自分: 履歴と控えの支払者は送った A', MERCHANT],
+  ] as const;
+
+  it.each(PAYERS)('relay: 送信 → B に切り替え → 成功が届く でも、%s', async (_label, payer) => {
     const user = userEvent.setup();
     vi.mocked(resolveJpycGaslessProvider).mockReturnValue('eip3009-relay');
     setURL(`to=${MERCHANT}&token=jpyc&amount=300`);
-    setAccount({ connected: true, chainId: polygonAmoy.id });
+    setAccount({ connected: true, chainId: polygonAmoy.id, address: payer });
     setBalance(10_000n * 10n ** 18n);
     const { rerender } = render(<PaymentForm />);
     await user.click(screen.getByRole('button', { name: /300 JPYC を支払う/ }));
@@ -3888,14 +3907,14 @@ describe('PaymentForm — 履歴と控えの支払者は送信した時点のア
     const txHash = `0x${'e'.repeat(64)}` as const;
     setRelay('success', { txHash, variables: { merchant: MERCHANT, value: 300n * 10n ** 18n, gasMode: 'merchant' } });
     rerender(<PaymentForm />);
-    expect(loadHistory().find((x) => x.txHash === txHash)?.customer).toBe(CUSTOMER);
-    expect(loadPayerReceipts().find((r) => r.receiptId === txHash)?.payerAddress).toBe(CUSTOMER);
+    expect(loadPayerReceipts().find((r) => r.receiptId === txHash)?.payerAddress).toBe(payer);
+    expect(loadHistory().map((x) => [x.txHash, x.customer])).toEqual(payer === MERCHANT ? [[txHash, payer]] : []);
   });
 
-  it('gasless: 送信 → B に切り替え → 成功が届く でも、履歴と控えの支払者は送った A', async () => {
+  it.each(PAYERS)('gasless: 送信 → B に切り替え → 成功が届く でも、%s', async (_label, payer) => {
     const user = userEvent.setup();
     setURL(`to=${MERCHANT}&token=usdc&amount=100`);
-    setAccount({ connected: true, chainId: baseSepolia.id });
+    setAccount({ connected: true, chainId: baseSepolia.id, address: payer });
     setBalance(200_000_000n);
     setSmartAccount(true);
     setGasQuote('ready', 0n);
@@ -3907,8 +3926,8 @@ describe('PaymentForm — 履歴と控えの支払者は送信した時点のア
     setPayment('success');
     rerender(<PaymentForm />);
     const txHash = `0x${'b'.repeat(64)}`;
-    expect(loadHistory().find((x) => x.txHash === txHash)?.customer).toBe(CUSTOMER);
-    expect(loadPayerReceipts().find((r) => r.receiptId === txHash)?.payerAddress).toBe(CUSTOMER);
+    expect(loadPayerReceipts().find((r) => r.receiptId === txHash)?.payerAddress).toBe(payer);
+    expect(loadHistory().map((x) => [x.txHash, x.customer])).toEqual(payer === MERCHANT ? [[txHash, payer]] : []);
   });
 
   it('cross-chain (CCTP): 試みる → B に切り替え → 成功が届く でも、控えの支払者は試みた A', async () => {
@@ -4096,6 +4115,7 @@ describe('PaymentForm — 復元した前の支払いの確定を、この画面
     rerender(<PaymentForm />);
     await expectOwnResult(RELAY_TX);
     expect(loadHistory()).toHaveLength(0);
+    expect(loadPayerReceipts()).toHaveLength(0);
   });
 
   it.each<[string, Partial<RelayIntent>]>([
@@ -4111,6 +4131,8 @@ describe('PaymentForm — 復元した前の支払いの確定を、この画面
   it('relay: この mount で送った支払いの成功は、今までどおりの題と大きな完了画面 (判定しない)', async () => {
     const user = userEvent.setup();
     readyJpyc(FIXED_JPYC);
+    // 受取先 = 自分 でつなぐ (履歴の行も書く)。
+    setAccount({ connected: true, chainId: polygonAmoy.id, address: MERCHANT });
     const { rerender } = render(<PaymentForm />);
     await user.click(screen.getByRole('button', { name: /300 JPYC を支払う/ }));
     expect(relayMutate).toHaveBeenCalledOnce();
@@ -4253,9 +4275,11 @@ describe('PaymentForm — 復元した前の支払いの確定を、この画面
 
     it('対照: 復元の印がどちらも無い成功 (この mount で送った) は、今までどおりの題で、履歴をこの画面の店で書く', async () => {
       readyUsdc(SCREEN_B);
+      // 受取先 = 自分 でつなぐ (履歴の行も書く)。
+      setAccount({ connected: true, chainId: baseSepolia.id, address: MERCHANT });
       setStandardPayment('success', {
         lastSubmittedParams: standardRecord({ feeAmount: 100_000n }),
-        lastSubmittedFrom: CUSTOMER,
+        lastSubmittedFrom: MERCHANT,
         restoredFromStorage: false,
         restoredAttempt: false,
       });
@@ -4304,6 +4328,7 @@ describe('PaymentForm — 復元した前の支払いの確定を、この画面
     await expectOwnResult(GASLESS_TX);
     await expectNoOverlay();
     expect(loadHistory()).toHaveLength(0);
+    expect(loadPayerReceipts()).toHaveLength(0);
   });
 
   it.each<[string, Partial<GaslessRecord>]>([
@@ -4318,6 +4343,7 @@ describe('PaymentForm — 復元した前の支払いの確定を、この画面
     await expectForeignResult(GASLESS_TX);
     await expectNoOverlay();
     expect(loadHistory()).toHaveLength(0);
+    expect(loadPayerReceipts()).toHaveLength(0);
   });
 
   // 金額なしの QR: 読み直した後に入力欄へ 50 を打って送り、その前の 10 USDC の intent (同じお店) が「同じ送信内容を再確認」で

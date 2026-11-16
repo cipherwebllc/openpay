@@ -7,6 +7,10 @@
 //
 // 重複対策は lib/history.ts 側 (id dedupe) に任せ、ここでは StrictMode の
 // 二重 effect / react-query onSuccess 再呼出を素朴に許容する。
+//
+// 履歴の行は /history に「受取」として出て、集計・会計 CSV に入る。払った側のブラウザが書くのは、受取先が自分の
+// とき (paidToSelf) だけ。他店への支払いは「支払い」の控え (saveReceiptFor) だけを残す (お店の側の行は、お店の端末が
+// 書く: lib/storeDeviceSaleHistory・lib/orderFeedHistoryRecorder)。控えは paidToSelf の外で、書く条件を変えない。
 
 import { useEffect, useMemo, useRef } from 'react';
 import type { Address, Hex } from 'viem';
@@ -73,6 +77,13 @@ export type AppendPaymentHistoryCtx = {
   sourceRoute?: string;
   locale?: string;
 };
+
+// その行の支払いの売上の受取先 (c.merchant) が、払った人 (c.customer) と同じアドレスか (大文字小文字を無視)。
+// 払った人が分からない (未接続) ときは「自分ではない」。渡すのは、その行を書くのに使う ctx (別の intent の確定は
+// その intent の ctx)。手数料の leg (standard-fee) も、行の merchant 欄 (= feeReceiver) ではなく同じ ctx で決める。
+function paidToSelf(c: AppendPaymentHistoryCtx): boolean {
+  return !!c.customer && c.customer.toLowerCase() === c.merchant.toLowerCase();
+}
 
 // sale 成功 leg の HistoryEntry から顧客向け電子レシート (PayerReceipt) を保存する。
 // dedupe (receiptId = txHash || userOpHash) は payerReceipt 側が担保。
@@ -304,7 +315,7 @@ export function usePaymentHistory(
       receiptNo: gaslessCtx.receiptNo ?? null,
       lineItems: gaslessCtx.lineItems ?? null,
     });
-    appendHistory(entry);
+    if (paidToSelf(gaslessCtx)) appendHistory(entry);
     // 顧客向け電子レシート: 成功 / relay pending のみ控えを残す (reverted は控えない)。
     if (status !== 'reverted') saveReceiptFor(entry, gaslessCtx);
   }, [
@@ -322,6 +333,8 @@ export function usePaymentHistory(
     if (!gaslessError) return;
     if (appendedErrorRef.current === gaslessError) return;
     appendedErrorRef.current = gaslessError;
+    // 判定は印の後 (その失敗が届いたときの会計で 1 回だけ決める。後から会計が変わっても書き足さない)。
+    if (!paidToSelf(ctx)) return;
     appendHistory(
       buildHistoryEntry({
         flow: 'batch',
@@ -404,10 +417,11 @@ export function usePaymentHistory(
       receiptNo: ctx.receiptNo ?? null,
       lineItems: ctx.lineItems ?? null,
     });
-    appendHistory(entry);
+    const self = paidToSelf(ctx);
+    if (self) appendHistory(entry);
     // 顧客向け電子レシート (店舗着金確定 = sale 成功)。
     saveReceiptFor(entry, ctx);
-    if (standardData.feeTxHash) {
+    if (self && standardData.feeTxHash) {
       appendHistory(
         buildHistoryEntry({
           flow: 'standard-fee',
@@ -453,7 +467,7 @@ export function usePaymentHistory(
   // .status ('error') で識別できるため、UI / CSV に phase 名を error 文と
   // して埋め込む必要はない (むしろ店主にとって意味不明な文字列になる)。
   useEffect(() => {
-    if (standardPhase !== 'merchant-error') return;
+    if (standardPhase !== 'merchant-error' || !paidToSelf(ctx)) return;
     appendHistory(
       buildHistoryEntry({
         flow: 'standard-merchant',
@@ -509,6 +523,7 @@ export function usePaymentHistory(
   //    行を append する。merchant 着金は確定済 = 会計上必ず計上すべき事象。
   useEffect(() => {
     if (standardPhase !== 'fee-error') return;
+    const self = paidToSelf(ctx);
     if (standardMerchantTxHash && standardMerchantBlockNumber !== undefined) {
       const entry = buildHistoryEntry({
         flow: 'standard-merchant',
@@ -542,13 +557,13 @@ export function usePaymentHistory(
         receiptNo: ctx.receiptNo ?? null,
         lineItems: ctx.lineItems ?? null,
       });
-      appendHistory(entry);
+      if (self) appendHistory(entry);
       // fee は失敗したが店舗着金は確定 = 顧客にとっては支払い成立。控えを残す。
       saveReceiptFor(entry, ctx);
     }
     // fee-awaiting の reload は「merchant 確定・fee はまだ未送信」であり、新しい失敗ではない。
     // mount ごとに hash 無し error 行を増殖させる波及を断ち、明示 retry 後の失敗だけを記録する。
-    if (standardRestoredFromStorage) return;
+    if (standardRestoredFromStorage || !self) return;
     appendHistory(
       buildHistoryEntry({
         flow: 'standard-fee',
