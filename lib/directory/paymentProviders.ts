@@ -107,12 +107,14 @@ export const PAYMENT_PROVIDERS: readonly PaymentProviderRecord[] = [
     verifiedAt: '2026-09-04',
   },
   {
+    // 2026-11-18 (第 15 回): Arc への対応 (デジタルガレージの 2026-11-10 のリリース) を chains に足した。Base は 8/10 の
+    // リリースの記録 (11/10 のリリースは前の対応チェーンを書いていないので、changelog の行に diffs は付けない)。
     provider: 'DG Stablecoin Payment Service',
     slug: 'dg-sps',
     eventKeys: ['dg-sps'],
     stage: 'commercial',
     assets: ['USDC'],
-    chains: ['base'],
+    chains: ['base', 'arc'],
     settlementCurrency: null,
     merchantFee: null,
     integrations: ['api'],
@@ -121,8 +123,9 @@ export const PAYMENT_PROVIDERS: readonly PaymentProviderRecord[] = [
     announcedAt: '2026-08-10',
     startedAt: '2026-08-10',
     plannedPeriod: null,
-    sourceUrl: 'https://www.garage.co.jp/pr/release/20260810/',
-    verifiedAt: '2026-09-04',
+    // 2026-11-18: 出典を Arc 対応の 11/10 のリリースに (chains の arc の根拠)。announcedAt / startedAt は 8/10 の商用展開のまま。
+    sourceUrl: 'https://www.garage.co.jp/pr/release/20261110/',
+    verifiedAt: '2026-11-18',
   },
   {
     provider: 'HashPort (Osaka Pref. subsidy)',
@@ -139,7 +142,7 @@ export const PAYMENT_PROVIDERS: readonly PaymentProviderRecord[] = [
     startedAt: null,
     plannedPeriod: '2027-01..2027-03',
     sourceUrl: OSAKA_SUBSIDY_URL,
-    verifiedAt: '2026-11-09',
+    verifiedAt: '2026-11-18',
   },
   {
     provider: 'Mina Wallet / Sumitomo Mitsui Card (Osaka Pref. subsidy)',
@@ -156,25 +159,29 @@ export const PAYMENT_PROVIDERS: readonly PaymentProviderRecord[] = [
     startedAt: null,
     plannedPeriod: '2026-10..2027-02',
     sourceUrl: OSAKA_SUBSIDY_URL,
-    verifiedAt: '2026-11-09',
+    verifiedAt: '2026-11-18',
   },
   {
     provider: 'Mi&T (Osaka Pref. subsidy)',
     eventKeys: ['Mi&T (Osaka Pref. subsidy)'],
     stage: 'pilot',
     assets: ['JPYC'],
-    chains: [],
+    // 2026-11-18 (第 15 回): 2026-11-11 の自社 PR TIMES「現時点では、Kaia 上の JPYC に対応」。
+    chains: ['kaia'],
     settlementCurrency: null,
     // 2026-08-31 Mi&T 自社 PR TIMES で「決済額の 1.0% のみ」と開示 (changelog fee_change と同一 PR)。
+    // 2026-11-11 の PR TIMES も合計 1.0% (インフラ利用料 0.5% + 利用者還元の原資 0.5%) で変わらない。
     merchantFee: '1.0%',
     integrations: ['in-store'],
     posIntegration: null,
     region: 'Osaka',
     announcedAt: '2026-08-26',
-    startedAt: null,
+    // 2026-11-18 (第 15 回): 2026-11-11 の PR TIMES が明示した開始日 (「開始日：2026年11月16日（月）」)。MisePay・
+    // ローソンと同じく、発表が明示した開始日を入れる。終わりは「2027年3月中旬まで（予定）」なので plannedPeriod は残す。
+    startedAt: '2026-11-16',
     plannedPeriod: '2026-11..2027-03',
-    sourceUrl: 'https://prtimes.jp/main/html/rd/p/000000003.000187870.html',
-    verifiedAt: '2026-11-09',
+    sourceUrl: 'https://prtimes.jp/main/html/rd/p/000000005.000187870.html',
+    verifiedAt: '2026-11-18',
   },
   {
     // 2026-09-04 の第 2 回週次更新で追跡開始 (発表は 2026-07-13・backfill)。
@@ -192,7 +199,7 @@ export const PAYMENT_PROVIDERS: readonly PaymentProviderRecord[] = [
     startedAt: '2026-07-13',
     plannedPeriod: null,
     sourceUrl: 'https://prtimes.jp/main/html/rd/p/000000185.000019526.html',
-    verifiedAt: '2026-11-09',
+    verifiedAt: '2026-11-18',
   },
   {
     // 2026-09-29 の第 6 回週次更新で追跡開始 (発表は 2026-01-28 の PR TIMES・backfill)。

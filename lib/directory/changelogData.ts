@@ -258,6 +258,22 @@ export const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
       'デジタルガレージの DG Stablecoin Payment Service を追加。加盟店向けステーブルコイン決済基盤 (当初は Base 上の USDC・JCB/DGFT へ先行提供)。',
     sourceUrl: 'https://www.garage.co.jp/pr/release/20260810/',
   },
+  {
+    // 週次更新 第 15 回 (2026-11-18) で記録漏れを補充 (発表は 2026-08-17 のマイナウォレット公式お知らせ)。公式トップの
+    // 一覧にある Arc は追加日が分からないので、ここにもエントリの chains にも入れない。
+    date: '2026-08-17',
+    collectedAt: '2026-11-18',
+    scopes: ['jpyc-services'],
+    slug: 'myna-wallet',
+    changeType: 'updated',
+    changeCategory: 'chains_change',
+    summary:
+      'Mina Wallet added support for the Kaia chain, so it now covers all of the chains on which JPYC is issued (Ethereum, Polygon, Avalanche and Kaia). Its supported chains became Ethereum, Polygon, Avalanche, Base, Optimism, Arbitrum and Kaia, with more to be added over time.',
+    summaryJa:
+      'マイナウォレットが Kaia チェーンに対応し、JPYC が発行されている全チェーン (Ethereum / Polygon / Avalanche / Kaia) を扱えるようになった。対応チェーンは Ethereum・Polygon・Avalanche・Base・Optimism・Arbitrum・Kaia の 7 つで、今後も順次広げる予定としている。',
+    // お知らせは更新後の 7 チェーンと Kaia (New!) を示すが、変更前の一覧を明示していないので diffs は付けない (runbook)。
+    sourceUrl: 'https://www.mynawallet.co.jp/news/',
+  },
   // ── 2026-08-26 大阪府「先駆的金融市場等形成支援事業補助金」採択 (公式発表・4 事業のうち
   //     ステーブルコイン決済関連 3 件。一次ソース = 大阪府公式ページ) ──
   {
@@ -1795,6 +1811,165 @@ export const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
       'Re-verified on the NetStars news list: no stablecoin announcement after the 2026-09-11 Kaia MOU (the two new items, a tax-free refund remittance service on 2026-11-05 and stronger online payment security for StarPay on 2026-11-06, are not about stablecoins; the StarPay item mentions stablecoins only in its standard description of StarPay); no launch date, fee or chain change published for Stablecoin Pay.',
     summaryJa:
       'ネットスターズ公式ニュース一覧で再確認: 2026-09-11 の Kaia MOU 以降、ステーブルコインの発表なし (新しい 2 件、11/05 の新免税制度に対応する免税送金サービスの開始と 11/06 の StarPay のオンライン決済のセキュリティ強化は、ステーブルコインの話ではない。StarPay の記事がステーブルコインに触れるのは、StarPay の定型の紹介文だけ)。Stablecoin Pay の稼働日・手数料・対応チェーンの変更は未公表のまま。',
+    sourceUrl: 'https://www.netstars.co.jp/news/',
+  },
+  // ── 第 15 回週次更新 (収集 2026-11-18・収集窓 2026-11-09〜11-18) ──
+  {
+    // 11/06 に告知した 14:00〜17:00 のメンテの完了 (announce-0047 の本文が【完了】に書き換わった・公式 X 11/10 17:12) と、
+    // 同じ日の夜の臨時メンテ (announce-0048・公式 X 21:05 / 23:19) を 1 行にする (slug+date+changeType の鍵が 11/10 で
+    // 衝突しないため)。臨時メンテの理由と時刻は公式お知らせの原文どおり (JST)。
+    date: '2026-11-10',
+    collectedAt: '2026-11-18',
+    scopes: ['jpyc-services'],
+    slug: 'jpyc-ex',
+    changeType: 'updated',
+    changeCategory: 'update',
+    assets: ['JPYC'],
+    summary:
+      "The JPYC EX maintenance announced for 14:00 to 17:00 JST on 2026-11-10 was completed at 17:00, and all of the suspended services became available again. From 20:47 JST the same day, JPYC EX ran unscheduled maintenance due to a temporary suspension of GMO Aozora Net Bank's bank API service: logging in, new issuance and redemption reservations, and issuance and redemption processing on all networks were unavailable, while account opening stayed available. Service resumed at 23:14 JST; deposits and transfers for issuance or redemption made during the maintenance are processed in order. Sources: the completion at 17:00 is from https://faq.jpyc.co.jp/s/article/announce-0047 and the official post https://x.com/jpyc_official/status/2120067143442354560; the unscheduled maintenance is from the source URL of this event.",
+    summaryJa:
+      '2026-11-10 14:00〜17:00 (予定) と告知していた JPYC EX のメンテナンスは 17:00 に完了し、停止していたサービスはすべて通常どおり利用可能に。同日 20:47 からは、GMO あおぞらネット銀行の銀行 API サービスの一時停止に伴う臨時メンテナンスを実施 (マイページへのログイン・発行と償還の新規予約・全ネットワークの発行と償還の処理が利用不可で、アカウント開設は利用可)。23:14 にサービスを再開し、メンテナンス中の発行・償還に関する入金・入庫は順次処理するとしている。出典: 17:00 の完了は https://faq.jpyc.co.jp/s/article/announce-0047 と公式 X の投稿 https://x.com/jpyc_official/status/2120067143442354560、臨時メンテナンスはこのイベントの sourceUrl。',
+    sourceUrl: 'https://faq.jpyc.co.jp/s/article/announce-0048',
+  },
+  {
+    // デジタルガレージのニュースリリース (2026-11-10)。決済スコープだけに載せる (ディレクトリの dg-sps エントリにも chains の arc を足した)。
+    // 一次ソースは前の対応チェーン (Base) を書いていないので diffs は付けない (現況行の chains には arc を足す・Base は
+    // 8/10 のリリースの記録)。リリースに JPYC を Arc で扱う記述は無いので、JPYC には触れない。
+    date: '2026-11-10',
+    collectedAt: '2026-11-18',
+    scopes: ['stablecoin-payments'],
+    slug: 'dg-sps',
+    provider: 'DG Stablecoin Payment Service',
+    changeType: 'updated',
+    changeCategory: 'chains_change',
+    assets: ['USDC'],
+    chains: ['arc'],
+    summary:
+      'Digital Garage signed an MOU with a Circle affiliate to explore collaboration on expanding the use of stablecoin payments in Japan. Under the MOU, DG Stablecoin Payment Service newly supports Arc, the L1 blockchain built by Circle, so payment providers that adopt DG SPS can offer USDC payments on Arc without additional system development. Digital Garage said it has started providing DG SPS to JCB, one of its early-provision partners, and plans to introduce it in turn at its payment subsidiary DG Financial Technology (DGFT).',
+    summaryJa:
+      'デジタルガレージが Circle の関連会社と、日本でのステーブルコイン決済の利用拡大に向けた協業の機会を探る基本合意書 (MOU) を締結。これに基づき DG Stablecoin Payment Service が Circle の L1 ブロックチェーン「Arc」に新たに対応し、DG SPS を採用する決済事業者は追加のシステム開発なしで Arc 上の USDC 決済を提供できるようになった。DG SPS は先行提供先の JCB への提供を開始しており、決済子会社の DG フィナンシャルテクノロジー (DGFT) へも順次導入する予定。',
+    sourceUrl: 'https://www.garage.co.jp/pr/release/20261110/',
+  },
+  {
+    // 11/10 の夜と同じ理由で再び実施した臨時メンテ (announce-0049・公式 X 11/11 1:32 / 8:36)。日付は告知の日 (11/11)。
+    // お知らせの本文は 11/11 を「(火)」と書いているが公式 X は「(水)」なので、曜日は書かない。
+    date: '2026-11-11',
+    collectedAt: '2026-11-18',
+    scopes: ['jpyc-services'],
+    slug: 'jpyc-ex',
+    changeType: 'updated',
+    changeCategory: 'update',
+    assets: ['JPYC'],
+    summary:
+      "Due to the temporary suspension of GMO Aozora Net Bank's bank API service, JPYC EX again ran unscheduled maintenance from 01:30 JST on 2026-11-11, with the same services unavailable as in the unscheduled maintenance of 2026-11-10 (account opening stayed available). Service resumed at 08:35 JST the same day and all services became available; deposits and transfers for issuance or redemption made during the maintenance are processed in order.",
+    summaryJa:
+      'GMO あおぞらネット銀行の銀行 API サービスの一時停止に伴い、JPYC EX が 2026-11-11 1:30 から再び臨時メンテナンスを実施 (利用できないサービスは 11/10 の臨時メンテナンスと同じで、アカウント開設は利用可)。同日 8:35 にサービスを再開し、すべてのサービスが利用可能に。メンテナンス中の発行・償還に関する入金・入庫は順次処理するとしている。',
+    sourceUrl: 'https://faq.jpyc.co.jp/s/article/announce-0049',
+  },
+  {
+    // Mi&T の PR TIMES (2026-11-11 14:19)。発表の時点の予定として書く (「開始した」とは書かない)。大阪府のページも
+    // 同じ 11/11 に、この実証の公表ページ (11/16 から 2027 年 3 月中旬までを予定) を載せた (補助の出典)。
+    // 8/31 の手数料 1.0% の行とは別の事実 (開始日・アプリ名・チェーン・1.0% の内訳・先行パイロット)。前後の値を明示する
+    // 記述は無いので diffs は付けない (現況行の chains・startedAt・sourceUrl は同じ PR で更新)。
+    date: '2026-11-11',
+    collectedAt: '2026-11-18',
+    scopes: ['stablecoin-payments'],
+    provider: 'Mi&T (Osaka Pref. subsidy)',
+    changeType: 'updated',
+    changeCategory: 'pilot',
+    assets: ['JPYC'],
+    chains: ['kaia'],
+    summary:
+      'Mi&T announced that it would start offering Matane, its JPYC payment app for physical stores, at restaurants and shops around Osaka Metropolitan University from 2026-11-16, as its Osaka Prefecture-subsidized pilot, running until mid-March 2027 (planned). Merchants bear 1.0% in total (a 0.5% infrastructure fee plus 0.5% that funds rewards to users), 0.5% is automatically returned to the payer at checkout, and the system side covers network fees. Matane currently supports JPYC on Kaia. A preliminary pilot was run at stalls during the university festival from 2026-10-30 to 2026-11-01. The Osaka Prefecture page, updated on 2026-11-11, also lists the pilot as planned from 2026-11-16 to mid-March 2027.',
+    summaryJa:
+      'Mi&T が、JPYC で支払う実店舗向けの決済アプリ「Matane」を 2026-11-16 から大阪公立大学周辺の飲食店・小売店で提供すると発表。大阪府補助の実証として、2027 年 3 月中旬まで (予定) 実施する。店舗の負担は合計 1.0% (インフラ利用料 0.5% と利用者還元の原資 0.5%) で、支払った利用者には 0.5% が自動で還元され、ネットワーク手数料はシステム側が負担する。対応は現時点で Kaia 上の JPYC。2026-10-30〜11-01 の大学の学園祭の模擬店で先行パイロットを実施済み。大阪府のページも 2026-11-11 の更新で、この実証を 2026-11-16 から 2027 年 3 月中旬までの予定として載せている。',
+    sourceUrl: 'https://prtimes.jp/main/html/rd/p/000000005.000187870.html',
+  },
+  {
+    // SBI ホールディングスのニュースリリース (2026-11-13)。決済スコープには入れない (金融機関の間の国際送金の PoC に
+    // 向けた基本合意で、加盟店の決済ではない)。具体的なサービス内容・提供時期は「今後の協議により決定」。
+    date: '2026-11-13',
+    collectedAt: '2026-11-18',
+    scopes: ['jpyc-services'],
+    slug: 'jpysc',
+    changeType: 'updated',
+    changeCategory: 'partnership',
+    summary:
+      'SBI Holdings signed an MOU with the National Bank of Cambodia (NBC) to jointly run a proof of concept (PoC) toward a next-generation Japan-Cambodia cross-border remittance and settlement system that uses JPYSC as the settlement layer between financial institutions. The PoC is a closed-loop, end-to-end test examining regulation, systems and business viability; NBC provides regulatory guidance and witnesses and reviews the PoC, while SBI group companies build and run it, with SBI VC Trade handling JPYSC on the Japan side. JPYSC is meant only for settlement between financial institutions, so remitting customers would see no change. Service details and timing are to be decided in further talks.',
+    summaryJa:
+      'SBI ホールディングスがカンボジア国立銀行 (NBC) と、JPYSC を金融機関同士の決済レイヤーに使う日本・カンボジア間の次世代の国際送金・資金決済システムの構築に向けて、実証実験 (PoC) を共同で行う基本合意書 (MOU) を締結。PoC はクローズドループのエンドツーエンドで行い、規制・システム・事業性を検証する。NBC は規制面のガイダンスと実証の立会い・レビューを担い、SBI グループ各社がシステムの構築から実証までを担う (日本側の JPYSC の取扱いは SBI VC トレード)。JPYSC は金融機関同士の決済に使う想定で、送金する利用者の体験は変わらない。具体的なサービス内容・提供時期は今後の協議で決める。',
+    sourceUrl: 'https://www.sbigroup.co.jp/news/2026/1113_16737.html',
+  },
+  {
+    // HashPort 公式 X (2026-11-17 11:42 JST)。日本国外からの利用の一時停止と再開を、再開の告知 1 本で記録する。
+    // 期間と時刻は告知の原文どおり (どちらも「頃」)。
+    date: '2026-11-17',
+    collectedAt: '2026-11-18',
+    scopes: ['jpyc-services'],
+    slug: 'hashport-wallet',
+    changeType: 'updated',
+    changeCategory: 'update',
+    summary:
+      'HashPort said that HashPort Wallet can be used again from outside Japan from around 11:00 JST on 2026-11-17, with all features available there as usual. Use from outside Japan had been suspended from around 13:00 JST on 2026-10-30 until then.',
+    summaryJa:
+      'HashPort が、日本国外からの HashPort Wallet の利用を 2026-11-17 11:00 頃に再開したと告知。国外からもすべての機能を通常どおり使える。国外からの利用は 2026-10-30 13:00 頃から一時停止していた。',
+    sourceUrl: 'https://x.com/hashport_io/status/2122520608919667095',
+  },
+  // ── 第 15 回週次更新の verified (2026-11-18) ──
+  {
+    date: '2026-11-18',
+    collectedAt: '2026-11-18',
+    scopes: ['jpyc-services'],
+    slug: 'coincheck',
+    changeType: 'verified',
+    assets: ['USDC'],
+    summary:
+      'Re-verified against the FSA registry of Electronic Payment Instruments Exchange Service Providers (still as of 2026-08-27): two registrants, SBI VC Trade (No. 00001) and Coincheck (No. 00002, USDC); no new registration.',
+    summaryJa:
+      '金融庁の電子決済手段等取引業者登録一覧 (令和 8 年 8 月 27 日現在のまま) で再確認: 登録は SBI VC トレード (第00001号) とコインチェック (第00002号・USDC) の 2 社で、新規登録なし。',
+    sourceUrl: 'https://www.fsa.go.jp/menkyo/menkyoj/denshikessaisyudan.pdf',
+  },
+  {
+    // 府のページは 2026-11-11 に更新され、新着として Mi&T の実証の公表ページが載った (上の Mi&T の行)。
+    // 他の採択事業は「実証開始時期等の詳細が決定次第、順次公表」のまま。
+    date: '2026-11-18',
+    collectedAt: '2026-11-18',
+    scopes: ['stablecoin-payments'],
+    provider: 'HashPort (Osaka Pref. subsidy)',
+    changeType: 'verified',
+    assets: ['JPYC', 'USDC'],
+    summary:
+      "Re-verified on the Osaka Prefecture page (updated 2026-11-11 with a new section on Mi&T's pilot start; for the other awarded projects, details such as start timing are to be published once decided) and its award list: HashPort pilot schedule (an assumed one week or more between January and March 2027) unchanged.",
+    summaryJa:
+      '大阪府公式ページ (2026-11-11 の更新で Mi&T の実証開始の公表ページを追加。他の採択事業は実証開始時期等の詳細が決まりしだい順次公表) と交付決定事業一覧で再確認: HashPort の実証の予定 (2027 年 1〜3 月の間で 1 週間以上を想定) に変更なし。',
+    sourceUrl:
+      'https://www.pref.osaka.lg.jp/o020060/kikaku/osaka-kokusaikinyu/senkuteki_hojokin.html',
+  },
+  {
+    date: '2026-11-18',
+    collectedAt: '2026-11-18',
+    scopes: ['stablecoin-payments'],
+    provider: 'Mina Wallet / Sumitomo Mitsui Card (Osaka Pref. subsidy)',
+    changeType: 'verified',
+    assets: ['JPYC', 'USDC'],
+    summary:
+      "Re-verified on the Osaka Prefecture page (updated 2026-11-11 with a new section on Mi&T's pilot start; for the other awarded projects, details such as start timing are to be published once decided) and its award list: Mina Wallet / Sumitomo Mitsui Card pilot schedule (around October 2026 to February 2027, a few days to about a month) unchanged.",
+    summaryJa:
+      '大阪府公式ページ (2026-11-11 の更新で Mi&T の実証開始の公表ページを追加。他の採択事業は実証開始時期等の詳細が決まりしだい順次公表) と交付決定事業一覧で再確認: マイナウォレット / 三井住友カードの実証の予定 (2026 年 10 月〜2027 年 2 月頃の間で数日〜1 か月程度) に変更なし。',
+    sourceUrl:
+      'https://www.pref.osaka.lg.jp/o020060/kikaku/osaka-kokusaikinyu/senkuteki_hojokin.html',
+  },
+  {
+    date: '2026-11-18',
+    collectedAt: '2026-11-18',
+    scopes: ['stablecoin-payments'],
+    provider: 'NetStars Stablecoin Pay',
+    changeType: 'verified',
+    assets: ['JPYC', 'USDT'],
+    summary:
+      "Re-verified on the NetStars news list: no stablecoin announcement after the 2026-09-11 Kaia MOU (the two new items, a service agreement with Dandelion on 2026-11-10 for settlement in JPQR Global's planned outbound payments and StarPay's adoption on 2026-11-12 as the QR code payment gateway for Sumitomo Mitsui Card's stera terminal light, are not about stablecoins); no launch date, fee or chain change published for Stablecoin Pay.",
+    summaryJa:
+      'ネットスターズ公式ニュース一覧で再確認: 2026-09-11 の Kaia MOU 以降、ステーブルコインの発表なし (新しい 2 件、11/10 の Dandelion とのサービス利用契約 (JPQR Global が今後めざすアウトバウンド決済の精算に活用予定) と 11/12 の三井住友カードの決済端末「stera terminal light」の QR コード決済ゲートウェイへの StarPay の採用は、ステーブルコインの話ではない)。Stablecoin Pay の稼働日・手数料・対応チェーンの変更は未公表のまま。',
     sourceUrl: 'https://www.netstars.co.jp/news/',
   },
 ];
