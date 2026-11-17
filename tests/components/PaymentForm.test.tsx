@@ -1471,7 +1471,7 @@ describe('PaymentForm — 分配 (split) つきの QR を払えない組み合�
     expect(screen.getByText('この QR は通常決済では支払えません')).toBeInTheDocument();
     expect(screen.queryByText('ネットワーク手数料')).toBeNull();
     expect(screen.queryByText('ウォレットで支払い')).toBeNull();
-    expect(screen.queryByText(/ウォレットで transfer を 1 件承認します/)).toBeNull();
+    expect(screen.queryByText(/ウォレットで送金を 1 件承認します/)).toBeNull();
     expect(totalRowLabel()).toBe('顧客支払額');
   });
 
@@ -3510,6 +3510,68 @@ describe('PaymentForm — ガスレスで払えないウォレット (7702 で�
     expect(screen.getByText('通常決済（ガス代は自分で負担）')).toBeInTheDocument();
     expect(screen.getByText(/のガス代残高が必要です/)).toBeInTheDocument();
     expect(screen.queryByText(STANDARD_TITLE)).toBeNull();
+  });
+
+  // 明細 (ネットワーク手数料の行・合計・下の注記) の文 (user 承認 2026-11-18)。見分けた口座の通常決済では「ウォレット側で gas を
+  // 払う」と言い切らない。見分けていないウォレットの通常決済は、注記の後ろの「Smart Account / Pimlico Paymaster」の文を外しただけ。
+  const BREAKDOWN_GAS = 'ウォレットの確認画面に出ます';
+  const BREAKDOWN_TOTAL = '顧客支払額';
+  const BREAKDOWN_HINT = '通常決済: ウォレットで送金を 1 件承認します。';
+
+  it('切り替えた後の明細: ネットワーク手数料は「ウォレットの確認画面に出ます」・合計は「顧客支払額」・注記は「通常決済: ウォレットで送金を 1 件承認します。」', async () => {
+    const user = userEvent.setup();
+    setupRelayFree();
+    setUnsupported();
+    render(<PaymentForm />);
+    await user.click(screen.getByRole('button', SWITCH));
+
+    expect(screen.getByText(BREAKDOWN_GAS, { selector: 'dd' })).toBeInTheDocument();
+    expect(screen.getByText(BREAKDOWN_TOTAL, { selector: 'dt' })).toBeInTheDocument();
+    expect(screen.getByText(BREAKDOWN_HINT)).toBeInTheDocument();
+    expect(screen.queryByText('ウォレットで支払い')).toBeNull();
+    expect(screen.queryByText(/ウォレット側 .*gas/)).toBeNull();
+    expect(screen.queryByText(/通常決済（ガスあり）: ウォレットで送金/)).toBeNull();
+  });
+
+  it('通常決済の QR (mode=standard) で見分けた口座も、明細は同じ新しい文', () => {
+    setupRelayFree(`to=${MERCHANT}&token=jpyc&amount=300&mode=standard`);
+    setUnsupported();
+    render(<PaymentForm />);
+    expect(screen.getByText(BREAKDOWN_GAS, { selector: 'dd' })).toBeInTheDocument();
+    expect(screen.getByText(BREAKDOWN_TOTAL, { selector: 'dt' })).toBeInTheDocument();
+    expect(screen.getByText(BREAKDOWN_HINT)).toBeInTheDocument();
+    expect(screen.queryByText(/ウォレット側 .*gas/)).toBeNull();
+  });
+
+  it('en: 見分けた口座の通常決済の明細は英訳の新しい文', () => {
+    setupRelayFree(`to=${MERCHANT}&token=jpyc&amount=300&mode=standard`);
+    setUnsupported();
+    render(<PaymentForm />, { locale: 'en' });
+    expect(screen.getByText("Shown on your wallet's confirmation screen", { selector: 'dd' })).toBeInTheDocument();
+    expect(screen.getByText('You pay', { selector: 'dt' })).toBeInTheDocument();
+    expect(screen.getByText('Standard payment: approve a single transfer in your wallet.')).toBeInTheDocument();
+    expect(screen.queryByText('Paid separately from your wallet')).toBeNull();
+    expect(screen.queryByText(/wallet-side/)).toBeNull();
+  });
+
+  it('見分けていないウォレットの通常決済の明細は、今の行と合計のまま・注記は Smart Account / Pimlico Paymaster の文を外した形 (ja)', () => {
+    setupRelayFree(`to=${MERCHANT}&token=jpyc&amount=300&mode=standard`);
+    render(<PaymentForm />);
+    expect(screen.getByText('ウォレットで支払い', { selector: 'dd' })).toBeInTheDocument();
+    expect(screen.getByText('顧客支払額 (+ ウォレット側 POL gas)', { selector: 'dt' })).toBeInTheDocument();
+    expect(screen.getByText('通常決済（ガスあり）: ウォレットで送金を 1 件承認します。')).toBeInTheDocument();
+    expect(screen.queryByText(BREAKDOWN_GAS)).toBeNull();
+    expect(screen.queryByText(BREAKDOWN_HINT)).toBeNull();
+    expect(screen.queryByText(/Smart Account|Pimlico Paymaster/)).toBeNull();
+  });
+
+  it('見分けていないウォレットの通常決済の明細 (en): 今の行と合計のまま・注記は Smart Account / Pimlico Paymaster の文を外した形', () => {
+    setupRelayFree(`to=${MERCHANT}&token=jpyc&amount=300&mode=standard`);
+    render(<PaymentForm />, { locale: 'en' });
+    expect(screen.getByText('Paid separately from your wallet', { selector: 'dd' })).toBeInTheDocument();
+    expect(screen.getByText('You pay (+ wallet-side POL gas)', { selector: 'dt' })).toBeInTheDocument();
+    expect(screen.getByText('Standard payment: approve a single transfer in your wallet.')).toBeInTheDocument();
+    expect(screen.queryByText(/Smart Account|Pimlico Paymaster/)).toBeNull();
   });
 
   it('USDC は見分けない (hook は enabled=false)', () => {

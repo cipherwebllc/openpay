@@ -81,7 +81,7 @@ describe('useGaslessUnsupportedWallet', () => {
     expect(read).not.toHaveBeenCalled();
   });
 
-  it('払えないと分かった後に enabled でなくなったら false (通常決済に切り替えた後に案内を残さない)', async () => {
+  it('払えないと分かった後に enabled でなくなったら、その結果を捨てて false を返す', async () => {
     const { result, rerender } = setup({ address: A, chainId: 137, enabled: true });
     await waitFor(() => expect(pending).toHaveLength(1));
     await settle(0, true);
