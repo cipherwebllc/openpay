@@ -358,9 +358,12 @@ describe('useStoreDevicePayment', () => {
   // (ecrecover だけ) で通らない。recover で断られる (signature_invalid) か、65 byte でない長い署名を受け渡しが形で断る
   // (invalid_body・lib/storeHandoff.ts)。どちらも「このウォレットはこの払い方に対応していない」と伝える (blocking でない)。
   const LONG_SIG = `0x${'1b'.repeat(400)}`;
+  // 65 byte より短い署名 (64 byte = 0x + 128 字) も 65 byte でない。`!== 132` を `> 132` にした回帰を拾う。
+  const SHORT_SIG = `0x${'1b'.repeat(64)}`;
   it.each([
     ['signature_invalid (署名から送り元を復元できない)', 'signature_invalid', SIG],
     ['invalid_body で、署名が 65 byte でない (contract の口座の署名)', 'invalid_body', LONG_SIG],
+    ['invalid_body で、署名が 64 byte (65 byte より短い)', 'invalid_body', SHORT_SIG],
   ])('%s → unsupported_wallet (未解決を消して理由を出す)', async (_, error, signature) => {
     w.signTypedData.mockResolvedValue(signature);
     authResponses = [() => json({ ok: false, error }, 400)];

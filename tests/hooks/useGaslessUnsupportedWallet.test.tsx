@@ -27,15 +27,22 @@ beforeEach(() => {
 });
 
 type Props = { address: Address | undefined; chainId: number; enabled: boolean };
-function setup(initial: Props) {
+function setup(initial: Props, opts: { reactStrictMode?: boolean } = {}) {
   return renderHook((p: Props) => useGaslessUnsupportedWallet(p.address, p.chainId, p.enabled, 'pay'), {
     initialProps: initial,
+    ...opts,
   });
 }
 
 async function settle(index: number, value: boolean) {
   await act(async () => {
     pending[index].resolve(value);
+  });
+}
+
+async function fail(index: number) {
+  await act(async () => {
+    pending[index].reject(new Error('rpc down'));
   });
 }
 
@@ -126,5 +133,104 @@ describe('useGaslessUnsupportedWallet', () => {
     await settle(0, true);
     rerender({ address: A.toLowerCase() as Address, chainId: 137, enabled: true });
     expect(result.current).toBe(true);
+  });
+
+  // 前の true が失効しないと、同じ組に戻ったときに読み込み中から true になり、新しい読み取りが false / 失敗でも true のまま
+  // になる (約束「読み込み中・失敗は false・古い結果を使わない」に反する)。入力が変わるたびに前の結果を捨てる。
+  describe('同じ組に戻っても、前の結果を使わない', () => {
+    async function trueThenBack(props: Props, away: Props) {
+      const view = setup(props);
+      await waitFor(() => expect(pending).toHaveLength(1));
+      await settle(0, true);
+      expect(view.result.current).toBe(true);
+      view.rerender(away);
+      if (away.enabled && away.address) {
+        await waitFor(() => expect(pending).toHaveLength(2));
+        await settle(1, false);
+      }
+      expect(view.result.current).toBe(false);
+      view.rerender(props);
+      // 戻った直後 (読み込み中) は false。
+      expect(view.result.current).toBe(false);
+      const index = away.enabled && away.address ? 2 : 1;
+      await waitFor(() => expect(pending).toHaveLength(index + 1));
+      expect(view.result.current).toBe(false);
+      return { view, index };
+    }
+
+    const HOME: Props = { address: A, chainId: 137, enabled: true };
+    const cases: [string, Props][] = [
+      ['アドレス (A → B → A)', { address: B, chainId: 137, enabled: true }],
+      ['チェーン (137 → 8217 → 137)', { address: A, chainId: 8217, enabled: true }],
+      ['enabled (ON → OFF → ON)', { address: A, chainId: 137, enabled: false }],
+      ['接続 (A → 切断 → A)', { address: undefined, chainId: 137, enabled: true }],
+    ];
+
+    it.each(cases)('%s: 戻った後の読み取りが false なら false', async (_, away) => {
+      const { view, index } = await trueThenBack(HOME, away);
+      await settle(index, false);
+      expect(view.result.current).toBe(false);
+    });
+
+    it.each(cases)('%s: 戻った後の読み取りが失敗なら false', async (_, away) => {
+      const { view, index } = await trueThenBack(HOME, away);
+      await fail(index);
+      expect(view.result.current).toBe(false);
+    });
+
+    it.each(cases)('%s: 戻った後の読み取りが読み込み中のままなら false・true と分かれば true', async (_, away) => {
+      const { view, index } = await trueThenBack(HOME, away);
+      expect(view.result.current).toBe(false);
+      await settle(index, true);
+      expect(view.result.current).toBe(true);
+    });
+
+    it('前の true の後に、同じ組の読み直しが失敗しても true のまま残さない (OFF → ON)', async () => {
+      const view = setup(HOME);
+      await waitFor(() => expect(pending).toHaveLength(1));
+      await settle(0, true);
+      view.rerender({ ...HOME, enabled: false });
+      view.rerender(HOME);
+      await waitFor(() => expect(pending).toHaveLength(2));
+      await fail(1);
+      expect(view.result.current).toBe(false);
+    });
+
+    it('A の読み取りが返る前に B → A と戻ったとき、前の A の遅れた結果を使わない', async () => {
+      const view = setup(HOME);
+      await waitFor(() => expect(pending).toHaveLength(1));
+      view.rerender({ ...HOME, address: B });
+      await waitFor(() => expect(pending).toHaveLength(2));
+      view.rerender(HOME);
+      await waitFor(() => expect(pending).toHaveLength(3));
+      await settle(0, true); // 1 回目の A (もう今の読み取りではない)
+      expect(view.result.current).toBe(false);
+      await settle(2, false); // 今の A
+      expect(view.result.current).toBe(false);
+    });
+  });
+
+  it('StrictMode の二重の effect: 1 回目の (片付けた) 読み取りの結果は使わず、今の読み取りの結果だけを使う', async () => {
+    const view = setup({ address: A, chainId: 137, enabled: true }, { reactStrictMode: true });
+    await waitFor(() => expect(pending).toHaveLength(2));
+    await settle(0, true); // 片付けた effect の読み取り
+    expect(view.result.current).toBe(false);
+    await settle(1, true);
+    expect(view.result.current).toBe(true);
+  });
+
+  it.each([
+    ['resolve (true)', (i: number) => pending[i].resolve(true)],
+    ['reject', (i: number) => pending[i].reject(new Error('rpc down'))],
+  ])('unmount の後に %s しても setState しない (React の警告・throw なし)', async (_, finish) => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const view = setup({ address: A, chainId: 137, enabled: true });
+    await waitFor(() => expect(pending).toHaveLength(1));
+    view.unmount();
+    await act(async () => {
+      finish(0);
+    });
+    expect(consoleError).not.toHaveBeenCalled();
+    consoleError.mockRestore();
   });
 });
