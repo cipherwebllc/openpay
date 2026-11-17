@@ -102,7 +102,7 @@ export type WalletGuideContent = {
 const JA: WalletGuideContent = {
   metaTitle: 'ウォレットを選ぶ — JPYC で支払うためのウォレットとつなぎ方',
   metaDescription:
-    'OpenPay で JPYC を支払うためのウォレットの選び方。MetaMask が基本で、初めての方にはマイナウォレットや HashPort Wallet もおすすめ。お店の QR の読み取り方と、WalletConnect でのつなぎ方。',
+    'OpenPay で JPYC を支払うためのウォレットの選び方。MetaMask が基本で、初めての方には HashPort Wallet やマイナウォレットもおすすめ。お店の QR の読み取り方と、WalletConnect でのつなぎ方。',
   subtitle: 'JPYC で支払うための、ウォレットの選び方とつなぎ方。',
   lead: 'OpenPay で支払うには、JPYC が入った自分のウォレットが要ります。OpenPay のアプリのインストールや会員登録は要りません。おすすめのウォレットと、お店の QR の読み取り方、ウォレットのつなぎ方をまとめました。',
   scanCta: { path: '/scan', label: 'スキャンして支払う' },
@@ -193,7 +193,7 @@ const JA: WalletGuideContent = {
 const EN: WalletGuideContent = {
   metaTitle: 'Choosing a wallet — wallets for paying with JPYC and how to connect them',
   metaDescription:
-    'Which wallet to use for paying with JPYC on OpenPay. MetaMask is the standard; if you are new to wallets, MynaWallet and HashPort Wallet are good choices too. How to scan the shop’s QR and how to connect with WalletConnect.',
+    'Which wallet to use for paying with JPYC on OpenPay. MetaMask is the standard; if you are new to wallets, HashPort Wallet and MynaWallet are good choices too. How to scan the shop’s QR and how to connect with WalletConnect.',
   subtitle: 'Which wallet to use for paying with JPYC, and how to connect it.',
   lead: 'To pay with OpenPay you need your own wallet with JPYC in it. You do not need to install an OpenPay app or sign up. Here are the recommended wallets, how to scan the shop’s QR, and how to connect your wallet.',
   scanCta: { path: '/scan', label: 'Scan to pay' },
