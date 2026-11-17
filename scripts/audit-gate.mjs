@@ -213,6 +213,21 @@ const ALLOWED_ADVISORIES = {
       'zod 3.x の通常の parse で同種のメモリ枯渇が起きる具体的な報告',
     ],
   },
+  'GHSA-fc5q-39xc-vjpf': {
+    pkg: 'picomatch',
+    summary:
+      'picomatch: ReDoS through single-branch repeated extglobs such as +(*) / +(*a) (<=4.0.7・修正版なし・CVE-2026-112366)',
+    chain:
+      '@sentry/nextjs → @rollup/plugin-commonjs@28.0.1・@rollup/pluginutils@5.3.0 → picomatch@4.0.4 / next-intl@4.11.0 → @parcel/watcher@2.5.6 → picomatch@4.0.4 / wagmi → @wagmi/connectors → … → @walletconnect/keyvaluestorage@1.1.1 → unstorage@1.17.5 → anymatch@3.1.3 → picomatch@2.3.2 (devDependencies: tailwindcss → chokidar・micromatch・tinyglobby / lint-staged / vite・vitest → picomatch)',
+    reason:
+      '到達性は開発とビルドの道具だけで、パターンは OpenPay と依存の固定値 (2026-11-18 確認): 起きるのは +(*) のような 1 つだけの枝を繰り返す extglob をパターンとして picomatch が処理し、細工した文字列と照合したときだけ。app/api・lib・hooks・components・packages・scripts に picomatch / micromatch / anymatch / tinyglobby / chokidar / @parcel/watcher / unstorage の import はゼロで、本番の flag の next build の出力 (.next/server・.next/static・source map) にも picomatch・anymatch と extglob の処理は入っていない。Next 本体が同梱する picomatch (audit の対象外) を使う /_next/image の照合も、OpenPay の next.config は images のパターンを持たないので呼ばれない。@rollup/plugin-commonjs は Sentry の webpack loader が build 時に使うだけ、@parcel/watcher は next-intl の extract (experimental・開発時の監視) だけで OpenPay は使っていない、unstorage が anymatch を読むのは drivers/fs だけで WalletConnect の keyvaluestorage は idb-keyval (ブラウザ)・fs-lite (Node) の driver を使う。dev 依存のパターン (tailwind の content・vitest の include・lint-staged) は OpenPay 自身の設定で extglob を含まない。最悪でも手元か CI の build・テストが止まるだけで、本番と利用者には届かない。修正版が無く (npm の最新 4.0.7 が影響範囲の内)、npm audit の fixAvailable は @sentry/nextjs 8.38.0 (10 系からの戻し) / wagmi 3.7.11 (3 系への移行) の semver major で使えない → picomatch の修正版を待つ accepted risk (この追加は PR の merge で user が承認)。',
+    docRef: 'docs/DEPLOY_CHECKLIST.md §7.18',
+    reviewTriggers: [
+      'picomatch の修正版 (4.0.8 以降・2.x の修正版) が出る → 依存の範囲の内なら lockfile を更新し、検出されなくなったら allowlist 削除',
+      '上流 (@sentry/nextjs・next-intl・unstorage・tailwindcss・vite・vitest) が修正版を取る版を出す、または wagmi 3 系へ移る → 更新して allowlist を見直す',
+      'サーバーやブラウザの処理で外部入力の glob パターンを picomatch / micromatch / anymatch に渡す変更、next-intl の extract の導入、next.config に images.remotePatterns / localPatterns を足す変更 (その PR で即再評価)',
+    ],
+  },
 };
 
 // CI gate 対象 severity。LOW は監視対象外 (Section 1 のコメント参照)。
