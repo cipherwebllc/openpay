@@ -6,19 +6,45 @@
 //
 // 載せる QR を決めるのは呼ぶ側: JPYC・forwarder のあるチェーンのガスレス (回収) で、金額のある通常の QR だけ
 // (それ以外は url に空文字を渡す)。お店負担の QR・金額なし・EIP-681・通常決済・USDC・forwarder の無いチェーンには載せない。
-// 返すのは「画面の QR に描く URL」だけ。URL のコピー・印刷 / PNG / SVG の保存・前回の受け取り QR の保存には、呼ぶ側が
-// 元の URL を使う (bill key を画面の外へ出さない)。
+// 返すのは「画面の QR に描く URL」と、下の「入金の確認」だけ。URL のコピー・印刷 / PNG / SVG の保存・前回の受け取り QR の
+// 保存には、呼ぶ側が元の URL を使う (bill key を画面の外へ出さない)。
 //
 // bill key は、QR を出すたび・表示する URL が変わるたびに新しく作る。同じ表示のあいだの再描画では作り直さない
 // (state に持つ)。作った bill key と会計の写し (元の URL) は見張りに渡し、memory だけに持つ (保存しない)。
+//
+// 入金の確認 (confirmed): 見張りが、この会計の入金を取引履歴に書いたら知らせてくる (lib/qrSaleWatch.ts の頭の注記の
+// 「画面への知らせ」)。返すのは、いま表示している会計 (bill key) の最後の知らせだけ。QR を閉じた後・出し直した後に
+// 見つけた前の会計の入金 (見張りは閉じた後も 60 秒読む) は、履歴には入るが、ここでは受けない・返さない。新しい会計の QR を
+// 出したら、前の会計の知らせは返さない (画面から消える)。
 //
 // 付帯の処理 (掟 13): 見張りの読み込み (dynamic import) と見張りの中の失敗は、QR の表示・開閉・レジの操作へ波及させない
 // (Promise は必ずここで受け止め、画面には何も返さない)。見張れなくても QR は bill key つきで出る (払う側の動きは同じ)。
 
 import { useEffect, useRef, useState } from 'react';
+import { formatStoreDeviceAmount } from '@/lib/storeDevicePayment';
 import { newBillKey, withBillKey } from '@/lib/url/billKeyQr';
 
+// 見張りの module は型だけを使う (静的な import にしない = /create の First Load JS に載せない)。
 type QrSaleWatch = typeof import('@/lib/qrSaleWatch');
+type QrBillRecorded = import('@/lib/qrSaleWatch').QrBillRecorded;
+
+/** 表示中の会計の入金を、見張りが取引履歴に書いた (count = 何件目か・amount = 書いた行の売上総額 = 請求額 (wei))。 */
+export type QrBillConfirmed = Pick<QrBillRecorded, 'count' | 'amount'>;
+
+/**
+ * QR の画面 (決済QR・レジ) に出す入金の確認の文 (QrPreviewModal の billConfirmed)。t は QrGenerator の namespace のもの。
+ * 文の選び方は、見張りが書いた行と同じ数え方: 1 件目 (明細つきの行) と、同じ会計への 2 件目以降 (明細なしの行 = 二重の
+ * お支払いかもしれない)。額は書いた行の売上総額 (= 請求額) を、お店の端末で送るの「入金を確認しました（{amount}）」
+ * (RegisterMode.storeDevice.received) と同じ形 (例「1400 JPYC」) で出す。
+ */
+export function qrBillConfirmedText(
+  t: (key: 'billPaymentRecorded' | 'billPaymentAnother', values: { amount: string }) => string,
+  confirmed: QrBillConfirmed,
+): string {
+  return t(confirmed.count === 1 ? 'billPaymentRecorded' : 'billPaymentAnother', {
+    amount: formatStoreDeviceAmount(confirmed.amount),
+  });
+}
 
 // 見張りの chunk (この画面で 1 回だけ読む)。読めなかったら捨てて、次に QR を出したときにもう一度読む。
 let watchChunk: Promise<QrSaleWatch> | null = null;
@@ -45,8 +71,14 @@ export type QrBillKeyArgs = {
   itemName?: string;
 };
 
-/** 画面の QR に描く URL (bill key つき)。載せないときは undefined (呼ぶ側は元の URL を描く)。 */
-export function useQrBillKey({ kind, url, shown, itemName = '' }: QrBillKeyArgs): string | undefined {
+export type QrBillKeyResult = {
+  /** 画面の QR に描く URL (bill key つき)。載せないときは undefined (呼ぶ側は元の URL を描く)。 */
+  screenUrl: string | undefined;
+  /** 表示中の会計の入金を、見張りが取引履歴に書いた (まだ無い・表示していないときは null)。 */
+  confirmed: QrBillConfirmed | null;
+};
+
+export function useQrBillKey({ kind, url, shown, itemName = '' }: QrBillKeyArgs): QrBillKeyResult {
   const wanted = shown && url !== '';
   const [issued, setIssued] = useState<{ url: string; billKey: string } | null>(null);
   // 表示を始めた・表示する URL が変わった → 新しい bill key。表示をやめた → 捨てる (次に出すときは新しく作る)。
@@ -56,6 +88,10 @@ export function useQrBillKey({ kind, url, shown, itemName = '' }: QrBillKeyArgs)
     current = wanted ? { url, billKey: newBillKey() } : null;
     setIssued(current);
   }
+  const [recorded, setRecorded] = useState<QrBillRecorded | null>(null);
+  // いま表示している bill key (effect の中で決める)。見張りの知らせは、閉じた後・出し直した後にも届くので、届いた時点で
+  // 表示中の会計の分だけを受ける (前の会計の知らせで、表示中の会計の知らせを上書きしない)。
+  const shownKeyRef = useRef<string | null>(null);
   const itemNameRef = useRef(itemName);
   useEffect(() => {
     itemNameRef.current = itemName;
@@ -63,19 +99,27 @@ export function useQrBillKey({ kind, url, shown, itemName = '' }: QrBillKeyArgs)
   useEffect(() => {
     if (!issued) return;
     const { billKey } = issued;
+    shownKeyRef.current = billKey;
     // 表示を始めた時刻・やめた時刻は、ここ (その瞬間) で決めて渡す。見張りの chunk の読み込みを待った後の時刻にすると、
     // 読み込みが遅いとき「やめてから 60 秒」の数え始めが後ろへずれる。
     const shownAt = Date.now();
+    const onRecorded = (event: QrBillRecorded) => {
+      if (shownKeyRef.current === event.billKey) setRecorded(event);
+    };
     withWatch((watch) =>
-      watch.showQrBill({ billKey, kind, url: issued.url, itemName: itemNameRef.current }, shownAt),
+      watch.showQrBill({ billKey, kind, url: issued.url, itemName: itemNameRef.current }, shownAt, onRecorded),
     );
     // 表示をやめた bill key も、見張りが 60 秒は持つ (閉じた直後・出し直した直後の入金を拾う)。
     return () => {
+      if (shownKeyRef.current === billKey) shownKeyRef.current = null;
       const hiddenAt = Date.now();
       withWatch((watch) => watch.hideQrBill(billKey, hiddenAt));
     };
   }, [issued, kind]);
-  return current ? withBillKey(current.url, current.billKey) : undefined;
+  // 返すのは、いま描く会計の知らせだけ (閉じた・出し直した = current が変わったら、前の会計の知らせは返さない)。
+  const confirmed =
+    current && recorded?.billKey === current.billKey ? { count: recorded.count, amount: recorded.amount } : null;
+  return { screenUrl: current ? withBillKey(current.url, current.billKey) : undefined, confirmed };
 }
 
 /** /create のページに 1 つ置く。ページを離れたら、見張りを止める (タブの切り替えでは止めない)。 */

@@ -790,8 +790,9 @@ export function QrGenerator() {
   const storeQrShown = storeQr !== null && !forceNormalQr;
   // 会計ごとの印 (bill key) を、画面に表示中の通常の QR にだけ載せる: JPYC の回収 (forwarder のあるチェーンのガスレス) で
   // 金額のある QR。お店負担の QR・金額なし・通常決済・USDC・forwarder の無いチェーンには載せない。URL のコピー・印刷・保存・
-  // 互換 QR・前回の受け取り QR は payUrl のまま (hooks/useQrBillKey.ts)。入金は、お店の端末がチェーンで確かめて取引履歴に書く。
-  const screenPayUrl = useQrBillKey({
+  // 互換 QR・前回の受け取り QR は payUrl のまま (hooks/useQrBillKey.ts)。入金は、お店の端末がチェーンで確かめて取引履歴に書き、
+  // 書いたら表示中のこの会計の QR の画面に出す (billConfirmed)。
+  const { screenUrl: screenPayUrl, confirmed: billConfirmed } = useQrBillKey({
     kind: 'pay',
     url: isJpycRecover && mode === 'amount' ? payUrl : '',
     shown: qrModalOpen && qrShowable && !storeQrShown,
@@ -1013,6 +1014,7 @@ export function QrGenerator() {
           recoverGasMode={recoverGasMode}
           incomingStatus={incomingStatus}
           receivedWei={receivedWei}
+          billConfirmed={billConfirmed}
         />
       )}
 

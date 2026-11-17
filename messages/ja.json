@@ -527,6 +527,8 @@
     "paymentWatchingNote": "表示した直後に届いた支払いは検知できないことがあります。結果は店舗ウォレットか Explorer で確かめてください。",
     "paymentReceived": "残高が増えました（+{amount}）",
     "paymentReceivedNote": "この支払いとは限りません。店舗ウォレットか Explorer で確かめてください。",
+    "billPaymentRecorded": "この会計の入金を確認しました（{amount}）。取引履歴に記録しました。",
+    "billPaymentAnother": "この会計に、もう 1 件の入金がありました（{amount}）。二重のお支払いかもしれません。",
     "printPoster": "印刷",
     "posterEyebrow": "OpenPay ステーブルコイン決済QR",
     "posterDefaultStoreName": "お支払いはこちら",

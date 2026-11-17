@@ -2,8 +2,8 @@
 
 // 全画面プレビュー (ポスター調 + 印刷/コピー/SVG/PNG + × 閉じる)。決済QR/レジ共通の QrPreviewModal に、決済QR タブの
 // 値と言葉を渡す。状態は持たない — 出す QR (payUrl・お店負担の QR の写し)・開閉と閉じる処理・コピーの状態・保存の
-// ref と名前・お店の端末の状態と操作・着金の見張りの結果は親の QrGenerator が持ち、ここは「お店負担の QR を出して
-// いるか」(storeQr) で出し分けて中継するだけ。
+// ref と名前・お店の端末の状態と操作・着金の見張りの結果・入金の確認 (bill key) は親の QrGenerator が持ち、ここは
+// 「お店負担の QR を出しているか」(storeQr) で出し分けて中継するだけ。
 
 import type { RefObject } from 'react';
 import dynamic from 'next/dynamic';
@@ -15,6 +15,7 @@ import { downloadPng, downloadSvg } from '@/components/qr/qrDownload';
 import type { StoreDeviceMode } from '@/components/StoreDeviceProvider';
 import type { QrSettings } from '@/hooks/useQrSettings';
 import type { IncomingPaymentStatus } from '@/hooks/useIncomingPaymentWatch';
+import { qrBillConfirmedText, type QrBillConfirmed } from '@/hooks/useQrBillKey';
 import { env } from '@/lib/env';
 import type { GasMode, PayMode } from '@/lib/fee';
 import { formatTokenAmount, shortAddress } from '@/lib/format';
@@ -58,6 +59,7 @@ export function PaymentQrModal({
   recoverGasMode,
   incomingStatus,
   receivedWei,
+  billConfirmed,
 }: {
   open: boolean;
   /** QR を薄くする (為替換算の期限切れ・お店負担の QR が署名を待っていない)。 */
@@ -96,6 +98,8 @@ export function PaymentQrModal({
   recoverGasMode: GasMode;
   incomingStatus: IncomingPaymentStatus;
   receivedWei: bigint;
+  /** 表示中の会計の入金を、お店の端末が確かめて取引履歴に書いた (bill key・hooks/useQrBillKey.ts の confirmed)。 */
+  billConfirmed: QrBillConfirmed | null;
 }) {
   const t = useTranslations('QrGenerator');
   const sdState = device.state;
@@ -217,6 +221,8 @@ export function PaymentQrModal({
             ? { state: 'watching' as const, text: t('paymentWatching'), note: t('paymentWatchingNote') }
             : undefined
       }
+      // 入金の確認 (bill key)。出している間は、上の残高のヒントの代わりに出す (QrPreviewModal)。
+      {...(billConfirmed ? { billConfirmed: qrBillConfirmedText(t, billConfirmed) } : {})}
     />
   );
 }

@@ -53,8 +53,16 @@
 //     またいで読み書きの順を守らせる仕組みが無いので、別のタブが「読む → 書く」のあいだに割り込んだ結果は受け入れる
 //     (既存の appendHistory・受注の書き手と同じ性質)。
 //
-// 付帯の処理 (掟 13): ここで起きた失敗 (RPC・計算・履歴と印の保存) は、QR の表示・残高の見張り・レジの操作へ波及させない。
-// 外に出す関数は throw せず、何も返さない。
+// 画面への知らせ (行を書いた後だけ):
+//   - この書き手が行を書き、その行が履歴にあると読み直せたときだけ、その会計を出した画面 (showQrBill に渡した受け手) に
+//     bill key・何件目か・額を知らせる。行を書かなかった入金 (同じ tx の行・印が先にあった・保存の失敗) は知らせない。
+//   - 何件目か = 上の「行にするもの」の数え方 (1 = 明細つきの行・2 以上 = 明細なしの行)。
+//   - 額 = 書いた行の売上総額 (saleAmount = 着金額 + 利用料 = お客様が払った請求額 = QR の画面に出している金額)。
+//   - 表示中か (閉じた後・出し直した後の会計か) は、受け手 (hooks/useQrBillKey.ts) が決める。ここは書いた行をそのまま知らせる。
+//   - 知らせは書き込みの後に足しただけ: 行を書く条件・順・印・RPC の読み方は変えない。
+//
+// 付帯の処理 (掟 13): ここで起きた失敗 (RPC・計算・履歴と印の保存・画面への知らせ) は、QR の表示・残高の見張り・レジの操作へ
+// 波及させない。外に出す関数は throw せず、何も返さない。
 
 import { polygon, polygonAmoy } from 'viem/chains';
 import { appendHistory, loadHistory } from './history';
@@ -140,6 +148,16 @@ export function isBlockRangeLimitError(error: unknown): boolean {
 const HEAD_MARGIN_BLOCKS: Record<number, bigint> = { [polygon.id]: 3n, [polygonAmoy.id]: 3n };
 const headMargin = (chainId: number) => HEAD_MARGIN_BLOCKS[chainId] ?? 1n;
 
+/** 見張りがこの会計の入金を取引履歴に書いた (画面への知らせ・頭の注記の「画面への知らせ」)。 */
+export type QrBillRecorded = {
+  billKey: string;
+  /** この会計に一致した入金の何件目か (1 = 1 件目 = 明細つきの行・2 以上 = 同じ会計への 2 件目以降 = 明細なしの行)。 */
+  count: number;
+  /** 書いた行の売上総額 (saleAmount・wei の 10 進文字列) = お客様が払った請求額 = QR の画面に出している金額。 */
+  amount: string;
+};
+export type QrBillRecordedListener = (event: QrBillRecorded) => void;
+
 type WatchedBill = {
   bill: QrBill;
   /** 表示を始めた時刻 (ms・画面の側が決めた値)。 */
@@ -148,6 +166,8 @@ type WatchedBill = {
   hiddenAt: number | null;
   /** この会計に一致した Settled の数。 */
   matched: number;
+  /** 行を書いたときに知らせる受け手 (この会計を出した画面・無ければ知らせない)。 */
+  onRecorded: QrBillRecordedListener | null;
 };
 type ChainCursor = {
   /** 前回、照合し終えた最後の block (null = 次の回は先頭 − 90 から読む: 初めての回・新しい会計が加わった後)。 */
@@ -235,23 +255,42 @@ function billsFitting(chainId: number, settled: SettledLog): WatchedBill[] {
   return [...bills.values()].filter((w) => w.bill.chainId === chainId && settledMatchesExpected(settled, w.bill));
 }
 
-// 保存の直前の確認 → 印 → 行 (頭の注記の「保存の決まり」)。
-function save(bill: QrBill, settled: SettledLog, txHash: string, blockTime: bigint, withDetail: boolean): void {
+// 保存の直前の確認 → 印 → 行 (頭の注記の「保存の決まり」)。true = この書き手が行を書き、その行が履歴にある (画面に知らせる)。
+function save(bill: QrBill, settled: SettledLog, txHash: string, blockTime: bigint, withDetail: boolean): boolean {
   const hash = txHash.toLowerCase();
   const own = readTxMarks(QR_SALE_MARKS_KEY);
   const feed = readTxMarks(ORDER_FEED_MARKS_KEY);
   // 印を読めない端末では書かない (消した行を書き戻さない側に倒す)。
-  if (!own || !feed) return;
+  if (!own || !feed) return false;
   // 前に書いた tx (この書き手か、受注の書き手が書いて、店主が履歴から消した行を含む)。書き戻さない。
-  if (own.has(hash) || feed.has(hash)) return;
+  if (own.has(hash) || feed.has(hash)) return false;
   // 同じ tx の行がもうある (払った側の画面・お店の端末で送る・受注の書き手が書いた)。その行にも印を付ける。
   if (historyHasTx(hash)) {
     addQrSaleMark(hash);
-    return;
+    return false;
   }
   // 先に印を書く。書けなければ行を書かない (この書き手が書いた行には、必ず印がある)。
-  if (!addQrSaleMark(hash)) return;
+  if (!addQrSaleMark(hash)) return false;
   appendHistory(buildQrSaleEntry(bill, settled, txHash, blockTime, withDetail));
+  // appendHistory は localStorage の書き込みの失敗 (容量の上限など) を握りつぶして返る。画面に「取引履歴に記録しました」と
+  // 出すのは、行が履歴にあると読み直せたときだけ (書けていない行を「記録した」と言う偽の成功を断つ・掟 13)。
+  return historyHasTx(hash);
+}
+
+// 書いた行を、その会計を出した画面に知らせる (頭の注記の「画面への知らせ」)。受け手の失敗 (画面の側の throw) を、
+// 残りの入金の記録と見張りの回へ波及させない (掟 13)。行はもう書いてあり、知らせられなくても履歴は変わらない。
+function notifyRecorded(w: WatchedBill, settled: SettledLog): void {
+  if (!w.onRecorded) return;
+  try {
+    // 額は書いた行の saleAmount と同じ式 (lib/qrSaleHistory.ts の buildQrSaleEntry: 着金額 + 利用料)。
+    w.onRecorded({
+      billKey: w.bill.billKey,
+      count: w.matched,
+      amount: (settled.merchantValue + settled.feeValue).toString(),
+    });
+  } catch (error) {
+    warnOnce('qrSale.notify_failed', error);
+  }
 }
 
 async function pollChain(chainId: number, startedGeneration: number): Promise<void> {
@@ -347,12 +386,14 @@ async function pollChain(chainId: number, startedGeneration: number): Promise<vo
       // 明細を付けるのは、その会計の 1 件目の一致だけ (2 件目以降 = 同じ会計への 2 回目の入金)。
       const withDetail = w.matched === 0;
       w.matched += 1;
+      let recorded = false;
       try {
-        save(w.bill, settled, txHash, blockTime, withDetail);
+        recorded = save(w.bill, settled, txHash, blockTime, withDetail);
       } catch (error) {
         // 1 件の保存の失敗 (履歴の読み書き・行の組み立て) を、残りの入金の記録へ波及させない。
         warnOnce('qrSale.save_failed', error);
       }
+      if (recorded) notifyRecorded(w, settled);
       // bill key は会計ごとに違う乱数なので、1 つの Settled が一致する会計は多くても 1 つ。
       break;
     }
@@ -393,18 +434,20 @@ async function tick(): Promise<void> {
 
 /**
  * QR を出した (または出し直した)。この会計を見張りに足す。同じ bill key をもう一度出したら、表示中に戻す。
- * shownAt = 表示を始めた時刻 (画面の側が、始めた瞬間に決めた値)。
+ * shownAt = 表示を始めた時刻 (画面の側が、始めた瞬間に決めた値)。onRecorded = この会計の行を書いたときの受け手
+ * (同じ bill key を出し直したら、新しい受け手に替える)。
  */
-export function showQrBill(input: QrBillInput, shownAt: number): void {
+export function showQrBill(input: QrBillInput, shownAt: number, onRecorded?: QrBillRecordedListener): void {
   try {
     const known = bills.get(input.billKey);
     if (known) {
       known.hiddenAt = null;
+      known.onRecorded = onRecorded ?? null;
     } else {
       const bill = readQrBill(input);
       // 見張れない QR (lib/qrSaleHistory.ts の readQrBill) は足さない = RPC を読まない。
       if (!bill) return;
-      bills.set(input.billKey, { bill, shownAt, hiddenAt: null, matched: 0 });
+      bills.set(input.billKey, { bill, shownAt, hiddenAt: null, matched: 0, onRecorded: onRecorded ?? null });
       // 新しい会計が加わった: そのチェーンの次の回は先頭 − 90 から読み直す (表示を始めた後の入金を覆う・読んだ log は落とす)。
       // 位置を消す (null にしない): 読んでいる途中の回が、終わった後に古い位置を書き戻さないように、別の物にする。
       cursors.delete(bill.chainId);
