@@ -1244,6 +1244,7 @@ describe('i18n: History フィルタ/集計/会計CSV keys (ja/en parity)', () =
     'affiliateHeading',
     'affiliateAd',
     'affiliateNote',
+    'notInHistoryNote',
   ] as const;
 
   for (const loc of [
@@ -1270,6 +1271,13 @@ describe('i18n: History フィルタ/集計/会計CSV keys (ja/en parity)', () =
       expect(h.accountingAccountsSummaryFreee).toContain('{credit}');
       expect(h.accountingAccountsSummaryFreee).not.toContain('{debit}');
       expect(h.accountingAccountTooLong).toContain('{max}');
+    }
+  });
+
+  // /history の「履歴に出ない入金もあります」の 1 行は、取引履歴のガイドへのリンク (t.rich の <link>) をちょうど 1 つ持つ。
+  it('notInHistoryNote は ja/en とも <link>…</link> をちょうど 1 つ持つ', () => {
+    for (const m of [ja, en]) {
+      expect(m.History.notInHistoryNote.match(/<link>[^<]+<\/link>/g)).toHaveLength(1);
     }
   });
 

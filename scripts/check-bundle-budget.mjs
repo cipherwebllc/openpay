@@ -144,6 +144,7 @@ const BUDGETS_KB = {
   '/[locale]/guide': 241, // 実測 236
   '/[locale]/guide/agent': 243, // 実測 238
   '/[locale]/guide/ai-pay': 244, // 実測 239
+  '/[locale]/guide/history': 242, // 2026-11-18 新設。手元の本番 flag build で 240 (239.5 kB・動画のある order-link より 1.4 kB 小さい)。予算はほかのガイドと同じ
   '/[locale]/guide/image-url': 242, // 実測 237
   '/[locale]/guide/mobile-order': 242, // 実測 237
   '/[locale]/guide/order-link': 242, // 実測 237 (2026-11-03 新設・mobile-order と同じ形。手元の build は 238 = CI より 1 kB 大きい)
