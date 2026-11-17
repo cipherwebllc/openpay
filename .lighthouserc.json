@@ -11,7 +11,8 @@
         "http://localhost:3000/ja/scan",
         "http://localhost:3000/ja/guide",
         "http://localhost:3000/ja/guide/qr",
-        "http://localhost:3000/ja/pricing"
+        "http://localhost:3000/ja/pricing",
+        "http://localhost:3000/ja/sponsors"
       ],
       "startServerCommand": "npm run start",
       "startServerReadyPattern": "Ready",
