@@ -110,8 +110,14 @@ const BUDGETS_KB = {
   // 2026-10-10 F2: 実測 [handle] 459 / checkout 431 に各 +5。
   // 2026-11-11 F-10: 実測 [handle] 442 / checkout 427 に各 +5 (前は 464 / 436)。
   // 2026-11-13 PR-41: 各 +1 kB (理由は上の /pay の 2026-11-13 の注記・Phase 3 の後に下げ直す)。
+  // 2026-11-18 /checkout だけ 433 → 434 (user 裁定)。ガスレスで払えないウォレット (7702 でない contract の口座) の案内で、
+  //   main c86b4faf の手元の本番 flag build から約 +0.4 kB (hooks/useGaslessUnsupportedWallet.ts・RelayFallbackBanner の形・
+  //   CheckoutForm の条件と JSX・お店の端末で送るの誤りの振り分け。RPC の読み取りは遅延 chunk)。main の CI の表で 433 ちょうど
+  //   だったので 434 に繰り上がった。お店の端末で送るの画面 (StoreDeviceCheckoutForm) を遅延の chunk にして下げる案は、
+  //   chunk がウォレットの再接続より遅れて届くと hydration の誤り (React #418) を出した (chunk を 3 秒遅らせて 10 回中 10 回・
+  //   next/dynamic でも React.lazy でも同じ) のでやめた。ssr: false の遅延は初めの HTML に画面が入らないので採らない。
   '/[locale]/[handle]': 448,
-  '/[locale]/checkout': 433,
+  '/[locale]/checkout': 434,
   // 2026-10-10 E22/F2: 予算の外にあった主要画面。顧客の支払い導線 (/order = モバイル注文・/scan = 読み取り)・
   // お店の画面 (/history・/billing)・AI ストア (/store・/discovery)。実測 order 366 / scan 388 / history 407 /
   // store 259 / billing 331 / discovery 310 に各 +5。

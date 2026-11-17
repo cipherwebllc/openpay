@@ -53,10 +53,37 @@ describe('relayErrorKey (relay error code → 顧客向け i18n キー)', () => 
     }
   });
 
-  it('技術系/未知コードは generic に丸める', () => {
-    for (const m of ['http_500', 'signature_invalid', 'unsupported_chain', 'reverted', '']) {
+  it('技術系/未知コードは generic に丸める (signature_mismatch はウォレットの種類の問題と言い切れないので generic のまま)', () => {
+    for (const m of ['http_500', 'signature_mismatch', 'unsupported_chain', 'reverted', '']) {
       expect(relayErrorKey(new Error(m))).toBe('errorRelayGeneric');
     }
+  });
+
+  // 7702 でない contract の口座 (ERC-4337 のスマートアカウント・マイナウォレット) の署名は、JPYC の EIP-3009 (ecrecover だけ) で
+  // server が送り元を復元できず signature_invalid になる。時間をおいても直らないので「一時的」の generic にしない。
+  it('signature_invalid は対応していないウォレットの専用キー (fallback-safe のまま = 通常決済へ切り替えられる)', () => {
+    const error = new Error('signature_invalid');
+    expect(relayErrorKey(error)).toBe('errorRelayUnsupportedWallet');
+    expect(isFallbackSafeRelayError(error)).toBe(true);
+    expect(isIntentStorageUnavailableError(error)).toBe(false);
+    expect(isOrderBindingStorageUnavailableError(error)).toBe(false);
+  });
+
+  it('対応していないウォレットの文言は 3 つのフォームの namespace に ja / en であり、「一時的」「時間をおいて」と言わない', () => {
+    expect(ja.PaymentForm.errorRelayUnsupportedWallet).toBe('このウォレットは、ガス代不要の支払いに対応していません。');
+    expect(ja.CheckoutForm.errorRelayUnsupportedWallet).toBe('このウォレットは、ガス代不要の支払いに対応していません。');
+    expect(ja.TipForm.errorRelayUnsupportedWallet).toBe('このウォレットは、ガス代不要の送金に対応していません。');
+    expect(en.PaymentForm.errorRelayUnsupportedWallet).toBe("This wallet doesn't support payment with no gas fee.");
+    expect(en.CheckoutForm.errorRelayUnsupportedWallet).toBe("This wallet doesn't support payment with no gas fee.");
+    expect(en.TipForm.errorRelayUnsupportedWallet).toBe("This wallet doesn't support transfers with no gas fee.");
+    for (const messages of [ja, en]) {
+      for (const namespace of ['PaymentForm', 'CheckoutForm', 'TipForm'] as const) {
+        expect(messages[namespace].errorRelayUnsupportedWallet).not.toMatch(/一時的|時間をおいて|temporarily|try again later/i);
+      }
+    }
+    // /pay・/checkout の banner の題は、この文と同じ中身 (banner は題・本文・切り替えのボタンだけを出す)。
+    expect(ja.PaymentForm.errorRelayUnsupportedWallet).toBe(`${ja.RelayFallback.unsupportedTitle}。`);
+    expect(en.PaymentForm.errorRelayUnsupportedWallet).toBe(`${en.RelayFallback.unsupportedTitle}.`);
   });
 });
 

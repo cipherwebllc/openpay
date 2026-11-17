@@ -651,6 +651,8 @@
     "standardModeTitle": "Standard (you pay gas)",
     "standardModeArcBody": "Arc supports standard payments only: gas is paid in USDC, with no separate token needed. Payments from USDC on other chains are forwarded to Arc by Circle (the sender pays Circle's forwarding fee on top; OpenPay collects nothing).",
     "standardModeBody": "This QR uses standard payment (with gas) mode. You need {nativeToken} (native gas token) in your wallet. OpenPay does not sponsor gas. The payment is a single transfer — approve it once in your wallet.",
+    "standardModeUnsupportedTitle": "Standard payment",
+    "standardModeUnsupportedBody": "Your wallet's confirmation screen shows whether a gas fee ({nativeToken}) is needed. OpenPay does not sponsor gas. The payment is a single transfer — approve it in your wallet.",
     "modeBadgeGasless": "No gas fee",
     "modeBadgeStandard": "Standard (you pay gas)",
     "breakdownTitle": "Breakdown",
@@ -746,6 +748,7 @@
     "errorRelayGeneric": "Could not complete the gasless payment. Please try again later or use standard mode.",
     "errorRelayFeePaused": "This shop's gasless payments are currently paused. Please contact the shop, or pay in standard mode (you cover the gas).",
     "errorRelayStorageUnavailable": "We can't save a payment record on this device, so gasless payment isn't available (your JPYC didn't move). Check your browser's site data settings, or try another browser.",
+    "errorRelayUnsupportedWallet": "This wallet doesn't support payment with no gas fee.",
     "relayDegradedPreflight": "Gasless payment may be temporarily congested or unavailable right now.",
     "ipRateLimitedTitle": "Temporarily busy",
     "ipRateLimitedBody": "Please wait a moment, then retry with the same details. You do not need to sign again.",
@@ -898,6 +901,7 @@
     "errorRelayGeneric": "Could not complete the gasless transfer. Please try again later.",
     "errorRelayFeePaused": "Gasless tips to this creator are currently paused. Please check with the creator.",
     "errorRelayStorageUnavailable": "We can't save a payment record on this device, so gasless transfer isn't available (your JPYC didn't move). Check your browser's site data settings, or try another browser.",
+    "errorRelayUnsupportedWallet": "This wallet doesn't support transfers with no gas fee.",
     "ipRateLimitedTitle": "Temporarily busy",
     "ipRateLimitedBody": "Please wait a moment, then retry with the same details. You do not need to sign again.",
     "ipRateLimitedBodyWithRetryAfter": "Please wait about {seconds} seconds, then retry with the same details. You do not need to sign again.",
@@ -1566,6 +1570,7 @@
     "storeNameUnverified": "The shop name was entered by whoever made this link and has not been verified.",
     "modeBadgeGasless": "No gas fee",
     "modeBadgeStandard": "Standard (you pay gas)",
+    "modeBadgeStandardUnsupported": "Standard payment",
     "itemsTitle": "Items",
     "subtotalRow": "Subtotal",
     "discountRow": "Discount",
@@ -1595,6 +1600,7 @@
     "errorRelayGeneric": "Could not complete the gasless payment. Please try again later or use standard mode.",
     "errorRelayFeePaused": "This shop's gasless payments are currently paused. Please contact the shop, or pay in standard mode (you cover the gas).",
     "errorRelayStorageUnavailable": "We can't save a payment record on this device, so gasless payment isn't available (your JPYC didn't move). Check your browser's site data settings, or try another browser.",
+    "errorRelayUnsupportedWallet": "This wallet doesn't support payment with no gas fee.",
     "relayDegradedPreflight": "Gasless payment may be temporarily congested or unavailable right now.",
     "ipRateLimitedTitle": "Temporarily busy",
     "ipRateLimitedBody": "Please wait a moment, then retry with the same details. You do not need to sign again.",
@@ -1612,6 +1618,7 @@
     "pendingExplorerLink": "View on explorer",
     "standardArcHint": "Arc supports standard payments only: gas is paid in USDC, with no separate token needed.",
     "standardHint": "Standard payment: approve a single transfer in your wallet. The network fee ({nativeToken}) is requested separately by your wallet.",
+    "standardHintUnsupported": "Your wallet's confirmation screen shows whether a gas fee ({nativeToken}) is needed. OpenPay does not sponsor gas. The payment is a single transfer — approve it in your wallet.",
     "gasInfoUsdc": "Pay the network fee in USDC via Pimlico ERC20 Paymaster — no need to hold native {nativeToken}. The figure shown is a worst-case estimate; any surplus over the actual cost is not charged.",
     "gasInfoUsdcCircle": "Pay the network fee in USDC via Circle Paymaster (official) — no need to hold native {nativeToken}. A Circle fee of about 10% is added on top of the gas cost. The figure shown is an upper-bound estimate; any surplus is not charged. OpenPay does not collect this fee.",
     "gasInfoJpyc": "Pimlico Sponsorship Paymaster covers {nativeToken} gas; you complete the payment in JPYC alone with no native ({nativeToken}) holdings required. The network fee is charged as a fixed amount based on the congestion ceiling price, so during normal periods it may exceed the actual gas (the difference is not refunded).",
@@ -1706,7 +1713,8 @@
         "session_taken": "Another payment is already in progress for this checkout. Please tell the staff.",
         "server_rejected": "The payment couldn't be accepted. No payment was made. Please tell the staff.",
         "storage_unavailable": "This device can't keep a record of the payment, so this method can't be used (e.g. private browsing). No payment was made.",
-        "busy": "It's busy right now. Please wait a moment and try again. No payment was made."
+        "busy": "It's busy right now. Please wait a moment and try again. No payment was made.",
+        "unsupported_wallet": "This wallet doesn't support this payment method. No payment was made. Please ask the staff to let you pay with the standard QR."
       },
       "usedUnresolved": "This signature can no longer be used. We couldn't confirm whether the payment went through. Please check your wallet's transaction history (if it went through, show that transaction to the staff). To avoid paying the same checkout twice if it did go through, you can't start a new payment until you've checked.",
       "acknowledge": "I've checked my wallet",
@@ -2489,7 +2497,10 @@
   "RelayFallback": {
     "title": "Gasless payment is temporarily unavailable",
     "switchButton": "Switch to standard payment (you pay gas)",
-    "gasHint": "If you hold {nativeToken}, you can switch and pay right now."
+    "gasHint": "If you hold {nativeToken}, you can switch and pay right now.",
+    "unsupportedTitle": "This wallet doesn't support payment with no gas fee",
+    "unsupportedBody": "You can pay by switching to standard payment. Your wallet's confirmation screen shows whether a gas fee is needed.",
+    "unsupportedSwitchButton": "Switch to standard payment"
   },
   "Tax": {
     "none": "None",

@@ -91,7 +91,9 @@ export type StoreDeviceErrorReason =
   | 'busy'
   | 'session_expired'
   | 'session_taken'
-  | 'server_rejected';
+  | 'server_rejected'
+  // このウォレット (7702 でない contract の口座) の署名は、JPYC の receiveWithAuthorization (ecrecover だけ) で通らない。
+  | 'unsupported_wallet';
 
 // これらは、この QR ではもう支払いを始めない (出し直し・店員への確認が要る)。
 const BLOCKING_REASONS: readonly StoreDeviceErrorReason[] = ['session_expired', 'session_taken'];
@@ -625,7 +627,13 @@ export function useStoreDevicePayment(deployment: TokenDeployment, handoffId: st
                 ? 'insufficient_balance'
                 : definitive.status === 404 || definitive.status === 410
                   ? 'session_expired'
-                  : 'server_rejected';
+                  // 署名から送り元を復元できない (signature_invalid)、または署名が 65 byte でない (contract の口座の署名は
+                  // 長く、受け渡しは recover の前に形で断る = invalid_body・lib/storeHandoff.ts) = このウォレットでは払えない。
+                  // ほかの 400 は今までどおり server_rejected。
+                  : definitive.error === 'signature_invalid' ||
+                      (definitive.error === 'invalid_body' && signature.length !== 132)
+                    ? 'unsupported_wallet'
+                    : 'server_rejected';
         setStatus({ phase: 'error', reason, blocking: BLOCKING_REASONS.includes(reason) });
       } finally {
         inFlight.current = false;

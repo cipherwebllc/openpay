@@ -47,8 +47,7 @@ export function usePaymentRoute({
   disableRelay,
   pinnedRoute,
 }: UsePaymentRouteArgs) {
-  const resolvedRoute = resolvePaymentRoute({
-    isStandard: standardRequested,
+  const routeInput = {
     jpycGaslessProvider: resolveJpycGaslessProvider(
       deployment,
       walletChainId ?? deployment.chainId,
@@ -59,12 +58,17 @@ export function usePaymentRoute({
     ),
     hasJpycForwarder: jpycForwarderFor(walletChainId ?? deployment.chainId) !== null,
     disableRelay,
-  });
+  };
+  const resolvedRoute = resolvePaymentRoute({ isStandard: standardRequested, ...routeInput });
   const route = pinnedRoute ?? resolvedRoute;
   const isStandard = isStandardRoute(route);
   const useRelay = isRelayRoute(route);
   // recover: relay かつ forwarder 設定済 chain (gas 相当額を JPYC 回収)。
   const useRecover = isRecoverRoute(route);
   const isCircle = isCircleRoute(route);
-  return { route, isStandard, useRelay, useRecover, isCircle };
+  // 通常決済を求められていなければ relay の経路になるか (同じ resolver に isStandard: false で聞く)。ガスレスで払えないウォレットの
+  // 見分け (hooks/useGaslessUnsupportedWallet.ts) を、通常決済に切り替えた後も同じ口座の結果のまま続けて、案内の文を選ぶため
+  // だけに使う。経路・金額・送信は上の route だけで決める (掟 12)。USDC・split (disableRelay)・relay の無いチェーンは false。
+  const relayCapable = isRelayRoute(resolvePaymentRoute({ isStandard: false, ...routeInput }));
+  return { route, isStandard, useRelay, useRecover, isCircle, relayCapable };
 }

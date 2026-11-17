@@ -1,6 +1,6 @@
 // JPYC relay (/api/relay/jpyc) の error code → 顧客向け i18n キー。検証系の細かな reason や
-// 技術コード (signature_*/unsupported_chain/http_* 等) は generic に丸め、顧客が取れる
-// アクションのある 3 種のみ専用キーにする。namespace 非依存に「キー文字列」を返すので、
+// 技術コード (signature_mismatch/unsupported_chain/http_* 等) は generic に丸め、顧客が取れる
+// アクションのあるものだけ専用キーにする (signature_invalid = 対応していないウォレット、は下の case)。namespace 非依存に「キー文字列」を返すので、
 // PaymentForm / CheckoutForm / TipForm それぞれの t() で翻訳する (3 つの namespace に同名キーが必要)。
 
 export type RelayErrorKey =
@@ -9,6 +9,7 @@ export type RelayErrorKey =
   | 'errorRelayInsufficientBalance'
   | 'errorRelayFeePaused'
   | 'errorRelayStorageUnavailable'
+  | 'errorRelayUnsupportedWallet'
   | 'errorRelayGeneric';
 
 export function relayErrorKey(err: Error): RelayErrorKey {
@@ -30,6 +31,13 @@ export function relayErrorKey(err: Error): RelayErrorKey {
     // isIntentStorageUnavailableError)。
     case 'intent_storage_unavailable':
       return 'errorRelayStorageUnavailable';
+    // server が署名から送り元を復元できなかった (lib/relay/jpycRelay.ts・forwarderRecover.ts)。JPYC の EIP-3009 は ecrecover
+    // だけなので、7702 でない contract の口座 (ERC-4337 のスマートアカウント等) の署名はここで断られる。時間をおいても直らない
+    // ので「一時的」の generic にせず、ウォレットが対応していないと伝える (/pay・/checkout は通常決済への切り替えの banner を
+    // 払えない口座の形で出す・hooks/useGaslessUnsupportedWallet.ts)。signature_mismatch (復元できたが送り元と違う) は
+    // ウォレットの種類の問題と言い切れないので generic のまま。
+    case 'signature_invalid':
+      return 'errorRelayUnsupportedWallet';
     default:
       return 'errorRelayGeneric';
   }
