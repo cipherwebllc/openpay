@@ -27,16 +27,19 @@ export function useGaslessUnsupportedWallet(
   enabled: boolean,
   path: GaslessUnsupportedWalletPath,
 ): boolean {
-  const key = enabled && address ? `${chainId}:${address.toLowerCase()}` : null;
+  // アドレスは小文字にそろえてから使う (読み取りの入力も key と同じにする: 大文字・小文字だけが変わったときに読み直して、
+  // 読み込み中に前の結果を返す順を作らない)。
+  const normalized = enabled && address ? (address.toLowerCase() as Address) : undefined;
+  const key = normalized ? `${chainId}:${normalized}` : null;
   // 今の入力 (key) の読み取りの結果。入力が変わったら、描画の中で前の結果を捨てる (React の「props が変わったら state を
   // 合わせる」形・effect の中で同期に setState しない)。A → B → A と戻っても、A の前の結果は残らない。
   const [read, setRead] = useState({ key, unsupported: false });
   if (read.key !== key) setRead({ key, unsupported: false });
   useEffect(() => {
-    if (!key || !address) return;
+    if (!key || !normalized) return;
     let current = true;
     (codeModule ??= import('@/lib/gaslessUnsupportedWallet'))
-      .then((m) => m.readGaslessUnsupportedWallet(chainId, address, path))
+      .then((m) => m.readGaslessUnsupportedWallet(chainId, normalized, path))
       .then(
         (unsupported) => {
           if (current) setRead({ key, unsupported });
@@ -49,6 +52,6 @@ export function useGaslessUnsupportedWallet(
     return () => {
       current = false;
     };
-  }, [key, address, chainId, path]);
+  }, [key, normalized, chainId, path]);
   return read.key === key && read.unsupported;
 }

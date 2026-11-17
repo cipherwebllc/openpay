@@ -51,7 +51,7 @@ describe('useGaslessUnsupportedWallet', () => {
     const { result } = setup({ address: A, chainId: 137, enabled: true });
     expect(result.current).toBe(false);
     await waitFor(() => expect(read).toHaveBeenCalledTimes(1));
-    expect(read).toHaveBeenCalledWith(137, A, 'pay');
+    expect(read).toHaveBeenCalledWith(137, A.toLowerCase(), 'pay');
     await settle(0, true);
     expect(result.current).toBe(true);
   });
@@ -99,7 +99,7 @@ describe('useGaslessUnsupportedWallet', () => {
     rerender({ address: B, chainId: 137, enabled: true });
     expect(result.current).toBe(false);
     await waitFor(() => expect(pending).toHaveLength(2));
-    expect(read).toHaveBeenLastCalledWith(137, B, 'pay');
+    expect(read).toHaveBeenLastCalledWith(137, B.toLowerCase(), 'pay');
     await settle(1, false);
     expect(result.current).toBe(false);
   });
@@ -111,7 +111,7 @@ describe('useGaslessUnsupportedWallet', () => {
     rerender({ address: A, chainId: 8217, enabled: true });
     expect(result.current).toBe(false);
     await waitFor(() => expect(pending).toHaveLength(2));
-    expect(read).toHaveBeenLastCalledWith(8217, A, 'pay');
+    expect(read).toHaveBeenLastCalledWith(8217, A.toLowerCase(), 'pay');
     await settle(1, false);
     expect(result.current).toBe(false);
   });
@@ -132,6 +132,10 @@ describe('useGaslessUnsupportedWallet', () => {
     await waitFor(() => expect(pending).toHaveLength(1));
     await settle(0, true);
     rerender({ address: A.toLowerCase() as Address, chainId: 137, enabled: true });
+    expect(result.current).toBe(true);
+    // 大文字・小文字だけの違いで読み直さない (読み直すと、読み込み中に前の結果を返す順ができる)。
+    await act(async () => {});
+    expect(read).toHaveBeenCalledTimes(1);
     expect(result.current).toBe(true);
   });
 
@@ -208,6 +212,19 @@ describe('useGaslessUnsupportedWallet', () => {
       await settle(2, false); // 今の A
       expect(view.result.current).toBe(false);
     });
+
+    it('今の A が true になった後に、前の A の読み取りが遅れて失敗しても、今の結果を消さない', async () => {
+      const view = setup(HOME);
+      await waitFor(() => expect(pending).toHaveLength(1));
+      view.rerender({ ...HOME, address: B });
+      await waitFor(() => expect(pending).toHaveLength(2));
+      view.rerender(HOME);
+      await waitFor(() => expect(pending).toHaveLength(3));
+      await settle(2, true); // 今の A
+      expect(view.result.current).toBe(true);
+      await fail(0); // 1 回目の A (もう今の読み取りではない)
+      expect(view.result.current).toBe(true);
+    });
   });
 
   it('StrictMode の二重の effect: 1 回目の (片付けた) 読み取りの結果は使わず、今の読み取りの結果だけを使う', async () => {
@@ -222,7 +239,7 @@ describe('useGaslessUnsupportedWallet', () => {
   it.each([
     ['resolve (true)', (i: number) => pending[i].resolve(true)],
     ['reject', (i: number) => pending[i].reject(new Error('rpc down'))],
-  ])('unmount の後に %s しても setState しない (React の警告・throw なし)', async (_, finish) => {
+  ])('unmount の後に %s しても throw しない・React の警告を出さない', async (_, finish) => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
     const view = setup({ address: A, chainId: 137, enabled: true });
     await waitFor(() => expect(pending).toHaveLength(1));
