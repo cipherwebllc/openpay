@@ -272,14 +272,8 @@ export const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
       'Mina Wallet added support for the Kaia chain, so it now covers all of the chains on which JPYC is issued (Ethereum, Polygon, Avalanche and Kaia). Its supported chains became Ethereum, Polygon, Avalanche, Base, Optimism, Arbitrum and Kaia, with more to be added over time.',
     summaryJa:
       'マイナウォレットが Kaia チェーンに対応し、JPYC が発行されている全チェーン (Ethereum / Polygon / Avalanche / Kaia) を扱えるようになった。対応チェーンは Ethereum・Polygon・Avalanche・Base・Optimism・Arbitrum・Kaia の 7 つで、今後も順次広げる予定としている。',
+    // お知らせは更新後の 7 チェーンと Kaia (New!) を示すが、変更前の一覧を明示していないので diffs は付けない (runbook)。
     sourceUrl: 'https://www.mynawallet.co.jp/news/',
-    diffs: [
-      {
-        field: 'chains',
-        previousValue: ['ethereum', 'polygon', 'avalanche', 'base', 'optimism', 'arbitrum'],
-        currentValue: ['ethereum', 'polygon', 'avalanche', 'base', 'optimism', 'arbitrum', 'kaia'],
-      },
-    ],
   },
   // ── 2026-08-26 大阪府「先駆的金融市場等形成支援事業補助金」採択 (公式発表・4 事業のうち
   //     ステーブルコイン決済関連 3 件。一次ソース = 大阪府公式ページ) ──
@@ -1833,13 +1827,13 @@ export const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
     changeCategory: 'update',
     assets: ['JPYC'],
     summary:
-      "The JPYC EX maintenance announced for 14:00 to 17:00 JST on 2026-11-10 was completed at 17:00, and all of the suspended services became available again. From 20:47 JST the same day, JPYC EX ran unscheduled maintenance due to a temporary suspension of GMO Aozora Net Bank's bank API service: logging in, new issuance and redemption reservations, and issuance and redemption processing on all networks were unavailable, while account opening stayed available. Service resumed at 23:14 JST; deposits and transfers for issuance or redemption made during the maintenance are processed in order.",
+      "The JPYC EX maintenance announced for 14:00 to 17:00 JST on 2026-11-10 was completed at 17:00, and all of the suspended services became available again. From 20:47 JST the same day, JPYC EX ran unscheduled maintenance due to a temporary suspension of GMO Aozora Net Bank's bank API service: logging in, new issuance and redemption reservations, and issuance and redemption processing on all networks were unavailable, while account opening stayed available. Service resumed at 23:14 JST; deposits and transfers for issuance or redemption made during the maintenance are processed in order. Sources: the completion at 17:00 is from https://faq.jpyc.co.jp/s/article/announce-0047 and the official post https://x.com/jpyc_official/status/2120067143442354560; the unscheduled maintenance is from the source URL of this event.",
     summaryJa:
-      '2026-11-10 14:00〜17:00 (予定) と告知していた JPYC EX のメンテナンスは 17:00 に完了し、停止していたサービスはすべて通常どおり利用可能に。同日 20:47 からは、GMO あおぞらネット銀行の銀行 API サービスの一時停止に伴う臨時メンテナンスを実施 (マイページへのログイン・発行と償還の新規予約・全ネットワークの発行と償還の処理が利用不可で、アカウント開設は利用可)。23:14 にサービスを再開し、メンテナンス中の発行・償還に関する入金・入庫は順次処理するとしている。',
+      '2026-11-10 14:00〜17:00 (予定) と告知していた JPYC EX のメンテナンスは 17:00 に完了し、停止していたサービスはすべて通常どおり利用可能に。同日 20:47 からは、GMO あおぞらネット銀行の銀行 API サービスの一時停止に伴う臨時メンテナンスを実施 (マイページへのログイン・発行と償還の新規予約・全ネットワークの発行と償還の処理が利用不可で、アカウント開設は利用可)。23:14 にサービスを再開し、メンテナンス中の発行・償還に関する入金・入庫は順次処理するとしている。出典: 17:00 の完了は https://faq.jpyc.co.jp/s/article/announce-0047 と公式 X の投稿 https://x.com/jpyc_official/status/2120067143442354560、臨時メンテナンスはこのイベントの sourceUrl。',
     sourceUrl: 'https://faq.jpyc.co.jp/s/article/announce-0048',
   },
   {
-    // デジタルガレージのニュースリリース (2026-11-10)。決済スコープだけに載せる (ディレクトリの dg-sps エントリの事実は変えない)。
+    // デジタルガレージのニュースリリース (2026-11-10)。決済スコープだけに載せる (ディレクトリの dg-sps エントリにも chains の arc を足した)。
     // 一次ソースは前の対応チェーン (Base) を書いていないので diffs は付けない (現況行の chains には arc を足す・Base は
     // 8/10 のリリースの記録)。リリースに JPYC を Arc で扱う記述は無いので、JPYC には触れない。
     date: '2026-11-10',

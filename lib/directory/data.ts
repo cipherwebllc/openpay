@@ -211,7 +211,7 @@ export const DIRECTORY_ENTRIES = [
     ),
     facts: {
       description:
-        '加盟店がAPI接続で導入するステーブルコイン決済基盤。当初はBase上のUSDCに対応し、JCBとDGFTへ先行提供。2026年11月にCircleのArc上のUSDCにも対応。JPYC対応は計画段階。',
+        '加盟店がAPI接続で導入するステーブルコイン決済基盤。当初はBase上のUSDCに対応。JCBへ提供を開始し、DGFTへ順次導入予定。2026年11月にCircleのArc上のUSDCにも対応。JPYC対応は計画段階。',
       category: 'payment',
       tags: ['Japan', 'payment', 'stablecoin'],
       tokens: ['usdc'],

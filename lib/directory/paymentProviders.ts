@@ -123,7 +123,8 @@ export const PAYMENT_PROVIDERS: readonly PaymentProviderRecord[] = [
     announcedAt: '2026-08-10',
     startedAt: '2026-08-10',
     plannedPeriod: null,
-    sourceUrl: 'https://www.garage.co.jp/pr/release/20260810/',
+    // 2026-11-18: 出典を Arc 対応の 11/10 のリリースに (chains の arc の根拠)。announcedAt / startedAt は 8/10 の商用展開のまま。
+    sourceUrl: 'https://www.garage.co.jp/pr/release/20261110/',
     verifiedAt: '2026-11-18',
   },
   {
