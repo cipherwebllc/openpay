@@ -2972,6 +2972,51 @@ describe('CheckoutForm — JPYC EIP-3009 relay 経路', () => {
       expect(screen.queryByText(STANDARD_BODY)).toBeNull();
     });
 
+    // 明細 (ネットワーク手数料の行・合計) の文 (user 承認 2026-11-18)。見分けた口座の通常決済では「ウォレット側で gas を払う」と
+    // 言い切らない。明細の下の説明は STANDARD_BODY (前の変更のまま)。
+    const BREAKDOWN_GAS = 'ウォレットの確認画面に出ます';
+    const BREAKDOWN_TOTAL = 'お支払い額';
+
+    it('切り替えた後の明細: ネットワーク手数料は「ウォレットの確認画面に出ます」・合計は「お支払い額」', async () => {
+      const user = userEvent.setup();
+      setupRelayReady();
+      setUnsupported();
+      render(<CheckoutForm params={JPYC_PARAMS} />);
+      await user.click(screen.getByRole('button', SWITCH));
+      expect(screen.getByText(BREAKDOWN_GAS, { selector: 'dd' })).toBeInTheDocument();
+      expect(screen.getByText(BREAKDOWN_TOTAL, { selector: 'dt' })).toBeInTheDocument();
+      expect(screen.getByText(STANDARD_BODY)).toBeInTheDocument();
+      expect(screen.queryByText('ウォレットで支払い')).toBeNull();
+      expect(screen.queryByText(/ウォレット側 .*gas/)).toBeNull();
+    });
+
+    it('通常決済のリンク (mode=standard) で見分けた口座も、明細は同じ新しい文', () => {
+      setupRelayReady();
+      setUnsupported();
+      render(<CheckoutForm params={{ ...JPYC_PARAMS, mode: 'standard' }} />);
+      expect(screen.getByText(BREAKDOWN_GAS, { selector: 'dd' })).toBeInTheDocument();
+      expect(screen.getByText(BREAKDOWN_TOTAL, { selector: 'dt' })).toBeInTheDocument();
+      expect(screen.queryByText(/ウォレット側 .*gas/)).toBeNull();
+    });
+
+    it('en: 見分けた口座の通常決済の明細は英訳の新しい文', () => {
+      setupRelayReady();
+      setUnsupported();
+      render(<CheckoutForm params={{ ...JPYC_PARAMS, mode: 'standard' }} />, { locale: 'en' });
+      expect(screen.getByText("Shown on your wallet's confirmation screen", { selector: 'dd' })).toBeInTheDocument();
+      expect(screen.getByText('You pay', { selector: 'dt' })).toBeInTheDocument();
+      expect(screen.queryByText('Paid separately from your wallet')).toBeNull();
+      expect(screen.queryByText(/wallet-side/)).toBeNull();
+    });
+
+    it('見分けていないウォレットの通常決済の明細は、今の行と合計のまま', () => {
+      setupRelayReady();
+      render(<CheckoutForm params={{ ...JPYC_PARAMS, mode: 'standard' }} />);
+      expect(screen.getByText('ウォレットで支払い', { selector: 'dd' })).toBeInTheDocument();
+      expect(screen.getByText('お支払い額 (+ ウォレット側 POL gas)', { selector: 'dt' })).toBeInTheDocument();
+      expect(screen.queryByText(BREAKDOWN_GAS)).toBeNull();
+    });
+
     it.each([
       ['送信中 (relay.isPending)', () => setRelayPayment('pending-flow')],
       ['結果不明 (response-unknown)', () => setRelayPayment('response-unknown')],

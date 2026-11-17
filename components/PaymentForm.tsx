@@ -1300,10 +1300,12 @@ function PaymentDetails({ params }: { params: PayParams }) {
               ),
             })}
           {/* 分配のため払えない QR (splitBlock) では、ネットワーク手数料の行と下の注記を出さない
-              (「OpenPay が負担」等の約束を、払えない状態で見せない)。受取人ごとの内訳は残す。 */}
+              (「OpenPay が負担」等の約束を、払えない状態で見せない)。受取人ごとの内訳は残す。
+              払えないウォレット (7702 でない contract の口座) と見分けた通常決済は、ガス代をウォレットの側で払う仕組みのことが
+              あるので、通常決済の行と合計と注記で「ウォレット側で gas を払う」と言い切らない (上の枠の文と同じ扱い)。 */}
           {!splitBlocked && breakdownRow(
             isStandard
-              ? { label: t('gasRowStandard'), value: t('gasRowStandardValue') }
+              ? { label: t('gasRowStandard'), value: t(unsupportedWallet ? 'gasRowStandardValueUnsupported' : 'gasRowStandardValue') }
               : useRecover
                 ? {
                   label: isMerchantGas ? t('gasRowMerchant') : t('gasRow'),
@@ -1338,7 +1340,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
             label: splitBlocked
               ? t('customerMerchantGas')
               : isStandard
-                ? t('customerStandard', { nativeToken })
+                ? t(unsupportedWallet ? 'customerStandardUnsupported' : 'customerStandard', { nativeToken })
                 : isMerchantGas
                   ? t('customerMerchantGas')
                   : t('customerCustomerGas'),
@@ -1354,7 +1356,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
         {!splitBlocked && (
           <p className="mt-4 text-xs text-slate-500">
             {isStandard
-              ? t('standardBatchHint')
+              ? t(unsupportedWallet ? 'standardBatchHintUnsupported' : 'standardBatchHint')
               : useRecover
                 ? t('gaslessBatchHintJpycRecover')
                 : useRelay || isJpyc

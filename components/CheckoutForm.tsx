@@ -1353,9 +1353,11 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
               }
               : null
           }
+          // 払えないウォレット (7702 でない contract の口座) と見分けた通常決済は、ガス代をウォレットの側で払う仕組みのことが
+          // あるので、ネットワーク手数料の行と合計で「ウォレット側で gas を払う」と言い切らない (下の hint と同じ扱い)。
           gasRow={
             isStandard
-              ? { label: t('gasRowStandard'), value: t('gasRowStandardValue') }
+              ? { label: t('gasRowStandard'), value: t(unsupportedWallet ? 'gasRowStandardValueUnsupported' : 'gasRowStandardValue') }
               : isMobileFee
                 /* モバイル注文 (gasless): ネットワーク手数料は利用料 (feeRow) に含むため別行を出さない
                    (relayGasEquiv=0 で「0 JPYC」表示になり紛らわしい)。standard 経路は上の分岐で
@@ -1391,7 +1393,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
           }
           totalRow={{
             label: isStandard
-              ? t('totalRowStandard', { nativeToken })
+              ? t(unsupportedWallet ? 'totalRowStandardUnsupported' : 'totalRowStandard', { nativeToken })
               : isMerchantGas
                 ? t('totalRowMerchantGas')
                 : t('totalRow'),
