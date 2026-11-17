@@ -259,9 +259,8 @@ export const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
     sourceUrl: 'https://www.garage.co.jp/pr/release/20260810/',
   },
   {
-    // 週次更新 第 15 回 (2026-11-18) で記録漏れを補充 (発表は 2026-08-17 のマイナウォレット公式お知らせ)。前の値は、
-    // お知らせの対応チェーンの一覧で (New!) が付いているのが Kaia だけであることから読む。公式トップの一覧にある Arc は
-    // 追加日が分からないので、ここにもエントリの chains にも入れない。
+    // 週次更新 第 15 回 (2026-11-18) で記録漏れを補充 (発表は 2026-08-17 のマイナウォレット公式お知らせ)。公式トップの
+    // 一覧にある Arc は追加日が分からないので、ここにもエントリの chains にも入れない。
     date: '2026-08-17',
     collectedAt: '2026-11-18',
     scopes: ['jpyc-services'],
