@@ -86,7 +86,7 @@ const JA: PayGuideContent = {
   needTitle: '用意するもの',
   need: [
     'スマートフォン (カメラで QR を読めれば OK)',
-    'JPYC が入った自分のウォレット (MetaMask が基本。初めての方にはマイナウォレットや HashPort Wallet も)',
+    'JPYC が入った自分のウォレット (MetaMask が基本。初めての方には HashPort Wallet やマイナウォレットも。マイナウォレットは通常支払いで払います)',
     'ガスレス決済の QR なら、ガス代用の POL などは要りません (「通常決済（ガス代は自分で負担）」の QR では必要)',
   ],
 
@@ -208,7 +208,7 @@ const EN: PayGuideContent = {
   needTitle: 'What you need',
   need: [
     'A smartphone (any camera that can scan a QR)',
-    'Your own wallet with JPYC in it (MetaMask is the standard; MynaWallet or HashPort Wallet are good choices if you are new to wallets)',
+    'Your own wallet with JPYC in it (MetaMask is the standard; HashPort Wallet or MynaWallet are good choices if you are new to wallets. With MynaWallet, you pay by standard payment)',
     'For a gasless QR you need no POL or other gas token (a QR marked “Standard (you pay gas)” does)',
   ],
 
