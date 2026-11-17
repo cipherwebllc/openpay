@@ -728,6 +728,57 @@ eslint・eslint-plugin-*・@eslint/* → minimatch@3.1.5
 - @lhci/cli か get-uri が basic-ftp>=6.2.4 を取れる版を出す → `tools/lighthouse` の lockfile を更新する
 - Lighthouse の workflow に proxy の設定を足す変更 (**その PR で即再評価**)
 
+### 7.18 HIGH: `picomatch` (GHSA-fc5q-39xc-vjpf)・修正版なし (2026-11-18)
+
+**Root advisory**:
+- [GHSA-fc5q-39xc-vjpf](https://github.com/advisories/GHSA-fc5q-39xc-vjpf) (CVE-2026-112366): `+(*)` や `+(*a)` のような「枝が 1 つだけの繰り返しの extglob」を
+  `lib/parse.js` の `analyzeRepeatedExtglob` が見逃し、正規表現が指数的に後戻りして、短い細工した文字列との照合で Node の event loop が止まる DoS
+  (picomatch <=4.0.7・**修正版なし**。advisory の公開は 2026-10-19・GitHub の review は 2026-11-17)。
+  advisory の書き方は「攻撃者がこの形の glob を渡す」で、パターンが攻撃者のものであることが条件。関連する[上流の PR](https://github.com/micromatch/picomatch/pull/194) は open のまま
+
+**修正版の有無** (2026-11-18 確認): npm の最新は 4.0.7 (2026-08-24) で影響範囲の内。2.x も 2.3.2 が最後。
+`npm audit` の fixAvailable はどれも semver major で使えない: 本番依存は @sentry/nextjs 8.38.0 (10 系からの戻し)・wagmi 3.7.11 (3 系への移行・§7.12 と同じ待ち)、
+dev は vitest 3.1.4・vite 6.2.7・tailwindcss 4.3.5・lint-staged 16.3.4。@parcel/watcher の `fixAvailable: true` は最新の 2.6.0 も picomatch ^4.0.4 のままで解消しない。
+修正版が無いので override も効かない
+
+**Propagation chain** (本番依存 = `npm audit --omit=dev` が数えるもの):
+```
+@sentry/nextjs@10.76.2 → @rollup/plugin-commonjs@28.0.1 → picomatch@4.0.4
+@sentry/nextjs@10.76.2 → @rollup/plugin-commonjs → @rollup/pluginutils@5.3.0 → picomatch@4.0.4
+next-intl@4.11.0 → @parcel/watcher@2.5.6 → picomatch@4.0.4
+wagmi@2.19.5 → @wagmi/connectors@6.2.0 → @walletconnect/ethereum-provider@2.21.1 → … → @walletconnect/core@2.21.0
+  → @walletconnect/keyvaluestorage@1.1.1 → unstorage@1.17.5 → anymatch@3.1.3 → picomatch@2.3.2
+```
+dev 依存 (gate の対象外・同じ advisory): tailwindcss@3.4.19 → chokidar@3.6.0 → anymatch / fast-glob・micromatch@4.0.8 → picomatch@2.3.2、
+lint-staged@16.4.0 → picomatch@4.0.4、vite@7.3.7・vitest@5.0.3 → picomatch@4.0.7、vite・vitest・sucrase・@typescript-eslint/typescript-estree → tinyglobby@0.2.17 → picomatch@4.0.4
+
+**Reachability for OpenPay**: 開発とビルドの道具だけで、処理するパターンは OpenPay と依存の固定値 —
+- app/api・lib・hooks・components・packages・scripts に picomatch / micromatch / anymatch / tinyglobby / chokidar / @parcel/watcher / unstorage の
+  import はゼロ (2026-11-18 grep。名前が出るのは `scripts/lib/installScriptAllowlist.mjs` の説明の文だけ)
+- 本番の flag (`scripts/check-bundle-budget.mjs --build` と同じ env) で `npm run build` した出力 (`.next/server`・`.next/static`・source map を含む) に
+  picomatch・anymatch・tinyglobby と extglob の処理 (`analyzeRepeatedExtglob`・`extglob`) は入っていない (2026-11-18 grep で 0 file)。
+  unstorage は本体 (`dist/index.mjs`) と WalletConnect の keyvaluestorage (`index.es.js`) だけが入り、`drivers/fs` は入らない。
+  micromatch の名前が出るのは next/image の loader (`image-loader.ts`) の source map のコメントだけ
+- @rollup/plugin-commonjs は Sentry の webpack loader (`wrappingLoader`) が build 時に page と route を包むときだけ動く。パターンは Sentry の固定値
+- @parcel/watcher を使うのは next-intl の extract (`experimental.extract`・開発時にソースを監視して messages を作る) だけ。OpenPay は
+  `createNextIntlPlugin('./i18n/request.ts')` で extract を使っておらず、監視は始まらない。使っても ignore のパターンは next-intl の固定の `**/<dir>/**`
+- unstorage が anymatch を読むのは `unstorage/drivers/fs` (ignore の設定) だけ。WalletConnect の keyvaluestorage が使うのは unstorage の本体と、
+  ブラウザでは idb-keyval の driver、Node では `drivers/fs-lite` で、どちらも anymatch を読まない
+- dev 依存が処理するパターンは OpenPay 自身の設定 (tailwind の `content`・vitest の `include` / `exclude`・lint-staged の `*.{ts,tsx,js,jsx}`) で、
+  extglob (`+(`・`*(`・`@(`・`?(`・`!(`) を含まない。照合する文字列もリポのファイルのパス
+- 参考 (npm audit の対象外): Next.js 本体は picomatch の古い版を `next/dist/compiled/picomatch` に同梱し、本番のサーバーでは `/_next/image` の
+  `images.remotePatterns` / `localPatterns` の照合に使う。OpenPay の next.config は images の設定を持たず (build の設定で remotePatterns は空・
+  localPatterns なし)、照合するパターンが無いので picomatch は呼ばれない
+
+**最悪の場合**: 手元か CI の build・lint・テストが止まる (job の timeout で落ちる)。本番のサーバーと利用者の端末には届かず、資金と秘密の値にも届かない
+→ picomatch の修正版を待つ accepted risk (2026-11-18・PR の merge で user が承認)
+
+**Reassess triggers**:
+- picomatch の修正版 (4.0.8 以降・2.x の修正版) が出る → 依存の範囲の内なら lockfile を更新し、検出されなくなったら allowlist を消す
+- 上流 (@sentry/nextjs・next-intl・unstorage・tailwindcss・vite・vitest) が修正版を取る版を出す、または wagmi 3 系へ移る → 更新して allowlist を見直す
+- サーバーやブラウザの処理で外部入力の glob パターンを picomatch / micromatch / anymatch に渡す変更、next-intl の extract の導入、
+  next.config に `images.remotePatterns` / `localPatterns` を足す変更 (extglob を書かない・**その PR で即再評価**)
+
 ### 7.7 CI gate: allowlist 方式 (`scripts/audit-gate.mjs`)
 
 `.github/workflows/ci.yml` の audit step は `node scripts/audit-gate.mjs` を呼ぶ。
@@ -758,6 +809,7 @@ allowlist 追加 / 削除は本 §7 の update と必ず同期させること (=
 | GHSA-mjw6-4jj6-33hc | stream-json | MODERATE | §7.13 |
 | GHSA-3g3m-2fjr-6pw4 | glob | MODERATE | §7.16 |
 | GHSA-g3hv-75wg-m249 | minimatch | MODERATE | §7.16 |
+| GHSA-fc5q-39xc-vjpf | picomatch | HIGH | §7.18 |
 
 (§7.1 js-cookie / §7.4 ws〔GHSA-58qx〕/ §7.5 ws〔GHSA-96hv〕/ §7.6 otel core〔GHSA-8988〕/
 §7.8 sharp〔GHSA-f88m〕は upstream fix 済で allowlist から削除済 = 上表は現行の実体。)
