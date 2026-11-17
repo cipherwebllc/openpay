@@ -759,7 +759,15 @@ describe('i18n: RelayFallback 名前空間 (relay API 失敗→通常決済へ�
   // B1 graceful degradation: relay が API レベルで失敗したとき Pay ボタン直上に出す
   // 「通常決済へ切替」banner の固定文言 (title / switchButton / gasHint)。per-error の
   // friendly 文言は PaymentForm/CheckoutForm の errorRelay* を流用する (banner には prop で渡す)。
-  const RELAY_FALLBACK_KEYS = ['title', 'switchButton', 'gasHint'] as const;
+  // unsupported*: 7702 でない contract の口座 (ガスレスの署名が通らない) の形 (components/RelayFallbackBanner.tsx の unsupportedWallet)。
+  const RELAY_FALLBACK_KEYS = [
+    'title',
+    'switchButton',
+    'gasHint',
+    'unsupportedTitle',
+    'unsupportedBody',
+    'unsupportedSwitchButton',
+  ] as const;
 
   for (const loc of [
     { name: 'ja', m: ja },

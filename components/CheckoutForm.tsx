@@ -88,6 +88,7 @@ import { logger } from '@/lib/logger';
 import { usePaymentHistory } from '@/hooks/usePaymentHistory';
 import { useRelayGaslessSnapshot } from '@/hooks/useRelayGaslessSnapshot';
 import { useRelayHealth } from '@/hooks/useRelayHealth';
+import { useGaslessUnsupportedWallet } from '@/hooks/useGaslessUnsupportedWallet';
 import { resolvePaymasterMode } from '@/lib/pimlico';
 import { DEFAULT_CHAIN_FOR_SYMBOL, deploymentForSlug } from '@/lib/tokens';
 import {
@@ -215,6 +216,9 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
     chainId: deployment.chainId,
     enabled: useRelay,
   });
+  // relay 経路で、つないだウォレットが 7702 でない contract の口座 (ガスレスの署名が通らない) か。署名 *前* の案内だけに使い、
+  // 送信の可否 (canSubmit) は変えない。読み込み中・読めないときは false (hooks/useGaslessUnsupportedWallet.ts)。
+  const unsupportedWallet = useGaslessUnsupportedWallet(address, deployment.chainId, useRelay, 'checkout');
 
   // 確定モデル (2026-06-12): JPYC recover 決済は店舗が常に手数料を吸収する固定 (gasMode=merchant)。
   // 旧 QR が gas=customer を載せていても無視し merchant に倒す (発行済 QR の audience は極小で
@@ -471,6 +475,15 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   const relayPreflightActive =
     useRelay &&
     relayHealth.degraded &&
+    !relay.isPending &&
+    !relayAmbiguous &&
+    !relayError &&
+    !relay.data;
+  // 払えないウォレットの署名 *前* の案内 (Layer B と同じ除外・押せるまま・完了後は描画側の !completed で出さない)。degraded と
+  // 同時なら、こちらを 1 枚だけ出す (混雑が直ってもこのウォレットでは払えないため)。署名の後に断られたとき (signature_invalid)
+  // は Layer A が同じ形で出す。
+  const unsupportedPreflightActive =
+    unsupportedWallet &&
     !relay.isPending &&
     !relayAmbiguous &&
     !relayError &&
@@ -1460,6 +1473,16 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
         </section>
       )}
 
+      {/* 払えないウォレットの署名前の案内 (支払いボタンの上・ボタンは押せるまま)。完了後は出さない。 */}
+      {!completed && unsupportedPreflightActive && (
+        <RelayFallbackBanner
+          message=""
+          nativeToken={nativeToken}
+          onSwitchToStandard={switchToStandard}
+          unsupportedWallet
+        />
+      )}
+
       {/* 署名安心パネル/ヒント (支払いボタン直上)。経路別に kind を出し分ける (計画 §3.3)。
           完了後は出さない。表示専用で決済ロジックには触れない。 */}
       {!completed && signReassurance && (
@@ -1600,6 +1623,8 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
             message={relayFallbackMessage}
             nativeToken={nativeToken}
             onSwitchToStandard={switchToStandard}
+            // 署名の後に、server が送り元を復元できなかった (lib/relay/relayErrorMessage.ts の signature_invalid)。
+            unsupportedWallet={relayError.message === 'signature_invalid'}
           />
         ) : (
           error && (
@@ -1614,7 +1639,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
           ボタンで呼ぶ処理はここで決めて渡す (第 9 回レビュー F-04)。完了後は出さない。 */}
       {!completed && (
         <RelayStatusBanners
-          relayPreflightActive={relayPreflightActive}
+          relayPreflightActive={relayPreflightActive && !unsupportedPreflightActive}
           nativeToken={nativeToken}
           onSwitchToStandard={switchToStandard}
           relayAmbiguous={relayAmbiguous}

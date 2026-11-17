@@ -28,6 +28,14 @@ vi.mock('@/hooks/useStoreDevicePayment', () => ({
   }),
 }));
 vi.mock('@/hooks/useErc20BalanceAndChain', () => ({ useErc20BalanceAndChain: () => hold.balance }));
+// ガスレスで払えないウォレット (7702 でない contract の口座) の見分け。既定は false。実物と同じく enabled のときだけ値を返す。
+const unsupported = vi.hoisted(() => ({ value: false, calls: [] as unknown[][] }));
+vi.mock('@/hooks/useGaslessUnsupportedWallet', () => ({
+  useGaslessUnsupportedWallet: (...args: unknown[]) => {
+    unsupported.calls.push(args);
+    return args[2] === true && unsupported.value;
+  },
+}));
 vi.mock('@/hooks/usePaymentHistory', () => ({
   usePaymentHistory: (...args: unknown[]) => {
     hold.history.push(args);
@@ -75,6 +83,70 @@ describe('StoreDeviceCheckoutForm', () => {
     hold.balance = { balance: 10n ** 22n, insufficientBalance: false, wrongChain: false };
     hold.history.length = 0;
     hold.connected = true;
+    unsupported.value = false;
+    unsupported.calls.length = 0;
+  });
+
+  // 7702 でない contract の口座 (ERC-4337 のスマートアカウント・マイナウォレット) の署名は、この払い方 (JPYC の
+  // receiveWithAuthorization) で通らない。押す前から、署名の後の誤りと同じ文を出す。押せるまま (pay は変えない)。
+  describe('この払い方に対応していないウォレット', () => {
+    const TEXT = 'このウォレットは、この払い方に対応していません。お支払いは行われていません。店員に、通常の QR での支払いを頼んでください。';
+
+    it('押す前に文を出し、支払いボタンは押せるまま (押すと今までどおり署名を求める)', () => {
+      unsupported.value = true;
+      render(<StoreDeviceCheckoutForm params={params} />);
+      expect(unsupported.calls.at(-1)).toEqual(['0x0000000000000000000000000000000000000def', 80002, true, 'store-device']);
+      expect(screen.getByRole('alert')).toHaveTextContent(TEXT);
+      const button = screen.getByRole('button', { name: /を支払う/ });
+      expect(button).toBeEnabled();
+      fireEvent.click(button);
+      expect(hold.pay).toHaveBeenCalledOnce();
+    });
+
+    it('署名の後の誤り (unsupported_wallet) と重ねず、文は 1 つ', () => {
+      unsupported.value = true;
+      hold.status = { phase: 'error', reason: 'unsupported_wallet', blocking: false };
+      render(<StoreDeviceCheckoutForm params={params} />);
+      expect(screen.getAllByText(TEXT)).toHaveLength(1);
+      expect(screen.getByRole('button', { name: /を支払う/ })).toBeEnabled();
+    });
+
+    it('見分けていなくても、署名の後に unsupported_wallet なら同じ文を出す', () => {
+      hold.status = { phase: 'error', reason: 'unsupported_wallet', blocking: false };
+      render(<StoreDeviceCheckoutForm params={params} />);
+      expect(screen.getByRole('alert')).toHaveTextContent(TEXT);
+    });
+
+    it('ほかの誤り (署名のキャンセル) が出ている間は、その誤りを出す', () => {
+      unsupported.value = true;
+      hold.status = { phase: 'error', reason: 'rejected', blocking: false };
+      render(<StoreDeviceCheckoutForm params={params} />);
+      expect(screen.getByRole('alert')).toHaveTextContent(/署名がキャンセルされました/);
+      expect(screen.queryByText(TEXT)).toBeNull();
+    });
+
+    it('署名・送信・確認の間は出さない', () => {
+      unsupported.value = true;
+      hold.status = { phase: 'waiting', intent: INTENT, otherCheckout: false, txHint: null, confirming: false, autoStopped: false };
+      render(<StoreDeviceCheckoutForm params={params} />);
+      expect(screen.queryByText(TEXT)).toBeNull();
+    });
+
+    it('結論が出た後 (完了) は見分けない (enabled=false)', () => {
+      unsupported.value = true;
+      hold.status = { phase: 'success', txHash: `0x${'ab'.repeat(32)}`, intent: INTENT };
+      render(<StoreDeviceCheckoutForm params={params} />);
+      expect(unsupported.calls.at(-1)?.[2]).toBe(false);
+      expect(screen.queryByText(TEXT)).toBeNull();
+    });
+
+    it('en: 同じ中身の英訳', () => {
+      unsupported.value = true;
+      render(<StoreDeviceCheckoutForm params={params} />, { locale: 'en' });
+      expect(screen.getByRole('alert')).toHaveTextContent(
+        "This wallet doesn't support this payment method. No payment was made. Please ask the staff to let you pay with the standard QR.",
+      );
+    });
   });
 
   it('明細・お支払い額・利用料 0 円 (仕組み上 1 wei) の説明を出し、支払いで署名を求める', () => {

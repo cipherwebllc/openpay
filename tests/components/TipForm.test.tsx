@@ -1917,6 +1917,25 @@ describe('TipForm — EIP-3009 relay (JPYC)', () => {
     expect(screen.getByText(/短時間に送金が集中/)).toBeInTheDocument();
   });
 
+  // 7702 でない contract の口座 (ERC-4337 のスマートアカウント等) の署名は、server が送り元を復元できず signature_invalid に
+  // なる。チップに通常決済への切り替えは無いので、文だけを「一時的」でない形にする (赤いエラー枠)。
+  it('relay error (signature_invalid) → 対応していないウォレットの文 (「時間をおいて」と言わない・切り替えのボタンなし)', () => {
+    setRelay('error', { errMsg: 'signature_invalid' });
+    render(<TipForm params={JPYC_PARAMS} />);
+    const message = screen.getByText('このウォレットは、ガス代不要の送金に対応していません。');
+    expect(message.closest('.bg-red-50')).not.toBeNull();
+    expect(screen.queryByText(/完了できませんでした/)).toBeNull();
+    expect(screen.queryByText('signature_invalid')).toBeNull();
+    expect(screen.queryByRole('button', { name: /通常支払い/ })).toBeNull();
+  });
+
+  it('relay error (signature_mismatch) → 今までどおり generic の文', () => {
+    setRelay('error', { errMsg: 'signature_mismatch' });
+    render(<TipForm params={JPYC_PARAMS} />);
+    expect(screen.getByText(/ガスレス送金を完了できませんでした/)).toBeInTheDocument();
+    expect(screen.queryByText(/対応していません/)).toBeNull();
+  });
+
   // 第 10 回レビュー H-R: 復旧の枠を書けない端末で hook が送らずに止めた (intent_storage_unavailable)。通常決済へは案内しない
   // (user 裁定 Q7-1・チップには JPYC の通常決済へ切り替える入口も無い)。赤いエラー枠に出す。
   it('relay error (intent_storage_unavailable) → 専用の文言を赤いエラー枠に出す (通常決済への切り替えは案内しない)', () => {

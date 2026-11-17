@@ -120,6 +120,16 @@ vi.mock('@/lib/qrSaleRpc', () => {
   };
 });
 
+// 払えないウォレットの見分け (hooks/useGaslessUnsupportedWallet.ts) は、/pay・/checkout・お店の端末で送るの relay の経路で、
+// つないだアドレスの code を RPC で読む (lib/gaslessUnsupportedWallet.ts)。既定は「読めない」スタブ (= 案内を出さない
+// fail-open): テストが外の RPC を叩かず、fetch を差し替えたテストに RPC の POST が混ざらない。読めたときの動きを確かめる
+// テストは、その file の vi.mock で上書きする (実物は tests/lib/gaslessUnsupportedWallet.test.ts が importActual で読む)。
+vi.mock('@/lib/gaslessUnsupportedWallet', () => ({
+  readGaslessUnsupportedWallet: async () => {
+    throw new Error('gasless_unsupported_wallet_stubbed_in_tests');
+  },
+}));
+
 // jsdom は matchMedia を実装しないため、既定の no-op スタブを各テスト前に用意する
 // (matches=false = 非 standalone / 非モバイル)。PwaInstallHint は広く render される
 // (QrGenerator / HistoryView / ScanShell) 一方で usePwaDisplayMode 経由で matchMedia を

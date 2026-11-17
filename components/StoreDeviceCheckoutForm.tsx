@@ -12,6 +12,7 @@ import { formatUnits } from 'viem';
 import { ConnectButton } from './ConnectButton';
 import { PayerReceiptCompletion } from './PayerReceiptCompletion';
 import { useErc20BalanceAndChain } from '@/hooks/useErc20BalanceAndChain';
+import { useGaslessUnsupportedWallet } from '@/hooks/useGaslessUnsupportedWallet';
 import { usePaymentHistory, type GaslessSnapshot } from '@/hooks/usePaymentHistory';
 import {
   useStoreDevicePayment,
@@ -176,6 +177,12 @@ export function StoreDeviceCheckoutForm({ params }: { params: CheckoutParams }) 
   const blocked = status.phase === 'error' && status.blocking;
   const canPay =
     isConnected && !wrongChain && !insufficientBalance && !busy && !done && !blocked && bill > 0n;
+  // つないだウォレットが 7702 でない contract の口座なら、この払い方 (JPYC の receiveWithAuthorization) の署名は通らない。
+  // 押す前から、署名の後の誤り (unsupported_wallet) と同じ文を同じ欄に出す (ほかの誤りが出ている間は、その誤りを出す)。
+  // 案内だけで、押せるかどうか (canPay) と pay は変えない。読み込み中・読めないときは false (hooks/useGaslessUnsupportedWallet.ts)。
+  const unsupportedWallet = useGaslessUnsupportedWallet(address, deployment.chainId, !done, 'store-device');
+  const errorReason =
+    status.phase === 'error' ? status.reason : unsupportedWallet && !busy ? 'unsupported_wallet' : null;
 
   return (
     <div className="space-y-4">
@@ -400,9 +407,9 @@ export function StoreDeviceCheckoutForm({ params }: { params: CheckoutParams }) 
         </p>
       )}
 
-      {status.phase === 'error' && (
+      {errorReason && (
         <p role="alert" className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">
-          {t(`storeDevice.error.${status.reason}`)}
+          {t(`storeDevice.error.${errorReason}`)}
         </p>
       )}
     </div>

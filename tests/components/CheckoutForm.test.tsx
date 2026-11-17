@@ -55,6 +55,10 @@ vi.mock('@/lib/logger', () => ({
 vi.mock('@/hooks/useRelayHealth', () => ({
   useRelayHealth: vi.fn(() => ({ degraded: false })),
 }));
+// ガスレスで払えないウォレット (7702 でない contract の口座) の見分け。既定は false (= 既存テストに影響しない)。
+vi.mock('@/hooks/useGaslessUnsupportedWallet', () => ({
+  useGaslessUnsupportedWallet: vi.fn(() => false),
+}));
 // Circle quote は flag OFF (resolveUsdcGaslessProvider→pimlico) で非 active。useQuery を
 // 走らせないよう stub (QueryClientProvider 無しで render する既存 test を壊さない)。
 // circle 経路 (usdc-permit 署名安心) テストでのみ setCircleQuote で data を持たせる。
@@ -159,6 +163,7 @@ import { resolvePaymasterMode } from '@/lib/pimlico';
 import { resolveJpycGaslessProvider } from '@/lib/jpycGaslessProvider';
 import { jpycForwarderFor, relayGasFeeValue } from '@/lib/relay/forwarderConfig';
 import { useRelayHealth } from '@/hooks/useRelayHealth';
+import { useGaslessUnsupportedWallet } from '@/hooks/useGaslessUnsupportedWallet';
 import { useRouter } from 'next/navigation';
 import { CheckoutForm } from '@/components/CheckoutForm';
 import { MobileOrderCallButton } from '@/components/MobileOrderCallButton';
@@ -575,6 +580,8 @@ beforeEach(() => {
   vi.mocked(resolveUsdcGaslessProvider).mockReturnValue('pimlico');
   // 既定 relayer 健全 (non-degraded)。preflight banner テストでのみ degraded へ override。
   vi.mocked(useRelayHealth).mockReturnValue({ degraded: false });
+  // 既定は払えるウォレット。払えないウォレットのテストでのみ override。
+  vi.mocked(useGaslessUnsupportedWallet).mockReturnValue(false);
   // fee flag / rate は毎テスト OFF・実物起点 (fee テストが個別に立てる)。
   feeFlags.enableMobileOrderFee = false;
   feeFlags.enableOrderPickup = false;
@@ -2903,6 +2910,104 @@ describe('CheckoutForm — JPYC EIP-3009 relay 経路', () => {
     ).toBeInTheDocument();
     // かつ underflow 検証エラーが抑止されず両方見える (旧 relayBannerActive 置換では隠れていた回帰)。
     expect(screen.getByText(/店主受取が 0/)).toBeInTheDocument();
+  });
+
+  // --- 7702 でない contract の口座 (ERC-4337 のスマートアカウント・マイナウォレット): ガスレスで払えない ---
+  // 案内だけで、支払いボタン (canSubmit) と通常決済への切り替えの条件は変えない (掟 12)。
+  describe('ガスレスで払えないウォレット', () => {
+    const TITLE = 'このウォレットは、ガス代不要の支払いに対応していません';
+    const BODY = '通常支払いに切り替えると払えます。ガス代が要るかどうかは、ウォレットの確認画面に出ます。';
+    const SWITCH = { name: '通常支払いに切り替える' };
+    // 実物の hook と同じく、enabled (relay の経路) のときだけ true を返す。
+    function setUnsupported() {
+      vi.mocked(useGaslessUnsupportedWallet).mockImplementation((_address, _chainId, enabled) => enabled);
+    }
+    const lastHookArgs = () => vi.mocked(useGaslessUnsupportedWallet).mock.lastCall;
+
+    it('署名の前: 支払いボタンの上に案内と切り替えのボタンを出し、支払いボタンは押せるまま (押すと relay で送る)', async () => {
+      const user = userEvent.setup();
+      setupRelayReady();
+      setUnsupported();
+      render(<CheckoutForm params={JPYC_PARAMS} />);
+
+      expect(lastHookArgs()).toEqual([CUSTOMER, polygonAmoy.id, true, 'checkout']);
+      expect(screen.getByText(TITLE)).toBeInTheDocument();
+      expect(screen.getByText(BODY)).toBeInTheDocument();
+      expect(screen.queryByText(/一時的に利用できません/)).toBeNull();
+      const payButton = screen.getByRole('button', { name: /3000 JPYC を支払う/ });
+      expect(payButton).toBeEnabled();
+      expect(
+        screen.getByRole('button', SWITCH).compareDocumentPosition(payButton) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+      await user.click(payButton);
+      expect(relayMutate).toHaveBeenCalledOnce();
+    });
+
+    it('切り替えのボタンで通常決済へ (案内が消え、見分けも止める)', async () => {
+      const user = userEvent.setup();
+      setupRelayReady();
+      setUnsupported();
+      render(<CheckoutForm params={JPYC_PARAMS} />);
+      await user.click(screen.getByRole('button', SWITCH));
+      expect(screen.queryByText(TITLE)).toBeNull();
+      expect(lastHookArgs()?.[2]).toBe(false);
+    });
+
+    it.each([
+      ['送信中 (relay.isPending)', () => setRelayPayment('pending-flow')],
+      ['結果不明 (response-unknown)', () => setRelayPayment('response-unknown')],
+      ['送信済み・確認待ち (relay.data)', () => setRelayPayment('broadcast-pending')],
+      ['完了 (completed)', () => setRelayPayment('success')],
+    ])('%s の間は署名前の案内を出さない', (_, arrange) => {
+      setupRelayReady();
+      setUnsupported();
+      arrange();
+      render(<CheckoutForm params={JPYC_PARAMS} />);
+      expect(screen.queryByText(TITLE)).toBeNull();
+      expect(screen.queryByRole('button', SWITCH)).toBeNull();
+    });
+
+    it('通常決済 (mode=standard) では見分けない (hook は enabled=false・案内なし)', () => {
+      setupRelayReady();
+      setUnsupported();
+      render(<CheckoutForm params={{ ...JPYC_PARAMS, mode: 'standard' }} />);
+      expect(lastHookArgs()?.[2]).toBe(false);
+      expect(screen.queryByText(TITLE)).toBeNull();
+    });
+
+    it('混雑 (degraded) と同時なら、払えないウォレットの案内を 1 枚だけ出す', () => {
+      setupRelayReady();
+      setUnsupported();
+      vi.mocked(useRelayHealth).mockReturnValue({ degraded: true });
+      render(<CheckoutForm params={JPYC_PARAMS} />);
+      expect(screen.getAllByText(TITLE)).toHaveLength(1);
+      expect(screen.queryByText(/ガスレス決済が現在混雑/)).toBeNull();
+      expect(screen.queryByText(/一時的に利用できません/)).toBeNull();
+      expect(screen.getAllByRole('button', { name: /通常支払い/ })).toHaveLength(1);
+    });
+
+    it('署名の後に signature_invalid: 「一時的」でなく払えない形の banner を出し、通常決済へ切り替えられる', async () => {
+      const user = userEvent.setup();
+      setupRelayReady();
+      setRelayPayment('error', { errMsg: 'signature_invalid' });
+      render(<CheckoutForm params={JPYC_PARAMS} />);
+      expect(screen.getByText(TITLE)).toBeInTheDocument();
+      expect(screen.getByText(BODY)).toBeInTheDocument();
+      expect(screen.queryByText(/一時的に利用できません/)).toBeNull();
+      expect(screen.queryByText(/完了できませんでした/)).toBeNull();
+      expect(screen.queryByText('エラー')).toBeNull();
+      await user.click(screen.getByRole('button', SWITCH));
+      expect(screen.queryByText(TITLE)).toBeNull();
+    });
+
+    it('signature_mismatch は今までどおり (「一時的」の題と generic の文)', () => {
+      setupRelayReady();
+      setRelayPayment('error', { errMsg: 'signature_mismatch' });
+      render(<CheckoutForm params={JPYC_PARAMS} />);
+      expect(screen.getByText(/ガスレス決済が一時的に利用できません/)).toBeInTheDocument();
+      expect(screen.getByText(/完了できませんでした/)).toBeInTheDocument();
+      expect(screen.queryByText(TITLE)).toBeNull();
+    });
   });
 
   // --- F1: recover モードの手数料開示 (共有 RecoverFeeNotice) ---

@@ -354,6 +354,48 @@ describe('useStoreDevicePayment', () => {
     expect(stored()).toBeNull();
   });
 
+  // 7702 でない contract の口座 (ERC-4337 のスマートアカウント・マイナウォレット) の署名は、JPYC の receiveWithAuthorization
+  // (ecrecover だけ) で通らない。recover で断られる (signature_invalid) か、65 byte でない長い署名を受け渡しが形で断る
+  // (invalid_body・lib/storeHandoff.ts)。どちらも「このウォレットはこの払い方に対応していない」と伝える (blocking でない)。
+  const LONG_SIG = `0x${'1b'.repeat(400)}`;
+  it.each([
+    ['signature_invalid (署名から送り元を復元できない)', 'signature_invalid', SIG],
+    ['invalid_body で、署名が 65 byte でない (contract の口座の署名)', 'invalid_body', LONG_SIG],
+  ])('%s → unsupported_wallet (未解決を消して理由を出す)', async (_, error, signature) => {
+    w.signTypedData.mockResolvedValue(signature);
+    authResponses = [() => json({ ok: false, error }, 400)];
+    const { result } = renderHook(() => useStoreDevicePayment(deployment, HS));
+    await payNow(result);
+    expect(result.current.status).toEqual({ phase: 'error', reason: 'unsupported_wallet', blocking: false });
+    expect(stored()).toBeNull();
+    expect(of('/auth')).toHaveLength(1);
+  });
+
+  it.each([
+    ['invalid_body で、署名は 65 byte', 'invalid_body', SIG],
+    ['signature_mismatch (復元できたが送り元と違う)', 'signature_mismatch', SIG],
+    ['signature_mismatch (署名が 65 byte でない)', 'signature_mismatch', LONG_SIG],
+    ['amount_mismatch', 'amount_mismatch', SIG],
+  ])('%s → 今までどおり server_rejected', async (_, error, signature) => {
+    w.signTypedData.mockResolvedValue(signature);
+    authResponses = [() => json({ ok: false, error }, 400)];
+    const { result } = renderHook(() => useStoreDevicePayment(deployment, HS));
+    await payNow(result);
+    expect(result.current.status).toEqual({ phase: 'error', reason: 'server_rejected', blocking: false });
+    expect(stored()).toBeNull();
+  });
+
+  it('unsupported_wallet の後も、別のウォレットでもう一度払える (blocking でない)', async () => {
+    w.signTypedData.mockResolvedValueOnce(LONG_SIG);
+    authResponses = [() => json({ ok: false, error: 'invalid_body' }, 400), () => json({ ok: true, idempotent: false })];
+    const { result } = renderHook(() => useStoreDevicePayment(deployment, HS));
+    await payNow(result);
+    expect(result.current.status).toMatchObject({ phase: 'error', reason: 'unsupported_wallet' });
+    await payNow(result);
+    expect(w.signTypedData).toHaveBeenCalledTimes(2);
+    expect(result.current.status.phase).toBe('waiting');
+  });
+
   it('未解決を保存できない端末では送らない', async () => {
     const spy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
       throw new Error('QuotaExceededError');

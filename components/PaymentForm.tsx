@@ -91,6 +91,7 @@ import {
 } from '@/hooks/usePaymentHistory';
 import { useRelayGaslessSnapshot } from '@/hooks/useRelayGaslessSnapshot';
 import { useRelayHealth } from '@/hooks/useRelayHealth';
+import { useGaslessUnsupportedWallet } from '@/hooks/useGaslessUnsupportedWallet';
 import type { ExecuteResult } from '@/hooks/useCrossChainPayment';
 import { resolvePaymasterMode } from '@/lib/pimlico';
 import {
@@ -220,6 +221,10 @@ function PaymentDetails({ params }: { params: PayParams }) {
     chainId: deployment.chainId,
     enabled: useRelay,
   });
+  // relay 経路で、つないだウォレットが 7702 でない contract の口座 (ガスレスの署名が通らない) か。署名 *前* の案内だけに使い、
+  // 送信の可否 (canSubmit) は変えない。読み込み中・読めないときは false (hooks/useGaslessUnsupportedWallet.ts)。
+  // split つきの QR は relay を外す (disableRelay) ので対象外。
+  const unsupportedWallet = useGaslessUnsupportedWallet(address, deployment.chainId, useRelay, 'pay');
 
   // 確定モデル (2026-06-12): JPYC recover 決済は店舗が常に手数料を吸収する固定 (gasMode=merchant)。
   // 旧 QR が gas=customer を載せていても無視し merchant に倒す (発行済 QR の audience は極小で
@@ -579,6 +584,14 @@ function PaymentDetails({ params }: { params: PayParams }) {
   const relayPreflightActive =
     useRelay &&
     relayHealth.degraded &&
+    !relay.isPending &&
+    !relayAmbiguous &&
+    !relayError &&
+    !relay.data;
+  // 払えないウォレットの署名 *前* の案内 (Layer B と同じ除外・押せるまま)。degraded と同時なら、こちらを 1 枚だけ出す
+  // (混雑が直ってもこのウォレットでは払えないため)。署名の後に断られたとき (signature_invalid) は Layer A が同じ形で出す。
+  const unsupportedPreflightActive =
+    unsupportedWallet &&
     !relay.isPending &&
     !relayAmbiguous &&
     !relayError &&
@@ -1449,6 +1462,16 @@ function PaymentDetails({ params }: { params: PayParams }) {
         )}
       </section>
 
+      {/* 払えないウォレットの署名前の案内 (支払いボタンの上・ボタンは押せるまま)。 */}
+      {unsupportedPreflightActive && (
+        <RelayFallbackBanner
+          message=""
+          nativeToken={nativeToken}
+          onSwitchToStandard={switchToStandard}
+          unsupportedWallet
+        />
+      )}
+
       {/* 署名安心パネル/ヒント (Pay ボタン直上)。経路別に kind を出し分ける (計画 §3.3)。
           relay free=フルパネル / standard=1 行ヒント / Circle USDC=usdc-permit。recover と
           Pimlico 7702 はスコープ外で出さない。署名/確認待ち中は待機表示に置換する。
@@ -1563,6 +1586,8 @@ function PaymentDetails({ params }: { params: PayParams }) {
           message={relayFallbackMessage}
           nativeToken={nativeToken}
           onSwitchToStandard={switchToStandard}
+          // 署名の後に、server が送り元を復元できなかった (lib/relay/relayErrorMessage.ts の signature_invalid)。
+          unsupportedWallet={relayError.message === 'signature_invalid'}
         />
       ) : (
         error && (
@@ -1579,7 +1604,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
       {/* B1 Layer B (preflight): relayer が degraded なときは署名 *前* に additive banner を出す。
           Layer A と違い汎用 error box を抑止しない (金額精度/店主受取0 など pre-submit 検証エラーを
           隠さない・Codex P1)。relay.error / relay.data があるときは出さない (排他は変数側で担保)。 */}
-      {relayPreflightActive && (
+      {relayPreflightActive && !unsupportedPreflightActive && (
         <RelayFallbackBanner
           message={t('relayDegradedPreflight')}
           nativeToken={nativeToken}
