@@ -149,7 +149,7 @@ describe('directory query pure functions', () => {
       generatedAt: '2026-07-13T00:00:00.000Z',
       dataFreshness: {
         oldest: '2026-07-13',
-        newestVerifiedAt: '2026-10-27', // supportsUsdc の絞り込みに週次更新 第 11 回 (2026-10-27) で再検証したエントリ (verifiedAt 10-27) が入る
+        newestVerifiedAt: '2026-11-18', // supportsUsdc の絞り込みに週次更新 第 15 回 (2026-11-18) で再検証したエントリ (hashport-wallet・verifiedAt 11-18) が入る
         oldestSourceCheckedAt: null,
       },
     });
@@ -207,7 +207,7 @@ describe('directory query pure functions', () => {
     expect(directoryStats(DIRECTORY_ENTRIES)).toEqual({
       entryCount: publishedDirectoryEntries(DIRECTORY_ENTRIES).length,
       categoryCount: directoryCategoryCounts(DIRECTORY_ENTRIES).length,
-      lastUpdated: '2026-10-21', // 2026-10-21 の拡充 (提供中 17 件の追加・updatedAt)
+      lastUpdated: '2026-11-18', // 2026-11-18 の週次更新 第 15 回 (myna-wallet の対応チェーンの訂正・updatedAt)
     });
   });
 

@@ -40,8 +40,10 @@ export const DIRECTORY_ENTRIES = [
     // 2026-10-18 (第 9 回): 10/16 の Polygon 発行遅延・10/17〜18 の臨時メンテナンスは changelog のみ (エントリの事実は不変)
     // 2026-10-21 (第 10 回): 10/19〜20 の新規アカウント開設の一時停止は changelog のみ (エントリの事実は不変)
     // 2026-11-09 (第 14 回): 11/10 の臨時メンテナンスの告知 (11/06) は changelog のみ (エントリの事実は不変)
+    // 2026-11-18 (第 15 回): 11/10 のメンテナンスの完了と、11/10〜11 の臨時メンテナンス 2 回 (GMO あおぞらネット銀行の
+    //   銀行 API サービスの一時停止に伴う) は changelog のみ (エントリの事実は不変)
     ...provenance('https://jpyc.co.jp/', 'JPYC株式会社', 'official', {
-      verifiedAt: '2026-11-09',
+      verifiedAt: '2026-11-18',
       updatedAt: '2026-10-06',
     }),
     facts: {
@@ -118,7 +120,7 @@ export const DIRECTORY_ENTRIES = [
     // 2026-08-27: 電子決済手段等取引業者に登録 (金融庁登録一覧・第00002号・取扱 USDC)。
     // 取扱開始時期は未発表のため tokens は空のまま (sourced-facts-only)。
     ...provenance('https://coincheck.com/', 'コインチェック株式会社', 'official', {
-      verifiedAt: '2026-11-09',
+      verifiedAt: '2026-11-18',
       updatedAt: '2026-09-04',
     }),
     facts: {
@@ -565,8 +567,9 @@ export const DIRECTORY_ENTRIES = [
     name: 'HashPort Wallet',
     nameJa: 'HashPort Wallet',
     status: 'published',
+    // 2026-11-18 (第 15 回): 日本国外からの利用の一時停止 (10/30〜) と再開 (11/17) は changelog のみ (エントリの事実は不変)
     ...provenance('https://wallet.hashport.com/', '株式会社HashPort', 'official', {
-      verifiedAt: '2026-10-21',
+      verifiedAt: '2026-11-18',
       updatedAt: '2026-10-21',
     }),
     facts: {
@@ -650,9 +653,11 @@ export const DIRECTORY_ENTRIES = [
     name: 'Mina Wallet',
     nameJa: 'マイナウォレット',
     status: 'published',
+    // 2026-11-18 (第 15 回): 対応チェーンを訂正 (記録漏れ)。8/17 の公式お知らせ (Kaia 対応) が挙げる 7 チェーン。
+    //   公式トップの一覧にある Arc は追加日が分からないので入れない
     ...provenance('https://prtimes.jp/main/html/rd/p/000000013.000125732.html', 'マイナウォレット株式会社', 'official', {
-      verifiedAt: '2026-10-21',
-      updatedAt: '2026-10-21',
+      verifiedAt: '2026-11-18',
+      updatedAt: '2026-11-18',
     }),
     facts: {
       description:
@@ -660,7 +665,7 @@ export const DIRECTORY_ENTRIES = [
       category: 'wallet',
       tags: ['Japan', 'wallet', 'My Number Card'],
       tokens: ['jpyc'],
-      chains: ['ethereum'],
+      chains: ['arbitrum', 'avalanche', 'base', 'ethereum', 'kaia', 'optimism', 'polygon'],
       languages: ['ja', 'en'],
       supportsJpyc: true,
       supportsUsdc: false,
@@ -848,8 +853,9 @@ export const DIRECTORY_ENTRIES = [
     status: 'published',
     // 2026-11-02 (第 12 回): BlackRock・CRB Group・SMBC グループとの提携 (10/27〜10/30) は changelog のみ
     // 2026-11-05 (第 13 回): レンディング残高 100 億円・取扱残高 300 億円の公表 (11/02) は changelog のみ (エントリの事実は不変)
+    // 2026-11-18 (第 15 回): SBI ホールディングスとカンボジア国立銀行の MOU (11/13) は changelog のみ (エントリの事実は不変)
     ...provenance('https://www.sbivc.co.jp/jpysc', 'SBI新生信託銀行株式会社', 'official', {
-      verifiedAt: '2026-11-05',
+      verifiedAt: '2026-11-18',
       updatedAt: '2026-10-21',
     }),
     facts: {
