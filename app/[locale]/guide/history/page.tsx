@@ -53,7 +53,16 @@ export default async function GuideHistoryPage({
           <GuideToc title={nav.tocTitle} />
 
           <Section title={c.inHistoryTitle}>
-            <BulletList items={c.inHistory} marker="✓" />
+            {/* 印 (①②③) は可視の文字のまま読ませる (下の 1 行が「① は…」と指すため・aria-hidden にしない)。 */}
+            <ol className="mt-3 space-y-2">
+              {c.inHistory.map((item) => (
+                <li key={item.mark} className="flex items-start gap-2 text-sm leading-relaxed text-slate-700">
+                  <span className="shrink-0 font-semibold text-emerald-700">{item.mark}</span>
+                  <span>{item.text}</span>
+                </li>
+              ))}
+            </ol>
+            <p className="mt-4 text-sm leading-relaxed text-slate-700">{c.inHistoryNote}</p>
           </Section>
 
           <Section title={c.notInHistoryTitle}>

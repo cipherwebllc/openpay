@@ -29,7 +29,13 @@ describe('/guide/history', () => {
     expect(article).toHaveTextContent(c.lead);
     const h2s = [...article.querySelectorAll('h2:not([data-toc="skip"])')].map((h) => h.getAttribute('data-toc-label'));
     expect(h2s).toEqual([c.inHistoryTitle, c.notInHistoryTitle, c.csvTitle, c.storageTitle]);
-    for (const item of [...c.inHistory, ...c.notInHistory]) {
+    // 出る払い方は ①②③ の印つき (印は可視の文字・下の 1 行が「① は…」と指す)。
+    const inList = within(article).getByText(c.inHistory[0].text).closest('ol')!;
+    expect([...inList.querySelectorAll('li')].map((li) => li.textContent)).toEqual(
+      c.inHistory.map((item) => `${item.mark}${item.text}`),
+    );
+    expect(article).toHaveTextContent(c.inHistoryNote);
+    for (const item of c.notInHistory) {
       expect(within(article).getByText(item)).toBeInTheDocument();
     }
     expect(article).toHaveTextContent(c.notInHistoryCheck);

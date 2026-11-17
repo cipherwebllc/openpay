@@ -2003,7 +2003,7 @@
     "filterJpyc": "JPYC ({count})",
     "filterUsdc": "USDC ({count})",
     "browserScopeNote": "History is stored only in this browser ({count}/{max} entries, oldest auto-deleted on overflow).",
-    "notInHistoryNote": "Some incoming payments do not show up in your history (standard payments, USDC and others). For details, see the <link>“History & accounting CSV” guide</link>.",
+    "notInHistoryNote": "Some incoming payments do not show up in your history (standard payments other than mobile orders, USDC and others). For details, see the <link>“History & accounting CSV” guide</link>.",
     "columnStatus": "Status",
     "columnFee": "OpenPay fee",
     "feeOneWei": "1 wei (by design, ¥0)",

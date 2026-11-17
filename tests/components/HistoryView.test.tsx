@@ -273,7 +273,7 @@ describe('HistoryView', () => {
     );
   });
 
-  // 履歴に出ない入金 (通常決済・USDC など) の 1 行と、取引履歴のガイドへのリンク。リンクの名前は可視の文字 (掟 8)。
+  // 履歴に出ない入金 (モバイルオーダー以外の通常決済・USDC など) の 1 行と、取引履歴のガイドへのリンク。リンクの名前は可視の文字 (掟 8)。
   // 空のとき (払われたのに出ない) こそ要るので、件数によらず出す。entries ありは browserScopeNote の直後。
   it('「履歴に出ない入金もあります」の 1 行は、空でも entries ありでも出て、取引履歴のガイドへリンクする', async () => {
     const { unmount } = render(<HistoryView />);
@@ -282,7 +282,7 @@ describe('HistoryView', () => {
     expect(emptyLink).toHaveAttribute('href', '/ja/guide/history');
     expect(emptyLink).not.toHaveAttribute('aria-label');
     expect(emptyLink.closest('p')).toHaveTextContent(
-      '履歴に出ない入金もあります（通常決済・USDC など）。くわしくは「取引履歴と会計 CSV」のガイドへ。',
+      '履歴に出ない入金もあります（モバイルオーダー以外の通常決済・USDC など）。くわしくは「取引履歴と会計 CSV」のガイドへ。',
     );
     unmount();
 
@@ -299,7 +299,7 @@ describe('HistoryView', () => {
     const link = await screen.findByRole('link', { name: '“History & accounting CSV” guide' });
     expect(link).toHaveAttribute('href', '/en/guide/history');
     expect(link.closest('p')).toHaveTextContent(
-      'Some incoming payments do not show up in your history (standard payments, USDC and others). For details, see the “History & accounting CSV” guide.',
+      'Some incoming payments do not show up in your history (standard payments other than mobile orders, USDC and others). For details, see the “History & accounting CSV” guide.',
     );
   });
 

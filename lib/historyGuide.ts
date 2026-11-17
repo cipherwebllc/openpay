@@ -2,7 +2,11 @@
 // 取引履歴 (/history・このブラウザの localStorage) に売上が出る払い方と出ない入金、会計 CSV、保存の注意をまとめる。
 // 本文 (lead・各節) は運営者の承認済みの文 (2026-11-18)。表の外で作った短い文 (メタ・副題・ボタン・帯の見出し) も、
 // その中身から作り、新しい事実を足さない。
-// ⚠️ 履歴の上限の件数は lib/history/model.ts の HISTORY_MAX_ENTRIES から描く (直書きしない)。
+// ⚠️ 上限の件数: 受取の履歴は lib/history/model.ts の HISTORY_MAX_ENTRIES から描く。支払いの控えの 200 件は
+// lib/payerReceipt.ts の PAYER_RECEIPTS_MAX と tests/lib/historyGuide.test.ts で照合する (payerReceipt を import すると、このガイドの
+// First Load JS が 240 → 246 kB に増えた・2026-11-18 の build で実測)。
+// ① の対象 (金額を入れて画面に表示している QR だけ) は components/QrGenerator.tsx の会計の印を載せる条件 (url / shown)、
+// 「通常決済 (モバイルオーダーを除く)」は lib/orderFeedHistory.ts (通常決済の受注も行にする) と、テストで照合する。
 // 「QR を閉じてから 60 秒」は lib/qrSaleWatch.ts の QR_SALE_KEEP_AFTER_HIDE_MS と tests/lib/historyGuide.test.ts で照合する
 // (qrSaleWatch は viem を読むので、この server の content からは import しない)。
 // 会計 CSV の形式の名前は、履歴ページの選択肢 (messages の History.accountingFormat*) とテストで照合する。
@@ -13,8 +17,13 @@ import type { Metadata } from 'next';
 import { guidePageMetadata } from '@/lib/guideMetadata';
 import { HISTORY_MAX_ENTRIES } from '@/lib/history/model';
 
-/** 履歴の上限の件数 (3 桁区切り・ja / en 同じ表記 = 「1,000」)。 */
+/** 上限の件数 (3 桁区切り・ja / en 同じ表記 = 「1,000」「200」)。 */
 const MAX_ENTRIES = HISTORY_MAX_ENTRIES.toLocaleString('en-US');
+/** 支払いの控えの上限 (PAYER_RECEIPTS_MAX とテストで照合)。 */
+const MAX_RECEIPTS = '200';
+
+/** 「履歴に売上が出る払い方」の項目の印 (下の 1 行が「① は…」と指す)。ja / en 共通。 */
+export type HistoryGuideMarkedItem = { readonly mark: string; readonly text: string };
 
 export type HistoryGuideContent = {
   readonly metaTitle: string;
@@ -27,7 +36,9 @@ export type HistoryGuideContent = {
   readonly ctaOpen: string;
 
   readonly inHistoryTitle: string;
-  readonly inHistory: readonly string[];
+  readonly inHistory: readonly HistoryGuideMarkedItem[];
+  /** 一覧の下の 1 行 (① の対象の QR)。 */
+  readonly inHistoryNote: string;
 
   readonly notInHistoryTitle: string;
   readonly notInHistory: readonly string[];
@@ -54,16 +65,22 @@ const JA: HistoryGuideContent = {
 
   inHistoryTitle: '履歴に売上が出る払い方',
   inHistory: [
-    'お客様がお店の QR (決済QR・レジ) を JPYC のガス代不要の払い方で払ったとき (QR を出していた端末に・QR を閉じてから 60 秒まで)',
-    'お店の端末で送る (その端末に)',
-    'モバイルオーダー (店主としてサインインし、受注の画面を開いた端末に)',
+    {
+      mark: '①',
+      text: 'お客様がお店の QR (決済QR・レジ) を JPYC のガス代不要の払い方で払ったとき (QR を出していた端末に・QR を閉じてから 60 秒まで)',
+    },
+    { mark: '②', text: 'お店がガス代を肩代わりして送る支払い (その端末に)' },
+    { mark: '③', text: 'モバイルオーダー (店主としてサインインし、受注の画面を開いた端末に)' },
   ],
+  inHistoryNote:
+    '① は、金額を入れて画面に表示している QR が対象です。印刷・画像の保存・リンクのコピーをした QR と、金額なしの QR は対象外です。',
 
   notInHistoryTitle: '履歴に出ない入金',
   notInHistory: [
-    '通常決済 (ガス代を自分で払う払い方)',
+    '通常決済 (ガス代を自分で払う払い方・モバイルオーダーを除く)',
     'USDC',
     'ウォレットのアプリで読む QR',
+    '印刷・保存・コピーした QR や、金額なしの QR での入金',
     '注文リンク',
     'QR を閉じて 60 秒より後や、受け取るページを離れた後に届いた入金',
     'ほかの端末やブラウザで受けた入金',
@@ -74,7 +91,7 @@ const JA: HistoryGuideContent = {
   csvBody: '成功した売上だけを書き出します (freee・弥生・マネーフォワードの形式)。勘定科目は履歴ページで変えられます。',
 
   storageTitle: '保存の注意',
-  storageBody: `履歴はブラウザごとに最大 ${MAX_ENTRIES} 件で、超えると古いものから消えます。ブラウザのデータを消すと履歴も消えるので、こまめに CSV を書き出してください。`,
+  storageBody: `受取の履歴はブラウザごとに最大 ${MAX_ENTRIES} 件 (支払いの控えは ${MAX_RECEIPTS} 件) で、超えると古いものから消えます。ブラウザのデータを消すと履歴も消えるので、こまめに CSV を書き出してください。`,
 
   ctaTitle: 'こまめに CSV を書き出す',
 };
@@ -90,16 +107,22 @@ const EN: HistoryGuideContent = {
 
   inHistoryTitle: 'Payments that show up as sales in your history',
   inHistory: [
-    'When a customer pays your shop’s QR (Payment QR or Register) in JPYC with the no-gas-fee method (on the device that showed the QR, up to 60 seconds after the QR is closed)',
-    'Sending from the shop’s device (on that device)',
-    'Mobile ordering (on the device where you signed in as the shop owner and opened the Orders screen)',
+    {
+      mark: '①',
+      text: 'When a customer pays your shop’s QR (Payment QR or Register) in JPYC with the no-gas-fee method (on the device that showed the QR, up to 60 seconds after the QR is closed)',
+    },
+    { mark: '②', text: 'Payment sent with the store paying gas (on that device)' },
+    { mark: '③', text: 'Mobile ordering (on the device where you signed in as the shop owner and opened the Orders screen)' },
   ],
+  inHistoryNote:
+    '① covers only QR codes with an amount entered and shown on screen. QR codes that were printed, saved as images or copied as links, and QR codes without an amount, are not covered.',
 
   notInHistoryTitle: 'Incoming payments that do not show up in your history',
   notInHistory: [
-    'Standard payments (where the payer pays the gas fee themselves)',
+    'Standard payments (where the payer pays the gas fee themselves; except mobile orders)',
     'USDC',
     'QR codes scanned with a wallet app',
+    'Payments to QR codes that were printed, saved or copied, or that have no amount',
     'Order links',
     'Payments that arrive more than 60 seconds after the QR is closed, or after you leave the Receive page',
     'Payments received on another device or browser',
@@ -110,7 +133,7 @@ const EN: HistoryGuideContent = {
   csvBody: 'Exports successful sales only (in freee, Yayoi or Money Forward format). You can change the account titles on the History page.',
 
   storageTitle: 'Storage notes',
-  storageBody: `Each browser keeps up to ${MAX_ENTRIES} entries, and the oldest are deleted beyond that. Clearing your browser data also deletes the history, so export a CSV regularly.`,
+  storageBody: `Each browser keeps up to ${MAX_ENTRIES} entries of payments received (and ${MAX_RECEIPTS} receipts of payments made), and the oldest are deleted beyond that. Clearing your browser data also deletes the history, so export a CSV regularly.`,
 
   ctaTitle: 'Export a CSV regularly',
 };
