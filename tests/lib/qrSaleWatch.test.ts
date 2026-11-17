@@ -92,6 +92,7 @@ import {
   isBlockRangeLimitError,
   showQrBill,
   stopQrSaleWatch,
+  type QrBillRecorded,
 } from '@/lib/qrSaleWatch';
 import { deploymentForSlug } from '@/lib/tokens';
 import { buildCheckoutUrl, buildPayUrl, type PayParams } from '@/lib/url';
@@ -1216,5 +1217,134 @@ describe('表示をやめた後・止めた後', () => {
     rpc.logs.mockResolvedValue(null as unknown as QrSaleLog[]);
     await tick();
     expect(loadHistory()).toEqual([]);
+  });
+});
+
+describe('画面への知らせ (行を書いた後だけ・受け手の失敗は見張りへ波及させない)', () => {
+  // 受け手つきで QR を出す (画面の側 = hooks/useQrBillKey.ts が渡すもの)。
+  const showWith = (listener: (event: QrBillRecorded) => void, billKey = BK, over: Partial<PayParams> = {}) =>
+    showQrBill(
+      { billKey, kind: 'pay', url: payUrl({ productName: 'ランチ', receiptNo: 'R-1', ...over }), itemName: 'お支払い' },
+      Date.now(),
+      listener,
+    );
+
+  it('1 件目 → count 1・2 件目以降 → count 2, 3 (明細つきの行・明細なしの行の数え方と同じ)。額は書いた行の saleAmount (請求額)', async () => {
+    const events: QrBillRecorded[] = [];
+    showWith((e) => events.push(e));
+    settle(994n, 1);
+    settle(995n, 2);
+    await tick();
+    expect(events).toEqual([
+      { billKey: BK, count: 1, amount: (1_000n * ONE).toString() },
+      { billKey: BK, count: 2, amount: (1_000n * ONE).toString() },
+    ]);
+    // 知らせの額 = 書いた行の売上総額 (着金額 998 + 利用料 2)。着金額 (merchantAmount) ではない。
+    const byId = Object.fromEntries(loadHistory().map((e) => [e.id, e]));
+    expect(byId[`batch-${tx(1)}`].saleAmount).toBe(events[0].amount);
+    expect(byId[`batch-${tx(1)}`].merchantAmount).not.toBe(events[0].amount);
+    // 1 件目 = 明細つきの行・2 件目 = 明細なしの行。
+    expect(byId[`batch-${tx(1)}`].lineItems).toHaveLength(1);
+    expect(byId[`batch-${tx(2)}`].lineItems).toBeNull();
+    chain.head = 1_004n;
+    settle(1_000n, 3);
+    await tick();
+    expect(events.at(-1)).toEqual({ billKey: BK, count: 3, amount: (1_000n * ONE).toString() });
+  });
+
+  it('会計ごとに知らせる (別の会計の入金は、その会計の受け手だけに届く)', async () => {
+    const a: QrBillRecorded[] = [];
+    const b: QrBillRecorded[] = [];
+    showWith((e) => a.push(e), BK);
+    showWith((e) => b.push(e), BK2, { amount: '700' });
+    settle(995n, 1, { billKey: BK2, merchantValue: 698n * ONE });
+    await tick();
+    expect(a).toEqual([]);
+    expect(b).toEqual([{ billKey: BK2, count: 1, amount: (700n * ONE).toString() }]);
+  });
+
+  it('同じ bill key を出し直したら (StrictMode の 出す → やめる → 出す)、新しい受け手に知らせる', async () => {
+    const first = vi.fn();
+    const second = vi.fn();
+    showWith(first);
+    hide();
+    showWith(second);
+    settle(995n, 1);
+    await tick();
+    expect(first).not.toHaveBeenCalled();
+    expect(second).toHaveBeenCalledTimes(1);
+  });
+
+  it('行を書かなかった入金は知らせない (同じ tx の行が履歴にある・自分の印がある・一致しない入金)', async () => {
+    const listener = vi.fn();
+    window.localStorage.setItem(QR_SALE_MARKS_KEY, JSON.stringify([[tx(2), 1]]));
+    appendHistory(
+      buildHistoryEntry({
+        flow: 'batch', status: 'success', chainId: POLYGON.chainId, chainSlug: 'polygon', asset: 'jpyc',
+        tokenAddress: POLYGON.address, payMode: 'gasless', gasMode: 'merchant', merchant: SHOP,
+        merchantAmount: 998n * ONE, customer: CUSTOMER, feeReceiver: env.feeReceiver, feeAmount: 0n,
+        txHash: tx(1), userOpHash: null, blockNumber: null, errorMessage: null, storeName: 'payer wrote this',
+      }),
+    );
+    expect(loadHistory()).toHaveLength(1);
+    showWith(listener);
+    settle(993n, 1);
+    settle(994n, 2);
+    settle(995n, 3, { salt: random(9) });
+    await tick();
+    expect(listener).not.toHaveBeenCalled();
+  });
+
+  it('履歴の保存が throw したとき・書き込みが黙って失敗したとき (容量の上限) は知らせない (「記録しました」と言わない)', async () => {
+    const listener = vi.fn();
+    showWith(listener);
+    settle(994n, 1);
+    hold.failAppend = true;
+    await tick();
+    hold.failAppend = false;
+    expect(listener).not.toHaveBeenCalled();
+    // appendHistory は localStorage の失敗を握りつぶして返る: 行の key への書き込みだけを失敗させる。
+    chain.head = 1_002n;
+    settle(999n, 2);
+    const real = Storage.prototype.setItem;
+    const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key: string, value: string) {
+      if (key === HISTORY_STORAGE_KEY) throw new Error('QuotaExceededError');
+      real.call(this, key, value);
+    });
+    await tick();
+    setItem.mockRestore();
+    expect(hold.appends).toBe(2);
+    expect(loadHistory()).toEqual([]);
+    expect(listener).not.toHaveBeenCalled();
+  });
+
+  it('受け手が throw しても、行は書かれ、同じ回の後ろの入金も次の回も記録を続ける。警告は qrSale.notify_failed', async () => {
+    const listener = vi.fn(() => {
+      throw new Error('setState failed');
+    });
+    showWith(listener);
+    settle(994n, 1);
+    settle(995n, 2);
+    await tick();
+    expect(loadHistory().map((e) => e.id)).toEqual([`batch-${tx(2)}`, `batch-${tx(1)}`]);
+    expect(listener).toHaveBeenCalledTimes(2);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0][0]).toBe('qrSale.notify_failed');
+    // 見張りは続く (次の回も読み、次の入金も書く)。
+    const reads = rpc.head.mock.calls.length;
+    chain.head = 1_004n;
+    settle(1_000n, 3);
+    await tick();
+    expect(rpc.head).toHaveBeenCalledTimes(reads + 1);
+    expect(loadHistory()[0].id).toBe(`batch-${tx(3)}`);
+    expect(listener).toHaveBeenCalledTimes(3);
+  });
+
+  it('受け手を渡さない (今までの呼び方) なら、行を書くだけ', async () => {
+    show();
+    settle(995n, 1);
+    await tick();
+    expect(loadHistory()).toHaveLength(1);
+    expect(warn).not.toHaveBeenCalled();
   });
 });

@@ -12,6 +12,7 @@ import { useEffect, type ReactElement } from 'react';
 import userEvent from '@testing-library/user-event';
 import type { Address } from 'viem';
 import { renderWithIntl } from '../_helpers/i18n';
+import ja from '@/messages/ja.json';
 
 const hold = vi.hoisted(() => ({
   eip3009: true,
@@ -379,5 +380,70 @@ describe('レジ → 見張り → 取引履歴', () => {
       ['コーヒー', 2, '500'],
       ['Tシャツ', 1, '3000'],
     ]);
+  });
+});
+
+describe('レジ: 入金の確認の表示 (見張りが表示中の会計の行を書いたら、その QR の画面に緑で出す)', () => {
+  const Q = ja.QrGenerator;
+  const first = (amount: string) => Q.billPaymentRecorded.replace('{amount}', amount);
+  const another = (amount: string) => Q.billPaymentAnother.replace('{amount}', amount);
+  const TX1 = `0x${'f1'.repeat(32)}`;
+  const TX2 = `0x${'f2'.repeat(32)}`;
+  // コーヒー 1 つ = 500 の会計 (利用料 2・着金 498) に、bill key で署名した入金。
+  const payment = (billKey: string, blockTime: bigint, tx: string, block: bigint) => {
+    const sale = {
+      from: CUSTOMER, merchant: VALID, merchantValue: 498n * ONE, feeValue: 2n * ONE,
+      validBefore: blockTime + 295n, chainId: 80002, forwarder: FORWARDER,
+    };
+    return settledRpcLog({ ...sale, nonce: billNonce(billKey, sale), txHash: tx, blockNumber: block });
+  };
+
+  it('1 件目 → 1 件目の文・2 件目 → 2 件目の文 (額 = 書いた行の saleAmount = 請求額)。確認の前は status を出さない', async () => {
+    seedSettings();
+    const user = userEvent.setup();
+    render(<RegisterMode />);
+    await tap(user, /コーヒー/);
+    const dialog = await openQr(user);
+    const billKey = BK_SUFFIX.exec(qrValue(dialog))![1];
+    expect(within(dialog).queryByRole('status')).toBeNull();
+    const blockTime = BigInt(Math.floor(Date.now() / 1000)) + 5n;
+    rpc.time.mockResolvedValue(blockTime);
+    rpc.logs.mockResolvedValue([payment(billKey, blockTime, TX1, 995n)]);
+    await tick();
+    expect(loadHistory()[0]).toMatchObject({ id: `batch-${TX1}`, saleAmount: (500n * ONE).toString() });
+    const status = within(dialog).getByRole('status');
+    expect(status.textContent).toBe(first('500 JPYC'));
+    expect(status).toHaveAttribute('aria-live', 'polite');
+    expect(status).not.toHaveAttribute('aria-label');
+    expect(status).toHaveClass('border-emerald-200', 'bg-emerald-50', 'text-emerald-900');
+    // 同じ会計への 2 件目 (明細なしの行)。
+    rpc.logs.mockResolvedValue([payment(billKey, blockTime, TX1, 995n), payment(billKey, blockTime, TX2, 996n)]);
+    await tick();
+    expect(loadHistory()[0]).toMatchObject({ id: `batch-${TX2}`, lineItems: null });
+    expect(within(dialog).getByRole('status').textContent).toBe(another('500 JPYC'));
+  });
+
+  it('閉じた後に見つけた入金は出さない (履歴には入る)。出し直した QR (新しい会計) には前の表示も前の会計の入金も出ない', async () => {
+    seedSettings();
+    const user = userEvent.setup();
+    render(<RegisterMode />);
+    await tap(user, /コーヒー/);
+    let dialog = await openQr(user);
+    const oldKey = BK_SUFFIX.exec(qrValue(dialog))![1];
+    const blockTime = BigInt(Math.floor(Date.now() / 1000)) + 5n;
+    rpc.time.mockResolvedValue(blockTime);
+    rpc.logs.mockResolvedValue([payment(oldKey, blockTime, TX1, 995n)]);
+    await tick();
+    expect(within(dialog).getByRole('status').textContent).toBe(first('500 JPYC'));
+    await closeQr(user, dialog);
+    // 閉じている間に、同じ会計の 2 件目が見つかる。
+    rpc.logs.mockResolvedValue([payment(oldKey, blockTime, TX1, 995n), payment(oldKey, blockTime, TX2, 996n)]);
+    await tick();
+    expect(loadHistory()).toHaveLength(2);
+    dialog = await openQr(user);
+    expect(BK_SUFFIX.exec(qrValue(dialog))![1]).not.toBe(oldKey);
+    expect(within(dialog).queryByRole('status')).toBeNull();
+    expect(dialog.textContent).not.toContain(first('500 JPYC'));
+    expect(dialog.textContent).not.toContain(another('500 JPYC'));
   });
 });

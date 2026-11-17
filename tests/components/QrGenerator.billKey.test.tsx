@@ -23,6 +23,8 @@ const h = vi.hoisted(() => ({
   provider: 'eip3009-relay' as string,
   forwarders: {} as Record<number, `0x${string}`>,
   billKeyOff: false,
+  // 残高の見張りの結果を差し替える (null = 本物の結果)。灰色の「残高が増えました」を出すとき。
+  incoming: null as { status: 'received'; receivedWei: bigint } | null,
   watchArgs: [] as string[],
   shown: [] as { billKey: string; kind: string; url: string; itemName: string }[],
   hidden: [] as string[],
@@ -76,7 +78,8 @@ vi.mock('@/hooks/useIncomingPaymentWatch', async (importOriginal) => {
     ...actual,
     useIncomingPaymentWatch: (args: Parameters<typeof actual.useIncomingPaymentWatch>[0]) => {
       h.watchArgs.push(JSON.stringify({ ...args, expectedAmountWei: String(args.expectedAmountWei) }));
-      return actual.useIncomingPaymentWatch(args);
+      const real = actual.useIncomingPaymentWatch(args);
+      return h.incoming && args.enabled ? h.incoming : real;
     },
   };
 });
@@ -158,6 +161,7 @@ import { QrGenerator } from '@/components/QrGenerator';
 import { useQrSaleWatchScope } from '@/hooks/useQrBillKey';
 import { loadHistory } from '@/lib/history';
 import { stopQrSaleWatch } from '@/lib/qrSaleWatch';
+import { formatStoreDeviceAmount } from '@/lib/storeDevicePayment';
 import { billNonce, settledRpcLog } from '../_helpers/qrSale';
 
 const L = ja.QrGenerator;
@@ -235,6 +239,7 @@ beforeEach(() => {
   h.provider = 'eip3009-relay';
   h.forwarders = { 80002: FORWARDER, 1001: FORWARDER };
   h.billKeyOff = false;
+  h.incoming = null;
   h.watchArgs = [];
   h.shown = [];
   h.hidden = [];
@@ -567,5 +572,115 @@ describe('決済QR → 見張り → 取引履歴', () => {
     await settle();
     await tick(5);
     expect(rpc.head).toHaveBeenCalledTimes(reads);
+  });
+});
+
+describe('決済QR: 入金の確認の表示 (見張りが表示中の会計の行を書いたら、その QR の画面に緑で出す)', () => {
+  // 1,400 JPYC の会計 (利用料 2・着金 1,398) に、bill key で署名した入金。
+  const payment = (billKey: string, block: bigint, tx: string) => {
+    const sale = {
+      from: CUSTOMER, merchant: RECEIVER, merchantValue: 1_398n * ONE, feeValue: 2n * ONE,
+      validBefore: BLOCK_TIME + 296n, chainId: 80002, forwarder: FORWARDER,
+    };
+    return settledRpcLog({ ...sale, nonce: billNonce(billKey, sale), txHash: tx, blockNumber: block });
+  };
+  const TX1 = `0x${'e1'.repeat(32)}`;
+  const TX2 = `0x${'e2'.repeat(32)}`;
+  const TX3 = `0x${'e3'.repeat(32)}`;
+  const first = (amount: string) => L.billPaymentRecorded.replace('{amount}', amount);
+  const another = (amount: string) => L.billPaymentAnother.replace('{amount}', amount);
+  const billKeyOf = (d: HTMLElement) => BK_SUFFIX.exec(mainQrValue(d))![1];
+  const status = () => within(dialog()!).getByRole('status');
+
+  it('1 件目 → 1 件目の文 (額 = 書いた行の saleAmount = 請求額・お店の端末で送ると同じ形)。灰色の「残高が増えました」は隠れる。2 件目 → 2 件目の文', async () => {
+    h.incoming = { status: 'received', receivedWei: 1_398n * ONE };
+    const { dialog: d } = await openQr('1400');
+    // 確認の前: 灰色の残高のヒント (残高の見張りは今までどおり)。
+    expect(status()).toHaveTextContent(L.paymentReceived.split('（')[0]);
+    expect(status()).toHaveTextContent(L.paymentReceivedNote);
+    const live = status();
+    const billKey = billKeyOf(d);
+    rpc.head.mockResolvedValue(1_010n);
+    rpc.logs.mockResolvedValue([payment(billKey, 1_003n, TX1)]);
+    await tick();
+    const [row] = loadHistory();
+    expect(row).toMatchObject({ id: `batch-${TX1}`, saleAmount: (1_400n * ONE).toString(), merchantAmount: (1_398n * ONE).toString() });
+    expect(formatStoreDeviceAmount(row.saleAmount!)).toBe('1400 JPYC');
+    expect(status()).toHaveTextContent(first('1400 JPYC'));
+    expect(status().textContent).toBe(first('1400 JPYC'));
+    // 灰色の表示は隠れ、同じ読み上げの領域の中身が替わる (aria-label は付けない)。
+    expect(status()).toBe(live);
+    expect(status()).not.toHaveAttribute('aria-label');
+    expect(status()).toHaveClass('border-emerald-200', 'bg-emerald-50');
+    expect(within(dialog()!).queryByText(L.paymentReceivedNote)).toBeNull();
+    // 「品物をお渡しください」は付けない。
+    expect(dialog()!.textContent).not.toContain(ja.RegisterMode.storeDevice.received.split('。')[1]);
+    // 同じ会計への 2 件目 (明細なしの行) → 2 件目の文。
+    rpc.logs.mockResolvedValue([payment(billKey, 1_003n, TX1), payment(billKey, 1_004n, TX2)]);
+    await tick();
+    expect(loadHistory()[0]).toMatchObject({ id: `batch-${TX2}`, lineItems: null });
+    expect(status().textContent).toBe(another('1400 JPYC'));
+  });
+
+  it('閉じた後に見つけた入金・前の会計の入金は、出し直した QR (新しい会計) に出さない (履歴には入る)。新しい会計の入金は出す', async () => {
+    const { dialog: d } = await openQr('1400');
+    const oldKey = billKeyOf(d);
+    await tick();
+    // 閉じて出し直す (新しい bill key)。その後に、前の会計の入金が取り込まれる (閉じて 60 秒の間)。
+    const reopened = await reopen();
+    const newKey = billKeyOf(reopened);
+    expect(newKey).not.toBe(oldKey);
+    rpc.head.mockResolvedValue(1_010n);
+    rpc.logs.mockResolvedValue([payment(oldKey, 1_003n, TX1)]);
+    await tick();
+    expect(loadHistory().map((e) => e.id)).toEqual([`batch-${TX1}`]);
+    expect(dialog()!.textContent).not.toContain(first('1400 JPYC'));
+    expect(within(dialog()!).getByRole('status')).toHaveTextContent(L.paymentWatching);
+    // 表示中の会計の入金は出す。
+    rpc.logs.mockResolvedValue([payment(oldKey, 1_003n, TX1), payment(newKey, 1_004n, TX2)]);
+    await tick();
+    expect(status().textContent).toBe(first('1400 JPYC'));
+  });
+
+  it('新しい会計の QR を出したら前の表示は消える。閉じている間に見つけた入金は、開き直しても出ない', async () => {
+    const { dialog: d } = await openQr('1400');
+    const firstKey = billKeyOf(d);
+    rpc.head.mockResolvedValue(1_010n);
+    rpc.logs.mockResolvedValue([payment(firstKey, 1_003n, TX1)]);
+    await tick();
+    expect(status().textContent).toBe(first('1400 JPYC'));
+    // 閉じる → 閉じている間に、同じ会計の 2 件目が見つかる (履歴には入る)。
+    fireEvent.click(within(dialog()!).getByRole('button', { name: L.qrModalClose }));
+    await settle();
+    rpc.logs.mockResolvedValue([payment(firstKey, 1_003n, TX1), payment(firstKey, 1_004n, TX2)]);
+    await tick();
+    expect(loadHistory()).toHaveLength(2);
+    // 開き直す (新しい会計): 前の会計の確認も、閉じている間の入金も出ない。
+    fireEvent.click(showButtons()[0]);
+    await settle();
+    expect(dialog()!.textContent).not.toContain(first('1400 JPYC'));
+    expect(dialog()!.textContent).not.toContain(another('1400 JPYC'));
+    rpc.logs.mockResolvedValue([payment(firstKey, 1_005n, TX3)]);
+    await tick();
+    expect(loadHistory()).toHaveLength(3);
+    expect(dialog()!.textContent).not.toContain(another('1400 JPYC'));
+  });
+
+  it('en: 同じ中身の文', async () => {
+    const enMessages = (await import('@/messages/en.json')).default;
+    seed();
+    renderWithIntl(<QrGenerator />, { locale: 'en' });
+    await settle();
+    fireEvent.change(qrAmountInput(), { target: { value: '1400' } });
+    await settle();
+    fireEvent.click(screen.getAllByRole('button', { name: enMessages.QrGenerator.showQr })[0]);
+    await settle();
+    const d = screen.getByRole('dialog', { name: enMessages.QrGenerator.qrModalTitle });
+    rpc.head.mockResolvedValue(1_010n);
+    rpc.logs.mockResolvedValue([payment(billKeyOf(d), 1_003n, TX1)]);
+    await tick();
+    expect(within(d).getByRole('status').textContent).toBe(
+      enMessages.QrGenerator.billPaymentRecorded.replace('{amount}', '1400 JPYC'),
+    );
   });
 });

@@ -23,7 +23,7 @@ describe('useQrBillKey — 見張りを読み込めないとき', () => {
     try {
       const page = renderHook(() => useQrSaleWatchScope());
       const { result, rerender, unmount } = renderHook(
-        (p: { url: string; shown: boolean }) => useQrBillKey({ kind: 'pay', ...p }),
+        (p: { url: string; shown: boolean }) => useQrBillKey({ kind: 'pay', ...p }).screenUrl,
         { initialProps: { url: URL_A, shown: true } },
       );
       expect(result.current).toMatch(new RegExp(`^${URL_A.replace(/[?]/g, '\\?')}&bk=[A-Za-z0-9_-]{11}$`));

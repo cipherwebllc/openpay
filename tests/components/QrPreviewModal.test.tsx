@@ -421,3 +421,43 @@ describe('QrPreviewModal FX expiry', () => {
     expect(input).toHaveFocus();
   });
 });
+
+describe('QrPreviewModal 入金の確認 (billConfirmed・bill key の会計の入金を履歴に書いた)', () => {
+  const confirmedText = ja.QrGenerator.billPaymentRecorded.replace('{amount}', '1000 JPYC');
+  const watching = { state: 'watching' as const, text: ja.QrGenerator.paymentWatching, note: ja.QrGenerator.paymentWatchingNote };
+  const received = {
+    state: 'received' as const,
+    text: ja.QrGenerator.paymentReceived.replace('{amount}', '998 JPYC'),
+    note: ja.QrGenerator.paymentReceivedNote,
+  };
+
+  it('緑の枠・太字の文を role="status" (aria-live=polite) で出す。aria-label は付けない (名前は可視の文)・印刷には出さない', () => {
+    renderModal({ billConfirmed: confirmedText });
+    const status = screen.getByRole('status');
+    expect(status).toHaveTextContent(confirmedText);
+    expect(status).toHaveAttribute('aria-live', 'polite');
+    expect(status).not.toHaveAttribute('aria-label');
+    // お店の端末で送るの「入金を確認しました」(StoreDeviceRegisterStatus) と同じ意匠。
+    expect(status).toHaveClass('rounded-xl', 'border', 'border-emerald-200', 'bg-emerald-50', 'text-emerald-900', 'print:hidden');
+    expect(screen.getByText(confirmedText).tagName).toBe('P');
+    expect(screen.getByText(confirmedText)).toHaveClass('font-semibold');
+  });
+
+  it('出している間は、残高のヒント (待っています・残高が増えました) を隠す。同じ読み上げの領域の中身を入れ替える', () => {
+    const { props, rerender } = renderModal({ paymentStatus: watching });
+    const status = screen.getByRole('status');
+    expect(status).toHaveTextContent(ja.QrGenerator.paymentWatching);
+    rerender(<QrPreviewModal {...props} paymentStatus={received} />);
+    expect(screen.getByRole('status')).toBe(status);
+    expect(status).toHaveTextContent(received.text);
+
+    rerender(<QrPreviewModal {...props} paymentStatus={received} billConfirmed={confirmedText} />);
+    // 待っている間から置いてある領域のまま (読み上げが確かに届く)。
+    expect(screen.getByRole('status')).toBe(status);
+    expect(status).toHaveTextContent(confirmedText);
+    expect(screen.queryByText(received.text)).toBeNull();
+    expect(screen.queryByText(ja.QrGenerator.paymentReceivedNote)).toBeNull();
+    expect(screen.queryByText(ja.QrGenerator.paymentWatching)).toBeNull();
+    expect(status.querySelector('.bg-slate-100')).toBeNull();
+  });
+});

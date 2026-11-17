@@ -107,6 +107,7 @@ export function QrPreviewModal({
   onDownloadPng,
   eip681,
   paymentStatus,
+  billConfirmed,
   deviceStatus,
   actionsNote,
   hideUrl = false,
@@ -137,6 +138,11 @@ export function QrPreviewModal({
   onDownloadPng?: () => void;
   eip681?: QrPreviewEip681;
   paymentStatus?: QrPreviewPaymentStatus;
+  /**
+   * 表示中の会計の入金を、お店の端末がチェーンで確かめて取引履歴に書いた (bill key・hooks/useQrBillKey.ts) ときの文 (任意・
+   * 印刷には出さない)。出している間は、着金検知ヒント (paymentStatus) の代わりに出す。省略時は何も描画しない。
+   */
+  billConfirmed?: string;
   /** レジの「お店の端末で送る」の状態 (任意・印刷には出さない)。省略時は何も描画しない。 */
   deviceStatus?: ReactNode;
   /** 操作ボタンの下の注記 (例: 画面に表示している間だけ使える QR で、印刷・保存・コピーはできない)。 */
@@ -308,19 +314,39 @@ export function QrPreviewModal({
               />
             </div>
             {/* 着金検知ヒント (任意・advisory・2026-10 磨き上げ P5 で QR のすぐ下へ)。短い状態をピルで、注意は小さな注記で。
-                決済成功の意匠 (緑・チェック) は使わない (残高の増加の観測であり、この支払いの確定ではない)。印刷時と prop 省略時は非描画。 */}
-            {paymentStatus && (
-              <div role="status" aria-live="polite" className="mt-4 flex flex-col items-center gap-1 print:hidden">
-                <span className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1.5 text-sm font-medium text-slate-700">
-                  {paymentStatus.state === 'received' ? (
-                    <Eye className="h-4 w-4 flex-none" aria-hidden />
-                  ) : (
-                    <span aria-hidden className="inline-block h-2 w-2 flex-none animate-pulse rounded-full bg-brand" />
-                  )}
-                  {paymentStatus.text}
-                </span>
-                {paymentStatus.note && (
-                  <span className="max-w-xs text-[11px] leading-snug text-slate-500">{paymentStatus.note}</span>
+                決済成功の意匠 (緑・チェック) は使わない (残高の増加の観測であり、この支払いの確定ではない)。印刷時と prop 省略時は非描画。
+                入金の確認 (billConfirmed) は、この会計の bill key と nonce が一致した入金を履歴に書いた結果なので緑で出し
+                (お店の端末で送るの StoreDeviceRegisterStatus の「入金を確認しました」と同じ意匠)、出している間は残高のヒントを
+                隠す。同じ role="status" の要素の中身を入れ替える (決済QR では待っている間から置いてある読み上げの領域で、確認を
+                読み上げる)。確認が無い間の DOM は今までと同じ。 */}
+            {(billConfirmed || paymentStatus) && (
+              <div
+                role="status"
+                aria-live="polite"
+                className={
+                  billConfirmed
+                    ? 'mt-4 w-full rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900 print:hidden'
+                    : 'mt-4 flex flex-col items-center gap-1 print:hidden'
+                }
+              >
+                {billConfirmed ? (
+                  <p className="font-semibold">{billConfirmed}</p>
+                ) : (
+                  paymentStatus && (
+                    <>
+                      <span className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1.5 text-sm font-medium text-slate-700">
+                        {paymentStatus.state === 'received' ? (
+                          <Eye className="h-4 w-4 flex-none" aria-hidden />
+                        ) : (
+                          <span aria-hidden className="inline-block h-2 w-2 flex-none animate-pulse rounded-full bg-brand" />
+                        )}
+                        {paymentStatus.text}
+                      </span>
+                      {paymentStatus.note && (
+                        <span className="max-w-xs text-[11px] leading-snug text-slate-500">{paymentStatus.note}</span>
+                      )}
+                    </>
+                  )
                 )}
               </div>
             )}

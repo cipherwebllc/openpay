@@ -81,14 +81,14 @@ afterEach(async () => {
 describe('useQrBillKey — 見張りの読み込みが、QR を閉じた後に終わる', () => {
   it('60 秒は閉じた時刻から数える。読み込みが終わった時に閉じて 60 秒を過ぎていた会計は持たない', async () => {
     // QR A: T0 に出して 5 秒後に閉じる。QR B: 20 秒後に出して 25 秒後に閉じる。どちらも見張りの読み込み待ちのまま。
-    const a = renderHook((p: { shown: boolean }) => useQrBillKey({ kind: 'pay', url: URL_A, shown: p.shown }), {
+    const a = renderHook((p: { shown: boolean }) => useQrBillKey({ kind: 'pay', url: URL_A, shown: p.shown }).screenUrl, {
       initialProps: { shown: true },
     });
     const keyA = keyOf(a.result.current);
     vi.setSystemTime(T0 + 5_000);
     a.rerender({ shown: false });
     vi.setSystemTime(T0 + 20_000);
-    const b = renderHook((p: { shown: boolean }) => useQrBillKey({ kind: 'pay', url: URL_B, shown: p.shown }), {
+    const b = renderHook((p: { shown: boolean }) => useQrBillKey({ kind: 'pay', url: URL_B, shown: p.shown }).screenUrl, {
       initialProps: { shown: true },
     });
     const keyB = keyOf(b.result.current);

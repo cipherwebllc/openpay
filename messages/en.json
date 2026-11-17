@@ -527,6 +527,8 @@
     "paymentWatchingNote": "A payment that arrives right after this screen opens may not be detected. Check the merchant wallet or the explorer for the result.",
     "paymentReceived": "Balance increased (+{amount})",
     "paymentReceivedNote": "This may not be this payment. Check the merchant wallet or the explorer.",
+    "billPaymentRecorded": "Payment for this bill confirmed ({amount}). Recorded in your transaction history.",
+    "billPaymentAnother": "Another payment arrived for this bill ({amount}). The customer may have paid twice.",
     "printPoster": "Print",
     "posterEyebrow": "OpenPay stablecoin payment QR",
     "posterDefaultStoreName": "Scan to pay",
