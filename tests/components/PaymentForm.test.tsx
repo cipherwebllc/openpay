@@ -3525,6 +3525,24 @@ describe('PaymentForm — ガスレスで払えないウォレット (7702 で�
     expect(screen.getAllByText(/通常決済（ガス代は自分で負担）/).length).toBeGreaterThanOrEqual(1);
   });
 
+  // deploy 済みの contract の口座が 65 byte の署名を返すと、server は送り元を復元でき signature_mismatch になる。前もって
+  // 払えないウォレットと見分けていたなら、どの error でも払えない形にする (「一時的」と言わない)。
+  it.each(['signature_mismatch', 'rate_limited'])('前もって見分けていたウォレットで署名の後に %s → 払えない形の banner を 1 枚だけ出す', async (errMsg) => {
+    const user = userEvent.setup();
+    setupRelayFree();
+    setUnsupported();
+    setRelay('error', { errMsg });
+    render(<PaymentForm />);
+    expect(screen.getAllByText(TITLE)).toHaveLength(1);
+    expect(screen.getByText(BODY)).toBeInTheDocument();
+    expect(screen.queryByText(/一時的に利用できません/)).toBeNull();
+    expect(screen.queryByText(/完了できませんでした|短時間に決済が集中/)).toBeNull();
+    expect(screen.getAllByRole('button', { name: /通常支払い/ })).toHaveLength(1);
+    await user.click(screen.getByRole('button', SWITCH));
+    expect(screen.queryByText(TITLE)).toBeNull();
+    expect(screen.getAllByText(/通常決済（ガス代は自分で負担）/).length).toBeGreaterThanOrEqual(1);
+  });
+
   it('signature_mismatch は今までどおり (「一時的」の題と generic の文・払えない形にしない)', () => {
     setupRelayFree();
     setRelay('error', { errMsg: 'signature_mismatch' });

@@ -52,7 +52,7 @@ describe('readGaslessUnsupportedWallet (code の表)', () => {
   });
 });
 
-describe('readGaslessUnsupportedWallet (件数を数える)', () => {
+describe('readGaslessUnsupportedWallet (開発時の確認用の log・本番の既定の level では出ない)', () => {
   it('見分けたときだけ logger.info に経路とチェーンを出す (アドレスは出さない)', async () => {
     const info = vi.spyOn(logger, 'info').mockImplementation(() => {});
     const { readGaslessUnsupportedWallet } = await loadActual();

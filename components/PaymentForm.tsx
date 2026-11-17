@@ -1586,8 +1586,10 @@ function PaymentDetails({ params }: { params: PayParams }) {
           message={relayFallbackMessage}
           nativeToken={nativeToken}
           onSwitchToStandard={switchToStandard}
-          // 署名の後に、server が送り元を復元できなかった (lib/relay/relayErrorMessage.ts の signature_invalid)。
-          unsupportedWallet={relayError.message === 'signature_invalid'}
+          // 署名の後に、server が送り元を復元できなかった (lib/relay/relayErrorMessage.ts の signature_invalid)、または前もって
+          // 払えないウォレットと見分けていた (deploy 済みの contract の口座が 65 byte の署名を返すと signature_mismatch になる。
+          // どの error でも、このウォレットではガスレスで払えない)。
+          unsupportedWallet={relayError.message === 'signature_invalid' || unsupportedWallet}
         />
       ) : (
         error && (

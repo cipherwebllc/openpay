@@ -3000,6 +3000,22 @@ describe('CheckoutForm — JPYC EIP-3009 relay 経路', () => {
       expect(screen.queryByText(TITLE)).toBeNull();
     });
 
+    // deploy 済みの contract の口座が 65 byte の署名を返すと signature_mismatch になる。前もって見分けていたなら払えない形。
+    it.each(['signature_mismatch', 'rate_limited'])('前もって見分けていたウォレットで署名の後に %s → 払えない形の banner を 1 枚だけ出す', async (errMsg) => {
+      const user = userEvent.setup();
+      setupRelayReady();
+      setUnsupported();
+      setRelayPayment('error', { errMsg });
+      render(<CheckoutForm params={JPYC_PARAMS} />);
+      expect(screen.getAllByText(TITLE)).toHaveLength(1);
+      expect(screen.getByText(BODY)).toBeInTheDocument();
+      expect(screen.queryByText(/一時的に利用できません/)).toBeNull();
+      expect(screen.queryByText(/完了できませんでした|短時間に決済が集中/)).toBeNull();
+      expect(screen.getAllByRole('button', { name: /通常支払い/ })).toHaveLength(1);
+      await user.click(screen.getByRole('button', SWITCH));
+      expect(screen.queryByText(TITLE)).toBeNull();
+    });
+
     it('signature_mismatch は今までどおり (「一時的」の題と generic の文)', () => {
       setupRelayReady();
       setRelayPayment('error', { errMsg: 'signature_mismatch' });

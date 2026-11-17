@@ -30,7 +30,8 @@ export async function readGaslessUnsupportedWallet(
   reader: CodeReader = readCode,
 ): Promise<boolean> {
   const unsupported = isNonDelegatedContractCode(await reader(chainId, address));
-  // 見分けた件数を数える (アドレスは出さない)。欄は文字列と数だけなので、logger は throw しない。
+  // 開発時の確認用の log (アドレスは出さない)。本番の既定の level (warn・lib/logger.ts) では出ず、Sentry にも送らない =
+  // 件数は数えていない。欄は文字列と数だけなので、logger は throw しない。
   if (unsupported) logger.info('payment.gasless_unsupported_wallet', { path, chainId });
   return unsupported;
 }
