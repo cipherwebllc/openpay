@@ -53,7 +53,7 @@ const MERCHANT: Address = getAddress('0x1111111111111111111111111111111111111111
 const CUSTOMER: Address = getAddress('0x9999999999999999999999999999999999999999');
 const FORWARDER: Address = '0x3333333333333333333333333333333333333333';
 const VALUE = 1000n * 10n ** 18n;
-const VALID_BK = 'Zm9vYmFyYmF6cXV4MTIzNA';
+const VALID_BK = 'Zm9vYmFyYmE';
 const GOLDEN = goldenFromMain['recover・店舗負担 (/pay・/checkout)'];
 
 let signTypedData: ReturnType<typeof vi.fn>;

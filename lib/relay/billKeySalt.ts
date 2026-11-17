@@ -2,22 +2,29 @@
 // 払う側 (hooks/useJpycEip3009Payment) と、入金を確かめるお店の端末が、同じこの関数を使う (再実装しない)。
 // server-only にしない・遅延 chunk から読む (/pay・/checkout の First Load JS に載せない)。
 //
-// bill key = お店が QR を出すたびに作る 128 bit の乱数を base64url にした 22 字。QR の URL の `bk` に載る。
+// bill key = お店が QR を出すたびに作る 64 bit の乱数を base64url にした 11 字。QR の URL の `bk` に載る。
+// 短くしているのは、QR のマスを増やさないため (URL が長いと QR が細かくなり、読み取りにくくなる)。64 bit で足りる理由:
+//   - bill key の役目は「同じお店の、同時に生きている会計どうしを区別すること」。生きているのは QR を出している間と閉じた後
+//     60 秒だけなので、同じお店の会計どうしがぶつかる確率は無視できる。
+//   - 推測できても害が無い。nonce の一致が保証するのは「log にある金額が、この bill key を使った署名で、この受取先へ実際に
+//     払われたこと」(金額と受取先は nonce の中)。お店の端末は、さらに金額が会計の期待値と同じ入金だけを、この会計の支払い
+//     として扱う (lib/qrSaleHistory.ts)。bill key を知った人にできるのは、その金額をその受取先へ実際に払うことだけ。
+//   - bill key は意味を持たない乱数なので、hash (intentSalt) から総当たりで戻されても、分かるのは乱数だけ。
 // 払う側が intentSalt = keccak256(abi.encode(BILL_KEY_TAG, bill key の文字列)) で署名すると、forwarder の nonce
 // (lib/relay/forwarderIntent の buildForwarderNonce) は金額・受取先・intentSalt を全部含む hash なので、Settled の nonce が
-// 同じ式で計算し直した値と一致すれば「この bill key の QR から作られた、この金額・この受取先の支払い」と分かる。
+// 同じ式で計算し直した値と一致すれば「この bill key を使った署名で、log の金額がこの受取先へ払われた」と分かる。
 // チェーンに出るのは hash した intentSalt だけで、bill key そのものは出ない。
 //
-// encode は lib/orderBind の orderBindSalt と同じ書き方 (abi.encode・先頭に用途の TAG)。bill key は 22 字の文字列を
-// そのまま string として hash する (base64 を 16 byte に decode しない: decode すると、末尾の余りの bit だけが違う 2 つの
+// encode は lib/orderBind の orderBindSalt と同じ書き方 (abi.encode・先頭に用途の TAG)。bill key は 11 字の文字列を
+// そのまま string として hash する (base64 を 8 byte に decode しない: decode すると、末尾の余りの bit だけが違う 2 つの
 // 文字列が同じ byte になる)。値は golden vector で固定 (tests/lib/billKeySalt.test.ts)。
 
 import { encodeAbiParameters, keccak256, toHex, type Hex } from 'viem';
 
 export const BILL_KEY_TAG: Hex = keccak256(toHex('openpay.bill-key.v1'));
 
-// base64url の 22 字だけを bill key として受ける。
-const BILL_KEY_RE = /^[A-Za-z0-9_-]{22}$/;
+// base64url の 11 字だけを bill key として受ける。
+const BILL_KEY_RE = /^[A-Za-z0-9_-]{11}$/;
 
 // 形の正しい bill key なら intentSalt、違えば null (呼ぶ側は「bill key が無い」ものとして扱う・throw しない)。
 export function billKeySalt(billKey: unknown): Hex | null {

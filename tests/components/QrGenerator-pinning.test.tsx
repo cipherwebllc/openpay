@@ -124,6 +124,14 @@ vi.mock('@/hooks/useIncomingPaymentWatch', async (importOriginal) => {
     },
   };
 });
+// 会計ごとの印 (bill key) は QR を出すたびの乱数 (lib/url/billKeyQr.ts)。画面の QR の値 (下の qr) を literal で固定できる
+// よう、この file では決まった値にする。載るのは JPYC の回収 (forwarder あり) の金額ありの通常の QR の、画面の QR だけ:
+// その case では qr だけが `&bk=…` つきになり、画面に出す URL・コピー・前回の受け取り QR は bill key なしの URL のまま
+// (QR の値と同じでなくなるので、'=qr' ではなく URL をそのまま書く)。
+vi.mock('@/lib/url/billKeyQr', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/url/billKeyQr')>()),
+  newBillKey: () => 'PinnedKey_0',
+}));
 // QR に渡す値をそのまま読む (描画は本物の qrcode.react・値は data 属性に写すだけ = DOM の hash では外す)。
 vi.mock('qrcode.react', async (importOriginal) => {
   const actual = await importOriginal<typeof import('qrcode.react')>();
@@ -887,7 +895,7 @@ describe('QrGenerator の pin (生成物の完全一致は採り直さない・D
       },
       recover: {
         copies: [
-          '=qr',
+          'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&gas=merchant&amount=500',
         ],
         downloads: [
           'openpay-jpyc-polygon-500.svg <- blob:pinned',
@@ -896,14 +904,14 @@ describe('QrGenerator の pin (生成物の完全一致は採り直さない・D
         eip681: null,
         lastQr: {
           amountLabel: '500 JPYC',
-          payUrl: '=qr',
+          payUrl: 'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&gas=merchant&amount=500',
           tokenChainLabel: 'JPYC · Polygon Amoy',
           ts: 1790208000800,
         },
         printed: 1,
-        qr: 'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&gas=merchant&amount=500',
+        qr: 'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&gas=merchant&amount=500&bk=PinnedKey_0',
         shownEip681: null,
-        shownUrl: '=qr',
+        shownUrl: 'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&gas=merchant&amount=500',
         watch: {
           chainId: 80002,
           enabled: true,
@@ -914,7 +922,7 @@ describe('QrGenerator の pin (生成物の完全一致は採り直さない・D
       },
       recoverFloor: {
         copies: [
-          '=qr',
+          'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&gas=merchant&amount=3',
         ],
         downloads: [
           'openpay-jpyc-polygon-3.svg <- blob:pinned',
@@ -923,14 +931,14 @@ describe('QrGenerator の pin (生成物の完全一致は採り直さない・D
         eip681: null,
         lastQr: {
           amountLabel: '3 JPYC',
-          payUrl: '=qr',
+          payUrl: 'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&gas=merchant&amount=3',
           tokenChainLabel: 'JPYC · Polygon Amoy',
           ts: 1790208000880,
         },
         printed: 1,
-        qr: 'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&gas=merchant&amount=3',
+        qr: 'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&gas=merchant&amount=3&bk=PinnedKey_0',
         shownEip681: null,
-        shownUrl: '=qr',
+        shownUrl: 'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&gas=merchant&amount=3',
         watch: {
           chainId: 80002,
           enabled: true,
@@ -1008,7 +1016,7 @@ describe('QrGenerator の pin (生成物の完全一致は採り直さない・D
     expect(generatedValues).toStrictEqual({
       recoverAtFloor: {
         copies: [
-          '=qr',
+          'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&gas=merchant&amount=2',
         ],
         downloads: [
           'openpay-jpyc-polygon-2.svg <- blob:pinned',
@@ -1017,14 +1025,14 @@ describe('QrGenerator の pin (生成物の完全一致は採り直さない・D
         eip681: null,
         lastQr: {
           amountLabel: '2 JPYC',
-          payUrl: '=qr',
+          payUrl: 'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&gas=merchant&amount=2',
           tokenChainLabel: 'JPYC · Polygon Amoy',
           ts: 1790208000060,
         },
         printed: 1,
-        qr: 'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&gas=merchant&amount=2',
+        qr: 'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&gas=merchant&amount=2&bk=PinnedKey_0',
         shownEip681: null,
-        shownUrl: '=qr',
+        shownUrl: 'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&gas=merchant&amount=2',
         watch: {
           chainId: 80002,
           enabled: true,
@@ -1035,7 +1043,7 @@ describe('QrGenerator の pin (生成物の完全一致は採り直さない・D
       },
       recoverBelowFloor: {
         copies: [
-          '=qr',
+          'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&gas=merchant&amount=1',
         ],
         downloads: [
           'openpay-jpyc-polygon-1.svg <- blob:pinned',
@@ -1044,14 +1052,14 @@ describe('QrGenerator の pin (生成物の完全一致は採り直さない・D
         eip681: null,
         lastQr: {
           amountLabel: '1 JPYC',
-          payUrl: '=qr',
+          payUrl: 'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&gas=merchant&amount=1',
           tokenChainLabel: 'JPYC · Polygon Amoy',
           ts: 1790208000140,
         },
         printed: 1,
-        qr: 'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&gas=merchant&amount=1',
+        qr: 'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&gas=merchant&amount=1&bk=PinnedKey_0',
         shownEip681: null,
-        shownUrl: '=qr',
+        shownUrl: 'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&gas=merchant&amount=1',
         watch: {
           chainId: 80002,
           enabled: true,
@@ -2011,7 +2019,7 @@ describe('QrGenerator の pin (生成物の完全一致は採り直さない・D
       },
       normalAfterCreateFailed: {
         copies: [
-          '=qr',
+          'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&gas=merchant&amount=800',
         ],
         downloads: [
           'openpay-jpyc-polygon-800.svg <- blob:pinned',
@@ -2020,15 +2028,15 @@ describe('QrGenerator の pin (生成物の完全一致は採り直さない・D
         eip681: null,
         lastQr: {
           amountLabel: '800 JPYC',
-          payUrl: '=qr',
+          payUrl: 'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&gas=merchant&amount=800',
           tokenChainLabel: 'JPYC · Polygon Amoy',
           ts: 1790208000320,
         },
         printed: 1,
-        qr: 'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&gas=merchant&amount=800',
+        qr: 'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&gas=merchant&amount=800&bk=PinnedKey_0',
         releaseForNormal: 1,
         shownEip681: null,
-        shownUrl: '=qr',
+        shownUrl: 'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&gas=merchant&amount=800',
         watch: {
           chainId: 80002,
           enabled: true,

@@ -25,10 +25,10 @@ const MARK = Math.round(QR_SIZE * QR_CENTER_MARK_RATIO);
 const PAY_URL =
   'https://open-pay.jp/pay?to=0x428483fba62edcef1e3a100d3799f6d71759c560&token=jpyc&gas=merchant&amount=12345';
 
-function markup(level: 'L' | 'M' | 'Q' | 'H' = QR_LEVEL, markSize = MARK): string {
+function markup(level: 'L' | 'M' | 'Q' | 'H' = QR_LEVEL, markSize = MARK, value = PAY_URL): string {
   return renderToStaticMarkup(
     <QRCodeSVG
-      value={PAY_URL}
+      value={value}
       size={QR_SIZE}
       includeMargin
       level={level}
@@ -87,5 +87,47 @@ describe('決済 QR の読み取り可能性 (中央マーク付き)', () => {
 
   it('マークは data URI である (外部参照は PNG 保存でロゴが欠落する)', () => {
     expect(QR_CENTER_MARK.startsWith('data:image/')).toBe(true);
+  });
+});
+
+// 会計ごとの印 (bill key・`&bk=` + 11 字) は、画面に表示中の JPYC・回収の QR にだけ載る (hooks/useQrBillKey.ts)。
+// URL が 15 字長くなり、QR のマスが増える (1 マスが細る)。どこまで読めるかを、bill key なしの QR と同じ条件で固定する。
+// bill key を 11 字 (64 bit) にしているのは、このためでもある: 22 字 (128 bit) では、同じ URL が 57 マスになり、
+// いちばん厳しい条件 (170px + ぼかし) で読めなかった (下の最後の test)。
+describe('会計ごとの印 (bill key) つきの決済 QR の読み取り', () => {
+  const BILL_KEY_URL = `${PAY_URL}&bk=Zm9vYmFyYmE`;
+  // 余白 (includeMargin = 4 マスずつ) を除いた、QR の 1 辺のマスの数。
+  const modules = (svg: string) => Number(/viewBox="0 0 (\d+) \d+"/.exec(svg)![1]) - 8;
+  const withKey = (url = BILL_KEY_URL) => markup(QR_LEVEL, MARK, url);
+
+  it('1 辺のマスは 49 → 53 (version 8 → 9・画面の QR だけ。印刷・保存の QR は 49 のまま)', () => {
+    expect(PAY_URL).toHaveLength(106);
+    expect(BILL_KEY_URL).toHaveLength(121);
+    expect(modules(markup())).toBe(49);
+    expect(modules(withKey())).toBe(53);
+  });
+
+  it('鮮明な描画でも、縮小 + ぼかし (bill key なしの QR と同じ 3 条件) でもデコードできる', async () => {
+    expect(await decode(withKey(), QR_SIZE)).toBe(BILL_KEY_URL);
+    expect(await decode(withKey(), QR_SIZE * 3)).toBe(BILL_KEY_URL);
+    expect(await decode(withKey(), QR_SIZE, 1.5)).toBe(BILL_KEY_URL);
+    expect(await decode(withKey(), 240, 1.2)).toBe(BILL_KEY_URL);
+    expect(await decode(withKey(), 170, 1.0)).toBe(BILL_KEY_URL);
+  });
+
+  it('53 マスに収まるのは 130 字まで: bill key つきで 131 字以上になる URL は 57 マスになる', () => {
+    const pad = (length: number) => `${PAY_URL}${'0'.repeat(length - 15 - PAY_URL.length)}&bk=Zm9vYmFyYmE`;
+    expect(pad(130)).toHaveLength(130);
+    expect(modules(withKey(pad(130)))).toBe(53);
+    expect(modules(withKey(pad(131)))).toBe(57);
+  });
+
+  // bill key を 22 字 (128 bit) にしない根拠: 同じ URL が 57 マス (上の「level を H に上げた QR」と同じ数) になり、
+  // いちばん厳しい条件で読めない。
+  it('22 字の bill key では 57 マスになり、170px + ぼかしで読めない (= 11 字にしている根拠)', async () => {
+    const long = `${PAY_URL}&bk=Zm9vYmFyYmF6cXV4MTIzNA`;
+    expect(modules(withKey(long))).toBe(57);
+    expect(modules(markup('H'))).toBe(57);
+    expect(await decode(withKey(long), 170, 1.0)).toBeNull();
   });
 });

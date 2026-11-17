@@ -105,6 +105,21 @@ vi.mock('@/lib/orderFeedReceipt', () => ({
   },
 }));
 
+// QR の会計の入金の見張り (lib/qrSaleWatch.ts) は、決済QR・レジが QR を出している間、お店の端末から RPC で forwarder の
+// Settled を読む (lib/qrSaleRpc.ts)。既定は「読めない」スタブ: テストが外の RPC を叩かない。読めたときの動きを確かめる
+// テストは、その file の vi.mock で上書きする。
+vi.mock('@/lib/qrSaleRpc', () => {
+  const unreadable = async () => {
+    throw new Error('qr_sale_rpc_stubbed_in_tests');
+  };
+  return {
+    QR_SALE_RPC_TIMEOUT_MS: 6_000,
+    readChainHead: unreadable,
+    readSettledLogs: unreadable,
+    readBlockTime: unreadable,
+  };
+});
+
 // jsdom は matchMedia を実装しないため、既定の no-op スタブを各テスト前に用意する
 // (matches=false = 非 standalone / 非モバイル)。PwaInstallHint は広く render される
 // (QrGenerator / HistoryView / ScanShell) 一方で usePwaDisplayMode 経由で matchMedia を

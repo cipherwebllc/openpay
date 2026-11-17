@@ -107,11 +107,13 @@ import goldenFromMain from '../fixtures/billKeyGoldenForms.json';
 const MERCHANT: Address = '0x1111111111111111111111111111111111111111';
 const CUSTOMER: Address = '0x9999999999999999999999999999999999999999';
 const FORWARDER: Address = '0x3333333333333333333333333333333333333333';
-// 形の正しい bill key (22 字の base64url)。
-const VALID_BK = 'Zm9vYmFyYmF6cXV4MTIzNA';
+// 形の正しい bill key (11 字の base64url)。
+// 前の形 (22 字・128 bit) は、形の違う bill key として無いものと同じに扱う。
+const OLD_22_BK = 'Zm9vYmFyYmF6cXV4MTIzNA';
+const VALID_BK = 'Zm9vYmFyYmE';
 // tests/lib/billKeySalt.test.ts の golden vector (cast で計算した値)。
-const VALID_BK_SALT = '0x69f93cd3b5a483ef1d119580ad5aff6b3b657cf379145e02b344199ea334c499';
-const OTHER_BK = 'a-b_c-d_e-f_g-h_0123Zz';
+const VALID_BK_SALT = '0xf71ee2a8eaaff2864b1bb71e47354a28af9038a73387875ed5159ddba2e4c311';
+const OTHER_BK = 'a-b_c-d_e-8';
 
 const PAY_QUERY = `to=${MERCHANT}&token=jpyc&amount=1000`;
 const CHECKOUT_QUERY = `to=${MERCHANT}&token=jpyc&chain=polygon&items=${encodeURIComponent('Tea:2:500')}`;
@@ -249,12 +251,13 @@ describe.skipIf(capturePath)('bill key を読む前の code と同じ (/pay と 
     it.each([
       ['bk が無い', ''],
       ['bk が空', '&bk='],
-      ['21 字', `&bk=${VALID_BK.slice(0, 21)}`],
-      ['23 字', `&bk=${VALID_BK}A`],
-      ['記号入り (+ は URL では空白になる)', `&bk=${VALID_BK.slice(0, 21)}+`],
-      ['記号入り (%2B = +)', `&bk=${VALID_BK.slice(0, 21)}%2B`],
-      ['記号入り (%2F = /)', `&bk=${VALID_BK.slice(0, 21)}%2F`],
-      ['記号入り (%3D = padding)', `&bk=${VALID_BK.slice(0, 21)}%3D`],
+      ['10 字', `&bk=${VALID_BK.slice(0, 10)}`],
+      ['12 字', `&bk=${VALID_BK}A`],
+      ['22 字 (前の形)', `&bk=${OLD_22_BK}`],
+      ['記号入り (+ は URL では空白になる)', `&bk=${VALID_BK.slice(0, 10)}+`],
+      ['記号入り (%2B = +)', `&bk=${VALID_BK.slice(0, 10)}%2B`],
+      ['記号入り (%2F = /)', `&bk=${VALID_BK.slice(0, 10)}%2F`],
+      ['記号入り (%3D = padding)', `&bk=${VALID_BK.slice(0, 10)}%3D`],
       ['別の名前の param (billKey=)', `&billKey=${VALID_BK}`],
       ['大文字の名前 (BK=)', `&BK=${VALID_BK}`],
     ])('%s: typed data・POST の body・保存する intent が同じ', async (_label, suffix) => {
@@ -267,7 +270,7 @@ describe.skipIf(capturePath)('bill key を読む前の code と同じ (/pay と 
     it.each([
       ['bk が無い', ''],
       ['形の正しい bk', `&bk=${VALID_BK}`],
-      ['形の違う bk (21 字)', `&bk=${VALID_BK.slice(0, 21)}`],
+      ['形の違う bk (10 字)', `&bk=${VALID_BK.slice(0, 10)}`],
     ])('%s: typed data・POST の body・保存するものが同じ', async (_label, suffix) => {
       expect(await payFenced(name, suffix)).toEqual(GOLDEN[name]);
     });

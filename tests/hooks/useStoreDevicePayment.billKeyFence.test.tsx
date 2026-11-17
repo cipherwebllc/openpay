@@ -23,7 +23,7 @@ import type { TokenDeployment } from '@/lib/tokens';
 import { randomHex32, stubRandom } from '../_helpers/relayAttemptCapture';
 
 const HS = 'AbCdEfGhIjKlMnOpQrStUv';
-const VALID_BK = 'Zm9vYmFyYmF6cXV4MTIzNA';
+const VALID_BK = 'Zm9vYmFyYmE';
 const SHOP = getAddress('0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913');
 const JPYC = getAddress('0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29');
 const deployment = { chainId: 80002, address: JPYC, decimals: 18 } as unknown as TokenDeployment;

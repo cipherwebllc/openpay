@@ -12,6 +12,8 @@
 //   - 同じ txHash の行が履歴にあれば何もしない (receipt も読まない)。
 //   - 「この注文は履歴に書いた」印 (ORDER_SALE_MARKS_KEY・履歴とは別の key) があれば何もしない。印は履歴の行を消しても・
 //     全て削除しても消えないので、店主が消した行を、受注フィードに注文が残っている間に書き戻さない。
+//     QR の会計の書き手 (lib/qrSaleWatch.ts) の印 (QR_SALE_MARKS_KEY) も読み、同じ扱いにする (向こうが書いて店主が消した
+//     tx を、ここが書き戻さない。向こうもこの書き手の印を読む)。読むだけで、向こうの key には書かない。
 //   - 約束: 印の付いた注文は、二度と書かない。印は一度付けたら外さない (保存の失敗と、保存の後に店主が消したことは、
 //     後から見分けられないので、外すと消した行を書き戻しうる)。印を読めない端末では書かない。保存の直前に先に印を書き、
 //     書けなければ行を書かない。= 印を読めない・書けない端末では、受注の行は入らない (消した行が戻るより安全な側)。
@@ -40,6 +42,7 @@ import {
 } from './orderFeedHistory';
 import { ORDER_RECEIPT_TIMEOUT_MS, readOrderReceipt } from './orderFeedReceipt';
 import { isTxHashLike, ORDER_LIST_MAX, type StoredOrder } from './orderRelay';
+import { QR_SALE_MARKS_KEY, readTxMarks } from './qrSaleMarks';
 
 /**
  * 注文 1 件につき、この画面を開いている間に試す回数の上限。receipt を読めなかった・読み解きが throw した・印を保存できなかった
@@ -161,8 +164,9 @@ export function createOrderSaleRecorder(): OrderSaleRecorder {
   // 1 回の polling で書くのは 25 件までなので、始めの確認を合わせて 1 回の polling で最大 51 回。
   const save = (entry: HistoryEntry, hash: string): SaveResult => {
     const marks = readSaleMarks();
-    if (!marks) return 'failed';
-    if (marks.has(hash)) return 'present';
+    const qrMarks = readTxMarks(QR_SALE_MARKS_KEY);
+    if (!marks || !qrMarks) return 'failed';
+    if (marks.has(hash) || qrMarks.has(hash)) return 'present';
     // receipt を待っている間に、別のタブが同じ注文を書いた (大文字小文字の違う txHash でも)。その行にも印を付ける。
     // 印を書けなくても、この画面では決着にする (pass の始めに履歴にあった注文と同じ): 試し直すと、その間に店主がその行を
     // 消したとき、次の polling で書き戻しうる。
@@ -197,7 +201,8 @@ export function createOrderSaleRecorder(): OrderSaleRecorder {
       if (pending.length === 0) return;
       // 印を読めない端末では書かない (印の無い行を作らない)。履歴も receipt も読まず、次の polling でもう一度見る。
       const marks = readSaleMarks();
-      if (!marks) return;
+      const qrMarks = readTxMarks(QR_SALE_MARKS_KEY);
+      if (!marks || !qrMarks) return;
       // 履歴を読むのは、まだ決着していない注文があり、印を読めるときだけ (上限 1,000 件の parse を polling のたびにしない)。
       const known = historyTxHashes();
       // 既に履歴にあった注文の印は、この回の終わりにまとめて付ける (印の key を注文ごとに書き直さない)。
@@ -215,7 +220,7 @@ export function createOrderSaleRecorder(): OrderSaleRecorder {
             if (!marks.has(hash)) foundInHistory.push(hash);
             continue;
           }
-          if (marks.has(hash)) {
+          if (marks.has(hash) || qrMarks.has(hash)) {
             // 前に書いた注文 (店主が履歴から消した行を含む)。書き戻さない。
             settled.add(key);
             continue;

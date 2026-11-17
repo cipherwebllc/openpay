@@ -30,6 +30,7 @@ import { QrPreviewModal } from './QrPreviewModal';
 import { StoreGasWalletPanel } from './StoreGasWalletPanel';
 import { StoreDeviceRegisterStatus } from './StoreDeviceRegisterStatus';
 import { useStoreDeviceMode } from './StoreDeviceProvider';
+import { useQrBillKey } from '@/hooks/useQrBillKey';
 import {
   STORE_DEVICE_MIN_AMOUNT_WEI,
   formatStoreDeviceAmount,
@@ -623,6 +624,14 @@ function RegisterModeContent({
   // 表示中のお店負担の QR は、受け渡しを作った時点の会計で組み立てた写しから出す (後から変わっても混ぜない)。
   const storeQrActive = storeQr !== null && !forceNormalQr;
   const qrValue = storeQrActive ? storeQr.url : checkoutUrl;
+  // 会計ごとの印 (bill key) を、画面に表示中の通常の QR にだけ載せる: JPYC の回収 (forwarder のあるチェーンのガスレス)。
+  // お店負担の QR・通常決済・USDC・forwarder の無いチェーンには載せない。URL の表示とコピーは checkoutUrl のまま
+  // (hooks/useQrBillKey.ts)。入金は、お店の端末がチェーンで確かめて取引履歴に書く。
+  const screenQrValue = useQrBillKey({
+    kind: 'checkout',
+    url: isJpycRecover ? checkoutUrl : '',
+    shown: qrModalOpen && !storeQrActive,
+  });
   const sdState = device.state;
   // お店の端末で送る状態の表示 (使える / 使えない理由 / 送っている・結果待ち)。
   const sdStatusShown = storeDeviceForSale || sdSaleBlocked !== null || (sdState.phase !== 'idle' && !qrModalOpen);
@@ -1275,6 +1284,7 @@ function RegisterModeContent({
           }
           deviceStatus={env.enableStoreGasWallet && sdState.phase !== 'idle' ? storeDeviceStatus : undefined}
           qrValue={qrValue}
+          {...(screenQrValue !== undefined ? { screenQrValue } : {})}
           qrRef={qrRef}
           storeName={settings.storeName.trim() || t('qrPosterDefaultStoreName')}
           amountText={`${groupAmountDigits(totalHuman)} ${symbol}`}

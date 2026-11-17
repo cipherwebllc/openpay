@@ -40,6 +40,12 @@ const hold = vi.hoisted(() => ({
   stop: vi.fn(),
   release: vi.fn(),
 }));
+// 会計ごとの印 (bill key) は QR を出すたびの乱数 (lib/url/billKeyQr.ts)。QR の中身を完全一致で固定できるよう、この file では
+// 決まった値にする。載るのは、JPYC の回収 (中継が有効・forwarder あり・ガス代不要) の通常の QR の、画面の QR だけ。
+vi.mock('@/lib/url/billKeyQr', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/url/billKeyQr')>()),
+  newBillKey: () => 'PinnedKey_0',
+}));
 // QR の中身 (URL) を読む。お店負担の QR は URL を画面に出さないので、どの QR も同じ取り方にする。
 vi.mock('qrcode.react', () => ({
   QRCodeSVG: ({ value }: { value: string }) => <svg data-testid="qr" data-value={value} />,
@@ -99,6 +105,8 @@ import enMessages from '@/messages/en.json';
 const VALID = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 const FORWARDER = '0x752B7AaD0089286EB7b553d84D05233d80c9FCB4';
 const HS = 'AbCdEfGhIjKlMnOpQrStUv';
+// 上の mock が返す bill key。
+const BK = 'PinnedKey_0';
 const QR_KEY = 'openpay:qr-settings:v2';
 const PRESETS_KEY = 'openpay:product-presets:v1';
 const JPYC = 10n ** 18n;
@@ -310,7 +318,7 @@ describe('RegisterMode: 作られる支払い URL と、カートの境目', () 
         total: '3,500 JPYC',
         payable: 3500n * JPYC,
         unit: JPYC,
-        query: { to: VALID, token: 'jpyc', items: `${COFFEE},${SHIRT}`, gas: 'merchant' },
+        query: { to: VALID, token: 'jpyc', items: `${COFFEE},${SHIRT}`, gas: 'merchant', bk: BK },
       },
       {
         name: 'JPYC・Polygon・ガス代不要 (中継が無効 = Pimlico の経路): 保存された gasMode=merchant をそのまま書く・数量 3',
@@ -446,8 +454,8 @@ describe('RegisterMode: 作られる支払い URL と、カートの境目', () 
       expect(payableOf(searchParams, row.unit)).toBe(row.payable);
       const dialog = within(screen.getByRole('dialog'));
       expect(dialog.getByText(row.total)).toBeInTheDocument();
-      // 画面に出す URL (コピーする値) も QR と同じ。
-      expect(dialog.getByText(value)).toBeInTheDocument();
+      // 画面に出す URL (コピーする値) も QR と同じ (会計ごとの印 bk は画面の QR だけ・出す URL には無い)。
+      expect(dialog.getByText(value.replace(`&bk=${BK}`, ''))).toBeInTheDocument();
     });
   });
 
@@ -1380,7 +1388,7 @@ describe('RegisterMode: 作られる支払い URL と、カートの境目', () 
       const { query } = parts(await openQr(user, /通常の QR を出す/));
       expect(hold.start).not.toHaveBeenCalled();
       expect(hold.release).toHaveBeenCalledTimes(1);
-      expect(query).toEqual({ to: VALID, token: 'jpyc', items, gas: 'merchant' });
+      expect(query).toEqual({ to: VALID, token: 'jpyc', items, gas: 'merchant', bk: BK });
     });
 
     it('値引きの後の額で判定する: 2 JPYC から 1 JPYC 引いて 1 JPYC ちょうどなら使える (受け渡しの額 1 JPYC・disc=1)', async () => {
@@ -1415,7 +1423,7 @@ describe('RegisterMode: 作られる支払い URL と、カートの境目', () 
       expect(summaryRow('合計').getByText('0.5 JPYC')).toBeInTheDocument();
       const { query } = parts(await openQr(user, /通常の QR を出す/));
       expect(hold.start).not.toHaveBeenCalled();
-      expect(query).toEqual({ to: VALID, token: 'jpyc', items: `${enc('チョコ')}:1:1.5:10:taxable_10:`, disc: '1', gas: 'merchant' });
+      expect(query).toEqual({ to: VALID, token: 'jpyc', items: `${enc('チョコ')}:1:1.5:10:taxable_10:`, disc: '1', gas: 'merchant', bk: BK });
     });
 
     it('カートが空のうちは、最低額の理由を出さない', async () => {
