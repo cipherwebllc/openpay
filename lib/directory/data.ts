@@ -201,19 +201,21 @@ export const DIRECTORY_ENTRIES = [
     nameJa: '',
     status: 'published',
     // 2026-08-27 追加: 商用展開開始の公式リリース (2026-08-10) に基づく
+    // 2026-11-18 (第 15 回): 11/10 の公式リリースで Circle の Arc 上の USDC に対応 → chains に arc を足す
+    //   (決済の現況行 lib/directory/paymentProviders.ts の dg-sps と同じ)。出典を 11/10 のリリースに
     ...provenance(
-      'https://www.garage.co.jp/pr/release/20260810/',
+      'https://www.garage.co.jp/pr/release/20261110/',
       '株式会社デジタルガレージ',
       'official',
-      { verifiedAt: '2026-09-04', updatedAt: '2026-08-27' },
+      { verifiedAt: '2026-11-18', updatedAt: '2026-11-18' },
     ),
     facts: {
       description:
-        '加盟店がAPI接続で導入するステーブルコイン決済基盤。当初はBase上のUSDCに対応し、JCBとDGFTへ先行提供。JPYC対応は計画段階。',
+        '加盟店がAPI接続で導入するステーブルコイン決済基盤。当初はBase上のUSDCに対応し、JCBとDGFTへ先行提供。2026年11月にCircleのArc上のUSDCにも対応。JPYC対応は計画段階。',
       category: 'payment',
       tags: ['Japan', 'payment', 'stablecoin'],
       tokens: ['usdc'],
-      chains: ['base'],
+      chains: ['arc', 'base'],
       languages: ['ja'],
       supportsJpyc: false,
       supportsUsdc: true,
