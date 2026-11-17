@@ -6,7 +6,7 @@ import { notFound } from 'next/navigation';
 import { LOCALES } from '@/i18n';
 import { CheckoutForm } from '@/components/CheckoutForm';
 import { CheckoutChainPicker } from '@/components/checkout/CheckoutChainPicker';
-import { StoreDeviceCheckoutFormLazy } from '@/components/checkout/StoreDeviceCheckoutFormLazy';
+import { StoreDeviceCheckoutForm } from '@/components/StoreDeviceCheckoutForm';
 import { LocaleSwitcher } from '@/components/LocaleSwitcher';
 import { checkoutFormKey } from '@/lib/checkoutFormKey';
 import { env } from '@/lib/env';
@@ -66,10 +66,9 @@ export default async function CheckoutPage({
 
       {parsed.ok ? (
         // お店の端末で送る QR (submit=store) は専用の画面で描画し、既存の CheckoutForm には触れない
-        // (parse が条件を fail-closed で確かめ済み・plans/store-gas-wallet.md §11)。その画面の chunk は submit=store のときだけ
-        // 読み込む (通常の /checkout の First Load JS に載せない・components/checkout/StoreDeviceCheckoutFormLazy.tsx)。
+        // (parse が条件を fail-closed で確かめ済み・plans/store-gas-wallet.md §11)。
         parsed.params.submit === 'store' ? (
-          <StoreDeviceCheckoutFormLazy params={parsed.params} />
+          <StoreDeviceCheckoutForm params={parsed.params} />
         ) : parsed.params.pickChain ? (
           // 受け付けるチェーンが複数で、まだ選んでいない: 払う前にチェーンを選ぶ (plans/order-link-multichain.md)。
           <CheckoutChainPicker params={parsed.params} />
