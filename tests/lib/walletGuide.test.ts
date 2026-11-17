@@ -56,8 +56,12 @@ describe('walletGuide content', () => {
       // 例外は UPBOND Wallet で確かめた事実だけ (OpenPay の対応チェーン・通貨の一覧ではない・ほかのチェーン名と金額はここでも書かない):
       //   - storeNote の「Polygon」: ガス代の例 (Polygon なら POL・2026-10-01 本番で受け取り、送るときに POL が要った)
       //   (UPBOND Wallet のカードの本文の「Polygon」は 2026-11-07 に支払いの一文ごと外した)
+      //   - マイナウォレットのカードの「(Polygon で確かめました)」: 通常支払いに切り替えると払えたのを確かめたチェーン (2026-11-17・
+      //     本番の実機とチェーン上の記録)。この括弧の中だけを外して検査する。
+      const mynaAt = walletGuideContentFor(locale).wallets.findIndex((w) => w.id === 'myna');
       const ALLOWED: Record<string, RegExp> = {
         [`${locale}.storeNote`]: /Polygon/g,
+        [`${locale}.wallets[${mynaAt}].body`]: /\((Polygon で確かめました|we checked this on Polygon)\)/g,
       };
       for (const [at, text] of copyLeaves(locale)) {
         const checked = ALLOWED[at] ? text.replace(ALLOWED[at], '') : text;
@@ -121,9 +125,14 @@ describe('walletGuide content', () => {
     expect(() => deploymentForSlug('jpyc', 'polygon')).not.toThrow();
   });
 
-  it('ウォレットは MetaMask → マイナウォレット → HashPort Wallet → UPBOND Wallet の 4 つ (マイナウォレットを先に推す・HashPort も推薦に残す・UPBOND は最後)・WalletConnect は 1..4 の手順で検索の言葉まで書く', () => {
-    expect(walletGuideContentFor('ja').wallets.map((w) => w.name)).toEqual(['MetaMask', 'マイナウォレット', 'HashPort Wallet', 'UPBOND Wallet']);
-    expect(walletGuideContentFor('en').wallets.map((w) => w.name)).toEqual(['MetaMask', 'MynaWallet', 'HashPort Wallet', 'UPBOND Wallet']);
+  // 2026-11-17 (本番の実機とチェーン上の記録で確定・文案は user 承認): マイナウォレット (ERC-4337 のスマートアカウント) は
+  // ガス代不要の支払い (EIP-3009) と「お店の端末で送る」で署名が通らず、通常支払いに切り替えると払えた (Polygon)。
+  // HashPort Wallet と MetaMask はガスレスで払えた → HashPort Wallet を先に並べ、マイナウォレットのカードに通常支払いで払うことを書く。
+  it('ウォレットは MetaMask → HashPort Wallet → マイナウォレット → UPBOND Wallet の 4 つ (マイナウォレットは通常支払いで払う・UPBOND は最後)・WalletConnect は 1..4 の手順で検索の言葉まで書く', () => {
+    expect(walletGuideContentFor('ja').wallets.map((w) => w.name)).toEqual(['MetaMask', 'HashPort Wallet', 'マイナウォレット', 'UPBOND Wallet']);
+    expect(walletGuideContentFor('en').wallets.map((w) => w.name)).toEqual(['MetaMask', 'HashPort Wallet', 'MynaWallet', 'UPBOND Wallet']);
+    expect(walletGuideContentFor('ja').walletLead).toContain('HashPort Wallet やマイナウォレットもおすすめです');
+    expect(walletGuideContentFor('en').walletLead).toContain('HashPort Wallet and MynaWallet are good choices too');
     for (const locale of LOCALES) {
       const c = walletGuideContentFor(locale);
       expect(c.wcSteps.map((s) => s.n)).toEqual([1, 2, 3, 4]);
@@ -132,13 +141,20 @@ describe('walletGuide content', () => {
     }
     // カードのマークの対応 (MetaMask は同梱の公式 SVG を使う)。
     for (const locale of LOCALES) {
-      expect(walletGuideContentFor(locale).wallets.map((w) => w.id)).toEqual(['metamask', 'myna', 'hashport', 'upbond']);
+      expect(walletGuideContentFor(locale).wallets.map((w) => w.id)).toEqual(['metamask', 'hashport', 'myna', 'upbond']);
       expect(walletGuideContentFor(locale).scanWays.map((w) => w.id)).toEqual(['camera', 'scan']);
     }
     expect(existsSync(path.join(process.cwd(), 'public', 'wallets', 'MetaMask.svg'))).toBe(true);
     // マイナウォレットは「JPYC EX の本人確認にもマイナンバーカード」ではじめての方に向く、と書く (user「マイナウォレットを押したい」)。
-    expect(walletGuideContentFor('ja').wallets[1].body).toContain('はじめての方に向いています');
-    expect(walletGuideContentFor('en').wallets[1].body).toContain('suits first-time users');
+    expect(walletGuideContentFor('ja').wallets[2].body).toContain('はじめての方に向いています');
+    expect(walletGuideContentFor('en').wallets[2].body).toContain('suits first-time users');
+    // 使えない支払い (ガスレス決済・お店がガス代を負担する支払い) と、通常支払いに切り替えると払えること (確かめたのは Polygon)。
+    expect(walletGuideContentFor('ja').wallets[2].body).toContain(
+      'ガス代不要の支払い (ガスレス決済) と、お店がガス代を負担する支払いには使えません。支払い画面で通常支払いに切り替えると払えます (Polygon で確かめました)。',
+    );
+    expect(walletGuideContentFor('en').wallets[2].body).toContain(
+      'It cannot be used for payments with no gas fee (gasless payments) or for payments where the shop pays the gas. Switch to standard payment on the payment screen and you can pay (we checked this on Polygon).',
+    );
   });
 
   it('お店の QR はスマホのカメラか「スキャンして支払う」で読む・ウォレットのアプリの読み取りでは開かないものがある', () => {

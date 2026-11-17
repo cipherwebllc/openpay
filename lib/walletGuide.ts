@@ -5,6 +5,11 @@
 // user 方針 (2026-10-13): MetaMask が基本・初めての方には JPYC EX が組み込まれたマイナウォレット / HashPort Wallet
 // (どちらも OpenPay の決済完了まで user が確認済み)。マイナウォレットを先に出して推す (JPYC EX の本人確認にもマイナンバー
 // カードを使うため・user「マイナウォレットを押したい」)。HashPort Wallet も推薦に残す (user「推薦から外すことはない」)。
+// **2026-11-17 更新** (本番の実機とチェーン上の記録で確定・文案は user 承認): マイナウォレットは ERC-4337 のスマートアカウントで、
+// JPYC のガス代不要の支払い (ガスレス決済・EIP-3009) と「お店の端末で送る」(お店がガス代を負担する支払い) では署名が通らない。
+// 支払い画面で通常支払いに切り替えると払えた (Polygon で確認)。HashPort Wallet と MetaMask はガスレスで払えた。
+// → 並びを MetaMask → HashPort Wallet → マイナウォレットにし、マイナウォレットのカードに使えない支払いと通常支払いで払えることを書く。
+// QR の読み取り (summary・scanNote) と売上の移し先 (storeNote) はこの件と関係しないので変えない。
 // つなぎ方は WalletConnect で、一覧は英語なので検索の言葉まで書く。
 // お店の QR (OpenPay の支払いの URL) は、ウォレットのアプリの QR 読み取りでは開けないことがある (2026-10-13 user が実機で確認:
 // MetaMask は外部リンクとして開ける・マイナウォレットは動かない・HashPort Wallet は「支払い」で読むと「このQRコードでは
@@ -28,7 +33,8 @@
 //     よくない？」)。@upbond/sdk の README は data 付きの tx (ERC-20 の送金) を未対応とするが、それは SDK をサイトに埋め込む場合の
 //     話で、WalletConnect でつないだ UPBOND Wallet が受けるかは確かめていない。
 // ⚠️ 料率・チェーン名・「無料」/free は書かない (tests/lib/walletGuide.test.ts が検査する)。例外は storeNote のガス代の例の
-// 「Polygon」だけ (UPBOND で確かめた事実で、OpenPay の対応チェーンの一覧ではない・同じ test が範囲を縛る)。
+// 「Polygon」と、マイナウォレットのカードの「Polygon で確かめました」だけ (どちらも確かめた事実で、OpenPay の対応チェーンの
+// 一覧ではない・同じ test が範囲を縛る)。
 
 import type { Metadata } from 'next';
 import { guidePageMetadata } from '@/lib/guideMetadata';
@@ -96,7 +102,7 @@ export type WalletGuideContent = {
 const JA: WalletGuideContent = {
   metaTitle: 'ウォレットを選ぶ — JPYC で支払うためのウォレットとつなぎ方',
   metaDescription:
-    'OpenPay で JPYC を支払うためのウォレットの選び方。MetaMask が基本で、初めての方にはマイナウォレットや HashPort Wallet もおすすめ。お店の QR の読み取り方と、WalletConnect でのつなぎ方。',
+    'OpenPay で JPYC を支払うためのウォレットの選び方。MetaMask が基本で、初めての方には HashPort Wallet やマイナウォレットもおすすめ。お店の QR の読み取り方と、WalletConnect でのつなぎ方。',
   subtitle: 'JPYC で支払うための、ウォレットの選び方とつなぎ方。',
   lead: 'OpenPay で支払うには、JPYC が入った自分のウォレットが要ります。OpenPay のアプリのインストールや会員登録は要りません。おすすめのウォレットと、お店の QR の読み取り方、ウォレットのつなぎ方をまとめました。',
   scanCta: { path: '/scan', label: 'スキャンして支払う' },
@@ -107,7 +113,7 @@ const JA: WalletGuideContent = {
 
   walletsTitle: 'おすすめのウォレット',
   walletLead:
-    'MetaMask が基本です。初めての方には、アプリの中に JPYC EX が組み込まれていて、JPYC を手に入れる (発行) ことも日本円に戻す (償還) こともアプリの中でできる、マイナウォレットや HashPort Wallet もおすすめです。',
+    'MetaMask が基本です。初めての方には、アプリの中に JPYC EX が組み込まれていて、JPYC を手に入れる (発行) ことも日本円に戻す (償還) こともアプリの中でできる、HashPort Wallet やマイナウォレットもおすすめです。',
   wallets: [
     {
       id: 'metamask',
@@ -115,14 +121,14 @@ const JA: WalletGuideContent = {
       body: 'いちばん広く使われているウォレットです。MetaMask のアプリの中のブラウザで支払い画面を開くと、そのまま接続できます。',
     },
     {
-      id: 'myna',
-      name: 'マイナウォレット',
-      body: 'マイナンバーカードを使うウォレットです。JPYC EX の本人確認にもマイナンバーカードを使うので、はじめての方に向いています。アプリの中で JPYC の発行・償還ができます。OpenPay には WalletConnect でつなぎます。',
-    },
-    {
       id: 'hashport',
       name: 'HashPort Wallet',
       body: 'アプリの中で JPYC の発行・償還ができます。OpenPay には WalletConnect でつなぎます。',
+    },
+    {
+      id: 'myna',
+      name: 'マイナウォレット',
+      body: 'マイナンバーカードを使うウォレットです。JPYC EX の本人確認にもマイナンバーカードを使うので、はじめての方に向いています。アプリの中で JPYC の発行・償還ができます。OpenPay には WalletConnect でつなぎます。ガス代不要の支払い (ガスレス決済) と、お店がガス代を負担する支払いには使えません。支払い画面で通常支払いに切り替えると払えます (Polygon で確かめました)。',
     },
     {
       id: 'upbond',
@@ -187,7 +193,7 @@ const JA: WalletGuideContent = {
 const EN: WalletGuideContent = {
   metaTitle: 'Choosing a wallet — wallets for paying with JPYC and how to connect them',
   metaDescription:
-    'Which wallet to use for paying with JPYC on OpenPay. MetaMask is the standard; if you are new to wallets, MynaWallet and HashPort Wallet are good choices too. How to scan the shop’s QR and how to connect with WalletConnect.',
+    'Which wallet to use for paying with JPYC on OpenPay. MetaMask is the standard; if you are new to wallets, HashPort Wallet and MynaWallet are good choices too. How to scan the shop’s QR and how to connect with WalletConnect.',
   subtitle: 'Which wallet to use for paying with JPYC, and how to connect it.',
   lead: 'To pay with OpenPay you need your own wallet with JPYC in it. You do not need to install an OpenPay app or sign up. Here are the recommended wallets, how to scan the shop’s QR, and how to connect your wallet.',
   scanCta: { path: '/scan', label: 'Scan to pay' },
@@ -198,7 +204,7 @@ const EN: WalletGuideContent = {
 
   walletsTitle: 'Recommended wallets',
   walletLead:
-    'MetaMask is the standard. If you are new to wallets, MynaWallet and HashPort Wallet are good choices too: JPYC EX is built into these apps, so you can get JPYC (issuance) and turn it back into yen (redemption) inside the app.',
+    'MetaMask is the standard. If you are new to wallets, HashPort Wallet and MynaWallet are good choices too: JPYC EX is built into these apps, so you can get JPYC (issuance) and turn it back into yen (redemption) inside the app.',
   wallets: [
     {
       id: 'metamask',
@@ -206,14 +212,14 @@ const EN: WalletGuideContent = {
       body: 'The most widely used wallet. Open the payment screen in the browser inside the MetaMask app and it connects as is.',
     },
     {
-      id: 'myna',
-      name: 'MynaWallet',
-      body: 'A wallet that uses the My Number Card (Japan’s individual number card). JPYC EX also uses the My Number Card for identity verification, so it suits first-time users. Issue and redeem JPYC inside the app. Connect it to OpenPay with WalletConnect.',
-    },
-    {
       id: 'hashport',
       name: 'HashPort Wallet',
       body: 'Issue and redeem JPYC inside the app. Connect it to OpenPay with WalletConnect.',
+    },
+    {
+      id: 'myna',
+      name: 'MynaWallet',
+      body: 'A wallet that uses the My Number Card (Japan’s individual number card). JPYC EX also uses the My Number Card for identity verification, so it suits first-time users. Issue and redeem JPYC inside the app. Connect it to OpenPay with WalletConnect. It cannot be used for payments with no gas fee (gasless payments) or for payments where the shop pays the gas. Switch to standard payment on the payment screen and you can pay (we checked this on Polygon).',
     },
     {
       id: 'upbond',
