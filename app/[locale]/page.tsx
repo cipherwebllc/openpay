@@ -1,6 +1,6 @@
 // トップページ = 紹介 LP。Server Component (LCP / SEO 優先)。
 // AppShell (Client) の中に Server-rendered の各 Landing* セクションを並べる。
-// 並び: ヒーロー → モバイルオーダー → 本文 → 使い方 → 料金 (5 つの場合) → FAQ → 信頼 (応援カードを含む締め)。
+// 並び: ヒーロー → モバイルオーダー → 本文 → 使い方 → 料金 (5 つの場合) → FAQ → 信頼 (応援カードを含む締め) → スポンサー募集の小さな案内。
 
 import { setRequestLocale } from 'next-intl/server';
 import { RouteMessages } from '@/i18n/RouteMessages';
@@ -20,6 +20,7 @@ import { LandingOrderLink } from '@/components/LandingOrderLink';
 import { LandingFaq } from '@/components/LandingFaq';
 import { LandingSupport } from '@/components/LandingSupport';
 import { LandingTrust } from '@/components/LandingTrust';
+import { LandingSponsorsNote } from '@/components/LandingSponsorsNote';
 import { LandingBand } from '@/components/LandingSectionHeader';
 import { LandingYourOpenPay } from '@/components/LandingYourOpenPay';
 
@@ -78,6 +79,8 @@ export default async function HomePage({
         <LandingSupport />
         <LandingFaq />
         <LandingTrust />
+        {/* 締めの後に、スポンサー・広告掲載の募集 (/sponsors) への小さな案内 (節にしない・2026-11-18 user 裁定の第 1 段)。 */}
+        <LandingSponsorsNote />
       </AppShell>
     </RouteMessages>
   );

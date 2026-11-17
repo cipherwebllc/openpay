@@ -1,6 +1,6 @@
 // 全 page 共通の footer。app/[locale]/layout.tsx から 1 度だけ render される。
 // 役割は (1) legal page (/terms /privacy /disclaimer) への導線、(2) 事業者表記
-// + copyright、(3) お問い合わせ (Discord) と SNS 行。技術スタックの羅列はここに置かない
+// + copyright、(3) お問い合わせ (Discord)・スポンサー・広告の募集 (/sponsors) と SNS 行。技術スタックの羅列はここに置かない
 // (技術は運用透明性ページと GitHub にある・2026-10-25 user 裁定)。
 //
 // QR ポスター印刷時は不要なので `print:hidden` で全体を非表示にする。
@@ -13,6 +13,7 @@ import { useTranslations } from 'next-intl';
 import { env } from '@/lib/env';
 import { isHandlePagePath } from '@/lib/handlePath';
 import { LEGAL_ENTITY } from '@/lib/legal';
+import { OPENPAY_DISCORD_URL, OPENPAY_X_URL } from '@/lib/officialLinks';
 import {
   DISCORD_ICON_PATH,
   GITHUB_ICON_PATH,
@@ -22,16 +23,16 @@ import {
 } from '@/lib/socialIconPaths';
 
 // 公開のメールアドレスは載せず、お問い合わせの行き先は Discord (2026-10-25 user 裁定)。SNS 行の Discord と同じ URL を共有する。
-const DISCORD_URL = 'https://discord.gg/Cfywb3aNWg';
-
+// Discord と X の URL は lib/officialLinks.ts (スポンサー・広告掲載のご案内の問い合わせのボタンと同じ値・二重に持たない)。
+//
 // 最下段の SNS・ソースのアイコン行。アイコンは @handle の SNS 行と同じ simple-icons (lib/socialIconPaths.ts)。
 // 文字が無いので a11y 名は aria-label (= title のツールチップと同じ文言) で付ける。
 // size は見た目の大きさをそろえるための px (横長の YouTube は少し大きく、塗りの多い note は小さく)。
 const SOCIAL_LINKS = [
-  { href: 'https://x.com/openpay_jp', labelKey: 'xLink', path: X_ICON_PATH, size: 14 },
+  { href: OPENPAY_X_URL, labelKey: 'xLink', path: X_ICON_PATH, size: 14 },
   { href: 'https://www.youtube.com/@openpay_jp?sub_confirmation=1', labelKey: 'youtubeLink', path: YOUTUBE_ICON_PATH, size: 18 },
   { href: 'https://note.com/masia02/m/mf28261a21eb1', labelKey: 'noteLink', path: NOTE_ICON_PATH, size: 13 },
-  { href: DISCORD_URL, labelKey: 'discordLink', path: DISCORD_ICON_PATH, size: 16 },
+  { href: OPENPAY_DISCORD_URL, labelKey: 'discordLink', path: DISCORD_ICON_PATH, size: 16 },
   { href: 'https://github.com/cipherwebllc/openpay', labelKey: 'sourceLink', path: GITHUB_ICON_PATH, size: 16 },
 ] as const;
 
@@ -125,10 +126,17 @@ export function SiteFooter() {
             {t('links.storeLibrary')}
           </Link>
         )}
+        {/* スポンサー・広告掲載のご案内 (/sponsors・2026-11-18 user 裁定)。お問い合わせの直前 (列の終わり) に置き、ガイド・料金・法務の
+            並びを動かさない。@handle ページでは、お問い合わせと同じく OpenPay 側の導線なので出さない。 */}
+        {!onHandlePage && (
+          <Link href="/sponsors" className="hover:text-slate-700 hover:underline" prefetch={false}>
+            {t('links.sponsors')}
+          </Link>
+        )}
         {/* お問い合わせ (Discord)。@handle ページでは SNS 行と同じく OpenPay 側の導線なので出さない。 */}
         {!onHandlePage && (
           <a
-            href={DISCORD_URL}
+            href={OPENPAY_DISCORD_URL}
             target="_blank"
             rel="noopener noreferrer"
             className="hover:text-slate-700 hover:underline"

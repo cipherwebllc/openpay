@@ -167,6 +167,9 @@ const BUDGETS_KB = {
   '/[locale]/orders/pickup': 228, // 実測 223
   '/[locale]/pricing': 243, // 実測 238
   '/[locale]/privacy': 220, // 実測 215
+  // 2026-11-18 新設 (server だけで描く・client は AppShell とフッターだけ)。手元 (macOS) の本番 flag build で 238 kB。同じ build で
+  // /transparency も 238 kB (予算 241 = CI の実測 236 + 5) なので同じ 241 にする。merge 前に CI の表の値で採り直す。
+  '/[locale]/sponsors': 241,
   '/[locale]/store/library': 262, // 実測 257
   '/[locale]/store/seller/[address]': 241, // 実測 236
   '/[locale]/terms': 220, // 実測 215

@@ -25,6 +25,7 @@ import { LandingMobileOrder } from '@/components/LandingMobileOrder';
 import { LandingOrderLink } from '@/components/LandingOrderLink';
 import { LandingBand } from '@/components/LandingSectionHeader';
 import { LandingSellables } from '@/components/LandingSellables';
+import { LandingSponsorsNote } from '@/components/LandingSponsorsNote';
 import { LandingSupport } from '@/components/LandingSupport';
 import { LandingTrust } from '@/components/LandingTrust';
 import { LandingUseCases } from '@/components/LandingUseCases';
@@ -45,6 +46,7 @@ import {
   LANDING_TEXT_LINK,
 } from '@/components/LandingControls';
 import { PAYER_TONE } from '@/components/pricing/PayerPill';
+import { sponsorsContentFor } from '@/lib/sponsors';
 import { textHolder } from '@/tests/helpers/phrased';
 
 vi.mock('next-intl/server', () => ({
@@ -122,9 +124,11 @@ describe('トップの節の入口は、役割ごとに 1 つの型を使う', (
     expectType(within(trust).getByRole('link', { name: new RegExp(L.trustGithubLabel.replace(/[()]/g, '\\$&')) }), LANDING_SECONDARY.onDark);
   });
 
-  it('矢印つきの文字リンク: 紺 (料金)・緑 (注文リンク・ガイド)', async () => {
+  it('矢印つきの文字リンク: 紺 (料金・スポンサー募集)・緑 (注文リンク・ガイド)', async () => {
     const pricing = render(await LandingSupport()).container;
     expectType(link(pricing, L.supportFeeDetailsLink), LANDING_TEXT_LINK.brand);
+    const sponsors = render(await LandingSponsorsNote()).container;
+    expectType(link(sponsors, sponsorsContentFor('ja').title), LANDING_TEXT_LINK.brand);
     const orderLink = render(await LandingOrderLink()).container;
     expectType(link(orderLink, L.orderLinkStripLink), LANDING_TEXT_LINK.shop);
     const guides = render(await LandingEntryPoints()).container;
@@ -234,6 +238,7 @@ const SECTIONS: Record<string, () => Promise<ReactNode>> = {
   LandingSupport,
   LandingFaq,
   LandingTrust,
+  LandingSponsorsNote,
 };
 const PAGE_SOURCE = readFileSync(join(process.cwd(), 'app/[locale]/page.tsx'), 'utf8');
 
