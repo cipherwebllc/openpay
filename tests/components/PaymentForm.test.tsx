@@ -3421,6 +3421,9 @@ describe('PaymentForm — ガスレスで払えないウォレット (7702 で�
     vi.mocked(useGaslessUnsupportedWallet).mockImplementation((_address, _chainId, enabled) => enabled);
   }
   const lastHookArgs = () => vi.mocked(useGaslessUnsupportedWallet).mock.lastCall;
+  // 見分けた口座が通常決済に切り替えた後の文 (user 承認 2026-11-18)。
+  const STANDARD_TITLE = '通常決済';
+  const STANDARD_BODY = 'ガス代（POL）が要るかどうかは、ウォレットの確認画面に出ます。OpenPay はガス代を肩代わりしません。お支払いは 1 件です。ウォレットで承認してください。';
 
   it('署名の前: 支払いボタンの上に案内と切り替えのボタンを出し、支払いボタンは押せるまま (押すと今までどおり relay で送る)', async () => {
     const user = userEvent.setup();
@@ -3445,16 +3448,33 @@ describe('PaymentForm — ガスレスで払えないウォレット (7702 で�
     expect(standardMutate).not.toHaveBeenCalled();
   });
 
-  it('切り替えのボタンで通常決済へ (案内が消え、見分けも止める)', async () => {
+  it('切り替えのボタンで通常決済へ: 案内が消え、通常決済の枠は「ガス代が要るかどうかはウォレットの確認画面に出ます」の文 (見分けは同じ組のまま続ける)', async () => {
     const user = userEvent.setup();
     setupRelayFree();
     setUnsupported();
     render(<PaymentForm />);
+    const before = lastHookArgs();
 
     await user.click(screen.getByRole('button', SWITCH));
     expect(screen.queryByText(TITLE)).toBeNull();
+    expect(screen.getByText(STANDARD_TITLE)).toBeInTheDocument();
+    expect(screen.getByText(STANDARD_BODY)).toBeInTheDocument();
+    expect(screen.queryByText(/通常決済（ガス代は自分で負担）/)).toBeNull();
+    expect(screen.queryByText(/ガス代残高が必要/)).toBeNull();
+    // 切り替えの前後で hook に渡す組 (アドレス・チェーン・enabled) は同じ = 同じ key で読み直さない。
+    expect(lastHookArgs()).toEqual(before);
+    expect(before).toEqual([CUSTOMER, polygonAmoy.id, true, 'pay']);
+  });
+
+  it('見分けていない (ふつうの) ウォレットが通常決済に切り替えた後は、今の文のまま', async () => {
+    const user = userEvent.setup();
+    setupRelayFree();
+    setRelay('error', { errMsg: 'rate_limited' });
+    render(<PaymentForm />);
+    await user.click(screen.getByRole('button', { name: /通常支払い（自分でガスを払う）に切り替える/ }));
     expect(screen.getAllByText(/通常決済（ガス代は自分で負担）/).length).toBeGreaterThanOrEqual(1);
-    expect(lastHookArgs()?.[2]).toBe(false);
+    expect(screen.getByText(/のガス代残高が必要です/)).toBeInTheDocument();
+    expect(screen.queryByText(STANDARD_BODY)).toBeNull();
   });
 
   it.each([
@@ -3471,12 +3491,43 @@ describe('PaymentForm — ガスレスで払えないウォレット (7702 で�
     expect(screen.queryByRole('button', SWITCH)).toBeNull();
   });
 
-  it('通常決済 (mode=standard) では見分けない (hook は enabled=false・案内なし)', () => {
+  it('通常決済の QR (mode=standard): 署名前の案内 (切り替えのボタン) は出さず、見分けた口座には通常決済の枠を新しい文で出す', () => {
     setupRelayFree(`to=${MERCHANT}&token=jpyc&amount=300&mode=standard`);
+    setUnsupported();
+    render(<PaymentForm />);
+    // 通常決済でなければ relay になる (JPYC・Polygon) ので見分ける。
+    expect(lastHookArgs()?.[2]).toBe(true);
+    expect(screen.queryByText(TITLE)).toBeNull();
+    expect(screen.queryByRole('button', SWITCH)).toBeNull();
+    expect(screen.getByText(STANDARD_TITLE)).toBeInTheDocument();
+    expect(screen.getByText(STANDARD_BODY)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /300 JPYC を支払う/ })).toBeEnabled();
+  });
+
+  it('通常決済の QR (mode=standard) で見分けていないウォレットは、今の文のまま', () => {
+    setupRelayFree(`to=${MERCHANT}&token=jpyc&amount=300&mode=standard`);
+    render(<PaymentForm />);
+    expect(screen.getByText('通常決済（ガス代は自分で負担）')).toBeInTheDocument();
+    expect(screen.getByText(/のガス代残高が必要です/)).toBeInTheDocument();
+    expect(screen.queryByText(STANDARD_TITLE)).toBeNull();
+  });
+
+  it('USDC は見分けない (hook は enabled=false)', () => {
+    setURL(`to=${MERCHANT}&token=usdc&amount=10`);
+    setAccount({ connected: true, chainId: baseSepolia.id });
     setUnsupported();
     render(<PaymentForm />);
     expect(lastHookArgs()?.[2]).toBe(false);
     expect(screen.queryByText(TITLE)).toBeNull();
+  });
+
+  it('USDC の通常決済 (mode=standard) も見分けない (hook は enabled=false・今の文)', () => {
+    setURL(`to=${MERCHANT}&token=usdc&amount=10&mode=standard`);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setUnsupported();
+    render(<PaymentForm />);
+    expect(lastHookArgs()?.[2]).toBe(false);
+    expect(screen.queryByText(STANDARD_TITLE)).toBeNull();
   });
 
   it('split つきの QR は relay を外すので見分けない (hook は enabled=false・案内なし)', () => {
@@ -3540,7 +3591,8 @@ describe('PaymentForm — ガスレスで払えないウォレット (7702 で�
     expect(screen.getAllByRole('button', { name: /通常支払い/ })).toHaveLength(1);
     await user.click(screen.getByRole('button', SWITCH));
     expect(screen.queryByText(TITLE)).toBeNull();
-    expect(screen.getAllByText(/通常決済（ガス代は自分で負担）/).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText(STANDARD_TITLE)).toBeInTheDocument();
+    expect(screen.getByText(STANDARD_BODY)).toBeInTheDocument();
   });
 
   it('signature_mismatch は今までどおり (「一時的」の題と generic の文・払えない形にしない)', () => {
@@ -3562,6 +3614,18 @@ describe('PaymentForm — ガスレスで払えないウォレット (7702 で�
       screen.getByText("You can pay by switching to standard payment. Your wallet's confirmation screen shows whether a gas fee is needed."),
     ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Switch to standard payment' })).toBeInTheDocument();
+  });
+
+  it('en: 見分けた口座の通常決済の枠も同じ中身の英訳', () => {
+    setupRelayFree(`to=${MERCHANT}&token=jpyc&amount=300&mode=standard`);
+    setUnsupported();
+    render(<PaymentForm />, { locale: 'en' });
+    expect(screen.getByText('Standard payment')).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Your wallet's confirmation screen shows whether a gas fee (POL) is needed. OpenPay does not sponsor gas. The payment is a single transfer — approve it in your wallet.",
+      ),
+    ).toBeInTheDocument();
   });
 });
 

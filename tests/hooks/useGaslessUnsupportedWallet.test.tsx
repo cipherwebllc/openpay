@@ -139,6 +139,18 @@ describe('useGaslessUnsupportedWallet', () => {
     expect(result.current).toBe(true);
   });
 
+  // 通常決済に切り替えても、フォームは同じ組 (アドレス・チェーン・enabled = relayCapable) を渡し続ける (components/PaymentForm.tsx)。
+  // 同じ組の描き直しでは読み直さず、結果を保つ (切り替えた後の通常決済の文を、同じ口座の結果で選ぶ)。
+  it('同じ組で何度描き直しても読み取りは 1 回で、結果を保つ', async () => {
+    const { result, rerender } = setup({ address: A, chainId: 137, enabled: true });
+    await waitFor(() => expect(pending).toHaveLength(1));
+    await settle(0, true);
+    for (let i = 0; i < 3; i += 1) rerender({ address: A, chainId: 137, enabled: true });
+    await act(async () => {});
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(result.current).toBe(true);
+  });
+
   // 前の true が失効しないと、同じ組に戻ったときに読み込み中から true になり、新しい読み取りが false / 失敗でも true のまま
   // になる (約束「読み込み中・失敗は false・古い結果を使わない」に反する)。入力が変わるたびに前の結果を捨てる。
   describe('同じ組に戻っても、前の結果を使わない', () => {

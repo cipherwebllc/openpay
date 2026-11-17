@@ -185,7 +185,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
   //   - standardRequested: params.mode='standard' か SA fallback の override。
   //   - PaymentForm は split 決済に対応するため disableRelay=hasSplit を渡す (現行 useRelay の
   //     `!hasSplit` ガード相当。split は Phase 1 relay 非対応なので非 relay 経路へ倒す)。
-  const { route, isStandard, useRelay, useRecover, isCircle } = usePaymentRoute({
+  const { route, isStandard, useRelay, useRecover, isCircle, relayCapable } = usePaymentRoute({
     deployment,
     walletChainId: chainId,
     standardRequested:
@@ -221,10 +221,11 @@ function PaymentDetails({ params }: { params: PayParams }) {
     chainId: deployment.chainId,
     enabled: useRelay,
   });
-  // relay 経路で、つないだウォレットが 7702 でない contract の口座 (ガスレスの署名が通らない) か。署名 *前* の案内だけに使い、
-  // 送信の可否 (canSubmit) は変えない。読み込み中・読めないときは false (hooks/useGaslessUnsupportedWallet.ts)。
-  // split つきの QR は relay を外す (disableRelay) ので対象外。
-  const unsupportedWallet = useGaslessUnsupportedWallet(address, deployment.chainId, useRelay, 'pay');
+  // つないだウォレットが 7702 でない contract の口座 (ガスレスの署名が通らない) か。案内だけに使い、送信の可否 (canSubmit) は
+  // 変えない。読み込み中・読めないときは false (hooks/useGaslessUnsupportedWallet.ts)。見分けるのは、通常決済でなければ relay に
+  // なる場合 (relayCapable) で、通常決済に切り替えた後も同じ口座の結果を保ち、通常決済の説明の文を選ぶのに使う。
+  // split つきの QR は relay を外す (disableRelay) ので対象外。USDC も対象外。
+  const unsupportedWallet = useGaslessUnsupportedWallet(address, deployment.chainId, relayCapable, 'pay');
 
   // 確定モデル (2026-06-12): JPYC recover 決済は店舗が常に手数料を吸収する固定 (gasMode=merchant)。
   // 旧 QR が gas=customer を載せていても無視し merchant に倒す (発行済 QR の audience は極小で
@@ -591,6 +592,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
   // 払えないウォレットの署名 *前* の案内 (Layer B と同じ除外・押せるまま)。degraded と同時なら、こちらを 1 枚だけ出す
   // (混雑が直ってもこのウォレットでは払えないため)。署名の後に断られたとき (signature_invalid) は Layer A が同じ形で出す。
   const unsupportedPreflightActive =
+    useRelay &&
     unsupportedWallet &&
     !relay.isPending &&
     !relayAmbiguous &&
@@ -1238,13 +1240,15 @@ function PaymentDetails({ params }: { params: PayParams }) {
         </div>
       )}
 
+      {/* 払えないウォレット (7702 でない contract の口座) と見分けたときは、ガス代が要るとは言い切らない文にする (この口座の
+          通常決済は、ウォレットの側でガス代を払う仕組みのことがある・ウォレットの確認画面に出る)。 */}
       {isStandard && (
         <div className="rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
-          <p className="font-semibold">{t('standardModeTitle')}</p>
+          <p className="font-semibold">{t(unsupportedWallet ? 'standardModeUnsupportedTitle' : 'standardModeTitle')}</p>
           <p className="mt-1 text-xs">
             {params.chain === 'arc'
               ? t('standardModeArcBody')
-              : t('standardModeBody', { nativeToken })}
+              : t(unsupportedWallet ? 'standardModeUnsupportedBody' : 'standardModeBody', { nativeToken })}
           </p>
         </div>
       )}

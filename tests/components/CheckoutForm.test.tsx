@@ -2923,6 +2923,10 @@ describe('CheckoutForm — JPYC EIP-3009 relay 経路', () => {
       vi.mocked(useGaslessUnsupportedWallet).mockImplementation((_address, _chainId, enabled) => enabled);
     }
     const lastHookArgs = () => vi.mocked(useGaslessUnsupportedWallet).mock.lastCall;
+    // 見分けた口座が通常決済に切り替えた後の文 (user 承認 2026-11-18)。見出し (CheckoutHeader の印) と内訳の下の説明。
+    // 印は「支払先 … · チェーン · トークン · 印」の 1 行の末尾に出る。
+    const STANDARD_BADGE = /· 通常決済$/;
+    const STANDARD_BODY = 'ガス代（POL）が要るかどうかは、ウォレットの確認画面に出ます。OpenPay はガス代を肩代わりしません。お支払いは 1 件です。ウォレットで承認してください。';
 
     it('署名の前: 支払いボタンの上に案内と切り替えのボタンを出し、支払いボタンは押せるまま (押すと relay で送る)', async () => {
       const user = userEvent.setup();
@@ -2943,14 +2947,29 @@ describe('CheckoutForm — JPYC EIP-3009 relay 経路', () => {
       expect(relayMutate).toHaveBeenCalledOnce();
     });
 
-    it('切り替えのボタンで通常決済へ (案内が消え、見分けも止める)', async () => {
+    it('切り替えのボタンで通常決済へ: 案内が消え、見出しは「通常決済」・説明は「ガス代が要るかどうかはウォレットの確認画面に出ます」(見分けは同じ組のまま)', async () => {
       const user = userEvent.setup();
       setupRelayReady();
       setUnsupported();
       render(<CheckoutForm params={JPYC_PARAMS} />);
+      const before = lastHookArgs();
       await user.click(screen.getByRole('button', SWITCH));
       expect(screen.queryByText(TITLE)).toBeNull();
-      expect(lastHookArgs()?.[2]).toBe(false);
+      expect(screen.getByText(STANDARD_BADGE)).toBeInTheDocument();
+      expect(screen.getByText(STANDARD_BODY)).toBeInTheDocument();
+      expect(screen.queryByText(/通常決済（ガス代は自分で負担）/)).toBeNull();
+      expect(screen.queryByText(/ウォレット側で別途請求されます/)).toBeNull();
+      // 切り替えの前後で hook に渡す組は同じ = 同じ key で読み直さない。
+      expect(lastHookArgs()).toEqual(before);
+      expect(before).toEqual([CUSTOMER, polygonAmoy.id, true, 'checkout']);
+    });
+
+    it('見分けていない (ふつうの) ウォレットの通常決済は、今の見出しと説明のまま', () => {
+      setupRelayReady();
+      render(<CheckoutForm params={{ ...JPYC_PARAMS, mode: 'standard' }} />);
+      expect(screen.getByText(/· 通常決済（ガス代は自分で負担）$/)).toBeInTheDocument();
+      expect(screen.getByText(/ウォレット側で別途請求されます/)).toBeInTheDocument();
+      expect(screen.queryByText(STANDARD_BODY)).toBeNull();
     });
 
     it.each([
@@ -2967,12 +2986,25 @@ describe('CheckoutForm — JPYC EIP-3009 relay 経路', () => {
       expect(screen.queryByRole('button', SWITCH)).toBeNull();
     });
 
-    it('通常決済 (mode=standard) では見分けない (hook は enabled=false・案内なし)', () => {
+    it('通常決済のリンク (mode=standard): 署名前の案内は出さず、見分けた口座には新しい見出しと説明を出す', () => {
       setupRelayReady();
       setUnsupported();
       render(<CheckoutForm params={{ ...JPYC_PARAMS, mode: 'standard' }} />);
+      // 通常決済でなければ relay になる (JPYC・Polygon) ので見分ける。
+      expect(lastHookArgs()?.[2]).toBe(true);
+      expect(screen.queryByText(TITLE)).toBeNull();
+      expect(screen.queryByRole('button', SWITCH)).toBeNull();
+      expect(screen.getByText(STANDARD_BADGE)).toBeInTheDocument();
+      expect(screen.getByText(STANDARD_BODY)).toBeInTheDocument();
+    });
+
+    it('USDC は見分けない (hook は enabled=false)', () => {
+      setAccount({ connected: true, chainId: baseSepolia.id });
+      setUnsupported();
+      render(<CheckoutForm params={USDC_PARAMS} />);
       expect(lastHookArgs()?.[2]).toBe(false);
       expect(screen.queryByText(TITLE)).toBeNull();
+      expect(screen.queryByText(STANDARD_BODY)).toBeNull();
     });
 
     it('混雑 (degraded) と同時なら、払えないウォレットの案内を 1 枚だけ出す', () => {
