@@ -190,6 +190,10 @@ function scrubRefererHeaders(headers: Record<string, string> | undefined): void 
 function scrubServerTraceData(data: Record<string, unknown> | undefined): void {
   if (!data) return;
   delete data['url.query'];
+  // 受けた request の本文 (http.request.body.*) を span に持たせない (下の scrubSentryServerEvent の request.data と同じ理由)。
+  for (const key of Object.keys(data)) {
+    if (key.toLowerCase().startsWith('http.request.body')) delete data[key];
+  }
   // span 側にも同じ別表現が付き得る (上の scrubUrlFields と同じ理由)。
   delete data['http.query'];
   delete data['http.fragment'];
@@ -271,6 +275,10 @@ export function scrubSentryServerEvent<T extends Event>(event: T): T | null {
     scrubTraceUrlFields(event);
     if (event.request) {
       delete event.request.query_string;
+      // 受けた request の本文を Sentry へ送らない。httpServerIntegration は既定 ('medium') で本文を event.request.data に
+      // 入れる (instrumentation.ts で 'none' にした・ここは別の入口 (captureRequestError 等) の分の二段目)。本文には
+      // 出品の有料の本文・納品 URL・署名などが入りうるので、第三者 (Sentry) へ波及させない。
+      delete event.request.data;
       scrubRefererHeaders(event.request.headers);
     }
     scrubServerTraceData(event.contexts?.trace?.data);

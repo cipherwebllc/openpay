@@ -38,6 +38,9 @@ export async function register(): Promise<void> {
       environment: sentryEnvironment(process.env.NEXT_PUBLIC_NETWORK_ENV, !process.env.VERCEL),
       tracesSampleRate: 1.0,
       ...sentryPrivacyOptions,
+      // 受けた request の本文を event に採らない (既定の 'medium' は約 10 KB まで採る)。出品の有料の本文・納品 URL・
+      // 署名などを第三者 (Sentry) へ波及させない。lib/telemetryRedaction.ts でも request.data を消す (二段構え)。
+      integrations: [Sentry.httpIntegration({ maxIncomingRequestBodySize: 'none' })],
     });
   }
 
