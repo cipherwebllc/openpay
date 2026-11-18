@@ -38,6 +38,20 @@ export type NewsItem = {
 // 表示順を強制しないが、可読性のため宣言時点でも新しい順に並べる。
 export const NEWS_ITEMS: readonly NewsItem[] = [
   {
+    id: 'shop-history-standard-2026-11-19',
+    date: '2026-11-19',
+    category: 'feature',
+    title: {
+      ja: 'お店の QR の通常決済も、取引履歴に出るようになりました',
+      en: 'Standard payments to your shop’s QR now show up in your history',
+    },
+    body: {
+      ja: 'お客様が決済QR・レジを、Polygon のガス代を自分で払う通常決済で払った入金も、QR を出していた端末の取引履歴に載るようになりました。ガス代不要の QR から通常決済に切り替えた支払いも対象です。くわしくは『取引履歴と会計 CSV』のガイドへ。',
+      en: 'When a customer pays your Payment QR or Register with a standard payment on Polygon, paying the gas fee themselves, the payment now appears in the history of the device that showed the QR. This also covers payments switched to a standard payment from a no-gas-fee QR. See the “History & accounting CSV” guide for details.',
+    },
+    link: { href: '/guide/history', labelJa: '取引履歴のガイドを見る', labelEn: 'See the transaction history guide' },
+  },
+  {
     id: 'shop-history-sales-2026-11-18',
     date: '2026-11-18',
     category: 'feature',
