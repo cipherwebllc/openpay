@@ -83,6 +83,9 @@ const JA: HistoryGuideContent = {
   notInHistoryTitle: '履歴に出ない入金',
   notInHistory: [
     'USDC',
+    // 同じ画面で、うまくいかなかった後に払い直した通常決済は会計の印を付けない (hooks/useStandardPayment.ts の逃げ道) ので、
+    // お店の端末の履歴にも QR の画面の確認にも出ない (2026-11-19 運営者の承認)。
+    '通常決済で、うまくいかなかった後に同じ画面から払い直した入金',
     'ウォレットのアプリで読む QR',
     '印刷・保存・コピーした QR や、金額なしの QR での入金',
     '注文リンク',
@@ -124,6 +127,7 @@ const EN: HistoryGuideContent = {
   notInHistoryTitle: 'Incoming payments that do not show up in your history',
   notInHistory: [
     'USDC',
+    'Standard payments made again from the same screen after an attempt that did not go through',
     'QR codes scanned with a wallet app',
     'Payments to QR codes that were printed, saved or copied, or that have no amount',
     'Order links',

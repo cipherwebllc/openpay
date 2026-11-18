@@ -70,7 +70,7 @@ describe('取引履歴のガイド (content)', () => {
     expect(c.notInHistoryTitle).toBe('履歴に出ない入金');
     // 承認の文は「・」で並べた 1 文。一覧にするために「・」で分けただけで、並びと語は変えない。
     expect(`${c.notInHistory.join('・')}。${c.notInHistoryCheck}`).toBe(
-      'USDC・ウォレットのアプリで読む QR・印刷・保存・コピーした QR や、金額なしの QR での入金・注文リンク・QR を閉じて 60 秒より後や、受け取るページを離れた後に届いた入金・ほかの端末やブラウザで受けた入金。これらは受取のウォレットか、ブロックチェーンのエクスプローラーで確かめてください。',
+      'USDC・通常決済で、うまくいかなかった後に同じ画面から払い直した入金・ウォレットのアプリで読む QR・印刷・保存・コピーした QR や、金額なしの QR での入金・注文リンク・QR を閉じて 60 秒より後や、受け取るページを離れた後に届いた入金・ほかの端末やブラウザで受けた入金。これらは受取のウォレットか、ブロックチェーンのエクスプローラーで確かめてください。',
     );
     expect(c.csvTitle).toBe('会計 CSV');
     expect(c.csvBody).toBe('成功した売上だけを書き出します (freee・弥生・マネーフォワードの形式)。勘定科目は履歴ページで変えられます。');
@@ -174,8 +174,11 @@ describe('取引履歴のガイド (content)', () => {
       expect(guide.inHistory[0].text).not.toMatch(/Kaia|Avalanche|Ethereum|カイア|アバランチ|イーサリアム/i);
       for (const item of guide.notInHistory) expect(item).not.toMatch(/Polygon|Kaia|Avalanche|Ethereum/i);
     }
-    for (const item of jaGuide.notInHistory) expect(item).not.toContain('通常決済');
-    for (const item of enGuide.notInHistory) expect(item).not.toMatch(/standard payment/i);
+    // 「出ない入金」の通常決済は、同じ画面で払い直した入金の 1 行だけ (逃げ道で印を付けない送金・2026-11-19 承認)。
+    expect(jaGuide.notInHistory.filter((item) => item.includes('通常決済'))).toEqual(['通常決済で、うまくいかなかった後に同じ画面から払い直した入金']);
+    expect(enGuide.notInHistory.filter((item) => /standard payment/i.test(item))).toEqual([
+      'Standard payments made again from the same screen after an attempt that did not go through',
+    ]);
   });
 
   // ③ のモバイルオーダーは、払い方によらない: 通常決済で払われたモバイルオーダーの受注 (unboundPayment) も、
@@ -236,7 +239,7 @@ describe('取引履歴のガイド (content)', () => {
     }
   });
 
-  it('llms.txt にガイドの 1 行があり、上限の件数・60 秒・② の名前・① の Polygon の通常決済はガイドと同じ (出ない入金に通常決済は無い)', () => {
+  it('llms.txt にガイドの 1 行があり、上限の件数・60 秒・② の名前・① の Polygon の通常決済・出ない入金の払い直しはガイドと同じ', () => {
     const llms = readFileSync(join(process.cwd(), 'public', 'llms.txt'), 'utf8');
     const line = llms.split('\n').find((l) => l.includes('(https://open-pay.jp/ja/guide/history)'));
     expect(line).toBeDefined();
@@ -244,9 +247,11 @@ describe('取引履歴のガイド (content)', () => {
     expect(line).toContain(`${QR_SALE_KEEP_AFTER_HIDE_MS / 1000} 秒`);
     expect(line).toContain(ja.Create.storeDeviceStatusLabel);
     expect(line).toContain('JPYC で払ったとき (ガス代不要の払い方と、Polygon でガス代を自分で払う通常決済・QR を出していた端末に・');
-    // 通常決済が出るのは ① の中の 1 回だけ (「出ない入金」の並びに無い)。
-    expect(line!.match(/通常決済/g)).toHaveLength(1);
-    expect(line!.slice(line!.indexOf('と出ない入金 ('))).not.toContain('通常決済');
+    // 通常決済が出るのは ① の中と、「出ない入金」の同じ画面で払い直した入金の 2 回だけ。
+    expect(line!.match(/通常決済/g)).toHaveLength(2);
+    const notIn = line!.slice(line!.indexOf('と出ない入金 ('));
+    expect(notIn.match(/通常決済/g)).toHaveLength(1);
+    expect(notIn).toContain('通常決済で、うまくいかなかった後に同じ画面から払い直した入金');
     expect(line).toContain('金額を入れて画面に表示している QR だけ');
   });
 });
