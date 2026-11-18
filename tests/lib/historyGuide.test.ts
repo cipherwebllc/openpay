@@ -1,11 +1,11 @@
 // /guide/history「取引履歴と会計 CSV」の content (lib/historyGuide.ts) の検査:
-// - 本文は運営者の承認済みの文 (2026-11-18・同日の直し「直す案で」を含む) に、2026-11-19 の通常決済の直し (① に通常決済を足す・
-//   「履歴に出ない入金」から通常決済を外す) を入れた文のまま (ja)。ja / en の形がそろう
+// - 本文は運営者の承認済みの文 (2026-11-18・同日の直し「直す案で」を含む) に、2026-11-19 の通常決済の直し (① に Polygon の
+//   通常決済を足す・「履歴に出ない入金」から通常決済を外す・運営者の裁定 A) を入れた文のまま (ja・en)。ja / en の形がそろう
 // - 文が言う事実をコードと照合する:
 //   - 上限の件数: 受取の履歴 = HISTORY_MAX_ENTRIES・支払いの控え = PAYER_RECEIPTS_MAX (ガイド・llms.txt とも)
 //   - 「QR を閉じてから 60 秒」= 見張りの QR_SALE_KEEP_AFTER_HIDE_MS
 //   - ① は金額を入れて画面に表示している QR だけ = 決済QR の useQrBillKey の url / shown の条件
-//   - ① の「通常決済も」= 払う側が対象の通常決済の送金に印を付け、お店の端末が同じ印で照合する (hooks/useStdBillMark.ts・lib/qrSaleWatch.ts)
+//   - ① の通常決済 = 払う側が対象の通常決済の送金に印を付け、お店の端末が同じ印で照合する (hooks/useStdBillMark.ts・lib/qrSaleWatch.ts)
 //   - ③ のモバイルオーダーは、通常決済の受注も履歴の行になる (lib/orderFeedHistory.ts)
 //   - ② の名前 = 画面の名前 (Create.storeDeviceStatusLabel)
 // - 会計 CSV の形式の名前は、履歴ページの選択肢 (History.accountingFormat*) にある名前
@@ -50,7 +50,7 @@ function allText(c: HistoryGuideContent): string[] {
 }
 
 describe('取引履歴のガイド (content)', () => {
-  it('ja の本文は承認済みの文 (2026-11-18) に、通常決済の直し (2026-11-19) を入れた文のまま', () => {
+  it('ja の本文は承認済みの文 (2026-11-18) に、通常決済の直し (2026-11-19・裁定 A = 通常決済は Polygon と書く) を入れた文のまま', () => {
     const c = historyGuideContentFor('ja');
     expect(c.lead).toBe(
       '取引履歴は、このブラウザに保存される売上と支払いの控えです。OpenPay のサーバーには送りません。会計 CSV に書き出して、会計ソフトに取り込めます。',
@@ -59,7 +59,7 @@ describe('取引履歴のガイド (content)', () => {
     expect(c.inHistory).toEqual([
       {
         mark: '①',
-        text: 'お客様がお店の QR (決済QR・レジ) を JPYC で払ったとき (ガス代不要の払い方も、ガス代を自分で払う通常決済も・QR を出していた端末に・QR を閉じてから 60 秒まで)',
+        text: 'お客様がお店の QR (決済QR・レジ) を JPYC で払ったとき (ガス代不要の払い方と、Polygon でガス代を自分で払う通常決済・QR を出していた端末に・QR を閉じてから 60 秒まで)',
       },
       { mark: '②', text: 'お店がガス代を肩代わりして送る支払い (その端末に)' },
       { mark: '③', text: 'モバイルオーダー (店主としてサインインし、受注の画面を開いた端末に)' },
@@ -131,11 +131,13 @@ describe('取引履歴のガイド (content)', () => {
     expect(call).toMatch(/shown: qrModalOpen && /);
   });
 
-  // ① の「ガス代を自分で払う通常決済も」の出どころ (2026-11-19 に全員へ): 通常決済の QR にも印 (bk) が載り、払う側の通常決済は、
+  // ① の「ガス代を自分で払う通常決済」の出どころ (2026-11-19 に全員へ): 通常決済の QR にも印 (bk) が載り、払う側の通常決済は、
   // 対象の会計 (/pay は JPYC・金額あり・分配なし / /checkout は JPYC のレジの会計) の transfer の calldata に、URL の bk から作った印を
   // 足す (端末ごとのスイッチは無い)。お店の端末の見張り (lib/qrSaleWatch.ts) は、その印の付いた Transfer を照合して行にする。
   // 振る舞いは tests/hooks/useStdBillMark.test.tsx・tests/components/stdBillMarkForms.integration.test.tsx・
   // tests/components/qrSaleHistory.standardParity.test.tsx (払う側の calldata = お店の照合の calldata・印の無い入金は行にしない)。
+  // 文が「Polygon で」と書くのは、code の制限ではなく、実機で確かめたのが Polygon だけだから (運営者の裁定 A・2026-11-19)。
+  // ほかのチェーンの通常決済は、① にも「履歴に出ない入金」にも書かない。
   it('通常決済の払う側は、対象の会計の送金に印を付け (端末ごとのスイッチは無い)、お店の端末は同じ印で照合する = ガイドの ① に通常決済が入る', () => {
     const read = (file: string) => readFileSync(join(process.cwd(), file), 'utf8');
     // 印を作るのは印の hook だけ (フォームと通常決済の hook は作り方を知らない)。hook が見るのは対象か (eligible) と URL の bk だけ。
@@ -161,8 +163,17 @@ describe('取引履歴のガイド (content)', () => {
     // ガイド: ① に通常決済が入り、「履歴に出ない入金」に通常決済は無い (ja・en)。
     const jaGuide = historyGuideContentFor('ja');
     const enGuide = historyGuideContentFor('en');
-    expect(jaGuide.inHistory[0].text).toContain('ガス代を自分で払う通常決済も');
-    expect(enGuide.inHistory[0].text).toContain('a standard payment where they pay the gas fee themselves');
+    expect(jaGuide.inHistory[0].text).toContain('ガス代不要の払い方と、Polygon でガス代を自分で払う通常決済');
+    // en の ① も承認の文のまま。
+    expect(enGuide.inHistory[0].text).toBe(
+      'When a customer pays your shop’s QR (Payment QR or Register) in JPYC, with the no-gas-fee method or, on Polygon, a standard payment where they pay the gas fee themselves (on the device that showed the QR, up to 60 seconds after the QR is closed)',
+    );
+    // 通常決済のチェーンとして書くのは Polygon だけ (ほかのチェーンの名前を ① に書かない)。
+    for (const guide of [jaGuide, enGuide]) {
+      expect(guide.inHistory[0].text.match(/Polygon/g)).toHaveLength(1);
+      expect(guide.inHistory[0].text).not.toMatch(/Kaia|Avalanche|Ethereum|カイア|アバランチ|イーサリアム/i);
+      for (const item of guide.notInHistory) expect(item).not.toMatch(/Polygon|Kaia|Avalanche|Ethereum/i);
+    }
     for (const item of jaGuide.notInHistory) expect(item).not.toContain('通常決済');
     for (const item of enGuide.notInHistory) expect(item).not.toMatch(/standard payment/i);
   });
@@ -225,14 +236,14 @@ describe('取引履歴のガイド (content)', () => {
     }
   });
 
-  it('llms.txt にガイドの 1 行があり、上限の件数・60 秒・② の名前・① の通常決済はガイドと同じ (出ない入金に通常決済は無い)', () => {
+  it('llms.txt にガイドの 1 行があり、上限の件数・60 秒・② の名前・① の Polygon の通常決済はガイドと同じ (出ない入金に通常決済は無い)', () => {
     const llms = readFileSync(join(process.cwd(), 'public', 'llms.txt'), 'utf8');
     const line = llms.split('\n').find((l) => l.includes('(https://open-pay.jp/ja/guide/history)'));
     expect(line).toBeDefined();
     expect(line).toContain(`受取の履歴はブラウザごとに最大 ${MAX} 件・支払いの控えは ${RECEIPTS} 件`);
     expect(line).toContain(`${QR_SALE_KEEP_AFTER_HIDE_MS / 1000} 秒`);
     expect(line).toContain(ja.Create.storeDeviceStatusLabel);
-    expect(line).toContain('JPYC で払ったとき (ガス代不要の払い方も通常決済も・');
+    expect(line).toContain('JPYC で払ったとき (ガス代不要の払い方と、Polygon でガス代を自分で払う通常決済・QR を出していた端末に・');
     // 通常決済が出るのは ① の中の 1 回だけ (「出ない入金」の並びに無い)。
     expect(line!.match(/通常決済/g)).toHaveLength(1);
     expect(line!.slice(line!.indexOf('と出ない入金 ('))).not.toContain('通常決済');
