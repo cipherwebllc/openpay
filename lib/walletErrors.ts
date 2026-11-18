@@ -34,12 +34,16 @@ export function isConnectRejection(err: Error): boolean {
  * ウォレットが EIP-1193 の 4001 (userRejectedRequest) で答えたと、code で確かめられたか。文言では決めない (isUserRejection は
  * 'connection request reset' のような、ウォレットが tx を出した後に応答だけが失われたのかもしれない失敗も拒否に数える)。
  *
- * error の cause の連なりをたどり、いちばん奥の error (それ以上 cause の無い = ウォレットが投げた元の error) の code が数の 4001 の
- * ときだけ true。途中の 4001 では決めない (包む側が文言や別の code から作った 4001 かもしれない)。
+ * error の cause の連なりをたどり、次の両方のときだけ true:
+ *   - いちばん奥の error (それ以上 cause の無い = ウォレットが投げた元の error) の code が数の 4001。
+ *   - 途中の error の code は、無いか 4001 (4001 でない code が 1 つも無い)。
+ * 途中の 4001 だけでは決めない (包む側が文言や別の code から作った 4001 かもしれない)。奥の 4001 だけでも決めない (包んだ側が別の
+ * code を付けたなら、その 4001 が送信そのものへの答えかどうか分からない)。
  *   - wagmi の writeContract の拒否は ContractFunctionExecutionError → TransactionExecutionError → viem の
  *     UserRejectedRequestError (code 4001) → ウォレットが投げた元の error (code 4001) の形で届く (code があるのは奥の 2 つ)。
  *   - viem (utils/buildRequest.ts) は WalletConnect の 5000 (CAIP-25 の User Rejected) も UserRejectedRequestError (code 4001) に
  *     包む。元の error の code は 5000 なので false (EIP-1193 の 4001 ではない)。
+ *   - viem は、ウォレットが投げた error に code が無いと UnknownRpcError (code -1) に包む。その cause の奥に 4001 があっても false。
  *   - wagmi の walletConnect の connector は、接続・チェーンの切り替えで、文言 (user rejected・connection request reset) から
  *     UserRejectedRequestError (code 4001) を作る。元の error に code が無いので false。
  *   - 元の error の code が無い・数の 4001 でない ('4001' の文字列など) は false。
@@ -50,6 +54,7 @@ export function isEip1193UserRejection(err: unknown): boolean {
   for (let depth = 0; depth < 16; depth += 1) {
     if (typeof node !== 'object' || node === null) return false;
     const { code, cause } = node as { code?: unknown; cause?: unknown };
+    if (code !== undefined && code !== 4001) return false;
     if (cause === undefined || cause === null) return code === 4001;
     node = cause;
   }

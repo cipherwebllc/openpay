@@ -46,9 +46,9 @@ import goldenFromMain from '../fixtures/stdBillMarkGoldenHook.json';
 //   - 利用料の transfer・保存する intent には印が無い。
 //   - MUST-2: 印は writeContract に渡す 1 つの object の中 (登録簿と unmount の後の保存は object の同一性で見る)・送信待ちも対。
 //   - MUST-1: 印つきの送信は、その画面で 1 回まで。印つきで送る直前に同期で予約し、その後の送信は印なし (印つき A の応答待ちの
-//     間の B も)。予約を解くのは、ウォレットが投げた元の error (cause のいちばん奥) の code が EIP-1193 の 4001 で、その 4001 が
-//     ウォレット自身の答えである接続 (injected・WalletConnect) のときだけ (文言だけの「拒否」では解かない)。receipt・revert・
-//     置換は追わない。
+//     間の B も)。予約を解くのは、ウォレットが投げた元の error (cause のいちばん奥) の code が EIP-1193 の 4001 で (途中に 4001 で
+//     ない code が無く)、その 4001 がウォレット自身の答えである接続 (injected・WalletConnect) のときだけ (文言だけの「拒否」では
+//     解かない)。receipt・revert・置換は追わない。
 // 兄弟の useStandardPayment.unmount.test.tsx と同じ形の harness (この file の分だけを写した)。
 type ReceiptState = {
   data:
@@ -676,16 +676,30 @@ describe('useStandardPayment の dataSuffix (K4b・MUST-1): 印つきの送信�
     expect(byteLength(out.second)).toBe(100);
   });
 
-  it.each<[string, () => unknown]>([
-    ['Error でない object の 4001', () => ({ code: 4001, message: 'User rejected the request.' })],
-    [
-      'ウォレットの側の SDK が code の無い error で包んだ、cause の奥の 4001',
-      () => new Error('Request failed', { cause: Object.assign(new Error('User rejected the request.'), { code: 4001 }) }),
-    ],
-  ])('cause の連なりのいちばん奥の error の code が 4001 (%s) → 予約を解き、次も印つき (100 byte)', async (_name, make) => {
-    const out = await settleThenResend(rejectFirstWith(make), 'merchant-error');
-    expect(errorChain(out.error).at(-1)).toMatchObject({ code: 4001 });
+  it('ウォレットが Error でない object の 4001 を投げても (WalletConnect の応答の形) → 予約を解き、次も印つき (100 byte)', async () => {
+    const out = await settleThenResend(
+      rejectFirstWith(() => ({ code: 4001, message: 'User rejected the request.' })),
+      'merchant-error',
+    );
+    expect(errorChain(out.error).map(({ code }) => code)).toEqual([undefined, undefined, 4001, 4001]);
     expect(out.second).toBe(concatHex([MERCHANT_CALLDATA, MARK]));
+  });
+
+  it('ウォレットが投げた error 自身に code が無いと、その cause の奥に 4001 があっても解かない (viem は UnknownRpcError に包む) → 68 byte', async () => {
+    const out = await settleThenResend(
+      rejectFirstWith(
+        () => new Error('Request failed', { cause: Object.assign(new Error('User rejected the request.'), { code: 4001 }) }),
+      ),
+      'merchant-error',
+    );
+    expect(errorChain(out.error)).toEqual([
+      { name: 'ContractFunctionExecutionError', code: undefined },
+      { name: 'TransactionExecutionError', code: undefined },
+      { name: 'UnknownRpcError', code: -1 },
+      { name: 'Error', code: undefined },
+      { name: 'Error', code: 4001 },
+    ]);
+    expect(out.second).toBe(MERCHANT_CALLDATA);
   });
 
   // Codex のレビュー (MUST 4 回目): 予約を解くのは、ウォレットが EIP-1193 の 4001 で答えたと、元の error の code で確かめられたときだけ。

@@ -225,9 +225,10 @@ export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {
   // K4b (Fable の MUST-1): 印つきの送信は、この画面で 1 回まで。印つきで merchant の writeContract を呼ぶ直前に、同期で印を予約する
   // (mutate の中)。予約の後のこの画面の送信は印なし (印つき A の応答待ちの間に始めた B も印なし = 同じ画面で印つきが 2 本出ない)。
   // 予約を解くのは、印つきの送信が「ウォレットが tx を出さずに断った」と確かめられる形で終わったときだけ (次はまた印つき):
-  //   1. error の cause の連なりの、いちばん奥の error (ウォレットが投げた元の error) の code が EIP-1193 の 4001 (lib/walletErrors の
-  //      isEip1193UserRejection)。文言では決めない ('Connection request reset' のような code の無い失敗は、ウォレットが tx を出した
-  //      後に hash の応答だけが失われたのかもしれない)。viem が 4001 として包む WalletConnect の 5000 でも解かない。
+  //   1. error の cause の連なりの、いちばん奥の error (ウォレットが投げた元の error) の code が EIP-1193 の 4001 で、途中に 4001 で
+  //      ない code が無い (lib/walletErrors の isEip1193UserRejection)。文言では決めない ('Connection request reset' のような code
+  //      の無い失敗は、ウォレットが tx を出した後に hash の応答だけが失われたのかもしれない)。viem が 4001 として包む WalletConnect
+  //      の 5000 でも解かない。
   //   2. その 4001 がウォレット自身の答えである接続 (injected・WalletConnect) で送った (rejectionCodeIsWalletAnswer)。Coinbase Wallet
   //      SDK は popup が閉じただけで SDK が 4001 を作るので解かない。接続は予約のとき (送信のとき) のものを予約と一緒に持つ。
   // hash が返った (ウォレットがチェーンに出した)・それ以外の失敗は予約のまま。解く判定は下の merchant の hook の options の onError

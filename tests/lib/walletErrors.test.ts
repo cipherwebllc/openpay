@@ -91,11 +91,18 @@ describe('isEip1193UserRejection (ウォレットが 4001 で断ったと code �
     expect(isEip1193UserRejection(wrapped)).toBe(false);
   });
 
-  it('いちばん奥の error の code で決める: 4001 の奥に別の error があれば false・別の code の奥が 4001 なら true', () => {
+  it('いちばん奥の error の code が 4001 でなければ false (4001 の奥に別の error がある)', () => {
     expect(isEip1193UserRejection(coded('User rejected the request.', 4001, coded('socket closed', -32000)))).toBe(false);
     expect(isEip1193UserRejection(coded('User rejected the request.', 4001, new Error('socket closed')))).toBe(false);
     expect(isEip1193UserRejection(coded('User rejected the request.', 4001, 'socket closed'))).toBe(false);
-    expect(isEip1193UserRejection(new InternalRpcError(coded('Internal error', -32603, coded('User rejected', 4001))))).toBe(true);
+  });
+
+  it('途中に 4001 でない code があれば、いちばん奥が 4001 でも false', () => {
+    const raw = coded('User rejected the request.', 4001);
+    expect(isEip1193UserRejection(new InternalRpcError(coded('Internal error', -32603, raw)))).toBe(false);
+    // ウォレットが投げた error 自身に code が無い (cause の奥に 4001) と、viem は UnknownRpcError (code -1) に包む。
+    expect(isEip1193UserRejection(new UnknownRpcError(new Error('Request failed', { cause: raw })))).toBe(false);
+    expect(isEip1193UserRejection(coded('Request failed', 'ERR_FAILED', raw))).toBe(false);
   });
 
   it('包む側が文言から作った 4001 (wagmi の walletConnect の connector が接続・切り替えで作る形) は false', () => {
