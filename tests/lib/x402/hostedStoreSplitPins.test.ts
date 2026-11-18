@@ -154,6 +154,8 @@ describe('R15a facade: public names', () => {
       'putSellerDisclosure',
       'replaceHostedSellerProduct',
       'sanitizeHostedText',
+      // 2026-11-19 に足した (AI 出品アシスタントが案の欄を保存と同じ規則で判定する・KV の互換には触れない)。
+      'sanitizeLine',
       'selectProfileProducts',
       'sellerDisclosureComplete',
       'sellerDisclosureKey',

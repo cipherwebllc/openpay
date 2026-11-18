@@ -757,7 +757,8 @@ describe('creator store seller routes', () => {
   it('seller GET は未登録 null、PUT は保存後の再読込値を返す', async () => {
     const empty = await getSeller(request('/api/store/seller'));
     expect(empty.status).toBe(200);
-    expect(await empty.json()).toEqual({ ok: true, seller: null });
+    // listingAssistant = AI 出品アシスタントの入口 (フラグ OFF・ADMIN_WALLETS 未設定のこの test では false)。
+    expect(await empty.json()).toEqual({ ok: true, seller: null, listingAssistant: false });
 
     getSellerDisclosure.mockResolvedValue({
       name: 'Alice',

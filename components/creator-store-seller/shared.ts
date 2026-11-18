@@ -2,8 +2,10 @@
 
 import type { HostedLabel } from '@/lib/x402/hostedStore';
 import type { StoreLicenseProduct } from '@/lib/licenseUi';
-import type { LicenseFormFields } from '@/components/CreatorStoreLicenseFields';
-import type { StoreUsageTerms, UsagePermission } from '@/lib/store/usageTerms';
+import type { StoreUsageTerms } from '@/lib/store/usageTerms';
+
+// 出品フォームの型の本体は lib/store/productForm.ts (AI 出品アシスタントの許可リストが lib/ から ProductForm を網羅するため)。
+export type { ProductForm } from '@/lib/store/productForm';
 
 export type ProductSummary = StoreLicenseProduct & {
   registration?: { status: 'pending' | 'registered' | 'failed' };
@@ -44,35 +46,6 @@ export type SellerDisclosure = {
   updatedAt: number;
 };
 
-export type ProductForm = LicenseFormFields & {
-  productKind: 'digital' | 'license';
-  payTo: string;
-  title: string;
-  desc: string;
-  emoji: string;
-  imageUrl: string;
-  deliveryUrl: string;
-  galleryUrls: string;
-  details: string;
-  specs: string;
-  demoUrl: string;
-  /** 利用条件の選択。'' = 記載しない。 */
-  usageCommercial: UsagePermission | '';
-  usageModify: UsagePermission | '';
-  usageRedistribute: UsagePermission | '';
-  usageNote: string;
-  priceJpyc: string;
-  contentKind: 'url' | 'text';
-  label: HostedLabel;
-  category: string;
-  tags: string;
-  listingHandle: string;
-  featured: boolean;
-  content: string;
-  saleActive: boolean;
-  usdcEnabled: boolean;
-};
-
 export type EditingProductState = {
   saleActive: boolean;
   usdcEnabled: boolean;
@@ -93,6 +66,8 @@ export type ProductsResponse = {
 export type SellerResponse = {
   ok: true;
   seller: SellerDisclosure | null;
+  /** GET だけが返す: AI 出品アシスタントの入口を出すか (server のフラグ ON かつ運営者)。 */
+  listingAssistant?: boolean;
 };
 
 export type ProductDetailResponse = {

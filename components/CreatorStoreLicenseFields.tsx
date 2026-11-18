@@ -3,15 +3,10 @@
 import { useTranslations } from 'next-intl';
 import { isAddress } from 'viem';
 import { LICENSE_STANDARD_TERMS } from '@/lib/license/standardTerms';
+import type { LicenseFormFields } from '@/lib/store/productForm';
 
-export type LicenseFormFields = {
-  payTo: string;
-  supply: string;
-  transferable: boolean;
-  termsPreset: typeof LICENSE_STANDARD_TERMS.version | undefined;
-  termsUrl: string;
-  termsVersion: string;
-};
+// 型の本体は lib/store/productForm.ts (AI 出品アシスタントの許可リストが lib/ から ProductForm を網羅するため)。
+export type { LicenseFormFields };
 
 export function validLicenseForm(fields: LicenseFormFields, price: string): boolean {
   let https = false;
