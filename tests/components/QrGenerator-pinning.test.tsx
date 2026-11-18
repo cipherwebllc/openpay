@@ -125,7 +125,8 @@ vi.mock('@/hooks/useIncomingPaymentWatch', async (importOriginal) => {
   };
 });
 // 会計ごとの印 (bill key) は QR を出すたびの乱数 (lib/url/billKeyQr.ts)。画面の QR の値 (下の qr) を literal で固定できる
-// よう、この file では決まった値にする。載るのは JPYC の回収 (forwarder あり) の金額ありの通常の QR の、画面の QR だけ:
+// よう、この file では決まった値にする。載るのは JPYC の回収 (forwarder あり) と JPYC の通常決済の、金額ありの通常の QR の、
+// 画面の QR だけ (通常決済の互換 QR = EIP-681 には載らない):
 // その case では qr だけが `&bk=…` つきになり、画面に出す URL・コピー・前回の受け取り QR は bill key なしの URL のまま
 // (QR の値と同じでなくなるので、'=qr' ではなく URL をそのまま書く)。
 vi.mock('@/lib/url/billKeyQr', async (importOriginal) => ({
@@ -558,7 +559,7 @@ describe('QrGenerator の pin (生成物の完全一致は採り直さない・D
       },
       avalancheLarge18Decimals: {
         copies: [
-          '=qr',
+          'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&chain=avalanche&amount=123456789.123456789012345678&mode=standard',
           '=eip681',
         ],
         downloads: [
@@ -568,14 +569,14 @@ describe('QrGenerator の pin (生成物の完全一致は採り直さない・D
         eip681: 'ethereum:0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29@43113/transfer?address=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&uint256=123456789123456789012345678',
         lastQr: {
           amountLabel: '123,456,789.123456789012345678 JPYC',
-          payUrl: '=qr',
+          payUrl: 'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&chain=avalanche&amount=123456789.123456789012345678&mode=standard',
           tokenChainLabel: 'JPYC · Avalanche Fuji',
           ts: 1790208000480,
         },
         printed: 1,
-        qr: 'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&chain=avalanche&amount=123456789.123456789012345678&mode=standard',
+        qr: 'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&chain=avalanche&amount=123456789.123456789012345678&mode=standard&bk=PinnedKey_0',
         shownEip681: '=eip681',
-        shownUrl: '=qr',
+        shownUrl: 'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&chain=avalanche&amount=123456789.123456789012345678&mode=standard',
         watch: {
           chainId: 43113,
           enabled: true,
@@ -840,7 +841,7 @@ describe('QrGenerator の pin (生成物の完全一致は採り直さない・D
       },
       polygonStandardLarge: {
         copies: [
-          '=qr',
+          'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&amount=1234567.89&mode=standard',
           '=eip681',
         ],
         downloads: [
@@ -850,14 +851,14 @@ describe('QrGenerator の pin (生成物の完全一致は採り直さない・D
         eip681: 'ethereum:0x0000000000000000000000000000000000000aBc@80002/transfer?address=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&uint256=1234567890000000000000000',
         lastQr: {
           amountLabel: '1,234,567.89 JPYC',
-          payUrl: '=qr',
+          payUrl: 'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&amount=1234567.89&mode=standard',
           tokenChainLabel: 'JPYC · Polygon Amoy',
           ts: 1790208000560,
         },
         printed: 1,
-        qr: 'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&amount=1234567.89&mode=standard',
+        qr: 'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&amount=1234567.89&mode=standard&bk=PinnedKey_0',
         shownEip681: '=eip681',
-        shownUrl: '=qr',
+        shownUrl: 'https://test.local/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&amount=1234567.89&mode=standard',
         watch: {
           chainId: 80002,
           enabled: true,

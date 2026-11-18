@@ -624,13 +624,15 @@ function RegisterModeContent({
   // 表示中のお店負担の QR は、受け渡しを作った時点の会計で組み立てた写しから出す (後から変わっても混ぜない)。
   const storeQrActive = storeQr !== null && !forceNormalQr;
   const qrValue = storeQrActive ? storeQr.url : checkoutUrl;
-  // 会計ごとの印 (bill key) を、画面に表示中の通常の QR にだけ載せる: JPYC の回収 (forwarder のあるチェーンのガスレス)。
-  // お店負担の QR・通常決済・USDC・forwarder の無いチェーンには載せない。URL の表示とコピーは checkoutUrl のまま
-  // (hooks/useQrBillKey.ts)。入金は、お店の端末がチェーンで確かめて取引履歴に書き、書いたら表示中のこの会計の QR の画面に
-  // 出す (billConfirmed)。
+  // 会計ごとの印 (bill key) を、画面に表示中の通常の QR にだけ載せる: JPYC の回収 (forwarder のあるチェーンのガスレス) と
+  // JPYC の通常決済 (mode=standard・forwarder の有無を問わない)。お店負担の QR・USDC・forwarder の無いチェーンのガスレスには
+  // 載せない。URL の表示とコピーは checkoutUrl のまま (hooks/useQrBillKey.ts)。入金は、お店の端末がチェーンで確かめて取引履歴に
+  // 書き、書いたら表示中のこの会計の QR の画面に出す (billConfirmed)。通常決済の QR の bill key は、払う側が transfer に印を
+  // 付けるようになるまで使われない (載せても今の支払いは変わらない)。
+  const isJpycStandard = settings.payMode === 'standard' && settings.token === 'jpyc';
   const { screenUrl: screenQrValue, confirmed: billConfirmed } = useQrBillKey({
     kind: 'checkout',
-    url: isJpycRecover ? checkoutUrl : '',
+    url: isJpycRecover || isJpycStandard ? checkoutUrl : '',
     shown: qrModalOpen && !storeQrActive,
   });
   const sdState = device.state;

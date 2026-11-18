@@ -6,7 +6,9 @@ import { join, relative } from 'node:path';
 // 払う側で bill key を使うのは「/pay と /checkout の JPYC ガスレス (forwarder のある経路・束縛なし)」だけ。チップ・
 // お店の端末で送る・USDC・通常決済・クロスチェーン・URL の parser と builder・履歴・控え・記録の送信・復旧の枠・server は
 // bill key を知らない。
-// お店の側で bill key を作って載せるのは「/create の決済QR・レジが、画面に表示中の通常の QR」だけ (hooks/useQrBillKey.ts)。
+// お店の側で bill key を作って載せるのは「/create の決済QR・レジが、画面に表示中の通常の QR」だけ (hooks/useQrBillKey.ts):
+// JPYC の回収 (ガスレス) と JPYC の通常決済 (mode=standard) の QR。通常決済の QR の bill key は、払う側はまだ使わない
+// (お店の端末だけが、Transfer の tx の input の印 = lib/relay/billKeySalt.ts の billKeyStdMark で確かめる)。
 // 注文リンク・モバイルオーダー・お店の端末で送る の URL を作る所・URL のコピー・QR の保存・前回の受け取り QR は bill key を
 // 知らない。入金を確かめる code (lib/qrSaleWatch.ts・lib/qrSaleHistory.ts) は遅延 chunk だけに置く。
 // 一覧の外の file が bill key に触れたら落ちる (使う場所を足すときは、その経路の柵のテストと一緒に一覧を直す)。
@@ -74,6 +76,14 @@ describe('bill key に触れる file の柵', () => {
     expect(hook).toContain("await import('@/lib/relay/billKeySalt')");
     // First Load JS に載せない: 静的な import にしない。
     expect(hook).not.toMatch(/^import .*billKeySalt/m);
+  });
+
+  it('通常決済の印の関数を呼ぶのは、入金を確かめる code だけ (払う側の通常決済の hook・フォームはまだ使わない)', () => {
+    // 呼び出しの形と import の名前 (注記の中の名前は数えない: 名前の後ろに ( か , か } が続く所だけ)。
+    expect(matching(/\bbillKeyStdMark\s*[(,}]/)).toEqual(['lib/qrSaleHistory.ts', 'lib/relay/billKeySalt.ts']);
+    for (const name of ['hooks/useStandardPayment.ts', 'components/PaymentForm.tsx', 'components/CheckoutForm.tsx']) {
+      expect(files.find(({ file }) => file === name)!.source).not.toMatch(/billKeyStdMark|BILL_KEY_STD_TAG/);
+    }
   });
 
   it('URL の param の名前 bk を知っているのは、読む lib/url/billKey.ts と、画面の QR に足す lib/url/billKeyQr.ts だけ (parser・builder は知らない)', () => {

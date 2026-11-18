@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { keccak256, toHex, type Address, type Hex } from 'viem';
-import { BILL_KEY_TAG, billKeyIntent, billKeySalt } from '@/lib/relay/billKeySalt';
+import { BILL_KEY_STD_TAG, BILL_KEY_TAG, billKeyIntent, billKeySalt, billKeyStdMark } from '@/lib/relay/billKeySalt';
 import { buildForwarderNonce, type ForwarderSettleParams } from '@/lib/relay/forwarderIntent';
 
 // 期待値は、実装 (viem) と別の道具 (Foundry の cast) で計算した:
@@ -177,6 +177,55 @@ describe('billKeyIntent (払う側の 1 回の署名に使う intentSalt と有�
     billKeyIntent(KEY, 1000n, used);
     expect([...used]).toEqual([`${billKeySalt(KEY)}:1000`]);
     expect([...used].join('')).not.toContain(KEY);
+  });
+});
+
+// 通常決済の印 (billKeyStdMark)。期待値は cast で計算した:
+//   STD_TAG = cast keccak "openpay.bill-key.std.v1"
+//   mark    = cast keccak $(cast abi-encode "f(bytes32,string)" $STD_TAG "<bill key>")
+// 払う側 (通常決済の transfer の calldata の後ろに足す) とお店の端末 (lib/qrSaleHistory.ts) が同じ値を作ることを固定する。
+const STD_TAG = '0x30aa7ab4769cfda1e885e6427c5ee1dcb6b221b27861421cf884f30368e8d96b';
+const STD_VECTORS: [string, Hex][] = [
+  ['AAAAAAAAAAA', '0x5bb3dab1e7c2d38298cab85f323aebf6426cfb3218e39bd2b438fd8417fd666b'],
+  ['Zm9vYmFyYmE', '0x958ae5e2bac7dd1aa8fc9dec6e21f67bd131f20780d3992b9b873d6c4754a317'],
+  ['a-b_c-d_e-8', '0xab43931949e4677332b159c3a885ef70e0888b3cf1bea3a956b24588012d7df3'],
+];
+
+describe('billKeyStdMark (通常決済の印)', () => {
+  it('BILL_KEY_STD_TAG は keccak256("openpay.bill-key.std.v1") で、ガスレスの TAG とは別の値', () => {
+    expect(BILL_KEY_STD_TAG).toBe(keccak256(toHex('openpay.bill-key.std.v1')));
+    expect(BILL_KEY_STD_TAG).toBe(STD_TAG);
+    expect(BILL_KEY_STD_TAG).not.toBe(BILL_KEY_TAG);
+  });
+
+  it.each(STD_VECTORS)('golden vector: %s', (billKey, mark) => {
+    expect(billKeyStdMark(billKey)).toBe(mark);
+  });
+
+  it('同じ bill key でも、ガスレスの intentSalt とは別の値 (settle の calldata に載る intentSalt を、通常決済の照合が拾わない)', () => {
+    for (const [billKey] of STD_VECTORS) {
+      expect(billKeyStdMark(billKey)).not.toBe(billKeySalt(billKey));
+    }
+    // golden どうしでも違う (同じ bill key の 2 つの vector)。
+    expect(STD_VECTORS[1][1]).not.toBe(VECTORS[1][1]);
+    expect(STD_VECTORS[1][0]).toBe(VECTORS[1][0]);
+  });
+
+  it('encode の形: abi.encode(bytes32 STD_TAG, string bill key) の keccak256', () => {
+    const utf8 = '5a6d3976596d4679596d45'; // "Zm9vYmFyYmE"
+    const encoded = `0x${STD_TAG.slice(2)}${'40'.padStart(64, '0')}${'0b'.padStart(64, '0')}${utf8.padEnd(64, '0')}` as Hex;
+    expect(billKeyStdMark('Zm9vYmFyYmE')).toBe(keccak256(encoded));
+  });
+
+  it.each([
+    ['空', ''],
+    ['10 字', 'Zm9vYmFyYm'],
+    ['22 字 (前の形)', OLD_22],
+    ['+ 入り', 'Zm9vYmFyYm+'],
+    ['undefined', undefined],
+    ['数', 12345678901],
+  ])('形の違う値は null (throw しない): %s', (_label, value) => {
+    expect(billKeyStdMark(value)).toBeNull();
   });
 });
 

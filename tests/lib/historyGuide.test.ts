@@ -116,16 +116,27 @@ describe('取引履歴のガイド (content)', () => {
     expect(c.notInHistory.some((item) => item.includes(unit))).toBe(true);
   });
 
-  // ① の対象 (金額を入れて画面に表示している QR) の出どころ。決済QR は、会計の印 (bill key) を「JPYC の回収・金額あり」の
-  // URL にだけ渡し、QR の画面を出している間 (お店負担の QR でない) だけ載せる。印のない QR の入金は見張りが行にしない。
-  // 印刷・保存・コピーが印のない元の URL を使うことは tests/components/QrGenerator.billKey.test.tsx が描画で確かめる。
+  // ① の対象 (金額を入れて画面に表示している QR) の出どころ。決済QR は、会計の印 (bill key) を「JPYC の回収・金額あり」と
+  // 「JPYC の通常決済・金額あり」の URL にだけ渡し、QR の画面を出している間 (お店負担の QR でない) だけ載せる。印のない QR の
+  // 入金は見張りが行にしない。印刷・保存・コピーが印のない元の URL を使うことは tests/components/QrGenerator.billKey.test.tsx が
+  // 描画で確かめる。
   it('① は金額を入れて画面に表示している QR だけ: 決済QR の useQrBillKey の url / shown の条件 (コード照合)', () => {
     const src = readFileSync(join(process.cwd(), 'components', 'QrGenerator.tsx'), 'utf8');
     const start = src.indexOf('useQrBillKey({');
     expect(start).toBeGreaterThan(-1);
     const call = src.slice(start, src.indexOf('});', start));
-    expect(call).toContain("url: isJpycRecover && mode === 'amount' ? payUrl : ''");
+    expect(call).toContain("url: (isJpycRecover || isJpycStandard) && mode === 'amount' ? payUrl : ''");
     expect(call).toMatch(/shown: qrModalOpen && /);
+  });
+
+  // 「通常決済」が履歴に出ない入金のままである出どころ: 通常決済の QR にも印 (bk) は載るが、払う側の通常決済は印を付けない
+  // (transfer の calldata に通常決済の印を足すのは別の変更)。お店の端末は印の無い通常決済を行にしない
+  // (tests/components/qrSaleHistory.standardParity.test.tsx)。払う側が印を付けるようになったら、このガイドの文も直す。
+  it('通常決済の払う側は、まだ印を付けない (ガイドの「通常決済は履歴に出ない」が今も正しい)', () => {
+    for (const file of ['hooks/useStandardPayment.ts', 'components/PaymentForm.tsx', 'components/CheckoutForm.tsx']) {
+      expect(readFileSync(join(process.cwd(), file), 'utf8')).not.toMatch(/billKeyStdMark|dataSuffix/);
+    }
+    expect(historyGuideContentFor('ja').notInHistory[0]).toContain('通常決済');
   });
 
   // 「通常決済 (モバイルオーダーを除く)」の出どころ: 通常決済で払われたモバイルオーダーの受注 (unboundPayment) も、

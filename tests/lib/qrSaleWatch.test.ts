@@ -227,10 +227,10 @@ describe('読む範囲と間隔', () => {
     expect(rpc.head).toHaveBeenCalledTimes(2);
   });
 
-  it('見張らない QR (USDC・通常決済・金額なし・forwarder の無いチェーン・形の違う bill key) では、RPC を 1 回も読まない', async () => {
+  // 通常決済 (mode=standard) の QR は、JPYC の Transfer を読む会計として見張る (tests/lib/qrSaleWatch.standard.test.ts)。
+  it('見張らない QR (USDC・金額なし・forwarder の無いチェーン・形の違う bill key) では、RPC を 1 回も読まない', async () => {
     const usdc = buildPayUrl(ORIGIN, { to: SHOP, token: 'usdc', chain: 'base', gas: 'customer', mode: 'gasless', amount: '5' });
     showQrBill({ billKey: BK, kind: 'pay', url: usdc, itemName: '' }, NOW);
-    showQrBill({ billKey: BK2, kind: 'pay', url: payUrl({ mode: 'standard' }), itemName: '' }, NOW);
     showQrBill({ billKey: BK3, kind: 'pay', url: payUrl({ amount: undefined }), itemName: '' }, NOW);
     showQrBill({ billKey: 'short', kind: 'pay', url: payUrl(), itemName: '' }, NOW);
     hold.forwarders = {};

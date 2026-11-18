@@ -1,4 +1,4 @@
-// 会計ごとの印 (bill key) から、JPYC ガスレス (forwarder のある経路 = recover) の intentSalt を作る純関数。
+// 会計ごとの印 (bill key) から、JPYC ガスレス (forwarder のある経路 = recover) の intentSalt と、通常決済の印を作る純関数。
 // 払う側 (hooks/useJpycEip3009Payment) と、入金を確かめるお店の端末が、同じこの関数を使う (再実装しない)。
 // server-only にしない・遅延 chunk から読む (/pay・/checkout の First Load JS に載せない)。
 //
@@ -18,10 +18,18 @@
 // encode は lib/orderBind の orderBindSalt と同じ書き方 (abi.encode・先頭に用途の TAG)。bill key は 11 字の文字列を
 // そのまま string として hash する (base64 を 8 byte に decode しない: decode すると、末尾の余りの bit だけが違う 2 つの
 // 文字列が同じ byte になる)。値は golden vector で固定 (tests/lib/billKeySalt.test.ts)。
+//
+// 通常決済 (JPYC の ERC-20 transfer を払う人のウォレットが送る) の印は、下の billKeyStdMark (別の TAG)。
 
 import { encodeAbiParameters, keccak256, toHex, type Hex } from 'viem';
 
 export const BILL_KEY_TAG: Hex = keccak256(toHex('openpay.bill-key.v1'));
+
+/**
+ * 通常決済の印の TAG。ガスレスの BILL_KEY_TAG とは別の値にする: forwarder の settle の calldata には intentSalt が
+ * そのまま載るので、印が intentSalt と同じ値だと、ガスレスの tx を通常決済の照合 (tx の input の中に印を探す) が拾う。
+ */
+export const BILL_KEY_STD_TAG: Hex = keccak256(toHex('openpay.bill-key.std.v1'));
 
 // base64url の 11 字だけを bill key として受ける。
 const BILL_KEY_RE = /^[A-Za-z0-9_-]{11}$/;
@@ -31,6 +39,20 @@ export function billKeySalt(billKey: unknown): Hex | null {
   if (typeof billKey !== 'string' || !BILL_KEY_RE.test(billKey)) return null;
   return keccak256(
     encodeAbiParameters([{ type: 'bytes32' }, { type: 'string' }], [BILL_KEY_TAG, billKey]),
+  );
+}
+
+/**
+ * 通常決済の印 (32 byte) = keccak256(abi.encode(BILL_KEY_STD_TAG, bill key の文字列))。形の違う bill key は null
+ * (受ける形は billKeySalt と同じ 11 字)。払う側は、ERC-20 の transfer(受取先, 額) の calldata の後ろにこの 32 byte を
+ * 足して送る (ERC-20 は余った calldata を読まない = 送金の宛先・額・本数は変わらない)。お店の端末 (lib/qrSaleHistory.ts) は、
+ * 受取先に届いた JPYC の Transfer の tx の input に「transfer(受取先, 額) + この印」があるかで、その会計の入金と確かめる。
+ * チェーンに出るのは hash だけで、bill key そのものは出ない。値は golden vector で固定 (tests/lib/billKeySalt.test.ts)。
+ */
+export function billKeyStdMark(billKey: unknown): Hex | null {
+  if (typeof billKey !== 'string' || !BILL_KEY_RE.test(billKey)) return null;
+  return keccak256(
+    encodeAbiParameters([{ type: 'bytes32' }, { type: 'string' }], [BILL_KEY_STD_TAG, billKey]),
   );
 }
 

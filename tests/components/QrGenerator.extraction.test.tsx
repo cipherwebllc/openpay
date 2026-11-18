@@ -1065,8 +1065,15 @@ describe('R11b: modal reopen, FX expiry, downloads and print', () => {
     const svg = dialog.querySelector('svg[width="340"]')!;
     expect(firstSvg).not.toBeInTheDocument();
     expect(svg).not.toBe(firstSvg);
+    const onScreen = new XMLSerializer().serializeToString(svg);
+    expect(onScreen).not.toBe(new XMLSerializer().serializeToString(firstSvg));
+    // JPYC の通常決済の金額ありの QR は、画面の QR だけが会計ごとの印 (bk) つき (hooks/useQrBillKey.ts)。保存・印刷は、
+    // 同じ <svg> を印のない URL で描き直したもの (components/QrPreviewModal.tsx)。その形を、印刷の前の描き直しで採る。
+    act(() => { window.dispatchEvent(new Event('beforeprint')); });
     const markup = new XMLSerializer().serializeToString(svg);
-    expect(markup).not.toBe(new XMLSerializer().serializeToString(firstSvg));
+    act(() => { window.dispatchEvent(new Event('afterprint')); });
+    expect(markup).not.toBe(onScreen);
+    expect(new XMLSerializer().serializeToString(svg)).toBe(onScreen);
     const blobs: Blob[] = [];
     const createObjectURL = vi.fn((blob: Blob) => { blobs.push(blob); return 'blob:r11b'; });
     const revokeObjectURL = vi.fn();

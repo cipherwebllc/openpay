@@ -4,7 +4,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { encodeEventTopics, keccak256, pad, parseAbi, toHex, type Address } from 'viem';
 import { deploymentForSlug } from '@/lib/tokens';
-import { settledRpcLog } from '../_helpers/qrSale';
+import { settledRpcLog, transferRpcLog } from '../_helpers/qrSale';
 
 const JPYC = deploymentForSlug('jpyc', 'polygon');
 const FORWARDER: Address = '0x752B7AaD0089286EB7b553d84D05233d80c9FCB4';
@@ -46,6 +46,8 @@ describe('tests/setup.ts の既定のスタブ', () => {
     await expect(stub.readChainHead(JPYC.chainId)).rejects.toThrow('qr_sale_rpc_stubbed_in_tests');
     await expect(stub.readSettledLogs(JPYC.chainId, FORWARDER, [SHOP], 1n, 2n)).rejects.toThrow('qr_sale_rpc_stubbed_in_tests');
     await expect(stub.readBlockTime(JPYC.chainId, 1n)).rejects.toThrow('qr_sale_rpc_stubbed_in_tests');
+    await expect(stub.readTransferLogs(JPYC.chainId, JPYC.address, [SHOP], 1n, 2n)).rejects.toThrow('qr_sale_rpc_stubbed_in_tests');
+    await expect(stub.readTransaction(JPYC.chainId, TX as `0x${string}`)).rejects.toThrow('qr_sale_rpc_stubbed_in_tests');
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(stub.QR_SALE_RPC_TIMEOUT_MS).toBe((await loadActual()).QR_SALE_RPC_TIMEOUT_MS);
   });
@@ -184,6 +186,87 @@ describe('readBlockTime', () => {
     stubRpc(ok(null));
     const { readBlockTime } = await loadActual();
     await expect(readBlockTime(JPYC.chainId, 995n)).rejects.toThrow();
+    expect(calls).toHaveLength(1);
+  });
+});
+
+describe('readTransferLogs (通常決済の会計)', () => {
+  const TRANSFER_TOPIC = keccak256(toHex('Transfer(address,address,uint256)'));
+
+  it('eth_getLogs を 1 回: JPYC の address・Transfer の topic・受取先 (to) の topic (複数は OR)・範囲の両端', async () => {
+    const log = transferRpcLog({ token: JPYC.address, from: CUSTOMER, to: SHOP, value: 1_000n * 10n ** 18n, txHash: TX, blockNumber: 995n });
+    stubRpc(
+      ok([
+        {
+          address: log.address, topics: log.topics, data: log.data, blockNumber: '0x3e3', transactionHash: TX,
+          transactionIndex: '0x1', blockHash: `0x${'b'.repeat(64)}`, logIndex: '0x2', removed: false,
+        },
+      ]),
+    );
+    const { readTransferLogs } = await loadActual();
+    const logs = await readTransferLogs(JPYC.chainId, JPYC.address, [SHOP, OTHER_SHOP], 987n, 997n);
+    expect(calls).toEqual([
+      {
+        method: 'eth_getLogs',
+        params: [
+          {
+            address: JPYC.address,
+            topics: [TRANSFER_TOPIC, null, [pad(SHOP).toLowerCase(), pad(OTHER_SHOP).toLowerCase()]],
+            fromBlock: '0x3db',
+            toBlock: '0x3e5',
+          },
+        ],
+      },
+    ]);
+    expect(logs).toHaveLength(1);
+    expect(logs[0]).toMatchObject({ address: log.address, topics: log.topics, data: log.data, transactionHash: TX, logIndex: 2, blockNumber: 995n });
+  });
+
+  it('RPC が失敗したら throw する。範囲の制限の判定は Settled と同じ error で働く。送り直しはしない', async () => {
+    stubRpc((body) =>
+      Response.json(
+        { jsonrpc: '2.0', id: body.id, error: { code: -32600, message: 'you can make eth_getLogs requests with up to a 10 block range' } },
+        { status: 400 },
+      ),
+    );
+    const { readTransferLogs } = await loadActual();
+    const { isBlockRangeLimitError } = await import('@/lib/qrSaleWatch');
+    const thrown = await readTransferLogs(JPYC.chainId, JPYC.address, [SHOP], 1n, 11n).then(
+      () => null,
+      (e: unknown) => e,
+    );
+    expect(isBlockRangeLimitError(thrown)).toBe(true);
+    expect(calls).toHaveLength(1);
+  });
+});
+
+describe('readTransaction (通常決済の会計)', () => {
+  const rawTx = (over: Record<string, unknown> = {}) => ({
+    hash: TX, nonce: '0x1', blockHash: `0x${'b'.repeat(64)}`, blockNumber: '0x3e3', transactionIndex: '0x0',
+    from: CUSTOMER.toLowerCase(), to: JPYC.address.toLowerCase(), value: '0x0', gas: '0x5208', gasPrice: '0x1',
+    input: '0xa9059cbb', type: '0x0', chainId: '0x13882', v: '0x1b', r: `0x${'1'.repeat(64)}`, s: `0x${'2'.repeat(64)}`,
+    ...over,
+  });
+
+  it('eth_getTransactionByHash を 1 回読み、送り手・宛先・input を返す', async () => {
+    stubRpc(ok(rawTx()));
+    const { readTransaction } = await loadActual();
+    expect(await readTransaction(JPYC.chainId, TX as `0x${string}`)).toEqual({
+      from: CUSTOMER.toLowerCase(), to: JPYC.address.toLowerCase(), input: '0xa9059cbb',
+    });
+    expect(calls).toEqual([{ method: 'eth_getTransactionByHash', params: [TX] }]);
+  });
+
+  it('宛先の無い tx (contract を作る) は to = null', async () => {
+    stubRpc(ok(rawTx({ to: null })));
+    const { readTransaction } = await loadActual();
+    expect((await readTransaction(JPYC.chainId, TX as `0x${string}`)).to).toBeNull();
+  });
+
+  it('tx が無い (null)・RPC の失敗は throw する。送り直しはしない', async () => {
+    stubRpc(ok(null));
+    const { readTransaction } = await loadActual();
+    await expect(readTransaction(JPYC.chainId, TX as `0x${string}`)).rejects.toThrow();
     expect(calls).toHaveLength(1);
   });
 });

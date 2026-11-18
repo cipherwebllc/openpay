@@ -467,6 +467,35 @@ describe.skipIf(capturePath)('約束 3 の柵: bk つきの URL でも、bill ke
   });
 });
 
+// お店は JPYC の通常決済の QR (mode=standard) にも bk を載せる (hooks/useQrBillKey.ts)。払う側が通常決済の transfer に印を
+// 付けるのは別の変更から: それまでは、bk のある URL でも、今の支払いは 1 byte も変わらない。
+describe.skipIf(capturePath)('通常決済 (mode=standard・JPYC) の URL の bk: 今の支払いは 1 byte も変わらない', () => {
+  // 押した時の通常決済の mutate の引数 (送る相手・額・保存の key) と、押した後の storage の中身。
+  async function payStandard(form: FormName, query: string) {
+    standardMutate.mockClear();
+    window.sessionStorage.clear();
+    window.localStorage.clear();
+    const view = FORMS[form].render(query);
+    await clickWhenEnabled(/JPYC を支払う/);
+    expect(standardMutate).toHaveBeenCalledOnce();
+    const out = { args: jsonWithBigint(standardMutate.mock.calls), storage: dumpStorage() };
+    view.unmount();
+    return out;
+  }
+
+  it.each(Object.keys(FORMS) as FormName[])('%s: bk の有無で、mutate の引数と storage が同じ。relay へ POST せず、署名もしない', async (form) => {
+    const plain = await payStandard(form, `${FORMS[form].query}&mode=standard`);
+    const withKey = await payStandard(form, `${FORMS[form].query}&mode=standard&bk=${VALID_BK}`);
+    expect(plain.args).toContain(MERCHANT);
+    expect(withKey.args).toBe(plain.args);
+    expect(withKey.storage).toBe(plain.storage);
+    expect(withKey.args).not.toContain(VALID_BK);
+    expect(withKey.storage).not.toContain(VALID_BK);
+    expect(relay.posts).toHaveLength(0);
+    expect(signTypedData).not.toHaveBeenCalled();
+  });
+});
+
 describe.skipIf(capturePath)('約束 4: bk の文字列そのものは、どこにも残らない', () => {
   it.each(FORM_NAMES)('%s: 完了まで進めても、署名・POST の body・storage (復旧の枠・履歴・控え)・記録の送信・ログに bk の値が無い', async (form) => {
     const captured = await payByRelay(form, `${FORMS[form].query}&bk=${VALID_BK}`);

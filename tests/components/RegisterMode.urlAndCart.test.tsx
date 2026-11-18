@@ -41,7 +41,8 @@ const hold = vi.hoisted(() => ({
   release: vi.fn(),
 }));
 // 会計ごとの印 (bill key) は QR を出すたびの乱数 (lib/url/billKeyQr.ts)。QR の中身を完全一致で固定できるよう、この file では
-// 決まった値にする。載るのは、JPYC の回収 (中継が有効・forwarder あり・ガス代不要) の通常の QR の、画面の QR だけ。
+// 決まった値にする。載るのは、JPYC の回収 (中継が有効・forwarder あり・ガス代不要) と JPYC の通常決済の、通常の QR の、
+// 画面の QR だけ。
 vi.mock('@/lib/url/billKeyQr', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/url/billKeyQr')>()),
   newBillKey: () => 'PinnedKey_0',
@@ -403,7 +404,8 @@ describe('RegisterMode: 作られる支払い URL と、カートの境目', () 
         total: '3,430 JPYC',
         payable: 3430n * JPYC,
         unit: JPYC,
-        query: { to: VALID, token: 'jpyc', chain: 'kaia', items: `${COFFEE},${SHIRT}`, disc: '70', mode: 'standard' },
+        // JPYC の通常決済の QR にも、画面の QR にだけ会計ごとの印 (bk) が載る。
+        query: { to: VALID, token: 'jpyc', chain: 'kaia', items: `${COFFEE},${SHIRT}`, disc: '70', mode: 'standard', bk: BK },
       },
       {
         name: 'オプションつきの品・メモつきの品・自由入力 (税なし) と、店名・登録番号・管理番号',
