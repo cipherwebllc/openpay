@@ -519,6 +519,23 @@ describe('1 tx 1 行・払った側の行', () => {
     },
   );
 
+  it('印が 1 つの tx に、同じ会計の額の Transfer が 2 つ: 印で数える Transfer は 1 つだけ (同じ会計の 2 件目として数えない)', async () => {
+    const seen: QrBillRecorded[] = [];
+    show(BK, { receiptNo: 'R-1' }, NOW, (e) => seen.push(e));
+    // AA の 1 つの tx に、印つきの transfer が 1 つと、印の無い同じ額の transfer が 1 つ (印は 1 つだけ)。
+    const input = handleOps(executeBatch([markedTransfer(BK, SHOP, 1_000n * ONE), plainTransfer(SHOP, 1_000n * ONE)]));
+    pay(995n, 1, { logIndex: 0, input, txFrom: BUNDLER, txTo: ENTRY_POINT });
+    pay(995n, 1, { logIndex: 1, input, txFrom: BUNDLER, txTo: ENTRY_POINT });
+    await tick();
+    expect(rows()).toEqual([[stdId(tx(1)), 'R-1']]);
+    // この会計の知らせは 1 件目だけ。次の別の tx の入金が 2 件目 (印 1 つを 2 回数えていない)。
+    expect(seen).toEqual([{ billKey: BK, count: 1, amount: (1_000n * ONE).toString() }]);
+    chain.head = 1_004n;
+    pay(1_000n, 2);
+    await tick();
+    expect(seen.map((e) => e.count)).toEqual([1, 2]);
+  });
+
   it('1 tx に候補 2 つ (同じ額の 2 つの会計への Transfer が 1 つの bundle に): 1 行。印はそれぞれの会計に 1 つずつ数える', async () => {
     const a: QrBillRecorded[] = [];
     const b: QrBillRecorded[] = [];
