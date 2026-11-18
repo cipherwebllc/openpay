@@ -737,7 +737,7 @@ eslint・eslint-plugin-*・@eslint/* → minimatch@3.1.5
 - `.github/workflows/lighthouse.yml` は `npm --prefix tools/lighthouse ci --ignore-scripts` で入れ、`scripts/installed-scripts-gate.mjs` で install script を確かめる = 依存の install script は動かない
 - `lhci collect` が開くのは、同じ job で build して起動した OpenPay 自身 (`.lighthouserc.json` の localhost の URL) だけ。外のサイトの HTML・zip・FTP・proxy の設定を読まない (proxy の環境変数は設定していない)
 - `LHCI_GITHUB_APP_TOKEN` を持つのは upload の step だけ (collect には渡さない)
-- 起きても、落ちる・止まるのは CI の job 1 つ。秘密の値・成果物・本番には届かない
+- 本番・npm の package・利用者の端末には配らない。**残る risk**: upload の step は同じ `lhci` (同じ依存) を `LHCI_GITHUB_APP_TOKEN` 付きで動かし、前の step のレポートを公開する。依存が侵害されていれば、その token (Lighthouse CI の GitHub App の status の書き込み) とレポートの公開に届きうる (install script は動かさない・collect の step は token を持たない、までが今の隔離)
 → **accepted risk (2026-11-18・user 承認)**。`scripts/audit-gate.mjs` の allowlist には足さない (本体の lockfile だけを見る gate のため・上の「Gate との関係」と同じ)。
 
 **Reassess triggers (追加)**:
@@ -1770,16 +1770,16 @@ on-chain 検証経路 (実 `getTransactionReceipt` → 実 JPYC `Transfer` log �
 - **外部レビュー (2026-11-18・main 97b2a59b 対象) の freee の 4 件** — どれも経路は実在するが、本番は flag OFF (`/api/freee/status` が `freee_disabled`) で到達しない。freee を再開する PR で、4 件をまとめて直す:
   - **P1-2 共有ブラウザで、店舗 A の売上・商品名・メモを店舗 B の freee 事業所に登録できる**。履歴 (localStorage `openpay:history:v1`) はウォレットで絞られず、`components/FreeeSyncPanel.tsx` は受取店舗で絞らずに送り、`lib/freeeSync.ts` の `runFreeeSync` は各明細の `merchant` をサインイン中のウォレットと照合しない。直し方: 画面とサーバーの両方で、明細の受取店舗 (`merchant`) が同期を許可したウォレットと同じ行だけを送る / 受け付ける (`merchant` が受取アドレスかを確かめてから)。
   - **P2-1 再同期で同じ売上を二重に記帳する**。`lib/freee.ts` の取引の作成が freee 側で作成された後にタイムアウトすると、`lib/freeeSync.ts` の catch が重複防止の記録を解放し、再同期で作り直す。作成の後のローカルの保存だけが失敗した場合も、保留の記録 (`app/api/freee/_store.ts` の `CLAIM_TTL_SEC` = 5 分) が切れた後の再同期で作り直す。直し方: 通信の失敗・タイムアウトは「結果不明」として記録を解放せず、作り直す前に freee 側の取引と照合する。
-  - **P2-8 一時的なレート制限 (429) で連携の資格情報を消す**。`lib/freee.ts` のトークンの更新の失敗 (`freee_token_http_${status}`) を、`app/api/freee/_store.ts` の `/^freee_token_http_4\d\d$/` が 429・408 も含めて失効として扱い、トークンを消す。直し方: 消すのは OAuth が失効を明示した 400・401 だけにし、429・408 はトークンを残して 502 を返す。
-  - **P3-1 同期のバッチが一部だけ記帳された状態で 500 になる**。`app/api/freee/sync/route.ts` は `entries` が配列であることだけを見て、各要素の形を見ない。途中の `null` で、前の要素を freee に作った後に例外になる (再送は冪等で skip されるので、被害は表示の不整合)。直し方: freee へ書き込む前に全要素の形を確かめる。
+  - **P2-8 一時的なレート制限 (429) で連携の資格情報を消す**。`lib/freee.ts` のトークンの更新の失敗 (`freee_token_http_${status}`) を、`app/api/freee/_store.ts` の `/^freee_token_http_4\d\d$/` が 429・408 も含めて失効として扱い、トークンを消す。直し方: 消すのは OAuth が失効を明示したときだけにする。今の `lib/freee.ts` は応答の本文を捨てているので、refresh の応答の `error` (例 `invalid_grant`) を読み、失効と分かったときだけ消す。429・408・5xx はトークンを残して 502 を返す。
+  - **P3-1 同期のバッチが一部だけ記帳された状態で 500 になる**。`app/api/freee/sync/route.ts` は `entries` が配列であることだけを見て、各要素の形を見ない。途中の `null` で、前の要素を freee に作った後に例外になる。`null` より後の要素は記帳されず、同じバッチを送り直しても同じ位置で止まる (前の要素は冪等で skip される)。直し方: freee へ書き込む前に全要素の形を確かめる。
 
-- **外部レビュー (2026-11-18) P2-6 後から確定した JPYC の決済が、a1 のメーター (`lib/billingMeter.ts`) に記録されない**。`recordRelayedVolume` は `app/api/relay/jpyc/route.ts` の同期の応答が `success` のときだけ呼ばれ、`pending` の後にオンチェーンで確定した決済を足す経路が無い (月次の請求の基礎額が少なくなる)。今の本番の利用料は recover の per-tx (決済のたびに差し引く) で、メーターは使わない (a1 は「当面やらない」) ので影響はほぼ 0。a1 を点灯する前に、status の解決で確定したときにも txHash で冪等に記録する。
+- **外部レビュー (2026-11-18) P2-6 後から確定した JPYC の決済が、a1 のメーター (`lib/billingMeter.ts`) に記録されない**。`recordRelayedVolume` は `app/api/relay/jpyc/route.ts` の同期の応答が `success` のときだけ呼ばれ、`pending` の後にオンチェーンで確定した決済を足す経路が無い (月次の請求の基礎額が少なくなる)。今の本番の利用料は recover の per-tx (決済のたびに差し引く) で、メーターは使わない (a1 は「当面やらない」) ので影響はほぼ 0。a1 を点灯する前に、未確定の決済をサーバーの側で照合して、確定したものを txHash で冪等に記録する仕組みを入れる (利用者が画面を閉じた決済も数える。画面の status の照会のときだけ足すのでは取りこぼす)。
 
 ### §12.8 relay の provider を Gelato に切り替える前に直すこと (外部レビュー P1-1・2026-11-18)
 
-本番の relay は self-host (`RELAYER_PRIVATE_KEY`・`.env.local.example` の注記)。self-host は送信の前に tx に署名して hash を確定し、送信後の曖昧な失敗を pending に倒す (`lib/relay/selfHostRelayer.ts`) ので、次の穴は無い。**`RELAYER_PRIVATE_KEY` を外して Gelato (`GELATO_SPONSOR_API_KEY`・rollback 用) に切り替える前に直す**:
+本番の relay は self-host (`RELAYER_PRIVATE_KEY`・`.env.local.example` の注記)。self-host は送信の前に tx に署名して hash を確定し、送信後の曖昧な失敗を pending に倒す (`lib/relay/selfHostRelayer.ts`) ので、次の穴は無い。**`RELAYER_PRIVATE_KEY` を外して Gelato (`GELATO_SPONSOR_API_KEY`・rollback 用) に切り替える前に直す** (a1 が OFF で forwarder を設定したチェーンでは、鍵を外すと relay は 503 で止まる。この指摘が当たるのは、free relay に進む場合):
 
-- **Gelato が決済を受け付けた後に応答が失われると、利用者が二重に払える**。`lib/relay/relayProvider.ts` の `gelatoSubmit` は、fetch の throw・2xx でない応答・`taskId` の欠けをすべて throw にし、`lib/relay/relayBroadcast.ts` の catch は送信前の失敗と区別せずに重複防止の記録を解放して `relay_error` (502) を返す。画面 (`hooks/useJpycEip3009Payment.ts`) は元の支払いの追跡を消すので、利用者は新しい署名か通常決済で払い直せる。Gelato が応答の前に受け付けて実行していれば、最初の送金と払い直しの両方が成立しうる (同じ署名の再送は nonce の使用済みで止まる)。直し方: `gelatoSubmit` の失敗を「送信前に確実に失敗」と「結果不明」に分け、結果不明は記録を解放せず pending (txHash なし) にして、元の署名の nonce の使用済みを確かめられるまで新しい支払いを止める。money-path の変更なので、掟 12・15 (運営者の明示レビュー)。
+- **Gelato が決済を受け付けた後に応答が失われると、利用者が二重に払える**。`lib/relay/relayProvider.ts` の `gelatoSubmit` は、fetch の throw・2xx でない応答・`taskId` の欠けをすべて throw にし、`lib/relay/relayBroadcast.ts` の catch は送信前の失敗と区別せずに重複防止の記録を解放して `relay_error` (502) を返す。画面 (`hooks/useJpycEip3009Payment.ts`) は元の支払いの追跡を消すので、利用者は新しい署名か通常決済で払い直せる。Gelato が応答の前に受け付けて実行していれば、最初の送金と払い直しの両方が成立しうる (同じ署名の再送は nonce の使用済みで止まる)。直し方: `gelatoSubmit` の失敗を「送信前に確実に失敗」と「結果不明」に分け、結果不明は記録を解放せず pending (txHash なし) にする。その後は既存の status の判定に合わせる: receipt の照合で成立を確かめたら完了・確定した block で署名の期限切れかつ nonce が未使用と確かめたら払い直してよい・それ以外は pending のまま (新しい支払いを止める)。money-path の変更なので、掟 12・15 (運営者の明示レビュー)。
 
 ## §13 モバイル注文 / レジ システム利用料 go-live SOP
 
